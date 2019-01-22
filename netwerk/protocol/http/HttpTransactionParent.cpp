@@ -155,34 +155,40 @@ void HttpTransactionParent::GetNetworkAddresses(NetAddr& self, NetAddr& peer) {
 // TODO: propogate the sticky information from socket process
 bool HttpTransactionParent::IsStickyConnection() { return false; }
 
-// TODO: serialize the timing. Dummy implementation for compliablity only.
 mozilla::TimeStamp HttpTransactionParent::GetDomainLookupStart() {
-  return TimeStamp();
+  return mTimings.domainLookupStart;
 }
+
 mozilla::TimeStamp HttpTransactionParent::GetDomainLookupEnd() {
-  return TimeStamp();
+  return mTimings.domainLookupEnd;
 }
+
 mozilla::TimeStamp HttpTransactionParent::GetConnectStart() {
-  return TimeStamp();
+  return mTimings.connectStart;
 }
+
 mozilla::TimeStamp HttpTransactionParent::GetTcpConnectEnd() {
-  return TimeStamp();
+  return mTimings.tcpConnectEnd;
 }
+
 mozilla::TimeStamp HttpTransactionParent::GetSecureConnectionStart() {
-  return TimeStamp();
+  return mTimings.secureConnectionStart;
 }
 
 mozilla::TimeStamp HttpTransactionParent::GetConnectEnd() {
-  return TimeStamp();
+  return mTimings.connectEnd;
 }
+
 mozilla::TimeStamp HttpTransactionParent::GetRequestStart() {
-  return TimeStamp();
+  return mTimings.requestStart;
 }
+
 mozilla::TimeStamp HttpTransactionParent::GetResponseStart() {
-  return TimeStamp();
+  return mTimings.responseStart;
 }
+
 mozilla::TimeStamp HttpTransactionParent::GetResponseEnd() {
-  return TimeStamp();
+  return mTimings.responseEnd;
 }
 
 bool HttpTransactionParent::ResponseIsComplete() { return mResponseIsComplete; }
@@ -198,7 +204,8 @@ void HttpTransactionParent::AddIPDLReference() { AddRef(); }
 mozilla::ipc::IPCResult HttpTransactionParent::RecvOnStartRequest(
     const nsresult& aStatus, const Maybe<nsHttpResponseHead>& aResponseHead,
     const nsCString& aSecurityInfoSerialization, const NetAddr& aSelfAddr,
-    const NetAddr& aPeerAddr, const bool& aProxyConnectFailed) {
+    const NetAddr& aPeerAddr, const bool& aProxyConnectFailed,
+    const TimingStruct& aTimings) {
   LOG(("HttpTransactionParent::RecvOnStartRequest [this=%p aStatus=%" PRIx32
        "]\n",
        this, static_cast<uint32_t>(aStatus)));
@@ -218,6 +225,7 @@ mozilla::ipc::IPCResult HttpTransactionParent::RecvOnStartRequest(
   mProxyConnectFailed = aProxyConnectFailed;
   mSelfAddr = aSelfAddr;
   mPeerAddr = aPeerAddr;
+  mTimings = aTimings;
 
   nsCOMPtr<nsIStreamListener> chan = mChannel;
 
@@ -270,7 +278,7 @@ mozilla::ipc::IPCResult HttpTransactionParent::RecvOnDataAvailable(
 
 mozilla::ipc::IPCResult HttpTransactionParent::RecvOnStopRequest(
     const nsresult& aStatus, const bool& aResponseIsComplete,
-    const int64_t& aTransferSize) {
+    const int64_t& aTransferSize, const TimingStruct& aTimings) {
   LOG(("HttpTransactionParent::RecvOnStopRequest [this=%p status=%" PRIx32
        "]\n",
        this, static_cast<uint32_t>(aStatus)));
@@ -283,6 +291,7 @@ mozilla::ipc::IPCResult HttpTransactionParent::RecvOnStopRequest(
 
   mResponseIsComplete = aResponseIsComplete;
   mTransferSize = aTransferSize;
+  mTimings = aTimings;
 
   nsCOMPtr<nsIStreamListener> chan = mChannel;
   Unused << chan->OnStopRequest(this, aStatus);

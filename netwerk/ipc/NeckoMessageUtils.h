@@ -140,6 +140,34 @@ struct ParamTraits<mozilla::net::NetAddr> {
 };
 
 template <>
+struct ParamTraits<mozilla::net::TimingStruct> {
+  static void Write(Message* aMsg, const mozilla::net::TimingStruct& aParam) {
+    WriteParam(aMsg, aParam.domainLookupStart);
+    WriteParam(aMsg, aParam.domainLookupEnd);
+    WriteParam(aMsg, aParam.connectStart);
+    WriteParam(aMsg, aParam.tcpConnectEnd);
+    WriteParam(aMsg, aParam.secureConnectionStart);
+    WriteParam(aMsg, aParam.connectEnd);
+    WriteParam(aMsg, aParam.requestStart);
+    WriteParam(aMsg, aParam.responseStart);
+    WriteParam(aMsg, aParam.responseEnd);
+  }
+
+  static bool Read(const Message* aMsg, PickleIterator* aIter,
+                   mozilla::net::TimingStruct* aResult) {
+    return ReadParam(aMsg, aIter, &aResult->domainLookupStart) &&
+           ReadParam(aMsg, aIter, &aResult->domainLookupEnd) &&
+           ReadParam(aMsg, aIter, &aResult->connectStart) &&
+           ReadParam(aMsg, aIter, &aResult->tcpConnectEnd) &&
+           ReadParam(aMsg, aIter, &aResult->secureConnectionStart) &&
+           ReadParam(aMsg, aIter, &aResult->connectEnd) &&
+           ReadParam(aMsg, aIter, &aResult->requestStart) &&
+           ReadParam(aMsg, aIter, &aResult->responseStart) &&
+           ReadParam(aMsg, aIter, &aResult->responseEnd);
+  }
+};
+
+template <>
 struct ParamTraits<mozilla::net::ResourceTimingStruct> {
   static void Write(Message* aMsg,
                     const mozilla::net::ResourceTimingStruct& aParam) {

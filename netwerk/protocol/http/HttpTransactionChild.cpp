@@ -216,9 +216,9 @@ HttpTransactionChild::OnStartRequest(nsIRequest* aRequest) {
   if (head) {
     optionalHead = Some(*head);
   }
-  Unused << SendOnStartRequest(status, optionalHead, serializedSecurityInfoOut,
-                               mSelfAddr, mPeerAddr,
-                               mTransaction->ProxyConnectFailed());
+  Unused << SendOnStartRequest(
+      status, optionalHead, serializedSecurityInfoOut, mSelfAddr, mPeerAddr,
+      mTransaction->ProxyConnectFailed(), mTransaction->Timings());
   LOG(("HttpTransactionChild::OnStartRequest end [this=%p]\n", this));
   return NS_OK;
 }
@@ -229,7 +229,9 @@ HttpTransactionChild::OnStopRequest(nsIRequest* aRequest, nsresult aStatus) {
   MOZ_ASSERT(mTransaction);
 
   Unused << SendOnStopRequest(aStatus, mTransaction->ResponseIsComplete(),
-                              mTransaction->GetTransferSize());
+                              mTransaction->GetTransferSize(),
+                              mTransaction->Timings());
+
   mTransaction = nullptr;
   mTransactionPump = nullptr;
   return NS_OK;

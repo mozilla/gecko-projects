@@ -8025,9 +8025,7 @@ nsHttpChannel::OnStopRequest(nsIRequest* request, nsresult status) {
     // TODO: serialize response trailer in onstoprequest
     // mResponseTrailers = mTransaction->TakeResponseTrailers();
 
-    // TODO: serialize the timing
     // at this point, we're done with the transaction
-    // mTransactionTimings = mTransaction->Timings();
     mTransaction = nullptr;
     mTransactionPump = nullptr;
 
