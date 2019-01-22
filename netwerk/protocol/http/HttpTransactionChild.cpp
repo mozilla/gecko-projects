@@ -166,6 +166,14 @@ mozilla::ipc::IPCResult HttpTransactionChild::RecvCancel(
   return IPC_OK();
 }
 
+mozilla::ipc::IPCResult HttpTransactionChild::RecvSetDNSWasRefreshed() {
+  LOG(("HttpTransactionChild::SetDNSWasRefreshed [this=%p]\n", this));
+  if (mTransaction) {
+    mTransaction->SetDNSWasRefreshed();
+  }
+  return IPC_OK();
+}
+
 //-----------------------------------------------------------------------------
 // HttpTransactionChild <nsIStreamListener>
 //-----------------------------------------------------------------------------

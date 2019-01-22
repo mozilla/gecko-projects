@@ -108,6 +108,9 @@ class nsAHttpTransactionShell : public nsISupports {
   // Called to set/find out if the transaction generated a complete response.
   virtual bool ResponseIsComplete() = 0;
   virtual int64_t GetTransferSize() = 0;
+
+  // Called to notify that a requested DNS cache entry was refreshed.
+  virtual void SetDNSWasRefreshed() = 0;
 };
 
 NS_DEFINE_STATIC_IID_ACCESSOR(nsAHttpTransactionShell,
@@ -147,7 +150,8 @@ NS_DEFINE_STATIC_IID_ACCESSOR(nsAHttpTransactionShell,
   virtual mozilla::TimeStamp GetResponseEnd() override; \
   virtual bool IsStickyConnection() override; \
   virtual bool ResponseIsComplete() override; \
-  virtual int64_t GetTransferSize() override;
+  virtual int64_t GetTransferSize() override; \
+  virtual void SetDNSWasRefreshed() override;
 
 }  // namespace net
 }  // namespace mozilla

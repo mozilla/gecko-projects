@@ -49,6 +49,7 @@ class HttpTransactionChild final : public PHttpTransactionChild,
   mozilla::ipc::IPCResult RecvCancelPump(const nsresult& aStatus);
   mozilla::ipc::IPCResult RecvSuspendPump();
   mozilla::ipc::IPCResult RecvResumePump();
+  mozilla::ipc::IPCResult RecvSetDNSWasRefreshed();
 
  private:
   virtual ~HttpTransactionChild();

@@ -147,6 +147,11 @@ NS_IMETHODIMP HttpTransactionParent::RetargetDeliveryTo(
   return NS_ERROR_NOT_IMPLEMENTED;
 }
 
+void HttpTransactionParent::SetDNSWasRefreshed() {
+  MOZ_ASSERT(NS_IsMainThread(), "SetDNSWasRefreshed on main thread only!");
+  Unused << SendSetDNSWasRefreshed();
+}
+
 void HttpTransactionParent::GetNetworkAddresses(NetAddr& self, NetAddr& peer) {
   self = mSelfAddr;
   peer = mPeerAddr;

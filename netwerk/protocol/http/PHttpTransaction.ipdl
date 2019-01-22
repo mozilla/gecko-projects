@@ -61,6 +61,8 @@ child:
   async SuspendPump();
   async ResumePump();
 
+  async SetDNSWasRefreshed();
+
 };
 
 } // namespace net

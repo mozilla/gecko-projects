@@ -9245,10 +9245,9 @@ nsHttpChannel::OnLookupComplete(nsICancelable* request, nsIDNSRecord* rec,
   // Unset DNS cache refresh if it was requested,
   if (mCaps & NS_HTTP_REFRESH_DNS) {
     mCaps &= ~NS_HTTP_REFRESH_DNS;
-    // TODO: unmark, might use the weakPtr
-    // if (mTransaction) {
-    //     mTransaction->SetDNSWasRefreshed();
-    // }
+    if (mTransaction) {
+      mTransaction->SetDNSWasRefreshed();
+    }
   }
 
   return NS_OK;
