@@ -182,6 +182,13 @@ PHttpTransactionChild* SocketProcessChild::AllocPHttpTransactionChild() {
     if (NS_FAILED(rv)) {
       return nullptr;
     }
+
+    // Initialize DNS Service here, since it needs to be done in main thread.
+    nsCOMPtr<nsIDNSService> dns =
+        do_GetService("@mozilla.org/network/dns-service;1", &rv);
+    if (NS_FAILED(rv)) {
+      return nullptr;
+    }
   }
   HttpTransactionChild* p = new HttpTransactionChild();
   p->AddRef();

@@ -355,9 +355,11 @@ already_AddRefed<nsIInputStream> InputStreamHelper::DeserializeInputStream(
   nsCOMPtr<nsIIPCSerializableInputStream> serializable;
 
   switch (aParams.type()) {
-    case InputStreamParams::TStringInputStreamParams:
-      serializable = do_CreateInstance(kStringInputStreamCID);
-      break;
+    case InputStreamParams::TStringInputStreamParams: {
+      nsCOMPtr<nsIInputStream> stream;
+      NS_NewCStringInputStream(getter_AddRefs(stream), EmptyCString());
+      serializable = do_QueryInterface(stream);
+    } break;
 
     case InputStreamParams::TFileInputStreamParams:
       serializable = do_CreateInstance(kFileInputStreamCID);

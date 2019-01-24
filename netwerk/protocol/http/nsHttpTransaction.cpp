@@ -51,8 +51,6 @@
 
 //-----------------------------------------------------------------------------
 
-static NS_DEFINE_CID(kMultiplexInputStream, NS_MULTIPLEXINPUTSTREAM_CID);
-
 // Place a limit on how much non-compliant HTTP can be skipped while
 // looking for a response header
 #define MAX_INVALID_RESPONSE_BODY_SIZE (1024 * 128)
@@ -380,8 +378,9 @@ nsresult nsHttpTransaction::Init(
 
   if (mHasRequestBody) {
     // wrap the headers and request body in a multiplexed input stream.
-    nsCOMPtr<nsIMultiplexInputStream> multi =
-        do_CreateInstance(kMultiplexInputStream, &rv);
+    nsCOMPtr<nsIMultiplexInputStream> multi;
+    rv = nsMultiplexInputStreamConstructor(
+        nullptr, NS_GET_IID(nsIMultiplexInputStream), getter_AddRefs(multi));
     if (NS_FAILED(rv)) return rv;
 
     rv = multi->AppendStream(headers);

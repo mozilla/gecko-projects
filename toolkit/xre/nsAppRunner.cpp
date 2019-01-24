@@ -1271,8 +1271,15 @@ static const mozilla::Module::CIDEntry kXRECIDs[] = {
 static const mozilla::Module::ContractIDEntry kXREContracts[] = {
     {NS_PROFILESERVICE_CONTRACTID, &kProfileServiceCID}, {nullptr}};
 
-extern const mozilla::Module kXREModule = {mozilla::Module::kVersion, kXRECIDs,
-                                           kXREContracts};
+extern const mozilla::Module kXREModule = {
+    mozilla::Module::kVersion,
+    kXRECIDs,
+    kXREContracts,
+    nullptr,
+    nullptr,
+    nullptr,
+    nullptr,
+    mozilla::Module::ALLOW_IN_SOCKET_PROCESS};
 
 nsresult ScopedXPCOMStartup::Initialize() {
   NS_ASSERTION(gDirServiceProvider, "Should not get here!");
