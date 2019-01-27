@@ -53,7 +53,7 @@
 #include "nsNameSpaceManager.h"
 #include <algorithm>
 #ifdef ACCESSIBILITY
-#include "nsAccessibilityService.h"
+#  include "nsAccessibilityService.h"
 #endif
 #include "nsLayoutUtils.h"
 #include "nsDisplayList.h"
@@ -1262,7 +1262,7 @@ void nsImageFrame::DisplayAltText(nsPresContext* aPresContext,
 
 struct nsRecessedBorder : public nsStyleBorder {
   nsRecessedBorder(nscoord aBorderWidth, nsPresContext* aPresContext)
-      : nsStyleBorder(aPresContext) {
+      : nsStyleBorder(*aPresContext->Document()) {
     NS_FOR_CSS_SIDES(side) {
       BorderColorFor(side) = StyleComplexColor::Black();
       mBorder.Side(side) = aBorderWidth;

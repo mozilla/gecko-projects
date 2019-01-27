@@ -1920,7 +1920,7 @@ function ErrorRep(props) {
 
   if (preview.stack && props.mode !== MODE.TINY) {
     const stacktrace = props.renderStacktrace ? props.renderStacktrace(parseStackString(preview.stack)) : getStacktraceElements(props, preview);
-    content.push("\n", stacktrace);
+    content.push(stacktrace);
   }
 
   return span({
@@ -4581,7 +4581,7 @@ class Tree extends Component {
           // it should be scrolled into view.
           this._focus(item, { preventAutoScroll: true });
           if (this.props.isExpanded(item)) {
-            this.props.onCollapse(item);
+            this.props.onCollapse(item, e.altKey);
           } else {
             this.props.onExpand(item, e.altKey);
           }
@@ -4589,10 +4589,7 @@ class Tree extends Component {
       });
     });
 
-    const style = Object.assign({}, this.props.style || {}, {
-      padding: 0,
-      margin: 0
-    });
+    const style = Object.assign({}, this.props.style || {});
 
     return _reactDomFactories2.default.div({
       className: `tree ${this.props.className ? this.props.className : ""}`,
@@ -7018,8 +7015,8 @@ const {
   nodeIsLongString,
   nodeHasFullText,
   nodeHasGetter,
-  getParentGripValue,
-  getNonPrototypeParentGripValue
+  getNonPrototypeParentGripValue,
+  getParentGripValue
 } = Utils.node;
 
 class ObjectInspectorItem extends Component {

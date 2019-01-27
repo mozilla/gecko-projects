@@ -90,6 +90,10 @@ const SUPPORTED_STRATEGIES = new Set([
   element.Strategy.AnonAttribute,
 ]);
 
+// Timeout used to abort fullscreen, maximize, and minimize
+// commands if no window manager is present.
+const TIMEOUT_NO_WINDOW_MANAGER = 5000;
+
 const globalMessageManager = Services.mm;
 
 /**
@@ -3027,20 +3031,26 @@ GeckoDriver.prototype.minimizeWindow = async function() {
   const win = assert.open(this.getCurrentWindow());
   await this._handleUserPrompts();
 
-  if (WindowState.from(win.windowState) != WindowState.Minimized) {
-    if (WindowState.from(win.windowState) == WindowState.Fullscreen) {
+  switch (WindowState.from(win.windowState)) {
+    case WindowState.Fullscreen:
       await exitFullscreen(win);
-    }
+      break;
 
+    case WindowState.Maximized:
+      await restoreWindow(win);
+      break;
+  }
+
+  if (WindowState.from(win.windowState) != WindowState.Minimized) {
     let cb;
     let observer = new WebElementEventTarget(this.curBrowser.messageManager);
+    // Use a timed promise to abort if no window manager is present
     await new TimedPromise(resolve => {
       cb = new DebounceCallback(resolve);
       observer.addEventListener("visibilitychange", cb);
       win.minimize();
-    }, {throws: null});
+    }, {throws: null, timeout: TIMEOUT_NO_WINDOW_MANAGER});
     observer.removeEventListener("visibilitychange", cb);
-
     await new IdlePromise(win);
   }
 
@@ -3082,11 +3092,12 @@ GeckoDriver.prototype.maximizeWindow = async function() {
 
   if (WindowState.from(win.windowState) != WindowState.Maximized) {
     let cb;
+    // Use a timed promise to abort if no window manager is present
     await new TimedPromise(resolve => {
       cb = new DebounceCallback(resolve);
       win.addEventListener("sizemodechange", cb);
       win.maximize();
-    }, {throws: null});
+    }, {throws: null, timeout: TIMEOUT_NO_WINDOW_MANAGER});
     win.removeEventListener("sizemodechange", cb);
     await new IdlePromise(win);
   }
@@ -3117,17 +3128,21 @@ GeckoDriver.prototype.fullscreenWindow = async function() {
   const win = assert.open(this.getCurrentWindow());
   await this._handleUserPrompts();
 
-  if (WindowState.from(win.windowState) == WindowState.Minimized) {
-    await restoreWindow(win);
+  switch (WindowState.from(win.windowState)) {
+    case WindowState.Maximized:
+    case WindowState.Minimized:
+      await restoreWindow(win);
+      break;
   }
 
   if (WindowState.from(win.windowState) != WindowState.Fullscreen) {
     let cb;
+    // Use a timed promise to abort if no window manager is present
     await new TimedPromise(resolve => {
       cb = new DebounceCallback(resolve);
       win.addEventListener("sizemodechange", cb);
       win.fullScreen = true;
-    }, {throws: null});
+    }, {throws: null, timeout: TIMEOUT_NO_WINDOW_MANAGER});
     win.removeEventListener("sizemodechange", cb);
   }
   await new IdlePromise(win);
@@ -3622,23 +3637,25 @@ function getOuterWindowId(win) {
   return win.windowUtils.outerWindowID;
 }
 
-async function exitFullscreen(window) {
+async function exitFullscreen(win) {
   let cb;
+  // Use a timed promise to abort if no window manager is present
   await new TimedPromise(resolve => {
     cb = new DebounceCallback(resolve);
-    window.addEventListener("sizemodechange", cb);
-    window.fullScreen = false;
-  });
-  window.removeEventListener("sizemodechange", cb);
+    win.addEventListener("sizemodechange", cb);
+    win.fullScreen = false;
+  }, {throws: null, timeout: TIMEOUT_NO_WINDOW_MANAGER});
+  win.removeEventListener("sizemodechange", cb);
 }
 
-function restoreWindow(window) {
-  window.restore();
-  return new PollPromise((resolve, reject) => {
-    if (WindowState.from(window.windowState) != WindowState.Minimized) {
+async function restoreWindow(win) {
+  win.restore();
+  // Use a poll promise to abort if no window manager is present
+  await new PollPromise((resolve, reject) => {
+    if (WindowState.from(win.windowState) == WindowState.Normal) {
       resolve();
     } else {
       reject();
     }
-  }, {timeout: 2000});
+  }, {timeout: TIMEOUT_NO_WINDOW_MANAGER});
 }

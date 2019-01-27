@@ -48,8 +48,10 @@ var gExceptionPaths = [
 
 // These are not part of the omni.ja file, so we find them only when running
 // the test on a non-packaged build.
-if (AppConstants.platform == "macosx")
+if (AppConstants.platform == "macosx") {
   gExceptionPaths.push("resource://gre/res/cursors/");
+  gExceptionPaths.push("resource://gre/res/touchbar/");
+}
 
 var whitelist = [
   // browser/extensions/pdfjs/content/PdfStreamConverter.jsm
@@ -158,9 +160,6 @@ var whitelist = [
   {file: "resource://gre/modules/Promise.jsm"},
   // Still used by WebIDE, which is going away but not entirely gone.
   {file: "resource://gre/modules/ZipUtils.jsm"},
-  // Bug 1463225 (on Mac and Windows this is only used by a test)
-  {file: "chrome://global/content/bindings/toolbar.xml",
-   platforms: ["macosx", "win"]},
   // Bug 1483277 (temporarily unreferenced)
   {file: AppConstants.BROWSER_CHROME_URL == "chrome://browser/content/browser.xul" ?
     "chrome://browser/content/browser.xhtml" : "chrome://browser/content/browser.xul" },

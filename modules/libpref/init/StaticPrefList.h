@@ -244,6 +244,21 @@ VARCACHE_PREF(
   RelaxedAtomicBool, true
 )
 
+// Should we defer timeouts and intervals while loading a page.  Released
+// on Idle or when the page is loaded.
+VARCACHE_PREF(
+  "dom.timeout.defer_during_load",
+  dom_timeout_defer_during_load,
+  bool, true
+)
+
+// Maximum deferral time for setTimeout/Interval in milliseconds
+VARCACHE_PREF(
+  "dom.timeout.max_idle_defer_ms",
+  dom_timeout_max_idle_defer_ms,
+  uint32_t, 10*1000
+)
+
 VARCACHE_PREF(
   "dom.performance.children_results_ipc_timeout",
   dom_performance_children_results_ipc_timeout,
@@ -456,6 +471,27 @@ VARCACHE_PREF(
   RelaxedAtomicBool, false
 )
 
+// Block multiple external protocol URLs in iframes per single event.
+#ifdef NIGHTLY_BUILD
+#define PREF_VALUE true
+#else
+#define PREF_VALUE false
+#endif
+VARCACHE_PREF(
+  "dom.block_external_protocol_in_iframes",
+   dom_block_external_protocol_in_iframes,
+  bool, PREF_VALUE
+)
+#undef PREF_VALUE
+
+// Any how many seconds we allow external protocol URLs in iframe when not in
+// single events
+VARCACHE_PREF(
+  "dom.delay.block_external_protocol_in_iframes",
+   dom_delay_block_external_protocol_in_iframes,
+  uint32_t, 10 // in seconds
+)
+
 // Block multiple window.open() per single event.
 VARCACHE_PREF(
   "dom.block_multiple_popups",
@@ -561,7 +597,7 @@ VARCACHE_PREF(
 VARCACHE_PREF(
   "html5.flushtimer.initialdelay",
    html5_flushtimer_initialdelay,
-  RelaxedAtomicInt32, 120
+  RelaxedAtomicInt32, 16
 )
 
 // Time in milliseconds between the time a network buffer is seen and the timer
@@ -569,7 +605,7 @@ VARCACHE_PREF(
 VARCACHE_PREF(
   "html5.flushtimer.subsequentdelay",
    html5_flushtimer_subsequentdelay,
-  RelaxedAtomicInt32, 120
+  RelaxedAtomicInt32, 16
 )
 
 //---------------------------------------------------------------------------
@@ -847,13 +883,6 @@ VARCACHE_PREF(
   bool, false
 )
 
-// Is overflow: -moz-scrollbars-* value enabled?
-VARCACHE_PREF(
-  "layout.css.overflow.moz-scrollbars.enabled",
-   layout_css_overflow_moz_scrollbars_enabled,
-  bool, false
-)
-
 // Does arbitrary ::-webkit-* pseudo-element parsed?
 VARCACHE_PREF(
   "layout.css.unknown-webkit-pseudo-element",
@@ -890,7 +919,7 @@ VARCACHE_PREF(
 )
 
 // Pref to control enabling scroll anchoring.
-#ifdef NIGHTLY_BUILD
+#ifndef ANDROID
 #define PREF_VALUE true
 #else
 #define PREF_VALUE false
@@ -1146,6 +1175,8 @@ VARCACHE_PREF(
 #undef PREF_VALUE
 
 #if defined(XP_WIN) && !defined(_ARM64_)
+# define PREF_VALUE true
+#elif defined(XP_MACOSX)
 # define PREF_VALUE true
 #else
 # define PREF_VALUE false
@@ -1467,6 +1498,8 @@ VARCACHE_PREF(
 
 // AV1
 #if defined(XP_WIN) && !defined(_ARM64_)
+# define PREF_VALUE true
+#elif defined(XP_MACOSX)
 # define PREF_VALUE true
 #else
 # define PREF_VALUE false

@@ -36,7 +36,7 @@
 #include "vm/AsyncFunction.h"
 #include "vm/AsyncIteration.h"
 #ifdef ENABLE_BIGINT
-#include "vm/BigIntType.h"
+#  include "vm/BigIntType.h"
 #endif
 #include "vm/BytecodeUtil.h"
 #include "vm/Debugger.h"
@@ -378,7 +378,7 @@ InterpreterFrame* RunState::pushInterpreterFrame(JSContext* cx) {
 // stack frames and stack overflow issues, see bug 1167883. Turn off PGO to
 // avoid this.
 #ifdef _MSC_VER
-#pragma optimize("g", off)
+#  pragma optimize("g", off)
 #endif
 bool js::RunScript(JSContext* cx, RunState& state) {
   if (!CheckRecursionLimit(cx)) {
@@ -421,7 +421,7 @@ bool js::RunScript(JSContext* cx, RunState& state) {
   return Interpret(cx, state);
 }
 #ifdef _MSC_VER
-#pragma optimize("", on)
+#  pragma optimize("", on)
 #endif
 
 STATIC_PRECONDITION_ASSUME(ubound(args.argv_) >= argc)
@@ -1676,38 +1676,38 @@ static MOZ_NEVER_INLINE JS_HAZ_JSNATIVE_CALLER bool Interpret(JSContext* cx,
 #if (defined(__GNUC__) || (__IBMC__ >= 700 && defined __IBM_COMPUTED_GOTO) || \
      __SUNPRO_C >= 0x570)
 // Non-standard but faster indirect-goto-based dispatch.
-#define INTERPRETER_LOOP()
-#define CASE(OP) label_##OP:
-#define DEFAULT() \
+#  define INTERPRETER_LOOP()
+#  define CASE(OP) label_##OP:
+#  define DEFAULT() \
   label_default:
-#define DISPATCH_TO(OP) goto* addresses[(OP)]
+#  define DISPATCH_TO(OP) goto* addresses[(OP)]
 
-#define LABEL(X) (&&label_##X)
+#  define LABEL(X) (&&label_##X)
 
   // Use addresses instead of offsets to optimize for runtime speed over
   // load-time relocation overhead.
   static const void* const addresses[EnableInterruptsPseudoOpcode + 1] = {
-#define OPCODE_LABEL(op, ...) LABEL(op),
+#  define OPCODE_LABEL(op, ...) LABEL(op),
       FOR_EACH_OPCODE(OPCODE_LABEL)
-#undef OPCODE_LABEL
-#define TRAILING_LABEL(v)                                                    \
-  ((v) == EnableInterruptsPseudoOpcode ? LABEL(EnableInterruptsPseudoOpcode) \
-                                       : LABEL(default)),
+#  undef OPCODE_LABEL
+#  define TRAILING_LABEL(v)                                                    \
+    ((v) == EnableInterruptsPseudoOpcode ? LABEL(EnableInterruptsPseudoOpcode) \
+                                         : LABEL(default)),
           FOR_EACH_TRAILING_UNUSED_OPCODE(TRAILING_LABEL)
-#undef TRAILING_LABEL
+#  undef TRAILING_LABEL
   };
 #else
 // Portable switch-based dispatch.
-#define INTERPRETER_LOOP() \
-  the_switch:              \
-  switch (switchOp)
-#define CASE(OP) case OP:
-#define DEFAULT() default:
-#define DISPATCH_TO(OP) \
-  JS_BEGIN_MACRO        \
-    switchOp = (OP);    \
-    goto the_switch;    \
-  JS_END_MACRO
+#  define INTERPRETER_LOOP() \
+  the_switch:                \
+    switch (switchOp)
+#  define CASE(OP) case OP:
+#  define DEFAULT() default:
+#  define DISPATCH_TO(OP) \
+    JS_BEGIN_MACRO        \
+      switchOp = (OP);    \
+      goto the_switch;    \
+    JS_END_MACRO
 
   // This variable is effectively a parameter to the_switch.
   jsbytecode switchOp;
@@ -1959,6 +1959,7 @@ static MOZ_NEVER_INLINE JS_HAZ_JSNATIVE_CALLER bool Interpret(JSContext* cx,
     CASE(JSOP_NOP)
     CASE(JSOP_NOP_DESTRUCTURING)
     CASE(JSOP_TRY_DESTRUCTURING)
+    CASE(JSOP_UNUSED71)
     CASE(JSOP_UNUSED151)
     CASE(JSOP_CONDSWITCH) {
       MOZ_ASSERT(CodeSpec[*REGS.pc].length == 1);
@@ -3395,13 +3396,6 @@ static MOZ_NEVER_INLINE JS_HAZ_JSNATIVE_CALLER bool Interpret(JSContext* cx,
     }
     END_CASE(JSOP_ARGUMENTS)
 
-    CASE(JSOP_RUNONCE) {
-      if (!RunOnceScriptPrologue(cx, script)) {
-        goto error;
-      }
-    }
-    END_CASE(JSOP_RUNONCE)
-
     CASE(JSOP_REST) {
       ReservedRooted<JSObject*> rest(&rootObject0,
                                      REGS.fp()->createRestParameter(cx));
@@ -3419,8 +3413,7 @@ static MOZ_NEVER_INLINE JS_HAZ_JSNATIVE_CALLER bool Interpret(JSContext* cx,
 #ifdef DEBUG
       // Only the .this slot can hold the TDZ MagicValue.
       if (IsUninitializedLexical(val)) {
-        PropertyName* name = EnvironmentCoordinateName(
-            cx->caches().envCoordinateNameCache, script, REGS.pc);
+        PropertyName* name = EnvironmentCoordinateNameSlow(script, REGS.pc);
         MOZ_ASSERT(name == cx->names().dotThis);
         JSOp next = JSOp(*GetNextPc(REGS.pc));
         MOZ_ASSERT(next == JSOP_CHECKTHIS || next == JSOP_CHECKRETURN ||
@@ -4259,14 +4252,10 @@ static MOZ_NEVER_INLINE JS_HAZ_JSNATIVE_CALLER bool Interpret(JSContext* cx,
     END_CASE(JSOP_IMPORTMETA)
 
     CASE(JSOP_DYNAMIC_IMPORT) {
-      ReservedRooted<Value> referencingPrivate(&rootValue0);
-      referencingPrivate = FindScriptOrModulePrivateForScript(script);
-
       ReservedRooted<Value> specifier(&rootValue1);
       POP_COPY_TO(specifier);
 
-      JSObject* promise =
-          StartDynamicModuleImport(cx, referencingPrivate, specifier);
+      JSObject* promise = StartDynamicModuleImport(cx, script, specifier);
       if (!promise) goto error;
 
       PUSH_OBJECT(*promise);
@@ -4924,26 +4913,6 @@ bool js::ImplicitThisOperation(JSContext* cx, HandleObject scopeObj,
   return true;
 }
 
-bool js::RunOnceScriptPrologue(JSContext* cx, HandleScript script) {
-  MOZ_ASSERT(script->treatAsRunOnce());
-
-  if (!script->hasRunOnce()) {
-    script->setHasRunOnce();
-    return true;
-  }
-
-  // Force instantiation of the script's function's group to ensure the flag
-  // is preserved in type information.
-  RootedFunction fun(cx, script->functionNonDelazifying());
-  if (!JSObject::getGroup(cx, fun)) {
-    return false;
-  }
-
-  MarkObjectGroupFlags(cx, script->functionNonDelazifying(),
-                       OBJECT_FLAG_RUNONCE_INVALIDATED);
-  return true;
-}
-
 unsigned js::GetInitDataPropAttrs(JSOp op) {
   switch (op) {
     case JSOP_INITPROP:
@@ -5176,9 +5145,7 @@ JSObject* js::NewObjectOperation(JSContext* cx, HandleScript script,
   }
 
   if (newKind == SingletonObject) {
-    if (!JSObject::setSingleton(cx, obj)) {
-      return nullptr;
-    }
+    MOZ_ASSERT(obj->isSingleton());
   } else {
     obj->setGroup(group);
 
@@ -5235,13 +5202,9 @@ JSObject* js::NewArrayOperation(JSContext* cx, HandleScript script,
     if (!group) {
       return nullptr;
     }
-    AutoSweepObjectGroup sweep(group);
-    if (group->maybePreliminaryObjects(sweep)) {
-      group->maybePreliminaryObjects(sweep)->maybeAnalyze(cx, group);
-    }
 
-    if (group->shouldPreTenure(sweep) ||
-        group->maybePreliminaryObjects(sweep)) {
+    AutoSweepObjectGroup sweep(group);
+    if (group->shouldPreTenure(sweep)) {
       newKind = TenuredObject;
     }
   }
@@ -5317,8 +5280,7 @@ void js::ReportRuntimeLexicalError(JSContext* cx, unsigned errorNumber,
     name = script->getName(pc);
   } else {
     MOZ_ASSERT(IsAliasedVarOp(op));
-    name = EnvironmentCoordinateName(cx->caches().envCoordinateNameCache,
-                                     script, pc);
+    name = EnvironmentCoordinateNameSlow(script, pc);
   }
 
   ReportRuntimeLexicalError(cx, errorNumber, name);

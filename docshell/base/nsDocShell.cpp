@@ -9,10 +9,10 @@
 #include <algorithm>
 
 #ifdef XP_WIN
-#include <process.h>
-#define getpid _getpid
+#  include <process.h>
+#  define getpid _getpid
 #else
-#include <unistd.h>  // for getpid()
+#  include <unistd.h>  // for getpid()
 #endif
 
 #include "mozilla/ArrayUtils.h"
@@ -209,17 +209,17 @@
 #include "timeline/JavascriptTimelineMarker.h"
 
 #ifdef MOZ_PLACES
-#include "nsIFaviconService.h"
-#include "mozIPlacesPendingOperation.h"
+#  include "nsIFaviconService.h"
+#  include "mozIPlacesPendingOperation.h"
 #endif
 
 #if NS_PRINT_PREVIEW
-#include "nsIDocumentViewerPrint.h"
-#include "nsIWebBrowserPrint.h"
+#  include "nsIDocumentViewerPrint.h"
+#  include "nsIWebBrowserPrint.h"
 #endif
 
 #ifdef MOZ_TOOLKIT_SEARCH
-#include "nsIBrowserSearchService.h"
+#  include "nsIBrowserSearchService.h"
 #endif
 
 using namespace mozilla;
@@ -1062,9 +1062,8 @@ nsDOMNavigationTiming* nsDocShell::GetNavigationTiming() const {
     innerTargetURI = NS_GetInnermostURI(targetURI);
   }
 
-  return innerOriginURI && innerTargetURI &&
-    SchemeIsFile(innerOriginURI) &&
-    SchemeIsFile(innerTargetURI);
+  return innerOriginURI && innerTargetURI && SchemeIsFile(innerOriginURI) &&
+         SchemeIsFile(innerTargetURI);
 }
 
 nsPresContext* nsDocShell::GetEldestPresContext() {
@@ -5508,8 +5507,8 @@ nsDocShell::GetAllowMixedContentAndConnectionData(
     // For things with system principal (e.g. scratchpad) there is no uri
     // aRootHasSecureConnection should be false.
     nsCOMPtr<nsIURI> rootUri = rootPrincipal->GetURI();
-    if (nsContentUtils::IsSystemPrincipal(rootPrincipal) ||
-        !rootUri || !SchemeIsHTTPS(rootUri)) {
+    if (nsContentUtils::IsSystemPrincipal(rootPrincipal) || !rootUri ||
+        !SchemeIsHTTPS(rootUri)) {
       *aRootHasSecureConnection = false;
     }
 
@@ -6392,7 +6391,7 @@ nsDocShell::OnStateChange(nsIWebProgress* aProgress, nsIRequest* aRequest,
         nsCOMPtr<nsIWidget> mainWidget;
         GetMainWidget(getter_AddRefs(mainWidget));
         if (mainWidget) {
-          mainWidget->SetCursor(eCursor_spinning);
+          mainWidget->SetCursor(eCursor_spinning, nullptr, 0, 0);
         }
       }
     }
@@ -6408,7 +6407,7 @@ nsDocShell::OnStateChange(nsIWebProgress* aProgress, nsIRequest* aRequest,
       nsCOMPtr<nsIWidget> mainWidget;
       GetMainWidget(getter_AddRefs(mainWidget));
       if (mainWidget) {
-        mainWidget->SetCursor(eCursor_standard);
+        mainWidget->SetCursor(eCursor_standard, nullptr, 0, 0);
       }
     }
   }
@@ -6545,6 +6544,13 @@ nsDocShell::OnStatusChange(nsIWebProgress* aWebProgress, nsIRequest* aRequest,
 NS_IMETHODIMP
 nsDocShell::OnSecurityChange(nsIWebProgress* aWebProgress, nsIRequest* aRequest,
                              uint32_t aState) {
+  MOZ_ASSERT_UNREACHABLE("notification excluded in AddProgressListener(...)");
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+nsDocShell::OnContentBlockingEvent(nsIWebProgress* aWebProgress,
+                                   nsIRequest* aRequest, uint32_t aEvent) {
   MOZ_ASSERT_UNREACHABLE("notification excluded in AddProgressListener(...)");
   return NS_OK;
 }
@@ -7527,14 +7533,12 @@ nsresult nsDocShell::RestoreFromHistory() {
 
   nsCOMPtr<nsIContentViewer> oldCv(mContentViewer);
   nsCOMPtr<nsIContentViewer> newCv(viewer);
-  int32_t minFontSize = 0;
   float textZoom = 1.0f;
   float pageZoom = 1.0f;
   float overrideDPPX = 0.0f;
 
   bool styleDisabled = false;
   if (oldCv && newCv) {
-    oldCv->GetMinFontSize(&minFontSize);
     oldCv->GetTextZoom(&textZoom);
     oldCv->GetFullZoom(&pageZoom);
     oldCv->GetOverrideDPPX(&overrideDPPX);
@@ -7765,7 +7769,6 @@ nsresult nsDocShell::RestoreFromHistory() {
   }
 
   if (oldCv && newCv) {
-    newCv->SetMinFontSize(minFontSize);
     newCv->SetTextZoom(textZoom);
     newCv->SetFullZoom(pageZoom);
     newCv->SetOverrideDPPX(overrideDPPX);
@@ -8264,7 +8267,6 @@ nsresult nsDocShell::SetupNewViewer(nsIContentViewer* aNewViewer) {
   const Encoding* forceCharset = nullptr;
   const Encoding* hintCharset = nullptr;
   int32_t hintCharsetSource;
-  int32_t minFontSize;
   float textZoom;
   float pageZoom;
   float overrideDPPX;
@@ -8300,8 +8302,6 @@ nsresult nsDocShell::SetupNewViewer(nsIContentViewer* aNewViewer) {
         forceCharset = oldCv->GetForceCharset();
         hintCharset = oldCv->GetHintCharset();
         NS_ENSURE_SUCCESS(oldCv->GetHintCharacterSetSource(&hintCharsetSource),
-                          NS_ERROR_FAILURE);
-        NS_ENSURE_SUCCESS(oldCv->GetMinFontSize(&minFontSize),
                           NS_ERROR_FAILURE);
         NS_ENSURE_SUCCESS(oldCv->GetTextZoom(&textZoom), NS_ERROR_FAILURE);
         NS_ENSURE_SUCCESS(oldCv->GetFullZoom(&pageZoom), NS_ERROR_FAILURE);
@@ -8368,7 +8368,6 @@ nsresult nsDocShell::SetupNewViewer(nsIContentViewer* aNewViewer) {
     newCv->SetHintCharset(hintCharset);
     NS_ENSURE_SUCCESS(newCv->SetHintCharacterSetSource(hintCharsetSource),
                       NS_ERROR_FAILURE);
-    NS_ENSURE_SUCCESS(newCv->SetMinFontSize(minFontSize), NS_ERROR_FAILURE);
     NS_ENSURE_SUCCESS(newCv->SetTextZoom(textZoom), NS_ERROR_FAILURE);
     NS_ENSURE_SUCCESS(newCv->SetFullZoom(pageZoom), NS_ERROR_FAILURE);
     NS_ENSURE_SUCCESS(newCv->SetOverrideDPPX(overrideDPPX), NS_ERROR_FAILURE);
@@ -9641,29 +9640,36 @@ nsresult nsDocShell::DoURILoad(nsDocShellLoadState* aLoadState,
                    aContentPolicyType == nsIContentPolicy::TYPE_INTERNAL_FRAME,
                "DoURILoad thinks this is a frame and InternalLoad does not");
 
-    // Only allow URLs able to return data in iframes.
-    bool doesNotReturnData = false;
-    NS_URIChainHasFlags(aLoadState->URI(),
-                        nsIProtocolHandler::URI_DOES_NOT_RETURN_DATA,
-                        &doesNotReturnData);
-    if (doesNotReturnData) {
-      bool popupBlocked = true;
+    if (StaticPrefs::dom_block_external_protocol_in_iframes()) {
+      // Only allow URLs able to return data in iframes.
+      bool doesNotReturnData = false;
+      NS_URIChainHasFlags(aLoadState->URI(),
+                          nsIProtocolHandler::URI_DOES_NOT_RETURN_DATA,
+                          &doesNotReturnData);
+      if (doesNotReturnData) {
+        bool popupBlocked = true;
 
-      // Let's consider external protocols as popups and let's check if the page
-      // is allowed to open them without abuse regardless of allowed events
-      if (PopupBlocker::GetPopupControlState() <= PopupBlocker::openBlocked) {
-        popupBlocked = !PopupBlocker::TryUsePopupOpeningToken();
-      } else {
-        nsCOMPtr<nsINode> loadingNode =
-            mScriptGlobal->AsOuter()->GetFrameElementInternal();
-        if (loadingNode) {
-          popupBlocked = !PopupBlocker::CanShowPopupByPermission(
-              loadingNode->NodePrincipal());
+        // Let's consider external protocols as popups and let's check if the
+        // page is allowed to open them without abuse regardless of allowed
+        // events
+        if (PopupBlocker::GetPopupControlState() <= PopupBlocker::openBlocked) {
+          popupBlocked = !PopupBlocker::TryUsePopupOpeningToken();
+        } else if (mIsActive &&
+                   PopupBlocker::ConsumeTimerTokenForExternalProtocolIframe()) {
+          popupBlocked = false;
+        } else {
+          nsCOMPtr<nsINode> loadingNode =
+              mScriptGlobal->AsOuter()->GetFrameElementInternal();
+          if (loadingNode) {
+            popupBlocked = !PopupBlocker::CanShowPopupByPermission(
+                loadingNode->NodePrincipal());
+          }
         }
-      }
 
-      if (popupBlocked) {
-        return NS_ERROR_UNKNOWN_PROTOCOL;
+        // No error must be returned when iframes are blocked.
+        if (popupBlocked) {
+          return NS_OK;
+        }
       }
     }
 
@@ -9692,6 +9698,35 @@ nsresult nsDocShell::DoURILoad(nsDocShellLoadState* aLoadState,
   nsCOMPtr<nsIChannel> channel;
 
   bool isSrcdoc = !aSrcdoc.IsVoid();
+
+  // If we have a pending channel, use the channel we've already created here.
+  // We don't need to set up load flags for our channel, as it has already been
+  // created.
+  nsCOMPtr<nsIChildChannel> pendingChannel =
+      aLoadState->GetPendingRedirectedChannel();
+  if (pendingChannel) {
+    MOZ_ASSERT(!isSrcdoc, "pending channel for srcdoc load?");
+
+    channel = do_QueryInterface(pendingChannel);
+    MOZ_ASSERT(channel, "nsIChildChannel isn't a nsIChannel?");
+
+    // If we have a request outparameter, shove our channel into it.
+    if (aRequest) {
+      nsCOMPtr<nsIRequest> outRequest = channel;
+      outRequest.forget(aRequest);
+    }
+
+    rv = OpenInitializedChannel(channel, uriLoader,
+                                nsIURILoader::REDIRECTED_CHANNEL);
+
+    // If the channel load failed, we failed and nsIWebProgress just ain't
+    // gonna happen.
+    if (NS_SUCCEEDED(rv) && aDocShell) {
+      nsCOMPtr<nsIDocShell> self = this;
+      self.forget(aDocShell);
+    }
+    return rv;
+  }
 
   // There are two cases we care about:
   // * Top-level load: In this case, loadingNode is null, but loadingWindow
@@ -9770,9 +9805,8 @@ nsresult nsDocShell::DoURILoad(nsDocShellLoadState* aLoadState,
         true,  // aInheritForAboutBlank
         isSrcdoc);
 
-    bool isURIUniqueOrigin =
-        nsIOService::IsDataURIUniqueOpaqueOrigin() &&
-        SchemeIsData(aLoadState->URI());
+    bool isURIUniqueOrigin = nsIOService::IsDataURIUniqueOpaqueOrigin() &&
+                             SchemeIsData(aLoadState->URI());
     inheritPrincipal = inheritAttrs && !isURIUniqueOrigin;
   }
 
@@ -9892,8 +9926,8 @@ nsresult nsDocShell::DoURILoad(nsDocShellLoadState* aLoadState,
                                getter_AddRefs(channel));
   } else {
     rv = NS_NewInputStreamChannelInternal(
-      getter_AddRefs(channel), aLoadState->URI(), aSrcdoc,
-      NS_LITERAL_CSTRING("text/html"), loadInfo, true);
+        getter_AddRefs(channel), aLoadState->URI(), aSrcdoc,
+        NS_LITERAL_CSTRING("text/html"), loadInfo, true);
     NS_ENSURE_SUCCESS(rv, rv);
     nsCOMPtr<nsIInputStreamChannel> isc = do_QueryInterface(channel);
     MOZ_ASSERT(isc);
@@ -10258,7 +10292,6 @@ nsresult nsDocShell::AddHeadersToChannel(nsIInputStream* aHeadersData,
 nsresult nsDocShell::DoChannelLoad(nsIChannel* aChannel,
                                    nsIURILoader* aURILoader,
                                    bool aBypassClassifier) {
-  nsresult rv;
   // Mark the channel as being a document URI and allow content sniffing...
   nsLoadFlags loadFlags = 0;
   (void)aChannel->GetLoadFlags(&loadFlags);
@@ -10357,6 +10390,14 @@ nsresult nsDocShell::DoChannelLoad(nsIChannel* aChannel,
     openFlags |= nsIURILoader::DONT_RETARGET;
   }
 
+  return OpenInitializedChannel(aChannel, aURILoader, openFlags);
+}
+
+nsresult nsDocShell::OpenInitializedChannel(nsIChannel* aChannel,
+                                            nsIURILoader* aURILoader,
+                                            uint32_t aOpenFlags) {
+  nsresult rv;
+
   // If anything fails here, make sure to clear our initial ClientSource.
   auto cleanupInitialClient =
       MakeScopeExit([&] { mInitialClientSource.reset(); });
@@ -10377,13 +10418,13 @@ nsresult nsDocShell::DoChannelLoad(nsIChannel* aChannel,
                               win->EventTargetFor(TaskCategory::Other));
   NS_ENSURE_SUCCESS(rv, rv);
 
-  rv = aURILoader->OpenURI(aChannel, openFlags, this);
+  rv = aURILoader->OpenURI(aChannel, aOpenFlags, this);
   NS_ENSURE_SUCCESS(rv, rv);
 
   // We're about to load a new page and it may take time before necko
   // gives back any data, so main thread might have a chance to process a
   // collector slice
-  nsJSContext::MaybeRunNextCollectorSlice(this, JS::gcreason::DOCSHELL);
+  nsJSContext::MaybeRunNextCollectorSlice(this, JS::GCReason::DOCSHELL);
 
   // Success.  Keep the initial ClientSource if it exists.
   cleanupInitialClient.release();
@@ -12982,6 +13023,25 @@ nsDocShell::SetOriginAttributesBeforeLoading(
   }
 
   return SetOriginAttributes(attrs);
+}
+
+NS_IMETHODIMP
+nsDocShell::ResumeRedirectedLoad(uint64_t aIdentifier) {
+  RefPtr<nsDocShell> self = this;
+  RefPtr<ChildProcessChannelListener> cpcl =
+      ChildProcessChannelListener::GetSingleton();
+
+  // Call into InternalLoad with the pending channel when it is received.
+  cpcl->RegisterCallback(aIdentifier, [self](nsIChildChannel* aChannel) {
+    RefPtr<nsDocShellLoadState> loadState;
+    nsresult rv = nsDocShellLoadState::CreateFromPendingChannel(
+        aChannel, getter_AddRefs(loadState));
+    if (NS_WARN_IF(NS_FAILED(rv))) {
+      return;
+    }
+    self->InternalLoad(loadState, nullptr, nullptr);
+  });
+  return NS_OK;
 }
 
 NS_IMETHODIMP

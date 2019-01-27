@@ -169,9 +169,13 @@ class nsPIDOMWindowInner : public mozIDOMWindow {
   // Returns true if this window is the same as mTopInnerWindow
   inline bool IsTopInnerWindow() const;
 
-  // Check whether a document is currently loading
+  // Check whether a document is currently loading (really checks if the
+  // load event has completed).  May not be reset to false on errors.
   inline bool IsLoading() const;
   inline bool IsHandlingResizeEvent() const;
+
+  // Note: not related to IsLoading.  Set to false if there's an error, etc.
+  void SetActiveLoadingState(bool aIsActiveLoading);
 
   bool AddAudioContext(mozilla::dom::AudioContext* aAudioContext);
   void RemoveAudioContext(mozilla::dom::AudioContext* aAudioContext);
@@ -1023,7 +1027,7 @@ class nsPIDOMWindowOuter : public mozIDOMWindowProxy {
                                      const nsAString& aPopupWindowName,
                                      const nsAString& aPopupWindowFeatures) = 0;
 
-  virtual void NotifyContentBlockingState(unsigned aState, nsIChannel* aChannel,
+  virtual void NotifyContentBlockingEvent(unsigned aEvent, nsIChannel* aChannel,
                                           bool aBlocked, nsIURI* aURIHint) = 0;
 
   // WebIDL-ish APIs

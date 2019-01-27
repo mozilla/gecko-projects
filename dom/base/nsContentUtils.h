@@ -10,11 +10,11 @@
 #define nsContentUtils_h___
 
 #if defined(XP_WIN)
-#include <float.h>
+#  include <float.h>
 #endif
 
 #if defined(SOLARIS)
-#include <ieeefp.h>
+#  include <ieeefp.h>
 #endif
 
 #include "js/TypeDecls.h"
@@ -50,7 +50,7 @@
 
 #if defined(XP_WIN)
 // Undefine LoadImage to prevent naming conflict with Windows.
-#undef LoadImage
+#  undef LoadImage
 #endif
 
 class imgICache;
@@ -1214,7 +1214,7 @@ class nsContentUtils {
   /**
    * Returns true if aDocument is a chrome document
    */
-  static bool IsChromeDoc(Document* aDocument);
+  static bool IsChromeDoc(const Document* aDocument);
 
   /**
    * Returns true if aDocument is in a docshell whose parent is the same type
@@ -2936,7 +2936,8 @@ class nsContentUtils {
    * persistent storage which are available to web pages. Cookies don't use
    * this logic, and security logic related to them must be updated separately.
    */
-  static StorageAccess StorageAllowedForWindow(nsPIDOMWindowInner* aWindow);
+  static StorageAccess StorageAllowedForWindow(
+      nsPIDOMWindowInner* aWindow, uint32_t* aRejectedReason = nullptr);
 
   /*
    * Checks if storage for the given document is permitted by a combination of
@@ -2976,12 +2977,13 @@ class nsContentUtils {
    * anti-tracking feature.
    */
   static bool StorageDisabledByAntiTracking(Document* aDocument, nsIURI* aURI) {
+    uint32_t rejectedReason = 0;
     // Note that GetChannel() below may return null, but that's OK, since the
     // callee is able to deal with a null channel argument, and if passed null,
     // will only fail to notify the UI in case storage gets blocked.
-    return StorageDisabledByAntiTracking(aDocument->GetInnerWindow(),
-                                         aDocument->GetChannel(),
-                                         aDocument->NodePrincipal(), aURI);
+    return StorageDisabledByAntiTracking(
+        aDocument->GetInnerWindow(), aDocument->GetChannel(),
+        aDocument->NodePrincipal(), aURI, rejectedReason);
   }
 
  private:
@@ -2995,7 +2997,8 @@ class nsContentUtils {
   static bool StorageDisabledByAntiTracking(nsPIDOMWindowInner* aWindow,
                                             nsIChannel* aChannel,
                                             nsIPrincipal* aPrincipal,
-                                            nsIURI* aURI);
+                                            nsIURI* aURI,
+                                            uint32_t& aRejectedReason);
 
  public:
   /*
@@ -3304,6 +3307,14 @@ class nsContentUtils {
   static bool StringifyJSON(JSContext* aCx, JS::MutableHandle<JS::Value> vp,
                             nsAString& aOutStr);
 
+  /**
+   * Returns true if the top level ancestor content document of aDocument hasn't
+   * yet had the first contentful paint and there is a high priority event
+   * pending in the main thread.
+   */
+  static bool HighPriorityEventPendingForTopLevelDocumentBeforeContentfulPaint(
+      Document* aDocument);
+
  private:
   static bool InitializeEventTable();
 
@@ -3375,7 +3386,7 @@ class nsContentUtils {
    */
   static StorageAccess InternalStorageAllowedForPrincipal(
       nsIPrincipal* aPrincipal, nsPIDOMWindowInner* aWindow, nsIURI* aURI,
-      nsIChannel* aChannel);
+      nsIChannel* aChannel, uint32_t& aRejectedReason);
 
   static nsINode* GetCommonAncestorHelper(nsINode* aNode1, nsINode* aNode2);
   static nsIContent* GetCommonFlattenedTreeAncestorHelper(
@@ -3436,7 +3447,6 @@ class nsContentUtils {
   static bool sIsFrameTimingPrefEnabled;
   static bool sIsFormAutofillAutocompleteEnabled;
   static bool sIsUAWidgetEnabled;
-  static bool sIsCustomElementsEnabled;
   static bool sSendPerformanceTimingNotifications;
   static bool sUseActivityCursor;
   static bool sAnimationsAPICoreEnabled;

@@ -3983,6 +3983,17 @@ nsPoint ScrollFrameHelper::GetVisualViewportOffset() const {
   return GetScrollPosition();
 }
 
+nsRect ScrollFrameHelper::GetVisualOptimalViewingRect() const {
+  nsIPresShell* presShell = mOuter->PresShell();
+
+  if (mIsRoot && presShell->IsVisualViewportSizeSet() &&
+      presShell->IsVisualViewportOffsetSet()) {
+    return nsRect(presShell->GetVisualViewportOffset(),
+                  presShell->GetVisualViewportSize());
+  }
+  return mScrollPort;
+}
+
 static void AdjustForWholeDelta(int32_t aDelta, nscoord* aCoord) {
   if (aDelta < 0) {
     *aCoord = nscoord_MIN;
@@ -4915,7 +4926,8 @@ void ScrollFrameHelper::FireScrollEvent() {
   nsPresContext* prescontext = mOuter->PresContext();
 #ifdef MOZ_GECKO_PROFILER
   nsCOMPtr<nsIDocShell> docShell = prescontext->GetDocShell();
-  AUTO_PROFILER_TRACING_DOCSHELL("Paint", "FireScrollEvent", docShell);
+  AUTO_PROFILER_TRACING_DOCSHELL("Paint", "FireScrollEvent", GRAPHICS,
+                                 docShell);
 #endif
 
   MOZ_ASSERT(mScrollEvent);
@@ -5492,14 +5504,13 @@ void ScrollFrameHelper::UpdateMinimumScaleSize(
 
   Document* doc = pc->Document();
   MOZ_ASSERT(doc, "The document should be valid");
-  nsViewportInfo viewportInfo = doc->GetViewportInfo(displaySize);
-  // FIXME: Bug 1520081 - Drop this check. We should use the minimum-scale size
-  // even if the minimum-scale size is greater than 1.0.
-  if (viewportInfo.GetMinZoom() >=
-      pc->CSSToDevPixelScale() * LayoutDeviceToScreenScale(1.0f)) {
+  if (doc->GetFullscreenElement()) {
+    // Don't use the minimum scale size in the case of fullscreen state.
+    // FIXME: 1508177: We will no longer need this.
     return;
   }
 
+  nsViewportInfo viewportInfo = doc->GetViewportInfo(displaySize);
   nsSize maximumPossibleSize =
       CSSSize::ToAppUnits(ScreenSize(displaySize) / viewportInfo.GetMinZoom());
 

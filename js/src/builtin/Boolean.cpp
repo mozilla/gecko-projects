@@ -17,7 +17,7 @@
 #include "js/PropertySpec.h"
 #include "util/StringBuffer.h"
 #ifdef ENABLE_BIGINT
-#include "vm/BigIntType.h"
+#  include "vm/BigIntType.h"
 #endif
 #include "vm/GlobalObject.h"
 #include "vm/JSAtom.h"
@@ -164,7 +164,7 @@ JS_PUBLIC_API bool js::ToBooleanSlow(HandleValue v) {
   }
 #ifdef ENABLE_BIGINT
   if (v.isBigInt()) {
-    return v.toBigInt()->toBoolean();
+    return !v.toBigInt()->isZero();
   }
 #endif
 

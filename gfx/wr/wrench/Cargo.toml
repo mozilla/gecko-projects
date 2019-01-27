@@ -14,7 +14,7 @@ euclid = "0.19"
 gleam = "0.6.2"
 glutin = "0.17"
 app_units = "0.7"
-image = "0.20"
+image = "0.21"
 clap = { version = "2", features = ["yaml"] }
 lazy_static = "1"
 log = "0.4"
@@ -39,7 +39,7 @@ headless = [ "osmesa-sys", "osmesa-src" ]
 pathfinder = [ "webrender/pathfinder" ]
 
 [target.'cfg(target_os = "windows")'.dependencies]
-dwrote = "0.7"
+dwrote = "0.8"
 mozangle = {version = "0.1.5", features = ["egl"]}
 
 [target.'cfg(all(unix, not(target_os = "android")))'.dependencies]

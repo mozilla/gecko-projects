@@ -567,12 +567,19 @@ def _cxxTypeCanMoveSend(ipdltype):
 
 
 def _cxxTypeNeedsMove(ipdltype):
-    return ((ipdltype.isIPDL() and (ipdltype.isArray() or
-                                    ipdltype.isShmem() or
-                                    ipdltype.isByteBuf() or
-                                    ipdltype.isEndpoint())) or
-            (ipdltype.isCxx() and ipdltype.isMoveonly())
-            or ipdltype.isUniquePtr())
+    if ipdltype.isUniquePtr():
+        return True
+
+    if ipdltype.isCxx():
+        return ipdltype.isMoveonly()
+
+    if ipdltype.isIPDL():
+        return (ipdltype.isArray() or
+                ipdltype.isShmem() or
+                ipdltype.isByteBuf() or
+                ipdltype.isEndpoint())
+
+    return False
 
 
 def _cxxTypeCanMove(ipdltype):
@@ -4549,7 +4556,8 @@ class _GenerateProtocolActorCode(ipdl.ast.Visitor):
                     StmtExpr(ExprCall(ExprVar('AUTO_PROFILER_TRACING'),
                                       [ExprLiteral.String("IPC"),
                                        ExprLiteral.String(self.protocol.name + "::" +
-                                                          md.prettyMsgName())])),
+                                                          md.prettyMsgName()),
+                                       ExprVar('OTHER')])),
                     StmtExpr(ExprAssn(sendok,
                                       ExprCall(
                                           ExprSelect(self.protocol.callGetChannel(actor),

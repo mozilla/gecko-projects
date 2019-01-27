@@ -226,9 +226,6 @@ void ServoStyleSet::InvalidateStyleForDocumentStateChanges(
 static const MediaFeatureChangeReason kMediaFeaturesAffectingDefaultStyle =
     // Zoom changes change the meaning of em units.
     MediaFeatureChangeReason::ZoomChange |
-    // Changes the meaning of em units, depending on which one is the actual
-    // min-font-size.
-    MediaFeatureChangeReason::MinFontSizeChange |
     // A resolution change changes the app-units-per-dev-pixels ratio, which
     // some structs (Border, Outline, Column) store for clamping. We should
     // arguably not do that, maybe doing it on layout directly, to try to avoid
@@ -387,10 +384,13 @@ void ServoStyleSet::PreTraverseSync() {
 
   LookAndFeel::NativeInit();
 
-  nsPresContext* presContext = GetPresContext();
-  MOZ_ASSERT(presContext,
-             "For now, we don't call into here without a pres context");
+  mDocument->CacheAllKnownLangPrefs();
+
   if (gfxUserFontSet* userFontSet = mDocument->GetUserFontSet()) {
+    nsPresContext* presContext = GetPresContext();
+    MOZ_ASSERT(presContext,
+               "For now, we don't call into here without a pres context");
+
     // Ensure that the @font-face data is not stale
     uint64_t generation = userFontSet->GetGeneration();
     if (generation != mUserFontSetUpdateGeneration) {
@@ -401,7 +401,6 @@ void ServoStyleSet::PreTraverseSync() {
   }
 
   MOZ_ASSERT(!StylistNeedsUpdate());
-  presContext->CacheAllLangs();
 }
 
 void ServoStyleSet::PreTraverse(ServoTraversalFlags aFlags, Element* aRoot) {

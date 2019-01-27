@@ -1496,7 +1496,8 @@ file, You can obtain one at http://mozilla.org/MPL/2.0/.
             // the input, since the user is editing.
             if (!this.popup.richlistbox.suppressMenuItemEvent &&
                 this.popup.richlistbox.currentItem) {
-              this.popup.richlistbox.currentItem._fireEvent("DOMMenuItemInactive");
+              this.popup.richlistbox._fireEvent(
+                this.popup.richlistbox.currentItem, "DOMMenuItemInactive");
             }
             // The user is typing, so don't give accessibility focus to the
             // popup, even if an item gets automatically selected.
@@ -1697,6 +1698,8 @@ file, You can obtain one at http://mozilla.org/MPL/2.0/.
       <method name="typeRestrictToken">
         <parameter name="char"/>
         <body><![CDATA[
+          focusAndSelectUrlBar();
+
           this.inputField.value = char + " ";
 
           let event = this.document.createEvent("UIEvents");
@@ -1711,7 +1714,7 @@ file, You can obtain one at http://mozilla.org/MPL/2.0/.
         ]]></body>
       </method>
 
-      <method name="hiddenFocus">
+      <method name="setHiddenFocus">
         <body><![CDATA[
           this.classList.add("hidden-focus");
           this.focus();
@@ -2226,7 +2229,8 @@ file, You can obtain one at http://mozilla.org/MPL/2.0/.
             // but because the popup isn't open yet, accessibility will ignore
             // it. Therefore, fire it again once the popup opens.
             this.addEventListener("popupshown", () => {
-              this.richlistbox.currentItem._fireEvent("DOMMenuItemActive");
+              this.richlistbox._fireEvent(this.richlistbox.currentItem,
+                "DOMMenuItemActive");
             }, {once: true});
           }
 

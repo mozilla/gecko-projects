@@ -39,7 +39,7 @@
 #include "mozilla/dom/WindowProxyHolder.h"
 #include "mozilla/IntegerPrintfMacros.h"
 #if defined(MOZ_WIDGET_ANDROID)
-#include "mozilla/dom/WindowOrientationObserver.h"
+#  include "mozilla/dom/WindowOrientationObserver.h"
 #endif
 #include "nsDOMOfflineResourceList.h"
 #include "nsError.h"
@@ -150,8 +150,8 @@
 #include "nsCSSProps.h"
 #include "nsIURIFixup.h"
 #ifndef DEBUG
-#include "nsIAppStartup.h"
-#include "nsToolkitCompsCID.h"
+#  include "nsIAppStartup.h"
+#  include "nsToolkitCompsCID.h"
 #endif
 #include "nsCDefaultURIFixup.h"
 #include "mozilla/EventDispatcher.h"
@@ -162,8 +162,8 @@
 #include "nsITimedChannel.h"
 #include "nsServiceManagerUtils.h"
 #ifdef MOZ_XUL
-#include "nsIDOMXULControlElement.h"
-#include "nsMenuPopupFrame.h"
+#  include "nsIDOMXULControlElement.h"
+#  include "nsMenuPopupFrame.h"
 #endif
 #include "mozilla/dom/CustomEvent.h"
 #include "nsIJARChannel.h"
@@ -174,9 +174,9 @@
 #include "xpcprivate.h"
 
 #ifdef NS_PRINTING
-#include "nsIPrintSettings.h"
-#include "nsIPrintSettingsService.h"
-#include "nsIWebBrowserPrint.h"
+#  include "nsIPrintSettings.h"
+#  include "nsIPrintSettingsService.h"
+#  include "nsIWebBrowserPrint.h"
 #endif
 
 #include "nsWindowRoot.h"
@@ -251,11 +251,11 @@
 #include "mozilla/dom/WebIDLGlobalNameHash.h"
 #include "mozilla/dom/Worklet.h"
 #ifdef HAVE_SIDEBAR
-#include "mozilla/dom/ExternalBinding.h"
+#  include "mozilla/dom/ExternalBinding.h"
 #endif
 
 #ifdef MOZ_WEBSPEECH
-#include "mozilla/dom/SpeechSynthesis.h"
+#  include "mozilla/dom/SpeechSynthesis.h"
 #endif
 
 #include "mozilla/dom/ClientManager.h"
@@ -267,19 +267,19 @@
 // Apple system headers seem to have a check() macro.  <sigh>
 #ifdef check
 class nsIScriptTimeoutHandler;
-#undef check
+#  undef check
 #endif  // check
 #include "AccessCheck.h"
 
 #ifdef ANDROID
-#include <android/log.h>
+#  include <android/log.h>
 #endif
 
 #ifdef XP_WIN
-#include <process.h>
-#define getpid _getpid
+#  include <process.h>
+#  define getpid _getpid
 #else
-#include <unistd.h>  // for getpid()
+#  include <unistd.h>  // for getpid()
 #endif
 
 using namespace mozilla;
@@ -617,7 +617,7 @@ void IdleRequestExecutor::ScheduleDispatch() {
   MOZ_ASSERT(mWindow);
   mDelayedExecutorHandle = Nothing();
   RefPtr<IdleRequestExecutor> request = this;
-  NS_IdleDispatchToCurrentThread(request.forget());
+  NS_DispatchToCurrentThreadQueue(request.forget(), EventQueuePriority::Idle);
 }
 
 void IdleRequestExecutor::DelayedDispatch(uint32_t aDelay) {
@@ -886,7 +886,8 @@ nsGlobalWindowInner::nsGlobalWindowInner(nsGlobalWindowOuter* aOuterWindow)
   // add this inner window to the outer window list of inners.
   PR_INSERT_AFTER(this, aOuterWindow);
 
-  mTimeoutManager = MakeUnique<dom::TimeoutManager>(*this);
+  mTimeoutManager = MakeUnique<dom::TimeoutManager>(
+      *this, StaticPrefs::dom_timeout_max_idle_defer_ms());
 
   mObserver = new nsGlobalWindowObserver(this);
   nsCOMPtr<nsIObserverService> os = mozilla::services::GetObserverService();
@@ -2541,6 +2542,12 @@ void nsPIDOMWindowInner::SetAudioCapture(bool aCapture) {
   }
 }
 
+void nsPIDOMWindowInner::SetActiveLoadingState(bool aIsLoading) /* const? */ {
+  if (!nsGlobalWindowInner::Cast(this)->IsChromeWindow()) {
+    mTimeoutManager->SetLoading(aIsLoading);
+  }
+}
+
 // nsISpeechSynthesisGetter
 
 #ifdef MOZ_WEBSPEECH
@@ -2750,7 +2757,7 @@ bool nsGlobalWindowInner::ResolveComponentsShim(
 }
 
 #ifdef RELEASE_OR_BETA
-#define USE_CONTROLLERS_SHIM
+#  define USE_CONTROLLERS_SHIM
 #endif
 
 #ifdef USE_CONTROLLERS_SHIM
@@ -4399,6 +4406,22 @@ Storage* nsGlobalWindowInner::GetLocalStorage(ErrorResult& aError) {
 
   nsContentUtils::StorageAccess access =
       nsContentUtils::StorageAllowedForWindow(this);
+
+  // We allow partitioned localStorage only to some hosts.
+  if (access == nsContentUtils::StorageAccess::ePartitionedOrDeny) {
+    if (!mDoc) {
+      access = nsContentUtils::StorageAccess::eDeny;
+    } else {
+      nsCOMPtr<nsIURI> uri;
+      Unused << mDoc->NodePrincipal()->GetURI(getter_AddRefs(uri));
+      static const char* kPrefName =
+          "privacy.restrict3rdpartystorage.partitionedHosts";
+      if (!uri || !nsContentUtils::IsURIInPrefList(uri, kPrefName)) {
+        access = nsContentUtils::StorageAccess::eDeny;
+      }
+    }
+  }
+
   if (access == nsContentUtils::StorageAccess::eDeny) {
     aError.Throw(NS_ERROR_DOM_SECURITY_ERR);
     return nullptr;
@@ -5401,8 +5424,7 @@ void nsGlobalWindowInner::Suspend() {
 
   // Suspend all of the AudioContexts for this window
   for (uint32_t i = 0; i < mAudioContexts.Length(); ++i) {
-    ErrorResult dummy;
-    RefPtr<Promise> d = mAudioContexts[i]->Suspend(dummy);
+    mAudioContexts[i]->SuspendFromChrome();
   }
 }
 
@@ -5443,8 +5465,7 @@ void nsGlobalWindowInner::Resume() {
 
   // Resume all of the AudioContexts for this window
   for (uint32_t i = 0; i < mAudioContexts.Length(); ++i) {
-    ErrorResult dummy;
-    RefPtr<Promise> d = mAudioContexts[i]->Resume(dummy);
+    mAudioContexts[i]->ResumeFromChrome();
   }
 
   mTimeoutManager->Resume();
@@ -6008,10 +6029,11 @@ bool nsGlobalWindowInner::RunTimeoutHandler(Timeout* aTimeout,
         nsJSUtils::ExecutionContext exec(aes.cx(), global);
         rv = exec.Compile(options, handler->GetHandlerText());
 
-        if (rv == NS_OK) {
+        JS::Rooted<JSScript*> script(aes.cx(), exec.MaybeGetScript());
+        if (script) {
           LoadedScript* initiatingScript = handler->GetInitiatingScript();
           if (initiatingScript) {
-            initiatingScript->AssociateWithScript(exec.GetScript());
+            initiatingScript->AssociateWithScript(script);
           }
 
           rv = exec.ExecScript();
@@ -6617,24 +6639,6 @@ void nsGlobalWindowInner::GetAttentionWithCycleCount(int32_t aCycleCount,
   }
 }
 
-void nsGlobalWindowInner::BeginWindowMove(Event& aMouseDownEvent,
-                                          ErrorResult& aError) {
-  nsCOMPtr<nsIWidget> widget = GetMainWidget();
-
-  if (!widget) {
-    return;
-  }
-
-  WidgetMouseEvent* mouseEvent =
-      aMouseDownEvent.WidgetEventPtr()->AsMouseEvent();
-  if (!mouseEvent || mouseEvent->mClass != eMouseEventClass) {
-    aError.Throw(NS_ERROR_FAILURE);
-    return;
-  }
-
-  aError = widget->BeginMoveDrag(mouseEvent);
-}
-
 already_AddRefed<Promise> nsGlobalWindowInner::PromiseDocumentFlushed(
     PromiseDocumentFlushedCallback& aCallback, ErrorResult& aError) {
   MOZ_RELEASE_ASSERT(IsChromeWindow());
@@ -7106,8 +7110,9 @@ void nsGlobalWindowInner::FireOnNewGlobalObject() {
 }
 
 #if defined(_WINDOWS_) && !defined(MOZ_WRAPPED_WINDOWS_H)
-#pragma message("wrapper failure reason: " MOZ_WINDOWS_WRAPPER_DISABLED_REASON)
-#error "Never include unwrapped windows.h in this file!"
+#  pragma message( \
+      "wrapper failure reason: " MOZ_WINDOWS_WRAPPER_DISABLED_REASON)
+#  error "Never include unwrapped windows.h in this file!"
 #endif
 
 already_AddRefed<Promise> nsGlobalWindowInner::CreateImageBitmap(

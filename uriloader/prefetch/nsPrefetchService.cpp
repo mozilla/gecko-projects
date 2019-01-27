@@ -64,17 +64,6 @@ static LazyLogModule gPrefetchLog("nsPrefetch");
 #define AGGRESSIVE_PREF "network.prefetch-next.aggressive"
 
 //-----------------------------------------------------------------------------
-// helpers
-//-----------------------------------------------------------------------------
-
-static inline uint32_t PRTimeToSeconds(PRTime t_usec) {
-  PRTime usec_per_sec = PR_USEC_PER_SEC;
-  return uint32_t(t_usec /= usec_per_sec);
-}
-
-#define NowInSeconds() PRTimeToSeconds(PR_Now())
-
-//-----------------------------------------------------------------------------
 // nsPrefetchNode <public>
 //-----------------------------------------------------------------------------
 
@@ -919,7 +908,15 @@ nsPrefetchService::OnStatusChange(nsIWebProgress *aWebProgress,
 
 NS_IMETHODIMP
 nsPrefetchService::OnSecurityChange(nsIWebProgress *aWebProgress,
-                                    nsIRequest *aRequest, uint32_t state) {
+                                    nsIRequest *aRequest, uint32_t aState) {
+  MOZ_ASSERT_UNREACHABLE("notification excluded in AddProgressListener(...)");
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+nsPrefetchService::OnContentBlockingEvent(nsIWebProgress *aWebProgress,
+                                          nsIRequest *aRequest,
+                                          uint32_t aEvent) {
   MOZ_ASSERT_UNREACHABLE("notification excluded in AddProgressListener(...)");
   return NS_OK;
 }

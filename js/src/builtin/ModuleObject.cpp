@@ -1678,9 +1678,11 @@ JSObject* js::CallModuleResolveHook(JSContext* cx,
   return result;
 }
 
-JSObject* js::StartDynamicModuleImport(JSContext* cx,
-                                       HandleValue referencingPrivate,
+JSObject* js::StartDynamicModuleImport(JSContext* cx, HandleScript script,
                                        HandleValue specifierArg) {
+  RootedValue referencingPrivate(cx,
+                                 script->sourceObject()->canonicalPrivate());
+
   RootedObject promiseConstructor(cx, JS::GetPromiseConstructor(cx));
   if (!promiseConstructor) {
     return nullptr;

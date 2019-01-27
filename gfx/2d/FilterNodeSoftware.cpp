@@ -19,7 +19,7 @@
 // #define DEBUG_DUMP_SURFACES
 
 #ifdef DEBUG_DUMP_SURFACES
-#include "gfxUtils.h"  // not part of Moz2D
+#  include "gfxUtils.h"  // not part of Moz2D
 #endif
 
 namespace mozilla {
@@ -402,6 +402,8 @@ static already_AddRefed<DataSourceSurface> GetDataSurfaceInRect(
   }
 
   IntRect intersect = sourceRect.Intersect(aDestRect);
+
+  // create rects that are in surface local space.
   IntRect intersectInSourceSpace = intersect - sourceRect.TopLeft();
   IntRect intersectInDestSpace = intersect - aDestRect.TopLeft();
   SurfaceFormat format =
@@ -726,7 +728,7 @@ FilterNodeSoftware::GetInputDataSourceSurface(
 #ifdef DEBUG_DUMP_SURFACES
     printf("input from input surface:\n");
 #endif
-    surfaceRect = IntRect(IntPoint(0, 0), surface->GetSize());
+    surfaceRect = surface->GetRect();
   } else {
     // Input from input filter
 #ifdef DEBUG_DUMP_SURFACES
@@ -829,8 +831,7 @@ IntRect FilterNodeSoftware::GetInputRectInRect(uint32_t aInputEnumIndex,
     return IntRect();
   }
   if (mInputSurfaces[inputIndex]) {
-    return aInRect.Intersect(
-        IntRect(IntPoint(0, 0), mInputSurfaces[inputIndex]->GetSize()));
+    return aInRect.Intersect(mInputSurfaces[inputIndex]->GetRect());
   }
   RefPtr<FilterNodeSoftware> filter = mInputFilters[inputIndex];
   MOZ_ASSERT(filter, "missing input");
@@ -2218,7 +2219,7 @@ static inline void DebugOnlyCheckColorSamplingAccess(
   MOZ_ASSERT(aSampleAddress < aBoundsEnd, "accessing after end");
 }
 #else
-#define DebugOnlyCheckColorSamplingAccess(address, boundsBegin, boundsEnd)
+#  define DebugOnlyCheckColorSamplingAccess(address, boundsBegin, boundsEnd)
 #endif
 
 static inline uint8_t ColorComponentAtPoint(

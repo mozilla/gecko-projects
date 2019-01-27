@@ -20,11 +20,11 @@
 #include "nsRefreshDriver.h"
 
 #ifdef XP_WIN
-#include <windows.h>
+#  include <windows.h>
 // mmsystem isn't part of WIN32_LEAN_AND_MEAN, so we have
 // to manually include it
-#include <mmsystem.h>
-#include "WinUtils.h"
+#  include <mmsystem.h>
+#  include "WinUtils.h"
 #endif
 
 #include "mozilla/AnimationEventDispatcher.h"
@@ -74,7 +74,7 @@
 #include "nsTransitionManager.h"
 
 #ifdef MOZ_XUL
-#include "nsXULPopupManager.h"
+#  include "nsXULPopupManager.h"
 #endif
 
 using namespace mozilla;
@@ -96,15 +96,15 @@ static mozilla::LazyLogModule sRefreshDriverLog("nsRefreshDriver");
 // The number of seconds spent skipping frames because we are waiting for the
 // compositor before logging.
 #if defined(MOZ_ASAN)
-#define REFRESH_WAIT_WARNING 5
+#  define REFRESH_WAIT_WARNING 5
 #elif defined(DEBUG) && !defined(MOZ_VALGRIND)
-#define REFRESH_WAIT_WARNING 5
+#  define REFRESH_WAIT_WARNING 5
 #elif defined(DEBUG) && defined(MOZ_VALGRIND)
-#define REFRESH_WAIT_WARNING (RUNNING_ON_VALGRIND ? 20 : 5)
+#  define REFRESH_WAIT_WARNING (RUNNING_ON_VALGRIND ? 20 : 5)
 #elif defined(MOZ_VALGRIND)
-#define REFRESH_WAIT_WARNING (RUNNING_ON_VALGRIND ? 10 : 1)
+#  define REFRESH_WAIT_WARNING (RUNNING_ON_VALGRIND ? 10 : 1)
 #else
-#define REFRESH_WAIT_WARNING 1
+#  define REFRESH_WAIT_WARNING 1
 #endif
 
 namespace {
@@ -316,7 +316,7 @@ class RefreshDriverTimer {
 
     LOG("[%p] ticking drivers...", this);
     // RD is short for RefreshDriver
-    AUTO_PROFILER_TRACING("Paint", "RefreshDriverTick");
+    AUTO_PROFILER_TRACING("Paint", "RefreshDriverTick", GRAPHICS);
 
     TickRefreshDrivers(aId, now, mContentRefreshDrivers);
     TickRefreshDrivers(aId, now, mRootRefreshDrivers);
@@ -1613,7 +1613,7 @@ void nsRefreshDriver::RunFrameRequestCallbacks(TimeStamp aNowTime) {
   mFrameRequestCallbackDocs.Clear();
 
   if (!frameRequestCallbacks.IsEmpty()) {
-    AUTO_PROFILER_TRACING_DOCSHELL("Paint", "Scripts",
+    AUTO_PROFILER_TRACING_DOCSHELL("Paint", "Scripts", GRAPHICS,
                                    GetDocShell(mPresContext));
     for (const DocumentFrameCallbacks& docCallbacks : frameRequestCallbacks) {
       // XXXbz Bug 863140: GetInnerWindow can return the outer
@@ -2006,8 +2006,9 @@ void nsRefreshDriver::Tick(VsyncId aId, TimeStamp aNowTime) {
     AutoTArray<RunnableWithDelay, 8>* runnables = sPendingIdleRunnables;
     sPendingIdleRunnables = nullptr;
     for (RunnableWithDelay& runnableWithDelay : *runnables) {
-      NS_IdleDispatchToCurrentThread(runnableWithDelay.mRunnable.forget(),
-                                     runnableWithDelay.mDelay);
+      NS_DispatchToCurrentThreadQueue(runnableWithDelay.mRunnable.forget(),
+                                      runnableWithDelay.mDelay,
+                                      EventQueuePriority::Idle);
     }
     delete runnables;
   }

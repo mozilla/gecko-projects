@@ -22,7 +22,7 @@
 #include "WebRenderCanvasRenderer.h"
 
 #ifdef XP_WIN
-#include "gfxDWriteFonts.h"
+#  include "gfxDWriteFonts.h"
 #endif
 
 namespace mozilla {
@@ -246,9 +246,8 @@ void WebRenderLayerManager::EndTransaction(DrawPaintedLayerCallback aCallback,
 
 void WebRenderLayerManager::EndTransactionWithoutLayer(
     nsDisplayList* aDisplayList, nsDisplayListBuilder* aDisplayListBuilder,
-    const nsTArray<wr::FilterOp>& aFilters,
-    WebRenderBackgroundData* aBackground) {
-  AUTO_PROFILER_TRACING("Paint", "RenderLayers");
+    nsTArray<wr::FilterOp>&& aFilters, WebRenderBackgroundData* aBackground) {
+  AUTO_PROFILER_TRACING("Paint", "RenderLayers", GRAPHICS);
 
   // Since we don't do repeat transactions right now, just set the time
   mAnimationReadyTime = TimeStamp::Now();
@@ -276,7 +275,7 @@ void WebRenderLayerManager::EndTransactionWithoutLayer(
 
     mWebRenderCommandBuilder.BuildWebRenderCommands(
         builder, resourceUpdates, aDisplayList, aDisplayListBuilder,
-        mScrollData, contentSize, aFilters);
+        mScrollData, contentSize, std::move(aFilters));
     builderDumpIndex = mWebRenderCommandBuilder.GetBuilderDumpIndex();
     containsSVGGroup = mWebRenderCommandBuilder.GetContainsSVGGroup();
   } else {
@@ -353,7 +352,7 @@ void WebRenderLayerManager::EndTransactionWithoutLayer(
   mLastDisplayListSize = dl.dl.inner.capacity;
 
   {
-    AUTO_PROFILER_TRACING("Paint", "ForwardDPTransaction");
+    AUTO_PROFILER_TRACING("Paint", "ForwardDPTransaction", GRAPHICS);
     WrBridge()->EndTransaction(contentSize, dl, resourceUpdates,
                                size.ToUnknownSize(), mLatestTransactionId,
                                mScrollData, containsSVGGroup,

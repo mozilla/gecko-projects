@@ -6,10 +6,16 @@
 
 TEST_DIRS += ['tests']
 
-for var in ('target', 'MOZ_CONFIGURE_OPTIONS', 'CC', 'CC_VERSION', 'CXX'):
+for var in ('target', 'MOZ_CONFIGURE_OPTIONS', 'CC', 'CC_VERSION', 'CXX',
+            'RUSTC', 'RUSTC_VERSION'):
     DEFINES[var] = CONFIG[var]
 
 DEFINES['CFLAGS'] = ' '.join(CONFIG['OS_CFLAGS'])
+
+rustflags = CONFIG['RUSTFLAGS']
+if not rustflags:
+    rustflags = []
+DEFINES['RUSTFLAGS'] = ' '.join(rustflags)
 
 cxx_flags = []
 for var in ('OS_CPPFLAGS', 'OS_CXXFLAGS', 'DEBUG', 'OPTIMIZE', 'FRAMEPTR'):
@@ -148,9 +154,6 @@ with Files('tests/chrome/rtlchrome/**'):
 
 with Files('tests/chrome/*451540*'):
     BUG_COMPONENT = ('Toolkit', 'Find Toolbar')
-
-with Files('tests/chrome/*585946*'):
-    BUG_COMPONENT = ('Toolkit', 'Toolbars and Toolbar Customization')
 
 with Files('tests/chrome/*557987*'):
     BUG_COMPONENT = ('Core', 'XP Toolkit/Widgets: Menus')

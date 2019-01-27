@@ -20,11 +20,11 @@
 #include <unordered_map>
 
 #ifdef XP_MACOSX
-#include "mozilla/gfx/UnscaledFontMac.h"
+#  include "mozilla/gfx/UnscaledFontMac.h"
 #elif defined(XP_WIN)
-#include "mozilla/gfx/UnscaledFontDWrite.h"
+#  include "mozilla/gfx/UnscaledFontDWrite.h"
 #else
-#include "mozilla/gfx/UnscaledFontFreeType.h"
+#  include "mozilla/gfx/UnscaledFontFreeType.h"
 #endif
 
 namespace std {
@@ -311,7 +311,7 @@ static bool Moz2DRenderCallback(const Range<const uint8_t> aBlob,
                                 const mozilla::wr::TileOffset* aTileOffset,
                                 const mozilla::wr::LayoutIntRect* aDirtyRect,
                                 Range<uint8_t> aOutput) {
-  AUTO_PROFILER_TRACING("WebRender", "RasterizeSingleBlob");
+  AUTO_PROFILER_TRACING("WebRender", "RasterizeSingleBlob", GRAPHICS);
   MOZ_ASSERT(aSize.width > 0 && aSize.height > 0);
   if (aSize.width <= 0 || aSize.height <= 0) {
     return false;

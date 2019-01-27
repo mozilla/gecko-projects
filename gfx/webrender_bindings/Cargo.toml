@@ -18,12 +18,12 @@ fxhash = "0.2.1"
 
 [dependencies.webrender]
 path = "../wr/webrender"
-version = "0.58.0"
+version = "0.59.0"
 default-features = false
 features = ["capture", "serialize_program"]
 
 [target.'cfg(target_os = "windows")'.dependencies]
-dwrote = "0.7"
+dwrote = "0.8"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 core-foundation = "0.6"

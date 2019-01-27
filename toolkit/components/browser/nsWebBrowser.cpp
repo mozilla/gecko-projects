@@ -45,8 +45,8 @@
 
 // Printing Includes
 #ifdef NS_PRINTING
-#include "nsIWebBrowserPrint.h"
-#include "nsIContentViewer.h"
+#  include "nsIWebBrowserPrint.h"
+#  include "nsIContentViewer.h"
 #endif
 
 // PSM2 includes
@@ -579,6 +579,11 @@ nsWebBrowser::SetOriginAttributesBeforeLoading(
 }
 
 NS_IMETHODIMP
+nsWebBrowser::ResumeRedirectedLoad(uint64_t aIdentifier) {
+  return mDocShellAsNav->ResumeRedirectedLoad(aIdentifier);
+}
+
+NS_IMETHODIMP
 nsWebBrowser::Reload(uint32_t aReloadFlags) {
   NS_ENSURE_STATE(mDocShell);
 
@@ -702,6 +707,16 @@ nsWebBrowser::OnSecurityChange(nsIWebProgress* aWebProgress,
                                nsIRequest* aRequest, uint32_t aState) {
   if (mProgressListener) {
     return mProgressListener->OnSecurityChange(aWebProgress, aRequest, aState);
+  }
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+nsWebBrowser::OnContentBlockingEvent(nsIWebProgress* aWebProgress,
+                                     nsIRequest* aRequest, uint32_t aEvent) {
+  if (mProgressListener) {
+    return mProgressListener->OnContentBlockingEvent(aWebProgress, aRequest,
+                                                     aEvent);
   }
   return NS_OK;
 }

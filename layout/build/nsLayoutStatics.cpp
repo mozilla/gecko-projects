@@ -73,12 +73,12 @@
 #include "mozilla/dom/WebCryptoThreadPool.h"
 
 #ifdef MOZ_XUL
-#include "nsXULPopupManager.h"
-#include "nsXULContentUtils.h"
-#include "nsXULPrototypeCache.h"
-#include "nsXULTooltipListener.h"
+#  include "nsXULPopupManager.h"
+#  include "nsXULContentUtils.h"
+#  include "nsXULPrototypeCache.h"
+#  include "nsXULTooltipListener.h"
 
-#include "nsMenuBarListener.h"
+#  include "nsMenuBarListener.h"
 #endif
 
 #include "CubebUtils.h"
@@ -111,6 +111,9 @@
 #include "mozilla/dom/WebIDLGlobalNameHash.h"
 #include "mozilla/dom/ipc/IPCBlobInputStreamStorage.h"
 #include "mozilla/dom/U2FTokenManager.h"
+#ifdef OS_WIN
+#  include "mozilla/dom/WinWebAuthnManager.h"
+#endif
 #include "mozilla/dom/PointerEventHandler.h"
 #include "mozilla/dom/RemoteWorkerService.h"
 #include "mozilla/dom/BlobURLProtocolHandler.h"
@@ -278,6 +281,10 @@ nsresult nsLayoutStatics::Initialize() {
   mozilla::dom::IPCBlobInputStreamStorage::Initialize();
 
   mozilla::dom::U2FTokenManager::Initialize();
+
+#ifdef OS_WIN
+  mozilla::dom::WinWebAuthnManager::Initialize();
+#endif
 
   if (XRE_IsParentProcess()) {
     // On content process we initialize these components when PContentChild is

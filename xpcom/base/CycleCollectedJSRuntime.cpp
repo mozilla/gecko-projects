@@ -88,7 +88,7 @@
 #include "GeckoProfiler.h"
 
 #ifdef MOZ_GECKO_PROFILER
-#include "ProfilerMarkerPayload.h"
+#  include "ProfilerMarkerPayload.h"
 #endif
 
 #include "nsIException.h"
@@ -99,7 +99,7 @@
 #ifdef NIGHTLY_BUILD
 // For performance reasons, we make the JS Dev Error Interceptor a Nightly-only
 // feature.
-#define MOZ_JS_DEV_ERROR_INTERCEPTOR = 1
+#  define MOZ_JS_DEV_ERROR_INTERCEPTOR = 1
 #endif  // NIGHTLY_BUILD
 
 using namespace mozilla;
@@ -798,26 +798,28 @@ void CycleCollectedJSRuntime::TraverseNativeRoots(
   if (profiler_thread_is_being_profiled()) {
     if (aProgress == JS::GC_CYCLE_END) {
       profiler_add_marker(
-          "GCMajor", MakeUnique<GCMajorMarkerPayload>(
-                         aDesc.startTime(aContext), aDesc.endTime(aContext),
-                         aDesc.formatJSONProfiler(aContext)));
+          "GCMajor", js::ProfilingStackFrame::Category::GCCC,
+          MakeUnique<GCMajorMarkerPayload>(aDesc.startTime(aContext),
+                                           aDesc.endTime(aContext),
+                                           aDesc.formatJSONProfiler(aContext)));
     } else if (aProgress == JS::GC_SLICE_END) {
-      profiler_add_marker("GCSlice", MakeUnique<GCSliceMarkerPayload>(
-                                         aDesc.lastSliceStart(aContext),
-                                         aDesc.lastSliceEnd(aContext),
-                                         aDesc.sliceToJSONProfiler(aContext)));
+      profiler_add_marker(
+          "GCSlice", js::ProfilingStackFrame::Category::GCCC,
+          MakeUnique<GCSliceMarkerPayload>(
+              aDesc.lastSliceStart(aContext), aDesc.lastSliceEnd(aContext),
+              aDesc.sliceToJSONProfiler(aContext)));
     }
   }
 #endif
 
   if (aProgress == JS::GC_CYCLE_END &&
       JS::dbg::FireOnGarbageCollectionHookRequired(aContext)) {
-    JS::gcreason::Reason reason = aDesc.reason_;
+    JS::GCReason reason = aDesc.reason_;
     Unused << NS_WARN_IF(
         NS_FAILED(DebuggerOnGCRunnable::Enqueue(aContext, aDesc)) &&
-        reason != JS::gcreason::SHUTDOWN_CC &&
-        reason != JS::gcreason::DESTROY_RUNTIME &&
-        reason != JS::gcreason::XPCONNECT_SHUTDOWN);
+        reason != JS::GCReason::SHUTDOWN_CC &&
+        reason != JS::GCReason::DESTROY_RUNTIME &&
+        reason != JS::GCReason::XPCONNECT_SHUTDOWN);
   }
 
   if (self->mPrevGCSliceCallback) {
@@ -827,17 +829,17 @@ void CycleCollectedJSRuntime::TraverseNativeRoots(
 
 class MinorGCMarker : public TimelineMarker {
  private:
-  JS::gcreason::Reason mReason;
+  JS::GCReason mReason;
 
  public:
-  MinorGCMarker(MarkerTracingType aTracingType, JS::gcreason::Reason aReason)
+  MinorGCMarker(MarkerTracingType aTracingType, JS::GCReason aReason)
       : TimelineMarker("MinorGC", aTracingType, MarkerStackRequest::NO_STACK),
         mReason(aReason) {
     MOZ_ASSERT(aTracingType == MarkerTracingType::START ||
                aTracingType == MarkerTracingType::END);
   }
 
-  MinorGCMarker(JS::GCNurseryProgress aProgress, JS::gcreason::Reason aReason)
+  MinorGCMarker(JS::GCNurseryProgress aProgress, JS::GCReason aReason)
       : TimelineMarker(
             "MinorGC",
             aProgress == JS::GCNurseryProgress::GC_NURSERY_COLLECTION_START
@@ -851,7 +853,7 @@ class MinorGCMarker : public TimelineMarker {
     TimelineMarker::AddDetails(aCx, aMarker);
 
     if (GetTracingType() == MarkerTracingType::START) {
-      auto reason = JS::gcreason::ExplainReason(mReason);
+      auto reason = JS::ExplainGCReason(mReason);
       aMarker.mCauseName.Construct(NS_ConvertUTF8toUTF16(reason));
     }
   }
@@ -865,7 +867,7 @@ class MinorGCMarker : public TimelineMarker {
 
 /* static */ void CycleCollectedJSRuntime::GCNurseryCollectionCallback(
     JSContext* aContext, JS::GCNurseryProgress aProgress,
-    JS::gcreason::Reason aReason) {
+    JS::GCReason aReason) {
   CycleCollectedJSRuntime* self = CycleCollectedJSRuntime::Get();
   MOZ_ASSERT(CycleCollectedJSContext::Get()->Context() == aContext);
   MOZ_ASSERT(NS_IsMainThread());
@@ -883,10 +885,10 @@ class MinorGCMarker : public TimelineMarker {
 #ifdef MOZ_GECKO_PROFILER
   else if (aProgress == JS::GCNurseryProgress::GC_NURSERY_COLLECTION_END &&
            profiler_thread_is_being_profiled()) {
-    profiler_add_marker(
-        "GCMinor", MakeUnique<GCMinorMarkerPayload>(
-                       self->mLatestNurseryCollectionStart, TimeStamp::Now(),
-                       JS::MinorGcToJSON(aContext)));
+    profiler_add_marker("GCMinor", js::ProfilingStackFrame::Category::GCCC,
+                        MakeUnique<GCMinorMarkerPayload>(
+                            self->mLatestNurseryCollectionStart,
+                            TimeStamp::Now(), JS::MinorGcToJSON(aContext)));
   }
 #endif
 
@@ -1123,13 +1125,10 @@ bool CycleCollectedJSRuntime::AreGCGrayBitsValid() const {
   return js::AreGCGrayBitsValid(mJSRuntime);
 }
 
-void CycleCollectedJSRuntime::GarbageCollect(uint32_t aReason) const {
-  MOZ_ASSERT(aReason < JS::gcreason::NUM_REASONS);
-  JS::gcreason::Reason gcreason = static_cast<JS::gcreason::Reason>(aReason);
-
+void CycleCollectedJSRuntime::GarbageCollect(JS::GCReason aReason) const {
   JSContext* cx = CycleCollectedJSContext::Get()->Context();
   JS::PrepareForFullGC(cx);
-  JS::NonIncrementalGC(cx, GC_NORMAL, gcreason);
+  JS::NonIncrementalGC(cx, GC_NORMAL, aReason);
 }
 
 void CycleCollectedJSRuntime::JSObjectsTenured() {
@@ -1327,7 +1326,8 @@ void CycleCollectedJSRuntime::FinalizeDeferredThings(
   MOZ_ASSERT(mDeferredFinalizerTable.Count() == 0);
 
   if (aType == CycleCollectedJSContext::FinalizeIncrementally) {
-    NS_IdleDispatchToCurrentThread(do_AddRef(mFinalizeRunnable), 2500);
+    NS_DispatchToCurrentThreadQueue(do_AddRef(mFinalizeRunnable), 2500,
+                                    EventQueuePriority::Idle);
   } else {
     mFinalizeRunnable->ReleaseNow(false);
     MOZ_ASSERT(!mFinalizeRunnable);

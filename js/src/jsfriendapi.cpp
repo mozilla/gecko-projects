@@ -14,7 +14,7 @@
 #include <stdint.h>
 
 #ifdef ENABLE_BIGINT
-#include "builtin/BigInt.h"
+#  include "builtin/BigInt.h"
 #endif
 #include "builtin/Promise.h"
 #include "builtin/TestingFunctions.h"
@@ -119,7 +119,7 @@ JS_FRIEND_API bool JS_SplicePrototype(JSContext* cx, HandleObject obj,
   }
 
   Rooted<TaggedProto> tagged(cx, TaggedProto(proto));
-  return JSObject::splicePrototype(cx, obj, obj->getClass(), tagged);
+  return JSObject::splicePrototype(cx, obj, tagged);
 }
 
 JS_FRIEND_API JSObject* JS_NewObjectWithUniqueType(JSContext* cx,
@@ -1118,7 +1118,7 @@ void DumpHeapTracer::onChild(const JS::GCCellPtr& thing) {
 void js::DumpHeap(JSContext* cx, FILE* fp,
                   js::DumpHeapNurseryBehaviour nurseryBehaviour) {
   if (nurseryBehaviour == js::CollectNurseryBeforeDump) {
-    cx->runtime()->gc.evictNursery(JS::gcreason::API);
+    cx->runtime()->gc.evictNursery(JS::GCReason::API);
   }
 
   DumpHeapTracer dtrc(fp, cx);

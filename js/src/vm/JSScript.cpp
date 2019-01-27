@@ -365,7 +365,7 @@ XDRResult js::XDRScript(XDRState<mode>* xdr, HandleScope scriptEnclosingScope,
       nresumeoffsets;
   uint32_t prologueLength;
   uint32_t funLength = 0;
-  uint32_t nTypeSets = 0;
+  uint32_t numBytecodeTypeSets = 0;
   uint32_t scriptBits = 0;
   uint32_t bodyScopeIndex = 0;
   uint32_t immutableFlags = 0;
@@ -430,7 +430,7 @@ XDRResult js::XDRScript(XDRState<mode>* xdr, HandleScope scriptEnclosingScope,
       nresumeoffsets = script->resumeOffsets().size();
     }
 
-    nTypeSets = script->nTypeSets();
+    numBytecodeTypeSets = script->numBytecodeTypeSets();
     funLength = script->funLength();
 
     if (script->analyzedArgsUsage() && script->needsArgsObj()) {
@@ -457,7 +457,7 @@ XDRResult js::XDRScript(XDRState<mode>* xdr, HandleScope scriptEnclosingScope,
   MOZ_TRY(xdr->codeUint32(&ntrynotes));
   MOZ_TRY(xdr->codeUint32(&nscopenotes));
   MOZ_TRY(xdr->codeUint32(&nresumeoffsets));
-  MOZ_TRY(xdr->codeUint32(&nTypeSets));
+  MOZ_TRY(xdr->codeUint32(&numBytecodeTypeSets));
   MOZ_TRY(xdr->codeUint32(&funLength));
   MOZ_TRY(xdr->codeUint32(&scriptBits));
   MOZ_TRY(xdr->codeUint32(&immutableFlags));
@@ -542,8 +542,8 @@ XDRResult js::XDRScript(XDRState<mode>* xdr, HandleScope scriptEnclosingScope,
     script->mainOffset_ = prologueLength;
     script->funLength_ = funLength;
 
-    MOZ_ASSERT(nTypeSets <= UINT16_MAX);
-    script->nTypeSets_ = uint16_t(nTypeSets);
+    MOZ_ASSERT(numBytecodeTypeSets <= UINT16_MAX);
+    script->numBytecodeTypeSets_ = uint16_t(numBytecodeTypeSets);
 
     scriptp.set(script);
 
@@ -1318,15 +1318,8 @@ void ScriptSourceObject::finalize(FreeOp* fop, JSObject* obj) {
   ScriptSourceObject* sso = &obj->as<ScriptSourceObject>();
   sso->source()->decref();
 
-  Value value = sso->canonicalPrivate();
-  if (!value.isUndefined()) {
-    // The embedding may need to dispose of its private data.
-    JS::AutoSuppressGCAnalysis suppressGC;
-    if (JS::ScriptPrivateFinalizeHook hook =
-            fop->runtime()->scriptPrivateFinalizeHook) {
-      hook(fop, value);
-    }
-  }
+  // Clear the private value, calling the release hook if necessary.
+  sso->setPrivate(fop->runtime(), UndefinedValue());
 }
 
 void ScriptSourceObject::trace(JSTracer* trc, JSObject* obj) {
@@ -1382,8 +1375,6 @@ ScriptSourceObject* ScriptSourceObject::createInternal(JSContext* cx,
   obj->initReservedSlot(ELEMENT_SLOT, MagicValue(JS_GENERIC_MAGIC));
   obj->initReservedSlot(ELEMENT_PROPERTY_SLOT, MagicValue(JS_GENERIC_MAGIC));
   obj->initReservedSlot(INTRODUCTION_SCRIPT_SLOT, MagicValue(JS_GENERIC_MAGIC));
-  obj->initReservedSlot(INTRODUCTION_SOURCE_OBJECT_SLOT,
-                        MagicValue(JS_GENERIC_MAGIC));
 
   return obj;
 }
@@ -1422,8 +1413,6 @@ ScriptSourceObject* ScriptSourceObject::unwrappedCanonical() const {
       source->getReservedSlot(ELEMENT_PROPERTY_SLOT).isMagic(JS_GENERIC_MAGIC));
   MOZ_ASSERT(source->getReservedSlot(INTRODUCTION_SCRIPT_SLOT)
                  .isMagic(JS_GENERIC_MAGIC));
-  MOZ_ASSERT(source->getReservedSlot(INTRODUCTION_SOURCE_OBJECT_SLOT)
-                 .isMagic(JS_GENERIC_MAGIC));
 
   RootedObject element(cx, options.element());
   RootedString elementAttributeName(cx, options.elementAttributeName());
@@ -1435,19 +1424,24 @@ ScriptSourceObject* ScriptSourceObject::unwrappedCanonical() const {
   // introduction script and ScriptSourceObject are in different compartments,
   // we would be creating a cross-compartment script reference, which is
   // forbidden. We can still store a CCW to the script source object though.
-  RootedValue introdutionScript(cx);
-  RootedValue introdutionSource(cx);
-  if (options.introductionScript()) {
-    if (options.introductionScript()->compartment() == cx->compartment()) {
-      introdutionScript.setPrivateGCThing(options.introductionScript());
+  RootedValue introductionScript(cx);
+  if (JSScript* script = options.introductionScript()) {
+    if (script->compartment() == cx->compartment()) {
+      introductionScript.setPrivateGCThing(options.introductionScript());
     }
-    introdutionSource.setObject(*options.introductionScript()->sourceObject());
-    if (!cx->compartment()->wrap(cx, &introdutionSource)) {
+  }
+  source->setReservedSlot(INTRODUCTION_SCRIPT_SLOT, introductionScript);
+
+  // Set the private value to that of the script or module that this source is
+  // part of, if any.
+  RootedValue privateValue(cx);
+  if (JSScript* script = options.scriptOrModule()) {
+    privateValue = script->sourceObject()->canonicalPrivate();
+    if (!JS_WrapValue(cx, &privateValue)) {
       return false;
     }
   }
-  source->setReservedSlot(INTRODUCTION_SCRIPT_SLOT, introdutionScript);
-  source->setReservedSlot(INTRODUCTION_SOURCE_OBJECT_SLOT, introdutionSource);
+  source->setPrivate(cx->runtime(), privateValue);
 
   return true;
 }
@@ -1474,6 +1468,25 @@ ScriptSourceObject* ScriptSourceObject::unwrappedCanonical() const {
   source->setReservedSlot(ELEMENT_PROPERTY_SLOT, nameValue);
 
   return true;
+}
+
+void ScriptSourceObject::setPrivate(JSRuntime* rt, const Value& value) {
+  // Update the private value, calling addRef/release hooks if necessary
+  // to allow the embedding to maintain a reference count for the
+  // private data.
+  JS::AutoSuppressGCAnalysis nogc;
+  Value prevValue = getReservedSlot(PRIVATE_SLOT);
+  if (!prevValue.isUndefined()) {
+    if (auto releaseHook = rt->scriptPrivateReleaseHook) {
+      releaseHook(prevValue);
+    }
+  }
+  setReservedSlot(PRIVATE_SLOT, value);
+  if (!value.isUndefined()) {
+    if (auto addRefHook = rt->scriptPrivateAddRefHook) {
+      addRefHook(value);
+    }
+  }
 }
 
 /* static */ bool JSScript::loadSource(JSContext* cx, ScriptSource* ss,
@@ -3275,7 +3288,7 @@ static inline uint8_t* AllocScriptData(JSContext* cx, size_t size) {
     return false;
   }
 
-  script->nTypeSets_ = 0;
+  script->numBytecodeTypeSets_ = 0;
 
   RootedScope enclosing(cx, &cx->global()->emptyGlobalScope());
   Scope* functionProtoScope = FunctionScope::create(cx, nullptr, false, false,
@@ -3379,12 +3392,6 @@ static void InitAtomMap(frontend::AtomIndexMap& indices, GCPtrAtom* atoms) {
     return false;
   }
 
-  uint32_t mainLength = bce->offset();
-  uint32_t prologueLength = bce->prologueOffset();
-  uint32_t nsrcnotes;
-  if (!bce->finishTakingSrcNotes(&nsrcnotes)) {
-    return false;
-  }
   uint32_t natoms = bce->atomIndices->count();
   if (!createPrivateScriptData(
           cx, script, bce->scopeList.length(), bce->numberList.length(),
@@ -3394,12 +3401,15 @@ static void InitAtomMap(frontend::AtomIndexMap& indices, GCPtrAtom* atoms) {
   }
 
   MOZ_ASSERT(script->mainOffset() == 0);
-  script->mainOffset_ = prologueLength;
-  script->nTypeSets_ = bce->typesetCount;
+  script->mainOffset_ = bce->mainOffset();
+  script->numBytecodeTypeSets_ = bce->typesetCount;
   script->lineno_ = bce->firstLine;
 
-  if (!script->createSharedScriptData(cx, prologueLength + mainLength,
-                                      nsrcnotes, natoms)) {
+  // The + 1 is to account for the final SN_MAKE_TERMINATOR that is appended
+  // when the notes are copied to their final destination by copySrcNotes.
+  uint32_t nsrcnotes = bce->notes().length() + 1;
+  uint32_t codeLength = bce->code().length();
+  if (!script->createSharedScriptData(cx, codeLength, nsrcnotes, natoms)) {
     return false;
   }
 
@@ -3409,9 +3419,7 @@ static void InitAtomMap(frontend::AtomIndexMap& indices, GCPtrAtom* atoms) {
   // resets it before returning false.
 
   jsbytecode* code = script->code();
-  PodCopy<jsbytecode>(code, bce->prologue.code.begin(), prologueLength);
-  PodCopy<jsbytecode>(code + prologueLength, bce->main.code.begin(),
-                      mainLength);
+  PodCopy<jsbytecode>(code, bce->code().begin(), codeLength);
   bce->copySrcNotes((jssrcnote*)(code + script->length()), nsrcnotes);
   InitAtomMap(*bce->atomIndices, script->atoms());
 
@@ -3430,13 +3438,13 @@ static void InitAtomMap(frontend::AtomIndexMap& indices, GCPtrAtom* atoms) {
     bce->scopeList.finish(data->scopes());
   }
   if (bce->tryNoteList.length() != 0) {
-    bce->tryNoteList.finish(data->tryNotes(), prologueLength);
+    bce->tryNoteList.finish(data->tryNotes());
   }
   if (bce->scopeNoteList.length() != 0) {
-    bce->scopeNoteList.finish(data->scopeNotes(), prologueLength);
+    bce->scopeNoteList.finish(data->scopeNotes());
   }
   if (bce->resumeOffsetList.length() != 0) {
-    bce->resumeOffsetList.finish(data->resumeOffsets(), prologueLength);
+    bce->resumeOffsetList.finish(data->resumeOffsets());
   }
 
   script->setFlag(ImmutableFlags::Strict, bce->sc->strict());
@@ -4025,7 +4033,7 @@ bool js::detail::CopyScript(JSContext* cx, HandleScript src, HandleScript dst,
   dst->nslots_ = src->nslots();
   dst->bodyScopeIndex_ = src->bodyScopeIndex_;
   dst->funLength_ = src->funLength();
-  dst->nTypeSets_ = src->nTypeSets();
+  dst->numBytecodeTypeSets_ = src->numBytecodeTypeSets();
 
   dst->immutableFlags_ = src->immutableFlags_;
   dst->setFlag(JSScript::ImmutableFlags::HasNonSyntacticScope,
@@ -4403,7 +4411,7 @@ void JSScript::traceChildren(JSTracer* trc) {
   jit::TraceJitScripts(trc, this);
 
   if (trc->isMarkingTracer()) {
-    return GCMarker::fromTracer(trc)->markImplicitEdges(this);
+    GCMarker::fromTracer(trc)->markImplicitEdges(this);
   }
 }
 

@@ -5,7 +5,7 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #ifdef MOZ_WIDGET_GTK
-#include <gtk/gtk.h>
+#  include <gtk/gtk.h>
 #endif
 
 #include "ContentChild.h"
@@ -90,6 +90,10 @@
 #include "mozilla/BasePrincipal.h"
 #include "mozilla/WebBrowserPersistDocumentChild.h"
 #include "mozilla/HangDetails.h"
+#include "mozilla/LoadInfo.h"
+#include "nsIChildProcessChannelListener.h"
+#include "mozilla/net/HttpChannelChild.h"
+#include "nsQueryObject.h"
 #include "imgLoader.h"
 #include "GMPServiceChild.h"
 #include "nsISimpleEnumerator.h"
@@ -98,26 +102,26 @@
 #include "nsGeolocation.h"
 
 #if !defined(XP_WIN)
-#include "mozilla/Omnijar.h"
+#  include "mozilla/Omnijar.h"
 #endif
 
 #ifdef MOZ_GECKO_PROFILER
-#include "ChildProfilerController.h"
+#  include "ChildProfilerController.h"
 #endif
 
 #if defined(MOZ_CONTENT_SANDBOX)
-#include "mozilla/SandboxSettings.h"
-#if defined(XP_WIN)
-#include "mozilla/sandboxTarget.h"
-#elif defined(XP_LINUX)
-#include "mozilla/Sandbox.h"
-#include "mozilla/SandboxInfo.h"
-#include "CubebUtils.h"
-#elif defined(XP_MACOSX)
-#include "mozilla/Sandbox.h"
-#elif defined(__OpenBSD__)
-#include <unistd.h>
-#endif
+#  include "mozilla/SandboxSettings.h"
+#  if defined(XP_WIN)
+#    include "mozilla/sandboxTarget.h"
+#  elif defined(XP_LINUX)
+#    include "mozilla/Sandbox.h"
+#    include "mozilla/SandboxInfo.h"
+#    include "CubebUtils.h"
+#  elif defined(XP_MACOSX)
+#    include "mozilla/Sandbox.h"
+#  elif defined(__OpenBSD__)
+#    include <unistd.h>
+#  endif
 #endif
 
 #include "mozilla/Unused.h"
@@ -157,7 +161,7 @@
 #include "nsContentPermissionHelper.h"
 #include "nsPluginHost.h"
 #ifdef NS_PRINTING
-#include "nsPrintingProxy.h"
+#  include "nsPrintingProxy.h"
 #endif
 #include "nsWindowMemoryReporter.h"
 
@@ -178,7 +182,7 @@
 #include "mozilla/dom/BlobURLProtocolHandler.h"
 
 #ifdef MOZ_WEBRTC
-#include "signaling/src/peerconnection/WebrtcGlobalChild.h"
+#  include "signaling/src/peerconnection/WebrtcGlobalChild.h"
 #endif
 
 #include "nsPermission.h"
@@ -187,34 +191,34 @@
 #include "PermissionMessageUtils.h"
 
 #if defined(MOZ_WIDGET_ANDROID)
-#include "APKOpen.h"
+#  include "APKOpen.h"
 #endif
 
 #ifdef XP_WIN
-#include <process.h>
-#define getpid _getpid
-#include "mozilla/widget/AudioSession.h"
-#include "mozilla/audio/AudioNotificationReceiver.h"
+#  include <process.h>
+#  define getpid _getpid
+#  include "mozilla/widget/AudioSession.h"
+#  include "mozilla/audio/AudioNotificationReceiver.h"
 #endif
 
 #if defined(XP_MACOSX)
-#include "nsMacUtilsImpl.h"
-#include <CoreServices/CoreServices.h>
+#  include "nsMacUtilsImpl.h"
+#  include <CoreServices/CoreServices.h>
 // Info.plist key associated with the developer repo path
-#define MAC_DEV_REPO_KEY "MozillaDeveloperRepoPath"
+#  define MAC_DEV_REPO_KEY "MozillaDeveloperRepoPath"
 // Info.plist key associated with the developer repo object directory
-#define MAC_DEV_OBJ_KEY "MozillaDeveloperObjPath"
+#  define MAC_DEV_OBJ_KEY "MozillaDeveloperObjPath"
 #endif /* XP_MACOSX */
 
 #ifdef MOZ_X11
-#include "mozilla/X11Util.h"
+#  include "mozilla/X11Util.h"
 #endif
 
 #ifdef ACCESSIBILITY
-#include "nsAccessibilityService.h"
-#ifdef XP_WIN
-#include "mozilla/a11y/AccessibleWrap.h"
-#endif
+#  include "nsAccessibilityService.h"
+#  ifdef XP_WIN
+#    include "mozilla/a11y/AccessibleWrap.h"
+#  endif
 #endif
 
 #include "mozilla/dom/File.h"
@@ -223,7 +227,7 @@
 #include "mozilla/ipc/InputStreamUtils.h"
 
 #ifdef MOZ_WEBSPEECH
-#include "mozilla/dom/PSpeechSynthesisChild.h"
+#  include "mozilla/dom/PSpeechSynthesisChild.h"
 #endif
 
 #include "ClearOnShutdown.h"
@@ -247,11 +251,11 @@
 #include "MMPrinter.h"
 
 #ifdef MOZ_WIDGET_GTK
-#include "nsAppRunner.h"
+#  include "nsAppRunner.h"
 #endif
 
 #ifdef MOZ_CODE_COVERAGE
-#include "mozilla/CodeCoverageHandler.h"
+#  include "mozilla/CodeCoverageHandler.h"
 #endif
 
 using namespace mozilla;
@@ -556,9 +560,10 @@ ContentChild::ContentChild()
 }
 
 #ifdef _MSC_VER
-#pragma warning(push)
-#pragma warning(disable : 4722) /* Silence "destructor never returns" warning \
-                                 */
+#  pragma warning(push)
+#  pragma warning(                                                  \
+      disable : 4722) /* Silence "destructor never returns" warning \
+                       */
 #endif
 
 ContentChild::~ContentChild() {
@@ -568,7 +573,7 @@ ContentChild::~ContentChild() {
 }
 
 #ifdef _MSC_VER
-#pragma warning(pop)
+#  pragma warning(pop)
 #endif
 
 NS_INTERFACE_MAP_BEGIN(ContentChild)
@@ -608,11 +613,11 @@ bool ContentChild::Init(MessageLoop* aIOLoop, base::ProcessId aParentPid,
   // when --display is set by the command line.
   if (!gfxPlatform::IsHeadless()) {
     const char* display_name = PR_GetEnv("MOZ_GDK_DISPLAY");
-#ifndef MOZ_WAYLAND
+#  ifndef MOZ_WAYLAND
     if (!display_name) {
       display_name = PR_GetEnv("DISPLAY");
     }
-#endif
+#  endif
     if (display_name) {
       int argc = 3;
       char option_name[] = "--display";
@@ -1481,9 +1486,9 @@ static bool StartMacOSContentSandbox() {
           "security.sandbox.content.mac.disconnect-windowserver")) {
     CGError result = CGSSetDenyWindowServerConnections(true);
     MOZ_DIAGNOSTIC_ASSERT(result == kCGErrorSuccess);
-#if !MOZ_DIAGNOSTIC_ASSERT_ENABLED
+#  if !MOZ_DIAGNOSTIC_ASSERT_ENABLED
     Unused << result;
-#endif
+#  endif
   }
 
   // If the sandbox is already enabled, there's nothing more to do here.
@@ -1568,7 +1573,7 @@ static bool StartMacOSContentSandbox() {
     info.hasSandboxedProfile = false;
   }
 
-#ifdef DEBUG
+#  ifdef DEBUG
   // When a content process dies intentionally (|NoteIntentionalCrash|), for
   // tests it wants to log that it did this. Allow writing to this location
   // that the testrunner wants.
@@ -1580,7 +1585,7 @@ static bool StartMacOSContentSandbox() {
         nsMacUtilsImpl::GetDirectoryPath(bloatLog);
     info.debugWriteDir.assign(bloatDirectoryPath.get());
   }
-#endif  // DEBUG
+#  endif  // DEBUG
 
   std::string err;
   if (!mozilla::StartMacSandbox(info, err)) {
@@ -1598,7 +1603,7 @@ mozilla::ipc::IPCResult ContentChild::RecvSetProcessSandbox(
   // at some point; see bug 880808.
 #if defined(MOZ_CONTENT_SANDBOX)
   bool sandboxEnabled = true;
-#if defined(XP_LINUX)
+#  if defined(XP_LINUX)
   // On Linux, we have to support systems that can't use any sandboxing.
   if (!SandboxInfo::Get().CanSandboxContent()) {
     sandboxEnabled = false;
@@ -1613,11 +1618,11 @@ mozilla::ipc::IPCResult ContentChild::RecvSetProcessSandbox(
     sandboxEnabled = SetContentProcessSandbox(
         ContentProcessSandboxParams::ForThisProcess(aBroker));
   }
-#elif defined(XP_WIN)
+#  elif defined(XP_WIN)
   mozilla::SandboxTarget::Instance()->StartSandbox();
-#elif defined(XP_MACOSX)
+#  elif defined(XP_MACOSX)
   sandboxEnabled = StartMacOSContentSandbox();
-#elif defined(__OpenBSD__)
+#  elif defined(__OpenBSD__)
   sandboxEnabled = StartOpenBSDSandbox(GeckoProcessType_Content);
   /* dont overwrite an existing session dbus address, but ensure it is set */
   if (!PR_GetEnv("DBUS_SESSION_BUS_ADDRESS")) {
@@ -1626,15 +1631,15 @@ mozilla::ipc::IPCResult ContentChild::RecvSetProcessSandbox(
             ("no session dbus found, faking one\n"));
     PR_SetEnv("DBUS_SESSION_BUS_ADDRESS=");
   }
-#endif
+#  endif
 
   CrashReporter::AnnotateCrashReport(
       CrashReporter::Annotation::ContentSandboxEnabled, sandboxEnabled);
-#if defined(XP_LINUX) && !defined(OS_ANDROID)
+#  if defined(XP_LINUX) && !defined(OS_ANDROID)
   CrashReporter::AnnotateCrashReport(
       CrashReporter::Annotation::ContentSandboxCapabilities,
       static_cast<int>(SandboxInfo::Get().AsInteger()));
-#endif /* XP_LINUX && !OS_ANDROID */
+#  endif /* XP_LINUX && !OS_ANDROID */
   CrashReporter::AnnotateCrashReport(CrashReporter::Annotation::RemoteType,
                                      NS_ConvertUTF16toUTF8(GetRemoteType()));
 #endif /* MOZ_CONTENT_SANDBOX */
@@ -1713,7 +1718,8 @@ mozilla::ipc::IPCResult ContentChild::RecvPBrowserConstructor(
     RefPtr<CancelableRunnable> firstIdleTask =
         NewCancelableRunnableFunction("FirstIdleRunnable", FirstIdle);
     gFirstIdleTask = firstIdleTask;
-    if (NS_FAILED(NS_IdleDispatchToCurrentThread(firstIdleTask.forget()))) {
+    if (NS_FAILED(NS_DispatchToCurrentThreadQueue(firstIdleTask.forget(),
+                                                  EventQueuePriority::Idle))) {
       gFirstIdleTask = nullptr;
       hasRunOnce = false;
     }
@@ -2441,13 +2447,13 @@ mozilla::ipc::IPCResult ContentChild::RecvFlushMemory(const nsString& reason) {
 mozilla::ipc::IPCResult ContentChild::RecvActivateA11y(
     const uint32_t& aMainChromeTid, const uint32_t& aMsaaID) {
 #ifdef ACCESSIBILITY
-#ifdef XP_WIN
+#  ifdef XP_WIN
   MOZ_ASSERT(aMainChromeTid != 0);
   mMainChromeTid = aMainChromeTid;
 
   MOZ_ASSERT(aMsaaID != 0);
   mMsaaID = aMsaaID;
-#endif  // XP_WIN
+#  endif  // XP_WIN
 
   // Start accessibility in content process if it's running in chrome
   // process.
@@ -2471,7 +2477,7 @@ mozilla::ipc::IPCResult ContentChild::RecvGarbageCollect() {
   if (obs) {
     obs->NotifyObservers(nullptr, "child-gc-request", nullptr);
   }
-  nsJSContext::GarbageCollectNow(JS::gcreason::DOM_IPC);
+  nsJSContext::GarbageCollectNow(JS::GCReason::DOM_IPC);
   return IPC_OK();
 }
 
@@ -3433,6 +3439,66 @@ mozilla::ipc::IPCResult ContentChild::RecvSaveRecording(
   return IPC_OK();
 }
 
+mozilla::ipc::IPCResult ContentChild::RecvCrossProcessRedirect(
+    const uint32_t& aRegistrarId, nsIURI* aURI, const uint32_t& aNewLoadFlags,
+    const OptionalLoadInfoArgs& aLoadInfo, const uint64_t& aChannelId,
+    nsIURI* aOriginalURI, const uint64_t& aIdentifier) {
+  nsCOMPtr<nsILoadInfo> loadInfo;
+  nsresult rv =
+      mozilla::ipc::LoadInfoArgsToLoadInfo(aLoadInfo, getter_AddRefs(loadInfo));
+  if (NS_FAILED(rv)) {
+    MOZ_DIAGNOSTIC_ASSERT(false, "LoadInfoArgsToLoadInfo failed");
+    return IPC_OK();
+  }
+
+  nsCOMPtr<nsIChannel> newChannel;
+  rv = NS_NewChannelInternal(getter_AddRefs(newChannel), aURI, loadInfo,
+                             nullptr,  // PerformanceStorage
+                             nullptr,  // aLoadGroup
+                             nullptr,  // aCallbacks
+                             aNewLoadFlags);
+
+  // We are sure this is a HttpChannelChild because the parent
+  // is always a HTTP channel.
+  RefPtr<HttpChannelChild> httpChild = do_QueryObject(newChannel);
+  if (NS_FAILED(rv) || !httpChild) {
+    MOZ_DIAGNOSTIC_ASSERT(false, "NS_NewChannelInternal failed");
+    return IPC_OK();
+  }
+
+  // This is used to report any errors back to the parent by calling
+  // CrossProcessRedirectFinished.
+  auto scopeExit =
+      MakeScopeExit([&]() { httpChild->CrossProcessRedirectFinished(rv); });
+
+  rv = httpChild->SetChannelId(aChannelId);
+  if (NS_FAILED(rv)) {
+    return IPC_OK();
+  }
+
+  rv = httpChild->SetOriginalURI(aOriginalURI);
+  if (NS_FAILED(rv)) {
+    return IPC_OK();
+  }
+
+  // connect parent.
+  rv = httpChild->ConnectParent(aRegistrarId);  // creates parent channel
+  if (NS_FAILED(rv)) {
+    return IPC_OK();
+  }
+
+  nsCOMPtr<nsIChildProcessChannelListener> processListener =
+      do_GetService("@mozilla.org/network/childProcessChannelListener;1");
+  // The listener will call completeRedirectSetup on the channel.
+  rv = processListener->OnChannelReady(httpChild, aIdentifier);
+  if (NS_FAILED(rv)) {
+    return IPC_OK();
+  }
+
+  // scopeExit will call CrossProcessRedirectFinished(rv) here
+  return IPC_OK();
+}
+
 already_AddRefed<nsIEventTarget> ContentChild::GetSpecificMessageEventTarget(
     const Message& aMsg) {
   switch (aMsg.type()) {
@@ -3591,7 +3657,7 @@ mozilla::ipc::IPCResult ContentChild::RecvWindowPostMessage(
 }  // namespace dom
 
 #if defined(__OpenBSD__) && defined(MOZ_CONTENT_SANDBOX)
-#include <unistd.h>
+#  include <unistd.h>
 
 static LazyLogModule sPledgeLog("SandboxPledge");
 

@@ -132,7 +132,7 @@
 #include "mozilla/dom/InspectorFontFace.h"
 
 #ifdef MOZ_XUL
-#include "nsXULPopupManager.h"
+#  include "nsXULPopupManager.h"
 #endif
 
 #include "GeckoProfiler.h"
@@ -143,10 +143,10 @@
 
 // Make sure getpid() works.
 #ifdef XP_WIN
-#include <process.h>
-#define getpid _getpid
+#  include <process.h>
+#  define getpid _getpid
 #else
-#include <unistd.h>
+#  include <unistd.h>
 #endif
 
 using namespace mozilla;
@@ -2945,7 +2945,7 @@ StyleClear nsLayoutUtils::CombineBreakType(StyleClear aOrigBreakType,
 }
 
 #ifdef MOZ_DUMP_PAINTING
-#include <stdio.h>
+#  include <stdio.h>
 
 static bool gDumpEventList = false;
 
@@ -3549,7 +3549,7 @@ nsresult nsLayoutUtils::PaintFrame(gfxContext* aRenderingContext,
 
   {
     AUTO_PROFILER_LABEL("nsLayoutUtils::PaintFrame:BuildDisplayList", GRAPHICS);
-    AUTO_PROFILER_TRACING("Paint", "DisplayList");
+    AUTO_PROFILER_TRACING("Paint", "DisplayList", GRAPHICS);
 
     PaintTelemetry::AutoRecord record(PaintTelemetry::Metric::DisplayList);
     TimeStamp dlStart = TimeStamp::Now();
@@ -3902,7 +3902,7 @@ nsresult nsLayoutUtils::PaintFrame(gfxContext* aRenderingContext,
   builder.Check();
 
   {
-    AUTO_PROFILER_TRACING("Paint", "DisplayListResources");
+    AUTO_PROFILER_TRACING("Paint", "DisplayListResources", GRAPHICS);
 
     // Flush the list so we don't trigger the IsEmpty-on-destruction assertion
     if (!useRetainedBuilder) {
@@ -5940,6 +5940,10 @@ void nsLayoutUtils::DrawUniDirString(const char16_t* aString, uint32_t aLength,
     // Webrender just needs the shadow details
     if (auto* textDrawer = aContext->GetTextDrawer()) {
       wr::Shadow wrShadow;
+
+      // Gecko already inflates the bounding rect of text shadows,
+      // so tell WR not to inflate again.
+      wrShadow.should_inflate = false;
 
       wrShadow.offset = {
           presCtx->AppUnitsToFloatDevPixels(shadowDetails->mXOffset),

@@ -1442,8 +1442,7 @@ static unsigned Disassemble1(JSContext* cx, HandleScript script, jsbytecode* pc,
     }
 
     case JOF_ENVCOORD: {
-      RootedValue v(cx, StringValue(EnvironmentCoordinateName(
-                            cx->caches().envCoordinateNameCache, script, pc)));
+      RootedValue v(cx, StringValue(EnvironmentCoordinateNameSlow(script, pc)));
       UniqueChars bytes = ToDisassemblySource(cx, v);
       if (!bytes) {
         return 0;
@@ -1468,10 +1467,10 @@ static unsigned Disassemble1(JSContext* cx, HandleScript script, jsbytecode* pc,
       break;
     }
 
-#ifdef ENABLE_BIGINT
+#  ifdef ENABLE_BIGINT
     case JOF_BIGINT:
       // Fallthrough.
-#endif
+#  endif
     case JOF_DOUBLE: {
       RootedValue v(cx, script->getConst(GET_UINT32_INDEX(pc)));
       UniqueChars bytes = ToDisassemblySource(cx, v);
@@ -1770,8 +1769,7 @@ bool ExpressionDecompiler::decompilePC(jsbytecode* pc, uint8_t defIndex) {
       return write(atom);
     }
     case JSOP_GETALIASEDVAR: {
-      JSAtom* atom = EnvironmentCoordinateName(
-          cx->caches().envCoordinateNameCache, script, pc);
+      JSAtom* atom = EnvironmentCoordinateNameSlow(script, pc);
       MOZ_ASSERT(atom);
       return write(atom);
     }

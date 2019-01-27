@@ -266,12 +266,12 @@
 #include "mozilla/dom/DocGroup.h"
 #include "mozilla/dom/TabGroup.h"
 #ifdef MOZ_XUL
-#include "mozilla/dom/XULBroadcastManager.h"
-#include "mozilla/dom/XULPersist.h"
-#include "nsIXULWindow.h"
-#include "nsXULCommandDispatcher.h"
-#include "nsXULPopupManager.h"
-#include "nsIDocShellTreeOwner.h"
+#  include "mozilla/dom/XULBroadcastManager.h"
+#  include "mozilla/dom/XULPersist.h"
+#  include "nsIXULWindow.h"
+#  include "nsXULCommandDispatcher.h"
+#  include "nsXULPopupManager.h"
+#  include "nsIDocShellTreeOwner.h"
 #endif
 #include "nsIPresShellInlines.h"
 #include "mozilla/dom/BoxObject.h"
@@ -799,7 +799,6 @@ void TransferZoomLevels(Document* aFromDoc, Document* aToDoc) {
   if (!toCtxt) return;
 
   toCtxt->SetFullZoom(fromCtxt->GetFullZoom());
-  toCtxt->SetBaseMinFontSize(fromCtxt->BaseMinFontSize());
   toCtxt->SetTextZoom(fromCtxt->TextZoom());
   toCtxt->SetOverrideDPPX(fromCtxt->GetOverrideDPPX());
 }
@@ -1208,6 +1207,7 @@ Document::Document(const char* aContentType)
       mStyledLinksCleared(false),
 #endif
       mBidiEnabled(false),
+      mFontGroupCacheDirty(true),
       mMathMLEnabled(false),
       mIsInitialDocumentInWindow(false),
       mIgnoreDocGroupMismatches(false),
@@ -1295,6 +1295,7 @@ Document::Document(const char* aContentType)
       mAsyncOnloadBlockCount(0),
       mCompatMode(eCompatibility_FullStandards),
       mReadyState(ReadyState::READYSTATE_UNINITIALIZED),
+      mAncestorIsLoading(false),
 #ifdef MOZILLA_INTERNAL_API
       mVisibilityState(dom::VisibilityState::Hidden),
 #else
@@ -1339,7 +1340,8 @@ Document::Document(const char* aContentType)
       mThrowOnDynamicMarkupInsertionCounter(0),
       mIgnoreOpensDuringUnloadCounter(0),
       mDocLWTheme(Doc_Theme_Uninitialized),
-      mSavedResolution(1.0f) {
+      mSavedResolution(1.0f),
+      mPendingInitialTranslation(false) {
   MOZ_LOG(gDocumentLeakPRLog, LogLevel::Debug, ("DOCUMENT %p created", this));
 
   SetIsInDocument();
@@ -1356,6 +1358,8 @@ Document::Document(const char* aContentType)
 
   // void state used to differentiate an empty source from an unselected source
   mPreloadPictureFoundSource.SetIsVoid(true);
+
+  RecomputeLanguageFromCharset();
 }
 
 void Document::ClearAllBoxObjects() {
@@ -3129,6 +3133,8 @@ void Document::LocalizationLinkAdded(Element* aLinkElement) {
     // will be resolved once the end of l10n resource
     // container is reached.
     mL10nResources.AppendElement(href);
+
+    mPendingInitialTranslation = true;
   }
 }
 
@@ -3171,9 +3177,18 @@ void Document::OnL10nResourceContainerParsed() {
 }
 
 void Document::TriggerInitialDocumentTranslation() {
+  // Let's call it again, in case the resource
+  // container has not been closed, and only
+  // now we're closing the document.
+  OnL10nResourceContainerParsed();
+
   if (mDocumentL10n) {
     mDocumentL10n->TriggerInitialDocumentTranslation();
   }
+}
+
+void Document::InitialDocumentTranslationCompleted() {
+  mPendingInitialTranslation = false;
 }
 
 bool Document::IsWebAnimationsEnabled(JSContext* aCx, JSObject* /*unused*/) {
@@ -3411,6 +3426,7 @@ void Document::SetDocumentCharacterSet(NotNull<const Encoding*> aEncoding) {
   if (mCharacterSet != aEncoding) {
     mCharacterSet = aEncoding;
     mEncodingMenuDisabled = aEncoding == UTF_8_ENCODING;
+    RecomputeLanguageFromCharset();
 
     if (nsPresContext* context = GetPresContext()) {
       context->DispatchCharSetChange(aEncoding);
@@ -3474,6 +3490,7 @@ void Document::SetHeaderData(nsAtom* aHeaderField, const nsAString& aData) {
 
   if (aHeaderField == nsGkAtoms::headerContentLanguage) {
     CopyUTF16toUTF8(aData, mContentLanguage);
+    ResetLangPrefs();
     if (auto* presContext = GetPresContext()) {
       presContext->ContentLanguageChanged();
     }
@@ -7336,7 +7353,7 @@ void Document::CollectDescendantDocuments(
 }
 
 #ifdef DEBUG_bryner
-#define DEBUG_PAGE_CACHE
+#  define DEBUG_PAGE_CACHE
 #endif
 
 bool Document::CanSavePresentation(nsIRequest* aNewRequest) {
@@ -8100,14 +8117,52 @@ nsresult Document::CloneDocHelper(Document* clone) const {
   return NS_OK;
 }
 
+static bool SetLoadingInSubDocument(Document* aDocument, void* aData) {
+  aDocument->SetAncestorLoading(*(static_cast<bool*>(aData)));
+  return true;
+}
+
+void Document::SetAncestorLoading(bool aAncestorIsLoading) {
+  NotifyLoading(mAncestorIsLoading, aAncestorIsLoading, mReadyState,
+                mReadyState);
+  mAncestorIsLoading = aAncestorIsLoading;
+}
+
+void Document::NotifyLoading(const bool& aCurrentParentIsLoading,
+                             bool aNewParentIsLoading,
+                             const ReadyState& aCurrentState,
+                             ReadyState aNewState) {
+  // Mirror the top-level loading state down to all subdocuments
+  bool was_loading = aCurrentParentIsLoading ||
+                     aCurrentState == READYSTATE_LOADING ||
+                     aCurrentState == READYSTATE_INTERACTIVE;
+  bool is_loading = aNewParentIsLoading || aNewState == READYSTATE_LOADING ||
+                    aNewState == READYSTATE_INTERACTIVE;  // new value for state
+  bool set_load_state = was_loading != is_loading;
+
+  if (set_load_state && StaticPrefs::dom_timeout_defer_during_load()) {
+    nsPIDOMWindowInner* inner = GetInnerWindow();
+    if (inner) {
+      inner->SetActiveLoadingState(is_loading);
+    }
+    EnumerateSubDocuments(SetLoadingInSubDocument, &is_loading);
+  }
+}
+
 void Document::SetReadyStateInternal(ReadyState rs) {
-  mReadyState = rs;
   if (rs == READYSTATE_UNINITIALIZED) {
     // Transition back to uninitialized happens only to keep assertions happy
     // right before readyState transitions to something else. Make this
     // transition undetectable by Web content.
+    mReadyState = rs;
     return;
   }
+
+  if (READYSTATE_LOADING == rs) {
+    mLoadingTimeStamp = mozilla::TimeStamp::Now();
+  }
+  NotifyLoading(mAncestorIsLoading, mAncestorIsLoading, mReadyState, rs);
+  mReadyState = rs;
   if (mTiming) {
     switch (rs) {
       case READYSTATE_LOADING:
@@ -8125,9 +8180,6 @@ void Document::SetReadyStateInternal(ReadyState rs) {
     }
   }
   // At the time of loading start, we don't have timing object, record time.
-  if (READYSTATE_LOADING == rs) {
-    mLoadingTimeStamp = mozilla::TimeStamp::Now();
-  }
 
   if (READYSTATE_INTERACTIVE == rs) {
     if (nsContentUtils::IsSystemPrincipal(NodePrincipal())) {
@@ -8137,7 +8189,6 @@ void Document::SetReadyStateInternal(ReadyState rs) {
         mXULPersist->Init();
       }
     }
-    TriggerInitialDocumentTranslation();
   }
 
   RecordNavigationTiming(rs);
@@ -8773,7 +8824,8 @@ void Document::RegisterPendingLinkUpdate(Link* aLink) {
         NewRunnableMethod("Document::FlushPendingLinkUpdatesFromRunnable", this,
                           &Document::FlushPendingLinkUpdatesFromRunnable);
     // Do this work in a second in the worst case.
-    nsresult rv = NS_IdleDispatchToCurrentThread(event.forget(), 1000);
+    nsresult rv = NS_DispatchToCurrentThreadQueue(event.forget(), 1000,
+                                                  EventQueuePriority::Idle);
     if (NS_FAILED(rv)) {
       // If during shutdown posting a runnable doesn't succeed, we probably
       // don't need to update link states.
@@ -10889,6 +10941,9 @@ void Document::DocAddSizeOfExcludingThis(nsWindowSizes& aWindowSizes) const {
     mPresShell->AddSizeOfIncludingThis(aWindowSizes);
   }
 
+  aWindowSizes.mDOMOtherSize += mLangGroupFontPrefs.SizeOfExcludingThis(
+      aWindowSizes.mState.mMallocSizeOf);
+
   aWindowSizes.mPropertyTablesSize +=
       mPropertyTable.SizeOfExcludingThis(aWindowSizes.mState.mMallocSizeOf);
 
@@ -11958,7 +12013,8 @@ void Document::MaybeStoreUserInteractionAsPermission() {
   }
 
   nsCOMPtr<nsIRunnable> task = new UserIntractionTimer(this);
-  nsresult rv = NS_IdleDispatchToCurrentThread(task.forget(), 2500);
+  nsresult rv = NS_DispatchToCurrentThreadQueue(task.forget(), 2500,
+                                                EventQueuePriority::Idle);
   if (NS_WARN_IF(NS_FAILED(rv))) {
     return;
   }
@@ -12496,6 +12552,63 @@ void Document::ReportShadowDOMUsage() {
 bool Document::StorageAccessSandboxed() const {
   return StaticPrefs::dom_storage_access_enabled() &&
          (GetSandboxFlags() & SANDBOXED_STORAGE_ACCESS) != 0;
+}
+
+already_AddRefed<nsAtom> Document::GetContentLanguageAsAtomForStyle() const {
+  nsAutoString contentLang;
+  GetContentLanguage(contentLang);
+  contentLang.StripWhitespace();
+
+  // Content-Language may be a comma-separated list of language codes,
+  // in which case the HTML5 spec says to treat it as unknown
+  if (!contentLang.IsEmpty() && !contentLang.Contains(char16_t(','))) {
+    return NS_Atomize(contentLang);
+  }
+
+  return nullptr;
+}
+
+already_AddRefed<nsAtom> Document::GetLanguageForStyle() const {
+  RefPtr<nsAtom> lang = GetContentLanguageAsAtomForStyle();
+  if (!lang) {
+    lang = mLanguageFromCharset;
+  }
+  return lang.forget();
+}
+
+const LangGroupFontPrefs* Document::GetFontPrefsForLang(
+    nsAtom* aLanguage, bool* aNeedsToCache) const {
+  nsAtom* lang = aLanguage ? aLanguage : mLanguageFromCharset.get();
+  return StaticPresData::Get()->GetFontPrefsForLangHelper(
+      lang, &mLangGroupFontPrefs, aNeedsToCache);
+}
+
+void Document::DoCacheAllKnownLangPrefs() {
+  MOZ_ASSERT(mFontGroupCacheDirty);
+  RefPtr<nsAtom> lang = GetLanguageForStyle();
+  GetFontPrefsForLang(lang.get());
+  GetFontPrefsForLang(nsGkAtoms::x_math);
+  // https://bugzilla.mozilla.org/show_bug.cgi?id=1362599#c12
+  GetFontPrefsForLang(nsGkAtoms::Unicode);
+  for (auto iter = mLanguagesUsed.Iter(); !iter.Done(); iter.Next()) {
+    GetFontPrefsForLang(iter.Get()->GetKey());
+  }
+  mFontGroupCacheDirty = false;
+}
+
+void Document::RecomputeLanguageFromCharset() {
+  nsLanguageAtomService* service = nsLanguageAtomService::GetService();
+  RefPtr<nsAtom> language = service->LookupCharSet(mCharacterSet);
+  if (language == nsGkAtoms::Unicode) {
+    language = service->GetLocaleLanguage();
+  }
+
+  if (language == mLanguageFromCharset) {
+    return;
+  }
+
+  ResetLangPrefs();
+  mLanguageFromCharset = language.forget();
 }
 
 }  // namespace dom

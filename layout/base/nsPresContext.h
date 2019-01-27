@@ -28,7 +28,6 @@
 #include "nsITimer.h"
 #include "nsCRT.h"
 #include "nsIWidgetListener.h"
-#include "nsLanguageAtomService.h"
 #include "nsGkAtoms.h"
 #include "nsCycleCollectionParticipant.h"
 #include "nsChangeHint.h"
@@ -136,7 +135,6 @@ class nsPresContext : public nsISupports,
   using Encoding = mozilla::Encoding;
   template <typename T>
   using NotNull = mozilla::NotNull<T>;
-  typedef mozilla::LangGroupFontPrefs LangGroupFontPrefs;
   typedef mozilla::ScrollStyles ScrollStyles;
   typedef mozilla::StaticPresData StaticPresData;
   using TransactionId = mozilla::layers::TransactionId;
@@ -361,25 +359,6 @@ class nsPresContext : public nsISupports,
    */
   void StopEmulatingMedium();
 
-  /**
-   * Get the default font for the given language and generic font ID.
-   * If aLanguage is nullptr, the document's language is used.
-   *
-   * See the comment in StaticPresData::GetDefaultFont.
-   */
-  const nsFont* GetDefaultFont(uint8_t aFontID, nsAtom* aLanguage,
-                               bool* aNeedsToCache = nullptr) const {
-    nsAtom* lang = aLanguage ? aLanguage : mLanguage.get();
-    const LangGroupFontPrefs* prefs = GetFontPrefsForLang(lang, aNeedsToCache);
-    if (aNeedsToCache && *aNeedsToCache) {
-      return nullptr;
-    }
-    return StaticPresData::Get()->GetDefaultFontHelper(aFontID, lang, prefs);
-  }
-
-  void ForceCacheLang(nsAtom* aLanguage);
-  void CacheAllLangs();
-
   /** Get a cached boolean pref, by its type */
   // *  - initially created for bugs 31816, 20760, 22963
   bool GetCachedBoolPref(nsPresContext_CachedBoolPrefType aPrefType) const {
@@ -532,8 +511,6 @@ class nsPresContext : public nsISupports,
 
   nsDeviceContext* DeviceContext() const { return mDeviceContext; }
   mozilla::EventStateManager* EventStateManager() { return mEventManager; }
-  nsAtom* GetLanguageFromCharset() const { return mLanguage; }
-  already_AddRefed<nsAtom> GetContentLanguage() const;
 
   /**
    * Get/set a text zoom factor that is applied on top of the normal text zoom
@@ -581,45 +558,6 @@ class nsPresContext : public nsISupports,
    * the front-end/user.
    */
   float EffectiveTextZoom() const { return mEffectiveTextZoom; }
-
-  /**
-   * Get the minimum font size for the specified language. If aLanguage
-   * is nullptr, then the document's language is used.  This combines
-   * the language-specific global preference with the per-presentation
-   * base minimum font size.
-   */
-  int32_t MinFontSize(nsAtom* aLanguage, bool* aNeedsToCache = nullptr) const {
-    const LangGroupFontPrefs* prefs =
-        GetFontPrefsForLang(aLanguage, aNeedsToCache);
-    if (aNeedsToCache && *aNeedsToCache) {
-      return 0;
-    }
-    return std::max(mBaseMinFontSize, prefs->mMinimumFontSize);
-  }
-
-  /**
-   * Get the per-presentation base minimum font size.  This size is
-   * independent of the language-specific global preference.
-   */
-  int32_t BaseMinFontSize() const { return mBaseMinFontSize; }
-
-  /**
-   * Set the per-presentation base minimum font size.  This size is
-   * independent of the language-specific global preference.
-   */
-  void SetBaseMinFontSize(int32_t aMinFontSize) {
-    if (aMinFontSize == mBaseMinFontSize) {
-      return;
-    }
-
-    mBaseMinFontSize = aMinFontSize;
-
-    // Media queries could have changed, since we changed the meaning
-    // of 'em' units in them.
-    MediaFeatureValuesChanged(
-        {eRestyle_ForceDescendants, NS_STYLE_HINT_REFLOW,
-         mozilla::MediaFeatureChangeReason::MinFontSizeChange});
-  }
 
   float GetFullZoom() { return mFullZoom; }
   /**
@@ -1171,17 +1109,6 @@ class nsPresContext : public nsISupports,
 
   void GetUserPreferences();
 
-  /**
-   * Fetch the user's font preferences for the given aLanguage's
-   * langugage group.
-   */
-  const LangGroupFontPrefs* GetFontPrefsForLang(
-      nsAtom* aLanguage, bool* aNeedsToCache = nullptr) const {
-    nsAtom* lang = aLanguage ? aLanguage : mLanguage.get();
-    return StaticPresData::Get()->GetFontPrefsForLangHelper(
-        lang, &mLangGroupFontPrefs, aNeedsToCache);
-  }
-
   void UpdateCharSet(NotNull<const Encoding*> aCharSet);
 
   static bool NotifyDidPaintSubdocumentCallback(
@@ -1261,13 +1188,6 @@ class nsPresContext : public nsISupports,
   // the classes which set it. (using SetLinkHandler() again).
   nsILinkHandler* MOZ_NON_OWNING_REF mLinkHandler;
 
-  // Formerly mLangGroup; moving from charset-oriented langGroup to
-  // maintaining actual language settings everywhere (see bug 524107).
-  // This may in fact hold a langGroup such as x-western rather than
-  // a specific language, however (e.g, if it is inferred from the
-  // charset rather than explicitly specified as a lang attribute).
-  RefPtr<nsAtom> mLanguage;
-
  public:
   // The following are public member variables so that we can use them
   // with mozilla::AutoToggle or mozilla::AutoRestore.
@@ -1279,9 +1199,6 @@ class nsPresContext : public nsISupports,
  protected:
   mozilla::WeakPtr<nsDocShell> mContainer;
 
-  // Base minimum font size, independent of the language-specific global
-  // preference. Defaults to 0
-  int32_t mBaseMinFontSize;
   float mSystemFontScale;    // Internal text zoom factor, defaults to 1.0
   float mTextZoom;           // Text zoom, defaults to 1.0
   float mEffectiveTextZoom;  // Text zoom * system font scale
@@ -1293,7 +1210,6 @@ class nsPresContext : public nsISupports,
   int32_t mAutoQualityMinFontSizePixelsPref;
 
   nsCOMPtr<nsITheme> mTheme;
-  nsLanguageAtomService* mLangService;
   nsCOMPtr<nsIPrintSettings> mPrintSettings;
 
   mozilla::UniquePtr<nsBidi> mBidiEngine;
@@ -1338,16 +1254,6 @@ class nsPresContext : public nsISupports,
 
   uint16_t mImageAnimationMode;
   uint16_t mImageAnimationModePref;
-
-  // Most documents will only use one (or very few) language groups. Rather
-  // than have the overhead of a hash lookup, we simply look along what will
-  // typically be a very short (usually of length 1) linked list. There are 31
-  // language groups, so in the worst case scenario we'll need to traverse 31
-  // link items.
-  LangGroupFontPrefs mLangGroupFontPrefs;
-
-  bool mFontGroupCacheDirty;
-  nsTHashtable<nsRefPtrHashKey<nsAtom>> mLanguagesUsed;
 
   uint32_t mInterruptChecksToSkip;
 
@@ -1571,10 +1477,10 @@ class nsRootPresContext final : public nsPresContext {
 
 #ifdef MOZ_REFLOW_PERF
 
-#define DO_GLOBAL_REFLOW_COUNT(_name) \
-  aPresContext->CountReflows((_name), (nsIFrame*)this);
+#  define DO_GLOBAL_REFLOW_COUNT(_name) \
+    aPresContext->CountReflows((_name), (nsIFrame*)this);
 #else
-#define DO_GLOBAL_REFLOW_COUNT(_name)
+#  define DO_GLOBAL_REFLOW_COUNT(_name)
 #endif  // MOZ_REFLOW_PERF
 
 #endif /* nsPresContext_h___ */

@@ -7,7 +7,6 @@ use api::{ColorF, ImageFormat, MemoryReport};
 use api::{DeviceIntPoint, DeviceIntRect, DeviceIntSize};
 use api::TextureTarget;
 use api::VoidPtrToSizeFn;
-#[cfg(any(feature = "debug_renderer", feature="capture"))]
 use api::ImageDescriptor;
 use euclid::Transform3D;
 use gleam::gl;
@@ -90,7 +89,6 @@ const DEFAULT_TEXTURE: TextureSlot = TextureSlot(0);
 
 #[repr(u32)]
 pub enum DepthFunction {
-    #[cfg(feature = "debug_renderer")]
     Less = gl::LESS,
     LessEqual = gl::LEQUAL,
 }
@@ -108,7 +106,6 @@ pub enum TextureFilter {
 #[derive(Debug)]
 pub enum VertexAttributeKind {
     F32,
-    #[cfg(feature = "debug_renderer")]
     U8Norm,
     U16Norm,
     I32,
@@ -284,7 +281,6 @@ impl VertexAttributeKind {
     fn size_in_bytes(&self) -> u32 {
         match *self {
             VertexAttributeKind::F32 => 4,
-            #[cfg(feature = "debug_renderer")]
             VertexAttributeKind::U8Norm => 1,
             VertexAttributeKind::U16Norm => 2,
             VertexAttributeKind::I32 => 4,
@@ -320,7 +316,6 @@ impl VertexAttribute {
                     offset,
                 );
             }
-            #[cfg(feature = "debug_renderer")]
             VertexAttributeKind::U8Norm => {
                 gl.vertex_attrib_pointer(
                     attr_index,
@@ -542,7 +537,6 @@ impl Texture {
         self.format
     }
 
-    #[cfg(any(feature = "debug_renderer", feature = "capture"))]
     pub fn get_filter(&self) -> TextureFilter {
         self.filter
     }
@@ -879,7 +873,6 @@ impl UniformLocation {
     pub const INVALID: Self = UniformLocation(-1);
 }
 
-#[cfg(feature = "debug_renderer")]
 pub struct Capabilities {
     pub supports_multisampling: bool,
 }
@@ -935,7 +928,6 @@ pub struct Device {
     upload_method: UploadMethod,
 
     // HW or API capabilities
-    #[cfg(feature = "debug_renderer")]
     capabilities: Capabilities,
 
     bgra_format_internal: gl::GLuint,
@@ -1007,6 +999,38 @@ impl<'a> DrawTarget<'a> {
         match *self {
             DrawTarget::Default(d) => d,
             DrawTarget::Texture { texture, .. } => texture.get_dimensions(),
+        }
+    }
+
+    /// Given a scissor rect, convert it to the right coordinate space
+    /// depending on the draw target kind. If no scissor rect was supplied,
+    /// returns a scissor rect that encloses the entire render target.
+    pub fn build_scissor_rect(
+        &self,
+        scissor_rect: Option<DeviceIntRect>,
+        framebuffer_target_rect: DeviceIntRect,
+    ) -> DeviceIntRect {
+        let dimensions = self.dimensions();
+
+        match scissor_rect {
+            Some(scissor_rect) => {
+                // Note: `framebuffer_target_rect` needs a Y-flip before going to GL
+                if self.is_default() {
+                    let mut rect = scissor_rect
+                        .intersection(&framebuffer_target_rect.to_i32())
+                        .unwrap_or(DeviceIntRect::zero());
+                    rect.origin.y = dimensions.height as i32 - rect.origin.y - rect.size.height;
+                    rect
+                } else {
+                    scissor_rect
+                }
+            }
+            None => {
+                DeviceIntRect::new(
+                    DeviceIntPoint::zero(),
+                    dimensions,
+                )
+            }
         }
     }
 }
@@ -1158,7 +1182,6 @@ impl Device {
             upload_method,
             inside_frame: false,
 
-            #[cfg(feature = "debug_renderer")]
             capabilities: Capabilities {
                 supports_multisampling: false, //TODO
             },
@@ -1223,7 +1246,6 @@ impl Device {
         self.max_texture_layers as usize
     }
 
-    #[cfg(feature = "debug_renderer")]
     pub fn get_capabilities(&self) -> &Capabilities {
         &self.capabilities
     }
@@ -2075,7 +2097,6 @@ impl Device {
         }
     }
 
-    #[cfg(feature = "debug_renderer")]
     pub fn get_uniform_location(&self, program: &Program, name: &str) -> UniformLocation {
         UniformLocation(self.gl.get_uniform_location(program.id, name))
     }
@@ -2181,7 +2202,6 @@ impl Device {
         }
     }
 
-    #[cfg(any(feature = "debug_renderer", feature = "capture"))]
     pub fn read_pixels(&mut self, img_desc: &ImageDescriptor) -> Vec<u8> {
         let desc = self.gl_describe_format(img_desc.format);
         self.gl.read_pixels(
@@ -2228,7 +2248,6 @@ impl Device {
     }
 
     /// Get texels of a texture into the specified output slice.
-    #[cfg(feature = "debug_renderer")]
     pub fn get_tex_image_into(
         &mut self,
         texture: &Texture,
@@ -2247,7 +2266,6 @@ impl Device {
     }
 
     /// Attaches the provided texture to the current Read FBO binding.
-    #[cfg(any(feature = "debug_renderer", feature="capture"))]
     fn attach_read_texture_raw(
         &mut self, texture_id: gl::GLuint, target: gl::GLuint, layer_id: i32
     ) {
@@ -2274,14 +2292,12 @@ impl Device {
         }
     }
 
-    #[cfg(any(feature = "debug_renderer", feature="capture"))]
     pub fn attach_read_texture_external(
         &mut self, texture_id: gl::GLuint, target: TextureTarget, layer_id: i32
     ) {
         self.attach_read_texture_raw(texture_id, get_gl_target(target), layer_id)
     }
 
-    #[cfg(any(feature = "debug_renderer", feature="capture"))]
     pub fn attach_read_texture(&mut self, texture: &Texture, layer_id: i32) {
         self.attach_read_texture_raw(texture.id, texture.target, layer_id)
     }
@@ -2517,7 +2533,6 @@ impl Device {
         );
     }
 
-    #[cfg(feature = "debug_renderer")]
     pub fn draw_triangles_u32(&mut self, first_vertex: i32, index_count: i32) {
         debug_assert!(self.inside_frame);
         self.gl.draw_elements(
@@ -2533,7 +2548,6 @@ impl Device {
         self.gl.draw_arrays(gl::POINTS, first_vertex, vertex_count);
     }
 
-    #[cfg(feature = "debug_renderer")]
     pub fn draw_nonindexed_lines(&mut self, first_vertex: i32, vertex_count: i32) {
         debug_assert!(self.inside_frame);
         self.gl.draw_arrays(gl::LINES, first_vertex, vertex_count);
@@ -2701,7 +2715,6 @@ impl Device {
             .blend_func_separate(gl::ONE, gl::ONE, gl::ONE, gl::ONE);
         self.gl.blend_equation_separate(gl::MAX, gl::FUNC_ADD);
     }
-    #[cfg(feature = "debug_renderer")]
     pub fn set_blend_mode_min(&self) {
         self.gl
             .blend_func_separate(gl::ONE, gl::ONE, gl::ONE, gl::ONE);

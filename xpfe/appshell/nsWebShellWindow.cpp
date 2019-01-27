@@ -71,8 +71,8 @@
 #include "gfxPlatform.h"
 
 #ifdef XP_MACOSX
-#include "nsINativeMenuService.h"
-#define USE_NATIVE_MENUS
+#  include "nsINativeMenuService.h"
+#  define USE_NATIVE_MENUS
 #endif
 
 using namespace mozilla;
@@ -633,7 +633,15 @@ nsWebShellWindow::OnStatusChange(nsIWebProgress* aWebProgress,
 
 NS_IMETHODIMP
 nsWebShellWindow::OnSecurityChange(nsIWebProgress* aWebProgress,
-                                   nsIRequest* aRequest, uint32_t state) {
+                                   nsIRequest* aRequest, uint32_t aState) {
+  MOZ_ASSERT_UNREACHABLE("notification excluded in AddProgressListener(...)");
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+nsWebShellWindow::OnContentBlockingEvent(nsIWebProgress* aWebProgress,
+                                         nsIRequest* aRequest,
+                                         uint32_t aEvent) {
   MOZ_ASSERT_UNREACHABLE("notification excluded in AddProgressListener(...)");
   return NS_OK;
 }

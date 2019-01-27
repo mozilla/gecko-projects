@@ -36,12 +36,8 @@
 #include "mozilla/webrender/RenderThread.h"
 #include "mozilla/widget/CompositorWidget.h"
 
-#ifdef XP_WIN
-#include "dwrite.h"
-#endif
-
 #ifdef MOZ_GECKO_PROFILER
-#include "ProfilerMarkerPayload.h"
+#  include "ProfilerMarkerPayload.h"
 #endif
 
 bool is_in_main_thread() { return NS_IsMainThread(); }
@@ -56,13 +52,17 @@ bool is_in_render_thread() {
 
 void gecko_profiler_start_marker(const char* name) {
 #ifdef MOZ_GECKO_PROFILER
-  profiler_tracing("WebRender", name, TRACING_INTERVAL_START);
+  profiler_tracing("WebRender", name,
+                   js::ProfilingStackFrame::Category::GRAPHICS,
+                   TRACING_INTERVAL_START);
 #endif
 }
 
 void gecko_profiler_end_marker(const char* name) {
 #ifdef MOZ_GECKO_PROFILER
-  profiler_tracing("WebRender", name, TRACING_INTERVAL_END);
+  profiler_tracing("WebRender", name,
+                   js::ProfilingStackFrame::Category::GRAPHICS,
+                   TRACING_INTERVAL_END);
 #endif
 }
 
@@ -205,7 +205,9 @@ class SceneBuiltNotification : public wr::NotificationHandler {
             };
 
             profiler_add_marker_for_thread(
-                profiler_current_thread_id(), "CONTENT_FULL_PAINT_TIME",
+                profiler_current_thread_id(),
+                js::ProfilingStackFrame::Category::GRAPHICS,
+                "CONTENT_FULL_PAINT_TIME",
                 MakeUnique<ContentFullPaintPayload>(startTime, endTime));
           }
 #endif
@@ -700,49 +702,6 @@ void WebRenderBridgeParent::ObserveSharedSurfaceRelease(
   }
 }
 
-// Debugging kluge for bug 1455848. Remove once debugged!
-mozilla::ipc::IPCResult WebRenderBridgeParent::RecvValidateFontDescriptor(
-    nsTArray<uint8_t>&& aData) {
-  if (mDestroyed) {
-    return IPC_OK();
-  }
-#ifdef XP_WIN
-  nsTArray<uint8_t> data(aData);
-  wchar_t* family = (wchar_t*)data.Elements();
-  size_t remaining = data.Length() / sizeof(wchar_t);
-  size_t familyLength = wcsnlen_s(family, remaining);
-  MOZ_ASSERT(familyLength < remaining && family[familyLength] == 0);
-  remaining -= familyLength + 1;
-  wchar_t* files = family + familyLength + 1;
-  BOOL exists = FALSE;
-  if (RefPtr<IDWriteFontCollection> systemFonts =
-          Factory::GetDWriteSystemFonts()) {
-    UINT32 idx;
-    systemFonts->FindFamilyName(family, &idx, &exists);
-  }
-  if (!remaining) {
-    gfxCriticalNote << (exists ? "found" : "MISSING") << " font family \""
-                    << family << "\" has no files!";
-  }
-  while (remaining > 0) {
-    size_t fileLength = wcsnlen_s(files, remaining);
-    MOZ_ASSERT(fileLength < remaining && files[fileLength] == 0);
-    DWORD attribs = GetFileAttributesW(files);
-    if (!exists || attribs == INVALID_FILE_ATTRIBUTES) {
-      gfxCriticalNote << (exists ? "found" : "MISSING") << " font family \""
-                      << family << "\" has "
-                      << (attribs == INVALID_FILE_ATTRIBUTES ? "INVALID"
-                                                             : "valid")
-                      << "(" << hexa(attribs) << ")"
-                      << " file \"" << files << "\"";
-    }
-    remaining -= fileLength + 1;
-    files += fileLength + 1;
-  }
-#endif
-  return IPC_OK();
-}
-
 mozilla::ipc::IPCResult WebRenderBridgeParent::RecvUpdateResources(
     nsTArray<OpUpdateResource>&& aResourceUpdates,
     nsTArray<RefCountedShmem>&& aSmallShmems,
@@ -917,7 +876,7 @@ mozilla::ipc::IPCResult WebRenderBridgeParent::RecvSetDisplayList(
     CrashReporter::AnnotateCrashReport(CrashReporter::Annotation::URL, aTxnURL);
   }
 
-  AUTO_PROFILER_TRACING("Paint", "SetDisplayList");
+  AUTO_PROFILER_TRACING("Paint", "SetDisplayList", GRAPHICS);
   UpdateFwdTransactionId(aFwdTransactionId);
 
   // This ensures that destroy operations are always processed. It is not safe
@@ -1043,7 +1002,7 @@ mozilla::ipc::IPCResult WebRenderBridgeParent::RecvEmptyTransaction(
     CrashReporter::AnnotateCrashReport(CrashReporter::Annotation::URL, aTxnURL);
   }
 
-  AUTO_PROFILER_TRACING("Paint", "EmptyTransaction");
+  AUTO_PROFILER_TRACING("Paint", "EmptyTransaction", GRAPHICS);
   UpdateFwdTransactionId(aFwdTransactionId);
 
   // This ensures that destroy operations are always processed. It is not safe
@@ -1720,7 +1679,7 @@ void WebRenderBridgeParent::CompositeToTarget(VsyncId aId,
   MOZ_ASSERT(aTarget == nullptr);
   MOZ_ASSERT(aRect == nullptr);
 
-  AUTO_PROFILER_TRACING("Paint", "CompositeToTarget");
+  AUTO_PROFILER_TRACING("Paint", "CompositeToTarget", GRAPHICS);
   if (mPaused || !mReceivedDisplayList) {
     mPreviousFrameTimeStamp = TimeStamp();
     return;
@@ -1729,13 +1688,8 @@ void WebRenderBridgeParent::CompositeToTarget(VsyncId aId,
   if (mSkippedComposite ||
       wr::RenderThread::Get()->TooManyPendingFrames(mApi->GetId())) {
     // Render thread is busy, try next time.
-    if (!mSkippedComposite) {
-      // Only record the vsync id for the first skipped composite,
-      // since this matches what we do for compressing messages
-      // in CompositorVsyncScheduler::PostCompositeTask.
-      mSkippedComposite = true;
-      mSkippedCompositeId = aId;
-    }
+    mSkippedComposite = true;
+    mSkippedCompositeId = aId;
     mPreviousFrameTimeStamp = TimeStamp();
 
     // Record that we skipped presenting a frame for

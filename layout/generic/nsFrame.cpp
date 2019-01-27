@@ -2545,6 +2545,13 @@ static bool FrameParticipatesIn3DContext(nsIFrame* aAncestor,
 static bool ItemParticipatesIn3DContext(nsIFrame* aAncestor,
                                         nsDisplayItem* aItem) {
   auto type = aItem->GetType();
+
+  if (type == DisplayItemType::TYPE_WRAP_LIST &&
+      aItem->GetChildren()->Count() == 1) {
+    // If the wraplist has only one child item, use the type of that item.
+    type = aItem->GetChildren()->GetBottom()->GetType();
+  }
+
   if (type != DisplayItemType::TYPE_TRANSFORM &&
       type != DisplayItemType::TYPE_PERSPECTIVE) {
     return false;
@@ -10962,7 +10969,7 @@ void nsFrame::VerifyDirtyBitSet(const nsFrameList& aFrameList) {
 }
 
 // Start Display Reflow
-#ifdef DEBUG
+#  ifdef DEBUG
 
 DR_cookie::DR_cookie(nsPresContext* aPresContext, nsIFrame* aFrame,
                      const ReflowInput& aReflowInput, ReflowOutput& aMetrics,
@@ -11460,12 +11467,12 @@ void DR_State::InitFrameTypeTable() {
   AddFrameTypeInfo(LayoutFrameType::TextInput, "textCtl", "textInput");
   AddFrameTypeInfo(LayoutFrameType::Text, "text", "text");
   AddFrameTypeInfo(LayoutFrameType::Viewport, "VP", "viewport");
-#ifdef MOZ_XUL
+#    ifdef MOZ_XUL
   AddFrameTypeInfo(LayoutFrameType::XULLabel, "XULLabel", "XULLabel");
   AddFrameTypeInfo(LayoutFrameType::Box, "Box", "Box");
   AddFrameTypeInfo(LayoutFrameType::Slider, "Slider", "Slider");
   AddFrameTypeInfo(LayoutFrameType::PopupSet, "PopupSet", "PopupSet");
-#endif
+#    endif
   AddFrameTypeInfo(LayoutFrameType::None, "unknown", "unknown");
 }
 
@@ -12033,7 +12040,7 @@ void DR_cookie::Change() const {
   DR_state->DeleteTreeNode(*treeNode);
 }
 
-#endif
+#  endif
 // End Display Reflow
 
 #endif

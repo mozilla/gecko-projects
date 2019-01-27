@@ -498,7 +498,7 @@ class AutoLeaveZeal {
     JS_GetGCZealBits(cx_, &zealBits_, &frequency_, &dummy);
     JS_SetGCZeal(cx_, 0, 0);
     JS::PrepareForFullGC(cx_);
-    JS::NonIncrementalGC(cx_, GC_SHRINK, JS::gcreason::DEBUG_GC);
+    JS::NonIncrementalGC(cx_, GC_SHRINK, JS::GCReason::DEBUG_GC);
   }
   ~AutoLeaveZeal() {
     JS_SetGCZeal(cx_, 0, 0);
@@ -508,12 +508,12 @@ class AutoLeaveZeal {
       }
     }
 
-#ifdef DEBUG
+#  ifdef DEBUG
     uint32_t zealBitsAfter, frequencyAfter, dummy;
     JS_GetGCZealBits(cx_, &zealBitsAfter, &frequencyAfter, &dummy);
     MOZ_ASSERT(zealBitsAfter == zealBits_);
     MOZ_ASSERT(frequencyAfter == frequency_);
-#endif
+#  endif
   }
 };
 #endif /* JS_GC_ZEAL */

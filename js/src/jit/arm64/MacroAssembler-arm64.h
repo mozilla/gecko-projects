@@ -16,12 +16,12 @@
 #include "jit/MoveResolver.h"
 
 #ifdef _M_ARM64
-#ifdef move32
-#undef move32
-#endif
-#ifdef move64
-#undef move64
-#endif
+#  ifdef move32
+#    undef move32
+#  endif
+#  ifdef move64
+#    undef move64
+#  endif
 #endif
 
 namespace js {
@@ -219,7 +219,7 @@ class MacroAssemblerCompat : public vixl::MacroAssembler {
 
   void pop(const ValueOperand& v) { pop(v.valueReg()); }
   void pop(const FloatRegister& f) {
-    vixl::MacroAssembler::Pop(ARMRegister(f.code(), 64));
+    vixl::MacroAssembler::Pop(ARMFPRegister(f, 64));
   }
 
   void implicitPop(uint32_t args) {

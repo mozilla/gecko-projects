@@ -191,14 +191,12 @@ class Zone : public JS::shadow::Zone,
     DiscardBaselineCode
   };
 
-  enum ShouldReleaseTypes : bool {
-    KeepTypes = false,
-    ReleaseTypes
-  };
+  enum ShouldReleaseTypes : bool { KeepTypes = false, ReleaseTypes };
 
-  void discardJitCode(js::FreeOp* fop,
-                      ShouldDiscardBaselineCode discardBaselineCode = DiscardBaselineCode,
-                      ShouldReleaseTypes releaseTypes = KeepTypes);
+  void discardJitCode(
+      js::FreeOp* fop,
+      ShouldDiscardBaselineCode discardBaselineCode = DiscardBaselineCode,
+      ShouldReleaseTypes releaseTypes = KeepTypes);
 
   void addSizeOfIncludingThis(mozilla::MallocSizeOf mallocSizeOf,
                               size_t* typePool, size_t* regexpZone,
@@ -271,6 +269,10 @@ class Zone : public JS::shadow::Zone,
   void setNeedsIncrementalBarrier(bool needs);
   const uint32_t* addressOfNeedsIncrementalBarrier() const {
     return &needsIncrementalBarrier_;
+  }
+
+  static constexpr size_t offsetOfNeedsIncrementalBarrier() {
+    return offsetof(Zone, needsIncrementalBarrier_);
   }
 
   js::jit::JitZone* getJitZone(JSContext* cx) {

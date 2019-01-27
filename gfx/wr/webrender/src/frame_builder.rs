@@ -13,7 +13,7 @@ use gpu_types::{PrimitiveHeaders, TransformPalette, UvRectKind, ZBufferIdGenerat
 use hit_test::{HitTester, HitTestingRun};
 use internal_types::{FastHashMap, PlaneSplitter};
 use picture::{PictureSurface, PictureUpdateState, SurfaceInfo, ROOT_SURFACE_INDEX, SurfaceIndex};
-use picture::{RetainedTiles, TileCache};
+use picture::{RetainedTiles, TileCache, DirtyRegion};
 use prim_store::{PrimitiveStore, SpaceMapper, PictureIndex, PrimitiveDebugId, PrimitiveScratchBuffer};
 #[cfg(feature = "replay")]
 use prim_store::{PrimitiveStoreStats};
@@ -108,6 +108,24 @@ pub struct FrameBuildingState<'a> {
     pub transforms: &'a mut TransformPalette,
     pub segment_builder: SegmentBuilder,
     pub surfaces: &'a mut Vec<SurfaceInfo>,
+    pub dirty_region_stack: Vec<DirtyRegion>,
+}
+
+impl<'a> FrameBuildingState<'a> {
+    /// Retrieve the current dirty region during primitive traversal.
+    pub fn current_dirty_region(&self) -> &DirtyRegion {
+        self.dirty_region_stack.last().unwrap()
+    }
+
+    /// Push a new dirty region for child primitives to cull / clip against.
+    pub fn push_dirty_region(&mut self, region: DirtyRegion) {
+        self.dirty_region_stack.push(region);
+    }
+
+    /// Pop the top dirty region from the stack.
+    pub fn pop_dirty_region(&mut self) {
+        self.dirty_region_stack.pop().unwrap();
+    }
 }
 
 /// Immutable context of a picture when processing children.
@@ -123,7 +141,7 @@ pub struct PictureContext {
     pub raster_spatial_node_index: SpatialNodeIndex,
     /// The surface that this picture will render on.
     pub surface_index: SurfaceIndex,
-    pub dirty_world_rect: WorldRect,
+    pub dirty_region_count: usize,
 }
 
 /// Mutable state of a picture that gets modified when
@@ -235,6 +253,7 @@ impl FrameBuilder {
     /// primitives in screen space.
     fn build_layer_screen_rects_and_cull_layers(
         &mut self,
+        screen_world_rect: WorldRect,
         clip_scroll_tree: &ClipScrollTree,
         pipelines: &FastHashMap<PipelineId, Arc<ScenePipeline>>,
         resource_cache: &mut ResourceCache,
@@ -260,8 +279,6 @@ impl FrameBuilder {
         let root_spatial_node_index = clip_scroll_tree.root_reference_frame_index();
 
         const MAX_CLIP_COORD: f32 = 1.0e9;
-
-        let screen_world_rect = (self.screen_rect.to_f32() / device_pixel_scale).round_out();
 
         let frame_context = FrameBuildingContext {
             device_pixel_scale,
@@ -346,7 +363,17 @@ impl FrameBuilder {
             transforms: transform_palette,
             segment_builder: SegmentBuilder::new(),
             surfaces: pic_update_state.surfaces,
+            dirty_region_stack: Vec::new(),
         };
+
+        // Push a default dirty region which culls primitives
+        // against the screen world rect, in absence of any
+        // other dirty regions.
+        let mut default_dirty_region = DirtyRegion::new();
+        default_dirty_region.push(
+            frame_context.screen_world_rect,
+        );
+        frame_state.push_dirty_region(default_dirty_region);
 
         let (pic_context, mut pic_state, mut prim_list) = self
             .prim_store
@@ -359,7 +386,6 @@ impl FrameBuilder {
                 true,
                 &mut frame_state,
                 &frame_context,
-                screen_world_rect,
             )
             .unwrap();
 
@@ -378,7 +404,10 @@ impl FrameBuilder {
             prim_list,
             pic_context,
             pic_state,
+            &mut frame_state,
         );
+
+        frame_state.pop_dirty_region();
 
         let child_tasks = frame_state
             .surfaces[ROOT_SURFACE_INDEX.0]
@@ -392,7 +421,6 @@ impl FrameBuilder {
             child_tasks,
             UvRectKind::Rect,
             root_spatial_node_index,
-            None,
         );
 
         let render_task_id = frame_state.render_tasks.add(root_render_task);
@@ -447,8 +475,10 @@ impl FrameBuilder {
         let mut surfaces = Vec::new();
 
         let screen_size = self.screen_rect.size.to_i32();
+        let screen_world_rect = (self.screen_rect.to_f32() / device_pixel_scale).round_out();
 
         let main_render_task_id = self.build_layer_screen_rects_and_cull_layers(
+            screen_world_rect,
             clip_scroll_tree,
             pipelines,
             resource_cache,
@@ -515,6 +545,7 @@ impl FrameBuilder {
                 data_stores,
                 surfaces: &surfaces,
                 scratch,
+                screen_world_rect,
             };
 
             pass.build(
@@ -560,7 +591,6 @@ impl FrameBuilder {
             has_been_rendered: false,
             has_texture_cache_tasks,
             prim_headers,
-            #[cfg(feature = "debug_renderer")]
             debug_items: mem::replace(&mut scratch.debug_items, Vec::new()),
         }
     }

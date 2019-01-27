@@ -6,12 +6,10 @@ use api::{DeviceRect, FilterOp, MixBlendMode, PipelineId, PremultipliedColorF, P
 use api::{DeviceIntRect, DevicePoint, LayoutRect, PictureToRasterTransform, LayoutPixel, PropertyBinding, PropertyBindingId};
 use api::{DevicePixelScale, RasterRect, RasterSpace, ColorF, ImageKey, DirtyRect, WorldSize, ClipMode, LayoutSize};
 use api::{PicturePixel, RasterPixel, WorldPixel, WorldRect, ImageFormat, ImageDescriptor, WorldVector2D, LayoutPoint};
-#[cfg(feature = "debug_renderer")]
 use api::{DebugFlags, DeviceVector2D};
 use box_shadow::{BLUR_SAMPLE_SCALE};
-use clip::{ClipStore, ClipChainId, ClipChainNode, ClipItem};
+use clip::{ClipChainId, ClipChainNode, ClipItem};
 use clip_scroll_tree::{ROOT_SPATIAL_NODE_INDEX, ClipScrollTree, SpatialNodeIndex, CoordinateSystemId};
-#[cfg(feature = "debug_renderer")]
 use debug_colors;
 use device::TextureFilter;
 use euclid::{TypedScale, vec3, TypedRect, TypedPoint2D, TypedSize2D};
@@ -29,12 +27,11 @@ use prim_store::{OpacityBindingStorage, ImageInstanceStorage, OpacityBindingInde
 use print_tree::PrintTreePrinter;
 use render_backend::DataStores;
 use render_task::{ClearMode, RenderTask, RenderTaskCacheEntryHandle, TileBlit};
-use render_task::{RenderTaskCacheKey, RenderTaskCacheKeyKind, RenderTaskId, RenderTaskLocation};
+use render_task::{RenderTaskId, RenderTaskLocation};
 use resource_cache::ResourceCache;
 use scene::{FilterOpHelpers, SceneProperties};
 use scene_builder::Interners;
 use smallvec::SmallVec;
-use surface::{SurfaceDescriptor};
 use std::{mem, u16};
 use std::sync::atomic::{AtomicUsize, ATOMIC_USIZE_INIT, Ordering};
 use texture_cache::{Eviction, TextureCacheHandle};
@@ -100,13 +97,8 @@ pub struct TileIndex(pub usize);
 pub const TILE_SIZE_WIDTH: i32 = 1024;
 pub const TILE_SIZE_HEIGHT: i32 = 256;
 const FRAMES_BEFORE_CACHING: usize = 2;
+const MAX_DIRTY_RECTS: usize = 3;
 
-/// The maximum size per axis of texture cache item,
-///  in WorldPixel coordinates.
-// TODO(gw): This size is quite arbitrary - we should do some
-//           profiling / telemetry to see when it makes sense
-//           to cache a picture.
-const MAX_CACHE_SIZE: f32 = 2048.0;
 /// The maximum size per axis of a surface,
 ///  in WorldPixel coordinates.
 const MAX_SURFACE_SIZE: f32 = 4096.0;
@@ -119,6 +111,10 @@ const MAX_PRIMS_TO_SEARCH: usize = 128;
 /// Used to get unique tile IDs, even when the tile cache is
 /// destroyed between display lists / scenes.
 static NEXT_TILE_ID: AtomicUsize = ATOMIC_USIZE_INIT;
+
+fn clamp(value: i32, low: i32, high: i32) -> i32 {
+    value.max(low).min(high)
+}
 
 /// Information about the state of an opacity binding.
 #[derive(Debug)]
@@ -186,6 +182,9 @@ pub struct Tile {
     /// they were important or can be discarded until we know the
     /// tile cache bounding rect.
     potential_clips: FastHashMap<RectangleKey, SpatialNodeIndex>,
+    /// If true, this tile should still be considered as part of
+    /// the dirty rect calculations.
+    consider_for_dirty_rect: bool,
 }
 
 impl Tile {
@@ -206,6 +205,7 @@ impl Tile {
             transforms: FastHashSet::default(),
             potential_clips: FastHashMap::default(),
             id,
+            consider_for_dirty_rect: false,
         }
     }
 
@@ -338,13 +338,189 @@ impl TileDescriptor {
     }
 }
 
+/// Stores both the world and devices rects for a single dirty rect.
+#[derive(Debug, Clone)]
+pub struct DirtyRegionRect {
+    pub world_rect: WorldRect,
+}
+
 /// Represents the dirty region of a tile cache picture.
-/// In future, we will want to support multiple dirty
-/// regions.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct DirtyRegion {
-    pub dirty_world_rect: WorldRect,
-    pub dirty_device_rect: DeviceIntRect,
+    /// The individual dirty rects of this region.
+    pub dirty_rects: Vec<DirtyRegionRect>,
+
+    /// The overall dirty rect, a combination of dirty_rects
+    pub combined: DirtyRegionRect,
+}
+
+impl DirtyRegion {
+    /// Construct a new dirty region tracker.
+    pub fn new() -> Self {
+        DirtyRegion {
+            dirty_rects: Vec::with_capacity(MAX_DIRTY_RECTS),
+            combined: DirtyRegionRect {
+                world_rect: WorldRect::zero(),
+            },
+        }
+    }
+
+    /// Reset the dirty regions back to empty
+    pub fn clear(&mut self) {
+        self.dirty_rects.clear();
+        self.combined = DirtyRegionRect {
+            world_rect: WorldRect::zero(),
+        }
+    }
+
+    /// Push a dirty rect into this region
+    pub fn push(
+        &mut self,
+        rect: WorldRect,
+    ) {
+        // Include this in the overall dirty rect
+        self.combined.world_rect = self.combined.world_rect.union(&rect);
+
+        // Store the individual dirty rect.
+        self.dirty_rects.push(DirtyRegionRect {
+            world_rect: rect,
+        });
+    }
+
+    /// Returns true if this region has no dirty rects
+    pub fn is_empty(&self) -> bool {
+        self.dirty_rects.is_empty()
+    }
+
+    /// Collapse all dirty rects into a single dirty rect.
+    pub fn collapse(&mut self) {
+        self.dirty_rects.clear();
+        self.dirty_rects.push(self.combined.clone());
+    }
+
+    pub fn inflate(
+        &self,
+        inflate_amount: f32,
+    ) -> DirtyRegion {
+        let mut dirty_rects = Vec::with_capacity(self.dirty_rects.len());
+        let mut combined = DirtyRegionRect {
+            world_rect: WorldRect::zero(),
+        };
+
+        for rect in &self.dirty_rects {
+            let world_rect = rect.world_rect.inflate(inflate_amount, inflate_amount);
+            combined.world_rect = combined.world_rect.union(&world_rect);
+            dirty_rects.push(DirtyRegionRect {
+                world_rect,
+            });
+        }
+
+        DirtyRegion {
+            dirty_rects,
+            combined,
+        }
+    }
+}
+
+/// A helper struct to build a (roughly) minimal set of dirty rectangles
+/// from a list of individual dirty rectangles. This minimizes the number
+/// of scissors rects and batch resubmissions that are needed.
+struct DirtyRegionBuilder<'a> {
+    tiles: &'a mut [Tile],
+    tile_count: TileSize,
+}
+
+impl<'a> DirtyRegionBuilder<'a> {
+    fn new(
+        tiles: &'a mut [Tile],
+        tile_count: TileSize,
+    ) -> Self {
+        DirtyRegionBuilder {
+            tiles,
+            tile_count,
+        }
+    }
+
+    fn tile_index(&self, x: i32, y: i32) -> usize {
+        (y * self.tile_count.width + x) as usize
+    }
+
+    fn is_dirty(&self, x: i32, y: i32) -> bool {
+        if x == self.tile_count.width || y == self.tile_count.height {
+            return false;
+        }
+
+        self.get_tile(x, y).consider_for_dirty_rect
+    }
+
+    fn get_tile(&self, x: i32, y: i32) -> &Tile {
+        &self.tiles[self.tile_index(x, y)]
+    }
+
+    fn get_tile_mut(&mut self, x: i32, y: i32) -> &mut Tile {
+        &mut self.tiles[self.tile_index(x, y)]
+    }
+
+    /// Return true if the entire column is dirty
+    fn column_is_dirty(&self, x: i32, y0: i32, y1: i32) -> bool {
+        for y in y0 .. y1 {
+            if !self.is_dirty(x, y) {
+                return false;
+            }
+        }
+
+        true
+    }
+
+    /// Push a dirty rect into the final region list.
+    fn push_dirty_rect(
+        &mut self,
+        x0: i32,
+        y0: i32,
+        x1: i32,
+        y1: i32,
+        dirty_region: &mut DirtyRegion,
+    ) {
+        // Construct the overall dirty rect by combining the visible
+        // parts of the dirty rects that were combined.
+        let mut dirty_world_rect = WorldRect::zero();
+
+        for y in y0 .. y1 {
+            for x in x0 .. x1 {
+                let tile = self.get_tile_mut(x, y);
+                tile.consider_for_dirty_rect = false;
+                if let Some(visible_rect) = tile.visible_rect {
+                    dirty_world_rect = dirty_world_rect.union(&visible_rect);
+                }
+            }
+        }
+
+        dirty_region.push(dirty_world_rect);
+    }
+
+    /// Simple sweep through the tile grid to try and coalesce individual
+    /// dirty rects into a smaller number of larger dirty rectangles.
+    fn build(&mut self, dirty_region: &mut DirtyRegion) {
+        for x0 in 0 .. self.tile_count.width {
+            for y0 in 0 .. self.tile_count.height {
+                let mut y1 = y0;
+
+                while self.is_dirty(x0, y1) {
+                    y1 += 1;
+                }
+
+                if y1 > y0 {
+                    let mut x1 = x0;
+
+                    while self.column_is_dirty(x1, y0, y1) {
+                        x1 += 1;
+                    }
+
+                    self.push_dirty_rect(x0, y0, x1, y1, dirty_region);
+                }
+            }
+        }
+    }
 }
 
 /// Represents a cache of tiles that make up a picture primitives.
@@ -360,14 +536,8 @@ pub struct TileCache {
     /// List of opacity bindings, with some extra information
     /// about whether they changed since last frame.
     opacity_bindings: FastHashMap<PropertyBindingId, OpacityBindingInfo>,
-    /// If Some(..) the region that is dirty in this picture.
-    pub dirty_region: Option<DirtyRegion>,
-    /// If true, we need to update the prim dependencies, due
-    /// to relative transforms changing. The dependencies are
-    /// stored in each tile, and are a list of things that
-    /// force the tile to re-rasterize if they change (e.g.
-    /// images, transforms).
-    needs_update: bool,
+    /// The current dirty region tracker for this picture.
+    pub dirty_region: DirtyRegion,
     /// The current world reference point that tiles are created around.
     world_origin: WorldPoint,
     /// Current size of tiles in world units.
@@ -506,8 +676,7 @@ impl TileCache {
             ),
             tiles_to_draw: Vec::new(),
             opacity_bindings: FastHashMap::default(),
-            dirty_region: None,
-            needs_update: true,
+            dirty_region: DirtyRegion::new(),
             world_origin: WorldPoint::zero(),
             world_tile_size: WorldSize::zero(),
             tile_count: TileSize::zero(),
@@ -529,15 +698,21 @@ impl TileCache {
         let origin = rect.origin - self.world_origin;
 
         // Get the tile coordinates in the picture space.
-        let p0 = TileOffset::new(
+        let mut p0 = TileOffset::new(
             (origin.x / self.world_tile_size.width).floor() as i32,
             (origin.y / self.world_tile_size.height).floor() as i32,
         );
 
-        let p1 = TileOffset::new(
+        let mut p1 = TileOffset::new(
             ((origin.x + rect.size.width) / self.world_tile_size.width).ceil() as i32,
             ((origin.y + rect.size.height) / self.world_tile_size.height).ceil() as i32,
         );
+
+        // Clamp the tile coordinates here to avoid looping over irrelevant tiles later on.
+        p0.x = clamp(p0.x, 0, self.tile_count.width);
+        p0.y = clamp(p0.y, 0, self.tile_count.height);
+        p1.x = clamp(p1.x, 0, self.tile_count.width);
+        p1.y = clamp(p1.y, 0, self.tile_count.height);
 
         (p0, p1)
     }
@@ -747,10 +922,6 @@ impl TileCache {
             // TODO(gw): Should we explicitly drop the tile texture cache handles here?
         }
 
-        // TODO(gw): We don't actually need to update the prim dependencies each frame.
-        //           For common cases, such as only being one main scroll root, we could
-        //           detect this and skip the dependency update on scroll frames.
-        self.needs_update = true;
         self.world_bounding_rect = WorldRect::zero();
         self.root_clip_rect = WorldRect::max_rect();
 
@@ -802,11 +973,9 @@ impl TileCache {
                 }
             }
 
-            if self.needs_update {
-                // Clear any dependencies so that when we rebuild them we
-                // can compare if the tile has the same content.
-                tile.clear();
-            }
+            // Clear any dependencies so that when we rebuild them we
+            // can compare if the tile has the same content.
+            tile.clear();
         }
     }
 
@@ -814,6 +983,7 @@ impl TileCache {
     pub fn update_prim_dependencies(
         &mut self,
         prim_instance: &PrimitiveInstance,
+        prim_rect: LayoutRect,
         clip_scroll_tree: &ClipScrollTree,
         data_stores: &DataStores,
         clip_chain_nodes: &[ClipChainNode],
@@ -821,47 +991,31 @@ impl TileCache {
         resource_cache: &ResourceCache,
         opacity_binding_store: &OpacityBindingStorage,
         image_instances: &ImageInstanceStorage,
-    ) {
-        if !self.needs_update {
-            return;
-        }
-
+    ) -> bool {
         self.map_local_to_world.set_target_spatial_node(
             prim_instance.spatial_node_index,
             clip_scroll_tree,
         );
 
-        let prim_data = &data_stores.as_common_data(&prim_instance);
-
-        let prim_rect = match prim_instance.kind {
-            PrimitiveInstanceKind::Picture { pic_index, .. } => {
-                let pic = &pictures[pic_index.0];
-                pic.local_rect
-            }
-            _ => {
-                LayoutRect::new(
-                    prim_instance.prim_origin,
-                    prim_data.prim_size,
-                )
-            }
-        };
-
         // Map the primitive local rect into world space.
         let world_rect = match self.map_local_to_world.map(&prim_rect) {
             Some(rect) => rect,
-            None => {
-                return;
-            }
+            None => return false,
         };
 
         // If the rect is invalid, no need to create dependencies.
-        // TODO(gw): Need to handle pictures with filters here.
         if world_rect.size.width <= 0.0 || world_rect.size.height <= 0.0 {
-            return;
+            return false;
         }
 
         // Get the tile coordinates in the picture space.
         let (p0, p1) = self.get_tile_coords_for_rect(&world_rect);
+
+        // If the primitive is outside the tiling rects, it's known to not
+        // be visible.
+        if p0.x == p1.x || p0.y == p1.y {
+            return false;
+        }
 
         // Build the list of resources that this primitive has dependencies on.
         let mut opacity_bindings: SmallVec<[OpacityBinding; 4]> = SmallVec::new();
@@ -997,14 +1151,27 @@ impl TileCache {
                                 // local clip rect.
                                 if clip_chain_node.spatial_node_index == prim_instance.spatial_node_index {
                                     culling_rect = culling_rect.intersection(&local_clip_rect).unwrap_or(LayoutRect::zero());
-                                } else {
+
+                                    false
+                                } else if !clip_scroll_tree.is_same_or_child_of(
+                                    clip_chain_node.spatial_node_index,
+                                    self.spatial_node_index,
+                                ) {
+                                    // If the clip node is *not* a child of the main scroll root,
+                                    // add it to the list of potential world clips to be checked later.
+                                    // If it *is* a child of the main scroll root, then just track
+                                    // it as a normal clip dependency, since it likely moves in
+                                    // the same way as the primitive when scrolling (and if it doesn't,
+                                    // we want to invalidate and rasterize).
                                     world_clips.push((
                                         clip_world_rect.into(),
                                         clip_chain_node.spatial_node_index,
                                     ));
-                                }
 
-                                false
+                                    false
+                                } else {
+                                    true
+                                }
                             }
                             None => {
                                 true
@@ -1064,12 +1231,6 @@ impl TileCache {
         // For each affected tile, mark any of the primitive dependencies.
         for y in p0.y .. p1.y {
             for x in p0.x .. p1.x {
-                // If the primitive exists on tiles outside the selected tile cache
-                // area, just ignore those.
-                if x < 0 || x >= self.tile_count.width || y < 0 || y >= self.tile_count.height {
-                    continue;
-                }
-
                 let index = (y * self.tile_count.width + x) as usize;
                 let tile = &mut self.tiles[index];
 
@@ -1125,6 +1286,8 @@ impl TileCache {
                 }
             }
         }
+
+        true
     }
 
     /// Apply any updates after prim dependency updates. This applies
@@ -1135,11 +1298,9 @@ impl TileCache {
         resource_cache: &mut ResourceCache,
         gpu_cache: &mut GpuCache,
         frame_context: &FrameVisibilityContext,
-        _scratch: &mut PrimitiveScratchBuffer,
+        scratch: &mut PrimitiveScratchBuffer,
     ) -> LayoutRect {
-        let mut dirty_world_rect = WorldRect::zero();
-
-        self.dirty_region = None;
+        self.dirty_region.clear();
         self.pending_blits.clear();
 
         let descriptor = ImageDescriptor::new(
@@ -1233,39 +1394,40 @@ impl TileCache {
 
             // Decide how to handle this tile when drawing this frame.
             if tile.is_valid {
+                // No need to include this is any dirty rect calculations.
+                tile.consider_for_dirty_rect = false;
                 self.tiles_to_draw.push(TileIndex(i));
 
-                #[cfg(feature = "debug_renderer")]
-                {
-                    if frame_context.debug_flags.contains(DebugFlags::PICTURE_CACHING_DBG) {
-                        let tile_device_rect = tile.world_rect * frame_context.device_pixel_scale;
-                        let mut label_pos = tile_device_rect.origin + DeviceVector2D::new(20.0, 30.0);
-                        _scratch.push_debug_rect(
+                if frame_context.debug_flags.contains(DebugFlags::PICTURE_CACHING_DBG) {
+                    if let Some(world_rect) = tile.world_rect.intersection(&self.world_bounding_rect) {
+                        let tile_device_rect = world_rect * frame_context.device_pixel_scale;
+                        let mut label_offset = DeviceVector2D::new(20.0, 30.0);
+                        scratch.push_debug_rect(
                             tile_device_rect,
                             debug_colors::GREEN,
                         );
-                        _scratch.push_debug_string(
-                            label_pos,
-                            debug_colors::RED,
-                            format!("{:?} {:?} {:?}", tile.id, tile.handle, tile.world_rect),
-                        );
-                        label_pos.y += 20.0;
-                        _scratch.push_debug_string(
-                            label_pos,
-                            debug_colors::RED,
-                            format!("same: {} frames", tile.same_frames),
-                        );
+                        if tile_device_rect.size.height >= label_offset.y {
+                            scratch.push_debug_string(
+                                tile_device_rect.origin + label_offset,
+                                debug_colors::RED,
+                                format!("{:?} {:?} {:?}", tile.id, tile.handle, tile.world_rect),
+                            );
+                        }
+                        label_offset.y += 20.0;
+                        if tile_device_rect.size.height >= label_offset.y {
+                            scratch.push_debug_string(
+                                tile_device_rect.origin + label_offset,
+                                debug_colors::RED,
+                                format!("same: {} frames", tile.same_frames),
+                            );
+                        }
                     }
                 }
             } else {
-                // Add the tile rect to the dirty rect.
-                dirty_world_rect = dirty_world_rect.union(&visible_rect);
-
-                #[cfg(feature = "debug_renderer")]
-                {
-                    if frame_context.debug_flags.contains(DebugFlags::PICTURE_CACHING_DBG) {
-                        _scratch.push_debug_rect(
-                            visible_rect * frame_context.device_pixel_scale,
+                if frame_context.debug_flags.contains(DebugFlags::PICTURE_CACHING_DBG) {
+                    if let Some(world_rect) = visible_rect.intersection(&self.world_bounding_rect) {
+                        scratch.push_debug_rect(
+                            world_rect * frame_context.device_pixel_scale,
                             debug_colors::RED,
                         );
                     }
@@ -1313,20 +1475,29 @@ impl TileCache {
                     // We can consider this tile valid now.
                     tile.is_valid = true;
                 }
+
+                // This tile should be considered as part of the dirty rect calculations.
+                tile.consider_for_dirty_rect = true;
             }
         }
 
-        // Store the dirty region for drawing the main scene.
-        self.dirty_region = if dirty_world_rect.is_empty() {
-            None
-        } else {
-            let dirty_device_rect = dirty_world_rect * frame_context.device_pixel_scale;
+        // Build a minimal set of dirty rects from the set of dirty tiles that
+        // were found above.
+        let mut builder = DirtyRegionBuilder::new(
+            &mut self.tiles,
+            self.tile_count,
+        );
 
-            Some(DirtyRegion {
-                dirty_world_rect,
-                dirty_device_rect: dirty_device_rect.round().to_i32(),
-            })
-        };
+        builder.build(&mut self.dirty_region);
+
+        // If we end up with too many dirty rects, then it's going to be a lot
+        // of extra draw calls to submit (since we currently just submit every
+        // draw call for every dirty rect). In this case, bail out and work
+        // with a single, large dirty rect. In future we can consider improving
+        // on this by supporting batching per dirty region.
+        if self.dirty_region.dirty_rects.len() > MAX_DIRTY_RECTS {
+            self.dirty_region.collapse();
+        }
 
         local_clip_rect
     }
@@ -1511,6 +1682,7 @@ pub enum PictureCompositeMode {
 #[derive(Debug)]
 pub enum PictureSurface {
     RenderTask(RenderTaskId),
+    #[allow(dead_code)]
     TextureCache(RenderTaskCacheEntryHandle),
 }
 
@@ -1736,6 +1908,21 @@ impl PrimitiveList {
     }
 }
 
+/// Defines configuration options for a given picture primitive.
+pub struct PictureOptions {
+    /// If true, WR should inflate the bounding rect of primitives when
+    /// using a filter effect that requires inflation.
+    pub inflate_if_required: bool,
+}
+
+impl Default for PictureOptions {
+    fn default() -> Self {
+        PictureOptions {
+            inflate_if_required: true,
+        }
+    }
+}
+
 pub struct PicturePrimitive {
     /// List of primitives, and associated info for this picture.
     pub prim_list: PrimitiveList,
@@ -1786,13 +1973,13 @@ pub struct PicturePrimitive {
     /// Local clip rect for this picture.
     pub local_clip_rect: LayoutRect,
 
-    /// A descriptor for this surface that can be used as a cache key.
-    surface_desc: Option<SurfaceDescriptor>,
-
     pub gpu_location: GpuCacheHandle,
 
     /// If Some(..) the tile cache that is associated with this picture.
     pub tile_cache: Option<TileCache>,
+
+    /// The config options for this picture.
+    options: PictureOptions,
 }
 
 impl PicturePrimitive {
@@ -1868,6 +2055,10 @@ impl PicturePrimitive {
         }
     }
 
+    // TODO(gw): We have the PictureOptions struct available. We
+    //           should move some of the parameter list in this
+    //           method to be part of the PictureOptions, and
+    //           avoid adding new parameters here.
     pub fn new_image(
         requested_composite_mode: Option<PictureCompositeMode>,
         context_3d: Picture3DContext<OrderedPictureChild>,
@@ -1878,33 +2069,10 @@ impl PicturePrimitive {
         prim_list: PrimitiveList,
         spatial_node_index: SpatialNodeIndex,
         local_clip_rect: LayoutRect,
-        clip_store: &ClipStore,
         tile_cache: Option<TileCache>,
+        options: PictureOptions,
     ) -> Self {
-        // For now, only create a cache descriptor for blur filters (which
-        // includes text shadows). We can incrementally expand this to
-        // handle more composite modes.
-        let create_cache_descriptor = match requested_composite_mode {
-            Some(PictureCompositeMode::Filter(FilterOp::Blur(blur_radius))) => {
-                blur_radius > 0.0
-            }
-            Some(_) | None => {
-                false
-            }
-        };
-
-        let surface_desc = if create_cache_descriptor {
-            SurfaceDescriptor::new(
-                &prim_list.prim_instances,
-                spatial_node_index,
-                clip_store,
-            )
-        } else {
-            None
-        };
-
         PicturePrimitive {
-            surface_desc,
             prim_list,
             state: None,
             secondary_render_task_id: None,
@@ -1921,6 +2089,7 @@ impl PicturePrimitive {
             local_clip_rect,
             gpu_location: GpuCacheHandle::new(),
             tile_cache,
+            options,
         }
     }
 
@@ -1933,50 +2102,39 @@ impl PicturePrimitive {
         parent_allows_subpixel_aa: bool,
         frame_state: &mut FrameBuildingState,
         frame_context: &FrameBuildingContext,
-        dirty_world_rect: WorldRect,
     ) -> Option<(PictureContext, PictureState, PrimitiveList)> {
         if !self.is_visible() {
             return None;
         }
 
-        // Work out the dirty world rect for this picture.
-        let dirty_world_rect = match self.tile_cache {
-            Some(ref tile_cache) => {
-                // If a tile cache is present, extract the dirty
-                // world rect from the dirty region. If there is
-                // no dirty region there is nothing to render.
-                // TODO(gw): We could early out here in that case?
-                tile_cache
-                    .dirty_region
-                    .as_ref()
-                    .map_or(WorldRect::zero(), |region| {
-                        region.dirty_world_rect
-                    })
-            }
-            None => {
-                // No tile cache - just assume the current dirty world rect.
-                dirty_world_rect
-            }
-        };
-
         // Extract the raster and surface spatial nodes from the raster
         // config, if this picture establishes a surface. Otherwise just
         // pass in the spatial node indices from the parent context.
-        let (raster_spatial_node_index, surface_spatial_node_index, surface_index) = match self.raster_config {
+        let (raster_spatial_node_index, surface_spatial_node_index, surface_index, inflation_factor) = match self.raster_config {
             Some(ref raster_config) => {
                 let surface = &frame_state.surfaces[raster_config.surface_index.0];
 
-                (surface.raster_spatial_node_index, self.spatial_node_index, raster_config.surface_index)
+                (
+                    surface.raster_spatial_node_index,
+                    self.spatial_node_index,
+                    raster_config.surface_index,
+                    surface.inflation_factor,
+                )
             }
             None => {
-                (raster_spatial_node_index, surface_spatial_node_index, surface_index)
+                (
+                    raster_spatial_node_index,
+                    surface_spatial_node_index,
+                    surface_index,
+                    0.0,
+                )
             }
         };
 
         let map_pic_to_world = SpaceMapper::new_with_target(
             ROOT_SPATIAL_NODE_INDEX,
             surface_spatial_node_index,
-            dirty_world_rect,
+            frame_context.screen_world_rect,
             frame_context.clip_scroll_tree,
         );
 
@@ -1991,7 +2149,7 @@ impl PicturePrimitive {
         let (map_raster_to_world, map_pic_to_raster) = create_raster_mappers(
             surface_spatial_node_index,
             raster_spatial_node_index,
-            dirty_world_rect,
+            frame_context.screen_world_rect,
             frame_context.clip_scroll_tree,
         );
 
@@ -2035,6 +2193,21 @@ impl PicturePrimitive {
         // Still disable subpixel AA if parent forbids it
         let allow_subpixel_aa = parent_allows_subpixel_aa && allow_subpixel_aa;
 
+        let mut dirty_region_count = 0;
+
+        // If this is a picture cache, push the dirty region to ensure any
+        // child primitives are culled and clipped to the dirty rect(s).
+        if let Some(ref tile_cache) = self.tile_cache {
+            frame_state.push_dirty_region(tile_cache.dirty_region.clone());
+            dirty_region_count += 1;
+        }
+
+        if inflation_factor > 0.0 {
+            let inflated_region = frame_state.current_dirty_region().inflate(inflation_factor);
+            frame_state.push_dirty_region(inflated_region);
+            dirty_region_count += 1;
+        }
+
         let context = PictureContext {
             pic_index,
             pipeline_id: self.pipeline_id,
@@ -2045,7 +2218,7 @@ impl PicturePrimitive {
             raster_spatial_node_index,
             surface_spatial_node_index,
             surface_index,
-            dirty_world_rect,
+            dirty_region_count,
         };
 
         let prim_list = mem::replace(&mut self.prim_list, PrimitiveList::empty());
@@ -2058,7 +2231,13 @@ impl PicturePrimitive {
         prim_list: PrimitiveList,
         context: PictureContext,
         state: PictureState,
+        frame_state: &mut FrameBuildingState,
     ) {
+        // Pop any dirty regions this picture set
+        for _ in 0 .. context.dirty_region_count {
+            frame_state.pop_dirty_region();
+        }
+
         self.prim_list = prim_list;
         self.state = Some((state, context));
     }
@@ -2208,17 +2387,17 @@ impl PicturePrimitive {
             let parent_raster_spatial_node_index = state.current_surface().raster_spatial_node_index;
             let surface_spatial_node_index = self.spatial_node_index;
 
-            // TODO(gw): For now, we always raster in screen space. Soon,
-            //           we will be able to respect the requested raster
-            //           space, and/or override the requested raster root
-            //           if it makes sense to.
-            let raster_space = RasterSpace::Screen;
-
             let inflation_factor = match composite_mode {
                 PictureCompositeMode::Filter(FilterOp::Blur(blur_radius)) => {
-                    // The amount of extra space needed for primitives inside
-                    // this picture to ensure the visibility check is correct.
-                    BLUR_SAMPLE_SCALE * blur_radius
+                    // Only inflate if the caller hasn't already inflated
+                    // the bounding rects for this filter.
+                    if self.options.inflate_if_required {
+                        // The amount of extra space needed for primitives inside
+                        // this picture to ensure the visibility check is correct.
+                        BLUR_SAMPLE_SCALE * blur_radius
+                    } else {
+                        0.0
+                    }
                 }
                 _ => {
                     0.0
@@ -2260,17 +2439,6 @@ impl PicturePrimitive {
                     &frame_context.clip_scroll_tree,
                 );
             };
-
-            // If we have a cache key / descriptor for this surface,
-            // update any transforms it cares about.
-            if let Some(ref mut surface_desc) = self.surface_desc {
-                surface_desc.update(
-                    surface_spatial_node_index,
-                    surface.raster_spatial_node_index,
-                    frame_context.clip_scroll_tree,
-                    raster_space,
-                );
-            }
 
             self.raster_config = Some(RasterConfig {
                 composite_mode,
@@ -2352,7 +2520,9 @@ impl PicturePrimitive {
 
         // Inflate the local bounding rect if required by the filter effect.
         let inflation_size = match self.raster_config {
-            Some(RasterConfig { composite_mode: PictureCompositeMode::Filter(FilterOp::Blur(blur_radius)), .. }) |
+            Some(RasterConfig { surface_index, composite_mode: PictureCompositeMode::Filter(FilterOp::Blur(_)), .. }) => {
+                Some(state.surfaces[surface_index.0].inflation_factor)
+            }
             Some(RasterConfig { composite_mode: PictureCompositeMode::Filter(FilterOp::DropShadow(_, blur_radius, _)), .. }) => {
                 Some((blur_radius * BLUR_SAMPLE_SCALE).ceil())
             }
@@ -2451,7 +2621,7 @@ impl PicturePrimitive {
         let (map_raster_to_world, map_pic_to_raster) = create_raster_mappers(
             prim_instance.spatial_node_index,
             raster_spatial_node_index,
-            pic_context.dirty_world_rect,
+            frame_context.screen_world_rect,
             frame_context.clip_scroll_tree,
         );
 
@@ -2487,140 +2657,55 @@ impl PicturePrimitive {
             }
             PictureCompositeMode::Filter(FilterOp::Blur(blur_radius)) => {
                 let blur_std_deviation = blur_radius * frame_context.device_pixel_scale.0;
-                let blur_range = (blur_std_deviation * BLUR_SAMPLE_SCALE).ceil() as i32;
+                let inflation_factor = surfaces[raster_config.surface_index.0].inflation_factor;
+                let inflation_factor = (inflation_factor * frame_context.device_pixel_scale.0).ceil() as i32;
 
-                // We need to choose whether to cache this picture, or draw
-                // it into a temporary render target each frame. If we draw
-                // it into a persistently cached texture, then we want to
-                // draw the whole picture, without clipping it to the screen
-                // dimensions, so that it can be reused as it scrolls into
-                // view etc. However, if the unclipped size of the surface is
-                // too big, then it will be very expensive to draw, and may
-                // even be bigger than the maximum hardware render target
-                // size. In these cases, it's probably best to not cache the
-                // picture, and just draw a minimal portion of the picture
-                // (clipped to screen bounds) to a temporary target each frame.
+                // The clipped field is the part of the picture that is visible
+                // on screen. The unclipped field is the screen-space rect of
+                // the complete picture, if no screen / clip-chain was applied
+                // (this includes the extra space for blur region). To ensure
+                // that we draw a large enough part of the picture to get correct
+                // blur results, inflate that clipped area by the blur range, and
+                // then intersect with the total screen rect, to minimize the
+                // allocation size.
+                let device_rect = clipped
+                    .inflate(inflation_factor, inflation_factor)
+                    .intersection(&unclipped.to_i32())
+                    .unwrap();
 
-                let too_big_to_cache = unclipped.size.width > MAX_CACHE_SIZE ||
-                                       unclipped.size.height > MAX_CACHE_SIZE;
+                let uv_rect_kind = calculate_uv_rect_kind(
+                    &pic_rect,
+                    &transform,
+                    &device_rect,
+                    frame_context.device_pixel_scale,
+                    true,
+                );
 
-                // If we can't create a valid cache key for this descriptor (e.g.
-                // due to it referencing old non-interned style primitives), then
-                // don't try to cache it.
-                let has_valid_cache_key = self.surface_desc.is_some();
+                let picture_task = RenderTask::new_picture(
+                    RenderTaskLocation::Dynamic(None, device_rect.size),
+                    unclipped.size,
+                    pic_index,
+                    device_rect.origin,
+                    child_tasks,
+                    uv_rect_kind,
+                    pic_context.raster_spatial_node_index,
+                );
 
-                if !has_valid_cache_key ||
-                   too_big_to_cache ||
-                   !pic_state_for_children.is_cacheable {
-                    // The clipped field is the part of the picture that is visible
-                    // on screen. The unclipped field is the screen-space rect of
-                    // the complete picture, if no screen / clip-chain was applied
-                    // (this includes the extra space for blur region). To ensure
-                    // that we draw a large enough part of the picture to get correct
-                    // blur results, inflate that clipped area by the blur range, and
-                    // then intersect with the total screen rect, to minimize the
-                    // allocation size.
-                    let device_rect = clipped
-                        .inflate(blur_range, blur_range)
-                        .intersection(&unclipped.to_i32())
-                        .unwrap();
+                let picture_task_id = frame_state.render_tasks.add(picture_task);
 
-                    let uv_rect_kind = calculate_uv_rect_kind(
-                        &pic_rect,
-                        &transform,
-                        &device_rect,
-                        frame_context.device_pixel_scale,
-                        true,
-                    );
+                let blur_render_task = RenderTask::new_blur(
+                    blur_std_deviation,
+                    picture_task_id,
+                    frame_state.render_tasks,
+                    RenderTargetKind::Color,
+                    ClearMode::Transparent,
+                );
 
-                    let picture_task = RenderTask::new_picture(
-                        RenderTaskLocation::Dynamic(None, device_rect.size),
-                        unclipped.size,
-                        pic_index,
-                        device_rect.origin,
-                        child_tasks,
-                        uv_rect_kind,
-                        pic_context.raster_spatial_node_index,
-                        None,
-                    );
+                let render_task_id = frame_state.render_tasks.add(blur_render_task);
 
-                    let picture_task_id = frame_state.render_tasks.add(picture_task);
+                surfaces[surface_index.0].tasks.push(render_task_id);
 
-                    let blur_render_task = RenderTask::new_blur(
-                        blur_std_deviation,
-                        picture_task_id,
-                        frame_state.render_tasks,
-                        RenderTargetKind::Color,
-                        ClearMode::Transparent,
-                    );
-
-                    let render_task_id = frame_state.render_tasks.add(blur_render_task);
-
-                    surfaces[surface_index.0].tasks.push(render_task_id);
-
-                    PictureSurface::RenderTask(render_task_id)
-                } else {
-                    // Request a render task that will cache the output in the
-                    // texture cache.
-                    let device_rect = unclipped.to_i32();
-
-                    let uv_rect_kind = calculate_uv_rect_kind(
-                        &pic_rect,
-                        &transform,
-                        &device_rect,
-                        frame_context.device_pixel_scale,
-                        true,
-                    );
-
-                    // TODO(gw): Probably worth changing the render task caching API
-                    //           so that we don't need to always clone the key.
-                    let cache_key = self.surface_desc
-                        .as_ref()
-                        .expect("bug: no cache key for surface")
-                        .cache_key
-                        .clone();
-
-                    let cache_item = frame_state.resource_cache.request_render_task(
-                        RenderTaskCacheKey {
-                            size: device_rect.size,
-                            kind: RenderTaskCacheKeyKind::Picture(cache_key),
-                        },
-                        frame_state.gpu_cache,
-                        frame_state.render_tasks,
-                        None,
-                        false,
-                        |render_tasks| {
-                            let picture_task = RenderTask::new_picture(
-                                RenderTaskLocation::Dynamic(None, device_rect.size),
-                                unclipped.size,
-                                pic_index,
-                                device_rect.origin,
-                                child_tasks,
-                                uv_rect_kind,
-                                pic_context.raster_spatial_node_index,
-                                None,
-                            );
-
-                            let picture_task_id = render_tasks.add(picture_task);
-
-                            let blur_render_task = RenderTask::new_blur(
-                                blur_std_deviation,
-                                picture_task_id,
-                                render_tasks,
-                                RenderTargetKind::Color,
-                                ClearMode::Transparent,
-                            );
-
-                            let render_task_id = render_tasks.add(blur_render_task);
-
-                            surfaces[surface_index.0].tasks.push(render_task_id);
-
-                            render_task_id
-                        }
-                    );
-
-                    PictureSurface::TextureCache(cache_item)
-                }
+                PictureSurface::RenderTask(render_task_id)
             }
             PictureCompositeMode::Filter(FilterOp::DropShadow(offset, blur_radius, color)) => {
                 let blur_std_deviation = blur_radius * frame_context.device_pixel_scale.0;
@@ -2655,7 +2740,6 @@ impl PicturePrimitive {
                     child_tasks,
                     uv_rect_kind,
                     pic_context.raster_spatial_node_index,
-                    None,
                 );
                 picture_task.mark_for_saving();
 
@@ -2721,7 +2805,6 @@ impl PicturePrimitive {
                     child_tasks,
                     uv_rect_kind,
                     pic_context.raster_spatial_node_index,
-                    None,
                 );
 
                 let readback_task_id = frame_state.render_tasks.add(
@@ -2760,7 +2843,6 @@ impl PicturePrimitive {
                     child_tasks,
                     uv_rect_kind,
                     pic_context.raster_spatial_node_index,
-                    None,
                 );
 
                 let render_task_id = frame_state.render_tasks.add(picture_task);
@@ -2791,7 +2873,6 @@ impl PicturePrimitive {
                     child_tasks,
                     uv_rect_kind,
                     pic_context.raster_spatial_node_index,
-                    None,
                 );
 
                 let render_task_id = frame_state.render_tasks.add(picture_task);
@@ -2895,17 +2976,17 @@ fn calculate_uv_rect_kind(
 fn create_raster_mappers(
     surface_spatial_node_index: SpatialNodeIndex,
     raster_spatial_node_index: SpatialNodeIndex,
-    dirty_world_rect: WorldRect,
+    world_rect: WorldRect,
     clip_scroll_tree: &ClipScrollTree,
 ) -> (SpaceMapper<RasterPixel, WorldPixel>, SpaceMapper<PicturePixel, RasterPixel>) {
     let map_raster_to_world = SpaceMapper::new_with_target(
         ROOT_SPATIAL_NODE_INDEX,
         raster_spatial_node_index,
-        dirty_world_rect,
+        world_rect,
         clip_scroll_tree,
     );
 
-    let raster_bounds = map_raster_to_world.unmap(&dirty_world_rect)
+    let raster_bounds = map_raster_to_world.unmap(&world_rect)
                                            .unwrap_or(RasterRect::max_rect());
 
     let map_pic_to_raster = SpaceMapper::new_with_target(

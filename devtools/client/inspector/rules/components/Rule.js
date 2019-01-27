@@ -21,6 +21,9 @@ class Rule extends PureComponent {
       onToggleDeclaration: PropTypes.func.isRequired,
       onToggleSelectorHighlighter: PropTypes.func.isRequired,
       rule: PropTypes.shape(Types.rule).isRequired,
+      showDeclarationNameEditor: PropTypes.func.isRequired,
+      showDeclarationValueEditor: PropTypes.func.isRequired,
+      showSelectorEditor: PropTypes.func.isRequired,
     };
   }
 
@@ -29,9 +32,15 @@ class Rule extends PureComponent {
       onToggleDeclaration,
       onToggleSelectorHighlighter,
       rule,
+      showDeclarationNameEditor,
+      showDeclarationValueEditor,
+      showSelectorEditor,
     } = this.props;
     const {
       declarations,
+      id,
+      isUnmatched,
+      isUserAgentStyle,
       selector,
       sourceLink,
       type,
@@ -39,12 +48,19 @@ class Rule extends PureComponent {
 
     return (
       dom.div(
-        { className: "ruleview-rule devtools-monospace" },
+        {
+          className: "ruleview-rule devtools-monospace" +
+                     (isUnmatched ? " unmatched" : "") +
+                     (isUserAgentStyle ? " uneditable" : ""),
+        },
         SourceLink({ sourceLink }),
         dom.div({ className: "ruleview-code" },
           dom.div({},
             Selector({
+              id,
+              isUserAgentStyle,
               selector,
+              showSelectorEditor,
               type,
             }),
             type !== CSSRule.KEYFRAME_RULE ?
@@ -58,7 +74,10 @@ class Rule extends PureComponent {
           ),
           Declarations({
             declarations,
+            isUserAgentStyle,
             onToggleDeclaration,
+            showDeclarationNameEditor,
+            showDeclarationValueEditor,
           }),
           dom.div({ className: "ruleview-ruleclose" }, "}")
         )

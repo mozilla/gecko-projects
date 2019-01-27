@@ -8,6 +8,7 @@
 #include "nsDocShellCID.h"
 
 #include "mozilla/dom/BrowsingContext.h"
+#include "mozilla/dom/ChildProcessChannelListener.h"
 
 #include "nsDocShell.h"
 #include "nsDefaultURIFixup.h"
@@ -26,10 +27,10 @@
 #include "nsLocalHandlerApp.h"
 #include "ContentHandlerService.h"
 #ifdef MOZ_ENABLE_DBUS
-#include "nsDBusHandlerApp.h"
+#  include "nsDBusHandlerApp.h"
 #endif
 #if defined(MOZ_WIDGET_ANDROID)
-#include "nsExternalURLHandlerService.h"
+#  include "nsExternalURLHandlerService.h"
 #endif
 
 // session history
@@ -37,6 +38,7 @@
 #include "nsSHEntryShared.h"
 #include "nsSHistory.h"
 
+using mozilla::dom::ChildProcessChannelListener;
 using mozilla::dom::ContentHandlerService;
 
 static bool gInitialized = false;
@@ -81,6 +83,8 @@ NS_GENERIC_FACTORY_CONSTRUCTOR(nsDBusHandlerApp)
 NS_GENERIC_FACTORY_CONSTRUCTOR(nsExternalURLHandlerService)
 #endif
 NS_GENERIC_FACTORY_CONSTRUCTOR_INIT(ContentHandlerService, Init)
+NS_GENERIC_FACTORY_SINGLETON_CONSTRUCTOR(
+    ChildProcessChannelListener, ChildProcessChannelListener::GetSingleton)
 
 // OS access permissions
 NS_GENERIC_FACTORY_CONSTRUCTOR(nsOSPermissionRequest)
@@ -107,6 +111,7 @@ NS_DEFINE_NAMED_CID(NS_EXTERNALURLHANDLERSERVICE_CID);
 #endif
 NS_DEFINE_NAMED_CID(NS_SHENTRY_CID);
 NS_DEFINE_NAMED_CID(NS_CONTENTHANDLERSERVICE_CID);
+NS_DEFINE_NAMED_CID(NS_CHILDPROCESSCHANNELLISTENER_CID);
 
 const mozilla::Module::CIDEntry kDocShellCIDs[] = {
     // clang-format off
@@ -130,6 +135,7 @@ const mozilla::Module::CIDEntry kDocShellCIDs[] = {
   { &kNS_EXTERNALURLHANDLERSERVICE_CID, false, nullptr, nsExternalURLHandlerServiceConstructor },
 #endif
   { &kNS_SHENTRY_CID, false, nullptr, nsSHEntryConstructor },
+  { &kNS_CHILDPROCESSCHANNELLISTENER_CID, false, nullptr, ChildProcessChannelListenerConstructor },
   { nullptr }
     // clang-format on
 };
@@ -185,17 +191,19 @@ const mozilla::Module::ContractIDEntry kDocShellContracts[] = {
 #endif
   { NS_SHENTRY_CONTRACTID, &kNS_SHENTRY_CID },
   { NS_OSPERMISSIONREQUEST_CONTRACTID, &kNS_OSPERMISSIONREQUEST_CID, mozilla::Module::MAIN_PROCESS_ONLY },
+  { NS_CHILDPROCESSCHANNELLISTENER_CONTRACTID, &kNS_CHILDPROCESSCHANNELLISTENER_CID, mozilla::Module::CONTENT_PROCESS_ONLY },
   { nullptr }
     // clang-format on
 };
 
-static const mozilla::Module kDocShellModule = {mozilla::Module::kVersion,
-                                                kDocShellCIDs,
-                                                kDocShellContracts,
-                                                nullptr,
-                                                nullptr,
-                                                Initialize,
-                                                Shutdown,
-                                                mozilla::Module::ALLOW_IN_SOCKET_PROCESS};
+static const mozilla::Module kDocShellModule = {
+    mozilla::Module::kVersion,
+    kDocShellCIDs,
+    kDocShellContracts,
+    nullptr,
+    nullptr,
+    Initialize,
+    Shutdown,
+    mozilla::Module::ALLOW_IN_SOCKET_PROCESS};
 
 NSMODULE_DEFN(docshell_provider) = &kDocShellModule;

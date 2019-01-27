@@ -1,19 +1,5 @@
 import {createSelector} from "reselect";
 
-function calculateSpocs(component, spocs) {
-  let spocIndex = 0;
-  return component.spocs.positions.map(position => {
-    const rickRoll = Math.random();
-    if (spocs.data.spocs[spocIndex] && rickRoll <= component.spocs.probability) {
-      return {
-        ...position,
-        result: spocs.data.spocs[spocIndex++],
-      };
-    }
-    return position;
-  });
-}
-
 export const selectLayoutRender = createSelector(
   // Selects layout, feeds, spocs so that we only recompute if
   // any of these values change.
@@ -26,6 +12,29 @@ export const selectLayoutRender = createSelector(
   // Adds data to each component from feeds. This function only re-runs if one of the inputs change.
   // TODO: calculate spocs
   function layoutRender(layout, feeds, spocs) {
+    let spocIndex = 0;
+
+    function maybeInjectSpocs(data, spocsConfig) {
+      if (data &&
+          spocsConfig && spocsConfig.positions && spocsConfig.positions.length &&
+          spocs.data.spocs && spocs.data.spocs.length) {
+        const recommendations = [...data.recommendations];
+        for (let position of spocsConfig.positions) {
+          let rickRoll = Math.random();
+          if (spocs.data.spocs[spocIndex] && rickRoll <= spocsConfig.probability) {
+            recommendations.splice(position.index, 0, spocs.data.spocs[spocIndex++]);
+          }
+        }
+
+        return {
+          ...data,
+          recommendations,
+        };
+      }
+
+      return data;
+    }
+
     return layout.map(row => ({
       ...row,
 
@@ -36,15 +45,7 @@ export const selectLayoutRender = createSelector(
           return component;
         }
 
-        // Calculate if we should display a spoc or not.
-        if (component.spocs && spocs.data.spocs && spocs.data.spocs.length) {
-          component.spocs = {
-            ...component.spocs,
-            positions: calculateSpocs(component, spocs),
-          };
-        }
-
-        return {...component, data: feeds[component.feed.url].data};
+        return {...component, data: maybeInjectSpocs(feeds[component.feed.url].data, component.spocs)};
       }),
     }));
   }

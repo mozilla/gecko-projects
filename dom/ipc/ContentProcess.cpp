@@ -9,19 +9,18 @@
 #include "ContentProcess.h"
 #include "base/shared_memory.h"
 #include "mozilla/Preferences.h"
-#include "mozilla/Scheduler.h"
 #include "mozilla/recordreplay/ParentIPC.h"
 
 #if defined(XP_MACOSX) && defined(MOZ_CONTENT_SANDBOX)
-#include <stdlib.h>
-#include "mozilla/Sandbox.h"
+#  include <stdlib.h>
+#  include "mozilla/Sandbox.h"
 #endif
 
 #if (defined(XP_WIN) || defined(XP_MACOSX)) && defined(MOZ_CONTENT_SANDBOX)
-#include "mozilla/SandboxSettings.h"
-#include "nsAppDirectoryServiceDefs.h"
-#include "nsDirectoryService.h"
-#include "nsDirectoryServiceDefs.h"
+#  include "mozilla/SandboxSettings.h"
+#  include "nsAppDirectoryServiceDefs.h"
+#  include "nsDirectoryService.h"
+#  include "nsDirectoryServiceDefs.h"
 #endif
 
 using mozilla::ipc::IOThreadChild;
@@ -81,7 +80,6 @@ static void SetUpSandboxEnvironment() {
 bool ContentProcess::Init(int aArgc, char* aArgv[]) {
   Maybe<uint64_t> childID;
   Maybe<bool> isForBrowser;
-  Maybe<const char*> schedulerPrefs;
   Maybe<const char*> parentBuildID;
   char* prefsHandle = nullptr;
   char* prefMapHandle = nullptr;
@@ -142,12 +140,6 @@ bool ContentProcess::Init(int aArgc, char* aArgv[]) {
         return false;
       }
       prefMapSize = aArgv[i];
-    } else if (strcmp(aArgv[i], "-schedulerPrefs") == 0) {
-      if (++i == aArgc) {
-        return false;
-      }
-      schedulerPrefs = Some(aArgv[i]);
-
     } else if (strcmp(aArgv[i], "-safeMode") == 0) {
       gSafeMode = true;
 
@@ -174,7 +166,7 @@ bool ContentProcess::Init(int aArgc, char* aArgv[]) {
 
   // Did we find all the mandatory flags?
   if (childID.isNothing() || isForBrowser.isNothing() ||
-      schedulerPrefs.isNothing() || parentBuildID.isNothing()) {
+      parentBuildID.isNothing()) {
     return false;
   }
 
@@ -183,8 +175,6 @@ bool ContentProcess::Init(int aArgc, char* aArgv[]) {
                                                 prefsLen, prefMapSize)) {
     return false;
   }
-
-  Scheduler::SetPrefs(*schedulerPrefs);
 
   if (recordreplay::IsMiddleman()) {
     recordreplay::parent::InitializeMiddleman(aArgc, aArgv, ParentPid(),
@@ -198,7 +188,7 @@ bool ContentProcess::Init(int aArgc, char* aArgv[]) {
   mXREEmbed.Start();
 #if (defined(XP_MACOSX)) && defined(MOZ_CONTENT_SANDBOX)
   mContent.SetProfileDir(profileDir);
-#if defined(DEBUG)
+#  if defined(DEBUG)
   // For WebReplay middleman processes, the sandbox is
   // started after receiving the SetProcessSandbox message.
   if (IsContentSandboxEnabled() &&
@@ -206,8 +196,8 @@ bool ContentProcess::Init(int aArgc, char* aArgv[]) {
       !recordreplay::IsMiddleman()) {
     AssertMacSandboxEnabled();
   }
-#endif /* DEBUG */
-#endif /* XP_MACOSX && MOZ_CONTENT_SANDBOX */
+#  endif /* DEBUG */
+#endif   /* XP_MACOSX && MOZ_CONTENT_SANDBOX */
 
 #if defined(XP_WIN) && defined(MOZ_CONTENT_SANDBOX)
   SetUpSandboxEnvironment();

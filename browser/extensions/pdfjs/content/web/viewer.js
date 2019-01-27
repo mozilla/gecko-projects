@@ -4907,7 +4907,7 @@ class PDFFindBar {
 
     Promise.resolve(matchesCountMsg).then(msg => {
       this.findResultsCount.textContent = msg;
-      this.findResultsCount.classList[!total ? 'add' : 'remove']('hidden');
+      this.findResultsCount.classList.toggle('hidden', !total);
 
       this._adjustWidth();
     });
@@ -5991,10 +5991,19 @@ class PDFHistory {
     }
 
     if (shouldReplace) {
-      window.history.replaceState(newState, '', newUrl);
+      if (newUrl) {
+        window.history.replaceState(newState, '', newUrl);
+      } else {
+        window.history.replaceState(newState, '');
+      }
     } else {
       this._maxUid = this._uid;
-      window.history.pushState(newState, '', newUrl);
+
+      if (newUrl) {
+        window.history.pushState(newState, '', newUrl);
+      } else {
+        window.history.pushState(newState, '');
+      }
     }
   }
 
@@ -8159,25 +8168,15 @@ class PDFViewer extends _base_viewer.BaseViewer {
     return this._getCurrentVisiblePage();
   }
 
-  update() {
-    let visible = this._getVisiblePages();
-
-    let visiblePages = visible.views,
-        numVisiblePages = visiblePages.length;
-
-    if (numVisiblePages === 0) {
+  _updateHelper(visiblePages) {
+    if (this.isInPresentationMode) {
       return;
     }
 
-    this._resizeBuffer(numVisiblePages, visiblePages);
-
-    this.renderingQueue.renderHighestPriority(visible);
     let currentId = this._currentPageNumber;
     let stillFullyVisible = false;
 
-    for (let i = 0; i < numVisiblePages; ++i) {
-      let page = visiblePages[i];
-
+    for (const page of visiblePages) {
       if (page.percent < 100) {
         break;
       }
@@ -8192,16 +8191,7 @@ class PDFViewer extends _base_viewer.BaseViewer {
       currentId = visiblePages[0].id;
     }
 
-    if (!this.isInPresentationMode) {
-      this._setCurrentPageNumber(currentId);
-    }
-
-    this._updateLocation(visible.first);
-
-    this.eventBus.dispatch('updateviewarea', {
-      source: this,
-      location: this._location
-    });
+    this._setCurrentPageNumber(currentId);
   }
 
   get _isScrollModeHorizontal() {
@@ -8953,8 +8943,32 @@ class BaseViewer {
     };
   }
 
+  _updateHelper(visiblePages) {
+    throw new Error('Not implemented: _updateHelper');
+  }
+
   update() {
-    throw new Error('Not implemented: update');
+    const visible = this._getVisiblePages();
+
+    const visiblePages = visible.views,
+          numVisiblePages = visiblePages.length;
+
+    if (numVisiblePages === 0) {
+      return;
+    }
+
+    this._resizeBuffer(numVisiblePages, visiblePages);
+
+    this.renderingQueue.renderHighestPriority(visible);
+
+    this._updateHelper(visiblePages);
+
+    this._updateLocation(visible.first);
+
+    this.eventBus.dispatch('updateviewarea', {
+      source: this,
+      location: this._location
+    });
   }
 
   containsElement(element) {
@@ -10790,27 +10804,7 @@ class PDFSinglePageViewer extends _base_viewer.BaseViewer {
     return this._getCurrentVisiblePage();
   }
 
-  update() {
-    let visible = this._getVisiblePages();
-
-    let visiblePages = visible.views,
-        numVisiblePages = visiblePages.length;
-
-    if (numVisiblePages === 0) {
-      return;
-    }
-
-    this._resizeBuffer(numVisiblePages);
-
-    this.renderingQueue.renderHighestPriority(visible);
-
-    this._updateLocation(visible.first);
-
-    this.eventBus.dispatch('updateviewarea', {
-      source: this,
-      location: this._location
-    });
-  }
+  _updateHelper(visiblePages) {}
 
   get _isScrollModeHorizontal() {
     return (0, _pdfjsLib.shadow)(this, '_isScrollModeHorizontal', false);

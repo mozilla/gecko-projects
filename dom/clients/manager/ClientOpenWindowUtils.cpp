@@ -23,7 +23,7 @@
 #include "nsPIWindowWatcher.h"
 
 #ifdef MOZ_WIDGET_ANDROID
-#include "FennecJNIWrappers.h"
+#  include "FennecJNIWrappers.h"
 #endif
 
 namespace mozilla {
@@ -118,6 +118,13 @@ class WebProgressListener final : public nsIWebProgressListener,
   NS_IMETHOD
   OnSecurityChange(nsIWebProgress* aWebProgress, nsIRequest* aRequest,
                    uint32_t aState) override {
+    MOZ_ASSERT(false, "Unexpected notification.");
+    return NS_OK;
+  }
+
+  NS_IMETHOD
+  OnContentBlockingEvent(nsIWebProgress* aWebProgress, nsIRequest* aRequest,
+                         uint32_t aEvent) override {
     MOZ_ASSERT(false, "Unexpected notification.");
     return NS_OK;
   }

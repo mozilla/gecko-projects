@@ -4,17 +4,22 @@
 
 "use strict";
 
-const { PureComponent } = require("devtools/client/shared/vendor/react");
+const { createRef, PureComponent } = require("devtools/client/shared/vendor/react");
 const dom = require("devtools/client/shared/vendor/react-dom-factories");
 const PropTypes = require("devtools/client/shared/vendor/react-prop-types");
+const { editableItem } = require("devtools/client/shared/inplace-editor");
 
+const { getStr } = require("../utils/l10n");
 const Types = require("../types");
 
 class Declaration extends PureComponent {
   static get propTypes() {
     return {
       declaration: PropTypes.shape(Types.declaration).isRequired,
+      isUserAgentStyle: PropTypes.bool.isRequired,
       onToggleDeclaration: PropTypes.func.isRequired,
+      showDeclarationNameEditor: PropTypes.func.isRequired,
+      showDeclarationValueEditor: PropTypes.func.isRequired,
     };
   }
 
@@ -26,8 +31,32 @@ class Declaration extends PureComponent {
       isComputedListExpanded: false,
     };
 
+    this.nameSpanRef = createRef();
+    this.valueSpanRef = createRef();
+
     this.onComputedExpanderClick = this.onComputedExpanderClick.bind(this);
     this.onToggleDeclarationClick = this.onToggleDeclarationClick.bind(this);
+  }
+
+  componentDidMount() {
+    if (this.props.isUserAgentStyle) {
+      // Declaration is not editable.
+      return;
+    }
+
+    const { ruleId, id } = this.props.declaration;
+
+    editableItem({
+      element: this.nameSpanRef.current,
+    }, element => {
+      this.props.showDeclarationNameEditor(element, ruleId, id);
+    });
+
+    editableItem({
+      element: this.valueSpanRef.current,
+    }, element => {
+      this.props.showDeclarationValueEditor(element, ruleId, id);
+    });
   }
 
   onComputedExpanderClick(event) {
@@ -45,9 +74,7 @@ class Declaration extends PureComponent {
   }
 
   renderComputedPropertyList() {
-    const { computedProperties } = this.props.declaration;
-
-    if (!computedProperties.length) {
+    if (!this.state.isComputedListExpanded) {
       return null;
     }
 
@@ -56,10 +83,10 @@ class Declaration extends PureComponent {
         {
           className: "ruleview-computedlist",
           style: {
-            display: this.state.isComputedListExpanded ? "block" : "",
+            display: "block",
           },
         },
-        computedProperties.map(({ name, value, isOverridden }) => {
+        this.props.declaration.computedProperties.map(({ name, value, isOverridden }) => {
           return (
             dom.li(
               {
@@ -68,7 +95,7 @@ class Declaration extends PureComponent {
                            (isOverridden ? " ruleview-overridden" : ""),
               },
               dom.span({ className: "ruleview-namecontainer" },
-                dom.span({ className: "ruleview-propertyname theme-fg-color5" }, name),
+                dom.span({ className: "ruleview-propertyname theme-fg-color3" }, name),
                 ": "
               ),
               dom.span({ className: "ruleview-propertyvaluecontainer" },
@@ -83,19 +110,20 @@ class Declaration extends PureComponent {
   }
 
   renderShorthandOverriddenList() {
-    const { declaration } = this.props;
+    if (this.state.isComputedListExpanded || this.props.declaration.isOverridden) {
+      return null;
+    }
 
-    if (this.state.isComputedListExpanded || declaration.isOverridden) {
+    const overriddenComputedProperties = this.props.declaration.computedProperties
+      .filter(prop => prop.isOverridden);
+
+    if (!overriddenComputedProperties.length) {
       return null;
     }
 
     return (
       dom.ul({ className: "ruleview-overridden-items" },
-        declaration.computedProperties.map(({ name, value, isOverridden }) => {
-          if (!isOverridden) {
-            return null;
-          }
-
+        overriddenComputedProperties.map(({ name, value }) => {
           return (
             dom.li(
               {
@@ -103,7 +131,7 @@ class Declaration extends PureComponent {
                 className: "ruleview-overridden-item ruleview-overridden",
               },
               dom.span({ className: "ruleview-namecontainer" },
-                dom.span({ className: "ruleview-propertyname theme-fg-color5" }, name),
+                dom.span({ className: "ruleview-propertyname theme-fg-color3" }, name),
                 ": "
               ),
               dom.span({ className: "ruleview-propertyvaluecontainer" },
@@ -118,15 +146,16 @@ class Declaration extends PureComponent {
   }
 
   render() {
-    const { declaration } = this.props;
     const {
       computedProperties,
+      isDeclarationValid,
       isEnabled,
       isKnownProperty,
+      isNameValid,
       isOverridden,
       name,
       value,
-    } = declaration;
+    } = this.props.declaration;
 
     return (
       dom.li(
@@ -143,7 +172,14 @@ class Declaration extends PureComponent {
             tabIndex: -1,
           }),
           dom.span({ className: "ruleview-namecontainer" },
-            dom.span({ className: "ruleview-propertyname theme-fg-color5" }, name),
+            dom.span(
+              {
+                className: "ruleview-propertyname theme-fg-color3",
+                ref: this.nameSpanRef,
+                tabIndex: 0,
+              },
+              name
+            ),
             ": "
           ),
           dom.span({
@@ -153,9 +189,27 @@ class Declaration extends PureComponent {
             style: { display: computedProperties.length ? "inline-block" : "none" },
           }),
           dom.span({ className: "ruleview-propertyvaluecontainer" },
-            dom.span({ className: "ruleview-propertyvalue theme-fg-color1" }, value),
+            dom.span(
+              {
+                className: "ruleview-propertyvalue theme-fg-color1",
+                ref: this.valueSpanRef,
+                tabIndex: 0,
+              },
+              value
+            ),
             ";"
-          )
+          ),
+          dom.div({
+            className: "ruleview-warning" +
+                       (isDeclarationValid ? " hidden" : ""),
+            title: isNameValid ?
+                   getStr("rule.warningName.title") : getStr("rule.warning.title"),
+          }),
+          dom.div({
+            className: "ruleview-overridden-rule-filter" +
+                       (!isDeclarationValid || !isOverridden ? " hidden" : ""),
+            title: getStr("rule.filterProperty.title"),
+          })
         ),
         this.renderComputedPropertyList(),
         this.renderShorthandOverriddenList()

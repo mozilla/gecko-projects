@@ -17,7 +17,7 @@
 
 #include <ctype.h>
 #ifdef __linux__
-#include <dlfcn.h>
+#  include <dlfcn.h>
 #endif
 #include <stdarg.h>
 #include <string.h>
@@ -42,7 +42,7 @@
 #include "builtin/String.h"
 #include "builtin/Symbol.h"
 #ifdef ENABLE_BINARYDATA
-#include "builtin/TypedObject.h"
+#  include "builtin/TypedObject.h"
 #endif
 #include "frontend/BytecodeCompiler.h"
 #include "gc/FreeOp.h"
@@ -55,6 +55,7 @@
 #include "js/CharacterEncoding.h"
 #include "js/CompilationAndEvaluation.h"
 #include "js/CompileOptions.h"
+#include "js/ContextOptions.h"  // JS::ContextOptions{,Ref}
 #include "js/Conversions.h"
 #include "js/Date.h"
 #include "js/Initialization.h"
@@ -120,9 +121,9 @@ using JS::ReadOnlyCompileOptions;
 using JS::SourceText;
 
 #ifdef HAVE_VA_LIST_AS_ARRAY
-#define JS_ADDRESSOF_VA_LIST(ap) ((va_list*)(ap))
+#  define JS_ADDRESSOF_VA_LIST(ap) ((va_list*)(ap))
 #else
-#define JS_ADDRESSOF_VA_LIST(ap) (&(ap))
+#  define JS_ADDRESSOF_VA_LIST(ap) (&(ap))
 #endif
 
 JS_PUBLIC_API void JS::CallArgs::reportMoreArgsNeeded(JSContext* cx,
@@ -704,6 +705,10 @@ JS_PUBLIC_API JSObject* JS_TransplantObject(JSContext* cx, HandleObject origobj,
     AutoRealmUnchecked ar(cx, origobj->nonCCWRealm());
     JSObject::swap(cx, origobj, target);
     newIdentity = origobj;
+
+    // |origobj| might be gray so unmark it to avoid returning a possibly-gray
+    // object.
+    JS::ExposeObjectToActiveJS(newIdentity);
   } else if (WrapperMap::Ptr p = destination->lookupWrapper(origv)) {
     // There might already be a wrapper for the original object in
     // the new compartment. If there is, we use its identity and swap
@@ -1167,14 +1172,14 @@ JS_PUBLIC_API bool JS::IsIdleGCTaskNeeded(JSRuntime* rt) {
 JS_PUBLIC_API void JS::RunIdleTimeGCTask(JSRuntime* rt) {
   gc::GCRuntime& gc = rt->gc;
   if (gc.nursery().needIdleTimeCollection()) {
-    gc.minorGC(JS::gcreason::IDLE_TIME_COLLECTION);
+    gc.minorGC(JS::GCReason::IDLE_TIME_COLLECTION);
   }
 }
 
-JS_PUBLIC_API void JS_GC(JSContext* cx) {
+JS_PUBLIC_API void JS_GC(JSContext* cx, JS::GCReason reason) {
   AssertHeapIsIdle();
   JS::PrepareForFullGC(cx);
-  cx->runtime()->gc.gc(GC_NORMAL, JS::gcreason::API);
+  cx->runtime()->gc.gc(GC_NORMAL, reason);
 }
 
 JS_PUBLIC_API void JS_MaybeGC(JSContext* cx) {
@@ -3422,6 +3427,9 @@ void JS::TransitiveCompileOptions::copyPODTransitiveOptions(
   hasIntroductionInfo = rhs.hasIntroductionInfo;
   isProbablySystemCode = rhs.isProbablySystemCode;
   hideScriptFromDebugger = rhs.hideScriptFromDebugger;
+#ifdef ENABLE_BIGINT
+  bigIntEnabledOption = rhs.bigIntEnabledOption;
+#endif
 };
 
 void JS::ReadOnlyCompileOptions::copyPODOptions(
@@ -3439,7 +3447,8 @@ JS::OwningCompileOptions::OwningCompileOptions(JSContext* cx)
     : ReadOnlyCompileOptions(),
       elementRoot(cx),
       elementAttributeNameRoot(cx),
-      introductionScriptRoot(cx) {}
+      introductionScriptRoot(cx),
+      scriptOrModuleRoot(cx) {}
 
 JS::OwningCompileOptions::~OwningCompileOptions() {
   // OwningCompileOptions always owns these, so these casts are okay.
@@ -3461,6 +3470,7 @@ bool JS::OwningCompileOptions::copy(JSContext* cx,
   setElement(rhs.element());
   setElementAttributeName(rhs.elementAttributeName());
   setIntroductionScript(rhs.introductionScript());
+  setScriptOrModule(rhs.scriptOrModule());
 
   return setFileAndLine(cx, rhs.filename(), rhs.lineno) &&
          setSourceMapURL(cx, rhs.sourceMapURL()) &&
@@ -3531,7 +3541,8 @@ JS::CompileOptions::CompileOptions(JSContext* cx)
     : ReadOnlyCompileOptions(),
       elementRoot(cx),
       elementAttributeNameRoot(cx),
-      introductionScriptRoot(cx) {
+      introductionScriptRoot(cx),
+      scriptOrModuleRoot(cx) {
   strictOption = cx->options().strictMode();
   extraWarningsOption = cx->realm()->behaviors().extraWarnings(cx);
   isProbablySystemCode = cx->realm()->isProbablySystemCode();
@@ -3545,6 +3556,9 @@ JS::CompileOptions::CompileOptions(JSContext* cx)
   }
   throwOnAsmJSValidationFailureOption =
       cx->options().throwOnAsmJSValidationFailure();
+#ifdef ENABLE_BIGINT
+  bigIntEnabledOption = cx->realm()->creationOptions().getBigIntEnabled();
+#endif
 }
 
 CompileOptions& CompileOptions::setIntroductionInfoToCaller(
@@ -3721,7 +3735,8 @@ JS_PUBLIC_API bool JS::CompileModule(JSContext* cx,
 
 JS_PUBLIC_API void JS::SetModulePrivate(JSObject* module,
                                         const JS::Value& value) {
-  module->as<ModuleObject>().scriptSourceObject()->setPrivate(value);
+  JSRuntime* rt = module->zone()->runtimeFromMainThread();
+  module->as<ModuleObject>().scriptSourceObject()->setPrivate(rt, value);
 }
 
 JS_PUBLIC_API JS::Value JS::GetModulePrivate(JSObject* module) {
@@ -3730,7 +3745,8 @@ JS_PUBLIC_API JS::Value JS::GetModulePrivate(JSObject* module) {
 
 JS_PUBLIC_API void JS::SetScriptPrivate(JSScript* script,
                                         const JS::Value& value) {
-  script->sourceObject()->setPrivate(value);
+  JSRuntime* rt = script->zone()->runtimeFromMainThread();
+  script->sourceObject()->setPrivate(rt, value);
 }
 
 JS_PUBLIC_API JS::Value JS::GetScriptPrivate(JSScript* script) {
@@ -3746,19 +3762,15 @@ JS_PUBLIC_API JS::Value JS::GetScriptedCallerPrivate(JSContext* cx) {
     return UndefinedValue();
   }
 
-  return FindScriptOrModulePrivateForScript(iter.script());
+  return iter.script()->sourceObject()->canonicalPrivate();
 }
 
-JS_PUBLIC_API JS::ScriptPrivateFinalizeHook JS::GetScriptPrivateFinalizeHook(
-    JSRuntime* rt) {
+JS_PUBLIC_API void JS::SetScriptPrivateReferenceHooks(
+    JSRuntime* rt, JS::ScriptPrivateReferenceHook addRefHook,
+    JS::ScriptPrivateReferenceHook releaseHook) {
   AssertHeapIsIdle();
-  return rt->scriptPrivateFinalizeHook;
-}
-
-JS_PUBLIC_API void JS::SetScriptPrivateFinalizeHook(
-    JSRuntime* rt, JS::ScriptPrivateFinalizeHook func) {
-  AssertHeapIsIdle();
-  rt->scriptPrivateFinalizeHook = func;
+  rt->scriptPrivateAddRefHook = addRefHook;
+  rt->scriptPrivateReleaseHook = releaseHook;
 }
 
 JS_PUBLIC_API bool JS::ModuleInstantiate(JSContext* cx,
@@ -5628,11 +5640,11 @@ JS_PUBLIC_API bool JS_GetGlobalJitCompilerOption(JSContext* cx,
     case JSJITCOMPILER_WASM_FOLD_OFFSETS:
       *valueOut = jit::JitOptions.wasmFoldOffsets ? 1 : 0;
       break;
-#ifdef DEBUG
+#  ifdef DEBUG
     case JSJITCOMPILER_FULL_DEBUG_CHECKS:
       *valueOut = jit::JitOptions.fullDebugChecks ? 1 : 0;
       break;
-#endif
+#  endif
     default:
       return false;
   }
@@ -5647,7 +5659,7 @@ JS_PUBLIC_API bool JS_GetGlobalJitCompilerOption(JSContext* cx,
 #if !defined(STATIC_EXPORTABLE_JS_API) && !defined(STATIC_JS_API) && \
     defined(XP_WIN)
 
-#include "util/Windows.h"
+#  include "util/Windows.h"
 
 /*
  * Initialization routine for the JS DLL.

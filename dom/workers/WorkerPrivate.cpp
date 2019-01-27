@@ -9,6 +9,7 @@
 #include <utility>
 
 #include "js/CompilationAndEvaluation.h"
+#include "js/ContextOptions.h"
 #include "js/LocaleSensitive.h"
 #include "js/MemoryMetrics.h"
 #include "js/SourceText.h"
@@ -72,7 +73,7 @@
 #include "nsThreadManager.h"
 
 #ifdef XP_WIN
-#undef PostMessage
+#  undef PostMessage
 #endif
 
 // JS_MaybeGC will run once every second during normal execution.
@@ -89,7 +90,7 @@ mozilla::LogModule* WorkerLog() { return sWorkerPrivateLog; }
 mozilla::LogModule* TimeoutsLog() { return sWorkerTimeoutsLog; }
 
 #ifdef LOG
-#undef LOG
+#  undef LOG
 #endif
 #define LOG(log, _args) MOZ_LOG(log, LogLevel::Debug, _args);
 
@@ -4390,13 +4391,13 @@ void WorkerPrivate::GarbageCollectInternal(JSContext* aCx, bool aShrinking,
     JS::PrepareForFullGC(aCx);
 
     if (aShrinking) {
-      JS::NonIncrementalGC(aCx, GC_SHRINK, JS::gcreason::DOM_WORKER);
+      JS::NonIncrementalGC(aCx, GC_SHRINK, JS::GCReason::DOM_WORKER);
 
       if (!aCollectChildren) {
         LOG(WorkerLog(), ("Worker %p collected idle garbage\n", this));
       }
     } else {
-      JS::NonIncrementalGC(aCx, GC_NORMAL, JS::gcreason::DOM_WORKER);
+      JS::NonIncrementalGC(aCx, GC_NORMAL, JS::GCReason::DOM_WORKER);
       LOG(WorkerLog(), ("Worker %p collected garbage\n", this));
     }
   } else {

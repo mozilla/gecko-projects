@@ -9,7 +9,7 @@
 #include "mozilla/MaybeOneOf.h"
 
 #ifdef ENABLE_BIGINT
-#include "builtin/BigInt.h"
+#  include "builtin/BigInt.h"
 #endif
 #include "builtin/Eval.h"
 #include "builtin/SelfHostingDefines.h"
@@ -30,7 +30,7 @@
 #include "vm/UnboxedObject-inl.h"
 
 #ifdef FUZZING
-#include "builtin/TestingFunctions.h"
+#  include "builtin/TestingFunctions.h"
 #endif
 
 using namespace js;
@@ -2173,7 +2173,7 @@ static bool FinishObjectClassInit(JSContext* cx, JS::HandleObject ctor,
    */
   Rooted<TaggedProto> tagged(cx, TaggedProto(proto));
   if (global->shouldSplicePrototype()) {
-    if (!JSObject::splicePrototype(cx, global, global->getClass(), tagged)) {
+    if (!JSObject::splicePrototype(cx, global, tagged)) {
       return false;
     }
   }

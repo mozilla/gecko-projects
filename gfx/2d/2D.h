@@ -38,9 +38,9 @@
 #include "nsRegionFwd.h"
 
 #if defined(MOZ_WIDGET_ANDROID) || defined(MOZ_WIDGET_GTK)
-#ifndef MOZ_ENABLE_FREETYPE
-#define MOZ_ENABLE_FREETYPE
-#endif
+#  ifndef MOZ_ENABLE_FREETYPE
+#    define MOZ_ENABLE_FREETYPE
+#  endif
 #endif
 
 struct _cairo_surface;
@@ -60,6 +60,7 @@ typedef int FT_Error;
 struct ID3D11Texture2D;
 struct ID3D11Device;
 struct ID2D1Device;
+struct ID2D1DeviceContext;
 struct IDWriteFactory;
 struct IDWriteRenderingParams;
 struct IDWriteFontFace;
@@ -342,6 +343,8 @@ class SourceSurface : public external::AtomicRefCounted<SourceSurface> {
 
   virtual SurfaceType GetType() const = 0;
   virtual IntSize GetSize() const = 0;
+  /* GetRect is useful for when the underlying surface doesn't actually
+   * have a backing store starting at 0, 0. e.g. SourceSurfaceOffset */
   virtual IntRect GetRect() const { return IntRect(IntPoint(0, 0), GetSize()); }
   virtual SurfaceFormat GetFormat() const = 0;
 
@@ -1056,6 +1059,18 @@ class DrawTarget : public external::AtomicRefCounted<DrawTarget> {
    */
   virtual void FillRect(const Rect &aRect, const Pattern &aPattern,
                         const DrawOptions &aOptions = DrawOptions()) = 0;
+
+  /**
+   * Fill a rounded rectangle on the DrawTarget with a certain source pattern.
+   *
+   * @param aRect Rounded rectangle that forms the mask of this filling
+   * operation
+   * @param aPattern Pattern that forms the source of this filling operation
+   * @param aOptions Options that are applied to this operation
+   */
+  virtual void FillRoundedRect(const RoundedRect &aRect,
+                               const Pattern &aPattern,
+                               const DrawOptions &aOptions = DrawOptions());
 
   /**
    * Stroke a rectangle on the DrawTarget with a certain source pattern.
@@ -1793,6 +1808,7 @@ class GFX2D_API Factory {
   static bool SupportsD2D1();
   static RefPtr<IDWriteFontCollection> GetDWriteSystemFonts(
       bool aUpdate = false);
+  static RefPtr<ID2D1DeviceContext> GetD2DDeviceContext();
 
   static uint64_t GetD2DVRAMUsageDrawTarget();
   static uint64_t GetD2DVRAMUsageSourceSurface();
@@ -1812,6 +1828,8 @@ class GFX2D_API Factory {
   static StaticRefPtr<IDWriteFactory> mDWriteFactory;
   static bool mDWriteFactoryInitialized;
   static StaticRefPtr<IDWriteFontCollection> mDWriteSystemFonts;
+  static StaticRefPtr<ID2D1DeviceContext> mMTDC;
+  static StaticRefPtr<ID2D1DeviceContext> mOffMTDC;
 
  protected:
   // This guards access to the singleton devices above, as well as the

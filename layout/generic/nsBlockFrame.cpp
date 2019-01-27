@@ -124,7 +124,7 @@ static bool BlockHasAnyFloats(nsIFrame* aFrame) {
 }
 
 #ifdef DEBUG
-#include "nsBlockDebugFlags.h"
+#  include "nsBlockDebugFlags.h"
 
 bool nsBlockFrame::gLamePaintMetrics;
 bool nsBlockFrame::gLameReflowMetrics;
@@ -155,7 +155,7 @@ static const BlockDebugFlags gFlags[] = {
     {"lame-reflow-metrics", &nsBlockFrame::gLameReflowMetrics},
     {"disable-resize-opt", &nsBlockFrame::gDisableResizeOpt},
 };
-#define NUM_DEBUG_FLAGS (sizeof(gFlags) / sizeof(gFlags[0]))
+#  define NUM_DEBUG_FLAGS (sizeof(gFlags) / sizeof(gFlags[0]))
 
 static void ShowDebugFlags() {
   printf("Here are the available GECKO_BLOCK_DEBUG_FLAGS:\n");
@@ -6515,14 +6515,14 @@ void nsBlockFrame::BuildDisplayList(nsDisplayListBuilder* aBuilder,
     }
   }
 
-  // Pick up the resulting text-overflow markers.  We append them to
-  // PositionedDescendants just before we append the lines' display items,
-  // so that our text-overflow markers will appear on top of this block's
-  // normal content but below any of its its' positioned children.
-  if (textOverflow.isSome()) {
-    aLists.PositionedDescendants()->AppendToTop(&textOverflow->GetMarkers());
-  }
   linesDisplayListCollection.MoveTo(aLists);
+
+  if (textOverflow.isSome()) {
+    // Put any text-overflow:ellipsis markers on top of the non-positioned
+    // content of the block's lines. (If we ever start sorting the Content()
+    // list this will end up in the wrong place.)
+    aLists.Content()->AppendToTop(&textOverflow->GetMarkers());
+  }
 
   if (HasOutsideBullet()) {
     // Display outside bullets manually
@@ -7008,7 +7008,7 @@ void nsBlockFrame::CheckFloats(BlockReflowInput& aState) {
     NS_WARNING(
         "nsBlockFrame::CheckFloats: Explicit float list is out of sync with "
         "float cache");
-#if defined(DEBUG_roc)
+#  if defined(DEBUG_roc)
     nsFrame::RootFrameList(PresContext(), stdout, 0);
     for (i = 0; i < lineFloats.Length(); ++i) {
       printf("Line float: %p\n", lineFloats.ElementAt(i));
@@ -7016,7 +7016,7 @@ void nsBlockFrame::CheckFloats(BlockReflowInput& aState) {
     for (i = 0; i < storedFloats.Length(); ++i) {
       printf("Stored float: %p\n", storedFloats.ElementAt(i));
     }
-#endif
+#  endif
   }
 #endif
 

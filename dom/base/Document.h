@@ -43,6 +43,7 @@
 #include "mozilla/net/ReferrerPolicy.h"  // for member
 #include "mozilla/UseCounter.h"
 #include "mozilla/WeakPtr.h"
+#include "mozilla/StaticPresData.h"
 #include "Units.h"
 #include "nsContentListDeclarations.h"
 #include "nsExpirationTracker.h"
@@ -63,11 +64,11 @@
 
 // windows.h #defines CreateEvent
 #ifdef CreateEvent
-#undef CreateEvent
+#  undef CreateEvent
 #endif
 
 #ifdef MOZILLA_INTERNAL_API
-#include "mozilla/dom/DocumentBinding.h"
+#  include "mozilla/dom/DocumentBinding.h"
 #else
 namespace mozilla {
 namespace dom {
@@ -123,6 +124,7 @@ class nsDOMCaretPosition;
 class nsViewportInfo;
 class nsIGlobalObject;
 class nsIXULWindow;
+struct nsFont;
 
 namespace mozilla {
 class AbstractThread;
@@ -1901,6 +1903,11 @@ class Document : public nsINode,
   void SetReadyStateInternal(ReadyState rs);
   ReadyState GetReadyStateEnum() { return mReadyState; }
 
+  void SetAncestorLoading(bool aAncestorIsLoading);
+  void NotifyLoading(const bool& aCurrentParentIsLoading,
+                     bool aNewParentIsLoading, const ReadyState& aCurrentState,
+                     ReadyState aNewState);
+
   // notify that a content node changed state.  This must happen under
   // a scriptblocker but NOT within a begin/end update.
   void ContentStateChanged(nsIContent* aContent,
@@ -3423,13 +3430,12 @@ class Document : public nsINode,
    */
   void LocalizationLinkRemoved(Element* aLinkElement);
 
- protected:
   /**
-   * This method should be collect as soon as the
+   * This method should be called as soon as the
    * parsing of the document is completed.
    *
-   * In HTML this happens when readyState becomes
-   * `interactive`.
+   * In HTML/XHTML this happens when we finish parsing
+   * the document element.
    * In XUL it happens at `DoneWalking`, during
    * `MozBeforeInitialXULLayout`.
    *
@@ -3438,6 +3444,18 @@ class Document : public nsINode,
    */
   void TriggerInitialDocumentTranslation();
 
+  /**
+   * This method is called when the initial translation
+   * of the document is completed.
+   *
+   * It unblocks the layout.
+   *
+   * This method is virtual so that XULDocument can
+   * override it.
+   */
+  virtual void InitialDocumentTranslationCompleted();
+
+ protected:
   RefPtr<mozilla::dom::DocumentL10n> mDocumentL10n;
 
  private:
@@ -3458,7 +3476,39 @@ class Document : public nsINode,
  public:
   bool IsThirdPartyForFlashClassifier();
 
-  bool IsScopedStyleEnabled();
+ private:
+  void DoCacheAllKnownLangPrefs();
+  void RecomputeLanguageFromCharset();
+
+ public:
+  void ResetLangPrefs() {
+    mLangGroupFontPrefs.Reset();
+    mFontGroupCacheDirty = true;
+  }
+
+  already_AddRefed<nsAtom> GetContentLanguageAsAtomForStyle() const;
+  already_AddRefed<nsAtom> GetLanguageForStyle() const;
+
+  /**
+   * Fetch the user's font preferences for the given aLanguage's
+   * language group.
+   */
+  const LangGroupFontPrefs* GetFontPrefsForLang(
+      nsAtom* aLanguage, bool* aNeedsToCache = nullptr) const;
+
+  void ForceCacheLang(nsAtom* aLanguage) {
+    if (!mLanguagesUsed.EnsureInserted(aLanguage)) {
+      return;
+    }
+    GetFontPrefsForLang(aLanguage);
+  }
+
+  void CacheAllKnownLangPrefs() {
+    if (!mFontGroupCacheDirty) {
+      return;
+    }
+    DoCacheAllKnownLangPrefs();
+  }
 
   nsINode* GetServoRestyleRoot() const { return mServoRestyleRoot; }
 
@@ -3804,6 +3854,8 @@ class Document : public nsINode,
 
   // True if BIDI is enabled.
   bool mBidiEnabled : 1;
+  // True if mLangGroupFontPrefs is not initialized or dirty in some other way.
+  bool mFontGroupCacheDirty : 1;
   // True if a MathML element has ever been owned by this document.
   bool mMathMLEnabled : 1;
 
@@ -4068,6 +4120,9 @@ class Document : public nsINode,
 
   // Our readyState
   ReadyState mReadyState;
+
+  // Ancestor's loading state
+  bool mAncestorIsLoading;
 
 #ifdef MOZILLA_INTERNAL_API
   // Our visibility state
@@ -4433,6 +4488,18 @@ class Document : public nsINode,
   // resolution.
   nsTHashtable<nsPtrHashKey<SVGElement>> mLazySVGPresElements;
 
+  // Most documents will only use one (or very few) language groups. Rather
+  // than have the overhead of a hash lookup, we simply look along what will
+  // typically be a very short (usually of length 1) linked list. There are 31
+  // language groups, so in the worst case scenario we'll need to traverse 31
+  // link items.
+  LangGroupFontPrefs mLangGroupFontPrefs;
+
+  nsTHashtable<nsRefPtrHashKey<nsAtom>> mLanguagesUsed;
+
+  // TODO(emilio): Is this hot enough to warrant to be cached?
+  RefPtr<nsAtom> mLanguageFromCharset;
+
   // Restyle root for servo's style system.
   //
   // We store this as an nsINode, rather than as an Element, so that we can
@@ -4465,9 +4532,13 @@ class Document : public nsINode,
   // Pres shell resolution saved before entering fullscreen mode.
   float mSavedResolution;
 
+  bool mPendingInitialTranslation;
+
  public:
   // Needs to be public because the bindings code pokes at it.
   js::ExpandoAndGeneration mExpandoAndGeneration;
+
+  bool HasPendingInitialTranslation() { return mPendingInitialTranslation; }
 };
 
 NS_DEFINE_STATIC_IID_ACCESSOR(Document, NS_IDOCUMENT_IID)

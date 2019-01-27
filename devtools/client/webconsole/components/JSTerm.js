@@ -19,6 +19,7 @@ loader.lazyRequireGetter(this, "KeyCodes", "devtools/client/shared/keycodes", tr
 loader.lazyRequireGetter(this, "Editor", "devtools/client/sourceeditor/editor");
 loader.lazyRequireGetter(this, "Telemetry", "devtools/client/shared/telemetry");
 loader.lazyRequireGetter(this, "saveScreenshot", "devtools/shared/screenshot/save");
+loader.lazyRequireGetter(this, "focusableSelector", "devtools/client/shared/focus", true);
 
 const l10n = require("devtools/client/webconsole/webconsole-l10n");
 
@@ -241,6 +242,21 @@ class JSTerm extends Component {
               return true;
             },
 
+            "Shift-Tab": () => {
+              if (this.hasEmptyInput()) {
+                this.focusPreviousElement();
+                return false;
+              }
+
+              const hasSuggestion = this.hasAutocompletionSuggestion();
+
+              if (hasSuggestion) {
+                return false;
+              }
+
+              return "CodeMirror.Pass";
+            },
+
             "Up": onArrowUp,
             "Cmd-Up": onArrowUp,
 
@@ -449,6 +465,33 @@ class JSTerm extends Component {
     }
   }
 
+  focusPreviousElement() {
+    const inputField = this.editor.codeMirror.getInputField();
+
+    const findPreviousFocusableElement = el => {
+      if (!el || !el.querySelectorAll) {
+        return null;
+      }
+
+      const items = Array.from(el.querySelectorAll(focusableSelector));
+      const inputIndex = items.indexOf(inputField);
+
+      if (items.length === 0 || (inputIndex > -1 && items.length === 1)) {
+        return findPreviousFocusableElement(el.parentNode);
+      }
+
+      const index = inputIndex > 0
+        ? inputIndex - 1
+        : items.length - 1;
+      return items[index];
+    };
+
+    const focusableEl = findPreviousFocusableElement(this.node.parentNode);
+    if (focusableEl) {
+      focusableEl.focus();
+    }
+  }
+
   /**
    * The JavaScript evaluation response handler.
    *
@@ -619,7 +662,7 @@ class JSTerm extends Component {
       "lines": str.split(/\n/).length,
     });
 
-    return this.webConsoleClient.evaluateJSAsync(str, null, {
+    return this.webConsoleClient.evaluateJSAsync(str, {
       frameActor: this.props.serviceContainer.getFrameActor(options.frame),
       ...options,
     });
@@ -636,8 +679,7 @@ class JSTerm extends Component {
    *         received.
    */
   copyObject(evalString, evalOptions) {
-    return this.webConsoleClient.evaluateJSAsync(`copy(${evalString})`,
-      null, evalOptions);
+    return this.webConsoleClient.evaluateJSAsync(`copy(${evalString})`, evalOptions);
   }
 
   /**
@@ -732,6 +774,14 @@ class JSTerm extends Component {
     }
 
     return this.inputNode ? this.inputNode.selectionStart : null;
+  }
+
+  getSelectedText() {
+    if (this.inputNode) {
+      return this.inputNode.value.substring(
+        this.inputNode.selectionStart, this.inputNode.selectionEnd);
+    }
+    return this.editor.getSelection();
   }
 
   /**

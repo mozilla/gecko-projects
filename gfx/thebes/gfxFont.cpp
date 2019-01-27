@@ -48,8 +48,8 @@
 
 #include "cairo.h"
 #ifdef XP_WIN
-#include "cairo-win32.h"
-#include "gfxWindowsPlatform.h"
+#  include "cairo-win32.h"
+#  include "gfxWindowsPlatform.h"
 #endif
 
 #include "harfbuzz/hb.h"
@@ -67,7 +67,7 @@ using mozilla::services::GetObserverService;
 gfxFontCache* gfxFontCache::gGlobalCache = nullptr;
 
 #ifdef DEBUG_roc
-#define DEBUG_TEXT_RUN_STORAGE_METRICS
+#  define DEBUG_TEXT_RUN_STORAGE_METRICS
 #endif
 
 #ifdef DEBUG_TEXT_RUN_STORAGE_METRICS
@@ -2616,9 +2616,9 @@ static char16_t IsBoundarySpace(char16_t aChar, char16_t aNextChar) {
 }
 
 #ifdef __GNUC__
-#define GFX_MAYBE_UNUSED __attribute__((unused))
+#  define GFX_MAYBE_UNUSED __attribute__((unused))
 #else
-#define GFX_MAYBE_UNUSED
+#  define GFX_MAYBE_UNUSED
 #endif
 
 template <typename T>
@@ -2906,9 +2906,9 @@ bool gfxFont::ShapeTextWithoutWordCache(DrawTarget* aDrawTarget, const T* aText,
 }
 
 #ifndef RELEASE_OR_BETA
-#define TEXT_PERF_INCR(tp, m) (tp ? (tp)->current.m++ : 0)
+#  define TEXT_PERF_INCR(tp, m) (tp ? (tp)->current.m++ : 0)
 #else
-#define TEXT_PERF_INCR(tp, m)
+#  define TEXT_PERF_INCR(tp, m)
 #endif
 
 inline static bool IsChar8Bit(uint8_t /*aCh*/) { return true; }
@@ -3061,6 +3061,9 @@ bool gfxFont::SplitAndInitTextRun(
             flags | gfx::ShapedTextFlags::TEXT_IS_8BIT, rounding, tp);
         if (sw) {
           aTextRun->CopyGlyphDataFrom(sw, aRunStart + i);
+          if (boundary == ' ') {
+            aTextRun->GetCharacterGlyphs()[aRunStart + i].SetIsSpace();
+          }
         } else {
           return false;
         }

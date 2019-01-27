@@ -216,18 +216,16 @@ WebConsoleClient.prototype = {
    * @param array types
    *        The array of message types you want from the server. See
    *        this.CACHED_MESSAGES for known types.
-   * @param function onResponse
-   *        The function invoked when the response is received.
    * @return request
    *         Request object that implements both Promise and EventEmitter interfaces
    */
-  getCachedMessages: function(types, onResponse) {
+  getCachedMessages: function(types) {
     const packet = {
       to: this.actorID,
       type: "getCachedMessages",
       messageTypes: types,
     };
-    return this._client.request(packet, onResponse);
+    return this._client.request(packet);
   },
 
   /**
@@ -253,8 +251,6 @@ WebConsoleClient.prototype = {
    *
    * @param string string
    *        The code you want to evaluate.
-   * @param function onResponse
-   *        The function invoked when the response is received.
    * @param object [options={}]
    *        Options for evaluation:
    *
@@ -287,7 +283,7 @@ WebConsoleClient.prototype = {
    * @return request
    *         Request object that implements both Promise and EventEmitter interfaces
    */
-  evaluateJS: function(string, onResponse, options = {}) {
+  evaluateJS: function(string, options = {}) {
     const packet = {
       to: this.actorID,
       type: "evaluateJS",
@@ -298,14 +294,14 @@ WebConsoleClient.prototype = {
       selectedNodeActor: options.selectedNodeActor,
       selectedObjectActor: options.selectedObjectActor,
     };
-    return this._client.request(packet, onResponse);
+    return this._client.request(packet);
   },
 
   /**
    * Evaluate a JavaScript expression asynchronously.
    * See evaluateJS for parameter and response information.
    */
-  evaluateJSAsync: function(string, onResponse, options = {}) {
+  evaluateJSAsync: function(string, options = {}) {
     const packet = {
       to: this.actorID,
       type: "evaluateJSAsync",
@@ -324,9 +320,6 @@ WebConsoleClient.prototype = {
         // for a response.
         if (this.pendingEvaluationResults) {
           this.pendingEvaluationResults.set(response.resultID, resp => {
-            if (onResponse) {
-              onResponse(resp);
-            }
             if (resp.error) {
               reject(resp);
             } else {
@@ -418,18 +411,16 @@ WebConsoleClient.prototype = {
    *
    * @param array preferences
    *        An array with the preferences you want to retrieve.
-   * @param function [onResponse]
-   *        Optional function to invoke when the response is received.
    * @return request
    *         Request object that implements both Promise and EventEmitter interfaces
    */
-  getPreferences: function(preferences, onResponse) {
+  getPreferences: function(preferences) {
     const packet = {
       to: this.actorID,
       type: "getPreferences",
       preferences: preferences,
     };
-    return this._client.request(packet, onResponse);
+    return this._client.request(packet);
   },
 
   /**
@@ -437,18 +428,16 @@ WebConsoleClient.prototype = {
    *
    * @param object preferences
    *        An object with the preferences you want to change.
-   * @param function [onResponse]
-   *        Optional function to invoke when the response is received.
    * @return request
    *         Request object that implements both Promise and EventEmitter interfaces
    */
-  setPreferences: function(preferences, onResponse) {
+  setPreferences: function(preferences) {
     const packet = {
       to: this.actorID,
       type: "setPreferences",
       preferences: preferences,
     };
-    return this._client.request(packet, onResponse);
+    return this._client.request(packet);
   },
 
   /**
@@ -636,18 +625,16 @@ WebConsoleClient.prototype = {
    *
    * @param string data
    *        The details of the HTTP request.
-   * @param function onResponse
-   *        The function invoked when the response is received.
    * @return request
    *         Request object that implements both Promise and EventEmitter interfaces
    */
-  sendHTTPRequest: function(data, onResponse) {
+  sendHTTPRequest: function(data) {
     const packet = {
       to: this.actorID,
       type: "sendHTTPRequest",
       request: data,
     };
-    return this._client.request(packet, onResponse);
+    return this._client.request(packet);
   },
 
   /**
@@ -657,18 +644,16 @@ WebConsoleClient.prototype = {
    * @param array listeners
    *        Array of listeners you want to start. See this.LISTENERS for
    *        known listeners.
-   * @param function onResponse
-   *        Function to invoke when the server response is received.
    * @return request
    *         Request object that implements both Promise and EventEmitter interfaces
    */
-  startListeners: function(listeners, onResponse) {
+  startListeners: function(listeners) {
     const packet = {
       to: this.actorID,
       type: "startListeners",
       listeners: listeners,
     };
-    return this._client.request(packet, onResponse);
+    return this._client.request(packet);
   },
 
   /**
@@ -683,13 +668,13 @@ WebConsoleClient.prototype = {
    * @return request
    *         Request object that implements both Promise and EventEmitter interfaces
    */
-  stopListeners: function(listeners, onResponse) {
+  stopListeners: function(listeners) {
     const packet = {
       to: this.actorID,
       type: "stopListeners",
       listeners: listeners,
     };
-    return this._client.request(packet, onResponse);
+    return this._client.request(packet);
   },
 
   /**
@@ -711,20 +696,18 @@ WebConsoleClient.prototype = {
   },
 
   /**
-   * Close the WebConsoleClient. This stops all the listeners on the server and
-   * detaches from the console actor.
+   * Close the WebConsoleClient.
    *
    * @param function onResponse
    *        Function to invoke when the server response is received.
    */
-  detach: function(onResponse) {
+  destroy: function() {
     this._client.removeListener("evaluationResult", this.onEvaluationResult);
     this._client.removeListener("networkEvent", this.onNetworkEvent);
     this._client.removeListener("networkEventUpdate",
                                 this.onNetworkEventUpdate);
     this._client.removeListener("inspectObject", this.onInspectObject);
     this._client.removeListener("documentEvent", this.onDocEvent);
-    this.stopListeners(null, onResponse);
     this._longStrings = null;
     this._client = null;
     this.pendingEvaluationResults.clear();

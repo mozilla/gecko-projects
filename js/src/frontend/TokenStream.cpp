@@ -598,11 +598,11 @@ void TokenStreamAnyChars::reportErrorNoOffsetVA(unsigned errorNumber,
 
 // Use the fastest available getc.
 #if defined(HAVE_GETC_UNLOCKED)
-#define fast_getc getc_unlocked
+#  define fast_getc getc_unlocked
 #elif defined(HAVE__GETC_NOLOCK)
-#define fast_getc _getc_nolock
+#  define fast_getc _getc_nolock
 #else
-#define fast_getc getc
+#  define fast_getc getc
 #endif
 
 MOZ_MUST_USE MOZ_ALWAYS_INLINE bool
@@ -2159,7 +2159,7 @@ MOZ_MUST_USE bool TokenStreamSpecific<Unit, AnyCharsAccess>::decimalNumber(
     }
   }
 #ifdef ENABLE_BIGINT
-  else if (unit == 'n') {
+  else if (unit == 'n' && anyCharsAccess().options().bigIntEnabledOption) {
     isBigInt = true;
     unit = peekCodeUnit();
   }
@@ -2365,6 +2365,7 @@ MOZ_MUST_USE bool TokenStreamSpecific<Unit, AnyCharsAccess>::regexpLiteral(
 template <typename Unit, class AnyCharsAccess>
 MOZ_MUST_USE bool TokenStreamSpecific<Unit, AnyCharsAccess>::bigIntLiteral(
     TokenStart start, Modifier modifier, TokenKind* out) {
+  MOZ_ASSERT(anyCharsAccess().options().bigIntEnabledOption);
   MOZ_ASSERT(this->sourceUnits.previousCodeUnit() == toUnit('n'));
   MOZ_ASSERT(this->sourceUnits.offset() > start.offset());
   uint32_t length = this->sourceUnits.offset() - start.offset();
@@ -2645,7 +2646,7 @@ MOZ_MUST_USE bool TokenStreamSpecific<Unit, AnyCharsAccess>::getTokenInternal(
       }
 
 #ifdef ENABLE_BIGINT
-      if (unit == 'n') {
+      if (unit == 'n' && anyCharsAccess().options().bigIntEnabledOption) {
         if (isLegacyOctalOrNoctal) {
           error(JSMSG_BIGINT_INVALID_SYNTAX);
           return badToken();
@@ -3361,11 +3362,11 @@ const char* TokenKindToDesc(TokenKind tt) {
 #ifdef DEBUG
 const char* TokenKindToString(TokenKind tt) {
   switch (tt) {
-#define EMIT_CASE(name, desc) \
-  case TokenKind::name:       \
-    return "TokenKind::" #name;
+#  define EMIT_CASE(name, desc) \
+    case TokenKind::name:       \
+      return "TokenKind::" #name;
     FOR_EACH_TOKEN_KIND(EMIT_CASE)
-#undef EMIT_CASE
+#  undef EMIT_CASE
     case TokenKind::Limit:
       break;
   }

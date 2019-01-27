@@ -151,7 +151,7 @@ mozilla::ipc::IPCResult LayerTransactionParent::RecvUpdate(
     }
   });
 
-  AUTO_PROFILER_TRACING("Paint", "LayerTransaction");
+  AUTO_PROFILER_TRACING("Paint", "LayerTransaction", GRAPHICS);
   AUTO_PROFILER_LABEL("LayerTransactionParent::RecvUpdate", GRAPHICS);
 
   TimeStamp updateStart = TimeStamp::Now();
@@ -886,11 +886,11 @@ bool LayerTransactionParent::IsSameProcess() const {
 void LayerTransactionParent::SetPendingTransactionId(
     TransactionId aId, const VsyncId& aVsyncId,
     const TimeStamp& aVsyncStartTime, const TimeStamp& aRefreshStartTime,
-    const TimeStamp& aTxnStartTime, const TimeStamp& aTxnEndTime, bool aContainsSVG,
-    const nsCString& aURL, const TimeStamp& aFwdTime) {
-  mPendingTransactions.AppendElement(
-      PendingTransaction{aId, aVsyncId, aVsyncStartTime, aRefreshStartTime,
-                         aTxnStartTime, aTxnEndTime, aFwdTime, aURL, aContainsSVG});
+    const TimeStamp& aTxnStartTime, const TimeStamp& aTxnEndTime,
+    bool aContainsSVG, const nsCString& aURL, const TimeStamp& aFwdTime) {
+  mPendingTransactions.AppendElement(PendingTransaction{
+      aId, aVsyncId, aVsyncStartTime, aRefreshStartTime, aTxnStartTime,
+      aTxnEndTime, aFwdTime, aURL, aContainsSVG});
 }
 
 TransactionId LayerTransactionParent::FlushTransactionId(

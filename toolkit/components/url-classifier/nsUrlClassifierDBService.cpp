@@ -51,7 +51,6 @@
 #include "mozilla/net/UrlClassifierFeatureResult.h"
 #include "mozilla/ipc/URIUtils.h"
 #include "mozilla/SyncRunnable.h"
-#include "nsProxyRelease.h"
 #include "UrlClassifierTelemetryUtils.h"
 #include "nsIURLFormatter.h"
 #include "nsIUploadChannel.h"
@@ -167,7 +166,7 @@ class FeatureHolder final {
     NS_ENSURE_SUCCESS(rv, rv);
 
     for (TableData* tableData : mTableData) {
-      nsresult rv = aWorker->DoSingleLocalLookupWithURIFragments(
+      rv = aWorker->DoSingleLocalLookupWithURIFragments(
           fragments, tableData->mTable, tableData->mResults);
       if (NS_WARN_IF(NS_FAILED(rv))) {
         return rv;
@@ -2076,9 +2075,11 @@ nsUrlClassifierDBService::Lookup(nsIPrincipal* aPrincipal,
   return LookupURI(aPrincipal, tables, c, true, &dummy);
 }
 
-nsresult nsUrlClassifierDBService::LookupURI(
-    nsIPrincipal* aPrincipal, const nsACString& tables,
-    nsIUrlClassifierCallback* c, bool forceLookup, bool* didLookup) {
+nsresult nsUrlClassifierDBService::LookupURI(nsIPrincipal* aPrincipal,
+                                             const nsACString& tables,
+                                             nsIUrlClassifierCallback* c,
+                                             bool forceLookup,
+                                             bool* didLookup) {
   NS_ENSURE_TRUE(gDbBackgroundThread, NS_ERROR_NOT_INITIALIZED);
   NS_ENSURE_ARG(aPrincipal);
 
@@ -2112,8 +2113,8 @@ nsresult nsUrlClassifierDBService::LookupURI(
     }
 
     uint32_t perm;
-    rv = permissionManager->TestPermissionFromPrincipal(
-        aPrincipal, "safe-browsing", &perm);
+    rv = permissionManager->TestPermissionFromPrincipal(aPrincipal,
+                                                        "safe-browsing", &perm);
     NS_ENSURE_SUCCESS(rv, rv);
 
     bool clean = (perm == nsIPermissionManager::ALLOW_ACTION);
@@ -2447,6 +2448,15 @@ nsIThread* nsUrlClassifierDBService::BackgroundThread() {
 // static
 bool nsUrlClassifierDBService::ShutdownHasStarted() {
   return gShuttingDownThread;
+}
+
+// static
+nsUrlClassifierDBServiceWorker* nsUrlClassifierDBService::GetWorker() {
+  if (!sUrlClassifierDBService) {
+    return nullptr;
+  }
+
+  return sUrlClassifierDBService->mWorker;
 }
 
 NS_IMETHODIMP

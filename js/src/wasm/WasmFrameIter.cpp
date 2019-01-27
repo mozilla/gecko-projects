@@ -376,7 +376,7 @@ static const unsigned SetFP = 3;
 static const unsigned PoppedFP = 4;
 static const unsigned PoppedTLSReg = 5;
 #else
-#error "Unknown architecture!"
+#  error "Unknown architecture!"
 #endif
 static constexpr unsigned SetJitEntryFP = PushedRetAddr + SetFP - PushedFP;
 
@@ -457,17 +457,17 @@ static void GenerateCallablePrologue(MacroAssembler& masm, uint32_t* entry) {
   }
 #else
   {
-#if defined(JS_CODEGEN_ARM)
+#  if defined(JS_CODEGEN_ARM)
     AutoForbidPools afp(&masm, /* number of instructions in scope = */ 7);
 
     *entry = masm.currentOffset();
 
     MOZ_ASSERT(BeforePushRetAddr == 0);
     masm.push(lr);
-#else
+#  else
     *entry = masm.currentOffset();
     // The x86/x64 call instruction pushes the return address.
-#endif
+#  endif
 
     MOZ_ASSERT_IF(!masm.oom(), PushedRetAddr == masm.currentOffset() - *entry);
     masm.push(WasmTlsReg);
@@ -527,9 +527,9 @@ static void GenerateCallableEpilogue(MacroAssembler& masm, unsigned framePushed,
 
 #else
   // Forbid pools for the same reason as described in GenerateCallablePrologue.
-#if defined(JS_CODEGEN_ARM)
+#  if defined(JS_CODEGEN_ARM)
   AutoForbidPools afp(&masm, /* number of instructions in scope = */ 7);
-#endif
+#  endif
 
   // There is an important ordering constraint here: fp must be repointed to
   // the caller's frame before any field of the frame currently pointed to by
@@ -1347,16 +1347,16 @@ static const char* ThunkedNativeToDescription(SymbolicAddress func) {
       return "jit call to int64 wasm function";
     case SymbolicAddress::MemCopy:
       return "call to native memory.copy function";
-    case SymbolicAddress::MemDrop:
-      return "call to native memory.drop function";
+    case SymbolicAddress::DataDrop:
+      return "call to native data.drop function";
     case SymbolicAddress::MemFill:
       return "call to native memory.fill function";
     case SymbolicAddress::MemInit:
       return "call to native memory.init function";
     case SymbolicAddress::TableCopy:
       return "call to native table.copy function";
-    case SymbolicAddress::TableDrop:
-      return "call to native table.drop function";
+    case SymbolicAddress::ElemDrop:
+      return "call to native elem.drop function";
     case SymbolicAddress::TableGet:
       return "call to native table.get function";
     case SymbolicAddress::TableGrow:

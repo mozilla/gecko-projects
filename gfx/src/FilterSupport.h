@@ -19,10 +19,12 @@
 namespace mozilla {
 namespace gfx {
 class FilterPrimitiveDescription;
-} // namespace gfx
-} // namespace mozilla
+}  // namespace gfx
+}  // namespace mozilla
 
 DECLARE_USE_COPY_CONSTRUCTORS(mozilla::gfx::FilterPrimitiveDescription)
+
+extern const float gsRGBToLinearRGBMap[256];
 
 namespace mozilla {
 namespace gfx {

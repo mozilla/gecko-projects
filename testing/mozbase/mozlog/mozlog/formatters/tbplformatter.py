@@ -253,7 +253,7 @@ class TbplFormatter(BaseFormatter):
             sections.append(duration_msg)
         rv.append(' | '.join(sections) + '\n')
         if screenshot_msg:
-            rv.append(screenshot_msg[1:])
+            rv.append(screenshot_msg[1:] + "\n")
         return "".join(rv)
 
     def suite_end(self, data):
@@ -304,7 +304,7 @@ class TbplFormatter(BaseFormatter):
     def mozleak_total(self, data):
         if data["bytes"] is None:
             # We didn't see a line with name 'TOTAL'
-            if data.get("induced_crashed", False):
+            if data.get("induced_crash", False):
                 return ("TEST-INFO | leakcheck | %s deliberate crash and thus no leak log\n"
                         % data["process"])
             if data.get("ignore_missing", False):

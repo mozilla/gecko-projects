@@ -329,6 +329,11 @@ DebuggerClient.prototype = {
         client.detach(detachClients);
         return;
       }
+      if (client.destroy) {
+        client.destroy();
+        detachClients();
+        return;
+      }
       detachClients();
     };
     detachClients();
@@ -883,6 +888,9 @@ DebuggerClient.prototype = {
    *        the stream.
    */
   onClosed: function() {
+    if (this._closed) {
+      return;
+    }
     this._closed = true;
     this.emit("closed");
 

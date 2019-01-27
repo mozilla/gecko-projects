@@ -22,7 +22,7 @@
 #include "vm/ArgumentsObject.h"
 #include "vm/ArrayObject.h"
 #ifdef ENABLE_BIGINT
-#include "vm/BigIntType.h"
+#  include "vm/BigIntType.h"
 #endif
 #include "vm/Debugger.h"
 #include "vm/EnvironmentObject.h"
@@ -95,20 +95,20 @@ using mozilla::PodCopy;
 //                       '---------'   '----------'         '-----------------'                 //
 //                            |                                                                 //
 //                            |                                                                 //
-//                        .--------.                                                            //
-//      o---------------->|traverse| .                                                          //
-//     /_\                '--------'   ' .                                                      //
-//      |                     .     .      ' .                                                  //
-//      |                     .       .        ' .                                              //
-//      |                     .         .          ' .                                          //
-//      |             .-----------.    .-----------.   ' .     .--------------------.           //
-//      |             |markAndScan|    |markAndPush|       ' - |markAndTraceChildren|---->      //
-//      |             '-----------'    '-----------'           '--------------------'           //
-//      |                   |                  \                                                //
-//      |                   |                   \                                               //
-//      |       .----------------------.     .----------------.                                 //
-//      |       |T::eagerlyMarkChildren|     |pushMarkStackTop|<===Oo                           //
-//      |       '----------------------'     '----------------'    ||                           //
+//                     .-----------.                                                            //
+//      o------------->|traverse(T)| .                                                          //
+//     /_\             '-----------'   ' .                                                      //
+//      |                   .       .      ' .                                                  //
+//      |                   .         .        ' .                                              //
+//      |                   .           .          ' .                                          //
+//      |          .--------------.  .--------------.  ' .     .-----------------------.        //
+//      |          |markAndScan(T)|  |markAndPush(T)|      ' - |markAndTraceChildren(T)|        //
+//      |          '--------------'  '--------------'          '-----------------------'        //
+//      |                   |                  \                               |                //
+//      |                   |                   \                              |                //
+//      |       .----------------------.     .----------------.         .------------------.    //
+//      |       |eagerlyMarkChildren(T)|     |pushMarkStackTop|<===Oo   |T::traceChildren()|--> //
+//      |       '----------------------'     '----------------'    ||   '------------------'    //
 //      |                  |                         ||            ||                           //
 //      |                  |                         ||            ||                           //
 //      |                  |                         ||            ||                           //
@@ -847,7 +847,6 @@ void GCMarker::traverse(JSString* thing) {
 template <>
 void GCMarker::traverse(LazyScript* thing) {
   markAndScan(thing);
-  markImplicitEdges(thing);
 }
 template <>
 void GCMarker::traverse(Shape* thing) {
@@ -1032,7 +1031,7 @@ void LazyScript::traceChildren(JSTracer* trc) {
   }
 
   if (trc->isMarkingTracer()) {
-    return GCMarker::fromTracer(trc)->markImplicitEdges(this);
+    GCMarker::fromTracer(trc)->markImplicitEdges(this);
   }
 }
 inline void js::GCMarker::eagerlyMarkChildren(LazyScript* thing) {
@@ -1068,6 +1067,8 @@ inline void js::GCMarker::eagerlyMarkChildren(LazyScript* thing) {
   for (auto i : IntegerRange(thing->numInnerFunctions())) {
     traverseEdge(thing, static_cast<JSObject*>(innerFunctions[i]));
   }
+
+  markImplicitEdges(thing);
 }
 
 void Shape::traceChildren(JSTracer* trc) {
@@ -1101,7 +1102,7 @@ inline void js::GCMarker::eagerlyMarkChildren(Shape* shape) {
 
     traverseEdge(shape, shape->propidRef().get());
 
-    // When triggered between slices on belhalf of a barrier, these
+    // When triggered between slices on behalf of a barrier, these
     // objects may reside in the nursery, so require an extra check.
     // FIXME: Bug 1157967 - remove the isTenured checks.
     if (shape->hasGetterObject() && shape->getterObject()->isTenured()) {
@@ -2774,10 +2775,9 @@ void TenuringTracer::traverse(T* thingp) {
 }  // namespace js
 
 template <typename T>
-void js::gc::StoreBuffer::MonoTypeBuffer<T>::trace(StoreBuffer* owner,
-                                                   TenuringTracer& mover) {
-  mozilla::ReentrancyGuard g(*owner);
-  MOZ_ASSERT(owner->isEnabled());
+void js::gc::StoreBuffer::MonoTypeBuffer<T>::trace(TenuringTracer& mover) {
+  mozilla::ReentrancyGuard g(*owner_);
+  MOZ_ASSERT(owner_->isEnabled());
   if (last_) {
     last_.trace(mover);
   }
@@ -2789,11 +2789,11 @@ void js::gc::StoreBuffer::MonoTypeBuffer<T>::trace(StoreBuffer* owner,
 namespace js {
 namespace gc {
 template void StoreBuffer::MonoTypeBuffer<StoreBuffer::ValueEdge>::trace(
-    StoreBuffer*, TenuringTracer&);
+    TenuringTracer&);
 template void StoreBuffer::MonoTypeBuffer<StoreBuffer::SlotsEdge>::trace(
-    StoreBuffer*, TenuringTracer&);
+    TenuringTracer&);
 template void StoreBuffer::MonoTypeBuffer<StoreBuffer::CellPtrEdge>::trace(
-    StoreBuffer*, TenuringTracer&);
+    TenuringTracer&);
 }  // namespace gc
 }  // namespace js
 
@@ -2873,9 +2873,8 @@ static void TraceBufferedCells(TenuringTracer& mover, Arena* arena,
   }
 }
 
-void js::gc::StoreBuffer::WholeCellBuffer::trace(StoreBuffer* owner,
-                                                 TenuringTracer& mover) {
-  MOZ_ASSERT(owner->isEnabled());
+void js::gc::StoreBuffer::WholeCellBuffer::trace(TenuringTracer& mover) {
+  MOZ_ASSERT(owner_->isEnabled());
 
   for (ArenaCellSet* cells = head_; cells; cells = cells->next) {
     cells->check();

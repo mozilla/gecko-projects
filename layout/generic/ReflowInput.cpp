@@ -33,9 +33,9 @@
 #include "mozilla/dom/HTMLInputElement.h"
 
 #ifdef DEBUG
-#undef NOISY_VERTICAL_ALIGN
+#  undef NOISY_VERTICAL_ALIGN
 #else
-#undef NOISY_VERTICAL_ALIGN
+#  undef NOISY_VERTICAL_ALIGN
 #endif
 
 using namespace mozilla;
@@ -822,8 +822,7 @@ void ReflowInput::InitDynamicReflowRoot() {
   if (mFrame->IsFrameOfType(nsIFrame::eLineParticipant) ||
       nsStyleDisplay::IsRubyDisplayType(display) ||
       mFrameType == NS_CSS_FRAME_TYPE_INTERNAL_TABLE ||
-      display == StyleDisplay::Table || display == StyleDisplay::TableCaption ||
-      display == StyleDisplay::InlineTable ||
+      display == StyleDisplay::Table || display == StyleDisplay::InlineTable ||
       (mFrame->GetParent() && mFrame->GetParent()->IsXULBoxFrame())) {
     // We have a display type where 'width' and 'height' don't actually
     // set the width or height (i.e., the size depends on content).

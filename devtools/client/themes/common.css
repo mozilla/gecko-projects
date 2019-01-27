@@ -281,13 +281,13 @@ checkbox:-moz-focusring {
 .devtools-button {
   -moz-appearance: none;
   background: transparent;
-  border: 1px solid var(--toolbarbutton-border-color);
+  border: none;
   border-radius: 2px;
   color: var(--theme-body-color);
   transition: background-color 0.05s ease-in-out;
   -moz-box-align: center;
   text-shadow: none;
-  padding: 1px;
+  padding: 2px;
   margin: 1px;
 
   /* Button text should not wrap on multiple lines */
@@ -307,7 +307,7 @@ checkbox:-moz-focusring {
   transition: opacity 0.05s ease-in-out;
   -moz-context-properties: fill;
   fill: currentColor;
-  color: var(--theme-toolbar-icon-color);
+  color: var(--theme-icon-color);
   direction: ltr;
   font-size: 11px;
 }
@@ -322,7 +322,7 @@ checkbox:-moz-focusring {
 .devtools-toolbarbutton:not([label])[checked=true] > .toolbarbutton-icon,
 .devtools-toolbarbutton:not([label])[open=true] > .toolbarbutton-icon,
 .devtools-button.checked:empty::before {
-  color: var(--theme-toolbar-checked-color);
+  color: var(--theme-icon-checked-color);
 }
 
 /* Standalone buttons */
@@ -383,7 +383,6 @@ checkbox:-moz-focusring {
 .devtools-toolbarbutton:not([label]):-moz-any([checked],[open],:hover:active),
 .devtools-button[aria-haspopup="menu"][aria-expanded="true"] {
   background-color: var(--toolbarbutton-hover-background);
-  border-color: var(--toolbarbutton-hover-border-color);
 }
 
 .devtools-button:not(:empty):not(.checked):not(:disabled):hover:active,
@@ -403,7 +402,6 @@ checkbox:-moz-focusring {
 .devtools-toolbarbutton:not([disabled])[label][open],
 .devtools-button:not(:empty).checked {
   background: var(--toolbarbutton-checked-background);
-  border-color: var(--toolbarbutton-checked-border-color);
   color: var(--toolbarbutton-checked-color);
 }
 
@@ -475,10 +473,12 @@ checkbox:-moz-focusring {
   padding: 0;
   padding-inline-start: 22px;
   padding-inline-end: 4px;
-  background-position: 8px center;
-  background-size: 11px 11px;
+  background-position: 7px center;
+  background-size: 12px;
   background-repeat: no-repeat;
   font-size: inherit;
+  -moz-context-properties: fill;
+  fill: var(--theme-icon-dimmed-color);
 }
 
 /*
@@ -495,14 +495,14 @@ checkbox:-moz-focusring {
 }
 
 .devtools-filterinput {
-  background-image: url(chrome://devtools/skin/images/filter.svg);
+  background-image: url(chrome://devtools/skin/images/filter-small.svg);
 }
 
 .devtools-searchinput:-moz-locale-dir(rtl),
 .devtools-searchinput:dir(rtl),
 .devtools-filterinput:-moz-locale-dir(rtl),
 .devtools-filterinput:dir(rtl) {
-  background-position: calc(100% - 8px) center;
+  background-position-x: right 7px;
 }
 
 .devtools-searchinput .textbox-input::placeholder,
@@ -618,7 +618,7 @@ checkbox:-moz-focusring {
   background-color: transparent;
   background-image: url("chrome://devtools/skin/images/search-clear.svg");
   -moz-context-properties: fill, fill-opacity;
-  fill: var(--theme-toolbar-icon-color);
+  fill: var(--theme-icon-color);
   fill-opacity: 0.8;
 }
 
@@ -641,7 +641,7 @@ checkbox:-moz-focusring {
   background-repeat: no-repeat;
   background-size: 10px;
   -moz-context-properties: fill;
-  fill: var(--theme-twisty-fill);
+  fill: var(--theme-icon-dimmed-color);
   transform: rotate(-90deg);
 }
 
@@ -652,7 +652,7 @@ checkbox:-moz-focusring {
 }
 
 .theme-selected ~ .theme-twisty {
-  fill: var(--theme-twisty-selected-fill);
+  fill: var(--theme-selection-color);
 }
 
 .theme-twisty:-moz-focusring {
@@ -741,7 +741,7 @@ checkbox:-moz-focusring {
   background-repeat: no-repeat;
   background-position: center;
   -moz-context-properties: fill;
-  fill: var(--theme-toolbar-icon-color);
+  fill: var(--theme-icon-color);
 }
 
 .all-tabs-menu:hover {

@@ -15,7 +15,7 @@ exports[`sources-tree addToTree correctly parses file sources 1`] = `
 " - root path= 
   - file:// path=file:// 
     - a path=file:///a 
-      - b.js path=file:///a/b.js source_id=undefined 
+      - b.js path=file:///a/b.js source_id=actor1 
 "
 `;
 
@@ -39,14 +39,14 @@ exports[`sources-tree addToTree does not mangle encoded URLs 1`] = `
 " - root path= 
   - example.com path=example.com 
     - foo path=example.com/foo 
-      - B9724220.131821496;dc_ver=42.111;sz=468x60;u_sd=2;dc_adk=2020465299;ord=a53rpc;dc_rfl=1,https%3A%2F%2Fdavidwalsh.name%2F$0;xdt=1 path=example.com/foo/B9724220.131821496;dc_ver=42.111;sz=468x60;u_sd=2;dc_adk=2020465299;ord=a53rpc;dc_rfl=1,https%3A%2F%2Fdavidwalsh.name%2F$0;xdt=1 source_id=undefined 
+      - B9724220.131821496;dc_ver=42.111;sz=468x60;u_sd=2;dc_adk=2020465299;ord=a53rpc;dc_rfl=1,https%3A%2F%2Fdavidwalsh.name%2F$0;xdt=1 path=example.com/foo/B9724220.131821496;dc_ver=42.111;sz=468x60;u_sd=2;dc_adk=2020465299;ord=a53rpc;dc_rfl=1,https%3A%2F%2Fdavidwalsh.name%2F$0;xdt=1 source_id=actor1 
 "
 `;
 
 exports[`sources-tree addToTree excludes javascript: URLs from the tree 1`] = `
 " - root path= 
   - example.com path=example.com 
-    - source1.js path=example.com/source1.js source_id=undefined 
+    - source1.js path=example.com/source1.js source_id=actor2 
 "
 `;
 
@@ -54,7 +54,7 @@ exports[`sources-tree addToTree name does not include query params 1`] = `
 " - root path= 
   - example.com path=example.com 
     - foo path=example.com/foo 
-      - name.js path=example.com/foo/name.js source_id=undefined 
+      - name.js path=example.com/foo/name.js source_id=actor1 
 "
 `;
 
@@ -73,5 +73,26 @@ exports[`sources-tree addToTree supports data URLs 1`] = `
 " - root path= 
   - (no domain) path=(no domain) 
     - data:text/html,<script>console.log(123)</script> path=data:text/html,<script>console.log(123)</script> source_id=server1.conn13.child1/39 
+"
+`;
+
+exports[`sources-tree addToTree uses debuggeeUrl as default 1`] = `
+" - root path= 
+  - localhost:4242 path=localhost:4242 
+    - components path=localhost:4242/components 
+      - Header.js path=localhost:4242/components/Header.js source_id=undefined 
+      - TodoItem.js path=localhost:4242/components/TodoItem.js source_id=undefined 
+      - TodoTextInput.js path=localhost:4242/components/TodoTextInput.js source_id=undefined 
+    - reducers path=localhost:4242/reducers 
+      - index.js path=localhost:4242/reducers/index.js source_id=undefined 
+    - index.js path=localhost:4242/index.js source_id=undefined 
+  - resource://gre path=resource://gre 
+    - modules path=resource://gre/modules 
+      - ExtensionContent.jsm path=resource://gre/modules/ExtensionContent.jsm source_id=undefined 
+  - voz37vlg5.codesandbox.io path=voz37vlg5.codesandbox.io 
+    - static path=voz37vlg5.codesandbox.io/static 
+      - js path=voz37vlg5.codesandbox.io/static/js 
+        - components path=voz37vlg5.codesandbox.io/static/js/components 
+          - TodoItem.js path=voz37vlg5.codesandbox.io/static/js/components/TodoItem.js source_id=undefined 
 "
 `;

@@ -77,7 +77,7 @@
 #include <algorithm>
 #include <limits>
 #ifdef ACCESSIBILITY
-#include "nsAccessibilityService.h"
+#  include "nsAccessibilityService.h"
 #endif
 
 #include "nsPrintfCString.h"
@@ -91,15 +91,15 @@
 #include "GeckoProfiler.h"
 
 #ifdef DEBUG
-#undef NOISY_REFLOW
-#undef NOISY_TRIM
+#  undef NOISY_REFLOW
+#  undef NOISY_TRIM
 #else
-#undef NOISY_REFLOW
-#undef NOISY_TRIM
+#  undef NOISY_REFLOW
+#  undef NOISY_TRIM
 #endif
 
 #ifdef DrawText
-#undef DrawText
+#  undef DrawText
 #endif
 
 using namespace mozilla;
@@ -4567,9 +4567,9 @@ static void VerifyNotDirty(nsFrameState state) {
   bool isDirty = state & NS_FRAME_IS_DIRTY;
   if (!isZero && isDirty) NS_WARNING("internal offsets may be out-of-sync");
 }
-#define DEBUG_VERIFY_NOT_DIRTY(state) VerifyNotDirty(state)
+#  define DEBUG_VERIFY_NOT_DIRTY(state) VerifyNotDirty(state)
 #else
-#define DEBUG_VERIFY_NOT_DIRTY(state)
+#  define DEBUG_VERIFY_NOT_DIRTY(state)
 #endif
 
 nsIFrame* NS_NewTextFrame(nsIPresShell* aPresShell, ComputedStyle* aStyle) {
@@ -5733,11 +5733,12 @@ gfxFloat nsTextFrame::ComputeSelectionUnderlineHeight(
       // computed value from the default font size can be too thick for the
       // current font size.
       nscoord defaultFontSize =
-          aPresContext
-              ->GetDefaultFont(kPresContext_DefaultVariableFont_ID, nullptr)
+          aPresContext->Document()
+              ->GetFontPrefsForLang(nullptr)
+              ->GetDefaultFont(kPresContext_DefaultVariableFont_ID)
               ->size;
       int32_t zoomedFontSize = aPresContext->AppUnitsToDevPixels(
-          nsStyleFont::ZoomText(aPresContext, defaultFontSize));
+          nsStyleFont::ZoomText(*aPresContext->Document(), defaultFontSize));
       gfxFloat fontSize =
           std::min(gfxFloat(zoomedFontSize), aFontMetrics.emHeight);
       fontSize = std::max(fontSize, 1.0);
@@ -6127,6 +6128,10 @@ void nsTextFrame::PaintOneShadow(const PaintShadowParams& aParams,
 
   if (auto* textDrawer = aParams.context->GetTextDrawer()) {
     wr::Shadow wrShadow;
+
+    // Gecko already inflates the bounding rect of text shadows,
+    // so tell WR not to inflate again.
+    wrShadow.should_inflate = false;
 
     wrShadow.offset = {
         PresContext()->AppUnitsToFloatDevPixels(aShadowDetails->mXOffset),

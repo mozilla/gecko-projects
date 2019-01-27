@@ -11,11 +11,11 @@
 #include <gdk/gdk.h>
 #include <gtk/gtk.h>
 #ifdef MOZ_X11
-#include <gdk/gdkx.h>
-#include "X11UndefineNone.h"
+#  include <gdk/gdkx.h>
+#  include "X11UndefineNone.h"
 #endif /* MOZ_X11 */
 #ifdef MOZ_WAYLAND
-#include <gdk/gdkwayland.h>
+#  include <gdk/gdkwayland.h>
 #endif
 #include "mozcontainer.h"
 #include "mozilla/RefPtr.h"
@@ -31,7 +31,7 @@
 #include "mozilla/widget/WindowSurfaceProvider.h"
 
 #ifdef ACCESSIBILITY
-#include "mozilla/a11y/Accessible.h"
+#  include "mozilla/a11y/Accessible.h"
 #endif
 #include "mozilla/EventForwards.h"
 #include "mozilla/TouchEvents.h"
@@ -41,26 +41,27 @@
 #undef LOG
 #ifdef MOZ_LOGGING
 
-#include "mozilla/Logging.h"
-#include "nsTArray.h"
-#include "Units.h"
+#  include "mozilla/Logging.h"
+#  include "nsTArray.h"
+#  include "Units.h"
 
 extern mozilla::LazyLogModule gWidgetLog;
 extern mozilla::LazyLogModule gWidgetFocusLog;
 extern mozilla::LazyLogModule gWidgetDragLog;
 extern mozilla::LazyLogModule gWidgetDrawLog;
 
-#define LOG(args) MOZ_LOG(gWidgetLog, mozilla::LogLevel::Debug, args)
-#define LOGFOCUS(args) MOZ_LOG(gWidgetFocusLog, mozilla::LogLevel::Debug, args)
-#define LOGDRAG(args) MOZ_LOG(gWidgetDragLog, mozilla::LogLevel::Debug, args)
-#define LOGDRAW(args) MOZ_LOG(gWidgetDrawLog, mozilla::LogLevel::Debug, args)
+#  define LOG(args) MOZ_LOG(gWidgetLog, mozilla::LogLevel::Debug, args)
+#  define LOGFOCUS(args) \
+    MOZ_LOG(gWidgetFocusLog, mozilla::LogLevel::Debug, args)
+#  define LOGDRAG(args) MOZ_LOG(gWidgetDragLog, mozilla::LogLevel::Debug, args)
+#  define LOGDRAW(args) MOZ_LOG(gWidgetDrawLog, mozilla::LogLevel::Debug, args)
 
 #else
 
-#define LOG(args)
-#define LOGFOCUS(args)
-#define LOGDRAG(args)
-#define LOGDRAW(args)
+#  define LOG(args)
+#  define LOGFOCUS(args)
+#  define LOGDRAG(args)
+#  define LOGDRAW(args)
 
 #endif /* MOZ_LOGGING */
 
@@ -143,9 +144,8 @@ class nsWindow final : public nsBaseWidget {
   virtual LayoutDeviceIntRect GetClientBounds() override;
   virtual LayoutDeviceIntSize GetClientSize() override;
   virtual LayoutDeviceIntPoint GetClientOffset() override;
-  virtual void SetCursor(nsCursor aCursor) override;
-  virtual nsresult SetCursor(imgIContainer* aCursor, uint32_t aHotspotX,
-                             uint32_t aHotspotY) override;
+  virtual void SetCursor(nsCursor aDefaultCursor, imgIContainer* aCursor,
+                         uint32_t aHotspotX, uint32_t aHotspotY) override;
   virtual void Invalidate(const LayoutDeviceIntRect& aRect) override;
   virtual void* GetNativeData(uint32_t aDataType) override;
   virtual nsresult SetTitle(const nsAString& aTitle) override;
@@ -262,8 +262,6 @@ class nsWindow final : public nsBaseWidget {
   virtual MOZ_MUST_USE nsresult BeginResizeDrag(mozilla::WidgetGUIEvent* aEvent,
                                                 int32_t aHorizontal,
                                                 int32_t aVertical) override;
-  virtual MOZ_MUST_USE nsresult
-  BeginMoveDrag(mozilla::WidgetMouseEvent* aEvent) override;
 
   MozContainer* GetMozContainer() { return mContainer; }
   // GetMozContainerWidget returns the MozContainer even for undestroyed
@@ -309,6 +307,7 @@ class nsWindow final : public nsBaseWidget {
   nsresult UpdateTranslucentWindowAlphaInternal(const nsIntRect& aRect,
                                                 uint8_t* aAlphas,
                                                 int32_t aStride);
+  void UpdateTitlebarTransparencyBitmap();
 
   virtual void ReparentNativeWidget(nsIWidget* aNewParent) override;
 
@@ -469,13 +468,11 @@ class nsWindow final : public nsBaseWidget {
   GtkWidget* mShell;
   MozContainer* mContainer;
   GdkWindow* mGdkWindow;
+  bool mWindowShouldStartDragging = false;
   PlatformCompositorWidgetDelegate* mCompositorWidgetDelegate;
 
   uint32_t mHasMappedToplevel : 1, mIsFullyObscured : 1, mRetryPointerGrab : 1;
   nsSizeMode mSizeState;
-
-  int32_t mTransparencyBitmapWidth;
-  int32_t mTransparencyBitmapHeight;
 
   nsIntPoint mClientOffset;
 
@@ -565,6 +562,12 @@ class nsWindow final : public nsBaseWidget {
   // full translucency at this time; each pixel is either fully opaque
   // or fully transparent.
   gchar* mTransparencyBitmap;
+  int32_t mTransparencyBitmapWidth;
+  int32_t mTransparencyBitmapHeight;
+  // The transparency bitmap is used instead of ARGB visual for toplevel
+  // window to draw titlebar.
+  bool mTransparencyBitmapForTitlebar;
+
   // True when we're on compositing window manager and this
   // window is using visual with alpha channel.
   bool mHasAlphaVisual;
