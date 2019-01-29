@@ -12,6 +12,7 @@
 #include "mozilla/ipc/IPCStreamUtils.h"
 #include "mozilla/net/SocketProcessChild.h"
 #include "nsHttpHandler.h"
+#include "nsProxyInfo.h"
 
 using namespace mozilla::net;
 
@@ -61,16 +62,22 @@ nsresult HttpTransactionChild::InitInternal(
     uint64_t requestContextID) {
   LOG(("HttpTransactionChild::InitInternal [this=%p caps=%x]\n", this, caps));
 
+  nsProxyInfo* proxyInfo = new nsProxyInfo(
+      infoArgs.proxyInfo().type(), infoArgs.proxyInfo().host(),
+      infoArgs.proxyInfo().port(), infoArgs.proxyInfo().username(),
+      infoArgs.proxyInfo().password(), infoArgs.proxyInfo().flags(),
+      infoArgs.proxyInfo().timeout(), infoArgs.proxyInfo().resolveFlags());
+
   RefPtr<nsHttpConnectionInfo> cinfo;
   if (infoArgs.routedHost().IsEmpty()) {
     cinfo = new nsHttpConnectionInfo(
         infoArgs.host(), infoArgs.port(), infoArgs.npnToken(),
-        infoArgs.username(), EmptyCString(), nullptr,
+        infoArgs.username(), EmptyCString(), proxyInfo,
         infoArgs.originAttributes(), infoArgs.endToEndSSL());
   } else {
     cinfo = new nsHttpConnectionInfo(
         infoArgs.host(), infoArgs.port(), infoArgs.npnToken(),
-        infoArgs.username(), EmptyCString(), nullptr,
+        infoArgs.username(), EmptyCString(), proxyInfo,
         infoArgs.originAttributes(), infoArgs.routedHost(),
         infoArgs.routedPort());
   }

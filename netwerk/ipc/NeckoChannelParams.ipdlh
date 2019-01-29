@@ -296,6 +296,18 @@ union HttpChannelCreationArgs
   HttpChannelConnectArgs;   // Used for redirected-to channels
 };
 
+struct ProxyInfoCloneArgs
+{
+  nsCString type;
+  nsCString host;
+  int32_t port;
+  nsCString username;
+  nsCString password;
+  uint32_t flags;
+  uint32_t timeout;
+  uint32_t resolveFlags;
+};
+
 struct HttpConnectionInfoCloneArgs
 {
   nsCString host;
@@ -314,6 +326,7 @@ struct HttpConnectionInfoCloneArgs
   uint32_t tlsFlags;
   bool trrUsed;
   bool trrDisabled;
+  ProxyInfoCloneArgs proxyInfo;
 };
 
 //-----------------------------------------------------------------------------

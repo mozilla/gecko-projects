@@ -13,6 +13,51 @@ namespace net {
 // Yes, we support QI to nsProxyInfo
 NS_IMPL_ISUPPORTS(nsProxyInfo, nsProxyInfo, nsIProxyInfo)
 
+// These pointers are declared in nsProtocolProxyService.cpp and
+// comparison of mType by string pointer is valid within necko
+  extern const char kProxyType_HTTP[];
+  extern const char kProxyType_HTTPS[];
+  extern const char kProxyType_SOCKS[];
+  extern const char kProxyType_SOCKS4[];
+  extern const char kProxyType_SOCKS5[];
+  extern const char kProxyType_DIRECT[];
+  extern const char kProxyType_PROXY[];
+
+nsProxyInfo::nsProxyInfo(const nsACString &aType,
+                         const nsACString &aHost,
+                         int32_t aPort,
+                         const nsACString &aUsername,
+                         const nsACString &aPassword,
+                         uint32_t aFlags,
+                         uint32_t aTimeout,
+                         uint32_t aResolveFlags)
+{
+  if (aType.EqualsASCII(kProxyType_HTTP)) {
+    mType = kProxyType_HTTP;
+  } else if (aType.EqualsASCII(kProxyType_HTTPS)) {
+    mType = kProxyType_HTTPS;
+  } else if (aType.EqualsASCII(kProxyType_SOCKS)) {
+    mType = kProxyType_SOCKS;
+  } else if (aType.EqualsASCII(kProxyType_SOCKS4)) {
+    mType = kProxyType_SOCKS4;
+  } else if (aType.EqualsASCII(kProxyType_SOCKS5)) {
+    mType = kProxyType_SOCKS5;
+  } else if (aType.EqualsASCII(kProxyType_PROXY)) {
+    mType = kProxyType_PROXY;
+  } else {
+    mType = kProxyType_DIRECT;
+  }
+
+  mHost = aHost;
+  mPort = aPort;
+  mUsername = aUsername;
+  mPassword = aPassword;
+  mFlags = aFlags;
+  mTimeout = aTimeout;
+  mResolveFlags = aResolveFlags;
+  mNext = nullptr;
+}
+
 NS_IMETHODIMP
 nsProxyInfo::GetHost(nsACString& result) {
   result = mHost;
@@ -93,15 +138,6 @@ nsProxyInfo::SetFailoverProxy(nsIProxyInfo* proxy) {
   pi.swap(mNext);
   return NS_OK;
 }
-
-// These pointers are declared in nsProtocolProxyService.cpp and
-// comparison of mType by string pointer is valid within necko
-extern const char kProxyType_HTTP[];
-extern const char kProxyType_HTTPS[];
-extern const char kProxyType_SOCKS[];
-extern const char kProxyType_SOCKS4[];
-extern const char kProxyType_SOCKS5[];
-extern const char kProxyType_DIRECT[];
 
 bool nsProxyInfo::IsDirect() {
   if (!mType) return true;

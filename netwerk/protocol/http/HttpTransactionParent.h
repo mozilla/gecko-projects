@@ -80,6 +80,7 @@ class HttpTransactionParent final : public PHttpTransactionParent,
   NetAddr mPeerAddr;
 
   TimingStruct mTimings;
+  bool mIPCOpen;
 };
 
 }  // namespace net

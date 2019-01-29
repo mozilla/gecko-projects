@@ -23,7 +23,7 @@ NS_IMPL_ISUPPORTS(HttpTransactionParent, nsIRequest,
 // HttpTransactionParent <public>
 //-----------------------------------------------------------------------------
 
-HttpTransactionParent::HttpTransactionParent() {
+HttpTransactionParent::HttpTransactionParent() : mIPCOpen(false) {
   LOG(("Creating HttpTransactionParent @%p\n", this));
 
   this->mSelfAddr.inet = {};
@@ -59,6 +59,19 @@ void HttpTransactionParent::GetStructFromInfo(
   aArgs.tlsFlags() = aInfo->GetTlsFlags();
   // aArgs.trrUsed() = aInfo->GetTrrUsed();
   aArgs.trrDisabled() = aInfo->GetTrrDisabled();
+
+  if (!aInfo->ProxyInfo()) {
+    return;
+  }
+
+  aArgs.proxyInfo().type() = nsCString(aInfo->ProxyInfo()->Type());
+  aArgs.proxyInfo().host() = aInfo->ProxyInfo()->Host();
+  aArgs.proxyInfo().port() = aInfo->ProxyInfo()->Port();
+  aArgs.proxyInfo().username() = aInfo->ProxyInfo()->Username();
+  aArgs.proxyInfo().password() = aInfo->ProxyInfo()->Password();
+  aArgs.proxyInfo().flags() = aInfo->ProxyInfo()->Flags();
+  aArgs.proxyInfo().timeout() = aInfo->ProxyInfo()->Timeout();
+  aArgs.proxyInfo().resolveFlags() = aInfo->ProxyInfo()->ResolveFlags();
 }
 
 //-----------------------------------------------------------------------------
@@ -77,6 +90,10 @@ nsresult HttpTransactionParent::Init(
 
   // TODO Bug 1547389: support HttpTrafficAnalyzer for socket process
   Unused << trafficCategory;
+
+  if (!mIPCOpen) {
+    return NS_ERROR_FAILURE;
+  }
 
   mEventsink = eventsink;
 
@@ -207,7 +224,10 @@ nsISupports* HttpTransactionParent::SecurityInfo() { return mSecurityInfo; }
 
 bool HttpTransactionParent::ProxyConnectFailed() { return mProxyConnectFailed; }
 
-void HttpTransactionParent::AddIPDLReference() { AddRef(); }
+void HttpTransactionParent::AddIPDLReference() {
+  mIPCOpen = true;
+  AddRef();
+}
 
 mozilla::ipc::IPCResult HttpTransactionParent::RecvOnStartRequest(
     const nsresult& aStatus, const Maybe<nsHttpResponseHead>& aResponseHead,
@@ -305,7 +325,9 @@ mozilla::ipc::IPCResult HttpTransactionParent::RecvOnStopRequest(
   Unused << chan->OnStopRequest(this, aStatus);
 
   // We are done with this transaction after OnStopRequest.
-  Unused << Send__delete__(this);
+  if (mIPCOpen) {
+    Unused << Send__delete__(this);
+  }
   return IPC_OK();
 }
 
@@ -380,6 +402,7 @@ HttpTransactionParent::SetLoadFlags(nsLoadFlags aLoadFlags) {
 
 void HttpTransactionParent::ActorDestroy(ActorDestroyReason aWhy) {
   LOG(("HttpTransactionParent::ActorDestroy [this=%p]\n", this));
+  mIPCOpen = false;
   // TODO: we (probably?) have to notify OnStopReq on the channel
 }
 
