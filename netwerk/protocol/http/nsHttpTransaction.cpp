@@ -246,7 +246,7 @@ nsresult nsHttpTransaction::Init(
     bool requestBodyHasHeaders, nsIEventTarget *target,
     nsIInterfaceRequestor *callbacks, nsITransportEventSink *eventsink,
     uint64_t topLevelOuterContentWindowId, HttpTrafficCategory trafficCategory,
-    nsIRequestContext *requestContext) {
+    nsIRequestContext *requestContext, uint32_t classOfService) {
   nsresult rv;
 
   LOG1(("nsHttpTransaction::Init [this=%p caps=%x]\n", this, caps));
@@ -264,6 +264,7 @@ nsresult nsHttpTransaction::Init(
         mRequestContext.get()));
 
   mTrafficCategory = trafficCategory;
+  SetClassOfService(classOfService);
 
   mActivityDistributor = services::GetActivityDistributor();
   if (!mActivityDistributor) {

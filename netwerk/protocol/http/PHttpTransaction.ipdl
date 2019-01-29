@@ -52,7 +52,8 @@ child:
              uint64_t reqContentLength,
              bool reqBodyIncludesHeaders,
              uint64_t topLevelOuterContentWindowId,
-             uint64_t requestContextID);
+             uint64_t requestContextID,
+             uint32_t classOfService);
   async Read(int32_t priority);
   async Reschedule(int32_t priority);
   async UpdateClassOfService(uint32_t classOfService);

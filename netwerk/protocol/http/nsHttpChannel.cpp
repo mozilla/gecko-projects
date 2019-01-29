@@ -1331,10 +1331,10 @@ nsresult nsHttpChannel::SetupTransaction() {
   HttpTrafficCategory category = CreateTrafficCategory();
 
   nsCOMPtr<nsIAsyncInputStream> responseStream;
-  rv = mTransaction->Init(mCaps, mConnectionInfo, &mRequestHead, mUploadStream,
-                          mReqContentLength, mUploadStreamHasHeaders,
-                          GetCurrentThreadEventTarget(), callbacks, this,
-                          mTopLevelOuterContentWindowId, category, mRequestContext);
+  rv = mTransaction->Init(
+      mCaps, mConnectionInfo, &mRequestHead, mUploadStream, mReqContentLength,
+      mUploadStreamHasHeaders, GetCurrentThreadEventTarget(), callbacks, this,
+      mTopLevelOuterContentWindowId, category, mRequestContext, mClassOfService);
   if (NS_FAILED(rv)) {
     mTransaction = nullptr;
     return rv;
@@ -1343,13 +1343,6 @@ nsresult nsHttpChannel::SetupTransaction() {
   // TODO: this line is added for security callback workaround
   // mTransaction->SetSecurityCallbacks(callbacks);
 
-  // TODO: make throttling work again
-  // mTransaction->SetClassOfService(mClassOfService);
-
-  // TODO: make request context service work agin
-  // if (EnsureRequestContext()) {
-  //     mTransaction->SetRequestContext(mRequestContext);
-  // }
   return NS_OK;
 }
 

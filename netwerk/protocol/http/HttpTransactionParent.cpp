@@ -85,7 +85,7 @@ nsresult HttpTransactionParent::Init(
     bool requestBodyHasHeaders, nsIEventTarget* target,
     nsIInterfaceRequestor* callbacks, nsITransportEventSink* eventsink,
     uint64_t topLevelOuterContentWindowId, HttpTrafficCategory trafficCategory,
-    nsIRequestContext* requestContext) {
+    nsIRequestContext* requestContext, uint32_t classOfService) {
   LOG(("HttpTransactionParent::Init [this=%p caps=%x]\n", this, caps));
 
   // TODO Bug 1547389: support HttpTrafficAnalyzer for socket process
@@ -112,7 +112,8 @@ nsresult HttpTransactionParent::Init(
   if (!SendInit(caps, infoArgs, *requestHead,
                 requestBody ? Some(autoStream.TakeValue()) : Nothing(),
                 requestContentLength, requestBodyHasHeaders,
-                topLevelOuterContentWindowId, requestContextID)) {
+                topLevelOuterContentWindowId, requestContextID,
+                classOfService)) {
     return NS_ERROR_FAILURE;
   }
 

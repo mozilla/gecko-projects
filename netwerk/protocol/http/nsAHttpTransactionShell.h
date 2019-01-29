@@ -64,8 +64,8 @@ class nsAHttpTransactionShell : public nsISupports {
       uint64_t reqContentLength, bool reqBodyIncludesHeaders,
       nsIEventTarget *consumerTarget, nsIInterfaceRequestor *callbacks,
       nsITransportEventSink *eventsink, uint64_t topLevelOuterContentWindowId,
-      HttpTrafficCategory trafficCategory,
-      nsIRequestContext *requestContext) = 0;
+      HttpTrafficCategory trafficCategory, nsIRequestContext *requestContext,
+      uint32_t classOfService) = 0;
 
   // @param aListener
   //        receives notifications.
@@ -119,8 +119,8 @@ NS_DEFINE_STATIC_IID_ACCESSOR(nsAHttpTransactionShell,
       uint64_t reqContentLength, bool reqBodyIncludesHeaders,                  \
       nsIEventTarget *consumerTarget, nsIInterfaceRequestor *callbacks,        \
       nsITransportEventSink *eventsink, uint64_t topLevelOuterContentWindowId, \
-      HttpTrafficCategory trafficCategory, nsIRequestContext *requestContext)  \
-      override;                                                                \
+      HttpTrafficCategory trafficCategory, nsIRequestContext *requestContext,  \
+      uint32_t classOfService) override;                                       \
   virtual nsresult AsyncRead(nsIStreamListener *listener, int32_t priority,    \
                              nsIRequest **pump) override;                      \
   virtual nsresult AsyncReschedule(int32_t priority) override;                 \

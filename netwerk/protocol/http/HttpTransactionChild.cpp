@@ -59,7 +59,7 @@ nsresult HttpTransactionChild::InitInternal(
     nsHttpRequestHead* requestHead, nsIInputStream* requestBody,
     uint64_t requestContentLength, bool requestBodyHasHeaders,
     nsIEventTarget* target, uint64_t topLevelOuterContentWindowId,
-    uint64_t requestContextID) {
+    uint64_t requestContextID, uint32_t classOfService) {
   LOG(("HttpTransactionChild::InitInternal [this=%p caps=%x]\n", this, caps));
 
   nsProxyInfo* proxyInfo = new nsProxyInfo(
@@ -95,11 +95,11 @@ nsresult HttpTransactionChild::InitInternal(
   nsCOMPtr<nsIRequestContext> rc = CreateRequestContext(requestContextID);
   LOG(("  CreateRequestContext this=%p id=%" PRIx64, this, requestContextID));
 
-  nsresult rv = mTransaction->Init(caps, cinfo, requestHead, requestBody,
-                                   requestContentLength, requestBodyHasHeaders,
-                                   target, nullptr,  // TODO: security callback
-                                   this, topLevelOuterContentWindowId,
-                                   HttpTrafficCategory::eInvalid, rc);
+  nsresult rv = mTransaction->Init(
+      caps, cinfo, requestHead, requestBody, requestContentLength,
+      requestBodyHasHeaders, target, nullptr,  // TODO: security callback
+      this, topLevelOuterContentWindowId, HttpTrafficCategory::eInvalid, rc,
+      classOfService);
   if (NS_WARN_IF(NS_FAILED(rv))) {
     mTransaction = nullptr;
   }
@@ -141,7 +141,7 @@ mozilla::ipc::IPCResult HttpTransactionChild::RecvInit(
     const nsHttpRequestHead& aReqHeaders, const Maybe<IPCStream>& aRequestBody,
     const uint64_t& aReqContentLength, const bool& aReqBodyIncludesHeaders,
     const uint64_t& aTopLevelOuterContentWindowId,
-    const uint64_t& aRequestContextID) {
+    const uint64_t& aRequestContextID, const uint32_t& aClassOfService) {
   mRequestHead = aReqHeaders;
   if (aRequestBody) {
     mUploadStream = mozilla::ipc::DeserializeIPCStream(aRequestBody);
@@ -150,7 +150,7 @@ mozilla::ipc::IPCResult HttpTransactionChild::RecvInit(
   if (NS_FAILED(InitInternal(
           aCaps, aArgs, &mRequestHead, mUploadStream, aReqContentLength,
           aReqBodyIncludesHeaders, GetCurrentThreadEventTarget(),
-          aTopLevelOuterContentWindowId, aRequestContextID))) {
+          aTopLevelOuterContentWindowId, aRequestContextID, aClassOfService))) {
     LOG(("HttpTransactionChild::RecvInit: [this=%p] InitInternal failed!\n",
          this));
   }
