@@ -1326,6 +1326,7 @@ nsresult nsHttpChannel::SetupTransaction() {
   }
 
   EnsureTopLevelOuterContentWindowId();
+  EnsureRequestContext();
 
   HttpTrafficCategory category = CreateTrafficCategory();
 
@@ -1333,7 +1334,7 @@ nsresult nsHttpChannel::SetupTransaction() {
   rv = mTransaction->Init(mCaps, mConnectionInfo, &mRequestHead, mUploadStream,
                           mReqContentLength, mUploadStreamHasHeaders,
                           GetCurrentThreadEventTarget(), callbacks, this,
-                          mTopLevelOuterContentWindowId, category);
+                          mTopLevelOuterContentWindowId, category, mRequestContext);
   if (NS_FAILED(rv)) {
     mTransaction = nullptr;
     return rv;

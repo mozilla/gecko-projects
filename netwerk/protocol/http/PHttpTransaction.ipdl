@@ -51,7 +51,8 @@ child:
              IPCStream? requestBody,
              uint64_t reqContentLength,
              bool reqBodyIncludesHeaders,
-             uint64_t topLevelOuterContentWindowId);
+             uint64_t topLevelOuterContentWindowId,
+             uint64_t requestContextID);
   async Read(int32_t priority);
   async Reschedule(int32_t priority);
   async UpdateClassOfService(uint32_t classOfService);

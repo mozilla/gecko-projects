@@ -36,11 +36,29 @@ HttpTransactionChild::~HttpTransactionChild() {
   LOG(("Destroying HttpTransactionChild @%p\n", this));
 }
 
+static already_AddRefed<nsIRequestContext> CreateRequestContext(
+    uint64_t aRequestContextID) {
+  if (!aRequestContextID) {
+    return nullptr;
+  }
+
+  nsIRequestContextService* rcsvc = gHttpHandler->GetRequestContextService();
+  if (!rcsvc) {
+    return nullptr;
+  }
+
+  nsCOMPtr<nsIRequestContext> requestContext;
+  rcsvc->GetRequestContext(aRequestContextID, getter_AddRefs(requestContext));
+
+  return requestContext.forget();
+}
+
 nsresult HttpTransactionChild::InitInternal(
     uint32_t caps, const HttpConnectionInfoCloneArgs& infoArgs,
     nsHttpRequestHead* requestHead, nsIInputStream* requestBody,
     uint64_t requestContentLength, bool requestBodyHasHeaders,
-    nsIEventTarget* target, uint64_t topLevelOuterContentWindowId) {
+    nsIEventTarget* target, uint64_t topLevelOuterContentWindowId,
+    uint64_t requestContextID) {
   LOG(("HttpTransactionChild::InitInternal [this=%p caps=%x]\n", this, caps));
 
   RefPtr<nsHttpConnectionInfo> cinfo;
@@ -67,13 +85,15 @@ nsresult HttpTransactionChild::InitInternal(
   // cinfo->SetTrrUsed(infoArgs.trrUsed());
   cinfo->SetTrrDisabled(infoArgs.trrDisabled());
 
-  nsresult rv;
-  nsCOMPtr<nsIRequest> request;
-  rv = mTransaction->Init(
-      caps, cinfo, requestHead, requestBody, requestContentLength,
-      requestBodyHasHeaders, target, nullptr,  // TODO: security callback
-      this, topLevelOuterContentWindowId, HttpTrafficCategory::eInvalid);
-  if (NS_FAILED(rv)) {
+  nsCOMPtr<nsIRequestContext> rc = CreateRequestContext(requestContextID);
+  LOG(("  CreateRequestContext this=%p id=%" PRIx64, this, requestContextID));
+
+  nsresult rv = mTransaction->Init(caps, cinfo, requestHead, requestBody,
+                                   requestContentLength, requestBodyHasHeaders,
+                                   target, nullptr,  // TODO: security callback
+                                   this, topLevelOuterContentWindowId,
+                                   HttpTrafficCategory::eInvalid, rc);
+  if (NS_WARN_IF(NS_FAILED(rv))) {
     mTransaction = nullptr;
   }
 
@@ -113,16 +133,17 @@ mozilla::ipc::IPCResult HttpTransactionChild::RecvInit(
     const uint32_t& aCaps, const HttpConnectionInfoCloneArgs& aArgs,
     const nsHttpRequestHead& aReqHeaders, const Maybe<IPCStream>& aRequestBody,
     const uint64_t& aReqContentLength, const bool& aReqBodyIncludesHeaders,
-    const uint64_t& aTopLevelOuterContentWindowId) {
+    const uint64_t& aTopLevelOuterContentWindowId,
+    const uint64_t& aRequestContextID) {
   mRequestHead = aReqHeaders;
   if (aRequestBody) {
     mUploadStream = mozilla::ipc::DeserializeIPCStream(aRequestBody);
   }
   // TODO: let parent process know about the failure
-  if (NS_FAILED(InitInternal(aCaps, aArgs, &mRequestHead, mUploadStream,
-                             aReqContentLength, aReqBodyIncludesHeaders,
-                             GetCurrentThreadEventTarget(),
-                             aTopLevelOuterContentWindowId))) {
+  if (NS_FAILED(InitInternal(
+          aCaps, aArgs, &mRequestHead, mUploadStream, aReqContentLength,
+          aReqBodyIncludesHeaders, GetCurrentThreadEventTarget(),
+          aTopLevelOuterContentWindowId, aRequestContextID))) {
     LOG(("HttpTransactionChild::RecvInit: [this=%p] InitInternal failed!\n",
          this));
   }

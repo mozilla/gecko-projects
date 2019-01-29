@@ -245,8 +245,8 @@ nsresult nsHttpTransaction::Init(
     nsIInputStream *requestBody, uint64_t requestContentLength,
     bool requestBodyHasHeaders, nsIEventTarget *target,
     nsIInterfaceRequestor *callbacks, nsITransportEventSink *eventsink,
-    uint64_t topLevelOuterContentWindowId,
-    HttpTrafficCategory trafficCategory) {
+    uint64_t topLevelOuterContentWindowId, HttpTrafficCategory trafficCategory,
+    nsIRequestContext *requestContext) {
   nsresult rv;
 
   LOG1(("nsHttpTransaction::Init [this=%p caps=%x]\n", this, caps));
@@ -258,6 +258,10 @@ nsresult nsHttpTransaction::Init(
 
   mTopLevelOuterContentWindowId = topLevelOuterContentWindowId;
   LOG(("  window-id = %" PRIx64, mTopLevelOuterContentWindowId));
+
+  mRequestContext = requestContext;
+  LOG1(("nsHttpTransaction %p SetRequestContext %p\n", this,
+        mRequestContext.get()));
 
   mTrafficCategory = trafficCategory;
 
@@ -1931,11 +1935,6 @@ nsresult nsHttpTransaction::ProcessData(char* buf, uint32_t count,
   }
 
   return NS_OK;
-}
-
-void nsHttpTransaction::SetRequestContext(nsIRequestContext* aRequestContext) {
-  LOG1(("nsHttpTransaction %p SetRequestContext %p\n", this, aRequestContext));
-  mRequestContext = aRequestContext;
 }
 
 // Called when the transaction marked for blocking is associated with a

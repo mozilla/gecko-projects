@@ -11,6 +11,7 @@ class nsIEventTraget;
 class nsIInputStream;
 class nsIInterfaceRequestor;
 class nsIRequest;
+class nsIRequestContext;
 class nsITransportEventSink;
 enum HttpTrafficCategory : uint8_t;
 
@@ -57,18 +58,14 @@ class nsAHttpTransactionShell : public nsISupports {
   //        indicate the top level outer content window in which
   //        this transaction is being loaded.
 
-  MOZ_MUST_USE virtual nsresult
-  Init(uint32_t               caps,
-       nsHttpConnectionInfo  *connInfo,
-       nsHttpRequestHead     *reqHeaders,
-       nsIInputStream        *reqBody,
-       uint64_t               reqContentLength,
-       bool                   reqBodyIncludesHeaders,
-       nsIEventTarget        *consumerTarget,
-       nsIInterfaceRequestor *callbacks,
-       nsITransportEventSink *eventsink,
-       uint64_t               topLevelOuterContentWindowId,
-       HttpTrafficCategory    trafficCategory) = 0;
+  MOZ_MUST_USE virtual nsresult Init(
+      uint32_t caps, nsHttpConnectionInfo *connInfo,
+      nsHttpRequestHead *reqHeaders, nsIInputStream *reqBody,
+      uint64_t reqContentLength, bool reqBodyIncludesHeaders,
+      nsIEventTarget *consumerTarget, nsIInterfaceRequestor *callbacks,
+      nsITransportEventSink *eventsink, uint64_t topLevelOuterContentWindowId,
+      HttpTrafficCategory trafficCategory,
+      nsIRequestContext *requestContext) = 0;
 
   // @param aListener
   //        receives notifications.
@@ -76,8 +73,7 @@ class nsAHttpTransactionShell : public nsISupports {
   //        the pump that will contain the response data. async wait on this
   //        input stream for data. On first notification, headers should be
   //        available (check transaction status).
-  virtual nsresult AsyncRead(nsIStreamListener *listener,
-                             int32_t priority,
+  virtual nsresult AsyncRead(nsIStreamListener *listener, int32_t priority,
                              nsIRequest **pump) = 0;
   virtual nsresult AsyncReschedule(int32_t priority) = 0;
   virtual void AsyncUpdateClassOfService(uint32_t classOfService) = 0;
@@ -116,41 +112,36 @@ class nsAHttpTransactionShell : public nsISupports {
 NS_DEFINE_STATIC_IID_ACCESSOR(nsAHttpTransactionShell,
                               NS_AHTTPTRANSACTIONSHELL_IID)
 
-#define NS_DECL_NSAHTTPTRANSACTIONSHELL \
-  virtual nsresult \
-  Init(uint32_t               caps, \
-       nsHttpConnectionInfo  *connInfo, \
-       nsHttpRequestHead     *reqHeaders, \
-       nsIInputStream        *reqBody, \
-       uint64_t               reqContentLength, \
-       bool                   reqBodyIncludesHeaders, \
-       nsIEventTarget        *consumerTarget, \
-       nsIInterfaceRequestor *callbacks, \
-       nsITransportEventSink *eventsink, \
-       uint64_t               topLevelOuterContentWindowId, \
-       HttpTrafficCategory    trafficCategory) override; \
-  virtual nsresult AsyncRead(nsIStreamListener *listener, \
-                             int32_t priority, \
-                             nsIRequest **pump) override; \
-  virtual nsresult AsyncReschedule(int32_t priority) override; \
-  virtual void AsyncUpdateClassOfService(uint32_t classOfService) override; \
-  virtual nsresult AsyncCancel(nsresult reason) override; \
-  virtual nsHttpResponseHead *TakeResponseHead() override; \
-  virtual nsISupports *SecurityInfo() override; \
-  virtual bool ProxyConnectFailed() override; \
-  virtual void GetNetworkAddresses(NetAddr &self, NetAddr &peer) override; \
-  virtual mozilla::TimeStamp GetDomainLookupStart() override; \
-  virtual mozilla::TimeStamp GetDomainLookupEnd() override; \
-  virtual mozilla::TimeStamp GetConnectStart() override; \
-  virtual mozilla::TimeStamp GetTcpConnectEnd() override; \
-  virtual mozilla::TimeStamp GetSecureConnectionStart() override; \
-  virtual mozilla::TimeStamp GetConnectEnd() override; \
-  virtual mozilla::TimeStamp GetRequestStart() override; \
-  virtual mozilla::TimeStamp GetResponseStart() override; \
-  virtual mozilla::TimeStamp GetResponseEnd() override; \
-  virtual bool IsStickyConnection() override; \
-  virtual bool ResponseIsComplete() override; \
-  virtual int64_t GetTransferSize() override; \
+#define NS_DECL_NSAHTTPTRANSACTIONSHELL                                        \
+  virtual nsresult Init(                                                       \
+      uint32_t caps, nsHttpConnectionInfo *connInfo,                           \
+      nsHttpRequestHead *reqHeaders, nsIInputStream *reqBody,                  \
+      uint64_t reqContentLength, bool reqBodyIncludesHeaders,                  \
+      nsIEventTarget *consumerTarget, nsIInterfaceRequestor *callbacks,        \
+      nsITransportEventSink *eventsink, uint64_t topLevelOuterContentWindowId, \
+      HttpTrafficCategory trafficCategory, nsIRequestContext *requestContext)  \
+      override;                                                                \
+  virtual nsresult AsyncRead(nsIStreamListener *listener, int32_t priority,    \
+                             nsIRequest **pump) override;                      \
+  virtual nsresult AsyncReschedule(int32_t priority) override;                 \
+  virtual void AsyncUpdateClassOfService(uint32_t classOfService) override;    \
+  virtual nsresult AsyncCancel(nsresult reason) override;                      \
+  virtual nsHttpResponseHead *TakeResponseHead() override;                     \
+  virtual nsISupports *SecurityInfo() override;                                \
+  virtual bool ProxyConnectFailed() override;                                  \
+  virtual void GetNetworkAddresses(NetAddr &self, NetAddr &peer) override;     \
+  virtual mozilla::TimeStamp GetDomainLookupStart() override;                  \
+  virtual mozilla::TimeStamp GetDomainLookupEnd() override;                    \
+  virtual mozilla::TimeStamp GetConnectStart() override;                       \
+  virtual mozilla::TimeStamp GetTcpConnectEnd() override;                      \
+  virtual mozilla::TimeStamp GetSecureConnectionStart() override;              \
+  virtual mozilla::TimeStamp GetConnectEnd() override;                         \
+  virtual mozilla::TimeStamp GetRequestStart() override;                       \
+  virtual mozilla::TimeStamp GetResponseStart() override;                      \
+  virtual mozilla::TimeStamp GetResponseEnd() override;                        \
+  virtual bool IsStickyConnection() override;                                  \
+  virtual bool ResponseIsComplete() override;                                  \
+  virtual int64_t GetTransferSize() override;                                  \
   virtual void SetDNSWasRefreshed() override;
 
 }  // namespace net

@@ -133,7 +133,6 @@ class nsHttpTransaction final : public nsAHttpTransaction,
 
   // overload of nsAHttpTransaction::RequestContext()
   nsIRequestContext* RequestContext() override { return mRequestContext.get(); }
-  void SetRequestContext(nsIRequestContext* aRequestContext);
   void DispatchedAsBlocking();
   void RemoveDispatchedAsBlocking();
 
