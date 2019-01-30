@@ -2657,26 +2657,46 @@ static FeatureState& WebRenderHardwareQualificationStatus(
     } else {
       nsAutoString adapterVendorID;
       gfxInfo->GetAdapterVendorID(adapterVendorID);
-      if (adapterVendorID != u"0x10de") {
+
+      nsAutoString adapterDeviceID;
+      gfxInfo->GetAdapterDeviceID(adapterDeviceID);
+      nsresult valid;
+      int32_t deviceID = adapterDeviceID.ToInteger(&valid, 16);
+      if (valid != NS_OK) {
         featureWebRenderQualified.Disable(
-            FeatureStatus::Blocked, "Not Nvidia",
-            NS_LITERAL_CSTRING("FEATURE_FAILURE_NOT_NVIDIA"));
+            FeatureStatus::Blocked, "Bad device id",
+            NS_LITERAL_CSTRING("FEATURE_FAILURE_BAD_DEVICE_ID"));
       } else {
-        nsAutoString adapterDeviceID;
-        gfxInfo->GetAdapterDeviceID(adapterDeviceID);
-        nsresult valid;
-        int32_t deviceID = adapterDeviceID.ToInteger(&valid, 16);
-        if (valid != NS_OK) {
+        if (adapterVendorID == u"0x10de") {
+          if (deviceID < 0x6c0) {
+            // 0x6c0 is the lowest Fermi device id. Unfortunately some Tesla
+            // devices that don't support D3D 10.1 have higher deviceIDs. They
+            // will be included, but blocked by ANGLE.
+            featureWebRenderQualified.Disable(
+                FeatureStatus::Blocked, "Device too old",
+                NS_LITERAL_CSTRING("FEATURE_FAILURE_DEVICE_TOO_OLD"));
+          }
+#ifdef NIGHTLY_BUILD
+        } else if (adapterVendorID == u"0x1002") {  // AMD
+          // AMD deviceIDs are not very well ordered. This
+          // condition is based off the information in gpu-db
+          if ((deviceID >= 0x6640 && deviceID < 0x6660) ||
+              (deviceID >= 0x67a0 && deviceID < 0x6800) ||
+              (deviceID >= 0x6860 && deviceID < 0x6880) ||
+              (deviceID >= 0x6900 && deviceID < 0x6a00) ||
+              (deviceID == 0x7300) ||
+              (deviceID >= 0x9830 && deviceID < 0x9870)) {
+            // we have a desktop CIK, VI, or GFX9 device
+          } else {
+            featureWebRenderQualified.Disable(
+                FeatureStatus::Blocked, "Device too old",
+                NS_LITERAL_CSTRING("FEATURE_FAILURE_DEVICE_TOO_OLD"));
+          }
+#endif
+        } else {
           featureWebRenderQualified.Disable(
-              FeatureStatus::Blocked, "Bad device id",
-              NS_LITERAL_CSTRING("FEATURE_FAILURE_BAD_DEVICE_ID"));
-        } else if (deviceID < 0x6c0) {
-          // 0x6c0 is the lowest Fermi device id. Unfortunately some Tesla
-          // devices that don't support D3D 10.1 have higher deviceIDs. They
-          // will be included, but blocked by ANGLE.
-          featureWebRenderQualified.Disable(
-              FeatureStatus::Blocked, "Device too old",
-              NS_LITERAL_CSTRING("FEATURE_FAILURE_DEVICE_TOO_OLD"));
+              FeatureStatus::Blocked, "Unsupported vendor",
+              NS_LITERAL_CSTRING("FEATURE_FAILURE_UNSUPPORTED_VENDOR"));
         }
       }
     }
@@ -2692,17 +2712,14 @@ void gfxPlatform::InitWebRenderConfig() {
   bool prefEnabled = WebRenderPrefEnabled();
   bool envvarEnabled = WebRenderEnvvarEnabled();
 
-  // On Nightly:
-  //   WR? WR+   => means WR was enabled via gfx.webrender.all.qualified
-  //   WR! WR+   => means WR was enabled via gfx.webrender.{all,enabled} or
-  //                envvar
-  // On Beta/Release:
-  //   WR? WR+   => means WR was enabled via gfx.webrender.all.qualified on
-  //                qualified hardware
-  //   WR! WR+   => means WR was enabled via envvar, possibly on unqualified
-  //                hardware.
+  // WR? WR+   => means WR was enabled via gfx.webrender.all.qualified on
+  //              qualified hardware
+  // WR! WR+   => means WR was enabled via gfx.webrender.{all,enabled} or
+  //              envvar, possibly on unqualified hardware
   // In all cases WR- means WR was not enabled, for one of many possible
-  // reasons.
+  // reasons. Prior to bug 1523788 landing the gfx.webrender.{all,enabled}
+  // prefs only worked on Nightly so keep that in mind when looking at older
+  // crash reports.
   ScopedGfxFeatureReporter reporter("WR", prefEnabled || envvarEnabled);
   if (!XRE_IsParentProcess()) {
     // Force-disable WebRender in recording/replaying child processes, which
@@ -2731,19 +2748,14 @@ void gfxPlatform::InitWebRenderConfig() {
 
   const bool wrQualifiedAll = CalculateWrQualifiedPrefValue();
 
-  // envvar works everywhere; we need this for testing in CI. Sadly this allows
-  // beta/release to enable it on unqualified hardware, but at least this is
-  // harder for the average person than flipping a pref.
+  // envvar works everywhere; note that we need this for testing in CI.
+  // Prior to bug 1523788, the `prefEnabled` check was only done on Nightly,
+  // so as to prevent random users from easily enabling WebRender on
+  // unqualified hardware in beta/release.
   if (envvarEnabled) {
     featureWebRender.UserEnable("Force enabled by envvar");
-
-    // gfx.webrender.enabled and gfx.webrender.all only work on nightly
-#ifdef NIGHTLY_BUILD
   } else if (prefEnabled) {
     featureWebRender.UserEnable("Force enabled by pref");
-#endif
-
-    // gfx.webrender.all.qualified works on all channels
   } else if (wrQualifiedAll && featureWebRenderQualified.IsEnabled()) {
     featureWebRender.UserEnable("Qualified enabled by pref ");
   }

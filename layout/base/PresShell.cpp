@@ -6520,12 +6520,6 @@ nsresult PresShell::EventHandler::HandleEvent(nsIFrame* aFrame,
     return NS_OK;
   }
 
-  nsIContent* capturingContent = ((aGUIEvent->mClass == ePointerEventClass ||
-                                   aGUIEvent->mClass == eWheelEventClass ||
-                                   aGUIEvent->HasMouseEventMessage())
-                                      ? nsIPresShell::GetCapturingContent()
-                                      : nullptr);
-
   RefPtr<Document> retargetEventDoc;
   if (!aDontRetargetEvents) {
     // key and IME related events should not cross top level window boundary.
@@ -6547,7 +6541,8 @@ nsresult PresShell::EventHandler::HandleEvent(nsIFrame* aFrame,
 
       retargetEventDoc = window->GetExtantDoc();
       if (!retargetEventDoc) return NS_OK;
-    } else if (capturingContent) {
+    } else if (nsIContent* capturingContent =
+                   EventHandler::GetCapturingContentFor(aGUIEvent)) {
       // if the mouse is being captured then retarget the mouse event at the
       // document that is being captured.
       retargetEventDoc = capturingContent->GetComposedDoc();
@@ -6611,6 +6606,11 @@ nsresult PresShell::EventHandler::HandleEvent(nsIFrame* aFrame,
   nsIFrame* frame = aFrame;
 
   if (aGUIEvent->IsUsingCoordinates()) {
+    // XXX Retrieving capturing content here.  However, some of the following
+    //     methods allow to run script.  So, isn't it possible the capturing
+    //     content outdated?
+    nsIContent* capturingContent =
+        EventHandler::GetCapturingContentFor(aGUIEvent);
     if (GetDocument()) {
       if (aGUIEvent->mClass == eTouchEventClass) {
         Document::UnlockPointer();
@@ -7114,32 +7114,56 @@ bool PresShell::EventHandler::MaybeHandleEventWithAccessibleCaret(
   MOZ_ASSERT(aGUIEvent);
   MOZ_ASSERT(aEventStatus);
 
-  if (AccessibleCaretEnabled(GetDocument()->GetDocShell())) {
-    // We have to target the focus window because regardless of where the
-    // touch goes, we want to access the copy paste manager.
-    nsCOMPtr<nsPIDOMWindowOuter> window = GetFocusedDOMWindowInOurWindow();
-    RefPtr<Document> retargetEventDoc =
-        window ? window->GetExtantDoc() : nullptr;
-    nsCOMPtr<nsIPresShell> presShell =
-        retargetEventDoc ? retargetEventDoc->GetShell() : nullptr;
-
-    RefPtr<AccessibleCaretEventHub> eventHub =
-        presShell ? presShell->GetAccessibleCaretEventHub() : nullptr;
-    if (eventHub && *aEventStatus != nsEventStatus_eConsumeNoDefault) {
-      // Don't dispatch event to AccessibleCaretEventHub when the event status
-      // is nsEventStatus_eConsumeNoDefault. This might be happened when content
-      // preventDefault on the pointer events. In such case, we also call
-      // preventDefault on mouse events to stop default behaviors.
-      *aEventStatus = eventHub->HandleEvent(aGUIEvent);
-      if (*aEventStatus == nsEventStatus_eConsumeNoDefault) {
-        // If the event is consumed, cancel APZC panning by setting
-        // mMultipleActionsPrevented.
-        aGUIEvent->mFlags.mMultipleActionsPrevented = true;
-        return true;
-      }
-    }
+  // Don't dispatch event to AccessibleCaretEventHub when the event status
+  // is nsEventStatus_eConsumeNoDefault. This might be happened when content
+  // preventDefault on the pointer events. In such case, we also call
+  // preventDefault on mouse events to stop default behaviors.
+  if (*aEventStatus == nsEventStatus_eConsumeNoDefault) {
+    return false;
   }
-  return false;
+
+  if (!AccessibleCaretEnabled(GetDocument()->GetDocShell())) {
+    return false;
+  }
+
+  // We have to target the focus window because regardless of where the
+  // touch goes, we want to access the copy paste manager.
+  nsCOMPtr<nsPIDOMWindowOuter> window = GetFocusedDOMWindowInOurWindow();
+  if (!window) {
+    return false;
+  }
+  RefPtr<Document> retargetEventDoc = window->GetExtantDoc();
+  if (!retargetEventDoc) {
+    return false;
+  }
+  nsCOMPtr<nsIPresShell> presShell = retargetEventDoc->GetShell();
+  if (!presShell) {
+    return false;
+  }
+
+  RefPtr<AccessibleCaretEventHub> eventHub =
+      presShell->GetAccessibleCaretEventHub();
+  if (!eventHub) {
+    return false;
+  }
+  *aEventStatus = eventHub->HandleEvent(aGUIEvent);
+  if (*aEventStatus != nsEventStatus_eConsumeNoDefault) {
+    return false;
+  }
+  // If the event is consumed, cancel APZC panning by setting
+  // mMultipleActionsPrevented.
+  aGUIEvent->mFlags.mMultipleActionsPrevented = true;
+  return true;
+}
+
+// static
+nsIContent* PresShell::EventHandler::GetCapturingContentFor(
+    WidgetGUIEvent* aGUIEvent) {
+  return (aGUIEvent->mClass == ePointerEventClass ||
+          aGUIEvent->mClass == eWheelEventClass ||
+          aGUIEvent->HasMouseEventMessage())
+             ? nsIPresShell::GetCapturingContent()
+             : nullptr;
 }
 
 Document* PresShell::GetPrimaryContentDocument() {

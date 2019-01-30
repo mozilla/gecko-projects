@@ -619,13 +619,6 @@ def check_compiler(compiler, language, target):
         elif info.type == 'clang-cl' and info.language_version != cxx14_version:
             append_flag('-std=c++14')
 
-    # We force clang-cl to emulate Visual C++ 2017 version 15.8.4
-    msvc_version = '19.15.26726'
-    if info.type == 'clang-cl' and info.version != msvc_version:
-        # This flag is a direct clang-cl flag that doesn't need -Xclang,
-        # add it directly.
-        flags.append('-fms-compatibility-version=%s' % msvc_version)
-
     # Check compiler target
     # --------------------------------------------------------------------
     if not info.cpu or info.cpu != target.cpu:
@@ -1186,6 +1179,20 @@ def compiler(language, host_or_target, c_compiler=None, other_compiler=None,
     # be provided.
     add_old_configure_assignment(var, depends_if(valid_compiler)(
         lambda x: list(x.wrapper) + [x.compiler] + list(x.flags)))
+
+    if host_or_target is target:
+        add_old_configure_assignment('ac_cv_prog_%s' % var, depends_if(valid_compiler)(
+            lambda x: list(x.wrapper) + [x.compiler] + list(x.flags)))
+        # We check that it works in python configure already.
+        add_old_configure_assignment('ac_cv_prog_%s_works' % var.lower(), 'yes')
+        gcc_like = depends(valid_compiler.type)(lambda x: 'yes' if x in ('gcc', 'clang') else 'no')
+        add_old_configure_assignment('ac_cv_prog_%s_g' % var.lower(), gcc_like)
+        if language == 'C':
+            add_old_configure_assignment('ac_cv_prog_gcc', gcc_like)
+            add_old_configure_assignment('ac_cv_prog_gcc_traditional', 'no')
+        if language == 'C++':
+            add_old_configure_assignment('ac_cv_prog_gxx', gcc_like)
+
 
     # Set CC_TYPE/CC_VERSION/HOST_CC_TYPE/HOST_CC_VERSION to allow
     # old-configure to do some of its still existing checks.
@@ -2092,6 +2099,7 @@ def as_with_flags(as_info, assembler, provided_assembler, c_compiler):
 
 
 add_old_configure_assignment('AS', as_with_flags)
+add_old_configure_assignment('ac_cv_prog_AS', as_with_flags)
 
 
 @depends(assembler, c_compiler, extra_toolchain_flags)
