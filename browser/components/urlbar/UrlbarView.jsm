@@ -6,7 +6,7 @@
 
 var EXPORTED_SYMBOLS = ["UrlbarView"];
 
-ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
+const {XPCOMUtils} = ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
 XPCOMUtils.defineLazyModuleGetters(this, {
   Services: "resource://gre/modules/Services.jsm",
   UrlbarUtils: "resource:///modules/UrlbarUtils.jsm",
@@ -260,9 +260,9 @@ class UrlbarView {
     item.className = "urlbarView-row";
     item.setAttribute("resultIndex", resultIndex);
 
-    if (result.source == UrlbarUtils.MATCH_SOURCE.TABS) {
+    if (result.source == UrlbarUtils.RESULT_SOURCE.TABS) {
       item.setAttribute("type", "tab");
-    } else if (result.source == UrlbarUtils.MATCH_SOURCE.BOOKMARKS) {
+    } else if (result.source == UrlbarUtils.RESULT_SOURCE.BOOKMARKS) {
       item.setAttribute("type", "bookmark");
     }
 

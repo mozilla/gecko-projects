@@ -29,12 +29,8 @@ pref("general.warnOnAboutConfig", true);
 pref("browser.bookmarks.max_backups",       5);
 
 pref("browser.cache.disk.enable",           true);
-// Is this the first-time smartsizing has been introduced?
-pref("browser.cache.disk.smart_size.first_run", true);
 // Does the user want smart-sizing?
 pref("browser.cache.disk.smart_size.enabled", true);
-// Which max value should we use for smart-sizing?
-pref("browser.cache.disk.smart_size.use_old_max", true);
 // Size (in KB) explicitly set by the user. Used when smart_size.enabled == false
 pref("browser.cache.disk.capacity",         256000);
 // When smartsizing is disabled we could potentially fill all disk space by
@@ -1458,8 +1454,6 @@ pref("dom.event.contextmenu.enabled",       true);
 pref("dom.event.clipboardevents.enabled",   true);
 pref("dom.event.highrestimestamp.enabled",  true);
 pref("dom.event.coalesce_mouse_move",       true);
-
-pref("dom.ua_widget.enabled", true);
 
 pref("javascript.enabled",                  true);
 pref("javascript.options.strict",           false);
@@ -5591,9 +5585,7 @@ pref("urlclassifier.update.timeout_ms", 90000);
 // Name of the about: page to display Safe Browsing warnings (bug 399233)
 pref("urlclassifier.alternate_error_page", "blocked");
 
-// Enable phishing & malware protection.
-pref("browser.safebrowsing.phishing.enabled", true);
-pref("browser.safebrowsing.malware.enabled", true);
+// Enable safe-browsing debugging
 pref("browser.safebrowsing.debug", false);
 
 // Allow users to ignore Safe Browsing warnings.
@@ -5656,7 +5648,6 @@ pref("browser.safebrowsing.provider.mozilla.lists.base", "moz-std");
 pref("browser.safebrowsing.provider.mozilla.lists.content", "moz-full");
 
 // The table and global pref for blocking plugin content
-pref("browser.safebrowsing.blockedURIs.enabled", true);
 pref("urlclassifier.blockedTable", "test-block-simple,mozplugin-block-digest256");
 
 // Flash blocking tables

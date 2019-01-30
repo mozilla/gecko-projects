@@ -17,7 +17,7 @@ if ("@mozilla.org/xre/app-info;1" in Cc) {
   }
 }
 
-ChromeUtils.import("resource://gre/modules/AppConstants.jsm");
+const {AppConstants} = ChromeUtils.import("resource://gre/modules/AppConstants.jsm");
 
 const MOZ_COMPATIBILITY_NIGHTLY = !["aurora", "beta", "release", "esr"].includes(AppConstants.MOZ_UPDATE_CHANNEL);
 
@@ -59,9 +59,11 @@ const WEBAPI_TEST_INSTALL_HOSTS = [
   "example.com",
 ];
 
-ChromeUtils.import("resource://gre/modules/Services.jsm");
-ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
-ChromeUtils.import("resource://gre/modules/AsyncShutdown.jsm");
+const {Services} = ChromeUtils.import("resource://gre/modules/Services.jsm");
+const {XPCOMUtils} = ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
+// This global is overridden by xpcshell tests, and therefore cannot be
+// a const.
+var {AsyncShutdown} = ChromeUtils.import("resource://gre/modules/AsyncShutdown.jsm");
 
 XPCOMUtils.defineLazyGlobalGetters(this, ["DOMParser", "Element"]);
 
@@ -94,7 +96,7 @@ const DEFAULT_PROVIDERS = [
   "resource://gre/modules/LightweightThemeManager.jsm",
 ];
 
-ChromeUtils.import("resource://gre/modules/Log.jsm");
+const {Log} = ChromeUtils.import("resource://gre/modules/Log.jsm");
 // Configure a logger at the parent 'addons' level to format
 // messages for all the modules under addons.*
 const PARENT_LOGGER_ID = "addons";
@@ -814,7 +816,7 @@ var AddonManagerInternal = {
       // Support for remote about:plugins. Note that this module isn't loaded
       // at the top because Services.appinfo is defined late in tests.
       let { RemotePages } =
-        ChromeUtils.import("resource://gre/modules/remotepagemanager/RemotePageManagerParent.jsm", {});
+        ChromeUtils.import("resource://gre/modules/remotepagemanager/RemotePageManagerParent.jsm");
 
       gPluginPageListener = new RemotePages("about:plugins");
       gPluginPageListener.addMessageListener("RequestPlugins", this.requestPlugins);
@@ -3512,9 +3514,6 @@ var AMTelemetry = {
     Services.obs.addObserver(this, "addon-install-disabled");
     Services.obs.addObserver(this, "addon-install-blocked");
 
-    Services.obs.addObserver(this, "webextension-permission-prompt");
-    Services.obs.addObserver(this, "webextension-update-permissions");
-
     AddonManager.addInstallListener(this);
     AddonManager.addAddonListener(this);
   },
@@ -3536,35 +3535,6 @@ var AMTelemetry = {
       case "addon-install-disabled": {
         const {installs} = subject.wrappedJSObject;
         this.recordInstallEvent(installs[0], {step: "install_disabled_warning"});
-        break;
-      }
-      case "webextension-permission-prompt": {
-        const {info} = subject.wrappedJSObject;
-        const {permissions, origins} = info.permissions || {permissions: [], origins: []};
-        if (info.type === "sideload") {
-          // When extension.js notifies a webextension-permission-prompt for a sideload,
-          // there is no AddonInstall instance available.
-          this.recordManageEvent(info.addon, "sideload_prompt", {
-            num_perms: permissions.length,
-            num_origins: origins.length,
-          });
-        } else {
-          this.recordInstallEvent(info.install, {
-            step: "permissions_prompt",
-            num_perms: permissions.length,
-            num_origins: origins.length,
-          });
-        }
-        break;
-      }
-      case "webextension-update-permissions": {
-        const update = subject.wrappedJSObject;
-        const {permissions, origins} = update.permissions || {permissions: [], origins: []};
-        this.recordInstallEvent(update.install, {
-          step: "permissions_prompt",
-          num_perms: permissions.length,
-          num_origins: origins.length,
-        });
         break;
       }
     }
@@ -3774,10 +3744,9 @@ var AMTelemetry = {
    *        The current step in the install or update flow.
    * @param {string} extraVars.download_time
    *        The number of ms needed to download the extension.
-   * @param {string} extraVars.num_perms
-   *        The number of permissions for the extensions.
-   * @param {string} extraVars.num_origins
-   *        The number of origins for the extensions.
+   * @param {string} extraVars.num_strings
+   *        The number of permission description string for the extension
+   *        permission doorhanger.
    */
   recordInstallEvent(install, extraVars) {
     // Early exit if AMTelemetry's telemetry setup has not been done yet.
@@ -3836,12 +3805,11 @@ var AMTelemetry = {
    *
    * @param {AddonWrapper} addon
    *        The AddonWrapper instance.
-   * @param {object} extra
+   * @param {object} extraVars
    *        The additional extra_vars to include in the recorded event.
-   * @param {string} extraVars.num_perms
-   *        The number of permissions for the extensions.
-   * @param {string} extraVars.num_origins
-   *        The number of origins for the extensions.
+   * @param {string} extraVars.num_strings
+   *        The number of permission description string for the extension
+   *        permission doorhanger.
    */
   recordManageEvent(addon, method, extraVars) {
     // Early exit if AMTelemetry's telemetry setup has not been done yet.

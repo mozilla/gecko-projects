@@ -6,9 +6,9 @@
 
 var EXPORTED_SYMBOLS = ["CustomizableUI"];
 
-ChromeUtils.import("resource://gre/modules/Services.jsm");
-ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
-ChromeUtils.import("resource://gre/modules/AppConstants.jsm");
+const {Services} = ChromeUtils.import("resource://gre/modules/Services.jsm");
+const {XPCOMUtils} = ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
+const {AppConstants} = ChromeUtils.import("resource://gre/modules/AppConstants.jsm");
 
 XPCOMUtils.defineLazyModuleGetters(this, {
   SearchWidgetTracker: "resource:///modules/SearchWidgetTracker.jsm",
@@ -1450,6 +1450,9 @@ var CustomizableUIInternal = {
     }
     if (!aWidget) {
       throw new Error("buildWidget was passed a non-widget to build.");
+    }
+    if (!aWidget.showInPrivateBrowsing && PrivateBrowsingUtils.isWindowPrivate(aDocument.defaultView)) {
+      return null;
     }
 
     log.debug("Building " + aWidget.id + " of type " + aWidget.type);
@@ -4027,8 +4030,7 @@ function WidgetGroupWrapper(aWidget) {
     }
 
     let instance = aWidget.instances.get(aWindow.document);
-    if (!instance &&
-        (aWidget.showInPrivateBrowsing || !PrivateBrowsingUtils.isWindowPrivate(aWindow))) {
+    if (!instance) {
       instance = CustomizableUIInternal.buildWidget(aWindow.document,
                                                     aWidget);
     }

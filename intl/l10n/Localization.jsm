@@ -21,9 +21,9 @@
 /* eslint no-console: ["error", { allow: ["warn", "error"] }] */
 /* global console */
 
-const { L10nRegistry } = ChromeUtils.import("resource://gre/modules/L10nRegistry.jsm", {});
-const { Services } = ChromeUtils.import("resource://gre/modules/Services.jsm", {});
-const { AppConstants } = ChromeUtils.import("resource://gre/modules/AppConstants.jsm", {});
+const { L10nRegistry } = ChromeUtils.import("resource://gre/modules/L10nRegistry.jsm");
+const { Services } = ChromeUtils.import("resource://gre/modules/Services.jsm");
+const { AppConstants } = ChromeUtils.import("resource://gre/modules/AppConstants.jsm");
 
 /*
  * Base CachedIterable class.
@@ -229,7 +229,9 @@ class Localization {
 
   removeResourceIds(resourceIds) {
     this.resourceIds = this.resourceIds.filter(r => !resourceIds.includes(r));
-    this.onChange();
+    if (this.resourceIds.length) {
+      this.onChange();
+    }
     return this.resourceIds.length;
   }
 

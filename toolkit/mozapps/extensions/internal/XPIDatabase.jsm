@@ -16,7 +16,7 @@
 
 var EXPORTED_SYMBOLS = ["AddonInternal", "XPIDatabase", "XPIDatabaseReconcile"];
 
-ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
+const {XPCOMUtils} = ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
 
 XPCOMUtils.defineLazyModuleGetters(this, {
   AddonManager: "resource://gre/modules/AddonManager.jsm",
@@ -59,7 +59,7 @@ for (let sym of [
   XPCOMUtils.defineLazyGetter(this, sym, () => XPIInternal[sym]);
 }
 
-ChromeUtils.import("resource://gre/modules/Log.jsm");
+const {Log} = ChromeUtils.import("resource://gre/modules/Log.jsm");
 const LOGGER_ID = "addons.xpi-utils";
 
 const nsIFile = Components.Constructor("@mozilla.org/file/local;1", "nsIFile",
@@ -109,7 +109,7 @@ const PROP_JSON_FIELDS = ["id", "syncGUID", "version", "type",
                           "softDisabled", "foreignInstall",
                           "strictCompatibility", "locales", "targetApplications",
                           "targetPlatforms", "signedState",
-                          "seen", "dependencies",
+                          "seen", "dependencies", "incognito",
                           "userPermissions", "icons", "iconURL",
                           "blocklistState", "blocklistURL", "startupData",
                           "previewImage", "hidden", "installTelemetryInfo",
@@ -730,6 +730,10 @@ AddonWrapper = class {
   get optionsBrowserStyle() {
     let addon = addonFor(this);
     return addon.optionsBrowserStyle;
+  }
+
+  get incognito() {
+    return addonFor(this).incognito;
   }
 
   async getBlocklistURL() {

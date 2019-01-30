@@ -31,7 +31,7 @@ var Startup = Cc["@mozilla.org/devtools/startup-clh;1"].getService(Ci.nsISupport
   .wrappedJSObject;
 
 const { BrowserLoader } =
-  ChromeUtils.import("resource://devtools/client/shared/browser-loader.js", {});
+  ChromeUtils.import("resource://devtools/client/shared/browser-loader.js");
 
 const {LocalizationHelper} = require("devtools/shared/l10n");
 const L10N = new LocalizationHelper("devtools/client/locales/toolbox.properties");
@@ -476,10 +476,15 @@ Toolbox.prototype = {
       Services.prefs.addObserver("devtools.serviceWorkers.testing.enabled",
                                  this._applyServiceWorkersTestingSettings);
 
+      // Register listener for handling context menus in standard
+      // input elements: <input> and <textarea>.
+      // There is also support for custom input elements using
+      // .devtools-input class (e.g. CodeMirror instances).
       this.doc.addEventListener("contextmenu", (e) => {
         if (e.originalTarget.closest("input[type=text]") ||
             e.originalTarget.closest("input[type=search]") ||
             e.originalTarget.closest("input:not([type])") ||
+            e.originalTarget.closest(".devtools-input") ||
             e.originalTarget.closest("textarea")) {
           e.stopPropagation();
           e.preventDefault();

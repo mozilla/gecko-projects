@@ -6,7 +6,7 @@
 
 var EXPORTED_SYMBOLS = ["UrlbarInput"];
 
-ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
+const {XPCOMUtils} = ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
 
 XPCOMUtils.defineLazyModuleGetters(this, {
   AppConstants: "resource://gre/modules/AppConstants.jsm",
@@ -724,7 +724,7 @@ class UrlbarInput {
     // this.value = url;
     // browser.userTypedValue = url;
     if (this.window.gInitialPages.includes(url)) {
-      browser.initialPageLoadedFromURLBar = url;
+      browser.initialPageLoadedFromUserAction = url;
     }
     try {
       UrlbarUtils.addToUrlbarHistory(url, this.window);

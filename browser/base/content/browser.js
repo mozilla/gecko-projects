@@ -3,9 +3,9 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
-ChromeUtils.import("resource://gre/modules/Services.jsm");
-ChromeUtils.import("resource://gre/modules/AppConstants.jsm");
+var {XPCOMUtils} = ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
+var {Services} = ChromeUtils.import("resource://gre/modules/Services.jsm");
+var {AppConstants} = ChromeUtils.import("resource://gre/modules/AppConstants.jsm");
 ChromeUtils.import("resource://gre/modules/NotificationDB.jsm");
 
 // lazy module getters
@@ -179,7 +179,7 @@ XPCOMUtils.defineLazyGetter(this, "gTabBrowserBundle", () => {
 
 XPCOMUtils.defineLazyGetter(this, "gCustomizeMode", () => {
   let { CustomizeMode } =
-    ChromeUtils.import("resource:///modules/CustomizeMode.jsm", {});
+    ChromeUtils.import("resource:///modules/CustomizeMode.jsm");
   return new CustomizeMode(window);
 });
 
@@ -220,21 +220,21 @@ XPCOMUtils.defineLazyGetter(this, "gNotificationBox", () => {
 
 XPCOMUtils.defineLazyGetter(this, "InlineSpellCheckerUI", () => {
   let { InlineSpellChecker } =
-    ChromeUtils.import("resource://gre/modules/InlineSpellChecker.jsm", {});
+    ChromeUtils.import("resource://gre/modules/InlineSpellChecker.jsm");
   return new InlineSpellChecker();
 });
 
 XPCOMUtils.defineLazyGetter(this, "PageMenuParent", () => {
   // eslint-disable-next-line no-shadow
   let { PageMenuParent } =
-    ChromeUtils.import("resource://gre/modules/PageMenu.jsm", {});
+    ChromeUtils.import("resource://gre/modules/PageMenu.jsm");
   return new PageMenuParent();
 });
 
 XPCOMUtils.defineLazyGetter(this, "PopupNotifications", () => {
   // eslint-disable-next-line no-shadow
   let { PopupNotifications } =
-    ChromeUtils.import("resource://gre/modules/PopupNotifications.jsm", {});
+    ChromeUtils.import("resource://gre/modules/PopupNotifications.jsm");
   try {
     // Hide all notifications while the URL is being edited and the address bar
     // has focus, including the virtual focus in the results popup.
@@ -264,7 +264,7 @@ XPCOMUtils.defineLazyGetter(this, "Win7Features", () => {
   if (WINTASKBAR_CONTRACTID in Cc &&
       Cc[WINTASKBAR_CONTRACTID].getService(Ci.nsIWinTaskbar).available) {
     let { AeroPeek } =
-      ChromeUtils.import("resource:///modules/WindowsPreviewPerTab.jsm", {});
+      ChromeUtils.import("resource:///modules/WindowsPreviewPerTab.jsm");
     return {
       onOpenWindow() {
         AeroPeek.onOpenWindow(window);
@@ -1414,7 +1414,7 @@ var gBrowserInit = {
 
   _delayedStartup() {
     let { TelemetryTimestamps } =
-      ChromeUtils.import("resource://gre/modules/TelemetryTimestamps.jsm", {});
+      ChromeUtils.import("resource://gre/modules/TelemetryTimestamps.jsm");
     TelemetryTimestamps.add("delayedStartupStarted");
 
     this._cancelDelayedStartup();
@@ -1747,6 +1747,11 @@ var gBrowserInit = {
 
     scheduleIdleTask(() => {
       gBrowserThumbnails.init();
+    });
+
+    // Show the addons private browsing panel the first time a private window.
+    scheduleIdleTask(() => {
+      ExtensionsUI.showPrivateBrowsingNotification(window);
     });
 
     scheduleIdleTask(() => {
@@ -2163,6 +2168,12 @@ function BrowserHome(aEvent) {
   // openTrustedLinkIn in utilityOverlay.js doesn't handle loading multiple pages
   switch (where) {
   case "current":
+    // If we're going to load an initial page in the current tab as the
+    // home page, we set initialPageLoadedFromURLBar so that the URL
+    // bar is cleared properly (even during a remoteness flip).
+    if (isInitialPage(homePage)) {
+      gBrowser.selectedBrowser.initialPageLoadedFromUserAction = homePage;
+    }
     loadOneOrMoreURIs(homePage, Services.scriptSecurityManager.getSystemPrincipal());
     if (isBlankPageURL(homePage)) {
       focusAndSelectUrlBar();

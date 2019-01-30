@@ -6,9 +6,9 @@
 
 var EXPORTED_SYMBOLS = ["webrtcUI"];
 
-ChromeUtils.import("resource:///modules/syncedtabs/EventEmitter.jsm");
-ChromeUtils.import("resource://gre/modules/Services.jsm");
-ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
+const {EventEmitter} = ChromeUtils.import("resource:///modules/syncedtabs/EventEmitter.jsm");
+const {Services} = ChromeUtils.import("resource://gre/modules/Services.jsm");
+const {XPCOMUtils} = ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
 
 ChromeUtils.defineModuleGetter(this, "AppConstants",
                                "resource://gre/modules/AppConstants.jsm");
@@ -606,8 +606,9 @@ function prompt(aBrowser, aRequest) {
         // Removing the child nodes of the menupopup doesn't clear the value
         // attribute of the menulist. This can have unfortunate side effects
         // when the list is rebuilt with a different content, so we remove
-        // the value attribute explicitly.
+        // the value attribute and unset the selectedItem explicitly.
         menupopup.parentNode.removeAttribute("value");
+        menupopup.parentNode.selectedItem = null;
 
         for (let device of devices)
           addDeviceToList(menupopup, device.name, device.deviceIndex);
@@ -628,6 +629,14 @@ function prompt(aBrowser, aRequest) {
         while (menupopup.lastChild) {
           menupopup.removeChild(menupopup.lastChild);
         }
+
+        // Removing the child nodes of the menupopup doesn't clear the value
+        // attribute of the menulist. This can have unfortunate side effects
+        // when the list is rebuilt with a different content, so we remove
+        // the value attribute and unset the selectedItem explicitly.
+        menupopup.parentNode.removeAttribute("value");
+        menupopup.parentNode.selectedItem = null;
+
         let label = doc.getElementById("webRTC-selectWindow-label");
         const gumStringId = "getUserMedia.selectWindowOrScreen";
         label.setAttribute("value",

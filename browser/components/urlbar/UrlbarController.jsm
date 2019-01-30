@@ -8,8 +8,8 @@ var EXPORTED_SYMBOLS = [
   "UrlbarController",
 ];
 
-ChromeUtils.import("resource://gre/modules/Services.jsm");
-ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
+const {XPCOMUtils} = ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
+const {Services} = ChromeUtils.import("resource://gre/modules/Services.jsm");
 XPCOMUtils.defineLazyModuleGetters(this, {
   AppConstants: "resource://gre/modules/AppConstants.jsm",
   // BrowserUsageTelemetry: "resource:///modules/BrowserUsageTelemetry.jsm",
@@ -314,7 +314,7 @@ class UrlbarController {
 
     const selectedResult = this.input.view.selectedResult;
     if (!selectedResult ||
-        selectedResult.source != UrlbarUtils.MATCH_SOURCE.HISTORY) {
+        selectedResult.source != UrlbarUtils.RESULT_SOURCE.HISTORY) {
       return false;
     }
 
