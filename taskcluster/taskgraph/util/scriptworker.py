@@ -109,7 +109,6 @@ BEETMOVER_BUCKET_SCOPES = {
 """
 BEETMOVER_ACTION_SCOPES = {
     'nightly': 'beetmover:action:push-to-nightly',
-    'nightly-oak': 'beetmover:action:push-to-nightly',
     'default': 'beetmover:action:push-to-candidates',
 }
 
