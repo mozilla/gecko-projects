@@ -29,7 +29,7 @@ use image::{Repetition};
 use intern;
 use malloc_size_of::MallocSizeOf;
 use picture::{PictureCompositeMode, PicturePrimitive, PictureUpdateState};
-use picture::{ClusterIndex, PrimitiveList, SurfaceIndex, RetainedTiles, RasterConfig};
+use picture::{ClusterIndex, PrimitiveList, RecordedDirtyRegion, SurfaceIndex, RetainedTiles, RasterConfig};
 use prim_store::borders::{ImageBorderDataHandle, NormalBorderDataHandle};
 use prim_store::gradient::{LinearGradientDataHandle, RadialGradientDataHandle};
 use prim_store::image::{ImageDataHandle, ImageInstance, VisibleImageTile, YuvImageDataHandle};
@@ -51,6 +51,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use storage;
 use util::{ScaleOffset, MatrixHelpers, MaxRect, Recycler};
 use util::{pack_as_float, project_rect, raster_rect_to_device_pixels};
+use util::{scale_factors, clamp_to_scale_factor};
 use smallvec::SmallVec;
 
 pub mod borders;
@@ -1553,6 +1554,11 @@ pub struct PrimitiveScratchBuffer {
     /// List of the visibility information for currently visible primitives.
     pub prim_info: Vec<PrimitiveVisibility>,
 
+    /// List of dirty regions for the cached pictures in this document, used to
+    /// verify invalidation in wrench reftests. Only collected in testing.
+    pub recorded_dirty_regions: Vec<RecordedDirtyRegion>,
+
+    /// List of debug display items for rendering.
     pub debug_items: Vec<DebugItem>,
 }
 
@@ -1565,6 +1571,7 @@ impl PrimitiveScratchBuffer {
             segments: SegmentStorage::new(0),
             segment_instances: SegmentInstanceStorage::new(0),
             gradient_tiles: GradientTileStorage::new(0),
+            recorded_dirty_regions: Vec::new(),
             debug_items: Vec::new(),
             prim_info: Vec::new(),
         }
@@ -1599,6 +1606,8 @@ impl PrimitiveScratchBuffer {
         self.prim_info.clear();
 
         self.debug_items.clear();
+
+        assert!(self.recorded_dirty_regions.is_empty(), "Should have sent to Renderer");
     }
 
     #[allow(dead_code)]
@@ -2554,7 +2563,21 @@ impl PrimitiveStore {
                 // TODO(gw): When drawing in screen raster mode, we should also incorporate a
                 //           scale factor from the world transform to get an appropriately
                 //           sized border task.
-                let world_scale = LayoutToWorldScale::new(1.0);
+                let transform = prim_context.spatial_node.world_content_transform.to_transform();
+
+                // Scale factors are normalized to a power of 2 to reduce the number of
+                // resolution changes
+                let scale = scale_factors(&transform);
+                // For frames with a changing scale transform round scale factors up to
+                // nearest power-of-2 boundary so that we don't keep having to redraw
+                // the content as it scales up and down. Rounding up to nearest
+                // power-of-2 boundary ensures we never scale up, only down --- avoiding
+                // jaggies. It also ensures we never scale down by more than a factor of
+                // 2, avoiding bad downscaling quality.
+                let scale_width = clamp_to_scale_factor(scale.0, false);
+                let scale_height = clamp_to_scale_factor(scale.1, false);
+                // Pick the maximum dimension as scale
+                let world_scale = LayoutToWorldScale::new(scale_width.max(scale_height));
                 let mut scale = world_scale * frame_context.device_pixel_scale;
                 let max_scale = get_max_scale_for_border(&border_data.border.radius,
                                                          &border_data.widths);

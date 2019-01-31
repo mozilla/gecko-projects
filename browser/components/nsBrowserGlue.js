@@ -1089,7 +1089,6 @@ BrowserGlue.prototype = {
     // check for update if our build is old
     if (AppConstants.MOZ_UPDATER &&
         Services.prefs.getBoolPref("app.update.checkInstallTime")) {
-
       let buildID = Services.appinfo.appBuildID;
       let today = new Date().getTime();
       /* eslint-disable no-multi-spaces */
@@ -1488,6 +1487,22 @@ BrowserGlue.prototype = {
     });
   },
 
+  _showNewInstallModal() {
+    // Allow other observers of the same topic to run while we open the dialog.
+    Services.tm.dispatchToMainThread(() => {
+      let win = BrowserWindowTracker.getTopWindow();
+
+      let stack = win.gBrowser.getPanel().querySelector(".browserStack");
+      let mask = win.document.createElementNS(XULNS, "box");
+      mask.setAttribute("id", "content-mask");
+      stack.appendChild(mask);
+
+      Services.ww.openWindow(win, "chrome://browser/content/newInstall.xul",
+                             "_blank", "chrome,modal,resizable=no,centerscreen", null);
+      mask.remove();
+    });
+  },
+
   // All initial windows have opened.
   _onWindowsRestored: function BG__onWindowsRestored() {
     if (this._windowsWereRestored) {
@@ -1542,6 +1557,12 @@ BrowserGlue.prototype = {
 
     this._monitorScreenshotsPref();
     this._monitorWebcompatReporterPref();
+
+    let pService = Cc["@mozilla.org/toolkit/profile-service;1"].
+                  getService(Ci.nsIToolkitProfileService);
+    if (pService.createdAlternateProfile) {
+      this._showNewInstallModal();
+    }
   },
 
   /**
@@ -2044,7 +2065,6 @@ BrowserGlue.prototype = {
           } catch (e) {
             Cu.reportError(e);
           }
-
         } else {
           Cu.reportError(new Error("Unable to find bookmarks.html file."));
         }
@@ -2091,7 +2111,6 @@ BrowserGlue.prototype = {
         }
         this._idleService.addIdleObserver(this, this._bookmarksBackupIdleTime);
       }
-
     })().catch(ex => {
       Cu.reportError(ex);
     }).then(() => {
@@ -3170,7 +3189,6 @@ ContentPermissionPrompt.prototype = {
       }
 
       permissionPrompt.prompt();
-
     } catch (ex) {
       Cu.reportError(ex);
       request.cancel();

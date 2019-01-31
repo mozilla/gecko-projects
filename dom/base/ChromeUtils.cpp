@@ -25,6 +25,7 @@
 #include "mozilla/dom/ReportingHeader.h"
 #include "mozilla/dom/UnionTypes.h"
 #include "mozilla/dom/WindowBinding.h"  // For IdleRequestCallback/Options
+#include "mozilla/net/UrlClassifierFeatureFactory.h"
 #include "IOActivityMonitor.h"
 #include "nsThreadUtils.h"
 #include "mozJSComponentLoader.h"
@@ -768,17 +769,6 @@ constexpr auto kSkipSelfHosted = JS::SavedFrameSelfHosted::Exclude;
   return domPromise.forget();
 }
 
-/* static */ already_AddRefed<BrowsingContext> ChromeUtils::GetBrowsingContext(
-    GlobalObject& aGlobal, uint64_t id) {
-  return BrowsingContext::Get(id);
-}
-
-/* static */ void ChromeUtils::GetRootBrowsingContexts(
-    GlobalObject& aGlobal,
-    nsTArray<RefPtr<BrowsingContext>>& aBrowsingContexts) {
-  BrowsingContext::GetRootBrowsingContexts(aBrowsingContexts);
-}
-
 /* static */ bool ChromeUtils::HasReportingHeaderForOrigin(
     GlobalObject& global, const nsAString& aOrigin, ErrorResult& aRv) {
   if (!XRE_IsParentProcess()) {
@@ -842,6 +832,12 @@ constexpr auto kSkipSelfHosted = JS::SavedFrameSelfHosted::Exclude;
 
   RefPtr<JSWindowActorService> service = JSWindowActorService::GetSingleton();
   service->RegisterWindowActor(aName, aOptions, aRv);
+}
+
+/* static */ bool ChromeUtils::IsClassifierBlockingErrorCode(
+    GlobalObject& aGlobal, uint32_t aError) {
+  return net::UrlClassifierFeatureFactory::IsClassifierBlockingErrorCode(
+      static_cast<nsresult>(aError));
 }
 
 }  // namespace dom
