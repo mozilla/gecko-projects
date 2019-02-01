@@ -64,14 +64,20 @@ void HttpTransactionParent::GetStructFromInfo(
     return;
   }
 
-  aArgs.proxyInfo().type() = nsCString(aInfo->ProxyInfo()->Type());
-  aArgs.proxyInfo().host() = aInfo->ProxyInfo()->Host();
-  aArgs.proxyInfo().port() = aInfo->ProxyInfo()->Port();
-  aArgs.proxyInfo().username() = aInfo->ProxyInfo()->Username();
-  aArgs.proxyInfo().password() = aInfo->ProxyInfo()->Password();
-  aArgs.proxyInfo().flags() = aInfo->ProxyInfo()->Flags();
-  aArgs.proxyInfo().timeout() = aInfo->ProxyInfo()->Timeout();
-  aArgs.proxyInfo().resolveFlags() = aInfo->ProxyInfo()->ResolveFlags();
+  nsTArray<ProxyInfoCloneArgs> proxyInfoArray;
+  nsProxyInfo* head = aInfo->ProxyInfo();
+  for (nsProxyInfo* iter = head; iter; iter = iter->mNext) {
+    ProxyInfoCloneArgs* arg = proxyInfoArray.AppendElement();
+    arg->type() = nsCString(iter->Type());
+    arg->host() = aInfo->ProxyInfo()->Host();
+    arg->port() = aInfo->ProxyInfo()->Port();
+    arg->username() = aInfo->ProxyInfo()->Username();
+    arg->password() = aInfo->ProxyInfo()->Password();
+    arg->flags() = aInfo->ProxyInfo()->Flags();
+    arg->timeout() = aInfo->ProxyInfo()->Timeout();
+    arg->resolveFlags() = aInfo->ProxyInfo()->ResolveFlags();
+  }
+  aArgs.proxyInfo() = proxyInfoArray;
 }
 
 //-----------------------------------------------------------------------------

@@ -326,7 +326,7 @@ struct HttpConnectionInfoCloneArgs
   uint32_t tlsFlags;
   bool trrUsed;
   bool trrDisabled;
-  ProxyInfoCloneArgs proxyInfo;
+  ProxyInfoCloneArgs[] proxyInfo;
 };
 
 //-----------------------------------------------------------------------------

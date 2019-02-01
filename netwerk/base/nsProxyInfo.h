@@ -63,6 +63,8 @@ class nsProxyInfo final : public nsIProxyInfo {
         mTimeout(UINT32_MAX),
         mNext(nullptr) {}
 
+  // For accessing mNext.
+  friend class HttpTransactionParent;
   // For the CTOR below.
   friend class HttpTransactionChild;
   explicit nsProxyInfo(const nsACString &aType,

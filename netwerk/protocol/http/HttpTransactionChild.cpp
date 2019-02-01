@@ -62,24 +62,30 @@ nsresult HttpTransactionChild::InitInternal(
     uint64_t requestContextID, uint32_t classOfService) {
   LOG(("HttpTransactionChild::InitInternal [this=%p caps=%x]\n", this, caps));
 
-  nsProxyInfo* proxyInfo = new nsProxyInfo(
-      infoArgs.proxyInfo().type(), infoArgs.proxyInfo().host(),
-      infoArgs.proxyInfo().port(), infoArgs.proxyInfo().username(),
-      infoArgs.proxyInfo().password(), infoArgs.proxyInfo().flags(),
-      infoArgs.proxyInfo().timeout(), infoArgs.proxyInfo().resolveFlags());
+  nsProxyInfo *pi = nullptr, *first = nullptr, *last = nullptr;
+  for (const ProxyInfoCloneArgs& info : infoArgs.proxyInfo()) {
+    pi = new nsProxyInfo(info.type(), info.host(), info.port(), info.username(),
+                         info.password(), info.flags(), info.timeout(),
+                         info.resolveFlags());
+    if (last) {
+      last->mNext = pi;
+    } else {
+      first = pi;
+    }
+    last = pi;
+  }
 
   RefPtr<nsHttpConnectionInfo> cinfo;
   if (infoArgs.routedHost().IsEmpty()) {
-    cinfo = new nsHttpConnectionInfo(
-        infoArgs.host(), infoArgs.port(), infoArgs.npnToken(),
-        infoArgs.username(), EmptyCString(), proxyInfo,
-        infoArgs.originAttributes(), infoArgs.endToEndSSL());
+    cinfo = new nsHttpConnectionInfo(infoArgs.host(), infoArgs.port(),
+                                     infoArgs.npnToken(), infoArgs.username(),
+                                     EmptyCString(), first, infoArgs.originAttributes(),
+                                     infoArgs.endToEndSSL());
   } else {
     cinfo = new nsHttpConnectionInfo(
         infoArgs.host(), infoArgs.port(), infoArgs.npnToken(),
-        infoArgs.username(), EmptyCString(), proxyInfo,
-        infoArgs.originAttributes(), infoArgs.routedHost(),
-        infoArgs.routedPort());
+        infoArgs.username(), EmptyCString(), first, infoArgs.originAttributes(),
+        infoArgs.routedHost(), infoArgs.routedPort());
   }
 
   // Make sure the anonymous, insecure-scheme, and private flags are transferred
