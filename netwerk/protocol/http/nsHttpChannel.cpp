@@ -8018,8 +8018,7 @@ nsHttpChannel::OnStopRequest(nsIRequest* request, nsresult status) {
       Unused << mCacheEntry->SetNetworkTimes(onStartTime, onStopTime);
     }
 
-    // TODO: serialize response trailer in onstoprequest
-    // mResponseTrailers = mTransaction->TakeResponseTrailers();
+    mResponseTrailers = mTransaction->TakeResponseTrailers();
 
     // at this point, we're done with the transaction
     mTransaction = nullptr;

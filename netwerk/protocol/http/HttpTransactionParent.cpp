@@ -23,7 +23,10 @@ NS_IMPL_ISUPPORTS(HttpTransactionParent, nsIRequest,
 // HttpTransactionParent <public>
 //-----------------------------------------------------------------------------
 
-HttpTransactionParent::HttpTransactionParent() : mIPCOpen(false) {
+HttpTransactionParent::HttpTransactionParent()
+    : mIPCOpen(false),
+      mResponseHeadTaken(false),
+      mResponseTrailersTaken(false) {
   LOG(("Creating HttpTransactionParent @%p\n", this));
 
   this->mSelfAddr.inet = {};
@@ -159,7 +162,19 @@ nsresult HttpTransactionParent::AsyncCancel(nsresult reason) {
 }
 
 nsHttpResponseHead* HttpTransactionParent::TakeResponseHead() {
+  MOZ_ASSERT(NS_IsMainThread());
+  MOZ_ASSERT(!mResponseHeadTaken, "TakeResponseHead called 2x");
+
+  mResponseHeadTaken = true;
   return mResponseHead.forget();
+}
+
+nsHttpHeaderArray* HttpTransactionParent::TakeResponseTrailers() {
+  MOZ_ASSERT(NS_IsMainThread());
+  MOZ_ASSERT(!mResponseTrailersTaken, "TakeResponseTrailers called 2x");
+
+  mResponseTrailersTaken = true;
+  return mResponseTrailers.forget();
 }
 
 NS_IMETHODIMP
@@ -317,7 +332,8 @@ mozilla::ipc::IPCResult HttpTransactionParent::RecvOnDataAvailable(
 
 mozilla::ipc::IPCResult HttpTransactionParent::RecvOnStopRequest(
     const nsresult& aStatus, const bool& aResponseIsComplete,
-    const int64_t& aTransferSize, const TimingStruct& aTimings) {
+    const int64_t& aTransferSize, const TimingStruct& aTimings,
+    const nsHttpHeaderArray& responseTrailers) {
   LOG(("HttpTransactionParent::RecvOnStopRequest [this=%p status=%" PRIx32
        "]\n",
        this, static_cast<uint32_t>(aStatus)));
@@ -331,6 +347,7 @@ mozilla::ipc::IPCResult HttpTransactionParent::RecvOnStopRequest(
   mResponseIsComplete = aResponseIsComplete;
   mTransferSize = aTransferSize;
   mTimings = aTimings;
+  mResponseTrailers = new nsHttpHeaderArray(responseTrailers);
 
   nsCOMPtr<nsIStreamListener> chan = mChannel;
   Unused << chan->OnStopRequest(this, aStatus);

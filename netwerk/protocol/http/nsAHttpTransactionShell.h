@@ -19,6 +19,7 @@ namespace mozilla {
 namespace net {
 
 class nsHttpConnectionInfo;
+class nsHttpHeaderArray;
 class nsHttpRequestHead;
 
 //----------------------------------------------------------------------------
@@ -108,6 +109,10 @@ class nsAHttpTransactionShell : public nsISupports {
 
   // Called to notify that a requested DNS cache entry was refreshed.
   virtual void SetDNSWasRefreshed() = 0;
+
+  // Called to take ownership of the trailer headers.
+  // Returning null if there is no trailer.
+  virtual nsHttpHeaderArray *TakeResponseTrailers() = 0;
 };
 
 NS_DEFINE_STATIC_IID_ACCESSOR(nsAHttpTransactionShell,
@@ -144,7 +149,8 @@ NS_DEFINE_STATIC_IID_ACCESSOR(nsAHttpTransactionShell,
   virtual bool ResponseIsComplete() override;                                  \
   virtual bool DataAlreadySent() override;                                     \
   virtual int64_t GetTransferSize() override;                                  \
-  virtual void SetDNSWasRefreshed() override;
+  virtual void SetDNSWasRefreshed() override;                                  \
+  virtual nsHttpHeaderArray *TakeResponseTrailers() override;
 
 }  // namespace net
 }  // namespace mozilla

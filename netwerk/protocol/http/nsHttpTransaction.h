@@ -105,10 +105,6 @@ class nsHttpTransaction final : public nsAHttpTransaction,
 
   void SetSecurityCallbacks(nsIInterfaceRequestor* aCallbacks);
 
-  // Called to take ownership of the trailer headers.
-  // Returning null if there is no trailer.
-  nsHttpHeaderArray* TakeResponseTrailers();
-
   void SetH2WSConnRefTaken();
 
   // Called to set/find out if the transaction generated a complete response.

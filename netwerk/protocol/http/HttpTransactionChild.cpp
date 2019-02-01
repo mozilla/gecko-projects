@@ -307,10 +307,13 @@ HttpTransactionChild::OnStopRequest(nsIRequest* aRequest, nsresult aStatus) {
   LOG(("HttpTransactionChild::OnStopRequest [this=%p]\n", this));
   MOZ_ASSERT(mTransaction);
 
-  Unused << SendOnStopRequest(aStatus, mTransaction->ResponseIsComplete(),
-                              mTransaction->GetTransferSize(),
-                              mTransaction->Timings());
+  nsAutoPtr<nsHttpHeaderArray> responseTrailer(
+      mTransaction->TakeResponseTrailers());
 
+  Unused << SendOnStopRequest(
+      aStatus, mTransaction->ResponseIsComplete(),
+      mTransaction->GetTransferSize(), mTransaction->Timings(),
+      responseTrailer ? *responseTrailer : nsHttpHeaderArray());
   mTransaction = nullptr;
   mTransactionPump = nullptr;
   return NS_OK;

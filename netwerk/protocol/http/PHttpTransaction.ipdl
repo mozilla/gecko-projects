@@ -14,6 +14,7 @@ include NeckoChannelParams;
 include "mozilla/net/NeckoMessageUtils.h";
 
 using class mozilla::net::nsHttpRequestHead from "nsHttpRequestHead.h";
+using class nsHttpHeaderArray from "nsHttpHeaderArray.h";
 using mozilla::net::NetAddr from "mozilla/net/DNS.h";
 using struct mozilla::net::TimingStruct from "mozilla/net/TimingStruct.h";
 
@@ -42,7 +43,8 @@ parent:
   async OnStopRequest(nsresult status,
                       bool responseIsComplete,
                       int64_t transferSize,
-                      TimingStruct timings);
+                      TimingStruct timings,
+                      nsHttpHeaderArray responseTrailers);
 
 child:
   async __delete__();

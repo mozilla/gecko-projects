@@ -49,10 +49,10 @@ class HttpTransactionParent final : public PHttpTransactionParent,
   mozilla::ipc::IPCResult RecvOnDataAvailable(
       const nsCString& aData, const uint64_t& aOffset, const uint32_t& aCount,
       const bool& dataSentToChildProcess);
-  mozilla::ipc::IPCResult RecvOnStopRequest(const nsresult& aStatus,
-                                            const bool& aResponseIsComplete,
-                                            const int64_t& aTransferSize,
-                                            const TimingStruct& aTimings);
+  mozilla::ipc::IPCResult RecvOnStopRequest(
+      const nsresult& aStatus, const bool& aResponseIsComplete,
+      const int64_t& aTransferSize, const TimingStruct& aTimings,
+      const nsHttpHeaderArray& responseTrailers);
 
  private:
   virtual ~HttpTransactionParent();
@@ -70,6 +70,7 @@ class HttpTransactionParent final : public PHttpTransactionParent,
   Atomic<int64_t, ReleaseAcquire> mTransferSize;
 
   nsAutoPtr<nsHttpResponseHead> mResponseHead;
+  nsAutoPtr<nsHttpHeaderArray> mResponseTrailers;
 
   nsLoadFlags mLoadFlags = LOAD_NORMAL;
   bool mProxyConnectFailed = false;
@@ -82,6 +83,8 @@ class HttpTransactionParent final : public PHttpTransactionParent,
 
   TimingStruct mTimings;
   bool mIPCOpen;
+  bool mResponseHeadTaken;
+  bool mResponseTrailersTaken;
 };
 
 }  // namespace net
