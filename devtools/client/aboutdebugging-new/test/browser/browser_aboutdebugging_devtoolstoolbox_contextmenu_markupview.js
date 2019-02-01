@@ -62,7 +62,3 @@ function getMarkupViewFrame(rootDocument) {
   const inspectorFrame = rootDocument.querySelector("#toolbox-panel-iframe-inspector");
   return inspectorFrame.contentDocument.querySelector("#markup-box iframe");
 }
-
-function getToolbox(win) {
-  return gDevTools.getToolboxes().find(toolbox => toolbox.win === win);
-}

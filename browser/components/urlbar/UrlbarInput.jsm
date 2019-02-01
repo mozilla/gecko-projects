@@ -331,9 +331,10 @@ class UrlbarInput {
         return;
       }
       case UrlbarUtils.RESULT_TYPE.SEARCH: {
-        url = this._maybeCanonizeURL(event,
+        let canonizedUrl = this._maybeCanonizeURL(event,
                 result.payload.suggestion || result.payload.query);
-        if (url) {
+        if (canonizedUrl) {
+          url = canonizedUrl;
           break;
         }
         const actionDetails = {
@@ -371,10 +372,10 @@ class UrlbarInput {
       case UrlbarUtils.RESULT_TYPE.SEARCH:
         val = result.payload.suggestion || result.payload.query;
         break;
+      case UrlbarUtils.RESULT_TYPE.OMNIBOX:
+        val = result.payload.content;
+        break;
       default: {
-        // FIXME: This is wrong, not all the other matches have a url. For example
-        // extension matches will call into the extension code rather than loading
-        // a url. That means we likely can't use the url as our value.
         val = result.payload.url;
         let uri;
         try {
