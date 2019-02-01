@@ -34,7 +34,7 @@ function test_simple_breakpoint() {
     );
     source.setBreakpoint({
       line: 3,
-      condition: "throw new Error()",
+      options: { condition: "throw new Error()" },
     }).then(function([response, bpClient]) {
       gThreadClient.addOneTimeListener("paused", function(event, packet) {
         // Check the return value.
