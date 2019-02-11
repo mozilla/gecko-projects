@@ -78,7 +78,7 @@ window.gActivityStreamStrings = {
   "pocket_read_more": "Sujets populaires :",
   "pocket_read_even_more": "Afficher plus d’articles",
   "pocket_more_reccommendations": "Plus de recommandations",
-  "pocket_how_it_works": "Mode d'emploi",
+  "pocket_how_it_works": "Mode d’emploi",
   "pocket_cta_button": "Installer Pocket",
   "pocket_cta_text": "Enregistrez les articles que vous aimez dans Pocket, et stimulez votre imagination avec des lectures fascinantes.",
   "highlights_empty_state": "Commencez à naviguer puis nous afficherons des articles, des vidéos ou d’autres pages que vous avez récemment visités ou ajoutés aux marque-pages.",

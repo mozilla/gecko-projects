@@ -1534,12 +1534,18 @@ static bool CreateMappedArrayBuffer(JSContext* cx, unsigned argc, Value* vp) {
   }
   AutoCloseFile autoClose(file);
 
+  struct stat st;
+  if (fstat(fileno(file), &st) < 0) {
+    JS_ReportErrorASCII(cx, "Unable to stat file");
+    return false;
+  }
+
+  if ((st.st_mode & S_IFMT) != S_IFREG) {
+    JS_ReportErrorASCII(cx, "Path is not a regular file");
+    return false;
+  }
+
   if (!sizeGiven) {
-    struct stat st;
-    if (fstat(fileno(file), &st) < 0) {
-      JS_ReportErrorASCII(cx, "Unable to stat file");
-      return false;
-    }
     if (off_t(offset) >= st.st_size) {
       JS_ReportErrorNumberASCII(cx, GetErrorMessage, nullptr,
                                 JSMSG_OFFSET_LARGER_THAN_FILESIZE);
@@ -3693,7 +3699,7 @@ static bool Crash(JSContext* cx, unsigned argc, Value* vp) {
 #ifndef DEBUG
   MOZ_ReportCrash(utf8chars.get(), __FILE__, __LINE__);
 #endif
-  MOZ_CRASH_UNSAFE_OOL(utf8chars.get());
+  MOZ_CRASH_UNSAFE(utf8chars.get());
 }
 
 static bool GetSLX(JSContext* cx, unsigned argc, Value* vp) {

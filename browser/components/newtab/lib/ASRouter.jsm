@@ -246,11 +246,9 @@ const MessageLoaderUtils = {
       const aUri = Services.io.newURI(url);
       const systemPrincipal = Services.scriptSecurityManager.getSystemPrincipal();
 
-      // AddonManager installation source associated to the addons installed from activitystream
-      // (See Bug 1496167 for a rationale).
-      const amTelemetryInfo = {source: "activitystream"};
-      const install = await AddonManager.getInstallForURL(aUri.spec, "application/x-xpinstall", null,
-                                                          null, null, null, null, amTelemetryInfo);
+      // AddonManager installation source associated to the addons installed from activitystream's CFR
+      const telemetryInfo = {source: "amo"};
+      const install = await AddonManager.getInstallForURL(aUri.spec, {telemetryInfo});
       await AddonManager.installAddonFromWebpage("application/x-xpinstall", browser,
         systemPrincipal, install);
     } catch (e) {

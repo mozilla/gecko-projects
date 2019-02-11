@@ -13,6 +13,10 @@ ChromeUtils.defineModuleGetter(this, "ActorManagerParent",
 
 var isDevtools = SimpleTest.harnessParameters.subsuite == "devtools";
 
+// This list should contain only path prefixes. It is meant to stop the test
+// from reporting things that *are* referenced, but for which the test can't
+// find any reference because the URIs are constructed programatically.
+// If you need to whitelist specific files, please use the 'whitelist' object.
 var gExceptionPaths = [
   "chrome://browser/content/defaultthemes/",
   "resource://app/defaults/settings/blocklists/",
@@ -41,11 +45,6 @@ var gExceptionPaths = [
 
   // Exclude all search-plugins because they aren't referenced by filename
   "resource://search-plugins/",
-
-  // Previous version of "about:config" kept for risk mitigation as a hidden
-  // page accessed using a direct chrome URL, will be removed in the future.
-  "chrome://global/content/config.js",
-  "chrome://global/content/config.xul",
 ];
 
 // These are not part of the omni.ja file, so we find them only when running
@@ -55,6 +54,9 @@ if (AppConstants.platform == "macosx") {
   gExceptionPaths.push("resource://gre/res/touchbar/");
 }
 
+// Each whitelist entry should have a comment indicating which file is
+// referencing the whitelisted file in a way that the test can't detect, or a
+// bug number to remove or use the file if it is indeed currently unreferenced.
 var whitelist = [
   // browser/extensions/pdfjs/content/PdfStreamConverter.jsm
   {file: "chrome://pdf.js/locale/chrome.properties"},
@@ -175,10 +177,18 @@ var whitelist = [
   {file: "chrome://devtools/skin/images/aboutdebugging-firefox-release.svg",
    isFromDevTools: true},
   {file: "chrome://devtools/skin/images/next.svg", isFromDevTools: true},
-   // Feature gates are available but not used yet - Bug 1479127
-   {file: "resource://gre-resources/featuregates/FeatureGate.jsm"},
-   {file: "resource://gre-resources/featuregates/FeatureGateImplementation.jsm"},
-   {file: "resource://gre-resources/featuregates/feature_definitions.json"},
+  // Feature gates are available but not used yet - Bug 1479127
+  {file: "resource://gre-resources/featuregates/FeatureGate.jsm"},
+  {file: "resource://gre-resources/featuregates/FeatureGateImplementation.jsm"},
+  {file: "resource://gre-resources/featuregates/feature_definitions.json"},
+  // kvstore.jsm wraps the API in nsIKeyValue.idl in a more ergonomic API
+  // It landed in bug 1490496, and we expect to start using it shortly.
+  {file: "resource://gre/modules/kvstore.jsm"},
+  {file: "chrome://devtools/content/aboutdebugging-new/tmp-locale/en-US/aboutdebugging.ftl",
+   isFromDevTools: true},
+  // Bug 1526672
+  {file: "resource://app/localization/en-US/browser/touchbar/touchbar.ftl",
+   platforms: ["linux", "win"]},
 ];
 
 whitelist = new Set(whitelist.filter(item =>
@@ -398,6 +408,7 @@ function parseCodeFile(fileUri) {
     for (let line of data.split("\n")) {
       let urls =
         line.match(/["'`]chrome:\/\/[a-zA-Z0-9-]+\/(content|skin|locale)\/[^"'` ]*["'`]/g);
+
       if (!urls) {
         urls = line.match(/["']resource:\/\/[^"']+["']/g);
         if (urls && isDevtools &&
@@ -406,6 +417,23 @@ function parseCodeFile(fileUri) {
           continue;
         }
       }
+
+      if (!urls) {
+        urls = line.match(/[a-z0-9_\/-]+\.ftl/i);
+        if (urls) {
+          urls = urls[0];
+          let grePrefix = Services.io.newURI("resource://gre/localization/en-US/");
+          let appPrefix = Services.io.newURI("resource://app/localization/en-US/");
+
+          let grePrefixUrl = Services.io.newURI(urls, null, grePrefix).spec;
+          let appPrefixUrl = Services.io.newURI(urls, null, appPrefix).spec;
+
+          addCodeReference(grePrefixUrl, fileUri);
+          addCodeReference(appPrefixUrl, fileUri);
+          continue;
+        }
+      }
+
       if (!urls) {
         // If there's no absolute chrome URL, look for relative ones in
         // src and href attributes.
@@ -591,7 +619,8 @@ add_task(async function checkAllTheFiles() {
   // This asynchronously produces a list of URLs (sadly, mostly sync on our
   // test infrastructure because it runs against jarfiles there, and
   // our zipreader APIs are all sync)
-  let uris = await generateURIsFromDirTree(appDir, [".css", ".manifest", ".jpg", ".png", ".gif", ".svg",  ".dtd", ".properties"].concat(kCodeExtensions));
+  let uris = await generateURIsFromDirTree(appDir, [".css", ".manifest", ".jpg", ".png", ".gif", ".svg",
+                                                    ".ftl", ".dtd", ".properties"].concat(kCodeExtensions));
 
   // Parse and remove all manifests from the list.
   // NOTE that this must be done before filtering out devtools paths
@@ -648,7 +677,11 @@ add_task(async function checkAllTheFiles() {
                           "resource://devtools-client-jsonview/",
                           "resource://devtools-client-shared/",
                           "resource://app/modules/devtools",
-                          "resource://gre/modules/devtools"];
+                          "resource://gre/modules/devtools",
+                          "resource://app/localization/en-US/startup/aboutDevTools.ftl",
+                          "resource://app/localization/en-US/devtools/",
+                          /* remove editmenu.ftl if it starts being used by non-devtools things */
+                          "resource://gre/localization/en-US/toolkit/main-window/editmenu.ftl"];
   let hasDevtoolsPrefix =
     uri => devtoolsPrefixes.some(prefix => uri.startsWith(prefix));
   let chromeFiles = [];

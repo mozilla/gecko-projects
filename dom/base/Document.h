@@ -437,7 +437,8 @@ class Document : public nsINode,
                  public nsIScriptObjectPrincipal,
                  public nsIApplicationCacheContainer,
                  public nsStubMutationObserver,
-                 public DispatcherTrait {
+                 public DispatcherTrait,
+                 public SupportsWeakPtr<Document> {
  protected:
   explicit Document(const char* aContentType);
   virtual ~Document();
@@ -449,6 +450,8 @@ class Document : public nsINode,
   typedef mozilla::dom::ExternalResourceMap::ExternalResourceLoad
       ExternalResourceLoad;
   typedef net::ReferrerPolicy ReferrerPolicyEnum;
+
+  MOZ_DECLARE_WEAKREFERENCE_TYPENAME(Document)
 
   NS_DECLARE_STATIC_IID_ACCESSOR(NS_IDOCUMENT_IID)
 
@@ -610,6 +613,8 @@ class Document : public nsINode,
   }
   nsresult CloneDocHelper(Document* clone) const;
 
+  Document* GetLatestStaticClone() const { return mLatestStaticClone; }
+
   /**
    * Signal that the document title may have changed
    * (see Document::GetTitle).
@@ -642,6 +647,13 @@ class Document : public nsINode,
    * https://html.spec.whatwg.org/multipage/webappapis.html#creation-url
    */
   nsIURI* GetOriginalURI() const { return mOriginalURI; }
+
+  /**
+   * Return the base domain of the document.  This has been computed using
+   * mozIThirdPartyUtil::GetBaseDomain() and can be used for third-party
+   * checks.  When the URI of the document changes, this value is recomputed.
+   */
+  nsCString GetBaseDomain() const { return mBaseDomain; }
 
   /**
    * Set the URI for the document.  This also sets the document's original URI,
@@ -3339,7 +3351,7 @@ class Document : public nsINode,
     }
   }
 
-  gfxUserFontSet* GetUserFontSet(bool aFlushUserFontSet = true);
+  gfxUserFontSet* GetUserFontSet();
   void FlushUserFontSet();
   void MarkUserFontSetDirty();
   mozilla::dom::FontFaceSet* GetFonts() { return mFontFaceSet; }
@@ -3820,6 +3832,9 @@ class Document : public nsINode,
   nsCOMPtr<nsIURI> mDocumentBaseURI;
   nsCOMPtr<nsIURI> mChromeXHRDocBaseURI;
 
+  // The base domain of the document for third-party checks.
+  nsCString mBaseDomain;
+
   // A lazily-constructed URL data for style system to resolve URL value.
   RefPtr<mozilla::URLExtraData> mCachedURLData;
 
@@ -4064,9 +4079,6 @@ class Document : public nsINode,
 
   // Is the current mFontFaceSet valid?
   bool mFontFaceSetDirty : 1;
-
-  // Has GetUserFontSet() been called?
-  bool mGetUserFontSetCalled : 1;
 
   // True if we have fired the DOMContentLoaded event, or don't plan to fire one
   // (e.g. we're not being parsed at all).
@@ -4318,6 +4330,11 @@ class Document : public nsINode,
 
   // Count of live static clones of this document.
   uint32_t mStaticCloneCount;
+
+  // If the document is currently printing (or in print preview) this will point
+  // to the current static clone of this document. This is weak since the clone
+  // also has a reference to this document.
+  WeakPtr<Document> mLatestStaticClone;
 
   // Array of nodes that have been blocked to prevent user tracking.
   // They most likely have had their nsIChannel canceled by the URL

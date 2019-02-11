@@ -1866,11 +1866,12 @@ bool BuildTextRunsScanner::ContinueTextRunAcrossFrames(nsTextFrame* aFrame1,
         //
         // 1. Any of margin/border/padding separating the two typographic
         //    character units in the inline axis is non-zero.
-        const nsStyleCoord& margin = ctx->StyleMargin()->mMargin.Get(aSide);
-        if (!margin.ConvertsToLength() || margin.ToLength() != 0) {
+        const auto& margin = ctx->StyleMargin()->mMargin.Get(aSide);
+        if (!margin.ConvertsToLength() ||
+            margin.AsLengthPercentage().ToLength() != 0) {
           return true;
         }
-        const nsStyleCoord& padding = ctx->StylePadding()->mPadding.Get(aSide);
+        const auto& padding = ctx->StylePadding()->mPadding.Get(aSide);
         if (!padding.ConvertsToLength() || padding.ToLength() != 0) {
           return true;
         }
@@ -4408,8 +4409,9 @@ class nsContinuingTextFrame final : public nsTextFrame {
                           InlinePrefISizeData* aData) final;
 
  protected:
-  explicit nsContinuingTextFrame(ComputedStyle* aStyle)
-      : nsTextFrame(aStyle, kClassID) {}
+  explicit nsContinuingTextFrame(ComputedStyle* aStyle,
+                                 nsPresContext* aPresContext)
+      : nsTextFrame(aStyle, aPresContext, kClassID) {}
 
   nsTextFrame* mPrevContinuation;
 };
@@ -4573,14 +4575,15 @@ static void VerifyNotDirty(nsFrameState state) {
 #endif
 
 nsIFrame* NS_NewTextFrame(nsIPresShell* aPresShell, ComputedStyle* aStyle) {
-  return new (aPresShell) nsTextFrame(aStyle);
+  return new (aPresShell) nsTextFrame(aStyle, aPresShell->GetPresContext());
 }
 
 NS_IMPL_FRAMEARENA_HELPERS(nsTextFrame)
 
 nsIFrame* NS_NewContinuingTextFrame(nsIPresShell* aPresShell,
                                     ComputedStyle* aStyle) {
-  return new (aPresShell) nsContinuingTextFrame(aStyle);
+  return new (aPresShell)
+      nsContinuingTextFrame(aStyle, aPresShell->GetPresContext());
 }
 
 NS_IMPL_FRAMEARENA_HELPERS(nsContinuingTextFrame)

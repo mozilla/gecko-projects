@@ -545,8 +545,9 @@ var Policies = {
               }
               url = Services.io.newFileURI(xpiFile).spec;
             }
-            AddonManager.getInstallForURL(url, "application/x-xpinstall", null, null, null, null, null,
-                                          {source: "enterprise-policy"}).then(install => {
+            AddonManager.getInstallForURL(url, {
+              telemetryInfo: {source: "enterprise-policy"},
+            }).then(install => {
               if (install.addon && install.addon.appDisabled) {
                 log.error(`Incompatible add-on - ${location}`);
                 install.cancel();
@@ -584,6 +585,14 @@ var Policies = {
         for (let ID of param.Locked) {
           manager.disallowFeature(`modify-extension:${ID}`);
         }
+      }
+    },
+  },
+
+  "ExtensionUpdate": {
+    onBeforeAddons(manager, param) {
+      if (!param) {
+        setAndLockPref("extensions.update.enabled", param);
       }
     },
   },
@@ -673,8 +682,16 @@ var Policies = {
         setAndLockPref("xpinstall.enabled", param.Default);
         if (!param.Default) {
           blockAboutPage(manager, "about:debugging");
+          manager.disallowFeature("xpinstall");
         }
       }
+    },
+  },
+
+  "NetworkPrediction": {
+    onBeforeAddons(manager, param) {
+      setAndLockPref("network.dns.disablePrefetch", !param);
+      setAndLockPref("network.dns.disablePrefetchFromHTTPS", !param);
     },
   },
 
@@ -806,17 +823,17 @@ var Policies = {
       }
     },
     onAllWindowsRestored(manager, param) {
-      Services.search.init(() => {
+      Services.search.init().then(async () => {
         if (param.Remove) {
           // Only rerun if the list of engine names has changed.
-          runOncePerModification("removeSearchEngines",
-                                 JSON.stringify(param.Remove),
-                                 () => {
+          await runOncePerModification("removeSearchEngines",
+                                       JSON.stringify(param.Remove),
+                                       async function() {
             for (let engineName of param.Remove) {
               let engine = Services.search.getEngineByName(engineName);
               if (engine) {
                 try {
-                  Services.search.removeEngine(engine);
+                  await Services.search.removeEngine(engine);
                 } catch (ex) {
                   log.error("Unable to remove the search engine", ex);
                 }
@@ -827,9 +844,9 @@ var Policies = {
         if (param.Add) {
           // Only rerun if the list of engine names has changed.
           let engineNameList = param.Add.map(engine => engine.Name);
-          runOncePerModification("addSearchEngines",
-                                 JSON.stringify(engineNameList),
-                                 () => {
+          await runOncePerModification("addSearchEngines",
+                                       JSON.stringify(engineNameList),
+                                       async function() {
             for (let newEngine of param.Add) {
               let newEngineParameters = {
                 template:    newEngine.URLTemplate,
@@ -842,8 +859,8 @@ var Policies = {
                 queryCharset: "UTF-8",
               };
               try {
-                Services.search.addEngineWithDetails(newEngine.Name,
-                                                     newEngineParameters);
+                await Services.search.addEngineWithDetails(newEngine.Name,
+                                                           newEngineParameters);
               } catch (ex) {
                 log.error("Unable to add search engine", ex);
               }
@@ -851,7 +868,7 @@ var Policies = {
           });
         }
         if (param.Default) {
-          runOncePerModification("setDefaultSearchEngine", param.Default, () => {
+          await runOncePerModification("setDefaultSearchEngine", param.Default, async () => {
             let defaultEngine;
             try {
               defaultEngine = Services.search.getEngineByName(param.Default);
@@ -865,7 +882,7 @@ var Policies = {
             }
             if (defaultEngine) {
               try {
-                Services.search.defaultEngine = defaultEngine;
+                await Services.search.setDefault(defaultEngine);
               } catch (ex) {
                 log.error("Unable to set the default search engine", ex);
               }

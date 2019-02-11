@@ -211,6 +211,22 @@ void LIRGenerator::visitNewTypedArrayFromArray(MNewTypedArrayFromArray* ins) {
   assignSafepoint(lir, ins);
 }
 
+void LIRGenerator::visitNewTypedArrayFromArrayBuffer(
+    MNewTypedArrayFromArrayBuffer* ins) {
+  MDefinition* arrayBuffer = ins->arrayBuffer();
+  MDefinition* byteOffset = ins->byteOffset();
+  MDefinition* length = ins->length();
+  MOZ_ASSERT(arrayBuffer->type() == MIRType::Object);
+  MOZ_ASSERT(byteOffset->type() == MIRType::Value);
+  MOZ_ASSERT(length->type() == MIRType::Value);
+
+  auto* lir = new (alloc()) LNewTypedArrayFromArrayBuffer(
+      useRegisterAtStart(arrayBuffer), useBoxAtStart(byteOffset),
+      useBoxAtStart(length));
+  defineReturn(lir, ins);
+  assignSafepoint(lir, ins);
+}
+
 void LIRGenerator::visitNewObject(MNewObject* ins) {
   LNewObject* lir = new (alloc()) LNewObject(temp());
   define(lir, ins);
@@ -589,6 +605,12 @@ void LIRGenerator::visitTest(MTest* test) {
   // String is converted to length of string in the type analysis phase (see
   // TestPolicy).
   MOZ_ASSERT(opd->type() != MIRType::String);
+
+#ifdef ENABLE_BIGINT
+  // BigInt is boxed in type analysis.
+  MOZ_ASSERT(opd->type() != MIRType::BigInt,
+             "BigInt should be boxed by TestPolicy");
+#endif
 
   // Testing a constant.
   if (MConstant* constant = opd->maybeConstantValue()) {
@@ -2090,10 +2112,13 @@ void LIRGenerator::visitToNumberInt32(MToNumberInt32* convert) {
 
     case MIRType::String:
     case MIRType::Symbol:
+#ifdef ENABLE_BIGINT
+    case MIRType::BigInt:
+#endif
     case MIRType::Object:
     case MIRType::Undefined:
-      // Objects might be effectful. Symbols throw. Undefined coerces to NaN,
-      // not int32.
+      // Objects might be effectful. Symbols and BigInts throw. Undefined
+      // coerces to NaN, not int32.
       MOZ_CRASH("ToInt32 invalid input type");
 
     default:
@@ -2876,6 +2901,10 @@ void LIRGenerator::visitNot(MNot* ins) {
   // String is converted to length of string in the type analysis phase (see
   // TestPolicy).
   MOZ_ASSERT(op->type() != MIRType::String);
+#ifdef ENABLE_BIGINT
+  MOZ_ASSERT(op->type() != MIRType::BigInt,
+             "BigInt should be boxed by TestPolicy");
+#endif
 
   // - boolean: x xor 1
   // - int32: LCompare(x, 0)
@@ -4671,6 +4700,11 @@ void LIRGenerator::visitConstant(MConstant* ins) {
     case MIRType::Symbol:
       define(new (alloc()) LPointer(ins->toSymbol()), ins);
       break;
+#ifdef ENABLE_BIGINT
+    case MIRType::BigInt:
+      define(new (alloc()) LPointer(ins->toBigInt()), ins);
+      break;
+#endif
     case MIRType::Object:
       define(new (alloc()) LPointer(&ins->toObject()), ins);
       break;

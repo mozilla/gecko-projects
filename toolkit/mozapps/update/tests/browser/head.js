@@ -1,41 +1,39 @@
-var {FileUtils} = ChromeUtils.import("resource://gre/modules/FileUtils.jsm");
-var {XPCOMUtils} = ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
+/* Any copyright is dedicated to the Public Domain.
+ * http://creativecommons.org/publicdomain/zero/1.0/ */
+
+"use strict";
+
+const {AppConstants} = ChromeUtils.import("resource://gre/modules/AppConstants.jsm");
 
 ChromeUtils.defineModuleGetter(this, "AppMenuNotifications",
                                "resource://gre/modules/AppMenuNotifications.jsm");
 ChromeUtils.defineModuleGetter(this, "UpdateListener",
                                "resource://gre/modules/UpdateListener.jsm");
 
-const IS_MACOSX = ("nsILocalFileMac" in Ci);
-const IS_WIN = ("@mozilla.org/windows-registry-key;1" in Cc);
-
-const BIN_SUFFIX = (IS_WIN ? ".exe" : "");
-const FILE_UPDATER_BIN = "updater" + (IS_MACOSX ? ".app" : BIN_SUFFIX);
+const BIN_SUFFIX = (AppConstants.platform == "win" ? ".exe" : "");
+const FILE_UPDATER_BIN = "updater" + (AppConstants.platform == "macosx" ? ".app" : BIN_SUFFIX);
 const FILE_UPDATER_BIN_BAK = FILE_UPDATER_BIN + ".bak";
-
-const PREF_APP_UPDATE_INTERVAL = "app.update.interval";
-const PREF_APP_UPDATE_LASTUPDATETIME = "app.update.lastUpdateTime.background-update-timer";
-
-const DATA_URI_SPEC =  "chrome://mochitests/content/browser/toolkit/mozapps/update/tests/browser/";
-
-var DEBUG_AUS_TEST = true;
 
 const LOG_FUNCTION = info;
 
 const MAX_UPDATE_COPY_ATTEMPTS = 10;
 
+const DATA_URI_SPEC = "chrome://mochitests/content/browser/toolkit/mozapps/update/tests/browser/";
 /* import-globals-from testConstants.js */
 Services.scriptloader.loadSubScript(DATA_URI_SPEC + "testConstants.js", this);
-/* import-globals-from ../data/shared.js */
-Services.scriptloader.loadSubScript(DATA_URI_SPEC + "shared.js", this);
 
 var gURLData = URL_HOST + "/" + REL_PATH_DATA;
 const URL_MANUAL_UPDATE = gURLData + "downloadPage.html";
 
-const gEnv = Cc["@mozilla.org/process/environment;1"].
-             getService(Ci.nsIEnvironment);
+/* import-globals-from ../data/shared.js */
+Services.scriptloader.loadSubScript(DATA_URI_SPEC + "shared.js", this);
 
 let gOriginalUpdateAutoValue = null;
+
+// Set to true to log additional information for debugging. To log additional
+// information for individual tests set gDebugTest to false here and to true in
+// the test's onload function.
+gDebugTest = true;
 
 /**
  * Creates the continue file used to signal that update staging or the mock http
@@ -70,7 +68,7 @@ async function continueFileHandler(leafName) {
     // total time to wait with the default interval of 100 is approximately 10
     // seconds. The test updater uses the same values.
     retries = 100;
-    continueFile = getUpdatesPatchDir();
+    continueFile = getUpdateDirFile(DIR_PATCH);
     continueFile.append(leafName);
   } else {
     debugDump("creating " + leafName + " file for slow http server requests");
@@ -102,12 +100,10 @@ async function continueFileHandler(leafName) {
  * @throws If the function is called on a platform other than Windows.
  */
 function lockWriteTestFile() {
-  if (!IS_WIN) {
+  if (AppConstants.platform != "win") {
     throw new Error("Windows only test function called");
   }
-  let file = getUpdatesRootDir();
-  file.append(FILE_UPDATE_TEST);
-  file.QueryInterface(Ci.nsILocalFileWin);
+  let file = getUpdateDirFile(FILE_UPDATE_TEST).QueryInterface(Ci.nsILocalFileWin);
   // Remove the file if it exists just in case.
   if (file.exists()) {
     file.fileAttributesWin |= file.WFA_READWRITE;
@@ -125,7 +121,7 @@ function lockWriteTestFile() {
 }
 
 function setOtherInstanceHandlingUpdates() {
-  if (!IS_WIN) {
+  if (AppConstants.platform != "win") {
     throw new Error("Windows only test function called");
   }
   gAUS.observe(null, "test-close-handle-update-mutex", "");
@@ -155,7 +151,7 @@ function getVersionParams(aAppVersion) {
  */
 function cleanUpUpdates() {
   reloadUpdateManagerData(true);
-  removeUpdateDirsAndFiles();
+  removeUpdateFiles(true);
 }
 
 /**
@@ -187,7 +183,7 @@ async function setAppUpdateAutoEnabledHelper(enabled) {
 add_task(async function setDefaults() {
   await SpecialPowers.pushPrefEnv({
     set: [
-      [PREF_APP_UPDATE_LOG, DEBUG_AUS_TEST],
+      [PREF_APP_UPDATE_LOG, gDebugTest],
       // See bug 1505790 - uses a very large value to prevent the sync code
       // from running since it has nothing to do with these tests.
       ["services.sync.autoconnectDelay", 600000],
@@ -223,7 +219,7 @@ function runUpdateTest(updateParams, checkAttempts, steps) {
 
     gEnv.set("MOZ_TEST_SKIP_UPDATE_STAGE", "1");
     setUpdateTimerPrefs();
-    removeUpdateDirsAndFiles();
+    removeUpdateFiles(true);
     await SpecialPowers.pushPrefEnv({
       set: [
         [PREF_APP_UPDATE_DOWNLOADPROMPTATTEMPTS, 0],
@@ -279,7 +275,7 @@ function runUpdateProcessingTest(updates, steps) {
 
     gEnv.set("MOZ_TEST_SKIP_UPDATE_STAGE", "1");
     setUpdateTimerPrefs();
-    removeUpdateDirsAndFiles();
+    removeUpdateFiles(true);
     await SpecialPowers.pushPrefEnv({
       set: [
         [PREF_APP_UPDATE_DOWNLOADPROMPTATTEMPTS, 0],
@@ -372,7 +368,7 @@ function waitForEvent(topic, status = null) {
 function getNotificationButton(win, notificationId, button) {
   let notification = win.document.getElementById(`appMenu-${notificationId}-notification`);
   is(notification.hidden, false, `${notificationId} notification is showing`);
-  return win.document.getAnonymousElementByAttribute(notification, "anonid", button);
+  return notification[button];
 }
 
 /**
@@ -427,10 +423,23 @@ function moveRealUpdater() {
   return (async function() {
     try {
       // Move away the real updater
-      let baseAppDir = getAppBaseDir();
-      let updater = baseAppDir.clone();
+      let greBinDir = getGREBinDir();
+      let updater = greBinDir.clone();
       updater.append(FILE_UPDATER_BIN);
-      updater.moveTo(baseAppDir, FILE_UPDATER_BIN_BAK);
+      updater.moveTo(greBinDir, FILE_UPDATER_BIN_BAK);
+
+      let greDir = getGREDir();
+      let updateSettingsIni = greDir.clone();
+      updateSettingsIni.append(FILE_UPDATE_SETTINGS_INI);
+      if (updateSettingsIni.exists()) {
+        updateSettingsIni.moveTo(greDir, FILE_UPDATE_SETTINGS_INI_BAK);
+      }
+
+      let precomplete = greDir.clone();
+      precomplete.append(FILE_PRECOMPLETE);
+      if (precomplete.exists()) {
+        precomplete.moveTo(greDir, FILE_PRECOMPLETE_BAK);
+      }
     } catch (e) {
       logTestInfo("Attempt to move the real updater out of the way failed... " +
                   "will try again, Exception: " + e);
@@ -451,7 +460,7 @@ function copyTestUpdater(attempt = 0) {
   return (async function() {
     try {
       // Copy the test updater
-      let baseAppDir = getAppBaseDir();
+      let greBinDir = getGREBinDir();
       let testUpdaterDir = Services.dirsvc.get("CurWorkD", Ci.nsIFile);
       let relPath = REL_PATH_DATA;
       let pathParts = relPath.split("/");
@@ -461,14 +470,22 @@ function copyTestUpdater(attempt = 0) {
 
       let testUpdater = testUpdaterDir.clone();
       testUpdater.append(FILE_UPDATER_BIN);
+      testUpdater.copyToFollowingLinks(greBinDir, FILE_UPDATER_BIN);
 
-      testUpdater.copyToFollowingLinks(baseAppDir, FILE_UPDATER_BIN);
+      let greDir = getGREDir();
+      let updateSettingsIni = greDir.clone();
+      updateSettingsIni.append(FILE_UPDATE_SETTINGS_INI);
+      writeFile(updateSettingsIni, UPDATE_SETTINGS_CONTENTS);
+
+      let precomplete = greDir.clone();
+      precomplete.append(FILE_PRECOMPLETE);
+      writeFile(precomplete, PRECOMPLETE_CONTENTS);
     } catch (e) {
       if (attempt < MAX_UPDATE_COPY_ATTEMPTS) {
         logTestInfo("Attempt to copy the test updater failed... " +
                     "will try again, Exception: " + e);
         await TestUtils.waitForTick();
-        await copyTestUpdater(attempt + 1);
+        await copyTestUpdater(attempt++);
       }
     }
   })();
@@ -480,16 +497,43 @@ function copyTestUpdater(attempt = 0) {
  * failed to restore the updater when the test has finished.
  */
 function restoreUpdaterBackup() {
-  let baseAppDir = getAppBaseDir();
-  let updater = baseAppDir.clone();
-  let updaterBackup = baseAppDir.clone();
+  let greBinDir = getGREBinDir();
+  let updater = greBinDir.clone();
+  let updaterBackup = greBinDir.clone();
   updater.append(FILE_UPDATER_BIN);
   updaterBackup.append(FILE_UPDATER_BIN_BAK);
   if (updaterBackup.exists()) {
     if (updater.exists()) {
       updater.remove(true);
     }
-    updaterBackup.moveTo(baseAppDir, FILE_UPDATER_BIN);
+    updaterBackup.moveTo(greBinDir, FILE_UPDATER_BIN);
+  }
+
+  let greDir = getGREDir();
+  let updateSettingsIniBackup = greDir.clone();
+  updateSettingsIniBackup.append(FILE_UPDATE_SETTINGS_INI_BAK);
+  if (updateSettingsIniBackup.exists()) {
+    let updateSettingsIni = greDir.clone();
+    updateSettingsIni.append(FILE_UPDATE_SETTINGS_INI);
+    if (updateSettingsIni.exists()) {
+      updateSettingsIni.remove(false);
+    }
+    updateSettingsIniBackup.moveTo(greDir, FILE_UPDATE_SETTINGS_INI);
+  }
+
+  let precomplete = greDir.clone();
+  let precompleteBackup = greDir.clone();
+  precomplete.append(FILE_PRECOMPLETE);
+  precompleteBackup.append(FILE_PRECOMPLETE_BAK);
+  if (precompleteBackup.exists()) {
+    if (precomplete.exists()) {
+      precomplete.remove(false);
+    }
+    precompleteBackup.moveTo(greDir, FILE_PRECOMPLETE);
+  } else if (precomplete.exists()) {
+    if (readFile(precomplete) == PRECOMPLETE_CONTENTS) {
+      precomplete.remove(false);
+    }
   }
 }
 
@@ -635,7 +679,7 @@ function runAboutDialogUpdateTest(updateParams, backgroundUpdate, steps) {
 
     gEnv.set("MOZ_TEST_SLOW_SKIP_UPDATE_STAGE", "1");
     setUpdateTimerPrefs();
-    removeUpdateDirsAndFiles();
+    removeUpdateFiles(true);
 
     await setupTestUpdater();
     registerCleanupFunction(async () => {
@@ -774,7 +818,7 @@ function runAboutPrefsUpdateTest(updateParams, backgroundUpdate, steps) {
 
     gEnv.set("MOZ_TEST_SLOW_SKIP_UPDATE_STAGE", "1");
     setUpdateTimerPrefs();
-    removeUpdateDirsAndFiles();
+    removeUpdateFiles(true);
 
     await setupTestUpdater();
     registerCleanupFunction(async () => {

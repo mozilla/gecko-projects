@@ -154,6 +154,12 @@ bool Instance::callImport(JSContext* cx, uint32_t funcImportIndex,
     return false;
   }
 
+#ifdef WASM_CODEGEN_DEBUG
+  if (!JitOptions.enableWasmJitEntry) {
+    return true;
+  }
+#endif
+
   // The import may already have become optimized.
   for (auto t : code().tiers()) {
     void* jitExitCode = codeBase(t) + fi.jitExitCodeOffset();
@@ -427,15 +433,51 @@ Instance::memCopy(Instance* instance, uint32_t dstByteOffset,
     }
   } else {
     // Here, we know that |len - 1| cannot underflow.
-    CheckedU32 lenMinus1 = CheckedU32(len - 1);
-    CheckedU32 highestDstOffset = CheckedU32(dstByteOffset) + lenMinus1;
-    CheckedU32 highestSrcOffset = CheckedU32(srcByteOffset) + lenMinus1;
-    if (highestDstOffset.isValid() && highestSrcOffset.isValid() &&
-        highestDstOffset.value() < memLen &&
-        highestSrcOffset.value() < memLen) {
-      ArrayBufferObjectMaybeShared& arrBuf = mem->buffer();
-      uint8_t* rawBuf = arrBuf.dataPointerEither().unwrap();
-      memmove(rawBuf + dstByteOffset, rawBuf + srcByteOffset, size_t(len));
+    bool mustTrap = false;
+
+    // As we're supposed to write data until we trap we have to deal with
+    // arithmetic overflow in the limit calculation.
+    uint64_t highestDstOffset = uint64_t(dstByteOffset) + uint64_t(len - 1);
+    uint64_t highestSrcOffset = uint64_t(srcByteOffset) + uint64_t(len - 1);
+
+    bool copyDown =
+      srcByteOffset < dstByteOffset && dstByteOffset < highestSrcOffset;
+
+    if (highestDstOffset >= memLen || highestSrcOffset >= memLen) {
+      // We would read past the end of the source or write past the end of the
+      // target.
+      if (copyDown) {
+        // We would trap on the first read or write, so don't read or write
+        // anything.
+        len = 0;
+      } else {
+        // Compute what we have space for in target and what's available in the
+        // source and pick the lowest value as the new len.
+        uint64_t srcAvail = memLen < srcByteOffset ? 0 : memLen - srcByteOffset;
+        uint64_t dstAvail = memLen < dstByteOffset ? 0 : memLen - dstByteOffset;
+        MOZ_ASSERT(len > Min(srcAvail, dstAvail));
+        len = uint32_t(Min(srcAvail, dstAvail));
+      }
+      mustTrap = true;
+    }
+
+    if (len > 0) {
+      // The required write direction is indicated by `copyDown`, but apart from
+      // the trap that may happen without writing anything, the direction is not
+      // currently observable as there are no fences nor any read/write protect
+      // operation.  So memmove is good enough to handle overlaps.
+      SharedMem<uint8_t*> dataPtr = mem->buffer().dataPointerEither();
+      if (mem->isShared()) {
+        AtomicOperations::memmoveSafeWhenRacy(dataPtr + dstByteOffset,
+                                              dataPtr + srcByteOffset,
+                                              size_t(len));
+      } else {
+        uint8_t* rawBuf = dataPtr.unwrap(/*Unshared*/);
+        memmove(rawBuf + dstByteOffset, rawBuf + srcByteOffset, size_t(len));
+      }
+    }
+
+    if (!mustTrap) {
       return 0;
     }
   }
@@ -478,11 +520,35 @@ Instance::memFill(Instance* instance, uint32_t byteOffset, uint32_t value,
     }
   } else {
     // Here, we know that |len - 1| cannot underflow.
-    CheckedU32 highestOffset = CheckedU32(byteOffset) + CheckedU32(len - 1);
-    if (highestOffset.isValid() && highestOffset.value() < memLen) {
-      ArrayBufferObjectMaybeShared& arrBuf = mem->buffer();
-      uint8_t* rawBuf = arrBuf.dataPointerEither().unwrap();
-      memset(rawBuf + byteOffset, int(value), size_t(len));
+
+    bool mustTrap = false;
+
+    // We must write data until we trap, so we have to deal with arithmetic
+    // overflow in the limit calculation.
+    uint64_t highestOffset = uint64_t(byteOffset) + uint64_t(len - 1);
+    if (highestOffset >= memLen) {
+      // We would write past the end.  Compute what we have space for in the
+      // target and make that the new len.
+      uint64_t avail = memLen < byteOffset ? 0 : memLen - byteOffset;
+      MOZ_ASSERT(len > avail);
+      len = uint32_t(avail);
+      mustTrap = true;
+    }
+
+    if (len > 0) {
+      // The required write direction is upward, but that is not currently
+      // observable as there are no fences nor any read/write protect operation.
+      SharedMem<uint8_t*> dataPtr = mem->buffer().dataPointerEither();
+      if (mem->isShared()) {
+        AtomicOperations::memsetSafeWhenRacy(dataPtr + byteOffset, int(value),
+                                             size_t(len));
+      } else {
+        uint8_t* rawBuf = dataPtr.unwrap(/*Unshared*/);
+        memset(rawBuf + byteOffset, int(value), size_t(len));
+      }
+    }
+
+    if (!mustTrap) {
       return 0;
     }
   }
@@ -526,16 +592,42 @@ Instance::memInit(Instance* instance, uint32_t dstOffset, uint32_t srcOffset,
     }
   } else {
     // Here, we know that |len - 1| cannot underflow.
-    CheckedU32 lenMinus1 = CheckedU32(len - 1);
-    CheckedU32 highestDstOffset = CheckedU32(dstOffset) + lenMinus1;
-    CheckedU32 highestSrcOffset = CheckedU32(srcOffset) + lenMinus1;
-    if (highestDstOffset.isValid() && highestSrcOffset.isValid() &&
-        highestDstOffset.value() < memLen &&
-        highestSrcOffset.value() < segLen) {
-      ArrayBufferObjectMaybeShared& arrBuf = mem->buffer();
-      uint8_t* memoryBase = arrBuf.dataPointerEither().unwrap();
-      memcpy(memoryBase + dstOffset, (const char*)seg.bytes.begin() + srcOffset,
-             len);
+
+    bool mustTrap = false;
+
+    // As we're supposed to write data until we trap we have to deal with
+    // arithmetic overflow in the limit calculation.
+    uint64_t highestDstOffset = uint64_t(dstOffset) + uint64_t(len - 1);
+    uint64_t highestSrcOffset = uint64_t(srcOffset) + uint64_t(len - 1);
+
+    if (highestDstOffset >= memLen || highestSrcOffset >= segLen) {
+      // We would read past the end of the source or write past the end of the
+      // target.  Compute what we have space for in target and what's available
+      // in the source and pick the lowest value as the new len.
+      uint64_t srcAvail = segLen < srcOffset ? 0 : segLen - srcOffset;
+      uint64_t dstAvail = memLen < dstOffset ? 0 : memLen - dstOffset;
+      MOZ_ASSERT(len > Min(srcAvail, dstAvail));
+      len = uint32_t(Min(srcAvail, dstAvail));
+      mustTrap = true;
+    }
+
+    if (len > 0) {
+      // The required read/write direction is upward, but that is not currently
+      // observable as there are no fences nor any read/write protect operation.
+      SharedMem<uint8_t*> dataPtr = mem->buffer().dataPointerEither();
+      if (mem->isShared()) {
+        AtomicOperations::memcpySafeWhenRacy(
+          dataPtr + dstOffset,
+          (uint8_t*)seg.bytes.begin() + srcOffset,
+          len);
+      } else {
+        uint8_t* rawBuf = dataPtr.unwrap(/*Unshared*/);
+        memcpy(rawBuf + dstOffset, (const char*)seg.bytes.begin() + srcOffset,
+               len);
+      }
+    }
+
+    if (!mustTrap) {
       return 0;
     }
   }
@@ -563,14 +655,40 @@ Instance::tableCopy(Instance* instance, uint32_t dstOffset, uint32_t srcOffset,
     }
   } else {
     // Here, we know that |len - 1| cannot underflow.
-    CheckedU32 lenMinus1 = CheckedU32(len - 1);
-    CheckedU32 highestDstOffset = CheckedU32(dstOffset) + lenMinus1;
-    CheckedU32 highestSrcOffset = CheckedU32(srcOffset) + lenMinus1;
-    if (highestDstOffset.isValid() && highestSrcOffset.isValid() &&
-        highestDstOffset.value() < dstTableLen &&
-        highestSrcOffset.value() < srcTableLen) {
-      // Actually do the copy, taking care to handle overlapping cases
-      // correctly.
+    bool mustTrap = false;
+
+    // As we're supposed to write data until we trap we have to deal with
+    // arithmetic overflow in the limit calculation.
+    uint64_t highestDstOffset = uint64_t(dstOffset) + (len - 1);
+    uint64_t highestSrcOffset = uint64_t(srcOffset) + (len - 1);
+
+    bool copyDown =
+      srcOffset < dstOffset && dstOffset < highestSrcOffset;
+
+    if (highestDstOffset >= dstTableLen || highestSrcOffset >= srcTableLen) {
+      // We would read past the end of the source or write past the end of the
+      // target.
+      if (copyDown) {
+        // We would trap on the first read or write, so don't read or write
+        // anything.
+        len = 0;
+      } else {
+        // Compute what we have space for in target and what's available in the
+        // source and pick the lowest value as the new len.
+        uint64_t srcAvail = srcTableLen < srcOffset ? 0 : srcTableLen - srcOffset;
+        uint64_t dstAvail = dstTableLen < dstOffset ? 0 : dstTableLen - dstOffset;
+        MOZ_ASSERT(len > Min(srcAvail, dstAvail));
+        len = uint32_t(Min(srcAvail, dstAvail));
+      }
+      mustTrap = true;
+    }
+
+    if (len > 0) {
+      // The required write direction is indicated by `copyDown`, but apart from
+      // the trap that may happen without writing anything, the direction is not
+      // currently observable as there are no fences nor any read/write protect
+      // operation.  So Table::copy is good enough, so long as we handle
+      // overlaps.
       if (&srcTable == &dstTable && dstOffset > srcOffset) {
         for (uint32_t i = len; i > 0; i--) {
           dstTable->copy(*srcTable, dstOffset + (i - 1), srcOffset + (i - 1));
@@ -582,7 +700,9 @@ Instance::tableCopy(Instance* instance, uint32_t dstOffset, uint32_t srcOffset,
           dstTable->copy(*srcTable, dstOffset + i, srcOffset + i);
         }
       }
+    }
 
+    if (!mustTrap) {
       return 0;
     }
   }
@@ -671,7 +791,10 @@ Instance::tableInit(Instance* instance, uint32_t dstOffset, uint32_t srcOffset,
 
   const ElemSegment& seg = *instance->passiveElemSegments_[segIndex];
   MOZ_RELEASE_ASSERT(!seg.active());
+  const uint32_t segLen = seg.length();
+
   const Table& table = *instance->tables()[tableIndex];
+  const uint32_t tableLen = table.length();
 
   // Element segments cannot currently contain arbitrary values, and anyref
   // tables cannot be initialized from segments.
@@ -685,18 +808,34 @@ Instance::tableInit(Instance* instance, uint32_t dstOffset, uint32_t srcOffset,
 
   if (len == 0) {
     // Even though the length is zero, we must check for valid offsets.
-    if (dstOffset < table.length() && srcOffset < seg.length()) {
+    if (dstOffset < tableLen && srcOffset < segLen) {
       return 0;
     }
   } else {
     // Here, we know that |len - 1| cannot underflow.
-    CheckedU32 lenMinus1 = CheckedU32(len - 1);
-    CheckedU32 highestDstOffset = CheckedU32(dstOffset) + lenMinus1;
-    CheckedU32 highestSrcOffset = CheckedU32(srcOffset) + lenMinus1;
-    if (highestDstOffset.isValid() && highestSrcOffset.isValid() &&
-        highestDstOffset.value() < table.length() &&
-        highestSrcOffset.value() < seg.length()) {
+    bool mustTrap = false;
+
+    // As we're supposed to write data until we trap we have to deal with
+    // arithmetic overflow in the limit calculation.
+    uint64_t highestDstOffset = uint64_t(dstOffset) + uint64_t(len - 1);
+    uint64_t highestSrcOffset = uint64_t(srcOffset) + uint64_t(len - 1);
+
+    if (highestDstOffset >= tableLen || highestSrcOffset >= segLen) {
+      // We would read past the end of the source or write past the end of the
+      // target.  Compute what we have space for in target and what's available
+      // in the source and pick the lowest value as the new len.
+      uint64_t srcAvail = segLen < srcOffset ? 0 : segLen - srcOffset;
+      uint64_t dstAvail = tableLen < dstOffset ? 0 : tableLen - dstOffset;
+      MOZ_ASSERT(len > Min(srcAvail, dstAvail));
+      len = uint32_t(Min(srcAvail, dstAvail));
+      mustTrap = true;
+    }
+
+    if (len > 0) {
       instance->initElems(tableIndex, seg, dstOffset, srcOffset, len);
+    }
+
+    if (!mustTrap) {
       return 0;
     }
   }
@@ -1342,35 +1481,44 @@ bool Instance::callExport(JSContext* cx, uint32_t funcIndex, CallArgs args) {
     return false;
   }
 
+  DebugCodegen(DebugChannel::Function, "wasm-function[%d]; arguments ", funcIndex);
   RootedValue v(cx);
   for (unsigned i = 0; i < func.funcType().args().length(); ++i) {
     v = i < args.length() ? args[i] : UndefinedValue();
     switch (func.funcType().arg(i).code()) {
       case ValType::I32:
         if (!ToInt32(cx, v, (int32_t*)&exportArgs[i])) {
+          DebugCodegen(DebugChannel::Function, "call to ToInt32 failed!\n");
           return false;
         }
+        DebugCodegen(DebugChannel::Function, "i32(%d) ", *(int32_t*)&exportArgs[i]);
         break;
       case ValType::I64:
         MOZ_CRASH("unexpected i64 flowing into callExport");
       case ValType::F32:
         if (!RoundFloat32(cx, v, (float*)&exportArgs[i])) {
+          DebugCodegen(DebugChannel::Function, "call to RoundFloat32 failed!\n");
           return false;
         }
+        DebugCodegen(DebugChannel::Function, "f32(%f) ", *(float*)&exportArgs[i]);
         break;
       case ValType::F64:
         if (!ToNumber(cx, v, (double*)&exportArgs[i])) {
+          DebugCodegen(DebugChannel::Function, "call to ToNumber failed!\n");
           return false;
         }
+        DebugCodegen(DebugChannel::Function, "f64(%lf) ", *(double*)&exportArgs[i]);
         break;
       case ValType::Ref:
         MOZ_CRASH("temporarily unsupported Ref type in callExport");
       case ValType::AnyRef: {
         RootedAnyRef ar(cx, AnyRef::null());
         if (!BoxAnyRef(cx, v, &ar)) {
+          DebugCodegen(DebugChannel::Function, "call to BoxAnyRef failed!\n");
           return false;
         }
         *(void**)&exportArgs[i] = ar.get().forCompiledCode();
+        DebugCodegen(DebugChannel::Function, "ptr(%p) ", *(void**)&exportArgs[i]);
         break;
       }
       case ValType::NullRef: {
@@ -1378,6 +1526,8 @@ bool Instance::callExport(JSContext* cx, uint32_t funcIndex, CallArgs args) {
       }
     }
   }
+
+  DebugCodegen(DebugChannel::Function, "\n");
 
   {
     JitActivation activation(cx);
@@ -1411,31 +1561,38 @@ bool Instance::callExport(JSContext* cx, uint32_t funcIndex, CallArgs args) {
 
   void* retAddr = &exportArgs[0];
 
+  DebugCodegen(DebugChannel::Function, "wasm-function[%d]; returns ", funcIndex);
   switch (func.funcType().ret().code()) {
     case ExprType::Void:
       args.rval().set(UndefinedValue());
+      DebugCodegen(DebugChannel::Function, "void");
       break;
     case ExprType::I32:
       args.rval().set(Int32Value(*(int32_t*)retAddr));
+      DebugCodegen(DebugChannel::Function, "i32(%d)", *(int32_t*)retAddr);
       break;
     case ExprType::I64:
       MOZ_CRASH("unexpected i64 flowing from callExport");
     case ExprType::F32:
       args.rval().set(NumberValue(*(float*)retAddr));
+      DebugCodegen(DebugChannel::Function, "f32(%f)", *(float*)retAddr);
       break;
     case ExprType::F64:
       args.rval().set(NumberValue(*(double*)retAddr));
+      DebugCodegen(DebugChannel::Function, "f64(%lf)", *(double*)retAddr);
       break;
     case ExprType::Ref:
       MOZ_CRASH("temporarily unsupported Ref type in callExport");
     case ExprType::AnyRef:
       args.rval().set(UnboxAnyRef(AnyRef::fromCompiledCode(*(void**)retAddr)));
+      DebugCodegen(DebugChannel::Function, "ptr(%p)", *(void**)retAddr);
       break;
     case ExprType::NullRef:
       MOZ_CRASH("NullRef not expressible");
     case ExprType::Limit:
       MOZ_CRASH("Limit");
   }
+  DebugCodegen(DebugChannel::Function, "\n");
 
   return true;
 }

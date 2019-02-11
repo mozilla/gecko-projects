@@ -52,10 +52,9 @@ var PREF_EM_CHECK_COMPATIBILITY = MOZ_COMPATIBILITY_NIGHTLY ?
 
 const VALID_TYPES_REGEXP = /^[\w\-]+$/;
 
-const WEBAPI_INSTALL_HOSTS = ["addons.mozilla.org", "testpilot.firefox.com"];
+const WEBAPI_INSTALL_HOSTS = ["addons.mozilla.org"];
 const WEBAPI_TEST_INSTALL_HOSTS = [
   "addons.allizom.org", "addons-dev.allizom.org",
-  "testpilot.stage.mozaws.net", "testpilot.dev.mozaws.net",
   "example.com",
 ];
 
@@ -1571,26 +1570,26 @@ var AddonManagerInternal = {
    * Asynchronously gets an AddonInstall for a URL.
    *
    * @param  aUrl
-   *         The string represenation of the URL the add-on is located at
-   * @param  aMimetype
-   *         The mimetype of the add-on
-   * @param  aHash
+   *         The string represenation of the URL where the add-on is located
+   * @param  {Object} [aOptions = {}]
+   *         Additional options for this install
+   * @param  {string} [aOptions.hash]
    *         An optional hash of the add-on
-   * @param  aName
+   * @param  {string} [aOptions.name]
    *         An optional placeholder name while the add-on is being downloaded
-   * @param  aIcons
+   * @param  {string|Object} [aOptions.icons]
    *         Optional placeholder icons while the add-on is being downloaded
-   * @param  aVersion
+   * @param  {string} [aOptions.version]
    *         An optional placeholder version while the add-on is being downloaded
-   * @param  aBrowser
+   * @param  {XULElement} [aOptions.browser]
    *         An optional <browser> element for download permissions prompts.
-   * @param  aTelemetryInfo
+   * @param  {Object} [aOptions.telemetryInfo]
    *         An optional object which provides details about the installation source
    *         included in the addon manager telemetry events.
-   * @throws if the aUrl, aCallback or aMimetype arguments are not specified
+   * @throws if aUrl is not specified or if an optional argument of
+   *         an improper type is passed.
    */
-  getInstallForURL(aUrl, aMimetype, aHash, aName,
-                   aIcons, aVersion, aBrowser, aTelemetryInfo) {
+  async getInstallForURL(aUrl, aOptions = {}) {
     if (!gStarted)
       throw Components.Exception("AddonManager is not initialized",
                                  Cr.NS_ERROR_NOT_INITIALIZED);
@@ -1599,45 +1598,41 @@ var AddonManagerInternal = {
       throw Components.Exception("aURL must be a non-empty string",
                                  Cr.NS_ERROR_INVALID_ARG);
 
-    if (!aMimetype || typeof aMimetype != "string")
-      throw Components.Exception("aMimetype must be a non-empty string",
+    if (aOptions.hash && typeof aOptions.hash != "string")
+      throw Components.Exception("hash must be a string or null",
                                  Cr.NS_ERROR_INVALID_ARG);
 
-    if (aHash && typeof aHash != "string")
-      throw Components.Exception("aHash must be a string or null",
+    if (aOptions.name && typeof aOptions.name != "string")
+      throw Components.Exception("name must be a string or null",
                                  Cr.NS_ERROR_INVALID_ARG);
 
-    if (aName && typeof aName != "string")
-      throw Components.Exception("aName must be a string or null",
-                                 Cr.NS_ERROR_INVALID_ARG);
-
-    if (aIcons) {
-      if (typeof aIcons == "string")
-        aIcons = { "32": aIcons };
-      else if (typeof aIcons != "object")
-        throw Components.Exception("aIcons must be a string, an object or null",
+    if (aOptions.icons) {
+      if (typeof aOptions.icons == "string")
+        aOptions.icons = { "32": aOptions.icons };
+      else if (typeof aOptions.icons != "object")
+        throw Components.Exception("icons must be a string, an object or null",
                                    Cr.NS_ERROR_INVALID_ARG);
     } else {
-      aIcons = {};
+      aOptions.icons = {};
     }
 
-    if (aVersion && typeof aVersion != "string")
-      throw Components.Exception("aVersion must be a string or null",
+    if (aOptions.version && typeof aOptions.version != "string")
+      throw Components.Exception("version must be a string or null",
                                  Cr.NS_ERROR_INVALID_ARG);
 
-    if (aBrowser && !Element.isInstance(aBrowser))
-      throw Components.Exception("aBrowser must be an Element or null",
+    if (aOptions.browser && !Element.isInstance(aOptions.browser))
+      throw Components.Exception("aOptions.browser must be an Element or null",
                                  Cr.NS_ERROR_INVALID_ARG);
 
     for (let provider of this.providers) {
-      if (callProvider(provider, "supportsMimetype", false, aMimetype)) {
-        return promiseCallProvider(
-          provider, "getInstallForURL", aUrl, aHash, aName, aIcons,
-          aVersion, aBrowser, aTelemetryInfo);
+      let install = await promiseCallProvider(provider, "getInstallForURL",
+                                              aUrl, aOptions);
+      if (install) {
+        return install;
       }
     }
 
-    return Promise.resolve(null);
+    return null;
   },
 
   /**
@@ -2690,14 +2685,13 @@ var AddonManagerInternal = {
         return Promise.reject({message: err.message});
       }
 
-      let installTelemetryInfo = {
-        source: AddonManager.getInstallSourceFromHost(options.sourceHost),
-        method: "amWebAPI",
-      };
-
-      return AddonManagerInternal.getInstallForURL(options.url, "application/x-xpinstall", options.hash,
-                                                   null, null, null, null, installTelemetryInfo)
-                                 .then(install => {
+      return AddonManagerInternal.getInstallForURL(options.url, {
+        hash: options.hash,
+        telemetryInfo: {
+          source: AddonManager.getInstallSourceFromHost(options.sourceHost),
+          method: "amWebAPI",
+        },
+      }).then(install => {
         AddonManagerInternal.setupPromptHandler(target, null, install, false, "AMO");
 
         let id = this.nextInstall++;
@@ -3277,10 +3271,8 @@ var AddonManager = {
     return "unknown";
   },
 
-  getInstallForURL(aUrl, aMimetype, aHash, aName, aIcons,
-                   aVersion, aBrowser, aTelemetryInfo) {
-    return AddonManagerInternal.getInstallForURL(
-      aUrl, aMimetype, aHash, aName, aIcons, aVersion, aBrowser, aTelemetryInfo);
+  getInstallForURL(aUrl, aOptions) {
+    return AddonManagerInternal.getInstallForURL(aUrl, aOptions);
   },
 
   getInstallForFile(aFile, aMimetype, aTelemetryInfo) {
@@ -3719,18 +3711,46 @@ var AMTelemetry = {
     }
   },
 
+  convertToString(value) {
+    if (value == null) {
+      // Convert null and undefined to empty strings.
+      return "";
+    }
+    switch (typeof(value)) {
+      case "string":
+        return value;
+      case "boolean":
+        return value ? "1" : "0";
+    }
+    return String(value);
+  },
+
   /**
    * Convert all the telemetry event's extra_vars into strings, if needed.
    *
    * @param {object} extraVars
+   * @returns {object} The formatted extra vars.
    */
-  formatExtraVars(extraVars) {
+  formatExtraVars({addon, ...extraVars}) {
+    if (addon) {
+      extraVars.addonId = addon.id;
+      extraVars.type = addon.type;
+    }
+
     // All the extra_vars in a telemetry event have to be strings.
-    for (var key of Object.keys(extraVars)) {
-      if (typeof(extraVars[key]) !== "string") {
-        extraVars[key] = String(extraVars[key]);
+    for (var [key, value] of Object.entries(extraVars)) {
+      if (value == undefined) {
+        delete extraVars[key];
+      } else {
+        extraVars[key] = this.convertToString(value);
       }
     }
+
+    if (extraVars.addonId) {
+      extraVars.addonId = this.getTrimmedString(extraVars.addonId);
+    }
+
+    return extraVars;
   },
 
   /**
@@ -3794,8 +3814,7 @@ var AMTelemetry = {
     }
 
     // All the extra vars in a telemetry event have to be strings.
-    extra = {...extraVars, ...extra};
-    this.formatExtraVars(extra);
+    extra = this.formatExtraVars({...extraVars, ...extra});
 
     this.recordEvent({method: eventMethod, object, value: installId, extra});
   },
@@ -3843,13 +3862,95 @@ var AMTelemetry = {
     extra = {...extraVars, ...extra};
 
     let hasExtraVars = Object.keys(extra).length > 0;
-    this.formatExtraVars(extra);
+    extra = this.formatExtraVars(extra);
 
     this.recordEvent({method, object, value, extra: hasExtraVars ? extra : null});
   },
 
+  /**
+   * Record an event for when a link is clicked.
+   *
+   * @param {object} opts
+   * @param {string} opts.object
+   *        The object of the event, should be an identifier for where the link
+   *        is located. The accepted values are listed in the
+   *        addonsManager.link object of the Events.yaml file.
+   * @param {string} opts.value The identifier for the link destination.
+   * @param {object} opts.extra
+   *        The extra data to be sent, all keys must be registered in the
+   *        extra_keys section of addonsManager.link in Events.yaml.
+   */
+  recordLinkEvent({object, value, extra = null}) {
+    this.recordEvent({method: "link", object, value, extra});
+  },
+
+  /**
+   * Record an event for an action that took place.
+   *
+   * @param {object} opts
+   * @param {string} opts.object
+   *        The object of the event, should an identifier for where the action
+   *        took place. The accepted values are listed in the
+   *        addonsManager.action object of the Events.yaml file.
+   * @param {string} opts.action The identifier for the action.
+   * @param {string} opts.value An optional value for the action.
+   * @param {AddonWrapper} opts.addon
+   *        An optional add-on object related to the event. Passing this will
+   *        set extra.addonId and extra.type based on the add-on.
+   * @param {string} opts.view The current view, when object is aboutAddons.
+   * @param {object} opts.extra
+   *        The extra data to be sent, all keys must be registered in the
+   *        extra_keys section of addonsManager.action in Events.yaml. If
+   *        opts.addon is passed then it will overwrite the addonId and type
+   *        properties in this object, if they are set.
+   */
+  recordActionEvent({object, action, value, addon, view, extra}) {
+    extra = {...extra, action, addon, view};
+    this.recordEvent({
+      method: "action",
+      object,
+      // Treat null and undefined as null.
+      value: value == null ? null : this.convertToString(value),
+      extra: this.formatExtraVars(extra),
+    });
+  },
+
+  /**
+   * Record an event for a view load in about:addons.
+   *
+   * @param {object} opts
+   * @param {string} opts.view
+   *        The identifier for the view. The accepted values are listed in the
+   *        object property of addonsManager.view object of the Events.yaml
+   *        file.
+   * @param {AddonWrapper} opts.addon
+   *        An optional add-on object related to the event.
+   * @param {string} opts.type
+   *        An optional type for the view. If opts.addon is set it will
+   *        overwrite this value with the type of the add-on.
+   */
+  recordViewEvent({view, addon, type}) {
+    this.recordEvent({
+      method: "view",
+      object: "aboutAddons",
+      value: view,
+      extra: this.formatExtraVars({type, addon}),
+    });
+  },
+
   recordEvent({method, object, value, extra}) {
-    Services.telemetry.recordEvent("addonsManager", method, object, value, extra);
+    if (typeof value != "string") {
+      // The value must be a string or null, make sure it's valid so sending
+      // the event doesn't fail.
+      value = null;
+    }
+    try {
+      Services.telemetry.recordEvent("addonsManager", method, object, value, extra);
+    } catch (err) {
+      // If the telemetry throws just log the error so it doesn't break any
+      // functionality.
+      Cu.reportError(err);
+    }
   },
 };
 

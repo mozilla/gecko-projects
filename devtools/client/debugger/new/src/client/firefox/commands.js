@@ -32,7 +32,7 @@ import type { PausePointsMap } from "../../workers/parser";
 
 import { makeBreakpointActorId } from "../../utils/breakpoint";
 
-import { createSource, createBreakpointLocation, createWorker } from "./create";
+import { createSource, createWorker } from "./create";
 import { supportsWorkers, updateWorkerClients } from "./workers";
 
 import { features } from "../../utils/prefs";
@@ -189,9 +189,8 @@ function removeXHRBreakpoint(path: string, method: string) {
 
 function setBreakpoint(
   location: SourceActorLocation,
-  options: BreakpointOptions,
-  noSliding: boolean
-): Promise<BreakpointResult> {
+  options: BreakpointOptions
+) {
   const sourceThreadClient = lookupThreadClient(location.sourceActor.thread);
   const sourceClient = sourceThreadClient.source({
     actor: location.sourceActor.actor
@@ -202,17 +201,10 @@ function setBreakpoint(
       line: location.line,
       column: location.column,
       options,
-      noSliding
     })
-    .then(([{ actualLocation }, bpClient]) => {
-      actualLocation = createBreakpointLocation(location, actualLocation);
-
-      const id = makeBreakpointActorId(actualLocation);
+    .then(([, bpClient]) => {
+      const id = makeBreakpointActorId(location);
       bpClients[id] = bpClient;
-      bpClient.location.line = actualLocation.line;
-      bpClient.location.column = actualLocation.column;
-
-      return { id, actualLocation };
     });
 }
 
@@ -301,11 +293,11 @@ function autocomplete(
 }
 
 function navigate(url: string): Promise<*> {
-  return tabTarget.activeTab.navigateTo({ url });
+  return tabTarget.navigateTo({ url });
 }
 
 function reload(): Promise<*> {
-  return tabTarget.activeTab.reload();
+  return tabTarget.reload();
 }
 
 function getProperties(thread: string, grip: Grip): Promise<*> {
@@ -448,12 +440,29 @@ async function fetchWorkers(): Promise<Worker[]> {
     return Promise.resolve([]);
   }
 
-  const { workers } = await tabTarget.activeTab.listWorkers();
+  const { workers } = await tabTarget.listWorkers();
   return workers;
 }
 
 function getMainThread() {
   return threadClient.actor;
+}
+
+async function getBreakpointPositions(
+  location: SourceActorLocation
+): Promise<Array<Number>> {
+  const {
+    sourceActor: { thread, actor },
+    line
+  } = location;
+  const sourceThreadClient = lookupThreadClient(thread);
+  const sourceClient = sourceThreadClient.source({ actor });
+  const { positions } = await sourceClient.getBreakpointPositionsCompressed({
+    start: { line },
+    end: { line }
+  });
+
+  return positions ? positions[line] : [];
 }
 
 const clientCommands = {
@@ -476,6 +485,7 @@ const clientCommands = {
   sourceContents,
   getSourceForActor,
   getBreakpointByLocation,
+  getBreakpointPositions,
   setBreakpoint,
   setXHRBreakpoint,
   removeXHRBreakpoint,

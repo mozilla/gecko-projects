@@ -41,9 +41,11 @@ XPCOMUtils.defineLazyGetter(this, "AlertsServiceDND", function() {
 });
 
 Preferences.addAll([
-  // Tracking Protection
+  // Content blocking / Tracking Protection
   { id: "privacy.trackingprotection.enabled", type: "bool" },
   { id: "privacy.trackingprotection.pbmode.enabled", type: "bool" },
+  { id: "privacy.trackingprotection.fingerprinting.enabled", type: "bool" },
+  { id: "privacy.trackingprotection.cryptomining.enabled", type: "bool" },
 
   // Button prefs
   { id: "pref.privacy.disable_button.cookie_exceptions", type: "bool" },
@@ -448,6 +450,14 @@ var gPrivacyPane = {
     Preferences.get("browser.contentblocking.category").on("change",
       gPrivacyPane.highlightCBCategory);
 
+    let cryptoMinersOption = document.getElementById("contentBlockingCryptominersOption");
+    let fingerprintersOption = document.getElementById("contentBlockingFingerprintersOption");
+
+    cryptoMinersOption.hidden =
+      !Services.prefs.getBoolPref("browser.contentblocking.cryptomining.preferences.ui.enabled");
+    fingerprintersOption.hidden =
+      !Services.prefs.getBoolPref("browser.contentblocking.fingerprinting.preferences.ui.enabled");
+
     this.highlightCBCategory();
     this.readBlockCookies();
 
@@ -464,7 +474,7 @@ var gPrivacyPane = {
   },
 
   highlightCBCategory() {
-    let value = document.getElementById("contentBlockingCategoryRadio").value;
+    let value = Preferences.get("browser.contentblocking.category").value;
     let standardEl = document.getElementById("contentBlockingOptionStandard");
     let strictEl = document.getElementById("contentBlockingOptionStrict");
     let customEl = document.getElementById("contentBlockingOptionCustom");
@@ -473,14 +483,16 @@ var gPrivacyPane = {
     customEl.classList.remove("selected");
 
     switch (value) {
-      case "standard":
-        standardEl.classList.add("selected");
-        break;
       case "strict":
         strictEl.classList.add("selected");
         break;
       case "custom":
         customEl.classList.add("selected");
+        break;
+      case "standard":
+        /* fall through */
+      default:
+        standardEl.classList.add("selected");
         break;
     }
   },
@@ -721,7 +733,7 @@ var gPrivacyPane = {
 
     if (document.getElementById("historyMode").value == "custom") {
       let disabled = Preferences.get("browser.privatebrowsing.autostart").value;
-      this.dependentControls.forEach(function(aElement) {
+      this.dependentControls.forEach(aElement => {
         let control = document.getElementById(aElement);
         let preferenceId = control.getAttribute("preference");
         if (!preferenceId) {
@@ -734,19 +746,12 @@ var gPrivacyPane = {
 
         let preference = preferenceId ? Preferences.get(preferenceId) : {};
         control.disabled = disabled || preference.locked;
+        if (control != clearDataSettings) {
+          this.ensurePrivacyMicroControlUncheckedWhenDisabled(control);
+        }
       });
 
       clearDataSettings.removeAttribute("hidden");
-
-      // adjust the checked state of the sanitizeOnShutdown checkbox
-      document.getElementById("alwaysClear").checked = disabled ? false :
-        Preferences.get("privacy.sanitize.sanitizeOnShutdown").value;
-
-      // adjust the checked state of the remember history checkboxes
-      document.getElementById("rememberHistory").checked = disabled ? false :
-        Preferences.get("places.history.enabled").value;
-      document.getElementById("rememberForms").checked = disabled ? false :
-        Preferences.get("browser.formfill.enable").value;
 
       if (!disabled) {
         // adjust the Settings button for sanitizeOnShutdown
@@ -755,6 +760,16 @@ var gPrivacyPane = {
     } else {
       clearDataSettings.setAttribute("hidden", "true");
     }
+  },
+
+  ensurePrivacyMicroControlUncheckedWhenDisabled(el) {
+    if (Preferences.get("browser.privatebrowsing.autostart").value) {
+      // Set checked to false when called from updatePrivacyMicroControls
+      el.checked = false;
+      // return false for the onsyncfrompreference case:
+      return false;
+    }
+    return undefined; // tell preferencesBindings to assign the 'right' value.
   },
 
   // CLEAR PRIVATE DATA

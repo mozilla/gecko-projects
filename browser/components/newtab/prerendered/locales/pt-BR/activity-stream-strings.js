@@ -44,7 +44,7 @@ window.gActivityStreamStrings = {
   "prefs_content_discovery_description": "A descoberta de conteúdo na página inicial do Firefox permite descobrir artigos relevantes, de alta qualidade, pela web afora.",
   "prefs_content_discovery_button": "Desativar descoberta de conteúdo",
   "prefs_section_rows_option": "{num} linha;{num} linhas",
-  "prefs_search_header": "Pesquisa na web",
+  "prefs_search_header": "Pesquisar na web",
   "prefs_topsites_description": "Os sites que você mais visita",
   "prefs_topstories_description2": "Os melhores conteúdos disponíveis na Web, personalizados pra você",
   "prefs_topstories_options_sponsored_label": "Histórias patrocinadas",

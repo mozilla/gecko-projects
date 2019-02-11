@@ -157,15 +157,6 @@ JS_FRIEND_API void js::AssertCompartmentHasSingleRealm(JS::Compartment* comp) {
   MOZ_RELEASE_ASSERT(comp->realms().length() == 1);
 }
 
-JS_FRIEND_API JSPrincipals* JS_DeprecatedGetCompartmentPrincipals(
-    JS::Compartment* compartment) {
-  // Note: for now we assume a single realm per compartment. This API will go
-  // away after we remove the remaining callers. See bug 1465700.
-  js::AssertCompartmentHasSingleRealm(compartment);
-
-  return compartment->realms()[0]->principals();
-}
-
 JS_FRIEND_API JSPrincipals* JS::GetRealmPrincipals(JS::Realm* realm) {
   return realm->principals();
 }
@@ -553,29 +544,16 @@ JS_FRIEND_API bool js::IsCompartmentZoneSweepingOrCompacting(
   return comp->zone()->isGCSweepingOrCompacting();
 }
 
-namespace {
-struct VisitGrayCallbackFunctor {
-  GCThingCallback callback_;
-  void* closure_;
-  VisitGrayCallbackFunctor(GCThingCallback callback, void* closure)
-      : callback_(callback), closure_(closure) {}
-
-  template <class T>
-  void operator()(T tp) const {
-    if ((*tp)->isMarkedGray()) {
-      callback_(closure_, JS::GCCellPtr(*tp));
-    }
-  }
-};
-}  // namespace
-
 JS_FRIEND_API void js::VisitGrayWrapperTargets(Zone* zone,
                                                GCThingCallback callback,
                                                void* closure) {
   for (CompartmentsInZoneIter comp(zone); !comp.done(); comp.next()) {
     for (Compartment::WrapperEnum e(comp); !e.empty(); e.popFront()) {
-      e.front().mutableKey().applyToWrapped(
-          VisitGrayCallbackFunctor(callback, closure));
+      e.front().mutableKey().applyToWrapped([callback, closure](auto tp) {
+        if ((*tp)->isMarkedGray()) {
+          callback(closure, JS::GCCellPtr(*tp));
+        }
+      });
     }
   }
 }

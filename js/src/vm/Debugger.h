@@ -23,6 +23,7 @@
 #include "js/HashTable.h"
 #include "js/Utility.h"
 #include "js/Wrapper.h"
+#include "proxy/DeadObjectProxy.h"
 #include "vm/GeneratorObject.h"
 #include "vm/GlobalObject.h"
 #include "vm/JSContext.h"
@@ -418,8 +419,9 @@ class Debugger : private mozilla::LinkedListElement<Debugger> {
           ctorName(ctorName),
           size(size),
           inNursery(inNursery) {
-      MOZ_ASSERT_IF(frame, UncheckedUnwrap(frame)->is<SavedFrame>());
-    };
+      MOZ_ASSERT_IF(frame, UncheckedUnwrap(frame)->is<SavedFrame>() ||
+                               IsDeadProxyObject(frame));
+    }
 
     HeapPtr<JSObject*> frame;
     mozilla::TimeStamp when;
@@ -986,7 +988,7 @@ class Debugger : private mozilla::LinkedListElement<Debugger> {
   static void traceAllForMovingGC(JSTracer* trc);
   static void sweepAll(FreeOp* fop);
   static void detachAllDebuggersFromGlobal(FreeOp* fop, GlobalObject* global);
-  static void findZoneEdges(JS::Zone* v, gc::ZoneComponentFinder& finder);
+  static MOZ_MUST_USE bool findSweepGroupEdges(JS::Zone* zone);
 #ifdef DEBUG
   static bool isDebuggerCrossCompartmentEdge(JSObject* obj,
                                              const js::gc::Cell* cell);

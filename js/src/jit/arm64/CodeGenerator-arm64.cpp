@@ -812,7 +812,8 @@ class js::jit::OutOfLineTableSwitch
 void CodeGeneratorARM64::visitOutOfLineTableSwitch(OutOfLineTableSwitch* ool) {
   MTableSwitch* mir = ool->mir();
 
-  AutoForbidPools afp(&masm, (mir->numCases() + 1) * (sizeof(void*) / vixl::kInstructionSize));
+  AutoForbidPools afp(
+      &masm, (mir->numCases() + 1) * (sizeof(void*) / vixl::kInstructionSize));
   masm.haltingAlign(sizeof(void*));
   masm.bind(ool->jumpLabel());
   masm.addCodeLabel(*ool->jumpLabel());
@@ -1251,6 +1252,11 @@ void CodeGenerator::visitUnbox(LUnbox* unbox) {
       case MIRType::Symbol:
         cond = masm.testSymbol(Assembler::NotEqual, value);
         break;
+#ifdef ENABLE_BIGINT
+      case MIRType::BigInt:
+        cond = masm.testBigInt(Assembler::NotEqual, value);
+        break;
+#endif
       default:
         MOZ_CRASH("Given MIRType cannot be unboxed.");
     }
@@ -1288,6 +1294,11 @@ void CodeGenerator::visitUnbox(LUnbox* unbox) {
     case MIRType::Symbol:
       masm.unboxSymbol(input, result);
       break;
+#ifdef ENABLE_BIGINT
+    case MIRType::BigInt:
+      masm.unboxBigInt(input, result);
+      break;
+#endif
     default:
       MOZ_CRASH("Given MIRType cannot be unboxed.");
   }
@@ -1776,7 +1787,9 @@ void CodeGenerator::visitWasmLoadI64(LWasmLoadI64*) { MOZ_CRASH("NYI"); }
 
 void CodeGenerator::visitWasmStoreI64(LWasmStoreI64*) { MOZ_CRASH("NYI"); }
 
-void CodeGenerator::visitMemoryBarrier(LMemoryBarrier*) { MOZ_CRASH("NYI"); }
+void CodeGenerator::visitMemoryBarrier(LMemoryBarrier* ins) {
+  masm.memoryBarrier(ins->type());
+}
 
 void CodeGenerator::visitWasmAddOffset(LWasmAddOffset*) { MOZ_CRASH("NYI"); }
 
@@ -1827,8 +1840,31 @@ void CodeGenerator::visitWasmReinterpretFromI64(LWasmReinterpretFromI64*) {
 }
 
 void CodeGenerator::visitAtomicTypedArrayElementBinop(
-    LAtomicTypedArrayElementBinop*) {
-  MOZ_CRASH("NYI");
+    LAtomicTypedArrayElementBinop* lir) {
+  MOZ_ASSERT(lir->mir()->hasUses());
+
+  AnyRegister output = ToAnyRegister(lir->output());
+  Register elements = ToRegister(lir->elements());
+  Register flagTemp = ToRegister(lir->temp1());
+  Register outTemp =
+    lir->temp2()->isBogusTemp() ? InvalidReg : ToRegister(lir->temp2());
+  Register value = ToRegister(lir->value());
+
+  Scalar::Type arrayType = lir->mir()->arrayType();
+  size_t width = Scalar::byteSize(arrayType);
+
+  if (lir->index()->isConstant()) {
+    Address mem(elements, ToInt32(lir->index()) * width);
+    masm.atomicFetchOpJS(arrayType, Synchronization::Full(),
+                         lir->mir()->operation(), value, mem, flagTemp, outTemp,
+                         output);
+  } else {
+    BaseIndex mem(elements, ToRegister(lir->index()),
+                  ScaleFromElemWidth(width));
+    masm.atomicFetchOpJS(arrayType, Synchronization::Full(),
+                         lir->mir()->operation(), value, mem, flagTemp, outTemp,
+                         output);
+  }
 }
 
 void CodeGenerator::visitWasmAtomicBinopHeapForEffect(

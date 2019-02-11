@@ -431,15 +431,18 @@ class nsHttpChannel final : public HttpBaseChannel,
   MOZ_MUST_USE nsresult OnDoneReadingPartialCacheEntry(bool *streamDone);
 
   MOZ_MUST_USE nsresult
-  DoAuthRetry(nsAHttpConnection *,
-              const std::function<nsresult(nsHttpChannel *, nsresult)> &aOuter);
-  MOZ_MUST_USE nsresult ContinueDoAuthRetry(
-      nsAHttpConnection *aConn,
-      const std::function<nsresult(nsHttpChannel *, nsresult)> &aOuter);
-  MOZ_MUST_USE nsresult DoConnect(nsAHttpConnection *aConn = nullptr);
+  DoAuthRetry(nsHttpTransaction *aTransWithStickyConn,
+              const std::function<nsresult(nsHttpChannel *, nsresult)>
+                  &aContinueOnStopRequestFunc);
+  MOZ_MUST_USE nsresult
+  ContinueDoAuthRetry(nsHttpTransaction *aTransWithStickyConn,
+                      const std::function<nsresult(nsHttpChannel *, nsresult)>
+                          &aContinueOnStopRequestFunc);
+  MOZ_MUST_USE nsresult
+  DoConnect(nsHttpTransaction *aTransWithStickyConn = nullptr);
   MOZ_MUST_USE nsresult ContinueOnStopRequestAfterAuthRetry(
       nsresult aStatus, bool aAuthRetry, bool aIsFromNet, bool aContentComplete,
-      nsAHttpConnection *aStickyConn);
+      nsHttpTransaction *aTransWithStickyConn);
   MOZ_MUST_USE nsresult ContinueOnStopRequest(nsresult status, bool aIsFromNet,
                                               bool aContentComplete);
 
@@ -652,7 +655,6 @@ class nsHttpChannel final : public HttpBaseChannel,
   uint32_t mCacheEntryIsWriteOnly : 1;
   // see WAIT_FOR_* constants above
   uint32_t mCacheEntriesToWaitFor : 2;
-  uint32_t mHasQueryString : 1;
   // whether cache entry data write was in progress during cache entry check
   // when true, after we finish read from cache we must check all data
   // had been loaded from cache. If not, then an error has to be propagated

@@ -88,6 +88,13 @@ static bool GenerateCraneliftCode(WasmMacroAssembler& masm,
     return false;
   }
 
+  // Cranelift isn't aware of pinned registers in general, so we need to reload
+  // both TLS and pinned regs from the stack.
+  // TODO(bug 1507820): We should teach Cranelift to reload this register
+  // itself, so we don't have to do it manually.
+  masm.loadWasmTlsRegFromFrame();
+  masm.loadWasmPinnedRegsFromTls();
+
   wasm::GenerateFunctionEpilogue(masm, func.framePushed, offsets);
 
   masm.flush();
@@ -279,9 +286,7 @@ const GlobalDesc* env_global(const CraneliftModuleEnvironment* env,
 bool wasm::CraneliftCompileFunctions(const ModuleEnvironment& env,
                                      LifoAlloc& lifo,
                                      const FuncCompileInputVector& inputs,
-                                     CompiledCode* code,
-                                     UniqueChars* error) {
-
+                                     CompiledCode* code, UniqueChars* error) {
   MOZ_RELEASE_ASSERT(CraneliftCanCompile());
 
   MOZ_ASSERT(env.tier() == Tier::Optimized);

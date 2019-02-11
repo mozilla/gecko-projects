@@ -398,20 +398,6 @@ void ICEntry::trace(JSTracer* trc) {
         }
         break;
       }
-      case JSOP_MOREITER: {
-        ICIteratorMore_Fallback::Compiler compiler(cx);
-        if (!addIC(pc, compiler.getStub(&stubSpace))) {
-          return nullptr;
-        }
-        break;
-      }
-      case JSOP_ENDITER: {
-        ICIteratorClose_Fallback::Compiler compiler(cx);
-        if (!addIC(pc, compiler.getStub(&stubSpace))) {
-          return nullptr;
-        }
-        break;
-      }
       case JSOP_REST: {
         ArrayObject* templateObject = ObjectGroup::newArrayObject(
             cx, nullptr, 0, TenuredObject,
@@ -499,11 +485,12 @@ void ICStubIterator::unlink(JSContext* cx) {
     case Call_ScriptedFunCall:
     case Call_ConstStringSplit:
     case WarmUpCounter_Fallback:
-    // These two fallback stubs don't actually make non-tail calls,
+    // These three fallback stubs don't actually make non-tail calls,
     // but the fallback code for the bailout path needs to pop the stub frame
     // pushed during the bailout.
     case GetProp_Fallback:
     case SetProp_Fallback:
+    case GetElem_Fallback:
       return true;
     default:
       return false;
@@ -2195,22 +2182,55 @@ bool ICGetElem_Fallback::Compiler::generateStubCode(MacroAssembler& masm) {
     masm.pushValue(R1);  // Index
     masm.pushValue(Address(masm.getStackPointer(), sizeof(Value) * 5));  // Obj
     masm.push(ICStubReg);
-    pushStubPayload(masm, R0.scratchReg());
+    masm.pushBaselineFramePtr(BaselineFrameReg, R0.scratchReg());
 
-    return tailCallVM(DoGetElemSuperFallbackInfo, masm);
+    if (!tailCallVM(DoGetElemSuperFallbackInfo, masm)) {
+      return false;
+    }
+  } else {
+    // Ensure stack is fully synced for the expression decompiler.
+    masm.pushValue(R0);
+    masm.pushValue(R1);
+
+    // Push arguments.
+    masm.pushValue(R1);
+    masm.pushValue(R0);
+    masm.push(ICStubReg);
+    masm.pushBaselineFramePtr(BaselineFrameReg, R0.scratchReg());
+
+    if (!tailCallVM(DoGetElemFallbackInfo, masm)) {
+      return false;
+    }
   }
 
-  // Ensure stack is fully synced for the expression decompiler.
-  masm.pushValue(R0);
-  masm.pushValue(R1);
+  // This is the resume point used when bailout rewrites call stack to undo
+  // Ion inlined frames. The return address pushed onto reconstructed stack
+  // will point here.
+  assumeStubFrame();
+  bailoutReturnOffset_.bind(masm.currentOffset());
 
-  // Push arguments.
-  masm.pushValue(R1);
-  masm.pushValue(R0);
-  masm.push(ICStubReg);
-  pushStubPayload(masm, R0.scratchReg());
+  leaveStubFrame(masm, true);
 
-  return tailCallVM(DoGetElemFallbackInfo, masm);
+  // When we get here, ICStubReg contains the ICGetElem_Fallback stub,
+  // which we can't use to enter the TypeMonitor IC, because it's a
+  // MonitoredFallbackStub instead of a MonitoredStub. So, we cheat. Note that
+  // we must have a non-null fallbackMonitorStub here because InitFromBailout
+  // delazifies.
+  masm.loadPtr(Address(ICStubReg,
+                       ICMonitoredFallbackStub::offsetOfFallbackMonitorStub()),
+               ICStubReg);
+  EmitEnterTypeMonitorIC(masm,
+                         ICTypeMonitor_Fallback::offsetOfFirstMonitorStub());
+
+  return true;
+}
+
+void ICGetElem_Fallback::Compiler::postGenerateStubCode(MacroAssembler& masm,
+                                                        Handle<JitCode*> code) {
+  BailoutReturnStub kind = hasReceiver_ ? BailoutReturnStub::GetElemSuper
+                                        : BailoutReturnStub::GetElem;
+  void* address = code->raw() + bailoutReturnOffset_.offset();
+  cx->realm()->jitRealm()->initBailoutReturnAddr(address, getKey(), kind);
 }
 
 static void SetUpdateStubData(ICCacheIR_Updated* stub,
@@ -3378,12 +3398,8 @@ static bool GetTemplateObjectForNative(JSContext* cx, HandleFunction target,
     }
 
     case InlinableNative::TypedArrayConstructor: {
-      if (args.length() != 1) {
-        return true;
-      }
-
       return TypedArrayObject::GetTemplateObjectForNative(cx, target->native(),
-                                                          args[0], res);
+                                                          args, res);
     }
 
     default:
@@ -5410,131 +5426,6 @@ bool ICGetIterator_Fallback::Compiler::generateStubCode(MacroAssembler& masm) {
   pushStubPayload(masm, R0.scratchReg());
 
   return tailCallVM(DoGetIteratorFallbackInfo, masm);
-}
-
-//
-// IteratorMore_Fallback
-//
-
-static bool DoIteratorMoreFallback(JSContext* cx, BaselineFrame* frame,
-                                   ICIteratorMore_Fallback* stub,
-                                   HandleObject iterObj,
-                                   MutableHandleValue res) {
-  stub->incrementEnteredCount();
-
-  FallbackICSpew(cx, stub, "IteratorMore");
-
-  if (!IteratorMore(cx, iterObj, res)) {
-    return false;
-  }
-
-  if (!res.isMagic(JS_NO_ITER_VALUE) && !res.isString()) {
-    stub->setHasNonStringResult();
-  }
-
-  if (iterObj->is<PropertyIteratorObject>() &&
-      !stub->hasStub(ICStub::IteratorMore_Native)) {
-    ICIteratorMore_Native::Compiler compiler(cx);
-    ICStub* newStub = compiler.getStub(compiler.getStubSpace(frame->script()));
-    if (!newStub) {
-      return false;
-    }
-    stub->addNewStub(newStub);
-  }
-
-  return true;
-}
-
-typedef bool (*DoIteratorMoreFallbackFn)(JSContext*, BaselineFrame*,
-                                         ICIteratorMore_Fallback*, HandleObject,
-                                         MutableHandleValue);
-static const VMFunction DoIteratorMoreFallbackInfo =
-    FunctionInfo<DoIteratorMoreFallbackFn>(DoIteratorMoreFallback,
-                                           "DoIteratorMoreFallback", TailCall);
-
-bool ICIteratorMore_Fallback::Compiler::generateStubCode(MacroAssembler& masm) {
-  EmitRestoreTailCallReg(masm);
-
-  masm.unboxObject(R0, R0.scratchReg());
-  masm.push(R0.scratchReg());
-  masm.push(ICStubReg);
-  pushStubPayload(masm, R0.scratchReg());
-
-  return tailCallVM(DoIteratorMoreFallbackInfo, masm);
-}
-
-//
-// IteratorMore_Native
-//
-
-bool ICIteratorMore_Native::Compiler::generateStubCode(MacroAssembler& masm) {
-  Label failure;
-
-  Register obj = masm.extractObject(R0, ExtractTemp0);
-
-  AllocatableGeneralRegisterSet regs(availableGeneralRegs(1));
-  Register nativeIterator = regs.takeAny();
-  Register scratch = regs.takeAny();
-
-  masm.branchTestObjClass(Assembler::NotEqual, obj,
-                          &PropertyIteratorObject::class_, scratch, obj,
-                          &failure);
-  masm.loadObjPrivate(obj, JSObject::ITER_CLASS_NFIXED_SLOTS, nativeIterator);
-
-  // If propertyCursor_ < propertiesEnd_, load the next string and advance
-  // the cursor.  Otherwise return MagicValue(JS_NO_ITER_VALUE).
-  Label iterDone;
-  Address cursorAddr(nativeIterator, NativeIterator::offsetOfPropertyCursor());
-  Address cursorEndAddr(nativeIterator,
-                        NativeIterator::offsetOfPropertiesEnd());
-  masm.loadPtr(cursorAddr, scratch);
-  masm.branchPtr(Assembler::BelowOrEqual, cursorEndAddr, scratch, &iterDone);
-
-  // Get next string.
-  masm.loadPtr(Address(scratch, 0), scratch);
-
-  // Increase the cursor.
-  masm.addPtr(Imm32(sizeof(JSString*)), cursorAddr);
-
-  masm.tagValue(JSVAL_TYPE_STRING, scratch, R0);
-  EmitReturnFromIC(masm);
-
-  masm.bind(&iterDone);
-  masm.moveValue(MagicValue(JS_NO_ITER_VALUE), R0);
-  EmitReturnFromIC(masm);
-
-  // Failure case - jump to next stub
-  masm.bind(&failure);
-  EmitStubGuardFailure(masm);
-  return true;
-}
-
-//
-// IteratorClose_Fallback
-//
-
-static void DoIteratorCloseFallback(JSContext* cx,
-                                    ICIteratorClose_Fallback* stub,
-                                    HandleValue iterValue) {
-  FallbackICSpew(cx, stub, "IteratorClose");
-
-  CloseIterator(&iterValue.toObject());
-}
-
-typedef void (*DoIteratorCloseFallbackFn)(JSContext*, ICIteratorClose_Fallback*,
-                                          HandleValue);
-static const VMFunction DoIteratorCloseFallbackInfo =
-    FunctionInfo<DoIteratorCloseFallbackFn>(
-        DoIteratorCloseFallback, "DoIteratorCloseFallback", TailCall);
-
-bool ICIteratorClose_Fallback::Compiler::generateStubCode(
-    MacroAssembler& masm) {
-  EmitRestoreTailCallReg(masm);
-
-  masm.pushValue(R0);
-  masm.push(ICStubReg);
-
-  return tailCallVM(DoIteratorCloseFallbackInfo, masm);
 }
 
 //

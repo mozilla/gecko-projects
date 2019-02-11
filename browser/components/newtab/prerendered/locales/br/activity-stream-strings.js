@@ -40,7 +40,7 @@ window.gActivityStreamStrings = {
   "section_disclaimer_topstories_buttontext": "Mat eo, komprenet am eus",
   "prefs_home_header": "Endalc'had Degemer Firefox",
   "prefs_home_description": "Dibabit peseurt endalc'had a fell deoc'h kaout war ho skramm Firefox Degemer.",
-  "prefs_content_discovery_header": "Firefox Home",
+  "prefs_content_discovery_header": "Degemer Firefox",
   "prefs_content_discovery_description": "Content Discovery in Firefox Home allows you to discover high-quality, relevant articles from across the web.",
   "prefs_content_discovery_button": "Turn Off Content Discovery",
   "prefs_section_rows_option": "{num} renk;{num} renk;{num} renk;{num} a renkoù;{num} renk",
@@ -110,6 +110,5 @@ window.gActivityStreamStrings = {
   "firstrun_privacy_notice": "evezhiadennoù a-fet buhez prevez",
   "firstrun_continue_to_login": "Kenderc'hel",
   "firstrun_skip_login": "Tremen ar bazenn-mañ",
-  "context_menu_title": "Digeriñ al lañser",
-  "pocket_learn_more": "Gouzout hiroc'h"
+  "context_menu_title": "Digeriñ al lañser"
 };

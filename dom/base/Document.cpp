@@ -297,6 +297,7 @@
 #include "mozilla/net/RequestContextService.h"
 #include "StorageAccessPermissionRequest.h"
 #include "mozilla/dom/WindowProxyHolder.h"
+#include "ThirdPartyUtil.h"
 
 #define XML_DECLARATION_BITS_DECLARATION_EXISTS (1 << 0)
 #define XML_DECLARATION_BITS_ENCODING_EXISTS (1 << 1)
@@ -1246,7 +1247,6 @@ Document::Document(const char* aContentType)
       mDidDocumentOpen(false),
       mHasDisplayDocument(false),
       mFontFaceSetDirty(true),
-      mGetUserFontSetCalled(false),
       mDidFireDOMContentLoaded(true),
       mHasScrollLinkedEffect(false),
       mFrameRequestCallbacksScheduled(false),
@@ -2853,6 +2853,13 @@ void Document::SetDocumentURI(nsIURI* aURI) {
   // need to refresh the hrefs of all the links on the page.
   if (!equalBases) {
     RefreshLinkHrefs();
+  }
+
+  // Recalculate our base domain
+  mBaseDomain.Truncate();
+  ThirdPartyUtil* thirdPartyUtil = ThirdPartyUtil::GetInstance();
+  if (thirdPartyUtil) {
+    Unused << thirdPartyUtil->GetBaseDomain(mDocumentURI, mBaseDomain);
   }
 
   // Tell our WindowGlobalParent that the document's URI has been changed.
@@ -7491,6 +7498,10 @@ void Document::Destroy() {
 
   mIsGoingAway = true;
 
+  if (mDocumentL10n) {
+    mDocumentL10n->Destroy();
+  }
+
   ScriptLoader()->Destroy();
   SetScriptGlobalObject(nullptr);
   RemovedFromDocShell();
@@ -7512,6 +7523,10 @@ void Document::Destroy() {
   mInUnlinkOrDeletion = oldVal;
 
   mLayoutHistoryState = nullptr;
+
+  if (mOriginalDocument) {
+    mOriginalDocument->mLatestStaticClone = nullptr;
+  }
 
   // Shut down our external resource map.  We might not need this for
   // leak-fixing if we fix nsDocumentViewer to do cycle-collection, but
@@ -8885,8 +8900,10 @@ already_AddRefed<Document> Document::CreateStaticClone(
     if (clonedDoc) {
       if (IsStaticDocument()) {
         clonedDoc->mOriginalDocument = mOriginalDocument;
+        mOriginalDocument->mLatestStaticClone = clonedDoc;
       } else {
         clonedDoc->mOriginalDocument = this;
+        mLatestStaticClone = clonedDoc;
       }
 
       clonedDoc->mOriginalDocument->mStaticCloneCount++;
@@ -10846,7 +10863,7 @@ bool Document::SetPointerLock(Element* aElement, StyleCursorKind aCursorStyle) {
 
   // Hide the cursor and set pointer lock for future mouse events
   RefPtr<EventStateManager> esm = presContext->EventStateManager();
-  esm->SetCursor(aCursorStyle, nullptr, false, 0.0f, 0.0f, widget, true);
+  esm->SetCursor(aCursorStyle, nullptr, Nothing(), widget, true);
   EventStateManager::SetPointerLock(widget, aElement);
 
   return true;
@@ -11601,33 +11618,7 @@ nsAutoSyncOperation::~nsAutoSyncOperation() {
   }
 }
 
-gfxUserFontSet* Document::GetUserFontSet(bool aFlushUserFontSet) {
-  // We want to initialize the user font set lazily the first time the
-  // user asks for it, rather than building it too early and forcing
-  // rule cascade creation.  Thus we try to enforce the invariant that
-  // we *never* build the user font set until the first call to
-  // GetUserFontSet.  However, once it's been requested, we can't wait
-  // for somebody to call GetUserFontSet in order to rebuild it (see
-  // comments below in MarkUserFontSetDirty for why).
-#ifdef DEBUG
-  bool userFontSetGottenBefore = mGetUserFontSetCalled;
-#endif
-  // Set mGetUserFontSetCalled up front, so that FlushUserFontSet will actually
-  // flush.
-  mGetUserFontSetCalled = true;
-  if (mFontFaceSetDirty && aFlushUserFontSet) {
-    // If this assertion fails, and there have actually been changes to
-    // @font-face rules, then we will call StyleChangeReflow in
-    // FlushUserFontSet.  If we're in the middle of reflow,
-    // that's a bad thing to do, and the caller was responsible for
-    // flushing first.  If we're not (e.g., in frame construction), it's
-    // ok.
-    NS_ASSERTION(!userFontSetGottenBefore || !GetShell() ||
-                     !GetShell()->IsReflowLocked(),
-                 "FlushUserFontSet should have been called first");
-    FlushUserFontSet();
-  }
-
+gfxUserFontSet* Document::GetUserFontSet() {
   if (!mFontFaceSet) {
     return nullptr;
   }
@@ -11636,12 +11627,6 @@ gfxUserFontSet* Document::GetUserFontSet(bool aFlushUserFontSet) {
 }
 
 void Document::FlushUserFontSet() {
-  if (!mGetUserFontSetCalled) {
-    return;  // No one cares about this font set yet, but we want to be careful
-             // to not unset our mFontFaceSetDirty bit, so when someone really
-             // does we'll create it.
-  }
-
   if (!mFontFaceSetDirty) {
     return;
   }
@@ -11678,22 +11663,20 @@ void Document::FlushUserFontSet() {
 }
 
 void Document::MarkUserFontSetDirty() {
-  if (!mGetUserFontSetCalled) {
-    // We want to lazily build the user font set the first time it's
-    // requested (so we don't force creation of rule cascades too
-    // early), so don't do anything now.
+  if (mFontFaceSetDirty) {
     return;
   }
-
   mFontFaceSetDirty = true;
+  if (nsIPresShell* shell = GetShell()) {
+    shell->EnsureStyleFlush();
+  }
 }
 
 FontFaceSet* Document::Fonts() {
   if (!mFontFaceSet) {
     nsCOMPtr<nsPIDOMWindowInner> window = do_QueryInterface(GetScopeObject());
     mFontFaceSet = new FontFaceSet(window, this);
-    GetUserFontSet();  // this will cause the user font set to be
-                       // created/updated
+    FlushUserFontSet();
   }
   return mFontFaceSet;
 }

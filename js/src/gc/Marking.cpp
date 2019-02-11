@@ -6,6 +6,7 @@
 
 #include "gc/Marking-inl.h"
 
+#include "mozilla/ArrayUtils.h"
 #include "mozilla/DebugOnly.h"
 #include "mozilla/IntegerRange.h"
 #include "mozilla/ReentrancyGuard.h"
@@ -38,6 +39,7 @@
 #include "gc/Nursery-inl.h"
 #include "gc/PrivateIterators-inl.h"
 #include "gc/Zone-inl.h"
+#include "vm/GeckoProfiler-inl.h"
 #include "vm/NativeObject-inl.h"
 #include "vm/Realm-inl.h"
 #include "vm/StringType-inl.h"
@@ -276,17 +278,9 @@ void js::CheckTracedThing(JSTracer* trc, T* thing) {
 #endif
 }
 
-template <typename S>
-struct CheckTracedFunctor : public VoidDefaultAdaptor<S> {
-  template <typename T>
-  void operator()(T* t, JSTracer* trc) {
-    CheckTracedThing(trc, t);
-  }
-};
-
 template <typename T>
 void js::CheckTracedThing(JSTracer* trc, T thing) {
-  DispatchTyped(CheckTracedFunctor<T>(), thing, trc);
+  ApplyGCThingTyped(thing, [](auto t) { CheckTracedThing(t); });
 }
 
 namespace js {
@@ -407,6 +401,8 @@ void js::gc::AssertRootMarkingPhase(JSTracer* trc) {
 /*** Tracing Interface ******************************************************/
 
 template <typename T>
+T* DoCallback(JS::CallbackTracer* trc, T** thingp, const char* name);
+template <typename T>
 T DoCallback(JS::CallbackTracer* trc, T* thingp, const char* name);
 template <typename T>
 void DoMarking(GCMarker* gcmarker, T* thing);
@@ -517,40 +513,40 @@ template void js::TraceProcessGlobalRoot<JSAtom>(JSTracer*, JSAtom*,
 template void js::TraceProcessGlobalRoot<JS::Symbol>(JSTracer*, JS::Symbol*,
                                                      const char*);
 
-// A typed functor adaptor for TraceRoot.
-struct TraceRootFunctor {
-  template <typename T>
-  void operator()(JSTracer* trc, Cell** thingp, const char* name) {
-    TraceRoot(trc, reinterpret_cast<T**>(thingp), name);
-  }
-};
-
 void js::TraceGenericPointerRoot(JSTracer* trc, Cell** thingp,
                                  const char* name) {
   MOZ_ASSERT(thingp);
-  if (!*thingp) {
+  Cell* thing = *thingp;
+  if (!thing) {
     return;
   }
-  TraceRootFunctor f;
-  DispatchTraceKindTyped(f, (*thingp)->getTraceKind(), trc, thingp, name);
-}
 
-// A typed functor adaptor for TraceManuallyBarrieredEdge.
-struct TraceManuallyBarrieredEdgeFunctor {
-  template <typename T>
-  void operator()(JSTracer* trc, Cell** thingp, const char* name) {
-    TraceManuallyBarrieredEdge(trc, reinterpret_cast<T**>(thingp), name);
+  auto traced = MapGCThingTyped(thing, thing->getTraceKind(),
+                                [trc, name](auto t) -> Cell* {
+    TraceRoot(trc, &t, name);
+    return t;
+  });
+  if (traced != thing) {
+    *thingp = traced;
   }
-};
+}
 
 void js::TraceManuallyBarrieredGenericPointerEdge(JSTracer* trc, Cell** thingp,
                                                   const char* name) {
   MOZ_ASSERT(thingp);
+  Cell* thing = *thingp;
   if (!*thingp) {
     return;
   }
-  TraceManuallyBarrieredEdgeFunctor f;
-  DispatchTraceKindTyped(f, (*thingp)->getTraceKind(), trc, thingp, name);
+
+  auto traced = MapGCThingTyped(thing, thing->getTraceKind(),
+                                [trc, name](auto t) -> Cell* {
+    TraceManuallyBarrieredEdge(trc, &t, name);
+    return t;
+  });
+  if (traced != thing) {
+    *thingp = traced;
+  }
 }
 
 // This method is responsible for dynamic dispatch to the real tracer
@@ -741,17 +737,9 @@ void DoMarking(GCMarker* gcmarker, T* thing) {
   SetMaybeAliveFlag(thing);
 }
 
-template <typename S>
-struct DoMarkingFunctor : public VoidDefaultAdaptor<S> {
-  template <typename T>
-  void operator()(T* t, GCMarker* gcmarker) {
-    DoMarking(gcmarker, t);
-  }
-};
-
 template <typename T>
 void DoMarking(GCMarker* gcmarker, const T& thing) {
-  DispatchTyped(DoMarkingFunctor<T>(), thing, gcmarker);
+  ApplyGCThingTyped(thing, [gcmarker](auto t) { DoMarking(gcmarker, t); });
 }
 
 template <typename T>
@@ -933,17 +921,11 @@ void js::GCMarker::traverseEdge(S source, T* target) {
   traverse(target);
 }
 
-template <typename V, typename S>
-struct TraverseEdgeFunctor : public VoidDefaultAdaptor<V> {
-  template <typename T>
-  void operator()(T t, GCMarker* gcmarker, S s) {
-    return gcmarker->traverseEdge(s, t);
-  }
-};
-
 template <typename S, typename T>
 void js::GCMarker::traverseEdge(S source, const T& thing) {
-  DispatchTyped(TraverseEdgeFunctor<T, S>(), thing, this, source);
+  ApplyGCThingTyped(thing, [this, source](auto t) {
+                             this->traverseEdge(source, t);
+                           });
 }
 
 namespace {
@@ -1096,8 +1078,8 @@ inline void js::GCMarker::eagerlyMarkChildren(Shape* shape) {
     BaseShape* base = shape->base();
     CheckTraversedEdge(shape, base);
     if (mark(base)) {
-      MOZ_ASSERT(base->canSkipMarkingShapeTable(shape));
-      base->traceChildrenSkipShapeTable(this);
+      MOZ_ASSERT(base->canSkipMarkingShapeCache(shape));
+      base->traceChildrenSkipShapeCache(this);
     }
 
     traverseEdge(shape, shape->propidRef().get());
@@ -1518,20 +1500,16 @@ void js::GCMarker::lazilyMarkChildren(ObjectGroup* group) {
 void JS::BigInt::traceChildren(JSTracer* trc) { return; }
 #endif
 
-struct TraverseObjectFunctor {
-  template <typename T>
-  void operator()(T* thing, GCMarker* gcmarker, JSObject* src) {
-    gcmarker->traverseEdge(src, *thing);
-  }
-};
+template <typename Functor>
+static void VisitTraceList(const Functor& f, const int32_t* traceList,
+                           uint8_t* memory);
 
 // Call the trace hook set on the object, if present. If further tracing of
 // NativeObject fields is required, this will return the native object.
 enum class CheckGeneration { DoChecks, NoChecks };
-template <typename Functor, typename... Args>
-static inline NativeObject* CallTraceHook(Functor f, JSTracer* trc,
-                                          JSObject* obj, CheckGeneration check,
-                                          Args&&... args) {
+template <typename Functor>
+static inline NativeObject* CallTraceHook(Functor&& f, JSTracer* trc,
+                                          JSObject* obj, CheckGeneration check) {
   const Class* clasp = obj->getClass();
   MOZ_ASSERT(clasp);
   MOZ_ASSERT(obj->isNative() == clasp->isNative());
@@ -1542,12 +1520,12 @@ static inline NativeObject* CallTraceHook(Functor f, JSTracer* trc,
 
   if (clasp->isTrace(InlineTypedObject::obj_trace)) {
     Shape** pshape = obj->as<InlineTypedObject>().addressOfShapeFromGC();
-    f(pshape, std::forward<Args>(args)...);
+    f(pshape);
 
     InlineTypedObject& tobj = obj->as<InlineTypedObject>();
     if (tobj.typeDescr().hasTraceList()) {
       VisitTraceList(f, tobj.typeDescr().traceList(),
-                     tobj.inlineTypedMemForGC(), std::forward<Args>(args)...);
+                     tobj.inlineTypedMemForGC());
     }
 
     return nullptr;
@@ -1556,7 +1534,7 @@ static inline NativeObject* CallTraceHook(Functor f, JSTracer* trc,
   if (clasp == &UnboxedPlainObject::class_) {
     JSObject** pexpando = obj->as<UnboxedPlainObject>().addressOfExpando();
     if (*pexpando) {
-      f(pexpando, std::forward<Args>(args)...);
+      f(pexpando);
     }
 
     UnboxedPlainObject& unboxed = obj->as<UnboxedPlainObject>();
@@ -1564,8 +1542,7 @@ static inline NativeObject* CallTraceHook(Functor f, JSTracer* trc,
                                       ? unboxed.layout()
                                       : unboxed.layoutDontCheckGeneration();
     if (layout.traceList()) {
-      VisitTraceList(f, layout.traceList(), unboxed.data(),
-                     std::forward<Args>(args)...);
+      VisitTraceList(f, layout.traceList(), unboxed.data());
     }
 
     return nullptr;
@@ -1579,26 +1556,24 @@ static inline NativeObject* CallTraceHook(Functor f, JSTracer* trc,
   return &obj->as<NativeObject>();
 }
 
-template <typename F, typename... Args>
-static void VisitTraceList(F f, const int32_t* traceList, uint8_t* memory,
-                           Args&&... args) {
+template <typename Functor>
+static void VisitTraceList(const Functor& f, const int32_t* traceList,
+                           uint8_t* memory) {
   while (*traceList != -1) {
-    f(reinterpret_cast<JSString**>(memory + *traceList),
-      std::forward<Args>(args)...);
+    f(reinterpret_cast<JSString**>(memory + *traceList));
     traceList++;
   }
   traceList++;
   while (*traceList != -1) {
     JSObject** objp = reinterpret_cast<JSObject**>(memory + *traceList);
     if (*objp) {
-      f(objp, std::forward<Args>(args)...);
+      f(objp);
     }
     traceList++;
   }
   traceList++;
   while (*traceList != -1) {
-    f(reinterpret_cast<Value*>(memory + *traceList),
-      std::forward<Args>(args)...);
+    f(reinterpret_cast<Value*>(memory + *traceList));
     traceList++;
   }
 }
@@ -1828,8 +1803,9 @@ scan_obj : {
   ObjectGroup* group = obj->groupFromGC();
   traverseEdge(obj, group);
 
-  NativeObject* nobj = CallTraceHook(TraverseObjectFunctor(), this, obj,
-                                     CheckGeneration::DoChecks, this, obj);
+  NativeObject* nobj = CallTraceHook([this, obj](auto thingp) {
+                                       this->traverseEdge(obj, *thingp);
+                                     }, this, obj, CheckGeneration::DoChecks);
   if (!nobj) {
     return;
   }
@@ -2759,19 +2735,17 @@ void TenuringTracer::traverse(JSString** strp) {
   }
 }
 
-template <typename S>
-struct TenuringTraversalFunctor : public IdentityDefaultAdaptor<S> {
-  template <typename T>
-  S operator()(T* t, TenuringTracer* trc) {
-    trc->traverse(&t);
-    return js::gc::RewrapTaggedPointer<S, T>::wrap(t);
-  }
-};
-
 template <typename T>
 void TenuringTracer::traverse(T* thingp) {
-  *thingp = DispatchTyped(TenuringTraversalFunctor<T>(), *thingp, this);
+  auto tenured = MapGCThingTyped(*thingp, [this](auto t) {
+    this->traverse(&t);
+    return TaggedPtr<T>::wrap(t);
+  });
+  if (tenured.isSome() && tenured.value() != *thingp) {
+    *thingp = tenured.value();
+  }
 }
+
 }  // namespace js
 
 template <typename T>
@@ -2937,17 +2911,11 @@ void js::gc::StoreBuffer::ValueEdge::trace(TenuringTracer& mover) const {
   }
 }
 
-struct TenuringFunctor {
-  template <typename T>
-  void operator()(T* thing, TenuringTracer& mover) {
-    mover.traverse(thing);
-  }
-};
-
 // Visit all object children of the object and trace them.
 void js::TenuringTracer::traceObject(JSObject* obj) {
-  NativeObject* nobj = CallTraceHook(TenuringFunctor(), this, obj,
-                                     CheckGeneration::NoChecks, *this);
+  NativeObject* nobj = CallTraceHook([this](auto thingp) {
+                                       this->traverse(thingp);
+                                     }, this, obj, CheckGeneration::NoChecks);
   if (!nobj) {
     return;
   }
@@ -3359,36 +3327,30 @@ bool js::gc::IsMarkedBlackInternal(JSRuntime* rt, T** thingp) {
   return (*thingp)->asTenured().isMarkedBlack();
 }
 
-template <typename S>
-struct IsMarkedFunctor : public IdentityDefaultAdaptor<S> {
-  template <typename T>
-  S operator()(T* t, JSRuntime* rt, bool* rv) {
-    *rv = IsMarkedInternal(rt, &t);
-    return js::gc::RewrapTaggedPointer<S, T>::wrap(t);
-  }
-};
-
 template <typename T>
 bool js::gc::IsMarkedInternal(JSRuntime* rt, T* thingp) {
-  bool rv = true;
-  *thingp = DispatchTyped(IsMarkedFunctor<T>(), *thingp, rt, &rv);
-  return rv;
-}
-
-template <typename S>
-struct IsMarkedBlackFunctor : public IdentityDefaultAdaptor<S> {
-  template <typename T>
-  S operator()(T* t, JSRuntime* rt, bool* rv) {
-    *rv = IsMarkedBlackInternal(rt, &t);
-    return js::gc::RewrapTaggedPointer<S, T>::wrap(t);
+  bool marked = true;
+  auto thing = MapGCThingTyped(*thingp, [rt, &marked](auto t) {
+    marked = IsMarkedInternal(rt, &t);
+    return TaggedPtr<T>::wrap(t);
+  });
+  if (thing.isSome() && thing.value() != *thingp) {
+    *thingp = thing.value();
   }
-};
+  return marked;
+}
 
 template <typename T>
 bool js::gc::IsMarkedBlackInternal(JSRuntime* rt, T* thingp) {
-  bool rv = true;
-  *thingp = DispatchTyped(IsMarkedBlackFunctor<T>(), *thingp, rt, &rv);
-  return rv;
+  bool marked = true;
+  auto thing = MapGCThingTyped(*thingp, [rt, &marked](auto t) {
+    marked = IsMarkedBlackInternal(rt, &t);
+    return TaggedPtr<T>::wrap(t);
+  });
+  if (thing.isSome() && thing.value() != *thingp) {
+    *thingp = thing.value();
+  }
+  return marked;
 }
 
 bool js::gc::IsAboutToBeFinalizedDuringSweep(TenuredCell& tenured) {
@@ -3425,21 +3387,17 @@ bool js::gc::IsAboutToBeFinalizedInternal(T** thingp) {
   return false;
 }
 
-template <typename S>
-struct IsAboutToBeFinalizedInternalFunctor : public IdentityDefaultAdaptor<S> {
-  template <typename T>
-  S operator()(T* t, bool* rv) {
-    *rv = IsAboutToBeFinalizedInternal(&t);
-    return js::gc::RewrapTaggedPointer<S, T>::wrap(t);
-  }
-};
-
 template <typename T>
 bool js::gc::IsAboutToBeFinalizedInternal(T* thingp) {
-  bool rv = false;
-  *thingp =
-      DispatchTyped(IsAboutToBeFinalizedInternalFunctor<T>(), *thingp, &rv);
-  return rv;
+  bool dying = false;
+  auto thing = MapGCThingTyped(*thingp, [&dying](auto t) {
+    dying = IsAboutToBeFinalizedInternal(&t);
+    return TaggedPtr<T>::wrap(t);
+  });
+  if (thing.isSome() && thing.value() != *thingp) {
+    *thingp = thing.value();
+  }
+  return dying;
 }
 
 namespace js {
@@ -3641,6 +3599,11 @@ static bool UnmarkGrayGCThing(JSRuntime* rt, JS::GCCellPtr thing) {
   // Gray cell unmarking can occur at different points between recording and
   // replay, so disallow recorded events from occurring in the tracer.
   mozilla::recordreplay::AutoDisallowThreadEvents d;
+
+  AutoGeckoProfilerEntry profilingStackFrame(
+    rt->mainContextFromOwnThread(),
+    "UnmarkGrayGCThing",
+    ProfilingStackFrame::Category::GCCC);
 
   UnmarkGrayTracer unmarker(rt);
   gcstats::AutoPhase innerPhase(rt->gc.stats(),

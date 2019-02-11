@@ -1761,26 +1761,26 @@ nsIScrollableFrame* nsLayoutUtils::GetScrollableFrameFor(
   int32_t sides = eSideBitsNone;
   if (aFixedPosFrame != aViewportFrame) {
     const nsStylePosition* position = aFixedPosFrame->StylePosition();
-    if (position->mOffset.GetRightUnit() != eStyleUnit_Auto) {
+    if (!position->mOffset.Get(eSideRight).IsAuto()) {
       sides |= eSideBitsRight;
-      if (position->mOffset.GetLeftUnit() != eStyleUnit_Auto) {
+      if (!position->mOffset.Get(eSideLeft).IsAuto()) {
         sides |= eSideBitsLeft;
         anchor.x = anchorRect.x + anchorRect.width / 2.f;
       } else {
         anchor.x = anchorRect.XMost();
       }
-    } else if (position->mOffset.GetLeftUnit() != eStyleUnit_Auto) {
+    } else if (!position->mOffset.Get(eSideLeft).IsAuto()) {
       sides |= eSideBitsLeft;
     }
-    if (position->mOffset.GetBottomUnit() != eStyleUnit_Auto) {
+    if (!position->mOffset.Get(eSideBottom).IsAuto()) {
       sides |= eSideBitsBottom;
-      if (position->mOffset.GetTopUnit() != eStyleUnit_Auto) {
+      if (!position->mOffset.Get(eSideTop).IsAuto()) {
         sides |= eSideBitsTop;
         anchor.y = anchorRect.y + anchorRect.height / 2.f;
       } else {
         anchor.y = anchorRect.YMost();
       }
-    } else if (position->mOffset.GetTopUnit() != eStyleUnit_Auto) {
+    } else if (!position->mOffset.Get(eSideTop).IsAuto()) {
       sides |= eSideBitsTop;
     }
   }
@@ -3613,10 +3613,24 @@ nsresult nsLayoutUtils::PaintFrame(gfxContext* aRenderingContext,
       DisplayListChecker toBeMergedChecker;
       DisplayListChecker afterMergeChecker;
 
+      // If we transition between wrapping the RCD-RSF contents into an async
+      // zoom container vs. not, we need to rebuild the display list. This only
+      // happens when the zooming or container scrolling prefs are toggled
+      // (manually by the user, or during test setup).
+      bool shouldAttemptPartialUpdate = useRetainedBuilder;
+      bool didBuildAsyncZoomContainer = builder.ShouldBuildAsyncZoomContainer();
+      builder.SetBuildAsyncZoomContainer(
+          gfxPrefs::APZAllowZooming() &&
+          !gfxPrefs::LayoutUseContainersForRootFrames());
+      if (builder.ShouldBuildAsyncZoomContainer() !=
+          didBuildAsyncZoomContainer) {
+        shouldAttemptPartialUpdate = false;
+      }
+
       // Attempt to do a partial build and merge into the existing list.
       // This calls BuildDisplayListForStacking context on a subset of the
       // viewport.
-      if (useRetainedBuilder) {
+      if (shouldAttemptPartialUpdate) {
         if (gfxPrefs::LayoutVerifyRetainDisplayList()) {
           beforeMergeChecker.Set(&list, "BM");
         }
@@ -4597,6 +4611,15 @@ bool nsLayoutUtils::IsViewportScrollbarFrame(nsIFrame* aFrame) {
            IsProperAncestorFrame(rootScrolledFrame, aFrame));
 }
 
+// Use only for paddings, since it clamps negative calc() to 0.
+static bool GetAbsoluteCoord(const LengthPercentage& aStyle, nscoord& aResult) {
+  if (!aStyle.ConvertsToLength()) {
+    return false;
+  }
+  aResult = std::max(0, aStyle.ToLength());
+  return true;
+}
+
 // Use only for widths/heights (or their min/max), since it clamps
 // negative calc() results to 0.
 static bool GetAbsoluteCoord(const nsStyleCoord& aStyle, nscoord& aResult) {
@@ -4713,6 +4736,54 @@ static bool GetPercentBSize(const nsStyleCoord& aStyle, nsIFrame* aFrame,
   return true;
 }
 
+static bool GetPercentBSize(const LengthPercentage& aStyle, nsIFrame* aFrame,
+                            bool aHorizontalAxis, nscoord& aResult) {
+  if (!aStyle.HasPercent()) {
+    return false;
+  }
+
+  // TODO(emilio): Temporary until I convert width / height to Servo too.
+  nsStyleCoord coord;
+  if (aStyle.was_calc) {
+    nscoord length = CSSPixel::ToAppUnits(aStyle.LengthInCSSPixels());
+    float percent = aStyle.Percentage();
+    auto* calc = new nsStyleCoord::Calc();
+    calc->mLength = length;
+    calc->mPercent = percent;
+    calc->mHasPercent = true;
+    coord.SetCalcValue(calc);  // Takes ownership.
+  } else {
+    coord.SetPercentValue(aStyle.Percentage());
+  }
+
+  return GetPercentBSize(coord, aFrame, aHorizontalAxis, aResult);
+}
+
+// Return true if aStyle can be resolved to a definite value and if so
+// return that value in aResult.
+static bool GetDefiniteSize(const LengthPercentage& aStyle, nsIFrame* aFrame,
+                            bool aIsInlineAxis,
+                            const Maybe<LogicalSize>& aPercentageBasis,
+                            nscoord* aResult) {
+  if (aStyle.ConvertsToLength()) {
+    *aResult = aStyle.ToLength();
+    return true;
+  }
+
+  if (!aPercentageBasis) {
+    return false;
+  }
+
+  auto wm = aFrame->GetWritingMode();
+  nscoord pb = aIsInlineAxis ? aPercentageBasis.value().ISize(wm)
+                             : aPercentageBasis.value().BSize(wm);
+  if (pb == NS_UNCONSTRAINEDSIZE) {
+    return false;
+  }
+  *aResult = std::max(0, aStyle.Resolve(pb));
+  return true;
+}
+
 // Return true if aStyle can be resolved to a definite value and if so
 // return that value in aResult.
 static bool GetDefiniteSize(const nsStyleCoord& aStyle, nsIFrame* aFrame,
@@ -4781,10 +4852,10 @@ static nscoord GetBSizeTakenByBoxSizing(StyleBoxSizing aBoxSizing,
                                  ? styleBorder->GetComputedBorder().TopBottom()
                                  : styleBorder->GetComputedBorder().LeftRight();
     if (!aIgnorePadding) {
-      const nsStyleSides& stylePadding = aFrame->StylePadding()->mPadding;
-      const nsStyleCoord& paddingStart =
+      const auto& stylePadding = aFrame->StylePadding()->mPadding;
+      const LengthPercentage& paddingStart =
           stylePadding.Get(aHorizontalAxis ? eSideTop : eSideLeft);
-      const nsStyleCoord& paddingEnd =
+      const LengthPercentage& paddingEnd =
           stylePadding.Get(aHorizontalAxis ? eSideBottom : eSideRight);
       nscoord pad;
       // XXXbz Calling GetPercentBSize on padding values looks bogus, since
@@ -4823,10 +4894,10 @@ static nscoord GetDefiniteSizeTakenByBoxSizing(
                                ? styleBorder->GetComputedBorder().LeftRight()
                                : styleBorder->GetComputedBorder().TopBottom();
     if (!aIgnorePadding) {
-      const nsStyleSides& stylePadding = aFrame->StylePadding()->mPadding;
-      const nsStyleCoord& pStart =
+      const auto& stylePadding = aFrame->StylePadding()->mPadding;
+      const LengthPercentage& pStart =
           stylePadding.Get(isHorizontalAxis ? eSideLeft : eSideTop);
-      const nsStyleCoord& pEnd =
+      const LengthPercentage& pEnd =
           stylePadding.Get(isHorizontalAxis ? eSideRight : eSideBottom);
       nscoord pad;
       // XXXbz Calling GetPercentBSize on padding values looks bogus, since
@@ -5464,24 +5535,8 @@ static void AddStateBitToAncestors(nsIFrame* aFrame, nsFrameState aBit) {
   return result;
 }
 
-/* static */ nscoord nsLayoutUtils::ComputeCBDependentValue(
-    nscoord aPercentBasis, const nsStyleCoord& aCoord) {
-  NS_WARNING_ASSERTION(
-      aPercentBasis != NS_UNCONSTRAINEDSIZE,
-      "have unconstrained width or height; this should only result from very "
-      "large sizes, not attempts at intrinsic size calculation");
-
-  if (aCoord.IsCoordPercentCalcUnit()) {
-    return aCoord.ComputeCoordPercentCalc(aPercentBasis);
-  }
-  NS_ASSERTION(aCoord.GetUnit() == eStyleUnit_None ||
-                   aCoord.GetUnit() == eStyleUnit_Auto,
-               "unexpected width value");
-  return 0;
-}
-
 /* static */ nscoord nsLayoutUtils::ComputeBSizeDependentValue(
-    nscoord aContainingBlockBSize, const nsStyleCoord& aCoord) {
+    nscoord aContainingBlockBSize, const LengthPercentageOrAuto& aCoord) {
   // XXXldb Some callers explicitly check aContainingBlockBSize
   // against NS_AUTOHEIGHT *and* unit against eStyleUnit_Percent or
   // calc()s containing percents before calling this function.
@@ -5492,14 +5547,11 @@ static void AddStateBitToAncestors(nsIFrame* aFrame, nsFrameState aBit) {
   MOZ_ASSERT(NS_AUTOHEIGHT != aContainingBlockBSize || !aCoord.HasPercent(),
              "unexpected containing block block-size");
 
-  if (aCoord.IsCoordPercentCalcUnit()) {
-    return aCoord.ComputeCoordPercentCalc(aContainingBlockBSize);
+  if (aCoord.IsAuto()) {
+    return 0;
   }
 
-  NS_ASSERTION(aCoord.GetUnit() == eStyleUnit_None ||
-                   aCoord.GetUnit() == eStyleUnit_Auto,
-               "unexpected block-size value");
-  return 0;
+  return aCoord.AsLengthPercentage().Resolve(aContainingBlockBSize);
 }
 
 /* static */ void nsLayoutUtils::MarkDescendantsDirty(nsIFrame* aSubtreeRoot) {
@@ -9569,8 +9621,7 @@ static nsRect ComputeHTMLReferenceRect(nsIFrame* aFrame,
 /* static */
 already_AddRefed<nsFontMetrics> nsLayoutUtils::GetMetricsFor(
     nsPresContext* aPresContext, bool aIsVertical,
-    const nsStyleFont* aStyleFont, nscoord aFontSize, bool aUseUserFontSet,
-    FlushUserFontSet aFlushUserFontSet) {
+    const nsStyleFont* aStyleFont, nscoord aFontSize, bool aUseUserFontSet) {
   nsFont font = aStyleFont->mFont;
   font.size = aFontSize;
   gfxFont::Orientation orientation =
@@ -9579,10 +9630,8 @@ already_AddRefed<nsFontMetrics> nsLayoutUtils::GetMetricsFor(
   params.language = aStyleFont->mLanguage;
   params.explicitLanguage = aStyleFont->mExplicitLanguage;
   params.orientation = orientation;
-  params.userFontSet = aUseUserFontSet
-                           ? aPresContext->GetUserFontSet(aFlushUserFontSet ==
-                                                          FlushUserFontSet::Yes)
-                           : nullptr;
+  params.userFontSet =
+      aUseUserFontSet ? aPresContext->GetUserFontSet() : nullptr;
   params.textPerf = aPresContext->GetTextPerfMetrics();
   return aPresContext->DeviceContext()->GetMetricsFor(font, params);
 }

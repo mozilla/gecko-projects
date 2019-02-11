@@ -15,11 +15,11 @@ import FrameComponent from "./Frame";
 
 import "./Group.css";
 
-import type { LocalFrame } from "./types";
+import type { Frame } from "../../../types";
 import Badge from "../../shared/Badge";
 import FrameIndent from "./FrameIndent";
 
-type FrameLocationProps = { frame: LocalFrame, expanded: boolean };
+type FrameLocationProps = { frame: Frame, expanded: boolean };
 function FrameLocation({ frame, expanded }: FrameLocationProps) {
   const library = frame.library || getLibraryFromUrl(frame);
   if (!library) {
@@ -39,8 +39,8 @@ function FrameLocation({ frame, expanded }: FrameLocationProps) {
 FrameLocation.displayName = "FrameLocation";
 
 type Props = {
-  group: LocalFrame[],
-  selectedFrame: LocalFrame,
+  group: Frame[],
+  selectedFrame: Frame,
   selectFrame: Function,
   toggleFrameworkGrouping: Function,
   copyStackTrace: Function,
@@ -108,9 +108,9 @@ export default class Group extends Component<Props, State> {
 
     return (
       <div className="frames-list">
-        {group.reduce((acc, frame) => {
+        {group.reduce((acc, frame, i) => {
           if (selectable) {
-            acc.push(<FrameIndent />);
+            acc.push(<FrameIndent key={`frame-indent-${i}`} />);
           }
           return acc.concat(
             <FrameComponent

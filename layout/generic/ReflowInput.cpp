@@ -136,21 +136,32 @@ static nscoord FontSizeInflationListMarginAdjustment(const nsIFrame* aFrame) {
   }
 
   float inflation = nsLayoutUtils::FontSizeInflationFor(aFrame);
-  if (inflation > 1.0f) {
-    auto listStyleType = aFrame->StyleList()->mCounterStyle->GetStyle();
-    if (listStyleType != NS_STYLE_LIST_STYLE_NONE &&
-        listStyleType != NS_STYLE_LIST_STYLE_DISC &&
-        listStyleType != NS_STYLE_LIST_STYLE_CIRCLE &&
-        listStyleType != NS_STYLE_LIST_STYLE_SQUARE &&
-        listStyleType != NS_STYLE_LIST_STYLE_DISCLOSURE_CLOSED &&
-        listStyleType != NS_STYLE_LIST_STYLE_DISCLOSURE_OPEN) {
-      // The HTML spec states that the default padding for ordered lists
-      // begins at 40px, indicating that we have 40px of space to place a
-      // bullet. When performing font inflation calculations, we add space
-      // equivalent to this, but simply inflated at the same amount as the
-      // text, in app units.
-      return nsPresContext::CSSPixelsToAppUnits(40) * (inflation - 1);
-    }
+  if (inflation <= 1.0f) {
+    return 0;
+  }
+
+  // The HTML spec states that the default padding for ordered lists
+  // begins at 40px, indicating that we have 40px of space to place a
+  // bullet. When performing font inflation calculations, we add space
+  // equivalent to this, but simply inflated at the same amount as the
+  // text, in app units.
+  auto margin = nsPresContext::CSSPixelsToAppUnits(40) * (inflation - 1);
+
+  auto* list = aFrame->StyleList();
+  if (!list->mCounterStyle.IsAtom()) {
+    return margin;
+  }
+
+  // NOTE(emilio): @counter-style can override some of the styles from this
+  // list, and we won't add margin to the counter.
+  //
+  // See https://github.com/w3c/csswg-drafts/issues/3584
+  nsAtom* type = list->mCounterStyle.AsAtom();
+  if (type != nsGkAtoms::none && type != nsGkAtoms::disc &&
+      type != nsGkAtoms::circle && type != nsGkAtoms::square &&
+      type != nsGkAtoms::disclosure_closed &&
+      type != nsGkAtoms::disclosure_open) {
+    return margin;
   }
 
   return 0;
@@ -721,8 +732,7 @@ void ReflowInput::InitResizeFlags(nsPresContext* aPresContext,
       mStylePosition->MinBSizeDependsOnContainer(wm) ||
       mStylePosition->MaxBSizeDependsOnContainer(wm) ||
       mStylePosition->OffsetHasPercent(wm.PhysicalSide(eLogicalSideBStart)) ||
-      mStylePosition->mOffset.GetBEndUnit(wm) != eStyleUnit_Auto ||
-      mFrame->IsXULBoxFrame();
+      !mStylePosition->mOffset.GetBEnd(wm).IsAuto() || mFrame->IsXULBoxFrame();
 
   if (mStyleText->mLineHeight.GetUnit() == eStyleUnit_Enumerated) {
     NS_ASSERTION(mStyleText->mLineHeight.GetIntValue() ==
@@ -1005,10 +1015,8 @@ void ReflowInput::InitFrameType(LayoutFrameType aFrameType) {
   // moves the boxes to the end of the line, and 'inlineEnd' moves the
   // boxes to the start of the line. The computed values are always:
   // inlineStart=-inlineEnd
-  bool inlineStartIsAuto =
-      eStyleUnit_Auto == position->mOffset.GetUnit(inlineStart);
-  bool inlineEndIsAuto =
-      eStyleUnit_Auto == position->mOffset.GetUnit(inlineEnd);
+  bool inlineStartIsAuto = position->mOffset.Get(inlineStart).IsAuto();
+  bool inlineEndIsAuto = position->mOffset.Get(inlineEnd).IsAuto();
 
   // If neither 'inlineStart' nor 'inlineEnd' is auto, then we're
   // over-constrained and we ignore one of them
@@ -1044,9 +1052,8 @@ void ReflowInput::InitFrameType(LayoutFrameType aFrameType) {
   // and 'blockEnd' properties move relatively positioned elements in
   // the block progression direction. They also must be each other's
   // negative
-  bool blockStartIsAuto =
-      eStyleUnit_Auto == position->mOffset.GetUnit(blockStart);
-  bool blockEndIsAuto = eStyleUnit_Auto == position->mOffset.GetUnit(blockEnd);
+  bool blockStartIsAuto = position->mOffset.Get(blockStart).IsAuto();
+  bool blockEndIsAuto = position->mOffset.Get(blockEnd).IsAuto();
 
   // Check for percentage based values and a containing block block-size
   // that depends on the content block-size. Treat them like 'auto'
@@ -1270,7 +1277,7 @@ void ReflowInput::CalculateBorderPaddingMargin(
   } else {
     nscoord start, end;
     // We have to compute the start and end values
-    if (eStyleUnit_Auto == mStyleMargin->mMargin.GetUnit(startSide)) {
+    if (mStyleMargin->mMargin.Get(startSide).IsAuto()) {
       // We set this to 0 for now, and fix it up later in
       // InitAbsoluteConstraints (which is caller of this function, via
       // CalculateHypotheticalPosition).
@@ -1279,7 +1286,7 @@ void ReflowInput::CalculateBorderPaddingMargin(
       start = nsLayoutUtils::ComputeCBDependentValue(
           aContainingBlockSize, mStyleMargin->mMargin.Get(startSide));
     }
-    if (eStyleUnit_Auto == mStyleMargin->mMargin.GetUnit(endSide)) {
+    if (mStyleMargin->mMargin.Get(endSide).IsAuto()) {
       // We set this to 0 for now, and fix it up later in
       // InitAbsoluteConstraints (which is caller of this function, via
       // CalculateHypotheticalPosition).
@@ -1632,10 +1639,10 @@ void ReflowInput::InitAbsoluteConstraints(nsPresContext* aPresContext,
                "Why are we here?");
 
   const auto& styleOffset = mStylePosition->mOffset;
-  bool iStartIsAuto = styleOffset.GetIStartUnit(cbwm) == eStyleUnit_Auto;
-  bool iEndIsAuto = styleOffset.GetIEndUnit(cbwm) == eStyleUnit_Auto;
-  bool bStartIsAuto = styleOffset.GetBStartUnit(cbwm) == eStyleUnit_Auto;
-  bool bEndIsAuto = styleOffset.GetBEndUnit(cbwm) == eStyleUnit_Auto;
+  bool iStartIsAuto = styleOffset.GetIStart(cbwm).IsAuto();
+  bool iEndIsAuto = styleOffset.GetIEnd(cbwm).IsAuto();
+  bool bStartIsAuto = styleOffset.GetBStart(cbwm).IsAuto();
+  bool bEndIsAuto = styleOffset.GetBEnd(cbwm).IsAuto();
 
   // If both 'left' and 'right' are 'auto' or both 'top' and 'bottom' are
   // 'auto', then compute the hypothetical box position where the element would
@@ -1875,10 +1882,8 @@ void ReflowInput::InitAbsoluteConstraints(nsPresContext* aPresContext,
     nscoord availMarginSpace =
         aCBSize.ISize(cbwm) - offsets.IStartEnd(cbwm) - margin.IStartEnd(cbwm) -
         borderPadding.IStartEnd(cbwm) - computedSize.ISize(cbwm);
-    marginIStartIsAuto =
-        eStyleUnit_Auto == mStyleMargin->mMargin.GetIStartUnit(cbwm);
-    marginIEndIsAuto =
-        eStyleUnit_Auto == mStyleMargin->mMargin.GetIEndUnit(cbwm);
+    marginIStartIsAuto = mStyleMargin->mMargin.GetIStart(cbwm).IsAuto();
+    marginIEndIsAuto = mStyleMargin->mMargin.GetIEnd(cbwm).IsAuto();
 
     if (marginIStartIsAuto) {
       if (marginIEndIsAuto) {
@@ -1963,10 +1968,8 @@ void ReflowInput::InitAbsoluteConstraints(nsPresContext* aPresContext,
     //  * we're dealing with a replaced element
     //  * bsize was constrained by min- or max-bsize.
     nscoord availMarginSpace = autoBSize - computedSize.BSize(cbwm);
-    marginBStartIsAuto =
-        eStyleUnit_Auto == mStyleMargin->mMargin.GetBStartUnit(cbwm);
-    marginBEndIsAuto =
-        eStyleUnit_Auto == mStyleMargin->mMargin.GetBEndUnit(cbwm);
+    marginBStartIsAuto = mStyleMargin->mMargin.GetBStart(cbwm).IsAuto();
+    marginBEndIsAuto = mStyleMargin->mMargin.GetBEnd(cbwm).IsAuto();
 
     if (marginBStartIsAuto) {
       if (marginBEndIsAuto) {
@@ -2471,8 +2474,8 @@ void ReflowInput::InitConstraints(nsPresContext* aPresContext,
                 : mStylePosition->UsedJustifySelf(alignCB->Style());
         if ((inlineAxisAlignment != NS_STYLE_ALIGN_STRETCH &&
              inlineAxisAlignment != NS_STYLE_ALIGN_NORMAL) ||
-            mStyleMargin->mMargin.GetIStartUnit(wm) == eStyleUnit_Auto ||
-            mStyleMargin->mMargin.GetIEndUnit(wm) == eStyleUnit_Auto) {
+            mStyleMargin->mMargin.GetIStart(wm).IsAuto() ||
+            mStyleMargin->mMargin.GetIEnd(wm).IsAuto()) {
           computeSizeFlags = ComputeSizeFlags(computeSizeFlags |
                                               ComputeSizeFlags::eShrinkWrap);
         }
@@ -2736,9 +2739,9 @@ void ReflowInput::CalculateBlockSideMargins(LayoutFrameType aFrameType) {
 
   // The css2 spec clearly defines how block elements should behave
   // in section 10.3.3.
-  const nsStyleSides& styleSides = mStyleMargin->mMargin;
-  bool isAutoStartMargin = eStyleUnit_Auto == styleSides.GetIStartUnit(cbWM);
-  bool isAutoEndMargin = eStyleUnit_Auto == styleSides.GetIEndUnit(cbWM);
+  const auto& styleSides = mStyleMargin->mMargin;
+  bool isAutoStartMargin = styleSides.GetIStart(cbWM).IsAuto();
+  bool isAutoEndMargin = styleSides.GetIEnd(cbWM).IsAuto();
   if (!isAutoStartMargin && !isAutoEndMargin) {
     // Neither margin is 'auto' so we're over constrained. Use the
     // 'direction' property of the parent to tell which margin to

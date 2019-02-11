@@ -298,6 +298,10 @@
       }
     },
 
+    "ExtensionUpdate": {
+      "type": "boolean"
+    },
+
     "FlashPlugin": {
       "type": "object",
       "properties": {
@@ -368,6 +372,10 @@
           "type": "boolean"
         }
       }
+    },
+
+    "NetworkPrediction": {
+      "type": "boolean"
     },
 
     "NoDefaultBookmarks": {

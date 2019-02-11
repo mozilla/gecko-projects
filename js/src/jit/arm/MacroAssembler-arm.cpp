@@ -3441,6 +3441,20 @@ Assembler::Condition MacroAssemblerARMCompat::testStringTruthy(
   return truthy ? Assembler::NotEqual : Assembler::Equal;
 }
 
+#ifdef ENABLE_BIGINT
+Assembler::Condition MacroAssemblerARMCompat::testBigIntTruthy(
+    bool truthy, const ValueOperand& value) {
+  Register bi = value.payloadReg();
+  ScratchRegisterScope scratch(asMasm());
+  SecondScratchRegisterScope scratch2(asMasm());
+
+  ma_dtr(IsLoad, bi, Imm32(BigInt::offsetOfLengthSignAndReservedBits()),
+         scratch, scratch2);
+  as_cmp(scratch, Imm8(0));
+  return truthy ? Assembler::NotEqual : Assembler::Equal;
+}
+#endif
+
 void MacroAssemblerARMCompat::floor(FloatRegister input, Register output,
                                     Label* bail) {
   Label handleZero;
@@ -4315,7 +4329,6 @@ void MacroAssembler::popReturnAddress() { pop(lr); }
 // ABI function calls.
 
 void MacroAssembler::setupUnalignedABICall(Register scratch) {
-  MOZ_ASSERT(!IsCompilingWasm(), "wasm should only use aligned ABI calls");
   setupABICall();
   dynamicAlignment_ = true;
 
@@ -5719,8 +5732,7 @@ void MacroAssembler::flexibleDivMod32(Register rhs, Register lhsOutput,
     callWithABI(isUnsigned ? JS_FUNC_TO_DATA_PTR(void*, __aeabi_uidivmod)
                            : JS_FUNC_TO_DATA_PTR(void*, __aeabi_idivmod),
                 MoveOp::GENERAL, CheckUnsafeCallWithABI::DontCheckOther);
-    mov(ReturnRegVal1, remOutput);
-    mov(ReturnRegVal0, lhsOutput);
+    moveRegPair(ReturnRegVal0, ReturnRegVal1, lhsOutput, remOutput);
 
     LiveRegisterSet ignore;
     ignore.add(remOutput);

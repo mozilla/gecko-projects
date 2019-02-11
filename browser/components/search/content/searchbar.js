@@ -119,19 +119,15 @@ class MozSearchbar extends MozXULElement {
 
     (window.delayedStartupPromise || Promise.resolve()).then(() => {
       window.requestIdleCallback(() => {
-        Services.search.init(aStatus => {
+        Services.search.init().then(aStatus => {
           // Bail out if the binding's been destroyed
           if (!this._initialized)
             return;
 
-          if (Components.isSuccessCode(aStatus)) {
-            // Refresh the display (updating icon, etc)
-            this.updateDisplay();
-            BrowserSearch.updateOpenSearchBadge();
-          } else {
-            Cu.reportError("Cannot initialize search service, bailing out: " + aStatus);
-          }
-        });
+          // Refresh the display (updating icon, etc)
+          this.updateDisplay();
+          BrowserSearch.updateOpenSearchBadge();
+        }).catch(status => Cu.reportError("Cannot initialize search service, bailing out: " + status));
       });
     });
 
@@ -389,13 +385,9 @@ class MozSearchbar extends MozXULElement {
       if (target.engine) {
         this.currentEngine = target.engine;
       } else if (target.classList.contains("addengine-item")) {
-        // Select the installed engine if the installation succeeds
-        let installCallback = {
-          onSuccess: engine => this.currentEngine = engine,
-        };
+        // Select the installed engine if the installation succeeds.
         Services.search.addEngine(target.getAttribute("uri"), null,
-          target.getAttribute("src"), false,
-          installCallback);
+          target.getAttribute("src"), false).then(engine => this.currentEngine = engine);
       } else
         return;
 

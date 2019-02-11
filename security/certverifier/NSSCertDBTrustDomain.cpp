@@ -59,7 +59,9 @@ NSSCertDBTrustDomain::NSSCertDBTrustDomain(
     ValidityCheckingMode validityCheckingMode, CertVerifier::SHA1Mode sha1Mode,
     NetscapeStepUpPolicy netscapeStepUpPolicy,
     DistrustedCAPolicy distrustedCAPolicy,
-    const OriginAttributes& originAttributes, UniqueCERTCertList& builtChain,
+    const OriginAttributes& originAttributes,
+    const Vector<Input>& thirdPartyRootInputs,
+    /*out*/ UniqueCERTCertList& builtChain,
     /*optional*/ PinningTelemetryInfo* pinningTelemetryInfo,
     /*optional*/ const char* hostname)
     : mCertDBTrustType(certDBTrustType),
@@ -77,6 +79,7 @@ NSSCertDBTrustDomain::NSSCertDBTrustDomain(
       mDistrustedCAPolicy(distrustedCAPolicy),
       mSawDistrustedCAByPolicyError(false),
       mOriginAttributes(originAttributes),
+      mThirdPartyRootInputs(thirdPartyRootInputs),
       mBuiltChain(builtChain),
       mPinningTelemetryInfo(pinningTelemetryInfo),
       mHostname(hostname),
@@ -87,33 +90,39 @@ NSSCertDBTrustDomain::NSSCertDBTrustDomain(
 
 Result NSSCertDBTrustDomain::FindIssuer(Input encodedIssuerName,
                                         IssuerChecker& checker, Time) {
-  // NSS seems not to differentiate between "no potential issuers found" and
-  // "there was an error trying to retrieve the potential issuers." We assume
-  // there was no error.
-  SECItem encodedIssuerNameItem = UnsafeMapInputToSECItem(encodedIssuerName);
-  UniqueCERTCertList candidates(CERT_CreateSubjectCertList(
-      nullptr, CERT_GetDefaultCertDB(), &encodedIssuerNameItem, 0, false));
-  if (!candidates) {
-    return Success;
-  }
-
   Vector<Input> rootCandidates;
   Vector<Input> intermediateCandidates;
-  for (CERTCertListNode* n = CERT_LIST_HEAD(candidates);
-       !CERT_LIST_END(n, candidates); n = CERT_LIST_NEXT(n)) {
-    Input certDER;
-    Result rv = certDER.Init(n->cert->derCert.data, n->cert->derCert.len);
-    if (rv != Success) {
-      continue;  // probably too big
+
+  SECItem encodedIssuerNameItem = UnsafeMapInputToSECItem(encodedIssuerName);
+
+  // NSS seems not to differentiate between "no potential issuers found" and
+  // "there was an error trying to retrieve the potential issuers." We assume
+  // there was no error if CERT_CreateSubjectCertList returns nullptr.
+  UniqueCERTCertList candidates(CERT_CreateSubjectCertList(
+      nullptr, CERT_GetDefaultCertDB(), &encodedIssuerNameItem, 0, false));
+  if (candidates) {
+    for (CERTCertListNode* n = CERT_LIST_HEAD(candidates);
+         !CERT_LIST_END(n, candidates); n = CERT_LIST_NEXT(n)) {
+      Input certDER;
+      Result rv = certDER.Init(n->cert->derCert.data, n->cert->derCert.len);
+      if (rv != Success) {
+        continue;  // probably too big
+      }
+      if (n->cert->isRoot) {
+        if (!rootCandidates.append(certDER)) {
+          return Result::FATAL_ERROR_NO_MEMORY;
+        }
+      } else {
+        if (!intermediateCandidates.append(certDER)) {
+          return Result::FATAL_ERROR_NO_MEMORY;
+        }
+      }
     }
-    if (n->cert->isRoot) {
-      if (!rootCandidates.append(certDER)) {
-        return Result::FATAL_ERROR_NO_MEMORY;
-      }
-    } else {
-      if (!intermediateCandidates.append(certDER)) {
-        return Result::FATAL_ERROR_NO_MEMORY;
-      }
+  }
+
+  for (const auto& thirdPartyRootInput : mThirdPartyRootInputs) {
+    if (!rootCandidates.append(thirdPartyRootInput)) {
+      return Result::FATAL_ERROR_NO_MEMORY;
     }
   }
 
@@ -201,6 +210,14 @@ Result NSSCertDBTrustDomain::GetCertTrust(EndEntityOrCA endEntityOrCA,
       MOZ_LOG(gCertVerifierLog, LogLevel::Debug,
               ("NSSCertDBTrustDomain: certificate is in blocklist"));
       return Result::ERROR_REVOKED_CERTIFICATE;
+    }
+  }
+
+  // This may be a third-party root.
+  for (const auto& thirdPartyRootInput : mThirdPartyRootInputs) {
+    if (InputsAreEqual(candidateCertDER, thirdPartyRootInput)) {
+      trustLevel = TrustLevel::TrustAnchor;
+      return Success;
     }
   }
 

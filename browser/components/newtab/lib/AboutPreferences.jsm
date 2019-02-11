@@ -242,8 +242,11 @@ this.AboutPreferences = class AboutPreferences {
           label.setAttribute("flex", 1);
           detailHbox.appendChild(label);
 
+          // Add box so the search tooltip is positioned correctly
+          const tooltipBox = createAppend("hbox", detailHbox);
+
           // Add appropriate number of localized entries to the dropdown
-          const menulist = createAppend("menulist", detailHbox);
+          const menulist = createAppend("menulist", tooltipBox);
           menulist.setAttribute("crop", "none");
           const menupopup = createAppend("menupopup", menulist);
           for (let num = 1; num <= maxRows; num++) {
@@ -284,6 +287,7 @@ this.AboutPreferences = class AboutPreferences {
       createAppend("hbox", discoveryGroup)
         .appendChild(contentDiscoveryButton)
         .addEventListener("click", async () => {
+          this.store.dispatch({type: at.DISCOVERY_STREAM_OPT_OUT});
           const activeExperiments = await PreferenceExperiments.getAllActive();
           const experiment = activeExperiments.find(exp => exp.preferenceName === DISCOVERY_STREAM_CONFIG_PREF_NAME);
           // Unconditionally update the UI for a fast user response and in

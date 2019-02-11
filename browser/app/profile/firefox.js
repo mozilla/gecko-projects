@@ -58,11 +58,6 @@ pref("extensions.autoDisableScopes", 15);
 pref("extensions.startupScanScopes", 0);
 
 pref("extensions.geckoProfiler.acceptedExtensionIds", "geckoprofiler@mozilla.com,quantum-foxfooding@mozilla.com,raptor@mozilla.org");
-#if defined(XP_LINUX) || defined (XP_MACOSX)
-pref("extensions.geckoProfiler.getSymbolRules", "localBreakpad,nm");
-#else // defined(XP_WIN)
-pref("extensions.geckoProfiler.getSymbolRules", "localBreakpad,dump_syms.exe");
-#endif
 
 
 // Add-on content security policies.
@@ -509,9 +504,6 @@ pref("browser.bookmarks.openInTabClosesMenu", true);
 // Scripts & Windows prefs
 pref("dom.disable_open_during_load",              true);
 pref("javascript.options.showInConsole",          true);
-#ifdef DEBUG
-pref("general.warnOnAboutConfig",                 false);
-#endif
 
 // This is the pref to control the location bar, change this to true to
 // force this - this makes the origin of popup windows more obvious to avoid
@@ -977,11 +969,7 @@ pref("security.certerrors.permanentOverride", true);
 pref("browser.privatebrowsing.autostart", false);
 
 // Whether to show the new private browsing UI with in-content search box.
-#ifdef EARLY_BETA_OR_EARLIER
 pref("browser.privatebrowsing.searchUI", true);
-#else
-pref("browser.privatebrowsing.searchUI", false);
-#endif
 
 // Whether the bookmark panel should be shown when bookmarking a page.
 pref("browser.bookmarks.editDialog.showForNewBookmarks", true);
@@ -1537,11 +1525,7 @@ pref("browser.ping-centre.production.endpoint", "https://tiles.services.mozilla.
 // Enable GMP support in the addon manager.
 pref("media.gmp-provider.enabled", true);
 
-// Enable blocking access to storage from tracking resources only in nightly
-// and early beta. By default the value is 0: BEHAVIOR_ACCEPT
-#ifdef EARLY_BETA_OR_EARLIER
 pref("network.cookie.cookieBehavior", 4 /* BEHAVIOR_REJECT_TRACKER */);
-#endif
 
 pref("browser.contentblocking.allowlist.storage.enabled", true);
 
@@ -1556,6 +1540,9 @@ pref("browser.contentblocking.rejecttrackers.control-center.ui.enabled", true);
 
 pref("browser.contentblocking.control-center.ui.showBlockedLabels", true);
 pref("browser.contentblocking.control-center.ui.showAllowedLabels", false);
+
+pref("browser.contentblocking.cryptomining.preferences.ui.enabled", false);
+pref("browser.contentblocking.fingerprinting.preferences.ui.enabled", false);
 
 // Enable the Report Breakage UI on Nightly and Beta but not on Release yet.
 #ifdef EARLY_BETA_OR_EARLIER
@@ -1681,6 +1668,7 @@ pref("extensions.pocket.oAuthConsumerKey", "40249-e88c401e1b1f2242d9e441c4");
 pref("extensions.pocket.site", "getpocket.com");
 
 pref("signon.schemeUpgrades", true);
+pref("signon.privateBrowsingCapture.enabled", true);
 
 // Enable the "Simplify Page" feature in Print Preview. This feature
 // is disabled by default in toolkit.
@@ -1814,10 +1802,7 @@ pref("browser.discovery.sites", "addons.mozilla.org");
 
 pref("browser.engagement.recent_visited_origins.expiry", 86400); // 24 * 60 * 60 (24 hours in seconds)
 
-// Show the warning page for the new about config. Will replace general.warnOnAboutConfig.
-#ifdef NIGHTLY_BUILD
 pref("browser.aboutConfig.showWarning", true);
-#endif
 
 #if defined(XP_WIN) && defined(MOZ_LAUNCHER_PROCESS)
 // Launcher process is disabled by default, will be selectively enabled via SHIELD

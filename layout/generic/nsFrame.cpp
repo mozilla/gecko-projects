@@ -467,14 +467,13 @@ void WeakFrame::Init(nsIFrame* aFrame) {
 }
 
 nsIFrame* NS_NewEmptyFrame(nsIPresShell* aPresShell, ComputedStyle* aStyle) {
-  return new (aPresShell) nsFrame(aStyle);
+  return new (aPresShell) nsFrame(aStyle, aPresShell->GetPresContext());
 }
 
-nsFrame::nsFrame(ComputedStyle* aStyle, ClassID aID) : nsBox(aID) {
+nsFrame::nsFrame(ComputedStyle* aStyle, nsPresContext* aPresContext,
+                 ClassID aID)
+    : nsBox(aStyle, aPresContext, aID) {
   MOZ_COUNT_CTOR(nsFrame);
-
-  mComputedStyle = aStyle;
-  mWritingMode = WritingMode(mComputedStyle);
 }
 
 nsFrame::~nsFrame() {
@@ -589,6 +588,7 @@ void nsFrame::Init(nsIContent* aContent, nsContainerFrame* aParent,
                   NS_FRAME_MAY_BE_TRANSFORMED |
                   NS_FRAME_CAN_HAVE_ABSPOS_CHILDREN));
   } else {
+    mComputedStyle->StartImageLoads(*PresContext()->Document());
     PresContext()->ConstructedFrame();
   }
   if (GetParent()) {
@@ -1066,8 +1066,8 @@ void nsIFrame::MarkNeedsDisplayItemRebuild() {
     // We don't want to set the property if one already exists.
     nsMargin oldValue(0, 0, 0, 0);
     nsMargin newValue(0, 0, 0, 0);
-    const nsStyleMargin* oldMargin = aOldComputedStyle->PeekStyleMargin();
-    if (oldMargin && oldMargin->GetMargin(oldValue)) {
+    const nsStyleMargin* oldMargin = aOldComputedStyle->StyleMargin();
+    if (oldMargin->GetMargin(oldValue)) {
       if (!StyleMargin()->GetMargin(newValue) || oldValue != newValue) {
         if (!HasProperty(UsedMarginProperty())) {
           AddProperty(UsedMarginProperty(), new nsMargin(oldValue));
@@ -1076,8 +1076,8 @@ void nsIFrame::MarkNeedsDisplayItemRebuild() {
       }
     }
 
-    const nsStylePadding* oldPadding = aOldComputedStyle->PeekStylePadding();
-    if (oldPadding && oldPadding->GetPadding(oldValue)) {
+    const nsStylePadding* oldPadding = aOldComputedStyle->StylePadding();
+    if (oldPadding->GetPadding(oldValue)) {
       if (!StylePadding()->GetPadding(newValue) || oldValue != newValue) {
         if (!HasProperty(UsedPaddingProperty())) {
           AddProperty(UsedPaddingProperty(), new nsMargin(oldValue));
@@ -1086,20 +1086,16 @@ void nsIFrame::MarkNeedsDisplayItemRebuild() {
       }
     }
 
-    const nsStyleBorder* oldBorder = aOldComputedStyle->PeekStyleBorder();
-    if (oldBorder) {
-      oldValue = oldBorder->GetComputedBorder();
-      newValue = StyleBorder()->GetComputedBorder();
-      if (oldValue != newValue && !HasProperty(UsedBorderProperty())) {
-        AddProperty(UsedBorderProperty(), new nsMargin(oldValue));
-      }
+    const nsStyleBorder* oldBorder = aOldComputedStyle->StyleBorder();
+    oldValue = oldBorder->GetComputedBorder();
+    newValue = StyleBorder()->GetComputedBorder();
+    if (oldValue != newValue && !HasProperty(UsedBorderProperty())) {
+      AddProperty(UsedBorderProperty(), new nsMargin(oldValue));
     }
 
-    const nsStyleDisplay* oldDisp = aOldComputedStyle->PeekStyleDisplay();
-    if (oldDisp &&
-        (oldDisp->mOverflowAnchor != StyleDisplay()->mOverflowAnchor)) {
-      if (ScrollAnchorContainer* container =
-              ScrollAnchorContainer::FindFor(this)) {
+    const nsStyleDisplay* oldDisp = aOldComputedStyle->StyleDisplay();
+    if (oldDisp->mOverflowAnchor != StyleDisplay()->mOverflowAnchor) {
+      if (auto* container = ScrollAnchorContainer::FindFor(this)) {
         container->InvalidateAnchor();
       }
       if (nsIScrollableFrame* scrollableFrame = do_QueryFrame(this)) {
@@ -1108,21 +1104,19 @@ void nsIFrame::MarkNeedsDisplayItemRebuild() {
     }
 
     if (mInScrollAnchorChain) {
-      const nsStylePosition* oldPosition =
-          aOldComputedStyle->PeekStylePosition();
-      if (oldPosition &&
-          (oldPosition->mOffset != StylePosition()->mOffset ||
-           oldPosition->mWidth != StylePosition()->mWidth ||
-           oldPosition->mMinWidth != StylePosition()->mMinWidth ||
-           oldPosition->mMaxWidth != StylePosition()->mMaxWidth ||
-           oldPosition->mHeight != StylePosition()->mHeight ||
-           oldPosition->mMinHeight != StylePosition()->mMinHeight ||
-           oldPosition->mMaxHeight != StylePosition()->mMaxHeight)) {
+      const nsStylePosition* oldPosition = aOldComputedStyle->StylePosition();
+      if (oldPosition->mOffset != StylePosition()->mOffset ||
+          oldPosition->mWidth != StylePosition()->mWidth ||
+          oldPosition->mMinWidth != StylePosition()->mMinWidth ||
+          oldPosition->mMaxWidth != StylePosition()->mMaxWidth ||
+          oldPosition->mHeight != StylePosition()->mHeight ||
+          oldPosition->mMinHeight != StylePosition()->mMinHeight ||
+          oldPosition->mMaxHeight != StylePosition()->mMaxHeight) {
         needAnchorSuppression = true;
       }
 
-      if (oldDisp && (oldDisp->mPosition != StyleDisplay()->mPosition ||
-                      oldDisp->TransformChanged(*StyleDisplay()))) {
+      if (oldDisp->mPosition != StyleDisplay()->mPosition ||
+          oldDisp->TransformChanged(*StyleDisplay())) {
         needAnchorSuppression = true;
       }
     }
@@ -1205,8 +1199,6 @@ void nsIFrame::MarkNeedsDisplayItemRebuild() {
 
 #ifdef MOZ_DIAGNOSTIC_ASSERT_ENABLED
 void nsIFrame::AssertNewStyleIsSane(ComputedStyle& aNewStyle) {
-  MOZ_DIAGNOSTIC_ASSERT(PresShell() ==
-                        aNewStyle.PresContextForFrame()->PresShell());
   MOZ_DIAGNOSTIC_ASSERT(
       aNewStyle.GetPseudo() == mComputedStyle->GetPseudo() ||
       // ::first-line continuations are weird, this should probably be fixed via
@@ -2943,19 +2935,23 @@ void nsIFrame::BuildDisplayListForStackingContext(
 
   nsDisplayListBuilder::AutoContainerASRTracker contASRTracker(aBuilder);
 
-  DisplayListClipState::AutoSaveRestore cssClip(aBuilder);
-  {
-    // The clip property clips everything, including filters and what not.
-    if (auto contentClip = GetClipPropClipRect(disp, effects, GetSize())) {
-      nsPoint offset = isTransformed
-                           ? GetOffsetToCrossDoc(
-                                 aBuilder->FindReferenceFrameFor(GetParent()))
-                           : aBuilder->GetCurrentFrameOffsetToReferenceFrame();
-
-      aBuilder->IntersectDirtyRect(*contentClip);
-      aBuilder->IntersectVisibleRect(*contentClip);
-      cssClip.ClipContentDescendants(*contentClip + offset);
+  auto cssClip = GetClipPropClipRect(disp, effects, GetSize());
+  auto ApplyClipProp = [&](DisplayListClipState::AutoSaveRestore& aClipState) {
+    if (!cssClip) {
+      return;
     }
+    nsPoint offset = aBuilder->GetCurrentFrameOffsetToReferenceFrame();
+    aBuilder->IntersectDirtyRect(*cssClip);
+    aBuilder->IntersectVisibleRect(*cssClip);
+    aClipState.ClipContentDescendants(*cssClip + offset);
+  };
+
+  // The CSS clip property is effectively inside the transform, but outside the
+  // filters. So if we're not transformed we can apply it just here for
+  // simplicity, instead of on each of the places that handle clipCapturedBy.
+  DisplayListClipState::AutoSaveRestore untransformedCssClip(aBuilder);
+  if (!isTransformed) {
+    ApplyClipProp(untransformedCssClip);
   }
 
   // If there is a current clip, then depending on the container items we
@@ -2992,6 +2988,20 @@ void nsIFrame::BuildDisplayListForStackingContext(
   DisplayListClipState::AutoSaveRestore clipState(aBuilder);
   if (clipCapturedBy != ContainerItemType::eNone) {
     clipState.Clear();
+  }
+
+  DisplayListClipState::AutoSaveRestore transformedCssClip(aBuilder);
+  if (isTransformed) {
+    // FIXME(emilio, bug 1525159): In the case we have a both a transform _and_
+    // filters, this clips the input to the filters as well, which is not
+    // correct (clipping by the `clip` property is supposed to happen after
+    // applying the filter effects, per [1].
+    //
+    // This is not a regression though, since we used to do that anyway before
+    // bug 1514384, and even without the transform we get it wrong.
+    //
+    // [1]: https://drafts.fxtf.org/css-masking/#placement
+    ApplyClipProp(transformedCssClip);
   }
 
   mozilla::UniquePtr<HitTestInfo> hitTestInfo;
@@ -3096,53 +3106,17 @@ void nsIFrame::BuildDisplayListForStackingContext(
     set.PositionedDescendants()->AppendToTop(color);
   }
 
-  // Sort PositionedDescendants() in CSS 'z-order' order.  The list is already
-  // in content document order and SortByZOrder is a stable sort which
-  // guarantees that boxes produced by the same element are placed together
-  // in the sort. Consider a position:relative inline element that breaks
-  // across lines and has absolutely positioned children; all the abs-pos
-  // children should be z-ordered after all the boxes for the position:relative
-  // element itself.
-  set.PositionedDescendants()->SortByZOrder();
-
-  nsDisplayList resultList;
-  // Now follow the rules of http://www.w3.org/TR/CSS21/zindex.html
-  // 1,2: backgrounds and borders
-  resultList.AppendToTop(set.BorderBackground());
-  // 3: negative z-index children.
-  for (;;) {
-    nsDisplayItem* item = set.PositionedDescendants()->GetBottom();
-    if (item && item->ZIndex() < 0) {
-      set.PositionedDescendants()->RemoveBottom();
-      resultList.AppendToTop(item);
-      continue;
-    }
-    break;
-  }
-  // 4: block backgrounds
-  resultList.AppendToTop(set.BlockBorderBackgrounds());
-  // 5: floats
-  resultList.AppendToTop(set.Floats());
-  // 7: general content
-  resultList.AppendToTop(set.Content());
-  // 7.5: outlines, in content tree order. We need to sort by content order
-  // because an element with outline that breaks and has children with outline
-  // might have placed child outline items between its own outline items.
-  // The element's outline items need to all come before any child outline
-  // items.
   nsIContent* content = GetContent();
   if (!content) {
     content = PresContext()->Document()->GetRootElement();
   }
-  if (content) {
-    set.Outlines()->SortByContentOrder(content);
-  }
+
+  nsDisplayList resultList;
+  set.SerializeWithCorrectZOrder(&resultList, content);
+
 #ifdef DEBUG
   DisplayDebugBorders(aBuilder, this, set);
 #endif
-  resultList.AppendToTop(set.Outlines());
-  // 8, 9: non-negative z-index children
-  resultList.AppendToTop(set.PositionedDescendants());
 
   // Get the ASR to use for the container items that we create here.
   const ActiveScrolledRoot* containerItemASR = contASRTracker.GetContainerASR();
@@ -3284,6 +3258,7 @@ void nsIFrame::BuildDisplayListForStackingContext(
   }
 
   if (isTransformed) {
+    transformedCssClip.Restore();
     if (clipCapturedBy == ContainerItemType::eTransform) {
       // Restore clip state now so nsDisplayTransform is clipped properly.
       clipState.Restore();
@@ -3483,7 +3458,8 @@ void nsIFrame::BuildDisplayListForSimpleChild(nsDisplayListBuilder* aBuilder,
   CheckForApzAwareEventHandlers(aBuilder, aChild);
 
   aBuilder->BuildCompositorHitTestInfoIfNeeded(
-      aChild, aLists.BorderBackground(), false);
+      aChild, aLists.BorderBackground(),
+      buildingForChild.IsAnimatedGeometryRoot());
 
   aChild->MarkAbsoluteFramesForDisplayList(aBuilder);
   aBuilder->AdjustWindowDraggingRegion(aChild);
@@ -5279,15 +5255,16 @@ void nsIFrame::InlinePrefISizeData::ForceBreak(StyleClear aBreakType) {
   mLineIsEmpty = true;
 }
 
-static nscoord ResolveMargin(const nsStyleCoord& aStyle,
+static nscoord ResolveMargin(const LengthPercentageOrAuto& aStyle,
                              nscoord aPercentageBasis) {
-  if (aStyle.GetUnit() == eStyleUnit_Auto) {
+  if (aStyle.IsAuto()) {
     return nscoord(0);
   }
-  return nsLayoutUtils::ResolveToLength<false>(aStyle, aPercentageBasis);
+  return nsLayoutUtils::ResolveToLength<false>(aStyle.AsLengthPercentage(),
+                                               aPercentageBasis);
 }
 
-static nscoord ResolvePadding(const nsStyleCoord& aStyle,
+static nscoord ResolvePadding(const LengthPercentage& aStyle,
                               nscoord aPercentageBasis) {
   return nsLayoutUtils::ResolveToLength<true>(aStyle, aPercentageBasis);
 }
@@ -5299,20 +5276,22 @@ static nsIFrame::IntrinsicISizeOffsetData IntrinsicSizeOffsets(
   const auto& margin = aFrame->StyleMargin()->mMargin;
   bool verticalAxis = aForISize == wm.IsVertical();
   if (verticalAxis) {
-    result.hMargin += ResolveMargin(margin.GetTop(), aPercentageBasis);
-    result.hMargin += ResolveMargin(margin.GetBottom(), aPercentageBasis);
+    result.hMargin += ResolveMargin(margin.Get(eSideTop), aPercentageBasis);
+    result.hMargin += ResolveMargin(margin.Get(eSideBottom), aPercentageBasis);
   } else {
-    result.hMargin += ResolveMargin(margin.GetLeft(), aPercentageBasis);
-    result.hMargin += ResolveMargin(margin.GetRight(), aPercentageBasis);
+    result.hMargin += ResolveMargin(margin.Get(eSideLeft), aPercentageBasis);
+    result.hMargin += ResolveMargin(margin.Get(eSideRight), aPercentageBasis);
   }
 
   const auto& padding = aFrame->StylePadding()->mPadding;
   if (verticalAxis) {
-    result.hPadding += ResolvePadding(padding.GetTop(), aPercentageBasis);
-    result.hPadding += ResolvePadding(padding.GetBottom(), aPercentageBasis);
+    result.hPadding += ResolvePadding(padding.Get(eSideTop), aPercentageBasis);
+    result.hPadding +=
+        ResolvePadding(padding.Get(eSideBottom), aPercentageBasis);
   } else {
-    result.hPadding += ResolvePadding(padding.GetLeft(), aPercentageBasis);
-    result.hPadding += ResolvePadding(padding.GetRight(), aPercentageBasis);
+    result.hPadding += ResolvePadding(padding.Get(eSideLeft), aPercentageBasis);
+    result.hPadding +=
+        ResolvePadding(padding.Get(eSideRight), aPercentageBasis);
   }
 
   const nsStyleBorder* styleBorder = aFrame->StyleBorder();
@@ -7262,6 +7241,11 @@ bool nsIFrame::IsBlockWrapper() const {
           pseudoType == nsCSSAnonBoxes::cellContent());
 }
 
+bool nsIFrame::IsBlockFrameOrSubclass() {
+  nsBlockFrame* thisAsBlock = do_QueryFrame(this);
+  return !!thisAsBlock;
+}
+
 static nsIFrame* GetNearestBlockContainer(nsIFrame* frame) {
   // The block wrappers we use to wrap blocks inside inlines aren't
   // described in the CSS spec.  We need to make them not be containing
@@ -8589,11 +8573,7 @@ nsresult nsIFrame::GetFrameFromDirection(
       frameTraversal->Prev();
 
     traversedFrame = frameTraversal->CurrentItem();
-
-    // Skip anonymous elements, but watch out for generated content
-    if (!traversedFrame ||
-        (!traversedFrame->IsGeneratedContentFrame() &&
-         traversedFrame->GetContent()->IsRootOfNativeAnonymousSubtree())) {
+    if (!traversedFrame) {
       return NS_ERROR_FAILURE;
     }
 
@@ -10269,14 +10249,7 @@ void nsIFrame::UpdateStyleOfChildAnonBox(nsIFrame* aChildFrame,
   //    anonymous boxes directly.
   uint32_t equalStructs;  // Not used, actually.
   nsChangeHint childHint = aChildFrame->Style()->CalcStyleDifference(
-      aNewComputedStyle, &equalStructs);
-
-  // CalcStyleDifference will handle caching structs on the new style, but only
-  // if we're not on a style worker thread.
-  MOZ_ASSERT(!ServoStyleSet::IsInServoTraversal(),
-             "if we can get in here from style worker threads, then we need "
-             "a ResolveSameStructsAs call to ensure structs are cached on "
-             "aNewComputedStyle");
+      *aNewComputedStyle, &equalStructs);
 
   // If aChildFrame is out of flow, then aRestyleState's "changes handled by the
   // parent" doesn't apply to it, because it may have some other parent in the

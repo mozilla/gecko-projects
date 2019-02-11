@@ -1127,11 +1127,15 @@ class ScriptSourceHolder {
 // ScriptSourceObject stores the ScriptSource and GC pointers related to it.
 //
 // ScriptSourceObjects can be cloned when we clone the JSScript (in order to
-// execute the script in a different realm/compartment). In this case we create
-// a new SSO that stores (a wrapper for) the original SSO in its "canonical
-// slot". The canonical SSO is always used for the private, introductionScript,
+// execute the script in a different compartment). In this case we create a new
+// SSO that stores (a wrapper for) the original SSO in its "canonical slot".
+// The canonical SSO is always used for the private, introductionScript,
 // element, elementAttributeName slots. This means their accessors may return an
 // object in a different compartment, hence the "unwrapped" prefix.
+//
+// Note that we don't clone the SSO when cloning the script for a different
+// realm in the same compartment, so sso->realm() does not necessarily match the
+// script's realm.
 //
 // We need ScriptSourceObject (instead of storing these GC pointers in the
 // ScriptSource itself) to properly account for cross-zone pointers: the
@@ -1729,12 +1733,7 @@ class JSScript : public js::gc::TenuredCell {
     // Script has an entry in Realm::debugScriptMap.
     HasDebugScript = 1 << 6,
 
-    // Freeze constraints for stack type sets have been generated.
-    HasFreezeConstraints = 1 << 7,
-
-    // Generation for this script's TypeScript. If out of sync with the
-    // TypeZone's generation, the TypeScript needs to be swept.
-    TypesGeneration = 1 << 8,
+    // (1 << 7) and (1 << 8) are unused.
 
     // Do not relazify this script. This is used by the relazify() testing
     // function for scripts that are on the stack and also by the AutoDelazify
@@ -2112,13 +2111,6 @@ class JSScript : public js::gc::TenuredCell {
   }
   bool hasScriptName();
 
-  bool hasFreezeConstraints() const {
-    return hasFlag(MutableFlags::HasFreezeConstraints);
-  }
-  void setHasFreezeConstraints() {
-    setFlag(MutableFlags::HasFreezeConstraints);
-  }
-
   bool warnedAboutUndefinedProp() const {
     return hasFlag(MutableFlags::WarnedAboutUndefinedProp);
   }
@@ -2209,15 +2201,6 @@ class JSScript : public js::gc::TenuredCell {
    */
   bool argsObjAliasesFormals() const {
     return needsArgsObj() && hasMappedArgsObj();
-  }
-
-  uint32_t typesGeneration() const {
-    return uint32_t(hasFlag(MutableFlags::TypesGeneration));
-  }
-
-  void setTypesGeneration(uint32_t generation) {
-    MOZ_ASSERT(generation <= 1);
-    setFlag(MutableFlags::TypesGeneration, bool(generation));
   }
 
   void setDoNotRelazify(bool b) { setFlag(MutableFlags::DoNotRelazify, b); }
@@ -2416,11 +2399,9 @@ class JSScript : public js::gc::TenuredCell {
   /* Ensure the script has a TypeScript. */
   inline bool ensureHasTypes(JSContext* cx, js::AutoKeepTypeScripts&);
 
-  inline js::TypeScript* types(const js::AutoSweepTypeScript& sweep);
-  inline bool typesNeedsSweep() const;
+  js::TypeScript* types() { return types_; }
 
   void maybeReleaseTypes();
-  void sweepTypes(const js::AutoSweepTypeScript& sweep);
 
   inline js::GlobalObject& global() const;
   inline bool hasGlobal(const js::GlobalObject* global) const;
@@ -3217,7 +3198,8 @@ extern void DescribeScriptedCallerForDirectEval(
     unsigned* linenop, uint32_t* pcOffset, bool* mutedErrors);
 
 JSScript* CloneScriptIntoFunction(JSContext* cx, HandleScope enclosingScope,
-                                  HandleFunction fun, HandleScript src);
+                                  HandleFunction fun, HandleScript src,
+                                  Handle<ScriptSourceObject*> sourceObject);
 
 JSScript* CloneGlobalScript(JSContext* cx, ScopeKind scopeKind,
                             HandleScript src);

@@ -569,7 +569,7 @@
 
       <xul:image class="card-heading-image" anonid="theme-screenshot" xbl:inherits="src=previewURL"/>
 
-      <xul:hbox class="content-container" align="center">
+      <xul:hbox class="content-container">
         <xul:vbox class="icon-container">
           <xul:image anonid="icon" class="icon"/>
         </xul:vbox>
@@ -1161,6 +1161,12 @@
       <method name="_fetchReleaseNotes">
         <parameter name="aURI"/>
         <body><![CDATA[
+          let sendToggleEvent = () => {
+            var event = document.createEvent("Events");
+            event.initEvent("RelNotesToggle", true, true);
+            this.dispatchEvent(event);
+          };
+
           if (!aURI || this._relNotesLoaded) {
             sendToggleEvent();
             return;
@@ -1171,12 +1177,6 @@
           this._relNotesLoaded = true;
           this._relNotesLoading.hidden = false;
           this._relNotesError.hidden = true;
-
-          let sendToggleEvent = () => {
-            var event = document.createEvent("Events");
-            event.initEvent("RelNotesToggle", true, true);
-            this.dispatchEvent(event);
-          };
 
           let showRelNotes = () => {
             if (!relNotesData || !transformData)
@@ -1222,14 +1222,14 @@
             }
           }
 
-          var dataReq = new XMLHttpRequest();
+          var dataReq = new XMLHttpRequest({mozAnon: true});
           dataReq.open("GET", aURI.spec, true);
           dataReq.responseType = "document";
           dataReq.addEventListener("load", handleResponse);
           dataReq.addEventListener("error", handleError);
           dataReq.send(null);
 
-          var styleReq = new XMLHttpRequest();
+          var styleReq = new XMLHttpRequest({mozAnon: true});
           styleReq.open("GET", UPDATES_RELEASENOTES_TRANSFORMFILE, true);
           styleReq.responseType = "document";
           styleReq.addEventListener("load", handleResponse);
@@ -1251,7 +1251,7 @@
               "tooltiptext",
               this._relNotesToggle.getAttribute("showtooltip")
             );
-            var event = document.createEvent("Events");
+            let event = document.createEvent("Events");
             event.initEvent("RelNotesToggle", true, true);
             this.dispatchEvent(event);
           } else {
@@ -1270,6 +1270,11 @@
                       this.mManualUpdate.releaseNotesURI :
                       this.mAddon.releaseNotesURI;
             this._fetchReleaseNotes(uri);
+
+            // Dispatch an event so extensions.js can record telemetry.
+            let event = document.createEvent("Events");
+            event.initEvent("RelNotesShow", true, true);
+            this.dispatchEvent(event);
           }
         ]]></body>
       </method>
@@ -1297,6 +1302,11 @@
               this.setAttribute("pending", "uninstall");
             });
           }
+
+          // Dispatch an event so extensions.js can track telemetry.
+          var event = document.createEvent("Events");
+          event.initEvent("Uninstall", true, true);
+          this.dispatchEvent(event);
         ]]></body>
       </method>
 
@@ -1393,6 +1403,12 @@
               aProperties.includes("signedState") ||
               aProperties.includes("userDisabled"))
             this._updateState();
+        ]]></body>
+      </method>
+
+      <method name="onUpdateAvailable">
+        <body><![CDATA[
+          this._showStatus("update-available");
         ]]></body>
       </method>
 
@@ -1539,6 +1555,11 @@
             this.mAddon.cancelUninstall();
           else if (this.getAttribute("wasDisabled") != "true")
             this.mAddon.enable();
+
+          // Dispatch an event so extensions.js can record telemetry.
+          var event = document.createEvent("Events");
+          event.initEvent("Undo", true, true);
+          this.dispatchEvent(event);
 
           this.removeAttribute("pending");
         ]]></body>

@@ -1761,7 +1761,8 @@ extern JS_PUBLIC_API bool JS_Enumerate(JSContext* cx, JS::HandleObject obj,
  * `src` object (which must not be null) to `target` (which also must not be
  * null).
  */
-extern JS_PUBLIC_API bool JS_AssignObject(JSContext* cx, JS::HandleObject target,
+extern JS_PUBLIC_API bool JS_AssignObject(JSContext* cx,
+                                          JS::HandleObject target,
                                           JS::HandleObject src);
 
 /*
@@ -3392,6 +3393,7 @@ extern JS_PUBLIC_API void JS_SetOffthreadIonCompilationEnabled(JSContext* cx,
   Register(FULL_DEBUG_CHECKS, "jit.full-debug-checks") \
   Register(JUMP_THRESHOLD, "jump-threshold") \
   Register(TRACK_OPTIMIZATIONS, "jit.track-optimizations")\
+  Register(UNBOXED_OBJECTS, "unboxed_objects") \
   Register(SIMULATOR_ALWAYS_INTERRUPT, "simulator.always-interrupt") \
   Register(SPECTRE_INDEX_MASKING, "spectre.index-masking") \
   Register(SPECTRE_OBJECT_MITIGATIONS_BARRIERS, "spectre.object-mitigations.barriers") \

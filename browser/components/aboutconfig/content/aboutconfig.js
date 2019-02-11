@@ -14,6 +14,12 @@ const GETTERS_BY_PREF_TYPE = {
   [Ci.nsIPrefBranch.PREF_STRING]: "getStringPref",
 };
 
+const STRINGS_ADD_BY_TYPE = {
+  Boolean: "about-config-pref-add-type-boolean",
+  Number: "about-config-pref-add-type-number",
+  String: "about-config-pref-add-type-string",
+};
+
 let gDefaultBranch = Services.prefs.getDefaultBranch("");
 let gFilterPrefsTask = new DeferredTask(() => filterPrefs(), SEARCH_TIMEOUT_MS);
 
@@ -207,7 +213,7 @@ class PrefRow {
           radio.checked = this.type == type;
           form.appendChild(radio);
           let radioLabel = document.createElement("span");
-          radioLabel.textContent = type;
+          document.l10n.setAttributes(radioLabel, STRINGS_ADD_BY_TYPE[type]);
           form.appendChild(radioLabel);
         }
         form.addEventListener("click", event => {
@@ -308,7 +314,7 @@ if (!Preferences.get("browser.aboutConfig.showWarning")) {
   // the value of the textbox has been restored from previous sessions.
   document.addEventListener("DOMContentLoaded", loadPrefs, { once: true });
   window.addEventListener("load", () => {
-    if (document.getElementById("search").value) {
+    if (document.getElementById("about-config-search").value) {
       filterPrefs();
     }
   }, { once: true });
@@ -324,20 +330,13 @@ function loadPrefs() {
   document.body.className = "config-background";
   [...document.styleSheets].find(s => s.title == "infop").disabled = true;
 
+  let { content } = document.getElementById("main");
   document.body.textContent = "";
-  let searchContainer = document.createElement("div");
-  searchContainer.id = "search-container";
-  let search = document.createElement("input");
-  search.type = "text";
-  search.id = "search";
-  document.l10n.setAttributes(search, "about-config-search");
-  searchContainer.appendChild(search);
-  document.body.appendChild(searchContainer);
-  search.focus();
+  document.body.appendChild(content);
 
-  let prefs = document.createElement("table");
-  prefs.id = "prefs";
-  document.body.appendChild(prefs);
+  let search = document.getElementById("about-config-search");
+  let prefs = document.getElementById("prefs");
+  search.focus();
 
   for (let name of Services.prefs.getChildList("")) {
     new PrefRow(name);
@@ -392,7 +391,7 @@ function filterPrefs() {
   }
   gDeletedPrefs.clear();
 
-  let searchName = document.getElementById("search").value.trim();
+  let searchName = document.getElementById("about-config-search").value.trim();
   gFilterString = searchName.toLowerCase();
   let prefArray = [...gExistingPrefs.values()];
   if (gFilterString) {

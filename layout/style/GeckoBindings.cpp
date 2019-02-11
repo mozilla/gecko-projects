@@ -183,15 +183,12 @@ const nsTArray<RefPtr<nsINode>>* Gecko_GetAssignedNodes(
   return &static_cast<const HTMLSlotElement*>(aElement)->AssignedNodes();
 }
 
-void Gecko_ComputedStyle_Init(mozilla::ComputedStyle* aStyle,
-                              RawGeckoPresContextBorrowed aPresContext,
+void Gecko_ComputedStyle_Init(ComputedStyle* aStyle,
                               const ServoComputedData* aValues,
-                              mozilla::CSSPseudoElementType aPseudoType,
+                              CSSPseudoElementType aPseudoType,
                               nsAtom* aPseudoTag) {
-  auto* presContext = const_cast<nsPresContext*>(aPresContext);
-  new (KnownNotNull, aStyle)
-      mozilla::ComputedStyle(presContext, aPseudoTag, aPseudoType,
-                             ServoComputedDataForgotten(aValues));
+  new (KnownNotNull, aStyle) ComputedStyle(aPseudoTag, aPseudoType,
+                                           ServoComputedDataForgotten(aValues));
 }
 
 ServoComputedData::ServoComputedData(const ServoComputedDataForgotten aValue) {
@@ -230,7 +227,7 @@ void ServoComputedData::AddSizeOfExcludingThis(nsWindowSizes& aSizes) const {
   // - font_computation_data
 }
 
-void Gecko_ComputedStyle_Destroy(mozilla::ComputedStyle* aStyle) {
+void Gecko_ComputedStyle_Destroy(ComputedStyle* aStyle) {
   aStyle->~ComputedStyle();
 }
 
@@ -327,8 +324,7 @@ uint32_t Gecko_CalcStyleDifference(ComputedStyleBorrowed aOldStyle,
 
   uint32_t equalStructs;
   nsChangeHint result =
-      const_cast<ComputedStyle*>(aOldStyle)->CalcStyleDifference(
-          const_cast<ComputedStyle*>(aNewStyle), &equalStructs);
+      aOldStyle->CalcStyleDifference(*aNewStyle, &equalStructs);
 
   *aAnyStyleStructChanged =
       equalStructs != StyleStructConstants::kAllStructsMask;
@@ -1124,15 +1120,8 @@ void Gecko_CopyAlternateValuesFrom(nsFont* aDest, const nsFont* aSrc) {
 
 void Gecko_SetCounterStyleToName(CounterStylePtr* aPtr, nsAtom* aName,
                                  RawGeckoPresContextBorrowed aPresContext) {
-  // Try resolving the counter style if possible, and keep it unresolved
-  // otherwise.
-  CounterStyleManager* manager = aPresContext->CounterStyleManager();
   RefPtr<nsAtom> name = already_AddRefed<nsAtom>(aName);
-  if (CounterStyle* style = manager->GetCounterStyle(name)) {
-    *aPtr = style;
-  } else {
-    *aPtr = name.forget();
-  }
+  *aPtr = name.forget();
 }
 
 void Gecko_SetCounterStyleToSymbols(CounterStylePtr* aPtr, uint8_t aSymbolsType,
@@ -1156,10 +1145,7 @@ void Gecko_CopyCounterStyle(CounterStylePtr* aDst,
 }
 
 nsAtom* Gecko_CounterStyle_GetName(const CounterStylePtr* aPtr) {
-  if (!aPtr->IsResolved()) {
-    return aPtr->AsAtom();
-  }
-  return (*aPtr)->GetStyleName();
+  return aPtr->IsAtom() ? aPtr->AsAtom() : nullptr;
 }
 
 const AnonymousCounterStyle* Gecko_CounterStyle_GetAnonymous(
@@ -1771,6 +1757,10 @@ nsCSSValueSharedList* Gecko_NewNoneTransform() {
   return list.forget().take();
 }
 
+void Gecko_StyleDisplay_GenerateCombinedTransform(nsStyleDisplay* aDisplay) {
+  aDisplay->GenerateCombinedIndividualTransform();
+}
+
 void Gecko_CSSValue_SetNumber(nsCSSValueBorrowedMut aCSSValue, float aNumber) {
   aCSSValue->SetFloatValue(aNumber, eCSSUnit_Number);
 }
@@ -2058,8 +2048,7 @@ GeckoFontMetrics Gecko_GetFontMetrics(RawGeckoPresContextBorrowed aPresContext,
   nsPresContext* presContext = const_cast<nsPresContext*>(aPresContext);
   presContext->SetUsesExChUnits(true);
   RefPtr<nsFontMetrics> fm = nsLayoutUtils::GetMetricsFor(
-      presContext, aIsVertical, aFont, aFontSize, aUseUserFontSet,
-      nsLayoutUtils::FlushUserFontSet::No);
+      presContext, aIsVertical, aFont, aFontSize, aUseUserFontSet);
 
   ret.mXSize = fm->XHeight();
   gfxFloat zeroWidth = fm->GetThebesFontGroup()

@@ -393,6 +393,8 @@ def find_tests(substring=None, run_binast=False):
                 continue
             if os.path.join('binast', 'nonlazy') in dirpath:
                 continue
+            if os.path.join('binast', 'invalid') in dirpath:
+                continue
 
         for filename in filenames:
             if not (filename.endswith('.js') or filename.endswith('.binjs')):
@@ -434,8 +436,7 @@ def run_test_remote(test, device, prefix, options):
     except ADBTimeoutError:
         raise
     except ADBProcessError as e:
-        out = e.adb_process.stdout
-        print("exception output: %s" % str(out))
+        out = str(e.adb_process.stdout)
         returncode = e.adb_process.exitcode
 
     elapsed = (datetime.now() - start).total_seconds()

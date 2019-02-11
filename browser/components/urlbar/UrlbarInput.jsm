@@ -15,8 +15,10 @@ XPCOMUtils.defineLazyModuleGetters(this, {
   ReaderMode: "resource://gre/modules/ReaderMode.jsm",
   Services: "resource://gre/modules/Services.jsm",
   UrlbarController: "resource:///modules/UrlbarController.jsm",
+  UrlbarEventBufferer: "resource:///modules/UrlbarEventBufferer.jsm",
   UrlbarPrefs: "resource:///modules/UrlbarPrefs.jsm",
   UrlbarQueryContext: "resource:///modules/UrlbarUtils.jsm",
+  UrlbarTokenizer: "resource:///modules/UrlbarTokenizer.jsm",
   UrlbarUtils: "resource:///modules/UrlbarUtils.jsm",
   UrlbarValueFormatter: "resource:///modules/UrlbarValueFormatter.jsm",
   UrlbarView: "resource:///modules/UrlbarView.jsm",
@@ -101,17 +103,21 @@ class UrlbarInput {
       return new UrlbarValueFormatter(this);
     });
 
+    // The event bufferer handles some events, queues them up, and calls back
+    // our handleEvent at the right time.
+    this.eventBufferer = new UrlbarEventBufferer(this);
+    this.inputField.addEventListener("blur", this.eventBufferer);
+    this.inputField.addEventListener("keydown", this.eventBufferer);
+
+    const inputFieldEvents = [
+      "focus", "input", "keyup", "mouseover", "paste", "scrollend", "select",
+      "overflow", "underflow",
+    ];
+    for (let name of inputFieldEvents) {
+      this.inputField.addEventListener(name, this);
+    }
+
     this.addEventListener("mousedown", this);
-    this.inputField.addEventListener("blur", this);
-    this.inputField.addEventListener("focus", this);
-    this.inputField.addEventListener("input", this);
-    this.inputField.addEventListener("mouseover", this);
-    this.inputField.addEventListener("overflow", this);
-    this.inputField.addEventListener("underflow", this);
-    this.inputField.addEventListener("scrollend", this);
-    this.inputField.addEventListener("select", this);
-    this.inputField.addEventListener("keydown", this);
-    this.inputField.addEventListener("keyup", this);
     this.view.panel.addEventListener("popupshowing", this);
     this.view.panel.addEventListener("popuphidden", this);
 
@@ -308,12 +314,19 @@ class UrlbarInput {
       allowInheritPrincipal: false,
     };
 
-    // TODO bug 1521702: Call _maybeCanonizeURL for autofilled results with the
-    // typed string (not the autofilled one).
+    if (result.autofill) {
+      // For autofilled results, the value that should be canonized is not the
+      // autofilled value but the value that the user typed.
+      let canonizedUrl = this._maybeCanonizeURL(event, this._lastSearchString);
+      if (canonizedUrl) {
+        this._loadURL(canonizedUrl, where, openParams);
+        return;
+      }
+    }
 
     switch (result.type) {
       case UrlbarUtils.RESULT_TYPE.TAB_SWITCH: {
-        if (this.hasAttribute("noactions")) {
+        if (this.hasAttribute("actionoverride")) {
           where = "current";
           break;
         }
@@ -366,29 +379,16 @@ class UrlbarInput {
    * @param {UrlbarResult} result The result that was selected.
    */
   setValueFromResult(result) {
-    let val;
-
-    switch (result.type) {
-      case UrlbarUtils.RESULT_TYPE.SEARCH:
-        val = result.payload.suggestion || result.payload.query;
-        break;
-      case UrlbarUtils.RESULT_TYPE.OMNIBOX:
-        val = result.payload.content;
-        break;
-      default: {
-        val = result.payload.url;
-        let uri;
-        try {
-          uri = Services.io.newURI(val);
-        } catch (ex) {}
-        if (uri) {
-          val = this.window.losslessDecodeURI(uri);
-        }
-        break;
-      }
+    if (result.autofill) {
+      this._setValueFromResultAutofill(result);
+    } else {
+      this.value = this._valueFromResultPayload(result);
     }
-    this.value = val;
 
+    // Also update userTypedValue. See bug 287996.
+    this.window.gBrowser.userTypedValue = this.value;
+
+    // The value setter clobbers the actiontype attribute, so update this after that.
     switch (result.type) {
       case UrlbarUtils.RESULT_TYPE.TAB_SWITCH:
         this.setAttribute("actiontype", "switchtab");
@@ -437,10 +437,25 @@ class UrlbarInput {
     }));
   }
 
-  typeRestrictToken(char) {
+  /**
+   * Sets the input's value, starts a search, and opens the popup.
+   *
+   * @param {string} value
+   *   The input's value will be set to this value, and the search will
+   *   use it as its query.
+   */
+  search(value) {
     this.window.focusAndSelectUrlBar();
 
-    this.inputField.value = char + " ";
+    // If the value is a restricted token, append a space.
+    if (Object.values(UrlbarTokenizer.RESTRICT).includes(value)) {
+      this.inputField.value = value + " ";
+    } else {
+      this.inputField.value = value;
+    }
+
+    // Avoid selecting the text if this method is called twice in a row.
+    this.selectionStart = -1;
 
     let event = this.document.createEvent("UIEvents");
     event.initUIEvent("input", true, false, this.window, 0);
@@ -462,27 +477,6 @@ class UrlbarInput {
    */
   removeHiddenFocus() {
     this.textbox.classList.remove("hidden-focus");
-  }
-
-  /**
-   * Autofills the given value into the input.  That is, sets the input's value
-   * to the given value and selects the portion of the new value that comes
-   * after the current value.  The given value should therefore start with the
-   * input's current value.  If it doesn't, then this method doesn't do
-   * anything.
-   *
-   * @param {string} value
-   *   The value to autofill.
-   */
-  autofill(value) {
-    if (!value.toLocaleLowerCase()
-        .startsWith(this.textValue.toLocaleLowerCase())) {
-      return;
-    }
-    let len = this.textValue.length;
-    this.value = this.textValue + value.substring(len);
-    this.selectionStart = len;
-    this.selectionEnd = value.length;
   }
 
   // Getters and Setters below.
@@ -528,6 +522,31 @@ class UrlbarInput {
   }
 
   // Private methods below.
+
+  _setValueFromResultAutofill(result) {
+    this.value = result.autofill.value;
+    this.selectionStart = result.autofill.selectionStart;
+    this.selectionEnd = result.autofill.selectionEnd;
+  }
+
+  _valueFromResultPayload(result) {
+    switch (result.type) {
+      case UrlbarUtils.RESULT_TYPE.SEARCH:
+        return (result.payload.keyword ? result.payload.keyword + " " : "") +
+               (result.payload.suggestion || result.payload.query);
+      case UrlbarUtils.RESULT_TYPE.OMNIBOX:
+        return result.payload.content;
+    }
+
+    try {
+      let uri = Services.io.newURI(result.payload.url);
+      if (uri) {
+        return this.window.losslessDecodeURI(uri);
+      }
+    } catch (ex) {}
+
+    return "";
+  }
 
   _updateTextOverflow() {
     if (!this._overflowing) {
@@ -629,7 +648,7 @@ class UrlbarInput {
     return selectedVal;
   }
 
-  _toggleNoActions(event) {
+  _toggleActionOverride(event) {
     if (event.keyCode == KeyEvent.DOM_VK_SHIFT ||
         event.keyCode == KeyEvent.DOM_VK_ALT ||
         event.keyCode == (AppConstants.platform == "macosx" ?
@@ -637,10 +656,12 @@ class UrlbarInput {
                             KeyEvent.DOM_VK_CONTROL)) {
       if (event.type == "keydown") {
         this._actionOverrideKeyCount++;
-        this.setAttribute("noactions", "true");
+        this.setAttribute("actionoverride", "true");
+        this.view.panel.setAttribute("actionoverride", "true");
       } else if (this._actionOverrideKeyCount &&
                  --this._actionOverrideKeyCount == 0) {
-        this.removeAttribute("noactions");
+        this.removeAttribute("actionoverride");
+        this.view.panel.removeAttribute("actionoverride");
       }
     }
   }
@@ -975,6 +996,37 @@ class UrlbarInput {
     this._updateUrlTooltip();
   }
 
+  _on_paste(event) {
+    let originalPasteData = event.clipboardData.getData("text/plain");
+    if (!originalPasteData) {
+      return;
+    }
+
+    let oldValue = this.inputField.value;
+    let oldStart = oldValue.substring(0, this.inputField.selectionStart);
+    // If there is already non-whitespace content in the URL bar
+    // preceding the pasted content, it's not necessary to check
+    // protocols used by the pasted content:
+    if (oldStart.trim()) {
+      return;
+    }
+    let oldEnd = oldValue.substring(this.inputField.selectionEnd);
+
+    let pasteData = UrlbarUtils.stripUnsafeProtocolOnPaste(originalPasteData);
+    if (originalPasteData != pasteData) {
+      // Unfortunately we're not allowed to set the bits being pasted
+      // so cancel this event:
+      event.preventDefault();
+      event.stopImmediatePropagation();
+
+      this.inputField.value = oldStart + pasteData + oldEnd;
+      // Fix up cursor/selection:
+      let newCursorPos = oldStart.length + pasteData.length;
+      this.inputField.selectionStart = newCursorPos;
+      this.inputField.selectionEnd = newCursorPos;
+    }
+  }
+
   _on_scrollend(event) {
     this._updateTextOverflow();
   }
@@ -985,11 +1037,11 @@ class UrlbarInput {
 
   _on_keydown(event) {
     this.controller.handleKeyNavigation(event);
-    this._toggleNoActions(event);
+    this._toggleActionOverride(event);
   }
 
   _on_keyup(event) {
-    this._toggleNoActions(event);
+    this._toggleActionOverride(event);
   }
 
   _on_popupshowing() {

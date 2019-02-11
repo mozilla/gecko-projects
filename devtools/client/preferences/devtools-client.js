@@ -66,9 +66,7 @@ pref("devtools.inspector.scrollable-badges.enabled", false);
 #endif
 
 // Flexbox preferences
-pref("devtools.inspector.flexboxHighlighter.enabled", true);
-pref("devtools.flexboxinspector.enabled", true);
-
+// Whether or not to show the combined flexbox and box model highlighter.
 #if defined(NIGHTLY_BUILD) || defined(MOZ_DEV_EDITION)
 pref("devtools.inspector.flexboxHighlighter.combine", true);
 #else
@@ -154,6 +152,11 @@ pref("devtools.performance.ui.experimental", false);
 // tests.
 // This isn't exposed directly to the user.
 pref("devtools.performance.recording.ui-base-url", "https://perf-html.io");
+
+// A JSON array of strings, where each string is a file path to an objdir on
+// the host machine. This is used in order to look up symbol information from
+// build artifacts of local builds.
+pref("devtools.performance.recording.objdirs", "[]");
 
 // The default cache UI setting
 pref("devtools.cache.disabled", false);
@@ -261,11 +264,6 @@ pref("devtools.browserconsole.filter.debug", true);
 pref("devtools.browserconsole.filter.css", false);
 pref("devtools.browserconsole.filter.net", false);
 pref("devtools.browserconsole.filter.netxhr", false);
-
-// Web console filter bar settings
-pref("devtools.webconsole.ui.filterbar", false);
-// Browser console filter bar settings
-pref("devtools.browserconsole.ui.filterbar", false);
 
 // Max number of inputs to store in web console history.
 pref("devtools.webconsole.inputHistoryCount", 300);

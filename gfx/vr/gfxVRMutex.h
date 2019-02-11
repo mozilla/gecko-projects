@@ -18,8 +18,9 @@ public:
     : mHandle(handle)
     , mStatus(false) {
 
-    DWORD dwWaitResult;
+    MOZ_ASSERT(mHandle);
 
+    DWORD dwWaitResult;
     dwWaitResult = WaitForSingleObject(
         mHandle,    // handle to mutex
         INFINITE);  // no time-out interval
@@ -43,15 +44,17 @@ public:
 
   ~WaitForMutex() {
     if (mHandle && !ReleaseMutex(mHandle)) {
+      nsAutoCString msg;
+      msg.AppendPrintf("WaitForMutex %d ReleaseMutex error \"%lu\".",
+                        mHandle, GetLastError());
+      NS_WARNING(msg.get());
       MOZ_ASSERT(false, "Failed to release mutex.");
     }
   }
 
-  bool GetStatus() {
-    return mStatus;
-  }
+  bool GetStatus() { return mStatus; }
 
-private:
+ private:
   HANDLE mHandle;
   bool mStatus;
 };

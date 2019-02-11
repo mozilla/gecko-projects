@@ -183,15 +183,6 @@ void js::DtoaCache::checkCacheAfterMovingGC() {
   MOZ_ASSERT(!s || !IsForwarded(s));
 }
 
-namespace {
-struct CheckGCThingAfterMovingGCFunctor {
-  template <class T>
-  void operator()(T* t) {
-    CheckGCThingAfterMovingGC(*t);
-  }
-};
-}  // namespace
-
 #endif  // JSGC_HASH_TABLE_CHECKS
 
 LexicalEnvironmentObject*
@@ -463,24 +454,6 @@ void ObjectRealm::sweepNativeIterators() {
 void Realm::sweepObjectRealm() { objects_.sweepNativeIterators(); }
 
 void Realm::sweepVarNames() { varNames_.sweep(); }
-
-namespace {
-struct TraceRootFunctor {
-  JSTracer* trc;
-  const char* name;
-  TraceRootFunctor(JSTracer* trc, const char* name) : trc(trc), name(name) {}
-  template <class T>
-  void operator()(T* t) {
-    return TraceRoot(trc, t, name);
-  }
-};
-struct NeedsSweepUnbarrieredFunctor {
-  template <class T>
-  bool operator()(T* t) const {
-    return IsAboutToBeFinalizedUnbarriered(t);
-  }
-};
-}  // namespace
 
 void Realm::sweepTemplateObjects() {
   if (mappedArgumentsTemplate_ &&
@@ -885,8 +858,11 @@ void Realm::clearScriptNames() { scriptNameMap.reset(); }
 
 void Realm::clearBreakpointsIn(FreeOp* fop, js::Debugger* dbg,
                                HandleObject handler) {
-  for (auto script = zone()->cellIter<JSScript>(); !script.done();
-       script.next()) {
+  for (auto iter = zone()->cellIter<JSScript>(); !iter.done(); iter.next()) {
+    JSScript* script = iter;
+    if (gc::IsAboutToBeFinalizedUnbarriered(&script)) {
+      continue;
+    }
     if (script->realm() == this && script->hasAnyBreakpointsOrStepMode()) {
       script->clearBreakpointsIn(fop, dbg, handler);
     }

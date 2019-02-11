@@ -955,7 +955,11 @@ nsDisplayListBuilder::OutOfFlowDisplayData::ComputeVisibleRectForFrame(
         dirtyRectRelativeToDirtyFrame.Size() < ps->GetVisualViewportSize()) {
       dirtyRectRelativeToDirtyFrame.SizeTo(ps->GetVisualViewportSize());
     }
-
+    // Expand the size to the layout viewport size if necessary.
+    const nsSize layoutViewportSize = ps->GetLayoutViewportSize();
+    if (dirtyRectRelativeToDirtyFrame.Size() < layoutViewportSize) {
+      dirtyRectRelativeToDirtyFrame.SizeTo(layoutViewportSize);
+    }
     visible = dirtyRectRelativeToDirtyFrame;
   }
 #endif
@@ -1042,6 +1046,7 @@ nsDisplayListBuilder::nsDisplayListBuilder(nsIFrame* aReferenceFrame,
       mDisablePartialUpdates(false),
       mPartialBuildFailed(false),
       mIsInActiveDocShell(false),
+      mBuildAsyncZoomContainer(false),
       mHitTestArea(),
       mHitTestInfo(CompositorHitTestInvisibleToHit) {
   MOZ_COUNT_CTOR(nsDisplayListBuilder);
@@ -2117,26 +2122,31 @@ bool nsDisplayListBuilder::AddToWillChangeBudget(nsIFrame* aFrame,
 bool nsDisplayListBuilder::IsInWillChangeBudget(nsIFrame* aFrame,
                                                 const nsSize& aSize) {
   bool onBudget = AddToWillChangeBudget(aFrame, aSize);
+  if (onBudget) {
+    return true;
+  }
 
-  if (!onBudget) {
-    nsString usageStr;
+  auto* pc = aFrame->PresContext();
+  auto* doc = pc->Document();
+  if (!doc->HasWarnedAbout(Document::eIgnoringWillChangeOverBudget)) {
+    nsAutoString usageStr;
     usageStr.AppendInt(GetLayerizationCost(aSize));
 
-    nsString multiplierStr;
+    nsAutoString multiplierStr;
     multiplierStr.AppendInt(gWillChangeAreaMultiplier);
 
-    nsString limitStr;
-    nsRect area = aFrame->PresContext()->GetVisibleArea();
+    nsAutoString limitStr;
+    nsRect area = pc->GetVisibleArea();
     uint32_t budgetLimit = nsPresContext::AppUnitsToIntCSSPixels(area.width) *
                            nsPresContext::AppUnitsToIntCSSPixels(area.height);
     limitStr.AppendInt(budgetLimit);
 
     const char16_t* params[] = {multiplierStr.get(), limitStr.get()};
-    aFrame->PresContext()->Document()->WarnOnceAbout(
-        Document::eIgnoringWillChangeOverBudget, false, params,
-        ArrayLength(params));
+    doc->WarnOnceAbout(Document::eIgnoringWillChangeOverBudget, false, params,
+                       ArrayLength(params));
   }
-  return onBudget;
+
+  return false;
 }
 
 void nsDisplayListBuilder::RemoveFromWillChangeBudget(nsIFrame* aFrame) {
@@ -2470,8 +2480,11 @@ FrameLayerBuilder* nsDisplayList::BuildLayers(nsDisplayListBuilder* aBuilder,
       rootLayer->SetScrollMetadata(nsTArray<ScrollMetadata>());
     }
 
-    ContainerLayerParameters containerParameters(presShell->GetResolution(),
-                                                 presShell->GetResolution());
+    float rootLayerResolution = gfxPrefs::LayoutUseContainersForRootFrames()
+                                    ? presShell->GetResolution()
+                                    : 1.0f;
+    ContainerLayerParameters containerParameters(rootLayerResolution,
+                                                 rootLayerResolution);
 
     {
       PaintTelemetry::AutoRecord record(PaintTelemetry::Metric::Layerization);
@@ -2491,10 +2504,12 @@ FrameLayerBuilder* nsDisplayList::BuildLayers(nsDisplayListBuilder* aBuilder,
     if (!root) {
       return nullptr;
     }
-    // Root is being scaled up by the X/Y resolution. Scale it back down.
-    root->SetPostScale(1.0f / containerParameters.mXScale,
-                       1.0f / containerParameters.mYScale);
-    root->SetScaleToResolution(containerParameters.mXScale);
+    if (gfxPrefs::LayoutUseContainersForRootFrames()) {
+      // Root is being scaled up by the X/Y resolution. Scale it back down.
+      root->SetPostScale(1.0f / containerParameters.mXScale,
+                         1.0f / containerParameters.mYScale);
+      root->SetScaleToResolution(containerParameters.mXScale);
+    }
 
     auto callback = [root](ScrollableLayerGuid::ViewID aScrollId) -> bool {
       return nsLayoutUtils::ContainsMetricsWithId(root, aScrollId);
@@ -6063,6 +6078,8 @@ bool nsDisplayOpacity::CreateWebRenderCommands(
   wr::StackingContextParams params;
   params.animation = animationsId ? &prop : nullptr;
   params.opacity = opacityForSC;
+  params.clip =
+      wr::WrStackingContextClip::ClipChain(aBuilder.CurrentClipChainId());
   StackingContextHelper sc(aSc, GetActiveScrolledRoot(), mFrame, this, aBuilder,
                            params);
 
@@ -6103,6 +6120,8 @@ bool nsDisplayBlendMode::CreateWebRenderCommands(
   wr::StackingContextParams params;
   params.mix_blend_mode =
       wr::ToMixBlendMode(nsCSSRendering::GetGFXBlendMode(mBlendMode));
+  params.clip =
+      wr::WrStackingContextClip::ClipChain(aBuilder.CurrentClipChainId());
   StackingContextHelper sc(aSc, GetActiveScrolledRoot(), mFrame, this, aBuilder,
                            params);
 
@@ -6222,8 +6241,11 @@ bool nsDisplayBlendContainer::CreateWebRenderCommands(
     const StackingContextHelper& aSc,
     mozilla::layers::RenderRootStateManager* aManager,
     nsDisplayListBuilder* aDisplayListBuilder) {
-  StackingContextHelper sc(aSc, GetActiveScrolledRoot(), mFrame, this,
-                           aBuilder);
+  wr::StackingContextParams params;
+  params.clip =
+      wr::WrStackingContextClip::ClipChain(aBuilder.CurrentClipChainId());
+  StackingContextHelper sc(aSc, GetActiveScrolledRoot(), mFrame, this, aBuilder,
+                           params);
 
   return nsDisplayWrapList::CreateWebRenderCommands(
       aBuilder, aResources, sc, aManager, aDisplayListBuilder);
@@ -6311,29 +6333,27 @@ bool nsDisplayOwnLayer::CreateWebRenderCommands(
     mozilla::wr::IpcResourceUpdateQueue& aResources,
     const StackingContextHelper& aSc, RenderRootStateManager* aManager,
     nsDisplayListBuilder* aDisplayListBuilder) {
-  if (!aManager->LayerManager()->AsyncPanZoomEnabled() ||
-      !IsScrollThumbLayer()) {
-    return nsDisplayWrapList::CreateWebRenderCommands(
-        aBuilder, aResources, aSc, aManager, aDisplayListBuilder);
+  Maybe<wr::WrAnimationProperty> prop;
+  if (aManager->LayerManager()->AsyncPanZoomEnabled() && IsScrollThumbLayer()) {
+    // APZ is enabled and this is a scroll thumb, so we need to create and
+    // set an animation id. That way APZ can move this scrollthumb around as
+    // needed.
+    RefPtr<WebRenderAnimationData> animationData =
+        aManager->CommandBuilder()
+            .CreateOrRecycleWebRenderUserData<WebRenderAnimationData>(this);
+    AnimationInfo& animationInfo = animationData->GetAnimationInfo();
+    animationInfo.EnsureAnimationsId();
+    mWrAnimationId = animationInfo.GetCompositorAnimationsId();
+
+    prop.emplace();
+    prop->id = mWrAnimationId;
+    prop->effect_type = wr::WrAnimationType::Transform;
   }
 
-  // APZ is enabled and this is a scroll thumb, so we need to create and
-  // set an animation id. That way APZ can move this scrollthumb around as
-  // needed.
-  RefPtr<WebRenderAnimationData> animationData =
-      aManager->CommandBuilder()
-          .CreateOrRecycleWebRenderUserData<WebRenderAnimationData>(this);
-  AnimationInfo& animationInfo = animationData->GetAnimationInfo();
-  animationInfo.EnsureAnimationsId();
-  mWrAnimationId = animationInfo.GetCompositorAnimationsId();
-
-  wr::WrAnimationProperty prop;
-  prop.id = mWrAnimationId;
-  prop.effect_type = wr::WrAnimationType::Transform;
-
   wr::StackingContextParams params;
-  params.animation = &prop;
-
+  params.animation = prop.ptrOr(nullptr);
+  params.clip =
+      wr::WrStackingContextClip::ClipChain(aBuilder.CurrentClipChainId());
   StackingContextHelper sc(aSc, GetActiveScrolledRoot(), mFrame, this, aBuilder,
                            params);
 
@@ -6572,15 +6592,22 @@ already_AddRefed<Layer> nsDisplayResolution::BuildLayer(
     nsDisplayListBuilder* aBuilder, LayerManager* aManager,
     const ContainerLayerParameters& aContainerParameters) {
   nsIPresShell* presShell = mFrame->PresShell();
+  float rootLayerResolution = gfxPrefs::LayoutUseContainersForRootFrames()
+                                  ? presShell->GetResolution()
+                                  : 1.0f;
   ContainerLayerParameters containerParameters(
-      presShell->GetResolution(), presShell->GetResolution(), nsIntPoint(),
+      rootLayerResolution, rootLayerResolution, nsIntPoint(),
       aContainerParameters);
 
   RefPtr<Layer> layer =
       nsDisplaySubDocument::BuildLayer(aBuilder, aManager, containerParameters);
-  layer->SetPostScale(1.0f / presShell->GetResolution(),
-                      1.0f / presShell->GetResolution());
-  layer->AsContainerLayer()->SetScaleToResolution(presShell->GetResolution());
+
+  if (gfxPrefs::LayoutUseContainersForRootFrames()) {
+    layer->SetPostScale(1.0f / presShell->GetResolution(),
+                        1.0f / presShell->GetResolution());
+    layer->AsContainerLayer()->SetScaleToResolution(presShell->GetResolution());
+  }
+
   return layer.forget();
 }
 
@@ -6651,6 +6678,13 @@ already_AddRefed<Layer> nsDisplayFixedPosition::BuildLayer(
       anchorRect.SizeTo(presContext->PresShell()->GetVisualViewportSize());
     } else {
       anchorRect.SizeTo(viewportFrame->GetSize());
+    }
+
+    // Expand the size to the layout viewport size if necessary.
+    const nsSize layoutViewportSize =
+        presContext->PresShell()->GetLayoutViewportSize();
+    if (anchorRect.Size() < layoutViewportSize) {
+      anchorRect.SizeTo(layoutViewportSize);
     }
   } else {
     // A display item directly attached to the viewport.
@@ -7006,8 +7040,11 @@ bool nsDisplayStickyPosition::CreateWebRenderCommands(
   }
 
   {
+    wr::StackingContextParams params;
+    params.clip =
+        wr::WrStackingContextClip::ClipChain(aBuilder.CurrentClipChainId());
     StackingContextHelper sc(aSc, GetActiveScrolledRoot(), mFrame, this,
-                             aBuilder);
+                             aBuilder, params);
     nsDisplayWrapList::CreateWebRenderCommands(aBuilder, aResources, sc,
                                                aManager, aDisplayListBuilder);
   }
@@ -7153,6 +7190,41 @@ bool nsDisplayZoom::ComputeVisibility(nsDisplayListBuilder* aBuilder,
   aBuilder->SubtractFromVisibleRegion(aVisibleRegion, removed);
 
   return retval;
+}
+
+nsDisplayAsyncZoom::nsDisplayAsyncZoom(
+    nsDisplayListBuilder* aBuilder, nsIFrame* aFrame, nsDisplayList* aList,
+    const ActiveScrolledRoot* aActiveScrolledRoot,
+    mozilla::layers::FrameMetrics::ViewID aViewID)
+    : nsDisplayOwnLayer(aBuilder, aFrame, aList, aActiveScrolledRoot),
+      mViewID(aViewID) {
+  MOZ_COUNT_CTOR(nsDisplayAsyncZoom);
+}
+
+#ifdef NS_BUILD_REFCNT_LOGGING
+nsDisplayAsyncZoom::~nsDisplayAsyncZoom() {
+  MOZ_COUNT_DTOR(nsDisplayAsyncZoom);
+}
+#endif
+
+already_AddRefed<Layer> nsDisplayAsyncZoom::BuildLayer(
+    nsDisplayListBuilder* aBuilder, LayerManager* aManager,
+    const ContainerLayerParameters& aContainerParameters) {
+  nsIPresShell* presShell = mFrame->PresShell();
+  ContainerLayerParameters containerParameters(
+      presShell->GetResolution(), presShell->GetResolution(), nsIntPoint(),
+      aContainerParameters);
+
+  RefPtr<Layer> layer =
+      nsDisplayOwnLayer::BuildLayer(aBuilder, aManager, containerParameters);
+
+  layer->SetIsAsyncZoomContainer(Some(mViewID));
+
+  layer->SetPostScale(1.0f / presShell->GetResolution(),
+                      1.0f / presShell->GetResolution());
+  layer->AsContainerLayer()->SetScaleToResolution(presShell->GetResolution());
+
+  return layer.forget();
 }
 
 ///////////////////////////////////////////////////
@@ -7875,9 +7947,9 @@ bool nsDisplayTransform::CreateWebRenderCommands(
     deferredTransformItem = Some(this);
   }
 
-  // If it looks like we're animated, we should rasterize in local space
-  // (disabling subpixel-aa and global pixel snapping)
-  bool animated = Frame()->HasAnimationOfTransform();
+  // Determine if we're possibly animated (= would need an active layer in FLB).
+  bool animated =
+    ActiveLayerTracker::IsStyleMaybeAnimated(Frame(), eCSSProperty_transform);
 
   wr::StackingContextParams params;
   params.mBoundTransform = &newTransformMatrix;
@@ -7886,7 +7958,16 @@ bool nsDisplayTransform::CreateWebRenderCommands(
   params.is_backface_visible = !BackfaceIsHidden();
   params.mDeferredTransformItem = deferredTransformItem;
   params.mAnimated = animated;
+  // Determine if we would have to rasterize any items in local raster space
+  // (i.e. disable subpixel AA). We don't always need to rasterize locally even
+  // if the stacking context is possibly animated (at the cost of potentially
+  // some false negatives with respect to will-change handling), so we pass in
+  // this determination separately to accurately match with when FLB would normally
+  // disable subpixel AA.
+  params.mRasterizeLocally = animated && Frame()->HasAnimationOfTransform();
   params.SetPreserve3D(mFrame->Extend3DContext() && !mIsTransformSeparator);
+  params.clip =
+      wr::WrStackingContextClip::ClipChain(aBuilder.CurrentClipChainId());
 
   StackingContextHelper sc(aSc, GetActiveScrolledRoot(), mFrame, this, aBuilder,
                            params,
@@ -8498,11 +8579,13 @@ bool nsDisplayPerspective::CreateWebRenderCommands(
   params.reference_frame_kind = wr::WrReferenceFrameKind::Perspective;
   params.is_backface_visible = !BackfaceIsHidden();
   params.SetPreserve3D(preserve3D);
+  params.clip =
+      wr::WrStackingContextClip::ClipChain(aBuilder.CurrentClipChainId());
 
   Maybe<uint64_t> scrollingRelativeTo;
   for (auto* asr = GetActiveScrolledRoot(); asr; asr = asr->mParent) {
     if (nsLayoutUtils::IsAncestorFrameCrossDoc(
-          asr->mScrollableFrame->GetScrolledFrame(), perspectiveFrame)) {
+            asr->mScrollableFrame->GetScrolledFrame(), perspectiveFrame)) {
       scrollingRelativeTo.emplace(asr->GetViewId());
       break;
     }
@@ -9568,6 +9651,49 @@ bool nsDisplayForeignObject::CreateWebRenderCommands(
   } else {
     return false;
   }
+}
+
+void nsDisplayListCollection::SerializeWithCorrectZOrder(
+    nsDisplayList* aOutResultList, nsIContent* aContent) {
+  // Sort PositionedDescendants() in CSS 'z-order' order.  The list is already
+  // in content document order and SortByZOrder is a stable sort which
+  // guarantees that boxes produced by the same element are placed together
+  // in the sort. Consider a position:relative inline element that breaks
+  // across lines and has absolutely positioned children; all the abs-pos
+  // children should be z-ordered after all the boxes for the position:relative
+  // element itself.
+  PositionedDescendants()->SortByZOrder();
+
+  // Now follow the rules of http://www.w3.org/TR/CSS21/zindex.html
+  // 1,2: backgrounds and borders
+  aOutResultList->AppendToTop(BorderBackground());
+  // 3: negative z-index children.
+  for (;;) {
+    nsDisplayItem* item = PositionedDescendants()->GetBottom();
+    if (item && item->ZIndex() < 0) {
+      PositionedDescendants()->RemoveBottom();
+      aOutResultList->AppendToTop(item);
+      continue;
+    }
+    break;
+  }
+  // 4: block backgrounds
+  aOutResultList->AppendToTop(BlockBorderBackgrounds());
+  // 5: floats
+  aOutResultList->AppendToTop(Floats());
+  // 7: general content
+  aOutResultList->AppendToTop(Content());
+  // 7.5: outlines, in content tree order. We need to sort by content order
+  // because an element with outline that breaks and has children with outline
+  // might have placed child outline items between its own outline items.
+  // The element's outline items need to all come before any child outline
+  // items.
+  if (aContent) {
+    Outlines()->SortByContentOrder(aContent);
+  }
+  aOutResultList->AppendToTop(Outlines());
+  // 8, 9: non-negative z-index children
+  aOutResultList->AppendToTop(PositionedDescendants());
 }
 
 namespace mozilla {

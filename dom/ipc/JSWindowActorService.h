@@ -25,6 +25,8 @@ class JSWindowActorService final {
                            const WindowActorOptions& aOptions,
                            ErrorResult& aRv);
 
+  void UnregisterWindowActor(const nsAString& aName);
+
   // Register child's Window Actor from JSWindowActorInfos for content process.
   void LoadJSWindowActorInfos(nsTArray<JSWindowActorInfo>& aInfos);
 
@@ -37,6 +39,9 @@ class JSWindowActorService final {
   // which is handled by callers.
   void ConstructActor(const nsAString& aName, bool aParentSide,
                       JS::MutableHandleObject aActor, ErrorResult& aRv);
+
+  void ReceiveMessage(JS::RootedObject& aObj, const nsString& aMessageName,
+                      ipc::StructuredCloneData& aData);
 
  private:
   JSWindowActorService();

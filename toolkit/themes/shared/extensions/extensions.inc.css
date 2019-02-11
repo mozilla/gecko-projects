@@ -155,6 +155,11 @@ button.warning {
 
 /*** category selector ***/
 
+#categories {
+  /* Make room for outlines */
+  padding: 1px;
+}
+
 #categories > .category[disabled] {
   overflow: hidden;
   height: 0;
@@ -469,7 +474,11 @@ button.warning {
   -moz-box-align: center;
 }
 
-.content-container,
+.content-container {
+  -moz-box-align: center;
+}
+
+#updates-list > .addon > .content-container,
 .basicinfo-container {
   -moz-box-align: start;
 }

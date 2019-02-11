@@ -685,6 +685,7 @@ JS_PUBLIC_API JSObject* JS_TransplantObject(JSContext* cx, HandleObject origobj,
   MOZ_ASSERT(!target->is<CrossCompartmentWrapperObject>());
   MOZ_ASSERT(origobj->getClass() == target->getClass());
   ReleaseAssertObjectHasNoWrappers(cx, target);
+  JS::AssertCellIsNotGray(origobj);
   JS::AssertCellIsNotGray(target);
 
   RootedValue origv(cx, ObjectValue(*origobj));
@@ -702,13 +703,9 @@ JS_PUBLIC_API JSObject* JS_TransplantObject(JSContext* cx, HandleObject origobj,
     // destination, then we know that we won't find a wrapper in the
     // destination's cross compartment map and that the same
     // object will continue to work.
-    AutoRealmUnchecked ar(cx, origobj->nonCCWRealm());
+    AutoRealm ar(cx, origobj);
     JSObject::swap(cx, origobj, target);
     newIdentity = origobj;
-
-    // |origobj| might be gray so unmark it to avoid returning a possibly-gray
-    // object.
-    JS::ExposeObjectToActiveJS(newIdentity);
   } else if (WrapperMap::Ptr p = destination->lookupWrapper(origv)) {
     // There might already be a wrapper for the original object in
     // the new compartment. If there is, we use its identity and swap
@@ -739,7 +736,7 @@ JS_PUBLIC_API JSObject* JS_TransplantObject(JSContext* cx, HandleObject origobj,
   // Lastly, update the original object to point to the new one.
   if (origobj->compartment() != destination) {
     RootedObject newIdentityWrapper(cx, newIdentity);
-    AutoRealmUnchecked ar(cx, origobj->nonCCWRealm());
+    AutoRealm ar(cx, origobj);
     if (!JS_WrapObject(cx, &newIdentityWrapper)) {
       MOZ_CRASH();
     }
@@ -3251,21 +3248,23 @@ static JSObject* CloneFunctionObject(JSContext* cx, HandleObject funobj,
     return nullptr;
   }
 
+  // Only allow cloning normal, interpreted functions.
   RootedFunction fun(cx, &funobj->as<JSFunction>());
+  if (fun->isNative() || fun->isBoundFunction() ||
+      fun->kind() != JSFunction::NormalFunction || fun->isExtended() ||
+      fun->isSelfHostedBuiltin()) {
+    JS_ReportErrorNumberASCII(cx, GetErrorMessage, nullptr,
+                              JSMSG_CANT_CLONE_OBJECT);
+    return nullptr;
+  }
+
   if (fun->isInterpretedLazy()) {
     AutoRealm ar(cx, fun);
     if (!JSFunction::getOrCreateScript(cx, fun)) {
       return nullptr;
     }
   }
-
-  // Only allow cloning normal, interpreted functions.
-  if (fun->isNative() || fun->isBoundFunction() ||
-      fun->kind() != JSFunction::NormalFunction || fun->isExtended()) {
-    JS_ReportErrorNumberASCII(cx, GetErrorMessage, nullptr,
-                              JSMSG_CANT_CLONE_OBJECT);
-    return nullptr;
-  }
+  RootedScript script(cx, fun->nonLazyScript());
 
   if (!IsFunctionCloneable(fun)) {
     JS_ReportErrorNumberASCII(cx, GetErrorMessage, nullptr,
@@ -3274,24 +3273,19 @@ static JSObject* CloneFunctionObject(JSContext* cx, HandleObject funobj,
   }
 
   if (CanReuseScriptForClone(cx->realm(), fun, env)) {
-    // If the script is to be reused, either the script can already handle
-    // non-syntactic scopes, or there is only the standard global lexical
-    // scope.
-#ifdef DEBUG
-    // Fail here if we OOM during debug asserting.
-    // CloneFunctionReuseScript will delazify the script anyways, so we
-    // are not creating an extra failure condition for DEBUG builds.
-    if (!JSFunction::getOrCreateScript(cx, fun)) {
-      return nullptr;
-    }
-    MOZ_ASSERT(scope->as<GlobalScope>().isSyntactic() ||
-               fun->nonLazyScript()->hasNonSyntacticScope());
-#endif
     return CloneFunctionReuseScript(cx, fun, env, fun->getAllocKind());
   }
 
-  JSFunction* clone =
-      CloneFunctionAndScript(cx, fun, env, scope, fun->getAllocKind());
+  Rooted<ScriptSourceObject*> sourceObject(cx, script->sourceObject());
+  if (cx->compartment() != sourceObject->compartment()) {
+    sourceObject = ScriptSourceObject::clone(cx, sourceObject);
+    if (!sourceObject) {
+      return nullptr;
+    }
+  }
+
+  JSFunction* clone = CloneFunctionAndScript(cx, fun, env, scope, sourceObject,
+                                             fun->getAllocKind());
 
 #ifdef DEBUG
   // The cloned function should itself be cloneable.
@@ -5567,6 +5561,9 @@ JS_PUBLIC_API void JS_SetGlobalJitCompilerOption(JSContext* cx,
       break;
     case JSJITCOMPILER_TRACK_OPTIMIZATIONS:
       jit::JitOptions.disableOptimizationTracking = !value;
+      break;
+    case JSJITCOMPILER_UNBOXED_OBJECTS:
+      jit::JitOptions.disableUnboxedObjects = !value;
       break;
     case JSJITCOMPILER_SPECTRE_INDEX_MASKING:
       jit::JitOptions.spectreIndexMasking = !!value;

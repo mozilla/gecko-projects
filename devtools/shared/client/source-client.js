@@ -19,7 +19,6 @@ const noop = () => {};
  */
 function SourceClient(client, form) {
   this._form = form;
-  this._isBlackBoxed = form.isBlackBoxed;
   this._activeThread = client;
   this._client = client.client;
 }
@@ -27,9 +26,6 @@ function SourceClient(client, form) {
 SourceClient.prototype = {
   get _transport() {
     return this._client._transport;
-  },
-  get isBlackBoxed() {
-    return this._isBlackBoxed;
   },
   get actor() {
     return this._form.actor;
@@ -51,15 +47,6 @@ SourceClient.prototype = {
     },
     {
       telemetry: "BLACKBOX",
-      after: function(response) {
-        if (!response.error) {
-          this._isBlackBoxed = true;
-          if (this._activeThread) {
-            this._activeThread.emit("blackboxchange", this);
-          }
-        }
-        return response;
-      },
     },
   ),
 
@@ -73,15 +60,6 @@ SourceClient.prototype = {
     },
     {
       telemetry: "UNBLACKBOX",
-      after: function(response) {
-        if (!response.error) {
-          this._isBlackBoxed = false;
-          if (this._activeThread) {
-            this._activeThread.emit("blackboxchange", this);
-          }
-        }
-        return response;
-      },
     },
   ),
 
@@ -178,7 +156,7 @@ SourceClient.prototype = {
    *        The location and options of the breakpoint in
    *        the form of { line[, column, options] }.
    */
-  setBreakpoint: function({ line, column, options, noSliding }) {
+  setBreakpoint: function({ line, column, options }) {
     // A helper function that sets the breakpoint.
     const doSetBreakpoint = callback => {
       const location = {
@@ -191,7 +169,6 @@ SourceClient.prototype = {
         type: "setBreakpoint",
         location,
         options,
-        noSliding,
       };
 
       // Older servers only support conditions, not a more general options

@@ -344,6 +344,12 @@ void DrawTargetD2D1::ClearRect(const Rect &aRect) {
   if (!EnsureInitialized()) {
     return;
   }
+
+  if (aRect.IsEmpty()) {
+    // Nothing to be done.
+    return;
+  }
+
   MarkChanged();
 
   PopAllClips();
@@ -1042,11 +1048,16 @@ already_AddRefed<SourceSurface> DrawTargetD2D1::CreateSourceSurfaceFromData(
     SurfaceFormat aFormat) const {
   RefPtr<ID2D1Bitmap1> bitmap;
 
-  HRESULT hr = Factory::GetD2DDeviceContext()->CreateBitmap(
-      D2DIntSize(aSize), aData, aStride,
-      D2D1::BitmapProperties1(D2D1_BITMAP_OPTIONS_NONE,
-                              D2DPixelFormat(aFormat)),
-      getter_AddRefs(bitmap));
+  RefPtr<ID2D1DeviceContext> dc = Factory::GetD2DDeviceContext();
+  if (!dc) {
+    return nullptr;
+  }
+
+  HRESULT hr =
+      dc->CreateBitmap(D2DIntSize(aSize), aData, aStride,
+                       D2D1::BitmapProperties1(D2D1_BITMAP_OPTIONS_NONE,
+                                               D2DPixelFormat(aFormat)),
+                       getter_AddRefs(bitmap));
 
   if (FAILED(hr) || !bitmap) {
     gfxCriticalError(
@@ -1056,8 +1067,8 @@ already_AddRefed<SourceSurface> DrawTargetD2D1::CreateSourceSurfaceFromData(
     return nullptr;
   }
 
-  return MakeAndAddRef<SourceSurfaceD2D1>(
-      bitmap.get(), Factory::GetD2DDeviceContext().get(), aFormat, aSize);
+  return MakeAndAddRef<SourceSurfaceD2D1>(bitmap.get(), dc.get(), aFormat,
+                                          aSize);
 }
 
 already_AddRefed<DrawTarget> DrawTargetD2D1::CreateSimilarDrawTarget(
@@ -1074,6 +1085,9 @@ already_AddRefed<DrawTarget> DrawTargetD2D1::CreateSimilarDrawTarget(
 bool DrawTargetD2D1::CanCreateSimilarDrawTarget(const IntSize &aSize,
                                                 SurfaceFormat aFormat) const {
   RefPtr<ID2D1DeviceContext> dc = Factory::GetD2DDeviceContext();
+  if (!dc) {
+    return false;
+  }
   return (dc->GetMaximumBitmapSize() >= UINT32(aSize.width) &&
           dc->GetMaximumBitmapSize() >= UINT32(aSize.height));
 }
@@ -2156,6 +2170,11 @@ already_AddRefed<SourceSurface> DrawTargetD2D1::OptimizeSourceSurface(
     return surface.forget();
   }
 
+  RefPtr<ID2D1DeviceContext> dc = Factory::GetD2DDeviceContext();
+  if (!dc) {
+    return nullptr;
+  }
+
   // Special case captures so we don't resolve them to a data surface.
   if (aSurface->GetType() == SurfaceType::CAPTURE) {
     SourceSurfaceCapture *capture =
@@ -2177,7 +2196,7 @@ already_AddRefed<SourceSurface> DrawTargetD2D1::OptimizeSourceSurface(
       return nullptr;
     }
 
-    HRESULT hr = Factory::GetD2DDeviceContext()->CreateBitmap(
+    HRESULT hr = dc->CreateBitmap(
         D2DIntSize(data->GetSize()), map.GetData(), map.GetStride(),
         D2D1::BitmapProperties1(D2D1_BITMAP_OPTIONS_NONE,
                                 D2DPixelFormat(data->GetFormat())),
@@ -2195,8 +2214,7 @@ already_AddRefed<SourceSurface> DrawTargetD2D1::OptimizeSourceSurface(
     return data.forget();
   }
 
-  return MakeAndAddRef<SourceSurfaceD2D1>(bitmap.get(),
-                                          Factory::GetD2DDeviceContext().get(),
+  return MakeAndAddRef<SourceSurfaceD2D1>(bitmap.get(), dc.get(),
                                           data->GetFormat(), data->GetSize());
 }
 

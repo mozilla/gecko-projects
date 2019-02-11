@@ -1,9 +1,11 @@
 import {actionCreators as ac} from "common/Actions.jsm";
 import React from "react";
+import {SpocIntersectionObserver} from "content-src/components/DiscoveryStreamComponents/SpocIntersectionObserver/SpocIntersectionObserver";
 
 export class DSCard extends React.PureComponent {
   constructor(props) {
     super(props);
+
     this.onLinkClick = this.onLinkClick.bind(this);
   }
 
@@ -25,26 +27,28 @@ export class DSCard extends React.PureComponent {
 
   render() {
     return (
-      <a href={this.props.url} className="ds-card" onClick={this.onLinkClick}>
-        <div className="img-wrapper">
-          <div className="img" style={{backgroundImage: `url(${this.props.image_src}`}} />
-        </div>
-        <div className="meta">
-          <div className="info-wrap">
-            <header className="title">{this.props.title}</header>
-            {this.props.excerpt && <p className="excerpt">{this.props.excerpt}</p>}
+      <SpocIntersectionObserver campaignId={this.props.campaignId} dispatch={this.props.dispatch}>
+        <a href={this.props.url} className="ds-card" onClick={this.onLinkClick}>
+          <div className="img-wrapper">
+            <div className="img" style={{backgroundImage: `url(${this.props.image_src}`}} />
           </div>
-          <p>
-            {this.props.context && (
-              <span>
-                <span className="context">{this.props.context}</span>
-                <br />
-              </span>
-            )}
-            <span className="source">{this.props.source}</span>
-          </p>
-        </div>
-      </a>
+          <div className="meta">
+            <div className="info-wrap">
+              <header className="title">{this.props.title}</header>
+              {this.props.excerpt && <p className="excerpt">{this.props.excerpt}</p>}
+            </div>
+            <p>
+              {this.props.context && (
+                <span>
+                  <span className="context">{this.props.context}</span>
+                  <br />
+                </span>
+              )}
+              <span className="source">{this.props.source}</span>
+            </p>
+          </div>
+        </a>
+      </SpocIntersectionObserver>
     );
   }
 }

@@ -364,13 +364,31 @@ if mozinfo.isWin:
             pid)
         if not pHandle:
             return False
-        pExitCode = ctypes.wintypes.DWORD()
-        ctypes.windll.kernel32.GetExitCodeProcess(
-            pHandle,
-            ctypes.byref(pExitCode))
-        ctypes.windll.kernel32.CloseHandle(pHandle)
-        return pExitCode.value == STILL_ACTIVE
 
+        try:
+            pExitCode = ctypes.wintypes.DWORD()
+            ctypes.windll.kernel32.GetExitCodeProcess(
+                pHandle,
+                ctypes.byref(pExitCode))
+
+            if pExitCode.value != STILL_ACTIVE:
+                return False
+
+            # We have a live process handle.  But Windows aggressively
+            # re-uses pids, so let's attempt to verify that this is
+            # actually Firefox.
+            namesize = 1024
+            pName = ctypes.create_string_buffer(namesize)
+            namelen = ctypes.windll.kernel32.GetProcessImageFileNameA(pHandle,
+                                                                      pName,
+                                                                      namesize)
+            if namelen == 0:
+                # Still an active process, so conservatively assume it's Firefox.
+                return True
+
+            return pName.value.endswith(('firefox.exe', 'plugin-container.exe'))
+        finally:
+            ctypes.windll.kernel32.CloseHandle(pHandle)
 else:
     import errno
 
@@ -1861,7 +1879,6 @@ toolbar#nav-bar {
         prefs = {
             "browser.tabs.remote.autostart": options.e10s,
             "dom.ipc.tabs.nested.enabled": options.nested_oop,
-            "idle.lastDailyNotification": int(time.time()),
             # Enable tracing output for detailed failures in case of
             # failing connection attempts, and hangs (bug 1397201)
             "marionette.log.level": "Trace",

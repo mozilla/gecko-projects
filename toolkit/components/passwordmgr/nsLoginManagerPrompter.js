@@ -96,17 +96,25 @@ LoginManagerPromptFactory.prototype = {
       return;
     }
 
-    // Allow only a limited number of authentication dialogs when they are all
-    // canceled by the user.
-    var cancelationCounter = (prompter._browser && prompter._browser.canceledAuthenticationPromptCounter) || { count: 0, id: 0 };
-    if (prompt.channel) {
-      var httpChannel = prompt.channel.QueryInterface(Ci.nsIHttpChannel);
-      if (httpChannel) {
-        var windowId = httpChannel.topLevelContentWindowId;
-        if (windowId != cancelationCounter.id) {
-          // window has been reloaded or navigated, reset the counter
-          cancelationCounter = { count: 0, id: windowId };
-        }
+    // Set up a counter for ensuring that the basic auth prompt can not
+    // be abused for DOS-style attacks. With this counter, each eTLD+1
+    // per browser will get a limited number of times a user can
+    // cancel the prompt until we stop showing it.
+    let browser = prompter._browser;
+    let baseDomain = null;
+    if (browser) {
+      try {
+        baseDomain = Services.eTLD.getBaseDomainFromHost(hostname);
+      } catch (e) {
+        baseDomain = hostname;
+      }
+
+      if (!browser.canceledAuthenticationPromptCounter) {
+        browser.canceledAuthenticationPromptCounter = {};
+      }
+
+      if (!browser.canceledAuthenticationPromptCounter[baseDomain]) {
+        browser.canceledAuthenticationPromptCounter[baseDomain] = 0;
       }
     }
 
@@ -136,13 +144,14 @@ LoginManagerPromptFactory.prototype = {
           prompt.inProgress = false;
           self._asyncPromptInProgress = false;
 
-          if (ok) {
-            cancelationCounter.count = 0;
-          } else {
-            cancelationCounter.count++;
-          }
-          if (prompter._browser) {
-            prompter._browser.canceledAuthenticationPromptCounter = cancelationCounter;
+          if (browser) {
+            // Reset the counter state if the user replied to a prompt and actually
+            // tried to login (vs. simply clicking any button to get out).
+            if (ok && (prompt.authInfo.username || prompt.authInfo.password)) {
+              browser.canceledAuthenticationPromptCounter[baseDomain] = 0;
+            } else {
+              browser.canceledAuthenticationPromptCounter[baseDomain] += 1;
+            }
           }
         }
 
@@ -168,8 +177,9 @@ LoginManagerPromptFactory.prototype = {
 
     var cancelDialogLimit = Services.prefs.getIntPref("prompts.authentication_dialog_abuse_limit");
 
+    let cancelationCounter = browser.canceledAuthenticationPromptCounter[baseDomain];
     this.log("cancelationCounter =", cancelationCounter);
-    if (cancelDialogLimit && cancelationCounter.count >= cancelDialogLimit) {
+    if (cancelDialogLimit && cancelationCounter >= cancelDialogLimit) {
       this.log("Blocking auth dialog, due to exceeding dialog bloat limit");
       delete this._asyncPrompts[hashKey];
 
@@ -293,6 +303,12 @@ LoginManagerPrompter.prototype = {
     return true;
   },
 
+  get _allowRememberLogin() {
+    if (!this._inPrivateBrowsing) {
+      return true;
+    }
+    return LoginHelper.privateBrowsingCaptureEnabled;
+  },
 
 
 
@@ -341,10 +357,8 @@ LoginManagerPrompter.prototype = {
 
     // If hostname is null, we can't save this login.
     if (hostname) {
-      var canRememberLogin;
-      if (this._inPrivateBrowsing) {
-        canRememberLogin = false;
-      } else {
+      var canRememberLogin = false;
+      if (this._allowRememberLogin) {
         canRememberLogin = (aSavePassword ==
                             Ci.nsIAuthPrompt.SAVE_PASSWORD_PERMANENTLY) &&
                            Services.logins.getLoginSavingEnabled(hostname);
@@ -592,7 +606,7 @@ LoginManagerPrompter.prototype = {
       }
 
       var canRememberLogin = Services.logins.getLoginSavingEnabled(hostname);
-      if (this._inPrivateBrowsing) {
+      if (!this._allowRememberLogin) {
         canRememberLogin = false;
       }
 
@@ -651,7 +665,9 @@ LoginManagerPrompter.prototype = {
                  " @ " + hostname + " (" + httpRealm + ")");
 
         if (notifyObj) {
-          this._showLoginCaptureDoorhanger(newLogin, "password-save");
+          this._showLoginCaptureDoorhanger(newLogin, "password-save", {
+            dismissed: this._inPrivateBrowsing,
+          });
           Services.obs.notifyObservers(newLogin, "passwordmgr-prompt-save");
         } else {
           Services.logins.addLogin(newLogin);
@@ -762,7 +778,9 @@ LoginManagerPrompter.prototype = {
     this.log("promptToSavePassword");
     var notifyObj = this._getPopupNote();
     if (notifyObj) {
-      this._showLoginCaptureDoorhanger(aLogin, "password-save");
+      this._showLoginCaptureDoorhanger(aLogin, "password-save", {
+        dismissed: this._inPrivateBrowsing,
+      });
       Services.obs.notifyObservers(aLogin, "passwordmgr-prompt-save");
     } else {
       this._showSaveLoginDialog(aLogin);
@@ -779,7 +797,7 @@ LoginManagerPrompter.prototype = {
    *        This is "password-save" or "password-change" depending on the
    *        original notification type. This is used for telemetry and tests.
    */
-  _showLoginCaptureDoorhanger(login, type) {
+  _showLoginCaptureDoorhanger(login, type, options = {}) {
     let { browser } = this._getNotifyWindow();
     if (!browser) {
       return;
@@ -994,7 +1012,7 @@ LoginManagerPrompter.prototype = {
       "password-notification-icon",
       mainAction,
       secondaryActions,
-      {
+      Object.assign({
         timeout: Date.now() + 10000,
         persistWhileVisible: true,
         passwordNotificationType: type,
@@ -1043,7 +1061,7 @@ LoginManagerPrompter.prototype = {
           }
           return false;
         },
-      }
+      }, options),
     );
   },
 
@@ -1199,7 +1217,7 @@ LoginManagerPrompter.prototype = {
   promptToChangePasswordWithUsernames(logins, count, aNewLogin) {
     this.log("promptToChangePasswordWithUsernames with count:", count);
 
-    var usernames = logins.map(l => l.username);
+    var usernames = logins.map(l => l.username || this._getLocalizedString("noUsername"));
     var dialogText  = this._getLocalizedString("userSelectText2");
     var dialogTitle = this._getLocalizedString("passwordChangeTitle");
     var selectedIndex = { value: null };

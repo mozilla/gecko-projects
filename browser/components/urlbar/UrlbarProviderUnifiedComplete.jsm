@@ -16,10 +16,10 @@ const {XPCOMUtils} = ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm")
 XPCOMUtils.defineLazyModuleGetters(this, {
   Log: "resource://gre/modules/Log.jsm",
   PlacesUtils: "resource://gre/modules/PlacesUtils.jsm",
+  PrivateBrowsingUtils: "resource://gre/modules/PrivateBrowsingUtils.jsm",
   UrlbarProvider: "resource:///modules/UrlbarUtils.jsm",
   UrlbarResult: "resource:///modules/UrlbarResult.jsm",
   UrlbarUtils: "resource:///modules/UrlbarUtils.jsm",
-  PrivateBrowsingUtils: "resource://gre/modules/PrivateBrowsingUtils.jsm",
 });
 
 XPCOMUtils.defineLazyServiceGetter(this, "unifiedComplete",
@@ -27,7 +27,7 @@ XPCOMUtils.defineLazyServiceGetter(this, "unifiedComplete",
   "nsIAutoCompleteSearch");
 
 XPCOMUtils.defineLazyGetter(this, "logger",
-  () => Log.repository.getLogger("Places.Urlbar.Provider.UnifiedComplete"));
+  () => Log.repository.getLogger("Urlbar.Provider.UnifiedComplete"));
 
 // See UnifiedComplete.
 const TITLE_TAGS_SEPARATOR = " \u2013 ";
@@ -197,10 +197,19 @@ function convertResultToMatches(context, result, urls) {
     if (!match) {
       continue;
     }
-    // Manage autofillValue and preselected properties for the first match.
+    // Manage autofill and preselected properties for the first match.
     if (i == 0) {
       if (style.includes("autofill") && result.defaultIndex == 0) {
-        context.autofillValue = result.getValueAt(i);
+        let autofillValue = result.getValueAt(i);
+        if (autofillValue.toLocaleLowerCase()
+            .startsWith(context.searchString.toLocaleLowerCase())) {
+          match.autofill = {
+            value: context.searchString +
+                   autofillValue.substring(context.searchString.length),
+            selectionStart: context.searchString.length,
+            selectionEnd: autofillValue.length,
+          };
+        }
       }
       if (style.includes("heuristic")) {
         context.preselected = true;
@@ -230,8 +239,14 @@ function makeUrlbarResult(tokens, info) {
             engine: [action.params.engineName, true],
             suggestion: [action.params.searchSuggestion, true],
             keyword: [action.params.alias, true],
-            query: [action.params.searchQuery, true],
+            query: [action.params.searchQuery.trim(), true],
             icon: [info.icon, false],
+            isKeywordOffer: [
+              action.params.alias &&
+                !action.params.searchQuery.trim() &&
+                !info.style.includes("heuristic"),
+              false,
+            ],
           })
         );
       case "keyword":

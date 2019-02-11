@@ -38,7 +38,7 @@ async function testChromeTab() {
   const target = await TargetFactory.forTab(tab);
   await target.attach();
 
-  const [, threadClient] = await target.activeTab.attachThread();
+  const [, threadClient] = await target.attachThread();
   await threadClient.resume();
 
   const { sources } = await threadClient.getSources();
@@ -94,15 +94,10 @@ async function testMainProcess() {
     Services.obs.addObserver(observe, "devtools-thread-instantiated");
   });
 
-  const targetFront = await client.mainRoot.getMainProcess();
-  const target = await TargetFactory.forRemoteTab({
-    client,
-    activeTab: targetFront,
-    chrome: true,
-  });
+  const target = await client.mainRoot.getMainProcess();
   await target.attach();
 
-  const [, threadClient] = await target.activeTab.attachThread();
+  const [, threadClient] = await target.attachThread();
   await threadClient.resume();
   const { sources } = await threadClient.getSources();
   ok(sources.find(s => s.url == "resource://devtools/client/framework/devtools.js"),

@@ -29,7 +29,7 @@ using namespace mozilla;
 using namespace mozilla::gfx;
 
 nsPageFrame* NS_NewPageFrame(nsIPresShell* aPresShell, ComputedStyle* aStyle) {
-  return new (aPresShell) nsPageFrame(aStyle);
+  return new (aPresShell) nsPageFrame(aStyle, aPresShell->GetPresContext());
 }
 
 NS_IMPL_FRAMEARENA_HELPERS(nsPageFrame)
@@ -38,8 +38,8 @@ NS_QUERYFRAME_HEAD(nsPageFrame)
   NS_QUERYFRAME_ENTRY(nsPageFrame)
 NS_QUERYFRAME_TAIL_INHERITING(nsContainerFrame)
 
-nsPageFrame::nsPageFrame(ComputedStyle* aStyle)
-    : nsContainerFrame(aStyle, kClassID) {}
+nsPageFrame::nsPageFrame(ComputedStyle* aStyle, nsPresContext* aPresContext)
+    : nsContainerFrame(aStyle, aPresContext, kClassID) {}
 
 nsPageFrame::~nsPageFrame() {}
 
@@ -94,9 +94,9 @@ void nsPageFrame::Reflow(nsPresContext* aPresContext,
     // Use the margins given in the @page rule.
     // If a margin is 'auto', use the margin from the print settings for that
     // side.
-    const nsStyleSides& marginStyle = kidReflowInput.mStyleMargin->mMargin;
+    const auto& marginStyle = kidReflowInput.mStyleMargin->mMargin;
     NS_FOR_CSS_SIDES(side) {
-      if (marginStyle.GetUnit(side) == eStyleUnit_Auto) {
+      if (marginStyle.Get(side).IsAuto()) {
         mPageContentMargin.Side(side) = mPD->mReflowMargin.Side(side);
       } else {
         mPageContentMargin.Side(side) =
@@ -637,13 +637,15 @@ nsIFrame* NS_NewPageBreakFrame(nsIPresShell* aPresShell,
   NS_ASSERTION(aPresShell->GetPresContext()->IsPaginated(),
                "created a page break frame while not printing");
 
-  return new (aPresShell) nsPageBreakFrame(aStyle);
+  return new (aPresShell)
+      nsPageBreakFrame(aStyle, aPresShell->GetPresContext());
 }
 
 NS_IMPL_FRAMEARENA_HELPERS(nsPageBreakFrame)
 
-nsPageBreakFrame::nsPageBreakFrame(ComputedStyle* aStyle)
-    : nsLeafFrame(aStyle, kClassID), mHaveReflowed(false) {}
+nsPageBreakFrame::nsPageBreakFrame(ComputedStyle* aStyle,
+                                   nsPresContext* aPresContext)
+    : nsLeafFrame(aStyle, aPresContext, kClassID), mHaveReflowed(false) {}
 
 nsPageBreakFrame::~nsPageBreakFrame() {}
 

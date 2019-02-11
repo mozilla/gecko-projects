@@ -290,7 +290,6 @@ nsComputedDOMStyle::nsComputedDOMStyle(dom::Element* aElement,
       mInnerFrame(nullptr),
       mPresShell(nullptr),
       mStyleType(aStyleType),
-      mComputedStyleGeneration(0),
       mExposeVisitedStyle(false),
       mResolvedComputedStyle(false)
 #ifdef DEBUG
@@ -746,6 +745,7 @@ void nsComputedDOMStyle::SetResolvedComputedStyle(
   }
   mComputedStyle = aContext;
   mComputedStyleGeneration = aGeneration;
+  mPresShellId = mPresShell->GetPresShellId();
 }
 
 void nsComputedDOMStyle::SetFrameComputedStyle(mozilla::ComputedStyle* aStyle,
@@ -753,6 +753,7 @@ void nsComputedDOMStyle::SetFrameComputedStyle(mozilla::ComputedStyle* aStyle,
   ClearComputedStyle();
   mComputedStyle = aStyle;
   mComputedStyleGeneration = aGeneration;
+  mPresShellId = mPresShell->GetPresShellId();
 }
 
 bool nsComputedDOMStyle::NeedsToFlush(Document* aDocument) const {
@@ -845,6 +846,7 @@ void nsComputedDOMStyle::UpdateCurrentStyleSources(bool aNeedsLayoutFlush) {
     //
     // So we always need to update the style to ensure it it up-to-date.
     if (mComputedStyleGeneration == currentGeneration &&
+        mPresShellId == mPresShell->GetPresShellId() &&
         mElement->IsInComposedDoc()) {
       // Our cached style is still valid.
       return;
@@ -2587,30 +2589,108 @@ already_AddRefed<CSSValue> nsComputedDOMStyle::GetOffsetWidthFor(
 
   uint8_t position = display->mPosition;
   if (!mOuterFrame) {
-    // GetRelativeOffset and GetAbsoluteOffset don't handle elements
-    // without frames in any sensible way.  GetStaticOffset, however,
-    // is perfect for that case.
+    // GetNonStaticPositionOffset or GetAbsoluteOffset don't handle elements
+    // without frames in any sensible way. GetStaticOffset, however, is perfect
+    // for that case.
     position = NS_STYLE_POSITION_STATIC;
   }
 
   switch (position) {
     case NS_STYLE_POSITION_STATIC:
       return GetStaticOffset(aSide);
-    case NS_STYLE_POSITION_RELATIVE:
-      return GetRelativeOffset(aSide);
     case NS_STYLE_POSITION_STICKY:
-      return GetStickyOffset(aSide);
+      return GetNonStaticPositionOffset(
+          aSide, false, &nsComputedDOMStyle::GetScrollFrameContentWidth,
+          &nsComputedDOMStyle::GetScrollFrameContentHeight);
     case NS_STYLE_POSITION_ABSOLUTE:
     case NS_STYLE_POSITION_FIXED:
       return GetAbsoluteOffset(aSide);
+    case NS_STYLE_POSITION_RELATIVE:
+      return GetNonStaticPositionOffset(
+          aSide, true, &nsComputedDOMStyle::GetCBContentWidth,
+          &nsComputedDOMStyle::GetCBContentHeight);
     default:
-      NS_ERROR("Invalid position");
+      MOZ_ASSERT_UNREACHABLE("Invalid position");
       return nullptr;
   }
+}
+// FIXME(emilio): Remove these when nsStyleCoord is gone.
+static nsStyleCoord ToCoord(const LengthPercentage& aLength) {
+  nsStyleCoord ret;
+  if (aLength.was_calc) {
+    auto* calc = new nsStyleCoord::Calc();
+    calc->mLength = CSSPixel::ToAppUnits(aLength.LengthInCSSPixels());
+    calc->mPercent = aLength.Percentage();
+    calc->mHasPercent = aLength.HasPercent();
+    ret.SetCalcValue(calc);  // takes ownership.
+    return ret;
+  }
+
+  if (aLength.HasPercent()) {
+    ret.SetPercentValue(aLength.Percentage());
+  } else {
+    ret.SetCoordValue(aLength.ToLength());
+  }
+  return ret;
+}
+
+static nsStyleCoord ToCoord(const LengthPercentageOrAuto& aLength) {
+  if (aLength.IsAuto()) {
+    return nsStyleCoord(eStyleUnit_Auto);
+  }
+  return ToCoord(aLength.AsLengthPercentage());
+}
+
+static_assert(eSideTop == 0 && eSideRight == 1 && eSideBottom == 2 &&
+                  eSideLeft == 3,
+              "box side constants not as expected for NS_OPPOSITE_SIDE");
+#define NS_OPPOSITE_SIDE(s_) mozilla::Side(((s_) + 2) & 3)
+
+already_AddRefed<CSSValue> nsComputedDOMStyle::GetNonStaticPositionOffset(
+    mozilla::Side aSide, bool aResolveAuto, PercentageBaseGetter aWidthGetter,
+    PercentageBaseGetter aHeightGetter) {
+  RefPtr<nsROCSSPrimitiveValue> val = new nsROCSSPrimitiveValue;
+
+  const nsStylePosition* positionData = StylePosition();
+  int32_t sign = 1;
+  LengthPercentageOrAuto coord = positionData->mOffset.Get(aSide);
+
+  if (coord.IsAuto()) {
+    if (!aResolveAuto) {
+      val->SetIdent(eCSSKeyword_auto);
+      return val.forget();
+    }
+    coord = positionData->mOffset.Get(NS_OPPOSITE_SIDE(aSide));
+    sign = -1;
+  }
+
+  PercentageBaseGetter baseGetter = (aSide == eSideLeft || aSide == eSideRight)
+                                        ? aWidthGetter
+                                        : aHeightGetter;
+
+  val->SetAppUnits(sign *
+                   StyleCoordToNSCoord(ToCoord(coord), baseGetter, 0, false));
+  return val.forget();
 }
 
 already_AddRefed<CSSValue> nsComputedDOMStyle::GetAbsoluteOffset(
     mozilla::Side aSide) {
+  const auto& offset = StylePosition()->mOffset;
+  const auto& coord = offset.Get(aSide);
+  const auto& oppositeCoord = offset.Get(NS_OPPOSITE_SIDE(aSide));
+
+  if (coord.IsAuto() || oppositeCoord.IsAuto()) {
+    RefPtr<nsROCSSPrimitiveValue> val = new nsROCSSPrimitiveValue;
+    val->SetAppUnits(GetUsedAbsoluteOffset(aSide));
+    return val.forget();
+  }
+
+  return GetNonStaticPositionOffset(
+      aSide, false, &nsComputedDOMStyle::GetCBPaddingRectWidth,
+      &nsComputedDOMStyle::GetCBPaddingRectHeight);
+}
+
+nscoord nsComputedDOMStyle::GetUsedAbsoluteOffset(mozilla::Side aSide) {
   MOZ_ASSERT(mOuterFrame, "need a frame, so we can call GetContainingBlock()");
 
   nsIFrame* container = mOuterFrame->GetContainingBlock();
@@ -2663,75 +2743,13 @@ already_AddRefed<CSSValue> nsComputedDOMStyle::GetAbsoluteOffset(
       break;
   }
 
-  RefPtr<nsROCSSPrimitiveValue> val = new nsROCSSPrimitiveValue;
-  val->SetAppUnits(offset);
-  return val.forget();
-}
-
-static_assert(eSideTop == 0 && eSideRight == 1 && eSideBottom == 2 &&
-                  eSideLeft == 3,
-              "box side constants not as expected for NS_OPPOSITE_SIDE");
-#define NS_OPPOSITE_SIDE(s_) mozilla::Side(((s_) + 2) & 3)
-
-already_AddRefed<CSSValue> nsComputedDOMStyle::GetRelativeOffset(
-    mozilla::Side aSide) {
-  RefPtr<nsROCSSPrimitiveValue> val = new nsROCSSPrimitiveValue;
-
-  const nsStylePosition* positionData = StylePosition();
-  int32_t sign = 1;
-  nsStyleCoord coord = positionData->mOffset.Get(aSide);
-
-  NS_ASSERTION(coord.GetUnit() == eStyleUnit_Coord ||
-                   coord.GetUnit() == eStyleUnit_Percent ||
-                   coord.GetUnit() == eStyleUnit_Auto || coord.IsCalcUnit(),
-               "Unexpected unit");
-
-  if (coord.GetUnit() == eStyleUnit_Auto) {
-    coord = positionData->mOffset.Get(NS_OPPOSITE_SIDE(aSide));
-    sign = -1;
-  }
-  PercentageBaseGetter baseGetter;
-  if (aSide == eSideLeft || aSide == eSideRight) {
-    baseGetter = &nsComputedDOMStyle::GetCBContentWidth;
-  } else {
-    baseGetter = &nsComputedDOMStyle::GetCBContentHeight;
-  }
-
-  val->SetAppUnits(sign * StyleCoordToNSCoord(coord, baseGetter, 0, false));
-  return val.forget();
-}
-
-already_AddRefed<CSSValue> nsComputedDOMStyle::GetStickyOffset(
-    mozilla::Side aSide) {
-  RefPtr<nsROCSSPrimitiveValue> val = new nsROCSSPrimitiveValue;
-
-  const nsStylePosition* positionData = StylePosition();
-  nsStyleCoord coord = positionData->mOffset.Get(aSide);
-
-  NS_ASSERTION(coord.GetUnit() == eStyleUnit_Coord ||
-                   coord.GetUnit() == eStyleUnit_Percent ||
-                   coord.GetUnit() == eStyleUnit_Auto || coord.IsCalcUnit(),
-               "Unexpected unit");
-
-  if (coord.GetUnit() == eStyleUnit_Auto) {
-    val->SetIdent(eCSSKeyword_auto);
-    return val.forget();
-  }
-  PercentageBaseGetter baseGetter;
-  if (aSide == eSideLeft || aSide == eSideRight) {
-    baseGetter = &nsComputedDOMStyle::GetScrollFrameContentWidth;
-  } else {
-    baseGetter = &nsComputedDOMStyle::GetScrollFrameContentHeight;
-  }
-
-  val->SetAppUnits(StyleCoordToNSCoord(coord, baseGetter, 0, false));
-  return val.forget();
+  return offset;
 }
 
 already_AddRefed<CSSValue> nsComputedDOMStyle::GetStaticOffset(
     mozilla::Side aSide) {
   RefPtr<nsROCSSPrimitiveValue> val = new nsROCSSPrimitiveValue;
-  SetValueToCoord(val, StylePosition()->mOffset.Get(aSide), false);
+  SetValueToCoord(val, ToCoord(StylePosition()->mOffset.Get(aSide)), false);
   return val.forget();
 }
 
@@ -2740,7 +2758,7 @@ already_AddRefed<CSSValue> nsComputedDOMStyle::GetPaddingWidthFor(
   RefPtr<nsROCSSPrimitiveValue> val = new nsROCSSPrimitiveValue;
 
   if (!mInnerFrame) {
-    SetValueToCoord(val, StylePadding()->mPadding.Get(aSide), true);
+    SetValueToCoord(val, ToCoord(StylePadding()->mPadding.Get(aSide)), true);
   } else {
     AssertFlushedPendingReflows();
 
@@ -2815,7 +2833,7 @@ already_AddRefed<CSSValue> nsComputedDOMStyle::GetMarginWidthFor(
   RefPtr<nsROCSSPrimitiveValue> val = new nsROCSSPrimitiveValue;
 
   if (!mInnerFrame) {
-    SetValueToCoord(val, StyleMargin()->mMargin.Get(aSide), false);
+    SetValueToCoord(val, ToCoord(StyleMargin()->mMargin.Get(aSide)), false);
   } else {
     AssertFlushedPendingReflows();
 
@@ -2964,8 +2982,7 @@ bool nsComputedDOMStyle::GetCBContentWidth(nscoord& aWidth) {
 
   AssertFlushedPendingReflows();
 
-  nsIFrame* container = mOuterFrame->GetContainingBlock();
-  aWidth = container->GetContentRect().width;
+  aWidth = mOuterFrame->GetContainingBlock()->GetContentRect().width;
   return true;
 }
 
@@ -2976,8 +2993,29 @@ bool nsComputedDOMStyle::GetCBContentHeight(nscoord& aHeight) {
 
   AssertFlushedPendingReflows();
 
-  nsIFrame* container = mOuterFrame->GetContainingBlock();
-  aHeight = container->GetContentRect().height;
+  aHeight = mOuterFrame->GetContainingBlock()->GetContentRect().height;
+  return true;
+}
+
+bool nsComputedDOMStyle::GetCBPaddingRectWidth(nscoord& aWidth) {
+  if (!mOuterFrame) {
+    return false;
+  }
+
+  AssertFlushedPendingReflows();
+
+  aWidth = mOuterFrame->GetContainingBlock()->GetPaddingRect().width;
+  return true;
+}
+
+bool nsComputedDOMStyle::GetCBPaddingRectHeight(nscoord& aHeight) {
+  if (!mOuterFrame) {
+    return false;
+  }
+
+  AssertFlushedPendingReflows();
+
+  aHeight = mOuterFrame->GetContainingBlock()->GetPaddingRect().height;
   return true;
 }
 

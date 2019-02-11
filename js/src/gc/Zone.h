@@ -28,14 +28,7 @@ class JitZone;
 
 namespace gc {
 
-struct ZoneComponentFinder
-    : public ComponentFinder<JS::Zone, ZoneComponentFinder> {
-  ZoneComponentFinder(uintptr_t sl, JS::Zone* maybeAtomsZone)
-      : ComponentFinder<JS::Zone, ZoneComponentFinder>(sl),
-        maybeAtomsZone(maybeAtomsZone) {}
-
-  JS::Zone* maybeAtomsZone;
-};
+using ZoneComponentFinder = ComponentFinder<JS::Zone>;
 
 struct UniqueIdGCPolicy {
   static bool needsSweep(Cell** cell, uint64_t* value);
@@ -185,7 +178,7 @@ class Zone : public JS::shadow::Zone,
     helperThreadUse_ = HelperThreadUse::None;
   }
 
-  void findOutgoingEdges(js::gc::ZoneComponentFinder& finder);
+  MOZ_MUST_USE bool findSweepGroupEdges(Zone* atomsZone);
 
   enum ShouldDiscardBaselineCode : bool {
     KeepBaselineCode = false,
@@ -203,7 +196,7 @@ class Zone : public JS::shadow::Zone,
                               size_t* typePool, size_t* regexpZone,
                               size_t* jitZone, size_t* baselineStubsOptimized,
                               size_t* cachedCFG, size_t* uniqueIdMap,
-                              size_t* shapeTables, size_t* atomsMarkBitmaps,
+                              size_t* shapeCaches, size_t* atomsMarkBitmaps,
                               size_t* compartmentObjects,
                               size_t* crossCompartmentWrappersTables,
                               size_t* compartmentsPrivateData);
@@ -376,9 +369,9 @@ class Zone : public JS::shadow::Zone,
   CompartmentVector& compartments() { return compartments_.ref(); }
 
   // This zone's gray roots.
-  using GrayRootVector = mozilla::SegmentedVector<js::gc::Cell*,
-                                                  1024 * sizeof(js::gc::Cell*),
-                                                  js::SystemAllocPolicy>;
+  using GrayRootVector =
+      mozilla::SegmentedVector<js::gc::Cell*, 1024 * sizeof(js::gc::Cell*),
+                               js::SystemAllocPolicy>;
 
  private:
   js::ZoneOrGCTaskData<GrayRootVector> gcGrayRoots_;
@@ -419,15 +412,18 @@ class Zone : public JS::shadow::Zone,
  public:
   js::gc::WeakKeyTable& gcWeakKeys() { return gcWeakKeys_.ref(); }
 
- private:
-  // A set of edges from this zone to other zones.
-  //
-  // This is used during GC while calculating sweep groups to record edges
-  // that can't be determined by examining this zone by itself.
-  js::MainThreadData<ZoneSet> gcSweepGroupEdges_;
-
- public:
-  ZoneSet& gcSweepGroupEdges() { return gcSweepGroupEdges_.ref(); }
+  // A set of edges from this zone to other zones used during GC to calculate
+  // sweep groups.
+  NodeSet& gcSweepGroupEdges() {
+    return gcGraphEdges; // Defined in GraphNodeBase base class.
+  }
+  MOZ_MUST_USE bool addSweepGroupEdgeTo(Zone* otherZone) {
+    MOZ_ASSERT(otherZone->isGCMarking());
+    return gcSweepGroupEdges().put(otherZone);
+  }
+  void clearSweepGroupEdges() {
+    gcSweepGroupEdges().clear();
+  }
 
   // Keep track of all TypeDescr and related objects in this compartment.
   // This is used by the GC to trace them all first when compacting, since the
@@ -645,8 +641,8 @@ class Zone : public JS::shadow::Zone,
   void checkUniqueIdTableAfterMovingGC();
 #endif
 
-  bool keepShapeTables() const { return keepShapeTables_; }
-  void setKeepShapeTables(bool b) { keepShapeTables_ = b; }
+  bool keepShapeCaches() const { return keepShapeCaches_; }
+  void setKeepShapeCaches(bool b) { keepShapeCaches_ = b; }
 
   // Delete an empty compartment after its contents have been merged.
   void deleteEmptyCompartment(JS::Compartment* comp);
@@ -664,7 +660,7 @@ class Zone : public JS::shadow::Zone,
   js::MainThreadData<bool> gcScheduled_;
   js::MainThreadData<bool> gcScheduledSaved_;
   js::MainThreadData<bool> gcPreserveCode_;
-  js::ZoneData<bool> keepShapeTables_;
+  js::ZoneData<bool> keepShapeCaches_;
 
   // Allow zones to be linked into a list
   friend class js::gc::ZoneList;

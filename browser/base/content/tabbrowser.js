@@ -2832,7 +2832,6 @@ window._gBrowser = {
       TelemetryStopwatch.start("FX_TAB_CLOSE_TIME_ANIM_MS", aTab);
       TelemetryStopwatch.start("FX_TAB_CLOSE_TIME_NO_ANIM_MS", aTab);
     }
-    window.maybeRecordAbandonmentTelemetry(aTab, "tabClosed");
 
     // Handle requests for synchronously removing an already
     // asynchronously closing tab.
@@ -3525,6 +3524,8 @@ window._gBrowser = {
     // Reset temporary permissions on the current tab. This is done here
     // because we only want to reset permissions on user reload.
     SitePermissions.clearTemporaryPermissions(browser);
+    // Also reset DOS mitigations for the basic auth prompt on reload.
+    delete browser.canceledAuthenticationPromptCounter;
     PanelMultiView.hidePopup(gIdentityHandler._identityPopup);
     browser.reload();
   },
@@ -4772,7 +4773,6 @@ window._gBrowser = {
       if (!tab.hasAttribute("activemedia-blocked")) {
         tab.setAttribute("activemedia-blocked", true);
         this._tabAttrModified(tab, ["activemedia-blocked"]);
-        tab.startMediaBlockTimer();
       }
     });
 
@@ -4787,7 +4787,6 @@ window._gBrowser = {
         this._tabAttrModified(tab, ["activemedia-blocked"]);
         let hist = Services.telemetry.getHistogramById("TAB_AUDIO_INDICATOR_USED");
         hist.add(2 /* unblockByVisitingTab */ );
-        tab.finishMediaBlockTimer();
       }
     });
 

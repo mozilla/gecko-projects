@@ -273,7 +273,9 @@ var gIdentityHandler = {
   recordClick(object) {
     let extra = {};
     for (let blocker of ContentBlocking.blockers) {
-      extra[blocker.telemetryIdentifier] = blocker.activated ? "true" : "false";
+      if (blocker.telemetryIdentifier) {
+        extra[blocker.telemetryIdentifier] = blocker.activated ? "true" : "false";
+      }
     }
     Services.telemetry.recordEvent("security.ui.identitypopup", "click", object, null, extra);
   },
@@ -758,7 +760,7 @@ var gIdentityHandler = {
     // Fill in organization information if we have a valid EV certificate.
     if (this._isEV) {
       let iData = this.getIdentityData();
-      host = owner = iData.subjectOrg;
+      owner = iData.subjectOrg;
       verifier = this._identityIconLabels.tooltipText;
 
       // Build an appropriate supplemental block out of whatever location data we have
@@ -869,7 +871,9 @@ var gIdentityHandler = {
 
     let extra = {};
     for (let blocker of ContentBlocking.blockers) {
-      extra[blocker.telemetryIdentifier] = blocker.activated ? "true" : "false";
+      if (blocker.telemetryIdentifier) {
+        extra[blocker.telemetryIdentifier] = blocker.activated ? "true" : "false";
+      }
     }
 
     let shieldStatus = ContentBlocking.iconBox.hasAttribute("active") ? "shield-showing" : "shield-hidden";

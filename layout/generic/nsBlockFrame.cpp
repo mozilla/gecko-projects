@@ -272,11 +272,6 @@ static void RecordReflowStatus(bool aChildIsBlock,
 }
 #endif
 
-static nscoord ResolveTextIndent(const nsStyleCoord& aStyle,
-                                 nscoord aPercentageBasis) {
-  return nsLayoutUtils::ResolveToLength<false>(aStyle, aPercentageBasis);
-}
-
 NS_DECLARE_FRAME_PROPERTY_WITH_DTOR_NEVER_CALLED(OverflowLinesProperty,
                                                  nsBlockFrame::FrameLines)
 NS_DECLARE_FRAME_PROPERTY_FRAMELIST(OverflowOutOfFlowsProperty)
@@ -289,7 +284,7 @@ NS_DECLARE_FRAME_PROPERTY_SMALL_VALUE(BlockEndEdgeOfChildrenProperty, nscoord)
 
 nsBlockFrame* NS_NewBlockFrame(nsIPresShell* aPresShell,
                                ComputedStyle* aStyle) {
-  return new (aPresShell) nsBlockFrame(aStyle);
+  return new (aPresShell) nsBlockFrame(aStyle, aPresShell->GetPresContext());
 }
 
 nsBlockFrame* NS_NewBlockFormattingContext(nsIPresShell* aPresShell,
@@ -487,7 +482,8 @@ bool nsBlockFrame::GetNaturalBaselineBOffset(
     if (line->IsBlock()) {
       nscoord offset;
       nsIFrame* kid = line->mFirstChild;
-      if (kid->GetVerticalAlignBaseline(aWM, &offset)) {
+      if (!aWM.IsOrthogonalTo(kid->GetWritingMode()) &&
+          kid->GetVerticalAlignBaseline(aWM, &offset)) {
         // Ignore relative positioning for baseline calculations.
         const nsSize& sz = line->mContainerSize;
         offset += kid->GetLogicalNormalPosition(aWM, sz).B(aWM);
@@ -768,7 +764,7 @@ void nsBlockFrame::CheckIntrinsicCacheAgainstShrinkWrapState() {
       } else {
         if (!curFrame->GetPrevContinuation() &&
             line == curFrame->LinesBegin()) {
-          data.mCurrentLine += ::ResolveTextIndent(StyleText()->mTextIndent, 0);
+          data.mCurrentLine += StyleText()->mTextIndent.Resolve(0);
         }
         data.mLine = &line;
         data.SetLineContainer(curFrame);
@@ -855,7 +851,7 @@ void nsBlockFrame::CheckIntrinsicCacheAgainstShrinkWrapState() {
       } else {
         if (!curFrame->GetPrevContinuation() &&
             line == curFrame->LinesBegin()) {
-          nscoord indent = ::ResolveTextIndent(StyleText()->mTextIndent, 0);
+          nscoord indent = StyleText()->mTextIndent.Resolve(0);
           data.mCurrentLine += indent;
           // XXXmats should the test below be indent > 0?
           if (indent != nscoord(0)) {
@@ -921,7 +917,7 @@ nsRect nsBlockFrame::ComputeTightBounds(DrawTarget* aDrawTarget) const {
       } else {
         if (!curFrame->GetPrevContinuation() &&
             line == curFrame->LinesBegin()) {
-          data.mCurrentLine += ::ResolveTextIndent(StyleText()->mTextIndent, 0);
+          data.mCurrentLine += StyleText()->mTextIndent.Resolve(0);
         }
         data.mLine = &line;
         data.SetLineContainer(curFrame);
@@ -1904,10 +1900,11 @@ static inline bool IsAlignedLeft(uint8_t aAlignment, uint8_t aDirection,
 
 void nsBlockFrame::PrepareResizeReflow(BlockReflowInput& aState) {
   // See if we can try and avoid marking all the lines as dirty
+  // FIXME(emilio): This should be writing-mode aware, I guess.
   bool tryAndSkipLines =
       // The left content-edge must be a constant distance from the left
       // border-edge.
-      !StylePadding()->mPadding.GetLeft().HasPercent();
+      !StylePadding()->mPadding.Get(eSideLeft).HasPercent();
 
 #ifdef DEBUG
   if (gDisableResizeOpt) {
@@ -6783,10 +6780,13 @@ void nsBlockFrame::CreateBulletFrameForListItem() {
                                 NS_BLOCK_FRAME_HAS_OUTSIDE_BULLET)) == 0,
              "How can we have a bullet already?");
 
-  nsIPresShell* shell = PresShell();
+  nsPresContext* pc = PresContext();
+  nsIPresShell* shell = pc->PresShell();
   const nsStyleList* styleList = StyleList();
+  CounterStyle* style =
+      pc->CounterStyleManager()->ResolveCounterStyle(styleList->mCounterStyle);
 
-  CSSPseudoElementType pseudoType = styleList->mCounterStyle->IsBullet()
+  CSSPseudoElementType pseudoType = style->IsBullet()
                                         ? CSSPseudoElementType::mozListBullet
                                         : CSSPseudoElementType::mozListNumber;
 
@@ -6794,7 +6794,7 @@ void nsBlockFrame::CreateBulletFrameForListItem() {
       ResolveBulletStyle(pseudoType, shell->StyleSet());
 
   // Create bullet frame
-  nsBulletFrame* bullet = new (shell) nsBulletFrame(kidSC);
+  nsBulletFrame* bullet = new (shell) nsBulletFrame(kidSC, pc);
   bullet->Init(mContent, this, nullptr);
 
   // If the list bullet frame should be positioned inside then add
@@ -6817,7 +6817,7 @@ bool nsBlockFrame::BulletIsEmpty() const {
                    HasOutsideBullet(),
                "should only care when we have an outside bullet");
   const nsStyleList* list = StyleList();
-  return list->mCounterStyle->IsNone() && !list->GetListStyleImage();
+  return list->mCounterStyle.IsNone() && !list->GetListStyleImage();
 }
 
 void nsBlockFrame::GetSpokenBulletText(nsAString& aText) const {

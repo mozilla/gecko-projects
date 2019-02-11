@@ -600,6 +600,9 @@ def set_treeherder_machine_platform(config, tests):
             test['treeherder-machine-platform'] = test['test-platform']
         elif 'android-hw' in test['test-platform']:
             test['treeherder-machine-platform'] = test['test-platform']
+        elif 'android-em-7.0-x86_64' in test['test-platform']:
+            opt = test['test-platform'].split('/')[1]
+            test['treeherder-machine-platform'] = 'android-em-7-0-x86_64/'+opt
         elif 'android-em-7.0-x86' in test['test-platform']:
             opt = test['test-platform'].split('/')[1]
             test['treeherder-machine-platform'] = 'android-em-7-0-x86/'+opt
@@ -653,6 +656,8 @@ def set_tier(config, tests):
                                          'android-em-4.3-arm7-api-16/opt',
                                          'android-em-4.3-arm7-api-16/debug',
                                          'android-em-4.2-x86/opt',
+                                         'android-em-7.0-x86_64/opt',
+                                         'android-em-7.0-x86_64/debug',
                                          'android-em-7.0-x86/opt']:
                 test['tier'] = 1
             else:
@@ -855,9 +860,7 @@ def split_serviceworker_e10s(config, tests):
             test['treeherder-symbol'] = join_symbol(group, symbol)
             test['mozharness']['extra-options'].append(
                 '--setpref="dom.serviceWorkers.parent_intercept=true"')
-
-            if 'web-platform' in test['suite']:
-                test['tier'] = 2
+            test['tier'] = 2
         yield test
 
 

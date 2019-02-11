@@ -46,7 +46,6 @@ XPCOMUtils.defineLazyModuleGetters(this, {
   ExtensionStorage: "resource://gre/modules/ExtensionStorage.jsm",
   ExtensionStorageIDB: "resource://gre/modules/ExtensionStorageIDB.jsm",
   ExtensionTelemetry: "resource://gre/modules/ExtensionTelemetry.jsm",
-  ExtensionTestCommon: "resource://testing-common/ExtensionTestCommon.jsm",
   FileSource: "resource://gre/modules/L10nRegistry.jsm",
   L10nRegistry: "resource://gre/modules/L10nRegistry.jsm",
   Log: "resource://gre/modules/Log.jsm",
@@ -288,6 +287,13 @@ var UninstallObserver = {
 };
 
 UninstallObserver.init();
+
+const manifestTypes = new Map([
+  ["theme", "manifest.ThemeManifest"],
+  ["langpack", "manifest.WebExtensionLangpackManifest"],
+  ["dictionary", "manifest.WebExtensionDictionaryManifest"],
+  ["extension", "manifest.WebExtensionManifest"],
+]);
 
 /**
  * Represents the data contained in an extension, contained either
@@ -558,6 +564,56 @@ class ExtensionData {
     return this.experimentsAllowed && manifest.experiment_apis;
   }
 
+  /**
+   * Load a locale and return a localized manifest.  The extension must
+   * be initialized, and manifest parsed prior to calling.
+   *
+   * @param {string} locale to load, if necessary.
+   * @returns {object} normalized manifest.
+   */
+  async getLocalizedManifest(locale) {
+    if (!this.type || !this.localeData) {
+      throw new Error("The extension has not been initialized.");
+    }
+    if (!this.localeData.has(locale)) {
+      // Locales are not avialable until some additional
+      // initialization is done.  We could just call initAllLocales,
+      // but that is heavy handed, especially when we likely only
+      // need one out of 20.
+      let locales = await this.promiseLocales();
+      if (locales.get(locale)) {
+        await this.initLocale(locale);
+      }
+      if (!this.localeData.has(locale)) {
+        throw new Error(`The extension does not contain the locale ${locale}`);
+      }
+    }
+    let normalized = await this._getNormalizedManifest(locale);
+    if (normalized.error) {
+      throw new Error(normalized.error);
+    }
+    return normalized.value;
+  }
+
+  async _getNormalizedManifest(locale) {
+    let manifestType = manifestTypes.get(this.type);
+
+    let context = {
+      url: this.baseURI && this.baseURI.spec,
+      principal: this.principal,
+      logError: error => {
+        this.manifestWarning(error);
+      },
+      preprocessors: {},
+    };
+
+    if (this.localeData) {
+      context.preprocessors.localize = (value, context) => this.localize(value, locale);
+    }
+
+    return Schemas.normalize(this.rawManifest, manifestType, context);
+  }
+
   // eslint-disable-next-line complexity
   async parseManifest() {
     let [manifest] = await Promise.all([
@@ -577,37 +633,17 @@ class ExtensionData {
       await this.initLocale();
     }
 
-    let context = {
-      url: this.baseURI && this.baseURI.spec,
-
-      principal: this.principal,
-
-      logError: error => {
-        this.manifestWarning(error);
-      },
-
-      preprocessors: {},
-    };
-
-    let manifestType = "manifest.WebExtensionManifest";
     if (this.manifest.theme) {
       this.type = "theme";
-      manifestType = "manifest.ThemeManifest";
     } else if (this.manifest.langpack_id) {
       this.type = "langpack";
-      manifestType = "manifest.WebExtensionLangpackManifest";
     } else if (this.manifest.dictionaries) {
       this.type = "dictionary";
-      manifestType = "manifest.WebExtensionDictionaryManifest";
     } else {
       this.type = "extension";
     }
 
-    if (this.localeData) {
-      context.preprocessors.localize = (value, context) => this.localize(value);
-    }
-
-    let normalized = Schemas.normalize(this.manifest, manifestType, context);
+    let normalized = await this._getNormalizedManifest();
     if (normalized.error) {
       this.manifestError(normalized.error);
       return null;
@@ -1467,18 +1503,6 @@ class Extension extends ExtensionData {
       }
     }
     return frameLoader || ExtensionParent.DebugUtils.getFrameLoader(this.id);
-  }
-
-  static generateXPI(data) {
-    return ExtensionTestCommon.generateXPI(data);
-  }
-
-  static generateZipFile(files, baseName = "generated-extension.xpi") {
-    return ExtensionTestCommon.generateZipFile(files, baseName);
-  }
-
-  static generate(data) {
-    return ExtensionTestCommon.generate(data);
   }
 
   on(hook, f) {

@@ -88,7 +88,6 @@ const nsTArray<RefPtr<nsINode>>* Gecko_GetAssignedNodes(
 void Gecko_DestroyAnonymousContentList(nsTArray<nsIContent*>* anon_content);
 
 void Gecko_ComputedStyle_Init(mozilla::ComputedStyle* context,
-                              RawGeckoPresContextBorrowed pres_context,
                               ServoComputedDataBorrowed values,
                               mozilla::CSSPseudoElementType pseudo_type,
                               nsAtom* pseudo_tag);
@@ -587,6 +586,7 @@ NS_DECL_THREADSAFE_FFI_REFCOUNTING(nsCSSShadowArray, CSSShadowArray);
 
 nsCSSValueSharedList* Gecko_NewCSSValueSharedList(uint32_t len);
 nsCSSValueSharedList* Gecko_NewNoneTransform();
+void Gecko_StyleDisplay_GenerateCombinedTransform(nsStyleDisplay*);
 
 // Getter for nsCSSValue
 nsCSSValueBorrowedMut Gecko_CSSValue_GetArrayItem(

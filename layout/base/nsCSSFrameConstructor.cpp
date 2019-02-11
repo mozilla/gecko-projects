@@ -1187,7 +1187,8 @@ void nsFrameConstructorState::ConstructBackdropFrameFor(nsIContent* aContent,
   nsContainerFrame* parentFrame =
       GetGeometricParent(*style->StyleDisplay(), nullptr);
 
-  nsBackdropFrame* backdropFrame = new (mPresShell) nsBackdropFrame(style);
+  nsBackdropFrame* backdropFrame =
+      new (mPresShell) nsBackdropFrame(style, mPresShell->GetPresContext());
   backdropFrame->Init(aContent, parentFrame, nullptr);
 
   nsFrameState placeholderType;
@@ -2335,9 +2336,6 @@ nsIFrame* nsCSSFrameConstructor::ConstructDocElementFrame(
   if (MOZ_UNLIKELY(display->mDisplay == StyleDisplay::None)) {
     return nullptr;
   }
-
-  // Make sure to start any background image loads for the root element now.
-  computedStyle->StartBackgroundImageLoads();
 
   nsFrameConstructorSaveState docElementContainingBlockAbsoluteSaveState;
   if (mHasRootAbsPosContainingBlock) {
@@ -5649,10 +5647,6 @@ void nsCSSFrameConstructor::ConstructFramesFromItem(
                        computedStyle, aFrameItems);
     return;
   }
-
-  // Start background loads during frame construction so that we're
-  // guaranteed that they will be started before onload fires.
-  computedStyle->StartBackgroundImageLoads();
 
   AutoRestore<nsFrameState> savedStateBits(aState.mAdditionalStateBits);
   if (item.mIsGeneratedContent) {

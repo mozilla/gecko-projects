@@ -10,7 +10,7 @@ use clip_scroll_tree::{ClipScrollTree, ROOT_SPATIAL_NODE_INDEX, SpatialNodeIndex
 use glyph_rasterizer::GlyphFormat;
 use gpu_cache::{GpuCache, GpuCacheHandle, GpuCacheAddress};
 use gpu_types::{BrushFlags, BrushInstance, PrimitiveHeaders, ZBufferId, ZBufferIdGenerator};
-use gpu_types::{ClipMaskInstance, SplitCompositeInstance};
+use gpu_types::{ClipMaskInstance, SplitCompositeInstance, SnapOffsets};
 use gpu_types::{PrimitiveInstanceData, RasterizationSpace, GlyphInstance};
 use gpu_types::{PrimitiveHeader, PrimitiveHeaderIndex, TransformPaletteId, TransformPalette};
 use internal_types::{FastHashMap, SavedTargetIndex, TextureSource};
@@ -1075,6 +1075,28 @@ impl AlphaBatchBuilder {
 
                         match raster_config.composite_mode {
                             PictureCompositeMode::TileCache { .. } => {
+                                let tile_cache = picture.tile_cache.as_ref().unwrap();
+
+                                // If the tile cache is disabled, just recurse into the
+                                // picture like a normal pass-through picture, adding
+                                // any child primitives into the parent surface batches.
+                                if !tile_cache.is_enabled {
+                                    self.add_pic_to_batch(
+                                        picture,
+                                        task_id,
+                                        ctx,
+                                        gpu_cache,
+                                        render_tasks,
+                                        deferred_resolves,
+                                        prim_headers,
+                                        transforms,
+                                        root_spatial_node_index,
+                                        z_generator,
+                                    );
+
+                                    return;
+                                }
+
                                 // Construct a local clip rect that ensures we only draw pixels where
                                 // the local bounds of the picture extend to within the edge tiles.
                                 let local_clip_rect = prim_info
@@ -1091,8 +1113,6 @@ impl AlphaBatchBuilder {
                                     let kind = BatchKind::Brush(
                                         BrushBatchKind::Image(ImageBufferKind::Texture2DArray)
                                     );
-
-                                    let tile_cache = picture.tile_cache.as_ref().unwrap();
 
                                     for tile_index in &tile_cache.tiles_to_draw {
                                         let tile = &tile_cache.tiles[tile_index.0];
@@ -1468,7 +1488,7 @@ impl AlphaBatchBuilder {
                                     PrimitiveInstanceData::from(instance),
                                 );
                             }
-                            PictureCompositeMode::Blit => {
+                            PictureCompositeMode::Blit(_) => {
                                 let surface = ctx.surfaces[raster_config.surface_index.0]
                                     .surface
                                     .as_ref()
@@ -2566,6 +2586,7 @@ impl ClipBatcher {
             local_pos,
             tile_rect: LayoutRect::zero(),
             sub_rect,
+            snap_offsets: SnapOffsets::empty(),
         };
 
         self.rectangles.push(instance);
@@ -2674,6 +2695,7 @@ impl ClipBatcher {
         actual_rect: DeviceIntRect,
         world_rect: &WorldRect,
         device_pixel_scale: DevicePixelScale,
+        snap_offsets: SnapOffsets,
     ) {
         for i in 0 .. clip_node_range.count {
             let clip_instance = clip_store.get_instance_from_range(&clip_node_range, i);
@@ -2703,6 +2725,7 @@ impl ClipBatcher {
                     DevicePoint::zero(),
                     actual_rect.size.to_f32(),
                 ),
+                snap_offsets,
             };
 
             match clip_node.item {

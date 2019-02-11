@@ -442,6 +442,7 @@ def try_preprocess(compiler, language, source):
 @imports(_from='mozbuild.configure.constants',
          _import='OS_preprocessor_checks')
 @imports(_from='textwrap', _import='dedent')
+@imports(_from='__builtin__', _import='Exception')
 def get_compiler_info(compiler, language):
     '''Returns information about the given `compiler` (command line in the
     form of a list or tuple), in the given `language`.
@@ -467,7 +468,7 @@ def get_compiler_info(compiler, language):
         #if defined(_MSC_VER)
         #if defined(__clang__)
         %COMPILER "clang-cl"
-        %VERSION _MSC_FULL_VER
+        %VERSION __clang_major__.__clang_minor__.__clang_patchlevel__
         #else
         %COMPILER "msvc"
         %VERSION _MSC_FULL_VER
@@ -548,7 +549,7 @@ def get_compiler_info(compiler, language):
     stdc_version = int(data.get('STDC_VERSION', '0L').rstrip('L'))
 
     version = data.get('VERSION')
-    if version and type in ('msvc', 'clang-cl'):
+    if version and type == 'msvc':
         msc_ver = version
         version = msc_ver[0:2]
         if len(msc_ver) > 2:
@@ -587,12 +588,6 @@ def check_compiler(compiler, language, target):
 
     flags = []
 
-    def append_flag(flag):
-        if flag not in flags:
-            if info.type == 'clang-cl':
-                flags.append('-Xclang')
-            flags.append(flag)
-
     # Check language standards
     # --------------------------------------------------------------------
     if language != info.language:
@@ -605,7 +600,9 @@ def check_compiler(compiler, language, target):
     # example)
     if info.language == 'C' and info.language_version != 199901:
         if info.type in ('clang-cl', 'clang', 'gcc'):
-            append_flag('-std=gnu99')
+            if info.type == 'clang-cl':
+                flags.append('-Xclang')
+            flags.append('-std=gnu99')
 
     # Note: MSVC, while supporting C++14, still reports 199711L for __cplusplus.
     # Note: this is a strict version check because we used to always add
@@ -613,48 +610,41 @@ def check_compiler(compiler, language, target):
     cxx14_version = 201402
     if info.language == 'C++':
         if info.type == 'clang' and info.language_version != cxx14_version:
-            append_flag('-std=gnu++14')
+            flags.append('-std=gnu++14')
         # MSVC headers include C++14 features, but don't guard them
         # with appropriate checks.
         elif info.type == 'clang-cl' and info.language_version != cxx14_version:
-            append_flag('-std=c++14')
+            flags.append('-Xclang')
+            flags.append('-std=c++14')
 
     # Check compiler target
     # --------------------------------------------------------------------
-    if not info.cpu or info.cpu != target.cpu:
-        if info.type == 'clang':
-            append_flag('--target=%s' % target.toolchain)
-        elif info.type == 'clang-cl':
-            # Ideally this would share the 'clang' branch above, but on Windows
-            # the --target needs additional data like ms-compatibility-version.
-            if (info.cpu, target.cpu) == ('x86_64', 'x86'):
-                # -m32 does not use -Xclang, so add it directly.
-                flags.append('-m32')
-            elif target.toolchain == 'aarch64-mingw32':
-                # clang-cl uses a different name for this target
-                flags.append('--target=aarch64-windows-msvc')
-        elif info.type == 'gcc':
-            same_arch = same_arch_different_bits()
-            if (target.cpu, info.cpu) in same_arch:
-                append_flag('-m32')
-            elif (info.cpu, target.cpu) in same_arch:
-                append_flag('-m64')
+    has_target = False
+    if info.type == 'clang':
+        if not info.kernel or info.kernel != target.kernel or \
+                not info.endianness or info.endianness != target.endianness:
+            flags.append('--target=%s' % target.toolchain)
+            has_target = True
 
-    if not info.kernel or info.kernel != target.kernel:
-        if info.type == 'clang':
-            append_flag('--target=%s' % target.toolchain)
+        # Add target flag when there is an OS mismatch (e.g. building for Android on
+        # Linux). However, only do this if the target OS is in our whitelist, to
+        # keep things the same on other platforms.
+        elif target.os in OS_preprocessor_checks and (
+                not info.os or info.os != target.os):
+            flags.append('--target=%s' % target.toolchain)
+            has_target = True
 
-    if not info.endianness or info.endianness != target.endianness:
-        if info.type == 'clang':
-            append_flag('--target=%s' % target.toolchain)
-
-    # Add target flag when there is an OS mismatch (e.g. building for Android on
-    # Linux). However, only do this if the target OS is in our whitelist, to
-    # keep things the same on other platforms.
-    if target.os in OS_preprocessor_checks and (
-            not info.os or info.os != target.os):
-        if info.type == 'clang':
-            append_flag('--target=%s' % target.toolchain)
+    if not has_target and (not info.cpu or info.cpu != target.cpu and info.type != 'msvc'):
+        same_arch = same_arch_different_bits()
+        if (target.cpu, info.cpu) in same_arch:
+            flags.append('-m32')
+        elif (info.cpu, target.cpu) in same_arch:
+            flags.append('-m64')
+        elif info.type == 'clang-cl' and target.cpu == 'aarch64':
+            # clang-cl uses a different name for this target
+            flags.append('--target=aarch64-windows-msvc')
+        elif info.type == 'clang':
+            flags.append('--target=%s' % target.toolchain)
 
     return namespace(
         type=info.type,
@@ -1215,6 +1205,8 @@ def compiler(language, host_or_target, c_compiler=None, other_compiler=None,
     valid_compiler.try_compile(check_msg='%s works' % what,
                                onerror=compiler_error)
 
+    set_config('%s_BASE_FLAGS' % var, valid_compiler.flags)
+
     # Set CPP/CXXCPP for both the build system and old-configure. We don't
     # need to check this works for preprocessing, because we already relied
     # on $CC -E/$CXX -E doing preprocessing work to validate the compiler
@@ -1636,8 +1628,6 @@ def lto(value, pgo, c_compiler):
                 cflags.append("-flto")
             else:
                 cflags.append("-flto=thin")
-                # Workaround for https://bugs.llvm.org/show_bug.cgi?id=40414
-                cflags.append("-fsplit-lto-unit")
             # With clang-cl, -flto can only be used with -c or -fuse-ld=lld.
             # AC_TRY_LINKs during configure don't have -c, so pass -fuse-ld=lld.
             cflags.append("-fuse-ld=lld");
@@ -1705,6 +1695,15 @@ option('--enable-hardening', env='MOZ_SECURITY_HARDENING',
        help='Enables security hardening compiler options')
 
 
+# This function is a bit confusing. It adds or removes hardening flags in
+# three stuations: if --enable-hardening is passed; if --disable-hardening
+# is passed, and if no flag is passed.
+#
+# At time of this comment writing, all flags are actually added in the
+# default no-flag case; making --enable-hardening the same as omitting the
+# flag. --disable-hardening will omit the security flags. (However, not all
+# possible security flags will be omitted by --disable-hardening, as many are
+# compiler-default options we do not explicitly enable.)
 @depends('--enable-hardening', '--enable-address-sanitizer',
          '--enable-optimize', c_compiler, target)
 def security_hardening_cflags(hardening_flag, asan, optimize, c_compiler, target):
@@ -1715,6 +1714,7 @@ def security_hardening_cflags(hardening_flag, asan, optimize, c_compiler, target
     js_flags = []
     js_ldflags = []
 
+    # ----------------------------------------------------------
     # If hardening is explicitly enabled, or not explicitly disabled
     if hardening_flag.origin == "default" or hardening_flag:
         # FORTIFY_SOURCE ------------------------------------
@@ -1743,7 +1743,19 @@ def security_hardening_cflags(hardening_flag, asan, optimize, c_compiler, target
             ldflags.append("-Wl,--dynamicbase")
             js_ldflags.append("-Wl,--dynamicbase")
 
-    # If ASAN _is_ on, undefine FOTIFY_SOURCE just to be safe
+        # Control Flow Guard (CFG) ----------------------------
+        # See Bug 1525588 for why this doesn't work on Windows ARM
+        if c_compiler.type == 'clang-cl' and c_compiler.version >= '8' and \
+           target.cpu != 'aarch64':
+            flags.append("-guard:cf")
+            js_flags.append("-guard:cf")
+            # nolongjmp is needed because clang doesn't emit the CFG tables of
+            # setjmp return addresses https://bugs.llvm.org/show_bug.cgi?id=40057
+            ldflags.append("-guard:cf,nolongjmp")
+            js_ldflags.append("-guard:cf,nolongjmp")
+
+    # ----------------------------------------------------------
+    # If ASAN _is_ on, undefine FORTIFY_SOURCE just to be safe
     if asan:
         flags.append("-U_FORTIFY_SOURCE")
         js_flags.append("-U_FORTIFY_SOURCE")

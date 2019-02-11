@@ -717,6 +717,11 @@ AbortReasonOr<Ok> IonBuilder::analyzeNewLoopTypes(
         case JSOP_DEC:
           type = inspector->expectedResultType(last);
           break;
+#ifdef ENABLE_BIGINT
+        case JSOP_BIGINT:
+          type = MIRType::BigInt;
+          break;
+#endif
         default:
           break;
       }
@@ -751,8 +756,7 @@ AbortReasonOr<Ok> IonBuilder::init() {
     argTypes = nullptr;
   }
 
-  AutoSweepTypeScript sweep(script());
-  bytecodeTypeMap = script()->types(sweep)->bytecodeTypeMap();
+  bytecodeTypeMap = script()->types()->bytecodeTypeMap();
 
   return Ok();
 }
@@ -1337,6 +1341,9 @@ AbortReasonOr<Ok> IonBuilder::addOsrValueTypeBarrier(
     case MIRType::Double:
     case MIRType::String:
     case MIRType::Symbol:
+#ifdef ENABLE_BIGINT
+    case MIRType::BigInt:
+#endif
     case MIRType::Object:
       if (type != def->type()) {
         MUnbox* unbox = MUnbox::New(alloc(), def, type, MUnbox::Fallible);
@@ -3349,7 +3356,8 @@ AbortReasonOr<Ok> IonBuilder::bitnotTrySpecialized(bool* emitted,
   // of the operand.
 
   if (input->mightBeType(MIRType::Object) ||
-      input->mightBeType(MIRType::Symbol)) {
+      input->mightBeType(MIRType::Symbol) ||
+      IF_BIGINT(input->mightBeType(MIRType::BigInt), false)) {
     return Ok();
   }
 
@@ -6210,6 +6218,7 @@ static bool ObjectOrSimplePrimitive(MDefinition* op) {
   // Return true if op is either undefined/null/boolean/int32/symbol or an
   // object.
   return !op->mightBeType(MIRType::String) &&
+         IF_BIGINT(!op->mightBeType(MIRType::BigInt), true) &&
          !op->mightBeType(MIRType::Double) &&
          !op->mightBeType(MIRType::Float32) &&
          !op->mightBeType(MIRType::MagicOptimizedArguments) &&
@@ -7460,6 +7469,12 @@ JSObject* IonBuilder::testSingletonPropertyTypes(MDefinition* obj, jsid id) {
       key = JSProto_Symbol;
       break;
 
+#ifdef ENABLE_BIGINT
+    case MIRType::BigInt:
+      key = JSProto_BigInt;
+      break;
+#endif
+
     case MIRType::Int32:
     case MIRType::Double:
       key = JSProto_Number;
@@ -7996,7 +8011,8 @@ AbortReasonOr<Ok> IonBuilder::jsop_getgname(PropertyName* name) {
     if (!forceInlineCaches() && obj->is<GlobalObject>()) {
       TemporaryTypeSet* types = bytecodeTypes(pc);
       MDefinition* globalObj = constant(ObjectValue(*obj));
-      MOZ_TRY(getPropTryCommonGetter(&emitted, globalObj, name, types));
+      MOZ_TRY(
+          getPropTryCommonGetter(&emitted, globalObj, NameToId(name), types));
       if (emitted) {
         return Ok();
       }
@@ -8581,6 +8597,13 @@ AbortReasonOr<Ok> IonBuilder::getElemTryGetProp(bool* emitted, MDefinition* obj,
 
   trackOptimizationAttempt(TrackedStrategy::GetProp_NotDefined);
   MOZ_TRY(getPropTryNotDefined(emitted, obj, id, types));
+  if (*emitted) {
+    index->setImplicitlyUsedUnchecked();
+    return Ok();
+  }
+
+  trackOptimizationAttempt(TrackedStrategy::GetProp_CommonGetter);
+  MOZ_TRY(getPropTryCommonGetter(emitted, obj, id, types));
   if (*emitted) {
     index->setImplicitlyUsedUnchecked();
     return Ok();
@@ -10134,10 +10157,10 @@ AbortReasonOr<Ok> IonBuilder::jsop_getelem_super() {
 }
 
 NativeObject* IonBuilder::commonPrototypeWithGetterSetter(
-    TemporaryTypeSet* types, PropertyName* name, bool isGetter,
-    JSFunction* getterOrSetter, bool* guardGlobal) {
+    TemporaryTypeSet* types, jsid id, bool isGetter, JSFunction* getterOrSetter,
+    bool* guardGlobal) {
   // If there's a single object on the proto chain of all objects in |types|
-  // that contains a property |name| with |getterOrSetter| getter or setter
+  // that contains a property |id| with |getterOrSetter| getter or setter
   // function, return that object.
 
   // No sense looking if we don't know what's going on.
@@ -10163,7 +10186,7 @@ NativeObject* IonBuilder::commonPrototypeWithGetterSetter(
         return nullptr;
       }
       JSObject* singleton = key->isSingleton() ? key->singleton() : nullptr;
-      if (ObjectHasExtraOwnProperty(realm, key, NameToId(name))) {
+      if (ObjectHasExtraOwnProperty(realm, key, id)) {
         if (!singleton || !singleton->is<GlobalObject>()) {
           return nullptr;
         }
@@ -10195,7 +10218,7 @@ NativeObject* IonBuilder::commonPrototypeWithGetterSetter(
         }
 
         NativeObject* singletonNative = &singleton->as<NativeObject>();
-        if (Shape* propShape = singletonNative->lookupPure(name)) {
+        if (Shape* propShape = singletonNative->lookupPure(id)) {
           // We found a property. Check if it's the getter or setter
           // we're looking for.
           Value getterSetterVal = ObjectValue(*getterOrSetter);
@@ -10221,7 +10244,7 @@ NativeObject* IonBuilder::commonPrototypeWithGetterSetter(
       // Test for isOwnProperty() without freezing. If we end up
       // optimizing, freezePropertiesForCommonPropFunc will freeze the
       // property type sets later on.
-      HeapTypeSetKey property = key->property(NameToId(name));
+      HeapTypeSetKey property = key->property(id);
       if (TypeSet* types = property.maybeTypes()) {
         if (!types->empty() || types->nonDataProperty()) {
           return nullptr;
@@ -10254,8 +10277,8 @@ NativeObject* IonBuilder::commonPrototypeWithGetterSetter(
 }
 
 AbortReasonOr<Ok> IonBuilder::freezePropertiesForCommonPrototype(
-    TemporaryTypeSet* types, PropertyName* name, JSObject* foundProto,
-    bool allowEmptyTypesforGlobal /* = false*/) {
+    TemporaryTypeSet* types, jsid id, JSObject* foundProto,
+    bool allowEmptyTypesforGlobal) {
   for (unsigned i = 0; i < types->getObjectCount(); i++) {
     // If we found a Singleton object's own-property, there's nothing to
     // freeze.
@@ -10273,7 +10296,7 @@ AbortReasonOr<Ok> IonBuilder::freezePropertiesForCommonPrototype(
         return abort(AbortReason::Alloc);
       }
 
-      HeapTypeSetKey property = key->property(NameToId(name));
+      HeapTypeSetKey property = key->property(id);
       MOZ_ALWAYS_TRUE(
           !property.isOwnProperty(constraints(), allowEmptyTypesforGlobal));
 
@@ -10290,9 +10313,8 @@ AbortReasonOr<Ok> IonBuilder::freezePropertiesForCommonPrototype(
 }
 
 AbortReasonOr<bool> IonBuilder::testCommonGetterSetter(
-    TemporaryTypeSet* types, PropertyName* name, bool isGetter,
-    JSFunction* getterOrSetter, MDefinition** guard,
-    Shape* globalShape /* = nullptr*/,
+    TemporaryTypeSet* types, jsid id, bool isGetter, JSFunction* getterOrSetter,
+    MDefinition** guard, Shape* globalShape /* = nullptr*/,
     MDefinition** globalGuard /* = nullptr */) {
   MOZ_ASSERT(getterOrSetter);
   MOZ_ASSERT_IF(globalShape, globalGuard);
@@ -10301,7 +10323,7 @@ AbortReasonOr<bool> IonBuilder::testCommonGetterSetter(
   // Check if all objects being accessed will lookup the name through
   // foundProto.
   NativeObject* foundProto = commonPrototypeWithGetterSetter(
-      types, name, isGetter, getterOrSetter, &guardGlobal);
+      types, id, isGetter, getterOrSetter, &guardGlobal);
   if (!foundProto || (guardGlobal && !globalShape)) {
     trackOptimizationOutcome(TrackedOutcome::MultiProtoPaths);
     return false;
@@ -10311,7 +10333,7 @@ AbortReasonOr<bool> IonBuilder::testCommonGetterSetter(
   // ensure there isn't a lower shadowing getter or setter installed in the
   // future.
   MOZ_TRY(
-      freezePropertiesForCommonPrototype(types, name, foundProto, guardGlobal));
+      freezePropertiesForCommonPrototype(types, id, foundProto, guardGlobal));
 
   // Add a shape guard on the prototype we found the property on. The rest of
   // the prototype chain is guarded by TI freezes, except when name is a global
@@ -10328,7 +10350,7 @@ AbortReasonOr<bool> IonBuilder::testCommonGetterSetter(
 
   // If the getter/setter is not configurable we don't have to guard on the
   // proto's shape.
-  Shape* propShape = foundProto->lookupPure(name);
+  Shape* propShape = foundProto->lookupPure(id);
   MOZ_ASSERT_IF(isGetter, propShape->getterObject() == getterOrSetter);
   MOZ_ASSERT_IF(!isGetter, propShape->setterObject() == getterOrSetter);
   if (propShape && !propShape->configurable()) {
@@ -10718,7 +10740,7 @@ AbortReasonOr<Ok> IonBuilder::jsop_getprop(PropertyName* name) {
 
     // Try to inline a common property getter, or make a call.
     trackOptimizationAttempt(TrackedStrategy::GetProp_CommonGetter);
-    MOZ_TRY(getPropTryCommonGetter(&emitted, obj, name, types));
+    MOZ_TRY(getPropTryCommonGetter(&emitted, obj, NameToId(name), types));
     if (emitted) {
       return Ok();
     }
@@ -11328,8 +11350,7 @@ MDefinition* IonBuilder::addShapeGuardsForGetterSetter(
 }
 
 AbortReasonOr<Ok> IonBuilder::getPropTryCommonGetter(bool* emitted,
-                                                     MDefinition* obj,
-                                                     PropertyName* name,
+                                                     MDefinition* obj, jsid id,
                                                      TemporaryTypeSet* types,
                                                      bool innerized) {
   MOZ_ASSERT(*emitted == false);
@@ -11348,14 +11369,14 @@ AbortReasonOr<Ok> IonBuilder::getPropTryCommonGetter(bool* emitted,
     BaselineInspector::ReceiverVector receivers(alloc());
     BaselineInspector::ObjectGroupVector convertUnboxedGroups(alloc());
     if (inspector->commonGetPropFunction(
-            pc, innerized, &foundProto, &lastProperty, &commonGetter,
+            pc, id, innerized, &foundProto, &lastProperty, &commonGetter,
             &globalShape, &isOwnProperty, receivers, convertUnboxedGroups)) {
       bool canUseTIForGetter = false;
       if (!isOwnProperty) {
         // If it's not an own property, try to use TI to avoid shape guards.
         // For own properties we use the path below.
         MOZ_TRY_VAR(canUseTIForGetter,
-                    testCommonGetterSetter(objTypes, name,
+                    testCommonGetterSetter(objTypes, id,
                                            /* isGetter = */ true, commonGetter,
                                            &guard, globalShape, &globalGuard));
       }
@@ -11370,11 +11391,11 @@ AbortReasonOr<Ok> IonBuilder::getPropTryCommonGetter(bool* emitted,
         }
       }
     } else if (inspector->megamorphicGetterSetterFunction(
-                   pc, /* isGetter = */ true, &commonGetter)) {
+                   pc, id, /* isGetter = */ true, &commonGetter)) {
       // Try to use TI to guard on this getter.
       bool canUseTIForGetter = false;
       MOZ_TRY_VAR(canUseTIForGetter,
-                  testCommonGetterSetter(objTypes, name, /* isGetter = */ true,
+                  testCommonGetterSetter(objTypes, id, /* isGetter = */ true,
                                          commonGetter, &guard));
       if (!canUseTIForGetter) {
         return Ok();
@@ -11910,7 +11931,7 @@ AbortReasonOr<Ok> IonBuilder::getPropTryInnerize(bool* emitted,
     }
 
     trackOptimizationAttempt(TrackedStrategy::GetProp_CommonGetter);
-    MOZ_TRY(getPropTryCommonGetter(emitted, inner, name, types,
+    MOZ_TRY(getPropTryCommonGetter(emitted, inner, NameToId(name), types,
                                    /* innerized = */ true));
     if (*emitted) {
       return Ok();
@@ -12025,10 +12046,10 @@ AbortReasonOr<Ok> IonBuilder::setPropTryCommonSetter(bool* emitted,
       if (!isOwnProperty) {
         // If it's not an own property, try to use TI to avoid shape guards.
         // For own properties we use the path below.
-        MOZ_TRY_VAR(
-            canUseTIForSetter,
-            testCommonGetterSetter(objTypes, name, /* isGetter = */ false,
-                                   commonSetter, &guard));
+        MOZ_TRY_VAR(canUseTIForSetter,
+                    testCommonGetterSetter(objTypes, NameToId(name),
+                                           /* isGetter = */ false, commonSetter,
+                                           &guard));
       }
       if (!canUseTIForSetter) {
         // If it's an own property or type information is bad, we can still
@@ -12041,12 +12062,13 @@ AbortReasonOr<Ok> IonBuilder::setPropTryCommonSetter(bool* emitted,
         }
       }
     } else if (inspector->megamorphicGetterSetterFunction(
-                   pc, /* isGetter = */ false, &commonSetter)) {
+                   pc, NameToId(name), /* isGetter = */ false, &commonSetter)) {
       // Try to use TI to guard on this setter.
       bool canUseTIForSetter = false;
-      MOZ_TRY_VAR(canUseTIForSetter,
-                  testCommonGetterSetter(objTypes, name, /* isGetter = */ false,
-                                         commonSetter, &guard));
+      MOZ_TRY_VAR(
+          canUseTIForSetter,
+          testCommonGetterSetter(objTypes, NameToId(name),
+                                 /* isGetter = */ false, commonSetter, &guard));
       if (!canUseTIForSetter) {
         return Ok();
       }

@@ -97,7 +97,6 @@ class BaselineInspector {
   bool hasSeenNegativeIndexGetElement(jsbytecode* pc);
   bool hasSeenAccessedGetter(jsbytecode* pc);
   bool hasSeenDoubleResult(jsbytecode* pc);
-  bool hasSeenNonStringIterMore(jsbytecode* pc);
 
   MOZ_MUST_USE bool isOptimizableConstStringSplit(jsbytecode* pc,
                                                   JSString** strOut,
@@ -121,12 +120,13 @@ class BaselineInspector {
   // global object) instead. In this case we should only look for Baseline
   // stubs that performed the same optimization.
   MOZ_MUST_USE bool commonGetPropFunction(
-      jsbytecode* pc, bool innerized, JSObject** holder, Shape** holderShape,
-      JSFunction** commonGetter, Shape** globalShape, bool* isOwnProperty,
-      ReceiverVector& receivers, ObjectGroupVector& convertUnboxedGroups);
+      jsbytecode* pc, jsid id, bool innerized, JSObject** holder,
+      Shape** holderShape, JSFunction** commonGetter, Shape** globalShape,
+      bool* isOwnProperty, ReceiverVector& receivers,
+      ObjectGroupVector& convertUnboxedGroups);
 
   MOZ_MUST_USE bool megamorphicGetterSetterFunction(
-      jsbytecode* pc, bool isGetter, JSFunction** getterOrSetter);
+      jsbytecode* pc, jsid id, bool isGetter, JSFunction** getterOrSetter);
 
   MOZ_MUST_USE bool commonSetPropFunction(
       jsbytecode* pc, JSObject** holder, Shape** holderShape,
