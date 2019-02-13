@@ -169,6 +169,13 @@ pref("app.update.idletime", 60);
 pref("app.update.service.enabled", true);
 #endif
 
+#ifdef XP_WIN
+// Default polling interval when monitoring update download status via BITS
+pref("app.update.BITS.idleUpdateIntervalMs", 300000); // 5 min
+// The BITS polling interval to use when the user is watching
+pref("app.update.BITS.activeUpdateIntervalMs", 500);
+#endif
+
 // Symmetric (can be overridden by individual extensions) update preferences.
 // e.g.
 //  extensions.{GUID}.update.enabled

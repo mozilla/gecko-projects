@@ -383,6 +383,7 @@ impl BITSInterface {
     xpcom_method!(
         cancel_download_nsIBITS => CancelDownload(
             id: *const nsACString,
+            status: nsresult,
             callback: *const nsIBITSCancelDownloadCallback
         )
     );
@@ -390,9 +391,10 @@ impl BITSInterface {
     fn cancel_download_nsIBITS(
         &self,
         id: &nsACString,
+        status: nsresult,
         callback: &nsIBITSCancelDownloadCallback,
     ) -> Result<(), nsresult> {
-        self.cancel_download(nsCString::from(id), None, Some(RefPtr::new(callback)))
+        self.cancel_download(nsCString::from(id), Some(status), Some(RefPtr::new(callback)))
     }
     xpcom_method!(
         cancel_download_nsIRequest => Cancel(
