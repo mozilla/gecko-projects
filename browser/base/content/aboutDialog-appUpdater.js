@@ -289,14 +289,11 @@ appUpdater.prototype =
   /**
    * Starts the download of an update mar.
    */
-  startDownload() {
+  async startDownload() {
     if (!this.update)
       this.update = this.um.activeUpdate;
-    this.update.QueryInterface(Ci.nsIWritablePropertyBag);
-    this.update.setProperty("foregroundDownload", "true");
 
-    this.aus.pauseDownload();
-    let state = this.aus.downloadUpdate(this.update, false);
+    let state = await this.aus.ensureForegroundDownload(this.update);
     if (state == "failed") {
       this.selectPanel("downloadFailed");
       return;
