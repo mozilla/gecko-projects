@@ -415,6 +415,7 @@ XPCOMUtils.defineLazyModuleGetters(this, {
   PageThumbs: "resource://gre/modules/PageThumbs.jsm",
   PdfJs: "resource://pdf.js/PdfJs.jsm",
   PermissionUI: "resource:///modules/PermissionUI.jsm",
+  PictureInPicture: "resource://gre/modules/PictureInPicture.jsm",
   PingCentre: "resource:///modules/PingCentre.jsm",
   PlacesBackups: "resource://gre/modules/PlacesBackups.jsm",
   PlacesUtils: "resource://gre/modules/PlacesUtils.jsm",
@@ -512,6 +513,8 @@ const listeners = {
     "ContentSearch": ["ContentSearch"],
     "FormValidation:ShowPopup": ["FormValidationHandler"],
     "FormValidation:HidePopup": ["FormValidationHandler"],
+    "PictureInPicture:Request": ["PictureInPicture"],
+    "PictureInPicture:Close": ["PictureInPicture"],
     "Prompt:Open": ["RemotePrompt"],
     "Reader:FaviconRequest": ["ReaderParent"],
     "Reader:UpdateReaderButton": ["ReaderParent"],
@@ -2219,7 +2222,7 @@ BrowserGlue.prototype = {
   _migrateUI: function BG__migrateUI() {
     // Use an increasing number to keep track of the current migration state.
     // Completely unrelated to the current Firefox release number.
-    const UI_VERSION = 78;
+    const UI_VERSION = 79;
     const BROWSER_DOCURL = AppConstants.BROWSER_CHROME_URL;
 
     let currentUIVersion;
@@ -2586,6 +2589,12 @@ BrowserGlue.prototype = {
 
     if (currentUIVersion < 78) {
       Services.prefs.clearUserPref("browser.search.region");
+    }
+
+    if (currentUIVersion < 79) {
+      // The handler app service will read this. We need to wait with migrating
+      // until the handler service has started up, so just set a pref here.
+      Services.prefs.setCharPref("browser.handlers.migrations", "30boxes");
     }
 
     // Update the migration version.

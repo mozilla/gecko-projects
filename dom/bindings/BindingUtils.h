@@ -1171,8 +1171,14 @@ inline bool WrapNewBindingNonWrapperCachedObject(
       if (!JS_WrapObject(cx, &proto)) {
         return false;
       }
+    } else {
+      // cx and scope are same-compartment, but they might still be
+      // different-Realm.  Enter the Realm of scope, since that's
+      // where we want to create our object.
+      ar.emplace(cx, scope);
     }
 
+    MOZ_ASSERT_IF(proto, js::IsObjectInContextCompartment(proto, cx));
     MOZ_ASSERT(js::IsObjectInContextCompartment(scope, cx));
     if (!value->WrapObject(cx, proto, &obj)) {
       return false;
@@ -1223,8 +1229,14 @@ inline bool WrapNewBindingNonWrapperCachedObject(
       if (!JS_WrapObject(cx, &proto)) {
         return false;
       }
+    } else {
+      // cx and scope are same-compartment, but they might still be
+      // different-Realm.  Enter the Realm of scope, since that's
+      // where we want to create our object.
+      ar.emplace(cx, scope);
     }
 
+    MOZ_ASSERT_IF(proto, js::IsObjectInContextCompartment(proto, cx));
     MOZ_ASSERT(js::IsObjectInContextCompartment(scope, cx));
     if (!value->WrapObject(cx, proto, &obj)) {
       return false;
@@ -1609,18 +1621,8 @@ static inline JSObject* FindAssociatedGlobal(
   obj = JS::GetNonCCWObjectGlobal(obj);
 
   switch (scope) {
-    case mozilla::dom::ReflectionScope::XBL: {
-      // If scope is set to XBLScope, it means that the canonical reflector for
-      // this native object should live in the content XBL scope. Note that we
-      // never put anonymous content inside an add-on scope.
-      if (xpc::IsInContentXBLScope(obj)) {
-        return obj;
-      }
-      JS::Rooted<JSObject*> rootedObj(cx, obj);
-      JSObject* xblScope = xpc::GetXBLScope(cx, rootedObj);
-      MOZ_ASSERT_IF(xblScope, JS_IsGlobalObject(xblScope));
-      JS::AssertObjectIsNotGray(xblScope);
-      return xblScope;
+    case mozilla::dom::ReflectionScope::NAC: {
+      return xpc::NACScope(obj);
     }
 
     case mozilla::dom::ReflectionScope::UAWidget: {

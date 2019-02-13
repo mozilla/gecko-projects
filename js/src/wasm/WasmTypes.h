@@ -138,18 +138,6 @@ typedef Vector<UniqueChars, 0, SystemAllocPolicy> UniqueCharsVector;
   const uint8_t* deserialize(const uint8_t* cursor); \
   size_t sizeOfExcludingThis(mozilla::MallocSizeOf mallocSizeOf) const;
 
-#define WASM_DECLARE_SERIALIZABLE_VIRTUAL(Type)              \
-  virtual size_t serializedSize() const;                     \
-  virtual uint8_t* serialize(uint8_t* cursor) const;         \
-  virtual const uint8_t* deserialize(const uint8_t* cursor); \
-  virtual size_t sizeOfExcludingThis(mozilla::MallocSizeOf mallocSizeOf) const;
-
-#define WASM_DECLARE_SERIALIZABLE_OVERRIDE(Type)              \
-  size_t serializedSize() const override;                     \
-  uint8_t* serialize(uint8_t* cursor) const override;         \
-  const uint8_t* deserialize(const uint8_t* cursor) override; \
-  size_t sizeOfExcludingThis(mozilla::MallocSizeOf mallocSizeOf) const override;
-
 template <class T>
 struct SerializableRefPtr : RefPtr<T> {
   using RefPtr<T>::operator=;
@@ -235,6 +223,7 @@ static inline PackedTypeCode PackTypeCode(TypeCode tc, uint32_t refTypeIndex) {
   MOZ_ASSERT(uint32_t(tc) <= 0xFF);
   MOZ_ASSERT_IF(tc != TypeCode::Ref, refTypeIndex == NoRefTypeIndex);
   MOZ_ASSERT_IF(tc == TypeCode::Ref, refTypeIndex <= MaxTypes);
+  static_assert(MaxTypes < (1 << (32 - 8)), "enough bits");
   return PackedTypeCode((refTypeIndex << 8) | uint32_t(tc));
 }
 
@@ -472,11 +461,9 @@ static inline jit::MIRType ToMIRType(ValType vt) {
     case ValType::F64:
       return jit::MIRType::Double;
     case ValType::Ref:
-      return jit::MIRType::Pointer;
     case ValType::AnyRef:
-      return jit::MIRType::Pointer;
     case ValType::NullRef:
-      return jit::MIRType::Pointer;
+      return jit::MIRType::RefOrNull;
   }
   MOZ_MAKE_COMPILER_ASSUME_IS_UNREACHABLE("bad type");
 }

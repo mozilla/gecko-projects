@@ -500,6 +500,8 @@ class PresShell final : public nsIPresShell,
     EventHandler() = delete;
     EventHandler(const EventHandler& aOther) = delete;
     explicit EventHandler(PresShell& aPresShell) : mPresShell(aPresShell) {}
+    explicit EventHandler(RefPtr<PresShell>&& aPresShell)
+        : mPresShell(aPresShell.forget()) {}
 
     /**
      * HandleEvent() may dispatch aGUIEvent.  This may redirect the event to
@@ -580,6 +582,70 @@ class PresShell final : public nsIPresShell,
         nsIPresShell* aPresShell);
     static already_AddRefed<nsIURI> GetDocumentURIToCompareWithBlacklist(
         PresShell& aPresShell);
+
+    /**
+     * EventTargetData struct stores a set of a PresShell (event handler),
+     * a frame (to handle the event) and a content (event target for the frame).
+     */
+    struct MOZ_STACK_CLASS EventTargetData final {
+      EventTargetData() = delete;
+      EventTargetData(const EventTargetData& aOther) = delete;
+      EventTargetData(PresShell* aPresShell, nsIFrame* aFrameToHandleEvent)
+          : mPresShell(aPresShell), mFrame(aFrameToHandleEvent) {}
+
+      void SetPresShellAndFrame(PresShell* aPresShell,
+                                nsIFrame* aFrameToHandleEvent) {
+        mPresShell = aPresShell;
+        mFrame = aFrameToHandleEvent;
+        mContent = nullptr;
+      }
+      void SetFrameAndComputePresShell(nsIFrame* aFrameToHandleEvent);
+      void SetFrameAndComputePresShellAndContent(nsIFrame* aFrameToHandleEvent,
+                                                 WidgetGUIEvent* aGUIEvent);
+      void SetContentForEventFromFrame(WidgetGUIEvent* aGUIEvent);
+
+      nsPresContext* GetPresContext() const {
+        return mPresShell ? mPresShell->GetPresContext() : nullptr;
+      };
+      EventStateManager* GetEventStateManager() const {
+        nsPresContext* presContext = GetPresContext();
+        return presContext ? presContext->EventStateManager() : nullptr;
+      }
+      Document* GetDocument() const {
+        return mPresShell ? mPresShell->GetDocument() : nullptr;
+      }
+      nsIContent* GetFrameContent() const;
+
+      RefPtr<PresShell> mPresShell;
+      nsIFrame* mFrame;
+      nsCOMPtr<nsIContent> mContent;
+    };
+
+    /**
+     * MaybeFlushPendingNotifications() maybe flush pending notifications if
+     * aGUIEvent should be handled with the latest layout.
+     *
+     * @param aGUIEvent                 The handling event.
+     * @return                          true if this actually flushes pending
+     *                                  layout and that has caused changing the
+     *                                  layout.
+     */
+    MOZ_CAN_RUN_SCRIPT
+    bool MaybeFlushPendingNotifications(WidgetGUIEvent* aGUIEvent);
+
+    /**
+     * GetFrameToHandleNonTouchEvent() returns a frame to handle the event.
+     * This may flush pending layout if the target is in child PresShell.
+     *
+     * @param aRootFrameToHandleEvent   The root frame to handle the event.
+     * @param aGUIEvent                 The handling event.
+     * @return                          The frame which should handle the
+     *                                  event.  nullptr if the caller should
+     *                                  stop handling the event.
+     */
+    MOZ_CAN_RUN_SCRIPT
+    nsIFrame* GetFrameToHandleNonTouchEvent(nsIFrame* aRootFrameToHandleEvent,
+                                            WidgetGUIEvent* aGUIEvent);
 
     /**
      * MaybeDiscardEvent() checks whether it's safe to handle aGUIEvent right
@@ -684,6 +750,22 @@ class PresShell final : public nsIPresShell,
     bool MaybeDiscardOrDelayKeyboardEvent(WidgetGUIEvent* aGUIEvent);
 
     /**
+     * MaybeDiscardOrDelayMouseEvent() may discard or put aGUIEvent into the
+     * delayed event queue if it's a mouse event and if we should do so.
+     * If aGUIEvent is not a mouse event, this does nothing.
+     * If there is suppressed event listener like debugger of devtools, this
+     * notifies it of the event after discard or put it into the delayed
+     * event queue.
+     *
+     * @param aFrameToHandleEvent       The frame to handle aGUIEvent.
+     * @param aGUIEvent                 The handling event.
+     * @return                          true if this method discard the event
+     *                                  or put it into the delayed event queue.
+     */
+    bool MaybeDiscardOrDelayMouseEvent(nsIFrame* aFrameToHandleEvent,
+                                       WidgetGUIEvent* aGUIEvent);
+
+    /**
      * MaybeFlushThrottledStyles() tries to flush pending animation.  If it's
      * flushed and then aFrameForPresShell is destroyed, returns new frame
      * which contains mPresShell.
@@ -769,6 +851,25 @@ class PresShell final : public nsIPresShell,
     nsIFrame* ComputeRootFrameToHandleEventWithCapturingContent(
         nsIFrame* aRootFrameToHandleEvent, nsIContent* aCapturingContent,
         bool* aIsCapturingContentIgnored, bool* aIsCaptureRetargeted);
+
+    /**
+     * HandleEventWithPointerCapturingContentWithoutItsFrame() handles
+     * aGUIEvent with aPointerCapturingContent when it does not have primary
+     * frame.
+     *
+     * @param aFrameForPresShell        The frame for mPresShell.  Typically,
+     *                                  aFrame of HandleEvent().
+     * @param aGUIEvent                 The handling event.
+     * @param aPointerCapturingContent  Current pointer capturing content.
+     *                                  Must not be nullptr.
+     * @param aEventStatus              [in/out] The event status of aGUIEvent.
+     * @return                          Basically, result of
+     *                                  HandeEventWithTraget().
+     */
+    MOZ_CAN_RUN_SCRIPT
+    nsresult HandleEventWithPointerCapturingContentWithoutItsFrame(
+        nsIFrame* aFrameForPresShell, WidgetGUIEvent* aGUIEvent,
+        nsIContent* aPointerCapturingContent, nsEventStatus* aEventStatus);
 
     /**
      * XXX Needs better name.

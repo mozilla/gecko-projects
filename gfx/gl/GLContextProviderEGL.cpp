@@ -296,6 +296,33 @@ already_AddRefed<GLContext> GLContextEGLFactory::Create(
   return gl.forget();
 }
 
+#if defined(MOZ_WAYLAND)
+/* static */ EGLSurface GLContextEGL::CreateEGLSurfaceForCompositorWidget(
+    widget::CompositorWidget* aCompositorWidget, bool aForceAccelerated) {
+  nsCString discardFailureId;
+  if (!GLLibraryEGL::EnsureInitialized(false, &discardFailureId)) {
+    gfxCriticalNote << "Failed to load EGL library 6!";
+    return EGL_NO_SURFACE;
+  }
+
+  MOZ_ASSERT(aCompositorWidget);
+  EGLNativeWindowType window = GET_NATIVE_WINDOW_FROM_COMPOSITOR_WIDGET(aCompositorWidget);
+  if (!window) {
+    gfxCriticalNote << "window is null";
+    return EGL_NO_SURFACE;
+  }
+  const bool useWebRender = aCompositorWidget->GetCompositorOptions().UseWebRender();
+
+  EGLConfig config;
+  if (!CreateConfig(&config, useWebRender)) {
+    gfxCriticalNote << "Failed to create EGLConfig!";
+    return EGL_NO_SURFACE;
+  }
+
+  return mozilla::gl::CreateSurfaceFromNativeWindow(window, config);
+}
+#endif
+
 GLContextEGL::GLContextEGL(CreateContextFlags flags, const SurfaceCaps& caps,
                            bool isOffscreen, EGLConfig config,
                            EGLSurface surface, EGLContext context)
@@ -360,10 +387,6 @@ bool GLContextEGL::Init() {
         NS_LITERAL_CSTRING("Couldn't get device attachments for device."));
     return false;
   }
-
-  static_assert(sizeof(GLint) >= sizeof(int32_t),
-                "GLint is smaller than int32_t");
-  mMaxTextureImageSize = INT32_MAX;
 
   mShareWithEGLImage = mEgl->HasKHRImageBase() &&
                        mEgl->HasKHRImageTexture2D() &&

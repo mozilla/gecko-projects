@@ -64,12 +64,37 @@ class UrlbarView {
     return this.panel.state == "open" || this.panel.state == "showing";
   }
 
+  get selectedIndex() {
+    if (!this.isOpen || !this._selected) {
+      return -1;
+    }
+    return parseInt(this._selected.getAttribute("resultIndex"));
+  }
+
+  set selectedIndex(val) {
+    if (!this.isOpen) {
+      throw new Error("UrlbarView: Cannot select an item if the view isn't open.");
+    }
+
+    if (val < 0) {
+      this._selectItem(null);
+      return val;
+    }
+
+    let items = this._rows.children;
+    if (val >= items.length) {
+      throw new Error(`UrlbarView: Index ${val} is out of bounds.`);
+    }
+    this._selectItem(items[val]);
+    return val;
+  }
+
   /**
    * @returns {UrlbarResult}
    *   The currently selected result.
    */
   get selectedResult() {
-    if (!this.isOpen) {
+    if (!this.isOpen || !this._selected) {
       return null;
     }
 
@@ -90,7 +115,7 @@ class UrlbarView {
       throw new Error("UrlbarView: Cannot select an item if the view isn't open.");
     }
 
-    // TODO: handle one-off search buttons
+    // TODO bug 1527260: handle one-off search buttons
 
     let row;
     if (reverse) {
@@ -100,18 +125,7 @@ class UrlbarView {
       row = (this._selected && this._selected.nextElementSibling) ||
             this._rows.firstElementChild;
     }
-
-    if (this._selected) {
-      this._selected.toggleAttribute("selected", false);
-    }
-    this._selected = row;
-    row.toggleAttribute("selected", true);
-
-    let resultIndex = row.getAttribute("resultIndex");
-    let result = this._queryContext.results[resultIndex];
-    if (result) {
-      this.input.setValueFromResult(result);
-    }
+    this._selectItem(row);
   }
 
   /**
@@ -144,20 +158,17 @@ class UrlbarView {
 
     if (queryContext.lastResultCount == 0) {
       if (queryContext.preselected) {
-        this._selected = fragment.firstElementChild;
-        this._selected.toggleAttribute("selected", true);
-      } else if (this._selected) {
+        this._selectItem(fragment.firstElementChild);
+      } else {
         // Clear the selection when we get a new set of results.
-        this._selected.toggleAttribute("selected", false);
-        this._selected = null;
+        this._selectItem(null);
       }
     } else if (this._selected) {
       // Ensure the selection is stable.
       // TODO bug 1523602: the selection should stay on the node that had it, if
       // it's still in the current result set.
       let resultIndex = this._selected.getAttribute("resultIndex");
-      this._selected = fragment.children[resultIndex];
-      this._selected.toggleAttribute("selected", true);
+      this._selectItem(fragment.children[resultIndex]);
     }
 
     // TODO bug 1523602: For now, clear the results for each set received.
@@ -196,11 +207,8 @@ class UrlbarView {
       newSelectionIndex = this._queryContext.results.length - 1;
     }
     if (newSelectionIndex >= 0) {
-      this._selected = this._rows.children[newSelectionIndex];
-      this._selected.setAttribute("selected", true);
+      this.selectedIndex = newSelectionIndex;
     }
-
-    this.input.setValueFromResult(this._queryContext.results[newSelectionIndex]);
   }
 
   /**
@@ -260,7 +268,8 @@ class UrlbarView {
     this.panel.setAttribute("width", width);
 
     // Subtract two pixels for left and right borders on the panel.
-    this._mainContainer.style.maxWidth = (width - 2) + "px";
+    let contentWidth = width - 2;
+    this._mainContainer.style.maxWidth = contentWidth + "px";
 
     // Keep the popup items' site icons aligned with the input's identity
     // icon if it's not too far from the edge of the window.  We define
@@ -289,10 +298,12 @@ class UrlbarView {
 
       this.panel.style.setProperty("--item-padding-start", Math.round(start) + "px");
       this.panel.style.setProperty("--item-padding-end", Math.round(endOffset) + "px");
+      contentWidth -= start + endOffset;
     } else {
       this.panel.style.removeProperty("--item-padding-start");
       this.panel.style.removeProperty("--item-padding-end");
     }
+    this.panel.style.setProperty("--item-content-width", Math.round(contentWidth) + "px");
   }
 
   _createRow(resultIndex) {
@@ -376,6 +387,11 @@ class UrlbarView {
         setAction(bundle.formatStringFromName("searchWithEngine",
                                               [result.payload.engine], 1));
         break;
+      case UrlbarUtils.RESULT_TYPE.KEYWORD:
+        if (result.payload.input.trim() == result.payload.keyword) {
+          setAction(bundle.GetStringFromName("visit"));
+        }
+        break;
       default:
         if (resultIndex == 0) {
           setAction(bundle.GetStringFromName("visit"));
@@ -392,6 +408,28 @@ class UrlbarView {
     }
 
     return item;
+  }
+
+  _selectItem(item, updateInput = true) {
+    if (this._selected) {
+      this._selected.toggleAttribute("selected", false);
+      this._selected = null;
+    }
+
+    if (!item) {
+      return;
+    }
+    this._selected = item;
+    item.toggleAttribute("selected", true);
+
+    if (!updateInput) {
+      return;
+    }
+    let resultIndex = item.getAttribute("resultIndex");
+    let result = this._queryContext.results[resultIndex];
+    if (result) {
+      this.input.setValueFromResult(result);
+    }
   }
 
   /**
@@ -457,13 +495,8 @@ class UrlbarView {
     while (!row.classList.contains("urlbarView-row")) {
       row = row.parentNode;
     }
-    let resultIndex = row.getAttribute("resultIndex");
-    if (this._selected) {
-      this._selected.toggleAttribute("selected", false);
-    }
-    this._selected = this._rows.children[resultIndex];
-    this._selected.toggleAttribute("selected", true);
-    this.controller.speculativeConnect(this._queryContext, resultIndex, "mousedown");
+    this._selectItem(row, false);
+    this.controller.speculativeConnect(this._queryContext, this.selectedIndex, "mousedown");
   }
 
   _on_mouseup(event) {

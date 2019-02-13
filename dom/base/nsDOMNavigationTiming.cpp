@@ -414,7 +414,8 @@ void nsDOMNavigationTiming::NotifyNonBlankPaintForRootContentDocument() {
   }
 }
 
-void nsDOMNavigationTiming::NotifyContentfulPaintForRootContentDocument() {
+void nsDOMNavigationTiming::NotifyContentfulPaintForRootContentDocument(
+    const mozilla::TimeStamp& aCompositeEndTime) {
   MOZ_ASSERT(NS_IsMainThread());
   MOZ_ASSERT(!mNavigationStart.IsNull());
 
@@ -422,7 +423,7 @@ void nsDOMNavigationTiming::NotifyContentfulPaintForRootContentDocument() {
     return;
   }
 
-  mContentfulPaint = TimeStamp::Now();
+  mContentfulPaint = aCompositeEndTime;
 
 #ifdef MOZ_GECKO_PROFILER
   if (profiler_is_active() || PAGELOAD_LOG_ENABLED()) {
@@ -458,6 +459,11 @@ void nsDOMNavigationTiming::NotifyContentfulPaintForRootContentDocument() {
                                        TTI_WINDOW_SIZE_MS,
                                        nsITimer::TYPE_ONE_SHOT_LOW_PRIORITY,
                                        "nsDOMNavigationTiming::TTITimeout");
+
+  if (mDocShellHasBeenActiveSinceNavigationStart) {
+    Telemetry::AccumulateTimeDelta(Telemetry::TIME_TO_FIRST_CONTENTFUL_PAINT_MS,
+                                   mNavigationStart, mContentfulPaint);
+  }
 }
 
 void nsDOMNavigationTiming::NotifyDOMContentFlushedForRootContentDocument() {

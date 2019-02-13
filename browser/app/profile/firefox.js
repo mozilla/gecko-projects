@@ -1217,6 +1217,7 @@ pref("services.sync.prefs.sync.intl.accept_languages", true);
 pref("services.sync.prefs.sync.layout.spellcheckDefault", true);
 pref("services.sync.prefs.sync.lightweightThemes.selectedThemeID", true);
 pref("services.sync.prefs.sync.lightweightThemes.usedThemes", true);
+pref("services.sync.prefs.sync.media.autoplay.default", true);
 pref("services.sync.prefs.sync.media.eme.enabled", true);
 pref("services.sync.prefs.sync.network.cookie.cookieBehavior", true);
 pref("services.sync.prefs.sync.network.cookie.lifetimePolicy", true);
@@ -1485,6 +1486,9 @@ pref("media.autoplay.block-webaudio", true);
 pref("media.autoplay.block-webaudio", false);
 #endif
 
+#ifdef NIGHTLY_BUILD
+pref("media.videocontrols.picture-in-picture.enabled", false);
+#endif
 
 // Play with different values of the decay time and get telemetry,
 // 0 means to randomize (and persist) the experiment value in users' profiles,
@@ -1525,7 +1529,11 @@ pref("browser.ping-centre.production.endpoint", "https://tiles.services.mozilla.
 // Enable GMP support in the addon manager.
 pref("media.gmp-provider.enabled", true);
 
+// Enable blocking access to storage from tracking resources only in nightly
+// and early beta. By default the value is 0: BEHAVIOR_ACCEPT
+#ifdef EARLY_BETA_OR_EARLIER
 pref("network.cookie.cookieBehavior", 4 /* BEHAVIOR_REJECT_TRACKER */);
+#endif
 
 pref("browser.contentblocking.allowlist.storage.enabled", true);
 

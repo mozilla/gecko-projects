@@ -949,11 +949,11 @@ using ScratchI8 = ScratchI32;
 
 // The stack frame.
 //
-// The frame has four parts ("below" means at lower addresses):
+// The stack frame has four parts ("below" means at lower addresses):
 //
-//  - the Header, comprising the Frame and DebugFrame elements;
-//  - the Local area, allocated below the header with various forms of
-//    alignment;
+//  - the Frame element;
+//  - the Local area, including the DebugFrame element; allocated below the
+//    header with various forms of alignment;
 //  - the Dynamic area, comprising the temporary storage the compiler uses for
 //    register spilling, allocated below the Local area;
 //  - the Arguments area, comprising memory allocated for outgoing calls,
@@ -965,30 +965,30 @@ using ScratchI8 = ScratchI32;
 //                 +----------------------------+
 //                 |    unspecified             |
 // --------------  +============================+
-//  ^              |    Frame (fixed size)      |
-// fixedSize       +----------------------------+ <------------------ FP
-//  |              |    DebugFrame (optional)   |               ^^
-//  |    --------  +============================+ ---------     ||
-//  |       ^      |    Local (static size)     |    ^          ||
-//  | localSize    |    ...                     |    |        framePushed
-//  v       v      |    (padding)               |    |          ||
-// --------------  +============================+ stackHeight   ||
-//          ^      |    Dynamic (variable)      |    |          ||
-//   dynamicSize   |    ...                     |    |          ||
-//          v      |    ...                     |    v          ||
-// --------------  |    (free space, sometimes) | ---------     v|
+//                 |    Frame (fixed size)      |
+// --------------  +============================+ <-------------------- FP
+//          ^      |    DebugFrame (optional)   |    ^                ^^
+//          |      +----------------------------+    |                ||
+//    localSize    |    Local (static size)     |    |                ||
+//          |      |    ...                     |    |        framePushed
+//          v      |    (padding)               |    |                ||
+// --------------  +============================+ currentStackHeight  ||
+//          ^      |    Dynamic (variable size) |    |                ||
+//   dynamicSize   |    ...                     |    |                ||
+//          v      |    ...                     |    v                ||
+// --------------  |    (free space, sometimes) | ---------           v|
 //                 +============================+ <----- SP not-during calls
-//                 |    Arguments (sometimes)   |                |
-//                 |    ...                     |                v
+//                 |    Arguments (sometimes)   |                      |
+//                 |    ...                     |                      v
 //                 +============================+ <----- SP during calls
 //
-// The Header is addressed off the stack pointer.  masm.framePushed() is always
+// The Frame is addressed off the stack pointer.  masm.framePushed() is always
 // correct, and masm.getStackPointer() + masm.framePushed() always addresses the
 // Frame, with the DebugFrame optionally below it.
 //
-// The Local area is laid out by BaseLocalIter and is allocated and deallocated
-// by standard prologue and epilogue functions that manipulate the stack
-// pointer, but it is accessed via BaseStackFrame.
+// The Local area (including the DebugFrame) is laid out by BaseLocalIter and is
+// allocated and deallocated by standard prologue and epilogue functions that
+// manipulate the stack pointer, but it is accessed via BaseStackFrame.
 //
 // The Dynamic area is maintained by and accessed via BaseStackFrame.  On some
 // systems (such as ARM64), the Dynamic memory may be allocated in chunks
@@ -1036,7 +1036,7 @@ void BaseLocalIter::settle() {
       case MIRType::Int64:
       case MIRType::Double:
       case MIRType::Float32:
-      case MIRType::Pointer:
+      case MIRType::RefOrNull:
         if (argsIter_->argInRegister()) {
           frameOffset_ = pushLocal(MIRTypeToSize(mirType_));
         } else {
@@ -1147,11 +1147,14 @@ class BaseStackFrameAllocator {
   static constexpr uint32_t ChunkSize = 8 * sizeof(void*);
   static constexpr uint32_t InitialChunk = ChunkSize;
 
-  // The current logical height of the frame, ie the sum of space for the
-  // Local and Dynamic areas.  The allocated size of the frame -- provided by
-  // masm.framePushed() -- is usually larger than currentStackHeight_, notably
-  // at the beginning of execution when we've allocated InitialChunk extra
-  // space.
+  // The current logical height of the frame is
+  //   currentStackHeight_ = localSize_ + dynamicSize
+  // where dynamicSize is not accounted for explicitly and localSize_ also
+  // includes size for the DebugFrame.
+  //
+  // The allocated size of the frame, provided by masm.framePushed(), is usually
+  // larger than currentStackHeight_, notably at the beginning of execution when
+  // we've allocated InitialChunk extra space.
 
   uint32_t currentStackHeight_;
 #endif
@@ -1205,9 +1208,10 @@ class BaseStackFrameAllocator {
  public:
   // The fixed amount of memory, in bytes, allocated on the stack below the
   // Header for purposes such as locals and other fixed values.  Includes all
-  // necessary alignment.
+  // necessary alignment, and on ARM64 also the initial chunk for the working
+  // stack memory.
 
-  uint32_t fixedSize() const {
+  uint32_t fixedAllocSize() const {
     MOZ_ASSERT(localSize_ != UINT32_MAX);
 #ifdef RABALDR_CHUNKY_STACK
     return localSize_ + InitialChunk;
@@ -1215,6 +1219,19 @@ class BaseStackFrameAllocator {
     return localSize_;
 #endif
   }
+
+#ifdef RABALDR_CHUNKY_STACK
+  // The allocated frame size is frequently larger than the logical stack
+  // height; we round up to a chunk boundary, and special case the initial
+  // chunk.
+  uint32_t framePushedForHeight(uint32_t logicalHeight) {
+    if (logicalHeight <= fixedAllocSize()) {
+      return fixedAllocSize();
+    }
+    return fixedAllocSize() + AlignBytes(logicalHeight - fixedAllocSize(),
+                                         ChunkSize);
+  }
+#endif
 
  protected:
   //////////////////////////////////////////////////////////////////////
@@ -1240,17 +1257,18 @@ class BaseStackFrameAllocator {
   void popChunkyBytes(uint32_t bytes) {
     checkChunkyInvariants();
     currentStackHeight_ -= bytes;
-    // Sometimes, popChunkyBytes() is used to pop a larger area, as when we
-    // drop values consumed by a call, and we may need to drop several
-    // chunks.  But never drop the initial chunk.
-    if (masm.framePushed() - currentStackHeight_ >= ChunkSize) {
-      uint32_t target =
-          Max(fixedSize(), AlignBytes(currentStackHeight_, ChunkSize));
-      uint32_t amount = masm.framePushed() - target;
-      if (amount) {
-        masm.freeStack(amount);
+    // Sometimes, popChunkyBytes() is used to pop a larger area, as when we drop
+    // values consumed by a call, and we may need to drop several chunks.  But
+    // never drop the initial chunk.  Crucially, the amount we drop is always an
+    // integral number of chunks.
+    uint32_t freeSpace = masm.framePushed() - currentStackHeight_;
+    if (freeSpace >= ChunkSize) {
+      uint32_t targetAllocSize = framePushedForHeight(currentStackHeight_);
+      uint32_t amountToFree = masm.framePushed() - targetAllocSize;
+      MOZ_ASSERT(amountToFree % ChunkSize == 0);
+      if (amountToFree) {
+        masm.freeStack(amountToFree);
       }
-      MOZ_ASSERT(masm.framePushed() >= fixedSize());
     }
     checkChunkyInvariants();
   }
@@ -1267,9 +1285,11 @@ class BaseStackFrameAllocator {
  private:
 #ifdef RABALDR_CHUNKY_STACK
   void checkChunkyInvariants() {
+    MOZ_ASSERT(masm.framePushed() >= fixedAllocSize());
     MOZ_ASSERT(masm.framePushed() >= currentStackHeight_);
-    MOZ_ASSERT(masm.framePushed() == fixedSize() ||
+    MOZ_ASSERT(masm.framePushed() == fixedAllocSize() ||
                masm.framePushed() - currentStackHeight_ < ChunkSize);
+    MOZ_ASSERT((masm.framePushed() - localSize_) % ChunkSize == 0);
   }
 #endif
 
@@ -1278,12 +1298,8 @@ class BaseStackFrameAllocator {
 
   uint32_t framePushedForHeight(StackHeight stackHeight) {
 #ifdef RABALDR_CHUNKY_STACK
-    // The allocated frame size is frequently larger than the stack height;
-    // we round up to a chunk boundary, and special case the initial chunk.
-    return stackHeight.height <= fixedSize()
-               ? fixedSize()
-               : fixedSize() +
-                     AlignBytes(stackHeight.height - fixedSize(), ChunkSize);
+    // A more complicated adjustment is needed.
+    return framePushedForHeight(stackHeight.height);
 #else
     // The allocated frame size equals the stack height.
     return stackHeight.height;
@@ -2145,7 +2161,7 @@ struct StackMapGenerator {
     }
 
     for (ABIArgIter<const ValTypeVector> i(args); !i.done(); i++) {
-      if (!i->argInRegister() || i.mirType() != MIRType::Pointer) {
+      if (!i->argInRegister() || i.mirType() != MIRType::RefOrNull) {
         continue;
       }
 
@@ -2520,10 +2536,10 @@ class BaseCompiler final : public BaseCompilerInterface {
   MIRTypeVector SigPI_;
   MIRTypeVector SigPL_;
   MIRTypeVector SigPII_;
-  MIRTypeVector SigPIPI_;
+  MIRTypeVector SigPIRI_;
   MIRTypeVector SigPIII_;
   MIRTypeVector SigPIIL_;
-  MIRTypeVector SigPIIP_;
+  MIRTypeVector SigPIIR_;
   MIRTypeVector SigPILL_;
   MIRTypeVector SigPIIII_;
   MIRTypeVector SigPIIIII_;
@@ -2931,7 +2947,7 @@ class BaseCompiler final : public BaseCompilerInterface {
   }
 
   void loadLocalRef(const Stk& src, RegPtr dest) {
-    fr.loadLocalPtr(localFromSlot(src.slot(), MIRType::Pointer), dest);
+    fr.loadLocalPtr(localFromSlot(src.slot(), MIRType::RefOrNull), dest);
   }
 
   void loadRegisterRef(const Stk& src, RegPtr dest) {
@@ -4050,11 +4066,9 @@ class BaseCompiler final : public BaseCompilerInterface {
 
     for (ABIArgIter<const ValTypeVector> i(argTys); !i.done(); i++) {
       ABIArg argLoc = *i;
-      if (argLoc.kind() != ABIArg::Stack) {
-        continue;
-      }
       const ValType& ty = argTys[i.index()];
-      if (!ty.isReference()) {
+      MOZ_ASSERT(ToMIRType(ty) != MIRType::Pointer);
+      if (argLoc.kind() != ABIArg::Stack || !ty.isReference()) {
         continue;
       }
       uint32_t offset = argLoc.offsetFromArgBase();
@@ -4123,7 +4137,7 @@ class BaseCompiler final : public BaseCompilerInterface {
       return false;
     }
 
-    size_t reservedBytes = fr.fixedSize() - masm.framePushed();
+    size_t reservedBytes = fr.fixedAllocSize() - masm.framePushed();
     MOZ_ASSERT(0 == (reservedBytes % sizeof(void*)));
 
     masm.reserveStack(reservedBytes);
@@ -4145,7 +4159,7 @@ class BaseCompiler final : public BaseCompilerInterface {
         case MIRType::Int64:
           fr.storeLocalI64(RegI64(i->gpr64()), l);
           break;
-        case MIRType::Pointer: {
+        case MIRType::RefOrNull: {
           uint32_t offs = fr.localOffset(l);
           MOZ_ASSERT(0 == (offs % sizeof(void*)));
           fr.storeLocalPtr(RegPtr(i->gpr()), l);
@@ -4284,7 +4298,7 @@ class BaseCompiler final : public BaseCompilerInterface {
       restoreResult();
     }
 
-    GenerateFunctionEpilogue(masm, fr.fixedSize(), &offsets_);
+    GenerateFunctionEpilogue(masm, fr.fixedAllocSize(), &offsets_);
 
 #if defined(JS_ION_PERF)
     // FIXME - profiling code missing.  No bug for this.
@@ -4550,7 +4564,7 @@ class BaseCompiler final : public BaseCompilerInterface {
       }
       case ValType::Ref:
       case ValType::AnyRef: {
-        ABIArg argLoc = call->abi.next(MIRType::Pointer);
+        ABIArg argLoc = call->abi.next(MIRType::RefOrNull);
         if (argLoc.kind() == ABIArg::Stack) {
           ScratchPtr scratch(*this);
           loadRef(arg, scratch);
@@ -9057,7 +9071,7 @@ bool BaseCompiler::emitSetOrTeeLocal(uint32_t slot) {
     case ValType::AnyRef: {
       RegPtr rv = popRef();
       syncLocal(slot);
-      fr.storeLocalPtr(rv, localFromSlot(slot, MIRType::Pointer));
+      fr.storeLocalPtr(rv, localFromSlot(slot, MIRType::RefOrNull));
       if (isSetLocal) {
         freeRef(rv);
       } else {
@@ -9557,7 +9571,7 @@ bool BaseCompiler::emitSelect() {
   BranchState b(&done);
   emitBranchSetup(&b);
 
-  switch (NonAnyToValType(type).code()) {
+  switch (NonTVarToValType(type).code()) {
     case ValType::I32: {
       RegI32 r, rs;
       pop2xI32(&r, &rs);
@@ -9762,7 +9776,7 @@ bool BaseCompiler::emitInstanceCall(uint32_t lineOrBytecode,
       case MIRType::Int64:
         t = ValType::I64;
         break;
-      case MIRType::Pointer:
+      case MIRType::RefOrNull:
         t = ValType::AnyRef;
         break;
       default:
@@ -10367,7 +10381,7 @@ bool BaseCompiler::emitTableGrow() {
   //
   // infallible.
   pushI32(tableIndex);
-  return emitInstanceCall(lineOrBytecode, SigPIPI_, ExprType::I32,
+  return emitInstanceCall(lineOrBytecode, SigPIRI_, ExprType::I32,
                           SymbolicAddress::TableGrow);
 }
 
@@ -10386,7 +10400,7 @@ bool BaseCompiler::emitTableSet() {
   //
   // Returns -1 on range error, otherwise 0 (which is then ignored).
   pushI32(tableIndex);
-  if (!emitInstanceCall(lineOrBytecode, SigPIPI_, ExprType::Void,
+  if (!emitInstanceCall(lineOrBytecode, SigPIRI_, ExprType::Void,
                         SymbolicAddress::TableSet)) {
     return false;
   }
@@ -10770,7 +10784,7 @@ bool BaseCompiler::emitStructNarrow() {
   pushI32(mustUnboxAnyref);
   pushI32(outputStruct.moduleIndex_);
   pushRef(rp);
-  return emitInstanceCall(lineOrBytecode, SigPIIP_, ExprType::AnyRef,
+  return emitInstanceCall(lineOrBytecode, SigPIIR_, ExprType::AnyRef,
                           SymbolicAddress::StructNarrow);
 }
 
@@ -11861,8 +11875,9 @@ bool BaseCompiler::init() {
       !SigPII_.append(MIRType::Int32)) {
     return false;
   }
-  if (!SigPIPI_.append(MIRType::Pointer) || !SigPIPI_.append(MIRType::Int32) ||
-      !SigPIPI_.append(MIRType::Pointer) || !SigPIPI_.append(MIRType::Int32)) {
+  if (!SigPIRI_.append(MIRType::Pointer) || !SigPIRI_.append(MIRType::Int32) ||
+      !SigPIRI_.append(MIRType::RefOrNull) ||
+      !SigPIRI_.append(MIRType::Int32)) {
     return false;
   }
   if (!SigPIII_.append(MIRType::Pointer) || !SigPIII_.append(MIRType::Int32) ||
@@ -11873,8 +11888,9 @@ bool BaseCompiler::init() {
       !SigPIIL_.append(MIRType::Int32) || !SigPIIL_.append(MIRType::Int64)) {
     return false;
   }
-  if (!SigPIIP_.append(MIRType::Pointer) || !SigPIIP_.append(MIRType::Int32) ||
-      !SigPIIP_.append(MIRType::Int32) || !SigPIIP_.append(MIRType::Pointer)) {
+  if (!SigPIIR_.append(MIRType::Pointer) || !SigPIIR_.append(MIRType::Int32) ||
+      !SigPIIR_.append(MIRType::Int32) ||
+      !SigPIIR_.append(MIRType::RefOrNull)) {
     return false;
   }
   if (!SigPILL_.append(MIRType::Pointer) || !SigPILL_.append(MIRType::Int32) ||
@@ -11975,8 +11991,7 @@ bool js::wasm::BaselineCompileFunctions(const ModuleEnvironment& env,
     if (!locals.appendAll(env.funcTypes[func.index]->args())) {
       return false;
     }
-    if (!DecodeLocalEntries(d, env.kind, env.types, env.gcTypesEnabled(),
-                            &locals)) {
+    if (!DecodeLocalEntries(d, env.types, env.gcTypesEnabled(), &locals)) {
       return false;
     }
 
