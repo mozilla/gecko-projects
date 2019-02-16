@@ -51,6 +51,7 @@
 #elif defined(XP_UNIX)
 #  include <unistd.h>
 #  include <sys/wait.h>
+#  include <errno.h>
 #endif
 
 using namespace mozilla;
@@ -634,17 +635,30 @@ static void ApplyUpdate(nsIFile *greDir, nsIFile *updateDir, nsIFile *appDir,
   // it is a faked implementation that doesn't really replace the current
   // process. Instead it spawns a new process, so we gain nothing from using
   // execv on Windows.
-  if (restart) {
-    exit(execv(updaterPath.get(), argv));
+  if (!restart) {
+    *outpid = fork();
+    if (*outpid != 0) {
+      delete[] argv;
+      return;
+    }
   }
-  *outpid = fork();
-  if (*outpid == -1) {
-    delete[] argv;
-    return;
-  } else if (*outpid == 0) {
-    exit(execv(updaterPath.get(), argv));
+
+  // It is possible that execv will fail with ETXTBSY (Text file busy) when
+  // the system is under stress such as when running test verfication. To
+  // account for this try multiple times when errno is ETXTBSY .
+  const int max_retries = 10;
+  int retries = 0;
+  int e = 0;
+  while (retries++ < max_retries) {
+    execv(updaterPath.get(), argv);
+    e = errno;
+    if (e != ETXTBSY) {
+      break;
+    }
+    usleep(100000);
   }
   delete[] argv;
+  exit(e);
 #elif defined(XP_WIN)
   if (isStaged) {
     // Launch the updater to replace the installation with the staged updated.
