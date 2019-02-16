@@ -780,6 +780,7 @@ nsIPresShell::nsIPresShell()
       mIsDestroying(false),
       mIsReflowing(false),
       mIsObservingDocument(false),
+      mForbiddenToFlush(false),
       mIsDocumentGone(false),
       mHaveShutDown(false),
       mPaintingSuppressed(false),
@@ -868,6 +869,9 @@ NS_IMPL_ISUPPORTS(PresShell, nsIPresShell, nsIDocumentObserver,
                   nsISupportsWeakReference, nsIMutationObserver)
 
 PresShell::~PresShell() {
+  MOZ_RELEASE_ASSERT(!mForbiddenToFlush,
+                     "Flag should only be set temporarily, while doing things "
+                     "that shouldn't cause destruction");
   MOZ_LOG(gLog, LogLevel::Debug, ("PresShell::~PresShell this=%p", this));
 
   if (!mHaveShutDown) {
@@ -3977,6 +3981,8 @@ static inline void AssertFrameTreeIsSane(const nsIPresShell& aShell) {
 }
 
 void PresShell::DoFlushPendingNotifications(mozilla::ChangesToFlush aFlush) {
+  MOZ_RELEASE_ASSERT(!mForbiddenToFlush, "This is bad!");
+
   // Per our API contract, hold a strong ref to ourselves until we return.
   nsCOMPtr<nsIPresShell> kungFuDeathGrip = this;
 
@@ -10757,25 +10763,39 @@ bool PresShell::EventHandler::EventTargetData::MaybeRetargetToActiveDocument(
   MOZ_ASSERT(mPresShell);
   MOZ_ASSERT(!mContent, "Doesn't support to retarget the content");
 
+  EventStateManager* activeESM =
+      EventStateManager::GetActiveEventStateManager();
+  if (!activeESM) {
+    return false;
+  }
+
+  if (aGUIEvent->mClass != ePointerEventClass &&
+      !aGUIEvent->HasMouseEventMessage()) {
+    return false;
+  }
+
+  if (activeESM == GetEventStateManager()) {
+    return false;
+  }
+
+  nsPresContext* activePresContext = activeESM->GetPresContext();
+  if (!activePresContext) {
+    return false;
+  }
+
+  nsIPresShell* activePresShell = activePresContext->GetPresShell();
+  if (!activePresShell) {
+    return false;
+  }
+
   // Note, currently for backwards compatibility we don't forward mouse events
   // to the active document when mouse is over some subdocument.
-  if (EventStateManager* activeESM =
-          EventStateManager::GetActiveEventStateManager()) {
-    if (aGUIEvent->mClass == ePointerEventClass ||
-        aGUIEvent->HasMouseEventMessage()) {
-      if (activeESM != GetEventStateManager()) {
-        if (nsPresContext* activeContext = activeESM->GetPresContext()) {
-          if (nsIPresShell* activeShell = activeContext->GetPresShell()) {
-            if (nsContentUtils::ContentIsCrossDocDescendantOf(
-                    activeShell->GetDocument(), GetDocument())) {
-              SetPresShellAndFrame(static_cast<PresShell*>(activeShell),
-                                   activeShell->GetRootFrame());
-              return true;
-            }
-          }
-        }
-      }
-    }
+  if (!nsContentUtils::ContentIsCrossDocDescendantOf(
+          activePresShell->GetDocument(), GetDocument())) {
+    return false;
   }
-  return false;
+
+  SetPresShellAndFrame(static_cast<PresShell*>(activePresShell),
+                       activePresShell->GetRootFrame());
+  return true;
 }

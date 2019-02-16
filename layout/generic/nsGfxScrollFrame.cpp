@@ -3487,7 +3487,8 @@ void ScrollFrameHelper::BuildDisplayList(nsDisplayListBuilder* aBuilder,
   bool haveRadii = mOuter->GetPaddingBoxBorderRadii(radii);
   if (mIsRoot) {
     clipRect.SizeTo(nsLayoutUtils::CalculateCompositionSizeForFrame(mOuter));
-    if (gfxPrefs::LayoutUseContainersForRootFrames() &&
+    if ((gfxPrefs::LayoutUseContainersForRootFrames() ||
+         !aBuilder->IsPaintingToWindow()) &&
         mOuter->PresContext()->IsRootContentDocument()) {
       double res = mOuter->PresShell()->GetResolution();
       clipRect.width = NSToCoordRound(clipRect.width / res);
@@ -3895,7 +3896,6 @@ bool ScrollFrameHelper::DecideScrollableLayer(
       mWillBuildScrollableLayer && mIsRoot) {
     mIsScrollableLayerInRootContainer = true;
   }
-
   return mWillBuildScrollableLayer;
 }
 

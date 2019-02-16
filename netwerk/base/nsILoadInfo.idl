@@ -620,7 +620,7 @@ interface nsILoadInfo : nsISupports
 
   /**
    * Only when the element being loaded is <frame src="foo.html">
-   * (or, more generally, if the element QIs to nsIFrameLoaderOwner),
+   * (or, more generally, if the element QIs to nsFrameLoaderOwner),
    * the frameOuterWindowID is the outer window containing the
    * foo.html document.
    *
@@ -633,6 +633,13 @@ interface nsILoadInfo : nsISupports
    */
   [infallible] readonly attribute unsigned long long browsingContextID;
   readonly attribute BrowsingContext browsingContext;
+
+  /**
+   * Like `frameOuterWindowID`, however returning the BrowsingContextID
+   * instead.
+   */
+  [infallible] readonly attribute unsigned long long frameBrowsingContextID;
+  readonly attribute BrowsingContext frameBrowsingContext;
 
   /**
    * Resets the PrincipalToInherit to a freshly created NullPrincipal
@@ -1068,4 +1075,15 @@ interface nsILoadInfo : nsISupports
    * or https://html.spec.whatwg.org/multipage/obsolete.html#process-the-frame-attributes
    */
   [infallible] readonly attribute boolean isFromProcessingFrameAttributes;
+
+  cenum CrossOriginOpenerPolicy : 8 {
+    OPENER_POLICY_NULL           = 0,
+    OPENER_POLICY_SAME_ORIGIN    = 1,
+    OPENER_POLICY_SAME_SITE      = 2,
+    OPENER_POLICY_UNSAFE_ALLOW_OUTGOING_FLAG = 0x80,
+    OPENER_POLICY_SAME_ORIGIN_ALLOW_OUTGOING = OPENER_POLICY_SAME_ORIGIN | OPENER_POLICY_UNSAFE_ALLOW_OUTGOING_FLAG,
+    OPENER_POLICY_SAME_SITE_ALLOW_OUTGOING = OPENER_POLICY_SAME_SITE | OPENER_POLICY_UNSAFE_ALLOW_OUTGOING_FLAG
+  };
+
+  [infallible] attribute nsILoadInfo_CrossOriginOpenerPolicy openerPolicy;
 };
