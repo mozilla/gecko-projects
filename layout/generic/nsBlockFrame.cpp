@@ -78,7 +78,7 @@ static void MarkAllDescendantLinesDirty(nsBlockFrame* aBlock) {
   while (line != endLine) {
     if (line->IsBlock()) {
       nsIFrame* f = line->mFirstChild;
-      nsBlockFrame* bf = nsLayoutUtils::GetAsBlock(f);
+      nsBlockFrame* bf = do_QueryFrame(f);
       if (bf) {
         MarkAllDescendantLinesDirty(bf);
       }
@@ -91,8 +91,7 @@ static void MarkAllDescendantLinesDirty(nsBlockFrame* aBlock) {
 static void MarkSameFloatManagerLinesDirty(nsBlockFrame* aBlock) {
   nsBlockFrame* blockWithFloatMgr = aBlock;
   while (!(blockWithFloatMgr->GetStateBits() & NS_BLOCK_FLOAT_MGR)) {
-    nsBlockFrame* bf =
-        nsLayoutUtils::GetAsBlock(blockWithFloatMgr->GetParent());
+    nsBlockFrame* bf = do_QueryFrame(blockWithFloatMgr->GetParent());
     if (!bf) {
       break;
     }
@@ -110,7 +109,7 @@ static void MarkSameFloatManagerLinesDirty(nsBlockFrame* aBlock) {
  * Returns true if aFrame is a block that has one or more float children.
  */
 static bool BlockHasAnyFloats(nsIFrame* aFrame) {
-  nsBlockFrame* block = nsLayoutUtils::GetAsBlock(aFrame);
+  nsBlockFrame* block = do_QueryFrame(aFrame);
   if (!block) return false;
   if (block->GetChildList(nsIFrame::kFloatList).FirstChild()) return true;
 
@@ -2741,7 +2740,7 @@ void nsBlockFrame::MarkLineDirtyForInterrupt(nsLineBox* aLine) {
     // Would need to sort out the exact business with mBlockDelta for that....
     // This marks way too much dirty.  If we ever make this better, revisit
     // which lines we mark dirty in the interrupt case in ReflowDirtyLines.
-    nsBlockFrame* bf = nsLayoutUtils::GetAsBlock(aLine->mFirstChild);
+    nsBlockFrame* bf = do_QueryFrame(aLine->mFirstChild);
     if (bf) {
       MarkAllDescendantLinesDirty(bf);
     }
@@ -3000,28 +2999,26 @@ nsresult nsBlockFrame::AttributeChanged(int32_t aNameSpaceID,
   return rv;
 }
 
-static inline bool IsNonAutoNonZeroBSize(const nsStyleCoord& aCoord) {
-  nsStyleUnit unit = aCoord.GetUnit();
-  if (unit == eStyleUnit_Auto ||
-      // The enumerated values were originally aimed at inline-size
-      // (or width, as it was before logicalization). For now, let them
-      // return false here, so we treat them like 'auto' pending a
-      // real implementation. (See bug 1126420.)
-      //
-      // FIXME (bug 567039, bug 527285)
-      // This isn't correct for the 'fill' value, which should more
-      // likely (but not necessarily, depending on the available space)
-      // be returning true.
-      unit == eStyleUnit_Enumerated) {
+static inline bool IsNonAutoNonZeroBSize(const StyleSize& aCoord) {
+  // The "extremum length" values (see ExtremumLength) were originally aimed at
+  // inline-size (or width, as it was before logicalization). For now, let them
+  // return false here, so we treat them like 'auto' pending a real
+  // implementation. (See bug 1126420.)
+  //
+  // FIXME (bug 567039, bug 527285)
+  // This isn't correct for the 'fill' value, which should more
+  // likely (but not necessarily, depending on the available space)
+  // be returning true.
+  if (aCoord.IsAuto() || aCoord.IsExtremumLength()) {
     return false;
   }
-  if (aCoord.IsCoordPercentCalcUnit()) {
+  if (aCoord.IsLengthPercentage()) {
     // If we evaluate the length/percent/calc at a percentage basis of
     // both nscoord_MAX and 0, and it's zero both ways, then it's a zero
     // length, percent, or combination thereof.  Test > 0 so we clamp
     // negative calc() results to 0.
-    return aCoord.ComputeCoordPercentCalc(nscoord_MAX) > 0 ||
-           aCoord.ComputeCoordPercentCalc(0) > 0;
+    return aCoord.AsLengthPercentage().Resolve(nscoord_MAX) > 0 ||
+           aCoord.AsLengthPercentage().Resolve(0) > 0;
   }
   MOZ_ASSERT(false, "unexpected unit for height or min-height");
   return true;
@@ -3618,8 +3615,7 @@ void nsBlockFrame::ReflowBlockFrame(BlockReflowInput& aState,
               // the line is already marked dirty, so just handle the
               // first case.
               if (!madeContinuation) {
-                nsBlockFrame* nifBlock =
-                    nsLayoutUtils::GetAsBlock(nextFrame->GetParent());
+                nsBlockFrame* nifBlock = do_QueryFrame(nextFrame->GetParent());
                 NS_ASSERTION(
                     nifBlock,
                     "A block's child's next in flow's parent must be a block!");
@@ -5870,8 +5866,7 @@ void nsBlockFrame::DoRemoveFrameInternal(nsIFrame* aDeletedFrame,
   if (!aDeletedFrame) {
     return;
   }
-  nsBlockFrame* nextBlock =
-      nsLayoutUtils::GetAsBlock(aDeletedFrame->GetParent());
+  nsBlockFrame* nextBlock = do_QueryFrame(aDeletedFrame->GetParent());
   NS_ASSERTION(nextBlock, "Our child's continuation's parent is not a block?");
   uint32_t flags = (aFlags & REMOVE_FIXED_CONTINUATIONS);
   nextBlock->DoRemoveFrameInternal(aDeletedFrame, flags, aPostDestroyData);
@@ -6294,7 +6289,7 @@ void nsBlockFrame::RecoverFloatsFor(nsIFrame* aFrame,
   MOZ_ASSERT(aFrame, "null frame");
 
   // Only blocks have floats
-  nsBlockFrame* block = nsLayoutUtils::GetAsBlock(aFrame);
+  nsBlockFrame* block = do_QueryFrame(aFrame);
   // Don't recover any state inside a block that has its own float manager
   // (we don't currently have any blocks like this, though, thanks to our
   // use of extra frames for 'overflow')
@@ -7063,7 +7058,7 @@ void nsBlockFrame::IsMarginRoot(bool* aBStartMarginRoot,
 /* static */
 bool nsBlockFrame::BlockNeedsFloatManager(nsIFrame* aBlock) {
   MOZ_ASSERT(aBlock, "Must have a frame");
-  NS_ASSERTION(nsLayoutUtils::GetAsBlock(aBlock), "aBlock must be a block");
+  NS_ASSERTION(aBlock->IsBlockFrameOrSubclass(), "aBlock must be a block");
 
   nsIFrame* parent = aBlock->GetParent();
   return (aBlock->GetStateBits() & NS_BLOCK_FLOAT_MGR) ||
@@ -7122,7 +7117,7 @@ nsBlockFrame::ReplacedElementISizeToClear nsBlockFrame::ISizeToClearPastFloats(
 nsBlockFrame* nsBlockFrame::GetNearestAncestorBlock(nsIFrame* aCandidate) {
   nsBlockFrame* block = nullptr;
   while (aCandidate) {
-    block = nsLayoutUtils::GetAsBlock(aCandidate);
+    block = do_QueryFrame(aCandidate);
     if (block) {
       // yay, candidate is a block!
       return block;

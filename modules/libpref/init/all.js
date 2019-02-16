@@ -1370,8 +1370,6 @@ pref("dom.forms.select.customstyling", false);
 pref("dom.forms.select.customstyling", true);
 #endif
 pref("dom.select_popup_in_parent.enabled", false);
-// Bug 1421229 - content-select
-pref("dom.select_popup_in_content.enabled", false);
 
 // Enable Directory API. By default, disabled.
 pref("dom.input.dirpicker", false);
@@ -5998,9 +5996,7 @@ pref("dom.datatransfer.mozAtAPIs", true);
 #endif
 
 // Whether or not Prio is supported on this platform.
-#ifdef MOZ_LIBPRIO
 pref("prio.enabled", false);
-#endif
 
 // External.AddSearchProvider is deprecated and it will be removed in the next
 // cycles.

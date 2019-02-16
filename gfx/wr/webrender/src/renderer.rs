@@ -58,7 +58,7 @@ use internal_types::{CacheTextureId, DebugOutput, FastHashMap, LayerIndex, Rende
 use internal_types::{TextureCacheAllocationKind, TextureCacheUpdate, TextureUpdateList, TextureUpdateSource};
 use internal_types::{RenderTargetInfo, SavedTargetIndex};
 use malloc_size_of::MallocSizeOfOps;
-use picture::RecordedDirtyRegion;
+use picture::{RecordedDirtyRegion, TileCache};
 use prim_store::DeferredResolve;
 use profiler::{BackendProfileCounters, FrameProfileCounters, TimeProfileCounter,
                GpuProfileTag, RendererProfileCounters, RendererProfileTimers};
@@ -84,6 +84,7 @@ use std::os::raw::c_void;
 use std::path::PathBuf;
 use std::rc::Rc;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{channel, Receiver};
 use std::thread;
 use std::cell::RefCell;
@@ -104,6 +105,14 @@ cfg_if! {
         use api::ApiMsg;
         use api::channel::MsgSender;
     }
+}
+
+/// Is only false if no WR instances have ever been created.
+static HAS_BEEN_INITIALIZED: AtomicBool = AtomicBool::new(false);
+
+/// Returns true if a WR instance has ever been initialized in this process.
+pub fn wr_has_been_initialized() -> bool {
+    HAS_BEEN_INITIALIZED.load(Ordering::SeqCst)
 }
 
 pub const MAX_VERTEX_TEXTURE_WIDTH: usize = 1024;
@@ -1629,6 +1638,8 @@ impl Renderer {
         mut options: RendererOptions,
         shaders: Option<&mut WrShaders>
     ) -> Result<(Self, RenderApiSender), RendererError> {
+        HAS_BEEN_INITIALIZED.store(true, Ordering::SeqCst);
+
         let (api_tx, api_rx) = channel::msg_channel()?;
         let (payload_tx, payload_rx) = channel::payload_channel()?;
         let (result_tx, result_rx) = channel();
@@ -1920,6 +1931,7 @@ impl Renderer {
             let texture_cache = TextureCache::new(
                 max_texture_size,
                 max_texture_layers,
+                TileCache::tile_dimensions(config.testing),
             );
 
             let resource_cache = ResourceCache::new(
@@ -2839,7 +2851,6 @@ impl Renderer {
                                 if self.debug_flags.contains(DebugFlags::TEXTURE_CACHE_DBG) {
                                     self.clear_texture(&texture, TEXTURE_CACHE_DBG_CLEAR_COLOR);
                                 }
-
                             }
 
                             let old = self.texture_resolver.texture_cache_map.insert(allocation.id, texture);

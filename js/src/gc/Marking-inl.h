@@ -13,17 +13,14 @@
 
 #include "gc/RelocationOverlay.h"
 
-#ifdef ENABLE_BIGINT
-#  include "vm/BigIntType.h"
-#endif
-
+#include "vm/BigIntType.h"
 #include "vm/RegExpShared.h"
 
 namespace js {
 namespace gc {
 
-// An abstraction to re-wrap any kind of typed pointer back to the tagged pointer
-// it came from with |TaggedPtr<TargetType>::wrap(sourcePtr)|.
+// An abstraction to re-wrap any kind of typed pointer back to the tagged
+// pointer it came from with |TaggedPtr<TargetType>::wrap(sourcePtr)|.
 template <typename T>
 struct TaggedPtr {};
 
@@ -32,9 +29,7 @@ struct TaggedPtr<JS::Value> {
   static JS::Value wrap(JSObject* obj) { return JS::ObjectOrNullValue(obj); }
   static JS::Value wrap(JSString* str) { return JS::StringValue(str); }
   static JS::Value wrap(JS::Symbol* sym) { return JS::SymbolValue(sym); }
-#ifdef ENABLE_BIGINT
   static JS::Value wrap(JS::BigInt* bi) { return JS::BigIntValue(bi); }
-#endif
   template <typename T>
   static JS::Value wrap(T* priv) {
     static_assert(mozilla::IsBaseOf<Cell, T>::value,

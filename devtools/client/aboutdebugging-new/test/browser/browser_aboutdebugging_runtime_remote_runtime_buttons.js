@@ -3,10 +3,6 @@
 
 "use strict";
 
-/* import-globals-from helper-mocks.js */
-Services.scriptloader.loadSubScript(
-  CHROME_URL_ROOT + "helper-mocks.js", this);
-
 /**
  * Test that remote runtimes show action buttons that are hidden for 'This Firefox'.
  */
@@ -18,7 +14,8 @@ add_task(async function() {
     name: "Lorem ipsum",
   });
 
-  const { document, tab } = await openAboutDebugging();
+  const { document, tab, window } = await openAboutDebugging();
+  await selectThisFirefoxPage(document, window.AboutDebugging.store);
 
   info("Checking This Firefox");
   ok(!document.querySelector(".js-connection-prompt-toggle-button"),

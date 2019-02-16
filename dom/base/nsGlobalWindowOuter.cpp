@@ -1796,6 +1796,12 @@ static JS::RealmCreationOptions& SelectZone(
 
   if (aNewInner->GetOuterWindow()) {
     nsGlobalWindowOuter* top = aNewInner->GetTopInternal();
+    if (top == aNewInner->GetOuterWindow()) {
+      // We're a toplevel load.  Use a new zone.  This way, when we do
+      // zone-based compartment sharing we won't share compartments
+      // across navigations.
+      return aOptions.setNewCompartmentAndZone();
+    }
 
     // If we have a top-level window, use its zone.
     if (top && top->GetGlobalJSObject()) {
@@ -3927,7 +3933,7 @@ already_AddRefed<BrowsingContext> nsGlobalWindowOuter::GetChildWindow(
     const nsAString& aName) {
   NS_ENSURE_TRUE(mBrowsingContext, nullptr);
 
-  return mBrowsingContext->FindChildWithName(aName);
+  return do_AddRef(mBrowsingContext->FindChildWithName(aName));
 }
 
 bool nsGlobalWindowOuter::DispatchCustomEvent(const nsAString& aEventName) {

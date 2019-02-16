@@ -41,7 +41,7 @@
 #include "builtin/Stream.h"
 #include "builtin/String.h"
 #include "builtin/Symbol.h"
-#ifdef ENABLE_BINARYDATA
+#ifdef ENABLE_TYPED_OBJECTS
 #  include "builtin/TypedObject.h"
 #endif
 #include "frontend/BytecodeCompiler.h"
@@ -1575,6 +1575,13 @@ JS::RealmCreationOptions& JS::RealmCreationOptions::setExistingCompartment(
     JSObject* obj) {
   compSpec_ = CompartmentSpecifier::ExistingCompartment;
   comp_ = obj->compartment();
+  return *this;
+}
+
+JS::RealmCreationOptions& JS::RealmCreationOptions::setExistingCompartment(
+    JS::Compartment* compartment) {
+  compSpec_ = CompartmentSpecifier::ExistingCompartment;
+  comp_ = compartment;
   return *this;
 }
 
@@ -3417,9 +3424,7 @@ void JS::TransitiveCompileOptions::copyPODTransitiveOptions(
   hasIntroductionInfo = rhs.hasIntroductionInfo;
   isProbablySystemCode = rhs.isProbablySystemCode;
   hideScriptFromDebugger = rhs.hideScriptFromDebugger;
-#ifdef ENABLE_BIGINT
   bigIntEnabledOption = rhs.bigIntEnabledOption;
-#endif
 };
 
 void JS::ReadOnlyCompileOptions::copyPODOptions(
@@ -3546,9 +3551,7 @@ JS::CompileOptions::CompileOptions(JSContext* cx)
   }
   throwOnAsmJSValidationFailureOption =
       cx->options().throwOnAsmJSValidationFailure();
-#ifdef ENABLE_BIGINT
   bigIntEnabledOption = cx->realm()->creationOptions().getBigIntEnabled();
-#endif
 }
 
 CompileOptions& CompileOptions::setIntroductionInfoToCaller(
@@ -3865,16 +3868,8 @@ JS_PUBLIC_API void JS_ResetInterruptCallback(JSContext* cx, bool enable) {
 /*
  * Promises.
  */
-JS_PUBLIC_API void JS::SetGetIncumbentGlobalCallback(
-    JSContext* cx, GetIncumbentGlobalCallback callback) {
-  cx->getIncumbentGlobalCallback = callback;
-}
-
-JS_PUBLIC_API void JS::SetEnqueuePromiseJobCallback(
-    JSContext* cx, EnqueuePromiseJobCallback callback,
-    void* data /* = nullptr */) {
-  cx->enqueuePromiseJobCallback = callback;
-  cx->enqueuePromiseJobCallbackData = data;
+JS_PUBLIC_API void JS::SetJobQueue(JSContext* cx, JobQueue* queue) {
+  cx->jobQueue = queue;
 }
 
 extern JS_PUBLIC_API void JS::SetPromiseRejectionTrackerCallback(

@@ -237,8 +237,6 @@ pref("browser.startup.homepage",            "about:home");
 // Whether we should skip the homepage when opening the first-run page
 pref("browser.startup.firstrunSkipsHomepage", true);
 
-pref("browser.dedicatedprofile.welcome.accounts.endpoint", "https://accounts.firefox.com/");
-
 // Show an about:blank window as early as possible for quick startup feedback.
 // Held to nightly on Linux due to bug 1450626.
 // Disabled on Mac because the bouncing dock icon already provides feedback.
@@ -1790,16 +1788,14 @@ pref("browser.fission.simulate", false);
 // On platforms that do not build libprio, do not set these prefs at all, which gives us a way to detect support.
 
 // Curve25519 public keys for Prio servers
-#ifdef MOZ_LIBPRIO
 pref("prio.publicKeyA", "35AC1C7576C7C6EDD7FED6BCFC337B34D48CB4EE45C86BEEFB40BD8875707733");
 pref("prio.publicKeyB", "26E6674E65425B823F1F1D5F96E3BB3EF9E406EC7FBA7DEF8B08A35DD135AF50");
-#endif
 
 // Coverage ping is disabled by default.
 pref("toolkit.coverage.enabled", false);
 pref("toolkit.coverage.endpoint.base", "https://coverage.mozilla.org");
 // Whether or not Prio-encoded Telemetry will be sent along with the main ping.
-#if defined(NIGHTLY_BUILD) && defined(MOZ_LIBPRIO)
+#if defined(NIGHTLY_BUILD)
 pref("prio.enabled", true);
 #endif
 
@@ -1816,3 +1812,5 @@ pref("browser.aboutConfig.showWarning", true);
 // Launcher process is disabled by default, will be selectively enabled via SHIELD
 pref("browser.launcherProcess.enabled", false);
 #endif // defined(XP_WIN) && defined(MOZ_LAUNCHER_PROCESS)
+
+pref("browser.toolbars.keyboard_navigation", false);

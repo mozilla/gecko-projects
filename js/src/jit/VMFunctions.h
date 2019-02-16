@@ -1092,9 +1092,7 @@ void AssertValidObjectPtr(JSContext* cx, JSObject* obj);
 void AssertValidObjectOrNullPtr(JSContext* cx, JSObject* obj);
 void AssertValidStringPtr(JSContext* cx, JSString* str);
 void AssertValidSymbolPtr(JSContext* cx, JS::Symbol* sym);
-#ifdef ENABLE_BIGINT
 void AssertValidBigIntPtr(JSContext* cx, JS::BigInt* bi);
-#endif
 void AssertValidValue(JSContext* cx, Value* v);
 
 void MarkValueFromJit(JSRuntime* rt, Value* vp);
@@ -1205,6 +1203,9 @@ extern const VMFunction NativeGetElementInfo;
 
 extern const VMFunction AddOrUpdateSparseElementHelperInfo;
 extern const VMFunction GetSparseElementHelperInfo;
+
+extern const VMFunction ToNumberInfo;
+extern const VMFunction ToNumericInfo;
 
 // TailCall VMFunctions
 extern const VMFunction DoConcatStringObjectInfo;

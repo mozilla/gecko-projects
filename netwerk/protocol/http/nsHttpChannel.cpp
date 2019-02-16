@@ -3148,7 +3148,6 @@ nsresult nsHttpChannel::ContinueDoReplaceWithProxy(nsresult rv) {
   // i.e. after all sinks had been notified
   mRedirectChannel->SetOriginalURI(mOriginalURI);
 
-
   // open new channel
   rv = mRedirectChannel->AsyncOpen(mListener);
   NS_ENSURE_SUCCESS(rv, rv);

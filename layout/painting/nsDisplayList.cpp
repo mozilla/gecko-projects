@@ -3835,9 +3835,7 @@ bool nsDisplayBackgroundImage::CanOptimizeToImageLayer(
   // because there isn't going to be any spriting/atlasing going on.
   const nsStyleImageLayers::Layer& layer =
       mBackgroundStyle->StyleBackground()->mImage.mLayers[mLayer];
-  bool allowPartialImages =
-      (layer.mSize.mWidthType == nsStyleImageLayers::Size::eContain ||
-       layer.mSize.mWidthType == nsStyleImageLayers::Size::eCover);
+  bool allowPartialImages = layer.mSize.IsContain() || layer.mSize.IsCover();
   if (!allowPartialImages && !mFillRect.Contains(mDestRect)) {
     return false;
   }
@@ -7949,7 +7947,7 @@ bool nsDisplayTransform::CreateWebRenderCommands(
 
   // Determine if we're possibly animated (= would need an active layer in FLB).
   bool animated =
-    ActiveLayerTracker::IsStyleMaybeAnimated(Frame(), eCSSProperty_transform);
+      ActiveLayerTracker::IsStyleMaybeAnimated(Frame(), eCSSProperty_transform);
 
   wr::StackingContextParams params;
   params.mBoundTransform = &newTransformMatrix;
@@ -7962,8 +7960,8 @@ bool nsDisplayTransform::CreateWebRenderCommands(
   // (i.e. disable subpixel AA). We don't always need to rasterize locally even
   // if the stacking context is possibly animated (at the cost of potentially
   // some false negatives with respect to will-change handling), so we pass in
-  // this determination separately to accurately match with when FLB would normally
-  // disable subpixel AA.
+  // this determination separately to accurately match with when FLB would
+  // normally disable subpixel AA.
   params.mRasterizeLocally = animated && Frame()->HasAnimationOfTransform();
   params.SetPreserve3D(mFrame->Extend3DContext() && !mIsTransformSeparator);
   params.clip =

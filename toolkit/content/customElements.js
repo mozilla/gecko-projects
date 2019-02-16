@@ -216,7 +216,8 @@ const MozElementMixin = Base => class MozElement extends Base {
       }
     }
 
-    let link = document.createElement("link");
+    let link = document.createElementNS("http://www.w3.org/1999/xhtml",
+                                        "link");
     link.setAttribute("rel", "localization");
     link.setAttribute("href", path);
 
@@ -402,6 +403,7 @@ if (!isDummyDocument) {
     ["stringbundle", "chrome://global/content/elements/stringbundle.js"],
     ["printpreview-toolbar", "chrome://global/content/printPreviewToolbar.js"],
     ["editor", "chrome://global/content/elements/editor.js"],
+    ["text-link", "chrome://global/content/elements/text.js"],
   ]) {
     customElements.setElementCreationCallback(tag, () => {
       Services.scriptloader.loadSubScript(script, window);

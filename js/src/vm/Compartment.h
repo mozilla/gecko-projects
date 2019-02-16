@@ -89,15 +89,11 @@ class CrossCompartmentKey {
       explicit WrappedMatcher(F f) : f_(f) {}
       auto match(JSObject*& obj) { return f_(&obj); }
       auto match(JSString*& str) { return f_(&str); }
-      auto match(DebuggerAndScript& tpl) {
-        return f_(&mozilla::Get<1>(tpl));
-      }
+      auto match(DebuggerAndScript& tpl) { return f_(&mozilla::Get<1>(tpl)); }
       auto match(DebuggerAndLazyScript& tpl) {
         return f_(&mozilla::Get<1>(tpl));
       }
-      auto match(DebuggerAndObject& tpl) {
-        return f_(&mozilla::Get<1>(tpl));
-      }
+      auto match(DebuggerAndObject& tpl) { return f_(&mozilla::Get<1>(tpl)); }
     } matcher(f);
     return wrapped.match(matcher);
   }
@@ -483,9 +479,7 @@ class JS::Compartment {
   MOZ_MUST_USE inline bool wrap(JSContext* cx, JS::MutableHandleValue vp);
 
   MOZ_MUST_USE bool wrap(JSContext* cx, js::MutableHandleString strp);
-#ifdef ENABLE_BIGINT
   MOZ_MUST_USE bool wrap(JSContext* cx, js::MutableHandle<JS::BigInt*> bi);
-#endif
   MOZ_MUST_USE bool wrap(JSContext* cx, JS::MutableHandleObject obj);
   MOZ_MUST_USE bool wrap(JSContext* cx,
                          JS::MutableHandle<JS::PropertyDescriptor> desc);

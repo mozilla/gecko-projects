@@ -110,7 +110,7 @@
 #  include "cairo/cairo-features.h"
 #  include "mozilla/WindowsDllBlocklist.h"
 #  include "mozilla/WinHeaderOnlyUtils.h"
-#  include "mozilla/mscom/MainThreadRuntime.h"
+#  include "mozilla/mscom/ProcessRuntime.h"
 #  include "mozilla/widget/AudioSession.h"
 
 #  if defined(MOZ_LAUNCHER_PROCESS)
@@ -1248,12 +1248,14 @@ nsXULAppInfo::Callback(nsISupports* aData) {
 }
 
 static const nsXULAppInfo kAppInfo;
-static nsresult AppInfoConstructor(nsISupports* aOuter, REFNSIID aIID,
-                                   void** aResult) {
+namespace mozilla {
+nsresult AppInfoConstructor(nsISupports* aOuter, REFNSIID aIID,
+                            void** aResult) {
   NS_ENSURE_NO_AGGREGATION(aOuter);
 
   return const_cast<nsXULAppInfo*>(&kAppInfo)->QueryInterface(aIID, aResult);
 }
+}  // namespace mozilla
 
 bool gLogConsoleErrors = false;
 
@@ -1531,7 +1533,12 @@ static inline void DumpVersion() {
   if (gAppData->vendor) {
     printf("%s ", (const char*)gAppData->vendor);
   }
-  printf("%s %s", (const char*)gAppData->name, (const char*)gAppData->version);
+  printf("%s ", (const char*)gAppData->name);
+
+  // Use the displayed version
+  // For example, for beta, we would display 42.0b2 instead of 42.0
+  printf("%s", NS_STRINGIFY(MOZ_APP_VERSION_DISPLAY));
+
   if (gAppData->copyright) {
     printf(", %s", (const char*)gAppData->copyright);
   }
@@ -3782,7 +3789,9 @@ int XREMain::XRE_mainStartup(bool* aExitFlag) {
 
   SetShutdownChecks();
 
-  // Enable Telemetry IO Reporting on DEBUG, nightly and local builds
+  // Enable Telemetry IO Reporting on DEBUG, nightly and local builds,
+  // but disable it on FUZZING builds.
+#ifndef FUZZING
 #ifdef DEBUG
   mozilla::Telemetry::InitIOReporting(gAppData->xreDirectory);
 #else
@@ -3794,6 +3803,7 @@ int XREMain::XRE_mainStartup(bool* aExitFlag) {
     }
   }
 #endif /* DEBUG */
+#endif /* FUZZING */
 
 #if defined(XP_WIN)
   // Enable the HeapEnableTerminationOnCorruption exploit mitigation. We ignore
@@ -4232,7 +4242,9 @@ int XREMain::XRE_mainStartup(bool* aExitFlag) {
       flagFile, &cachesOK, &isDowngrade, lastVersion);
 
 #ifdef MOZ_BLOCK_PROFILE_DOWNGRADE
-  if (isDowngrade && !CheckArg("allow-downgrade")) {
+  // The argument check must come first so the argument is always removed from
+  // the command line regardless of whether this is a downgrade or not.
+  if (!CheckArg("allow-downgrade") && isDowngrade) {
     rv = CheckDowngrade(mProfD, mNativeApp, mProfileSvc, lastVersion);
     if (rv == NS_ERROR_LAUNCHED_CHILD_PROCESS || rv == NS_ERROR_ABORT) {
       *aExitFlag = true;
@@ -4793,7 +4805,7 @@ int XREMain::XRE_main(int argc, char* argv[], const BootstrapConfig& aConfig) {
   // trivial COM is run in the application. Since these settings may affect
   // stability, we should instantiate COM ASAP so that we can ensure that these
   // global settings are configured before anything can interfere.
-  mozilla::mscom::MainThreadRuntime msCOMRuntime;
+  mozilla::mscom::ProcessRuntime msCOMRuntime;
 #endif
 
   // init

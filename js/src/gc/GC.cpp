@@ -229,9 +229,7 @@
 #include "js/SliceBudget.h"
 #include "proxy/DeadObjectProxy.h"
 #include "util/Windows.h"
-#ifdef ENABLE_BIGINT
-#  include "vm/BigIntType.h"
-#endif
+#include "vm/BigIntType.h"
 #include "vm/Debugger.h"
 #include "vm/GeckoProfiler.h"
 #include "vm/JSAtom.h"
@@ -506,10 +504,7 @@ static const FinalizePhase BackgroundFinalizePhases[] = {
     {gcstats::PhaseKind::SWEEP_STRING,
      {AllocKind::FAT_INLINE_STRING, AllocKind::STRING,
       AllocKind::EXTERNAL_STRING, AllocKind::FAT_INLINE_ATOM, AllocKind::ATOM,
-      AllocKind::SYMBOL,
-#ifdef ENABLE_BIGINT
-      AllocKind::BIGINT
-#endif
+      AllocKind::SYMBOL, AllocKind::BIGINT
      }},
     {gcstats::PhaseKind::SWEEP_SHAPE,
      {AllocKind::SHAPE, AllocKind::ACCESSOR_SHAPE, AllocKind::BASE_SHAPE,
@@ -3410,9 +3405,11 @@ void GCRuntime::startDecommit() {
   MOZ_ASSERT(CurrentThreadCanAccessRuntime(rt));
   MOZ_ASSERT(!decommitTask.isRunning());
 
-  // If we are allocating heavily enough to trigger "high freqency" GC, then
-  // skip decommit so that we do not compete with the mutator.
-  if (schedulingState.inHighFrequencyGCMode()) {
+  // If we are allocating heavily enough to trigger "high frequency" GC, then
+  // skip decommit so that we do not compete with the mutator. However if we're
+  // doing a shrinking GC we always decommit to release as much memory as
+  // possible.
+  if (schedulingState.inHighFrequencyGCMode() && !cleanUpEverything) {
     return;
   }
 
@@ -4033,9 +4030,8 @@ static bool InCrossCompartmentMap(JSObject* src, JS::GCCellPtr dst) {
 }
 
 void CompartmentCheckTracer::onChild(const JS::GCCellPtr& thing) {
-  Compartment* comp = MapGCThingTyped(thing, [](auto t) {
-    return t->maybeCompartment();
-  });
+  Compartment* comp =
+      MapGCThingTyped(thing, [](auto t) { return t->maybeCompartment(); });
   if (comp && compartment) {
     MOZ_ASSERT(comp == compartment ||
                (srcKind == JS::TraceKind::Object &&
@@ -4062,9 +4058,8 @@ void GCRuntime::checkForCompartmentMismatches() {
            i.next()) {
         trc.src = i.getCell();
         trc.srcKind = MapAllocToTraceKind(thingKind);
-        trc.compartment = MapGCThingTyped(trc.src, trc.srcKind, [](auto t) {
-          return t->maybeCompartment();
-        });
+        trc.compartment = MapGCThingTyped(
+            trc.src, trc.srcKind, [](auto t) { return t->maybeCompartment(); });
         js::TraceChildren(&trc, trc.src, trc.srcKind);
       }
     }
@@ -4851,9 +4846,8 @@ bool Compartment::findSweepGroupEdges() {
       continue;
     }
 
-    Zone* target = key.applyToWrapped([](auto tp) {
-      return (*tp)->asTenured().zone();
-    });
+    Zone* target =
+        key.applyToWrapped([](auto tp) { return (*tp)->asTenured().zone(); });
     if (!target->isGCMarking()) {
       continue;
     }
@@ -7408,8 +7402,7 @@ bool GCRuntime::shouldCollectNurseryForSlice(bool nonincrementalByAPI,
       return true;
     case State::Mark:
       return (nonincrementalByAPI || budget.isUnlimited() || lastMarkSlice ||
-              nursery().shouldCollect() ||
-              hasIncrementalTwoSliceZealMode());
+              nursery().shouldCollect() || hasIncrementalTwoSliceZealMode());
     case State::Finish:
       return false;
     case State::MarkRoots:
@@ -8383,10 +8376,8 @@ JS::GCCellPtr::GCCellPtr(const Value& v) : ptr(0) {
     ptr = checkedCast(&v.toObject(), JS::TraceKind::Object);
   } else if (v.isSymbol()) {
     ptr = checkedCast(v.toSymbol(), JS::TraceKind::Symbol);
-#ifdef ENABLE_BIGINT
   } else if (v.isBigInt()) {
     ptr = checkedCast(v.toBigInt(), JS::TraceKind::BigInt);
-#endif
   } else if (v.isPrivateGCThing()) {
     ptr = checkedCast(v.toGCThing(), v.toGCThing()->getTraceKind());
   } else {
@@ -9003,11 +8994,9 @@ void js::gc::ClearEdgesTracer::onStringEdge(JSString** strp) {
 void js::gc::ClearEdgesTracer::onSymbolEdge(JS::Symbol** symp) {
   clearEdge(symp);
 }
-#ifdef ENABLE_BIGINT
 void js::gc::ClearEdgesTracer::onBigIntEdge(JS::BigInt** bip) {
   clearEdge(bip);
 }
-#endif
 void js::gc::ClearEdgesTracer::onScriptEdge(JSScript** scriptp) {
   clearEdge(scriptp);
 }

@@ -356,6 +356,8 @@ class CorePS {
   }
 #endif
 
+  PS_GET_AND_SET(const nsACString&, ProcessName)
+
  private:
   // The singleton instance
   static CorePS* sInstance;
@@ -378,6 +380,9 @@ class CorePS {
   // LUL's state. Null prior to the first activation, non-null thereafter.
   UniquePtr<lul::LUL> mLul;
 #endif
+
+  // Process name, provided by child process initialization code.
+  nsAutoCString mProcessName;
 };
 
 CorePS* CorePS::sInstance = nullptr;
@@ -2005,6 +2010,7 @@ static void locked_profiler_stream_json_for_this_process(
           registeredThread ? registeredThread->GetJSContext() : nullptr;
       ProfiledThreadData* profiledThreadData = thread.second();
       profiledThreadData->StreamJSON(buffer, cx, aWriter,
+                                     CorePS::ProcessName(aLock),
                                      CorePS::ProcessStartTime(), aSinceTime,
                                      ActivePS::FeatureJSTracer(aLock));
     }
@@ -2022,6 +2028,7 @@ static void locked_profiler_stream_json_for_this_process(
       ProfiledThreadData profiledThreadData(
           threadInfo, nullptr, ActivePS::FeatureResponsiveness(aLock));
       profiledThreadData.StreamJSON(*javaBuffer.get(), nullptr, aWriter,
+                                    CorePS::ProcessName(aLock),
                                     CorePS::ProcessStartTime(), aSinceTime,
                                     ActivePS::FeatureJSTracer(aLock));
 
@@ -2897,6 +2904,12 @@ static bool WriteProfileToJSONWriter(SpliceableChunkedJSONWriter& aWriter,
   return true;
 }
 
+void profiler_set_process_name(const nsACString& aProcessName) {
+  LOG("profiler_set_process_name(\"%s\")", aProcessName.Data());
+  PSAutoLock lock(gPSMutex);
+  CorePS::SetProcessName(lock, aProcessName);
+}
+
 UniquePtr<char[]> profiler_get_profile(double aSinceTime,
                                        bool aIsShuttingDown) {
   LOG("profiler_get_profile");
@@ -3528,8 +3541,9 @@ void profiler_unregister_thread() {
 
 void profiler_register_page(const nsID& aDocShellId, uint32_t aHistoryId,
                             const nsCString& aUrl, bool aIsSubFrame) {
-  DEBUG_LOG("profiler_register_page(%s, %u, %s, %d)", aDocShellId.ToString(),
-            aHistoryId, aUrl.get(), aIsSubFrame);
+  DEBUG_LOG("profiler_register_page(%s, %u, %s, %d)",
+            nsIDToCString(aDocShellId).get(), aHistoryId, aUrl.get(),
+            aIsSubFrame);
 
   MOZ_RELEASE_ASSERT(CorePS::Exists());
 
@@ -3830,6 +3844,19 @@ void profiler_tracing(const char* aCategoryString, const char* aMarkerName,
       MakeUnique<TracingMarkerPayload>(aCategoryString, aKind, aDocShellId,
                                        aDocShellHistoryId, std::move(aCause));
   racy_profiler_add_marker(aMarkerName, aCategory, std::move(payload));
+}
+
+void profiler_add_text_marker(
+    const char* aMarkerName, const nsACString& aText,
+    js::ProfilingStackFrame::Category aCategory,
+    const mozilla::TimeStamp& aStartTime, const mozilla::TimeStamp& aEndTime,
+    const mozilla::Maybe<nsID>& aDocShellId,
+    const mozilla::Maybe<uint32_t>& aDocShellHistoryId,
+    UniqueProfilerBacktrace aCause) {
+  profiler_add_marker(
+      aMarkerName, aCategory,
+      MakeUnique<TextMarkerPayload>(aText, aStartTime, aEndTime, aDocShellId,
+                                    aDocShellHistoryId, std::move(aCause)));
 }
 
 void profiler_set_js_context(JSContext* aCx) {

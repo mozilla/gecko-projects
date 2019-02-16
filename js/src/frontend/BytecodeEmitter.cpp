@@ -102,6 +102,9 @@ BytecodeEmitter::BytecodeEmitter(BytecodeEmitter* parent, SharedContext* sc,
       lastNoteOffset_(0),
       currentLine_(lineNum),
       lastColumn_(0),
+      lastSeparatorOffet_(0),
+      lastSeparatorLine_(0),
+      lastSeparatorColumn_(0),
       mainOffset_(),
       lastTarget{-1 - ptrdiff_t(JSOP_JUMPTARGET_LENGTH)},
       parser(nullptr),
@@ -192,6 +195,50 @@ Maybe<NameLocation> BytecodeEmitter::locationOfNameBoundInFunctionScope(
     funScope = funScope->enclosingInFrame();
   }
   return source->locationBoundInScope(name, funScope);
+}
+
+bool BytecodeEmitter::markStepBreakpoint() {
+  if (inPrologue()) {
+    return true;
+  }
+
+  if (!newSrcNote(SRC_STEP_SEP)) {
+    return false;
+  }
+
+  if (!newSrcNote(SRC_BREAKPOINT)) {
+    return false;
+  }
+
+  // We track the location of the most recent separator for use in
+  // markSimpleBreakpoint. Note that this means that the position must already
+  // be set before markStepBreakpoint is called.
+  lastSeparatorOffet_ = code().length();
+  lastSeparatorLine_ = currentLine_;
+  lastSeparatorColumn_ = lastColumn_;
+
+  return true;
+}
+
+bool BytecodeEmitter::markSimpleBreakpoint() {
+  if (inPrologue()) {
+    return true;
+  }
+
+  // If a breakable call ends up being the same location as the most recent
+  // expression start, we need to skip marking it breakable in order to avoid
+  // having two breakpoints with the same line/column position.
+  // Note: This assumes that the position for the call has already been set.
+  bool isDuplicateLocation =
+      lastSeparatorLine_ == currentLine_ && lastSeparatorColumn_ == lastColumn_;
+
+  if (!isDuplicateLocation) {
+    if (!newSrcNote(SRC_BREAKPOINT)) {
+      return false;
+    }
+  }
+
+  return true;
 }
 
 bool BytecodeEmitter::emitCheck(JSOp op, ptrdiff_t delta, ptrdiff_t* offset) {
@@ -520,6 +567,8 @@ bool BytecodeEmitter::updateLineNumberNotes(uint32_t offset) {
         }
       } while (--delta != 0);
     }
+
+    updateSeparatorPosition();
   }
   return true;
 }
@@ -550,8 +599,17 @@ bool BytecodeEmitter::updateSourceCoordNotes(uint32_t offset) {
       return false;
     }
     lastColumn_ = columnIndex;
+    updateSeparatorPosition();
   }
   return true;
+}
+
+/* Updates the last separator position, if present */
+void BytecodeEmitter::updateSeparatorPosition() {
+  if (!inPrologue() && lastSeparatorOffet_ == code().length()) {
+    lastSeparatorLine_ = currentLine_;
+    lastSeparatorColumn_ = lastColumn_;
+  }
 }
 
 Maybe<uint32_t> BytecodeEmitter::getOffsetForLoop(ParseNode* nextpn) {
@@ -1003,12 +1061,10 @@ restart:
       *answer = false;
       return true;
 
-#ifdef ENABLE_BIGINT
     case ParseNodeKind::BigIntExpr:
       MOZ_ASSERT(pn->is<BigIntLiteral>());
       *answer = false;
       return true;
-#endif
 
     // |this| can throw in derived class constructors, including nested arrow
     // functions or eval.
@@ -1946,7 +2002,7 @@ bool BytecodeEmitter::emitCallIncDec(UnaryNode* incDec) {
     //              [stack] CALLRESULT
     return false;
   }
-  if (!emit1(JSOP_POS)) {
+  if (!emit1(JSOP_TONUMERIC)) {
     //              [stack] N
     return false;
   }
@@ -2009,7 +2065,11 @@ MOZ_NEVER_INLINE bool BytecodeEmitter::emitSwitch(SwitchStatement* switchStmt) {
   MOZ_ASSERT(cases->isKind(ParseNodeKind::StatementList));
 
   SwitchEmitter se(this);
-  if (!se.emitDiscriminant(Some(switchStmt->pn_pos.begin))) {
+  if (!se.emitDiscriminant(Some(switchStmt->discriminant().pn_pos.begin))) {
+    return false;
+  }
+
+  if (!markStepBreakpoint()) {
     return false;
   }
   if (!emitTree(&switchStmt->discriminant())) {
@@ -2392,6 +2452,9 @@ bool BytecodeEmitter::emitScript(ParseNode* body) {
       return false;
     }
   }
+  if (!markSimpleBreakpoint()) {
+    return false;
+  }
 
   if (!emit1(JSOP_RETRVAL)) {
     return false;
@@ -2452,6 +2515,9 @@ bool BytecodeEmitter::emitFunctionScript(FunctionNode* funNode,
   }
 
   if (!updateSourceCoordNotes(body->pn_pos.end)) {
+    return false;
+  }
+  if (!markSimpleBreakpoint()) {
     return false;
   }
 
@@ -3930,10 +3996,6 @@ bool BytecodeEmitter::emitDeclarationList(ListNode* declList) {
   MOZ_ASSERT(declList->isOp(JSOP_NOP));
 
   for (ParseNode* decl : declList->contents()) {
-    if (!updateSourceCoordNotes(decl->pn_pos.begin)) {
-      return false;
-    }
-
     if (decl->isKind(ParseNodeKind::AssignExpr)) {
       MOZ_ASSERT(decl->isOp(JSOP_NOP));
 
@@ -3942,6 +4004,12 @@ bool BytecodeEmitter::emitDeclarationList(ListNode* declList) {
       MOZ_ASSERT(pattern->isKind(ParseNodeKind::ArrayExpr) ||
                  pattern->isKind(ParseNodeKind::ObjectExpr));
 
+      if (!updateSourceCoordNotes(assignNode->right()->pn_pos.begin)) {
+        return false;
+      }
+      if (!markStepBreakpoint()) {
+        return false;
+      }
       if (!emitTree(assignNode->right())) {
         return false;
       }
@@ -3989,6 +4057,13 @@ bool BytecodeEmitter::emitSingleDeclaration(ListNode* declList, NameNode* decl,
     }
   } else {
     MOZ_ASSERT(initializer);
+
+    if (!updateSourceCoordNotes(initializer->pn_pos.begin)) {
+      return false;
+    }
+    if (!markStepBreakpoint()) {
+      return false;
+    }
     if (!emitInitializer(initializer, decl)) {
       //            [stack] ENV? V
       return false;
@@ -4317,11 +4392,9 @@ bool ParseNode::getConstantValue(JSContext* cx,
     case ParseNodeKind::NumberExpr:
       vp.setNumber(as<NumericLiteral>().value());
       return true;
-#ifdef ENABLE_BIGINT
     case ParseNodeKind::BigIntExpr:
       vp.setBigInt(as<BigIntLiteral>().box()->value());
       return true;
-#endif
     case ParseNodeKind::TemplateStringExpr:
     case ParseNodeKind::StringExpr:
       vp.setString(as<NameNode>().atom());
@@ -4643,11 +4716,15 @@ MOZ_MUST_USE bool BytecodeEmitter::emitGoSub(JumpList* jump) {
 bool BytecodeEmitter::emitIf(TernaryNode* ifNode) {
   IfEmitter ifThenElse(this);
 
-  if (!ifThenElse.emitIf(Some(ifNode->pn_pos.begin))) {
+  if (!ifThenElse.emitIf(Some(ifNode->kid1()->pn_pos.begin))) {
     return false;
   }
 
 if_again:
+  if (!markStepBreakpoint()) {
+    return false;
+  }
+
   /* Emit code for the condition before pushing stmtInfo. */
   if (!emitTree(ifNode->kid1())) {
     return false;
@@ -4673,7 +4750,7 @@ if_again:
     if (elseNode->isKind(ParseNodeKind::IfStmt)) {
       ifNode = &elseNode->as<TernaryNode>();
 
-      if (!ifThenElse.emitElseIf(Some(ifNode->pn_pos.begin))) {
+      if (!ifThenElse.emitElseIf(Some(ifNode->kid1()->pn_pos.begin))) {
         return false;
       }
 
@@ -4812,7 +4889,11 @@ MOZ_NEVER_INLINE bool BytecodeEmitter::emitLexicalScope(
 
 bool BytecodeEmitter::emitWith(BinaryNode* withNode) {
   // Ensure that the column of the 'with' is set properly.
-  if (!updateSourceCoordNotes(withNode->pn_pos.begin)) {
+  if (!updateSourceCoordNotes(withNode->left()->pn_pos.begin)) {
+    return false;
+  }
+
+  if (!markStepBreakpoint()) {
     return false;
   }
 
@@ -4892,14 +4973,12 @@ bool BytecodeEmitter::emitCopyDataProperties(CopyOption option) {
   return true;
 }
 
-#ifdef ENABLE_BIGINT
 bool BytecodeEmitter::emitBigIntOp(BigInt* bigint) {
   if (!numberList.append(BigIntValue(bigint))) {
     return false;
   }
   return emitIndex32(JSOP_BIGINT, numberList.length() - 1);
 }
-#endif
 
 bool BytecodeEmitter::emitIterator() {
   // Convert iterable to iterator.
@@ -5270,6 +5349,12 @@ bool BytecodeEmitter::emitForOf(ForNode* forOfLoop,
     return false;
   }
 
+  if (!updateSourceCoordNotes(forHeadExpr->pn_pos.begin)) {
+    return false;
+  }
+  if (!markStepBreakpoint()) {
+    return false;
+  }
   if (!emitTree(forHeadExpr)) {
     //              [stack] ITERABLE
     return false;
@@ -5364,6 +5449,13 @@ bool BytecodeEmitter::emitForIn(ForNode* forInLoop,
 
   // Evaluate the expression being iterated.
   ParseNode* expr = forInHead->kid3();
+
+  if (!updateSourceCoordNotes(expr->pn_pos.begin)) {
+    return false;
+  }
+  if (!markStepBreakpoint()) {
+    return false;
+  }
   if (!emitTree(expr)) {
     //              [stack] EXPR
     return false;
@@ -5436,6 +5528,13 @@ bool BytecodeEmitter::emitCStyleFor(
         return false;
       }
     } else {
+      if (!updateSourceCoordNotes(init->pn_pos.begin)) {
+        return false;
+      }
+      if (!markStepBreakpoint()) {
+        return false;
+      }
+
       // 'init' is an expression, not a declaration. emitTree left its
       // value on the stack.
       if (!emitTree(init, ValueUsage::IgnoreValue)) {
@@ -5470,6 +5569,12 @@ bool BytecodeEmitter::emitCStyleFor(
 
   // Check for update code to do before the condition (if any).
   if (update) {
+    if (!updateSourceCoordNotes(update->pn_pos.begin)) {
+      return false;
+    }
+    if (!markStepBreakpoint()) {
+      return false;
+    }
     if (!emitTree(update, ValueUsage::IgnoreValue)) {
       //            [stack] VAL
       return false;
@@ -5484,6 +5589,12 @@ bool BytecodeEmitter::emitCStyleFor(
   }
 
   if (cond) {
+    if (!updateSourceCoordNotes(cond->pn_pos.begin)) {
+      return false;
+    }
+    if (!markStepBreakpoint()) {
+      return false;
+    }
     if (!emitTree(cond)) {
       //            [stack] VAL
       return false;
@@ -5845,6 +5956,12 @@ bool BytecodeEmitter::emitDo(BinaryNode* doNode) {
   }
 
   ParseNode* condNode = doNode->right();
+  if (!updateSourceCoordNotes(condNode->pn_pos.begin)) {
+    return false;
+  }
+  if (!markStepBreakpoint()) {
+    return false;
+  }
   if (!emitTree(condNode)) {
     return false;
   }
@@ -5874,6 +5991,12 @@ bool BytecodeEmitter::emitWhile(BinaryNode* whileNode) {
     return false;
   }
 
+  if (!updateSourceCoordNotes(condNode->pn_pos.begin)) {
+    return false;
+  }
+  if (!markStepBreakpoint()) {
+    return false;
+  }
   if (!emitTree(condNode)) {
     return false;
   }
@@ -6000,6 +6123,13 @@ bool BytecodeEmitter::emitReturn(UnaryNode* returnNode) {
     if (!emitPrepareIteratorResult()) {
       return false;
     }
+  }
+
+  if (!updateSourceCoordNotes(returnNode->pn_pos.begin)) {
+    return false;
+  }
+  if (!markStepBreakpoint()) {
+    return false;
   }
 
   /* Push a return value */
@@ -6711,6 +6841,9 @@ bool BytecodeEmitter::emitExpressionStatement(UnaryNode* exprStmt) {
         wantval ? ValueUsage::WantValue : ValueUsage::IgnoreValue;
     ExpressionStatementEmitter ese(this, valueUsage);
     if (!ese.prepareForExpr(Some(exprStmt->pn_pos.begin))) {
+      return false;
+    }
+    if (!markStepBreakpoint()) {
       return false;
     }
     if (!emitTree(expr, valueUsage)) {
@@ -8557,6 +8690,12 @@ bool BytecodeEmitter::emitClass(
   bool isDerived = !!heritageExpression;
   bool hasNameOnStack = nameKind == ClassNameKind::ComputedName;
   if (isDerived) {
+    if (!updateSourceCoordNotes(classNode->pn_pos.begin)) {
+      return false;
+    }
+    if (!markStepBreakpoint()) {
+      return false;
+    }
     if (!emitTree(heritageExpression)) {
       //            [stack] HERITAGE
       return false;
@@ -8709,6 +8848,9 @@ bool BytecodeEmitter::emitTree(
       if (!updateSourceCoordNotes(pn->pn_pos.begin)) {
         return false;
       }
+      if (!markStepBreakpoint()) {
+        return false;
+      }
 
       if (!emitBreak(pn->as<BreakStatement>().label())) {
         return false;
@@ -8718,6 +8860,9 @@ bool BytecodeEmitter::emitTree(
     case ParseNodeKind::ContinueStmt:
       // Ensure that the column of the 'continue' is set properly.
       if (!updateSourceCoordNotes(pn->pn_pos.begin)) {
+        return false;
+      }
+      if (!markStepBreakpoint()) {
         return false;
       }
 
@@ -8901,6 +9046,13 @@ bool BytecodeEmitter::emitTree(
       break;
 
     case ParseNodeKind::ThrowStmt:
+      if (!updateSourceCoordNotes(pn->pn_pos.begin)) {
+        return false;
+      }
+      if (!markStepBreakpoint()) {
+        return false;
+      }
+      MOZ_FALLTHROUGH;
     case ParseNodeKind::VoidExpr:
     case ParseNodeKind::NotExpr:
     case ParseNodeKind::BitNotExpr:
@@ -9086,13 +9238,11 @@ bool BytecodeEmitter::emitTree(
       }
       break;
 
-#ifdef ENABLE_BIGINT
     case ParseNodeKind::BigIntExpr:
       if (!emitBigIntOp(pn->as<BigIntLiteral>().box()->value())) {
         return false;
       }
       break;
-#endif
 
     case ParseNodeKind::RegExpExpr:
       if (!emitRegExp(objectList.add(pn->as<RegExpLiteral>().objbox()))) {
@@ -9117,6 +9267,9 @@ bool BytecodeEmitter::emitTree(
 
     case ParseNodeKind::DebuggerStmt:
       if (!updateSourceCoordNotes(pn->pn_pos.begin)) {
+        return false;
+      }
+      if (!markStepBreakpoint()) {
         return false;
       }
       if (!emit1(JSOP_DEBUGGER)) {

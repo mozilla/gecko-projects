@@ -2842,22 +2842,6 @@
     "n_buckets": 50,
     "description": "Time to search cache (ms)"
   },
-  "CACHE_MEMORY_SEARCH_2": {
-    "record_in_processes": ["main", "content"],
-    "expires_in_version": "default",
-    "kind": "exponential",
-    "high": 10000,
-    "n_buckets": 50,
-    "description": "Time to search memory cache (ms)"
-  },
-  "CACHE_DISK_SEARCH_2": {
-    "record_in_processes": ["main", "content"],
-    "expires_in_version": "default",
-    "kind": "exponential",
-    "high": 10000,
-    "n_buckets": 50,
-    "description": "Time to search disk cache (ms)"
-  },
   "CACHE_OFFLINE_SEARCH_2": {
     "record_in_processes": ["main", "content"],
     "expires_in_version": "never",
@@ -2898,14 +2882,6 @@
     "kind": "enumerated",
     "n_values": 6,
     "description": "encoding removed: 0=unknown, 1=gzip, 2=deflate, 3=brotli"
-  },
-  "HTTP_DISK_CACHE_OVERHEAD": {
-    "record_in_processes": ["main", "content"],
-    "expires_in_version": "default",
-    "kind": "exponential",
-    "high": 32000000,
-    "n_buckets": 100,
-    "description": "HTTP Disk cache memory overhead (bytes)"
   },
   "CACHE_LM_INCONSISTENT": {
     "record_in_processes": ["main", "content"],
@@ -4695,14 +4671,6 @@
     "kind": "enumerated",
     "n_values": 16,
     "description": "Flags errors in startup calculation()"
-  },
-  "NETWORK_DISK_CACHE_OPEN": {
-    "record_in_processes": ["main", "content"],
-    "expires_in_version": "default",
-    "kind": "exponential",
-    "high": 10000,
-    "n_buckets": 10,
-    "description": "Time spent opening disk cache (ms)"
   },
   "NETWORK_DISK_CACHE_TRASHRENAME": {
     "record_in_processes": ["main", "content"],
@@ -8680,6 +8648,31 @@
     "n_values": 10,
     "description": "Counts types of deprecation warnings logged on every successful call to navigator.requestMediaKeySystemAccess(). 0=No warnings logged, 1=MediaEMENoCapabilitiesDeprecatedWarning, 2=MediaEMENoCodecsDeprecatedWarning."
   },
+  "MEDIA_MP4_PARSE_SAMPLE_DESCRIPTION_ENTRIES_HAVE_MULTIPLE_CODECS": {
+    "record_in_processes": ["main", "content"],
+    "alert_emails": ["bvandyk@mozilla.com", "jya@mozilla.com", "drno@ohlmeier.org"],
+    "bug_numbers": [1513651],
+    "expires_in_version": "never",
+    "kind": "boolean",
+    "description": "Records if multiple codecs are present in a track's sample description entries. Recorded each time we process a track's metadata while parsing mp4s."
+  },
+  "MEDIA_MP4_PARSE_SAMPLE_DESCRIPTION_ENTRIES_HAVE_MULTIPLE_CRYPTO": {
+    "record_in_processes": ["main", "content"],
+    "alert_emails": ["bvandyk@mozilla.com", "jya@mozilla.com", "drno@ohlmeier.org"],
+    "bug_numbers": [1513651],
+    "expires_in_version": "never",
+    "kind": "boolean",
+    "description": "Records if multiple sets of crypto info are present in a track's sample description entries. Recorded each time we process a track's metadata while parsing mp4s."
+  },
+  "MEDIA_MP4_PARSE_NUM_SAMPLE_DESCRIPTION_ENTRIES": {
+    "record_in_processes": ["main", "content"],
+    "alert_emails": ["bvandyk@mozilla.com", "jya@mozilla.com", "drno@ohlmeier.org"],
+    "bug_numbers": [1513651],
+    "expires_in_version": "never",
+    "kind": "enumerated",
+    "n_values": 5,
+    "description": "Counts the number of entries in the sample description box (stsd) for a track in an mp4. Recorded each time we process a track's metadata while parsing mp4s."
+  },
   "MEDIACACHE_WATERMARK_KB": {
     "record_in_processes": ["main", "content"],
     "alert_emails": ["gsquelart@mozilla.com"],
@@ -11285,13 +11278,13 @@
   },
   "WEAVE_LOGIN_FAILED_FOR": {
     "record_in_processes": ["main"],
-    "expires_in_version": "68",
+    "expires_in_version": "72",
     "alert_emails": ["sync-dev@mozilla.org"],
     "kind": "exponential",
     "high": 20000,
     "n_buckets": 100,
     "releaseChannelCollection": "opt-out",
-    "bug_numbers": [1375635],
+    "bug_numbers": [1375635, 1523644],
     "description": "The number of minutes the user was in a bad login state."
   },
   "WEAVE_WIPE_SERVER_SUCCEEDED": {
@@ -13444,6 +13437,33 @@
     "n_buckets": 100,
     "bug_numbers": [1341531],
     "description": "Time (ms) for the APZ handled wheel event to dispatch, but before handlers executing."
+  },
+  "INTERMEDIATE_PRELOADING_ERRORS": {
+    "record_in_processes": ["main"],
+    "alert_emails": ["seceng-telemetry@mozilla.com", "jjones@mozilla.com"],
+    "expires_in_version": "70",
+    "kind": "categorical",
+    "labels": ["emptyAttachment",
+               "failedToDownloadMisc",
+               "failedToFetch",
+               "failedToObserve",
+               "failedToRemove",
+               "failedToUpdateNSS",
+               "failedToUpdateDB",
+               "unexpectedHash",
+               "unexpectedLength"],
+    "bug_numbers": [1519273],
+    "description": "Errors occurred during intermediate certificate preloading."
+  },
+  "INTERMEDIATE_PRELOADING_UPDATE_TIME_MS": {
+    "record_in_processes": ["main"],
+    "alert_emails": ["seceng-telemetry@mozilla.com", "jjones@mozilla.com"],
+    "expires_in_version": "70",
+    "kind": "exponential",
+    "high": 180000,
+    "n_buckets": 50,
+    "bug_numbers": [1519273],
+    "description": "Number of milliseconds to update the pre-loaded data, if updated."
   },
   "IPC_SYNC_MESSAGE_MANAGER_LATENCY_MS": {
     "record_in_processes": ["main", "content"],

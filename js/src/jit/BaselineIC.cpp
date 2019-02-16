@@ -214,13 +214,6 @@ void ICEntry::trace(JSTracer* trc) {
         }
         break;
       }
-      case JSOP_POS: {
-        ICToNumber_Fallback::Compiler stubCompiler(cx);
-        if (!addIC(pc, stubCompiler.getStub(&stubSpace))) {
-          return nullptr;
-        }
-        break;
-      }
       case JSOP_LOOPENTRY: {
         ICWarmUpCounter_Fallback::Compiler stubCompiler(cx);
         if (!addIC(pc, stubCompiler.getStub(&stubSpace))) {
@@ -1471,11 +1464,9 @@ bool ICTypeMonitor_PrimitiveSet::Compiler::generateStubCode(
     masm.branchTestSymbol(Assembler::Equal, R0, &success);
   }
 
-#ifdef ENABLE_BIGINT
   if (flags_ & TypeToFlag(JSVAL_TYPE_BIGINT)) {
     masm.branchTestBigInt(Assembler::Equal, R0, &success);
   }
-#endif
 
   if (flags_ & TypeToFlag(JSVAL_TYPE_OBJECT)) {
     masm.branchTestObject(Assembler::Equal, R0, &success);
@@ -1817,11 +1808,9 @@ bool ICTypeUpdate_PrimitiveSet::Compiler::generateStubCode(
     masm.branchTestSymbol(Assembler::Equal, R0, &success);
   }
 
-#ifdef ENABLE_BIGINT
   if (flags_ & TypeToFlag(JSVAL_TYPE_BIGINT)) {
     masm.branchTestBigInt(Assembler::Equal, R0, &success);
   }
-#endif
 
   if (flags_ & TypeToFlag(JSVAL_TYPE_OBJECT)) {
     masm.branchTestObject(Assembler::Equal, R0, &success);
@@ -1927,40 +1916,6 @@ bool ICToBool_Fallback::Compiler::generateStubCode(MacroAssembler& masm) {
   pushStubPayload(masm, R0.scratchReg());
 
   return tailCallVM(fun, masm);
-}
-
-//
-// ToNumber_Fallback
-//
-
-static bool DoToNumberFallback(JSContext* cx, ICToNumber_Fallback* stub,
-                               HandleValue arg, MutableHandleValue ret) {
-  stub->incrementEnteredCount();
-  FallbackICSpew(cx, stub, "ToNumber");
-  ret.set(arg);
-  return ToNumber(cx, ret);
-}
-
-typedef bool (*DoToNumberFallbackFn)(JSContext*, ICToNumber_Fallback*,
-                                     HandleValue, MutableHandleValue);
-static const VMFunction DoToNumberFallbackInfo =
-    FunctionInfo<DoToNumberFallbackFn>(DoToNumberFallback, "DoToNumberFallback",
-                                       TailCall, PopValues(1));
-
-bool ICToNumber_Fallback::Compiler::generateStubCode(MacroAssembler& masm) {
-  MOZ_ASSERT(R0 == JSReturnOperand);
-
-  // Restore the tail call register.
-  EmitRestoreTailCallReg(masm);
-
-  // Ensure stack is fully synced for the expression decompiler.
-  masm.pushValue(R0);
-
-  // Push arguments.
-  masm.pushValue(R0);
-  masm.push(ICStubReg);
-
-  return tailCallVM(DoToNumberFallbackInfo, masm);
 }
 
 static void StripPreliminaryObjectStubs(JSContext* cx, ICFallbackStub* stub) {
@@ -3610,6 +3565,7 @@ static bool TryAttachCallStub(JSContext* cx, ICCall_Fallback* stub,
       }
 
       if (protov.isObject()) {
+        AutoRealm ar(cx, fun);
         TaggedProto proto(&protov.toObject());
         ObjectGroup* group =
             ObjectGroup::defaultNewGroup(cx, nullptr, proto, newTarget);
@@ -3629,17 +3585,17 @@ static bool TryAttachCallStub(JSContext* cx, ICCall_Fallback* stub,
         }
       }
 
-      if (cx->realm() == fun->realm()) {
-        JSObject* thisObject =
-            CreateThisForFunction(cx, fun, newTarget, TenuredObject);
-        if (!thisObject) {
-          return false;
-        }
+      JSObject* thisObject =
+          CreateThisForFunction(cx, fun, newTarget, TenuredObject);
+      if (!thisObject) {
+        return false;
+      }
 
-        if (thisObject->is<PlainObject>() ||
-            thisObject->is<UnboxedPlainObject>()) {
-          templateObject = thisObject;
-        }
+      MOZ_ASSERT(thisObject->nonCCWRealm() == fun->realm());
+
+      if (thisObject->is<PlainObject>() ||
+          thisObject->is<UnboxedPlainObject>()) {
+        templateObject = thisObject;
       }
     }
 

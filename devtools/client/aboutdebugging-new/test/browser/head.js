@@ -17,6 +17,9 @@ Services.scriptloader.loadSubScript(
   "chrome://mochitests/content/browser/devtools/client/shared/test/shared-redux-head.js",
   this);
 
+/* import-globals-from helper-mocks.js */
+Services.scriptloader.loadSubScript(CHROME_URL_ROOT + "helper-mocks.js", this);
+
 // Make sure the ADB addon is removed and ADB is stopped when the test ends.
 registerCleanupFunction(async function() {
   try {
@@ -41,17 +44,22 @@ async function enableNewAboutDebugging() {
   await pushPref("devtools.aboutdebugging.network", true);
 }
 
-async function openAboutDebugging(page, win) {
+async function openAboutDebugging({ enableWorkerUpdates } = {}) {
+  if (!enableWorkerUpdates) {
+    silenceWorkerUpdates();
+  }
+
   await enableNewAboutDebugging();
 
   info("opening about:debugging");
 
-  const tab = await addTab("about:debugging", { window: win });
+  const tab = await addTab("about:debugging");
   const browser = tab.linkedBrowser;
   const document = browser.contentDocument;
   const window = browser.contentWindow;
-  info("wait for the initial about:debugging requests to be successful");
-  await waitForRequestsSuccess(window);
+
+  info("Wait until Connect page is displayed");
+  await waitUntil(() => document.querySelector(".js-connect-page"));
 
   return { tab, document, window };
 }
@@ -98,7 +106,7 @@ async function reloadAboutDebugging(tab) {
   const document = browser.contentDocument;
   const window = browser.contentWindow;
   info("wait for the initial about:debugging requests to be successful");
-  await waitForRequestsSuccess(window);
+  await waitForRequestsSuccess(window.AboutDebugging.store);
 
   return document;
 }
@@ -106,12 +114,11 @@ async function reloadAboutDebugging(tab) {
 // Wait for all about:debugging target request actions to succeed.
 // They will typically be triggered after watching a new runtime or loading
 // about:debugging.
-function waitForRequestsSuccess(win) {
-  const { AboutDebugging } = win;
+function waitForRequestsSuccess(store) {
   return Promise.all([
-    waitForDispatch(AboutDebugging.store, "REQUEST_EXTENSIONS_SUCCESS"),
-    waitForDispatch(AboutDebugging.store, "REQUEST_TABS_SUCCESS"),
-    waitForDispatch(AboutDebugging.store, "REQUEST_WORKERS_SUCCESS"),
+    waitForDispatch(store, "REQUEST_EXTENSIONS_SUCCESS"),
+    waitForDispatch(store, "REQUEST_TABS_SUCCESS"),
+    waitForDispatch(store, "REQUEST_WORKERS_SUCCESS"),
   ]);
 }
 
@@ -168,9 +175,10 @@ function waitForDispatch(store, type) {
  */
 async function selectThisFirefoxPage(doc, store) {
   info("Select This Firefox page");
+  const onRequestSuccess = waitForRequestsSuccess(store);
   doc.location.hash = "#/runtime/this-firefox";
-  info("Wait for requests to settle");
-  await waitForRequestsToSettle(store);
+  info("Wait for requests to be complete");
+  await onRequestSuccess;
   info("Wait for runtime page to be rendered");
   await waitUntil(() => doc.querySelector(".js-runtime-page"));
 }

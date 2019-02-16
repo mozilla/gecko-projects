@@ -1664,12 +1664,33 @@ bool BaselineCodeGen<Handler>::emit_JSOP_POS() {
   // Keep top stack value in R0.
   frame.popRegsAndSync(1);
 
-  // Inline path for int32 and double.
+  // Inline path for int32 and double; otherwise call VM.
   Label done;
   masm.branchTestNumber(Assembler::Equal, R0, &done);
 
-  // Call IC.
-  if (!emitNextIC()) {
+  prepareVMCall();
+  pushArg(R0);
+  if (!callVM(ToNumberInfo)) {
+    return false;
+  }
+
+  masm.bind(&done);
+  frame.push(R0);
+  return true;
+}
+
+template <typename Handler>
+bool BaselineCodeGen<Handler>::emit_JSOP_TONUMERIC() {
+  // Keep top stack value in R0.
+  frame.popRegsAndSync(1);
+
+  // Inline path for int32 and double; otherwise call VM.
+  Label done;
+  masm.branchTestNumber(Assembler::Equal, R0, &done);
+
+  prepareVMCall();
+  pushArg(R0);
+  if (!callVM(ToNumericInfo)) {
     return false;
   }
 
@@ -2021,12 +2042,10 @@ bool BaselineInterpreterCodeGen::emit_JSOP_DOUBLE() {
   MOZ_CRASH("NYI: interpreter JSOP_DOUBLE");
 }
 
-#ifdef ENABLE_BIGINT
 template <typename Handler>
 bool BaselineCodeGen<Handler>::emit_JSOP_BIGINT() {
   return emit_JSOP_DOUBLE();
 }
-#endif
 
 template <>
 bool BaselineCompilerCodeGen::emit_JSOP_STRING() {
@@ -3111,16 +3130,15 @@ void BaselineInterpreterCodeGen::getEnvironmentCoordinateObject(Register reg) {
 template <>
 Address BaselineCompilerCodeGen::getEnvironmentCoordinateAddressFromObject(
     Register objReg, Register reg) {
-  JSScript* script = handler.script();
   EnvironmentCoordinate ec(handler.pc());
-  Shape* shape = EnvironmentCoordinateToEnvironmentShape(script, handler.pc());
 
-  if (shape->numFixedSlots() <= ec.slot()) {
-    masm.loadPtr(Address(objReg, NativeObject::offsetOfSlots()), reg);
-    return Address(reg, (ec.slot() - shape->numFixedSlots()) * sizeof(Value));
+  if (EnvironmentObject::nonExtensibleIsFixedSlot(ec)) {
+    return Address(objReg, NativeObject::getFixedSlotOffset(ec.slot()));
   }
 
-  return Address(objReg, NativeObject::getFixedSlotOffset(ec.slot()));
+  uint32_t slot = EnvironmentObject::nonExtensibleDynamicSlotIndex(ec);
+  masm.loadPtr(Address(objReg, NativeObject::offsetOfSlots()), reg);
+  return Address(reg, slot * sizeof(Value));
 }
 
 template <>

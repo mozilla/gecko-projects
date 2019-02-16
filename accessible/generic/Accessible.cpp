@@ -335,8 +335,15 @@ uint64_t Accessible::VisibilityState() const {
     nsIFrame* parentFrame = curFrame->GetParent();
     nsDeckFrame* deckFrame = do_QueryFrame(parentFrame);
     if (deckFrame && deckFrame->GetSelectedBox() != curFrame) {
+#if defined(ANDROID)
+      // In Fennec instead of a <tabpanels> container there is a <deck>
+      // with direct <browser> children.
+      if (curFrame->GetContent()->IsXULElement(nsGkAtoms::browser))
+        return states::OFFSCREEN;
+#else
       if (deckFrame->GetContent()->IsXULElement(nsGkAtoms::tabpanels))
         return states::OFFSCREEN;
+#endif
 
       MOZ_ASSERT_UNREACHABLE(
           "Children of not selected deck panel are not accessible.");
@@ -907,6 +914,14 @@ nsresult Accessible::HandleAccEvent(AccEvent* aEvent) {
               scrollingEvent->MaxScrollY());
           break;
         }
+#if !defined(XP_WIN)
+        case nsIAccessibleEvent::EVENT_ANNOUNCEMENT: {
+          AccAnnouncementEvent* announcementEvent = downcast_accEvent(aEvent);
+          ipcDoc->SendAnnouncementEvent(id, announcementEvent->Announcement(),
+                                        announcementEvent->Priority());
+          break;
+        }
+#endif
         default:
           ipcDoc->SendEvent(id, aEvent->GetEventType());
       }
@@ -2432,6 +2447,12 @@ Accessible* Accessible::ContainerWidget() const {
     }
   }
   return nullptr;
+}
+
+void Accessible::Announce(const nsAString& aAnnouncement, uint16_t aPriority) {
+  RefPtr<AccAnnouncementEvent> event =
+      new AccAnnouncementEvent(this, aAnnouncement, aPriority);
+  nsEventShell::FireEvent(event);
 }
 
 ////////////////////////////////////////////////////////////////////////////////

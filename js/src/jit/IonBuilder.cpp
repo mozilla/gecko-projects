@@ -622,7 +622,7 @@ AbortReasonOr<Ok> IonBuilder::analyzeNewLoopTypes(
 
     MPhi* phi = entry->getSlot(slot)->toPhi();
 
-    if (*last == JSOP_POS) {
+    if (*last == JSOP_POS || *last == JSOP_TONUMERIC) {
       last = earlier;
     }
 
@@ -717,11 +717,9 @@ AbortReasonOr<Ok> IonBuilder::analyzeNewLoopTypes(
         case JSOP_DEC:
           type = inspector->expectedResultType(last);
           break;
-#ifdef ENABLE_BIGINT
         case JSOP_BIGINT:
           type = MIRType::BigInt;
           break;
-#endif
         default:
           break;
       }
@@ -1341,9 +1339,7 @@ AbortReasonOr<Ok> IonBuilder::addOsrValueTypeBarrier(
     case MIRType::Double:
     case MIRType::String:
     case MIRType::Symbol:
-#ifdef ENABLE_BIGINT
     case MIRType::BigInt:
-#endif
     case MIRType::Object:
       if (type != def->type()) {
         MUnbox* unbox = MUnbox::New(alloc(), def, type, MUnbox::Fallible);
@@ -1659,6 +1655,7 @@ AbortReasonOr<Ok> IonBuilder::visitBlock(const CFGBlock* cfgblock,
           break;
 
         case JSOP_POS:
+        case JSOP_TONUMERIC:
         case JSOP_TOID:
         case JSOP_TOSTRING:
           // These ops may leave their input on the stack without setting
@@ -1901,6 +1898,9 @@ AbortReasonOr<Ok> IonBuilder::inspectOpcode(JSOp op) {
     case JSOP_POS:
       return jsop_pos();
 
+    case JSOP_TONUMERIC:
+      return jsop_tonumeric();
+
     case JSOP_NEG:
       return jsop_neg();
 
@@ -1932,9 +1932,7 @@ AbortReasonOr<Ok> IonBuilder::inspectOpcode(JSOp op) {
       return jsop_compare(op);
 
     case JSOP_DOUBLE:
-#ifdef ENABLE_BIGINT
     case JSOP_BIGINT:
-#endif
       pushConstant(info().getConst(pc));
       return Ok();
 
@@ -2805,13 +2803,9 @@ AbortReasonOr<Ok> IonBuilder::improveTypesAtTypeOfCompare(MCompare* ins,
     filter.addType(TypeSet::StringType(), alloc_->lifoAlloc());
   } else if (constant->toString() == TypeName(JSTYPE_SYMBOL, names)) {
     filter.addType(TypeSet::SymbolType(), alloc_->lifoAlloc());
-  }
-#ifdef ENABLE_BIGINT
-  else if (constant->toString() == TypeName(JSTYPE_BIGINT, names)) {
+  } else if (constant->toString() == TypeName(JSTYPE_BIGINT, names)) {
     filter.addType(TypeSet::BigIntType(), alloc_->lifoAlloc());
-  }
-#endif
-  else if (constant->toString() == TypeName(JSTYPE_OBJECT, names)) {
+  } else if (constant->toString() == TypeName(JSTYPE_OBJECT, names)) {
     filter.addType(TypeSet::NullType(), alloc_->lifoAlloc());
     if (trueBranch) {
       filter.addType(TypeSet::AnyObjectType(), alloc_->lifoAlloc());
@@ -3055,10 +3049,8 @@ AbortReasonOr<Ok> IonBuilder::improveTypesAtTest(MDefinition* ins,
                  alloc_->lifoAlloc());  // ToBoolean(0.0) == false
     base.addType(TypeSet::StringType(),
                  alloc_->lifoAlloc());  // ToBoolean("") == false
-#ifdef ENABLE_BIGINT
     base.addType(TypeSet::BigIntType(),
                  alloc_->lifoAlloc());  // ToBoolean(0n) == false
-#endif
 
     // If the typeset does emulate undefined, then we cannot filter out
     // objects.
@@ -3367,7 +3359,7 @@ AbortReasonOr<Ok> IonBuilder::bitnotTrySpecialized(bool* emitted,
 
   if (input->mightBeType(MIRType::Object) ||
       input->mightBeType(MIRType::Symbol) ||
-      IF_BIGINT(input->mightBeType(MIRType::BigInt), false)) {
+      input->mightBeType(MIRType::BigInt)) {
     return Ok();
   }
 
@@ -3802,6 +3794,42 @@ AbortReasonOr<Ok> IonBuilder::jsop_neg() {
   MDefinition* right = current->pop();
 
   return jsop_binary_arith(JSOP_MUL, negator, right);
+}
+
+AbortReasonOr<Ok> IonBuilder::jsop_tonumeric() {
+  MDefinition* peeked = current->peek(-1);
+
+  if (IsNumericType(peeked->type())) {
+    // Elide the ToNumeric as we already unboxed the value.
+    peeked->setImplicitlyUsedUnchecked();
+    return Ok();
+  }
+
+  LifoAlloc* lifoAlloc = alloc().lifoAlloc();
+  TemporaryTypeSet* types = lifoAlloc->new_<TemporaryTypeSet>();
+  if (!types) {
+    return abort(AbortReason::Alloc);
+  }
+
+  types->addType(TypeSet::Int32Type(), lifoAlloc);
+  types->addType(TypeSet::DoubleType(), lifoAlloc);
+  types->addType(TypeSet::BigIntType(), lifoAlloc);
+
+  if (peeked->type() == MIRType::Value && peeked->resultTypeSet() &&
+      peeked->resultTypeSet()->isSubset(types)) {
+    // Elide the ToNumeric because the arg is already a boxed numeric.
+    peeked->setImplicitlyUsedUnchecked();
+    return Ok();
+  }
+
+  // Otherwise, pop the value and add an MToNumeric.
+  MDefinition* popped = current->pop();
+  MToNumeric* ins = MToNumeric::New(alloc(), popped, types);
+  current->add(ins);
+  current->push(ins);
+
+  // toValue() is effectful, so add a resume point.
+  return resumeAfter(ins);
 }
 
 AbortReasonOr<Ok> IonBuilder::jsop_inc_or_dec(JSOp op) {
@@ -5151,6 +5179,9 @@ MDefinition* IonBuilder::createThisScriptedSingleton(JSFunction* target) {
   if (templateObject->staticPrototype() != proto) {
     return nullptr;
   }
+  if (templateObject->nonCCWRealm() != target->realm()) {
+    return nullptr;
+  }
 
   TypeSet::ObjectKey* templateObjectKey =
       TypeSet::ObjectKey::get(templateObject->group());
@@ -5195,6 +5226,9 @@ MDefinition* IonBuilder::createThisScriptedBaseline(MDefinition* callee) {
   }
   if (!templateObject->is<PlainObject>() &&
       !templateObject->is<UnboxedPlainObject>()) {
+    return nullptr;
+  }
+  if (templateObject->nonCCWRealm() != target->realm()) {
     return nullptr;
   }
 
@@ -5255,8 +5289,8 @@ MDefinition* IonBuilder::createThisScriptedBaseline(MDefinition* callee) {
 
 MDefinition* IonBuilder::createThis(JSFunction* target, MDefinition* callee,
                                     MDefinition* newTarget) {
-  // Create |this| for unknown target or cross-realm target.
-  if (!target || target->realm() != script()->realm()) {
+  // Create |this| for unknown target.
+  if (!target) {
     if (MDefinition* createThis = createThisScriptedBaseline(callee)) {
       return createThis;
     }
@@ -6228,7 +6262,7 @@ static bool ObjectOrSimplePrimitive(MDefinition* op) {
   // Return true if op is either undefined/null/boolean/int32/symbol or an
   // object.
   return !op->mightBeType(MIRType::String) &&
-         IF_BIGINT(!op->mightBeType(MIRType::BigInt), true) &&
+         !op->mightBeType(MIRType::BigInt) &&
          !op->mightBeType(MIRType::Double) &&
          !op->mightBeType(MIRType::Float32) &&
          !op->mightBeType(MIRType::MagicOptimizedArguments) &&
@@ -7479,11 +7513,9 @@ JSObject* IonBuilder::testSingletonPropertyTypes(MDefinition* obj, jsid id) {
       key = JSProto_Symbol;
       break;
 
-#ifdef ENABLE_BIGINT
     case MIRType::BigInt:
       key = JSProto_BigInt;
       break;
-#endif
 
     case MIRType::Int32:
     case MIRType::Double:
@@ -13113,16 +13145,15 @@ MDefinition* IonBuilder::walkEnvironmentChain(unsigned hops) {
 MDefinition* IonBuilder::getAliasedVar(EnvironmentCoordinate ec) {
   MDefinition* obj = walkEnvironmentChain(ec.hops());
 
-  Shape* shape = EnvironmentCoordinateToEnvironmentShape(script(), pc);
-
   MInstruction* load;
-  if (shape->numFixedSlots() <= ec.slot()) {
+  if (EnvironmentObject::nonExtensibleIsFixedSlot(ec)) {
+    load = MLoadFixedSlot::New(alloc(), obj, ec.slot());
+  } else {
     MInstruction* slots = MSlots::New(alloc(), obj);
     current->add(slots);
 
-    load = MLoadSlot::New(alloc(), slots, ec.slot() - shape->numFixedSlots());
-  } else {
-    load = MLoadFixedSlot::New(alloc(), obj, ec.slot());
+    uint32_t slot = EnvironmentObject::nonExtensibleDynamicSlotIndex(ec);
+    load = MLoadSlot::New(alloc(), slots, slot);
   }
 
   current->add(load);
@@ -13145,21 +13176,19 @@ AbortReasonOr<Ok> IonBuilder::jsop_setaliasedvar(EnvironmentCoordinate ec) {
   MDefinition* rval = current->peek(-1);
   MDefinition* obj = walkEnvironmentChain(ec.hops());
 
-  Shape* shape = EnvironmentCoordinateToEnvironmentShape(script(), pc);
-
   if (needsPostBarrier(rval)) {
     current->add(MPostWriteBarrier::New(alloc(), obj, rval));
   }
 
   MInstruction* store;
-  if (shape->numFixedSlots() <= ec.slot()) {
+  if (EnvironmentObject::nonExtensibleIsFixedSlot(ec)) {
+    store = MStoreFixedSlot::NewBarriered(alloc(), obj, ec.slot(), rval);
+  } else {
     MInstruction* slots = MSlots::New(alloc(), obj);
     current->add(slots);
 
-    store = MStoreSlot::NewBarriered(alloc(), slots,
-                                     ec.slot() - shape->numFixedSlots(), rval);
-  } else {
-    store = MStoreFixedSlot::NewBarriered(alloc(), obj, ec.slot(), rval);
+    uint32_t slot = EnvironmentObject::nonExtensibleDynamicSlotIndex(ec);
+    store = MStoreSlot::NewBarriered(alloc(), slots, slot, rval);
   }
 
   current->add(store);

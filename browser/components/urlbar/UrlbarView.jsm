@@ -64,6 +64,12 @@ class UrlbarView {
     return this.panel.state == "open" || this.panel.state == "showing";
   }
 
+  get allowEmptySelection() {
+    return !(this._queryContext &&
+             this._queryContext.results[0] &&
+             this._queryContext.results[0].heuristic);
+  }
+
   get selectedIndex() {
     if (!this.isOpen || !this._selected) {
       return -1;
@@ -103,6 +109,19 @@ class UrlbarView {
   }
 
   /**
+   * Gets the result for the index.
+   * @param {number} index
+   *   The index to look up.
+   * @returns {UrlbarResult}
+   */
+  getResult(index) {
+    if (index < 0 || index > this._queryContext.results.length) {
+      throw new Error(`UrlbarView: Index ${index} is out of bounds`);
+    }
+    return this._queryContext.results[index];
+  }
+
+  /**
    * Selects the next or previous view item. An item could be an autocomplete
    * result or a one-off search button.
    *
@@ -115,15 +134,13 @@ class UrlbarView {
       throw new Error("UrlbarView: Cannot select an item if the view isn't open.");
     }
 
-    // TODO bug 1527260: handle one-off search buttons
-
     let row;
     if (reverse) {
       row = (this._selected && this._selected.previousElementSibling) ||
-            this._rows.lastElementChild;
+            ((this._selected && this.allowEmptySelection) ? null : this._rows.lastElementChild);
     } else {
       row = (this._selected && this._selected.nextElementSibling) ||
-            this._rows.firstElementChild;
+            ((this._selected && this.allowEmptySelection) ? null : this._rows.firstElementChild);
     }
     this._selectItem(row);
   }
@@ -158,7 +175,7 @@ class UrlbarView {
 
     if (queryContext.lastResultCount == 0) {
       if (queryContext.preselected) {
-        this._selectItem(fragment.firstElementChild);
+        this._selectItem(fragment.firstElementChild, false);
       } else {
         // Clear the selection when we get a new set of results.
         this._selectItem(null);
@@ -168,7 +185,7 @@ class UrlbarView {
       // TODO bug 1523602: the selection should stay on the node that had it, if
       // it's still in the current result set.
       let resultIndex = this._selected.getAttribute("resultIndex");
-      this._selectItem(fragment.children[resultIndex]);
+      this._selectItem(fragment.children[resultIndex], false);
     }
 
     // TODO bug 1523602: For now, clear the results for each set received.
@@ -335,7 +352,7 @@ class UrlbarView {
     favicon.className = "urlbarView-favicon";
     if (result.type == UrlbarUtils.RESULT_TYPE.SEARCH ||
         result.type == UrlbarUtils.RESULT_TYPE.KEYWORD) {
-      favicon.src = UrlbarUtils.ICON.SEARCH_GLASS;
+      favicon.src = result.payload.icon || UrlbarUtils.ICON.SEARCH_GLASS;
     } else {
       favicon.src = result.payload.icon || UrlbarUtils.ICON.DEFAULT;
     }
@@ -509,11 +526,7 @@ class UrlbarView {
     while (!row.classList.contains("urlbarView-row")) {
       row = row.parentNode;
     }
-    let resultIndex = row.getAttribute("resultIndex");
-    let result = this._queryContext.results[resultIndex];
-    if (result) {
-      this.input.pickResult(event, result);
-    }
+    this.input.pickResult(event, parseInt(row.getAttribute("resultIndex")));
   }
 
   _on_overflow(event) {

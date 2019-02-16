@@ -22,9 +22,7 @@
 #include "js/SliceBudget.h"
 #include "vm/ArgumentsObject.h"
 #include "vm/ArrayObject.h"
-#ifdef ENABLE_BIGINT
-#  include "vm/BigIntType.h"
-#endif
+#include "vm/BigIntType.h"
 #include "vm/Debugger.h"
 #include "vm/EnvironmentObject.h"
 #include "vm/RegExpShared.h"
@@ -523,9 +521,9 @@ void js::TraceGenericPointerRoot(JSTracer* trc, Cell** thingp,
 
   auto traced = MapGCThingTyped(thing, thing->getTraceKind(),
                                 [trc, name](auto t) -> Cell* {
-    TraceRoot(trc, &t, name);
-    return t;
-  });
+                                  TraceRoot(trc, &t, name);
+                                  return t;
+                                });
   if (traced != thing) {
     *thingp = traced;
   }
@@ -541,9 +539,9 @@ void js::TraceManuallyBarrieredGenericPointerEdge(JSTracer* trc, Cell** thingp,
 
   auto traced = MapGCThingTyped(thing, thing->getTraceKind(),
                                 [trc, name](auto t) -> Cell* {
-    TraceManuallyBarrieredEdge(trc, &t, name);
-    return t;
-  });
+                                  TraceManuallyBarrieredEdge(trc, &t, name);
+                                  return t;
+                                });
   if (traced != thing) {
     *thingp = traced;
   }
@@ -803,12 +801,10 @@ template <>
 void GCMarker::traverse(JS::Symbol* thing) {
   markAndTraceChildren(thing);
 }
-#ifdef ENABLE_BIGINT
 template <>
 void GCMarker::traverse(JS::BigInt* thing) {
   markAndTraceChildren(thing);
 }
-#endif
 template <>
 void GCMarker::traverse(RegExpShared* thing) {
   markAndTraceChildren(thing);
@@ -923,9 +919,8 @@ void js::GCMarker::traverseEdge(S source, T* target) {
 
 template <typename S, typename T>
 void js::GCMarker::traverseEdge(S source, const T& thing) {
-  ApplyGCThingTyped(thing, [this, source](auto t) {
-                             this->traverseEdge(source, t);
-                           });
+  ApplyGCThingTyped(thing,
+                    [this, source](auto t) { this->traverseEdge(source, t); });
 }
 
 namespace {
@@ -1496,9 +1491,7 @@ void js::GCMarker::lazilyMarkChildren(ObjectGroup* group) {
   }
 }
 
-#ifdef ENABLE_BIGINT
 void JS::BigInt::traceChildren(JSTracer* trc) { return; }
-#endif
 
 template <typename Functor>
 static void VisitTraceList(const Functor& f, const int32_t* traceList,
@@ -1509,7 +1502,8 @@ static void VisitTraceList(const Functor& f, const int32_t* traceList,
 enum class CheckGeneration { DoChecks, NoChecks };
 template <typename Functor>
 static inline NativeObject* CallTraceHook(Functor&& f, JSTracer* trc,
-                                          JSObject* obj, CheckGeneration check) {
+                                          JSObject* obj,
+                                          CheckGeneration check) {
   const Class* clasp = obj->getClass();
   MOZ_ASSERT(clasp);
   MOZ_ASSERT(obj->isNative() == clasp->isNative());
@@ -1659,7 +1653,7 @@ inline static bool ObjectDenseElementsMayBeMarkable(NativeObject* nobj) {
 
   static const uint32_t flagMask = TYPE_FLAG_STRING | TYPE_FLAG_SYMBOL |
                                    TYPE_FLAG_LAZYARGS | TYPE_FLAG_ANYOBJECT |
-                                   IF_BIGINT(TYPE_FLAG_BIGINT, 0);
+                                   TYPE_FLAG_BIGINT;
   bool mayBeMarkable =
       typeSet->hasAnyFlag(flagMask) || typeSet->getObjectCount() != 0;
 
@@ -1776,13 +1770,9 @@ scan_value_array:
       }
     } else if (v.isSymbol()) {
       traverseEdge(obj, v.toSymbol());
-    }
-#ifdef ENABLE_BIGINT
-    else if (v.isBigInt()) {
+    } else if (v.isBigInt()) {
       traverseEdge(obj, v.toBigInt());
-    }
-#endif
-    else if (v.isPrivateGCThing()) {
+    } else if (v.isPrivateGCThing()) {
       // v.toGCCellPtr cannot be inlined, so construct one manually.
       Cell* cell = v.toGCThing();
       traverseEdge(obj, JS::GCCellPtr(cell, cell->getTraceKind()));
@@ -1803,9 +1793,9 @@ scan_obj : {
   ObjectGroup* group = obj->groupFromGC();
   traverseEdge(obj, group);
 
-  NativeObject* nobj = CallTraceHook([this, obj](auto thingp) {
-                                       this->traverseEdge(obj, *thingp);
-                                     }, this, obj, CheckGeneration::DoChecks);
+  NativeObject* nobj = CallTraceHook(
+      [this, obj](auto thingp) { this->traverseEdge(obj, *thingp); }, this, obj,
+      CheckGeneration::DoChecks);
   if (!nobj) {
     return;
   }
@@ -2913,9 +2903,9 @@ void js::gc::StoreBuffer::ValueEdge::trace(TenuringTracer& mover) const {
 
 // Visit all object children of the object and trace them.
 void js::TenuringTracer::traceObject(JSObject* obj) {
-  NativeObject* nobj = CallTraceHook([this](auto thingp) {
-                                       this->traverse(thingp);
-                                     }, this, obj, CheckGeneration::NoChecks);
+  NativeObject* nobj =
+      CallTraceHook([this](auto thingp) { this->traverse(thingp); }, this, obj,
+                    CheckGeneration::NoChecks);
   if (!nobj) {
     return;
   }
@@ -3601,9 +3591,8 @@ static bool UnmarkGrayGCThing(JSRuntime* rt, JS::GCCellPtr thing) {
   mozilla::recordreplay::AutoDisallowThreadEvents d;
 
   AutoGeckoProfilerEntry profilingStackFrame(
-    rt->mainContextFromOwnThread(),
-    "UnmarkGrayGCThing",
-    ProfilingStackFrame::Category::GCCC);
+      rt->mainContextFromOwnThread(), "UnmarkGrayGCThing",
+      ProfilingStackFrame::Category::GCCC);
 
   UnmarkGrayTracer unmarker(rt);
   gcstats::AutoPhase innerPhase(rt->gc.stats(),
