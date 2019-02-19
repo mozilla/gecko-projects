@@ -70,6 +70,11 @@ class SocketProcessChild final : public PSocketProcessChild {
   PAltServiceChild* AllocPAltServiceChild();
   bool DeallocPAltServiceChild(PAltServiceChild* aActor);
 
+  mozilla::ipc::IPCResult RecvNotifySocketProcessObservers(
+      const nsCString& aTopic, const nsString& aData);
+  mozilla::ipc::IPCResult RecvTopLevelOuterWindowId(
+      const uint64_t& aOuterWindowId);
+
   void CleanUp();
   void DestroySocketProcessBridgeParent(ProcessId aId);
 

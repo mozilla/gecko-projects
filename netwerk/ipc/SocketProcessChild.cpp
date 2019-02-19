@@ -20,6 +20,7 @@
 #include "mozilla/ipc/PParentToChildStreamChild.h"
 #include "mozilla/Preferences.h"
 #include "nsDebugImpl.h"
+#include "nsSupportsPrimitives.h"
 #include "nsThreadManager.h"
 #include "ProcessUtils.h"
 #include "SocketProcessBridgeParent.h"
@@ -299,6 +300,25 @@ bool SocketProcessChild::DeallocPWebrtcTCPSocketChild(
   child->ReleaseIPDLReference();
 #endif
   return true;
+}
+
+mozilla::ipc::IPCResult SocketProcessChild::RecvNotifySocketProcessObservers(
+    const nsCString& aTopic, const nsString& aData) {
+  if (gHttpHandler) {
+    gHttpHandler->Observe(nullptr, aTopic.get(), aData.get());
+  }
+  return IPC_OK();
+}
+
+mozilla::ipc::IPCResult SocketProcessChild::RecvTopLevelOuterWindowId(
+    const uint64_t& aOuterWindowId) {
+  if (gHttpHandler) {
+    nsCOMPtr<nsISupportsPRUint64> wrapper = new nsSupportsPRUint64();
+    wrapper->SetData(aOuterWindowId);
+    gHttpHandler->Observe(
+        wrapper, "net:current-toplevel-outer-content-windowid", nullptr);
+  }
+  return IPC_OK();
 }
 
 PDNSRequestChild* SocketProcessChild::AllocPDNSRequestChild(

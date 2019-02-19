@@ -66,6 +66,7 @@
 #include "mozilla/net/NeckoParent.h"
 #include "mozilla/net/RequestContextService.h"
 #include "mozilla/net/SocketProcessChild.h"
+#include "mozilla/net/SocketProcessParent.h"
 #include "mozilla/ipc/URIUtils.h"
 #include "mozilla/Telemetry.h"
 #include "mozilla/Unused.h"
@@ -2134,6 +2135,15 @@ nsHttpHandler::GetAltSvcCacheKeys(nsTArray<nsCString>& value) {
 // nsHttpHandler::nsIObserver
 //-----------------------------------------------------------------------------
 
+static void NotifySocketProcessObservers(const char *topic,
+                                         const char16_t *data) {
+  if (gIOService->UseSocketProcess() && gIOService->SocketProcessReady()) {
+    Unused << SocketProcessParent::GetSingleton()
+                  ->SendNotifySocketProcessObservers(nsCString(topic),
+                                                     nsString(data));
+  }
+}
+
 NS_IMETHODIMP
 nsHttpHandler::Observe(nsISupports* subject, const char* topic,
                        const char16_t* data) {
@@ -2177,11 +2187,16 @@ nsHttpHandler::Observe(nsISupports* subject, const char* topic,
     } else {
       Telemetry::Accumulate(Telemetry::TCP_FAST_OPEN_STATUS, 4);
     }
+    NotifySocketProcessObservers(topic, data);
   } else if (!strcmp(topic, "profile-change-net-restore")) {
     // initialize connection manager
     rv = InitConnectionMgr();
     MOZ_ASSERT(NS_SUCCEEDED(rv));
-    mAltSvcCache = MakeUnique<AltSvcCache>();
+
+    if (XRE_IsParentProcess()) {
+      mAltSvcCache = MakeUnique<AltSvcCache>();
+    }
+    NotifySocketProcessObservers(topic, data);
   } else if (!strcmp(topic, "net:clear-active-logins")) {
     Unused << mAuthCache.ClearAll();
     Unused << mPrivateAuthCache.ClearAll();
@@ -2189,6 +2204,7 @@ nsHttpHandler::Observe(nsISupports* subject, const char* topic,
     if (mConnMgr) {
       mConnMgr->AbortAndCloseAllConnections(0, nullptr);
     }
+    NotifySocketProcessObservers(topic, data);
   } else if (!strcmp(topic, "net:prune-dead-connections")) {
     if (mConnMgr) {
       rv = mConnMgr->PruneDeadConnections();
@@ -2197,6 +2213,7 @@ nsHttpHandler::Observe(nsISupports* subject, const char* topic,
              static_cast<uint32_t>(rv)));
       }
     }
+    NotifySocketProcessObservers(topic, data);
   } else if (!strcmp(topic, "net:prune-all-connections")) {
     if (mConnMgr) {
       rv = mConnMgr->DoShiftReloadConnectionCleanup(nullptr);
@@ -2210,6 +2227,7 @@ nsHttpHandler::Observe(nsISupports* subject, const char* topic,
              static_cast<uint32_t>(rv)));
       }
     }
+    NotifySocketProcessObservers(topic, data);
 #if 0
     } else if (!strcmp(topic, "net:failed-to-process-uri-content")) {
          // nop right now - we used to cancel h1 pipelines based on this,
@@ -2219,6 +2237,7 @@ nsHttpHandler::Observe(nsISupports* subject, const char* topic,
   } else if (!strcmp(topic, "last-pb-context-exited")) {
     Unused << mPrivateAuthCache.ClearAll();
     if (mAltSvcCache) {
+      MOZ_ASSERT(XRE_IsParentProcess());
       mAltSvcCache->ClearAltServiceMappings();
     }
   } else if (!strcmp(topic, "browser:purge-session-history")) {
@@ -2231,8 +2250,10 @@ nsHttpHandler::Observe(nsISupports* subject, const char* topic,
       }
     }
     if (mAltSvcCache) {
+      MOZ_ASSERT(XRE_IsParentProcess());
       mAltSvcCache->ClearAltServiceMappings();
     }
+    NotifySocketProcessObservers(topic, data);
   } else if (!strcmp(topic, NS_NETWORK_LINK_TOPIC)) {
     nsAutoCString converted = NS_ConvertUTF16toUTF8(data);
     if (!strcmp(converted.get(), NS_NETWORK_LINK_DATA_CHANGED)) {
@@ -2248,6 +2269,7 @@ nsHttpHandler::Observe(nsISupports* subject, const char* topic,
         }
       }
     }
+    NotifySocketProcessObservers(topic, data);
   } else if (!strcmp(topic, "application-background")) {
     // going to the background on android means we should close
     // down idle connections for power conservation
@@ -2258,6 +2280,7 @@ nsHttpHandler::Observe(nsISupports* subject, const char* topic,
              static_cast<uint32_t>(rv)));
       }
     }
+    NotifySocketProcessObservers(topic, data);
   } else if (!strcmp(topic, "net:current-toplevel-outer-content-windowid")) {
     nsCOMPtr<nsISupportsPRUint64> wrapper = do_QueryInterface(subject);
     MOZ_RELEASE_ASSERT(wrapper);
@@ -2265,6 +2288,12 @@ nsHttpHandler::Observe(nsISupports* subject, const char* topic,
     uint64_t windowId = 0;
     wrapper->GetData(&windowId);
     MOZ_ASSERT(windowId);
+
+    if (gIOService->UseSocketProcess() && gIOService->SocketProcessReady()) {
+      Unused << SocketProcessParent::GetSingleton()->SendTopLevelOuterWindowId(
+          windowId);
+      return NS_OK;
+    }
 
     static uint64_t sCurrentTopLevelOuterContentWindowId = 0;
     if (sCurrentTopLevelOuterContentWindowId != windowId) {
@@ -2279,6 +2308,7 @@ nsHttpHandler::Observe(nsISupports* subject, const char* topic,
     // We have detected a captive portal and we will reset the Fast Open
     // failure counter.
     ResetFastOpenConsecutiveFailureCounter();
+    NotifySocketProcessObservers(topic, data);
   } else if (!strcmp(topic, "psm:user-certificate-added")) {
     // A user certificate has just been added.
     // We should immediately disable speculative connect

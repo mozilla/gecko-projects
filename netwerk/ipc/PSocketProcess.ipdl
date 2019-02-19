@@ -72,6 +72,8 @@ child:
   async SetOffline(bool offline);
   async InitSocketProcessBridgeParent(ProcessId processId, Endpoint<PSocketProcessBridgeParent> endpoint);
   async InitProfiler(Endpoint<PProfilerChild> aEndpoint);
+  async NotifySocketProcessObservers(nsCString topic, nsString data);
+  async TopLevelOuterWindowId(uint64_t outerWindowId);
 
   // test-only
   async SocketProcessTelemetryPing();

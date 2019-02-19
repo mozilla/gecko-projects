@@ -448,7 +448,23 @@ bool nsIOService::SocketProcessReady() {
   return mSocketProcess && mSocketProcess->IsConnected();
 }
 
-void nsIOService::NotifySocketProcessPrefsChanged(const char* aName) {
+static bool sUseSocketProcess = false;
+static bool sUseSocketProcessChecked = false;
+
+bool nsIOService::UseSocketProcess() {
+  if (sUseSocketProcessChecked) {
+    return sUseSocketProcess;
+  }
+
+  sUseSocketProcessChecked = true;
+  if (IsSocketProcessEnabled()) {
+    sUseSocketProcess = Preferences::GetBool(
+        "network.http.network_access_on_socket_process.enabled", true);
+  }
+  return sUseSocketProcess;
+}
+
+void nsIOService::NotifySocketProcessPrefsChanged(const char *aName) {
   MOZ_ASSERT(NS_IsMainThread());
 
   if (!XRE_IsParentProcess()) {

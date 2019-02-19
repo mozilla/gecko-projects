@@ -156,22 +156,6 @@ namespace net {
 
 namespace {
 
-static bool sUseSocketProcess = false;
-static bool sUseSocketProcessChecked = false;
-
-bool UseSocketProcess() {
-  if (sUseSocketProcessChecked) {
-    return sUseSocketProcess;
-  }
-
-  sUseSocketProcessChecked = true;
-  if (gIOService->IsSocketProcessEnabled()) {
-    sUseSocketProcess = Preferences::GetBool(
-        "network.http.network_access_on_socket_process.enabled", true);
-  }
-  return sUseSocketProcess;
-}
-
 static bool sRCWNEnabled = false;
 static uint32_t sRCWNQueueSizeNormal = 50;
 static uint32_t sRCWNQueueSizePriority = 10;
@@ -1269,8 +1253,8 @@ nsresult nsHttpChannel::SetupTransaction() {
                                          getter_AddRefs(callbacks));
 
   // create the transaction object
-  if (UseSocketProcess()) {
-    if (!gIOService->SocketProcessReady()) {
+  if (gIOService->UseSocketProcess()) {
+    if (NS_WARN_IF(!gIOService->SocketProcessReady())) {
       return NS_ERROR_NOT_AVAILABLE;
     }
 
@@ -1287,7 +1271,6 @@ nsresult nsHttpChannel::SetupTransaction() {
     }
 
     mTransaction = transParent;
-
   } else {
     mTransaction = new nsHttpTransaction();
     LOG(("nsHttpChannel %p created HttpTransaction %p\n", this,
@@ -6516,7 +6499,8 @@ nsHttpChannel::AsyncOpen(nsIStreamListener* aListener) {
 
   mListener = listener;
 
-  if (UseSocketProcess() && !gIOService->IsSocketProcessLaunchComplete()) {
+  if (gIOService->UseSocketProcess() &&
+      !gIOService->IsSocketProcessLaunchComplete()) {
     RefPtr<nsHttpChannel> self = this;
     gIOService->CallOrWaitForSocketProcess(
         [self]() { self->AsyncOpenFinal(TimeStamp::Now()); });
