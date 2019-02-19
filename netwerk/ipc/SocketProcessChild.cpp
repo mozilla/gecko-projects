@@ -7,6 +7,7 @@
 #include "SocketProcessLogging.h"
 
 #include "base/task.h"
+#include "AltServiceChild.h"
 #include "HttpTransactionChild.h"
 #include "mozilla/Assertions.h"
 #include "mozilla/dom/MemoryReportRequest.h"
@@ -270,6 +271,15 @@ void SocketProcessChild::DestroySocketProcessBridgeParent(ProcessId aId) {
   MOZ_ASSERT(NS_IsMainThread());
 
   mSocketProcessBridgeParentMap.Remove(aId);
+}
+
+PAltServiceChild* SocketProcessChild::AllocPAltServiceChild() {
+  return new AltServiceChild();
+}
+
+bool SocketProcessChild::DeallocPAltServiceChild(PAltServiceChild* aActor) {
+  delete static_cast<AltServiceChild*>(aActor);
+  return true;
 }
 
 PWebrtcTCPSocketChild* SocketProcessChild::AllocPWebrtcTCPSocketChild(

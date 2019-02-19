@@ -83,6 +83,8 @@ class SocketProcessParent final
   bool DeallocPChildToParentStreamParent(PChildToParentStreamParent* aActor);
   PParentToChildStreamParent* AllocPParentToChildStreamParent();
   bool DeallocPParentToChildStreamParent(PParentToChildStreamParent* aActor);
+  PAltServiceParent* AllocPAltServiceParent();
+  bool DeallocPAltServiceParent(PAltServiceParent* aActor);
 
  private:
   SocketProcessHost* mHost;

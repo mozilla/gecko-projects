@@ -10,6 +10,7 @@ include protocol PParentToChildStream;
 include protocol PDNSRequest;
 include protocol PSocketProcessBridge;
 include protocol PProfiler;
+include protocol PAltService;
 include protocol PWebrtcTCPSocket;
 
 include MemoryReportTypes;
@@ -37,6 +38,7 @@ protocol PSocketProcess
   manages PParentToChildStream;
   manages PDNSRequest;
   manages PWebrtcTCPSocket;
+  manages PAltService;
 
 parent:
   async InitCrashReporter(Shmem shmem, NativeThreadId threadId);
@@ -51,6 +53,7 @@ parent:
   async UpdateChildKeyedScalars(KeyedScalarAction[] actions);
   async RecordChildEvents(ChildEventData[] events);
   async RecordDiscardedData(DiscardedData data);
+  async PAltService();
 
   /* tabId is only required for web-proxy support, which isn't always needed */
   async PWebrtcTCPSocket(TabId? tabId);

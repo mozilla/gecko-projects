@@ -22,6 +22,7 @@
 #define NO_ESNI_SUCCESSFUL 2
 #define NO_ESNI_FAILED 3
 
+#include "AltServiceChild.h"
 #include "ASpdySession.h"
 #include "mozilla/ChaosMode.h"
 #include "mozilla/Telemetry.h"
@@ -1010,7 +1011,11 @@ void nsHttpConnection::Close(nsresult reason, bool aIsShutdown) {
     if (((reason == NS_ERROR_NET_RESET) ||
          (NS_ERROR_GET_MODULE(reason) == NS_ERROR_MODULE_SECURITY)) &&
         mConnInfo && !(mTransactionCaps & NS_HTTP_ERROR_SOFTLY)) {
-      gHttpHandler->ConnMgr()->ClearHostMapping(mConnInfo);
+      if (XRE_IsSocketProcess()) {
+        AltServiceChild::GetSingleton()->ClearHostMapping(mConnInfo);
+      } else {
+        gHttpHandler->AltServiceCache()->ClearHostMapping(mConnInfo);
+      }
     }
 
     if (mSocketTransport) {

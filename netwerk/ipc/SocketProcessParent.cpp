@@ -5,6 +5,7 @@
 
 #include "SocketProcessParent.h"
 
+#include "AltServiceParent.h"
 #include "HttpTransactionParent.h"
 #include "mozilla/ipc/FileDescriptorSetParent.h"
 #include "SocketProcessHost.h"
@@ -211,6 +212,15 @@ SocketProcessParent::AllocPParentToChildStreamParent() {
 bool SocketProcessParent::DeallocPParentToChildStreamParent(
     PParentToChildStreamParent* aActor) {
   delete aActor;
+  return true;
+}
+
+PAltServiceParent* SocketProcessParent::AllocPAltServiceParent() {
+  return new AltServiceParent();
+}
+
+bool SocketProcessParent::DeallocPAltServiceParent(PAltServiceParent* aActor) {
+  delete static_cast<AltServiceParent*>(aActor);
   return true;
 }
 

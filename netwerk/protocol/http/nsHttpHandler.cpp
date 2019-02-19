@@ -65,6 +65,7 @@
 #include "mozilla/net/NeckoChild.h"
 #include "mozilla/net/NeckoParent.h"
 #include "mozilla/net/RequestContextService.h"
+#include "mozilla/net/SocketProcessChild.h"
 #include "mozilla/ipc/URIUtils.h"
 #include "mozilla/Telemetry.h"
 #include "mozilla/Unused.h"
@@ -76,6 +77,7 @@
 #include "mozilla/dom/Promise.h"
 #include "mozilla/dom/network/Connection.h"
 
+#include "AltServiceChild.h"
 #include "nsNSSComponent.h"
 
 #if defined(XP_UNIX)
@@ -487,6 +489,12 @@ nsresult nsHttpHandler::Init() {
 
   rv = InitConnectionMgr();
   if (NS_FAILED(rv)) return rv;
+
+  if (XRE_IsSocketProcess()) {
+    SocketProcessChild::GetSingleton()->SendPAltServiceConstructor();
+  } else if (XRE_IsParentProcess()) {
+    mAltSvcCache = MakeUnique<AltSvcCache>();
+  }
 
   mRequestContextService = RequestContextService::GetOrCreate();
 
@@ -2119,7 +2127,7 @@ nsHttpHandler::GetMisc(nsACString& value) {
 
 NS_IMETHODIMP
 nsHttpHandler::GetAltSvcCacheKeys(nsTArray<nsCString>& value) {
-  return mConnMgr->GetAltSvcCacheKeys(value);
+  return mAltSvcCache->GetAltSvcCacheKeys(value);
 }
 
 //-----------------------------------------------------------------------------
@@ -2173,6 +2181,7 @@ nsHttpHandler::Observe(nsISupports* subject, const char* topic,
     // initialize connection manager
     rv = InitConnectionMgr();
     MOZ_ASSERT(NS_SUCCEEDED(rv));
+    mAltSvcCache = MakeUnique<AltSvcCache>();
   } else if (!strcmp(topic, "net:clear-active-logins")) {
     Unused << mAuthCache.ClearAll();
     Unused << mPrivateAuthCache.ClearAll();
@@ -2209,8 +2218,8 @@ nsHttpHandler::Observe(nsISupports* subject, const char* topic,
 #endif
   } else if (!strcmp(topic, "last-pb-context-exited")) {
     Unused << mPrivateAuthCache.ClearAll();
-    if (mConnMgr) {
-      mConnMgr->ClearAltServiceMappings();
+    if (mAltSvcCache) {
+      mAltSvcCache->ClearAltServiceMappings();
     }
   } else if (!strcmp(topic, "browser:purge-session-history")) {
     if (mConnMgr) {
@@ -2220,7 +2229,9 @@ nsHttpHandler::Observe(nsISupports* subject, const char* topic,
             &nsHttpConnectionMgr::ClearConnectionHistory);
         gSocketTransportService->Dispatch(event, NS_DISPATCH_NORMAL);
       }
-      mConnMgr->ClearAltServiceMappings();
+    }
+    if (mAltSvcCache) {
+      mAltSvcCache->ClearAltServiceMappings();
     }
   } else if (!strcmp(topic, NS_NETWORK_LINK_TOPIC)) {
     nsAutoCString converted = NS_ConvertUTF16toUTF8(data);

@@ -13,6 +13,7 @@
 #include "nsHttpConnectionMgr.h"
 #include "ASpdySession.h"
 #include "HttpTrafficAnalyzer.h"
+#include "AlternateServices.h"
 
 #include "mozilla/Mutex.h"
 #include "mozilla/StaticPtr.h"
@@ -246,6 +247,10 @@ class nsHttpHandler final : public nsIHttpProtocolHandler,
     return aPrivate ? &mPrivateAuthCache : &mAuthCache;
   }
   nsHttpConnectionMgr* ConnMgr() { return mConnMgr; }
+  AltSvcCache *AltServiceCache() const {
+    MOZ_ASSERT(XRE_IsParentProcess());
+    return mAltSvcCache.get();
+  }
 
   // cache support
   uint32_t GenerateUniqueID() { return ++mLastUniqueID; }
@@ -328,15 +333,15 @@ class nsHttpHandler final : public nsIHttpProtocolHandler,
   void UpdateAltServiceMapping(AltSvcMapping* map, nsProxyInfo* proxyInfo,
                                nsIInterfaceRequestor* callbacks, uint32_t caps,
                                const OriginAttributes& originAttributes) {
-    mConnMgr->UpdateAltServiceMapping(map, proxyInfo, callbacks, caps,
-                                      originAttributes);
+    mAltSvcCache->UpdateAltServiceMapping(map, proxyInfo, callbacks, caps,
+                                          originAttributes);
   }
 
   already_AddRefed<AltSvcMapping> GetAltServiceMapping(
       const nsACString& scheme, const nsACString& host, int32_t port, bool pb,
       bool isolated, const nsACString& topWindowOrigin,
       const OriginAttributes& originAttributes) {
-    return mConnMgr->GetAltServiceMapping(scheme, host, port, pb, isolated,
+    return mAltSvcCache->GetAltServiceMapping(scheme, host, port, pb, isolated,
                                           topWindowOrigin, originAttributes);
   }
 
@@ -502,6 +507,7 @@ class nsHttpHandler final : public nsIHttpProtocolHandler,
   // the connection manager
   RefPtr<nsHttpConnectionMgr> mConnMgr;
 
+  UniquePtr<AltSvcCache> mAltSvcCache;
   // This thread is used for performing operations that should not block
   // the main thread.
   nsCOMPtr<nsIThread> mBackgroundThread;

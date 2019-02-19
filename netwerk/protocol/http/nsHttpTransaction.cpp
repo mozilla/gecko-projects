@@ -9,6 +9,7 @@
 
 #include "base/basictypes.h"
 
+#include "AltServiceChild.h"
 #include "nsHttpBasicAuth.h"
 #include "nsHttpChunkedDecoder.h"
 #include "nsHttpDigestAuth.h"
@@ -1679,7 +1680,11 @@ nsresult nsHttpTransaction::HandleContentStart() {
         break;
       case 421:
         LOG(("Misdirected Request.\n"));
-        gHttpHandler->ConnMgr()->ClearHostMapping(mConnInfo);
+        if (XRE_IsSocketProcess()) {
+          AltServiceChild::GetSingleton()->ClearHostMapping(mConnInfo);
+        } else {
+          gHttpHandler->AltServiceCache()->ClearHostMapping(mConnInfo);
+        }
 
         // retry on a new connection - just in case
         if (!mRestartCount) {

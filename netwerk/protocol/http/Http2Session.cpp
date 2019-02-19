@@ -2692,13 +2692,17 @@ nsresult Http2Session::RecvAltSvc(Http2Session* self) {
     }
   }
 
-  nsCOMPtr<nsISupports> callbacks;
-  self->mConnection->GetSecurityInfo(getter_AddRefs(callbacks));
-  nsCOMPtr<nsIInterfaceRequestor> irCallbacks = do_QueryInterface(callbacks);
+  // TODO: AltSvcMapping::ProcessHeader needs the security callback, so we
+  // can only wait until bug 1512479 is done.
+  if (!XRE_IsSocketProcess()) {
+    nsCOMPtr<nsISupports> callbacks;
+    self->mConnection->GetSecurityInfo(getter_AddRefs(callbacks));
+    nsCOMPtr<nsIInterfaceRequestor> irCallbacks = do_QueryInterface(callbacks);
 
-  RefPtr<UpdateAltSvcEvent> event =
-      new UpdateAltSvcEvent(altSvcFieldValue, origin, ci, irCallbacks);
-  NS_DispatchToMainThread(event);
+    RefPtr<UpdateAltSvcEvent> event =
+        new UpdateAltSvcEvent(altSvcFieldValue, origin, ci, irCallbacks);
+    NS_DispatchToMainThread(event);
+  }
   self->ResetDownstreamState();
   return NS_OK;
 }

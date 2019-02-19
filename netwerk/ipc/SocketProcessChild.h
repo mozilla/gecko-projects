@@ -67,6 +67,8 @@ class SocketProcessChild final : public PSocketProcessChild {
   bool DeallocPChildToParentStreamChild(PChildToParentStreamChild* aActor);
   PParentToChildStreamChild* AllocPParentToChildStreamChild();
   bool DeallocPParentToChildStreamChild(PParentToChildStreamChild* aActor);
+  PAltServiceChild* AllocPAltServiceChild();
+  bool DeallocPAltServiceChild(PAltServiceChild* aActor);
 
   void CleanUp();
   void DestroySocketProcessBridgeParent(ProcessId aId);
