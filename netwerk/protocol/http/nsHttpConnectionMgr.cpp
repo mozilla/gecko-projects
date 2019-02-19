@@ -446,14 +446,23 @@ nsresult nsHttpConnectionMgr::VerifyTraffic() {
   return PostEvent(&nsHttpConnectionMgr::OnMsgVerifyTraffic);
 }
 
+class nsCStringWrapper : public ARefBase {
+ public:
+  explicit nsCStringWrapper(const nsACString &aString) : mString(aString) {}
+  NS_INLINE_DECL_THREADSAFE_REFCOUNTING(nsCStringWrapper, override)
+
+  nsCString GetValue() { return mString; }
+
+ private:
+  nsCString mString;
+  virtual ~nsCStringWrapper() = default;
+};
+
 nsresult nsHttpConnectionMgr::DoShiftReloadConnectionCleanup(
-    nsHttpConnectionInfo* aCI) {
-  RefPtr<nsHttpConnectionInfo> ci;
-  if (aCI) {
-    ci = aCI->Clone();
-  }
+    const nsACString &aHashKey) {
+  RefPtr<nsCStringWrapper> wrapper = new nsCStringWrapper(aHashKey);
   return PostEvent(&nsHttpConnectionMgr::OnMsgDoShiftReloadConnectionCleanup, 0,
-                   ci);
+                   wrapper);
 }
 
 class SpeculativeConnectArgs : public ARefBase {
@@ -2769,13 +2778,16 @@ void nsHttpConnectionMgr::OnMsgDoShiftReloadConnectionCleanup(int32_t,
   LOG(("nsHttpConnectionMgr::OnMsgDoShiftReloadConnectionCleanup\n"));
   MOZ_ASSERT(OnSocketThread(), "not on socket thread");
 
-  nsHttpConnectionInfo* ci = static_cast<nsHttpConnectionInfo*>(param);
+  nsCStringWrapper *wrapper = static_cast<nsCStringWrapper *>(param);
+  nsCString hashKey = wrapper->GetValue();
 
   for (auto iter = mCT.Iter(); !iter.Done(); iter.Next()) {
     ClosePersistentConnections(iter.Data());
   }
 
-  if (ci) ResetIPFamilyPreference(ci);
+  if (!hashKey.IsEmpty()) {
+    ResetIPFamilyPreference(hashKey);
+  }
 }
 
 void nsHttpConnectionMgr::OnMsgReclaimConnection(int32_t, ARefBase* param) {
@@ -5289,9 +5301,9 @@ bool nsHttpConnectionMgr::GetConnectionData(nsTArray<HttpRetParams>* aArg) {
   return true;
 }
 
-void nsHttpConnectionMgr::ResetIPFamilyPreference(nsHttpConnectionInfo* ci) {
+void nsHttpConnectionMgr::ResetIPFamilyPreference(const nsACString &aHashKey) {
   MOZ_ASSERT(OnSocketThread(), "not on socket thread");
-  nsConnectionEntry* ent = mCT.GetWeak(ci->HashKey());
+  nsConnectionEntry *ent = mCT.GetWeak(aHashKey);
   if (ent) {
     ent->ResetIPFamilyPreference();
   }

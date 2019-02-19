@@ -6780,13 +6780,23 @@ nsresult nsHttpChannel::BeginConnect() {
     // just the initial document resets the whole pool
     if (mLoadFlags & LOAD_INITIAL_DOCUMENT_URI) {
       gHttpHandler->AltServiceCache()->ClearAltServiceMappings();
-      rv = gHttpHandler->ConnMgr()->DoShiftReloadConnectionCleanup(
-          mConnectionInfo);
-      if (NS_FAILED(rv)) {
-        LOG(
-            ("nsHttpChannel::BeginConnect "
-             "DoShiftReloadConnectionCleanup failed: %08x [this=%p]",
-             static_cast<uint32_t>(rv), this));
+      if (gIOService->UseSocketProcess()) {
+        if (gIOService->SocketProcessReady()) {
+          Unused << SocketProcessParent::GetSingleton()
+                        ->SendDoShiftReloadConnectionCleanup(
+                            mConnectionInfo->HashKey());
+        } else {
+          rv = NS_ERROR_NOT_AVAILABLE;
+        }
+      } else {
+        rv = gHttpHandler->ConnMgr()->DoShiftReloadConnectionCleanup(
+            mConnectionInfo->HashKey());
+        if (NS_FAILED(rv)) {
+          LOG(
+              ("nsHttpChannel::BeginConnect "
+               "DoShiftReloadConnectionCleanup failed: %08x [this=%p]",
+               static_cast<uint32_t>(rv), this));
+        }
       }
     }
   }

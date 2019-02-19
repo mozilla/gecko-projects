@@ -384,5 +384,20 @@ mozilla::ipc::IPCResult SocketProcessChild::RecvGetHttpConnectionData(
   return IPC_OK();
 }
 
+mozilla::ipc::IPCResult SocketProcessChild::RecvDoShiftReloadConnectionCleanup(
+    const nsCString& hashKey) {
+  if (gHttpHandler) {
+    nsresult rv =
+        gHttpHandler->ConnMgr()->DoShiftReloadConnectionCleanup(hashKey);
+    if (NS_FAILED(rv)) {
+      LOG(
+          ("SocketProcessChild::RecvDoShiftReloadConnectionCleanup "
+           "DoShiftReloadConnectionCleanup failed: %08x ",
+           static_cast<uint32_t>(rv)));
+    }
+  }
+  return IPC_OK();
+}
+
 }  // namespace net
 }  // namespace mozilla

@@ -137,9 +137,10 @@ class nsHttpConnectionMgr final : public nsIObserver {
   MOZ_MUST_USE nsresult VerifyTraffic();
 
   // Close all idle persistent connections and prevent any active connections
-  // from being reused. Optional connection info resets CI specific
+  // from being reused. Connection info hash key resets CI specific
   // information such as Happy Eyeballs history.
-  MOZ_MUST_USE nsresult DoShiftReloadConnectionCleanup(nsHttpConnectionInfo*);
+  MOZ_MUST_USE nsresult
+  DoShiftReloadConnectionCleanup(const nsACString &aHashKey);
 
   // called to get a reference to the socket transport service.  the socket
   // transport service is not available when the connection manager is down.
@@ -218,7 +219,7 @@ class nsHttpConnectionMgr final : public nsIObserver {
 
   bool GetConnectionData(nsTArray<HttpRetParams>*);
 
-  void ResetIPFamilyPreference(nsHttpConnectionInfo*);
+  void ResetIPFamilyPreference(const nsACString& aHashKey);
 
   uint16_t MaxRequestDelay() { return mMaxRequestDelay; }
 
