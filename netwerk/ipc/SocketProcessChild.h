@@ -74,6 +74,8 @@ class SocketProcessChild final : public PSocketProcessChild {
       const nsCString& aTopic, const nsString& aData);
   mozilla::ipc::IPCResult RecvTopLevelOuterWindowId(
       const uint64_t& aOuterWindowId);
+  mozilla::ipc::IPCResult RecvGetHttpConnectionData(
+      GetHttpConnectionDataResolver&& aResolve);
 
   void CleanUp();
   void DestroySocketProcessBridgeParent(ProcessId aId);

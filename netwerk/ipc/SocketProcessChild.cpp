@@ -8,6 +8,7 @@
 
 #include "base/task.h"
 #include "AltServiceChild.h"
+#include "HttpInfo.h"
 #include "HttpTransactionChild.h"
 #include "mozilla/Assertions.h"
 #include "mozilla/dom/MemoryReportRequest.h"
@@ -20,6 +21,7 @@
 #include "mozilla/ipc/PParentToChildStreamChild.h"
 #include "mozilla/Preferences.h"
 #include "nsDebugImpl.h"
+#include "nsSocketTransportService2.h"
 #include "nsSupportsPrimitives.h"
 #include "nsThreadManager.h"
 #include "ProcessUtils.h"
@@ -334,6 +336,52 @@ bool SocketProcessChild::DeallocPDNSRequestChild(PDNSRequestChild* aChild) {
   DNSRequestChild* p = static_cast<DNSRequestChild*>(aChild);
   p->ReleaseIPDLReference();
   return true;
+}
+
+class HttpConnectionDataResolver final {
+ public:
+  NS_INLINE_DECL_THREADSAFE_REFCOUNTING(HttpConnectionDataResolver)
+
+  explicit HttpConnectionDataResolver(
+      SocketProcessChild::GetHttpConnectionDataResolver&& aResolve)
+      : mResolve(std::move(aResolve)) {}
+
+  void OnResolve(nsTArray<HttpRetParams>&& aData) {
+    MOZ_ASSERT(OnSocketThread());
+
+    RefPtr<HttpConnectionDataResolver> self = this;
+    mData = std::move(aData);
+    NS_DispatchToMainThread(NS_NewRunnableFunction(
+        "net::HttpConnectionDataResolver::OnResolve",
+        [self{std::move(self)}]() { self->mResolve(std::move(self->mData)); }));
+  }
+
+ private:
+  ~HttpConnectionDataResolver() = default;
+
+  SocketProcessChild::GetHttpConnectionDataResolver mResolve;
+  nsTArray<HttpRetParams> mData;
+};
+
+mozilla::ipc::IPCResult SocketProcessChild::RecvGetHttpConnectionData(
+    GetHttpConnectionDataResolver&& aResolve) {
+  if (!gSocketTransportService) {
+    aResolve(nsTArray<HttpRetParams>());
+    return IPC_OK();
+  }
+
+  RefPtr<HttpConnectionDataResolver> resolver =
+      new HttpConnectionDataResolver(std::move(aResolve));
+  gSocketTransportService->Dispatch(
+      NS_NewRunnableFunction(
+          "net::SocketProcessChild::RecvGetHttpConnectionData",
+          [resolver{std::move(resolver)}]() {
+            nsTArray<HttpRetParams> data;
+            HttpInfo::GetHttpConnectionData(&data);
+            resolver->OnResolve(std::move(data));
+          }),
+      NS_DISPATCH_NORMAL);
+  return IPC_OK();
 }
 
 }  // namespace net

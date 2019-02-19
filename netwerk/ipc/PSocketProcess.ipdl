@@ -26,6 +26,7 @@ using mozilla::Telemetry::ChildEventData from "mozilla/TelemetryComms.h";
 using mozilla::Telemetry::DiscardedData from "mozilla/TelemetryComms.h";
 using base::ProcessId from "base/process.h";
 using mozilla::OriginAttributes from "mozilla/ipc/BackgroundUtils.h";
+using mozilla::net::HttpRetParams from "mozilla/net/DashboardTypes.h";
 
 namespace mozilla {
 namespace net {
@@ -74,6 +75,8 @@ child:
   async InitProfiler(Endpoint<PProfilerChild> aEndpoint);
   async NotifySocketProcessObservers(nsCString topic, nsString data);
   async TopLevelOuterWindowId(uint64_t outerWindowId);
+  async GetHttpConnectionData()
+    returns (HttpRetParams[] params);
 
   // test-only
   async SocketProcessTelemetryPing();
