@@ -963,17 +963,17 @@ void AltSvcCache::UpdateAltServiceMapping(
          "speculative connect started\n",
          this));
     // for https resources we only establish a connection
-    nsCOMPtr<nsIInterfaceRequestor> callbacks = new AltSvcOverride(aCallbacks);
-    RefPtr<AltSvcTransaction> nullTransaction =
-        new AltSvcTransaction(map, ci, aCallbacks, caps);
-    nsresult rv = gHttpHandler->ConnMgr()->SpeculativeConnect(
-        ci, callbacks, caps, nullTransaction);
-    if (NS_FAILED(rv)) {
-      LOG(
+
+    // TODO: fix this in bug 1527384.
+    /*nsCOMPtr<nsIInterfaceRequestor> callbacks = new
+    AltSvcOverride(aCallbacks); RefPtr<AltSvcTransaction> nullTransaction = new
+    AltSvcTransaction(map, ci, aCallbacks, caps); nsresult rv =
+    gHttpHandler->ConnMgr()->SpeculativeConnect( ci, callbacks, caps,
+    nullTransaction); if (NS_FAILED(rv)) { LOG(
           ("AltSvcCache::UpdateAltServiceMapping %p "
            "speculative connect failed with code %08x\n",
            this, static_cast<uint32_t>(rv)));
-    }
+    }*/
   } else {
     // for http:// resources we fetch .well-known too
     nsAutoCString origin(NS_LITERAL_CSTRING("http://"));

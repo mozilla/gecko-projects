@@ -8094,20 +8094,21 @@ nsresult nsHttpChannel::ContinueOnStopRequestAfterAuthRetry(
     return NS_OK;
   }
 
-  bool upgradeWebsocket = mUpgradeProtocolCallback && aTransWithStickyConn &&
+  // TODO: fix this in bug 1497249
+  /* bool upgradeWebsocket = mUpgradeProtocolCallback && aStickyConn &&
                           mResponseHead &&
                           ((mResponseHead->Status() == 101 &&
                             mResponseHead->Version() == HttpVersion::v1_1) ||
                            (mResponseHead->Status() == 200 &&
                             mResponseHead->Version() == HttpVersion::v2_0));
 
-  bool upgradeConnect = mUpgradeProtocolCallback && aTransWithStickyConn &&
+  bool upgradeConnect = mUpgradeProtocolCallback && aStickyConn &&
                         (mCaps & NS_HTTP_CONNECT_ONLY) && mResponseHead &&
                         mResponseHead->Status() == 200;
 
   if (upgradeWebsocket || upgradeConnect) {
     nsresult rv = gHttpHandler->ConnMgr()->CompleteUpgrade(
-        aTransWithStickyConn, mUpgradeProtocolCallback);
+        aStickyConn, mUpgradeProtocolCallback);
     if (NS_FAILED(rv)) {
       LOG(("  CompleteUpgrade failed with %" PRIx32,
            static_cast<uint32_t>(rv)));
@@ -8116,7 +8117,7 @@ nsresult nsHttpChannel::ContinueOnStopRequestAfterAuthRetry(
       // called with an error so the session is properly aborted.
       aStatus = rv;
     }
-  }
+  } */
 
   return ContinueOnStopRequest(aStatus, aIsFromNet, aContentComplete);
 }

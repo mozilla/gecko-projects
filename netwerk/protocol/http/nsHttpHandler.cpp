@@ -596,6 +596,13 @@ nsresult nsHttpHandler::InitConnectionMgr() {
     return NS_OK;
   }
 
+  if (XRE_IsParentProcess()) {
+    if (gIOService->UseSocketProcess()) {
+      return NS_OK;
+    }
+  }
+
+  MOZ_ASSERT(!gIOService->UseSocketProcess() || XRE_IsSocketProcess());
   nsresult rv;
 
   if (!mConnMgr) {
@@ -2688,8 +2695,10 @@ bool nsHttpHandler::IsBeforeLastActiveTabLoadOptimization(
 }
 
 void nsHttpHandler::BlacklistSpdy(const nsHttpConnectionInfo* ci) {
-  mConnMgr->BlacklistSpdy(ci);
-  mBlacklistedSpdyOrigins.PutEntry(ci->GetOrigin());
+  if (mConnMgr) {
+    mConnMgr->BlacklistSpdy(ci);
+    mBlacklistedSpdyOrigins.PutEntry(ci->GetOrigin());
+  }
 }
 
 bool nsHttpHandler::IsSpdyBlacklisted(const nsHttpConnectionInfo* ci) {
