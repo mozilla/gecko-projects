@@ -607,6 +607,8 @@ nsresult Predictor::Create(nsISupports *aOuter, const nsIID &aIID,
 
   RefPtr<Predictor> svc = new Predictor();
   if (IsNeckoChild()) {
+    NeckoChild::InitNeckoChild();
+
     // Child threads only need to be call into the public interface methods
     // so we don't bother with initialization
     return svc->QueryInterface(aIID, aResult);
@@ -1255,10 +1257,8 @@ nsresult Predictor::Prefetch(nsIURI *uri, nsIURI *referrer,
     return rv;
   }
 
-  nsCOMPtr<nsILoadInfo> loadInfo = channel->GetLoadInfo();
-  if (loadInfo) {
-    rv = loadInfo->SetOriginAttributes(originAttributes);
-  }
+  nsCOMPtr<nsILoadInfo> loadInfo = channel->LoadInfo();
+  rv = loadInfo->SetOriginAttributes(originAttributes);
 
   if (NS_FAILED(rv)) {
     PREDICTOR_LOG(

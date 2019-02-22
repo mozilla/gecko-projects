@@ -2412,8 +2412,7 @@ nsresult nsObjectLoadingContent::OpenChannel() {
           nsIRequest::LOAD_HTML_OBJECT_DATA);
   NS_ENSURE_SUCCESS(rv, rv);
   if (inherit) {
-    nsCOMPtr<nsILoadInfo> loadinfo = chan->GetLoadInfo();
-    NS_ENSURE_STATE(loadinfo);
+    nsCOMPtr<nsILoadInfo> loadinfo = chan->LoadInfo();
     loadinfo->SetPrincipalToInherit(thisContent->NodePrincipal());
   }
 
@@ -3181,12 +3180,12 @@ bool nsObjectLoadingContent::ShouldPlay(FallbackType& aReason) {
     NS_ENSURE_SUCCESS(rv, false);
     uint32_t permission;
     rv = permissionManager->TestPermissionFromPrincipal(
-        topDoc->NodePrincipal(), permissionString.Data(), &permission);
+        topDoc->NodePrincipal(), permissionString, &permission);
     NS_ENSURE_SUCCESS(rv, false);
     if (permission != nsIPermissionManager::UNKNOWN_ACTION) {
       uint64_t nowms = PR_Now() / 1000;
       permissionManager->UpdateExpireTime(
-          topDoc->NodePrincipal(), permissionString.Data(), false,
+          topDoc->NodePrincipal(), permissionString, false,
           nowms + sSessionTimeoutMinutes * 60 * 1000,
           nowms / 1000 +
               uint64_t(sPersistentTimeoutDays) * 24 * 60 * 60 * 1000);

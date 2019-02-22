@@ -588,7 +588,6 @@ void nsFrame::Init(nsIContent* aContent, nsContainerFrame* aParent,
                   NS_FRAME_MAY_BE_TRANSFORMED |
                   NS_FRAME_CAN_HAVE_ABSPOS_CHILDREN));
   } else {
-    mComputedStyle->StartImageLoads(*PresContext()->Document());
     PresContext()->ConstructedFrame();
   }
   if (GetParent()) {
@@ -618,7 +617,8 @@ void nsFrame::Init(nsIContent* aContent, nsContainerFrame* aParent,
   const nsStyleDisplay* disp = StyleDisplay();
   if (disp->HasTransform(this) ||
       (IsFrameOfType(eSupportsCSSTransforms) &&
-       nsLayoutUtils::HasAnimationOfProperty(this, eCSSProperty_transform))) {
+       nsLayoutUtils::HasAnimationOfPropertySet(
+           this, nsCSSPropertyIDSet::TransformLikeProperties()))) {
     // The frame gets reconstructed if we toggle the -moz-transform
     // property, so we can set this bit here and then ignore it.
     AddStateBits(NS_FRAME_MAY_BE_TRANSFORMED);
@@ -847,11 +847,9 @@ static void CompareLayers(
 }
 
 static void AddAndRemoveImageAssociations(
-    nsFrame* aFrame, const nsStyleImageLayers* aOldLayers,
+    ImageLoader& aImageLoader, nsFrame* aFrame,
+    const nsStyleImageLayers* aOldLayers,
     const nsStyleImageLayers* aNewLayers) {
-  ImageLoader* imageLoader =
-      aFrame->PresContext()->Document()->StyleImageLoader();
-
   // If the old context had a background-image image, or mask-image image,
   // and new context does not have the same image, clear the image load
   // notifier (which keeps the image loading, if it still is) for the frame.
@@ -861,16 +859,14 @@ static void AddAndRemoveImageAssociations(
   // when we paint, although we could miss a notification in that
   // interval.)
   if (aOldLayers && aFrame->HasImageRequest()) {
-    CompareLayers(aOldLayers, aNewLayers,
-                  [&imageLoader, aFrame](imgRequestProxy* aReq) {
-                    imageLoader->DisassociateRequestFromFrame(aReq, aFrame);
-                  });
+    CompareLayers(aOldLayers, aNewLayers, [&](imgRequestProxy* aReq) {
+      aImageLoader.DisassociateRequestFromFrame(aReq, aFrame);
+    });
   }
 
-  CompareLayers(aNewLayers, aOldLayers,
-                [&imageLoader, aFrame](imgRequestProxy* aReq) {
-                  imageLoader->AssociateRequestToFrame(aReq, aFrame, 0);
-                });
+  CompareLayers(aNewLayers, aOldLayers, [&](imgRequestProxy* aReq) {
+    aImageLoader.AssociateRequestToFrame(aReq, aFrame, 0);
+  });
 }
 
 void nsIFrame::AddDisplayItem(nsDisplayItem* aItem) {
@@ -1042,16 +1038,32 @@ void nsIFrame::MarkNeedsDisplayItemRebuild() {
     }
   }
 
+  Document* doc = PresContext()->Document();
+  ImageLoader* imageLoader = doc->StyleImageLoader();
+  // Continuing text frame doesn't initialize its continuation pointer before
+  // reaching here for the first time, so we have to exclude text frames. This
+  // doesn't affect correctness because text can't match selectors.
+  //
+  // FIXME(emilio): We should consider fixing that.
+  const bool isNonTextFirstContinuation =
+      !IsTextFrame() && !GetPrevContinuation();
+  if (isNonTextFirstContinuation) {
+    mComputedStyle->StartImageLoads(*doc);
+  }
+
+  // TODO(emilio): Can we avoid doing some / all of this when
+  // isNonTextFirstContinuation is false? We should consider doing this just for
+  // primary frames and pseudos.
   const nsStyleImageLayers* oldLayers =
       aOldComputedStyle ? &aOldComputedStyle->StyleBackground()->mImage
                         : nullptr;
   const nsStyleImageLayers* newLayers = &StyleBackground()->mImage;
-  AddAndRemoveImageAssociations(this, oldLayers, newLayers);
+  AddAndRemoveImageAssociations(*imageLoader, this, oldLayers, newLayers);
 
   oldLayers =
       aOldComputedStyle ? &aOldComputedStyle->StyleSVGReset()->mMask : nullptr;
   newLayers = &StyleSVGReset()->mMask;
-  AddAndRemoveImageAssociations(this, oldLayers, newLayers);
+  AddAndRemoveImageAssociations(*imageLoader, this, oldLayers, newLayers);
 
   if (aOldComputedStyle) {
     // Detect style changes that should trigger a scroll anchor adjustment
@@ -1126,7 +1138,6 @@ void nsIFrame::MarkNeedsDisplayItemRebuild() {
     }
   }
 
-  ImageLoader* imageLoader = PresContext()->Document()->StyleImageLoader();
   imgIRequest* oldBorderImage =
       aOldComputedStyle
           ? aOldComputedStyle->StyleBorder()->GetBorderImageRequest()
@@ -1174,11 +1185,8 @@ void nsIFrame::MarkNeedsDisplayItemRebuild() {
   }
 
   // SVGObserverUtils::GetEffectProperties() asserts that we only invoke it with
-  // the first continuation so we need to check that in advance. Continuing text
-  // frame doesn't initialize its continuation pointer before reaching here for
-  // the first time, so we have to exclude text frames. This doesn't affect
-  // correctness because text nodes themselves shouldn't have effects applied.
-  if (!IsTextFrame() && !GetPrevContinuation()) {
+  // the first continuation so we need to check that in advance.
+  if (isNonTextFirstContinuation) {
     // Kick off loading of external SVG resources referenced from properties if
     // any. This currently includes filter, clip-path, and mask.
     SVGObserverUtils::InitiateResourceDocLoads(this);
@@ -1200,19 +1208,19 @@ void nsIFrame::MarkNeedsDisplayItemRebuild() {
 #ifdef MOZ_DIAGNOSTIC_ASSERT_ENABLED
 void nsIFrame::AssertNewStyleIsSane(ComputedStyle& aNewStyle) {
   MOZ_DIAGNOSTIC_ASSERT(
-      aNewStyle.GetPseudo() == mComputedStyle->GetPseudo() ||
+      aNewStyle.GetPseudoType() == mComputedStyle->GetPseudoType() ||
       // ::first-line continuations are weird, this should probably be fixed via
       // bug 1465474.
-      (mComputedStyle->GetPseudo() == nsCSSPseudoElements::firstLine() &&
-       aNewStyle.GetPseudo() == nsCSSAnonBoxes::mozLineFrame()) ||
+      (mComputedStyle->GetPseudoType() == PseudoStyleType::firstLine &&
+       aNewStyle.GetPseudoType() == PseudoStyleType::mozLineFrame) ||
       // ::first-letter continuations are broken, in particular floating ones,
       // see bug 1490281. The construction code tries to fix this up after the
       // fact, then restyling undoes it...
-      (mComputedStyle->GetPseudo() == nsCSSAnonBoxes::mozText() &&
-       aNewStyle.GetPseudo() == nsCSSAnonBoxes::firstLetterContinuation()) ||
-      (mComputedStyle->GetPseudo() ==
-           nsCSSAnonBoxes::firstLetterContinuation() &&
-       aNewStyle.GetPseudo() == nsCSSAnonBoxes::mozText()));
+      (mComputedStyle->GetPseudoType() == PseudoStyleType::mozText &&
+       aNewStyle.GetPseudoType() == PseudoStyleType::firstLetterContinuation) ||
+      (mComputedStyle->GetPseudoType() ==
+           PseudoStyleType::firstLetterContinuation &&
+       aNewStyle.GetPseudoType() == PseudoStyleType::mozText));
 }
 #endif
 
@@ -1279,9 +1287,10 @@ void nsIFrame::SyncFrameViewProperties(nsView* aView) {
     // Make sure z-index is correct
     ComputedStyle* sc = Style();
     const nsStylePosition* position = sc->StylePosition();
-    if (position->mZIndex.GetUnit() == eStyleUnit_Integer) {
-      zIndex = position->mZIndex.GetIntValue();
-    } else if (position->mZIndex.GetUnit() == eStyleUnit_Auto) {
+    if (position->mZIndex.IsInteger()) {
+      zIndex = position->mZIndex.integer._0;
+    } else {
+      MOZ_ASSERT(position->mZIndex.IsAuto());
       autoZIndex = true;
     }
   } else {
@@ -1523,7 +1532,8 @@ bool nsIFrame::IsCSSTransformed(const nsStyleDisplay* aStyleDisplay) const {
 
 bool nsIFrame::HasAnimationOfTransform() const {
   return IsPrimaryFrame() &&
-         nsLayoutUtils::HasAnimationOfProperty(this, eCSSProperty_transform) &&
+         nsLayoutUtils::HasAnimationOfPropertySet(
+             this, nsCSSPropertyIDSet::TransformLikeProperties()) &&
          IsFrameOfType(eSupportsCSSTransforms);
 }
 
@@ -1555,7 +1565,8 @@ bool nsIFrame::HasOpacityInternal(float aThreshold,
   return ((IsPrimaryFrame() ||
            nsLayoutUtils::FirstContinuationOrIBSplitSibling(this)
                ->IsPrimaryFrame()) &&
-          nsLayoutUtils::HasAnimationOfProperty(effects, eCSSProperty_opacity));
+          nsLayoutUtils::HasAnimationOfPropertySet(
+              effects, nsCSSPropertyIDSet::OpacityProperties()));
 }
 
 bool nsIFrame::IsSVGTransformed(gfx::Matrix* aOwnTransforms,
@@ -2192,7 +2203,7 @@ already_AddRefed<ComputedStyle> nsIFrame::ComputeSelectionStyle() const {
     return nullptr;
   }
   RefPtr<ComputedStyle> sc = PresContext()->StyleSet()->ProbePseudoElementStyle(
-      *element, CSSPseudoElementType::selection, Style());
+      *element, PseudoStyleType::selection, Style());
   return sc.forget();
 }
 
@@ -2758,7 +2769,8 @@ void nsIFrame::BuildDisplayListForStackingContext(
   bool opacityItemForEventsAndPluginsOnly = false;
   if (effects->mOpacity == 0.0 && aBuilder->IsForPainting() &&
       !(disp->mWillChangeBitField & NS_STYLE_WILL_CHANGE_OPACITY) &&
-      !nsLayoutUtils::HasAnimationOfProperty(effectSet, eCSSProperty_opacity)) {
+      !nsLayoutUtils::HasAnimationOfPropertySet(
+          effectSet, nsCSSPropertyIDSet::OpacityProperties())) {
     if (needHitTestInfo || aBuilder->WillComputePluginGeometry()) {
       opacityItemForEventsAndPluginsOnly = true;
     } else {
@@ -2913,7 +2925,7 @@ void nsIFrame::BuildDisplayListForStackingContext(
                            BuilderHasScrolledClip(aBuilder));
 
   nsDisplayListBuilder::AutoBuildingDisplayList buildingDisplayList(
-      aBuilder, this, visibleRect, dirtyRect, true);
+      aBuilder, this, visibleRect, dirtyRect, isTransformed);
 
   // Depending on the effects that are applied to this frame, we can create
   // multiple container display items and wrap them around our contents.
@@ -3452,6 +3464,7 @@ void nsIFrame::BuildDisplayListForSimpleChild(nsDisplayListBuilder* aBuilder,
     return;
   }
 
+  // Child cannot be transformed since it is not a stacking context.
   nsDisplayListBuilder::AutoBuildingDisplayList buildingForChild(
       aBuilder, aChild, visible, dirty, false);
 
@@ -3655,7 +3668,7 @@ void nsIFrame::BuildDisplayListForChild(nsDisplayListBuilder* aBuilder,
                "Stacking contexts must also be pseudo-stacking-contexts");
 
   nsDisplayListBuilder::AutoBuildingDisplayList buildingForChild(
-      aBuilder, child, visible, dirty, pseudoStackingContext);
+      aBuilder, child, visible, dirty);
   DisplayListClipState::AutoClipMultiple clipState(aBuilder);
   nsDisplayListBuilder::AutoCurrentActiveScrolledRootSetter asrSetter(aBuilder);
   CheckForApzAwareEventHandlers(aBuilder, child);
@@ -7246,10 +7259,10 @@ bool nsFrame::IsFrameTreeTooDeep(const ReflowInput& aReflowInput,
 }
 
 bool nsIFrame::IsBlockWrapper() const {
-  nsAtom* pseudoType = Style()->GetPseudo();
-  return (pseudoType == nsCSSAnonBoxes::mozBlockInsideInlineWrapper() ||
-          pseudoType == nsCSSAnonBoxes::buttonContent() ||
-          pseudoType == nsCSSAnonBoxes::cellContent());
+  auto pseudoType = Style()->GetPseudoType();
+  return pseudoType == PseudoStyleType::mozBlockInsideInlineWrapper ||
+         pseudoType == PseudoStyleType::buttonContent ||
+         pseudoType == PseudoStyleType::cellContent;
 }
 
 bool nsIFrame::IsBlockFrameOrSubclass() const {
@@ -7297,7 +7310,7 @@ nsIFrame* nsIFrame::GetContainingBlock(
   }
 
   if (aFlags & SKIP_SCROLLED_FRAME && f &&
-      f->Style()->GetPseudo() == nsCSSAnonBoxes::scrolledContent()) {
+      f->Style()->GetPseudoType() == PseudoStyleType::scrolledContent) {
     f = f->GetParent();
   }
   return f;
@@ -7426,13 +7439,8 @@ void nsIFrame::ListGeneric(nsACString& aTo, const char* aPrefix,
   }
   aTo += nsPrintfCString(" [cs=%p", static_cast<void*>(mComputedStyle));
   if (mComputedStyle) {
-    nsAtom* pseudoTag = mComputedStyle->GetPseudo();
-    if (pseudoTag) {
-      nsAutoString atomString;
-      pseudoTag->ToString(atomString);
-      aTo +=
-          nsPrintfCString("%s", NS_LossyConvertUTF16toASCII(atomString).get());
-    }
+    auto pseudoType = mComputedStyle->GetPseudoType();
+    aTo += ToString(pseudoType).c_str();
   }
   aTo += "]";
 }
@@ -8868,8 +8876,8 @@ static void ComputeAndIncludeOutlineArea(nsIFrame* aFrame,
   // contents of the anonymous blocks.
   nsIFrame* frameForArea = aFrame;
   do {
-    nsAtom* pseudoType = frameForArea->Style()->GetPseudo();
-    if (pseudoType != nsCSSAnonBoxes::mozBlockInsideInlineWrapper()) break;
+    PseudoStyleType pseudoType = frameForArea->Style()->GetPseudoType();
+    if (pseudoType != PseudoStyleType::mozBlockInsideInlineWrapper) break;
     // If we're done, we really want it and all its later siblings.
     frameForArea = frameForArea->PrincipalChildList().FirstChild();
     NS_ASSERTION(frameForArea, "anonymous block with no children?");
@@ -9282,8 +9290,8 @@ static nsIFrame* GetIBSplitSiblingForAnonymousBlock(const nsIFrame* aFrame) {
   NS_ASSERTION(aFrame->GetStateBits() & NS_FRAME_PART_OF_IBSPLIT,
                "GetIBSplitSibling should only be called on ib-split frames");
 
-  nsAtom* type = aFrame->Style()->GetPseudo();
-  if (type != nsCSSAnonBoxes::mozBlockInsideInlineWrapper()) {
+  if (aFrame->Style()->GetPseudoType() !=
+      PseudoStyleType::mozBlockInsideInlineWrapper) {
     // it's not an anonymous block
     return nullptr;
   }
@@ -9324,7 +9332,7 @@ static nsIFrame* GetCorrectedParent(const nsIFrame* aFrame) {
   // as the style parent.
   if (aFrame->IsTableCaption()) {
     nsIFrame* innerTable = parent->PrincipalChildList().FirstChild();
-    if (!innerTable->Style()->GetPseudo()) {
+    if (!innerTable->Style()->IsAnonBox()) {
       return innerTable;
     }
   }
@@ -9332,14 +9340,15 @@ static nsIFrame* GetCorrectedParent(const nsIFrame* aFrame) {
   // Table wrappers are always anon boxes; if we're in here for an outer
   // table, that actually means its the _inner_ table that wants to
   // know its parent. So get the pseudo of the inner in that case.
-  nsAtom* pseudo = aFrame->Style()->GetPseudo();
-  if (pseudo == nsCSSAnonBoxes::tableWrapper()) {
-    pseudo = aFrame->PrincipalChildList().FirstChild()->Style()->GetPseudo();
+  auto pseudo = aFrame->Style()->GetPseudoType();
+  if (pseudo == PseudoStyleType::tableWrapper) {
+    pseudo =
+        aFrame->PrincipalChildList().FirstChild()->Style()->GetPseudoType();
   }
 
   // Prevent a NAC pseudo-element from inheriting from its NAC parent, and
   // inherit from the NAC generator element instead.
-  if (pseudo) {
+  if (pseudo != PseudoStyleType::NotPseudo) {
     MOZ_ASSERT(aFrame->GetContent());
     Element* element = Element::FromNode(aFrame->GetContent());
     // Make sure to avoid doing the fixup for non-element-backed pseudos like
@@ -9359,23 +9368,22 @@ static nsIFrame* GetCorrectedParent(const nsIFrame* aFrame) {
 
 /* static */
 nsIFrame* nsFrame::CorrectStyleParentFrame(nsIFrame* aProspectiveParent,
-                                           nsAtom* aChildPseudo) {
+                                           PseudoStyleType aChildPseudo) {
   MOZ_ASSERT(aProspectiveParent, "Must have a prospective parent");
 
-  if (aChildPseudo) {
+  if (aChildPseudo != PseudoStyleType::NotPseudo) {
     // Non-inheriting anon boxes have no style parent frame at all.
-    if (nsCSSAnonBoxes::IsNonInheritingAnonBox(aChildPseudo)) {
+    if (PseudoStyle::IsNonInheritingAnonBox(aChildPseudo)) {
       return nullptr;
     }
 
     // Other anon boxes are parented to their actual parent already, except
     // for non-elements.  Those should not be treated as an anon box.
-    if (!nsCSSAnonBoxes::IsNonElement(aChildPseudo) &&
-        nsCSSAnonBoxes::IsAnonBox(aChildPseudo)) {
-      NS_ASSERTION(
-          aChildPseudo != nsCSSAnonBoxes::mozBlockInsideInlineWrapper(),
-          "Should have dealt with kids that have "
-          "NS_FRAME_PART_OF_IBSPLIT elsewhere");
+    if (PseudoStyle::IsAnonBox(aChildPseudo) &&
+        !nsCSSAnonBoxes::IsNonElement(aChildPseudo)) {
+      NS_ASSERTION(aChildPseudo != PseudoStyleType::mozBlockInsideInlineWrapper,
+                   "Should have dealt with kids that have "
+                   "NS_FRAME_PART_OF_IBSPLIT elsewhere");
       return aProspectiveParent;
     }
   }
@@ -9395,22 +9403,23 @@ nsIFrame* nsFrame::CorrectStyleParentFrame(nsIFrame* aProspectiveParent,
       }
     }
 
-    nsAtom* parentPseudo = parent->Style()->GetPseudo();
-    if (!parentPseudo ||
-        (!nsCSSAnonBoxes::IsAnonBox(parentPseudo) &&
-         // nsPlaceholderFrame pases in nsGkAtoms::placeholderFrame for
-         // aChildPseudo (even though that's not a valid pseudo-type) just to
-         // trigger this behavior of walking up to the nearest non-pseudo
-         // ancestor.
-         aChildPseudo != nsGkAtoms::placeholderFrame)) {
+    if (!parent->Style()->IsPseudoOrAnonBox()) {
+      return parent;
+    }
+
+    if (!parent->Style()->IsAnonBox() && aChildPseudo != PseudoStyleType::MAX) {
+      // nsPlaceholderFrame passes in PseudoStyleType::MAX for
+      // aChildPseudo (even though that's not a valid pseudo-type) just to
+      // trigger this behavior of walking up to the nearest non-pseudo
+      // ancestor.
       return parent;
     }
 
     parent = parent->GetInFlowParent();
   } while (parent);
 
-  if (aProspectiveParent->Style()->GetPseudo() ==
-      nsCSSAnonBoxes::viewportScroll()) {
+  if (aProspectiveParent->Style()->GetPseudoType() ==
+      PseudoStyleType::viewportScroll) {
     // aProspectiveParent is the scrollframe for a viewport
     // and the kids are the anonymous scrollbars
     return aProspectiveParent;
@@ -9433,16 +9442,16 @@ ComputedStyle* nsFrame::DoGetParentComputedStyle(
   if (MOZ_LIKELY(mContent)) {
     Element* parentElement = mContent->GetFlattenedTreeParentElement();
     if (MOZ_LIKELY(parentElement)) {
-      nsAtom* pseudo = Style()->GetPseudo();
-      if (!pseudo || !mContent->IsElement() ||
-          (!nsCSSAnonBoxes::IsAnonBox(pseudo) &&
+      auto pseudo = Style()->GetPseudoType();
+      if (pseudo == PseudoStyleType::NotPseudo || !mContent->IsElement() ||
+          (!PseudoStyle::IsAnonBox(pseudo) &&
            // Ensure that we don't return the display:contents style
            // of the parent content for pseudos that have the same content
            // as their primary frame (like -moz-list-bullets do):
            IsPrimaryFrame()) ||
           /* if next is true then it's really a request for the table frame's
              parent context, see nsTable[Outer]Frame::GetParentComputedStyle. */
-          pseudo == nsCSSAnonBoxes::tableWrapper()) {
+          pseudo == PseudoStyleType::tableWrapper) {
         if (Servo_Element_IsDisplayContents(parentElement)) {
           RefPtr<ComputedStyle> style =
               PresShell()->StyleSet()->ResolveServoStyle(*parentElement);
@@ -9455,7 +9464,7 @@ ComputedStyle* nsFrame::DoGetParentComputedStyle(
         }
       }
     } else {
-      if (!Style()->GetPseudo()) {
+      if (Style()->GetPseudoType() == PseudoStyleType::NotPseudo) {
         // We're a frame for the root.  We have no style parent.
         return nullptr;
       }
@@ -9531,8 +9540,8 @@ void nsFrame::GetFirstLeaf(nsPresContext* aPresContext, nsIFrame** aFrame) {
   bool isFocusable = false;
 
   if (mContent && mContent->IsElement() && IsVisibleConsideringAncestors() &&
-      Style()->GetPseudo() != nsCSSAnonBoxes::anonymousFlexItem() &&
-      Style()->GetPseudo() != nsCSSAnonBoxes::anonymousGridItem()) {
+      Style()->GetPseudoType() != PseudoStyleType::anonymousFlexItem &&
+      Style()->GetPseudoType() != PseudoStyleType::anonymousGridItem) {
     const nsStyleUI* ui = StyleUI();
     if (ui->mUserFocus != StyleUserFocus::Ignore &&
         ui->mUserFocus != StyleUserFocus::None) {
@@ -10084,7 +10093,7 @@ void nsFrame::BoxReflow(nsBoxLayoutState& aState, nsPresContext* aPresContext,
     // The one exception are block frames, because we need to know their
     // natural height excluding any overflow area which may be caused by
     // various CSS effects such as shadow or outline.
-    if (!IsFrameOfType(eBlockFrame)) {
+    if (!IsBlockFrameOrSubclass()) {
       if (aHeight != NS_INTRINSICSIZE) {
         nscoord computedHeight =
             aHeight - reflowInput.ComputedPhysicalBorderPadding().TopBottom();
@@ -10210,9 +10219,9 @@ void nsIFrame::UpdateStyleOfChildAnonBox(nsIFrame* aChildFrame,
 
   // We could force the caller to pass in the pseudo, since some callers know it
   // statically...  But this API is a bit nicer.
-  nsAtom* pseudo = aChildFrame->Style()->GetPseudo();
-  MOZ_ASSERT(nsCSSAnonBoxes::IsAnonBox(pseudo), "Child is not an anon box?");
-  MOZ_ASSERT(!nsCSSAnonBoxes::IsNonInheritingAnonBox(pseudo),
+  auto pseudo = aChildFrame->Style()->GetPseudoType();
+  MOZ_ASSERT(PseudoStyle::IsAnonBox(pseudo), "Child is not an anon box?");
+  MOZ_ASSERT(!PseudoStyle::IsNonInheritingAnonBox(pseudo),
              "Why did the caller bother calling us?");
 
   // Anon boxes inherit from their parent; that's us.
@@ -10235,8 +10244,7 @@ void nsIFrame::UpdateStyleOfChildAnonBox(nsIFrame* aChildFrame,
 
   // We do need to handle block pseudo-elements here, though.  Especially list
   // bullets.
-  if (aChildFrame->IsFrameOfType(nsIFrame::eBlockFrame)) {
-    auto block = static_cast<nsBlockFrame*>(aChildFrame);
+  if (nsBlockFrame* block = do_QueryFrame(aChildFrame)) {
     block->UpdatePseudoElementStyles(childrenState);
   }
 }
@@ -10441,7 +10449,7 @@ bool nsIFrame::IsStackingContext(const nsStyleDisplay* aStyleDisplay,
          nsSVGIntegrationUtils::UsingEffectsForFrame(this) ||
          (aIsPositioned &&
           (aStyleDisplay->IsPositionForcingStackingContext() ||
-           aStylePosition->mZIndex.GetUnit() == eStyleUnit_Integer)) ||
+           aStylePosition->mZIndex.IsInteger())) ||
          (aStyleDisplay->mWillChangeBitField &
           NS_STYLE_WILL_CHANGE_STACKING_CONTEXT) ||
          aStyleDisplay->mIsolation != NS_STYLE_ISOLATION_AUTO;
@@ -10519,8 +10527,9 @@ gfx::Matrix nsIFrame::ComputeWidgetTransform() {
       float(appUnitsPerDevPixel));
 
   // Apply the -moz-window-transform-origin translation to the matrix.
+  const StyleTransformOrigin& origin = uiReset->mWindowTransformOrigin;
   Point transformOrigin = nsStyleTransformMatrix::Convert2DPosition(
-      uiReset->mWindowTransformOrigin, refBox, appUnitsPerDevPixel);
+      origin.horizontal, origin.vertical, refBox, appUnitsPerDevPixel);
   matrix.ChangeBasis(Point3D(transformOrigin.x, transformOrigin.y, 0));
 
   gfx::Matrix result2d;

@@ -2581,9 +2581,6 @@ nsresult HttpBaseChannel::AddSecurityMessage(
 
   nsCOMPtr<nsILoadInfo> loadInfo;
   GetLoadInfo(getter_AddRefs(loadInfo));
-  if (!loadInfo) {
-    return NS_ERROR_FAILURE;
-  }
 
   auto innerWindowID = loadInfo->GetInnerWindowID();
 
@@ -3440,16 +3437,13 @@ nsresult HttpBaseChannel::SetupReplacementChannel(nsIURI* newURI,
   // If the protocol handler that created the channel wants to use
   // the originalURI of the channel as the principal URI, this fulfills
   // that request - newURI is the original URI of the channel.
-  nsCOMPtr<nsILoadInfo> newLoadInfo = newChannel->GetLoadInfo();
-  if (newLoadInfo) {
-    nsCOMPtr<nsIURI> resultPrincipalURI;
-    rv = newLoadInfo->GetResultPrincipalURI(getter_AddRefs(resultPrincipalURI));
+  nsCOMPtr<nsILoadInfo> newLoadInfo = newChannel->LoadInfo();
+  nsCOMPtr<nsIURI> resultPrincipalURI;
+  rv = newLoadInfo->GetResultPrincipalURI(getter_AddRefs(resultPrincipalURI));
+  NS_ENSURE_SUCCESS(rv, rv);
+  if (!resultPrincipalURI) {
+    rv = newLoadInfo->SetResultPrincipalURI(newURI);
     NS_ENSURE_SUCCESS(rv, rv);
-
-    if (!resultPrincipalURI) {
-      rv = newLoadInfo->SetResultPrincipalURI(newURI);
-      NS_ENSURE_SUCCESS(rv, rv);
-    }
   }
 
   uint32_t newLoadFlags = mLoadFlags | LOAD_REPLACE;
@@ -3762,9 +3756,9 @@ nsresult HttpBaseChannel::SetupReplacementChannel(nsIURI* newURI,
   // Pass the preferred alt-data type on to the new channel.
   nsCOMPtr<nsICacheInfoChannel> cacheInfoChan(do_QueryInterface(newChannel));
   if (cacheInfoChan) {
-    for (auto& pair : mPreferredCachedAltDataTypes) {
-      cacheInfoChan->PreferAlternativeDataType(mozilla::Get<0>(pair),
-                                               mozilla::Get<1>(pair));
+    for (auto& data : mPreferredCachedAltDataTypes) {
+      cacheInfoChan->PreferAlternativeDataType(data.type(), data.contentType(),
+                                               data.deliverAltData());
     }
   }
 

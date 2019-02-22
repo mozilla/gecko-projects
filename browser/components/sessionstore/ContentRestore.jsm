@@ -212,10 +212,8 @@ ContentRestoreInternal.prototype = {
           referrerInfo = new ReferrerInfo(referrerPolicy, true, referrer);
         }
         let postData = loadArguments.postData ?
-                       Utils.makeInputStream(loadArguments.postData) : null;
-        let triggeringPrincipal = loadArguments.triggeringPrincipal
-                                  ? Utils.deserializePrincipal(loadArguments.triggeringPrincipal)
-                                  : Services.scriptSecurityManager.createNullPrincipal({});
+                       E10SUtils.makeInputStream(loadArguments.postData) : null;
+        let triggeringPrincipal = E10SUtils.deserializePrincipal(loadArguments.triggeringPrincipal, () => Services.scriptSecurityManager.createNullPrincipal({}));
 
         if (loadArguments.userContextId) {
           webNavigation.setOriginAttributesBeforeLoading({ userContextId: loadArguments.userContextId });

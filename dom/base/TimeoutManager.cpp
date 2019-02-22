@@ -798,11 +798,12 @@ void TimeoutManager::RunTimeout(const TimeStamp& aNow,
     }
   }
   if (aProcessIdle) {
-    MOZ_LOG(gTimeoutLog, LogLevel::Debug,
-            ("Running %u deferred timeouts on idle (TimeoutManager=%p), "
-             "nextDeadline = %gms from now",
-             numTimersToRun, this,
-             nextDeadline.IsNull() ? 0.0 : (nextDeadline - now).ToMilliseconds()));
+    MOZ_LOG(
+        gTimeoutLog, LogLevel::Debug,
+        ("Running %u deferred timeouts on idle (TimeoutManager=%p), "
+         "nextDeadline = %gms from now",
+         numTimersToRun, this,
+         nextDeadline.IsNull() ? 0.0 : (nextDeadline - now).ToMilliseconds()));
   }
 
   now = TimeStamp::Now();
@@ -859,14 +860,30 @@ void TimeoutManager::RunTimeout(const TimeStamp& aNow,
       // objects we computed above.
       if (timeout->mFiringId != firingId) {
         // If the FiringId does not match, but is still valid, then this is
-        // a Timeout for another RunTimeout() on the call stack.  Just
-        // skip it.
+        // a Timeout for another RunTimeout() on the call stack (such as in
+        // the case of nested event loops, for alert() or more likely XHR).
+        // Just skip it.
         if (IsValidFiringId(timeout->mFiringId)) {
           MOZ_LOG(gTimeoutLog, LogLevel::Debug,
                   ("Skipping Run%s(TimeoutManager=%p, timeout=%p) since "
-                   "firingId %d is valid (processing firingId %d)",
+                   "firingId %d is valid (processing firingId %d) - "
+                   "FiringIndex %" PRId64 " (mLastFiringIndex %" PRId64 ")",
                    timeout->mIsInterval ? "Interval" : "Timeout", this,
-                   timeout.get(), timeout->mFiringId, firingId));
+                   timeout.get(), timeout->mFiringId, firingId,
+                   timeout->mFiringIndex, mFiringIndex));
+#ifdef MOZ_DIAGNOSTIC_ASSERT_ENABLED
+          // The old FiringIndex assumed no recursion; recursion can cause
+          // other timers to get fired "in the middle" of a sequence we've
+          // already assigned firingindexes to.  Since we're not going to
+          // run this timeout now, remove any FiringIndex that was already
+          // set.
+
+          // Since all timers that have FiringIndexes set *must* be ready
+          // to run and have valid FiringIds, all of them will be 'skipped'
+          // and reset if we recurse - we don't have to look through the
+          // list past where we'll stop on the first InvalidFiringId.
+          timeout->mFiringIndex = -1;
+#endif
           continue;
         }
 
@@ -939,6 +956,16 @@ void TimeoutManager::RunTimeout(const TimeStamp& aNow,
         }
 
 #ifdef MOZ_DIAGNOSTIC_ASSERT_ENABLED
+        if (timeout->mFiringIndex <= mLastFiringIndex) {
+          MOZ_LOG(gTimeoutLog, LogLevel::Debug,
+                  ("Incorrect firing index for Run%s(TimeoutManager=%p, "
+                   "timeout=%p) with "
+                   "firingId %d - FiringIndex %" PRId64
+                   " (mLastFiringIndex %" PRId64 ")",
+                   timeout->mIsInterval ? "Interval" : "Timeout", this,
+                   timeout.get(), timeout->mFiringId, timeout->mFiringIndex,
+                   mFiringIndex));
+        }
         MOZ_DIAGNOSTIC_ASSERT(timeout->mFiringIndex > mLastFiringIndex);
         mLastFiringIndex = timeout->mFiringIndex;
 #endif

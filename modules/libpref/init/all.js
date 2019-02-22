@@ -231,6 +231,12 @@ pref("dom.keyboardevent.keypress.hack.dispatch_non_printable_keys", "");
 // check its explanation for the detail.
 pref("dom.keyboardevent.keypress.hack.use_legacy_keycode_and_charcode", "");
 
+// Whether InputEvent.data is enabled.
+pref("dom.inputevent.data.enabled", true);
+
+// Whether InputEvent.dataTransfer is enabled.
+pref("dom.inputevent.datatransfer.enabled", true);
+
 // Whether InputEvent.inputType is enabled.
 pref("dom.inputevent.inputtype.enabled", true);
 
@@ -284,10 +290,9 @@ pref("ui.menu.incremental_search.timeout", 1000);
 pref("ui.popup.disable_autohide", false);
 
 #ifdef XP_MACOSX
-pref("ui.touchbar.layout", "Back,Reload,OpenOrFocus,AddBookmark,NewTab,Share");
+pref("ui.touchbar.layout", "Back,Forward,Reload,OpenLocation,NewTab,Share");
 #endif
 
-pref("browser.display.use_document_fonts",  1);  // 0 = never, 1 = quick, 2 = always
 // 0 = default: always, except in high contrast mode
 // 1 = always
 // 2 = never
@@ -1437,6 +1442,9 @@ pref("privacy.firstparty.isolate.restrict_opener_access", true);
 // If you do set it, to work around some broken website, please file a bug with
 // information so we can understand why it is needed.
 pref("privacy.resistFingerprinting.autoDeclineNoUserInputCanvasPrompts", true);
+// The log level for browser console messages logged in RFPHelper.jsm
+// Change to 'All' and restart to see the messages
+pref("privacy.resistFingerprinting.jsmloglevel", "Warn");
 // A subset of Resist Fingerprinting protections focused specifically on timers for testing
 // This affects the Animation API, the performance APIs, Date.getTime, Event.timestamp,
 //   File.lastModified, audioContext.currentTime, canvas.captureStream.currentTime
@@ -2362,12 +2370,13 @@ pref("network.proxy.socks_port",            0);
 pref("network.proxy.socks_version",         5);
 pref("network.proxy.socks_remote_dns",      false);
 pref("network.proxy.proxy_over_tls",        true);
-pref("network.proxy.no_proxies_on",         "localhost, 127.0.0.1");
+pref("network.proxy.no_proxies_on",         "");
+// Set true to allow resolving proxy for localhost
+pref("network.proxy.allow_hijacking_localhost", false);
 pref("network.proxy.failover_timeout",      1800); // 30 minutes
 pref("network.online",                      true); //online/offline
 pref("network.cookie.thirdparty.sessionOnly", false);
 pref("network.cookie.thirdparty.nonsecureSessionOnly", false);
-pref("network.cookie.leave-secure-alone",   true);
 pref("network.cookie.same-site.enabled",    true); // Honor the SameSite cookie attribute
 
 // Cookie lifetime policy. Possible values:

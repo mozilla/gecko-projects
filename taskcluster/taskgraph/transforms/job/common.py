@@ -59,8 +59,8 @@ def docker_worker_add_workspace_cache(config, job, taskdesc, extra=None):
         extra (str): Optional context passed in that supports extending the cache
             key name to avoid undesired conflicts with other caches.
     """
-    cache_name = 'level-{}-{}-build-{}-{}-workspace'.format(
-        config.params['level'], config.params['project'],
+    cache_name = '{}-build-{}-{}-workspace'.format(
+        config.params['project'],
         taskdesc['attributes']['build_platform'],
         taskdesc['attributes']['build_type'],
     )
@@ -120,12 +120,7 @@ def support_vcs_checkout(config, job, taskdesc, sparse=False):
         geckodir = '{}/gecko'.format(checkoutdir)
         hgstore = '{}/hg-store'.format(checkoutdir)
 
-    cache_name = 'level-{}-checkouts'.format(config.params['level'])
-
-    # comm-central checkouts need their own cache, because clobber won't
-    # remove the comm-central checkout
-    if job['run'].get('comm-checkout', False):
-        cache_name += '-comm'
+    cache_name = 'checkouts'
 
     # Sparse checkouts need their own cache because they can interfere
     # with clients that aren't sparse aware.
@@ -160,7 +155,8 @@ def support_vcs_checkout(config, job, taskdesc, sparse=False):
         taskdesc['worker']['taskcluster-proxy'] = True
 
 
-def generic_worker_hg_commands(base_repo, head_repo, head_rev, path):
+def generic_worker_hg_commands(base_repo, head_repo, head_rev, path,
+                               sparse_profile=None):
     """Obtain commands needed to obtain a Mercurial checkout on generic-worker.
 
     Returns two command strings. One performs the checkout. Another logs.
@@ -172,9 +168,16 @@ def generic_worker_hg_commands(base_repo, head_repo, head_rev, path):
         '--purge',
         '--upstream', base_repo,
         '--revision', head_rev,
+    ]
+
+    if sparse_profile:
+        args.extend(['--config', 'extensions.sparse='])
+        args.extend(['--sparseprofile', sparse_profile])
+
+    args.extend([
         head_repo,
         path,
-    ]
+    ])
 
     logging_args = [
         b":: TinderboxPrint:<a href={source_repo}/rev/{revision} "
@@ -219,7 +222,7 @@ def docker_worker_add_tooltool(config, job, taskdesc, internal=False):
     assert job['worker']['implementation'] in ('docker-worker',)
 
     level = config.params['level']
-    add_cache(job, taskdesc, 'level-{}-tooltool-cache'.format(level),
+    add_cache(job, taskdesc, 'tooltool-cache'.format(level),
               '{workdir}/tooltool-cache'.format(**job['run']))
 
     taskdesc['worker'].setdefault('env', {}).update({

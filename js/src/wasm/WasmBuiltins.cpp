@@ -621,12 +621,12 @@ void* wasm::AddressOf(SymbolicAddress imm, ABIFunctionType* abiType) {
     case SymbolicAddress::ATan2D:
       *abiType = Args_Double_DoubleDouble;
       return FuncCast(ecmaAtan2, *abiType);
-    case SymbolicAddress::GrowMemory:
+    case SymbolicAddress::MemoryGrow:
       *abiType = Args_General2;
-      return FuncCast(Instance::growMemory_i32, *abiType);
-    case SymbolicAddress::CurrentMemory:
+      return FuncCast(Instance::memoryGrow_i32, *abiType);
+    case SymbolicAddress::MemorySize:
       *abiType = Args_General1;
-      return FuncCast(Instance::currentMemory_i32, *abiType);
+      return FuncCast(Instance::memorySize_i32, *abiType);
     case SymbolicAddress::WaitI32:
       *abiType = Args_Int_GeneralGeneralGeneralInt64;
       return FuncCast(Instance::wait_i32, *abiType);
@@ -672,6 +672,9 @@ void* wasm::AddressOf(SymbolicAddress imm, ABIFunctionType* abiType) {
     case SymbolicAddress::PostBarrier:
       *abiType = Args_General2;
       return FuncCast(Instance::postBarrier, *abiType);
+    case SymbolicAddress::PostBarrierFiltering:
+      *abiType = Args_General2;
+      return FuncCast(Instance::postBarrierFiltering, *abiType);
     case SymbolicAddress::StructNew:
       *abiType = Args_General2;
       return FuncCast(Instance::structNew, *abiType);
@@ -767,8 +770,8 @@ bool wasm::NeedsBuiltinThunk(SymbolicAddress sym) {
     case SymbolicAddress::LogD:
     case SymbolicAddress::PowD:
     case SymbolicAddress::ATan2D:
-    case SymbolicAddress::GrowMemory:
-    case SymbolicAddress::CurrentMemory:
+    case SymbolicAddress::MemoryGrow:
+    case SymbolicAddress::MemorySize:
     case SymbolicAddress::WaitI32:
     case SymbolicAddress::WaitI64:
     case SymbolicAddress::Wake:
@@ -786,6 +789,7 @@ bool wasm::NeedsBuiltinThunk(SymbolicAddress sym) {
     case SymbolicAddress::TableSet:
     case SymbolicAddress::TableSize:
     case SymbolicAddress::PostBarrier:
+    case SymbolicAddress::PostBarrierFiltering:
     case SymbolicAddress::StructNew:
     case SymbolicAddress::StructNarrow:
       return true;

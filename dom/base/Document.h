@@ -2474,6 +2474,16 @@ class Document : public nsINode,
     return !mParentDocument && !mDisplayDocument;
   }
 
+  bool IsDocumentURISchemeChrome() const { return mDocURISchemeIsChrome; }
+
+  bool IsInChromeDocShell() const {
+    const Document* root = this;
+    while (const Document* displayDoc = root->GetDisplayDocument()) {
+      root = displayDoc;
+    }
+    return root->mInChromeDocShell;
+  }
+
   bool IsBeingUsedAsImage() const { return mIsBeingUsedAsImage; }
 
   void SetIsBeingUsedAsImage() { mIsBeingUsedAsImage = true; }
@@ -4007,6 +4017,12 @@ class Document : public nsINode,
   // True if we're an SVG document being used as an image.
   bool mIsBeingUsedAsImage : 1;
 
+  // True if our current document URI's scheme is chrome://
+  bool mDocURISchemeIsChrome : 1;
+
+  // True if we're loaded in a chrome docshell.
+  bool mInChromeDocShell : 1;
+
   // True is this document is synthetic : stand alone image, video, audio
   // file, etc.
   bool mIsSyntheticDocument : 1;
@@ -4764,7 +4780,7 @@ inline bool ShouldUseNACScope(const nsINode* aNode) {
 }
 
 inline bool ShouldUseUAWidgetScope(const nsINode* aNode) {
-  return aNode->IsInUAWidget();
+  return aNode->HasBeenInUAWidget();
 }
 
 inline mozilla::dom::ParentObject nsINode::GetParentObject() const {

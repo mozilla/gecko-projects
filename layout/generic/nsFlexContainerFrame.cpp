@@ -156,12 +156,10 @@ static uint8_t ConvertLegacyStyleToJustifyContent(const nsStyleXUL* aStyleXUL) {
 // Helper-function to find the first non-anonymous-box descendent of aFrame.
 static nsIFrame* GetFirstNonAnonBoxDescendant(nsIFrame* aFrame) {
   while (aFrame) {
-    nsAtom* pseudoTag = aFrame->Style()->GetPseudo();
-
-    // If aFrame isn't an anonymous container, then it'll do.
-    if (!pseudoTag ||                               // No pseudotag.
-        !nsCSSAnonBoxes::IsAnonBox(pseudoTag) ||    // Pseudotag isn't anon.
-        nsCSSAnonBoxes::IsNonElement(pseudoTag)) {  // Text, not a container.
+    // If aFrame isn't an anonymous container, or it's text or such, then it'll
+    // do.
+    if (!aFrame->Style()->IsAnonBox() ||
+        nsCSSAnonBoxes::IsNonElement(aFrame->Style()->GetPseudoType())) {
       break;
     }
 
@@ -2351,9 +2349,8 @@ void nsFlexContainerFrame::Init(nsIContent* aContent, nsContainerFrame* aParent,
   if (!isLegacyBox && styleDisp->mDisplay == mozilla::StyleDisplay::Block) {
     ComputedStyle* parentComputedStyle = GetParent()->Style();
     NS_ASSERTION(
-        parentComputedStyle &&
-            (mComputedStyle->GetPseudo() == nsCSSAnonBoxes::buttonContent() ||
-             mComputedStyle->GetPseudo() == nsCSSAnonBoxes::scrolledContent()),
+        Style()->GetPseudoType() == PseudoStyleType::buttonContent ||
+            Style()->GetPseudoType() == PseudoStyleType::scrolledContent,
         "The only way a nsFlexContainerFrame can have 'display:block' "
         "should be if it's the inner part of a scrollable or button "
         "element");
@@ -2391,9 +2388,8 @@ nscoord nsFlexContainerFrame::GetLogicalBaseline(
 // http://www.w3.org/TR/2012/CR-css3-flexbox-20120918/#painting
 static uint32_t GetDisplayFlagsForFlexItem(nsIFrame* aFrame) {
   MOZ_ASSERT(aFrame->IsFlexItem(), "Should only be called on flex items");
-
   const nsStylePosition* pos = aFrame->StylePosition();
-  if (pos->mZIndex.GetUnit() == eStyleUnit_Integer) {
+  if (pos->mZIndex.IsInteger()) {
     return nsIFrame::DISPLAY_CHILD_FORCE_STACKING_CONTEXT;
   }
   return nsIFrame::DISPLAY_CHILD_FORCE_PSEUDO_STACKING_CONTEXT;
@@ -3630,7 +3626,7 @@ void FlexboxAxisTracker::InitAxesFromLegacyProps(
 void FlexboxAxisTracker::InitAxesFromModernProps(
     const nsFlexContainerFrame* aFlexContainer) {
   const nsStylePosition* stylePos = aFlexContainer->StylePosition();
-  uint32_t flexDirection = stylePos->mFlexDirection;
+  StyleFlexDirection flexDirection = stylePos->mFlexDirection;
 
   // Inline dimension ("start-to-end"):
   // (NOTE: I'm intentionally not calling these "inlineAxis"/"blockAxis", since
@@ -3643,22 +3639,22 @@ void FlexboxAxisTracker::InitAxesFromModernProps(
 
   // Determine main axis:
   switch (flexDirection) {
-    case NS_STYLE_FLEX_DIRECTION_ROW:
+    case StyleFlexDirection::Row:
       mMainAxis = inlineDimension;
       mIsRowOriented = true;
       mIsMainAxisReversed = false;
       break;
-    case NS_STYLE_FLEX_DIRECTION_ROW_REVERSE:
+    case StyleFlexDirection::RowReverse:
       mMainAxis = GetReverseAxis(inlineDimension);
       mIsRowOriented = true;
       mIsMainAxisReversed = true;
       break;
-    case NS_STYLE_FLEX_DIRECTION_COLUMN:
+    case StyleFlexDirection::Column:
       mMainAxis = blockDimension;
       mIsRowOriented = false;
       mIsMainAxisReversed = false;
       break;
-    case NS_STYLE_FLEX_DIRECTION_COLUMN_REVERSE:
+    case StyleFlexDirection::ColumnReverse:
       mMainAxis = GetReverseAxis(blockDimension);
       mIsRowOriented = false;
       mIsMainAxisReversed = true;
@@ -3670,8 +3666,8 @@ void FlexboxAxisTracker::InitAxesFromModernProps(
   // Determine cross axis:
   // (This is set up so that a bogus |flexDirection| value will
   // give us blockDimension.
-  if (flexDirection == NS_STYLE_FLEX_DIRECTION_COLUMN ||
-      flexDirection == NS_STYLE_FLEX_DIRECTION_COLUMN_REVERSE) {
+  if (flexDirection == StyleFlexDirection::Column ||
+      flexDirection == StyleFlexDirection::ColumnReverse) {
     mCrossAxis = inlineDimension;
   } else {
     mCrossAxis = blockDimension;
@@ -3718,9 +3714,9 @@ bool nsFlexContainerFrame::ShouldUseMozBoxCollapseBehavior(
 
   // Check our parent's display value, if we're an anonymous box (with a
   // potentially-untrustworthy display value):
-  auto pseudoType = Style()->GetPseudo();
-  if (pseudoType == nsCSSAnonBoxes::scrolledContent() ||
-      pseudoType == nsCSSAnonBoxes::buttonContent()) {
+  auto pseudoType = Style()->GetPseudoType();
+  if (pseudoType == PseudoStyleType::scrolledContent ||
+      pseudoType == PseudoStyleType::buttonContent) {
     const nsStyleDisplay* disp = GetParent()->StyleDisplay();
     if (disp->mDisplay == mozilla::StyleDisplay::MozBox ||
         disp->mDisplay == mozilla::StyleDisplay::MozInlineBox) {
@@ -4450,8 +4446,8 @@ bool nsFlexContainerFrame::IsItemInlineAxisMainAxis(nsIFrame* aFrame) {
   // whether the flex container's main axis is its inline axis.)
   auto flexDirection = flexContainer->StylePosition()->mFlexDirection;
   bool flexContainerIsRowOriented =
-      flexDirection == NS_STYLE_FLEX_DIRECTION_ROW ||
-      flexDirection == NS_STYLE_FLEX_DIRECTION_ROW_REVERSE;
+      flexDirection == StyleFlexDirection::Row ||
+      flexDirection == StyleFlexDirection::RowReverse;
 
   // aFrame's inline axis is its flex container's main axis IFF the above
   // questions have the same answer.

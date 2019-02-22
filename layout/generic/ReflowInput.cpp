@@ -125,7 +125,7 @@ static bool CheckNextInFlowParenthood(nsIFrame* aFrame, nsIFrame* aParent) {
  * bullets to be rendered with font inflation enabled.
  */
 static nscoord FontSizeInflationListMarginAdjustment(const nsIFrame* aFrame) {
-  if (!aFrame->IsFrameOfType(nsIFrame::eBlockFrame)) {
+  if (!aFrame->IsBlockFrameOrSubclass()) {
     return 0;
   }
 
@@ -892,7 +892,7 @@ void ReflowInput::InitDynamicReflowRoot() {
 
   // If we participate in a container's block reflow context, or margins
   // can collapse through us, we can't be a dynamic reflow root.
-  if (canBeDynamicReflowRoot && mFrame->IsFrameOfType(nsIFrame::eBlockFrame) &&
+  if (canBeDynamicReflowRoot && mFrame->IsBlockFrameOrSubclass() &&
       !mFrame->HasAllStateBits(NS_BLOCK_FLOAT_MGR | NS_BLOCK_MARGIN_ROOT)) {
     canBeDynamicReflowRoot = false;
   }
@@ -2487,8 +2487,8 @@ void ReflowInput::InitConstraints(nsPresContext* aPresContext,
         // Also shrink-wrap blocks that are orthogonal to their container.
         if (isBlock &&
             ((aFrameType == LayoutFrameType::Legend &&
-              mFrame->Style()->GetPseudo() !=
-                  nsCSSAnonBoxes::scrolledContent()) ||
+              mFrame->Style()->GetPseudoType() !=
+                  PseudoStyleType::scrolledContent) ||
              (aFrameType == LayoutFrameType::Scroll &&
               mFrame->GetContentInsertionFrame()->IsLegendFrame()) ||
              (mCBReflowInput &&
@@ -2931,6 +2931,9 @@ bool SizeComputationInput::ComputeMargin(WritingMode aWM,
     // We have to compute the value. Note that this calculation is
     // performed according to the writing mode of the containing block
     // (http://dev.w3.org/csswg/css-writing-modes-3/#orthogonal-flows)
+    if (aPercentBasis == NS_UNCONSTRAINEDSIZE) {
+      aPercentBasis = 0;
+    }
     LogicalMargin m(aWM);
     m.IStart(aWM) = nsLayoutUtils::ComputeCBDependentValue(
         aPercentBasis, styleMargin->mMargin.GetIStart(aWM));
@@ -2976,6 +2979,9 @@ bool SizeComputationInput::ComputePadding(WritingMode aWM,
     // according to the writing mode of the containing block
     // (http://dev.w3.org/csswg/css-writing-modes-3/#orthogonal-flows)
     // clamp negative calc() results to 0
+    if (aPercentBasis == NS_UNCONSTRAINEDSIZE) {
+      aPercentBasis = 0;
+    }
     LogicalMargin p(aWM);
     p.IStart(aWM) =
         std::max(0, nsLayoutUtils::ComputeCBDependentValue(

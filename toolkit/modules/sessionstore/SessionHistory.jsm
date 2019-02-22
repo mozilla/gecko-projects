@@ -9,8 +9,6 @@ var EXPORTED_SYMBOLS = ["SessionHistory"];
 const {Services} = ChromeUtils.import("resource://gre/modules/Services.jsm");
 const {XPCOMUtils} = ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
 
-ChromeUtils.defineModuleGetter(this, "Utils",
-  "resource://gre/modules/sessionstore/Utils.jsm");
 ChromeUtils.defineModuleGetter(this, "E10SUtils",
   "resource://gre/modules/E10SUtils.jsm");
 XPCOMUtils.defineLazyServiceGetter(this, "uuidGenerator",
@@ -119,7 +117,7 @@ var SessionHistoryInternal = {
       if (uri != "about:blank" || (body && body.hasChildNodes())) {
         data.entries.push({
           url: uri,
-          triggeringPrincipal_base64: Utils.SERIALIZED_SYSTEMPRINCIPAL,
+          triggeringPrincipal_base64: E10SUtils.SERIALIZED_SYSTEMPRINCIPAL,
         });
         data.index = 1;
       }
@@ -219,11 +217,11 @@ var SessionHistoryInternal = {
 
     // Collect triggeringPrincipal data for the current history entry.
     if (shEntry.principalToInherit) {
-      entry.principalToInherit_base64 = Utils.serializePrincipal(shEntry.principalToInherit);
+      entry.principalToInherit_base64 = E10SUtils.serializePrincipal(shEntry.principalToInherit);
     }
 
     if (shEntry.triggeringPrincipal) {
-      entry.triggeringPrincipal_base64 = Utils.serializePrincipal(shEntry.triggeringPrincipal);
+      entry.triggeringPrincipal_base64 = E10SUtils.serializePrincipal(shEntry.triggeringPrincipal);
     }
 
     entry.docIdentifier = shEntry.BFCacheEntry.ID;
@@ -452,16 +450,15 @@ var SessionHistoryInternal = {
     }
 
     if (entry.triggeringPrincipal_base64) {
-      shEntry.triggeringPrincipal = Utils.deserializePrincipal(entry.triggeringPrincipal_base64);
-    }
-    // Ensure that we have a null principal if we couldn't deserialize it.
-    // This won't always work however is safe to use.
-    if (!shEntry.triggeringPrincipal) {
-      debug("Couldn't deserialize the triggeringPrincipal, falling back to NullPrincipal");
-      shEntry.triggeringPrincipal = Services.scriptSecurityManager.createNullPrincipal({});
+      shEntry.triggeringPrincipal = E10SUtils.deserializePrincipal(entry.triggeringPrincipal_base64, () => {
+        // Ensure that we have a null principal if we couldn't deserialize it.
+        // This won't always work however is safe to use.
+        debug("Couldn't deserialize the triggeringPrincipal, falling back to NullPrincipal");
+        return Services.scriptSecurityManager.createNullPrincipal({});
+      });
     }
     if (entry.principalToInherit_base64) {
-      shEntry.principalToInherit = Utils.deserializePrincipal(entry.principalToInherit_base64);
+      shEntry.principalToInherit = E10SUtils.deserializePrincipal(entry.principalToInherit_base64);
     }
 
     if (entry.children) {

@@ -624,6 +624,11 @@ enum class CompileMode { Once, Tier1, Tier2 };
 
 enum class DebugEnabled { False, True };
 
+// A wasm module can either use no memory, a unshared memory (ArrayBuffer) or
+// shared memory (SharedArrayBuffer).
+
+enum class MemoryUsage { None = false, Unshared = 1, Shared = 2 };
+
 // Iterator over tiers present in a tiered data structure.
 
 class Tiers {
@@ -1143,7 +1148,7 @@ typedef Vector<GlobalDesc, 0, SystemAllocPolicy> GlobalDescVector;
 struct ElemSegment : AtomicRefCounted<ElemSegment> {
   uint32_t tableIndex;
   Maybe<InitExpr> offsetIfActive;
-  Uint32Vector elemFuncIndices;
+  Uint32Vector elemFuncIndices; // Element may be NullFuncIndex
 
   bool active() const { return !!offsetIfActive; }
 
@@ -1153,6 +1158,11 @@ struct ElemSegment : AtomicRefCounted<ElemSegment> {
 
   WASM_DECLARE_SERIALIZABLE(ElemSegment)
 };
+
+// NullFuncIndex represents the case when an element segment (of type anyfunc)
+// contains a null element.
+constexpr uint32_t NullFuncIndex = UINT32_MAX;
+static_assert(NullFuncIndex > MaxFuncs, "Invariant");
 
 typedef RefPtr<ElemSegment> MutableElemSegment;
 typedef SerializableRefPtr<const ElemSegment> SharedElemSegment;
@@ -2048,8 +2058,8 @@ enum class SymbolicAddress {
   Uint64ToDouble,
   Int64ToFloat32,
   Int64ToDouble,
-  GrowMemory,
-  CurrentMemory,
+  MemoryGrow,
+  MemorySize,
   WaitI32,
   WaitI64,
   Wake,
@@ -2065,6 +2075,7 @@ enum class SymbolicAddress {
   TableSet,
   TableSize,
   PostBarrier,
+  PostBarrierFiltering,
   StructNew,
   StructNarrow,
 #if defined(JS_CODEGEN_MIPS32)

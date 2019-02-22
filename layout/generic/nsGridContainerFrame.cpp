@@ -2323,7 +2323,7 @@ void nsGridContainerFrame::GridReflowInput::CalculateTrackSizes(
  */
 static uint32_t GetDisplayFlagsForGridItem(nsIFrame* aFrame) {
   const nsStylePosition* pos = aFrame->StylePosition();
-  if (pos->mZIndex.GetUnit() == eStyleUnit_Integer) {
+  if (pos->mZIndex.IsInteger()) {
     return nsIFrame::DISPLAY_CHILD_FORCE_STACKING_CONTEXT;
   }
   return nsIFrame::DISPLAY_CHILD_FORCE_PSEUDO_STACKING_CONTEXT;
@@ -3439,7 +3439,7 @@ static nscoord ContentContribution(
     // The next two variables are MinSizeClamp values in the child's axes.
     nscoord iMinSizeClamp = NS_MAXSIZE;
     nscoord bMinSizeClamp = NS_MAXSIZE;
-    LogicalSize cbSize(childWM, 0, 0);
+    LogicalSize cbSize(childWM, 0, NS_UNCONSTRAINEDSIZE);
     if (aState.mCols.mCanResolveLineRangeSize) {
       nscoord sz = aState.mCols.ResolveSize(aGridItem.mArea.mCols);
       if (isOrthogonal) {

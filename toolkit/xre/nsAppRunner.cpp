@@ -1670,7 +1670,7 @@ static void RegisterApplicationRestartChanged(const char* aPref, void* aData) {
 #  if defined(MOZ_LAUNCHER_PROCESS)
 
 static void OnLauncherPrefChanged(const char* aPref, void* aData) {
-  bool prefVal = Preferences::GetBool(PREF_WIN_LAUNCHER_PROCESS_ENABLED, false);
+  bool prefVal = Preferences::GetBool(aPref, false);
 
   mozilla::LauncherRegistryInfo launcherRegInfo;
   mozilla::LauncherVoidResult reflectResult =
@@ -1679,6 +1679,17 @@ static void OnLauncherPrefChanged(const char* aPref, void* aData) {
 }
 
 static void SetupLauncherProcessPref() {
+#    if defined(NIGHTLY_BUILD)
+  // On Nightly, tie launcher state to the SHIELD opt-out pref. Fire the
+  // callback immediately to ensure the pref is reflected to the registry.
+  // Also handle any future modification to SHIELD opt-out.
+  Preferences::RegisterCallbackAndCall(&OnLauncherPrefChanged,
+                                       "app.shield.optoutstudies.enabled");
+
+  // Now we fall-through to the remaining code that populates the launcher
+  // pref and the crash report annotations.
+#    endif  // defined(NIGHTLY_BUILD)
+
   mozilla::LauncherRegistryInfo launcherRegInfo;
 
   mozilla::LauncherResult<mozilla::LauncherRegistryInfo::EnabledState>
@@ -1695,8 +1706,11 @@ static void SetupLauncherProcessPref() {
         static_cast<uint32_t>(enabledState.unwrap()));
   }
 
+#    if !defined(NIGHTLY_BUILD)
+  // Only watch the launcher pref if we're not on nightly
   Preferences::RegisterCallback(&OnLauncherPrefChanged,
                                 PREF_WIN_LAUNCHER_PROCESS_ENABLED);
+#    endif  // !defined(NIGHTLY_BUILD)
 }
 
 #  endif  // defined(MOZ_LAUNCHER_PROCESS)
@@ -2146,7 +2160,8 @@ static nsresult SelectProfile(nsToolkitProfileService* aProfileSvc,
   // Ask the profile manager to select the profile directories to use.
   bool didCreate = false;
   rv = aProfileSvc->SelectStartupProfile(&gArgc, gArgv, gDoProfileReset,
-      aRootDir, aLocalDir, aProfile, &didCreate);
+                                         aRootDir, aLocalDir, aProfile,
+                                         &didCreate);
 
   if (rv == NS_ERROR_SHOW_PROFILE_MANAGER) {
     return ShowProfileManager(aProfileSvc, aNative);
@@ -3792,9 +3807,9 @@ int XREMain::XRE_mainStartup(bool* aExitFlag) {
   // Enable Telemetry IO Reporting on DEBUG, nightly and local builds,
   // but disable it on FUZZING builds.
 #ifndef FUZZING
-#ifdef DEBUG
+#  ifdef DEBUG
   mozilla::Telemetry::InitIOReporting(gAppData->xreDirectory);
-#else
+#  else
   {
     const char* releaseChannel = NS_STRINGIFY(MOZ_UPDATE_CHANNEL);
     if (strcmp(releaseChannel, "nightly") == 0 ||
@@ -3802,8 +3817,8 @@ int XREMain::XRE_mainStartup(bool* aExitFlag) {
       mozilla::Telemetry::InitIOReporting(gAppData->xreDirectory);
     }
   }
-#endif /* DEBUG */
-#endif /* FUZZING */
+#  endif /* DEBUG */
+#endif   /* FUZZING */
 
 #if defined(XP_WIN)
   // Enable the HeapEnableTerminationOnCorruption exploit mitigation. We ignore
@@ -4160,7 +4175,7 @@ int XREMain::XRE_mainStartup(bool* aExitFlag) {
   // We always want to lock the profile even if we're actually going to reset
   // it later.
   rv = LockProfile(mNativeApp, mProfD, mProfLD, profile,
-      getter_AddRefs(mProfileLock));
+                   getter_AddRefs(mProfileLock));
   if (rv == NS_ERROR_LAUNCHED_CHILD_PROCESS || rv == NS_ERROR_ABORT) {
     *aExitFlag = true;
     return 0;
@@ -4244,7 +4259,8 @@ int XREMain::XRE_mainStartup(bool* aExitFlag) {
 #ifdef MOZ_BLOCK_PROFILE_DOWNGRADE
   // The argument check must come first so the argument is always removed from
   // the command line regardless of whether this is a downgrade or not.
-  if (!CheckArg("allow-downgrade") && isDowngrade) {
+  if (!CheckArg("allow-downgrade") && isDowngrade &&
+      !EnvHasValue("MOZ_ALLOW_DOWNGRADE")) {
     rv = CheckDowngrade(mProfD, mNativeApp, mProfileSvc, lastVersion);
     if (rv == NS_ERROR_LAUNCHED_CHILD_PROCESS || rv == NS_ERROR_ABORT) {
       *aExitFlag = true;
@@ -4498,8 +4514,8 @@ nsresult XREMain::XRE_mainRun() {
     }
 
     if (gDoProfileReset) {
-      nsresult backupCreated = ProfileResetCleanup(mProfileSvc,
-          gResetOldProfile);
+      nsresult backupCreated =
+          ProfileResetCleanup(mProfileSvc, gResetOldProfile);
       if (NS_FAILED(backupCreated))
         NS_WARNING("Could not cleanup the profile that was reset");
     }

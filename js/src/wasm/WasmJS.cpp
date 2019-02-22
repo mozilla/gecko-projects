@@ -452,6 +452,24 @@ bool wasm::Eval(JSContext* cx, Handle<TypedArrayObject*> code,
                              globalObjs.get(), nullptr, instanceObj);
 }
 
+struct MOZ_STACK_CLASS SerializeListener : JS::OptimizedEncodingListener {
+  // MOZ_STACK_CLASS means these can be nops.
+  MozExternalRefCountType MOZ_XPCOM_ABI AddRef() override { return 0; }
+  MozExternalRefCountType MOZ_XPCOM_ABI Release() override { return 0; }
+
+  DebugOnly<bool> called = false;
+  Bytes* serialized;
+  explicit SerializeListener(Bytes* serialized) : serialized(serialized) {}
+
+  void storeOptimizedEncoding(const uint8_t* bytes, size_t length) override {
+    MOZ_ASSERT(!called);
+    called = true;
+    if (serialized->resize(length)) {
+      memcpy(serialized->begin(), bytes, length);
+    }
+  }
+};
+
 bool wasm::CompileAndSerialize(const ShareableBytes& bytecode,
                                Bytes* serialized) {
   MutableCompileArgs compileArgs = js_new<CompileArgs>(ScriptedCaller());
@@ -459,28 +477,26 @@ bool wasm::CompileAndSerialize(const ShareableBytes& bytecode,
     return false;
   }
 
-  // The caller has ensured HasCachingSupport().
+  // The caller has ensured HasCachingSupport(). Moreover, we want to ensure
+  // we go straight to tier-2 so that we synchronously call
+  // JS::OptimizedEncodingListener::storeOptimizedEncoding().
+  compileArgs->baselineEnabled = false;
   compileArgs->ionEnabled = true;
+
+  SerializeListener listener(serialized);
 
   UniqueChars error;
   UniqueCharsVector warnings;
-  UniqueLinkData linkData;
   SharedModule module =
-      CompileBuffer(*compileArgs, bytecode, &error, &warnings, &linkData);
+      CompileBuffer(*compileArgs, bytecode, &error, &warnings, &listener);
   if (!module) {
     fprintf(stderr, "Compilation error: %s\n", error ? error.get() : "oom");
     return false;
   }
 
   MOZ_ASSERT(module->code().hasTier(Tier::Serialized));
-
-  size_t serializedSize = module->serializedSize(*linkData);
-  if (!serialized->resize(serializedSize)) {
-    return false;
-  }
-
-  module->serialize(*linkData, serialized->begin(), serialized->length());
-  return true;
+  MOZ_ASSERT(listener.called);
+  return !listener.serialized->empty();
 }
 
 bool wasm::DeserializeModule(JSContext* cx, const Bytes& serialized,
@@ -977,7 +993,7 @@ static JSString* UTF8CharsToString(JSContext* cx, const char* chars) {
       continue;
     }
 
-    buf = ArrayBufferObject::create(cx, cs.payload->length());
+    buf = ArrayBufferObject::createZeroed(cx, cs.payload->length());
     if (!buf) {
       return false;
     }
@@ -2091,7 +2107,7 @@ bool WasmTableObject::isNewborn() const {
   }
 
   Limits limits;
-  if (!GetLimits(cx, obj, MaxTableInitialLength, MaxTableMaximumLength, "Table",
+  if (!GetLimits(cx, obj, MaxTableInitialLength, MaxTableLength, "Table",
                  &limits, Shareable::False)) {
     return false;
   }
@@ -2193,6 +2209,31 @@ static bool ToTableIndex(JSContext* cx, HandleValue v, const Table& table,
   return CallNonGenericMethod<IsTable, getImpl>(cx, args);
 }
 
+static void TableFunctionFill(JSContext* cx, Table* table, HandleFunction value,
+                              uint32_t index, uint32_t limit)
+{
+  RootedWasmInstanceObject instanceObj(
+    cx, ExportedFunctionToInstanceObject(value));
+  uint32_t funcIndex = ExportedFunctionToFuncIndex(value);
+
+#ifdef DEBUG
+  RootedFunction f(cx);
+  MOZ_ASSERT(
+    instanceObj->getExportedFunction(cx, instanceObj, funcIndex, &f));
+  MOZ_ASSERT(value == f);
+#endif
+
+  Instance& instance = instanceObj->instance();
+  Tier tier = instance.code().bestTier();
+  const MetadataTier& metadata = instance.metadata(tier);
+  const CodeRange& codeRange =
+    metadata.codeRange(metadata.lookupFuncExport(funcIndex));
+  void* code = instance.codeBase(tier) + codeRange.funcTableEntry();
+  while (index < limit) {
+    table->setAnyFunc(index++, code, &instance);
+  }
+}
+
 /* static */ bool WasmTableObject::setImpl(JSContext* cx,
                                            const CallArgs& args) {
   RootedWasmTableObject tableObj(
@@ -2208,34 +2249,20 @@ static bool ToTableIndex(JSContext* cx, HandleValue v, const Table& table,
     return false;
   }
 
+  RootedValue fillValue(cx, args[1]);
   switch (table.kind()) {
     case TableKind::AnyFunction: {
       RootedFunction value(cx);
-      if (!IsExportedFunction(args[1], &value) && !args[1].isNull()) {
+      if (!IsExportedFunction(fillValue, &value) && !fillValue.isNull()) {
         JS_ReportErrorNumberUTF8(cx, GetErrorMessage, nullptr,
                                  JSMSG_WASM_BAD_TABLE_VALUE);
         return false;
       }
 
       if (value) {
-        RootedWasmInstanceObject instanceObj(
-            cx, ExportedFunctionToInstanceObject(value));
-        uint32_t funcIndex = ExportedFunctionToFuncIndex(value);
-
-#ifdef DEBUG
-        RootedFunction f(cx);
-        MOZ_ASSERT(
-            instanceObj->getExportedFunction(cx, instanceObj, funcIndex, &f));
-        MOZ_ASSERT(value == f);
-#endif
-
-        Instance& instance = instanceObj->instance();
-        Tier tier = instance.code().bestTier();
-        const MetadataTier& metadata = instance.metadata(tier);
-        const CodeRange& codeRange =
-            metadata.codeRange(metadata.lookupFuncExport(funcIndex));
-        void* code = instance.codeBase(tier) + codeRange.funcTableEntry();
-        table.setAnyFunc(index, code, &instance);
+        MOZ_ASSERT(index < MaxTableLength);
+        static_assert(MaxTableLength < UINT32_MAX, "Invariant");
+        TableFunctionFill(cx, &table, value, index, index + 1);
       } else {
         table.setNull(index);
       }
@@ -2243,14 +2270,17 @@ static bool ToTableIndex(JSContext* cx, HandleValue v, const Table& table,
     }
     case TableKind::AnyRef: {
       RootedAnyRef tmp(cx, AnyRef::null());
-      if (!BoxAnyRef(cx, args[1], &tmp)) {
+      if (!BoxAnyRef(cx, fillValue, &tmp)) {
         return false;
       }
       table.setAnyRef(index, tmp);
       break;
     }
-    default: { MOZ_CRASH("Unexpected table kind"); }
+    default: {
+      MOZ_CRASH("Unexpected table kind");
+    }
   }
+
 
   args.rval().setUndefined();
   return true;
@@ -2276,15 +2306,68 @@ static bool ToTableIndex(JSContext* cx, HandleValue v, const Table& table,
     return false;
   }
 
-  uint32_t ret = table->table().grow(delta, cx);
+  uint32_t oldLength = table->table().grow(delta, cx);
 
-  if (ret == uint32_t(-1)) {
+  if (oldLength == uint32_t(-1)) {
     JS_ReportErrorNumberUTF8(cx, GetErrorMessage, nullptr, JSMSG_WASM_BAD_GROW,
                              "table");
     return false;
   }
 
-  args.rval().setInt32(ret);
+  RootedValue fillValue(cx);
+  fillValue.setNull();
+  if (args.length() > 1) {
+    fillValue = args[1];
+  }
+
+  MOZ_ASSERT(delta <= MaxTableLength); // grow() should ensure this
+  MOZ_ASSERT(oldLength <= MaxTableLength - delta); // ditto
+
+  static_assert(MaxTableLength < UINT32_MAX, "Invariant");
+
+  switch (table->table().kind()) {
+    case TableKind::AnyFunction: {
+      RootedFunction value(cx);
+      if (fillValue.isNull()) {
+#ifdef DEBUG
+        for (uint32_t index = oldLength; index < oldLength + delta; index++) {
+          MOZ_ASSERT(table->table().getAnyFunc(index).code == nullptr);
+        }
+#endif
+      } else if (IsExportedFunction(fillValue, &value)) {
+        TableFunctionFill(cx, &table->table(), value, oldLength,
+                          oldLength + delta);
+      } else {
+        JS_ReportErrorNumberUTF8(cx, GetErrorMessage, nullptr,
+                                 JSMSG_WASM_BAD_TBL_GROW_INIT, "anyfunc");
+        return false;
+      }
+      break;
+    }
+    case TableKind::AnyRef: {
+      RootedAnyRef tmp(cx, AnyRef::null());
+      if (!BoxAnyRef(cx, fillValue, &tmp)) {
+        return false;
+      }
+      if (!tmp.get().isNull()) {
+        for (uint32_t index = oldLength; index < oldLength + delta; index++) {
+          table->table().setAnyRef(index, tmp);
+        }
+      } else {
+#ifdef DEBUG
+        for (uint32_t index = oldLength; index < oldLength + delta; index++) {
+          MOZ_ASSERT(table->table().getAnyRef(index).isNull());
+        }
+#endif
+      }
+      break;
+    }
+    default: {
+      MOZ_CRASH("Unexpected table kind");
+    }
+  }
+
+  args.rval().setInt32(oldLength);
   return true;
 }
 

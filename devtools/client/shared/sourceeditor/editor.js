@@ -33,27 +33,20 @@ const AUTOCOMPLETE_MARK_CLASSNAME = "cm-auto-complete-shadow-text";
 const Services = require("Services");
 const EventEmitter = require("devtools/shared/event-emitter");
 const { PrefObserver } = require("devtools/client/shared/prefs");
-const { getClientCssProperties } = require("devtools/shared/fronts/css-properties");
 const KeyShortcuts = require("devtools/client/shared/key-shortcuts");
 
 const {LocalizationHelper} = require("devtools/shared/l10n");
 const L10N = new LocalizationHelper("devtools/client/locales/sourceeditor.properties");
 
-const {
-  getWasmText,
-  isWasm,
-  lineToWasmOffset,
-  wasmOffsetToLine,
-} = require("./wasm");
+loader.lazyRequireGetter(this, "wasm", "devtools/client/shared/sourceeditor/wasm");
 
 const { OS } = Services.appinfo;
 
-// CM_SCRIPTS and CM_IFRAME represent the HTML and JavaScript that is
+// CM_BUNDLE and CM_IFRAME represent the HTML and JavaScript that is
 // injected into an iframe in order to initialize a CodeMirror instance.
 
-const CM_SCRIPTS = [
-  "chrome://devtools/content/shared/sourceeditor/codemirror/codemirror.bundle.js",
-];
+const CM_BUNDLE =
+  "chrome://devtools/content/shared/sourceeditor/codemirror/codemirror.bundle.js";
 
 const CM_IFRAME = "chrome://devtools/content/shared/sourceeditor/codemirror/cmiframe.html";
 
@@ -136,6 +129,8 @@ function Editor(config) {
     themeSwitching: true,
     autocomplete: false,
     autocompleteOpts: {},
+    // Expect a CssProperties object (see devtools/shared/fronts/css-properties.js)
+    cssProperties: null,
     // Set to true to prevent the search addon to be activated.
     disableSearchAddon: false,
   };
@@ -217,17 +212,9 @@ function Editor(config) {
     cm.replaceSelection(" ".repeat(num), "end", "+input");
   };
 
-  // Allow add-ons to inject scripts for their editor instances
-  if (!this.config.externalScripts) {
-    this.config.externalScripts = [];
-  }
-
   if (this.config.cssProperties) {
     // Ensure that autocompletion has cssProperties if it's passed in via the options.
     this.config.autocompleteOpts.cssProperties = this.config.cssProperties;
-  } else {
-    // Use a static client-side database of CSS values if none is provided.
-    this.config.cssProperties = getClientCssProperties();
   }
 
   EventEmitter.decorate(this);
@@ -326,33 +313,30 @@ Editor.prototype = {
     doc = doc || el.ownerDocument;
     const win = el.ownerDocument.defaultView;
 
-    const scriptsToInject = CM_SCRIPTS.concat(this.config.externalScripts);
-    scriptsToInject.forEach(url => {
-      if (url.startsWith("chrome://")) {
-        Services.scriptloader.loadSubScript(url, win);
-      }
-    });
+    Services.scriptloader.loadSubScript(CM_BUNDLE, win);
 
-    // Replace the propertyKeywords, colorKeywords and valueKeywords
-    // properties of the CSS MIME type with the values provided by the CSS properties
-    // database.
-    const {
-      propertyKeywords,
-      colorKeywords,
-      valueKeywords,
-    } = getCSSKeywords(this.config.cssProperties);
+    if (this.config.cssProperties) {
+      // Replace the propertyKeywords, colorKeywords and valueKeywords
+      // properties of the CSS MIME type with the values provided by the CSS properties
+      // database.
+      const {
+        propertyKeywords,
+        colorKeywords,
+        valueKeywords,
+      } = getCSSKeywords(this.config.cssProperties);
 
-    const cssSpec = win.CodeMirror.resolveMode("text/css");
-    cssSpec.propertyKeywords = propertyKeywords;
-    cssSpec.colorKeywords = colorKeywords;
-    cssSpec.valueKeywords = valueKeywords;
-    win.CodeMirror.defineMIME("text/css", cssSpec);
+      const cssSpec = win.CodeMirror.resolveMode("text/css");
+      cssSpec.propertyKeywords = propertyKeywords;
+      cssSpec.colorKeywords = colorKeywords;
+      cssSpec.valueKeywords = valueKeywords;
+      win.CodeMirror.defineMIME("text/css", cssSpec);
 
-    const scssSpec = win.CodeMirror.resolveMode("text/x-scss");
-    scssSpec.propertyKeywords = propertyKeywords;
-    scssSpec.colorKeywords = colorKeywords;
-    scssSpec.valueKeywords = valueKeywords;
-    win.CodeMirror.defineMIME("text/x-scss", scssSpec);
+      const scssSpec = win.CodeMirror.resolveMode("text/x-scss");
+      scssSpec.propertyKeywords = propertyKeywords;
+      scssSpec.colorKeywords = colorKeywords;
+      scssSpec.valueKeywords = valueKeywords;
+      win.CodeMirror.defineMIME("text/x-scss", scssSpec);
+    }
 
     win.CodeMirror.commands.save = () => this.emit("saveRequested");
 
@@ -433,6 +417,19 @@ Editor.prototype = {
 
     if (!this.config.disableSearchAddon) {
       this._initSearchShortcuts(win);
+    } else {
+      // Hotfix for Bug 1527898. We should remove those overrides as part of Bug 1527903.
+      Object.assign(win.CodeMirror.commands, {
+        find: null,
+        findPersistent: null,
+        findPersistentNext: null,
+        findPersistentPrev: null,
+        findNext: null,
+        findPrev: null,
+        clearSearch: null,
+        replace: null,
+        replaceAll: null,
+      });
     }
 
     editors.set(this, cm);
@@ -543,15 +540,15 @@ Editor.prototype = {
   },
 
   get isWasm() {
-    return isWasm(this.getDoc());
+    return wasm.isWasm(this.getDoc());
   },
 
   wasmOffsetToLine: function(offset) {
-    return wasmOffsetToLine(this.getDoc(), offset);
+    return wasm.wasmOffsetToLine(this.getDoc(), offset);
   },
 
   lineToWasmOffset: function(number) {
-    return lineToWasmOffset(this.getDoc(), number);
+    return wasm.lineToWasmOffset(this.getDoc(), number);
   },
 
   toLineIfWasmOffset: function(maybeOffset) {
@@ -588,7 +585,7 @@ Editor.prototype = {
       for (let i = 0; i < data.length; i++) {
         data[i] = binary.charCodeAt(i);
       }
-      const { lines, done } = getWasmText(this.getDoc(), data);
+      const { lines, done } = wasm.getWasmText(this.getDoc(), data);
       const MAX_LINES = 10000000;
       if (lines.length > MAX_LINES) {
         lines.splice(MAX_LINES, lines.length - MAX_LINES);

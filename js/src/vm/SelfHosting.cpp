@@ -224,7 +224,7 @@ static bool intrinsic_IsWrappedInstanceOfBuiltin(JSContext* cx, unsigned argc,
     return true;
   }
 
-  JSObject* unwrapped = CheckedUnwrap(obj);
+  JSObject* unwrapped = CheckedUnwrapDynamic(obj, cx);
   if (!unwrapped) {
     ReportAccessDenied(cx);
     return false;
@@ -242,7 +242,7 @@ static bool intrinsic_IsPossiblyWrappedInstanceOfBuiltin(JSContext* cx,
   MOZ_ASSERT(args.length() == 1);
   MOZ_ASSERT(args[0].isObject());
 
-  JSObject* obj = CheckedUnwrap(&args[0].toObject());
+  JSObject* obj = CheckedUnwrapDynamic(&args[0].toObject(), cx);
   if (!obj) {
     ReportAccessDenied(cx);
     return false;
@@ -2654,7 +2654,6 @@ static const JSFunctionSpec intrinsic_functions[] = {
     // See builtin/TypedObject.h for descriptors of the typedobj functions.
     JS_FN("NewOpaqueTypedObject", js::NewOpaqueTypedObject, 1, 0),
     JS_FN("NewDerivedTypedObject", js::NewDerivedTypedObject, 3, 0),
-    JS_FN("TypedObjectBuffer", TypedObject::GetBuffer, 1, 0),
     JS_FN("TypedObjectByteOffset", TypedObject::GetByteOffset, 1, 0),
     JS_FN("AttachTypedObject", js::AttachTypedObject, 3, 0),
     JS_FN("TypedObjectIsAttached", js::TypedObjectIsAttached, 1, 0),

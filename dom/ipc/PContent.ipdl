@@ -104,6 +104,7 @@ using mozilla::CrossProcessMutexHandle from "mozilla/ipc/CrossProcessMutex.h";
 using refcounted class nsIInputStream from "mozilla/ipc/IPCStreamUtils.h";
 using refcounted class mozilla::dom::BrowsingContext from "mozilla/dom/BrowsingContext.h";
 using mozilla::dom::BrowsingContextId from "mozilla/dom/ipc/IdType.h";
+using mozilla::dom::BrowsingContextTransaction from "mozilla/dom/BrowsingContext.h";
 
 union ChromeRegistryItem
 {
@@ -894,6 +895,7 @@ parent:
     async PPSMContentDownloader(uint32_t aCertType);
 
     async PExternalHelperApp(OptionalURIParams uri,
+                             OptionalLoadInfoArgs loadInfoArgs,
                              nsCString aMimeContentType,
                              nsCString aContentDisposition,
                              uint32_t aContentDispositionHint,
@@ -1133,9 +1135,6 @@ parent:
       Principal aTriggeringPrincipal,
       uint32_t aReferrerPolicy);
 
-    sync GetAndroidSystemInfo()
-        returns (AndroidSystemInfo info);
-
     /**
      * Tells the parent to ungrab the pointer on the default display.
      *
@@ -1261,8 +1260,11 @@ parent:
                                    bool aNewValue);
 
 both:
-     async AsyncMessage(nsString aMessage, CpowEntry[] aCpows,
-                        Principal aPrincipal, ClonedMessageData aData);
+    async CommitBrowsingContextTransaction(BrowsingContext aContext,
+                                           BrowsingContextTransaction aTransaction);
+
+    async AsyncMessage(nsString aMessage, CpowEntry[] aCpows,
+                       Principal aPrincipal, ClonedMessageData aData);
 
     /**
      * Notify `push-subscription-modified` observers in the parent and child.

@@ -63,7 +63,7 @@ struct nsOverflowAreas;
 
 namespace mozilla {
 class ComputedStyle;
-enum class CSSPseudoElementType : uint8_t;
+enum class PseudoStyleType : uint8_t;
 class EventListenerManager;
 enum class LayoutFrameType : uint8_t;
 struct IntrinsicSize;
@@ -684,7 +684,7 @@ class nsLayoutUtils {
    */
   static bool HasPseudoStyle(nsIContent* aContent,
                              ComputedStyle* aComputedStyle,
-                             mozilla::CSSPseudoElementType aPseudoElement,
+                             mozilla::PseudoStyleType aPseudoElement,
                              nsPresContext* aPresContext);
 
   /**
@@ -2278,18 +2278,20 @@ class nsLayoutUtils {
   static bool HasCurrentTransitions(const nsIFrame* aFrame);
 
   /**
-   * Returns true if |aFrame| has an animation of |aProperty| regardless of
-   * whether the property is overridden by !important rule.
+   * Returns true if |aFrame| has an animation of a property in |aPropertySet|
+   * regardless of whether any property in the set is overridden by !important
+   * rule.
    */
-  static bool HasAnimationOfProperty(const nsIFrame* aFrame,
-                                     nsCSSPropertyID aProperty);
+  static bool HasAnimationOfPropertySet(const nsIFrame* aFrame,
+                                        const nsCSSPropertyIDSet& aPropertySet);
 
   /**
-   * Returns true if |aEffectSet| has an animation of |aProperty| regardless of
-   * whether the property is overridden by !important rule.
+   * Returns true if |aEffectSet| has an animation of a property |aPropertySet|
+   * regardless of whether any property in the set is overridden by !important
+   * rule.
    */
-  static bool HasAnimationOfProperty(mozilla::EffectSet* aEffectSet,
-                                     nsCSSPropertyID aProperty);
+  static bool HasAnimationOfPropertySet(mozilla::EffectSet* aEffectSet,
+                                        const nsCSSPropertyIDSet& aPropertySet);
 
   /**
    * Returns true if |aFrame| has an animation of |aProperty| which is
@@ -2946,8 +2948,7 @@ class nsLayoutUtils {
    * Appropriately add the correct font if we are using DocumentFonts or
    * overriding for XUL
    */
-  static void FixupNoneGeneric(nsFont* aFont, const nsPresContext* aPresContext,
-                               uint8_t aGenericFontID,
+  static void FixupNoneGeneric(nsFont* aFont, uint8_t aGenericFontID,
                                const nsFont* aDefaultVariableFont);
 
   /**
@@ -2955,7 +2956,7 @@ class nsLayoutUtils {
    * from preferences, as well as -moz-min-font-size-ratio.
    */
   static void ApplyMinFontSize(nsStyleFont* aFont,
-                               const nsPresContext* aPresContext,
+                               const mozilla::dom::Document*,
                                nscoord aMinFontSize);
 
   static void ComputeSystemFont(nsFont* aSystemFont,

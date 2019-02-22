@@ -1281,8 +1281,7 @@ void AssertValidValue(JSContext* cx, Value* v) {
     AssertValidStringPtr(cx, v->toString());
   } else if (v->isSymbol()) {
     AssertValidSymbolPtr(cx, v->toSymbol());
-  }
-  else if (v->isBigInt()) {
+  } else if (v->isBigInt()) {
     AssertValidBigIntPtr(cx, v->toBigInt());
   }
 }
@@ -1809,7 +1808,7 @@ MOZ_MUST_USE bool TrySkipAwait(JSContext* cx, HandleValue val,
 }
 
 bool IsPossiblyWrappedTypedArray(JSContext* cx, JSObject* obj, bool* result) {
-  JSObject* unwrapped = CheckedUnwrap(obj);
+  JSObject* unwrapped = CheckedUnwrapDynamic(obj, cx);
   if (!unwrapped) {
     ReportAccessDenied(cx);
     return false;
@@ -1870,8 +1869,7 @@ const VMFunction GetSparseElementHelperInfo =
     FunctionInfo<GetSparseElementHelperFn>(GetSparseElementHelper,
                                            "getSparseElementHelper");
 
-static bool DoToNumber(JSContext* cx, HandleValue arg,
-                       MutableHandleValue ret) {
+static bool DoToNumber(JSContext* cx, HandleValue arg, MutableHandleValue ret) {
   ret.set(arg);
   return ToNumber(cx, ret);
 }

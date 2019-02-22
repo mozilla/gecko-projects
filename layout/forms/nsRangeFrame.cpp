@@ -74,7 +74,7 @@ void nsRangeFrame::Init(nsIContent* aContent, nsContainerFrame* aParent,
   ServoStyleSet* styleSet = PresContext()->StyleSet();
 
   mOuterFocusStyle = styleSet->ProbePseudoElementStyle(
-      *aContent->AsElement(), CSSPseudoElementType::mozFocusOuter, Style());
+      *aContent->AsElement(), PseudoStyleType::mozFocusOuter, Style());
 
   return nsContainerFrame::Init(aContent, aParent, aPrevInFlow);
 }
@@ -96,7 +96,7 @@ void nsRangeFrame::DestroyFrom(nsIFrame* aDestructRoot,
 }
 
 nsresult nsRangeFrame::MakeAnonymousDiv(Element** aResult,
-                                        CSSPseudoElementType aPseudoType,
+                                        PseudoStyleType aPseudoType,
                                         nsTArray<ContentInfo>& aElements) {
   nsCOMPtr<Document> doc = mContent->GetComposedDoc();
   RefPtr<Element> resultElement = doc->CreateHTMLElement(nsGkAtoms::div);
@@ -116,19 +116,19 @@ nsresult nsRangeFrame::CreateAnonymousContent(
     nsTArray<ContentInfo>& aElements) {
   nsresult rv;
 
-  // Create the ::-moz-range-track pseuto-element (a div):
+  // Create the ::-moz-range-track pseudo-element (a div):
   rv = MakeAnonymousDiv(getter_AddRefs(mTrackDiv),
-                        CSSPseudoElementType::mozRangeTrack, aElements);
+                        PseudoStyleType::mozRangeTrack, aElements);
   NS_ENSURE_SUCCESS(rv, rv);
 
   // Create the ::-moz-range-progress pseudo-element (a div):
   rv = MakeAnonymousDiv(getter_AddRefs(mProgressDiv),
-                        CSSPseudoElementType::mozRangeProgress, aElements);
+                        PseudoStyleType::mozRangeProgress, aElements);
   NS_ENSURE_SUCCESS(rv, rv);
 
   // Create the ::-moz-range-thumb pseudo-element (a div):
   rv = MakeAnonymousDiv(getter_AddRefs(mThumbDiv),
-                        CSSPseudoElementType::mozRangeThumb, aElements);
+                        PseudoStyleType::mozRangeThumb, aElements);
   return rv;
 }
 
@@ -725,11 +725,10 @@ nscoord nsRangeFrame::AutoCrossSize(nscoord aEm) {
     bool unused;
     LayoutDeviceIntSize size;
     nsPresContext* pc = PresContext();
-    pc->GetTheme()->GetMinimumWidgetSize(pc, this,
-                                         StyleAppearance::RangeThumb,
+    pc->GetTheme()->GetMinimumWidgetSize(pc, this, StyleAppearance::RangeThumb,
                                          &size, &unused);
-    minCrossSize = pc->DevPixelsToAppUnits(IsHorizontal() ? size.height
-                                                          : size.width);
+    minCrossSize =
+        pc->DevPixelsToAppUnits(IsHorizontal() ? size.height : size.width);
   }
   return std::max(minCrossSize, NSToCoordRound(CROSS_AXIS_EM_SIZE * aEm));
 }
@@ -770,8 +769,7 @@ nscoord nsRangeFrame::GetMinISize(gfxContext* aRenderingContext) {
 nscoord nsRangeFrame::GetPrefISize(gfxContext* aRenderingContext) {
   bool isInline = IsInlineOriented();
   auto em = StyleFont()->mFont.size * nsLayoutUtils::FontSizeInflationFor(this);
-  return isInline ? NSToCoordRound(em * MAIN_AXIS_EM_SIZE)
-                  : AutoCrossSize(em);
+  return isInline ? NSToCoordRound(em * MAIN_AXIS_EM_SIZE) : AutoCrossSize(em);
 }
 
 bool nsRangeFrame::IsHorizontal() const {

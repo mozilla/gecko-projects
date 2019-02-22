@@ -165,10 +165,6 @@ add_task(async function() {
 // Checks that "Search with Current Search Engine" items are updated to "Search
 // with One-Off Engine" when a one-off is selected.
 add_task(async function searchWith() {
-  // TODO Bug 1527947: Implement "search with" change with button change.
-  if (UrlbarPrefs.get("quantumbar")) {
-    return;
-  }
   let typedValue = "foo";
   await promiseAutocompleteResultPopup(typedValue);
   let result = await UrlbarTestUtils.getDetailsOfResultAt(window, 0);
@@ -264,10 +260,6 @@ add_task(async function collapsedOneOffs() {
 // The one-offs should be hidden when searching with an "@engine" search engine
 // alias.
 add_task(async function hiddenWhenUsingSearchAlias() {
-  // TODO Bug 1527934: Implement this for QuantumBar.
-  if (UrlbarPrefs.get("quantumbar")) {
-    return;
-  }
   let typedValue = "@example";
   await promiseAutocompleteResultPopup(typedValue, window, true);
   await waitForAutocompleteResultAt(0);

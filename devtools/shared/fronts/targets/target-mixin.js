@@ -46,7 +46,11 @@ function TargetMixin(parentClass) {
       this._forceChrome = false;
 
       this.destroy = this.destroy.bind(this);
+      this._onNewSource = this._onNewSource.bind(this);
+      this._onUpdatedSource = this._onUpdatedSource.bind(this);
+
       this.activeConsole = null;
+      this.threadClient = null;
 
       this._client = client;
 
@@ -356,12 +360,49 @@ function TargetMixin(parentClass) {
 
     // Attach the console actor
     async attachConsole() {
-      const [, consoleClient] = await this._client.attachConsole(
-        this.targetForm.consoleActor, []);
-      this.activeConsole = consoleClient;
+      this.activeConsole = await this.getFront("console");
+      await this.activeConsole.startListeners([]);
 
       this._onInspectObject = packet => this.emit("inspect-object", packet);
       this.activeConsole.on("inspectObject", this._onInspectObject);
+    }
+
+    /**
+     * Attach to thread actor.
+     *
+     * This depends on having the sub-class to set the thread actor ID in `_threadActor`.
+     *
+     * @param object options
+     *        Configuration options.
+     */
+    async attachThread(options = {}) {
+      if (!this._threadActor) {
+        throw new Error("TargetMixin sub class should set _threadActor before calling " +
+                        "attachThread");
+      }
+      const [response, threadClient] =
+        await this._client.attachThread(this._threadActor, options);
+      this.threadClient = threadClient;
+
+      this.threadClient.addListener("newSource", this._onNewSource);
+
+      // "updatedSource" is emitted by the thread actor, but on its parent actor.
+      // i.e. the target actor. So we have to listen on the target actor, but ideally,
+      // the actor should emit this event itself.
+      this.on("updatedSource", this._onUpdatedSource);
+
+      return [response, threadClient];
+    }
+
+    // Listener for "newSource" event fired by the thread actor
+    _onNewSource(type, packet) {
+      this.emit("source-updated", packet);
+    }
+
+    // Listener for "updatedSource" event fired by the thread actor in the name of the
+    // target actor
+    _onUpdatedSource(packet) {
+      this.emit("source-updated", packet);
     }
 
     /**
@@ -391,12 +432,6 @@ function TargetMixin(parentClass) {
       this.client.addListener("closed", this.destroy);
 
       this.on("tabDetached", this.destroy);
-
-      // These events should be ultimately listened from the thread client as
-      // they are coming from it and no longer go through the Target Actor/Front.
-      this._onSourceUpdated = packet => this.emit("source-updated", packet);
-      this.on("newSource", this._onSourceUpdated);
-      this.on("updatedSource", this._onSourceUpdated);
     }
 
     /**
@@ -406,8 +441,12 @@ function TargetMixin(parentClass) {
       // Remove listeners set in _setupRemoteListeners
       this.client.removeListener("closed", this.destroy);
       this.off("tabDetached", this.destroy);
-      this.off("newSource", this._onSourceUpdated);
-      this.off("updatedSource", this._onSourceUpdated);
+
+      // Remove listeners set in attachThread
+      if (this.threadClient) {
+        this.threadClient.removeListener("newSource", this._onNewSource);
+        this.off("updatedSource", this._onUpdatedSource);
+      }
 
       // Remove listeners set in attachConsole
       if (this.activeConsole && this._onInspectObject) {
@@ -502,7 +541,15 @@ function TargetMixin(parentClass) {
           }
         }
 
-        // Do that very last in order to let a chance to call detach.
+        if (this.threadClient) {
+          try {
+            await this.threadClient.detach();
+          } catch (e) {
+            console.warn(`Error while detaching the thread front: ${e.message}`);
+          }
+        }
+
+        // Do that very last in order to let a chance to dispatch `detach` requests.
         super.destroy();
 
         this._cleanup();
@@ -516,6 +563,7 @@ function TargetMixin(parentClass) {
      */
     _cleanup() {
       this.activeConsole = null;
+      this.threadClient = null;
       this._client = null;
       this._tab = null;
 

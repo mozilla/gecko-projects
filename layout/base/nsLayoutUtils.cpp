@@ -232,64 +232,59 @@ bool nsLayoutUtils::HasCurrentTransitions(const nsIFrame* aFrame) {
   });
 }
 
-static bool MayHaveAnimationOfProperty(EffectSet* effects,
-                                       nsCSSPropertyID aProperty) {
-  MOZ_ASSERT(effects);
-
-  if (aProperty == eCSSProperty_transform &&
-      !effects->MayHaveTransformAnimation()) {
-    return false;
-  }
-  if (aProperty == eCSSProperty_opacity &&
-      !effects->MayHaveOpacityAnimation()) {
-    return false;
+template <typename EffectSetOrFrame>
+static bool MayHaveAnimationOfPropertySet(
+    const EffectSetOrFrame* aTarget, const nsCSSPropertyIDSet& aPropertySet) {
+  MOZ_ASSERT(aTarget);
+  if (aPropertySet.Equals(nsCSSPropertyIDSet::OpacityProperties())) {
+    return aTarget->MayHaveOpacityAnimation();
   }
 
-  return true;
+  MOZ_ASSERT(aPropertySet.Equals(nsCSSPropertyIDSet::TransformLikeProperties()),
+             "Should equal to transform-like properties at this branch");
+  return aTarget->MayHaveTransformAnimation();
 }
 
-static bool MayHaveAnimationOfProperty(const nsIFrame* aFrame,
-                                       nsCSSPropertyID aProperty) {
-  switch (aProperty) {
-    case eCSSProperty_transform:
-      return aFrame->MayHaveTransformAnimation();
-    case eCSSProperty_opacity:
-      return aFrame->MayHaveOpacityAnimation();
-    default:
-      MOZ_ASSERT_UNREACHABLE("unexpected property");
-      return false;
-  }
-}
-
-bool nsLayoutUtils::HasAnimationOfProperty(EffectSet* aEffectSet,
-                                           nsCSSPropertyID aProperty) {
-  if (!aEffectSet || !MayHaveAnimationOfProperty(aEffectSet, aProperty)) {
+bool nsLayoutUtils::HasAnimationOfPropertySet(
+    EffectSet* aEffectSet, const nsCSSPropertyIDSet& aPropertySet) {
+  if (!aEffectSet || !MayHaveAnimationOfPropertySet(aEffectSet, aPropertySet)) {
     return false;
   }
 
   return HasMatchingAnimations(
-      aEffectSet, [&aProperty](KeyframeEffect& aEffect) {
+      aEffectSet, [&aPropertySet](KeyframeEffect& aEffect) {
         return (aEffect.IsInEffect() || aEffect.IsCurrent()) &&
-               aEffect.HasAnimationOfProperty(aProperty);
+               aEffect.HasAnimationOfPropertySet(aPropertySet);
       });
 }
 
-bool nsLayoutUtils::HasAnimationOfProperty(const nsIFrame* aFrame,
-                                           nsCSSPropertyID aProperty) {
-  if (!MayHaveAnimationOfProperty(aFrame, aProperty)) {
+bool nsLayoutUtils::HasAnimationOfPropertySet(
+    const nsIFrame* aFrame, const nsCSSPropertyIDSet& aPropertySet) {
+  if (!MayHaveAnimationOfPropertySet(aFrame, aPropertySet)) {
     return false;
   }
 
-  return HasMatchingAnimations(aFrame, [&aProperty](KeyframeEffect& aEffect) {
-    return (aEffect.IsInEffect() || aEffect.IsCurrent()) &&
-           aEffect.HasAnimationOfProperty(aProperty);
-  });
+  return HasMatchingAnimations(
+      aFrame, [&aPropertySet](KeyframeEffect& aEffect) {
+        return (aEffect.IsInEffect() || aEffect.IsCurrent()) &&
+               aEffect.HasAnimationOfPropertySet(aPropertySet);
+      });
 }
 
 bool nsLayoutUtils::HasEffectiveAnimation(const nsIFrame* aFrame,
                                           nsCSSPropertyID aProperty) {
   EffectSet* effects = EffectSet::GetEffectSet(aFrame);
-  if (!effects || !MayHaveAnimationOfProperty(effects, aProperty)) {
+  if (!effects) {
+    return false;
+  }
+
+  if (nsCSSPropertyIDSet::TransformLikeProperties().HasProperty(aProperty) &&
+      !effects->MayHaveTransformAnimation()) {
+    return false;
+  }
+
+  if (aProperty == eCSSProperty_opacity &&
+      !effects->MayHaveOpacityAnimation()) {
     return false;
   }
 
@@ -1928,7 +1923,7 @@ nsRect nsLayoutUtils::GetScrolledRect(nsIFrame* aScrolledFrame,
 // static
 bool nsLayoutUtils::HasPseudoStyle(nsIContent* aContent,
                                    ComputedStyle* aComputedStyle,
-                                   CSSPseudoElementType aPseudoElement,
+                                   PseudoStyleType aPseudoElement,
                                    nsPresContext* aPresContext) {
   MOZ_ASSERT(aPresContext, "Must have a prescontext");
 
@@ -3253,7 +3248,7 @@ void nsLayoutUtils::AddExtraBackgroundItems(nsDisplayListBuilder& aBuilder,
     nsRect bounds =
         nsRect(aBuilder.ToReferenceFrame(aFrame), aFrame->GetSize());
     nsDisplayListBuilder::AutoBuildingDisplayList buildingDisplayList(
-        &aBuilder, aFrame, bounds, bounds, false);
+        &aBuilder, aFrame, bounds, bounds);
     presShell->AddPrintPreviewBackgroundItem(aBuilder, aList, aFrame, bounds);
   } else if (frameType != LayoutFrameType::Page) {
     // For printing, this function is first called on an nsPageFrame, which
@@ -3268,7 +3263,7 @@ void nsLayoutUtils::AddExtraBackgroundItems(nsDisplayListBuilder& aBuilder,
     nsRect canvasArea = aVisibleRegion.GetBounds();
     canvasArea.IntersectRect(aCanvasArea, canvasArea);
     nsDisplayListBuilder::AutoBuildingDisplayList buildingDisplayList(
-        &aBuilder, aFrame, canvasArea, canvasArea, false);
+        &aBuilder, aFrame, canvasArea, canvasArea);
     presShell->AddCanvasBackgroundColorItem(aBuilder, aList, aFrame, canvasArea,
                                             aBackstop);
   }
@@ -3970,9 +3965,9 @@ bool nsLayoutUtils::BinarySearchForPosition(
 
 void nsLayoutUtils::AddBoxesForFrame(nsIFrame* aFrame,
                                      nsLayoutUtils::BoxCallback* aCallback) {
-  nsAtom* pseudoType = aFrame->Style()->GetPseudo();
+  auto pseudoType = aFrame->Style()->GetPseudoType();
 
-  if (pseudoType == nsCSSAnonBoxes::tableWrapper()) {
+  if (pseudoType == PseudoStyleType::tableWrapper) {
     AddBoxesForFrame(aFrame->PrincipalChildList().FirstChild(), aCallback);
     if (aCallback->mIncludeCaptionBoxForTable) {
       nsIFrame* kid = aFrame->GetChildList(nsIFrame::kCaptionList).FirstChild();
@@ -3980,9 +3975,9 @@ void nsLayoutUtils::AddBoxesForFrame(nsIFrame* aFrame,
         AddBoxesForFrame(kid, aCallback);
       }
     }
-  } else if (pseudoType == nsCSSAnonBoxes::mozBlockInsideInlineWrapper() ||
-             pseudoType == nsCSSAnonBoxes::mozMathMLAnonymousBlock() ||
-             pseudoType == nsCSSAnonBoxes::mozXULAnonymousBlock()) {
+  } else if (pseudoType == PseudoStyleType::mozBlockInsideInlineWrapper ||
+             pseudoType == PseudoStyleType::mozMathMLAnonymousBlock ||
+             pseudoType == PseudoStyleType::mozXULAnonymousBlock) {
     for (nsIFrame* kid : aFrame->PrincipalChildList()) {
       AddBoxesForFrame(kid, aCallback);
     }
@@ -4001,9 +3996,9 @@ void nsLayoutUtils::GetAllInFlowBoxes(nsIFrame* aFrame,
 
 nsIFrame* nsLayoutUtils::GetFirstNonAnonymousFrame(nsIFrame* aFrame) {
   while (aFrame) {
-    nsAtom* pseudoType = aFrame->Style()->GetPseudo();
+    auto pseudoType = aFrame->Style()->GetPseudoType();
 
-    if (pseudoType == nsCSSAnonBoxes::tableWrapper()) {
+    if (pseudoType == PseudoStyleType::tableWrapper) {
       nsIFrame* f =
           GetFirstNonAnonymousFrame(aFrame->PrincipalChildList().FirstChild());
       if (f) {
@@ -4016,9 +4011,9 @@ nsIFrame* nsLayoutUtils::GetFirstNonAnonymousFrame(nsIFrame* aFrame) {
           return f;
         }
       }
-    } else if (pseudoType == nsCSSAnonBoxes::mozBlockInsideInlineWrapper() ||
-               pseudoType == nsCSSAnonBoxes::mozMathMLAnonymousBlock() ||
-               pseudoType == nsCSSAnonBoxes::mozXULAnonymousBlock()) {
+    } else if (pseudoType == PseudoStyleType::mozBlockInsideInlineWrapper ||
+               pseudoType == PseudoStyleType::mozMathMLAnonymousBlock ||
+               pseudoType == PseudoStyleType::mozXULAnonymousBlock) {
       for (nsIFrame* kid : aFrame->PrincipalChildList()) {
         nsIFrame* f = GetFirstNonAnonymousFrame(kid);
         if (f) {
@@ -4451,6 +4446,7 @@ already_AddRefed<nsFontMetrics> nsLayoutUtils::GetFontMetricsForComputedStyle(
   // pass along to CreateFontGroup
   params.userFontSet = aPresContext->GetUserFontSet();
   params.textPerf = aPresContext->GetTextPerfMetrics();
+  params.featureValueLookup = aPresContext->GetFontFeatureValuesLookup();
 
   // When aInflation is 1.0 and we don't require width variant, avoid
   // making a local copy of the nsFont.
@@ -9555,14 +9551,13 @@ already_AddRefed<nsFontMetrics> nsLayoutUtils::GetMetricsFor(
   params.userFontSet =
       aUseUserFontSet ? aPresContext->GetUserFontSet() : nullptr;
   params.textPerf = aPresContext->GetTextPerfMetrics();
+  params.featureValueLookup = aPresContext->GetFontFeatureValuesLookup();
   return aPresContext->DeviceContext()->GetMetricsFor(font, params);
 }
 
 /* static */ void nsLayoutUtils::FixupNoneGeneric(
-    nsFont* aFont, const nsPresContext* aPresContext, uint8_t aGenericFontID,
-    const nsFont* aDefaultVariableFont) {
-  bool useDocumentFonts =
-      aPresContext->GetCachedBoolPref(kPresContext_UseDocumentFonts);
+    nsFont* aFont, uint8_t aGenericFontID, const nsFont* aDefaultVariableFont) {
+  bool useDocumentFonts = StaticPrefs::browser_display_use_document_fonts();
   if (aGenericFontID == kGenericFont_NONE ||
       (!useDocumentFonts && (aGenericFontID == kGenericFont_cursive ||
                              aGenericFontID == kGenericFont_fantasy))) {
@@ -9587,9 +9582,9 @@ already_AddRefed<nsFontMetrics> nsLayoutUtils::GetMetricsFor(
   }
 }
 
-/* static */ void nsLayoutUtils::ApplyMinFontSize(
-    nsStyleFont* aFont, const nsPresContext* aPresContext,
-    nscoord aMinFontSize) {
+/* static */ void nsLayoutUtils::ApplyMinFontSize(nsStyleFont* aFont,
+                                                  const Document* aDocument,
+                                                  nscoord aMinFontSize) {
   nscoord fontSize = aFont->mSize;
 
   // enforce the user' specified minimum font-size on the value that we expose
@@ -9600,7 +9595,7 @@ already_AddRefed<nsFontMetrics> nsLayoutUtils::GetMetricsFor(
     } else {
       aMinFontSize = (aMinFontSize * aFont->mMinFontSizeRatio) / 100;
     }
-    if (fontSize < aMinFontSize && !aPresContext->IsChrome()) {
+    if (fontSize < aMinFontSize && !nsContentUtils::IsChromeDoc(aDocument)) {
       // override the minimum font-size constraint
       fontSize = aMinFontSize;
     }
@@ -9718,26 +9713,6 @@ already_AddRefed<nsFontMetrics> nsLayoutUtils::GetMetricsFor(
   return style.get();
 }
 
-static float ResolveTransformOrigin(
-    const nsStyleCoord& aCoord, TransformReferenceBox& aRefBox,
-    TransformReferenceBox::DimensionGetter aGetter) {
-  float result = 0.0;
-  const float scale = mozilla::AppUnitsPerCSSPixel();
-  if (aCoord.GetUnit() == eStyleUnit_Calc) {
-    const nsStyleCoord::Calc* calc = aCoord.GetCalcValue();
-    result =
-        NSAppUnitsToFloatPixels((aRefBox.*aGetter)(), scale) * calc->mPercent +
-        NSAppUnitsToFloatPixels(calc->mLength, scale);
-  } else if (aCoord.GetUnit() == eStyleUnit_Percent) {
-    result = NSAppUnitsToFloatPixels((aRefBox.*aGetter)(), scale) *
-             aCoord.GetPercentValue();
-  } else {
-    MOZ_ASSERT(aCoord.GetUnit() == eStyleUnit_Coord, "unexpected unit");
-    result = NSAppUnitsToFloatPixels(aCoord.GetCoordValue(), scale);
-  }
-  return result;
-}
-
 /* static */ Maybe<MotionPathData> nsLayoutUtils::ResolveMotionPath(
     const nsIFrame* aFrame) {
   MOZ_ASSERT(aFrame);
@@ -9791,11 +9766,10 @@ static float ResolveTransformOrigin(
   // We need to resolve transform-origin here to calculate the correct path
   // translate. (i.e. Center transform-origin on the path.)
   TransformReferenceBox refBox(aFrame);
-  Point origin(ResolveTransformOrigin(display->mTransformOrigin[0], refBox,
-                                      &TransformReferenceBox::Width),
-               ResolveTransformOrigin(display->mTransformOrigin[1], refBox,
-                                      &TransformReferenceBox::Height));
+  auto& transformOrigin = display->mTransformOrigin;
+  CSSPoint origin = nsStyleTransformMatrix::Convert2DPosition(
+      transformOrigin.horizontal, transformOrigin.vertical, refBox);
   // Bug 1186329: the translate parameters will be adjusted more after we
   // implement offset-position and offset-anchor.
-  return Some(MotionPathData{point - origin, angle});
+  return Some(MotionPathData{point - origin.ToUnknownPoint(), angle});
 }

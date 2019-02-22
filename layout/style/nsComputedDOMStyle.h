@@ -297,9 +297,7 @@ class nsComputedDOMStyle final : public nsDOMCSSDeclaration,
   already_AddRefed<CSSValue> DoGetBorderTopRightRadius();
 
   /* Border Image */
-  already_AddRefed<CSSValue> DoGetBorderImageSlice();
   already_AddRefed<CSSValue> DoGetBorderImageWidth();
-  already_AddRefed<CSSValue> DoGetBorderImageOutset();
 
   /* Box Shadow */
   already_AddRefed<CSSValue> DoGetBoxShadow();
@@ -317,9 +315,6 @@ class nsComputedDOMStyle final : public nsDOMCSSDeclaration,
   already_AddRefed<CSSValue> DoGetOutlineRadiusTopLeft();
   already_AddRefed<CSSValue> DoGetOutlineRadiusTopRight();
 
-  /* z-index */
-  already_AddRefed<CSSValue> DoGetZIndex();
-
   /* Text Properties */
   already_AddRefed<CSSValue> DoGetInitialLetter();
   already_AddRefed<CSSValue> DoGetLineHeight();
@@ -333,7 +328,6 @@ class nsComputedDOMStyle final : public nsDOMCSSDeclaration,
   already_AddRefed<CSSValue> DoGetTextShadow();
   already_AddRefed<CSSValue> DoGetLetterSpacing();
   already_AddRefed<CSSValue> DoGetWordSpacing();
-  already_AddRefed<CSSValue> DoGetTabSize();
   already_AddRefed<CSSValue> DoGetWebkitTextStrokeWidth();
 
   /* Display properties */
@@ -344,7 +338,6 @@ class nsComputedDOMStyle final : public nsDOMCSSDeclaration,
   already_AddRefed<CSSValue> DoGetTouchAction();
   already_AddRefed<CSSValue> DoGetTransform();
   already_AddRefed<CSSValue> DoGetTransformOrigin();
-  already_AddRefed<CSSValue> DoGetPerspective();
   already_AddRefed<CSSValue> DoGetPerspectiveOrigin();
   already_AddRefed<CSSValue> DoGetScrollSnapPointsX();
   already_AddRefed<CSSValue> DoGetScrollSnapPointsY();
@@ -482,8 +475,6 @@ class nsComputedDOMStyle final : public nsDOMCSSDeclaration,
   bool GetCBPaddingRectHeight(nscoord& aHeight);
   bool GetScrollFrameContentWidth(nscoord& aWidth);
   bool GetScrollFrameContentHeight(nscoord& aHeight);
-  bool GetFrameBoundsWidthForTransform(nscoord& aWidth);
-  bool GetFrameBoundsHeightForTransform(nscoord& aHeight);
   bool GetFrameBorderRectWidth(nscoord& aWidth);
   bool GetFrameBorderRectHeight(nscoord& aHeight);
 

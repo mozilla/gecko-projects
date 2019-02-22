@@ -1448,7 +1448,7 @@ static bool CaptureFirstSubsumedFrame(JSContext* cx, unsigned argc,
   }
 
   RootedObject obj(cx, &args[0].toObject());
-  obj = CheckedUnwrap(obj);
+  obj = CheckedUnwrapStatic(obj);
   if (!obj) {
     JS_ReportErrorASCII(cx, "Denied permission to object.");
     return false;
@@ -3043,7 +3043,7 @@ static mozilla::Maybe<JS::StructuredCloneScope> ParseCloneScope(
   return scope;
 }
 
-static bool Serialize(JSContext* cx, unsigned argc, Value* vp) {
+bool js::testingFunc_serialize(JSContext* cx, unsigned argc, Value* vp) {
   CallArgs args = CallArgsFromVp(argc, vp);
 
   mozilla::Maybe<JSAutoStructuredCloneBuffer> clonebuf;
@@ -3346,7 +3346,7 @@ static bool SharedAddress(JSContext* cx, unsigned argc, Value* vp) {
 #  ifdef JS_MORE_DETERMINISTIC
   args.rval().setString(cx->staticStrings().getUint(0));
 #  else
-  RootedObject obj(cx, CheckedUnwrap(&args[0].toObject()));
+  RootedObject obj(cx, CheckedUnwrapStatic(&args[0].toObject()));
   if (!obj) {
     ReportAccessDenied(cx);
     return false;
@@ -3907,7 +3907,7 @@ static bool EvalReturningScope(JSContext* cx, unsigned argc, Value* vp) {
   }
 
   if (global) {
-    global = CheckedUnwrap(global);
+    global = CheckedUnwrapDynamic(global, cx);
     if (!global) {
       JS_ReportErrorASCII(cx, "Permission denied to access global");
       return false;
@@ -4010,7 +4010,7 @@ static bool ShellCloneAndExecuteScript(JSContext* cx, unsigned argc,
     return false;
   }
 
-  global = CheckedUnwrap(global);
+  global = CheckedUnwrapDynamic(global, cx);
   if (!global) {
     JS_ReportErrorASCII(cx, "Permission denied to access global");
     return false;
@@ -4383,7 +4383,7 @@ static bool GetLcovInfo(JSContext* cx, unsigned argc, Value* vp) {
       JS_ReportErrorASCII(cx, "Permission denied to access global");
       return false;
     }
-    global = CheckedUnwrap(global);
+    global = CheckedUnwrapDynamic(global, cx);
     if (!global) {
       ReportAccessDenied(cx);
       return false;
@@ -6094,7 +6094,7 @@ gc::ZealModeHelpText),
 "  are valuable and should be generally enabled, however they can be very expensive for large\n"
 "  (wasm) programs."),
 
-    JS_FN_HELP("serialize", Serialize, 1, 0,
+    JS_FN_HELP("serialize", testingFunc_serialize, 1, 0,
 "serialize(data, [transferables, [policy]])",
 "  Serialize 'data' using JS_WriteStructuredClone. Returns a structured\n"
 "  clone buffer object. 'policy' may be an options hash. Valid keys:\n"

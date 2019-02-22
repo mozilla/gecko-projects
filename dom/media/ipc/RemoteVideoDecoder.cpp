@@ -18,8 +18,7 @@ namespace mozilla {
 using namespace layers;  // for PlanarYCbCrData and BufferRecycleBin
 
 RemoteVideoDecoderChild::RemoteVideoDecoderChild()
-    : RemoteDecoderChild(),
-      mBufferRecycleBin(new BufferRecycleBin) {}
+    : RemoteDecoderChild(), mBufferRecycleBin(new BufferRecycleBin) {}
 
 RefPtr<mozilla::layers::Image> RemoteVideoDecoderChild::DeserializeImage(
     const SurfaceDescriptorBuffer& aSdBuffer, const IntSize& aPicSize) {
@@ -65,7 +64,8 @@ RefPtr<mozilla::layers::Image> RemoteVideoDecoderChild::DeserializeImage(
   // images coming from AOMDecoder are RecyclingPlanarYCbCrImages.
   RefPtr<RecyclingPlanarYCbCrImage> image =
       new RecyclingPlanarYCbCrImage(mBufferRecycleBin);
-  image->CopyData(pData);
+  bool setData = image->CopyData(pData);
+  MOZ_ASSERT(setData);
 
   switch (memOrShmem.type()) {
     case MemoryOrShmem::Tuintptr_t:
@@ -76,6 +76,10 @@ RefPtr<mozilla::layers::Image> RemoteVideoDecoderChild::DeserializeImage(
       break;
     default:
       MOZ_ASSERT(false, "Unknown MemoryOrShmem type");
+  }
+
+  if (!setData) {
+    return nullptr;
   }
 
   return image;
@@ -101,8 +105,7 @@ mozilla::ipc::IPCResult RemoteVideoDecoderChild::RecvOutput(
 }
 
 MediaResult RemoteVideoDecoderChild::InitIPDL(
-    const VideoInfo& aVideoInfo,
-    float aFramerate,
+    const VideoInfo& aVideoInfo, float aFramerate,
     const CreateDecoderParams::OptionSet& aOptions) {
   RefPtr<RemoteDecoderManagerChild> manager =
       RemoteDecoderManagerChild::GetSingleton();
@@ -124,11 +127,8 @@ MediaResult RemoteVideoDecoderChild::InitIPDL(
   bool success = false;
   nsCString errorDescription;
   VideoDecoderInfoIPDL decoderInfo(aVideoInfo, aFramerate);
-  if (manager->SendPRemoteDecoderConstructor(this,
-                                             decoderInfo,
-                                             aOptions,
-                                             &success,
-                                             &errorDescription)) {
+  if (manager->SendPRemoteDecoderConstructor(this, decoderInfo, aOptions,
+                                             &success, &errorDescription)) {
     mCanSend = true;
   }
 
@@ -137,17 +137,11 @@ MediaResult RemoteVideoDecoderChild::InitIPDL(
 }
 
 RemoteVideoDecoderParent::RemoteVideoDecoderParent(
-    RemoteDecoderManagerParent* aParent,
-    const VideoInfo& aVideoInfo,
-    float aFramerate,
-    const CreateDecoderParams::OptionSet& aOptions,
-    TaskQueue* aManagerTaskQueue,
-    TaskQueue* aDecodeTaskQueue,
-    bool* aSuccess,
+    RemoteDecoderManagerParent* aParent, const VideoInfo& aVideoInfo,
+    float aFramerate, const CreateDecoderParams::OptionSet& aOptions,
+    TaskQueue* aManagerTaskQueue, TaskQueue* aDecodeTaskQueue, bool* aSuccess,
     nsCString* aErrorDescription)
-    : RemoteDecoderParent(aParent,
-                          aManagerTaskQueue,
-                          aDecodeTaskQueue),
+    : RemoteDecoderParent(aParent, aManagerTaskQueue, aDecodeTaskQueue),
       mVideoInfo(aVideoInfo) {
   CreateDecoderParams params(mVideoInfo);
   params.mTaskQueue = mDecodeTaskQueue;

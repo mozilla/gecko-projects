@@ -2939,10 +2939,14 @@ static Maybe<int32_t> MaxZIndexInList(nsDisplayList* aList,
   Maybe<int32_t> maxZIndex = Nothing();
   for (nsDisplayItem* item = aList->GetBottom(); item;
        item = item->GetAbove()) {
+    int32_t zIndex = item->ZIndex();
+    if (zIndex < 0) {
+      continue;
+    }
     if (!maxZIndex) {
-      maxZIndex = Some(item->ZIndex());
+      maxZIndex = Some(zIndex);
     } else {
-      maxZIndex = Some(std::max(maxZIndex.value(), item->ZIndex()));
+      maxZIndex = Some(std::max(maxZIndex.value(), zIndex));
     }
   }
   return maxZIndex;
@@ -3001,9 +3005,8 @@ static void AppendToTop(nsDisplayListBuilder* aBuilder,
       zIndex = Some(INT32_MAX);
     } else if (aFlags & APPEND_OVERLAY) {
       zIndex = MaxZIndexInList(aLists.PositionedDescendants(), aBuilder);
-    } else if (aSourceFrame->StylePosition()->mZIndex.GetUnit() ==
-               eStyleUnit_Integer) {
-      zIndex = Some(aSourceFrame->StylePosition()->mZIndex.GetIntValue());
+    } else if (aSourceFrame->StylePosition()->mZIndex.IsInteger()) {
+      zIndex = Some(aSourceFrame->StylePosition()->mZIndex.integer._0);
     }
     AppendInternalItemToTop(aLists, newItem, zIndex);
   } else {
@@ -3108,7 +3111,7 @@ void ScrollFrameHelper::AppendScrollPartsTo(nsDisplayListBuilder* aBuilder,
     nsDisplayListCollection partList(aBuilder);
     {
       nsDisplayListBuilder::AutoBuildingDisplayList buildingForChild(
-          aBuilder, mOuter, visible, dirty, true);
+          aBuilder, mOuter, visible, dirty);
 
       nsDisplayListBuilder::AutoCurrentScrollbarInfoSetter infoSetter(
           aBuilder, scrollTargetId, scrollDirection, createLayer);
@@ -3143,7 +3146,7 @@ void ScrollFrameHelper::AppendScrollPartsTo(nsDisplayListBuilder* aBuilder,
       nsDisplayListBuilder::AutoBuildingDisplayList buildingForChild(
           aBuilder, scrollParts[i],
           visible + mOuter->GetOffsetTo(scrollParts[i]),
-          dirty + mOuter->GetOffsetTo(scrollParts[i]), true);
+          dirty + mOuter->GetOffsetTo(scrollParts[i]));
       nsDisplayListBuilder::AutoCurrentScrollbarInfoSetter infoSetter(
           aBuilder, scrollTargetId, scrollDirection, createLayer);
 
@@ -3360,8 +3363,7 @@ void ScrollFrameHelper::BuildDisplayList(nsDisplayListBuilder* aBuilder,
       }
 
       nsDisplayListBuilder::AutoBuildingDisplayList building(
-          aBuilder, mOuter, visibleRect, dirtyRect,
-          aBuilder->IsAtRootOfPseudoStackingContext());
+          aBuilder, mOuter, visibleRect, dirtyRect);
 
       // Don't clip the scrolled child, and don't paint scrollbars/scrollcorner.
       // The scrolled frame shouldn't have its own background/border, so we
@@ -3596,8 +3598,7 @@ void ScrollFrameHelper::BuildDisplayList(nsDisplayListBuilder* aBuilder,
           scrolledRectClip + aBuilder->ToReferenceFrame(mOuter));
 
       nsDisplayListBuilder::AutoBuildingDisplayList building(
-          aBuilder, mOuter, visibleRect, dirtyRect,
-          aBuilder->IsAtRootOfPseudoStackingContext());
+          aBuilder, mOuter, visibleRect, dirtyRect);
 
       mOuter->BuildDisplayListForChild(aBuilder, mScrolledFrame, set);
 
@@ -5573,6 +5574,10 @@ void ScrollFrameHelper::UpdateMinimumScaleSize(
   }
 
   nsViewportInfo viewportInfo = doc->GetViewportInfo(displaySize);
+  if (!viewportInfo.IsZoomAllowed()) {
+    // Don't apply the minimum scale size if user-scalable=no is specified.
+    return;
+  }
 
   // The intrinsic minimum scale is the scale that fits the entire content
   // width into the visual viewport.

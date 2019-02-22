@@ -222,7 +222,6 @@ STATIC_ATOMS = [
     Atom("childList", "childList"),
     Atom("choose", "choose"),
     Atom("chromemargin", "chromemargin"),
-    Atom("chromeOnlyContent", "chromeOnlyContent"),
     Atom("exposeToUntrustedContent", "exposeToUntrustedContent"),
     Atom("circ", "circ"),
     Atom("circle", "circle"),
@@ -2063,7 +2062,7 @@ STATIC_ATOMS = [
     Atom("restylableAnonymousNode", "restylableAnonymousNode"),  # bool
     Atom("docLevelNativeAnonymousContent", "docLevelNativeAnonymousContent"),  # bool
     Atom("paintRequestTime", "PaintRequestTime"),
-    Atom("pseudoProperty", "PseudoProperty"),  # CSSPseudoElementType
+    Atom("pseudoProperty", "PseudoProperty"),  # PseudoStyleType
     Atom("manualNACProperty", "ManualNACProperty"),  # ManualNAC*
 
     # Languages for lang-specific transforms

@@ -11,6 +11,7 @@
 #include "mozilla/dom/nsIContentParent.h"
 #include "mozilla/gfx/gfxVarReceiver.h"
 #include "mozilla/gfx/GPUProcessListener.h"
+#include "mozilla/ipc/BackgroundUtils.h"
 #include "mozilla/ipc/GeckoChildProcessHost.h"
 #include "mozilla/Attributes.h"
 #include "mozilla/FileUtils.h"
@@ -897,8 +898,9 @@ class ContentParent final : public PContentParent,
       PPSMContentDownloaderParent* aDownloader);
 
   PExternalHelperAppParent* AllocPExternalHelperAppParent(
-      const OptionalURIParams& aUri, const nsCString& aMimeContentType,
-      const nsCString& aContentDisposition,
+      const OptionalURIParams& aUri,
+      const mozilla::net::OptionalLoadInfoArgs& aLoadInfoArgs,
+      const nsCString& aMimeContentType, const nsCString& aContentDisposition,
       const uint32_t& aContentDispositionHint,
       const nsString& aContentDispositionFilename, const bool& aForceSave,
       const int64_t& aContentLength, const bool& aWasFileChannel,
@@ -1041,6 +1043,9 @@ class ContentParent final : public PContentParent,
  public:
   mozilla::ipc::IPCResult RecvPrivateDocShellsExist(const bool& aExist);
 
+  mozilla::ipc::IPCResult RecvCommitBrowsingContextTransaction(
+      BrowsingContext* aContext, BrowsingContext::Transaction&& aTransaction);
+
   mozilla::ipc::IPCResult RecvFirstIdle();
 
   mozilla::ipc::IPCResult RecvDeviceReset();
@@ -1106,8 +1111,6 @@ class ContentParent final : public PContentParent,
 
   mozilla::ipc::IPCResult RecvGetGraphicsDeviceInitData(
       ContentDeviceData* aOut);
-
-  mozilla::ipc::IPCResult RecvGetAndroidSystemInfo(AndroidSystemInfo* aInfo);
 
   mozilla::ipc::IPCResult RecvNotifyBenchmarkResult(const nsString& aCodecName,
                                                     const uint32_t& aDecodeFPS);

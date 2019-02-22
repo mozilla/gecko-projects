@@ -22,7 +22,6 @@ extensions/spellcheck/**
 extensions/universalchardet/**
 image/**
 layout/**
-modules/**
 netwerk/cookie/test/browser/**
 netwerk/test/browser/**
 netwerk/test/mochitests/**
@@ -293,6 +292,9 @@ security/manager/ssl/security-prefs.js
 security/nss/**
 
 # services/ exclusions
+
+# Webpack-bundled library
+services/fxaccounts/FxAccountsPairingChannel.js
 
 # Uses `#filter substitution`
 services/sync/modules/constants.js

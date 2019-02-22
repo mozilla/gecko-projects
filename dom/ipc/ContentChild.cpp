@@ -1969,8 +1969,9 @@ bool ContentChild::DeallocPPSMContentDownloaderChild(
 }
 
 PExternalHelperAppChild* ContentChild::AllocPExternalHelperAppChild(
-    const OptionalURIParams& uri, const nsCString& aMimeContentType,
-    const nsCString& aContentDisposition,
+    const OptionalURIParams& uri,
+    const mozilla::net::OptionalLoadInfoArgs& aLoadInfoArgs,
+    const nsCString& aMimeContentType, const nsCString& aContentDisposition,
     const uint32_t& aContentDispositionHint,
     const nsString& aContentDispositionFilename, const bool& aForceSave,
     const int64_t& aContentLength, const bool& aWasFileChannel,
@@ -3593,8 +3594,8 @@ PContentChild::Result ContentChild::OnMessageReceived(const Message& aMsg,
   return result;
 }
 
-mozilla::ipc::IPCResult ContentChild::RecvWindowClose(
-    BrowsingContext* aContext, bool aTrustedCaller) {
+mozilla::ipc::IPCResult ContentChild::RecvWindowClose(BrowsingContext* aContext,
+                                                      bool aTrustedCaller) {
   if (!aContext) {
     MOZ_LOG(BrowsingContext::GetLog(), LogLevel::Debug,
             ("ChildIPC: Trying to send a message to dead or detached context"));
@@ -3606,7 +3607,8 @@ mozilla::ipc::IPCResult ContentChild::RecvWindowClose(
   return IPC_OK();
 }
 
-mozilla::ipc::IPCResult ContentChild::RecvWindowFocus(BrowsingContext* aContext) {
+mozilla::ipc::IPCResult ContentChild::RecvWindowFocus(
+    BrowsingContext* aContext) {
   if (!aContext) {
     MOZ_LOG(BrowsingContext::GetLog(), LogLevel::Debug,
             ("ChildIPC: Trying to send a message to dead or detached context"));
@@ -3665,6 +3667,14 @@ mozilla::ipc::IPCResult ContentChild::RecvWindowPostMessage(
   event->UnpackFrom(aMessage);
 
   window->Dispatch(TaskCategory::Other, event.forget());
+  return IPC_OK();
+}
+
+mozilla::ipc::IPCResult ContentChild::RecvCommitBrowsingContextTransaction(
+    BrowsingContext* aContext, BrowsingContext::Transaction&& aTransaction) {
+  if (aContext) {
+    aTransaction.Apply(aContext);
+  }
   return IPC_OK();
 }
 

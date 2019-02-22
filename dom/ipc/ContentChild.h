@@ -281,8 +281,9 @@ class ContentChild final : public PContentChild,
       PPSMContentDownloaderChild* aDownloader);
 
   PExternalHelperAppChild* AllocPExternalHelperAppChild(
-      const OptionalURIParams& uri, const nsCString& aMimeContentType,
-      const nsCString& aContentDisposition,
+      const OptionalURIParams& uri,
+      const mozilla::net::OptionalLoadInfoArgs& aLoadInfoArgs,
+      const nsCString& aMimeContentType, const nsCString& aContentDisposition,
       const uint32_t& aContentDispositionHint,
       const nsString& aContentDispositionFilename, const bool& aForceSave,
       const int64_t& aContentLength, const bool& aWasFileChannel,
@@ -721,6 +722,9 @@ class ContentChild final : public PContentChild,
   mozilla::ipc::IPCResult RecvWindowPostMessage(
       BrowsingContext* aContext, const ClonedMessageData& aMessage,
       const PostMessageData& aData);
+
+  mozilla::ipc::IPCResult RecvCommitBrowsingContextTransaction(
+      BrowsingContext* aContext, BrowsingContext::Transaction&& aTransaction);
 
 #ifdef NIGHTLY_BUILD
   virtual PContentChild::Result OnMessageReceived(const Message& aMsg) override;

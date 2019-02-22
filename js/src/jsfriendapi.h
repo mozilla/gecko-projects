@@ -596,7 +596,7 @@ struct Object {
   JS::Value* slots;
   void* _1;
 
-  static const size_t MAX_FIXED_SLOTS = 16;
+  static constexpr size_t MAX_FIXED_SLOTS = 16;
 
   size_t numFixedSlots() const {
     return (shape->immutableFlags & Shape::FIXED_SLOTS_MASK) >>
@@ -1794,7 +1794,7 @@ extern JS_FRIEND_API bool JS_IsArrayBufferObject(JSObject* obj);
 extern JS_FRIEND_API bool JS_IsSharedArrayBufferObject(JSObject* obj);
 
 /**
- * Return the available byte length of an array buffer.
+ * Return the available byte length of an ArrayBuffer.
  *
  * |obj| must have passed a JS_IsArrayBufferObject test, or somehow be known
  * that it would pass such a test: it is an ArrayBuffer or a wrapper of an
@@ -1805,8 +1805,8 @@ extern JS_FRIEND_API uint32_t JS_GetArrayBufferByteLength(JSObject* obj);
 extern JS_FRIEND_API uint32_t JS_GetSharedArrayBufferByteLength(JSObject* obj);
 
 /**
- * Return true if the arrayBuffer contains any data. This will return false for
- * ArrayBuffer.prototype and detached ArrayBuffers.
+ * Return true if the ArrayBuffer |obj| contains any data, i.e. it is not a
+ * detached ArrayBuffer.  (ArrayBuffer.prototype is not an ArrayBuffer.)
  *
  * |obj| must have passed a JS_IsArrayBufferObject test, or somehow be known
  * that it would pass such a test: it is an ArrayBuffer or a wrapper of an
@@ -1849,7 +1849,7 @@ extern JS_FRIEND_API bool JS_IsMappedArrayBufferObject(JSObject* obj);
 extern JS_FRIEND_API uint32_t JS_GetTypedArrayLength(JSObject* obj);
 
 /**
- * Return the byte offset from the start of an array buffer to the start of a
+ * Return the byte offset from the start of an ArrayBuffer to the start of a
  * typed array view.
  *
  * |obj| must have passed a JS_IsTypedArrayObject/JS_Is*Array test, or somehow
@@ -1943,7 +1943,9 @@ extern JS_FRIEND_API JSObject* JS_GetArrayBufferViewBuffer(
  * Detach an ArrayBuffer, causing all associated views to no longer refer to
  * the ArrayBuffer's original attached memory.
  *
- * The |changeData| argument is obsolete and ignored.
+ * This function throws only if it is provided a non-ArrayBuffer object or if
+ * the provided ArrayBuffer is a WASM-backed ArrayBuffer or an ArrayBuffer used
+ * in asm.js code.
  */
 extern JS_FRIEND_API bool JS_DetachArrayBuffer(JSContext* cx,
                                                JS::HandleObject obj);

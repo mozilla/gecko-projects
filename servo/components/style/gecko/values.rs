@@ -10,12 +10,10 @@ use crate::counter_style::{Symbol, Symbols};
 use crate::gecko_bindings::structs::{nsStyleCoord, CounterStylePtr};
 use crate::gecko_bindings::structs::{StyleGridTrackBreadth, StyleShapeRadius};
 use crate::gecko_bindings::sugar::ns_style_coord::{CoordData, CoordDataMut, CoordDataValue};
-use crate::media_queries::Device;
 use crate::values::computed::basic_shape::ShapeRadius as ComputedShapeRadius;
 use crate::values::computed::{Angle, Length, LengthPercentage};
 use crate::values::computed::{Number, NumberOrPercentage, Percentage};
 use crate::values::generics::basic_shape::ShapeRadius;
-use crate::values::generics::box_::Perspective;
 use crate::values::generics::gecko::ScrollSnapPoint;
 use crate::values::generics::grid::{TrackBreadth, TrackKeyword};
 use crate::values::generics::length::LengthPercentageOrAuto;
@@ -331,27 +329,6 @@ impl GeckoStyleCoordConvertible for ScrollSnapPoint<LengthPercentage> {
     }
 }
 
-impl<L> GeckoStyleCoordConvertible for Perspective<L>
-where
-    L: GeckoStyleCoordConvertible,
-{
-    fn to_gecko_style_coord<T: CoordDataMut>(&self, coord: &mut T) {
-        match *self {
-            Perspective::None => coord.set_value(CoordDataValue::None),
-            Perspective::Length(ref l) => l.to_gecko_style_coord(coord),
-        };
-    }
-
-    fn from_gecko_style_coord<T: CoordData>(coord: &T) -> Option<Self> {
-        use crate::gecko_bindings::structs::root::nsStyleUnit;
-
-        if coord.unit() == nsStyleUnit::eStyleUnit_None {
-            return Some(Perspective::None);
-        }
-        Some(Perspective::Length(L::from_gecko_style_coord(coord)?))
-    }
-}
-
 /// Convert a given RGBA value to `nscolor`.
 pub fn convert_rgba_to_nscolor(rgba: &RGBA) -> u32 {
     ((rgba.alpha as u32) << 24) |
@@ -387,16 +364,15 @@ pub fn round_border_to_device_pixels(width: Au, au_per_device_px: Au) -> Au {
 
 impl CounterStyleOrNone {
     /// Convert this counter style to a Gecko CounterStylePtr.
-    pub fn to_gecko_value(self, gecko_value: &mut CounterStylePtr, device: &Device) {
+    pub fn to_gecko_value(self, gecko_value: &mut CounterStylePtr) {
         use crate::gecko_bindings::bindings::Gecko_SetCounterStyleToName as set_name;
         use crate::gecko_bindings::bindings::Gecko_SetCounterStyleToSymbols as set_symbols;
-        let pres_context = device.pres_context();
         match self {
             CounterStyleOrNone::None => unsafe {
-                set_name(gecko_value, atom!("none").into_addrefed(), pres_context);
+                set_name(gecko_value, atom!("none").into_addrefed());
             },
             CounterStyleOrNone::Name(name) => unsafe {
-                set_name(gecko_value, name.0.into_addrefed(), pres_context);
+                set_name(gecko_value, name.0.into_addrefed());
             },
             CounterStyleOrNone::Symbols(symbols_type, symbols) => {
                 let symbols: Vec<_> = symbols

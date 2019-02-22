@@ -868,13 +868,14 @@ class FunctionCompiler {
     return load;
   }
 
-  void storeGlobalVar(uint32_t globalDataOffset, bool isIndirect,
-                      MDefinition* v) {
+  MInstruction* storeGlobalVar(uint32_t globalDataOffset, bool isIndirect,
+                               MDefinition* v) {
     if (inDeadCode()) {
-      return;
+      return nullptr;
     }
 
     MInstruction* store;
+    MInstruction* valueAddr = nullptr;
     if (isIndirect) {
       // Pull a pointer to the value out of TlsData::globalArea, then
       // store through that pointer.
@@ -882,13 +883,31 @@ class FunctionCompiler {
           MWasmLoadGlobalVar::New(alloc(), MIRType::Pointer, globalDataOffset,
                                   /*isConst=*/true, tlsPointer_);
       curBlock_->add(cellPtr);
-      store = MWasmStoreGlobalCell::New(alloc(), v, cellPtr);
+      if (v->type() == MIRType::RefOrNull) {
+        valueAddr = cellPtr;
+        store = MWasmStoreRef::New(alloc(), tlsPointer_, valueAddr, v,
+                                   AliasSet::WasmGlobalCell);
+      } else {
+        store = MWasmStoreGlobalCell::New(alloc(), v, cellPtr);
+      }
     } else {
       // Store the value directly in TlsData::globalArea.
-      store =
-          MWasmStoreGlobalVar::New(alloc(), globalDataOffset, v, tlsPointer_);
+      if (v->type() == MIRType::RefOrNull) {
+        valueAddr =
+          MWasmDerivedPointer::New(alloc(), tlsPointer_,
+                                   offsetof(wasm::TlsData, globalArea) +
+                                   globalDataOffset);
+        curBlock_->add(valueAddr);
+        store = MWasmStoreRef::New(alloc(), tlsPointer_, valueAddr, v,
+                                   AliasSet::WasmGlobalVar);
+      } else {
+        store =
+            MWasmStoreGlobalVar::New(alloc(), globalDataOffset, v, tlsPointer_);
+      }
     }
     curBlock_->add(store);
+
+    return valueAddr;
   }
 
   void addInterruptCheck() {
@@ -1032,9 +1051,8 @@ class FunctionCompiler {
     }
 
     CallSiteDesc desc(lineOrBytecode, CallSiteDesc::Dynamic);
-    auto* ins =
-        MWasmCall::New(alloc(), desc, callee, call.regArgs_,
-                       ToMIRType(funcType.ret()), index);
+    auto* ins = MWasmCall::New(alloc(), desc, callee, call.regArgs_,
+                               ToMIRType(funcType.ret()), index);
     if (!ins) {
       return false;
     }
@@ -1075,8 +1093,8 @@ class FunctionCompiler {
 
     CallSiteDesc desc(lineOrBytecode, CallSiteDesc::Symbolic);
     auto callee = CalleeDesc::builtin(builtin);
-    auto* ins = MWasmCall::New(alloc(), desc, callee, call.regArgs_,
-                               ToMIRType(ret));
+    auto* ins =
+        MWasmCall::New(alloc(), desc, callee, call.regArgs_, ToMIRType(ret));
     if (!ins) {
       return false;
     }
@@ -1785,6 +1803,17 @@ static bool EmitEnd(FunctionCompiler& f) {
 
   MDefinition* def = nullptr;
   switch (kind) {
+    case LabelKind::Body:
+      MOZ_ASSERT(f.iter().controlStackEmpty());
+      if (!f.finishBlock(&def)) {
+        return false;
+      }
+      if (f.inDeadCode() || IsVoid(type)) {
+        f.returnVoid();
+      } else {
+        f.returnExpr(def);
+      }
+      return f.iter().readFunctionEnd(f.iter().end());
     case LabelKind::Block:
       if (!f.finishBlock(&def)) {
         return false;
@@ -2096,6 +2125,8 @@ static bool EmitGetGlobal(FunctionCompiler& f) {
 }
 
 static bool EmitSetGlobal(FunctionCompiler& f) {
+  uint32_t lineOrBytecode = f.readCallSiteLineOrBytecode();
+
   uint32_t id;
   MDefinition* value;
   if (!f.iter().readSetGlobal(&id, &value)) {
@@ -2104,7 +2135,33 @@ static bool EmitSetGlobal(FunctionCompiler& f) {
 
   const GlobalDesc& global = f.env().globals[id];
   MOZ_ASSERT(global.isMutable());
-  f.storeGlobalVar(global.offset(), global.isIndirect(), value);
+  MInstruction* barrierAddr =
+    f.storeGlobalVar(global.offset(), global.isIndirect(), value);
+
+  // We always call the C++ postbarrier because the location will never be in
+  // the nursery, and the value stored will very frequently be in the nursery.
+  // The C++ postbarrier performs any necessary filtering.
+
+  if (barrierAddr) {
+    CallCompileState args;
+    if (!f.passInstance(&args)) {
+      return false;
+    }
+    // TODO: The argument type here is MIRType::Pointer, Julian's fix will take
+    // care of this.
+    if (!f.passArg(barrierAddr, ValType::AnyRef, &args)) {
+        return false;
+    }
+    f.finishCall(&args);
+    MDefinition* ret;
+    // TODO: The return type here is void (ExprType::Void or MIRType::None),
+    // Julian's fix will take care of this.
+    if (!f.builtinInstanceMethodCall(SymbolicAddress::PostBarrierFiltering,
+                                     lineOrBytecode, args, ValType::I32, &ret)) {
+      return false;
+    }
+  }
+
   return true;
 }
 
@@ -2544,7 +2601,7 @@ static bool EmitBinaryMathBuiltinCall(FunctionCompiler& f,
   return true;
 }
 
-static bool EmitGrowMemory(FunctionCompiler& f) {
+static bool EmitMemoryGrow(FunctionCompiler& f) {
   uint32_t lineOrBytecode = f.readCallSiteLineOrBytecode();
 
   CallCompileState args;
@@ -2553,7 +2610,7 @@ static bool EmitGrowMemory(FunctionCompiler& f) {
   }
 
   MDefinition* delta;
-  if (!f.iter().readGrowMemory(&delta)) {
+  if (!f.iter().readMemoryGrow(&delta)) {
     return false;
   }
 
@@ -2564,7 +2621,7 @@ static bool EmitGrowMemory(FunctionCompiler& f) {
   f.finishCall(&args);
 
   MDefinition* ret;
-  if (!f.builtinInstanceMethodCall(SymbolicAddress::GrowMemory, lineOrBytecode,
+  if (!f.builtinInstanceMethodCall(SymbolicAddress::MemoryGrow, lineOrBytecode,
                                    args, ValType::I32, &ret)) {
     return false;
   }
@@ -2573,12 +2630,12 @@ static bool EmitGrowMemory(FunctionCompiler& f) {
   return true;
 }
 
-static bool EmitCurrentMemory(FunctionCompiler& f) {
+static bool EmitMemorySize(FunctionCompiler& f) {
   uint32_t lineOrBytecode = f.readCallSiteLineOrBytecode();
 
   CallCompileState args;
 
-  if (!f.iter().readCurrentMemory()) {
+  if (!f.iter().readMemorySize()) {
     return false;
   }
 
@@ -2589,7 +2646,7 @@ static bool EmitCurrentMemory(FunctionCompiler& f) {
   f.finishCall(&args);
 
   MDefinition* ret;
-  if (!f.builtinInstanceMethodCall(SymbolicAddress::CurrentMemory,
+  if (!f.builtinInstanceMethodCall(SymbolicAddress::MemorySize,
                                    lineOrBytecode, args, ValType::I32, &ret)) {
     return false;
   }
@@ -2759,8 +2816,8 @@ static bool EmitWake(FunctionCompiler& f) {
   }
 
   MDefinition* ret;
-  if (!f.builtinInstanceMethodCall(SymbolicAddress::Wake, lineOrBytecode,
-                                   args, ValType::I32, &ret)) {
+  if (!f.builtinInstanceMethodCall(SymbolicAddress::Wake, lineOrBytecode, args,
+                                   ValType::I32, &ret)) {
     return false;
   }
 
@@ -3110,14 +3167,8 @@ static bool EmitBodyExprs(FunctionCompiler& f) {
         if (!EmitEnd(f)) {
           return false;
         }
-
         if (f.iter().controlStackEmpty()) {
-          if (f.inDeadCode() || IsVoid(f.funcType().ret())) {
-            f.returnVoid();
-          } else {
-            f.returnExpr(f.iter().getResult());
-          }
-          return f.iter().readFunctionEnd(f.iter().end());
+          return true;
         }
         break;
 
@@ -3166,6 +3217,12 @@ static bool EmitBodyExprs(FunctionCompiler& f) {
         CHECK(EmitGetGlobal(f));
       case uint16_t(Op::SetGlobal):
         CHECK(EmitSetGlobal(f));
+#ifdef ENABLE_WASM_GENERALIZED_TABLES
+      case uint16_t(Op::TableGet):
+        CHECK(EmitTableGet(f));
+      case uint16_t(Op::TableSet):
+        CHECK(EmitTableSet(f));
+#endif
 
       // Memory-related operators
       case uint16_t(Op::I32Load):
@@ -3214,10 +3271,10 @@ static bool EmitBodyExprs(FunctionCompiler& f) {
         CHECK(EmitStore(f, ValType::I64, Scalar::Int16));
       case uint16_t(Op::I64Store32):
         CHECK(EmitStore(f, ValType::I64, Scalar::Int32));
-      case uint16_t(Op::CurrentMemory):
-        CHECK(EmitCurrentMemory(f));
-      case uint16_t(Op::GrowMemory):
-        CHECK(EmitGrowMemory(f));
+      case uint16_t(Op::MemorySize):
+        CHECK(EmitMemorySize(f));
+      case uint16_t(Op::MemoryGrow):
+        CHECK(EmitMemoryGrow(f));
 
       // Constants
       case uint16_t(Op::I32Const):
@@ -3582,12 +3639,8 @@ static bool EmitBodyExprs(FunctionCompiler& f) {
             CHECK(EmitMemOrTableInit(f, /*isMem=*/false));
 #endif
 #ifdef ENABLE_WASM_GENERALIZED_TABLES
-          case uint16_t(MiscOp::TableGet):
-            CHECK(EmitTableGet(f));
           case uint16_t(MiscOp::TableGrow):
             CHECK(EmitTableGrow(f));
-          case uint16_t(MiscOp::TableSet):
-            CHECK(EmitTableSet(f));
           case uint16_t(MiscOp::TableSize):
             CHECK(EmitTableSize(f));
 #endif

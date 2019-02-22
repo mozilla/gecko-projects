@@ -118,8 +118,7 @@ static void BuildDisplayListForTopLayerFrame(nsDisplayListBuilder* aBuilder,
         savedOutOfFlowData->mContainingBlockActiveScrolledRoot);
   }
   nsDisplayListBuilder::AutoBuildingDisplayList buildingForChild(
-      aBuilder, aFrame, visible, dirty,
-      aBuilder->IsAtRootOfPseudoStackingContext());
+      aBuilder, aFrame, visible, dirty);
 
   nsDisplayList list;
   aFrame->BuildDisplayListForStackingContext(aBuilder, &list);
@@ -383,10 +382,9 @@ void ViewportFrame::Reflow(nsPresContext* aPresContext,
 }
 
 void ViewportFrame::UpdateStyle(ServoRestyleState& aRestyleState) {
-  nsAtom* pseudo = Style()->GetPseudo();
   RefPtr<ComputedStyle> newStyle =
-      aRestyleState.StyleSet().ResolveInheritingAnonymousBoxStyle(pseudo,
-                                                                  nullptr);
+      aRestyleState.StyleSet().ResolveInheritingAnonymousBoxStyle(
+          Style()->GetPseudoType(), nullptr);
 
   MOZ_ASSERT(!GetNextContinuation(), "Viewport has continuations?");
   SetComputedStyle(newStyle);

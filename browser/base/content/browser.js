@@ -28,7 +28,6 @@ XPCOMUtils.defineLazyModuleGetters(this, {
   E10SUtils: "resource://gre/modules/E10SUtils.jsm",
   ExtensionsUI: "resource:///modules/ExtensionsUI.jsm",
   FormValidationHandler: "resource:///modules/FormValidationHandler.jsm",
-  LanguagePrompt: "resource://gre/modules/LanguagePrompt.jsm",
   HomePage: "resource:///modules/HomePage.jsm",
   LightweightThemeConsumer: "resource://gre/modules/LightweightThemeConsumer.jsm",
   LightweightThemeManager: "resource://gre/modules/LightweightThemeManager.jsm",
@@ -50,6 +49,7 @@ XPCOMUtils.defineLazyModuleGetters(this, {
   ProcessHangMonitor: "resource:///modules/ProcessHangMonitor.jsm",
   PromiseUtils: "resource://gre/modules/PromiseUtils.jsm",
   ReaderParent: "resource:///modules/ReaderParent.jsm",
+  RFPHelper: "resource://gre/modules/RFPHelper.jsm",
   SafeBrowsing: "resource://gre/modules/SafeBrowsing.jsm",
   Sanitizer: "resource:///modules/Sanitizer.jsm",
   SessionStartup: "resource:///modules/sessionstore/SessionStartup.jsm",
@@ -69,7 +69,6 @@ XPCOMUtils.defineLazyModuleGetters(this, {
   UrlbarTokenizer: "resource:///modules/UrlbarTokenizer.jsm",
   UrlbarUtils: "resource:///modules/UrlbarUtils.jsm",
   UrlbarValueFormatter: "resource:///modules/UrlbarValueFormatter.jsm",
-  Utils: "resource://gre/modules/sessionstore/Utils.jsm",
   Weave: "resource://services-sync/main.js",
   WebNavigationFrames: "resource://gre/modules/WebNavigationFrames.jsm",
   fxAccounts: "resource://gre/modules/FxAccounts.jsm",
@@ -1949,8 +1948,6 @@ var gBrowserInit = {
       ToolbarKeyboardNavigator.uninit();
     }
 
-    LanguagePrompt.uninit();
-
     BrowserSearch.uninit();
 
     // Now either cancel delayedStartup, or clean up the services initialized from
@@ -2060,6 +2057,8 @@ function HandleAppCommandEvent(evt) {
 }
 
 function gotoHistoryIndex(aEvent) {
+  aEvent = getRootEvent(aEvent);
+
   let index = aEvent.target.getAttribute("index");
   if (!index)
     return false;
@@ -2136,6 +2135,7 @@ function BrowserStop() {
 }
 
 function BrowserReloadOrDuplicate(aEvent) {
+  aEvent = getRootEvent(aEvent);
   let metaKeyPressed = AppConstants.platform == "macosx"
                        ? aEvent.metaKey
                        : aEvent.ctrlKey;
@@ -2174,7 +2174,7 @@ function BrowserHome(aEvent) {
       aEvent.button == 2) // right-click: do nothing
     return;
 
-  var homePage = HomePage.get();
+  var homePage = HomePage.get(window);
   var where = whereToOpenLink(aEvent, false, true);
   var urls;
   var notifyObservers;
@@ -3105,7 +3105,7 @@ var BrowserOnClick = {
   },
 
   ignoreWarningLink(reason, blockedInfo) {
-    let triggeringPrincipal = Utils.deserializePrincipal(blockedInfo.triggeringPrincipal) || _createNullPrincipalFromTabUserContextId();
+    let triggeringPrincipal = E10SUtils.deserializePrincipal(blockedInfo.triggeringPrincipal, _createNullPrincipalFromTabUserContextId());
     // Allow users to override and continue through to the site,
     // but add a notify bar as a reminder, so that they don't lose
     // track after, e.g., tab switching.

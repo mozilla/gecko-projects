@@ -36,12 +36,6 @@ using namespace js;
       uint32_t offset = uint32_t(obj->getFixedSlot(BYTEOFFSET_SLOT).toInt32());
       MOZ_ASSERT(offset <= INT32_MAX);
 
-      // We don't expose the underlying ArrayBuffer for typed objects,
-      // and we don't allow constructing a TypedObject from an arbitrary
-      // ArrayBuffer, so we should never have a TypedArray/DataView with
-      // a buffer that has TypedObject views.
-      MOZ_RELEASE_ASSERT(!buf.forInlineTypedObject());
-
       MOZ_ASSERT_IF(buf.dataPointer() == nullptr, offset == 0);
 
       // The data may or may not be inline with the buffer. The buffer
@@ -193,17 +187,16 @@ JS_FRIEND_API JSObject* JS_GetArrayBufferViewBuffer(JSContext* cx,
   CHECK_THREAD(cx);
   cx->check(obj);
 
-  JSObject* unwrappedObj = CheckedUnwrap(obj);
-  if (!unwrappedObj) {
+  Rooted<ArrayBufferViewObject*> unwrappedView(
+      cx, obj->maybeUnwrapAs<ArrayBufferViewObject>());
+  if (!unwrappedView) {
     ReportAccessDenied(cx);
     return nullptr;
   }
 
-  Rooted<ArrayBufferViewObject*> unwrappedView(
-      cx, &unwrappedObj->as<ArrayBufferViewObject>());
   ArrayBufferObjectMaybeShared* unwrappedBuffer;
   {
-    AutoRealm ar(cx, unwrappedObj);
+    AutoRealm ar(cx, unwrappedView);
     unwrappedBuffer = ArrayBufferViewObject::bufferObject(cx, unwrappedView);
     if (!unwrappedBuffer) {
       return nullptr;

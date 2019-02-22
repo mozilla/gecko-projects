@@ -1104,7 +1104,7 @@ mozilla::ipc::IPCResult ContentParent::RecvUngrabPointer(
 mozilla::ipc::IPCResult ContentParent::RecvRemovePermission(
     const IPC::Principal& aPrincipal, const nsCString& aPermissionType,
     nsresult* aRv) {
-  *aRv = Permissions::RemovePermission(aPrincipal, aPermissionType.get());
+  *aRv = Permissions::RemovePermission(aPrincipal, aPermissionType);
   return IPC_OK();
 }
 
@@ -3596,14 +3596,15 @@ bool ContentParent::DeallocPPSMContentDownloaderParent(
 }
 
 PExternalHelperAppParent* ContentParent::AllocPExternalHelperAppParent(
-    const OptionalURIParams& uri, const nsCString& aMimeContentType,
-    const nsCString& aContentDisposition,
+    const OptionalURIParams& uri,
+    const mozilla::net::OptionalLoadInfoArgs& aLoadInfoArgs,
+    const nsCString& aMimeContentType, const nsCString& aContentDisposition,
     const uint32_t& aContentDispositionHint,
     const nsString& aContentDispositionFilename, const bool& aForceSave,
     const int64_t& aContentLength, const bool& aWasFileChannel,
     const OptionalURIParams& aReferrer, PBrowserParent* aBrowser) {
   ExternalHelperAppParent* parent = new ExternalHelperAppParent(
-      uri, aContentLength, aWasFileChannel, aContentDisposition,
+      uri, aLoadInfoArgs, aContentLength, aWasFileChannel, aContentDisposition,
       aContentDispositionHint, aContentDispositionFilename);
   parent->AddRef();
   parent->Init(this, aMimeContentType, aForceSave, aReferrer, aBrowser);
@@ -4755,8 +4756,7 @@ mozilla::ipc::IPCResult ContentParent::CommonCreateWindow(
     nsCOMPtr<Element> frameElement =
         TabParent::GetFrom(aNewTabParent)->GetOwnerElement();
     MOZ_ASSERT(frameElement);
-    RefPtr<nsFrameLoaderOwner> frameLoaderOwner =
-        do_QueryObject(frameElement);
+    RefPtr<nsFrameLoaderOwner> frameLoaderOwner = do_QueryObject(frameElement);
     MOZ_ASSERT(frameLoaderOwner);
     RefPtr<nsFrameLoader> frameLoader = frameLoaderOwner->GetFrameLoader();
     MOZ_ASSERT(frameLoader);
@@ -4977,17 +4977,6 @@ mozilla::ipc::IPCResult ContentParent::RecvEndDriverCrashGuard(
     const uint32_t& aGuardType) {
   mDriverCrashGuard = nullptr;
   return IPC_OK();
-}
-
-mozilla::ipc::IPCResult ContentParent::RecvGetAndroidSystemInfo(
-    AndroidSystemInfo* aInfo) {
-#ifdef MOZ_WIDGET_ANDROID
-  nsSystemInfo::GetAndroidSystemInfo(aInfo);
-  return IPC_OK();
-#else
-  MOZ_CRASH("wrong platform!");
-  return IPC_FAIL_NO_REASON(this);
-#endif
 }
 
 mozilla::ipc::IPCResult ContentParent::RecvNotifyBenchmarkResult(
@@ -5843,6 +5832,28 @@ void ContentParent::OnBrowsingContextGroupUnsubscribe(
   mGroups.RemoveEntry(aGroup);
 }
 
+mozilla::ipc::IPCResult ContentParent::RecvCommitBrowsingContextTransaction(
+    BrowsingContext* aContext, BrowsingContext::Transaction&& aTransaction) {
+  if (!aContext) {
+    MOZ_LOG(BrowsingContext::GetLog(), LogLevel::Warning,
+            ("ParentIPC: Trying to run transaction on missing context."));
+    return IPC_OK();
+  }
+
+  for (auto iter = aContext->Group()->ContentParentsIter(); !iter.Done();
+       iter.Next()) {
+    auto* entry = iter.Get();
+    ContentParent* parent = entry->GetKey();
+    if (parent != this) {
+      Unused << parent->SendCommitBrowsingContextTransaction(aContext,
+                                                             aTransaction);
+    }
+  }
+
+  aTransaction.Apply(aContext);
+
+  return IPC_OK();
+}
 }  // namespace dom
 }  // namespace mozilla
 

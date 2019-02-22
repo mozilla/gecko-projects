@@ -552,8 +552,8 @@ struct nsStyleImageLayers {
 
     // mask-only property. This property is used for mask layer only. For a
     // background layer, it should always be the initial value, which is
-    // NS_STYLE_MASK_MODE_MATCH_SOURCE.
-    uint8_t mMaskMode;  // NS_STYLE_MASK_MODE_*
+    // StyleMaskMode::MatchSource.
+    mozilla::StyleMaskMode mMaskMode;
 
     Repeat mRepeat;
 
@@ -719,6 +719,7 @@ struct MOZ_NEEDS_MEMMOVABLE_MEMBERS nsStyleMargin {
   inline bool HasInlineAxisAuto(mozilla::WritingMode aWM) const;
 
   mozilla::StyleRect<mozilla::LengthPercentageOrAuto> mMargin;
+  mozilla::StyleRect<mozilla::StyleLength> mScrollMargin;
 };
 
 struct MOZ_NEEDS_MEMMOVABLE_MEMBERS nsStylePadding {
@@ -731,6 +732,7 @@ struct MOZ_NEEDS_MEMMOVABLE_MEMBERS nsStylePadding {
   nsChangeHint CalcDifference(const nsStylePadding& aNewData) const;
 
   mozilla::StyleRect<mozilla::NonNegativeLengthPercentage> mPadding;
+  mozilla::StyleRect<mozilla::NonNegativeLengthPercentageOrAuto> mScrollPadding;
 
   inline bool IsWidthDependent() const {
     return !mPadding.All(
@@ -943,11 +945,9 @@ struct MOZ_NEEDS_MEMMOVABLE_MEMBERS nsStyleBorder {
  public:
   nsStyleCorners mBorderRadius;  // coord, percent
   nsStyleImage mBorderImageSource;
-  nsStyleSides mBorderImageSlice;   // factor, percent
-  nsStyleSides mBorderImageWidth;   // length, factor, percent, auto
-  nsStyleSides mBorderImageOutset;  // length, factor
-
-  uint8_t mBorderImageFill;
+  nsStyleSides mBorderImageWidth;  // length, factor, percent, auto
+  mozilla::StyleNonNegativeLengthOrNumberRect mBorderImageOutset;
+  mozilla::StyleBorderImageSlice mBorderImageSlice;  // factor, percent
   mozilla::StyleBorderImageRepeat mBorderImageRepeatH;
   mozilla::StyleBorderImageRepeat mBorderImageRepeatV;
   mozilla::StyleFloatEdge mFloatEdge;
@@ -1291,13 +1291,13 @@ struct MOZ_NEEDS_MEMMOVABLE_MEMBERS nsStylePosition {
   uint8_t mSpecifiedJustifyItems;
   uint8_t mJustifyItems;
   uint8_t mJustifySelf;
-  uint8_t mFlexDirection;  // NS_STYLE_FLEX_DIRECTION_*
+  mozilla::StyleFlexDirection mFlexDirection;  
   uint8_t mFlexWrap;       // NS_STYLE_FLEX_WRAP_*
   uint8_t mObjectFit;      // NS_STYLE_OBJECT_FIT_*
   int32_t mOrder;
   float mFlexGrow;
   float mFlexShrink;
-  nsStyleCoord mZIndex;  // integer, auto
+  mozilla::StyleZIndex mZIndex;
   mozilla::UniquePtr<nsStyleGridTemplate> mGridTemplateColumns;
   mozilla::UniquePtr<nsStyleGridTemplate> mGridTemplateRows;
 
@@ -1471,7 +1471,7 @@ struct MOZ_NEEDS_MEMMOVABLE_MEMBERS nsStyleText {
   mozilla::StyleComplexColor mWebkitTextFillColor;
   mozilla::StyleComplexColor mWebkitTextStrokeColor;
 
-  nsStyleCoord mTabSize;        // coord, factor, calc
+  mozilla::StyleNonNegativeLengthOrNumber mMozTabSize;
   nsStyleCoord mWordSpacing;    // coord, percent, calc
   nsStyleCoord mLetterSpacing;  // coord, normal
   nsStyleCoord mLineHeight;     // coord, factor, normal
@@ -1877,6 +1877,7 @@ struct MOZ_NEEDS_MEMMOVABLE_MEMBERS nsStyleDisplay {
   mozilla::StyleOverscrollBehavior mOverscrollBehaviorX;
   mozilla::StyleOverscrollBehavior mOverscrollBehaviorY;
   mozilla::StyleOverflowAnchor mOverflowAnchor;
+  mozilla::StyleScrollSnapAlign mScrollSnapAlign;
   mozilla::StyleScrollSnapType mScrollSnapTypeX;
   mozilla::StyleScrollSnapType mScrollSnapTypeY;
   nsStyleCoord mScrollSnapPointsX;
@@ -1900,10 +1901,9 @@ struct MOZ_NEEDS_MEMMOVABLE_MEMBERS nsStyleDisplay {
   RefPtr<nsCSSValueSharedList> mIndividualTransform;
   mozilla::UniquePtr<mozilla::StyleMotion> mMotion;
 
-  nsStyleCoord mTransformOrigin[3];    // percent, coord, calc, 3rd param is
-                                       // coord, calc only
-  nsStyleCoord mChildPerspective;      // none, coord
-  nsStyleCoord mPerspectiveOrigin[2];  // percent, coord, calc
+  mozilla::StyleTransformOrigin mTransformOrigin;
+  mozilla::StylePerspective mChildPerspective;
+  mozilla::Position mPerspectiveOrigin;
 
   nsStyleCoord mVerticalAlign;  // coord, percent, calc, enum
                                 // (NS_STYLE_VERTICAL_ALIGN_*)
@@ -2143,9 +2143,7 @@ struct MOZ_NEEDS_MEMMOVABLE_MEMBERS nsStyleDisplay {
     return mSpecifiedRotate || mSpecifiedTranslate || mSpecifiedScale;
   }
 
-  bool HasPerspectiveStyle() const {
-    return mChildPerspective.GetUnit() == eStyleUnit_Coord;
-  }
+  bool HasPerspectiveStyle() const { return !mChildPerspective.IsNone(); }
 
   bool BackfaceIsHidden() const {
     return mBackfaceVisibility == NS_STYLE_BACKFACE_VISIBILITY_HIDDEN;
@@ -2485,7 +2483,7 @@ struct MOZ_NEEDS_MEMMOVABLE_MEMBERS nsStyleUIReset {
   uint8_t mWindowShadow;
   float mWindowOpacity;
   RefPtr<nsCSSValueSharedList> mSpecifiedWindowTransform;
-  nsStyleCoord mWindowTransformOrigin[2];  // percent, coord, calc
+  mozilla::StyleTransformOrigin mWindowTransformOrigin;
 };
 
 struct nsCursorImage {

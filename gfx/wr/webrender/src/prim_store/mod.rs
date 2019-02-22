@@ -951,6 +951,7 @@ impl BrushSegment {
         clip_data_store: &mut ClipDataStore,
         unclipped: &DeviceRect,
         prim_snap_offsets: SnapOffsets,
+        device_pixel_scale: DevicePixelScale,
     ) -> ClipMaskKind {
         match clip_chain {
             Some(clip_chain) => {
@@ -977,7 +978,7 @@ impl BrushSegment {
                     prim_snap_offsets,
                     &pic_state.map_raster_to_world,
                     segment_world_rect,
-                    frame_context.device_pixel_scale,
+                    device_pixel_scale,
                 ) {
                     Some(info) => info,
                     None => {
@@ -995,6 +996,8 @@ impl BrushSegment {
                     frame_state.render_tasks,
                     clip_data_store,
                     snap_offsets,
+                    device_pixel_scale,
+                    frame_context.fb_config,
                 );
 
                 let clip_task_id = frame_state.render_tasks.add(clip_task);
@@ -1928,7 +1931,7 @@ impl PrimitiveStore {
                         &frame_context.clip_scroll_tree,
                         frame_state.gpu_cache,
                         frame_state.resource_cache,
-                        frame_context.device_pixel_scale,
+                        surface.device_pixel_scale,
                         &frame_context.screen_world_rect,
                         &mut frame_state.data_stores.clip,
                     );
@@ -1993,7 +1996,7 @@ impl PrimitiveStore {
                         PrimitiveInstanceKind::Clear { .. } => debug_colors::CYAN,
                     };
                     if debug_color.a != 0.0 {
-                        let debug_rect = clipped_world_rect * frame_context.device_pixel_scale;
+                        let debug_rect = clipped_world_rect * frame_context.global_device_pixel_scale;
                         frame_state.scratch.push_debug_rect(debug_rect, debug_color);
                     }
                 }
@@ -2447,6 +2450,7 @@ impl PrimitiveStore {
         scratch: &mut PrimitiveScratchBuffer,
     ) {
         let is_chased = prim_instance.is_chased();
+        let device_pixel_scale = frame_state.surfaces[pic_context.surface_index.0].device_pixel_scale;
 
         match &mut prim_instance.kind {
             PrimitiveInstanceKind::LineDecoration { data_handle, ref mut cache_handle, .. } => {
@@ -2468,7 +2472,7 @@ impl PrimitiveStore {
                 if let Some(cache_key) = line_dec_data.cache_key.as_ref() {
                     // TODO(gw): Do we ever need / want to support scales for text decorations
                     //           based on the current transform?
-                    let scale_factor = TypedScale::new(1.0) * frame_context.device_pixel_scale;
+                    let scale_factor = TypedScale::new(1.0) * device_pixel_scale;
                     let task_size = (LayoutSize::from_au(cache_key.size) * scale_factor).ceil().to_i32();
 
                     // Request a pre-rendered image task.
@@ -2518,7 +2522,7 @@ impl PrimitiveStore {
                     prim_offset,
                     &prim_data.font,
                     &prim_data.glyphs,
-                    frame_context.device_pixel_scale,
+                    device_pixel_scale,
                     &transform,
                     pic_context,
                     frame_state.resource_cache,
@@ -2561,7 +2565,7 @@ impl PrimitiveStore {
                 let scale_height = clamp_to_scale_factor(scale.1, false);
                 // Pick the maximum dimension as scale
                 let world_scale = LayoutToWorldScale::new(scale_width.max(scale_height));
-                let mut scale = world_scale * frame_context.device_pixel_scale;
+                let mut scale = world_scale * device_pixel_scale;
                 let max_scale = get_max_scale_for_border(&border_data.border.radius,
                                                          &border_data.widths);
                 scale.0 = scale.0.min(max_scale.0);
@@ -2666,7 +2670,7 @@ impl PrimitiveStore {
                     .get_image_properties(image_data.key);
 
                 if let Some(ImageProperties { descriptor, tiling: Some(tile_size), .. }) = image_properties {
-                    let device_image_size = descriptor.size;
+                    let device_image_rect = DeviceIntRect::from_size(descriptor.size);
 
                     // Tighten the clip rect because decomposing the repeated image can
                     // produce primitives that are partially covering the original image
@@ -2706,15 +2710,15 @@ impl PrimitiveStore {
                     for Repetition { origin, edge_flags } in repetitions {
                         let edge_flags = base_edge_flags | edge_flags;
 
-                        let image_rect = LayoutRect {
+                        let layout_image_rect = LayoutRect {
                             origin,
                             size: image_data.stretch_size,
                         };
 
                         let tiles = ::image::tiles(
-                            &image_rect,
+                            &layout_image_rect,
                             &visible_rect,
-                            &device_image_size,
+                            &device_image_rect,
                             tile_size as i32,
                         );
 
@@ -3201,6 +3205,7 @@ impl PrimitiveInstance {
         clip_mask_instances: &mut Vec<ClipMaskKind>,
         unclipped: &DeviceRect,
         prim_snap_offsets: SnapOffsets,
+        device_pixel_scale: DevicePixelScale,
     ) -> bool {
         let segments = match self.kind {
             PrimitiveInstanceKind::Picture { .. } |
@@ -3299,6 +3304,7 @@ impl PrimitiveInstance {
                 &mut data_stores.clip,
                 unclipped,
                 prim_snap_offsets,
+                device_pixel_scale,
             );
             clip_mask_instances.push(clip_mask_kind);
         } else {
@@ -3308,7 +3314,6 @@ impl PrimitiveInstance {
                 // Build a clip chain for the smaller segment rect. This will
                 // often manage to eliminate most/all clips, and sometimes
                 // clip the segment completely.
-
                 let segment_clip_chain = frame_state
                     .clip_store
                     .build_clip_chain_instance(
@@ -3324,7 +3329,7 @@ impl PrimitiveInstance {
                         &frame_context.clip_scroll_tree,
                         frame_state.gpu_cache,
                         frame_state.resource_cache,
-                        frame_context.device_pixel_scale,
+                        device_pixel_scale,
                         &dirty_world_rect,
                         &mut data_stores.clip,
                     );
@@ -3340,6 +3345,7 @@ impl PrimitiveInstance {
                     &mut data_stores.clip,
                     unclipped,
                     prim_snap_offsets,
+                    device_pixel_scale,
                 );
                 clip_mask_instances.push(clip_mask_kind);
             }
@@ -3361,6 +3367,7 @@ impl PrimitiveInstance {
         scratch: &mut PrimitiveScratchBuffer,
     ) {
         let prim_info = &mut scratch.prim_info[self.visibility_info.0 as usize];
+        let device_pixel_scale = frame_state.surfaces[pic_context.surface_index.0].device_pixel_scale;
 
         if self.is_chased() {
             println!("\tupdating clip task with pic rect {:?}", prim_info.clip_chain.pic_clip_rect);
@@ -3373,7 +3380,7 @@ impl PrimitiveInstance {
             root_spatial_node_index,
             prim_info.clip_chain.pic_clip_rect,
             &pic_state.map_pic_to_raster,
-            frame_context.device_pixel_scale,
+            device_pixel_scale,
             frame_context,
             frame_state,
         ) {
@@ -3406,6 +3413,7 @@ impl PrimitiveInstance {
             &mut scratch.clip_mask_instances,
             &unclipped,
             prim_snap_offsets,
+            device_pixel_scale,
         ) {
             if self.is_chased() {
                 println!("\tsegment tasks have been created for clipping");
@@ -3422,7 +3430,7 @@ impl PrimitiveInstance {
                 prim_snap_offsets,
                 &pic_state.map_raster_to_world,
                 prim_info.clipped_world_rect,
-                frame_context.device_pixel_scale,
+                device_pixel_scale,
             ) {
                 let clip_task = RenderTask::new_mask(
                     device_rect,
@@ -3434,6 +3442,8 @@ impl PrimitiveInstance {
                     frame_state.render_tasks,
                     &mut data_stores.clip,
                     snap_offsets,
+                    device_pixel_scale,
+                    frame_context.fb_config,
                 );
 
                 let clip_task_id = frame_state.render_tasks.add(clip_task);

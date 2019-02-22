@@ -78,9 +78,9 @@ WINDOWS_WORKER_TYPES = {
       'hardware': 'releng-hardware/gecko-t-win10-64-hw',
     },
     'windows10-aarch64': {
-      'virtual': 'test-provisioner/bitbar',
-      'virtual-with-gpu': 'test-provisioner/bitbar',
-      'hardware': 'test-provisioner/bitbar',
+      'virtual': 'bitbar/gecko-t-win64-aarch64-laptop',
+      'virtual-with-gpu': 'bitbar/gecko-t-win64-aarch64-laptop',
+      'hardware': 'bitbar/gecko-t-win64-aarch64-laptop',
     },
     'windows10-64-ccov': {
       'virtual': 'aws-provisioner-v1/gecko-t-win10-64',
@@ -108,6 +108,11 @@ WINDOWS_WORKER_TYPES = {
       'hardware': 'releng-hardware/gecko-t-win10-64-hw',
     },
     'windows10-64-qr': {
+      'virtual': 'aws-provisioner-v1/gecko-t-win10-64',
+      'virtual-with-gpu': 'aws-provisioner-v1/gecko-t-win10-64-gpu',
+      'hardware': 'releng-hardware/gecko-t-win10-64-hw',
+    },
+    'windows10-64-pgo-qr': {
       'virtual': 'aws-provisioner-v1/gecko-t-win10-64',
       'virtual-with-gpu': 'aws-provisioner-v1/gecko-t-win10-64-gpu',
       'hardware': 'releng-hardware/gecko-t-win10-64-hw',
@@ -645,6 +650,7 @@ def set_tier(config, tests):
                                          'linux64-asan/opt',
                                          'linux64-qr/opt',
                                          'linux64-qr/debug',
+                                         'linux64-pgo-qr/opt',
                                          'windows7-32/debug',
                                          'windows7-32/opt',
                                          'windows7-32-pgo/opt',
@@ -659,6 +665,7 @@ def set_tier(config, tests):
                                          'windows10-64-asan/opt',
                                          'windows10-64-qr/opt',
                                          'windows10-64-qr/debug',
+                                         'windows10-64-pgo-qr/opt',
                                          'macosx64/opt',
                                          'macosx64/debug',
                                          'macosx64-nightly/opt',

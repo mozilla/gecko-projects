@@ -87,10 +87,10 @@ class Element;
 }  // namespace mozilla
 
 // supported values for cached bool types
-enum nsPresContext_CachedBoolPrefType {
-  kPresContext_UseDocumentFonts = 1,
-  kPresContext_UnderlineLinks
-};
+//
+// FIXME(emilio): We have StaticPrefs now, probably all of these should be
+// migrated.
+enum nsPresContext_CachedBoolPrefType { kPresContext_UnderlineLinks = 1 };
 
 // supported values for cached integer pref types
 enum nsPresContext_CachedIntPrefType {
@@ -365,8 +365,6 @@ class nsPresContext : public nsISupports,
     // If called with a constant parameter, the compiler should optimize
     // this switch statement away.
     switch (aPrefType) {
-      case kPresContext_UseDocumentFonts:
-        return mUseDocumentFonts;
       case kPresContext_UnderlineLinks:
         return mUnderlineLinks;
       default:
@@ -415,7 +413,6 @@ class nsPresContext : public nsISupports,
   bool GetFocusRingOnAnything() const { return mFocusRingOnAnything; }
   uint8_t GetFocusRingStyle() const { return mFocusRingStyle; }
 
-  void SetContainer(nsIDocShell* aContainer);
 
   nsISupports* GetContainerWeak() const;
 
@@ -427,7 +424,7 @@ class nsPresContext : public nsISupports,
 
   /**
    * Detach this pres context - i.e. cancel relevant timers,
-   * SetLinkHandler(null), SetContainer(null) etc.
+   * SetLinkHandler(null), etc.
    * Only to be used by the DocumentViewer.
    */
   virtual void Detach();
@@ -873,9 +870,8 @@ class nsPresContext : public nsISupports,
   }
 
   // Is this presentation in a chrome docshell?
-  bool IsChrome() const { return mIsChrome; }
-  bool IsChromeOriginImage() const { return mIsChromeOriginImage; }
-  void UpdateIsChrome();
+  bool IsChrome() const;
+  bool IsChromeOriginImage() const;
 
   // Public API for native theme code to get style internals.
   bool HasAuthorSpecifiedRules(const nsIFrame* aFrame,
@@ -1197,8 +1193,6 @@ class nsPresContext : public nsISupports,
   bool mInflationDisabledForShrinkWrap;
 
  protected:
-  mozilla::WeakPtr<nsDocShell> mContainer;
-
   float mSystemFontScale;    // Internal text zoom factor, defaults to 1.0
   float mTextZoom;           // Text zoom, defaults to 1.0
   float mEffectiveTextZoom;  // Text zoom * system font scale
@@ -1283,7 +1277,6 @@ class nsPresContext : public nsISupports,
   unsigned mHasPendingInterrupt : 1;
   unsigned mPendingInterruptFromTest : 1;
   unsigned mInterruptsEnabled : 1;
-  unsigned mUseDocumentFonts : 1;
   unsigned mUseDocumentColors : 1;
   unsigned mUnderlineLinks : 1;
   unsigned mSendAfterPaintToContent : 1;
@@ -1326,9 +1319,6 @@ class nsPresContext : public nsISupports,
 
   unsigned mIsVisual : 1;
 
-  unsigned mIsChrome : 1;
-  unsigned mIsChromeOriginImage : 1;
-
   // Should we paint flash in this context? Do not use this variable directly.
   // Use GetPaintFlashing() method instead.
   mutable unsigned mPaintFlashing : 1;
@@ -1340,9 +1330,6 @@ class nsPresContext : public nsISupports,
 
   // Have we added quirk.css to the style set?
   unsigned mQuirkSheetAdded : 1;
-
-  // Is there a pref update to process once we have a container?
-  unsigned mNeedsPrefUpdate : 1;
 
   // Has NotifyNonBlankPaint been called on this PresContext?
   unsigned mHadNonBlankPaint : 1;

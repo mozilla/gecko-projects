@@ -548,6 +548,14 @@ VARCACHE_PREF(
 // Graphics prefs
 //---------------------------------------------------------------------------
 
+// In theory: 0 = never, 1 = quick, 2 = always, though we always just use it as
+// a bool!
+VARCACHE_PREF(
+  "browser.display.use_document_fonts",
+   browser_display_use_document_fonts,
+  RelaxedAtomicInt32, 1
+)
+
 VARCACHE_PREF(
   "gfx.font_rendering.opentype_svg.enabled",
    gfx_font_rendering_opentype_svg_enabled,
@@ -948,6 +956,13 @@ VARCACHE_PREF(
   "layout.css.scroll-anchoring.highlight",
    layout_css_scroll_anchoring_highlight,
   bool, false
+)
+
+// Is the CSS Scroll Snap Module Level 1 enabled?
+VARCACHE_PREF(
+  "layout.css.scroll-snap-v1.enabled",
+   layout_css_scroll_snap_v1_enabled,
+  RelaxedAtomicBool, false
 )
 
 //---------------------------------------------------------------------------

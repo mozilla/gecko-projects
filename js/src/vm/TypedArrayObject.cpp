@@ -79,7 +79,7 @@ using mozilla::IsAsciiDigit;
 
   AutoRealm ar(cx, tarray);
   Rooted<ArrayBufferObject*> buffer(
-      cx, ArrayBufferObject::create(cx, tarray->byteLength()));
+      cx, ArrayBufferObject::createZeroed(cx, tarray->byteLength()));
   if (!buffer) {
     return false;
   }
@@ -814,7 +814,7 @@ class TypedArrayObjectTemplate : public TypedArrayObject {
   static JSObject* fromBufferWrapped(JSContext* cx, HandleObject bufobj,
                                      uint64_t byteOffset, uint64_t lengthIndex,
                                      HandleObject proto) {
-    JSObject* unwrapped = CheckedUnwrap(bufobj);
+    JSObject* unwrapped = CheckedUnwrapStatic(bufobj);
     if (!unwrapped) {
       ReportAccessDenied(cx);
       return nullptr;
@@ -907,7 +907,7 @@ class TypedArrayObjectTemplate : public TypedArrayObject {
     }
 
     ArrayBufferObject* buf =
-        ArrayBufferObject::create(cx, byteLength, nonDefaultProto);
+        ArrayBufferObject::createZeroed(cx, byteLength, nonDefaultProto);
     if (!buf) {
       return false;
     }
@@ -1487,7 +1487,7 @@ static bool TypedArray_toStringTagGetter(JSContext* cx, unsigned argc,
     return true;
   }
 
-  JSObject* obj = CheckedUnwrap(&args.thisv().toObject());
+  JSObject* obj = CheckedUnwrapStatic(&args.thisv().toObject());
   if (!obj) {
     ReportAccessDenied(cx);
     return false;
@@ -1589,7 +1589,7 @@ static inline bool SetFromNonTypedArray(JSContext* cx,
 
   Rooted<TypedArrayObject*> srcTypedArray(cx);
   {
-    JSObject* obj = CheckedUnwrap(src);
+    JSObject* obj = CheckedUnwrapStatic(src);
     if (!obj) {
       ReportAccessDenied(cx);
       return false;

@@ -133,9 +133,10 @@
 #endif
 
 // Linux builds use LUL, which uses DWARF info to unwind stacks.
-#if defined(GP_PLAT_amd64_linux) || defined(GP_PLAT_x86_linux) ||    \
-    defined(GP_PLAT_x86_android) || defined(GP_PLAT_mips64_linux) || \
-    defined(GP_PLAT_arm64_linux) || defined(GP_PLAT_arm64_android)
+#if defined(GP_PLAT_amd64_linux) || defined(GP_PLAT_x86_linux) ||     \
+    defined(GP_PLAT_amd64_android) || defined(GP_PLAT_x86_android) || \
+    defined(GP_PLAT_mips64_linux) || defined(GP_PLAT_arm64_linux) ||  \
+    defined(GP_PLAT_arm64_android)
 #  define HAVE_NATIVE_UNWIND
 #  define USE_LUL_STACKWALK
 #  include "lul/LulMain.h"
@@ -776,8 +777,7 @@ class ActivePS {
 
 #if !defined(RELEASE_OR_BETA)
   static void UnregisterIOInterposer(PSLockRef) {
-    if (!sInstance->mInterposeObserver)
-      return;
+    if (!sInstance->mInterposeObserver) return;
 
     IOInterposer::Unregister(IOInterposeObserver::OpAll,
                              sInstance->mInterposeObserver);
@@ -785,6 +785,33 @@ class ActivePS {
     sInstance->mInterposeObserver = nullptr;
   }
 #endif
+
+  static void ClearExpiredExitProfiles(PSLockRef) {
+    uint64_t bufferRangeStart = sInstance->mBuffer->mRangeStart;
+    // Discard exit profiles that were gathered before our buffer RangeStart.
+    sInstance->mExitProfiles.RemoveElementsBy(
+        [bufferRangeStart](const ExitProfile& aExitProfile) {
+          return aExitProfile.mBufferPositionAtGatherTime < bufferRangeStart;
+        });
+  }
+
+  static void AddExitProfile(PSLockRef aLock, const nsCString& aExitProfile) {
+    ClearExpiredExitProfiles(aLock);
+
+    sInstance->mExitProfiles.AppendElement(
+        ExitProfile{aExitProfile, sInstance->mBuffer->mRangeEnd});
+  }
+
+  static nsTArray<nsCString> MoveExitProfiles(PSLockRef aLock) {
+    ClearExpiredExitProfiles(aLock);
+
+    nsTArray<nsCString> profiles(sInstance->mExitProfiles.Length());
+    for (auto& profile : sInstance->mExitProfiles) {
+      profiles.AppendElement(std::move(profile.mJSON));
+    }
+    sInstance->mExitProfiles.Clear();
+    return profiles;
+  }
 
  private:
   // The singleton instance.
@@ -859,6 +886,12 @@ class ActivePS {
   // at all times except just before/after forking.
   bool mWasPaused;
 #endif
+
+  struct ExitProfile {
+    nsCString mJSON;
+    uint64_t mBufferPositionAtGatherTime;
+  };
+  nsTArray<ExitProfile> mExitProfiles;
 };
 
 ActivePS* ActivePS::sInstance = nullptr;
@@ -1227,7 +1260,7 @@ static void MergeStacks(uint32_t aFeatures, bool aIsSynchronous,
   }
 }
 
-#if defined(GP_OS_windows)
+#if defined(GP_OS_windows) && defined(USE_MOZ_STACK_WALK)
 static HANDLE GetThreadHandle(PlatformData* aData);
 #endif
 
@@ -1386,7 +1419,7 @@ static void DoLULBacktrace(PSLockRef aLock,
   lul::UnwindRegs startRegs;
   memset(&startRegs, 0, sizeof(startRegs));
 
-#  if defined(GP_PLAT_amd64_linux)
+#  if defined(GP_PLAT_amd64_linux) || defined(GP_PLAT_amd64_android)
   startRegs.xip = lul::TaggedUWord(mc->gregs[REG_RIP]);
   startRegs.xsp = lul::TaggedUWord(mc->gregs[REG_RSP]);
   startRegs.xbp = lul::TaggedUWord(mc->gregs[REG_RBP]);
@@ -1448,7 +1481,7 @@ static void DoLULBacktrace(PSLockRef aLock,
   lul::StackImage stackImg;
 
   {
-#  if defined(GP_PLAT_amd64_linux)
+#  if defined(GP_PLAT_amd64_linux) || defined(GP_PLAT_amd64_android)
     uintptr_t rEDZONE_SIZE = 128;
     uintptr_t start = startRegs.xsp.Value() - rEDZONE_SIZE;
 #  elif defined(GP_PLAT_arm_linux) || defined(GP_PLAT_arm_android)
@@ -1731,7 +1764,7 @@ static void StreamMetaJSCustomObject(PSLockRef aLock,
                                      bool aIsShuttingDown) {
   MOZ_RELEASE_ASSERT(CorePS::Exists() && ActivePS::Exists(aLock));
 
-  aWriter.IntProperty("version", 14);
+  aWriter.IntProperty("version", 15);
 
   // The "startTime" field holds the number of milliseconds since midnight
   // January 1, 1970 GMT. This grotty code computes (Now - (Now -
@@ -2124,6 +2157,11 @@ static void PrintUsageThenExit(int aExitCode) {
       "  MOZ_PROFILER_SHUTDOWN\n"
       "  If set, the profiler saves a profile to the named file on shutdown.\n"
       "\n"
+      "  MOZ_PROFILER_SYMBOLICATE\n"
+      "  If set, the profiler will pre-symbolicate profiles.\n"
+      "  *Note* This will add a significant pause when gathering data, and\n"
+      "  is intended mainly for local development.\n"
+      "\n"
       "  MOZ_PROFILER_LUL_TEST\n"
       "  If set to any value, runs LUL unit tests at startup.\n"
       "\n"
@@ -2278,6 +2316,8 @@ void SamplerThread::Run() {
       if (ActivePS::Generation(lock) != mActivityGeneration) {
         return;
       }
+
+      ActivePS::ClearExpiredExitProfiles(lock);
 
       ActivePS::Buffer(lock).DeleteExpiredStoredMarkers();
       TimeStamp expiredMarkersCleaned = TimeStamp::Now();
@@ -2989,6 +3029,25 @@ void GetProfilerEnvVarsForChildProcess(
 
 }  // namespace mozilla
 
+void profiler_received_exit_profile(const nsCString& aExitProfile) {
+  MOZ_RELEASE_ASSERT(CorePS::Exists());
+  PSAutoLock lock(gPSMutex);
+  if (!ActivePS::Exists(lock)) {
+    return;
+  }
+  ActivePS::AddExitProfile(lock, aExitProfile);
+}
+
+nsTArray<nsCString> profiler_move_exit_profiles() {
+  MOZ_RELEASE_ASSERT(CorePS::Exists());
+  PSAutoLock lock(gPSMutex);
+  nsTArray<nsCString> profiles;
+  if (ActivePS::Exists(lock)) {
+    profiles = ActivePS::MoveExitProfiles(lock);
+  }
+  return profiles;
+}
+
 static void locked_profiler_save_profile_to_file(PSLockRef aLock,
                                                  const char* aFilename,
                                                  bool aIsShuttingDown = false) {
@@ -3005,9 +3064,13 @@ static void locked_profiler_save_profile_to_file(PSLockRef aLock,
       locked_profiler_stream_json_for_this_process(aLock, w, /* sinceTime */ 0,
                                                    aIsShuttingDown);
 
-      // Don't include profiles from other processes because this is a
-      // synchronous function.
       w.StartArrayProperty("processes");
+      nsTArray<nsCString> exitProfiles = ActivePS::MoveExitProfiles(aLock);
+      for (auto& exitProfile : exitProfiles) {
+        if (!exitProfile.IsEmpty()) {
+          w.Splice(exitProfile.get());
+        }
+      }
       w.EndArray();
     }
     w.End();
