@@ -387,7 +387,7 @@ bool HttpChannelParent::DoAsyncOpen(
     const uint32_t& aReferrerPolicy, const OptionalURIParams& aAPIRedirectToURI,
     const OptionalURIParams& aTopWindowURI, nsIPrincipal* aTopWindowPrincipal,
     const uint32_t& aLoadFlags, const RequestHeaderTuples& requestHeaders,
-    const nsCString& requestMethod, const OptionalIPCStream& uploadStream,
+    const nsCString& requestMethod, const Maybe<IPCStream>& uploadStream,
     const bool& uploadStreamHasHeaders, const int16_t& priority,
     const uint32_t& classOfService, const uint8_t& redirectionLimit,
     const bool& allowSTS, const uint32_t& thirdPartyFlags,
@@ -1078,8 +1078,9 @@ void HttpChannelParent::DivertOnDataAvailable(const nsCString& data,
   }
 
   nsCOMPtr<nsIInputStream> stringStream;
-  nsresult rv = NS_NewByteInputStream(getter_AddRefs(stringStream), data.get(),
-                                      count, NS_ASSIGNMENT_DEPEND);
+  nsresult rv =
+      NS_NewByteInputStream(getter_AddRefs(stringStream),
+                            MakeSpan(data).To(count), NS_ASSIGNMENT_DEPEND);
   if (NS_FAILED(rv)) {
     if (mChannel) {
       mChannel->Cancel(rv);

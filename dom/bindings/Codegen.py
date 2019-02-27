@@ -9914,7 +9914,7 @@ class CGStaticMethodJitinfo(CGGeneric):
             "static const JSJitInfo %s_methodinfo = {\n"
             "  { (JSJitGetterOp)%s },\n"
             "  { prototypes::id::_ID_Count }, { 0 }, JSJitInfo::StaticMethod,\n"
-            "  JSJitInfo::AliasEverything, JSVAL_TYPE_MISSING, false, false,\n"
+            "  JSJitInfo::AliasEverything, JSVAL_TYPE_OBJECT, false, false,\n"
             "  false, false, 0\n"
             "};\n" %
             (IDLToCIdentifier(method.identifier.name),
@@ -13699,12 +13699,14 @@ class CGDictionary(CGThing):
 
         if CGDictionary.isDictionaryCopyConstructible(d):
             disallowCopyConstruction = False
-            # Note: no base constructors because our operator= will
-            # deal with that.
+            # Note: gcc's -Wextra has a warning against not initializng our
+            # base explicitly. If we have one. Use our non-initializing base
+            # constructor to get around that.
             ctors.append(ClassConstructor([Argument("const %s&" % selfName,
                                                     "aOther")],
                                           bodyInHeader=True,
                                           visibility="public",
+                                          baseConstructors=baseConstructors,
                                           explicit=True,
                                           body="*this = aOther;\n"))
             methods.append(self.assignmentOperator())

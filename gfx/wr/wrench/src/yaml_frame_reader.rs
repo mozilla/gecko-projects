@@ -1825,6 +1825,7 @@ impl YamlFrameReader {
         }
 
         let filters = yaml["filters"].as_vec_filter_op().unwrap_or(vec![]);
+        let filter_datas = yaml["filter-datas"].as_vec_filter_data().unwrap_or(vec![]);
 
         info.rect = bounds;
         info.clip_rect = bounds;
@@ -1836,6 +1837,7 @@ impl YamlFrameReader {
             transform_style,
             mix_blend_mode,
             &filters,
+            &filter_datas,
             raster_space,
             cache_tiles,
         );
@@ -1899,7 +1901,7 @@ impl WrenchThing for YamlFrameReader {
                 max_frame_count = max_frame_count.max(values.as_vec().unwrap().len());
             }
         }
-        if self.requested_frame < max_frame_count - 1 {
+        if self.requested_frame + 1 < max_frame_count {
             self.requested_frame += 1;
         }
     }

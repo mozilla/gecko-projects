@@ -144,8 +144,6 @@ var whitelist = [
    platforms: ["linux"]},
   // Bug 1348559
   {file: "chrome://pippki/content/resetpassword.xul"},
-  // Bug 1351078
-  {file: "resource://gre/modules/Battery.jsm"},
   // Bug 1337345
   {file: "resource://gre/modules/Manifest.jsm"},
   // Bug 1351097
@@ -183,6 +181,8 @@ var whitelist = [
   // Bug 1526672
   {file: "resource://app/localization/en-US/browser/touchbar/touchbar.ftl",
    platforms: ["linux", "win"]},
+  // Referenced by the webcompat system addon for localization
+  {file: "resource://gre/localization/en-US/toolkit/about/aboutCompat.ftl"},
 ];
 
 whitelist = new Set(whitelist.filter(item =>

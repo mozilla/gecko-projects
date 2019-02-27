@@ -675,6 +675,12 @@ void nsWindow::Destroy() {
     gFocusWindow = nullptr;
   }
 
+#ifdef MOZ_WAYLAND
+  if (mContainer) {
+    moz_container_set_initial_draw_callback(mContainer, nullptr);
+  }
+#endif
+
   GtkWidget *owningWidget = GetMozContainerWidget();
   if (mShell) {
     gtk_widget_destroy(mShell);
@@ -1860,6 +1866,23 @@ static bool ExtractExposeRegion(LayoutDeviceIntRegion &aRegion, cairo_t *cr) {
   return true;
 }
 
+#ifdef MOZ_WAYLAND
+void nsWindow::WaylandEGLSurfaceForceRedraw() {
+  MOZ_RELEASE_ASSERT(NS_IsMainThread());
+
+  if (mIsDestroyed) {
+    return;
+  }
+
+  if (CompositorBridgeChild* remoteRenderer = GetRemoteRenderer()) {
+    if (mCompositorWidgetDelegate) {
+      mCompositorWidgetDelegate->RequestsUpdatingEGLSurface();
+    }
+    remoteRenderer->SendForcePresent();
+  }
+}
+#endif
+
 gboolean nsWindow::OnExposeEvent(cairo_t *cr) {
   // Send any pending resize events so that layout can update.
   // May run event loop.
@@ -1888,11 +1911,6 @@ gboolean nsWindow::OnExposeEvent(cairo_t *cr) {
   region.ScaleRoundOut(scale, scale);
 
   if (GetLayerManager()->AsKnowsCompositor() && mCompositorSession) {
-#ifdef MOZ_WAYLAND
-    if (mCompositorWidgetDelegate && WaylandRequestsUpdatingEGLSurface()) {
-      mCompositorWidgetDelegate->RequestsUpdatingEGLSurface();
-    }
-#endif
     // We need to paint to the screen even if nothing changed, since if we
     // don't have a compositing window manager, our pixels could be stale.
     GetLayerManager()->SetNeedsComposite(true);
@@ -3287,28 +3305,31 @@ nsresult nsWindow::Create(nsIWidget *aParent, nsNativeWidget aNativeParent,
         // We enable titlebar rendering for toplevel windows only.
         mCSDSupportLevel = GetSystemCSDSupportLevel();
 
-        // Some Gtk+ themes use non-rectangular toplevel windows. To fully
-        // support such themes we need to make toplevel window transparent
-        // with ARGB visual.
-        // It may cause performanance issue so make it configurable
-        // and enable it by default for selected window managers.
-        needsAlphaVisual = TopLevelWindowUseARGBVisual();
-        if (needsAlphaVisual && mIsX11Display && !shouldAccelerate) {
-          // We want to draw a transparent titlebar but we can't use
-          // ARGB visual due to Bug 1516224.
-          // We use ARGB visual for mShell only and shape mask
-          // for mContainer where is all our content drawn.
-          mTransparencyBitmapForTitlebar = true;
-        }
-
-        // When mozilla.widget.use-argb-visuals is set don't use shape mask.
-        if (mTransparencyBitmapForTitlebar &&
-            Preferences::GetBool("mozilla.widget.use-argb-visuals", false)) {
-          mTransparencyBitmapForTitlebar = false;
-        }
-
-        if (mTransparencyBitmapForTitlebar) {
-          mCSDSupportLevel = CSD_SUPPORT_CLIENT;
+        // There's no point to configure transparency
+        // on non-composited screens.
+        GdkScreen *screen = gdk_screen_get_default();
+        if (gdk_screen_is_composited(screen)) {
+          // Some Gtk+ themes use non-rectangular toplevel windows. To fully
+          // support such themes we need to make toplevel window transparent
+          // with ARGB visual.
+          // It may cause performanance issue so make it configurable
+          // and enable it by default for selected window managers.
+          if (Preferences::HasUserValue("mozilla.widget.use-argb-visuals")) {
+            // argb visual is explicitly required so use it
+            needsAlphaVisual =
+                Preferences::GetBool("mozilla.widget.use-argb-visuals");
+          } else if (!mIsX11Display) {
+            // Wayland uses ARGB visual by default
+            needsAlphaVisual = true;
+          } else if (mCSDSupportLevel != CSD_SUPPORT_NONE) {
+            if (shouldAccelerate) {
+              needsAlphaVisual = true;
+            } else {
+              // We want to draw a transparent titlebar but we can't use
+              // ARGB visual due to Bug 1516224.
+              mTransparencyBitmapForTitlebar = true;
+            }
+          }
         }
       }
 
@@ -3356,7 +3377,8 @@ nsresult nsWindow::Create(nsIWidget *aParent, nsNativeWidget aNativeParent,
       // We have a toplevel window with transparency. Mark it as transparent
       // now as nsWindow::SetTransparencyMode() can't be called after
       // nsWindow is created (Bug 1344839).
-      if (mWindowType == eWindowType_toplevel && mHasAlphaVisual) {
+      if (mWindowType == eWindowType_toplevel &&
+          (mHasAlphaVisual || mTransparencyBitmapForTitlebar)) {
         mIsTransparent = true;
       }
 
@@ -3450,6 +3472,15 @@ nsresult nsWindow::Create(nsIWidget *aParent, nsNativeWidget aNativeParent,
       // Create a container to hold child windows and child GtkWidgets.
       GtkWidget *container = moz_container_new();
       mContainer = MOZ_CONTAINER(container);
+#ifdef MOZ_WAYLAND
+      if (!mIsX11Display && ComputeShouldAccelerate()) {
+        RefPtr<nsWindow> self(this);
+        moz_container_set_initial_draw_callback(mContainer,
+            [self]() -> void {
+              self->WaylandEGLSurfaceForceRedraw();
+            });
+      }
+#endif
 
       // "csd" style is set when widget is realized so we need to call
       // it explicitly now.
@@ -6523,35 +6554,6 @@ bool nsWindow::HideTitlebarByDefault() {
   return hideTitlebar;
 }
 
-bool nsWindow::TopLevelWindowUseARGBVisual() {
-  static int useARGBVisual = -1;
-  if (useARGBVisual != -1) {
-    return useARGBVisual;
-  }
-
-  GdkScreen *screen = gdk_screen_get_default();
-  if (!gdk_screen_is_composited(screen)) {
-    useARGBVisual = false;
-  }
-
-  if (Preferences::HasUserValue("mozilla.widget.use-argb-visuals")) {
-    useARGBVisual =
-        Preferences::GetBool("mozilla.widget.use-argb-visuals", false);
-  } else {
-    const char *currentDesktop = getenv("XDG_CURRENT_DESKTOP");
-    useARGBVisual =
-        (currentDesktop && GetSystemCSDSupportLevel() != CSD_SUPPORT_NONE);
-
-    if (useARGBVisual) {
-      useARGBVisual =
-          (strstr(currentDesktop, "GNOME-Flashback:GNOME") != nullptr ||
-           strstr(currentDesktop, "GNOME") != nullptr);
-    }
-  }
-
-  return useARGBVisual;
-}
-
 int32_t nsWindow::RoundsWidgetCoordinatesTo() { return GdkScaleFactor(); }
 
 void nsWindow::GetCompositorWidgetInitData(
@@ -6565,7 +6567,8 @@ void nsWindow::GetCompositorWidgetInitData(
   *aInitData = mozilla::widget::GtkCompositorWidgetInitData(
       (mXWindow != X11None) ? mXWindow : (uintptr_t) nullptr,
       mXDisplay ? nsCString(XDisplayString(mXDisplay)) : nsCString(),
-      mIsTransparent && !mHasAlphaVisual, GetClientSize());
+      mIsTransparent && !mHasAlphaVisual && !mTransparencyBitmapForTitlebar,
+      GetClientSize());
 }
 
 #ifdef MOZ_WAYLAND
@@ -6588,17 +6591,6 @@ bool nsWindow::WaylandSurfaceNeedsClear() {
       "nsWindow::WaylandSurfaceNeedsClear(): We don't have any mContainer!");
   return false;
 }
-
-bool nsWindow::WaylandRequestsUpdatingEGLSurface() {
-  if (mContainer) {
-    return moz_container_egl_surface_needs_update(MOZ_CONTAINER(mContainer));
-  }
-
-  NS_WARNING(
-      "nsWindow::WaylandSurfaceNeedsClear(): We don't have any mContainer!");
-  return false;
-}
-
 #endif
 
 #ifdef MOZ_X11

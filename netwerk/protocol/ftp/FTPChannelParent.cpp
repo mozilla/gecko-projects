@@ -105,7 +105,7 @@ bool FTPChannelParent::Init(const FTPChannelCreationArgs& aArgs) {
 bool FTPChannelParent::DoAsyncOpen(const URIParams& aURI,
                                    const uint64_t& aStartPos,
                                    const nsCString& aEntityID,
-                                   const OptionalIPCStream& aUploadStream,
+                                   const Maybe<IPCStream>& aUploadStream,
                                    const OptionalLoadInfoArgs& aLoadInfoArgs,
                                    const uint32_t& aLoadFlags) {
   nsresult rv;
@@ -260,8 +260,9 @@ void FTPChannelParent::DivertOnDataAvailable(const nsCString& data,
   }
 
   nsCOMPtr<nsIInputStream> stringStream;
-  nsresult rv = NS_NewByteInputStream(getter_AddRefs(stringStream), data.get(),
-                                      count, NS_ASSIGNMENT_DEPEND);
+  nsresult rv =
+      NS_NewByteInputStream(getter_AddRefs(stringStream),
+                            MakeSpan(data).To(count), NS_ASSIGNMENT_DEPEND);
   if (NS_FAILED(rv)) {
     if (mChannel) {
       mChannel->Cancel(rv);

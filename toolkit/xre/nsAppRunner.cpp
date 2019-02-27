@@ -4389,7 +4389,7 @@ nsresult XREMain::XRE_mainRun() {
 #if defined(XP_WIN)
   RefPtr<mozilla::DllServices> dllServices(mozilla::DllServices::Get());
   auto dllServicesDisable =
-      MakeScopeExit([&dllServices]() { dllServices->Disable(); });
+      MakeScopeExit([&dllServices]() { dllServices->DisableFull(); });
 #endif  // defined(XP_WIN)
 
 #ifdef NS_FUNCTION_TIMER
@@ -4632,10 +4632,14 @@ nsresult XREMain::XRE_mainRun() {
     // after we are sure that we're not restarting
     cmdLine = new nsCommandLine();
 
-    CommandLineServiceMac::SetupMacCommandLine(gArgc, gArgv, false);
-
-    rv = cmdLine->Init(gArgc, gArgv, workingDir,
+    char** tempArgv = static_cast<char**>(malloc(gArgc * sizeof(char*)));
+    for (int i = 0; i < gArgc; i++) {
+      tempArgv[i] = strdup(gArgv[i]);
+    }
+    CommandLineServiceMac::SetupMacCommandLine(gArgc, tempArgv, false);
+    rv = cmdLine->Init(gArgc, tempArgv, workingDir,
                        nsICommandLine::STATE_INITIAL_LAUNCH);
+    free(tempArgv);
     NS_ENSURE_SUCCESS(rv, NS_ERROR_FAILURE);
 #endif
 

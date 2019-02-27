@@ -1341,7 +1341,9 @@ Document::Document(const char* aContentType)
       mIgnoreOpensDuringUnloadCounter(0),
       mDocLWTheme(Doc_Theme_Uninitialized),
       mSavedResolution(1.0f),
-      mPendingInitialTranslation(false) {
+      mPendingInitialTranslation(false),
+      mGeneration(0),
+      mCachedTabSizeGeneration(0) {
   MOZ_LOG(gDocumentLeakPRLog, LogLevel::Debug, ("DOCUMENT %p created", this));
 
   SetIsInDocument();
@@ -8412,9 +8414,9 @@ void Document::MaybePreconnect(nsIURI* aOrigURI, mozilla::CORSMode aCORSMode) {
   }
 
   if (aCORSMode == CORS_ANONYMOUS) {
-    speculator->SpeculativeAnonymousConnect2(uri, NodePrincipal(), nullptr);
+    speculator->SpeculativeAnonymousConnect(uri, NodePrincipal(), nullptr);
   } else {
-    speculator->SpeculativeConnect2(uri, NodePrincipal(), nullptr);
+    speculator->SpeculativeConnect(uri, NodePrincipal(), nullptr);
   }
 }
 
@@ -9367,6 +9369,7 @@ class UnblockParsingPromiseHandler final : public PromiseNativeHandler {
       mParser = do_GetWeakReference(parser);
       mDocument = aDocument;
       mDocument->BlockOnload();
+      mDocument->BlockDOMContentLoaded();
     }
   }
 
@@ -9400,8 +9403,16 @@ class UnblockParsingPromiseHandler final : public PromiseNativeHandler {
       if (parser == docParser) {
         parser->UnblockParser();
         parser->ContinueInterruptedParsingAsync();
-        mDocument->UnblockOnload(false);
       }
+    }
+    if (mDocument) {
+      // We blocked DOMContentLoaded and load events on this document.  Unblock
+      // them.  Note that we want to do that no matter what's going on with the
+      // parser state for this document.  Maybe someone caused it to stop being
+      // parsed, so CreatorParserOrNull() is returning null, but we still want
+      // to unblock these.
+      mDocument->UnblockDOMContentLoaded();
+      mDocument->UnblockOnload(false);
     }
     mParser = nullptr;
     mDocument = nullptr;
@@ -12538,6 +12549,24 @@ void Document::ReportShadowDOMUsage() {
 bool Document::StorageAccessSandboxed() const {
   return StaticPrefs::dom_storage_access_enabled() &&
          (GetSandboxFlags() & SANDBOXED_STORAGE_ACCESS) != 0;
+}
+
+bool Document::GetCachedSizes(nsTabSizes* aSizes) {
+  if (mCachedTabSizeGeneration == 0 ||
+      GetGeneration() != mCachedTabSizeGeneration) {
+    return false;
+  }
+  aSizes->mDom += mCachedTabSizes.mDom;
+  aSizes->mStyle += mCachedTabSizes.mStyle;
+  aSizes->mOther += mCachedTabSizes.mOther;
+  return true;
+}
+
+void Document::SetCachedSizes(nsTabSizes* aSizes) {
+  mCachedTabSizes.mDom = aSizes->mDom;
+  mCachedTabSizes.mStyle = aSizes->mStyle;
+  mCachedTabSizes.mOther = aSizes->mOther;
+  mCachedTabSizeGeneration = GetGeneration();
 }
 
 already_AddRefed<nsAtom> Document::GetContentLanguageAsAtomForStyle() const {
