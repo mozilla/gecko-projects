@@ -839,6 +839,7 @@ function setupTestCommon(aAppUpdateAutoEnabled = false) {
   }
 
   setAppUpdateAutoSync(aAppUpdateAutoEnabled);
+  Services.prefs.setBoolPref(PREF_APP_UPDATE_BITS_ENABLED, aAllowBits);
 
   debugDump("finish - general test setup");
   return true;
@@ -942,6 +943,7 @@ function cleanupTestCommon() {
   }
 
   resetEnvironment();
+  Services.prefs.clearUserPref(PREF_APP_UPDATE_BITS_ENABLED);
 
   debugDump("finish - general test cleanup");
 
