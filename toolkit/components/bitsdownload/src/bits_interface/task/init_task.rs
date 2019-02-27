@@ -6,7 +6,7 @@ use super::client::make_bits_client;
 use crossbeam_utils::atomic::AtomicCell;
 use log::warn;
 use moz_task::Task;
-use nserror::{nsresult, NsresultExt, NS_ERROR_FAILURE};
+use nserror::{nsresult, NS_ERROR_FAILURE};
 use nsstring::nsCString;
 use xpcom::{interfaces::nsIBITSInitCallback, RefPtr, ThreadBoundRefPtr};
 

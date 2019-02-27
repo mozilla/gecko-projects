@@ -6,7 +6,7 @@ use comedy;
 use std::convert::From;
 use std::string::FromUtf8Error;
 use std::str::Utf8Error;
-use nserror::{nsresult};
+use nserror::nsresult;
 use failure::Fail;
 
 // This wrapper is needed in order to implement Fail for Utf8Error

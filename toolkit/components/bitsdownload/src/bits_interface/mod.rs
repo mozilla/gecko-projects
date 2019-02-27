@@ -19,7 +19,7 @@ use libc::c_void;
 use log::warn;
 use moz_task::{create_thread, TaskRunnable};
 use nserror::{
-    nsresult, NsresultExt, NS_OK, NS_ERROR_INVALID_ARG, NS_ERROR_NO_AGGREGATION,
+    nsresult, NS_OK, NS_ERROR_INVALID_ARG, NS_ERROR_NO_AGGREGATION,
     NS_ERROR_NOT_INITIALIZED,
 };
 use nsstring::{nsACString, nsCString};
