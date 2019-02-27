@@ -733,8 +733,11 @@ gTestDirsPartialSuccess = gTestDirsCommon.concat(gTestDirsPartialSuccess);
  *
  * @param  aAppUpdateAutoEnabled
  *         See setAppUpdateAutoSync in shared.js for details.
+ * @param  aAllowBits
+ *         If true, allow update downloads via the Windows BITS service.
+ *         If false, this download mechanism will not be used.
  */
-function setupTestCommon(aAppUpdateAutoEnabled = false) {
+function setupTestCommon(aAppUpdateAutoEnabled = false, aAllowBits = false) {
   debugDump("start - general test setup");
 
   Assert.strictEqual(gTestID, undefined,
