@@ -164,6 +164,9 @@ pref("app.update.service.enabled", true);
 #endif
 
 #ifdef XP_WIN
+// This pref prevents BITS from being used by Firefox. This pref cannot be used
+// to disable the update agent.
+pref("app.update.BITS.enabled", true);
 // Default polling interval when monitoring update download status via BITS
 pref("app.update.BITS.idleUpdateIntervalMs", 300000); // 5 min
 // The BITS polling interval to use when the user is watching

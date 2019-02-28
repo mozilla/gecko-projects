@@ -29,8 +29,9 @@ const UPDATESERVICE_CID = Components.ID("{B3C290A6-3943-4B89-8BBE-C01EB7B3B311}"
 const PREF_APP_UPDATE_ALTWINDOWTYPE        = "app.update.altwindowtype";
 const PREF_APP_UPDATE_BACKGROUNDERRORS     = "app.update.backgroundErrors";
 const PREF_APP_UPDATE_BACKGROUNDMAXERRORS  = "app.update.backgroundMaxErrors";
-const PREF_APP_UPDATE_BITS_IDLE_POLL       = "app.update.BITS.idleUpdateIntervalMs";
 const PREF_APP_UPDATE_BITS_ACTIVE_POLL     = "app.update.BITS.activeUpdateIntervalMs";
+const PREF_APP_UPDATE_BITS_ENABLED         = "app.update.BITS.enabled";
+const PREF_APP_UPDATE_BITS_IDLE_POLL       = "app.update.BITS.idleUpdateIntervalMs";
 const PREF_APP_UPDATE_CANCELATIONS         = "app.update.cancelations";
 const PREF_APP_UPDATE_CANCELATIONS_OSX     = "app.update.cancelations.osx";
 const PREF_APP_UPDATE_CANCELATIONS_OSX_MAX = "app.update.cancelations.osx.max";
@@ -3662,6 +3663,28 @@ Downloader.prototype = {
   },
 
   /**
+   * Returns true if the specified patch can be downloaded with BITS.
+   */
+  _canUseBits: function Downloader__canUseBits(patch) {
+    if (AppConstants.platform != "win") {
+      return false;
+    }
+    if (!Services.prefs.getBoolPref(PREF_APP_UPDATE_BITS_ENABLED, true)) {
+      return false;
+    }
+    // Proxies cannot currently be passed to BITS.
+    let defaultProxy = Ci.nsIProtocolProxyService.PROXYCONFIG_SYSTEM;
+    if (Services.prefs.getIntPref(PREF_NETWORK_PROXY_TYPE, defaultProxy) !=
+        defaultProxy) {
+      return false;
+    }
+    patch.QueryInterface(Ci.nsIWritablePropertyBag);
+    // Regardless of success or failure, don't download the same patch with BITS
+    // twice.
+    return !this._patch.getProperty("bitsResult");
+  },
+
+  /**
    * Download and stage the given update.
    * @param   update
    *          A nsIUpdate object to download a patch for. Cannot be null.
@@ -3688,12 +3711,7 @@ Downloader.prototype = {
     }
     this.isCompleteUpdate = this._patch.type == "complete";
 
-    let defaultProxy = Ci.nsIProtocolProxyService.PROXYCONFIG_SYSTEM;
-    let proxySet = Services.prefs.getIntPref(PREF_NETWORK_PROXY_TYPE,
-                                             defaultProxy) != defaultProxy;
-    this._patch.QueryInterface(Ci.nsIWritablePropertyBag);
-    let bitsResult = this._patch.getProperty("bitsResult");
-    if (AppConstants.platform != "win" || proxySet || bitsResult) {
+    if (!this._canUseBits(this._patch)) {
       this.usingBits = false;
 
       let patchFile = getUpdatesDir().clone();
