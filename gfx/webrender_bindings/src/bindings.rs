@@ -1126,7 +1126,7 @@ pub extern "C" fn wr_window_new(window_id: WrWindowId,
 
     let opts = RendererOptions {
         enable_aa: true,
-        enable_subpixel_aa: true,
+        enable_subpixel_aa: cfg!(not(target_os = "android")),
         support_low_priority_transactions,
         recorder: recorder,
         blob_image_handler: Some(Box::new(Moz2dBlobImageHandler::new(workers.clone()))),
@@ -2220,7 +2220,9 @@ pub extern "C" fn wr_dp_define_scroll_layer(state: &mut WrState,
         vec![],
         None,
         ScrollSensitivity::Script,
-        scroll_offset,
+        // TODO(gw): We should also update the Gecko-side APIs to provide
+        //           this as a vector rather than a point.
+        scroll_offset.to_vector(),
     );
 
     WrSpaceAndClip::from_webrender(space_and_clip)

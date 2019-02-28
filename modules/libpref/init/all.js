@@ -23,9 +23,7 @@ pref("general.useragent.site_specific_overrides", true);
 
 pref("general.config.obscure_value", 13); // for MCD .cfg files
 
-#ifndef MOZ_BUILD_APP_IS_BROWSER
 pref("general.warnOnAboutConfig", true);
-#endif
 
 // maximum number of dated backups to keep at any time
 pref("browser.bookmarks.max_backups",       5);
@@ -1767,10 +1765,21 @@ pref("network.http.sendRefererHeader",      2);
 // 0=no-referrer, 1=same-origin, 2=strict-origin-when-cross-origin,
 // 3=no-referrer-when-downgrade
 pref("network.http.referer.defaultPolicy", 3);
+// Set the default Referrer Policy applied to third-party trackers when the
+// default cookie policy is set to reject third-party trackers;
+// to be used unless overriden by the site;
+// values are identical to defaultPolicy above
+pref("network.http.referer.defaultPolicy.trackers", 3);
 // Set the Private Browsing Default Referrer Policy;
 // to be used unless overriden by the site;
 // values are identical to defaultPolicy above
 pref("network.http.referer.defaultPolicy.pbmode", 2);
+// Set the Private Browsing Default Referrer Policy applied to third-party
+// trackers when the default cookie policy is set to reject third-party
+// trackers;
+// to be used unless overriden by the site;
+// values are identical to defaultPolicy above
+pref("network.http.referer.defaultPolicy.trackers.pbmode", 2);
 // false=real referer, true=spoof referer (use target URI as referer)
 pref("network.http.referer.spoofSource", false);
 // false=allow onion referer, true=hide onion referer (use empty referer)
@@ -3406,6 +3415,10 @@ pref("browser.tabs.remote.allowLinkedWebInFileUriProcess", true);
 
 // Pref to control whether we use separate privileged content processes.
 pref("browser.tabs.remote.separatePrivilegedContentProcess", false);
+
+// When this pref is enabled top level loads with a mismatched
+// Cross-Origin-Opener-Policy header will be loaded in a separate process.
+pref("browser.tabs.remote.useCrossOriginOpenerPolicy", false);
 
 // Enable the use of display-lists for SVG hit-testing and painting.
 pref("svg.display-lists.hit-testing.enabled", true);
@@ -6007,7 +6020,3 @@ pref("prio.enabled", false);
 // External.AddSearchProvider is deprecated and it will be removed in the next
 // cycles.
 pref("dom.sidebar.enabled", true);
-
-#if defined(MOZ_WIDGET_GTK)
-pref("widget.default-hidden-titlebar", true);
-#endif

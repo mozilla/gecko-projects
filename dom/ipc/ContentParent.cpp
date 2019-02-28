@@ -1304,6 +1304,13 @@ RemoteWindowContext::OpenURI(nsIURI* aURI) {
   return NS_OK;
 }
 
+NS_IMETHODIMP
+RemoteWindowContext::GetUsePrivateBrowsing(bool* aUsePrivateBrowsing) {
+  nsCOMPtr<nsILoadContext> loadContext = mTabParent->GetLoadContext();
+  *aUsePrivateBrowsing = loadContext && loadContext->UsePrivateBrowsing();
+  return NS_OK;
+}
+
 }  // namespace
 
 void ContentParent::ShutDownProcess(ShutDownMethod aMethod) {
@@ -5246,7 +5253,7 @@ void ContentParent::UpdateCookieStatus(nsIChannel* aChannel) {
   }
 }
 
-nsresult ContentParent::AboutToLoadHttpFtpWyciwygDocumentForChild(
+nsresult ContentParent::AboutToLoadHttpFtpDocumentForChild(
     nsIChannel* aChannel) {
   MOZ_ASSERT(aChannel);
 

@@ -5,6 +5,8 @@
 #ifndef UPDATEDEFINES_H
 #define UPDATEDEFINES_H
 
+#include <stdio.h>
+#include <stdarg.h>
 #include "readstrings.h"
 
 #if defined(XP_WIN)
@@ -12,8 +14,6 @@
 #  include <shlwapi.h>
 #  include <direct.h>
 #  include <io.h>
-#  include <stdio.h>
-#  include <stdarg.h>
 
 #  ifndef F_OK
 #    define F_OK 00
@@ -41,7 +41,6 @@
 // The extra layer of indirection here allows this macro to be passed macros
 #  define NS_T(str) NS_CONCAT(L, str)
 #  define NS_SLASH NS_T('\\')
-
 static inline int mywcsprintf(WCHAR* dest, size_t count, const WCHAR* fmt,
                               ...) {
   size_t _count = count - 1;
@@ -144,5 +143,20 @@ static inline int mywcsprintf(WCHAR* dest, size_t count, const WCHAR* fmt,
 #    define MAXPATHLEN 1024
 #  endif
 #endif
+
+static inline bool NS_tvsnprintf(NS_tchar* dest, size_t count,
+                                 const NS_tchar* fmt, ...) {
+  va_list varargs;
+  va_start(varargs, fmt);
+#if defined(XP_WIN)
+  int result = _vsnwprintf(dest, count, fmt, varargs);
+#else
+  int result = vsnprintf(dest, count, fmt, varargs);
+#endif
+  va_end(varargs);
+  // The size_t cast of result is safe because result can only be positive after
+  // the first check.
+  return result >= 0 && (size_t)result < count;
+}
 
 #endif

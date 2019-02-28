@@ -1391,7 +1391,6 @@ name = "jsrust"
 version = "0.1.0"
 dependencies = [
  "jsrust_shared 0.1.0",
- "mozilla-central-workspace-hack 0.1.0",
 ]
 
 [[package]]
@@ -1399,6 +1398,7 @@ name = "jsrust_shared"
 version = "0.1.0"
 dependencies = [
  "baldrdash 0.1.0",
+ "mozilla-central-workspace-hack 0.1.0",
 ]
 
 [[package]]
@@ -1744,7 +1744,7 @@ dependencies = [
  "quote 0.5.2 (registry+https://github.com/rust-lang/crates.io-index)",
  "serde 1.0.80 (registry+https://github.com/rust-lang/crates.io-index)",
  "serde_derive 1.0.80 (git+https://github.com/servo/serde?branch=deserialize_from_enums9)",
- "syn 0.14.6 (registry+https://github.com/rust-lang/crates.io-index)",
+ "syn 0.15.24 (registry+https://github.com/rust-lang/crates.io-index)",
  "void 1.0.2 (registry+https://github.com/rust-lang/crates.io-index)",
  "winapi 0.3.6 (git+https://github.com/froydnj/winapi-rs?branch=aarch64)",
 ]
@@ -3317,6 +3317,7 @@ dependencies = [
  "libc 0.2.43 (registry+https://github.com/rust-lang/crates.io-index)",
  "nserror 0.1.0",
  "nsstring 0.1.0",
+ "thin-vec 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "threadbound 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "xpcom_macros 0.1.0",
 ]

@@ -1829,6 +1829,14 @@ GeneralParser<ParseHandler, Unit>::functionBody(InHandling inHandling,
   uint32_t startYieldOffset = pc_->lastYieldOffset;
 #endif
 
+  if (kind == FunctionSyntaxKind::ClassConstructor) {
+    // Don't do DerivedClassConstructor here, that gets marked after super()
+    // calls.
+    if (!noteUsedName(cx_->names().dotInitializers)) {
+      return null();
+    }
+  }
+
   Node body;
   if (type == StatementListBody) {
     bool inheritedStrict = pc_->sc()->strict();
@@ -1889,12 +1897,14 @@ GeneralParser<ParseHandler, Unit>::functionBody(InHandling inHandling,
     if (!pc_->declareDotGeneratorName()) {
       return null();
     }
-    NameNodeType generator = newDotGeneratorName();
-    if (!generator) {
-      return null();
-    }
-    if (!handler_.prependInitialYield(handler_.asList(body), generator)) {
-      return null();
+    if (pc_->isGenerator()) {
+      NameNodeType generator = newDotGeneratorName();
+      if (!generator) {
+        return null();
+      }
+      if (!handler_.prependInitialYield(handler_.asList(body), generator)) {
+        return null();
+      }
     }
   }
 
@@ -1974,11 +1984,6 @@ JSFunction* AllocNewFunction(JSContext* cx, HandleAtom atom,
                        asyncKind == FunctionAsyncKind::SyncFunction
                    ? JSFunction::INTERPRETED_NORMAL
                    : JSFunction::INTERPRETED_GENERATOR_OR_ASYNC);
-  }
-
-  // We store the async wrapper in a slot for later access.
-  if (asyncKind == FunctionAsyncKind::AsyncFunction) {
-    allocKind = gc::AllocKind::FUNCTION_EXTENDED;
   }
 
   fun = NewFunctionWithProto(cx, nullptr, 0, flags, nullptr, atom, proto,
@@ -2556,8 +2561,18 @@ GeneralParser<ParseHandler, Unit>::functionDefinition(
   }
 
   RootedObject proto(cx_);
-  if (generatorKind == GeneratorKind::Generator ||
-      asyncKind == FunctionAsyncKind::AsyncFunction) {
+  if (asyncKind == FunctionAsyncKind::AsyncFunction &&
+      generatorKind == GeneratorKind::Generator) {
+    proto = GlobalObject::getOrCreateAsyncGenerator(cx_, cx_->global());
+    if (!proto) {
+      return null();
+    }
+  } else if (asyncKind == FunctionAsyncKind::AsyncFunction) {
+    proto = GlobalObject::getOrCreateAsyncFunctionPrototype(cx_, cx_->global());
+    if (!proto) {
+      return null();
+    }
+  } else if (generatorKind == GeneratorKind::Generator) {
     proto =
         GlobalObject::getOrCreateGeneratorFunctionPrototype(cx_, cx_->global());
     if (!proto) {
@@ -6764,12 +6779,10 @@ GeneralParser<ParseHandler, Unit>::classDefinition(
   // class name for the "inner name".
   Maybe<ParseContext::Statement> innerScopeStmt;
   Maybe<ParseContext::Scope> innerScope;
-  if (className) {
-    innerScopeStmt.emplace(pc_, StatementKind::Block);
-    innerScope.emplace(this);
-    if (!innerScope->init(pc_)) {
-      return null();
-    }
+  innerScopeStmt.emplace(pc_, StatementKind::Block);
+  innerScope.emplace(this);
+  if (!innerScope->init(pc_)) {
+    return null();
   }
 
   // Because the binding definitions keep track of their blockId, we need to
@@ -7008,30 +7021,35 @@ GeneralParser<ParseHandler, Unit>::classDefinition(
     }
   }
 
+  NameNodeType innerName;
   Node nameNode = null();
-  Node membersOrBlock = classMembers;
   if (className) {
     // The inner name is immutable.
     if (!noteDeclaredName(className, DeclarationKind::Const, namePos)) {
       return null();
     }
 
-    NameNodeType innerName = newName(className, namePos);
+    innerName = newName(className, namePos);
     if (!innerName) {
       return null();
     }
+  }
 
-    Node classBlock = finishLexicalScope(*innerScope, classMembers);
-    if (!classBlock) {
-      return null();
-    }
+  if (!noteDeclaredName(cx_->names().dotInitializers, DeclarationKind::Const,
+                        namePos)) {
+    return null();
+  }
 
-    membersOrBlock = classBlock;
+  Node classBlock = finishLexicalScope(*innerScope, classMembers);
+  if (!classBlock) {
+    return null();
+  }
 
-    // Pop the inner scope.
-    innerScope.reset();
-    innerScopeStmt.reset();
+  // Pop the inner scope.
+  innerScope.reset();
+  innerScopeStmt.reset();
 
+  if (className) {
     NameNodeType outerName = null();
     if (classContext == ClassStatement) {
       // The outer name is mutable.
@@ -7053,7 +7071,7 @@ GeneralParser<ParseHandler, Unit>::classDefinition(
 
   MOZ_ALWAYS_TRUE(setLocalStrictMode(savedStrictness));
 
-  return handler_.newClass(nameNode, classHeritage, membersOrBlock,
+  return handler_.newClass(nameNode, classHeritage, classBlock,
                            TokenPos(classStartOffset, classEndOffset));
 }
 
@@ -7114,6 +7132,10 @@ GeneralParser<ParseHandler, Unit>::synthesizeConstructor(
 
   auto stmtList = handler_.newStatementList(synthesizedBodyPos);
   if (!stmtList) {
+    return null();
+  }
+
+  if (!noteUsedName(cx_->names().dotInitializers)) {
     return null();
   }
 
