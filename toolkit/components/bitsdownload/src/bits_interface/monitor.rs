@@ -163,7 +163,7 @@ impl MonitorRunnable {
                 if !self.request_started.load() && transfer_started(&status) {
                     self.request_started.store(true);
                     let observer_result = unsafe {
-                        observer.OnStartRequest(bits_interface.coerce(), context)
+                        observer.OnStartRequest(bits_interface.coerce())
                     }.to_result();
                     if observer_result.is_err() {
                         let mut id = nsCString::new();
@@ -215,7 +215,6 @@ impl MonitorRunnable {
 
                     unsafe {
                         observer.OnStopRequest(bits_interface.coerce(),
-                                               context,
                                                job_status);
                     }
 
