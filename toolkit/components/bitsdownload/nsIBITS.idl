@@ -149,11 +149,9 @@ interface nsIBITS : nsIRequest
    * the download started by Firefox.
    *
    * @param id The GUID of the download to cancel.
-   * @param status The reason for cancelling the request.
    * @param callback The callback used to relay the response from BITS.
    */
   void cancelDownload(in AUTF8String id,
-                      in nsresult status,
                       in nsIBITSCancelDownloadCallback callback);
 
   /**

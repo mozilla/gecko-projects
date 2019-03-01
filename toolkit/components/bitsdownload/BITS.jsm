@@ -81,7 +81,7 @@ var BITS = {
       let callback = {
         QueryInterface: ChromeUtils.generateQI([Ci.nsIBITSStartDownloadCallback]),
         success(id) {
-          resolve(gBITS.QueryInterface(Ci.nsIRequest));
+          resolve(id, gBITS.QueryInterface(Ci.nsIRequest));
         },
         BITSFailure(failure) {
           reject(failure);
@@ -174,11 +174,10 @@ var BITS = {
    * the download started by Firefox.
    *
    * @param id The GUID of the download to monitor.
-   * @param status The reason for cancelling the request.
    * @return A Promise that resolves when the download has been cancelled.
    *         The Promise may reject if the download could not be cancelled.
    */
-  async cancelDownload(id, status) {
+  async cancelDownload(id) {
     return new Promise(async (resolve, reject) => {
       let callback = {
         QueryInterface: ChromeUtils.generateQI([Ci.nsIBITSCancelDownloadCallback]),
@@ -193,7 +192,7 @@ var BITS = {
         },
       };
 
-      gBITS.cancelDownload(id, status, callback);
+      gBITS.cancelDownload(id, callback);
     });
   },
 
