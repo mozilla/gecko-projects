@@ -9,7 +9,7 @@ use super::{
 use crossbeam_utils::atomic::AtomicCell;
 use log::warn;
 use moz_task::Task;
-use nserror::{nsresult, NS_ERROR_FAILURE, NS_OK};
+use nserror::{nsresult, NsresultExt, NS_ERROR_FAILURE, NS_OK};
 use nsstring::nsCString;
 use std::fmt::Debug;
 use xpcom::{

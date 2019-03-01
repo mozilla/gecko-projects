@@ -7,7 +7,7 @@ use bits_client::{BitsJobState, JobStatus, BitsMonitorClient, PipeError};
 use crossbeam_utils::atomic::AtomicCell;
 use log::{error, warn};
 use moz_task::{get_main_thread, is_main_thread};
-use nserror::{nsresult, NS_ERROR_ABORT, NS_ERROR_FAILURE, NS_OK};
+use nserror::{nsresult, NsresultExt, NS_ERROR_ABORT, NS_ERROR_FAILURE, NS_OK};
 use nsstring::{nsACString, nsCString};
 use std::ptr;
 use xpcom::{
