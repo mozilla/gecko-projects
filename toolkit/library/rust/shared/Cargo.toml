@@ -32,7 +32,6 @@ env_logger = {version = "0.5", default-features = false} # disable `regex` to re
 cose-c = { version = "0.1.5" }
 jsrust_shared = { path = "../../../../js/src/rust/shared", optional = true }
 arrayvec = "0.4"
-bitsdownload = { path = "../../../components/bitsdownload", optional = true }
 
 [build-dependencies]
 rustc_version = "0.2"
@@ -50,7 +49,6 @@ moz_memory = ["mp4parse_capi/mp4parse_fallible"]
 spidermonkey_rust = ["jsrust_shared"]
 gecko_profiler = ["profiler_helper"]
 gecko_profiler_parse_elf = ["profiler_helper/parse_elf"]
-bitsdownload_feature = ["bitsdownload"]
 
 [lib]
 path = "lib.rs"

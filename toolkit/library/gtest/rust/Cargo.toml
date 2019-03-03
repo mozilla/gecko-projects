@@ -17,7 +17,6 @@ moz_memory = ["gkrust-shared/moz_memory"]
 spidermonkey_rust = ["gkrust-shared/spidermonkey_rust"]
 gecko_profiler = ["gkrust-shared/gecko_profiler"]
 gecko_profiler_parse_elf = ["gkrust-shared/gecko_profiler_parse_elf"]
-bitsdownload_feature = ["gkrust-shared/bitsdownload_feature"]
 
 [dependencies]
 bench-collections-gtest = { path = "../../../../xpcom/rust/gtest/bench-collections" }
