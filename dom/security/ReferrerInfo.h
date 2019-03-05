@@ -7,6 +7,7 @@
 #ifndef mozilla_dom_ReferrerInfo_h
 #define mozilla_dom_ReferrerInfo_h
 
+#include "ipc/IPCMessageUtils.h"
 #include "nsCOMPtr.h"
 #include "nsIReferrerInfo.h"
 #include "nsISerializable.h"

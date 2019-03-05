@@ -69,6 +69,8 @@
 #include "mozilla/dom/PushNotifier.h"
 #include "mozilla/dom/quota/QuotaManagerService.h"
 #include "mozilla/dom/ServiceWorkerUtils.h"
+#include "mozilla/dom/SHEntryParent.h"
+#include "mozilla/dom/SHistoryParent.h"
 #include "mozilla/dom/URLClassifierParent.h"
 #include "mozilla/dom/ipc/SharedMap.h"
 #include "mozilla/embedding/printingui/PrintingParent.h"
@@ -5589,6 +5591,32 @@ bool ContentParent::DeallocPSessionStorageObserverParent(
   MOZ_ASSERT(aActor);
 
   return mozilla::dom::DeallocPSessionStorageObserverParent(aActor);
+}
+
+PSHEntryParent* ContentParent::AllocPSHEntryParent(
+    const PSHEntryOrSharedID& aEntryOrSharedID) {
+  RefPtr<LegacySHEntry> entry;
+  if (aEntryOrSharedID.type() == PSHEntryOrSharedID::Tuint64_t) {
+    entry = new LegacySHEntry(this, aEntryOrSharedID.get_uint64_t());
+  } else {
+    entry = new LegacySHEntry(*(
+        static_cast<const SHEntryParent*>(aEntryOrSharedID.get_PSHEntryParent())
+            ->mEntry));
+  }
+  return entry->CreateActor();
+}
+
+void ContentParent::DeallocPSHEntryParent(PSHEntryParent* aEntry) {
+  delete static_cast<SHEntryParent*>(aEntry);
+}
+
+PSHistoryParent* ContentParent::AllocPSHistoryParent(
+    BrowsingContext* aContext) {
+  return new SHistoryParent(aContext->Canonical());
+}
+
+void ContentParent::DeallocPSHistoryParent(PSHistoryParent* aActor) {
+  delete static_cast<SHistoryParent*>(aActor);
 }
 
 nsresult ContentParent::SaveRecording(nsIFile* aFile, bool* aRetval) {

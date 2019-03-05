@@ -46,6 +46,8 @@ include protocol PRemoteDecoderManager;
 include protocol PProfiler;
 include protocol PScriptCache;
 include protocol PSessionStorageObserver;
+include protocol PSHEntry;
+include protocol PSHistory;
 include DOMTypes;
 include JavaScriptTypes;
 include IPCBlob;
@@ -62,6 +64,7 @@ include ClientIPCTypes;
 include HangTypes;
 include PrefsTypes;
 include NeckoChannelParams;
+include NewPSHEntry;
 
 using refcounted class nsIDOMGeoPosition from "nsGeoPositionIPCSerialiser.h";
 using refcounted class nsIAlertNotification from "mozilla/AlertNotificationIPCSerializer.h";
@@ -355,6 +358,8 @@ nested(upto inside_cpow) sync protocol PContent
     manages PScriptCache;
     manages PLoginReputation;
     manages PSessionStorageObserver;
+    manages PSHEntry;
+    manages PSHistory;
 
     // Depending on exactly how the new browser is being created, it might be
     // created from either the child or parent process!
@@ -803,6 +808,8 @@ child:
     // value for every individual BrowsingContext.
     async RegisterBrowsingContextGroup(BrowsingContextInitializer[] aInits);
 
+    async DestroySHEntrySharedState(uint64_t aID);
+
 parent:
     async InitBackground(Endpoint<PBackgroundParent> aEndpoint);
 
@@ -877,6 +884,11 @@ parent:
     async PLoginReputation(URIParams formURI);
 
     async PSessionStorageObserver();
+
+    async PSHistory(BrowsingContext aContext);
+
+    // Clone from entry or use shared id.
+    sync PSHEntry(PSHEntryOrSharedID entryOrSharedID);
 
     // Services remoting
 

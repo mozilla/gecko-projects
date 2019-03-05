@@ -3259,6 +3259,13 @@ class nsContentUtils {
   static uint64_t GenerateBrowsingContextId();
 
   /**
+   * Generate an id using a range of serial numbers reserved for the current
+   * process. aId should be a counter that's incremented every time
+   * GenerateProcessSpecificId is called.
+   */
+  static uint64_t GenerateProcessSpecificId(uint64_t aId);
+
+  /**
    * Check whether we should skip moving the cursor for a same-value .value set
    * on a text input or textarea.
    */

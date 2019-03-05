@@ -10313,7 +10313,8 @@ bool nsContentUtils::IsLocalRefURL(const nsString& aString) {
 static const uint64_t kIdProcessBits = 32;
 static const uint64_t kIdBits = 64 - kIdProcessBits;
 
-/* static */ uint64_t GenerateProcessSpecificId(uint64_t aId) {
+/* static */
+uint64_t nsContentUtils::GenerateProcessSpecificId(uint64_t aId) {
   uint64_t processId = 0;
   if (XRE_IsContentProcess()) {
     ContentChild* cc = ContentChild::GetSingleton();

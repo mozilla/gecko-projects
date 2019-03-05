@@ -2646,6 +2646,14 @@ VARCACHE_PREF(
   RelaxedAtomicBool, false
 )
 
+// Store the session history in the parent process, and access it over IPC from
+// the child processes.
+VARCACHE_PREF(
+  "fission.sessionHistoryInParent",
+   fission_sessionHistoryInParent,
+  bool, false
+)
+
 //---------------------------------------------------------------------------
 // End of prefs
 //---------------------------------------------------------------------------

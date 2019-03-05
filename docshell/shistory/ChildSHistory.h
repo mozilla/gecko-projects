@@ -26,6 +26,7 @@
 
 class nsSHistory;
 class nsDocShell;
+class nsISHEntry;
 class nsISHistory;
 class nsIWebNavigation;
 class nsIGlobalObject;
@@ -76,8 +77,10 @@ class ChildSHistory : public nsISupports, public nsWrapperCache {
   virtual ~ChildSHistory();
 
   RefPtr<nsDocShell> mDocShell;
-  RefPtr<nsSHistory> mHistory;
+  nsCOMPtr<nsISHistory> mHistory;
 };
+
+already_AddRefed<nsISHEntry> CreateSHEntry();
 
 }  // namespace dom
 }  // namespace mozilla
