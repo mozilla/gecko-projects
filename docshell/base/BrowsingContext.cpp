@@ -131,6 +131,8 @@ already_AddRefed<BrowsingContext> BrowsingContext::Create(
     context->mCrossOriginPolicy = inherit->mCrossOriginPolicy;
   }
 
+  nsContentUtils::GenerateUUIDInPlace(context->mHistoryID);
+
   Register(context);
 
   // Attach the browsing context to the tree.

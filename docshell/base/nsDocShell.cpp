@@ -310,6 +310,7 @@ static void DecreasePrivateDocShellCount() {
 
 nsDocShell::nsDocShell(BrowsingContext* aBrowsingContext)
     : nsDocLoader(),
+      mHistoryID(aBrowsingContext->GetHistoryID()),
       mContentWindowID(NextWindowID()),
       mBrowsingContext(aBrowsingContext),
       mForcedCharset(nullptr),
@@ -386,12 +387,7 @@ nsDocShell::nsDocShell(BrowsingContext* aBrowsingContext)
       mBlankTiming(false),
       mTitleValidForCurrentURI(false),
       mIsFrame(false) {
-  mHistoryID.m0 = 0;
-  mHistoryID.m1 = 0;
-  mHistoryID.m2 = 0;
   AssertOriginAttributesMatchPrivateBrowsing();
-
-  nsContentUtils::GenerateUUIDInPlace(mHistoryID);
 
   if (gDocShellCount++ == 0) {
     NS_ASSERTION(sURIFixup == nullptr,
@@ -9440,6 +9436,7 @@ nsresult nsDocShell::InternalLoad(nsDocShellLoadState* aLoadState,
       // We're making history navigation or a reload. Make sure our history ID
       // points to the same ID as SHEntry's docshell ID.
       mHistoryID = aLoadState->SHEntry()->DocshellID();
+      mBrowsingContext->SetHistoryID(aLoadState->SHEntry()->DocshellID());
     }
   }
 
@@ -11437,7 +11434,7 @@ nsresult nsDocShell::AddToSessionHistory(nsIURI* aURI, nsIChannel* aChannel,
                 cacheKey,             // CacheKey
                 mContentTypeHint,     // Content-type
                 triggeringPrincipal,  // Channel or provided principal
-                principalToInherit, csp, mHistoryID, mDynamicallyCreated);
+                principalToInherit, csp, HistoryID(), mDynamicallyCreated);
 
   entry->SetOriginalURI(originalURI);
   entry->SetResultPrincipalURI(resultPrincipalURI);

@@ -27,5 +27,7 @@ MOZ_BC_FIELD(OpenerId, uint64_t)
 // context is currently considered to be activated by a gesture.
 MOZ_BC_FIELD_RACY(IsActivatedByUserGesture, bool)
 
+MOZ_BC_FIELD(HistoryID, nsID)
+
 #undef MOZ_BC_FIELD
 #undef MOZ_BC_FIELD_RACY

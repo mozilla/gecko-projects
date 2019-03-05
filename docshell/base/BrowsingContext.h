@@ -14,6 +14,7 @@
 #include "mozilla/dom/BindingDeclarations.h"
 #include "nsCOMPtr.h"
 #include "nsCycleCollectionParticipant.h"
+#include "nsID.h"
 #include "nsIDocShell.h"
 #include "nsString.h"
 #include "nsTArray.h"
