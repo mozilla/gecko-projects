@@ -296,6 +296,26 @@ union HttpChannelCreationArgs
   HttpChannelConnectArgs;   // Used for redirected-to channels
 };
 
+struct HttpConnectionInfoCloneArgs
+{
+  nsCString host;
+  int32_t port;
+  nsCString npnToken;
+  nsCString username;
+  OriginAttributes originAttributes;
+  bool endToEndSSL;
+  nsCString routedHost;
+  int32_t routedPort;
+  bool anonymous;
+  bool aPrivate; // use prefix to avoid code generation error
+  bool insecureScheme;
+  bool noSpdy;
+  bool beConservative;
+  uint32_t tlsFlags;
+  bool trrUsed;
+  bool trrDisabled;
+};
+
 //-----------------------------------------------------------------------------
 // FTP IPDL structs
 //-----------------------------------------------------------------------------

@@ -9,6 +9,7 @@
 
 #include "DelayHttpChannelQueue.h"
 #include "HttpBaseChannel.h"
+#include "HttpTransactionParent.h"
 #include "nsTArray.h"
 #include "nsICachingChannel.h"
 #include "nsICacheEntry.h"
@@ -597,8 +598,8 @@ class nsHttpChannel final : public HttpBaseChannel,
  private:
   nsCOMPtr<nsICancelable> mProxyRequest;
 
-  RefPtr<nsInputStreamPump> mTransactionPump;
-  RefPtr<nsHttpTransaction> mTransaction;
+  RefPtr<nsIRequest> mTransactionPump;
+  RefPtr<HttpTransactionParent> mTransaction;
 
   uint64_t mLogicalOffset;
 

@@ -15,11 +15,13 @@
 #include "mozilla/Preferences.h"
 #include "mozilla/Unused.h"
 #include "nsCRT.h"
+#include "nsContentUtils.h"
 #include "nsHttpRequestHead.h"
 #include "nsHttpResponseHead.h"
 #include "nsHttpHandler.h"
 #include "nsICacheEntry.h"
 #include "nsIRequest.h"
+#include "nsJSUtils.h"
 #include <errno.h>
 #include <functional>
 

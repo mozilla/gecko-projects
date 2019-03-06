@@ -13,6 +13,13 @@
 
 class nsIHttpHeaderVisitor;
 
+// This needs to be forward declared here so we can include only this header
+// without also including PHttpChannelParams.h
+namespace IPC {
+template <typename>
+struct ParamTraits;
+}  // namespace IPC
+
 namespace mozilla {
 namespace net {
 
@@ -82,7 +89,7 @@ class nsHttpRequestHead {
   bool IsSafeMethod();
 
   enum ParsedMethodType {
-    kMethod_Custom,
+    kMethod_Custom = 0,
     kMethod_Get,
     kMethod_Post,
     kMethod_Options,
@@ -124,6 +131,8 @@ class nsHttpRequestHead {
 
   // During VisitHeader we sould not allow cal to SetHeader.
   bool mInVisitHeaders;
+
+  friend struct IPC::ParamTraits<nsHttpRequestHead>;
 };
 
 }  // namespace net
