@@ -14,6 +14,12 @@ config = {
         {'filename': '/builds/gapi.data',
          'secret_name': 'project/releng/gecko/build/level-%(scm-level)s/gapi.data',
          'min_scm_level': 1},
+        {'filename': '/builds/gls-gapi.data',
+         'secret_name': 'project/releng/gecko/build/level-%(scm-level)s/gls-gapi.data',
+         'min_scm_level': 1},
+        {'filename': '/builds/sb-gapi.data',
+         'secret_name': 'project/releng/gecko/build/level-%(scm-level)s/sb-gapi.data',
+         'min_scm_level': 1},
         {'filename': '/builds/mozilla-desktop-geoloc-api.key',
          'secret_name': 'project/releng/gecko/build/level-%(scm-level)s/mozilla-desktop-geoloc-api.key',
          'min_scm_level': 2, 'default': 'try-build-has-no-secrets'},
@@ -51,6 +57,5 @@ config = {
         'MINIDUMP_SAVE_PATH': '%(base_work_dir)s/minidumps',
     },
     'mozconfig_platform': 'win32',
-    'mozconfig_variant': 'mingw32',
     #########################################################################
 }

@@ -6,9 +6,9 @@ Transform the `release-generate-checksums-beetmover` task to also append `build`
 """
 from __future__ import absolute_import, print_function, unicode_literals
 
+from taskgraph.loader.single_dep import schema
 from taskgraph.transforms.base import TransformSequence
 from taskgraph.util.attributes import copy_attributes_from_dependent_job
-from taskgraph.util.schema import validate_schema, Schema
 from taskgraph.util.scriptworker import (get_beetmover_bucket_scope,
                                          get_beetmover_action_scope,
                                          get_worker_type_for_scope,
@@ -38,12 +38,7 @@ CHECKSUMS_SIGNING_ARTIFACTS = [
 # comparable, so we cast all of the keys back to regular strings
 task_description_schema = {str(k): v for k, v in task_description_schema.schema.iteritems()}
 
-transforms = TransformSequence()
-
-release_generate_checksums_beetmover_schema = Schema({
-    # the dependent task (object) for this beetmover job, used to inform beetmover.
-    Required('dependent-task'): object,
-
+release_generate_checksums_beetmover_schema = schema.extend({
     # depname is used in taskref's to identify the taskID of the unsigned things
     Required('depname', default='build'): basestring,
 
@@ -57,23 +52,18 @@ release_generate_checksums_beetmover_schema = Schema({
 
     Optional('shipping-phase'): task_description_schema['shipping-phase'],
     Optional('shipping-product'): task_description_schema['shipping-product'],
+
+    Optional('attributes'): task_description_schema['attributes'],
 })
 
-
-@transforms.add
-def validate(config, jobs):
-    for job in jobs:
-        label = job.get('dependent-task', object).__dict__.get('label', '?no-label?')
-        validate_schema(
-            release_generate_checksums_beetmover_schema, job,
-            "In ({!r} kind) task for {!r}:".format(config.kind, label))
-        yield job
+transforms = TransformSequence()
+transforms.add_validate(release_generate_checksums_beetmover_schema)
 
 
 @transforms.add
 def make_task_description(config, jobs):
     for job in jobs:
-        dep_job = job['dependent-task']
+        dep_job = job['primary-dependency']
         attributes = copy_attributes_from_dependent_job(dep_job)
 
         treeherder = job.get('treeherder', {})

@@ -204,4 +204,5 @@ default-preferences pref(layout.css.font-variations.enabled,true)
 == variation-format-hint-1b.html variation-format-hint-1B-otf-ref.html
 == variation-format-hint-1c.html variation-format-hint-1B-woff-ref.html
 == variation-format-hint-1d.html variation-format-hint-1B-woff2-ref.html
+
 default-preferences

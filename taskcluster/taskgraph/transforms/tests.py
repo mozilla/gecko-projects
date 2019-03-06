@@ -24,7 +24,6 @@ from taskgraph.util.schema import resolve_keyed_by, OptimizationSchema
 from taskgraph.util.treeherder import split_symbol, join_symbol, add_suffix
 from taskgraph.util.platforms import platform_family
 from taskgraph.util.schema import (
-    validate_schema,
     optionally_keyed_by,
     Schema,
 )
@@ -355,9 +354,9 @@ test_description_schema = Schema({
     Optional('product'): basestring,
 
     # conditional files to determine when these tests should be run
-    Exclusive(Optional('when'), 'optimization'): Any({
+    Exclusive(Optional('when'), 'optimization'): {
         Optional('files-changed'): [basestring],
-    }),
+    },
 
     # Optimization to perform on this task during the optimization phase.
     # Optimizations are defined in taskcluster/taskgraph/optimize.py.
@@ -371,6 +370,11 @@ test_description_schema = Schema({
         'test-platform',
         Any(basestring, None),
     ),
+
+    Optional(
+        'require-signed-extensions',
+        description="Whether the build being tested requires extensions be signed.",
+    ): optionally_keyed_by('release-type', 'test-platform', bool),
 
     # The target name, specifying the build artifact to be tested.
     # If None or not specified, a transform sets the target based on OS:
@@ -443,6 +447,7 @@ def set_defaults(config, tests):
         test.setdefault('loopback-video', False)
         test.setdefault('docker-image', {'in-tree': 'desktop1604-test'})
         test.setdefault('checkout', False)
+        test.setdefault('require-signed-extensions', False)
 
         test['mozharness'].setdefault('extra-options', [])
         test['mozharness'].setdefault('requires-signed-builds', False)
@@ -453,11 +458,19 @@ def set_defaults(config, tests):
         yield test
 
 
+transforms.add_validate(test_description_schema)
+
+
 @transforms.add
-def validate(config, tests):
+def resolve_keys(config, tests):
     for test in tests:
-        validate_schema(test_description_schema, test,
-                        "In test {!r}:".format(test['test-name']))
+        resolve_keyed_by(
+            test, 'require-signed-extensions',
+            item_name=test['test-name'],
+            **{
+                'release-type': config.params['release_type'],
+            }
+        )
         yield test
 
 
@@ -475,12 +488,6 @@ def setup_talos(config, tests):
         if test['build-platform'].startswith('win32'):
             extra_options.append('--add-option')
             extra_options.append('--setpref,gfx.direct2d.disabled=true')
-
-        # Per https://bugzilla.mozilla.org/show_bug.cgi?id=1357753#c3, branch
-        # name is only required for try
-        if config.params.is_try():
-            extra_options.append('--branch-name')
-            extra_options.append('try')
 
         yield test
 

@@ -1096,11 +1096,13 @@ def bindgen_cflags(value):
 add_old_configure_assignment('_BINDGEN_CFLAGS', bindgen_cflags)
 
 
-@depends(c_compiler)
-def default_debug_flags(compiler_info):
+@depends(c_compiler, target)
+def default_debug_flags(compiler_info, target):
     # Debug info is ON by default.
     if compiler_info.type in ('msvc', 'clang-cl'):
         return '-Zi'
+    elif target.kernel == 'WINNT' and compiler_info.type == 'clang':
+        return '-g -gcodeview'
     return '-g'
 
 
@@ -1307,6 +1309,7 @@ include('windows.configure', when=is_windows)
 
 fxc = check_prog('FXC', ('fxc.exe', 'fxc2.exe'), when=depends(target)
                  (lambda t: t.kernel == 'WINNT'))
+add_old_configure_assignment('FXC', fxc)
 wine = check_prog('WINE', ['wine'], when=depends(target, host)
                   (lambda t, h: t.kernel == 'WINNT' and h.kernel == 'Linux'))
 
@@ -1334,11 +1337,13 @@ def security_hardening_cflags(hardening_flag, asan, optimize, c_compiler, target
     compiler_is_gccish = c_compiler.type in ('gcc', 'clang')
 
     flags = []
+    ldflags = []
     js_flags = []
+    js_ldflags = []
 
-    # FORTIFY_SOURCE ------------------------------------
     # If hardening is explicitly enabled, or not explicitly disabled
     if hardening_flag.origin == "default" or hardening_flag:
+        # FORTIFY_SOURCE ------------------------------------
         # Require optimization for FORTIFY_SOURCE. See Bug 1417452
         # Also, undefine it before defining it just in case a distro adds it, see Bug 1418398
         if compiler_is_gccish and optimize and not asan:
@@ -1360,6 +1365,13 @@ def security_hardening_cflags(hardening_flag, asan, optimize, c_compiler, target
     if hardening_flag and compiler_is_gccish and not asan:
         flags.append("-fstack-protector-strong")
 
+    # ASLR ------------------------------------------------
+    # ASLR (dynamicbase) is enabled by default in clang-cl; but the
+    # mingw-clang build requires it to be explicitly enabled
+    if target.os == 'WINNT' and c_compiler.type == 'clang':
+        ldflags.append("-Wl,--dynamicbase")
+        js_ldflags.append("-Wl,--dynamicbase")
+
     # fno-common -----------------------------------------
     # Do not merge variables for ASAN; can detect some subtle bugs
     if asan:
@@ -1367,12 +1379,16 @@ def security_hardening_cflags(hardening_flag, asan, optimize, c_compiler, target
 
     return namespace(
         flags=flags,
+        ldflags=ldflags,
         js_flags=js_flags,
+        js_ldflags=js_ldflags,
     )
 
 
 add_old_configure_assignment('MOZ_HARDENING_CFLAGS', security_hardening_cflags.flags)
+add_old_configure_assignment('MOZ_HARDENING_LDFLAGS', security_hardening_cflags.ldflags)
 add_old_configure_assignment('MOZ_HARDENING_CFLAGS_JS', security_hardening_cflags.js_flags)
+add_old_configure_assignment('MOZ_HARDENING_LDFLAGS_JS', security_hardening_cflags.js_ldflags)
 imply_option('--enable-pie', depends_if('--enable-hardening')(lambda v: v))
 
 # ==============================================================
@@ -1646,3 +1662,57 @@ add_gcc_flag(
 add_gcc_flag(
     '-D_GLIBCXX_USE_CXX11_ABI=0', host_cxx_compiler,
     when=libstdcxx_version('MOZ_LIBSTDCXX_HOST_VERSION', host_cxx_compiler))
+
+
+# Shared library building
+# ==============================================================
+
+# XXX: The use of makefile constructs in these variables is awful.
+@depends(target, c_compiler)
+def make_shared_library(target, compiler):
+    if target.os == 'WINNT':
+        if compiler.type == 'gcc':
+            return namespace(
+                mkshlib=['$(CXX)', '$(DSO_LDOPTS)', '-o', '$@'],
+                mkcshlib=['$(CC)', '$(DSO_LDOPTS)', '-o', '$@'],
+            )
+        elif compiler.type == 'clang':
+            return namespace(
+                mkshlib=['$(CXX)', '$(DSO_LDOPTS)', '-Wl,-pdb,$(LINK_PDBFILE)', '-o', '$@'],
+                mkcshlib=['$(CC)', '$(DSO_LDOPTS)', '-Wl,-pdb,$(LINK_PDBFILE)', '-o', '$@'],
+            )
+        else:
+            linker = [
+                '$(LINKER)',
+                '-NOLOGO', '-DLL',
+                '-OUT:$@',
+                '-PDB:$(LINK_PDBFILE)',
+                '$(DSO_LDOPTS)'
+            ]
+            return namespace(
+                mkshlib=linker,
+                mkcshlib=linker,
+            )
+
+    cc = ['$(CC)', '$(COMPUTED_C_LDFLAGS)']
+    cxx = ['$(CXX)', '$(COMPUTED_CXX_LDFLAGS)']
+    flags = ['$(PGO_CFLAGS)', '$(DSO_PIC_CFLAGS)', '$(DSO_LDOPTS)']
+    output = ['-o', '$@']
+
+    if target.kernel == 'Darwin':
+        soname = []
+    elif target.os == 'NetBSD':
+        soname = ['-Wl,-soname,$(DSO_SONAME)']
+    else:
+        assert compiler.type in ('gcc', 'clang')
+
+        soname = ['-Wl,-h,$(DSO_SONAME)']
+
+    return namespace(
+        mkshlib=cxx + flags + soname + output,
+        mkcshlib=cc + flags + soname + output,
+    )
+
+
+set_config('MKSHLIB', make_shared_library.mkshlib)
+set_config('MKCSHLIB', make_shared_library.mkcshlib)

@@ -13,7 +13,7 @@ linux64/opt:
         max-run-time: 7200
     run:
         using: mozharness
-        actions: [get-secrets build check-test]
+        actions: [get-secrets, build, check-test]
         config:
             - builds/releng_base_firefox.py
             - builds/releng_base_linux_64_builds.py
@@ -41,13 +41,12 @@ linux64-dmd/opt:
         max-run-time: 3600
     run:
         using: mozharness
-        actions: [get-secrets build check-test]
+        actions: [get-secrets, build, check-test]
         config:
             - builds/releng_base_firefox.py
             - builds/releng_base_linux_64_builds.py
         script: "mozharness/scripts/fx_desktop_build.py"
-        extra-config:
-            mozconfig_variant: 'opt-dmd'
+        mozconfig-variant: 'opt-dmd'
         secrets: true
         tooltool-downloads: public
         need-xvfb: true
@@ -73,7 +72,7 @@ linux64/pgo:
         max-run-time: 7200
     run:
         using: mozharness
-        actions: [get-secrets build check-test]
+        actions: [get-secrets, build, check-test]
         options: [enable-pgo]
         config:
             - builds/releng_base_firefox.py
@@ -103,13 +102,14 @@ linux64-fuzzing/debug:
             PERFHERDER_EXTRA_OPTIONS: fuzzing
     run:
         using: mozharness
-        actions: [get-secrets build check-test]
+        actions: [get-secrets, build, check-test]
         config:
             - builds/releng_base_firefox.py
             - builds/releng_base_linux_64_builds.py
         script: "mozharness/scripts/fx_desktop_build.py"
         secrets: true
         custom-build-variant-cfg: fuzzing-debug
+        mozconfig-variant: debug-fuzzing
         tooltool-downloads: public
         need-xvfb: true
     toolchains:
@@ -133,13 +133,14 @@ linux64/debug:
         max-run-time: 3600
     run:
         using: mozharness
-        actions: [get-secrets build check-test]
+        actions: [get-secrets, build, check-test]
         config:
             - builds/releng_base_firefox.py
             - builds/releng_base_linux_64_builds.py
         script: "mozharness/scripts/fx_desktop_build.py"
         secrets: true
         custom-build-variant-cfg: debug
+        mozconfig-variant: debug
         tooltool-downloads: public
         need-xvfb: true
     toolchains:
@@ -167,16 +168,18 @@ linux64-devedition-nightly/opt:
         max-run-time: 7200
     run:
         using: mozharness
-        actions: [get-secrets build check-test]
+        actions: [get-secrets, build, check-test]
         config:
             - builds/releng_base_firefox.py
             - builds/releng_base_linux_64_builds.py
             - taskcluster_nightly.py
+        extra-config:
+            stage_platform: 'linux64-devedition'
         script: "mozharness/scripts/fx_desktop_build.py"
         secrets: true
         tooltool-downloads: public
         need-xvfb: true
-        custom-build-variant-cfg: devedition
+        mozconfig-variant: devedition
     run-on-projects: ['mozilla-beta']
     toolchains:
         - linux64-clang
@@ -194,12 +197,13 @@ linux64-base-toolchains/opt:
         symbol: Bb
     worker-type: aws-provisioner-v1/gecko-{level}-b-linux
     worker:
+        docker-image: {in-tree: debian7-amd64-build-base}
         max-run-time: 7200
         env:
             PERFHERDER_EXTRA_OPTIONS: base-toolchains
     run:
         using: mozharness
-        actions: [get-secrets build check-test]
+        actions: [get-secrets, build, check-test]
         config:
             - builds/releng_base_firefox.py
             - builds/releng_base_linux_64_builds.py
@@ -223,18 +227,20 @@ linux64-base-toolchains/debug:
         symbol: Bb
     worker-type: aws-provisioner-v1/gecko-{level}-b-linux
     worker:
+        docker-image: {in-tree: debian7-amd64-build-base}
         max-run-time: 3600
         env:
             PERFHERDER_EXTRA_OPTIONS: base-toolchains
     run:
         using: mozharness
-        actions: [get-secrets build check-test]
+        actions: [get-secrets, build, check-test]
         config:
             - builds/releng_base_firefox.py
             - builds/releng_base_linux_64_builds.py
         script: "mozharness/scripts/fx_desktop_build.py"
         secrets: true
         custom-build-variant-cfg: debug
+        mozconfig-variant: debug
         tooltool-downloads: public
         need-xvfb: true
     toolchains:
@@ -259,7 +265,7 @@ linux/opt:
         max-run-time: 7200
     run:
         using: mozharness
-        actions: [get-secrets build check-test]
+        actions: [get-secrets, build, check-test]
         config:
             - builds/releng_base_firefox.py
             - builds/releng_base_linux_32_builds.py
@@ -289,13 +295,14 @@ linux/debug:
         max-run-time: 3600
     run:
         using: mozharness
-        actions: [get-secrets build check-test]
+        actions: [get-secrets, build, check-test]
         config:
             - builds/releng_base_firefox.py
             - builds/releng_base_linux_32_builds.py
         script: "mozharness/scripts/fx_desktop_build.py"
         secrets: true
         custom-build-variant-cfg: debug
+        mozconfig-variant: debug
         tooltool-downloads: public
         need-xvfb: true
     toolchains:
@@ -320,7 +327,7 @@ linux/pgo:
         max-run-time: 7200
     run:
         using: mozharness
-        actions: [get-secrets build check-test]
+        actions: [get-secrets, build, check-test]
         options: [enable-pgo]
         config:
             - builds/releng_base_firefox.py
@@ -352,13 +359,14 @@ linux-rusttests/opt:
             PERFHERDER_EXTRA_OPTIONS: rusttests
     run:
         using: mozharness
-        actions: [get-secrets build check-test]
+        actions: [get-secrets, build, check-test]
         config:
             - builds/releng_base_firefox.py
             - builds/releng_base_linux_32_builds.py
         script: "mozharness/scripts/fx_desktop_build.py"
         secrets: true
         custom-build-variant-cfg: rusttests
+        mozconfig-variant: rusttests
         tooltool-downloads: public
         keep-artifacts: false
         need-xvfb: true
@@ -386,13 +394,14 @@ linux-rusttests/debug:
             PERFHERDER_EXTRA_OPTIONS: rusttests
     run:
         using: mozharness
-        actions: [get-secrets build check-test]
+        actions: [get-secrets, build, check-test]
         config:
             - builds/releng_base_firefox.py
             - builds/releng_base_linux_32_builds.py
         script: "mozharness/scripts/fx_desktop_build.py"
         secrets: true
         custom-build-variant-cfg: rusttests-debug
+        mozconfig-variant: rusttests-debug
         tooltool-downloads: public
         keep-artifacts: false
         need-xvfb: true
@@ -423,16 +432,18 @@ linux-devedition-nightly/opt:
         max-run-time: 7200
     run:
         using: mozharness
-        actions: [get-secrets build check-test]
+        actions: [get-secrets, build, check-test]
         config:
             - builds/releng_base_firefox.py
             - builds/releng_base_linux_32_builds.py
             - taskcluster_nightly.py
+        extra-config:
+            stage_platform: linux-devedition
         script: "mozharness/scripts/fx_desktop_build.py"
         secrets: true
         tooltool-downloads: public
         need-xvfb: true
-        custom-build-variant-cfg: devedition
+        mozconfig-variant: devedition
     run-on-projects: ['mozilla-beta']
     toolchains:
         - linux64-clang
@@ -460,7 +471,7 @@ linux-nightly/opt:
         max-run-time: 7200
     run:
         using: mozharness
-        actions: [get-secrets build check-test]
+        actions: [get-secrets, build, check-test]
         config:
             - builds/releng_base_firefox.py
             - builds/releng_base_linux_32_builds.py
@@ -490,13 +501,14 @@ linux64-asan/opt:
         max-run-time: 3600
     run:
         using: mozharness
-        actions: [get-secrets build check-test]
+        actions: [get-secrets, build, check-test]
         config:
             - builds/releng_base_firefox.py
             - builds/releng_base_linux_64_builds.py
         script: "mozharness/scripts/fx_desktop_build.py"
         secrets: true
         custom-build-variant-cfg: asan-tc
+        mozconfig-variant: nightly-asan
         tooltool-downloads: public
         need-xvfb: true
     toolchains:
@@ -521,13 +533,14 @@ linux64-asan-fuzzing/opt:
         max-run-time: 3600
     run:
         using: mozharness
-        actions: [get-secrets build check-test]
+        actions: [get-secrets, build, check-test]
         config:
             - builds/releng_base_firefox.py
             - builds/releng_base_linux_64_builds.py
         script: "mozharness/scripts/fx_desktop_build.py"
         secrets: true
         custom-build-variant-cfg: fuzzing-asan-tc
+        mozconfig-variant: nightly-fuzzing-asan
         tooltool-downloads: public
         need-xvfb: true
     toolchains:
@@ -551,13 +564,14 @@ linux64-asan-reporter/opt:
         max-run-time: 3600
     run:
         using: mozharness
-        actions: [get-secrets build check-test]
+        actions: [get-secrets, build, check-test]
         config:
             - builds/releng_base_firefox.py
             - builds/releng_base_linux_64_builds.py
         script: "mozharness/scripts/fx_desktop_build.py"
         secrets: true
         custom-build-variant-cfg: asan-reporter-tc
+        mozconfig-variant: nightly-asan-reporter
         tooltool-downloads: public
         need-xvfb: true
     toolchains:
@@ -581,13 +595,14 @@ linux64-asan/debug:
         max-run-time: 3600
     run:
         using: mozharness
-        actions: [get-secrets build check-test]
+        actions: [get-secrets, build, check-test]
         config:
             - builds/releng_base_firefox.py
             - builds/releng_base_linux_64_builds.py
         script: "mozharness/scripts/fx_desktop_build.py"
         secrets: true
         custom-build-variant-cfg: asan-tc-and-debug
+        mozconfig-variant: debug-asan
         tooltool-downloads: public
         need-xvfb: true
     toolchains:
@@ -615,7 +630,7 @@ linux64-nightly/opt:
         max-run-time: 7200
     run:
         using: mozharness
-        actions: [get-secrets build check-test]
+        actions: [get-secrets, build, check-test]
         config:
             - builds/releng_base_firefox.py
             - builds/releng_base_linux_64_builds.py
@@ -644,13 +659,14 @@ linux64-noopt/debug:
         max-run-time: 3600
     run:
         using: mozharness
-        actions: [get-secrets build check-test]
+        actions: [get-secrets, build, check-test]
         config:
             - builds/releng_base_firefox.py
             - builds/releng_base_linux_64_builds.py
         script: "mozharness/scripts/fx_desktop_build.py"
         secrets: true
         custom-build-variant-cfg: noopt-debug
+        mozconfig-variant: noopt-debug
         tooltool-downloads: public
         keep-artifacts: false
         need-xvfb: true
@@ -677,13 +693,14 @@ linux64-rusttests/opt:
             PERFHERDER_EXTRA_OPTIONS: rusttests
     run:
         using: mozharness
-        actions: [get-secrets build check-test]
+        actions: [get-secrets, build, check-test]
         config:
             - builds/releng_base_firefox.py
             - builds/releng_base_linux_64_builds.py
         script: "mozharness/scripts/fx_desktop_build.py"
         secrets: true
         custom-build-variant-cfg: rusttests
+        mozconfig-variant: rusttests
         tooltool-downloads: public
         keep-artifacts: false
         need-xvfb: true
@@ -710,13 +727,14 @@ linux64-rusttests/debug:
             PERFHERDER_EXTRA_OPTIONS: rusttests
     run:
         using: mozharness
-        actions: [get-secrets build check-test]
+        actions: [get-secrets, build, check-test]
         config:
             - builds/releng_base_firefox.py
             - builds/releng_base_linux_64_builds.py
         script: "mozharness/scripts/fx_desktop_build.py"
         secrets: true
         custom-build-variant-cfg: rusttests-debug
+        mozconfig-variant: rusttests-debug
         tooltool-downloads: public
         keep-artifacts: false
         need-xvfb: true
@@ -742,7 +760,7 @@ linux64-jsdcov/opt:
         max-run-time: 3600
     run:
         using: mozharness
-        actions: [get-secrets build check-test]
+        actions: [get-secrets, build, check-test]
         config:
             - builds/releng_base_firefox.py
             - builds/releng_base_linux_64_builds.py
@@ -771,13 +789,14 @@ linux64-ccov/opt:
         max-run-time: 7200
     run:
         using: mozharness
-        actions: [get-secrets build check-test]
+        actions: [get-secrets, build, check-test]
         config:
             - builds/releng_base_firefox.py
             - builds/releng_base_linux_64_builds.py
         script: "mozharness/scripts/fx_desktop_build.py"
         secrets: true
         custom-build-variant-cfg: code-coverage
+        mozconfig-variant: code-coverage
         tooltool-downloads: public
         need-xvfb: true
     toolchains:
@@ -799,7 +818,7 @@ linux64-add-on-devel/opt:
         max-run-time: 7200
     run:
         using: mozharness
-        actions: [get-secrets build check-test]
+        actions: [get-secrets, build, check-test]
         config:
             - builds/releng_base_firefox.py
             - builds/releng_base_linux_64_builds.py
@@ -829,14 +848,13 @@ linux64-stylo-only/opt:
         max-run-time: 7200
     run:
         using: mozharness
-        actions: [get-secrets build check-test]
+        actions: [get-secrets, build, check-test]
         config:
             - builds/releng_base_firefox.py
             - builds/releng_base_linux_64_builds.py
         script: "mozharness/scripts/fx_desktop_build.py"
-        extra-config:
-            mozconfig_variant: 'stylo-only'
         secrets: true
+        mozconfig-variant: stylo-only
         tooltool-downloads: public
         need-xvfb: true
     run-on-projects: ['mozilla-central', 'try', 'mozilla-inbound', 'autoland']
@@ -860,14 +878,13 @@ linux64-stylo-only/debug:
         max-run-time: 3600
     run:
         using: mozharness
-        actions: [get-secrets build check-test]
+        actions: [get-secrets, build, check-test]
         config:
             - builds/releng_base_firefox.py
             - builds/releng_base_linux_64_builds.py
         script: "mozharness/scripts/fx_desktop_build.py"
-        extra-config:
-            mozconfig_variant: 'stylo-only-debug'
         secrets: true
+        mozconfig-variant: stylo-only-debug
         tooltool-downloads: public
         need-xvfb: true
     run-on-projects: ['mozilla-central', 'try', 'mozilla-inbound', 'autoland']

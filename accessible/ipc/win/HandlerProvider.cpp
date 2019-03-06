@@ -4,8 +4,6 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#define INITGUID
-
 #include "mozilla/a11y/HandlerProvider.h"
 
 #include "Accessible2_3.h"
@@ -39,17 +37,14 @@ namespace mozilla {
 namespace a11y {
 
 HandlerProvider::HandlerProvider(REFIID aIid,
-                               mscom::InterceptorTargetPtr<IUnknown> aTarget)
-  : mRefCnt(0)
-  , mMutex("mozilla::a11y::HandlerProvider::mMutex")
-  , mTargetUnkIid(aIid)
-  , mTargetUnk(Move(aTarget))
-{
-}
+                                 mscom::InterceptorTargetPtr<IUnknown> aTarget)
+    : mRefCnt(0),
+      mMutex("mozilla::a11y::HandlerProvider::mMutex"),
+      mTargetUnkIid(aIid),
+      mTargetUnk(Move(aTarget)) {}
 
 HRESULT
-HandlerProvider::QueryInterface(REFIID riid, void** ppv)
-{
+HandlerProvider::QueryInterface(REFIID riid, void** ppv) {
   if (!ppv) {
     return E_INVALIDARG;
   }
@@ -62,8 +57,9 @@ HandlerProvider::QueryInterface(REFIID riid, void** ppv)
 
   if (riid == IID_IMarshal) {
     if (!mFastMarshalUnk) {
-      HRESULT hr = mscom::FastMarshaler::Create(
-        static_cast<IGeckoBackChannel*>(this), getter_AddRefs(mFastMarshalUnk));
+      HRESULT hr =
+          mscom::FastMarshaler::Create(static_cast<IGeckoBackChannel*>(this),
+                                       getter_AddRefs(mFastMarshalUnk));
       if (FAILED(hr)) {
         return hr;
       }
@@ -76,14 +72,10 @@ HandlerProvider::QueryInterface(REFIID riid, void** ppv)
 }
 
 ULONG
-HandlerProvider::AddRef()
-{
-  return ++mRefCnt;
-}
+HandlerProvider::AddRef() { return ++mRefCnt; }
 
 ULONG
-HandlerProvider::Release()
-{
+HandlerProvider::Release() {
   ULONG result = --mRefCnt;
   if (!result) {
     delete this;
@@ -92,8 +84,7 @@ HandlerProvider::Release()
 }
 
 HRESULT
-HandlerProvider::GetHandler(NotNull<CLSID*> aHandlerClsid)
-{
+HandlerProvider::GetHandler(NotNull<CLSID*> aHandlerClsid) {
   if (!IsTargetInterfaceCacheable()) {
     return E_NOINTERFACE;
   }
@@ -102,10 +93,8 @@ HandlerProvider::GetHandler(NotNull<CLSID*> aHandlerClsid)
   return S_OK;
 }
 
-void
-HandlerProvider::GetAndSerializePayload(const MutexAutoLock&,
-    NotNull<mscom::IInterceptor*> aInterceptor)
-{
+void HandlerProvider::GetAndSerializePayload(
+    const MutexAutoLock&, NotNull<mscom::IInterceptor*> aInterceptor) {
   MOZ_ASSERT(mscom::IsCurrentThreadMTA());
 
   if (mSerializer) {
@@ -114,10 +103,10 @@ HandlerProvider::GetAndSerializePayload(const MutexAutoLock&,
 
   IA2Payload payload{};
 
-  if (!mscom::InvokeOnMainThread("HandlerProvider::BuildInitialIA2Data",
-                                 this, &HandlerProvider::BuildInitialIA2Data,
-                                 aInterceptor,
-                                 &payload.mStaticData, &payload.mDynamicData) ||
+  if (!mscom::InvokeOnMainThread("HandlerProvider::BuildInitialIA2Data", this,
+                                 &HandlerProvider::BuildInitialIA2Data,
+                                 aInterceptor, &payload.mStaticData,
+                                 &payload.mDynamicData) ||
       !payload.mDynamicData.mUniqueId) {
     return;
   }
@@ -140,9 +129,9 @@ HandlerProvider::GetAndSerializePayload(const MutexAutoLock&,
 }
 
 HRESULT
-HandlerProvider::GetHandlerPayloadSize(NotNull<mscom::IInterceptor*> aInterceptor,
-                                       NotNull<DWORD*> aOutPayloadSize)
-{
+HandlerProvider::GetHandlerPayloadSize(
+    NotNull<mscom::IInterceptor*> aInterceptor,
+    NotNull<DWORD*> aOutPayloadSize) {
   MOZ_ASSERT(mscom::IsCurrentThreadMTA());
 
   if (!IsTargetInterfaceCacheable()) {
@@ -164,11 +153,8 @@ HandlerProvider::GetHandlerPayloadSize(NotNull<mscom::IInterceptor*> aIntercepto
   return S_OK;
 }
 
-void
-HandlerProvider::BuildStaticIA2Data(
-  NotNull<mscom::IInterceptor*> aInterceptor,
-  StaticIA2Data* aOutData)
-{
+void HandlerProvider::BuildStaticIA2Data(
+    NotNull<mscom::IInterceptor*> aInterceptor, StaticIA2Data* aOutData) {
   MOZ_ASSERT(aOutData);
   MOZ_ASSERT(NS_IsMainThread());
   MOZ_ASSERT(mTargetUnk);
@@ -182,7 +168,7 @@ HandlerProvider::BuildStaticIA2Data(
   // However, the target might be an IAccessibleHyperlink, etc., in which
   // case the client will almost certainly QI for IAccessible2.
   HRESULT hr = aInterceptor->GetInterceptorForIID(NEWEST_IA2_IID,
-                                          (void**)&aOutData->mIA2);
+                                                  (void**)&aOutData->mIA2);
   if (FAILED(hr)) {
     // IA2 should always be present, so something has
     // gone very wrong if this fails.
@@ -223,9 +209,7 @@ HandlerProvider::BuildStaticIA2Data(
   }
 }
 
-void
-HandlerProvider::BuildDynamicIA2Data(DynamicIA2Data* aOutIA2Data)
-{
+void HandlerProvider::BuildDynamicIA2Data(DynamicIA2Data* aOutIA2Data) {
   MOZ_ASSERT(aOutIA2Data);
   MOZ_ASSERT(NS_IsMainThread());
   MOZ_ASSERT(IsTargetInterfaceCacheable());
@@ -235,24 +219,22 @@ HandlerProvider::BuildDynamicIA2Data(DynamicIA2Data* aOutIA2Data)
   }
 
   RefPtr<NEWEST_IA2_INTERFACE> target;
-  HRESULT hr = mTargetUnk.get()->QueryInterface(NEWEST_IA2_IID,
-    getter_AddRefs(target));
+  HRESULT hr =
+      mTargetUnk.get()->QueryInterface(NEWEST_IA2_IID, getter_AddRefs(target));
   if (FAILED(hr)) {
     return;
   }
 
   hr = E_UNEXPECTED;
 
-  auto hasFailed = [&hr]() -> bool {
-    return FAILED(hr);
-  };
+  auto hasFailed = [&hr]() -> bool { return FAILED(hr); };
 
   auto cleanup = [this, aOutIA2Data]() -> void {
     CleanupDynamicIA2Data(*aOutIA2Data);
   };
 
-  mscom::ExecuteWhen<decltype(hasFailed), decltype(cleanup)>
-    onFail(hasFailed, cleanup);
+  mscom::ExecuteWhen<decltype(hasFailed), decltype(cleanup)> onFail(hasFailed,
+                                                                    cleanup);
 
   const VARIANT kChildIdSelf = {VT_I4};
   VARIANT varVal;
@@ -338,7 +320,7 @@ HandlerProvider::BuildDynamicIA2Data(DynamicIA2Data* aOutIA2Data)
   RefPtr<IAccessibleAction> action;
   // It is not an error if this fails.
   hr = mTargetUnk.get()->QueryInterface(IID_IAccessibleAction,
-    getter_AddRefs(action));
+                                        getter_AddRefs(action));
   if (SUCCEEDED(hr)) {
     hr = action->nActions(&aOutIA2Data->mNActions);
     if (FAILED(hr)) {
@@ -349,13 +331,12 @@ HandlerProvider::BuildDynamicIA2Data(DynamicIA2Data* aOutIA2Data)
   RefPtr<IAccessibleTableCell> cell;
   // It is not an error if this fails.
   hr = mTargetUnk.get()->QueryInterface(IID_IAccessibleTableCell,
-    getter_AddRefs(cell));
+                                        getter_AddRefs(cell));
   if (SUCCEEDED(hr)) {
-    hr = cell->get_rowColumnExtents(&aOutIA2Data->mRowIndex,
-                                    &aOutIA2Data->mColumnIndex,
-                                    &aOutIA2Data->mRowExtent,
-                                    &aOutIA2Data->mColumnExtent,
-                                    &aOutIA2Data->mCellIsSelected);
+    hr = cell->get_rowColumnExtents(
+        &aOutIA2Data->mRowIndex, &aOutIA2Data->mColumnIndex,
+        &aOutIA2Data->mRowExtent, &aOutIA2Data->mColumnExtent,
+        &aOutIA2Data->mCellIsSelected);
     if (FAILED(hr)) {
       return;
     }
@@ -367,21 +348,16 @@ HandlerProvider::BuildDynamicIA2Data(DynamicIA2Data* aOutIA2Data)
   hr = target->get_uniqueID(&aOutIA2Data->mUniqueId);
 }
 
-void
-HandlerProvider::CleanupStaticIA2Data(StaticIA2Data& aData)
-{
+void HandlerProvider::CleanupStaticIA2Data(StaticIA2Data& aData) {
   // When CoMarshalInterface writes interfaces out to a stream, it AddRefs.
   // Therefore, we must release our references after this.
   ReleaseStaticIA2DataInterfaces(aData);
   ZeroMemory(&aData, sizeof(StaticIA2Data));
 }
 
-void
-HandlerProvider::BuildInitialIA2Data(
-  NotNull<mscom::IInterceptor*> aInterceptor,
-  StaticIA2Data* aOutStaticData,
-  DynamicIA2Data* aOutDynamicData)
-{
+void HandlerProvider::BuildInitialIA2Data(
+    NotNull<mscom::IInterceptor*> aInterceptor, StaticIA2Data* aOutStaticData,
+    DynamicIA2Data* aOutDynamicData) {
   BuildStaticIA2Data(aInterceptor, aOutStaticData);
   if (!aOutStaticData->mIA2) {
     return;
@@ -394,17 +370,14 @@ HandlerProvider::BuildInitialIA2Data(
   }
 }
 
-bool
-HandlerProvider::IsTargetInterfaceCacheable()
-{
+bool HandlerProvider::IsTargetInterfaceCacheable() {
   return MarshalAs(mTargetUnkIid) == NEWEST_IA2_IID ||
          mTargetUnkIid == IID_IAccessibleHyperlink;
 }
 
 HRESULT
 HandlerProvider::WriteHandlerPayload(NotNull<mscom::IInterceptor*> aInterceptor,
-                                     NotNull<IStream*> aStream)
-{
+                                     NotNull<IStream*> aStream) {
   MutexAutoLock lock(mMutex);
 
   if (!mSerializer || !(*mSerializer)) {
@@ -421,8 +394,7 @@ HandlerProvider::WriteHandlerPayload(NotNull<mscom::IInterceptor*> aInterceptor,
 }
 
 REFIID
-HandlerProvider::MarshalAs(REFIID aIid)
-{
+HandlerProvider::MarshalAs(REFIID aIid) {
   static_assert(&NEWEST_IA2_IID == &IID_IAccessible2_3,
                 "You have modified NEWEST_IA2_IID. This code needs updating.");
   if (aIid == IID_IDispatch || aIid == IID_IAccessible ||
@@ -436,8 +408,7 @@ HandlerProvider::MarshalAs(REFIID aIid)
 }
 
 HRESULT
-HandlerProvider::DisconnectHandlerRemotes()
-{
+HandlerProvider::DisconnectHandlerRemotes() {
   // If a handlerProvider call is pending on another thread,
   // CoDisconnectObject won't release this HandlerProvider immediately.
   // However, the interceptor and its target (mTargetUnk) might be destroyed.
@@ -448,11 +419,8 @@ HandlerProvider::DisconnectHandlerRemotes()
 }
 
 REFIID
-HandlerProvider::GetEffectiveOutParamIid(REFIID aCallIid,
-                                         ULONG aCallMethod)
-{
-  if (aCallIid == IID_IAccessibleTable ||
-      aCallIid == IID_IAccessibleTable2 ||
+HandlerProvider::GetEffectiveOutParamIid(REFIID aCallIid, ULONG aCallMethod) {
+  if (aCallIid == IID_IAccessibleTable || aCallIid == IID_IAccessibleTable2 ||
       aCallIid == IID_IAccessibleDocument ||
       aCallIid == IID_IAccessibleTableCell ||
       aCallIid == IID_IAccessibleRelation) {
@@ -472,19 +440,16 @@ HandlerProvider::GetEffectiveOutParamIid(REFIID aCallIid,
 }
 
 HRESULT
-HandlerProvider::NewInstance(REFIID aIid,
-                             mscom::InterceptorTargetPtr<IUnknown> aTarget,
-                             NotNull<mscom::IHandlerProvider**> aOutNewPayload)
-{
+HandlerProvider::NewInstance(
+    REFIID aIid, mscom::InterceptorTargetPtr<IUnknown> aTarget,
+    NotNull<mscom::IHandlerProvider**> aOutNewPayload) {
   RefPtr<IHandlerProvider> newPayload(new HandlerProvider(aIid, Move(aTarget)));
   newPayload.forget(aOutNewPayload.get());
   return S_OK;
 }
 
-void
-HandlerProvider::SetHandlerControlOnMainThread(DWORD aPid,
-                                              mscom::ProxyUniquePtr<IHandlerControl> aCtrl)
-{
+void HandlerProvider::SetHandlerControlOnMainThread(
+    DWORD aPid, mscom::ProxyUniquePtr<IHandlerControl> aCtrl) {
   MOZ_ASSERT(NS_IsMainThread());
 
   auto content = dom::ContentChild::GetSingleton();
@@ -495,8 +460,7 @@ HandlerProvider::SetHandlerControlOnMainThread(DWORD aPid,
 }
 
 HRESULT
-HandlerProvider::put_HandlerControl(long aPid, IHandlerControl* aCtrl)
-{
+HandlerProvider::put_HandlerControl(long aPid, IHandlerControl* aCtrl) {
   MOZ_ASSERT(mscom::IsCurrentThreadMTA());
 
   if (!aCtrl) {
@@ -505,10 +469,10 @@ HandlerProvider::put_HandlerControl(long aPid, IHandlerControl* aCtrl)
 
   auto ptrProxy = mscom::ToProxyUniquePtr(aCtrl);
 
-  if (!mscom::InvokeOnMainThread("HandlerProvider::SetHandlerControlOnMainThread",
-                                 this,
-                                 &HandlerProvider::SetHandlerControlOnMainThread,
-                                 static_cast<DWORD>(aPid), Move(ptrProxy))) {
+  if (!mscom::InvokeOnMainThread(
+          "HandlerProvider::SetHandlerControlOnMainThread", this,
+          &HandlerProvider::SetHandlerControlOnMainThread,
+          static_cast<DWORD>(aPid), Move(ptrProxy))) {
     return E_FAIL;
   }
 
@@ -516,16 +480,15 @@ HandlerProvider::put_HandlerControl(long aPid, IHandlerControl* aCtrl)
 }
 
 HRESULT
-HandlerProvider::Refresh(DynamicIA2Data* aOutData)
-{
+HandlerProvider::Refresh(DynamicIA2Data* aOutData) {
   MOZ_ASSERT(mscom::IsCurrentThreadMTA());
 
   if (!mTargetUnk) {
     return CO_E_OBJNOTCONNECTED;
   }
 
-  if (!mscom::InvokeOnMainThread("HandlerProvider::BuildDynamicIA2Data",
-                                 this, &HandlerProvider::BuildDynamicIA2Data,
+  if (!mscom::InvokeOnMainThread("HandlerProvider::BuildDynamicIA2Data", this,
+                                 &HandlerProvider::BuildDynamicIA2Data,
                                  aOutData)) {
     return E_FAIL;
   }
@@ -543,28 +506,22 @@ HandlerProvider::Refresh(DynamicIA2Data* aOutData)
   return S_OK;
 }
 
-template<typename Interface>
-HRESULT
-HandlerProvider::ToWrappedObject(Interface** aObj)
-{
+template <typename Interface>
+HRESULT HandlerProvider::ToWrappedObject(Interface** aObj) {
   mscom::STAUniquePtr<Interface> inObj(*aObj);
-  RefPtr<HandlerProvider> hprov = new HandlerProvider(__uuidof(Interface),
-    mscom::ToInterceptorTargetPtr(inObj));
-  HRESULT hr = mscom::MainThreadHandoff::WrapInterface(Move(inObj), hprov,
-                                                       aObj);
+  RefPtr<HandlerProvider> hprov = new HandlerProvider(
+      __uuidof(Interface), mscom::ToInterceptorTargetPtr(inObj));
+  HRESULT hr =
+      mscom::MainThreadHandoff::WrapInterface(Move(inObj), hprov, aObj);
   if (FAILED(hr)) {
     *aObj = nullptr;
   }
   return hr;
 }
 
-void
-HandlerProvider::GetAllTextInfoMainThread(BSTR* aText,
-                                          IAccessibleHyperlink*** aHyperlinks,
-                                          long* aNHyperlinks,
-                                          IA2TextSegment** aAttribRuns,
-                                          long* aNAttribRuns, HRESULT* result)
-{
+void HandlerProvider::GetAllTextInfoMainThread(
+    BSTR* aText, IAccessibleHyperlink*** aHyperlinks, long* aNHyperlinks,
+    IA2TextSegment** aAttribRuns, long* aNAttribRuns, HRESULT* result) {
   MOZ_ASSERT(aText);
   MOZ_ASSERT(aHyperlinks);
   MOZ_ASSERT(aNHyperlinks);
@@ -578,8 +535,8 @@ HandlerProvider::GetAllTextInfoMainThread(BSTR* aText,
   }
 
   RefPtr<IAccessibleHypertext2> ht;
-  HRESULT hr = mTargetUnk->QueryInterface(IID_IAccessibleHypertext2,
-                                          getter_AddRefs(ht));
+  HRESULT hr =
+      mTargetUnk->QueryInterface(IID_IAccessibleHypertext2, getter_AddRefs(ht));
   if (FAILED(hr)) {
     *result = hr;
     return;
@@ -633,8 +590,8 @@ HandlerProvider::GetAllTextInfoMainThread(BSTR* aText,
 
   // Put the attribute runs in a COM array.
   *aNAttribRuns = attribRuns.Length();
-  *aAttribRuns = static_cast<IA2TextSegment*>(::CoTaskMemAlloc(
-    sizeof(IA2TextSegment) * *aNAttribRuns));
+  *aAttribRuns = static_cast<IA2TextSegment*>(
+      ::CoTaskMemAlloc(sizeof(IA2TextSegment) * *aNAttribRuns));
   for (long index = 0; index < *aNAttribRuns; ++index) {
     (*aAttribRuns)[index] = attribRuns[index];
   }
@@ -647,8 +604,7 @@ HandlerProvider::get_AllTextInfo(BSTR* aText,
                                  IAccessibleHyperlink*** aHyperlinks,
                                  long* aNHyperlinks,
                                  IA2TextSegment** aAttribRuns,
-                                 long* aNAttribRuns)
-{
+                                 long* aNAttribRuns) {
   MOZ_ASSERT(mscom::IsCurrentThreadMTA());
 
   if (!mTargetUnk) {
@@ -656,22 +612,19 @@ HandlerProvider::get_AllTextInfo(BSTR* aText,
   }
 
   HRESULT hr;
-  if (!mscom::InvokeOnMainThread("HandlerProvider::GetAllTextInfoMainThread",
-                                 this,
-                                 &HandlerProvider::GetAllTextInfoMainThread,
-                                 aText, aHyperlinks, aNHyperlinks,
-                                 aAttribRuns, aNAttribRuns, &hr)) {
+  if (!mscom::InvokeOnMainThread(
+          "HandlerProvider::GetAllTextInfoMainThread", this,
+          &HandlerProvider::GetAllTextInfoMainThread, aText, aHyperlinks,
+          aNHyperlinks, aAttribRuns, aNAttribRuns, &hr)) {
     return E_FAIL;
   }
 
   return hr;
 }
 
-void
-HandlerProvider::GetRelationsInfoMainThread(IARelationData** aRelations,
-                                            long* aNRelations,
-                                            HRESULT* hr)
-{
+void HandlerProvider::GetRelationsInfoMainThread(IARelationData** aRelations,
+                                                 long* aNRelations,
+                                                 HRESULT* hr) {
   MOZ_ASSERT(aRelations);
   MOZ_ASSERT(aNRelations);
   MOZ_ASSERT(NS_IsMainThread());
@@ -682,8 +635,7 @@ HandlerProvider::GetRelationsInfoMainThread(IARelationData** aRelations,
   }
 
   RefPtr<NEWEST_IA2_INTERFACE> acc;
-  *hr = mTargetUnk.get()->QueryInterface(NEWEST_IA2_IID,
-    getter_AddRefs(acc));
+  *hr = mTargetUnk.get()->QueryInterface(NEWEST_IA2_IID, getter_AddRefs(acc));
   if (FAILED(*hr)) {
     return;
   }
@@ -693,14 +645,14 @@ HandlerProvider::GetRelationsInfoMainThread(IARelationData** aRelations,
     return;
   }
 
-  auto rawRels = MakeUnique<IAccessibleRelation*[]>(*aNRelations);
+  auto rawRels = MakeUnique<IAccessibleRelation* []>(*aNRelations);
   *hr = acc->get_relations(*aNRelations, rawRels.get(), aNRelations);
   if (FAILED(*hr)) {
     return;
   }
 
-  *aRelations = static_cast<IARelationData*>(::CoTaskMemAlloc(
-    sizeof(IARelationData) * *aNRelations));
+  *aRelations = static_cast<IARelationData*>(
+      ::CoTaskMemAlloc(sizeof(IARelationData) * *aNRelations));
   for (long index = 0; index < *aNRelations; ++index) {
     IAccessibleRelation* rawRel = rawRels[index];
     IARelationData& relData = (*aRelations)[index];
@@ -720,8 +672,7 @@ HandlerProvider::GetRelationsInfoMainThread(IARelationData** aRelations,
 
 HRESULT
 HandlerProvider::get_RelationsInfo(IARelationData** aRelations,
-                                   long* aNRelations)
-{
+                                   long* aNRelations) {
   MOZ_ASSERT(mscom::IsCurrentThreadMTA());
 
   if (!mTargetUnk) {
@@ -740,9 +691,8 @@ HandlerProvider::get_RelationsInfo(IARelationData** aRelations,
 }
 
 // Helper function for GetAllChildrenMainThread.
-static bool
-SetChildDataForTextLeaf(NEWEST_IA2_INTERFACE* acc, AccChildData& data)
-{
+static bool SetChildDataForTextLeaf(NEWEST_IA2_INTERFACE* acc,
+                                    AccChildData& data) {
   const VARIANT kChildIdSelf = {VT_I4};
   VARIANT varVal;
 
@@ -793,11 +743,8 @@ SetChildDataForTextLeaf(NEWEST_IA2_INTERFACE* acc, AccChildData& data)
   return true;
 }
 
-void
-HandlerProvider::GetAllChildrenMainThread(AccChildData** aChildren,
-                                          ULONG* aNChildren,
-                                          HRESULT* hr)
-{
+void HandlerProvider::GetAllChildrenMainThread(AccChildData** aChildren,
+                                               ULONG* aNChildren, HRESULT* hr) {
   MOZ_ASSERT(aChildren);
   MOZ_ASSERT(aNChildren);
   MOZ_ASSERT(NS_IsMainThread());
@@ -808,8 +755,7 @@ HandlerProvider::GetAllChildrenMainThread(AccChildData** aChildren,
   }
 
   RefPtr<NEWEST_IA2_INTERFACE> acc;
-  *hr = mTargetUnk.get()->QueryInterface(NEWEST_IA2_IID,
-    getter_AddRefs(acc));
+  *hr = mTargetUnk.get()->QueryInterface(NEWEST_IA2_IID, getter_AddRefs(acc));
   if (FAILED(*hr)) {
     return;
   }
@@ -829,7 +775,7 @@ HandlerProvider::GetAllChildrenMainThread(AccChildData** aChildren,
 
   RefPtr<IEnumVARIANT> enumVar;
   *hr = mTargetUnk.get()->QueryInterface(IID_IEnumVARIANT,
-    getter_AddRefs(enumVar));
+                                         getter_AddRefs(enumVar));
   if (FAILED(*hr)) {
     return;
   }
@@ -842,8 +788,8 @@ HandlerProvider::GetAllChildrenMainThread(AccChildData** aChildren,
     return;
   }
 
-  *aChildren = static_cast<AccChildData*>(::CoTaskMemAlloc(
-    sizeof(AccChildData) * *aNChildren));
+  *aChildren = static_cast<AccChildData*>(
+      ::CoTaskMemAlloc(sizeof(AccChildData) * *aNChildren));
   for (ULONG index = 0; index < *aNChildren; ++index) {
     (*aChildren)[index] = {};
     AccChildData& child = (*aChildren)[index];
@@ -852,7 +798,7 @@ HandlerProvider::GetAllChildrenMainThread(AccChildData** aChildren,
     MOZ_ASSERT(rawChildren[index].pdispVal);
     RefPtr<NEWEST_IA2_INTERFACE> childAcc;
     *hr = rawChildren[index].pdispVal->QueryInterface(NEWEST_IA2_IID,
-      getter_AddRefs(childAcc));
+                                                      getter_AddRefs(childAcc));
     rawChildren[index].pdispVal->Release();
     MOZ_ASSERT(SUCCEEDED(*hr));
     if (FAILED(*hr)) {
@@ -871,9 +817,7 @@ HandlerProvider::GetAllChildrenMainThread(AccChildData** aChildren,
 }
 
 HRESULT
-HandlerProvider::get_AllChildren(AccChildData** aChildren,
-                                 ULONG* aNChildren)
-{
+HandlerProvider::get_AllChildren(AccChildData** aChildren, ULONG* aNChildren) {
   MOZ_ASSERT(mscom::IsCurrentThreadMTA());
 
   HRESULT hr;
@@ -887,6 +831,5 @@ HandlerProvider::get_AllChildren(AccChildData** aChildren,
   return hr;
 }
 
-} // namespace a11y
-} // namespace mozilla
-
+}  // namespace a11y
+}  // namespace mozilla

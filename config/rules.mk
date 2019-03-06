@@ -142,6 +142,9 @@ endif # MKSHLIB
 endif # FORCE_SHARED_LIB
 
 ifeq ($(OS_ARCH),WINNT)
+
+LINK_PDBFILE ?= $(basename $(@F)).pdb
+
 ifndef GNU_CC
 
 #
@@ -163,7 +166,6 @@ endif
 COMPILE_CFLAGS += $(COMPILE_PDB_FLAG)
 COMPILE_CXXFLAGS += $(COMPILE_PDB_FLAG)
 
-LINK_PDBFILE ?= $(basename $(@F)).pdb
 ifdef MOZ_DEBUG
 CODFILE=$(basename $(@F)).cod
 endif
@@ -177,6 +179,12 @@ endif # WINNT
 ifeq (arm-Darwin,$(CPU_ARCH)-$(OS_TARGET))
 ifdef PROGRAM
 MOZ_PROGRAM_LDFLAGS += -Wl,-rpath -Wl,@executable_path/Frameworks
+endif
+endif
+
+ifeq ($(OS_ARCH),WINNT)
+ifeq ($(CC_TYPE),clang)
+MOZ_PROGRAM_LDFLAGS += -Wl,-pdb,$(dir $@)/$(LINK_PDBFILE)
 endif
 endif
 
@@ -578,7 +586,7 @@ ifdef MOZ_PROFILE_GENERATE
 endif
 else # !WINNT || GNU_CC
 	$(call EXPAND_CC_OR_CXX,$@) -o $@ $(COMPUTED_CXX_LDFLAGS) $(PGO_CFLAGS) $(PROGOBJS) $(RESFILE) $(WIN32_EXE_LDFLAGS) $(LDFLAGS) $(STATIC_LIBS) $(MOZ_PROGRAM_LDFLAGS) $(SHARED_LIBS) $(OS_LIBS)
-	$(call CHECK_BINARY,$@)
+	$(call py_action,check_binary,--target $@)
 endif # WINNT && !GNU_CC
 
 ifdef ENABLE_STRIP
@@ -614,7 +622,7 @@ else
 endif # HOST_CPP_PROG_LINK
 endif
 ifndef CROSS_COMPILE
-	$(call CHECK_STDCXX,$@)
+	$(call py_action,check_binary,--host $@)
 endif
 
 #
@@ -637,7 +645,7 @@ ifdef MSMANIFEST_TOOL
 endif	# MSVC with manifest tool
 else
 	$(call EXPAND_CC_OR_CXX,$@) $(COMPUTED_CXX_LDFLAGS) $(PGO_CFLAGS) -o $@ $< $(WIN32_EXE_LDFLAGS) $(LDFLAGS) $(STATIC_LIBS) $(MOZ_PROGRAM_LDFLAGS) $(SHARED_LIBS) $(OS_LIBS)
-	$(call CHECK_BINARY,$@)
+	$(call py_action,check_binary,--target $@)
 endif # WINNT && !GNU_CC
 
 ifdef ENABLE_STRIP
@@ -659,7 +667,7 @@ else
 endif
 endif
 ifndef CROSS_COMPILE
-	$(call CHECK_STDCXX,$@)
+	$(call py_action,check_binary,--host $@)
 endif
 
 $(filter %.$(LIB_SUFFIX),$(LIBRARY)): $(OBJS) $(STATIC_LIBS_DEPS) $(EXTRA_DEPS) $(GLOBAL_DEPS)
@@ -701,7 +709,7 @@ ifndef INCREMENTAL_LINKER
 	$(RM) $@
 endif
 	$(EXPAND_MKSHLIB) $(OBJS) $(RESFILE) $(LDFLAGS) $(STATIC_LIBS) $(RUST_STATIC_LIB_FOR_SHARED_LIB) $(SHARED_LIBS) $(EXTRA_DSO_LDOPTS) $(MOZ_GLUE_LDFLAGS) $(OS_LIBS)
-	$(call CHECK_BINARY,$@)
+	$(call py_action,check_binary,--target $@)
 
 ifeq (_WINNT,$(GNU_CC)_$(OS_ARCH))
 ifdef MSMANIFEST_TOOL
@@ -816,14 +824,13 @@ DUMP_SYMS_TARGETS :=
 endif
 endif
 
-ifdef MOZ_CRASHREPORTER
-$(foreach file,$(DUMP_SYMS_TARGETS),$(eval $(call syms_template,$(file),$(file)_syms.track)))
-else ifneq (,$(and $(LLVM_SYMBOLIZER),$(filter WINNT,$(OS_ARCH)),$(MOZ_AUTOMATION)))
-$(foreach file,$(DUMP_SYMS_TARGETS),$(eval $(call syms_template,$(file),$(addsuffix .pdb,$(basename $(file))))))
+ifdef MOZ_COPY_PDBS
 PDB_FILES = $(addsuffix .pdb,$(basename $(DUMP_SYMS_TARGETS)))
 PDB_DEST ?= $(FINAL_TARGET)
-PDB_TARGET = target
+PDB_TARGET = syms
 INSTALL_TARGETS += PDB
+else ifdef MOZ_CRASHREPORTER
+$(foreach file,$(DUMP_SYMS_TARGETS),$(eval $(call syms_template,$(file),$(notdir $(file))_syms.track)))
 endif
 
 cargo_host_flag := --target=$(RUST_HOST_TARGET)

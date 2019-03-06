@@ -34,7 +34,9 @@ RELEASE_PROMOTION_PROJECTS = {
 _OPTIONAL_ATTRIBUTES = (
     'artifact_prefix',
     'l10n_chunk',
+    'locale',
     'nightly',
+    'required_signoffs',
     'signed',
     'shipping_phase',
     'shipping_product',
@@ -105,6 +107,19 @@ def match_run_on_projects(project, run_on_projects):
     return project in run_on_projects
 
 
+def match_run_on_hg_branches(hg_branch, run_on_hg_branches):
+    """Determine whether the given project is included in the `run-on-hg-branches`
+    parameter. Allows 'all'."""
+    if 'all' in run_on_hg_branches:
+        return True
+
+    for expected_hg_branch_pattern in run_on_hg_branches:
+        if re.match(expected_hg_branch_pattern, hg_branch):
+            return True
+
+    return False
+
+
 def copy_attributes_from_dependent_job(dep_job):
     attributes = {
         'build_platform': dep_job.attributes.get('build_platform'),
@@ -117,3 +132,18 @@ def copy_attributes_from_dependent_job(dep_job):
     })
 
     return attributes
+
+
+def sorted_unique_list(*args):
+    """Join one or more lists, and return a sorted list of unique members"""
+    combined = set().union(*args)
+    return sorted(combined)
+
+
+def release_level(project):
+    """
+    Whether this is a staging release or not.
+
+    :return basestring: One of "production" or "staging".
+    """
+    return 'production' if project in RELEASE_PROJECTS else 'staging'

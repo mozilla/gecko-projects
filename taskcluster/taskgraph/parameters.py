@@ -16,7 +16,7 @@ from mozbuild.util import ReadOnlyDict, memoize
 from mozversioncontrol import get_repository_object
 
 from . import GECKO
-from .util.attributes import RELEASE_PROJECTS
+from .util.attributes import release_level
 
 
 class ParameterMismatch(Exception):
@@ -55,11 +55,11 @@ PARAMETERS = {
     'build_number': 1,
     'do_not_optimize': [],
     'existing_tasks': {},
-    'filters': ['check_servo', 'target_tasks_method'],
+    'filters': ['target_tasks_method'],
     'head_ref': get_head_ref,
     'head_repository': 'https://hg.mozilla.org/mozilla-central',
     'head_rev': get_head_ref,
-    'include_nightly': False,
+    'hg_branch': 'default',
     'level': '3',
     'message': '',
     'moz_build_date': lambda: datetime.now().strftime("%Y%m%d%H%M%S"),
@@ -78,6 +78,8 @@ PARAMETERS = {
     'release_partner_build_number': 1,
     'release_type': 'nightly',
     'release_product': None,
+    'required_signoffs': [],
+    'signoff_urls': {},
     'target_tasks_method': 'default',
     'try_mode': None,
     'try_options': None,
@@ -181,7 +183,7 @@ class Parameters(ReadOnlyDict):
 
         :return basestring: One of "production" or "staging".
         """
-        return 'production' if self['project'] in RELEASE_PROJECTS else 'staging'
+        return release_level(self['project'])
 
 
 def load_parameters_file(filename, strict=True, overrides=None):

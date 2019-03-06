@@ -9,6 +9,7 @@ kind-dependencies:
 
 transforms:
   - taskgraph.transforms.docker_image:transforms
+  - taskgraph.transforms.cached_tasks:transforms
   - taskgraph.transforms.task:transforms
 
 # make a task for each docker-image we might want.  For the moment, since we
@@ -44,6 +45,14 @@ jobs:
     packages:
       - deb7-cmake
       - deb7-ninja
+  debian7-amd64-build-base:
+    symbol: I(deb7-bb)
+    parent: debian7-base
+    definition: debian7-build
+    packages:
+      - deb7-valgrind
+    args:
+      ARCH: amd64
   debian7-amd64-build:
     symbol: I(deb7)
     parent: debian7-base

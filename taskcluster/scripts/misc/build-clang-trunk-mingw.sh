@@ -10,10 +10,12 @@ elif [ "$1" == "x86" ]; then
   machine="i686"
   compiler_rt_machine="i386"
   crt_flags="--enable-lib32 --disable-lib64"
+  WRAPPER_FLAGS="-fsjlj-exceptions"
 elif [ "$1" == "x64" ]; then
   machine="x86_64"
   compiler_rt_machine="x86_64"
   crt_flags="--disable-lib32 --enable-lib64"
+  WRAPPER_FLAGS=""
 else
   echo "Provide either x86 or x64 to specify a toolchain."
   exit 1;
@@ -30,16 +32,17 @@ SRC_DIR=$TOOLCHAIN_DIR/src
 
 make_flags="-j$(nproc)"
 
-mingw_version=cfd85ebed773810429bf2164c3a985895b7dbfe3
-libunwind_version=86ab23972978242b6f9e27cebc239f3e8428b1af
+mingw_version=a3b01285793fe405ce6eae883cd5ebacdfd819ae
+libunwind_version=1f89d78bb488bc71cfdee8281fc0834e9fbe5dce
+llvm_mingw_version=53db1c3a4c9c81972b70556a5ba5cd6ccd8e6e7d
 
 binutils_version=2.27
 binutils_ext=bz2
 binutils_sha=369737ce51587f92466041a97ab7d2358c6d9e1b6490b3940eb09fb0a9a6ac88
 
 # This is default value of _WIN32_WINNT. Gecko configure script explicitly sets this,
-# so this is not used to build Gecko itself. We default to 0x600, which is Windows Vista.
-default_win32_winnt=0x600
+# so this is not used to build Gecko itself. We default to 0x601, which is Windows 7.
+default_win32_winnt=0x601
 
 cd $HOME_DIR/src
 
@@ -55,11 +58,17 @@ prepare() {
   git clone -n git://git.code.sf.net/p/mingw-w64/mingw-w64
   pushd mingw-w64
   git checkout $mingw_version
+  patch -p1 < $HOME_DIR/src/build/build-clang/math.patch
   popd
 
   git clone https://github.com/llvm-mirror/libunwind.git
   pushd libunwind
   git checkout $libunwind_version
+  popd
+
+  git clone https://github.com/mstorsjo/llvm-mingw.git
+  pushd llvm-mingw
+  git checkout $llvm_mingw_version
   popd
 
   wget -c --progress=dot:mega ftp://ftp.gnu.org/gnu/binutils/binutils-$binutils_version.tar.$binutils_ext
@@ -76,17 +85,19 @@ prepare() {
 install_wrappers() {
   pushd $INSTALL_DIR/bin
 
+  compiler_flags="--sysroot \$DIR/../$machine-w64-mingw32 -rtlib=compiler-rt -stdlib=libc++ -fuse-ld=lld $WRAPPER_FLAGS -fuse-cxa-atexit -Qunused-arguments"
+
   cat <<EOF >$machine-w64-mingw32-clang
 #!/bin/sh
 DIR="\$(cd "\$(dirname "\$0")" && pwd)"
-\$DIR/clang -target $machine-w64-mingw32 --sysroot \$DIR/../$machine-w64-mingw32 -rtlib=compiler-rt -stdlib=libc++ -fuse-ld=lld -fdwarf-exceptions -Qunused-arguments "\$@"
+\$DIR/clang -target $machine-w64-mingw32 $compiler_flags "\$@"
 EOF
   chmod +x $machine-w64-mingw32-clang
 
   cat <<EOF >$machine-w64-mingw32-clang++
 #!/bin/sh
 DIR="\$(cd "\$(dirname "\$0")" && pwd)"
-\$DIR/clang -target $machine-w64-mingw32 --sysroot \$DIR/../$machine-w64-mingw32 --driver-mode=g++ -rtlib=compiler-rt -stdlib=libc++ -fuse-ld=lld -fdwarf-exceptions -Qunused-arguments "\$@"
+\$DIR/clang -target $machine-w64-mingw32 --driver-mode=g++ $compiler_flags "\$@"
 EOF
   chmod +x $machine-w64-mingw32-clang++
 
@@ -164,6 +175,12 @@ EOF
 }
 
 build_libcxx() {
+  # Below, we specify -g -gcodeview to build static libraries with debug information.
+  # Because we're not distributing these builds, this is fine. If one were to distribute
+  # the builds, perhaps one would want to make those flags conditional or investigation
+  # other options.
+  DEBUG_FLAGS="-g -gcodeview"
+
   mkdir libunwind
   pushd libunwind
   cmake \
@@ -184,7 +201,7 @@ build_libcxx() {
       -DLIBUNWIND_ENABLE_THREADS=TRUE \
       -DLIBUNWIND_ENABLE_SHARED=FALSE \
       -DLIBUNWIND_ENABLE_CROSS_UNWINDING=FALSE \
-      -DCMAKE_CXX_FLAGS="-nostdinc++ -I$SRC_DIR/libcxx/include -DPSAPI_VERSION=2" \
+      -DCMAKE_CXX_FLAGS="${DEBUG_FLAGS} -nostdinc++ -I$SRC_DIR/libcxx/include -DPSAPI_VERSION=2" \
       $SRC_DIR/libunwind
   make $make_flags
   make $make_flags install
@@ -212,7 +229,7 @@ build_libcxx() {
       -DLIBCXXABI_LIBCXX_INCLUDES=$SRC_DIR/libcxx/include \
       -DLLVM_NO_OLD_LIBSTDCXX=TRUE \
       -DCXX_SUPPORTS_CXX11=TRUE \
-      -DCMAKE_CXX_FLAGS="-D_LIBCPP_DISABLE_VISIBILITY_ANNOTATIONS -D_LIBCPP_HAS_THREAD_API_WIN32" \
+      -DCMAKE_CXX_FLAGS="${DEBUG_FLAGS} -D_LIBCPP_DISABLE_VISIBILITY_ANNOTATIONS -D_LIBCPP_HAS_THREAD_API_WIN32" \
       $SRC_DIR/libcxxabi
   make $make_flags VERBOSE=1
   popd
@@ -245,7 +262,7 @@ build_libcxx() {
       -DLIBCXX_CXX_ABI=libcxxabi \
       -DLIBCXX_CXX_ABI_INCLUDE_PATHS=$SRC_DIR/libcxxabi/include \
       -DLIBCXX_CXX_ABI_LIBRARY_PATH=../libcxxabi/lib \
-      -DCMAKE_CXX_FLAGS="-D_LIBCXXABI_DISABLE_VISIBILITY_ANNOTATIONS" \
+      -DCMAKE_CXX_FLAGS="${DEBUG_FLAGS} -D_LIBCXXABI_DISABLE_VISIBILITY_ANNOTATIONS" \
       $SRC_DIR/libcxx
   make $make_flags VERBOSE=1
   make $make_flags install
@@ -258,7 +275,7 @@ build_libcxx() {
   popd
 }
 
-build_windres() {
+build_utils() {
   # we build whole binutils, but use only windres in our toolchain
   mkdir binutils
   pushd binutils
@@ -268,9 +285,17 @@ build_windres() {
                                                 --target=$machine-w64-mingw32
   make $make_flags
 
-  # Manually install only nm and windres
-  cp binutils/windres $INSTALL_DIR/bin/$machine-w64-mingw32-windres
+  # Manually install only nm
   cp binutils/nm-new $INSTALL_DIR/bin/$machine-w64-mingw32-nm
+
+  pushd $INSTALL_DIR/bin/
+  ./clang $SRC_DIR/llvm-mingw/wrappers/windres-wrapper.c -O2 -Wl,-s -o $machine-w64-mingw32-windres
+  popd
+
+  pushd $INSTALL_DIR/bin/
+  ln -s llvm-readobj $machine-w64-mingw32-readobj
+  popd
+
   popd
 }
 
@@ -293,7 +318,7 @@ install_wrappers
 build_mingw
 build_compiler_rt
 build_libcxx
-build_windres
+build_utils
 
 popd
 

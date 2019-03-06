@@ -387,7 +387,6 @@ class BuildOptionParser(object):
         'valgrind': 'builds/releng_sub_%s_configs/%s_valgrind.py',
         'artifact': 'builds/releng_sub_%s_configs/%s_artifact.py',
         'debug-artifact': 'builds/releng_sub_%s_configs/%s_debug_artifact.py',
-        'devedition': 'builds/releng_sub_%s_configs/%s_devedition.py',
         'dmd': 'builds/releng_sub_%s_configs/%s_dmd.py',
     }
     build_pool_cfg_file = 'builds/build_pool_specifics.py'
@@ -838,7 +837,10 @@ or run without that action (ie: --no-{action})"
         if self.query_is_nightly() or self.query_is_nightly_promotion():
             # in branch_specifics.py we might set update_channel explicitly
             if c.get('update_channel'):
-                env["MOZ_UPDATE_CHANNEL"] = c['update_channel']
+                update_channel = c['update_channel']
+                if isinstance(update_channel, unicode):
+                    update_channel = update_channel.encode("utf-8")
+                env["MOZ_UPDATE_CHANNEL"] = update_channel
             elif c.get('enable_release_promotion'):
                 env["MOZ_UPDATE_CHANNEL"] = self.branch
             else:  # let's just give the generic channel based on branch
@@ -994,25 +996,6 @@ or run without that action (ie: --no-{action})"
         self.run_command(cmd, cwd=dirs['abs_src_dir'], halt_on_failure=True,
                          env=env)
 
-    def query_revision(self, source_path=None):
-        """ returns the revision of the build
-
-         This method is used both to figure out what revision to check out and
-         to figure out what revision *was* checked out.
-        """
-        revision = None
-        if not source_path:
-            dirs = self.query_abs_dirs()
-            source_path = dirs['abs_src_dir']  # let's take the default
-
-        # Look at what we have checked out
-        if os.path.exists(source_path):
-            hg = self.query_exe('hg', return_type='list')
-            revision = self.get_output_from_command(
-                hg + ['parent', '--template', '{node}'], cwd=source_path
-            )
-        return revision.encode('ascii', 'replace') if revision else None
-
     def _count_ctors(self):
         """count num of ctors and set testresults."""
         dirs = self.query_abs_dirs()
@@ -1116,6 +1099,15 @@ or run without that action (ie: --no-{action})"
 
     def build(self):
         """builds application."""
+
+        # This will error on non-0 exit code.
+        self._run_mach_command_in_build_env(['build', '-v'])
+
+        self.generate_build_props(console_output=True, halt_on_failure=True)
+        self._generate_build_stats()
+
+    def _run_mach_command_in_build_env(self, args):
+        """Run a mach command in a build context."""
         env = self.query_build_env()
         env.update(self.query_mach_build_env())
 
@@ -1133,21 +1125,19 @@ or run without that action (ie: --no-{action})"
             mach = [sys.executable, 'mach']
 
         return_code = self.run_command(
-            command=mach + ['--log-no-times', 'build', '-v'],
+            command=mach + ['--log-no-times'] + args,
             cwd=dirs['abs_src_dir'],
             env=env,
             output_timeout=self.config.get('max_build_output_timeout', 60 * 40)
         )
+
         if return_code:
             self.return_code = self.worst_level(
-                EXIT_STATUS_DICT[TBPL_FAILURE],  self.return_code,
+                EXIT_STATUS_DICT[TBPL_FAILURE], self.return_code,
                 AUTOMATION_EXIT_CODES[::-1]
             )
-            self.fatal("'mach build' did not run successfully. Please check "
-                       "log for errors.")
-
-        self.generate_build_props(console_output=True, halt_on_failure=True)
-        self._generate_build_stats()
+            self.fatal("'mach %s' did not run successfully. Please check "
+                       "log for errors." % ' '.join(args))
 
     def multi_l10n(self):
         if not self.query_is_nightly():

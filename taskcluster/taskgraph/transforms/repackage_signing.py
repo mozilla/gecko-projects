@@ -9,9 +9,9 @@ from __future__ import absolute_import, print_function, unicode_literals
 
 import os
 
+from taskgraph.loader.single_dep import schema
 from taskgraph.transforms.base import TransformSequence
 from taskgraph.util.attributes import copy_attributes_from_dependent_job
-from taskgraph.util.schema import validate_schema, Schema
 from taskgraph.util.scriptworker import (
     add_scope_prefix,
     get_signing_cert_scope_per_platform,
@@ -24,10 +24,7 @@ from voluptuous import Required, Optional
 # comparable, so we cast all of the keys back to regular strings
 task_description_schema = {str(k): v for k, v in task_description_schema.schema.iteritems()}
 
-transforms = TransformSequence()
-
-repackage_signing_description_schema = Schema({
-    Required('dependent-task'): object,
+repackage_signing_description_schema = schema.extend({
     Required('depname', default='repackage'): basestring,
     Optional('label'): basestring,
     Optional('treeherder'): task_description_schema['treeherder'],
@@ -36,27 +33,18 @@ repackage_signing_description_schema = Schema({
 })
 
 SIGNING_FORMATS = {
-    'target.complete.mar': ["autograph_hash_only_mar384"],
-    'target.bz2.complete.mar': ["mar"],
     "target.installer.exe": ["sha2signcode"],
     "target.stub-installer.exe": ["sha2signcodestub"],
 }
 
-
-@transforms.add
-def validate(config, jobs):
-    for job in jobs:
-        label = job.get('dependent-task', object).__dict__.get('label', '?no-label?')
-        validate_schema(
-            repackage_signing_description_schema, job,
-            "In repackage-signing ({!r} kind) task for {!r}:".format(config.kind, label))
-        yield job
+transforms = TransformSequence()
+transforms.add_validate(repackage_signing_description_schema)
 
 
 @transforms.add
 def make_repackage_signing_description(config, jobs):
     for job in jobs:
-        dep_job = job['dependent-task']
+        dep_job = job['primary-dependency']
         attributes = copy_attributes_from_dependent_job(dep_job)
         attributes['repackage_type'] = 'repackage-signing'
 
