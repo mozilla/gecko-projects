@@ -1,0 +1,58 @@
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set sw=2 ts=8 et tw=80 ft=cpp : */
+
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+
+include protocol PSocketProcess;
+include protocol PFileDescriptorSet; // FIXME: bug #792908
+
+include IPCStream;
+include NeckoChannelParams;
+
+using class mozilla::net::nsHttpRequestHead from "nsHttpRequestHead.h";
+using mozilla::net::NetAddr from "mozilla/net/DNS.h";
+
+namespace mozilla {
+namespace net {
+
+protocol PHttpTransaction
+{
+  manager PSocketProcess;
+
+parent:
+  async OnStartRequest(nsresult                   status,
+                       nsHttpResponseHead?        responseHead,
+                       nsCString                  securityInfoSerialization,
+                       NetAddr                    selfAddr,
+                       NetAddr                    peerAddr,
+                       bool                       proxyConnectFailed);
+  async OnTransportStatus(nsresult status,
+                          int64_t progress,
+                          int64_t progressMax);
+  async OnDataAvailable(nsCString data,
+                        uint64_t  offset,
+                        uint32_t  count);
+  async OnStopRequest(nsresult status,
+                      bool responseIsComplete,
+                      int64_t transferSize);
+
+child:
+  async __delete__();
+  async Init(uint32_t caps,
+             HttpConnectionInfoCloneArgs aArgs,
+             nsHttpRequestHead reqHeaders,
+             IPCStream? requestBody,
+             uint64_t reqContentLength,
+             bool reqBodyIncludesHeaders,
+             uint64_t topLevelOuterContentWindowId,
+             int32_t priority);
+  async Cancel(nsresult status);
+  async Suspend();
+  async Resume();
+
+};
+
+} // namespace net
+} // namespace mozilla

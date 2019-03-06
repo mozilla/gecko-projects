@@ -5,6 +5,8 @@
 
 #include "SocketProcessParent.h"
 
+#include "HttpTransactionParent.h"
+#include "mozilla/ipc/FileDescriptorSetParent.h"
 #include "SocketProcessHost.h"
 #include "mozilla/net/DNSRequestParent.h"
 #include "mozilla/Telemetry.h"
@@ -160,6 +162,53 @@ mozilla::ipc::IPCResult SocketProcessParent::RecvPDNSRequestConstructor(
 bool SocketProcessParent::DeallocPDNSRequestParent(PDNSRequestParent* aParent) {
   DNSRequestParent* p = static_cast<DNSRequestParent*>(aParent);
   p->Release();
+  return true;
+}
+
+PHttpTransactionParent* SocketProcessParent::AllocPHttpTransactionParent() {
+  MOZ_ASSERT_UNREACHABLE(
+      "AllocPHttpTransactionParent should not be called on "
+      "parent");
+  return nullptr;
+}
+
+bool SocketProcessParent::DeallocPHttpTransactionParent(
+    PHttpTransactionParent* aActor) {
+  HttpTransactionParent* p = static_cast<HttpTransactionParent*>(aActor);
+  p->Release();
+  return true;
+}
+
+PFileDescriptorSetParent* SocketProcessParent::AllocPFileDescriptorSetParent(
+    const FileDescriptor& aFD) {
+  return new FileDescriptorSetParent(aFD);
+}
+
+bool SocketProcessParent::DeallocPFileDescriptorSetParent(
+    PFileDescriptorSetParent* aActor) {
+  delete static_cast<FileDescriptorSetParent*>(aActor);
+  return true;
+}
+
+PChildToParentStreamParent*
+SocketProcessParent::AllocPChildToParentStreamParent() {
+  return mozilla::ipc::AllocPChildToParentStreamParent();
+}
+
+bool SocketProcessParent::DeallocPChildToParentStreamParent(
+    PChildToParentStreamParent* aActor) {
+  delete aActor;
+  return true;
+}
+
+PParentToChildStreamParent*
+SocketProcessParent::AllocPParentToChildStreamParent() {
+  MOZ_CRASH("PParentToChildStreamChild actors should be manually constructed!");
+}
+
+bool SocketProcessParent::DeallocPParentToChildStreamParent(
+    PParentToChildStreamParent* aActor) {
+  delete aActor;
   return true;
 }
 

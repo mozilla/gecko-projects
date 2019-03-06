@@ -12,6 +12,7 @@
 #include "mozilla/ipc/PBackgroundChild.h"
 #include "mozilla/ipc/PChildToParentStreamChild.h"
 #include "mozilla/ipc/PParentToChildStreamChild.h"
+#include "mozilla/net/PSocketProcessChild.h"
 
 namespace mozilla {
 namespace ipc {
@@ -93,6 +94,27 @@ PChildToParentStreamChild* IPCStreamSource::Create(
     nsIAsyncInputStream* aInputStream, PBackgroundChild* aManager) {
   MOZ_ASSERT(aInputStream);
   MOZ_ASSERT(aManager);
+
+  IPCStreamSourceChild* source = IPCStreamSourceChild::Create(aInputStream);
+  if (!source) {
+    return nullptr;
+  }
+
+  if (!aManager->SendPChildToParentStreamConstructor(source)) {
+    return nullptr;
+  }
+
+  source->ActorConstructed();
+  return source;
+}
+
+/* static */ PChildToParentStreamChild* IPCStreamSource::Create(
+    nsIAsyncInputStream* aInputStream, net::PSocketProcessChild* aManager) {
+  MOZ_ASSERT(aInputStream);
+  MOZ_ASSERT(aManager);
+
+  // PSocketProcessChild can only be used on the main thread
+  MOZ_ASSERT(NS_IsMainThread());
 
   IPCStreamSourceChild* source = IPCStreamSourceChild::Create(aInputStream);
   if (!source) {

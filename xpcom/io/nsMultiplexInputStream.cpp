@@ -1008,6 +1008,14 @@ void nsMultiplexInputStream::Serialize(InputStreamParams& aParams,
                     aSizeUsed, aManager);
 }
 
+void nsMultiplexInputStream::Serialize(
+    InputStreamParams& aParams, FileDescriptorArray& aFileDescriptors,
+    bool aDelayedStart, uint32_t aMaxSize, uint32_t* aSizeUsed,
+    mozilla::net::PSocketProcessChild* aManager) {
+  SerializeInternal(aParams, aFileDescriptors, aDelayedStart, aMaxSize,
+                    aSizeUsed, aManager);
+}
+
 void nsMultiplexInputStream::Serialize(InputStreamParams& aParams,
                                        FileDescriptorArray& aFileDescriptors,
                                        bool aDelayedStart, uint32_t aMaxSize,
@@ -1022,6 +1030,14 @@ void nsMultiplexInputStream::Serialize(InputStreamParams& aParams,
                                        bool aDelayedStart, uint32_t aMaxSize,
                                        uint32_t* aSizeUsed,
                                        PBackgroundParent* aManager) {
+  SerializeInternal(aParams, aFileDescriptors, aDelayedStart, aMaxSize,
+                    aSizeUsed, aManager);
+}
+
+void nsMultiplexInputStream::Serialize(
+    InputStreamParams& aParams, FileDescriptorArray& aFileDescriptors,
+    bool aDelayedStart, uint32_t aMaxSize, uint32_t* aSizeUsed,
+    mozilla::net::PSocketProcessParent* aManager) {
   SerializeInternal(aParams, aFileDescriptors, aDelayedStart, aMaxSize,
                     aSizeUsed, aManager);
 }

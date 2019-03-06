@@ -71,12 +71,26 @@ class SocketProcessParent final
                                const bool& aMinimizeMemoryUsage,
                                const Maybe<ipc::FileDescriptor>& aDMDFile);
 
+  PHttpTransactionParent* AllocPHttpTransactionParent();
+  bool DeallocPHttpTransactionParent(PHttpTransactionParent* aActor);
+
+  PFileDescriptorSetParent* AllocPFileDescriptorSetParent(
+      const FileDescriptor& fd);
+  bool DeallocPFileDescriptorSetParent(PFileDescriptorSetParent* aActor);
+
+  PChildToParentStreamParent* AllocPChildToParentStreamParent();
+  bool DeallocPChildToParentStreamParent(PChildToParentStreamParent* aActor);
+  PParentToChildStreamParent* AllocPParentToChildStreamParent();
+  bool DeallocPParentToChildStreamParent(PParentToChildStreamParent* aActor);
+
  private:
   SocketProcessHost* mHost;
   UniquePtr<dom::MemoryReportRequestHost> mMemoryReportRequest;
 
   static void Destroy(UniquePtr<SocketProcessParent>&& aParent);
 };
+
+extern PSocketProcessParent* gSocketProcessParent;
 
 }  // namespace net
 }  // namespace mozilla

@@ -405,6 +405,13 @@ void nsStringInputStream::Serialize(InputStreamParams& aParams,
   SerializeInternal(aParams, aDelayedStart, aMaxSize, aSizeUsed, aManager);
 }
 
+void nsStringInputStream::Serialize(
+    InputStreamParams& aParams, FileDescriptorArray& /* aFDs */,
+    bool aDelayedStart, uint32_t aMaxSize, uint32_t* aSizeUsed,
+    mozilla::net::PSocketProcessChild* aManager) {
+  SerializeInternal(aParams, aDelayedStart, aMaxSize, aSizeUsed, aManager);
+}
+
 void nsStringInputStream::Serialize(InputStreamParams& aParams,
                                     FileDescriptorArray& /* aFDs */,
                                     bool aDelayedStart, uint32_t aMaxSize,
@@ -418,6 +425,13 @@ void nsStringInputStream::Serialize(InputStreamParams& aParams,
                                     bool aDelayedStart, uint32_t aMaxSize,
                                     uint32_t* aSizeUsed,
                                     PBackgroundParent* aManager) {
+  SerializeInternal(aParams, aDelayedStart, aMaxSize, aSizeUsed, aManager);
+}
+
+void nsStringInputStream::Serialize(
+    InputStreamParams& aParams, FileDescriptorArray& /* aFDs */,
+    bool aDelayedStart, uint32_t aMaxSize, uint32_t* aSizeUsed,
+    mozilla::net::PSocketProcessParent* aManager) {
   SerializeInternal(aParams, aDelayedStart, aMaxSize, aSizeUsed, aManager);
 }
 

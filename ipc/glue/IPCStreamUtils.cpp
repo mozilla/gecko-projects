@@ -17,10 +17,13 @@
 #include "mozilla/ipc/InputStreamUtils.h"
 #include "mozilla/ipc/PBackgroundChild.h"
 #include "mozilla/ipc/PBackgroundParent.h"
+#include "mozilla/net/PSocketProcessChild.h"
+#include "mozilla/net/PSocketProcessParent.h"
 #include "mozilla/Unused.h"
 #include "nsNetCID.h"
 
 using namespace mozilla::dom;
+using namespace mozilla::net;
 
 namespace mozilla {
 namespace ipc {
@@ -409,6 +412,48 @@ bool AutoIPCStream::Serialize(nsIInputStream* aStream,
   if (!SerializeInputStreamParent(aStream, aManager, mValue, mOptionalValue,
                                   mDelayedStart)) {
     return false;
+  }
+
+  return true;
+}
+
+bool AutoIPCStream::Serialize(nsIInputStream* aStream,
+                              net::PSocketProcessParent* aManager) {
+  MOZ_ASSERT(aStream || !mValue);
+  MOZ_ASSERT(aManager);
+  MOZ_ASSERT(mValue || mOptionalValue);
+  MOZ_ASSERT(!mTaken);
+  MOZ_ASSERT(!IsSet());
+
+  // If NormalizeOptionalValue returns false, we don't have to proceed.
+  if (!NormalizeOptionalValue(aStream, mValue, mOptionalValue)) {
+    return true;
+  }
+
+  if (!SerializeInputStreamParent(aStream, aManager, mValue, mOptionalValue,
+                                  mDelayedStart)) {
+    return false;
+  }
+
+  return true;
+}
+
+bool AutoIPCStream::Serialize(nsIInputStream* aStream,
+                              net::PSocketProcessChild* aManager) {
+  MOZ_ASSERT(aStream || !mValue);
+  MOZ_ASSERT(aManager);
+  MOZ_ASSERT(mValue || mOptionalValue);
+  MOZ_ASSERT(!mTaken);
+  MOZ_ASSERT(!IsSet());
+
+  // If NormalizeOptionalValue returns false, we don't have to proceed.
+  if (!NormalizeOptionalValue(aStream, mValue, mOptionalValue)) {
+    return true;
+  }
+
+  if (!SerializeInputStreamChild(aStream, aManager, mValue, mOptionalValue,
+                                 mDelayedStart)) {
+    MOZ_CRASH("IPCStream creation failed!");
   }
 
   return true;

@@ -21,6 +21,13 @@ class ContentParent;
 
 }  // namespace dom
 
+namespace net {
+
+class PSocketProcessChild;
+class PSocketProcessParent;
+
+}  // namespace net
+
 namespace ipc {
 
 class FileDescriptor;
@@ -61,6 +68,12 @@ class NS_NO_VTABLE nsIIPCSerializableInputStream : public nsISupports {
                          FileDescriptorArray& aFileDescriptors,
                          bool aDelayedStart, uint32_t aMaxSize,
                          uint32_t* aSizeUsed,
+                         mozilla::net::PSocketProcessChild* aManager) = 0;
+
+  virtual void Serialize(mozilla::ipc::InputStreamParams& aParams,
+                         FileDescriptorArray& aFileDescriptors,
+                         bool aDelayedStart, uint32_t aMaxSize,
+                         uint32_t* aSizeUsed,
                          mozilla::dom::ContentParent* aManager) = 0;
 
   virtual void Serialize(mozilla::ipc::InputStreamParams& aParams,
@@ -68,6 +81,12 @@ class NS_NO_VTABLE nsIIPCSerializableInputStream : public nsISupports {
                          bool aDelayedStart, uint32_t aMaxSize,
                          uint32_t* aSizeUsed,
                          mozilla::ipc::PBackgroundParent* aManager) = 0;
+
+  virtual void Serialize(mozilla::ipc::InputStreamParams& aParams,
+                         FileDescriptorArray& aFileDescriptors,
+                         bool aDelayedStart, uint32_t aMaxSize,
+                         uint32_t* aSizeUsed,
+                         mozilla::net::PSocketProcessParent* aManager) = 0;
 
   virtual bool Deserialize(const mozilla::ipc::InputStreamParams& aParams,
                            const FileDescriptorArray& aFileDescriptors) = 0;
@@ -87,11 +106,19 @@ NS_DEFINE_STATIC_IID_ACCESSOR(nsIIPCSerializableInputStream,
                                                                           \
   virtual void Serialize(mozilla::ipc::InputStreamParams&,                \
                          FileDescriptorArray&, bool, uint32_t, uint32_t*, \
+                         mozilla::net::PSocketProcessChild*) override;    \
+                                                                          \
+  virtual void Serialize(mozilla::ipc::InputStreamParams&,                \
+                         FileDescriptorArray&, bool, uint32_t, uint32_t*, \
                          mozilla::dom::ContentParent*) override;          \
                                                                           \
   virtual void Serialize(mozilla::ipc::InputStreamParams&,                \
                          FileDescriptorArray&, bool, uint32_t, uint32_t*, \
                          mozilla::ipc::PBackgroundParent*) override;      \
+                                                                          \
+  virtual void Serialize(mozilla::ipc::InputStreamParams&,                \
+                         FileDescriptorArray&, bool, uint32_t, uint32_t*, \
+                         mozilla::net::PSocketProcessParent*) override;   \
                                                                           \
   virtual bool Deserialize(const mozilla::ipc::InputStreamParams&,        \
                            const FileDescriptorArray&) override;
@@ -115,6 +142,15 @@ NS_DEFINE_STATIC_IID_ACCESSOR(nsIIPCSerializableInputStream,
                   aSizeUsed, aManager);                                        \
   }                                                                            \
                                                                                \
+  virtual void Serialize(                                                      \
+      mozilla::ipc::InputStreamParams& aParams,                                \
+      FileDescriptorArray& aFileDescriptors, bool aDelayedStart,               \
+      uint32_t aMaxSize, uint32_t* aSizeUsed,                                  \
+      mozilla::net::PSocketProcessChild* aManager) override {                  \
+    _to Serialize(aParams, aFileDescriptors, aDelayedStart, aMaxSize,          \
+                  aSizeUsed, aManager);                                        \
+  }                                                                            \
+                                                                               \
   virtual void Serialize(mozilla::ipc::InputStreamParams& aParams,             \
                          FileDescriptorArray& aFileDescriptors,                \
                          bool aDelayedStart, uint32_t aMaxSize,                \
@@ -129,6 +165,15 @@ NS_DEFINE_STATIC_IID_ACCESSOR(nsIIPCSerializableInputStream,
                          bool aDelayedStart, uint32_t aMaxSize,                \
                          uint32_t* aSizeUsed,                                  \
                          mozilla::ipc::PBackgroundParent* aManager) override { \
+    _to Serialize(aParams, aFileDescriptors, aDelayedStart, aMaxSize,          \
+                  aSizeUsed, aManager);                                        \
+  }                                                                            \
+                                                                               \
+  virtual void Serialize(                                                      \
+      mozilla::ipc::InputStreamParams& aParams,                                \
+      FileDescriptorArray& aFileDescriptors, bool aDelayedStart,               \
+      uint32_t aMaxSize, uint32_t* aSizeUsed,                                  \
+      mozilla::net::PSocketProcessParent* aManager) override {                 \
     _to Serialize(aParams, aFileDescriptors, aDelayedStart, aMaxSize,          \
                   aSizeUsed, aManager);                                        \
   }                                                                            \
@@ -162,6 +207,17 @@ NS_DEFINE_STATIC_IID_ACCESSOR(nsIIPCSerializableInputStream,
     }                                                                          \
   }                                                                            \
                                                                                \
+  virtual void Serialize(                                                      \
+      mozilla::ipc::InputStreamParams& aParams,                                \
+      FileDescriptorArray& aFileDescriptors, bool aDelayedStart,               \
+      uint32_t aMaxSize, uint32_t* aSizeUsed,                                  \
+      mozilla::net::PSocketProcessChild* aManager) override {                  \
+    if (_to) {                                                                 \
+      _to->Serialize(aParams, aFileDescriptors, aDelayedStart, aMaxSize,       \
+                     aSizeUsed, aManager);                                     \
+    }                                                                          \
+  }                                                                            \
+                                                                               \
   virtual void Serialize(mozilla::ipc::InputStreamParams& aParams,             \
                          FileDescriptorArray& aFileDescriptors,                \
                          bool aDelayedStart, uint32_t aMaxSize,                \
@@ -178,6 +234,17 @@ NS_DEFINE_STATIC_IID_ACCESSOR(nsIIPCSerializableInputStream,
                          bool aDelayedStart, uint32_t aMaxSize,                \
                          uint32_t* aSizeUsed,                                  \
                          mozilla::ipc::PBackgroundParent* aManager) override { \
+    if (_to) {                                                                 \
+      _to->Serialize(aParams, aFileDescriptors, aDelayedStart, aMaxSize,       \
+                     aSizeUsed, aManager);                                     \
+    }                                                                          \
+  }                                                                            \
+                                                                               \
+  virtual void Serialize(                                                      \
+      mozilla::ipc::InputStreamParams& aParams,                                \
+      FileDescriptorArray& aFileDescriptors, bool aDelayedStart,               \
+      uint32_t aMaxSize, uint32_t* aSizeUsed,                                  \
+      mozilla::net::PSocketProcessParent* aManager) override {                 \
     if (_to) {                                                                 \
       _to->Serialize(aParams, aFileDescriptors, aDelayedStart, aMaxSize,       \
                      aSizeUsed, aManager);                                     \

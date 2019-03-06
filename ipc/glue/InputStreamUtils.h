@@ -13,6 +13,14 @@
 #include "nsTArray.h"
 
 namespace mozilla {
+
+namespace net {
+
+class PSocketProcessChild;
+class PSocketProcessParent;
+
+}  // namespace net
+
 namespace ipc {
 
 class FileDescriptor;
@@ -48,6 +56,13 @@ class InputStreamHelper {
                                    nsTArray<FileDescriptor>& aFileDescriptors,
                                    bool aDelayedStart, uint32_t aMaxSize,
                                    uint32_t* aSizeUsed,
+                                   mozilla::net::PSocketProcessChild* aManager);
+
+  static void SerializeInputStream(nsIInputStream* aInputStream,
+                                   InputStreamParams& aParams,
+                                   nsTArray<FileDescriptor>& aFileDescriptors,
+                                   bool aDelayedStart, uint32_t aMaxSize,
+                                   uint32_t* aSizeUsed,
                                    mozilla::dom::ContentParent* aManager);
 
   static void SerializeInputStream(nsIInputStream* aInputStream,
@@ -57,27 +72,39 @@ class InputStreamHelper {
                                    uint32_t* aSizeUsed,
                                    PBackgroundParent* aManager);
 
+  static void SerializeInputStream(
+      nsIInputStream* aInputStream, InputStreamParams& aParams,
+      nsTArray<FileDescriptor>& aFileDescriptors, bool aDelayedStart,
+      uint32_t aMaxSize, uint32_t* aSizeUsed,
+      mozilla::net::PSocketProcessParent* aManager);
+
   // When a stream wants to serialize itself as IPCRemoteStream, it uses one of
   // these methods.
-  static void SerializeInputStreamAsPipe(nsIInputStream* aInputStream,
-                                         InputStreamParams& aParams,
-                                         bool aDelayedStart,
-                                         mozilla::dom::ContentChild* aManager);
+  static void SerializeInputStreamAsPipe(
+      nsIInputStream* aInputStream, InputStreamParams& aParams,
+      bool aDelayedStart, mozilla::dom::ContentChild* aManager);
 
   static void SerializeInputStreamAsPipe(nsIInputStream* aInputStream,
                                          InputStreamParams& aParams,
                                          bool aDelayedStart,
                                          PBackgroundChild* aManager);
 
-  static void SerializeInputStreamAsPipe(nsIInputStream* aInputStream,
-                                         InputStreamParams& aParams,
-                                         bool aDelayedStart,
-                                         mozilla::dom::ContentParent* aManager);
+  static void SerializeInputStreamAsPipe(
+      nsIInputStream* aInputStream, InputStreamParams& aParams,
+      bool aDelayedStart, mozilla::net::PSocketProcessChild* aManager);
+
+  static void SerializeInputStreamAsPipe(
+      nsIInputStream* aInputStream, InputStreamParams& aParams,
+      bool aDelayedStart, mozilla::dom::ContentParent* aManager);
 
   static void SerializeInputStreamAsPipe(nsIInputStream* aInputStream,
                                          InputStreamParams& aParams,
                                          bool aDelayedStart,
                                          PBackgroundParent* aManager);
+
+  static void SerializeInputStreamAsPipe(
+      nsIInputStream* aInputStream, InputStreamParams& aParams,
+      bool aDelayedStart, mozilla::net::PSocketProcessParent* aManager);
 
   // After the sending of the inputStream into the IPC pipe, some of the
   // InputStreamParams data struct needs to be activated (IPCRemoteStream).

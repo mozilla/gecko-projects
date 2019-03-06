@@ -9,6 +9,7 @@
 #include "mozilla/ipc/PBackgroundParent.h"
 #include "mozilla/ipc/PChildToParentStreamParent.h"
 #include "mozilla/ipc/PParentToChildStreamParent.h"
+#include "mozilla/net/PSocketProcessParent.h"
 #include "mozilla/Unused.h"
 
 namespace mozilla {
@@ -92,6 +93,28 @@ PParentToChildStreamParent* IPCStreamSource::Create(
     nsIAsyncInputStream* aInputStream, PBackgroundParent* aManager) {
   MOZ_ASSERT(aInputStream);
   MOZ_ASSERT(aManager);
+
+  IPCStreamSourceParent* source = IPCStreamSourceParent::Create(aInputStream);
+  if (!source) {
+    return nullptr;
+  }
+
+  if (!aManager->SendPParentToChildStreamConstructor(source)) {
+    // no delete here, the manager will delete the actor for us.
+    return nullptr;
+  }
+
+  source->ActorConstructed();
+  return source;
+}
+
+/* static */ PParentToChildStreamParent* IPCStreamSource::Create(
+    nsIAsyncInputStream* aInputStream, net::PSocketProcessParent* aManager) {
+  MOZ_ASSERT(aInputStream);
+  MOZ_ASSERT(aManager);
+
+  // PContent can only be used on the main thread
+  MOZ_ASSERT(NS_IsMainThread());
 
   IPCStreamSourceParent* source = IPCStreamSourceParent::Create(aInputStream);
   if (!source) {

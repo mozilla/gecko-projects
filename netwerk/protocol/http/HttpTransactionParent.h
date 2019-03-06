@@ -7,26 +7,24 @@
 #define HttpTransactionParent_h__
 
 #include "mozilla/net/NeckoChannelParams.h"
+#include "mozilla/net/PHttpTransactionParent.h"
 #include "nsHttp.h"
 #include "nsCOMPtr.h"
-#include "AlternateServices.h"
 #include "HttpTrafficAnalyzer.h"
 #include "nsIThreadRetargetableRequest.h"
 #include "nsITransport.h"
 #include "nsIRequest.h"
 #include "TimingStruct.h"
 
-#include "HttpTransactionChild.h"
-
 namespace mozilla {
 namespace net {
 
-// TODO: remove after inherit ipdl
-class HttpTransactionChild;
+class nsHttpConnectionInfo;
 
 // HttpTransactionParent plays the role of nsHttpTransaction and delegates the
 // work to the nsHttpTransport in socket process.
-class HttpTransactionParent final : public nsIRequest,
+class HttpTransactionParent final : public PHttpTransactionParent,
+                                    public nsIRequest,
                                     public nsIThreadRetargetableRequest {
  public:
   NS_DECL_ISUPPORTS
@@ -37,35 +35,35 @@ class HttpTransactionParent final : public nsIRequest,
 
   // Let socket process init the *real* nsHttpTransaction. See
   // |nsHttpTransaction::Init| for the parameters.
-  MOZ_MUST_USE nsresult Init(uint32_t caps, nsHttpConnectionInfo *connInfo,
-                             nsHttpRequestHead *reqHeaders,
-                             nsIInputStream *reqBody, uint64_t reqContentLength,
+  MOZ_MUST_USE nsresult Init(uint32_t caps, nsHttpConnectionInfo* connInfo,
+                             nsHttpRequestHead* reqHeaders,
+                             nsIInputStream* reqBody, uint64_t reqContentLength,
                              bool reqBodyIncludesHeaders,
-                             nsIEventTarget *consumerTarget,
-                             nsIInterfaceRequestor *callbacks,
-                             nsITransportEventSink *eventsink,
+                             nsIEventTarget* consumerTarget,
+                             nsIInterfaceRequestor* callbacks,
+                             nsITransportEventSink* eventsink,
                              uint64_t topLevelOuterContentWindowId,
                              HttpTrafficCategory trafficCategory,
                              int32_t priority  // a workaround for bug 1485355
   );
 
-  nsHttpResponseHead *TakeResponseHead();
-  nsISupports *SecurityInfo() { return mSecurityInfo; }
+  nsHttpResponseHead* TakeResponseHead();
+  nsISupports* SecurityInfo() { return mSecurityInfo; }
   bool ProxyConnectFailed() { return mProxyConnectFailed; }
 
-  void GetNetworkAddresses(NetAddr &self, NetAddr &peer);
+  void GetNetworkAddresses(NetAddr& self, NetAddr& peer);
 
   NS_IMETHODIMP OnTransportStatus(nsresult aStatus, int64_t aProgress,
                                   int64_t aProgressMax, NetAddr aSelfAddr,
                                   NetAddr aPeerAddr);
 
-  NS_IMETHODIMP OnDataAvailable(nsIRequest *aRequest,
-                                nsIInputStream *aInputStream, uint64_t aOffset,
+  NS_IMETHODIMP OnDataAvailable(nsIRequest* aRequest,
+                                nsIInputStream* aInputStream, uint64_t aOffset,
                                 uint32_t aCount);
 
-  NS_IMETHODIMP OnStartRequest(nsresult aStatus, nsISupports *aSecurityInfo,
+  NS_IMETHODIMP OnStartRequest(nsresult aStatus, nsISupports* aSecurityInfo,
                                bool aProxyConnectFailed,
-                               nsHttpResponseHead *aResponseHead);
+                               nsHttpResponseHead* aResponseHead);
 
   NS_IMETHODIMP OnStopRequest(nsresult aStatus, bool aResponseIsComplete,
                               int64_t aTransferSize);
@@ -98,11 +96,28 @@ class HttpTransactionParent final : public nsIRequest,
   bool ResponseIsComplete() { return mResponseIsComplete; }
   int64_t GetTransferSize() { return mTransferSize; }
 
+  void ActorDestroy(ActorDestroyReason aWhy) override;
+  void AddIPDLReference();
+
+  mozilla::ipc::IPCResult RecvOnStartRequest(
+      const nsresult& aStatus, const Maybe<nsHttpResponseHead>& aResponseHead,
+      const nsCString& aSecurityInfoSerialization, const NetAddr& aSelfAddr,
+      const NetAddr& aPeerAddr, const bool& aProxyConnectFailed);
+  mozilla::ipc::IPCResult RecvOnTransportStatus(const nsresult& aStatus,
+                                                const int64_t& aProgress,
+                                                const int64_t& aProgressMax);
+  mozilla::ipc::IPCResult RecvOnDataAvailable(const nsCString& aData,
+                                              const uint64_t& aOffset,
+                                              const uint32_t& aCount);
+  mozilla::ipc::IPCResult RecvOnStopRequest(const nsresult& aStatus,
+                                            const bool& aResponseIsComplete,
+                                            const int64_t& aTransferSize);
+
  private:
   virtual ~HttpTransactionParent();
 
-  void GetStructFromInfo(nsHttpConnectionInfo *aInfo,
-                         HttpConnectionInfoCloneArgs &aArgs);
+  void GetStructFromInfo(nsHttpConnectionInfo* aInfo,
+                         HttpConnectionInfoCloneArgs& aArgs);
 
   nsCOMPtr<nsITransportEventSink> mEventsink;
   nsCOMPtr<nsIStreamListener> mChannel;
@@ -123,9 +138,6 @@ class HttpTransactionParent final : public nsIRequest,
 
   NetAddr mSelfAddr;
   NetAddr mPeerAddr;
-
-  // TODO: remove after ipdl is set
-  RefPtr<HttpTransactionChild> mChild;
 };
 
 }  // namespace net

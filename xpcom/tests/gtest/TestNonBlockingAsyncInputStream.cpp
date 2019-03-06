@@ -279,10 +279,17 @@ class QIInputStream final : public nsIInputStream,
                  uint32_t, uint32_t*,
                  mozilla::ipc::PBackgroundChild*) override {}
   void Serialize(mozilla::ipc::InputStreamParams&, FileDescriptorArray&, bool,
-                 uint32_t, uint32_t*, mozilla::dom::ContentParent*) override {}
+                 uint32_t, uint32_t*,
+                 mozilla::net::PSocketProcessChild*) override {}
+  void Serialize(mozilla::ipc::InputStreamParams&, FileDescriptorArray&, bool,
+                 uint32_t, uint32_t*,
+                 mozilla::dom::ContentParent*) override {}
   void Serialize(mozilla::ipc::InputStreamParams&, FileDescriptorArray&, bool,
                  uint32_t, uint32_t*,
                  mozilla::ipc::PBackgroundParent*) override {}
+  void Serialize(mozilla::ipc::InputStreamParams&, FileDescriptorArray&, bool,
+                 uint32_t, uint32_t*,
+                 mozilla::net::PSocketProcessParent*) override {}
   bool Deserialize(const mozilla::ipc::InputStreamParams&,
                    const FileDescriptorArray&) override {
     return false;

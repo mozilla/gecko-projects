@@ -7,25 +7,25 @@
 #define HttpTransactionChild_h__
 
 #include "mozilla/net/NeckoChannelParams.h"
+#include "mozilla/net/PHttpTransactionChild.h"
 #include "nsHttp.h"
 #include "nsCOMPtr.h"
 #include "TimingStruct.h"
 #include "nsIStreamListener.h"
 #include "nsInputStreamPump.h"
-
-#include "HttpTransactionParent.h"
+#include "nsITransport.h"
 
 namespace mozilla {
 namespace net {
 
-// TODO: remove after inherit ipdl
-class HttpTransactionParent;
+class nsHttpTransaction;
 
 //-----------------------------------------------------------------------------
 // HttpTransactionChild commutes between parent process and socket process,
 // manages the real nsHttpTransaction and transaction pump.
 //-----------------------------------------------------------------------------
-class HttpTransactionChild final : public nsIStreamListener,
+class HttpTransactionChild final : public PHttpTransactionChild,
+                                   public nsIStreamListener,
                                    public nsITransportEventSink {
  public:
   NS_DECL_THREADSAFE_ISUPPORTS
@@ -33,31 +33,36 @@ class HttpTransactionChild final : public nsIStreamListener,
   NS_DECL_NSISTREAMLISTENER
   NS_DECL_NSITRANSPORTEVENTSINK
 
-  explicit HttpTransactionChild(HttpTransactionParent *);
+  explicit HttpTransactionChild();
 
-  // Initialize the *real* nsHttpTransaction. See |nsHttpTransaction::Init| for
-  // the parameters.
-  MOZ_MUST_USE nsresult
-  Init(uint32_t caps,
-       const HttpConnectionInfoCloneArgs &aArgs,  // remove proxyInfo first
-       nsHttpRequestHead *reqHeaders,
-       nsIInputStream *reqBody,  // use the trick in bug 1277681
-       uint64_t reqContentLength, bool reqBodyIncludesHeaders,
-       nsIEventTarget *consumerTarget,  // Will remove
-       uint64_t topLevelOuterContentWindowId, int32_t priority);
-
-  NS_IMETHODIMP Cancel(nsresult aStatus);
-  NS_IMETHODIMP Suspend(void);
-  NS_IMETHODIMP Resume(void);
-
-  // TODO: move to private after Bug 1485355
-  RefPtr<nsHttpTransaction> mTransaction;
-  RefPtr<nsInputStreamPump> mTransactionPump;
+  mozilla::ipc::IPCResult RecvInit(
+      const uint32_t& aCaps, const HttpConnectionInfoCloneArgs& aArgs,
+      const nsHttpRequestHead& aReqHeaders,
+      const Maybe<IPCStream>& aRequestBody, const uint64_t& aReqContentLength,
+      const bool& aReqBodyIncludesHeaders,
+      const uint64_t& aTopLevelOuterContentWindowId, const int32_t& aPriority);
+  mozilla::ipc::IPCResult RecvCancel(const nsresult& aStatus);
+  mozilla::ipc::IPCResult RecvSuspend();
+  mozilla::ipc::IPCResult RecvResume();
 
  private:
   virtual ~HttpTransactionChild();
+  // Initialize the *real* nsHttpTransaction. See |nsHttpTransaction::Init| for
+  // the parameters.
+  MOZ_MUST_USE nsresult InitInternal(
+      uint32_t caps,
+      const HttpConnectionInfoCloneArgs& aArgs,  // remove proxyInfo first
+      nsHttpRequestHead* reqHeaders, nsIInputStream* reqBody,
+      uint64_t reqContentLength, bool reqBodyIncludesHeaders,
+      nsIEventTarget* consumerTarget,  // Will remove
+      uint64_t topLevelOuterContentWindowId, int32_t priority);
 
-  RefPtr<HttpTransactionParent> mParent;
+  nsHttpRequestHead mRequestHead;
+  nsCOMPtr<nsIInputStream> mUploadStream;
+  RefPtr<nsHttpTransaction> mTransaction;
+  RefPtr<nsInputStreamPump> mTransactionPump;
+  NetAddr mSelfAddr;
+  NetAddr mPeerAddr;
 };
 
 }  // namespace net

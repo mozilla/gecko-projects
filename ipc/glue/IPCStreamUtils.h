@@ -18,6 +18,11 @@ class ContentChild;
 class ContentParent;
 }  // namespace dom
 
+namespace net {
+class PSocketProcessParent;
+class PSocketProcessChild;
+}  // namespace net
+
 namespace ipc {
 
 class PBackgroundChild;
@@ -162,6 +167,13 @@ class AutoIPCStream final {
   // Serialize the input stream.
   MOZ_MUST_USE bool Serialize(nsIInputStream* aStream,
                               PBackgroundParent* aManager);
+
+  // Serialize the input stream.
+  MOZ_MUST_USE bool Serialize(nsIInputStream* aStream,
+                              net::PSocketProcessParent* aManager);
+
+  MOZ_MUST_USE bool Serialize(nsIInputStream* aStream,
+                              net::PSocketProcessChild* aManager);
 
   // Get the IPCStream as a non-optional value.  This will
   // assert if a stream has not been serialized or if it has already been taken.

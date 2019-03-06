@@ -28,6 +28,29 @@ nsHttpRequestHead::nsHttpRequestHead()
 
 nsHttpRequestHead::~nsHttpRequestHead() { MOZ_COUNT_DTOR(nsHttpRequestHead); }
 
+nsHttpRequestHead::nsHttpRequestHead(const nsHttpRequestHead &aRequestHead)
+    : mRecursiveMutex("nsHttpRequestHead.mRecursiveMutex"),
+      mInVisitHeaders(false) {
+  nsHttpRequestHead &other = const_cast<nsHttpRequestHead &>(aRequestHead);
+  RecursiveMutexAutoLock monitor(other.mRecursiveMutex);
+
+  mHeaders = other.mHeaders;
+  mVersion = other.mVersion;
+  mRequestURI = other.mRequestURI;
+}
+
+nsHttpRequestHead &nsHttpRequestHead::operator=(
+    const nsHttpRequestHead &aRequestHead) {
+  nsHttpRequestHead &other = const_cast<nsHttpRequestHead &>(aRequestHead);
+  RecursiveMutexAutoLock monitorOther(other.mRecursiveMutex);
+  RecursiveMutexAutoLock monitor(mRecursiveMutex);
+
+  mHeaders = other.mHeaders;
+  mVersion = other.mVersion;
+  mRequestURI = other.mRequestURI;
+  return *this;
+}
+
 // Don't use this function. It is only used by HttpChannelParent to avoid
 // copying of request headers!!!
 const nsHttpHeaderArray& nsHttpRequestHead::Headers() const {

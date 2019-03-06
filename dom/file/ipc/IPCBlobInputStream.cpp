@@ -585,11 +585,33 @@ void IPCBlobInputStream::Serialize(mozilla::ipc::InputStreamParams& aParams,
   SerializeInternal(aParams);
 }
 
+void IPCBlobInputStream::Serialize(
+    mozilla::ipc::InputStreamParams& aParams,
+    FileDescriptorArray& aFileDescriptors, bool aDelayedStart,
+    uint32_t aMaxSize, uint32_t* aSizeUsed,
+    mozilla::net::PSocketProcessChild* aManager) {
+  MOZ_ASSERT(aSizeUsed);
+  *aSizeUsed = 0;
+
+  SerializeInternal(aParams);
+}
+
 void IPCBlobInputStream::Serialize(mozilla::ipc::InputStreamParams& aParams,
                                    FileDescriptorArray& aFileDescriptors,
                                    bool aDelayedStart, uint32_t aMaxSize,
                                    uint32_t* aSizeUsed,
                                    ContentParent* aManager) {
+  MOZ_ASSERT(aSizeUsed);
+  *aSizeUsed = 0;
+
+  SerializeInternal(aParams);
+}
+
+void IPCBlobInputStream::Serialize(
+    mozilla::ipc::InputStreamParams& aParams,
+    FileDescriptorArray& aFileDescriptors, bool aDelayedStart,
+    uint32_t aMaxSize, uint32_t* aSizeUsed,
+    mozilla::net::PSocketProcessParent* aManager) {
   MOZ_ASSERT(aSizeUsed);
   *aSizeUsed = 0;
 

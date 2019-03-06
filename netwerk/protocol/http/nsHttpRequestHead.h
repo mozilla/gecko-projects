@@ -32,6 +32,8 @@ class nsHttpRequestHead {
  public:
   nsHttpRequestHead();
   ~nsHttpRequestHead();
+  explicit nsHttpRequestHead(const nsHttpRequestHead &aRequestHead);
+  nsHttpRequestHead &operator=(const nsHttpRequestHead &aRequestHead);
 
   // The following function is only used in HttpChannelParent to avoid
   // copying headers. If you use it be careful to do it only under

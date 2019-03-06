@@ -20,6 +20,7 @@ namespace dom {
 namespace indexedDB {
 
 using namespace mozilla::ipc;
+using namespace mozilla::net;
 
 namespace {
 
@@ -289,6 +290,15 @@ void StreamWrapper::Serialize(InputStreamParams& aParams,
 void StreamWrapper::Serialize(InputStreamParams& aParams,
                               FileDescriptorArray& aFileDescriptors,
                               bool aDelayedStart, uint32_t aMaxSize,
+                              uint32_t* aSizeUsed,
+                              PSocketProcessChild* aManager) {
+  SerializeInternal(aParams, aFileDescriptors, aDelayedStart, aMaxSize,
+                    aSizeUsed, aManager);
+}
+
+void StreamWrapper::Serialize(InputStreamParams& aParams,
+                              FileDescriptorArray& aFileDescriptors,
+                              bool aDelayedStart, uint32_t aMaxSize,
                               uint32_t* aSizeUsed, ContentParent* aManager) {
   SerializeInternal(aParams, aFileDescriptors, aDelayedStart, aMaxSize,
                     aSizeUsed, aManager);
@@ -299,6 +309,15 @@ void StreamWrapper::Serialize(InputStreamParams& aParams,
                               bool aDelayedStart, uint32_t aMaxSize,
                               uint32_t* aSizeUsed,
                               PBackgroundParent* aManager) {
+  SerializeInternal(aParams, aFileDescriptors, aDelayedStart, aMaxSize,
+                    aSizeUsed, aManager);
+}
+
+void StreamWrapper::Serialize(InputStreamParams& aParams,
+                              FileDescriptorArray& aFileDescriptors,
+                              bool aDelayedStart, uint32_t aMaxSize,
+                              uint32_t* aSizeUsed,
+                              PSocketProcessParent* aManager) {
   SerializeInternal(aParams, aFileDescriptors, aDelayedStart, aMaxSize,
                     aSizeUsed, aManager);
 }

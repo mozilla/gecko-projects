@@ -15,6 +15,7 @@
 #include "nsXULAppAPI.h"
 
 using namespace mozilla::ipc;
+using namespace mozilla::net;
 
 namespace mozilla {
 namespace dom {
@@ -67,6 +68,13 @@ class TemporaryFileInputStream final : public nsFileInputStream {
   void Serialize(InputStreamParams& aParams,
                  FileDescriptorArray& aFileDescriptors, bool aDelayedStart,
                  uint32_t aMaxSize, uint32_t* aSizeUsed,
+                 PSocketProcessChild* aManager) override {
+    MOZ_CRASH("This inputStream cannot be serialized.");
+  }
+
+  void Serialize(InputStreamParams& aParams,
+                 FileDescriptorArray& aFileDescriptors, bool aDelayedStart,
+                 uint32_t aMaxSize, uint32_t* aSizeUsed,
                  ContentParent* aManager) override {
     MOZ_CRASH("This inputStream cannot be serialized.");
   }
@@ -75,6 +83,13 @@ class TemporaryFileInputStream final : public nsFileInputStream {
                  FileDescriptorArray& aFileDescriptors, bool aDelayedStart,
                  uint32_t aMaxSize, uint32_t* aSizeUsed,
                  PBackgroundParent* aManager) override {
+    MOZ_CRASH("This inputStream cannot be serialized.");
+  }
+
+  void Serialize(InputStreamParams& aParams,
+                 FileDescriptorArray& aFileDescriptors, bool aDelayedStart,
+                 uint32_t aMaxSize, uint32_t* aSizeUsed,
+                 PSocketProcessParent* aManager) override {
     MOZ_CRASH("This inputStream cannot be serialized.");
   }
 

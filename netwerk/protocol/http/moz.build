@@ -50,6 +50,8 @@ EXPORTS.mozilla.net += [
     'HttpChannelChild.h',
     'HttpChannelParent.h',
     'HttpInfo.h',
+    'HttpTrafficAnalyzer.h',
+    'HttpTrafficAnalyzer.inc',
     'HttpTransactionChild.h',
     'HttpTransactionParent.h',
     'nsServerTiming.h',
@@ -126,6 +128,7 @@ IPDL_SOURCES += [
     'PClassifierDummyChannel.ipdl',
     'PHttpBackgroundChannel.ipdl',
     'PHttpChannel.ipdl',
+    'PHttpTransaction.ipdl',
 ]
 
 include('/ipc/chromium/chromium-config.mozbuild')

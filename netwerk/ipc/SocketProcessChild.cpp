@@ -7,11 +7,16 @@
 #include "SocketProcessLogging.h"
 
 #include "base/task.h"
+#include "HttpTransactionChild.h"
 #include "mozilla/Assertions.h"
 #include "mozilla/dom/MemoryReportRequest.h"
 #include "mozilla/ipc/CrashReporterClient.h"
+#include "mozilla/ipc/FileDescriptorSetChild.h"
+#include "mozilla/ipc/IPCStreamAlloc.h"
 #include "mozilla/ipc/ProcessChild.h"
 #include "mozilla/net/DNSRequestChild.h"
+#include "mozilla/ipc/PChildToParentStreamChild.h"
+#include "mozilla/ipc/PParentToChildStreamChild.h"
 #include "mozilla/Preferences.h"
 #include "nsDebugImpl.h"
 #include "nsThreadManager.h"
@@ -157,6 +162,72 @@ mozilla::ipc::IPCResult SocketProcessChild::RecvSetOffline(
   io->SetOffline(aOffline);
 
   return IPC_OK();
+}
+
+mozilla::ipc::IPCResult SocketProcessChild::RecvPHttpTransactionConstructor(
+    PHttpTransactionChild* actor) {
+  return IPC_OK();
+}
+
+PHttpTransactionChild* SocketProcessChild::AllocPHttpTransactionChild() {
+  if (!gHttpHandler) {
+    nsresult rv;
+    nsCOMPtr<nsIIOService> ios = do_GetIOService(&rv);
+    if (NS_FAILED(rv)) {
+      return nullptr;
+    }
+
+    nsCOMPtr<nsIProtocolHandler> handler;
+    rv = ios->GetProtocolHandler("http", getter_AddRefs(handler));
+    if (NS_FAILED(rv)) {
+      return nullptr;
+    }
+  }
+  HttpTransactionChild* p = new HttpTransactionChild();
+  p->AddRef();
+  return p;
+}
+
+bool SocketProcessChild::DeallocPHttpTransactionChild(
+    PHttpTransactionChild* aActor) {
+  LOG(("SocketProcessChild::DeallocPHttpTransactionChild aActor=%p\n", aActor));
+
+  HttpTransactionChild* p = static_cast<HttpTransactionChild*>(aActor);
+  p->Release();
+  return true;
+}
+
+PFileDescriptorSetChild* SocketProcessChild::AllocPFileDescriptorSetChild(
+    const FileDescriptor& aFD) {
+  return new FileDescriptorSetChild(aFD);
+}
+
+bool SocketProcessChild::DeallocPFileDescriptorSetChild(
+    PFileDescriptorSetChild* aActor) {
+  delete aActor;
+  return true;
+}
+
+PChildToParentStreamChild*
+SocketProcessChild::AllocPChildToParentStreamChild() {
+  MOZ_CRASH("PChildToParentStreamChild actors should be manually constructed!");
+}
+
+bool SocketProcessChild::DeallocPChildToParentStreamChild(
+    PChildToParentStreamChild* aActor) {
+  delete aActor;
+  return true;
+}
+
+PParentToChildStreamChild*
+SocketProcessChild::AllocPParentToChildStreamChild() {
+  return mozilla::ipc::AllocPParentToChildStreamChild();
+}
+
+bool SocketProcessChild::DeallocPParentToChildStreamChild(
+    PParentToChildStreamChild* aActor) {
+  delete aActor;
+  return true;
 }
 
 mozilla::ipc::IPCResult SocketProcessChild::RecvInitSocketProcessBridgeParent(

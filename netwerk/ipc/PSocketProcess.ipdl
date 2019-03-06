@@ -3,6 +3,10 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+include protocol PFileDescriptorSet;
+include protocol PHttpTransaction;
+include protocol PChildToParentStream;
+include protocol PParentToChildStream;
 include protocol PDNSRequest;
 include protocol PSocketProcessBridge;
 include protocol PProfiler;
@@ -27,6 +31,10 @@ namespace net {
 
 protocol PSocketProcess
 {
+  manages PFileDescriptorSet;
+  manages PHttpTransaction;
+  manages PChildToParentStream;
+  manages PParentToChildStream;
   manages PDNSRequest;
   manages PWebrtcTCPSocket;
 
@@ -34,6 +42,8 @@ parent:
   async InitCrashReporter(Shmem shmem, NativeThreadId threadId);
   async AddMemoryReport(MemoryReport aReport);
   async FinishMemoryReport(uint32_t aGeneration);
+  async PChildToParentStream();
+
   // Messages for sending telemetry to parent process.
   async AccumulateChildHistograms(HistogramAccumulation[] accumulations);
   async AccumulateChildKeyedHistograms(KeyedHistogramAccumulation[] accumulations);
@@ -53,11 +63,18 @@ child:
                             bool anonymize,
                             bool minimizeMemoryUsage,
                             FileDescriptor? DMDFile);
+  async PHttpTransaction();
+  async PParentToChildStream();
   async SetOffline(bool offline);
   async InitSocketProcessBridgeParent(ProcessId processId, Endpoint<PSocketProcessBridgeParent> endpoint);
   async InitProfiler(Endpoint<PProfilerChild> aEndpoint);
+
   // test-only
   async SocketProcessTelemetryPing();
+
+both:
+  async PFileDescriptorSet(FileDescriptor fd);
+
 };
 
 } // namespace net

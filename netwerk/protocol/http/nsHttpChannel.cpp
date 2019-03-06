@@ -137,6 +137,7 @@
 #include "mozilla/dom/CanonicalBrowsingContext.h"
 #include "mozilla/dom/WindowGlobalParent.h"
 #include "js/Conversions.h"
+#include "mozilla/net/SocketProcessParent.h"
 
 #ifdef MOZ_TASK_TRACER
 #  include "GeckoTaskTracer.h"
@@ -1257,6 +1258,12 @@ nsresult nsHttpChannel::SetupTransaction() {
   mTransaction = new HttpTransactionParent();
   LOG(("nsHttpChannel %p created HttpTransactionParent %p\n", this,
        mTransaction.get()));
+
+  SocketProcessParent *socketProcess = SocketProcessParent::GetSingleton();
+  if (socketProcess) {
+    Unused << socketProcess->SendPHttpTransactionConstructor(mTransaction);
+    mTransaction->AddIPDLReference();
+  }
 
   // TODO: make transaction overserver work again
   // mTransaction->SetTransactionObserver(mTransactionObserver);

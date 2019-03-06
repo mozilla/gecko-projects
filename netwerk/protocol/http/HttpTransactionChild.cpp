@@ -8,6 +8,9 @@
 #include "HttpLog.h"
 
 #include "HttpTransactionChild.h"
+
+#include "mozilla/ipc/IPCStreamUtils.h"
+#include "mozilla/net/SocketProcessChild.h"
 #include "nsHttpHandler.h"
 
 using namespace mozilla::net;
@@ -22,17 +25,18 @@ NS_IMPL_ISUPPORTS(HttpTransactionChild, nsIRequestObserver, nsIStreamListener,
 // HttpTransactionChild <public>
 //-----------------------------------------------------------------------------
 
-HttpTransactionChild::HttpTransactionChild(HttpTransactionParent* aParent)
-    : mParent(aParent) {
+HttpTransactionChild::HttpTransactionChild() {
   LOG(("Creating HttpTransactionChild @%p\n", this));
   mTransaction = new nsHttpTransaction();
+  mSelfAddr.raw.family = PR_AF_UNSPEC;
+  mPeerAddr.raw.family = PR_AF_UNSPEC;
 }
 
 HttpTransactionChild::~HttpTransactionChild() {
   LOG(("Destroying HttpTransactionChild @%p\n", this));
 }
 
-nsresult HttpTransactionChild::Init(
+nsresult HttpTransactionChild::InitInternal(
     uint32_t caps, const HttpConnectionInfoCloneArgs& infoArgs,
     nsHttpRequestHead* requestHead, nsIInputStream* requestBody,
     uint64_t requestContentLength, bool requestBodyHasHeaders,
@@ -93,20 +97,50 @@ nsresult HttpTransactionChild::Init(
   return rv;
 }
 
-NS_IMETHODIMP
-HttpTransactionChild::Cancel(nsresult aStatus) {
+mozilla::ipc::IPCResult HttpTransactionChild::RecvCancel(
+    const nsresult& aStatus) {
+  LOG(("HttpTransactionChild::RecvCancel start [this=%p]\n", this));
+
   if (mTransactionPump) {
     mTransactionPump->Cancel(aStatus);
   }
 
-  return NS_OK;
+  return IPC_OK();
 }
 
-NS_IMETHODIMP
-HttpTransactionChild::Suspend(void) { return mTransactionPump->Suspend(); }
+mozilla::ipc::IPCResult HttpTransactionChild::RecvSuspend() {
+  LOG(("HttpTransactionChild::RecvSuspend start [this=%p]\n", this));
 
-NS_IMETHODIMP
-HttpTransactionChild::Resume(void) { return mTransactionPump->Resume(); }
+  mTransactionPump->Suspend();
+  return IPC_OK();
+}
+
+mozilla::ipc::IPCResult HttpTransactionChild::RecvResume() {
+  LOG(("HttpTransactionChild::RecvResume start [this=%p]\n", this));
+
+  mTransactionPump->Resume();
+  return IPC_OK();
+}
+
+mozilla::ipc::IPCResult HttpTransactionChild::RecvInit(
+    const uint32_t& aCaps, const HttpConnectionInfoCloneArgs& aArgs,
+    const nsHttpRequestHead& aReqHeaders, const Maybe<IPCStream>& aRequestBody,
+    const uint64_t& aReqContentLength, const bool& aReqBodyIncludesHeaders,
+    const uint64_t& aTopLevelOuterContentWindowId, const int32_t& aPriority) {
+  mRequestHead = aReqHeaders;
+  if (aRequestBody) {
+    mUploadStream = mozilla::ipc::DeserializeIPCStream(aRequestBody);
+  }
+  // TODO: let parent process know about the failure
+  if (NS_FAILED(InitInternal(aCaps, aArgs, &mRequestHead, mUploadStream,
+                             aReqContentLength, aReqBodyIncludesHeaders,
+                             GetCurrentThreadEventTarget(),
+                             aTopLevelOuterContentWindowId, aPriority))) {
+    LOG(("HttpTransactionChild::RecvInit: [this=%p] InitInternal failed!\n",
+         this));
+  }
+  return IPC_OK();
+}
 
 //-----------------------------------------------------------------------------
 // HttpTransactionChild <nsIStreamListener>
@@ -116,39 +150,65 @@ NS_IMETHODIMP
 HttpTransactionChild::OnDataAvailable(nsIRequest* aRequest,
                                       nsIInputStream* aInputStream,
                                       uint64_t aOffset, uint32_t aCount) {
-  LOG(("HttpTransactionChild::OnDataAvailable [this=%p]\n", this));
+  LOG(("HttpTransactionChild::OnDataAvailable [this=%p, aOffset= %" PRIu64
+       " aCount=%" PRIu32 "]\n",
+       this, aOffset, aCount));
   MOZ_ASSERT(mTransaction);
 
-  // TODO: need to determine how to send the input stream, we can use
-  // OptionalIPCStream first
-  return mParent->OnDataAvailable(aRequest, aInputStream, aOffset, aCount);
+  // TODO: need to determine how to send the input stream, we use nsCString for
+  // now
+  // TODO: send by chunks
+  // TODO: think of sending this to both content (consumer) and parent (cache)
+  // process, content needs to be flow-controlled
+  nsCString data;
+  nsresult rv = NS_ReadInputStreamToString(aInputStream, data, aCount);
+  // TODO: Let parent process know
+  if (NS_FAILED(rv)) {
+    return rv;
+  }
+  Unused << SendOnDataAvailable(data, aOffset, aCount);
+  return NS_OK;
 }
 
 NS_IMETHODIMP
 HttpTransactionChild::OnStartRequest(nsIRequest* aRequest) {
-  LOG(("HttpTransactionChild::OnStartRequest [this=%p]\n", this));
+  LOG(("HttpTransactionChild::OnStartRequest start [this=%p]\n", this));
   MOZ_ASSERT(mTransaction);
+
   nsresult status;
   aRequest->GetStatus(&status);
 
-  nsresult rv;
-  nsAutoPtr<nsHttpResponseHead> trans(mTransaction->TakeResponseHead());
-  rv = mParent->OnStartRequest(status, mTransaction->SecurityInfo(),
-                               mTransaction->ProxyConnectFailed(),
-                               trans.forget());
-
-  if (NS_SUCCEEDED(rv)) {
-    trans = nullptr;
+  nsCString serializedSecurityInfoOut;
+  nsCOMPtr<nsISupports> secInfoSupp = mTransaction->SecurityInfo();
+  if (secInfoSupp) {
+    nsCOMPtr<nsISerializable> secInfoSer = do_QueryInterface(secInfoSupp);
+    if (secInfoSer) {
+      NS_SerializeToString(secInfoSer, serializedSecurityInfoOut);
+    }
   }
-  return rv;
+
+  nsAutoPtr<nsHttpResponseHead> head(mTransaction->TakeResponseHead());
+  Maybe<nsHttpResponseHead> optionalHead;
+  if (head) {
+    optionalHead = Some(*head);
+  }
+  Unused << SendOnStartRequest(status, optionalHead, serializedSecurityInfoOut,
+                               mSelfAddr, mPeerAddr,
+                               mTransaction->ProxyConnectFailed());
+  LOG(("HttpTransactionChild::OnStartRequest end [this=%p]\n", this));
+  return NS_OK;
 }
 
 NS_IMETHODIMP
 HttpTransactionChild::OnStopRequest(nsIRequest* aRequest, nsresult aStatus) {
   LOG(("HttpTransactionChild::OnStopRequest [this=%p]\n", this));
   MOZ_ASSERT(mTransaction);
-  return mParent->OnStopRequest(aStatus, mTransaction->ResponseIsComplete(),
-                                mTransaction->GetTransferSize());
+
+  Unused << SendOnStopRequest(aStatus, mTransaction->ResponseIsComplete(),
+                              mTransaction->GetTransferSize());
+  mTransaction = nullptr;
+  mTransactionPump = nullptr;
+  return NS_OK;
 }
 
 //-----------------------------------------------------------------------------
@@ -160,17 +220,22 @@ HttpTransactionChild::OnTransportStatus(nsITransport* aTransport,
                                         nsresult aStatus, int64_t aProgress,
                                         int64_t aProgressMax) {
   LOG(("HttpTransactionChild::OnTransportStatus [this=%p]\n", this));
-  MOZ_ASSERT(mTransaction);
 
-  NetAddr selfAddr;
-  NetAddr peerAddr;
   if (aStatus == NS_NET_STATUS_CONNECTED_TO ||
       aStatus == NS_NET_STATUS_WAITING_FOR) {
-    mTransaction->GetNetworkAddresses(selfAddr, peerAddr);
+    if (mTransaction) {
+      mTransaction->GetNetworkAddresses(mSelfAddr, mPeerAddr);
+    } else {
+      nsCOMPtr<nsISocketTransport> socketTransport =
+          do_QueryInterface(aTransport);
+      if (socketTransport) {
+        socketTransport->GetSelfAddr(&mSelfAddr);
+        socketTransport->GetPeerAddr(&mPeerAddr);
+      }
+    }
   }
 
-  mParent->OnTransportStatus(aStatus, aProgress, aProgressMax, selfAddr,
-                             peerAddr);
+  Unused << SendOnTransportStatus(aStatus, aProgress, aProgressMax);
   return NS_OK;
 }
 

@@ -8,6 +8,8 @@
 #include "HttpLog.h"
 
 #include "HttpTransactionParent.h"
+#include "mozilla/ipc/IPCStreamUtils.h"
+#include "mozilla/net/SocketProcessParent.h"
 
 using namespace mozilla::net;
 
@@ -23,7 +25,6 @@ NS_IMPL_ISUPPORTS(HttpTransactionParent, nsIRequest,
 
 HttpTransactionParent::HttpTransactionParent() {
   LOG(("Creating HttpTransactionParent @%p\n", this));
-  mChild = new HttpTransactionChild(this);
 
   this->mSelfAddr.inet = {};
   this->mPeerAddr.inet = {};
@@ -78,12 +79,18 @@ nsresult HttpTransactionParent::Init(
   HttpConnectionInfoCloneArgs infoArgs;
   GetStructFromInfo(cinfo, infoArgs);
 
-  nsresult rv = mChild->Init(caps, infoArgs, requestHead, requestBody,
-                             requestContentLength, requestBodyHasHeaders,
-                             target, topLevelOuterContentWindowId, priority);
+  mozilla::ipc::AutoIPCStream autoStream;
+  if (requestBody &&
+      !autoStream.Serialize(requestBody, SocketProcessParent::GetSingleton())) {
+    return NS_ERROR_FAILURE;
+  }
 
-  if (NS_FAILED(rv)) {
-    return rv;
+  // TODO: handle |target| later
+  if (!SendInit(caps, infoArgs, *requestHead,
+                requestBody ? Some(autoStream.TakeValue()) : Nothing(),
+                requestContentLength, requestBodyHasHeaders,
+                topLevelOuterContentWindowId, priority)) {
+    return NS_ERROR_FAILURE;
   }
 
   mTargetThread = GetCurrentThreadEventTarget();
@@ -107,83 +114,93 @@ NS_IMETHODIMP HttpTransactionParent::RetargetDeliveryTo(
   return NS_ERROR_NOT_IMPLEMENTED;
 }
 
-NS_IMETHODIMP
-HttpTransactionParent::OnTransportStatus(nsresult aStatus, int64_t aProgress,
-                                         int64_t aProgressMax,
-                                         NetAddr aSelfAddr, NetAddr aPeerAddr) {
-  LOG(("HttpTransactionParent::OnTransportStatus [this=%p]\n", this));
-  NS_ENSURE_TRUE(mEventsink, NS_ERROR_UNEXPECTED);
-
-  if (aStatus == NS_NET_STATUS_CONNECTED_TO ||
-      aStatus == NS_NET_STATUS_WAITING_FOR) {
-    mSelfAddr = aSelfAddr;
-    mPeerAddr = aPeerAddr;
-  }
-  return mEventsink->OnTransportStatus(nullptr, aStatus, aProgress,
-                                       aProgressMax);
-}
-
 void HttpTransactionParent::GetNetworkAddresses(NetAddr& self, NetAddr& peer) {
   self = mSelfAddr;
   peer = mPeerAddr;
 }
 
-//-----------------------------------------------------------------------------
-// HttpTransactionParent <nsIStreamListener>
-//-----------------------------------------------------------------------------
+void HttpTransactionParent::AddIPDLReference() { AddRef(); }
 
-NS_IMETHODIMP
-HttpTransactionParent::OnDataAvailable(nsIRequest* aRequest,
-                                       nsIInputStream* aInputStream,
-                                       uint64_t aOffset, uint32_t aCount) {
-  LOG(("HttpTransactionParent::OnDataAvailable [this=%p]\n", this));
-  NS_ENSURE_TRUE(mChannel, NS_ERROR_UNEXPECTED);
-
-  if (mCanceled) {
-    return mStatus;
-  }
-
-  // TODO: need to determine how to send the input stream, we can use
-  // OptionalIPCStream first
-  nsCOMPtr<nsIStreamListener> chan = mChannel;
-  return chan->OnDataAvailable(this, aInputStream, aOffset, aCount);
-}
-
-NS_IMETHODIMP
-HttpTransactionParent::OnStartRequest(nsresult aStatus,
-                                      nsISupports* aSecurityInfo,
-                                      bool aProxyConnectFailed,
-                                      nsHttpResponseHead* aResponseHead) {
-  LOG(("HttpTransactionParent::OnStartRequest [this=%p]\n", this));
-  NS_ENSURE_TRUE(mChannel, NS_ERROR_UNEXPECTED);
+mozilla::ipc::IPCResult HttpTransactionParent::RecvOnStartRequest(
+    const nsresult& aStatus, const Maybe<nsHttpResponseHead>& aResponseHead,
+    const nsCString& aSecurityInfoSerialization, const NetAddr& aSelfAddr,
+    const NetAddr& aPeerAddr, const bool& aProxyConnectFailed) {
+  LOG(("HttpTransactionParent::RecvOnStartRequest [this=%p]\n", this));
 
   if (!mCanceled) {
     mStatus = aStatus;
   }
 
-  mSecurityInfo = aSecurityInfo;
+  if (!aSecurityInfoSerialization.IsEmpty()) {
+    NS_DeserializeObject(aSecurityInfoSerialization,
+                         getter_AddRefs(mSecurityInfo));
+  }
+
+  if (aResponseHead.isSome()) {
+    mResponseHead = new nsHttpResponseHead(aResponseHead.ref());
+  }
   mProxyConnectFailed = aProxyConnectFailed;
-  mResponseHead = aResponseHead;
+  mSelfAddr = aSelfAddr;
+  mPeerAddr = aPeerAddr;
 
   nsCOMPtr<nsIStreamListener> chan = mChannel;
-  return chan->OnStartRequest(this);
+
+  // TODO: return IPC_Fail if OnStartRequest failed?
+  Unused << chan->OnStartRequest(this);
+  return IPC_OK();
 }
 
-NS_IMETHODIMP
-HttpTransactionParent::OnStopRequest(nsresult aStatus, bool aResponseIsComplete,
-                                     int64_t aTransferSize) {
-  LOG(("HttpTransactionParent::OnStopRequest [this=%p]\n", this));
-  NS_ENSURE_TRUE(mChannel, NS_ERROR_UNEXPECTED);
+mozilla::ipc::IPCResult HttpTransactionParent::RecvOnTransportStatus(
+    const nsresult& aStatus, const int64_t& aProgress,
+    const int64_t& aProgressMax) {
+  LOG(("HttpTransactionParent::OnTransportStatus [this=%p]\n", this));
 
-  nsresult rv;
+  mEventsink->OnTransportStatus(nullptr, aStatus, aProgress, aProgressMax);
+  return IPC_OK();
+}
+
+mozilla::ipc::IPCResult HttpTransactionParent::RecvOnDataAvailable(
+    const nsCString& aData, const uint64_t& aOffset, const uint32_t& aCount) {
+  LOG(("HttpTransactionParent::RecvOnDataAvailable [this=%p, aOffset= %" PRIu64
+       " aCount=%" PRIu32 "]\n",
+       this, aOffset, aCount));
+
+  if (mCanceled) {
+    return IPC_OK();
+  }
+
+  // TODO: need to determine how to send the input stream, we use nsCString for
+  // now
+  nsCOMPtr<nsIStreamListener> chan = mChannel;
+  nsCOMPtr<nsIInputStream> stringStream;
+  nsresult rv = NS_NewByteInputStream(getter_AddRefs(stringStream),
+                                      MakeSpan(aData.get(), aCount),
+                                      NS_ASSIGNMENT_DEPEND);
+
+  if (NS_FAILED(rv)) {
+    return IPC_OK();
+  }
+  // TODO: return IPC_Fail if OnDataAvailable failed?
+  Unused << chan->OnDataAvailable(this, stringStream, aOffset, aCount);
+  return IPC_OK();
+}
+
+mozilla::ipc::IPCResult HttpTransactionParent::RecvOnStopRequest(
+    const nsresult& aStatus, const bool& aResponseIsComplete,
+    const int64_t& aTransferSize) {
+  LOG(("HttpTransactionParent::RecvOnStopRequest [this=%p]\n", this));
+
+  nsCOMPtr<nsIRequest> deathGrip = this;
 
   mResponseIsComplete = aResponseIsComplete;
   mTransferSize = aTransferSize;
 
   nsCOMPtr<nsIStreamListener> chan = mChannel;
-  rv = chan->OnStopRequest(this, aStatus);
+  Unused << chan->OnStopRequest(this, aStatus);
 
-  return rv;
+  // We are done with this transaction after OnStopRequest.
+  Unused << Send__delete__(this);
+  return IPC_OK();
 }
 
 //-----------------------------------------------------------------------------
@@ -210,35 +227,23 @@ HttpTransactionParent::GetStatus(nsresult* aStatus) {
 
 NS_IMETHODIMP
 HttpTransactionParent::Cancel(nsresult aStatus) {
-  NS_ENSURE_TRUE(mChild, NS_ERROR_NOT_AVAILABLE);
-
   if (!mCanceled) {
     mCanceled = true;
     mStatus = aStatus;
-    if (NS_FAILED(mChild->Cancel(aStatus))) {
-      return NS_ERROR_UNEXPECTED;
-    }
+    Unused << SendCancel(mStatus);
   }
   return NS_OK;
 }
 
 NS_IMETHODIMP
 HttpTransactionParent::Suspend(void) {
-  NS_ENSURE_TRUE(mChild, NS_ERROR_NOT_AVAILABLE);
-
-  if (NS_FAILED(mChild->Suspend())) {
-    return NS_ERROR_UNEXPECTED;
-  }
+  Unused << SendSuspend();
   return NS_OK;
 }
 
 NS_IMETHODIMP
 HttpTransactionParent::Resume(void) {
-  NS_ENSURE_TRUE(mChild, NS_ERROR_NOT_AVAILABLE);
-
-  if (NS_FAILED(mChild->Resume())) {
-    return NS_ERROR_UNEXPECTED;
-  }
+  Unused << SendResume();
   return NS_OK;
 }
 
@@ -262,6 +267,11 @@ NS_IMETHODIMP
 HttpTransactionParent::SetLoadFlags(nsLoadFlags aLoadFlags) {
   mLoadFlags = aLoadFlags;
   return NS_OK;
+}
+
+void HttpTransactionParent::ActorDestroy(ActorDestroyReason aWhy) {
+  LOG(("HttpTransactionParent::ActorDestroy [this=%p]\n", this));
+  // TODO: we (probably?) have to notify OnStopReq on the channel
 }
 
 }  // namespace net

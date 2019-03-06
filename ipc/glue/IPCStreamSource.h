@@ -19,6 +19,11 @@ class ContentChild;
 class ContentParent;
 }  // namespace dom
 
+namespace net {
+class PSocketProcessChild;
+class PSocketProcessParent;
+}  // namespace net
+
 namespace wr {
 struct ByteBuffer;
 }  // namespace wr
@@ -69,6 +74,12 @@ class IPCStreamSource {
   static PChildToParentStreamChild* Create(nsIAsyncInputStream* aInputStream,
                                            PBackgroundChild* aManager);
 
+  // Create a IPCStreamSource using a PSocketProcess IPC manager on the
+  // main thread.  This can return nullptr if the provided
+  // stream is blocking.
+  static PChildToParentStreamChild* Create(nsIAsyncInputStream* aInputStream,
+                                           net::PSocketProcessChild* aManager);
+
   // Create a IPCStreamSource using a PContent IPC manager on the
   // main thread.  This can return nullptr if the provided stream is
   // blocking.
@@ -80,6 +91,12 @@ class IPCStreamSource {
   // stream is blocking or if the Worker thread is already shutting down.
   static PParentToChildStreamParent* Create(nsIAsyncInputStream* aInputStream,
                                             PBackgroundParent* aManager);
+
+  // Create a IPCStreamSource using a PSocketProcess IPC manager on the
+  // main thread.  This can return nullptr if the provided stream is
+  // blocking.
+  static PParentToChildStreamParent* Create(
+      nsIAsyncInputStream* aInputStream, net::PSocketProcessParent* aManager);
 
   static IPCStreamSource* Cast(PChildToParentStreamChild* aActor);
 
