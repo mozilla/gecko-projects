@@ -852,11 +852,10 @@ nsresult nsHttpChannel::DoConnect(nsHttpTransaction* aTransWithStickyConn) {
   // TODO: Bug 1485355, now move to HttpTransaction::Child
   // if (aTransWithStickyConn) {
   //   rv = gHttpHandler->InitiateTransactionWithStickyConn(
-  //       mTransaction->mChild->mTransaction, mPriority, aTransWithStickyConn);
+  //       mTransaction, mPriority, aTransWithStickyConn);
   // } else {
   //   rv =
-  //   gHttpHandler->InitiateTransaction(mTransaction->mChild->mTransaction,
-  //   mPriority);
+  //   gHttpHandler->InitiateTransaction(mTransaction, mPriority);
   // }
 
   // if (NS_FAILED(rv)) {
@@ -864,8 +863,7 @@ nsresult nsHttpChannel::DoConnect(nsHttpTransaction* aTransWithStickyConn) {
   // }
 
   // rv =
-  // mTransaction->mChild->mTransactionPump->AsyncRead(mTransaction->mChild,
-  // nullptr);
+  // mTransactionPump->AsyncRead(this, nullptr);
 
   // if (NS_FAILED(rv)) {
   //   return rv;
@@ -1257,13 +1255,12 @@ nsresult nsHttpChannel::SetupTransaction() {
 
   // create the transaction object
   mTransaction = new HttpTransactionParent();
-  LOG1(("nsHttpChannel %p created nsHttpTransaction %p\n", this,
-        mTransaction.get()));
+  LOG(("nsHttpChannel %p created HttpTransactionParent %p\n", this,
+       mTransaction.get()));
 
   // TODO: make transaction overserver work again
-  mTransaction->mChild->mTransaction->SetTransactionObserver(
-      mTransactionObserver);
-  mTransactionObserver = nullptr;
+  // mTransaction->SetTransactionObserver(mTransactionObserver);
+  // mTransactionObserver = nullptr;
 
   // See bug #466080. Transfer LOAD_ANONYMOUS flag to socket-layer.
   if (mLoadFlags & LOAD_ANONYMOUS) mCaps |= NS_HTTP_LOAD_ANONYMOUS;
@@ -1281,10 +1278,10 @@ nsresult nsHttpChannel::SetupTransaction() {
   }
 
   // TODO: enable h2 push
-  if (mPushedStream) {
-    mTransaction->mChild->mTransaction->SetPushedStream(mPushedStream);
-    mPushedStream = nullptr;
-  }
+  // if (mPushedStream) {
+  //     mTransaction->SetPushedStream(mPushedStream);
+  //     mPushedStream = nullptr;
+  // }
 
   nsCOMPtr<nsIHttpPushListener> pushListener;
   NS_QueryNotificationCallbacks(mCallbacks, mLoadGroup,
@@ -1308,13 +1305,16 @@ nsresult nsHttpChannel::SetupTransaction() {
     return rv;
   }
 
+  // TODO: this line is added for security callback workaround
+  // mTransaction->SetSecurityCallbacks(callbacks);
+
   // TODO: make throttling work again
-  mTransaction->mChild->mTransaction->SetClassOfService(mClassOfService);
+  // mTransaction->SetClassOfService(mClassOfService);
 
   // TODO: make request context service work agin
-  if (EnsureRequestContext()) {
-    mTransaction->mChild->mTransaction->SetRequestContext(mRequestContext);
-  }
+  // if (EnsureRequestContext()) {
+  //     mTransaction->SetRequestContext(mRequestContext);
+  // }
 
   mTransactionPump = mTransaction;
 
@@ -1823,11 +1823,11 @@ nsresult nsHttpChannel::CallOnStartRequest() {
           NS_SUCCEEDED(mCachePump->PeekStream(CallTypeSniffers, thisChannel));
     }
 
+    Unused << typeSniffersCalled;
     // TODO: enable PeekStream (possible?)
-    if (!typeSniffersCalled && mTransactionPump) {
-      mTransaction->mChild->mTransactionPump->PeekStream(CallTypeSniffers,
-                                                         thisChannel);
-    }
+    // if (!typeSniffersCalled && mTransactionPump) {
+    //   mTransactionPump->PeekStream(CallTypeSniffers, thisChannel);
+    // }
   }
 
   bool unknownDecoderStarted = false;
@@ -2018,8 +2018,8 @@ nsresult nsHttpChannel::ProcessFailedProxyConnect(uint32_t httpStatus) {
   // Make sure the connection is thrown away as it can be in a bad state
   // and the proxy may just hang on the next request.
   // TODO: Bug 1497247 fix this in connection stickness bug.
-  MOZ_ASSERT(mTransaction);
-  mTransaction->mChild->mTransaction->DontReuseConnection();
+  // MOZ_ASSERT(mTransaction);
+  // mTransaction->DontReuseConnection();
 
   Cancel(rv);
   {
@@ -6107,7 +6107,7 @@ NS_IMETHODIMP nsHttpChannel::CloseStickyConnection() {
   }
 
   // TODO: Bug 1497247 fix this in connection stickness bug.
-  mTransaction->mChild->mTransaction->DontReuseConnection();
+  // mTransaction->DontReuseConnection();
   return NS_OK;
 }
 
@@ -6301,11 +6301,10 @@ nsresult nsHttpChannel::CancelInternal(nsresult status) {
 void nsHttpChannel::CancelNetworkRequest(nsresult aStatus) {
   if (mTransaction) {
     // TODO: Bug 1485355
-    nsresult rv = gHttpHandler->CancelTransaction(
-        mTransaction->mChild->mTransaction, aStatus);
-    if (NS_FAILED(rv)) {
-      LOG(("failed to cancel the transaction\n"));
-    }
+    // nsresult rv = gHttpHandler->CancelTransaction(mTransaction, aStatus);
+    // if (NS_FAILED(rv)) {
+    //   LOG(("failed to cancel the transaction\n"));
+    // }
   }
   if (mTransactionPump) mTransactionPump->Cancel(aStatus);
 }
@@ -6933,14 +6932,13 @@ nsHttpChannel::SetPriority(int32_t value) {
 
   mPriority = newValue;
   if (mTransaction) {
-    nsresult rv = gHttpHandler->RescheduleTransaction(
-        mTransaction->mChild->mTransaction, mPriority);
-    if (NS_FAILED(rv)) {
-      LOG(
-          ("nsHttpChannel::SetPriority [this=%p] "
-           "RescheduleTransaction failed (%08x)",
-           this, static_cast<uint32_t>(rv)));
-    }
+    // TODO: Bug 1485355
+    // nsresult rv = gHttpHandler->RescheduleTransaction(mTransaction,
+    // mPriority); if (NS_FAILED(rv)) {
+    //     LOG(("nsHttpChannel::SetPriority [this=%p] "
+    //          "RescheduleTransaction failed (%08x)", this,
+    //          static_cast<uint32_t>(rv)));
+    // }
   }
 
   // If this channel is the real channel for an e10s channel, notify the
@@ -7002,8 +7000,9 @@ void nsHttpChannel::OnClassOfServiceUpdated() {
        mClassOfService));
 
   if (mTransaction) {
-    gHttpHandler->UpdateClassOfServiceOnTransaction(
-        mTransaction->mChild->mTransaction, mClassOfService);
+    // TODO: Bug 1485355
+    // gHttpHandler->UpdateClassOfServiceOnTransaction(mTransaction,
+    // mClassOfService);
   }
   if (EligibleForTailing()) {
     RemoveAsNonTailRequest();
@@ -7906,11 +7905,11 @@ nsHttpChannel::OnStopRequest(nsIRequest* request, nsresult status) {
     // Do not to leave the transaction in a suspended state in error cases.
     if (NS_FAILED(status) && mTransaction) {
       // TODO: Bug 1485355
-      nsresult rv = gHttpHandler->CancelTransaction(
-          mTransaction->mChild->mTransaction, status);
-      if (NS_FAILED(rv)) {
-        LOG(("  CancelTransaction failed (%08x)", static_cast<uint32_t>(rv)));
-      }
+      // nsresult rv = gHttpHandler->CancelTransaction(mTransaction, status);
+      // if (NS_FAILED(rv)) {
+      //     LOG(("  CancelTransaction failed (%08x)",
+      //          static_cast<uint32_t>(rv)));
+      // }
     }
   }
 
@@ -7935,12 +7934,12 @@ nsHttpChannel::OnStopRequest(nsIRequest* request, nsresult status) {
 
     // TODO: Bug 1497247 fix this in connection stickness bug
     RefPtr<nsHttpTransaction> transactionWithStickyConn;
-    if (mCaps & NS_HTTP_STICKY_CONNECTION ||
-        mTransaction->Caps() & NS_HTTP_STICKY_CONNECTION) {
-      transactionWithStickyConn = mTransaction->mChild->mTransaction;
-      LOG(("  transaction %p has sticky connection",
-           transactionWithStickyConn.get()));
-    }
+    // if (mCaps & NS_HTTP_STICKY_CONNECTION ||
+    //     mTransaction->Caps() & NS_HTTP_STICKY_CONNECTION) {
+    //   transactionWithStickyConn = mTransaction;
+    //   LOG(("  transaction %p has sticky connection",
+    //        transactionWithStickyConn.get()));
+    // }
 
     // this code relies on the code in nsHttpTransaction::Close, which
     // tests for NS_HTTP_STICKY_CONNECTION to determine whether or not to
@@ -7991,11 +7990,11 @@ nsHttpChannel::OnStopRequest(nsIRequest* request, nsresult status) {
     }
 
     // TODO: serialize response trailer in onstoprequest
-    mResponseTrailers =
-        mTransaction->mChild->mTransaction->TakeResponseTrailers();
+    // mResponseTrailers = mTransaction->TakeResponseTrailers();
 
+    // TODO: serialize the timing
     // at this point, we're done with the transaction
-    mTransactionTimings = mTransaction->mChild->mTransaction->Timings();
+    // mTransactionTimings = mTransaction->Timings();
     mTransaction = nullptr;
     mTransactionPump = nullptr;
 
@@ -9333,7 +9332,8 @@ void nsHttpChannel::UpdateAggregateCallbacks() {
   NS_NewNotificationCallbacksAggregation(mCallbacks, mLoadGroup,
                                          GetCurrentThreadEventTarget(),
                                          getter_AddRefs(callbacks));
-  mTransaction->mChild->mTransaction->SetSecurityCallbacks(callbacks);
+  // TODO: deal with security callbacks (PSM)
+  // mTransaction->SetSecurityCallbacks(callbacks);
 }
 
 NS_IMETHODIMP

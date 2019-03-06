@@ -98,9 +98,6 @@ class HttpTransactionParent final : public nsIRequest,
   bool ResponseIsComplete() { return mResponseIsComplete; }
   int64_t GetTransferSize() { return mTransferSize; }
 
-  // TODO: remove after ipdl is set
-  RefPtr<HttpTransactionChild> mChild;
-
  private:
   virtual ~HttpTransactionParent();
 
@@ -126,6 +123,9 @@ class HttpTransactionParent final : public nsIRequest,
 
   NetAddr mSelfAddr;
   NetAddr mPeerAddr;
+
+  // TODO: remove after ipdl is set
+  RefPtr<HttpTransactionChild> mChild;
 };
 
 }  // namespace net
