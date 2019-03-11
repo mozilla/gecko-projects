@@ -2371,8 +2371,8 @@ bool CharIterator::IsOriginalCharTrimmed() const {
     nsIContent* content = mFrameForTrimCheck->GetContent();
     nsTextFrame::TrimmedOffsets trim = mFrameForTrimCheck->GetTrimmedOffsets(
         content->GetText(),
-            (mPostReflow ? nsTextFrame::TrimmedOffsetFlags::kDefaultTrimFlags :
-                           nsTextFrame::TrimmedOffsetFlags::kNotPostReflow));
+        (mPostReflow ? nsTextFrame::TrimmedOffsetFlags::kDefaultTrimFlags
+                     : nsTextFrame::TrimmedOffsetFlags::kNotPostReflow));
     TrimOffsets(offset, length, trim);
     mTrimmedOffset = offset;
     mTrimmedLength = length;
@@ -3017,8 +3017,7 @@ void SVGTextFrame::ReflowSVGNonDisplayText() {
   // element is within a <mask>, say, the element referencing the <mask> will
   // be updated, which will then cause this SVGTextFrame to be painted and
   // in doing so cause the anonymous block frame to be reflowed.
-  nsLayoutUtils::PostRestyleEvent(mContent->AsElement(), nsRestyleHint(0),
-                                  nsChangeHint_InvalidateRenderingObservers);
+  SVGObserverUtils::InvalidateRenderingObservers(this);
 
   // Finally, we need to actually reflow the anonymous block frame and update
   // mPositions, in case we are being reflowed immediately after a DOM
@@ -3822,9 +3821,9 @@ nsresult SVGTextFrame::GetSubStringLength(nsIContent* aContent,
     // Trim the offset/length to remove any leading/trailing white space.
     uint32_t trimmedOffset = untrimmedOffset;
     uint32_t trimmedLength = untrimmedLength;
-    nsTextFrame::TrimmedOffsets trimmedOffsets =
-        frame->GetTrimmedOffsets(frame->GetContent()->GetText(),
-            nsTextFrame::TrimmedOffsetFlags::kNotPostReflow);
+    nsTextFrame::TrimmedOffsets trimmedOffsets = frame->GetTrimmedOffsets(
+        frame->GetContent()->GetText(),
+        nsTextFrame::TrimmedOffsetFlags::kNotPostReflow);
     TrimOffsets(trimmedOffset, trimmedLength, trimmedOffsets);
 
     textElementCharIndex += trimmedOffset - untrimmedOffset;

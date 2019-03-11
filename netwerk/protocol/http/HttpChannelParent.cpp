@@ -382,11 +382,11 @@ void HttpChannelParent::InvokeAsyncOpen(nsresult rv) {
 }
 
 bool HttpChannelParent::DoAsyncOpen(
-    const URIParams& aURI, const OptionalURIParams& aOriginalURI,
-    const OptionalURIParams& aDocURI,
-    const OptionalURIParams& aOriginalReferrerURI,
-    const uint32_t& aReferrerPolicy, const OptionalURIParams& aAPIRedirectToURI,
-    const OptionalURIParams& aTopWindowURI, nsIPrincipal* aTopWindowPrincipal,
+    const URIParams& aURI, const Maybe<URIParams>& aOriginalURI,
+    const Maybe<URIParams>& aDocURI,
+    const Maybe<URIParams>& aOriginalReferrerURI,
+    const uint32_t& aReferrerPolicy, const Maybe<URIParams>& aAPIRedirectToURI,
+    const Maybe<URIParams>& aTopWindowURI, nsIPrincipal* aTopWindowPrincipal,
     const uint32_t& aLoadFlags, const RequestHeaderTuples& requestHeaders,
     const nsCString& requestMethod, const Maybe<IPCStream>& uploadStream,
     const bool& uploadStreamHasHeaders, const int16_t& priority,
@@ -395,7 +395,7 @@ bool HttpChannelParent::DoAsyncOpen(
     const bool& doResumeAt, const uint64_t& startPos, const nsCString& entityID,
     const bool& chooseApplicationCache, const nsCString& appCacheClientID,
     const bool& allowSpdy, const bool& allowAltSvc, const bool& beConservative,
-    const uint32_t& tlsFlags, const OptionalLoadInfoArgs& aLoadInfoArgs,
+    const uint32_t& tlsFlags, const Maybe<LoadInfoArgs>& aLoadInfoArgs,
     const OptionalHttpResponseHead& aSynthesizedResponseHead,
     const nsCString& aSecurityInfoSerialization, const uint32_t& aCacheKey,
     const uint64_t& aRequestContextID,
@@ -827,8 +827,8 @@ mozilla::ipc::IPCResult HttpChannelParent::RecvRedirect2Verify(
     const nsresult& aResult, const RequestHeaderTuples& changedHeaders,
     const ChildLoadInfoForwarderArgs& aLoadInfoForwarder,
     const uint32_t& loadFlags, const uint32_t& referrerPolicy,
-    const OptionalURIParams& aReferrerURI,
-    const OptionalURIParams& aAPIRedirectURI,
+    const Maybe<URIParams>& aReferrerURI,
+    const Maybe<URIParams>& aAPIRedirectURI,
     const OptionalCorsPreflightArgs& aCorsPreflightArgs,
     const bool& aChooseAppcache) {
   LOG(("HttpChannelParent::RecvRedirect2Verify [this=%p result=%" PRIx32 "]\n",
@@ -2353,7 +2353,8 @@ void HttpChannelParent::NotifyDiversionFailed(nsresult aErrorCode) {
 }
 
 nsresult HttpChannelParent::OpenAlternativeOutputStream(
-    const nsACString& type, int64_t predictedSize, nsIOutputStream** _retval) {
+    const nsACString& type, int64_t predictedSize,
+    nsIAsyncOutputStream** _retval) {
   // We need to make sure the child does not call SendDocumentChannelCleanup()
   // before opening the altOutputStream, because that clears mCacheEntry.
   if (!mCacheEntry) {

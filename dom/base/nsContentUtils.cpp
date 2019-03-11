@@ -20,6 +20,7 @@
 #include "imgRequestProxy.h"
 #include "jsapi.h"
 #include "jsfriendapi.h"
+#include "js/ArrayBuffer.h"  // JS::{GetArrayBufferData,IsArrayBufferObject,NewArrayBuffer}
 #include "js/JSON.h"
 #include "js/Value.h"
 #include "Layers.h"
@@ -69,6 +70,7 @@
 #include "mozilla/dom/IPCBlobUtils.h"
 #include "mozilla/dom/NodeBinding.h"
 #include "mozilla/dom/Promise.h"
+#include "mozilla/dom/BrowserBridgeChild.h"
 #include "mozilla/dom/ScriptSettings.h"
 #include "mozilla/dom/TabParent.h"
 #include "mozilla/dom/Text.h"
@@ -2069,6 +2071,15 @@ bool nsContentUtils::ShouldResistFingerprinting(const Document* aDoc) {
     return false;
   }
   bool isChrome = nsContentUtils::IsChromeDoc(aDoc);
+  return !isChrome && ShouldResistFingerprinting();
+}
+
+/* static */
+bool nsContentUtils::ShouldResistFingerprinting(nsIPrincipal* aPrincipal) {
+  if (!aPrincipal) {
+    return false;
+  }
+  bool isChrome = nsContentUtils::IsSystemPrincipal(aPrincipal);
   return !isChrome && ShouldResistFingerprinting();
 }
 
@@ -6078,16 +6089,16 @@ nsresult nsContentUtils::CreateArrayBuffer(JSContext* aCx,
   }
 
   int32_t dataLen = aData.Length();
-  *aResult = JS_NewArrayBuffer(aCx, dataLen);
+  *aResult = JS::NewArrayBuffer(aCx, dataLen);
   if (!*aResult) {
     return NS_ERROR_FAILURE;
   }
 
   if (dataLen > 0) {
-    NS_ASSERTION(JS_IsArrayBufferObject(*aResult), "What happened?");
+    NS_ASSERTION(JS::IsArrayBufferObject(*aResult), "What happened?");
     JS::AutoCheckCannotGC nogc;
     bool isShared;
-    memcpy(JS_GetArrayBufferData(*aResult, &isShared, nogc),
+    memcpy(JS::GetArrayBufferData(*aResult, &isShared, nogc),
            aData.BeginReading(), dataLen);
     MOZ_ASSERT(!isShared);
   }
@@ -6187,7 +6198,8 @@ bool nsContentUtils::IsSubDocumentTabbable(nsIContent* aContent) {
 
   // If the subdocument lives in another process, the frame is
   // tabbable.
-  if (EventStateManager::IsRemoteTarget(aContent)) {
+  if (EventStateManager::IsRemoteTarget(aContent) ||
+      BrowserBridgeChild::GetFrom(aContent)) {
     return true;
   }
 
@@ -7508,7 +7520,7 @@ void nsContentUtils::TransferableToIPCTransferable(
 
         IPCDataTransferItem* item = aIPCDataTransfer->items().AppendElement();
         item->flavor() = flavorStr;
-        item->data() = dataAsShmem;
+        item->data() = std::move(dataAsShmem);
       } else if (nsCOMPtr<nsIInputStream> stream = do_QueryInterface(data)) {
         // Images to be pasted on the clipboard are nsIInputStreams
         nsCString imageData;
@@ -7521,7 +7533,7 @@ void nsContentUtils::TransferableToIPCTransferable(
 
         IPCDataTransferItem* item = aIPCDataTransfer->items().AppendElement();
         item->flavor() = flavorStr;
-        item->data() = imageDataShmem;
+        item->data() = std::move(imageDataShmem);
       } else if (nsCOMPtr<imgIContainer> image = do_QueryInterface(data)) {
         // Images to be placed on the clipboard are imgIContainers.
         RefPtr<mozilla::gfx::SourceSurface> surface = image->GetFrame(
@@ -7549,7 +7561,7 @@ void nsContentUtils::TransferableToIPCTransferable(
         IPCDataTransferItem* item = aIPCDataTransfer->items().AppendElement();
         item->flavor() = flavorStr;
         // Turn item->data() into an nsCString prior to accessing it.
-        item->data() = surfaceData.ref();
+        item->data() = std::move(surfaceData.ref());
 
         IPCDataTransferImage& imageDetails = item->imageDetails();
         mozilla::gfx::IntSize size = dataSurface->GetSize();
@@ -7580,7 +7592,7 @@ void nsContentUtils::TransferableToIPCTransferable(
               IPCDataTransferItem* item =
                   aIPCDataTransfer->items().AppendElement();
               item->flavor() = type;
-              item->data() = dataAsShmem;
+              item->data() = std::move(dataAsShmem);
             }
 
             continue;
@@ -8214,31 +8226,30 @@ nsContentUtils::StorageAccess nsContentUtils::StorageAllowedForServiceWorker(
 }
 
 // static, private
-void nsContentUtils::GetCookieLifetimePolicyForPrincipal(
-    nsIPrincipal* aPrincipal, uint32_t* aLifetimePolicy) {
+void nsContentUtils::GetCookieLifetimePolicyFromCookieSettings(
+    nsICookieSettings* aCookieSettings, nsIPrincipal* aPrincipal,
+    uint32_t* aLifetimePolicy) {
   *aLifetimePolicy = sCookiesLifetimePolicy;
 
-  // Any permissions set for the given principal will override our default
-  // settings from preferences.
-  nsCOMPtr<nsIPermissionManager> permissionManager =
-      services::GetPermissionManager();
-  if (!permissionManager) {
-    return;
-  }
+  if (aCookieSettings) {
+    uint32_t cookiePermission = 0;
+    nsresult rv =
+        aCookieSettings->CookiePermission(aPrincipal, &cookiePermission);
+    if (NS_WARN_IF(NS_FAILED(rv))) {
+      return;
+    }
 
-  uint32_t perm;
-  permissionManager->TestPermissionFromPrincipal(
-      aPrincipal, NS_LITERAL_CSTRING("cookie"), &perm);
-  switch (perm) {
-    case nsICookiePermission::ACCESS_ALLOW:
-      *aLifetimePolicy = nsICookieService::ACCEPT_NORMALLY;
-      break;
-    case nsICookiePermission::ACCESS_DENY:
-      *aLifetimePolicy = nsICookieService::ACCEPT_NORMALLY;
-      break;
-    case nsICookiePermission::ACCESS_SESSION:
-      *aLifetimePolicy = nsICookieService::ACCEPT_SESSION;
-      break;
+    switch (cookiePermission) {
+      case nsICookiePermission::ACCESS_ALLOW:
+        *aLifetimePolicy = nsICookieService::ACCEPT_NORMALLY;
+        break;
+      case nsICookiePermission::ACCESS_DENY:
+        *aLifetimePolicy = nsICookieService::ACCEPT_NORMALLY;
+        break;
+      case nsICookiePermission::ACCESS_SESSION:
+        *aLifetimePolicy = nsICookieService::ACCEPT_SESSION;
+        break;
+    }
   }
 }
 
@@ -8409,6 +8420,7 @@ nsContentUtils::StorageAccess nsContentUtils::InternalStorageAllowedCheck(
   aRejectedReason = 0;
 
   StorageAccess access = StorageAccess::eAllow;
+  nsCOMPtr<nsICookieSettings> cookieSettings;
 
   // We don't allow storage on the null principal, in general. Even if the
   // calling context is chrome.
@@ -8427,6 +8439,15 @@ nsContentUtils::StorageAccess nsContentUtils::InternalStorageAllowedCheck(
     if (IsInPrivateBrowsing(document)) {
       access = StorageAccess::ePrivateBrowsing;
     }
+
+    if (document) {
+      cookieSettings = document->CookieSettings();
+    }
+  }
+
+  if (aChannel) {
+    nsCOMPtr<nsILoadInfo> loadInfo = aChannel->LoadInfo();
+    loadInfo->GetCookieSettings(getter_AddRefs(cookieSettings));
   }
 
   uint32_t lifetimePolicy;
@@ -8438,7 +8459,8 @@ nsContentUtils::StorageAccess nsContentUtils::InternalStorageAllowedCheck(
   if (policy) {
     lifetimePolicy = nsICookieService::ACCEPT_NORMALLY;
   } else {
-    GetCookieLifetimePolicyForPrincipal(aPrincipal, &lifetimePolicy);
+    GetCookieLifetimePolicyFromCookieSettings(cookieSettings, aPrincipal,
+                                              &lifetimePolicy);
   }
 
   // Check if we should only allow storage for the session, and record that fact

@@ -1,5 +1,6 @@
 import {actionCreators as ac} from "common/Actions.jsm";
 import {connect} from "react-redux";
+import {DSLinkMenu} from "../DSLinkMenu/DSLinkMenu";
 import {ImpressionStats} from "../../DiscoveryStreamImpressionStats/ImpressionStats";
 import React from "react";
 import {SafeAnchor} from "../SafeAnchor/SafeAnchor";
@@ -20,13 +21,13 @@ export class ListItem extends React.PureComponent {
       this.props.dispatch(ac.UserEvent({
         event: "CLICK",
         source: this.props.type.toUpperCase(),
-        action_position: this.props.index,
+        action_position: this.props.pos,
       }));
 
       this.props.dispatch(ac.ImpressionStats({
         source: this.props.type.toUpperCase(),
         click: 0,
-        tiles: [{id: this.props.id, pos: this.props.index}],
+        tiles: [{id: this.props.id, pos: this.props.pos}],
       }));
     }
   }
@@ -34,7 +35,11 @@ export class ListItem extends React.PureComponent {
   render() {
     return (
       <li className="ds-list-item">
-        <SafeAnchor url={this.props.url} className="ds-list-item-link" onLinkClick={this.onLinkClick}>
+        <SafeAnchor
+          className="ds-list-item-link"
+          dispatch={this.props.dispatch}
+          onLinkClick={this.onLinkClick}
+          url={this.props.url}>
           <div className="ds-list-item-text">
             <div>
               <div className="ds-list-item-title">{this.props.title}</div>
@@ -53,10 +58,18 @@ export class ListItem extends React.PureComponent {
           <div className="ds-list-image" style={{backgroundImage: `url(${this.props.image_src})`}} />
           <ImpressionStats
             campaignId={this.props.campaignId}
-            rows={[{id: this.props.id}]}
+            rows={[{id: this.props.id, pos: this.props.pos}]}
             dispatch={this.props.dispatch}
             source={this.props.type} />
         </SafeAnchor>
+        <DSLinkMenu
+          index={this.props.index}
+          dispatch={this.props.dispatch}
+          intl={this.props.intl}
+          url={this.props.url}
+          title={this.props.title}
+          source={this.props.source}
+          type={this.props.type} />
       </li>
     );
   }
@@ -80,7 +93,7 @@ export function _List(props) {
       excerpt={rec.excerpt}
       id={rec.id}
       image_src={rec.image_src}
-      index={index}
+      pos={rec.pos}
       title={rec.title}
       context={rec.context}
       type={props.type}

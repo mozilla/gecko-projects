@@ -2,15 +2,12 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-use api::{BorderRadius, ClipMode, ColorF, PictureRect, ColorU, LayoutVector2D};
-use api::{DeviceIntRect, DevicePixelScale, DeviceRect, WorldVector2D};
+use api::{BorderRadius, ClipMode, ColorF};
 use api::{FilterOp, ImageRendering, TileOffset, RepeatMode, WorldPoint, WorldSize};
-use api::{LayoutPoint, LayoutRect, LayoutSideOffsets, LayoutSize, PicturePoint};
-use api::{PremultipliedColorF, PropertyBinding, Shadow, DeviceVector2D};
-use api::{WorldPixel, BoxShadowClipMode, WorldRect, LayoutToWorldScale};
-use api::{PicturePixel, RasterPixel, LineStyle, LineOrientation, AuHelpers};
-use api::{LayoutPrimitiveInfo};
-use api::DevicePoint;
+use api::{PremultipliedColorF, PropertyBinding, Shadow, GradientStop};
+use api::{BoxShadowClipMode, LineStyle, LineOrientation, AuHelpers};
+use api::{LayoutPrimitiveInfo, PrimitiveKeyKind};
+use api::units::*;
 use border::{get_max_scale_for_border, build_border_instances};
 use border::BorderSegmentCacheKey;
 use clip::{ClipStore};
@@ -18,8 +15,9 @@ use clip_scroll_tree::{ROOT_SPATIAL_NODE_INDEX, ClipScrollTree, SpatialNodeIndex
 use clip::{ClipDataStore, ClipNodeFlags, ClipChainId, ClipChainInstance, ClipItem};
 use debug_colors;
 use debug_render::DebugItem;
-use display_list_flattener::{AsInstanceKind, CreateShadow, IsVisible};
+use display_list_flattener::{CreateShadow, IsVisible};
 use euclid::{SideOffsets2D, TypedTransform3D, TypedRect, TypedScale, TypedSize2D};
+use euclid::approxeq::ApproxEq;
 use frame_builder::{FrameBuildingContext, FrameBuildingState, PictureContext, PictureState};
 use frame_builder::{PrimitiveContext, FrameVisibilityContext, FrameVisibilityState};
 use glyph_rasterizer::GlyphKey;
@@ -31,7 +29,8 @@ use malloc_size_of::MallocSizeOf;
 use picture::{PictureCompositeMode, PicturePrimitive};
 use picture::{ClusterIndex, PrimitiveList, RecordedDirtyRegion, SurfaceIndex, RetainedTiles, RasterConfig};
 use prim_store::borders::{ImageBorderDataHandle, NormalBorderDataHandle};
-use prim_store::gradient::{LinearGradientDataHandle, RadialGradientDataHandle};
+use prim_store::gradient::{GRADIENT_FP_STOPS, GradientCacheKey, GradientStopKey};
+use prim_store::gradient::{LinearGradientPrimitive, LinearGradientDataHandle, RadialGradientDataHandle};
 use prim_store::image::{ImageDataHandle, ImageInstance, VisibleImageTile, YuvImageDataHandle};
 use prim_store::line_dec::LineDecorationDataHandle;
 use prim_store::picture::PictureDataHandle;
@@ -49,6 +48,7 @@ use std::{cmp, fmt, hash, ops, u32, usize, mem};
 #[cfg(debug_assertions)]
 use std::sync::atomic::{AtomicUsize, Ordering};
 use storage;
+use texture_cache::TEXTURE_REGION_DIMENSIONS;
 use util::{ScaleOffset, MatrixHelpers, MaxRect, Recycler, TransformedRectKind};
 use util::{pack_as_float, project_rect, raster_rect_to_device_pixels};
 use util::{scale_factors, clamp_to_scale_factor};
@@ -60,6 +60,7 @@ pub mod image;
 pub mod line_dec;
 pub mod picture;
 pub mod text_run;
+pub mod interned;
 
 /// Counter for unique primitive IDs for debug tracing.
 #[cfg(debug_assertions)]
@@ -327,19 +328,6 @@ impl GpuCacheAddress {
 pub struct PrimitiveSceneData {
     pub prim_size: LayoutSize,
     pub is_backface_visible: bool,
-}
-
-/// Information specific to a primitive type that
-/// uniquely identifies a primitive template by key.
-#[cfg_attr(feature = "capture", derive(Serialize))]
-#[cfg_attr(feature = "replay", derive(Deserialize))]
-#[derive(Debug, Clone, Eq, MallocSizeOf, PartialEq, Hash)]
-pub enum PrimitiveKeyKind {
-    /// Clear an existing rect, used for special effects on some platforms.
-    Clear,
-    Rectangle {
-        color: ColorU,
-    },
 }
 
 #[cfg_attr(feature = "capture", derive(Serialize))]
@@ -634,32 +622,6 @@ impl PrimitiveKey {
 
 impl intern::InternDebug for PrimitiveKey {}
 
-impl AsInstanceKind<PrimitiveDataHandle> for PrimitiveKey {
-    /// Construct a primitive instance that matches the type
-    /// of primitive key.
-    fn as_instance_kind(
-        &self,
-        data_handle: PrimitiveDataHandle,
-        _: &mut PrimitiveStore,
-        _reference_frame_relative_offset: LayoutVector2D,
-    ) -> PrimitiveInstanceKind {
-        match self.kind {
-            PrimitiveKeyKind::Clear => {
-                PrimitiveInstanceKind::Clear {
-                    data_handle
-                }
-            }
-            PrimitiveKeyKind::Rectangle { .. } => {
-                PrimitiveInstanceKind::Rectangle {
-                    data_handle,
-                    opacity_binding_index: OpacityBindingIndex::INVALID,
-                    segment_instance_index: SegmentInstanceIndex::INVALID,
-                }
-            }
-        }
-    }
-}
-
 /// The shared information for a given primitive. This is interned and retained
 /// both across frames and display lists, by comparing the matching PrimitiveKey.
 #[cfg_attr(feature = "capture", derive(Serialize))]
@@ -675,9 +637,9 @@ pub enum PrimitiveTemplateKind {
 /// Construct the primitive template data from a primitive key. This
 /// is invoked when a primitive key is created and the interner
 /// doesn't currently contain a primitive with this key.
-impl PrimitiveKeyKind {
-    fn into_template(self) -> PrimitiveTemplateKind {
-        match self {
+impl From<PrimitiveKeyKind> for PrimitiveTemplateKind {
+    fn from(kind: PrimitiveKeyKind) -> Self {
+        match kind {
             PrimitiveKeyKind::Clear => {
                 PrimitiveTemplateKind::Clear
             }
@@ -746,10 +708,10 @@ impl ops::DerefMut for PrimitiveTemplate {
 
 impl From<PrimitiveKey> for PrimitiveTemplate {
     fn from(item: PrimitiveKey) -> Self {
-        let common = PrimTemplateCommonData::with_key_common(item.common);
-        let kind = item.kind.into_template();
-
-        PrimitiveTemplate { common, kind, }
+        PrimitiveTemplate {
+            common: PrimTemplateCommonData::with_key_common(item.common),
+            kind: item.kind.into(),
+        }
     }
 }
 
@@ -795,13 +757,16 @@ impl PrimitiveTemplate {
     }
 }
 
+type PrimitiveDataHandle = intern::Handle<PrimitiveKeyKind>;
+
 impl intern::Internable for PrimitiveKeyKind {
-    type Marker = ::intern_types::prim::Marker;
-    type Source = PrimitiveKey;
+    type Key = PrimitiveKey;
     type StoreData = PrimitiveTemplate;
     type InternData = PrimitiveSceneData;
+}
 
-    fn build_key(
+impl InternablePrimitive for PrimitiveKeyKind {
+    fn into_key(
         self,
         info: &LayoutPrimitiveInfo,
     ) -> PrimitiveKey {
@@ -811,9 +776,29 @@ impl intern::Internable for PrimitiveKeyKind {
             self,
         )
     }
-}
 
-use intern_types::prim::Handle as PrimitiveDataHandle;
+    fn make_instance_kind(
+        key: PrimitiveKey,
+        data_handle: PrimitiveDataHandle,
+        _: &mut PrimitiveStore,
+        _reference_frame_relative_offset: LayoutVector2D,
+    ) -> PrimitiveInstanceKind {
+        match key.kind {
+            PrimitiveKeyKind::Clear => {
+                PrimitiveInstanceKind::Clear {
+                    data_handle
+                }
+            }
+            PrimitiveKeyKind::Rectangle { .. } => {
+                PrimitiveInstanceKind::Rectangle {
+                    data_handle,
+                    opacity_binding_index: OpacityBindingIndex::INVALID,
+                    segment_instance_index: SegmentInstanceIndex::INVALID,
+                }
+            }
+        }
+    }
+}
 
 // Maintains a list of opacity bindings that have been collapsed into
 // the color of a single primitive. This is an important optimization
@@ -1339,7 +1324,7 @@ pub enum PrimitiveInstanceKind {
     LinearGradient {
         /// Handle to the common interned data for this primitive.
         data_handle: LinearGradientDataHandle,
-        visible_tiles_range: GradientTileRange,
+        gradient_index: LinearGradientIndex,
     },
     RadialGradient {
         /// Handle to the common interned data for this primitive.
@@ -1520,6 +1505,8 @@ pub type ImageInstanceStorage = storage::Storage<ImageInstance>;
 pub type ImageInstanceIndex = storage::Index<ImageInstance>;
 pub type GradientTileStorage = storage::Storage<VisibleGradientTile>;
 pub type GradientTileRange = storage::Range<VisibleGradientTile>;
+pub type LinearGradientIndex = storage::Index<LinearGradientPrimitive>;
+pub type LinearGradientStorage = storage::Storage<LinearGradientPrimitive>;
 
 /// Contains various vecs of data that is used only during frame building,
 /// where we want to recycle the memory each new display list, to avoid constantly
@@ -1644,6 +1631,7 @@ pub struct PrimitiveStoreStats {
     text_run_count: usize,
     opacity_binding_count: usize,
     image_count: usize,
+    linear_gradient_count: usize,
 }
 
 impl PrimitiveStoreStats {
@@ -1653,6 +1641,7 @@ impl PrimitiveStoreStats {
             text_run_count: 0,
             opacity_binding_count: 0,
             image_count: 0,
+            linear_gradient_count: 0,
         }
     }
 }
@@ -1661,6 +1650,7 @@ impl PrimitiveStoreStats {
 pub struct PrimitiveStore {
     pub pictures: Vec<PicturePrimitive>,
     pub text_runs: TextRunStorage,
+    pub linear_gradients: LinearGradientStorage,
 
     /// A list of image instances. These are stored separately as
     /// storing them inline in the instance makes the structure bigger
@@ -1678,6 +1668,7 @@ impl PrimitiveStore {
             text_runs: TextRunStorage::new(stats.text_run_count),
             images: ImageInstanceStorage::new(stats.image_count),
             opacity_bindings: OpacityBindingStorage::new(stats.opacity_binding_count),
+            linear_gradients: LinearGradientStorage::new(stats.linear_gradient_count),
         }
     }
 
@@ -1687,6 +1678,7 @@ impl PrimitiveStore {
             text_run_count: self.text_runs.len(),
             image_count: self.images.len(),
             opacity_binding_count: self.opacity_bindings.len(),
+            linear_gradient_count: self.linear_gradients.len(),
         }
     }
 
@@ -2748,12 +2740,85 @@ impl PrimitiveStore {
                     image_data.write_prim_gpu_blocks(request);
                 });
             }
-            PrimitiveInstanceKind::LinearGradient { data_handle, ref mut visible_tiles_range, .. } => {
+            PrimitiveInstanceKind::LinearGradient { data_handle, gradient_index, .. } => {
                 let prim_data = &mut data_stores.linear_grad[*data_handle];
+                let gradient = &mut self.linear_gradients[*gradient_index];
 
                 // Update the template this instane references, which may refresh the GPU
                 // cache with any shared template data.
                 prim_data.update(frame_state);
+
+                if prim_data.supports_caching {
+                    let gradient_size = (prim_data.end_point - prim_data.start_point).to_size();
+
+                    // Calculate what the range of the gradient is that covers this
+                    // primitive. These values are included in the cache key. The
+                    // size of the gradient task is the length of a texture cache
+                    // region, for maximum accuracy, and a minimal size on the
+                    // axis that doesn't matter.
+                    let (size, orientation, start_point, end_point) = if prim_data.start_point.x.approx_eq(&prim_data.end_point.x) {
+                        let start_point = -prim_data.start_point.y / gradient_size.height;
+                        let end_point = (prim_data.common.prim_size.height - prim_data.start_point.y) / gradient_size.height;
+                        let size = DeviceIntSize::new(16, TEXTURE_REGION_DIMENSIONS);
+                        (size, LineOrientation::Vertical, start_point, end_point)
+                    } else {
+                        let start_point = -prim_data.start_point.x / gradient_size.width;
+                        let end_point = (prim_data.common.prim_size.width - prim_data.start_point.x) / gradient_size.width;
+                        let size = DeviceIntSize::new(TEXTURE_REGION_DIMENSIONS, 16);
+                        (size, LineOrientation::Horizontal, start_point, end_point)
+                    };
+
+                    // Build the cache key, including information about the stops.
+                    let mut stops = [GradientStopKey::empty(); GRADIENT_FP_STOPS];
+
+                    // Reverse the stops as required, same as the gradient builder does
+                    // for the slow path.
+                    if prim_data.reverse_stops {
+                        for (src, dest) in prim_data.stops.iter().rev().zip(stops.iter_mut()) {
+                            let stop = GradientStop {
+                                offset: 1.0 - src.offset,
+                                color: src.color,
+                            };
+                            *dest = stop.into();
+                        }
+                    } else {
+                        for (src, dest) in prim_data.stops.iter().zip(stops.iter_mut()) {
+                            *dest = (*src).into();
+                        }
+                    }
+
+                    let cache_key = GradientCacheKey {
+                        orientation,
+                        start_stop_point: VectorKey {
+                            x: start_point,
+                            y: end_point,
+                        },
+                        stops,
+                    };
+
+                    // Request the render task each frame.
+                    gradient.cache_handle = Some(frame_state.resource_cache.request_render_task(
+                        RenderTaskCacheKey {
+                            size: size,
+                            kind: RenderTaskCacheKeyKind::Gradient(cache_key),
+                        },
+                        frame_state.gpu_cache,
+                        frame_state.render_tasks,
+                        None,
+                        prim_data.stops_opacity.is_opaque,
+                        |render_tasks| {
+                            let task = RenderTask::new_gradient(
+                                size,
+                                stops,
+                                orientation,
+                                start_point,
+                                end_point,
+                            );
+
+                            render_tasks.add(task)
+                        }
+                    ));
+                }
 
                 if prim_data.tile_spacing != LayoutSize::zero() {
                     let prim_info = &scratch.prim_info[prim_instance.visibility_info.0 as usize];
@@ -2762,7 +2827,7 @@ impl PrimitiveStore {
                         prim_data.common.prim_size,
                     );
 
-                    *visible_tiles_range = decompose_repeated_primitive(
+                    gradient.visible_tiles_range = decompose_repeated_primitive(
                         &prim_info.combined_local_clip_rect,
                         &prim_rect,
                         &prim_data.stretch_size,
@@ -2786,7 +2851,7 @@ impl PrimitiveStore {
                         }
                     );
 
-                    if visible_tiles_range.is_empty() {
+                    if gradient.visible_tiles_range.is_empty() {
                         prim_instance.visibility_info = PrimitiveVisibilityIndex::INVALID;
                     }
                 }
@@ -3705,6 +3770,24 @@ fn update_opacity_binding(
         binding.current
     }
 }
+
+/// Trait for primitives that are directly internable.
+/// see DisplayListFlattener::add_primitive<P>
+pub trait InternablePrimitive: intern::Internable<InternData = PrimitiveSceneData> + Sized {
+    /// Build a new key from self with `info`.
+    fn into_key(
+        self,
+        info: &LayoutPrimitiveInfo,
+    ) -> Self::Key;
+
+    fn make_instance_kind(
+        key: Self::Key,
+        data_handle: intern::Handle<Self>,
+        prim_store: &mut PrimitiveStore,
+        reference_frame_relative_offset: LayoutVector2D,
+    ) -> PrimitiveInstanceKind;
+}
+
 
 #[test]
 #[cfg(target_pointer_width = "64")]

@@ -66,6 +66,12 @@ var EXPORTED_SYMBOLS = ["Policies"];
  * The callbacks will be bound to their parent policy object.
  */
 var Policies = {
+  "3rdparty": {
+    onBeforeAddons(manager, param) {
+      manager.setExtensionPolicies(param.Extensions);
+    },
+  },
+
   "AppUpdateURL": {
     onBeforeAddons(manager, param) {
       setDefaultPref("app.update.url", param.href);
@@ -328,7 +334,8 @@ var Policies = {
     onBeforeAddons(manager, param) {
       if (param) {
         manager.disallowFeature("Shield");
-        setAndLockPref("browser.newtabpage.activity-stream.asrouter.userprefs.cfr", false);
+        setAndLockPref("browser.newtabpage.activity-stream.asrouter.userprefs.cfr.addons", false);
+        setAndLockPref("browser.newtabpage.activity-stream.asrouter.userprefs.cfr.features", false);
       }
     },
   },
@@ -683,7 +690,8 @@ var Policies = {
         setAndLockPref("xpinstall.enabled", param.Default);
         if (!param.Default) {
           blockAboutPage(manager, "about:debugging");
-          setAndLockPref("browser.newtabpage.activity-stream.asrouter.userprefs.cfr", false);
+          setAndLockPref("browser.newtabpage.activity-stream.asrouter.userprefs.cfr.addons", false);
+          setAndLockPref("browser.newtabpage.activity-stream.asrouter.userprefs.cfr.features", false);
           manager.disallowFeature("xpinstall");
         }
       }

@@ -72,7 +72,7 @@ var LoginManagerParent = {
   receiveMessage(msg) {
     let data = msg.data;
     switch (msg.name) {
-      case "RemoteLogins:findLogins": {
+      case "PasswordManager:findLogins": {
         // TODO Verify msg.target's principals against the formOrigin?
         this.sendLoginDataToChild(data.options.showMasterPassword,
                                   data.formOrigin,
@@ -82,34 +82,35 @@ var LoginManagerParent = {
         break;
       }
 
-      case "RemoteLogins:findRecipes": {
+      case "PasswordManager:findRecipes": {
         let formHost = (new URL(data.formOrigin)).host;
         return this._recipeManager.getRecipesForHost(formHost);
       }
 
-      case "RemoteLogins:onFormSubmit": {
+      case "PasswordManager:onFormSubmit": {
         // TODO Verify msg.target's principals against the formOrigin?
-        this.onFormSubmit(data.hostname,
-                          data.formSubmitURL,
-                          data.usernameField,
-                          data.newPasswordField,
-                          data.oldPasswordField,
-                          data.openerTopWindowID,
-                          msg.target);
+        this.onFormSubmit({hostname: data.hostname,
+                           formSubmitURL: data.formSubmitURL,
+                           autoFilledLoginGuid: data.autoFilledLoginGuid,
+                           usernameField: data.usernameField,
+                           newPasswordField: data.newPasswordField,
+                           oldPasswordField: data.oldPasswordField,
+                           openerTopWindowID: data.openerTopWindowID,
+                           target: msg.target});
         break;
       }
 
-      case "RemoteLogins:insecureLoginFormPresent": {
+      case "PasswordManager:insecureLoginFormPresent": {
         this.setHasInsecureLoginForms(msg.target, data.hasInsecureLoginForms);
         break;
       }
 
-      case "RemoteLogins:autoCompleteLogins": {
+      case "PasswordManager:autoCompleteLogins": {
         this.doAutocompleteSearch(data, msg.target);
         break;
       }
 
-      case "RemoteLogins:removeLogin": {
+      case "PasswordManager:removeLogin": {
         let login = LoginHelper.vanillaObjectToLogin(data.login);
         AutoCompletePopup.removeLogin(login);
         break;
@@ -141,7 +142,7 @@ var LoginManagerParent = {
     let jsLogins = [LoginHelper.loginToVanillaObject(login)];
 
     let objects = inputElement ? {inputElement} : null;
-    browser.messageManager.sendAsyncMessage("RemoteLogins:fillForm", {
+    browser.messageManager.sendAsyncMessage("PasswordManager:fillForm", {
       loginFormOrigin,
       logins: jsLogins,
       recipes,
@@ -167,7 +168,7 @@ var LoginManagerParent = {
 
     if (!showMasterPassword && !Services.logins.isLoggedIn) {
       try {
-        target.sendAsyncMessage("RemoteLogins:loginsFound", {
+        target.sendAsyncMessage("PasswordManager:loginsFound", {
           requestId,
           logins: [],
           recipes,
@@ -193,7 +194,7 @@ var LoginManagerParent = {
           Services.obs.removeObserver(this, "passwordmgr-crypto-login");
           Services.obs.removeObserver(this, "passwordmgr-crypto-loginCanceled");
           if (topic == "passwordmgr-crypto-loginCanceled") {
-            target.sendAsyncMessage("RemoteLogins:loginsFound", {
+            target.sendAsyncMessage("PasswordManager:loginsFound", {
               requestId,
               logins: [],
               recipes,
@@ -222,7 +223,7 @@ var LoginManagerParent = {
     // Convert the array of nsILoginInfo to vanilla JS objects since nsILoginInfo
     // doesn't support structured cloning.
     var jsLogins = LoginHelper.loginsToVanillaObjects(logins);
-    target.sendAsyncMessage("RemoteLogins:loginsFound", {
+    target.sendAsyncMessage("PasswordManager:loginsFound", {
       requestId,
       logins: jsLogins,
       recipes,
@@ -244,7 +245,7 @@ var LoginManagerParent = {
             `prompt was last cancelled ${Math.round(timeDiff / 1000)} seconds ago.`);
         // Send an empty array to make LoginManagerContent clear the
         // outstanding request it has temporarily saved.
-        target.messageManager.sendAsyncMessage("RemoteLogins:loginsAutoCompleted", {
+        target.messageManager.sendAsyncMessage("PasswordManager:loginsAutoCompleted", {
           requestId,
           logins: [],
         });
@@ -282,16 +283,16 @@ var LoginManagerParent = {
     // Convert the array of nsILoginInfo to vanilla JS objects since nsILoginInfo
     // doesn't support structured cloning.
     var jsLogins = LoginHelper.loginsToVanillaObjects(matchingLogins);
-    target.messageManager.sendAsyncMessage("RemoteLogins:loginsAutoCompleted", {
+    target.messageManager.sendAsyncMessage("PasswordManager:loginsAutoCompleted", {
       requestId,
       logins: jsLogins,
     });
   },
 
-  onFormSubmit(hostname, formSubmitURL,
-               usernameField, newPasswordField,
-               oldPasswordField, openerTopWindowID,
-               target) {
+  onFormSubmit({hostname, formSubmitURL, autoFilledLoginGuid,
+                usernameField, newPasswordField,
+                oldPasswordField, openerTopWindowID,
+                target}) {
     function getPrompter() {
       var prompterSvc = Cc["@mozilla.org/login-manager/prompter;1"].
                         createInstance(Ci.nsILoginManagerPrompter);
@@ -341,6 +342,20 @@ var LoginManagerParent = {
                    newPasswordField.value,
                    (usernameField ? usernameField.name : ""),
                    newPasswordField.name);
+
+    if (autoFilledLoginGuid) {
+      let loginsForGuid = LoginHelper.searchLoginsWithObject({
+        guid: autoFilledLoginGuid,
+      });
+      if (loginsForGuid.length == 1 &&
+          loginsForGuid[0].password == formLogin.password &&
+          (!formLogin.username || // Also cover cases where only the password is requested.
+           loginsForGuid[0].username == formLogin.username)) {
+        log("The filled login matches the form submission. Nothing to change.");
+        recordLoginUse(loginsForGuid[0]);
+        return;
+      }
+    }
 
     // Below here we have one login per hostPort + action + username with the
     // matching scheme being preferred.

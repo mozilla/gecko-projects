@@ -10,8 +10,9 @@
 </head>
 <body>
 <script type="application/javascript">
+const {LoginFormFactory} = SpecialPowers.Cu.import("resource://gre/modules/LoginFormFactory.jsm");
 const LMCBackstagePass = SpecialPowers.Cu.import("resource://gre/modules/LoginManagerContent.jsm");
-const { LoginManagerContent, LoginFormFactory } = LMCBackstagePass;
+const { LoginManagerContent } = LMCBackstagePass;
 
 let loadPromise = new Promise(resolve => {
   document.addEventListener("DOMContentLoaded", () => {
@@ -41,7 +42,7 @@ const TESTCASES = [
     document: `<input type=password value="pass1">`,
     inputIndexForFormLike: 0,
 
-    // Expected outputs similar to RemoteLogins:onFormSubmit
+    // Expected outputs similar to PasswordManager:onFormSubmit
     hostname: DEFAULT_ORIGIN,
     formSubmitURL: DEFAULT_ORIGIN,
     usernameFieldValue: null,
@@ -150,7 +151,7 @@ add_task(async function test() {
 
     let submittedResult = await processedPromise;
 
-    // Check data sent via RemoteLogins:onFormSubmit
+    // Check data sent via PasswordManager:onFormSubmit
     is(submittedResult.hostname, tc.hostname, "Check hostname");
     is(submittedResult.formSubmitURL, tc.formSubmitURL, "Check formSubmitURL");
 

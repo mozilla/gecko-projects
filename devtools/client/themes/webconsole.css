@@ -252,7 +252,7 @@ a {
 .message-repeats {
   -moz-user-select: none;
   flex-shrink: 0;
-  margin: 2px 5px;
+  margin: 2px 5px 0 5px;
   padding: 0 6px;
   height: 1.25em;
   color: white;
@@ -963,10 +963,21 @@ body {
   height: 10px;
   background: url("chrome://devtools/skin/images/arrow.svg") no-repeat center;
   background-size: 10px;
+  transform: rotate(-90deg);
   /* Needed for alignment */
   margin-top: -1px;
   -moz-context-properties: fill;
   fill: var(--theme-icon-dimmed-color);
+}
+
+.webconsole-app .tree .arrow.expanded,
+.webconsole-app .object-inspector .tree-node .arrow.expanded {
+  transform: rotate(0deg);
+}
+
+.webconsole-app .tree.focused .arrow,
+.webconsole-app .object-inspector .tree-node.focused .arrow {
+  fill: currentColor
 }
 
 /* Sidebar */

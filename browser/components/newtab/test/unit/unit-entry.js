@@ -34,6 +34,7 @@ const TEST_GLOBAL = {
   },
   AppConstants: {MOZILLA_OFFICIAL: true},
   UpdateUtils: {getUpdateChannel() {}},
+  BrowserWindowTracker: {getTopWindow() {}},
   ChromeUtils: {
     defineModuleGetter() {},
     generateQI() { return {}; },
@@ -87,6 +88,7 @@ const TEST_GLOBAL = {
     nsIHttpChannel: {REFERRER_POLICY_UNSAFE_URL: 5},
     nsITimer: {TYPE_ONE_SHOT: 1},
     nsIWebProgressListener: {LOCATION_CHANGE_SAME_DOCUMENT: 1},
+    nsIDOMWindow: Object,
   },
   Cu: {
     importGlobalProperties() {},

@@ -619,7 +619,9 @@ class ScriptSource {
   uint32_t id_;
 
   // How many ids have been handed out to sources.
-  static mozilla::Atomic<uint32_t> idCount_;
+  static mozilla::Atomic<uint32_t, mozilla::SequentiallyConsistent,
+                         mozilla::recordreplay::Behavior::DontPreserve>
+      idCount_;
 
   // True if we can call JSRuntime::sourceHook to load the source on
   // demand. If sourceRetrievable_ and hasSourceText() are false, it is not
@@ -1445,6 +1447,9 @@ class alignas(JS::Value) PrivateScriptData final {
   static bool Clone(JSContext* cx, js::HandleScript src, js::HandleScript dst,
                     js::MutableHandle<JS::GCVector<js::Scope*>> scopes);
 
+  static bool InitFromEmitter(JSContext* cx, js::HandleScript script,
+                              js::frontend::BytecodeEmitter* bce);
+
   void traceChildren(JSTracer* trc);
 };
 
@@ -1517,6 +1522,9 @@ class SharedScriptData {
   template <XDRMode mode>
   static MOZ_MUST_USE XDRResult XDR(js::XDRState<mode>* xdr,
                                     js::HandleScript script);
+
+  static bool InitFromEmitter(JSContext* cx, js::HandleScript script,
+                              js::frontend::BytecodeEmitter* bce);
 
   // Mark this SharedScriptData for use in a new zone
   void markForCrossZone(JSContext* cx);
@@ -1678,8 +1686,7 @@ class JSScript : public js::gc::TenuredCell {
     // Code is in strict mode.
     Strict = 1 << 1,
 
-    // Code has "use strict"; explicitly.
-    ExplicitUseStrict = 1 << 2,
+    // (1 << 2) is unused.
 
     // True if the script has a non-syntactic scope on its dynamic scope chain.
     // That is, there are objects about which we know nothing between the
@@ -1693,8 +1700,7 @@ class JSScript : public js::gc::TenuredCell {
     BindingsAccessedDynamically = 1 << 5,
     FunHasExtensibleScope = 1 << 6,
 
-    // True if any formalIsAliased(i).
-    FunHasAnyAliasedFormal = 1 << 7,
+    // (1 << 7) is unused.
 
     // Script has singleton objects.
     HasSingletons = 1 << 8,
@@ -1852,6 +1858,10 @@ class JSScript : public js::gc::TenuredCell {
   friend js::XDRResult js::SharedScriptData::XDR(js::XDRState<mode>* xdr,
                                                  js::HandleScript script);
 
+  friend bool js::SharedScriptData::InitFromEmitter(
+      JSContext* cx, js::HandleScript script,
+      js::frontend::BytecodeEmitter* bce);
+
   template <js::XDRMode mode>
   friend js::XDRResult js::PrivateScriptData::XDR(
       js::XDRState<mode>* xdr, js::HandleScript script,
@@ -1861,6 +1871,10 @@ class JSScript : public js::gc::TenuredCell {
   friend bool js::PrivateScriptData::Clone(
       JSContext* cx, js::HandleScript src, js::HandleScript dst,
       js::MutableHandle<JS::GCVector<js::Scope*>> scopes);
+
+  friend bool js::PrivateScriptData::InitFromEmitter(
+      JSContext* cx, js::HandleScript script,
+      js::frontend::BytecodeEmitter* bce);
 
   friend JSScript* js::detail::CopyScript(
       JSContext* cx, js::HandleScript src,
@@ -1894,9 +1908,7 @@ class JSScript : public js::gc::TenuredCell {
                                       uint32_t nresumeoffsets);
 
  private:
-  static void initFromFunctionBox(js::HandleScript script,
-                                  js::frontend::FunctionBox* funbox);
-  static void initFromModuleContext(js::HandleScript script);
+  void initFromFunctionBox(js::frontend::FunctionBox* funbox);
 
  public:
   static bool fullyInitFromEmitter(JSContext* cx, js::HandleScript script,
@@ -1910,6 +1922,7 @@ class JSScript : public js::gc::TenuredCell {
  private:
   // Assert that jump targets are within the code array of the script.
   void assertValidJumpTargets() const;
+
  public:
 #endif
 
@@ -2084,10 +2097,6 @@ class JSScript : public js::gc::TenuredCell {
 
   bool strict() const { return hasFlag(ImmutableFlags::Strict); }
 
-  bool explicitUseStrict() const {
-    return hasFlag(ImmutableFlags::ExplicitUseStrict);
-  }
-
   bool hasNonSyntacticScope() const {
     return hasFlag(ImmutableFlags::HasNonSyntacticScope);
   }
@@ -2098,9 +2107,6 @@ class JSScript : public js::gc::TenuredCell {
   }
   bool funHasExtensibleScope() const {
     return hasFlag(ImmutableFlags::FunHasExtensibleScope);
-  }
-  bool funHasAnyAliasedFormal() const {
-    return hasFlag(ImmutableFlags::FunHasAnyAliasedFormal);
   }
 
   bool hasSingletons() const { return hasFlag(ImmutableFlags::HasSingletons); }

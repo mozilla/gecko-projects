@@ -4,7 +4,7 @@
 "use strict";
 
 const {XPCOMUtils} = ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
-const {Localization} = ChromeUtils.import("resource://gre/modules/Localization.jsm");
+const {DOMLocalization} = ChromeUtils.import("resource://gre/modules/DOMLocalization.jsm");
 const {Services} = ChromeUtils.import("resource://gre/modules/Services.jsm");
 XPCOMUtils.defineLazyGlobalGetters(this, ["fetch"]);
 
@@ -12,10 +12,16 @@ ChromeUtils.defineModuleGetter(this, "PrivateBrowsingUtils",
   "resource://gre/modules/PrivateBrowsingUtils.jsm");
 
 const POPUP_NOTIFICATION_ID = "contextual-feature-recommendation";
+const PAUSE_BUTTON_ID = "cfr-notification-footer-pause-button";
 const SUMO_BASE_URL = Services.urlFormatter.formatURLPref("app.support.baseURL");
 const ADDONS_API_URL = "https://services.addons.mozilla.org/api/v3/addons/addon";
+const ANIMATIONS_ENABLED_PREF = "toolkit.cosmeticAnimations.enabled";
 
 const DELAY_BEFORE_EXPAND_MS = 1000;
+const CATEGORY_ICONS = {
+  "cfrAddons": "webextensions-icon",
+  "cfrFeatures": "recommendations-icon",
+};
 
 /**
  * A WeakMap from browsers to {host, recommendation} pairs. Recommendations are
@@ -49,10 +55,10 @@ class PageAction {
 
     this._popupStateChange = this._popupStateChange.bind(this);
     this._collapse = this._collapse.bind(this);
-    this._handleClick = this._handleClick.bind(this);
+    this._showPopupOnClick = this._showPopupOnClick.bind(this);
     this.dispatchUserAction = this.dispatchUserAction.bind(this);
 
-    this._l10n = new Localization([
+    this._l10n = new DOMLocalization([
       "browser/newtab/asrouter.ftl",
     ]);
 
@@ -60,10 +66,11 @@ class PageAction {
     this.stateTransitionTimeoutIDs = [];
   }
 
-  async show(recommendation, shouldExpand = false) {
+  async showAddressBarNotifier(recommendation, shouldExpand = false) {
     this.container.hidden = false;
 
     this.label.value = await this.getStrings(recommendation.content.notification_text);
+    this.button.setAttribute("data-cfr-icon", CATEGORY_ICONS[recommendation.content.category]);
 
     // Wait for layout to flush to avoid a synchronous reflow then calculate the
     // label width. We can safely get the width even though the recommendation is
@@ -71,7 +78,7 @@ class PageAction {
     let [{width}] = await this.window.promiseDocumentFlushed(() => this.label.getClientRects());
     this.urlbar.style.setProperty("--cfr-label-width", `${width}px`);
 
-    this.container.addEventListener("click", this._handleClick);
+    this.container.addEventListener("click", this._showPopupOnClick);
     // Collapse the recommendation on url bar focus in order to free up more
     // space to display and edit the url
     this.urlbar.addEventListener("focus", this._collapse);
@@ -93,11 +100,11 @@ class PageAction {
     }
   }
 
-  hide() {
+  hideAddressBarNotifier() {
     this.container.hidden = true;
     this._clearScheduledStateChanges();
     this.urlbar.removeAttribute("cfr-recommendation-state");
-    this.container.removeEventListener("click", this._handleClick);
+    this.container.removeEventListener("click", this._showPopupOnClick);
     this.urlbar.removeEventListener("focus", this._collapse);
     if (this.currentNotification) {
       this.window.PopupNotifications.remove(this.currentNotification);
@@ -130,6 +137,13 @@ class PageAction {
       if (this.urlbar.getAttribute("cfr-recommendation-state") === "expanded") {
         this.urlbar.setAttribute("cfr-recommendation-state", "collapsed");
       }
+    }
+
+    // TODO: FIXME: find a nicer way of cleaning this up. Maybe listening to "popuphidden"?
+    // Remove click listener on pause button;
+    if (this.onPauseClick) {
+      this.window.document.getElementById(PAUSE_BUTTON_ID).removeEventListener("click", this.onPauseClick);
+      delete this.onPauseClick;
     }
   }
 
@@ -221,51 +235,17 @@ class PageAction {
     return subAttribute ? mainString.attributes[subAttribute] : mainString;
   }
 
-  /**
-   * Respond to a user click on the recommendation by showing a doorhanger/
-   * popup notification
-   */
-  async _handleClick(event) { // eslint-disable-line max-statements
-    const browser = this.window.gBrowser.selectedBrowser;
-    if (!RecommendationMap.has(browser)) {
-      // There's no recommendation for this browser, so the user shouldn't have
-      // been able to click
-      this.hide();
-      return;
-    }
-    const {id, content} = RecommendationMap.get(browser);
-
-    // The recommendation should remain either collapsed or expanded while the
-    // doorhanger is showing
-    this._clearScheduledStateChanges();
-
-    // A hacky way of setting the popup anchor outside the usual url bar icon box
-    // See https://searchfox.org/mozilla-central/rev/847b64cc28b74b44c379f9bff4f415b97da1c6d7/toolkit/modules/PopupNotifications.jsm#42
-    browser.cfrpopupnotificationanchor = this.container;
-
-    const headerLabel = this.window.document.getElementById("cfr-notification-header-label");
-    const headerLink = this.window.document.getElementById("cfr-notification-header-link");
-    const headerImage = this.window.document.getElementById("cfr-notification-header-image");
+  async _setAddonAuthorAndRating(document, content) {
     const author = this.window.document.getElementById("cfr-notification-author");
-    const footerText = this.window.document.getElementById("cfr-notification-footer-text");
     const footerFilledStars = this.window.document.getElementById("cfr-notification-footer-filled-stars");
     const footerEmptyStars = this.window.document.getElementById("cfr-notification-footer-empty-stars");
     const footerUsers = this.window.document.getElementById("cfr-notification-footer-users");
     const footerSpacer = this.window.document.getElementById("cfr-notification-footer-spacer");
-    const footerLink = this.window.document.getElementById("cfr-notification-footer-learn-more-link");
-
-    headerLabel.value = await this.getStrings(content.heading_text);
-    headerLink.setAttribute("href", SUMO_BASE_URL + content.info_icon.sumo_path);
-    headerLink.setAttribute(this.window.RTL_UI ? "left" : "right", 0);
-    headerImage.setAttribute("tooltiptext", await this.getStrings(content.info_icon.label, "tooltiptext"));
-    headerLink.onclick = () => this._sendTelemetry({message_id: id, bucket_id: content.bucket_id, event: "RATIONALE"});
 
     author.textContent = await this.getStrings({
       string_id: "cfr-doorhanger-extension-author",
       args: {name: content.addon.author},
     });
-
-    footerText.textContent = await this.getStrings(content.text);
 
     const {rating} = content.addon;
     if (rating) {
@@ -307,13 +287,132 @@ class PageAction {
     } else {
       footerSpacer.setAttribute("hidden", true);
     }
+  }
 
-    footerLink.value = await this.getStrings({string_id: "cfr-doorhanger-extension-learn-more-link"});
-    footerLink.setAttribute("href", content.addon.amo_url);
-    footerLink.onclick = () => this._sendTelemetry({message_id: id, bucket_id: content.bucket_id, event: "LEARN_MORE"});
+  _createElementAndAppend({type, id}, parent) {
+    let element = this.window.document.createElement(type);
+    if (id) {
+      element.setAttribute("id", id);
+    }
+    parent.appendChild(element);
+    return element;
+  }
 
+  async _renderPinTabAnimation() {
+    const ANIMATION_CONTAINER_ID = "cfr-notification-footer-pintab-animation-container";
+    const footer = this.window.document.getElementById("cfr-notification-footer");
+    let animationContainer = this.window.document.getElementById(ANIMATION_CONTAINER_ID);
+    if (!animationContainer) {
+      animationContainer = this._createElementAndAppend({type: "vbox", id: ANIMATION_CONTAINER_ID}, footer);
+
+      // spacer
+      this._createElementAndAppend("vbox", animationContainer).setAttribute("flex", 1);
+
+      let controlsContainer = this._createElementAndAppend(
+        {type: "hbox", id: "cfr-notification-footer-animation-controls"}, animationContainer);
+
+      // spacer
+      this._createElementAndAppend({type: "vbox"}, controlsContainer).setAttribute("flex", 1);
+
+      let pauseButton = this._createElementAndAppend({type: "hbox", id: PAUSE_BUTTON_ID}, controlsContainer);
+
+      let pauseLabel = this._createElementAndAppend(
+        {type: "label", id: "cfr-notification-footer-pause-label"}, pauseButton);
+      pauseLabel.textContent = await this.getStrings({"string_id": "cfr-doorhanger-pintab-animation-pause"});
+
+      // pause icon
+      this._createElementAndAppend({type: "image", id: "cfr-notification-footer-pause-icon"}, pauseButton);
+    }
+
+    animationContainer.toggleAttribute("animate", Services.prefs.getBoolPref(ANIMATIONS_ENABLED_PREF, true));
+    animationContainer.removeAttribute("paused");
+
+    if (!this.onPauseClick) {
+      let pauseButton = this.window.document.getElementById(PAUSE_BUTTON_ID);
+      this.onPauseClick = () => { animationContainer.setAttribute("paused", true); };
+      pauseButton.addEventListener("click", this.onPauseClick);
+    }
+  }
+
+  async _renderPopup(message, browser) {
+    const {id, content} = message;
+
+    const headerLabel = this.window.document.getElementById("cfr-notification-header-label");
+    const headerLink = this.window.document.getElementById("cfr-notification-header-link");
+    const headerImage = this.window.document.getElementById("cfr-notification-header-image");
+    const footerText = this.window.document.getElementById("cfr-notification-footer-text");
+    const footerLink = this.window.document.getElementById("cfr-notification-footer-learn-more-link");
     const {primary, secondary} = content.buttons;
+    let primaryActionCallback;
+    let options = {};
+    let panelTitle;
+
+    // Use the message category as a CSS selector to hide different parts of the
+    // notification template markup
+    this.window.document.getElementById("contextual-feature-recommendation-notification")
+      .setAttribute("data-notification-category", message.content.category);
+
+    headerLabel.value = await this.getStrings(content.heading_text);
+    headerLink.setAttribute("href", SUMO_BASE_URL + content.info_icon.sumo_path);
+    headerLink.setAttribute(this.window.RTL_UI ? "left" : "right", 0);
+    headerImage.setAttribute("tooltiptext", await this.getStrings(content.info_icon.label, "tooltiptext"));
+    headerLink.onclick = () => this._sendTelemetry({message_id: id, bucket_id: content.bucket_id, event: "RATIONALE"});
+
+    footerText.textContent = await this.getStrings(content.text);
+
+    if (content.addon) {
+      await this._setAddonAuthorAndRating(this.window.document, content);
+      panelTitle = await this.getStrings(content.addon.title);
+      options = {popupIconURL: content.addon.icon};
+
+      footerLink.value = await this.getStrings({string_id: "cfr-doorhanger-extension-learn-more-link"});
+      footerLink.setAttribute("href", content.addon.amo_url);
+      footerLink.onclick = () => this._sendTelemetry({message_id: id, bucket_id: content.bucket_id, event: "LEARN_MORE"});
+
+      primaryActionCallback = async () => {
+        primary.action.data.url = await CFRPageActions._fetchLatestAddonVersion(content.addon.id); // eslint-disable-line no-use-before-define
+        this._blockMessage(id);
+        this.dispatchUserAction(primary.action);
+        this.hideAddressBarNotifier();
+        this._sendTelemetry({message_id: id, bucket_id: content.bucket_id, event: "INSTALL"});
+        RecommendationMap.delete(browser);
+      };
+    } else {
+      const stepsContainerId = "cfr-notification-feature-steps";
+      let stepsContainer = this.window.document.getElementById(stepsContainerId);
+      primaryActionCallback = () => {
+        this._blockMessage(id);
+        this.dispatchUserAction(primary.action);
+        this.hideAddressBarNotifier();
+        this._sendTelemetry({message_id: id, bucket_id: content.bucket_id, event: "PIN"});
+        RecommendationMap.delete(browser);
+      };
+      panelTitle = await this.getStrings(content.heading_text);
+
+      if (stepsContainer) { // If it exists we need to empty it
+        stepsContainer.remove();
+        stepsContainer = stepsContainer.cloneNode(false);
+      } else {
+        stepsContainer = this.window.document.createElement("vbox");
+        stepsContainer.setAttribute("id", stepsContainerId);
+      }
+      footerText.parentNode.appendChild(stepsContainer);
+      for (let step of content.descriptionDetails.steps) {
+        const li = this.window.document.createElement("li");
+        this._l10n.setAttributes(li, step.string_id);
+        stepsContainer.appendChild(li);
+      }
+      await this._l10n.translateElements([...stepsContainer.children]);
+
+      await this._renderPinTabAnimation();
+    }
+
     const primaryBtnStrings = await this.getStrings(primary.label);
+    const mainAction = {
+      label: primaryBtnStrings,
+      accessKey: primaryBtnStrings.attributes.accesskey,
+      callback: primaryActionCallback,
+    };
 
     // For each secondary action, get the strings and attributes
     const secondaryBtnStrings = [];
@@ -321,20 +420,6 @@ class PageAction {
       let label = await this.getStrings(button.label);
       secondaryBtnStrings.push({label, attributes: label.attributes});
     }
-
-    const mainAction = {
-      label: primaryBtnStrings,
-      accessKey: primaryBtnStrings.attributes.accesskey,
-      callback: async () => {
-        primary.action.data.url = await CFRPageActions._fetchLatestAddonVersion(content.addon.id); // eslint-disable-line no-use-before-define
-        this._blockMessage(id);
-        this.dispatchUserAction(primary.action);
-        this.hide();
-        this._sendTelemetry({message_id: id, bucket_id: content.bucket_id, event: "INSTALL"});
-        RecommendationMap.delete(browser);
-      },
-    };
-
     const secondaryActions = [{
       label: secondaryBtnStrings[0].label,
       accessKey: secondaryBtnStrings[0].attributes.accesskey,
@@ -347,7 +432,7 @@ class PageAction {
       accessKey: secondaryBtnStrings[1].attributes.accesskey,
       callback: () => {
         this._blockMessage(id);
-        this.hide();
+        this.hideAddressBarNotifier();
         this._sendTelemetry({message_id: id, bucket_id: content.bucket_id, event: "BLOCK"});
         RecommendationMap.delete(browser);
       },
@@ -360,22 +445,47 @@ class PageAction {
       },
     }];
 
-    const options = {
-      popupIconURL: content.addon.icon,
-      hideClose: true,
-      eventCallback: this._popupStateChange,
-    };
-
-    this._sendTelemetry({message_id: id, bucket_id: content.bucket_id, event: "CLICK_DOORHANGER"});
+    // Actually show the notification
     this.currentNotification = this.window.PopupNotifications.show(
       browser,
       POPUP_NOTIFICATION_ID,
-      await this.getStrings(content.addon.title),
+      panelTitle,
       "cfr",
       mainAction,
       secondaryActions,
-      options
+      {
+        ...options,
+        hideClose: true,
+        eventCallback: this._popupStateChange,
+      }
     );
+  }
+
+  /**
+   * Respond to a user click on the recommendation by showing a doorhanger/
+   * popup notification
+   */
+  async _showPopupOnClick(event) {
+    const browser = this.window.gBrowser.selectedBrowser;
+    if (!RecommendationMap.has(browser)) {
+      // There's no recommendation for this browser, so the user shouldn't have
+      // been able to click
+      this.hideAddressBarNotifier();
+      return;
+    }
+    const message = RecommendationMap.get(browser);
+    const {id, content} = message;
+
+    // The recommendation should remain either collapsed or expanded while the
+    // doorhanger is showing
+    this._clearScheduledStateChanges(browser, message);
+
+    // A hacky way of setting the popup anchor outside the usual url bar icon box
+    // See https://searchfox.org/mozilla-central/rev/847b64cc28b74b44c379f9bff4f415b97da1c6d7/toolkit/modules/PopupNotifications.jsm#42
+    browser.cfrpopupnotificationanchor = this.container;
+
+    this._sendTelemetry({message_id: id, bucket_id: content.bucket_id, event: "CLICK_DOORHANGER"});
+    await this._renderPopup(message, browser);
   }
 }
 
@@ -404,21 +514,21 @@ const CFRPageActions = {
       if (isHostMatch(browser, recommendation.host)) {
         // The browser has a recommendation specified with this host, so show
         // the page action
-        pageAction.show(recommendation);
+        pageAction.showAddressBarNotifier(recommendation);
       } else if (recommendation.retain) {
         // Keep the recommendation first time the user navigates away just in
         // case they will go back to the previous page
-        pageAction.hide();
+        pageAction.hideAddressBarNotifier();
         recommendation.retain = false;
       } else {
         // The user has navigated away from the specified host in the given
         // browser, so the recommendation is no longer valid and should be removed
         RecommendationMap.delete(browser);
-        pageAction.hide();
+        pageAction.hideAddressBarNotifier();
       }
     } else {
       // There's no recommendation specified for this browser, so hide the page action
-      pageAction.hide();
+      pageAction.hideAddressBarNotifier();
     }
   },
 
@@ -456,7 +566,7 @@ const CFRPageActions = {
     if (!PageActionMap.has(win)) {
       PageActionMap.set(win, new PageAction(win, dispatchToASRouter));
     }
-    await PageActionMap.get(win).show(recommendation, true);
+    await PageActionMap.get(win).showAddressBarNotifier(recommendation, true);
     return true;
   },
 
@@ -481,7 +591,7 @@ const CFRPageActions = {
     if (!PageActionMap.has(win)) {
       PageActionMap.set(win, new PageAction(win, dispatchToASRouter));
     }
-    await PageActionMap.get(win).show(recommendation, true);
+    await PageActionMap.get(win).showAddressBarNotifier(recommendation, true);
     return true;
   },
 
@@ -494,7 +604,7 @@ const CFRPageActions = {
       if (win.closed || !PageActionMap.has(win)) {
         continue;
       }
-      PageActionMap.get(win).hide();
+      PageActionMap.get(win).hideAddressBarNotifier();
     }
     // WeakMaps don't have a `clear` method
     PageActionMap = new WeakMap();

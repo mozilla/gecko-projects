@@ -1659,6 +1659,34 @@ devtools.changesview:
     record_in_processes:
       - 'main'
 
+  copy_all_changes:
+    bug_numbers:
+      - 1532583
+    description: >
+      Number of times the Copy All Changes button is used in the Changes panel.
+    expires: "70"
+    kind: uint
+    notification_emails:
+      - dev-developer-tools@lists.mozilla.org
+      - mbalfanz@mozilla.com
+    release_channel_collection: opt-out
+    record_in_processes:
+      - 'main'
+
+  copy_rule:
+    bug_numbers:
+      - 1532583
+    description: >
+      Number of times the Copy Rule button is used in the Changes panel.
+    expires: "70"
+    kind: uint
+    notification_emails:
+      - dev-developer-tools@lists.mozilla.org
+      - mbalfanz@mozilla.com
+    release_channel_collection: opt-out
+    record_in_processes:
+      - 'main'
+
   contextmenu:
     bug_numbers:
       - 1522843
@@ -1679,6 +1707,36 @@ devtools.changesview:
     description: >
       Number of times the Copy option is picked from the Changes panel context menu.
     expires: "69"
+    kind: uint
+    notification_emails:
+      - dev-developer-tools@lists.mozilla.org
+      - mbalfanz@mozilla.com
+    release_channel_collection: opt-out
+    record_in_processes:
+      - 'main'
+
+  contextmenu_copy_declaration:
+    bug_numbers:
+      - 1532583
+    description: >
+      Number of times the Copy Declaration option is picked from the Changes panel
+      context menu.
+    expires: "70"
+    kind: uint
+    notification_emails:
+      - dev-developer-tools@lists.mozilla.org
+      - mbalfanz@mozilla.com
+    release_channel_collection: opt-out
+    record_in_processes:
+      - 'main'
+
+  contextmenu_copy_rule:
+    bug_numbers:
+      - 1532583
+    description: >
+      Number of times the Copy Rule option is picked from the Changes panel
+      context menu.
+    expires: "70"
     kind: uint
     notification_emails:
       - dev-developer-tools@lists.mozilla.org
@@ -1946,6 +2004,21 @@ telemetry.discarded:
     release_channel_collection: opt-out
     record_in_processes:
       - 'all_childs'
+
+normandy:
+  recipe_freshness:
+    bug_numbers:
+      - 1530508
+    description: >
+      For each recipe ID seen by the Normandy client, its last_modified.
+    expires: "never"
+    keyed: true
+    kind: uint
+    notification_emails:
+      - product-delivery@mozilla.com
+    release_channel_collection: opt-out
+    record_in_processes:
+      - main
 
 # The following section contains graphics-related scalars.
 gfx.advanced.layers:
@@ -2494,6 +2567,23 @@ startup:
     release_channel_collection: opt-out
     record_in_processes:
       - main
+
+script.preloader:
+  mainthread_recompile:
+    bug_numbers:
+      - 1364235
+    description:
+      How many times we ended up recompiling a script from the script preloader
+      on the main thread.
+    expires: "73"
+    keyed: false
+    kind: uint
+    notification_emails:
+      - dothayer@mozilla.com
+    release_channel_collection: opt-out
+    record_in_processes:
+      - 'main'
+      - 'content'
 
 # The following section is for probes testing the Telemetry system. They will not be
 # submitted in pings and are only used for testing.

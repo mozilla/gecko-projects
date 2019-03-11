@@ -30,7 +30,18 @@ Object.defineProperty(this, "BROWSER_NEW_TAB_URL", {
       }
       // If the extension does not have private browsing permission,
       // use about:privatebrowsing.
-      let extensionInfo = ExtensionSettingsStore.getSetting("url_overrides", "newTabURL");
+      let extensionInfo;
+      try {
+        extensionInfo = ExtensionSettingsStore.getSetting("url_overrides", "newTabURL");
+      } catch (e) {
+        // ExtensionSettings may not be initialized if no extensions are enabled.  If
+        // we have some indication that an extension controls the homepage, return
+        // the defaults instead.
+        if (aboutNewTabService.newTabURL.startsWith("moz-extension://")) {
+          return "about:privatebrowsing";
+        }
+      }
+
       if (extensionInfo) {
         let policy = WebExtensionPolicy.getByID(extensionInfo.id);
         if (!policy || !policy.privateBrowsingAllowed) {
@@ -1024,8 +1035,6 @@ function openHelpLink(aHelpTopic, aCalledFromModal, aWhere) {
   openTrustedLinkIn(url, where);
 }
 
-window.addEventListener("dialoghelp", openPrefsHelp);
-
 function openPrefsHelp() {
   // non-instant apply prefwindows are usually modal, so we can't open in the topmost window,
   // since its probably behind the window.
@@ -1061,4 +1070,15 @@ function trimURL(aURL) {
     return urlWithoutProtocol;
   }
   return url;
+}
+
+/**
+ * Updates visibility of "Import From Another Browser" command depending on
+ * the DisableProfileImport policy.
+ */
+function updateFileMenuImportUIVisibility(id) {
+  if (!Services.policies.isAllowed("profileImport")) {
+    let command = document.getElementById(id);
+    command.setAttribute("disabled", "true");
+  }
 }

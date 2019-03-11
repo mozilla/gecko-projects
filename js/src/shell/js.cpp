@@ -84,6 +84,7 @@
 #include "jit/JitcodeMap.h"
 #include "jit/JitRealm.h"
 #include "jit/shared/CodeGenerator-shared.h"
+#include "js/ArrayBuffer.h"  // JS::{CreateMappedArrayBufferContents,NewMappedArrayBufferWithContents,IsArrayBufferObject,GetArrayBufferLengthAndData}
 #include "js/BuildId.h"  // JS::BuildIdCharVector, JS::SetProcessBuildIdOp
 #include "js/CharacterEncoding.h"
 #include "js/CompilationAndEvaluation.h"
@@ -97,6 +98,7 @@
 #include "js/MemoryFunctions.h"
 #include "js/Printf.h"
 #include "js/PropertySpec.h"
+#include "js/Realm.h"
 #include "js/SourceText.h"
 #include "js/StableStringChars.h"
 #include "js/StructuredClone.h"
@@ -493,7 +495,7 @@ static bool enableSharedMemory = SHARED_MEMORY_DEFAULT;
 static bool enableWasmBaseline = false;
 static bool enableWasmIon = false;
 static bool enableWasmCranelift = false;
-#ifdef ENABLE_WASM_REFTYPES
+#ifdef ENABLE_WASM_GC
 static bool enableWasmGc = false;
 #endif
 static bool enableWasmVerbose = false;
@@ -1536,7 +1538,7 @@ static bool CreateMappedArrayBuffer(JSContext* cx, unsigned argc, Value* vp) {
   }
 
   void* contents =
-      JS_CreateMappedArrayBufferContents(GET_FD_FROM_FILE(file), offset, size);
+      JS::CreateMappedArrayBufferContents(GET_FD_FROM_FILE(file), offset, size);
   if (!contents) {
     JS_ReportErrorASCII(cx,
                         "failed to allocate mapped array buffer contents "
@@ -1544,7 +1546,8 @@ static bool CreateMappedArrayBuffer(JSContext* cx, unsigned argc, Value* vp) {
     return false;
   }
 
-  RootedObject obj(cx, JS_NewMappedArrayBufferWithContents(cx, size, contents));
+  RootedObject obj(cx,
+                   JS::NewMappedArrayBufferWithContents(cx, size, contents));
   if (!obj) {
     return false;
   }
@@ -3976,8 +3979,9 @@ static void WorkerMain(WorkerInput* input) {
   auto guard = mozilla::MakeScopeExit([&] {
     CancelOffThreadJobsForContext(cx);
     sc->markObservers.reset();
-    JS_DestroyContext(cx);
+    JS_SetContextPrivate(cx, nullptr);
     js_delete(sc);
+    JS_DestroyContext(cx);
     js_delete(input);
   });
 
@@ -5032,7 +5036,7 @@ static bool BinParse(JSContext* cx, unsigned argc, Value* vp) {
   }
 
   RootedObject objBuf(cx, &args[0].toObject());
-  if (!JS_IsArrayBufferObject(objBuf)) {
+  if (!JS::IsArrayBufferObject(objBuf)) {
     const char* typeName = InformalValueTypeName(args[0]);
     JS_ReportErrorASCII(cx, "expected ArrayBuffer to parse, got %s", typeName);
     return false;
@@ -5041,8 +5045,8 @@ static bool BinParse(JSContext* cx, unsigned argc, Value* vp) {
   uint32_t buf_length = 0;
   bool buf_isSharedMemory = false;
   uint8_t* buf_data = nullptr;
-  GetArrayBufferLengthAndData(objBuf, &buf_length, &buf_isSharedMemory,
-                              &buf_data);
+  JS::GetArrayBufferLengthAndData(objBuf, &buf_length, &buf_isSharedMemory,
+                                  &buf_data);
   MOZ_ASSERT(buf_data);
 
   // Extract argument 2: Options.
@@ -8057,6 +8061,287 @@ static bool WasmLoop(JSContext* cx, unsigned argc, Value* vp) {
 #endif
 }
 
+static constexpr uint32_t DOM_OBJECT_SLOT = 0;
+
+static const JSClass* GetDomClass();
+
+static JSObject* GetDOMPrototype(JSObject* global);
+
+static const JSClass TransplantableDOMObjectClass = {
+    "TransplantableDOMObject",
+    JSCLASS_IS_DOMJSCLASS | JSCLASS_HAS_RESERVED_SLOTS(1)};
+
+static const Class TransplantableDOMProxyObjectClass =
+    PROXY_CLASS_DEF("TransplantableDOMProxyObject",
+                    JSCLASS_IS_DOMJSCLASS | JSCLASS_HAS_RESERVED_SLOTS(1));
+
+class TransplantableDOMProxyHandler final : public ForwardingProxyHandler {
+ public:
+  static const TransplantableDOMProxyHandler singleton;
+  static const char family;
+
+  constexpr TransplantableDOMProxyHandler() : ForwardingProxyHandler(&family) {}
+
+  // These two proxy traps are called in |js::DeadProxyTargetValue|, which in
+  // turn is called when nuking proxies. Because this proxy can temporarily be
+  // without an object in its private slot, see |EnsureExpandoObject|, the
+  // default implementation inherited from ForwardingProxyHandler can't be used,
+  // since it tries to derive the callable/constructible value from the target.
+  bool isCallable(JSObject* obj) const override { return false; }
+  bool isConstructor(JSObject* obj) const override { return false; }
+
+  // Simplified implementation of |DOMProxyHandler::GetAndClearExpandoObject|.
+  static JSObject* GetAndClearExpandoObject(JSObject* obj) {
+    const Value& v = GetProxyPrivate(obj);
+    if (v.isUndefined()) {
+      return nullptr;
+    }
+
+    JSObject* expandoObject = &v.toObject();
+    SetProxyPrivate(obj, UndefinedValue());
+    return expandoObject;
+  }
+
+  // Simplified implementation of |DOMProxyHandler::EnsureExpandoObject|.
+  static JSObject* EnsureExpandoObject(JSContext* cx, JS::HandleObject obj) {
+    const Value& v = GetProxyPrivate(obj);
+    if (v.isObject()) {
+      return &v.toObject();
+    }
+    MOZ_ASSERT(v.isUndefined());
+
+    JSObject* expando = JS_NewObjectWithGivenProto(cx, nullptr, nullptr);
+    if (!expando) {
+      return nullptr;
+    }
+    SetProxyPrivate(obj, ObjectValue(*expando));
+    return expando;
+  }
+};
+
+const TransplantableDOMProxyHandler TransplantableDOMProxyHandler::singleton;
+const char TransplantableDOMProxyHandler::family = 0;
+
+enum TransplantObjectSlots {
+  TransplantSourceObject = 0,
+};
+
+static bool TransplantObject(JSContext* cx, unsigned argc, Value* vp) {
+  CallArgs args = CallArgsFromVp(argc, vp);
+  RootedFunction callee(cx, &args.callee().as<JSFunction>());
+
+  if (args.length() != 1 || !args[0].isObject()) {
+    JS_ReportErrorASCII(cx, "transplant() must be called with an object");
+    return false;
+  }
+
+  // |newGlobal| needs to be a GlobalObject.
+  RootedObject newGlobal(cx, CheckedUnwrapDynamic(&args[0].toObject(), cx));
+  if (!newGlobal) {
+    ReportAccessDenied(cx);
+    return false;
+  }
+  if (!JS_IsGlobalObject(newGlobal)) {
+    JS_ReportErrorNumberASCII(
+        cx, GetErrorMessage, nullptr, JSMSG_UNEXPECTED_TYPE,
+        "\"global\" passed to transplant()", "not a global object");
+    return false;
+  }
+
+  const Value& reserved =
+      GetFunctionNativeReserved(callee, TransplantSourceObject);
+  RootedObject source(cx, CheckedUnwrapStatic(&reserved.toObject()));
+  if (!source) {
+    ReportAccessDenied(cx);
+    return false;
+  }
+  MOZ_ASSERT(source->getClass()->isDOMClass());
+
+  // The following steps aim to replicate the behavior of UpdateReflectorGlobal
+  // in dom/bindings/BindingUtils.cpp. In detail:
+  // 1. Check the recursion depth using CheckRecursionLimitConservative.
+  // 2. Enter the target compartment.
+  // 3. Clone the source object using JS_CloneObject.
+  // 4. Copy all properties from source to a temporary holder object.
+  // 5. Actually transplant the object.
+  // 6. And finally copy the properties back to the source object.
+  //
+  // As an extension to the algorithm in UpdateReflectorGlobal, we also allow
+  // to transplant an object into the same compartment as the source object to
+  // cover all operations supported by JS_TransplantObject.
+
+  if (!CheckRecursionLimitConservative(cx)) {
+    return false;
+  }
+
+  bool isProxy = IsProxy(source);
+  RootedObject expandoObject(cx);
+  if (isProxy) {
+    expandoObject =
+        TransplantableDOMProxyHandler::GetAndClearExpandoObject(source);
+  }
+
+  JSAutoRealm ar(cx, newGlobal);
+
+  RootedObject proto(cx);
+  if (JS_GetClass(source) == GetDomClass()) {
+    proto = GetDOMPrototype(newGlobal);
+  } else {
+    proto = JS::GetRealmObjectPrototype(cx);
+    if (!proto) {
+      return false;
+    }
+  }
+
+  RootedObject target(cx, JS_CloneObject(cx, source, proto));
+  if (!target) {
+    return false;
+  }
+
+  RootedObject copyFrom(cx, isProxy ? expandoObject : source);
+  RootedObject propertyHolder(cx,
+                              JS_NewObjectWithGivenProto(cx, nullptr, nullptr));
+  if (!propertyHolder) {
+    return false;
+  }
+
+  if (!JS_CopyPropertiesFrom(cx, propertyHolder, copyFrom)) {
+    return false;
+  }
+
+  SetReservedSlot(target, DOM_OBJECT_SLOT,
+                  GetReservedSlot(source, DOM_OBJECT_SLOT));
+  SetReservedSlot(source, DOM_OBJECT_SLOT, JS::PrivateValue(nullptr));
+
+  source = JS_TransplantObject(cx, source, target);
+  if (!source) {
+    return false;
+  }
+
+  RootedObject copyTo(cx);
+  if (isProxy) {
+    copyTo = TransplantableDOMProxyHandler::EnsureExpandoObject(cx, source);
+    if (!copyTo) {
+      return false;
+    }
+  } else {
+    copyTo = source;
+  }
+  if (!JS_CopyPropertiesFrom(cx, copyTo, propertyHolder)) {
+    return false;
+  }
+
+  args.rval().setUndefined();
+  return true;
+}
+
+static bool TransplantableObject(JSContext* cx, unsigned argc, Value* vp) {
+  CallArgs args = CallArgsFromVp(argc, vp);
+  RootedObject callee(cx, &args.callee());
+
+  if (args.length() > 1) {
+    ReportUsageErrorASCII(cx, callee, "Wrong number of arguments");
+    return false;
+  }
+
+  bool createProxy = false;
+  RootedObject source(cx);
+  if (args.length() == 1 && !args[0].isUndefined()) {
+    if (!args[0].isObject()) {
+      ReportUsageErrorASCII(cx, callee, "Argument must be an object");
+      return false;
+    }
+
+    RootedObject options(cx, &args[0].toObject());
+    RootedValue value(cx);
+
+    if (!JS_GetProperty(cx, options, "proxy", &value)) {
+      return false;
+    }
+    createProxy = JS::ToBoolean(value);
+
+    if (!JS_GetProperty(cx, options, "object", &value)) {
+      return false;
+    }
+    if (!value.isUndefined()) {
+      if (!value.isObject()) {
+        ReportUsageErrorASCII(cx, callee, "'object' option must be an object");
+        return false;
+      }
+
+      source = &value.toObject();
+      if (JS_GetClass(source) != GetDomClass()) {
+        ReportUsageErrorASCII(cx, callee, "Object not a FakeDOMObject");
+        return false;
+      }
+
+      // |source| must be a tenured object to be transplantable.
+      if (gc::IsInsideNursery(source)) {
+        JS_GC(cx);
+
+        MOZ_ASSERT(!gc::IsInsideNursery(source),
+                   "Live objects should be tenured after one GC, because "
+                   "the nursery has only a single generation");
+      }
+    }
+  }
+
+  if (!source) {
+    if (!createProxy) {
+      source = NewBuiltinClassInstance(
+          cx, Valueify(&TransplantableDOMObjectClass), TenuredObject);
+      if (!source) {
+        return false;
+      }
+
+      SetReservedSlot(source, DOM_OBJECT_SLOT, JS::PrivateValue(nullptr));
+    } else {
+      JSObject* expando = JS_NewPlainObject(cx);
+      if (!expando) {
+        return false;
+      }
+      RootedValue expandoVal(cx, ObjectValue(*expando));
+
+      ProxyOptions options;
+      options.setClass(&TransplantableDOMProxyObjectClass);
+      options.setLazyProto(true);
+
+      source = NewProxyObject(cx, &TransplantableDOMProxyHandler::singleton,
+                              expandoVal, nullptr, options);
+      if (!source) {
+        return false;
+      }
+
+      SetProxyReservedSlot(source, DOM_OBJECT_SLOT, JS::PrivateValue(nullptr));
+    }
+  }
+
+  jsid emptyId = NameToId(cx->names().empty);
+  RootedObject transplant(
+      cx, NewFunctionByIdWithReserved(cx, TransplantObject, 0, 0, emptyId));
+  if (!transplant) {
+    return false;
+  }
+
+  SetFunctionNativeReserved(transplant, TransplantSourceObject,
+                            ObjectValue(*source));
+
+  RootedObject result(cx, JS_NewPlainObject(cx));
+  if (!result) {
+    return false;
+  }
+
+  RootedValue sourceVal(cx, ObjectValue(*source));
+  RootedValue transplantVal(cx, ObjectValue(*transplant));
+  if (!JS_DefineProperty(cx, result, "object", sourceVal, 0) ||
+      !JS_DefineProperty(cx, result, "transplant", transplantVal, 0)) {
+    return false;
+  }
+
+  args.rval().setObject(*result);
+  return true;
+}
+
 // clang-format off
 static const JSFunctionSpecWithHelp shell_functions[] = {
     JS_FN_HELP("clone", Clone, 1, 0,
@@ -8702,6 +8987,19 @@ JS_FN_HELP("parseBin", BinParse, 1, 0,
 "  wasm::Module into bytes, and deserialize those bytes in the current\n"
 "  process, returning the resulting WebAssembly.Module."),
 
+    JS_FN_HELP("transplantableObject", TransplantableObject, 0, 0,
+"transplantableObject([options])",
+"  Returns the pair {object, transplant}. |object| is an object which can be\n"
+"  transplanted into a new object when the |transplant| function, which must\n"
+"  be invoked with a global object, is called.\n"
+"  |object| is swapped with a cross-compartment wrapper if the global object\n"
+"  is in a different compartment.\n"
+"\n"
+"  If options is given, it may have any of the following properties:\n"
+"    proxy: Create a DOM Proxy object instead of a plain DOM object.\n"
+"    object: Don't create a new DOM object, but instead use the supplied\n"
+"            FakeDOMObject."),
+
     JS_FS_HELP_END
 };
 // clang-format on
@@ -9218,15 +9516,22 @@ static const JSClassOps global_classOps = {nullptr,
                                            nullptr,
                                            JS_GlobalObjectTraceHook};
 
-static const JSClass global_class = {"global", JSCLASS_GLOBAL_FLAGS,
-                                     &global_classOps};
+static constexpr uint32_t DOM_PROTOTYPE_SLOT = JSCLASS_GLOBAL_SLOT_COUNT;
+static constexpr uint32_t DOM_GLOBAL_SLOTS = 1;
+
+static const JSClass global_class = {
+    "global",
+    JSCLASS_GLOBAL_FLAGS | JSCLASS_GLOBAL_FLAGS_WITH_SLOTS(DOM_GLOBAL_SLOTS),
+    &global_classOps};
 
 /*
  * Define a FakeDOMObject constructor. It returns an object with a getter,
  * setter and method with attached JitInfo. This object can be used to test
  * IonMonkey DOM optimizations in the shell.
  */
-static const uint32_t DOM_OBJECT_SLOT = 0;
+
+/* Fow now just use to a constant we can check. */
+static const void* DOM_PRIVATE_VALUE = (void*)0x1234;
 
 static bool dom_genericGetter(JSContext* cx, unsigned argc, JS::Value* vp);
 
@@ -9234,14 +9539,10 @@ static bool dom_genericSetter(JSContext* cx, unsigned argc, JS::Value* vp);
 
 static bool dom_genericMethod(JSContext* cx, unsigned argc, JS::Value* vp);
 
-#ifdef DEBUG
-static const JSClass* GetDomClass();
-#endif
-
 static bool dom_get_x(JSContext* cx, HandleObject obj, void* self,
                       JSJitGetterCallArgs args) {
   MOZ_ASSERT(JS_GetClass(obj) == GetDomClass());
-  MOZ_ASSERT(self == (void*)0x1234);
+  MOZ_ASSERT(self == DOM_PRIVATE_VALUE);
   args.rval().set(JS_NumberValue(double(3.14)));
   return true;
 }
@@ -9249,14 +9550,14 @@ static bool dom_get_x(JSContext* cx, HandleObject obj, void* self,
 static bool dom_set_x(JSContext* cx, HandleObject obj, void* self,
                       JSJitSetterCallArgs args) {
   MOZ_ASSERT(JS_GetClass(obj) == GetDomClass());
-  MOZ_ASSERT(self == (void*)0x1234);
+  MOZ_ASSERT(self == DOM_PRIVATE_VALUE);
   return true;
 }
 
 static bool dom_get_global(JSContext* cx, HandleObject obj, void* self,
                            JSJitGetterCallArgs args) {
   MOZ_ASSERT(JS_GetClass(obj) == GetDomClass());
-  MOZ_ASSERT(self == (void*)0x1234);
+  MOZ_ASSERT(self == DOM_PRIVATE_VALUE);
 
   // Return the current global (instead of obj->global()) to test cx->realm
   // switching in the JIT.
@@ -9268,7 +9569,7 @@ static bool dom_get_global(JSContext* cx, HandleObject obj, void* self,
 static bool dom_set_global(JSContext* cx, HandleObject obj, void* self,
                            JSJitSetterCallArgs args) {
   MOZ_ASSERT(JS_GetClass(obj) == GetDomClass());
-  MOZ_ASSERT(self == (void*)0x1234);
+  MOZ_ASSERT(self == DOM_PRIVATE_VALUE);
 
   // Throw an exception if our argument is not the current global. This lets
   // us test cx->realm switching.
@@ -9284,7 +9585,7 @@ static bool dom_set_global(JSContext* cx, HandleObject obj, void* self,
 static bool dom_doFoo(JSContext* cx, HandleObject obj, void* self,
                       const JSJitMethodCallArgs& args) {
   MOZ_ASSERT(JS_GetClass(obj) == GetDomClass());
-  MOZ_ASSERT(self == (void*)0x1234);
+  MOZ_ASSERT(self == DOM_PRIVATE_VALUE);
   MOZ_ASSERT(cx->realm() == args.callee().as<JSFunction>().realm());
 
   /* Just return args.length(). */
@@ -9398,9 +9699,7 @@ static const JSFunctionSpec dom_methods[] = {
 static const JSClass dom_class = {
     "FakeDOMObject", JSCLASS_IS_DOMJSCLASS | JSCLASS_HAS_RESERVED_SLOTS(2)};
 
-#ifdef DEBUG
 static const JSClass* GetDomClass() { return &dom_class; }
-#endif
 
 static bool dom_genericGetter(JSContext* cx, unsigned argc, JS::Value* vp) {
   CallArgs args = CallArgsFromVp(argc, vp);
@@ -9473,8 +9772,14 @@ static bool dom_genericMethod(JSContext* cx, unsigned argc, JS::Value* vp) {
 }
 
 static void InitDOMObject(HandleObject obj) {
-  /* Fow now just initialize to a constant we can check. */
-  SetReservedSlot(obj, DOM_OBJECT_SLOT, PrivateValue((void*)0x1234));
+  SetReservedSlot(obj, DOM_OBJECT_SLOT,
+                  PrivateValue(const_cast<void*>(DOM_PRIVATE_VALUE)));
+}
+
+static JSObject* GetDOMPrototype(JSObject* global) {
+  MOZ_ASSERT(JS_IsGlobalObject(global));
+  MOZ_ASSERT(GetReservedSlot(global, DOM_PROTOTYPE_SLOT).isObject());
+  return &GetReservedSlot(global, DOM_PROTOTYPE_SLOT).toObject();
 }
 
 static bool dom_constructor(JSContext* cx, unsigned argc, JS::Value* vp) {
@@ -9506,9 +9811,8 @@ static bool dom_constructor(JSContext* cx, unsigned argc, JS::Value* vp) {
 
 static bool InstanceClassHasProtoAtDepth(const Class* clasp, uint32_t protoID,
                                          uint32_t depth) {
-  // There's only a single (fake) DOM object in the shell, so just return
-  // true.
-  return true;
+  // Only the (fake) DOM object supports any JIT optimizations.
+  return clasp == Valueify(GetDomClass());
 }
 
 static bool ShellBuildId(JS::BuildIdCharVector* buildId) {
@@ -9636,6 +9940,11 @@ static JSObject* NewGlobalObject(JSContext* cx, JS::RealmOptions& options,
     if (!domProto) {
       return nullptr;
     }
+
+    // FakeDOMObject.prototype is the only DOM object which needs to retrieved
+    // in the shell; store it directly instead of creating a separate layer
+    // (ProtoAndIfaceCache) as done in the browser.
+    SetReservedSlot(glob, DOM_PROTOTYPE_SLOT, ObjectValue(*domProto));
 
     /* Initialize FakeDOMObject.prototype */
     InitDOMObject(domProto);
@@ -9837,25 +10146,14 @@ static MOZ_MUST_USE bool ProcessArgs(JSContext* cx, OptionParser* op) {
 
 static bool SetContextOptions(JSContext* cx, const OptionParser& op) {
   enableBaseline = !op.getBoolOption("no-baseline");
-#ifdef JS_CODEGEN_ARM64
-  // TODO: Enable Ion by default.
-  enableIon = false;
-  enableAsmJS = false;
-#else
   enableIon = !op.getBoolOption("no-ion");
   enableAsmJS = !op.getBoolOption("no-asmjs");
-#endif
   enableNativeRegExp = !op.getBoolOption("no-native-regexp");
 
   // Default values for wasm.
   enableWasm = true;
   enableWasmBaseline = true;
-#ifdef JS_CODEGEN_ARM64
-  // TODO: Enable WasmIon by default.
-  enableWasmIon = false;
-#else
   enableWasmIon = true;
-#endif
   if (const char* str = op.getStringOption("wasm-compiler")) {
     if (strcmp(str, "none") == 0) {
       enableWasm = false;
@@ -9880,7 +10178,7 @@ static bool SetContextOptions(JSContext* cx, const OptionParser& op) {
     }
   }
 
-#ifdef ENABLE_WASM_REFTYPES
+#ifdef ENABLE_WASM_GC
   enableWasmGc = op.getBoolOption("wasm-gc");
 #endif
   enableWasmVerbose = op.getBoolOption("wasm-verbose");
@@ -9899,7 +10197,7 @@ static bool SetContextOptions(JSContext* cx, const OptionParser& op) {
 #ifdef ENABLE_WASM_CRANELIFT
       .setWasmCranelift(enableWasmCranelift)
 #endif
-#ifdef ENABLE_WASM_REFTYPES
+#ifdef ENABLE_WASM_GC
       .setWasmGc(enableWasmGc)
 #endif
       .setWasmVerbose(enableWasmVerbose)
@@ -10202,7 +10500,7 @@ static void SetWorkerContextOptions(JSContext* cx) {
 #ifdef ENABLE_WASM_CRANELIFT
       .setWasmCranelift(enableWasmCranelift)
 #endif
-#ifdef ENABLE_WASM_REFTYPES
+#ifdef ENABLE_WASM_GC
       .setWasmGc(enableWasmGc)
 #endif
       .setWasmVerbose(enableWasmVerbose)
@@ -10587,8 +10885,8 @@ int main(int argc, char** argv, char** envp) {
       !op.addBoolOption('\0', "test-wasm-await-tier2",
                         "Forcibly activate tiering and block "
                         "instantiation on completion of tier2")
-#ifdef ENABLE_WASM_REFTYPES
-      || !op.addBoolOption('\0', "wasm-gc", "Enable wasm GC features")
+#ifdef ENABLE_WASM_GC
+      || !op.addBoolOption('\0', "wasm-gc", "Enable experimental wasm GC features")
 #else
       || !op.addBoolOption('\0', "wasm-gc", "No-op")
 #endif
@@ -10984,6 +11282,8 @@ int main(int argc, char** argv, char** envp) {
 
   CancelOffThreadJobsForRuntime(cx);
 
+  JS_SetContextPrivate(cx, nullptr);
+  sc.reset();
   JS_DestroyContext(cx);
   return result;
 }

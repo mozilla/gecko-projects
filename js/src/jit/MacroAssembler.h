@@ -961,6 +961,7 @@ class MacroAssembler : public MacroAssemblerSpecific {
 
   inline void neg32(Register reg) PER_SHARED_ARCH;
   inline void neg64(Register64 reg) DEFINED_ON(x86, x64, arm, mips32, mips64);
+  inline void negPtr(Register reg) PER_ARCH;
 
   inline void negateFloat(FloatRegister reg) PER_SHARED_ARCH;
 
@@ -1758,8 +1759,12 @@ class MacroAssembler : public MacroAssemblerSpecific {
 
   void wasmTrap(wasm::Trap trap, wasm::BytecodeOffset bytecodeOffset);
   void wasmInterruptCheck(Register tls, wasm::BytecodeOffset bytecodeOffset);
-  void wasmReserveStackChecked(uint32_t amount,
-                               wasm::BytecodeOffset trapOffset);
+
+  // Returns a pair: the offset of the undefined (trapping) instruction, and
+  // the number of extra bytes of stack allocated prior to the trap
+  // instruction proper.
+  std::pair<CodeOffset, uint32_t>
+  wasmReserveStackChecked(uint32_t amount, wasm::BytecodeOffset trapOffset);
 
   // Emit a bounds check against the wasm heap limit, jumping to 'label' if
   // 'cond' holds. If JitOptions.spectreMaskIndex is true, in speculative

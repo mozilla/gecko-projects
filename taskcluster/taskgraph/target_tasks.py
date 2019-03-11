@@ -570,6 +570,15 @@ def target_tasks_customv8_update(full_task_graph, parameters, graph_config):
     return ['toolchain-linux64-custom-v8']
 
 
+@_target_task('chromium_update')
+def target_tasks_chromium_update(full_task_graph, parameters, graph_config):
+    """Select tasks required for building latest chromium versions."""
+    return ['fetch-linux64-chromium',
+            'fetch-win32-chromium',
+            'fetch-win64-chromium',
+            'fetch-mac-chromium']
+
+
 @_target_task('pipfile_update')
 def target_tasks_pipfile_update(full_task_graph, parameters, graph_config):
     """Select the set of tasks required to perform nightly in-tree pipfile updates
@@ -655,3 +664,21 @@ def target_tasks_release_simulation(full_task_graph, parameters, graph_config):
             and filter_out_cron(t, parameters)
             and filter_for_target_project(t)
             and filter_out_android_on_esr(t)]
+
+
+@_target_task('codereview')
+def target_tasks_codereview(full_task_graph, parameters, graph_config):
+    """Select all code review tasks needed to produce a report"""
+
+    def filter(task):
+        # Ending tasks
+        if task.kind in ['code-review']:
+            return True
+
+        # Analyzer tasks
+        if task.attributes.get('code-review') is True:
+            return True
+
+        return False
+
+    return [l for l, t in full_task_graph.tasks.iteritems() if filter(t)]

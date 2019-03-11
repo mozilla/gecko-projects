@@ -104,7 +104,7 @@
 #include "mozilla/dom/ChildSHistory.h"
 #include "mozilla/dom/CanonicalBrowsingContext.h"
 #include "mozilla/dom/ContentChild.h"
-#include "mozilla/dom/RemoteFrameChild.h"
+#include "mozilla/dom/BrowserBridgeChild.h"
 
 #include "mozilla/dom/HTMLBodyElement.h"
 
@@ -180,7 +180,6 @@ nsFrameLoader::nsFrameLoader(Element* aOwner, nsPIDOMWindowOuter* aOpener,
       mLoadingOriginalSrc(false),
       mRemoteBrowserShown(false),
       mRemoteFrame(false),
-      mClampScrollPosition(true),
       mObservingOwnerContent(false) {
   mRemoteFrame = ShouldUseRemoteProcess();
   MOZ_ASSERT(!mRemoteFrame || !aOpener,
@@ -345,15 +344,15 @@ nsresult nsFrameLoader::ReallyStartLoadingInternal() {
   AUTO_PROFILER_LABEL("nsFrameLoader::ReallyStartLoadingInternal", OTHER);
 
   if (IsRemoteFrame()) {
-    if (!mRemoteBrowser && !mRemoteFrameChild && !TryRemoteBrowser()) {
+    if (!mRemoteBrowser && !mBrowserBridgeChild && !TryRemoteBrowser()) {
       NS_WARNING("Couldn't create child process for iframe.");
       return NS_ERROR_FAILURE;
     }
 
-    if (mRemoteFrameChild) {
+    if (mBrowserBridgeChild) {
       nsAutoCString spec;
       mURIToLoad->GetSpec(spec);
-      Unused << mRemoteFrameChild->SendLoadURL(spec);
+      Unused << mBrowserBridgeChild->SendLoadURL(spec);
     } else {
       // FIXME get error codes from child
       mRemoteBrowser->LoadURL(mURIToLoad);
@@ -396,11 +395,21 @@ nsresult nsFrameLoader::ReallyStartLoadingInternal() {
     loadState->SetTriggeringPrincipal(mOwnerContent->NodePrincipal());
   }
 
-  // Currently we query the CSP from the principal, but after
-  // Bug 1529877 we should query the CSP from within GetURL and
-  // store it as a member, similar to mTriggeringPrincipal.
+  // Expanded Principals override the CSP of the document, hence we first check
+  // if the triggeringPrincipal overrides the document's principal. If so, let's
+  // query the CSP from that Principal, otherwise we use the document's CSP.
+  // Note that even after Bug 965637, Expanded Principals will hold their own
+  // CSP.
   nsCOMPtr<nsIContentSecurityPolicy> csp;
-  loadState->TriggeringPrincipal()->GetCsp(getter_AddRefs(csp));
+  if (BasePrincipal::Cast(loadState->TriggeringPrincipal())
+          ->OverridesCSP(mOwnerContent->NodePrincipal())) {
+    loadState->TriggeringPrincipal()->GetCsp(getter_AddRefs(csp));
+  } else {
+    // Currently the NodePrincipal holds the CSP for a document. After
+    // Bug 965637 we can query the CSP from mOwnerContent->OwnerDoc()
+    // instead of mOwnerContent->NodePrincipal().
+    mOwnerContent->NodePrincipal()->GetCsp(getter_AddRefs(csp));
+  }
   loadState->SetCsp(csp);
 
   nsCOMPtr<nsIURI> referrer;
@@ -797,7 +806,7 @@ bool nsFrameLoader::ShowRemoteFrame(const ScreenIntSize& size,
   NS_ASSERTION(IsRemoteFrame(),
                "ShowRemote only makes sense on remote frames.");
 
-  if (!mRemoteBrowser && !mRemoteFrameChild && !TryRemoteBrowser()) {
+  if (!mRemoteBrowser && !mBrowserBridgeChild && !TryRemoteBrowser()) {
     NS_ERROR("Couldn't create child process.");
     return false;
   }
@@ -816,7 +825,7 @@ bool nsFrameLoader::ShowRemoteFrame(const ScreenIntSize& size,
       return false;
     }
 
-    if (mRemoteFrameChild) {
+    if (mBrowserBridgeChild) {
       nsCOMPtr<nsISupports> container =
           mOwnerContent->OwnerDoc()->GetContainer();
       nsCOMPtr<nsIBaseWindow> baseWindow = do_QueryInterface(container);
@@ -825,7 +834,7 @@ bool nsFrameLoader::ShowRemoteFrame(const ScreenIntSize& size,
       nsSizeMode sizeMode =
           mainWidget ? mainWidget->SizeMode() : nsSizeMode_Normal;
 
-      Unused << mRemoteFrameChild->SendShow(
+      Unused << mBrowserBridgeChild->SendShow(
           size, ParentWindowIsActive(mOwnerContent->OwnerDoc()), sizeMode);
       mRemoteBrowserShown = true;
       return true;
@@ -854,8 +863,8 @@ bool nsFrameLoader::ShowRemoteFrame(const ScreenIntSize& size,
     if (!aFrame || !(aFrame->GetStateBits() & NS_FRAME_FIRST_REFLOW)) {
       if (mRemoteBrowser) {
         mRemoteBrowser->UpdateDimensions(dimensions, size);
-      } else if (mRemoteFrameChild) {
-        mRemoteFrameChild->UpdateDimensions(dimensions, size);
+      } else if (mBrowserBridgeChild) {
+        mBrowserBridgeChild->UpdateDimensions(dimensions, size);
       }
     }
   }
@@ -946,7 +955,7 @@ nsresult nsFrameLoader::SwapWithOtherRemoteLoader(
   }
 
   // FIXME: Consider supporting FrameLoader swapping for remote sub frames.
-  if (mRemoteFrameChild) {
+  if (mBrowserBridgeChild) {
     return NS_ERROR_NOT_IMPLEMENTED;
   }
 
@@ -1677,9 +1686,9 @@ void nsFrameLoader::DestroyDocShell() {
     mRemoteBrowser->Destroy();
   }
 
-  if (mRemoteFrameChild) {
-    Unused << mRemoteFrameChild->Send__delete__(mRemoteFrameChild);
-    mRemoteFrameChild = nullptr;
+  if (mBrowserBridgeChild) {
+    Unused << mBrowserBridgeChild->Send__delete__(mBrowserBridgeChild);
+    mBrowserBridgeChild = nullptr;
   }
 
   // Fire the "unload" event if we're in-process.
@@ -1723,9 +1732,9 @@ void nsFrameLoader::DestroyComplete() {
     mRemoteBrowser = nullptr;
   }
 
-  if (mRemoteFrameChild) {
-    Unused << mRemoteFrameChild->Send__delete__(mRemoteFrameChild);
-    mRemoteFrameChild = nullptr;
+  if (mBrowserBridgeChild) {
+    Unused << mBrowserBridgeChild->Send__delete__(mBrowserBridgeChild);
+    mBrowserBridgeChild = nullptr;
   }
 
   if (mMessageManager) {
@@ -2289,7 +2298,7 @@ nsresult nsFrameLoader::GetWindowDimensions(nsIntRect& aRect) {
 
 nsresult nsFrameLoader::UpdatePositionAndSize(nsSubDocumentFrame* aIFrame) {
   if (IsRemoteFrame()) {
-    if (mRemoteBrowser || mRemoteFrameChild) {
+    if (mRemoteBrowser || mBrowserBridgeChild) {
       ScreenIntSize size = aIFrame->GetSubdocumentSize();
       // If we were not able to show remote frame before, we should probably
       // retry now to send correct showInfo.
@@ -2301,8 +2310,8 @@ nsresult nsFrameLoader::UpdatePositionAndSize(nsSubDocumentFrame* aIFrame) {
       mLazySize = size;
       if (mRemoteBrowser) {
         mRemoteBrowser->UpdateDimensions(dimensions, size);
-      } else if (mRemoteFrameChild) {
-        mRemoteFrameChild->UpdateDimensions(dimensions, size);
+      } else if (mBrowserBridgeChild) {
+        mBrowserBridgeChild->UpdateDimensions(dimensions, size);
       }
     }
     return NS_OK;
@@ -2359,28 +2368,6 @@ uint32_t nsFrameLoader::LazyHeight() const {
   return lazyHeight;
 }
 
-void nsFrameLoader::SetClampScrollPosition(bool aClamp) {
-  mClampScrollPosition = aClamp;
-
-  // When turning clamping on, make sure the current position is clamped.
-  if (aClamp) {
-    nsIFrame* frame = GetPrimaryFrameOfOwningContent();
-    nsSubDocumentFrame* subdocFrame = do_QueryFrame(frame);
-    if (subdocFrame) {
-      nsIFrame* subdocRootFrame = subdocFrame->GetSubdocumentRootFrame();
-      if (subdocRootFrame) {
-        nsIScrollableFrame* subdocRootScrollFrame =
-            subdocRootFrame->PresShell()->GetRootScrollFrameAsScrollable();
-        if (subdocRootScrollFrame) {
-          subdocRootScrollFrame->ScrollTo(
-              subdocRootScrollFrame->GetScrollPosition(),
-              nsIScrollableFrame::INSTANT);
-        }
-      }
-    }
-  }
-}
-
 static Tuple<ContentParent*, TabParent*> GetContentParent(Element* aBrowser) {
   using ReturnTuple = Tuple<ContentParent*, TabParent*>;
 
@@ -2404,7 +2391,7 @@ static Tuple<ContentParent*, TabParent*> GetContentParent(Element* aBrowser) {
 }
 
 bool nsFrameLoader::TryRemoteBrowser() {
-  NS_ASSERTION(!mRemoteBrowser && !mRemoteFrameChild,
+  NS_ASSERTION(!mRemoteBrowser && !mBrowserBridgeChild,
                "TryRemoteBrowser called with a remote browser already?");
 
   if (!mOwnerContent) {
@@ -2521,11 +2508,11 @@ bool nsFrameLoader::TryRemoteBrowser() {
 
   nsCOMPtr<Element> ownerElement = mOwnerContent;
 
-  // If we're in a content process, create a RemoteFrameChild actor.
+  // If we're in a content process, create a BrowserBridgeChild actor.
   if (XRE_IsContentProcess()) {
-    mRemoteFrameChild = RemoteFrameChild::Create(
+    mBrowserBridgeChild = BrowserBridgeChild::Create(
         this, context, NS_LITERAL_STRING(DEFAULT_REMOTE_TYPE));
-    return !!mRemoteFrameChild;
+    return !!mBrowserBridgeChild;
   }
 
   mRemoteBrowser =
@@ -2599,13 +2586,17 @@ mozilla::dom::PBrowserParent* nsFrameLoader::GetRemoteBrowser() const {
   return mRemoteBrowser;
 }
 
+mozilla::dom::BrowserBridgeChild* nsFrameLoader::GetBrowserBridgeChild() const {
+  return mBrowserBridgeChild;
+}
+
 mozilla::layers::LayersId nsFrameLoader::GetLayersId() const {
   MOZ_ASSERT(mRemoteFrame);
   if (mRemoteBrowser) {
     return mRemoteBrowser->GetRenderFrame()->GetLayersId();
   }
-  if (mRemoteFrameChild) {
-    return mRemoteFrameChild->GetLayersId();
+  if (mBrowserBridgeChild) {
+    return mBrowserBridgeChild->GetLayersId();
   }
   return mozilla::layers::LayersId{};
 }

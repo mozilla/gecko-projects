@@ -18,6 +18,7 @@
 #include "mozilla/dom/WorkerRunnable.h"
 #include "mozilla/ipc/BackgroundUtils.h"
 #include "mozilla/ipc/URIUtils.h"
+#include "mozilla/net/CookieSettings.h"
 #include "nsIConsoleReportCollector.h"
 #include "nsIPrincipal.h"
 #include "nsNetUtil.h"
@@ -201,8 +202,9 @@ RemoteWorkerChild::~RemoteWorkerChild() {
 }
 
 void RemoteWorkerChild::ActorDestroy(ActorDestroyReason aWhy) {
+  MOZ_ACCESS_THREAD_BOUND(mLauncherData, data);
   mIPCActive = false;
-  mPendingOps.Clear();
+  data->mPendingOps.Clear();
 }
 
 void RemoteWorkerChild::ExecWorker(const RemoteWorkerData& aData) {
@@ -269,6 +271,7 @@ nsresult RemoteWorkerChild::ExecWorkerOnMainThread(
   info.mStorageAllowed = aData.isStorageAccessAllowed();
   info.mOriginAttributes =
       BasePrincipal::Cast(principal)->OriginAttributesRef();
+  info.mCookieSettings = net::CookieSettings::Create();
 
   // Default CSP permissions for now.  These will be overrided if necessary
   // based on the script CSP headers during load in ScriptLoader.
@@ -290,8 +293,8 @@ nsresult RemoteWorkerChild::ExecWorkerOnMainThread(
   }
 
   Maybe<ClientInfo> clientInfo;
-  if (aData.clientInfo().type() == OptionalIPCClientInfo::TIPCClientInfo) {
-    clientInfo.emplace(ClientInfo(aData.clientInfo().get_IPCClientInfo()));
+  if (aData.clientInfo().isSome()) {
+    clientInfo.emplace(ClientInfo(aData.clientInfo().ref()));
   }
 
   // Top level workers' main script use the document charset for the script
@@ -301,7 +304,7 @@ nsresult RemoteWorkerChild::ExecWorkerOnMainThread(
       info.mResolvedScriptURI, clientInfo,
       aData.isSharedWorker() ? nsIContentPolicy::TYPE_INTERNAL_SHARED_WORKER
                              : nsIContentPolicy::TYPE_INTERNAL_SERVICE_WORKER,
-      getter_AddRefs(info.mChannel));
+      info.mCookieSettings, getter_AddRefs(info.mChannel));
   if (NS_WARN_IF(NS_FAILED(rv))) {
     return rv;
   }
@@ -367,10 +370,10 @@ void RemoteWorkerChild::ShutdownOnWorker() {
 }
 
 void RemoteWorkerChild::WorkerTerminated() {
-  MOZ_ASSERT(RemoteWorkerService::Thread()->IsOnCurrentThread());
+  MOZ_ACCESS_THREAD_BOUND(mLauncherData, data);
 
   mWorkerState = eTerminated;
-  mPendingOps.Clear();
+  data->mPendingOps.Clear();
 
   if (!mIPCActive) {
     return;
@@ -441,7 +444,7 @@ void RemoteWorkerChild::CloseWorkerOnMainThread() {
 
   // The holder will be notified by this.
   if (mWorkerState == eRunning) {
-    MOZ_ASSERT(mWorkerPrivate);
+    MOZ_RELEASE_ASSERT(mWorkerPrivate);
     mWorkerPrivate->Cancel();
   }
 }
@@ -469,13 +472,15 @@ void RemoteWorkerChild::FlushReportsOnMainThread(
 }
 
 IPCResult RemoteWorkerChild::RecvExecOp(const RemoteWorkerOp& aOp) {
+  MOZ_ACCESS_THREAD_BOUND(mLauncherData, data);
+
   if (!mIPCActive) {
     return IPC_OK();
   }
 
   // The worker is not ready yet.
   if (mWorkerState == ePending) {
-    mPendingOps.AppendElement(aOp);
+    data->mPendingOps.AppendElement(aOp);
     return IPC_OK();
   }
 
@@ -589,7 +594,7 @@ void RemoteWorkerChild::CreationSucceededOnAnyThread() {
 }
 
 void RemoteWorkerChild::CreationSucceeded() {
-  MOZ_ASSERT(RemoteWorkerService::Thread()->IsOnCurrentThread());
+  MOZ_ACCESS_THREAD_BOUND(mLauncherData, data);
 
   // The worker is created but we need to terminate it already.
   if (mWorkerState == ePendingTerminated) {
@@ -610,11 +615,11 @@ void RemoteWorkerChild::CreationSucceeded() {
     return;
   }
 
-  for (const RemoteWorkerOp& op : mPendingOps) {
+  for (const RemoteWorkerOp& op : data->mPendingOps) {
     RecvExecOp(op);
   }
 
-  mPendingOps.Clear();
+  data->mPendingOps.Clear();
 
   Unused << SendCreated(true);
 }
@@ -629,10 +634,10 @@ void RemoteWorkerChild::CreationFailedOnAnyThread() {
 }
 
 void RemoteWorkerChild::CreationFailed() {
-  MOZ_ASSERT(RemoteWorkerService::Thread()->IsOnCurrentThread());
+  MOZ_ACCESS_THREAD_BOUND(mLauncherData, data);
 
   mWorkerState = eTerminated;
-  mPendingOps.Clear();
+  data->mPendingOps.Clear();
 
   if (!mIPCActive) {
     return;

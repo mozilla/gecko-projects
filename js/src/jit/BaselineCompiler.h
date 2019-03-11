@@ -304,7 +304,7 @@ class BaselineCodeGen {
   }
 
   // Pushes the current script as argument for a VM function.
-  void pushScriptArg(Register scratch);
+  void pushScriptArg();
 
   // Pushes the bytecode pc as argument for a VM function.
   void pushBytecodePCArg();
@@ -321,6 +321,8 @@ class BaselineCodeGen {
   void pushUint16BytecodeOperandArg();
 
   void loadResumeIndexBytecodeOperand(Register dest);
+  void loadInt32LengthBytecodeOperand(Register dest);
+  void loadInt32IndexBytecodeOperand(ValueOperand dest);
 
   // Loads the current JSScript* in dest.
   void loadScript(Register dest);
@@ -346,15 +348,14 @@ class BaselineCodeGen {
                                        Register scratch1, Register scratch2);
 
   enum CallVMPhase { POST_INITIALIZE, CHECK_OVER_RECURSED };
-  bool callVM(const VMFunctionData& fun, TrampolinePtr code,
-              CallVMPhase phase = POST_INITIALIZE);
-  bool callVM(const VMFunction& fun, CallVMPhase phase = POST_INITIALIZE);
+  bool callVMInternal(VMFunctionId id, CallVMPhase phase);
 
   template <typename Fn, Fn fn>
   bool callVM(CallVMPhase phase = POST_INITIALIZE);
 
-  bool callVMNonOp(const VMFunction& fun, CallVMPhase phase = POST_INITIALIZE) {
-    if (!callVM(fun, phase)) {
+  template <typename Fn, Fn fn>
+  bool callVMNonOp(CallVMPhase phase = POST_INITIALIZE) {
+    if (!callVM<Fn, fn>(phase)) {
       return false;
     }
     handler.markLastRetAddrEntryKind(RetAddrEntry::Kind::NonOpCallVM);
@@ -629,6 +630,7 @@ class BaselineCompiler final : private BaselineCompilerCodeGen {
 // Interface used by BaselineCodeGen for BaselineInterpreterGenerator.
 class BaselineInterpreterHandler {
   InterpreterFrameInfo frame_;
+  Label interpretOp_;
 
  public:
   using FrameInfoT = InterpreterFrameInfo;
@@ -636,6 +638,8 @@ class BaselineInterpreterHandler {
   explicit BaselineInterpreterHandler(JSContext* cx, MacroAssembler& masm);
 
   InterpreterFrameInfo& frame() { return frame_; }
+
+  Label* interpretOpLabel() { return &interpretOp_; }
 
   // Interpreter doesn't know the script and pc statically.
   jsbytecode* maybePC() const { return nullptr; }
@@ -666,8 +670,6 @@ class BaselineInterpreterGenerator final : private BaselineInterpreterCodeGen {
  public:
   explicit BaselineInterpreterGenerator(JSContext* cx);
 };
-
-extern const VMFunction ImplicitThisInfo;
 
 }  // namespace jit
 }  // namespace js

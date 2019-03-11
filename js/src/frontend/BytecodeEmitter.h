@@ -46,6 +46,7 @@ struct CGObjectList {
 
   unsigned add(ObjectBox* objbox);
   void finish(mozilla::Span<GCPtrObject> array);
+  void finishInnerFunctions();
 };
 
 struct MOZ_STACK_CLASS CGScopeList {
@@ -349,6 +350,10 @@ struct MOZ_STACK_CLASS BytecodeEmitter {
 
   Scope* outermostScope() const { return scopeList.vector[0]; }
   Scope* innermostScope() const;
+  Scope* bodyScope() const {
+      MOZ_ASSERT(bodyScopeIndex < scopeList.length());
+      return scopeList.vector[bodyScopeIndex];
+  }
 
   MOZ_ALWAYS_INLINE
   MOZ_MUST_USE bool makeAtomIndex(JSAtom* atom, uint32_t* indexp) {
@@ -599,6 +604,9 @@ struct MOZ_STACK_CLASS BytecodeEmitter {
 
   MOZ_MUST_USE bool emitPropertyList(ListNode* obj, PropertyEmitter& pe,
                                      PropListType type);
+
+  FieldInitializers setupFieldInitializers(ListNode* classMembers);
+  MOZ_MUST_USE bool emitCreateFieldInitializers(ListNode* obj);
 
   // To catch accidental misuse, emitUint16Operand/emit3 assert that they are
   // not used to unconditionally emit JSOP_GETLOCAL. Variable access should

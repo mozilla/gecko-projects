@@ -742,6 +742,10 @@ class nsDisplayListBuilder {
     return CurrentPresShellState()->mInsidePointerEventsNoneDoc;
   }
 
+  bool IsTouchEventPrefEnabledDoc() {
+    return CurrentPresShellState()->mTouchEventPrefEnabledDoc;
+  }
+
   bool GetAncestorHasApzAwareEventHandler() const {
     return mAncestorHasApzAwareEventHandler;
   }
@@ -1833,6 +1837,7 @@ class nsDisplayListBuilder {
     // in the document, and is set when we enter a subdocument for a pointer-
     // events:none frame.
     bool mInsidePointerEventsNoneDoc;
+    bool mTouchEventPrefEnabledDoc;
     nsIFrame* mPresShellIgnoreScrollFrame;
   };
 
@@ -2096,7 +2101,8 @@ class nsDisplayItem : public nsDisplayItemLink {
         mDisableSubpixelAA(false),
         mReusedItem(false),
         mBackfaceHidden(mFrame->In3DContextAndBackfaceIsHidden()),
-        mPaintRectValid(false)
+        mPaintRectValid(false),
+        mCanBeReused(true)
 #ifdef MOZ_DUMP_PAINTING
         ,
         mPainted(false)
@@ -2170,7 +2176,8 @@ class nsDisplayItem : public nsDisplayItemLink {
         mDisableSubpixelAA(aOther.mDisableSubpixelAA),
         mReusedItem(false),
         mBackfaceHidden(mFrame->In3DContextAndBackfaceIsHidden()),
-        mPaintRectValid(false)
+        mPaintRectValid(false),
+        mCanBeReused(true)
 #ifdef MOZ_DUMP_PAINTING
         ,
         mPainted(false)
@@ -2264,6 +2271,14 @@ class nsDisplayItem : public nsDisplayItemLink {
   virtual nsRect GetBounds(nsDisplayListBuilder* aBuilder, bool* aSnap) const {
     *aSnap = false;
     return nsRect(ToReferenceFrame(), Frame()->GetSize());
+  }
+
+  /**
+   * Returns the untransformed bounds of this display item.
+   */
+  virtual nsRect GetUntransformedBounds(nsDisplayListBuilder* aBuilder,
+                                        bool* aSnap) const {
+    return GetBounds(aBuilder, aSnap);
   }
 
   virtual nsRegion GetTightBounds(nsDisplayListBuilder* aBuilder,
@@ -2831,7 +2846,12 @@ class nsDisplayItem : public nsDisplayItemLink {
 
   void SetReused(bool aReused) { mReusedItem = aReused; }
 
-  virtual bool CanBeReused() const { return true; }
+  bool CanBeReused() const { return mCanBeReused; }
+  void DiscardIfOldItem() {
+    if (mOldList) {
+      mCanBeReused = false;
+    }
+  }
 
   virtual nsIFrame* GetDependentFrame() { return nullptr; }
 
@@ -2889,6 +2909,10 @@ class nsDisplayItem : public nsDisplayItemLink {
 
   const nsRect& GetPaintRect() const { return mPaintRect; }
 
+  virtual const nsRect& GetUntransformedPaintRect() const {
+    return GetPaintRect();
+  }
+
   virtual bool HasHitTestInfo() const { return false; }
 
 #ifdef DEBUG
@@ -2941,6 +2965,7 @@ class nsDisplayItem : public nsDisplayItemLink {
   bool mReusedItem;
   bool mBackfaceHidden;
   bool mPaintRectValid;
+  bool mCanBeReused;
 #ifdef MOZ_DUMP_PAINTING
   // True if this frame has been painted.
   bool mPainted;
@@ -2984,9 +3009,7 @@ class nsDisplayList {
   }
 
   virtual ~nsDisplayList() {
-    if (mSentinel.mAbove) {
-      NS_WARNING("Nonempty list left over?");
-    }
+    MOZ_RELEASE_ASSERT(!mSentinel.mAbove, "Nonempty list left over?");
   }
 
   nsDisplayList(nsDisplayList&& aOther) {
@@ -3256,6 +3279,29 @@ class nsDisplayList {
   nsRect GetClippedBoundsWithRespectToASR(
       nsDisplayListBuilder* aBuilder, const ActiveScrolledRoot* aASR,
       nsRect* aBuildingRect = nullptr) const;
+
+  /**
+   * Returns the opaque region of this display list.
+   */
+  nsRegion GetOpaqueRegion(nsDisplayListBuilder* aBuilder) {
+    nsRegion result;
+    bool snap;
+    for (nsDisplayItem* item = GetBottom(); item; item = item->GetAbove()) {
+      result.OrWith(item->GetOpaqueRegion(aBuilder, &snap));
+    }
+    return result;
+  }
+
+  /**
+   * Returns the bounds of the area that needs component alpha.
+   */
+  nsRect GetComponentAlphaBounds(nsDisplayListBuilder* aBuilder) const {
+    nsRect bounds;
+    for (nsDisplayItem* item = GetBottom(); item; item = item->GetAbove()) {
+      bounds.UnionRect(bounds, item->GetComponentAlphaBounds(aBuilder));
+    }
+    return bounds;
+  }
 
   /**
    * Find the topmost display item that returns a non-null frame, and return
@@ -4017,12 +4063,11 @@ class nsDisplaySolidColor : public nsDisplaySolidColorBase {
   nsDisplaySolidColor(nsDisplayListBuilder* aBuilder, nsIFrame* aFrame,
                       const nsRect& aBounds, nscolor aColor,
                       bool aCanBeReused = true)
-      : nsDisplaySolidColorBase(aBuilder, aFrame, aColor),
-        mBounds(aBounds),
-        mCanBeReused(aCanBeReused) {
+      : nsDisplaySolidColorBase(aBuilder, aFrame, aColor), mBounds(aBounds) {
     NS_ASSERTION(NS_GET_A(aColor) > 0,
                  "Don't create invisible nsDisplaySolidColors!");
     MOZ_COUNT_CTOR(nsDisplaySolidColor);
+    mCanBeReused = aCanBeReused;
   }
 
 #ifdef NS_BUILD_REFCNT_LOGGING
@@ -4046,7 +4091,6 @@ class nsDisplaySolidColor : public nsDisplaySolidColorBase {
       const StackingContextHelper& aSc,
       mozilla::layers::RenderRootStateManager* aManager,
       nsDisplayListBuilder* aDisplayListBuilder) override;
-  bool CanBeReused() const override { return mCanBeReused; }
 
   int32_t ZIndex() const override {
     if (mOverrideZIndex) {
@@ -4061,7 +4105,6 @@ class nsDisplaySolidColor : public nsDisplaySolidColorBase {
 
  private:
   nsRect mBounds;
-  bool mCanBeReused;
   mozilla::Maybe<int32_t> mOverrideZIndex;
 };
 
@@ -5722,6 +5765,7 @@ class nsDisplayOwnLayer : public nsDisplayWrapList {
   nsDisplayOwnLayerFlags GetFlags() { return mFlags; }
   bool IsScrollThumbLayer() const;
   bool IsScrollbarContainer() const;
+  bool IsZoomingLayer() const;
 
  protected:
   nsDisplayOwnLayerFlags mFlags;
@@ -6415,37 +6459,6 @@ class nsDisplayTransform : public nsDisplayHitTestInfoItem {
   typedef mozilla::gfx::Matrix4x4Flagged Matrix4x4Flagged;
   typedef mozilla::gfx::Point3D Point3D;
 
-  /*
-   * Avoid doing UpdateBounds() during construction.
-   */
-  class StoreList : public nsDisplayWrapList {
-   public:
-    StoreList(nsDisplayListBuilder* aBuilder, nsIFrame* aFrame,
-              nsDisplayList* aList)
-        : nsDisplayWrapList(aBuilder, aFrame, aList, true) {}
-
-    ~StoreList() override = default;
-
-    void UpdateBounds(nsDisplayListBuilder* aBuilder) override {
-      // For extending 3d rendering context, the bounds would be
-      // updated by DoUpdateBoundsPreserves3D(), not here.
-      if (!mFrame->Extend3DContext()) {
-        nsDisplayWrapList::UpdateBounds(aBuilder);
-      }
-    }
-
-    void ForceUpdateBounds(nsDisplayListBuilder* aBuilder) {
-      nsDisplayWrapList::UpdateBounds(aBuilder);
-    }
-
-    void DoUpdateBoundsPreserves3D(nsDisplayListBuilder* aBuilder) override {
-      for (nsDisplayItem* i = mList.GetBottom(); i; i = i->GetAbove()) {
-        i->DoUpdateBoundsPreserves3D(aBuilder);
-      }
-      nsDisplayWrapList::UpdateBounds(aBuilder);
-    }
-  };
-
  public:
   enum PrerenderDecision { NoPrerender, FullPrerender, PartialPrerender };
 
@@ -6464,14 +6477,16 @@ class nsDisplayTransform : public nsDisplayHitTestInfoItem {
    */
   nsDisplayTransform(nsDisplayListBuilder* aBuilder, nsIFrame* aFrame,
                      nsDisplayList* aList, const nsRect& aChildrenBuildingRect,
-                     uint32_t aIndex = 0, bool aAllowAsyncAnimation = false);
+                     uint32_t aIndex);
+
   nsDisplayTransform(nsDisplayListBuilder* aBuilder, nsIFrame* aFrame,
                      nsDisplayList* aList, const nsRect& aChildrenBuildingRect,
-                     ComputeTransformFunction aTransformGetter,
-                     uint32_t aIndex = 0);
+                     uint32_t aIndex, bool aAllowAsyncAnimation);
+
   nsDisplayTransform(nsDisplayListBuilder* aBuilder, nsIFrame* aFrame,
                      nsDisplayList* aList, const nsRect& aChildrenBuildingRect,
-                     const Matrix4x4& aTransform, uint32_t aIndex = 0);
+                     uint32_t aIndex,
+                     ComputeTransformFunction aTransformGetter);
 
 #ifdef NS_BUILD_REFCNT_LOGGING
   ~nsDisplayTransform() override { MOZ_COUNT_DTOR(nsDisplayTransform); }
@@ -6481,40 +6496,36 @@ class nsDisplayTransform : public nsDisplayHitTestInfoItem {
 
   void RestoreState() override { mShouldFlatten = false; }
 
-  void UpdateBounds(nsDisplayListBuilder* aBuilder) override {
-    mHasBounds = false;
-    if (IsTransformSeparator()) {
-      mStoredList.ForceUpdateBounds(aBuilder);
-      return;
-    }
-    mStoredList.UpdateBounds(aBuilder);
-    UpdateBoundsFor3D(aBuilder);
-  }
+  void UpdateBounds(nsDisplayListBuilder* aBuilder) override;
+
+  /**
+   * This function updates bounds for items with a frame establishing
+   * 3D rendering context.
+   */
+  void UpdateBoundsFor3D(nsDisplayListBuilder* aBuilder);
+
+  void DoUpdateBoundsPreserves3D(nsDisplayListBuilder* aBuilder) override;
 
   void Destroy(nsDisplayListBuilder* aBuilder) override {
-    mStoredList.GetChildren()->DeleteAll(aBuilder);
+    GetChildren()->DeleteAll(aBuilder);
     nsDisplayItem::Destroy(aBuilder);
   }
 
-  nsRect GetComponentAlphaBounds(
-      nsDisplayListBuilder* aBuilder) const override {
-    if (mStoredList.GetComponentAlphaBounds(aBuilder).IsEmpty())
-      return nsRect();
-    bool snap;
-    return GetBounds(aBuilder, &snap);
+  nsRect GetComponentAlphaBounds(nsDisplayListBuilder* aBuilder) const override;
+
+  RetainedDisplayList* GetChildren() const override { return &mChildren; }
+
+  nsRect GetUntransformedBounds(nsDisplayListBuilder* aBuilder,
+                                bool* aSnap) const override {
+    *aSnap = false;
+    return mChildBounds;
   }
 
-  RetainedDisplayList* GetChildren() const override {
-    return mStoredList.GetChildren();
+  const nsRect& GetUntransformedPaintRect() const override {
+    return mChildrenBuildingRect;
   }
 
   bool ShouldFlattenAway(nsDisplayListBuilder* aBuilder) override;
-
-  void SetActiveScrolledRoot(
-      const ActiveScrolledRoot* aActiveScrolledRoot) override {
-    nsDisplayHitTestInfoItem::SetActiveScrolledRoot(aActiveScrolledRoot);
-    mStoredList.SetActiveScrolledRoot(aActiveScrolledRoot);
-  }
 
   void HitTest(nsDisplayListBuilder* aBuilder, const nsRect& aRect,
                HitTestState* aState, nsTArray<nsIFrame*>* aOutFrames) override;
@@ -6748,41 +6759,12 @@ class nsDisplayTransform : public nsDisplayHitTestInfoItem {
 
   void WriteDebugInfo(std::stringstream& aStream) override;
 
-  void DoUpdateBoundsPreserves3D(nsDisplayListBuilder* aBuilder) override {
-    MOZ_ASSERT(mFrame->Combines3DTransformWithAncestors() ||
-               IsTransformSeparator());
-    // Updating is not going through to child 3D context.
-    ComputeBounds(aBuilder);
-  }
-
-  /**
-   * This function updates bounds for items with a frame establishing
-   * 3D rendering context.
-   *
-   * \see nsDisplayItem::DoUpdateBoundsPreserves3D()
-   */
-  void UpdateBoundsFor3D(nsDisplayListBuilder* aBuilder) {
-    if (!mFrame->Extend3DContext() ||
-        mFrame->Combines3DTransformWithAncestors() || IsTransformSeparator()) {
-      // Not an establisher of a 3D rendering context.
-      return;
-    }
-    // Always start updating from an establisher of a 3D rendering context.
-
-    nsDisplayListBuilder::AutoAccumulateRect accRect(aBuilder);
-    nsDisplayListBuilder::AutoAccumulateTransform accTransform(aBuilder);
-    accTransform.StartRoot();
-    ComputeBounds(aBuilder);
-    mBounds = aBuilder->GetAccumulatedRect();
-    mHasBounds = true;
-  }
-
   /**
    * This item is an additional item as the boundary between parent
    * and child 3D rendering context.
    * \see nsIFrame::BuildDisplayListForStackingContext().
    */
-  bool IsTransformSeparator() { return mIsTransformSeparator; }
+  bool IsTransformSeparator() const { return mIsTransformSeparator; }
   /**
    * This item is the boundary between parent and child 3D rendering
    * context.
@@ -6801,33 +6783,33 @@ class nsDisplayTransform : public nsDisplayHitTestInfoItem {
            mFrame->Combines3DTransformWithAncestors();
   }
 
-  void RemoveFrame(nsIFrame* aFrame) override {
-    nsDisplayItem::RemoveFrame(aFrame);
-    mStoredList.RemoveFrame(aFrame);
-  }
-
  private:
   void ComputeBounds(nsDisplayListBuilder* aBuilder);
+  nsRect TransformUntransformedBounds(nsDisplayListBuilder* aBuilder,
+                                      const Matrix4x4Flagged& aMatrix) const;
+  void UpdateUntransformedBounds(nsDisplayListBuilder* aBuilder);
+
   void SetReferenceFrameToAncestor(nsDisplayListBuilder* aBuilder);
-  void Init(nsDisplayListBuilder* aBuilder);
+  void Init(nsDisplayListBuilder* aBuilder, nsDisplayList* aChildren);
 
   static Matrix4x4 GetResultingTransformMatrixInternal(
       const FrameTransformProperties& aProperties, const nsPoint& aOrigin,
       float aAppUnitsPerPixel, uint32_t aFlags, const nsRect* aBoundsOverride);
 
-  StoreList mStoredList;
   mutable mozilla::Maybe<Matrix4x4Flagged> mTransform;
   mutable mozilla::Maybe<Matrix4x4Flagged> mInverseTransform;
   // Accumulated transform of ancestors on the preserves-3d chain.
-  Matrix4x4 mTransformPreserves3D;
+  mozilla::UniquePtr<Matrix4x4> mTransformPreserves3D;
   ComputeTransformFunction mTransformGetter;
   RefPtr<AnimatedGeometryRoot> mAnimatedGeometryRootForChildren;
   RefPtr<AnimatedGeometryRoot> mAnimatedGeometryRootForScrollMetadata;
   nsRect mChildrenBuildingRect;
   uint32_t mIndex;
-  mutable nsRect mBounds;
-  // True for mBounds is valid.
-  mutable bool mHasBounds;
+  mutable RetainedDisplayList mChildren;
+  // The untransformed bounds of |mChildren|.
+  nsRect mChildBounds;
+  // The transformed bounds of this display item.
+  nsRect mBounds;
   // This item is a separator between 3D rendering contexts, and
   // mTransform have been presetted by the constructor.
   // This also forces us not to extend the 3D context.  Since we don't create a
@@ -6836,8 +6818,6 @@ class nsDisplayTransform : public nsDisplayHitTestInfoItem {
   // parent context unintendedly if the root of the child preserves3d context
   // doesn't create a transform item.
   bool mIsTransformSeparator;
-  // True if mTransformPreserves3D have been initialized.
-  bool mTransformPreserves3DInited;
   // True if async animation of the transform is allowed.
   bool mAllowAsyncAnimation;
   // True if this nsDisplayTransform should get flattened

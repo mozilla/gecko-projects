@@ -24,6 +24,23 @@ function startup() {
 
     gProfileService = C[ToolkitProfileService].getService(I.nsIToolkitProfileService);
 
+    // Check if any profiles are missing on the disk and if so remove them.
+    // We cannot remove profiles while iterating the list returned from the
+    // profile service, so convert it to a new array first.
+    try {
+      for (let profile of [...gProfileService.profiles]) {
+        if (!profile.rootDir.exists() || !profile.rootDir.isDirectory()) {
+          profile.remove(false);
+        }
+      }
+
+      // The profile service is always flushed after this dialog completes.
+    } catch (e) {
+      // There shouldn't be any failures to catch here, but just in case let the
+      // UI build itself properly.
+      Cu.reportError(e);
+    }
+
     gProfileManagerBundle = document.getElementById("bundle_profileManager");
     gBrandBundle = document.getElementById("bundle_brand");
 
@@ -71,27 +88,8 @@ function acceptDialog() {
     return false;
   }
 
-  var profileLock;
-
-  try {
-    profileLock = selectedProfile.profile.lock({ value: null });
-  } catch (e) {
-    if (!selectedProfile.profile.rootDir.exists()) {
-      var missingTitle = gProfileManagerBundle.getString("profileMissingTitle");
-      var missing =
-        gProfileManagerBundle.getFormattedString("profileMissing", [appName]);
-      Services.prompt.alert(window, missingTitle, missing);
-      return false;
-    }
-
-    var lockedTitle = gProfileManagerBundle.getString("profileLockedTitle");
-    var locked =
-      gProfileManagerBundle.getFormattedString("profileLocked2", [appName, selectedProfile.profile.name, appName]);
-    Services.prompt.alert(window, lockedTitle, locked);
-
-    return false;
-  }
-  gDialogParams.objects.insertElementAt(profileLock.nsIProfileLock, 0);
+  gDialogParams.objects.insertElementAt(selectedProfile.profile.rootDir, 0);
+  gDialogParams.objects.insertElementAt(selectedProfile.profile.localDir, 1);
 
   try {
     gProfileService.defaultProfile = selectedProfile.profile;

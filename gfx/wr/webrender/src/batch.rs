@@ -5,7 +5,7 @@
 use api::{AlphaType, ClipMode, DeviceIntRect, DeviceIntPoint, DeviceIntSize, WorldRect};
 use api::{ExternalImageType, FilterOp, ImageRendering, LayoutRect, DeviceRect, DevicePixelScale};
 use api::{YuvColorSpace, YuvFormat, PictureRect, ColorDepth, LayoutPoint, DevicePoint, LayoutSize};
-use api::{PremultipliedColorF};
+use api::{PremultipliedColorF, RasterSpace};
 use clip::{ClipDataStore, ClipNodeFlags, ClipNodeRange, ClipItem, ClipStore, ClipNodeInstance};
 use clip_scroll_tree::{ClipScrollTree, ROOT_SPATIAL_NODE_INDEX, SpatialNodeIndex, CoordinateSystemId};
 use glyph_rasterizer::GlyphFormat;
@@ -845,13 +845,14 @@ impl AlphaBatchBuilder {
                             }
                         };
 
+                        let raster_scale = run.raster_space.local_scale().unwrap_or(1.0).max(0.001);
                         let prim_header_index = prim_headers.push(
                             &prim_header,
                             z_id,
                             [
                                 (run.reference_frame_relative_offset.x * 256.0) as i32,
                                 (run.reference_frame_relative_offset.y * 256.0) as i32,
-                                (run.inverse_raster_scale * 65535.0).round() as i32,
+                                (raster_scale * 65535.0).round() as i32,
                             ],
                         );
                         let key = BatchKey::new(kind, blend_mode, textures);
@@ -864,10 +865,14 @@ impl AlphaBatchBuilder {
                             z_id,
                         );
 
+                        let rasterization_space = match run.raster_space {
+                            RasterSpace::Screen => RasterizationSpace::Screen,
+                            RasterSpace::Local(..) => RasterizationSpace::Local,
+                        };
                         for glyph in glyphs {
                             batch.push(base_instance.build(
                                 glyph.index_in_text_run |
-                                (run.raster_space as i32) << 16,
+                                (rasterization_space as i32) << 16,
                                 glyph.uv_rect_address.as_int(),
                                 (subpx_dir as u32 as i32) << 16 |
                                 (color_mode as u32 as i32),
@@ -1072,12 +1077,19 @@ impl AlphaBatchBuilder {
 
                 match picture.raster_config {
                     Some(ref raster_config) => {
+                        // All pictures must snap to their primitive rect instead of the
+                        // visible rect like most primitives. This is because the picture's
+                        // visible rect includes the effect of the picture's clip rect,
+                        // which was not considered by the picture's children. The primitive
+                        // rect however is simply the union of the visible rect of the
+                        // children, which they snapped to, which is precisely what we also
+                        // need to snap to in order to be consistent.
+                        let mut brush_flags = BrushFlags::SNAP_TO_PRIMITIVE;
+
                         // If the child picture was rendered in local space, we can safely
                         // interpolate the UV coordinates with perspective correction.
-                        let brush_flags = if raster_config.establishes_raster_root {
-                            BrushFlags::PERSPECTIVE_INTERPOLATION
-                        } else {
-                            BrushFlags::empty()
+                        if raster_config.establishes_raster_root {
+                            brush_flags |= BrushFlags::PERSPECTIVE_INTERPOLATION;
                         };
 
                         match raster_config.composite_mode {
@@ -1464,7 +1476,7 @@ impl AlphaBatchBuilder {
                                     .expect("bug: surface must be allocated by now");
 
 
-                                let filter_data = &ctx.data_stores.filterdata[handle];
+                                let filter_data = &ctx.data_stores.filter_data[handle];
                                 let filter_mode : i32 = 13 |
                                     ((filter_data.data.r_func.to_int() << 28 |
                                       filter_data.data.g_func.to_int() << 24 |
@@ -2065,7 +2077,8 @@ impl AlphaBatchBuilder {
                     }
                 }
             }
-            PrimitiveInstanceKind::LinearGradient { data_handle, ref visible_tiles_range, .. } => {
+            PrimitiveInstanceKind::LinearGradient { data_handle, gradient_index, .. } => {
+                let gradient = &ctx.prim_store.linear_gradients[gradient_index];
                 let prim_data = &ctx.data_stores.linear_grad[data_handle];
                 let specified_blend_mode = BlendMode::PremultipliedAlpha;
 
@@ -2078,16 +2091,63 @@ impl AlphaBatchBuilder {
                     transform_id,
                 };
 
-                if visible_tiles_range.is_empty() {
-                    let non_segmented_blend_mode = if !prim_data.opacity.is_opaque ||
-                        prim_info.clip_task_index != ClipTaskIndex::INVALID ||
-                        transform_kind == TransformedRectKind::Complex
-                    {
-                        specified_blend_mode
-                    } else {
-                        BlendMode::None
+                let non_segmented_blend_mode = if !prim_data.opacity.is_opaque ||
+                    prim_info.clip_task_index != ClipTaskIndex::INVALID ||
+                    transform_kind == TransformedRectKind::Complex
+                {
+                    specified_blend_mode
+                } else {
+                    BlendMode::None
+                };
+
+                if let Some(ref cache_handle) = gradient.cache_handle {
+                    let rt_cache_entry = ctx.resource_cache
+                        .get_cached_render_task(cache_handle);
+                    let cache_item = ctx.resource_cache
+                        .get_texture_cache_item(&rt_cache_entry.handle);
+
+                    if cache_item.texture_id == TextureSource::Invalid {
+                        return;
+                    }
+
+                    let textures = BatchTextures::color(cache_item.texture_id);
+                    let batch_kind = BrushBatchKind::Image(get_buffer_kind(cache_item.texture_id));
+                    let prim_user_data = [
+                        ShaderColorMode::Image as i32 | ((AlphaType::PremultipliedAlpha as i32) << 16),
+                        RasterizationSpace::Local as i32,
+                        get_shader_opacity(1.0),
+                    ];
+                    let segment_user_data = cache_item.uv_rect_handle.as_int(gpu_cache);
+                    prim_header.specific_prim_address = gpu_cache.get_address(&ctx.globals.default_image_handle);
+
+                    let prim_header_index = prim_headers.push(
+                        &prim_header,
+                        z_id,
+                        prim_user_data,
+                    );
+
+                    let batch_key = BatchKey {
+                        blend_mode: non_segmented_blend_mode,
+                        kind: BatchKind::Brush(batch_kind),
+                        textures: textures,
                     };
 
+                    let instance = PrimitiveInstanceData::from(BrushInstance {
+                        segment_index: INVALID_SEGMENT_INDEX,
+                        edge_flags: EdgeAaSegmentMask::all(),
+                        clip_task_address,
+                        brush_flags: BrushFlags::PERSPECTIVE_INTERPOLATION,
+                        prim_header_index,
+                        user_data: segment_user_data,
+                    });
+
+                    self.current_batch_list().push_single_instance(
+                        batch_key,
+                        bounding_rect,
+                        z_id,
+                        PrimitiveInstanceData::from(instance),
+                    );
+                } else if gradient.visible_tiles_range.is_empty() {
                     let batch_params = BrushBatchParameters::shared(
                         BrushBatchKind::LinearGradient,
                         BatchTextures::no_texture(),
@@ -2129,7 +2189,7 @@ impl AlphaBatchBuilder {
                         ctx,
                     );
                 } else {
-                    let visible_tiles = &ctx.scratch.gradient_tiles[*visible_tiles_range];
+                    let visible_tiles = &ctx.scratch.gradient_tiles[gradient.visible_tiles_range];
 
                     add_gradient_tiles(
                         visible_tiles,

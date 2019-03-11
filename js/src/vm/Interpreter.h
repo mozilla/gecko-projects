@@ -425,21 +425,18 @@ bool HandleClosingGeneratorReturn(JSContext* cx, AbstractFramePtr frame,
 
 /************************************************************************/
 
-bool Throw(JSContext* cx, HandleValue v);
+bool ThrowOperation(JSContext* cx, HandleValue v);
 
 bool GetProperty(JSContext* cx, HandleValue value, HandlePropertyName name,
                  MutableHandleValue vp);
+
+bool GetValueProperty(JSContext* cx, HandleValue value, HandlePropertyName name,
+                      MutableHandleValue vp);
 
 JSObject* Lambda(JSContext* cx, HandleFunction fun, HandleObject parent);
 
 JSObject* LambdaArrow(JSContext* cx, HandleFunction fun, HandleObject parent,
                       HandleValue newTargetv);
-
-bool GetElement(JSContext* cx, MutableHandleValue lref, HandleValue rref,
-                MutableHandleValue res);
-
-bool CallElement(JSContext* cx, MutableHandleValue lref, HandleValue rref,
-                 MutableHandleValue res);
 
 bool SetObjectElement(JSContext* cx, HandleObject obj, HandleValue index,
                       HandleValue value, bool strict);
@@ -447,8 +444,9 @@ bool SetObjectElement(JSContext* cx, HandleObject obj, HandleValue index,
                       HandleValue value, bool strict, HandleScript script,
                       jsbytecode* pc);
 
-bool SetObjectElement(JSContext* cx, HandleObject obj, HandleValue index,
-                      HandleValue value, HandleValue receiver, bool strict);
+bool SetObjectElementWithReceiver(JSContext* cx, HandleObject obj,
+                                  HandleValue index, HandleValue value,
+                                  HandleValue receiver, bool strict);
 bool SetObjectElement(JSContext* cx, HandleObject obj, HandleValue index,
                       HandleValue value, HandleValue receiver, bool strict,
                       HandleScript script, jsbytecode* pc);

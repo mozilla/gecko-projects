@@ -78,6 +78,7 @@
 #include "mozilla/dom/ShadowIncludingTreeIterator.h"
 #include "mozilla/dom/StyleSheetList.h"
 #include "mozilla/dom/SVGUseElement.h"
+#include "mozilla/net/CookieSettings.h"
 #include "nsGenericHTMLElement.h"
 #include "mozilla/dom/CDATASection.h"
 #include "mozilla/dom/ProcessingInstruction.h"
@@ -128,6 +129,7 @@
 #include "nsIDOMWindow.h"
 #include "nsPIDOMWindow.h"
 #include "nsFocusManager.h"
+#include "nsICookiePermission.h"
 #include "nsICookieService.h"
 
 #include "nsBidiUtils.h"
@@ -269,6 +271,7 @@
 #  include "mozilla/dom/XULBroadcastManager.h"
 #  include "mozilla/dom/XULPersist.h"
 #  include "nsIXULWindow.h"
+#  include "nsXULPrototypeDocument.h"
 #  include "nsXULCommandDispatcher.h"
 #  include "nsXULPopupManager.h"
 #  include "nsIDocShellTreeOwner.h"
@@ -1743,6 +1746,7 @@ NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN_INTERNAL(Document)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mCommandDispatcher)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mFeaturePolicy)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mSuppressedEventListener)
+  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mPrototypeDocument)
 
   // Traverse all our nsCOMArrays.
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mStyleSheets)
@@ -1835,6 +1839,7 @@ NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(Document)
   NS_IMPL_CYCLE_COLLECTION_UNLINK(mDocumentL10n);
   NS_IMPL_CYCLE_COLLECTION_UNLINK(mFeaturePolicy)
   NS_IMPL_CYCLE_COLLECTION_UNLINK(mSuppressedEventListener)
+  NS_IMPL_CYCLE_COLLECTION_UNLINK(mPrototypeDocument)
 
   tmp->mParentDocument = nullptr;
 
@@ -2557,6 +2562,18 @@ nsresult Document::StartDocumentLoad(const char* aCommand, nsIChannel* aChannel,
             ("XFO doesn't like frame's ancestry, not loading."));
     // stop!  ERROR page!
     aChannel->Cancel(NS_ERROR_CSP_FRAME_ANCESTOR_VIOLATION);
+  }
+
+  // Let's take the CookieSettings from the loadInfo or from the parent
+  // document.
+  if (loadInfo) {
+    rv = loadInfo->GetCookieSettings(getter_AddRefs(mCookieSettings));
+    NS_ENSURE_SUCCESS(rv, rv);
+  } else {
+    nsCOMPtr<Document> parentDocument = GetParentDocument();
+    if (parentDocument) {
+      mCookieSettings = parentDocument->CookieSettings();
+    }
   }
 
   return NS_OK;
@@ -3871,7 +3888,7 @@ Element* Document::GetRootElement() const {
              : GetRootElementInternal();
 }
 
-nsIContent* Document::GetUnfocusedKeyEventTarget() { return GetRootElement(); }
+Element* Document::GetUnfocusedKeyEventTarget() { return GetRootElement(); }
 
 Element* Document::GetRootElementInternal() const {
   // We invoke GetRootElement() immediately before the servo traversal, so we
@@ -4865,7 +4882,8 @@ static void AssertAboutPageHasCSP(nsIURI* aDocumentURI,
 void Document::EndLoad() {
 #if defined(DEBUG) && !defined(ANDROID)
   // only assert if nothing stopped the load on purpose
-  if (!mParserAborted) {
+  // TODO: we probably also want to check XUL documents here too
+  if (!mParserAborted && !IsXULDocument()) {
     AssertAboutPageHasCSP(mDocumentURI, NodePrincipal());
   }
 #endif
@@ -6050,6 +6068,10 @@ void Document::TryCancelFrameLoaderInitialization(nsIDocShell* aShell) {
   }
 }
 
+void Document::SetPrototypeDocument(nsXULPrototypeDocument* aPrototype) {
+  mPrototypeDocument = aPrototype;
+}
+
 Document* Document::RequestExternalResource(
     nsIURI* aURI, nsIURI* aReferrer, uint32_t aReferrerPolicy,
     nsINode* aRequestingNode, ExternalResourceLoad** aPendingLoad) {
@@ -6792,8 +6814,16 @@ nsViewportInfo Document::GetViewportInfo(const ScreenIntSize& aDisplaySize) {
       // https://drafts.csswg.org/css-device-adapt/#resolve-width
       if (width == nsViewportInfo::Auto) {
         if (height == nsViewportInfo::Auto || aDisplaySize.height == 0) {
-          // Stretch CSS pixel size of viewport to keep device pixel size
-          // unchanged after full zoom applied.
+          // If we don't have any applicable viewport width constraints, this is
+          // most likely a desktop page written without mobile devices in mind.
+          // We use the desktop mode viewport for those pages by default,
+          // because a narrow viewport based on typical mobile device screen
+          // sizes (especially in portrait mode) will frequently break the
+          // layout of such pages. To keep text readable in that case, we rely
+          // on font inflation instead.
+
+          // Divide by fullZoom to stretch CSS pixel size of viewport in order
+          // to keep device pixel size unchanged after full zoom applied.
           // See bug 974242.
           width = gfxPrefs::DesktopViewportWidth() / fullZoom;
         } else {
@@ -8182,7 +8212,8 @@ void Document::SetReadyStateInternal(ReadyState rs,
   if (READYSTATE_INTERACTIVE == rs) {
     if (nsContentUtils::IsSystemPrincipal(NodePrincipal())) {
       Element* root = GetRootElement();
-      if (root && root->HasAttr(kNameSpaceID_None, nsGkAtoms::mozpersist)) {
+      if ((root && root->HasAttr(kNameSpaceID_None, nsGkAtoms::mozpersist)) ||
+          IsXULDocument()) {
         mXULPersist = new XULPersist(this);
         mXULPersist->Init();
       }
@@ -11783,7 +11814,7 @@ DocumentAutoplayPolicy Document::AutoplayPolicy() const {
 }
 
 void Document::MaybeAllowStorageForOpenerAfterUserInteraction() {
-  if (StaticPrefs::network_cookie_cookieBehavior() !=
+  if (mCookieSettings->GetCookieBehavior() !=
       nsICookieService::BEHAVIOR_REJECT_TRACKER) {
     return;
   }
@@ -12027,6 +12058,12 @@ Document* Document::GetSameTypeParentDocument() {
   }
 
   return parent->GetDocument();
+}
+
+void Document::TraceProtos(JSTracer* aTrc) {
+  if (mPrototypeDocument) {
+    mPrototypeDocument->TraceProtos(aTrc);
+  }
 }
 
 /**
@@ -12299,8 +12336,8 @@ already_AddRefed<mozilla::dom::Promise> Document::RequestStorageAccess(
   }
 
   // Only enforce third-party checks when there is a reason to enforce them.
-  if (StaticPrefs::network_cookie_cookieBehavior() !=
-      nsICookieService::BEHAVIOR_ACCEPT) {
+  if (mCookieSettings->GetCookieBehavior() !=
+      nsICookieService::BEHAVIOR_REJECT_TRACKER) {
     // Step 3. If the document's frame is the main frame, resolve.
     if (IsTopLevelContentDocument()) {
       promise->MaybeResolveWithUndefined();
@@ -12352,7 +12389,7 @@ already_AddRefed<mozilla::dom::Promise> Document::RequestStorageAccess(
     return promise.forget();
   }
 
-  if (StaticPrefs::network_cookie_cookieBehavior() ==
+  if (mCookieSettings->GetCookieBehavior() ==
           nsICookieService::BEHAVIOR_REJECT_TRACKER &&
       inner) {
     // Only do something special for third-party tracking content.
@@ -12608,6 +12645,16 @@ void Document::RecomputeLanguageFromCharset() {
 
   ResetLangPrefs();
   mLanguageFromCharset = language.forget();
+}
+
+nsICookieSettings* Document::CookieSettings() {
+  // If we are here, this is probably a javascript: URL document. In any case,
+  // we must have a nsCookieSettings. Let's create it.
+  if (!mCookieSettings) {
+    mCookieSettings = net::CookieSettings::Create();
+  }
+
+  return mCookieSettings;
 }
 
 }  // namespace dom

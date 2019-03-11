@@ -469,6 +469,12 @@ VARCACHE_PREF(
   RelaxedAtomicUint32, 30000 /* 30 seconds */
 )
 
+VARCACHE_PREF(
+  "dom.worker.use_medium_high_event_queue",
+   dom_worker_use_medium_high_event_queue,
+  RelaxedAtomicBool, true
+)
+
 // Enable content type normalization of XHR uploads via MIME Sniffing standard
 // Disabled for now in bz1499136
 VARCACHE_PREF(
@@ -520,15 +526,35 @@ VARCACHE_PREF(
   bool, false
 )
 
+// This currently only affects XHTML. For XUL the cache is always allowed.
+VARCACHE_PREF(
+  "dom.prototype_document_cache.enabled",
+   dom_prototype_document_cache_enabled,
+  bool, true
+)
+
+VARCACHE_PREF(
+  "dom.storage_access.auto_grants.delayed",
+   dom_storage_access_auto_grants_delayed,
+  bool, true
+)
+
 //---------------------------------------------------------------------------
 // Extension prefs
 //---------------------------------------------------------------------------
 
+#ifdef ANDROID
+// Private browsing opt-in is only supported on Firefox desktop.
+# define PREF_VALUE true
+#else
+# define PREF_VALUE false
+#endif
 VARCACHE_PREF(
   "extensions.allowPrivateBrowsingByDefault",
    extensions_allowPrivateBrowsingByDefault,
-  bool, true
+  bool, PREF_VALUE
 )
+#undef PREF_VALUE
 
 //---------------------------------------------------------------------------
 // Full-screen prefs
@@ -539,6 +565,63 @@ VARCACHE_PREF(
    full_screen_api_unprefix_enabled,
   bool, true
 )
+
+//---------------------------------------------------------------------------
+// Preference stylesheet prefs.
+//---------------------------------------------------------------------------
+
+VARCACHE_PREF(
+  "browser.display.focus_ring_on_anything",
+   browser_display_focus_ring_on_anything,
+  bool, false
+)
+
+VARCACHE_PREF(
+  "browser.display.focus_ring_width",
+   browser_display_focus_ring_width,
+  uint32_t, 1
+)
+
+// 0=solid, 1=dotted
+VARCACHE_PREF(
+  "browser.display.focus_ring_style",
+   browser_display_focus_ring_style,
+  uint32_t, 1
+)
+
+VARCACHE_PREF(
+  "browser.display.use_system_colors",
+   browser_display_use_system_colors,
+  bool, true
+)
+
+// 0 = default: always, except in high contrast mode
+// 1 = always
+// 2 = never
+VARCACHE_PREF(
+  "browser.display.document_color_use",
+   browser_display_document_color_use,
+  uint32_t, 0
+)
+VARCACHE_PREF(
+  "browser.display.use_focus_colors",
+   browser_display_use_focus_colors,
+  bool, false
+)
+
+VARCACHE_PREF(
+  "browser.underline_anchors",
+   browser_underline_anchors,
+  bool, true
+)
+
+PREF("browser.display.foreground_color", String, "")
+PREF("browser.display.background_color", String, "")
+PREF("browser.display.focus_background_color", String, "")
+PREF("browser.display.focus_text_color", String, "")
+PREF("browser.anchor_color", String, "")
+PREF("browser.active_color", String, "")
+PREF("browser.visited_color", String, "")
 
 //---------------------------------------------------------------------------
 // Graphics prefs
@@ -1739,6 +1822,14 @@ VARCACHE_PREF(
   bool, true
 )
 
+// Allow CookieSettings to be unblocked for channels without a document.
+// This is for testing only.
+VARCACHE_PREF(
+  "network.cookieSettings.unblocked_for_testing",
+   network_cookieSettings_unblocked_for_testing,
+  bool, false
+)
+
 VARCACHE_PREF(
   "network.predictor.enable-hover-on-ssl",
    network_predictor_enable_hover_on_ssl,
@@ -2204,9 +2295,31 @@ VARCACHE_PREF(
   uint32_t, 100
 )
 
+// In case Touch API is enabled, this pref controls whether to support
+// ontouch* event handlers, document.createTouch, document.createTouchList and
+// document.createEvent("TouchEvent").
+#ifdef ANDROID
+# define PREF_VALUE true
+#else
+# define PREF_VALUE false
+#endif
+VARCACHE_PREF(
+  "dom.w3c_touch_events.legacy_apis.enabled",
+   dom_w3c_touch_events_legacy_apis_enabled,
+  bool, PREF_VALUE
+)
+#undef PREF_VALUE
+
 VARCACHE_PREF(
   "medium_high_event_queue.enabled",
    medium_high_event_queue_enabled,
+  RelaxedAtomicBool, true
+)
+
+// Whether strict file origin policy is in effect.
+VARCACHE_PREF(
+  "security.fileuri.strict_origin_policy",
+   security_fileuri_strict_origin_policy,
   RelaxedAtomicBool, true
 )
 

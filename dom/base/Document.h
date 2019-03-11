@@ -12,7 +12,8 @@
 #include "nsCOMArray.h"         // for member
 #include "nsCompatibility.h"    // for member
 #include "nsCOMPtr.h"           // for member
-#include "nsGkAtoms.h"          // for static class members
+#include "nsICookieSettings.h"
+#include "nsGkAtoms.h"  // for static class members
 #include "nsIApplicationCache.h"
 #include "nsIApplicationCacheContainer.h"
 #include "nsIContentViewer.h"
@@ -123,6 +124,7 @@ class nsDOMCaretPosition;
 class nsViewportInfo;
 class nsIGlobalObject;
 class nsIXULWindow;
+class nsXULPrototypeDocument;
 struct nsFont;
 
 namespace mozilla {
@@ -1342,7 +1344,7 @@ class Document : public nsINode,
    * Gets the event target to dispatch key events to if there is no focused
    * content in the document.
    */
-  virtual nsIContent* GetUnfocusedKeyEventTarget();
+  virtual Element* GetUnfocusedKeyEventTarget();
 
   /**
    * Retrieve information about the viewport as a data structure.
@@ -1487,6 +1489,9 @@ class Document : public nsINode,
   // Helper method that returns true if the document has storage-access sandbox
   // flag.
   bool StorageAccessSandboxed() const;
+
+  // Returns the cookie settings for this and sub contexts.
+  nsICookieSettings* CookieSettings();
 
   // Increments the document generation.
   inline void Changed() { ++mGeneration; }
@@ -3724,6 +3729,14 @@ class Document : public nsINode,
 
   mozilla::dom::XPathEvaluator* XPathEvaluator();
 
+  void MaybeInitializeFinalizeFrameLoaders();
+
+  void SetDelayFrameLoaderInitialization(bool aDelayFrameLoaderInitialization) {
+    mDelayFrameLoaderInitialization = aDelayFrameLoaderInitialization;
+  }
+
+  void SetPrototypeDocument(nsXULPrototypeDocument* aPrototype);
+
  protected:
   void DoUpdateSVGUseElementShadowTrees();
 
@@ -3739,8 +3752,6 @@ class Document : public nsINode,
 
   bool ContainsEMEContent();
   bool ContainsMSEContent();
-
-  void MaybeInitializeFinalizeFrameLoaders();
 
   /**
    * Returns the title element of the document as defined by the HTML
@@ -4485,6 +4496,10 @@ class Document : public nsINode,
   // parsed into.
   nsCOMPtr<nsIParser> mParser;
 
+  // If the document was created from the the prototype cache there will be a
+  // reference to the prototype document to allow tracing.
+  RefPtr<nsXULPrototypeDocument> mPrototypeDocument;
+
   nsrefcnt mStackRefCnt;
 
   // Weak reference to our sink for in case we no longer have a parser.  This
@@ -4690,6 +4705,8 @@ class Document : public nsINode,
 
   bool mPendingInitialTranslation;
 
+  nsCOMPtr<nsICookieSettings> mCookieSettings;
+
   // Document generation. Gets incremented everytime it changes.
   int32_t mGeneration;
 
@@ -4702,6 +4719,8 @@ class Document : public nsINode,
   js::ExpandoAndGeneration mExpandoAndGeneration;
 
   bool HasPendingInitialTranslation() { return mPendingInitialTranslation; }
+
+  void TraceProtos(JSTracer* aTrc);
 };
 
 NS_DEFINE_STATIC_IID_ACCESSOR(Document, NS_IDOCUMENT_IID)

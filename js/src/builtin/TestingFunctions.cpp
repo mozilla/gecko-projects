@@ -41,6 +41,7 @@
 #include "jit/BaselineJIT.h"
 #include "jit/InlinableNatives.h"
 #include "jit/JitRealm.h"
+#include "js/ArrayBuffer.h"  // JS::{DetachArrayBuffer,GetArrayBufferLengthAndData,NewArrayBufferWithContents}
 #include "js/CharacterEncoding.h"
 #include "js/CompilationAndEvaluation.h"
 #include "js/CompileOptions.h"
@@ -653,6 +654,17 @@ static bool WasmCachingIsSupported(JSContext* cx, unsigned argc, Value* vp) {
   return true;
 }
 
+static bool WasmUsesCranelift(JSContext* cx, unsigned argc, Value* vp) {
+  CallArgs args = CallArgsFromVp(argc, vp);
+#ifdef ENABLE_WASM_CRANELIFT
+  bool usesCranelift = cx->options().wasmCranelift();
+#else
+  bool usesCranelift = false;
+#endif
+  args.rval().setBoolean(usesCranelift);
+  return true;
+}
+
 static bool WasmThreadsSupported(JSContext* cx, unsigned argc, Value* vp) {
   CallArgs args = CallArgsFromVp(argc, vp);
   bool isSupported = wasm::HasSupport(cx);
@@ -689,11 +701,7 @@ static bool WasmReftypesEnabled(JSContext* cx, unsigned argc, Value* vp) {
 
 static bool WasmGcEnabled(JSContext* cx, unsigned argc, Value* vp) {
   CallArgs args = CallArgsFromVp(argc, vp);
-#ifdef ENABLE_WASM_GC
-  args.rval().setBoolean(wasm::HasReftypesSupport(cx));
-#else
-  args.rval().setBoolean(false);
-#endif
+  args.rval().setBoolean(wasm::HasGcSupport(cx));
   return true;
 }
 
@@ -1645,17 +1653,16 @@ static bool NewRope(JSContext* cx, unsigned argc, Value* vp) {
     }
   }
 
-  JSString* left = args[0].toString();
-  JSString* right = args[1].toString();
+  RootedString left(cx, args[0].toString());
+  RootedString right(cx, args[1].toString());
   size_t length = JS_GetStringLength(left) + JS_GetStringLength(right);
   if (length > JSString::MAX_LENGTH) {
     JS_ReportErrorASCII(cx, "rope length exceeds maximum string length");
     return false;
   }
 
-  Rooted<JSRope*> str(cx, JSRope::new_<NoGC>(cx, left, right, length, heap));
+  Rooted<JSRope*> str(cx, JSRope::new_<CanGC>(cx, left, right, length, heap));
   if (!str) {
-    JS_ReportOutOfMemory(cx);
     return false;
   }
 
@@ -2846,7 +2853,7 @@ class CloneBufferObject : public NativeObject {
       ArrayBufferObject* buffer = &args[0].toObject().as<ArrayBufferObject>();
       bool isSharedMemory;
       uint8_t* dataBytes = nullptr;
-      js::GetArrayBufferLengthAndData(buffer, &nbytes, &isSharedMemory,
+      JS::GetArrayBufferLengthAndData(buffer, &nbytes, &isSharedMemory,
                                       &dataBytes);
       MOZ_ASSERT(!isSharedMemory);
       data = reinterpret_cast<char*>(dataBytes);
@@ -2966,7 +2973,7 @@ class CloneBufferObject : public NativeObject {
     data->ReadBytes(iter, buffer.get(), size);
 
     auto* rawBuffer = buffer.release();
-    JSObject* arrayBuffer = JS_NewArrayBufferWithContents(cx, size, rawBuffer);
+    JSObject* arrayBuffer = JS::NewArrayBufferWithContents(cx, size, rawBuffer);
     if (!arrayBuffer) {
       js_free(rawBuffer);
       return false;
@@ -3190,7 +3197,7 @@ static bool DetachArrayBuffer(JSContext* cx, unsigned argc, Value* vp) {
   }
 
   RootedObject obj(cx, &args[0].toObject());
-  if (!JS_DetachArrayBuffer(cx, obj)) {
+  if (!JS::DetachArrayBuffer(cx, obj)) {
     return false;
   }
 
@@ -5314,6 +5321,22 @@ static bool ObjectGlobal(JSContext* cx, unsigned argc, Value* vp) {
   return true;
 }
 
+static bool IsSameCompartment(JSContext* cx, unsigned argc, Value* vp) {
+  CallArgs args = CallArgsFromVp(argc, vp);
+  RootedObject callee(cx, &args.callee());
+
+  if (!args.get(0).isObject() || !args.get(1).isObject()) {
+    ReportUsageErrorASCII(cx, callee, "Both arguments must be objects");
+    return false;
+  }
+
+  RootedObject obj1(cx, UncheckedUnwrap(&args[0].toObject()));
+  RootedObject obj2(cx, UncheckedUnwrap(&args[1].toObject()));
+
+  args.rval().setBoolean(obj1->compartment() == obj2->compartment());
+  return true;
+}
+
 static bool FirstGlobalInCompartment(JSContext* cx, unsigned argc, Value* vp) {
   CallArgs args = CallArgsFromVp(argc, vp);
   RootedObject callee(cx, &args.callee());
@@ -5966,6 +5989,12 @@ gc::ZealModeHelpText),
 "wasmCachingIsSupported()",
 "  Returns a boolean indicating whether WebAssembly caching is supported by the runtime."),
 
+    JS_FN_HELP("wasmUsesCranelift", WasmUsesCranelift, 0, 0,
+"wasmUsesCranelift()",
+"  Returns a boolean indicating whether Cranelift is currently enabled for backend\n"
+"  compilation. This doesn't necessarily mean a module will be compiled with \n"
+"  Cranelift (e.g. when baseline is also enabled)."),
+
     JS_FN_HELP("wasmThreadsSupported", WasmThreadsSupported, 0, 0,
 "wasmThreadsSupported()",
 "  Returns a boolean indicating whether the WebAssembly threads proposal is\n"
@@ -5998,15 +6027,15 @@ gc::ZealModeHelpText),
 "This will return true early if compilation isn't two-tiered. "),
 
     JS_FN_HELP("wasmReftypesEnabled", WasmReftypesEnabled, 1, 0,
-"wasmReftypesEnabled(bool)",
+"wasmReftypesEnabled()",
 "  Returns a boolean indicating whether the WebAssembly reftypes proposal is enabled."),
 
     JS_FN_HELP("wasmGcEnabled", WasmGcEnabled, 1, 0,
-"wasmGcEnabled(bool)",
+"wasmGcEnabled()",
 "  Returns a boolean indicating whether the WebAssembly GC types proposal is enabled."),
 
     JS_FN_HELP("wasmDebugSupport", WasmDebugSupport, 1, 0,
-"wasmDebugSupport(bool)",
+"wasmDebugSupport()",
 "  Returns a boolean indicating whether the WebAssembly compilers support debugging."),
 
     JS_FN_HELP("isLazyFunction", IsLazyFunction, 1, 0,
@@ -6307,6 +6336,11 @@ gc::ZealModeHelpText),
     JS_FN_HELP("objectGlobal", ObjectGlobal, 1, 0,
 "objectGlobal(obj)",
 "  Returns the object's global object or null if the object is a wrapper.\n"),
+
+    JS_FN_HELP("isSameCompartment", IsSameCompartment, 2, 0,
+"isSameCompartment(obj1, obj2)",
+"  Unwraps obj1 and obj2 and returns whether the unwrapped objects are\n"
+"  same-compartment.\n"),
 
     JS_FN_HELP("firstGlobalInCompartment", FirstGlobalInCompartment, 1, 0,
 "firstGlobalInCompartment(obj)",

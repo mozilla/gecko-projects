@@ -35,6 +35,7 @@
 #include "mozilla/dom/ImageTracker.h"
 #include "mozilla/CORSMode.h"
 #include "mozilla/ClearOnShutdown.h"
+#include "mozilla/PreferenceSheet.h"
 #include "mozilla/Likely.h"
 #include "nsIURI.h"
 #include "mozilla/dom/Document.h"
@@ -314,10 +315,10 @@ nsMargin nsStyleBorder::GetImageOutset() const {
     const auto& coord = mBorderImageOutset.Get(s);
     nscoord value;
     if (coord.IsLength()) {
-      value = coord.length._0.ToAppUnits();
+      value = coord.AsLength().ToAppUnits();
     } else {
       MOZ_ASSERT(coord.IsNumber());
-      value = coord.number._0 * mComputedBorder.Side(s);
+      value = coord.AsNumber() * mComputedBorder.Side(s);
     }
     outset.Side(s) = value;
   }
@@ -642,9 +643,8 @@ nsChangeHint nsStyleColumn::CalcDifference(
 nsStyleSVG::nsStyleSVG(const Document& aDocument)
     : mFill(eStyleSVGPaintType_Color),  // Will be initialized to NS_RGB(0,0,0)
       mStroke(eStyleSVGPaintType_None),
-      mStrokeDashoffset(0, nsStyleCoord::CoordConstructor),
-      mStrokeWidth(nsPresContext::CSSPixelsToAppUnits(1),
-                   nsStyleCoord::CoordConstructor),
+      mStrokeDashoffset(LengthPercentage::Zero()),
+      mStrokeWidth(LengthPercentage::FromPixels(1.0f)),
       mFillOpacity(1.0f),
       mStrokeMiterlimit(4.0f),
       mStrokeOpacity(1.0f),
@@ -1667,8 +1667,7 @@ nsChangeHint nsStyleTableBorder::CalcDifference(
 //
 
 static nscolor DefaultColor(const Document& aDocument) {
-  auto* pc = aDocument.GetPresContext();
-  return pc ? pc->DefaultColor() : NS_RGB(0, 0, 0);
+  return PreferenceSheet::PrefsFor(aDocument).mDefaultColor;
 }
 
 nsStyleColor::nsStyleColor(const Document& aDocument)
@@ -3712,9 +3711,9 @@ nsStyleText::nsStyleText(const Document& aDocument)
       mWebkitTextStrokeColor(StyleComplexColor::CurrentColor()),
       mMozTabSize(
           StyleNonNegativeLengthOrNumber::Number(NS_STYLE_TABSIZE_INITIAL)),
-      mWordSpacing(0, nsStyleCoord::CoordConstructor),
-      mLetterSpacing(eStyleUnit_Normal),
-      mLineHeight(eStyleUnit_Normal),
+      mWordSpacing(LengthPercentage::Zero()),
+      mLetterSpacing({0.}),
+      mLineHeight(StyleLineHeight::Normal()),
       mTextIndent(LengthPercentage::Zero()),
       mWebkitTextStrokeWidth(0),
       mTextShadow(nullptr) {

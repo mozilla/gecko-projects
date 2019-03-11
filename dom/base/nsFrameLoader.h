@@ -59,7 +59,7 @@ class ProcessMessageManager;
 class Promise;
 class TabParent;
 class MutableTabContext;
-class RemoteFrameChild;
+class BrowserBridgeChild;
 
 namespace ipc {
 class StructuredCloneData;
@@ -193,9 +193,6 @@ class nsFrameLoader final : public nsStubMutationObserver,
 
   uint64_t ChildID() const { return mChildID; }
 
-  bool ClampScrollPosition() const { return mClampScrollPosition; }
-  void SetClampScrollPosition(bool aClamp);
-
   bool DepthTooGreat() const { return mDepthTooGreat; }
 
   bool IsDead() const { return mDestroyCalled; }
@@ -286,6 +283,12 @@ class nsFrameLoader final : public nsStubMutationObserver,
   PBrowserParent* GetRemoteBrowser() const;
 
   /**
+   * Returns the BrowserBridgeChild if this is an out-of-process iframe, or null
+   * otherwise.
+   */
+  mozilla::dom::BrowserBridgeChild* GetBrowserBridgeChild() const;
+
+  /**
    * Returns the layers ID that this remote frame is using to render.
    *
    * This must only be called if this is a remote frame.
@@ -297,8 +300,6 @@ class nsFrameLoader final : public nsStubMutationObserver,
   }
 
   mozilla::dom::Element* GetOwnerContent() { return mOwnerContent; }
-
-  bool ShouldClampScrollPosition() { return mClampScrollPosition; }
 
   mozilla::dom::ParentSHistory* GetParentSHistory() { return mParentSHistory; }
 
@@ -454,7 +455,7 @@ class nsFrameLoader final : public nsStubMutationObserver,
   uint64_t mChildID;
 
   // This is used when this refers to a remote sub frame
-  RefPtr<mozilla::dom::RemoteFrameChild> mRemoteFrameChild;
+  RefPtr<mozilla::dom::BrowserBridgeChild> mBrowserBridgeChild;
 
   // Holds the last known size of the frame.
   mozilla::ScreenIntSize mLazySize;
@@ -479,7 +480,6 @@ class nsFrameLoader final : public nsStubMutationObserver,
 
   bool mRemoteBrowserShown : 1;
   bool mRemoteFrame : 1;
-  bool mClampScrollPosition : 1;
   bool mObservingOwnerContent : 1;
 };
 

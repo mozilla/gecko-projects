@@ -200,14 +200,13 @@ class NeckoParent : public PNeckoParent {
 
   /* Predictor Messages */
   mozilla::ipc::IPCResult RecvPredPredict(
-      const ipc::OptionalURIParams& aTargetURI,
-      const ipc::OptionalURIParams& aSourceURI,
+      const Maybe<ipc::URIParams>& aTargetURI,
+      const Maybe<ipc::URIParams>& aSourceURI,
       const PredictorPredictReason& aReason,
       const OriginAttributes& aOriginAttributes, const bool& hasVerifier);
 
   mozilla::ipc::IPCResult RecvPredLearn(
-      const ipc::URIParams& aTargetURI,
-      const ipc::OptionalURIParams& aSourceURI,
+      const ipc::URIParams& aTargetURI, const Maybe<ipc::URIParams>& aSourceURI,
       const PredictorPredictReason& aReason,
       const OriginAttributes& aOriginAttributes);
   mozilla::ipc::IPCResult RecvPredReset();
@@ -226,14 +225,14 @@ class NeckoParent : public PNeckoParent {
 
   PTrackingDummyChannelParent* AllocPTrackingDummyChannelParent(
       nsIURI* aURI, nsIURI* aTopWindowURI, const nsresult& aTopWindowURIResult,
-      const OptionalLoadInfoArgs& aLoadInfo);
+      const Maybe<LoadInfoArgs>& aLoadInfo);
 
   bool DeallocPTrackingDummyChannelParent(PTrackingDummyChannelParent* aChild);
 
   virtual mozilla::ipc::IPCResult RecvPTrackingDummyChannelConstructor(
       PTrackingDummyChannelParent* aActor, nsIURI* aURI, nsIURI* aTopWindowURI,
       const nsresult& aTopWindowURIResult,
-      const OptionalLoadInfoArgs& aLoadInfo) override;
+      const Maybe<LoadInfoArgs>& aLoadInfo) override;
 
   mozilla::ipc::IPCResult RecvInitSocketProcessBridge(
       InitSocketProcessBridgeResolver&& aResolver);

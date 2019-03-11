@@ -57,16 +57,17 @@ class UrlbarInput {
     this.document.getElementById("mainPopupSet").appendChild(
       MozXULElement.parseXULToFragment(`
         <panel id="urlbar-results"
-                role="group"
-                noautofocus="true"
-                hidden="true"
-                flip="none"
-                consumeoutsideclicks="never"
-                norolluponanchor="true"
-                level="parent">
+               role="group"
+               noautofocus="true"
+               hidden="true"
+               flip="none"
+               consumeoutsideclicks="never"
+               norolluponanchor="true"
+               level="parent">
           <html:div class="urlbarView-body-outer">
             <html:div class="urlbarView-body-inner">
-              <html:div class="urlbarView-results"/>
+              <html:div id="urlbarView-results"
+                        role="listbox"/>
             </html:div>
           </html:div>
           <hbox class="search-one-offs"
@@ -130,18 +131,18 @@ class UrlbarInput {
       return new UrlbarValueFormatter(this);
     });
 
-    // The event bufferer handles some events, queues them up, and calls back
-    // our handleEvent at the right time.
+    // The event bufferer can be used to defer events that may affect users
+    // muscle memory; for example quickly pressing DOWN+ENTER should end up
+    // on a predictable result, regardless of the search status. The event
+    // bufferer will invoke the handling code at the right time.
     this.eventBufferer = new UrlbarEventBufferer(this);
-    this.inputField.addEventListener("blur", this.eventBufferer);
-    this.inputField.addEventListener("keydown", this.eventBufferer);
 
-    const inputFieldEvents = [
-      "focus", "input", "keyup", "mouseover", "paste", "scrollend", "select",
-      "overflow", "underflow", "dragstart", "dragover", "drop",
-      "compositionstart", "compositionend",
+    this._inputFieldEvents = [
+      "blur", "focus", "input", "keydown", "keyup", "mouseover", "paste",
+      "scrollend", "select", "overflow", "underflow", "dragstart", "dragover",
+      "drop", "compositionstart", "compositionend",
     ];
-    for (let name of inputFieldEvents) {
+    for (let name of this._inputFieldEvents) {
       this.inputField.addEventListener(name, this);
     }
 
@@ -160,14 +161,7 @@ class UrlbarInput {
    * Uninitializes this input object, detaching it from the inputField.
    */
   uninit() {
-    this.inputField.removeEventListener("blur", this.eventBufferer);
-    this.inputField.removeEventListener("keydown", this.eventBufferer);
-    delete this.eventBufferer;
-    const inputFieldEvents = [
-      "focus", "input", "keyup", "mouseover", "paste", "scrollend", "select",
-      "overflow", "underflow", "dragstart", "dragover", "drop",
-    ];
-    for (let name of inputFieldEvents) {
+    for (let name of this._inputFieldEvents) {
       this.inputField.removeEventListener(name, this);
     }
     this.removeEventListener("mousedown", this);
@@ -178,6 +172,7 @@ class UrlbarInput {
 
     delete this.document;
     delete this.window;
+    delete this.eventBufferer;
     delete this.valueFormatter;
     delete this.panel;
     delete this.view;
@@ -345,7 +340,7 @@ class UrlbarInput {
             browser.lastLocationChange == lastLocationChange) {
           openParams.postData = data.postData;
           openParams.allowInheritPrincipal = data.mayInheritPrincipal;
-          this._loadURL(data.url, where, openParams);
+          this._loadURL(data.url, where, openParams, browser);
         }
       });
       return;
@@ -447,25 +442,33 @@ class UrlbarInput {
   }
 
   /**
-   * Called by the view when moving through results with the keyboard.
+   * Called by the view when moving through results with the keyboard, and when
+   * picking a result.
    *
-   * @param {UrlbarResult} result The result that was selected.
+   * @param {UrlbarResult} [result]
+   *   The result that was selected or picked, null if no result was selected.
    * @param {Event} [event] The event that picked the result.
    * @returns {boolean}
    *   Whether the value has been canonized
    */
-  setValueFromResult(result, event = null) {
-    // For autofilled results, the value that should be canonized is not the
-    // autofilled value but the value that the user typed.
-    let canonizedUrl = this._maybeCanonizeURL(event, result.autofill ?
-                         this._lastSearchString : this.textValue);
-    if (canonizedUrl) {
-      this.value = canonizedUrl;
+  setValueFromResult(result = null, event = null) {
+    let canonizedUrl;
+
+    if (!result) {
+      this.value = this._lastSearchString;
     } else {
-      this.value = this._getValueFromResult(result);
-      if (result.autofill) {
-        this.selectionStart = result.autofill.selectionStart;
-        this.selectionEnd = result.autofill.selectionEnd;
+      // For autofilled results, the value that should be canonized is not the
+      // autofilled value but the value that the user typed.
+      canonizedUrl = this._maybeCanonizeURL(event, result.autofill ?
+                       this._lastSearchString : this.textValue);
+      if (canonizedUrl) {
+        this.value = canonizedUrl;
+      } else {
+        this.value = this._getValueFromResult(result);
+        if (result.autofill) {
+          this.selectionStart = result.autofill.selectionStart;
+          this.selectionEnd = result.autofill.selectionEnd;
+        }
       }
     }
     this._resultForCurrentValue = result;
@@ -474,13 +477,15 @@ class UrlbarInput {
     this.window.gBrowser.userTypedValue = this.value;
 
     // The value setter clobbers the actiontype attribute, so update this after that.
-    switch (result.type) {
-      case UrlbarUtils.RESULT_TYPE.TAB_SWITCH:
-        this.setAttribute("actiontype", "switchtab");
-        break;
-      case UrlbarUtils.RESULT_TYPE.OMNIBOX:
-        this.setAttribute("actiontype", "extension");
-        break;
+    if (result) {
+      switch (result.type) {
+        case UrlbarUtils.RESULT_TYPE.TAB_SWITCH:
+          this.setAttribute("actiontype", "switchtab");
+          break;
+        case UrlbarUtils.RESULT_TYPE.OMNIBOX:
+          this.setAttribute("actiontype", "extension");
+          break;
+      }
     }
 
     return !!canonizedUrl;
@@ -747,6 +752,10 @@ class UrlbarInput {
   }
 
   _toggleActionOverride(event) {
+    // Ignore repeated KeyboardEvents.
+    if (event.repeat) {
+      return;
+    }
     if (event.keyCode == KeyEvent.DOM_VK_SHIFT ||
         event.keyCode == KeyEvent.DOM_VK_ALT ||
         event.keyCode == (AppConstants.platform == "macosx" ?
@@ -856,10 +865,10 @@ class UrlbarInput {
    *   The POST data associated with a search submission.
    * @param {boolean} [params.allowInheritPrincipal]
    *   If the principal may be inherited
+   * @param {object} browser [optional] the browser to use for the load.
    */
-  _loadURL(url, openUILinkWhere, params) {
-    let browser = this.window.gBrowser.selectedBrowser;
-
+  _loadURL(url, openUILinkWhere, params,
+           browser = this.window.gBrowser.selectedBrowser) {
     this.value = url;
     browser.userTypedValue = url;
 
@@ -912,9 +921,8 @@ class UrlbarInput {
       }
     }
 
-    // TODO This should probably be handed via input.
     // Ensure the start of the URL is visible for usability reasons.
-    // this.selectionStart = this.selectionEnd = 0;
+    this.selectionStart = this.selectionEnd = 0;
 
     this.closePopup();
   }
@@ -1006,13 +1014,25 @@ class UrlbarInput {
 
   _on_blur(event) {
     this.formatValue();
-    this.view.close(UrlbarUtils.CANCEL_REASON.BLUR);
+    // Respect the autohide preference for easier inspecting/debugging via
+    // the browser toolbox.
+    if (!UrlbarPrefs.get("ui.popup.disable_autohide")) {
+      this.view.close(UrlbarUtils.CANCEL_REASON.BLUR);
+    }
+    // We may have hidden popup notifications, show them again if necessary.
+    if (this.getAttribute("pageproxystate") != "valid") {
+      this.window.UpdatePopupNotificationsVisibility();
+    }
   }
 
   _on_focus(event) {
     this._updateUrlTooltip();
-
     this.formatValue();
+
+    // Hide popup notifications, to reduce visual noise.
+    if (this.getAttribute("pageproxystate") != "valid") {
+      this.window.UpdatePopupNotificationsVisibility();
+    }
   }
 
   _on_mouseover(event) {
@@ -1167,8 +1187,10 @@ class UrlbarInput {
   }
 
   _on_keydown(event) {
-    this.controller.handleKeyNavigation(event);
     this._toggleActionOverride(event);
+    this.eventBufferer.maybeDeferEvent(event, () => {
+      this.controller.handleKeyNavigation(event);
+    });
   }
 
   _on_keyup(event) {

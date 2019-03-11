@@ -535,9 +535,13 @@ pref("layers.low-precision-opacity", "1.0");
 // work harder keep scrolling smooth and memory low.
 pref("layers.max-active", 20);
 
-// On Fennec we need containerful scrolling to support zooming. Bug 1459312
-// tracks zooming with containerless scrolling.
+// Use containerless scrolling in nightly builds on Fennec.
+// Bug 1137890 tracks letting containerless scrolling ride the trains.
+#ifdef NIGHTLY_BUILD
+pref("layout.scroll.root-frame-containers", 0);
+#else
 pref("layout.scroll.root-frame-containers", 1);
+#endif
 
 pref("notification.feature.enabled", true);
 pref("dom.webnotifications.enabled", true);
@@ -580,6 +584,10 @@ pref("media.autoplay.default", 1); // 0=Allowed, 1=Blocked
 // Enable WebSpeech speech synthesis
 pref("media.webspeech.synth.enabled", true);
 
+// OpenH264 is visible in about:plugins, and enabled, by default.
+pref("media.gmp-gmpopenh264.visible", true);
+pref("media.gmp-gmpopenh264.enabled", true);
+
 // optimize images memory usage
 pref("image.downscale-during-decode.enabled", true);
 
@@ -592,10 +600,6 @@ pref("urlclassifier.downloadBlockTable", "");
 
 // The Potentially Harmful Apps list replaces the malware one on Android.
 pref("urlclassifier.malwareTable", "goog-harmful-proto,goog-unwanted-proto,test-harmful-simple,test-malware-simple,test-unwanted-simple");
-
-// True if this is the first time we are showing about:firstrun
-pref("browser.firstrun.show.uidiscovery", true);
-pref("browser.firstrun.show.localepicker", false);
 
 // True if you always want dump() to work
 //
@@ -731,26 +735,6 @@ pref("browser.ui.linkify.phone", false);
 
 // Enables/disables Spatial Navigation
 pref("snav.enabled", true);
-
-// This url, if changed, MUST continue to point to an https url. Pulling arbitrary content to inject into
-// this page over http opens us up to a man-in-the-middle attack that we'd rather not face. If you are a downstream
-// repackager of this code using an alternate snippet url, please keep your users safe
-pref("browser.snippets.updateUrl", "https://snippets.cdn.mozilla.net/json/%SNIPPETS_VERSION%/%NAME%/%VERSION%/%APPBUILDID%/%BUILD_TARGET%/%LOCALE%/%CHANNEL%/%OS_VERSION%/%DISTRIBUTION%/%DISTRIBUTION_VERSION%/");
-
-// How frequently we check for new snippets, in seconds (1 day)
-pref("browser.snippets.updateInterval", 86400);
-
-// URL used to check for user's country code. Please do not directly use this code or Snippets key.
-// Contact MLS team for your own credentials. https://location.services.mozilla.com/contact
-pref("browser.snippets.geoUrl", "https://location.services.mozilla.com/v1/country?key=fff72d56-b040-4205-9a11-82feda9d83a3");
-
-// URL used to ping metrics with stats about which snippets have been shown
-pref("browser.snippets.statsUrl", "https://snippets-stats.mozilla.org/mobile");
-
-// These prefs require a restart to take effect.
-pref("browser.snippets.enabled", true);
-pref("browser.snippets.syncPromo.enabled", true);
-pref("browser.snippets.firstrunHomepage.enabled", true);
 
 // The mode of home provider syncing.
 // 0: Sync always

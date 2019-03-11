@@ -399,6 +399,10 @@ nsWindow::nsWindow() {
   mXDepth = 0;
 #endif /* MOZ_X11 */
 
+#ifdef MOZ_WAYLAND
+  mNeedsUpdatingEGLSurface = false;
+#endif
+
   if (!gGlobalsInitialized) {
     gGlobalsInitialized = true;
 
@@ -1872,12 +1876,14 @@ static bool ExtractExposeRegion(LayoutDeviceIntRegion &aRegion, cairo_t *cr) {
 void nsWindow::WaylandEGLSurfaceForceRedraw() {
   MOZ_RELEASE_ASSERT(NS_IsMainThread());
 
-  if (mIsDestroyed) {
+  if (mIsDestroyed || !mNeedsUpdatingEGLSurface) {
     return;
   }
 
-  if (CompositorBridgeChild* remoteRenderer = GetRemoteRenderer()) {
+  if (CompositorBridgeChild *remoteRenderer = GetRemoteRenderer()) {
+    MOZ_ASSERT(mCompositorWidgetDelegate);
     if (mCompositorWidgetDelegate) {
+      mNeedsUpdatingEGLSurface = false;
       mCompositorWidgetDelegate->RequestsUpdatingEGLSurface();
     }
     remoteRenderer->SendForcePresent();
@@ -3473,16 +3479,20 @@ nsresult nsWindow::Create(nsIWidget *aParent, nsNativeWidget aNativeParent,
         g_object_unref(group);
       }
 
+      if (aInitData->mAlwaysOnTop) {
+        gtk_window_set_keep_above(GTK_WINDOW(mShell), TRUE);
+      }
+
       // Create a container to hold child windows and child GtkWidgets.
       GtkWidget *container = moz_container_new();
       mContainer = MOZ_CONTAINER(container);
 #ifdef MOZ_WAYLAND
       if (!mIsX11Display && ComputeShouldAccelerate()) {
         RefPtr<nsWindow> self(this);
-        moz_container_set_initial_draw_callback(mContainer,
-            [self]() -> void {
-              self->WaylandEGLSurfaceForceRedraw();
-            });
+        moz_container_set_initial_draw_callback(mContainer, [self]() -> void {
+          self->mNeedsUpdatingEGLSurface = true;
+          self->WaylandEGLSurfaceForceRedraw();
+        });
       }
 #endif
 
@@ -6054,6 +6064,9 @@ void nsWindow::SetCompositorWidgetDelegate(CompositorWidgetDelegate *delegate) {
     MOZ_ASSERT(mCompositorWidgetDelegate,
                "nsWindow::SetCompositorWidgetDelegate called with a "
                "non-PlatformCompositorWidgetDelegate");
+#ifdef MOZ_WAYLAND
+    WaylandEGLSurfaceForceRedraw();
+#endif
   } else {
     mCompositorWidgetDelegate = nullptr;
   }
@@ -6539,8 +6552,7 @@ nsWindow::CSDSupportLevel nsWindow::GetSystemCSDSupportLevel() {
 // Check for Mutter regression on X.org (Bug 1530252). In that case we
 // don't hide system titlebar by default as we can't draw transparent
 // corners reliably.
-bool nsWindow::TitlebarCanUseShapeMask()
-{
+bool nsWindow::TitlebarCanUseShapeMask() {
   static int canUseShapeMask = -1;
   if (canUseShapeMask != -1) {
     return canUseShapeMask;
@@ -6570,7 +6582,8 @@ bool nsWindow::HideTitlebarByDefault() {
   // When user defined widget.default-hidden-titlebar don't do any
   // heuristics and just follow it.
   if (Preferences::HasUserValue("widget.default-hidden-titlebar")) {
-    hideTitlebar = Preferences::GetBool("widget.default-hidden-titlebar", false);
+    hideTitlebar =
+        Preferences::GetBool("widget.default-hidden-titlebar", false);
     return hideTitlebar;
   }
 

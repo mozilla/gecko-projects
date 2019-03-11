@@ -33,6 +33,9 @@ void gecko_profiler_unregister_thread();
 
 void gecko_profiler_start_marker(const char* name);
 void gecko_profiler_end_marker(const char* name);
+void gecko_profiler_add_text_marker(
+    const char* name, const char* text_ptr, size_t text_len, uint64_t microseconds);
+bool gecko_profiler_thread_is_being_profiled();
 
 // IMPORTANT: Keep this synchronized with enumerate_interners in
 // gfx/wr/webrender_api
@@ -63,60 +66,6 @@ struct InternerSubReport {
 };
 
 #undef DECLARE_MEMBER
-
-struct FontInstanceFlags {
-  uint32_t bits;
-
-  bool operator==(const FontInstanceFlags& aOther) const {
-    return bits == aOther.bits;
-  }
-
-  FontInstanceFlags& operator=(uint32_t aBits) {
-    bits = aBits;
-    return *this;
-  }
-
-  FontInstanceFlags& operator|=(uint32_t aBits) {
-    bits |= aBits;
-    return *this;
-  }
-
-  FontInstanceFlags operator|(uint32_t aBits) const {
-    FontInstanceFlags flags = {bits | aBits};
-    return flags;
-  }
-
-  FontInstanceFlags& operator&=(uint32_t aBits) {
-    bits &= aBits;
-    return *this;
-  }
-
-  FontInstanceFlags operator&(uint32_t aBits) const {
-    FontInstanceFlags flags = {bits & aBits};
-    return flags;
-  }
-
-  MOZ_IMPLICIT operator bool() const { return bits != 0; }
-
-  enum : uint32_t {
-    SYNTHETIC_BOLD = 1 << 1,
-    EMBEDDED_BITMAPS = 1 << 2,
-    SUBPIXEL_BGR = 1 << 3,
-    TRANSPOSE = 1 << 4,
-    FLIP_X = 1 << 5,
-    FLIP_Y = 1 << 6,
-    SUBPIXEL_POSITION = 1 << 7,
-
-    FORCE_GDI = 1 << 16,
-
-    FONT_SMOOTHING = 1 << 16,
-
-    FORCE_AUTOHINT = 1 << 16,
-    NO_AUTOHINT = 1 << 17,
-    VERTICAL_LAYOUT = 1 << 18,
-    LCD_VERTICAL = 1 << 19
-  };
-};
 
 struct Transaction;
 struct WrWindowId;

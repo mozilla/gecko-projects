@@ -48,12 +48,11 @@ mozilla::ipc::IPCResult WebSocketChannelParent::RecvDeleteSelf() {
 }
 
 mozilla::ipc::IPCResult WebSocketChannelParent::RecvAsyncOpen(
-    const OptionalURIParams& aURI, const nsCString& aOrigin,
+    const Maybe<URIParams>& aURI, const nsCString& aOrigin,
     const uint64_t& aInnerWindowID, const nsCString& aProtocol,
     const bool& aSecure, const uint32_t& aPingInterval,
     const bool& aClientSetPingInterval, const uint32_t& aPingTimeout,
-    const bool& aClientSetPingTimeout,
-    const OptionalLoadInfoArgs& aLoadInfoArgs,
+    const bool& aClientSetPingTimeout, const Maybe<LoadInfoArgs>& aLoadInfoArgs,
     const OptionalTransportProvider& aTransportProvider,
     const nsCString& aNegotiatedExtensions) {
   LOG(("WebSocketChannelParent::RecvAsyncOpen() %p\n", this));

@@ -95,8 +95,7 @@ class WebRenderCommandBuilder {
       nsDisplayList* aDisplayList, nsDisplayItem* aWrappingItem,
       nsDisplayListBuilder* aDisplayListBuilder,
       const StackingContextHelper& aSc, wr::DisplayListBuilder& aBuilder,
-      wr::IpcResourceUpdateQueue& aResources,
-      nsDisplayItem* aOuterItem = nullptr);
+      wr::IpcResourceUpdateQueue& aResources);
 
   // aWrappingItem has to be non-null.
   void DoGroupingForDisplayList(nsDisplayList* aDisplayList,
@@ -143,11 +142,6 @@ class WebRenderCommandBuilder {
     RefPtr<WebRenderUserData>& data = userDataTable->GetOrInsert(
         WebRenderUserDataKey(aItem->GetPerFrameKey(), T::Type()));
     if (!data) {
-      // To recreate a new user data, we should remove the data from the table
-      // first.
-      if (data) {
-        data->RemoveFromTable();
-      }
       data = new T(GetRenderRootStateManager(), aItem);
       mWebRenderUserDatas.PutEntry(data);
       if (aOutIsRecycled) {
@@ -193,10 +187,6 @@ class WebRenderCommandBuilder {
 
   wr::usize mBuilderDumpIndex;
   wr::usize mDumpIndent;
-
-  // When zooming is enabled, this stores the animation property that we use
-  // to manipulate the zoom from APZ.
-  Maybe<wr::WrAnimationProperty> mZoomProp;
 
  public:
   // Whether consecutive inactive display items should be grouped into one

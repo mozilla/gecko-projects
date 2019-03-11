@@ -19,6 +19,7 @@
 #include "mozilla/dom/ClientInfo.h"
 #include "mozilla/dom/ServiceWorkerDescriptor.h"
 
+class nsICookieSettings;
 class nsINode;
 class nsPIDOMWindowOuter;
 
@@ -30,13 +31,13 @@ class XMLHttpRequestMainThread;
 }  // namespace dom
 
 namespace net {
-class OptionalLoadInfoArgs;
+class LoadInfoArgs;
 }  // namespace net
 
 namespace ipc {
 // we have to forward declare that function so we can use it as a friend.
 nsresult LoadInfoArgsToLoadInfo(
-    const mozilla::net::OptionalLoadInfoArgs& aLoadInfoArgs,
+    const Maybe<mozilla::net::LoadInfoArgs>& aLoadInfoArgs,
     nsILoadInfo** outLoadInfo);
 }  // namespace ipc
 
@@ -70,6 +71,7 @@ class LoadInfo final : public nsILoadInfo {
 
   // create an exact copy of the loadinfo
   already_AddRefed<nsILoadInfo> Clone() const;
+
   // hands off!!! don't use CloneWithNewSecFlags unless you know
   // exactly what you are doing - it should only be used within
   // nsBaseChannel::Redirect()
@@ -96,7 +98,7 @@ class LoadInfo final : public nsILoadInfo {
            nsIPrincipal* aSandboxedLoadingPrincipal,
            nsIPrincipal* aTopLevelPrincipal,
            nsIPrincipal* aTopLevelStorageAreaPrincipal,
-           nsIURI* aResultPrincipalURI,
+           nsIURI* aResultPrincipalURI, nsICookieSettings* aCookieSettings,
            const Maybe<mozilla::dom::ClientInfo>& aClientInfo,
            const Maybe<mozilla::dom::ClientInfo>& aReservedClientInfo,
            const Maybe<mozilla::dom::ClientInfo>& aInitialClientInfo,
@@ -131,7 +133,7 @@ class LoadInfo final : public nsILoadInfo {
                           const RedirectHistoryArray& aArra);
 
   friend nsresult mozilla::ipc::LoadInfoArgsToLoadInfo(
-      const mozilla::net::OptionalLoadInfoArgs& aLoadInfoArgs,
+      const Maybe<mozilla::net::LoadInfoArgs>& aLoadInfoArgs,
       nsILoadInfo** outLoadInfo);
 
   ~LoadInfo() = default;
@@ -155,6 +157,7 @@ class LoadInfo final : public nsILoadInfo {
   nsCOMPtr<nsIPrincipal> mTopLevelStorageAreaPrincipal;
   nsCOMPtr<nsIURI> mResultPrincipalURI;
   nsCOMPtr<nsICSPEventListener> mCSPEventListener;
+  nsCOMPtr<nsICookieSettings> mCookieSettings;
 
   Maybe<mozilla::dom::ClientInfo> mClientInfo;
   UniquePtr<mozilla::dom::ClientSource> mReservedClientSource;

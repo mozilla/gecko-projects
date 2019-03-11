@@ -101,9 +101,9 @@ class HttpChannelParent final : public nsIInterfaceRequestor,
     }
   }
 
-  MOZ_MUST_USE nsresult OpenAlternativeOutputStream(const nsACString& type,
-                                                    int64_t predictedSize,
-                                                    nsIOutputStream** _retval);
+  MOZ_MUST_USE nsresult
+  OpenAlternativeOutputStream(const nsACString& type, int64_t predictedSize,
+                              nsIAsyncOutputStream** _retval);
 
   // Callbacks for each asynchronous tasks required in AsyncOpen
   // procedure, will call InvokeAsyncOpen when all the expected
@@ -138,12 +138,12 @@ class HttpChannelParent final : public nsIInterfaceRequestor,
                                    const bool& shouldIntercept);
 
   MOZ_MUST_USE bool DoAsyncOpen(
-      const URIParams& uri, const OptionalURIParams& originalUri,
-      const OptionalURIParams& docUri,
-      const OptionalURIParams& originalReferrerUri,
+      const URIParams& uri, const Maybe<URIParams>& originalUri,
+      const Maybe<URIParams>& docUri,
+      const Maybe<URIParams>& originalReferrerUri,
       const uint32_t& referrerPolicy,
-      const OptionalURIParams& internalRedirectUri,
-      const OptionalURIParams& topWindowUri, nsIPrincipal* aTopWindowPrincipal,
+      const Maybe<URIParams>& internalRedirectUri,
+      const Maybe<URIParams>& topWindowUri, nsIPrincipal* aTopWindowPrincipal,
       const uint32_t& loadFlags, const RequestHeaderTuples& requestHeaders,
       const nsCString& requestMethod, const Maybe<IPCStream>& uploadStream,
       const bool& uploadStreamHasHeaders, const int16_t& priority,
@@ -153,7 +153,7 @@ class HttpChannelParent final : public nsIInterfaceRequestor,
       const nsCString& entityID, const bool& chooseApplicationCache,
       const nsCString& appCacheClientID, const bool& allowSpdy,
       const bool& allowAltSvc, const bool& beConservative,
-      const uint32_t& tlsFlags, const OptionalLoadInfoArgs& aLoadInfoArgs,
+      const uint32_t& tlsFlags, const Maybe<LoadInfoArgs>& aLoadInfoArgs,
       const OptionalHttpResponseHead& aSynthesizedResponseHead,
       const nsCString& aSecurityInfoSerialization, const uint32_t& aCacheKey,
       const uint64_t& aRequestContextID,
@@ -189,8 +189,8 @@ class HttpChannelParent final : public nsIInterfaceRequestor,
       const nsresult& result, const RequestHeaderTuples& changedHeaders,
       const ChildLoadInfoForwarderArgs& aLoadInfoForwarder,
       const uint32_t& loadFlags, const uint32_t& referrerPolicy,
-      const OptionalURIParams& aReferrerURI,
-      const OptionalURIParams& apiRedirectUri,
+      const Maybe<URIParams>& aReferrerURI,
+      const Maybe<URIParams>& apiRedirectUri,
       const OptionalCorsPreflightArgs& aCorsPreflightArgs,
       const bool& aChooseAppcache) override;
   virtual mozilla::ipc::IPCResult RecvDocumentChannelCleanup(

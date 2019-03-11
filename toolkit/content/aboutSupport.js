@@ -133,8 +133,11 @@ var snapshotFormatters = {
       $("policies-status-row").hidden = true;
     }
 
-    let keyGoogleFound = data.keyGoogleFound ? "found" : "missing";
-    document.l10n.setAttributes($("key-google-box"), keyGoogleFound);
+    let keyLocationServiceGoogleFound = data.keyLocationServiceGoogleFound ? "found" : "missing";
+    document.l10n.setAttributes($("key-location-service-google-box"), keyLocationServiceGoogleFound);
+
+    let keySafebrowsingGoogleFound = data.keySafebrowsingGoogleFound ? "found" : "missing";
+    document.l10n.setAttributes($("key-safebrowsing-google-box"), keySafebrowsingGoogleFound);
 
     let keyMozillaFound = data.keyMozillaFound ? "found" : "missing";
     document.l10n.setAttributes($("key-mozilla-box"), keyMozillaFound);
@@ -318,9 +321,6 @@ var snapshotFormatters = {
     // @where    The name in "graphics-<name>-tbody", of the element to append to.
     function addRow(where, key, value) {
       addRows(where, [buildRow(key, value)]);
-    }
-    if (data.clearTypeParameters !== undefined) {
-      addRow("diagnostics", "clear-type-parameters", data.clearTypeParameters);
     }
     if ("info" in data) {
       apzInfo = formatApzInfo(data.info);

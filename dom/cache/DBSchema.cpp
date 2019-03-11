@@ -20,6 +20,7 @@
 #include "mozilla/net/MozURL.h"
 #include "mozIStorageConnection.h"
 #include "mozIStorageStatement.h"
+#include "mozIThirdPartyUtil.h"
 #include "mozStorageHelper.h"
 #include "nsCOMPtr.h"
 #include "nsCRT.h"
@@ -2216,10 +2217,9 @@ nsresult InsertEntry(mozIStorageConnection* aConn, CacheId aCacheId,
 
   nsAutoCString serializedInfo;
   // We only allow content serviceworkers right now.
-  if (aResponse.principalInfo().type() ==
-      mozilla::ipc::OptionalPrincipalInfo::TPrincipalInfo) {
+  if (aResponse.principalInfo().isSome()) {
     const mozilla::ipc::PrincipalInfo& principalInfo =
-        aResponse.principalInfo().get_PrincipalInfo();
+        aResponse.principalInfo().ref();
     MOZ_DIAGNOSTIC_ASSERT(principalInfo.type() ==
                           mozilla::ipc::PrincipalInfo::TContentPrincipalInfo);
     const mozilla::ipc::ContentPrincipalInfo& cInfo =
@@ -2469,7 +2469,7 @@ nsresult ReadResponse(mozIStorageConnection* aConn, EntryId aEntryId,
     return rv;
   }
 
-  aSavedResponseOut->mValue.principalInfo() = void_t();
+  aSavedResponseOut->mValue.principalInfo() = Nothing();
   if (!serializedInfo.IsEmpty()) {
     nsAutoCString specNoSuffix;
     OriginAttributes attrs;
@@ -2494,9 +2494,17 @@ nsresult ReadResponse(mozIStorageConnection* aConn, EntryId aEntryId,
 
     // CSP is recovered from the headers, no need to initialise it here.
     nsTArray<mozilla::ipc::ContentSecurityPolicy> policies;
+
+    nsCString baseDomain;
+    rv = url->BaseDomain(baseDomain);
+    if (NS_WARN_IF(NS_FAILED(rv))) {
+      return rv;
+    }
+
     aSavedResponseOut->mValue.principalInfo() =
-        mozilla::ipc::ContentPrincipalInfo(attrs, origin, specNoSuffix,
-                                           Nothing(), std::move(policies));
+        Some(mozilla::ipc::ContentPrincipalInfo(
+            attrs, origin, specNoSuffix, Nothing(), std::move(policies),
+            baseDomain));
   }
 
   bool nullPadding = false;

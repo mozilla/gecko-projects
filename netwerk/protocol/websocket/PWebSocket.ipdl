@@ -34,7 +34,7 @@ async protocol PWebSocket
 
 parent:
   // Forwarded methods corresponding to methods on nsIWebSocketChannel
-  async AsyncOpen(OptionalURIParams aURI,
+  async AsyncOpen(URIParams? aURI,
                   nsCString aOrigin,
                   uint64_t aInnerWindowID,
                   nsCString aProtocol,
@@ -44,7 +44,7 @@ parent:
                   bool aClientSetPingInterval,
                   uint32_t aPingTimeout,
                   bool aClientSetPingTimeout,
-                  OptionalLoadInfoArgs aLoadInfoArgs,
+                  LoadInfoArgs? aLoadInfoArgs,
                   OptionalTransportProvider aProvider,
                   nsCString aNegotiatedExtensions);
   async Close(uint16_t code, nsCString reason);

@@ -33,6 +33,7 @@ XPCOMUtils.defineLazyModuleGetters(this, {
   LightweightThemeManager: "resource://gre/modules/LightweightThemeManager.jsm",
   Log: "resource://gre/modules/Log.jsm",
   LoginManagerParent: "resource://gre/modules/LoginManagerParent.jsm",
+  MigrationUtils: "resource:///modules/MigrationUtils.jsm",
   NetUtil: "resource://gre/modules/NetUtil.jsm",
   NewTabUtils: "resource://gre/modules/NewTabUtils.jsm",
   OpenInTabsUtils: "resource:///modules/OpenInTabsUtils.jsm",
@@ -1516,6 +1517,10 @@ var gBrowserInit = {
 
     this._cancelDelayedStartup();
 
+    // Bug 1531854 - The hidden window is force-created here
+    // until all of its dependencies are handled.
+    Services.appShell.hiddenDOMWindow;
+
     // We need to set the OfflineApps message listeners up before we
     // load homepages, which might need them.
     OfflineApps.init();
@@ -1569,7 +1574,7 @@ var gBrowserInit = {
     let safeMode = document.getElementById("helpSafeMode");
     if (Services.appinfo.inSafeMode) {
       safeMode.label = safeMode.getAttribute("stoplabel");
-      safeMode.accesskey = safeMode.getAttribute("stopaccesskey");
+      safeMode.accessKey = safeMode.getAttribute("stopaccesskey");
     }
 
     // BiDi UI
@@ -6500,7 +6505,9 @@ var gPageStyleMenu = {
   init() {
     let mm = window.messageManager;
     mm.addMessageListener("PageStyle:StyleSheets", (msg) => {
-      this._pageStyleSheets.set(msg.target.permanentKey, msg.data);
+      if (msg.target.permanentKey) {
+        this._pageStyleSheets.set(msg.target.permanentKey, msg.data);
+      }
     });
   },
 
@@ -8271,10 +8278,22 @@ var ConfirmationHint = {
    *         An object with the following optional properties:
    *         - event (DOM event): The event that triggered the feedback.
    *         - hideArrow (boolean): Optionally hide the arrow.
+   *         - showDescription (boolean): show description text (confirmationHint.<messageId>.description)
+   *
    */
   show(anchor, messageId, options = {}) {
     this._message.textContent =
-      gBrowserBundle.GetStringFromName("confirmationHint." + messageId + ".label");
+      gBrowserBundle.GetStringFromName(`confirmationHint.${messageId}.label`);
+
+    if (options.showDescription) {
+      this._description.textContent =
+          gBrowserBundle.GetStringFromName(`confirmationHint.${messageId}.description`);
+      this._description.hidden = false;
+      this._panel.classList.add("with-description");
+    } else {
+      this._description.hidden = true;
+      this._panel.classList.remove("with-description");
+    }
 
     if (options.hideArrow) {
       this._panel.setAttribute("hidearrow", "true");
@@ -8284,11 +8303,12 @@ var ConfirmationHint = {
       this._animationBox.setAttribute("animate", "true");
 
       // The timeout value used here allows the panel to stay open for
-      // X second after the text transition (duration=120ms) has finished.
-      const DURATION = 1500;
+      // 1.5s second after the text transition (duration=120ms) has finished.
+      // If there is a description, we show for 4s and there is no text transition.
+      const DURATION = options.showDescription ? 4000 : 1500 + 120;
       setTimeout(() => {
         this._panel.hidePopup(true);
-      }, DURATION + 120);
+      }, DURATION);
     }, {once: true});
 
     this._panel.addEventListener("popuphidden", () => {
@@ -8298,7 +8318,7 @@ var ConfirmationHint = {
 
     this._panel.hidden = false;
     this._panel.openPopup(anchor, {
-      position: "bottomcenter topright",
+      position: "bottomcenter topleft",
       triggerEvent: options.event,
     });
   },
@@ -8316,5 +8336,10 @@ var ConfirmationHint = {
   get _message() {
     delete this._message;
     return this._message = document.getElementById("confirmation-hint-message");
+  },
+
+  get _description() {
+    delete this._description;
+    return this._description = document.getElementById("confirmation-hint-description");
   },
 };

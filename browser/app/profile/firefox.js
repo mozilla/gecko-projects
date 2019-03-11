@@ -107,6 +107,11 @@ pref("app.update.altwindowtype", "Browser:About");
 
 // Enables some extra Application Update Logging (can reduce performance)
 pref("app.update.log", false);
+// Causes Application Update Logging to be sent to a file in the profile
+// directory. This preference is automatically disabled on application start to
+// prevent it from being left on accidentally. Turning this pref on enables
+// logging, even if app.update.log is false.
+pref("app.update.log.file", false);
 
 // The number of general background check failures to allow before notifying the
 // user of the failure. User initiated update checks always notify the user of
@@ -239,6 +244,10 @@ pref("browser.startup.blankWindow", true);
 #else
 pref("browser.startup.blankWindow", false);
 #endif
+
+// Don't create the hidden window during startup on
+// platforms that don't always need it (Win/Linux).
+pref("toolkit.lazyHiddenWindow", true);
 
 pref("browser.slowStartup.notificationDisabled", false);
 pref("browser.slowStartup.timeThreshold", 20000);
@@ -480,11 +489,11 @@ pref("browser.tabs.remote.separatePrivilegedContentProcess", true);
 // Turn on HTTP response process selection.
 pref("browser.tabs.remote.useHTTPResponseProcessSelection", true);
 
-// Unload tabs on low-memory on nightly.
-#ifdef RELEASE_OR_BETA
-pref("browser.tabs.unloadOnLowMemory", false);
-#else
+// Unload tabs on low-memory on nightly and beta.
+#ifdef EARLY_BETA_OR_EARLIER
 pref("browser.tabs.unloadOnLowMemory", true);
+#else
+pref("browser.tabs.unloadOnLowMemory", false);
 #endif
 
 pref("browser.ctrlTab.recentlyUsedOrder", true);
@@ -1293,7 +1302,7 @@ pref("browser.newtabpage.activity-stream.fxaccounts.endpoint", "https://accounts
 pref("browser.newtabpage.activity-stream.improvesearch.topSiteSearchShortcuts", true);
 
 // ASRouter provider configuration
-pref("browser.newtabpage.activity-stream.asrouter.providers.cfr", "{\"id\":\"cfr\",\"enabled\":true,\"type\":\"local\",\"localProvider\":\"CFRMessageProvider\",\"frequency\":{\"custom\":[{\"period\":\"daily\",\"cap\":1}]}}");
+pref("browser.newtabpage.activity-stream.asrouter.providers.cfr", "{\"id\":\"cfr\",\"enabled\":true,\"type\":\"local\",\"localProvider\":\"CFRMessageProvider\",\"frequency\":{\"custom\":[{\"period\":\"daily\",\"cap\":1}]},\"categories\":[\"cfrAddons\",\"cfrFeatures\"]}");
 pref("browser.newtabpage.activity-stream.asrouter.providers.snippets", "{\"id\":\"snippets\",\"enabled\":true,\"type\":\"remote\",\"url\":\"https://snippets.cdn.mozilla.net/%STARTPAGE_VERSION%/%NAME%/%VERSION%/%APPBUILDID%/%BUILD_TARGET%/%LOCALE%/%CHANNEL%/%OS_VERSION%/%DISTRIBUTION%/%DISTRIBUTION_VERSION%/\",\"updateCycleInMs\":14400000}");
 
 // The pref controls if search hand-off is enabled for Activity Stream.
@@ -1370,7 +1379,7 @@ pref("dom.debug.propagate_gesture_events_through_content", false);
 // All the Geolocation preferences are here.
 //
 #ifndef EARLY_BETA_OR_EARLIER
-pref("geo.wifi.uri", "https://www.googleapis.com/geolocation/v1/geolocate?key=%GOOGLE_API_KEY%");
+pref("geo.wifi.uri", "https://www.googleapis.com/geolocation/v1/geolocate?key=%GOOGLE_LOCATION_SERVICE_API_KEY%");
 #else
 // Use MLS on Nightly and early Beta.
 pref("geo.wifi.uri", "https://location.services.mozilla.com/v1/geolocate?key=%MOZILLA_API_KEY%");
@@ -1800,7 +1809,10 @@ pref("intl.multilingual.downloadEnabled", false);
 // development and testing of Fission.
 // The current simulated conditions are:
 // - Don't propagate events from subframes to JS child actors
-pref("browser.fission.simulate", false);
+pref("fission.frontend.simulate-events", false);
+// - Only deliver subframe messages that specifies
+//   their destination (using the BrowsingContext id).
+pref("fission.frontend.simulate-messages", false);
 
 // Prio preferences
 // Only enable by default on Nightly.

@@ -539,7 +539,7 @@ class PredictorLearnRunnable final : public Runnable {
     ipc::URIParams serTargetURI;
     SerializeURI(mTargetURI, serTargetURI);
 
-    ipc::OptionalURIParams serSourceURI;
+    Maybe<ipc::URIParams> serSourceURI;
     SerializeURI(mSourceURI, serSourceURI);
 
     PREDICTOR_LOG(("predictor::learn (async) forwarding to parent"));
@@ -657,7 +657,7 @@ Predictor::PredictNative(nsIURI *targetURI, nsIURI *sourceURI,
 
     PREDICTOR_LOG(("    called on child process"));
 
-    ipc::OptionalURIParams serTargetURI, serSourceURI;
+    Maybe<ipc::URIParams> serTargetURI, serSourceURI;
     SerializeURI(targetURI, serTargetURI);
     SerializeURI(sourceURI, serSourceURI);
 
@@ -1246,7 +1246,8 @@ nsresult Predictor::Prefetch(nsIURI *uri, nsIURI *referrer,
   nsresult rv = NS_NewChannel(
       getter_AddRefs(channel), uri, nsContentUtils::GetSystemPrincipal(),
       nsILoadInfo::SEC_ALLOW_CROSS_ORIGIN_DATA_IS_NULL,
-      nsIContentPolicy::TYPE_OTHER, nullptr, /* aPerformanceStorage */
+      nsIContentPolicy::TYPE_OTHER, nullptr, /* nsICookieSettings */
+      nullptr,                               /* aPerformanceStorage */
       nullptr,                               /* aLoadGroup */
       nullptr,                               /* aCallbacks */
       nsIRequest::LOAD_BACKGROUND);

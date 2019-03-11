@@ -132,6 +132,15 @@ const PREFS_CONFIG = new Map([
     value: AppConstants.EARLY_BETA_OR_EARLIER,
     value_local_dev: false,
   }],
+  ["telemetry.structuredIngestion", {
+    title: "Enable Structured Ingestion Telemetry data collection",
+    value: AppConstants.EARLY_BETA_OR_EARLIER,
+    value_local_dev: false,
+  }],
+  ["telemetry.structuredIngestion.endpoint", {
+    title: "Structured Ingestion telemetry server endpoint",
+    value: "https://incoming.telemetry.mozilla.org/submit/activity-stream",
+  }],
   ["telemetry.ping.endpoint", {
     title: "Telemetry server endpoint",
     value: "https://tiles.services.mozilla.com/v4/links/activity-stream",
@@ -197,8 +206,12 @@ const PREFS_CONFIG = new Map([
     title: "Are the asrouter devtools enabled?",
     value: false,
   }],
-  ["asrouter.userprefs.cfr", {
-    title: "Does the user allow CFR recommendations?",
+  ["asrouter.userprefs.cfr.addons", {
+    title: "Does the user allow CFR addon recommendations?",
+    value: true,
+  }],
+  ["asrouter.userprefs.cfr.features", {
+    title: "Does the user allow CFR feature recommendations?",
     value: true,
   }],
   ["asrouter.providers.onboarding", {

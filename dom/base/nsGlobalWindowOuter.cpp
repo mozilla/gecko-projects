@@ -29,7 +29,6 @@
 #include "mozilla/dom/LocalStorage.h"
 #include "mozilla/dom/LSObject.h"
 #include "mozilla/dom/Storage.h"
-#include "mozilla/dom/IdleRequest.h"
 #include "mozilla/dom/MaybeCrossOriginObject.h"
 #include "mozilla/dom/Performance.h"
 #include "mozilla/dom/StorageEvent.h"
@@ -45,7 +44,6 @@
 #  include "mozilla/dom/WindowOrientationObserver.h"
 #endif
 #include "nsError.h"
-#include "nsIIdleService.h"
 #include "nsISizeOfEventTarget.h"
 #include "nsDOMJSUtils.h"
 #include "nsArrayUtils.h"
@@ -1098,10 +1096,6 @@ static JSObject* NewOuterWindowProxy(JSContext* cx,
 
 nsGlobalWindowOuter::nsGlobalWindowOuter(uint64_t aWindowID)
     : nsPIDOMWindowOuter(aWindowID),
-      mIdleFuzzFactor(0),
-      mIdleCallbackIndex(-1),
-      mCurrentlyIdle(false),
-      mAddActiveEventFuzzTime(true),
       mFullscreen(false),
       mFullscreenMode(false),
       mIsClosed(false),
@@ -1264,10 +1258,6 @@ nsGlobalWindowOuter::~nsGlobalWindowOuter() {
   if (obs) {
     obs->RemoveObserver(this, PERM_CHANGE_NOTIFICATION);
   }
-  nsCOMPtr<nsIPrefBranch> prefBranch = do_GetService(NS_PREFSERVICE_CONTRACTID);
-  if (prefBranch) {
-    prefBranch->RemoveObserver("network.cookie.cookieBehavior", this);
-  }
 
   nsLayoutStatics::Release();
 }
@@ -1324,11 +1314,6 @@ void nsGlobalWindowOuter::CleanUp() {
   mMessageManager = nullptr;
 
   mArguments = nullptr;
-
-  if (mIdleTimer) {
-    mIdleTimer->Cancel();
-    mIdleTimer = nullptr;
-  }
 }
 
 void nsGlobalWindowOuter::ClearControllers() {
@@ -1418,9 +1403,6 @@ NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN_INTERNAL(nsGlobalWindowOuter)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mSuspendedDoc)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mDocumentPrincipal)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mDoc)
-  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mIdleService)
-
-  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mIdleObservers)
 
   // Traverse stuff from nsPIDOMWindow
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mChromeEventHandler)
@@ -1447,8 +1429,6 @@ NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(nsGlobalWindowOuter)
   NS_IMPL_CYCLE_COLLECTION_UNLINK(mSuspendedDoc)
   NS_IMPL_CYCLE_COLLECTION_UNLINK(mDocumentPrincipal)
   NS_IMPL_CYCLE_COLLECTION_UNLINK(mDoc)
-  NS_IMPL_CYCLE_COLLECTION_UNLINK(mIdleService)
-  NS_IMPL_CYCLE_COLLECTION_UNLINK(mIdleObservers)
 
   // Unlink stuff from nsPIDOMWindow
   NS_IMPL_CYCLE_COLLECTION_UNLINK(mChromeEventHandler)
@@ -2307,20 +2287,18 @@ nsresult nsGlobalWindowOuter::SetNewDocument(Document* aDocument,
 
   mHasStorageAccess = false;
   nsIURI* uri = aDocument->GetDocumentURI();
-  if (newInnerWindow) {
-    if (StaticPrefs::network_cookie_cookieBehavior() ==
-            nsICookieService::BEHAVIOR_REJECT_TRACKER &&
-        nsContentUtils::IsThirdPartyWindowOrChannel(newInnerWindow, nullptr,
-                                                    uri) &&
-        nsContentUtils::IsTrackingResourceWindow(newInnerWindow)) {
-      // Grant storage access by default if the first-party storage access
-      // permission has been granted already.
-      // Don't notify in this case, since we would be notifying the user
-      // needlessly.
-      mHasStorageAccess =
-          AntiTrackingCommon::IsFirstPartyStorageAccessGrantedFor(
-              newInnerWindow, uri, nullptr);
-    }
+  if (newInnerWindow &&
+      aDocument->CookieSettings()->GetCookieBehavior() ==
+          nsICookieService::BEHAVIOR_REJECT_TRACKER &&
+      nsContentUtils::IsThirdPartyWindowOrChannel(newInnerWindow, nullptr,
+                                                  uri) &&
+      nsContentUtils::IsTrackingResourceWindow(newInnerWindow)) {
+    // Grant storage access by default if the first-party storage access
+    // permission has been granted already.
+    // Don't notify in this case, since we would be notifying the user
+    // needlessly.
+    mHasStorageAccess = AntiTrackingCommon::IsFirstPartyStorageAccessGrantedFor(
+        newInnerWindow, uri, nullptr);
   }
 
   return NS_OK;
@@ -6960,11 +6938,6 @@ NS_IMETHODIMP
 nsGlobalWindowOuter::Observe(nsISupports* aSupports, const char* aTopic,
                              const char16_t* aData) {
   if (!nsCRT::strcmp(aTopic, PERM_CHANGE_NOTIFICATION)) {
-    if (!nsCRT::strcmp(aData, u"cleared") && !aSupports) {
-      // All permissions have been cleared.
-      mHasStorageAccess = false;
-      return NS_OK;
-    }
     nsCOMPtr<nsIPermission> permission = do_QueryInterface(aSupports);
     if (!permission) {
       return NS_OK;
@@ -6996,10 +6969,6 @@ nsGlobalWindowOuter::Observe(nsISupports* aSupports, const char* aTopic,
         return NS_OK;
       }
     }
-  } else if (!nsCRT::strcmp(aTopic, NS_PREFBRANCH_PREFCHANGE_TOPIC_ID)) {
-    // Reset the storage access permission when our cookie policy changes.
-    mHasStorageAccess = false;
-    return NS_OK;
   }
   return NS_OK;
 }
@@ -7796,10 +7765,6 @@ already_AddRefed<nsGlobalWindowOuter> nsGlobalWindowOuter::Create(
         NS_NewRunnableFunction("PermChangeDelayRunnable", [obs, window] {
           obs->AddObserver(window, PERM_CHANGE_NOTIFICATION, true);
         }));
-  }
-  nsCOMPtr<nsIPrefBranch> prefBranch = do_GetService(NS_PREFSERVICE_CONTRACTID);
-  if (prefBranch) {
-    prefBranch->AddObserver("network.cookie.cookieBehavior", window, true);
   }
   return window.forget();
 }

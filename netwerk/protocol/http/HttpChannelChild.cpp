@@ -180,6 +180,7 @@ HttpChannelChild::HttpChannelChild()
       mAltDataCacheEntryAvailable(false),
       mSendResumeAt(false),
       mKeptAlive(false),
+      mIPCActorDeleted(false),
       mSuspendSent(false),
       mSynthesizedResponse(false),
       mShouldInterceptSubsequentRedirect(false),
@@ -533,7 +534,11 @@ void HttpChannelChild::OnStartRequest(
       !mDivertingToParent,
       "mDivertingToParent should be unset before OnStartRequest!");
 
-  if (mOnStartRequestCalled && !mIPCOpen) {
+  // If this channel was aborted by ActorDestroy, then there may be other
+  // OnStartRequest/OnStopRequest/OnDataAvailable IPC messages that need to
+  // be handled. In that case we just ignore them to avoid calling the listener
+  // twice.
+  if (mOnStartRequestCalled && mIPCActorDeleted) {
     return;
   }
 
@@ -663,11 +668,11 @@ void HttpChannelChild::DoOnStartRequest(nsIRequest* aRequest,
   }
 
   nsresult rv = mListener->OnStartRequest(aRequest);
+  mOnStartRequestCalled = true;
   if (NS_FAILED(rv)) {
     Cancel(rv);
     return;
   }
-  mOnStartRequestCalled = true;
 
   if (mDivertingToParent) {
     mListener = nullptr;
@@ -1033,7 +1038,11 @@ void HttpChannelChild::OnStopRequest(
        static_cast<uint32_t>(channelStatus)));
   MOZ_ASSERT(NS_IsMainThread());
 
-  if (mOnStopRequestCalled && !mIPCOpen) {
+  // If this channel was aborted by ActorDestroy, then there may be other
+  // OnStartRequest/OnStopRequest/OnDataAvailable IPC messages that need to
+  // be handled. In that case we just ignore them to avoid calling the listener
+  // twice.
+  if (mOnStopRequestCalled && mIPCActorDeleted) {
     return;
   }
 
@@ -2141,11 +2150,11 @@ NS_IMETHODIMP
 HttpChannelChild::OnRedirectVerifyCallback(nsresult result) {
   LOG(("HttpChannelChild::OnRedirectVerifyCallback [this=%p]\n", this));
   MOZ_ASSERT(NS_IsMainThread());
-  OptionalURIParams redirectURI;
+  Maybe<URIParams> redirectURI;
   nsresult rv;
 
   uint32_t referrerPolicy = REFERRER_POLICY_UNSET;
-  OptionalURIParams referrerURI;
+  Maybe<URIParams> referrerURI;
   SerializeURI(nullptr, referrerURI);
 
   nsCOMPtr<nsIHttpChannel> newHttpChannel =
@@ -3076,7 +3085,7 @@ HttpChannelChild::GetAlternativeDataType(nsACString& aType) {
 NS_IMETHODIMP
 HttpChannelChild::OpenAlternativeOutputStream(const nsACString& aType,
                                               int64_t aPredictedSize,
-                                              nsIOutputStream** _retval) {
+                                              nsIAsyncOutputStream** _retval) {
   MOZ_ASSERT(NS_IsMainThread(), "Main thread only");
 
   if (mSynthesizedCacheInfo) {
@@ -3830,6 +3839,9 @@ void HttpChannelChild::ActorDestroy(ActorDestroyReason aWhy) {
     // Cleanup the background channel before we resume the eventQ so we don't
     // get any other events.
     CleanupBackgroundChannel();
+
+    mIPCActorDeleted = true;
+    mCanceled = true;
   }
 }
 

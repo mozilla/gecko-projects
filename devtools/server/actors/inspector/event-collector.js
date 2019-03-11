@@ -14,6 +14,7 @@ const {
   isBeforePseudoElement,
   isNativeAnonymous,
 } = require("devtools/shared/layout/utils");
+const Debugger = require("Debugger");
 
 // eslint-disable-next-line
 const JQUERY_LIVE_REGEX = /return typeof \w+.*.event\.triggered[\s\S]*\.event\.(dispatch|handle).*arguments/;
@@ -707,7 +708,9 @@ class ReactEventCollector extends MainEventCollector {
  * The exposed class responsible for gathering events.
  */
 class EventCollector {
-  constructor() {
+  constructor(targetActor) {
+    this.targetActor = targetActor;
+
     // The event collector array. Please preserve the order otherwise there will
     // be multiple failing tests.
     this.eventCollectors = [
@@ -744,6 +747,18 @@ class EventCollector {
   }
 
   /**
+   * We allow displaying chrome events if the page is chrome or if
+   * `devtools.chrome.enabled = true`.
+   */
+  get chromeEnabled() {
+    if (typeof this._chromeEnabled === "undefined") {
+      this._chromeEnabled = Services.prefs.getBoolPref("devtools.chrome.enabled");
+    }
+
+    return this._chromeEnabled;
+  }
+
+  /**
    *
    * @param  {DOMNode} node
    *         The node for which events are to be gathered.
@@ -762,7 +777,18 @@ class EventCollector {
    */
   getEventListeners(node) {
     const listenerArray = [];
-    const dbg = new Debugger();
+    let dbg;
+    if (!this.chromeEnabled) {
+      dbg = new Debugger();
+    } else {
+      // When the chrome pref is turned on, we may try to debug system compartments.
+      // But since bug 1517210, the server is also loaded using the system principal
+      // and so here, we have to ensure using a special Debugger instance, loaded
+      // in a compartment flagged with invisibleToDebugger=true. This helps the Debugger
+      // know about the precise boundary between debuggee and debugger code.
+      const ChromeDebugger = require("ChromeDebugger");
+      dbg = new ChromeDebugger();
+    }
 
     for (const collector of this.eventCollectors) {
       const listeners = collector.getListeners(node);
@@ -840,6 +866,7 @@ class EventCollector {
       let line = 0;
       let native = false;
       let url = "";
+      let sourceActor = "";
 
       // If the listener is an object with a 'handleEvent' method, use that.
       if (listenerDO.class === "Object" || /^XUL\w*Element$/.test(listenerDO.class)) {
@@ -876,6 +903,8 @@ class EventCollector {
 
         line = script.startLine;
         url = script.url;
+        const actor = this.targetActor.sources.getOrCreateSourceActor(script.source);
+        sourceActor = actor ? actor.actorID : null;
 
         // Checking for the string "[native code]" is the only way at this point
         // to check for native code. Even if this provides a false positive then
@@ -933,6 +962,7 @@ class EventCollector {
                           override.capturing : capturing,
         hide: typeof override.hide !== "undefined" ? override.hide : hide,
         native,
+        sourceActor,
       };
 
       // Hide the debugger icon for DOM0 and native listeners. DOM0 listeners are

@@ -765,6 +765,10 @@ Document::DocumentTheme Gecko_GetDocumentLWTheme(const Document* aDocument) {
   return aDocument->ThreadSafeGetDocumentLWTheme();
 }
 
+const PreferenceSheet::Prefs* Gecko_GetPrefSheetPrefs(const Document* aDoc) {
+  return &PreferenceSheet::PrefsFor(*aDoc);
+}
+
 bool Gecko_IsTableBorderNonzero(RawGeckoElementBorrowed aElement) {
   if (!aElement->IsHTMLElement(nsGkAtoms::table)) {
     return false;
@@ -2250,24 +2254,6 @@ void Gecko_ReportUnexpectedCSSError(const StyleSheet* aSheet,
   }
   nsDependentCSubstring sourceValue(source, sourceLen);
   reporter.OutputError(lineNumber, colNumber, sourceValue);
-}
-
-void Gecko_AddBufferToCrashReport(const void* addr, size_t len) {
-  MOZ_ASSERT(NS_IsMainThread());
-  nsCOMPtr<nsICrashReporter> cr =
-      do_GetService("@mozilla.org/toolkit/crash-reporter;1");
-  NS_ENSURE_TRUE_VOID(cr);
-  cr->RegisterAppMemory((uint64_t)addr, len);
-}
-
-void Gecko_AnnotateCrashReport(const char* key_str, const char* value_str) {
-  MOZ_ASSERT(NS_IsMainThread());
-  nsDependentCString key(key_str);
-  nsDependentCString value(value_str);
-  nsCOMPtr<nsICrashReporter> cr =
-      do_GetService("@mozilla.org/toolkit/crash-reporter;1");
-  NS_ENSURE_TRUE_VOID(cr);
-  cr->AnnotateCrashReport(key, value);
 }
 
 void Gecko_ContentList_AppendAll(nsSimpleContentList* aList,

@@ -296,7 +296,7 @@ JSFunction* js::MakeDefaultConstructor(JSContext* cx, HandleScript script,
   ctor->setIsClassConstructor();
 
   // Create the script now, so we can fix up its source span below.
-  JSScript* ctorScript = JSFunction::getOrCreateScript(cx, ctor);
+  RootedScript ctorScript(cx, JSFunction::getOrCreateScript(cx, ctor));
   if (!ctorScript) {
     return nullptr;
   }
@@ -316,6 +316,8 @@ JSFunction* js::MakeDefaultConstructor(JSContext* cx, HandleScript script,
   unsigned line = PCToLineNumber(script, pc, &column);
   ctorScript->setDefaultClassConstructorSpan(
       script->sourceObject(), classStartOffset, classEndOffset, line, column);
+
+  Debugger::onNewScript(cx, ctorScript);
 
   return ctor;
 }
@@ -2109,6 +2111,10 @@ static MOZ_NEVER_INLINE JS_HAZ_JSNATIVE_CALLER bool Interpret(JSContext* cx,
         if (MOZ_LIKELY(interpReturnOK)) {
           TypeScript::Monitor(cx, script, REGS.pc, REGS.sp[-1]);
 
+          if (JSOp(*REGS.pc) == JSOP_RESUME) {
+            ADVANCE_AND_DISPATCH(JSOP_RESUME_LENGTH);
+          }
+          MOZ_ASSERT(CodeSpec[*REGS.pc].length == JSOP_CALL_LENGTH);
           ADVANCE_AND_DISPATCH(JSOP_CALL_LENGTH);
         }
 
@@ -2938,7 +2944,8 @@ static MOZ_NEVER_INLINE JS_HAZ_JSNATIVE_CALLER bool Interpret(JSContext* cx,
       HandleValue value = REGS.stackHandleAt(-1);
 
       bool strict = JSOp(*REGS.pc) == JSOP_STRICTSETELEM_SUPER;
-      if (!SetObjectElement(cx, obj, index, value, receiver, strict)) {
+      if (!SetObjectElementWithReceiver(cx, obj, index, value, receiver,
+                                        strict)) {
         goto error;
       }
       REGS.sp[-4] = value;
@@ -3021,6 +3028,19 @@ static MOZ_NEVER_INLINE JS_HAZ_JSNATIVE_CALLER bool Interpret(JSContext* cx,
     CASE(JSOP_CALLITER)
     CASE(JSOP_SUPERCALL)
     CASE(JSOP_FUNCALL) {
+      static_assert(JSOP_CALL_LENGTH == JSOP_NEW_LENGTH,
+                    "call and new must be the same size");
+      static_assert(JSOP_CALL_LENGTH == JSOP_CALL_IGNORES_RV_LENGTH,
+                    "call and call-ignores-rv must be the same size");
+      static_assert(JSOP_CALL_LENGTH == JSOP_CALLITER_LENGTH,
+                    "call and calliter must be the same size");
+      static_assert(JSOP_CALL_LENGTH == JSOP_SUPERCALL_LENGTH,
+                    "call and supercall must be the same size");
+      static_assert(JSOP_CALL_LENGTH == JSOP_FUNCALL_LENGTH,
+                    "call and funcall must be the same size");
+      static_assert(JSOP_CALL_LENGTH == JSOP_FUNAPPLY_LENGTH,
+                    "call and funapply must be the same size");
+
       if (REGS.fp()->hasPushedGeckoProfilerFrame()) {
         cx->geckoProfiler().updatePC(cx, script, REGS.pc);
       }
@@ -3881,7 +3901,7 @@ static MOZ_NEVER_INLINE JS_HAZ_JSNATIVE_CALLER bool Interpret(JSContext* cx,
       CHECK_BRANCH();
       ReservedRooted<Value> v(&rootValue0);
       POP_COPY_TO(v);
-      MOZ_ALWAYS_FALSE(Throw(cx, v));
+      MOZ_ALWAYS_FALSE(ThrowOperation(cx, v));
       /* let the code at error try to catch the exception. */
       goto error;
     }
@@ -4403,7 +4423,7 @@ prologue_error:
   goto prologue_return_continuation;
 }
 
-bool js::Throw(JSContext* cx, HandleValue v) {
+bool js::ThrowOperation(JSContext* cx, HandleValue v) {
   MOZ_ASSERT(!cx->isExceptionPending());
   cx->setPendingException(v);
   return false;
@@ -4422,18 +4442,32 @@ bool js::GetProperty(JSContext* cx, HandleValue v, HandlePropertyName name,
   // create a wrapper object.
   if (v.isPrimitive() && !v.isNullOrUndefined()) {
     NativeObject* proto;
-    if (v.isNumber()) {
-      proto = GlobalObject::getOrCreateNumberPrototype(cx, cx->global());
-    } else if (v.isString()) {
-      proto = GlobalObject::getOrCreateStringPrototype(cx, cx->global());
-    } else if (v.isBoolean()) {
-      proto = GlobalObject::getOrCreateBooleanPrototype(cx, cx->global());
-    } else if (v.isBigInt()) {
-      proto = GlobalObject::getOrCreateBigIntPrototype(cx, cx->global());
-    } else {
-      MOZ_ASSERT(v.isSymbol());
-      proto = GlobalObject::getOrCreateSymbolPrototype(cx, cx->global());
+
+    switch (v.type()) {
+      case ValueType::Double:
+      case ValueType::Int32:
+        proto = GlobalObject::getOrCreateNumberPrototype(cx, cx->global());
+        break;
+      case ValueType::Boolean:
+        proto = GlobalObject::getOrCreateBooleanPrototype(cx, cx->global());
+        break;
+      case ValueType::String:
+        proto = GlobalObject::getOrCreateStringPrototype(cx, cx->global());
+        break;
+      case ValueType::Symbol:
+        proto = GlobalObject::getOrCreateSymbolPrototype(cx, cx->global());
+        break;
+      case ValueType::BigInt:
+        proto = GlobalObject::getOrCreateBigIntPrototype(cx, cx->global());
+        break;
+      case ValueType::Undefined:
+      case ValueType::Null:
+      case ValueType::Magic:
+      case ValueType::PrivateGCThing:
+      case ValueType::Object:
+        MOZ_CRASH("unexpected type");
     }
+
     if (!proto) {
       return false;
     }
@@ -4450,6 +4484,11 @@ bool js::GetProperty(JSContext* cx, HandleValue v, HandlePropertyName name,
   }
 
   return GetProperty(cx, obj, receiver, name, vp);
+}
+
+bool js::GetValueProperty(JSContext* cx, HandleValue value,
+                          HandlePropertyName name, MutableHandleValue vp) {
+  return GetProperty(cx, value, name, vp);
 }
 
 JSObject* js::Lambda(JSContext* cx, HandleFunction fun, HandleObject parent) {
@@ -4767,16 +4806,6 @@ template bool js::DeleteElementJit<true>(JSContext*, HandleValue, HandleValue,
 template bool js::DeleteElementJit<false>(JSContext*, HandleValue, HandleValue,
                                           bool* succeeded);
 
-bool js::GetElement(JSContext* cx, MutableHandleValue lref, HandleValue rref,
-                    MutableHandleValue vp) {
-  return GetElementOperation(cx, JSOP_GETELEM, lref, rref, vp);
-}
-
-bool js::CallElement(JSContext* cx, MutableHandleValue lref, HandleValue rref,
-                     MutableHandleValue res) {
-  return GetElementOperation(cx, JSOP_CALLELEM, lref, rref, res);
-}
-
 bool js::SetObjectElement(JSContext* cx, HandleObject obj, HandleValue index,
                           HandleValue value, bool strict) {
   RootedId id(cx);
@@ -4800,9 +4829,9 @@ bool js::SetObjectElement(JSContext* cx, HandleObject obj, HandleValue index,
                                    pc);
 }
 
-bool js::SetObjectElement(JSContext* cx, HandleObject obj, HandleValue index,
-                          HandleValue value, HandleValue receiver,
-                          bool strict) {
+bool js::SetObjectElementWithReceiver(JSContext* cx, HandleObject obj,
+                                      HandleValue index, HandleValue value,
+                                      HandleValue receiver, bool strict) {
   RootedId id(cx);
   if (!ToPropertyKey(cx, index, &id)) {
     return false;
@@ -5208,6 +5237,7 @@ JSObject* js::CreateThisWithTemplate(JSContext* cx,
 JSObject* js::NewArrayOperation(JSContext* cx, HandleScript script,
                                 jsbytecode* pc, uint32_t length,
                                 NewObjectKind newKind /* = GenericObject */) {
+  MOZ_ASSERT(*pc == JSOP_NEWARRAY);
   MOZ_ASSERT(newKind != SingletonObject);
 
   RootedObjectGroup group(cx);

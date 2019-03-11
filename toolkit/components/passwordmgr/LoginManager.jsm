@@ -14,11 +14,11 @@ ChromeUtils.defineModuleGetter(this, "BrowserUtils",
 ChromeUtils.defineModuleGetter(this, "LoginHelper",
                                "resource://gre/modules/LoginHelper.jsm");
 ChromeUtils.defineModuleGetter(this, "LoginFormFactory",
-                               "resource://gre/modules/LoginManagerContent.jsm");
+                               "resource://gre/modules/LoginFormFactory.jsm");
 ChromeUtils.defineModuleGetter(this, "LoginManagerContent",
                                "resource://gre/modules/LoginManagerContent.jsm");
-ChromeUtils.defineModuleGetter(this, "UserAutoCompleteResult",
-                               "resource://gre/modules/LoginManagerContent.jsm");
+ChromeUtils.defineModuleGetter(this, "LoginAutoCompleteResult",
+                               "resource://gre/modules/LoginAutoCompleteResult.jsm");
 ChromeUtils.defineModuleGetter(this, "InsecurePasswordUtils",
                                "resource://gre/modules/InsecurePasswordUtils.jsm");
 
@@ -534,7 +534,7 @@ LoginManager.prototype = {
       }
 
       this._autoCompleteLookupPromise = null;
-      let results = new UserAutoCompleteResult(aSearchString, logins, {
+      let results = new LoginAutoCompleteResult(aSearchString, logins, {
         messageManager,
         isSecure,
         isPasswordField,

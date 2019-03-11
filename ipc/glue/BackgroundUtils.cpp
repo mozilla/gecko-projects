@@ -12,6 +12,7 @@
 #include "mozilla/NullPrincipal.h"
 #include "mozilla/ipc/PBackgroundSharedTypes.h"
 #include "mozilla/ipc/URIUtils.h"
+#include "mozilla/net/CookieSettings.h"
 #include "mozilla/net/NeckoChannelParams.h"
 #include "ExpandedPrincipal.h"
 #include "nsIScriptSecurityManager.h"
@@ -27,9 +28,6 @@
 #include "mozilla/dom/nsCSPContext.h"
 
 namespace mozilla {
-namespace net {
-class OptionalLoadInfoArgs;
-}
 
 using mozilla::BasePrincipal;
 using mozilla::Maybe;
@@ -131,6 +129,15 @@ already_AddRefed<nsIPrincipal> PrincipalInfoToPrincipal(
         static_cast<nsCSPContext*>(csp.get())->SetIPCPolicies(
             info.securityPolicies());
         principal->SetCsp(csp);
+      }
+
+      if (!info.baseDomain().IsVoid()) {
+        nsAutoCString baseDomain;
+        rv = principal->GetBaseDomain(baseDomain);
+        if (NS_WARN_IF(NS_FAILED(rv)) ||
+            !info.baseDomain().Equals(baseDomain)) {
+          MOZ_CRASH("Base domain must be available when deserialized");
+        }
       }
 
       return principal.forget();
@@ -315,9 +322,16 @@ nsresult PrincipalToPrincipalInfo(nsIPrincipal* aPrincipal,
     PopulateContentSecurityPolicies(csp, policies);
   }
 
+  // This attribute is not crucial.
+  nsCString baseDomain;
+  if (NS_FAILED(aPrincipal->GetBaseDomain(baseDomain))) {
+    NS_WARNING("Failed to get base domain!");
+    baseDomain.SetIsVoid(true);
+  }
+
   *aPrincipalInfo =
       ContentPrincipalInfo(aPrincipal->OriginAttributesRef(), originNoSuffix,
-                           spec, domain, std::move(policies));
+                           spec, domain, std::move(policies), baseDomain);
   return NS_OK;
 }
 
@@ -368,21 +382,21 @@ nsresult RHEntryToRHEntryInfo(nsIRedirectHistoryEntry* aRHEntry,
 }
 
 nsresult LoadInfoToLoadInfoArgs(nsILoadInfo* aLoadInfo,
-                                OptionalLoadInfoArgs* aOptionalLoadInfoArgs) {
+                                Maybe<LoadInfoArgs>* aOptionalLoadInfoArgs) {
   if (!aLoadInfo) {
     // if there is no loadInfo, then there is nothing to serialize
-    *aOptionalLoadInfoArgs = void_t();
+    *aOptionalLoadInfoArgs = Nothing();
     return NS_OK;
   }
 
   nsresult rv = NS_OK;
-  OptionalPrincipalInfo loadingPrincipalInfo = mozilla::void_t();
+  Maybe<PrincipalInfo> loadingPrincipalInfo;
   if (aLoadInfo->LoadingPrincipal()) {
     PrincipalInfo loadingPrincipalInfoTemp;
     rv = PrincipalToPrincipalInfo(aLoadInfo->LoadingPrincipal(),
                                   &loadingPrincipalInfoTemp);
     NS_ENSURE_SUCCESS(rv, rv);
-    loadingPrincipalInfo = loadingPrincipalInfoTemp;
+    loadingPrincipalInfo = Some(loadingPrincipalInfoTemp);
   }
 
   PrincipalInfo triggeringPrincipalInfo;
@@ -390,43 +404,44 @@ nsresult LoadInfoToLoadInfoArgs(nsILoadInfo* aLoadInfo,
                                 &triggeringPrincipalInfo);
   NS_ENSURE_SUCCESS(rv, rv);
 
-  OptionalPrincipalInfo principalToInheritInfo = mozilla::void_t();
+  Maybe<PrincipalInfo> principalToInheritInfo;
   if (aLoadInfo->PrincipalToInherit()) {
     PrincipalInfo principalToInheritInfoTemp;
     rv = PrincipalToPrincipalInfo(aLoadInfo->PrincipalToInherit(),
                                   &principalToInheritInfoTemp);
     NS_ENSURE_SUCCESS(rv, rv);
-    principalToInheritInfo = principalToInheritInfoTemp;
+    principalToInheritInfo = Some(principalToInheritInfoTemp);
   }
 
-  OptionalPrincipalInfo sandboxedLoadingPrincipalInfo = mozilla::void_t();
+  Maybe<PrincipalInfo> sandboxedLoadingPrincipalInfo;
   if (aLoadInfo->GetLoadingSandboxed()) {
     PrincipalInfo sandboxedLoadingPrincipalInfoTemp;
     rv = PrincipalToPrincipalInfo(aLoadInfo->GetSandboxedLoadingPrincipal(),
                                   &sandboxedLoadingPrincipalInfoTemp);
     NS_ENSURE_SUCCESS(rv, rv);
-    sandboxedLoadingPrincipalInfo = sandboxedLoadingPrincipalInfoTemp;
+    sandboxedLoadingPrincipalInfo = Some(sandboxedLoadingPrincipalInfoTemp);
   }
 
-  OptionalPrincipalInfo topLevelPrincipalInfo = mozilla::void_t();
+  Maybe<PrincipalInfo> topLevelPrincipalInfo;
   if (aLoadInfo->GetTopLevelPrincipal()) {
     PrincipalInfo topLevelPrincipalInfoTemp;
     rv = PrincipalToPrincipalInfo(aLoadInfo->GetTopLevelPrincipal(),
                                   &topLevelPrincipalInfoTemp);
     NS_ENSURE_SUCCESS(rv, rv);
-    topLevelPrincipalInfo = topLevelPrincipalInfoTemp;
+    topLevelPrincipalInfo = Some(topLevelPrincipalInfoTemp);
   }
 
-  OptionalPrincipalInfo topLevelStorageAreaPrincipalInfo = mozilla::void_t();
+  Maybe<PrincipalInfo> topLevelStorageAreaPrincipalInfo;
   if (aLoadInfo->GetTopLevelStorageAreaPrincipal()) {
     PrincipalInfo topLevelStorageAreaPrincipalInfoTemp;
     rv = PrincipalToPrincipalInfo(aLoadInfo->GetTopLevelStorageAreaPrincipal(),
                                   &topLevelStorageAreaPrincipalInfoTemp);
     NS_ENSURE_SUCCESS(rv, rv);
-    topLevelStorageAreaPrincipalInfo = topLevelStorageAreaPrincipalInfoTemp;
+    topLevelStorageAreaPrincipalInfo =
+        Some(topLevelStorageAreaPrincipalInfoTemp);
   }
 
-  OptionalURIParams optionalResultPrincipalURI = mozilla::void_t();
+  Maybe<URIParams> optionalResultPrincipalURI;
   nsCOMPtr<nsIURI> resultPrincipalURI;
   Unused << aLoadInfo->GetResultPrincipalURI(
       getter_AddRefs(resultPrincipalURI));
@@ -459,24 +474,24 @@ nsresult LoadInfoToLoadInfoArgs(nsILoadInfo* aLoadInfo,
     NS_ENSURE_SUCCESS(rv, rv);
   }
 
-  OptionalIPCClientInfo ipcClientInfo = mozilla::void_t();
+  Maybe<IPCClientInfo> ipcClientInfo;
   const Maybe<ClientInfo>& clientInfo = aLoadInfo->GetClientInfo();
   if (clientInfo.isSome()) {
-    ipcClientInfo = clientInfo.ref().ToIPC();
+    ipcClientInfo.emplace(clientInfo.ref().ToIPC());
   }
 
-  OptionalIPCClientInfo ipcReservedClientInfo = mozilla::void_t();
+  Maybe<IPCClientInfo> ipcReservedClientInfo;
   const Maybe<ClientInfo>& reservedClientInfo =
       aLoadInfo->GetReservedClientInfo();
   if (reservedClientInfo.isSome()) {
-    ipcReservedClientInfo = reservedClientInfo.ref().ToIPC();
+    ipcReservedClientInfo.emplace(reservedClientInfo.ref().ToIPC());
   }
 
-  OptionalIPCClientInfo ipcInitialClientInfo = mozilla::void_t();
+  Maybe<IPCClientInfo> ipcInitialClientInfo;
   const Maybe<ClientInfo>& initialClientInfo =
       aLoadInfo->GetInitialClientInfo();
   if (initialClientInfo.isSome()) {
-    ipcInitialClientInfo = initialClientInfo.ref().ToIPC();
+    ipcInitialClientInfo.emplace(initialClientInfo.ref().ToIPC());
   }
 
   OptionalIPCServiceWorkerDescriptor ipcController = mozilla::void_t();
@@ -488,7 +503,15 @@ nsresult LoadInfoToLoadInfoArgs(nsILoadInfo* aLoadInfo,
   nsAutoString cspNonce;
   Unused << NS_WARN_IF(NS_FAILED(aLoadInfo->GetCspNonce(cspNonce)));
 
-  *aOptionalLoadInfoArgs = LoadInfoArgs(
+  nsCOMPtr<nsICookieSettings> cookieSettings;
+  rv = aLoadInfo->GetCookieSettings(getter_AddRefs(cookieSettings));
+  NS_ENSURE_SUCCESS(rv, rv);
+
+  CookieSettingsArgs cookieSettingsArgs;
+  static_cast<CookieSettings*>(cookieSettings.get())
+      ->Serialize(cookieSettingsArgs);
+
+  *aOptionalLoadInfoArgs = Some(LoadInfoArgs(
       loadingPrincipalInfo, triggeringPrincipalInfo, principalToInheritInfo,
       sandboxedLoadingPrincipalInfo, topLevelPrincipalInfo,
       topLevelStorageAreaPrincipalInfo, optionalResultPrincipalURI,
@@ -518,27 +541,26 @@ nsresult LoadInfoToLoadInfoArgs(nsILoadInfo* aLoadInfo,
       aLoadInfo->GetDocumentHasUserInteracted(),
       aLoadInfo->GetDocumentHasLoaded(), cspNonce,
       aLoadInfo->GetIsFromProcessingFrameAttributes(),
-      aLoadInfo->GetOpenerPolicy());
+      aLoadInfo->GetOpenerPolicy(), cookieSettingsArgs));
 
   return NS_OK;
 }
 
 nsresult LoadInfoArgsToLoadInfo(
-    const OptionalLoadInfoArgs& aOptionalLoadInfoArgs,
+    const Maybe<LoadInfoArgs>& aOptionalLoadInfoArgs,
     nsILoadInfo** outLoadInfo) {
-  if (aOptionalLoadInfoArgs.type() == OptionalLoadInfoArgs::Tvoid_t) {
+  if (aOptionalLoadInfoArgs.isNothing()) {
     *outLoadInfo = nullptr;
     return NS_OK;
   }
 
-  const LoadInfoArgs& loadInfoArgs = aOptionalLoadInfoArgs.get_LoadInfoArgs();
+  const LoadInfoArgs& loadInfoArgs = aOptionalLoadInfoArgs.ref();
 
   nsresult rv = NS_OK;
   nsCOMPtr<nsIPrincipal> loadingPrincipal;
-  if (loadInfoArgs.requestingPrincipalInfo().type() !=
-      OptionalPrincipalInfo::Tvoid_t) {
-    loadingPrincipal =
-        PrincipalInfoToPrincipal(loadInfoArgs.requestingPrincipalInfo(), &rv);
+  if (loadInfoArgs.requestingPrincipalInfo().isSome()) {
+    loadingPrincipal = PrincipalInfoToPrincipal(
+        loadInfoArgs.requestingPrincipalInfo().ref(), &rv);
     NS_ENSURE_SUCCESS(rv, rv);
   }
 
@@ -548,39 +570,35 @@ nsresult LoadInfoArgsToLoadInfo(
   NS_ENSURE_SUCCESS(rv, rv);
 
   nsCOMPtr<nsIPrincipal> principalToInherit;
-  if (loadInfoArgs.principalToInheritInfo().type() !=
-      OptionalPrincipalInfo::Tvoid_t) {
-    principalToInherit =
-        PrincipalInfoToPrincipal(loadInfoArgs.principalToInheritInfo(), &rv);
+  if (loadInfoArgs.principalToInheritInfo().isSome()) {
+    principalToInherit = PrincipalInfoToPrincipal(
+        loadInfoArgs.principalToInheritInfo().ref(), &rv);
     NS_ENSURE_SUCCESS(rv, rv);
   }
 
   nsCOMPtr<nsIPrincipal> sandboxedLoadingPrincipal;
-  if (loadInfoArgs.sandboxedLoadingPrincipalInfo().type() !=
-      OptionalPrincipalInfo::Tvoid_t) {
+  if (loadInfoArgs.sandboxedLoadingPrincipalInfo().isSome()) {
     sandboxedLoadingPrincipal = PrincipalInfoToPrincipal(
-        loadInfoArgs.sandboxedLoadingPrincipalInfo(), &rv);
+        loadInfoArgs.sandboxedLoadingPrincipalInfo().ref(), &rv);
     NS_ENSURE_SUCCESS(rv, rv);
   }
 
   nsCOMPtr<nsIPrincipal> topLevelPrincipal;
-  if (loadInfoArgs.topLevelPrincipalInfo().type() !=
-      OptionalPrincipalInfo::Tvoid_t) {
-    topLevelPrincipal =
-        PrincipalInfoToPrincipal(loadInfoArgs.topLevelPrincipalInfo(), &rv);
+  if (loadInfoArgs.topLevelPrincipalInfo().isSome()) {
+    topLevelPrincipal = PrincipalInfoToPrincipal(
+        loadInfoArgs.topLevelPrincipalInfo().ref(), &rv);
     NS_ENSURE_SUCCESS(rv, rv);
   }
 
   nsCOMPtr<nsIPrincipal> topLevelStorageAreaPrincipal;
-  if (loadInfoArgs.topLevelStorageAreaPrincipalInfo().type() !=
-      OptionalPrincipalInfo::Tvoid_t) {
+  if (loadInfoArgs.topLevelStorageAreaPrincipalInfo().isSome()) {
     topLevelStorageAreaPrincipal = PrincipalInfoToPrincipal(
-        loadInfoArgs.topLevelStorageAreaPrincipalInfo(), &rv);
+        loadInfoArgs.topLevelStorageAreaPrincipalInfo().ref(), &rv);
     NS_ENSURE_SUCCESS(rv, rv);
   }
 
   nsCOMPtr<nsIURI> resultPrincipalURI;
-  if (loadInfoArgs.resultPrincipalURI().type() != OptionalURIParams::Tvoid_t) {
+  if (loadInfoArgs.resultPrincipalURI().isSome()) {
     resultPrincipalURI = DeserializeURI(loadInfoArgs.resultPrincipalURI());
     NS_ENSURE_TRUE(resultPrincipalURI, NS_ERROR_UNEXPECTED);
   }
@@ -614,23 +632,20 @@ nsresult LoadInfoArgsToLoadInfo(
   }
 
   Maybe<ClientInfo> clientInfo;
-  if (loadInfoArgs.clientInfo().type() != OptionalIPCClientInfo::Tvoid_t) {
-    clientInfo.emplace(
-        ClientInfo(loadInfoArgs.clientInfo().get_IPCClientInfo()));
+  if (loadInfoArgs.clientInfo().isSome()) {
+    clientInfo.emplace(ClientInfo(loadInfoArgs.clientInfo().ref()));
   }
 
   Maybe<ClientInfo> reservedClientInfo;
-  if (loadInfoArgs.reservedClientInfo().type() !=
-      OptionalIPCClientInfo::Tvoid_t) {
+  if (loadInfoArgs.reservedClientInfo().isSome()) {
     reservedClientInfo.emplace(
-        ClientInfo(loadInfoArgs.reservedClientInfo().get_IPCClientInfo()));
+        ClientInfo(loadInfoArgs.reservedClientInfo().ref()));
   }
 
   Maybe<ClientInfo> initialClientInfo;
-  if (loadInfoArgs.initialClientInfo().type() !=
-      OptionalIPCClientInfo::Tvoid_t) {
+  if (loadInfoArgs.initialClientInfo().isSome()) {
     initialClientInfo.emplace(
-        ClientInfo(loadInfoArgs.initialClientInfo().get_IPCClientInfo()));
+        ClientInfo(loadInfoArgs.initialClientInfo().ref()));
   }
 
   // We can have an initial client info or a reserved client info, but not both.
@@ -647,11 +662,15 @@ nsresult LoadInfoArgsToLoadInfo(
         loadInfoArgs.controller().get_IPCServiceWorkerDescriptor()));
   }
 
+  nsCOMPtr<nsICookieSettings> cookieSettings;
+  CookieSettings::Deserialize(loadInfoArgs.cookieSettings(),
+                              getter_AddRefs(cookieSettings));
+
   RefPtr<mozilla::LoadInfo> loadInfo = new mozilla::LoadInfo(
       loadingPrincipal, triggeringPrincipal, principalToInherit,
       sandboxedLoadingPrincipal, topLevelPrincipal,
-      topLevelStorageAreaPrincipal, resultPrincipalURI, clientInfo,
-      reservedClientInfo, initialClientInfo, controller,
+      topLevelStorageAreaPrincipal, resultPrincipalURI, cookieSettings,
+      clientInfo, reservedClientInfo, initialClientInfo, controller,
       loadInfoArgs.securityFlags(), loadInfoArgs.contentPolicyType(),
       static_cast<LoadTainting>(loadInfoArgs.tainting()),
       loadInfoArgs.upgradeInsecureRequests(),
@@ -694,7 +713,7 @@ void LoadInfoToParentLoadInfoForwarder(
         false,  // serviceWorkerTaintingSynthesized
         false,  // documentHasUserInteracted
         false,  // documentHasLoaded
-        nsILoadInfo::OPENER_POLICY_NULL);
+        nsILoadInfo::OPENER_POLICY_NULL, Maybe<CookieSettingsArgs>());
     return;
   }
 
@@ -710,11 +729,21 @@ void LoadInfoToParentLoadInfoForwarder(
   nsILoadInfo::CrossOriginOpenerPolicy openerPolicy =
       aLoadInfo->GetOpenerPolicy();
 
+  Maybe<CookieSettingsArgs> cookieSettingsArgs;
+
+  nsCOMPtr<nsICookieSettings> cookieSettings;
+  nsresult rv = aLoadInfo->GetCookieSettings(getter_AddRefs(cookieSettings));
+  if (NS_SUCCEEDED(rv) && cookieSettings) {
+    CookieSettingsArgs args;
+    static_cast<CookieSettings*>(cookieSettings.get())->Serialize(args);
+    cookieSettingsArgs = Some(args);
+  }
+
   *aForwarderArgsOut = ParentLoadInfoForwarderArgs(
       aLoadInfo->GetAllowInsecureRedirectToDataURI(), ipcController, tainting,
       aLoadInfo->GetServiceWorkerTaintingSynthesized(),
       aLoadInfo->GetDocumentHasUserInteracted(),
-      aLoadInfo->GetDocumentHasLoaded(), openerPolicy);
+      aLoadInfo->GetDocumentHasLoaded(), openerPolicy, cookieSettingsArgs);
 }
 
 nsresult MergeParentLoadInfoForwarder(
@@ -751,6 +780,17 @@ nsresult MergeParentLoadInfoForwarder(
   MOZ_ALWAYS_SUCCEEDS(
       aLoadInfo->SetDocumentHasLoaded(aForwarderArgs.documentHasLoaded()));
 
+  const Maybe<CookieSettingsArgs>& cookieSettingsArgs =
+      aForwarderArgs.cookieSettings();
+  if (cookieSettingsArgs.isSome()) {
+    nsCOMPtr<nsICookieSettings> cookieSettings;
+    nsresult rv = aLoadInfo->GetCookieSettings(getter_AddRefs(cookieSettings));
+    if (NS_SUCCEEDED(rv) && cookieSettings) {
+      static_cast<CookieSettings*>(cookieSettings.get())
+          ->Merge(cookieSettingsArgs.ref());
+    }
+  }
+
   return NS_OK;
 }
 
@@ -758,20 +798,20 @@ void LoadInfoToChildLoadInfoForwarder(
     nsILoadInfo* aLoadInfo, ChildLoadInfoForwarderArgs* aForwarderArgsOut) {
   if (!aLoadInfo) {
     *aForwarderArgsOut =
-        ChildLoadInfoForwarderArgs(void_t(), void_t(), void_t());
+        ChildLoadInfoForwarderArgs(Nothing(), Nothing(), void_t());
     return;
   }
 
-  OptionalIPCClientInfo ipcReserved = void_t();
+  Maybe<IPCClientInfo> ipcReserved;
   Maybe<ClientInfo> reserved(aLoadInfo->GetReservedClientInfo());
   if (reserved.isSome()) {
-    ipcReserved = reserved.ref().ToIPC();
+    ipcReserved.emplace(reserved.ref().ToIPC());
   }
 
-  OptionalIPCClientInfo ipcInitial = void_t();
+  Maybe<IPCClientInfo> ipcInitial;
   Maybe<ClientInfo> initial(aLoadInfo->GetInitialClientInfo());
   if (initial.isSome()) {
-    ipcInitial = initial.ref().ToIPC();
+    ipcInitial.emplace(initial.ref().ToIPC());
   }
 
   OptionalIPCServiceWorkerDescriptor ipcController = void_t();
@@ -792,14 +832,14 @@ nsresult MergeChildLoadInfoForwarder(
 
   Maybe<ClientInfo> reservedClientInfo;
   auto& ipcReserved = aForwarderArgs.reservedClientInfo();
-  if (ipcReserved.type() != OptionalIPCClientInfo::Tvoid_t) {
-    reservedClientInfo.emplace(ClientInfo(ipcReserved.get_IPCClientInfo()));
+  if (ipcReserved.isSome()) {
+    reservedClientInfo.emplace(ClientInfo(ipcReserved.ref()));
   }
 
   Maybe<ClientInfo> initialClientInfo;
   auto& ipcInitial = aForwarderArgs.initialClientInfo();
-  if (ipcInitial.type() != OptionalIPCClientInfo::Tvoid_t) {
-    initialClientInfo.emplace(ClientInfo(ipcInitial.get_IPCClientInfo()));
+  if (ipcInitial.isSome()) {
+    initialClientInfo.emplace(ClientInfo(ipcInitial.ref()));
   }
 
   // There should only be at most one reserved or initial ClientInfo.

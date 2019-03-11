@@ -21,11 +21,11 @@ var { gDevTools } = require("devtools/client/framework/devtools");
  * @return {Promise<boolean>}
  */
 exports.viewSourceInStyleEditor = async function(toolbox, sourceURL,
-                                                        sourceLine) {
+                                                        sourceLine, sourceColumn) {
   const panel = await toolbox.loadTool("styleeditor");
 
   try {
-    await panel.selectStyleSheet(sourceURL, sourceLine);
+    await panel.selectStyleSheet(sourceURL, sourceLine, sourceColumn);
     await toolbox.selectTool("styleeditor");
     return true;
   } catch (e) {
@@ -52,7 +52,8 @@ exports.viewSourceInStyleEditor = async function(toolbox, sourceURL,
 exports.viewSourceInDebugger = async function(toolbox, sourceURL, sourceLine, sourceId,
                                               reason = "unknown") {
   const dbg = await toolbox.loadTool("jsdebugger");
-  const source = dbg.getSourceByURL(sourceURL) || dbg.getSourceByActorId(sourceId);
+  const source =
+    sourceId ? dbg.getSourceByActorId(sourceId) : dbg.getSourceByURL(sourceURL);
   if (source) {
     await toolbox.selectTool("jsdebugger", reason);
     dbg.selectSource(source.id, sourceLine);

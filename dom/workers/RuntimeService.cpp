@@ -822,7 +822,8 @@ JSObject* Wrap(JSContext* cx, JS::HandleObject existing, JS::HandleObject obj) {
   JSObject* targetGlobal = JS::CurrentGlobalOrNull(cx);
   if (!IsWorkerDebuggerGlobal(targetGlobal) &&
       !IsWorkerDebuggerSandbox(targetGlobal)) {
-    MOZ_CRASH("There should be no edges from the debuggee to the debugger.");
+    JS_ReportErrorASCII(cx, "There should be no edges from the debuggee to the debugger.");
+    return nullptr;
   }
 
   // Note: the JS engine unwraps CCWs before calling this callback.
@@ -1255,13 +1256,14 @@ bool RuntimeService::RegisterWorker(WorkerPrivate* aWorkerPrivate) {
   } else {
     if (!mNavigatorPropertiesLoaded) {
       Navigator::AppName(mNavigatorProperties.mAppName,
+                         aWorkerPrivate->GetPrincipal(),
                          false /* aUsePrefOverriddenValue */);
-      if (NS_FAILED(
-              Navigator::GetAppVersion(mNavigatorProperties.mAppVersion,
-                                       false /* aUsePrefOverriddenValue */)) ||
-          NS_FAILED(
-              Navigator::GetPlatform(mNavigatorProperties.mPlatform,
-                                     false /* aUsePrefOverriddenValue */))) {
+      if (NS_FAILED(Navigator::GetAppVersion(
+              mNavigatorProperties.mAppVersion, aWorkerPrivate->GetPrincipal(),
+              false /* aUsePrefOverriddenValue */)) ||
+          NS_FAILED(Navigator::GetPlatform(
+              mNavigatorProperties.mPlatform, aWorkerPrivate->GetPrincipal(),
+              false /* aUsePrefOverriddenValue */))) {
         UnregisterWorker(aWorkerPrivate);
         return false;
       }
@@ -2017,8 +2019,10 @@ void RuntimeService::PropagateFirstPartyStorageAccessGranted(
     nsPIDOMWindowInner* aWindow) {
   AssertIsOnMainThread();
   MOZ_ASSERT(aWindow);
-  MOZ_ASSERT(StaticPrefs::network_cookie_cookieBehavior() ==
-             nsICookieService::BEHAVIOR_REJECT_TRACKER);
+  MOZ_ASSERT_IF(
+      aWindow->GetExtantDoc(),
+      aWindow->GetExtantDoc()->CookieSettings()->GetCookieBehavior() ==
+          nsICookieService::BEHAVIOR_REJECT_TRACKER);
 
   nsTArray<WorkerPrivate*> workers;
   GetWorkersForWindow(aWindow, workers);
@@ -2399,8 +2403,10 @@ void ResumeWorkersForWindow(nsPIDOMWindowInner* aWindow) {
 void PropagateFirstPartyStorageAccessGrantedToWorkers(
     nsPIDOMWindowInner* aWindow) {
   AssertIsOnMainThread();
-  MOZ_ASSERT(StaticPrefs::network_cookie_cookieBehavior() ==
-             nsICookieService::BEHAVIOR_REJECT_TRACKER);
+  MOZ_ASSERT_IF(
+      aWindow->GetExtantDoc(),
+      aWindow->GetExtantDoc()->CookieSettings()->GetCookieBehavior() ==
+          nsICookieService::BEHAVIOR_REJECT_TRACKER);
 
   RuntimeService* runtime = RuntimeService::GetService();
   if (runtime) {

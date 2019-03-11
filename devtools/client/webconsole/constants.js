@@ -25,6 +25,7 @@ const actionTypes = {
   MESSAGE_TABLE_RECEIVE: "MESSAGE_TABLE_RECEIVE",
   MESSAGES_ADD: "MESSAGES_ADD",
   MESSAGES_CLEAR: "MESSAGES_CLEAR",
+  MESSAGES_CLEAR_LOGPOINT: "MESSAGES_CLEAR_LOGPOINT",
   NETWORK_MESSAGE_UPDATE: "NETWORK_MESSAGE_UPDATE",
   NETWORK_UPDATE_REQUEST: "NETWORK_UPDATE_REQUEST",
   PERSIST_TOGGLE: "PERSIST_TOGGLE",
@@ -64,6 +65,8 @@ const prefs = {
       PERSIST: "devtools.webconsole.persistlog",
       // Max number of entries in history list.
       INPUT_HISTORY_COUNT: "devtools.webconsole.inputHistoryCount",
+      // Is editor mode enabled.
+      EDITOR: "devtools.webconsole.input.editor",
     },
     FEATURES: {
       // We use the same pref to enable the sidebar on webconsole and browser console.

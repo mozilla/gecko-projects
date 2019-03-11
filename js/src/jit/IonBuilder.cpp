@@ -410,6 +410,12 @@ IonBuilder::InliningDecision IonBuilder::canInlineTarget(JSFunction* target,
     return DontInline(nullptr, "Non-interpreted target");
   }
 
+  // Never inline scripted cross-realm calls.
+  if (target->realm() != script()->realm()) {
+    trackOptimizationOutcome(TrackedOutcome::CantInlineCrossRealm);
+    return DontInline(nullptr, "Cross-realm call");
+  }
+
   if (info().analysisMode() != Analysis_DefiniteProperties) {
     // If |this| or an argument has an empty resultTypeSet, don't bother
     // inlining, as the call is currently unreachable due to incomplete type
@@ -4265,12 +4271,6 @@ IonBuilder::InliningDecision IonBuilder::makeInliningDecision(
     return InliningDecision_DontInline;
   }
 
-  // Don't inline (native or scripted) cross-realm calls.
-  Realm* targetRealm = JS::GetObjectRealmOrNull(targetArg);
-  if (!targetRealm || targetRealm != script()->realm()) {
-    return InliningDecision_DontInline;
-  }
-
   // Inlining non-function targets is handled by inlineNonFunctionCall().
   if (!targetArg->is<JSFunction>()) {
     return InliningDecision_Inline;
@@ -4466,6 +4466,16 @@ AbortReasonOr<Ok> IonBuilder::selectInliningTargets(
     } else {
       // Non-function targets are not supported by polymorphic inlining.
       inlineable = false;
+    }
+
+    // Only use a group guard and inline the target if we will recompile when
+    // the target function gets a new group.
+    if (inlineable && targets[i].group) {
+      ObjectGroup* group = targets[i].group;
+      TypeSet::ObjectKey* key = TypeSet::ObjectKey::get(group);
+      if (!key->hasStableClassAndProto(constraints())) {
+        inlineable = false;
+      }
     }
 
     choiceSet.infallibleAppend(inlineable);

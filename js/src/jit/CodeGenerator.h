@@ -30,8 +30,13 @@
 #  error "Unknown architecture!"
 #endif
 
+#include "wasm/WasmGC.h"
+
 namespace js {
 namespace jit {
+
+template <class ArgSeq, class StoreOutputTo>
+class OutOfLineCallVM;
 
 enum class SwitchTableType { Inline, OutOfLine };
 
@@ -65,6 +70,27 @@ class CodeGenerator final : public CodeGeneratorSpecific {
   ConstantOrRegister toConstantOrRegister(LInstruction* lir, size_t n,
                                           MIRType type);
 
+#ifdef CHECK_OSIPOINT_REGISTERS
+  void resetOsiPointRegs(LSafepoint* safepoint);
+  bool shouldVerifyOsiPointRegs(LSafepoint* safepoint);
+  void verifyOsiPointRegs(LSafepoint* safepoint);
+#endif
+
+  void callVMInternal(const VMFunctionData& fun, TrampolinePtr code,
+                      LInstruction* ins, const Register* dynStack);
+  void callVMInternal(VMFunctionId id, LInstruction* ins,
+                      const Register* dynStack);
+
+  void callVM(const VMFunction& fun, LInstruction* ins,
+              const Register* dynStack = nullptr);
+
+  template <typename Fn, Fn fn>
+  void callVM(LInstruction* ins, const Register* dynStack = nullptr);
+
+  template <class ArgSeq, class StoreOutputTo>
+  inline OutOfLineCode* oolCallVM(const VMFunction& fun, LInstruction* ins,
+                                  const ArgSeq& args, const StoreOutputTo& out);
+
  public:
   CodeGenerator(MIRGenerator* gen, LIRGraph* graph,
                 MacroAssembler* masm = nullptr);
@@ -73,13 +99,20 @@ class CodeGenerator final : public CodeGeneratorSpecific {
   MOZ_MUST_USE bool generate();
   MOZ_MUST_USE bool generateWasm(wasm::FuncTypeIdDesc funcTypeId,
                                  wasm::BytecodeOffset trapOffset,
-                                 wasm::FuncOffsets* offsets);
+                                 const wasm::ValTypeVector& argTys,
+                                 const MachineState& trapExitLayout,
+                                 size_t trapExitLayoutNumWords,
+                                 wasm::FuncOffsets* offsets,
+                                 wasm::StackMaps* stackMaps);
 
   MOZ_MUST_USE bool link(JSContext* cx, CompilerConstraintList* constraints);
 
   void emitOOLTestObject(Register objreg, Label* ifTruthy, Label* ifFalsy,
                          Register scratch);
   void emitIntToString(Register input, Register output, Label* ool);
+
+  template <class ArgSeq, class StoreOutputTo>
+  void visitOutOfLineCallVM(OutOfLineCallVM<ArgSeq, StoreOutputTo>* ool);
 
   void visitOutOfLineRegExpMatcher(OutOfLineRegExpMatcher* ool);
   void visitOutOfLineRegExpSearcher(OutOfLineRegExpSearcher* ool);
@@ -235,7 +268,8 @@ class CodeGenerator final : public CodeGeneratorSpecific {
   template <class OrderedHashTable>
   void emitLoadIteratorValues(Register result, Register temp, Register front);
 
-  void emitWasmCallBase(MWasmCall* mir, bool needsBoundsCheck);
+  template <size_t Defs>
+  void emitWasmCallBase(LWasmCallBase<Defs>* lir);
 
   template <size_t NumDefs>
   void emitIonToWasmCallBase(LIonToWasmCallBase<NumDefs>* lir);

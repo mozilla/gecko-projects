@@ -905,6 +905,31 @@ bool nsIFrame::HasDisplayItem(nsDisplayItem* aItem) {
   return items->Contains(aItem);
 }
 
+bool nsIFrame::HasDisplayItem(uint32_t aKey) {
+  DisplayItemArray* items = GetProperty(DisplayItems());
+  if (!items) {
+    return false;
+  }
+
+  for (nsDisplayItem* i : *items) {
+    if (i->GetPerFrameKey() == aKey) {
+      return true;
+    }
+  }
+  return false;
+}
+
+void nsIFrame::DiscardOldItems() {
+  DisplayItemArray* items = GetProperty(DisplayItems());
+  if (!items) {
+    return;
+  }
+
+  for (nsDisplayItem* i : *items) {
+    i->DiscardIfOldItem();
+  }
+}
+
 void nsIFrame::RemoveDisplayItemDataForDeletion() {
   // Destroying a WebRenderUserDataTable can cause destruction of other objects
   // which can remove frame properties in their destructor. If we delete a frame
@@ -1305,7 +1330,7 @@ void nsIFrame::SyncFrameViewProperties(nsView* aView) {
     ComputedStyle* sc = Style();
     const nsStylePosition* position = sc->StylePosition();
     if (position->mZIndex.IsInteger()) {
-      zIndex = position->mZIndex.integer._0;
+      zIndex = position->mZIndex.AsInteger();
     } else {
       MOZ_ASSERT(position->mZIndex.IsAuto());
       autoZIndex = true;
@@ -1551,9 +1576,10 @@ bool nsIFrame::IsCSSTransformed(const nsStyleDisplay* aStyleDisplay) const {
 }
 
 bool nsIFrame::HasAnimationOfTransform() const {
-  return IsPrimaryFrame() &&
+  const nsIFrame* styleFrame = nsLayoutUtils::GetStyleFrame(this);
+  return IsPrimaryFrame() && styleFrame &&
          nsLayoutUtils::HasAnimationOfPropertySet(
-             this, nsCSSPropertyIDSet::TransformLikeProperties()) &&
+             styleFrame, nsCSSPropertyIDSet::TransformLikeProperties()) &&
          IsFrameOfType(eSupportsCSSTransforms);
 }
 
@@ -1582,7 +1608,7 @@ bool nsIFrame::HasOpacityInternal(float aThreshold,
     return false;
   }
 
-  return ((IsPrimaryFrame() ||
+  return ((nsLayoutUtils::IsPrimaryStyleFrame(this) ||
            nsLayoutUtils::FirstContinuationOrIBSplitSibling(this)
                ->IsPrimaryFrame()) &&
           nsLayoutUtils::HasAnimationOfPropertySet(
@@ -1713,10 +1739,13 @@ bool nsIFrame::ComputeBorderRadii(const BorderRadius& aBorderRadius,
     nscoord length =
         SideIsVertical(side) ? aBorderArea.height : aBorderArea.width;
     nscoord sum = aRadii[hc1] + aRadii[hc2];
-    if (sum) haveRadius = true;
-
-    // avoid floating point division in the normal case
-    if (length < sum) ratio = std::min(ratio, double(length) / sum);
+    if (sum) {
+      haveRadius = true;
+      // avoid floating point division in the normal case
+      if (length < sum) {
+        ratio = std::min(ratio, double(length) / sum);
+      }
+    }
   }
   if (ratio < 1.0) {
     NS_FOR_CSS_HALF_CORNERS(corner) { aRadii[corner] *= ratio; }
@@ -2586,8 +2615,7 @@ static void WrapSeparatorTransform(nsDisplayListBuilder* aBuilder,
   }
 
   nsDisplayTransform* item = MakeDisplayItem<nsDisplayTransform>(
-      aBuilder, aFrame, aNonParticipants, aBuilder->GetVisibleRect(),
-      Matrix4x4(), aIndex);
+      aBuilder, aFrame, aNonParticipants, aBuilder->GetVisibleRect(), aIndex);
 
   if (*aSeparator == nullptr) {
     *aSeparator = item;
@@ -3400,17 +3428,51 @@ void nsIFrame::BuildDisplayListForStackingContext(
 static nsDisplayItem* WrapInWrapList(nsDisplayListBuilder* aBuilder,
                                      nsIFrame* aFrame, nsDisplayList* aList,
                                      const ActiveScrolledRoot* aContainerASR,
-                                     bool aCanSkipWrapList = false) {
+                                     bool aBuiltContainerItem = false) {
   nsDisplayItem* item = aList->GetBottom();
   if (!item) {
     return nullptr;
   }
 
-  if (aCanSkipWrapList) {
-    MOZ_ASSERT(!item->GetAbove());
+  // We need a wrap list if there are multiple items, or if the single
+  // item has a different frame. This can change in a partial build depending
+  // on which items we build, so we need to ensure that we don't transition
+  // to/from a wrap list without invalidating correctly.
+  bool needsWrapList =
+      item->GetAbove() || item->Frame() != aFrame || item->GetChildren();
+
+  // If we have an explicit container item (that can't change without an
+  // invalidation) or we're doing a full build and don't need a wrap list, then
+  // we can skip adding one.
+  if (aBuiltContainerItem || (!aBuilder->IsPartialUpdate() && !needsWrapList)) {
     aList->RemoveBottom();
     return item;
   }
+
+  // If we're doing a partial build and we didn't need a wrap list
+  // previously then we can try to work from there.
+  if (aBuilder->IsPartialUpdate() &&
+      !aFrame->HasDisplayItem(uint32_t(DisplayItemType::TYPE_WRAP_LIST))) {
+    // If we now need a wrap list, we must previously have had no display items
+    // or a single one belonging to this frame. Mark the item itself as
+    // discarded so that RetainedDisplayListBuilder uses the ones we just built.
+    // We don't want to mark the frame as modified as that would invalidate
+    // positioned descendants that might be outside of this list, and might not
+    // have been rebuilt this time.
+    if (needsWrapList) {
+      aFrame->DiscardOldItems();
+    } else {
+      aList->RemoveBottom();
+      return item;
+    }
+  }
+
+  // The last case we could try to handle is when we previously had a wrap list,
+  // but no longer need it. Unfortunately we can't differentiate this case from
+  // a partial build where other children exist but we just didn't build them
+  // this time.
+  // TODO:RetainedDisplayListBuilder's merge phase has the full list and
+  // could strip them out.
 
   // Clear clip rect for the construction of the items below. Since we're
   // clipping all their contents, they themselves don't need to be clipped.
@@ -3725,17 +3787,17 @@ void nsIFrame::BuildDisplayListForChild(nsDisplayListBuilder* aBuilder,
   nsDisplayList list;
   nsDisplayList extraPositionedDescendants;
   const ActiveScrolledRoot* wrapListASR;
-  bool canSkipWrapList = false;
+  bool builtContainerItem = false;
   if (isStackingContext) {
     // True stacking context.
     // For stacking contexts, BuildDisplayListForStackingContext handles
     // clipping and MarkAbsoluteFramesForDisplayList.
     nsDisplayListBuilder::AutoContainerASRTracker contASRTracker(aBuilder);
     child->BuildDisplayListForStackingContext(aBuilder, &list,
-                                              &canSkipWrapList);
+                                              &builtContainerItem);
     wrapListASR = contASRTracker.GetContainerASR();
     if (aBuilder->GetCaretFrame() == child) {
-      canSkipWrapList = false;
+      builtContainerItem = false;
     }
   } else {
     Maybe<nsRect> clipPropClip =
@@ -3791,7 +3853,7 @@ void nsIFrame::BuildDisplayListForChild(nsDisplayListBuilder* aBuilder,
     child->BuildDisplayList(aBuilder, pseudoStack);
     aBuilder->Check();
     if (aBuilder->DisplayCaret(child, pseudoStack.Content())) {
-      canSkipWrapList = false;
+      builtContainerItem = false;
     }
     wrapListASR = contASRTracker.GetContainerASR();
 
@@ -3813,8 +3875,8 @@ void nsIFrame::BuildDisplayListForChild(nsDisplayListBuilder* aBuilder,
     // Genuine stacking contexts, and positioned pseudo-stacking-contexts,
     // go in this level.
     if (!list.IsEmpty()) {
-      nsDisplayItem* item =
-          WrapInWrapList(aBuilder, child, &list, wrapListASR, canSkipWrapList);
+      nsDisplayItem* item = WrapInWrapList(aBuilder, child, &list, wrapListASR,
+                                           builtContainerItem);
       if (isSVG) {
         aLists.Content()->AppendToTop(item);
       } else {
@@ -8166,10 +8228,10 @@ nsresult nsIFrame::PeekOffset(nsPeekOffsetStruct* aPos) {
         bool movingInFrameDirection =
             IsMovingInFrameDirection(current, aPos->mDirection, aPos->mVisual);
 
-        done = current->PeekOffsetWord(
-                   movingInFrameDirection, wordSelectEatSpace,
-                   aPos->mIsKeyboardSelect, &offset, &state,
-                   aPos->mTrimSpaces) == FOUND;
+        done =
+            current->PeekOffsetWord(movingInFrameDirection, wordSelectEatSpace,
+                                    aPos->mIsKeyboardSelect, &offset, &state,
+                                    aPos->mTrimSpaces) == FOUND;
 
         if (!done) {
           nsIFrame* nextFrame;
@@ -8416,12 +8478,9 @@ nsIFrame::FrameSearchResult nsFrame::PeekOffsetCharacter(
   return CONTINUE;
 }
 
-nsIFrame::FrameSearchResult nsFrame::PeekOffsetWord(bool aForward,
-                                                    bool aWordSelectEatSpace,
-                                                    bool aIsKeyboardSelect,
-                                                    int32_t* aOffset,
-                                                    PeekWordState* aState,
-                                                    bool aTrimSpaces) {
+nsIFrame::FrameSearchResult nsFrame::PeekOffsetWord(
+    bool aForward, bool aWordSelectEatSpace, bool aIsKeyboardSelect,
+    int32_t* aOffset, PeekWordState* aState, bool aTrimSpaces) {
   NS_ASSERTION(aOffset && *aOffset <= 1, "aOffset out of range");
   int32_t startOffset = *aOffset;
   // This isn't text, so truncate the context
@@ -10475,9 +10534,8 @@ bool nsIFrame::IsStackingContext(const nsStyleDisplay* aStyleDisplay,
          ChildrenHavePerspective(aStyleDisplay) ||
          aStyleEffects->mMixBlendMode != NS_STYLE_BLEND_NORMAL ||
          nsSVGIntegrationUtils::UsingEffectsForFrame(this) ||
-         (aIsPositioned &&
-          (aStyleDisplay->IsPositionForcingStackingContext() ||
-           aStylePosition->mZIndex.IsInteger())) ||
+         (aIsPositioned && (aStyleDisplay->IsPositionForcingStackingContext() ||
+                            aStylePosition->mZIndex.IsInteger())) ||
          (aStyleDisplay->mWillChangeBitField &
           NS_STYLE_WILL_CHANGE_STACKING_CONTEXT) ||
          aStyleDisplay->mIsolation != NS_STYLE_ISOLATION_AUTO;
@@ -10775,11 +10833,7 @@ CompositorHitTestInfo nsIFrame::GetCompositorHitTestInfo(
     }
   }
 
-  nsIDocShell* docShell = nullptr;
-  if (PresShell()->GetDocument()) {
-    docShell = PresShell()->GetDocument()->GetDocShell();
-  }
-  if (dom::TouchEvent::PrefEnabled(docShell)) {
+  if (aBuilder->IsTouchEventPrefEnabledDoc()) {
     // Inherit the touch-action flags from the parent, if there is one. We do
     // this because of how the touch-action on a frame combines the touch-action
     // from ancestor DOM elements. Refer to the documentation in

@@ -81,10 +81,14 @@ function initial_font_family_is_sans_serif()
 {
   // The initial value of 'font-family' might be 'serif' or
   // 'sans-serif'.
-  var div = document.createElement("div");
-  div.setAttribute("style", "font: initial");
-  return getComputedStyle(div, "").fontFamily == "sans-serif";
+  const meta = document.createElement("meta");
+  meta.setAttribute("style", "font: initial;");
+  document.documentElement.appendChild(meta);
+  const family = getComputedStyle(meta).fontFamily;
+  meta.remove();
+  return family == "sans-serif";
 }
+
 var gInitialFontFamilyIsSansSerif = initial_font_family_is_sans_serif();
 
 // shared by background-image and border-image-source
@@ -3962,11 +3966,9 @@ var gCSSProperties = {
     applies_to_first_letter: true,
     applies_to_first_line: true,
     applies_to_placeholder: true,
-    initial_values: [ "normal" ],
-    other_values: [ "0", "0px", "1em", "2px", "-3px",
-      "calc(0px)", "calc(1em)", "calc(1em + 3px)",
-      "calc(15px / 2)", "calc(15px/2)", "calc(-3px)"
-    ],
+    initial_values: [ "normal", "0", "0px", "calc(0px)" ],
+    other_values: [ "1em", "2px", "-3px", "calc(1em)", "calc(1em + 3px)",
+      "calc(15px / 2)", "calc(15px/2)", "calc(-3px)" ],
     invalid_values: [],
     quirks_values: { "5": "5px" },
   },
@@ -5144,8 +5146,8 @@ var gCSSProperties = {
     domProp: "fillOpacity",
     inherited: true,
     type: CSS_TYPE_LONGHAND,
-    initial_values: [ "1", "2.8", "1.000", "context-fill-opacity", "context-stroke-opacity" ],
-    other_values: [ "0", "0.3", "-7.3" ],
+    initial_values: [ "1", "2.8", "1.000", ],
+    other_values: [ "0", "0.3", "-7.3", "context-fill-opacity", "context-stroke-opacity" ],
     invalid_values: []
   },
   "fill-rule": {
@@ -5559,16 +5561,16 @@ var gCSSProperties = {
     domProp: "strokeDasharray",
     inherited: true,
     type: CSS_TYPE_LONGHAND,
-    initial_values: [ "none", "context-value" ],
-    other_values: [ "5px,3px,2px", "5px 3px 2px", "  5px ,3px\t, 2px ", "1px", "5%", "3em", "0.0002" ],
+    initial_values: [ "none" ],
+    other_values: [ "5px,3px,2px", "5px 3px 2px", "  5px ,3px\t, 2px ", "1px", "5%", "3em", "0.0002", "context-value"],
     invalid_values: [ "-5px,3px,2px", "5px,3px,-2px" ]
   },
   "stroke-dashoffset": {
     domProp: "strokeDashoffset",
     inherited: true,
     type: CSS_TYPE_LONGHAND,
-    initial_values: [ "0", "-0px", "0em", "context-value" ],
-    other_values: [ "3px", "3%", "1em", "0.0002" ],
+    initial_values: [ "0", "-0px", "0em" ],
+    other_values: [ "3px", "3%", "1em", "0.0002", "context-value" ],
     invalid_values: []
   },
   "stroke-linecap": {
@@ -5592,23 +5594,23 @@ var gCSSProperties = {
     inherited: true,
     type: CSS_TYPE_LONGHAND,
     initial_values: [ "4" ],
-    other_values: [ "1", "7", "5000", "1.1" ],
-    invalid_values: [ "0.9", "0", "-1", "3px", "-0.3" ]
+    other_values: [ "0", "0.9", "1", "7", "5000", "1.1" ],
+    invalid_values: [ "-1", "3px", "-0.3" ]
   },
   "stroke-opacity": {
     domProp: "strokeOpacity",
     inherited: true,
     type: CSS_TYPE_LONGHAND,
-    initial_values: [ "1", "2.8", "1.000", "context-fill-opacity", "context-stroke-opacity" ],
-    other_values: [ "0", "0.3", "-7.3" ],
+    initial_values: [ "1", "2.8", "1.000" ],
+    other_values: [ "0", "0.3", "-7.3", "context-fill-opacity", "context-stroke-opacity" ],
     invalid_values: []
   },
   "stroke-width": {
     domProp: "strokeWidth",
     inherited: true,
     type: CSS_TYPE_LONGHAND,
-    initial_values: [ "1px", "context-value" ],
-    other_values: [ "0", "0px", "-0em", "17px", "0.2em", "0.0002" ],
+    initial_values: [ "1px" ],
+    other_values: [ "0", "0px", "-0em", "17px", "0.2em", "0.0002", "context-value" ],
     invalid_values: [ "-0.1px", "-3px" ]
   },
   "text-anchor": {
@@ -7488,41 +7490,37 @@ if (IsCSSPropertyPrefEnabled("layout.css.contain.enabled")) {
     other_values: [
       "strict",
       "layout",
-      "style",
       "size",
       "content",
-      "layout style",
-      "style layout",
       "paint",
       "layout paint",
       "paint layout",
-      "style paint",
-      "paint style",
       "size layout",
-      "style size",
       "paint size",
-      "layout style paint",
-      "layout paint style",
-      "style paint layout",
-      "paint style layout",
+      "layout size paint",
+      "layout paint size",
+      "size paint layout",
+      "paint size layout",
     ],
     invalid_values: [
       "none strict",
+      "none size",
       "strict layout",
-      "strict layout style",
+      "strict layout size",
       "layout strict",
       "layout content",
       "strict content",
-      "layout style strict",
-      "layout style paint strict",
+      "layout size strict",
+      "layout size paint strict",
       "paint strict",
-      "style strict",
+      "size strict",
       "paint paint",
       "content content",
       "size content",
       "content strict size",
       "paint layout content",
       "layout size content",
+      "size size",
       "strict strict",
       "auto",
       "10px",

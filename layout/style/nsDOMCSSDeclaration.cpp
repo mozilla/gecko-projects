@@ -22,13 +22,14 @@
 #include "mozilla/layers/ScrollLinkedEffectDetector.h"
 
 using namespace mozilla;
+using namespace mozilla::dom;
 
 nsDOMCSSDeclaration::~nsDOMCSSDeclaration() = default;
 
 /* virtual */
 JSObject* nsDOMCSSDeclaration::WrapObject(JSContext* aCx,
                                           JS::Handle<JSObject*> aGivenProto) {
-  return dom::CSS2Properties_Binding::Wrap(aCx, this, aGivenProto);
+  return CSS2Properties_Binding::Wrap(aCx, this, aGivenProto);
 }
 
 NS_IMPL_QUERY_INTERFACE(nsDOMCSSDeclaration, nsICSSDeclaration)
@@ -194,7 +195,7 @@ nsDOMCSSDeclaration::SetProperty(const nsAString& aPropertyName,
   bool important;
   if (aPriority.IsEmpty()) {
     important = false;
-  } else if (aPriority.EqualsLiteral("important")) {
+  } else if (aPriority.LowerCaseEqualsASCII("important")) {
     important = true;
   } else {
     // XXX silent failure?

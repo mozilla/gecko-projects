@@ -184,15 +184,19 @@ void js::DestroyContext(JSContext* cx) {
 
   cx->jobQueue = nullptr;
   cx->internalJobQueue = nullptr;
+  SetContextProfilingStack(cx, nullptr);
+
+  JSRuntime* rt = cx->runtime();
 
   // Flush promise tasks executing in helper threads early, before any parts
   // of the JSRuntime that might be visible to helper threads are torn down.
-  cx->runtime()->offThreadPromiseState.ref().shutdown(cx);
+  rt->offThreadPromiseState.ref().shutdown(cx);
 
   // Destroy the runtime along with its last context.
-  cx->runtime()->destroyRuntime();
-  js_delete(cx->runtime());
+  js::AutoNoteSingleThreadedRegion nochecks;
+  rt->destroyRuntime();
   js_delete_poison(cx);
+  js_delete_poison(rt);
 }
 
 void JS::RootingContext::checkNoGCRooters() {
@@ -1274,7 +1278,6 @@ JSContext::JSContext(JSRuntime* runtime, const JS::ContextOptions& options)
       generatingError(false),
       cycleDetectorVector_(this),
       data(nullptr),
-      jitIsBroken(false),
       asyncCauseForNewActivations(nullptr),
       asyncCallIsExplicit(false),
       interruptCallbackDisabled(false),
@@ -1375,74 +1378,6 @@ bool JSContext::isThrowingDebuggeeWouldRun() {
          unwrappedException().toObject().as<ErrorObject>().type() ==
              JSEXN_DEBUGGEEWOULDRUN;
 }
-
-static bool ComputeIsJITBroken() {
-#if !defined(ANDROID)
-  return false;
-#else   // ANDROID
-  if (getenv("JS_IGNORE_JIT_BROKENNESS")) {
-    return false;
-  }
-
-  std::string line;
-
-  // Check for the known-bad kernel version (2.6.29).
-  std::ifstream osrelease("/proc/sys/kernel/osrelease");
-  std::getline(osrelease, line);
-  __android_log_print(ANDROID_LOG_INFO, "Gecko", "Detected osrelease `%s'",
-                      line.c_str());
-
-  if (line.npos == line.find("2.6.29")) {
-    // We're using something other than 2.6.29, so the JITs should work.
-    __android_log_print(ANDROID_LOG_INFO, "Gecko", "JITs are not broken");
-    return false;
-  }
-
-  // We're using 2.6.29, and this causes trouble with the JITs on i9000.
-  line = "";
-  bool broken = false;
-  std::ifstream cpuinfo("/proc/cpuinfo");
-  do {
-    if (0 == line.find("Hardware")) {
-      static const char* const blacklist[] = {
-          "SCH-I400",  // Samsung Continuum
-          "SGH-T959",  // Samsung i9000, Vibrant device
-          "SGH-I897",  // Samsung i9000, Captivate device
-          "SCH-I500",  // Samsung i9000, Fascinate device
-          "SPH-D700",  // Samsung i9000, Epic device
-          "GT-I9000",  // Samsung i9000, UK/Europe device
-          nullptr};
-      for (const char* const* hw = &blacklist[0]; *hw; ++hw) {
-        if (line.npos != line.find(*hw)) {
-          __android_log_print(ANDROID_LOG_INFO, "Gecko",
-                              "Blacklisted device `%s'", *hw);
-          broken = true;
-          break;
-        }
-      }
-      break;
-    }
-    std::getline(cpuinfo, line);
-  } while (!cpuinfo.fail() && !cpuinfo.eof());
-
-  __android_log_print(ANDROID_LOG_INFO, "Gecko", "JITs are %sbroken",
-                      broken ? "" : "not ");
-
-  return broken;
-#endif  // ifndef ANDROID
-}
-
-static bool IsJITBrokenHere() {
-  static bool computedIsBroken = false;
-  static bool isBroken = false;
-  if (!computedIsBroken) {
-    isBroken = ComputeIsJITBroken();
-    computedIsBroken = true;
-  }
-  return isBroken;
-}
-
-void JSContext::updateJITEnabled() { jitIsBroken = IsJITBrokenHere(); }
 
 size_t JSContext::sizeOfExcludingThis(
     mozilla::MallocSizeOf mallocSizeOf) const {

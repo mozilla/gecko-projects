@@ -315,13 +315,13 @@ class TabParent final : public PBrowserParent,
   virtual mozilla::ipc::IPCResult RecvPWindowGlobalConstructor(
       PWindowGlobalParent* aActor, const WindowGlobalInit& aInit) override;
 
-  PRemoteFrameParent* AllocPRemoteFrameParent(const nsString& aPresentationURL,
-                                              const nsString& aRemoteType);
+  PBrowserBridgeParent* AllocPBrowserBridgeParent(
+      const nsString& aPresentationURL, const nsString& aRemoteType);
 
-  bool DeallocPRemoteFrameParent(PRemoteFrameParent* aActor);
+  bool DeallocPBrowserBridgeParent(PBrowserBridgeParent* aActor);
 
-  virtual mozilla::ipc::IPCResult RecvPRemoteFrameConstructor(
-      PRemoteFrameParent* aActor, const nsString& aPresentationURL,
+  virtual mozilla::ipc::IPCResult RecvPBrowserBridgeConstructor(
+      PBrowserBridgeParent* aActor, const nsString& aPresentationURL,
       const nsString& aRemoteType) override;
 
   void LoadURL(nsIURI* aURI);
@@ -493,9 +493,40 @@ class TabParent final : public PBrowserParent,
 
   const TabId GetTabId() const { return mTabId; }
 
+  // Helper for transforming a point
+  LayoutDeviceIntPoint TransformPoint(
+      const LayoutDeviceIntPoint& aPoint,
+      const LayoutDeviceToLayoutDeviceMatrix4x4& aMatrix);
+  LayoutDevicePoint TransformPoint(
+      const LayoutDevicePoint& aPoint,
+      const LayoutDeviceToLayoutDeviceMatrix4x4& aMatrix);
+
+  // Transform a coordinate from the parent process coordinate space to the
+  // child process coordinate space.
+  LayoutDeviceIntPoint TransformParentToChild(
+      const LayoutDeviceIntPoint& aPoint);
+  LayoutDevicePoint TransformParentToChild(const LayoutDevicePoint& aPoint);
+
+  // Transform a coordinate from the child process coordinate space to the
+  // parent process coordinate space.
+  LayoutDeviceIntPoint TransformChildToParent(
+      const LayoutDeviceIntPoint& aPoint);
+  LayoutDevicePoint TransformChildToParent(const LayoutDevicePoint& aPoint);
+  LayoutDeviceIntRect TransformChildToParent(const LayoutDeviceIntRect& aRect);
+
+  // Returns the matrix that transforms event coordinates from the coordinate
+  // space of the child process to the coordinate space of the parent process.
+  LayoutDeviceToLayoutDeviceMatrix4x4 GetChildToParentConversionMatrix();
+
+  void SetChildToParentConversionMatrix(
+      const LayoutDeviceToLayoutDeviceMatrix4x4& aMatrix);
+
   // Returns the offset from the origin of our frameloader's nearest widget to
   // the origin of its layout frame. This offset is used to translate event
   // coordinates relative to the PuppetWidget origin in the child process.
+  //
+  // GOING AWAY. PLEASE AVOID ADDING CALLERS. Use the above tranformation
+  // methods instead.
   LayoutDeviceIntPoint GetChildProcessOffset();
 
   // Returns the offset from the on-screen origin of our top-level window's
@@ -598,7 +629,7 @@ class TabParent final : public PBrowserParent,
   mozilla::ipc::IPCResult RecvGetSystemFont(nsCString* aFontName);
 
   mozilla::ipc::IPCResult RecvVisitURI(const URIParams& aURI,
-                                       const OptionalURIParams& aLastVisitedURI,
+                                       const Maybe<URIParams>& aLastVisitedURI,
                                        const uint32_t& aFlags);
 
   mozilla::ipc::IPCResult RecvQueryVisitedState(
@@ -738,6 +769,8 @@ class TabParent final : public PBrowserParent,
 
   layout::RenderFrame mRenderFrame;
   LayersObserverEpoch mLayerTreeEpoch;
+
+  Maybe<LayoutDeviceToLayoutDeviceMatrix4x4> mChildToParentConversionMatrix;
 
   // If this flag is set, then the tab's layers will be preserved even when
   // the tab's docshell is inactive.

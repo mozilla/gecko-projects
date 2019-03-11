@@ -21,7 +21,7 @@
 #include "mozilla/dom/indexedDB/ActorsParent.h"
 #include "mozilla/dom/IPCBlobUtils.h"
 #include "mozilla/dom/PaymentRequestParent.h"
-#include "mozilla/dom/RemoteFrameParent.h"
+#include "mozilla/dom/BrowserBridgeParent.h"
 #include "mozilla/EventStateManager.h"
 #include "mozilla/gfx/2D.h"
 #include "mozilla/gfx/DataSurfaceHelpers.h"
@@ -998,22 +998,22 @@ bool TabParent::DeallocPWindowGlobalParent(PWindowGlobalParent* aActor) {
   return true;
 }
 
-IPCResult TabParent::RecvPRemoteFrameConstructor(PRemoteFrameParent* aActor,
-                                                 const nsString& aName,
-                                                 const nsString& aRemoteType) {
-  static_cast<RemoteFrameParent*>(aActor)->Init(aName, aRemoteType);
+IPCResult TabParent::RecvPBrowserBridgeConstructor(
+    PBrowserBridgeParent* aActor, const nsString& aName,
+    const nsString& aRemoteType) {
+  static_cast<BrowserBridgeParent*>(aActor)->Init(aName, aRemoteType);
   return IPC_OK();
 }
 
-PRemoteFrameParent* TabParent::AllocPRemoteFrameParent(
+PBrowserBridgeParent* TabParent::AllocPBrowserBridgeParent(
     const nsString& aName, const nsString& aRemoteType) {
-  // Reference freed in DeallocPRemoteFrameParent.
-  return do_AddRef(new RemoteFrameParent()).take();
+  // Reference freed in DeallocPBrowserBridgeParent.
+  return do_AddRef(new BrowserBridgeParent()).take();
 }
 
-bool TabParent::DeallocPRemoteFrameParent(PRemoteFrameParent* aActor) {
-  // Free reference from AllocPRemoteFrameParent.
-  static_cast<RemoteFrameParent*>(aActor)->Release();
+bool TabParent::DeallocPBrowserBridgeParent(PBrowserBridgeParent* aActor) {
+  // Free reference from AllocPBrowserBridgeParent.
+  static_cast<BrowserBridgeParent*>(aActor)->Release();
   return true;
 }
 
@@ -1032,7 +1032,7 @@ void TabParent::SendRealMouseEvent(WidgetMouseEvent& aEvent) {
   if (mIsDestroyed) {
     return;
   }
-  aEvent.mRefPoint += GetChildProcessOffset();
+  aEvent.mRefPoint = TransformParentToChild(aEvent.mRefPoint);
 
   nsCOMPtr<nsIWidget> widget = GetWidget();
   if (widget) {
@@ -1189,7 +1189,7 @@ void TabParent::SendRealDragEvent(WidgetDragEvent& aEvent, uint32_t aDragAction,
     return;
   }
   MOZ_ASSERT(!Manager()->IsInputPriorityEventEnabled());
-  aEvent.mRefPoint += GetChildProcessOffset();
+  aEvent.mRefPoint = TransformParentToChild(aEvent.mRefPoint);
   if (aEvent.mMessage == eDrop) {
     if (!QueryDropLinksForVerification()) {
       return;
@@ -1209,7 +1209,7 @@ void TabParent::SendMouseWheelEvent(WidgetWheelEvent& aEvent) {
   ScrollableLayerGuid guid;
   uint64_t blockId;
   ApzAwareEventRoutingToChild(&guid, &blockId, nullptr);
-  aEvent.mRefPoint += GetChildProcessOffset();
+  aEvent.mRefPoint = TransformParentToChild(aEvent.mRefPoint);
   DebugOnly<bool> ret =
       Manager()->IsInputPriorityEventEnabled()
           ? PBrowserParent::SendMouseWheelEvent(aEvent, guid, blockId)
@@ -1229,7 +1229,7 @@ mozilla::ipc::IPCResult TabParent::RecvDispatchWheelEvent(
 
   WidgetWheelEvent localEvent(aEvent);
   localEvent.mWidget = widget;
-  localEvent.mRefPoint -= GetChildProcessOffset();
+  localEvent.mRefPoint = TransformChildToParent(localEvent.mRefPoint);
 
   widget->DispatchInputEvent(&localEvent);
   return IPC_OK();
@@ -1244,7 +1244,7 @@ mozilla::ipc::IPCResult TabParent::RecvDispatchMouseEvent(
 
   WidgetMouseEvent localEvent(aEvent);
   localEvent.mWidget = widget;
-  localEvent.mRefPoint -= GetChildProcessOffset();
+  localEvent.mRefPoint = TransformChildToParent(localEvent.mRefPoint);
 
   widget->DispatchInputEvent(&localEvent);
   return IPC_OK();
@@ -1259,7 +1259,7 @@ mozilla::ipc::IPCResult TabParent::RecvDispatchKeyboardEvent(
 
   WidgetKeyboardEvent localEvent(aEvent);
   localEvent.mWidget = widget;
-  localEvent.mRefPoint -= GetChildProcessOffset();
+  localEvent.mRefPoint = TransformChildToParent(localEvent.mRefPoint);
 
   widget->DispatchInputEvent(&localEvent);
   return IPC_OK();
@@ -1463,7 +1463,7 @@ void TabParent::SendRealKeyEvent(WidgetKeyboardEvent& aEvent) {
   if (mIsDestroyed || !mIsReadyToHandleInputEvents) {
     return;
   }
-  aEvent.mRefPoint += GetChildProcessOffset();
+  aEvent.mRefPoint = TransformParentToChild(aEvent.mRefPoint);
 
   if (aEvent.mMessage == eKeyPress) {
     // XXX Should we do this only when input context indicates an editor having
@@ -1507,9 +1507,9 @@ void TabParent::SendRealTouchEvent(WidgetTouchEvent& aEvent) {
     return;
   }
 
-  LayoutDeviceIntPoint offset = GetChildProcessOffset();
   for (uint32_t i = 0; i < aEvent.mTouches.Length(); i++) {
-    aEvent.mTouches[i]->mRefPoint += offset;
+    aEvent.mTouches[i]->mRefPoint =
+        TransformParentToChild(aEvent.mTouches[i]->mRefPoint);
   }
 
   bool inputPriorityEventEnabled = Manager()->IsInputPriorityEventEnabled();
@@ -1564,12 +1564,13 @@ bool TabParent::SendHandleTap(TapType aType, const LayoutDevicePoint& aPoint,
       }
     }
   }
-  LayoutDeviceIntPoint offset = GetChildProcessOffset();
   return Manager()->IsInputPriorityEventEnabled()
-             ? PBrowserParent::SendHandleTap(aType, aPoint + offset, aModifiers,
-                                             aGuid, aInputBlockId)
+             ? PBrowserParent::SendHandleTap(aType,
+                                             TransformParentToChild(aPoint),
+                                             aModifiers, aGuid, aInputBlockId)
              : PBrowserParent::SendNormalPriorityHandleTap(
-                   aType, aPoint + offset, aModifiers, aGuid, aInputBlockId);
+                   aType, TransformParentToChild(aPoint), aModifiers, aGuid,
+                   aInputBlockId);
 }
 
 mozilla::ipc::IPCResult TabParent::RecvSyncMessage(
@@ -1943,15 +1944,76 @@ mozilla::ipc::IPCResult TabParent::RecvEnableDisableCommands(
   return IPC_OK();
 }
 
-NS_IMETHODIMP
-TabParent::GetChildProcessOffset(int32_t* aOutCssX, int32_t* aOutCssY) {
-  NS_ENSURE_ARG(aOutCssX);
-  NS_ENSURE_ARG(aOutCssY);
-  CSSPoint offset =
-      LayoutDevicePoint(GetChildProcessOffset()) * GetLayoutDeviceToCSSScale();
-  *aOutCssX = offset.x;
-  *aOutCssY = offset.y;
-  return NS_OK;
+LayoutDeviceIntPoint TabParent::TransformPoint(
+    const LayoutDeviceIntPoint& aPoint,
+    const LayoutDeviceToLayoutDeviceMatrix4x4& aMatrix) {
+  LayoutDevicePoint floatPoint(aPoint);
+  LayoutDevicePoint floatTransformed = TransformPoint(floatPoint, aMatrix);
+  // The next line loses precision if an out-of-process iframe
+  // has been scaled or rotated.
+  return RoundedToInt(floatTransformed);
+}
+
+LayoutDevicePoint TabParent::TransformPoint(
+    const LayoutDevicePoint& aPoint,
+    const LayoutDeviceToLayoutDeviceMatrix4x4& aMatrix) {
+  return aMatrix.TransformPoint(aPoint);
+}
+
+LayoutDeviceIntPoint TabParent::TransformParentToChild(
+    const LayoutDeviceIntPoint& aPoint) {
+  LayoutDeviceToLayoutDeviceMatrix4x4 matrix =
+      GetChildToParentConversionMatrix();
+  if (!matrix.Invert()) {
+    return LayoutDeviceIntPoint(0, 0);
+  }
+  return TransformPoint(aPoint, matrix);
+}
+
+LayoutDevicePoint TabParent::TransformParentToChild(
+    const LayoutDevicePoint& aPoint) {
+  LayoutDeviceToLayoutDeviceMatrix4x4 matrix =
+      GetChildToParentConversionMatrix();
+  if (!matrix.Invert()) {
+    return LayoutDevicePoint(0.0, 0.0);
+  }
+  return TransformPoint(aPoint, matrix);
+}
+
+LayoutDeviceIntPoint TabParent::TransformChildToParent(
+    const LayoutDeviceIntPoint& aPoint) {
+  return TransformPoint(aPoint, GetChildToParentConversionMatrix());
+}
+
+LayoutDevicePoint TabParent::TransformChildToParent(
+    const LayoutDevicePoint& aPoint) {
+  return TransformPoint(aPoint, GetChildToParentConversionMatrix());
+}
+
+LayoutDeviceIntRect TabParent::TransformChildToParent(
+    const LayoutDeviceIntRect& aRect) {
+  LayoutDeviceToLayoutDeviceMatrix4x4 matrix =
+      GetChildToParentConversionMatrix();
+  LayoutDeviceRect floatRect(aRect);
+  // The outcome is not ideal if an out-of-process iframe has been rotated
+  LayoutDeviceRect floatTransformed = matrix.TransformBounds(floatRect);
+  // The next line loses precision if an out-of-process iframe
+  // has been scaled or rotated.
+  return RoundedToInt(floatTransformed);
+}
+
+LayoutDeviceToLayoutDeviceMatrix4x4
+TabParent::GetChildToParentConversionMatrix() {
+  if (mChildToParentConversionMatrix) {
+    return *mChildToParentConversionMatrix;
+  }
+  LayoutDevicePoint offset(-GetChildProcessOffset());
+  return LayoutDeviceToLayoutDeviceMatrix4x4::Translation(offset);
+}
+
+void TabParent::SetChildToParentConversionMatrix(
+    const LayoutDeviceToLayoutDeviceMatrix4x4& aMatrix) {
+  mChildToParentConversionMatrix = Some(aMatrix);
 }
 
 LayoutDeviceIntPoint TabParent::GetChildProcessOffset() {
@@ -2157,7 +2219,7 @@ bool TabParent::HandleQueryContentEvent(WidgetQueryContentEvent& aEvent) {
         aEvent.mReply.mRect +=
             nsLayoutUtils::WidgetToWidgetOffset(widget, docWidget);
       }
-      aEvent.mReply.mRect -= GetChildProcessOffset();
+      aEvent.mReply.mRect = TransformChildToParent(aEvent.mReply.mRect);
       break;
     }
     default:
@@ -3308,7 +3370,7 @@ mozilla::ipc::IPCResult TabParent::RecvLookUpDictionary(
   }
 
   widget->LookUpDictionary(aText, aFontRangeArray, aIsVertical,
-                           aPoint - GetChildProcessOffset());
+                           TransformChildToParent(aPoint));
   return IPC_OK();
 }
 
@@ -3337,7 +3399,7 @@ mozilla::ipc::IPCResult TabParent::RecvShowCanvasPermissionPrompt(
 }
 
 mozilla::ipc::IPCResult TabParent::RecvVisitURI(
-    const URIParams& aURI, const OptionalURIParams& aLastVisitedURI,
+    const URIParams& aURI, const Maybe<URIParams>& aLastVisitedURI,
     const uint32_t& aFlags) {
   nsCOMPtr<nsIURI> ourURI = DeserializeURI(aURI);
   if (!ourURI) {

@@ -42,6 +42,7 @@ if (isDevelopment()) {
   pref("devtools.debugger.file-search-whole-word", false);
   pref("devtools.debugger.file-search-regex-match", false);
   pref("devtools.debugger.project-directory-root", "");
+  pref("devtools.debugger.map-scopes-enabled", false);
   pref("devtools.debugger.prefs-schema-version", "1.0.1");
   pref("devtools.debugger.skip-pausing", false);
   pref("devtools.debugger.features.workers", true);
@@ -53,7 +54,7 @@ if (isDevelopment()) {
   pref("devtools.debugger.features.remove-command-bar-options", true);
   pref("devtools.debugger.features.code-folding", false);
   pref("devtools.debugger.features.outline", true);
-  pref("devtools.debugger.features.column-breakpoints", false);
+  pref("devtools.debugger.features.column-breakpoints", true);
   pref("devtools.debugger.features.skip-pausing", true);
   pref("devtools.debugger.features.component-pane", false);
   pref("devtools.debugger.features.autocomplete-expressions", false);
@@ -97,7 +98,8 @@ export const prefs = new PrefsHelper("devtools", {
   fileSearchRegexMatch: ["Bool", "debugger.file-search-regex-match"],
   debuggerPrefsSchemaVersion: ["Char", "debugger.prefs-schema-version"],
   projectDirectoryRoot: ["Char", "debugger.project-directory-root", ""],
-  skipPausing: ["Bool", "debugger.skip-pausing"]
+  skipPausing: ["Bool", "debugger.skip-pausing"],
+  mapScopes: ["Bool", "debugger.map-scopes-enabled"]
 });
 
 export const features = new PrefsHelper("devtools.debugger.features", {

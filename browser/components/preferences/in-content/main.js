@@ -110,7 +110,8 @@ Preferences.addAll([
   { id: "browser.ctrlTab.recentlyUsedOrder", type: "bool" },
 
   // CFR
-  {id: "browser.newtabpage.activity-stream.asrouter.userprefs.cfr", type: "bool"},
+  {id: "browser.newtabpage.activity-stream.asrouter.userprefs.cfr.addons", type: "bool"},
+  {id: "browser.newtabpage.activity-stream.asrouter.userprefs.cfr.features", type: "bool"},
 
   // Fonts
   { id: "font.language.group", type: "wstring" },
@@ -319,9 +320,11 @@ var gMainPane = {
       gMainPane.initBrowserLocale();
     }
 
-    let cfrLearnMoreLink = document.getElementById("cfrLearnMore");
     let cfrLearnMoreUrl = Services.urlFormatter.formatURLPref("app.support.baseURL") + "extensionrecommendations";
-    cfrLearnMoreLink.setAttribute("href", cfrLearnMoreUrl);
+    for (const id of ["cfrLearnMore", "cfrFeaturesLearnMore"]) {
+      let link = document.getElementById(id);
+      link.setAttribute("href", cfrLearnMoreUrl);
+    }
 
     if (AppConstants.platform == "win") {
       // Functionality for "Show tabs in taskbar" on Windows 7 and up.
@@ -1654,8 +1657,7 @@ var gMainPane = {
     this.selectedHandlerListItem = null;
 
     // Clear the list of entries.
-    while (this._list.childNodes.length > 1)
-      this._list.removeChild(this._list.lastChild);
+    this._list.textContent = "";
 
     var visibleTypes = this._visibleTypes;
 

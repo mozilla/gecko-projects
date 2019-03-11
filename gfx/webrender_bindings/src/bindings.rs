@@ -16,6 +16,7 @@ use std::ops::Range;
 use std::os::raw::{c_void, c_char, c_float};
 #[cfg(target_os = "android")]
 use std::os::raw::{c_int};
+use std::time::Duration;
 use gleam::gl;
 
 use webrender::api::*;
@@ -757,6 +758,9 @@ pub unsafe extern "C" fn wr_pipeline_info_delete(_info: WrPipelineInfo) {
 extern "C" {
     pub fn gecko_profiler_start_marker(name: *const c_char);
     pub fn gecko_profiler_end_marker(name: *const c_char);
+    pub fn gecko_profiler_add_text_marker(
+        name: *const c_char, text_bytes: *const c_char, text_len: usize, microseconds: u64);
+    pub fn gecko_profiler_thread_is_being_profiled() -> bool;
 }
 
 /// Simple implementation of the WR ProfilerHooks trait to allow profile
@@ -775,9 +779,22 @@ impl ProfilerHooks for GeckoProfilerHooks {
             gecko_profiler_end_marker(label.as_ptr());
         }
     }
+
+    fn add_text_marker(&self, label: &CStr, text: &str, duration: Duration) {
+        unsafe {
+            // NB: This can be as_micros() once we require Rust 1.33.
+            let micros = duration.subsec_micros() as u64 + duration.as_secs() * 1000 * 1000;
+            let text_bytes = text.as_bytes();
+            gecko_profiler_add_text_marker(label.as_ptr(), text_bytes.as_ptr() as *const c_char, text_bytes.len(), micros);
+        }
+    }
+
+    fn thread_is_being_profiled(&self) -> bool {
+        unsafe { gecko_profiler_thread_is_being_profiled() }
+    }
 }
 
-const PROFILER_HOOKS: GeckoProfilerHooks = GeckoProfilerHooks {};
+static PROFILER_HOOKS: GeckoProfilerHooks = GeckoProfilerHooks {};
 
 #[allow(improper_ctypes)] // this is needed so that rustc doesn't complain about passing the &mut Transaction to an extern function
 extern "C" {
@@ -1203,17 +1220,9 @@ pub unsafe extern "C" fn wr_api_notify_memory_pressure(dh: &mut DocumentHandle) 
     dh.api.notify_memory_pressure();
 }
 
-/// cbindgen:field-names=[mBits]
-#[repr(C)]
-pub struct WrDebugFlags {
-    bits: u32,
-}
-
 #[no_mangle]
-pub extern "C" fn wr_api_set_debug_flags(dh: &mut DocumentHandle, flags: WrDebugFlags) {
-    if let Some(dbg_flags) = DebugFlags::from_bits(flags.bits) {
-        dh.api.set_debug_flags(dbg_flags);
-    }
+pub extern "C" fn wr_api_set_debug_flags(dh: &mut DocumentHandle, flags: DebugFlags) {
+    dh.api.set_debug_flags(flags);
 }
 
 #[no_mangle]

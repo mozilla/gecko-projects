@@ -712,7 +712,7 @@ class IonBuilder : public MIRGenerator,
   MIRType getInlineReturnType();
 
   // Array natives.
-  InliningResult inlineArray(CallInfo& callInfo);
+  InliningResult inlineArray(CallInfo& callInfo, Realm* targetRealm);
   InliningResult inlineArrayIsArray(CallInfo& callInfo);
   InliningResult inlineArrayPopShift(CallInfo& callInfo,
                                      MArrayPopShift::Mode mode);
@@ -725,6 +725,7 @@ class IonBuilder : public MIRGenerator,
 
   // Iterator intrinsics.
   InliningResult inlineNewIterator(CallInfo& callInfo, MNewIterator::Type type);
+  InliningResult inlineArrayIteratorPrototypeOptimizable(CallInfo& callInfo);
 
   // Math natives.
   InliningResult inlineMathAbs(CallInfo& callInfo);

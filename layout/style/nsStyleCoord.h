@@ -46,6 +46,10 @@ using NonNegativeLengthPercentageOrAuto =
     StyleNonNegativeLengthPercentageOrAuto;
 using BorderRadius = StyleBorderRadius;
 
+bool StyleCSSPixelLength::IsZero() const {
+  return _0 == 0.0f;
+}
+
 nscoord StyleCSSPixelLength::ToAppUnits() const {
   // We want to resolve the length part of the calc() expression rounding 0.5
   // away from zero, instead of the default behavior of NSToCoordRoundWithClamp
@@ -95,7 +99,7 @@ nscoord LengthPercentage::ToLength() const {
 }
 
 bool LengthPercentage::ConvertsToPercentage() const {
-  return has_percentage && length._0 == 0.0f;
+  return has_percentage && length.IsZero();
 }
 
 float LengthPercentage::ToPercentage() const {
@@ -105,6 +109,10 @@ float LengthPercentage::ToPercentage() const {
 
 bool LengthPercentage::HasLengthAndPercentage() const {
   return !ConvertsToLength() && !ConvertsToPercentage();
+}
+
+bool LengthPercentage::IsDefinitelyZero() const {
+  return length.IsZero() && Percentage() == 0.0f;
 }
 
 CSSCoord LengthPercentage::ResolveToCSSPixels(CSSCoord aPercentageBasis) const {
@@ -133,12 +141,10 @@ nscoord LengthPercentage::Resolve(T aPercentageGetter,
     return ToLength();
   }
   nscoord basis = aPercentageGetter();
-  NS_WARNING_ASSERTION(basis >= 0, "nscoord overflow?");
   return length.ToAppUnits() + aPercentageRounder(basis * Percentage());
 }
 
 nscoord LengthPercentage::Resolve(nscoord aPercentageBasis) const {
-  NS_WARNING_ASSERTION(aPercentageBasis >= 0, "nscoord overflow?");
   return Resolve([=] { return aPercentageBasis; }, NSToCoordFloorClamped);
 }
 
@@ -156,11 +162,6 @@ nscoord LengthPercentage::Resolve(nscoord aPercentageBasis,
 }
 
 #define IMPL_LENGTHPERCENTAGE_FORWARDS(ty_)                                 \
-  template <>                                                               \
-  inline const LengthPercentage& ty_::AsLengthPercentage() const {          \
-    MOZ_ASSERT(IsLengthPercentage());                                       \
-    return length_percentage._0;                                            \
-  }                                                                         \
   template <>                                                               \
   inline bool ty_::HasPercent() const {                                     \
     return IsLengthPercentage() && AsLengthPercentage().HasPercent();       \
@@ -195,20 +196,8 @@ IMPL_LENGTHPERCENTAGE_FORWARDS(StyleSize)
 IMPL_LENGTHPERCENTAGE_FORWARDS(StyleMaxSize)
 
 template <>
-inline const StyleSize& StyleFlexBasis::AsSize() const {
-  MOZ_ASSERT(IsSize());
-  return size._0;
-}
-
-template <>
 inline bool StyleFlexBasis::IsAuto() const {
   return IsSize() && AsSize().IsAuto();
-}
-
-template <>
-inline StyleExtremumLength StyleSize::AsExtremumLength() const {
-  MOZ_ASSERT(IsExtremumLength());
-  return extremum_length._0;
 }
 
 template <>
@@ -219,12 +208,6 @@ inline bool StyleSize::BehavesLikeInitialValueOnBlockAxis() const {
 template <>
 inline bool StyleMaxSize::BehavesLikeInitialValueOnBlockAxis() const {
   return IsNone() || IsExtremumLength();
-}
-
-template <>
-inline StyleExtremumLength StyleMaxSize::AsExtremumLength() const {
-  MOZ_ASSERT(IsExtremumLength());
-  return extremum_length._0;
 }
 
 template <>

@@ -658,13 +658,14 @@ pref("media.cubeb.sandbox", false);
 #ifdef MOZ_AV1
 #if defined(XP_WIN) && !defined(_ARM64_)
 pref("media.av1.enabled", true);
+pref("media.av1.use-dav1d", true);
 #elif defined(XP_MACOSX)
 pref("media.av1.enabled", true);
+pref("media.av1.use-dav1d", false);
 #else
 pref("media.av1.enabled", false);
-#endif
-// Use libdav1d instead of libaom
 pref("media.av1.use-dav1d", false);
+#endif
 #endif
 
 pref("media.webaudio.audiocontextoptions-samplerate.enabled", true);
@@ -758,6 +759,7 @@ pref("apz.pinch_lock.mode", 1);
 pref("apz.pinch_lock.scoll_lock_threshold", "0.03125");  // 1/32 inches
 pref("apz.pinch_lock.span_breakout_threshold", "0.03125");  // 1/32 inches
 pref("apz.pinch_lock.span_lock_threshold", "0.03125");  // 1/32 inches
+pref("apz.pinch_lock.buffer_max_age", "50"); // milliseconds
 pref("apz.popups.enabled", false);
 pref("apz.relative-update.enabled", true);
 
@@ -965,6 +967,7 @@ pref("gfx.webrender.debug.show-overdraw", false);
 pref("gfx.webrender.debug.slow-frame-indicator", false);
 pref("gfx.webrender.debug.picture-caching", false);
 pref("gfx.webrender.debug.primitives", false);
+pref("gfx.webrender.debug.small-screen", false);
 pref("gfx.webrender.dl.dump-parent", false);
 pref("gfx.webrender.dl.dump-content", false);
 pref("gfx.webrender.picture-caching", true);
@@ -1299,9 +1302,9 @@ pref("dom.serviceWorkers.disable_open_click_delay", 1000);
 
 pref("dom.storage.enabled", true);
 // Whether or not LSNG (Next Generation Local Storage) is enabled.
-// See bug 1510410 for enabling this on Nightly.
+// See bug 1517090 for enabling this on Nightly.
 #ifdef NIGHTLY_BUILD
-pref("dom.storage.next_gen", false);
+pref("dom.storage.next_gen", true);
 #else
 pref("dom.storage.next_gen", false);
 #endif
@@ -1310,6 +1313,7 @@ pref("dom.storage.shadow_writes", true);
 pref("dom.storage.snapshot_prefill", 16384);
 pref("dom.storage.snapshot_reusing", true);
 pref("dom.storage.testing", false);
+pref("dom.storage.client_validation", true);
 
 pref("dom.send_after_paint_to_content", false);
 
@@ -1600,11 +1604,7 @@ pref("javascript.options.streams", true);
 pref("javascript.options.bigint", false);
 
 // Dynamic module import.
-#ifdef NIGHTLY_BUILD
 pref("javascript.options.dynamicImport", true);
-#else
-pref("javascript.options.dynamicImport", false);
-#endif
 
 // advanced prefs
 pref("advanced.mailftp",                    false);
@@ -4673,6 +4673,7 @@ pref("font.name-list.monospace.x-unicode", "dt-interface user-ucs2.cjk_japan-0")
 pref("signon.rememberSignons",              true);
 pref("signon.rememberSignons.visibilityToggle", true);
 pref("signon.autofillForms",                true);
+pref("signon.autofillForms.autocompleteOff", true);
 pref("signon.autofillForms.http",           false);
 pref("signon.autologin.proxy",              false);
 pref("signon.formlessCapture.enabled",      true);
@@ -5323,10 +5324,6 @@ pref("memory.dump_reports_on_oom", false);
 // Number of stack frames to capture in createObjectURL for about:memory.
 pref("memory.blob_report.stack_frames", 0);
 
-// Disable idle observer fuzz, because only privileged content can access idle
-// observers (bug 780507).
-pref("dom.idle-observers-api.fuzz_time.disabled", true);
-
 // Activates the activity monitor
 pref("io.activity.enabled", false);
 
@@ -5620,7 +5617,7 @@ pref("browser.safebrowsing.id", "Firefox");
 pref("browser.safebrowsing.downloads.enabled", true);
 pref("browser.safebrowsing.downloads.remote.enabled", true);
 pref("browser.safebrowsing.downloads.remote.timeout_ms", 15000);
-pref("browser.safebrowsing.downloads.remote.url", "https://sb-ssl.google.com/safebrowsing/clientreport/download?key=%GOOGLE_API_KEY%");
+pref("browser.safebrowsing.downloads.remote.url", "https://sb-ssl.google.com/safebrowsing/clientreport/download?key=%GOOGLE_SAFEBROWSING_API_KEY%");
 pref("browser.safebrowsing.downloads.remote.block_dangerous",            true);
 pref("browser.safebrowsing.downloads.remote.block_dangerous_host",       true);
 pref("browser.safebrowsing.downloads.remote.block_potentially_unwanted", true);
@@ -5629,7 +5626,7 @@ pref("browser.safebrowsing.downloads.remote.block_uncommon",             true);
 // Google Safe Browsing provider (legacy)
 pref("browser.safebrowsing.provider.google.pver", "2.2");
 pref("browser.safebrowsing.provider.google.lists", "goog-badbinurl-shavar,goog-downloadwhite-digest256,goog-phish-shavar,googpub-phish-shavar,goog-malware-shavar,goog-unwanted-shavar");
-pref("browser.safebrowsing.provider.google.updateURL", "https://safebrowsing.google.com/safebrowsing/downloads?client=SAFEBROWSING_ID&appver=%MAJOR_VERSION%&pver=2.2&key=%GOOGLE_API_KEY%");
+pref("browser.safebrowsing.provider.google.updateURL", "https://safebrowsing.google.com/safebrowsing/downloads?client=SAFEBROWSING_ID&appver=%MAJOR_VERSION%&pver=2.2&key=%GOOGLE_SAFEBROWSING_API_KEY%");
 pref("browser.safebrowsing.provider.google.gethashURL", "https://safebrowsing.google.com/safebrowsing/gethash?client=SAFEBROWSING_ID&appver=%MAJOR_VERSION%&pver=2.2");
 pref("browser.safebrowsing.provider.google.reportURL", "https://safebrowsing.google.com/safebrowsing/diagnostic?client=%NAME%&hl=%LOCALE%&site=");
 pref("browser.safebrowsing.provider.google.reportPhishMistakeURL", "https://%LOCALE%.phish-error.mozilla.com/?hl=%LOCALE%&url=");
@@ -5640,14 +5637,14 @@ pref("browser.safebrowsing.provider.google.advisoryName", "Google Safe Browsing"
 // Google Safe Browsing provider
 pref("browser.safebrowsing.provider.google4.pver", "4");
 pref("browser.safebrowsing.provider.google4.lists", "goog-badbinurl-proto,goog-downloadwhite-proto,goog-phish-proto,googpub-phish-proto,goog-malware-proto,goog-unwanted-proto,goog-harmful-proto,goog-passwordwhite-proto");
-pref("browser.safebrowsing.provider.google4.updateURL", "https://safebrowsing.googleapis.com/v4/threatListUpdates:fetch?$ct=application/x-protobuf&key=%GOOGLE_API_KEY%&$httpMethod=POST");
-pref("browser.safebrowsing.provider.google4.gethashURL", "https://safebrowsing.googleapis.com/v4/fullHashes:find?$ct=application/x-protobuf&key=%GOOGLE_API_KEY%&$httpMethod=POST");
+pref("browser.safebrowsing.provider.google4.updateURL", "https://safebrowsing.googleapis.com/v4/threatListUpdates:fetch?$ct=application/x-protobuf&key=%GOOGLE_SAFEBROWSING_API_KEY%&$httpMethod=POST");
+pref("browser.safebrowsing.provider.google4.gethashURL", "https://safebrowsing.googleapis.com/v4/fullHashes:find?$ct=application/x-protobuf&key=%GOOGLE_SAFEBROWSING_API_KEY%&$httpMethod=POST");
 pref("browser.safebrowsing.provider.google4.reportURL", "https://safebrowsing.google.com/safebrowsing/diagnostic?client=%NAME%&hl=%LOCALE%&site=");
 pref("browser.safebrowsing.provider.google4.reportPhishMistakeURL", "https://%LOCALE%.phish-error.mozilla.com/?hl=%LOCALE%&url=");
 pref("browser.safebrowsing.provider.google4.reportMalwareMistakeURL", "https://%LOCALE%.malware-error.mozilla.com/?hl=%LOCALE%&url=");
 pref("browser.safebrowsing.provider.google4.advisoryURL", "https://developers.google.com/safe-browsing/v4/advisory");
 pref("browser.safebrowsing.provider.google4.advisoryName", "Google Safe Browsing");
-pref("browser.safebrowsing.provider.google4.dataSharingURL", "https://safebrowsing.googleapis.com/v4/threatHits?$ct=application/x-protobuf&key=%GOOGLE_API_KEY%&$httpMethod=POST");
+pref("browser.safebrowsing.provider.google4.dataSharingURL", "https://safebrowsing.googleapis.com/v4/threatHits?$ct=application/x-protobuf&key=%GOOGLE_SAFEBROWSING_API_KEY%&$httpMethod=POST");
 pref("browser.safebrowsing.provider.google4.dataSharing.enabled", false);
 
 pref("browser.safebrowsing.reportPhishURL", "https://%LOCALE%.phish-report.mozilla.com/?hl=%LOCALE%&url=");

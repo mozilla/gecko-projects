@@ -1550,7 +1550,8 @@ CssRuleView.prototype = {
    * @param  {Element|null} declaration
    *         Optional. The declaration to scroll to.
    * @param  {String} scrollBehavior
-   *         Optional. The transition animation when scrolling.
+   *         Optional. The transition animation when scrolling. If prefers-reduced-motion
+   *         system pref is set, then the scroll behavior will be overridden to "auto".
    */
   _scrollToElement(rule, declaration, scrollBehavior = "smooth") {
     let elementToScrollTo = rule;
@@ -1565,6 +1566,11 @@ CssRuleView.prototype = {
         elementToScrollTo = declaration;
       }
     }
+
+    // Ensure that smooth scrolling is disabled when the user prefers reduced motion.
+    const win = elementToScrollTo.ownerGlobal;
+    const reducedMotion = win.matchMedia("(prefers-reduced-motion)").matches;
+    scrollBehavior = reducedMotion ? "auto" : scrollBehavior;
 
     elementToScrollTo.scrollIntoView({ behavior: scrollBehavior });
   },
@@ -1656,6 +1662,10 @@ CssRuleView.prototype = {
 
         // If there is no matching property, then look in computed properties.
         for (const computed of textProp.computed) {
+          if (computed.overridden) {
+            continue;
+          }
+
           if (computed.name === name) {
             if (!this.inspector.is3PaneModeEnabled) {
               this.inspector.sidebar.select("ruleview");

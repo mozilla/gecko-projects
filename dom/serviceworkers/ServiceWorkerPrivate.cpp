@@ -40,6 +40,7 @@
 #include "mozilla/dom/WorkerRunnable.h"
 #include "mozilla/dom/WorkerScope.h"
 #include "mozilla/dom/ipc/StructuredCloneData.h"
+#include "mozilla/net/CookieSettings.h"
 #include "mozilla/net/NeckoChannelParams.h"
 #include "mozilla/StaticPrefs.h"
 #include "mozilla/Unused.h"
@@ -639,7 +640,9 @@ class LifeCycleEventWatcher final : public ExtendableEventCallback {
                                 [self]() { self->ReportResult(false); });
     if (NS_WARN_IF(!mWorkerRef)) {
       mCallback->SetResult(false);
-      nsresult rv = workerPrivate->DispatchToMainThread(mCallback);
+      // Using DispatchToMainThreadForMessaging so that state update on
+      // the main thread doesn't happen too soon.
+      nsresult rv = workerPrivate->DispatchToMainThreadForMessaging(mCallback);
       Unused << NS_WARN_IF(NS_FAILED(rv));
       return false;
     }
@@ -655,7 +658,9 @@ class LifeCycleEventWatcher final : public ExtendableEventCallback {
     }
 
     mCallback->SetResult(aResult);
-    nsresult rv = mWorkerRef->Private()->DispatchToMainThread(mCallback);
+    // Using DispatchToMainThreadForMessaging so that state update on
+    // the main thread doesn't happen too soon.
+    nsresult rv = mWorkerRef->Private()->DispatchToMainThreadForMessaging(mCallback);
     if (NS_WARN_IF(NS_FAILED(rv))) {
       MOZ_CRASH("Failed to dispatch life cycle event handler.");
     }
@@ -1727,6 +1732,10 @@ nsresult ServiceWorkerPrivate::SpawnWorkerIfNeeded(WakeUpReason aWhy,
       nsContentUtils::StorageAllowedForServiceWorker(info.mPrincipal);
   info.mStorageAllowed =
       access > nsContentUtils::StorageAccess::ePrivateBrowsing;
+
+  info.mCookieSettings = mozilla::net::CookieSettings::Create();
+  MOZ_ASSERT(info.mCookieSettings);
+
   info.mOriginAttributes = mInfo->GetOriginAttributes();
 
   // Verify that we don't have any CSP on pristine principal.

@@ -3737,6 +3737,7 @@ void HTMLMediaElement::DispatchEventsWhenPlayWasNotAllowed() {
   OwnerDoc()->MaybeNotifyAutoplayBlocked();
   ReportToConsole(nsIScriptError::warningFlag, "BlockAutoplayError");
   mHasPlayEverBeenBlocked = true;
+  mHasEverBeenBlockedForAutoplay = true;
 }
 
 void HTMLMediaElement::PlayInternal(bool aHandlingUserInput) {
@@ -5985,6 +5986,14 @@ void HTMLMediaElement::SuspendOrResumeElement(bool aPauseElement,
         mEventDeliveryPaused = false;
         DispatchPendingMediaEvents();
       }
+      // If the media element has been blocked and isn't still allowed to play
+      // when it comes back from the bfcache, we would notify front end to show
+      // the blocking icon in order to inform user that the site is still being
+      // blocked.
+      if (mHasEverBeenBlockedForAutoplay &&
+          !AutoplayPolicy::IsAllowedToPlay(*this)) {
+        OwnerDoc()->MaybeNotifyAutoplayBlocked();
+      }
     }
   }
 }
@@ -6018,7 +6027,8 @@ void HTMLMediaElement::NotifyOwnerDocumentActivityChanged() {
 
   // If the owning document has become inactive we should shutdown the CDM.
   if (!OwnerDoc()->IsCurrentActiveDocument() && mMediaKeys) {
-    mMediaKeys->Shutdown();
+    // We don't shutdown MediaKeys here because it also listens for document
+    // activity and will take care of shutting down itself.
     DDUNLINKCHILD(mMediaKeys.get());
     mMediaKeys = nullptr;
     if (mDecoder) {

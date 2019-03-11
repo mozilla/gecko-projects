@@ -9,9 +9,7 @@
 
 "use strict";
 
-const TEST_PATH = getRootDirectory(gTestPath)
-  .replace("chrome://mochitests/content", "http://example.org/");
-const TEST_URL = `${TEST_PATH}dummy_page.html`;
+const TEST_URL = `${TEST_BASE_URL}dummy_page.html`;
 
 
 add_task(async function test_switchtab_override() {
@@ -52,8 +50,11 @@ add_task(async function test_switchtab_override() {
   EventUtils.synthesizeKey("KEY_Shift", {type: "keydown"});
   EventUtils.synthesizeKey("KEY_Enter");
   info(`gURLBar.value = ${gURLBar.value}`);
-  EventUtils.synthesizeKey("KEY_Shift", {type: "keyup"});
   await deferred.promise;
+  // Loading the page may move focus, thus ensure the urlbar receives the keyup
+  // event, to avoid confusing next tests.
+  gURLBar.focus();
+  EventUtils.synthesizeKey("KEY_Shift", {type: "keyup"});
 
   await PlacesUtils.history.clear();
 });

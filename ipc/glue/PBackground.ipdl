@@ -170,7 +170,7 @@ parent:
 
   async PCameras();
 
-  async PUDPSocket(OptionalPrincipalInfo pInfo, nsCString filter);
+  async PUDPSocket(PrincipalInfo? pInfo, nsCString filter);
   async PBroadcastChannel(PrincipalInfo pInfo, nsCString origin, nsString channel);
 
   async PServiceWorkerManager();
@@ -190,6 +190,8 @@ parent:
                          PrincipalInfo principalInfo);
 
   async PQuota();
+
+  async ShutdownQuotaManager();
 
   async PFileSystemRequest(FileSystemParams params);
 

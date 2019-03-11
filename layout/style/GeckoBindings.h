@@ -17,6 +17,7 @@
 #include "mozilla/css/SheetLoadData.h"
 #include "mozilla/EffectCompositor.h"
 #include "mozilla/ComputedTimingFunction.h"
+#include "mozilla/PreferenceSheet.h"
 #include "nsCSSValue.h"
 #include "nsStyleStruct.h"
 
@@ -136,6 +137,9 @@ bool Gecko_MatchLang(RawGeckoElementBorrowed element, nsAtom* override_lang,
 nsAtom* Gecko_GetXMLLangValue(RawGeckoElementBorrowed element);
 
 mozilla::dom::Document::DocumentTheme Gecko_GetDocumentLWTheme(
+    const mozilla::dom::Document*);
+
+const mozilla::PreferenceSheet::Prefs* Gecko_GetPrefSheetPrefs(
     const mozilla::dom::Document*);
 
 bool Gecko_IsTableBorderNonzero(RawGeckoElementBorrowed element);
@@ -731,8 +735,6 @@ bool Gecko_DocumentRule_UseForPresentation(
 
 // Allocator hinting.
 void Gecko_SetJemallocThreadLocalArena(bool enabled);
-void Gecko_AddBufferToCrashReport(const void* addr, size_t len);
-void Gecko_AnnotateCrashReport(uint32_t key, const char* value_str);
 
 // Pseudo-element flags.
 #define CSS_PSEUDO_ELEMENT(name_, value_, flags_) \
