@@ -94,29 +94,6 @@ use nserror::{nsresult, NS_ERROR_NULL_POINTER};
 /// call it with valid pointer arguments.
 #[macro_export]
 macro_rules! xpcom_method {
-    // By providing this as an internal rule, rather than a macro, it prevents
-    // external modules from needing to import that macro as well as this one.
-    // The ensure_param macro converts raw pointer arguments to references,
-    // returning NS_ERROR_NULL_POINTER if the argument is_null().
-    // 
-    // Notes:
-    //
-    // This rule can be called on a non-pointer copy parameter, but there's no
-    // benefit to doing so.  The macro will just set the value of the parameter
-    // to itself. (This macro does this anyway due to limitations in declarative
-    // macros; it isn't currently possible to distinguish between pointer and
-    // copy types when processing a set of parameters.)
-    //
-    // The macro currently supports only inparameters (*const nsIFoo); It
-    // doesn't (yet?) support outparameters (*mut nsIFoo).  The xpcom_method
-    // macro itself does, however, support the return value outparameter.
-    (@ensure_param $name:ident) => {
-        let $name = match $crate::Ensure::ensure($name) {
-            Ok(val) => val,
-            Err(result) => return result,
-        };
-    };
-
     // `#[allow(non_snake_case)]` is used for each method because `$xpcom_name`
     // is almost always UpperCamelCase, and Rust gives a warning that it should
     // be snake_case. It isn't reasonable to rename the XPCOM methods, so
@@ -127,7 +104,7 @@ macro_rules! xpcom_method {
     ($rust_name:ident => $xpcom_name:ident($($param_name:ident: $param_type:ty),*) -> *const $retval:ty) => {
         #[allow(non_snake_case)]
         unsafe fn $xpcom_name(&self, $($param_name: $param_type,)* retval: *mut *const $retval) -> nsresult {
-            $(xpcom_method!(@ensure_param $param_name);)*
+            $(ensure_param!($param_name);)*
             match self.$rust_name($($param_name, )*) {
                 Ok(val) => {
                     val.forget(&mut *retval);
@@ -145,7 +122,7 @@ macro_rules! xpcom_method {
     ($rust_name:ident => $xpcom_name:ident($($param_name:ident: $param_type:ty),*) -> nsAString) => {
         #[allow(non_snake_case)]
         unsafe fn $xpcom_name(&self, $($param_name: $param_type,)* retval: *mut nsAString) -> nsresult {
-            $(xpcom_method!(@ensure_param $param_name);)*
+            $(ensure_param!($param_name);)*
             match self.$rust_name($($param_name, )*) {
                 Ok(val) => {
                     (*retval).assign(&val);
@@ -163,7 +140,7 @@ macro_rules! xpcom_method {
     ($rust_name:ident => $xpcom_name:ident($($param_name:ident: $param_type:ty),*) -> nsACString) => {
         #[allow(non_snake_case)]
         unsafe fn $xpcom_name(&self, $($param_name: $param_type,)* retval: *mut nsACString) -> nsresult {
-            $(xpcom_method!(@ensure_param $param_name);)*
+            $(ensure_param!($param_name);)*
             match self.$rust_name($($param_name, )*) {
                 Ok(val) => {
                     (*retval).assign(&val);
@@ -181,7 +158,7 @@ macro_rules! xpcom_method {
     ($rust_name:ident => $xpcom_name:ident($($param_name:ident: $param_type:ty),*) -> $retval:ty) => {
         #[allow(non_snake_case)]
         unsafe fn $xpcom_name(&self, $($param_name: $param_type,)* retval: *mut $retval) -> nsresult {
-            $(xpcom_method!(@ensure_param $param_name);)*
+            $(ensure_param!($param_name);)*
             match self.$rust_name($($param_name, )*) {
                 Ok(val) => {
                     *retval = val;
@@ -199,7 +176,7 @@ macro_rules! xpcom_method {
     ($rust_name:ident => $xpcom_name:ident($($param_name:ident: $param_type:ty),*)) => {
         #[allow(non_snake_case)]
         unsafe fn $xpcom_name(&self, $($param_name: $param_type,)*) -> nsresult {
-            $(xpcom_method!(@ensure_param $param_name);)*
+            $(ensure_param!($param_name);)*
             match self.$rust_name($($param_name, )*) {
                 Ok(_) => NS_OK,
                 Err(error) => {
@@ -207,6 +184,59 @@ macro_rules! xpcom_method {
                 }
             }
         }
+    };
+}
+
+/// The ensure_param macro converts raw pointer arguments to references,
+/// returning NS_ERROR_NULL_POINTER if the argument is_null().  It isn't
+/// intended to be used directly but rather via the xpcom_method macro.
+///
+/// Given the appropriate extern crate and use declarations (which include
+/// using the Ensure trait from this module):
+///
+/// ```ignore
+/// #[macro_use]
+/// extern crate xpcom;
+/// use xpcom::Ensure;
+/// ```
+///
+/// Invoking the macro with a parameter like `foo: *const nsIBar`:
+///
+/// ```ignore
+/// ensure_param!(foo: *const nsIBar);
+/// ```
+///
+/// Results in the macro generating a code block like the following:
+///
+/// ```ignore
+/// let foo = match Ensure::ensure(foo) {
+///     Ok(val) => val,
+///     Err(result) => return result,
+/// };
+/// ```
+///
+/// Which converts `foo` from a `*const nsIBar` to a `&nsIBar`.
+///
+/// Notes:
+///
+/// You can call the macro on a non-pointer copy parameter, but there's no
+/// benefit to doing so.  The macro will just set the value of the parameter
+/// to itself.  (The xpcom_method macro does this anyway due to limitations
+/// in declarative macros; it isn't currently possible to distinguish between
+/// pointer and copy types when processing a set of parameters.)
+///
+/// The macro currently supports only inparameters (*const nsIFoo); It doesn't
+/// (yet?) support outparameters (*mut nsIFoo).  The xpcom_method macro itself
+/// does, however, support the return value outparameter.
+///
+#[doc(hidden)]
+#[macro_export]
+macro_rules! ensure_param {
+    ($name:ident) => {
+        let $name = match $crate::Ensure::ensure($name) {
+            Ok(val) => val,
+            Err(result) => return result,
+        };
     };
 }
 
