@@ -8,7 +8,7 @@
 
 const {AppConstants} = ChromeUtils.import("resource://gre/modules/AppConstants.jsm");
 const {AUSTLMY} = ChromeUtils.import("resource://gre/modules/UpdateTelemetry.jsm");
-const {Bits, BitsConstants, BitsRequest} =
+const {Bits, BitsConstants, BitsError, BitsRequest, BitsUnknownError, BitsVerificationError} =
   ChromeUtils.import("resource://gre/modules/Bits.jsm");
 const {FileUtils} = ChromeUtils.import("resource://gre/modules/FileUtils.jsm");
 const {OS} = ChromeUtils.import("resource://gre/modules/osfile.jsm");
@@ -549,6 +549,10 @@ function getCanStageUpdates() {
  *           NoBits_FeatureOff
  *           NoBits_Pref
  *           NoBits_Proxy
+ *         These strings are directly compatible with the categories for
+ *         UPDATE_CAN_USE_BITS_EXTERNAL and UPDATE_CAN_USE_BITS_NOTIFY telemetry
+ *         probes. If this function is made to return other values, they should
+ *         also be added to the labels lists for those probes in Histograms.json
  */
 function getCanUseBits() {
   if (AppConstants.platform != "win") {
@@ -2294,6 +2298,13 @@ UpdateService.prototype = {
     // UPDATE_CANNOT_STAGE_NOTIFY
     AUSTLMY.pingGeneric("UPDATE_CANNOT_STAGE_" + this._pingSuffix,
                         getCanStageUpdates(), true);
+    if (AppConstants.platform == "win") {
+      // Histogram IDs:
+      // UPDATE_CAN_USE_BITS_EXTERNAL
+      // UPDATE_CAN_USE_BITS_NOTIFY
+      AUSTLMY.pingGeneric("UPDATE_CAN_USE_BITS_" + this._pingSuffix,
+                          getCanUseBits());
+    }
     // Histogram IDs:
     // UPDATE_INVALID_LASTUPDATETIME_EXTERNAL
     // UPDATE_INVALID_LASTUPDATETIME_NOTIFY
@@ -3931,6 +3942,9 @@ Downloader.prototype = {
             error);
 
         this._pendingRequest = null;
+
+        AUSTLMY.pingBitsError(this.isCompleteUpdate, error);
+
         // Try download again with nsIIncrementalDownload
         // Note: The update status file has already had STATE_DOWNLOADING
         //       written to it. If the downloadUpdate call below returns
@@ -4147,6 +4161,7 @@ Downloader.prototype = {
       LOG("Downloader:onStopRequest - status: " + status);
     }
 
+    let bitsCompletionError;
     if (this.usingBits) {
       if (Components.isSuccessCode(status)) {
         try {
@@ -4155,6 +4170,7 @@ Downloader.prototype = {
           LOG("Downloader:onStopRequest - Unable to complete BITS download: " +
               e);
           status = Cr.NS_ERROR_FAILURE;
+          bitsCompletionError = e;
         }
       } else {
         // BITS jobs that failed to complete should still have cancel called on
@@ -4311,6 +4327,24 @@ Downloader.prototype = {
       if (!Components.isSuccessCode(status)) {
         deleteActiveUpdate = false;
         shouldRetrySoon = true;
+      }
+
+      // Send BITS Telemetry
+      if (Components.isSuccessCode(status)) {
+        AUSTLMY.pingBitsSuccess(this.isCompleteUpdate);
+      } else {
+        let error;
+        if (bitsCompletionError) {
+          error = bitsCompletionError;
+        } else if (status == Cr.NS_ERROR_CORRUPTED_CONTENT) {
+          error = new BitsVerificationError();
+        } else {
+          error = request.bitsTransferResult;
+          if (!(error instanceof BitsError)) {
+            error = new BitsUnknownError();
+          }
+        }
+        AUSTLMY.pingBitsError(this.isCompleteUpdate, error);
       }
     }
 
