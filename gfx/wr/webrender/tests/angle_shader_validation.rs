@@ -52,6 +52,10 @@ const SHADERS: &[Shader] = &[
         features: CACHE_FEATURES,
     },
     Shader {
+        name: "cs_gradient",
+        features: CACHE_FEATURES,
+    },
+    Shader {
         name: "cs_border_solid",
         features: CACHE_FEATURES,
     },
@@ -125,7 +129,7 @@ fn validate_shaders() {
             }
 
             let (vs, fs) =
-                webrender::build_shader_strings(VERSION_STRING, &features, shader.name, &None);
+                webrender::build_shader_strings(VERSION_STRING, &features, shader.name, None);
 
             validate(&vs_validator, shader.name, vs);
             validate(&fs_validator, shader.name, fs);

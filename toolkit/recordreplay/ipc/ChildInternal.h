@@ -81,14 +81,17 @@ void AfterCheckpoint(const CheckpointId& aCheckpoint);
 // Get the ID of the last normal checkpoint.
 size_t LastNormalCheckpoint();
 
+// Whether to send a paint message for the last normal checkpoint reached.
+bool ShouldSendPaintMessage();
+
 }  // namespace navigation
 
 namespace child {
 
 // IPC activity that can be triggered by navigation.
 void RespondToRequest(const js::CharBuffer& aBuffer);
-void HitCheckpoint(size_t aId, bool aRecordingEndpoint);
-void HitBreakpoint(bool aRecordingEndpoint);
+void HitExecutionPoint(const js::ExecutionPoint& aPoint,
+                       bool aRecordingEndpoint);
 
 // Optional information about a crash that occurred. If not provided to
 // ReportFatalError, the current thread will be treated as crashed.

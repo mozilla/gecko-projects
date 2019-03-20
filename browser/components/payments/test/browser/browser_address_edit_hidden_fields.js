@@ -41,7 +41,7 @@ add_task(async function test_hiddenFieldNotSaved() {
 
     let shippingAddressChangePromise = ContentTask.spawn(browser, {
       eventName: "shippingaddresschange",
-    }, PTU.ContentTasks.awaitPaymentRequestEventPromise);
+    }, PTU.ContentTasks.awaitPaymentEventPromise);
 
     let options = {
       addLinkSelector: "address-picker.shipping-related .add-link",
@@ -69,7 +69,7 @@ add_task(async function test_hiddenFieldNotSaved() {
     await spawnPaymentDialogTask(frame, async () => {
       let {
         PaymentTestUtils: PTU,
-      } = ChromeUtils.import("resource://testing-common/PaymentTestUtils.jsm", {});
+      } = ChromeUtils.import("resource://testing-common/PaymentTestUtils.jsm");
 
       let {savedAddresses} = await PTU.DialogContentUtils.getCurrentState(content);
       is(Object.keys(savedAddresses).length, 2, "2 saved addresses");
@@ -108,12 +108,12 @@ add_task(async function test_hiddenFieldRemovedWhenCountryChanged() {
 
     let shippingAddressChangePromise = ContentTask.spawn(browser, {
       eventName: "shippingaddresschange",
-    }, PTU.ContentTasks.awaitPaymentRequestEventPromise);
+    }, PTU.ContentTasks.awaitPaymentEventPromise);
 
     await spawnPaymentDialogTask(frame, async (args) => {
       let {
         PaymentTestUtils: PTU,
-      } = ChromeUtils.import("resource://testing-common/PaymentTestUtils.jsm", {});
+      } = ChromeUtils.import("resource://testing-common/PaymentTestUtils.jsm");
 
       let picker = content.document
                      .querySelector("address-picker[selected-state-key='selectedShippingAddress']");
@@ -146,7 +146,7 @@ add_task(async function test_hiddenFieldRemovedWhenCountryChanged() {
     await spawnPaymentDialogTask(frame, async () => {
       let {
         PaymentTestUtils: PTU,
-      } = ChromeUtils.import("resource://testing-common/PaymentTestUtils.jsm", {});
+      } = ChromeUtils.import("resource://testing-common/PaymentTestUtils.jsm");
 
       let {savedAddresses} = await PTU.DialogContentUtils.getCurrentState(content);
       is(Object.keys(savedAddresses).length, 1, "1 saved address");
@@ -212,7 +212,7 @@ add_task(async function test_hiddenNonShippingFieldsPreservedUponEdit() {
 
   Object.assign(expected, PTU.Addresses.TimBR, {
     "given-name": "Timothy-edit",
-    "name": "Timothy-edit João Berners-Lee",
+    "name": "Timothy-edit Jo\u{00E3}o Berners-Lee",
   });
   let actual = await formAutofillStorage.addresses.get(prefilledGuids.address1GUID);
   isnot(actual.email, "", "Check email isn't empty");
@@ -335,7 +335,7 @@ add_task(async function test_hiddenNonBillingAddressFieldsPreservedUponEdit() {
 
   Object.assign(expected, PTU.Addresses.TimBR, {
     "given-name": "Timothy-edit",
-    "name": "Timothy-edit João Berners-Lee",
+    "name": "Timothy-edit Jo\u{00E3}o Berners-Lee",
   });
   let actual = await formAutofillStorage.addresses.get(prefilledGuids.address1GUID);
   // timeLastModified changes and isn't relevant

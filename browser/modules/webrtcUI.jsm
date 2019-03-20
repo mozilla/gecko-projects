@@ -6,9 +6,9 @@
 
 var EXPORTED_SYMBOLS = ["webrtcUI"];
 
-ChromeUtils.import("resource:///modules/syncedtabs/EventEmitter.jsm");
-ChromeUtils.import("resource://gre/modules/Services.jsm");
-ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
+const {EventEmitter} = ChromeUtils.import("resource:///modules/syncedtabs/EventEmitter.jsm");
+const {Services} = ChromeUtils.import("resource://gre/modules/Services.jsm");
+const {XPCOMUtils} = ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
 
 ChromeUtils.defineModuleGetter(this, "AppConstants",
                                "resource://gre/modules/AppConstants.jsm");
@@ -158,7 +158,7 @@ var webrtcUI = {
   updateWarningLabel(aMenuList) {
     let type = aMenuList.selectedItem.getAttribute("devicetype");
     let document = aMenuList.ownerDocument;
-    document.getElementById("webRTC-all-windows-shared").hidden = type != "Screen";
+    document.getElementById("webRTC-all-windows-shared").hidden = type != "screen";
   },
 
   // Add-ons can override stock permission behavior by doing:
@@ -201,10 +201,9 @@ var webrtcUI = {
     return this.emitter.off(...args);
   },
 
-  // Listeners and observers are registered in nsBrowserGlue.js
+  // Listeners and observers are registered in BrowserGlue.jsm
   receiveMessage(aMessage) {
     switch (aMessage.name) {
-
       case "rtcpeer:Request": {
         let params = Object.freeze(Object.assign({
           origin: aMessage.target.contentPrincipal.origin,
@@ -489,7 +488,7 @@ function prompt(aBrowser, aRequest) {
   let options = {
     name: getHostOrExtensionName(uri),
     persistent: true,
-    hideClose: !Services.prefs.getBoolPref("privacy.permissionPrompts.showCloseButton"),
+    hideClose: true,
     eventCallback(aTopic, aNewBrowser) {
       if (aTopic == "swapping")
         return true;
@@ -606,8 +605,9 @@ function prompt(aBrowser, aRequest) {
         // Removing the child nodes of the menupopup doesn't clear the value
         // attribute of the menulist. This can have unfortunate side effects
         // when the list is rebuilt with a different content, so we remove
-        // the value attribute explicitly.
+        // the value attribute and unset the selectedItem explicitly.
         menupopup.parentNode.removeAttribute("value");
+        menupopup.parentNode.selectedItem = null;
 
         for (let device of devices)
           addDeviceToList(menupopup, device.name, device.deviceIndex);
@@ -625,23 +625,28 @@ function prompt(aBrowser, aRequest) {
       }
 
       function listScreenShareDevices(menupopup, devices) {
-        while (menupopup.lastChild)
+        while (menupopup.lastChild) {
           menupopup.removeChild(menupopup.lastChild);
+        }
 
-        let type = devices[0].mediaSource;
-        let typeName = type.charAt(0).toUpperCase() + type.substr(1);
+        // Removing the child nodes of the menupopup doesn't clear the value
+        // attribute of the menulist. This can have unfortunate side effects
+        // when the list is rebuilt with a different content, so we remove
+        // the value attribute and unset the selectedItem explicitly.
+        menupopup.parentNode.removeAttribute("value");
+        menupopup.parentNode.selectedItem = null;
 
         let label = doc.getElementById("webRTC-selectWindow-label");
-        let gumStringId = "getUserMedia.select" + typeName;
+        const gumStringId = "getUserMedia.selectWindowOrScreen";
         label.setAttribute("value",
                            stringBundle.getString(gumStringId + ".label"));
         label.setAttribute("accesskey",
                            stringBundle.getString(gumStringId + ".accesskey"));
 
-        // "Select <type>" is the default because we can't pick a
-        // 'default' window to share.
+        // "Select a Window or Screen" is the default because we can't and don't
+        // want to pick a 'default' window to share (Full screen is "scary").
         addDeviceToList(menupopup,
-                        stringBundle.getString("getUserMedia.pick" + typeName + ".label"),
+                        stringBundle.getString("getUserMedia.pickWindowOrScreen.label"),
                         "-1");
         menupopup.appendChild(doc.createXULElement("menuseparator"));
 
@@ -649,7 +654,7 @@ function prompt(aBrowser, aRequest) {
         let monitorIndex = 1;
         for (let i = 0; i < devices.length; ++i) {
           let device = devices[i];
-
+          let type = device.mediaSource;
           let name;
           // Building screen list from available screens.
           if (type == "screen") {
@@ -673,8 +678,9 @@ function prompt(aBrowser, aRequest) {
                                .replace("#2", count);
             }
           }
-          let item = addDeviceToList(menupopup, name, i, typeName);
+          let item = addDeviceToList(menupopup, name, i, type);
           item.deviceId = device.id;
+          item.mediaSource = type;
           if (device.scary)
             item.scary = true;
         }
@@ -691,6 +697,7 @@ function prompt(aBrowser, aRequest) {
             video.stream = null;
           }
 
+          let type = event.target.mediaSource;
           let deviceId = event.target.deviceId;
           if (deviceId == undefined) {
             doc.getElementById("webRTC-preview").hidden = true;
@@ -712,8 +719,7 @@ function prompt(aBrowser, aRequest) {
             let baseURL =
               Services.urlFormatter.formatURLPref("app.support.baseURL");
 
-            let learnMore = chromeWin.document.createXULElement("label");
-            learnMore.className = "text-link";
+            let learnMore = chromeWin.document.createXULElement("label", {is: "text-link"});
             learnMore.setAttribute("href", baseURL + "screenshare-safety");
             learnMore.textContent = learnMoreText;
 
@@ -753,6 +759,14 @@ function prompt(aBrowser, aRequest) {
             video.onloadedmetadata = function(e) {
               video.play();
             };
+          },
+          err => {
+            if (err.name == "OverconstrainedError" && err.constraint == "deviceId") {
+              // Window has disappeared since enumeration, which can happen.
+              // No preview for you.
+              return;
+            }
+            Cu.reportError(`error in preview: ${err.message} ${err.constraint}`);
           });
         };
         menupopup.addEventListener("command", menupopup._commandEventListener);
@@ -877,7 +891,6 @@ function prompt(aBrowser, aRequest) {
 
   // Don't offer "always remember" action in PB mode.
   if (!PrivateBrowsingUtils.isBrowserPrivate(aBrowser)) {
-
     // Disable the permanent 'Allow' action if the connection isn't secure, or for
     // screen/audio sharing (because we can't guess which window the user wants to
     // share without prompting).

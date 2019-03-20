@@ -6,8 +6,8 @@
 
 var EXPORTED_SYMBOLS = ["LoginManagerContextMenu"];
 
-ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
-ChromeUtils.import("resource://gre/modules/Services.jsm");
+const {XPCOMUtils} = ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
+const {Services} = ChromeUtils.import("resource://gre/modules/Services.jsm");
 
 ChromeUtils.defineModuleGetter(this, "LoginHelper",
                                "resource://gre/modules/LoginHelper.jsm");
@@ -41,27 +41,27 @@ var LoginManagerContextMenu = {
     let fragment = browser.ownerDocument.createDocumentFragment();
     let duplicateUsernames = this._findDuplicates(foundLogins);
     for (let login of foundLogins) {
-        let item = fragment.ownerDocument.createXULElement("menuitem");
+      let item = fragment.ownerDocument.createXULElement("menuitem");
 
-        let username = login.username;
-        // If login is empty or duplicated we want to append a modification date to it.
-        if (!username || duplicateUsernames.has(username)) {
-          if (!username) {
-            username = this._getLocalizedString("noUsername");
-          }
-          let meta = login.QueryInterface(Ci.nsILoginMetaInfo);
-          let time = this.dateAndTimeFormatter.format(new Date(meta.timePasswordChanged));
-          username = this._getLocalizedString("loginHostAge", [username, time]);
+      let username = login.username;
+      // If login is empty or duplicated we want to append a modification date to it.
+      if (!username || duplicateUsernames.has(username)) {
+        if (!username) {
+          username = this._getLocalizedString("noUsername");
         }
-        item.setAttribute("label", username);
-        item.setAttribute("class", "context-login-item");
+        let meta = login.QueryInterface(Ci.nsILoginMetaInfo);
+        let time = this.dateAndTimeFormatter.format(new Date(meta.timePasswordChanged));
+        username = this._getLocalizedString("loginHostAge", [username, time]);
+      }
+      item.setAttribute("label", username);
+      item.setAttribute("class", "context-login-item");
 
-        // login is bound so we can keep the reference to each object.
-        item.addEventListener("command", function(login, event) {
-          this._fillTargetField(login, inputElement, browser, documentURI);
-        }.bind(this, login));
+      // login is bound so we can keep the reference to each object.
+      item.addEventListener("command", function(login, event) {
+        this._fillTargetField(login, inputElement, browser, documentURI);
+      }.bind(this, login));
 
-        fragment.appendChild(item);
+      fragment.appendChild(item);
     }
 
     return fragment;

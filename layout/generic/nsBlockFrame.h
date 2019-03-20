@@ -122,6 +122,9 @@ class nsBlockFrame : public nsContainerFrame {
   nscoord GetLogicalBaseline(mozilla::WritingMode aWritingMode) const override;
   bool GetVerticalAlignBaseline(mozilla::WritingMode aWM,
                                 nscoord* aBaseline) const override {
+    NS_ASSERTION(!aWM.IsOrthogonalTo(GetWritingMode()),
+                 "You should only call this on frames with a WM that's "
+                 "parallel to aWM");
     nscoord lastBaseline;
     if (GetNaturalBaselineBOffset(aWM, BaselineSharingGroup::eLast,
                                   &lastBaseline)) {
@@ -141,8 +144,7 @@ class nsBlockFrame : public nsContainerFrame {
                         const nsDisplayListSet& aLists) override;
   bool IsFrameOfType(uint32_t aFlags) const override {
     return nsContainerFrame::IsFrameOfType(
-        aFlags &
-        ~(nsIFrame::eCanContainOverflowContainers | nsIFrame::eBlockFrame));
+        aFlags & ~(nsIFrame::eCanContainOverflowContainers));
   }
 
   void InvalidateFrame(uint32_t aDisplayItemKey = 0,
@@ -223,7 +225,6 @@ class nsBlockFrame : public nsContainerFrame {
   };
 
   void ChildIsDirty(nsIFrame* aChild) override;
-  bool IsVisibleInSelection(mozilla::dom::Selection* aSelection) override;
 
   bool IsEmpty() override;
   bool CachedIsEmpty() override;
@@ -408,8 +409,9 @@ class nsBlockFrame : public nsContainerFrame {
   void UpdateFirstLetterStyle(mozilla::ServoRestyleState& aRestyleState);
 
  protected:
-  explicit nsBlockFrame(ComputedStyle* aStyle, ClassID aID = kClassID)
-      : nsContainerFrame(aStyle, aID),
+  explicit nsBlockFrame(ComputedStyle* aStyle, nsPresContext* aPresContext,
+                        ClassID aID = kClassID)
+      : nsContainerFrame(aStyle, aPresContext, aID),
         mMinWidth(NS_INTRINSIC_WIDTH_UNKNOWN),
         mPrefWidth(NS_INTRINSIC_WIDTH_UNKNOWN) {
 #ifdef DEBUG
@@ -529,10 +531,12 @@ class nsBlockFrame : public nsContainerFrame {
 
   virtual void UnionChildOverflow(nsOverflowAreas& aOverflowAreas) override;
 
-  /** Load all of aFrame's floats into the float manager iff aFrame is not a
-   *  block formatting context. Handles all necessary float manager
-   * translations; assumes float manager is in aFrame's parent's coord system.
-   *  Safe to call on non-blocks (does nothing).
+  /**
+   * Load all of aFrame's floats into the float manager iff aFrame is not a
+   * block formatting context. Handles all necessary float manager translations;
+   * assumes float manager is in aFrame's parent's coord system.
+   *
+   * Safe to call on non-blocks (does nothing).
    */
   static void RecoverFloatsFor(nsIFrame* aFrame, nsFloatManager& aFloatManager,
                                mozilla::WritingMode aWM,
@@ -673,11 +677,14 @@ class nsBlockFrame : public nsContainerFrame {
   // Methods for line reflow
   /**
    * Reflow a line.
-   * @param aState           the current reflow state
-   * @param aLine            the line to reflow.  can contain a single block
-   * frame or contain 1 or more inline frames.
-   * @param aKeepReflowGoing [OUT] indicates whether the caller should continue
-   * to reflow more lines
+   *
+   * @param aState
+   *   the current reflow state
+   * @param aLine
+   *   the line to reflow.  can contain a single block frame or contain 1 or
+   *   more inline frames.
+   * @param aKeepReflowGoing [OUT]
+   *   indicates whether the caller should continue to reflow more lines
    */
   void ReflowLine(BlockReflowInput& aState, LineIterator aLine,
                   bool* aKeepReflowGoing);
@@ -900,7 +907,7 @@ class nsBlockFrame : public nsContainerFrame {
   // mozListBullet or mozListNumber.  Passing in the style set is an
   // optimization, because all callsites have it.
   already_AddRefed<ComputedStyle> ResolveBulletStyle(
-      mozilla::CSSPseudoElementType aType, mozilla::ServoStyleSet* aStyleSet);
+      mozilla::PseudoStyleType aType, mozilla::ServoStyleSet* aStyleSet);
 
 #ifdef DEBUG
   void VerifyLines(bool aFinalCheckOK);

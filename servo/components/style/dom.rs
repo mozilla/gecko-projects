@@ -1,13 +1,12 @@
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
- * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 //! Types and traits used to access the DOM from style calculation.
 
 #![allow(unsafe_code)]
 #![deny(missing_docs)]
 
-use atomic_refcell::{AtomicRef, AtomicRefCell, AtomicRefMut};
 use crate::applicable_declarations::ApplicableDeclarationBlock;
 #[cfg(feature = "gecko")]
 use crate::context::PostAnimationTasks;
@@ -23,6 +22,7 @@ use crate::shared_lock::Locked;
 use crate::stylist::CascadeData;
 use crate::traversal_flags::TraversalFlags;
 use crate::{Atom, LocalName, Namespace, WeakAtom};
+use atomic_refcell::{AtomicRef, AtomicRefCell, AtomicRefMut};
 use selectors::matching::{ElementSelectorFlags, QuirksMode, VisitedHandlingMode};
 use selectors::sink::Push;
 use selectors::Element as SelectorsElement;
@@ -42,10 +42,7 @@ use std::ops::Deref;
 /// data structures. Also, layout code tends to be faster when the DOM is not being accessed, for
 /// locality reasons. Using `OpaqueNode` enforces this invariant.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-#[cfg_attr(
-    feature = "servo",
-    derive(MallocSizeOf, Deserialize, Serialize)
-)]
+#[cfg_attr(feature = "servo", derive(MallocSizeOf, Deserialize, Serialize))]
 pub struct OpaqueNode(pub usize);
 
 impl OpaqueNode {

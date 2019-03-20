@@ -342,7 +342,7 @@ void LIRGeneratorShared::defineSinCos(LInstructionHelper<2, Ops, Temps>* lir,
   lir->setDef(1, LDefinition(vreg + VREG_INCREMENT, LDefinition::DOUBLE,
                              LFloatReg(xmm1)));
 #else
-#error "Unsupported architecture for SinCos"
+#  error "Unsupported architecture for SinCos"
 #endif
 
   getVirtualRegister();
@@ -429,7 +429,8 @@ void LIRGeneratorShared::redefine(MDefinition* def, MDefinition* as) {
         case MIRType::Object:
         case MIRType::ObjectOrNull:
         case MIRType::String:
-        case MIRType::Symbol: {
+        case MIRType::Symbol:
+        case MIRType::BigInt: {
           LAssertResultT* check =
               new (alloc()) LAssertResultT(useRegister(def));
           add(check, def->toInstruction());

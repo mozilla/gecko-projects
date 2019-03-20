@@ -174,21 +174,16 @@ class WorkletThread::PrimaryRunnable final : public Runnable {
         mWorkletThread(aWorkletThread) {
     MOZ_ASSERT(aWorkletThread);
     MOZ_ASSERT(NS_IsMainThread());
-
-    mParentRuntime =
-        JS_GetParentRuntime(CycleCollectedJSContext::Get()->Context());
-    MOZ_ASSERT(mParentRuntime);
   }
 
   NS_IMETHOD
   Run() override {
-    mWorkletThread->RunEventLoop(mParentRuntime);
+    mWorkletThread->RunEventLoop();
     return NS_OK;
   }
 
  private:
   RefPtr<WorkletThread> mWorkletThread;
-  JSRuntime* mParentRuntime;
 };
 
 // This is the last runnable to be dispatched. It calls the TerminateInternal()
@@ -271,12 +266,15 @@ WorkletThread::DelayedDispatch(already_AddRefed<nsIRunnable>, uint32_t aFlags) {
   return NS_ERROR_NOT_IMPLEMENTED;
 }
 
-void WorkletThread::RunEventLoop(JSRuntime* aParentRuntime) {
-  MOZ_ASSERT(!NS_IsMainThread());
+/* static */
+void WorkletThread::EnsureCycleCollectedJSContext(JSRuntime* aParentRuntime) {
+  CycleCollectedJSContext* ccjscx = CycleCollectedJSContext::Get();
+  if (ccjscx) {
+    MOZ_ASSERT(ccjscx->GetAsWorkletJSContext());
+    return;
+  }
 
-  PR_SetCurrentThreadName("worklet");
-
-  auto context = MakeUnique<WorkletJSContext>();
+  WorkletJSContext* context = new WorkletJSContext();
   nsresult rv = context->Initialize(aParentRuntime);
   if (NS_WARN_IF(NS_FAILED(rv))) {
     // TODO: error propagation
@@ -287,7 +285,6 @@ void WorkletThread::RunEventLoop(JSRuntime* aParentRuntime) {
   // FIXME: JSSettings
   // FIXME: JS_SetNativeStackQuota
   // FIXME: JS_SetSecurityCallbacks
-  // FIXME: JS::SetAsmJSCacheOps
   // FIXME: JS::SetAsyncTaskCallbacks
   // FIXME: JS_AddInterruptCallback
   // FIXME: JS::SetCTypesActivityCallback
@@ -297,10 +294,18 @@ void WorkletThread::RunEventLoop(JSRuntime* aParentRuntime) {
     // TODO: error propagation
     return;
   }
+}
+
+void WorkletThread::RunEventLoop() {
+  MOZ_ASSERT(!NS_IsMainThread());
+
+  PR_SetCurrentThreadName("worklet");
 
   while (!mExitLoop) {
     MOZ_ALWAYS_TRUE(NS_ProcessNextEvent(this, /* wait: */ true));
   }
+
+  DeleteCycleCollectedJSContext();
 }
 
 void WorkletThread::Terminate() {
@@ -330,12 +335,26 @@ void WorkletThread::TerminateInternal() {
   NS_DispatchToMainThread(runnable);
 }
 
-/* static */ bool WorkletThread::IsOnWorkletThread() {
+/* static */
+void WorkletThread::DeleteCycleCollectedJSContext() {
+  CycleCollectedJSContext* ccjscx = CycleCollectedJSContext::Get();
+  if (!ccjscx) {
+    return;
+  }
+
+  WorkletJSContext* workletjscx = ccjscx->GetAsWorkletJSContext();
+  MOZ_ASSERT(workletjscx);
+  delete workletjscx;
+}
+
+/* static */
+bool WorkletThread::IsOnWorkletThread() {
   CycleCollectedJSContext* ccjscx = CycleCollectedJSContext::Get();
   return ccjscx && ccjscx->GetAsWorkletJSContext();
 }
 
-/* static */ void WorkletThread::AssertIsOnWorkletThread() {
+/* static */
+void WorkletThread::AssertIsOnWorkletThread() {
   MOZ_ASSERT(IsOnWorkletThread());
 }
 

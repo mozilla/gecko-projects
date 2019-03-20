@@ -8,7 +8,6 @@
 
 #include "blink/PeriodicWave.h"
 
-#include "mozilla/AutoplayPermissionManager.h"
 #include "mozilla/ErrorResult.h"
 #include "mozilla/NotNull.h"
 #include "mozilla/OwningNonNull.h"
@@ -59,6 +58,7 @@
 #include "DynamicsCompressorNode.h"
 #include "GainNode.h"
 #include "IIRFilterNode.h"
+#include "js/ArrayBuffer.h"  // JS::StealArrayBufferContents
 #include "MediaElementAudioSourceNode.h"
 #include "MediaStreamAudioDestinationNode.h"
 #include "MediaStreamAudioSourceNode.h"
@@ -94,6 +94,7 @@ NS_IMPL_CYCLE_COLLECTION_CLASS(AudioContext)
 NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(AudioContext)
   NS_IMPL_CYCLE_COLLECTION_UNLINK(mDestination)
   NS_IMPL_CYCLE_COLLECTION_UNLINK(mListener)
+  NS_IMPL_CYCLE_COLLECTION_UNLINK(mWorklet)
   NS_IMPL_CYCLE_COLLECTION_UNLINK(mPromiseGripArray)
   NS_IMPL_CYCLE_COLLECTION_UNLINK(mPendingResumePromises)
   if (!tmp->mIsStarted) {
@@ -112,6 +113,7 @@ NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN_INHERITED(AudioContext,
                                                   DOMEventTargetHelper)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mDestination)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mListener)
+  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mWorklet)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mPromiseGripArray)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mPendingResumePromises)
   if (!tmp->mIsStarted) {
@@ -153,12 +155,25 @@ AudioContext::AudioContext(nsPIDOMWindowInner* aWindow, bool aIsOffline,
       mCloseCalled(false),
       mSuspendCalled(false),
       mIsDisconnecting(false),
-      mWasAllowedToStart(true) {
+      mWasAllowedToStart(true),
+      mSuspendedByContent(false),
+      mSuspendedByChrome(false),
+      mWasEverAllowedToStart(false),
+      mWasEverBlockedToStart(false),
+      mWouldBeAllowedToStart(true) {
   bool mute = aWindow->AddAudioContext(this);
 
   // Note: AudioDestinationNode needs an AudioContext that must already be
   // bound to the window.
   const bool allowedToStart = AutoplayPolicy::IsAllowedToPlay(*this);
+  // If an AudioContext is not allowed to start, we would postpone its state
+  // transition from `suspended` to `running` until sites explicitly call
+  // AudioContext.resume() or AudioScheduledSourceNode.start().
+  if (!allowedToStart) {
+    AUTOPLAY_LOG("AudioContext %p is not allowed to start", this);
+    mSuspendCalled = true;
+    ReportBlocked();
+  }
   mDestination = new AudioDestinationNode(this, aIsOffline, allowedToStart,
                                           aNumberOfChannels, aLength);
 
@@ -167,21 +182,14 @@ AudioContext::AudioContext(nsPIDOMWindowInner* aWindow, bool aIsOffline,
     Mute();
   }
 
-  // If an AudioContext is not allowed to start, we would postpone its state
-  // transition from `suspended` to `running` until sites explicitly call
-  // AudioContext.resume() or AudioScheduledSourceNode.start().
-  if (!allowedToStart) {
-    AUTOPLAY_LOG("AudioContext %p is not allowed to start", this);
-    mWasAllowedToStart = false;
-    SuspendInternal(nullptr);
-    DispatchBlockedEvent();
-  }
+  UpdateAutoplayAssumptionStatus();
 
   FFTBlock::MainThreadInit();
 }
 
-void AudioContext::NotifyScheduledSourceNodeStarted() {
+void AudioContext::StartBlockedAudioContextIfAllowed() {
   MOZ_ASSERT(NS_IsMainThread());
+  MaybeUpdateAutoplayTelemetry();
   // Only try to start AudioContext when AudioContext was not allowed to start.
   if (mWasAllowedToStart) {
     return;
@@ -190,48 +198,15 @@ void AudioContext::NotifyScheduledSourceNodeStarted() {
   const bool isAllowedToPlay = AutoplayPolicy::IsAllowedToPlay(*this);
   AUTOPLAY_LOG("Trying to start AudioContext %p, IsAllowedToPlay=%d", this,
                isAllowedToPlay);
-  if (isAllowedToPlay) {
+
+  // Only start the AudioContext if this resume() call was initiated by content,
+  // not if it was a result of the AudioContext starting after having been
+  // blocked because of the auto-play policy.
+  if (isAllowedToPlay && !mSuspendedByContent) {
     ResumeInternal();
   } else {
-    EnsureAutoplayRequested();
+    ReportBlocked();
   }
-}
-
-void AudioContext::EnsureAutoplayRequested() {
-  nsPIDOMWindowInner* parent = GetParentObject();
-  if (!parent || !parent->AsGlobal()) {
-    return;
-  }
-
-  RefPtr<AutoplayPermissionManager> request =
-      AutoplayPolicy::RequestFor(*(parent->GetExtantDoc()));
-  if (!request) {
-    return;
-  }
-
-  AUTOPLAY_LOG("AudioContext %p EnsureAutoplayRequested %p", this,
-               request.get());
-  RefPtr<AudioContext> self = this;
-  request->RequestWithPrompt()->Then(
-      parent->AsGlobal()->AbstractMainThreadFor(TaskCategory::Other), __func__,
-      [self, request](bool aApproved) {
-        AUTOPLAY_LOG("%p Autoplay request approved request=%p", self.get(),
-                     request.get());
-        self->mWasAllowedToStart = true;
-        self->ResumeInternal();
-      },
-      [self, request](nsresult aError) {
-        AUTOPLAY_LOG("%p Autoplay request denied request=%p", self.get(),
-                     request.get());
-        self->mWasAllowedToStart = false;
-        self->DispatchBlockedEvent();
-        nsIDocument* doc = self->GetParentObject()
-                               ? self->GetParentObject()->GetExtantDoc()
-                               : nullptr;
-        nsContentUtils::ReportToConsole(
-            nsIScriptError::warningFlag, NS_LITERAL_CSTRING("Media"), doc,
-            nsContentUtils::eDOM_PROPERTIES, "BlockAutoplayError");
-      });
 }
 
 nsresult AudioContext::Init() {
@@ -266,7 +241,8 @@ JSObject* AudioContext::WrapObject(JSContext* aCx,
   }
 }
 
-/* static */ already_AddRefed<AudioContext> AudioContext::Constructor(
+/* static */
+already_AddRefed<AudioContext> AudioContext::Constructor(
     const GlobalObject& aGlobal, const AudioContextOptions& aOptions,
     ErrorResult& aRv) {
   // Audio playback is not yet supported when recording or replaying. See bug
@@ -309,14 +285,16 @@ JSObject* AudioContext::WrapObject(JSContext* aCx,
   return object.forget();
 }
 
-/* static */ already_AddRefed<AudioContext> AudioContext::Constructor(
+/* static */
+already_AddRefed<AudioContext> AudioContext::Constructor(
     const GlobalObject& aGlobal, const OfflineAudioContextOptions& aOptions,
     ErrorResult& aRv) {
   return Constructor(aGlobal, aOptions.mNumberOfChannels, aOptions.mLength,
                      aOptions.mSampleRate, aRv);
 }
 
-/* static */ already_AddRefed<AudioContext> AudioContext::Constructor(
+/* static */
+already_AddRefed<AudioContext> AudioContext::Constructor(
     const GlobalObject& aGlobal, uint32_t aNumberOfChannels, uint32_t aLength,
     float aSampleRate, ErrorResult& aRv) {
   // Audio playback is not yet supported when recording or replaying. See bug
@@ -565,8 +543,8 @@ bool AudioContext::IsRunning() const {
 
 already_AddRefed<Promise> AudioContext::DecodeAudioData(
     const ArrayBuffer& aBuffer,
-    const Optional<OwningNonNull<DecodeSuccessCallback> >& aSuccessCallback,
-    const Optional<OwningNonNull<DecodeErrorCallback> >& aFailureCallback,
+    const Optional<OwningNonNull<DecodeSuccessCallback>>& aSuccessCallback,
+    const Optional<OwningNonNull<DecodeErrorCallback>>& aFailureCallback,
     ErrorResult& aRv) {
   nsCOMPtr<nsIGlobalObject> parentObject = do_QueryInterface(GetParentObject());
   RefPtr<Promise> promise;
@@ -574,7 +552,8 @@ already_AddRefed<Promise> AudioContext::DecodeAudioData(
   jsapi.Init();
   JSContext* cx = jsapi.cx();
 
-  JS::Rooted<JSObject*> obj(cx, js::CheckedUnwrap(aBuffer.Obj()));
+  // CheckedUnwrapStatic is OK, since we know we have an ArrayBuffer.
+  JS::Rooted<JSObject*> obj(cx, js::CheckedUnwrapStatic(aBuffer.Obj()));
   if (!obj) {
     aRv.Throw(NS_ERROR_DOM_SECURITY_ERR);
     return nullptr;
@@ -606,7 +585,7 @@ already_AddRefed<Promise> AudioContext::DecodeAudioData(
   // Detach the array buffer
   size_t length = aBuffer.Length();
 
-  uint8_t* data = static_cast<uint8_t*>(JS_StealArrayBufferContents(cx, obj));
+  uint8_t* data = static_cast<uint8_t*>(JS::StealArrayBufferContents(cx, obj));
 
   // Sniff the content of the media.
   // Failed type sniffing will be handled by AsyncDecodeWebAudio.
@@ -712,6 +691,10 @@ void AudioContext::BindToOwner(nsIGlobalObject* aNew) {
 }
 
 void AudioContext::Shutdown() {
+  // Avoid resend the Telemetry data.
+  if (!mIsShutDown) {
+    MaybeUpdateAutoplayTelemetryWhenShutdown();
+  }
   mIsShutDown = true;
 
   // We don't want to touch promises if the global is going away soon.
@@ -804,7 +787,7 @@ class OnStateChangeTask final : public Runnable {
       return NS_ERROR_FAILURE;
     }
 
-    nsIDocument* doc = parent->GetExtantDoc();
+    Document* doc = parent->GetExtantDoc();
     if (!doc) {
       return NS_ERROR_FAILURE;
     }
@@ -852,8 +835,8 @@ void AudioContext::OnStateChanged(void* aPromise, AudioContextState aNewState) {
   }
 
 #ifndef WIN32  // Bug 1170547
-#ifndef XP_MACOSX
-#ifdef DEBUG
+#  ifndef XP_MACOSX
+#    ifdef DEBUG
 
   if (!((mAudioContextState == AudioContextState::Suspended &&
          aNewState == AudioContextState::Running) ||
@@ -870,9 +853,9 @@ void AudioContext::OnStateChanged(void* aPromise, AudioContextState aNewState) {
     MOZ_ASSERT(false);
   }
 
-#endif  // DEBUG
-#endif  // XP_MACOSX
-#endif  // WIN32
+#    endif  // DEBUG
+#  endif    // XP_MACOSX
+#endif      // WIN32
 
   if (aPromise) {
     Promise* promise = reinterpret_cast<Promise*>(aPromise);
@@ -907,9 +890,20 @@ void AudioContext::OnStateChanged(void* aPromise, AudioContextState aNewState) {
 nsTArray<MediaStream*> AudioContext::GetAllStreams() const {
   nsTArray<MediaStream*> streams;
   for (auto iter = mAllNodes.ConstIter(); !iter.Done(); iter.Next()) {
-    MediaStream* s = iter.Get()->GetKey()->GetStream();
+    AudioNode* node = iter.Get()->GetKey();
+    MediaStream* s = node->GetStream();
     if (s) {
       streams.AppendElement(s);
+    }
+    // Add the streams for the AudioParam that have an AudioNode input.
+    const nsTArray<RefPtr<AudioParam>>& audioParams = node->OutputParams();
+    if (!audioParams.IsEmpty()) {
+      for (auto& param : audioParams) {
+        s = param->GetStream();
+        if (s && !streams.Contains(s)) {
+          streams.AppendElement(s);
+        }
+      }
     }
   }
   return streams;
@@ -932,9 +926,21 @@ already_AddRefed<Promise> AudioContext::Suspend(ErrorResult& aRv) {
     return promise.forget();
   }
 
+  mSuspendedByContent = true;
   mPromiseGripArray.AppendElement(promise);
   SuspendInternal(promise);
   return promise.forget();
+}
+
+void AudioContext::SuspendFromChrome() {
+  // Not support suspend call for these situations.
+  if (mAudioContextState == AudioContextState::Suspended || mIsOffline ||
+      (mAudioContextState == AudioContextState::Closed || mCloseCalled) ||
+      mIsShutDown) {
+    return;
+  }
+  SuspendInternal(nullptr);
+  mSuspendedByChrome = true;
 }
 
 void AudioContext::SuspendInternal(void* aPromise) {
@@ -952,6 +958,17 @@ void AudioContext::SuspendInternal(void* aPromise) {
                                       AudioContextOperation::Suspend, aPromise);
 
   mSuspendCalled = true;
+}
+
+void AudioContext::ResumeFromChrome() {
+  // Not support resume call for these situations.
+  if (mAudioContextState == AudioContextState::Running || mIsOffline ||
+      (mAudioContextState == AudioContextState::Closed || mCloseCalled) ||
+      mIsShutDown || !mSuspendedByChrome) {
+    return;
+  }
+  ResumeInternal();
+  mSuspendedByChrome = false;
 }
 
 already_AddRefed<Promise> AudioContext::Resume(ErrorResult& aRv) {
@@ -972,23 +989,27 @@ already_AddRefed<Promise> AudioContext::Resume(ErrorResult& aRv) {
     return promise.forget();
   }
 
+  mSuspendedByContent = false;
   mPendingResumePromises.AppendElement(promise);
 
   const bool isAllowedToPlay = AutoplayPolicy::IsAllowedToPlay(*this);
   AUTOPLAY_LOG("Trying to resume AudioContext %p, IsAllowedToPlay=%d", this,
                isAllowedToPlay);
   if (isAllowedToPlay) {
-    mWasAllowedToStart = true;
     ResumeInternal();
-  } else if (!isAllowedToPlay && !mWasAllowedToStart) {
-    EnsureAutoplayRequested();
+  } else {
+    ReportBlocked();
   }
+
+  MaybeUpdateAutoplayTelemetry();
 
   return promise.forget();
 }
 
 void AudioContext::ResumeInternal() {
   AUTOPLAY_LOG("Allow to resume AudioContext %p", this);
+  mWasAllowedToStart = true;
+
   Destination()->Resume();
 
   nsTArray<MediaStream*> streams;
@@ -1002,9 +1023,56 @@ void AudioContext::ResumeInternal() {
   Graph()->ApplyAudioContextOperation(DestinationStream(), streams,
                                       AudioContextOperation::Resume, nullptr);
   mSuspendCalled = false;
+  // AudioContext will be resumed later, so we have no need to keep the suspend
+  // flag from Chrome, in case to avoid to resume the suspended Audio Context
+  // which is requested by content.
+  mSuspendedByChrome = false;
 }
 
-void AudioContext::DispatchBlockedEvent() {
+void AudioContext::UpdateAutoplayAssumptionStatus() {
+  if (AutoplayPolicy::WouldBeAllowedToPlayIfAutoplayDisabled(*this)) {
+    mWasEverAllowedToStart |= true;
+    mWouldBeAllowedToStart = true;
+  } else {
+    mWasEverBlockedToStart |= true;
+    mWouldBeAllowedToStart = false;
+  }
+}
+
+void AudioContext::MaybeUpdateAutoplayTelemetry() {
+  // Exclude offline AudioContext because it's always allowed to start.
+  if (mIsOffline) {
+    return;
+  }
+
+  if (AutoplayPolicy::WouldBeAllowedToPlayIfAutoplayDisabled(*this) &&
+      !mWouldBeAllowedToStart) {
+    AccumulateCategorical(
+        mozilla::Telemetry::LABELS_WEB_AUDIO_AUTOPLAY::AllowedAfterBlocked);
+  }
+  UpdateAutoplayAssumptionStatus();
+}
+
+void AudioContext::MaybeUpdateAutoplayTelemetryWhenShutdown() {
+  // Exclude offline AudioContext because it's always allowed to start.
+  if (mIsOffline) {
+    return;
+  }
+
+  if (mWasEverAllowedToStart && !mWasEverBlockedToStart) {
+    AccumulateCategorical(
+        mozilla::Telemetry::LABELS_WEB_AUDIO_AUTOPLAY::NeverBlocked);
+  } else if (!mWasEverAllowedToStart && mWasEverBlockedToStart) {
+    AccumulateCategorical(
+        mozilla::Telemetry::LABELS_WEB_AUDIO_AUTOPLAY::NeverAllowed);
+  }
+}
+
+void AudioContext::ReportBlocked() {
+  ReportToConsole(nsIScriptError::warningFlag,
+                  "BlockAutoplayWebAudioStartError");
+  mWasAllowedToStart = false;
+
   if (!StaticPrefs::MediaBlockEventEnabled()) {
     return;
   }
@@ -1017,7 +1085,7 @@ void AudioContext::DispatchBlockedEvent() {
           return;
         }
 
-        nsIDocument* doc = parent->GetExtantDoc();
+        Document* doc = parent->GetExtantDoc();
         if (!doc) {
           return;
         }
@@ -1134,6 +1202,13 @@ void AudioContext::Unmute() const {
   }
 }
 
+void AudioContext::SetParamMapForWorkletName(
+    const nsAString& aName, AudioParamDescriptorMap* aParamMap) {
+  MOZ_ASSERT(!mWorkletParamDescriptors.GetValue(aName));
+  Unused << mWorkletParamDescriptors.Put(aName, std::move(*aParamMap),
+                                         fallible);
+}
+
 size_t AudioContext::SizeOfIncludingThis(
     mozilla::MallocSizeOf aMallocSizeOf) const {
   // AudioNodes are tracked separately because we do not want the AudioContext
@@ -1180,6 +1255,15 @@ BasicWaveFormCache* AudioContext::GetBasicWaveFormCache() {
     mBasicWaveFormCache = new BasicWaveFormCache(SampleRate());
   }
   return mBasicWaveFormCache;
+}
+
+void AudioContext::ReportToConsole(uint32_t aErrorFlags,
+                                   const char* aMsg) const {
+  MOZ_ASSERT(aMsg);
+  Document* doc =
+      GetParentObject() ? GetParentObject()->GetExtantDoc() : nullptr;
+  nsContentUtils::ReportToConsole(aErrorFlags, NS_LITERAL_CSTRING("Media"), doc,
+                                  nsContentUtils::eDOM_PROPERTIES, aMsg);
 }
 
 BasicWaveFormCache::BasicWaveFormCache(uint32_t aSampleRate)

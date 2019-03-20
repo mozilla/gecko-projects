@@ -19,6 +19,7 @@
 
 #include "js/AllocPolicy.h"
 #include "js/HashTable.h"
+#include "js/TraceLoggerAPI.h"
 #include "js/TypeDecls.h"
 #include "js/Vector.h"
 #include "threading/LockGuard.h"
@@ -199,6 +200,7 @@ class TraceLoggerEventPayload {
   mozilla::Maybe<uint32_t> column() { return col_; }
   uint32_t textId() { return textId_; }
   uint32_t dictionaryId() { return dictionaryId_; }
+  void setDictionaryId(uint32_t dictId) { dictionaryId_ = dictId; }
   uint32_t uses() { return uses_; }
 
   // Payloads may have their use count change at any time, *except* the count
@@ -218,6 +220,12 @@ class TraceLoggerEventPayload {
 // Per thread trace logger state.
 class TraceLoggerThread : public mozilla::LinkedListElement<TraceLoggerThread> {
 #ifdef JS_TRACE_LOGGING
+  friend JS::TraceLoggerIdImpl;
+  friend JS::TraceLoggerTimeStampImpl;
+  friend JS::TraceLoggerDurationImpl;
+  friend JS::TraceLoggerLineNoImpl;
+  friend JS::TraceLoggerColNoImpl;
+
  private:
   uint32_t enabled_;
   bool failed;
@@ -231,10 +239,10 @@ class TraceLoggerThread : public mozilla::LinkedListElement<TraceLoggerThread> {
   // event.
   uint32_t iteration_;
 
-#ifdef DEBUG
+#  ifdef DEBUG
   typedef Vector<uint32_t, 1, js::SystemAllocPolicy> GraphStack;
   GraphStack graphStack;
-#endif
+#  endif
 
  public:
   AutoTraceLog* top;
@@ -345,9 +353,10 @@ class TraceLoggerThread : public mozilla::LinkedListElement<TraceLoggerThread> {
 // Process wide trace logger state.
 class TraceLoggerThreadState {
 #ifdef JS_TRACE_LOGGING
-#ifdef DEBUG
+  friend JS::TraceLoggerDictionaryImpl;
+#  ifdef DEBUG
   bool initialized;
-#endif
+#  endif
 
   bool enabledTextIds[TraceLogger_Last];
   bool mainThreadEnabled;
@@ -397,9 +406,9 @@ class TraceLoggerThreadState {
 
   TraceLoggerThreadState()
       :
-#ifdef DEBUG
+#  ifdef DEBUG
         initialized(false),
-#endif
+#  endif
         mainThreadEnabled(false),
         helperThreadEnabled(false),
         graphEnabled(false),
@@ -418,6 +427,9 @@ class TraceLoggerThreadState {
   void enableFrontendLogging();
 
   void clear();
+  bool remapDictionaryEntries(
+      mozilla::Vector<UniqueChars, 0, SystemAllocPolicy>* newDictionary,
+      uint32_t* newNextDictionaryId);
 
   TraceLoggerThread* forCurrentThread(JSContext* cx);
   void destroyLogger(TraceLoggerThread* logger);

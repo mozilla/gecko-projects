@@ -14,7 +14,7 @@ namespace a11y {
 
 class DocAccessibleWrap : public DocAccessible {
  public:
-  DocAccessibleWrap(nsIDocument* aDocument, nsIPresShell* aPresShell);
+  DocAccessibleWrap(Document* aDocument, nsIPresShell* aPresShell);
   virtual ~DocAccessibleWrap();
 
   virtual nsresult HandleAccEvent(AccEvent* aEvent) override;
@@ -32,6 +32,8 @@ class DocAccessibleWrap : public DocAccessible {
 
   void CacheFocusPath(AccessibleWrap* aAccessible);
 
+  void CacheViewport();
+
   enum {
     eBatch_Viewport = 0,
     eBatch_FocusPath = 1,
@@ -47,8 +49,6 @@ class DocAccessibleWrap : public DocAccessible {
   virtual void DoInitialUpdate() override;
 
  private:
-  void CacheViewport();
-
   void UpdateFocusPathBounds();
 
   static void CacheViewportCallback(nsITimer* aTimer, void* aDocAccParam);

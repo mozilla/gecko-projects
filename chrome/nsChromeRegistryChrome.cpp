@@ -11,9 +11,9 @@
 #include "nsChromeRegistryChrome.h"
 
 #if defined(XP_WIN)
-#include <windows.h>
+#  include <windows.h>
 #elif defined(XP_MACOSX)
-#include <CoreServices/CoreServices.h>
+#  include <CoreServices/CoreServices.h>
 #endif
 
 #include "nsArrayEnumerator.h"
@@ -353,7 +353,8 @@ void nsChromeRegistryChrome::SendRegisteredChrome(
   }
 }
 
-/* static */ void nsChromeRegistryChrome::ChromePackageFromPackageEntry(
+/* static */
+void nsChromeRegistryChrome::ChromePackageFromPackageEntry(
     const nsACString& aPackageName, PackageEntry* aPackage,
     ChromePackage* aChromePackage, const nsCString& aSelectedSkin) {
   nsAutoCString appLocale;

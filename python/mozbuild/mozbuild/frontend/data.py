@@ -373,6 +373,20 @@ class IPDLCollection(ContextDerived):
         return sorted(set(p for p, _ in self.unified_source_mapping))
 
 
+class XPCOMComponentManifests(ContextDerived):
+    """Collects XPCOM manifest files during the build."""
+
+    def __init__(self, context):
+        ContextDerived.__init__(self, context)
+        self.manifests = set()
+
+    def all_sources(self):
+        return self.manifests
+
+    def all_source_files(self):
+        return []
+
+
 class LinkageWrongKindError(Exception):
     """Error thrown when trying to link objects of the wrong kind"""
 
@@ -1166,6 +1180,7 @@ class GeneratedFile(ContextDerived):
         self.force = force
 
         suffixes = (
+            '.asm',
             '.c',
             '.cpp',
             '.h',
@@ -1173,6 +1188,8 @@ class GeneratedFile(ContextDerived):
             '.py',
             '.rs',
             'node.stub', # To avoid VPATH issues with installing node files: https://bugzilla.mozilla.org/show_bug.cgi?id=1461714#c55
+            'android_apks', # We need to compile Java to generate JNI wrappers for native code compilation to consume.
+            '.profdata',
         )
         self.required_for_compile = [f for f in self.outputs if f.endswith(suffixes) or 'stl_wrappers/' in f]
 

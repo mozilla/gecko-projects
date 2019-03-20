@@ -307,11 +307,15 @@ void CodeGenerator::visitWasmSelect(LWasmSelect* ins) {
 
   masm.test32(cond, cond);
 
-  if (mirType == MIRType::Int32) {
+  if (mirType == MIRType::Int32 || mirType == MIRType::RefOrNull) {
     Register out = ToRegister(ins->output());
     MOZ_ASSERT(ToRegister(ins->trueExpr()) == out,
                "true expr input is reused for output");
-    masm.cmovzl(falseExpr, out);
+    if (mirType == MIRType::Int32) {
+      masm.cmovz32(falseExpr, out);
+    } else {
+      masm.cmovzPtr(falseExpr, out);
+    }
     return;
   }
 
@@ -755,8 +759,8 @@ void CodeGenerator::visitPowHalfD(LPowHalfD* ins) {
   }
 
   if (!ins->mir()->operandIsNeverNegativeZero()) {
-    // Math.pow(-0, 0.5) == 0 == Math.pow(0, 0.5). Adding 0 converts any -0 to
-    // 0.
+    // Math.pow(-0, 0.5) == 0 == Math.pow(0, 0.5).
+    // Adding 0 converts any -0 to 0.
     masm.zeroDouble(scratch);
     masm.addDouble(input, scratch);
     masm.vsqrtsd(scratch, output, output);

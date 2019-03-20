@@ -4,10 +4,10 @@
 
 "use strict";
 
-ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
+const {XPCOMUtils} = ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
 
-const {InvalidArgumentError} = ChromeUtils.import("chrome://marionette/content/error.js", {});
-const {Log} = ChromeUtils.import("chrome://marionette/content/log.js", {});
+const {InvalidArgumentError} = ChromeUtils.import("chrome://marionette/content/error.js");
+const {Log} = ChromeUtils.import("chrome://marionette/content/log.js");
 
 XPCOMUtils.defineLazyGetter(this, "logger", Log.get);
 XPCOMUtils.defineLazyGlobalGetters(this, ["crypto"]);
@@ -72,14 +72,12 @@ capture.element = function(node, highlights = []) {
  *     The canvas element where the viewport has been painted on.
  */
 capture.viewport = function(win, highlights = []) {
-  let rootNode = win.document.documentElement;
-
   return capture.canvas(
       win,
       win.pageXOffset,
       win.pageYOffset,
-      rootNode.clientWidth,
-      rootNode.clientHeight,
+      win.innerWidth,
+      win.innerHeight,
       {highlights});
 };
 

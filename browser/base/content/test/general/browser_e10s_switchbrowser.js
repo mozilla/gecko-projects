@@ -48,7 +48,7 @@ var check_history = async function() {
 
   for (let i = 0; i < count; i++) {
     let entry = sessionHistory.entries[i];
-    info("Checking History Entry:", entry.uri);
+    info("Checking History Entry: " + entry.uri);
     is(entry.uri, gExpectedHistory.entries[i].uri, "Should have the right URI");
     is(entry.title, gExpectedHistory.entries[i].title, "Should have the right title");
   }
@@ -63,9 +63,10 @@ function clear_history() {
 var waitForLoad = async function(uri) {
   info("Loading " + uri);
   // Longwinded but this ensures we don't just shortcut to LoadInNewProcess
-  gBrowser.selectedBrowser.webNavigation.loadURI(uri, Ci.nsIWebNavigation.LOAD_FLAGS_NONE,
-                                                 null, null, null,
-                                                 Services.scriptSecurityManager.getSystemPrincipal());
+  let loadURIOptions = {
+    triggeringPrincipal: Services.scriptSecurityManager.getSystemPrincipal(),
+  };
+  gBrowser.selectedBrowser.webNavigation.loadURI(uri, loadURIOptions);
 
   await BrowserTestUtils.browserStopped(gBrowser);
   gExpectedHistory.index++;
@@ -85,7 +86,6 @@ var waitForLoadWithFlags = async function(uri, flags = Ci.nsIWebNavigation.LOAD_
 
   await BrowserTestUtils.browserStopped(gBrowser);
   if (!(flags & Ci.nsIWebNavigation.LOAD_FLAGS_BYPASS_HISTORY)) {
-
     if (flags & Ci.nsIWebNavigation.LOAD_FLAGS_REPLACE_HISTORY) {
       gExpectedHistory.entries.pop();
     } else {
@@ -136,6 +136,8 @@ add_task(async function test_navigation() {
   info("3");
   // Load a non-remote page
   await waitForLoad("about:robots");
+  await TestUtils.waitForCondition(() => gBrowser.selectedBrowser.contentTitle != "about:robots",
+    "Waiting for about:robots title to update");
   is(gBrowser.selectedBrowser.isRemoteBrowser, false, "Remote attribute should be correct");
   is(gBrowser.selectedBrowser.permanentKey, permanentKey, "browser.permanentKey is still the same");
   await check_history();
@@ -239,6 +241,8 @@ add_task(async function test_loadflags() {
   // Create a tab and load a remote page in it
   gBrowser.selectedTab = BrowserTestUtils.addTab(gBrowser, "about:blank", {skipAnimation: true});
   await waitForLoadWithFlags("about:robots");
+  await TestUtils.waitForCondition(() => gBrowser.selectedBrowser.contentTitle != "about:robots",
+    "Waiting for about:robots title to update");
   is(gBrowser.selectedBrowser.isRemoteBrowser, false, "Remote attribute should be correct");
   await check_history();
 
@@ -251,6 +255,8 @@ add_task(async function test_loadflags() {
   info("3");
   // Load a non-remote page
   await waitForLoadWithFlags("about:robots");
+  await TestUtils.waitForCondition(() => gBrowser.selectedBrowser.contentTitle != "about:robots",
+    "Waiting for about:robots title to update");
   is(gBrowser.selectedBrowser.isRemoteBrowser, false, "Remote attribute should be correct");
   await check_history();
 

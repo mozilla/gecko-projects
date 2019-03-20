@@ -6,10 +6,7 @@ ChromeUtils.import("resource://normandy/lib/Uptake.jsm", this);
 class NoopAction extends BaseAction {
   constructor() {
     super();
-    // this._testPreExecutionFlag is set by _preExecution, called in the constructor
-    if (this._testPreExecutionFlag === undefined) {
-      this._testPreExecutionFlag = false;
-    }
+    this._testPreExecutionFlag = false;
     this._testRunFlag = false;
     this._testFinalizeFlag = false;
   }
@@ -52,18 +49,25 @@ decorate_task(
   withStub(Uptake, "reportRecipe"),
   withStub(Uptake, "reportAction"),
   async () => {
-    const action = new NoopAction();
-    is(action._testPreExecutionFlag, true, "_preExecution should be called on a new action");
+    let action = new NoopAction();
+    is(action._testPreExecutionFlag, false, "_preExecution should not have been called on a new action");
     is(action._testRunFlag, false, "_run has should not have been called on a new action");
     is(action._testFinalizeFlag, false, "_finalize should not be called on a new action");
 
     const recipe = recipeFactory();
     await action.runRecipe(recipe);
+    is(action._testPreExecutionFlag, true, "_preExecution should be called when a recipe is executed");
     is(action._testRunFlag, true, "_run should be called when a recipe is executed");
     is(action._testFinalizeFlag, false, "_finalize should not have been called when a recipe is executed");
 
     await action.finalize();
     is(action._testFinalizeFlag, true, "_finalizeExecution should be called when finalize was called");
+
+    action = new NoopAction();
+    await action.finalize();
+    is(action._testPreExecutionFlag, true, "_preExecution should be called when finalized even if no recipes");
+    is(action._testRunFlag, false, "_run should be called if no recipes were run");
+    is(action._testFinalizeFlag, true, "_finalize should be called when finalized");
   }
 );
 
@@ -76,7 +80,7 @@ decorate_task(
     await action.runRecipe(recipe);
     Assert.deepEqual(
       reportRecipeStub.args,
-      [[recipe.id, Uptake.RECIPE_SUCCESS]],
+      [[recipe, Uptake.RECIPE_SUCCESS]],
       "per-recipe uptake telemetry should be reported",
     );
   },
@@ -116,7 +120,7 @@ decorate_task(
 
     Assert.deepEqual(
       reportRecipeStub.args,
-      [[recipe1.id, Uptake.RECIPE_SUCCESS]],
+      [[recipe1, Uptake.RECIPE_SUCCESS]],
       "Only recipes executed prior to finalizer should report uptake telemetry",
     );
   },
@@ -129,12 +133,13 @@ decorate_task(
   async function(reportRecipeStub, reportActionStub) {
     const recipe = recipeFactory();
     const action = new FailPreExecutionAction();
-    is(action.state, FailPreExecutionAction.STATE_FAILED, "Action should fail during pre-execution fail");
-    is(action.lastError, NoopAction._errorToThrow, "The thrown error should be stored in lastError");
+    is(action.state, FailPreExecutionAction.STATE_PREPARING, "Pre-execution should not happen immediately");
 
-    // Should not throw, even though the action is in a disabled state.
+    // Should fail, putting the action into a "failed" state, but the
+    // entry point `runRecipe()` itself should not throw an exception.
     await action.runRecipe(recipe);
-    is(action.state, FailPreExecutionAction.STATE_FAILED, "Action should remain failed");
+    is(action.state, FailPreExecutionAction.STATE_FAILED, "Action fails if pre-execution fails");
+    is(action.lastError, NoopAction._errorToThrow, "The thrown error should be stored in lastError");
 
     // Should not throw, even though the action is in a disabled state.
     await action.finalize();
@@ -146,7 +151,7 @@ decorate_task(
 
     Assert.deepEqual(
       reportRecipeStub.args,
-      [[recipe.id, Uptake.RECIPE_ACTION_DISABLED]],
+      [[recipe, Uptake.RECIPE_ACTION_DISABLED]],
       "Recipe should report recipe status as action disabled",
     );
 
@@ -174,7 +179,7 @@ decorate_task(
 
     Assert.deepEqual(
       reportRecipeStub.args,
-      [[recipe.id, Uptake.RECIPE_EXECUTION_ERROR]],
+      [[recipe, Uptake.RECIPE_EXECUTION_ERROR]],
       "Recipe should report recipe execution error",
     );
 
@@ -198,7 +203,7 @@ decorate_task(
 
     Assert.deepEqual(
       reportRecipeStub.args,
-      [[recipe.id, Uptake.RECIPE_SUCCESS]],
+      [[recipe, Uptake.RECIPE_SUCCESS]],
       "Recipe should report success",
     );
 
@@ -238,7 +243,7 @@ decorate_task(
 
     Assert.deepEqual(
       reportRecipeStub.args,
-      [[recipe.id, Uptake.RECIPE_ACTION_DISABLED]],
+      [[recipe, Uptake.RECIPE_ACTION_DISABLED]],
       "Recipe should report recipe status as action disabled",
     );
   },

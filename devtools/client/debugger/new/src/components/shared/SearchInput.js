@@ -8,7 +8,7 @@ import React, { Component } from "react";
 
 import { CloseButton } from "./Button";
 
-import Svg from "./Svg";
+import AccessibleImage from "./AccessibleImage";
 import classnames from "classnames";
 import "./SearchInput.css";
 
@@ -23,7 +23,7 @@ const arrowBtn = (onClick, type, className, tooltip) => {
 
   return (
     <button {...props}>
-      <Svg name={type} />
+      <AccessibleImage className={type} />
     </button>
   );
 };
@@ -48,7 +48,8 @@ type Props = {
   showErrorEmoji: boolean,
   size: string,
   summaryMsg: string,
-  showClose: boolean
+  showClose: boolean,
+  isLoading: boolean
 };
 
 type State = {
@@ -103,8 +104,7 @@ class SearchInput extends Component<Props, State> {
   }
 
   renderSvg() {
-    const svgName = this.props.showErrorEmoji ? "sad-face" : "magnifying-glass";
-    return <Svg name={svgName} />;
+    return <AccessibleImage className="search" />;
   }
 
   renderArrowButtons() {
@@ -196,7 +196,14 @@ class SearchInput extends Component<Props, State> {
       return null;
     }
 
-    return <div className="summary">{summaryMsg}</div>;
+    return <div className="search-field-summary">{summaryMsg}</div>;
+  }
+
+  renderSpinner() {
+    const { isLoading } = this.props;
+    if (isLoading) {
+      return <AccessibleImage className="loader" />;
+    }
   }
 
   renderNav() {
@@ -245,7 +252,7 @@ class SearchInput extends Component<Props, State> {
 
     return (
       <div
-        className={classnames("search-shadow", {
+        className={classnames("search-outline", {
           focused: this.state.inputFocused
         })}
       >
@@ -258,6 +265,7 @@ class SearchInput extends Component<Props, State> {
         >
           {this.renderSvg()}
           <input {...inputProps} />
+          {this.renderSpinner()}
           {this.renderSummaryMsg()}
           {this.renderNav()}
           {showClose && (

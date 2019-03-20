@@ -38,13 +38,15 @@ mozilla::LazyLogModule gLayoutPrintingLog("printing-layout");
 
 nsSimplePageSequenceFrame* NS_NewSimplePageSequenceFrame(
     nsIPresShell* aPresShell, ComputedStyle* aStyle) {
-  return new (aPresShell) nsSimplePageSequenceFrame(aStyle);
+  return new (aPresShell)
+      nsSimplePageSequenceFrame(aStyle, aPresShell->GetPresContext());
 }
 
 NS_IMPL_FRAMEARENA_HELPERS(nsSimplePageSequenceFrame)
 
-nsSimplePageSequenceFrame::nsSimplePageSequenceFrame(ComputedStyle* aStyle)
-    : nsContainerFrame(aStyle, kClassID),
+nsSimplePageSequenceFrame::nsSimplePageSequenceFrame(
+    ComputedStyle* aStyle, nsPresContext* aPresContext)
+    : nsContainerFrame(aStyle, aPresContext, kClassID),
       mTotalPages(-1),
       mCalledBeginPage(false),
       mCurrentCanvasListSetup(false) {
@@ -53,8 +55,11 @@ nsSimplePageSequenceFrame::nsSimplePageSequenceFrame(ComputedStyle* aStyle)
 
   // XXX Unsafe to assume successful allocation
   mPageData = new nsSharedPageData();
-  mPageData->mHeadFootFont = *PresContext()->GetDefaultFont(
-      kGenericFont_serif, aStyle->StyleFont()->mLanguage);
+  mPageData->mHeadFootFont =
+      *PresContext()
+           ->Document()
+           ->GetFontPrefsForLang(aStyle->StyleFont()->mLanguage)
+           ->GetDefaultFont(kGenericFont_serif);
   mPageData->mHeadFootFont.size = nsPresContext::CSSPointsToAppUnits(10);
 
   // Doing this here so we only have to go get these formats once
@@ -68,7 +73,7 @@ nsSimplePageSequenceFrame::~nsSimplePageSequenceFrame() {
 }
 
 NS_QUERYFRAME_HEAD(nsSimplePageSequenceFrame)
-NS_QUERYFRAME_ENTRY(nsIPageSequenceFrame)
+  NS_QUERYFRAME_ENTRY(nsIPageSequenceFrame)
 NS_QUERYFRAME_TAIL_INHERITING(nsContainerFrame)
 
 //----------------------------------------------------------------------
@@ -711,8 +716,7 @@ void nsSimplePageSequenceFrame::BuildDisplayList(
       if (child->GetVisualOverflowRectRelativeToParent().Intersects(visible)) {
         nsDisplayListBuilder::AutoBuildingDisplayList buildingForChild(
             aBuilder, child, visible - child->GetPosition(),
-            visible - child->GetPosition(),
-            aBuilder->IsAtRootOfPseudoStackingContext());
+            visible - child->GetPosition());
         child->BuildDisplayListForStackingContext(aBuilder, &content);
         aBuilder->ResetMarkedFramesForDisplayList(this);
       }
@@ -721,7 +725,7 @@ void nsSimplePageSequenceFrame::BuildDisplayList(
   }
 
   content.AppendToTop(MakeDisplayItem<nsDisplayTransform>(
-      aBuilder, this, &content, content.GetBuildingRect(),
+      aBuilder, this, &content, content.GetBuildingRect(), 0,
       ::ComputePageSequenceTransform));
 
   aLists.Content()->AppendToTop(&content);

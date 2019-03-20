@@ -8,7 +8,7 @@
 #include "base/task.h"
 
 #ifdef OS_POSIX
-#include <errno.h>
+#  include <errno.h>
 #endif
 
 #include "mozilla/IntegerPrintfMacros.h"
@@ -25,14 +25,14 @@
 #include "nsPrintfCString.h"
 
 #if defined(MOZ_SANDBOX) && defined(XP_WIN)
-#include "mozilla/sandboxTarget.h"
+#  include "mozilla/sandboxTarget.h"
 #endif
 
 #if defined(XP_WIN)
-#include "aclapi.h"
-#include "sddl.h"
+#  include "aclapi.h"
+#  include "sddl.h"
 
-#include "mozilla/TypeTraits.h"
+#  include "mozilla/TypeTraits.h"
 #endif
 
 #include "nsAutoPtr.h"
@@ -171,14 +171,14 @@ bool DuplicateHandle(HANDLE aSourceHandle, DWORD aTargetProcessId,
                                aDesiredAccess, false, aOptions);
   }
 
-#if defined(MOZ_SANDBOX)
+#  if defined(MOZ_SANDBOX)
   // Try the broker next (will fail if not sandboxed).
   if (SandboxTarget::Instance()->BrokerDuplicateHandle(
           aSourceHandle, aTargetProcessId, aTargetHandle, aDesiredAccess,
           aOptions)) {
     return true;
   }
-#endif
+#  endif
 
   // Finally, see if we already have access to the process.
   ScopedProcessHandle targetProcess(
@@ -261,12 +261,12 @@ void FatalError(const char* aMsg, bool aIsParent) {
   } else {
     formattedMessage.AppendLiteral("\". abort()ing as a result.");
 #ifndef FUZZING
-    MOZ_CRASH_UNSAFE_OOL(formattedMessage.get());
+    MOZ_CRASH_UNSAFE(formattedMessage.get());
 #endif
   }
 }
 
-void LogicError(const char* aMsg) { MOZ_CRASH_UNSAFE_OOL(aMsg); }
+void LogicError(const char* aMsg) { MOZ_CRASH_UNSAFE(aMsg); }
 
 void ActorIdReadError(const char* aActorDescription) {
 #ifndef FUZZING
@@ -627,6 +627,11 @@ bool IToplevelProtocol::OpenWithAsyncPid(mozilla::ipc::Transport* aTransport,
   return GetIPCChannel()->Open(aTransport, aThread, aSide);
 }
 
+bool IToplevelProtocol::OpenOnSameThread(MessageChannel* aChannel, Side aSide) {
+  SetOtherProcessId(base::GetCurrentProcId());
+  return GetIPCChannel()->OpenOnSameThread(aChannel, aSide);
+}
+
 void IToplevelProtocol::Close() { GetIPCChannel()->Close(); }
 
 void IToplevelProtocol::SetReplyTimeoutMs(int32_t aTimeoutMs) {
@@ -637,13 +642,29 @@ bool IToplevelProtocol::IsOnCxxStack() const {
   return GetIPCChannel()->IsOnCxxStack();
 }
 
+int32_t IToplevelProtocol::ToplevelState::NextId() {
+  // Genreate the next ID to use for a shared memory or protocol. Parent and
+  // Child sides of the protocol use different pools, and actors created in the
+  // middleman need to use a distinct pool as well.
+  int32_t tag = 0;
+  if (recordreplay::IsMiddleman()) {
+    tag |= 1 << 0;
+  }
+  if (mProtocol->GetSide() == ParentSide) {
+    tag |= 1 << 1;
+  }
+
+  // Compute the ID to use with the low two bits as our tag, and the remaining
+  // bits as a monotonic.
+  return (++mLastLocalId << 2) | tag;
+}
+
 int32_t IToplevelProtocol::ToplevelState::Register(IProtocol* aRouted) {
   if (aRouted->Id() != kNullActorId && aRouted->Id() != kFreedActorId) {
     // If there's already an ID, just return that.
     return aRouted->Id();
   }
-  int32_t id =
-      mProtocol->GetSide() == ParentSide ? ++mLastRouteId : --mLastRouteId;
+  int32_t id = NextId();
   mActorMap.AddWithID(aRouted, id);
   aRouted->SetId(id);
 
@@ -682,8 +703,7 @@ IToplevelProtocol::ToplevelState::ToplevelState(const char* aName,
                                                 Side aSide)
     : ProtocolState(),
       mProtocol(aProtocol),
-      mLastRouteId(aSide == ParentSide ? kFreedActorId : kNullActorId),
-      mLastShmemId(aSide == ParentSide ? kFreedActorId : kNullActorId),
+      mLastLocalId(0),
       mEventTargetMutex("ProtocolEventTargetMutex"),
       mChannel(aName, aProtocol) {}
 
@@ -696,8 +716,7 @@ Shmem::SharedMemory* IToplevelProtocol::ToplevelState::CreateSharedMemory(
   if (!segment) {
     return nullptr;
   }
-  int32_t id =
-      mProtocol->GetSide() == ParentSide ? ++mLastShmemId : --mLastShmemId;
+  int32_t id = NextId();
   Shmem shmem(Shmem::PrivateIPDLCaller(), segment.get(), id);
 
   base::ProcessId pid =

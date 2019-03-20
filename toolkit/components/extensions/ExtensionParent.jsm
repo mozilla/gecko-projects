@@ -15,8 +15,8 @@
 
 var EXPORTED_SYMBOLS = ["ExtensionParent"];
 
-ChromeUtils.import("resource://gre/modules/Services.jsm");
-ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
+const {Services} = ChromeUtils.import("resource://gre/modules/Services.jsm");
+const {XPCOMUtils} = ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
 
 XPCOMUtils.defineLazyModuleGetters(this, {
   AppConstants: "resource://gre/modules/AppConstants.jsm",
@@ -41,8 +41,8 @@ XPCOMUtils.defineLazyServiceGetters(this, {
 XPCOMUtils.defineLazyPreferenceGetter(this, "gTimingEnabled",
                                       "extensions.webextensions.enablePerformanceCounters",
                                       false);
-ChromeUtils.import("resource://gre/modules/ExtensionCommon.jsm");
-ChromeUtils.import("resource://gre/modules/ExtensionUtils.jsm");
+const {ExtensionCommon} = ChromeUtils.import("resource://gre/modules/ExtensionCommon.jsm");
+const {ExtensionUtils} = ChromeUtils.import("resource://gre/modules/ExtensionUtils.jsm");
 
 var {
   BaseContext,
@@ -324,7 +324,10 @@ ProxyMessenger = {
           port.replaceMessageManager(messageManager, newMessageManager);
         }
         this.ports.delete(messageManager);
-        event.detail.addEventListener("SwapDocShells", this, {once: true});
+
+        event.detail.addEventListener("EndSwapDocShells", () => {
+          event.detail.addEventListener("SwapDocShells", this, {once: true});
+        }, {once: true});
       }
     }
   },
@@ -353,7 +356,7 @@ ProxyMessenger = {
 
     let extension = GlobalManager.extensionMap.get(sender.extensionId);
 
-    if (extension.wakeupBackground) {
+    if (extension && extension.wakeupBackground) {
       await extension.wakeupBackground();
     }
 
@@ -1044,16 +1047,17 @@ ParentAPIManager = {
 ParentAPIManager.init();
 
 /**
- * This utility class is used to create hidden XUL windows, which are used to
- * contains the extension pages that are not visible (e.g. the background page and
- * the devtools page), and it is also used by the ExtensionDebuggingUtils to
- * contains the browser elements that are used by the addon debugger to be able
- * to connect to the devtools actors running in the same process of the target
- * extension (and be able to stay connected across the addon reloads).
+ * A hidden window which contains the extension pages that are not visible
+ * (i.e., background pages and devtools pages), and is also used by
+ * ExtensionDebuggingUtils to contain the browser elements used by the
+ * addon debugger to connect to the devtools actors running in the same
+ * process of the target extension (and be able to stay connected across
+ *  the addon reloads).
  */
 class HiddenXULWindow {
   constructor() {
     this._windowlessBrowser = null;
+    this.unloaded = false;
     this.waitInitialized = this.initWindowlessBrowser();
   }
 
@@ -1064,8 +1068,13 @@ class HiddenXULWindow {
 
     this.unloaded = true;
 
-    this.chromeShell = null;
     this.waitInitialized = null;
+
+    if (!this._windowlessBrowser) {
+      Cu.reportError("HiddenXULWindow was shut down while it was loading.");
+      // initWindowlessBrowser will close windowlessBrowser when possible.
+      return;
+    }
 
     this._windowlessBrowser.close();
     this._windowlessBrowser = null;
@@ -1078,8 +1087,8 @@ class HiddenXULWindow {
   /**
    * Private helper that create a XULDocument in a windowless browser.
    *
-   * @returns {Promise<XULDocument>}
-   *          A promise which resolves to the newly created XULDocument.
+   * @returns {Promise<void>}
+   *          A promise which resolves when the windowless browser is ready.
    */
   async initWindowlessBrowser() {
     if (this.waitInitialized) {
@@ -1089,7 +1098,6 @@ class HiddenXULWindow {
     // The invisible page is currently wrapped in a XUL window to fix an issue
     // with using the canvas API from a background page (See Bug 1274775).
     let windowlessBrowser = Services.appShell.createWindowlessBrowser(true);
-    this._windowlessBrowser = windowlessBrowser;
 
     // The windowless browser is a thin wrapper around a docShell that keeps
     // its related resources alive. It implements nsIWebNavigation and
@@ -1099,23 +1107,31 @@ class HiddenXULWindow {
     // access to the webNav methods that are already available on the
     // windowless browser, but contrary to appearances, they are not the same
     // object.
-    this.chromeShell = this._windowlessBrowser.docShell
-                           .QueryInterface(Ci.nsIWebNavigation);
+    let chromeShell = windowlessBrowser.docShell
+                                       .QueryInterface(Ci.nsIWebNavigation);
 
     if (PrivateBrowsingUtils.permanentPrivateBrowsing) {
-      let attrs = this.chromeShell.getOriginAttributes();
+      let attrs = chromeShell.getOriginAttributes();
       attrs.privateBrowsingId = 1;
-      this.chromeShell.setOriginAttributes(attrs);
+      chromeShell.setOriginAttributes(attrs);
     }
 
     let system = Services.scriptSecurityManager.getSystemPrincipal();
-    this.chromeShell.createAboutBlankContentViewer(system);
-    this.chromeShell.useGlobalHistory = false;
-    this.chromeShell.loadURI("chrome://extensions/content/dummy.xul", 0, null, null, null, system);
+    chromeShell.createAboutBlankContentViewer(system);
+    chromeShell.useGlobalHistory = false;
+    let loadURIOptions = {
+      triggeringPrincipal: system,
+    };
+    chromeShell.loadURI("chrome://extensions/content/dummy.xul", loadURIOptions);
 
     await promiseObserved("chrome-document-global-created",
-                          win => win.document == this.chromeShell.document);
-    return promiseDocumentLoaded(windowlessBrowser.document);
+                          win => win.document == chromeShell.document);
+    await promiseDocumentLoaded(windowlessBrowser.document);
+    if (this.unloaded) {
+      windowlessBrowser.close();
+      return;
+    }
+    this._windowlessBrowser = windowlessBrowser;
   }
 
   /**
@@ -1164,6 +1180,35 @@ class HiddenXULWindow {
   }
 }
 
+const SharedWindow = {
+  _window: null,
+  _count: 0,
+
+  acquire() {
+    if (this._window == null) {
+      if (this._count != 0) {
+        throw new Error(`Shared window already exists with count ${this._count}`);
+      }
+
+      this._window = new HiddenXULWindow();
+    }
+
+    this._count++;
+    return this._window;
+  },
+
+  release() {
+    if (this._count < 1) {
+      throw new Error(`Releasing shared window with count ${this._count}`);
+    }
+
+    this._count--;
+    if (this._count == 0) {
+      this._window.shutdown();
+      this._window = null;
+    }
+  },
+};
 
 /**
  * This is a base class used by the ext-backgroundPage and ext-devtools API implementations
@@ -1179,16 +1224,16 @@ class HiddenXULWindow {
  *        The viewType of the WebExtension page that is going to be loaded
  *        in the created browser element (e.g. "background" or "devtools_page").
  */
-class HiddenExtensionPage extends HiddenXULWindow {
+class HiddenExtensionPage {
   constructor(extension, viewType) {
     if (!extension || !viewType) {
       throw new Error("extension and viewType parameters are mandatory");
     }
 
-    super();
     this.extension = extension;
     this.viewType = viewType;
     this.browser = null;
+    this.unloaded = false;
   }
 
   /**
@@ -1199,12 +1244,17 @@ class HiddenExtensionPage extends HiddenXULWindow {
       throw new Error("Unable to shutdown an unloaded HiddenExtensionPage instance");
     }
 
-    if (this.browser) {
-      this.browser.remove();
-      this.browser = null;
-    }
+    this.unloaded = true;
 
-    super.shutdown();
+    if (this.browser) {
+      this._releaseBrowser();
+    }
+  }
+
+  _releaseBrowser() {
+    this.browser.remove();
+    this.browser = null;
+    SharedWindow.release();
   }
 
   /**
@@ -1218,12 +1268,23 @@ class HiddenExtensionPage extends HiddenXULWindow {
       throw new Error("createBrowserElement called twice");
     }
 
-    this.browser = await super.createBrowserElement({
-      "webextension-view-type": this.viewType,
-      "remote": this.extension.remote ? "true" : null,
-      "remoteType": this.extension.remote ?
-        E10SUtils.EXTENSION_REMOTE_TYPE : null,
-    }, this.extension.groupFrameLoader);
+    let window = SharedWindow.acquire();
+    try {
+      this.browser = await window.createBrowserElement({
+        "webextension-view-type": this.viewType,
+        "remote": this.extension.remote ? "true" : null,
+        "remoteType": this.extension.remote ?
+          E10SUtils.EXTENSION_REMOTE_TYPE : null,
+      }, this.extension.groupFrameLoader);
+    } catch (e) {
+      SharedWindow.release();
+      throw e;
+    }
+
+    if (this.unloaded) {
+      this._releaseBrowser();
+      throw new Error("Extension shut down before browser element was created");
+    }
 
     return this.browser;
   }
@@ -1369,13 +1430,45 @@ const DebugUtils = {
 };
 
 
-function promiseExtensionViewLoaded(browser) {
-  return new Promise(resolve => {
-    browser.messageManager.addMessageListener("Extension:ExtensionViewLoaded", function onLoad({data}) {
-      browser.messageManager.removeMessageListener("Extension:ExtensionViewLoaded", onLoad);
-      resolve(data.childId && ParentAPIManager.getContextById(data.childId));
-    });
+/**
+ * Returns a Promise which resolves with the message data when the given message
+ * was received by the message manager. The promise is rejected if the message
+ * manager was closed before a message was received.
+ *
+ * @param {MessageListenerManager} messageManager
+ *        The message manager on which to listen for messages.
+ * @param {string} messageName
+ *        The message to listen for.
+ * @returns {Promise<*>}
+ */
+function promiseMessageFromChild(messageManager, messageName) {
+  return new Promise((resolve, reject) => {
+    let unregister;
+    function listener(message) {
+      unregister();
+      resolve(message.data);
+    }
+    function observer(subject, topic, data) {
+      if (subject === messageManager) {
+        unregister();
+        reject(new Error(`Message manager was disconnected before receiving ${messageName}`));
+      }
+    }
+    unregister = () => {
+      Services.obs.removeObserver(observer, "message-manager-close");
+      messageManager.removeMessageListener(messageName, listener);
+    };
+    messageManager.addMessageListener(messageName, listener);
+    Services.obs.addObserver(observer, "message-manager-close");
   });
+}
+
+// This should be called before browser.loadURI is invoked.
+async function promiseExtensionViewLoaded(browser) {
+  let {childId} = await promiseMessageFromChild(browser.messageManager, "Extension:ExtensionViewLoaded");
+  if (childId) {
+    return ParentAPIManager.getContextById(childId);
+  }
 }
 
 /**
@@ -1747,8 +1840,9 @@ class CacheStore {
   async delete(path) {
     let [store, key] = await this.getStore(path);
 
-    store.delete(key);
-    StartupCache.save();
+    if (store.delete(key)) {
+      StartupCache.save();
+    }
   }
 }
 

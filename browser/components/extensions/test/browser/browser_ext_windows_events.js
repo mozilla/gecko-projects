@@ -4,7 +4,12 @@
 
 SimpleTest.requestCompleteLog();
 
-add_task(async function testWindowsEvents() {
+add_task(async function test_windows_events_not_allowed() {
+  SpecialPowers.pushPrefEnv({set: [
+    ["extensions.allowPrivateBrowsingByDefault", false],
+  ]});
+  let monitor = await startIncognitoMonitorExtension();
+
   function background() {
     browser.windows.onCreated.addListener(window => {
       browser.test.log(`onCreated: windowId=${window.id}`);
@@ -26,7 +31,6 @@ add_task(async function testWindowsEvents() {
 
       browser.test.assertTrue(Number.isInteger(eventWindowId),
                               "windowId is an integer");
-
       let window = await browser.windows.getLastFocused();
       browser.test.sendMessage("window-focus-changed", {winId: eventWindowId, lastFocusedWindowId: window.id});
     });
@@ -44,7 +48,9 @@ add_task(async function testWindowsEvents() {
   }
 
   let extension = ExtensionTestUtils.loadExtension({
+    manifest: {},
     background,
+    incognitoOverride: "spanning",
   });
 
   await extension.startup();
@@ -61,7 +67,7 @@ add_task(async function testWindowsEvents() {
     return windowInfo.winId;
   }
 
-  let {Management: {global: {windowTracker}}} = ChromeUtils.import("resource://gre/modules/Extension.jsm", {});
+  let {Management: {global: {windowTracker}}} = ChromeUtils.import("resource://gre/modules/Extension.jsm", null);
 
   let currentWindow = window;
   let currentWindowId = windowTracker.getId(currentWindow);
@@ -80,7 +86,7 @@ add_task(async function testWindowsEvents() {
   is(winId, win1Id, "Got focus change event for the correct window ID.");
 
   info("Create browser window 2");
-  let win2 = await BrowserTestUtils.openNewBrowserWindow();
+  let win2 = await BrowserTestUtils.openNewBrowserWindow({private: true});
   let win2Id = await extension.awaitMessage("window-created");
   info(`Window 2 ID: ${win2Id}`);
 
@@ -114,4 +120,5 @@ add_task(async function testWindowsEvents() {
 
   await extension.awaitFinish("windows.events");
   await extension.unload();
+  await monitor.unload();
 });

@@ -4,15 +4,15 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "mozilla/ArrayUtils.h"
-
-#include "nsCOMPtr.h"
-#include "mozilla/dom/SVGDocument.h"
 #include "mozilla/dom/SVGForeignObjectElement.h"
+
+#include "mozilla/AlreadyAddRefed.h"
+#include "mozilla/ArrayUtils.h"
+#include "mozilla/dom/SVGDocument.h"
 #include "mozilla/dom/SVGForeignObjectElementBinding.h"
 #include "mozilla/dom/SVGLengthBinding.h"
 
-NS_IMPL_NS_NEW_NAMESPACED_SVG_ELEMENT(ForeignObject)
+NS_IMPL_NS_NEW_SVG_ELEMENT(ForeignObject)
 
 namespace mozilla {
 namespace dom {
@@ -22,7 +22,7 @@ JSObject* SVGForeignObjectElement::WrapNode(JSContext* aCx,
   return SVGForeignObjectElement_Binding::Wrap(aCx, this, aGivenProto);
 }
 
-nsSVGElement::LengthInfo SVGForeignObjectElement::sLengthInfo[4] = {
+SVGElement::LengthInfo SVGForeignObjectElement::sLengthInfo[4] = {
     {nsGkAtoms::x, 0, SVGLength_Binding::SVG_LENGTHTYPE_NUMBER,
      SVGContentUtils::X},
     {nsGkAtoms::y, 0, SVGLength_Binding::SVG_LENGTHTYPE_NUMBER,
@@ -64,9 +64,10 @@ already_AddRefed<SVGAnimatedLength> SVGForeignObjectElement::Height() {
 }
 
 //----------------------------------------------------------------------
-// nsSVGElement methods
+// SVGElement methods
 
-/* virtual */ gfxMatrix SVGForeignObjectElement::PrependLocalTransformsTo(
+/* virtual */
+gfxMatrix SVGForeignObjectElement::PrependLocalTransformsTo(
     const gfxMatrix& aMatrix, SVGTransformTypes aWhich) const {
   // 'transform' attribute:
   gfxMatrix fromUserSpace =
@@ -86,7 +87,8 @@ already_AddRefed<SVGAnimatedLength> SVGForeignObjectElement::Height() {
   return toUserSpace * fromUserSpace;
 }
 
-/* virtual */ bool SVGForeignObjectElement::HasValidDimensions() const {
+/* virtual */
+bool SVGForeignObjectElement::HasValidDimensions() const {
   return mLengthAttributes[ATTR_WIDTH].IsExplicitlySet() &&
          mLengthAttributes[ATTR_WIDTH].GetAnimValInSpecifiedUnits() > 0 &&
          mLengthAttributes[ATTR_HEIGHT].IsExplicitlySet() &&
@@ -112,9 +114,9 @@ SVGForeignObjectElement::IsAttributeMapped(const nsAtom* name) const {
 }
 
 //----------------------------------------------------------------------
-// nsSVGElement methods
+// SVGElement methods
 
-nsSVGElement::LengthAttributesInfo SVGForeignObjectElement::GetLengthInfo() {
+SVGElement::LengthAttributesInfo SVGForeignObjectElement::GetLengthInfo() {
   return LengthAttributesInfo(mLengthAttributes, sLengthInfo,
                               ArrayLength(sLengthInfo));
 }

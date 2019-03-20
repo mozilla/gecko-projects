@@ -20,6 +20,7 @@
 
 #include "builtin/Array.h"
 #include "gc/Barrier.h"
+#include "js/GCVariant.h"
 #include "js/UniquePtr.h"
 #include "vm/ArrayBufferObject.h"
 #include "vm/Compartment.h"
@@ -174,6 +175,8 @@ class NewProxyCache {
 // In the presence of internal errors, we do not set the new object's metadata
 // (if it was even allocated) and reset to the previous state on the stack.
 
+// See below in namespace JS for the template specialization for
+// ImmediateMetadata and DelayMetadata.
 struct ImmediateMetadata {};
 struct DelayMetadata {};
 using PendingMetadata = JSObject*;
@@ -181,22 +184,14 @@ using PendingMetadata = JSObject*;
 using NewObjectMetadataState =
     mozilla::Variant<ImmediateMetadata, DelayMetadata, PendingMetadata>;
 
-class MOZ_RAII AutoSetNewObjectMetadata : private JS::CustomAutoRooter {
+class MOZ_RAII AutoSetNewObjectMetadata {
   MOZ_DECL_USE_GUARD_OBJECT_NOTIFIER;
 
   JSContext* cx_;
-  NewObjectMetadataState prevState_;
+  Rooted<NewObjectMetadataState> prevState_;
 
   AutoSetNewObjectMetadata(const AutoSetNewObjectMetadata& aOther) = delete;
   void operator=(const AutoSetNewObjectMetadata& aOther) = delete;
-
- protected:
-  virtual void trace(JSTracer* trc) override {
-    if (prevState_.is<PendingMetadata>()) {
-      TraceRoot(trc, &prevState_.as<PendingMetadata>(),
-                "Object pending metadata");
-    }
-  }
 
  public:
   explicit AutoSetNewObjectMetadata(
@@ -293,6 +288,15 @@ class ObjectRealm {
 };
 
 }  // namespace js
+
+namespace JS {
+template <>
+struct GCPolicy<js::ImmediateMetadata>
+    : public IgnoreGCPolicy<js::ImmediateMetadata> {};
+template <>
+struct GCPolicy<js::DelayMetadata> : public IgnoreGCPolicy<js::DelayMetadata> {
+};
+}  // namespace JS
 
 class JS::Realm : public JS::shadow::Realm {
   JS::Zone* zone_;
@@ -409,8 +413,6 @@ class JS::Realm : public JS::shadow::Realm {
   js::ArraySpeciesLookup arraySpeciesLookup;
   js::PromiseLookup promiseLookup;
 
-  js::PerformanceGroupHolder performanceMonitoring;
-
   js::UniquePtr<js::ScriptCountsMap> scriptCountsMap;
   js::UniquePtr<js::ScriptNameMap> scriptNameMap;
   js::UniquePtr<js::DebugScriptMap> debugScriptMap;
@@ -440,6 +442,11 @@ class JS::Realm : public JS::shadow::Realm {
 #ifdef DEBUG
   bool firedOnNewGlobalObject = false;
 #endif
+
+  // True if all incoming wrappers have been nuked. This happens when
+  // NukeCrossCompartmentWrappers is called with the NukeAllReferences option.
+  // This prevents us from creating new wrappers for the compartment.
+  bool nukedIncomingWrappers = false;
 
  private:
   void updateDebuggerObservesFlag(unsigned flag);
@@ -509,6 +516,9 @@ class JS::Realm : public JS::shadow::Realm {
 
   /* True if a global object exists, but it's being collected. */
   inline bool globalIsAboutToBeFinalized();
+
+  /* True if a global exists and it's not being collected. */
+  inline bool hasLiveGlobal();
 
   inline void initGlobal(js::GlobalObject& global);
 
@@ -635,21 +645,7 @@ class JS::Realm : public JS::shadow::Realm {
    * principals during its lifetime (e.g. in case of lazy parsing).
    */
   JSPrincipals* principals() { return principals_; }
-  void setPrincipals(JSPrincipals* principals) {
-    if (principals_ == principals) {
-      return;
-    }
-
-    // If we change principals, we need to unlink immediately this
-    // realm from its PerformanceGroup. For one thing, the performance data
-    // we collect should not be improperly associated with a group to which
-    // we do not belong anymore. For another thing, we use `principals()` as
-    // part of the key to map realms to a `PerformanceGroup`, so if we do
-    // not unlink now, this will be too late once we have updated
-    // `principals_`.
-    performanceMonitoring.unlink();
-    principals_ = principals;
-  }
+  void setPrincipals(JSPrincipals* principals) { principals_ = principals; }
 
   bool isSystem() const { return isSystem_; }
 
@@ -809,6 +805,14 @@ class JS::Realm : public JS::shadow::Realm {
   }
   static constexpr size_t offsetOfRegExps() {
     return offsetof(JS::Realm, regExps);
+  }
+
+  // Note: global_ is a read-barriered object, but it's fine to skip the read
+  // barrier when the realm is active. See the comment in JSContext::global().
+  static constexpr size_t offsetOfActiveGlobal() {
+    static_assert(sizeof(global_) == sizeof(uintptr_t),
+                  "JIT code assumes field is pointer-sized");
+    return offsetof(JS::Realm, global_);
   }
 };
 

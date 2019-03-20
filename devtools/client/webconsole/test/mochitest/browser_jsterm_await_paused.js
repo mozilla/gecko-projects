@@ -5,12 +5,6 @@
 
 "use strict";
 
-// Import helpers for the new debugger
-/* import-globals-from ../../../debugger/new/test/mochitest/helpers.js */
-Services.scriptloader.loadSubScript(
-  "chrome://mochitests/content/browser/devtools/client/debugger/new/test/mochitest/helpers.js",
-  this);
-
 const TEST_URI =
   `data:text/html;charset=utf-8,Web Console test top-level await when debugger paused`;
 
@@ -60,6 +54,9 @@ async function performTests() {
   // done. We can't await on the previous execution because it waits for the result to
   // be send, which won't happen until we resume the debugger.
   await jsterm.execute(`"smoke"`);
+
+  // Give the engine some time to evaluate the await expression before resuming.
+  await waitForTick();
 
   // Click on the resume button to not be paused anymore.
   await resume(dbg);

@@ -5,7 +5,7 @@
 
 /* eslint no-unused-vars: ["error", {vars: "local", args: "none"}] */
 
-ChromeUtils.import("resource://gre/modules/NetUtil.jsm");
+var {NetUtil} = ChromeUtils.import("resource://gre/modules/NetUtil.jsm");
 
 var tmp = {};
 ChromeUtils.import("resource://gre/modules/AddonManager.jsm", tmp);
@@ -368,9 +368,8 @@ function wait_for_manager_load(aManagerWindow, aCallback) {
   return log_callback(p, aCallback);
 }
 
-function open_manager(aView, aCallback, aLoadCallback, aLongerTimeout) {
+function open_manager(aView, aCallback, aLoadCallback, aLongerTimeout, aWin = window) {
   let p = new Promise((resolve, reject) => {
-
     async function setup_manager(aManagerWindow) {
       if (aLoadCallback)
         log_exceptions(aLoadCallback, aManagerWindow);
@@ -399,8 +398,8 @@ function open_manager(aView, aCallback, aLoadCallback, aLongerTimeout) {
       setup_manager(aSubject);
     }, "EM-loaded");
 
-    gBrowser.selectedTab = BrowserTestUtils.addTab(gBrowser);
-    switchToTabHavingURI(MANAGER_URI, true, {
+    aWin.gBrowser.selectedTab = BrowserTestUtils.addTab(aWin.gBrowser);
+    aWin.switchToTabHavingURI(MANAGER_URI, true, {
       triggeringPrincipal: Services.scriptSecurityManager.getSystemPrincipal(),
     });
   });
@@ -515,7 +514,7 @@ function promiseAddonsByIDs(aIDs) {
  */
 function install_addon(path, cb, pathPrefix = TESTROOT) {
   let p = new Promise(async (resolve, reject) => {
-    let install = await AddonManager.getInstallForURL(pathPrefix + path, "application/x-xpinstall");
+    let install = await AddonManager.getInstallForURL(pathPrefix + path);
     install.addListener({
       onInstallEnded: () => resolve(install.addon),
     });
@@ -584,7 +583,6 @@ CategoryUtilities.prototype = {
   },
 
   open(aCategory, aCallback) {
-
     isnot(this.window, null, "Should not open category when manager window is not loaded");
     ok(this.isVisible(aCategory), "Category should be visible if attempting to open it");
 
@@ -599,40 +597,37 @@ CategoryUtilities.prototype = {
   },
 };
 
-function CertOverrideListener(host, bits) {
-  this.host = host;
-  this.bits = bits;
+// Returns a promise that will resolve when the certificate error override has been added, or reject
+// if there is some failure.
+function addCertOverride(host, bits) {
+  return new Promise((resolve, reject) => {
+    let req = new XMLHttpRequest();
+    req.open("GET", "https://" + host + "/");
+    req.onload = reject;
+    req.onerror = () => {
+      if (req.channel && req.channel.securityInfo) {
+        let securityInfo = req.channel.securityInfo.QueryInterface(Ci.nsITransportSecurityInfo);
+        if (securityInfo.serverCert) {
+          let cos = Cc["@mozilla.org/security/certoverride;1"]
+                      .getService(Ci.nsICertOverrideService);
+          cos.rememberValidityOverride(host, -1, securityInfo.serverCert, bits, false);
+          resolve();
+          return;
+        }
+      }
+      reject();
+    };
+    req.send(null);
+  });
 }
 
-CertOverrideListener.prototype = {
-  host: null,
-  bits: null,
-
-  getInterface(aIID) {
-    return this.QueryInterface(aIID);
-  },
-
-  QueryInterface: ChromeUtils.generateQI(["nsIBadCertListener2", "nsIInterfaceRequestor"]),
-
-  notifyCertProblem(socketInfo, secInfo, targetHost) {
-    var cert = secInfo.serverCert;
-    var cos = Cc["@mozilla.org/security/certoverride;1"].
-              getService(Ci.nsICertOverrideService);
-    cos.rememberValidityOverride(this.host, -1, cert, this.bits, false);
-    return true;
-  },
-};
-
-// Add overrides for the bad certificates
-function addCertOverride(host, bits) {
-  var req = new XMLHttpRequest();
-  try {
-    req.open("GET", "https://" + host + "/", false);
-    req.channel.notificationCallbacks = new CertOverrideListener(host, bits);
-    req.send(null);
-  } catch (e) {
-    // This request will fail since the SSL server is not trusted yet
-  }
+// Returns a promise that will resolve when the necessary certificate overrides have been added.
+function addCertOverrides() {
+  return Promise.all(
+    [addCertOverride("nocert.example.com", Ci.nsICertOverrideService.ERROR_MISMATCH),
+     addCertOverride("self-signed.example.com", Ci.nsICertOverrideService.ERROR_UNTRUSTED),
+     addCertOverride("untrusted.example.com", Ci.nsICertOverrideService.ERROR_UNTRUSTED),
+     addCertOverride("expired.example.com", Ci.nsICertOverrideService.ERROR_TIME)]);
 }
 
 /** *** Mock Provider *****/
@@ -944,21 +939,12 @@ MockProvider.prototype = {
   /**
    * Called to get an AddonInstall to download and install an add-on from a URL.
    *
-   * @param  aUrl
+   * @param  {string} aUrl
    *         The URL to be installed
-   * @param  aHash
-   *         A hash for the install
-   * @param  aName
-   *         A name for the install
-   * @param  aIconURL
-   *         An icon URL for the install
-   * @param  aVersion
-   *         A version for the install
-   * @param  aLoadGroup
-   *         An nsILoadGroup to associate requests with
+   * @param  {object} aOptions
+   *         Options for the install
    */
-  getInstallForURL: function MP_getInstallForURL(aUrl, aHash, aName, aIconURL,
-                                                  aVersion, aLoadGroup) {
+  getInstallForURL: function MP_getInstallForURL(aUrl, aOptions) {
     // Not yet implemented
   },
 
@@ -1233,9 +1219,9 @@ MockInstall.prototype = {
         this.type = this._type;
 
         // Adding addon to MockProvider to be implemented when needed
-        if (this._addonToInstall)
+        if (this._addonToInstall) {
           this.addon = this._addonToInstall;
-        else {
+        } else {
           this.addon = new MockAddon("", this.name, this.type);
           this.addon.version = this.version;
           this.addon.pendingOperations = AddonManager.PENDING_INSTALL;
@@ -1413,9 +1399,11 @@ function promisePopupNotificationShown(name = "addon-webext-permissions") {
   });
 }
 
-function acceptAppMenuNotificationWhenShown(id) {
-  ChromeUtils.import("resource://gre/modules/AppMenuNotifications.jsm");
+function waitAppMenuNotificationShown(id, type, accept = false, win = window) {
+  const {AppMenuNotifications} = ChromeUtils.import("resource://gre/modules/AppMenuNotifications.jsm");
   return new Promise(resolve => {
+    let {document, PanelUI} = win;
+
     function popupshown() {
       let notification = AppMenuNotifications.activeNotification;
       if (!notification) { return; }
@@ -1425,12 +1413,68 @@ function acceptAppMenuNotificationWhenShown(id) {
 
       PanelUI.notificationPanel.removeEventListener("popupshown", popupshown);
 
-      let popupnotificationID = PanelUI._getPopupId(notification);
-      let popupnotification = document.getElementById(popupnotificationID);
-      popupnotification.button.click();
+      if (id == "addon-installed" && type) {
+        let hidden = type !== "extension" ||
+                     Services.prefs.getBoolPref("extensions.allowPrivateBrowsingByDefault", true);
+        let checkbox = document.getElementById("addon-incognito-checkbox");
+        is(checkbox.hidden, hidden, "checkbox visibility is correct");
+      }
+      if (accept) {
+        let popupnotificationID = PanelUI._getPopupId(notification);
+        let popupnotification = document.getElementById(popupnotificationID);
+        popupnotification.button.click();
+      }
 
       resolve();
     }
+    // If it's already open just run the test.
+    let notification = AppMenuNotifications.activeNotification;
+    if (notification && PanelUI.isNotificationPanelOpen) {
+      popupshown();
+      return;
+    }
     PanelUI.notificationPanel.addEventListener("popupshown", popupshown);
   });
+}
+
+function acceptAppMenuNotificationWhenShown(id, type) {
+  return waitAppMenuNotificationShown(id, type, true);
+}
+
+function assertTelemetryMatches(events, {filterMethods} = {}) {
+  let snapshot = Services.telemetry.snapshotEvents(
+    Ci.nsITelemetry.DATASET_RELEASE_CHANNEL_OPTIN, true);
+
+  if (events.length == 0) {
+    ok(!snapshot.parent || snapshot.parent.length == 0, "There are no telemetry events");
+    return;
+  }
+
+  // Make sure we got some data.
+  ok(snapshot.parent && snapshot.parent.length > 0, "Got parent telemetry events in the snapshot");
+
+  // Only look at the related events after stripping the timestamp and category (and optionally filter
+  // out the events related to methods that we are not interested in).
+  let relatedEvents = snapshot.parent.filter(([timestamp, category, method]) => {
+    return category == "addonsManager" && (filterMethods ? filterMethods.includes(method) : true);
+  }).map(relatedEvent => relatedEvent.slice(2, 6));
+
+  // Events are now [method, object, value, extra] as expected.
+  Assert.deepEqual(relatedEvents, events, "The events are recorded correctly");
+}
+
+/* HTML view helpers */
+function mockPromptService() {
+  let {prompt} = Services;
+  let promptService = {
+    // The prompt returns 1 for cancelled and 0 for accepted.
+    _response: 1,
+    QueryInterface: ChromeUtils.generateQI([Ci.nsIPromptService]),
+    confirmEx: () => promptService._response,
+  };
+  Services.prompt = promptService;
+  registerCleanupFunction(() => {
+    Services.prompt = prompt;
+  });
+  return promptService;
 }

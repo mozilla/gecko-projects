@@ -40,6 +40,9 @@ namespace mozilla {
 
 enum class MediaSessionConduitLocalDirection : int { kSend, kRecv };
 
+class VideoSessionConduit;
+class AudioSessionConduit;
+
 using RtpExtList = std::vector<webrtc::RtpExtension>;
 
 /**
@@ -227,29 +230,14 @@ class MediaSessionConduit {
   virtual bool GetRecvPacketTypeStats(
       webrtc::RtcpPacketTypeCounter* aPacketCounts) = 0;
 
-  virtual bool GetVideoEncoderStats(double* framerateMean,
-                                    double* framerateStdDev,
-                                    double* bitrateMean, double* bitrateStdDev,
-                                    uint32_t* droppedFrames,
-                                    uint32_t* framesEncoded) = 0;
-  virtual bool GetVideoDecoderStats(double* framerateMean,
-                                    double* framerateStdDev,
-                                    double* bitrateMean, double* bitrateStdDev,
-                                    uint32_t* discardedPackets,
-                                    uint32_t* framesDecoded) = 0;
-  virtual bool GetAVStats(int32_t* jitterBufferDelayMs,
-                          int32_t* playoutBufferDelayMs,
-                          int32_t* avSyncOffsetMs) = 0;
-  virtual bool GetRTPStats(unsigned int* jitterMs,
-                           unsigned int* cumulativeLost) = 0;
-  virtual bool GetRTCPReceiverReport(DOMHighResTimeStamp* timestamp,
-                                     uint32_t* jitterMs,
+  virtual bool GetRTPReceiverStats(unsigned int* jitterMs,
+                                   unsigned int* cumulativeLost) = 0;
+  virtual bool GetRTCPReceiverReport(uint32_t* jitterMs,
                                      uint32_t* packetsReceived,
                                      uint64_t* bytesReceived,
                                      uint32_t* cumulativeLost,
                                      int32_t* rttMs) = 0;
-  virtual bool GetRTCPSenderReport(DOMHighResTimeStamp* timestamp,
-                                   unsigned int* packetsSent,
+  virtual bool GetRTCPSenderReport(unsigned int* packetsSent,
                                    uint64_t* bytesSent) = 0;
 
   virtual uint64_t CodecPluginID() = 0;
@@ -259,6 +247,8 @@ class MediaSessionConduit {
   virtual MediaConduitErrorCode DeliverPacket(const void* data, int len) = 0;
 
   virtual void DeleteStreams() = 0;
+
+  virtual Maybe<RefPtr<VideoSessionConduit>> AsVideoSessionConduit() = 0;
 
   NS_INLINE_DECL_THREADSAFE_REFCOUNTING(MediaSessionConduit)
 };
@@ -399,9 +389,6 @@ class VideoSessionConduit : public MediaSessionConduit {
 
   Type type() const override { return VIDEO; }
 
-  MediaConduitErrorCode SetLocalRTPExtensions(
-      MediaSessionConduitLocalDirection aDirection,
-      const RtpExtList& extensions) override = 0;
   /**
    * Function to attach Renderer end-point of the Media-Video conduit.
    * @param aRenderer : Reference to the concrete Video renderer implementation
@@ -465,6 +452,18 @@ class VideoSessionConduit : public MediaSessionConduit {
 
   bool UsingFEC() const { return mUsingFEC; }
 
+  virtual bool GetVideoEncoderStats(double* framerateMean,
+                                    double* framerateStdDev,
+                                    double* bitrateMean, double* bitrateStdDev,
+                                    uint32_t* droppedFrames,
+                                    uint32_t* framesEncoded,
+                                    Maybe<uint64_t>* qpSum) = 0;
+  virtual bool GetVideoDecoderStats(double* framerateMean,
+                                    double* framerateStdDev,
+                                    double* bitrateMean, double* bitrateStdDev,
+                                    uint32_t* discardedPackets,
+                                    uint32_t* framesDecoded) = 0;
+
  protected:
   /* RTCP feedback settings, for unit testing purposes */
   FrameRequestType mFrameRequestMethod;
@@ -494,9 +493,10 @@ class AudioSessionConduit : public MediaSessionConduit {
 
   Type type() const override { return AUDIO; }
 
-  MediaConduitErrorCode SetLocalRTPExtensions(
-      MediaSessionConduitLocalDirection aDirection,
-      const RtpExtList& extensions) override = 0;
+  Maybe<RefPtr<VideoSessionConduit>> AsVideoSessionConduit() override {
+    return Nothing();
+  }
+
   /**
    * Function to deliver externally captured audio sample for encoding and
    * transport

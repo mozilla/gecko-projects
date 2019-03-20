@@ -7,13 +7,13 @@ var EXPORTED_SYMBOLS = ["TabEngine", "TabSetRecord"];
 const TABS_TTL = 1814400; // 21 days.
 const TAB_ENTRIES_LIMIT = 5; // How many URLs to include in tab history.
 
-ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
-ChromeUtils.import("resource://gre/modules/Services.jsm");
-ChromeUtils.import("resource://gre/modules/Log.jsm");
-ChromeUtils.import("resource://services-sync/engines.js");
-ChromeUtils.import("resource://services-sync/record.js");
-ChromeUtils.import("resource://services-sync/util.js");
-ChromeUtils.import("resource://services-sync/constants.js");
+const {XPCOMUtils} = ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
+const {Services} = ChromeUtils.import("resource://gre/modules/Services.jsm");
+const {Log} = ChromeUtils.import("resource://gre/modules/Log.jsm");
+const {Store, SyncEngine, Tracker} = ChromeUtils.import("resource://services-sync/engines.js");
+const {CryptoWrapper} = ChromeUtils.import("resource://services-sync/record.js");
+const {Svc, Utils} = ChromeUtils.import("resource://services-sync/util.js");
+const {SCORE_INCREMENT_SMALL, URI_LENGTH_MAX} = ChromeUtils.import("resource://services-sync/constants.js");
 
 ChromeUtils.defineModuleGetter(this, "PrivateBrowsingUtils",
   "resource://gre/modules/PrivateBrowsingUtils.jsm");
@@ -44,11 +44,6 @@ TabEngine.prototype = {
   _storeObj: TabStore,
   _trackerObj: TabTracker,
   _recordObj: TabSetRecord,
-  // A flag to indicate if we have synced in this session. This is to help
-  // consumers of remote tabs that may want to differentiate between "I've an
-  // empty tab list as I haven't yet synced" vs "I've an empty tab list
-  // as there really are no tabs"
-  hasSyncedThisSession: false,
 
   syncPriority: 3,
 
@@ -81,7 +76,6 @@ TabEngine.prototype = {
     await SyncEngine.prototype._resetClient.call(this);
     await this._store.wipe();
     this._tracker.modified = true;
-    this.hasSyncedThisSession = false;
   },
 
   async removeClientData() {
@@ -98,11 +92,6 @@ TabEngine.prototype = {
     }
 
     return SyncEngine.prototype._reconcile.call(this, item);
-  },
-
-  async _syncFinish() {
-    this.hasSyncedThisSession = true;
-    return SyncEngine.prototype._syncFinish.call(this);
   },
 };
 

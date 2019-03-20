@@ -37,8 +37,8 @@
 
 // for async loading
 #ifdef ASYNC_LOADING
-#include "nsIBinaryInputStream.h"
-#include "nsIStringStream.h"
+#  include "nsIBinaryInputStream.h"
+#  include "nsIStringStream.h"
 #endif
 
 using namespace mozilla;
@@ -304,7 +304,8 @@ void nsStringBundleBase::RegisterMemoryReporter() {
 }
 
 template <typename T, typename... Args>
-/* static */ already_AddRefed<T> nsStringBundleBase::Create(Args... args) {
+/* static */
+already_AddRefed<T> nsStringBundleBase::Create(Args... args) {
   RefPtr<T> bundle = new T(args...);
   bundle->RegisterMemoryReporter();
   return bundle.forget();
@@ -317,9 +318,10 @@ nsStringBundle::~nsStringBundle() {}
 
 NS_IMETHODIMP
 nsStringBundleBase::AsyncPreload() {
-  return NS_IdleDispatchToCurrentThread(
+  return NS_DispatchToCurrentThreadQueue(
       NewIdleRunnableMethod("nsStringBundleBase::LoadProperties", this,
-                            &nsStringBundleBase::LoadProperties));
+                            &nsStringBundleBase::LoadProperties),
+      EventQueuePriority::Idle);
 }
 
 size_t nsStringBundle::SizeOfIncludingThis(
@@ -456,7 +458,7 @@ nsresult nsStringBundleBase::ParseProperties(nsIPersistentProperties** aProps) {
     // It's a string bundle.  We expect a text/plain type, so set that as hint
     channel->SetContentType(NS_LITERAL_CSTRING("text/plain"));
 
-    rv = channel->Open2(getter_AddRefs(in));
+    rv = channel->Open(getter_AddRefs(in));
     if (NS_FAILED(rv)) return rv;
   }
 

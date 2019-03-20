@@ -23,8 +23,6 @@ class FunctionExtended;
 typedef JSNative Native;
 }  // namespace js
 
-struct JSAtomState;
-
 static const uint32_t JSSLOT_BOUND_FUNCTION_TARGET = 2;
 static const uint32_t JSSLOT_BOUND_FUNCTION_THIS = 3;
 static const uint32_t JSSLOT_BOUND_FUNCTION_ARGS = 4;
@@ -72,8 +70,8 @@ class JSFunction : public js::NativeObject {
                    self-hosted code only. */
     HAS_INFERRED_NAME = 0x0100, /* function had no explicit name, but a name was
                                    set by SetFunctionName at compile time or
-                                   SetFunctionNameIfNoOwnName at runtime. See
-                                   atom_ for more info about this flag. */
+                                   SetFunctionName at runtime. See atom_ for
+                                   more info about this flag. */
     INTERPRETED_LAZY =
         0x0200, /* function is interpreted but doesn't have a script yet */
     RESOLVED_LENGTH =
@@ -102,7 +100,6 @@ class JSFunction : public js::NativeObject {
     ASMJS_NATIVE = ASMJS_KIND | NATIVE_FUN,
     WASM_FUN = NATIVE_FUN | WASM_OPTIMIZED,
     INTERPRETED_METHOD = INTERPRETED | METHOD_KIND,
-    INTERPRETED_METHOD_GENERATOR_OR_ASYNC = INTERPRETED | METHOD_KIND,
     INTERPRETED_CLASS_CONSTRUCTOR =
         INTERPRETED | CLASSCONSTRUCTOR_KIND | CONSTRUCTOR,
     INTERPRETED_GETTER = INTERPRETED | GETTER_KIND,
@@ -184,8 +181,7 @@ class JSFunction : public js::NativeObject {
   //      guessed name was set.
   //   f. HAS_INFERRED_NAME can be set for cloned singleton function, even
   //      though the clone shouldn't receive an inferred name. See the
-  //      comments in NewFunctionClone() and SetFunctionNameIfNoOwnName()
-  //      for details.
+  //      comments in NewFunctionClone() and SetFunctionName() for details.
   //
   // 2. If the function is a bound function:
   //   a. To store the initial value of the "name" property.
@@ -224,13 +220,16 @@ class JSFunction : public js::NativeObject {
   bool needsNamedLambdaEnvironment() const;
 
   bool needsFunctionEnvironmentObjects() const {
-    return needsCallObject() || needsNamedLambdaEnvironment();
+    bool res = nonLazyScript()->needsFunctionEnvironmentObjects();
+    MOZ_ASSERT(res == (needsCallObject() || needsNamedLambdaEnvironment()));
+    return res;
   }
 
   bool needsSomeEnvironmentObject() const {
     return needsFunctionEnvironmentObjects() || needsExtraBodyVarEnvironment();
   }
 
+  static constexpr size_t NArgsBits = sizeof(nargs_) * CHAR_BIT;
   size_t nargs() const { return nargs_; }
 
   uint16_t flags() const { return flags_; }
@@ -634,23 +633,32 @@ class JSFunction : public js::NativeObject {
   }
 
   js::FunctionAsyncKind asyncKind() const {
-    return isInterpretedLazy() ? lazyScript()->asyncKind()
-                               : nonLazyScript()->asyncKind();
+    if (!isInterpreted()) {
+      return js::FunctionAsyncKind::SyncFunction;
+    }
+    if (hasScript()) {
+      return nonLazyScript()->asyncKind();
+    }
+    if (js::LazyScript* lazy = lazyScriptOrNull()) {
+      return lazy->asyncKind();
+    }
+    MOZ_ASSERT(isSelfHostedBuiltin());
+    return js::FunctionAsyncKind::SyncFunction;
   }
 
   bool isAsync() const {
-    if (isInterpretedLazy()) {
-      return lazyScript()->isAsync();
-    }
-    if (hasScript()) {
-      return nonLazyScript()->isAsync();
-    }
-    return false;
+    return asyncKind() == js::FunctionAsyncKind::AsyncFunction;
   }
 
-  void setScript(JSScript* script_) { mutableScript() = script_; }
+  void setScript(JSScript* script) {
+    MOZ_ASSERT(realm() == script->realm());
+    mutableScript() = script;
+  }
 
-  void initScript(JSScript* script_) { mutableScript().init(script_); }
+  void initScript(JSScript* script) {
+    MOZ_ASSERT_IF(script, realm() == script->realm());
+    mutableScript().init(script);
+  }
 
   void setUnlazifiedScript(JSScript* script) {
     MOZ_ASSERT(isInterpretedLazy());
@@ -885,13 +893,25 @@ extern JSFunction* NewScriptedFunction(
     HandleObject proto = nullptr,
     gc::AllocKind allocKind = gc::AllocKind::FUNCTION,
     NewObjectKind newKind = GenericObject, HandleObject enclosingEnv = nullptr);
+
+// Determine which [[Prototype]] to use when creating a new function using the
+// requested generator and async kind.
+//
+// This sets `proto` to `nullptr` for non-generator, synchronous functions to
+// mean "the builtin %FunctionPrototype% in the current realm", the common case.
+//
+// We could set it to `cx->global()->getOrCreateFunctionPrototype()`, but
+// nullptr gets a fast path in e.g. js::NewObjectWithClassProtoCommon.
+extern bool GetFunctionPrototype(JSContext* cx, js::GeneratorKind generatorKind,
+                                 js::FunctionAsyncKind asyncKind,
+                                 js::MutableHandleObject proto);
+
 extern JSAtom* IdToFunctionName(
     JSContext* cx, HandleId id,
     FunctionPrefixKind prefixKind = FunctionPrefixKind::None);
 
-extern bool SetFunctionNameIfNoOwnName(JSContext* cx, HandleFunction fun,
-                                       HandleValue name,
-                                       FunctionPrefixKind prefixKind);
+extern bool SetFunctionName(JSContext* cx, HandleFunction fun, HandleValue name,
+                            FunctionPrefixKind prefixKind);
 
 extern JSFunction* DefineFunction(
     JSContext* cx, HandleObject obj, HandleId id, JSNative native,
@@ -904,8 +924,6 @@ struct WellKnownSymbols;
 
 extern bool FunctionHasDefaultHasInstance(JSFunction* fun,
                                           const WellKnownSymbols& symbols);
-
-extern bool fun_symbolHasInstance(JSContext* cx, unsigned argc, Value* vp);
 
 extern void ThrowTypeErrorBehavior(JSContext* cx);
 
@@ -965,8 +983,8 @@ extern JSFunction* CloneFunctionReuseScript(
 // Functions whose scripts are cloned are always given singleton types.
 extern JSFunction* CloneFunctionAndScript(
     JSContext* cx, HandleFunction fun, HandleObject parent,
-    HandleScope newScope, gc::AllocKind kind = gc::AllocKind::FUNCTION,
-    HandleObject proto = nullptr);
+    HandleScope newScope, Handle<ScriptSourceObject*> sourceObject,
+    gc::AllocKind kind = gc::AllocKind::FUNCTION, HandleObject proto = nullptr);
 
 extern JSFunction* CloneAsmJSModuleFunction(JSContext* cx, HandleFunction fun);
 
@@ -1032,9 +1050,6 @@ extern void ReportIncompatibleMethod(JSContext* cx, const CallArgs& args,
  * function.
  */
 extern void ReportIncompatible(JSContext* cx, const CallArgs& args);
-
-extern const JSFunctionSpec function_methods[];
-extern const JSFunctionSpec function_selfhosted_methods[];
 
 extern bool fun_apply(JSContext* cx, unsigned argc, Value* vp);
 

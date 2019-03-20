@@ -20,13 +20,10 @@ Services.scriptloader.loadSubScript(
   "chrome://mochitests/content/browser/devtools/client/shared/test/shared-redux-head.js",
   this);
 
-// Ensure the Changes panel is enabled before running the tests.
-Services.prefs.setBoolPref("devtools.inspector.changes.enabled", true);
 // Ensure the three-pane mode is enabled before running the tests.
 Services.prefs.setBoolPref("devtools.inspector.three-pane-enabled", true);
 
 registerCleanupFunction(() => {
-  Services.prefs.clearUserPref("devtools.inspector.changes.enabled");
   Services.prefs.clearUserPref("devtools.inspector.three-pane-enabled");
 });
 
@@ -40,23 +37,31 @@ registerCleanupFunction(() => {
  *         Optional selector to filter rendered declaration DOM elements.
  *         One of ".diff-remove" or ".diff-add".
  *         If omitted, all declarations will be returned.
+ * @param  {DOMNode} containerNode
+ *         Optional element to restrict results to declaration DOM elements which are
+ *         descendants of this container node.
+ *         If omitted, all declarations will be returned
  * @return {Array}
  */
-function getDeclarations(panelDoc, selector = "") {
-  const els = panelDoc.querySelectorAll(`#sidebar-panel-changes .declaration${selector}`);
+function getDeclarations(panelDoc, selector = "", containerNode = null) {
+  const els = panelDoc.querySelectorAll(`.changes__declaration${selector}`);
 
-  return [...els].map(el => {
-    return {
-      property: el.querySelector(".declaration-name").textContent,
-      value: el.querySelector(".declaration-value").textContent,
-    };
-  });
+  return [...els]
+    .filter(el => {
+      return containerNode ? containerNode.contains(el) : true;
+    })
+    .map(el => {
+      return {
+        property: el.querySelector(".changes__declaration-name").textContent,
+        value: el.querySelector(".changes__declaration-value").textContent,
+      };
+    });
 }
 
-function getAddedDeclarations(panelDoc) {
-  return getDeclarations(panelDoc, ".diff-add");
+function getAddedDeclarations(panelDoc, containerNode) {
+  return getDeclarations(panelDoc, ".diff-add", containerNode);
 }
 
-function getRemovedDeclarations(panelDoc) {
-  return getDeclarations(panelDoc, ".diff-remove");
+function getRemovedDeclarations(panelDoc, containerNode) {
+  return getDeclarations(panelDoc, ".diff-remove", containerNode);
 }

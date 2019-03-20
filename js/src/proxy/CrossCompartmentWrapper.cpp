@@ -43,14 +43,6 @@ static bool MarkAtoms(JSContext* cx, const AutoIdVector& ids) {
   return true;
 }
 
-bool CrossCompartmentWrapper::getPropertyDescriptor(
-    JSContext* cx, HandleObject wrapper, HandleId id,
-    MutableHandle<PropertyDescriptor> desc) const {
-  PIERCE(cx, wrapper, MarkAtoms(cx, id),
-         Wrapper::getPropertyDescriptor(cx, wrapper, id, desc),
-         cx->compartment()->wrap(cx, desc));
-}
-
 bool CrossCompartmentWrapper::getOwnPropertyDescriptor(
     JSContext* cx, HandleObject wrapper, HandleId id,
     MutableHandle<PropertyDescriptor> desc) const {
@@ -219,68 +211,10 @@ bool CrossCompartmentWrapper::getOwnEnumerablePropertyKeys(
          MarkAtoms(cx, props));
 }
 
-/*
- * We can reify non-escaping iterator objects instead of having to wrap them.
- * This allows fast iteration over objects across a compartment boundary.
- */
-static bool CanReify(HandleObject obj) {
-  return obj->is<PropertyIteratorObject>();
-}
-
-static JSObject* Reify(JSContext* cx, JS::Compartment* origin,
-                       HandleObject iter) {
-  // Ensure iterator gets closed.
-  auto autoCloseIterator = mozilla::MakeScopeExit([=] { CloseIterator(iter); });
-
-  NativeIterator* ni = iter->as<PropertyIteratorObject>().getNativeIterator();
-  RootedObject obj(cx, ni->objectBeingIterated());
-
-  // Wrap iteratee.
-  if (!origin->wrap(cx, &obj)) {
-    return nullptr;
-  }
-
-  // Wrap the elements in the iterator's snapshot.
-  size_t length = ni->numKeys();
-  AutoIdVector keys(cx);
-  if (length > 0) {
-    if (!keys.reserve(length)) {
-      return nullptr;
-    }
-    RootedId id(cx);
-    RootedValue v(cx);
-    for (size_t i = 0; i < length; ++i) {
-      v.setString(ni->propertiesBegin()[i]);
-      if (!ValueToId<CanGC>(cx, v, &id)) {
-        return nullptr;
-      }
-      cx->markId(id);
-      keys.infallibleAppend(id);
-    }
-  }
-
-  // Return iterator in current compartment.
-  return EnumeratedIdVectorToIterator(cx, obj, keys);
-}
-
-JSObject* CrossCompartmentWrapper::enumerate(JSContext* cx,
-                                             HandleObject wrapper) const {
-  RootedObject res(cx);
-  {
-    AutoRealm call(cx, wrappedObject(wrapper));
-    res = Wrapper::enumerate(cx, wrapper);
-    if (!res) {
-      return nullptr;
-    }
-  }
-
-  if (CanReify(res)) {
-    return Reify(cx, cx->compartment(), res);
-  }
-  if (!cx->compartment()->wrap(cx, &res)) {
-    return nullptr;
-  }
-  return res;
+bool CrossCompartmentWrapper::enumerate(JSContext* cx, HandleObject wrapper,
+                                        AutoIdVector& props) const {
+  PIERCE(cx, wrapper, NOTHING, Wrapper::enumerate(cx, wrapper, props),
+         MarkAtoms(cx, props));
 }
 
 bool CrossCompartmentWrapper::call(JSContext* cx, HandleObject wrapper,
@@ -460,30 +394,58 @@ JS_FRIEND_API void js::NukeCrossCompartmentWrapper(JSContext* cx,
   NukeRemovedCrossCompartmentWrapper(cx, wrapper);
 }
 
+JS_FRIEND_API void js::NukeCrossCompartmentWrapperIfExists(
+    JSContext* cx, JS::Compartment* source, JSObject* target) {
+  MOZ_ASSERT(source != target->compartment());
+  MOZ_ASSERT(!target->is<CrossCompartmentWrapperObject>());
+  auto ptr = source->lookupWrapper(target);
+  if (ptr) {
+    JSObject* wrapper = &ptr->value().get().toObject();
+    NukeCrossCompartmentWrapper(cx, wrapper);
+  }
+}
+
+// Returns true iff all realms in the compartment have been nuked.
+static bool NukedAllRealms(JS::Compartment* comp) {
+  for (RealmsInCompartmentIter realm(comp); !realm.done(); realm.next()) {
+    if (!realm->nukedIncomingWrappers) {
+      return false;
+    }
+  }
+  return true;
+}
+
 /*
  * NukeChromeCrossCompartmentWrappersForGlobal reaches into chrome and cuts
- * all of the cross-compartment wrappers that point to objects parented to
- * obj's global.  The snag here is that we need to avoid cutting wrappers that
- * point to the window object on page navigation (inner window destruction)
- * and only do that on tab close (outer window destruction).  Thus the
- * option of how to handle the global object.
+ * all of the cross-compartment wrappers that point to an object in the |target|
+ * realm. The snag here is that we need to avoid cutting wrappers that point to
+ * the window object on page navigation (inner window destruction) and only do
+ * that on tab close (outer window destruction).  Thus the option of how to
+ * handle the global object.
  */
 JS_FRIEND_API bool js::NukeCrossCompartmentWrappers(
-    JSContext* cx, const CompartmentFilter& sourceFilter,
-    JS::Compartment* target, js::NukeReferencesToWindow nukeReferencesToWindow,
+    JSContext* cx, const CompartmentFilter& sourceFilter, JS::Realm* target,
+    js::NukeReferencesToWindow nukeReferencesToWindow,
     js::NukeReferencesFromTarget nukeReferencesFromTarget) {
   CHECK_THREAD(cx);
   JSRuntime* rt = cx->runtime();
+
+  // If we're nuking all wrappers into the target realm, prevent us from
+  // creating new wrappers for it in the future.
+  if (nukeReferencesFromTarget == NukeAllReferences) {
+    target->nukedIncomingWrappers = true;
+  }
 
   for (CompartmentsIter c(rt); !c.done(); c.next()) {
     if (!sourceFilter.match(c)) {
       continue;
     }
 
-    // If the compartment matches both the source and target filter, we may
-    // want to cut both incoming and outgoing wrappers.
+    // If the realm matches both the source and target filter, we may want to
+    // cut outgoing wrappers too, if we nuked all realms in the compartment.
     bool nukeAll =
-        (nukeReferencesFromTarget == NukeAllReferences && target == c.get());
+        (nukeReferencesFromTarget == NukeAllReferences &&
+         target->compartment() == c.get() && NukedAllRealms(c.get()));
 
     // Iterate only the wrappers that have target compartment matched unless
     // |nukeAll| is true. The string wrappers that we're not interested in
@@ -492,9 +454,10 @@ JS_FRIEND_API bool js::NukeCrossCompartmentWrappers(
     // initializing NonStringWrapperEnum.
     mozilla::Maybe<Compartment::NonStringWrapperEnum> e;
     if (MOZ_LIKELY(!nukeAll)) {
-      e.emplace(c, target);
+      e.emplace(c, target->compartment());
     } else {
       e.emplace(c);
+      c.get()->nukedOutgoingWrappers = true;
     }
     for (; !e->empty(); e->popFront()) {
       // Skip debugger references because NukeCrossCompartmentWrapper()
@@ -511,9 +474,16 @@ JS_FRIEND_API bool js::NukeCrossCompartmentWrappers(
       // the wrapper, this could save us a bit of time.
       JSObject* wrapped = UncheckedUnwrap(k.as<JSObject*>());
 
-      // We never nuke script source objects, since only ever used internally by
-      // the JS engine, and are expected to remain valid throughout a scripts
-      // lifetime.
+      // Don't nuke wrappers for objects in other realms in the target
+      // compartment unless nukeAll is set because in that case we want to nuke
+      // all outgoing wrappers for the current compartment.
+      if (!nukeAll && wrapped->nonCCWRealm() != target) {
+        continue;
+      }
+
+      // We never nuke ScriptSourceObjects, since they are only ever used
+      // internally by the JS engine, and are expected to remain valid
+      // throughout a script's lifetime.
       if (MOZ_UNLIKELY(wrapped->is<ScriptSourceObject>())) {
         continue;
       }
@@ -532,6 +502,31 @@ JS_FRIEND_API bool js::NukeCrossCompartmentWrappers(
   }
 
   return true;
+}
+
+JS_FRIEND_API bool js::AllowNewWrapper(JS::Compartment* target, JSObject* obj) {
+  // Disallow creating new wrappers if we nuked the object realm or target
+  // compartment. However, we always need to provide live wrappers for
+  // ScriptSourceObjects, since they're used for cross-compartment cloned
+  // scripts, and need to remain accessible even after the original realm has
+  // been nuked.
+
+  MOZ_ASSERT(obj->compartment() != target);
+
+  if (obj->is<ScriptSourceObject>()) {
+    return true;
+  }
+
+  if (target->nukedOutgoingWrappers ||
+      obj->nonCCWRealm()->nukedIncomingWrappers) {
+    return false;
+  }
+
+  return true;
+}
+
+JS_FRIEND_API bool js::NukedObjectRealm(JSObject* obj) {
+  return obj->nonCCWRealm()->nukedIncomingWrappers;
 }
 
 // Given a cross-compartment wrapper |wobj|, update it to point to
@@ -554,6 +549,7 @@ void js::RemapWrapper(JSContext* cx, JSObject* wobjArg,
              "We don't want a dead proxy in the wrapper map");
   Value origv = ObjectValue(*origTarget);
   JS::Compartment* wcompartment = wobj->compartment();
+  MOZ_ASSERT(wcompartment != newTarget->compartment());
 
   AutoDisableProxyCheck adpc;
 

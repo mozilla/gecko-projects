@@ -30,15 +30,15 @@
 #include "nsNetCID.h"
 
 #ifdef ANDROID
-#include "cutils/properties.h"
+#  include "cutils/properties.h"
 #endif
 
 #ifdef MOZ_WIDGET_GTK
-#include <glib.h>
-#ifdef MOZ_WAYLAND
-#include <gdk/gdk.h>
-#include <gdk/gdkx.h>
-#endif
+#  include <glib.h>
+#  ifdef MOZ_WAYLAND
+#    include <gdk/gdk.h>
+#    include <gdk/gdkx.h>
+#  endif
 #endif
 
 #include <dirent.h>
@@ -46,7 +46,7 @@
 #include <sys/sysmacros.h>
 #include <sys/types.h>
 #ifndef ANDROID
-#include <glob.h>
+#  include <glob.h>
 #endif
 
 namespace mozilla {
@@ -191,6 +191,13 @@ static void AddPathsFromFile(SandboxBroker::Policy* aPolicy,
 static void AddLdconfigPaths(SandboxBroker::Policy* aPolicy) {
   nsAutoCString ldconfigPath(NS_LITERAL_CSTRING("/etc/ld.so.conf"));
   AddPathsFromFile(aPolicy, ldconfigPath);
+}
+
+static void AddSharedMemoryPaths(SandboxBroker::Policy* aPolicy, pid_t aPid) {
+  std::string shmPath("/dev/shm");
+  if (base::SharedMemory::AppendPosixShmPrefix(&shmPath, aPid)) {
+    aPolicy->AddPrefix(rdwrcr, shmPath.c_str());
+  }
 }
 
 SandboxBrokerPolicyFactory::SandboxBrokerPolicyFactory() {
@@ -366,7 +373,7 @@ SandboxBrokerPolicyFactory::SandboxBrokerPolicyFactory() {
     }
   }
 
-#ifdef DEBUG
+#  ifdef DEBUG
   char* bloatLog = PR_GetEnv("XPCOM_MEM_BLOAT_LOG");
   // XPCOM_MEM_BLOAT_LOG has the format
   // /tmp/tmpd0YzFZ.mozrunner/runtests_leaks.log
@@ -380,7 +387,7 @@ SandboxBrokerPolicyFactory::SandboxBrokerPolicyFactory() {
       policy->AddPrefix(rdwrcr, bloatStr.get());
     }
   }
-#endif
+#  endif
 
   // Allow Primus to contact the Bumblebee daemon to manage GPU
   // switching on NVIDIA Optimus systems.
@@ -390,20 +397,20 @@ SandboxBrokerPolicyFactory::SandboxBrokerPolicyFactory() {
   }
   policy->AddPath(SandboxBroker::MAY_CONNECT, bumblebeeSocket);
 
-#if defined(MOZ_WIDGET_GTK)
+#  if defined(MOZ_WIDGET_GTK)
   // Allow local X11 connections, for Primus and VirtualGL to contact
   // the secondary X server. No exception for Wayland.
-#if defined(MOZ_WAYLAND)
+#    if defined(MOZ_WAYLAND)
   if (GDK_IS_X11_DISPLAY(gdk_display_get_default())) {
     policy->AddPrefix(SandboxBroker::MAY_CONNECT, "/tmp/.X11-unix/X");
   }
-#else
+#    else
   policy->AddPrefix(SandboxBroker::MAY_CONNECT, "/tmp/.X11-unix/X");
-#endif
+#    endif
   if (const auto xauth = PR_GetEnv("XAUTHORITY")) {
     policy->AddPath(rdonly, xauth);
   }
-#endif
+#  endif
 
   mCommonContentPolicy.reset(policy);
 #endif
@@ -418,8 +425,8 @@ UniquePtr<SandboxBroker::Policy> SandboxBrokerPolicyFactory::GetContentPolicy(
   // in early startup.
 
   MOZ_ASSERT(NS_IsMainThread());
-  // File broker usage is controlled through a pref.
-  if (!IsContentSandboxEnabled()) {
+  // The file broker is used at level 2 and up.
+  if (GetEffectiveContentSandboxLevel() <= 1) {
     return nullptr;
   }
 
@@ -508,12 +515,12 @@ UniquePtr<SandboxBroker::Policy> SandboxBrokerPolicyFactory::GetContentPolicy(
   bool allowPulse = false;
   bool allowAlsa = false;
   if (level < 4) {
-#ifdef MOZ_PULSEAUDIO
+#  ifdef MOZ_PULSEAUDIO
     allowPulse = true;
-#endif
-#ifdef MOZ_ALSA
+#  endif
+#  ifdef MOZ_ALSA
     allowAlsa = true;
-#endif
+#  endif
   }
 
   if (allowAlsa) {
@@ -524,13 +531,10 @@ UniquePtr<SandboxBroker::Policy> SandboxBrokerPolicyFactory::GetContentPolicy(
   if (allowPulse) {
     policy->AddDir(rdwrcr, "/dev/shm");
   } else {
-    std::string shmPath("/dev/shm");
-    if (base::SharedMemory::AppendPosixShmPrefix(&shmPath, aPid)) {
-      policy->AddPrefix(rdwrcr, shmPath.c_str());
-    }
+    AddSharedMemoryPaths(policy.get(), aPid);
   }
 
-#ifdef MOZ_WIDGET_GTK
+#  ifdef MOZ_WIDGET_GTK
   if (const auto userDir = g_get_user_runtime_dir()) {
     // Bug 1321134: DConf's single bit of shared memory
     // The leaf filename is "user" by default, but is configurable.
@@ -545,7 +549,7 @@ UniquePtr<SandboxBroker::Policy> SandboxBrokerPolicyFactory::GetContentPolicy(
       policy->AddPath(rdonly, pulsePath.get());
     }
   }
-#endif  // MOZ_WIDGET_GTK
+#  endif  // MOZ_WIDGET_GTK
 
   if (allowPulse) {
     // PulseAudio also needs access to read the $XAUTHORITY file (see
@@ -579,6 +583,18 @@ void SandboxBrokerPolicyFactory::AddDynamicPathList(
       policy->AddDynamic(perms, trimPath.get());
     }
   }
+}
+
+/* static */ UniquePtr<SandboxBroker::Policy>
+SandboxBrokerPolicyFactory::GetUtilityPolicy(int aPid) {
+  auto policy = MakeUnique<SandboxBroker::Policy>();
+
+  AddSharedMemoryPaths(policy.get(), aPid);
+
+  if (policy->IsEmpty()) {
+    policy = nullptr;
+  }
+  return policy;
 }
 
 #endif  // MOZ_CONTENT_SANDBOX

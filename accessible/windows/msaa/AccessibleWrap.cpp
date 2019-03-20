@@ -27,7 +27,7 @@
 #include "States.h"
 
 #ifdef A11Y_LOG
-#include "Logging.h"
+#  include "Logging.h"
 #endif
 
 #include "nsIMutableArray.h"
@@ -481,7 +481,7 @@ AccessibleWrap::get_accRole(
     if (roleString.IsEmpty()) {
       // No role attribute (or it is an empty string).
       // Use the tag name.
-      nsIDocument* document = content->GetUncomposedDoc();
+      dom::Document* document = content->GetUncomposedDoc();
       if (!document) return E_FAIL;
 
       dom::NodeInfo* nodeInfo = content->NodeInfo();
@@ -740,17 +740,25 @@ AccessibleWrap::get_accSelection(VARIANT __RPC_FAR* pvarChildren) {
 
   if (IsDefunct()) return CO_E_OBJNOTCONNECTED;
 
-  if (IsSelect()) {
-    AutoTArray<Accessible*, 10> selectedItems;
-    SelectedItems(&selectedItems);
+  if (!IsSelect()) {
+    return S_OK;
+  }
 
-    // 1) Create and initialize the enumeration
+  AutoTArray<Accessible*, 10> selectedItems;
+  SelectedItems(&selectedItems);
+  uint32_t count = selectedItems.Length();
+  if (count == 1) {
+    pvarChildren->vt = VT_DISPATCH;
+    pvarChildren->pdispVal = NativeAccessible(selectedItems[0]);
+  } else if (count > 1) {
     RefPtr<AccessibleEnumerator> pEnum =
         new AccessibleEnumerator(selectedItems);
     pvarChildren->vt =
         VT_UNKNOWN;  // this must be VT_UNKNOWN for an IEnumVARIANT
     NS_ADDREF(pvarChildren->punkVal = pEnum);
   }
+  // If count == 0, vt is already VT_EMPTY, so there's nothing else to do.
+
   return S_OK;
 }
 
@@ -895,7 +903,7 @@ AccessibleWrap::accNavigate(
   switch (navDir) {
     case NAVDIR_FIRSTCHILD:
       if (IsProxy()) {
-        if (!Proxy()->MustPruneChildren()) {
+        if (!nsAccUtils::MustPrune(Proxy())) {
           navAccessible = WrapperFor(Proxy()->FirstChild());
         }
       } else {
@@ -904,7 +912,7 @@ AccessibleWrap::accNavigate(
       break;
     case NAVDIR_LASTCHILD:
       if (IsProxy()) {
-        if (!Proxy()->MustPruneChildren()) {
+        if (!nsAccUtils::MustPrune(Proxy())) {
           navAccessible = WrapperFor(Proxy()->LastChild());
         }
       } else {
@@ -1379,7 +1387,7 @@ already_AddRefed<IAccessible> AccessibleWrap::GetIAccessibleFor(
   }
 
   if (varChild.ulVal != GetExistingID() &&
-      (IsProxy() ? Proxy()->MustPruneChildren()
+      (IsProxy() ? nsAccUtils::MustPrune(Proxy())
                  : nsAccUtils::MustPrune(this))) {
     // This accessible should have no subtree in platform, return null for its
     // children.
@@ -1537,7 +1545,8 @@ void AccessibleWrap::UpdateSystemCaretFor(Accessible* aAccessible) {
   UpdateSystemCaretFor(caretWnd, caretRect);
 }
 
-/* static */ void AccessibleWrap::UpdateSystemCaretFor(
+/* static */
+void AccessibleWrap::UpdateSystemCaretFor(
     ProxyAccessible* aProxy, const LayoutDeviceIntRect& aCaretRect) {
   ::DestroyCaret();
 
@@ -1547,7 +1556,8 @@ void AccessibleWrap::UpdateSystemCaretFor(Accessible* aAccessible) {
   UpdateSystemCaretFor(GetHWNDFor(outerDoc), aCaretRect);
 }
 
-/* static */ void AccessibleWrap::UpdateSystemCaretFor(
+/* static */
+void AccessibleWrap::UpdateSystemCaretFor(
     HWND aCaretWnd, const LayoutDeviceIntRect& aCaretRect) {
   if (!aCaretWnd || aCaretRect.IsEmpty()) {
     return;
@@ -1697,12 +1707,12 @@ bool AccessibleWrap::DispatchTextChangeToHandler(bool aIsInsert,
   return SUCCEEDED(hr);
 }
 
-/* static */ void AccessibleWrap::AssignChildIDTo(
-    NotNull<sdnAccessible*> aSdnAcc) {
+/* static */
+void AccessibleWrap::AssignChildIDTo(NotNull<sdnAccessible*> aSdnAcc) {
   aSdnAcc->SetUniqueID(sIDGen.GetID());
 }
 
-/* static */ void AccessibleWrap::ReleaseChildID(
-    NotNull<sdnAccessible*> aSdnAcc) {
+/* static */
+void AccessibleWrap::ReleaseChildID(NotNull<sdnAccessible*> aSdnAcc) {
   sIDGen.ReleaseID(aSdnAcc);
 }

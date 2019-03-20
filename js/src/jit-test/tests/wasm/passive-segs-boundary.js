@@ -30,7 +30,7 @@ function do_test(insn1, insn2, errKind, errText, isMem, haveMemOrTable)
                ${mem_init}
               `;
     } else {
-        let tab_def  = haveMemOrTable ? "(table 30 30 anyfunc)" : "";
+        let tab_def  = haveMemOrTable ? "(table 30 30 funcref)" : "";
         let tab_init = haveMemOrTable
                        ? `(elem (i32.const 2) 3 1 4 1)
                           (elem passive 2 7 1 8)
@@ -100,10 +100,10 @@ function tab_test_nofail(insn1, insn2) {
 }
 
 
-//---- memory.{drop,init} -------------------------------------------------
+//---- memory.{drop,init,copy} -------------------------------------------------
 
 // drop with no memory
-mem_test("memory.drop 3", "",
+mem_test("data.drop 3", "",
          WebAssembly.CompileError, /can't touch memory without memory/,
          false);
 
@@ -113,20 +113,20 @@ mem_test("(memory.init 1 (i32.const 1234) (i32.const 1) (i32.const 1))", "",
          false);
 
 // drop with data seg ix out of range
-mem_test("memory.drop 4", "",
-         WebAssembly.CompileError, /memory.{drop,init} index out of range/);
+mem_test("data.drop 4", "",
+         WebAssembly.CompileError, /data.drop segment index out of range/);
 
 // init with data seg ix out of range
 mem_test("(memory.init 4 (i32.const 1234) (i32.const 1) (i32.const 1))", "",
-         WebAssembly.CompileError, /memory.{drop,init} index out of range/);
+         WebAssembly.CompileError, /memory.init segment index out of range/);
 
 // drop with data seg ix indicating an active segment
-mem_test("memory.drop 2", "",
-         WebAssembly.RuntimeError, /use of invalid passive data segment/);
+mem_test("data.drop 2", "",
+         WebAssembly.RuntimeError, /use of dropped data segment/);
 
 // init with data seg ix indicating an active segment
 mem_test("(memory.init 2 (i32.const 1234) (i32.const 1) (i32.const 1))", "",
-         WebAssembly.RuntimeError, /use of invalid passive data segment/);
+         WebAssembly.RuntimeError, /use of dropped data segment/);
 
 // init, using a data seg ix more than once is OK
 mem_test_nofail(
@@ -134,14 +134,14 @@ mem_test_nofail(
     "(memory.init 1 (i32.const 4321) (i32.const 1) (i32.const 1))");
 
 // drop, then drop
-mem_test("memory.drop 1",
-         "memory.drop 1",
-         WebAssembly.RuntimeError, /use of invalid passive data segment/);
+mem_test("data.drop 1",
+         "data.drop 1",
+         WebAssembly.RuntimeError, /use of dropped data segment/);
 
 // drop, then init
-mem_test("memory.drop 1",
+mem_test("data.drop 1",
          "(memory.init 1 (i32.const 1234) (i32.const 1) (i32.const 1))",
-         WebAssembly.RuntimeError, /use of invalid passive data segment/);
+         WebAssembly.RuntimeError, /use of dropped data segment/);
 
 // init: seg ix is valid passive, but length to copy > len of seg
 mem_test("",
@@ -158,18 +158,28 @@ mem_test("",
          "(memory.init 1 (i32.const 0xFFFE) (i32.const 1) (i32.const 3))",
          WebAssembly.RuntimeError, /index out of bounds/);
 
-// init: seg ix is valid passive, zero len, but src offset out of bounds
+// init: seg ix is valid passive, zero len, but src offset out of bounds.
+// At edge of segment is OK
 mem_test("",
-         "(memory.init 1 (i32.const 1234) (i32.const 4) (i32.const 0))",
+         "(memory.init 1 (i32.const 1234) (i32.const 4) (i32.const 0))");
+
+// One past end of segment is not OK
+mem_test("",
+         "(memory.init 1 (i32.const 1234) (i32.const 5) (i32.const 0))",
          WebAssembly.RuntimeError, /index out of bounds/);
 
-// init: seg ix is valid passive, zero len, but dst offset out of bounds
+// init: seg ix is valid passive, zero len, but dst offset out of bounds.
+// At edge of memory is OK.
 mem_test("",
-         "(memory.init 1 (i32.const 0x10000) (i32.const 2) (i32.const 0))",
+         "(memory.init 1 (i32.const 0x10000) (i32.const 2) (i32.const 0))");
+
+// One past end of memory is not OK.
+mem_test("",
+         "(memory.init 1 (i32.const 0x10001) (i32.const 2) (i32.const 0))",
          WebAssembly.RuntimeError, /index out of bounds/);
 
 // drop: too many args
-mem_test("memory.drop 1 (i32.const 42)", "",
+mem_test("data.drop 1 (i32.const 42)", "",
          WebAssembly.CompileError,
          /unused values not explicitly dropped by end of block/);
 
@@ -197,12 +207,12 @@ mem_test("(memory.init 1 (i32.const 1) (i32.const 1))", "",
     }}}
 }
 
-
+//
 //---- table.{drop,init} --------------------------------------------------
 
 // drop with no table
-tab_test("table.drop 3", "",
-         WebAssembly.CompileError, /can't table.drop without a table/,
+tab_test("elem.drop 3", "",
+         WebAssembly.CompileError, /can't elem.drop without a table/,
          false);
 
 // init with no table
@@ -211,20 +221,20 @@ tab_test("(table.init 1 (i32.const 12) (i32.const 1) (i32.const 1))", "",
          false);
 
 // drop with elem seg ix out of range
-tab_test("table.drop 4", "",
-         WebAssembly.CompileError, /element segment index out of range for table.drop/);
+tab_test("elem.drop 4", "",
+         WebAssembly.CompileError, /element segment index out of range for elem.drop/);
 
 // init with elem seg ix out of range
 tab_test("(table.init 4 (i32.const 12) (i32.const 1) (i32.const 1))", "",
          WebAssembly.CompileError, /table.init segment index out of range/);
 
 // drop with elem seg ix indicating an active segment
-tab_test("table.drop 2", "",
-         WebAssembly.RuntimeError, /use of invalid passive element segment/);
+tab_test("elem.drop 2", "",
+         WebAssembly.RuntimeError, /use of dropped element segment/);
 
 // init with elem seg ix indicating an active segment
 tab_test("(table.init 2 (i32.const 12) (i32.const 1) (i32.const 1))", "",
-         WebAssembly.RuntimeError, /use of invalid passive element segment/);
+         WebAssembly.RuntimeError, /use of dropped element segment/);
 
 // init, using an elem seg ix more than once is OK
 tab_test_nofail(
@@ -232,14 +242,14 @@ tab_test_nofail(
     "(table.init 1 (i32.const 21) (i32.const 1) (i32.const 1))");
 
 // drop, then drop
-tab_test("table.drop 1",
-         "table.drop 1",
-         WebAssembly.RuntimeError, /use of invalid passive element segment/);
+tab_test("elem.drop 1",
+         "elem.drop 1",
+         WebAssembly.RuntimeError, /use of dropped element segment/);
 
 // drop, then init
-tab_test("table.drop 1",
+tab_test("elem.drop 1",
          "(table.init 1 (i32.const 12) (i32.const 1) (i32.const 1))",
-         WebAssembly.RuntimeError, /use of invalid passive element segment/);
+         WebAssembly.RuntimeError, /use of dropped element segment/);
 
 // init: seg ix is valid passive, but length to copy > len of seg
 tab_test("",
@@ -256,18 +266,28 @@ tab_test("",
          "(table.init 1 (i32.const 28) (i32.const 1) (i32.const 3))",
          WebAssembly.RuntimeError, /index out of bounds/);
 
-// init: seg ix is valid passive, zero len, but src offset out of bounds
+// init: seg ix is valid passive, zero len, but src offset out of bounds.
+// At edge of segment is OK.
 tab_test("",
-         "(table.init 1 (i32.const 12) (i32.const 4) (i32.const 0))",
+         "(table.init 1 (i32.const 12) (i32.const 4) (i32.const 0))");
+
+// One past edge of segment is not OK.
+tab_test("",
+         "(table.init 1 (i32.const 12) (i32.const 5) (i32.const 0))",
          WebAssembly.RuntimeError, /index out of bounds/);
 
-// init: seg ix is valid passive, zero len, but dst offset out of bounds
+// init: seg ix is valid passive, zero len, but dst offset out of bounds.
+// At edge of table is OK.
 tab_test("",
-         "(table.init 1 (i32.const 30) (i32.const 2) (i32.const 0))",
+         "(table.init 1 (i32.const 30) (i32.const 2) (i32.const 0))");
+
+// One past edge of table is not OK.
+tab_test("",
+         "(table.init 1 (i32.const 31) (i32.const 2) (i32.const 0))",
          WebAssembly.RuntimeError, /index out of bounds/);
 
 // drop: too many args
-tab_test("table.drop 1 (i32.const 42)", "",
+tab_test("elem.drop 1 (i32.const 42)", "",
          WebAssembly.CompileError,
          /unused values not explicitly dropped by end of block/);
 
@@ -332,12 +352,22 @@ tab_test_nofail(
     "(table.copy (i32.const 15) (i32.const 25) (i32.const 0))",
     "");
 
-// copy: zero length with dst offset out of bounds
+// copy: zero length with dst offset out of bounds.
+// At edge of table is OK.
 tab_test("(table.copy (i32.const 30) (i32.const 15) (i32.const 0))",
+         "");
+
+// One past edge of table is not OK.
+tab_test("(table.copy (i32.const 31) (i32.const 15) (i32.const 0))",
          "",
          WebAssembly.RuntimeError, /index out of bounds/);
 
 // copy: zero length with src offset out of bounds
+// At edge of table is OK.
 tab_test("(table.copy (i32.const 15) (i32.const 30) (i32.const 0))",
+         "");
+
+// One past edge of table is not OK.
+tab_test("(table.copy (i32.const 15) (i32.const 31) (i32.const 0))",
          "",
          WebAssembly.RuntimeError, /index out of bounds/);

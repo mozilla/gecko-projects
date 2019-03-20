@@ -2,6 +2,10 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
 
+// @flow
+
+import { memoize } from "lodash";
+
 const defaultUrl = {
   hash: "",
   host: "",
@@ -19,10 +23,10 @@ const defaultUrl = {
   username: ""
 };
 
-export function parse(url: string): URL | object {
+export const parse = memoize(function parse(url: string): any {
   try {
     const urlObj = new URL(url);
-    urlObj.path = urlObj.pathname + urlObj.search;
+    (urlObj: any).path = urlObj.pathname + urlObj.search;
     return urlObj;
   } catch (err) {
     // If we're given simply a filename...
@@ -32,4 +36,4 @@ export function parse(url: string): URL | object {
 
     return defaultUrl;
   }
-}
+});

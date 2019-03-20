@@ -11,40 +11,42 @@
 add_task(threadClientTest(({ threadClient, debuggee, client }) => {
   return new Promise(resolve => {
     // Debugger statement
-    client.addOneTimeListener("paused", function(event, packet) {
-      const source = threadClient.source(packet.frame.where.source);
+    client.addOneTimeListener("paused", async function(event, packet) {
+      const source = await getSourceById(
+        threadClient,
+        packet.frame.where.actor
+      );
       const location = {
+        sourceUrl: source.url,
         line: debuggee.line0 + 1,
         column: 55,
       };
       let timesBreakpointHit = 0;
 
-      source.setBreakpoint(location).then(function([response, bpClient]) {
-        threadClient.addListener("paused", function onPaused(event, packet) {
-          Assert.equal(packet.type, "paused");
-          Assert.equal(packet.why.type, "breakpoint");
-          Assert.equal(packet.why.actors[0], bpClient.actor);
-          Assert.equal(packet.frame.where.source.actor, source.actor);
-          Assert.equal(packet.frame.where.line, location.line);
-          Assert.equal(packet.frame.where.column, location.column);
+      threadClient.setBreakpoint(location, {});
 
-          Assert.equal(debuggee.acc, timesBreakpointHit);
-          Assert.equal(packet.frame.environment.bindings.variables.i.value,
-                       timesBreakpointHit);
+      threadClient.addListener("paused", function onPaused(event, packet) {
+        Assert.equal(packet.type, "paused");
+        Assert.equal(packet.why.type, "breakpoint");
+        Assert.equal(packet.frame.where.actor, source.actor);
+        Assert.equal(packet.frame.where.line, location.line);
+        Assert.equal(packet.frame.where.column, location.column);
 
-          if (++timesBreakpointHit === 3) {
-            threadClient.removeListener("paused", onPaused);
-            bpClient.remove(function(response) {
-              threadClient.resume(resolve);
-            });
-          } else {
-            threadClient.resume();
-          }
-        });
+        Assert.equal(debuggee.acc, timesBreakpointHit);
+        Assert.equal(packet.frame.environment.bindings.variables.i.value,
+                     timesBreakpointHit);
 
-        // Continue until the breakpoint is hit.
-        threadClient.resume();
+        if (++timesBreakpointHit === 3) {
+          threadClient.removeListener("paused", onPaused);
+          threadClient.removeBreakpoint(location);
+          threadClient.resume(resolve);
+        } else {
+          threadClient.resume();
+        }
       });
+
+      // Continue until the breakpoint is hit.
+      threadClient.resume();
     });
 
     /* eslint-disable */

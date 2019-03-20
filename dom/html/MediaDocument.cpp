@@ -49,14 +49,13 @@ void MediaDocumentStreamListener::SetStreamListener(
 }
 
 NS_IMETHODIMP
-MediaDocumentStreamListener::OnStartRequest(nsIRequest* request,
-                                            nsISupports* ctxt) {
+MediaDocumentStreamListener::OnStartRequest(nsIRequest* request) {
   NS_ENSURE_TRUE(mDocument, NS_ERROR_FAILURE);
 
   mDocument->StartLayout();
 
   if (mNextStream) {
-    return mNextStream->OnStartRequest(request, ctxt);
+    return mNextStream->OnStartRequest(request);
   }
 
   return NS_ERROR_PARSED_DATA_CACHED;
@@ -64,10 +63,10 @@ MediaDocumentStreamListener::OnStartRequest(nsIRequest* request,
 
 NS_IMETHODIMP
 MediaDocumentStreamListener::OnStopRequest(nsIRequest* request,
-                                           nsISupports* ctxt, nsresult status) {
+                                           nsresult status) {
   nsresult rv = NS_OK;
   if (mNextStream) {
-    rv = mNextStream->OnStopRequest(request, ctxt, status);
+    rv = mNextStream->OnStopRequest(request, status);
   }
 
   // Don't release mDocument here if we're in the middle of a multipart
@@ -86,13 +85,11 @@ MediaDocumentStreamListener::OnStopRequest(nsIRequest* request,
 
 NS_IMETHODIMP
 MediaDocumentStreamListener::OnDataAvailable(nsIRequest* request,
-                                             nsISupports* ctxt,
                                              nsIInputStream* inStr,
                                              uint64_t sourceOffset,
                                              uint32_t count) {
   if (mNextStream) {
-    return mNextStream->OnDataAvailable(request, ctxt, inStr, sourceOffset,
-                                        count);
+    return mNextStream->OnDataAvailable(request, inStr, sourceOffset, count);
   }
 
   return NS_OK;
@@ -143,7 +140,7 @@ nsresult MediaDocument::StartDocumentLoad(const char* aCommand,
                                           nsISupports* aContainer,
                                           nsIStreamListener** aDocListener,
                                           bool aReset, nsIContentSink* aSink) {
-  nsresult rv = nsDocument::StartDocumentLoad(
+  nsresult rv = Document::StartDocumentLoad(
       aCommand, aChannel, aLoadGroup, aContainer, aDocListener, aReset, aSink);
   if (NS_FAILED(rv)) {
     return rv;
@@ -184,12 +181,12 @@ nsresult MediaDocument::StartDocumentLoad(const char* aCommand,
 }
 
 void MediaDocument::InitialSetupDone() {
-  MOZ_ASSERT(GetReadyStateEnum() == nsIDocument::READYSTATE_LOADING,
+  MOZ_ASSERT(GetReadyStateEnum() == Document::READYSTATE_LOADING,
              "Bad readyState: we should still be doing our initial load");
   mDidInitialDocumentSetup = true;
   nsContentUtils::AddScriptRunner(
       new nsDocElementCreatedNotificationRunner(this));
-  SetReadyStateInternal(nsIDocument::READYSTATE_INTERACTIVE);
+  SetReadyStateInternal(Document::READYSTATE_INTERACTIVE);
 }
 
 nsresult MediaDocument::CreateSyntheticDocument() {
@@ -274,7 +271,7 @@ void MediaDocument::GetFileName(nsAString& aResult, nsIChannel* aChannel) {
   nsAutoCString docCharset;
   // Now that the charset is set in |StartDocumentLoad| to the charset of
   // the document viewer instead of a bogus value ("windows-1252" set in
-  // |nsDocument|'s ctor), the priority is given to the current charset.
+  // |Document|'s ctor), the priority is given to the current charset.
   // This is necessary to deal with a media document being opened in a new
   // window or a new tab.
   if (mCharacterSetSource != kCharsetUninitialized) {

@@ -7,6 +7,8 @@
 #include "GeckoTaskTracer.h"
 #include "GeckoTaskTracerImpl.h"
 
+#include "platform.h"
+
 #include "mozilla/DebugOnly.h"
 #include "mozilla/MathAlgorithms.h"
 #include "mozilla/StaticMutex.h"
@@ -14,17 +16,15 @@
 #include "mozilla/TimeStamp.h"
 #include "mozilla/UniquePtr.h"
 #include "mozilla/Unused.h"
-
 #include "nsString.h"
 #include "nsThreadUtils.h"
-#include "platform.h"
 #include "prtime.h"
 
 #include <stdarg.h>
 
 #if defined(GP_OS_windows)
-#include <windows.h>
-#define getpid GetCurrentProcessId
+#  include <windows.h>
+#  define getpid GetCurrentProcessId
 #endif
 
 #define MAX_SIZE_LOG (1024 * 128)

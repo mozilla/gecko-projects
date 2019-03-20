@@ -1,6 +1,6 @@
 "use strict";
 
-ChromeUtils.import("resource://gre/modules/ExtensionParent.jsm");
+var {ExtensionParent} = ChromeUtils.import("resource://gre/modules/ExtensionParent.jsm");
 var {
   HiddenExtensionPage,
   promiseExtensionViewLoaded,
@@ -9,6 +9,8 @@ var {
 
 ChromeUtils.defineModuleGetter(this, "ExtensionTelemetry",
                                "resource://gre/modules/ExtensionTelemetry.jsm");
+ChromeUtils.defineModuleGetter(this, "PrivateBrowsingUtils",
+                               "resource://gre/modules/PrivateBrowsingUtils.jsm");
 
 XPCOMUtils.defineLazyPreferenceGetter(this, "DELAYED_STARTUP",
                                       "extensions.webextensions.background-delayed-startup");
@@ -33,14 +35,27 @@ class BackgroundPage extends HiddenExtensionPage {
 
     ExtensionTelemetry.backgroundPageLoad.stopwatchStart(extension, this);
 
-    await this.createBrowserElement();
-    extension._backgroundPageFrameLoader = this.browser.frameLoader;
+    let context;
+    try {
+      await this.createBrowserElement();
+      if (!this.browser) {
+        throw new Error("Extension shut down before the background page was created");
+      }
+      extension._backgroundPageFrameLoader = this.browser.frameLoader;
 
-    extensions.emit("extension-browser-inserted", this.browser);
+      extensions.emit("extension-browser-inserted", this.browser);
 
-    this.browser.loadURI(this.url, {triggeringPrincipal: extension.principal});
+      let contextPromise = promiseExtensionViewLoaded(this.browser);
+      this.browser.loadURI(this.url, {triggeringPrincipal: extension.principal});
 
-    let context = await promiseExtensionViewLoaded(this.browser);
+      context = await contextPromise;
+    } catch (e) {
+      // Extension was down before the background page has loaded.
+      Cu.reportError(e);
+      ExtensionTelemetry.backgroundPageLoad.stopwatchCancel(extension, this);
+      extension.emit("background-page-aborted");
+      return;
+    }
 
     ExtensionTelemetry.backgroundPageLoad.stopwatchFinish(extension, this);
 
@@ -61,20 +76,47 @@ class BackgroundPage extends HiddenExtensionPage {
 }
 
 this.backgroundPage = class extends ExtensionAPI {
-  onManifestEntry(entryName) {
+  build() {
+    if (this.bgPage) {
+      return;
+    }
+
     let {extension} = this;
     let {manifest} = extension;
 
     this.bgPage = new BackgroundPage(extension, manifest.background);
+    return this.bgPage.build();
+  }
+
+  onManifestEntry(entryName) {
+    let {extension} = this;
+
+    this.bgPage = null;
+
+    // When in PPB background pages all run in a private context.  This check
+    // simply avoids an extraneous error in the console since the BaseContext
+    // will throw.
+    if (PrivateBrowsingUtils.permanentPrivateBrowsing && !extension.privateBrowsingAllowed) {
+      return;
+    }
+
     if (extension.startupReason !== "APP_STARTUP" || !DELAYED_STARTUP) {
-      return this.bgPage.build();
+      return this.build();
     }
 
     EventManager.primeListeners(extension);
 
     extension.once("start-background-page", async () => {
-      await this.bgPage.build();
-      EventManager.clearPrimedListeners(extension);
+      if (!this.extension) {
+        // Extension was shut down. Don't build the background page.
+        // Primed listeners have been cleared in onShutdown.
+        return;
+      }
+      await this.build();
+      // |this.extension| may be null if the extension was shut down.
+      // In that case, we still want to clear the primed listeners,
+      // but not update the persistent listeners in the startupData.
+      EventManager.clearPrimedListeners(extension, !!this.extension);
     });
 
     // There are two ways to start the background page:
@@ -95,6 +137,10 @@ this.backgroundPage = class extends ExtensionAPI {
   }
 
   onShutdown() {
-    this.bgPage.shutdown();
+    if (this.bgPage) {
+      this.bgPage.shutdown();
+    } else {
+      EventManager.clearPrimedListeners(this.extension, false);
+    }
   }
 };

@@ -1,14 +1,20 @@
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
- * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 use crate::cg;
-use quote::Tokens;
-use syn::DeriveInput;
+use proc_macro2::{Span, TokenStream};
+use syn::{DeriveInput, Ident};
 use synstructure::BindStyle;
 
-pub fn derive(mut input: DeriveInput) -> Tokens {
+pub fn derive(mut input: DeriveInput) -> TokenStream {
     let mut where_clause = input.generics.where_clause.take();
+    cg::propagate_clauses_to_output_type(
+        &mut where_clause,
+        &input.generics,
+        parse_quote!(crate::values::computed::ToComputedValue),
+        parse_quote!(ComputedValue),
+    );
     let (to_body, from_body) = {
         let params = input.generics.type_params().collect::<Vec<_>>();
         for param in &params {
@@ -79,7 +85,7 @@ pub fn derive(mut input: DeriveInput) -> Tokens {
     let computed_value_type = cg::fmap_trait_output(
         &input,
         &parse_quote!(crate::values::computed::ToComputedValue),
-        "ComputedValue".into(),
+        Ident::new("ComputedValue", Span::call_site()),
     );
 
     quote! {

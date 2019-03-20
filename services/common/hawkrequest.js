@@ -9,13 +9,12 @@ var EXPORTED_SYMBOLS = [
   "deriveHawkCredentials",
 ];
 
-ChromeUtils.import("resource://gre/modules/Preferences.jsm");
-ChromeUtils.import("resource://gre/modules/Services.jsm");
-ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
-ChromeUtils.import("resource://gre/modules/Log.jsm");
-ChromeUtils.import("resource://services-common/rest.js");
-ChromeUtils.import("resource://services-common/utils.js");
-ChromeUtils.import("resource://gre/modules/Credentials.jsm");
+const {Preferences} = ChromeUtils.import("resource://gre/modules/Preferences.jsm");
+const {Services} = ChromeUtils.import("resource://gre/modules/Services.jsm");
+const {Log} = ChromeUtils.import("resource://gre/modules/Log.jsm");
+const {RESTRequest} = ChromeUtils.import("resource://services-common/rest.js");
+const {CommonUtils} = ChromeUtils.import("resource://services-common/utils.js");
+const {Credentials} = ChromeUtils.import("resource://gre/modules/Credentials.jsm");
 
 ChromeUtils.defineModuleGetter(this, "CryptoUtils",
                                "resource://services-crypto/utils.js");
@@ -79,7 +78,7 @@ HAWKAuthenticatedRESTRequest.prototype = {
         payload: data && JSON.stringify(data) || "",
         contentType,
       };
-      let header = CryptoUtils.computeHAWK(this.uri, method, options);
+      let header = await CryptoUtils.computeHAWK(this.uri, method, options);
       this.setHeader("Authorization", header.field);
     }
 
@@ -113,22 +112,17 @@ HAWKAuthenticatedRESTRequest.prototype = {
   * @return credentials
   *        Returns an object:
   *        {
-  *          algorithm: sha256
   *          id: the Hawk id (from the first 32 bytes derived)
   *          key: the Hawk key (from bytes 32 to 64)
   *          extra: size - 64 extra bytes (if size > 64)
   *        }
   */
-function deriveHawkCredentials(tokenHex,
-                                                            context,
-                                                            size = 96,
-                                                            hexKey = false) {
+async function deriveHawkCredentials(tokenHex, context, size = 96) {
   let token = CommonUtils.hexToBytes(tokenHex);
-  let out = CryptoUtils.hkdf(token, undefined, Credentials.keyWord(context), size);
+  let out = await CryptoUtils.hkdfLegacy(token, undefined, Credentials.keyWord(context), size);
 
   let result = {
-    algorithm: "sha256",
-    key: hexKey ? CommonUtils.bytesAsHex(out.slice(32, 64)) : out.slice(32, 64),
+    key: out.slice(32, 64),
     id: CommonUtils.bytesAsHex(out.slice(0, 32)),
   };
   if (size > 64) {

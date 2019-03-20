@@ -26,15 +26,15 @@
 #include <algorithm>
 
 #ifdef CAIRO_HAS_WIN32_SURFACE
-#include "gfxWindowsSurface.h"
+#  include "gfxWindowsSurface.h"
 #endif
 
 #ifdef MOZ_X11
-#include "gfxXlibSurface.h"
+#  include "gfxXlibSurface.h"
 #endif
 
 #ifdef CAIRO_HAS_QUARTZ_SURFACE
-#include "gfxQuartzSurface.h"
+#  include "gfxQuartzSurface.h"
 #endif
 
 #include <stdio.h>
@@ -480,7 +480,8 @@ size_t gfxASurface::SizeOfIncludingThis(MallocSizeOf aMallocSizeOf) const {
   return aMallocSizeOf(this) + SizeOfExcludingThis(aMallocSizeOf);
 }
 
-/* static */ uint8_t gfxASurface::BytesPerPixel(gfxImageFormat aImageFormat) {
+/* static */
+uint8_t gfxASurface::BytesPerPixel(gfxImageFormat aImageFormat) {
   switch (aImageFormat) {
     case SurfaceFormat::A8R8G8B8_UINT32:
       return 4;

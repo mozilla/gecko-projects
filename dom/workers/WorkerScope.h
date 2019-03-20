@@ -16,7 +16,7 @@
 #include "mozilla/dom/ImageBitmapSource.h"
 
 #ifdef XP_WIN
-#undef PostMessage
+#  undef PostMessage
 #endif
 
 namespace mozilla {
@@ -336,6 +336,9 @@ class WorkerDebuggerGlobalScope final : public DOMEventTargetHelper,
   Console* GetConsoleIfExists() const { return mConsole; }
 
   void Dump(JSContext* aCx, const Optional<nsAString>& aString) const;
+
+  void Atob(const nsAString& aAtob, nsAString& aOutput, ErrorResult& aRv) const;
+  void Btoa(const nsAString& aBtoa, nsAString& aOutput, ErrorResult& aRv) const;
 
   // Override DispatchTrait API to target the worker thread.  Dispatch may
   // return failure if the worker thread is not alive.

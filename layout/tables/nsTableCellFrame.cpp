@@ -60,7 +60,7 @@ class nsDisplayTableCellSelection final : public nsDisplayItem {
       mozilla::wr::DisplayListBuilder& aBuilder,
       mozilla::wr::IpcResourceUpdateQueue& aResources,
       const StackingContextHelper& aSc,
-      mozilla::layers::WebRenderLayerManager* aManager,
+      mozilla::layers::RenderRootStateManager* aManager,
       nsDisplayListBuilder* aDisplayListBuilder) override {
     RefPtr<nsFrameSelection> frameSelection =
         mFrame->PresShell()->FrameSelection();
@@ -74,7 +74,7 @@ class nsDisplayTableCellSelection final : public nsDisplayItem {
 
 nsTableCellFrame::nsTableCellFrame(ComputedStyle* aStyle,
                                    nsTableFrame* aTableFrame, ClassID aID)
-    : nsContainerFrame(aStyle, aID),
+    : nsContainerFrame(aStyle, aTableFrame->PresContext(), aID),
       mDesiredSize(aTableFrame->GetWritingMode()) {
   mColIndex = 0;
   mPriorAvailISize = 0;
@@ -204,14 +204,14 @@ nsresult nsTableCellFrame::AttributeChanged(int32_t aNameSpaceID,
   }
 
   if (aAttribute == nsGkAtoms::rowspan || aAttribute == nsGkAtoms::colspan) {
-    nsLayoutUtils::PostRestyleEvent(mContent->AsElement(), nsRestyleHint(0),
+    nsLayoutUtils::PostRestyleEvent(mContent->AsElement(), RestyleHint{0},
                                     nsChangeHint_UpdateTableCellSpans);
   }
   return NS_OK;
 }
 
-/* virtual */ void nsTableCellFrame::DidSetComputedStyle(
-    ComputedStyle* aOldComputedStyle) {
+/* virtual */
+void nsTableCellFrame::DidSetComputedStyle(ComputedStyle* aOldComputedStyle) {
   nsContainerFrame::DidSetComputedStyle(aOldComputedStyle);
 
   if (!aOldComputedStyle)  // avoid this on init
@@ -249,7 +249,8 @@ void nsTableCellFrame::RemoveFrame(ChildListID aListID, nsIFrame* aOldFrame) {
 
 void nsTableCellFrame::SetColIndex(int32_t aColIndex) { mColIndex = aColIndex; }
 
-/* virtual */ nsMargin nsTableCellFrame::GetUsedMargin() const {
+/* virtual */
+nsMargin nsTableCellFrame::GetUsedMargin() const {
   return nsMargin(0, 0, 0, 0);
 }
 
@@ -436,7 +437,7 @@ bool nsTableCellFrame::ShouldPaintBordersAndBackgrounds() const {
 }
 
 bool nsTableCellFrame::ShouldPaintBackground(nsDisplayListBuilder* aBuilder) {
-  return ShouldPaintBordersAndBackgrounds() && IsVisibleInSelection(aBuilder);
+  return ShouldPaintBordersAndBackgrounds();
 }
 
 void nsTableCellFrame::BuildDisplayList(nsDisplayListBuilder* aBuilder,
@@ -511,9 +512,8 @@ nsIFrame::LogicalSides nsTableCellFrame::GetLogicalSkipSides(
   return skip;
 }
 
-/* virtual */ nsMargin nsTableCellFrame::GetBorderOverflow() {
-  return nsMargin(0, 0, 0, 0);
-}
+/* virtual */
+nsMargin nsTableCellFrame::GetBorderOverflow() { return nsMargin(0, 0, 0, 0); }
 
 // Align the cell's child frame within the cell
 
@@ -653,7 +653,7 @@ int32_t nsTableCellFrame::GetRowSpan() {
   int32_t rowSpan = 1;
 
   // Don't look at the content's rowspan if we're a pseudo cell
-  if (!Style()->GetPseudo()) {
+  if (!Style()->IsPseudoOrAnonBox()) {
     dom::Element* elem = mContent->AsElement();
     const nsAttrValue* attr = elem->GetParsedAttr(nsGkAtoms::rowspan);
     // Note that we don't need to check the tag name, because only table cells
@@ -670,7 +670,7 @@ int32_t nsTableCellFrame::GetColSpan() {
   int32_t colSpan = 1;
 
   // Don't look at the content's colspan if we're a pseudo cell
-  if (!Style()->GetPseudo()) {
+  if (!Style()->IsPseudoOrAnonBox()) {
     dom::Element* elem = mContent->AsElement();
     const nsAttrValue* attr = elem->GetParsedAttr(
         MOZ_UNLIKELY(elem->IsMathMLElement()) ? nsGkAtoms::columnspan_
@@ -685,8 +685,8 @@ int32_t nsTableCellFrame::GetColSpan() {
   return colSpan;
 }
 
-/* virtual */ nscoord nsTableCellFrame::GetMinISize(
-    gfxContext* aRenderingContext) {
+/* virtual */
+nscoord nsTableCellFrame::GetMinISize(gfxContext* aRenderingContext) {
   nscoord result = 0;
   DISPLAY_MIN_INLINE_SIZE(this, result);
 
@@ -696,8 +696,8 @@ int32_t nsTableCellFrame::GetColSpan() {
   return result;
 }
 
-/* virtual */ nscoord nsTableCellFrame::GetPrefISize(
-    gfxContext* aRenderingContext) {
+/* virtual */
+nscoord nsTableCellFrame::GetPrefISize(gfxContext* aRenderingContext) {
   nscoord result = 0;
   DISPLAY_PREF_INLINE_SIZE(this, result);
 
@@ -721,7 +721,7 @@ nsTableCellFrame::IntrinsicISizeOffsets(nscoord aPercentageBasis) {
 }
 
 #ifdef DEBUG
-#define PROBABLY_TOO_LARGE 1000000
+#  define PROBABLY_TOO_LARGE 1000000
 static void DebugCheckChildSize(nsIFrame* aChild, ReflowOutput& aMet) {
   WritingMode wm = aMet.GetWritingMode();
   if ((aMet.ISize(wm) < 0) || (aMet.ISize(wm) > PROBABLY_TOO_LARGE)) {
@@ -950,9 +950,9 @@ void nsTableCellFrame::Reflow(nsPresContext* aPresContext,
 /* ----- global methods ----- */
 
 NS_QUERYFRAME_HEAD(nsTableCellFrame)
-NS_QUERYFRAME_ENTRY(nsTableCellFrame)
-NS_QUERYFRAME_ENTRY(nsITableCellLayout)
-NS_QUERYFRAME_ENTRY(nsIPercentBSizeObserver)
+  NS_QUERYFRAME_ENTRY(nsTableCellFrame)
+  NS_QUERYFRAME_ENTRY(nsITableCellLayout)
+  NS_QUERYFRAME_ENTRY(nsIPercentBSizeObserver)
 NS_QUERYFRAME_TAIL_INHERITING(nsContainerFrame)
 
 #ifdef ACCESSIBILITY
@@ -1008,7 +1008,8 @@ nsBCTableCellFrame::nsBCTableCellFrame(ComputedStyle* aStyle,
 
 nsBCTableCellFrame::~nsBCTableCellFrame() {}
 
-/* virtual */ nsMargin nsBCTableCellFrame::GetUsedBorder() const {
+/* virtual */
+nsMargin nsBCTableCellFrame::GetUsedBorder() const {
   WritingMode wm = GetWritingMode();
   return GetBorderWidth(wm).GetPhysicalMargin(wm);
 }
@@ -1056,7 +1057,8 @@ void nsBCTableCellFrame::SetBorderWidth(LogicalSide aSide, BCPixelSize aValue) {
   }
 }
 
-/* virtual */ nsMargin nsBCTableCellFrame::GetBorderOverflow() {
+/* virtual */
+nsMargin nsBCTableCellFrame::GetBorderOverflow() {
   WritingMode wm = GetWritingMode();
   int32_t d2a = PresContext()->AppUnitsPerDevPixel();
   LogicalMargin halfBorder(wm, BC_BORDER_START_HALF_COORD(d2a, mBStartBorder),

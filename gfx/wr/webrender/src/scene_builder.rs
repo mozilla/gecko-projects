@@ -4,17 +4,27 @@
 
 use api::{AsyncBlobImageRasterizer, BlobImageRequest, BlobImageParams, BlobImageResult};
 use api::{DocumentId, PipelineId, ApiMsg, FrameMsg, ResourceUpdate, ExternalEvent, Epoch};
-use api::{BuiltDisplayList, ColorF, LayoutSize, NotificationRequest, Checkpoint, IdNamespace};
+use api::{BuiltDisplayList, ColorF, NotificationRequest, Checkpoint, IdNamespace};
+use api::{ClipIntern, FilterDataIntern, MemoryReport, PrimitiveKeyKind};
 use api::channel::MsgSender;
+use api::units::LayoutSize;
 #[cfg(feature = "capture")]
 use capture::CaptureConfig;
 use frame_builder::{FrameBuilderConfig, FrameBuilder};
-use clip::{ClipDataInterner, ClipDataUpdateList};
 use clip_scroll_tree::ClipScrollTree;
 use display_list_flattener::DisplayListFlattener;
+use hit_test::HitTestingSceneStats;
+use intern::{Internable, Interner, UpdateList};
 use internal_types::{FastHashMap, FastHashSet};
-use prim_store::{PrimitiveDataInterner, PrimitiveDataUpdateList, PrimitiveStoreStats};
-use resource_cache::FontInstanceMap;
+use malloc_size_of::{MallocSizeOf, MallocSizeOfOps};
+use prim_store::PrimitiveStoreStats;
+use prim_store::borders::{ImageBorder, NormalBorderPrim};
+use prim_store::gradient::{LinearGradient, RadialGradient};
+use prim_store::image::{Image, YuvImage};
+use prim_store::line_dec::LineDecoration;
+use prim_store::picture::Picture;
+use prim_store::text_run::TextRun;
+use resource_cache::{AsyncBlobImageInfo, FontInstanceMap};
 use render_backend::DocumentView;
 use renderer::{PipelineInfo, SceneBuilderHooks};
 use scene::Scene;
@@ -25,10 +35,6 @@ use util::drain_filter;
 use std::thread;
 use std::time::Duration;
 
-pub struct DocumentResourceUpdates {
-    pub clip_updates: ClipDataUpdateList,
-    pub prim_updates: PrimitiveDataUpdateList,
-}
 
 /// Represents the work associated to a transaction before scene building.
 pub struct Transaction {
@@ -38,7 +44,7 @@ pub struct Transaction {
     pub epoch_updates: Vec<(PipelineId, Epoch)>,
     pub request_scene_build: Option<SceneRequest>,
     pub blob_requests: Vec<BlobImageParams>,
-    pub blob_rasterizer: Option<Box<AsyncBlobImageRasterizer>>,
+    pub blob_rasterizer: Option<(Box<AsyncBlobImageRasterizer>, AsyncBlobImageInfo)>,
     pub rasterized_blobs: Vec<(BlobImageRequest, BlobImageResult)>,
     pub resource_updates: Vec<ResourceUpdate>,
     pub frame_ops: Vec<FrameMsg>,
@@ -62,6 +68,18 @@ impl Transaction {
         !self.display_list_updates.is_empty() ||
             self.set_root_pipeline.is_some()
     }
+
+    fn rasterize_blobs(&mut self, is_low_priority: bool) {
+        if let Some((ref mut rasterizer, _)) = self.blob_rasterizer {
+            let mut rasterized_blobs = rasterizer.rasterize(&self.blob_requests, is_low_priority);
+            // try using the existing allocation if our current list is empty
+            if self.rasterized_blobs.is_empty() {
+                self.rasterized_blobs = rasterized_blobs;
+            } else {
+                self.rasterized_blobs.append(&mut rasterized_blobs);
+            }
+        }
+    }
 }
 
 /// Represent the remaining work associated to a transaction after the scene building
@@ -71,11 +89,11 @@ pub struct BuiltTransaction {
     pub built_scene: Option<BuiltScene>,
     pub resource_updates: Vec<ResourceUpdate>,
     pub rasterized_blobs: Vec<(BlobImageRequest, BlobImageResult)>,
-    pub blob_rasterizer: Option<Box<AsyncBlobImageRasterizer>>,
+    pub blob_rasterizer: Option<(Box<AsyncBlobImageRasterizer>, AsyncBlobImageInfo)>,
     pub frame_ops: Vec<FrameMsg>,
     pub removed_pipelines: Vec<PipelineId>,
     pub notifications: Vec<NotificationRequest>,
-    pub doc_resource_updates: Option<DocumentResourceUpdates>,
+    pub interner_updates: Option<InternerUpdates>,
     pub scene_build_start_time: u64,
     pub scene_build_end_time: u64,
     pub render_frame: bool,
@@ -107,7 +125,7 @@ pub struct LoadScene {
     pub view: DocumentView,
     pub config: FrameBuilderConfig,
     pub build_frame: bool,
-    pub doc_resources: DocumentResources,
+    pub interners: Interners,
 }
 
 pub struct BuiltScene {
@@ -128,6 +146,7 @@ pub enum SceneBuilderRequest {
     SimulateLongSceneBuild(u32),
     SimulateLongLowPrioritySceneBuild(u32),
     Stop,
+    ReportMemory(MemoryReport, MsgSender<MemoryReport>),
     #[cfg(feature = "capture")]
     SaveScene(CaptureConfig),
     #[cfg(feature = "replay")]
@@ -151,24 +170,76 @@ pub enum SceneSwapResult {
     Aborted,
 }
 
-// This struct contains all items that can be shared between
-// display lists. We want to intern and share the same clips,
-// primitives and other things between display lists so that:
-// - GPU cache handles remain valid, reducing GPU cache updates.
-// - Comparison of primitives and pictures between two
-//   display lists is (a) fast (b) done during scene building.
-#[cfg_attr(feature = "capture", derive(Serialize))]
-#[cfg_attr(feature = "replay", derive(Deserialize))]
-pub struct DocumentResources {
-    pub clip_interner: ClipDataInterner,
-    pub prim_interner: PrimitiveDataInterner,
+macro_rules! declare_interners {
+    ( $( $name:ident : $ty:ident, )+ ) => {
+        /// This struct contains all items that can be shared between
+        /// display lists. We want to intern and share the same clips,
+        /// primitives and other things between display lists so that:
+        /// - GPU cache handles remain valid, reducing GPU cache updates.
+        /// - Comparison of primitives and pictures between two
+        ///   display lists is (a) fast (b) done during scene building.
+        #[cfg_attr(feature = "capture", derive(Serialize))]
+        #[cfg_attr(feature = "replay", derive(Deserialize))]
+        #[derive(Default)]
+        pub struct Interners {
+            $(
+                pub $name: Interner<$ty>,
+            )+
+        }
+
+        $(
+            impl AsMut<Interner<$ty>> for Interners {
+                fn as_mut(&mut self) -> &mut Interner<$ty> {
+                    &mut self.$name
+                }
+            }
+        )+
+
+        pub struct InternerUpdates {
+            $(
+                pub $name: UpdateList<<$ty as Internable>::Key>,
+            )+
+        }
+
+        impl Interners {
+            /// Reports CPU heap memory used by the interners.
+            fn report_memory(
+                &self,
+                ops: &mut MallocSizeOfOps,
+                r: &mut MemoryReport,
+            ) {
+                $(
+                    r.interning.interners.$name += self.$name.size_of(ops);
+                )+
+            }
+
+            fn end_frame_and_get_pending_updates(&mut self) -> InternerUpdates {
+                InternerUpdates {
+                    $(
+                        $name: self.$name.end_frame_and_get_pending_updates(),
+                    )+
+                }
+            }
+        }
+    }
 }
 
-impl DocumentResources {
-    fn new() -> Self {
-        DocumentResources {
-            clip_interner: ClipDataInterner::new(),
-            prim_interner: PrimitiveDataInterner::new(),
+enumerate_interners!(declare_interners);
+
+/// Stores the allocation sizes of various arrays in the frame
+/// builder. This is retrieved from the current frame builder
+/// and used to reserve an approximately correct capacity of
+/// the arrays for the next scene that is getting built.
+pub struct DocumentStats {
+    pub prim_store_stats: PrimitiveStoreStats,
+    pub hit_test_stats: HitTestingSceneStats,
+}
+
+impl DocumentStats {
+    pub fn empty() -> DocumentStats {
+        DocumentStats {
+            prim_store_stats: PrimitiveStoreStats::empty(),
+            hit_test_stats: HitTestingSceneStats::empty(),
         }
     }
 }
@@ -179,16 +250,16 @@ impl DocumentResources {
 // display lists.
 struct Document {
     scene: Scene,
-    resources: DocumentResources,
-    prim_store_stats: PrimitiveStoreStats,
+    interners: Interners,
+    doc_stats: DocumentStats,
 }
 
 impl Document {
     fn new(scene: Scene) -> Self {
         Document {
             scene,
-            resources: DocumentResources::new(),
-            prim_store_stats: PrimitiveStoreStats::empty(),
+            interners: Interners::default(),
+            doc_stats: DocumentStats::empty(),
         }
     }
 }
@@ -201,6 +272,7 @@ pub struct SceneBuilder {
     config: FrameBuilderConfig,
     hooks: Option<Box<SceneBuilderHooks + Send>>,
     simulate_slow_ms: u32,
+    size_of_ops: Option<MallocSizeOfOps>,
 }
 
 impl SceneBuilder {
@@ -208,6 +280,7 @@ impl SceneBuilder {
         config: FrameBuilderConfig,
         api_tx: MsgSender<ApiMsg>,
         hooks: Option<Box<SceneBuilderHooks + Send>>,
+        size_of_ops: Option<MallocSizeOfOps>,
     ) -> (Self, Sender<SceneBuilderRequest>, Receiver<SceneBuilderResult>) {
         let (in_tx, in_rx) = channel();
         let (out_tx, out_rx) = channel();
@@ -219,6 +292,7 @@ impl SceneBuilder {
                 api_tx,
                 config,
                 hooks,
+                size_of_ops,
                 simulate_slow_ms: 0,
             },
             in_tx,
@@ -278,6 +352,10 @@ impl SceneBuilder {
                     // get the Stop when the RenderBackend loop is exiting.
                     break;
                 }
+                Ok(SceneBuilderRequest::ReportMemory(mut report, tx)) => {
+                    report += self.report_memory();
+                    tx.send(report).unwrap();
+                }
                 Ok(SceneBuilderRequest::SimulateLongSceneBuild(time_ms)) => {
                     self.simulate_slow_ms = time_ms
                 }
@@ -300,8 +378,8 @@ impl SceneBuilder {
     #[cfg(feature = "capture")]
     fn save_scene(&mut self, config: CaptureConfig) {
         for (id, doc) in &self.documents {
-            let doc_resources_name = format!("doc-resources-{}-{}", (id.0).0, id.1);
-            config.serialize(&doc.resources, doc_resources_name);
+            let interners_name = format!("interners-{}-{}", (id.0).0, id.1);
+            config.serialize(&doc.interners, interners_name);
         }
     }
 
@@ -313,7 +391,7 @@ impl SceneBuilder {
             let scene_build_start_time = precise_time_ns();
 
             let mut built_scene = None;
-            let mut doc_resource_updates = None;
+            let mut interner_updates = None;
 
             if item.scene.has_root_pipeline() {
                 let mut clip_scroll_tree = ClipScrollTree::new();
@@ -327,25 +405,12 @@ impl SceneBuilder {
                     &item.output_pipelines,
                     &self.config,
                     &mut new_scene,
-                    &mut item.doc_resources,
-                    &PrimitiveStoreStats::empty(),
+                    &mut item.interners,
+                    &DocumentStats::empty(),
                 );
 
-                let clip_updates = item
-                    .doc_resources
-                    .clip_interner
-                    .end_frame_and_get_pending_updates();
-
-                let prim_updates = item
-                    .doc_resources
-                    .prim_interner
-                    .end_frame_and_get_pending_updates();
-
-                doc_resource_updates = Some(
-                    DocumentResourceUpdates {
-                        clip_updates,
-                        prim_updates,
-                    }
+                interner_updates = Some(
+                    item.interners.end_frame_and_get_pending_updates()
                 );
 
                 built_scene = Some(BuiltScene {
@@ -359,8 +424,8 @@ impl SceneBuilder {
                 item.document_id,
                 Document {
                     scene: item.scene,
-                    resources: item.doc_resources,
-                    prim_store_stats: PrimitiveStoreStats::empty(),
+                    interners: item.interners,
+                    doc_stats: DocumentStats::empty(),
                 },
             );
 
@@ -377,7 +442,7 @@ impl SceneBuilder {
                 notifications: Vec::new(),
                 scene_build_start_time,
                 scene_build_end_time: precise_time_ns(),
-                doc_resource_updates,
+                interner_updates,
             });
 
             self.forward_built_transaction(txn);
@@ -421,7 +486,7 @@ impl SceneBuilder {
         }
 
         let mut built_scene = None;
-        let mut doc_resource_updates = None;
+        let mut interner_updates = None;
         if scene.has_root_pipeline() {
             if let Some(request) = txn.request_scene_build.take() {
                 let mut clip_scroll_tree = ClipScrollTree::new();
@@ -435,29 +500,16 @@ impl SceneBuilder {
                     &request.output_pipelines,
                     &self.config,
                     &mut new_scene,
-                    &mut doc.resources,
-                    &doc.prim_store_stats,
+                    &mut doc.interners,
+                    &doc.doc_stats,
                 );
 
                 // Update the allocation stats for next scene
-                doc.prim_store_stats = frame_builder.prim_store.get_stats();
+                doc.doc_stats = frame_builder.get_stats();
 
                 // Retrieve the list of updates from the clip interner.
-                let clip_updates = doc
-                    .resources
-                    .clip_interner
-                    .end_frame_and_get_pending_updates();
-
-                let prim_updates = doc
-                    .resources
-                    .prim_interner
-                    .end_frame_and_get_pending_updates();
-
-                doc_resource_updates = Some(
-                    DocumentResourceUpdates {
-                        clip_updates,
-                        prim_updates,
-                    }
+                interner_updates = Some(
+                    doc.interners.end_frame_and_get_pending_updates()
                 );
 
                 built_scene = Some(BuiltScene {
@@ -469,12 +521,7 @@ impl SceneBuilder {
         }
 
         let is_low_priority = false;
-        let blob_requests = replace(&mut txn.blob_requests, Vec::new());
-        let mut rasterized_blobs = txn.blob_rasterizer.as_mut().map_or(
-            Vec::new(),
-            |rasterizer| rasterizer.rasterize(&blob_requests, is_low_priority),
-        );
-        rasterized_blobs.append(&mut txn.rasterized_blobs);
+        txn.rasterize_blobs(is_low_priority);
 
         drain_filter(
             &mut txn.notifications,
@@ -491,13 +538,13 @@ impl SceneBuilder {
             render_frame: txn.render_frame,
             invalidate_rendered_frame: txn.invalidate_rendered_frame,
             built_scene,
-            rasterized_blobs,
+            rasterized_blobs: replace(&mut txn.rasterized_blobs, Vec::new()),
             resource_updates: replace(&mut txn.resource_updates, Vec::new()),
             blob_rasterizer: replace(&mut txn.blob_rasterizer, None),
             frame_ops: replace(&mut txn.frame_ops, Vec::new()),
             removed_pipelines: replace(&mut txn.removed_pipelines, Vec::new()),
             notifications: replace(&mut txn.notifications, Vec::new()),
-            doc_resource_updates,
+            interner_updates,
             scene_build_start_time,
             scene_build_end_time: precise_time_ns(),
         })
@@ -527,6 +574,7 @@ impl SceneBuilder {
 
         let scene_swap_start_time = precise_time_ns();
         let has_resources_updates = !txn.resource_updates.is_empty();
+        let invalidate_rendered_frame = txn.invalidate_rendered_frame;
 
         self.tx.send(SceneBuilderResult::Transaction(txn, result_tx)).unwrap();
 
@@ -544,7 +592,7 @@ impl SceneBuilder {
                 },
                 _ => (),
             };
-        } else if has_resources_updates {
+        } else if has_resources_updates || invalidate_rendered_frame {
             if let &Some(ref hooks) = &self.hooks {
                 hooks.post_resource_update();
             }
@@ -553,6 +601,17 @@ impl SceneBuilder {
                 hooks.post_empty_scene_build();
             }
         }
+    }
+
+    /// Reports CPU heap memory used by the SceneBuilder.
+    fn report_memory(&mut self) -> MemoryReport {
+        let ops = self.size_of_ops.as_mut().unwrap();
+        let mut report = MemoryReport::default();
+        for doc in self.documents.values() {
+            doc.interners.report_memory(ops, &mut report);
+        }
+
+        report
     }
 }
 
@@ -596,13 +655,9 @@ impl LowPrioritySceneBuilder {
     }
 
     fn process_transaction(&mut self, mut txn: Box<Transaction>) -> Box<Transaction> {
-        let blob_requests = replace(&mut txn.blob_requests, Vec::new());
         let is_low_priority = true;
-        let mut more_rasterized_blobs = txn.blob_rasterizer.as_mut().map_or(
-            Vec::new(),
-            |rasterizer| rasterizer.rasterize(&blob_requests, is_low_priority),
-        );
-        txn.rasterized_blobs.append(&mut more_rasterized_blobs);
+        txn.rasterize_blobs(is_low_priority);
+        txn.blob_requests = Vec::new();
 
         if self.simulate_slow_ms > 0 {
             thread::sleep(Duration::from_millis(self.simulate_slow_ms as u64));

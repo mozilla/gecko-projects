@@ -121,6 +121,12 @@ DynamicImage::GetType(uint16_t* aType) {
 }
 
 NS_IMETHODIMP
+DynamicImage::GetProducerId(uint32_t* aId) {
+  *aId = 0;
+  return NS_OK;
+}
+
+NS_IMETHODIMP
 DynamicImage::GetAnimated(bool* aAnimated) {
   *aAnimated = false;
   return NS_OK;
@@ -275,7 +281,7 @@ already_AddRefed<imgIContainer> DynamicImage::Unwrap() {
   return self.forget();
 }
 
-void DynamicImage::PropagateUseCounters(nsIDocument*) {
+void DynamicImage::PropagateUseCounters(dom::Document*) {
   // No use counters.
 }
 

@@ -35,23 +35,33 @@ log = logging.getLogger(__name__)
 ddstats = ThreadStats(namespace='releng.releases.partials')
 
 
+ROOT_URL = os.environ['TASKCLUSTER_ROOT_URL']
+QUEUE_PREFIX = ("https://queue.taskcluster.net/"
+                if ROOT_URL == 'https://taskcluster.net'
+                else ROOT_URL + '/api/queue/')
 ALLOWED_URL_PREFIXES = (
     "http://download.cdn.mozilla.net/pub/mozilla.org/firefox/nightly/",
     "http://download.cdn.mozilla.net/pub/firefox/nightly/",
     "https://mozilla-nightly-updates.s3.amazonaws.com",
-    "https://queue.taskcluster.net/",
     "http://ftp.mozilla.org/",
     "http://download.mozilla.org/",
     "https://archive.mozilla.org/",
     "http://archive.mozilla.org/",
-    "https://queue.taskcluster.net/v1/task/",
+    QUEUE_PREFIX,
 )
 STAGING_URL_PREFIXES = (
     "http://ftp.stage.mozaws.net/",
+    "https://ftp.stage.mozaws.net/",
 )
 
 DEFAULT_FILENAME_TEMPLATE = "{appName}-{branch}-{version}-{platform}-" \
                             "{locale}-{from_buildid}-{to_buildid}.partial.mar"
+
+BCJ_OPTIONS = {
+    'x86': ['--x86'],
+    'x86_64': ['--x86'],
+    'aarch64': [],
+}
 
 
 def write_dogrc(api_key):
@@ -146,26 +156,28 @@ async def run_command(cmd, cwd='/', env=None, label=None, silent=False):
         env = dict()
     process = await asyncio.create_subprocess_shell(cmd,
                                                     stdout=asyncio.subprocess.PIPE,
-                                                    stderr=asyncio.subprocess.STDOUT,
+                                                    stderr=asyncio.subprocess.PIPE,
                                                     cwd=cwd, env=env)
-    stdout, stderr = await process.communicate()
+    if label:
+        label = "{}: ".format(label)
+    else:
+        label = ""
 
-    await process.wait()
+    async def read_output(stream, label, printcmd):
+        while True:
+            line = await stream.readline()
+            if line == b'':
+                break
+            printcmd("%s%s", label, line.decode('utf-8').rstrip())
 
     if silent:
-        return
-
-    if not stderr:
-        stderr = ""
-    if not stdout:
-        stdout = ""
-
-    label = "{}: ".format(label)
-
-    for line in stdout.splitlines():
-        log.debug("%s%s", label, line.decode('utf-8'))
-    for line in stderr.splitlines():
-        log.warn("%s%s", label, line.decode('utf-8'))
+        await process.wait()
+    else:
+        await asyncio.gather(
+            read_output(process.stdout, label, log.info),
+            read_output(process.stderr, label, log.warn)
+            )
+        await process.wait()
 
 
 async def unpack(work_env, mar, dest_dir):
@@ -228,14 +240,8 @@ def get_hash(path, hash_type="sha512"):
 
 
 class WorkEnv(object):
-
-    def __init__(self, allowed_url_prefixes, mar=None, mbsdiff=None):
-        self.workdir = tempfile.mkdtemp()
-        self.paths = {
-            'unwrap_full_update.pl': os.path.join(self.workdir, 'unwrap_full_update.pl'),
-            'mar': os.path.join(self.workdir, 'mar'),
-            'mbsdiff': os.path.join(self.workdir, 'mbsdiff')
-        }
+    def __init__(self, allowed_url_prefixes, mar=None, mbsdiff=None, arch=None):
+        self.paths = dict()
         self.urls = {
             'unwrap_full_update.pl': 'https://hg.mozilla.org/mozilla-central/raw-file/default/'
             'tools/update-packaging/unwrap_full_update.pl',
@@ -249,12 +255,14 @@ class WorkEnv(object):
             self.urls['mar'] = mar
         if mbsdiff:
             self.urls['mbsdiff'] = mbsdiff
+        self.arch = arch
 
     async def setup(self, mar=None, mbsdiff=None):
+        self.workdir = tempfile.mkdtemp()
         for filename, url in self.urls.items():
-            if filename not in self.paths:
-                log.info("Been told about %s but don't know where to download it to!", filename)
-                continue
+            if filename in self.paths:
+                os.unlink(self.paths[filename])
+            self.paths[filename] = os.path.join(self.workdir, filename)
             await retry_download(url, dest=self.paths[filename], mode=0o755)
 
     async def download_buildsystem_bits(self, repo, revision):
@@ -273,6 +281,8 @@ class WorkEnv(object):
         my_env['LC_ALL'] = 'C'
         my_env['MAR'] = self.paths['mar']
         my_env['MBSDIFF'] = self.paths['mbsdiff']
+        if self.arch:
+            my_env['BCJ_OPTIONS'] = ' '.join(BCJ_OPTIONS[self.arch])
         return my_env
 
 
@@ -283,10 +293,20 @@ def verify_allowed_url(mar, allowed_url_prefixes):
         ))
 
 
-async def manage_partial(partial_def, work_env, filename_template, artifacts_dir, signing_certs):
+async def manage_partial(partial_def, filename_template, artifacts_dir,
+                         allowed_url_prefixes, signing_certs, arch=None):
     """Manage the creation of partial mars based on payload."""
+
+    work_env = WorkEnv(
+        allowed_url_prefixes=allowed_url_prefixes,
+        mar=partial_def.get('mar_binary'),
+        mbsdiff=partial_def.get('mbsdiff_binary'),
+        arch=arch,
+    )
+    await work_env.setup()
+
     for mar in (partial_def["from_mar"], partial_def["to_mar"]):
-        verify_allowed_url(mar, work_env.allowed_url_prefixes)
+        verify_allowed_url(mar, allowed_url_prefixes)
 
     complete_mars = {}
     use_old_format = False
@@ -320,12 +340,6 @@ async def manage_partial(partial_def, work_env, filename_template, artifacts_dir
                 use_old_format = True
                 log.info("Forcing BZ2 compression for %s", f)
 
-        log.info("AV-scanning %s ...", unpack_dir)
-        metric_tags = [
-            "platform:{}".format(partial_def['platform']),
-        ]
-        with ddstats.timer('mar.clamscan.time', tags=metric_tags):
-            await run_command("clamscan -r {}".format(unpack_dir), label='clamscan')
         log.info("Done.")
 
     to_path = os.path.join(work_env.workdir, "to")
@@ -415,12 +429,6 @@ async def async_main(args, signing_certs):
     task = json.load(args.task_definition)
     # TODO: verify task["extra"]["funsize"]["partials"] with jsonschema
     for definition in task["extra"]["funsize"]["partials"]:
-        workenv = WorkEnv(
-            allowed_url_prefixes=allowed_url_prefixes,
-            mar=definition.get('mar_binary'),
-            mbsdiff=definition.get('mbsdiff_binary')
-        )
-        await workenv.setup()
         tasks.append(asyncio.ensure_future(retry_async(
                                            manage_partial,
                                            retry_exceptions=(
@@ -431,8 +439,9 @@ async def async_main(args, signing_certs):
                                                partial_def=definition,
                                                filename_template=args.filename_template,
                                                artifacts_dir=args.artifacts_dir,
-                                               work_env=workenv,
-                                               signing_certs=signing_certs
+                                               allowed_url_prefixes=allowed_url_prefixes,
+                                               signing_certs=signing_certs,
+                                               arch=args.arch
                                            ))))
     manifest = await asyncio.gather(*tasks)
     return manifest
@@ -455,11 +464,12 @@ def main():
                         help="Allow files from staging buckets.")
     parser.add_argument("--filename-template",
                         default=DEFAULT_FILENAME_TEMPLATE)
-    parser.add_argument("--no-freshclam", action="store_true", default=False,
-                        help="Do not refresh ClamAV DB")
     parser.add_argument("-q", "--quiet", dest="log_level",
                         action="store_const", const=logging.WARNING,
                         default=logging.DEBUG)
+    parser.add_argument('--arch', type=str, required=True,
+                        choices=BCJ_OPTIONS.keys(),
+                        help='The archtecture you are building.')
     args = parser.parse_args()
 
     logging.basicConfig(format="%(asctime)s - %(levelname)s - %(message)s")
@@ -490,17 +500,6 @@ def main():
         write_dogrc(dd_api_key)
     else:
         log.info("No metric collection")
-
-    if args.no_freshclam:
-        log.info("Skipping freshclam")
-    else:
-        log.info("Refreshing clamav db...")
-        try:
-            redo.retry(lambda: sh.freshclam("--stdout", "--verbose",
-                                            _timeout=300, _err_to_out=True))
-            log.info("Done.")
-        except sh.ErrorReturnCode:
-            log.warning("Freshclam failed, skipping DB update")
 
     loop = asyncio.get_event_loop()
     manifest = loop.run_until_complete(async_main(args, signing_certs))

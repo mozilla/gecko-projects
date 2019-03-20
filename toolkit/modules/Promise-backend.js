@@ -60,16 +60,12 @@ var Components_ = this.require ? require("chrome").components : Components;
 if (Cu) {
   // If we're in a devtools module environment, ChromeUtils won't exist.
   /* eslint "mozilla/use-chromeutils-import": ["error", {allowCu: true}] */
-  Cu.import("resource://gre/modules/Services.jsm");
-  Cu.import("resource://gre/modules/XPCOMUtils.jsm");
+  Cu.import("resource://gre/modules/Services.jsm", this);
+  Cu.import("resource://gre/modules/XPCOMUtils.jsm", this);
 
   XPCOMUtils.defineLazyServiceGetter(this, "FinalizationWitnessService",
                                      "@mozilla.org/toolkit/finalizationwitness;1",
                                      "nsIFinalizationWitnessService");
-
-  // For now, we're worried about add-ons using Promises with CPOWs, so we'll
-  // permit them in this scope, but this support will go away soon.
-  Cu.permitCPOWsInScope(this);
 }
 
 const STATUS_PENDING = 0;
@@ -449,7 +445,6 @@ Promise.prototype.then = function(aOnResolve, aOnReject) {
   // Ensure the handler is scheduled for processing if this promise is already
   // resolved or rejected.
   if (this[N_INTERNALS].status != STATUS_PENDING) {
-
     // This promise is not the last in the chain anymore. Remove any watchdog.
     if (this[N_INTERNALS].witness != null) {
       let [id, witness] = this[N_INTERNALS].witness;
@@ -932,12 +927,10 @@ Handler.prototype = {
         nextStatus = STATUS_RESOLVED;
       }
     } catch (ex) {
-
       // An exception has occurred in the handler.
 
       if (ex && typeof ex == "object" && "name" in ex &&
           ERRORS_TO_REPORT.includes(ex.name)) {
-
         // We suspect that the exception is a programmer error, so we now
         // display it using dump().  Note that we do not use Cu.reportError as
         // we assume that this is a programming error, so we do not want end
@@ -952,7 +945,6 @@ Handler.prototype = {
         dump("Full message: " + ex + "\n");
         dump("Full stack: " + (("stack" in ex) ? ex.stack : "not available") + "\n");
         dump("*************************\n");
-
       }
 
       // Additionally, reject the next promise.

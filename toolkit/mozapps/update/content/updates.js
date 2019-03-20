@@ -820,7 +820,7 @@ var gDownloadingPage = {
       this._pauseButton.setAttribute("tooltiptext",
                                      gUpdates.getAUSString("pauseButtonResume"));
       this._pauseButton.setAttribute("paused", "true");
-      var p = u.selectedPatch.QueryInterface(Ci.nsIPropertyBag);
+      var p = u.selectedPatch.QueryInterface(Ci.nsIWritablePropertyBag);
       var status = p.getProperty("status");
       if (status) {
         let pausedStatus = gUpdates.getAUSString("downloadPausedStatus", [status]);
@@ -864,9 +864,9 @@ var gDownloadingPage = {
    * When the user clicks the Pause/Resume button
    */
   onPause() {
-    if (this._paused)
+    if (this._paused) {
       gAUS.downloadUpdate(gUpdates.update, false);
-    else {
+    } else {
       var patch = gUpdates.update.selectedPatch;
       patch.QueryInterface(Ci.nsIWritablePropertyBag);
       patch.setProperty("status", this._pausedStatus);
@@ -941,7 +941,7 @@ var gDownloadingPage = {
    * @param   context
    *          Additional data
    */
-  onStartRequest(request, context) {
+  onStartRequest(request) {
     // This !paused test is necessary because onStartRequest may fire after
     // the download was paused (for those speedy clickers...)
     if (this._paused)
@@ -1017,7 +1017,7 @@ var gDownloadingPage = {
    * @param   status
    *          Status code containing the reason for the cessation.
    */
-  onStopRequest(request, context, status) {
+  onStopRequest(request, status) {
     this._downloadProgress.setAttribute("value", "100");
 
     var u = gUpdates.update;

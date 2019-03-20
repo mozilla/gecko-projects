@@ -142,7 +142,7 @@ TextPropertyEditor.prototype = {
     // Property name, editable when focused.  Property name
     // is committed when the editor is unfocused.
     this.nameSpan = createChild(this.nameContainer, "span", {
-      class: "ruleview-propertyname theme-fg-color5",
+      class: "ruleview-propertyname theme-fg-color3",
       tabindex: this.ruleEditor.isEditable ? "0" : "-1",
     });
 
@@ -395,7 +395,9 @@ TextPropertyEditor.prototype = {
       flexClass: "ruleview-flex",
       gridClass: "ruleview-grid",
       shapeClass: "ruleview-shape",
-      shapeSwatchClass: SHARED_SWATCH_CLASS + " " + SHAPE_SWATCH_CLASS,
+      shapeSwatchClass: SHAPE_SWATCH_CLASS,
+      // Only ask the parser to convert colors to the default color type specified by the
+      // user if the property hasn't been changed yet.
       defaultColorType: !propDirty,
       urlClass: "theme-link",
       fontFamilyClass: FONT_FAMILY_CLASS,
@@ -470,7 +472,6 @@ TextPropertyEditor.prototype = {
           onCommit: this._onSwatchCommit,
           onRevert: this._onSwatchRevert,
         });
-        span.on("unit-change", this._onSwatchCommit);
         const title = l10n("rule.colorSwatch.tooltip");
         span.setAttribute("title", title);
         span.dataset.propertyName = this.nameSpan.textContent;
@@ -611,7 +612,7 @@ TextPropertyEditor.prototype = {
 
     if (!this.editing &&
         (this.prop.overridden || !this.prop.enabled ||
-         !this.prop.isKnownProperty())) {
+         !this.prop.isKnownProperty)) {
       this.element.classList.add("ruleview-overridden");
     } else {
       this.element.classList.remove("ruleview-overridden");
@@ -707,7 +708,7 @@ TextPropertyEditor.prototype = {
     });
 
     createChild(nameContainer, "span", {
-      class: "ruleview-propertyname theme-fg-color5",
+      class: "ruleview-propertyname theme-fg-color3",
       textContent: computed.name,
     });
     appendText(nameContainer, ": ");

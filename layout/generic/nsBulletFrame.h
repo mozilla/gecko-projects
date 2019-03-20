@@ -49,8 +49,8 @@ class nsBulletFrame final : public nsFrame {
   NS_DECL_QUERYFRAME
 #endif
 
-  explicit nsBulletFrame(ComputedStyle* aStyle)
-      : nsFrame(aStyle, kClassID),
+  explicit nsBulletFrame(ComputedStyle* aStyle, nsPresContext* aPresContext)
+      : nsFrame(aStyle, aPresContext, kClassID),
         mPadding(GetWritingMode()),
         mIntrinsicSize(GetWritingMode()),
         mOrdinal(0),
@@ -93,7 +93,8 @@ class nsBulletFrame final : public nsFrame {
                              int32_t aIncrement);
 
   /* get list item text, with prefix & suffix */
-  void GetListItemText(nsAString& aResult);
+  static void GetListItemText(mozilla::CounterStyle*, mozilla::WritingMode,
+                              int32_t aOrdinal, nsAString& aResult);
 
   void GetSpokenText(nsAString& aText);
 
@@ -129,7 +130,7 @@ class nsBulletFrame final : public nsFrame {
                       mozilla::LogicalMargin* aPadding);
 
   void GetLoadGroup(nsPresContext* aPresContext, nsILoadGroup** aLoadGroup);
-  nsIDocument* GetOurCurrentDoc() const;
+  mozilla::dom::Document* GetOurCurrentDoc() const;
 
   mozilla::LogicalMargin mPadding;
   RefPtr<imgRequestProxy> mImageRequest;
@@ -139,6 +140,8 @@ class nsBulletFrame final : public nsFrame {
   int32_t mOrdinal;
 
  private:
+  mozilla::CounterStyle* ResolveCounterStyle();
+  nscoord GetListStyleAscent() const;
   void RegisterImageRequest(bool aKnownToBeAnimated);
   void DeregisterAndCancelImageRequest();
 

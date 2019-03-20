@@ -7,6 +7,7 @@
 #include <MediaStreamGraphImpl.h>
 #include "mozilla/dom/AudioContext.h"
 #include "mozilla/dom/AudioDeviceInfo.h"
+#include "mozilla/dom/WorkletThread.h"
 #include "mozilla/SharedThreadPool.h"
 #include "mozilla/ClearOnShutdown.h"
 #include "mozilla/Unused.h"
@@ -14,16 +15,16 @@
 #include "Tracing.h"
 
 #ifdef MOZ_WEBRTC
-#include "webrtc/MediaEngineWebRTC.h"
+#  include "webrtc/MediaEngineWebRTC.h"
 #endif
 
 #ifdef XP_MACOSX
-#include <sys/sysctl.h>
+#  include <sys/sysctl.h>
 #endif
 
 extern mozilla::LazyLogModule gMediaStreamGraphLog;
 #ifdef LOG
-#undef LOG
+#  undef LOG
 #endif  // LOG
 #define LOG(type, msg) MOZ_LOG(gMediaStreamGraphLog, type, msg)
 
@@ -40,7 +41,7 @@ GraphDriver::GraphDriver(MediaStreamGraphImpl* aGraphImpl)
 void GraphDriver::SetGraphTime(GraphDriver* aPreviousDriver,
                                GraphTime aLastSwitchNextIterationStart,
                                GraphTime aLastSwitchNextIterationEnd) {
-  MOZ_ASSERT(OnThread() || !ThreadRunning());
+  MOZ_ASSERT(OnGraphThread() || !ThreadRunning());
   GraphImpl()->GetMonitor().AssertCurrentThreadOwns();
   // We set mIterationEnd here, because the first thing a driver do when it
   // does an iteration is to update graph times, so we are in fact setting
@@ -62,7 +63,7 @@ void GraphDriver::SetGraphTime(GraphDriver* aPreviousDriver,
 }
 
 void GraphDriver::SwitchAtNextIteration(GraphDriver* aNextDriver) {
-  MOZ_ASSERT(OnThread());
+  MOZ_ASSERT(OnGraphThread());
   MOZ_ASSERT(aNextDriver);
   GraphImpl()->GetMonitor().AssertCurrentThreadOwns();
 
@@ -86,14 +87,20 @@ GraphTime GraphDriver::StateComputedTime() const {
 
 void GraphDriver::EnsureNextIteration() { GraphImpl()->EnsureNextIteration(); }
 
+#ifdef DEBUG
+bool GraphDriver::OnGraphThread() {
+  return GraphImpl()->RunByGraphDriver(this);
+}
+#endif
+
 bool GraphDriver::Switching() {
-  MOZ_ASSERT(OnThread());
+  MOZ_ASSERT(OnGraphThread());
   GraphImpl()->GetMonitor().AssertCurrentThreadOwns();
   return mNextDriver || mPreviousDriver;
 }
 
 void GraphDriver::SwitchToNextDriver() {
-  MOZ_ASSERT(OnThread() || !ThreadRunning());
+  MOZ_ASSERT(OnGraphThread() || !ThreadRunning());
   GraphImpl()->GetMonitor().AssertCurrentThreadOwns();
   MOZ_ASSERT(NextDriver());
 
@@ -104,19 +111,19 @@ void GraphDriver::SwitchToNextDriver() {
 }
 
 GraphDriver* GraphDriver::NextDriver() {
-  MOZ_ASSERT(OnThread() || !ThreadRunning());
+  MOZ_ASSERT(OnGraphThread() || !ThreadRunning());
   GraphImpl()->GetMonitor().AssertCurrentThreadOwns();
   return mNextDriver;
 }
 
 GraphDriver* GraphDriver::PreviousDriver() {
-  MOZ_ASSERT(OnThread() || !ThreadRunning());
+  MOZ_ASSERT(OnGraphThread() || !ThreadRunning());
   GraphImpl()->GetMonitor().AssertCurrentThreadOwns();
   return mPreviousDriver;
 }
 
 void GraphDriver::SetNextDriver(GraphDriver* aNextDriver) {
-  MOZ_ASSERT(OnThread() || !ThreadRunning());
+  MOZ_ASSERT(OnGraphThread() || !ThreadRunning());
   GraphImpl()->GetMonitor().AssertCurrentThreadOwns();
   MOZ_ASSERT(aNextDriver != this);
   MOZ_ASSERT(aNextDriver != mNextDriver);
@@ -132,7 +139,7 @@ void GraphDriver::SetNextDriver(GraphDriver* aNextDriver) {
 }
 
 void GraphDriver::SetPreviousDriver(GraphDriver* aPreviousDriver) {
-  MOZ_ASSERT(OnThread() || !ThreadRunning());
+  MOZ_ASSERT(OnGraphThread() || !ThreadRunning());
   GraphImpl()->GetMonitor().AssertCurrentThreadOwns();
   mPreviousDriver = aPreviousDriver;
 }
@@ -307,6 +314,7 @@ void ThreadedDriver::RunThread() {
     if (!stillProcessing) {
       // Enter shutdown mode. The stable-state handler will detect this
       // and complete shutdown if the graph does not get restarted.
+      dom::WorkletThread::DeleteCycleCollectedJSContext();
       GraphImpl()->SignalMainThreadCleanup();
       break;
     }
@@ -657,7 +665,7 @@ bool AudioCallbackDriver::Init() {
 void AudioCallbackDriver::Start() {
   MOZ_ASSERT(!IsStarted());
   MOZ_ASSERT(NS_IsMainThread() || OnCubebOperationThread() ||
-             (PreviousDriver() && PreviousDriver()->OnThread()));
+             (PreviousDriver() && PreviousDriver()->OnGraphThread()));
   if (mPreviousDriver) {
     if (mPreviousDriver->AsAudioCallbackDriver()) {
       LOG(LogLevel::Debug, ("Releasing audio driver off main thread."));
@@ -721,7 +729,7 @@ void AudioCallbackDriver::Revive() {
 }
 
 void AudioCallbackDriver::RemoveMixerCallback() {
-  MOZ_ASSERT(OnThread() || !ThreadRunning());
+  MOZ_ASSERT(OnGraphThread() || !ThreadRunning());
 
   if (mAddedMixer) {
     GraphImpl()->mMixer.RemoveCallback(this);
@@ -730,7 +738,7 @@ void AudioCallbackDriver::RemoveMixerCallback() {
 }
 
 void AudioCallbackDriver::AddMixerCallback() {
-  MOZ_ASSERT(OnThread());
+  MOZ_ASSERT(OnGraphThread());
 
   if (!mAddedMixer) {
     mGraphImpl->mMixer.AddCallback(this);
@@ -762,25 +770,25 @@ void AudioCallbackDriver::ResetDefaultDevice() {
 }
 #endif
 
-/* static */ long AudioCallbackDriver::DataCallback_s(cubeb_stream* aStream,
-                                                      void* aUser,
-                                                      const void* aInputBuffer,
-                                                      void* aOutputBuffer,
-                                                      long aFrames) {
+/* static */
+long AudioCallbackDriver::DataCallback_s(cubeb_stream* aStream, void* aUser,
+                                         const void* aInputBuffer,
+                                         void* aOutputBuffer, long aFrames) {
   AudioCallbackDriver* driver = reinterpret_cast<AudioCallbackDriver*>(aUser);
   return driver->DataCallback(static_cast<const AudioDataValue*>(aInputBuffer),
                               static_cast<AudioDataValue*>(aOutputBuffer),
                               aFrames);
 }
 
-/* static */ void AudioCallbackDriver::StateCallback_s(cubeb_stream* aStream,
-                                                       void* aUser,
-                                                       cubeb_state aState) {
+/* static */
+void AudioCallbackDriver::StateCallback_s(cubeb_stream* aStream, void* aUser,
+                                          cubeb_state aState) {
   AudioCallbackDriver* driver = reinterpret_cast<AudioCallbackDriver*>(aUser);
   driver->StateCallback(aState);
 }
 
-/* static */ void AudioCallbackDriver::DeviceChangedCallback_s(void* aUser) {
+/* static */
+void AudioCallbackDriver::DeviceChangedCallback_s(void* aUser) {
   AudioCallbackDriver* driver = reinterpret_cast<AudioCallbackDriver*>(aUser);
   driver->DeviceChangedCallback();
 }
@@ -947,7 +955,7 @@ long AudioCallbackDriver::DataCallback(const AudioDataValue* aInputBuffer,
 }
 
 void AudioCallbackDriver::StateCallback(cubeb_state aState) {
-  MOZ_ASSERT(!OnThread());
+  MOZ_ASSERT(!OnGraphThread());
   LOG(LogLevel::Debug, ("AudioCallbackDriver State: %d", aState));
 
   // Clear the flag for the not running
@@ -970,7 +978,7 @@ void AudioCallbackDriver::MixerCallback(AudioDataValue* aMixedBuffer,
                                         AudioSampleFormat aFormat,
                                         uint32_t aChannels, uint32_t aFrames,
                                         uint32_t aSampleRate) {
-  MOZ_ASSERT(OnThread());
+  MOZ_ASSERT(OnGraphThread());
   uint32_t toWrite = mBuffer.Available();
 
   if (!mBuffer.Available()) {
@@ -1026,7 +1034,7 @@ void AudioCallbackDriver::PanOutputIfNeeded(bool aMicrophoneActive) {
 }
 
 void AudioCallbackDriver::DeviceChangedCallback() {
-  MOZ_ASSERT(!OnThread());
+  MOZ_ASSERT(!OnGraphThread());
   // Tell the audio engine the device has changed, it might want to reset some
   // state.
   MonitorAutoLock mon(mGraphImpl->GetMonitor());
@@ -1037,7 +1045,7 @@ void AudioCallbackDriver::DeviceChangedCallback() {
 }
 
 uint32_t AudioCallbackDriver::IterationDuration() {
-  MOZ_ASSERT(OnThread());
+  MOZ_ASSERT(OnGraphThread());
   // The real fix would be to have an API in cubeb to give us the number. Short
   // of that, we approximate it here. bug 1019507
   return mIterationDurationMS;
@@ -1048,7 +1056,7 @@ bool AudioCallbackDriver::IsStarted() { return mStarted; }
 void AudioCallbackDriver::EnqueueStreamAndPromiseForOperation(
     MediaStream* aStream, void* aPromise,
     dom::AudioContextOperation aOperation) {
-  MOZ_ASSERT(OnThread() || !ThreadRunning());
+  MOZ_ASSERT(OnGraphThread() || !ThreadRunning());
   MonitorAutoLock mon(mGraphImpl->GetMonitor());
   mPromisesForOperation.AppendElement(
       StreamAndPromiseForOperation(aStream, aPromise, aOperation));

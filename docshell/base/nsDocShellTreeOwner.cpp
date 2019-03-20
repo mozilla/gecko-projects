@@ -56,6 +56,7 @@
 #include "mozilla/dom/Event.h"     // for Event
 #include "mozilla/dom/File.h"      // for input type=file
 #include "mozilla/dom/FileList.h"  // for input type=file
+#include "mozilla/dom/LoadURIOptionsBinding.h"
 #include "mozilla/TextEvents.h"
 
 using namespace mozilla;
@@ -378,7 +379,7 @@ nsDocShellTreeOwner::SizeShellTo(nsIDocShellTreeItem* aShellItem, int32_t aCX,
 
   NS_ENSURE_TRUE(aShellItem, NS_ERROR_FAILURE);
 
-  nsCOMPtr<nsIDocument> document = aShellItem->GetDocument();
+  RefPtr<Document> document = aShellItem->GetDocument();
   NS_ENSURE_TRUE(document, NS_ERROR_FAILURE);
 
   NS_ENSURE_TRUE(document->GetDocumentElement(), NS_ERROR_FAILURE);
@@ -694,9 +695,15 @@ nsDocShellTreeOwner::OnStatusChange(nsIWebProgress* aWebProgress,
 }
 
 NS_IMETHODIMP
-nsDocShellTreeOwner::OnSecurityChange(
-    nsIWebProgress* aWebProgress, nsIRequest* aRequest, uint32_t aOldState,
-    uint32_t aState, const nsAString& aContentBlockingLogJSON) {
+nsDocShellTreeOwner::OnSecurityChange(nsIWebProgress* aWebProgress,
+                                      nsIRequest* aRequest, uint32_t aState) {
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+nsDocShellTreeOwner::OnContentBlockingEvent(nsIWebProgress* aWebProgress,
+                                            nsIRequest* aRequest,
+                                            uint32_t aEvent) {
   return NS_OK;
 }
 
@@ -897,8 +904,12 @@ nsDocShellTreeOwner::HandleEvent(Event* aEvent) {
                          "nsDocShellTreeOwner::HandleEvent: Need a valid "
                          "triggeringPrincipal");
 #endif
-              webnav->LoadURI(url, 0, nullptr, nullptr, nullptr,
-                              triggeringPrincipal);
+              LoadURIOptions loadURIOptions;
+              loadURIOptions.mTriggeringPrincipal = triggeringPrincipal;
+              nsCOMPtr<nsIContentSecurityPolicy> csp;
+              handler->GetCSP(dragEvent, getter_AddRefs(csp));
+              loadURIOptions.mCsp = csp;
+              webnav->LoadURI(url, loadURIOptions);
             }
           }
 
@@ -1165,9 +1176,8 @@ ChromeTooltipListener::ShowTooltip(int32_t aInXCoords, int32_t aInYCoords,
   nsCOMPtr<nsITooltipListener> tooltipListener(
       do_QueryInterface(mWebBrowserChrome));
   if (tooltipListener) {
-    rv = tooltipListener->OnShowTooltip(aInXCoords, aInYCoords,
-                                        PromiseFlatString(aInTipText).get(),
-                                        PromiseFlatString(aTipDir).get());
+    rv = tooltipListener->OnShowTooltip(aInXCoords, aInYCoords, aInTipText,
+                                        aTipDir);
     if (NS_SUCCEEDED(rv)) {
       mShowingTooltip = true;
     }

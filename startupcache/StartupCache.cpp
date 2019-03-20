@@ -13,6 +13,7 @@
 #include "nsAutoPtr.h"
 #include "nsClassHashtable.h"
 #include "nsComponentManagerUtils.h"
+#include "nsCRT.h"
 #include "nsDirectoryServiceUtils.h"
 #include "nsIClassInfo.h"
 #include "nsIFile.h"
@@ -36,15 +37,15 @@
 #include "GeckoProfiler.h"
 
 #ifdef IS_BIG_ENDIAN
-#define SC_ENDIAN "big"
+#  define SC_ENDIAN "big"
 #else
-#define SC_ENDIAN "little"
+#  define SC_ENDIAN "little"
 #endif
 
 #if PR_BYTES_PER_WORD == 4
-#define SC_WORDSIZE "4"
+#  define SC_WORDSIZE "4"
 #else
-#define SC_WORDSIZE "8"
+#  define SC_WORDSIZE "8"
 #endif
 
 namespace mozilla {
@@ -261,12 +262,21 @@ nsresult StartupCache::GetBuffer(const char* id, UniquePtr<char[]>* outbuf,
       *outbuf = MakeUnique<char[]>(entry->size);
       memcpy(outbuf->get(), entry->data.get(), entry->size);
       *length = entry->size;
+      Telemetry::AccumulateCategorical(
+          Telemetry::LABELS_STARTUP_CACHE_REQUESTS::HitMemory);
       return NS_OK;
     }
   }
 
   nsresult rv = GetBufferFromZipArchive(mArchive, true, id, outbuf, length);
-  if (NS_SUCCEEDED(rv)) return rv;
+  if (NS_SUCCEEDED(rv)) {
+    Telemetry::AccumulateCategorical(
+        Telemetry::LABELS_STARTUP_CACHE_REQUESTS::HitDisk);
+    return rv;
+  }
+
+  Telemetry::AccumulateCategorical(
+      Telemetry::LABELS_STARTUP_CACHE_REQUESTS::Miss);
 
   RefPtr<nsZipArchive> omnijar =
       mozilla::Omnijar::GetReader(mozilla::Omnijar::APP);
@@ -422,7 +432,14 @@ void StartupCache::WriteToDisk() {
   LoadArchive();
 }
 
-void StartupCache::InvalidateCache() {
+void StartupCache::InvalidateCache(bool memoryOnly) {
+  if (memoryOnly) {
+    // The memoryOnly option is just for testing purposes. We want to ensure
+    // that we're nuking the in-memory form but that we preserve everything
+    // on disk.
+    WriteToDisk();
+    return;
+  }
   WaitOnWriteThread();
   mPendingWrites.Clear();
   mTable.Clear();
@@ -506,7 +523,7 @@ nsresult StartupCacheListener::Observe(nsISupports* subject, const char* topic,
     sc->WaitOnWriteThread();
     StartupCache::gShutdownInitiated = true;
   } else if (strcmp(topic, "startupcache-invalidate") == 0) {
-    sc->InvalidateCache();
+    sc->InvalidateCache(data && nsCRT::strcmp(data, u"memoryOnly") == 0);
   }
   return NS_OK;
 }

@@ -66,7 +66,7 @@ A user event ping includes some basic metadata (tab id, addon version, etc.) as 
 ```js
 {
   // This indicates the type of interaction
-  "event": ["CLICK", "SEARCH", "BLOCK", "DELETE", "OPEN_NEW_WINDOW", "OPEN_PRIVATE_WINDOW", "BOOKMARK_DELETE", "BOOKMARK_ADD", "OPEN_NEWTAB_PREFS", "CLOSE_NEWTAB_PREFS"],
+  "event": ["CLICK", "SEARCH", "BLOCK", "DELETE", "OPEN_NEW_WINDOW", "OPEN_PRIVATE_WINDOW", "BOOKMARK_DELETE", "BOOKMARK_ADD", "OPEN_NEWTAB_PREFS", "CLOSE_NEWTAB_PREFS", "SEARCH_HANDOFF"],
 
   // Optional field indicating the UI component type
   "source": "TOP_SITES",
@@ -94,6 +94,23 @@ A user event ping includes some basic metadata (tab id, addon version, etc.) as 
 ```js
 {
   "event": "SEARCH",
+
+  // Basic metadata
+  "action": "activity_stream_event",
+  "page": ["about:newtab" | "about:home" | "about:welcome" | "unknown"],
+  "client_id": "26288a14-5cc4-d14f-ae0a-bb01ef45be9c",
+  "session_id": "005deed0-e3e4-4c02-a041-17405fd703f6",
+  "addon_version": "20180710100040",
+  "locale": "en-US",
+  "user_prefs": 7
+}
+```
+
+#### Performing a search handoff
+
+```js
+{
+  "event": "SEARCH_HANDOFF",
 
   // Basic metadata
   "action": "activity_stream_event",
@@ -342,6 +359,26 @@ A user event ping includes some basic metadata (tab id, addon version, etc.) as 
   "addon_version": "20180710100040",
   "locale": "en-US",
   "user_prefs": 7
+}
+```
+
+#### Pinning a tab
+
+```js
+{
+  "event": "TABPINNED",
+  "source": "TAB_CONTEXT_MENU",
+  "value": "{\"total_pinned_tabs\":2}",
+
+  // Basic metadata
+  "action": "activity_stream_user_event",
+  "client_id": "aabaace5-35f4-7345-a28e-5502147dc93c",
+  "version": "67.0a1",
+  "addon_version": "20190218094427",
+  "locale": "en-US",
+  "user_prefs": 59,
+  "page": "n/a",
+  "session_id": "n/a",
 }
 ```
 
@@ -722,6 +759,78 @@ These report any failures during domain affinity v2 calculations, and where it f
 }
 ```
 
+### Discovery Stream performance pings
+
+#### Request time of layout feed in ms
+
+```js
+{
+  "action": "activity_stream_performance_event",
+  "client_id": "26288a14-5cc4-d14f-ae0a-bb01ef45be9c",
+  "addon_version": "20180710100040",
+  "locale": "en-US",
+  "user_prefs": 7,
+  "event": "LAYOUT_REQUEST_TIME",
+  "value": 42
+}
+```
+
+#### Request time of SPOCS feed in ms
+
+```js
+{
+  "action": "activity_stream_performance_event",
+  "client_id": "26288a14-5cc4-d14f-ae0a-bb01ef45be9c",
+  "addon_version": "20180710100040",
+  "locale": "en-US",
+  "user_prefs": 7,
+  "event": "SPOCS_REQUEST_TIME",
+  "value": 42
+}
+```
+
+#### Request time of component feed feed in ms
+
+```js
+{
+  "action": "activity_stream_performance_event",
+  "client_id": "26288a14-5cc4-d14f-ae0a-bb01ef45be9c",
+  "addon_version": "20180710100040",
+  "locale": "en-US",
+  "user_prefs": 7,
+  "event": "COMPONENT_FEED_REQUEST_TIME",
+  "value": 42
+}
+```
+
+#### Request time of total Discovery Stream feed in ms
+
+```js
+{
+  "action": "activity_stream_performance_event",
+  "client_id": "26288a14-5cc4-d14f-ae0a-bb01ef45be9c",
+  "addon_version": "20180710100040",
+  "locale": "en-US",
+  "user_prefs": 7,
+  "event": "DS_FEED_TOTAL_REQUEST_TIME",
+  "value": 136
+}
+```
+
+#### Cache age of Discovery Stream feed in second
+
+```js
+{
+  "action": "activity_stream_performance_event",
+  "client_id": "26288a14-5cc4-d14f-ae0a-bb01ef45be9c",
+  "addon_version": "20180710100040",
+  "locale": "en-US",
+  "user_prefs": 7,
+  "event": "DS_CACHE_AGE_IN_SEC",
+  "value": 1800 // 30 minutes
+}
+```
+
 ## Undesired event pings
 
 These pings record the undesired events happen in the addon for further investigation.
@@ -840,7 +949,7 @@ This reports the user's interaction with Activity Stream Router.
   "source": "CFR",
   // message_id could be the ID of the recommendation, such as "wikipedia_addon"
   "message_id": "wikipedia_addon",
-  "event": "[INSTALL | BLOCK | DISMISS | RATIONALE | LEARN_MORE | CLICK_DOORHANGER | MANAGE]"
+  "event": "[INSTALL | PIN | BLOCK | DISMISS | RATIONALE | LEARN_MORE | CLICK_DOORHANGER | MANAGE]"
 }
 ```
 
@@ -856,7 +965,7 @@ This reports the user's interaction with Activity Stream Router.
   // message_id should be a bucket ID in the release channel, we may not use the
   // individual ID, such as addon ID, per legal's request
   "message_id": "bucket_id",
-  "event": "[INSTALL | BLOCK | DISMISS | RATIONALE | LEARN_MORE | CLICK_DOORHANGER | MANAGE]"
+  "event": "[INSTALL | PIN | BLOCK | DISMISS | RATIONALE | LEARN_MORE | CLICK_DOORHANGER | MANAGE]"
 }
 ```
 

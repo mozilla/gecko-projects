@@ -18,11 +18,10 @@
 #include "mozilla/MozPromise.h"
 #include "mozilla/Vector.h"
 #if defined(OS_WIN)
-#include "mozilla/ipc/Neutering.h"
+#  include "mozilla/ipc/Neutering.h"
 #endif  // defined(OS_WIN)
 #include "mozilla/ipc/Transport.h"
 #include "MessageLink.h"
-#include "nsILabelableRunnable.h"
 #include "nsThreadUtils.h"
 
 #include <deque>
@@ -111,7 +110,7 @@ class MessageChannel : HasResultCodes, MessageLoop::DestructionObserver {
 
     virtual ~UntypedCallbackHolder() {}
 
-    void Reject(ResponseRejectReason aReason) { mReject(aReason); }
+    void Reject(ResponseRejectReason&& aReason) { mReject(std::move(aReason)); }
 
     ActorIdType mActorId;
     RejectCallback mReject;
@@ -163,6 +162,15 @@ class MessageChannel : HasResultCodes, MessageLoop::DestructionObserver {
   // in MessageChannel.cpp.
   bool Open(MessageChannel* aTargetChan, nsIEventTarget* aEventTarget,
             Side aSide);
+
+  // "Open" a connection to an actor on the current thread.
+  //
+  // Returns true if the transport layer was successfully connected,
+  // i.e., mChannelState == ChannelConnected.
+  //
+  // Same-thread channels may not perform synchronous or blocking message
+  // sends, to avoid deadlocks.
+  bool OpenOnSameThread(MessageChannel* aTargetChan, Side aSide);
 
   // Close the underlying transport channel.
   void Close();
@@ -304,6 +312,11 @@ class MessageChannel : HasResultCodes, MessageLoop::DestructionObserver {
     sIsPumpingMessages = aIsPumping;
   }
 
+  /**
+   * Does this MessageChannel cross process boundaries?
+   */
+  bool IsCrossProcess() const { return mIsCrossProcess; }
+
 #ifdef OS_WIN
   struct MOZ_STACK_CLASS SyncStackFrame {
     SyncStackFrame(MessageChannel* channel, bool interrupt);
@@ -344,10 +357,10 @@ class MessageChannel : HasResultCodes, MessageLoop::DestructionObserver {
 
  private:
   void SpinInternalEventLoop();
-#if defined(ACCESSIBILITY)
+#  if defined(ACCESSIBILITY)
   bool WaitForSyncNotifyWithA11yReentry();
-#endif  // defined(ACCESSIBILITY)
-#endif  // defined(OS_WIN)
+#  endif  // defined(ACCESSIBILITY)
+#endif    // defined(OS_WIN)
 
  private:
   void CommonThreadOpenInit(MessageChannel* aTargetChan, Side aSide);
@@ -530,10 +543,19 @@ class MessageChannel : HasResultCodes, MessageLoop::DestructionObserver {
                        "not on worker thread!");
   }
 
-  // The "link" thread is either the I/O thread (ProcessLink) or the
-  // other actor's work thread (ThreadLink).  In either case, it is
-  // NOT our worker thread.
+  // The "link" thread is either the I/O thread (ProcessLink), the other
+  // actor's work thread (ThreadLink), or the worker thread (same-thread
+  // channels).
   void AssertLinkThread() const {
+    if (mIsSameThreadChannel) {
+      // If we're a same-thread channel, we have to be on our worker
+      // thread.
+      AssertWorkerThread();
+      return;
+    }
+
+    // If we aren't a same-thread channel, our "link" thread is _not_ our
+    // worker thread!
     MOZ_ASSERT(mWorkerThread, "Channel hasn't been opened yet");
     MOZ_RELEASE_ASSERT(mWorkerThread != GetCurrentVirtualThread(),
                        "on worker thread but should not be!");
@@ -542,8 +564,7 @@ class MessageChannel : HasResultCodes, MessageLoop::DestructionObserver {
  private:
   class MessageTask : public CancelableRunnable,
                       public LinkedListElement<RefPtr<MessageTask>>,
-                      public nsIRunnablePriority,
-                      public nsILabelableRunnable {
+                      public nsIRunnablePriority {
    public:
     explicit MessageTask(MessageChannel* aChannel, Message&& aMessage);
 
@@ -559,8 +580,6 @@ class MessageChannel : HasResultCodes, MessageLoop::DestructionObserver {
 
     Message& Msg() { return mMessage; }
     const Message& Msg() const { return mMessage; }
-
-    bool GetAffectedSchedulerGroups(SchedulerGroupSet& aGroups) override;
 
    private:
     MessageTask() = delete;
@@ -827,6 +846,10 @@ class MessageChannel : HasResultCodes, MessageLoop::DestructionObserver {
   std::vector<UniquePtr<Message>> mPostponedSends;
 
   bool mBuildIDsConfirmedMatch;
+
+  // If this is true, both ends of this message channel have event targets
+  // on the same thread.
+  bool mIsSameThreadChannel;
 };
 
 void CancelCPOWs();

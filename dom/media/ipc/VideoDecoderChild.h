@@ -3,36 +3,39 @@
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
-#ifndef include_dom_ipc_VideoDecoderChild_h
-#define include_dom_ipc_VideoDecoderChild_h
+#ifndef include_ipc_VideoDecoderChild_h
+#define include_ipc_VideoDecoderChild_h
 
 #include "MediaResult.h"
 #include "PlatformDecoderModule.h"
-#include "mozilla/dom/PVideoDecoderChild.h"
+#include "mozilla/PVideoDecoderChild.h"
 #include "IRemoteDecoderChild.h"
 
 namespace mozilla {
-namespace dom {
 
 class RemoteVideoDecoder;
 class RemoteDecoderModule;
 class VideoDecoderManagerChild;
+using mozilla::ipc::IPCResult;
 
 class VideoDecoderChild final : public PVideoDecoderChild,
                                 public IRemoteDecoderChild {
+  friend class PVideoDecoderChild;
+
  public:
   explicit VideoDecoderChild();
 
   // PVideoDecoderChild
-  mozilla::ipc::IPCResult RecvOutput(const VideoDataIPDL& aData) override;
-  mozilla::ipc::IPCResult RecvInputExhausted() override;
-  mozilla::ipc::IPCResult RecvDrainComplete() override;
-  mozilla::ipc::IPCResult RecvError(const nsresult& aError) override;
-  mozilla::ipc::IPCResult RecvInitComplete(
-      const nsCString& aDecoderDescription, const bool& aHardware,
-      const nsCString& aHardwareReason, const uint32_t& aConversion) override;
-  mozilla::ipc::IPCResult RecvInitFailed(const nsresult& aReason) override;
-  mozilla::ipc::IPCResult RecvFlushComplete() override;
+  IPCResult RecvOutput(const VideoDataIPDL& aData);
+  IPCResult RecvInputExhausted();
+  IPCResult RecvDrainComplete();
+  IPCResult RecvError(const nsresult& aError);
+  IPCResult RecvInitComplete(const nsCString& aDecoderDescription,
+                             const bool& aHardware,
+                             const nsCString& aHardwareReason,
+                             const uint32_t& aConversion);
+  IPCResult RecvInitFailed(const nsresult& aReason);
+  IPCResult RecvFlushComplete();
 
   void ActorDestroy(ActorDestroyReason aWhy) override;
 
@@ -88,7 +91,6 @@ class VideoDecoderChild final : public PVideoDecoderChild,
   TimeStamp mGPUCrashTime;
 };
 
-}  // namespace dom
 }  // namespace mozilla
 
-#endif  // include_dom_ipc_VideoDecoderChild_h
+#endif  // include_ipc_VideoDecoderChild_h

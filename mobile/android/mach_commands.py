@@ -50,9 +50,13 @@ def REMOVED(cls):
 @CommandProvider
 class MachCommands(MachCommandBase):
     def _root_url(self, artifactdir=None, objdir=None):
+        """Generate a publicly-accessible URL for the tasks's artifacts, or an objdir path"""
         if 'TASK_ID' in os.environ and 'RUN_ID' in os.environ:
-            return 'https://queue.taskcluster.net/v1/task/{}/runs/{}/artifacts/{}'.format(
-                os.environ['TASK_ID'], os.environ['RUN_ID'], artifactdir)
+            import taskcluster_urls
+            from taskgraph.util.taskcluster import get_root_url
+            return taskcluster_urls.api(
+                get_root_url(False), 'queue', 'v1', 'task/{}/runs/{}/artifacts/{}'.format(
+                    os.environ['TASK_ID'], os.environ['RUN_ID'], artifactdir))
         else:
             return os.path.join(self.topobjdir, objdir)
 
@@ -501,17 +505,13 @@ class MachCommands(MachCommandBase):
     @CommandArgument('--upload-message', metavar='MSG',
                      default='GeckoView docs upload',
                      help='Use the specified message for commits.')
-    @CommandArgument('--variant', default='debug',
-                     help='Gradle variant used to generate javadoc.')
     def android_geckoview_docs(self, archive, upload, upload_branch,
-                               upload_message, variant):
+                               upload_message):
 
-        def capitalize(s):
-            # Can't use str.capitalize because it lower cases trailing letters.
-            return (s[0].upper() + s[1:]) if s else ''
+        tasks = (self.substs['GRADLE_ANDROID_GECKOVIEW_DOCS_ARCHIVE_TASKS'] if archive or upload
+                 else self.substs['GRADLE_ANDROID_GECKOVIEW_DOCS_TASKS'])
 
-        task = 'geckoview:javadoc' + ('Jar' if archive or upload else '') + capitalize(variant)
-        ret = self.gradle([task], verbose=True)
+        ret = self.gradle(tasks, verbose=True)
         if ret or not upload:
             return ret
 
@@ -668,9 +668,9 @@ class AndroidEmulatorCommands(MachCommandBase):
              conditions=[],
              description='Run the Android emulator with an AVD from test automation.')
     @CommandArgument('--version', metavar='VERSION',
-                     choices=['4.3', '7.0', 'x86', 'x86-7.0'],
+                     choices=['4.3', 'x86', 'x86-7.0'],
                      help='Specify Android version to run in emulator. '
-                     'One of "4.3", "7.0", "x86", or "x86-7.0".')
+                     'One of "4.3", "x86", or "x86-7.0".')
     @CommandArgument('--wait', action='store_true',
                      help='Wait for emulator to be closed.')
     @CommandArgument('--force-update', action='store_true',

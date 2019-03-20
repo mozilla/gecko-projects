@@ -104,7 +104,8 @@ Channel::Channel(size_t aId, bool aMiddlemanRecording,
   Thread::SpawnNonRecordedThread(ThreadMain, this);
 }
 
-/* static */ void Channel::ThreadMain(void* aChannelArg) {
+/* static */
+void Channel::ThreadMain(void* aChannelArg) {
   Channel* channel = (Channel*)aChannelArg;
 
   static const int32_t MagicValue = 0x914522b9;
@@ -135,11 +136,11 @@ Channel::Channel(size_t aId, bool aMiddlemanRecording,
   }
 
   while (true) {
-    Message* msg = channel->WaitForMessage();
+    Message::UniquePtr msg = channel->WaitForMessage();
     if (!msg) {
       break;
     }
-    channel->mHandler(msg);
+    channel->mHandler(std::move(msg));
   }
 }
 
@@ -175,7 +176,7 @@ void Channel::SendMessage(const Message& aMsg) {
   }
 }
 
-Message* Channel::WaitForMessage() {
+Message::UniquePtr Channel::WaitForMessage() {
   if (!mMessageBuffer) {
     mMessageBuffer = (MessageBuffer*)AllocateMemory(sizeof(MessageBuffer),
                                                     MemoryKind::Generic);
@@ -216,7 +217,7 @@ Message* Channel::WaitForMessage() {
     mMessageBytes += nbytes;
   }
 
-  Message* res = ((Message*)mMessageBuffer->begin())->Clone();
+  Message::UniquePtr res = ((Message*)mMessageBuffer->begin())->Clone();
 
   // Remove the message we just received from the incoming buffer.
   size_t remaining = mMessageBytes - messageSize;
@@ -237,16 +238,13 @@ void Channel::PrintMessage(const char* aPrefix, const Message& aMsg) {
   AutoEnsurePassThroughThreadEvents pt;
   nsCString data;
   switch (aMsg.mType) {
-    case MessageType::HitCheckpoint: {
-      const HitCheckpointMessage& nmsg = (const HitCheckpointMessage&)aMsg;
-      data.AppendPrintf("Id %d Endpoint %d Duration %.2f ms",
-                        (int)nmsg.mCheckpointId, nmsg.mRecordingEndpoint,
+    case MessageType::HitExecutionPoint: {
+      const HitExecutionPointMessage& nmsg =
+          (const HitExecutionPointMessage&)aMsg;
+      nmsg.mPoint.ToString(data);
+      data.AppendPrintf(" Endpoint %d Duration %.2f ms",
+                        nmsg.mRecordingEndpoint,
                         nmsg.mDurationMicroseconds / 1000.0);
-      break;
-    }
-    case MessageType::HitBreakpoint: {
-      const HitBreakpointMessage& nmsg = (const HitBreakpointMessage&)aMsg;
-      data.AppendPrintf("Endpoint %d", nmsg.mRecordingEndpoint);
       break;
     }
     case MessageType::Resume: {

@@ -5,26 +5,28 @@
 /* import-globals-from extensionControlled.js */
 /* import-globals-from preferences.js */
 
-/* FIXME: ESlint globals workaround should be removed once bug 1395426 gets fixed */
-/* globals DownloadUtils, LoadContextInfo */
+var {AppConstants} = ChromeUtils.import("resource://gre/modules/AppConstants.jsm");
 
-ChromeUtils.import("resource://gre/modules/AppConstants.jsm");
-ChromeUtils.import("resource://gre/modules/PluralForm.jsm");
-
-ChromeUtils.defineModuleGetter(this, "PluralForm",
-  "resource://gre/modules/PluralForm.jsm");
+ChromeUtils.defineModuleGetter(this, "DownloadUtils",
+  "resource://gre/modules/DownloadUtils.jsm");
 ChromeUtils.defineModuleGetter(this, "LoginHelper",
   "resource://gre/modules/LoginHelper.jsm");
 ChromeUtils.defineModuleGetter(this, "SiteDataManager",
   "resource:///modules/SiteDataManager.jsm");
 
-ChromeUtils.import("resource://gre/modules/PrivateBrowsingUtils.jsm");
+var {PrivateBrowsingUtils} = ChromeUtils.import("resource://gre/modules/PrivateBrowsingUtils.jsm");
 
 const PREF_UPLOAD_ENABLED = "datareporting.healthreport.uploadEnabled";
 
 const TRACKING_PROTECTION_KEY = "websites.trackingProtectionMode";
 const TRACKING_PROTECTION_PREFS = ["privacy.trackingprotection.enabled",
                                    "privacy.trackingprotection.pbmode.enabled"];
+const CONTENT_BLOCKING_PREFS = ["privacy.trackingprotection.enabled",
+                                "privacy.trackingprotection.pbmode.enabled",
+                                "network.cookie.cookieBehavior",
+                                "privacy.trackingprotection.fingerprinting.enabled",
+                                "privacy.trackingprotection.cryptomining.enabled",
+                                "urlclassifier.trackingTable"];
 
 const PREF_OPT_OUT_STUDIES_ENABLED = "app.shield.optoutstudies.enabled";
 const PREF_NORMANDY_ENABLED = "app.normandy.enabled";
@@ -45,9 +47,14 @@ XPCOMUtils.defineLazyGetter(this, "AlertsServiceDND", function() {
 });
 
 Preferences.addAll([
-  // Tracking Protection
+  // Content blocking / Tracking Protection
   { id: "privacy.trackingprotection.enabled", type: "bool" },
   { id: "privacy.trackingprotection.pbmode.enabled", type: "bool" },
+  { id: "privacy.trackingprotection.fingerprinting.enabled", type: "bool" },
+  { id: "privacy.trackingprotection.cryptomining.enabled", type: "bool" },
+
+  // Tracker list
+  { id: "urlclassifier.trackingTable", type: "string"},
 
   // Button prefs
   { id: "pref.privacy.disable_button.cookie_exceptions", type: "bool" },
@@ -77,8 +84,6 @@ Preferences.addAll([
 
   // Media
   { id: "media.autoplay.default", type: "int" },
-  { id: "media.autoplay.enabled.ask-permission", type: "bool" },
-  { id: "media.autoplay.enabled.user-gestures-needed", type: "bool" },
 
   // Popups
   { id: "dom.disable_open_during_load", type: "bool" },
@@ -132,9 +137,6 @@ if (AppConstants.MOZ_DATA_REPORTING) {
 }
 
 // Data Choices tab
-if (AppConstants.NIGHTLY_BUILD) {
-  Preferences.add({ id: "browser.chrome.errorReporter.enabled", type: "bool" });
-}
 if (AppConstants.MOZ_CRASHREPORTER) {
   Preferences.add({ id: "browser.crashReports.unsubmittedCheck.autoSubmit2", type: "bool" });
 }
@@ -185,25 +187,28 @@ var gPrivacyPane = {
    * Update the tracking protection UI to deal with extension control.
    */
   _updateTrackingProtectionUI() {
-    let isLocked = TRACKING_PROTECTION_PREFS.some(
+    let cBPrefisLocked = CONTENT_BLOCKING_PREFS.some(
+      pref => Services.prefs.prefIsLocked(pref));
+    let tPPrefisLocked = TRACKING_PROTECTION_PREFS.some(
       pref => Services.prefs.prefIsLocked(pref));
 
     function setInputsDisabledState(isControlled) {
-      let disabled = isLocked || isControlled;
+      let tpDisabled = tPPrefisLocked || isControlled;
+      let disabled = cBPrefisLocked || isControlled;
       let tpCheckbox =
         document.getElementById("contentBlockingTrackingProtectionCheckbox");
       // Only enable the TP menu if Detect All Trackers is enabled.
-      document.getElementById("trackingProtectionMenu").disabled = disabled ||
+      document.getElementById("trackingProtectionMenu").disabled = tpDisabled ||
         !tpCheckbox.checked;
-      tpCheckbox.disabled = disabled;
+      tpCheckbox.disabled = tpDisabled;
 
-      document.getElementById("standardRadio").disabled = isControlled;
-      document.getElementById("strictRadio").disabled = isControlled;
-      document.getElementById("contentBlockingOptionStrict").classList.toggle("disabled", isControlled);
-      document.getElementById("contentBlockingOptionStandard").classList.toggle("disabled", isControlled);
+      document.getElementById("standardRadio").disabled = disabled;
+      document.getElementById("strictRadio").disabled = disabled;
+      document.getElementById("contentBlockingOptionStrict").classList.toggle("disabled", disabled);
+      document.getElementById("contentBlockingOptionStandard").classList.toggle("disabled", disabled);
       let arrowButtons = document.querySelectorAll("button.arrowhead");
       for (let button of arrowButtons) {
-        button.disabled = isControlled;
+        button.disabled = disabled;
       }
 
       // Notify observers that the TP UI has been updated.
@@ -212,7 +217,19 @@ var gPrivacyPane = {
       Services.obs.notifyObservers(window, "privacy-pane-tp-ui-updated");
     }
 
-    if (isLocked) {
+    // We watch the network.cookie.cookieBehavior default value, if it is
+    // BEHAVIOR_ACCEPT (0) then show the fallback UI. When we change
+    // this default to BEHAVIOR_REJECT_TRACKER (4) show our default UI.
+    let defaults = Services.prefs.getDefaultBranch("");
+    document.getElementById("contentBlockingCategories").toggleAttribute("fallback-ui",
+      defaults.getIntPref("network.cookie.cookieBehavior") === Ci.nsICookieService.BEHAVIOR_ACCEPT);
+
+    let policy = Services.policies.getActivePolicies();
+    if (policy && ((policy.EnableTrackingProtection && policy.EnableTrackingProtection.Locked) ||
+        (policy.Cookies && policy.Cookies.Locked))) {
+      setInputsDisabledState(true);
+    }
+    if (tPPrefisLocked) {
       // An extension can't control this setting if either pref is locked.
       hideControllingExtension(TRACKING_PROTECTION_KEY);
       setInputsDisabledState(false);
@@ -264,8 +281,6 @@ var gPrivacyPane = {
   init() {
     this._updateSanitizeSettingsButton();
     this.initializeHistoryMode();
-    this.initAutoplay();
-    this.updateAutoplayMediaControlsVisibility();
     this.updateHistoryModePane();
     this.updatePrivacyMicroControls();
     this.initAutoStartPrivateBrowsingReverter();
@@ -274,9 +289,13 @@ var gPrivacyPane = {
     /* Initialize Content Blocking */
     this.initContentBlocking();
 
+    this.blockAutoplayReadPrefs();
     this.trackingProtectionReadPrefs();
     this.networkCookieBehaviorReadPrefs();
     this._initTrackingProtectionExtensionControl();
+
+    Preferences.get("media.autoplay.default").on("change",
+      gPrivacyPane.blockAutoplayReadPrefs.bind(gPrivacyPane));
 
     Preferences.get("privacy.trackingprotection.enabled").on("change",
       gPrivacyPane.trackingProtectionReadPrefs.bind(gPrivacyPane));
@@ -298,10 +317,6 @@ var gPrivacyPane = {
       gPrivacyPane._updateSanitizeSettingsButton.bind(gPrivacyPane));
     Preferences.get("browser.privatebrowsing.autostart").on("change",
       gPrivacyPane.updatePrivacyMicroControls.bind(gPrivacyPane));
-    Preferences.get("media.autoplay.enabled.ask-permission").on("change",
-     gPrivacyPane.updateAutoplayMediaControlsVisibility.bind(gPrivacyPane));
-    Preferences.get("media.autoplay.enabled.user-gestures-needed").on("change",
-     gPrivacyPane.updateAutoplayMediaControlsVisibility.bind(gPrivacyPane));
     setEventListener("historyMode", "command", function() {
       gPrivacyPane.updateHistoryModePane();
       gPrivacyPane.updateHistoryModePrefs();
@@ -359,8 +374,6 @@ var gPrivacyPane = {
       gPrivacyPane.toggleAutoplayMedia);
     setEventListener("autoplayMediaPolicyButton", "command",
       gPrivacyPane.showAutoplayMediaExceptions);
-    setEventListener("autoplayMediaPolicyComboboxButton", "command",
-      gPrivacyPane.showAutoplayMediaExceptions);
     setEventListener("notificationsDoNotDisturb", "command",
       gPrivacyPane.toggleDoNotDisturbNotifications);
 
@@ -389,25 +402,9 @@ var gPrivacyPane = {
       Services.urlFormatter.formatURLPref("app.support.baseURL") + "push";
     document.getElementById("notificationPermissionsLearnMore").setAttribute("href",
       notificationInfoURL);
-    let drmInfoURL =
-      Services.urlFormatter.formatURLPref("app.support.baseURL") + "drm-content";
-    document.getElementById("playDRMContentLink").setAttribute("href", drmInfoURL);
-    let emeUIEnabled = Services.prefs.getBoolPref("browser.eme.ui.enabled");
-    // Force-disable/hide on WinXP:
-    if (navigator.platform.toLowerCase().startsWith("win")) {
-      emeUIEnabled = emeUIEnabled && parseFloat(Services.sysinfo.get("version")) >= 6;
-    }
-    if (!emeUIEnabled) {
-      // Don't want to rely on .hidden for the toplevel groupbox because
-      // of the pane hiding/showing code potentially interfering:
-      document.getElementById("drmGroup").setAttribute("style", "display: none !important");
-    }
 
     if (AppConstants.MOZ_DATA_REPORTING) {
       this.initDataCollection();
-      if (AppConstants.NIGHTLY_BUILD) {
-        this.initCollectBrowserErrors();
-      }
       if (AppConstants.MOZ_CRASHREPORTER) {
         this.initSubmitCrashes();
       }
@@ -470,22 +467,40 @@ var gPrivacyPane = {
     Preferences.get("browser.contentblocking.category").on("change",
       gPrivacyPane.highlightCBCategory);
 
+    // If any relevant content blocking pref changes, show a warning that the changes will
+    // not be implemented until they refresh their tabs.
+    for (let pref of CONTENT_BLOCKING_PREFS) {
+      Preferences.get(pref).on("change", gPrivacyPane.notifyUserToReload);
+    }
+    for (let button of document.querySelectorAll(".reload-tabs-button")) {
+      button.addEventListener("command", gPrivacyPane.reloadAllTabs);
+    }
+
+    let cryptoMinersOption = document.getElementById("contentBlockingCryptominersOption");
+    let fingerprintersOption = document.getElementById("contentBlockingFingerprintersOption");
+
+    cryptoMinersOption.hidden =
+      !Services.prefs.getBoolPref("browser.contentblocking.cryptomining.preferences.ui.enabled");
+    fingerprintersOption.hidden =
+      !Services.prefs.getBoolPref("browser.contentblocking.fingerprinting.preferences.ui.enabled");
+
     this.highlightCBCategory();
     this.readBlockCookies();
 
     let link = document.getElementById("contentBlockingLearnMore");
-    let url = Services.urlFormatter.formatURLPref("app.support.baseURL") + "tracking-protection";
-    link.setAttribute("href", url);
+    let contentBlockingUrl = Services.urlFormatter.formatURLPref("app.support.baseURL") + "content-blocking";
+    link.setAttribute("href", contentBlockingUrl);
 
+    let contentBlockingTour = Services.urlFormatter.formatURLPref("privacy.trackingprotection.introURL")
+      + `?step=3&newtab=true`;
     let warningLinks = document.getElementsByClassName("content-blocking-warning-learn-how");
     for (let warningLink of warningLinks) {
-      let warningUrl = Services.urlFormatter.formatURLPref("app.support.baseURL") + "content-blocking";
-      warningLink.setAttribute("href", warningUrl);
+      warningLink.setAttribute("href", contentBlockingTour);
     }
   },
 
   highlightCBCategory() {
-    let value = document.getElementById("contentBlockingCategoryRadio").value;
+    let value = Preferences.get("browser.contentblocking.category").value;
     let standardEl = document.getElementById("contentBlockingOptionStandard");
     let strictEl = document.getElementById("contentBlockingOptionStrict");
     let customEl = document.getElementById("contentBlockingOptionCustom");
@@ -494,14 +509,16 @@ var gPrivacyPane = {
     customEl.classList.remove("selected");
 
     switch (value) {
-      case "standard":
-        standardEl.classList.add("selected");
-        break;
       case "strict":
         strictEl.classList.add("selected");
         break;
       case "custom":
         customEl.classList.add("selected");
+        break;
+      case "standard":
+        /* fall through */
+      default:
+        standardEl.classList.add("selected");
         break;
     }
   },
@@ -539,6 +556,7 @@ var gPrivacyPane = {
     let behavior = Preferences.get("network.cookie.cookieBehavior").value;
     let blockCookiesMenu = document.getElementById("blockCookiesMenu");
     let deleteOnCloseCheckbox = document.getElementById("deleteOnClose");
+    let deleteOnCloseNote = document.getElementById("deleteOnCloseNote");
 
     let blockCookies = (behavior != Ci.nsICookieService.BEHAVIOR_ACCEPT);
     let cookieBehaviorLocked = Services.prefs.prefIsLocked("network.cookie.cookieBehavior");
@@ -550,6 +568,7 @@ var gPrivacyPane = {
     let cookieExpirationLocked = Services.prefs.prefIsLocked("network.cookie.lifetimePolicy");
     deleteOnCloseCheckbox.disabled = privateBrowsing || completelyBlockCookies ||
                                      cookieExpirationLocked;
+    deleteOnCloseNote.hidden = !privateBrowsing;
 
     switch (behavior) {
       case Ci.nsICookieService.BEHAVIOR_ACCEPT:
@@ -609,6 +628,7 @@ var gPrivacyPane = {
     let carat = e.target;
     carat.classList.toggle("up");
     carat.closest(".content-blocking-category").classList.toggle("expanded");
+    carat.setAttribute("aria-expanded", carat.getAttribute("aria-expanded") === "false");
   },
 
   // HISTORY MODE
@@ -667,15 +687,16 @@ var gPrivacyPane = {
     let mode;
     let getVal = aPref => Preferences.get(aPref).value;
 
-    if (getVal("privacy.history.custom"))
+    if (getVal("privacy.history.custom")) {
       mode = "custom";
-    else if (this._checkHistoryValues(this.prefsForKeepingHistory)) {
+    } else if (this._checkHistoryValues(this.prefsForKeepingHistory)) {
       if (getVal("browser.privatebrowsing.autostart"))
         mode = "dontremember";
       else
         mode = "remember";
-    } else
+    } else {
       mode = "custom";
+    }
 
     document.getElementById("historyMode").value = mode;
   },
@@ -740,7 +761,7 @@ var gPrivacyPane = {
 
     if (document.getElementById("historyMode").value == "custom") {
       let disabled = Preferences.get("browser.privatebrowsing.autostart").value;
-      this.dependentControls.forEach(function(aElement) {
+      this.dependentControls.forEach(aElement => {
         let control = document.getElementById(aElement);
         let preferenceId = control.getAttribute("preference");
         if (!preferenceId) {
@@ -753,19 +774,12 @@ var gPrivacyPane = {
 
         let preference = preferenceId ? Preferences.get(preferenceId) : {};
         control.disabled = disabled || preference.locked;
+        if (control != clearDataSettings) {
+          this.ensurePrivacyMicroControlUncheckedWhenDisabled(control);
+        }
       });
 
       clearDataSettings.removeAttribute("hidden");
-
-      // adjust the checked state of the sanitizeOnShutdown checkbox
-      document.getElementById("alwaysClear").checked = disabled ? false :
-        Preferences.get("privacy.sanitize.sanitizeOnShutdown").value;
-
-      // adjust the checked state of the remember history checkboxes
-      document.getElementById("rememberHistory").checked = disabled ? false :
-        Preferences.get("places.history.enabled").value;
-      document.getElementById("rememberForms").checked = disabled ? false :
-        Preferences.get("browser.formfill.enable").value;
 
       if (!disabled) {
         // adjust the Settings button for sanitizeOnShutdown
@@ -774,6 +788,16 @@ var gPrivacyPane = {
     } else {
       clearDataSettings.setAttribute("hidden", "true");
     }
+  },
+
+  ensurePrivacyMicroControlUncheckedWhenDisabled(el) {
+    if (Preferences.get("browser.privatebrowsing.autostart").value) {
+      // Set checked to false when called from updatePrivacyMicroControls
+      el.checked = false;
+      // return false for the onsyncfrompreference case:
+      return false;
+    }
+    return undefined; // tell preferencesBindings to assign the 'right' value.
   },
 
   // CLEAR PRIVATE DATA
@@ -837,10 +861,14 @@ var gPrivacyPane = {
    * Initialize the starting state for the auto-start private browsing mode pref reverter.
    */
   initAutoStartPrivateBrowsingReverter() {
+    // We determine the mode in initializeHistoryMode, which is guaranteed to have been
+    // called before now, so this is up-to-date.
     let mode = document.getElementById("historyMode");
-    let autoStart = document.getElementById("privateBrowsingAutoStart");
     this._lastMode = mode.selectedIndex;
-    this._lastCheckState = autoStart.hasAttribute("checked");
+    // The value of the autostart pref, on the other hand, is gotten from Preferences,
+    // which updates the DOM asynchronously, so we can't rely on the DOM. Get it directly
+    // from the prefs.
+    this._lastCheckState = Preferences.get("browser.privatebrowsing.autostart").value;
   },
 
   _lastMode: null,
@@ -997,6 +1025,25 @@ var gPrivacyPane = {
   },
 
   /**
+   * Reload all tabs in all windows.
+   */
+  reloadAllTabs() {
+    for (let win of window.BrowserWindowTracker.orderedWindows) {
+      let tabbrowser = win.getBrowser();
+      tabbrowser.reloadTabs(tabbrowser.tabs);
+    }
+  },
+
+  /**
+   * Show a warning to the user that they need to reload their tabs to apply the setting.
+   */
+  notifyUserToReload() {
+    for (let notification of document.querySelectorAll(".reload-tabs")) {
+      notification.hidden = false;
+    }
+  },
+
+  /**
    * Displays fine-grained, per-site preferences for cookies.
    */
   showCookieExceptions() {
@@ -1093,20 +1140,15 @@ var gPrivacyPane = {
 
     gSubDialog.open("chrome://browser/content/preferences/sitePermissions.xul",
       "resizable=yes", params);
-
-    try {
-      Services.telemetry
-        .getHistogramById("WEB_NOTIFICATION_EXCEPTIONS_OPENED").add();
-    } catch (e) { }
   },
 
 
   // MEDIA
 
-  initAutoplay() {
-    let url = Services.urlFormatter.formatURLPref("app.support.baseURL") +
-      "block-autoplay";
-    document.getElementById("autoplayLearnMoreLink").setAttribute("href", url);
+  blockAutoplayReadPrefs() {
+    let blocked =
+      Preferences.get("media.autoplay.default").value == Ci.nsIAutoplay.BLOCKED;
+    document.getElementById("autoplayMediaCheckbox").checked = blocked;
   },
 
   /**
@@ -1115,29 +1157,6 @@ var gPrivacyPane = {
   toggleAutoplayMedia(event) {
     let blocked = event.target.checked ? Ci.nsIAutoplay.BLOCKED : Ci.nsIAutoplay.ALLOWED;
     Services.prefs.setIntPref("media.autoplay.default", blocked);
-  },
-
-  /**
-   * If user-gestures-needed is false we do not show any UI for configuring autoplay,
-   * if user-gestures-needed is false and ask-permission is false we show a checkbox
-   * which only allows the user to block autoplay
-   * if user-gestures-needed and ask-permission are true we show a combobox that
-   * allows the user to block / allow or prompt for autoplay
-   * We will be performing a shield study to determine the behaviour to be
-   * shipped, at which point we can remove these pref switches.
-   * https://bugzilla.mozilla.org/show_bug.cgi?id=1475099
-   */
-  updateAutoplayMediaControlsVisibility() {
-    let askPermission =
-      Services.prefs.getBoolPref("media.autoplay.ask-permission", false);
-    let userGestures =
-        Services.prefs.getBoolPref("media.autoplay.enabled.user-gestures-needed", false);
-    // Hide the combobox if we don't let the user ask for permission.
-    document.getElementById("autoplayMediaComboboxWrapper").hidden =
-      !userGestures || !askPermission;
-    // If the user may ask for permission, hide the checkbox instead.
-    document.getElementById("autoplayMediaCheckboxWrapper").hidden =
-      !userGestures || askPermission;
   },
 
   /**
@@ -1285,6 +1304,10 @@ var gPrivacyPane = {
  * information.
  */
   showPasswords() {
+    if (LoginHelper.managementURI) {
+      window.docShell.messageManager.sendAsyncMessage("PasswordManager:OpenPreferences", {});
+      return;
+    }
     gSubDialog.open("chrome://passwordmgr/content/passwordManager.xul");
   },
 
@@ -1506,11 +1529,6 @@ var gPrivacyPane = {
   initDataCollection() {
     this._setupLearnMoreLink("toolkit.datacollection.infoURL",
       "dataCollectionPrivacyNotice");
-  },
-
-  initCollectBrowserErrors() {
-    this._setupLearnMoreLink("browser.chrome.errorReporter.infoURL",
-      "collectBrowserErrorsLearnMore");
   },
 
   initSubmitCrashes() {

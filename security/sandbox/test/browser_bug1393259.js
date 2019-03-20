@@ -13,8 +13,6 @@
  * not being already installed and enabled.
  */
 
-ChromeUtils.import("resource://gre/modules/FileUtils.jsm");
-
 const kPageURL =
   "http://example.com/browser/security/sandbox/test/bug1393259.html";
 
@@ -126,8 +124,6 @@ add_task(async function() {
 
     // Get a list of fonts being used to display the web content.
     let fontList = await ContentTask.spawn(aBrowser, {}, async function() {
-      Cu.importGlobalProperties(["InspectorUtils"]);
-
       let window = content.window.wrappedJSObject;
       let range = window.document.createRange();
       let contentDiv = window.document.getElementById("content");

@@ -86,7 +86,7 @@ function matchRequest(channel, filters) {
           return true;
         }
       } catch (e) {
-        // outerWindowID getter from browser.xml (non-remote <xul:browser>) may
+        // outerWindowID getter from browser.js (non-remote <xul:browser>) may
         // throw when closing a tab while resources are still loading.
       }
     }
@@ -494,7 +494,7 @@ NetworkObserver.prototype = {
       .toISOString();
     event.fromCache = fromCache;
     event.fromServiceWorker = fromServiceWorker;
-    event.isThirdPartyTrackingResource = channel.isThirdPartyTrackingResource;
+    event.isThirdPartyTrackingResource = channel.isThirdPartyTrackingResource();
     event.referrerPolicy =
       Services.netUtils.getReferrerPolicyString(channel.referrerPolicy);
     httpActivity.fromServiceWorker = fromServiceWorker;

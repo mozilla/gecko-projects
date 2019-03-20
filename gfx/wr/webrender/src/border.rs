@@ -2,16 +2,16 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-use api::{BorderRadius, BorderSide, BorderStyle, ColorF, ColorU, DeviceRect, DeviceSize};
-use api::{LayoutSideOffsets, LayoutSizeAu, LayoutPrimitiveInfo, LayoutToDeviceScale};
-use api::{DeviceVector2D, DevicePoint, LayoutRect, LayoutSize, NormalBorder, DeviceIntSize};
-use api::{AuHelpers, LayoutPoint, RepeatMode, TexelRect};
+use api::{BorderRadius, BorderSide, BorderStyle, ColorF, ColorU};
+use api::{LayoutPrimitiveInfo, NormalBorder as ApiNormalBorder, RepeatMode};
+use api::units::*;
 use ellipse::Ellipse;
 use euclid::vec2;
 use display_list_flattener::DisplayListFlattener;
 use gpu_types::{BorderInstance, BorderSegment, BrushFlags};
 use prim_store::{BorderSegmentInfo, BrushSegment, NinePatchDescriptor};
-use prim_store::{EdgeAaSegmentMask, ScrollNodeAndClipChain, PrimitiveKeyKind};
+use prim_store::{EdgeAaSegmentMask, ScrollNodeAndClipChain};
+use prim_store::borders::NormalBorderPrim;
 use util::{lerp, RectHelpers};
 
 // Using 2048 as the maximum radius in device space before which we
@@ -32,7 +32,7 @@ pub const MAX_DASH_COUNT: u32 = 2048;
 //           all the border structs with hashable
 //           variants...
 
-#[derive(Clone, Debug, Hash, PartialEq, Eq)]
+#[derive(Clone, Debug, Hash, MallocSizeOf, PartialEq, Eq)]
 #[cfg_attr(feature = "capture", derive(Serialize))]
 #[cfg_attr(feature = "replay", derive(Deserialize))]
 pub struct BorderRadiusAu {
@@ -40,17 +40,6 @@ pub struct BorderRadiusAu {
     pub top_right: LayoutSizeAu,
     pub bottom_left: LayoutSizeAu,
     pub bottom_right: LayoutSizeAu,
-}
-
-impl BorderRadiusAu {
-    pub fn zero() -> Self {
-        BorderRadiusAu {
-            top_left: LayoutSizeAu::zero(),
-            top_right: LayoutSizeAu::zero(),
-            bottom_left: LayoutSizeAu::zero(),
-            bottom_right: LayoutSizeAu::zero(),
-        }
-    }
 }
 
 impl From<BorderRadius> for BorderRadiusAu {
@@ -75,7 +64,7 @@ impl From<BorderRadiusAu> for BorderRadius {
     }
 }
 
-#[derive(Clone, Debug, Hash, PartialEq, Eq)]
+#[derive(Clone, Debug, Hash, MallocSizeOf, PartialEq, Eq)]
 #[cfg_attr(feature = "capture", derive(Serialize))]
 #[cfg_attr(feature = "replay", derive(Deserialize))]
 pub struct BorderSideAu {
@@ -103,7 +92,7 @@ impl From<BorderSideAu> for BorderSide {
 
 #[cfg_attr(feature = "capture", derive(Serialize))]
 #[cfg_attr(feature = "replay", derive(Deserialize))]
-#[derive(Debug, Clone, Hash, Eq, PartialEq)]
+#[derive(Debug, Clone, Hash, Eq, MallocSizeOf, PartialEq)]
 pub struct NormalBorderAu {
     pub left: BorderSideAu,
     pub right: BorderSideAu,
@@ -129,8 +118,8 @@ impl NormalBorderAu {
     }
 }
 
-impl From<NormalBorder> for NormalBorderAu {
-    fn from(border: NormalBorder) -> Self {
+impl From<ApiNormalBorder> for NormalBorderAu {
+    fn from(border: ApiNormalBorder) -> Self {
         NormalBorderAu {
             left: border.left.into(),
             right: border.right.into(),
@@ -142,9 +131,9 @@ impl From<NormalBorder> for NormalBorderAu {
     }
 }
 
-impl From<NormalBorderAu> for NormalBorder {
+impl From<NormalBorderAu> for ApiNormalBorder {
     fn from(border: NormalBorderAu) -> Self {
-        NormalBorder {
+        ApiNormalBorder {
             left: border.left.into(),
             right: border.right.into(),
             top: border.top.into(),
@@ -157,7 +146,7 @@ impl From<NormalBorderAu> for NormalBorder {
 
 /// Cache key that uniquely identifies a border
 /// segment in the render task cache.
-#[derive(Clone, Debug, Hash, PartialEq, Eq)]
+#[derive(Clone, Debug, Hash, MallocSizeOf, PartialEq, Eq)]
 #[cfg_attr(feature = "capture", derive(Serialize))]
 #[cfg_attr(feature = "replay", derive(Deserialize))]
 pub struct BorderSegmentCacheKey {
@@ -167,11 +156,15 @@ pub struct BorderSegmentCacheKey {
     pub side1: BorderSideAu,
     pub segment: BorderSegment,
     pub do_aa: bool,
+    pub h_adjacent_corner_outer: LayoutPointAu,
+    pub h_adjacent_corner_radius: LayoutSizeAu,
+    pub v_adjacent_corner_outer: LayoutPointAu,
+    pub v_adjacent_corner_radius: LayoutSizeAu,
 }
 
 pub fn ensure_no_corner_overlap(
     radius: &mut BorderRadius,
-    rect: &LayoutRect,
+    size: LayoutSize,
 ) {
     let mut ratio = 1.0;
     let top_left_radius = &mut radius.top_left;
@@ -180,23 +173,23 @@ pub fn ensure_no_corner_overlap(
     let bottom_left_radius = &mut radius.bottom_left;
 
     let sum = top_left_radius.width + top_right_radius.width;
-    if rect.size.width < sum {
-        ratio = f32::min(ratio, rect.size.width / sum);
+    if size.width < sum {
+        ratio = f32::min(ratio, size.width / sum);
     }
 
     let sum = bottom_left_radius.width + bottom_right_radius.width;
-    if rect.size.width < sum {
-        ratio = f32::min(ratio, rect.size.width / sum);
+    if size.width < sum {
+        ratio = f32::min(ratio, size.width / sum);
     }
 
     let sum = top_left_radius.height + bottom_left_radius.height;
-    if rect.size.height < sum {
-        ratio = f32::min(ratio, rect.size.height / sum);
+    if size.height < sum {
+        ratio = f32::min(ratio, size.height / sum);
     }
 
     let sum = top_right_radius.height + bottom_right_radius.height;
-    if rect.size.height < sum {
-        ratio = f32::min(ratio, rect.size.height / sum);
+    if size.height < sum {
+        ratio = f32::min(ratio, size.height / sum);
     }
 
     if ratio < 1. {
@@ -218,18 +211,18 @@ impl<'a> DisplayListFlattener<'a> {
     pub fn add_normal_border(
         &mut self,
         info: &LayoutPrimitiveInfo,
-        border: &NormalBorder,
+        border: &ApiNormalBorder,
         widths: LayoutSideOffsets,
         clip_and_scroll: ScrollNodeAndClipChain,
     ) {
         let mut border = *border;
-        ensure_no_corner_overlap(&mut border.radius, &info.rect);
+        ensure_no_corner_overlap(&mut border.radius, info.rect.size);
 
         self.add_primitive(
             clip_and_scroll,
             info,
             Vec::new(),
-            PrimitiveKeyKind::NormalBorder {
+            NormalBorderPrim {
                 border: border.into(),
                 widths: widths.to_au(),
             },
@@ -649,12 +642,17 @@ fn get_edge_info(
 /// Create the set of border segments and render task
 /// cache keys for a given CSS border.
 pub fn create_border_segments(
-    rect: &LayoutRect,
-    border: &NormalBorder,
+    size: LayoutSize,
+    border: &ApiNormalBorder,
     widths: &LayoutSideOffsets,
     border_segments: &mut Vec<BorderSegmentInfo>,
     brush_segments: &mut Vec<BrushSegment>,
 ) {
+    let rect = LayoutRect::new(
+        LayoutPoint::zero(),
+        size,
+    );
+
     let local_size_tl = LayoutSize::new(
         border.radius.top_left.width.max(widths.left),
         border.radius.top_left.height.max(widths.top),
@@ -766,12 +764,22 @@ pub fn create_border_segments(
             rect.origin.x + local_size_tl.width,
             rect.origin.y + local_size_tl.height,
         ),
+        LayoutRect::from_floats(
+            rect.origin.x,
+            rect.origin.y,
+            rect.max_x() - widths.right,
+            rect.max_y() - widths.bottom
+        ),
         border.left,
         border.top,
         LayoutSize::new(widths.left, widths.top),
         border.radius.top_left,
         BorderSegment::TopLeft,
         EdgeAaSegmentMask::TOP | EdgeAaSegmentMask::LEFT,
+        rect.top_right(),
+        border.radius.top_right,
+        rect.bottom_left(),
+        border.radius.bottom_left,
         brush_segments,
         border_segments,
         border.do_aa,
@@ -783,12 +791,22 @@ pub fn create_border_segments(
             rect.origin.x + rect.size.width,
             rect.origin.y + local_size_tr.height,
         ),
+        LayoutRect::from_floats(
+            rect.origin.x + widths.left,
+            rect.origin.y,
+            rect.max_x(),
+            rect.max_y() - widths.bottom,
+        ),
         border.top,
         border.right,
         LayoutSize::new(widths.right, widths.top),
         border.radius.top_right,
         BorderSegment::TopRight,
         EdgeAaSegmentMask::TOP | EdgeAaSegmentMask::RIGHT,
+        rect.origin,
+        border.radius.top_left,
+        rect.bottom_right(),
+        border.radius.bottom_right,
         brush_segments,
         border_segments,
         border.do_aa,
@@ -800,12 +818,22 @@ pub fn create_border_segments(
             rect.origin.x + rect.size.width,
             rect.origin.y + rect.size.height,
         ),
+        LayoutRect::from_floats(
+            rect.origin.x + widths.left,
+            rect.origin.y + widths.top,
+            rect.max_x(),
+            rect.max_y(),
+        ),
         border.right,
         border.bottom,
         LayoutSize::new(widths.right, widths.bottom),
         border.radius.bottom_right,
         BorderSegment::BottomRight,
         EdgeAaSegmentMask::BOTTOM | EdgeAaSegmentMask::RIGHT,
+        rect.bottom_left(),
+        border.radius.bottom_left,
+        rect.top_right(),
+        border.radius.top_right,
         brush_segments,
         border_segments,
         border.do_aa,
@@ -817,12 +845,22 @@ pub fn create_border_segments(
             rect.origin.x + local_size_bl.width,
             rect.origin.y + rect.size.height,
         ),
+        LayoutRect::from_floats(
+            rect.origin.x,
+            rect.origin.y + widths.top,
+            rect.max_x() - widths.right,
+            rect.max_y(),
+        ),
         border.bottom,
         border.left,
         LayoutSize::new(widths.left, widths.bottom),
         border.radius.bottom_left,
         BorderSegment::BottomLeft,
         EdgeAaSegmentMask::BOTTOM | EdgeAaSegmentMask::LEFT,
+        rect.bottom_right(),
+        border.radius.bottom_right,
+        rect.origin,
+        border.radius.top_left,
         brush_segments,
         border_segments,
         border.do_aa,
@@ -864,6 +902,10 @@ fn add_segment(
     widths: DeviceSize,
     radius: DeviceSize,
     do_aa: bool,
+    h_adjacent_corner_outer: DevicePoint,
+    h_adjacent_corner_radius: DeviceSize,
+    v_adjacent_corner_outer: DevicePoint,
+    v_adjacent_corner_radius: DeviceSize,
 ) {
     let base_flags = (segment as i32) |
                      ((style0 as i32) << 8) |
@@ -918,7 +960,21 @@ fn add_segment(
             };
 
             if dashed_or_dotted_corner.is_err() {
-                instances.push(base_instance);
+                let clip_params = [
+                    h_adjacent_corner_outer.x,
+                    h_adjacent_corner_outer.y,
+                    h_adjacent_corner_radius.width,
+                    h_adjacent_corner_radius.height,
+                    v_adjacent_corner_outer.x,
+                    v_adjacent_corner_outer.y,
+                    v_adjacent_corner_radius.width,
+                    v_adjacent_corner_radius.height,
+                ];
+
+                instances.push(BorderInstance {
+                    clip_params,
+                    ..base_instance
+                });
             }
         }
         BorderSegment::Top |
@@ -977,12 +1033,17 @@ fn add_segment(
 /// border segments for this primitive.
 fn add_corner_segment(
     image_rect: LayoutRect,
+    non_overlapping_rect: LayoutRect,
     side0: BorderSide,
     side1: BorderSide,
     widths: LayoutSize,
     radius: LayoutSize,
     segment: BorderSegment,
     edge_flags: EdgeAaSegmentMask,
+    h_adjacent_corner_outer: LayoutPoint,
+    h_adjacent_corner_radius: LayoutSize,
+    v_adjacent_corner_outer: LayoutPoint,
+    v_adjacent_corner_radius: LayoutSize,
     brush_segments: &mut Vec<BrushSegment>,
     border_segments: &mut Vec<BorderSegmentInfo>,
     do_aa: bool,
@@ -999,19 +1060,94 @@ fn add_corner_segment(
         return;
     }
 
-    if image_rect.size.width <= 0. || image_rect.size.height <= 0. {
+    let segment_rect = image_rect.intersection(&non_overlapping_rect)
+        .unwrap_or(LayoutRect::zero());
+
+    if segment_rect.size.width <= 0. || segment_rect.size.height <= 0. {
         return;
     }
 
+    let texture_rect = segment_rect
+        .translate(&-image_rect.origin.to_vector())
+        .scale(1.0 / image_rect.size.width, 1.0 / image_rect.size.height);
+
     brush_segments.push(
         BrushSegment::new(
-            image_rect,
+            segment_rect,
             /* may_need_clip_mask = */ true,
             edge_flags,
-            [0.0; 4],
-            BrushFlags::SEGMENT_RELATIVE,
+            [texture_rect.min_x(), texture_rect.min_y(), texture_rect.max_x(), texture_rect.max_y()],
+            BrushFlags::SEGMENT_RELATIVE | BrushFlags::SEGMENT_TEXEL_RECT,
         )
     );
+
+    // If the radii of the adjacent corners do not overlap with this segment,
+    // then set the outer position to this segment's corner and the radii to zero.
+    // That way the cache key is unaffected by non-overlapping corners, resulting
+    // in fewer misses.
+    let (h_corner_outer, h_corner_radius) = match segment {
+        BorderSegment::TopLeft => {
+            if h_adjacent_corner_outer.x - h_adjacent_corner_radius.width < image_rect.max_x() {
+                (h_adjacent_corner_outer, h_adjacent_corner_radius)
+            } else {
+                (LayoutPoint::new(image_rect.max_x(), image_rect.min_y()), LayoutSize::zero())
+            }
+        }
+        BorderSegment::TopRight => {
+            if h_adjacent_corner_outer.x + h_adjacent_corner_radius.width > image_rect.min_x() {
+                (h_adjacent_corner_outer, h_adjacent_corner_radius)
+            } else {
+                (LayoutPoint::new(image_rect.min_x(), image_rect.min_y()), LayoutSize::zero())
+            }
+        }
+        BorderSegment::BottomRight => {
+            if h_adjacent_corner_outer.x + h_adjacent_corner_radius.width > image_rect.min_x() {
+                (h_adjacent_corner_outer, h_adjacent_corner_radius)
+            } else {
+                (LayoutPoint::new(image_rect.min_x(), image_rect.max_y()), LayoutSize::zero())
+            }
+        }
+        BorderSegment::BottomLeft => {
+            if h_adjacent_corner_outer.x - h_adjacent_corner_radius.width < image_rect.max_x() {
+                (h_adjacent_corner_outer, h_adjacent_corner_radius)
+            } else {
+                (image_rect.bottom_right(), LayoutSize::zero())
+            }
+        }
+        _ => unreachable!()
+    };
+
+    let (v_corner_outer, v_corner_radius) = match segment {
+        BorderSegment::TopLeft => {
+            if v_adjacent_corner_outer.y - v_adjacent_corner_radius.height < image_rect.max_y() {
+                (v_adjacent_corner_outer, v_adjacent_corner_radius)
+            } else {
+                (LayoutPoint::new(image_rect.min_x(), image_rect.max_y()), LayoutSize::zero())
+            }
+        }
+        BorderSegment::TopRight => {
+            if v_adjacent_corner_outer.y - v_adjacent_corner_radius.height < image_rect.max_y() {
+                (v_adjacent_corner_outer, v_adjacent_corner_radius)
+            } else {
+                (image_rect.bottom_right(), LayoutSize::zero())
+            }
+        }
+        BorderSegment::BottomRight => {
+            if v_adjacent_corner_outer.y + v_adjacent_corner_radius.height > image_rect.min_y() {
+                (v_adjacent_corner_outer, v_adjacent_corner_radius)
+            } else {
+                (LayoutPoint::new(image_rect.max_x(), image_rect.min_y()), LayoutSize::zero())
+            }
+        }
+        BorderSegment::BottomLeft => {
+            if v_adjacent_corner_outer.y + v_adjacent_corner_radius.height > image_rect.min_y() {
+                (v_adjacent_corner_outer, v_adjacent_corner_radius)
+            } else {
+                (LayoutPoint::new(image_rect.min_x(), image_rect.min_y()), LayoutSize::zero())
+            }
+        }
+        _ => unreachable!()
+    };
 
     border_segments.push(BorderSegmentInfo {
         local_task_size: image_rect.size,
@@ -1022,6 +1158,10 @@ fn add_corner_segment(
             segment,
             radius: radius.to_au(),
             size: widths.to_au(),
+            h_adjacent_corner_outer: (h_corner_outer - image_rect.origin).to_point().to_au(),
+            h_adjacent_corner_radius: h_corner_radius.to_au(),
+            v_adjacent_corner_outer: (v_corner_outer - image_rect.origin).to_point().to_au(),
+            v_adjacent_corner_radius: v_corner_radius.to_au(),
         },
     });
 }
@@ -1082,6 +1222,10 @@ fn add_edge_segment(
             radius: LayoutSizeAu::zero(),
             size: size.to_au(),
             segment,
+            h_adjacent_corner_outer: LayoutPointAu::zero(),
+            h_adjacent_corner_radius: LayoutSizeAu::zero(),
+            v_adjacent_corner_outer: LayoutPointAu::zero(),
+            v_adjacent_corner_radius: LayoutSizeAu::zero(),
         },
     });
 }
@@ -1091,7 +1235,7 @@ fn add_edge_segment(
 pub fn build_border_instances(
     cache_key: &BorderSegmentCacheKey,
     cache_size: DeviceIntSize,
-    border: &NormalBorder,
+    border: &ApiNormalBorder,
     scale: LayoutToDeviceScale,
 ) -> Vec<BorderInstance> {
     let mut instances = Vec::new();
@@ -1124,6 +1268,11 @@ pub fn build_border_instances(
     let widths = (LayoutSize::from_au(cache_key.size) * scale).ceil();
     let radius = (LayoutSize::from_au(cache_key.radius) * scale).ceil();
 
+    let h_corner_outer = (LayoutPoint::from_au(cache_key.h_adjacent_corner_outer) * scale).round();
+    let h_corner_radius = (LayoutSize::from_au(cache_key.h_adjacent_corner_radius) * scale).ceil();
+    let v_corner_outer = (LayoutPoint::from_au(cache_key.v_adjacent_corner_outer) * scale).round();
+    let v_corner_radius = (LayoutSize::from_au(cache_key.v_adjacent_corner_radius) * scale).ceil();
+
     add_segment(
         DeviceRect::new(DevicePoint::zero(), cache_size.to_f32()),
         style0,
@@ -1135,6 +1284,10 @@ pub fn build_border_instances(
         widths,
         radius,
         border.do_aa,
+        h_corner_outer,
+        h_corner_radius,
+        v_corner_outer,
+        v_corner_radius,
     );
 
     instances
@@ -1143,8 +1296,13 @@ pub fn build_border_instances(
 impl NinePatchDescriptor {
     pub fn create_segments(
         &self,
-        rect: &LayoutRect,
+        size: LayoutSize,
     ) -> Vec<BrushSegment> {
+        let rect = LayoutRect::new(
+            LayoutPoint::zero(),
+            size,
+        );
+
         // Calculate the modified rect as specific by border-image-outset
         let origin = LayoutPoint::new(
             rect.origin.x - self.outset.left,
@@ -1158,14 +1316,14 @@ impl NinePatchDescriptor {
 
         // Calculate the local texel coords of the slices.
         let px0 = 0.0;
-        let px1 = self.slice.left as f32;
-        let px2 = self.width as f32 - self.slice.right as f32;
-        let px3 = self.width as f32;
+        let px1 = self.slice.left as f32 / self.width as f32;
+        let px2 = (self.width as f32 - self.slice.right as f32) / self.width as f32;
+        let px3 = 1.0;
 
         let py0 = 0.0;
-        let py1 = self.slice.top as f32;
-        let py2 = self.height as f32 - self.slice.bottom as f32;
-        let py3 = self.height as f32;
+        let py1 = self.slice.top as f32 / self.height as f32;
+        let py2 = (self.height as f32 - self.slice.bottom as f32) / self.height as f32;
+        let py3 = 1.0;
 
         let tl_outer = LayoutPoint::new(rect.origin.x, rect.origin.y);
         let tl_inner = tl_outer + vec2(self.widths.left, self.widths.top);

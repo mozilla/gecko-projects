@@ -11,6 +11,7 @@
 #include "mozilla/FlushType.h"                // for FlushType::Frames
 #include "mozilla/HTMLEditor.h"               // for HTMLEditor
 #include "mozilla/mozalloc.h"                 // for operator new
+#include "mozilla/PresShell.h"                // for PresShell
 #include "nsAString.h"
 #include "nsComponentManagerUtils.h"  // for do_CreateInstance
 #include "nsContentUtils.h"
@@ -27,13 +28,12 @@
 #include "nsHTMLDocument.h"        // for nsHTMLDocument
 #include "nsIDOMWindow.h"          // for nsIDOMWindow
 #include "nsIDocShell.h"           // for nsIDocShell
-#include "nsIDocument.h"           // for nsIDocument
+#include "mozilla/dom/Document.h"  // for Document
 #include "nsIDocumentStateListener.h"
 #include "nsIEditor.h"                   // for nsIEditor
 #include "nsIHTMLDocument.h"             // for nsIHTMLDocument, etc
 #include "nsIInterfaceRequestorUtils.h"  // for do_GetInterface
 #include "nsIPlaintextEditor.h"          // for nsIPlaintextEditor, etc
-#include "nsIPresShell.h"                // for nsIPresShell
 #include "nsIRefreshURI.h"               // for nsIRefreshURI
 #include "nsIRequest.h"                  // for nsIRequest
 #include "nsITimer.h"                    // for nsITimer, etc
@@ -50,6 +50,7 @@
 #include "mozilla/dom/Selection.h"       // for AutoHideSelectionChanges, etc
 #include "nsFrameSelection.h"            // for nsFrameSelection
 #include "nsBaseCommandController.h"     // for nsBaseCommandController
+#include "mozilla/dom/LoadURIOptionsBinding.h"
 
 class nsISupports;
 class nsIURI;
@@ -125,7 +126,7 @@ nsEditingSession::MakeWindowEditable(mozIDOMWindowProxy* aWindow,
 
   nsresult rv;
   if (!mInteractive) {
-    rv = DisableJSAndPlugins(aWindow);
+    rv = DisableJSAndPlugins(*docShell);
     NS_ENSURE_SUCCESS(rv, rv);
   }
 
@@ -177,25 +178,20 @@ nsEditingSession::MakeWindowEditable(mozIDOMWindowProxy* aWindow,
   return rv;
 }
 
-NS_IMETHODIMP
-nsEditingSession::DisableJSAndPlugins(mozIDOMWindowProxy* aWindow) {
-  NS_ENSURE_TRUE(aWindow, NS_ERROR_FAILURE);
-  nsIDocShell* docShell = nsPIDOMWindowOuter::From(aWindow)->GetDocShell();
-  NS_ENSURE_TRUE(docShell, NS_ERROR_FAILURE);
-
+nsresult nsEditingSession::DisableJSAndPlugins(nsIDocShell& aDocShell) {
   bool tmp;
-  nsresult rv = docShell->GetAllowJavascript(&tmp);
+  nsresult rv = aDocShell.GetAllowJavascript(&tmp);
   NS_ENSURE_SUCCESS(rv, rv);
 
   mScriptsEnabled = tmp;
 
-  rv = docShell->SetAllowJavascript(false);
+  rv = aDocShell.SetAllowJavascript(false);
   NS_ENSURE_SUCCESS(rv, rv);
 
   // Disable plugins in this document:
-  mPluginsEnabled = docShell->PluginsAllowedInCurrentDoc();
+  mPluginsEnabled = aDocShell.PluginsAllowedInCurrentDoc();
 
-  rv = docShell->SetAllowPlugins(false);
+  rv = aDocShell.SetAllowPlugins(false);
   NS_ENSURE_SUCCESS(rv, rv);
 
   mDisabledJSAndPlugins = true;
@@ -203,16 +199,18 @@ nsEditingSession::DisableJSAndPlugins(mozIDOMWindowProxy* aWindow) {
   return NS_OK;
 }
 
-NS_IMETHODIMP
-nsEditingSession::RestoreJSAndPlugins(mozIDOMWindowProxy* aWindow) {
+nsresult nsEditingSession::RestoreJSAndPlugins(nsPIDOMWindowOuter* aWindow) {
   if (!mDisabledJSAndPlugins) {
     return NS_OK;
   }
 
   mDisabledJSAndPlugins = false;
 
-  NS_ENSURE_TRUE(aWindow, NS_ERROR_FAILURE);
-  nsIDocShell* docShell = nsPIDOMWindowOuter::From(aWindow)->GetDocShell();
+  if (NS_WARN_IF(!aWindow)) {
+    // DetachFromWindow may call this method with nullptr.
+    return NS_ERROR_FAILURE;
+  }
+  nsIDocShell* docShell = aWindow->GetDocShell();
   NS_ENSURE_TRUE(docShell, NS_ERROR_FAILURE);
 
   nsresult rv = docShell->SetAllowJavascript(mScriptsEnabled);
@@ -220,13 +218,6 @@ nsEditingSession::RestoreJSAndPlugins(mozIDOMWindowProxy* aWindow) {
 
   // Disable plugins in this document:
   return docShell->SetAllowPlugins(mPluginsEnabled);
-}
-
-NS_IMETHODIMP
-nsEditingSession::GetJsAndPluginsDisabled(bool* aResult) {
-  NS_ENSURE_ARG_POINTER(aResult);
-  *aResult = mDisabledJSAndPlugins;
-  return NS_OK;
 }
 
 /*---------------------------------------------------------------------------
@@ -300,7 +291,7 @@ nsEditingSession::SetupEditorOnWindow(mozIDOMWindowProxy* aWindow) {
   nsAutoCString mimeCType;
 
   // then lets check the mime type
-  if (nsCOMPtr<nsIDocument> doc = window->GetDoc()) {
+  if (RefPtr<Document> doc = window->GetDoc()) {
     nsAutoString mimeType;
     doc->GetContentType(mimeType);
     AppendUTF16toUTF8(mimeType, mimeCType);
@@ -375,8 +366,11 @@ nsEditingSession::SetupEditorOnWindow(mozIDOMWindowProxy* aWindow) {
   //  only if we haven't found some error above,
   nsCOMPtr<nsIDocShell> docShell = window->GetDocShell();
   NS_ENSURE_TRUE(docShell, NS_ERROR_FAILURE);
-  nsCOMPtr<nsIPresShell> presShell = docShell->GetPresShell();
-  NS_ENSURE_TRUE(presShell, NS_ERROR_FAILURE);
+  RefPtr<PresShell> presShell =
+      static_cast<PresShell*>(docShell->GetPresShell());
+  if (NS_WARN_IF(!presShell)) {
+    return NS_ERROR_FAILURE;
+  }
 
   if (!mInteractive) {
     // Disable animation of images in this document:
@@ -427,7 +421,7 @@ nsEditingSession::SetupEditorOnWindow(mozIDOMWindowProxy* aWindow) {
   NS_ENSURE_SUCCESS(rv, rv);
   NS_ENSURE_TRUE(contentViewer, NS_ERROR_FAILURE);
 
-  nsCOMPtr<nsIDocument> doc = contentViewer->GetDocument();
+  RefPtr<Document> doc = contentViewer->GetDocument();
   if (NS_WARN_IF(!doc)) {
     return NS_ERROR_FAILURE;
   }
@@ -511,7 +505,7 @@ nsEditingSession::TearDownEditorOnWindow(mozIDOMWindowProxy* aWindow) {
   // Check if we're turning off editing (from contentEditable or designMode).
   auto* window = nsPIDOMWindowOuter::From(aWindow);
 
-  nsCOMPtr<nsIDocument> doc = window->GetDoc();
+  RefPtr<Document> doc = window->GetDoc();
   nsCOMPtr<nsIHTMLDocument> htmlDoc = do_QueryInterface(doc);
   bool stopEditing = htmlDoc && htmlDoc->IsEditingOn();
   if (stopEditing) {
@@ -540,7 +534,7 @@ nsEditingSession::TearDownEditorOnWindow(mozIDOMWindowProxy* aWindow) {
 
   if (stopEditing) {
     // Make things the way they were before we started editing.
-    RestoreJSAndPlugins(aWindow);
+    RestoreJSAndPlugins(window);
     RestoreAnimationMode(window);
 
     if (mMakeWholeDocumentEditable) {
@@ -637,7 +631,7 @@ nsEditingSession::OnStateChange(nsIWebProgress* aWebProgress,
         aWebProgress->GetDOMWindow(getter_AddRefs(window));
 
         auto* piWindow = nsPIDOMWindowOuter::From(window);
-        nsCOMPtr<nsIDocument> doc = piWindow->GetDoc();
+        RefPtr<Document> doc = piWindow->GetDoc();
         nsHTMLDocument* htmlDoc =
             doc && doc->IsHTMLOrXHTML() ? doc->AsHTMLDocument() : nullptr;
         if (htmlDoc && htmlDoc->IsWriting()) {
@@ -749,7 +743,7 @@ nsEditingSession::OnLocationChange(nsIWebProgress* aWebProgress,
 
   auto* piWindow = nsPIDOMWindowOuter::From(domWindow);
 
-  nsCOMPtr<nsIDocument> doc = piWindow->GetDoc();
+  RefPtr<Document> doc = piWindow->GetDoc();
   NS_ENSURE_TRUE(doc, NS_ERROR_FAILURE);
 
   doc->SetDocumentURI(aURI);
@@ -787,9 +781,20 @@ nsEditingSession::OnStatusChange(nsIWebProgress* aWebProgress,
 ----------------------------------------------------------------------------*/
 NS_IMETHODIMP
 nsEditingSession::OnSecurityChange(nsIWebProgress* aWebProgress,
-                                   nsIRequest* aRequest, uint32_t aOldState,
-                                   uint32_t aState,
-                                   const nsAString& aContentBlockingLogJSON) {
+                                   nsIRequest* aRequest, uint32_t aState) {
+  MOZ_ASSERT_UNREACHABLE("notification excluded in AddProgressListener(...)");
+  return NS_OK;
+}
+
+/*---------------------------------------------------------------------------
+
+  OnContentBlockingEvent
+
+----------------------------------------------------------------------------*/
+NS_IMETHODIMP
+nsEditingSession::OnContentBlockingEvent(nsIWebProgress* aWebProgress,
+                                         nsIRequest* aRequest,
+                                         uint32_t aEvent) {
   MOZ_ASSERT_UNREACHABLE("notification excluded in AddProgressListener(...)");
   return NS_OK;
 }
@@ -942,8 +947,10 @@ void nsEditingSession::TimerCallback(nsITimer* aTimer, void* aClosure) {
   if (docShell) {
     nsCOMPtr<nsIWebNavigation> webNav(do_QueryInterface(docShell));
     if (webNav) {
-      webNav->LoadURI(NS_LITERAL_STRING("about:blank"), 0, nullptr, nullptr,
-                      nullptr, nsContentUtils::GetSystemPrincipal());
+      LoadURIOptions loadURIOptions;
+      loadURIOptions.mTriggeringPrincipal =
+          nsContentUtils::GetSystemPrincipal();
+      webNav->LoadURI(NS_LITERAL_STRING("about:blank"), loadURIOptions);
     }
   }
 }
@@ -1199,8 +1206,11 @@ void nsEditingSession::RestoreAnimationMode(nsPIDOMWindowOuter* aWindow) {
 
   nsCOMPtr<nsIDocShell> docShell = aWindow ? aWindow->GetDocShell() : nullptr;
   NS_ENSURE_TRUE_VOID(docShell);
-  nsCOMPtr<nsIPresShell> presShell = docShell->GetPresShell();
-  NS_ENSURE_TRUE_VOID(presShell);
+  RefPtr<PresShell> presShell =
+      static_cast<PresShell*>(docShell->GetPresShell());
+  if (NS_WARN_IF(!presShell)) {
+    return;
+  }
   nsPresContext* presContext = presShell->GetPresContext();
   NS_ENSURE_TRUE_VOID(presContext);
 
@@ -1225,7 +1235,7 @@ nsresult nsEditingSession::DetachFromWindow(mozIDOMWindowProxy* aWindow) {
   // make things the way they were before we started editing.
   RemoveEditorControllers(window);
   RemoveWebProgressListener(window);
-  RestoreJSAndPlugins(aWindow);
+  RestoreJSAndPlugins(window);
   RestoreAnimationMode(window);
 
   // Kill our weak reference to our original window, in case
@@ -1253,7 +1263,7 @@ nsresult nsEditingSession::ReattachToWindow(mozIDOMWindowProxy* aWindow) {
 
   // Disable plugins.
   if (!mInteractive) {
-    rv = DisableJSAndPlugins(aWindow);
+    rv = DisableJSAndPlugins(*docShell);
     NS_ENSURE_SUCCESS(rv, rv);
   }
 
@@ -1287,8 +1297,11 @@ nsresult nsEditingSession::ReattachToWindow(mozIDOMWindowProxy* aWindow) {
 
   if (!mInteractive) {
     // Disable animation of images in this document:
-    nsCOMPtr<nsIPresShell> presShell = docShell->GetPresShell();
-    NS_ENSURE_TRUE(presShell, NS_ERROR_FAILURE);
+    RefPtr<PresShell> presShell =
+        static_cast<PresShell*>(docShell->GetPresShell());
+    if (NS_WARN_IF(!presShell)) {
+      return NS_ERROR_FAILURE;
+    }
     nsPresContext* presContext = presShell->GetPresContext();
     NS_ENSURE_TRUE(presContext, NS_ERROR_FAILURE);
 

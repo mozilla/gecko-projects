@@ -32,7 +32,7 @@
 #include "nsIStreamConverterService.h"
 #include "nsIFile.h"
 #if defined(XP_MACOSX)
-#include "nsILocalFileMac.h"
+#  include "nsILocalFileMac.h"
 #endif
 #include "nsISeekableStream.h"
 #include "nsNetUtil.h"
@@ -40,7 +40,7 @@
 #include "nsISimpleEnumerator.h"
 #include "nsIStringStream.h"
 #include "nsIProgressEventSink.h"
-#include "nsIDocument.h"
+#include "mozilla/dom/Document.h"
 #include "nsPluginLogging.h"
 #include "nsIScriptChannel.h"
 #include "nsIBlocklistService.h"
@@ -100,16 +100,17 @@
 #include "mozilla/dom/Promise.h"
 
 #if defined(XP_WIN)
-#include "nsIWindowMediator.h"
-#include "nsIBaseWindow.h"
-#include "windows.h"
-#include "winbase.h"
+#  include "nsIWindowMediator.h"
+#  include "nsIBaseWindow.h"
+#  include "windows.h"
+#  include "winbase.h"
 #endif
 
 #include "npapi.h"
 
 using namespace mozilla;
 using mozilla::TimeStamp;
+using mozilla::dom::Document;
 using mozilla::dom::FakePluginMimeEntry;
 using mozilla::dom::FakePluginTagInit;
 using mozilla::dom::Promise;
@@ -839,10 +840,10 @@ nsresult nsPluginHost::SetUpPluginInstance(const nsACString& aMimeType,
   // reloading our plugin list. Only do that once per document to
   // avoid redundant high resource usage on pages with multiple
   // unkown instance types. We'll do that by caching the document.
-  nsCOMPtr<nsIDocument> document;
+  nsCOMPtr<Document> document;
   aOwner->GetDocument(getter_AddRefs(document));
 
-  nsCOMPtr<nsIDocument> currentdocument = do_QueryReferent(mCurrentDocument);
+  nsCOMPtr<Document> currentdocument = do_QueryReferent(mCurrentDocument);
   if (document == currentdocument) {
     return rv;
   }
@@ -2586,7 +2587,8 @@ void nsPluginHost::UpdatePluginInfo(nsPluginTag* aPluginTag) {
   UpdateInMemoryPluginInfo(aPluginTag);
 }
 
-/* static */ bool nsPluginHost::IsTypeWhitelisted(const char* aMimeType) {
+/* static */
+bool nsPluginHost::IsTypeWhitelisted(const char* aMimeType) {
   nsAutoCString whitelist;
   Preferences::GetCString(kPrefWhitelist, whitelist);
   if (whitelist.IsEmpty()) {
@@ -2596,8 +2598,8 @@ void nsPluginHost::UpdatePluginInfo(nsPluginTag* aPluginTag) {
   return IsTypeInList(wrap, whitelist);
 }
 
-/* static */ bool nsPluginHost::ShouldLoadTypeInParent(
-    const nsACString& aMimeType) {
+/* static */
+bool nsPluginHost::ShouldLoadTypeInParent(const nsACString& aMimeType) {
   nsCString prefName(kPrefLoadInParentPrefix);
   prefName += aMimeType;
   return Preferences::GetBool(prefName.get(), false);
@@ -3079,7 +3081,7 @@ nsresult nsPluginHost::NewPluginURLStream(
   NS_ENSURE_SUCCESS(rv, rv);
 
   RefPtr<dom::Element> element;
-  nsCOMPtr<nsIDocument> doc;
+  nsCOMPtr<Document> doc;
   if (owner) {
     owner->GetDOMElement(getter_AddRefs(element));
     owner->GetDocument(getter_AddRefs(doc));
@@ -3159,7 +3161,7 @@ nsresult nsPluginHost::NewPluginURLStream(
       NS_ENSURE_SUCCESS(rv, rv);
     }
   }
-  rv = channel->AsyncOpen2(listenerPeer);
+  rv = channel->AsyncOpen(listenerPeer);
   if (NS_SUCCEEDED(rv)) listenerPeer->TrackRequest(channel);
   return rv;
 }

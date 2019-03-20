@@ -17,8 +17,9 @@ function assertBreakpointExists(dbg, source, line) {
   );
 }
 
-function assertEditorBreakpoint(dbg, line, shouldExist) {
-  const exists = !!getLineEl(dbg, line).querySelector(".new-breakpoint");
+async function assertEditorBreakpoint(dbg, line, shouldExist) {
+  const el = await getLineEl(dbg, line);
+  const exists = !!el.querySelector(".new-breakpoint");
   ok(
     exists === shouldExist,
     "Breakpoint " +
@@ -28,13 +29,17 @@ function assertEditorBreakpoint(dbg, line, shouldExist) {
   );
 }
 
-function getLineEl(dbg, line) {
-  const lines = dbg.win.document.querySelectorAll(".CodeMirror-code > div");
-  return lines[line - 1];
+async function getLineEl(dbg, line) {
+  let el = await codeMirrorGutterElement(dbg, line);
+  while (el && !el.matches(".CodeMirror-code > div")) {
+    el = el.parentElement;
+  }
+  return el;
 }
 
-function clickGutter(dbg, line) {
-  clickElement(dbg, "gutter", line);
+async function clickGutter(dbg, line) {
+  const el = await codeMirrorGutterElement(dbg, line);
+  clickDOMElement(dbg, el);
 }
 
 add_task(async function() {
@@ -48,13 +53,17 @@ add_task(async function() {
   ok(true, "Original sources exist");
   const bundleSrc = findSource(dbg, "bundle.js");
 
+  // Check that the original sources appear in the source tree
+  await clickElement(dbg, "sourceDirectoryLabel", 3);
+  await assertSourceCount(dbg, 8);
+
   await selectSource(dbg, bundleSrc);
 
-  await clickGutter(dbg, 13);
+  await clickGutter(dbg, 70);
   await waitForDispatch(dbg, "ADD_BREAKPOINT");
-  assertEditorBreakpoint(dbg, 13, true);
+  assertEditorBreakpoint(dbg, 70, true);
 
-  await clickGutter(dbg, 13);
+  await clickGutter(dbg, 70);
   await waitForDispatch(dbg, "REMOVE_BREAKPOINT");
   is(getBreakpointCount(getState()), 0, "No breakpoints exists");
 
@@ -77,7 +86,6 @@ add_task(async function() {
   await waitForPaused(dbg);
   assertPausedLocation(dbg);
 
-  await stepIn(dbg);
   await stepIn(dbg);
   assertPausedLocation(dbg);
 

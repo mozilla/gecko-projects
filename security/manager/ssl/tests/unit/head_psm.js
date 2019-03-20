@@ -5,25 +5,22 @@
 "use strict";
 
 const { AppConstants } =
-  ChromeUtils.import("resource://gre/modules/AppConstants.jsm", {});
-const { ctypes } = ChromeUtils.import("resource://gre/modules/ctypes.jsm", {});
-const { FileUtils } = ChromeUtils.import("resource://gre/modules/FileUtils.jsm", {});
-const { HttpServer } = ChromeUtils.import("resource://testing-common/httpd.js", {});
+  ChromeUtils.import("resource://gre/modules/AppConstants.jsm");
+const { ctypes } = ChromeUtils.import("resource://gre/modules/ctypes.jsm");
+const { FileUtils } = ChromeUtils.import("resource://gre/modules/FileUtils.jsm");
+const { HttpServer } = ChromeUtils.import("resource://testing-common/httpd.js");
 const { MockRegistrar } =
-  ChromeUtils.import("resource://testing-common/MockRegistrar.jsm", {});
-const { NetUtil } = ChromeUtils.import("resource://gre/modules/NetUtil.jsm", {});
-const { Promise } = ChromeUtils.import("resource://gre/modules/Promise.jsm", {});
-const { Services } = ChromeUtils.import("resource://gre/modules/Services.jsm", {});
-const { XPCOMUtils } = ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm", {});
+  ChromeUtils.import("resource://testing-common/MockRegistrar.jsm");
+const { NetUtil } = ChromeUtils.import("resource://gre/modules/NetUtil.jsm");
+const { Promise } = ChromeUtils.import("resource://gre/modules/Promise.jsm");
+const { Services } = ChromeUtils.import("resource://gre/modules/Services.jsm");
+const { XPCOMUtils } = ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
 
 const isDebugBuild = Cc["@mozilla.org/xpcom/debug;1"]
                        .getService(Ci.nsIDebug2).isDebugBuild;
 
 // The test EV roots are only enabled in debug builds as a security measure.
-//
-// Bug 1008316: B2G doesn't have EV enabled, so EV is not expected even in debug
-// builds.
-const gEVExpected = isDebugBuild && !("@mozilla.org/b2g-process-global;1" in Cc);
+const gEVExpected = isDebugBuild;
 
 const SSS_STATE_FILE_NAME = "SiteSecurityServiceState.txt";
 const PRELOAD_STATE_FILE_NAME = "SecurityPreloadState.txt";
@@ -137,7 +134,8 @@ function readFile(file) {
   let fstream = Cc["@mozilla.org/network/file-input-stream;1"]
                   .createInstance(Ci.nsIFileInputStream);
   fstream.init(file, -1, 0, 0);
-  let data = NetUtil.readInputStreamToString(fstream, fstream.available());
+  let available = fstream.available();
+  let data = available > 0 ? NetUtil.readInputStreamToString(fstream, available) : "";
   fstream.close();
   return data;
 }
@@ -496,7 +494,7 @@ function _getBinaryUtil(binaryUtilName) {
     utilBin.append("bin");
     utilBin.append(binaryUtilName + mozinfo.bin_suffix);
   }
-  // But maybe we're on Android or B2G, where binaries are in /data/local/xpcb.
+  // But maybe we're on Android, where binaries are in /data/local/xpcb.
   if (!utilBin.exists()) {
     utilBin.initWithPath("/data/local/xpcb/");
     utilBin.append(binaryUtilName);
@@ -834,7 +832,8 @@ function asyncTestCertificateUsages(certdb, cert, expectedUsages) {
       let successExpected = expectedUsages.includes(usage);
       let result = new CertVerificationResult(cert.commonName, usageString,
                                               successExpected, resolve);
-      certdb.asyncVerifyCertAtTime(cert, usage, 0, null, now, result);
+      let flags = Ci.nsIX509CertDB.FLAG_LOCAL_ONLY;
+      certdb.asyncVerifyCertAtTime(cert, usage, flags, null, now, result);
     });
     promises.push(promise);
   });

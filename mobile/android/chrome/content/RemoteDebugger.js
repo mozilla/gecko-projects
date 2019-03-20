@@ -6,7 +6,7 @@
 "use strict";
 
 XPCOMUtils.defineLazyGetter(this, "require", () => {
-  let { require } = ChromeUtils.import("resource://devtools/shared/Loader.jsm", {});
+  let { require } = ChromeUtils.import("resource://devtools/shared/Loader.jsm");
   return require;
 });
 
@@ -215,6 +215,8 @@ var RemoteDebugger = {
     // Allow debugging of chrome for any process
     DebuggerServer.allowChromeProcess = true;
     DebuggerServer.chromeWindowType = this._windowType;
+    // Force the Server to stay alive even if there are no connections at the moment.
+    DebuggerServer.keepAlive = true;
   },
 };
 

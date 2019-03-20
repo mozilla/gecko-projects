@@ -50,7 +50,7 @@ class IIRFilterNodeEngine final : public AudioNodeEngine {
           RefPtr<PlayingRefChangeHandler> refchanged =
               new PlayingRefChangeHandler(aStream,
                                           PlayingRefChangeHandler::RELEASE);
-          aStream->Graph()->DispatchToMainThreadAfterStreamStateUpdate(
+          aStream->Graph()->DispatchToMainThreadStableState(
               refchanged.forget());
 
           aOutput->SetNull(WEBAUDIO_BLOCK_SIZE);
@@ -64,8 +64,7 @@ class IIRFilterNodeEngine final : public AudioNodeEngine {
         RefPtr<PlayingRefChangeHandler> refchanged =
             new PlayingRefChangeHandler(aStream,
                                         PlayingRefChangeHandler::ADDREF);
-        aStream->Graph()->DispatchToMainThreadAfterStreamStateUpdate(
-            refchanged.forget());
+        aStream->Graph()->DispatchToMainThreadStableState(refchanged.forget());
       } else {
         WebAudioUtils::LogToDeveloperConsole(
             mWindowID, "IIRFilterChannelCountChangeWarning");
@@ -156,7 +155,8 @@ IIRFilterNode::IIRFilterNode(AudioContext* aContext,
       aContext, engine, AudioNodeStream::NO_STREAM_FLAGS, aContext->Graph());
 }
 
-/* static */ already_AddRefed<IIRFilterNode> IIRFilterNode::Create(
+/* static */
+already_AddRefed<IIRFilterNode> IIRFilterNode::Create(
     AudioContext& aAudioContext, const IIRFilterOptions& aOptions,
     ErrorResult& aRv) {
   if (aAudioContext.CheckClosed(aRv)) {

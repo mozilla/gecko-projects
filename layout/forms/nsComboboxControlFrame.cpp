@@ -30,7 +30,7 @@
 #include "nsContentUtils.h"
 #include "mozilla/dom/Event.h"
 #include "mozilla/dom/HTMLSelectElement.h"
-#include "nsIDocument.h"
+#include "mozilla/dom/Document.h"
 #include "nsIScrollableFrame.h"
 #include "mozilla/ServoStyleSet.h"
 #include "nsNodeInfoManager.h"
@@ -52,13 +52,14 @@
 #include "nsILayoutHistoryState.h"
 
 #ifdef XP_WIN
-#define COMBOBOX_ROLLUP_CONSUME_EVENT 0
+#  define COMBOBOX_ROLLUP_CONSUME_EVENT 0
 #else
-#define COMBOBOX_ROLLUP_CONSUME_EVENT 1
+#  define COMBOBOX_ROLLUP_CONSUME_EVENT 1
 #endif
 
 using namespace mozilla;
 using namespace mozilla::gfx;
+using mozilla::dom::Document;
 
 NS_IMETHODIMP
 nsComboboxControlFrame::RedisplayTextEvent::Run() {
@@ -112,7 +113,8 @@ nsComboboxControlFrame* nsComboboxControlFrame::sFocused = nullptr;
 nsComboboxControlFrame* NS_NewComboboxControlFrame(nsIPresShell* aPresShell,
                                                    ComputedStyle* aStyle,
                                                    nsFrameState aStateFlags) {
-  nsComboboxControlFrame* it = new (aPresShell) nsComboboxControlFrame(aStyle);
+  nsComboboxControlFrame* it = new (aPresShell)
+      nsComboboxControlFrame(aStyle, aPresShell->GetPresContext());
 
   if (it) {
     // set the state flags (if any are provided)
@@ -130,7 +132,7 @@ NS_IMPL_FRAMEARENA_HELPERS(nsComboboxControlFrame)
 //-----------------------------------------------------------
 #ifdef DO_REFLOW_COUNTER
 
-#define MAX_REFLOW_CNT 1024
+#  define MAX_REFLOW_CNT 1024
 static int32_t gTotalReqs = 0;
 ;
 static int32_t gTotalReflows = 0;
@@ -139,50 +141,51 @@ static int32_t gReflowControlCntRQ[MAX_REFLOW_CNT];
 static int32_t gReflowControlCnt[MAX_REFLOW_CNT];
 static int32_t gReflowInx = -1;
 
-#define REFLOW_COUNTER() \
-  if (mReflowId > -1) gReflowControlCnt[mReflowId]++;
+#  define REFLOW_COUNTER() \
+    if (mReflowId > -1) gReflowControlCnt[mReflowId]++;
 
-#define REFLOW_COUNTER_REQUEST() \
-  if (mReflowId > -1) gReflowControlCntRQ[mReflowId]++;
+#  define REFLOW_COUNTER_REQUEST() \
+    if (mReflowId > -1) gReflowControlCntRQ[mReflowId]++;
 
-#define REFLOW_COUNTER_DUMP(__desc)                                            \
-  if (mReflowId > -1) {                                                        \
-    gTotalReqs += gReflowControlCntRQ[mReflowId];                              \
-    gTotalReflows += gReflowControlCnt[mReflowId];                             \
-    printf("** Id:%5d %s RF: %d RQ: %d   %d/%d  %5.2f\n", mReflowId, (__desc), \
-           gReflowControlCnt[mReflowId], gReflowControlCntRQ[mReflowId],       \
-           gTotalReflows, gTotalReqs,                                          \
-           float(gTotalReflows) / float(gTotalReqs) * 100.0f);                 \
-  }
+#  define REFLOW_COUNTER_DUMP(__desc)                                   \
+    if (mReflowId > -1) {                                               \
+      gTotalReqs += gReflowControlCntRQ[mReflowId];                     \
+      gTotalReflows += gReflowControlCnt[mReflowId];                    \
+      printf("** Id:%5d %s RF: %d RQ: %d   %d/%d  %5.2f\n", mReflowId,  \
+             (__desc), gReflowControlCnt[mReflowId],                    \
+             gReflowControlCntRQ[mReflowId], gTotalReflows, gTotalReqs, \
+             float(gTotalReflows) / float(gTotalReqs) * 100.0f);        \
+    }
 
-#define REFLOW_COUNTER_INIT()           \
-  if (gReflowInx < MAX_REFLOW_CNT) {    \
-    gReflowInx++;                       \
-    mReflowId = gReflowInx;             \
-    gReflowControlCnt[mReflowId] = 0;   \
-    gReflowControlCntRQ[mReflowId] = 0; \
-  } else {                              \
-    mReflowId = -1;                     \
-  }
+#  define REFLOW_COUNTER_INIT()           \
+    if (gReflowInx < MAX_REFLOW_CNT) {    \
+      gReflowInx++;                       \
+      mReflowId = gReflowInx;             \
+      gReflowControlCnt[mReflowId] = 0;   \
+      gReflowControlCntRQ[mReflowId] = 0; \
+    } else {                              \
+      mReflowId = -1;                     \
+    }
 
 // reflow messages
-#define REFLOW_DEBUG_MSG(_msg1) printf((_msg1))
-#define REFLOW_DEBUG_MSG2(_msg1, _msg2) printf((_msg1), (_msg2))
-#define REFLOW_DEBUG_MSG3(_msg1, _msg2, _msg3) printf((_msg1), (_msg2), (_msg3))
-#define REFLOW_DEBUG_MSG4(_msg1, _msg2, _msg3, _msg4) \
-  printf((_msg1), (_msg2), (_msg3), (_msg4))
+#  define REFLOW_DEBUG_MSG(_msg1) printf((_msg1))
+#  define REFLOW_DEBUG_MSG2(_msg1, _msg2) printf((_msg1), (_msg2))
+#  define REFLOW_DEBUG_MSG3(_msg1, _msg2, _msg3) \
+    printf((_msg1), (_msg2), (_msg3))
+#  define REFLOW_DEBUG_MSG4(_msg1, _msg2, _msg3, _msg4) \
+    printf((_msg1), (_msg2), (_msg3), (_msg4))
 
 #else  //-------------
 
-#define REFLOW_COUNTER_REQUEST()
-#define REFLOW_COUNTER()
-#define REFLOW_COUNTER_DUMP(__desc)
-#define REFLOW_COUNTER_INIT()
+#  define REFLOW_COUNTER_REQUEST()
+#  define REFLOW_COUNTER()
+#  define REFLOW_COUNTER_DUMP(__desc)
+#  define REFLOW_COUNTER_INIT()
 
-#define REFLOW_DEBUG_MSG(_msg)
-#define REFLOW_DEBUG_MSG2(_msg1, _msg2)
-#define REFLOW_DEBUG_MSG3(_msg1, _msg2, _msg3)
-#define REFLOW_DEBUG_MSG4(_msg1, _msg2, _msg3, _msg4)
+#  define REFLOW_DEBUG_MSG(_msg)
+#  define REFLOW_DEBUG_MSG2(_msg1, _msg2)
+#  define REFLOW_DEBUG_MSG3(_msg1, _msg2, _msg3)
+#  define REFLOW_DEBUG_MSG4(_msg1, _msg2, _msg3, _msg4)
 
 #endif
 
@@ -190,33 +193,35 @@ static int32_t gReflowInx = -1;
 // This is for being VERY noisy
 //------------------------------------------
 #ifdef DO_VERY_NOISY
-#define REFLOW_NOISY_MSG(_msg1) printf((_msg1))
-#define REFLOW_NOISY_MSG2(_msg1, _msg2) printf((_msg1), (_msg2))
-#define REFLOW_NOISY_MSG3(_msg1, _msg2, _msg3) printf((_msg1), (_msg2), (_msg3))
-#define REFLOW_NOISY_MSG4(_msg1, _msg2, _msg3, _msg4) \
-  printf((_msg1), (_msg2), (_msg3), (_msg4))
+#  define REFLOW_NOISY_MSG(_msg1) printf((_msg1))
+#  define REFLOW_NOISY_MSG2(_msg1, _msg2) printf((_msg1), (_msg2))
+#  define REFLOW_NOISY_MSG3(_msg1, _msg2, _msg3) \
+    printf((_msg1), (_msg2), (_msg3))
+#  define REFLOW_NOISY_MSG4(_msg1, _msg2, _msg3, _msg4) \
+    printf((_msg1), (_msg2), (_msg3), (_msg4))
 #else
-#define REFLOW_NOISY_MSG(_msg)
-#define REFLOW_NOISY_MSG2(_msg1, _msg2)
-#define REFLOW_NOISY_MSG3(_msg1, _msg2, _msg3)
-#define REFLOW_NOISY_MSG4(_msg1, _msg2, _msg3, _msg4)
+#  define REFLOW_NOISY_MSG(_msg)
+#  define REFLOW_NOISY_MSG2(_msg1, _msg2)
+#  define REFLOW_NOISY_MSG3(_msg1, _msg2, _msg3)
+#  define REFLOW_NOISY_MSG4(_msg1, _msg2, _msg3, _msg4)
 #endif
 
 //------------------------------------------
 // Displays value in pixels or twips
 //------------------------------------------
 #ifdef DO_PIXELS
-#define PX(__v) __v / 15
+#  define PX(__v) __v / 15
 #else
-#define PX(__v) __v
+#  define PX(__v) __v
 #endif
 
 //------------------------------------------------------
 //-- Done with macros
 //------------------------------------------------------
 
-nsComboboxControlFrame::nsComboboxControlFrame(ComputedStyle* aStyle)
-    : nsBlockFrame(aStyle, kClassID),
+nsComboboxControlFrame::nsComboboxControlFrame(ComputedStyle* aStyle,
+                                               nsPresContext* aPresContext)
+    : nsBlockFrame(aStyle, aPresContext, kClassID),
       mDisplayFrame(nullptr),
       mButtonFrame(nullptr),
       mDropdownFrame(nullptr),
@@ -239,11 +244,11 @@ nsComboboxControlFrame::nsComboboxControlFrame(ComputedStyle* aStyle)
 //--------------------------------------------------------------
 
 NS_QUERYFRAME_HEAD(nsComboboxControlFrame)
-NS_QUERYFRAME_ENTRY(nsComboboxControlFrame)
-NS_QUERYFRAME_ENTRY(nsIFormControlFrame)
-NS_QUERYFRAME_ENTRY(nsIAnonymousContentCreator)
-NS_QUERYFRAME_ENTRY(nsISelectControlFrame)
-NS_QUERYFRAME_ENTRY(nsIStatefulFrame)
+  NS_QUERYFRAME_ENTRY(nsComboboxControlFrame)
+  NS_QUERYFRAME_ENTRY(nsIFormControlFrame)
+  NS_QUERYFRAME_ENTRY(nsIAnonymousContentCreator)
+  NS_QUERYFRAME_ENTRY(nsISelectControlFrame)
+  NS_QUERYFRAME_ENTRY(nsIStatefulFrame)
 NS_QUERYFRAME_TAIL_INHERITING(nsBlockFrame)
 
 #ifdef ACCESSIBILITY
@@ -287,8 +292,6 @@ void nsComboboxControlFrame::SetFocus(bool aOn, bool aRepaint) {
 }
 
 void nsComboboxControlFrame::ShowPopup(bool aShowPopup) {
-  // TODO(kuoe0) Remove this function when content-select is enabled.
-
   nsView* view = mDropdownFrame->GetView();
   nsViewManager* viewManager = view->GetViewManager();
 
@@ -316,15 +319,6 @@ void nsComboboxControlFrame::ShowPopup(bool aShowPopup) {
 }
 
 bool nsComboboxControlFrame::ShowList(bool aShowList) {
-  // TODO(kuoe0) Remove this function when content-select is enabled.
-  //
-  // This function is used to handle the widget/view stuff, so we just return
-  // when content-select is enabled. And the following callee, ShowPopup(), will
-  // also be ignored, it is only used to show and hide the widget.
-  if (nsLayoutUtils::IsContentSelectEnabled()) {
-    return true;
-  }
-
   nsView* view = mDropdownFrame->GetView();
   if (aShowList) {
     NS_ASSERTION(
@@ -431,8 +425,7 @@ void nsComboboxControlFrame::ReflowDropdown(nsPresContext* aPresContext,
       std::max(kidReflowInput.ComputedISize(), forcedISize));
 
   // ensure we start off hidden
-  if (!nsLayoutUtils::IsContentSelectEnabled() && !mDroppedDown &&
-      GetStateBits() & NS_FRAME_FIRST_REFLOW) {
+  if (!mDroppedDown && GetStateBits() & NS_FRAME_FIRST_REFLOW) {
     nsView* view = mDropdownFrame->GetView();
     nsViewManager* viewManager = view->GetViewManager();
     viewManager->SetViewVisibility(view, nsViewVisibility_kHide);
@@ -616,7 +609,7 @@ nsComboboxControlFrame::AbsolutelyPositionDropDown() {
   mLastDropDownAfterScreenBCoord = nscoord_MIN;
   GetAvailableDropdownSpace(wm, &before, &after, &translation);
   if (before <= 0 && after <= 0) {
-    if (!nsLayoutUtils::IsContentSelectEnabled() && IsDroppedDown()) {
+    if (IsDroppedDown()) {
       // Hide the view immediately to minimize flicker.
       nsView* view = mDropdownFrame->GetView();
       view->GetViewManager()->SetViewVisibility(view, nsViewVisibility_kHide);
@@ -793,8 +786,8 @@ void nsComboboxControlFrame::Reflow(nsPresContext* aPresContext,
     return;
   }
 
-  // Make sure the displayed text is the same as the selected option, bug
-  // 297389.
+  // Make sure the displayed text is the same as the selected option,
+  // bug 297389.
   if (!mDroppedDown) {
     mDisplayedIndex = mListControlFrame->GetSelectedIndex();
   }
@@ -865,10 +858,7 @@ nsresult nsComboboxControlFrame::GetFrameName(nsAString& aResult) const {
 #endif
 
 void nsComboboxControlFrame::ShowDropDown(bool aDoDropDown) {
-  if (!nsLayoutUtils::IsContentSelectEnabled()) {
-    // TODO(kuoe0) remove this assertion after content-select is enabled
-    MOZ_ASSERT(!XRE_IsContentProcess());
-  }
+  MOZ_ASSERT(!XRE_IsContentProcess());
   mDelayedShowDropDown = false;
   EventStates eventStates = mContent->AsElement()->State();
   if (aDoDropDown && eventStates.HasState(NS_EVENT_STATE_DISABLED)) {
@@ -1045,7 +1035,7 @@ nsComboboxControlFrame::RemoveOption(int32_t aIndex) {
   return lcf->RemoveOption(aIndex);
 }
 
-NS_IMETHODIMP
+NS_IMETHODIMP_(void)
 nsComboboxControlFrame::OnSetSelectedIndex(int32_t aOldIndex,
                                            int32_t aNewIndex) {
   nsAutoScriptBlocker scriptBlocker;
@@ -1204,7 +1194,8 @@ class nsComboboxDisplayFrame final : public nsBlockFrame {
 
   nsComboboxDisplayFrame(ComputedStyle* aStyle,
                          nsComboboxControlFrame* aComboBox)
-      : nsBlockFrame(aStyle, kClassID), mComboBox(aComboBox) {}
+      : nsBlockFrame(aStyle, aComboBox->PresContext(), kClassID),
+        mComboBox(aComboBox) {}
 
 #ifdef DEBUG_FRAME_DUMP
   nsresult GetFrameName(nsAString& aResult) const override {
@@ -1282,7 +1273,7 @@ nsIFrame* nsComboboxControlFrame::CreateFrameForDisplayNode() {
   // create the ComputedStyle for the anonymous block frame and text frame
   RefPtr<ComputedStyle> computedStyle;
   computedStyle = styleSet->ResolveInheritingAnonymousBoxStyle(
-      nsCSSAnonBoxes::mozDisplayComboboxControlFrame(), mComputedStyle);
+      PseudoStyleType::mozDisplayComboboxControlFrame, mComputedStyle);
 
   RefPtr<ComputedStyle> textComputedStyle;
   textComputedStyle =
@@ -1315,7 +1306,7 @@ void nsComboboxControlFrame::DestroyFrom(nsIFrame* aDestructRoot,
 
   nsCheckboxRadioFrame::RegUnRegAccessKey(static_cast<nsIFrame*>(this), false);
 
-  if (!nsLayoutUtils::IsContentSelectEnabled() && mDroppedDown) {
+  if (mDroppedDown) {
     MOZ_ASSERT(mDropdownFrame, "mDroppedDown without frame");
     nsView* view = mDropdownFrame->GetView();
     MOZ_ASSERT(view);
@@ -1388,8 +1379,7 @@ bool nsComboboxControlFrame::Rollup(uint32_t aCount, bool aFlush,
     mListControlFrame->CaptureMouseEvents(false);
   }
 
-  if (!nsLayoutUtils::IsContentSelectEnabled() && aFlush &&
-      weakFrame.IsAlive()) {
+  if (aFlush && weakFrame.IsAlive()) {
     // The popup's visibility doesn't update until the minimize animation has
     // finished, so call UpdateWidgetGeometry to update it right away.
     nsViewManager* viewManager = mDropdownFrame->GetView()->GetViewManager();
@@ -1407,10 +1397,6 @@ bool nsComboboxControlFrame::Rollup(uint32_t aCount, bool aFlush,
 }
 
 nsIWidget* nsComboboxControlFrame::GetRollupWidget() {
-  if (nsLayoutUtils::IsContentSelectEnabled()) {
-    return nullptr;
-  }
-
   nsView* view = mDropdownFrame->GetView();
   MOZ_ASSERT(view);
   return view->GetWidget();
@@ -1462,8 +1448,7 @@ void nsComboboxControlFrame::BuildDisplayList(nsDisplayListBuilder* aBuilder,
   }
 
   // draw a focus indicator only when focus rings should be drawn
-  nsIDocument* doc = mContent->GetComposedDoc();
-  if (doc) {
+  if (Document* doc = mContent->GetComposedDoc()) {
     nsPIDOMWindowOuter* window = doc->GetWindow();
     if (window && window->ShouldShowFocusRing()) {
       nsPresContext* presContext = PresContext();
@@ -1471,7 +1456,7 @@ void nsComboboxControlFrame::BuildDisplayList(nsDisplayListBuilder* aBuilder,
       if ((!IsThemed(disp) ||
            !presContext->GetTheme()->ThemeDrawsFocusForWidget(
                disp->mAppearance)) &&
-          mDisplayFrame && IsVisibleForPainting(aBuilder)) {
+          mDisplayFrame && IsVisibleForPainting()) {
         aLists.Content()->AppendToTop(
             MakeDisplayItem<nsDisplayComboboxFocus>(aBuilder, this));
       }
@@ -1575,7 +1560,7 @@ nsComboboxControlFrame::RestoreState(PresState* aState) {
 // position for the same Element
 NS_IMETHODIMP
 nsComboboxControlFrame::GenerateStateKey(nsIContent* aContent,
-                                         nsIDocument* aDocument,
+                                         Document* aDocument,
                                          nsACString& aKey) {
   nsresult rv = nsContentUtils::GenerateStateKey(aContent, aDocument, aKey);
   if (NS_FAILED(rv) || aKey.IsEmpty()) {

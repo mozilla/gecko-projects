@@ -41,10 +41,9 @@ typedef wr::WrFontKey FontKey;
 typedef wr::WrFontInstanceKey FontInstanceKey;
 typedef wr::WrEpoch Epoch;
 typedef wr::WrExternalImageId ExternalImageId;
-typedef wr::WrDebugFlags DebugFlags;
 
 typedef mozilla::Maybe<mozilla::wr::IdNamespace> MaybeIdNamespace;
-typedef mozilla::Maybe<mozilla::wr::WrImageMask> MaybeImageMask;
+typedef mozilla::Maybe<mozilla::wr::ImageMask> MaybeImageMask;
 typedef Maybe<ExternalImageId> MaybeExternalImageId;
 
 typedef Maybe<FontInstanceOptions> MaybeFontInstanceOptions;
@@ -58,11 +57,7 @@ struct ExternalImageKeyPair {
 /* Generate a brand new window id and return it. */
 WindowId NewWindowId();
 
-inline DebugFlags NewDebugFlags(uint32_t aFlags) {
-  DebugFlags flags;
-  flags.mBits = aFlags;
-  return flags;
-}
+inline DebugFlags NewDebugFlags(uint32_t aFlags) { return {aFlags}; }
 
 inline Maybe<wr::ImageFormat> SurfaceFormatToImageFormat(
     gfx::SurfaceFormat aFormat) {
@@ -771,42 +766,21 @@ struct BuiltDisplayList {
   wr::BuiltDisplayListDescriptor dl_desc;
 };
 
-static inline wr::WrFilterOpType ToWrFilterOpType(uint32_t type) {
-  switch (type) {
-    case NS_STYLE_FILTER_BLUR:
-      return wr::WrFilterOpType::Blur;
-    case NS_STYLE_FILTER_BRIGHTNESS:
-      return wr::WrFilterOpType::Brightness;
-    case NS_STYLE_FILTER_CONTRAST:
-      return wr::WrFilterOpType::Contrast;
-    case NS_STYLE_FILTER_GRAYSCALE:
-      return wr::WrFilterOpType::Grayscale;
-    case NS_STYLE_FILTER_HUE_ROTATE:
-      return wr::WrFilterOpType::HueRotate;
-    case NS_STYLE_FILTER_INVERT:
-      return wr::WrFilterOpType::Invert;
-    case NS_STYLE_FILTER_OPACITY:
-      return wr::WrFilterOpType::Opacity;
-    case NS_STYLE_FILTER_SATURATE:
-      return wr::WrFilterOpType::Saturate;
-    case NS_STYLE_FILTER_SEPIA:
-      return wr::WrFilterOpType::Sepia;
-    case NS_STYLE_FILTER_DROP_SHADOW:
-      return wr::WrFilterOpType::DropShadow;
-  }
-  MOZ_ASSERT_UNREACHABLE("Tried to convert unknown filter type.");
-  return wr::WrFilterOpType::Grayscale;
-}
-
-extern WrClipId RootScrollNode();
-
 // Corresponds to a clip id for a clip chain in webrender. Similar to
 // WrClipId but a separate struct so we don't get them mixed up in C++.
 struct WrClipChainId {
   uint64_t id;
 
   bool operator==(const WrClipChainId& other) const { return id == other.id; }
+
+  static WrClipChainId Empty() {
+    WrClipChainId id = {0};
+    return id;
+  }
 };
+
+WrSpaceAndClip RootScrollNode();
+WrSpaceAndClipChain RootScrollNodeWithChain();
 
 enum class WebRenderError : int8_t {
   INITIALIZE = 0,
@@ -857,8 +831,8 @@ static inline wr::SyntheticItalics DegreesToSyntheticItalics(float aDegrees) {
 
 namespace std {
 template <>
-struct hash<mozilla::wr::WrClipId> {
-  std::size_t operator()(mozilla::wr::WrClipId const& aKey) const noexcept {
+struct hash<mozilla::wr::WrSpatialId> {
+  std::size_t operator()(mozilla::wr::WrSpatialId const& aKey) const noexcept {
     return std::hash<size_t>{}(aKey.id);
   }
 };

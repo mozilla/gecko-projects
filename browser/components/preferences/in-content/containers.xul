@@ -10,14 +10,14 @@
 <hbox hidden="true"
       class="container-header-links"
       data-category="paneContainers">
-  <label class="text-link" id="backContainersLink" data-l10n-id="containers-back-link"/>
+  <label is="text-link" id="backContainersLink" data-l10n-id="containers-back-link"/>
 </hbox>
 
 <hbox id="header-containers"
       class="header"
       hidden="true"
       data-category="paneContainers">
-  <label class="header-name" flex="1" data-l10n-id="containers-header"/>
+  <html:h1 data-l10n-id="containers-header"/>
 </hbox>
 
 <!-- Containers -->

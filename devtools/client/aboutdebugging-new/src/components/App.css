@@ -32,6 +32,7 @@
   grid-template-columns: var(--sidebar-width) auto;
 
   font-size: var(--base-font-size);
+  font-weight: var(--base-font-weight);
   line-height: var(--base-line-height);
 }
 
@@ -54,6 +55,6 @@
 }
 
 .page__section {
-  margin-block-end: calc(var(--base-distance) * 12);
+  margin-block-end: calc(var(--base-unit) * 12);
   --section-inline-margin: calc(var(--alt-heading-icon-size) + var(--alt-heading-icon-gap));
 }

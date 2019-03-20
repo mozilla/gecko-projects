@@ -9,7 +9,10 @@
 #include "jsapi.h"
 
 #include "js/CharacterEncoding.h"
-#include "vm/Interpreter.h"  // For InstanceOfOperator
+#include "js/PropertyDescriptor.h"  // JS::FromPropertyDescriptor
+#include "vm/EqualityOperations.h"  // js::SameValue
+#include "vm/JSFunction.h"
+#include "vm/JSObject.h"
 
 #include "vm/JSObject-inl.h"
 #include "vm/NativeObject-inl.h"
@@ -163,8 +166,8 @@ static bool IsCompatiblePropertyDescriptor(JSContext* cx, bool extensible,
 }
 
 // Get the [[ProxyHandler]] of a scripted proxy.
-/* static */ JSObject* ScriptedProxyHandler::handlerObject(
-    const JSObject* proxy) {
+/* static */
+JSObject* ScriptedProxyHandler::handlerObject(const JSObject* proxy) {
   MOZ_ASSERT(proxy->as<ProxyObject>().handler() ==
              &ScriptedProxyHandler::singleton);
   return proxy->as<ProxyObject>()
@@ -991,15 +994,7 @@ bool ScriptedProxyHandler::delete_(JSContext* cx, HandleObject proxy,
 
   // Step 12.
   if (desc.object() && !desc.configurable()) {
-    UniqueChars bytes =
-        IdToPrintableUTF8(cx, id, IdToPrintableBehavior::IdIsPropertyKey);
-    if (!bytes) {
-      return false;
-    }
-
-    JS_ReportErrorNumberUTF8(cx, GetErrorMessage, nullptr, JSMSG_CANT_DELETE,
-                             bytes.get());
-    return false;
+    return Throw(cx, id, JSMSG_CANT_DELETE);
   }
 
   // Steps 11,13.
@@ -1373,7 +1368,7 @@ bool ScriptedProxyHandler::nativeCall(JSContext* cx, IsAcceptableThis test,
 
 bool ScriptedProxyHandler::hasInstance(JSContext* cx, HandleObject proxy,
                                        MutableHandleValue v, bool* bp) const {
-  return InstanceOfOperator(cx, proxy, v, bp);
+  return InstanceofOperator(cx, proxy, v, bp);
 }
 
 bool ScriptedProxyHandler::getBuiltinClass(JSContext* cx, HandleObject proxy,
@@ -1439,16 +1434,14 @@ const char ScriptedProxyHandler::family = 0;
 const ScriptedProxyHandler ScriptedProxyHandler::singleton;
 
 bool IsRevokedScriptedProxy(JSObject* obj) {
-  obj = CheckedUnwrap(obj);
+  obj = CheckedUnwrapStatic(obj);
   return obj && IsScriptedProxy(obj) && !obj->as<ProxyObject>().target();
 }
 
 // ES8 rev 0c1bd3004329336774cbc90de727cd0cf5f11e93
 // 9.5.14 ProxyCreate.
 static bool ProxyCreate(JSContext* cx, CallArgs& args, const char* callerName) {
-  if (args.length() < 2) {
-    JS_ReportErrorNumberASCII(cx, GetErrorMessage, nullptr,
-                              JSMSG_MORE_ARGS_NEEDED, callerName, "1", "s");
+  if (!args.requireAtLeast(cx, callerName, 2)) {
     return false;
   }
 
@@ -1547,15 +1540,15 @@ bool js::proxy_revocable(JSContext* cx, unsigned argc, Value* vp) {
   RootedValue proxyVal(cx, args.rval());
   MOZ_ASSERT(proxyVal.toObject().is<ProxyObject>());
 
-  RootedObject revoker(
-      cx, NewFunctionByIdWithReserved(cx, RevokeProxy, 0, 0,
-                                      NameToId(cx->names().revoke)));
+  HandlePropertyName funName = cx->names().revoke;
+  RootedFunction revoker(
+      cx, NewNativeFunction(cx, RevokeProxy, 0, funName,
+                            gc::AllocKind::FUNCTION_EXTENDED, GenericObject));
   if (!revoker) {
     return false;
   }
 
-  revoker->as<JSFunction>().initExtendedSlot(ScriptedProxyHandler::REVOKE_SLOT,
-                                             proxyVal);
+  revoker->initExtendedSlot(ScriptedProxyHandler::REVOKE_SLOT, proxyVal);
 
   RootedPlainObject result(cx, NewBuiltinClassInstance<PlainObject>(cx));
   if (!result) {

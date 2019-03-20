@@ -31,7 +31,7 @@
 // clang-format off
 // Needs to be a on single line
 GECKO_BORROWED_TYPE(mozilla::dom::Element, RawGeckoElement)
-GECKO_BORROWED_TYPE(nsIDocument, RawGeckoDocument)
+GECKO_BORROWED_TYPE(mozilla::dom::Document, RawGeckoDocument)
 GECKO_BORROWED_TYPE(nsINode, RawGeckoNode)
 GECKO_BORROWED_TYPE(nsPresContext, RawGeckoPresContext)
 GECKO_BORROWED_TYPE(nsXBLBinding, RawGeckoXBLBinding)
@@ -39,7 +39,6 @@ GECKO_BORROWED_TYPE_MUT(mozilla::AnimationPropertySegment, RawGeckoAnimationProp
 GECKO_BORROWED_TYPE_MUT(mozilla::ComputedTiming, RawGeckoComputedTiming)
 GECKO_BORROWED_TYPE_MUT(mozilla::dom::StyleChildrenIterator, RawGeckoStyleChildrenIterator)
 GECKO_BORROWED_TYPE_MUT(mozilla::GfxMatrix4x4, RawGeckoGfxMatrix4x4)
-GECKO_BORROWED_TYPE_MUT(mozilla::ServoElementSnapshot, ServoElementSnapshot)
 GECKO_BORROWED_TYPE_MUT(mozilla::URLExtraData, RawGeckoURLExtraData)
 GECKO_BORROWED_TYPE_MUT(nsCSSPropertyIDSet, nsCSSPropertyIDSet)
 GECKO_BORROWED_TYPE_MUT(nsCSSValue, nsCSSValue)

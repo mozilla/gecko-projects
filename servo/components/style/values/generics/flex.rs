@@ -1,6 +1,6 @@
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
- * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 //! Generic types for CSS values related to flexbox.
 
@@ -12,6 +12,7 @@
     ComputeSquaredDistance,
     Copy,
     Debug,
+    Parse,
     PartialEq,
     SpecifiedValueInfo,
     ToAnimatedValue,
@@ -19,9 +20,12 @@
     ToComputedValue,
     ToCss,
 )]
-pub enum FlexBasis<Width> {
+#[repr(C)]
+pub enum GenericFlexBasis<S> {
     /// `content`
     Content,
     /// `<width>`
-    Width(Width),
+    Size(S),
 }
+
+pub use self::GenericFlexBasis as FlexBasis;

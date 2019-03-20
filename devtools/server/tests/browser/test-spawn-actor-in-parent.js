@@ -6,6 +6,7 @@
 "use strict";
 
 const protocol = require("devtools/shared/protocol");
+const { FrontClassWithSpec } = protocol;
 const { DebuggerServerConnection } = require("devtools/server/main");
 const Services = require("Services");
 
@@ -51,13 +52,9 @@ exports.InContentActor = protocol.ActorClassWithSpec(inContentSpec, {
   },
 });
 
-exports.InContentFront = protocol.FrontClassWithSpec(inContentSpec, {
-  initialize: function(client, tabForm) {
-    protocol.Front.prototype.initialize.call(this, client);
-    this.actorID = tabForm.inContentActor;
-    this.manage(this);
-  },
-});
+class InContentFront extends FrontClassWithSpec(inContentSpec) {
+}
+exports.InContentFront = InContentFront;
 
 const inParentSpec = protocol.generateActorSpec({
   typeName: "inParent",
@@ -91,10 +88,6 @@ exports.InParentActor = protocol.ActorClassWithSpec(inParentSpec, {
   },
 });
 
-exports.InParentFront = protocol.FrontClassWithSpec(inParentSpec, {
-  initialize: function(client, tabForm) {
-    protocol.Front.prototype.initialize.call(this, client);
-    this.actorID = tabForm.inParentActor;
-    this.manage(this);
-  },
-});
+class InParentFront extends FrontClassWithSpec(inParentSpec) {
+}
+exports.InParentFront = InParentFront;

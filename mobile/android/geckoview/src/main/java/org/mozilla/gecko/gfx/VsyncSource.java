@@ -7,8 +7,10 @@ package org.mozilla.gecko.gfx;
 
 import android.content.Context;
 import android.hardware.display.DisplayManager;
+import android.os.Build;
 import android.os.Handler;
 import android.os.Looper;
+import android.support.annotation.RequiresApi;
 import android.view.Choreographer;
 import android.view.Display;
 import org.mozilla.gecko.annotation.WrapForJNI;
@@ -27,38 +29,23 @@ import org.mozilla.gecko.GeckoAppShell;
     private volatile boolean mObservingVsync;
 
     private VsyncSource() {
-        // Use a dedicated lock object because |mainHandler| might synchronize
-        // on itself internally and we don't want to risk getting stuck for such
-        // a silly reason.
-        final Object lock = new Object();
-
         Handler mainHandler = new Handler(Looper.getMainLooper());
         mainHandler.post(new Runnable() {
             @Override
             public void run() {
-                synchronized (lock) {
-                    mChoreographer = Choreographer.getInstance();
-                    lock.notifyAll();
+                mChoreographer = Choreographer.getInstance();
+                if (mObservingVsync) {
+                    mChoreographer.postFrameCallback(VsyncSource.this);
                 }
             }
         });
-
-        synchronized (lock) {
-            while (mChoreographer == null) {
-                try {
-                    lock.wait();
-                } catch (final InterruptedException e) {
-                    // Ignore
-                }
-            }
-        }
     }
 
     @WrapForJNI(stubName = "NotifyVsync")
     private static native void nativeNotifyVsync();
 
     // Choreographer callback implementation.
-    public void doFrame(long frameTimeNanos) {
+    public void doFrame(final long frameTimeNanos) {
         if (mObservingVsync) {
             mChoreographer.postFrameCallback(this);
             nativeNotifyVsync();
@@ -71,19 +58,30 @@ import org.mozilla.gecko.GeckoAppShell;
      * @return true if observing and false if not.
      */
     @WrapForJNI
-    public synchronized boolean observeVsync(boolean enable) {
+    public synchronized boolean observeVsync(final boolean enable) {
         if (mObservingVsync != enable) {
             mObservingVsync = enable;
-            if (enable) {
-                mChoreographer.postFrameCallback(this);
-            } else {
-                mChoreographer.removeFrameCallback(this);
+
+            if (mChoreographer != null) {
+                if (enable) {
+                    mChoreographer.postFrameCallback(this);
+                } else {
+                    mChoreographer.removeFrameCallback(this);
+                }
             }
         }
         return mObservingVsync;
     }
 
-    /** Gets the refresh rate of default display in frames per second. */
+    /**
+     * Gets the refresh rate of default display in frames per second.
+     *
+     * The {@link DisplayManager} used by this method to determine the refresh rate
+     * was introduced in API level 17.
+     *
+     * @return the refresh rate of default display in frames per second.
+     **/
+    @RequiresApi(api = Build.VERSION_CODES.JELLY_BEAN_MR1)
     @WrapForJNI
     public float getRefreshRate() {
         DisplayManager dm = (DisplayManager)

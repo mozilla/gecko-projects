@@ -7,7 +7,7 @@
 #include "FilePickerParent.h"
 #include "nsComponentManagerUtils.h"
 #include "nsNetCID.h"
-#include "nsIDocument.h"
+#include "mozilla/dom/Document.h"
 #include "nsIDOMWindow.h"
 #include "nsIFile.h"
 #include "nsISimpleEnumerator.h"
@@ -128,7 +128,7 @@ void FilePickerParent::IORunnable::Destroy() { mFilePickerParent = nullptr; }
 
 void FilePickerParent::SendFilesOrDirectories(
     const nsTArray<BlobImplOrString>& aData) {
-  nsIContentParent* parent = TabParent::GetFrom(Manager())->Manager();
+  ContentParent* parent = TabParent::GetFrom(Manager())->Manager();
 
   if (mMode == nsIFilePicker::modeGetFolder) {
     MOZ_ASSERT(aData.Length() <= 1);
@@ -241,8 +241,8 @@ mozilla::ipc::IPCResult FilePickerParent::RecvOpen(
     const nsString& aDefaultFile, const nsString& aDefaultExtension,
     InfallibleTArray<nsString>&& aFilters,
     InfallibleTArray<nsString>&& aFilterNames,
-    const nsString& aDisplayDirectory, const nsString& aDisplaySpecialDirectory,
-    const nsString& aOkButtonLabel) {
+    InfallibleTArray<nsString>&& aRawFilters, const nsString& aDisplayDirectory,
+    const nsString& aDisplaySpecialDirectory, const nsString& aOkButtonLabel) {
   if (!CreateFilePicker()) {
     Unused << Send__delete__(this, void_t(), nsIFilePicker::returnCancel);
     return IPC_OK();
@@ -252,6 +252,10 @@ mozilla::ipc::IPCResult FilePickerParent::RecvOpen(
 
   for (uint32_t i = 0; i < aFilters.Length(); ++i) {
     mFilePicker->AppendFilter(aFilterNames[i], aFilters[i]);
+  }
+
+  for (uint32_t i = 0; i < aRawFilters.Length(); ++i) {
+    mFilePicker->AppendRawFilter(aRawFilters[i]);
   }
 
   mFilePicker->SetDefaultString(aDefaultFile);

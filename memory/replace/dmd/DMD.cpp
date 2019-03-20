@@ -13,20 +13,20 @@
 #include <string.h>
 
 #if !defined(MOZ_PROFILING)
-#error "DMD requires MOZ_PROFILING"
+#  error "DMD requires MOZ_PROFILING"
 #endif
 
 #ifdef XP_WIN
-#include <windows.h>
-#include <process.h>
+#  include <windows.h>
+#  include <process.h>
 #else
-#include <pthread.h>
-#include <sys/types.h>
-#include <unistd.h>
+#  include <pthread.h>
+#  include <sys/types.h>
+#  include <unistd.h>
 #endif
 
 #ifdef ANDROID
-#include <android/log.h>
+#  include <android/log.h>
 #endif
 
 #include "nscore.h"
@@ -39,8 +39,8 @@
 #include "mozilla/JSONWriter.h"
 #include "mozilla/Likely.h"
 #include "mozilla/MemoryReporting.h"
+#include "mozilla/PodOperations.h"
 #include "mozilla/StackWalk.h"
-#include "mozilla/Vector.h"
 
 // CodeAddressService is defined entirely in the header, so this does not make
 // DMD depend on XPCOM's object file.
@@ -76,9 +76,9 @@ inline void StatusMsg(const char* aFmt, ...) {
 //---------------------------------------------------------------------------
 
 #ifndef DISALLOW_COPY_AND_ASSIGN
-#define DISALLOW_COPY_AND_ASSIGN(T) \
-  T(const T&);                      \
-  void operator=(const T&)
+#  define DISALLOW_COPY_AND_ASSIGN(T) \
+    T(const T&);                      \
+    void operator=(const T&)
 #endif
 
 static malloc_table_t gMallocTable;
@@ -133,8 +133,8 @@ class InfallibleAllocPolicy {
     return p;
   }
 
-  static void* calloc_(size_t aSize) {
-    void* p = gMallocTable.calloc(1, aSize);
+  static void* calloc_(size_t aCount, size_t aSize) {
+    void* p = gMallocTable.calloc(aCount, aSize);
     ExitOnFailure(p);
     return p;
   }
@@ -183,7 +183,7 @@ class InfallibleAllocPolicy {
   }
 
   template <class T, typename P1>
-  static T* new_(P1 aP1) {
+  static T* new_(const P1& aP1) {
     void* mem = malloc_(sizeof(T));
     return new (mem) T(aP1);
   }
@@ -217,7 +217,8 @@ void DMDFuncs::StatusMsg(const char* aFmt, va_list aAp) {
 #endif
 }
 
-/* static */ void InfallibleAllocPolicy::ExitOnFailure(const void* aP) {
+/* static */
+void InfallibleAllocPolicy::ExitOnFailure(const void* aP) {
   if (!aP) {
     MOZ_CRASH("DMD out of memory; aborting");
   }
@@ -439,22 +440,22 @@ class AutoUnlockState {
 
 #ifdef XP_WIN
 
-#define DMD_TLS_INDEX_TYPE DWORD
-#define DMD_CREATE_TLS_INDEX(i_) \
-  do {                           \
-    (i_) = TlsAlloc();           \
-  } while (0)
-#define DMD_DESTROY_TLS_INDEX(i_) TlsFree((i_))
-#define DMD_GET_TLS_DATA(i_) TlsGetValue((i_))
-#define DMD_SET_TLS_DATA(i_, v_) TlsSetValue((i_), (v_))
+#  define DMD_TLS_INDEX_TYPE DWORD
+#  define DMD_CREATE_TLS_INDEX(i_) \
+    do {                           \
+      (i_) = TlsAlloc();           \
+    } while (0)
+#  define DMD_DESTROY_TLS_INDEX(i_) TlsFree((i_))
+#  define DMD_GET_TLS_DATA(i_) TlsGetValue((i_))
+#  define DMD_SET_TLS_DATA(i_, v_) TlsSetValue((i_), (v_))
 
 #else
 
-#define DMD_TLS_INDEX_TYPE pthread_key_t
-#define DMD_CREATE_TLS_INDEX(i_) pthread_key_create(&(i_), nullptr)
-#define DMD_DESTROY_TLS_INDEX(i_) pthread_key_delete((i_))
-#define DMD_GET_TLS_DATA(i_) pthread_getspecific((i_))
-#define DMD_SET_TLS_DATA(i_, v_) pthread_setspecific((i_), (v_))
+#  define DMD_TLS_INDEX_TYPE pthread_key_t
+#  define DMD_CREATE_TLS_INDEX(i_) pthread_key_create(&(i_), nullptr)
+#  define DMD_DESTROY_TLS_INDEX(i_) pthread_key_delete((i_))
+#  define DMD_GET_TLS_DATA(i_) pthread_getspecific((i_))
+#  define DMD_SET_TLS_DATA(i_, v_) pthread_setspecific((i_), (v_))
 
 #endif
 
@@ -490,7 +491,8 @@ class Thread {
   bool InterceptsAreBlocked() const { return mBlockIntercepts; }
 };
 
-/* static */ Thread* Thread::Fetch() {
+/* static */
+Thread* Thread::Fetch() {
   Thread* t = static_cast<Thread*>(DMD_GET_TLS_DATA(gTlsIndex));
 
   if (MOZ_UNLIKELY(!t)) {
@@ -596,6 +598,9 @@ class StackTrace {
 
  public:
   StackTrace() : mLength(0) {}
+  StackTrace(const StackTrace& aOther) : mLength(aOther.mLength) {
+    PodCopy(mPcs, aOther.mPcs, mLength);
+  }
 
   uint32_t Length() const { return mLength; }
   const void* Pc(uint32_t i) const {
@@ -701,11 +706,11 @@ static uint32_t gGCStackTraceTableWhenSizeExceeds = 4 * 1024;
     FramePointerStackWalk(StackWalkCallback, /* skipFrames = */ 0, MaxFrames,
                           &tmp, fp, stackEnd);
 #else
-#if defined(XP_WIN) && defined(_M_X64)
+#  if defined(XP_WIN) && defined(_M_X64)
     int skipFrames = 1;
-#else
+#  else
     int skipFrames = 2;
-#endif
+#  endif
     MozStackWalk(StackWalkCallback, skipFrames, MaxFrames, &tmp);
 #endif
   }
@@ -1127,9 +1132,12 @@ static void* replace_calloc(size_t aCount, size_t aSize) {
 
   Thread* t = Thread::Fetch();
   if (t->InterceptsAreBlocked()) {
-    return InfallibleAllocPolicy::calloc_(aCount * aSize);
+    return InfallibleAllocPolicy::calloc_(aCount, aSize);
   }
 
+  // |aCount * aSize| could overflow, but if that happens then
+  // |gMallocTable.calloc()| will return nullptr and |AllocCallback()| will
+  // return immediately without using the overflowed value.
   void* ptr = gMallocTable.calloc(aCount, aSize);
   AllocCallback(ptr, aCount * aSize, t);
   return ptr;
@@ -1351,6 +1359,7 @@ const char* Options::ModeString() const {
 // DMD start-up
 //---------------------------------------------------------------------------
 
+#ifndef XP_WIN
 static void prefork() {
   if (gStateLock) {
     gStateLock->Lock();
@@ -1362,6 +1371,7 @@ static void postfork() {
     gStateLock->Unlock();
   }
 }
+#endif
 
 // WARNING: this function runs *very* early -- before all static initializers
 // have run.  For this reason, non-scalar globals such as gStateLock and

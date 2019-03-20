@@ -11,17 +11,19 @@
 
 var EXPORTED_SYMBOLS = ["UrlbarProvidersManager"];
 
-ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
+const {XPCOMUtils} = ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
 XPCOMUtils.defineLazyModuleGetters(this, {
   Log: "resource://gre/modules/Log.jsm",
   PlacesUtils: "resource://modules/PlacesUtils.jsm",
+  UrlbarMuxer: "resource:///modules/UrlbarUtils.jsm",
   UrlbarPrefs: "resource:///modules/UrlbarPrefs.jsm",
+  UrlbarProvider: "resource:///modules/UrlbarUtils.jsm",
   UrlbarTokenizer: "resource:///modules/UrlbarTokenizer.jsm",
   UrlbarUtils: "resource:///modules/UrlbarUtils.jsm",
 });
 
 XPCOMUtils.defineLazyGetter(this, "logger", () =>
-  Log.repository.getLogger("Places.Urlbar.ProvidersManager"));
+  Log.repository.getLogger("Urlbar.ProvidersManager"));
 
 // List of available local providers, each is implemented in its own jsm module
 // and will track different queries internally by queryContext.
@@ -29,10 +31,18 @@ var localProviderModules = {
   UrlbarProviderUnifiedComplete: "resource:///modules/UrlbarProviderUnifiedComplete.jsm",
 };
 
+// List of available local muxers, each is implemented in its own jsm module.
+var localMuxerModules = {
+  UrlbarMuxerUnifiedComplete: "resource:///modules/UrlbarMuxerUnifiedComplete.jsm",
+};
+
 // To improve dataflow and reduce UI work, when a match is added by a
 // non-immediate provider, we notify it to the controller after a delay, so
 // that we can chunk matches coming in that timeframe into a single call.
 const CHUNK_MATCHES_DELAY_MS = 16;
+
+const DEFAULT_PROVIDERS = ["UnifiedComplete"];
+const DEFAULT_MUXER = "UnifiedComplete";
 
 /**
  * Class used to create a manager.
@@ -59,6 +69,13 @@ class ProvidersManager {
     // running a query that shouldn't be interrupted, and if so it should
     // bump this through disableInterrupt and enableInterrupt.
     this.interruptLevel = 0;
+
+    // This maps muxer names to muxers.
+    this.muxers = new Map();
+    for (let [symbol, module] of Object.entries(localMuxerModules)) {
+      let {[symbol]: muxer} = ChromeUtils.import(module, {});
+      this.registerMuxer(muxer);
+    }
   }
 
   /**
@@ -66,10 +83,13 @@ class ProvidersManager {
    * @param {object} provider
    */
   registerProvider(provider) {
-    logger.info(`Registering provider ${provider.name}`);
+    if (!provider || !(provider instanceof UrlbarProvider)) {
+      throw new Error(`Trying to register an invalid provider`);
+    }
     if (!Object.values(UrlbarUtils.PROVIDER_TYPE).includes(provider.type)) {
       throw new Error(`Unknown provider type ${provider.type}`);
     }
+    logger.info(`Registering provider ${provider.name}`);
     this.providers.get(provider.type).set(provider.name, provider);
   }
 
@@ -83,13 +103,47 @@ class ProvidersManager {
   }
 
   /**
+   * Registers a muxer object with the manager.
+   * @param {object} muxer a UrlbarMuxer object
+   */
+  registerMuxer(muxer) {
+    if (!muxer || !(muxer instanceof UrlbarMuxer)) {
+      throw new Error(`Trying to register an invalid muxer`);
+    }
+    logger.info(`Registering muxer ${muxer.name}`);
+    this.muxers.set(muxer.name, muxer);
+  }
+
+  /**
+   * Unregisters a previously registered muxer object.
+   * @param {object} muxer a UrlbarMuxer object or name.
+   */
+  unregisterMuxer(muxer) {
+    let muxerName = typeof muxer == "string" ? muxer : muxer.name;
+    logger.info(`Unregistering muxer ${muxerName}`);
+    this.muxers.delete(muxerName);
+  }
+
+  /**
    * Starts querying.
    * @param {object} queryContext The query context object
    * @param {object} controller a UrlbarController instance
    */
   async startQuery(queryContext, controller) {
     logger.info(`Query start ${queryContext.searchString}`);
-    let query = new Query(queryContext, controller, this.providers);
+
+    // Define the muxer to use.
+    let muxerName = queryContext.muxer || DEFAULT_MUXER;
+    logger.info(`Using muxer ${muxerName}`);
+    let muxer = this.muxers.get(muxerName);
+    if (!muxer) {
+      throw new Error(`Muxer with name ${muxerName} not found`);
+    }
+    // Define the list of providers to use.
+    let providers = queryContext.providers || DEFAULT_PROVIDERS;
+    providers = filterProviders(this.providers, providers);
+
+    let query = new Query(queryContext, controller, muxer, providers);
     this.queries.set(queryContext, query);
     await query.start();
   }
@@ -145,19 +199,22 @@ class Query {
    *        The query context
    * @param {object} controller
    *        The controller to be notified
+   * @param {object} muxer
+   *        The muxer to sort results
    * @param {object} providers
    *        Map of all the providers by type and name
    */
-  constructor(queryContext, controller, providers) {
+  constructor(queryContext, controller, muxer, providers) {
     this.context = queryContext;
     this.context.results = [];
+    this.muxer = muxer;
     this.controller = controller;
     this.providers = providers;
     this.started = false;
     this.canceled = false;
     this.complete = false;
-    // Array of acceptable MATCH_SOURCE values for this query. Providers not
-    // returning any of these will be skipped, as well as matches not part of
+    // Array of acceptable RESULT_SOURCE values for this query. Providers not
+    // returning any of these will be skipped, as well as results not part of
     // this subset (Note we still expect the provider to do its own internal
     // filtering, our additional filtering will be for sanity).
     this.acceptableSources = [];
@@ -247,8 +304,16 @@ class Query {
    * @param {object} match
    */
   add(provider, match) {
+    if (!(provider instanceof UrlbarProvider)) {
+      throw new Error("Invalid provider passed to the add callback");
+    }
     // Stop returning results as soon as we've been canceled.
-    if (this.canceled || !this.acceptableSources.includes(match.source)) {
+    if (this.canceled) {
+      return;
+    }
+    // Check if the result source should be filtered out. Pay attention to the
+    // heuristic result though, that is supposed to be added regardless.
+    if (!this.acceptableSources.includes(match.source) && !match.heuristic) {
       return;
     }
 
@@ -267,8 +332,11 @@ class Query {
         this._chunkTimer.cancel().catch(Cu.reportError);
         delete this._chunkTimer;
       }
-      // TODO:
-      //  * pass results to a muxer before sending them back to the controller.
+      this.muxer.sort(this.context);
+
+      // Crop results to the requested number.
+      logger.debug(`Cropping ${this.context.results.length} matches to ${this.context.maxResults}`);
+      this.context.results = this.context.results.slice(0, this.context.maxResults);
       this.controller.receiveResults(this.context);
     };
 
@@ -350,8 +418,8 @@ class SkippableTimer {
 }
 
 /**
- * Gets an array of the provider sources accepted for a given QueryContext.
- * @param {object} context The QueryContext to examine
+ * Gets an array of the provider sources accepted for a given UrlbarQueryContext.
+ * @param {UrlbarQueryContext} context The query context to examine
  * @returns {array} Array of accepted sources
  */
 function getAcceptableMatchSources(context) {
@@ -364,9 +432,14 @@ function getAcceptableMatchSources(context) {
                                                  UrlbarTokenizer.TYPE.RESTRICT_SEARCH,
                                                ].includes(t.type));
   let restrictTokenType = restrictToken ? restrictToken.type : undefined;
-  for (let source of Object.values(UrlbarUtils.MATCH_SOURCE)) {
+  for (let source of Object.values(UrlbarUtils.RESULT_SOURCE)) {
+    // Skip sources that the context doesn't care about.
+    if (context.sources && !context.sources.includes(source)) {
+      continue;
+    }
+    // Check prefs and restriction tokens.
     switch (source) {
-      case UrlbarUtils.MATCH_SOURCE.BOOKMARKS:
+      case UrlbarUtils.RESULT_SOURCE.BOOKMARKS:
         if (UrlbarPrefs.get("suggest.bookmark") &&
             (!restrictTokenType ||
              restrictTokenType === UrlbarTokenizer.TYPE.RESTRICT_BOOKMARK ||
@@ -374,37 +447,56 @@ function getAcceptableMatchSources(context) {
           acceptedSources.push(source);
         }
         break;
-      case UrlbarUtils.MATCH_SOURCE.HISTORY:
+      case UrlbarUtils.RESULT_SOURCE.HISTORY:
         if (UrlbarPrefs.get("suggest.history") &&
             (!restrictTokenType ||
              restrictTokenType === UrlbarTokenizer.TYPE.RESTRICT_HISTORY)) {
           acceptedSources.push(source);
         }
         break;
-      case UrlbarUtils.MATCH_SOURCE.SEARCH:
+      case UrlbarUtils.RESULT_SOURCE.SEARCH:
         if (UrlbarPrefs.get("suggest.searches") &&
             (!restrictTokenType ||
              restrictTokenType === UrlbarTokenizer.TYPE.RESTRICT_SEARCH)) {
           acceptedSources.push(source);
         }
         break;
-      case UrlbarUtils.MATCH_SOURCE.TABS:
+      case UrlbarUtils.RESULT_SOURCE.TABS:
         if (UrlbarPrefs.get("suggest.openpage") &&
             (!restrictTokenType ||
              restrictTokenType === UrlbarTokenizer.TYPE.RESTRICT_OPENPAGE)) {
           acceptedSources.push(source);
         }
         break;
-      case UrlbarUtils.MATCH_SOURCE.OTHER_NETWORK:
-        if (!context.isPrivate) {
+      case UrlbarUtils.RESULT_SOURCE.OTHER_NETWORK:
+        if (!context.isPrivate && !restrictTokenType) {
           acceptedSources.push(source);
         }
         break;
-      case UrlbarUtils.MATCH_SOURCE.OTHER_LOCAL:
+      case UrlbarUtils.RESULT_SOURCE.OTHER_LOCAL:
       default:
-        acceptedSources.push(source);
+        if (!restrictTokenType) {
+          acceptedSources.push(source);
+        }
         break;
     }
   }
   return acceptedSources;
+}
+
+/* Given a providers Map and a list of provider names, produces a filtered
+ * Map containing only the provided names.
+ * @param providersMap {Map} providers mapped by type and name
+ * @param names {array} list of provider names to retain
+ * @returns {Map} a new filtered providers Map
+ */
+function filterProviders(providersMap, names) {
+  let providers = new Map();
+  for (let [type, providersByName] of providersMap) {
+    providers.set(type, new Map());
+    for (let name of Array.from(providersByName.keys()).filter(n => names.includes(n))) {
+      providers.get(type).set(name, providersByName.get(name));
+    }
+  }
+  return providers;
 }

@@ -12,32 +12,33 @@ but it can also be used as such in a standalone application.
 WebRender currently depends on [FreeType](https://www.freetype.org/)
 
 # Api Structure
-The main entry point to WebRender is the `webrender::Renderer`.
+The main entry point to WebRender is the [`crate::Renderer`].
 
-By calling `Renderer::new(...)` you get a `Renderer`, as well as a `RenderApiSender`.
-Your `Renderer` is responsible to render the previously processed frames onto the screen.
+By calling [`Renderer::new(...)`](crate::Renderer::new) you get a [`Renderer`], as well as
+a [`RenderApiSender`](api::RenderApiSender). Your [`Renderer`] is responsible to render the
+previously processed frames onto the screen.
 
-By calling `yourRenderApiSender.create_api()`, you'll get a `RenderApi` instance,
-which is responsible for managing resources and documents. A worker thread is used internally
-to untie the workload from the application thread and therefore be able to make better use of
-multicore systems.
+By calling [`yourRenderApiSender.create_api()`](api::RenderApiSender::create_api), you'll
+get a [`RenderApi`](api::RenderApi) instance, which is responsible for managing resources
+and documents. A worker thread is used internally to untie the workload from the application
+thread and therefore be able to make better use of multicore systems.
 
 ## Frame
 
 What is referred to as a `frame`, is the current geometry on the screen.
-A new Frame is created by calling [`set_display_list()`][newframe] on the `RenderApi`.
-When the geometry is processed, the application will be informed via a `RenderNotifier`,
-a callback which you employ with [set_render_notifier][notifier] on the `Renderer`
+A new Frame is created by calling [`set_display_list()`](api::Transaction::set_display_list)
+on the [`RenderApi`](api::RenderApi). When the geometry is processed, the application will be
+informed via a [`RenderNotifier`](api::RenderNotifier), a callback which you pass to
+[`Renderer::new`].
 More information about [stacking contexts][stacking_contexts].
 
-`set_display_list()` also needs to be supplied with `BuiltDisplayList`s.
-These are obtained by finalizing a `DisplayListBuilder`. These are used to draw your geometry.
-But it doesn't only contain trivial geometry, it can also store another StackingContext, as
-they're nestable.
+[`set_display_list()`](api::Transaction::set_display_list) also needs to be supplied with
+[`BuiltDisplayList`](api::BuiltDisplayList)s. These are obtained by finalizing a
+[`DisplayListBuilder`](api::DisplayListBuilder). These are used to draw your geometry. But it
+doesn't only contain trivial geometry, it can also store another
+[`StackingContext`](api::StackingContext), as they're nestable.
 
 [stacking_contexts]: https://developer.mozilla.org/en-US/docs/Web/CSS/CSS_Positioning/Understanding_z_index/The_stacking_context
-[newframe]: ../webrender_api/struct.RenderApi.html#method.set_display_list
-[notifier]: renderer/struct.Renderer.html#method.set_render_notifier
 */
 
 // Cribbed from the |matches| crate, for simplicity.
@@ -55,17 +56,24 @@ extern crate bitflags;
 #[macro_use]
 extern crate cfg_if;
 #[macro_use]
+extern crate cstr;
+#[macro_use]
 extern crate lazy_static;
 #[macro_use]
 extern crate log;
+#[macro_use]
+extern crate malloc_size_of_derive;
 #[cfg(any(feature = "serde"))]
 #[macro_use]
 extern crate serde;
 #[macro_use]
 extern crate thread_profiler;
 
+extern crate wr_malloc_size_of;
+use wr_malloc_size_of as malloc_size_of;
+
 #[macro_use]
-mod storage;
+mod profiler;
 
 mod batch;
 mod border;
@@ -75,15 +83,14 @@ mod capture;
 mod clip;
 mod clip_scroll_tree;
 mod debug_colors;
-#[cfg(feature = "debug_renderer")]
 mod debug_font_data;
-#[cfg(feature = "debug_renderer")]
 mod debug_render;
 #[cfg(feature = "debugger")]
 mod debug_server;
 mod device;
 mod display_list_flattener;
 mod ellipse;
+mod filterdata;
 mod frame_builder;
 mod freelist;
 #[cfg(any(target_os = "macos", target_os = "windows"))]
@@ -101,7 +108,6 @@ mod internal_types;
 mod picture;
 mod prim_store;
 mod print_tree;
-mod profiler;
 mod record;
 mod render_backend;
 mod render_task;
@@ -112,7 +118,7 @@ mod scene_builder;
 mod segment;
 mod shade;
 mod spatial_node;
-mod surface;
+mod storage;
 mod texture_allocator;
 mod texture_cache;
 mod tiling;
@@ -155,11 +161,12 @@ extern crate core_text;
 
 #[cfg(all(unix, not(target_os = "macos")))]
 extern crate freetype;
+#[cfg(all(unix, not(target_os = "macos")))]
+extern crate libc;
 
 #[cfg(target_os = "windows")]
 extern crate dwrote;
 
-extern crate app_units;
 extern crate bincode;
 extern crate byteorder;
 extern crate fxhash;
@@ -193,17 +200,20 @@ extern crate png;
 #[cfg(test)]
 extern crate rand;
 
+#[macro_use]
 pub extern crate webrender_api;
+extern crate webrender_build;
 
 #[doc(hidden)]
 pub use device::{build_shader_strings, ReadPixelsFormat, UploadMethod, VertexUsageHint};
 pub use device::{ProgramBinary, ProgramCache, ProgramCacheObserver};
 pub use device::Device;
 pub use frame_builder::ChasePrimitive;
+pub use profiler::{ProfilerHooks, set_profiler_hooks};
 pub use renderer::{AsyncPropertySampler, CpuProfile, DebugFlags, OutputImageHandler, RendererKind};
 pub use renderer::{ExternalImage, ExternalImageHandler, ExternalImageSource, GpuProfile};
 pub use renderer::{GraphicsApi, GraphicsApiInfo, PipelineInfo, Renderer, RendererOptions};
-pub use renderer::{RendererStats, SceneBuilderHooks, ThreadListener, ShaderPrecacheFlags};
+pub use renderer::{RenderResults, RendererStats, SceneBuilderHooks, ThreadListener, ShaderPrecacheFlags};
 pub use renderer::MAX_VERTEX_TEXTURE_WIDTH;
 pub use shade::{Shaders, WrShaders};
 pub use webrender_api as api;

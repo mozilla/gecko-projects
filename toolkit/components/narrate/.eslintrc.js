@@ -3,7 +3,7 @@
 module.exports = {
   "rules": {
     "mozilla/no-aArgs": "error",
-    "mozilla/reject-importGlobalProperties": "error",
+    "mozilla/reject-importGlobalProperties": ["error", "everything"],
     "mozilla/var-only-at-top-level": "error",
     "block-scoped-var": "error",
     "camelcase": "error",
@@ -25,7 +25,6 @@ module.exports = {
     "no-return-assign": "error",
     "no-shadow": "error",
     "no-throw-literal": "error",
-    "padded-blocks": ["error", "never"],
     "quotes": ["error", "double", "avoid-escape"],
     "semi-spacing": ["error", {"before": false, "after": true}],
     "space-in-parens": ["error", "never"],

@@ -1,10 +1,9 @@
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
- * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 //! The context within which style is calculated.
 
-use app_units::Au;
 #[cfg(feature = "servo")]
 use crate::animation::Animation;
 use crate::bloom::StyleBloom;
@@ -29,6 +28,9 @@ use crate::thread_state::{self, ThreadState};
 use crate::timer::Timer;
 use crate::traversal::DomTraversal;
 use crate::traversal_flags::TraversalFlags;
+use app_units::Au;
+#[cfg(feature = "servo")]
+use crossbeam_channel::Sender;
 use euclid::Size2D;
 use euclid::TypedScale;
 use fxhash::FxHashMap;
@@ -39,8 +41,6 @@ use selectors::NthIndexCache;
 use servo_arc::Arc;
 #[cfg(feature = "servo")]
 use servo_atoms::Atom;
-#[cfg(feature = "servo")]
-use servo_channel::Sender;
 use std::fmt;
 use std::ops;
 #[cfg(feature = "servo")]
@@ -304,7 +304,7 @@ impl ElementCascadeInputs {
 /// Statistics gathered during the traversal. We gather statistics on each
 /// thread and then combine them after the threads join via the Add
 /// implementation below.
-#[derive(Default)]
+#[derive(AddAssign, Clone, Default)]
 pub struct PerThreadTraversalStatistics {
     /// The total number of elements traversed.
     pub elements_traversed: u32,
@@ -317,20 +317,6 @@ pub struct PerThreadTraversalStatistics {
     /// The number of styles reused via rule node comparison from the
     /// StyleSharingCache.
     pub styles_reused: u32,
-}
-
-/// Implementation of Add to aggregate statistics across different threads.
-impl<'a> ops::Add for &'a PerThreadTraversalStatistics {
-    type Output = PerThreadTraversalStatistics;
-    fn add(self, other: Self) -> PerThreadTraversalStatistics {
-        PerThreadTraversalStatistics {
-            elements_traversed: self.elements_traversed + other.elements_traversed,
-            elements_styled: self.elements_styled + other.elements_styled,
-            elements_matched: self.elements_matched + other.elements_matched,
-            styles_shared: self.styles_shared + other.styles_shared,
-            styles_reused: self.styles_reused + other.styles_reused,
-        }
-    }
 }
 
 /// Statistics gathered during the traversal plus some information from

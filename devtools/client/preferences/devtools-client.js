@@ -50,21 +50,16 @@ pref("devtools.inspector.showUserAgentStyles", false);
 pref("devtools.inspector.showAllAnonymousContent", false);
 // Show user agent shadow roots
 pref("devtools.inspector.showUserAgentShadowRoots", false);
-// Enable the CSS shapes highlighter
-pref("devtools.inspector.shapesHighlighter.enabled", true);
-// Enable the font highlight-on-hover feature
-pref("devtools.inspector.fonthighlighter.enabled", true);
-
-// Enable tracking of style changes and the Changes panel in the Inspector
-#if defined(NIGHTLY_BUILD)
-pref("devtools.inspector.changes.enabled", true);
-#else
-pref("devtools.inspector.changes.enabled", false);
-#endif
+// Enable the new Rules View
+pref("devtools.inspector.new-rulesview.enabled", false);
 
 // Flexbox preferences
-pref("devtools.inspector.flexboxHighlighter.enabled", true);
-pref("devtools.flexboxinspector.enabled", true);
+// Whether or not to show the combined flexbox and box model highlighter.
+#if defined(NIGHTLY_BUILD) || defined(MOZ_DEV_EDITION)
+pref("devtools.inspector.flexboxHighlighter.combine", true);
+#else
+pref("devtools.inspector.flexboxHighlighter.combine", false);
+#endif
 
 // Grid highlighter preferences
 pref("devtools.gridinspector.gridOutlineMaxColumns", 50);
@@ -82,6 +77,13 @@ pref("devtools.layout.flexbox.opened", true);
 // Whether or not the grid inspector panel is opened in the layout view
 pref("devtools.layout.grid.opened", true);
 
+// Enable hovering Box Model values and jumping to their source CSS rule in the rule-view
+#if defined(NIGHTLY_BUILD)
+pref("devtools.layout.boxmodel.highlightProperty", true);
+#else
+pref("devtools.layout.boxmodel.highlightProperty", false);
+#endif
+
 // By how many times eyedropper will magnify pixels
 pref("devtools.eyedropper.zoom", 6);
 
@@ -90,6 +92,9 @@ pref("devtools.markup.collapseAttributes", true);
 
 // Length to collapse attributes
 pref("devtools.markup.collapseAttributeLength", 120);
+
+// Whether to auto-beautify the HTML on copy.
+pref("devtools.markup.beautifyOnCopy", false);
 
 // DevTools default color unit
 pref("devtools.defaultColorUnit", "authored");
@@ -140,11 +145,16 @@ pref("devtools.performance.ui.experimental", false);
 #endif
 
 // Preferences for the new performance panel
-// This pref configures the base URL for the perf.html instance to use. This is
-// useful so that a developer can change it while working on perf.html, or in
+// This pref configures the base URL for the profiler.firefox.com instance to use. This is
+// useful so that a developer can change it while working on profiler.firefox.com, or in
 // tests.
 // This isn't exposed directly to the user.
-pref("devtools.performance.recording.ui-base-url", "https://perf-html.io");
+pref("devtools.performance.recording.ui-base-url", "https://profiler.firefox.com");
+
+// A JSON array of strings, where each string is a file path to an objdir on
+// the host machine. This is used in order to look up symbol information from
+// build artifacts of local builds.
+pref("devtools.performance.recording.objdirs", "[]");
 
 // The default cache UI setting
 pref("devtools.cache.disabled", false);
@@ -165,6 +175,13 @@ pref("devtools.netmonitor.filters", "[\"all\"]");
 pref("devtools.netmonitor.visibleColumns",
   "[\"status\",\"method\",\"domain\",\"file\",\"cause\",\"type\",\"transferred\",\"contentSize\",\"waterfall\"]"
 );
+pref("devtools.netmonitor.columnsData",
+  '[{"name":"status","minWidth":30,"width":5}, {"name":"method","minWidth":30,"width":5}, {"name":"domain","minWidth":30,"width":10}, {"name":"file","minWidth":30,"width":25}, {"name":"cause","minWidth":30,"width":10},{"name":"type","minWidth":30,"width":5},{"name":"transferred","minWidth":30,"width":10},{"name":"contentSize","minWidth":30,"width":5},{"name":"waterfall","minWidth":150,"width":25}]');
+
+// Support for columns resizing is currently hidden behind this pref.
+pref("devtools.netmonitor.features.resizeColumns", false);
+
+pref("devtools.netmonitor.response.ui.limit", 10240);
 
 // Save request/response bodies yes/no.
 pref("devtools.netmonitor.saveRequestAndResponseBodies", true);
@@ -212,15 +229,6 @@ pref("devtools.styleeditor.transitions", true);
 pref("devtools.screenshot.clipboard.enabled", false);
 pref("devtools.screenshot.audio.enabled", true);
 
-// Enable the Shader Editor.
-pref("devtools.shadereditor.enabled", false);
-
-// Enable the Canvas Debugger.
-pref("devtools.canvasdebugger.enabled", false);
-
-// Enable the Web Audio Editor
-pref("devtools.webaudioeditor.enabled", false);
-
 // Enable Scratchpad
 pref("devtools.scratchpad.enabled", false);
 
@@ -229,9 +237,6 @@ pref("devtools.dom.enabled", false);
 
 // Enable the Accessibility panel.
 pref("devtools.accessibility.enabled", true);
-
-// Web Audio Editor Inspector Width should be a preference
-pref("devtools.webaudioeditor.inspectorWidth", 300);
 
 // Web console filters
 pref("devtools.webconsole.filter.error", true);
@@ -252,11 +257,6 @@ pref("devtools.browserconsole.filter.debug", true);
 pref("devtools.browserconsole.filter.css", false);
 pref("devtools.browserconsole.filter.net", false);
 pref("devtools.browserconsole.filter.netxhr", false);
-
-// Web console filter bar settings
-pref("devtools.webconsole.ui.filterbar", false);
-// Browser console filter bar settings
-pref("devtools.browserconsole.ui.filterbar", false);
 
 // Max number of inputs to store in web console history.
 pref("devtools.webconsole.inputHistoryCount", 300);
@@ -282,15 +282,14 @@ pref("devtools.webconsole.sidebarToggle", false);
 // Enable CodeMirror in the JsTerm
 pref("devtools.webconsole.jsterm.codeMirror", true);
 
-// Enable console input reverse-search in Nightly builds
-#if defined(NIGHTLY_BUILD)
-pref("devtools.webconsole.jsterm.reverse-search", true);
-#else
-pref("devtools.webconsole.jsterm.reverse-search", false);
-#endif
+// Enable editor mode in the console.
+pref("devtools.webconsole.input.editor", false);
 
 // Disable the new performance recording panel by default
 pref("devtools.performance.new-panel-enabled", false);
+
+// Enable message grouping in the console, false by default
+pref("devtools.webconsole.groupWarningMessages", false);
 
 // Enable client-side mapping service for source maps
 pref("devtools.source-map.client-service.enabled", true);
@@ -329,6 +328,9 @@ pref("devtools.responsive.reloadConditions.userAgent", false);
 pref("devtools.responsive.reloadNotification.enabled", true);
 // Whether or not touch simulation is enabled.
 pref("devtools.responsive.touchSimulation.enabled", false);
+// Whether or not meta viewport is enabled, if and only if touchSimulation
+// is also enabled.
+pref("devtools.responsive.metaViewport.enabled", false);
 // The user agent of the viewport.
 pref("devtools.responsive.userAgent", "");
 

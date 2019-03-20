@@ -11,12 +11,17 @@
 
 namespace mozilla {
 
+namespace layers {
+class ImageContainer;
+}
+
 class MediaEngineTabVideoSource : public MediaEngineSource {
  public:
   MediaEngineTabVideoSource();
 
   nsString GetName() const override;
   nsCString GetUUID() const override;
+  nsString GetGroupId() const override;
 
   bool GetScary() const override { return true; }
 
@@ -30,9 +35,9 @@ class MediaEngineTabVideoSource : public MediaEngineSource {
                     AllocationHandle** aOutHandle,
                     const char** aOutBadConstraint) override;
   nsresult Deallocate(const RefPtr<const AllocationHandle>& aHandle) override;
-  nsresult SetTrack(const RefPtr<const AllocationHandle>& aHandle,
-                    const RefPtr<SourceMediaStream>& aStream, TrackID aTrackID,
-                    const PrincipalHandle& aPrincipal) override;
+  void SetTrack(const RefPtr<const AllocationHandle>& aHandle,
+                const RefPtr<SourceMediaStream>& aStream, TrackID aTrackID,
+                const PrincipalHandle& aPrincipal) override;
   nsresult Start(const RefPtr<const AllocationHandle>& aHandle) override;
   nsresult Reconfigure(const RefPtr<AllocationHandle>& aHandle,
                        const dom::MediaTrackConstraints& aConstraints,
@@ -105,8 +110,8 @@ class MediaEngineTabVideoSource : public MediaEngineSource {
   int32_t mViewportWidth = 0;
   int32_t mViewportHeight = 0;
   int32_t mTimePerFrame = 0;
-  UniquePtr<unsigned char[]> mData;
-  size_t mDataSize = 0;
+  RefPtr<layers::ImageContainer> mImageContainer;
+
   nsCOMPtr<nsPIDOMWindowOuter> mWindow;
   // If this is set, we will run despite mWindow == nullptr.
   bool mBlackedoutWindow = false;
@@ -119,9 +124,8 @@ class MediaEngineTabVideoSource : public MediaEngineSource {
   // Owning thread only.
   RefPtr<SourceMediaStream> mStream;
   TrackID mTrackID = TRACK_NONE;
-  // mImage and mImageSize is Protected by mMutex.
-  RefPtr<layers::SourceSurfaceImage> mImage;
-  gfx::IntSize mImageSize;
+  // mImage is Protected by mMutex.
+  RefPtr<layers::Image> mImage;
   nsCOMPtr<nsITimer> mTimer;
   Mutex mMutex;
   nsCOMPtr<nsITabSource> mTabSource;

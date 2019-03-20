@@ -9,7 +9,7 @@ ChromeUtils.defineModuleGetter(this, "PageActions",
 ChromeUtils.defineModuleGetter(this, "PanelPopup",
                                "resource:///modules/ExtensionPopups.jsm");
 
-ChromeUtils.import("resource://gre/modules/ExtensionParent.jsm");
+var {ExtensionParent} = ChromeUtils.import("resource://gre/modules/ExtensionParent.jsm");
 
 var {
   IconDetails,
@@ -55,8 +55,9 @@ this.pageAction = class extends ExtensionAPI {
       show = false;
     } else {
       // Might show or hide depending on the URL. Enable pattern matching.
-      showMatches = new MatchPatternSet(show_matches);
-      hideMatches = new MatchPatternSet(hide_matches);
+      const {restrictSchemes} = extension;
+      showMatches = new MatchPatternSet(show_matches, {restrictSchemes});
+      hideMatches = new MatchPatternSet(hide_matches, {restrictSchemes});
     }
 
     this.defaults = {

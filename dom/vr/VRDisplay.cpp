@@ -68,13 +68,15 @@ uint32_t VRDisplayCapabilities::MaxLayers() const {
   return CanPresent() ? 1 : 0;
 }
 
-/*static*/ bool VRDisplay::RefreshVRDisplays(uint64_t aWindowId) {
+/*static*/
+bool VRDisplay::RefreshVRDisplays(uint64_t aWindowId) {
   gfx::VRManagerChild* vm = gfx::VRManagerChild::Get();
   return vm && vm->RefreshVRDisplaysWithCallback(aWindowId);
 }
 
-/*static*/ void VRDisplay::UpdateVRDisplays(
-    nsTArray<RefPtr<VRDisplay>>& aDisplays, nsPIDOMWindowInner* aWindow) {
+/*static*/
+void VRDisplay::UpdateVRDisplays(nsTArray<RefPtr<VRDisplay>>& aDisplays,
+                                 nsPIDOMWindowInner* aWindow) {
   nsTArray<RefPtr<VRDisplay>> displays;
 
   gfx::VRManagerChild* vm = gfx::VRManagerChild::Get();
@@ -305,8 +307,9 @@ JSObject* VRPose::WrapObject(JSContext* aCx,
   return VRPose_Binding::Wrap(aCx, this, aGivenProto);
 }
 
-/* virtual */ JSObject* VRDisplay::WrapObject(
-    JSContext* aCx, JS::Handle<JSObject*> aGivenProto) {
+/* virtual */
+JSObject* VRDisplay::WrapObject(JSContext* aCx,
+                                JS::Handle<JSObject*> aGivenProto) {
   return VRDisplay_Binding::Wrap(aCx, this, aGivenProto);
 }
 
@@ -376,7 +379,7 @@ void VRDisplay::UpdateFrameInfo() {
    * should return the latest frame data always.
    */
   if (mFrameInfo.IsDirty() || !mPresentation) {
-    gfx::VRHMDSensorState state = mClient->GetSensorState();
+    const gfx::VRHMDSensorState& state = mClient->GetSensorState();
     const gfx::VRDisplayInfo& info = mClient->GetDisplayInfo();
     mFrameInfo.Update(info, state, mDepthNear, mDepthFar);
   }
@@ -586,7 +589,7 @@ void VRDisplay::GetLayers(nsTArray<VRLayer>& result) {
 }
 
 void VRDisplay::SubmitFrame() {
-  AUTO_PROFILER_TRACING("VR", "SubmitFrameAtVRDisplay");
+  AUTO_PROFILER_TRACING("VR", "SubmitFrameAtVRDisplay", OTHER);
 
   if (mClient && !mClient->IsPresentationGenerationCurrent()) {
     mPresentation = nullptr;
@@ -699,7 +702,8 @@ VRFrameData::VRFrameData(nsISupports* aParent)
 
 VRFrameData::~VRFrameData() { mozilla::DropJSObjects(this); }
 
-/* static */ already_AddRefed<VRFrameData> VRFrameData::Constructor(
+/* static */
+already_AddRefed<VRFrameData> VRFrameData::Constructor(
     const GlobalObject& aGlobal, ErrorResult& aRv) {
   RefPtr<VRFrameData> obj = new VRFrameData(aGlobal.GetAsSupports());
   return obj.forget();
@@ -802,11 +806,11 @@ void VRFrameInfo::Update(const gfx::VRDisplayInfo& aInfo,
   }
 
   const gfx::VRFieldOfView leftFOV =
-      aInfo.mDisplayState.mEyeFOV[gfx::VRDisplayState::Eye_Left];
+      aInfo.mDisplayState.eyeFOV[gfx::VRDisplayState::Eye_Left];
   mLeftProjection =
       leftFOV.ConstructProjectionMatrix(aDepthNear, aDepthFar, true);
   const gfx::VRFieldOfView rightFOV =
-      aInfo.mDisplayState.mEyeFOV[gfx::VRDisplayState::Eye_Right];
+      aInfo.mDisplayState.eyeFOV[gfx::VRDisplayState::Eye_Right];
   mRightProjection =
       rightFOV.ConstructProjectionMatrix(aDepthNear, aDepthFar, true);
   memcpy(mLeftView.components, aState.leftViewMatrix,
@@ -836,9 +840,9 @@ VRSubmitFrameResult::VRSubmitFrameResult(nsISupports* aParent)
 
 VRSubmitFrameResult::~VRSubmitFrameResult() { mozilla::DropJSObjects(this); }
 
-/* static */ already_AddRefed<VRSubmitFrameResult>
-VRSubmitFrameResult::Constructor(const GlobalObject& aGlobal,
-                                 ErrorResult& aRv) {
+/* static */
+already_AddRefed<VRSubmitFrameResult> VRSubmitFrameResult::Constructor(
+    const GlobalObject& aGlobal, ErrorResult& aRv) {
   RefPtr<VRSubmitFrameResult> obj =
       new VRSubmitFrameResult(aGlobal.GetAsSupports());
   return obj.forget();

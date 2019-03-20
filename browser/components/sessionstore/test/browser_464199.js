@@ -2,17 +2,17 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-let {ForgetAboutSite} = ChromeUtils.import("resource://gre/modules/ForgetAboutSite.jsm", {});
+let {ForgetAboutSite} = ChromeUtils.import("resource://gre/modules/ForgetAboutSite.jsm");
 
 function promiseClearHistory() {
   return new Promise(resolve => {
     let observer = {
       observe(aSubject, aTopic, aData) {
-        Services.obs.removeObserver(this, "browser:purge-domain-data");
+        Services.obs.removeObserver(this, "browser:purge-session-history-for-domain");
         resolve();
       },
     };
-    Services.obs.addObserver(observer, "browser:purge-domain-data");
+    Services.obs.addObserver(observer, "browser:purge-session-history-for-domain");
   });
 }
 

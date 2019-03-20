@@ -6,13 +6,13 @@
 
 // Globals
 
-ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
-ChromeUtils.import("resource://gre/modules/Services.jsm");
-ChromeUtils.import("resource://gre/modules/LoginRecipes.jsm");
-ChromeUtils.import("resource://gre/modules/LoginHelper.jsm");
-ChromeUtils.import("resource://testing-common/FileTestUtils.jsm");
-ChromeUtils.import("resource://testing-common/LoginTestUtils.jsm");
-ChromeUtils.import("resource://testing-common/MockDocument.jsm");
+var {XPCOMUtils} = ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
+var {Services} = ChromeUtils.import("resource://gre/modules/Services.jsm");
+var {LoginRecipesContent, LoginRecipesParent} = ChromeUtils.import("resource://gre/modules/LoginRecipes.jsm");
+var {LoginHelper} = ChromeUtils.import("resource://gre/modules/LoginHelper.jsm");
+var {FileTestUtils} = ChromeUtils.import("resource://testing-common/FileTestUtils.jsm");
+var {LoginTestUtils} = ChromeUtils.import("resource://testing-common/LoginTestUtils.jsm");
+var {MockDocument} = ChromeUtils.import("resource://testing-common/MockDocument.jsm");
 
 ChromeUtils.defineModuleGetter(this, "DownloadPaths",
                                "resource://gre/modules/DownloadPaths.jsm");
@@ -31,8 +31,7 @@ const newPropertyBag = LoginHelper.newPropertyBag;
 /**
  * All the tests are implemented with add_task, this starts them automatically.
  */
-function run_test()
-{
+function run_test() {
   do_get_profile();
   run_next_test();
 }
@@ -55,8 +54,7 @@ const RecipeHelpers = {
 
 // Initialization functions common to all tests
 
-add_task(async function test_common_initialize()
-{
+add_task(async function test_common_initialize() {
   // Before initializing the service for the first time, we should copy the key
   // file required to decrypt the logins contained in the SQLite databases used
   // by migration tests.  This file is not required for the other tests.

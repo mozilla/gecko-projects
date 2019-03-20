@@ -24,37 +24,28 @@ using mozilla::LogLevel;
 
 #ifdef MOZ_LOGGING
 
-#include "mozilla/Logging.h"
+#  include "mozilla/Logging.h"
 static mozilla::LazyLogModule sWidgetLog("Widget");
 static mozilla::LazyLogModule sWidgetFocusLog("WidgetFocus");
-#define LOG(args) MOZ_LOG(sWidgetLog, mozilla::LogLevel::Debug, args)
-#define LOGFOCUS(args) MOZ_LOG(sWidgetFocusLog, mozilla::LogLevel::Debug, args)
+#  define LOG(args) MOZ_LOG(sWidgetLog, mozilla::LogLevel::Debug, args)
+#  define LOGFOCUS(args) \
+    MOZ_LOG(sWidgetFocusLog, mozilla::LogLevel::Debug, args)
 
 #else
 
-#define LOG(args)
-#define LOGFOCUS(args)
+#  define LOG(args)
+#  define LOGFOCUS(args)
 
 #endif /* MOZ_LOGGING */
 
-/*static*/ already_AddRefed<nsIWidget> nsIWidget::CreateHeadlessWidget() {
+/*static*/
+already_AddRefed<nsIWidget> nsIWidget::CreateHeadlessWidget() {
   nsCOMPtr<nsIWidget> widget = new mozilla::widget::HeadlessWidget();
   return widget.forget();
 }
 
 namespace mozilla {
 namespace widget {
-
-already_AddRefed<gfxContext> CreateDefaultTarget(IntSize aSize) {
-  // Always use at least a 1x1 draw target to avoid gfx issues
-  // with 0x0 targets.
-  IntSize size =
-      (aSize.width <= 0 || aSize.height <= 0) ? gfx::IntSize(1, 1) : aSize;
-  RefPtr<DrawTarget> target = Factory::CreateDrawTarget(
-      gfxVars::ContentBackend(), size, SurfaceFormat::B8G8R8A8);
-  RefPtr<gfxContext> ctx = gfxContext::CreatePreservingTransformOrNull(target);
-  return ctx.forget();
-}
 
 StaticAutoPtr<nsTArray<HeadlessWidget*>> HeadlessWidget::sActiveWindows;
 

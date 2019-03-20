@@ -24,7 +24,7 @@
 
 // X.h defines KeyPress
 #ifdef KeyPress
-#undef KeyPress
+#  undef KeyPress
 #endif
 
 class nsFormHistory;
@@ -73,6 +73,9 @@ class nsFormFillController final : public nsIFormFillController,
 
   void StartControllingInput(mozilla::dom::HTMLInputElement* aInput);
   void StopControllingInput();
+
+  nsresult HandleFocus(mozilla::dom::HTMLInputElement* aInput);
+
   /**
    * Checks that aElement is a type of element we want to fill, then calls
    * StartControllingInput on it.
@@ -93,7 +96,7 @@ class nsFormFillController final : public nsIFormFillController,
 
   void MaybeRemoveMutationObserver(nsINode* aNode);
 
-  void RemoveForDocument(nsIDocument* aDoc);
+  void RemoveForDocument(mozilla::dom::Document* aDoc);
 
   bool IsTextControl(nsINode* aNode);
 

@@ -13,7 +13,7 @@ var EXPORTED_SYMBOLS = [
   "MINIMUM_TAB_COUNT_INTERVAL_MS",
  ];
 
-const {XPCOMUtils} = ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm", null);
+const {XPCOMUtils} = ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
 
 XPCOMUtils.defineLazyModuleGetters(this, {
   PrivateBrowsingUtils: "resource://gre/modules/PrivateBrowsingUtils.jsm",
@@ -96,7 +96,6 @@ const URLBAR_SELECTED_RESULT_METHODS = {
   rightClickEnter: 5,
 };
 
-
 const MINIMUM_TAB_COUNT_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes, in ms
 
 function getOpenTabsAndWinsCounts() {
@@ -136,7 +135,7 @@ let URICountListener = {
   // A set containing the visited domains, see bug 1271310.
   _domainSet: new Set(),
   // A set containing the visited origins during the last 24 hours (similar to domains, but not quite the same)
-  _origin24hrSet: new Set(),
+  _domain24hrSet: new Set(),
   // A map to keep track of the URIs loaded from the restored tabs.
   _restoredURIsMap: new WeakMap(),
 
@@ -154,6 +153,9 @@ let URICountListener = {
   },
 
   onLocationChange(browser, webProgress, request, uri, flags) {
+    // By default, assume we no longer need to track this tab.
+    SearchTelemetry.stopTrackingBrowser(browser);
+
     // Don't count this URI if it's an error page.
     if (flags & Ci.nsIWebProgressListener.LOCATION_CHANGE_ERROR_PAGE) {
       return;
@@ -219,7 +221,7 @@ let URICountListener = {
 
     if (shouldRecordSearchCount(browser.getTabBrowser()) &&
         !(flags & Ci.nsIWebProgressListener.LOCATION_CHANGE_SAME_DOCUMENT)) {
-      SearchTelemetry.recordSearchURLTelemetry(uriSpec);
+      SearchTelemetry.updateTrackingStatus(browser, uriSpec);
     }
 
     if (!shouldCountURI) {
@@ -232,11 +234,6 @@ let URICountListener = {
     // Update tab count
     BrowserUsageTelemetry._recordTabCount();
 
-    // We only want to count the unique domains up to MAX_UNIQUE_VISITED_DOMAINS.
-    if (this._domainSet.size == MAX_UNIQUE_VISITED_DOMAINS) {
-      return;
-    }
-
     // Unique domains should be aggregated by (eTLD + 1): x.test.com and y.test.com
     // are counted once as test.com.
     let baseDomain;
@@ -245,23 +242,22 @@ let URICountListener = {
       // due to the URI containing invalid characters or the domain actually being
       // an ipv4 or ipv6 address.
       baseDomain = Services.eTLD.getBaseDomain(uri);
-      this._domainSet.add(baseDomain);
     } catch (e) {
-      baseDomain = uri.host;
+      return;
     }
 
-    // Record the origin, but with the base domain (eTLD + 1).
-    let baseDomainURI = uri.mutate()
-                           .setHost(baseDomain)
-                           .finalize();
-    this._origin24hrSet.add(baseDomainURI.prePath);
+    // We only want to count the unique domains up to MAX_UNIQUE_VISITED_DOMAINS.
+    if (this._domainSet.size < MAX_UNIQUE_VISITED_DOMAINS) {
+      this._domainSet.add(baseDomain);
+      Services.telemetry.scalarSet(UNIQUE_DOMAINS_COUNT_SCALAR_NAME, this._domainSet.size);
+    }
+
+    this._domain24hrSet.add(baseDomain);
     if (gRecentVisitedOriginsExpiry) {
       setTimeout(() => {
-        this._origin24hrSet.delete(baseDomainURI.prePath);
+        this._domain24hrSet.delete(baseDomain);
       }, gRecentVisitedOriginsExpiry * 1000);
     }
-
-    Services.telemetry.scalarSet(UNIQUE_DOMAINS_COUNT_SCALAR_NAME, this._domainSet.size);
   },
 
   /**
@@ -272,18 +268,18 @@ let URICountListener = {
   },
 
   /**
-   * Returns the number of unique origins visited in this session during the
+   * Returns the number of unique domains visited in this session during the
    * last 24 hours.
    */
-  get uniqueOriginsVisitedInPast24Hours() {
-    return this._origin24hrSet.size;
+  get uniqueDomainsVisitedInPast24Hours() {
+    return this._domain24hrSet.size;
   },
 
   /**
-   * Resets the number of unique origins visited in this session.
+   * Resets the number of unique domains visited in this session.
    */
-  resetUniqueOriginsVisitedInPast24Hours() {
-    this._origin24hrSet.clear();
+  resetUniqueDomainsVisitedInPast24Hours() {
+    this._domain24hrSet.clear();
   },
 
   QueryInterface: ChromeUtils.generateQI([Ci.nsIWebProgressListener,
@@ -581,7 +577,8 @@ let BrowserUsageTelemetry = {
   },
 
   /**
-   * Records the method by which the user selected a urlbar result.
+   * Records the method by which the user selected a urlbar result for the
+   * legacy urlbar.
    *
    * @param {Event} event
    *        The event that triggered the selection.
@@ -589,7 +586,7 @@ let BrowserUsageTelemetry = {
    *        How the user cycled through results before picking the current match.
    *        Could be one of "tab", "arrow" or "none".
    */
-  recordUrlbarSelectedResultMethod(event, userSelectionBehavior = "none") {
+  recordLegacyUrlbarSelectedResultMethod(event, userSelectionBehavior = "none") {
     // The reason this method relies on urlbarListener instead of having the
     // caller pass in an index is that by the time the urlbar handles a
     // selection, the selection in its popup has been cleared, so it's not easy
@@ -599,6 +596,34 @@ let BrowserUsageTelemetry = {
 
     this._recordUrlOrSearchbarSelectedResultMethod(
       event, urlbarListener.selectedIndex,
+      "FX_URLBAR_SELECTED_RESULT_METHOD",
+      userSelectionBehavior
+    );
+  },
+
+  /**
+   * Records the method by which the user selected a urlbar result for the
+   * legacy urlbar.
+   *
+   * @param {Event} event
+   *        The event that triggered the selection.
+   * @param {number} index
+   *        The index that the user chose in the popup, or -1 if there wasn't a
+   *        selection.
+   * @param {string} userSelectionBehavior
+   *        How the user cycled through results before picking the current match.
+   *        Could be one of "tab", "arrow" or "none".
+   */
+  recordUrlbarSelectedResultMethod(event, index, userSelectionBehavior = "none") {
+    // The reason this method relies on urlbarListener instead of having the
+    // caller pass in an index is that by the time the urlbar handles a
+    // selection, the selection in its popup has been cleared, so it's not easy
+    // to tell which popup index was selected.  Fortunately this file already
+    // has urlbarListener, which gets notified of selections in the urlbar
+    // before the popup selection is cleared, so just use that.
+
+    this._recordUrlOrSearchbarSelectedResultMethod(
+      event, index,
       "FX_URLBAR_SELECTED_RESULT_METHOD",
       userSelectionBehavior
     );

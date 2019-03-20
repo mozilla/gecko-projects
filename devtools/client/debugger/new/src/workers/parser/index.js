@@ -7,7 +7,7 @@
 import { workerUtils } from "devtools-utils";
 const { WorkerDispatcher } = workerUtils;
 
-import type { AstLocation, AstPosition, PausePoints } from "./types";
+import type { AstLocation, AstPosition } from "./types";
 import type { SourceLocation, Source, SourceId } from "../../types";
 import type { SourceScope } from "./getScopes/visitor";
 import type { SymbolDeclarations } from "./getSymbols";
@@ -79,9 +79,6 @@ export const mapExpression = async (
 export const getFramework = async (sourceId: string): Promise<?string> =>
   dispatcher.invoke("getFramework", sourceId);
 
-export const getPausePoints = async (sourceId: string): Promise<PausePoints> =>
-  dispatcher.invoke("getPausePoints", sourceId);
-
 export type {
   SourceScope,
   BindingData,
@@ -92,16 +89,12 @@ export type {
   BindingType
 } from "./getScopes";
 
-export type {
-  AstLocation,
-  AstPosition,
-  PausePoint,
-  PausePoints
-} from "./types";
+export type { AstLocation, AstPosition } from "./types";
 
 export type {
   ClassDeclaration,
   SymbolDeclaration,
   SymbolDeclarations,
+  IdentifierDeclaration,
   FunctionDeclaration
 } from "./getSymbols";

@@ -13,9 +13,7 @@
 #include "jit/BaselineJIT.h"
 #include "jit/Ion.h"
 #include "vm/ArrayObject.h"
-#ifdef ENABLE_BIGINT
 #include "vm/BigIntType.h"
-#endif
 #include "vm/HelperThreads.h"
 #include "vm/JSObject.h"
 #include "vm/JSScript.h"
@@ -60,8 +58,8 @@ static uint32_t HashStringChars(JSString* s) {
   return hash;
 }
 
-/* static */ HashNumber InefficientNonFlatteningStringHashPolicy::hash(
-    const Lookup& l) {
+/* static */
+HashNumber InefficientNonFlatteningStringHashPolicy::hash(const Lookup& l) {
   return l->hasLatin1Chars() ? HashStringChars<Latin1Char>(l)
                              : HashStringChars<char16_t>(l);
 }
@@ -100,8 +98,9 @@ static bool EqualStringsPure(JSString* s1, JSString* s2) {
   return EqualChars(c1, c2, s1->length());
 }
 
-/* static */ bool InefficientNonFlatteningStringHashPolicy::match(
-    const JSString* const& k, const Lookup& l) {
+/* static */
+bool InefficientNonFlatteningStringHashPolicy::match(const JSString* const& k,
+                                                     const Lookup& l) {
   // We can't use js::EqualStrings, because that flattens our strings.
   JSString* s1 = const_cast<JSString*>(k);
   if (k->hasLatin1Chars()) {
@@ -495,7 +494,6 @@ static void StatsCellCallback(JSRuntime* rt, void* data, void* thing,
       zStats->symbolsGCHeap += thingSize;
       break;
 
-#ifdef ENABLE_BIGINT
     case JS::TraceKind::BigInt: {
       JS::BigInt* bi = static_cast<BigInt*>(thing);
       zStats->bigIntsGCHeap += thingSize;
@@ -503,7 +501,6 @@ static void StatsCellCallback(JSRuntime* rt, void* data, void* thing,
           bi->sizeOfExcludingThis(rtStats->mallocSizeOf_);
       break;
     }
-#endif
 
     case JS::TraceKind::BaseShape: {
       JS::ShapeInfo info;  // This zeroes all the sizes.
@@ -819,6 +816,26 @@ JS_PUBLIC_API bool JS::CollectRuntimeStats(JSContext* cx, RuntimeStats* rtStats,
                                    StatsCellCallback<FineGrained>);
 }
 
+JS_PUBLIC_API size_t JS::SystemCompartmentCount(JSContext* cx) {
+  size_t n = 0;
+  for (CompartmentsIter comp(cx->runtime()); !comp.done(); comp.next()) {
+    if (IsSystemCompartment(comp)) {
+      ++n;
+    }
+  }
+  return n;
+}
+
+JS_PUBLIC_API size_t JS::UserCompartmentCount(JSContext* cx) {
+  size_t n = 0;
+  for (CompartmentsIter comp(cx->runtime()); !comp.done(); comp.next()) {
+    if (!IsSystemCompartment(comp)) {
+      ++n;
+    }
+  }
+  return n;
+}
+
 JS_PUBLIC_API size_t JS::SystemRealmCount(JSContext* cx) {
   size_t n = 0;
   for (RealmsIter realm(cx->runtime()); !realm.done(); realm.next()) {
@@ -864,7 +881,12 @@ JS_PUBLIC_API bool AddSizeOfTab(JSContext* cx, HandleObject obj,
 
   JS::Zone* zone = GetObjectZone(obj);
 
-  if (!rtStats.realmStatsVector.reserve(zone->compartments().length())) {
+  size_t numRealms = 0;
+  for (CompartmentsInZoneIter comp(zone); !comp.done(); comp.next()) {
+    numRealms += comp->realms().length();
+  }
+
+  if (!rtStats.realmStatsVector.reserve(numRealms)) {
     return false;
   }
 

@@ -1262,6 +1262,8 @@ add_task(async function removeRetainState() {
 // Opens the context menu on a non-built-in action.  (The context menu for
 // built-in actions is tested in browser_page_action_menu.js.)
 add_task(async function contextMenu() {
+  Services.telemetry.clearEvents();
+
   // Add a test action.
   let action = PageActions.addAction(new PageActions.Action({
     id: "test-contextMenu",
@@ -1445,10 +1447,24 @@ add_task(async function contextMenu() {
   // Done, clean up.
   action.remove();
 
+  // Check the telemetry was collected properly.
+  let snapshot = Services.telemetry.snapshotEvents(
+    Ci.nsITelemetry.DATASET_RELEASE_CHANNEL_OPTIN, true);
+  ok(snapshot.parent && snapshot.parent.length > 0,
+     "Got parent telemetry events in the snapshot");
+  let relatedEvents = snapshot.parent
+    .filter(([timestamp, category, method]) =>
+      category == "addonsManager" && method == "action")
+    .map(relatedEvent => relatedEvent.slice(3, 6));
+  Assert.deepEqual(relatedEvents, [
+    ["pageAction", null, {action: "manage"}],
+    ["pageAction", null, {action: "manage"}],
+  ]);
+
   // urlbar tests that run after this one can break if the mouse is left over
   // the area where the urlbar popup appears, which seems to happen due to the
   // above synthesized mouse events.  Move it over the urlbar.
-  EventUtils.synthesizeMouseAtCenter(gURLBar, { type: "mousemove" });
+  EventUtils.synthesizeMouseAtCenter(gURLBar.inputField, { type: "mousemove" });
   gURLBar.focus();
 });
 
@@ -1657,6 +1673,31 @@ add_task(async function transient() {
   otherAction.remove();
 });
 
+add_task(async function action_disablePrivateBrowsing() {
+  let id = "testWidget";
+  let action = PageActions.addAction(new PageActions.Action({
+    id,
+    disablePrivateBrowsing: true,
+    title: "title",
+    disabled: false,
+    pinnedToUrlbar: true,
+  }));
+  // Open an actionable page so that the main page action button appears.
+  let url = "http://example.com/";
+  let privateWindow = await BrowserTestUtils.openNewBrowserWindow({private: true});
+  await BrowserTestUtils.openNewForegroundTab(privateWindow.gBrowser, url, true, true);
+
+  Assert.ok(action.canShowInWindow(window), "should show in default window");
+  Assert.ok(!action.canShowInWindow(privateWindow), "should not show in private browser");
+  Assert.ok(action.shouldShowInUrlbar(window), "should show in default urlbar");
+  Assert.ok(!action.shouldShowInUrlbar(privateWindow), "should not show in default urlbar");
+  Assert.ok(action.shouldShowInPanel(window), "should show in default urlbar");
+  Assert.ok(!action.shouldShowInPanel(privateWindow), "should not show in default urlbar");
+
+  action.remove();
+
+  privateWindow.close();
+});
 
 function assertActivatedPageActionPanelHidden() {
   Assert.ok(!document.getElementById(BrowserPageActions._activatedActionPanelID));

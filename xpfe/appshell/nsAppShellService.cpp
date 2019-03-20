@@ -48,10 +48,11 @@
 #include "nsWebBrowser.h"
 
 #ifdef MOZ_INSTRUMENT_EVENT_LOOP
-#include "EventTracer.h"
+#  include "EventTracer.h"
 #endif
 
 using namespace mozilla;
+using mozilla::dom::BrowsingContext;
 using mozilla::intl::LocaleService;
 
 // Default URL for the hidden window, can be overridden by a pref on Mac
@@ -91,13 +92,23 @@ nsAppShellService::SetScreenId(uint32_t aScreenId) {
   return NS_OK;
 }
 
+void nsAppShellService::EnsureHiddenWindow() {
+  if (!mHiddenWindow) {
+    (void)CreateHiddenWindowHelper(/* aIsPrivate = */ false);
+  }
+}
+
 void nsAppShellService::EnsurePrivateHiddenWindow() {
   if (!mHiddenPrivateWindow) {
-    CreateHiddenWindowHelper(true);
+    (void)CreateHiddenWindowHelper(/* aIsPrivate = */ true);
   }
 }
 
 nsresult nsAppShellService::CreateHiddenWindowHelper(bool aIsPrivate) {
+  if (!XRE_IsParentProcess()) {
+    return NS_ERROR_NOT_IMPLEMENTED;
+  }
+
   nsresult rv;
   int32_t initialHeight = 100, initialWidth = 100;
 
@@ -460,13 +471,17 @@ nsAppShellService::CreateWindowlessBrowser(bool aIsChrome,
       widget->Create(nullptr, 0, LayoutDeviceIntRect(0, 0, 0, 0), nullptr);
   NS_ENSURE_SUCCESS(rv, rv);
 
+  // Create a BrowsingContext for our windowless browser.
+  RefPtr<BrowsingContext> browsingContext =
+      BrowsingContext::Create(nullptr, nullptr, EmptyString(),
+                              aIsChrome ? BrowsingContext::Type::Chrome
+                                        : BrowsingContext::Type::Content);
+
   /* Next, we create an instance of nsWebBrowser. Instances of this class have
    * an associated doc shell, which is what we're interested in.
    */
   nsCOMPtr<nsIWebBrowser> browser =
-      nsWebBrowser::Create(stub, widget, OriginAttributes(), nullptr,
-                           aIsChrome ? nsIDocShellTreeItem::typeChromeWrapper
-                                     : nsIDocShellTreeItem::typeContentWrapper);
+      nsWebBrowser::Create(stub, widget, OriginAttributes(), browsingContext);
 
   if (NS_WARN_IF(!browser)) {
     NS_ERROR("Couldn't create instance of nsWebBrowser!");
@@ -589,6 +604,9 @@ nsresult nsAppShellService::JustCreateTopWindow(
 
   if (aChromeMask & nsIWebBrowserChrome::CHROME_SUPPRESS_ANIMATION)
     widgetInitData.mIsAnimationSuppressed = true;
+
+  if (aChromeMask & nsIWebBrowserChrome::CHROME_ALWAYS_ON_TOP)
+    widgetInitData.mAlwaysOnTop = true;
 
 #ifdef XP_MACOSX
   // Mac OS X sheet support
@@ -716,6 +734,8 @@ NS_IMETHODIMP
 nsAppShellService::GetHiddenWindow(nsIXULWindow** aWindow) {
   NS_ENSURE_ARG_POINTER(aWindow);
 
+  EnsureHiddenWindow();
+
   *aWindow = mHiddenWindow;
   NS_IF_ADDREF(*aWindow);
   return *aWindow ? NS_OK : NS_ERROR_FAILURE;
@@ -723,6 +743,10 @@ nsAppShellService::GetHiddenWindow(nsIXULWindow** aWindow) {
 
 NS_IMETHODIMP
 nsAppShellService::GetHiddenDOMWindow(mozIDOMWindowProxy** aWindow) {
+  NS_ENSURE_ARG_POINTER(aWindow);
+
+  EnsureHiddenWindow();
+
   nsresult rv;
   nsCOMPtr<nsIDocShell> docShell;
   NS_ENSURE_TRUE(mHiddenWindow, NS_ERROR_FAILURE);
@@ -749,6 +773,8 @@ nsAppShellService::GetHiddenPrivateWindow(nsIXULWindow** aWindow) {
 
 NS_IMETHODIMP
 nsAppShellService::GetHiddenPrivateDOMWindow(mozIDOMWindowProxy** aWindow) {
+  NS_ENSURE_ARG_POINTER(aWindow);
+
   EnsurePrivateHiddenWindow();
 
   nsresult rv;
@@ -762,6 +788,14 @@ nsAppShellService::GetHiddenPrivateDOMWindow(mozIDOMWindowProxy** aWindow) {
   nsCOMPtr<nsPIDOMWindowOuter> hiddenPrivateDOMWindow(docShell->GetWindow());
   hiddenPrivateDOMWindow.forget(aWindow);
   return *aWindow ? NS_OK : NS_ERROR_FAILURE;
+}
+
+NS_IMETHODIMP
+nsAppShellService::GetHasHiddenWindow(bool* aHasHiddenWindow) {
+  NS_ENSURE_ARG_POINTER(aHasHiddenWindow);
+
+  *aHasHiddenWindow = !!mHiddenWindow;
+  return NS_OK;
 }
 
 NS_IMETHODIMP

@@ -17,35 +17,19 @@ namespace mozilla {
 using layers::ScrollSnapInfo;
 
 /**
- * Stores candidate snapping edges.
- */
-class SnappingEdgeCallback {
- public:
-  virtual void AddHorizontalEdge(nscoord aEdge) = 0;
-  virtual void AddVerticalEdge(nscoord aEdge) = 0;
-  virtual void AddHorizontalEdgeInterval(const nsRect& aScrollRange,
-                                         nscoord aInterval,
-                                         nscoord aOffset) = 0;
-  virtual void AddVerticalEdgeInterval(const nsRect& aScrollRange,
-                                       nscoord aInterval, nscoord aOffset) = 0;
-};
-
-/**
  * Keeps track of the current best edge to snap to. The criteria for
  * adding an edge depends on the scrolling unit.
  */
-class CalcSnapPoints : public SnappingEdgeCallback {
+class CalcSnapPoints final {
  public:
   CalcSnapPoints(nsIScrollableFrame::ScrollUnit aUnit,
                  const nsPoint& aDestination, const nsPoint& aStartPos);
-  virtual void AddHorizontalEdge(nscoord aEdge) override;
-  virtual void AddVerticalEdge(nscoord aEdge) override;
-  virtual void AddHorizontalEdgeInterval(const nsRect& aScrollRange,
-                                         nscoord aInterval,
-                                         nscoord aOffset) override;
-  virtual void AddVerticalEdgeInterval(const nsRect& aScrollRange,
-                                       nscoord aInterval,
-                                       nscoord aOffset) override;
+  void AddHorizontalEdge(nscoord aEdge);
+  void AddVerticalEdge(nscoord aEdge);
+  void AddHorizontalEdgeInterval(const nsRect& aScrollRange, nscoord aInterval,
+                                 nscoord aOffset);
+  void AddVerticalEdgeInterval(const nsRect& aScrollRange, nscoord aInterval,
+                               nscoord aOffset);
   void AddEdge(nscoord aEdge, nscoord aDestination, nscoord aStartPos,
                nscoord aScrollingDirection, nscoord* aBestEdge,
                bool* aEdgeFound);
@@ -57,9 +41,9 @@ class CalcSnapPoints : public SnappingEdgeCallback {
 
  protected:
   nsIScrollableFrame::ScrollUnit mUnit;
-  nsPoint
-      mDestination;   // gives the position after scrolling but before snapping
-  nsPoint mStartPos;  // gives the position before scrolling
+  nsPoint mDestination;  // gives the position after scrolling but before
+                         // snapping
+  nsPoint mStartPos;     // gives the position before scrolling
   nsIntPoint mScrollingDirection;  // always -1, 0, or 1
   nsPoint mBestEdge;  // keeps track of the position of the current best edge
   bool mHorizontalEdgeFound;  // true if mBestEdge.x is storing a valid
@@ -236,24 +220,24 @@ void CalcSnapPoints::AddEdgeInterval(nscoord aInterval, nscoord aMinPos,
 }
 
 static void ProcessScrollSnapCoordinates(
-    SnappingEdgeCallback& aCallback,
+    CalcSnapPoints& aCalcSnapPoint,
     const nsTArray<nsPoint>& aScrollSnapCoordinates,
     const nsPoint& aScrollSnapDestination) {
   for (nsPoint snapCoords : aScrollSnapCoordinates) {
     // Make them relative to the scroll snap destination.
     snapCoords -= aScrollSnapDestination;
 
-    aCallback.AddVerticalEdge(snapCoords.x);
-    aCallback.AddHorizontalEdge(snapCoords.y);
+    aCalcSnapPoint.AddVerticalEdge(snapCoords.x);
+    aCalcSnapPoint.AddHorizontalEdge(snapCoords.y);
   }
 }
 
 Maybe<nsPoint> ScrollSnapUtils::GetSnapPointForDestination(
     const ScrollSnapInfo& aSnapInfo, nsIScrollableFrame::ScrollUnit aUnit,
-    const nsSize& aScrollPortSize, const nsRect& aScrollRange,
-    const nsPoint& aStartPos, const nsPoint& aDestination) {
-  if (aSnapInfo.mScrollSnapTypeY == NS_STYLE_SCROLL_SNAP_TYPE_NONE &&
-      aSnapInfo.mScrollSnapTypeX == NS_STYLE_SCROLL_SNAP_TYPE_NONE) {
+    const nsRect& aScrollRange, const nsPoint& aStartPos,
+    const nsPoint& aDestination) {
+  if (aSnapInfo.mScrollSnapTypeY == StyleScrollSnapType::None &&
+      aSnapInfo.mScrollSnapTypeX == StyleScrollSnapType::None) {
     return Nothing();
   }
 
@@ -276,13 +260,13 @@ Maybe<nsPoint> ScrollSnapUtils::GetSnapPointForDestination(
   nsPoint finalPos = calcSnapPoints.GetBestEdge();
   nscoord proximityThreshold = gfxPrefs::ScrollSnapProximityThreshold();
   proximityThreshold = nsPresContext::CSSPixelsToAppUnits(proximityThreshold);
-  if (aSnapInfo.mScrollSnapTypeY == NS_STYLE_SCROLL_SNAP_TYPE_PROXIMITY &&
+  if (aSnapInfo.mScrollSnapTypeY == StyleScrollSnapType::Proximity &&
       std::abs(aDestination.y - finalPos.y) > proximityThreshold) {
     finalPos.y = aDestination.y;
   } else {
     snapped = true;
   }
-  if (aSnapInfo.mScrollSnapTypeX == NS_STYLE_SCROLL_SNAP_TYPE_PROXIMITY &&
+  if (aSnapInfo.mScrollSnapTypeX == StyleScrollSnapType::Proximity &&
       std::abs(aDestination.x - finalPos.x) > proximityThreshold) {
     finalPos.x = aDestination.x;
   } else {

@@ -4,7 +4,7 @@
 
 // @flow
 
-import { parse } from "../../utils/url";
+import { parse } from "../url";
 import { getUnicodeHostname, getUnicodeUrlPath } from "devtools-modules";
 
 import type { Source } from "../../types";
@@ -14,14 +14,12 @@ export type ParsedURL = {
   filename: string
 };
 
-const urlMap: WeakMap<Source, ParsedURL> = new WeakMap();
-
 export function getFilenameFromPath(pathname?: string) {
   let filename = "";
   if (pathname) {
     filename = pathname.substring(pathname.lastIndexOf("/") + 1);
     // This file does not have a name. Default should be (index).
-    if (filename == "" || !filename.includes(".")) {
+    if (filename == "") {
       filename = "(index)";
     }
   }
@@ -31,7 +29,7 @@ export function getFilenameFromPath(pathname?: string) {
 const NoDomain = "(no domain)";
 const def = { path: "", group: "", filename: "" };
 
-function _getURL(source: Source, defaultDomain: string): ParsedURL {
+export function getURL(source: Source, defaultDomain: ?string = ""): ParsedURL {
   const { url } = source;
   if (!url) {
     return def;
@@ -115,14 +113,4 @@ function _getURL(source: Source, defaultDomain: string): ParsedURL {
     group: protocol ? `${protocol}//` : "",
     filename
   };
-}
-
-export function getURL(source: Source, debuggeeUrl: ?string) {
-  if (urlMap.has(source)) {
-    return urlMap.get(source) || def;
-  }
-
-  const url = _getURL(source, debuggeeUrl || "");
-  urlMap.set(source, url);
-  return url;
 }

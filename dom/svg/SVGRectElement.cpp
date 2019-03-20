@@ -14,7 +14,7 @@
 #include "mozilla/gfx/PathHelpers.h"
 #include <algorithm>
 
-NS_IMPL_NS_NEW_NAMESPACED_SVG_ELEMENT(Rect)
+NS_IMPL_NS_NEW_SVG_ELEMENT(Rect)
 
 using namespace mozilla::gfx;
 
@@ -28,7 +28,7 @@ JSObject* SVGRectElement::WrapNode(JSContext* aCx,
   return SVGRectElement_Binding::Wrap(aCx, this, aGivenProto);
 }
 
-nsSVGElement::LengthInfo SVGRectElement::sLengthInfo[6] = {
+SVGElement::LengthInfo SVGRectElement::sLengthInfo[6] = {
     {nsGkAtoms::x, 0, SVGLength_Binding::SVG_LENGTHTYPE_NUMBER,
      SVGContentUtils::X},
     {nsGkAtoms::y, 0, SVGLength_Binding::SVG_LENGTHTYPE_NUMBER,
@@ -81,16 +81,17 @@ already_AddRefed<SVGAnimatedLength> SVGRectElement::Ry() {
 }
 
 //----------------------------------------------------------------------
-// nsSVGElement methods
+// SVGElement methods
 
-/* virtual */ bool SVGRectElement::HasValidDimensions() const {
+/* virtual */
+bool SVGRectElement::HasValidDimensions() const {
   return mLengthAttributes[ATTR_WIDTH].IsExplicitlySet() &&
          mLengthAttributes[ATTR_WIDTH].GetAnimValInSpecifiedUnits() > 0 &&
          mLengthAttributes[ATTR_HEIGHT].IsExplicitlySet() &&
          mLengthAttributes[ATTR_HEIGHT].GetAnimValInSpecifiedUnits() > 0;
 }
 
-nsSVGElement::LengthAttributesInfo SVGRectElement::GetLengthInfo() {
+SVGElement::LengthAttributesInfo SVGRectElement::GetLengthInfo() {
   return LengthAttributesInfo(mLengthAttributes, sLengthInfo,
                               ArrayLength(sLengthInfo));
 }

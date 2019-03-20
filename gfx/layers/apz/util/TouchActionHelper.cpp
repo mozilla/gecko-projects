@@ -57,7 +57,8 @@ TouchBehaviorFlags TouchActionHelper::GetAllowedTouchBehavior(
       nsLayoutUtils::GetEventCoordinatesRelativeTo(aWidget, aPoint, aRootFrame);
 
   nsIFrame* target = nsLayoutUtils::GetFrameForPoint(
-      aRootFrame, relativePoint, nsLayoutUtils::IGNORE_ROOT_SCROLL_FRAME);
+      aRootFrame, relativePoint,
+      nsLayoutUtils::FrameForPointOption::IgnoreRootScrollFrame);
   if (!target) {
     return behavior;
   }
@@ -86,7 +87,7 @@ TouchBehaviorFlags TouchActionHelper::GetAllowedTouchBehavior(
   bool considerPanning = true;
 
   for (nsIFrame* frame = target; frame && frame->GetContent() && behavior;
-       frame = frame->GetParent()) {
+       frame = frame->GetInFlowParent()) {
     UpdateAllowedBehavior(nsLayoutUtils::GetTouchActionFromFrame(frame),
                           considerPanning, behavior);
 

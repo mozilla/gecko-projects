@@ -3,8 +3,6 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
-
 function RemoteController(browser) {
   this._browser = browser;
 
@@ -83,6 +81,10 @@ RemoteController.prototype = {
       this._supportedCommands[aDisabledCommands[c]] = false;
     }
 
+    // Don't update anything if we're not the active element
+    if (this._browser != this._browser.ownerDocument.activeElement) {
+      return;
+    }
     this._browser.ownerGlobal.updateCommands(aAction);
   },
 };

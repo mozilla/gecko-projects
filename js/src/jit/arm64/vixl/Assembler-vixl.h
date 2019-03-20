@@ -702,22 +702,6 @@ class Operand {
   //       <shift_amount> is uint2_t.
   explicit Operand(Register reg, Extend extend, unsigned shift_amount = 0);
 
-  // FIXME: Temporary constructors for compilation.
-  // FIXME: These should be removed -- Operand should not leak into shared code.
-  // FIXME: Something like an LAllocationUnion for {gpreg, fpreg, Address} is wanted.
-  explicit Operand(js::jit::Register) {
-    MOZ_CRASH("Operand with Register");
-  }
-  explicit Operand(js::jit::FloatRegister) {
-    MOZ_CRASH("Operand with FloatRegister");
-  }
-  explicit Operand(js::jit::Register, int32_t) {
-    MOZ_CRASH("Operand with implicit Address");
-  }
-  explicit Operand(js::jit::RegisterOrSP, int32_t) {
-    MOZ_CRASH("Operand with implicit Address");
-  }
-
   bool IsImmediate() const;
   bool IsShiftedRegister() const;
   bool IsExtendedRegister() const;
@@ -4073,11 +4057,9 @@ class Assembler : public MozBaseAssembler {
                 const MemOperand& addr,
                 LoadStoreScalingOption option = PreferScaledOffset);
 
-  // TODO(all): The third parameter should be passed by reference but gcc 4.8.2
-  // reports a bogus uninitialised warning then.
   BufferOffset Logical(const Register& rd,
                        const Register& rn,
-                       const Operand operand,
+                       const Operand& operand,
                        LogicalOp op);
   BufferOffset LogicalImmediate(const Register& rd,
                                 const Register& rn,

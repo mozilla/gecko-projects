@@ -15,7 +15,7 @@
 #include "mozilla/dom/MemoryReportRequest.h"
 #include "mozilla/gfx/gfxVars.h"
 #if defined(XP_WIN)
-#include "mozilla/gfx/DeviceManagerDx.h"
+#  include "mozilla/gfx/DeviceManagerDx.h"
 #endif
 #include "mozilla/ipc/CrashReporterHost.h"
 #include "mozilla/layers/APZInputBridgeChild.h"
@@ -25,7 +25,7 @@
 #include "nsIObserverService.h"
 
 #ifdef MOZ_GECKO_PROFILER
-#include "ProfilerParent.h"
+#  include "ProfilerParent.h"
 #endif
 
 namespace mozilla {
@@ -171,6 +171,16 @@ mozilla::ipc::IPCResult GPUChild::RecvCreateVRProcess() {
   return IPC_OK();
 }
 
+mozilla::ipc::IPCResult GPUChild::RecvShutdownVRProcess() {
+  // Make sure stopping VR process at the main process
+  MOZ_ASSERT(XRE_IsParentProcess());
+  if (gfxPrefs::VRProcessEnabled()) {
+    VRProcessManager::Shutdown();
+  }
+
+  return IPC_OK();
+}
+
 mozilla::ipc::IPCResult GPUChild::RecvNotifyUiObservers(
     const nsCString& aTopic) {
   nsCOMPtr<nsIObserverService> obsSvc = mozilla::services::GetObserverService();
@@ -230,7 +240,7 @@ mozilla::ipc::IPCResult GPUChild::RecvNotifyDeviceReset(
 bool GPUChild::SendRequestMemoryReport(const uint32_t& aGeneration,
                                        const bool& aAnonymize,
                                        const bool& aMinimizeMemoryUsage,
-                                       const MaybeFileDesc& aDMDFile) {
+                                       const Maybe<FileDescriptor>& aDMDFile) {
   mMemoryReportRequest = MakeUnique<MemoryReportRequestHost>(aGeneration);
   Unused << PGPUChild::SendRequestMemoryReport(aGeneration, aAnonymize,
                                                aMinimizeMemoryUsage, aDMDFile);
@@ -316,7 +326,8 @@ class DeferredDeleteGPUChild : public Runnable {
   UniquePtr<GPUChild> mChild;
 };
 
-/* static */ void GPUChild::Destroy(UniquePtr<GPUChild>&& aChild) {
+/* static */
+void GPUChild::Destroy(UniquePtr<GPUChild>&& aChild) {
   NS_DispatchToMainThread(new DeferredDeleteGPUChild(std::move(aChild)));
 }
 

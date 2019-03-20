@@ -1,5 +1,3 @@
-ChromeUtils.import("resource://gre/modules/Services.jsm");
-
 AntiTracking.runTest("Set/Get Cookies",
   // Blocking callback
   async _ => {
@@ -69,13 +67,22 @@ AntiTracking.runTest("Cookies and Storage Access API",
 
     is(document.cookie, "", "No cookies for me");
     document.cookie = "name=value";
-    is(document.cookie, "name=value", "I have the cookies!");
+
+    if (SpecialPowers.Services.prefs.getIntPref("network.cookie.cookieBehavior") == SpecialPowers.Ci.nsICookieService.BEHAVIOR_REJECT) {
+      is(document.cookie, "", "No cookies for me");
+    } else {
+      is(document.cookie, "name=value", "I have the cookies!");
+    }
   },
 
   // Non blocking callback
   async _ => {
     /* import-globals-from storageAccessAPIHelpers.js */
-    await noStorageAccessInitially();
+    if (allowListed) {
+      await hasStorageAccessInitially();
+    } else {
+      await noStorageAccessInitially();
+    }
 
     is(document.cookie, "", "No cookies for me");
 

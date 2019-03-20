@@ -8,10 +8,10 @@
  * Manages the base loader (base-loader.js) instance used to load the developer tools.
  */
 
-var { Services } = ChromeUtils.import("resource://gre/modules/Services.jsm", {});
+var { Services } = ChromeUtils.import("resource://gre/modules/Services.jsm");
 var { Loader, Require, resolveURI, unload } =
-  ChromeUtils.import("resource://devtools/shared/base-loader.js", {});
-var { requireRawId } = ChromeUtils.import("resource://devtools/shared/loader-plugin-raw.jsm", {});
+  ChromeUtils.import("resource://devtools/shared/base-loader.js");
+var { requireRawId } = ChromeUtils.import("resource://devtools/shared/loader-plugin-raw.jsm");
 
 this.EXPORTED_SYMBOLS = ["DevToolsLoader", "devtools", "BuiltinProvider",
                          "require", "loader",
@@ -36,8 +36,6 @@ BuiltinProvider.prototype = {
       "acorn": "resource://devtools/shared/acorn",
       // ⚠ DISCUSSION ON DEV-DEVELOPER-TOOLS REQUIRED BEFORE MODIFYING ⚠
       "acorn/util/walk": "resource://devtools/shared/acorn/walk.js",
-      // ⚠ DISCUSSION ON DEV-DEVELOPER-TOOLS REQUIRED BEFORE MODIFYING ⚠
-      "source-map": "resource://devtools/shared/sourcemap/source-map.js",
       // ⚠ DISCUSSION ON DEV-DEVELOPER-TOOLS REQUIRED BEFORE MODIFYING ⚠
       // Allow access to xpcshell test items from the loader.
       "xpcshell-test": "resource://test",

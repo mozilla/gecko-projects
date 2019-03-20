@@ -1,5 +1,5 @@
-/* -*- Mode: C++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
-// vim:cindent:ts=4:et:sw=4:
+/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+// vim:cindent:ts=2:et:sw=2:
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -37,8 +37,8 @@ BasicTableLayoutStrategy::BasicTableLayoutStrategy(nsTableFrame *aTableFrame)
 /* virtual */
 BasicTableLayoutStrategy::~BasicTableLayoutStrategy() {}
 
-/* virtual */ nscoord BasicTableLayoutStrategy::GetMinISize(
-    gfxContext *aRenderingContext) {
+/* virtual */
+nscoord BasicTableLayoutStrategy::GetMinISize(gfxContext *aRenderingContext) {
   DISPLAY_MIN_INLINE_SIZE(mTableFrame, mMinISize);
   if (mMinISize == NS_INTRINSIC_WIDTH_UNKNOWN) {
     ComputeIntrinsicISizes(aRenderingContext);
@@ -46,8 +46,9 @@ BasicTableLayoutStrategy::~BasicTableLayoutStrategy() {}
   return mMinISize;
 }
 
-/* virtual */ nscoord BasicTableLayoutStrategy::GetPrefISize(
-    gfxContext *aRenderingContext, bool aComputingSize) {
+/* virtual */
+nscoord BasicTableLayoutStrategy::GetPrefISize(gfxContext *aRenderingContext,
+                                               bool aComputingSize) {
   DISPLAY_PREF_INLINE_SIZE(mTableFrame, mPrefISize);
   NS_ASSERTION((mPrefISize == NS_INTRINSIC_WIDTH_UNKNOWN) ==
                    (mPrefISizePctExpand == NS_INTRINSIC_WIDTH_UNKNOWN),
@@ -121,11 +122,10 @@ static CellISizeInfo GetISizeInfo(gfxContext *aRenderingContext,
   float prefPercent = 0.0f;
   bool hasSpecifiedISize = false;
 
-  const nsStyleCoord &iSize = stylePos->ISize(aWM);
-  nsStyleUnit unit = iSize.GetUnit();
-  // NOTE: We're ignoring calc() units with percentages here, for lack of a
-  // sensible idea for what to do with them.  This means calc() with
-  // percentages is basically handled like 'auto' for table cells and
+  const auto &iSize = stylePos->ISize(aWM);
+  // NOTE: We're ignoring calc() units with both lengths and percentages here,
+  // for lack of a sensible idea for what to do with them.  This means calc()
+  // with percentages is basically handled like 'auto' for table cells and
   // columns.
   if (iSize.ConvertsToLength()) {
     hasSpecifiedISize = true;
@@ -145,73 +145,70 @@ static CellISizeInfo GetISizeInfo(gfxContext *aRenderingContext,
       minCoord = c;
     }
     prefCoord = std::max(c, minCoord);
-  } else if (unit == eStyleUnit_Percent) {
-    prefPercent = iSize.GetPercentValue();
-  } else if (unit == eStyleUnit_Enumerated && aIsCell) {
-    switch (iSize.GetIntValue()) {
-      case NS_STYLE_WIDTH_MAX_CONTENT:
+  } else if (iSize.ConvertsToPercentage()) {
+    prefPercent = iSize.ToPercentage();
+  } else if (iSize.IsExtremumLength() && aIsCell) {
+    switch (iSize.AsExtremumLength()) {
+      case StyleExtremumLength::MaxContent:
         // 'inline-size' only affects pref isize, not min
         // isize, so don't change anything
         break;
-      case NS_STYLE_WIDTH_MIN_CONTENT:
+      case StyleExtremumLength::MinContent:
         prefCoord = minCoord;
         break;
-      case NS_STYLE_WIDTH_FIT_CONTENT:
-      case NS_STYLE_WIDTH_AVAILABLE:
-        // act just like 'inline-size: auto'
+      case StyleExtremumLength::MozFitContent:
+      case StyleExtremumLength::MozAvailable:
         break;
       default:
         MOZ_ASSERT_UNREACHABLE("unexpected enumerated value");
     }
   }
 
-  nsStyleCoord maxISize(stylePos->MaxISize(aWM));
-  if (maxISize.GetUnit() == eStyleUnit_Enumerated) {
-    if (!aIsCell || maxISize.GetIntValue() == NS_STYLE_WIDTH_AVAILABLE) {
-      maxISize.SetNoneValue();
-    } else if (maxISize.GetIntValue() == NS_STYLE_WIDTH_FIT_CONTENT) {
-      // for 'max-inline-size', '-moz-fit-content' is like
-      // '-moz-max-content'
-      maxISize.SetIntValue(NS_STYLE_WIDTH_MAX_CONTENT, eStyleUnit_Enumerated);
+  StyleMaxSize maxISize = stylePos->MaxISize(aWM);
+  if (maxISize.IsExtremumLength()) {
+    if (!aIsCell ||
+        maxISize.AsExtremumLength() == StyleExtremumLength::MozAvailable) {
+      maxISize = StyleMaxSize::None();
+    } else if (maxISize.AsExtremumLength() ==
+               StyleExtremumLength::MozFitContent) {
+      // for 'max-inline-size', '-moz-fit-content' is like 'max-content'
+      maxISize = StyleMaxSize::ExtremumLength(StyleExtremumLength::MaxContent);
     }
   }
-  unit = maxISize.GetUnit();
   // XXX To really implement 'max-inline-size' well, we'd need to store
   // it separately on the columns.
-  if (maxISize.ConvertsToLength() || unit == eStyleUnit_Enumerated) {
+  if (maxISize.ConvertsToLength() || maxISize.IsExtremumLength()) {
     nscoord c = aFrame->ComputeISizeValue(aRenderingContext, 0, 0, 0, maxISize);
     minCoord = std::min(c, minCoord);
     prefCoord = std::min(c, prefCoord);
-  } else if (unit == eStyleUnit_Percent) {
-    float p = stylePos->MaxISize(aWM).GetPercentValue();
+  } else if (maxISize.ConvertsToPercentage()) {
+    float p = maxISize.ToPercentage();
     if (p < prefPercent) {
       prefPercent = p;
     }
   }
-  // treat calc() with percentages on max-inline-size just like 'none'.
 
-  nsStyleCoord minISize(stylePos->MinISize(aWM));
-  if (minISize.GetUnit() == eStyleUnit_Enumerated) {
-    if (!aIsCell || minISize.GetIntValue() == NS_STYLE_WIDTH_AVAILABLE) {
-      minISize.SetCoordValue(0);
-    } else if (minISize.GetIntValue() == NS_STYLE_WIDTH_FIT_CONTENT) {
-      // for 'min-inline-size', '-moz-fit-content' is like
-      // '-moz-min-content'
-      minISize.SetIntValue(NS_STYLE_WIDTH_MIN_CONTENT, eStyleUnit_Enumerated);
+  StyleSize minISize = stylePos->MinISize(aWM);
+  if (minISize.IsExtremumLength()) {
+    if (!aIsCell ||
+        minISize.AsExtremumLength() == StyleExtremumLength::MozAvailable) {
+      minISize = StyleSize::LengthPercentage(LengthPercentage::Zero());
+    } else if (minISize.AsExtremumLength() ==
+               StyleExtremumLength::MozFitContent) {
+      // for 'min-inline-size', '-moz-fit-content' is like 'min-content'
+      minISize = StyleSize::ExtremumLength(StyleExtremumLength::MinContent);
     }
   }
-  unit = minISize.GetUnit();
-  if (minISize.ConvertsToLength() || unit == eStyleUnit_Enumerated) {
+  if (minISize.ConvertsToLength() || minISize.IsExtremumLength()) {
     nscoord c = aFrame->ComputeISizeValue(aRenderingContext, 0, 0, 0, minISize);
     minCoord = std::max(c, minCoord);
     prefCoord = std::max(c, prefCoord);
-  } else if (unit == eStyleUnit_Percent) {
-    float p = stylePos->MinISize(aWM).GetPercentValue();
+  } else if (minISize.ConvertsToPercentage()) {
+    float p = minISize.ToPercentage();
     if (p > prefPercent) {
       prefPercent = p;
     }
   }
-  // treat calc() with percentages on min-inline-size just like '0'.
 
   // XXX Should col frame have border/padding considered?
   if (aIsCell) {
@@ -478,14 +475,16 @@ void BasicTableLayoutStrategy::ComputeIntrinsicISizes(
   mPrefISizePctExpand = pref_pct_expand;
 }
 
-/* virtual */ void BasicTableLayoutStrategy::MarkIntrinsicISizesDirty() {
+/* virtual */
+void BasicTableLayoutStrategy::MarkIntrinsicISizesDirty() {
   mMinISize = NS_INTRINSIC_WIDTH_UNKNOWN;
   mPrefISize = NS_INTRINSIC_WIDTH_UNKNOWN;
   mPrefISizePctExpand = NS_INTRINSIC_WIDTH_UNKNOWN;
   mLastCalcISize = nscoord_MIN;
 }
 
-/* virtual */ void BasicTableLayoutStrategy::ComputeColumnISizes(
+/* virtual */
+void BasicTableLayoutStrategy::ComputeColumnISizes(
     const ReflowInput &aReflowInput) {
   nscoord iSize = aReflowInput.ComputedISize();
 

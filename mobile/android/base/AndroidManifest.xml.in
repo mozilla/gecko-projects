@@ -30,6 +30,7 @@
                  android:hardwareAccelerated="true"
                  android:supportsRtl="true"
                  android:allowBackup="false"
+                 android:usesCleartextTraffic="true"
                  >
 
         <meta-data android:name="com.sec.android.support.multiwindow" android:value="true"/>
@@ -226,6 +227,23 @@
             <action android:name="android.intent.action.GET_RESTRICTION_ENTRIES" />
           </intent-filter>
         </receiver>
+
+         <receiver android:name="org.mozilla.gecko.search.SearchWidgetProvider">
+             <intent-filter>
+                 <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+             </intent-filter>
+
+             <meta-data
+                 android:name="android.appwidget.provider"
+                 android:resource="@xml/search_widget_info" />
+         </receiver>
+
+         <activity android:name="org.mozilla.gecko.search.SearchWidgetConfigurationActivity"
+                   android:theme="@style/OverlayActivity">
+             <intent-filter>
+                 <action android:name="android.appwidget.action.APPWIDGET_CONFIGURE"/>
+             </intent-filter>
+         </activity>
 
         <!-- Masquerade as the Resolver so that we can be opened from the Marketplace. -->
         <activity-alias
@@ -514,10 +532,10 @@
 
         <!-- New child services must also be added to the GeckoView AndroidManifest.xml -->
         <service
-            android:name="org.mozilla.gecko.process.GeckoServiceChildProcess$geckomediaplugin"
+            android:name="org.mozilla.gecko.process.GeckoServiceChildProcess$gmplugin"
             android:enabled="true"
             android:exported="false"
-            android:process=":geckomediaplugin"
+            android:process=":gmplugin"
             android:isolatedProcess="false">
         </service>
 

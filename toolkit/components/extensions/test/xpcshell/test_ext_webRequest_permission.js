@@ -66,7 +66,7 @@ add_task(async function test_permissions() {
       },
     };
 
-    ChromeUtils.import("resource://gre/modules/MessageChannel.jsm");
+    const {MessageChannel} = ChromeUtils.import("resource://gre/modules/MessageChannel.jsm");
     MessageChannel.addListener(this, "Test:Check", messageListener);
   };
 
@@ -87,4 +87,32 @@ add_task(async function test_permissions() {
 
   await extension.unload();
   await contentPage.close();
+});
+
+
+add_task(async function test_no_webRequestBlocking_error() {
+  function background() {
+    const expectedError = "Using webRequest.addListener with the blocking option " +
+      "requires the 'webRequestBlocking' permission.";
+
+    const blockingEvents = [
+      "onBeforeRequest", "onBeforeSendHeaders", "onHeadersReceived", "onAuthRequired",
+    ];
+
+    for (let eventName of blockingEvents) {
+      browser.test.assertThrows(() => {
+        browser.webRequest[eventName].addListener(details => {}, {urls: ["<all_urls>"]}, ["blocking"]);
+      }, expectedError, `Got the expected exception for a blocking webRequest.${eventName} listener`);
+    }
+  }
+
+  const extensionData = {
+    manifest: {permissions: ["webRequest", "<all_urls>"]},
+    background,
+  };
+
+  const extension = ExtensionTestUtils.loadExtension(extensionData);
+
+  await extension.startup();
+  await extension.unload();
 });

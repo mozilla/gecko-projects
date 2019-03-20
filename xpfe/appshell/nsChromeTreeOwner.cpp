@@ -445,9 +445,14 @@ nsChromeTreeOwner::OnStatusChange(nsIWebProgress* aWebProgress,
 
 NS_IMETHODIMP
 nsChromeTreeOwner::OnSecurityChange(nsIWebProgress* aWebProgress,
-                                    nsIRequest* aRequest, uint32_t aOldState,
-                                    uint32_t aState,
-                                    const nsAString& aContentBlockingLogJSON) {
+                                    nsIRequest* aRequest, uint32_t aState) {
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+nsChromeTreeOwner::OnContentBlockingEvent(nsIWebProgress* aWebProgress,
+                                          nsIRequest* aRequest,
+                                          uint32_t aEvent) {
   return NS_OK;
 }
 

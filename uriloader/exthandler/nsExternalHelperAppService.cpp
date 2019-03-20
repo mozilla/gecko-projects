@@ -68,7 +68,7 @@
 #include "nsIPropertyBag2.h"     // for the 64-bit content length
 
 #ifdef XP_MACOSX
-#include "nsILocalFileMac.h"
+#  include "nsILocalFileMac.h"
 #endif
 
 #include "nsIPluginHost.h"  // XXX needed for ext->type mapping (bug 233289)
@@ -98,11 +98,11 @@
 #include "ExternalHelperAppChild.h"
 
 #ifdef XP_WIN
-#include "nsWindowsHelpers.h"
+#  include "nsWindowsHelpers.h"
 #endif
 
 #ifdef MOZ_WIDGET_ANDROID
-#include "FennecJNIWrappers.h"
+#  include "FennecJNIWrappers.h"
 #endif
 
 #include "mozilla/Preferences.h"
@@ -344,7 +344,7 @@ static nsresult GetDownloadDirectory(nsIFile** _directory,
   nsresult rv = NS_GetSpecialDirectory(NS_OS_TEMP_DIR, getter_AddRefs(dir));
   NS_ENSURE_SUCCESS(rv, rv);
 
-#if defined(XP_UNIX)
+#  if defined(XP_UNIX)
   // Ensuring that only the current user can read the file names we end up
   // creating. Note that Creating directories with specified permission only
   // supported on Unix platform right now. That's why above if exists.
@@ -412,7 +412,7 @@ static nsresult GetDownloadDirectory(nsIFile** _directory,
     }
   }
 
-#endif
+#  endif
 #endif
 
   NS_ASSERTION(dir, "Somehow we didn't get a download directory!");
@@ -488,9 +488,9 @@ struct nsExtraMimeTypeEntry {
 };
 
 #ifdef XP_MACOSX
-#define MAC_TYPE(x) x
+#  define MAC_TYPE(x) x
 #else
-#define MAC_TYPE(x) 0
+#  define MAC_TYPE(x) 0
 #endif
 
 /**
@@ -557,7 +557,8 @@ static const nsExtraMimeTypeEntry extraMimeEntries[] = {
     {AUDIO_WAV, "wav", "Waveform Audio"},
     {VIDEO_3GPP, "3gpp,3gp", "3GPP Video"},
     {VIDEO_3GPP2, "3g2", "3GPP2 Video"},
-    {AUDIO_MIDI, "mid", "Standard MIDI Audio"}};
+    {AUDIO_MIDI, "mid", "Standard MIDI Audio"},
+    {APPLICATION_WASM, "wasm", "WebAssembly Module"}};
 
 #undef MAC_TYPE
 
@@ -615,6 +616,7 @@ nsresult nsExternalHelperAppService::DoContentContentProcessHelper(
   bool wasFileChannel = false;
   uint32_t contentDisposition = -1;
   nsAutoString fileName;
+  nsCOMPtr<nsILoadInfo> loadInfo;
 
   nsCOMPtr<nsIChannel> channel = do_QueryInterface(aRequest);
   if (channel) {
@@ -623,6 +625,7 @@ nsresult nsExternalHelperAppService::DoContentContentProcessHelper(
     channel->GetContentDisposition(&contentDisposition);
     channel->GetContentDispositionFilename(fileName);
     channel->GetContentDispositionHeader(disp);
+    loadInfo = channel->LoadInfo();
 
     nsCOMPtr<nsIFileChannel> fileChan(do_QueryInterface(aRequest));
     wasFileChannel = fileChan != nullptr;
@@ -631,9 +634,12 @@ nsresult nsExternalHelperAppService::DoContentContentProcessHelper(
   nsCOMPtr<nsIURI> referrer;
   NS_GetReferrerFromChannel(channel, getter_AddRefs(referrer));
 
-  OptionalURIParams uriParams, referrerParams;
+  Maybe<URIParams> uriParams, referrerParams;
   SerializeURI(uri, uriParams);
   SerializeURI(referrer, referrerParams);
+
+  Maybe<mozilla::net::LoadInfoArgs> loadInfoArgs;
+  MOZ_ALWAYS_SUCCEEDS(LoadInfoToLoadInfoArgs(loadInfo, &loadInfoArgs));
 
   // Now we build a protocol for forwarding our data to the parent.  The
   // protocol will act as a listener on the child-side and create a "real"
@@ -641,8 +647,9 @@ nsresult nsExternalHelperAppService::DoContentContentProcessHelper(
   // DoContent.
   mozilla::dom::PExternalHelperAppChild* pc =
       child->SendPExternalHelperAppConstructor(
-          uriParams, nsCString(aMimeContentType), disp, contentDisposition,
-          fileName, aForceSave, contentLength, wasFileChannel, referrerParams,
+          uriParams, loadInfoArgs, nsCString(aMimeContentType), disp,
+          contentDisposition, fileName, aForceSave, contentLength,
+          wasFileChannel, referrerParams,
           mozilla::dom::TabChild::GetFrom(window));
   ExternalHelperAppChild* childListener =
       static_cast<ExternalHelperAppChild*>(pc);
@@ -1495,8 +1502,7 @@ void nsExternalAppHandler::MaybeApplyDecodingForExtension(
   encChannel->SetApplyConversion(applyConversion);
 }
 
-NS_IMETHODIMP nsExternalAppHandler::OnStartRequest(nsIRequest* request,
-                                                   nsISupports* aCtxt) {
+NS_IMETHODIMP nsExternalAppHandler::OnStartRequest(nsIRequest* request) {
   MOZ_ASSERT(request, "OnStartRequest without request?");
 
   // Set mTimeDownloadStarted here as the download has already started and
@@ -1879,7 +1885,7 @@ void nsExternalAppHandler::SendStatusChange(ErrorType type, nsresult rv,
 }
 
 NS_IMETHODIMP
-nsExternalAppHandler::OnDataAvailable(nsIRequest* request, nsISupports* aCtxt,
+nsExternalAppHandler::OnDataAvailable(nsIRequest* request,
                                       nsIInputStream* inStr,
                                       uint64_t sourceOffset, uint32_t count) {
   nsresult rv = NS_OK;
@@ -1894,7 +1900,7 @@ nsExternalAppHandler::OnDataAvailable(nsIRequest* request, nsISupports* aCtxt,
     mProgress += count;
 
     nsCOMPtr<nsIStreamListener> saver = do_QueryInterface(mSaver);
-    rv = saver->OnDataAvailable(request, aCtxt, inStr, sourceOffset, count);
+    rv = saver->OnDataAvailable(request, inStr, sourceOffset, count);
     if (NS_SUCCEEDED(rv)) {
       // Send progress notification.
       if (mTransfer) {
@@ -1918,7 +1924,6 @@ nsExternalAppHandler::OnDataAvailable(nsIRequest* request, nsISupports* aCtxt,
 }
 
 NS_IMETHODIMP nsExternalAppHandler::OnStopRequest(nsIRequest* request,
-                                                  nsISupports* aCtxt,
                                                   nsresult aStatus) {
   LOG(
       ("nsExternalAppHandler::OnStopRequest\n"
@@ -1971,19 +1976,17 @@ nsExternalAppHandler::OnSaveComplete(nsIBackgroundFileSaver* aSaver,
     // Save the redirect information.
     nsCOMPtr<nsIChannel> channel = do_QueryInterface(mRequest);
     if (channel) {
-      nsCOMPtr<nsILoadInfo> loadInfo = channel->GetLoadInfo();
-      if (loadInfo) {
-        nsresult rv = NS_OK;
-        nsCOMPtr<nsIMutableArray> redirectChain =
-            do_CreateInstance(NS_ARRAY_CONTRACTID, &rv);
-        NS_ENSURE_SUCCESS(rv, rv);
-        LOG(("nsExternalAppHandler: Got %zu redirects\n",
-             loadInfo->RedirectChain().Length()));
-        for (nsIRedirectHistoryEntry* entry : loadInfo->RedirectChain()) {
-          redirectChain->AppendElement(entry);
-        }
-        mRedirects = redirectChain;
+      nsCOMPtr<nsILoadInfo> loadInfo = channel->LoadInfo();
+      nsresult rv = NS_OK;
+      nsCOMPtr<nsIMutableArray> redirectChain =
+          do_CreateInstance(NS_ARRAY_CONTRACTID, &rv);
+      NS_ENSURE_SUCCESS(rv, rv);
+      LOG(("nsExternalAppHandler: Got %zu redirects\n",
+           loadInfo->RedirectChain().Length()));
+      for (nsIRedirectHistoryEntry* entry : loadInfo->RedirectChain()) {
+        redirectChain->AppendElement(entry);
       }
+      mRedirects = redirectChain;
     }
 
     if (NS_FAILED(aStatus)) {

@@ -18,7 +18,11 @@ function waitForInsecureLoginFormsStateChange(browser, count) {
  */
 add_task(async function test_simple() {
   await SpecialPowers.pushPrefEnv({
-    "set": [["security.insecure_password.ui.enabled", true]],
+    "set": [
+      ["security.insecure_password.ui.enabled", true],
+      // By default, proxies don't apply to 127.0.0.1. We need them to for this test, though:
+      ["network.proxy.allow_hijacking_localhost", true],
+    ],
   });
 
   for (let [origin, expectWarning] of [

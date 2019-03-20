@@ -67,14 +67,15 @@ class VRManager {
   void StopVRNavigation(const uint32_t& aDisplayID,
                         const TimeDuration& aTimeout);
 
+  void Shutdown();
+
  protected:
   VRManager();
   ~VRManager();
 
  private:
-  void Init();
   void Destroy();
-  void Shutdown();
+  void Init();
   void StartTasks();
   void StopTasks();
   static void TaskTimerCallback(nsITimer* aTimer, void* aClosure);
@@ -112,9 +113,6 @@ class VRManager {
   double mAccumulator100ms;
   RefPtr<VRSystemManagerPuppet> mPuppetManager;
   RefPtr<VRSystemManagerExternal> mExternalManager;
-#if !defined(MOZ_WIDGET_ANDROID)
-  RefPtr<VRService> mVRService;
-#endif
   bool mVRDisplaysRequested;
   bool mVRDisplaysRequestedNonFocus;
   bool mVRControllersRequested;

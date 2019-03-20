@@ -42,7 +42,7 @@ run_on_hg_branches
 
 On a given project, the mercurial branch where this task should be in the target
 task set.  This is how requirements like "only run this RELBRANCH" get implemented.
-These are either the regular expression of a branch (e.g.: "GECKOVIEW_\d+_RELBRANCH")
+These are either the regular expression of a branch (e.g.: ``GECKOVIEW_\d+_RELBRANCH``)
 or the following alias:
 
  * `all` -- everywhere (the default)
@@ -135,6 +135,12 @@ serviceworker_e10s
 
 For test suites which distinguish whether or not they run with the serviceworker
 e10s redesign enabled.
+
+socketprocess_e10s
+==================
+
+For test suites which distinguish whether or not they run with the socket
+process enabled.
 
 e10s
 ====
@@ -261,15 +267,18 @@ cron
 Indicates that a task is meant to be run via cron tasks, and should not be run
 on push.
 
-cache_digest
-============
-Some tasks generate artifacts that are cached between pushes. This is the unique string used
-to identify the current version of the artifacts. See :py:mod:`taskgraph.util.cached_task`.
+cached_task
+===========
+Some tasks generate artifacts that are cached between pushes. This is a
+dictionary with the type and name of the cache, and the unique string used to
+identify the current version of the artifacts. See :py:mod:`taskgraph.util.cached_task`.
 
-cache_type
-==========
-Some tasks generate artifacts that are cached between pushes. This is the type of cache that is
-used for the this task. See :py:mod:`taskgraph.util.cached_task`.
+.. code:: yaml
+
+   cached_task:
+       digest: 66dfc2204600b48d92a049b6a18b83972bb9a92f9504c06608a9c20eb4c9d8ae
+       name: debian7-base
+       type: docker-images.v2
 
 required_signoffs
 =================
@@ -278,3 +287,18 @@ require these signoffs. For example, ``mar-signing`` signoffs may be required
 by some releases in the future; for any releases that require ``mar-signing``
 signoffs, the kinds that also require that signoff are marked with this
 attribute.
+
+update-channel
+==============
+The update channel the build is configured to use.
+
+openh264_rev
+============
+Only used for openh264 plugin builds, used to signify the revision (and thus inform artifact name) of the given build.
+
+code-review
+===========
+If a task set this boolean attribute to `true`, it will be processed by the code
+review bot, the task will ran for every new Phabricator diff.
+Any supported and detected issue will be automatically reported on the
+Phabricator revision.

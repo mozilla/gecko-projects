@@ -17,7 +17,10 @@ import type { Symbols } from "../reducers/ast";
 import type { QuickOpenType } from "../reducers/quick-open";
 import type { TabList } from "../reducers/tabs";
 import type { Source } from "../types";
-import type { SymbolDeclaration } from "../workers/parser";
+import type {
+  SymbolDeclaration,
+  IdentifierDeclaration
+} from "../workers/parser";
 
 export const MODIFIERS = {
   "@": "functions",
@@ -60,7 +63,7 @@ export function formatSourcesForList(source: Source, tabs: TabList) {
   const title = getFilename(source);
   const relativeUrlWithQuery = `${source.relativeUrl}${getSourceQueryString(
     source
-  )}`;
+  ) || ""}`;
   const subtitle = endTruncateStr(relativeUrlWithQuery, 100);
   const value = relativeUrlWithQuery;
   return {
@@ -86,11 +89,12 @@ export type QuickOpenResult = {|
 |};
 
 export type FormattedSymbolDeclarations = {|
-  variables: Array<QuickOpenResult>,
   functions: Array<QuickOpenResult>
 |};
 
-export function formatSymbol(symbol: SymbolDeclaration): QuickOpenResult {
+export function formatSymbol(
+  symbol: SymbolDeclaration | IdentifierDeclaration
+): QuickOpenResult {
   return {
     id: `${symbol.name}:${symbol.location.start.line}`,
     title: symbol.name,
@@ -133,12 +137,10 @@ export function formatShortcutResults(): Array<QuickOpenResult> {
 }
 
 export function formatSources(
-  sources: { [string]: Source },
+  sources: Source[],
   tabs: TabList
 ): Array<QuickOpenResult> {
-  const sourceList: Source[] = (Object.values(sources): any);
-
-  return sourceList
+  return sources
     .filter(source => !isPretty(source))
     .filter(({ relativeUrl }) => !!relativeUrl)
     .map(source => formatSourcesForList(source, tabs));

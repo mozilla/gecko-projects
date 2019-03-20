@@ -5,7 +5,9 @@
 
 /* import-globals-from ../../../toolkit/content/preferencesBindings.js */
 
-ChromeUtils.import("resource://gre/modules/Services.jsm");
+var {Services} = ChromeUtils.import("resource://gre/modules/Services.jsm");
+
+document.documentElement.addEventListener("dialoghelp", window.top.openPrefsHelp);
 
 Preferences.addAll([
   { id: "intl.accept_languages", type: "wstring" },
@@ -186,9 +188,9 @@ var gLanguagesDialog = {
 
     this._selectedItemID = selectedID;
 
-    if (preference.value == "")
+    if (preference.value == "") {
       preference.value = selectedID;
-    else {
+    } else {
       arrayOfPrefs.unshift(selectedID);
       preference.value = arrayOfPrefs.join(",");
     }

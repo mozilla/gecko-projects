@@ -4,17 +4,6 @@
 
 %include ../shared/compacttheme.inc.css
 
-@media (-moz-windows-accent-color-in-titlebar) {
-  :root[tabsintitlebar]:not(:-moz-window-inactive) {
-    background-color: -moz-win-accentcolor;
-    color: -moz-win-accentcolortext;
-  }
-  :root[tabsintitlebar] #titlebar {
-    --lwt-toolbarbutton-icon-fill: currentColor;
-    --toolbarbutton-icon-fill-opacity: .7;
-  }
-}
-
 /* The window background is white due to no accentcolor in the lightweight
    theme. It can't be changed to transparent when there is no compositor
    (Win 7 in classic / basic theme), or else dragging and focus become
@@ -51,9 +40,8 @@
 
     /* Because we're forcing the tabs toolbar to be [brighttext] to
      * get white toolbar button icons, we need to manually set the
-     * correct color for the tab hover and multiselect state for the light theme. */
-    .tabbrowser-tab:hover > .tab-stack > .tab-background:not([selected=true]):-moz-lwtheme-darktext,
-    .tabbrowser-tab[multiselected] > .tab-stack > .tab-background:not([selected=true]):-moz-lwtheme-darktext {
+     * correct color for the tab hover state for the light theme. */
+    .tabbrowser-tab:hover > .tab-stack > .tab-background:not([selected=true]):not([multiselected]):-moz-lwtheme-darktext {
       background-color: rgba(0,0,0,.1) !important;
     }
     .tabbrowser-tab:hover > .tab-stack > .tab-background > .tab-line:not([selected=true]):not([multiselected]):-moz-lwtheme-darktext {

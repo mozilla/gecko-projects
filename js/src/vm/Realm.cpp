@@ -53,8 +53,7 @@ Realm::Realm(Compartment* comp, const JS::RealmOptions& options)
       global_(nullptr),
       objects_(zone_),
       randomKeyGenerator_(runtime_->forkRandomKeyGenerator()),
-      wasm(runtime_),
-      performanceMonitoring(runtime_) {
+      wasm(runtime_) {
   MOZ_ASSERT_IF(creationOptions_.mergeable(),
                 creationOptions_.invisibleToDebugger());
 
@@ -117,20 +116,26 @@ bool Realm::init(JSContext* cx, JSPrincipals* principals) {
   return true;
 }
 
-jit::JitRuntime* JSRuntime::createJitRuntime(JSContext* cx) {
+bool JSRuntime::createJitRuntime(JSContext* cx) {
   using namespace js::jit;
 
   MOZ_ASSERT(!jitRuntime_);
 
   if (!CanLikelyAllocateMoreExecutableMemory()) {
-    // Report OOM instead of potentially hitting the MOZ_CRASH below.
-    ReportOutOfMemory(cx);
-    return nullptr;
+    // Report OOM instead of potentially hitting the MOZ_CRASH below, but first
+    // try to release memory.
+    if (OnLargeAllocationFailure) {
+      OnLargeAllocationFailure();
+    }
+    if (!CanLikelyAllocateMoreExecutableMemory()) {
+      ReportOutOfMemory(cx);
+      return false;
+    }
   }
 
   jit::JitRuntime* jrt = cx->new_<jit::JitRuntime>();
   if (!jrt) {
-    return nullptr;
+    return false;
   }
 
   // Unfortunately, initialization depends on jitRuntime_ being non-null, so
@@ -145,7 +150,7 @@ jit::JitRuntime* JSRuntime::createJitRuntime(JSContext* cx) {
     noOOM.crash("OOM in createJitRuntime");
   }
 
-  return jitRuntime_;
+  return true;
 }
 
 bool Realm::ensureJitRealmExists(JSContext* cx) {
@@ -164,7 +169,7 @@ bool Realm::ensureJitRealmExists(JSContext* cx) {
     return false;
   }
 
-  if (!jitRealm->initialize(cx)) {
+  if (!jitRealm->initialize(cx, zone()->allocNurseryStrings)) {
     return false;
   }
 
@@ -177,15 +182,6 @@ bool Realm::ensureJitRealmExists(JSContext* cx) {
 void js::DtoaCache::checkCacheAfterMovingGC() {
   MOZ_ASSERT(!s || !IsForwarded(s));
 }
-
-namespace {
-struct CheckGCThingAfterMovingGCFunctor {
-  template <class T>
-  void operator()(T* t) {
-    CheckGCThingAfterMovingGC(*t);
-  }
-};
-}  // namespace
 
 #endif  // JSGC_HASH_TABLE_CHECKS
 
@@ -307,8 +303,8 @@ void ObjectRealm::trace(JSTracer* trc) {
 void Realm::traceRoots(JSTracer* trc,
                        js::gc::GCRuntime::TraceOrMarkRuntime traceOrMark) {
   if (objectMetadataState_.is<PendingMetadata>()) {
-    TraceRoot(trc, &objectMetadataState_.as<PendingMetadata>(),
-              "on-stack object pending metadata");
+    GCPolicy<NewObjectMetadataState>::trace(trc, &objectMetadataState_,
+                                            "on-stack object pending metadata");
   }
 
   if (!JS::RuntimeHeapIsMinorCollecting()) {
@@ -459,24 +455,6 @@ void Realm::sweepObjectRealm() { objects_.sweepNativeIterators(); }
 
 void Realm::sweepVarNames() { varNames_.sweep(); }
 
-namespace {
-struct TraceRootFunctor {
-  JSTracer* trc;
-  const char* name;
-  TraceRootFunctor(JSTracer* trc, const char* name) : trc(trc), name(name) {}
-  template <class T>
-  void operator()(T* t) {
-    return TraceRoot(trc, t, name);
-  }
-};
-struct NeedsSweepUnbarrieredFunctor {
-  template <class T>
-  bool operator()(T* t) const {
-    return IsAboutToBeFinalizedUnbarriered(t);
-  }
-};
-}  // namespace
-
 void Realm::sweepTemplateObjects() {
   if (mappedArgumentsTemplate_ &&
       IsAboutToBeFinalized(&mappedArgumentsTemplate_)) {
@@ -599,7 +577,7 @@ void Realm::checkScriptMapsAfterMovingGC() {
     }
   }
 
-#ifdef MOZ_VTUNE
+#  ifdef MOZ_VTUNE
   if (scriptVTuneIdMap) {
     for (auto r = scriptVTuneIdMap->all(); !r.empty(); r.popFront()) {
       JSScript* script = r.front().key();
@@ -609,7 +587,7 @@ void Realm::checkScriptMapsAfterMovingGC() {
       MOZ_RELEASE_ASSERT(ptr.found() && &*ptr == &r.front());
     }
   }
-#endif  // MOZ_VTUNE
+#  endif  // MOZ_VTUNE
 }
 #endif
 
@@ -713,11 +691,7 @@ static bool AddLazyFunctionsForRealm(JSContext* cx,
   for (auto i = cx->zone()->cellIter<JSObject>(kind); !i.done(); i.next()) {
     JSFunction* fun = &i->as<JSFunction>();
 
-    // Sweeping is incremental; take care to not delazify functions that
-    // are about to be finalized. GC things referenced by objects that are
-    // about to be finalized (e.g., in slots) may already be freed.
-    if (gc::IsAboutToBeFinalizedUnbarriered(&fun) ||
-        fun->realm() != cx->realm()) {
+    if (fun->realm() != cx->realm()) {
       continue;
     }
 
@@ -796,7 +770,9 @@ void Realm::updateDebuggerObservesFlag(unsigned flag) {
           : maybeGlobal();
   const GlobalObject::DebuggerVector* v = global->getDebuggers();
   for (auto p = v->begin(); p != v->end(); p++) {
-    Debugger* dbg = *p;
+    // Use unbarrieredGet() to prevent triggering read barrier while collecting,
+    // this is safe as long as dbg does not escape.
+    Debugger* dbg = p->unbarrieredGet();
     if (flag == DebuggerObservesAllExecution
             ? dbg->observesAllExecution()
             : flag == DebuggerObservesCoverage
@@ -948,9 +924,8 @@ mozilla::HashCodeScrambler Realm::randomHashCodeScrambler() {
 
 AutoSetNewObjectMetadata::AutoSetNewObjectMetadata(
     JSContext* cx MOZ_GUARD_OBJECT_NOTIFIER_PARAM_IN_IMPL)
-    : CustomAutoRooter(cx),
-      cx_(cx->helperThread() ? nullptr : cx),
-      prevState_(cx->realm()->objectMetadataState_) {
+    : cx_(cx->helperThread() ? nullptr : cx),
+      prevState_(cx, cx->realm()->objectMetadataState_) {
   MOZ_GUARD_OBJECT_NOTIFIER_INIT;
   if (cx_) {
     cx_->realm()->objectMetadataState_ =

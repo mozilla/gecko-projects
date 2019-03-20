@@ -47,7 +47,7 @@ XPCOMUtils.defineLazyServiceGetter(this, "PageThumbsStorageService",
   "@mozilla.org/thumbnails/pagethumbs-service;1", "nsIPageThumbsStorageService");
 
 /**
- * Utilities for dealing with promises and Task.jsm
+ * Utilities for dealing with promises.
  */
 const TaskUtils = {
   /**
@@ -163,14 +163,12 @@ var PageThumbs = {
     }
 
     return new Promise(resolve => {
-
-      let canvas = this.createCanvas(aBrowser.contentWindow);
+      let canvas = this.createCanvas(aBrowser.ownerGlobal);
       this.captureToCanvas(aBrowser, canvas, () => {
         canvas.toBlob(blob => {
           resolve(blob, this.contentType);
         });
       });
-
     });
   },
 
@@ -263,7 +261,7 @@ var PageThumbs = {
       return;
     }
     // The content is a local page, grab a thumbnail sync.
-    PageThumbUtils.createSnapshotThumbnail(aBrowser.contentWindow,
+    PageThumbUtils.createSnapshotThumbnail(aBrowser.ownerGlobal,
                                            aCanvas,
                                            aArgs);
 
@@ -284,7 +282,6 @@ var PageThumbs = {
    */
   _captureRemoteThumbnail(aBrowser, aWidth, aHeight, aArgs) {
     return new Promise(resolve => {
-
       // The index we send with the request so we can identify the
       // correct response.
       let index = gRemoteThumbId++;
@@ -330,7 +327,6 @@ var PageThumbs = {
         id: index,
         additionalArgs: aArgs,
       });
-
     });
   },
 

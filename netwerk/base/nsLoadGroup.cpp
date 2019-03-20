@@ -83,19 +83,17 @@ static void RescheduleRequest(nsIRequest *aRequest, int32_t delta) {
   if (p) p->AdjustPriority(delta);
 }
 
-nsLoadGroup::nsLoadGroup(nsISupports *outer)
+nsLoadGroup::nsLoadGroup()
     : mForegroundCount(0),
       mLoadFlags(LOAD_NORMAL),
       mDefaultLoadFlags(0),
+      mPriority(PRIORITY_NORMAL),
       mRequests(&sRequestHashOps, sizeof(RequestMapEntry)),
       mStatus(NS_OK),
-      mPriority(PRIORITY_NORMAL),
       mIsCanceling(false),
       mDefaultLoadIsTimed(false),
       mTimedRequests(0),
-      mCachedRequests(0),
-      mTimedNonCachedRequestsUntilOnEndPageLoad(0) {
-  NS_INIT_AGGREGATED(outer);
+      mCachedRequests(0) {
   LOG(("LOADGROUP [%p]: Created.\n", this));
 }
 
@@ -115,15 +113,8 @@ nsLoadGroup::~nsLoadGroup() {
 ////////////////////////////////////////////////////////////////////////////////
 // nsISupports methods:
 
-NS_IMPL_AGGREGATED(nsLoadGroup)
-NS_INTERFACE_MAP_BEGIN_AGGREGATED(nsLoadGroup)
-  NS_INTERFACE_MAP_ENTRY(nsILoadGroup)
-  NS_INTERFACE_MAP_ENTRY(nsPILoadGroupInternal)
-  NS_INTERFACE_MAP_ENTRY(nsILoadGroupChild)
-  NS_INTERFACE_MAP_ENTRY(nsIRequest)
-  NS_INTERFACE_MAP_ENTRY(nsISupportsPriority)
-  NS_INTERFACE_MAP_ENTRY(nsISupportsWeakReference)
-NS_INTERFACE_MAP_END
+NS_IMPL_ISUPPORTS(nsLoadGroup, nsILoadGroup, nsILoadGroupChild, nsIRequest,
+                  nsISupportsPriority, nsISupportsWeakReference)
 
 ////////////////////////////////////////////////////////////////////////////////
 // nsIRequest methods:
@@ -205,20 +196,19 @@ nsLoadGroup::Cancel(nsresult status) {
   nsresult firstError = NS_OK;
 
   while (count > 0) {
-    nsIRequest *request = requests.ElementAt(--count);
+    nsCOMPtr<nsIRequest> request = dont_AddRef(requests.ElementAt(--count));
 
     NS_ASSERTION(request, "NULL request found in list.");
 
     if (!mRequests.Search(request)) {
       // |request| was removed already
-      NS_RELEASE(request);
       continue;
     }
 
     if (MOZ_LOG_TEST(gLoadGroupLog, LogLevel::Debug)) {
       nsAutoCString nameStr;
       request->GetName(nameStr);
-      LOG(("LOADGROUP [%p]: Canceling request %p %s.\n", this, request,
+      LOG(("LOADGROUP [%p]: Canceling request %p %s.\n", this, request.get(),
            nameStr.get()));
     }
 
@@ -235,8 +225,6 @@ nsLoadGroup::Cancel(nsresult status) {
 
     // Remember the first failure and return it...
     if (NS_FAILED(rv) && NS_SUCCEEDED(firstError)) firstError = rv;
-
-    NS_RELEASE(request);
   }
 
   if (mRequestContext) {
@@ -271,7 +259,7 @@ nsLoadGroup::Suspend() {
   // get removed from the list it won't affect our iteration
   //
   while (count > 0) {
-    nsIRequest *request = requests.ElementAt(--count);
+    nsCOMPtr<nsIRequest> request = dont_AddRef(requests.ElementAt(--count));
 
     NS_ASSERTION(request, "NULL request found in list.");
     if (!request) continue;
@@ -279,7 +267,7 @@ nsLoadGroup::Suspend() {
     if (MOZ_LOG_TEST(gLoadGroupLog, LogLevel::Debug)) {
       nsAutoCString nameStr;
       request->GetName(nameStr);
-      LOG(("LOADGROUP [%p]: Suspending request %p %s.\n", this, request,
+      LOG(("LOADGROUP [%p]: Suspending request %p %s.\n", this, request.get(),
            nameStr.get()));
     }
 
@@ -288,8 +276,6 @@ nsLoadGroup::Suspend() {
 
     // Remember the first failure and return it...
     if (NS_FAILED(rv) && NS_SUCCEEDED(firstError)) firstError = rv;
-
-    NS_RELEASE(request);
   }
 
   return firstError;
@@ -312,7 +298,7 @@ nsLoadGroup::Resume() {
   // get removed from the list it won't affect our iteration
   //
   while (count > 0) {
-    nsIRequest *request = requests.ElementAt(--count);
+    nsCOMPtr<nsIRequest> request = dont_AddRef(requests.ElementAt(--count));
 
     NS_ASSERTION(request, "NULL request found in list.");
     if (!request) continue;
@@ -320,7 +306,7 @@ nsLoadGroup::Resume() {
     if (MOZ_LOG_TEST(gLoadGroupLog, LogLevel::Debug)) {
       nsAutoCString nameStr;
       request->GetName(nameStr);
-      LOG(("LOADGROUP [%p]: Resuming request %p %s.\n", this, request,
+      LOG(("LOADGROUP [%p]: Resuming request %p %s.\n", this, request.get(),
            nameStr.get()));
     }
 
@@ -329,8 +315,6 @@ nsLoadGroup::Resume() {
 
     // Remember the first failure and return it...
     if (NS_FAILED(rv) && NS_SUCCEEDED(firstError)) firstError = rv;
-
-    NS_RELEASE(request);
   }
 
   return firstError;
@@ -350,8 +334,8 @@ nsLoadGroup::SetLoadFlags(uint32_t aLoadFlags) {
 
 NS_IMETHODIMP
 nsLoadGroup::GetLoadGroup(nsILoadGroup **loadGroup) {
-  *loadGroup = mLoadGroup;
-  NS_IF_ADDREF(*loadGroup);
+  nsCOMPtr<nsILoadGroup> result = mLoadGroup;
+  result.forget(loadGroup);
   return NS_OK;
 }
 
@@ -366,8 +350,8 @@ nsLoadGroup::SetLoadGroup(nsILoadGroup *loadGroup) {
 
 NS_IMETHODIMP
 nsLoadGroup::GetDefaultLoadRequest(nsIRequest **aRequest) {
-  *aRequest = mDefaultLoadRequest;
-  NS_IF_ADDREF(*aRequest);
+  nsCOMPtr<nsIRequest> result = mDefaultLoadRequest;
+  result.forget(aRequest);
   return NS_OK;
 }
 
@@ -465,7 +449,7 @@ nsLoadGroup::AddRequest(nsIRequest *request, nsISupports *ctxt) {
            "(foreground count=%d).\n",
            this, request, mForegroundCount));
 
-      rv = observer->OnStartRequest(request, ctxt);
+      rv = observer->OnStartRequest(request);
       if (NS_FAILED(rv)) {
         LOG(("LOADGROUP [%p]: OnStartRequest for request %p FAILED.\n", this,
              request));
@@ -538,8 +522,6 @@ nsLoadGroup::RemoveRequest(nsIRequest *request, nsISupports *ctxt,
       rv = timedChannel->GetCacheReadStart(&timeStamp);
       if (NS_SUCCEEDED(rv) && !timeStamp.IsNull()) {
         ++mCachedRequests;
-      } else {
-        mTimedNonCachedRequestsUntilOnEndPageLoad++;
       }
 
       rv = timedChannel->GetAsyncOpen(&timeStamp);
@@ -583,7 +565,7 @@ nsLoadGroup::RemoveRequest(nsIRequest *request, nsISupports *ctxt,
            "(foreground count=%d).\n",
            this, request, mForegroundCount));
 
-      rv = observer->OnStopRequest(request, ctxt, aStatus);
+      rv = observer->OnStopRequest(request, aStatus);
 
       if (NS_FAILED(rv)) {
         LOG(("LOADGROUP [%p]: OnStopRequest for request %p FAILED.\n", this,
@@ -622,8 +604,7 @@ nsLoadGroup::SetGroupObserver(nsIRequestObserver *aObserver) {
 NS_IMETHODIMP
 nsLoadGroup::GetGroupObserver(nsIRequestObserver **aResult) {
   nsCOMPtr<nsIRequestObserver> observer = do_QueryReferent(mObserver);
-  *aResult = observer;
-  NS_IF_ADDREF(*aResult);
+  observer.forget(aResult);
   return NS_OK;
 }
 
@@ -636,8 +617,8 @@ nsLoadGroup::GetActiveCount(uint32_t *aResult) {
 NS_IMETHODIMP
 nsLoadGroup::GetNotificationCallbacks(nsIInterfaceRequestor **aCallbacks) {
   NS_ENSURE_ARG_POINTER(aCallbacks);
-  *aCallbacks = mCallbacks;
-  NS_IF_ADDREF(*aCallbacks);
+  nsCOMPtr<nsIInterfaceRequestor> callbacks = mCallbacks;
+  callbacks.forget(aCallbacks);
   return NS_OK;
 }
 
@@ -692,18 +673,6 @@ nsLoadGroup::GetRootLoadGroup(nsILoadGroup **aRootLoadGroup) {
 
   // finally just return this
   NS_ADDREF(*aRootLoadGroup = this);
-  return NS_OK;
-}
-
-////////////////////////////////////////////////////////////////////////////////
-// nsPILoadGroupInternal methods:
-
-NS_IMETHODIMP
-nsLoadGroup::OnEndPageLoad(nsIChannel *aDefaultChannel) {
-  LOG(("nsLoadGroup::OnEndPageLoad this=%p default-request=%p", this,
-       aDefaultChannel));
-
-  // for the moment, nothing to do here.
   return NS_OK;
 }
 

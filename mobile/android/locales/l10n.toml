@@ -154,6 +154,10 @@ exclude-multi-locale = [
     l10n = "{l}dom/chrome/dom/dom.properties"
 
 [[paths]]
+    reference = "toolkit/locales/en-US/toolkit/about/*Plugins.ftl"
+    l10n = "{l}toolkit/toolkit/about/*Plugins.ftl"
+
+[[paths]]
     reference = "dom/locales/en-US/chrome/plugins.properties"
     l10n = "{l}dom/chrome/plugins.properties"
 
@@ -172,6 +176,14 @@ exclude-multi-locale = [
 [[paths]]
     reference = "toolkit/locales/en-US/chrome/global/aboutRights.dtd"
     l10n = "{l}toolkit/chrome/global/aboutRights.dtd"
+
+[[paths]]
+    reference = "toolkit/locales/en-US/toolkit/about/*Rights.ftl"
+    l10n = "{l}toolkit/toolkit/about/*Rights.ftl"
+
+[[paths]]
+    reference = "toolkit/locales/en-US/toolkit/about/*Compat.ftl"
+    l10n = "{l}toolkit/toolkit/about/*Compat.ftl"
 
 [[paths]]
     reference = "toolkit/locales/en-US/chrome/global/charsetMenu.properties"
@@ -204,6 +216,10 @@ exclude-multi-locale = [
 [[paths]]
     reference = "toolkit/locales/en-US/chrome/global/aboutSupport.properties"
     l10n = "{l}toolkit/chrome/global/aboutSupport.properties"
+
+[[paths]]
+    reference = "toolkit/locales/en-US/toolkit/about/*Support.ftl"
+    l10n = "{l}toolkit/toolkit/about/*Support.ftl"
 
 [[paths]]
     reference = "toolkit/locales/en-US/crashreporter/*.ftl"

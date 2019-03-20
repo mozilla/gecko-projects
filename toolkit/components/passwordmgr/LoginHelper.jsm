@@ -18,48 +18,64 @@ var EXPORTED_SYMBOLS = [
 
 // Globals
 
-ChromeUtils.import("resource://gre/modules/Services.jsm");
-ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
-
-// LoginHelper
+const {Services} = ChromeUtils.import("resource://gre/modules/Services.jsm");
+const {XPCOMUtils} = ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
 
 /**
  * Contains functions shared by different Login Manager components.
  */
 var LoginHelper = {
-  /**
-   * Warning: these only update if a logger was created.
-   */
-  debug: Services.prefs.getBoolPref("signon.debug"),
-  formlessCaptureEnabled: Services.prefs.getBoolPref("signon.formlessCapture.enabled"),
-  schemeUpgrades: Services.prefs.getBoolPref("signon.schemeUpgrades"),
-  insecureAutofill: Services.prefs.getBoolPref("signon.autofillForms.http"),
+  debug: null,
+  enabled: null,
+  formlessCaptureEnabled: null,
+  insecureAutofill: null,
+  managementURI: null,
+  privateBrowsingCaptureEnabled: null,
+  schemeUpgrades: null,
+  showAutoCompleteFooter: null,
+
+  init() {
+    // Watch for pref changes to update cached pref values.
+    Services.prefs.addObserver("signon.", () => this.updateSignonPrefs());
+    this.updateSignonPrefs();
+  },
+
+  updateSignonPrefs() {
+    this.autofillForms = Services.prefs.getBoolPref("signon.autofillForms");
+    this.autofillAutocompleteOff = Services.prefs.getBoolPref("signon.autofillForms.autocompleteOff");
+    this.debug = Services.prefs.getBoolPref("signon.debug");
+    this.enabled = Services.prefs.getBoolPref("signon.rememberSignons");
+    this.formlessCaptureEnabled = Services.prefs.getBoolPref("signon.formlessCapture.enabled");
+    this.insecureAutofill = Services.prefs.getBoolPref("signon.autofillForms.http");
+    this.managementURI = Services.prefs.getStringPref("signon.management.overrideURI", null);
+    this.privateBrowsingCaptureEnabled =
+      Services.prefs.getBoolPref("signon.privateBrowsingCapture.enabled");
+    this.schemeUpgrades = Services.prefs.getBoolPref("signon.schemeUpgrades");
+    this.showAutoCompleteFooter = Services.prefs.getBoolPref("signon.showAutoCompleteFooter");
+    this.storeWhenAutocompleteOff = Services.prefs.getBoolPref("signon.storeWhenAutocompleteOff");
+  },
 
   createLogger(aLogPrefix) {
     let getMaxLogLevel = () => {
-      return this.debug ? "debug" : "warn";
+      return this.debug ? "Debug" : "Warn";
     };
 
     let logger;
     function getConsole() {
       if (!logger) {
         // Create a new instance of the ConsoleAPI so we can control the maxLogLevel with a pref.
-        let ConsoleAPI = ChromeUtils.import("resource://gre/modules/Console.jsm", {}).ConsoleAPI;
         let consoleOptions = {
           maxLogLevel: getMaxLogLevel(),
           prefix: aLogPrefix,
         };
-        logger = new ConsoleAPI(consoleOptions);
+        logger = console.createInstance(consoleOptions);
       }
       return logger;
     }
 
     // Watch for pref changes and update this.debug and the maxLogLevel for created loggers
-    Services.prefs.addObserver("signon.", () => {
+    Services.prefs.addObserver("signon.debug", () => {
       this.debug = Services.prefs.getBoolPref("signon.debug");
-      this.formlessCaptureEnabled = Services.prefs.getBoolPref("signon.formlessCapture.enabled");
-      this.schemeUpgrades = Services.prefs.getBoolPref("signon.schemeUpgrades");
-      this.insecureAutofill = Services.prefs.getBoolPref("signon.autofillForms.http");
       if (logger) {
         logger.maxLogLevel = getMaxLogLevel();
       }
@@ -207,6 +223,43 @@ var LoginHelper = {
   },
 
   /**
+   * Get the parts of the URL we want for identification.
+   * Strip out things like the userPass portion and handle javascript:.
+   */
+  getLoginOrigin(uriString, allowJS) {
+    let realm = "";
+    try {
+      let uri = Services.io.newURI(uriString);
+
+      if (allowJS && uri.scheme == "javascript") {
+        return "javascript:";
+      }
+
+      // Build this manually instead of using prePath to avoid including the userPass portion.
+      realm = uri.scheme + "://" + uri.displayHostPort;
+    } catch (e) {
+      // bug 159484 - disallow url types that don't support a hostPort.
+      // (although we handle "javascript:..." as a special case above.)
+      log.warn("Couldn't parse origin for", uriString, e);
+      realm = null;
+    }
+
+    return realm;
+  },
+
+  getFormActionOrigin(form) {
+    let uriString = form.action;
+
+    // A blank or missing action submits to where it came from.
+    if (uriString == "") {
+      // ala bug 297761
+      uriString = form.baseURI;
+    }
+
+    return this.getLoginOrigin(uriString, true);
+  },
+
+  /**
    * @param {String} aLoginOrigin - An origin value from a stored login's
    *                                hostname or formSubmitURL properties.
    * @param {String} aSearchOrigin - The origin that was are looking to match
@@ -250,17 +303,20 @@ var LoginHelper = {
     ignoreSchemes = false,
   }) {
     if (aLogin1.httpRealm != aLogin2.httpRealm ||
-        aLogin1.username != aLogin2.username)
+        aLogin1.username != aLogin2.username) {
       return false;
+    }
 
-    if (!ignorePassword && aLogin1.password != aLogin2.password)
+    if (!ignorePassword && aLogin1.password != aLogin2.password) {
       return false;
+    }
 
     if (ignoreSchemes) {
       let login1HostPort = this.maybeGetHostPortForURL(aLogin1.hostname);
       let login2HostPort = this.maybeGetHostPortForURL(aLogin2.hostname);
-      if (login1HostPort != login2HostPort)
+      if (login1HostPort != login2HostPort) {
         return false;
+      }
 
       if (aLogin1.formSubmitURL != "" && aLogin2.formSubmitURL != "" &&
           this.maybeGetHostPortForURL(aLogin1.formSubmitURL) !=
@@ -268,13 +324,15 @@ var LoginHelper = {
         return false;
       }
     } else {
-      if (aLogin1.hostname != aLogin2.hostname)
+      if (aLogin1.hostname != aLogin2.hostname) {
         return false;
+      }
 
       // If either formSubmitURL is blank (but not null), then match.
       if (aLogin1.formSubmitURL != "" && aLogin2.formSubmitURL != "" &&
-          aLogin1.formSubmitURL != aLogin2.formSubmitURL)
+          aLogin1.formSubmitURL != aLogin2.formSubmitURL) {
         return false;
+      }
     }
 
     // The .usernameField and .passwordField values are ignored.
@@ -541,9 +599,15 @@ var LoginHelper = {
    *                 the window from where we want to open the dialog
    *
    * @param {string} [filterString=""]
-   *                 the filterString parameter to pass to the login manager dialog
+   *                 the domain (not origin) to pass to the login manager dialog
+   *                 to pre-filter the results
    */
   openPasswordManager(window, filterString = "") {
+    if (this.managementURI && window.openTrustedLinkIn) {
+      let managementURL = this.managementURI.replace("%DOMAIN%", window.encodeURIComponent(filterString));
+      window.openTrustedLinkIn(managementURL, "tab");
+      return;
+    }
     let win = Services.wm.getMostRecentWindow("Toolkit:PasswordManager");
     if (win) {
       win.setFilter(filterString);
@@ -565,20 +629,35 @@ var LoginHelper = {
    *                    of the username types.
    */
   isUsernameFieldType(element) {
-    if (ChromeUtils.getClassName(element) !== "HTMLInputElement")
+    if (ChromeUtils.getClassName(element) !== "HTMLInputElement") {
       return false;
+    }
+
+    if (!element.isConnected) {
+      // If the element isn't connected then it isn't visible to the user so
+      // shouldn't be considered. It must have been connected in the past.
+      return false;
+    }
 
     let fieldType = (element.hasAttribute("type") ?
                      element.getAttribute("type").toLowerCase() :
                      element.type);
-    if (fieldType == "text" ||
-        fieldType == "email" ||
-        fieldType == "url" ||
-        fieldType == "tel" ||
-        fieldType == "number") {
-      return true;
+    if (!(fieldType == "text" ||
+          fieldType == "email" ||
+          fieldType == "url" ||
+          fieldType == "tel" ||
+          fieldType == "number")) {
+      return false;
     }
-    return false;
+
+    let acFieldName = element.getAutocompleteInfo().fieldName;
+    if (!(acFieldName == "username" ||
+          acFieldName == "off" ||
+          acFieldName == "on" ||
+          acFieldName == "")) {
+      return false;
+    }
+    return true;
   },
 
   /**
@@ -769,6 +848,8 @@ var LoginHelper = {
     Services.obs.notifyObservers(dataObject, "passwordmgr-storage-changed", changeType);
   },
 };
+
+LoginHelper.init();
 
 XPCOMUtils.defineLazyPreferenceGetter(LoginHelper, "showInsecureFieldWarning",
                                       "security.insecure_field_warning.contextual.enabled");

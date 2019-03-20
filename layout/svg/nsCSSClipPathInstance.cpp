@@ -7,26 +7,26 @@
 // Main header first:
 #include "nsCSSClipPathInstance.h"
 
-#include "gfx2DGlue.h"
-#include "gfxContext.h"
-#include "gfxPlatform.h"
+#include "mozilla/dom/SVGElement.h"
 #include "mozilla/dom/SVGPathData.h"
 #include "mozilla/gfx/2D.h"
 #include "mozilla/gfx/PathHelpers.h"
 #include "mozilla/ShapeUtils.h"
+#include "nsSVGUtils.h"
+#include "gfx2DGlue.h"
+#include "gfxContext.h"
+#include "gfxPlatform.h"
 #include "nsCSSRendering.h"
 #include "nsIFrame.h"
 #include "nsLayoutUtils.h"
-#include "nsSVGElement.h"
-#include "nsSVGUtils.h"
-#include "nsSVGViewBox.h"
 
 using namespace mozilla;
 using namespace mozilla::dom;
 using namespace mozilla::gfx;
 
-/* static*/ void nsCSSClipPathInstance::ApplyBasicShapeOrPathClip(
-    gfxContext& aContext, nsIFrame* aFrame) {
+/* static*/
+void nsCSSClipPathInstance::ApplyBasicShapeOrPathClip(gfxContext& aContext,
+                                                      nsIFrame* aFrame) {
   auto& clipPathStyle = aFrame->StyleSVGReset()->mClipPath;
 
 #ifdef DEBUG
@@ -45,7 +45,8 @@ using namespace mozilla::gfx;
   aContext.Clip();
 }
 
-/* static*/ bool nsCSSClipPathInstance::HitTestBasicShapeOrPathClip(
+/* static*/
+bool nsCSSClipPathInstance::HitTestBasicShapeOrPathClip(
     nsIFrame* aFrame, const gfxPoint& aPoint) {
   auto& clipPathStyle = aFrame->StyleSVGReset()->mClipPath;
   StyleShapeSourceType type = clipPathStyle.GetType();
@@ -66,7 +67,8 @@ using namespace mozilla::gfx;
   return path->ContainsPoint(ToPoint(aPoint) * pixelRatio, Matrix());
 }
 
-/* static */ Rect nsCSSClipPathInstance::GetBoundingRectForBasicShapeOrPathClip(
+/* static */
+Rect nsCSSClipPathInstance::GetBoundingRectForBasicShapeOrPathClip(
     nsIFrame* aFrame, const StyleShapeSource& aClipPathStyle) {
   MOZ_ASSERT(aClipPathStyle.GetType() == StyleShapeSourceType::Shape ||
              aClipPathStyle.GetType() == StyleShapeSourceType::Box ||

@@ -3,6 +3,9 @@
 
 "use strict";
 
+/* import-globals-from helper-collapsibilities.js */
+Services.scriptloader.loadSubScript(CHROME_URL_ROOT + "helper-collapsibilities.js", this);
+
 /**
  * Check that navigating from This Firefox to Connect and back to This Firefox works and
  * does not leak.
@@ -17,6 +20,7 @@ add_task(async function() {
 
   const { document, tab, window } = await openAboutDebugging();
   const AboutDebugging = window.AboutDebugging;
+  await selectThisFirefoxPage(document, AboutDebugging.store);
 
   const connectSidebarItem = findSidebarItemByText("Connect", document);
   const connectLink = connectSidebarItem.querySelector(".js-sidebar-link");
@@ -49,7 +53,7 @@ add_task(async function() {
   const backgroundTab2 = await addTab(TAB_URL_2, { background: true });
 
   info("Click on the ThisFirefox item in the sidebar");
-  const requestsSuccess = waitForRequestsSuccess(window);
+  const requestsSuccess = waitForRequestsSuccess(AboutDebugging.store);
   thisFirefoxLink.click();
 
   info("Wait for all target requests to complete");

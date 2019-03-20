@@ -11,8 +11,10 @@ use std::env;
 use std::path::PathBuf;
 use webrender;
 use winit;
-use webrender::ShaderPrecacheFlags;
+use webrender::{DebugFlags, ShaderPrecacheFlags};
 use webrender::api::*;
+use webrender::api::units::*;
+
 
 struct Notifier {
     events_proxy: winit::EventsLoopProxy,
@@ -78,7 +80,7 @@ pub trait Example {
         api: &RenderApi,
         builder: &mut DisplayListBuilder,
         txn: &mut Transaction,
-        framebuffer_size: DeviceIntSize,
+        framebuffer_size: FramebufferIntSize,
         pipeline_id: PipelineId,
         document_id: DocumentId,
     );
@@ -147,13 +149,14 @@ pub fn main_wrapper<E: Example>(
     println!("Device pixel ratio: {}", device_pixel_ratio);
 
     println!("Loading shaders...");
+    let mut debug_flags = DebugFlags::ECHO_DRIVER_MESSAGES | DebugFlags::TEXTURE_CACHE_DBG;
     let opts = webrender::RendererOptions {
         resource_override_path: res_path,
         precache_flags: E::PRECACHE_SHADER_FLAGS,
         device_pixel_ratio,
         clear_color: Some(ColorF::new(0.3, 0.0, 0.0, 1.0)),
         //scatter_gpu_cache_updates: false,
-        debug_flags: webrender::DebugFlags::ECHO_DRIVER_MESSAGES,
+        debug_flags,
         ..options.unwrap_or(webrender::RendererOptions::default())
     };
 
@@ -162,7 +165,7 @@ pub fn main_wrapper<E: Example>(
             .get_inner_size()
             .unwrap()
             .to_physical(device_pixel_ratio as f64);
-        DeviceIntSize::new(size.width as i32, size.height as i32)
+        FramebufferIntSize::new(size.width as i32, size.height as i32)
     };
     let notifier = Box::new(Notifier::new(events_loop.create_proxy()));
     let (mut renderer, sender) = webrender::Renderer::new(gl.clone(), notifier, opts, None).unwrap();
@@ -178,8 +181,6 @@ pub fn main_wrapper<E: Example>(
     if let Some(external_image_handler) = external {
         renderer.set_external_image_handler(external_image_handler);
     }
-
-    renderer.toggle_debug_flags(webrender::DebugFlags::TEXTURE_CACHE_DBG);
 
     let epoch = Epoch(0);
     let pipeline_id = PipelineId(0, 0);
@@ -211,47 +212,43 @@ pub fn main_wrapper<E: Example>(
         let mut txn = Transaction::new();
         let mut custom_event = true;
 
-        match global_event {
-            winit::Event::WindowEvent {
-                event: winit::WindowEvent::CloseRequested,
-                ..
-            } => return winit::ControlFlow::Break,
-            winit::Event::WindowEvent {
-                event: winit::WindowEvent::KeyboardInput {
-                    input: winit::KeyboardInput {
-                        state: winit::ElementState::Pressed,
-                        virtual_keycode: Some(key),
-                        ..
-                    },
+        let old_flags = debug_flags;
+        let win_event = match global_event {
+            winit::Event::WindowEvent { event, .. } => event,
+            _ => return winit::ControlFlow::Continue,
+        };
+        match win_event {
+            winit::WindowEvent::CloseRequested => return winit::ControlFlow::Break,
+            // skip high-frequency events
+            winit::WindowEvent::AxisMotion { .. } |
+            winit::WindowEvent::CursorMoved { .. } => return winit::ControlFlow::Continue,
+            winit::WindowEvent::KeyboardInput {
+                input: winit::KeyboardInput {
+                    state: winit::ElementState::Pressed,
+                    virtual_keycode: Some(key),
                     ..
                 },
                 ..
             } => match key {
                 winit::VirtualKeyCode::Escape => return winit::ControlFlow::Break,
-                winit::VirtualKeyCode::P => renderer.toggle_debug_flags(webrender::DebugFlags::PROFILER_DBG),
-                winit::VirtualKeyCode::O => renderer.toggle_debug_flags(webrender::DebugFlags::RENDER_TARGET_DBG),
-                winit::VirtualKeyCode::I => renderer.toggle_debug_flags(webrender::DebugFlags::TEXTURE_CACHE_DBG),
-                winit::VirtualKeyCode::S => renderer.toggle_debug_flags(webrender::DebugFlags::COMPACT_PROFILER),
-                winit::VirtualKeyCode::Q => renderer.toggle_debug_flags(
-                    webrender::DebugFlags::GPU_TIME_QUERIES | webrender::DebugFlags::GPU_SAMPLE_QUERIES
+                winit::VirtualKeyCode::P => debug_flags.toggle(DebugFlags::PROFILER_DBG),
+                winit::VirtualKeyCode::O => debug_flags.toggle(DebugFlags::RENDER_TARGET_DBG),
+                winit::VirtualKeyCode::I => debug_flags.toggle(DebugFlags::TEXTURE_CACHE_DBG),
+                winit::VirtualKeyCode::S => debug_flags.toggle(DebugFlags::COMPACT_PROFILER),
+                winit::VirtualKeyCode::T => debug_flags.toggle(DebugFlags::PICTURE_CACHING_DBG),
+                winit::VirtualKeyCode::Q => debug_flags.toggle(
+                    DebugFlags::GPU_TIME_QUERIES | DebugFlags::GPU_SAMPLE_QUERIES
                 ),
-                winit::VirtualKeyCode::F => renderer.toggle_debug_flags(
-                    webrender::DebugFlags::NEW_FRAME_INDICATOR | webrender::DebugFlags::NEW_SCENE_INDICATOR
+                winit::VirtualKeyCode::F => debug_flags.toggle(
+                    DebugFlags::NEW_FRAME_INDICATOR | DebugFlags::NEW_SCENE_INDICATOR
                 ),
-                winit::VirtualKeyCode::G => api.send_debug_cmd(
-                    // go through the API so that we reach the render backend
-                    DebugCommand::EnableGpuCacheDebug(
-                        !renderer.get_debug_flags().contains(webrender::DebugFlags::GPU_CACHE_DBG)
-                    ),
-                ),
-                winit::VirtualKeyCode::Key1 => txn.set_window_parameters(
-                    framebuffer_size,
-                    DeviceIntRect::new(DeviceIntPoint::zero(), framebuffer_size),
+                winit::VirtualKeyCode::G => debug_flags.toggle(DebugFlags::GPU_CACHE_DBG),
+                winit::VirtualKeyCode::Key1 => txn.set_document_view(
+                    framebuffer_size.into(),
                     1.0
                 ),
-                winit::VirtualKeyCode::Key2 => txn.set_window_parameters(
-                    framebuffer_size,
-                    DeviceIntRect::new(DeviceIntPoint::zero(), framebuffer_size),
+                winit::VirtualKeyCode::Key2 => txn.set_document_view(
+                    framebuffer_size.into(),
                     2.0
                 ),
                 winit::VirtualKeyCode::M => api.notify_memory_pressure(),
@@ -263,10 +260,6 @@ pub fn main_wrapper<E: Example>(
                     api.save_capture(path, bits);
                 },
                 _ => {
-                    let win_event = match global_event {
-                        winit::Event::WindowEvent { event, .. } => event,
-                        _ => unreachable!()
-                    };
                     custom_event = example.on_event(
                         win_event,
                         &api,
@@ -274,13 +267,16 @@ pub fn main_wrapper<E: Example>(
                     )
                 },
             },
-            winit::Event::WindowEvent { event, .. } => custom_event = example.on_event(
-                event,
+            other => custom_event = example.on_event(
+                other,
                 &api,
                 document_id,
             ),
-            _ => return winit::ControlFlow::Continue,
         };
+
+        if debug_flags != old_flags {
+            api.send_debug_cmd(DebugCommand::SetFlags(debug_flags));
+        }
 
         if custom_event {
             let mut builder = DisplayListBuilder::new(pipeline_id, layout_size);

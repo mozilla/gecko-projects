@@ -17,14 +17,12 @@ export function pauseOnExceptions(
   shouldPauseOnExceptions: boolean,
   shouldPauseOnCaughtExceptions: boolean
 ) {
-  return ({ dispatch, client }: ThunkArgs) => {
-    /* eslint-disable camelcase */
+  return ({ dispatch, getState, client }: ThunkArgs) => {
     recordEvent("pause_on_exceptions", {
       exceptions: shouldPauseOnExceptions,
       // There's no "n" in the key below (#1463117)
-      caught_exceptio: shouldPauseOnCaughtExceptions
+      ["caught_exceptio"]: shouldPauseOnCaughtExceptions
     });
-    /* eslint-enable camelcase */
 
     return dispatch({
       type: "PAUSE_ON_EXCEPTIONS",

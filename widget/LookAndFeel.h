@@ -7,7 +7,7 @@
 #define __LookAndFeel
 
 #ifndef MOZILLA_INTERNAL_API
-#error "This header is only usable from within libxul (MOZILLA_INTERNAL_API)."
+#  error "This header is only usable from within libxul (MOZILLA_INTERNAL_API)."
 #endif
 
 #include "nsDebug.h"
@@ -419,6 +419,12 @@ class LookAndFeel {
     eIntID_GTKCSDAvailable,
 
     /*
+     * A boolean value indicating whether GTK+ system titlebar should be
+     * disabled by default.
+     */
+    eIntID_GTKCSDHideTitlebarByDefault,
+
+    /*
      * A boolean value indicating whether client-side decorations should
      * have transparent background.
      */
@@ -441,6 +447,12 @@ class LookAndFeel {
      * contain a close button.
      */
     eIntID_GTKCSDCloseButton,
+
+    /*
+     * A boolean value indicating whether titlebar buttons are located
+     * in left titlebar corner.
+     */
+    eIntID_GTKCSDReversedPlacement,
 
     /*
      * A boolean value indicating whether or not the OS is using a dark theme,
@@ -638,13 +650,13 @@ class LookAndFeel {
    * if the system theme specifies this font, false if a default should
    * be used.  In the latter case neither aName nor aStyle is modified.
    *
+   * Size of the font should be in CSS pixels, not device pixels.
+   *
    * @param aID    Which system-theme font is wanted.
    * @param aName  The name of the font to use.
    * @param aStyle Styling to apply to the font.
-   * @param aDevPixPerCSSPixel  Ratio of device pixels to CSS pixels
    */
-  static bool GetFont(FontID aID, nsString& aName, gfxFontStyle& aStyle,
-                      float aDevPixPerCSSPixel);
+  static bool GetFont(FontID aID, nsString& aName, gfxFontStyle& aStyle);
 
   /**
    * GetPasswordCharacter() returns a unicode character which should be used

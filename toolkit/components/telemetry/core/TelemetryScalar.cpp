@@ -27,7 +27,6 @@
 #include "nsPrintfCString.h"
 #include "nsThreadUtils.h"
 #include "nsVariant.h"
-#include "TelemetryCommon.h"
 #include "TelemetryScalarData.h"
 
 using mozilla::Nothing;
@@ -55,6 +54,7 @@ using mozilla::Telemetry::Common::IsInDataset;
 using mozilla::Telemetry::Common::IsValidIdentifierString;
 using mozilla::Telemetry::Common::LogToBrowserConsole;
 using mozilla::Telemetry::Common::RecordedProcessType;
+using mozilla::Telemetry::Common::StringHashSet;
 using mozilla::Telemetry::Common::SupportedProduct;
 
 namespace TelemetryIPCAccumulator = mozilla::TelemetryIPCAccumulator;
@@ -1864,6 +1864,7 @@ void internal_DynamicScalarToIPC(
     stubDefinition.expired = info.mDynamicExpiration;
     stubDefinition.keyed = info.keyed;
     stubDefinition.name = info.mDynamicName;
+    stubDefinition.builtin = info.builtin;
     aIPCDefs.AppendElement(stubDefinition);
   }
 }
@@ -2158,7 +2159,10 @@ void internal_ApplyScalarActions(
     nsresult rv =
         internal_GetScalarByEnum(lock, uniqueId, processType, &scalar);
     if (NS_FAILED(rv)) {
-      NS_WARNING("NS_FAILED internal_GetScalarByEnum for CHILD");
+      // Bug 1513496 - We no longer log a warning if the scalar is expired.
+      if (rv != NS_ERROR_NOT_AVAILABLE) {
+        NS_WARNING("NS_FAILED internal_GetScalarByEnum for CHILD");
+      }
       continue;
     }
 
@@ -2271,7 +2275,10 @@ void internal_ApplyKeyedScalarActions(
     nsresult rv =
         internal_GetKeyedScalarByEnum(lock, uniqueId, processType, &scalar);
     if (NS_FAILED(rv)) {
-      NS_WARNING("NS_FAILED internal_GetScalarByEnum for CHILD");
+      // Bug 1513496 - We no longer log a warning if the scalar is expired.
+      if (rv != NS_ERROR_NOT_AVAILABLE) {
+        NS_WARNING("NS_FAILED internal_GetScalarByEnum for CHILD");
+      }
       continue;
     }
 
@@ -3672,7 +3679,7 @@ void TelemetryScalar::AddDynamicScalarDefinitions(
                                                  def.expired,
                                                  def.name,
                                                  def.keyed,
-                                                 false /* builtin */,
+                                                 def.builtin,
                                                  {} /* stores */});
   }
 
@@ -3680,6 +3687,29 @@ void TelemetryScalar::AddDynamicScalarDefinitions(
     StaticMutexAutoLock locker(gTelemetryScalarsMutex);
     internal_RegisterScalars(locker, dynamicStubs);
   }
+}
+
+nsresult TelemetryScalar::GetAllStores(StringHashSet& set) {
+  // Static stores
+  for (uint32_t storeIdx : gScalarStoresTable) {
+    const char* name = &gScalarsStringTable[storeIdx];
+    nsAutoCString store;
+    store.AssignASCII(name);
+    if (!set.PutEntry(store)) {
+      return NS_ERROR_FAILURE;
+    }
+  }
+
+  // Dynamic stores
+  for (auto& ptr : *gDynamicStoreNames) {
+    nsAutoCString store;
+    ptr->ToUTF8String(store);
+    if (!set.PutEntry(store)) {
+      return NS_ERROR_FAILURE;
+    }
+  }
+
+  return NS_OK;
 }
 
 ////////////////////////////////////////////////////////////////////////

@@ -7,22 +7,25 @@
 #ifndef mozilla_dom_DocumentL10n_h
 #define mozilla_dom_DocumentL10n_h
 
+#include "mozIDOMLocalization.h"
+#include "nsCycleCollectionParticipant.h"
+#include "nsIContentSink.h"
+#include "nsINode.h"
+#include "nsIObserver.h"
+#include "nsWrapperCache.h"
+#include "nsWeakReference.h"
 #include "js/TypeDecls.h"
 #include "mozilla/Attributes.h"
 #include "mozilla/ErrorResult.h"
 #include "mozilla/dom/BindingDeclarations.h"
-#include "nsIDOMEventListener.h"
-#include "nsCycleCollectionParticipant.h"
-#include "nsWrapperCache.h"
-#include "nsIDocument.h"
-#include "nsINode.h"
-#include "mozIDOMLocalization.h"
+#include "mozilla/dom/Document.h"
 #include "mozilla/dom/Promise.h"
 #include "mozilla/dom/PromiseNativeHandler.h"
 
 namespace mozilla {
 namespace dom {
 
+class Document;
 class Element;
 struct L10nKey;
 
@@ -40,40 +43,50 @@ class PromiseResolver final : public PromiseNativeHandler {
   RefPtr<Promise> mPromise;
 };
 
-enum class DocumentL10nState { Initialized = 0, InitialTranslationTriggered };
+enum class DocumentL10nState {
+  Initialized = 0,
+  InitialTranslationTriggered,
+  InitialTranslationCompleted
+};
 
 /**
- * This class maintains localization status of the nsDocument.
+ * This class maintains localization status of the document.
  *
- * The nsDocument will initialize it lazily when a link with a
- * localization resource is added to the document.
+ * The document will initialize it lazily when a link with a localization
+ * resource is added to the document.
  *
  * Once initialized, DocumentL10n relays all API methods to an
- * instance of mozIDOMLocalization and maintaines a single promise
+ * instance of mozIDOMLocalization and maintains a single promise
  * which gets resolved the first time the document gets translated.
  */
-class DocumentL10n final : public nsIDOMEventListener, public nsWrapperCache {
+class DocumentL10n final : public nsIObserver,
+                           public nsSupportsWeakReference,
+                           public nsWrapperCache {
  public:
   NS_DECL_CYCLE_COLLECTING_ISUPPORTS
-  NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_CLASS(DocumentL10n)
-  NS_DECL_NSIDOMEVENTLISTENER
+  NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_CLASS_AMBIGUOUS(DocumentL10n,
+                                                         nsIObserver)
+  NS_DECL_NSIOBSERVER
 
  public:
-  explicit DocumentL10n(nsIDocument* aDocument);
+  explicit DocumentL10n(Document* aDocument);
   bool Init(nsTArray<nsString>& aResourceIds);
+  void Destroy();
 
  protected:
   virtual ~DocumentL10n();
 
-  nsCOMPtr<nsIDocument> mDocument;
+  RefPtr<Document> mDocument;
   RefPtr<Promise> mReady;
   DocumentL10nState mState;
   nsCOMPtr<mozIDOMLocalization> mDOMLocalization;
+  nsCOMPtr<nsIContentSink> mContentSink;
 
   already_AddRefed<Promise> MaybeWrapPromise(Promise* aPromise);
+  void RegisterObservers();
 
  public:
-  nsIDocument* GetParentObject() const { return mDocument; };
+  Document* GetParentObject() const { return mDocument; };
 
   virtual JSObject* WrapObject(JSContext* aCx,
                                JS::Handle<JSObject*> aGivenProto) override;
@@ -112,9 +125,14 @@ class DocumentL10n final : public nsIDOMEventListener, public nsWrapperCache {
   already_AddRefed<Promise> TranslateElements(
       const Sequence<OwningNonNull<Element>>& aElements, ErrorResult& aRv);
 
+  void PauseObserving(ErrorResult& aRv);
+  void ResumeObserving(ErrorResult& aRv);
+
   Promise* Ready();
 
   void TriggerInitialDocumentTranslation();
+
+  void InitialDocumentTranslationCompleted();
 };
 
 }  // namespace dom

@@ -62,6 +62,11 @@ fn imm64(offset: usize) -> ir::immediates::Imm64 {
     (offset as i64).into()
 }
 
+/// Convert a usize offset into a `Uimm64`.
+fn uimm64(offset: usize) -> ir::immediates::Uimm64 {
+    (offset as u64).into()
+}
+
 /// Initialize a `Signature` from a wasm signature.
 fn init_sig_from_wsig(sig: &mut ir::Signature, wsig: bd::FuncTypeWithId) {
     sig.clear(CallConv::Baldrdash);
@@ -301,7 +306,8 @@ impl<'a, 'b, 'c> TransEnv<'a, 'b, 'c> {
                     base: vmctx,
                     offset: imm64(self.static_env.cxTlsOffset),
                     global_type: native_pointer_type(),
-                }).into();
+                })
+                .into();
         }
         if self.realm_addr.is_none() {
             let vmctx = self.get_vmctx_gv(&mut pos.func);
@@ -311,7 +317,8 @@ impl<'a, 'b, 'c> TransEnv<'a, 'b, 'c> {
                     base: vmctx,
                     offset: imm64(self.static_env.realmTlsOffset),
                     global_type: native_pointer_type(),
-                }).into();
+                })
+                .into();
         }
 
         let ptr = native_pointer_type();
@@ -389,35 +396,31 @@ impl<'a, 'b, 'c> FuncEnvironment for TransEnv<'a, 'b, 'c> {
             let mut pos = FuncCursor::new(func);
             pos.next_ebb().expect("empty function");
             pos.next_inst();
-            GlobalVariable::Const(global.emit_constant(&mut pos))
+            return GlobalVariable::Const(global.emit_constant(&mut pos));
+        }
+
+        // This is a global variable. Here we don't care if it is mutable or not.
+        let vmctx_gv = self.get_vmctx_gv(func);
+        let offset = global.tls_offset();
+
+        // Some globals are represented as a pointer to the actual data, in which case we
+        // must do an extra dereference to get to them.
+        let (base_gv, offset) = if global.is_indirect() {
+            let gv = func.create_global_value(ir::GlobalValueData::Load {
+                base: vmctx_gv,
+                offset: offset32(offset),
+                global_type: native_pointer_type(),
+                readonly: false,
+            });
+            (gv, 0.into())
         } else {
-            // This is a global variable. Here we don't care if it is mutable or not.
-            let offset = global.tls_offset();
-            let mut gv = self.get_vmctx_gv(func);
+            (vmctx_gv, offset32(offset))
+        };
 
-            // Some globals are represented as a pointer to the actual data, in which case we
-            // must do an extra dereference to get to them.
-            if global.is_indirect() {
-                gv = func.create_global_value(ir::GlobalValueData::Load {
-                    base: gv,
-                    offset: offset32(offset),
-                    global_type: native_pointer_type(),
-                    readonly: false,
-                });
-            } else {
-                gv = func.create_global_value(ir::GlobalValueData::IAddImm {
-                    base: gv,
-                    offset: imm64(offset),
-                    global_type: native_pointer_type(),
-                });
-            }
-
-            // Create a Cranelift global variable. We don't need to remember the reference, the
-            // function translator does that for us.
-            GlobalVariable::Memory {
-                gv,
-                ty: global.value_type().into(),
-            }
+        GlobalVariable::Memory {
+            gv: base_gv,
+            ty: global.value_type().into(),
+            offset,
         }
     }
 
@@ -433,13 +436,13 @@ impl<'a, 'b, 'c> FuncEnvironment for TransEnv<'a, 'b, 'c> {
             global_type: native_pointer_type(),
             readonly: true,
         });
-        let min_size = ir::immediates::Imm64::new(self.env.min_memory_length());
-        let guard_size = imm64(self.static_env.memoryGuardSize);
+        let min_size = ir::immediates::Uimm64::new(self.env.min_memory_length() as u64);
+        let guard_size = uimm64(self.static_env.memoryGuardSize);
 
         let bound = self.static_env.staticMemoryBound;
         let style = if bound > 0 {
             // We have a static heap.
-            let bound = (bound as i64).into();
+            let bound = (bound as u64).into();
             ir::HeapStyle::Static { bound }
         } else {
             // Get the `TlsData::boundsCheckLimit` field.
@@ -455,7 +458,7 @@ impl<'a, 'b, 'c> FuncEnvironment for TransEnv<'a, 'b, 'c> {
         func.create_heap(ir::HeapData {
             base,
             min_size,
-            guard_size,
+            offset_guard_size: guard_size,
             style,
             index_type: ir::types::I32,
         })
@@ -498,9 +501,9 @@ impl<'a, 'b, 'c> FuncEnvironment for TransEnv<'a, 'b, 'c> {
 
         func.create_table(ir::TableData {
             base_gv,
-            min_size: ir::immediates::Imm64::new(0),
+            min_size: ir::immediates::Uimm64::new(0),
             bound_gv,
-            element_size: ir::immediates::Imm64::new(i64::from(self.pointer_bytes()) * 2),
+            element_size: ir::immediates::Uimm64::new(u64::from(self.pointer_bytes()) * 2),
             index_type: ir::types::I32,
         })
     }
@@ -687,10 +690,10 @@ impl<'a, 'b, 'c> FuncEnvironment for TransEnv<'a, 'b, 'c> {
         _heap: ir::Heap,
         val: ir::Value,
     ) -> WasmResult<ir::Value> {
-        // We emit a call to `uint32_t growMemory_i32(Instance* instance, uint32_t delta)` via a
+        // We emit a call to `uint32_t memoryGrow_i32(Instance* instance, uint32_t delta)` via a
         // stub.
         let (fnref, sigref) =
-            self.symbolic_funcref(pos.func, bd::SymbolicAddress::GrowMemory, || {
+            self.symbolic_funcref(pos.func, bd::SymbolicAddress::MemoryGrow, || {
                 let mut sig = ir::Signature::new(CallConv::Baldrdash);
                 sig.params.push(ir::AbiParam::new(native_pointer_type()));
                 sig.params.push(ir::AbiParam::new(ir::types::I32).uext());
@@ -702,7 +705,7 @@ impl<'a, 'b, 'c> FuncEnvironment for TransEnv<'a, 'b, 'c> {
                 sig
             });
 
-        // Get the instance pointer needed by `growMemory_i32`.
+        // Get the instance pointer needed by `memoryGrow_i32`.
         let instance = self.load_instance(&mut pos);
         let vmctx = pos
             .func
@@ -724,9 +727,9 @@ impl<'a, 'b, 'c> FuncEnvironment for TransEnv<'a, 'b, 'c> {
         _index: MemoryIndex,
         _heap: ir::Heap,
     ) -> WasmResult<ir::Value> {
-        // We emit a call to `uint32_t currentMemory_i32(Instance* instance)` via a stub.
+        // We emit a call to `uint32_t memorySize_i32(Instance* instance)` via a stub.
         let (fnref, sigref) =
-            self.symbolic_funcref(pos.func, bd::SymbolicAddress::CurrentMemory, || {
+            self.symbolic_funcref(pos.func, bd::SymbolicAddress::MemorySize, || {
                 let mut sig = ir::Signature::new(CallConv::Baldrdash);
                 sig.params.push(ir::AbiParam::new(native_pointer_type()));
                 sig.params.push(ir::AbiParam::special(
@@ -737,7 +740,7 @@ impl<'a, 'b, 'c> FuncEnvironment for TransEnv<'a, 'b, 'c> {
                 sig
             });
 
-        // Get the instance pointer needed by `currentMemory_i32`.
+        // Get the instance pointer needed by `memorySize_i32`.
         let instance = self.load_instance(&mut pos);
         let vmctx = pos
             .func

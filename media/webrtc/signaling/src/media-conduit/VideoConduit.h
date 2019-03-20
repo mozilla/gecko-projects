@@ -25,7 +25,7 @@
 #include "webrtc/call/call.h"
 #include "webrtc/common_types.h"
 #ifdef FF
-#undef FF  // Avoid name collision between scoped_ptr.h and nsCRTGlue.h.
+#  undef FF  // Avoid name collision between scoped_ptr.h and nsCRTGlue.h.
 #endif
 #include "webrtc/api/video_codecs/video_decoder.h"
 #include "webrtc/api/video_codecs/video_encoder.h"
@@ -256,27 +256,28 @@ class WebrtcVideoConduit
   void UpdateVideoStatsTimer();
   bool GetVideoEncoderStats(double* framerateMean, double* framerateStdDev,
                             double* bitrateMean, double* bitrateStdDev,
-                            uint32_t* droppedFrames,
-                            uint32_t* framesEncoded) override;
+                            uint32_t* droppedFrames, uint32_t* framesEncoded,
+                            Maybe<uint64_t>* qpSum) override;
   bool GetVideoDecoderStats(double* framerateMean, double* framerateStdDev,
                             double* bitrateMean, double* bitrateStdDev,
                             uint32_t* discardedPackets,
                             uint32_t* framesDecoded) override;
-  bool GetAVStats(int32_t* jitterBufferDelayMs, int32_t* playoutBufferDelayMs,
-                  int32_t* avSyncOffsetMs) override;
-  bool GetRTPStats(unsigned int* jitterMs,
-                   unsigned int* cumulativeLost) override;
-  bool GetRTCPReceiverReport(DOMHighResTimeStamp* timestamp, uint32_t* jitterMs,
-                             uint32_t* packetsReceived, uint64_t* bytesReceived,
-                             uint32_t* cumulativeLost, int32_t* rttMs) override;
-  bool GetRTCPSenderReport(DOMHighResTimeStamp* timestamp,
-                           unsigned int* packetsSent,
+  bool GetRTPReceiverStats(unsigned int* jitterMs,
+                           unsigned int* cumulativeLost) override;
+  bool GetRTCPReceiverReport(uint32_t* jitterMs, uint32_t* packetsReceived,
+                             uint64_t* bytesReceived, uint32_t* cumulativeLost,
+                             int32_t* rttMs) override;
+  bool GetRTCPSenderReport(unsigned int* packetsSent,
                            uint64_t* bytesSent) override;
   uint64_t MozVideoLatencyAvg();
 
   void DisableSsrcChanges() override {
     ASSERT_ON_THREAD(mStsThread);
     mAllowSsrcChange = false;
+  }
+
+  Maybe<RefPtr<VideoSessionConduit>> AsVideoSessionConduit() override {
+    return Some(RefPtr<VideoSessionConduit>(this));
   }
 
  private:
@@ -363,17 +364,19 @@ class WebrtcVideoConduit
     uint32_t PacketsLost() const;
     uint64_t BytesReceived() const;
     uint32_t PacketsReceived() const;
+    Maybe<uint64_t> QpSum() const;
 
    private:
     uint32_t mDroppedFrames = 0;
     uint32_t mFramesEncoded = 0;
-    int32_t mFramesDeliveredToEncoder;
+    int32_t mFramesDeliveredToEncoder = 0;
 
     bool mSsrcFound = false;
     uint32_t mJitterMs = 0;
     uint32_t mPacketsLost = 0;
     uint64_t mBytesReceived = 0;
     uint32_t mPacketsReceived = 0;
+    Maybe<uint64_t> mQpSum;
   };
 
   /**

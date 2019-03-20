@@ -1,17 +1,17 @@
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
- * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 //! Access to font metrics from the style system.
 
 #![deny(missing_docs)]
 
-use app_units::Au;
 use crate::context::SharedStyleContext;
 use crate::logical_geometry::WritingMode;
 use crate::media_queries::Device;
 use crate::properties::style_structs::Font;
 use crate::Atom;
+use app_units::Au;
 
 /// Represents the font metrics that style needs from a font to compute the
 /// value of certain CSS units like `ex`.

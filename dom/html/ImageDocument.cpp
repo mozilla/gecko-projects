@@ -17,7 +17,7 @@
 #include "nsIImageLoadingContent.h"
 #include "nsGenericHTMLElement.h"
 #include "nsDocShell.h"
-#include "nsIDocumentInlines.h"
+#include "DocumentInlines.h"
 #include "nsDOMTokenList.h"
 #include "nsIDOMEventListener.h"
 #include "nsIFrame.h"
@@ -68,7 +68,7 @@ ImageListener::ImageListener(ImageDocument* aDocument)
 ImageListener::~ImageListener() {}
 
 NS_IMETHODIMP
-ImageListener::OnStartRequest(nsIRequest* request, nsISupports* ctxt) {
+ImageListener::OnStartRequest(nsIRequest* request) {
   NS_ENSURE_TRUE(mDocument, NS_ERROR_FAILURE);
 
   ImageDocument* imgDoc = static_cast<ImageDocument*>(mDocument.get());
@@ -87,7 +87,7 @@ ImageListener::OnStartRequest(nsIRequest* request, nsISupports* ctxt) {
   nsAutoCString mimeType;
   channel->GetContentType(mimeType);
 
-  nsCOMPtr<nsILoadInfo> loadInfo = channel->GetLoadInfo();
+  nsCOMPtr<nsILoadInfo> loadInfo = channel->LoadInfo();
   // query the corresponding arguments for the channel loadinfo and pass
   // it on to the temporary loadinfo used for content policy checks.
   nsCOMPtr<nsINode> requestingNode = domWindow->GetFrameElementInternal();
@@ -100,8 +100,8 @@ ImageListener::OnStartRequest(nsIRequest* request, nsISupports* ctxt) {
   }
 
   nsCOMPtr<nsILoadInfo> secCheckLoadInfo = new net::LoadInfo(
-      loadingPrincipal, loadInfo ? loadInfo->TriggeringPrincipal() : nullptr,
-      requestingNode, nsILoadInfo::SEC_ONLY_FOR_EXPLICIT_CONTENTSEC_CHECK,
+      loadingPrincipal, loadInfo->TriggeringPrincipal(), requestingNode,
+      nsILoadInfo::SEC_ONLY_FOR_EXPLICIT_CONTENTSEC_CHECK,
       nsIContentPolicy::TYPE_INTERNAL_IMAGE);
 
   int16_t decision = nsIContentPolicy::ACCEPT;
@@ -124,17 +124,16 @@ ImageListener::OnStartRequest(nsIRequest* request, nsISupports* ctxt) {
     imageLoader->LoadImageWithChannel(channel, getter_AddRefs(mNextStream));
   }
 
-  return MediaDocumentStreamListener::OnStartRequest(request, ctxt);
+  return MediaDocumentStreamListener::OnStartRequest(request);
 }
 
 NS_IMETHODIMP
-ImageListener::OnStopRequest(nsIRequest* aRequest, nsISupports* aCtxt,
-                             nsresult aStatus) {
+ImageListener::OnStopRequest(nsIRequest* aRequest, nsresult aStatus) {
   ImageDocument* imgDoc = static_cast<ImageDocument*>(mDocument.get());
-  nsContentUtils::DispatchChromeEvent(imgDoc, static_cast<nsIDocument*>(imgDoc),
+  nsContentUtils::DispatchChromeEvent(imgDoc, ToSupports(imgDoc),
                                       NS_LITERAL_STRING("ImageContentLoaded"),
                                       CanBubble::eYes, Cancelable::eYes);
-  return MediaDocumentStreamListener::OnStopRequest(aRequest, aCtxt, aStatus);
+  return MediaDocumentStreamListener::OnStopRequest(aRequest, aStatus);
 }
 
 ImageDocument::ImageDocument()
@@ -480,7 +479,7 @@ void ImageDocument::NotifyPossibleTitleChange(bool aBoundTitleElement) {
     mHasCustomTitle = true;
   }
 
-  nsIDocument::NotifyPossibleTitleChange(aBoundTitleElement);
+  Document::NotifyPossibleTitleChange(aBoundTitleElement);
 }
 
 NS_IMETHODIMP
@@ -847,8 +846,8 @@ float ImageDocument::GetResolution() {
 }  // namespace dom
 }  // namespace mozilla
 
-nsresult NS_NewImageDocument(nsIDocument** aResult) {
-  mozilla::dom::ImageDocument* doc = new mozilla::dom::ImageDocument();
+nsresult NS_NewImageDocument(mozilla::dom::Document** aResult) {
+  auto* doc = new mozilla::dom::ImageDocument();
   NS_ADDREF(doc);
 
   nsresult rv = doc->Init();

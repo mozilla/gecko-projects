@@ -22,16 +22,16 @@
 #include "mozilla/webrender/WebRenderAPI.h"
 
 #ifdef XP_WIN
-#include <windows.h>  // For HWND :(
+#  include <windows.h>  // For HWND :(
 // Undo the windows.h damage
-#undef GetMessage
-#undef CreateEvent
-#undef GetClassName
-#undef GetBinaryType
-#undef RemoveDirectory
-#undef LoadIcon
-#undef LoadImage
-#undef GetObject
+#  undef GetMessage
+#  undef CreateEvent
+#  undef GetClassName
+#  undef GetBinaryType
+#  undef RemoveDirectory
+#  undef LoadIcon
+#  undef LoadImage
+#  undef GetObject
 #endif
 
 class nsPresContext;
@@ -62,7 +62,7 @@ class nsPluginFrame final : public nsFrame,
   typedef mozilla::layers::LayerManager LayerManager;
   typedef mozilla::layers::ImageContainer ImageContainer;
   typedef mozilla::layers::StackingContextHelper StackingContextHelper;
-  typedef mozilla::layers::WebRenderLayerManager WebRenderLayerManager;
+  typedef mozilla::layers::RenderRootStateManager RenderRootStateManager;
   typedef mozilla::layers::WebRenderParentCommand WebRenderParentCommand;
   typedef mozilla::ContainerLayerParameters ContainerLayerParameters;
 
@@ -106,8 +106,7 @@ class nsPluginFrame final : public nsFrame,
 
   virtual void SetIsDocumentActive(bool aIsActive) override;
 
-  virtual nsresult GetCursor(const nsPoint& aPoint,
-                             nsIFrame::Cursor& aCursor) override;
+  mozilla::Maybe<Cursor> GetCursor(const nsPoint&) override;
 
   // APIs used by nsRootPresContext to set up the widget position/size/clip
   // region.
@@ -142,9 +141,9 @@ class nsPluginFrame final : public nsFrame,
   // accessibility support
 #ifdef ACCESSIBILITY
   virtual mozilla::a11y::AccType AccessibleType() override;
-#ifdef XP_WIN
+#  ifdef XP_WIN
   NS_IMETHOD GetPluginPort(HWND* aPort);
-#endif
+#  endif
 #endif
 
   // local methods
@@ -223,15 +222,15 @@ class nsPluginFrame final : public nsFrame,
    */
   bool WantsToHandleWheelEventAsDefaultAction() const;
 
-  bool CreateWebRenderCommands(nsDisplayItem* aItem,
-                               mozilla::wr::DisplayListBuilder& aBuilder,
-                               mozilla::wr::IpcResourceUpdateQueue& aResources,
-                               const StackingContextHelper& aSc,
-                               mozilla::layers::WebRenderLayerManager* aManager,
-                               nsDisplayListBuilder* aDisplayListBuilder);
+  bool CreateWebRenderCommands(
+      nsDisplayItem* aItem, mozilla::wr::DisplayListBuilder& aBuilder,
+      mozilla::wr::IpcResourceUpdateQueue& aResources,
+      const StackingContextHelper& aSc,
+      mozilla::layers::RenderRootStateManager* aManager,
+      nsDisplayListBuilder* aDisplayListBuilder);
 
  protected:
-  explicit nsPluginFrame(ComputedStyle* aStyle);
+  explicit nsPluginFrame(ComputedStyle* aStyle, nsPresContext* aPresContext);
   virtual ~nsPluginFrame();
 
   // NOTE:  This frame class does not inherit from |nsLeafFrame|, so
@@ -397,7 +396,7 @@ class nsDisplayPlugin final : public nsDisplayItem {
       mozilla::wr::DisplayListBuilder& aBuilder,
       mozilla::wr::IpcResourceUpdateQueue& aResources,
       const StackingContextHelper& aSc,
-      mozilla::layers::WebRenderLayerManager* aManager,
+      mozilla::layers::RenderRootStateManager* aManager,
       nsDisplayListBuilder* aDisplayListBuilder) override;
 };
 

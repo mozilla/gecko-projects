@@ -40,9 +40,12 @@ window.gActivityStreamStrings = {
   "section_disclaimer_topstories_buttontext": "Entesos",
   "prefs_home_header": "Contingut d'inici del Firefox",
   "prefs_home_description": "Trieu el contingut que voleu a la pantalla d'inici del Firefox.",
+  "prefs_content_discovery_header": "Inici del Firefox",
+  "prefs_content_discovery_description": "El descobriment de contingut en la pàgina d'inici del Firefox us permet descobrir articles de gran qualitat i rellevants de tot el web.",
+  "prefs_content_discovery_button": "Desactiva el descobriment de contingut",
   "prefs_section_rows_option": "{num} fila;{num} files",
   "prefs_search_header": "Cerca web",
-  "prefs_topsites_description": "El llocs que visiteu més sovint",
+  "prefs_topsites_description": "Els llocs que visiteu més sovint",
   "prefs_topstories_description2": "El contingut més interessant de tot el web, personalitzat per a vós",
   "prefs_topstories_options_sponsored_label": "Articles patrocinats",
   "prefs_topstories_sponsored_learn_more": "Més informació",
@@ -107,6 +110,5 @@ window.gActivityStreamStrings = {
   "firstrun_privacy_notice": "Avís de privadesa",
   "firstrun_continue_to_login": "Continua",
   "firstrun_skip_login": "Omet aquest pas",
-  "context_menu_title": "Open menu",
-  "pocket_learn_more": "Més informació"
+  "context_menu_title": "Obre el menú"
 };

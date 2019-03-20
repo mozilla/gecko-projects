@@ -11,13 +11,13 @@
 #include "mozilla/layers/VideoBridgeChild.h"
 #include "mozilla/layers/ImageClient.h"
 #include "MediaInfo.h"
+#include "PDMFactory.h"
 #include "VideoDecoderManagerParent.h"
 #ifdef XP_WIN
-#include "WMFDecoderModule.h"
+#  include "WMFDecoderModule.h"
 #endif
 
 namespace mozilla {
-namespace dom {
 
 using base::Thread;
 using media::TimeUnit;
@@ -65,9 +65,11 @@ VideoDecoderParent::VideoDecoderParent(
   using Option = CreateDecoderParams::Option;
   using OptionSet = CreateDecoderParams::OptionSet;
 
+  // Ensure everything is properly initialized on the right thread.
+  PDMFactory::EnsureInit();
+
   // TODO: Ideally we wouldn't hardcode the WMF PDM, and we'd use the normal PDM
   // factory logic for picking a decoder.
-  WMFDecoderModule::Init();
   RefPtr<WMFDecoderModule> pdm(new WMFDecoderModule());
   pdm->Startup();
 
@@ -142,9 +144,9 @@ mozilla::ipc::IPCResult VideoDecoderParent::RecvInput(
     return IPC_OK();
   }
   data->mOffset = aData.base().offset();
-  data->mTime = TimeUnit::FromMicroseconds(aData.base().time());
-  data->mTimecode = TimeUnit::FromMicroseconds(aData.base().timecode());
-  data->mDuration = TimeUnit::FromMicroseconds(aData.base().duration());
+  data->mTime = aData.base().time();
+  data->mTimecode = aData.base().timecode();
+  data->mDuration = aData.base().duration();
   data->mKeyframe = aData.base().keyframe();
 
   DeallocShmem(aData.buffer());
@@ -173,7 +175,7 @@ void VideoDecoderParent::ProcessDecodedData(
   }
 
   for (auto&& data : aData) {
-    MOZ_ASSERT(data->mType == MediaData::VIDEO_DATA,
+    MOZ_ASSERT(data->mType == MediaData::Type::VIDEO_DATA,
                "Can only decode videos using VideoDecoderParent!");
     VideoData* video = static_cast<VideoData*>(data.get());
 
@@ -195,10 +197,8 @@ void VideoDecoderParent::ProcessDecodedData(
     }
 
     VideoDataIPDL output(
-        MediaDataIPDL(data->mOffset, data->mTime.ToMicroseconds(),
-                      data->mTimecode.ToMicroseconds(),
-                      data->mDuration.ToMicroseconds(), data->mFrames,
-                      data->mKeyframe),
+        MediaDataIPDL(data->mOffset, data->mTime, data->mTimecode,
+                      data->mDuration, data->mKeyframe),
         video->mDisplay, texture ? texture->GetSize() : IntSize(),
         texture ? mParent->StoreImage(video->mImage, texture)
                 : SurfaceDescriptorGPUVideo(0, null_t()),
@@ -250,10 +250,10 @@ mozilla::ipc::IPCResult VideoDecoderParent::RecvShutdown() {
 }
 
 mozilla::ipc::IPCResult VideoDecoderParent::RecvSetSeekThreshold(
-    const int64_t& aTime) {
+    const TimeUnit& aTime) {
   MOZ_ASSERT(!mDestroyed);
   MOZ_ASSERT(OnManagerThread());
-  mDecoder->SetSeekThreshold(TimeUnit::FromMicroseconds(aTime));
+  mDecoder->SetSeekThreshold(aTime);
   return IPC_OK();
 }
 
@@ -280,5 +280,4 @@ bool VideoDecoderParent::OnManagerThread() {
   return mParent->OnManagerThread();
 }
 
-}  // namespace dom
 }  // namespace mozilla

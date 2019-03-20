@@ -97,7 +97,7 @@ class ModuleSharedContext;
  */
 class SharedContext {
  public:
-  JSContext* const context;
+  JSContext* const cx_;
 
  protected:
   enum class Kind : uint8_t { FunctionBox, Global, Eval, Module };
@@ -155,7 +155,7 @@ class SharedContext {
  public:
   SharedContext(JSContext* cx, Kind kind, Directives directives,
                 bool extraWarnings)
-      : context(cx),
+      : cx_(cx),
         kind_(kind),
         thisBinding_(ThisBinding::Global),
         strictScript(directives.strict()),
@@ -183,6 +183,19 @@ class SharedContext {
   inline GlobalSharedContext* asGlobalContext();
   bool isEvalContext() const { return kind_ == Kind::Eval; }
   inline EvalSharedContext* asEvalContext();
+
+  bool isTopLevelContext() const {
+    switch (kind_) {
+      case Kind::Module:
+      case Kind::Global:
+      case Kind::Eval:
+        return true;
+      case Kind::FunctionBox:
+        break;
+    }
+    MOZ_ASSERT(kind_ == Kind::FunctionBox);
+    return false;
+  }
 
   ThisBinding thisBinding() const { return thisBinding_; }
 
@@ -290,7 +303,9 @@ class FunctionBox : public ObjectBox, public SharedContext {
   void initWithEnclosingScope(Scope* enclosingScope);
 
  public:
-  CodeNode* functionNode; /* back pointer used by asm.js for error messages */
+  // Back pointer used by asm.js for error messages.
+  FunctionNode* functionNode;
+
   uint32_t bufStart;
   uint32_t bufEnd;
   uint32_t startLine;
@@ -475,6 +490,7 @@ class FunctionBox : public ObjectBox, public SharedContext {
   bool needsFinalYield() const { return isGenerator() || isAsync(); }
   bool needsDotGeneratorName() const { return isGenerator() || isAsync(); }
   bool needsIteratorResult() const { return isGenerator(); }
+  bool needsPromiseResult() const { return isAsync() && !isGenerator(); }
 
   bool isArrow() const { return function()->isArrow(); }
 
@@ -527,14 +543,10 @@ class FunctionBox : public ObjectBox, public SharedContext {
   // for validated asm.js.
   bool useAsmOrInsideUseAsm() const { return useAsm; }
 
-  void setStart(const TokenStreamAnyChars& anyChars) {
-    uint32_t offset = anyChars.currentToken().pos.begin;
-    setStart(anyChars, offset);
-  }
-
-  void setStart(const TokenStreamAnyChars& anyChars, uint32_t offset) {
+  void setStart(uint32_t offset, uint32_t line, uint32_t column) {
     bufStart = offset;
-    anyChars.srcCoords.lineNumAndColumnIndex(offset, &startLine, &startColumn);
+    startLine = line;
+    startColumn = column;
   }
 
   void setEnd(const TokenStreamAnyChars& anyChars) {
@@ -548,6 +560,19 @@ class FunctionBox : public ObjectBox, public SharedContext {
 
   void trace(JSTracer* trc) override;
 };
+
+template <typename Unit, class AnyCharsAccess>
+inline void GeneralTokenStreamChars<Unit, AnyCharsAccess>::setFunctionStart(
+    FunctionBox* funbox) const {
+  const TokenStreamAnyChars& anyChars = anyCharsAccess();
+
+  uint32_t bufStart = anyChars.currentToken().pos.begin;
+
+  uint32_t startLine, startColumn;
+  computeLineAndColumn(bufStart, &startLine, &startColumn);
+
+  funbox->setStart(bufStart, startLine, startColumn);
+}
 
 inline FunctionBox* SharedContext::asFunctionBox() {
   MOZ_ASSERT(isFunctionBox());

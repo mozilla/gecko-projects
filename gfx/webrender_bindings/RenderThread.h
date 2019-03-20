@@ -15,18 +15,21 @@
 #include "ThreadSafeRefcountingWithMainThreadDestruction.h"
 #include "mozilla/gfx/Point.h"
 #include "mozilla/MozPromise.h"
-#include "mozilla/Mutex.h"
+#include "mozilla/DataMutex.h"
 #include "mozilla/webrender/webrender_ffi.h"
 #include "mozilla/UniquePtr.h"
 #include "mozilla/webrender/WebRenderTypes.h"
 #include "mozilla/layers/SynchronousTask.h"
-#include "GLContext.h"
+#include "mozilla/VsyncDispatcher.h"
 
 #include <list>
 #include <queue>
 #include <unordered_map>
 
 namespace mozilla {
+namespace gl {
+class GLContext;
+}  // namespace gl
 namespace wr {
 
 typedef MozPromise<MemoryReport, bool, true> MemoryReportPromise;
@@ -168,8 +171,9 @@ class RenderThread final {
   void RunEvent(wr::WindowId aWindowId, UniquePtr<RendererEvent> aCallBack);
 
   /// Can only be called from the render thread.
-  void UpdateAndRender(wr::WindowId aWindowId, const TimeStamp& aStartTime,
-                       bool aRender, const Maybe<gfx::IntSize>& aReadbackSize,
+  void UpdateAndRender(wr::WindowId aWindowId, const VsyncId& aStartId,
+                       const TimeStamp& aStartTime, bool aRender,
+                       const Maybe<gfx::IntSize>& aReadbackSize,
                        const Maybe<Range<uint8_t>>& aReadbackBuffer,
                        bool aHadSlowFrame);
 
@@ -183,7 +187,7 @@ class RenderThread final {
   /// Can be called from any thread.
   void UnregisterExternalImage(uint64_t aExternalImageId);
 
-  /// Can be called from any thread.
+  /// Can only be called from the render thread.
   void UpdateRenderTextureHost(uint64_t aSrcExternalImageId,
                                uint64_t aWrappedExternalImageId);
 
@@ -200,7 +204,7 @@ class RenderThread final {
   /// Can be called from any thread.
   bool TooManyPendingFrames(wr::WindowId aWindowId);
   /// Can be called from any thread.
-  void IncPendingFrameCount(wr::WindowId aWindowId,
+  void IncPendingFrameCount(wr::WindowId aWindowId, const VsyncId& aStartId,
                             const TimeStamp& aStartTime);
   /// Can be called from any thread.
   void DecPendingFrameCount(wr::WindowId aWindowId);
@@ -266,11 +270,11 @@ class RenderThread final {
     // One entry in this queue for each pending frame, so the length
     // should always equal mPendingCount
     std::queue<TimeStamp> mStartTimes;
+    std::queue<VsyncId> mStartIds;
     bool mHadSlowFrame = false;
   };
 
-  Mutex mFrameCountMapLock;
-  std::unordered_map<uint64_t, WindowInfo*> mWindowInfos;
+  DataMutex<std::unordered_map<uint64_t, WindowInfo*>> mWindowInfos;
 
   Mutex mRenderTextureMapLock;
   std::unordered_map<uint64_t, RefPtr<RenderTextureHost>> mRenderTextures;

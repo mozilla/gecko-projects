@@ -1,6 +1,6 @@
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
- * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 //! The [`@font-face`][ff] at-rule.
 //!
@@ -336,9 +336,10 @@ impl<'a> FontFace<'a> {
                         // We support only opentype fonts and truetype is an alias for
                         // that format. Sources without format hints need to be
                         // downloaded in case we support them.
-                        hints.is_empty() || hints
-                            .iter()
-                            .any(|hint| hint == "truetype" || hint == "opentype" || hint == "woff")
+                        hints.is_empty() ||
+                            hints.iter().any(|hint| {
+                                hint == "truetype" || hint == "opentype" || hint == "woff"
+                            })
                     } else {
                         true
                     }

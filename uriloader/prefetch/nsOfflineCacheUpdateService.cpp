@@ -9,7 +9,6 @@
 #include "OfflineCacheUpdateGlue.h"
 #include "nsOfflineCacheUpdate.h"
 
-#include "nsCPrefetchService.h"
 #include "nsCURILoader.h"
 #include "nsIApplicationCacheContainer.h"
 #include "nsIApplicationCacheChannel.h"
@@ -19,7 +18,7 @@
 #include "nsIDocShell.h"
 #include "nsIDocumentLoader.h"
 #include "nsIDOMWindow.h"
-#include "nsIDocument.h"
+#include "mozilla/dom/Document.h"
 #include "nsIObserverService.h"
 #include "nsIURL.h"
 #include "nsIWebProgress.h"
@@ -28,12 +27,14 @@
 #include "nsIPermissionManager.h"
 #include "nsIPrincipal.h"
 #include "nsNetCID.h"
+#include "nsNetUtil.h"
 #include "nsServiceManagerUtils.h"
 #include "nsStreamUtils.h"
 #include "nsThreadUtils.h"
 #include "nsProxyRelease.h"
 #include "mozilla/Logging.h"
 #include "nsIAsyncVerifyRedirectCallback.h"
+#include "mozilla/Components.h"
 #include "mozilla/Preferences.h"
 #include "mozilla/Attributes.h"
 #include "mozilla/Unused.h"
@@ -97,7 +98,7 @@ class nsOfflineCachePendingUpdate final : public nsIWebProgressListener,
   nsOfflineCachePendingUpdate(nsOfflineCacheUpdateService *aService,
                               nsIURI *aManifestURI, nsIURI *aDocumentURI,
                               nsIPrincipal *aLoadingPrincipal,
-                              nsIDocument *aDocument)
+                              Document *aDocument)
       : mService(aService),
         mManifestURI(aManifestURI),
         mDocumentURI(aDocumentURI),
@@ -143,7 +144,7 @@ nsOfflineCachePendingUpdate::OnStateChange(nsIWebProgress *aWebProgress,
   if (mDidReleaseThis) {
     return NS_OK;
   }
-  nsCOMPtr<nsIDocument> updateDoc = do_QueryReferent(mDocument);
+  nsCOMPtr<Document> updateDoc = do_QueryReferent(mDocument);
   if (!updateDoc) {
     // The document that scheduled this update has gone away,
     // we don't need to listen anymore.
@@ -165,10 +166,8 @@ nsOfflineCachePendingUpdate::OnStateChange(nsIWebProgress *aWebProgress,
   auto *outerWindow = nsPIDOMWindowOuter::From(windowProxy);
   nsPIDOMWindowInner *innerWindow = outerWindow->GetCurrentInnerWindow();
 
-  nsCOMPtr<nsIDocument> progressDoc = outerWindow->GetDoc();
-  if (!progressDoc) return NS_OK;
-
-  if (!SameCOMIdentity(progressDoc, updateDoc)) {
+  nsCOMPtr<Document> progressDoc = outerWindow->GetDoc();
+  if (!progressDoc || progressDoc != updateDoc) {
     return NS_OK;
   }
 
@@ -212,9 +211,16 @@ nsOfflineCachePendingUpdate::OnStatusChange(nsIWebProgress *aWebProgress,
 }
 
 NS_IMETHODIMP
-nsOfflineCachePendingUpdate::OnSecurityChange(
-    nsIWebProgress *aWebProgress, nsIRequest *aRequest, uint32_t aOldState,
-    uint32_t aState, const nsAString &aContentBlockingLogJSON) {
+nsOfflineCachePendingUpdate::OnSecurityChange(nsIWebProgress *aWebProgress,
+                                              nsIRequest *aRequest,
+                                              uint32_t aState) {
+  MOZ_ASSERT_UNREACHABLE("notification excluded in AddProgressListener(...)");
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+nsOfflineCachePendingUpdate::OnContentBlockingEvent(
+    nsIWebProgress *aWebProgress, nsIRequest *aRequest, uint32_t aEvent) {
   MOZ_ASSERT_UNREACHABLE("notification excluded in AddProgressListener(...)");
   return NS_OK;
 }
@@ -280,7 +286,8 @@ nsOfflineCacheUpdateService *nsOfflineCacheUpdateService::EnsureService() {
   if (!gOfflineCacheUpdateService) {
     // Make the service manager hold a long-lived reference to the service
     nsCOMPtr<nsIOfflineCacheUpdateService> service =
-        do_GetService(NS_OFFLINECACHEUPDATESERVICE_CONTRACTID);
+        components::OfflineCacheUpdate::Service();
+    Unused << service;
   }
 
   return gOfflineCacheUpdateService;
@@ -301,7 +308,7 @@ nsresult nsOfflineCacheUpdateService::ScheduleUpdate(
 NS_IMETHODIMP
 nsOfflineCacheUpdateService::ScheduleOnDocumentStop(
     nsIURI *aManifestURI, nsIURI *aDocumentURI, nsIPrincipal *aLoadingPrincipal,
-    nsIDocument *aDocument) {
+    Document *aDocument) {
   LOG(
       ("nsOfflineCacheUpdateService::ScheduleOnDocumentStop [%p, "
        "manifestURI=%p, documentURI=%p doc=%p]",
@@ -431,7 +438,7 @@ nsresult nsOfflineCacheUpdateService::FindUpdate(
 
 nsresult nsOfflineCacheUpdateService::Schedule(
     nsIURI *aManifestURI, nsIURI *aDocumentURI, nsIPrincipal *aLoadingPrincipal,
-    nsIDocument *aDocument, nsPIDOMWindowInner *aWindow,
+    Document *aDocument, nsPIDOMWindowInner *aWindow,
     nsIFile *aCustomProfileDir, nsIOfflineCacheUpdate **aUpdate) {
   nsCOMPtr<nsIOfflineCacheUpdate> update;
   if (GeckoProcessType_Default != XRE_GetProcessType()) {
@@ -571,7 +578,8 @@ static nsresult OfflineAppPermForPrincipal(nsIPrincipal *aPrincipal,
   }
 
   uint32_t perm;
-  const char *permName = pinned ? "pin-app" : "offline-app";
+  const nsLiteralCString permName = pinned ? NS_LITERAL_CSTRING("pin-app")
+                                           : NS_LITERAL_CSTRING("offline-app");
   permissionManager->TestExactPermissionFromPrincipal(aPrincipal, permName,
                                                       &perm);
 
@@ -660,8 +668,9 @@ nsOfflineCacheUpdateService::AllowOfflineApp(nsIPrincipal *aPrincipal) {
     if (!permissionManager) return NS_ERROR_NOT_AVAILABLE;
 
     rv = permissionManager->AddFromPrincipal(
-        aPrincipal, "offline-app", nsIPermissionManager::ALLOW_ACTION,
-        nsIPermissionManager::EXPIRE_NEVER, 0);
+        aPrincipal, NS_LITERAL_CSTRING("offline-app"),
+        nsIPermissionManager::ALLOW_ACTION, nsIPermissionManager::EXPIRE_NEVER,
+        0);
     NS_ENSURE_SUCCESS(rv, rv);
   }
 

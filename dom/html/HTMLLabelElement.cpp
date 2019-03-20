@@ -61,18 +61,6 @@ void HTMLLabelElement::Focus(ErrorResult& aError) {
   }
 }
 
-static bool InInteractiveHTMLContent(nsIContent* aContent, nsIContent* aStop) {
-  nsIContent* content = aContent;
-  while (content && content != aStop) {
-    if (content->IsElement() &&
-        content->AsElement()->IsInteractiveHTMLContent(true)) {
-      return true;
-    }
-    content = content->GetParent();
-  }
-  return false;
-}
-
 nsresult HTMLLabelElement::PostHandleEvent(EventChainPostVisitor& aVisitor) {
   WidgetMouseEvent* mouseEvent = aVisitor.mEvent->AsMouseEvent();
   if (mHandlingEvent ||
@@ -85,8 +73,9 @@ nsresult HTMLLabelElement::PostHandleEvent(EventChainPostVisitor& aVisitor) {
     return NS_OK;
   }
 
-  nsCOMPtr<nsIContent> target = do_QueryInterface(aVisitor.mEvent->mTarget);
-  if (InInteractiveHTMLContent(target, this)) {
+  nsCOMPtr<Element> target =
+      do_QueryInterface(aVisitor.mEvent->GetOriginalDOMEventTarget());
+  if (nsContentUtils::IsInInteractiveHTMLContent(target, this)) {
     return NS_OK;
   }
 
@@ -201,8 +190,8 @@ bool HTMLLabelElement::PerformAccesskey(bool aKeyCausesActivation,
                            WidgetMouseEvent::eReal);
     event.inputSource = MouseEvent_Binding::MOZ_SOURCE_KEYBOARD;
 
-    nsAutoPopupStatePusher popupStatePusher(aIsTrustedEvent ? openAllowed
-                                                            : openAbused);
+    nsAutoPopupStatePusher popupStatePusher(
+        aIsTrustedEvent ? PopupBlocker::openAllowed : PopupBlocker::openAbused);
 
     EventDispatcher::Dispatch(static_cast<nsIContent*>(this), presContext,
                               &event);
@@ -226,7 +215,7 @@ nsGenericHTMLElement* HTMLLabelElement::GetLabeledElement() const {
 
   if (ShadowRoot* shadowRoot = GetContainingShadow()) {
     element = shadowRoot->GetElementById(elementId);
-  } else if (nsIDocument* doc = GetUncomposedDoc()) {
+  } else if (Document* doc = GetUncomposedDoc()) {
     element = doc->GetElementById(elementId);
   } else {
     element =

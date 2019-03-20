@@ -14,27 +14,23 @@ var EXPORTED_SYMBOLS = ["ExtensionPageChild"];
  * child process.
  */
 
-ChromeUtils.import("resource://gre/modules/Services.jsm");
-ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
+const {Services} = ChromeUtils.import("resource://gre/modules/Services.jsm");
 
 ChromeUtils.defineModuleGetter(this, "ExtensionChildDevToolsUtils",
                                "resource://gre/modules/ExtensionChildDevToolsUtils.jsm");
+ChromeUtils.defineModuleGetter(this, "ExtensionProcessScript",
+                               "resource://gre/modules/ExtensionProcessScript.jsm");
 ChromeUtils.defineModuleGetter(this, "Schemas",
                                "resource://gre/modules/Schemas.jsm");
 ChromeUtils.defineModuleGetter(this, "WebNavigationFrames",
                                "resource://gre/modules/WebNavigationFrames.jsm");
 
-XPCOMUtils.defineLazyGetter(
-  this, "processScript",
-  () => Cc["@mozilla.org/webextensions/extension-process-script;1"]
-          .getService().wrappedJSObject);
-
 const CATEGORY_EXTENSION_SCRIPTS_ADDON = "webextension-scripts-addon";
 const CATEGORY_EXTENSION_SCRIPTS_DEVTOOLS = "webextension-scripts-devtools";
 
-ChromeUtils.import("resource://gre/modules/ExtensionCommon.jsm");
-ChromeUtils.import("resource://gre/modules/ExtensionChild.jsm");
-ChromeUtils.import("resource://gre/modules/ExtensionUtils.jsm");
+const {ExtensionCommon} = ChromeUtils.import("resource://gre/modules/ExtensionCommon.jsm");
+const {ExtensionChild} = ChromeUtils.import("resource://gre/modules/ExtensionChild.jsm");
+const {ExtensionUtils} = ChromeUtils.import("resource://gre/modules/ExtensionUtils.jsm");
 
 const {
   getInnerWindowID,
@@ -90,7 +86,7 @@ const initializeBackgroundPage = (context) => {
 };
 
 function getFrameData(global) {
-  return processScript.getFrameData(global, true);
+  return ExtensionProcessScript.getFrameData(global, true);
 }
 
 var apiManager = new class extends SchemaAPIManager {
@@ -377,7 +373,7 @@ ExtensionPageChild = {
   },
 
   /**
-   * Create a privileged context at document-element-inserted.
+   * Create a privileged context at initial-document-element-inserted.
    *
    * @param {BrowserExtensionContent} extension
    *     The extension for which the context should be created.

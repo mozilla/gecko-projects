@@ -10,7 +10,6 @@
 
 #include "mozilla/ArrayUtils.h"
 #include "mozilla/MathAlgorithms.h"
-#include "mozilla/ServoBindings.h"
 #include "mozilla/ServoStyleSet.h"
 #include "mozilla/Tuple.h"
 #include "mozilla/UniquePtr.h"
@@ -27,13 +26,14 @@
 #include "mozilla/ServoCSSParser.h"
 #include "gfxMatrix.h"
 #include "gfxQuaternion.h"
-#include "nsIDocument.h"
+#include "mozilla/dom/Document.h"
 #include "nsIFrame.h"
 #include "gfx2DGlue.h"
 #include "mozilla/ComputedStyleInlines.h"
 
 using namespace mozilla;
 using namespace mozilla::css;
+using namespace mozilla::dom;
 using namespace mozilla::gfx;
 using nsStyleTransformMatrix::Decompose2DMatrix;
 using nsStyleTransformMatrix::Decompose3DMatrix;
@@ -118,16 +118,13 @@ nscolor AnimationValue::GetColor(nscolor aForegroundColor) const {
 already_AddRefed<const nsCSSValueSharedList> AnimationValue::GetTransformList()
     const {
   MOZ_ASSERT(mServo);
-
   RefPtr<nsCSSValueSharedList> transform;
   Servo_AnimationValue_GetTransform(mServo, &transform);
   return transform.forget();
 }
 
 Size AnimationValue::GetScaleValue(const nsIFrame* aFrame) const {
-  MOZ_ASSERT(mServo);
-  RefPtr<nsCSSValueSharedList> list;
-  Servo_AnimationValue_GetTransform(mServo, &list);
+  RefPtr<const nsCSSValueSharedList> list = GetTransformList();
   return nsStyleTransformMatrix::GetScaleValue(list, aFrame);
 }
 
@@ -163,13 +160,15 @@ double AnimationValue::ComputeDistance(nsCSSPropertyID aProperty,
   return distance < 0.0 ? 0.0 : distance;
 }
 
-/* static */ AnimationValue AnimationValue::FromString(
-    nsCSSPropertyID aProperty, const nsAString& aValue, Element* aElement) {
+/* static */
+AnimationValue AnimationValue::FromString(nsCSSPropertyID aProperty,
+                                          const nsAString& aValue,
+                                          Element* aElement) {
   MOZ_ASSERT(aElement);
 
   AnimationValue result;
 
-  nsCOMPtr<nsIDocument> doc = aElement->GetComposedDoc();
+  nsCOMPtr<Document> doc = aElement->GetComposedDoc();
   if (!doc) {
     return result;
   }
@@ -197,14 +196,15 @@ double AnimationValue::ComputeDistance(nsCSSPropertyID aProperty,
   return result;
 }
 
-/* static */ AnimationValue AnimationValue::Opacity(float aOpacity) {
+/* static */
+AnimationValue AnimationValue::Opacity(float aOpacity) {
   AnimationValue result;
   result.mServo = Servo_AnimationValue_Opacity(aOpacity).Consume();
   return result;
 }
 
-/* static */ AnimationValue AnimationValue::Transform(
-    nsCSSValueSharedList& aList) {
+/* static */
+AnimationValue AnimationValue::Transform(nsCSSValueSharedList& aList) {
   AnimationValue result;
   result.mServo = Servo_AnimationValue_Transform(aList).Consume();
   return result;

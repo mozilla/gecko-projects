@@ -44,7 +44,6 @@
 /* eslint-disable no-shadow */
 /* eslint-env mozilla/browser-window */
 
-ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
 ChromeUtils.defineModuleGetter(this, "PrivateBrowsingUtils",
   "resource://gre/modules/PrivateBrowsingUtils.jsm");
 ChromeUtils.defineModuleGetter(this, "ReaderMode",
@@ -53,7 +52,6 @@ ChromeUtils.defineModuleGetter(this, "pktApi",
   "chrome://pocket/content/pktApi.jsm");
 
 var pktUI = (function() {
-
     // -- Initialization (on startup and new windows) -- //
 
     // Init panel id at 0. The first actual panel id will have the number 1 so
@@ -152,7 +150,6 @@ var pktUI = (function() {
      * Show the logged-out state / sign-up panel
      */
     function saveAndShowConfirmation(url, title) {
-
         // Validate input parameter
         if (typeof url !== "undefined" && url.startsWith("about:reader?url=")) {
             url = ReaderMode.getOriginalUrl(url);
@@ -461,7 +458,7 @@ var pktUI = (function() {
         var _initL10NMessageId = "initL10N";
         pktUIMessaging.addMessageListener(iframe, _initL10NMessageId, function(panelId, data) {
             var strings = {};
-            var bundle = Services.strings.createBundle("chrome://pocket/locale/pocket.properties");
+            var bundle = Services.strings.createBundle("chrome://browser/locale/pocket.properties");
             for (let str of bundle.getSimpleEnumeration()) {
                 if (str.key in data) {
                     strings[str.key] = bundle.formatStringFromName(str.key, data[str.key], data[str.key].length);
@@ -471,7 +468,6 @@ var pktUI = (function() {
             }
             pktUIMessaging.sendResponseMessageToPanel(panelId, _initL10NMessageId, { strings });
         });
-
     }
 
     // -- Browser Navigation -- //
@@ -576,7 +572,6 @@ var pktUI = (function() {
 // -- Communication to Background -- //
 // https://developer.mozilla.org/en-US/Add-ons/Code_snippets/Interaction_between_privileged_and_non-privileged_pages
 var pktUIMessaging = (function() {
-
     /**
      * Prefix message id for message listening
      */
@@ -603,7 +598,6 @@ var pktUIMessaging = (function() {
 
             // Cleanup the element
             e.target.remove();
-
         }, false, true);
     }
 
@@ -611,7 +605,6 @@ var pktUIMessaging = (function() {
      * Send a message to the panel's iframe
      */
     function sendMessageToPanel(panelId, messageId, payload) {
-
         if (!isPanelIdValid(panelId)) { return; }
 
         var panelFrame = pktUI.getPanelFrame();

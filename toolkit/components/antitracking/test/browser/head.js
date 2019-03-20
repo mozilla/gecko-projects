@@ -1,15 +1,15 @@
-const TEST_DOMAIN = "http://example.net";
-const TEST_DOMAIN_2 = "http://xn--exmple-cua.test";
-const TEST_DOMAIN_3 = "https://xn--hxajbheg2az3al.xn--jxalpdlp";
-const TEST_DOMAIN_4 = "http://prefixexample.com";
-const TEST_DOMAIN_5 = "http://test";
-const TEST_DOMAIN_6 = "http://mochi.test:8888";
-const TEST_3RD_PARTY_DOMAIN = "https://tracking.example.org";
-const TEST_3RD_PARTY_DOMAIN_TP = "https://tracking.example.com";
-const TEST_4TH_PARTY_DOMAIN = "http://not-tracking.example.com";
-const TEST_ANOTHER_3RD_PARTY_DOMAIN = "https://another-tracking.example.net";
+const TEST_DOMAIN = "http://example.net/";
+const TEST_DOMAIN_2 = "http://xn--exmple-cua.test/";
+const TEST_DOMAIN_3 = "https://xn--hxajbheg2az3al.xn--jxalpdlp/";
+const TEST_DOMAIN_4 = "http://prefixexample.com/";
+const TEST_DOMAIN_5 = "http://test/";
+const TEST_DOMAIN_6 = "http://mochi.test:8888/";
+const TEST_3RD_PARTY_DOMAIN = "https://tracking.example.org/";
+const TEST_3RD_PARTY_DOMAIN_TP = "https://tracking.example.com/";
+const TEST_4TH_PARTY_DOMAIN = "http://not-tracking.example.com/";
+const TEST_ANOTHER_3RD_PARTY_DOMAIN = "https://another-tracking.example.net/";
 
-const TEST_PATH = "/browser/toolkit/components/antitracking/test/browser/";
+const TEST_PATH = "browser/toolkit/components/antitracking/test/browser/";
 
 const TEST_TOP_PAGE = TEST_DOMAIN + TEST_PATH + "page.html";
 const TEST_TOP_PAGE_2 = TEST_DOMAIN_2 + TEST_PATH + "page.html";
@@ -27,15 +27,16 @@ const TEST_4TH_PARTY_PAGE = TEST_4TH_PARTY_DOMAIN + TEST_PATH + "3rdParty.html";
 const TEST_ANOTHER_3RD_PARTY_PAGE = TEST_ANOTHER_3RD_PARTY_DOMAIN + TEST_PATH + "3rdParty.html";
 
 const BEHAVIOR_ACCEPT         = Ci.nsICookieService.BEHAVIOR_ACCEPT;
+const BEHAVIOR_REJECT         = Ci.nsICookieService.BEHAVIOR_REJECT;
 const BEHAVIOR_LIMIT_FOREIGN  = Ci.nsICookieService.BEHAVIOR_LIMIT_FOREIGN;
 const BEHAVIOR_REJECT_FOREIGN = Ci.nsICookieService.BEHAVIOR_REJECT_FOREIGN;
 const BEHAVIOR_REJECT_TRACKER = Ci.nsICookieService.BEHAVIOR_REJECT_TRACKER;
 
 var gFeatures = undefined;
 
-let {UrlClassifierTestUtils} = ChromeUtils.import("resource://testing-common/UrlClassifierTestUtils.jsm", {});
+let {UrlClassifierTestUtils} = ChromeUtils.import("resource://testing-common/UrlClassifierTestUtils.jsm");
 
-requestLongerTimeout(5);
+requestLongerTimeout(3);
 
 this.AntiTracking = {
   runTest(name, callbackTracking, callbackNonTracking, cleanupFunction, extraPrefs,
@@ -117,7 +118,7 @@ this.AntiTracking = {
           blockingByContentBlockingRTUI: true,
           allowList: false,
           callback: callbackNonTracking,
-          extraPrefs: [],
+          extraPrefs,
           expectedBlockingNotifications: 0,
           runInPrivateWindow,
           iframeSandbox,
@@ -132,7 +133,7 @@ this.AntiTracking = {
           blockingByContentBlockingRTUI: false,
           allowList: true,
           callback: callbackNonTracking,
-          extraPrefs: [],
+          extraPrefs,
           expectedBlockingNotifications: 0,
           runInPrivateWindow,
           iframeSandbox,
@@ -147,7 +148,22 @@ this.AntiTracking = {
           blockingByContentBlockingRTUI: false,
           allowList: false,
           callback: callbackNonTracking,
-          extraPrefs: [],
+          extraPrefs,
+          expectedBlockingNotifications: 0,
+          runInPrivateWindow,
+          iframeSandbox,
+          accessRemoval: null, // only passed with non-blocking callback
+          callbackAfterRemoval: null,
+        });
+        this._createCleanupTask(cleanupFunction);
+
+        this._createTask({
+          name,
+          cookieBehavior: BEHAVIOR_REJECT,
+          blockingByContentBlockingRTUI: true,
+          allowList: false,
+          callback: callbackTracking,
+          extraPrefs,
           expectedBlockingNotifications: 0,
           runInPrivateWindow,
           iframeSandbox,
@@ -162,7 +178,7 @@ this.AntiTracking = {
           blockingByContentBlockingRTUI: true,
           allowList: true,
           callback: callbackNonTracking,
-          extraPrefs: [],
+          extraPrefs,
           expectedBlockingNotifications: 0,
           runInPrivateWindow,
           iframeSandbox,
@@ -177,7 +193,7 @@ this.AntiTracking = {
           blockingByContentBlockingRTUI: true,
           allowList: true,
           callback: callbackNonTracking,
-          extraPrefs: [],
+          extraPrefs,
           expectedBlockingNotifications: 0,
           runInPrivateWindow,
           iframeSandbox,
@@ -192,7 +208,7 @@ this.AntiTracking = {
           blockingByContentBlockingRTUI: true,
           allowList: true,
           callback: callbackNonTracking,
-          extraPrefs: [],
+          extraPrefs,
           expectedBlockingNotifications: 0,
           runInPrivateWindow,
           iframeSandbox,
@@ -207,7 +223,7 @@ this.AntiTracking = {
           blockingByContentBlockingRTUI: false,
           allowList: false,
           callback: callbackNonTracking,
-          extraPrefs: [],
+          extraPrefs,
           expectedBlockingNotifications: false,
           runInPrivateWindow,
           iframeSandbox,
@@ -230,8 +246,7 @@ this.AntiTracking = {
       // get blocked with user interaction present
       if (userInteractionTest) {
         this._createUserInteractionTask(name, callbackTracking, callbackNonTracking,
-                                        runInPrivateWindow, iframeSandbox,
-                                        expectedBlockingNotifications, extraPrefs);
+                                        runInPrivateWindow, iframeSandbox, extraPrefs);
         this._createCleanupTask(cleanupFunction);
       }
     }
@@ -300,93 +315,9 @@ this.AntiTracking = {
 
       let cookieBlocked = 0;
       let listener = {
-        onSecurityChange(webProgress, request, oldState, state,
-                         contentBlockingLogJSON) {
-          if ((state & options.expectedBlockingNotifications)) {
+        onContentBlockingEvent(webProgress, request, event) {
+          if ((event & options.expectedBlockingNotifications)) {
             ++cookieBlocked;
-          }
-          let contentBlockingLog = {};
-          try {
-            contentBlockingLog = JSON.parse(contentBlockingLogJSON);
-          } catch (e) {
-          }
-
-          let trackerInteractionHelper = false;
-          if (request) {
-            request.QueryInterface(Ci.nsIChannel);
-            trackerInteractionHelper = request.URI.spec.endsWith("?messageme");
-          }
-
-          // If this is the first cookie to be blocked, our state should have
-          // just changed, otherwise it should have previously contained one of
-          // the blocking flag too.
-          if (options.expectedBlockingNotifications && cookieBlocked &&
-              !options.allowList && !trackerInteractionHelper) {
-            if (cookieBlocked == 1) {
-              is(oldState & options.expectedBlockingNotifications, 0,
-                 "When blocking the first cookie, old state should not have had " +
-                 "one of the blocking flag bit");
-            }
-
-            for (let trackerOrigin in contentBlockingLog) {
-              is(trackerOrigin, TEST_3RD_PARTY_DOMAIN, "Correct tracker origin must be reported");
-              let originLog = contentBlockingLog[trackerOrigin];
-              if (options.expectedBlockingNotifications != Ci.nsIWebProgressListener.STATE_COOKIES_BLOCKED_BY_PERMISSION)
-              ok(originLog.length > 1, "We should have at least two items in the log");
-              for (let i = 0; i < originLog.length; ++i) {
-                let item = originLog[i];
-                switch (item[0]) {
-                case Ci.nsIWebProgressListener.STATE_LOADED_TRACKING_CONTENT:
-                  is(item[1], true, "Correct blocking status reported");
-                  is(item[2], 1, "Correct repeat count reported");
-                  break;
-                case Ci.nsIWebProgressListener.STATE_BLOCKED_TRACKING_CONTENT:
-                  if (item[1]) {
-                    ok(item[2] >= 1, "Correct repeat count reported");
-                  } else {
-                    // This branch is needed here because of the tests that use the storage
-                    // access API to gain storage access.
-                    is(item[2], 1, "Correct repeat count reported");
-                  }
-                  break;
-                case Ci.nsIWebProgressListener.STATE_COOKIES_BLOCKED_TRACKER:
-                  if (item[1]) {
-                    ok(item[2] >= 1, "Correct repeat count reported");
-                  } else {
-                    // This branch is needed here because of the tests that use the storage
-                    // access API to gain storage access.
-                    is(item[2], 1, "Correct repeat count reported");
-                  }
-                  break;
-                }
-              }
-            }
-            // Can't assert the number of tracker origins because we may get 0
-            // for web progress navigations coming from the window opening from
-            // storage access API tracker interaction attempts...
-          }
-          if (!options.expectedBlockingNotifications) {
-            is(oldState & Ci.nsIWebProgressListener.STATE_COOKIES_BLOCKED_TRACKER, 0,
-               "When not blocking, old state should not have had the " +
-               "STATE_COOKIES_BLOCKED_TRACKER bit");
-            // Ensure that if there is something in the content blocking log, it's only
-            // STATE_LOADED_TRACKING_CONTENT notifications.
-            for (let trackerOrigin in contentBlockingLog) {
-              let originLog = contentBlockingLog[trackerOrigin];
-              for (let i = 0; i < originLog.length; ++i) {
-                let item = originLog[i];
-                switch (item[0]) {
-                case Ci.nsIWebProgressListener.STATE_LOADED_TRACKING_CONTENT:
-                  is(item[1], true, "Correct blocking status reported");
-                  ok(item[2] >= 1, "Correct repeat count reported");
-                  break;
-                case Ci.nsIWebProgressListener.STATE_COOKIES_LOADED:
-                  is(item[1], true, "Correct blocking status reported");
-                  ok(item[2] >= 1, "Correct repeat count reported");
-                  break;
-                }
-              }
-            }
           }
         },
       };
@@ -426,6 +357,7 @@ this.AntiTracking = {
                                   options.callbackAfterRemoval.toString() : null,
                                 accessRemoval: options.accessRemoval,
                                 iframeSandbox: options.iframeSandbox,
+                                allowList: options.allowList,
                                 doAccessRemovalChecks },
                               async function(obj) {
         let id = "id" + Math.random();
@@ -434,7 +366,8 @@ this.AntiTracking = {
           ifr.id = id;
           ifr.onload = function() {
             info("Sending code to the 3rd party content");
-            ifr.contentWindow.postMessage(obj.callback, "*");
+            let callback = obj.allowList + "!!!" + obj.callback;
+            ifr.contentWindow.postMessage(callback, "*");
           };
           if (typeof obj.iframeSandbox == "string") {
             ifr.setAttribute("sandbox", obj.iframeSandbox);
@@ -550,59 +483,7 @@ this.AntiTracking = {
         await TestUtils.topicObserved("browser-delayed-startup-finished");
       }
 
-      await AntiTracking._setupTest(win, BEHAVIOR_REJECT_TRACKER, true, true, extraPrefs);
-
-      let cookieBlocked = 0;
-      let listener = {
-        onSecurityChange(webProgress, request, oldState, state,
-                         contentBlockingLogJSON) {
-          if (state & Ci.nsIWebProgressListener.STATE_COOKIES_BLOCKED_TRACKER) {
-            ++cookieBlocked;
-          }
-          let contentBlockingLog = {};
-          try {
-            contentBlockingLog = JSON.parse(contentBlockingLogJSON);
-          } catch (e) {
-          }
-          if (cookieBlocked) {
-            for (let trackerOrigin in contentBlockingLog) {
-              is(trackerOrigin, TEST_3RD_PARTY_DOMAIN, "Correct tracker origin must be reported");
-              let originLog = contentBlockingLog[trackerOrigin];
-              ok(originLog.length >= 1, "We should have at least two items in the log");
-              for (let i = 0; i < originLog.length; ++i) {
-                let item = originLog[i];
-                switch (item[0]) {
-                case Ci.nsIWebProgressListener.STATE_LOADED_TRACKING_CONTENT:
-                  is(item[1], true, "Correct blocking status reported");
-                  ok(item[2] >= 1, "Correct repeat count reported");
-                  break;
-                case Ci.nsIWebProgressListener.STATE_BLOCKED_TRACKING_CONTENT:
-                  if (item[1]) {
-                    ok(item[2] >= 1, "Correct repeat count reported");
-                  } else {
-                    is(item[2], 1, "Correct repeat count reported");
-                  }
-                  break;
-                case Ci.nsIWebProgressListener.STATE_COOKIES_BLOCKED_TRACKER:
-                  if (item[1]) {
-                    ok(item[2] >= 1, "Correct repeat count reported");
-                  } else {
-                    is(item[2], 1, "Correct repeat count reported");
-                  }
-                  break;
-                case Ci.nsIWebProgressListener.STATE_COOKIES_LOADED:
-                  is(item[1], true, "Correct blocking status reported");
-                  ok(item[2] >= 1, "Correct repeat count reported");
-                  break;
-                }
-              }
-            }
-            // Can't assert the number of tracker origins because we may get 0
-            // for web progress navigations coming from the window opening...
-          }
-        },
-      };
-      win.gBrowser.addProgressListener(listener);
+      await AntiTracking._setupTest(win, BEHAVIOR_REJECT_TRACKER, true, extraPrefs);
 
       info("Creating a new tab");
       let tab = BrowserTestUtils.addTab(win.gBrowser, TEST_TOP_PAGE);
@@ -659,8 +540,6 @@ this.AntiTracking = {
         });
       });
 
-      win.gBrowser.removeProgressListener(listener);
-
       info("Removing the tab");
       BrowserTestUtils.removeTab(tab);
 
@@ -671,8 +550,7 @@ this.AntiTracking = {
   },
 
   _createUserInteractionTask(name, blockingCallback, nonBlockingCallback,
-                             runInPrivateWindow, iframeSandbox,
-                             expectedBlockingNotifications, extraPrefs) {
+                             runInPrivateWindow, iframeSandbox, extraPrefs) {
     add_task(async function() {
       info("Starting user-interaction test " + name);
 
@@ -682,71 +560,7 @@ this.AntiTracking = {
         await TestUtils.topicObserved("browser-delayed-startup-finished");
       }
 
-      await AntiTracking._setupTest(win, BEHAVIOR_REJECT_TRACKER, true, true, extraPrefs);
-
-      let cookieBlocked = 0;
-      let listener = {
-        onSecurityChange(webProgress, request, oldState, state,
-                         contentBlockingLogJSON) {
-          if (state & expectedBlockingNotifications) {
-            ++cookieBlocked;
-          }
-          let contentBlockingLog = {};
-          try {
-            contentBlockingLog = JSON.parse(contentBlockingLogJSON);
-          } catch (e) {
-          }
-          // If this is the first cookie to be blocked, our state should have
-          // just changed, otherwise it should have previously contained one of
-          // the blocking flag bit too.
-          if (expectedBlockingNotifications && cookieBlocked) {
-            if (cookieBlocked == 1) {
-              is(oldState & expectedBlockingNotifications, 0,
-                 "When blocking the first cookie, old state should not have had " +
-                 "one of the blocking flag bit");
-            }
-
-            for (let trackerOrigin in contentBlockingLog) {
-              let originLog = contentBlockingLog[trackerOrigin];
-              ok(originLog.length >= 1, "We should have at least two items in the log");
-              for (let i = 0; i < originLog.length; ++i) {
-                let item = originLog[i];
-                switch (item[0]) {
-                case Ci.nsIWebProgressListener.STATE_LOADED_TRACKING_CONTENT:
-                  is(trackerOrigin, TEST_3RD_PARTY_DOMAIN, "Correct tracker origin must be reported");
-                  is(item[1], true, "Correct blocking status reported");
-                  ok(item[2] >= 1, "Correct repeat count reported");
-                  break;
-                case Ci.nsIWebProgressListener.STATE_BLOCKED_TRACKING_CONTENT:
-                  is(trackerOrigin, TEST_3RD_PARTY_DOMAIN, "Correct tracker origin must be reported");
-                  if (item[1]) {
-                    ok(item[2] >= 1, "Correct repeat count reported");
-                  } else {
-                    // This branch is needed here because of the tests that use the storage
-                    // access API to gain storage access.
-                    is(item[2], 1, "Correct repeat count reported");
-                  }
-                  break;
-                case Ci.nsIWebProgressListener.STATE_COOKIES_BLOCKED_TRACKER:
-                  is(trackerOrigin, TEST_3RD_PARTY_DOMAIN, "Correct tracker origin must be reported");
-                  // We can expect 1 or more repeat count whether or not blocking has happened,
-                  // so nothing to assert on item[1].
-                  ok(item[2] >= 1, "Correct repeat count reported");
-                  break;
-                case Ci.nsIWebProgressListener.STATE_COOKIES_LOADED:
-                  // The trackerOrigin here is sometimes TEST_DOMAIN, sometimes TEST_3RD_PARTY_DOMAIN.
-                  is(item[1], true, "Correct blocking status reported");
-                  ok(item[2] >= 1, "Correct repeat count reported");
-                  break;
-                }
-              }
-            }
-            // Can't assert the number of tracker origins because we may get 0
-            // for web progress navigations coming from the window opening...
-          }
-        },
-      };
-      win.gBrowser.addProgressListener(listener);
+      await AntiTracking._setupTest(win, BEHAVIOR_REJECT_TRACKER, true, extraPrefs);
 
       info("Creating a new tab");
       let tab = BrowserTestUtils.addTab(win.gBrowser, TEST_TOP_PAGE);
@@ -894,8 +708,6 @@ this.AntiTracking = {
           ifr.contentWindow.postMessage({ callback: obj.nonBlockingCallback }, "*");
         });
       });
-
-      win.gBrowser.removeProgressListener(listener);
 
       info("Removing the tab");
       BrowserTestUtils.removeTab(tab);

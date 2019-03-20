@@ -13,15 +13,38 @@
 #include "nsReadableUtils.h"
 #include "plbase64.h"
 #include "nsPrintfCString.h"
+#include "mozilla/ClearOnShutdown.h"
 #include "mozilla/Sprintf.h"
+#include "mozilla/StaticPtr.h"
 #include "mozilla/Mutex.h"
 #include "nsIRedirectHistoryEntry.h"
 #include "nsIHttpChannelInternal.h"
 #include "mozIThirdPartyUtil.h"
 #include "nsIDocShell.h"
 #include "mozilla/TextUtils.h"
+#include "mozilla/Preferences.h"
+#include "mozilla/Services.h"
+#include "mozilla/Telemetry.h"
+#include "nsNetUtil.h"
+#include "nsIHttpChannel.h"
+#include "nsIObserverService.h"
+#include "nsIPrefBranch.h"
+#include "nsIPrefService.h"
+#include "nsMemory.h"
+#include "nsPIDOMWindow.h"
+#include "nsServiceManagerUtils.h"
+#include "nsThreadManager.h"
+#include "Classifier.h"
+#include "Entries.h"
+#include "prprf.h"
+#include "prtime.h"
 
 #define DEFAULT_PROTOCOL_VERSION "2.2"
+
+using namespace mozilla;
+using namespace mozilla::safebrowsing;
+
+static mozilla::StaticRefPtr<nsUrlClassifierUtils> gUrlClassifierUtils;
 
 static char int_to_hex_digit(int32_t i) {
   NS_ASSERTION((i >= 0) && (i <= 15), "int too big in int_to_hex_digit");
@@ -165,8 +188,42 @@ static bool IsAllowedOnCurrentPlatform(uint32_t aThreatType) {
 }  // end of namespace safebrowsing.
 }  // end of namespace mozilla.
 
+// static
+already_AddRefed<nsUrlClassifierUtils>
+nsUrlClassifierUtils::GetXPCOMSingleton() {
+  if (gUrlClassifierUtils) {
+    return do_AddRef(gUrlClassifierUtils);
+  }
+
+  RefPtr<nsUrlClassifierUtils> utils = new nsUrlClassifierUtils();
+  if (NS_WARN_IF(NS_FAILED(utils->Init()))) {
+    return nullptr;
+  }
+
+  // Note: This is cleared in the nsUrlClassifierUtils destructor.
+  gUrlClassifierUtils = utils.get();
+  ClearOnShutdown(&gUrlClassifierUtils);
+  return utils.forget();
+}
+
+// static
+nsUrlClassifierUtils* nsUrlClassifierUtils::GetInstance() {
+  if (!gUrlClassifierUtils) {
+    RefPtr<nsUrlClassifierUtils> utils = GetXPCOMSingleton();
+  }
+
+  return gUrlClassifierUtils;
+}
+
 nsUrlClassifierUtils::nsUrlClassifierUtils()
     : mProviderDictLock("nsUrlClassifierUtils.mProviderDictLock") {}
+
+nsUrlClassifierUtils::~nsUrlClassifierUtils() {
+  if (gUrlClassifierUtils) {
+    MOZ_ASSERT(gUrlClassifierUtils == this);
+    gUrlClassifierUtils = nullptr;
+  }
+}
 
 nsresult nsUrlClassifierUtils::Init() {
   // nsIUrlClassifierUtils is a thread-safe service so it's
@@ -184,7 +241,7 @@ nsresult nsUrlClassifierUtils::Init() {
   if (!observerService) return NS_ERROR_FAILURE;
 
   observerService->AddObserver(this, "xpcom-shutdown-threads", false);
-  Preferences::AddStrongObserver(this, "browser.safebrowsing");
+  mozilla::Preferences::AddStrongObserver(this, "browser.safebrowsing");
 
   return NS_OK;
 }
@@ -577,7 +634,8 @@ static nsresult AddTabThreatSources(ThreatHit& aHit, nsIChannel* aChannel) {
       do_GetService(THIRDPARTYUTIL_CONTRACTID, &rv);
   NS_ENSURE_SUCCESS(rv, rv);
 
-  rv = thirdPartyUtil->GetTopWindowForChannel(aChannel, getter_AddRefs(win));
+  rv = thirdPartyUtil->GetTopWindowForChannel(aChannel, nullptr,
+                                              getter_AddRefs(win));
   NS_ENSURE_SUCCESS(rv, rv);
 
   auto* pwin = nsPIDOMWindowOuter::From(win);
@@ -603,8 +661,8 @@ static nsresult AddTabThreatSources(ThreatHit& aHit, nsIChannel* aChannel) {
   bool isTopUri = false;
   rv = topUri->Equals(uri, &isTopUri);
   if (NS_SUCCEEDED(rv) && !isTopUri) {
-    nsCOMPtr<nsILoadInfo> loadInfo = aChannel->GetLoadInfo();
-    if (loadInfo && loadInfo->RedirectChain().Length()) {
+    nsCOMPtr<nsILoadInfo> loadInfo = aChannel->LoadInfo();
+    if (loadInfo->RedirectChain().Length()) {
       AddThreatSourceFromRedirectEntry(aHit, loadInfo->RedirectChain()[0],
                                        ThreatHit_ThreatSourceType_TAB_RESOURCE);
     }
@@ -616,11 +674,7 @@ static nsresult AddTabThreatSources(ThreatHit& aHit, nsIChannel* aChannel) {
   Unused << NS_WARN_IF(NS_FAILED(rv));
 
   // Set tab_redirect threat sources if there's any
-  nsCOMPtr<nsILoadInfo> topLoadInfo = topChannel->GetLoadInfo();
-  if (!topLoadInfo) {
-    return NS_OK;
-  }
-
+  nsCOMPtr<nsILoadInfo> topLoadInfo = topChannel->LoadInfo();
   nsIRedirectHistoryEntry* redirectEntry;
   size_t length = topLoadInfo->RedirectChain().Length();
   for (size_t i = 0; i < length; i++) {

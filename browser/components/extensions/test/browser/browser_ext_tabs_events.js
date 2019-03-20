@@ -2,8 +2,25 @@
 /* vim: set sts=2 sw=2 et tw=80: */
 "use strict";
 
-add_task(async function testTabEvents() {
+
+// A single monitor for the tests.  If it receives any
+// incognito data in event listeners it will fail.
+let monitor;
+add_task(async function startup() {
+  SpecialPowers.pushPrefEnv({set: [
+    ["extensions.allowPrivateBrowsingByDefault", false],
+  ]});
+  monitor = await startIncognitoMonitorExtension();
+});
+registerCleanupFunction(async function finish() {
+  await monitor.unload();
+});
+
+// Test tab events from private windows, the monitor above will fail
+// if it receives any.
+add_task(async function test_tab_events_incognito_monitored() {
   async function background() {
+    let incognito = true;
     let events = [];
     let eventPromise;
     let checkEvents = () => {
@@ -54,24 +71,23 @@ add_task(async function testTabEvents() {
     }
 
     try {
-      browser.test.log("Create second browser window");
-
       let windows = await Promise.all([
-        browser.windows.getCurrent(),
-        browser.windows.create({url: "about:blank"}),
+        browser.windows.create({url: "about:blank", incognito}),
+        browser.windows.create({url: "about:blank", incognito}),
       ]);
 
       let windowId = windows[0].id;
       let otherWindowId = windows[1].id;
 
-      let [created] = await expectEvents(["onCreated"]);
-      let initialTab = created.tab;
+      let created = await expectEvents(["onCreated", "onCreated"]);
+      let initialTab = created[1].tab;
 
 
       browser.test.log("Create tab in window 1");
       let tab = await browser.tabs.create({windowId, index: 0, url: "about:blank"});
       let oldIndex = tab.index;
       browser.test.assertEq(0, oldIndex, "Tab has the expected index");
+      browser.test.assertEq(tab.incognito, incognito, "Tab is incognito");
 
       [created] = await expectEvents(["onCreated"]);
       browser.test.assertEq(tab.id, created.tab.id, "Got expected tab ID");
@@ -123,6 +139,7 @@ add_task(async function testTabEvents() {
       browser.test.log("Create additional tab in window 1");
       tab = await browser.tabs.create({windowId, url: "about:blank"});
       await expectEvents(["onCreated"]);
+      browser.test.assertEq(tab.incognito, incognito, "Tab is incognito");
 
 
       browser.test.log("Create a new window, adopting the new tab");
@@ -136,7 +153,7 @@ add_task(async function testTabEvents() {
       });
 
       let [window] = await Promise.all([
-        browser.windows.create({tabId: tab.id}),
+        browser.windows.create({tabId: tab.id, incognito}),
         promiseAttached,
       ]);
 
@@ -163,9 +180,11 @@ add_task(async function testTabEvents() {
       browser.test.assertEq(1, attached.newPosition, "Expected onAttached new index");
       browser.test.assertEq(windowId, attached.newWindowId,
                             "Expected onAttached new window id");
+      browser.test.assertEq(tab.incognito, incognito, "Tab is incognito");
 
       browser.test.log("Remove the tab");
       await browser.tabs.remove(tab.id);
+      browser.windows.remove(windowId);
 
       browser.test.notifyPass("tabs-events");
     } catch (e) {
@@ -178,8 +197,8 @@ add_task(async function testTabEvents() {
     manifest: {
       "permissions": ["tabs"],
     },
-
     background,
+    incognitoOverride: "spanning",
   });
 
   await extension.startup();
@@ -382,12 +401,13 @@ add_task(async function testLastTabRemoval() {
   async function background() {
     let windowId;
     browser.tabs.onCreated.addListener(tab => {
-      browser.test.assertEq(windowId, tab.windowId,
-                            "expecting onCreated after onRemoved on the same window");
+      windowId = tab.windowId;
       browser.test.sendMessage("tabCreated", `${tab.width}x${tab.height}`);
     });
     browser.tabs.onRemoved.addListener((tabId, info) => {
-      windowId = info.windowId;
+      browser.test.assertEq(windowId, info.windowId,
+                            "expecting onRemoved after onCreated on the same window");
+      browser.test.sendMessage("tabRemoved");
     });
   }
 
@@ -407,6 +427,7 @@ add_task(async function testLastTabRemoval() {
 
   const actualDims = await extension.awaitMessage("tabCreated");
   is(actualDims, expectedDims, "created tab reports a size same to the removed last tab");
+  await extension.awaitMessage("tabRemoved");
 
   await extension.unload();
   await BrowserTestUtils.closeWindow(newWin);

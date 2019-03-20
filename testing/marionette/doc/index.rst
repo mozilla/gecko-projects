@@ -1,6 +1,6 @@
-==========
-Marionette
-==========
+=================
+Marionette server
+=================
 
 Marionette is the remote protocol that lets out-of-process programs
 communicate with, instrument, and control Gecko-based browsers.
@@ -46,7 +46,7 @@ See also:
 * Documentation for `Firefox Puppeteer`_, which is used to in-tree
   to write Firefox UI tests.
 
-.. _Marionette Python client: http://marionette-client.readthedocs.io
+.. _Marionette Python client: ../../../python/marionette_driver.html
 .. _Firefox Puppeteer: http://firefox-puppeteer.readthedocs.io
 
 
@@ -62,7 +62,7 @@ Communication
 The mailing list for Marionette discussion is
 tools-marionette@lists.mozilla.org (`subscribe`_, `archive`_).
 
-If you prefer real-time chat, there is often someone in the #ateam IRC
+If you prefer real-time chat, there is often someone in the #interop IRC
 channel on irc.mozilla.org.  Don’t ask if you may ask a question; just go ahead
 and ask, and please wait for an answer as we might not be in your timezone.
 

@@ -8,7 +8,7 @@
  * Test simple requests using the protocol helpers.
  */
 var protocol = require("devtools/shared/protocol");
-var {preEvent, types, Arg, RetVal} = protocol;
+var {types, Arg, RetVal} = protocol;
 
 var EventEmitter = require("devtools/shared/event-emitter");
 
@@ -46,11 +46,11 @@ const childSpec = protocol.generateActorSpec({
     },
     "object-event": {
       type: "objectEvent",
-      detail: Arg(0, "childActor#detail1"),
+      detail: Arg(0, "childActor#actorid"),
     },
     "array-object-event": {
       type: "arrayObjectEvent",
-      detail: Arg(0, "array:childActor#detail2"),
+      detail: Arg(0, "array:childActor#actorid"),
     },
   },
 
@@ -60,12 +60,14 @@ const childSpec = protocol.generateActorSpec({
       response: { str: RetVal("string") },
     },
     getDetail1: {
-      // This also exercises return-value-as-packet.
-      response: RetVal("childActor#detail1"),
+      response: {
+        child: RetVal("childActor#actorid"),
+      },
     },
     getDetail2: {
-      // This also exercises return-value-as-packet.
-      response: RetVal("childActor#detail2"),
+      response: {
+        child: RetVal("childActor#actorid"),
+      },
     },
     getIDDetail: {
       response: {
@@ -109,14 +111,10 @@ var ChildActor = protocol.ActorClassWithSpec(childSpec, {
     this.destroyed = true;
   },
 
-  form: function(detail) {
-    if (detail === "actorid") {
-      return this.actorID;
-    }
+  form: function() {
     return {
       actor: this.actorID,
       childID: this.childID,
-      detail: detail,
     };
   },
 
@@ -162,46 +160,47 @@ var ChildActor = protocol.ActorClassWithSpec(childSpec, {
   release: function() { },
 });
 
-var ChildFront = protocol.FrontClassWithSpec(childSpec, {
-  initialize: function(client, form) {
-    protocol.Front.prototype.initialize.call(this, client, form);
-  },
+class ChildFront extends protocol.FrontClassWithSpec(childSpec) {
+  constructor(client) {
+    super(client);
 
-  destroy: function() {
+    this.before("event1", this.onEvent1.bind(this));
+    this.before("event2", this.onEvent2a.bind(this));
+    this.on("event2", this.onEvent2b.bind(this));
+  }
+
+  destroy() {
     this.destroyed = true;
-    protocol.Front.prototype.destroy.call(this);
-  },
+    super.destroy();
+  }
 
-  marshallPool: function() {
+  marshallPool() {
     return this.parent();
-  },
+  }
 
-  toString: function() {
+  toString() {
     return "[child front " + this.childID + "]";
-  },
+  }
 
-  form: function(form, detail) {
-    if (detail === "actorid") {
-      return;
-    }
+  form(form) {
     this.childID = form.childID;
-    this.detail = form.detail;
-  },
+  }
 
-  onEvent1: preEvent("event1", function(a, b, c) {
+  onEvent1(a, b, c) {
     this.event1arg3 = c;
-  }),
+  }
 
-  onEvent2a: preEvent("event2", function(a, b, c) {
+  onEvent2a(a, b, c) {
     return Promise.resolve().then(() => {
       this.event2arg3 = c;
     });
-  }),
+  }
 
-  onEvent2b: preEvent("event2", function(a, b, c) {
+  onEvent2b(a, b, c) {
     this.event2arg2 = b;
-  }),
-});
+  }
+}
+protocol.registerFront(ChildFront);
 
 types.addDictType("manyChildrenDict", {
   child5: "childActor",
@@ -301,39 +300,36 @@ var RootActor = protocol.ActorClassWithSpec(rootSpec, {
   },
 });
 
-var RootFront = protocol.FrontClassWithSpec(rootSpec, {
-  toString: function() {
-    return "[root front]";
-  },
-  initialize: function(client) {
+class RootFront extends protocol.FrontClassWithSpec(rootSpec) {
+  constructor(client) {
+    super(client);
     this.actorID = "root";
-    protocol.Front.prototype.initialize.call(this, client);
     // Root actor owns itself.
     this.manage(this);
-  },
+  }
 
-  getTemporaryChild: protocol.custom(function(id) {
+  toString() {
+    return "[root front]";
+  }
+
+  getTemporaryChild(id) {
     if (!this._temporaryHolder) {
       this._temporaryHolder = new protocol.Front(this.conn);
       this._temporaryHolder.actorID = this.actorID + "_temp";
       this.manage(this._temporaryHolder);
     }
-    return this._getTemporaryChild(id);
-  }, {
-    impl: "_getTemporaryChild",
-  }),
+    return super.getTemporaryChild(id);
+  }
 
-  clearTemporaryChildren: protocol.custom(function() {
+  clearTemporaryChildren() {
     if (!this._temporaryHolder) {
       return Promise.resolve(undefined);
     }
     this._temporaryHolder.destroy();
     delete this._temporaryHolder;
-    return this._clearTemporaryChildren();
-  }, {
-    impl: "_clearTemporaryChildren",
-  }),
-});
+    return super.clearTemporaryChildren();
+  }
+}
 
 function run_test() {
   DebuggerServer.createRootActor = (conn => {
@@ -349,7 +345,7 @@ function run_test() {
                          "traits": []});
     Assert.equal(applicationType, "xpcshell-tests");
 
-    const rootFront = RootFront(client);
+    const rootFront = new RootFront(client);
     let childFront = null;
 
     const expectRootChildren = size => {
@@ -388,22 +384,16 @@ function run_test() {
       return childFront.getDetail1();
     }).then(ret => {
       trace.expectSend({"type": "getDetail1", "to": "<actorid>"});
-      trace.expectReceive({"actor": "<actorid>",
-                           "childID": "child1",
-                           "detail": "detail1",
+      trace.expectReceive({"child": childFront.actorID,
                            "from": "<actorid>"});
       Assert.ok(ret === childFront);
-      Assert.equal(childFront.detail, "detail1");
     }).then(() => {
       return childFront.getDetail2();
     }).then(ret => {
       trace.expectSend({"type": "getDetail2", "to": "<actorid>"});
-      trace.expectReceive({"actor": "<actorid>",
-                           "childID": "child1",
-                           "detail": "detail2",
+      trace.expectReceive({"child": childFront.actorID,
                            "from": "<actorid>"});
       Assert.ok(ret === childFront);
-      Assert.equal(childFront.detail, "detail2");
     }).then(() => {
       return childFront.getIDDetail();
     }).then(ret => {
@@ -510,12 +500,10 @@ function run_test() {
       });
       childFront.on("object-event", (obj) => {
         Assert.ok(obj === childFront);
-        Assert.equal(childFront.detail, "detail1");
         set.delete("object-event");
       });
       childFront.on("array-object-event", (array) => {
         Assert.ok(array[0] === childFront);
-        Assert.equal(childFront.detail, "detail2");
         set.delete("array-object-event");
       });
 
@@ -537,14 +525,10 @@ function run_test() {
         trace.expectReceive({"type": "namedEvent", "a": 1, "b": 2, "c": 3,
                              "from": "<actorid>"});
         trace.expectReceive({"type": "objectEvent",
-                             "detail": {"actor": "<actorid>",
-                                        "childID": "child1",
-                                        "detail": "detail1"},
+                             "detail": childFront.actorID,
                              "from": "<actorid>"});
         trace.expectReceive({"type": "arrayObjectEvent",
-                             "detail": [{"actor": "<actorid>",
-                                         "childID": "child1",
-                                         "detail": "detail2"}],
+                             "detail": [childFront.actorID],
                              "from": "<actorid>"});
         trace.expectReceive({"value": "correct response", "from": "<actorid>"});
 

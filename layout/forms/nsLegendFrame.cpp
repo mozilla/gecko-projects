@@ -25,7 +25,8 @@ nsIFrame* NS_NewLegendFrame(nsIPresShell* aPresShell, ComputedStyle* aStyle) {
                "Legends should not be positioned and should not float");
 #endif
 
-  nsIFrame* f = new (aPresShell) nsLegendFrame(aStyle);
+  nsIFrame* f =
+      new (aPresShell) nsLegendFrame(aStyle, aPresShell->GetPresContext());
   f->AddStateBits(NS_BLOCK_FORMATTING_CONTEXT_STATE_BITS);
   return f;
 }
@@ -39,7 +40,7 @@ void nsLegendFrame::DestroyFrom(nsIFrame* aDestructRoot,
 }
 
 NS_QUERYFRAME_HEAD(nsLegendFrame)
-NS_QUERYFRAME_ENTRY(nsLegendFrame)
+  NS_QUERYFRAME_ENTRY(nsLegendFrame)
 NS_QUERYFRAME_TAIL_INHERITING(nsBlockFrame)
 
 void nsLegendFrame::Reflow(nsPresContext* aPresContext,

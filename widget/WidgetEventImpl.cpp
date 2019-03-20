@@ -574,7 +574,8 @@ Modifier WidgetInputEvent::AccelModifier() {
  * mozilla::WidgetMouseEvent (MouseEvents.h)
  ******************************************************************************/
 
-/* static */ bool WidgetMouseEvent::IsMiddleClickPasteEnabled() {
+/* static */
+bool WidgetMouseEvent::IsMiddleClickPasteEnabled() {
   return Preferences::GetBool("middlemouse.paste", false);
 }
 
@@ -582,8 +583,9 @@ Modifier WidgetInputEvent::AccelModifier() {
  * mozilla::WidgetWheelEvent (MouseEvents.h)
  ******************************************************************************/
 
-/* static */ double WidgetWheelEvent::ComputeOverriddenDelta(
-    double aDelta, bool aIsForVertical) {
+/* static */
+double WidgetWheelEvent::ComputeOverriddenDelta(double aDelta,
+                                                bool aIsForVertical) {
   if (!gfxPrefs::MouseWheelHasRootScrollDeltaOverride()) {
     return aDelta;
   }
@@ -993,15 +995,17 @@ int32_t WidgetKeyboardEvent::ContentAccessModifierMaskPref() {
   return sValue;
 }
 
-/* static */ void WidgetKeyboardEvent::Shutdown() {
+/* static */
+void WidgetKeyboardEvent::Shutdown() {
   delete sKeyNameIndexHashtable;
   sKeyNameIndexHashtable = nullptr;
   delete sCodeNameIndexHashtable;
   sCodeNameIndexHashtable = nullptr;
 }
 
-/* static */ void WidgetKeyboardEvent::GetDOMKeyName(KeyNameIndex aKeyNameIndex,
-                                                     nsAString& aKeyName) {
+/* static */
+void WidgetKeyboardEvent::GetDOMKeyName(KeyNameIndex aKeyNameIndex,
+                                        nsAString& aKeyName) {
   if (aKeyNameIndex >= KEY_NAME_INDEX_USE_STRING) {
     aKeyName.Truncate();
     return;
@@ -1013,8 +1017,9 @@ int32_t WidgetKeyboardEvent::ContentAccessModifierMaskPref() {
   aKeyName = kKeyNames[aKeyNameIndex];
 }
 
-/* static */ void WidgetKeyboardEvent::GetDOMCodeName(
-    CodeNameIndex aCodeNameIndex, nsAString& aCodeName) {
+/* static */
+void WidgetKeyboardEvent::GetDOMCodeName(CodeNameIndex aCodeNameIndex,
+                                         nsAString& aCodeName) {
   if (aCodeNameIndex >= CODE_NAME_INDEX_USE_STRING) {
     aCodeName.Truncate();
     return;
@@ -1026,8 +1031,8 @@ int32_t WidgetKeyboardEvent::ContentAccessModifierMaskPref() {
   aCodeName = kCodeNames[aCodeNameIndex];
 }
 
-/* static */ KeyNameIndex WidgetKeyboardEvent::GetKeyNameIndex(
-    const nsAString& aKeyValue) {
+/* static */
+KeyNameIndex WidgetKeyboardEvent::GetKeyNameIndex(const nsAString& aKeyValue) {
   if (!sKeyNameIndexHashtable) {
     sKeyNameIndexHashtable = new KeyNameIndexHashtable(ArrayLength(kKeyNames));
     for (size_t i = 0; i < ArrayLength(kKeyNames); i++) {
@@ -1040,7 +1045,8 @@ int32_t WidgetKeyboardEvent::ContentAccessModifierMaskPref() {
   return result;
 }
 
-/* static */ CodeNameIndex WidgetKeyboardEvent::GetCodeNameIndex(
+/* static */
+CodeNameIndex WidgetKeyboardEvent::GetCodeNameIndex(
     const nsAString& aCodeValue) {
   if (!sCodeNameIndexHashtable) {
     sCodeNameIndexHashtable =
@@ -1055,7 +1061,8 @@ int32_t WidgetKeyboardEvent::ContentAccessModifierMaskPref() {
   return result;
 }
 
-/* static */ uint32_t WidgetKeyboardEvent::GetFallbackKeyCodeOfPunctuationKey(
+/* static */
+uint32_t WidgetKeyboardEvent::GetFallbackKeyCodeOfPunctuationKey(
     CodeNameIndex aCodeNameIndex) {
   switch (aCodeNameIndex) {
     case CODE_NAME_INDEX_Semicolon:  // VK_OEM_1 on Windows
@@ -1104,7 +1111,8 @@ int32_t WidgetKeyboardEvent::ContentAccessModifierMaskPref() {
   return kCommands[aCommand];
 }
 
-/* static */ uint32_t WidgetKeyboardEvent::ComputeLocationFromCodeValue(
+/* static */
+uint32_t WidgetKeyboardEvent::ComputeLocationFromCodeValue(
     CodeNameIndex aCodeNameIndex) {
   // Following commented out cases are not defined in PhysicalKeyCodeNameList.h
   // but are defined by D3E spec.  So, they should be uncommented when the
@@ -1154,7 +1162,8 @@ int32_t WidgetKeyboardEvent::ContentAccessModifierMaskPref() {
   }
 }
 
-/* static */ uint32_t WidgetKeyboardEvent::ComputeKeyCodeFromKeyNameIndex(
+/* static */
+uint32_t WidgetKeyboardEvent::ComputeKeyCodeFromKeyNameIndex(
     KeyNameIndex aKeyNameIndex) {
   switch (aKeyNameIndex) {
     case KEY_NAME_INDEX_Cancel:
@@ -1325,8 +1334,8 @@ int32_t WidgetKeyboardEvent::ContentAccessModifierMaskPref() {
   }
 }
 
-/* static */ CodeNameIndex
-WidgetKeyboardEvent::ComputeCodeNameIndexFromKeyNameIndex(
+/* static */
+CodeNameIndex WidgetKeyboardEvent::ComputeCodeNameIndexFromKeyNameIndex(
     KeyNameIndex aKeyNameIndex, const Maybe<uint32_t>& aLocation) {
   if (aLocation.isSome() &&
       aLocation.value() ==
@@ -1646,7 +1655,8 @@ WidgetKeyboardEvent::ComputeCodeNameIndexFromKeyNameIndex(
   }
 }
 
-/* static */ Modifier WidgetKeyboardEvent::GetModifierForKeyName(
+/* static */
+Modifier WidgetKeyboardEvent::GetModifierForKeyName(
     KeyNameIndex aKeyNameIndex) {
   switch (aKeyNameIndex) {
     case KEY_NAME_INDEX_Alt:
@@ -1682,8 +1692,8 @@ WidgetKeyboardEvent::ComputeCodeNameIndexFromKeyNameIndex(
   }
 }
 
-/* static */ bool WidgetKeyboardEvent::IsLockableModifier(
-    KeyNameIndex aKeyNameIndex) {
+/* static */
+bool WidgetKeyboardEvent::IsLockableModifier(KeyNameIndex aKeyNameIndex) {
   switch (aKeyNameIndex) {
     case KEY_NAME_INDEX_CapsLock:
     case KEY_NAME_INDEX_FnLock:
@@ -1694,6 +1704,59 @@ WidgetKeyboardEvent::ComputeCodeNameIndexFromKeyNameIndex(
     default:
       return false;
   }
+}
+
+/******************************************************************************
+ * mozilla::InternalEditorInputEvent (TextEvents.h)
+ ******************************************************************************/
+
+#define NS_DEFINE_INPUTTYPE(aCPPName, aDOMName) (u"" aDOMName),
+const char16_t* const InternalEditorInputEvent::kInputTypeNames[] = {
+#include "mozilla/InputTypeList.h"
+};
+#undef NS_DEFINE_INPUTTYPE
+
+InternalEditorInputEvent::InputTypeHashtable*
+    InternalEditorInputEvent::sInputTypeHashtable = nullptr;
+
+/* static */
+void InternalEditorInputEvent::Shutdown() {
+  delete sInputTypeHashtable;
+  sInputTypeHashtable = nullptr;
+}
+
+/* static */
+void InternalEditorInputEvent::GetDOMInputTypeName(EditorInputType aInputType,
+                                                   nsAString& aInputTypeName) {
+  if (static_cast<size_t>(aInputType) >=
+      static_cast<size_t>(EditorInputType::eUnknown)) {
+    aInputTypeName.Truncate();
+    return;
+  }
+
+  MOZ_RELEASE_ASSERT(
+      static_cast<size_t>(aInputType) < ArrayLength(kInputTypeNames),
+      "Illegal input type enumeration value");
+  aInputTypeName.Assign(kInputTypeNames[static_cast<size_t>(aInputType)]);
+}
+
+/* static */
+EditorInputType InternalEditorInputEvent::GetEditorInputType(
+    const nsAString& aInputType) {
+  if (aInputType.IsEmpty()) {
+    return EditorInputType::eUnknown;
+  }
+
+  if (!sInputTypeHashtable) {
+    sInputTypeHashtable = new InputTypeHashtable(ArrayLength(kInputTypeNames));
+    for (size_t i = 0; i < ArrayLength(kInputTypeNames); i++) {
+      sInputTypeHashtable->Put(nsDependentString(kInputTypeNames[i]),
+                               static_cast<EditorInputType>(i));
+    }
+  }
+  EditorInputType result = EditorInputType::eUnknown;
+  sInputTypeHashtable->Get(aInputType, &result);
+  return result;
 }
 
 }  // namespace mozilla

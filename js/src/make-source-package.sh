@@ -153,6 +153,11 @@ case $cmd in
         ${TOPSRCDIR}/testing/mozbase \
         ${tgtpath}/testing/
 
+    ${MKDIR} -p ${tgtpath}/testing/web-platform/tests
+    cp -pPR \
+        ${TOPSRCDIR}/testing/web-platform/tests/streams \
+        ${tgtpath}/testing/web-platform/tests/
+
     ${MKDIR} -p ${tgtpath}/taskcluster/taskgraph
     cp -pPR \
         ${TOPSRCDIR}/taskcluster/moz.build \
@@ -178,8 +183,7 @@ case $cmd in
     ${MKDIR} -p ${tgtpath}/js/src
     cp -pPR \
         ${TOPSRCDIR}/js/app.mozbuild \
-        ${TOPSRCDIR}/js/ffi.configure \
-        ${TOPSRCDIR}/js/moz.configure \
+        ${TOPSRCDIR}/js/*.configure \
         ${tgtpath}/js/
     cp -pPR \
         ${TOPSRCDIR}/js/examples \

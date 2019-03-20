@@ -143,6 +143,12 @@ br_table = Instruction(
 
         Note that this branch instruction can't pass arguments to the targeted
         blocks. Split critical edges as needed to work around this.
+
+        Do not confuse this with "tables" in WebAssembly. ``br_table`` is for
+        jump tables with destinations within the current function only -- think
+        of a ``match`` in Rust or a ``switch`` in C.  If you want to call a
+        function in a dynamic library, that will typically use
+        ``call_indirect``.
         """,
         ins=(x, EBB, JT), is_branch=True, is_terminator=True)
 
@@ -180,6 +186,10 @@ indirect_jump_table_br = Instruction(
     """,
     ins=(addr, JT),
     is_branch=True, is_indirect_branch=True, is_terminator=True)
+
+debugtrap = Instruction('debugtrap', r"""
+    Encodes an assembly debug trap.
+    """, can_load=True, can_store=True, other_side_effects=True)
 
 code = Operand('code', trapcode)
 trap = Instruction(

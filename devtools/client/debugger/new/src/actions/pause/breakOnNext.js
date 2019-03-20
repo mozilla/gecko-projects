@@ -4,6 +4,7 @@
 
 // @flow
 
+import { getCurrentThread } from "../../selectors";
 import type { ThunkArgs } from "../types";
 
 /**
@@ -15,8 +16,9 @@ import type { ThunkArgs } from "../types";
  * @static
  */
 export function breakOnNext() {
-  return async ({ dispatch, client }: ThunkArgs) => {
-    await client.breakOnNext();
-    return dispatch({ type: "BREAK_ON_NEXT" });
+  return async ({ dispatch, getState, client }: ThunkArgs) => {
+    const thread = getCurrentThread(getState());
+    await client.breakOnNext(thread);
+    return dispatch({ type: "BREAK_ON_NEXT", thread });
   };
 }

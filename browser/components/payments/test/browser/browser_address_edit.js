@@ -40,7 +40,7 @@ add_task(async function test_add_link() {
     await spawnPaymentDialogTask(frame, async () => {
       let {
         PaymentTestUtils: PTU,
-      } = ChromeUtils.import("resource://testing-common/PaymentTestUtils.jsm", {});
+      } = ChromeUtils.import("resource://testing-common/PaymentTestUtils.jsm");
 
       let {tempAddresses, savedAddresses} = await PTU.DialogContentUtils.getCurrentState(content);
       is(Object.keys(tempAddresses).length, 0, "No temporary addresses at the start of test");
@@ -58,7 +58,7 @@ add_task(async function test_add_link() {
     for (let options of testOptions) {
       let shippingAddressChangePromise = ContentTask.spawn(browser, {
         eventName: "shippingaddresschange",
-      }, PTU.ContentTasks.awaitPaymentRequestEventPromise);
+      }, PTU.ContentTasks.awaitPaymentEventPromise);
 
       await manuallyAddShippingAddress(frame, newAddress, options);
       await shippingAddressChangePromise;
@@ -67,7 +67,7 @@ add_task(async function test_add_link() {
       await spawnPaymentDialogTask(frame, async ({address, options, prefilledGuids}) => {
         let {
           PaymentTestUtils: PTU,
-        } = ChromeUtils.import("resource://testing-common/PaymentTestUtils.jsm", {});
+        } = ChromeUtils.import("resource://testing-common/PaymentTestUtils.jsm");
 
         let newAddresses = await PTU.DialogContentUtils.waitForState(content, (state) => {
           return state.tempAddresses && state.savedAddresses;
@@ -108,7 +108,7 @@ add_task(async function test_edit_link() {
 
     let shippingAddressChangePromise = ContentTask.spawn(browser, {
       eventName: "shippingaddresschange",
-    }, PTU.ContentTasks.awaitPaymentRequestEventPromise);
+    }, PTU.ContentTasks.awaitPaymentEventPromise);
 
     const EXPECTED_ADDRESS = {
       "given-name": "Jaws",
@@ -120,7 +120,7 @@ add_task(async function test_edit_link() {
     await spawnPaymentDialogTask(frame, async () => {
       let {
         PaymentTestUtils: PTU,
-      } = ChromeUtils.import("resource://testing-common/PaymentTestUtils.jsm", {});
+      } = ChromeUtils.import("resource://testing-common/PaymentTestUtils.jsm");
 
       let {tempAddresses, savedAddresses} = await PTU.DialogContentUtils.getCurrentState(content);
       is(Object.keys(tempAddresses).length, 0, "No temporary addresses at the start of test");
@@ -162,7 +162,7 @@ add_task(async function test_edit_link() {
     await spawnPaymentDialogTask(frame, async (address) => {
       let {
         PaymentTestUtils: PTU,
-      } = ChromeUtils.import("resource://testing-common/PaymentTestUtils.jsm", {});
+      } = ChromeUtils.import("resource://testing-common/PaymentTestUtils.jsm");
 
       let state = await PTU.DialogContentUtils.waitForState(content, (state) => {
         let addresses = Object.entries(state.savedAddresses);
@@ -229,7 +229,7 @@ add_task(async function test_add_payer_contact_name_email_link() {
     await spawnPaymentDialogTask(frame, async () => {
       let {
         PaymentTestUtils: PTU,
-      } = ChromeUtils.import("resource://testing-common/PaymentTestUtils.jsm", {});
+      } = ChromeUtils.import("resource://testing-common/PaymentTestUtils.jsm");
 
       let {tempAddresses, savedAddresses} = await PTU.DialogContentUtils.getCurrentState(content);
       is(Object.keys(tempAddresses).length, 0, "No temporary addresses at the start of test");
@@ -262,7 +262,7 @@ add_task(async function test_add_payer_contact_name_email_link() {
     await spawnPaymentDialogTask(frame, async (address) => {
       let {
         PaymentTestUtils: PTU,
-      } = ChromeUtils.import("resource://testing-common/PaymentTestUtils.jsm", {});
+      } = ChromeUtils.import("resource://testing-common/PaymentTestUtils.jsm");
 
       let {savedAddresses} = await PTU.DialogContentUtils.getCurrentState(content);
 
@@ -317,7 +317,7 @@ add_task(async function test_edit_payer_contact_name_email_phone_link() {
     await spawnPaymentDialogTask(frame, async (address) => {
       let {
         PaymentTestUtils: PTU,
-      } = ChromeUtils.import("resource://testing-common/PaymentTestUtils.jsm", {});
+      } = ChromeUtils.import("resource://testing-common/PaymentTestUtils.jsm");
 
       await PTU.DialogContentUtils.waitForState(content, (state) => {
         return Object.keys(state.savedAddresses).length == 1;
@@ -368,7 +368,7 @@ add_task(async function test_edit_payer_contact_name_email_phone_link() {
     await spawnPaymentDialogTask(frame, async (address) => {
       let {
         PaymentTestUtils: PTU,
-      } = ChromeUtils.import("resource://testing-common/PaymentTestUtils.jsm", {});
+      } = ChromeUtils.import("resource://testing-common/PaymentTestUtils.jsm");
 
       let state = await PTU.DialogContentUtils.waitForState(content, (state) => {
         let addresses = Object.entries(state.savedAddresses);
@@ -413,8 +413,9 @@ add_task(async function test_shipping_address_picker() {
     await spawnPaymentDialogTask(frame, async function test_picker_option_label(address) {
       let {
         PaymentTestUtils: PTU,
-      } = ChromeUtils.import("resource://testing-common/PaymentTestUtils.jsm", {});
-      ChromeUtils.import("resource://formautofill/FormAutofillUtils.jsm");
+      } = ChromeUtils.import("resource://testing-common/PaymentTestUtils.jsm");
+      const {FormAutofillUtils} =
+          ChromeUtils.import("resource://formautofill/FormAutofillUtils.jsm");
 
       let state = await PTU.DialogContentUtils.waitForState(content, (state) => {
         return Object.keys(state.savedAddresses).length == 1;
@@ -453,8 +454,9 @@ add_task(async function test_payer_address_picker() {
     await spawnPaymentDialogTask(frame, async function test_picker_option_label(address) {
       let {
         PaymentTestUtils: PTU,
-      } = ChromeUtils.import("resource://testing-common/PaymentTestUtils.jsm", {});
-      ChromeUtils.import("resource://formautofill/FormAutofillUtils.jsm");
+      } = ChromeUtils.import("resource://testing-common/PaymentTestUtils.jsm");
+      const {FormAutofillUtils} =
+          ChromeUtils.import("resource://formautofill/FormAutofillUtils.jsm");
 
       let state = await PTU.DialogContentUtils.waitForState(content, (state) => {
         return Object.keys(state.savedAddresses).length == 1;
@@ -522,7 +524,7 @@ add_task(async function test_private_persist_addresses() {
     await spawnPaymentDialogTask(frame, async () => {
       let {
         PaymentTestUtils: PTU,
-      } = ChromeUtils.import("resource://testing-common/PaymentTestUtils.jsm", {});
+      } = ChromeUtils.import("resource://testing-common/PaymentTestUtils.jsm");
 
       let state = await PTU.DialogContentUtils.getCurrentState(content);
       info("on address-page and state.isPrivate: " + state.isPrivate);
@@ -556,13 +558,13 @@ add_task(async function test_private_persist_addresses() {
     info("awaiting the shippingaddresschange event");
     await ContentTask.spawn(browser, {
       eventName: "shippingaddresschange",
-    }, PTU.ContentTasks.awaitPaymentRequestEventPromise);
+    }, PTU.ContentTasks.awaitPaymentEventPromise);
 
     await spawnPaymentDialogTask(frame, async (args) => {
-      let {address, tempAddressGuid} = args;
+      let {address, tempAddressGuid, prefilledGuids: guids} = args;
       let {
         PaymentTestUtils: PTU,
-      } = ChromeUtils.import("resource://testing-common/PaymentTestUtils.jsm", {});
+      } = ChromeUtils.import("resource://testing-common/PaymentTestUtils.jsm");
 
       let state = await PTU.DialogContentUtils.waitForState(content, (state) => {
         return state.selectedShippingAddress == tempAddressGuid;
@@ -580,7 +582,11 @@ add_task(async function test_private_persist_addresses() {
       ok(tempAddress.name, "Address has a name");
       ok(tempAddress.name.includes(address["given-name"]) &&
          tempAddress.name.includes(address["family-name"]), "Address.name was computed");
-    }, {address: addressToAdd, tempAddressGuid});
+
+      let paymentMethodPicker = content.document.querySelector("payment-method-picker");
+      content.fillField(Cu.waiveXrays(paymentMethodPicker).dropdown.popupBox,
+                        guids.card1GUID);
+    }, {address: addressToAdd, tempAddressGuid, prefilledGuids});
 
     await spawnPaymentDialogTask(frame, PTU.DialogContentTasks.setSecurityCode, {
       securityCode: "123",
@@ -651,7 +657,7 @@ add_task(async function test_countrySpecificFieldsGetRequiredness() {
     await spawnPaymentDialogTask(frame, async () => {
       let {
         PaymentTestUtils: PTU,
-      } = ChromeUtils.import("resource://testing-common/PaymentTestUtils.jsm", {});
+      } = ChromeUtils.import("resource://testing-common/PaymentTestUtils.jsm");
 
       let editLink = content.document.querySelector("address-picker.shipping-related .edit-link");
       is(editLink.textContent, "Edit", "Edit link text");

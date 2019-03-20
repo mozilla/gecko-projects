@@ -15,8 +15,8 @@
 
 var EXPORTED_SYMBOLS = ["ExtensionCommon"];
 
-ChromeUtils.import("resource://gre/modules/Services.jsm");
-ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
+const {Services} = ChromeUtils.import("resource://gre/modules/Services.jsm");
+const {XPCOMUtils} = ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
 
 XPCOMUtils.defineLazyGlobalGetters(this, ["fetch"]);
 
@@ -33,7 +33,7 @@ XPCOMUtils.defineLazyServiceGetter(this, "styleSheetService",
                                    "@mozilla.org/content/style-sheet-service;1",
                                    "nsIStyleSheetService");
 
-ChromeUtils.import("resource://gre/modules/ExtensionUtils.jsm");
+const {ExtensionUtils} = ChromeUtils.import("resource://gre/modules/ExtensionUtils.jsm");
 
 var {
   DefaultMap,
@@ -383,7 +383,7 @@ class InnerWindowReference {
     // If invalidate() is called while the inner window is in the bfcache, then
     // we are unable to remove the event listener, and handleEvent will be
     // called once more if the page is revived from the bfcache.
-    if (this.contentWindow) {
+    if (this.contentWindow && !Cu.isDeadWrapper(this.contentWindow)) {
       this.contentWindow.removeEventListener("pagehide", this, {mozSystemGroup: true});
       this.contentWindow.removeEventListener("pageshow", this, {mozSystemGroup: true});
     }
@@ -445,7 +445,19 @@ class BaseContext {
     return this.cloneScopePromise || this.cloneScope.Promise;
   }
 
+  get privateBrowsingAllowed() {
+    return this.extension.privateBrowsingAllowed;
+  }
+
+  canAccessWindow(window) {
+    return this.extension.canAccessWindow(window);
+  }
+
   setContentWindow(contentWindow) {
+    if (!this.canAccessWindow(contentWindow)) {
+      throw new Error("BaseContext attempted to load when extension is not allowed due to incognito settings.");
+    }
+
     this.innerWindowID = getInnerWindowID(contentWindow);
     this.messageManager = contentWindow.docShell.messageManager;
 
@@ -1309,7 +1321,7 @@ class SchemaAPIManager extends EventEmitter {
 
   initModuleData(moduleData) {
     if (!this._modulesJSONLoaded) {
-      let data = moduleData.deserialize({});
+      let data = moduleData.deserialize({}, true);
 
       this.modules = data.modules;
       this.modulePaths = data.modulePaths;
@@ -1497,7 +1509,7 @@ class SchemaAPIManager extends EventEmitter {
 
     this.initGlobal();
 
-    Services.scriptloader.loadSubScript(module.url, this.global, "UTF-8");
+    Services.scriptloader.loadSubScript(module.url, this.global);
 
     module.loaded = true;
 
@@ -1649,7 +1661,7 @@ class SchemaAPIManager extends EventEmitter {
     // in the sandbox's context instead of here.
     let scope = Cu.createObjectIn(this.global);
 
-    Services.scriptloader.loadSubScript(scriptUrl, scope, "UTF-8");
+    Services.scriptloader.loadSubScript(scriptUrl, scope);
 
     // Save the scope to avoid it being garbage collected.
     this._scriptScopes.push(scope);
@@ -2145,7 +2157,10 @@ class EventManager {
 
   // Remove any primed listeners that were not re-registered.
   // This function is called after the background page has started.
-  static clearPrimedListeners(extension) {
+  // The removed listeners are removed from the set of saved listeners, unless
+  // `clearPersistent` is false. If false, the listeners are cleared from
+  // memory, but not removed from the extension's startup data.
+  static clearPrimedListeners(extension, clearPersistent = true) {
     for (let [module, moduleEntry] of extension.persistentListeners) {
       for (let [event, listeners] of moduleEntry) {
         for (let [key, listener] of listeners) {
@@ -2158,7 +2173,9 @@ class EventManager {
             evt.reject(new Error("listener not re-registered"));
           }
 
-          EventManager.clearPersistentListener(extension, module, event, key);
+          if (clearPersistent) {
+            EventManager.clearPersistentListener(extension, module, event, key);
+          }
           primed.unregister();
         }
       }

@@ -17,8 +17,6 @@ class RemoteDecoderModule : public PlatformDecoderModule {
  public:
   RemoteDecoderModule() = default;
 
-  nsresult Startup() override;
-
   bool SupportsMimeType(const nsACString& aMimeType,
                         DecoderDoctorDiagnostics* aDiagnostics) const override;
 
@@ -26,9 +24,7 @@ class RemoteDecoderModule : public PlatformDecoderModule {
       const CreateDecoderParams& aParams) override;
 
   already_AddRefed<MediaDataDecoder> CreateAudioDecoder(
-      const CreateDecoderParams& aParams) override {
-    return nullptr;
-  }
+      const CreateDecoderParams& aParams) override;
 };
 
 }  // namespace mozilla

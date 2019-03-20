@@ -6,7 +6,7 @@
 
 "use strict";
 
-const { Cu } = require("chrome");
+const { Cc, Ci, Cu } = require("chrome");
 const Services = require("Services");
 const { Pool } = require("devtools/shared/protocol");
 const { LazyPool, createExtraActors } = require("devtools/shared/protocol/lazy-pool");
@@ -121,20 +121,19 @@ RootActor.prototype = {
     storageInspector: true,
     // Whether storage inspector is read only
     storageInspectorReadOnly: true,
-    // Whether conditional breakpoints are supported
-    conditionalBreakpoints: true,
-    // Whether the server supports full source actors (breakpoints on
-    // eval scripts, etc)
-    debuggerSourceActors: true,
     // Whether the server can return wasm binary source
     wasmBinarySource: true,
     bulk: true,
     // Whether the director scripts are supported
     directorScripts: true,
     // Whether the debugger server supports
-    // blackboxing/pretty-printing (not supported in Fever Dream yet)
+    // blackboxing (not supported in Fever Dream yet)
     noBlackBoxing: false,
-    noPrettyPrinting: false,
+    // Support for server pretty-printing has been removed.
+    noPrettyPrinting: true,
+    // Added in Firefox 66. Indicates that clients do not need to pause the
+    // debuggee before adding breakpoints.
+    breakpointWhileRunning: true,
     // Trait added in Gecko 38, indicating that all features necessary for
     // grabbing allocations from the MemoryActor are available for the performance tool
     memoryActorAllocations: true,
@@ -166,11 +165,14 @@ RootActor.prototype = {
     // to retrieve the extension child process target actors.
     webExtensionAddonConnect: true,
     // Version of perf actor. Fx65+
-    // Version 1 - Firefox 65: Introduces a duration-based buffer. With that change
-    // Services.profiler.StartProfiler method accepts an additional parameter called
-    // `window-length`. This is an optional parameter but it will throw an error if the
-    // profiled Firefox doesn't accept it.
+    // Version 1 - Firefox 65: Introduces a duration-based buffer. It can be controlled
+    // by adding a `duration` property (in seconds) to the options passed to
+    // `front.startProfiler`. This is an optional parameter but it will throw an error if
+    // the profiled Firefox doesn't accept it.
     perfActorVersion: 1,
+    // Supports native log points and modifying the condition/log of an existing
+    // breakpoints. Fx66+
+    nativeLogpoints: true,
   },
 
   /**
@@ -341,7 +343,7 @@ RootActor.prototype = {
 
     let targetActor;
     try {
-      targetActor = await tabList.getTab(options);
+      targetActor = await tabList.getTab(options, { forceUnzombify: true });
     } catch (error) {
       if (error.error) {
         // Pipe expected errors as-is to the client
@@ -396,7 +398,17 @@ RootActor.prototype = {
     this._parameters.tabList.onListChanged = null;
   },
 
-  onListAddons: function() {
+  /**
+   * This function can receive the following option from debugger client.
+   *
+   * @param {Object} option
+   *        - iconDataURL: {boolean}
+   *            When true, make data url from the icon of addon, then make possible to
+   *            access by iconDataURL in the actor. The iconDataURL is useful when
+   *            retrieving addons from a remote device, because the raw iconURL might not
+   *            be accessible on the client.
+   */
+  onListAddons: async function(option) {
     const addonList = this._parameters.addonList;
     if (!addonList) {
       return { from: this.actorID, error: "noAddons",
@@ -406,22 +418,25 @@ RootActor.prototype = {
     // Reattach the onListChanged listener now that a client requested the list.
     addonList.onListChanged = this._onAddonListChanged;
 
-    return addonList.getList().then((addonTargetActors) => {
-      const addonTargetActorPool = new Pool(this.conn);
-      for (const addonTargetActor of addonTargetActors) {
-        addonTargetActorPool.manage(addonTargetActor);
+    const addonTargetActors = await addonList.getList();
+    const addonTargetActorPool = new Pool(this.conn);
+    for (const addonTargetActor of addonTargetActors) {
+      if (option.iconDataURL) {
+        await addonTargetActor.loadIconDataURL();
       }
 
-      if (this._addonTargetActorPool) {
-        this._addonTargetActorPool.destroy();
-      }
-      this._addonTargetActorPool = addonTargetActorPool;
+      addonTargetActorPool.manage(addonTargetActor);
+    }
 
-      return {
-        "from": this.actorID,
-        "addons": addonTargetActors.map(addonTargetActor => addonTargetActor.form()),
-      };
-    });
+    if (this._addonTargetActorPool) {
+      this._addonTargetActorPool.destroy();
+    }
+    this._addonTargetActorPool = addonTargetActorPool;
+
+    return {
+      "from": this.actorID,
+      "addons": addonTargetActors.map(addonTargetActor => addonTargetActor.form()),
+    };
   },
 
   onAddonListChanged: function() {
@@ -527,16 +542,13 @@ RootActor.prototype = {
     // If the request doesn't contains id parameter or id is 0
     // (id == 0, based on onListProcesses implementation)
     if ((!("id" in request)) || request.id === 0) {
-      // Check if we are running on xpcshell. hiddenDOMWindow is going to throw on it.
+      // Check if we are running on xpcshell.
       // When running on xpcshell, there is no valid browsing context to attach to
       // and so ParentProcessTargetActor doesn't make sense as it inherits from
       // BrowsingContextTargetActor. So instead use ContentProcessTargetActor, which
       // matches xpcshell needs.
-      let isXpcshell = true;
-      try {
-        isXpcshell = !Services.wm.getMostRecentWindow(null) &&
-                     !Services.appShell.hiddenDOMWindow;
-      } catch (e) {}
+      const env = Cc["@mozilla.org/process/environment;1"].getService(Ci.nsIEnvironment);
+      const isXpcshell = env.exists("XPCSHELL_TEST_PROFILE_DIR");
 
       if (!isXpcshell && this._parentProcessTargetActor &&
           (!this._parentProcessTargetActor.docShell ||

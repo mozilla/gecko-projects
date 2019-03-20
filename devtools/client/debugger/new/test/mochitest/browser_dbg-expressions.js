@@ -1,5 +1,6 @@
-/* Any copyright is dedicated to the Public Domain.
- * http://creativecommons.org/publicdomain/zero/1.0/ */
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
 
 /**
  * tests the watch expressions component
@@ -8,11 +9,6 @@
  * 3. delete watch expressions
  * 4. expanding properties when not paused
  */
-
-const expressionSelectors = {
-  plusIcon: ".watch-expressions-pane button.plus",
-  input: "input.input-expression"
-};
 
 function getLabel(dbg, index) {
   return findElement(dbg, "expressionNode", index).innerText;
@@ -30,31 +26,6 @@ function assertEmptyValue(dbg, index) {
   }
 
   is(value, null);
-}
-
-async function addExpression(dbg, input) {
-  info("Adding an expression");
-
-  const plusIcon = findElementWithSelector(dbg, expressionSelectors.plusIcon);
-  if (plusIcon) {
-    plusIcon.click();
-  }
-  findElementWithSelector(dbg, expressionSelectors.input).focus();
-  type(dbg, input);
-  pressKey(dbg, "Enter");
-
-  await waitForDispatch(dbg, "EVALUATE_EXPRESSION");
-}
-
-async function editExpression(dbg, input) {
-  info("Updating the expression");
-  dblClickElement(dbg, "expressionNode", 1);
-  // Position cursor reliably at the end of the text.
-  pressKey(dbg, "End");
-  type(dbg, input);
-  const evaluated = waitForDispatch(dbg, "EVALUATE_EXPRESSIONS");
-  pressKey(dbg, "Enter");
-  await evaluated;
 }
 
 add_task(async function() {
@@ -88,10 +59,10 @@ add_task(async function() {
   await resume(dbg);
   await addExpression(dbg, "location");
 
-  is(findAllElements(dbg, "expressionNodes").length, 34);
+  is(findAllElements(dbg, "expressionNodes").length, 1);
 
   await toggleExpressionNode(dbg, 1);
-  is(findAllElements(dbg, "expressionNodes").length, 1);
+  is(findAllElements(dbg, "expressionNodes").length, 34);
 
   await deleteExpression(dbg, "location");
   is(findAllElements(dbg, "expressionNodes").length, 0);

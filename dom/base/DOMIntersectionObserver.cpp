@@ -226,7 +226,7 @@ enum class BrowsingContextInfo {
   UnknownBrowsingContext
 };
 
-void DOMIntersectionObserver::Update(nsIDocument* aDocument,
+void DOMIntersectionObserver::Update(Document* aDocument,
                                      DOMHighResTimeStamp time) {
   Element* root = nullptr;
   nsIFrame* rootFrame = nullptr;
@@ -285,9 +285,8 @@ void DOMIntersectionObserver::Update(nsIDocument* aDocument,
   NS_FOR_CSS_SIDES(side) {
     nscoord basis = side == eSideTop || side == eSideBottom ? rootRect.Height()
                                                             : rootRect.Width();
-    nsStyleCoord coord = mRootMargin.Get(side);
     rootMargin.Side(side) =
-        nsLayoutUtils::ComputeCBDependentValue(basis, coord);
+        nsLayoutUtils::ComputeCBDependentValue(basis, mRootMargin.Get(side));
   }
 
   for (size_t i = 0; i < mObservationTargets.Length(); ++i) {

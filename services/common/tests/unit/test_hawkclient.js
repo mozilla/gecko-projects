@@ -3,7 +3,7 @@
 
 "use strict";
 
-ChromeUtils.import("resource://services-common/hawkclient.js");
+const {HawkClient} = ChromeUtils.import("resource://services-common/hawkclient.js");
 
 const SECOND_MS = 1000;
 const MINUTE_MS = SECOND_MS * 60;
@@ -467,16 +467,6 @@ add_task(async function test_401_then_500() {
   Assert.equal(attempts, 2);
 
   await promiseStopServer(server);
-});
-
-add_task(async function throw_if_not_json_body() {
-  let client = new HawkClient("https://example.com");
-  try {
-    await client.request("/bogus", "GET", {}, "I am not json");
-    do_throw("Expected an error");
-  } catch (err) {
-    Assert.ok(!!err.message);
-  }
 });
 
 // End of tests.

@@ -11,7 +11,8 @@ using namespace mozilla;
 
 nsIFrame* NS_NewSVGSymbolFrame(nsIPresShell* aPresShell,
                                ComputedStyle* aStyle) {
-  return new (aPresShell) nsSVGSymbolFrame(aStyle);
+  return new (aPresShell)
+      nsSVGSymbolFrame(aStyle, aPresShell->GetPresContext());
 }
 
 NS_IMPL_FRAMEARENA_HELPERS(nsSVGSymbolFrame)
@@ -20,7 +21,7 @@ NS_IMPL_FRAMEARENA_HELPERS(nsSVGSymbolFrame)
 // nsIFrame methods
 
 NS_QUERYFRAME_HEAD(nsSVGSymbolFrame)
-NS_QUERYFRAME_ENTRY(nsSVGSymbolFrame)
+  NS_QUERYFRAME_ENTRY(nsSVGSymbolFrame)
 NS_QUERYFRAME_TAIL_INHERITING(nsSVGViewportFrame)
 
 #ifdef DEBUG

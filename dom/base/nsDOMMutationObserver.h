@@ -24,7 +24,7 @@
 #include "mozilla/dom/Nullable.h"
 #include "mozilla/dom/MutationEventBinding.h"
 #include "mozilla/dom/MutationObserverBinding.h"
-#include "nsIDocument.h"
+#include "mozilla/dom/Document.h"
 #include "mozilla/dom/Animation.h"
 #include "nsIAnimationObserver.h"
 #include "nsGlobalWindow.h"
@@ -359,8 +359,7 @@ class nsMutationReceiver : public nsMutationReceiverBase {
                                           nsAtom* aAttribute) override {
     // We can reuse AttributeWillChange implementation.
     AttributeWillChange(aElement, aNameSpaceID, aAttribute,
-                        mozilla::dom::MutationEvent_Binding::MODIFICATION,
-                        nullptr);
+                        mozilla::dom::MutationEvent_Binding::MODIFICATION);
   }
 
  protected:
@@ -502,9 +501,14 @@ class nsDOMMutationObserver final : public nsISupports, public nsWrapperCache {
   }
 
   void ClearPendingRecords() {
-    mFirstPendingMutation = nullptr;
+    // Break down the pending mutation record list so that cycle collector
+    // can delete the objects sooner.
+    RefPtr<nsDOMMutationRecord> current = mFirstPendingMutation.forget();
     mLastPendingMutation = nullptr;
     mPendingMutationCount = 0;
+    while (current) {
+      current = current->mNext.forget();
+    }
   }
 
   // static methods
@@ -707,11 +711,11 @@ class nsAutoAnimationMutationBatch {
   struct Entry;
 
  public:
-  explicit nsAutoAnimationMutationBatch(nsIDocument* aDocument) {
+  explicit nsAutoAnimationMutationBatch(mozilla::dom::Document* aDocument) {
     Init(aDocument);
   }
 
-  void Init(nsIDocument* aDocument) {
+  void Init(mozilla::dom::Document* aDocument) {
     if (!aDocument || !aDocument->MayHaveDOMMutationObservers() ||
         sCurrentBatch) {
       return;

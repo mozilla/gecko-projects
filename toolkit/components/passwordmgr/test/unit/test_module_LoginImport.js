@@ -12,8 +12,6 @@
 // Globals
 
 
-ChromeUtils.defineModuleGetter(this, "LoginHelper",
-                               "resource://gre/modules/LoginHelper.jsm");
 ChromeUtils.defineModuleGetter(this, "LoginImport",
                                "resource://gre/modules/LoginImport.jsm");
 ChromeUtils.defineModuleGetter(this, "LoginStore",
@@ -32,8 +30,7 @@ XPCOMUtils.defineLazyServiceGetter(this, "gUUIDGenerator",
  * Creates empty login data tables in the given SQLite connection, resembling
  * the most recent schema version (excluding indices).
  */
-function promiseCreateDatabaseSchema(aConnection)
-{
+function promiseCreateDatabaseSchema(aConnection) {
   return (async function() {
     await aConnection.setSchemaVersion(5);
     await aConnection.execute("CREATE TABLE moz_logins (" +
@@ -64,8 +61,7 @@ function promiseCreateDatabaseSchema(aConnection)
 /**
  * Inserts a new entry in the database resembling the given nsILoginInfo object.
  */
-function promiseInsertLoginInfo(aConnection, aLoginInfo)
-{
+function promiseInsertLoginInfo(aConnection, aLoginInfo) {
   aLoginInfo.QueryInterface(Ci.nsILoginMetaInfo);
 
   // We can't use the aLoginInfo object directly in the execute statement
@@ -99,8 +95,7 @@ function promiseInsertLoginInfo(aConnection, aLoginInfo)
 /**
  * Inserts a new disabled host entry in the database.
  */
-function promiseInsertDisabledHost(aConnection, aHostname)
-{
+function promiseInsertDisabledHost(aConnection, aHostname) {
   return aConnection.execute("INSERT INTO moz_disabledHosts (hostname) " +
                              "VALUES (?)", [aHostname]);
 }
@@ -110,8 +105,7 @@ function promiseInsertDisabledHost(aConnection, aHostname)
 /**
  * Imports login data from a SQLite file constructed using the test data.
  */
-add_task(async function test_import()
-{
+add_task(async function test_import() {
   let store = new LoginStore(getTempFile("test-import.json").path);
   let loginsSqlite = getTempFile("test-logins.sqlite").path;
 
@@ -164,18 +158,12 @@ add_task(async function test_import()
              loginDataItem.timesUsed == loginInfo.timesUsed;
     });
   }));
-
-  // Verify that disabled hosts have been imported.
-  Assert.equal(store.data.disabledHosts.length, 2);
-  Assert.ok(store.data.disabledHosts.includes("http://www.example.com"));
-  Assert.ok(store.data.disabledHosts.includes("https://www.example.org"));
 });
 
 /**
  * Tests imports of NULL values due to a downgraded database.
  */
-add_task(async function test_import_downgraded()
-{
+add_task(async function test_import_downgraded() {
   let store = new LoginStore(getTempFile("test-import-downgraded.json").path);
   let loginsSqlite = getTempFile("test-logins-downgraded.sqlite").path;
 
@@ -211,8 +199,7 @@ add_task(async function test_import_downgraded()
 /**
  * Verifies that importing from a SQLite file with database version 2 fails.
  */
-add_task(async function test_import_v2()
-{
+add_task(async function test_import_v2() {
   let store = new LoginStore(getTempFile("test-import-v2.json").path);
   let loginsSqlite = do_get_file("data/signons-v2.sqlite").path;
 
@@ -227,8 +214,7 @@ add_task(async function test_import_v2()
 /**
  * Imports login data from a SQLite file, with database version 3.
  */
-add_task(async function test_import_v3()
-{
+add_task(async function test_import_v3() {
   let store = new LoginStore(getTempFile("test-import-v3.json").path);
   let loginsSqlite = do_get_file("data/signons-v3.sqlite").path;
 
@@ -238,5 +224,4 @@ add_task(async function test_import_v3()
 
   // We only execute basic integrity checks.
   Assert.equal(store.data.logins[0].usernameField, "u1");
-  Assert.equal(store.data.disabledHosts.length, 0);
 });

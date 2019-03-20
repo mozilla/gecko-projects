@@ -2,7 +2,6 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-const { TargetFactory } = require("devtools/client/framework/target");
 const EventEmitter = require("devtools/shared/event-emitter");
 const { Connection } = require("devtools/shared/client/connection-manager");
 
@@ -50,7 +49,6 @@ TabStore.prototype = {
   },
 
   _resetStore: function() {
-    this.response = null;
     this.tabs = [];
     this._selectedTab = null;
     this._selectedTabTargetPromise = null;
@@ -91,20 +89,20 @@ TabStore.prototype = {
     }
 
     return new Promise((resolve, reject) => {
-      this._connection.client.listTabs().then(response => {
-        if (response.error) {
-          this._connection.disconnect();
-          reject(response.error);
-          return;
-        }
-        const tabsChanged = JSON.stringify(this.tabs) !== JSON.stringify(response.tabs);
-        this.response = response;
-        this.tabs = response.tabs;
+      this._connection.client.mainRoot.listTabs().then(tabs => {
+        // To avoid refactoring WebIDE while switching from form to Target Front for
+        // listTabs. Convert front to form list here.
+        tabs = tabs.map(tab => tab.targetForm);
+        const tabsChanged = JSON.stringify(this.tabs) !== JSON.stringify(tabs);
+        this.tabs = tabs;
         this._checkSelectedTab();
         if (tabsChanged) {
           this.emit("tab-list");
         }
-        resolve(response);
+        resolve(tabs);
+      }, error => {
+        this._connection.disconnect();
+        reject(error);
       });
     });
   },
@@ -154,11 +152,9 @@ TabStore.prototype = {
       // if you try to connect to the same tab again.  To work around this
       // issue, we force a "listTabs" request before connecting to a tab.
       await store.listTabs();
-      return TargetFactory.forRemoteTab({
-        form: store._selectedTab,
-        client: store._connection.client,
-        chrome: false,
-      });
+
+      const { outerWindowID } = store._selectedTab;
+      return store._connection.client.mainRoot.getTab({ outerWindowID });
     })();
     this._selectedTabTargetPromise.then(target => {
       target.once("close", () => {

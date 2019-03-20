@@ -6,6 +6,8 @@
 
 /* global ChromeUtils, ExtensionAPI, ExtensionCommon, XPCOMUtils */
 
+var Services;
+
 ChromeUtils.defineModuleGetter(this, "EventDispatcher",
                                "resource://gre/modules/Messaging.jsm");
 
@@ -19,7 +21,7 @@ XPCOMUtils.defineLazyGetter(this, "GlobalEventDispatcher", () => EventDispatcher
 function getInfoFrameScript(messageName) {
   /* eslint-env mozilla/frame-script */
 
-  ChromeUtils.import("resource://gre/modules/Services.jsm");
+  ({Services} = ChromeUtils.import("resource://gre/modules/Services.jsm"));
 
   function getInnerWindowId(window) {
     return window.windowUtils.currentInnerWindowID;
@@ -99,7 +101,7 @@ this.tabExtras = class extends ExtensionAPI {
     const EventManager = ExtensionCommon.EventManager;
     const {tabManager} = context.extension;
     const {Management: {global: {windowTracker}}} =
-                ChromeUtils.import("resource://gre/modules/Extension.jsm", {});
+                ChromeUtils.import("resource://gre/modules/Extension.jsm", null);
     return {
       tabExtras: {
         onDesktopSiteRequested: new EventManager({
@@ -164,8 +166,11 @@ this.tabExtras = class extends ExtensionAPI {
               },
             };
             windowTracker.addListener("progress", listener);
-            tab.browser.webNavigation.loadURIWithOptions(url, null, null, null,
-                                                         post, null, null, null);
+            let loadURIOptions = {
+              triggeringPrincipal: Services.scriptSecurityManager.getSystemPrincipal(),
+              postData: post,
+            };
+            tab.browser.webNavigation.loadURI(url, loadURIOptions);
           });
         },
         async getWebcompatInfo(tabId) {

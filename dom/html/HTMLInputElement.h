@@ -89,7 +89,7 @@ class UploadLastDir final : public nsIObserver, public nsSupportsWeakReference {
    * @param aFpCallback   the callback object to be run when the file is shown.
    */
   nsresult FetchDirectoryAndDisplayPicker(
-      nsIDocument* aDoc, nsIFilePicker* aFilePicker,
+      Document* aDoc, nsIFilePicker* aFilePicker,
       nsIFilePickerShownCallback* aFpCallback);
 
   /**
@@ -98,7 +98,7 @@ class UploadLastDir final : public nsIObserver, public nsSupportsWeakReference {
    * @param aURI URI of the current page
    * @param aDir Parent directory of the file(s)/directory chosen by the user
    */
-  nsresult StoreLastUsedDirectory(nsIDocument* aDoc, nsIFile* aDir);
+  nsresult StoreLastUsedDirectory(Document* aDoc, nsIFile* aDir);
 
   class ContentPrefCallback final : public nsIContentPrefCallback2 {
     virtual ~ContentPrefCallback() {}
@@ -199,7 +199,7 @@ class HTMLInputElement final : public nsGenericHTMLFormElementWithState,
   MOZ_CAN_RUN_SCRIPT
   void SetValueOfRangeForUserEvent(Decimal aValue);
 
-  virtual nsresult BindToTree(nsIDocument* aDocument, nsIContent* aParent,
+  virtual nsresult BindToTree(Document* aDocument, nsIContent* aParent,
                               nsIContent* aBindingParent) override;
   virtual void UnbindFromTree(bool aDeep = true,
                               bool aNullParent = true) override;
@@ -244,8 +244,7 @@ class HTMLInputElement final : public nsGenericHTMLFormElementWithState,
   NS_IMETHOD_(bool) GetPlaceholderVisibility() override;
   NS_IMETHOD_(bool) GetPreviewVisibility() override;
   NS_IMETHOD_(void) InitializeKeyboardEventListeners() override;
-  NS_IMETHOD_(void)
-  OnValueChanged(bool aNotify, bool aWasInteractiveUserChange) override;
+  NS_IMETHOD_(void) OnValueChanged(bool aNotify, ValueChangeKind) override;
   virtual void GetValueFromSetRangeText(nsAString& aValue) override;
   MOZ_CAN_RUN_SCRIPT_BOUNDARY
   virtual nsresult SetValueFromSetRangeText(const nsAString& aValue) override;
@@ -346,6 +345,14 @@ class HTMLInputElement final : public nsGenericHTMLFormElementWithState,
   // as needed.  aNotify controls whether the element state update
   // needs to notify.
   void UpdateAllValidityStates(bool aNotify);
+  void MaybeUpdateAllValidityStates() {
+    // If you need to add new type which supports validationMessage, you should
+    // add test cases into test_MozEditableElement_setUserInput.html.
+    if (mType == NS_FORM_INPUT_EMAIL) {
+      UpdateAllValidityStates(!mDoneCreating);
+    }
+  }
+
   // Update all our validity states without updating element state.
   // This should be called instead of UpdateAllValidityStates any time
   // we're guaranteed that element state will be updated anyway.
@@ -749,7 +756,7 @@ class HTMLInputElement final : public nsGenericHTMLFormElementWithState,
 
   /*
    * This allows chrome JavaScript to dispatch event to the inner datetimebox
-   * anonymous element or access nsIDateTimeInputArea implmentation.
+   * anonymous or UA Widget element.
    */
   Element* GetDateTimeBoxElement();
 
@@ -846,6 +853,8 @@ class HTMLInputElement final : public nsGenericHTMLFormElementWithState,
    * Required() returns true whenever @required attribute is set.
    */
   bool IsRequired() const { return State().HasState(NS_EVENT_STATE_REQUIRED); }
+
+  bool HasBeenTypePassword() { return mHasBeenTypePassword; }
 
  protected:
   virtual ~HTMLInputElement();
@@ -1551,6 +1560,7 @@ class HTMLInputElement final : public nsGenericHTMLFormElementWithState,
   bool mPickerRunning : 1;
   bool mSelectionCached : 1;
   bool mIsPreviewEnabled : 1;
+  bool mHasBeenTypePassword : 1;
   bool mHasPatternAttribute : 1;
 
  private:

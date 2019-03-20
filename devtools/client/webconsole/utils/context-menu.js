@@ -15,12 +15,13 @@ const clipboardHelper = require("devtools/shared/platform/clipboard");
 const { l10n } = require("devtools/client/webconsole/utils/messages");
 
 loader.lazyRequireGetter(this, "openContentLink", "devtools/client/shared/link", true);
+loader.lazyRequireGetter(this, "getElementText", "devtools/client/webconsole/utils/clipboard", true);
 
 /**
  * Create a Menu instance for the webconsole.
  *
- * @param {Object} hud
- *        The webConsoleFrame.
+ * @param {WebConsoleUI} webConsoleUI
+ *        The webConsoleUI instance.
  * @param {Element} parentNode
  *        The container of the new console frontend output wrapper.
  * @param {Object} options
@@ -37,7 +38,7 @@ loader.lazyRequireGetter(this, "openContentLink", "devtools/client/shared/link",
  *        - {Object} executionPoint (optional) when replaying, the execution point where
  *            this message was logged
  */
-function createContextMenu(hud, parentNode, {
+function createContextMenu(webConsoleUI, parentNode, {
   actor,
   clipboardText,
   variableText,
@@ -47,6 +48,7 @@ function createContextMenu(hud, parentNode, {
   rootActorId,
   executionPoint,
   toolbox,
+  url,
 }) {
   const win = parentNode.ownerDocument.defaultView;
   const selection = win.getSelection();
@@ -114,9 +116,9 @@ function createContextMenu(hud, parentNode, {
         selectedObjectActor: actor,
       };
 
-      hud.jsterm.requestEvaluation(evalString, options).then((res) => {
-        hud.jsterm.focus();
-        hud.jsterm.setInputValue(res.result);
+      webConsoleUI.jsterm.requestEvaluation(evalString, options).then((res) => {
+        webConsoleUI.jsterm.focus();
+        webConsoleUI.hud.setInputValue(res.result);
       });
     },
   }));
@@ -149,9 +151,10 @@ function createContextMenu(hud, parentNode, {
     click: () => {
       if (actor) {
         // The Debugger.Object of the OA will be bound to |_self| during evaluation,
-        hud.jsterm.copyObject(`_self`, { selectedObjectActor: actor }).then((res) => {
-          clipboardHelper.copyString(res.helperResult.value);
-        });
+        webConsoleUI.jsterm.copyObject(`_self`, { selectedObjectActor: actor })
+          .then((res) => {
+            clipboardHelper.copyString(res.helperResult.value);
+          });
       } else {
         clipboardHelper.copyString(variableText);
       }
@@ -167,6 +170,17 @@ function createContextMenu(hud, parentNode, {
     click: () => {
       const webconsoleOutput = parentNode.querySelector(".webconsole-output");
       selection.selectAllChildren(webconsoleOutput);
+    },
+  }));
+
+  // Export to clipboard
+  menu.append(new MenuItem({
+    id: "console-menu-export-clipboard",
+    label: l10n.getStr("webconsole.menu.exportClipboard.label"),
+    disabled: false,
+    click: () => {
+      const webconsoleOutput = parentNode.querySelector(".webconsole-output");
+      clipboardHelper.copyString(getElementText(webconsoleOutput));
     },
   }));
 
@@ -191,6 +205,15 @@ function createContextMenu(hud, parentNode, {
         const threadClient = toolbox.threadClient;
         threadClient.timeWarp(executionPoint);
       },
+    }));
+  }
+
+  if (url) {
+    menu.append(new MenuItem({
+      id: "console-menu-copy-url",
+      label: l10n.getStr("webconsole.menu.copyURL.label"),
+      accesskey: l10n.getStr("webconsole.menu.copyURL.accesskey"),
+      click: () => clipboardHelper.copyString(url),
     }));
   }
 

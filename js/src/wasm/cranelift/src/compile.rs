@@ -106,8 +106,12 @@ impl<'a, 'b> BatchCompiler<'a, 'b> {
         self.context.func.name = wasm_function_name(index);
 
         let tenv = &mut TransEnv::new(&*self.isa, &self.environ, self.static_environ);
-        self.trans
-            .translate(func.bytecode(), &mut self.context.func, tenv)?;
+        self.trans.translate(
+            func.bytecode(),
+            func.offset_in_module as usize,
+            &mut self.context.func,
+            tenv,
+        )?;
 
         info!("Translated wasm function {}.", func.index);
         debug!("Content: {}", self.context.func.display(&*self.isa));
@@ -345,7 +349,7 @@ impl<'a, 'b> BatchCompiler<'a, 'b> {
             ir::TrapCode::IntegerDivisionByZero => bd::Trap::IntegerDivideByZero,
             ir::TrapCode::BadConversionToInteger => bd::Trap::InvalidConversionToInteger,
             ir::TrapCode::Interrupt => bd::Trap::CheckInterrupt,
-            ir::TrapCode::User(0) => bd::Trap::Unreachable,
+            ir::TrapCode::UnreachableCodeReached => bd::Trap::Unreachable,
             ir::TrapCode::User(_) => panic!("Uncovered trap code {}", code),
         };
 

@@ -15,13 +15,15 @@
 #include "nsNetUtil.h"
 #include "nsQueryObject.h"
 #include "mozilla/dom/nsCSPUtils.h"
+#include "mozilla/dom/LoadURIOptionsBinding.h"
 #include "mozilla/NullPrincipal.h"
 
 using namespace mozilla;
 
-/* static */ bool FramingChecker::CheckOneFrameOptionsPolicy(
-    nsIHttpChannel* aHttpChannel, const nsAString& aPolicy,
-    nsIDocShell* aDocShell) {
+/* static */
+bool FramingChecker::CheckOneFrameOptionsPolicy(nsIHttpChannel* aHttpChannel,
+                                                const nsAString& aPolicy,
+                                                nsIDocShell* aDocShell) {
   static const char allowFrom[] = "allow-from";
   const uint32_t allowFromLen = ArrayLength(allowFrom) - 1;
   bool isAllowFrom =
@@ -67,7 +69,7 @@ using namespace mozilla;
   nsCOMPtr<nsIDocShellTreeItem> thisDocShellItem(aDocShell);
   nsCOMPtr<nsIDocShellTreeItem> parentDocShellItem;
   nsCOMPtr<nsIDocShellTreeItem> curDocShellItem = thisDocShellItem;
-  nsCOMPtr<nsIDocument> topDoc;
+  nsCOMPtr<Document> topDoc;
   nsresult rv;
   nsCOMPtr<nsIScriptSecurityManager> ssm =
       do_GetService(NS_SCRIPTSECURITYMANAGER_CONTRACTID, &rv);
@@ -183,10 +185,9 @@ static bool ShouldIgnoreFrameOptions(nsIChannel* aChannel,
   }
 
   // log warning to console that xfo is ignored because of CSP
-  nsCOMPtr<nsILoadInfo> loadInfo = aChannel->GetLoadInfo();
-  uint64_t innerWindowID = loadInfo ? loadInfo->GetInnerWindowID() : 0;
-  bool privateWindow =
-      loadInfo ? !!loadInfo->GetOriginAttributes().mPrivateBrowsingId : false;
+  nsCOMPtr<nsILoadInfo> loadInfo = aChannel->LoadInfo();
+  uint64_t innerWindowID = loadInfo->GetInnerWindowID();
+  bool privateWindow = !!loadInfo->GetOriginAttributes().mPrivateBrowsingId;
   const char16_t* params[] = {u"x-frame-options", u"frame-ancestors"};
   CSP_LogLocalizedStr("IgnoringSrcBecauseOfDirective", params,
                       ArrayLength(params),
@@ -204,9 +205,10 @@ static bool ShouldIgnoreFrameOptions(nsIChannel* aChannel,
 // Check if X-Frame-Options permits this document to be loaded as a subdocument.
 // This will iterate through and check any number of X-Frame-Options policies
 // in the request (comma-separated in a header, multiple headers, etc).
-/* static */ bool FramingChecker::CheckFrameOptions(nsIChannel* aChannel,
-                                                    nsIDocShell* aDocShell,
-                                                    nsIPrincipal* aPrincipal) {
+/* static */
+bool FramingChecker::CheckFrameOptions(nsIChannel* aChannel,
+                                       nsIDocShell* aDocShell,
+                                       nsIPrincipal* aPrincipal) {
   if (!aChannel || !aDocShell) {
     return true;
   }
@@ -251,14 +253,14 @@ static bool ShouldIgnoreFrameOptions(nsIChannel* aChannel,
       if (aDocShell) {
         nsCOMPtr<nsIWebNavigation> webNav(do_QueryObject(aDocShell));
         if (webNav) {
-          nsCOMPtr<nsILoadInfo> loadInfo = httpChannel->GetLoadInfo();
-          MOZ_ASSERT(loadInfo);
-
+          nsCOMPtr<nsILoadInfo> loadInfo = httpChannel->LoadInfo();
           RefPtr<NullPrincipal> principal =
               NullPrincipal::CreateWithInheritedAttributes(
                   loadInfo->TriggeringPrincipal());
-          webNav->LoadURI(NS_LITERAL_STRING("about:blank"), 0, nullptr, nullptr,
-                          nullptr, principal);
+
+          LoadURIOptions loadURIOptions;
+          loadURIOptions.mTriggeringPrincipal = principal;
+          webNav->LoadURI(NS_LITERAL_STRING("about:blank"), loadURIOptions);
         }
       }
       return false;
@@ -268,9 +270,9 @@ static bool ShouldIgnoreFrameOptions(nsIChannel* aChannel,
   return true;
 }
 
-/* static */ void FramingChecker::ReportXFOViolation(
-    nsIDocShellTreeItem* aTopDocShellItem, nsIURI* aThisURI,
-    XFOHeader aHeader) {
+/* static */
+void FramingChecker::ReportXFOViolation(nsIDocShellTreeItem* aTopDocShellItem,
+                                        nsIURI* aThisURI, XFOHeader aHeader) {
   MOZ_ASSERT(aTopDocShellItem, "Need a top docshell");
 
   nsCOMPtr<nsPIDOMWindowOuter> topOuterWindow = aTopDocShellItem->GetWindow();
@@ -285,7 +287,7 @@ static bool ShouldIgnoreFrameOptions(nsIChannel* aChannel,
 
   nsCOMPtr<nsIURI> topURI;
 
-  nsCOMPtr<nsIDocument> document = aTopDocShellItem->GetDocument();
+  nsCOMPtr<Document> document = aTopDocShellItem->GetDocument();
   nsresult rv = document->NodePrincipal()->GetURI(getter_AddRefs(topURI));
   if (NS_FAILED(rv)) {
     return;

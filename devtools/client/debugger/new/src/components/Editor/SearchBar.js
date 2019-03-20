@@ -6,9 +6,9 @@
 
 import PropTypes from "prop-types";
 import React, { Component } from "react";
-import { connect } from "react-redux";
+import { connect } from "../../utils/connect";
 import { CloseButton } from "../shared/Button";
-import Svg from "../shared/Svg";
+import AccessibleImage from "../shared/AccessibleImage";
 import actions from "../../actions";
 import {
   getActiveSearch,
@@ -26,7 +26,6 @@ import { scrollList } from "../../utils/result-list";
 import classnames from "classnames";
 
 import type { Source } from "../../types";
-import type { ActiveSearchType } from "../../reducers/ui";
 import type { Modifiers, SearchResults } from "../../reducers/file-search";
 
 import SearchInput from "../shared/SearchInput";
@@ -56,21 +55,20 @@ type State = {
 };
 
 type Props = {
-  editor?: SourceEditor,
+  editor: SourceEditor,
   selectedSource?: Source,
   searchOn: boolean,
   searchResults: SearchResults,
   modifiers: Modifiers,
   query: string,
-  toggleFileSearchModifier: string => any,
-  setFileSearchQuery: string => any,
-  setActiveSearch: (?ActiveSearchType) => any,
-  closeFileSearch: SourceEditor => void,
-  doSearch: (string, SourceEditor) => void,
-  traverseResults: (boolean, SourceEditor) => void,
-  updateSearchResults: ({ count: number, index?: number }) => any,
   showClose?: boolean,
-  size?: string
+  size?: string,
+  toggleFileSearchModifier: typeof actions.toggleFileSearchModifier,
+  setFileSearchQuery: typeof actions.setFileSearchQuery,
+  setActiveSearch: typeof actions.setActiveSearch,
+  closeFileSearch: typeof actions.closeFileSearch,
+  doSearch: typeof actions.doSearch,
+  traverseResults: typeof actions.traverseResults
 };
 
 class SearchBar extends Component<Props, State> {
@@ -179,18 +177,6 @@ class SearchBar extends Component<Props, State> {
     this.props.doSearch(query, this.props.editor);
   };
 
-  updateSearchResults = (characterIndex, line, matches) => {
-    const matchIndex = matches.findIndex(
-      elm => elm.line === line && elm.ch === characterIndex
-    );
-    this.props.updateSearchResults({
-      matches,
-      matchIndex,
-      count: matches.length,
-      index: characterIndex
-    });
-  };
-
   traverseResults = (e: SyntheticEvent<HTMLElement>, rev: boolean) => {
     e.stopPropagation();
     e.preventDefault();
@@ -245,7 +231,7 @@ class SearchBar extends Component<Props, State> {
     }
 
     if (count == 0) {
-      return L10N.getStr("editor.noResults");
+      return L10N.getStr("editor.noResultsFound");
     }
 
     if (index == -1) {
@@ -256,13 +242,7 @@ class SearchBar extends Component<Props, State> {
   }
 
   renderSearchModifiers = () => {
-    const {
-      modifiers,
-      toggleFileSearchModifier,
-      query,
-      showClose = true,
-      size = "big"
-    } = this.props;
+    const { modifiers, toggleFileSearchModifier, query } = this.props;
     const { doSearch } = this;
 
     function SearchModBtn({ modVal, className, svgName, tooltip }) {
@@ -284,13 +264,14 @@ class SearchBar extends Component<Props, State> {
           }}
           title={tooltip}
         >
-          <Svg name={svgName} />
+          <AccessibleImage className={svgName} />
         </button>
       );
     }
 
     return (
       <div className="search-modifiers">
+        <span className="pipe-divider" />
         <span className="search-type-name">
           {L10N.getStr("symbolSearch.searchModifier.modifiersLabel")}
         </span>
@@ -312,12 +293,6 @@ class SearchBar extends Component<Props, State> {
           svgName="whole-word-match"
           tooltip={L10N.getStr("symbolSearch.searchModifier.wholeWord")}
         />
-        {showClose && (
-          <React.Fragment>
-            <span className="pipe-divider" />
-            <CloseButton handleClick={this.closeSearch} buttonClass={size} />
-          </React.Fragment>
-        )}
       </div>
     );
   };
@@ -333,7 +308,9 @@ class SearchBar extends Component<Props, State> {
   render() {
     const {
       searchResults: { count },
-      searchOn
+      searchOn,
+      showClose = true,
+      size = "big"
     } = this.props;
 
     if (!searchOn) {
@@ -349,6 +326,7 @@ class SearchBar extends Component<Props, State> {
           count={count}
           placeholder={L10N.getStr("sourceSearch.search.placeholder2")}
           summaryMsg={this.buildSummaryMsg()}
+          isLoading={false}
           onChange={this.onChange}
           onFocus={this.onFocus}
           onBlur={this.onBlur}
@@ -360,7 +338,15 @@ class SearchBar extends Component<Props, State> {
           shouldFocus={this.state.inputFocused}
           showClose={false}
         />
-        <div className="search-bottom-bar">{this.renderSearchModifiers()}</div>
+        <div className="search-bottom-bar">
+          {this.renderSearchModifiers()}
+          {showClose && (
+            <React.Fragment>
+              <span className="pipe-divider" />
+              <CloseButton handleClick={this.closeSearch} buttonClass={size} />
+            </React.Fragment>
+          )}
+        </div>
       </div>
     );
   }
@@ -388,7 +374,6 @@ export default connect(
     setActiveSearch: actions.setActiveSearch,
     closeFileSearch: actions.closeFileSearch,
     doSearch: actions.doSearch,
-    traverseResults: actions.traverseResults,
-    updateSearchResults: actions.updateSearchResults
+    traverseResults: actions.traverseResults
   }
 )(SearchBar);

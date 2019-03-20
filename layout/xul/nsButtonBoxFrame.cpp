@@ -51,13 +51,15 @@ nsresult nsButtonBoxFrame::nsButtonBoxListener::HandleEvent(
 //
 nsIFrame* NS_NewButtonBoxFrame(nsIPresShell* aPresShell,
                                ComputedStyle* aStyle) {
-  return new (aPresShell) nsButtonBoxFrame(aStyle);
+  return new (aPresShell)
+      nsButtonBoxFrame(aStyle, aPresShell->GetPresContext());
 }
 
 NS_IMPL_FRAMEARENA_HELPERS(nsButtonBoxFrame)
 
-nsButtonBoxFrame::nsButtonBoxFrame(ComputedStyle* aStyle, ClassID aID)
-    : nsBoxFrame(aStyle, aID, false),
+nsButtonBoxFrame::nsButtonBoxFrame(ComputedStyle* aStyle,
+                                   nsPresContext* aPresContext, ClassID aID)
+    : nsBoxFrame(aStyle, aPresContext, aID, false),
       mButtonBoxListener(nullptr),
       mIsHandlingKeyEvent(false) {
   UpdateMouseThrough();
@@ -123,8 +125,9 @@ nsresult nsButtonBoxFrame::HandleEvent(nsPresContext* aPresContext,
         break;
       }
       if (NS_VK_RETURN == keyEvent->mKeyCode) {
-        nsCOMPtr<nsIDOMXULButtonElement> buttonEl(do_QueryInterface(mContent));
-        if (buttonEl) {
+        RefPtr<nsIDOMXULButtonElement> button =
+            mContent->AsElement()->AsXULButton();
+        if (button) {
           MouseClicked(aEvent);
           *aEventStatus = nsEventStatus_eConsumeNoDefault;
         }

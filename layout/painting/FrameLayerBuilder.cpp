@@ -41,6 +41,7 @@
 #include "mozilla/LayerTimelineMarker.h"
 
 #include "mozilla/EffectCompositor.h"
+#include "mozilla/LayerAnimationInfo.h"
 #include "mozilla/Move.h"
 #include "mozilla/ReverseIterator.h"
 #include "mozilla/gfx/2D.h"
@@ -352,19 +353,15 @@ DisplayItemData::~DisplayItemData() {
 }
 
 void DisplayItemData::ClearAnimationCompositorState() {
-  if (mDisplayItemKey !=
-          static_cast<uint32_t>(DisplayItemType::TYPE_TRANSFORM) &&
-      mDisplayItemKey != static_cast<uint32_t>(DisplayItemType::TYPE_OPACITY)) {
+  DisplayItemType type = static_cast<DisplayItemType>(mDisplayItemKey);
+  // FIXME: Bug 1530857: Add background_color.
+  if (type != DisplayItemType::TYPE_TRANSFORM &&
+      type != DisplayItemType::TYPE_OPACITY) {
     return;
   }
 
   for (nsIFrame* frame : mFrameList) {
-    nsCSSPropertyID prop =
-        mDisplayItemKey ==
-                static_cast<uint32_t>(DisplayItemType::TYPE_TRANSFORM)
-            ? eCSSProperty_transform
-            : eCSSProperty_opacity;
-    EffectCompositor::ClearIsRunningOnCompositor(frame, prop);
+    EffectCompositor::ClearIsRunningOnCompositor(frame, type);
   }
 }
 
@@ -387,12 +384,10 @@ DisplayItemData* DisplayItemData::AssertDisplayItemData(
 class LayerManagerData : public LayerUserData {
  public:
   explicit LayerManagerData(LayerManager* aManager)
-      : mLayerManager(aManager)
+      : mLayerManager(aManager),
 #ifdef DEBUG_DISPLAY_ITEM_DATA
-        ,
-        mParent(nullptr)
+        mParent(nullptr),
 #endif
-        ,
         mInvalidateAllLayers(false) {
     MOZ_COUNT_CTOR(LayerManagerData);
   }
@@ -472,11 +467,26 @@ class LayerManagerData : public LayerUserData {
   bool mInvalidateAllLayers;
 };
 
-/* static */ void FrameLayerBuilder::DestroyDisplayItemDataFor(
-    nsIFrame* aFrame) {
+/* static */
+void FrameLayerBuilder::DestroyDisplayItemDataFor(nsIFrame* aFrame) {
   RemoveFrameFromLayerManager(aFrame, aFrame->DisplayItemData());
   aFrame->DisplayItemData().Clear();
-  aFrame->DeleteProperty(WebRenderUserDataProperty::Key());
+
+  // Destroying a WebRenderUserDataTable can cause destruction of other objects
+  // which can remove frame properties in their destructor. If we delete a frame
+  // property it runs the destructor of the stored object in the middle of
+  // updating the frame property table, so if the destruction of that object
+  // causes another update to the frame property table it would leave the frame
+  // property table in an inconsistent state. So we remove it from the table and
+  // then destroy it. (bug 1530657)
+  WebRenderUserDataTable* userDataTable =
+      aFrame->RemoveProperty(WebRenderUserDataProperty::Key());
+  if (userDataTable) {
+    for (auto iter = userDataTable->Iter(); !iter.Done(); iter.Next()) {
+      iter.UserData()->RemoveFromTable();
+    }
+    delete userDataTable;
+  }
 }
 
 /**
@@ -523,13 +533,13 @@ class PaintedLayerData {
    */
   nsCString mLog;
 
-#define FLB_LOG_PAINTED_LAYER_DECISION(pld, ...) \
-  if (gfxPrefs::LayersDumpDecision()) {          \
-    pld->mLog.AppendPrintf("\t\t\t\t");          \
-    pld->mLog.AppendPrintf(__VA_ARGS__);         \
-  }
+#  define FLB_LOG_PAINTED_LAYER_DECISION(pld, ...) \
+    if (gfxPrefs::LayersDumpDecision()) {          \
+      pld->mLog.AppendPrintf("\t\t\t\t");          \
+      pld->mLog.AppendPrintf(__VA_ARGS__);         \
+    }
 #else
-#define FLB_LOG_PAINTED_LAYER_DECISION(...)
+#  define FLB_LOG_PAINTED_LAYER_DECISION(...)
 #endif
 
   /**
@@ -1663,6 +1673,14 @@ class FLBDisplayItemIterator : protected FlattenedDisplayItemIterator {
     }
 
     const DisplayItemType type = mNext->GetType();
+
+    if (type == DisplayItemType::TYPE_SVG_WRAPPER) {
+      // We mark SetContainsSVG for the CONTENT_FRAME_TIME_WITH_SVG metric
+      if (RefPtr<LayerManager> lm = mBuilder->GetWidgetLayerManager()) {
+        lm->SetContainsSVG(true);
+      }
+    }
+
     if (type != DisplayItemType::TYPE_OPACITY &&
         type != DisplayItemType::TYPE_TRANSFORM) {
       return true;
@@ -2041,7 +2059,8 @@ static PaintedDisplayItemLayerUserData* GetPaintedDisplayItemLayerUserData(
       aLayer->GetUserData(&gPaintedDisplayItemLayerUserData));
 }
 
-/* static */ void FrameLayerBuilder::Shutdown() {
+/* static */
+void FrameLayerBuilder::Shutdown() {
   if (gMaskLayerImageCache) {
     delete gMaskLayerImageCache;
     gMaskLayerImageCache = nullptr;
@@ -2176,7 +2195,8 @@ static nsIntPoint GetTranslationForPaintedLayer(PaintedLayer* aLayer) {
  * Cache the destroyed frame pointer here so we can avoid crashing in this case.
  */
 
-/* static */ void FrameLayerBuilder::RemoveFrameFromLayerManager(
+/* static */
+void FrameLayerBuilder::RemoveFrameFromLayerManager(
     const nsIFrame* aFrame, SmallPointerArray<DisplayItemData>& aArray) {
   MOZ_RELEASE_ASSERT(!sDestroyedFrame);
   sDestroyedFrame = aFrame;
@@ -2308,7 +2328,8 @@ void FrameLayerBuilder::WillEndTransaction() {
   data->mInvalidateAllLayers = false;
 }
 
-/* static */ DisplayItemData* FrameLayerBuilder::GetDisplayItemDataForManager(
+/* static */
+DisplayItemData* FrameLayerBuilder::GetDisplayItemDataForManager(
     nsDisplayItem* aItem, LayerManager* aManager) {
   const SmallPointerArray<DisplayItemData>& array =
       aItem->Frame()->DisplayItemData();
@@ -2382,8 +2403,8 @@ Layer* FrameLayerBuilder::GetOldLayerFor(nsDisplayItem* aItem,
   return nullptr;
 }
 
-/* static */ DisplayItemData* FrameLayerBuilder::GetOldDataFor(
-    nsDisplayItem* aItem) {
+/* static */
+DisplayItemData* FrameLayerBuilder::GetOldDataFor(nsDisplayItem* aItem) {
   const SmallPointerArray<DisplayItemData>& array =
       aItem->Frame()->DisplayItemData();
 
@@ -2584,7 +2605,7 @@ already_AddRefed<PaintedLayer> ContainerState::AttemptToRecyclePaintedLayer(
   return layer.forget();
 }
 
-void ReleaseLayerUserData(void* aData) {
+static void ReleaseLayerUserData(void* aData) {
   PaintedDisplayItemLayerUserData* userData =
       static_cast<PaintedDisplayItemLayerUserData*>(aData);
   userData->Release();
@@ -4387,7 +4408,8 @@ static void ProcessDisplayItemMarker(DisplayItemEntryType aMarker,
  * of ContainerState::Finish.
  */
 void ContainerState::ProcessDisplayItems(nsDisplayList* aList) {
-  AUTO_PROFILER_LABEL("ContainerState::ProcessDisplayItems", GRAPHICS);
+  AUTO_PROFILER_LABEL("ContainerState::ProcessDisplayItems",
+                      GRAPHICS_LayerBuilding);
 
   nsPoint topLeft(0, 0);
 
@@ -4410,6 +4432,7 @@ void ContainerState::ProcessDisplayItems(nsDisplayList* aList) {
   // AGR and ASR for the container item that was flattened.
   AnimatedGeometryRoot* containerAGR = nullptr;
   const ActiveScrolledRoot* containerASR = nullptr;
+  nsIFrame* containerReferenceFrame = nullptr;
   RefPtr<TransformClipNode> transformNode = nullptr;
 
   const auto InTransform = [&]() { return transformNode; };
@@ -4660,10 +4683,9 @@ void ContainerState::ProcessDisplayItems(nsDisplayList* aList) {
 
       // 3D-transformed layers don't necessarily draw in the order in which
       // they're added to their parent container layer.
-      bool mayDrawOutOfOrder =
-          itemType == DisplayItemType::TYPE_TRANSFORM &&
-          (item->Frame()->Combines3DTransformWithAncestors() ||
-           item->Frame()->Extend3DContext());
+      bool mayDrawOutOfOrder = itemType == DisplayItemType::TYPE_TRANSFORM &&
+                               (item->Combines3DTransformWithAncestors() ||
+                                item->Frame()->Extend3DContext());
 
       // Let mPaintedLayerDataTree know about this item, so that
       // FindPaintedLayerFor and FindOpaqueBackgroundColor are aware of this
@@ -4946,8 +4968,8 @@ void ContainerState::ProcessDisplayItems(nsDisplayList* aList) {
         newLayerEntry->mLayerContentsVisibleRect = layerContentsVisibleRect;
         if (itemType == DisplayItemType::TYPE_PERSPECTIVE ||
             (itemType == DisplayItemType::TYPE_TRANSFORM &&
-             (item->Frame()->Extend3DContext() ||
-              item->Frame()->Combines3DTransformWithAncestors() ||
+             (item->Combines3DTransformWithAncestors() ||
+              item->Frame()->Extend3DContext() ||
               item->Frame()->HasPerspective()))) {
           // Give untransformed visible region as outer visible region
           // to avoid failure caused by singular transforms.
@@ -5038,7 +5060,8 @@ void ContainerState::ProcessDisplayItems(nsDisplayList* aList) {
         if (!paintedLayerData->mLayer) {
           // Try to recycle the old layer of this display item.
           RefPtr<PaintedLayer> layer = AttemptToRecyclePaintedLayer(
-              itemAGR, item, topLeft, referenceFrame);
+              itemAGR, item, topLeft,
+              inEffect ? containerReferenceFrame : referenceFrame);
           if (layer) {
             paintedLayerData->mLayer = layer;
 
@@ -5060,14 +5083,16 @@ void ContainerState::ProcessDisplayItems(nsDisplayList* aList) {
           selectedLayer = nullptr;
           containerAGR = nullptr;
           containerASR = nullptr;
+          containerReferenceFrame = nullptr;
         }
       };
 
       const auto SelectLayerIfNeeded = [&]() {
         if (!selectedLayer) {
           selectedLayer = paintedLayerData;
-          containerAGR = item->GetAnimatedGeometryRoot();
-          containerASR = item->GetActiveScrolledRoot();
+          containerAGR = itemAGR;
+          containerASR = itemASR;
+          containerReferenceFrame = const_cast<nsIFrame*>(referenceFrame);
         }
       };
 
@@ -6004,6 +6029,83 @@ static nsSize ComputeDesiredDisplaySizeForAnimation(nsIFrame* aContainerFrame) {
   return presContext->GetVisibleArea().Size();
 }
 
+/* static */
+Size FrameLayerBuilder::ChooseScale(nsIFrame* aContainerFrame,
+                                    nsDisplayItem* aContainerItem,
+                                    const nsRect& aVisibleRect, float aXScale,
+                                    float aYScale, const Matrix& aTransform2d,
+                                    bool aCanDraw2D) {
+  Size scale;
+  // XXX Should we do something for 3D transforms?
+  if (aCanDraw2D && !aContainerFrame->Combines3DTransformWithAncestors() &&
+      !aContainerFrame->HasPerspective()) {
+    // If the container's transform is animated off main thread, fix a suitable
+    // scale size for animation
+    if (aContainerItem &&
+        aContainerItem->GetType() == DisplayItemType::TYPE_TRANSFORM &&
+        // FIXME: What we need is only transform, rotate, and scale, not
+        // translate, so it's be better to use a property set, instead of
+        // display item type here.
+        EffectCompositor::HasAnimationsForCompositor(
+            aContainerFrame, DisplayItemType::TYPE_TRANSFORM)) {
+      nsSize displaySize =
+          ComputeDesiredDisplaySizeForAnimation(aContainerFrame);
+      // compute scale using the animation on the container, taking ancestors in
+      // to account
+      nsSize scaledVisibleSize = nsSize(aVisibleRect.Width() * aXScale,
+                                        aVisibleRect.Height() * aYScale);
+      scale = nsLayoutUtils::ComputeSuitableScaleForAnimation(
+          aContainerFrame, scaledVisibleSize, displaySize);
+      // multiply by the scale inherited from ancestors--we use a uniform
+      // scale factor to prevent blurring when the layer is rotated.
+      float incomingScale = std::max(aXScale, aYScale);
+      scale.width *= incomingScale;
+      scale.height *= incomingScale;
+    } else {
+      // Scale factors are normalized to a power of 2 to reduce the number of
+      // resolution changes
+      scale = aTransform2d.ScaleFactors(true);
+      // For frames with a changing scale transform round scale factors up to
+      // nearest power-of-2 boundary so that we don't keep having to redraw
+      // the content as it scales up and down. Rounding up to nearest
+      // power-of-2 boundary ensures we never scale up, only down --- avoiding
+      // jaggies. It also ensures we never scale down by more than a factor of
+      // 2, avoiding bad downscaling quality.
+      Matrix frameTransform;
+      if (ActiveLayerTracker::IsScaleSubjectToAnimation(aContainerFrame)) {
+        scale.width = gfxUtils::ClampToScaleFactor(scale.width);
+        scale.height = gfxUtils::ClampToScaleFactor(scale.height);
+
+        // Limit animated scale factors to not grow excessively beyond the
+        // display size.
+        nsSize maxScale(4, 4);
+        if (!aVisibleRect.IsEmpty()) {
+          nsSize displaySize =
+              ComputeDesiredDisplaySizeForAnimation(aContainerFrame);
+          maxScale = Max(maxScale, displaySize / aVisibleRect.Size());
+        }
+        if (scale.width > maxScale.width) {
+          scale.width = gfxUtils::ClampToScaleFactor(maxScale.width, true);
+        }
+        if (scale.height > maxScale.height) {
+          scale.height = gfxUtils::ClampToScaleFactor(maxScale.height, true);
+        }
+      } else {
+        // XXX Do we need to move nearly-integer values to integers here?
+      }
+    }
+    // If the scale factors are too small, just use 1.0. The content is being
+    // scaled out of sight anyway.
+    if (fabs(scale.width) < 1e-8 || fabs(scale.height) < 1e-8) {
+      scale = Size(1.0, 1.0);
+    }
+  } else {
+    scale = Size(1.0, 1.0);
+  }
+
+  return scale;
+}
+
 static bool ChooseScaleAndSetTransform(
     FrameLayerBuilder* aLayerBuilder, nsDisplayListBuilder* aDisplayListBuilder,
     nsIFrame* aContainerFrame, nsDisplayItem* aContainerItem,
@@ -6055,79 +6157,17 @@ static bool ChooseScaleAndSetTransform(
   }
 
   bool canDraw2D = transform.CanDraw2D(&transform2d);
-  Size scale;
-  // XXX Should we do something for 3D transforms?
-  if (canDraw2D && !aContainerFrame->Combines3DTransformWithAncestors() &&
-      !aContainerFrame->HasPerspective()) {
-    // If the container's transform is animated off main thread, fix a suitable
-    // scale size for animation
-    if (aContainerItem &&
-        aContainerItem->GetType() == DisplayItemType::TYPE_TRANSFORM &&
-        EffectCompositor::HasAnimationsForCompositor(aContainerFrame,
-                                                     eCSSProperty_transform)) {
-      nsSize displaySize =
-          ComputeDesiredDisplaySizeForAnimation(aContainerFrame);
-      // compute scale using the animation on the container, taking ancestors in
-      // to account
-      nsSize scaledVisibleSize =
-          nsSize(aVisibleRect.Width() * aIncomingScale.mXScale,
-                 aVisibleRect.Height() * aIncomingScale.mYScale);
-      scale = nsLayoutUtils::ComputeSuitableScaleForAnimation(
-          aContainerFrame, scaledVisibleSize, displaySize);
-      // multiply by the scale inherited from ancestors--we use a uniform
-      // scale factor to prevent blurring when the layer is rotated.
-      float incomingScale =
-          std::max(aIncomingScale.mXScale, aIncomingScale.mYScale);
-      scale.width *= incomingScale;
-      scale.height *= incomingScale;
-    } else {
-      // Scale factors are normalized to a power of 2 to reduce the number of
-      // resolution changes
-      scale = transform2d.ScaleFactors(true);
-      // For frames with a changing scale transform round scale factors up to
-      // nearest power-of-2 boundary so that we don't keep having to redraw
-      // the content as it scales up and down. Rounding up to nearest
-      // power-of-2 boundary ensures we never scale up, only down --- avoiding
-      // jaggies. It also ensures we never scale down by more than a factor of
-      // 2, avoiding bad downscaling quality.
-      Matrix frameTransform;
-      if (ActiveLayerTracker::IsScaleSubjectToAnimation(aContainerFrame)) {
-        scale.width = gfxUtils::ClampToScaleFactor(scale.width);
-        scale.height = gfxUtils::ClampToScaleFactor(scale.height);
+  Size scale = FrameLayerBuilder::ChooseScale(
+      aContainerFrame, aContainerItem, aVisibleRect, aIncomingScale.mXScale,
+      aIncomingScale.mYScale, transform2d, canDraw2D);
 
-        // Limit animated scale factors to not grow excessively beyond the
-        // display size.
-        nsSize maxScale(4, 4);
-        if (!aVisibleRect.IsEmpty()) {
-          nsSize displaySize =
-              ComputeDesiredDisplaySizeForAnimation(aContainerFrame);
-          maxScale = Max(maxScale, displaySize / aVisibleRect.Size());
-        }
-        if (scale.width > maxScale.width) {
-          scale.width = gfxUtils::ClampToScaleFactor(maxScale.width, true);
-        }
-        if (scale.height > maxScale.height) {
-          scale.height = gfxUtils::ClampToScaleFactor(maxScale.height, true);
-        }
-      } else {
-        // XXX Do we need to move nearly-integer values to integers here?
-      }
-    }
-    // If the scale factors are too small, just use 1.0. The content is being
-    // scaled out of sight anyway.
-    if (fabs(scale.width) < 1e-8 || fabs(scale.height) < 1e-8) {
-      scale = Size(1.0, 1.0);
-    }
-    // If this is a transform container layer, then pre-rendering might
-    // mean we try render a layer bigger than the max texture size. If we have
-    // tiling, that's not a problem, since we'll automatically choose a tiled
-    // layer for layers of that size. If not, we need to apply clamping to
-    // prevent this.
-    if (aTransform && !gfxPrefs::LayersTilesEnabled()) {
-      RestrictScaleToMaxLayerSize(scale, aVisibleRect, aContainerFrame, aLayer);
-    }
-  } else {
-    scale = Size(1.0, 1.0);
+  // If this is a transform container layer, then pre-rendering might
+  // mean we try render a layer bigger than the max texture size. If we have
+  // tiling, that's not a problem, since we'll automatically choose a tiled
+  // layer for layers of that size. If not, we need to apply clamping to
+  // prevent this.
+  if (aTransform && !gfxPrefs::LayersTilesEnabled()) {
+    RestrictScaleToMaxLayerSize(scale, aVisibleRect, aContainerFrame, aLayer);
   }
 
   // Store the inverse of our resolution-scale on the layer
@@ -6139,8 +6179,8 @@ static bool ChooseScaleAndSetTransform(
                                             aIncomingScale);
   if (aTransform) {
     aOutgoingScale.mInTransformedSubtree = true;
-    if (ActiveLayerTracker::IsStyleAnimated(
-            aDisplayListBuilder, aContainerFrame, eCSSProperty_transform)) {
+    if (ActiveLayerTracker::IsTransformAnimated(aDisplayListBuilder,
+                                                aContainerFrame)) {
       aOutgoingScale.mInActiveTransformedSubtree = true;
     }
   }
@@ -6328,8 +6368,8 @@ Layer* FrameLayerBuilder::GetLeafLayerFor(nsDisplayListBuilder* aBuilder,
   return layer;
 }
 
-/* static */ void FrameLayerBuilder::InvalidateAllLayers(
-    LayerManager* aManager) {
+/* static */
+void FrameLayerBuilder::InvalidateAllLayers(LayerManager* aManager) {
   LayerManagerData* data = static_cast<LayerManagerData*>(
       aManager->GetUserData(&gLayerManagerUserData));
   if (data) {
@@ -6337,8 +6377,8 @@ Layer* FrameLayerBuilder::GetLeafLayerFor(nsDisplayListBuilder* aBuilder,
   }
 }
 
-/* static */ void FrameLayerBuilder::InvalidateAllLayersForFrame(
-    nsIFrame* aFrame) {
+/* static */
+void FrameLayerBuilder::InvalidateAllLayersForFrame(nsIFrame* aFrame) {
   const SmallPointerArray<DisplayItemData>& array = aFrame->DisplayItemData();
 
   for (uint32_t i = 0; i < array.Length(); i++) {
@@ -6380,48 +6420,53 @@ Layer* FrameLayerBuilder::GetDedicatedLayer(nsIFrame* aFrame,
   return nullptr;
 }
 
-/* static */ void FrameLayerBuilder::EnumerateGenerationForDedicatedLayers(
-    const nsIFrame* aFrame,
-    const CompositorAnimatableDisplayItemTypes& aDisplayItemTypes,
-    const AnimationGenerationCallback& aCallback) {
+/* static */
+void FrameLayerBuilder::EnumerateGenerationForDedicatedLayers(
+    const nsIFrame* aFrame, const AnimationGenerationCallback& aCallback) {
   std::bitset<static_cast<uint32_t>(DisplayItemType::TYPE_MAX)> notFoundTypes;
-  for (auto displayItem : aDisplayItemTypes) {
-    notFoundTypes.set(static_cast<uint32_t>(displayItem));
+  for (auto displayItemType : LayerAnimationInfo::sDisplayItemTypes) {
+    notFoundTypes.set(static_cast<uint32_t>(displayItemType));
   }
 
-  const SmallPointerArray<DisplayItemData>& array = aFrame->DisplayItemData();
+  for (auto displayItemType : LayerAnimationInfo::sDisplayItemTypes) {
+    // For transform animations, the animation is on the primary frame but
+    // |aFrame| is the style frame.
+    const nsIFrame* frameToQuery =
+        displayItemType == DisplayItemType::TYPE_TRANSFORM
+            ? nsLayoutUtils::GetPrimaryFrameFromStyleFrame(aFrame)
+            : aFrame;
+    const nsIFrame::DisplayItemDataArray& displayItemDataArray =
+        frameToQuery->DisplayItemData();
 
-  for (uint32_t i = 0; i < array.Length(); i++) {
-    DisplayItemData* element =
-        DisplayItemData::AssertDisplayItemData(array.ElementAt(i));
-    if (!element->mParent->mLayerManager->IsWidgetLayerManager()) {
-      continue;
-    }
-
-    DisplayItemType foundType = DisplayItemType::TYPE_ZERO;
-    for (auto displayItem : aDisplayItemTypes) {
-      if (GetDisplayItemTypeFromKey(element->mDisplayItemKey) == displayItem) {
-        foundType = displayItem;
-        notFoundTypes.reset(static_cast<uint32_t>(displayItem));
-        break;
+    for (uint32_t i = 0; i < displayItemDataArray.Length(); i++) {
+      DisplayItemData* element = DisplayItemData::AssertDisplayItemData(
+          displayItemDataArray.ElementAt(i));
+      if (!element->mParent->mLayerManager->IsWidgetLayerManager()) {
+        continue;
       }
-    }
-    if (foundType == DisplayItemType::TYPE_ZERO) {
-      continue;
-    }
 
-    Maybe<uint64_t> generation;
-    if (element->mOptLayer) {
-      generation = element->mOptLayer->GetAnimationGeneration();
-    } else if (!element->mLayer->HasUserData(&gColorLayerUserData) &&
-               !element->mLayer->HasUserData(&gImageLayerUserData) &&
-               !element->mLayer->HasUserData(
-                   &gPaintedDisplayItemLayerUserData)) {
-      generation = element->mLayer->GetAnimationGeneration();
-    }
+      if (GetDisplayItemTypeFromKey(element->mDisplayItemKey) !=
+          displayItemType) {
+        continue;
+      }
 
-    if (!aCallback(generation, foundType)) {
-      return;
+      notFoundTypes.reset(static_cast<uint32_t>(displayItemType));
+
+      Maybe<uint64_t> generation;
+      if (element->mOptLayer) {
+        generation = element->mOptLayer->GetAnimationGeneration();
+      } else if (!element->mLayer->HasUserData(&gColorLayerUserData) &&
+                 !element->mLayer->HasUserData(&gImageLayerUserData) &&
+                 !element->mLayer->HasUserData(
+                     &gPaintedDisplayItemLayerUserData)) {
+        generation = element->mLayer->GetAnimationGeneration();
+      }
+
+      if (!aCallback(generation, displayItemType)) {
+        return;
+      }
+
+      break;
     }
   }
 
@@ -6433,9 +6478,9 @@ Layer* FrameLayerBuilder::GetDedicatedLayer(nsIFrame* aFrame,
 
   // If there are any display item types that the nsIFrame doesn't have, we need
   // to call the callback function for them respectively.
-  for (auto displayItem : aDisplayItemTypes) {
-    if (notFoundTypes[static_cast<uint32_t>(displayItem)] &&
-        !aCallback(Nothing(), displayItem)) {
+  for (auto displayItemType : LayerAnimationInfo::sDisplayItemTypes) {
+    if (notFoundTypes[static_cast<uint32_t>(displayItemType)] &&
+        !aCallback(Nothing(), displayItemType)) {
       return;
     }
   }
@@ -6500,7 +6545,8 @@ static void DebugPaintItem(DrawTarget& aDrawTarget, nsPresContext* aPresContext,
 }
 #endif
 
-/* static */ void FrameLayerBuilder::RecomputeVisibilityForItems(
+/* static */
+void FrameLayerBuilder::RecomputeVisibilityForItems(
     std::vector<AssignedDisplayItem>& aItems, nsDisplayListBuilder* aBuilder,
     const nsIntRegion& aRegionToDraw, nsRect& aPreviousRectToDraw,
     const nsIntPoint& aOffset, int32_t aAppUnitsPerDevPixel, float aXScale,
@@ -6919,10 +6965,11 @@ void FrameLayerBuilder::PaintItems(std::vector<AssignedDisplayItem>& aItems,
     }
 
 #ifdef MOZ_DUMP_PAINTING
-    AUTO_PROFILER_LABEL_DYNAMIC_CSTR("FrameLayerBuilder::PaintItems", GRAPHICS,
-                                     item->Name());
+    AUTO_PROFILER_LABEL_DYNAMIC_CSTR("FrameLayerBuilder::PaintItems",
+                                     GRAPHICS_Rasterization, item->Name());
 #else
-    AUTO_PROFILER_LABEL("FrameLayerBuilder::PaintItems", GRAPHICS);
+    AUTO_PROFILER_LABEL("FrameLayerBuilder::PaintItems",
+                        GRAPHICS_Rasterization);
 #endif
 
     MOZ_ASSERT((opacityLevel == 0 && !cdi.mHasOpacity) ||
@@ -7088,14 +7135,18 @@ static void DrawForcedBackgroundColor(DrawTarget& aDrawTarget,
  * always falls within the visible region we computed.
  */
 
-/* static */ void FrameLayerBuilder::DrawPaintedLayer(
-    PaintedLayer* aLayer, gfxContext* aContext,
-    const nsIntRegion& aRegionToDraw, const nsIntRegion& aDirtyRegion,
-    DrawRegionClip aClip, const nsIntRegion& aRegionToInvalidate,
-    void* aCallbackData) {
+/* static */
+void FrameLayerBuilder::DrawPaintedLayer(PaintedLayer* aLayer,
+                                         gfxContext* aContext,
+                                         const nsIntRegion& aRegionToDraw,
+                                         const nsIntRegion& aDirtyRegion,
+                                         DrawRegionClip aClip,
+                                         const nsIntRegion& aRegionToInvalidate,
+                                         void* aCallbackData) {
   DrawTarget& aDrawTarget = *aContext->GetDrawTarget();
 
-  AUTO_PROFILER_LABEL("FrameLayerBuilder::DrawPaintedLayer", GRAPHICS);
+  AUTO_PROFILER_LABEL("FrameLayerBuilder::DrawPaintedLayer",
+                      GRAPHICS_Rasterization);
 
   nsDisplayListBuilder* builder =
       static_cast<nsDisplayListBuilder*>(aCallbackData);
@@ -7216,8 +7267,10 @@ static void DrawForcedBackgroundColor(DrawTarget& aDrawTarget,
   }
 }
 
-/* static */ void FrameLayerBuilder::DumpRetainedLayerTree(
-    LayerManager* aManager, std::stringstream& aStream, bool aDumpHtml) {
+/* static */
+void FrameLayerBuilder::DumpRetainedLayerTree(LayerManager* aManager,
+                                              std::stringstream& aStream,
+                                              bool aDumpHtml) {
   aManager->Dump(aStream, "", aDumpHtml);
 }
 

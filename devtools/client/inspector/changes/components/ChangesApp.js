@@ -10,29 +10,56 @@ const PropTypes = require("devtools/client/shared/vendor/react-prop-types");
 const { connect } = require("devtools/client/shared/vendor/react-redux");
 
 const CSSDeclaration = createFactory(require("./CSSDeclaration"));
+const { getChangesTree } = require("../selectors/changes");
 const { getSourceForDisplay } = require("../utils/changes-utils");
 const { getStr } = require("../utils/l10n");
 
 class ChangesApp extends PureComponent {
   static get propTypes() {
     return {
-      // Redux state slice assigned to Track Changes feature; passed as prop by connect()
-      changes: PropTypes.object.isRequired,
+      // Nested CSS rule tree structure of CSS changes grouped by source (stylesheet)
+      changesTree: PropTypes.object.isRequired,
+      // Event handler for "contextmenu" event
+      onContextMenu: PropTypes.func.isRequired,
+      // Event handler for "copy" event
+      onCopy: PropTypes.func.isRequired,
+      // Event handler for click on "Copy All Changes" button
+      onCopyAllChanges: PropTypes.func.isRequired,
+      // Event handler for click on "Copy Rule" button
+      onCopyRule: PropTypes.func.isRequired,
     };
   }
 
   constructor(props) {
     super(props);
-    // In the Redux store, all rules exist in a collection at the same level of nesting.
-    // Parent rules come before child rules. Parent/child dependencies are set
-    // via parameters in each rule pointing to the corresponding rule ids.
-    //
-    // To render rules, we traverse the descendant rule tree and render each child rule
-    // found. This means we get into situations where we can render the same rule multiple
-    // times: once as a child of its parent and once standalone.
-    //
-    // By keeping a log of rules previously rendered we prevent needless multi-rendering.
-    this.renderedRules = [];
+  }
+
+  renderCopyAllChangesButton() {
+    return dom.button(
+      {
+        className: "changes__copy-all-changes-button",
+        onClick: e => {
+          e.stopPropagation();
+          this.props.onCopyAllChanges();
+        },
+        title: getStr("changes.contextmenu.copyAllChangesDescription"),
+      },
+      getStr("changes.contextmenu.copyAllChanges")
+    );
+  }
+
+  renderCopyButton(ruleId) {
+    return dom.button(
+      {
+        className: "changes__copy-rule-button",
+        onClick: e => {
+          e.stopPropagation();
+          this.props.onCopyRule(ruleId);
+        },
+        title: getStr("changes.contextmenu.copyRuleDescription"),
+      },
+      getStr("changes.contextmenu.copyRule")
+    );
   }
 
   renderDeclarations(remove = [], add = []) {
@@ -43,6 +70,7 @@ class ChangesApp extends PureComponent {
         return CSSDeclaration({
           key: "remove-" + property + index,
           className: "level diff-remove",
+          marker: getDiffMarker("diff-remove"),
           property,
           value,
         });
@@ -55,6 +83,7 @@ class ChangesApp extends PureComponent {
         return CSSDeclaration({
           key: "add-" + property + index,
           className: "level diff-add",
+          marker: getDiffMarker("diff-add"),
           property,
           value,
         });
@@ -63,47 +92,64 @@ class ChangesApp extends PureComponent {
     return [removals, additions];
   }
 
-  renderRule(ruleId, rule, rules, level = 0) {
-    const selector = rule.selector;
-
-    if (this.renderedRules.includes(ruleId)) {
-      return null;
-    }
-
-    // Mark this rule as rendered so we don't render it again.
-    this.renderedRules.push(ruleId);
-
-    let diffClass = "";
-    if (rule.changeType === "rule-add") {
-      diffClass = "diff-add";
-    } else if (rule.changeType === "rule-remove") {
-      diffClass = "diff-remove";
-    }
-
+  renderRule(ruleId, rule, level = 0) {
     return dom.div(
       {
         key: ruleId,
-        className: "rule devtools-monospace",
+        className: "changes__rule devtools-monospace",
+        "data-rule-id": ruleId,
         style: {
           "--diff-level": level,
         },
       },
-      dom.div(
-        {
-          className: `level selector ${diffClass}`,
-          title: selector,
-        },
-        selector,
-        dom.span({ className: "bracket-open" }, "{")
-      ),
+      this.renderSelectors(rule.selectors),
+      this.renderCopyButton(ruleId),
       // Render any nested child rules if they exist.
-      rule.children.map(childRuleId => {
-        return this.renderRule(childRuleId, rules[childRuleId], rules, level + 1);
+      rule.children.map(childRule => {
+        return this.renderRule(childRule.ruleId, childRule, level + 1);
       }),
       // Render any changed CSS declarations.
       this.renderDeclarations(rule.remove, rule.add),
-      dom.div({ className: `level bracket-close ${diffClass}` }, "}")
+      dom.div({ className: `level` }, "}")
     );
+  }
+
+  /**
+   * Return an array of React elements for the rule's selector.
+   *
+   * @param  {Array} selectors
+   *         List of strings as versions of this rule's selector over time.
+   * @return {Array}
+   */
+  renderSelectors(selectors) {
+    const selectorDiffClassMap = new Map();
+
+    // The selectors array has just one item if it hasn't changed. Render it as-is.
+    // If it has two or more items, the first item was the original selector (mark as
+    // removed) and the last item is the current selector (mark as added).
+    if (selectors.length === 1) {
+      selectorDiffClassMap.set(selectors[0], "");
+    } else if (selectors.length >= 2) {
+      selectorDiffClassMap.set(selectors[0], "diff-remove");
+      selectorDiffClassMap.set(selectors[selectors.length - 1], "diff-add");
+    }
+
+    const elements = [];
+
+    for (const [selector, diffClass] of selectorDiffClassMap) {
+      elements.push(dom.div(
+        {
+          key: selector,
+          className: `level changes__selector ${diffClass}`,
+          title: selector,
+        },
+        getDiffMarker(diffClass),
+        selector,
+        dom.span({}, " {")
+      ));
+    }
+
+    return elements;
   }
 
   renderDiff(changes = {}) {
@@ -115,6 +161,7 @@ class ChangesApp extends PureComponent {
       return dom.div(
         {
           key: sourceId,
+          "data-source-id": sourceId,
           className: "source",
         },
         dom.div(
@@ -127,7 +174,7 @@ class ChangesApp extends PureComponent {
         ),
         // Render changed rules within this source.
         Object.entries(rules).map(([ruleId, rule]) => {
-          return this.renderRule(ruleId, rule, rules);
+          return this.renderRule(ruleId, rule);
         })
       );
     });
@@ -151,19 +198,49 @@ class ChangesApp extends PureComponent {
   }
 
   render() {
-    // Reset log of rendered rules.
-    this.renderedRules = [];
-    const hasChanges = Object.keys(this.props.changes).length > 0;
-
+    const hasChanges = Object.keys(this.props.changesTree).length > 0;
     return dom.div(
       {
         className: "theme-sidebar inspector-tabpanel",
         id: "sidebar-panel-changes",
+        onContextMenu: this.props.onContextMenu,
+        onCopy: this.props.onCopy,
       },
       !hasChanges && this.renderEmptyState(),
-      hasChanges && this.renderDiff(this.props.changes)
+      hasChanges && this.renderCopyAllChangesButton(),
+      hasChanges && this.renderDiff(this.props.changesTree)
     );
   }
 }
 
-module.exports = connect(state => state)(ChangesApp);
+/**
+ * Get a React element with text content of either a plus or minus sign according to
+ * the given CSS class name used to mark added or removed lines in the changes diff view.
+ * This is used as a diff line maker that can be copied over as text with the rest of the
+ * content. CSS pseudo-elements are not part of the document flow and cannot be copied.
+ *
+ * @param  {String} className
+ *         One of "diff-add" or "diff-remove"
+ * @return {Component|null}
+ *         Returns null if the given className isn't recognized. React handles it.
+ */
+function getDiffMarker(className) {
+  let marker = null;
+  switch (className) {
+    case "diff-add":
+      marker = dom.span({ className: "diff-marker" }, "+ ");
+      break;
+    case "diff-remove":
+      marker = dom.span({ className: "diff-marker" }, "- ");
+      break;
+  }
+  return marker;
+}
+
+const mapStateToProps = state => {
+  return {
+    changesTree: getChangesTree(state.changes),
+  };
+};
+
+module.exports = connect(mapStateToProps)(ChangesApp);

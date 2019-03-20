@@ -6,8 +6,8 @@
 
 var EXPORTED_SYMBOLS = ["PrintingChild"];
 
-ChromeUtils.import("resource://gre/modules/ActorChild.jsm");
-ChromeUtils.import("resource://gre/modules/Services.jsm");
+const {ActorChild} = ChromeUtils.import("resource://gre/modules/ActorChild.jsm");
+const {Services} = ChromeUtils.import("resource://gre/modules/Services.jsm");
 
 ChromeUtils.defineModuleGetter(this, "ReaderMode",
   "resource://gre/modules/ReaderMode.jsm");
@@ -421,6 +421,6 @@ PrintingListener.prototype = {
 
   onLocationChange(aWebProgress, aRequest, aLocation, aFlags) {},
   onStatusChange(aWebProgress, aRequest, aStatus, aMessage) {},
-  onSecurityChange(aWebProgress, aRequest, aOldState, aState,
-                   aContentBlockingLogJSON) {},
+  onSecurityChange(aWebProgress, aRequest, aState) {},
+  onContentBlockingEvent(aWebProgress, aRequest, aEvent) {},
 };

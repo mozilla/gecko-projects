@@ -591,6 +591,17 @@ if buildconfig.substs.get('MOZ_ASAN') and buildconfig.substs.get('CLANG_CL'):
     ARCHIVE_FILES['common'].append(asan_dll)
 
 
+if buildconfig.substs.get('commtopsrcdir'):
+    commtopsrcdir = buildconfig.substs.get('commtopsrcdir')
+    mozharness_comm = {
+        'source': commtopsrcdir,
+        'base': 'mozharness',
+        'pattern': '**',
+        'dest': 'mozharness/configs'
+    }
+    ARCHIVE_FILES['mozharness'].append(mozharness_comm)
+
+
 # "common" is our catch all archive and it ignores things from other archives.
 # Verify nothing sneaks into ARCHIVE_FILES without a corresponding exclusion
 # rule in the "common" archive.
@@ -764,7 +775,7 @@ def main(argv):
             create_tar_gz_from_files(fh, files, compresslevel=5)
             file_count = len(files)
         elif out_file.endswith('.zip'):
-            with JarWriter(fileobj=fh, optimize=False, compress_level=5) as writer:
+            with JarWriter(fileobj=fh, compress_level=5) as writer:
                 for p, f in res:
                     writer.add(p.encode('utf-8'), f.read(), mode=f.mode,
                                skip_duplicates=True)

@@ -15,6 +15,7 @@
 #include "nsNetCID.h"
 #include "nsPrintfCString.h"
 #include "nsThreadUtils.h"
+#include "mozilla/Components.h"
 #include "mozilla/EndianUtils.h"
 #include "mozilla/Telemetry.h"
 #include "mozilla/IntegerPrintfMacros.h"
@@ -23,8 +24,8 @@
 #include "mozilla/Base64.h"
 #include "mozilla/Unused.h"
 #include "mozilla/UniquePtr.h"
-#include "nsIUrlClassifierUtils.h"
 #include "nsUrlClassifierDBService.h"
+#include "nsUrlClassifierUtils.h"
 
 // MOZ_LOG=UrlClassifierDbService:5
 extern mozilla::LazyLogModule gUrlClassifierDbServiceLog;
@@ -174,7 +175,7 @@ nsresult Classifier::SetupPathNames() {
 }
 
 nsresult Classifier::CreateStoreDirectory() {
-  if (mIsClosed) {
+  if (ShouldAbort()) {
     return NS_OK;  // nothing to do, the classifier is done
   }
 
@@ -236,10 +237,8 @@ nsresult Classifier::Open(nsIFile& aCacheDirectory) {
 }
 
 void Classifier::Close() {
-  // Close will be called by PreShutdown, set |mUpdateInterrupted| here
-  // to abort an ongoing update if possible. It is important to note that
+  // Close will be called by PreShutdown, so it is important to note that
   // things put here should not affect an ongoing update thread.
-  mUpdateInterrupted = true;
   mIsClosed = true;
   DropStores();
 }
@@ -406,64 +405,49 @@ void Classifier::TableRequest(nsACString& aResult) {
   mIsTableRequestResultOutdated = false;
 }
 
-nsresult Classifier::Check(const nsACString& aSpec, const nsACString& aTables,
-                           LookupResultArray& aResults) {
-  Telemetry::AutoTimer<Telemetry::URLCLASSIFIER_CL_CHECK_TIME> timer;
+nsresult Classifier::CheckURIFragments(
+    const nsTArray<nsCString>& aSpecFragments, const nsACString& aTable,
+    LookupResultArray& aResults) {
+  // A URL can form up to 30 different fragments
+  MOZ_ASSERT(aSpecFragments.Length() <=
+             (MAX_HOST_COMPONENTS * (MAX_PATH_COMPONENTS + 2)));
 
-  // Get the set of fragments based on the url. This is necessary because we
-  // only look up at most 5 URLs per aSpec, even if aSpec has more than 5
-  // components.
-  nsTArray<nsCString> fragments;
-  nsresult rv = LookupCache::GetLookupFragments(aSpec, &fragments);
-  NS_ENSURE_SUCCESS(rv, rv);
-
-  nsTArray<nsCString> activeTables;
-  SplitTables(aTables, activeTables);
-
-  LookupCacheArray cacheArray;
-  for (uint32_t i = 0; i < activeTables.Length(); i++) {
-    LOG(("Checking table %s", activeTables[i].get()));
-    RefPtr<LookupCache> cache = GetLookupCache(activeTables[i]);
-    if (cache) {
-      cacheArray.AppendElement(cache);
-    } else {
-      return NS_ERROR_FAILURE;
-    }
+  LOG(("Checking table %s", aTable.BeginReading()));
+  RefPtr<LookupCache> cache = GetLookupCache(aTable);
+  if (NS_WARN_IF(!cache)) {
+    return NS_ERROR_FAILURE;
   }
 
   // Now check each lookup fragment against the entries in the DB.
-  for (uint32_t i = 0; i < fragments.Length(); i++) {
+  for (uint32_t i = 0; i < aSpecFragments.Length(); i++) {
     Completion lookupHash;
-    lookupHash.FromPlaintext(fragments[i]);
+    lookupHash.FromPlaintext(aSpecFragments[i]);
 
     if (LOG_ENABLED()) {
       nsAutoCString checking;
       lookupHash.ToHexString(checking);
-      LOG(("Checking fragment %s, hash %s (%X)", fragments[i].get(),
+      LOG(("Checking fragment %s, hash %s (%X)", aSpecFragments[i].get(),
            checking.get(), lookupHash.ToUint32()));
     }
 
-    for (uint32_t i = 0; i < cacheArray.Length(); i++) {
-      RefPtr<LookupCache> cache = cacheArray[i];
-      bool has, confirmed;
-      uint32_t matchLength;
+    bool has, confirmed;
+    uint32_t matchLength;
 
-      rv = cache->Has(lookupHash, &has, &matchLength, &confirmed);
-      NS_ENSURE_SUCCESS(rv, rv);
+    nsresult rv = cache->Has(lookupHash, &has, &matchLength, &confirmed);
+    NS_ENSURE_SUCCESS(rv, rv);
 
-      if (has) {
-        RefPtr<LookupResult> result = new LookupResult;
-        aResults.AppendElement(result);
+    if (has) {
+      RefPtr<LookupResult> result = new LookupResult;
+      aResults.AppendElement(result);
 
-        LOG(("Found a result in %s: %s", cache->TableName().get(),
-             confirmed ? "confirmed." : "Not confirmed."));
+      LOG(("Found a result in %s: %s", cache->TableName().get(),
+           confirmed ? "confirmed." : "Not confirmed."));
 
-        result->hash.complete = lookupHash;
-        result->mConfirmed = confirmed;
-        result->mTableName.Assign(cache->TableName());
-        result->mPartialHashLength = confirmed ? COMPLETE_SIZE : matchLength;
-        result->mProtocolV2 = LookupCache::Cast<LookupCacheV2>(cache);
-      }
+      result->hash.complete = lookupHash;
+      result->mConfirmed = confirmed;
+      result->mTableName.Assign(cache->TableName());
+      result->mPartialHashLength = confirmed ? COMPLETE_SIZE : matchLength;
+      result->mProtocolV2 = LookupCache::Cast<LookupCacheV2>(cache);
     }
   }
 
@@ -737,8 +721,10 @@ nsresult Classifier::ApplyUpdatesBackground(TableUpdateArray& aUpdates,
     return NS_OK;
   }
 
-  nsCOMPtr<nsIUrlClassifierUtils> urlUtil =
-      do_GetService(NS_URLCLASSIFIERUTILS_CONTRACTID);
+  nsUrlClassifierUtils* urlUtil = nsUrlClassifierUtils::GetInstance();
+  if (NS_WARN_IF(!urlUtil)) {
+    return NS_ERROR_FAILURE;
+  }
 
   nsCString provider;
   // Assume all TableUpdate objects should have the same provider.
@@ -754,7 +740,7 @@ nsresult Classifier::ApplyUpdatesBackground(TableUpdateArray& aUpdates,
 
   nsresult rv;
 
-  // Check point 1: Copying files takes time so we check |mUpdateInterrupted|
+  // Check point 1: Copying files takes time so we check ShouldAbort()
   //                inside CopyInUseDirForUpdate().
   rv = CopyInUseDirForUpdate();  // i.e. mUpdatingDirectory will be setup.
   if (NS_FAILED(rv)) {
@@ -775,7 +761,7 @@ nsresult Classifier::ApplyUpdatesBackground(TableUpdateArray& aUpdates,
     nsAutoCString updateTable(update->TableName());
 
     // Check point 2: Processing downloaded data takes time.
-    if (mUpdateInterrupted) {
+    if (ShouldAbort()) {
       LOG(("Update is interrupted. Stop building new tables."));
       return NS_OK;
     }
@@ -805,7 +791,7 @@ nsresult Classifier::ApplyUpdatesBackground(TableUpdateArray& aUpdates,
 
 nsresult Classifier::ApplyUpdatesForeground(
     nsresult aBackgroundRv, const nsACString& aFailedTableName) {
-  if (mUpdateInterrupted) {
+  if (ShouldAbort()) {
     LOG(("Update is interrupted! Just remove update intermediaries."));
     RemoveUpdateIntermediaries();
     return NS_OK;
@@ -858,7 +844,7 @@ void Classifier::DropStores() {
 }
 
 nsresult Classifier::RegenActiveTables() {
-  if (mIsClosed) {
+  if (ShouldAbort()) {
     return NS_OK;  // nothing to do, the classifier is done
   }
 
@@ -1038,7 +1024,7 @@ nsresult Classifier::DumpFailedUpdate() {
 
 /**
  * This function copies the files one by one to the destination folder.
- * Before copying a file, it checks |mUpdateInterrupted| and returns
+ * Before copying a file, it checks ::ShouldAbort and returns
  * NS_ERROR_ABORT if the flag is set.
  */
 nsresult Classifier::CopyDirectoryInterruptible(nsCOMPtr<nsIFile>& aDestDir,
@@ -1051,7 +1037,7 @@ nsresult Classifier::CopyDirectoryInterruptible(nsCOMPtr<nsIFile>& aDestDir,
   nsCOMPtr<nsIFile> source;
   while (NS_SUCCEEDED(rv = entries->GetNextFile(getter_AddRefs(source))) &&
          source) {
-    if (mUpdateInterrupted) {
+    if (ShouldAbort()) {
       LOG(("Update is interrupted. Aborting the directory copy"));
       return NS_ERROR_ABORT;
     }
@@ -1095,6 +1081,9 @@ nsresult Classifier::CopyDirectoryInterruptible(nsCOMPtr<nsIFile>& aDestDir,
 
 nsresult Classifier::CopyInUseDirForUpdate() {
   LOG(("Copy in-use directory content for update."));
+  if (ShouldAbort()) {
+    return NS_ERROR_UC_UPDATE_SHUTDOWNING;
+  }
 
   // We copy everything from in-use directory to a temporary directory
   // for updating.
@@ -1172,8 +1161,10 @@ bool Classifier::CheckValidUpdate(TableUpdateArray& aUpdates,
 }
 
 nsCString Classifier::GetProvider(const nsACString& aTableName) {
-  nsCOMPtr<nsIUrlClassifierUtils> urlUtil =
-      do_GetService(NS_URLCLASSIFIERUTILS_CONTRACTID);
+  nsUrlClassifierUtils* urlUtil = nsUrlClassifierUtils::GetInstance();
+  if (NS_WARN_IF(!urlUtil)) {
+    return EmptyCString();
+  }
 
   nsCString provider;
   nsresult rv = urlUtil->GetProvider(aTableName, provider);
@@ -1186,7 +1177,7 @@ nsCString Classifier::GetProvider(const nsACString& aTableName) {
  */
 nsresult Classifier::UpdateHashStore(TableUpdateArray& aUpdates,
                                      const nsACString& aTable) {
-  if (nsUrlClassifierDBService::ShutdownHasStarted()) {
+  if (ShouldAbort()) {
     return NS_ERROR_UC_UPDATE_SHUTDOWNING;
   }
 
@@ -1288,7 +1279,7 @@ nsresult Classifier::UpdateTableV4(TableUpdateArray& aUpdates,
                                    const nsACString& aTable) {
   MOZ_ASSERT(!NS_IsMainThread(),
              "UpdateTableV4 must be called on the classifier worker thread.");
-  if (nsUrlClassifierDBService::ShutdownHasStarted()) {
+  if (ShouldAbort()) {
     return NS_ERROR_UC_UPDATE_SHUTDOWNING;
   }
 
@@ -1437,7 +1428,7 @@ RefPtr<LookupCache> Classifier::GetLookupCache(const nsACString& aTable,
   }
 
   // We don't want to create lookupcache when shutdown is already happening.
-  if (nsUrlClassifierDBService::ShutdownHasStarted()) {
+  if (ShouldAbort()) {
     return nullptr;
   }
 
@@ -1586,9 +1577,10 @@ nsresult Classifier::LoadMetadata(nsIFile* aDirectory, nsACString& aResult) {
       continue;
     }
 
-    nsCString state;
-    nsCString checksum;
-    rv = lookupCacheV4->LoadMetadata(state, checksum);
+    nsCString state, sha256;
+    rv = lookupCacheV4->LoadMetadata(state, sha256);
+    Telemetry::Accumulate(Telemetry::URLCLASSIFIER_VLPS_METADATA_CORRUPT,
+                          rv == NS_ERROR_FILE_CORRUPTED);
     if (NS_FAILED(rv)) {
       LOG(("Failed to get metadata for table %s", tableName.get()));
       continue;
@@ -1600,7 +1592,7 @@ nsresult Classifier::LoadMetadata(nsIFile* aDirectory, nsACString& aResult) {
     NS_ENSURE_SUCCESS(rv, rv);
 
     nsAutoCString checksumBase64;
-    rv = Base64Encode(checksum, checksumBase64);
+    rv = Base64Encode(sha256, checksumBase64);
     NS_ENSURE_SUCCESS(rv, rv);
 
     LOG(("Appending state '%s' and checksum '%s' for table %s",
@@ -1611,6 +1603,11 @@ nsresult Classifier::LoadMetadata(nsIFile* aDirectory, nsACString& aResult) {
   }
 
   return rv;
+}
+
+bool Classifier::ShouldAbort() const {
+  return mIsClosed || nsUrlClassifierDBService::ShutdownHasStarted() ||
+         (mUpdateInterrupted && (NS_GetCurrentThread() == mUpdateThread));
 }
 
 }  // namespace safebrowsing

@@ -40,6 +40,9 @@ window.gActivityStreamStrings = {
   "section_disclaimer_topstories_buttontext": "Ok, ¡ya caché!",
   "prefs_home_header": "Contenido de la página de inicio de Firefox",
   "prefs_home_description": "Elige qué contenido quieres en tu pantalla de inicio de Firefox.",
+  "prefs_content_discovery_header": "Inicio de Firefox",
+  "prefs_content_discovery_description": "El Descubrimiento de contenido en el Inicio de Firefox te permite descubrir artículos relevantes de alta calidad provenientes de toda la web.",
+  "prefs_content_discovery_button": "Desactivar Descubrimiento de contenido",
   "prefs_section_rows_option": "{num} fila;{num} filas",
   "prefs_search_header": "Búsqueda web",
   "prefs_topsites_description": "Los sitios que más visitas",
@@ -88,7 +91,7 @@ window.gActivityStreamStrings = {
   "section_menu_action_remove_section": "Eliminar sección",
   "section_menu_action_collapse_section": "Contraer sección",
   "section_menu_action_expand_section": "Expandir sección",
-  "section_menu_action_manage_section": "Gestionar sección",
+  "section_menu_action_manage_section": "Gestionar secciones",
   "section_menu_action_manage_webext": "Gestionar extensión",
   "section_menu_action_add_topsite": "Añadir sitio frecuente",
   "section_menu_action_add_search_engine": "Añadir motor de búsqueda",
@@ -97,7 +100,7 @@ window.gActivityStreamStrings = {
   "section_menu_action_privacy_notice": "Aviso de privacidad",
   "firstrun_title": "Lleva a Firefox contigo",
   "firstrun_content": "Ten tus marcadores, historial, contraseñas y otros ajustes en todos tus dispositivos.",
-  "firstrun_learn_more_link": "Aprende más sobre Firefox Accounts",
+  "firstrun_learn_more_link": "Aprende más sobre las cuentas de Firefox",
   "firstrun_form_header": "Ingresa tu correo",
   "firstrun_form_sub_header": "para conectarte a Firefox Sync.",
   "firstrun_email_input_placeholder": "Correo",
@@ -108,5 +111,5 @@ window.gActivityStreamStrings = {
   "firstrun_continue_to_login": "Continuar",
   "firstrun_skip_login": "Saltar este paso",
   "context_menu_title": "Abrir menú",
-  "pocket_learn_more": "Aprender más"
+  "pocket_learn_more": "Saber más"
 };

@@ -794,7 +794,7 @@ nsresult nsHttpChannelAuthProvider::GetCredentialsForChallenge(
 
       // Collect statistics on how frequently the various types of HTTP
       // authentication are used over SSL and non-SSL connections.
-      if (gHttpHandler->IsTelemetryEnabled()) {
+      if (Telemetry::CanRecordPrereleaseData()) {
         if (NS_LITERAL_CSTRING("basic").LowerCaseEqualsASCII(authType)) {
           Telemetry::Accumulate(
               Telemetry::HTTP_AUTH_TYPE_STATS,
@@ -899,51 +899,48 @@ bool nsHttpChannelAuthProvider::BlockPrompt(bool proxyAuth) {
   }
 
   nsCOMPtr<nsIChannel> chan = do_QueryInterface(mAuthChannel);
-  nsCOMPtr<nsILoadInfo> loadInfo;
-  chan->GetLoadInfo(getter_AddRefs(loadInfo));
+  nsCOMPtr<nsILoadInfo> loadInfo = chan->LoadInfo();
 
   // We will treat loads w/o loadInfo as a top level document.
   bool topDoc = true;
   bool xhr = false;
   bool nonWebContent = false;
 
-  if (loadInfo) {
-    if (loadInfo->GetExternalContentPolicyType() !=
-        nsIContentPolicy::TYPE_DOCUMENT) {
-      topDoc = false;
-    }
+  if (loadInfo->GetExternalContentPolicyType() !=
+      nsIContentPolicy::TYPE_DOCUMENT) {
+    topDoc = false;
+  }
 
-    if (!topDoc) {
-      nsCOMPtr<nsIPrincipal> triggeringPrinc = loadInfo->TriggeringPrincipal();
-      if (nsContentUtils::IsSystemPrincipal(triggeringPrinc)) {
-        nonWebContent = true;
-      }
-    }
-
-    if (loadInfo->GetExternalContentPolicyType() ==
-        nsIContentPolicy::TYPE_XMLHTTPREQUEST) {
-      xhr = true;
-    }
-
-    if (!topDoc && !xhr) {
-      nsCOMPtr<nsIURI> topURI;
-      Unused << chanInternal->GetTopWindowURI(getter_AddRefs(topURI));
-
-      if (!topURI) {
-        // If we do not have topURI try the loadingPrincipal.
-        nsCOMPtr<nsIPrincipal> loadingPrinc = loadInfo->LoadingPrincipal();
-        if (loadingPrinc) {
-          loadingPrinc->GetURI(getter_AddRefs(topURI));
-        }
-      }
-
-      if (!NS_SecurityCompareURIs(topURI, mURI, true)) {
-        mCrossOrigin = true;
-      }
+  if (!topDoc) {
+    nsCOMPtr<nsIPrincipal> triggeringPrinc = loadInfo->TriggeringPrincipal();
+    if (nsContentUtils::IsSystemPrincipal(triggeringPrinc)) {
+      nonWebContent = true;
     }
   }
 
-  if (gHttpHandler->IsTelemetryEnabled()) {
+  if (loadInfo->GetExternalContentPolicyType() ==
+      nsIContentPolicy::TYPE_XMLHTTPREQUEST) {
+    xhr = true;
+  }
+
+  if (!topDoc && !xhr) {
+    nsCOMPtr<nsIURI> topURI;
+    Unused << chanInternal->GetTopWindowURI(getter_AddRefs(topURI));
+
+    if (!topURI) {
+      // If we do not have topURI try the loadingPrincipal.
+      nsCOMPtr<nsIPrincipal> loadingPrinc = loadInfo->LoadingPrincipal();
+      if (loadingPrinc) {
+        loadingPrinc->GetURI(getter_AddRefs(topURI));
+      }
+    }
+
+    if (!NS_SecurityCompareURIs(topURI, mURI, true)) {
+      mCrossOrigin = true;
+    }
+  }
+
+  if (Telemetry::CanRecordPrereleaseData()) {
     if (topDoc) {
       Telemetry::Accumulate(Telemetry::HTTP_AUTH_DIALOG_STATS_3,
                             HTTP_AUTH_DIALOG_TOP_LEVEL_DOC);
@@ -1542,15 +1539,15 @@ void nsHttpChannelAuthProvider::SetAuthorizationHeader(
   // or a webserver
   nsISupports **continuationState;
 
+  nsAutoCString suffix;
   if (header == nsHttp::Proxy_Authorization) {
     continuationState = &mProxyAuthContinuationState;
   } else {
     continuationState = &mAuthContinuationState;
-  }
 
-  nsCOMPtr<nsIChannel> chan = do_QueryInterface(mAuthChannel);
-  nsAutoCString suffix;
-  GetOriginAttributesSuffix(chan, suffix);
+    nsCOMPtr<nsIChannel> chan = do_QueryInterface(mAuthChannel);
+    GetOriginAttributesSuffix(chan, suffix);
+  }
 
   rv = authCache->GetAuthEntryForPath(scheme, host, port, path, suffix, &entry);
   if (NS_SUCCEEDED(rv)) {

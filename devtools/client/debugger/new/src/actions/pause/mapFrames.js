@@ -4,15 +4,36 @@
 
 // @flow
 
-import { getFrames, getSymbols, getSource } from "../../selectors";
+import {
+  getFrames,
+  getSymbols,
+  getSource,
+  getSelectedFrame
+} from "../../selectors";
+
 import assert from "../../utils/assert";
 import { findClosestFunction } from "../../utils/ast";
 
-import type { Frame } from "../../types";
+import type { Frame, ThreadId } from "../../types";
 import type { State } from "../../reducers/types";
 import type { ThunkArgs } from "../types";
 
 import { isGeneratedId } from "devtools-source-map";
+
+function isFrameBlackboxed(state, frame) {
+  const source = getSource(state, frame.location.sourceId);
+  return source && source.isBlackBoxed;
+}
+
+function getSelectedFrameId(state, thread, frames) {
+  let selectedFrame = getSelectedFrame(state, thread);
+  if (selectedFrame && !isFrameBlackboxed(state, selectedFrame)) {
+    return selectedFrame.id;
+  }
+
+  selectedFrame = frames.find(frame => !isFrameBlackboxed(state, frame));
+  return selectedFrame && selectedFrame.id;
+}
 
 export function updateFrameLocation(frame: Frame, sourceMaps: any) {
   if (frame.isOriginal) {
@@ -114,8 +135,10 @@ async function expandFrames(
       const id = j == 0 ? frame.id : `${frame.id}-originalFrame${j}`;
       result.push({
         id,
+        thread: originalFrame.thread,
         displayName: originalFrame.displayName,
         location: originalFrame.location,
+        source: null,
         scope: frame.scope,
         this: frame.this,
         isOriginal: true,
@@ -138,9 +161,9 @@ async function expandFrames(
  * @memberof actions/pause
  * @static
  */
-export function mapFrames() {
+export function mapFrames(thread: ThreadId) {
   return async function({ dispatch, getState, sourceMaps }: ThunkArgs) {
-    const frames = getFrames(getState());
+    const frames = getFrames(getState(), thread);
     if (!frames) {
       return;
     }
@@ -149,9 +172,16 @@ export function mapFrames() {
     mappedFrames = await expandFrames(mappedFrames, sourceMaps, getState);
     mappedFrames = mapDisplayNames(mappedFrames, getState);
 
+    const selectedFrameId = getSelectedFrameId(
+      getState(),
+      thread,
+      mappedFrames
+    );
     dispatch({
       type: "MAP_FRAMES",
-      frames: mappedFrames
+      thread,
+      frames: mappedFrames,
+      selectedFrameId
     });
   };
 }

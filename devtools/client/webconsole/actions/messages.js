@@ -17,6 +17,7 @@ const {
   NETWORK_MESSAGE_UPDATE,
   NETWORK_UPDATE_REQUEST,
   MESSAGES_CLEAR,
+  MESSAGES_CLEAR_LOGPOINT,
   MESSAGE_OPEN,
   MESSAGE_CLOSE,
   MESSAGE_TYPE,
@@ -55,6 +56,13 @@ function messagesAdd(packets, idGenerator = null) {
 function messagesClear() {
   return {
     type: MESSAGES_CLEAR,
+  };
+}
+
+function messagesClearLogpoint(logpointId) {
+  return {
+    type: MESSAGES_CLEAR_LOGPOINT,
+    logpointId,
   };
 }
 
@@ -98,6 +106,7 @@ function messageTableDataGet(id, client, dataType) {
 
     fetchObjectActorData(enumResponse => {
       const {iterator} = enumResponse;
+      // eslint-disable-next-line mozilla/use-returnValue
       iterator.slice(0, iterator.count, sliceResponse => {
         const {ownProperties} = sliceResponse;
         dispatch(messageTableDataReceive(id, ownProperties));
@@ -139,6 +148,7 @@ function networkUpdateRequest(id, data) {
 module.exports = {
   messagesAdd,
   messagesClear,
+  messagesClearLogpoint,
   messageOpen,
   messageClose,
   messageTableDataGet,

@@ -25,19 +25,23 @@ add_task(async function test_corrupt_local_roots() {
   info("Make remote changes");
   await storeRecords(buf, [{
     id: "menu",
+    parentid: "places",
     type: "folder",
     children: ["bookmarkAAAA"],
   }, {
     id: "bookmarkAAAA",
+    parentid: "menu",
     type: "bookmark",
     title: "A",
     bmkUri: "http://example.com/a",
   }, {
     id: "toolbar",
+    parentid: "places",
     type: "folder",
     children: ["bookmarkBBBB"],
   }, {
     id: "bookmarkBBBB",
+    parentid: "toolbar",
     type: "bookmark",
     title: "B",
     bmkUri: "http://example.com/b",
@@ -130,19 +134,23 @@ add_task(async function test_corrupt_remote_roots() {
   info("Make remote changes: Menu > Unfiled");
   await storeRecords(buf, [{
     id: "menu",
+    parentid: "places",
     type: "folder",
     children: ["unfiled", "bookmarkAAAA"],
   }, {
     id: "unfiled",
+    parentid: "menu",
     type: "folder",
     children: ["bookmarkBBBB"],
   }, {
     id: "bookmarkAAAA",
+    parentid: "menu",
     type: "bookmark",
     title: "A",
     bmkUri: "http://example.com/a",
   }, {
     id: "bookmarkBBBB",
+    parentid: "unfiled",
     type: "bookmark",
     title: "B",
     bmkUri: "http://example.com/b",
@@ -264,11 +272,13 @@ add_task(async function test_missing_children() {
   {
     await storeRecords(buf, shuffle([{
       id: "menu",
+      parentid: "places",
       type: "folder",
       children: ["bookmarkBBBB", "bookmarkCCCC", "bookmarkDDDD",
                  "bookmarkEEEE"],
     }, {
       id: "bookmarkCCCC",
+      parentid: "menu",
       type: "bookmark",
       bmkUri: "http://example.com/c",
       title: "C",
@@ -299,17 +309,20 @@ add_task(async function test_missing_children() {
       missingParents: [],
       parentsWithGaps: [],
     }, "Should report (B D E) as missing");
+    await storeChangesInMirror(buf, changesToUpload);
   }
 
   info("Add (B E) to remote");
   {
     await storeRecords(buf, shuffle([{
       id: "bookmarkBBBB",
+      parentid: "menu",
       type: "bookmark",
       title: "B",
       bmkUri: "http://example.com/b",
     }, {
       id: "bookmarkEEEE",
+      parentid: "menu",
       type: "bookmark",
       title: "E",
       bmkUri: "http://example.com/e",
@@ -358,6 +371,7 @@ add_task(async function test_missing_children() {
   {
     await storeRecords(buf, [{
       id: "bookmarkDDDD",
+      parentid: "menu",
       type: "bookmark",
       title: "D",
       bmkUri: "http://example.com/d",
@@ -425,16 +439,19 @@ add_task(async function test_new_orphan_without_local_parent() {
   info("Make remote changes: [A] > (B C D)");
   await storeRecords(buf, shuffle([{
     id: "bookmarkBBBB",
+    parentid: "folderAAAAAA",
     type: "bookmark",
     title: "B (remote)",
     bmkUri: "http://example.com/b-remote",
   }, {
     id: "bookmarkCCCC",
+    parentid: "folderAAAAAA",
     type: "bookmark",
     title: "C (remote)",
     bmkUri: "http://example.com/c-remote",
   }, {
     id: "bookmarkDDDD",
+    parentid: "folderAAAAAA",
     type: "bookmark",
     title: "D (remote)",
     bmkUri: "http://example.com/d-remote",
@@ -482,6 +499,7 @@ add_task(async function test_new_orphan_without_local_parent() {
   info("Add [E] > A to remote");
   await storeRecords(buf, [{
     id: "folderAAAAAA",
+    parentid: "folderEEEEEE",
     type: "folder",
     title: "A",
     children: ["bookmarkDDDD", "bookmarkCCCC", "bookmarkBBBB"],
@@ -533,6 +551,7 @@ add_task(async function test_new_orphan_without_local_parent() {
   info("Add E to remote");
   await storeRecords(buf, [{
     id: "folderEEEEEE",
+    parentid: "menu",
     type: "folder",
     title: "E",
     children: ["folderAAAAAA"],
@@ -591,6 +610,7 @@ add_task(async function test_new_orphan_without_local_parent() {
   info("Add Menu > E to remote");
   await storeRecords(buf, [{
     id: "menu",
+    parentid: "places",
     type: "folder",
     children: ["folderEEEEEE"],
   }]);
@@ -604,6 +624,7 @@ add_task(async function test_new_orphan_without_local_parent() {
       updated: [],
       deleted: [],
     }, "Should not reupload after forming complete tree");
+    await storeChangesInMirror(buf, changesToUpload);
   }
 
   await assertLocalTree(PlacesUtils.bookmarks.rootGuid, {
@@ -706,35 +727,42 @@ add_task(async function test_move_into_orphaned() {
   });
   await storeRecords(buf, [{
     id: "menu",
+    parentid: "places",
     type: "folder",
     children: ["bookmarkAAAA", "bookmarkBBBB", "folderCCCCCC"],
   }, {
     id: "bookmarkAAAA",
+    parentid: "menu",
     type: "bookmark",
     title: "A",
     bmkUri: "http://example.com/a",
   }, {
     id: "bookmarkBBBB",
+    parentid: "menu",
     type: "bookmark",
     title: "B",
     bmkUri: "http://example.com/b",
   }, {
     id: "folderCCCCCC",
+    parentid: "menu",
     type: "folder",
     title: "C",
     children: ["bookmarkDDDD", "folderEEEEEE"],
   }, {
     id: "bookmarkDDDD",
+    parentid: "folderCCCCCC",
     type: "bookmark",
     title: "D",
     bmkUri: "http://example.com/d",
   }, {
     id: "folderEEEEEE",
+    parentid: "folderCCCCCC",
     type: "folder",
     title: "E",
     children: ["bookmarkFFFF"],
   }, {
     id: "bookmarkFFFF",
+    parentid: "folderEEEEEE",
     type: "bookmark",
     title: "F",
     bmkUri: "http://example.com/f",
@@ -754,16 +782,19 @@ add_task(async function test_move_into_orphaned() {
   info("Make remote changes: ([G] > A (C > (D H E))), (C > H)");
   await storeRecords(buf, shuffle([{
     id: "bookmarkAAAA",
+    parentid: "folderGGGGGG",
     type: "bookmark",
     title: "A",
     bmkUri: "http://example.com/a",
   }, {
     id: "folderCCCCCC",
+    parentid: "folderGGGGGG",
     type: "folder",
     title: "C",
     children: ["bookmarkDDDD", "bookmarkHHHH", "folderEEEEEE"],
   }, {
     id: "bookmarkHHHH",
+    parentid: "folderCCCCCC",
     type: "bookmark",
     title: "H (remote)",
     bmkUri: "http://example.com/h-remote",
@@ -883,20 +914,24 @@ add_task(async function test_new_orphan_with_local_parent() {
   });
   await storeRecords(buf, shuffle([{
     id: "menu",
+    parentid: "places",
     type: "folder",
     children: ["folderAAAAAA"],
   }, {
     id: "folderAAAAAA",
+    parentid: "menu",
     type: "folder",
     title: "A",
     children: ["bookmarkBBBB", "bookmarkEEEE"],
   }, {
     id: "bookmarkBBBB",
+    parentid: "folderAAAAAA",
     type: "bookmark",
     title: "B",
     bmkUri: "http://example.com/b",
   }, {
     id: "bookmarkEEEE",
+    parentid: "folderAAAAAA",
     type: "bookmark",
     title: "E",
     bmkUri: "http://example.com/e",
@@ -909,11 +944,13 @@ add_task(async function test_new_orphan_with_local_parent() {
   info("Set up remote with orphans: [A] > (C D)");
   await storeRecords(buf, [{
     id: "bookmarkDDDD",
+    parentid: "folderAAAAAA",
     type: "bookmark",
     title: "D (remote)",
     bmkUri: "http://example.com/d-remote",
   }, {
     id: "bookmarkCCCC",
+    parentid: "folderAAAAAA",
     type: "bookmark",
     title: "C (remote)",
     bmkUri: "http://example.com/c-remote",
@@ -994,6 +1031,7 @@ add_task(async function test_new_orphan_with_local_parent() {
   info("Add A to remote");
   await storeRecords(buf, [{
     id: "folderAAAAAA",
+    parentid: "menu",
     type: "folder",
     title: "A",
     children: ["bookmarkCCCC", "bookmarkDDDD", "bookmarkEEEE", "bookmarkBBBB"],
@@ -1008,6 +1046,7 @@ add_task(async function test_new_orphan_with_local_parent() {
       updated: [],
       deleted: [],
     }, "Should not reupload orphan A");
+    await storeChangesInMirror(buf, changesToUpload);
   }
 
   await assertLocalTree("folderAAAAAA", {
@@ -1055,20 +1094,24 @@ add_task(async function test_tombstone_as_child() {
   // as a child.
   await storeRecords(buf, shuffle([{
     id: "menu",
+    parentid: "places",
     type: "folder",
     children: ["folderAAAAAA"],
   }, {
     id: "folderAAAAAA",
+    parentid: "menu",
     type: "folder",
     title: "A",
     children: ["bookmarkAAAA", "bookmarkTTTT", "bookmarkBBBB"],
   }, {
     id: "bookmarkAAAA",
+    parentid: "folderAAAAAA",
     type: "bookmark",
     title: "Bookmark A",
     bmkUri: "http://example.com/a",
   }, {
     id: "bookmarkBBBB",
+    parentid: "folderAAAAAA",
     type: "bookmark",
     title: "Bookmark B",
     bmkUri: "http://example.com/b",
@@ -1210,6 +1253,7 @@ add_task(async function test_non_syncable_items() {
     // locally. We should remove A and its descendants locally, since its parent
     // H is known to be non-syncable remotely.
     id: "folderAAAAAA",
+    parentid: "rootHHHHHHHH",
     type: "folder",
     title: "A",
     children: ["bookmarkFFFF", "bookmarkIIII"],
@@ -1217,11 +1261,13 @@ add_task(async function test_non_syncable_items() {
     // F exists in two different non-syncable folders: C locally, and A
     // remotely.
     id: "bookmarkFFFF",
+    parentid: "folderAAAAAA",
     type: "bookmark",
     title: "F",
     bmkUri: "http://example.com/f",
   }, {
     id: "bookmarkIIII",
+    parentid: "folderAAAAAA",
     type: "query",
     title: "I",
     bmkUri: "http://example.com/i",
@@ -1236,16 +1282,19 @@ add_task(async function test_non_syncable_items() {
     children: ["folderLEFTPQ", "folderLEFTPF"],
   }, {
     id: "folderLEFTPQ",
+    parentid: "folderLEFTPR",
     type: "query",
     title: "Some query",
     bmkUri: "place:folder=SOMETHING",
   }, {
     id: "folderLEFTPF",
+    parentid: "folderLEFTPR",
     type: "folder",
     title: "All Bookmarks",
     children: ["folderLEFTPC"],
   }, {
     id: "folderLEFTPC",
+    parentid: "folderLEFTPF",
     type: "query",
     title: "A query under 'All Bookmarks'",
     bmkUri: "place:folder=SOMETHING_ELSE",
@@ -1254,20 +1303,24 @@ add_task(async function test_non_syncable_items() {
     // J and G don't exist locally, and are syncable remotely, we'll remove D
     // from the merged structure, and move J and G to unfiled.
     id: "unfiled",
+    parentid: "places",
     type: "folder",
     children: ["folderDDDDDD", "bookmarkGGGG"],
   }, {
     id: "folderDDDDDD",
+    parentid: "unfiled",
     type: "folder",
     title: "D",
     children: ["bookmarkJJJJ"],
   }, {
     id: "bookmarkJJJJ",
+    parentid: "folderDDDDDD",
     type: "bookmark",
     title: "J",
     bmkUri: "http://example.com/j",
   }, {
     id: "bookmarkGGGG",
+    parentid: "unfiled",
     type: "bookmark",
     title: "G",
     bmkUri: "http://example.com/g",
@@ -1592,20 +1645,24 @@ add_task(async function test_partial_cycle() {
   });
   await storeRecords(buf, shuffle([{
     id: "menu",
+    parentid: "places",
     type: "folder",
     children: ["folderAAAAAA"],
   }, {
     id: "folderAAAAAA",
+    parentid: "menu",
     type: "folder",
     title: "A",
     children: ["folderBBBBBB"],
   }, {
     id: "folderBBBBBB",
+    parentid: "folderAAAAAA",
     type: "folder",
     title: "B",
     children: ["bookmarkCCCC"],
   }, {
     id: "bookmarkCCCC",
+    parentid: "folderBBBBBB",
     type: "bookmark",
     title: "C",
     bmkUri: "http://example.com/c",
@@ -1618,11 +1675,13 @@ add_task(async function test_partial_cycle() {
   info("Make remote changes: A > C");
   await storeRecords(buf, [{
     id: "folderAAAAAA",
+    parentid: "menu",
     type: "folder",
     title: "A (remote)",
     children: ["bookmarkCCCC"],
   }, {
     id: "folderBBBBBB",
+    parentid: "folderAAAAAA",
     type: "folder",
     title: "B (remote)",
     children: ["folderAAAAAA"],
@@ -1701,25 +1760,30 @@ add_task(async function test_complete_cycle() {
   info("Make remote changes: Menu > A > B > C > A");
   await storeRecords(buf, [{
     id: "menu",
+    parentid: "places",
     type: "folder",
     children: ["folderAAAAAA"],
   }, {
     id: "folderAAAAAA",
+    parentid: "menu",
     type: "folder",
     title: "A",
     children: ["folderBBBBBB"],
   }, {
     id: "folderBBBBBB",
+    parentid: "folderAAAAAA",
     type: "folder",
     title: "B",
     children: ["folderCCCCCC"],
   }, {
     id: "folderCCCCCC",
+    parentid: "folderBBBBBB",
     type: "folder",
     title: "C",
     children: ["folderDDDDDD"],
   }, {
     id: "folderDDDDDD",
+    parentid: "folderCCCCCC",
     type: "folder",
     title: "D",
     children: ["folderAAAAAA"],
@@ -1777,21 +1841,25 @@ add_task(async function test_invalid_guid() {
   info("Make remote changes");
   await storeRecords(buf, [{
     id: "menu",
+    parentid: "places",
     type: "folder",
     children: ["bookmarkAAAA", "bad!guid~", "bookmarkBBBB"],
   }, {
     id: "bookmarkAAAA",
+    parentid: "menu",
     type: "bookmark",
     title: "A",
     bmkUri: "http://example.com/a",
   }, {
     // Should be ignored.
     id: "bad!guid~",
+    parentid: "menu",
     type: "bookmark",
     title: "Bad GUID",
     bmkUri: "http://example.com/bad-guid",
   }, {
     id: "bookmarkBBBB",
+    parentid: "menu",
     type: "bookmark",
     title: "B",
     bmkUri: "http://example.com/b",
@@ -1807,6 +1875,220 @@ add_task(async function test_invalid_guid() {
     missingParents: [],
     parentsWithGaps: [PlacesUtils.bookmarks.menuGuid],
   }, "Should report gaps in menu");
+
+  await buf.finalize();
+  await PlacesUtils.bookmarks.eraseEverything();
+  await PlacesSyncUtils.bookmarks.reset();
+});
+
+add_task(async function test_sync_status_mismatches() {
+  let dateAdded = new Date();
+
+  let mergeTelemetryEvents = [];
+  let buf = await openMirror("sync_status_mismatches", {
+    recordTelemetryEvent(object, method, value, extra) {
+      equal(object, "mirror", "Wrong object for telemetry event");
+      if (method == "merge") {
+        mergeTelemetryEvents.push({ value, extra });
+      }
+    },
+  });
+
+  info("Ensure mirror is up-to-date with Places");
+  let initialChangesToUpload = await buf.apply();
+
+  deepEqual(Object.keys(initialChangesToUpload).sort(),
+    ["menu", "mobile", "toolbar", "unfiled"],
+    "Should upload roots on first merge");
+
+  await storeChangesInMirror(buf, initialChangesToUpload);
+
+  deepEqual(await buf.fetchSyncStatusMismatches(), {
+    missingLocal: [],
+    missingRemote: [],
+    wrongSyncStatus: [],
+  }, "Should not report mismatches after first merge");
+
+  info("Make local changes");
+  await PlacesUtils.bookmarks.insertTree({
+    guid: PlacesUtils.bookmarks.menuGuid,
+    source: PlacesUtils.bookmarks.SOURCES.SYNC,
+    children: [{
+      // A is NORMAL in Places, but doesn't exist in the mirror.
+      guid: "bookmarkAAAA",
+      url: "http://example.com/a",
+      title: "A",
+      dateAdded,
+    }],
+  });
+  await PlacesUtils.bookmarks.insertTree({
+    guid: PlacesUtils.bookmarks.unfiledGuid,
+    children: [{
+      // B is NEW in Places and exists in the mirror.
+      guid: "bookmarkBBBB",
+      url: "http://example.com/b",
+      title: "B",
+      dateAdded,
+    }],
+  });
+
+  info("Make remote changes");
+  await storeRecords(buf, [{
+    id: "unfiled",
+    parentid: "places",
+    type: "folder",
+    children: ["bookmarkBBBB"],
+  }, {
+    id: "toolbar",
+    parentid: "places",
+    type: "folder",
+    children: ["bookmarkCCCC"],
+  }, {
+    id: "bookmarkBBBB",
+    parentid: "unfiled",
+    type: "bookmark",
+    bmkUri: "http://example.com/b",
+    title: "B",
+  }, {
+    // C is flagged as merged in the mirror, but doesn't exist in Places.
+    id: "bookmarkCCCC",
+    parentid: "toolbar",
+    type: "bookmark",
+    bmkUri: "http://example.com/c",
+    title: "C",
+  }], { needsMerge: false });
+
+  deepEqual(await buf.fetchSyncStatusMismatches(), {
+    missingLocal: ["bookmarkCCCC"],
+    missingRemote: ["bookmarkAAAA"],
+    wrongSyncStatus: ["bookmarkBBBB"],
+  }, "Should report sync status mismatches");
+
+  info("Apply mirror");
+  let changesToUpload = await buf.apply();
+  deepEqual(await buf.fetchUnmergedGuids(), [], "Should merge all items");
+
+  let datesAdded = await promiseManyDatesAdded([PlacesUtils.bookmarks.menuGuid,
+    PlacesUtils.bookmarks.unfiledGuid]);
+  deepEqual(changesToUpload, {
+    bookmarkAAAA: {
+      tombstone: false,
+      counter: 1,
+      synced: false,
+      cleartext: {
+        id: "bookmarkAAAA",
+        type: "bookmark",
+        parentid: "menu",
+        hasDupe: true,
+        parentName: BookmarksMenuTitle,
+        dateAdded: dateAdded.getTime(),
+        bmkUri: "http://example.com/a",
+        title: "A",
+      },
+    },
+    bookmarkBBBB: {
+      tombstone: false,
+      counter: 1,
+      synced: false,
+      cleartext: {
+        id: "bookmarkBBBB",
+        type: "bookmark",
+        parentid: "unfiled",
+        hasDupe: true,
+        parentName: UnfiledBookmarksTitle,
+        dateAdded: dateAdded.getTime(),
+        bmkUri: "http://example.com/b",
+        title: "B",
+      },
+    },
+    menu: {
+      tombstone: false,
+      counter: 1,
+      synced: false,
+      cleartext: {
+        id: "menu",
+        type: "folder",
+        parentid: "places",
+        hasDupe: true,
+        parentName: "",
+        dateAdded: datesAdded.get(PlacesUtils.bookmarks.menuGuid),
+        title: BookmarksMenuTitle,
+        children: ["bookmarkAAAA"],
+      },
+    },
+    unfiled: {
+      tombstone: false,
+      counter: 1,
+      synced: false,
+      cleartext: {
+        id: "unfiled",
+        type: "folder",
+        parentid: "places",
+        hasDupe: true,
+        parentName: "",
+        dateAdded: datesAdded.get(PlacesUtils.bookmarks.unfiledGuid),
+        title: UnfiledBookmarksTitle,
+        children: ["bookmarkBBBB"],
+      },
+    },
+  }, "Should flag (A B) and their parents for upload");
+
+  await assertLocalTree(PlacesUtils.bookmarks.rootGuid, {
+    guid: PlacesUtils.bookmarks.rootGuid,
+    type: PlacesUtils.bookmarks.TYPE_FOLDER,
+    index: 0,
+    title: "",
+    children: [{
+      guid: PlacesUtils.bookmarks.menuGuid,
+      type: PlacesUtils.bookmarks.TYPE_FOLDER,
+      index: 0,
+      title: BookmarksMenuTitle,
+      children: [{
+        guid: "bookmarkAAAA",
+        type: PlacesUtils.bookmarks.TYPE_BOOKMARK,
+        index: 0,
+        title: "A",
+        url: "http://example.com/a",
+      }],
+    }, {
+      guid: PlacesUtils.bookmarks.toolbarGuid,
+      type: PlacesUtils.bookmarks.TYPE_FOLDER,
+      index: 1,
+      title: BookmarksToolbarTitle,
+      children: [{
+        guid: "bookmarkCCCC",
+        type: PlacesUtils.bookmarks.TYPE_BOOKMARK,
+        index: 0,
+        title: "C",
+        url: "http://example.com/c",
+      }],
+    }, {
+      guid: PlacesUtils.bookmarks.unfiledGuid,
+      type: PlacesUtils.bookmarks.TYPE_FOLDER,
+      index: 3,
+      title: UnfiledBookmarksTitle,
+      children: [{
+        guid: "bookmarkBBBB",
+        type: PlacesUtils.bookmarks.TYPE_BOOKMARK,
+        index: 0,
+        title: "B",
+        url: "http://example.com/b",
+      }],
+    }, {
+      guid: PlacesUtils.bookmarks.mobileGuid,
+      type: PlacesUtils.bookmarks.TYPE_FOLDER,
+      index: 4,
+      title: MobileBookmarksTitle,
+    }],
+  }, "Should parent C correctly");
+
+  await storeChangesInMirror(buf, changesToUpload);
+
+  deepEqual(await buf.fetchSyncStatusMismatches(), {
+    missingLocal: [],
+    missingRemote: [],
+    wrongSyncStatus: [],
+  }, "Applying and storing new changes in mirror should fix inconsistencies");
 
   await buf.finalize();
   await PlacesUtils.bookmarks.eraseEverything();

@@ -1,12 +1,12 @@
 /* Any copyright is dedicated to the Public Domain.
    http://creativecommons.org/publicdomain/zero/1.0/ */
 
-/* import-globals-from head-addons-script.js */
-
 "use strict";
 
-// Load addons helpers
-Services.scriptloader.loadSubScript(CHROME_URL_ROOT + "head-addons-script.js", this);
+/* import-globals-from helper-addons.js */
+Services.scriptloader.loadSubScript(CHROME_URL_ROOT + "helper-addons.js", this);
+/* import-globals-from helper-collapsibilities.js */
+Services.scriptloader.loadSubScript(CHROME_URL_ROOT + "helper-collapsibilities.js", this);
 
 /**
  * Test that an "empty" message is displayed when there are no debug targets in a debug
@@ -19,7 +19,8 @@ const EXTENSION_NAME = "test-temporary-extension";
 add_task(async function() {
   prepareCollapsibilitiesTest();
 
-  const { document, tab } = await openAboutDebugging();
+  const { document, tab, window } = await openAboutDebugging();
+  await selectThisFirefoxPage(document, window.AboutDebugging.store);
 
   info("Check that the temporary extensions pane is empty");
   const temporaryExtensionPane = getDebugTargetPane("Temporary Extensions", document);

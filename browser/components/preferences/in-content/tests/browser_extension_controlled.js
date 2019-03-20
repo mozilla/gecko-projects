@@ -9,6 +9,9 @@ XPCOMUtils.defineLazyServiceGetter(this, "aboutNewTabService",
                                    "nsIAboutNewTabService");
 XPCOMUtils.defineLazyPreferenceGetter(this, "proxyType", PROXY_PREF);
 
+const {AddonTestUtils} = ChromeUtils.import("resource://testing-common/AddonTestUtils.jsm");
+AddonTestUtils.initMochitest(this);
+
 const TEST_DIR = gTestPath.substr(0, gTestPath.lastIndexOf("/"));
 const CHROME_URL_ROOT = TEST_DIR + "/";
 const PERMISSIONS_URL = "chrome://browser/content/preferences/sitePermissions.xul";
@@ -442,6 +445,10 @@ add_task(async function testExtensionControlledDefaultSearch() {
     },
   };
 
+  // This test is comparing nsISearchEngines by reference, so we need to initialize
+  // the SearchService here.
+  await Services.search.init();
+
   function setEngine(engine) {
     doc.querySelector(`#defaultEngine menuitem[label="${engine.name}"]`)
        .doCommand();
@@ -464,6 +471,7 @@ add_task(async function testExtensionControlledDefaultSearch() {
 
   let messageShown = waitForMessageShown("browserDefaultSearchExtensionContent");
   await originalExtension.startup();
+  await AddonTestUtils.waitForSearchProviderStartup(originalExtension);
   await messageShown;
 
   let addon = await AddonManager.getAddonByID(extensionId);
@@ -491,6 +499,8 @@ add_task(async function testExtensionControlledDefaultSearch() {
 
   // Setting the engine back to the extension's engine does not show the message.
   setEngine(extensionEngine);
+  // Wait a tick for the Search Service's promises to resolve.
+  await new Promise(resolve => executeSoon(resolve));
 
   is(extensionEngine, Services.search.defaultEngine,
      "default search engine is set back to extension");
@@ -506,6 +516,7 @@ add_task(async function testExtensionControlledDefaultSearch() {
     manifest: Object.assign({}, manifest, {version: "2.0"}),
   });
   await updatedExtension.startup();
+  await AddonTestUtils.waitForSearchProviderStartup(updatedExtension);
   addon = await AddonManager.getAddonByID(extensionId);
 
   // Verify the extension is updated and search engine didn't change.
@@ -750,12 +761,14 @@ add_task(async function testExtensionControlledProxyConfig() {
         let manualControlContainer = controlGroup.querySelector("grid");
         return {
           manualControls: [
-            ...manualControlContainer.querySelectorAll("label"),
+            ...manualControlContainer.querySelectorAll("label[data-l10n-id]:not([control=networkProxyNone])"),
             ...manualControlContainer.querySelectorAll("textbox"),
             ...manualControlContainer.querySelectorAll("checkbox"),
             ...doc.querySelectorAll("#networkProxySOCKSVersion > radio")],
           pacControls: [doc.getElementById("networkProxyAutoconfigURL")],
           otherControls: [
+            doc.querySelector("label[control=networkProxyNone]"),
+            doc.getElementById("networkProxyNone"),
             ...controlGroup.querySelectorAll(":scope > radio"),
             ...doc.querySelectorAll("#ConnectionsDialogPane > checkbox")],
         };
@@ -764,14 +777,14 @@ add_task(async function testExtensionControlledProxyConfig() {
       let controls = getProxyControls();
       for (let element of controls.manualControls) {
         let disabled = isControlled || proxyType !== proxySvc.PROXYCONFIG_MANUAL;
-        is(element.disabled, disabled, `Proxy controls are ${controlState}.`);
+        is(element.disabled, disabled, `Manual proxy controls should be ${controlState} - control: ${element.outerHTML}.`);
       }
       for (let element of controls.pacControls) {
         let disabled = isControlled || proxyType !== proxySvc.PROXYCONFIG_PAC;
-        is(element.disabled, disabled, `Proxy controls are ${controlState}.`);
+        is(element.disabled, disabled, `PAC proxy controls should be ${controlState} - control: ${element.outerHTML}.`);
       }
       for (let element of controls.otherControls) {
-        is(element.disabled, isControlled, `Proxy controls are ${controlState}.`);
+        is(element.disabled, isControlled, `Other proxy controls should be ${controlState} - control: ${element.outerHTML}.`);
       }
     } else {
       let elem = doc.getElementById(CONNECTION_SETTINGS_DESC_ID);
@@ -838,8 +851,11 @@ add_task(async function testExtensionControlledProxyConfig() {
 
   verifyState(mainDoc, false);
 
-  // Install an extension that controls proxy settings.
+  // Install an extension that controls proxy settings. The extension needs
+  // incognitoOverride because controlling the proxy.settings requires private
+  // browsing access.
   let extension = ExtensionTestUtils.loadExtension({
+    incognitoOverride: "spanning",
     useAddonManager: "permanent",
     manifest: {
       name: "set_proxy",

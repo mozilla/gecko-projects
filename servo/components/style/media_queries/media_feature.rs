@@ -1,6 +1,6 @@
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
- * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 //! Media features.
 
@@ -30,9 +30,10 @@ type MediaFeatureEvaluator<T> = fn(
 pub type KeywordSerializer = fn(KeywordDiscriminant) -> String;
 
 /// Parses a given identifier.
-pub type KeywordParser =
-    for<'a, 'i, 't> fn(context: &'a ParserContext, input: &'a mut Parser<'i, 't>)
-        -> Result<KeywordDiscriminant, ParseError<'i>>;
+pub type KeywordParser = for<'a, 'i, 't> fn(
+    context: &'a ParserContext,
+    input: &'a mut Parser<'i, 't>,
+) -> Result<KeywordDiscriminant, ParseError<'i>>;
 
 /// An evaluator for a given media feature.
 ///

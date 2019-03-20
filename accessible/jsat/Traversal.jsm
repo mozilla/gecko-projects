@@ -6,7 +6,7 @@
 
 var EXPORTED_SYMBOLS = ["TraversalRules", "TraversalHelper"]; // jshint ignore:line
 
-ChromeUtils.import("resource://gre/modules/accessibility/Utils.jsm");
+const {PrefCache, Utils} = ChromeUtils.import("resource://gre/modules/accessibility/Utils.jsm");
 ChromeUtils.defineModuleGetter(this, "Roles", // jshint ignore:line
   "resource://gre/modules/accessibility/Constants.jsm");
 ChromeUtils.defineModuleGetter(this, "Filters", // jshint ignore:line
@@ -166,15 +166,15 @@ var gSimpleMatchFunc = function gSimpleMatchFunc(aAccessible) {
 
 var gSimplePreFilter = Prefilters.DEFUNCT |
   Prefilters.INVISIBLE |
-  Prefilters.TRANSPARENT;
+  Prefilters.TRANSPARENT |
+  Prefilters.PLATFORM_PRUNED;
 
 var TraversalRules = { // jshint ignore:line
   Simple: new BaseTraversalRule(gSimpleTraversalRoles, gSimpleMatchFunc),
 
   SimpleOnScreen: new BaseTraversalRule(
     gSimpleTraversalRoles, gSimpleMatchFunc,
-    Prefilters.DEFUNCT | Prefilters.INVISIBLE |
-    Prefilters.TRANSPARENT | Prefilters.OFFSCREEN),
+    gSimplePreFilter | Prefilters.OFFSCREEN),
 
   Anchor: new BaseTraversalRule(
     [Roles.LINK],
@@ -184,7 +184,6 @@ var TraversalRules = { // jshint ignore:line
         return Filters.IGNORE;
       }
       return Filters.MATCH;
-
     }),
 
   Button: new BaseTraversalRule(
@@ -273,7 +272,6 @@ var TraversalRules = { // jshint ignore:line
         return Filters.MATCH;
       }
       return Filters.IGNORE;
-
     }),
 
   /* For TalkBack's "Control" granularity. Form conrols and links */
@@ -392,7 +390,6 @@ var TraversalHelper = {
       return moved;
     }
     return aVirtualCursor[aMethod](rule);
-
   },
 
 };

@@ -31,19 +31,8 @@ const SOURCE_URL = "http://example.com/source.js";
 
 function test_black_box() {
   gClient.addOneTimeListener("paused", function(event, packet) {
-    gThreadClient.eval(packet.frame.actor, "doStuff", function(response) {
-      gThreadClient.addOneTimeListener("paused", function(event, packet) {
-        const obj = gThreadClient.pauseGrip(packet.why.frameFinished.return);
-        obj.getDefinitionSite(runWithSource);
-      });
-    });
-
-    function runWithSource(packet) {
-      const source = gThreadClient.source(packet.source);
-      source.setBreakpoint({
-        line: 2,
-      }).then(test_black_box_paused);
-    }
+    gThreadClient.setBreakpoint({ sourceUrl: BLACK_BOXED_URL, line: 2 }, {});
+    test_black_box_paused();
   });
 
   /* eslint-disable no-multi-spaces, no-undef */
@@ -76,17 +65,15 @@ function test_black_box() {
 }
 
 function test_black_box_paused() {
-  gThreadClient.getSources(function({error, sources}) {
+  gThreadClient.getSources(async function({error, sources}) {
     Assert.ok(!error, "Should not get an error: " + error);
     const sourceClient = gThreadClient.source(
       sources.filter(s => s.url == BLACK_BOXED_URL)[0]
     );
 
-    sourceClient.blackBox(function({error, pausedInSource}) {
-      Assert.ok(!error, "Should not get an error: " + error);
-      Assert.ok(pausedInSource,
-                "We should be notified that we are currently paused in this source");
-      finishClient(gClient);
-    });
+    const {pausedInSource} = await blackBox(sourceClient);
+    Assert.ok(pausedInSource,
+      "We should be notified that we are currently paused in this source");
+    finishClient(gClient);
   });
 }

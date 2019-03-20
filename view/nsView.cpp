@@ -104,6 +104,8 @@ nsView::~nsView() {
   // Destroy and release the widget
   DestroyWidget();
 
+  MOZ_RELEASE_ASSERT(!mFrame);
+
   delete mDirtyRegion;
 }
 
@@ -316,7 +318,7 @@ void nsView::DoResetWidgetBounds(bool aMoveOnly, bool aInvalidateChangedSize) {
   }
 
   bool curVisibility = widget->IsVisible();
-  bool newVisibility = IsEffectivelyVisible();
+  bool newVisibility = !invisiblePopup && IsEffectivelyVisible();
   if (curVisibility && !newVisibility) {
     widget->Show(false);
   }
@@ -1039,6 +1041,15 @@ void nsView::RequestRepaint() {
   if (presShell) {
     presShell->ScheduleViewManagerFlush();
   }
+}
+
+bool nsView::ShouldNotBeVisible() {
+  if (mFrame && mFrame->IsMenuPopupFrame()) {
+    nsXULPopupManager* pm = nsXULPopupManager::GetInstance();
+    return !pm || !pm->IsPopupOpen(mFrame->GetContent());
+  }
+
+  return false;
 }
 
 nsEventStatus nsView::HandleEvent(WidgetGUIEvent* aEvent,

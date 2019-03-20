@@ -13,7 +13,7 @@
 
 class nsIFrame;
 
-NS_IMPL_NS_NEW_NAMESPACED_SVG_ELEMENT(Switch)
+NS_IMPL_NS_NEW_SVG_ELEMENT(Switch)
 
 namespace mozilla {
 namespace dom {
@@ -57,7 +57,7 @@ void SVGSwitchElement::MaybeInvalidate() {
 
   nsIFrame* frame = GetPrimaryFrame();
   if (frame) {
-    nsLayoutUtils::PostRestyleEvent(this, nsRestyleHint(0),
+    nsLayoutUtils::PostRestyleEvent(this, RestyleHint{0},
                                     nsChangeHint_InvalidateRenderingObservers);
     nsSVGUtils::ScheduleReflowSVG(frame);
   }

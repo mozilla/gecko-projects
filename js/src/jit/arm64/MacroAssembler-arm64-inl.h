@@ -67,6 +67,14 @@ void MacroAssembler::move32To64SignExtend(Register src, Register64 dest) {
 }
 
 // ===============================================================
+// Load instructions
+
+void MacroAssembler::load32SignExtendToPtr(const Address& src, Register dest) {
+  load32(src, dest);
+  move32To64SignExtend(dest, Register64(dest));
+}
+
+// ===============================================================
 // Logical instructions
 
 void MacroAssembler::not32(Register reg) {
@@ -473,6 +481,10 @@ void MacroAssembler::inc64(AbsoluteAddress dest) {
 
 void MacroAssembler::neg32(Register reg) {
   Negs(ARMRegister(reg, 32), Operand(ARMRegister(reg, 32)));
+}
+
+void MacroAssembler::negPtr(Register reg) {
+  Negs(ARMRegister(reg, 64), Operand(ARMRegister(reg, 64)));
 }
 
 void MacroAssembler::negateFloat(FloatRegister reg) {
@@ -1402,6 +1414,35 @@ void MacroAssembler::branchTestSymbolImpl(Condition cond, const T& t,
   B(label, c);
 }
 
+void MacroAssembler::branchTestBigInt(Condition cond, Register tag,
+                                      Label* label) {
+  branchTestBigIntImpl(cond, tag, label);
+}
+
+void MacroAssembler::branchTestBigInt(Condition cond, const BaseIndex& address,
+                                      Label* label) {
+  branchTestBigIntImpl(cond, address, label);
+}
+
+void MacroAssembler::branchTestBigInt(Condition cond, const ValueOperand& value,
+                                      Label* label) {
+  branchTestBigIntImpl(cond, value, label);
+}
+
+template <typename T>
+void MacroAssembler::branchTestBigIntImpl(Condition cond, const T& t,
+                                          Label* label) {
+  Condition c = testBigInt(cond, t);
+  B(label, c);
+}
+
+void MacroAssembler::branchTestBigIntTruthy(bool truthy,
+                                            const ValueOperand& value,
+                                            Label* label) {
+  Condition c = testBigIntTruthy(truthy, value);
+  B(label, c);
+}
+
 void MacroAssembler::branchTestNull(Condition cond, Register tag,
                                     Label* label) {
   branchTestNullImpl(cond, tag, label);
@@ -1526,8 +1567,10 @@ void MacroAssembler::branchTestMagic(Condition cond, const Address& valaddr,
 }
 
 void MacroAssembler::branchToComputedAddress(const BaseIndex& addr) {
-  // Not used by Rabaldr.
-  MOZ_CRASH("NYI - branchToComputedAddress");
+  vixl::UseScratchRegisterScope temps(&this->asVIXL());
+  const ARMRegister scratch64 = temps.AcquireX();
+  loadPtr(addr, scratch64.asUnsized());
+  Br(scratch64);
 }
 
 void MacroAssembler::cmp32Move32(Condition cond, Register lhs, Register rhs,

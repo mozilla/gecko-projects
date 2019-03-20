@@ -2,16 +2,16 @@
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
-ChromeUtils.import("resource://gre/modules/AppConstants.jsm");
-ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
-ChromeUtils.import("resource://gre/modules/Services.jsm");
+
+"use strict";
+
+var {AppConstants} = ChromeUtils.import("resource://gre/modules/AppConstants.jsm");
+var {Services} = ChromeUtils.import("resource://gre/modules/Services.jsm");
 
 ChromeUtils.defineModuleGetter(this, "SiteDataManager",
                                "resource:///modules/SiteDataManager.jsm");
 ChromeUtils.defineModuleGetter(this, "DownloadUtils",
                                "resource://gre/modules/DownloadUtils.jsm");
-
-"use strict";
 
 let gSiteDataSettings = {
 
@@ -169,7 +169,7 @@ let gSiteDataSettings = {
       sites.sort(sortFunc);
     }
 
-    let cols = this._list.querySelectorAll("treecol");
+    let cols = this._list.previousElementSibling.querySelectorAll("treecol");
     cols.forEach(c => {
       c.removeAttribute("sortDirection");
       c.removeAttribute("data-isCurrentSortCol");
@@ -221,7 +221,7 @@ let gSiteDataSettings = {
     this._updateButtonsState();
   },
 
-  saveChanges() {
+  async saveChanges() {
     // Tracks whether the user confirmed their decision.
     let allowed = false;
 
@@ -233,12 +233,20 @@ let gSiteDataSettings = {
       if (this._sites.length == removals.length) {
         allowed = SiteDataManager.promptSiteDataRemoval(window);
         if (allowed) {
-          SiteDataManager.removeAll();
+          try {
+            await SiteDataManager.removeAll();
+          } catch (e) {
+            Cu.reportError(e);
+          }
         }
       } else {
         allowed = SiteDataManager.promptSiteDataRemoval(window, removals);
         if (allowed) {
-          SiteDataManager.remove(removals).catch(Cu.reportError);
+          try {
+            await SiteDataManager.remove(removals);
+          } catch (e) {
+            Cu.reportError(e);
+          }
         }
       }
     }

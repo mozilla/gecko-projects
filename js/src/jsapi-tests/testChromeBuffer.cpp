@@ -5,6 +5,7 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "js/CompilationAndEvaluation.h"
+#include "js/ContextOptions.h"
 #include "jsapi-tests/tests.h"
 
 static TestJSPrincipals system_principals(1);
@@ -158,11 +159,17 @@ BEGIN_TEST(testChromeBuffer) {
 
     JS::RootedValue rval(cx);
     CHECK(JS_CallFunction(cx, nullptr, fun, JS::HandleValueArray(v), &rval));
+#ifndef JS_SIMULATOR_ARM64
+    // The ARM64 simulator does not share a common implementation with the other
+    // simulators, and has slightly different end-of-stack behavior. Instead of
+    // failing with "too much recursion," it executes one more function call and
+    // fails with a type error. This behavior is not incorrect.
     bool match;
     CHECK(JS_StringEqualsAscii(
         cx, rval.toString(), "From trusted: InternalError: too much recursion",
         &match));
     CHECK(match);
+#endif
   }
 
   {

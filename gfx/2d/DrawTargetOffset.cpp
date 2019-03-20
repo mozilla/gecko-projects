@@ -25,7 +25,7 @@ bool DrawTargetOffset::Init(DrawTarget* aDrawTarget, IntPoint aOrigin) {
 }
 
 already_AddRefed<SourceSurface> DrawTargetOffset::Snapshot() {
-  return mDrawTarget->Snapshot();
+  return MakeAndAddRef<SourceSurfaceOffset>(mDrawTarget->Snapshot(), mOrigin);
 }
 
 void DrawTargetOffset::DetachAllSnapshots() {}
@@ -163,6 +163,12 @@ void DrawTargetOffset::PushLayer(bool aOpaque, Float aOpacity,
   mDrawTarget->PushLayer(aOpaque, aOpacity, aMask, aMaskTransform, bounds,
                          aCopyBackground);
   SetPermitSubpixelAA(mDrawTarget->GetPermitSubpixelAA());
+}
+
+already_AddRefed<SourceSurface> DrawTargetOffset::IntoLuminanceSource(
+    LuminanceType aLuminanceType, float aOpacity) {
+  return MakeAndAddRef<SourceSurfaceOffset>(
+      DrawTarget::IntoLuminanceSource(aLuminanceType, aOpacity), mOrigin);
 }
 
 void DrawTargetOffset::PushLayerWithBlend(bool aOpaque, Float aOpacity,

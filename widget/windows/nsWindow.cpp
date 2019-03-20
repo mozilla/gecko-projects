@@ -132,7 +132,6 @@
 #include "mozilla/dom/MouseEventBinding.h"
 #include "mozilla/dom/Touch.h"
 #include "mozilla/gfx/2D.h"
-#include "nsToolkitCompsCID.h"
 #include "nsIAppStartup.h"
 #include "mozilla/WindowsVersion.h"
 #include "mozilla/TextEvents.h"  // For WidgetKeyboardEvent
@@ -158,20 +157,20 @@
 
 #if defined(ACCESSIBILITY)
 
-#ifdef DEBUG
-#include "mozilla/a11y/Logging.h"
-#endif
+#  ifdef DEBUG
+#    include "mozilla/a11y/Logging.h"
+#  endif
 
-#include "oleidl.h"
-#include <winuser.h>
-#include "nsAccessibilityService.h"
-#include "mozilla/a11y/DocAccessible.h"
-#include "mozilla/a11y/LazyInstantiator.h"
-#include "mozilla/a11y/Platform.h"
-#if !defined(WINABLEAPI)
-#include <winable.h>
-#endif  // !defined(WINABLEAPI)
-#endif  // defined(ACCESSIBILITY)
+#  include "oleidl.h"
+#  include <winuser.h>
+#  include "nsAccessibilityService.h"
+#  include "mozilla/a11y/DocAccessible.h"
+#  include "mozilla/a11y/LazyInstantiator.h"
+#  include "mozilla/a11y/Platform.h"
+#  if !defined(WINABLEAPI)
+#    include <winable.h>
+#  endif  // !defined(WINABLEAPI)
+#endif    // defined(ACCESSIBILITY)
 
 #include "nsIWinTaskbar.h"
 #define NS_TASKBAR_CONTRACTID "@mozilla.org/windows-taskbar;1"
@@ -200,11 +199,11 @@
 #define ERROR 0
 
 #if !defined(SM_CONVERTIBLESLATEMODE)
-#define SM_CONVERTIBLESLATEMODE 0x2003
+#  define SM_CONVERTIBLESLATEMODE 0x2003
 #endif
 
 #if !defined(WM_DPICHANGED)
-#define WM_DPICHANGED 0x02E0
+#  define WM_DPICHANGED 0x02E0
 #endif
 
 #include "mozilla/gfx/DeviceManagerDx.h"
@@ -359,9 +358,6 @@ static const int32_t kGlassMarginAdjustment = 2;
 // we will always display a resize cursor in, regardless of the underlying
 // content.
 static const int32_t kResizableBorderMinSize = 3;
-
-// Cached pointer events enabler value, True if pointer events are enabled.
-static bool gIsPointerEventsEnabled = false;
 
 // We should never really try to accelerate windows bigger than this. In some
 // cases this might lead to no D3D9 acceleration where we could have had it
@@ -651,10 +647,6 @@ nsWindow::nsWindow(bool aIsChildWindow)
     if (mPointerEvents.ShouldEnableInkCollector()) {
       InkCollector::sInkCollector = new InkCollector();
     }
-
-    Preferences::AddBoolVarCache(&gIsPointerEventsEnabled,
-                                 "dom.w3c_pointer_events.enabled",
-                                 gIsPointerEventsEnabled);
   }  // !sInstanceCount
 
   mIdleService = nullptr;
@@ -756,6 +748,7 @@ nsresult nsWindow::Create(nsIWidget* aParent, nsNativeWidget aNativeParent,
 
   mIsRTL = aInitData->mRTL;
   mOpeningAnimationSuppressed = aInitData->mIsAnimationSuppressed;
+  mAlwaysOnTop = aInitData->mAlwaysOnTop;
 
   DWORD style = WindowStyle();
   DWORD extendedStyle = WindowExStyle();
@@ -833,6 +826,11 @@ nsresult nsWindow::Create(nsIWidget* aParent, nsNativeWidget aNativeParent,
 
   if (mOpeningAnimationSuppressed) {
     SuppressAnimation(true);
+  }
+
+  if (mAlwaysOnTop) {
+    ::SetWindowPos(mWnd, HWND_TOPMOST, 0, 0, 0, 0,
+                   SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
   }
 
   if (!IsPlugin() && mWindowType != eWindowType_invisible &&
@@ -1342,7 +1340,8 @@ BOOL CALLBACK nsWindow::EnumAllThreadWindowProc(HWND aWnd, LPARAM aParam) {
   return TRUE;
 }
 
-/* static*/ nsTArray<nsWindow*> nsWindow::EnumAllWindows() {
+/* static*/
+nsTArray<nsWindow*> nsWindow::EnumAllWindows() {
   nsTArray<nsWindow*> windows;
   EnumThreadWindows(GetCurrentThreadId(), EnumAllThreadWindowProc,
                     reinterpret_cast<LPARAM>(&windows));
@@ -1510,7 +1509,7 @@ void nsWindow::Show(bool bState) {
 
         // Set the cursor before showing the window to avoid the default wait
         // cursor.
-        SetCursor(eCursor_standard);
+        SetCursor(eCursor_standard, nullptr, 0, 0);
 
         switch (mSizeMode) {
           case nsSizeMode_Fullscreen:
@@ -2704,208 +2703,183 @@ void nsWindow::SetBackgroundColor(const nscolor& aColor) {
  **************************************************************/
 
 // Set this component cursor
-void nsWindow::SetCursor(nsCursor aCursor) {
-  // Only change cursor if it's changing
-
-  // XXX mCursor isn't always right.  Scrollbars and others change it, too.
-  // XXX If we want this optimization we need a better way to do it.
-  // if (aCursor != mCursor) {
-  HCURSOR newCursor = nullptr;
-
+static HCURSOR CursorFor(nsCursor aCursor) {
   switch (aCursor) {
     case eCursor_select:
-      newCursor = ::LoadCursor(nullptr, IDC_IBEAM);
-      break;
-
+      return ::LoadCursor(nullptr, IDC_IBEAM);
     case eCursor_wait:
-      newCursor = ::LoadCursor(nullptr, IDC_WAIT);
-      break;
-
-    case eCursor_hyperlink: {
-      newCursor = ::LoadCursor(nullptr, IDC_HAND);
-      break;
-    }
-
+      return ::LoadCursor(nullptr, IDC_WAIT);
+    case eCursor_hyperlink:
+      return ::LoadCursor(nullptr, IDC_HAND);
     case eCursor_standard:
     case eCursor_context_menu:  // XXX See bug 258960.
-      newCursor = ::LoadCursor(nullptr, IDC_ARROW);
-      break;
+      return ::LoadCursor(nullptr, IDC_ARROW);
 
     case eCursor_n_resize:
     case eCursor_s_resize:
-      newCursor = ::LoadCursor(nullptr, IDC_SIZENS);
-      break;
+      return ::LoadCursor(nullptr, IDC_SIZENS);
 
     case eCursor_w_resize:
     case eCursor_e_resize:
-      newCursor = ::LoadCursor(nullptr, IDC_SIZEWE);
-      break;
+      return ::LoadCursor(nullptr, IDC_SIZEWE);
 
     case eCursor_nw_resize:
     case eCursor_se_resize:
-      newCursor = ::LoadCursor(nullptr, IDC_SIZENWSE);
-      break;
+      return ::LoadCursor(nullptr, IDC_SIZENWSE);
 
     case eCursor_ne_resize:
     case eCursor_sw_resize:
-      newCursor = ::LoadCursor(nullptr, IDC_SIZENESW);
-      break;
+      return ::LoadCursor(nullptr, IDC_SIZENESW);
 
     case eCursor_crosshair:
-      newCursor = ::LoadCursor(nullptr, IDC_CROSS);
-      break;
+      return ::LoadCursor(nullptr, IDC_CROSS);
 
     case eCursor_move:
-      newCursor = ::LoadCursor(nullptr, IDC_SIZEALL);
-      break;
+      return ::LoadCursor(nullptr, IDC_SIZEALL);
 
     case eCursor_help:
-      newCursor = ::LoadCursor(nullptr, IDC_HELP);
-      break;
+      return ::LoadCursor(nullptr, IDC_HELP);
 
     case eCursor_copy:  // CSS3
-      newCursor =
-          ::LoadCursor(nsToolkit::mDllInstance, MAKEINTRESOURCE(IDC_COPY));
-      break;
+      return ::LoadCursor(nsToolkit::mDllInstance, MAKEINTRESOURCE(IDC_COPY));
 
     case eCursor_alias:
-      newCursor =
-          ::LoadCursor(nsToolkit::mDllInstance, MAKEINTRESOURCE(IDC_ALIAS));
-      break;
+      return ::LoadCursor(nsToolkit::mDllInstance, MAKEINTRESOURCE(IDC_ALIAS));
 
     case eCursor_cell:
-      newCursor =
-          ::LoadCursor(nsToolkit::mDllInstance, MAKEINTRESOURCE(IDC_CELL));
-      break;
-
+      return ::LoadCursor(nsToolkit::mDllInstance, MAKEINTRESOURCE(IDC_CELL));
     case eCursor_grab:
-      newCursor =
-          ::LoadCursor(nsToolkit::mDllInstance, MAKEINTRESOURCE(IDC_GRAB));
-      break;
+      return ::LoadCursor(nsToolkit::mDllInstance, MAKEINTRESOURCE(IDC_GRAB));
 
     case eCursor_grabbing:
-      newCursor =
-          ::LoadCursor(nsToolkit::mDllInstance, MAKEINTRESOURCE(IDC_GRABBING));
-      break;
+      return ::LoadCursor(nsToolkit::mDllInstance,
+                          MAKEINTRESOURCE(IDC_GRABBING));
 
     case eCursor_spinning:
-      newCursor = ::LoadCursor(nullptr, IDC_APPSTARTING);
-      break;
+      return ::LoadCursor(nullptr, IDC_APPSTARTING);
 
     case eCursor_zoom_in:
-      newCursor =
-          ::LoadCursor(nsToolkit::mDllInstance, MAKEINTRESOURCE(IDC_ZOOMIN));
-      break;
+      return ::LoadCursor(nsToolkit::mDllInstance, MAKEINTRESOURCE(IDC_ZOOMIN));
 
     case eCursor_zoom_out:
-      newCursor =
-          ::LoadCursor(nsToolkit::mDllInstance, MAKEINTRESOURCE(IDC_ZOOMOUT));
-      break;
+      return ::LoadCursor(nsToolkit::mDllInstance,
+                          MAKEINTRESOURCE(IDC_ZOOMOUT));
 
     case eCursor_not_allowed:
     case eCursor_no_drop:
-      newCursor = ::LoadCursor(nullptr, IDC_NO);
-      break;
+      return ::LoadCursor(nullptr, IDC_NO);
 
     case eCursor_col_resize:
-      newCursor =
-          ::LoadCursor(nsToolkit::mDllInstance, MAKEINTRESOURCE(IDC_COLRESIZE));
-      break;
+      return ::LoadCursor(nsToolkit::mDllInstance,
+                          MAKEINTRESOURCE(IDC_COLRESIZE));
 
     case eCursor_row_resize:
-      newCursor =
-          ::LoadCursor(nsToolkit::mDllInstance, MAKEINTRESOURCE(IDC_ROWRESIZE));
-      break;
+      return ::LoadCursor(nsToolkit::mDllInstance,
+                          MAKEINTRESOURCE(IDC_ROWRESIZE));
 
     case eCursor_vertical_text:
-      newCursor = ::LoadCursor(nsToolkit::mDllInstance,
-                               MAKEINTRESOURCE(IDC_VERTICALTEXT));
-      break;
+      return ::LoadCursor(nsToolkit::mDllInstance,
+                          MAKEINTRESOURCE(IDC_VERTICALTEXT));
 
     case eCursor_all_scroll:
       // XXX not 100% appropriate perhaps
-      newCursor = ::LoadCursor(nullptr, IDC_SIZEALL);
-      break;
+      return ::LoadCursor(nullptr, IDC_SIZEALL);
 
     case eCursor_nesw_resize:
-      newCursor = ::LoadCursor(nullptr, IDC_SIZENESW);
-      break;
+      return ::LoadCursor(nullptr, IDC_SIZENESW);
 
     case eCursor_nwse_resize:
-      newCursor = ::LoadCursor(nullptr, IDC_SIZENWSE);
-      break;
+      return ::LoadCursor(nullptr, IDC_SIZENWSE);
 
     case eCursor_ns_resize:
-      newCursor = ::LoadCursor(nullptr, IDC_SIZENS);
-      break;
+      return ::LoadCursor(nullptr, IDC_SIZENS);
 
     case eCursor_ew_resize:
-      newCursor = ::LoadCursor(nullptr, IDC_SIZEWE);
-      break;
+      return ::LoadCursor(nullptr, IDC_SIZEWE);
 
     case eCursor_none:
-      newCursor =
-          ::LoadCursor(nsToolkit::mDllInstance, MAKEINTRESOURCE(IDC_NONE));
-      break;
+      return ::LoadCursor(nsToolkit::mDllInstance, MAKEINTRESOURCE(IDC_NONE));
 
     default:
       NS_ERROR("Invalid cursor type");
-      break;
-  }
-
-  if (nullptr != newCursor) {
-    mCursor = aCursor;
-    HCURSOR oldCursor = ::SetCursor(newCursor);
-
-    if (sHCursor == oldCursor) {
-      NS_IF_RELEASE(sCursorImgContainer);
-      if (sHCursor != nullptr) ::DestroyIcon(sHCursor);
-      sHCursor = nullptr;
-    }
+      return nullptr;
   }
 }
 
-// Setting the actual cursor
-nsresult nsWindow::SetCursor(imgIContainer* aCursor, uint32_t aHotspotX,
-                             uint32_t aHotspotY) {
-  if (sCursorImgContainer == aCursor && sHCursor) {
-    ::SetCursor(sHCursor);
-    return NS_OK;
+static HCURSOR CursorForImage(imgIContainer* aImageContainer,
+                              uint32_t aHotspotX, uint32_t aHotspotY,
+                              double aScale) {
+  if (!aImageContainer) {
+    return nullptr;
   }
 
-  int32_t width;
-  int32_t height;
+  int32_t width = 0;
+  int32_t height = 0;
 
-  nsresult rv;
-  rv = aCursor->GetWidth(&width);
-  NS_ENSURE_SUCCESS(rv, rv);
-  rv = aCursor->GetHeight(&height);
-  NS_ENSURE_SUCCESS(rv, rv);
+  if (NS_FAILED(aImageContainer->GetWidth(&width)) ||
+      NS_FAILED(aImageContainer->GetHeight(&height))) {
+    return nullptr;
+  }
 
   // Reject cursors greater than 128 pixels in either direction, to prevent
   // spoofing.
   // XXX ideally we should rescale. Also, we could modify the API to
   // allow trusted content to set larger cursors.
-  if (width > 128 || height > 128) return NS_ERROR_NOT_AVAILABLE;
+  if (width > 128 || height > 128) {
+    return nullptr;
+  }
 
+  IntSize size = RoundedToInt(Size(width * aScale, height * aScale));
   HCURSOR cursor;
+  nsresult rv = nsWindowGfx::CreateIcon(aImageContainer, true, aHotspotX,
+                                        aHotspotY, size, &cursor);
+  if (NS_FAILED(rv)) {
+    return nullptr;
+  }
+
+  return cursor;
+}
+
+// Setting the actual cursor
+void nsWindow::SetCursor(nsCursor aDefaultCursor, imgIContainer* aImageCursor,
+                         uint32_t aHotspotX, uint32_t aHotspotY) {
+  if (aImageCursor && sCursorImgContainer == aImageCursor && sHCursor) {
+    ::SetCursor(sHCursor);
+    return;
+  }
+
   double scale = GetDefaultScale().scale;
-  IntSize size = RoundedToInt(Size(width * scale, height * scale));
-  rv = nsWindowGfx::CreateIcon(aCursor, true, aHotspotX, aHotspotY, size,
-                               &cursor);
-  NS_ENSURE_SUCCESS(rv, rv);
+  HCURSOR cursor = CursorForImage(aImageCursor, aHotspotX, aHotspotY, scale);
+  if (cursor) {
+    mCursor = eCursorInvalid;
+    ::SetCursor(cursor);
 
-  mCursor = eCursorInvalid;
-  ::SetCursor(cursor);
+    NS_IF_RELEASE(sCursorImgContainer);
+    sCursorImgContainer = aImageCursor;
+    NS_ADDREF(sCursorImgContainer);
 
-  NS_IF_RELEASE(sCursorImgContainer);
-  sCursorImgContainer = aCursor;
-  NS_ADDREF(sCursorImgContainer);
+    if (sHCursor) {
+      ::DestroyIcon(sHCursor);
+    }
+    sHCursor = cursor;
+    return;
+  }
 
-  if (sHCursor != nullptr) ::DestroyIcon(sHCursor);
-  sHCursor = cursor;
+  cursor = CursorFor(aDefaultCursor);
+  if (!cursor) {
+    return;
+  }
 
-  return NS_OK;
+  mCursor = aDefaultCursor;
+  HCURSOR oldCursor = ::SetCursor(cursor);
+
+  if (sHCursor == oldCursor) {
+    NS_IF_RELEASE(sCursorImgContainer);
+    if (sHCursor) {
+      ::DestroyIcon(sHCursor);
+    }
+    sHCursor = nullptr;
+  }
 }
 
 /**************************************************************
@@ -3251,8 +3225,8 @@ class FullscreenTransitionData final : public nsISupports {
 
 NS_IMPL_ISUPPORTS0(FullscreenTransitionData)
 
-/* virtual */ bool nsWindow::PrepareForFullscreenTransition(
-    nsISupports** aData) {
+/* virtual */
+bool nsWindow::PrepareForFullscreenTransition(nsISupports** aData) {
   // We don't support fullscreen transition when composition is not
   // enabled, which could make the transition broken and annoying.
   // See bug 1184201.
@@ -3294,9 +3268,11 @@ NS_IMPL_ISUPPORTS0(FullscreenTransitionData)
   return true;
 }
 
-/* virtual */ void nsWindow::PerformFullscreenTransition(
-    FullscreenTransitionStage aStage, uint16_t aDuration, nsISupports* aData,
-    nsIRunnable* aCallback) {
+/* virtual */
+void nsWindow::PerformFullscreenTransition(FullscreenTransitionStage aStage,
+                                           uint16_t aDuration,
+                                           nsISupports* aData,
+                                           nsIRunnable* aCallback) {
   auto data = static_cast<FullscreenTransitionData*>(aData);
   nsCOMPtr<nsIRunnable> callback = aCallback;
   UINT msg = aStage == eBeforeFullscreenToggle ? WM_FULLSCREEN_TRANSITION_BEFORE
@@ -3305,7 +3281,8 @@ NS_IMPL_ISUPPORTS0(FullscreenTransitionData)
   ::PostMessage(data->mWnd, msg, wparam, (LPARAM)aDuration);
 }
 
-/* virtual */ void nsWindow::CleanupFullscreenTransition() {
+/* virtual */
+void nsWindow::CleanupFullscreenTransition() {
   MOZ_ASSERT(NS_IsMainThread(),
              "CleanupFullscreenTransition "
              "should only run on the main thread");
@@ -3776,6 +3753,7 @@ void nsWindow::SetCompositorWidgetDelegate(CompositorWidgetDelegate* delegate) {
     MOZ_ASSERT(mCompositorWidgetDelegate,
                "nsWindow::SetCompositorWidgetDelegate called with a "
                "non-PlatformCompositorWidgetDelegate");
+    mCompositorWidgetDelegate->SetParentWnd(mWnd);
   } else {
     mCompositorWidgetDelegate = nullptr;
   }
@@ -3891,14 +3869,10 @@ void nsWindow::AddWindowOverlayWebRenderCommands(
     wr::IpcResourceUpdateQueue& aResources) {
   if (mWindowButtonsRect) {
     wr::LayoutRect rect = wr::ToLayoutRect(*mWindowButtonsRect);
-    nsTArray<wr::ComplexClipRegion> roundedClip;
-    roundedClip.AppendElement(wr::ToComplexClipRegion(
+    auto complexRegion = wr::ToComplexClipRegion(
         RoundedRect(IntRectToRect(mWindowButtonsRect->ToUnknownRect()),
-                    RectCornerRadii(0, 0, 3, 3))));
-    wr::WrClipId clipId = aBuilder.DefineClip(Nothing(), rect, &roundedClip);
-    aBuilder.PushClip(clipId);
-    aBuilder.PushClearRect(rect);
-    aBuilder.PopClip();
+                    RectCornerRadii(0, 0, 3, 3)));
+    aBuilder.PushClearRectWithComplexRegion(rect, complexRegion);
   }
 }
 
@@ -4697,6 +4671,12 @@ static bool DisplaySystemMenu(HWND hWnd, nsSizeMode sizeMode, bool isRtl,
       case nsSizeMode_Normal:
         SetMenuItemInfo(hMenu, SC_RESTORE, FALSE, &mii);
         break;
+      case nsSizeMode_Invalid:
+        NS_ASSERTION(false, "Did the argument come from invalid IPC?");
+        break;
+      default:
+        MOZ_ASSERT_UNREACHABLE("Unhnalded nsSizeMode value detected");
+        break;
     }
     LPARAM cmd = TrackPopupMenu(
         hMenu,
@@ -4946,7 +4926,7 @@ bool nsWindow::ProcessMessage(UINT msg, WPARAM& wParam, LPARAM& lParam,
 
     case MOZ_WM_STARTA11Y:
 #if defined(ACCESSIBILITY)
-      (void*)GetAccessible();
+      Unused << GetAccessible();
       result = true;
 #else
       result = false;
@@ -6504,13 +6484,17 @@ void nsWindow::OnWindowPosChanging(LPWINDOWPOS& info) {
     nsCOMPtr<nsIScreenManager> screenmgr =
         do_GetService(sScreenManagerContractID);
     if (screenmgr) {
+      LayoutDeviceIntRect bounds(info->x, info->y, info->cx, info->cy);
+      DesktopIntRect deskBounds =
+          RoundedToInt(bounds / GetDesktopToDeviceScale());
       nsCOMPtr<nsIScreen> screen;
-      screenmgr->ScreenForRect(info->x, info->y, info->cx, info->cy,
+      screenmgr->ScreenForRect(deskBounds.X(), deskBounds.Y(),
+                               deskBounds.Width(), deskBounds.Height(),
                                getter_AddRefs(screen));
 
       if (screen) {
         int32_t x, y, width, height;
-        screen->GetRectDisplayPix(&x, &y, &width, &height);
+        screen->GetRect(&x, &y, &width, &height);
 
         info->x = x;
         info->y = y;
@@ -6554,6 +6538,16 @@ void nsWindow::OnWindowPosChanging(LPWINDOWPOS& info) {
   }
   // prevent rude external programs from making hidden window visible
   if (mWindowType == eWindowType_invisible) info->flags &= ~SWP_SHOWWINDOW;
+
+  // When waking from sleep or switching out of tablet mode, Windows 10
+  // Version 1809 will reopen popup windows that should be hidden. Detect
+  // this case and refuse to show the window.
+  static bool sDWMUnhidesPopups = IsWin10Sep2018UpdateOrLater();
+  if (sDWMUnhidesPopups && (info->flags & SWP_SHOWWINDOW) &&
+      mWindowType == eWindowType_popup && mWidgetListener &&
+      mWidgetListener->ShouldNotBeVisible()) {
+    info->flags &= ~SWP_SHOWWINDOW;
+  }
 }
 
 void nsWindow::UserActivity() {
@@ -6918,7 +6912,9 @@ void nsWindow::OnDestroy() {
   }
 
   // Destroy any custom cursor resources.
-  if (mCursor == eCursorInvalid) SetCursor(eCursor_standard);
+  if (mCursor == eCursorInvalid) {
+    SetCursor(eCursor_standard, nullptr, 0, 0);
+  }
 
   if (mCompositorWidgetDelegate) {
     mCompositorWidgetDelegate->OnDestroyWindow();
@@ -7089,24 +7085,25 @@ TextEventDispatcherListener* nsWindow::GetNativeTextEventDispatcherListener() {
 }
 
 #ifdef ACCESSIBILITY
-#ifdef DEBUG
-#define NS_LOG_WMGETOBJECT(aWnd, aHwnd, aAcc)                                  \
-  if (a11y::logging::IsEnabled(a11y::logging::ePlatforms)) {                   \
-    printf(                                                                    \
-        "Get the window:\n  {\n     HWND: %p, parent HWND: %p, wndobj: %p,\n", \
-        aHwnd, ::GetParent(aHwnd), aWnd);                                      \
-    printf("     acc: %p", aAcc);                                              \
-    if (aAcc) {                                                                \
-      nsAutoString name;                                                       \
-      aAcc->Name(name);                                                        \
-      printf(", accname: %s", NS_ConvertUTF16toUTF8(name).get());              \
-    }                                                                          \
-    printf("\n }\n");                                                          \
-  }
+#  ifdef DEBUG
+#    define NS_LOG_WMGETOBJECT(aWnd, aHwnd, aAcc)                            \
+      if (a11y::logging::IsEnabled(a11y::logging::ePlatforms)) {             \
+        printf(                                                              \
+            "Get the window:\n  {\n     HWND: %p, parent HWND: %p, wndobj: " \
+            "%p,\n",                                                         \
+            aHwnd, ::GetParent(aHwnd), aWnd);                                \
+        printf("     acc: %p", aAcc);                                        \
+        if (aAcc) {                                                          \
+          nsAutoString name;                                                 \
+          aAcc->Name(name);                                                  \
+          printf(", accname: %s", NS_ConvertUTF16toUTF8(name).get());        \
+        }                                                                    \
+        printf("\n }\n");                                                    \
+      }
 
-#else
-#define NS_LOG_WMGETOBJECT(aWnd, aHwnd, aAcc)
-#endif
+#  else
+#    define NS_LOG_WMGETOBJECT(aWnd, aHwnd, aAcc)
+#  endif
 
 a11y::Accessible* nsWindow::GetAccessible() {
   // If the pref was ePlatformIsDisabled, return null here, disabling a11y.
@@ -7256,17 +7253,17 @@ LRESULT CALLBACK nsWindow::MozSpecialMsgFilter(int code, WPARAM wParam,
     }
     if (code != gLastMsgCode) {
       if (gMSGFEvents[inx].mId == code) {
-#ifdef DEBUG
+#  ifdef DEBUG
         MOZ_LOG(gWindowsLog, LogLevel::Info,
                 ("MozSpecialMessageProc - code: 0x%X  - %s  hw: %p\n", code,
                  gMSGFEvents[inx].mStr, pMsg->hwnd));
-#endif
+#  endif
       } else {
-#ifdef DEBUG
+#  ifdef DEBUG
         MOZ_LOG(gWindowsLog, LogLevel::Info,
                 ("MozSpecialMessageProc - code: 0x%X  - %d  hw: %p\n", code,
                  gMSGFEvents[inx].mId, pMsg->hwnd));
-#endif
+#  endif
       }
       gLastMsgCode = code;
     }

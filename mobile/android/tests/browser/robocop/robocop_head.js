@@ -542,7 +542,6 @@ function pattern_matcher(pattern) {
       }
       return true;
     };
-
 }
 
 // Format an explanation for a pattern match failure, as stored in the
@@ -705,7 +704,7 @@ var _Task;
 function add_task(func) {
   if (!_Task) {
     let ns = {};
-    _Task = Components.utils.import("resource://gre/modules/Task.jsm", ns).Task;
+    _Task = Components.utils.import("resource://testing-common/Task.jsm", ns).Task;
   }
 
   _gTests.push([true, func]);
@@ -761,7 +760,6 @@ function run_next_test() {
  */
 
 function JavaBridge(obj) {
-
   this._EVENT_TYPE = "Robocop:JS";
   this._JAVA_EVENT_TYPE = "Robocop:Java";
   this._target = obj;

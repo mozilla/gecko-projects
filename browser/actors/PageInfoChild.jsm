@@ -4,10 +4,10 @@
 
 var EXPORTED_SYMBOLS = ["PageInfoChild"];
 
-ChromeUtils.import("resource://gre/modules/Services.jsm");
-ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
+const {Services} = ChromeUtils.import("resource://gre/modules/Services.jsm");
+const {XPCOMUtils} = ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
 
-ChromeUtils.import("resource://gre/modules/ActorChild.jsm");
+const {ActorChild} = ChromeUtils.import("resource://gre/modules/ActorChild.jsm");
 
 XPCOMUtils.defineLazyModuleGetters(this, {
   PrivateBrowsingUtils: "resource://gre/modules/PrivateBrowsingUtils.jsm",
@@ -108,7 +108,7 @@ class PageInfoChild extends ActorChild {
       let num = window.frames.length;
       for (let i = 0; i < num; i++) {
         // Recurse through the frames.
-        frameList.concat(this.goThroughFrames(window.frames[i].document,
+        frameList = frameList.concat(this.goThroughFrames(window.frames[i].document,
                                               window.frames[i]));
       }
     }
@@ -292,7 +292,6 @@ class PageInfoChild extends ActorChild {
   // Modified from the Links Panel v2.3, http://segment7.net/mozilla/links/links.html
   // parse a node to extract the contents of the node
   getValueText(node) {
-
     let valueText = "";
     let content = node.ownerGlobal;
 

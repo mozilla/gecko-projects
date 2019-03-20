@@ -44,9 +44,6 @@ class gfxTextPerfMetrics;
 typedef struct FT_LibraryRec_* FT_Library;
 
 namespace mozilla {
-namespace gl {
-class SkiaGLGlue;
-}  // namespace gl
 namespace layers {
 class FrameStats;
 }
@@ -117,6 +114,8 @@ inline const char* GetBackendName(mozilla::gfx::BackendType aBackend) {
       return "direct2d 1.1";
     case mozilla::gfx::BackendType::WEBRENDER_TEXT:
       return "webrender text";
+    case mozilla::gfx::BackendType::CAPTURE:
+      return "capture";
     case mozilla::gfx::BackendType::NONE:
       return "none";
     case mozilla::gfx::BackendType::BACKEND_LAST:
@@ -273,15 +272,6 @@ class gfxPlatform : public mozilla::layers::MemoryPressureListener {
   bool SupportsAzureContentForType(mozilla::gfx::BackendType aType) {
     return BackendTypeBit(aType) & mContentBackendBitmask;
   }
-
-  /// This function also lets us know if the current preferences/platform
-  /// combination allows for both accelerated and not accelerated canvas
-  /// implementations.  If it does, and other relevant preferences are
-  /// asking for it, we will examine the commands in the first few seconds
-  /// of the canvas usage, and potentially change to accelerated or
-  /// non-accelerated canvas.
-  virtual bool AllowOpenGLCanvas();
-  virtual void InitializeSkiaCacheLimits();
 
   static bool AsyncPanZoomEnabled();
 
@@ -613,13 +603,18 @@ class gfxPlatform : public mozilla::layers::MemoryPressureListener {
    */
   mozilla::layers::DiagnosticTypes GetLayerDiagnosticTypes();
 
-  mozilla::gl::SkiaGLGlue* GetSkiaGLGlue();
-  void PurgeSkiaGPUCache();
   static void PurgeSkiaFontCache();
 
   static bool UsesOffMainThreadCompositing();
 
-  bool HasEnoughTotalSystemMemoryForSkiaGL();
+  /**
+   * Whether we want to adjust gfx parameters (currently just
+   * the framerate and whether we use software vs. hardware vsync)
+   * down because we've determined we're on a low-end machine.
+   * This will return false if the user has turned on fingerprinting
+   * resistance (to ensure consistent behavior across devices).
+   */
+  static bool ShouldAdjustForLowEndMachine();
 
   /**
    * Get the hardware vsync source for each platform.
@@ -640,19 +635,24 @@ class gfxPlatform : public mozilla::layers::MemoryPressureListener {
   static bool IsInLayoutAsapMode();
 
   /**
-   * Returns the software vsync rate to use.
-   */
-  static int GetSoftwareVsyncRate();
-
-  /**
    * Returns whether or not a custom vsync rate is set.
    */
   static bool ForceSoftwareVsync();
 
   /**
+   * Returns the software vsync rate to use.
+   */
+  static int GetSoftwareVsyncRate();
+
+  /**
    * Returns the default frame rate for the refresh driver / software vsync.
    */
   static int GetDefaultFrameRate();
+
+  /**
+   * Update the frame rate (called e.g. after pref changes).
+   */
+  static void ReInitFrameRate();
 
   /**
    * Used to test which input types are handled via APZ.
@@ -737,6 +737,11 @@ class gfxPlatform : public mozilla::layers::MemoryPressureListener {
 
   virtual void OnMemoryPressure(
       mozilla::layers::MemoryPressureReason aWhy) override;
+
+  virtual void EnsureDevicesInitialized(){};
+  virtual bool DevicesInitialized() { return true; };
+
+  static uint32_t TargetFrameRate();
 
  protected:
   gfxPlatform();
@@ -913,7 +918,6 @@ class gfxPlatform : public mozilla::layers::MemoryPressureListener {
   nsTArray<mozilla::layers::FrameStats> mFrameStats;
 
   RefPtr<mozilla::gfx::DrawEventRecorder> mRecorder;
-  RefPtr<mozilla::gl::SkiaGLGlue> mSkiaGlue;
 
   // Backend that we are compositing with. NONE, if no compositor has been
   // created yet.

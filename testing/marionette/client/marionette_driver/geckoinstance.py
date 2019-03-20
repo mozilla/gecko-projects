@@ -116,6 +116,9 @@ class GeckoInstance(object):
         # Make sure SNTP requests don't hit the network
         "network.sntp.pools": "%(server)s",
 
+        # Don't do network connections for mitm priming
+        "security.certerrors.mitm.priming.enabled": False,
+
         # Tests don't wait for the notification button security delay
         "security.notification_enable_delay": 0,
 
@@ -379,11 +382,6 @@ class FennecInstance(GeckoInstance):
         "browser.dom.window.dump.enabled": True,
         "devtools.console.stdout.chrome": True,
 
-        # Disable Android snippets
-        "browser.snippets.enabled": False,
-        "browser.snippets.syncPromo.enabled": False,
-        "browser.snippets.firstrunHomepage.enabled": False,
-
         # Disable safebrowsing components
         "browser.safebrowsing.blockedURIs.enabled": False,
         "browser.safebrowsing.downloads.enabled": False,
@@ -500,14 +498,12 @@ class DesktopInstance(GeckoInstance):
         "app.update.checkInstallTime": False,
 
         # Disable automatically upgrading Firefox
-        # Bug 1508726: "disabledForTesting" has no effect in Marionette yet.
-        # As such automatically downloading updates, and installing those
-        # needs to be prevented. Sadly "app.update.auto" will not be enough
-        # anymore, because Windows has changed in how it handles updates. But
-        # at least we can workaround the problem on other platforms.
         #
-        # DISCLAIMER: Don't remove or change this line until bug 1508726 has
-        # been fixed.
+        # Note: Possible update tests could reset or flip the value to allow
+        # updates to be downloaded and applied.
+        "app.update.disabledForTesting": True,
+        # !!! For backward compatibility up to Firefox 64. Only remove
+        # when this Firefox version is no longer supported by the client !!!
         "app.update.auto": False,
 
         # Don't show the content blocking introduction panel

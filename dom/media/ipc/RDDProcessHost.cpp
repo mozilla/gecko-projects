@@ -128,7 +128,9 @@ void RDDProcessHost::InitAfterConnect(bool aSucceeded) {
         mRDDChild->Open(GetChannel(), base::GetProcId(GetChildProcessHandle()));
     MOZ_ASSERT(rv);
 
-    mRDDChild->Init();
+    if (!mRDDChild->Init()) {
+      KillHard("ActorInitFailed");
+    }
   }
 
   if (mListener) {
@@ -195,11 +197,6 @@ void RDDProcessHost::KillHard(const char* aReason) {
 
 uint64_t RDDProcessHost::GetProcessToken() const { return mProcessToken; }
 
-static void RDDDelayedDeleteSubprocess(GeckoChildProcessHost* aSubprocess) {
-  XRE_GetIOMessageLoop()->PostTask(
-      mozilla::MakeAndAddRef<DeleteTask<GeckoChildProcessHost>>(aSubprocess));
-}
-
 void RDDProcessHost::KillProcess() { KillHard("DiagnosticKill"); }
 
 void RDDProcessHost::DestroyProcess() {
@@ -210,8 +207,8 @@ void RDDProcessHost::DestroyProcess() {
     mTaskFactory.RevokeAll();
   }
 
-  MessageLoop::current()->PostTask(NewRunnableFunction(
-      "DestroyProcessRunnable", RDDDelayedDeleteSubprocess, this));
+  MessageLoop::current()->PostTask(
+      NS_NewRunnableFunction("DestroyProcessRunnable", [this] { Destroy(); }));
 }
 
 }  // namespace mozilla

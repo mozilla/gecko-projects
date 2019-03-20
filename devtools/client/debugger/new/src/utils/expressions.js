@@ -7,21 +7,16 @@
 import { correctIndentation } from "./indentation";
 import type { Expression } from "../types";
 
-// replace quotes that could interfere with the evaluation.
-export function sanitizeInput(input: string) {
-  return input.replace(/"/g, '"');
-}
-
 /*
  * wrap the expression input in a try/catch so that it can be safely
  * evaluated.
  *
  * NOTE: we add line after the expression to protect against comments.
-*/
+ */
 export function wrapExpression(input: string) {
   return correctIndentation(`
     try {
-      ${sanitizeInput(input)}
+      ${input}
     } catch (e) {
       e
     }

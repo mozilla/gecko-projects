@@ -19,12 +19,13 @@ import {
   getSources,
   getUrls,
   getSpecificSourceByURL,
-  getSpecificSourceByUrlInSources
+  getSpecificSourceByURLInSources
 } from "./sources";
 
 import type { Action } from "../actions/types";
 import type { SourcesState } from "./sources";
 import type { Source } from "../types";
+import type { Selector } from "./types";
 
 export type Tab = {
   url: string,
@@ -166,9 +167,8 @@ export function getNewSelectedSourceId(
   const availableTab = availableTabs[newSelectedTabIndex];
 
   if (availableTab) {
-    const tabSource = getSpecificSourceByUrlInSources(
-      getSources(state),
-      getUrls(state),
+    const tabSource = getSpecificSourceByURL(
+      state,
       availableTab.url,
       availableTab.isOriginal
     );
@@ -194,7 +194,7 @@ type OuterState = { tabs: TabList, sources: SourcesState };
 
 export const getTabs = (state: OuterState): TabList => state.tabs;
 
-export const getSourceTabs = createSelector(
+export const getSourceTabs: Selector<Tab[]> = createSelector(
   getTabs,
   getSources,
   getUrls,
@@ -202,7 +202,7 @@ export const getSourceTabs = createSelector(
     tabs.filter(tab => getTabWithOrWithoutUrl(tab, sources, urls))
 );
 
-export const getSourcesForTabs = createSelector(
+export const getSourcesForTabs: Selector<Source[]> = createSelector(
   getSourceTabs,
   getSources,
   getUrls,
@@ -212,7 +212,7 @@ export const getSourcesForTabs = createSelector(
 
 function getTabWithOrWithoutUrl(tab, sources, urls) {
   if (tab.url) {
-    return getSpecificSourceByUrlInSources(
+    return getSpecificSourceByURLInSources(
       sources,
       urls,
       tab.url,

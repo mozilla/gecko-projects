@@ -4,7 +4,7 @@
 
 #filter substitution
 
-// For browser.xml binding
+// For browser.js element
 //
 // cacheRatio* is a ratio that determines the amount of pixels to cache. The
 // ratio is multiplied by the viewport width or height to get the displayport's
@@ -72,7 +72,6 @@ pref("browser.cache.disk.enable", true);
 pref("browser.cache.disk.capacity", 20480); // kilobytes
 pref("browser.cache.disk.max_entry_size", 4096); // kilobytes
 pref("browser.cache.disk.smart_size.enabled", true);
-pref("browser.cache.disk.smart_size.first_run", true);
 
 pref("browser.cache.memory.enable", true);
 pref("browser.cache.memory.capacity", 1024); // kilobytes
@@ -185,7 +184,7 @@ pref("dom.forms.datetime.others", true);
 /* extension manager and xpinstall */
 pref("xpinstall.whitelist.directRequest", false);
 pref("xpinstall.whitelist.fileRequest", false);
-pref("xpinstall.whitelist.add", "https://addons.mozilla.org,https://testpilot.firefox.com");
+pref("xpinstall.whitelist.add", "https://addons.mozilla.org");
 
 pref("extensions.langpacks.signatures.required", true);
 pref("xpinstall.signatures.required", true);
@@ -381,13 +380,8 @@ pref("browser.ui.zoom.force-user-scalable", false);
 // With the typical screen sizes on mobile devices, we want to wrap page sources by default.
 pref("view_source.wrap_long_lines", true);
 
-// When removing this Nightly flag, also remember to remove the flags surrounding this feature
-// in GeckoPreferences and BrowserApp (see bug 1245930).
-#ifdef NIGHTLY_BUILD
-pref("ui.bookmark.mobilefolder.enabled", true);
-#else
-pref("ui.bookmark.mobilefolder.enabled", false);
-#endif
+// Ditto for plain text documents.
+pref("plain_text.wrap_long_lines", true);
 
 
 pref("ui.touch.radius.enabled", false);
@@ -419,7 +413,7 @@ pref("dom.ipc.plugins.enabled", false);
 
 // product URLs
 // The breakpad report server to link to in about:crashes
-pref("breakpad.reportURL", "https://crash-stats.mozilla.com/report/index/");
+pref("breakpad.reportURL", "https://crash-stats.mozilla.org/report/index/");
 
 pref("app.support.baseURL", "https://support.mozilla.org/1/mobile/%VERSION%/%OS%/%LOCALE%/");
 pref("app.supportURL", "https://support.mozilla.org/1/mobile/%VERSION%/%OS%/%LOCALE%/mobile-help");
@@ -544,9 +538,8 @@ pref("layers.low-precision-opacity", "1.0");
 // work harder keep scrolling smooth and memory low.
 pref("layers.max-active", 20);
 
-// On Fennec we need containerful scrolling to support zooming. Bug 1459312
-// tracks zooming with containerless scrolling.
-pref("layout.scroll.root-frame-containers", 1);
+// Use containerless scrolling on Fennec.
+pref("layout.scroll.root-frame-containers", 0);
 
 pref("notification.feature.enabled", true);
 pref("dom.webnotifications.enabled", true);
@@ -581,21 +574,17 @@ pref("media.mediasource.enabled", true);
 
 pref("media.mediadrm-widevinecdm.visible", true);
 
-#ifdef NIGHTLY_BUILD
 // Switch block autoplay logic to v2.
 pref("media.autoplay.enabled.user-gestures-needed", true);
-// UI/prompting for permission isn't implemented for Fennec, so disable.
-pref("media.autoplay.ask-permission", false);
 // Set Fennec to block autoplay by default.
-pref("media.autoplay.default", 1); // 0=Allowed, 1=Blocked, 2=Prompt
-#else
-pref("media.autoplay.default", 0); // 0=Allowed, 1=Blocked, 2=Prompt
-pref("media.autoplay.enabled.user-gestures-needed", false);
-pref("media.autoplay.ask-permission", false);
-#endif
+pref("media.autoplay.default", 1); // 0=Allowed, 1=Blocked
 
 // Enable WebSpeech speech synthesis
 pref("media.webspeech.synth.enabled", true);
+
+// OpenH264 is visible in about:plugins, and enabled, by default.
+pref("media.gmp-gmpopenh264.visible", true);
+pref("media.gmp-gmpopenh264.enabled", true);
 
 // optimize images memory usage
 pref("image.downscale-during-decode.enabled", true);
@@ -609,10 +598,6 @@ pref("urlclassifier.downloadBlockTable", "");
 
 // The Potentially Harmful Apps list replaces the malware one on Android.
 pref("urlclassifier.malwareTable", "goog-harmful-proto,goog-unwanted-proto,test-harmful-simple,test-malware-simple,test-unwanted-simple");
-
-// True if this is the first time we are showing about:firstrun
-pref("browser.firstrun.show.uidiscovery", true);
-pref("browser.firstrun.show.localepicker", false);
 
 // True if you always want dump() to work
 //
@@ -735,10 +720,7 @@ pref("dom.phonenumber.substringmatching.BR", 8);
 pref("dom.phonenumber.substringmatching.CO", 10);
 pref("dom.phonenumber.substringmatching.VE", 7);
 
-// Support, but deprecate, hardware-accelerated Skia canvas
 pref("gfx.canvas.azure.backends", "skia");
-pref("gfx.canvas.azure.accelerated", false);
-pref("gfx.canvas.azure.accelerated.limit", 64);
 
 // See ua-update.json.in for the packaged UA override list
 pref("general.useragent.updates.enabled", true);
@@ -751,26 +733,6 @@ pref("browser.ui.linkify.phone", false);
 
 // Enables/disables Spatial Navigation
 pref("snav.enabled", true);
-
-// This url, if changed, MUST continue to point to an https url. Pulling arbitrary content to inject into
-// this page over http opens us up to a man-in-the-middle attack that we'd rather not face. If you are a downstream
-// repackager of this code using an alternate snippet url, please keep your users safe
-pref("browser.snippets.updateUrl", "https://snippets.cdn.mozilla.net/json/%SNIPPETS_VERSION%/%NAME%/%VERSION%/%APPBUILDID%/%BUILD_TARGET%/%LOCALE%/%CHANNEL%/%OS_VERSION%/%DISTRIBUTION%/%DISTRIBUTION_VERSION%/");
-
-// How frequently we check for new snippets, in seconds (1 day)
-pref("browser.snippets.updateInterval", 86400);
-
-// URL used to check for user's country code. Please do not directly use this code or Snippets key.
-// Contact MLS team for your own credentials. https://location.services.mozilla.com/contact
-pref("browser.snippets.geoUrl", "https://location.services.mozilla.com/v1/country?key=fff72d56-b040-4205-9a11-82feda9d83a3");
-
-// URL used to ping metrics with stats about which snippets have been shown
-pref("browser.snippets.statsUrl", "https://snippets-stats.mozilla.org/mobile");
-
-// These prefs require a restart to take effect.
-pref("browser.snippets.enabled", true);
-pref("browser.snippets.syncPromo.enabled", true);
-pref("browser.snippets.firstrunHomepage.enabled", true);
 
 // The mode of home provider syncing.
 // 0: Sync always

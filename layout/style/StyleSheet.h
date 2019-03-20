@@ -23,7 +23,6 @@
 #include "nsCompatibility.h"
 #include "nsStringFwd.h"
 
-class nsIDocument;
 class nsINode;
 class nsIPrincipal;
 
@@ -242,12 +241,12 @@ class StyleSheet final : public nsICSSLoaderObserver, public nsWrapperCache {
   bool IsKeptAliveByDocument() const;
 
   // Returns the document whose styles this sheet is affecting.
-  nsIDocument* GetComposedDoc() const;
+  dom::Document* GetComposedDoc() const;
 
   // Returns the document we're associated to, via mDocumentOrShadowRoot.
   //
   // Non-null iff GetAssociatedDocumentOrShadowRoot is non-null.
-  nsIDocument* GetAssociatedDocument() const;
+  dom::Document* GetAssociatedDocument() const;
 
   void SetAssociatedDocumentOrShadowRoot(dom::DocumentOrShadowRoot*,
                                          AssociationMode);
@@ -458,9 +457,9 @@ class StyleSheet final : public nsICSSLoaderObserver, public nsWrapperCache {
   StyleSheet* mParent;  // weak ref
 
   nsString mTitle;
-  dom::DocumentOrShadowRoot*
-      mDocumentOrShadowRoot;       // weak ref; parents maintain this for their
-                                   // children
+
+  // weak ref; parents maintain this for their children
+  dom::DocumentOrShadowRoot* mDocumentOrShadowRoot;
   nsINode* mOwningNode;            // weak ref
   dom::CSSImportRule* mOwnerRule;  // weak ref
 

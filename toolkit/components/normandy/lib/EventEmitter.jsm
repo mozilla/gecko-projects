@@ -3,24 +3,16 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 "use strict";
 
-ChromeUtils.import("resource://normandy/lib/LogManager.jsm");
+const {LogManager} = ChromeUtils.import("resource://normandy/lib/LogManager.jsm");
 
 var EXPORTED_SYMBOLS = ["EventEmitter"];
 
 const log = LogManager.getLogger("event-emitter");
 
-var EventEmitter = function(sandboxManager) {
+var EventEmitter = function() {
   const listeners = {};
 
   return {
-    createSandboxedEmitter() {
-      return sandboxManager.cloneInto({
-        on: this.on.bind(this),
-        off: this.off.bind(this),
-        once: this.once.bind(this),
-      }, {cloneFunctions: true});
-    },
-
     emit(eventName, event) {
       // Fire events async
       Promise.resolve()
@@ -32,7 +24,12 @@ var EventEmitter = function(sandboxManager) {
           // Clone callbacks array to avoid problems with mutation while iterating
           const callbacks = Array.from(listeners[eventName]);
           for (const cb of callbacks) {
-            cb(sandboxManager.cloneInto(event));
+            // Clone event so it can't by modified by the handler
+            let eventToPass = event;
+            if (typeof event === "object") {
+              eventToPass = Object.assign({}, event);
+            }
+            cb(eventToPass);
           }
         });
     },

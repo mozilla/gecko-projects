@@ -39,7 +39,7 @@ static const uint32_t VREG_INCREMENT = 1;
 static const uint32_t THIS_FRAME_ARGSLOT = 0;
 
 #if defined(JS_NUNBOX32)
-#define BOX_PIECES 2
+#  define BOX_PIECES 2
 static const uint32_t VREG_TYPE_OFFSET = 0;
 static const uint32_t VREG_DATA_OFFSET = 1;
 static const uint32_t TYPE_INDEX = 0;
@@ -47,9 +47,9 @@ static const uint32_t PAYLOAD_INDEX = 1;
 static const uint32_t INT64LOW_INDEX = 0;
 static const uint32_t INT64HIGH_INDEX = 1;
 #elif defined(JS_PUNBOX64)
-#define BOX_PIECES 1
+#  define BOX_PIECES 1
 #else
-#error "Unknown!"
+#  error "Unknown!"
 #endif
 
 static const uint32_t INT64_PIECES = sizeof(int64_t) / sizeof(uintptr_t);
@@ -525,8 +525,10 @@ class LDefinition {
         return LDefinition::INT32;
       case MIRType::String:
       case MIRType::Symbol:
+      case MIRType::BigInt:
       case MIRType::Object:
       case MIRType::ObjectOrNull:
+      case MIRType::RefOrNull:
         return LDefinition::OBJECT;
       case MIRType::Double:
         return LDefinition::DOUBLE;
@@ -1350,6 +1352,25 @@ class LSafepoint : public TempObject {
   // List of slots which have slots/elements pointers.
   SlotList slotsOrElementsSlots_;
 
+  // Wasm only: with what kind of instruction is this LSafepoint associated?
+  // true => wasm trap, false => wasm call.
+  bool isWasmTrap_;
+
+  // Wasm only: what is the value of masm.framePushed() that corresponds to
+  // the lowest-addressed word covered by the StackMap that we will generate
+  // from this LSafepoint?  This depends on the instruction:
+  //
+  // if isWasmTrap_ == true:
+  //    masm.framePushed() unmodified.  Note that when constructing the
+  //    StackMap we will add entries below this point to take account of
+  //    registers dumped on the stack as a result of the trap.
+  //
+  // if isWasmTrap_ == false:
+  //    masm.framePushed() - StackArgAreaSizeUnaligned(arg types for the call),
+  //    because the map does not include the outgoing args themselves, but
+  //    it does cover any and all alignment space above them.
+  uint32_t framePushedAtStackMapBase_;
+
  public:
   void assertInvariants() {
     // Every register in valueRegs and gcRegs should also be in liveRegs.
@@ -1369,7 +1390,9 @@ class LSafepoint : public TempObject {
         nunboxParts_(alloc)
 #endif
         ,
-        slotsOrElementsSlots_(alloc) {
+        slotsOrElementsSlots_(alloc),
+        isWasmTrap_(false),
+        framePushedAtStackMapBase_(0) {
     assertInvariants();
   }
   void addLiveRegister(AnyRegister reg) {
@@ -1547,7 +1570,7 @@ class LSafepoint : public TempObject {
     return LUse(typeVreg, LUse::ANY);
   }
 
-#ifdef DEBUG
+#  ifdef DEBUG
   bool hasNunboxPayload(LAllocation payload) const {
     if (payload.isMemory() &&
         hasValueSlot(payload.isStackSlot(), payload.memorySlot())) {
@@ -1560,7 +1583,7 @@ class LSafepoint : public TempObject {
     }
     return false;
   }
-#endif
+#  endif
 
   NunboxList& nunboxParts() { return nunboxParts_; }
 
@@ -1611,6 +1634,17 @@ class LSafepoint : public TempObject {
   void setOsiCallPointOffset(uint32_t osiCallPointOffset) {
     MOZ_ASSERT(!osiCallPointOffset_);
     osiCallPointOffset_ = osiCallPointOffset;
+  }
+
+  bool isWasmTrap() const { return isWasmTrap_; }
+  void setIsWasmTrap() { isWasmTrap_ = true; }
+
+  uint32_t framePushedAtStackMapBase() const {
+    return framePushedAtStackMapBase_;
+  }
+  void setFramePushedAtStackMapBase(uint32_t n) {
+    MOZ_ASSERT(framePushedAtStackMapBase_ == 0);
+    framePushedAtStackMapBase_ = n;
   }
 };
 
@@ -1800,27 +1834,27 @@ AnyRegister LAllocation::toRegister() const {
 
 #include "jit/shared/LIR-shared.h"
 #if defined(JS_CODEGEN_X86) || defined(JS_CODEGEN_X64)
-#if defined(JS_CODEGEN_X86)
-#include "jit/x86/LIR-x86.h"
-#elif defined(JS_CODEGEN_X64)
-#include "jit/x64/LIR-x64.h"
-#endif
-#include "jit/x86-shared/LIR-x86-shared.h"
+#  if defined(JS_CODEGEN_X86)
+#    include "jit/x86/LIR-x86.h"
+#  elif defined(JS_CODEGEN_X64)
+#    include "jit/x64/LIR-x64.h"
+#  endif
+#  include "jit/x86-shared/LIR-x86-shared.h"
 #elif defined(JS_CODEGEN_ARM)
-#include "jit/arm/LIR-arm.h"
+#  include "jit/arm/LIR-arm.h"
 #elif defined(JS_CODEGEN_ARM64)
-#include "jit/arm64/LIR-arm64.h"
+#  include "jit/arm64/LIR-arm64.h"
 #elif defined(JS_CODEGEN_MIPS32) || defined(JS_CODEGEN_MIPS64)
-#if defined(JS_CODEGEN_MIPS32)
-#include "jit/mips32/LIR-mips32.h"
-#elif defined(JS_CODEGEN_MIPS64)
-#include "jit/mips64/LIR-mips64.h"
-#endif
-#include "jit/mips-shared/LIR-mips-shared.h"
+#  if defined(JS_CODEGEN_MIPS32)
+#    include "jit/mips32/LIR-mips32.h"
+#  elif defined(JS_CODEGEN_MIPS64)
+#    include "jit/mips64/LIR-mips64.h"
+#  endif
+#  include "jit/mips-shared/LIR-mips-shared.h"
 #elif defined(JS_CODEGEN_NONE)
-#include "jit/none/LIR-none.h"
+#  include "jit/none/LIR-none.h"
 #else
-#error "Unknown architecture!"
+#  error "Unknown architecture!"
 #endif
 
 #undef LIR_HEADER

@@ -1,14 +1,12 @@
 "use strict";
 
-ChromeUtils.import("resource://gre/modules/Preferences.jsm");
+const {Preferences} = ChromeUtils.import("resource://gre/modules/Preferences.jsm");
 
 
 const server = createHttpServer();
 server.registerDirectory("/data/", do_get_file("data"));
 
 const BASE_URL = `http://localhost:${server.identity.primaryPort}/data`;
-
-Cu.importGlobalProperties(["XMLHttpRequest"]);
 
 const {
   createAppInfo,

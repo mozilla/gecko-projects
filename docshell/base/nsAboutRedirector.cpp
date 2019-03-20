@@ -12,11 +12,11 @@
 #include "nsIProtocolHandler.h"
 
 #if defined(MOZ_WIDGET_ANDROID) && defined(RELEASE_OR_BETA)
-#define ABOUT_CONFIG_BLOCKED_GV
+#  define ABOUT_CONFIG_BLOCKED_GV
 #endif
 
 #ifdef ABOUT_CONFIG_BLOCKED_GV
-#include "mozilla/jni/Utils.h"  // for mozilla::jni::IsFennec()
+#  include "mozilla/jni/Utils.h"  // for mozilla::jni::IsFennec()
 #endif
 
 NS_IMPL_ISUPPORTS(nsAboutRedirector, nsIAboutModule)
@@ -147,7 +147,14 @@ nsAboutRedirector::NewChannel(nsIURI* aURI, nsILoadInfo* aLoadInfo,
   NS_ENSURE_SUCCESS(rv, rv);
 
   if (path.EqualsASCII("crashparent") || path.EqualsASCII("crashcontent")) {
+    bool isExternal;
+    aLoadInfo->GetLoadTriggeredFromExternal(&isExternal);
+    if (isExternal) {
+      return NS_ERROR_NOT_AVAILABLE;
+    }
+
     nsCOMPtr<nsIChannel> channel = new CrashChannel(aURI);
+    channel->SetLoadInfo(aLoadInfo);
     channel.forget(aResult);
     return NS_OK;
   }

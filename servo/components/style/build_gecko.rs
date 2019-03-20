@@ -1,6 +1,6 @@
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
- * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 mod common {
     use std::env;
@@ -139,7 +139,9 @@ mod bindings {
 
             // Disable rust unions, because we replace some types inside of
             // them.
-            let mut builder = Builder::default().rust_target(RustTarget::Stable_1_0);
+            let mut builder = Builder::default()
+                .rust_target(RustTarget::Stable_1_25)
+                .disable_untagged_union();
 
             let rustfmt_path = env::var_os("RUSTFMT")
                 // This can be replaced with
@@ -513,8 +515,7 @@ mod bindings {
                         "pub type nsTArrayBorrowed_{}<'a> = ",
                         "&'a mut ::gecko_bindings::structs::nsTArray<{}>;"
                     ),
-                    cpp_type,
-                    rust_type
+                    cpp_type, rust_type
                 ))
             })
             .handle_str_items("servo-immutable-borrow-types", |b, ty| b.borrowed_type(ty))

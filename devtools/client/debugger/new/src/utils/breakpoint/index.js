@@ -6,18 +6,26 @@
 
 import { sortBy } from "lodash";
 
-import { getBreakpoint } from "../../selectors";
+import { getBreakpoint, getSource } from "../../selectors";
+import { isGenerated } from "../source";
+
 import assert from "../assert";
 import { features } from "../prefs";
+import { getSelectedLocation } from "../source-maps";
 
-export { getASTLocation, findScopeByName } from "./astBreakpointLocation";
+export * from "./astBreakpointLocation";
+export * from "./breakpointPositions";
 
-import type { FormattedBreakpoint } from "../../selectors/breakpointSources";
 import type {
+  Source,
+  SourceActor,
   SourceLocation,
+  SourceActorLocation,
   PendingLocation,
   Breakpoint,
-  PendingBreakpoint
+  BreakpointLocation,
+  PendingBreakpoint,
+  MappedLocation
 } from "../../types";
 
 import type { State } from "../../reducers/types";
@@ -33,16 +41,8 @@ export function firstString(...args: string[]) {
   return null;
 }
 
-export function locationMoved(
-  location: SourceLocation,
-  newLocation: SourceLocation
-) {
-  return (
-    location.line !== newLocation.line || location.column !== newLocation.column
-  );
-}
-
-export function makeLocationId(location: SourceLocation) {
+// The ID for a Breakpoint is derived from its location in its Source.
+export function makeBreakpointId(location: SourceLocation) {
   const { sourceId, line, column } = location;
   const columnString = column || "";
   return `${sourceId}:${line}:${columnString}`;
@@ -60,6 +60,44 @@ export function makePendingLocationId(location: SourceLocation) {
   const columnString = column || "";
 
   return `${sourceUrlString}:${line}:${columnString}`;
+}
+
+export function makeBreakpointLocation(
+  state: State,
+  location: SourceLocation
+): BreakpointLocation {
+  const source = getSource(state, location.sourceId);
+  if (!source) {
+    throw new Error("no source");
+  }
+  const breakpointLocation: any = {
+    line: location.line,
+    column: location.column
+  };
+  if (source.url) {
+    breakpointLocation.sourceUrl = source.url;
+  } else {
+    breakpointLocation.sourceId = source.actors[0].actor;
+  }
+  return breakpointLocation;
+}
+
+export function makeSourceActorLocation(
+  sourceActor: SourceActor,
+  location: SourceLocation
+) {
+  return {
+    sourceActor,
+    line: location.line,
+    column: location.column
+  };
+}
+
+// The ID for a BreakpointActor is derived from its location in its SourceActor.
+export function makeBreakpointActorId(location: SourceActorLocation) {
+  const { sourceActor, line, column } = location;
+  const columnString = column || "";
+  return `${sourceActor.actor}:${line}:${columnString}`;
 }
 
 export function assertBreakpoint(breakpoint: Breakpoint) {
@@ -119,30 +157,27 @@ export function breakpointExists(state: State, location: SourceLocation) {
 }
 
 export function createBreakpoint(
-  location: SourceLocation,
+  mappedLocation: MappedLocation,
   overrides: Object = {}
 ): Breakpoint {
-  const {
-    condition,
-    disabled,
-    hidden,
-    generatedLocation,
-    astLocation,
-    id,
-    text,
-    originalText
-  } = overrides;
+  const { disabled, astLocation, text, originalText, options } = overrides;
 
-  const defaultASTLocation = { name: undefined, offset: location };
+  const defaultASTLocation = {
+    name: undefined,
+    offset: mappedLocation.location,
+    index: 0
+  };
   const properties = {
-    id,
-    condition: condition || null,
+    id: makeBreakpointId(mappedLocation.location),
+    ...mappedLocation,
+    options: {
+      condition: options.condition || null,
+      logValue: options.logValue || null,
+      hidden: options.hidden || false
+    },
     disabled: disabled || false,
-    hidden: hidden || false,
     loading: false,
     astLocation: astLocation || defaultASTLocation,
-    generatedLocation: generatedLocation || location,
-    location,
     text,
     originalText
   };
@@ -160,7 +195,7 @@ export function createXHRBreakpoint(
     method,
     disabled: false,
     loading: false,
-    text: `URL contains "${path}"`
+    text: L10N.getFormatStr("xhrBreakpoints.item.label", path)
   };
 
   return { ...properties, ...overrides };
@@ -178,7 +213,7 @@ export function createPendingBreakpoint(bp: Breakpoint) {
   assertPendingLocation(pendingLocation);
 
   return {
-    condition: bp.condition,
+    options: bp.options,
     disabled: bp.disabled,
     location: pendingLocation,
     astLocation: bp.astLocation,
@@ -186,19 +221,46 @@ export function createPendingBreakpoint(bp: Breakpoint) {
   };
 }
 
-export function sortBreakpoints(breakpoints: FormattedBreakpoint[]) {
-  breakpoints = breakpoints.map(bp => ({
-    ...bp,
-    selectedLocation: {
-      ...bp.selectedLocation,
-      // If a breakpoint has an undefined column, we must provide a 0 value
-      // or the breakpoint will display after all explicit column numbers
-      column: bp.selectedLocation.column || 0
-    }
-  }));
+export function getSelectedText(
+  breakpoint: Breakpoint,
+  selectedSource: Source
+) {
+  return selectedSource && isGenerated(selectedSource)
+    ? breakpoint.text
+    : breakpoint.originalText;
+}
 
+export function sortSelectedBreakpoints(
+  breakpoints: Breakpoint[],
+  selectedSource: ?Source
+): Breakpoint[] {
   return sortBy(breakpoints, [
-    "selectedLocation.line",
-    "selectedLocation.column"
+    // Priority: line number, undefined column, column number
+    bp => getSelectedLocation(bp, selectedSource).line,
+    bp => {
+      const location = getSelectedLocation(bp, selectedSource);
+      return location.column === undefined || location.column;
+    }
   ]);
+}
+
+export function sortBreakpoints(breakpoints: Breakpoint[]) {
+  return _sortBreakpoints(breakpoints, "location");
+}
+
+function _sortBreakpoints(
+  breakpoints: Array<Object>,
+  property: string
+): Array<Object> {
+  // prettier-ignore
+  return sortBy(
+    breakpoints,
+    [
+      // Priority: line number, undefined column, column number
+      `${property}.line`,
+      bp => {
+        return bp[property].column === undefined || bp[property].column;
+      }
+    ]
+  );
 }

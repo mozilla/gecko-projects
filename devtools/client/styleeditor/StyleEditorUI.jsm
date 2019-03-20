@@ -7,7 +7,7 @@
 
 this.EXPORTED_SYMBOLS = ["StyleEditorUI"];
 
-const {loader, require} = ChromeUtils.import("resource://devtools/shared/Loader.jsm", {});
+const {loader, require} = ChromeUtils.import("resource://devtools/shared/Loader.jsm");
 const Services = require("Services");
 const {NetUtil} = require("resource://gre/modules/NetUtil.jsm");
 const {OS} = require("resource://gre/modules/osfile.jsm");
@@ -129,11 +129,9 @@ StyleEditorUI.prototype = {
     await toolbox.initInspector();
     this._walker = toolbox.walker;
 
-    const hUtils = toolbox.highlighterUtils;
-
     try {
       this._highlighter =
-        await hUtils.getHighlighterByType(SELECTOR_HIGHLIGHTER_TYPE);
+        await toolbox.inspector.getHighlighterByType(SELECTOR_HIGHLIGHTER_TYPE);
     } catch (e) {
       // The selectorHighlighter can't always be instantiated, for example
       // it doesn't work with XUL windows (until bug 1094959 gets fixed);

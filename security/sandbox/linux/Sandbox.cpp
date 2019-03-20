@@ -13,13 +13,13 @@
 #include "SandboxInternal.h"
 #include "SandboxLogging.h"
 #ifdef MOZ_GMP_SANDBOX
-#include "SandboxOpenedFiles.h"
+#  include "SandboxOpenedFiles.h"
 #endif
 #include "SandboxReporterClient.h"
 
 #include <dirent.h>
 #ifdef NIGHTLY_BUILD
-#include "dlfcn.h"
+#  include "dlfcn.h"
 #endif
 #include <errno.h>
 #include <fcntl.h>
@@ -54,7 +54,7 @@
 #include "sandbox/linux/system_headers/linux_seccomp.h"
 #include "sandbox/linux/system_headers/linux_syscalls.h"
 #if defined(ANDROID)
-#include "sandbox/linux/system_headers/linux_ucontext.h"
+#  include "sandbox/linux/system_headers/linux_ucontext.h"
 #endif
 
 #ifdef MOZ_ASAN
@@ -644,13 +644,33 @@ void SetMediaPluginSandbox(const char* aFilePath) {
   files->Add("/sys/devices/system/cpu/cpu0/tsc_freq_khz");
   files->Add("/sys/devices/system/cpu/cpu0/cpufreq/cpuinfo_max_freq");
   files->Add("/proc/cpuinfo");  // Info also available via CPUID instruction.
-#ifdef __i386__
+#  ifdef __i386__
   files->Add("/proc/self/auxv");  // Info also in process's address space.
-#endif
+#  endif
 
   // Finally, start the sandbox.
   SetCurrentProcessSandbox(GetMediaSandboxPolicy(files));
 }
 #endif  // MOZ_GMP_SANDBOX
+
+void SetRemoteDataDecoderSandbox(int aBroker) {
+  if (PR_GetEnv("MOZ_DISABLE_RDD_SANDBOX") != nullptr) {
+    if (aBroker >= 0) {
+      close(aBroker);
+    }
+    return;
+  }
+
+  gSandboxReporterClient =
+      new SandboxReporterClient(SandboxReport::ProcType::RDD);
+
+  // FIXME(bug 1513773): merge this with the one for content?
+  static SandboxBrokerClient* sBroker;
+  if (aBroker >= 0) {
+    sBroker = new SandboxBrokerClient(aBroker);
+  }
+
+  SetCurrentProcessSandbox(GetDecoderSandboxPolicy(sBroker));
+}
 
 }  // namespace mozilla

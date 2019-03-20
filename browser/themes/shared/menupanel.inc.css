@@ -73,26 +73,43 @@
   list-style-image: url(chrome://browser/skin/fullscreen-exit.svg);
 }
 
+#appMenu-library-pocket-button {
+  list-style-image: url("chrome://browser/skin/pocket.svg");
+}
+
 #appMenu-library-history-button {
   list-style-image: url(chrome://browser/skin/history.svg);
 }
 
+#PanelUI-fxa-menu-remotetabs-button,
 #appMenuRecentlyClosedTabs,
 #appMenu-library-remotetabs-button {
   list-style-image: url("chrome://browser/skin/tab.svg");
 }
 
+#PanelUI-fxa-menu-syncnow-button,
 #PanelUI-remotetabs-syncnow {
   list-style-image: url("chrome://browser/skin/sync.svg");
 }
 
+#PanelUI-fxa-menu-view-managedevices
 #PanelUI-remotetabs-view-managedevices {
   list-style-image: url("chrome://browser/skin/device-phone.svg");
 }
 
+#PanelUI-fxa-menu-view-sidebar,
 #appMenuViewHistorySidebar,
 #PanelUI-remotetabs-view-sidebar,
 #panelMenu_viewBookmarksSidebar {
+  list-style-image: url("chrome://browser/skin/sidebars-right.svg");
+}
+
+#appMenuViewHistorySidebar:-moz-locale-dir(ltr):not([positionend]),
+#appMenuViewHistorySidebar:-moz-locale-dir(rtl)[positionend],
+#PanelUI-remotetabs-view-sidebar:-moz-locale-dir(ltr):not([positionend]),
+#PanelUI-remotetabs-view-sidebar:-moz-locale-dir(rtl)[positionend],
+#panelMenu_viewBookmarksSidebar:-moz-locale-dir(ltr):not([positionend]),
+#panelMenu_viewBookmarksSidebar:-moz-locale-dir(rtl)[positionend] {
   list-style-image: url("chrome://browser/skin/sidebars.svg");
 }
 

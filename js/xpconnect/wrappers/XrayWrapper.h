@@ -390,8 +390,8 @@ class XrayWrapper : public Base {
   virtual bool delete_(JSContext* cx, JS::Handle<JSObject*> wrapper,
                        JS::Handle<jsid> id,
                        JS::ObjectOpResult& result) const override;
-  virtual JSObject* enumerate(JSContext* cx,
-                              JS::Handle<JSObject*> wrapper) const override;
+  virtual bool enumerate(JSContext* cx, JS::Handle<JSObject*> wrapper,
+                         JS::AutoIdVector& props) const override;
   virtual bool getPrototype(JSContext* cx, JS::HandleObject wrapper,
                             JS::MutableHandleObject protop) const override;
   virtual bool setPrototype(JSContext* cx, JS::HandleObject wrapper,
@@ -421,9 +421,6 @@ class XrayWrapper : public Base {
                          const JS::CallArgs& args) const override;
 
   /* SpiderMonkey extensions. */
-  virtual bool getPropertyDescriptor(
-      JSContext* cx, JS::Handle<JSObject*> wrapper, JS::Handle<jsid> id,
-      JS::MutableHandle<JS::PropertyDescriptor> desc) const override;
   virtual bool hasOwn(JSContext* cx, JS::Handle<JSObject*> wrapper,
                       JS::Handle<jsid> id, bool* bp) const override;
   virtual bool getOwnEnumerablePropertyKeys(
@@ -432,6 +429,8 @@ class XrayWrapper : public Base {
 
   virtual bool getBuiltinClass(JSContext* cx, JS::HandleObject wapper,
                                js::ESClass* cls) const override;
+  virtual bool hasInstance(JSContext* cx, JS::HandleObject wrapper,
+                           JS::MutableHandleValue v, bool* bp) const override;
   virtual const char* className(JSContext* cx,
                                 JS::HandleObject proxy) const override;
 
@@ -444,15 +443,12 @@ class XrayWrapper : public Base {
 
 #define PermissiveXrayDOM \
   xpc::XrayWrapper<js::CrossCompartmentWrapper, xpc::DOMXrayTraits>
-#define SecurityXrayDOM \
-  xpc::XrayWrapper<js::CrossCompartmentSecurityWrapper, xpc::DOMXrayTraits>
 #define PermissiveXrayJS \
   xpc::XrayWrapper<js::CrossCompartmentWrapper, xpc::JSXrayTraits>
 #define PermissiveXrayOpaque \
   xpc::XrayWrapper<js::CrossCompartmentWrapper, xpc::OpaqueXrayTraits>
 
 extern template class PermissiveXrayDOM;
-extern template class SecurityXrayDOM;
 extern template class PermissiveXrayJS;
 extern template class PermissiveXrayOpaque;
 

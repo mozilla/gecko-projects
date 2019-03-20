@@ -9,9 +9,8 @@ var gTimeoutSeconds = 45;
 var gConfig;
 var gSaveInstrumentationData = null;
 
-ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
-ChromeUtils.import("resource://gre/modules/AppConstants.jsm");
-ChromeUtils.import("resource://gre/modules/Services.jsm");
+var {AppConstants} = ChromeUtils.import("resource://gre/modules/AppConstants.jsm");
+var {Services} = ChromeUtils.import("resource://gre/modules/Services.jsm");
 
 ChromeUtils.defineModuleGetter(this, "ContentSearch",
   "resource:///modules/ContentSearch.jsm");
@@ -88,8 +87,10 @@ function testInit() {
       // eslint-disable-next-line no-undef
       var webNav = content.window.docShell
                           .QueryInterface(Ci.nsIWebNavigation);
-      var systemPrincipal = Services.scriptSecurityManager.getSystemPrincipal();
-      webNav.loadURI(url, null, null, null, null, systemPrincipal);
+      let loadURIOptions = {
+        triggeringPrincipal: Services.scriptSecurityManager.getSystemPrincipal(),
+      };
+      webNav.loadURI(url, loadURIOptions);
     };
 
     var listener = 'data:,function doLoad(e) { var data=e.detail&&e.detail.data;removeEventListener("contentEvent", function (e) { doLoad(e); }, false, true);sendAsyncMessage("chromeEvent", {"data":data}); };addEventListener("contentEvent", function (e) { doLoad(e); }, false, true);';
@@ -125,7 +126,6 @@ function testInit() {
 }
 
 function takeInstrumentation() {
-
   let instrumentData = {
     elements: {},
   };
@@ -382,8 +382,12 @@ function Tester(aTests, structuredLogger, aCallback) {
 
   // In order to allow existing tests to continue using unsafe CPOWs
   // with EventUtils, we need to load a separate copy into a sandbox
-  // which has unsafe CPOW usage whitelisted.
-  this.cpowSandbox = Cu.Sandbox(window, {sandboxPrototype: window});
+  // which has unsafe CPOW usage whitelisted. We need to create a new
+  // compartment for Cu.permitCPOWsInScope.
+  this.cpowSandbox = Cu.Sandbox(window, {
+    freshCompartment: true,
+    sandboxPrototype: window,
+  });
   Cu.permitCPOWsInScope(this.cpowSandbox);
 
   this.cpowEventUtils = new this.cpowSandbox.Object();
@@ -427,7 +431,7 @@ function Tester(aTests, structuredLogger, aCallback) {
 
   this._coverageCollector = null;
 
-  const XPCOMUtilsMod = ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm", {});
+  const XPCOMUtilsMod = ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm", null);
 
   // Avoid failing tests when XPCOMUtils.defineLazyScriptGetter is used.
   XPCOMUtilsMod.Services = Object.create(Services, {
@@ -435,10 +439,10 @@ function Tester(aTests, structuredLogger, aCallback) {
       configurable: true,
       writable: true,
       value: {
-        loadSubScript: (url, obj, charset) => {
+        loadSubScript: (url, obj) => {
           let before = Object.keys(window);
           try {
-            return this._scriptLoader.loadSubScript(url, obj, charset);
+            return this._scriptLoader.loadSubScript(url, obj);
           } finally {
             for (let property of Object.keys(window)) {
               if (!before.includes(property) && !this._globalProperties.includes(property)) {
@@ -490,8 +494,7 @@ Tester.prototype = {
 
     if (gConfig.jscovDirPrefix) {
       let coveragePath = gConfig.jscovDirPrefix;
-      let {CoverageCollector} = ChromeUtils.import("resource://testing-common/CoverageUtils.jsm",
-                                                   {});
+      let {CoverageCollector} = ChromeUtils.import("resource://testing-common/CoverageUtils.jsm");
       this._coverageCollector = new CoverageCollector(coveragePath);
     }
 
@@ -503,6 +506,8 @@ Tester.prototype = {
       "Application",
       "__SS_tabsToRestore", "__SSi",
       "webConsoleCommandController",
+      // Thunderbird
+      "MailMigrator", "SearchIntegration",
     ];
 
     this.PerTestCoverageUtils.beforeTestSync();
@@ -522,7 +527,7 @@ Tester.prototype = {
   },
 
   async promiseMainWindowReady() {
-    if (!gBrowserInit.idleTasksFinished) {
+    if (window.gBrowserInit && !gBrowserInit.idleTasksFinished) {
       await this.TestUtils.topicObserved("browser-idle-startup-tasks-finished",
                                          subject => subject === window);
     }
@@ -577,12 +582,16 @@ Tester.prototype = {
     // Remove stale windows
     this.structuredLogger.info("checking window state");
     for (let win of Services.wm.getEnumerator(null)) {
+      let type = win.document.documentElement.getAttribute("windowtype");
       if (win != window && !win.closed &&
-          win.document.documentElement.getAttribute("id") != "browserTestHarness") {
-        let type = win.document.documentElement.getAttribute("windowtype");
+          win.document.documentElement.getAttribute("id") != "browserTestHarness" &&
+          type != "devtools:webconsole") {
         switch (type) {
         case "navigator:browser":
           type = "browser window";
+          break;
+        case "mail:3pane":
+          type = "mail window";
           break;
         case null:
           type = "unknown window with document URI: " + win.document.documentURI +
@@ -629,7 +638,7 @@ Tester.prototype = {
     this.structuredLogger.info("TEST-START | Shutdown");
 
     if (this.tests.length) {
-      let e10sMode = gMultiProcessBrowser ? "e10s" : "non-e10s";
+      let e10sMode = window.gMultiProcessBrowser ? "e10s" : "non-e10s";
       this.structuredLogger.info("Browser Chrome Test Summary");
       this.structuredLogger.info("Passed:  " + passCount);
       this.structuredLogger.info("Failed:  " + failCount);
@@ -907,17 +916,21 @@ Tester.prototype = {
             // to touch the sidebar. They will thus not be blamed for leaking
             // a document.
             let sidebar = document.getElementById("sidebar");
-            sidebar.setAttribute("src", "data:text/html;charset=utf-8,");
-            sidebar.docShell.createAboutBlankContentViewer(null);
-            sidebar.setAttribute("src", "about:blank");
+            if (sidebar) {
+              sidebar.setAttribute("src", "data:text/html;charset=utf-8,");
+              sidebar.docShell.createAboutBlankContentViewer(null);
+              sidebar.setAttribute("src", "about:blank");
+            }
           }
 
           // Destroy BackgroundPageThumbs resources.
           let {BackgroundPageThumbs} =
-            ChromeUtils.import("resource://gre/modules/BackgroundPageThumbs.jsm", {});
+            ChromeUtils.import("resource://gre/modules/BackgroundPageThumbs.jsm");
           BackgroundPageThumbs._destroy();
 
-          gBrowser.removePreloadedBrowser();
+          if (window.gBrowser) {
+            gBrowser.removePreloadedBrowser();
+          }
         }
 
         // Schedule GC and CC runs before finishing in order to detect
@@ -940,7 +953,7 @@ Tester.prototype = {
 
 
         let {AsyncShutdown} =
-          ChromeUtils.import("resource://gre/modules/AsyncShutdown.jsm", {});
+          ChromeUtils.import("resource://gre/modules/AsyncShutdown.jsm");
 
         let barrier = new AsyncShutdown.Barrier(
           "ShutdownLeaks: Wait for cleanup to be finished before checking for leaks");
@@ -1113,7 +1126,6 @@ Tester.prototype = {
                   stack: (typeof ex == "object" && "stack" in ex) ? ex.stack : null,
                   allowFailure: currentTest.allowFailure,
                 }));
-
             }
             PromiseTestUtils.assertNoUncaughtRejections();
             this.SimpleTest.info("Leaving test " + task.name);
@@ -1445,7 +1457,13 @@ testScope.prototype = {
   Assert: null,
 
   _createSandbox() {
-    let sandbox = Cu.Sandbox(window, {sandboxPrototype: window});
+    // Force this sandbox to be in its own compartment because we call
+    // Cu.permitCPOWsInScope on it and we can't call that on objects in the
+    // shared system compartment.
+    let sandbox = Cu.Sandbox(window, {
+      freshCompartment: true,
+      sandboxPrototype: window,
+    });
 
     for (let prop in this) {
       if (typeof this[prop] == "function") {

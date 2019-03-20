@@ -37,7 +37,6 @@ add_task(async function test_sidebarpanels_click() {
         title: "test",
         url: TEST_URL,
       });
-
     },
     prepare() {
     },
@@ -144,7 +143,11 @@ function promiseAlertDialogObserved() {
       Services.obs.removeObserver(observer, "common-dialog-loaded");
       Services.obs.removeObserver(observer, "tabmodal-dialog-loaded");
 
-      subject.Dialog.ui.button0.click();
+      if (subject.Dialog) {
+        subject.Dialog.ui.button0.click();
+      } else {
+        subject.querySelector(".tabmodalprompt-button0").click();
+      }
       resolve();
     }
     Services.obs.addObserver(observer, "common-dialog-loaded");

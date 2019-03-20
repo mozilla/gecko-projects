@@ -48,13 +48,14 @@ struct ParamTraits<mozilla::OriginAttributes>
 namespace mozilla {
 namespace net {
 class ChildLoadInfoForwarderArgs;
-class OptionalLoadInfoArgs;
+class LoadInfoArgs;
 class ParentLoadInfoForwarderArgs;
 class RedirectHistoryEntryInfo;
 }  // namespace net
 
 namespace ipc {
 
+class ContentSecurityPolicy;
 class PrincipalInfo;
 
 /**
@@ -64,6 +65,14 @@ class PrincipalInfo;
  */
 already_AddRefed<nsIPrincipal> PrincipalInfoToPrincipal(
     const PrincipalInfo& aPrincipalInfo, nsresult* aOptionalResult = nullptr);
+
+/**
+ * Populate an array of ContentSecurityPolicy objects from a CSP object.
+ *
+ * MUST be called on the main thread only.
+ */
+nsresult PopulateContentSecurityPolicies(
+    nsIContentSecurityPolicy* aCSP, nsTArray<ContentSecurityPolicy>& aPolicies);
 
 /**
  * Convert an nsIPrincipal to a PrincipalInfo.
@@ -99,13 +108,13 @@ nsresult RHEntryToRHEntryInfo(
  */
 nsresult LoadInfoToLoadInfoArgs(
     nsILoadInfo* aLoadInfo,
-    mozilla::net::OptionalLoadInfoArgs* outOptionalLoadInfoArgs);
+    Maybe<mozilla::net::LoadInfoArgs>* outOptionalLoadInfoArgs);
 
 /**
  * Convert LoadInfoArgs to a LoadInfo.
  */
 nsresult LoadInfoArgsToLoadInfo(
-    const mozilla::net::OptionalLoadInfoArgs& aOptionalLoadInfoArgs,
+    const Maybe<mozilla::net::LoadInfoArgs>& aOptionalLoadInfoArgs,
     nsILoadInfo** outLoadInfo);
 
 /**

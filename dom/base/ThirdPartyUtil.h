@@ -10,25 +10,45 @@
 #include "nsCOMPtr.h"
 #include "nsString.h"
 #include "mozIThirdPartyUtil.h"
-#include "nsIEffectiveTLDService.h"
+#include "nsEffectiveTLDService.h"
 #include "mozilla/Attributes.h"
 
 class nsIURI;
 
 class ThirdPartyUtil final : public mozIThirdPartyUtil {
  public:
-  NS_DECL_ISUPPORTS
+  NS_DECL_THREADSAFE_ISUPPORTS
   NS_DECL_MOZITHIRDPARTYUTIL
 
   nsresult Init();
 
- private:
-  ~ThirdPartyUtil() {}
+  static void Startup();
+  static ThirdPartyUtil* GetInstance();
 
+ private:
+  ~ThirdPartyUtil();
+
+  bool IsThirdPartyInternal(const nsCString& aFirstDomain,
+                            const nsCString& aSecondDomain) {
+    // Check strict equality.
+    return aFirstDomain != aSecondDomain;
+  }
   nsresult IsThirdPartyInternal(const nsCString& aFirstDomain,
                                 nsIURI* aSecondURI, bool* aResult);
 
-  nsCOMPtr<nsIEffectiveTLDService> mTLDService;
+  nsCString GetBaseDomainFromWindow(nsPIDOMWindowOuter* aWindow) {
+    MOZ_ASSERT(aWindow);
+
+    mozilla::dom::Document* doc = aWindow->GetExtantDoc();
+
+    if (!doc) {
+      return EmptyCString();
+    }
+
+    return doc->GetBaseDomain();
+  }
+
+  RefPtr<nsEffectiveTLDService> mTLDService;
 };
 
 #endif

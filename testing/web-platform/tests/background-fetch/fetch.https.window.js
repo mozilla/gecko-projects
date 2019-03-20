@@ -1,5 +1,7 @@
+// META: script=/common/get-host-info.sub.js
 // META: script=/service-workers/service-worker/resources/test-helpers.sub.js
 // META: script=resources/utils.js
+
 'use strict';
 
 // Covers basic functionality provided by BackgroundFetchManager.fetch().
@@ -300,3 +302,54 @@ backgroundFetchTest(async (test, backgroundFetch) => {
 
 }, 'Matching to a non-existing request should work');
 
+backgroundFetchTest(async (test, backgroundFetch) => {
+  const registrationId = 'matchexistingrequesttwice';
+  const registration =
+    await backgroundFetch.fetch(registrationId, 'resources/feature-name.txt');
+
+  assert_equals(registration.id, registrationId);
+
+  const {type, eventRegistration, results} = await getMessageFromServiceWorker();
+  assert_equals('backgroundfetchsuccess', type);
+  assert_equals(results.length, 2);
+
+  assert_equals(eventRegistration.id, registration.id);
+  assert_equals(eventRegistration.result, 'success');
+  assert_equals(eventRegistration.failureReason, '');
+
+  assert_true(results[0].url.includes('resources/feature-name.txt'));
+  assert_equals(results[0].status, 200);
+  assert_equals(results[0].text, 'Background Fetch');
+
+  assert_true(results[1].url.includes('resources/feature-name.txt'));
+  assert_equals(results[1].status, 200);
+  assert_equals(results[1].text, 'Background Fetch');
+
+}, 'Matching multiple times on the same request works as expected.');
+
+backgroundFetchTest(async (test, backgroundFetch) => {
+  const filePath = '/background-fetch/resources/feature-name.txt';
+  const registration = await backgroundFetch.fetch(
+    uniqueId(),
+    `https://${get_host_info().REMOTE_HOST}${filePath}`);
+
+  const {type, eventRegistration, results} = await getMessageFromServiceWorker();
+  assert_equals(type, 'backgroundfetchfail');
+  assert_equals(results.length, 1);
+
+  assert_equals(results[0], null);
+  assert_equals(eventRegistration.id, registration.id);
+  assert_equals(eventRegistration.downloaded, 0);
+}, 'Responses failing CORS checks are not leaked');
+
+backgroundFetchTest(async (test, backgroundFetch) => {
+  const registration = await backgroundFetch.fetch(
+    uniqueId(), ['resources/feature-name.txt', '/common/slow.py']);
+
+  const record = await registration.match('resources/feature-name.txt');
+  const response = await record.responseReady;
+  assert_true(response.url.includes('resources/feature-name.txt'));
+  const completedResponseText = await response.text();
+  assert_equals(completedResponseText, 'Background Fetch');
+
+}, 'Access to active fetches is supported.');

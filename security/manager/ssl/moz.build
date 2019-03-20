@@ -51,6 +51,10 @@ if CONFIG['MOZ_XUL']:
 
 XPIDL_MODULE = 'pipnss'
 
+XPCOM_MANIFESTS += [
+    'components.conf',
+]
+
 # These aren't actually used in production code yet, so we don't want to
 # ship them with the browser.
 TESTING_JS_MODULES.psm += [
@@ -58,8 +62,13 @@ TESTING_JS_MODULES.psm += [
     'X509.jsm',
 ]
 
+EXTRA_JS_MODULES.psm += [
+    'RemoteSecuritySettings.jsm',
+]
+
 EXPORTS += [
     'CryptoTask.h',
+    'EnterpriseRoots.h',
     'nsClientAuthRemember.h',
     'nsNSSCallbacks.h',
     'nsNSSCertificate.h',
@@ -141,12 +150,12 @@ UNIFIED_SOURCES += [
     'TransportSecurityInfo.cpp',
 ]
 
-if CONFIG['MOZ_LIB_SECRET']:
+if 'gtk' in CONFIG['MOZ_WIDGET_TOOLKIT']:
     UNIFIED_SOURCES += [
         'LibSecret.cpp',
     ]
-    CFLAGS += CONFIG['MOZ_LIB_SECRET_CFLAGS']
-    CXXFLAGS += CONFIG['MOZ_LIB_SECRET_CFLAGS']
+    CFLAGS += CONFIG['GLIB_CFLAGS']
+    CXXFLAGS += CONFIG['GLIB_CFLAGS']
 
 if CONFIG['OS_ARCH'] == 'Darwin':
     UNIFIED_SOURCES += [
@@ -226,6 +235,3 @@ if CONFIG['CC_TYPE'] in ('clang', 'gcc'):
     CXXFLAGS += [
         '-Wno-unused-parameter',
     ]
-
-if CONFIG['CC_TYPE'] == 'clang-cl':
-    AllowCompilerWarnings()  # workaround for bug 1090497

@@ -12,14 +12,14 @@
 #include "mozilla/Unused.h"
 
 #if defined(XP_DARWIN)
-#include <mach/mach.h>
+#  include <mach/mach.h>
 #elif defined(XP_UNIX)
-#include <sys/resource.h>
+#  include <sys/resource.h>
 #endif  // defined(XP_DARWIN) || defined(XP_UNIX) || defined(XP_WIN)
 #include <locale.h>
 #include <string.h>
 #ifdef JS_CAN_CHECK_THREADSAFE_ACCESSES
-#include <sys/mman.h>
+#  include <sys/mman.h>
 #endif
 
 #include "jsfriendapi.h"
@@ -64,9 +64,9 @@ using mozilla::PodZero;
 using mozilla::PositiveInfinity;
 
 /* static */ MOZ_THREAD_LOCAL(JSContext*) js::TlsContext;
-/* static */ Atomic<size_t> JSRuntime::liveRuntimesCount;
+/* static */
+Atomic<size_t> JSRuntime::liveRuntimesCount;
 Atomic<JS::LargeAllocationFailureCallback> js::OnLargeAllocationFailure;
-Atomic<JS::BuildIdOp> js::GetBuildId;
 
 namespace js {
 bool gCanUseExtraThreads = true;
@@ -157,13 +157,14 @@ JSRuntime::JSRuntime(JSRuntime* parentRuntime)
       autoWritableJitCodeActive_(false),
       oomCallback(nullptr),
       debuggerMallocSizeOf(ReturnZeroSize),
-      performanceMonitoring_(),
       stackFormat_(parentRuntime ? js::StackFormat::Default
                                  : js::StackFormat::SpiderMonkey),
       wasmInstances(mutexid::WasmRuntimeInstances),
       moduleResolveHook(),
       moduleMetadataHook(),
-      moduleDynamicImportHook() {
+      moduleDynamicImportHook(),
+      scriptPrivateAddRefHook(),
+      scriptPrivateReleaseHook() {
   JS_COUNT_CTOR(JSRuntime);
   liveRuntimesCount++;
 
@@ -280,7 +281,7 @@ void JSRuntime::destroyRuntime() {
     profilingScripts = false;
 
     JS::PrepareForFullGC(cx);
-    gc.gc(GC_NORMAL, JS::gcreason::DESTROY_RUNTIME);
+    gc.gc(GC_NORMAL, JS::GCReason::DESTROY_RUNTIME);
   }
 
   AutoNoteSingleThreadedRegion anstr;
@@ -359,7 +360,7 @@ void JSRuntime::addSizeOfIncludingThis(mozilla::MallocSizeOf mallocSizeOf,
   rtSizes->uncompressedSourceCache +=
       caches().uncompressedSourceCache.sizeOfExcludingThis(mallocSizeOf);
 
-  rtSizes->gc.nurseryCommitted += gc.nursery().sizeOfHeapCommitted();
+  rtSizes->gc.nurseryCommitted += gc.nursery().committed();
   rtSizes->gc.nurseryMallocedBuffers +=
       gc.nursery().sizeOfMallocedBuffers(mallocSizeOf);
   gc.storeBuffer().addSizeOfExcludingThis(mallocSizeOf, &rtSizes->gc);
@@ -582,32 +583,25 @@ bool FreeOp::isDefaultFreeOp() const {
 }
 
 GlobalObject* JSRuntime::getIncumbentGlobal(JSContext* cx) {
-  // If the embedding didn't set a callback for getting the incumbent
-  // global, the currently active global is used.
-  if (!cx->getIncumbentGlobalCallback) {
-    if (!cx->compartment()) {
-      return nullptr;
-    }
-    return cx->global();
+  MOZ_ASSERT(cx->jobQueue);
+
+  JSObject* obj = cx->jobQueue->getIncumbentGlobal(cx);
+  if (!obj) {
+    return nullptr;
   }
 
-  if (JSObject* obj = cx->getIncumbentGlobalCallback(cx)) {
-    MOZ_ASSERT(obj->is<GlobalObject>(),
-               "getIncumbentGlobalCallback must return a global!");
-    return &obj->as<GlobalObject>();
-  }
-
-  return nullptr;
+  MOZ_ASSERT(obj->is<GlobalObject>(),
+             "getIncumbentGlobalCallback must return a global!");
+  return &obj->as<GlobalObject>();
 }
 
 bool JSRuntime::enqueuePromiseJob(JSContext* cx, HandleFunction job,
                                   HandleObject promise,
                                   Handle<GlobalObject*> incumbentGlobal) {
-  MOZ_ASSERT(cx->enqueuePromiseJobCallback,
-             "Must set a callback using JS::SetEnqueuePromiseJobCallback "
-             "before using Promises");
+  MOZ_ASSERT(cx->jobQueue,
+             "Must select a JobQueue implementation using JS::JobQueue "
+             "or js::UseInternalJobQueues before using Promises");
 
-  void* data = cx->enqueuePromiseJobCallbackData;
   RootedObject allocationSite(cx);
   if (promise) {
 #ifdef DEBUG
@@ -625,8 +619,8 @@ bool JSRuntime::enqueuePromiseJob(JSContext* cx, HandleFunction job,
       allocationSite = JS::GetPromiseAllocationSite(unwrappedPromise);
     }
   }
-  return cx->enqueuePromiseJobCallback(cx, promise, job, allocationSite,
-                                       incumbentGlobal, data);
+  return cx->jobQueue->enqueuePromiseJob(cx, promise, job, allocationSite,
+                                         incumbentGlobal);
 }
 
 void JSRuntime::addUnhandledRejectedPromise(JSContext* cx,
@@ -690,7 +684,8 @@ void JSRuntime::updateMallocCounter(size_t nbytes) {
 }
 
 JS_FRIEND_API void* JSRuntime::onOutOfMemory(AllocFunction allocFunc,
-                                             size_t nbytes, void* reallocPtr,
+                                             arena_id_t arena, size_t nbytes,
+                                             void* reallocPtr,
                                              JSContext* maybecx) {
   MOZ_ASSERT_IF(allocFunc != AllocFunction::Realloc, !reallocPtr);
 
@@ -707,10 +702,10 @@ JS_FRIEND_API void* JSRuntime::onOutOfMemory(AllocFunction allocFunc,
     void* p;
     switch (allocFunc) {
       case AllocFunction::Malloc:
-        p = js_malloc(nbytes);
+        p = js_arena_malloc(arena, nbytes);
         break;
       case AllocFunction::Calloc:
-        p = js_calloc(nbytes);
+        p = js_arena_calloc(arena, nbytes, 1);
         break;
       case AllocFunction::Realloc:
         p = js_realloc(reallocPtr, nbytes);
@@ -729,12 +724,12 @@ JS_FRIEND_API void* JSRuntime::onOutOfMemory(AllocFunction allocFunc,
   return nullptr;
 }
 
-void* JSRuntime::onOutOfMemoryCanGC(AllocFunction allocFunc, size_t bytes,
-                                    void* reallocPtr) {
+void* JSRuntime::onOutOfMemoryCanGC(AllocFunction allocFunc, arena_id_t arena,
+                                    size_t bytes, void* reallocPtr) {
   if (OnLargeAllocationFailure && bytes >= LARGE_ALLOCATION) {
     OnLargeAllocationFailure();
   }
-  return onOutOfMemory(allocFunc, bytes, reallocPtr);
+  return onOutOfMemory(allocFunc, arena, bytes, reallocPtr);
 }
 
 bool JSRuntime::activeGCInAtomsZone() {

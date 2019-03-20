@@ -109,7 +109,7 @@ nsIURI* GetBaseURI(bool aIsMainScript, WorkerPrivate* aWorkerPrivate) {
 }
 
 nsresult ConstructURI(const nsAString& aScriptURL, nsIURI* baseURI,
-                      nsIDocument* parentDoc, bool aDefaultURIEncoding,
+                      Document* parentDoc, bool aDefaultURIEncoding,
                       nsIURI** aResult) {
   nsresult rv;
   if (aDefaultURIEncoding) {
@@ -125,17 +125,15 @@ nsresult ConstructURI(const nsAString& aScriptURL, nsIURI* baseURI,
   return NS_OK;
 }
 
-nsresult ChannelFromScriptURL(nsIPrincipal* principal, nsIDocument* parentDoc,
-                              WorkerPrivate* aWorkerPrivate,
-                              nsILoadGroup* loadGroup, nsIIOService* ios,
-                              nsIScriptSecurityManager* secMan,
-                              nsIURI* aScriptURL,
-                              const Maybe<ClientInfo>& aClientInfo,
-                              const Maybe<ServiceWorkerDescriptor>& aController,
-                              bool aIsMainScript,
-                              WorkerScriptType aWorkerScriptType,
-                              nsContentPolicyType aMainScriptContentPolicyType,
-                              nsLoadFlags aLoadFlags, nsIChannel** aChannel) {
+nsresult ChannelFromScriptURL(
+    nsIPrincipal* principal, Document* parentDoc, WorkerPrivate* aWorkerPrivate,
+    nsILoadGroup* loadGroup, nsIIOService* ios,
+    nsIScriptSecurityManager* secMan, nsIURI* aScriptURL,
+    const Maybe<ClientInfo>& aClientInfo,
+    const Maybe<ServiceWorkerDescriptor>& aController, bool aIsMainScript,
+    WorkerScriptType aWorkerScriptType,
+    nsContentPolicyType aMainScriptContentPolicyType, nsLoadFlags aLoadFlags,
+    nsICookieSettings* aCookieSettings, nsIChannel** aChannel) {
   AssertIsOnMainThread();
 
   nsresult rv;
@@ -206,11 +204,7 @@ nsresult ChannelFromScriptURL(nsIPrincipal* principal, nsIDocument* parentDoc,
                         nsIContentPolicy::TYPE_INTERNAL_SERVICE_WORKER);
 
   nsCOMPtr<nsIChannel> channel;
-  // If we have the document, use it. Unfortunately, for dedicated workers
-  // 'parentDoc' ends up being the parent document, which is not the document
-  // that we want to use. So make sure to avoid using 'parentDoc' in that
-  // situation.
-  if (parentDoc && parentDoc->NodePrincipal() == principal) {
+  if (parentDoc) {
     rv = NS_NewChannel(getter_AddRefs(channel), uri, parentDoc, secFlags,
                        contentPolicyType,
                        nullptr,  // aPerformanceStorage
@@ -234,24 +228,20 @@ nsresult ChannelFromScriptURL(nsIPrincipal* principal, nsIDocument* parentDoc,
     if (aClientInfo.isSome()) {
       rv = NS_NewChannel(getter_AddRefs(channel), uri, principal,
                          aClientInfo.ref(), aController, secFlags,
-                         contentPolicyType, performanceStorage, loadGroup,
-                         nullptr,  // aCallbacks
+                         contentPolicyType, aCookieSettings, performanceStorage,
+                         loadGroup, nullptr,  // aCallbacks
                          aLoadFlags, ios);
     } else {
       rv = NS_NewChannel(getter_AddRefs(channel), uri, principal, secFlags,
-                         contentPolicyType, performanceStorage, loadGroup,
-                         nullptr,  // aCallbacks
+                         contentPolicyType, aCookieSettings, performanceStorage,
+                         loadGroup, nullptr,  // aCallbacks
                          aLoadFlags, ios);
     }
 
     NS_ENSURE_SUCCESS(rv, NS_ERROR_DOM_SECURITY_ERR);
 
     if (cspEventListener) {
-      nsCOMPtr<nsILoadInfo> loadInfo = channel->GetLoadInfo();
-      if (NS_WARN_IF(!loadInfo)) {
-        return NS_ERROR_UNEXPECTED;
-      }
-
+      nsCOMPtr<nsILoadInfo> loadInfo = channel->LoadInfo();
       rv = loadInfo->SetCspEventListener(cspEventListener);
       NS_ENSURE_SUCCESS(rv, rv);
     }
@@ -536,11 +526,10 @@ class LoaderListener final : public nsIStreamLoaderObserver,
                    const uint8_t* aString) override;
 
   NS_IMETHOD
-  OnStartRequest(nsIRequest* aRequest, nsISupports* aContext) override;
+  OnStartRequest(nsIRequest* aRequest) override;
 
   NS_IMETHOD
-  OnStopRequest(nsIRequest* aRequest, nsISupports* aContext,
-                nsresult aStatusCode) override {
+  OnStopRequest(nsIRequest* aRequest, nsresult aStatusCode) override {
     // Nothing to do here!
     return NS_OK;
   }
@@ -913,7 +902,7 @@ class ScriptLoaderRunnable final : public nsIRunnable, public nsINamed {
     nsCOMPtr<nsIURI> baseURI = GetBaseURI(mIsMainScript, mWorkerPrivate);
 
     // May be null.
-    nsCOMPtr<nsIDocument> parentDoc = mWorkerPrivate->GetDocument();
+    nsCOMPtr<Document> parentDoc = mWorkerPrivate->GetDocument();
 
     nsCOMPtr<nsIChannel> channel;
     if (IsMainWorkerScript()) {
@@ -964,11 +953,11 @@ class ScriptLoaderRunnable final : public nsIRunnable, public nsINamed {
         return rv;
       }
 
-      rv = ChannelFromScriptURL(principal, parentDoc, mWorkerPrivate, loadGroup,
-                                ios, secMan, url, mClientInfo, mController,
-                                IsMainWorkerScript(), mWorkerScriptType,
-                                mWorkerPrivate->ContentPolicyType(), loadFlags,
-                                getter_AddRefs(channel));
+      rv = ChannelFromScriptURL(
+          principal, parentDoc, mWorkerPrivate, loadGroup, ios, secMan, url,
+          mClientInfo, mController, IsMainWorkerScript(), mWorkerScriptType,
+          mWorkerPrivate->ContentPolicyType(), loadFlags,
+          mWorkerPrivate->CookieSettings(), getter_AddRefs(channel));
       if (NS_WARN_IF(NS_FAILED(rv))) {
         return rv;
       }
@@ -997,7 +986,7 @@ class ScriptLoaderRunnable final : public nsIRunnable, public nsINamed {
     }
 
     if (loadInfo.mCacheStatus != ScriptLoadInfo::ToBeCached) {
-      rv = channel->AsyncOpen2(loader);
+      rv = channel->AsyncOpen(loader);
       if (NS_WARN_IF(NS_FAILED(rv))) {
         return rv;
       }
@@ -1022,7 +1011,7 @@ class ScriptLoaderRunnable final : public nsIRunnable, public nsINamed {
         return rv;
       }
 
-      nsresult rv = channel->AsyncOpen2(tee);
+      nsresult rv = channel->AsyncOpen(tee);
       if (NS_WARN_IF(NS_FAILED(rv))) {
         return rv;
       }
@@ -1120,7 +1109,7 @@ class ScriptLoaderRunnable final : public nsIRunnable, public nsINamed {
     }
 
     // May be null.
-    nsIDocument* parentDoc = mWorkerPrivate->GetDocument();
+    Document* parentDoc = mWorkerPrivate->GetDocument();
 
     // Use the regular ScriptLoader for this grunt work! Should be just fine
     // because we're running on the main thread.
@@ -1156,8 +1145,8 @@ class ScriptLoaderRunnable final : public nsIRunnable, public nsINamed {
       aLoadInfo.mURL.Assign(NS_ConvertUTF8toUTF16(filename));
     }
 
-    nsCOMPtr<nsILoadInfo> chanLoadInfo = channel->GetLoadInfo();
-    if (chanLoadInfo && chanLoadInfo->GetEnforceSRI()) {
+    nsCOMPtr<nsILoadInfo> chanLoadInfo = channel->LoadInfo();
+    if (chanLoadInfo->GetEnforceSRI()) {
       // importScripts() and the Worker constructor do not support integrity
       // metadata
       //  (or any fetch options). Until then, we can just block.
@@ -1270,7 +1259,7 @@ class ScriptLoaderRunnable final : public nsIRunnable, public nsINamed {
     loadInfo.mMutedErrorFlag.emplace(!principal->Subsumes(responsePrincipal));
 
     // May be null.
-    nsIDocument* parentDoc = mWorkerPrivate->GetDocument();
+    Document* parentDoc = mWorkerPrivate->GetDocument();
 
     MOZ_ASSERT(!loadInfo.mScriptTextBuf);
 
@@ -1404,7 +1393,7 @@ LoaderListener::OnStreamComplete(nsIStreamLoader* aLoader,
 }
 
 NS_IMETHODIMP
-LoaderListener::OnStartRequest(nsIRequest* aRequest, nsISupports* aContext) {
+LoaderListener::OnStartRequest(nsIRequest* aRequest) {
   return mRunnable->OnStartRequest(aRequest, mIndex);
 }
 
@@ -1830,9 +1819,10 @@ class ChannelGetterRunnable final : public WorkerMainThreadRunnable {
     MOZ_ASSERT(baseURI);
 
     // May be null.
-    nsCOMPtr<nsIDocument> parentDoc = mWorkerPrivate->GetDocument();
+    nsCOMPtr<Document> parentDoc = mWorkerPrivate->GetDocument();
 
     mLoadInfo.mLoadGroup = mWorkerPrivate->GetLoadGroup();
+    mLoadInfo.mCookieSettings = mWorkerPrivate->CookieSettings();
 
     // Nested workers use default uri encoding.
     nsCOMPtr<nsIURI> url;
@@ -1848,7 +1838,8 @@ class ChannelGetterRunnable final : public WorkerMainThreadRunnable {
         mLoadInfo.mLoadingPrincipal, parentDoc, mLoadInfo.mLoadGroup, url,
         clientInfo,
         // Nested workers are always dedicated.
-        nsIContentPolicy::TYPE_INTERNAL_WORKER, getter_AddRefs(channel));
+        nsIContentPolicy::TYPE_INTERNAL_WORKER, mLoadInfo.mCookieSettings,
+        getter_AddRefs(channel));
     NS_ENSURE_SUCCESS(mResult, true);
 
     mResult = mLoadInfo.SetPrincipalFromChannel(channel);
@@ -2161,9 +2152,10 @@ void LoadAllScripts(WorkerPrivate* aWorkerPrivate,
 namespace workerinternals {
 
 nsresult ChannelFromScriptURLMainThread(
-    nsIPrincipal* aPrincipal, nsIDocument* aParentDoc, nsILoadGroup* aLoadGroup,
+    nsIPrincipal* aPrincipal, Document* aParentDoc, nsILoadGroup* aLoadGroup,
     nsIURI* aScriptURL, const Maybe<ClientInfo>& aClientInfo,
-    nsContentPolicyType aMainScriptContentPolicyType, nsIChannel** aChannel) {
+    nsContentPolicyType aMainScriptContentPolicyType,
+    nsICookieSettings* aCookieSettings, nsIChannel** aChannel) {
   AssertIsOnMainThread();
 
   nsCOMPtr<nsIIOService> ios(do_GetIOService());
@@ -2174,7 +2166,8 @@ nsresult ChannelFromScriptURLMainThread(
   return ChannelFromScriptURL(
       aPrincipal, aParentDoc, nullptr, aLoadGroup, ios, secMan, aScriptURL,
       aClientInfo, Maybe<ServiceWorkerDescriptor>(), true, WorkerScript,
-      aMainScriptContentPolicyType, nsIRequest::LOAD_NORMAL, aChannel);
+      aMainScriptContentPolicyType, nsIRequest::LOAD_NORMAL, aCookieSettings,
+      aChannel);
 }
 
 nsresult ChannelFromScriptURLWorkerThread(JSContext* aCx,

@@ -141,7 +141,8 @@ void WebGLContext::SynthesizeGLError(GLenum err) const {
   if (!mWebGLError) mWebGLError = err;
 }
 
-void WebGLContext::SynthesizeGLError(GLenum err, const char* fmt, ...) const {
+void WebGLContext::GenerateError(const GLenum err, const char* const fmt,
+                                 ...) const {
   va_list va;
   va_start(va, fmt);
   GenerateWarning(fmt, va);
@@ -566,7 +567,8 @@ const char* GetEnumName(const GLenum val, const char* const defaultRet) {
   return defaultRet;
 }
 
-/*static*/ void WebGLContext::EnumName(GLenum val, nsCString* out_name) {
+/*static*/
+void WebGLContext::EnumName(GLenum val, nsCString* out_name) {
   const char* name = GetEnumName(val, nullptr);
   if (name) {
     *out_name = name;

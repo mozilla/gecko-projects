@@ -167,12 +167,14 @@ SET TIMEOUT: html/semantics/embedded-content/the-img-element/*
 SET TIMEOUT: html/semantics/scripting-1/the-script-element/*
 SET TIMEOUT: html/webappapis/dynamic-markup-insertion/opening-the-input-stream/0*
 SET TIMEOUT: html/webappapis/dynamic-markup-insertion/opening-the-input-stream/resources/history-frame.html
+SET TIMEOUT: html/webappapis/dynamic-markup-insertion/opening-the-input-stream/resources/url-entry-document-timer-frame.html
 SET TIMEOUT: html/webappapis/dynamic-markup-insertion/opening-the-input-stream/tasks.window.js
 SET TIMEOUT: html/webappapis/scripting/event-loops/*
 SET TIMEOUT: html/webappapis/scripting/events/event-handler-processing-algorithm-error/*
 SET TIMEOUT: html/webappapis/scripting/processing-model-2/*
 SET TIMEOUT: IndexedDB/*
 SET TIMEOUT: infrastructure/*
+SET TIMEOUT: intersection-observer/resources/v2-subframe.html
 SET TIMEOUT: intersection-observer/target-in-different-window.html
 SET TIMEOUT: media-source/mediasource-util.js
 SET TIMEOUT: media-source/URL-createObjectURL-revoke.html
@@ -206,13 +208,6 @@ SET TIMEOUT: shadow-dom/Document-prototype-currentScript.html
 SET TIMEOUT: shadow-dom/scroll-to-the-fragment-in-shadow-tree.html
 SET TIMEOUT: shadow-dom/slotchange-event.html
 SET TIMEOUT: shadow-dom/untriaged/html-elements-in-shadow-trees/html-forms/test-003.html
-SET TIMEOUT: streams/piping/close-propagation-forward.js
-SET TIMEOUT: streams/piping/error-propagation-backward.js
-SET TIMEOUT: streams/piping/error-propagation-forward.js
-SET TIMEOUT: streams/piping/general.js
-SET TIMEOUT: streams/readable-streams/cancel.js
-SET TIMEOUT: streams/resources/rs-utils.js
-SET TIMEOUT: streams/writable-streams/byte-length-queuing-strategy.js
 SET TIMEOUT: trusted-types/block-string-assignment-to-DOMWindowTimers-setTimeout-setInterval.tentative.html
 SET TIMEOUT: trusted-types/DOMWindowTimers-setTimeout-setInterval.tentative.html
 SET TIMEOUT: user-timing/*
@@ -300,6 +295,8 @@ GENERATE_TESTS: shadow-dom/untriaged/shadow-trees/upper-boundary-encapsulation/w
 SET TIMEOUT: css/css-fonts/font-display/font-display.html
 SET TIMEOUT: css/css-fonts/font-display/font-display-change.html
 SET TIMEOUT: css/css-fonts/font-display/font-display-change-ref.html
+SET TIMEOUT: css/css-fonts/font-display/font-display-feature-policy-01.tentative.html
+SET TIMEOUT: css/css-fonts/font-display/font-display-feature-policy-02.tentative.html
 SET TIMEOUT: css/css-fonts/font-display/font-display-preload.html
 SET TIMEOUT: html/browsers/windows/auxiliary-browsing-contexts/resources/close-opener.html
 SET TIMEOUT: html/dom/documents/dom-tree-accessors/Document.currentScript.html

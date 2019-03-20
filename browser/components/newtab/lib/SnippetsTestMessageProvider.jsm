@@ -151,7 +151,7 @@ const MESSAGES = () => ([
       scene1_title_icon: TEST_ICON_16,
 
       scene2_button_label: "Send",
-      scene2_disclaimer_html: "The intended recipient of the email must have consented. <privacyLink>Learn more.</privacyLink>",
+      scene2_disclaimer_html: "The intended recipient of the email must have consented. <privacyLink>Learn more</privacyLink>.",
       scene2_dismiss_button_text: "Dismiss",
       scene2_icon: TEST_ICON,
       scene2_input_placeholder: "Your email address or phone number",
@@ -217,6 +217,34 @@ const MESSAGES = () => ([
       "donation_form_url": "https://donate.mozilla.org",
       "text": "Big corporations want to restrict how we access the web. Fake news is making it harder for us to find the truth. Online bullies are silencing inspired voices. The <em>not-for-profit Mozilla Foundation</em> fights for a healthy internet with programs like our Tech Policy Fellowships and Internet Health Report; <b>will you donate today</b>?",
       "test": "takeover",
+    },
+  },
+  {
+    "id": "SIMPLE_TEST_WITH_SECTION_HEADING",
+    "template": "simple_snippet",
+    "content": {
+      "button_label": "Get one now!",
+      "button_url": "https://www.mozilla.org/en-US/firefox/accounts",
+      "icon": TEST_ICON,
+      "title": "Firefox Account!",
+      "text": "<syncLink>Sync it, link it, take it with you</syncLink>. All this and more with a Firefox Account.",
+      "links": {"syncLink": {"url": "https://www.mozilla.org/en-US/firefox/accounts"}},
+      "block_button_text": "Block",
+      "section_title_icon": "resource://activity-stream/data/content/assets/glyph-pocket-16.svg",
+      "section_title_text": "Messages from Mozilla",
+    },
+  },
+  {
+    "id": "SIMPLE_TEST_WITH_SECTION_HEADING_AND_LINK",
+    "template": "simple_snippet",
+    "content": {
+      "icon": TEST_ICON,
+      "title": "Firefox Account!",
+      "text": "Sync it, link it, take it with you. All this and more with a Firefox Account.",
+      "block_button_text": "Block",
+      "section_title_icon": "resource://activity-stream/data/content/assets/glyph-pocket-16.svg",
+      "section_title_text": "Messages from Mozilla (click for info)",
+      "section_title_url": "https://www.mozilla.org/about",
     },
   },
 ]);

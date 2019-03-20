@@ -1,6 +1,6 @@
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
- * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 //! [@supports rules](https://drafts.csswg.org/css-conditional-3/#at-supports)
 
@@ -145,7 +145,7 @@ impl SupportsCondition {
         function: &str,
         input: &mut Parser<'i, 't>,
     ) -> Result<Self, ParseError<'i>> {
-        match_ignore_ascii_case!{ function,
+        match_ignore_ascii_case! { function,
             // Although this is an internal syntax, it is not necessary
             // to check parsing context as far as we accept any
             // unexpected token as future syntax, and evaluate it to
@@ -350,9 +350,8 @@ impl RawSelector {
                     use crate::selector_parser::PseudoElement;
                     use selectors::parser::Component;
 
-                    let has_any_unknown_webkit_pseudo = selector.has_pseudo_element() && selector
-                        .iter_raw_match_order()
-                        .any(|component| {
+                    let has_any_unknown_webkit_pseudo = selector.has_pseudo_element() &&
+                        selector.iter_raw_match_order().any(|component| {
                             matches!(
                                 *component,
                                 Component::PseudoElement(PseudoElement::UnknownWebkit(..))

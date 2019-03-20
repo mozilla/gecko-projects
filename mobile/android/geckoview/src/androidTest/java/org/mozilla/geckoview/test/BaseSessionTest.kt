@@ -7,8 +7,8 @@ package org.mozilla.geckoview.test
 
 import android.os.Parcel
 import android.support.test.InstrumentationRegistry
+import org.mozilla.geckoview.GeckoRuntimeSettings
 import org.mozilla.geckoview.GeckoSession
-import org.mozilla.geckoview.GeckoSessionSettings
 import org.mozilla.geckoview.test.rule.GeckoSessionTestRule
 
 import org.hamcrest.Matcher
@@ -29,6 +29,7 @@ open class BaseSessionTest(noErrorCollector: Boolean = false) {
         const val CONTENT_CRASH_URL = "about:crashcontent"
         const val DOWNLOAD_HTML_PATH = "/assets/www/download.html"
         const val FORMS_HTML_PATH = "/assets/www/forms.html"
+        const val FORMS2_HTML_PATH = "/assets/www/forms2.html"
         const val HELLO_HTML_PATH = "/assets/www/hello.html"
         const val HELLO2_HTML_PATH = "/assets/www/hello2.html"
         const val INPUTS_PATH = "/assets/www/inputs.html"
@@ -47,6 +48,12 @@ open class BaseSessionTest(noErrorCollector: Boolean = false) {
         const val VIDEO_BAD_PATH = "/assets/www/badVideoPath.html"
         const val UNKNOWN_HOST_URI = "http://www.test.invalid/"
         const val FULLSCREEN_PATH = "/assets/www/fullscreen.html"
+        const val VIEWPORT_PATH = "/assets/www/viewport.html"
+        const val IFRAME_REDIRECT_LOCAL = "/assets/www/iframe_redirect_local.html"
+        const val IFRAME_REDIRECT_AUTOMATION = "/assets/www/iframe_redirect_automation.html"
+        const val AUTOPLAY_PATH = "/assets/www/autoplay.html"
+        const val SCROLL_TEST_PATH = "/assets/www/scroll.html"
+        const val COLORS_HTML_PATH = "/assets/www/colors.html"
     }
 
     @get:Rule val sessionRule = GeckoSessionTestRule()
@@ -73,7 +80,7 @@ open class BaseSessionTest(noErrorCollector: Boolean = false) {
                     .open(path.removePrefix("/assets/")).readBytes()
 
     val GeckoSession.isRemote
-        get() = this.settings.getBoolean(GeckoSessionSettings.USE_MULTIPROCESS)
+        get() = this.settings.getUseMultiprocess()
 
     fun createTestUrl(path: String) =
             GeckoSessionTestRule.APK_URI_PREFIX + path.removePrefix("/")
@@ -98,6 +105,22 @@ open class BaseSessionTest(noErrorCollector: Boolean = false) {
         }
     }
 
+    inline fun GeckoRuntimeSettings.toParcel(lambda: (Parcel) -> Unit) {
+        val parcel = Parcel.obtain()
+        try {
+            this.writeToParcel(parcel, 0)
+
+            val pos = parcel.dataPosition()
+            parcel.setDataPosition(0)
+
+            lambda(parcel)
+
+            assertThat("Read parcel matches written parcel",
+                       parcel.dataPosition(), Matchers.equalTo(pos))
+        } finally {
+            parcel.recycle()
+        }
+    }
 
     fun GeckoSession.open() =
             sessionRule.openSession(this)

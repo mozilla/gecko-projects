@@ -7,6 +7,7 @@
 #include "AudioBuffer.h"
 #include "mozilla/dom/AudioBufferBinding.h"
 #include "jsfriendapi.h"
+#include "js/ArrayBuffer.h"  // JS::StealArrayBufferContents
 #include "mozilla/ErrorResult.h"
 #include "AudioSegment.h"
 #include "AudioChannelFormat.h"
@@ -170,7 +171,8 @@ AudioBuffer::~AudioBuffer() {
   mozilla::DropJSObjects(this);
 }
 
-/* static */ already_AddRefed<AudioBuffer> AudioBuffer::Constructor(
+/* static */
+already_AddRefed<AudioBuffer> AudioBuffer::Constructor(
     const GlobalObject& aGlobal, const AudioBufferOptions& aOptions,
     ErrorResult& aRv) {
   if (!aOptions.mNumberOfChannels) {
@@ -199,7 +201,8 @@ void AudioBuffer::SetSharedChannels(
   mSharedChannels.mBufferFormat = AUDIO_FORMAT_FLOAT32;
 }
 
-/* static */ already_AddRefed<AudioBuffer> AudioBuffer::Create(
+/* static */
+already_AddRefed<AudioBuffer> AudioBuffer::Create(
     nsPIDOMWindowInner* aWindow, uint32_t aNumberOfChannels, uint32_t aLength,
     float aSampleRate,
     already_AddRefed<ThreadSharedFloatArrayBufferList> aInitialContents,
@@ -219,7 +222,8 @@ void AudioBuffer::SetSharedChannels(
   return buffer.forget();
 }
 
-/* static */ already_AddRefed<AudioBuffer> AudioBuffer::Create(
+/* static */
+already_AddRefed<AudioBuffer> AudioBuffer::Create(
     nsPIDOMWindowInner* aWindow, float aSampleRate,
     AudioChunk&& aInitialContents) {
   AudioChunk initialContents = aInitialContents;
@@ -255,6 +259,13 @@ static void CopyChannelDataToFloat(const AudioChunk& aChunk, uint32_t aChannel,
 }
 
 bool AudioBuffer::RestoreJSChannelData(JSContext* aJSContext) {
+  nsPIDOMWindowInner* global = GetParentObject();
+  if (!global || !global->AsGlobal()->GetGlobalJSObject()) {
+    return false;
+  }
+
+  JSAutoRealm ar(aJSContext, global->AsGlobal()->GetGlobalJSObject());
+
   for (uint32_t i = 0; i < mJSChannels.Length(); ++i) {
     if (mJSChannels[i]) {
       // Already have data in JS array.
@@ -382,6 +393,13 @@ void AudioBuffer::GetChannelData(JSContext* aJSContext, uint32_t aChannel,
 
 already_AddRefed<ThreadSharedFloatArrayBufferList>
 AudioBuffer::StealJSArrayDataIntoSharedChannels(JSContext* aJSContext) {
+  nsPIDOMWindowInner* global = GetParentObject();
+  if (!global || !global->AsGlobal()->GetGlobalJSObject()) {
+    return nullptr;
+  }
+
+  JSAutoRealm ar(aJSContext, global->AsGlobal()->GetGlobalJSObject());
+
   // "1. If any of the AudioBuffer's ArrayBuffer have been detached, abort
   // these steps, and return a zero-length channel data buffers to the
   // invoker."
@@ -409,7 +427,7 @@ AudioBuffer::StealJSArrayDataIntoSharedChannels(JSContext* aJSContext) {
     // RestoreJSChannelData, where they are created unshared.
     MOZ_ASSERT(!isSharedMemory);
     auto stolenData = arrayBuffer
-                          ? static_cast<float*>(JS_StealArrayBufferContents(
+                          ? static_cast<float*>(JS::StealArrayBufferContents(
                                 aJSContext, arrayBuffer))
                           : nullptr;
     if (stolenData) {

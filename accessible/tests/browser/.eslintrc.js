@@ -9,7 +9,7 @@ module.exports = {
   },
   "rules": {
     "mozilla/no-aArgs": "error",
-    "mozilla/reject-importGlobalProperties": "error",
+    "mozilla/reject-importGlobalProperties": ["error", "everything"],
     "mozilla/var-only-at-top-level": "error",
 
     "block-scoped-var": "error",
@@ -66,7 +66,6 @@ module.exports = {
     "no-warning-comments": "off",
     "object-shorthand": "off",
     "one-var": ["error", "never"],
-    "padded-blocks": ["error", "never"],
     "quote-props": "off",
     "radix": "error",
     "semi-spacing": ["error", {"before": false, "after": true}],

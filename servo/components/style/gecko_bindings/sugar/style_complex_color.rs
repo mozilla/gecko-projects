@@ -1,16 +1,16 @@
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
- * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 //! Rust helpers to interact with Gecko's StyleComplexColor.
 
 use crate::gecko::values::{convert_nscolor_to_rgba, convert_rgba_to_nscolor};
 use crate::gecko_bindings::structs::StyleComplexColor;
 use crate::gecko_bindings::structs::StyleComplexColor_Tag as Tag;
-use crate::values::computed::ui::ColorOrAuto;
-use crate::values::computed::{Color as ComputedColor, RGBAColor as ComputedRGBA};
-use crate::values::generics::color::{Color as GenericColor, ComplexColorRatios};
-use crate::values::{Auto, Either};
+use crate::values::computed::{Color as ComputedColor, ColorOrAuto, RGBAColor as ComputedRGBA};
+use crate::values::generics::color::{
+    Color as GenericColor, ColorOrAuto as GenericColorOrAuto, ComplexColorRatios,
+};
 
 impl StyleComplexColor {
     /// Create a `StyleComplexColor` value that represents `currentColor`.
@@ -94,8 +94,8 @@ impl From<StyleComplexColor> for ComputedColor {
 impl From<ColorOrAuto> for StyleComplexColor {
     fn from(other: ColorOrAuto) -> Self {
         match other {
-            Either::First(color) => color.into(),
-            Either::Second(_) => StyleComplexColor::auto(),
+            GenericColorOrAuto::Color(color) => color.into(),
+            GenericColorOrAuto::Auto => StyleComplexColor::auto(),
         }
     }
 }
@@ -103,9 +103,9 @@ impl From<ColorOrAuto> for StyleComplexColor {
 impl From<StyleComplexColor> for ColorOrAuto {
     fn from(other: StyleComplexColor) -> Self {
         if other.mTag != Tag::eAuto {
-            Either::First(other.into())
+            GenericColorOrAuto::Color(other.into())
         } else {
-            Either::Second(Auto)
+            GenericColorOrAuto::Auto
         }
     }
 }

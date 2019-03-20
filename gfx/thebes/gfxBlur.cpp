@@ -88,6 +88,10 @@ already_AddRefed<DrawTarget> gfxAlphaBoxBlur::InitDrawTarget(
     mDrawTarget = aReferenceDT->CreateShadowDrawTarget(
         mBlur.GetSize(), SurfaceFormat::A8,
         AlphaBoxBlur::CalculateBlurSigma(aBlurRadius.width));
+    if (mDrawTarget) {
+      // See Bug 1526045 - this is to force DT initialization.
+      mDrawTarget->ClearRect(gfx::Rect());
+    }
   } else {
     // Make an alpha-only surface to draw on. We will play with the data after
     // everything is drawn to create a blur effect.
@@ -441,10 +445,11 @@ static IntSize ComputeMinSizeForShadowShape(const RectCornerRadii* aCornerRadii,
   return minSize;
 }
 
-void CacheBlur(DrawTarget* aDT, const IntSize& aMinSize,
-               const IntSize& aBlurRadius, const RectCornerRadii* aCornerRadii,
-               const Color& aShadowColor, const IntMargin& aBlurMargin,
-               SourceSurface* aBoxShadow) {
+static void CacheBlur(DrawTarget* aDT, const IntSize& aMinSize,
+                      const IntSize& aBlurRadius,
+                      const RectCornerRadii* aCornerRadii,
+                      const Color& aShadowColor, const IntMargin& aBlurMargin,
+                      SourceSurface* aBoxShadow) {
   BlurCacheKey key(aMinSize, aBlurRadius, aCornerRadii, aShadowColor,
                    aDT->GetBackendType());
   BlurCacheData* data =
@@ -873,11 +878,14 @@ static void DrawMirroredMinBoxShadow(
  * the space between the corners.
  */
 
-/* static */ void gfxAlphaBoxBlur::BlurRectangle(
-    gfxContext* aDestinationCtx, const gfxRect& aRect,
-    const RectCornerRadii* aCornerRadii, const gfxPoint& aBlurStdDev,
-    const Color& aShadowColor, const gfxRect& aDirtyRect,
-    const gfxRect& aSkipRect) {
+/* static */
+void gfxAlphaBoxBlur::BlurRectangle(gfxContext* aDestinationCtx,
+                                    const gfxRect& aRect,
+                                    const RectCornerRadii* aCornerRadii,
+                                    const gfxPoint& aBlurStdDev,
+                                    const Color& aShadowColor,
+                                    const gfxRect& aDirtyRect,
+                                    const gfxRect& aSkipRect) {
   if (!RectIsInt32Safe(ToRect(aRect))) {
     return;
   }

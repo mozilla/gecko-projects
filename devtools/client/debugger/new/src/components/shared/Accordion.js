@@ -4,7 +4,7 @@
 
 // @flow
 import React, { cloneElement, Component } from "react";
-import Svg from "./Svg";
+import AccessibleImage from "./AccessibleImage";
 
 import "./Accordion.css";
 
@@ -62,15 +62,15 @@ class Accordion extends Component<Props, State> {
     const { opened } = item;
 
     return (
-      <li role="listitem" className={item.className} key={i}>
+      <li className={item.className} key={i}>
         <h2
           className="_header"
           tabIndex="0"
           onKeyDown={e => this.onHandleHeaderKeyDown(e, i)}
           onClick={() => this.handleHeaderClick(i)}
         >
-          <Svg name="arrow" className={opened ? "expanded" : ""} />
-          {item.header}
+          <AccessibleImage className={`arrow ${opened ? "expanded" : ""}`} />
+          <span className="header-label">{item.header}</span>
           {item.buttons ? (
             <div className="header-buttons" tabIndex="-1">
               {item.buttons}
@@ -87,7 +87,7 @@ class Accordion extends Component<Props, State> {
   };
   render() {
     return (
-      <ul role="list" className="accordion">
+      <ul className="accordion">
         {this.props.items.map(this.renderContainer)}
       </ul>
     );

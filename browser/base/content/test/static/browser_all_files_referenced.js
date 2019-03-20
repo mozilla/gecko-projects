@@ -13,6 +13,10 @@ ChromeUtils.defineModuleGetter(this, "ActorManagerParent",
 
 var isDevtools = SimpleTest.harnessParameters.subsuite == "devtools";
 
+// This list should contain only path prefixes. It is meant to stop the test
+// from reporting things that *are* referenced, but for which the test can't
+// find any reference because the URIs are constructed programatically.
+// If you need to whitelist specific files, please use the 'whitelist' object.
 var gExceptionPaths = [
   "chrome://browser/content/defaultthemes/",
   "resource://app/defaults/settings/blocklists/",
@@ -41,16 +45,18 @@ var gExceptionPaths = [
 
   // Exclude all search-plugins because they aren't referenced by filename
   "resource://search-plugins/",
-
-  // This is only in Nightly, and accessed using a direct chrome URL
-  "chrome://browser/content/aboutconfig/",
 ];
 
 // These are not part of the omni.ja file, so we find them only when running
 // the test on a non-packaged build.
-if (AppConstants.platform == "macosx")
+if (AppConstants.platform == "macosx") {
   gExceptionPaths.push("resource://gre/res/cursors/");
+  gExceptionPaths.push("resource://gre/res/touchbar/");
+}
 
+// Each whitelist entry should have a comment indicating which file is
+// referencing the whitelisted file in a way that the test can't detect, or a
+// bug number to remove or use the file if it is indeed currently unreferenced.
 var whitelist = [
   // browser/extensions/pdfjs/content/PdfStreamConverter.jsm
   {file: "chrome://pdf.js/locale/chrome.properties"},
@@ -63,10 +69,8 @@ var whitelist = [
   // See bug 1339424 for why this is hard to fix.
   {file: "chrome://global/locale/fallbackMenubar.properties",
    platforms: ["linux", "win"]},
-  {file: "chrome://global/locale/printPageSetup.dtd", platforms: ["linux", "macosx"]},
-  {file: "chrome://global/locale/printPreviewProgress.dtd",
+  {file: "resource://gre/localization/en-US/toolkit/printing/printDialogs.ftl",
    platforms: ["macosx"]},
-  {file: "chrome://global/locale/printProgress.dtd", platforms: ["macosx"]},
 
   // toolkit/content/aboutRights-unbranded.xhtml doesn't use aboutRights.css
   {file: "chrome://global/skin/aboutRights.css", skipUnofficial: true},
@@ -90,10 +94,6 @@ var whitelist = [
   // layout/mathml/nsMathMLChar.cpp
   {file: "resource://gre/res/fonts/mathfontSTIXGeneral.properties"},
   {file: "resource://gre/res/fonts/mathfontUnicode.properties"},
-
-  // toolkit/components/places/ColorAnalyzer_worker.js
-  {file: "resource://gre/modules/ClusterLib.js"},
-  {file: "resource://gre/modules/ColorConversion.js"},
 
   // Needed by HiddenFrame.jsm, but can't be packaged test-only
   {file: "chrome://global/content/win.xul"},
@@ -144,8 +144,6 @@ var whitelist = [
    platforms: ["linux"]},
   // Bug 1348559
   {file: "chrome://pippki/content/resetpassword.xul"},
-  // Bug 1351078
-  {file: "resource://gre/modules/Battery.jsm"},
   // Bug 1337345
   {file: "resource://gre/modules/Manifest.jsm"},
   // Bug 1351097
@@ -154,16 +152,10 @@ var whitelist = [
   {file: "resource://gre/modules/PerfMeasurement.jsm"},
   // Bug 1356045
   {file: "chrome://global/content/test-ipc.xul"},
-  // Bug 1356036
-  {file: "resource://gre/modules/PerformanceWatcher-content.js"},
-  {file: "resource://gre/modules/PerformanceWatcher.jsm"},
   // Bug 1378173 (warning: still used by devtools)
   {file: "resource://gre/modules/Promise.jsm"},
   // Still used by WebIDE, which is going away but not entirely gone.
   {file: "resource://gre/modules/ZipUtils.jsm"},
-  // Bug 1463225 (on Mac and Windows this is only used by a test)
-  {file: "chrome://global/content/bindings/toolbar.xml",
-   platforms: ["macosx", "win"]},
   // Bug 1483277 (temporarily unreferenced)
   {file: AppConstants.BROWSER_CHROME_URL == "chrome://browser/content/browser.xul" ?
     "chrome://browser/content/browser.xhtml" : "chrome://browser/content/browser.xul" },
@@ -176,6 +168,17 @@ var whitelist = [
    isFromDevTools: true},
   {file: "chrome://devtools/skin/images/aboutdebugging-firefox-release.svg",
    isFromDevTools: true},
+  {file: "chrome://devtools/skin/images/next.svg", isFromDevTools: true},
+  // kvstore.jsm wraps the API in nsIKeyValue.idl in a more ergonomic API
+  // It landed in bug 1490496, and we expect to start using it shortly.
+  {file: "resource://gre/modules/kvstore.jsm"},
+  {file: "chrome://devtools/content/aboutdebugging-new/tmp-locale/en-US/aboutdebugging.ftl",
+   isFromDevTools: true},
+  // Bug 1526672
+  {file: "resource://app/localization/en-US/browser/touchbar/touchbar.ftl",
+   platforms: ["linux", "win"]},
+  // Referenced by the webcompat system addon for localization
+  {file: "resource://gre/localization/en-US/toolkit/about/aboutCompat.ftl"},
 ];
 
 whitelist = new Set(whitelist.filter(item =>
@@ -196,6 +199,9 @@ const ignorableWhitelist = new Set([
 
   // Bug 1351669 - obsolete test file
   "resource://gre/res/test.properties",
+
+  // Bug 1532703
+  "resource://app/localization/en-US/browser/aboutConfig.ftl",
 ]);
 for (let entry of ignorableWhitelist) {
   whitelist.add(entry);
@@ -210,7 +216,6 @@ if (!isDevtools) {
                       "extension-storage.js"]) {
     whitelist.add("resource://services-sync/engines/" + module);
   }
-
 }
 
 if (AppConstants.MOZ_CODE_COVERAGE) {
@@ -274,8 +279,11 @@ function parseManifest(manifestUri) {
         // The webcompat reporter's locale directory may not exist if
         // the addon is preffed-off, and since it's a hack until we
         // get bz1425104 landed, we'll just skip it for now.
+        // Same issue with fxmonitor, which is also pref'd off.
         if (chromeUri === "chrome://webcompat-reporter/locale/") {
           gChromeMap.set("chrome://webcompat-reporter/locale/", true);
+        } else if (chromeUri === "chrome://fxmonitor/locale/") {
+          gChromeMap.set("chrome://fxmonitor/locale/", true);
         } else {
           trackChromeUri(chromeUri);
         }
@@ -341,13 +349,6 @@ function addCodeReference(url, fromURI) {
     if (ref === null)
       return;
   } else {
-    // Mark any file referenced by a 'features' bootstrap.js file as
-    // unconditionally referenced. The features folder is only in
-    // resource://app/ for non-packaged builds.
-    if (/resource:\/\/app\/features\/[^/]+\/bootstrap\.js/.test(from)) {
-      gReferencesFromCode.set(url, null);
-      return;
-    }
     ref = new Set();
     gReferencesFromCode.set(url, ref);
   }
@@ -403,6 +404,7 @@ function parseCodeFile(fileUri) {
     for (let line of data.split("\n")) {
       let urls =
         line.match(/["'`]chrome:\/\/[a-zA-Z0-9-]+\/(content|skin|locale)\/[^"'` ]*["'`]/g);
+
       if (!urls) {
         urls = line.match(/["']resource:\/\/[^"']+["']/g);
         if (urls && isDevtools &&
@@ -411,6 +413,23 @@ function parseCodeFile(fileUri) {
           continue;
         }
       }
+
+      if (!urls) {
+        urls = line.match(/[a-z0-9_\/-]+\.ftl/i);
+        if (urls) {
+          urls = urls[0];
+          let grePrefix = Services.io.newURI("resource://gre/localization/en-US/");
+          let appPrefix = Services.io.newURI("resource://app/localization/en-US/");
+
+          let grePrefixUrl = Services.io.newURI(urls, null, grePrefix).spec;
+          let appPrefixUrl = Services.io.newURI(urls, null, appPrefix).spec;
+
+          addCodeReference(grePrefixUrl, fileUri);
+          addCodeReference(appPrefixUrl, fileUri);
+          continue;
+        }
+      }
+
       if (!urls) {
         // If there's no absolute chrome URL, look for relative ones in
         // src and href attributes.
@@ -596,7 +615,8 @@ add_task(async function checkAllTheFiles() {
   // This asynchronously produces a list of URLs (sadly, mostly sync on our
   // test infrastructure because it runs against jarfiles there, and
   // our zipreader APIs are all sync)
-  let uris = await generateURIsFromDirTree(appDir, [".css", ".manifest", ".jpg", ".png", ".gif", ".svg",  ".dtd", ".properties"].concat(kCodeExtensions));
+  let uris = await generateURIsFromDirTree(appDir, [".css", ".manifest", ".jpg", ".png", ".gif", ".svg",
+                                                    ".ftl", ".dtd", ".properties"].concat(kCodeExtensions));
 
   // Parse and remove all manifests from the list.
   // NOTE that this must be done before filtering out devtools paths
@@ -618,6 +638,10 @@ add_task(async function checkAllTheFiles() {
 
   // Wait for all manifest to be parsed
   await throttledMapPromises(manifestURIs, parseManifest);
+
+  for (let jsm of Components.manager.getComponentJSMs()) {
+    gReferencesFromCode.set(jsm, null);
+  }
 
   // manifest.json is a common name, it is used for WebExtension manifests
   // but also for other things.  To tell them apart, we have to actually
@@ -653,7 +677,9 @@ add_task(async function checkAllTheFiles() {
                           "resource://devtools-client-jsonview/",
                           "resource://devtools-client-shared/",
                           "resource://app/modules/devtools",
-                          "resource://gre/modules/devtools"];
+                          "resource://gre/modules/devtools",
+                          "resource://app/localization/en-US/startup/aboutDevTools.ftl",
+                          "resource://app/localization/en-US/devtools/"];
   let hasDevtoolsPrefix =
     uri => devtoolsPrefixes.some(prefix => uri.startsWith(prefix));
   let chromeFiles = [];
@@ -679,9 +705,6 @@ add_task(async function checkAllTheFiles() {
       if (refs === null)
         return false;
       for (let ref of refs) {
-        if (ref.endsWith("!/bootstrap.js"))
-          return false;
-
         if (isDevtools) {
           if (ref.startsWith("resource://app/components/") ||
               (file.startsWith("chrome://") && ref.startsWith("resource://")))
@@ -753,23 +776,6 @@ add_task(async function checkAllTheFiles() {
       return true;
     });
   }
-
-  unreferencedFiles = unreferencedFiles.filter(file => {
-    // resource://app/features/ will only contain .xpi files when the test runs
-    // on a packaged build, so the following two exceptions only matter when
-    // running the test on a local non-packaged build.
-
-    if (/resource:\/\/app\/features\/[^/]+\/bootstrap\.js/.test(file)) {
-      info("not reporting feature boostrap file: " + file);
-      return false;
-    }
-    // Bug 1351892 - can stop shipping these?
-    if (/resource:\/\/app\/features\/[^/]+\/chrome\/skin\//.test(file)) {
-      info("not reporting feature skin file that may be for another platform: " + file);
-      return false;
-    }
-    return true;
-  });
 
   is(unreferencedFiles.length, 0, "there should be no unreferenced files");
   for (let file of unreferencedFiles) {

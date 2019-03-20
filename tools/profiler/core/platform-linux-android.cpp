@@ -53,9 +53,9 @@
 #include <unistd.h>     // sysconf
 #include <semaphore.h>
 #ifdef __GLIBC__
-#include <execinfo.h>  // backtrace, backtrace_symbols
-#endif                 // def __GLIBC__
-#include <strings.h>   // index
+#  include <execinfo.h>  // backtrace, backtrace_symbols
+#endif                   // def __GLIBC__
+#include <strings.h>     // index
 #include <errno.h>
 #include <stdarg.h>
 
@@ -69,7 +69,8 @@
 
 using namespace mozilla;
 
-/* static */ int Thread::GetCurrentId() { return gettid(); }
+/* static */
+int Thread::GetCurrentId() { return gettid(); }
 
 void* GetStackTop(void* aGuess) { return aGuess; }
 
@@ -104,12 +105,12 @@ static void PopulateRegsFromContext(Registers& aRegs, ucontext_t* aContext) {
   aRegs.mFP = reinterpret_cast<Address>(mcontext.gregs[30]);
 
 #else
-#error "bad platform"
+#  error "bad platform"
 #endif
 }
 
 #if defined(GP_OS_android)
-#define SYS_tgkill __NR_tgkill
+#  define SYS_tgkill __NR_tgkill
 #endif
 
 int tgkill(pid_t tgid, pid_t tid, int signalno) {

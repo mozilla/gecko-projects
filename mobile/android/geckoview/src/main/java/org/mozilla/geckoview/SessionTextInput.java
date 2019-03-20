@@ -7,7 +7,6 @@ package org.mozilla.geckoview;
 
 import org.mozilla.gecko.InputMethods;
 import org.mozilla.gecko.annotation.WrapForJNI;
-import org.mozilla.gecko.GeckoEditableChild;
 import org.mozilla.gecko.IGeckoEditableParent;
 import org.mozilla.gecko.NativeQueue;
 import org.mozilla.gecko.util.ActivityUtils;
@@ -205,6 +204,19 @@ public final class SessionTextInput {
             final View view = session.getTextInput().getView();
             final InputMethodManager imm = getInputMethodManager(view);
             if (imm != null) {
+                // When composition start and end is -1,
+                // InputMethodManager.updateSelection will remove composition
+                // on most IMEs. But ATOK series do nothing. So we have to
+                // restart input method to remove composition as workaround.
+                if (compositionStart < 0 && compositionEnd < 0 &&
+                    InputMethods.needsRestartInput(
+                        InputMethods.getCurrentInputMethod(view.getContext()))) {
+                    try {
+                        imm.restartInput(view);
+                    } catch (RuntimeException e) {
+                        Log.e(LOGTAG, "Error restarting input", e);
+                    }
+                }
                 imm.updateSelection(view, selStart, selEnd, compositionStart, compositionEnd);
             }
         }
@@ -483,7 +495,7 @@ public final class SessionTextInput {
      * @return TextInputDelegate instance or a default instance if no delegate has been set.
      */
     @UiThread
-    public GeckoSession.TextInputDelegate getDelegate() {
+    public @NonNull GeckoSession.TextInputDelegate getDelegate() {
         ThreadUtils.assertOnUiThread();
         if (mDelegate == null) {
             mDelegate = DefaultDelegate.INSTANCE;
@@ -499,6 +511,7 @@ public final class SessionTextInput {
      *              AUTOFILL_FLAG_*} constants.
      */
     @TargetApi(23)
+    @UiThread
     public void onProvideAutofillVirtualStructure(@NonNull final ViewStructure structure,
                                                   final int flags) {
         final View view = getView();
@@ -532,7 +545,8 @@ public final class SessionTextInput {
      *
      * @param values Map of auto-fill IDs to values.
      */
-    public void autofill(final SparseArray<CharSequence> values) {
+    @UiThread
+    public void autofill(final @NonNull SparseArray<CharSequence> values) {
         if (mAutoFillRoots == null) {
             return;
         }
@@ -652,6 +666,7 @@ public final class SessionTextInput {
         }
 
         if (Build.VERSION.SDK_INT >= 26 && "INPUT".equals(tag)) {
+            // LastPass will fill password to the feild that setAutofillHints is unset and setInputType is set.
             switch (type) {
                 case "email":
                     structure.setAutofillHints(new String[] { View.AUTOFILL_HINT_EMAIL_ADDRESS });
@@ -670,13 +685,17 @@ public final class SessionTextInput {
                     structure.setAutofillHints(new String[] { View.AUTOFILL_HINT_PHONE });
                     structure.setInputType(InputType.TYPE_CLASS_PHONE);
                     break;
-                case "text":
-                    structure.setInputType(InputType.TYPE_CLASS_TEXT |
-                                           InputType.TYPE_TEXT_VARIATION_WEB_EDIT_TEXT);
-                    break;
                 case "url":
                     structure.setInputType(InputType.TYPE_CLASS_TEXT |
                                            InputType.TYPE_TEXT_VARIATION_URI);
+                    break;
+                case "text":
+                    final String autofillhint = bundle.getString("autofillhint", "");
+                    if (autofillhint.equals("username")) {
+                        structure.setAutofillHints(new String[] { View.AUTOFILL_HINT_USERNAME });
+                        structure.setInputType(InputType.TYPE_CLASS_TEXT |
+                                               InputType.TYPE_TEXT_VARIATION_WEB_EDIT_TEXT);
+                    }
                     break;
             }
         }

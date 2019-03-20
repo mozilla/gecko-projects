@@ -1,6 +1,6 @@
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
- * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 //! Generic types for box properties.
 
@@ -19,7 +19,7 @@ use crate::values::animated::ToAnimatedZero;
     ToComputedValue,
     ToCss,
 )]
-pub enum VerticalAlign<LengthOrPercentage> {
+pub enum VerticalAlign<LengthPercentage> {
     /// `baseline`
     Baseline,
     /// `sub`
@@ -40,7 +40,7 @@ pub enum VerticalAlign<LengthOrPercentage> {
     #[cfg(feature = "gecko")]
     MozMiddleWithBaseline,
     /// `<length-percentage>`
-    Length(LengthOrPercentage),
+    Length(LengthPercentage),
 }
 
 impl<L> VerticalAlign<L> {
@@ -74,6 +74,7 @@ pub enum AnimationIterationCount<Number> {
     Copy,
     Debug,
     MallocSizeOf,
+    Parse,
     PartialEq,
     SpecifiedValueInfo,
     ToAnimatedValue,
@@ -81,12 +82,15 @@ pub enum AnimationIterationCount<Number> {
     ToComputedValue,
     ToCss,
 )]
-pub enum Perspective<NonNegativeLength> {
+#[repr(C, u8)]
+pub enum GenericPerspective<NonNegativeLength> {
     /// A non-negative length.
     Length(NonNegativeLength),
     /// The keyword `none`.
     None,
 }
+
+pub use self::GenericPerspective as Perspective;
 
 impl<L> Perspective<L> {
     /// Returns `none`.

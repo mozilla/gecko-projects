@@ -36,7 +36,8 @@
 #include "mozilla/StackWalk_windows.h"
 #include "mozilla/WindowsVersion.h"
 
-/* static */ int Thread::GetCurrentId() {
+/* static */
+int Thread::GetCurrentId() {
   DWORD threadId = GetCurrentThreadId();
   MOZ_ASSERT(threadId <= INT32_MAX, "native thread ID is > INT32_MAX");
   return int(threadId);
@@ -61,7 +62,7 @@ static void PopulateRegsFromContext(Registers& aRegs, CONTEXT* aContext) {
   aRegs.mSP = reinterpret_cast<Address>(aContext->Sp);
   aRegs.mFP = reinterpret_cast<Address>(aContext->Fp);
 #else
-#error "bad arch"
+#  error "bad arch"
 #endif
   aRegs.mLR = 0;
 }
@@ -94,8 +95,10 @@ class PlatformData {
   HANDLE mProfiledThread;
 };
 
+#if defined(USE_MOZ_STACK_WALK)
 HANDLE
 GetThreadHandle(PlatformData* aData) { return aData->ProfiledThread(); }
+#endif
 
 static const HANDLE kNoThread = INVALID_HANDLE_VALUE;
 

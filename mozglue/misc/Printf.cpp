@@ -11,6 +11,7 @@
  */
 
 #include "mozilla/AllocPolicy.h"
+#include "mozilla/Likely.h"
 #include "mozilla/Printf.h"
 #include "mozilla/Sprintf.h"
 #include "mozilla/UniquePtrExtensions.h"
@@ -22,7 +23,7 @@
 #include <string.h>
 
 #if defined(XP_WIN)
-#include <windows.h>
+#  include <windows.h>
 #endif
 
 /*
@@ -30,11 +31,11 @@
  * and requires array notation.
  */
 #ifdef HAVE_VA_COPY
-#define VARARGS_ASSIGN(foo, bar) VA_COPY(foo, bar)
+#  define VARARGS_ASSIGN(foo, bar) VA_COPY(foo, bar)
 #elif defined(HAVE_VA_LIST_AS_ARRAY)
-#define VARARGS_ASSIGN(foo, bar) foo[0] = bar[0]
+#  define VARARGS_ASSIGN(foo, bar) foo[0] = bar[0]
 #else
-#define VARARGS_ASSIGN(foo, bar) (foo) = (bar)
+#  define VARARGS_ASSIGN(foo, bar) (foo) = (bar)
 #endif
 
 /*
@@ -61,7 +62,7 @@ typedef mozilla::Vector<NumArgState, 20, mozilla::MallocAllocPolicy>
 #define TYPE_INTSTR 10
 #define TYPE_POINTER 11
 #if defined(XP_WIN)
-#define TYPE_WSTRING 12
+#  define TYPE_WSTRING 12
 #endif
 #define TYPE_UNKNOWN 20
 
@@ -258,9 +259,27 @@ bool mozilla::PrintfTarget::cvt_f(double d, const char* fmt0,
   }
 #endif
   size_t len = SprintfLiteral(fout, fin, d);
-  MOZ_RELEASE_ASSERT(len <= sizeof(fout));
+  // Note that SprintfLiteral will always write a \0 at the end, so a
+  // "<=" check here would be incorrect -- the buffer size passed to
+  // snprintf includes the trailing \0, but the returned length does
+  // not.
+  if (MOZ_LIKELY(len < sizeof(fout))) {
+    return emit(fout, len);
+  }
 
-  return emit(fout, len);
+  // Maybe the user used "%500.500f" or something like that.
+  size_t buf_size = len + 1;
+  UniqueFreePtr<char> buf((char*)malloc(buf_size));
+  if (!buf) {
+    return false;
+  }
+  len = snprintf(buf.get(), buf_size, fin, d);
+  // If this assert fails, then SprintfLiteral has a bug -- and in
+  // this case we would like to learn of it, which is why there is a
+  // release assert.
+  MOZ_RELEASE_ASSERT(len < buf_size);
+
+  return emit(buf.get(), len);
 }
 
 /*

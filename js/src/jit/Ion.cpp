@@ -36,7 +36,6 @@
 #include "jit/LICM.h"
 #include "jit/Linker.h"
 #include "jit/LIR.h"
-#include "jit/LoopUnroller.h"
 #include "jit/Lowering.h"
 #include "jit/PerfSpewer.h"
 #include "jit/RangeAnalysis.h"
@@ -67,7 +66,7 @@
 #include "vm/Stack-inl.h"
 
 #if defined(ANDROID)
-#include <sys/system_properties.h>
+#  include <sys/system_properties.h>
 #endif
 
 using namespace js;
@@ -99,9 +98,11 @@ JitContext::JitContext(CompileRuntime* rt, CompileRealm* realm,
     : cx(nullptr),
       temp(temp),
       runtime(rt),
-      realm(realm),
-      zone(realm ? realm->zone() : nullptr),
       prev_(CurrentJitContext()),
+      realm_(realm),
+#ifdef DEBUG
+      isCompilingWasm_(!realm),
+#endif
       assemblerCount_(0) {
   SetJitContext(this);
 }
@@ -110,9 +111,11 @@ JitContext::JitContext(JSContext* cx, TempAllocator* temp)
     : cx(cx),
       temp(temp),
       runtime(CompileRuntime::get(cx->runtime())),
-      realm(CompileRealm::get(cx->realm())),
-      zone(CompileZone::get(cx->zone())),
       prev_(CurrentJitContext()),
+      realm_(CompileRealm::get(cx->realm())),
+#ifdef DEBUG
+      isCompilingWasm_(false),
+#endif
       assemblerCount_(0) {
   SetJitContext(this);
 }
@@ -162,7 +165,6 @@ JitRuntime::JitRuntime()
       debugTrapHandler_(nullptr),
       baselineDebugModeOSRHandler_(nullptr),
       trampolineCode_(nullptr),
-      functionWrappers_(nullptr),
       jitcodeGlobalTable_(nullptr),
 #ifdef DEBUG
       ionBailAfter_(0),
@@ -175,8 +177,6 @@ JitRuntime::~JitRuntime() {
   MOZ_ASSERT(numFinishedBuilders_ == 0);
   MOZ_ASSERT(ionLazyLinkListSize_ == 0);
   MOZ_ASSERT(ionLazyLinkList_.ref().isEmpty());
-
-  js_delete(functionWrappers_.ref());
 
   // By this point, the jitcode global table should be empty.
   MOZ_ASSERT_IF(jitcodeGlobalTable_, jitcodeGlobalTable_->empty());
@@ -197,11 +197,6 @@ bool JitRuntime::initialize(JSContext* cx) {
   AutoAllocInAtomsZone az(cx);
 
   JitContext jctx(cx, nullptr);
-
-  functionWrappers_ = cx->new_<VMWrapperMap>(cx);
-  if (!functionWrappers_) {
-    return false;
-  }
 
   StackMacroAssembler masm;
 
@@ -283,15 +278,8 @@ bool JitRuntime::initialize(JSContext* cx) {
   generateDoubleToInt32ValueStub(masm);
 
   JitSpew(JitSpew_Codegen, "# Emitting VM function wrappers");
-  for (VMFunction* fun = VMFunction::functions; fun; fun = fun->next) {
-    if (functionWrappers_->has(fun)) {
-      // Duplicate VMFunction definition. See VMFunction::hash.
-      continue;
-    }
-    JitSpew(JitSpew_Codegen, "# VM function wrapper (%s)", fun->name());
-    if (!generateVMWrapper(cx, masm, *fun)) {
-      return false;
-    }
+  if (!generateVMWrappers(cx, masm)) {
+    return false;
   }
 
   JitSpew(JitSpew_Codegen, "# Emitting profiler exit frame tail stub");
@@ -302,8 +290,7 @@ bool JitRuntime::initialize(JSContext* cx) {
   void* handler = JS_FUNC_TO_DATA_PTR(void*, jit::HandleException);
   generateExceptionTailStub(masm, handler, &profilerExitTail);
 
-  Linker linker(masm);
-  AutoFlushICache afc("Trampolines");
+  Linker linker(masm, "Trampolines");
   trampolineCode_ = linker.newCode(cx, CodeKind::Other);
   if (!trampolineCode_) {
     return false;
@@ -375,13 +362,12 @@ JitRealm::JitRealm() : stubCodes_(nullptr), stringsCanBeInNursery(false) {}
 
 JitRealm::~JitRealm() { js_delete(stubCodes_); }
 
-bool JitRealm::initialize(JSContext* cx) {
+bool JitRealm::initialize(JSContext* cx, bool zoneHasNurseryStrings) {
   stubCodes_ = cx->new_<ICStubCodeMap>(cx->zone());
   if (!stubCodes_) {
     return false;
   }
-
-  stringsCanBeInNursery = cx->nursery().canAllocateStrings();
+  setStringsCanBeInNursery(zoneHasNurseryStrings);
 
   return true;
 }
@@ -522,8 +508,8 @@ uint8_t* jit::LazyLinkTopActivation(JSContext* cx,
   return calleeScript->jitCodeRaw();
 }
 
-/* static */ void JitRuntime::Trace(JSTracer* trc,
-                                    const AutoAccessAtomsZone& access) {
+/* static */
+void JitRuntime::Trace(JSTracer* trc, const AutoAccessAtomsZone& access) {
   MOZ_ASSERT(!JS::RuntimeHeapIsMinorCollecting());
 
   // Shared stubs are allocated in the atoms zone, so do not iterate
@@ -533,13 +519,14 @@ uint8_t* jit::LazyLinkTopActivation(JSContext* cx,
   }
 
   Zone* zone = trc->runtime()->atomsZone(access);
-  for (auto i = zone->cellIter<JitCode>(); !i.done(); i.next()) {
+  for (auto i = zone->cellIterUnsafe<JitCode>(); !i.done(); i.next()) {
     JitCode* code = i;
     TraceRoot(trc, &code, "wrapper");
   }
 }
 
-/* static */ void JitRuntime::TraceJitcodeGlobalTableForMinorGC(JSTracer* trc) {
+/* static */
+void JitRuntime::TraceJitcodeGlobalTableForMinorGC(JSTracer* trc) {
   if (trc->runtime()->geckoProfiler().enabled() &&
       trc->runtime()->hasJitRuntime() &&
       trc->runtime()->jitRuntime()->hasJitcodeGlobalTable()) {
@@ -547,8 +534,8 @@ uint8_t* jit::LazyLinkTopActivation(JSContext* cx,
   }
 }
 
-/* static */ bool JitRuntime::MarkJitcodeGlobalTableIteratively(
-    GCMarker* marker) {
+/* static */
+bool JitRuntime::MarkJitcodeGlobalTableIteratively(GCMarker* marker) {
   if (marker->runtime()->hasJitRuntime() &&
       marker->runtime()->jitRuntime()->hasJitcodeGlobalTable()) {
     return marker->runtime()
@@ -559,7 +546,8 @@ uint8_t* jit::LazyLinkTopActivation(JSContext* cx,
   return false;
 }
 
-/* static */ void JitRuntime::SweepJitcodeGlobalTable(JSRuntime* rt) {
+/* static */
+void JitRuntime::SweepJitcodeGlobalTable(JSRuntime* rt) {
   if (rt->hasJitRuntime() && rt->jitRuntime()->hasJitcodeGlobalTable()) {
     rt->jitRuntime()->getJitcodeGlobalTable()->sweep(rt);
   }
@@ -620,16 +608,6 @@ uint32_t JitRuntime::getBailoutTableSize(
     const FrameSizeClass& frameClass) const {
   MOZ_ASSERT(frameClass != FrameSizeClass::None());
   return bailoutTables_.ref()[frameClass.classId()].size;
-}
-
-TrampolinePtr JitRuntime::getVMWrapper(const VMFunction& f) const {
-  MOZ_ASSERT(functionWrappers_);
-  MOZ_ASSERT(trampolineCode_);
-
-  JitRuntime::VMWrapperMap::Ptr p =
-      functionWrappers_->readonlyThreadsafeLookup(&f);
-  MOZ_ASSERT(p);
-  return trampolineCode(p->value());
 }
 
 void JitCodeHeader::init(JitCode* jitCode) {
@@ -894,7 +872,8 @@ void IonScript::trace(JSTracer* trc) {
   }
 }
 
-/* static */ void IonScript::writeBarrierPre(Zone* zone, IonScript* ionScript) {
+/* static */
+void IonScript::writeBarrierPre(Zone* zone, IonScript* ionScript) {
   if (zone->needsIncrementalBarrier()) {
     ionScript->trace(zone->barrierTracer());
   }
@@ -1470,17 +1449,6 @@ bool OptimizeMIR(MIRGenerator* mir) {
       if (mir->shouldCancel("Truncate Doubles")) {
         return false;
       }
-    }
-
-    if (mir->optimizationInfo().loopUnrollingEnabled()) {
-      AutoTraceLog log(logger, TraceLogger_LoopUnrolling);
-
-      if (!UnrollLoops(graph, r.loopIterationBounds)) {
-        return false;
-      }
-
-      gs.spewPass("Unroll Loops");
-      AssertExtendedGraphCoherency(graph);
     }
   }
 
@@ -2169,7 +2137,7 @@ static bool CanIonCompileOrInlineScript(JSScript* script, const char** reason) {
     return false;
   }
 
-  if (script->nTypeSets() >= UINT16_MAX) {
+  if (script->numBytecodeTypeSets() >= JSScript::MaxBytecodeTypeSets) {
     // In this case multiple bytecode ops can share a single observed
     // TypeSet (see bug 1303710).
     *reason = "too many typesets";
@@ -2669,7 +2637,7 @@ static void InvalidateActivation(FreeOp* fop,
                 frame.script()->maybeForwardedFilename(),
                 frame.script()->lineno(), frame.script()->column(),
                 frame.maybeCallee(), (JSScript*)frame.script(),
-                frame.returnAddressToFp());
+                frame.resumePCinCurrentFrame());
         break;
       }
       case FrameType::BaselineStub:
@@ -2768,10 +2736,10 @@ static void InvalidateActivation(FreeOp* fop,
     // construction.
     AutoWritableJitCode awjc(ionCode);
     const SafepointIndex* si =
-        ionScript->getSafepointIndex(frame.returnAddressToFp());
-    CodeLocationLabel dataLabelToMunge(frame.returnAddressToFp());
+        ionScript->getSafepointIndex(frame.resumePCinCurrentFrame());
+    CodeLocationLabel dataLabelToMunge(frame.resumePCinCurrentFrame());
     ptrdiff_t delta = ionScript->invalidateEpilogueDataOffset() -
-                      (frame.returnAddressToFp() - ionCode->raw());
+                      (frame.resumePCinCurrentFrame() - ionCode->raw());
     Assembler::PatchWrite_Imm32(dataLabelToMunge, Imm32(delta));
 
     CodeLocationLabel osiPatchPoint =
@@ -3094,9 +3062,9 @@ AutoFlushICache::AutoFlushICache(const char* nonce, bool inhibit)
     defined(JS_CODEGEN_MIPS32) || defined(JS_CODEGEN_MIPS64)
     : start_(0),
       stop_(0),
-#ifdef JS_JITSPEW
+#  ifdef JS_JITSPEW
       name_(nonce),
-#endif
+#  endif
       inhibit_(inhibit)
 #endif
 {

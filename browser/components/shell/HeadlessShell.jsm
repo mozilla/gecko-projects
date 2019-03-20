@@ -6,16 +6,27 @@
 
 var EXPORTED_SYMBOLS = ["HeadlessShell"];
 
-ChromeUtils.import("resource://gre/modules/Services.jsm");
-ChromeUtils.import("resource://gre/modules/osfile.jsm");
+const {Services} = ChromeUtils.import("resource://gre/modules/Services.jsm");
+const {OS} = ChromeUtils.import("resource://gre/modules/osfile.jsm");
 
 // Refrences to the progress listeners to keep them from being gc'ed
 // before they are called.
 const progressListeners = new Map();
 
-function loadContentWindow(webNavigation, uri, principal) {
+function loadContentWindow(webNavigation, url, principal) {
+  let uri;
+  try {
+    uri = Services.io.newURI(url);
+  } catch (e) {
+    let msg = `Invalid URL passed to loadContentWindow(): ${url}`;
+    Cu.reportError(msg);
+    return Promise.reject(new Error(msg));
+  }
   return new Promise((resolve, reject) => {
-    webNavigation.loadURI(uri, Ci.nsIWebNavigation.LOAD_FLAGS_NONE, null, null, null, principal);
+    let loadURIOptions = {
+      triggeringPrincipal: principal,
+    };
+    webNavigation.loadURI(uri.spec, loadURIOptions);
     let docShell = webNavigation.QueryInterface(Ci.nsIInterfaceRequestor)
                                 .getInterface(Ci.nsIDocShell);
     let webProgress = docShell.QueryInterface(Ci.nsIInterfaceRequestor)
@@ -31,7 +42,7 @@ function loadContentWindow(webNavigation, uri, principal) {
           return;
         }
         // Ignore the initial about:blank
-        if (uri != location.spec) {
+        if (uri.spec != location.spec) {
           return;
         }
         let contentWindow = docShell.domWindow;

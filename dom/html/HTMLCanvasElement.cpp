@@ -229,8 +229,9 @@ HTMLCanvasPrintState::HTMLCanvasPrintState(
 
 HTMLCanvasPrintState::~HTMLCanvasPrintState() {}
 
-/* virtual */ JSObject* HTMLCanvasPrintState::WrapObject(
-    JSContext* aCx, JS::Handle<JSObject*> aGivenProto) {
+/* virtual */
+JSObject* HTMLCanvasPrintState::WrapObject(JSContext* aCx,
+                                           JS::Handle<JSObject*> aGivenProto) {
   return MozCanvasPrintState_Binding::Wrap(aCx, this, aGivenProto);
 }
 
@@ -282,7 +283,7 @@ void HTMLCanvasElementObserver::RegisterVisibilityChangeEvent() {
     return;
   }
 
-  nsIDocument* document = mElement->OwnerDoc();
+  Document* document = mElement->OwnerDoc();
   document->AddSystemEventListener(NS_LITERAL_STRING("visibilitychange"), this,
                                    true, false);
 }
@@ -292,7 +293,7 @@ void HTMLCanvasElementObserver::UnregisterVisibilityChangeEvent() {
     return;
   }
 
-  nsIDocument* document = mElement->OwnerDoc();
+  Document* document = mElement->OwnerDoc();
   document->RemoveSystemEventListener(NS_LITERAL_STRING("visibilitychange"),
                                       this, true);
 }
@@ -386,8 +387,9 @@ NS_IMPL_ISUPPORTS_CYCLE_COLLECTION_INHERITED_0(HTMLCanvasElement,
 
 NS_IMPL_ELEMENT_CLONE(HTMLCanvasElement)
 
-/* virtual */ JSObject* HTMLCanvasElement::WrapNode(
-    JSContext* aCx, JS::Handle<JSObject*> aGivenProto) {
+/* virtual */
+JSObject* HTMLCanvasElement::WrapNode(JSContext* aCx,
+                                      JS::Handle<JSObject*> aGivenProto) {
   return HTMLCanvasElement_Binding::Wrap(aCx, this, aGivenProto);
 }
 
@@ -845,7 +847,7 @@ OffscreenCanvas* HTMLCanvasElement::TransferControlToOffscreen(
 already_AddRefed<File> HTMLCanvasElement::MozGetAsFile(
     const nsAString& aName, const nsAString& aType,
     nsIPrincipal& aSubjectPrincipal, ErrorResult& aRv) {
-  OwnerDoc()->WarnOnceAbout(nsIDocument::eMozGetAsFile);
+  OwnerDoc()->WarnOnceAbout(Document::eMozGetAsFile);
 
   // do a trust check if this is a write-only canvas
   if (mWriteOnly && !nsContentUtils::IsSystemPrincipal(&aSubjectPrincipal)) {
@@ -1197,7 +1199,7 @@ nsresult HTMLCanvasElement::RegisterFrameCaptureListener(
   }
 
   if (!mRequestedFrameRefreshObserver) {
-    nsIDocument* doc = OwnerDoc();
+    Document* doc = OwnerDoc();
     if (!doc) {
       return NS_ERROR_FAILURE;
     }
@@ -1376,7 +1378,8 @@ void HTMLCanvasElement::OnMemoryPressure() {
   }
 }
 
-/* static */ void HTMLCanvasElement::SetAttrFromAsyncCanvasRenderer(
+/* static */
+void HTMLCanvasElement::SetAttrFromAsyncCanvasRenderer(
     AsyncCanvasRenderer* aRenderer) {
   HTMLCanvasElement* element = aRenderer->mHTMLCanvasElement;
   if (!element) {
@@ -1407,7 +1410,8 @@ void HTMLCanvasElement::OnMemoryPressure() {
   element->mResetLayer = true;
 }
 
-/* static */ void HTMLCanvasElement::InvalidateFromAsyncCanvasRenderer(
+/* static */
+void HTMLCanvasElement::InvalidateFromAsyncCanvasRenderer(
     AsyncCanvasRenderer* aRenderer) {
   HTMLCanvasElement* element = aRenderer->mHTMLCanvasElement;
   if (!element) {

@@ -12,7 +12,7 @@
 #include "nsISupportsUtils.h"
 #include "nsIURI.h"
 #include "nsIHttpChannel.h"
-#include "nsIDocument.h"
+#include "mozilla/dom/Document.h"
 #include "nsIStreamListener.h"
 #include "nsIChannelEventSink.h"
 #include "nsIAsyncVerifyRedirectCallback.h"
@@ -53,7 +53,9 @@
 #ifdef Status
 /* Xlib headers insist on this for some reason... Nuke it because
    it'll override our member name */
-#undef Status
+typedef Status __StatusTmp;
+#  undef Status
+typedef __StatusTmp Status;
 #endif
 
 class nsIJARChannel;
@@ -197,7 +199,8 @@ class XMLHttpRequestMainThread final : public XMLHttpRequest,
   XMLHttpRequestMainThread();
 
   void Construct(nsIPrincipal* aPrincipal, nsIGlobalObject* aGlobalObject,
-                 nsIURI* aBaseURI = nullptr, nsILoadGroup* aLoadGroup = nullptr,
+                 nsICookieSettings* aCookieSettings, nsIURI* aBaseURI = nullptr,
+                 nsILoadGroup* aLoadGroup = nullptr,
                  PerformanceStorage* aPerformanceStorage = nullptr,
                  nsICSPEventListener* aCSPEventListener = nullptr) {
     MOZ_ASSERT(aPrincipal);
@@ -205,6 +208,7 @@ class XMLHttpRequestMainThread final : public XMLHttpRequest,
     BindToOwner(aGlobalObject);
     mBaseURI = aBaseURI;
     mLoadGroup = aLoadGroup;
+    mCookieSettings = aCookieSettings;
     mPerformanceStorage = aPerformanceStorage;
     mCSPEventListener = aCSPEventListener;
   }
@@ -376,7 +380,7 @@ class XMLHttpRequestMainThread final : public XMLHttpRequest,
   void GetResponseText(XMLHttpRequestStringSnapshot& aSnapshot,
                        ErrorResult& aRv);
 
-  virtual nsIDocument* GetResponseXML(ErrorResult& aRv) override;
+  virtual Document* GetResponseXML(ErrorResult& aRv) override;
 
   virtual bool MozBackgroundRequest() const override;
 
@@ -488,9 +492,11 @@ class XMLHttpRequestMainThread final : public XMLHttpRequest,
   nsCOMPtr<nsIChannel> mChannel;
   nsCString mRequestMethod;
   nsCOMPtr<nsIURI> mRequestURL;
-  nsCOMPtr<nsIDocument> mResponseXML;
+  RefPtr<Document> mResponseXML;
 
   nsCOMPtr<nsIStreamListener> mXMLParserStreamListener;
+
+  nsCOMPtr<nsICookieSettings> mCookieSettings;
 
   RefPtr<PerformanceStorage> mPerformanceStorage;
   nsCOMPtr<nsICSPEventListener> mCSPEventListener;
@@ -627,7 +633,7 @@ class XMLHttpRequestMainThread final : public XMLHttpRequest,
   void StartTimeoutTimer();
   void HandleTimeoutCallback();
 
-  nsCOMPtr<nsIDocument> mSuspendedDoc;
+  RefPtr<Document> mSuspendedDoc;
   nsCOMPtr<nsIRunnable> mResumeTimeoutRunnable;
 
   nsCOMPtr<nsITimer> mSyncTimeoutTimer;

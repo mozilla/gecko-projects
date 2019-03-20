@@ -62,7 +62,8 @@ void AudioNodeStream::DestroyImpl() {
   ProcessedMediaStream::DestroyImpl();
 }
 
-/* static */ already_AddRefed<AudioNodeStream> AudioNodeStream::Create(
+/* static */
+already_AddRefed<AudioNodeStream> AudioNodeStream::Create(
     AudioContext* aCtx, AudioNodeEngine* aEngine, Flags aFlags,
     MediaStreamGraph* aGraph) {
   MOZ_ASSERT(NS_IsMainThread());
@@ -288,6 +289,20 @@ void AudioNodeStream::SetPassThrough(bool aPassThrough) {
   };
 
   GraphImpl()->AppendMessage(MakeUnique<Message>(this, aPassThrough));
+}
+
+void AudioNodeStream::SendRunnable(already_AddRefed<nsIRunnable> aRunnable) {
+  class Message final : public ControlMessage {
+   public:
+    Message(MediaStream* aStream, already_AddRefed<nsIRunnable> aRunnable)
+        : ControlMessage(aStream), mRunnable(aRunnable) {}
+    void Run() override { mRunnable->Run(); }
+
+   private:
+    nsCOMPtr<nsIRunnable> mRunnable;
+  };
+
+  GraphImpl()->AppendMessage(MakeUnique<Message>(this, std::move(aRunnable)));
 }
 
 void AudioNodeStream::SetChannelMixingParametersImpl(

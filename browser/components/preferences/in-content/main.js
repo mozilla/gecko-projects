@@ -7,15 +7,13 @@
 /* import-globals-from ../../../../toolkit/mozapps/preferences/fontbuilder.js */
 /* import-globals-from ../../../base/content/aboutDialog-appUpdater.js */
 
-ChromeUtils.import("resource://gre/modules/Services.jsm");
-ChromeUtils.import("resource://gre/modules/Downloads.jsm");
-ChromeUtils.import("resource://gre/modules/FileUtils.jsm");
-ChromeUtils.import("resource:///modules/ShellService.jsm");
-ChromeUtils.import("resource:///modules/TransientPrefs.jsm");
-ChromeUtils.import("resource://gre/modules/AppConstants.jsm");
-ChromeUtils.import("resource://gre/modules/DownloadUtils.jsm");
-ChromeUtils.import("resource://gre/modules/L10nRegistry.jsm");
-ChromeUtils.import("resource://gre/modules/Localization.jsm");
+var {Services} = ChromeUtils.import("resource://gre/modules/Services.jsm");
+var {Downloads} = ChromeUtils.import("resource://gre/modules/Downloads.jsm");
+var {FileUtils} = ChromeUtils.import("resource://gre/modules/FileUtils.jsm");
+var {TransientPrefs} = ChromeUtils.import("resource:///modules/TransientPrefs.jsm");
+var {AppConstants} = ChromeUtils.import("resource://gre/modules/AppConstants.jsm");
+var {L10nRegistry} = ChromeUtils.import("resource://gre/modules/L10nRegistry.jsm");
+var {Localization} = ChromeUtils.import("resource://gre/modules/Localization.jsm");
 ChromeUtils.defineModuleGetter(this, "CloudStorage",
   "resource://gre/modules/CloudStorage.jsm");
 ChromeUtils.defineModuleGetter(this, "SelectionChangedMenulist",
@@ -112,7 +110,8 @@ Preferences.addAll([
   { id: "browser.ctrlTab.recentlyUsedOrder", type: "bool" },
 
   // CFR
-  {id: "browser.newtabpage.activity-stream.asrouter.userprefs.cfr", type: "bool"},
+  {id: "browser.newtabpage.activity-stream.asrouter.userprefs.cfr.addons", type: "bool"},
+  {id: "browser.newtabpage.activity-stream.asrouter.userprefs.cfr.features", type: "bool"},
 
   // Fonts
   { id: "font.language.group", type: "wstring" },
@@ -321,9 +320,11 @@ var gMainPane = {
       gMainPane.initBrowserLocale();
     }
 
-    let cfrLearnMoreLink = document.getElementById("cfrLearnMore");
     let cfrLearnMoreUrl = Services.urlFormatter.formatURLPref("app.support.baseURL") + "extensionrecommendations";
-    cfrLearnMoreLink.setAttribute("href", cfrLearnMoreUrl);
+    for (const id of ["cfrLearnMore", "cfrFeaturesLearnMore"]) {
+      let link = document.getElementById(id);
+      link.setAttribute("href", cfrLearnMoreUrl);
+    }
 
     if (AppConstants.platform == "win") {
       // Functionality for "Show tabs in taskbar" on Windows 7 and up.
@@ -393,31 +394,25 @@ var gMainPane = {
       let row = document.getElementById("translationBox");
       row.removeAttribute("hidden");
       // Showing attribution only for Bing Translator.
-      ChromeUtils.import("resource:///modules/translation/Translation.jsm");
+      var {Translation} = ChromeUtils.import("resource:///modules/translation/Translation.jsm");
       if (Translation.translationEngine == "Bing") {
         document.getElementById("bingAttribution").removeAttribute("hidden");
       }
     }
 
-    if (AppConstants.MOZ_DEV_EDITION) {
-      let uAppData = OS.Constants.Path.userApplicationDataDir;
-      let ignoreSeparateProfile = OS.Path.join(uAppData, "ignore-dev-edition-profile");
-
-      setEventListener("separateProfileMode", "command", gMainPane.separateProfileModeChange);
-      let separateProfileModeCheckbox = document.getElementById("separateProfileMode");
-      setEventListener("getStarted", "click", gMainPane.onGetStarted);
-
-      OS.File.stat(ignoreSeparateProfile).then(() => separateProfileModeCheckbox.checked = false,
-        () => separateProfileModeCheckbox.checked = true);
-
-      if (Services.prefs.getBoolPref("identity.fxaccounts.enabled")) {
-        document.getElementById("sync-dev-edition-root").hidden = false;
-        fxAccounts.getSignedInUser().then(data => {
-          document.getElementById("getStarted").selectedIndex = data ? 1 : 0;
-        }).catch(Cu.reportError);
-      }
+    let drmInfoURL =
+      Services.urlFormatter.formatURLPref("app.support.baseURL") + "drm-content";
+    document.getElementById("playDRMContentLink").setAttribute("href", drmInfoURL);
+    let emeUIEnabled = Services.prefs.getBoolPref("browser.eme.ui.enabled");
+    // Force-disable/hide on WinXP:
+    if (navigator.platform.toLowerCase().startsWith("win")) {
+      emeUIEnabled = emeUIEnabled && parseFloat(Services.sysinfo.get("version")) >= 6;
     }
-
+    if (!emeUIEnabled) {
+      // Don't want to rely on .hidden for the toplevel groupbox because
+      // of the pane hiding/showing code potentially interfering:
+      document.getElementById("drmGroup").setAttribute("style", "display: none !important");
+    }
     // Initialize the Firefox Updates section.
     let version = AppConstants.MOZ_APP_VERSION_DISPLAY;
 
@@ -477,7 +472,13 @@ var gMainPane = {
     }
 
     if (AppConstants.MOZ_UPDATER) {
-      gAppUpdater = new appUpdater();
+      // XXX Workaround bug 1523453 -- changing selectIndex of a <deck> before
+      // frame construction could confuse nsDeckFrame::RemoveFrame().
+      window.requestAnimationFrame(() => {
+        window.requestAnimationFrame(() => {
+          gAppUpdater = new appUpdater();
+        });
+      });
       setEventListener("showUpdateHistory", "command",
         gMainPane.showUpdates);
 
@@ -495,6 +496,15 @@ var gMainPane = {
         this.updateReadPrefs();
         setEventListener("updateRadioGroup", "command",
                          gMainPane.updateWritePrefs);
+      }
+
+      if (AppConstants.platform == "win") {
+        // On Windows, the Application Update setting is an installation-
+        // specific preference, not a profile-specific one. Show a warning to
+        // inform users of this.
+        let updateContainer = document.getElementById("updateSettingsContainer");
+        updateContainer.classList.add("updateSettingCrossUserWarningContainer");
+        document.getElementById("updateSettingCrossUserWarning").hidden = false;
       }
 
       if (AppConstants.MOZ_MAINTENANCE_SERVICE) {
@@ -563,6 +573,8 @@ var gMainPane = {
 
     // Notify observers that the UI is now ready
     Services.obs.notifyObservers(window, "main-pane-loaded");
+
+    this.setInitialized();
   },
 
   preInit() {
@@ -571,6 +583,7 @@ var gMainPane = {
       // By doing this after pageshow, we ensure it doesn't delay painting
       // of the preferences page.
       window.addEventListener("pageshow", async () => {
+        await this.initialized;
         try {
           this._initListEventHandlers();
           this._loadData();
@@ -756,6 +769,15 @@ var gMainPane = {
   },
 
   initBrowserLocale() {
+    // Enable telemetry.
+    Services.telemetry.setEventRecordingEnabled("intl.ui.browserLanguage", true);
+
+    // This will register the "command" listener.
+    let menulist = document.getElementById("defaultBrowserLanguage");
+    new SelectionChangedMenulist(menulist, event => {
+      gMainPane.onBrowserLanguageChange(event);
+    });
+
     gMainPane.setBrowserLocales(Services.locale.appLocaleAsBCP47);
   },
 
@@ -765,7 +787,7 @@ var gMainPane = {
    * that the user would like to switch to after confirmation.
    */
   async setBrowserLocales(selected) {
-    let available = Services.locale.availableLocales;
+    let available = await getAvailableLocales();
     let localeNames = Services.intl.getLocaleDisplayNames(undefined, available);
     let locales = available.map((code, i) => ({code, name: localeNames[i]}));
     locales.sort((a, b) => a.name > b.name);
@@ -793,11 +815,6 @@ var gMainPane = {
     menupopup.textContent = "";
     menupopup.appendChild(fragment);
     menulist.value = selected;
-
-    // This will register the "command" listener.
-    new SelectionChangedMenulist(menulist, event => {
-      gMainPane.onBrowserLanguageChange(event);
-    });
 
     document.getElementById("browserLanguagesBox").hidden = false;
   },
@@ -867,6 +884,9 @@ var gMainPane = {
     let locales = localesString.split(",");
     Services.locale.requestedLocales = locales;
 
+    // Record the change in telemetry before we restart.
+    gMainPane.recordBrowserLanguagesTelemetry("apply");
+
     // Restart with the new locale.
     let cancelQuit = Cc["@mozilla.org/supports-PRBool;1"].createInstance(Ci.nsISupportsPRBool);
     Services.obs.notifyObservers(cancelQuit, "quit-application-requested", "restart");
@@ -886,6 +906,9 @@ var gMainPane = {
       this.hideConfirmLanguageChangeMessageBar();
       return;
     }
+
+    // Note the change in telemetry.
+    gMainPane.recordBrowserLanguagesTelemetry("reorder");
 
     let locales = Array.from(new Set([
       locale,
@@ -1024,8 +1047,17 @@ var gMainPane = {
     gSubDialog.open("chrome://browser/content/preferences/languages.xul");
   },
 
+  recordBrowserLanguagesTelemetry(method, value = null) {
+    Services.telemetry.recordEvent("intl.ui.browserLanguage", method, "main", value);
+  },
+
   showBrowserLanguages({search}) {
-    let opts = {selected: gMainPane.selectedLocales, search};
+    // Record the telemetry event with an id to associate related actions.
+    let telemetryId = parseInt(Services.telemetry.msSinceProcessStart(), 10).toString();
+    let method = search ? "search" : "manage";
+    gMainPane.recordBrowserLanguagesTelemetry(method, telemetryId);
+
+    let opts = {selected: gMainPane.selectedLocales, search, telemetryId};
     gSubDialog.open(
       "chrome://browser/content/preferences/browserLanguages.xul",
       null, opts, this.browserLanguagesClosed);
@@ -1033,8 +1065,10 @@ var gMainPane = {
 
   /* Show or hide the confirm change message bar based on the updated ordering. */
   browserLanguagesClosed() {
-    let selected = this.gBrowserLanguagesDialog.selected;
+    let {accepted, selected} = this.gBrowserLanguagesDialog;
     let active = Services.locale.appLocalesAsBCP47;
+
+    this.gBrowserLanguagesDialog.recordTelemetry(accepted ? "accept" : "cancel");
 
     // Prepare for changing the locales if they are different than the current locales.
     if (selected && selected.join(",") != active.join(",")) {
@@ -1057,7 +1091,7 @@ var gMainPane = {
   },
 
   openTranslationProviderAttribution() {
-    ChromeUtils.import("resource:///modules/translation/Translation.jsm");
+    var {Translation} = ChromeUtils.import("resource:///modules/translation/Translation.jsm");
     Translation.openProviderAttribution();
   },
 
@@ -1521,9 +1555,9 @@ var gMainPane = {
       let type = wrappedHandlerInfo.type;
 
       let handlerInfoWrapper;
-      if (type in this._handledTypes)
+      if (type in this._handledTypes) {
         handlerInfoWrapper = this._handledTypes[type];
-      else {
+      } else {
         handlerInfoWrapper = new HandlerInfoWrapper(type, wrappedHandlerInfo);
         this._handledTypes[type] = handlerInfoWrapper;
       }
@@ -1623,8 +1657,7 @@ var gMainPane = {
     this.selectedHandlerListItem = null;
 
     // Clear the list of entries.
-    while (this._list.childNodes.length > 1)
-      this._list.removeChild(this._list.lastChild);
+    this._list.textContent = "";
 
     var visibleTypes = this._visibleTypes;
 
@@ -2058,7 +2091,6 @@ var gMainPane = {
 
     gSubDialog.open("chrome://browser/content/preferences/applicationManager.xul",
       "resizable=no", handlerInfo, onComplete);
-
   },
 
   chooseApp(aEvent) {
@@ -2453,6 +2485,10 @@ var gMainPane = {
     return currentDirPref.value;
   },
 };
+
+gMainPane.initialized = new Promise(res => {
+  gMainPane.setInitialized = res;
+});
 
 // Utilities
 

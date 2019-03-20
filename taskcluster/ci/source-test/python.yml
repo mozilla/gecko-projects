@@ -4,10 +4,14 @@ job-defaults:
     worker-type:
         by-platform:
             linux64.*: aws-provisioner-v1/gecko-t-linux-xlarge
+            macosx64.*: releng-hardware/gecko-t-osx-1010
+            windows10-64.*: aws-provisioner-v1/gecko-t-win10-64
     worker:
         by-platform:
             linux64.*:
                 docker-image: {in-tree: "lint"}
+                max-run-time: 3600
+            default:
                 max-run-time: 3600
     treeherder:
         kind: test
@@ -34,6 +38,9 @@ taskgraph-tests:
 
 marionette-harness:
     description: testing/marionette/harness unit tests
+    platform:
+        - linux64/opt
+        - windows10-64/opt
     python-version: [2]
     treeherder:
         symbol: mnh
@@ -89,6 +96,10 @@ mochitest-harness:
 
 mozbase:
     description: testing/mozbase unit tests
+    platform:
+        - linux64/opt
+        - macosx64/opt
+        - windows10-64/opt
     python-version: [2, 3]
     treeherder:
         symbol: mb
@@ -115,6 +126,10 @@ mozharness:
 
 mozlint:
     description: python/mozlint unit tests
+    platform:
+        - linux64/opt
+        - macosx64/opt
+        - windows10-64/opt
     python-version: [2]
     treeherder:
         symbol: ml
@@ -140,6 +155,9 @@ mozrelease:
 
 mozterm:
     description: python/mozterm unit tests
+    platform:
+        - linux64/opt
+        - windows10-64/opt
     python-version: [2, 3]
     treeherder:
         symbol: term
@@ -164,6 +182,9 @@ mozversioncontrol:
 
 raptor:
     description: testing/raptor unit tests
+    platform:
+        - linux64/opt
+        - windows10-64/opt
     python-version: [2]
     treeherder:
         symbol: rap
@@ -215,6 +236,9 @@ reftest-harness:
 
 tryselect:
     description: tools/tryselect unit tests
+    platform:
+        - linux64/opt
+        - windows10-64/opt
     python-version: [2]
     treeherder:
         symbol: try

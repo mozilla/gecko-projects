@@ -1,6 +1,6 @@
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
- * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 //! A wrapper over an element and a snapshot, that allows us to selector-match
 //! against a past state of the element.
@@ -208,10 +208,10 @@ where
             // Instead, we use the `visited_handling` to determine if they
             // match.
             NonTSPseudoClass::Link => {
-                return self.is_link() && context.visited_handling().matches_unvisited()
+                return self.is_link() && context.visited_handling().matches_unvisited();
             },
             NonTSPseudoClass::Visited => {
-                return self.is_link() && context.visited_handling().matches_visited()
+                return self.is_link() && context.visited_handling().matches_visited();
             },
 
             #[cfg(feature = "gecko")]

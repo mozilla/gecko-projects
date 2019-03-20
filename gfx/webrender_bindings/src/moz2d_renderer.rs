@@ -7,6 +7,7 @@
 //! registering fonts found in the blob (see `prepare_request`).
 
 use webrender::api::*;
+use webrender::api::units::{BlobDirtyRect, BlobToDeviceTranslation};
 use bindings::{ByteSlice, MutByteSlice, wr_moz2d_render_cb, ArcVecU8, gecko_profiler_start_marker, gecko_profiler_end_marker};
 use rayon::ThreadPool;
 use rayon::prelude::*;
@@ -30,6 +31,8 @@ use foreign_types::ForeignType;
 
 #[cfg(not(any(target_os = "macos", target_os = "windows")))]
 use std::ffi::CString;
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
+use std::os::unix::ffi::OsStrExt;
 
 /// Local print-debugging utility
 macro_rules! dlog {
@@ -466,7 +469,7 @@ impl Drop for GeckoProfilerMarker {
 }
 
 impl AsyncBlobImageRasterizer for Moz2dBlobRasterizer {
-   
+
     fn rasterize(&mut self, requests: &[BlobImageParams], low_priority: bool) -> Vec<(BlobImageRequest, BlobImageResult)> {
         // All we do here is spin up our workers to callback into gecko to replay the drawing commands.
         let _marker = GeckoProfilerMarker::new(b"BlobRasterization\0");
@@ -546,7 +549,7 @@ fn rasterize_blob(job: Job) -> (BlobImageRequest, BlobImageResult) {
         }
     };
 
-    (job.request, result)    
+    (job.request, result)
 }
 
 impl BlobImageHandler for Moz2dBlobImageHandler {
@@ -655,9 +658,8 @@ impl Moz2dBlobImageHandler {
     fn prepare_request(&self, blob: &[u8], resources: &BlobImageResources) {
         #[cfg(target_os = "windows")]
         fn process_native_font_handle(key: FontKey, handle: &NativeFontHandle) {
-            let system_fc = dwrote::FontCollection::system();
-            let font = system_fc.get_font_from_descriptor(handle).unwrap();
-            let face = font.create_font_face();
+            let file = dwrote::FontFile::new_from_path(&handle.path).unwrap();
+            let face = file.create_face(handle.index, dwrote::DWRITE_FONT_SIMULATIONS_NONE).unwrap();
             unsafe { AddNativeFontHandle(key, face.as_ptr() as *mut c_void, 0) };
         }
 
@@ -668,7 +670,7 @@ impl Moz2dBlobImageHandler {
 
         #[cfg(not(any(target_os = "macos", target_os = "windows")))]
         fn process_native_font_handle(key: FontKey, handle: &NativeFontHandle) {
-            let cstr = CString::new(handle.pathname.clone()).unwrap();
+            let cstr = CString::new(handle.path.as_os_str().as_bytes()).unwrap();
             unsafe { AddNativeFontHandle(key, cstr.as_ptr() as *mut c_void, handle.index) };
         }
 

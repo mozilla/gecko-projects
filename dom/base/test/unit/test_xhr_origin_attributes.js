@@ -1,5 +1,3 @@
-ChromeUtils.import("resource://testing-common/httpd.js");
-
 let server = new HttpServer();
 server.start(-1);
 
@@ -41,6 +39,6 @@ function run_test() {
 
     xhr2.onload = function() {
       server.stop(do_test_finished);
-    }
+    };
   };
 }

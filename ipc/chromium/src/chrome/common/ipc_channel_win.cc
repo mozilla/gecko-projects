@@ -18,16 +18,20 @@
 #include "chrome/common/ipc_message_utils.h"
 #include "mozilla/ipc/ProtocolUtils.h"
 
+#ifdef FUZZING
+#  include "mozilla/ipc/Faulty.h"
+#endif
+
 // ChannelImpl is used on the IPC thread, but constructed on a different thread,
 // so it has to hold the nsAutoOwningThread as a pointer, and we need a slightly
 // different macro.
 #ifdef DEBUG
-#define ASSERT_OWNINGTHREAD(_class)                              \
-  if (nsAutoOwningThread* owningThread = _mOwningThread.get()) { \
-    owningThread->AssertOwnership(#_class " not thread-safe");   \
-  }
+#  define ASSERT_OWNINGTHREAD(_class)                              \
+    if (nsAutoOwningThread* owningThread = _mOwningThread.get()) { \
+      owningThread->AssertOwnership(#_class " not thread-safe");   \
+    }
 #else
-#define ASSERT_OWNINGTHREAD(_class) ((void)0)
+#  define ASSERT_OWNINGTHREAD(_class) ((void)0)
 #endif
 
 namespace IPC {
@@ -73,6 +77,11 @@ Channel::ChannelImpl::ChannelImpl(const std::wstring& channel_id,
   Init(mode, listener);
 
   if (mode == MODE_SERVER) {
+    // We don't need the pipe name because we've been passed a handle, but we do
+    // need to get the shared secret from the channel_id.
+    PipeName(channel_id, &shared_secret_);
+    waiting_for_shared_secret_ = !!shared_secret_;
+
     // Use the existing handle that was dup'd to us
     pipe_ = server_pipe;
     EnqueueHelloMessage();
@@ -142,6 +151,11 @@ bool Channel::ChannelImpl::Send(Message* message) {
   DLOG(INFO) << "sending message @" << message << " on channel @" << this
              << " with type " << message->type() << " (" << output_queue_.size()
              << " in queue)";
+#endif
+
+#ifdef FUZZING
+  message = mozilla::ipc::Faulty::instance().MutateIPCMessage(
+      "Channel::ChannelImpl::Send", message);
 #endif
 
   if (closed_) {

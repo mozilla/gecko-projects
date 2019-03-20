@@ -440,7 +440,7 @@ class AudioBufferSourceNodeEngine final : public AudioNodeEngine {
   }
 
   int32_t ComputeFinalOutSampleRate(float aPlaybackRate, float aDetune) {
-    float computedPlaybackRate = aPlaybackRate * pow(2, aDetune / 1200.f);
+    float computedPlaybackRate = aPlaybackRate * exp2(aDetune / 1200.f);
     // Make sure the playback rate and the doppler shift are something
     // our resampler can work with.
     int32_t rate = WebAudioUtils::TruncateFloatToInt<int32_t>(
@@ -604,10 +604,10 @@ AudioBufferSourceNode::AudioBufferSourceNode(AudioContext* aContext)
   mStream->AddMainThreadListener(this);
 }
 
-/* static */ already_AddRefed<AudioBufferSourceNode>
-AudioBufferSourceNode::Create(JSContext* aCx, AudioContext& aAudioContext,
-                              const AudioBufferSourceOptions& aOptions,
-                              ErrorResult& aRv) {
+/* static */
+already_AddRefed<AudioBufferSourceNode> AudioBufferSourceNode::Create(
+    JSContext* aCx, AudioContext& aAudioContext,
+    const AudioBufferSourceOptions& aOptions, ErrorResult& aRv) {
   if (aAudioContext.CheckClosed(aRv)) {
     return nullptr;
   }
@@ -705,7 +705,7 @@ void AudioBufferSourceNode::Start(double aWhen, double aOffset,
     ns->SetDoubleParameter(START, aWhen);
   }
 
-  Context()->NotifyScheduledSourceNodeStarted();
+  Context()->StartBlockedAudioContextIfAllowed();
 }
 
 void AudioBufferSourceNode::Start(double aWhen, ErrorResult& aRv) {

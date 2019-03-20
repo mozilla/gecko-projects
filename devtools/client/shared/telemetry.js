@@ -692,7 +692,6 @@ function getChartsFromToolId(id) {
   switch (id) {
     case "ABOUTDEBUGGING":
     case "BROWSERCONSOLE":
-    case "CANVASDEBUGGER":
     case "DOM":
     case "INSPECTOR":
     case "JSBROWSERDEBUGGER":
@@ -704,7 +703,6 @@ function getChartsFromToolId(id) {
     case "PAINTFLASHING":
     case "RESPONSIVE":
     case "SCRATCHPAD":
-    case "SHADEREDITOR":
     case "STORAGE":
     case "STYLEEDITOR":
     case "TOOLBOX":
@@ -738,6 +736,7 @@ function getChartsFromToolId(id) {
       countHist = `DEVTOOLS_${id}_OPENED_COUNT`;
       break;
     case "FLEXBOX_HIGHLIGHTER":
+    case "GRID_HIGHLIGHTER":
       timerHist = `DEVTOOLS_${id}_TIME_ACTIVE_SECONDS`;
       break;
     default:

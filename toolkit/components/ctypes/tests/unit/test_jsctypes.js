@@ -6,11 +6,6 @@
 /* eslint-disable no-new-wrappers */
 
 try {
-  // We might be running without privileges, in which case it's up to the
-  // harness to give us the 'ctypes' object.
-  ChromeUtils.import("resource://gre/modules/ctypes.jsm");
-  ChromeUtils.import("resource://gre/modules/Services.jsm");
-
   Services.prefs.setBoolPref("security.allow_eval_with_system_principal", true);
   registerCleanupFunction(() => {
     Services.prefs.clearUserPref("security.allow_eval_with_system_principal");
@@ -458,10 +453,12 @@ function run_Int64_tests() {
   Assert.equal(ctypes.Int64.join(-0x28590a1d, 0x6de22000).toString(16), "-28590a1c921de000");
   Assert.equal(ctypes.Int64.join(0x7fffffff, 0xffffffff).toString(16), "7fffffffffffffff");
   Assert.equal(ctypes.Int64.join(-0x80000000, 0x00000000).toString(16), "-8000000000000000");
+  /* eslint-disable mozilla/use-returnValue */
   do_check_throws(function() { ctypes.Int64.join(-0x80000001, 0); }, TypeError);
   do_check_throws(function() { ctypes.Int64.join(0x80000000, 0); }, TypeError);
   do_check_throws(function() { ctypes.Int64.join(0, -0x1); }, TypeError);
   do_check_throws(function() { ctypes.Int64.join(0, 0x800000000); }, TypeError);
+  /* eslint-enable mozilla/use-returnValue */
 }
 
 function run_UInt64_tests() {
@@ -605,10 +602,12 @@ function run_UInt64_tests() {
   Assert.equal(ctypes.UInt64.join(0xa8590a1c, 0x921de000).toString(16), "a8590a1c921de000");
   Assert.equal(ctypes.UInt64.join(0xffffffff, 0xffffffff).toString(16), "ffffffffffffffff");
   Assert.equal(ctypes.UInt64.join(0, 0).toString(16), "0");
+  /* eslint-disable mozilla/use-returnValue */
   do_check_throws(function() { ctypes.UInt64.join(-0x1, 0); }, TypeError);
   do_check_throws(function() { ctypes.UInt64.join(0x100000000, 0); }, TypeError);
   do_check_throws(function() { ctypes.UInt64.join(0, -0x1); }, TypeError);
   do_check_throws(function() { ctypes.UInt64.join(0, 0x1000000000); }, TypeError);
+  /* eslint-enable mozilla/use-returnValue */
 }
 
 function run_basic_abi_tests(library, t, name, toprimitive,
@@ -1480,7 +1479,6 @@ function run_StructType_tests() {
     do_check_throws(function() {
       ctypes.StructType("large_t", [{"a": large_t}, {"b": ctypes.int8_t}]);
     }, RangeError);
-
   } else {
     // Test 1: overflow struct size when converting from size_t to jsdouble.
     let large_t = ctypes.StructType("large_t",
@@ -2029,7 +2027,6 @@ function run_ArrayType_tests() {
 
     let large_t = ctypes.int8_t.array(0x80000000);
     do_check_throws(function() { large_t.array(2); }, RangeError);
-
   } else {
     do_check_throws(function() {
       ctypes.ArrayType(ctypes.int8_t, ctypes.UInt64("0xffffffffffffffff"));

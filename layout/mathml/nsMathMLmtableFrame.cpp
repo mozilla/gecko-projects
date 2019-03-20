@@ -310,19 +310,19 @@ class nsDisplaymtdBorder final : public nsDisplayBorder {
       mozilla::wr::DisplayListBuilder& aBuilder,
       mozilla::wr::IpcResourceUpdateQueue& aResources,
       const StackingContextHelper& aSc,
-      mozilla::layers::WebRenderLayerManager* aManager,
+      mozilla::layers::RenderRootStateManager* aManager,
       nsDisplayListBuilder* aDisplayListBuilder) override {
     return false;
   }
 };
 
 #ifdef DEBUG
-#define DEBUG_VERIFY_THAT_FRAME_IS(_frame, _expected)                       \
-  MOZ_ASSERT(                                                               \
-      mozilla::StyleDisplay::_expected == _frame->StyleDisplay()->mDisplay, \
-      "internal error");
+#  define DEBUG_VERIFY_THAT_FRAME_IS(_frame, _expected)                       \
+    MOZ_ASSERT(                                                               \
+        mozilla::StyleDisplay::_expected == _frame->StyleDisplay()->mDisplay, \
+        "internal error");
 #else
-#define DEBUG_VERIFY_THAT_FRAME_IS(_frame, _expected)
+#  define DEBUG_VERIFY_THAT_FRAME_IS(_frame, _expected)
 #endif
 
 static void ParseFrameAttribute(nsIFrame* aFrame, nsAtom* aAttribute,
@@ -636,8 +636,8 @@ static void ListMathMLTree(nsIFrame* atLeast) {
   for (; f; f = f->GetParent()) {
     nsIContent* c = f->GetContent();
     if (!c || c->IsMathMLElement(nsGkAtoms::math) ||
-        c->NodeInfo()->NameAtom(
-            nsGkAtoms::body))  // XXXbaku which kind of body tag?
+        // XXXbaku which kind of body tag?
+        c->NodeInfo()->NameAtom(nsGkAtoms::body))
       break;
   }
   if (!f) f = atLeast;
@@ -649,12 +649,13 @@ static void ListMathMLTree(nsIFrame* atLeast) {
 // implementation of nsMathMLmtableWrapperFrame
 
 NS_QUERYFRAME_HEAD(nsMathMLmtableWrapperFrame)
-NS_QUERYFRAME_ENTRY(nsIMathMLFrame)
+  NS_QUERYFRAME_ENTRY(nsIMathMLFrame)
 NS_QUERYFRAME_TAIL_INHERITING(nsTableWrapperFrame)
 
 nsContainerFrame* NS_NewMathMLmtableOuterFrame(nsIPresShell* aPresShell,
                                                ComputedStyle* aStyle) {
-  return new (aPresShell) nsMathMLmtableWrapperFrame(aStyle);
+  return new (aPresShell)
+      nsMathMLmtableWrapperFrame(aStyle, aPresShell->GetPresContext());
 }
 
 NS_IMPL_FRAMEARENA_HELPERS(nsMathMLmtableWrapperFrame)
@@ -878,7 +879,8 @@ void nsMathMLmtableWrapperFrame::Reflow(nsPresContext* aPresContext,
 
 nsContainerFrame* NS_NewMathMLmtableFrame(nsIPresShell* aPresShell,
                                           ComputedStyle* aStyle) {
-  return new (aPresShell) nsMathMLmtableFrame(aStyle);
+  return new (aPresShell)
+      nsMathMLmtableFrame(aStyle, aPresShell->GetPresContext());
 }
 
 NS_IMPL_FRAMEARENA_HELPERS(nsMathMLmtableFrame)
@@ -898,7 +900,8 @@ void nsMathMLmtableFrame::RestyleTable() {
   // Explicitly request a re-resolve and reflow in our subtree to pick up any
   // changes
   PresContext()->RestyleManager()->PostRestyleEvent(
-      mContent->AsElement(), eRestyle_Subtree, nsChangeHint_AllReflowHints);
+      mContent->AsElement(), RestyleHint::RestyleSubtree(),
+      nsChangeHint_AllReflowHints);
 }
 
 nscoord nsMathMLmtableFrame::GetColSpacing(int32_t aColIndex) {
@@ -1023,7 +1026,7 @@ void nsMathMLmtableFrame::SetUseCSSSpacing() {
 }
 
 NS_QUERYFRAME_HEAD(nsMathMLmtableFrame)
-NS_QUERYFRAME_ENTRY(nsMathMLmtableFrame)
+  NS_QUERYFRAME_ENTRY(nsMathMLmtableFrame)
 NS_QUERYFRAME_TAIL_INHERITING(nsTableFrame)
 
 // --------
@@ -1031,7 +1034,8 @@ NS_QUERYFRAME_TAIL_INHERITING(nsTableFrame)
 
 nsContainerFrame* NS_NewMathMLmtrFrame(nsIPresShell* aPresShell,
                                        ComputedStyle* aStyle) {
-  return new (aPresShell) nsMathMLmtrFrame(aStyle);
+  return new (aPresShell)
+      nsMathMLmtrFrame(aStyle, aPresShell->GetPresContext());
 }
 
 NS_IMPL_FRAMEARENA_HELPERS(nsMathMLmtrFrame)
@@ -1164,18 +1168,20 @@ nsMargin nsMathMLmtdFrame::GetBorderOverflow() {
 // implementation of nsMathMLmtdInnerFrame
 
 NS_QUERYFRAME_HEAD(nsMathMLmtdInnerFrame)
-NS_QUERYFRAME_ENTRY(nsIMathMLFrame)
+  NS_QUERYFRAME_ENTRY(nsIMathMLFrame)
 NS_QUERYFRAME_TAIL_INHERITING(nsBlockFrame)
 
 nsContainerFrame* NS_NewMathMLmtdInnerFrame(nsIPresShell* aPresShell,
                                             ComputedStyle* aStyle) {
-  return new (aPresShell) nsMathMLmtdInnerFrame(aStyle);
+  return new (aPresShell)
+      nsMathMLmtdInnerFrame(aStyle, aPresShell->GetPresContext());
 }
 
 NS_IMPL_FRAMEARENA_HELPERS(nsMathMLmtdInnerFrame)
 
-nsMathMLmtdInnerFrame::nsMathMLmtdInnerFrame(ComputedStyle* aStyle)
-    : nsBlockFrame(aStyle, kClassID)
+nsMathMLmtdInnerFrame::nsMathMLmtdInnerFrame(ComputedStyle* aStyle,
+                                             nsPresContext* aPresContext)
+    : nsBlockFrame(aStyle, aPresContext, kClassID)
       // Make a copy of the parent nsStyleText for later modification.
       ,
       mUniqueStyleText(MakeUnique<nsStyleText>(*StyleText())) {}
@@ -1214,7 +1220,8 @@ const nsStyleText* nsMathMLmtdInnerFrame::StyleTextForLineLayout() {
   return mUniqueStyleText.get();
 }
 
-/* virtual */ void nsMathMLmtdInnerFrame::DidSetComputedStyle(
+/* virtual */
+void nsMathMLmtdInnerFrame::DidSetComputedStyle(
     ComputedStyle* aOldComputedStyle) {
   nsBlockFrame::DidSetComputedStyle(aOldComputedStyle);
   mUniqueStyleText = MakeUnique<nsStyleText>(*StyleText());

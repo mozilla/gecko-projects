@@ -1,8 +1,8 @@
-g = newGlobal();
+g = newGlobal({newCompartment: true});
 hits = 0;
 Debugger(g).onDebuggerStatement = function(frame) {
     // Set a breakpoint at the JSOP_DEBUGAFTERYIELD op.
-    frame.script.setBreakpoint(71, {hit: function() { hits++; }});
+    frame.script.setBreakpoint(75, {hit: function() { hits++; }});
 }
 g.eval(`
 function* range() {

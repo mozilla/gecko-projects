@@ -10,11 +10,11 @@
 #define nsContentUtils_h___
 
 #if defined(XP_WIN)
-#include <float.h>
+#  include <float.h>
 #endif
 
 #if defined(SOLARIS)
-#include <ieeefp.h>
+#  include <ieeefp.h>
 #endif
 
 #include "js/TypeDecls.h"
@@ -44,13 +44,13 @@
 #include "mozilla/Maybe.h"
 #include "mozilla/RangeBoundary.h"
 #include "nsIContentPolicy.h"
-#include "nsIDocument.h"
+#include "mozilla/dom/Document.h"
 #include "nsPIDOMWindow.h"
 #include "nsRFPService.h"
 
 #if defined(XP_WIN)
 // Undefine LoadImage to prevent naming conflict with Windows.
-#undef LoadImage
+#  undef LoadImage
 #endif
 
 class imgICache;
@@ -132,6 +132,7 @@ class TextEditor;
 namespace dom {
 class ContentFrameMessageManager;
 struct CustomElementDefinition;
+class DataTransfer;
 class DocumentFragment;
 class Element;
 class Event;
@@ -143,8 +144,8 @@ struct LifecycleCallbackArgs;
 struct LifecycleAdoptedCallbackArgs;
 class MessageBroadcaster;
 class NodeInfo;
-class nsIContentChild;
-class nsIContentParent;
+class ContentChild;
+class ContentParent;
 class TabChild;
 class Selection;
 class TabParent;
@@ -206,6 +207,7 @@ typedef bool (*CallOnRemoteChildFunction)(mozilla::dom::TabParent* aTabParent,
 class nsContentUtils {
   friend class nsAutoScriptBlockerSuppressNodeRemoved;
   typedef mozilla::dom::Element Element;
+  typedef mozilla::dom::Document Document;
   typedef mozilla::Cancelable Cancelable;
   typedef mozilla::CanBubble CanBubble;
   typedef mozilla::Composed Composed;
@@ -216,9 +218,6 @@ class nsContentUtils {
 
  public:
   static nsresult Init();
-
-  // Strip off "wyciwyg://n/" part of a URL. aURI must have "wyciwyg" scheme.
-  static nsresult RemoveWyciwygScheme(nsIURI* aURI, nsIURI** aReturn);
 
   static bool IsCallerChrome();
   static bool ThreadsafeIsCallerChrome();
@@ -305,7 +304,11 @@ class nsContentUtils {
   // This function can be called both in the main thread and worker threads.
   static bool ShouldResistFingerprinting();
   static bool ShouldResistFingerprinting(nsIDocShell* aDocShell);
-  static bool ShouldResistFingerprinting(nsIDocument* aDoc);
+  static bool ShouldResistFingerprinting(nsIPrincipal* aPrincipal);
+  static bool ShouldResistFingerprinting(const Document* aDoc);
+
+  // Prevent system colors from being exposed to CSS or canvas.
+  static bool UseStandinsForNativeColors();
 
   // A helper function to calculate the rounded window size for fingerprinting
   // resistance. The rounded size is based on the chrome UI size and available
@@ -440,6 +443,15 @@ class nsContentUtils {
                                                          Element* aElement2);
 
   /**
+   * Returns the common ancestor under interactive content, if any.
+   * If neither one has interactive content as ancestor, common ancestor will be
+   * returned. If only one has interactive content as ancestor, null will be
+   * returned. If the nodes are the same, that node is returned.
+   */
+  static nsINode* GetCommonAncestorUnderInteractiveContent(nsINode* aNode1,
+                                                           nsINode* aNode2);
+
+  /**
    * Returns true if aNode1 is before aNode2 in the same connected
    * tree.
    * aNode1Index and aNode2Index are in/out arguments. If non-null, and value is
@@ -527,14 +539,14 @@ class nsContentUtils {
    * @param aOuterWindowID
    *        The outer window ID for the subdocument to be found. This must
    *        be a value greater than 0.
-   * @return nsIDocument*
-   *        A pointer to the found nsIDocument. nullptr if the subdocument
+   * @return Document*
+   *        A pointer to the found Document. nullptr if the subdocument
    *        cannot be found, or if either aDocument or aOuterWindowId were
    *        invalid. If the outer window ID belongs to aDocument itself, this
    *        will return a pointer to aDocument.
    */
-  static nsIDocument* GetSubdocumentWithOuterWindowId(nsIDocument* aDocument,
-                                                      uint64_t aOuterWindowId);
+  static Document* GetSubdocumentWithOuterWindowId(Document* aDocument,
+                                                   uint64_t aOuterWindowId);
 
   static const nsDependentSubstring TrimCharsInSet(const char* aSet,
                                                    const nsAString& aValue);
@@ -702,7 +714,7 @@ class nsContentUtils {
   // with a single realm.
   static nsIPrincipal* ObjectPrincipal(JSObject* aObj);
 
-  static nsresult GenerateStateKey(nsIContent* aContent, nsIDocument* aDocument,
+  static nsresult GenerateStateKey(nsIContent* aContent, Document* aDocument,
                                    nsACString& aKey);
 
   /**
@@ -712,7 +724,7 @@ class nsContentUtils {
    */
   static nsresult NewURIWithDocumentCharset(nsIURI** aResult,
                                             const nsAString& aSpec,
-                                            nsIDocument* aDocument,
+                                            Document* aDocument,
                                             nsIURI* aBaseURI);
 
   /**
@@ -747,13 +759,14 @@ class nsContentUtils {
   // If the pref doesn't exist or if it isn't ALLOW_ACTION, false is
   // returned, otherwise true is returned. Always returns true for the
   // system principal, and false for a null principal.
-  static bool IsSitePermAllow(nsIPrincipal* aPrincipal, const char* aType);
+  static bool IsSitePermAllow(nsIPrincipal* aPrincipal,
+                              const nsACString& aType);
 
   // Get a permission-manager setting for the given principal and type.
   // If the pref doesn't exist or if it isn't DENY_ACTION, false is
   // returned, otherwise true is returned. Always returns false for the
   // system principal, and true for a null principal.
-  static bool IsSitePermDeny(nsIPrincipal* aPrincipal, const char* aType);
+  static bool IsSitePermDeny(nsIPrincipal* aPrincipal, const nsACString& aType);
 
   // Get a permission-manager setting for the given principal and type.
   // If the pref doesn't exist or if it isn't ALLOW_ACTION, false is
@@ -761,7 +774,8 @@ class nsContentUtils {
   // system principal, and false for a null principal.
   // This version checks the permission for an exact host match on
   // the principal
-  static bool IsExactSitePermAllow(nsIPrincipal* aPrincipal, const char* aType);
+  static bool IsExactSitePermAllow(nsIPrincipal* aPrincipal,
+                                   const nsACString& aType);
 
   // Get a permission-manager setting for the given principal and type.
   // If the pref doesn't exist or if it isn't DENY_ACTION, false is
@@ -769,10 +783,11 @@ class nsContentUtils {
   // system principal, and true for a null principal.
   // This version checks the permission for an exact host match on
   // the principal
-  static bool IsExactSitePermDeny(nsIPrincipal* aPrincipal, const char* aType);
+  static bool IsExactSitePermDeny(nsIPrincipal* aPrincipal,
+                                  const nsACString& aType);
 
   // Returns true if aDoc1 and aDoc2 have equal NodePrincipal()s.
-  static bool HaveEqualPrincipals(nsIDocument* aDoc1, nsIDocument* aDoc2);
+  static bool HaveEqualPrincipals(Document* aDoc1, Document* aDoc2);
 
   static mozilla::intl::LineBreaker* LineBreaker() {
     return sLineBreaker.get();
@@ -833,13 +848,13 @@ class nsContentUtils {
    *         false is returned.
    */
   static bool CanLoadImage(nsIURI* aURI, nsINode* aNode,
-                           nsIDocument* aLoadingDocument,
+                           Document* aLoadingDocument,
                            nsIPrincipal* aLoadingPrincipal);
 
   /**
    * Returns true if objects in aDocument shouldn't initiate image loads.
    */
-  static bool DocumentInactiveForImageLoads(nsIDocument* aDocument);
+  static bool DocumentInactiveForImageLoads(Document* aDocument);
 
   /**
    * Convert a CORSMode into the corresponding imgILoader flags for
@@ -871,7 +886,7 @@ class nsContentUtils {
    * @return the imgIRequest for the image load
    */
   static nsresult LoadImage(
-      nsIURI* aURI, nsINode* aContext, nsIDocument* aLoadingDocument,
+      nsIURI* aURI, nsINode* aContext, Document* aLoadingDocument,
       nsIPrincipal* aLoadingPrincipal, uint64_t aRequestContextID,
       nsIURI* aReferrer, mozilla::net::ReferrerPolicy aReferrerPolicy,
       imgINotificationObserver* aObserver, int32_t aLoadFlags,
@@ -883,14 +898,14 @@ class nsContentUtils {
    * Obtain an image loader that respects the given document/channel's privacy
    * status. Null document/channel arguments return the public image loader.
    */
-  static imgLoader* GetImgLoaderForDocument(nsIDocument* aDoc);
+  static imgLoader* GetImgLoaderForDocument(Document* aDoc);
   static imgLoader* GetImgLoaderForChannel(nsIChannel* aChannel,
-                                           nsIDocument* aContext);
+                                           Document* aContext);
 
   /**
    * Returns whether the given URI is in the image cache.
    */
-  static bool IsImageInCache(nsIURI* aURI, nsIDocument* aDocument);
+  static bool IsImageInCache(nsIURI* aURI, Document* aDocument);
 
   /**
    * Method to get an imgIContainer from an image loading content
@@ -906,7 +921,7 @@ class nsContentUtils {
    * Helper method to call imgIRequest::GetStaticRequest.
    */
   static already_AddRefed<imgRequestProxy> GetStaticRequest(
-      nsIDocument* aLoadingDocument, imgRequestProxy* aRequest);
+      Document* aLoadingDocument, imgRequestProxy* aRequest);
 
   /**
    * Method that decides whether a content node is draggable
@@ -953,7 +968,7 @@ class nsContentUtils {
   /**
    * Returns origin attributes of the document.
    **/
-  static mozilla::OriginAttributes GetOriginAttributes(nsIDocument* aDoc);
+  static mozilla::OriginAttributes GetOriginAttributes(Document* aDoc);
 
   /**
    * Returns origin attributes of the load group.
@@ -964,7 +979,7 @@ class nsContentUtils {
   /**
    * Returns true if this document is in a Private Browsing window.
    */
-  static bool IsInPrivateBrowsing(nsIDocument* aDoc);
+  static bool IsInPrivateBrowsing(Document* aDoc);
 
   /**
    * Returns true if this loadGroup uses Private Browsing.
@@ -987,6 +1002,15 @@ class nsContentUtils {
    */
   static bool IsInSameAnonymousTree(const nsINode* aNode,
                                     const nsIContent* aContent);
+
+  /*
+   * Traverse the parent chain from aElement up to aStop, and return true if
+   * there's an interactive html content; false otherwise.
+   *
+   * Note: This crosses shadow boundaries but not document boundaries.
+   */
+  static bool IsInInteractiveHTMLContent(const Element* aElement,
+                                         const Element* aStop);
 
   /**
    * Return the nsIXPConnect service.
@@ -1027,7 +1051,7 @@ class nsContentUtils {
   };
   static nsresult ReportToConsoleNonLocalized(
       const nsAString& aErrorText, uint32_t aErrorFlags,
-      const nsACString& aCategory, const nsIDocument* aDocument,
+      const nsACString& aCategory, const Document* aDocument,
       nsIURI* aURI = nullptr, const nsString& aSourceLine = EmptyString(),
       uint32_t aLineNumber = 0, uint32_t aColumnNumber = 0,
       MissingErrorLocationMode aLocationMode = eUSE_CALLING_LOCATION);
@@ -1096,13 +1120,12 @@ class nsContentUtils {
   };
   static nsresult ReportToConsole(
       uint32_t aErrorFlags, const nsACString& aCategory,
-      const nsIDocument* aDocument, PropertiesFile aFile,
-      const char* aMessageName, const char16_t** aParams = nullptr,
-      uint32_t aParamsLength = 0, nsIURI* aURI = nullptr,
-      const nsString& aSourceLine = EmptyString(), uint32_t aLineNumber = 0,
-      uint32_t aColumnNumber = 0);
+      const Document* aDocument, PropertiesFile aFile, const char* aMessageName,
+      const char16_t** aParams = nullptr, uint32_t aParamsLength = 0,
+      nsIURI* aURI = nullptr, const nsString& aSourceLine = EmptyString(),
+      uint32_t aLineNumber = 0, uint32_t aColumnNumber = 0);
 
-  static void ReportEmptyGetElementByIdArg(const nsIDocument* aDoc);
+  static void ReportEmptyGetElementByIdArg(const Document* aDoc);
 
   static void LogMessageToConsole(const char* aMsg);
 
@@ -1205,12 +1228,14 @@ class nsContentUtils {
   /**
    * Returns true if aDocument is a chrome document
    */
-  static bool IsChromeDoc(nsIDocument* aDocument);
+  static bool IsChromeDoc(const Document* aDocument) {
+    return aDocument && aDocument->NodePrincipal() == sSystemPrincipal;
+  }
 
   /**
    * Returns true if aDocument is in a docshell whose parent is the same type
    */
-  static bool IsChildOfSameType(nsIDocument* aDoc);
+  static bool IsChildOfSameType(Document* aDoc);
 
   /**
    * Returns true if the content-type will be rendered as plain-text.
@@ -1228,7 +1253,9 @@ class nsContentUtils {
    * display purposes.  Returns false for null documents or documents
    * which do not belong to a docshell.
    */
-  static bool IsInChromeDocshell(nsIDocument* aDocument);
+  static bool IsInChromeDocshell(const Document* aDocument) {
+    return aDocument && aDocument->IsInChromeDocShell();
+  }
 
   /**
    * Return the content policy service
@@ -1307,7 +1334,7 @@ class nsContentUtils {
    *
    * @return true if there are mutation listeners of the specified type
    */
-  static bool HasMutationListeners(nsIDocument* aDocument, uint32_t aType);
+  static bool HasMutationListeners(Document* aDocument, uint32_t aType);
   /**
    * Synchronously fire DOMNodeRemoved on aChild. Only fires the event if
    * there really are listeners by checking using the HasMutationListeners
@@ -1324,7 +1351,7 @@ class nsContentUtils {
   /**
    * These methods create and dispatch a trusted event.
    * Works only with events which can be created by calling
-   * nsIDocument::CreateEvent() with parameter "Events".
+   * Document::CreateEvent() with parameter "Events".
    * Note that don't use these methods for "input" event.  Use
    * DispatchInputEvent() instead.
    *
@@ -1338,13 +1365,13 @@ class nsContentUtils {
    * @param aDefaultAction Set to true if default action should be taken,
    *                       see EventTarget::DispatchEvent.
    */
-  static nsresult DispatchTrustedEvent(nsIDocument* aDoc, nsISupports* aTarget,
+  static nsresult DispatchTrustedEvent(Document* aDoc, nsISupports* aTarget,
                                        const nsAString& aEventName, CanBubble,
                                        Cancelable,
                                        Composed aComposed = Composed::eDefault,
                                        bool* aDefaultAction = nullptr);
 
-  static nsresult DispatchTrustedEvent(nsIDocument* aDoc, nsISupports* aTarget,
+  static nsresult DispatchTrustedEvent(Document* aDoc, nsISupports* aTarget,
                                        const nsAString& aEventName,
                                        CanBubble aCanBubble,
                                        Cancelable aCancelable,
@@ -1367,7 +1394,7 @@ class nsContentUtils {
    */
   template <class WidgetEventType>
   static nsresult DispatchTrustedEvent(
-      nsIDocument* aDoc, nsISupports* aTarget, EventMessage aEventMessage,
+      Document* aDoc, nsISupports* aTarget, EventMessage aEventMessage,
       CanBubble aCanBubble, Cancelable aCancelable,
       bool* aDefaultAction = nullptr,
       ChromeOnlyDispatch aOnlyChromeDispatch = ChromeOnlyDispatch::eNo) {
@@ -1388,20 +1415,40 @@ class nsContentUtils {
    *
    * @param aEventTarget        The event target element of the "input" event.
    *                            Must not be nullptr.
+   * @param aEditorInputType    The inputType value of InputEvent.
+   *                            If aEventTarget won't dispatch "input" event
+   *                            with InputEvent, set EditorInputType::eUnknown.
    * @param aTextEditor         Optional.  If this is called by editor,
    *                            editor should set this.  Otherwise, leave
    *                            nullptr.
+   * @param aOptions            Optional.  If aEditorInputType value requires
+   *                            some additional data, they should be properly
+   *                            set with this argument.
    */
   MOZ_CAN_RUN_SCRIPT
-  static nsresult DispatchInputEvent(Element* aEventTarget);
+  static nsresult DispatchInputEvent(Element* aEventTarget) {
+    return DispatchInputEvent(aEventTarget, mozilla::EditorInputType::eUnknown,
+                              nullptr, InputEventOptions());
+  }
+  struct MOZ_STACK_CLASS InputEventOptions final {
+    InputEventOptions() = default;
+    explicit InputEventOptions(const nsAString& aData)
+        : mData(aData), mDataTransfer(nullptr) {}
+    explicit InputEventOptions(mozilla::dom::DataTransfer* aDataTransfer);
+
+    nsString mData;
+    mozilla::dom::DataTransfer* mDataTransfer;
+  };
   MOZ_CAN_RUN_SCRIPT
   static nsresult DispatchInputEvent(Element* aEventTarget,
-                                     mozilla::TextEditor* aTextEditor);
+                                     mozilla::EditorInputType aEditorInputType,
+                                     mozilla::TextEditor* aTextEditor,
+                                     const InputEventOptions& aOptions);
 
   /**
    * This method creates and dispatches a untrusted event.
    * Works only with events which can be created by calling
-   * nsIDocument::CreateEvent() with parameter "Events".
+   * Document::CreateEvent() with parameter "Events".
    * @param aDoc           The document which will be used to create the event.
    * @param aTarget        The target of the event, should be QIable to
    *                       EventTarget.
@@ -1411,8 +1458,7 @@ class nsContentUtils {
    * @param aDefaultAction Set to true if default action should be taken,
    *                       see EventTarget::DispatchEvent.
    */
-  static nsresult DispatchUntrustedEvent(nsIDocument* aDoc,
-                                         nsISupports* aTarget,
+  static nsresult DispatchUntrustedEvent(Document* aDoc, nsISupports* aTarget,
                                          const nsAString& aEventName, CanBubble,
                                          Cancelable,
                                          bool* aDefaultAction = nullptr);
@@ -1431,7 +1477,7 @@ class nsContentUtils {
    */
   template <class WidgetEventType>
   static nsresult DispatchUntrustedEvent(
-      nsIDocument* aDoc, nsISupports* aTarget, EventMessage aEventMessage,
+      Document* aDoc, nsISupports* aTarget, EventMessage aEventMessage,
       CanBubble aCanBubble, Cancelable aCancelable,
       bool* aDefaultAction = nullptr,
       ChromeOnlyDispatch aOnlyChromeDispatch = ChromeOnlyDispatch::eNo) {
@@ -1449,7 +1495,7 @@ class nsContentUtils {
    * object. Use DispatchEventOnlyToChrome if the normal event dispatching is
    * wanted in case aTarget is a chrome object.
    * Works only with events which can be created by calling
-   * nsIDocument::CreateEvent() with parameter "Events".
+   * Document::CreateEvent() with parameter "Events".
    * @param aDocument      The document which will be used to create the event,
    *                       and whose window's chrome handler will be used to
    *                       dispatch the event.
@@ -1460,7 +1506,7 @@ class nsContentUtils {
    * @param aDefaultAction Set to true if default action should be taken,
    *                       see EventTarget::DispatchEvent.
    */
-  static nsresult DispatchChromeEvent(nsIDocument* aDoc, nsISupports* aTarget,
+  static nsresult DispatchChromeEvent(Document* aDoc, nsISupports* aTarget,
                                       const nsAString& aEventName, CanBubble,
                                       Cancelable,
                                       bool* aDefaultAction = nullptr);
@@ -1481,7 +1527,7 @@ class nsContentUtils {
    * events to chrome event handler. DispatchEventOnlyToChrome works like
    * DispatchTrustedEvent in the case aTarget is a chrome object.
    * Works only with events which can be created by calling
-   * nsIDocument::CreateEvent() with parameter "Events".
+   * Document::CreateEvent() with parameter "Events".
    * @param aDoc           The document which will be used to create the event.
    * @param aTarget        The target of the event, should be QIable to
    *                       EventTarget.
@@ -1491,7 +1537,7 @@ class nsContentUtils {
    * @param aDefaultAction Set to true if default action should be taken,
    *                       see EventTarget::DispatchEvent.
    */
-  static nsresult DispatchEventOnlyToChrome(nsIDocument* aDoc,
+  static nsresult DispatchEventOnlyToChrome(Document* aDoc,
                                             nsISupports* aTarget,
                                             const nsAString& aEventName,
                                             CanBubble, Cancelable,
@@ -1663,7 +1709,7 @@ class nsContentUtils {
    *         fragments is made, a return code from the XML parser.
    */
   static nsresult ParseFragmentXML(const nsAString& aSourceBuffer,
-                                   nsIDocument* aDocument,
+                                   Document* aDocument,
                                    nsTArray<nsString>& aTagStack,
                                    bool aPreventScriptExecution,
                                    mozilla::dom::DocumentFragment** aReturn);
@@ -1682,7 +1728,7 @@ class nsContentUtils {
    *         long and NS_OK otherwise.
    */
   static nsresult ParseDocumentHTML(const nsAString& aSourceBuffer,
-                                    nsIDocument* aTargetDocument,
+                                    Document* aTargetDocument,
                                     bool aScriptingEnabledForNoscriptParsing);
 
   /**
@@ -1789,6 +1835,9 @@ class nsContentUtils {
 
   /**
    * Returns true if aPrincipal is the system principal.
+   *
+   * @deprecated Use nsIPrincipal::IsSystemPrincipal instead!
+   * https://bugzilla.mozilla.org/show_bug.cgi?id=1517588 tracks removing this.
    */
   static bool IsSystemPrincipal(nsIPrincipal* aPrincipal);
 
@@ -1873,7 +1922,7 @@ class nsContentUtils {
    * Hide any XUL popups associated with aDocument, including any documents
    * displayed in child frames. Does nothing if aDocument is null.
    */
-  static void HidePopupsInDocument(nsIDocument* aDocument);
+  static void HidePopupsInDocument(Document* aDocument);
 
   /**
    * Retrieve the current drag session, or null if no drag is currently occuring
@@ -1909,7 +1958,7 @@ class nsContentUtils {
    * @param aDocument The document that lists the manifest.
    * @param aURI The manifest URI.
    */
-  static void GetOfflineAppManifest(nsIDocument* aDocument, nsIURI** aURI);
+  static void GetOfflineAppManifest(Document* aDocument, nsIURI** aURI);
 
   /**
    * Check whether an application should be allowed to use offline APIs.
@@ -1982,7 +2031,7 @@ class nsContentUtils {
    * (rather than using AddScriptRunner as we usually do). |aDocument| is
    * optional as it is only used for showing the URL in the console.
    */
-  static void WarnScriptWasIgnored(nsIDocument* aDocument);
+  static void WarnScriptWasIgnored(Document* aDocument);
 
   /**
    * Add a "synchronous section", in the form of an nsIRunnable run once the
@@ -2016,7 +2065,7 @@ class nsContentUtils {
    *
    * See Bug #436083
    */
-  static nsresult ProcessViewportInfo(nsIDocument* aDocument,
+  static nsresult ProcessViewportInfo(Document* aDocument,
                                       const nsAString& viewportInfo);
 
   static JSContext* GetCurrentJSContext();
@@ -2197,7 +2246,7 @@ class nsContentUtils {
    * getting generic data like a device context or widget from it is OK, but it
    * might not be this document's actual presentation.
    */
-  static nsIPresShell* FindPresShellForDocument(const nsIDocument* aDoc);
+  static nsIPresShell* FindPresShellForDocument(const Document* aDoc);
 
   /**
    * Returns the widget for this document if there is one. Looks at all ancestor
@@ -2207,7 +2256,7 @@ class nsContentUtils {
    * You should probably use WidgetForContent() instead of this, unless you have
    * a good reason to do otherwise.
    */
-  static nsIWidget* WidgetForDocument(const nsIDocument* aDoc);
+  static nsIWidget* WidgetForDocument(const Document* aDoc);
 
   /**
    * Returns the appropriate widget for this element, if there is one. Unlike
@@ -2231,7 +2280,7 @@ class nsContentUtils {
    * layer manager should be used for retained layers
    */
   static already_AddRefed<mozilla::layers::LayerManager>
-  LayerManagerForDocument(const nsIDocument* aDoc);
+  LayerManagerForDocument(const Document* aDoc);
 
   /**
    * Returns a layer manager to use for the given content. Unlike
@@ -2258,7 +2307,7 @@ class nsContentUtils {
    * layer manager should be used for retained layers
    */
   static already_AddRefed<mozilla::layers::LayerManager>
-  PersistentLayerManagerForDocument(nsIDocument* aDoc);
+  PersistentLayerManagerForDocument(Document* aDoc);
 
   /**
    * Determine whether a content node is focused or not,
@@ -2386,7 +2435,7 @@ class nsContentUtils {
    * @param aDest the destination node that got stuff appended to it
    * @param aOldChildCount the number of children the node had before parsing
    */
-  static void FireMutationEventsForDirectParsing(nsIDocument* aDoc,
+  static void FireMutationEventsForDirectParsing(Document* aDoc,
                                                  nsIContent* aDest,
                                                  int32_t aOldChildCount);
 
@@ -2402,7 +2451,7 @@ class nsContentUtils {
    * Returns the root document in a document hierarchy. Normally this
    * will be the chrome document.
    */
-  static nsIDocument* GetRootDocument(nsIDocument* aDoc);
+  static Document* GetRootDocument(Document* aDoc);
 
   /**
    * Returns true if aWin and the current pointer lock document
@@ -2505,7 +2554,7 @@ class nsContentUtils {
    * @result          whether the given string is matches the pattern.
    */
   static bool IsPatternMatching(nsAString& aValue, nsAString& aPattern,
-                                nsIDocument* aDocument);
+                                const Document* aDocument);
 
   /**
    * Calling this adds support for
@@ -2785,19 +2834,18 @@ class nsContentUtils {
       const bool& aIsPrivateData, nsIPrincipal* aRequestingPrincipal,
       const nsContentPolicyType& aContentPolicyType,
       nsITransferable* aTransferable,
-      mozilla::dom::nsIContentParent* aContentParent,
+      mozilla::dom::ContentParent* aContentParent,
       mozilla::dom::TabChild* aTabChild);
 
   static void TransferablesToIPCTransferables(
       nsIArray* aTransferables, nsTArray<mozilla::dom::IPCDataTransfer>& aIPC,
-      bool aInSyncMessage, mozilla::dom::nsIContentChild* aChild,
-      mozilla::dom::nsIContentParent* aParent);
+      bool aInSyncMessage, mozilla::dom::ContentChild* aChild,
+      mozilla::dom::ContentParent* aParent);
 
   static void TransferableToIPCTransferable(
       nsITransferable* aTransferable,
       mozilla::dom::IPCDataTransfer* aIPCDataTransfer, bool aInSyncMessage,
-      mozilla::dom::nsIContentChild* aChild,
-      mozilla::dom::nsIContentParent* aParent);
+      mozilla::dom::ContentChild* aChild, mozilla::dom::ContentParent* aParent);
 
   /*
    * Get the pixel data from the given source surface and return it as a buffer.
@@ -2848,7 +2896,7 @@ class nsContentUtils {
                                 mozilla::dom::EventTarget* aChromeEventHandler,
                                 bool aOnlySystemGroup = false);
 
-  static already_AddRefed<nsPIWindowRoot> GetWindowRoot(nsIDocument* aDoc);
+  static already_AddRefed<nsPIWindowRoot> GetWindowRoot(Document* aDoc);
 
   /*
    * Implements step 3.1 and 3.3 of the Determine request's Referrer algorithm
@@ -2866,7 +2914,7 @@ class nsContentUtils {
    * https://w3c.github.io/webappsec/specs/referrer-policy/#determine-requests-referrer
    */
   static nsresult SetFetchReferrerURIWithPolicy(
-      nsIPrincipal* aPrincipal, nsIDocument* aDoc, nsIHttpChannel* aChannel,
+      nsIPrincipal* aPrincipal, Document* aDoc, nsIHttpChannel* aChannel,
       mozilla::net::ReferrerPolicy aReferrerPolicy);
 
   /*
@@ -2921,7 +2969,8 @@ class nsContentUtils {
    * persistent storage which are available to web pages. Cookies don't use
    * this logic, and security logic related to them must be updated separately.
    */
-  static StorageAccess StorageAllowedForWindow(nsPIDOMWindowInner* aWindow);
+  static StorageAccess StorageAllowedForWindow(
+      nsPIDOMWindowInner* aWindow, uint32_t* aRejectedReason = nullptr);
 
   /*
    * Checks if storage for the given document is permitted by a combination of
@@ -2932,7 +2981,7 @@ class nsContentUtils {
    * the window's extant document has not been set yet.  The code in
    * StorageAllowedForWindow(), however, will not work in these cases.
    */
-  static StorageAccess StorageAllowedForDocument(nsIDocument* aDoc);
+  static StorageAccess StorageAllowedForDocument(Document* aDoc);
 
   /*
    * Checks if storage should be allowed for a new window with the given
@@ -2951,23 +3000,22 @@ class nsContentUtils {
 
   /*
    * Checks if storage for the given principal is permitted by the user's
-   * preferences. The caller is assumed to not be a third-party iframe.
-   * (if that is possible, the caller should use StorageAllowedForWindow)
+   * preferences. This method should be used only by ServiceWorker loading.
    */
-  static StorageAccess StorageAllowedForPrincipal(nsIPrincipal* aPrincipal);
+  static StorageAccess StorageAllowedForServiceWorker(nsIPrincipal* aPrincipal);
 
   /*
    * Returns true if this document should disable storages because of the
    * anti-tracking feature.
    */
-  static bool StorageDisabledByAntiTracking(nsIDocument* aDocument,
-                                            nsIURI* aURI) {
+  static bool StorageDisabledByAntiTracking(Document* aDocument, nsIURI* aURI) {
+    uint32_t rejectedReason = 0;
     // Note that GetChannel() below may return null, but that's OK, since the
     // callee is able to deal with a null channel argument, and if passed null,
     // will only fail to notify the UI in case storage gets blocked.
-    return StorageDisabledByAntiTracking(aDocument->GetInnerWindow(),
-                                         aDocument->GetChannel(),
-                                         aDocument->NodePrincipal(), aURI);
+    return StorageDisabledByAntiTracking(
+        aDocument->GetInnerWindow(), aDocument->GetChannel(),
+        aDocument->NodePrincipal(), aURI, rejectedReason);
   }
 
  private:
@@ -2981,7 +3029,8 @@ class nsContentUtils {
   static bool StorageDisabledByAntiTracking(nsPIDOMWindowInner* aWindow,
                                             nsIChannel* aChannel,
                                             nsIPrincipal* aPrincipal,
-                                            nsIURI* aURI);
+                                            nsIURI* aURI,
+                                            uint32_t& aRejectedReason);
 
  public:
   /*
@@ -3037,7 +3086,7 @@ class nsContentUtils {
    * https://html.spec.whatwg.org/#concept-document-https-state
    * https://fetch.spec.whatwg.org/#concept-response-https-state
    */
-  static bool HttpsStateIsModern(nsIDocument* aDocument);
+  static bool HttpsStateIsModern(Document* aDocument);
 
   /**
    * Try to upgrade an element.
@@ -3055,14 +3104,14 @@ class nsContentUtils {
       mozilla::dom::CustomElementDefinition* aDefinition);
 
   static mozilla::dom::CustomElementRegistry* GetCustomElementRegistry(
-      nsIDocument*);
+      Document*);
 
   /**
    * Looking up a custom element definition.
    * https://html.spec.whatwg.org/#look-up-a-custom-element-definition
    */
   static mozilla::dom::CustomElementDefinition* LookupCustomElementDefinition(
-      nsIDocument* aDoc, nsAtom* aNameAtom, uint32_t aNameSpaceID,
+      Document* aDoc, nsAtom* aNameAtom, uint32_t aNameSpaceID,
       nsAtom* aTypeAtom);
 
   static void RegisterCallbackUpgradeElement(Element* aElement,
@@ -3075,7 +3124,7 @@ class nsContentUtils {
       Element* aElement, mozilla::dom::CustomElementDefinition* aDefinition);
 
   static void EnqueueLifecycleCallback(
-      nsIDocument::ElementCallbackType aType, Element* aCustomElement,
+      Document::ElementCallbackType aType, Element* aCustomElement,
       mozilla::dom::LifecycleCallbackArgs* aArgs = nullptr,
       mozilla::dom::LifecycleAdoptedCallbackArgs* aAdoptedCallbackArgs =
           nullptr,
@@ -3090,7 +3139,7 @@ class nsContentUtils {
    * the scrollbar elements created by the root scroll frame.
    */
   static void AppendDocumentLevelNativeAnonymousContentTo(
-      nsIDocument* aDocument, nsTArray<nsIContent*>& aElements);
+      Document* aDocument, nsTArray<nsIContent*>& aElements);
 
   /**
    * Appends all native anonymous content subtree roots generated by `aContent`
@@ -3134,17 +3183,6 @@ class nsContentUtils {
   static nsresult CreateJSValueFromSequenceOfObject(
       JSContext* aCx, const mozilla::dom::Sequence<JSObject*>& aTransfer,
       JS::MutableHandle<JS::Value> aValue);
-
-  /**
-   * Returns whether or not UA Widget is enabled, controlled by pref
-   * dom.ua_widget.enabled.
-   *
-   * When enabled, UA Widget will replace legacy XBL when rendering
-   * JS-implemented web content widgets (videocontrols/datetimebox/etc.)
-   *
-   * It is really enabled only if Shadow DOM is also enabled.
-   */
-  static bool IsUAWidgetEnabled() { return sIsUAWidgetEnabled; }
 
   /**
    * Returns true if reserved key events should be prevented from being sent
@@ -3214,10 +3252,6 @@ class nsContentUtils {
    */
   static bool GetUserIsInteracting();
 
-  // Check pref "privacy.trackingprotection.lower_network_priority" to see
-  // if we want to lower the priority of the channel.
-  static bool IsLowerNetworkPriority() { return sLowerNetworkPriority; }
-
   // Whether tracker tailing is turned on - "network.http.tailing.enabled".
   static bool IsTailingEnabled() { return sTailingEnabled; }
 
@@ -3275,23 +3309,6 @@ class nsContentUtils {
   static already_AddRefed<mozilla::dom::ContentFrameMessageManager>
   TryGetTabChildGlobal(nsISupports* aFrom);
 
-  static PopupControlState PushPopupControlState(PopupControlState aState,
-                                                 bool aForce) {
-    MOZ_ASSERT(NS_IsMainThread());
-    PopupControlState old = sPopupControlState;
-    if (aState < old || aForce) {
-      sPopupControlState = aState;
-    }
-    return old;
-  }
-
-  static void PopPopupControlState(PopupControlState aState) {
-    MOZ_ASSERT(NS_IsMainThread());
-    sPopupControlState = aState;
-  }
-
-  static PopupControlState GetPopupControlState() { return sPopupControlState; }
-
   // Get a serial number for a newly created inner or outer window.
   static uint32_t InnerOrOuterWindowCreated();
   // Record that an inner or outer window has been destroyed.
@@ -3300,8 +3317,6 @@ class nsContentUtils {
   static int32_t GetCurrentInnerOrOuterWindowCount() {
     return sInnerOrOuterWindowCount;
   }
-
-  static bool CanShowPopup(nsIPrincipal* aPrincipal);
 
   /**
    * Serializes a JSON-like JS::Value into a string.
@@ -3312,6 +3327,14 @@ class nsContentUtils {
    */
   static bool StringifyJSON(JSContext* aCx, JS::MutableHandle<JS::Value> vp,
                             nsAString& aOutStr);
+
+  /**
+   * Returns true if the top level ancestor content document of aDocument hasn't
+   * yet had the first contentful paint and there is a high priority event
+   * pending in the main thread.
+   */
+  static bool HighPriorityEventPendingForTopLevelDocumentBeforeContentfulPaint(
+      Document* aDocument);
 
  private:
   static bool InitializeEventTable();
@@ -3326,13 +3349,13 @@ class nsContentUtils {
                              JS::MutableHandle<JS::Value> vp,
                              bool aAllowWrapping);
 
-  static nsresult DispatchEvent(nsIDocument* aDoc, nsISupports* aTarget,
+  static nsresult DispatchEvent(Document* aDoc, nsISupports* aTarget,
                                 const nsAString& aEventName, CanBubble,
                                 Cancelable, Composed, Trusted,
                                 bool* aDefaultAction = nullptr,
                                 ChromeOnlyDispatch = ChromeOnlyDispatch::eNo);
 
-  static nsresult DispatchEvent(nsIDocument* aDoc, nsISupports* aTarget,
+  static nsresult DispatchEvent(Document* aDoc, nsISupports* aTarget,
                                 mozilla::WidgetEvent& aWidgetEvent,
                                 EventMessage aEventMessage, CanBubble,
                                 Cancelable, Trusted,
@@ -3362,13 +3385,14 @@ class nsContentUtils {
       CallOnRemoteChildFunction aCallback, void* aArg);
 
   /**
-   * Gets the current cookie lifetime policy for a given principal by checking
-   * with preferences and the permission manager.
+   * Gets the cookie lifetime policy for a given cookieSettings and a given
+   * principal by checking the permission value.
    *
-   * Used in the implementation of InternalStorageAllowedForPrincipal.
+   * Used in the implementation of InternalStorageAllowedCheck.
    */
-  static void GetCookieLifetimePolicyForPrincipal(nsIPrincipal* aPrincipal,
-                                                  uint32_t* aLifetimePolicy);
+  static void GetCookieLifetimePolicyFromCookieSettings(
+      nsICookieSettings* aCookieSettings, nsIPrincipal* aPrincipal,
+      uint32_t* aLifetimePolicy);
 
   /*
    * Checks if storage for a given principal is permitted by the user's
@@ -3379,12 +3403,14 @@ class nsContentUtils {
    * allow a channel instead of the window reference when determining 3rd party
    * status.
    *
-   * Used in the implementation of StorageAllowedForWindow and
-   * StorageAllowedForPrincipal.
+   * Used in the implementation of StorageAllowedForWindow,
+   * StorageAllowedForChannel and StorageAllowedForServiceWorker.
    */
-  static StorageAccess InternalStorageAllowedForPrincipal(
-      nsIPrincipal* aPrincipal, nsPIDOMWindowInner* aWindow, nsIURI* aURI,
-      nsIChannel* aChannel);
+  static StorageAccess InternalStorageAllowedCheck(nsIPrincipal* aPrincipal,
+                                                   nsPIDOMWindowInner* aWindow,
+                                                   nsIURI* aURI,
+                                                   nsIChannel* aChannel,
+                                                   uint32_t& aRejectedReason);
 
   static nsINode* GetCommonAncestorHelper(nsINode* aNode1, nsINode* aNode2);
   static nsIContent* GetCommonFlattenedTreeAncestorHelper(
@@ -3433,7 +3459,6 @@ class nsContentUtils {
 
   static bool sIsHandlingKeyBoardEvent;
   static bool sAllowXULXBL_for_file;
-  static bool sDisablePopups;
   static bool sIsFullscreenApiEnabled;
   static bool sIsUnprefixedFullscreenApiEnabled;
   static bool sTrustedFullscreenOnly;
@@ -3445,15 +3470,12 @@ class nsContentUtils {
   static bool sIsUpgradableDisplayContentPrefEnabled;
   static bool sIsFrameTimingPrefEnabled;
   static bool sIsFormAutofillAutocompleteEnabled;
-  static bool sIsUAWidgetEnabled;
-  static bool sIsCustomElementsEnabled;
   static bool sSendPerformanceTimingNotifications;
   static bool sUseActivityCursor;
   static bool sAnimationsAPICoreEnabled;
   static bool sGetBoxQuadsEnabled;
   static bool sSkipCursorMoveForSameValueSet;
   static bool sRequestIdleCallbackEnabled;
-  static bool sLowerNetworkPriority;
   static bool sTailingEnabled;
   static bool sShowInputPlaceholderOnFocus;
   static bool sAutoFocusEnabled;
@@ -3494,8 +3516,6 @@ class nsContentUtils {
   static bool sDoNotTrackEnabled;
   static mozilla::LazyLogModule sDOMDumpLog;
 
-  static PopupControlState sPopupControlState;
-
   static int32_t sInnerOrOuterWindowCount;
   static uint32_t sInnerOrOuterWindowSerialCounter;
 };
@@ -3505,6 +3525,8 @@ nsContentUtils::InternalContentPolicyTypeToExternal(nsContentPolicyType aType) {
   switch (aType) {
     case nsIContentPolicy::TYPE_INTERNAL_SCRIPT:
     case nsIContentPolicy::TYPE_INTERNAL_SCRIPT_PRELOAD:
+    case nsIContentPolicy::TYPE_INTERNAL_MODULE:
+    case nsIContentPolicy::TYPE_INTERNAL_MODULE_PRELOAD:
     case nsIContentPolicy::TYPE_INTERNAL_WORKER:
     case nsIContentPolicy::TYPE_INTERNAL_SHARED_WORKER:
     case nsIContentPolicy::TYPE_INTERNAL_SERVICE_WORKER:

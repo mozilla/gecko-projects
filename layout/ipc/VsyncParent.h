@@ -27,6 +27,7 @@ namespace layout {
 // DeallocPVsyncParent().
 class VsyncParent final : public PVsyncParent, public VsyncObserver {
   friend class mozilla::ipc::BackgroundParentImpl;
+  friend class PVsyncParent;
 
  private:
   static already_AddRefed<VsyncParent> Create();
@@ -34,14 +35,14 @@ class VsyncParent final : public PVsyncParent, public VsyncObserver {
   VsyncParent();
   virtual ~VsyncParent();
 
-  virtual bool NotifyVsync(TimeStamp aTimeStamp) override;
-  virtual mozilla::ipc::IPCResult RecvRequestVsyncRate() override;
+  virtual bool NotifyVsync(const VsyncEvent& aVsync) override;
+  mozilla::ipc::IPCResult RecvRequestVsyncRate();
 
-  virtual mozilla::ipc::IPCResult RecvObserve() override;
-  virtual mozilla::ipc::IPCResult RecvUnobserve() override;
+  mozilla::ipc::IPCResult RecvObserve();
+  mozilla::ipc::IPCResult RecvUnobserve();
   virtual void ActorDestroy(ActorDestroyReason aActorDestroyReason) override;
 
-  void DispatchVsyncEvent(TimeStamp aTimeStamp);
+  void DispatchVsyncEvent(const VsyncEvent& aVsync);
 
   bool mObservingVsync;
   bool mDestroyed;

@@ -15,7 +15,8 @@
 namespace mozilla {
 namespace layers {
 
-APZCTreeManagerChild::APZCTreeManagerChild() : mCompositorSession(nullptr) {}
+APZCTreeManagerChild::APZCTreeManagerChild()
+    : mCompositorSession(nullptr), mIPCOpen(false) {}
 
 APZCTreeManagerChild::~APZCTreeManagerChild() {}
 
@@ -66,7 +67,9 @@ void APZCTreeManagerChild::SetTargetAPZC(
 void APZCTreeManagerChild::UpdateZoomConstraints(
     const ScrollableLayerGuid& aGuid,
     const Maybe<ZoomConstraints>& aConstraints) {
-  SendUpdateZoomConstraints(aGuid, aConstraints);
+  if (mIPCOpen) {
+    SendUpdateZoomConstraints(aGuid, aConstraints);
+  }
 }
 
 void APZCTreeManagerChild::SetDPI(float aDpiValue) { SendSetDPI(aDpiValue); }
@@ -101,6 +104,21 @@ APZInputBridge* APZCTreeManagerChild::InputBridge() {
   return mInputBridge.get();
 }
 
+void APZCTreeManagerChild::AddIPDLReference() {
+  MOZ_ASSERT(mIPCOpen == false);
+  mIPCOpen = true;
+  AddRef();
+}
+
+void APZCTreeManagerChild::ReleaseIPDLReference() {
+  mIPCOpen = false;
+  Release();
+}
+
+void APZCTreeManagerChild::ActorDestroy(ActorDestroyReason aWhy) {
+  mIPCOpen = false;
+}
+
 mozilla::ipc::IPCResult APZCTreeManagerChild::RecvHandleTap(
     const TapType& aType, const LayoutDevicePoint& aPoint,
     const Modifiers& aModifiers, const ScrollableLayerGuid& aGuid,
@@ -109,8 +127,9 @@ mozilla::ipc::IPCResult APZCTreeManagerChild::RecvHandleTap(
   if (mCompositorSession &&
       mCompositorSession->RootLayerTreeId() == aGuid.mLayersId &&
       mCompositorSession->GetContentController()) {
-    mCompositorSession->GetContentController()->HandleTap(
-        aType, aPoint, aModifiers, aGuid, aInputBlockId);
+    RefPtr<GeckoContentController> controller =
+        mCompositorSession->GetContentController();
+    controller->HandleTap(aType, aPoint, aModifiers, aGuid, aInputBlockId);
     return IPC_OK();
   }
   dom::TabParent* tab =

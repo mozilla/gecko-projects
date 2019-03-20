@@ -39,8 +39,8 @@
  * The schema for this object is defined in policies-schema.json.
  */
 
-ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
-ChromeUtils.import("resource://gre/modules/Services.jsm");
+const {XPCOMUtils} = ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
+const {Services} = ChromeUtils.import("resource://gre/modules/Services.jsm");
 
 ChromeUtils.defineModuleGetter(this, "PlacesUtils",
   "resource://gre/modules/PlacesUtils.jsm");
@@ -48,7 +48,7 @@ ChromeUtils.defineModuleGetter(this, "PlacesUtils",
 const PREF_LOGLEVEL = "browser.policies.loglevel";
 
 XPCOMUtils.defineLazyGetter(this, "log", () => {
-  let { ConsoleAPI } = ChromeUtils.import("resource://gre/modules/Console.jsm", {});
+  let { ConsoleAPI } = ChromeUtils.import("resource://gre/modules/Console.jsm");
   return new ConsoleAPI({
     prefix: "BookmarksPolicies.jsm",
     // tip: set maxLogLevel to "debug" and use log.debug() to create detailed
@@ -195,7 +195,7 @@ async function insertBookmark(bookmark) {
   await PlacesUtils.bookmarks.insert({
     url: Services.io.newURI(bookmark.URL.href),
     title: bookmark.Title,
-    guid: generateGuidWithPrefix(BookmarksPolicies.BOOKMARK_GUID_PREFIX),
+    guid: PlacesUtils.generateGuidWithPrefix(BookmarksPolicies.BOOKMARK_GUID_PREFIX),
     parentGuid,
   });
 
@@ -246,13 +246,6 @@ async function setFaviconForBookmark(bookmark) {
   });
 }
 
-function generateGuidWithPrefix(prefix) {
-  // Generates a random GUID and replace its beginning with the given
-  // prefix. We do this instead of just prepending the prefix to keep
-  // the correct character length.
-  return prefix + PlacesUtils.history.makeGuid().substring(prefix.length);
-}
-
 // Cache of folder names to guids to be used by the getParentGuid
 // function. The name consists in the parentGuid (which should always
 // be the menuGuid or the toolbarGuid) + the folder title. This is to
@@ -290,7 +283,7 @@ async function getParentGuid(placement, folderTitle) {
     return foldersMap.get(folderName);
   }
 
-  let guid = generateGuidWithPrefix(BookmarksPolicies.FOLDER_GUID_PREFIX);
+  let guid = PlacesUtils.generateGuidWithPrefix(BookmarksPolicies.FOLDER_GUID_PREFIX);
   await PlacesUtils.bookmarks.insert({
     type: PlacesUtils.bookmarks.TYPE_FOLDER,
     title: folderTitle,

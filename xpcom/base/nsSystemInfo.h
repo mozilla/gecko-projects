@@ -9,11 +9,11 @@
 
 #include "nsHashPropertyBag.h"
 #if defined(XP_WIN)
-#include "nsIObserver.h"
+#  include "nsIObserver.h"
 #endif  // defined(XP_WIN)
 
 #ifdef MOZ_WIDGET_ANDROID
-#include "mozilla/dom/PContent.h"
+#  include "mozilla/dom/PContent.h"
 #endif  // MOZ_WIDGET_ANDROID
 
 class nsSystemInfo final : public nsHashPropertyBag
@@ -32,8 +32,8 @@ class nsSystemInfo final : public nsHashPropertyBag
 
   nsresult Init();
 
-  // Slot for NS_InitXPCOM2 to pass information to nsSystemInfo::Init.
-  // See comments above the variable definition and in NS_InitXPCOM2.
+  // Slot for NS_InitXPCOM to pass information to nsSystemInfo::Init.
+  // See comments above the variable definition and in NS_InitXPCOM.
   static uint32_t gUserUmask;
 
 #ifdef MOZ_WIDGET_ANDROID

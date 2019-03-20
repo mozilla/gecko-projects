@@ -127,9 +127,8 @@ void CycleCollectedJSContext::InitializeCommon() {
 
   NS_GetCurrentThread()->SetCanInvokeJS(true);
 
-  JS::SetGetIncumbentGlobalCallback(mJSContext, GetIncumbentGlobalCallback);
+  JS::SetJobQueue(mJSContext, this);
 
-  JS::SetEnqueuePromiseJobCallback(mJSContext, EnqueuePromiseJobCallback, this);
   JS::SetPromiseRejectionTrackerCallback(mJSContext,
                                          PromiseRejectionTrackerCallback, this);
   mUncaughtRejections.init(mJSContext,
@@ -184,8 +183,8 @@ nsresult CycleCollectedJSContext::InitializeNonPrimary(
   return NS_OK;
 }
 
-/* static */ CycleCollectedJSContext* CycleCollectedJSContext::GetFor(
-    JSContext* aCx) {
+/* static */
+CycleCollectedJSContext* CycleCollectedJSContext::GetFor(JSContext* aCx) {
   // Cast from void* matching JS_SetContextPrivate.
   auto atomCache = static_cast<PerThreadAtomCache*>(JS_GetContextPrivate(aCx));
   // Down cast.
@@ -226,7 +225,7 @@ class PromiseJobRunnable final : public MicroTaskRunnable {
     if (global && !global->IsDying()) {
       // Propagate the user input event handling bit if needed.
       nsCOMPtr<nsPIDOMWindowInner> win = do_QueryInterface(global);
-      nsCOMPtr<nsIDocument> doc;
+      RefPtr<Document> doc;
       if (win) {
         doc = win->GetExtantDoc();
       }
@@ -255,8 +254,7 @@ class PromiseJobRunnable final : public MicroTaskRunnable {
   bool mPropagateUserInputEventHandling;
 };
 
-/* static */
-JSObject* CycleCollectedJSContext::GetIncumbentGlobalCallback(JSContext* aCx) {
+JSObject* CycleCollectedJSContext::getIncumbentGlobal(JSContext* aCx) {
   nsIGlobalObject* global = mozilla::dom::GetIncumbentGlobal();
   if (global) {
     return global->GetGlobalJSObject();
@@ -264,14 +262,11 @@ JSObject* CycleCollectedJSContext::GetIncumbentGlobalCallback(JSContext* aCx) {
   return nullptr;
 }
 
-/* static */
-bool CycleCollectedJSContext::EnqueuePromiseJobCallback(
+bool CycleCollectedJSContext::enqueuePromiseJob(
     JSContext* aCx, JS::HandleObject aPromise, JS::HandleObject aJob,
-    JS::HandleObject aAllocationSite, JS::HandleObject aIncumbentGlobal,
-    void* aData) {
-  CycleCollectedJSContext* self = static_cast<CycleCollectedJSContext*>(aData);
-  MOZ_ASSERT(aCx == self->Context());
-  MOZ_ASSERT(Get() == self);
+    JS::HandleObject aAllocationSite, JS::HandleObject aIncumbentGlobal) {
+  MOZ_ASSERT(aCx == Context());
+  MOZ_ASSERT(Get() == this);
 
   nsIGlobalObject* global = nullptr;
   if (aIncumbentGlobal) {
@@ -280,8 +275,56 @@ bool CycleCollectedJSContext::EnqueuePromiseJobCallback(
   JS::RootedObject jobGlobal(aCx, JS::CurrentGlobalOrNull(aCx));
   RefPtr<PromiseJobRunnable> runnable = new PromiseJobRunnable(
       aPromise, aJob, jobGlobal, aAllocationSite, global);
-  self->DispatchToMicroTask(runnable.forget());
+  DispatchToMicroTask(runnable.forget());
   return true;
+}
+
+// Used only by the SpiderMonkey Debugger API, and even then only via
+// JS::AutoDebuggerJobQueueInterruption, to ensure that the debuggee's queue is
+// not affected; see comments in js/public/Promise.h.
+void CycleCollectedJSContext::runJobs(JSContext* aCx) {
+  MOZ_ASSERT(aCx == Context());
+  MOZ_ASSERT(Get() == this);
+  PerformMicroTaskCheckPoint();
+}
+
+bool CycleCollectedJSContext::empty() const {
+  // This is our override of JS::JobQueue::empty. Since that interface is only
+  // concerned with the ordinary microtask queue, not the debugger microtask
+  // queue, we only report on the former.
+  return mPendingMicroTaskRunnables.empty();
+}
+
+// Preserve a debuggee's microtask queue while it is interrupted by the
+// debugger. See the comments for JS::AutoDebuggerJobQueueInterruption.
+class CycleCollectedJSContext::SavedMicroTaskQueue
+    : public JS::JobQueue::SavedJobQueue {
+ public:
+  explicit SavedMicroTaskQueue(CycleCollectedJSContext* ccjs) : ccjs(ccjs) {
+    ccjs->mPendingMicroTaskRunnables.swap(mQueue);
+  }
+
+  ~SavedMicroTaskQueue() {
+    MOZ_RELEASE_ASSERT(ccjs->mPendingMicroTaskRunnables.empty());
+    ccjs->mPendingMicroTaskRunnables.swap(mQueue);
+  }
+
+ private:
+  CycleCollectedJSContext* ccjs;
+  std::queue<RefPtr<MicroTaskRunnable>> mQueue;
+};
+
+js::UniquePtr<JS::JobQueue::SavedJobQueue>
+CycleCollectedJSContext::saveJobQueue(JSContext* cx) {
+  auto saved = js::MakeUnique<SavedMicroTaskQueue>(this);
+  if (!saved) {
+    // When MakeUnique's allocation fails, the SavedMicroTaskQueue constructor
+    // is never called, so mPendingMicroTaskRunnables is still initialized.
+    JS_ReportOutOfMemory(cx);
+    return nullptr;
+  }
+
+  return saved;
 }
 
 /* static */
@@ -331,6 +374,8 @@ void CycleCollectedJSContext::ProcessStableStateQueue() {
   MOZ_RELEASE_ASSERT(!mDoingStableStates);
   mDoingStableStates = true;
 
+  // When run, one event can add another event to the mStableStateEvents, as
+  // such you can't use iterators here.
   for (uint32_t i = 0; i < mStableStateEvents.Length(); ++i) {
     nsCOMPtr<nsIRunnable> event = mStableStateEvents[i].forget();
     event->Run();
@@ -406,7 +451,7 @@ void CycleCollectedJSContext::AfterProcessMicrotasks() {
   CleanupIDBTransactions(RecursionDepth());
 }
 
-void CycleCollectedJSContext::IsIdleGCTaskNeeded() {
+void CycleCollectedJSContext::IsIdleGCTaskNeeded() const {
   class IdleTimeGCTaskRunnable : public mozilla::IdleRunnable {
    public:
     using mozilla::IdleRunnable::IdleRunnable;
@@ -425,12 +470,12 @@ void CycleCollectedJSContext::IsIdleGCTaskNeeded() {
 
   if (Runtime()->IsIdleGCTaskNeeded()) {
     nsCOMPtr<nsIRunnable> gc_task = new IdleTimeGCTaskRunnable();
-    NS_IdleDispatchToCurrentThread(gc_task.forget());
+    NS_DispatchToCurrentThreadQueue(gc_task.forget(), EventQueuePriority::Idle);
     Runtime()->SetPendingIdleGCTask();
   }
 }
 
-uint32_t CycleCollectedJSContext::RecursionDepth() {
+uint32_t CycleCollectedJSContext::RecursionDepth() const {
   return mOwningThread->RecursionDepth();
 }
 
@@ -591,4 +636,5 @@ void CycleCollectedJSContext::PerformDebuggerMicroTaskCheckpoint() {
 
   AfterProcessMicrotasks();
 }
+
 }  // namespace mozilla

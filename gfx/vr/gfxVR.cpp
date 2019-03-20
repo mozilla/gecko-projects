@@ -12,7 +12,7 @@
 #include "VRDisplayHost.h"
 
 #ifndef M_PI
-#define M_PI 3.14159265358979323846
+#  define M_PI 3.14159265358979323846
 #endif
 
 using namespace mozilla;
@@ -21,13 +21,11 @@ using namespace mozilla::gfx;
 Atomic<uint32_t> VRSystemManager::sDisplayBase(0);
 Atomic<uint32_t> VRSystemManager::sControllerBase(0);
 
-/* static */ uint32_t VRSystemManager::AllocateDisplayID() {
-  return ++sDisplayBase;
-}
+/* static */
+uint32_t VRSystemManager::AllocateDisplayID() { return ++sDisplayBase; }
 
-/* static */ uint32_t VRSystemManager::AllocateControllerID() {
-  return ++sControllerBase;
-}
+/* static */
+uint32_t VRSystemManager::AllocateControllerID() { return ++sControllerBase; }
 
 /**
  * VRSystemManager::NotifyVsync must be called even when a WebVR site is
@@ -190,25 +188,25 @@ void VRHMDSensorState::CalcViewMatrices(
 }
 
 const IntSize VRDisplayInfo::SuggestedEyeResolution() const {
-  return IntSize(mDisplayState.mEyeResolution.width,
-                 mDisplayState.mEyeResolution.height);
+  return IntSize(mDisplayState.eyeResolution.width,
+                 mDisplayState.eyeResolution.height);
 }
 
 const Point3D VRDisplayInfo::GetEyeTranslation(uint32_t whichEye) const {
-  return Point3D(mDisplayState.mEyeTranslation[whichEye].x,
-                 mDisplayState.mEyeTranslation[whichEye].y,
-                 mDisplayState.mEyeTranslation[whichEye].z);
+  return Point3D(mDisplayState.eyeTranslation[whichEye].x,
+                 mDisplayState.eyeTranslation[whichEye].y,
+                 mDisplayState.eyeTranslation[whichEye].z);
 }
 
 const Size VRDisplayInfo::GetStageSize() const {
-  return Size(mDisplayState.mStageSize.width, mDisplayState.mStageSize.height);
+  return Size(mDisplayState.stageSize.width, mDisplayState.stageSize.height);
 }
 
 const Matrix4x4 VRDisplayInfo::GetSittingToStandingTransform() const {
   Matrix4x4 m;
   // If we could replace Matrix4x4 with a pod type, we could
   // use it directly from the VRDisplayInfo struct.
-  memcpy(m.components, mDisplayState.mSittingToStandingTransform,
+  memcpy(m.components, mDisplayState.sittingToStandingTransform,
          sizeof(float) * 16);
   return m;
 }

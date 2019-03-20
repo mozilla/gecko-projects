@@ -11,9 +11,7 @@ Services.prefs.setBoolPref(PREF_EM_CHECK_UPDATE_SECURITY, false);
 // doesn't support lightweight themes.
 Services.prefs.setBoolPref("lightweightThemes.update.enabled", true);
 
-ChromeUtils.import("resource://gre/modules/LightweightThemeManager.jsm");
-
-Cu.importGlobalProperties(["URLSearchParams"]);
+const {LightweightThemeManager} = ChromeUtils.import("resource://gre/modules/LightweightThemeManager.jsm");
 
 var gInstallDate;
 
@@ -193,7 +191,10 @@ add_task(async function test_apply_update() {
   equal(originalSyncGUID, a1.syncGUID);
 
   // Make sure that the extension lastModifiedTime was updated.
-  let testURI = a1.getResourceURI("");
+  let testURI = a1.getResourceURI();
+  if (testURI instanceof Ci.nsIJARURI) {
+    testURI = testURI.JARFile;
+  }
   let testFile = testURI.QueryInterface(Ci.nsIFileURL).file;
   let difference = testFile.lastModifiedTime - startupTime;
   ok(Math.abs(difference) < MAX_TIME_DIFFERENCE);
@@ -955,4 +956,3 @@ add_task(async function run_test_locked_install() {
   let installs = await AddonManager.getAllInstalls();
   equal(installs.length, 0);
 });
-

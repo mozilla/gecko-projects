@@ -18,6 +18,7 @@ import copy
 import shutil
 import glob
 import imp
+import platform
 
 from datetime import datetime, timedelta
 
@@ -28,7 +29,7 @@ from mozharness.base.errors import BaseErrorList
 from mozharness.base.log import INFO
 from mozharness.base.script import PreScriptAction
 from mozharness.base.vcs.vcsbase import MercurialScript
-from mozharness.mozilla.automation import TBPL_EXCEPTION
+from mozharness.mozilla.automation import TBPL_EXCEPTION, TBPL_RETRY
 from mozharness.mozilla.mozbase import MozbaseMixin
 from mozharness.mozilla.structuredlog import StructuredOutputParser
 from mozharness.mozilla.testing.errors import HarnessErrorList
@@ -931,9 +932,11 @@ class DesktopUnittest(TestingMixin, MercurialScript, MozbaseMixin,
                     # 3) checking to see if the return code is in success_codes
 
                     success_codes = None
-                    if self._is_windows() and suite_category != 'gtest':
-                        # bug 1120644
-                        success_codes = [0, 1]
+                    if (suite_category == 'reftest'
+                            and '32bit' in platform.architecture()
+                            and platform.system() == "Windows"):
+                        # see bug 1120644, 1526777, 1531499
+                        success_codes = [1]
 
                     tbpl_status, log_level, summary = parser.evaluate_parser(return_code,
                                                                              success_codes,
@@ -943,6 +946,9 @@ class DesktopUnittest(TestingMixin, MercurialScript, MozbaseMixin,
                     self.record_status(tbpl_status, level=log_level)
                     if len(per_test_args) > 0:
                         self.log_per_test_status(per_test_args[-1], tbpl_status, log_level)
+                        if tbpl_status == TBPL_RETRY:
+                            self.info("Per-test run abandoned due to RETRY status")
+                            return False
                     else:
                         self.log("The %s suite: %s ran with return status: %s" %
                                  (suite_category, suite, tbpl_status), level=log_level)

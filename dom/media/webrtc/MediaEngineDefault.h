@@ -41,15 +41,16 @@ class MediaEngineDefaultVideoSource : public MediaEngineSource {
 
   nsString GetName() const override;
   nsCString GetUUID() const override;
+  nsString GetGroupId() const override;
 
   nsresult Allocate(const dom::MediaTrackConstraints& aConstraints,
                     const MediaEnginePrefs& aPrefs, const nsString& aDeviceId,
                     const ipc::PrincipalInfo& aPrincipalInfo,
                     AllocationHandle** aOutHandle,
                     const char** aOutBadConstraint) override;
-  nsresult SetTrack(const RefPtr<const AllocationHandle>& aHandle,
-                    const RefPtr<SourceMediaStream>& aStream, TrackID aTrackID,
-                    const PrincipalHandle& aPrincipal) override;
+  void SetTrack(const RefPtr<const AllocationHandle>& aHandle,
+                const RefPtr<SourceMediaStream>& aStream, TrackID aTrackID,
+                const PrincipalHandle& aPrincipal) override;
   nsresult Start(const RefPtr<const AllocationHandle>& aHandle) override;
   nsresult Reconfigure(const RefPtr<AllocationHandle>& aHandle,
                        const dom::MediaTrackConstraints& aConstraints,
@@ -98,6 +99,9 @@ class MediaEngineDefaultVideoSource : public MediaEngineSource {
   MediaEnginePrefs mOpts;
   int mCb = 16;
   int mCr = 16;
+
+ private:
+  const nsString mName;
 };
 
 class SineWaveGenerator;
@@ -108,15 +112,16 @@ class MediaEngineDefaultAudioSource : public MediaEngineSource {
 
   nsString GetName() const override;
   nsCString GetUUID() const override;
+  nsString GetGroupId() const override;
 
   nsresult Allocate(const dom::MediaTrackConstraints& aConstraints,
                     const MediaEnginePrefs& aPrefs, const nsString& aDeviceId,
                     const ipc::PrincipalInfo& aPrincipalInfo,
                     AllocationHandle** aOutHandle,
                     const char** aOutBadConstraint) override;
-  nsresult SetTrack(const RefPtr<const AllocationHandle>& aHandle,
-                    const RefPtr<SourceMediaStream>& aStream, TrackID aTrackID,
-                    const PrincipalHandle& aPrincipal) override;
+  void SetTrack(const RefPtr<const AllocationHandle>& aHandle,
+                const RefPtr<SourceMediaStream>& aStream, TrackID aTrackID,
+                const PrincipalHandle& aPrincipal) override;
   nsresult Start(const RefPtr<const AllocationHandle>& aHandle) override;
   nsresult Reconfigure(const RefPtr<AllocationHandle>& aHandle,
                        const dom::MediaTrackConstraints& aConstraints,

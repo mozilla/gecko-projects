@@ -2,7 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-ChromeUtils.import("resource://testing-common/httpd.js");
+var {HttpServer} = ChromeUtils.import("resource://testing-common/httpd.js");
 
 var server = new HttpServer();
 server.start(-1);
@@ -23,7 +23,7 @@ function headerCheckHandler(metadata, response) {
   try {
     let headerValue = metadata.getHeader("X-Custom-Header");
     Assert.equal(headerValue, "present");
-  } catch(e) {
+  } catch (e) {
     do_throw("No header present after redirect");
   }
   try {
@@ -55,5 +55,5 @@ function run_test() {
     request.setRequestHeader("X-Unwanted-Header", "present");
     do_throw("Shouldn't be able to set a header after send");
   } catch (x) {
-  }    
+  }
 }

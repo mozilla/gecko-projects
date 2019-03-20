@@ -89,10 +89,9 @@ static uint32_t NumArgAndLocalSlots(const InlineFrameIterator& frame) {
 static void CloseLiveIteratorIon(JSContext* cx,
                                  const InlineFrameIterator& frame,
                                  const JSTryNote* tn) {
-  MOZ_ASSERT(tn->kind == JSTRY_FOR_IN ||
-             tn->kind == JSTRY_DESTRUCTURING_ITERCLOSE);
+  MOZ_ASSERT(tn->kind == JSTRY_FOR_IN || tn->kind == JSTRY_DESTRUCTURING);
 
-  bool isDestructuring = tn->kind == JSTRY_DESTRUCTURING_ITERCLOSE;
+  bool isDestructuring = tn->kind == JSTRY_DESTRUCTURING;
   MOZ_ASSERT_IF(!isDestructuring, tn->stackDepth > 0);
   MOZ_ASSERT_IF(isDestructuring, tn->stackDepth > 1);
 
@@ -134,25 +133,24 @@ static void CloseLiveIteratorIon(JSContext* cx,
   }
 }
 
-class IonFrameStackDepthOp {
+class IonTryNoteFilter {
   uint32_t depth_;
 
  public:
-  explicit IonFrameStackDepthOp(const InlineFrameIterator& frame) {
+  explicit IonTryNoteFilter(const InlineFrameIterator& frame) {
     uint32_t base = NumArgAndLocalSlots(frame);
     SnapshotIterator si = frame.snapshotIterator();
     MOZ_ASSERT(si.numAllocations() >= base);
     depth_ = si.numAllocations() - base;
   }
 
-  uint32_t operator()() { return depth_; }
+  bool operator()(const JSTryNote* note) { return note->stackDepth <= depth_; }
 };
 
-class TryNoteIterIon : public TryNoteIter<IonFrameStackDepthOp> {
+class TryNoteIterIon : public TryNoteIter<IonTryNoteFilter> {
  public:
   TryNoteIterIon(JSContext* cx, const InlineFrameIterator& frame)
-      : TryNoteIter(cx, frame.script(), frame.pc(),
-                    IonFrameStackDepthOp(frame)) {}
+      : TryNoteIter(cx, frame.script(), frame.pc(), IonTryNoteFilter(frame)) {}
 };
 
 static void HandleExceptionIon(JSContext* cx, const InlineFrameIterator& frame,
@@ -201,43 +199,19 @@ static void HandleExceptionIon(JSContext* cx, const InlineFrameIterator& frame,
     return;
   }
 
-  bool inForOfIterClose = false;
-
   for (TryNoteIterIon tni(cx, frame); !tni.done(); ++tni) {
     const JSTryNote* tn = *tni;
-
     switch (tn->kind) {
       case JSTRY_FOR_IN:
-      case JSTRY_DESTRUCTURING_ITERCLOSE:
-        // See corresponding comment in ProcessTryNotes.
-        if (inForOfIterClose) {
-          break;
-        }
-
+      case JSTRY_DESTRUCTURING:
         MOZ_ASSERT_IF(tn->kind == JSTRY_FOR_IN,
                       JSOp(*(script->offsetToPC(tn->start + tn->length))) ==
                           JSOP_ENDITER);
         CloseLiveIteratorIon(cx, frame, tn);
         break;
 
-      case JSTRY_FOR_OF_ITERCLOSE:
-        inForOfIterClose = true;
-        break;
-
-      case JSTRY_FOR_OF:
-        inForOfIterClose = false;
-        break;
-
-      case JSTRY_LOOP:
-        break;
-
       case JSTRY_CATCH:
         if (cx->isExceptionPending()) {
-          // See corresponding comment in ProcessTryNotes.
-          if (inForOfIterClose) {
-            break;
-          }
-
           // Ion can compile try-catch, but bailing out to catch
           // exceptions is slow. Reset the warm-up counter so that if we
           // catch many exceptions we won't Ion-compile the script.
@@ -266,6 +240,11 @@ static void HandleExceptionIon(JSContext* cx, const InlineFrameIterator& frame,
         }
         break;
 
+      case JSTRY_FOR_OF:
+      case JSTRY_LOOP:
+        break;
+
+      // JSTRY_FOR_OF_ITERCLOSE is handled internally by the try note iterator.
       default:
         MOZ_CRASH("Unexpected try note");
     }
@@ -328,39 +307,33 @@ struct AutoBaselineHandlingException {
   }
 };
 
-class BaselineFrameStackDepthOp {
+class BaselineTryNoteFilter {
   BaselineFrame* frame_;
 
  public:
-  explicit BaselineFrameStackDepthOp(BaselineFrame* frame) : frame_(frame) {}
-  uint32_t operator()() {
+  explicit BaselineTryNoteFilter(BaselineFrame* frame) : frame_(frame) {}
+  bool operator()(const JSTryNote* note) {
     MOZ_ASSERT(frame_->numValueSlots() >= frame_->script()->nfixed());
-    return frame_->numValueSlots() - frame_->script()->nfixed();
+    uint32_t currDepth = frame_->numValueSlots() - frame_->script()->nfixed();
+    return note->stackDepth <= currDepth;
   }
 };
 
-class TryNoteIterBaseline : public TryNoteIter<BaselineFrameStackDepthOp> {
+class TryNoteIterBaseline : public TryNoteIter<BaselineTryNoteFilter> {
  public:
   TryNoteIterBaseline(JSContext* cx, BaselineFrame* frame, jsbytecode* pc)
-      : TryNoteIter(cx, frame->script(), pc, BaselineFrameStackDepthOp(frame)) {
-  }
+      : TryNoteIter(cx, frame->script(), pc, BaselineTryNoteFilter(frame)) {}
 };
 
 // Close all live iterators on a BaselineFrame due to exception unwinding. The
 // pc parameter is updated to where the envs have been unwound to.
 static void CloseLiveIteratorsBaselineForUncatchableException(
     JSContext* cx, const JSJitFrameIter& frame, jsbytecode* pc) {
-  bool inForOfIterClose = false;
   for (TryNoteIterBaseline tni(cx, frame.baselineFrame(), pc); !tni.done();
        ++tni) {
     const JSTryNote* tn = *tni;
     switch (tn->kind) {
       case JSTRY_FOR_IN: {
-        // See corresponding comment in ProcessTryNotes.
-        if (inForOfIterClose) {
-          break;
-        }
-
         uint8_t* framePointer;
         uint8_t* stackPointer;
         BaselineFrameAndStackPointersFromTryNote(tn, frame, &framePointer,
@@ -370,14 +343,6 @@ static void CloseLiveIteratorsBaselineForUncatchableException(
         UnwindIteratorForUncatchableException(iterObject);
         break;
       }
-
-      case JSTRY_FOR_OF_ITERCLOSE:
-        inForOfIterClose = true;
-        break;
-
-      case JSTRY_FOR_OF:
-        inForOfIterClose = false;
-        break;
 
       default:
         break;
@@ -389,7 +354,6 @@ static bool ProcessTryNotesBaseline(JSContext* cx, const JSJitFrameIter& frame,
                                     EnvironmentIter& ei,
                                     ResumeFromException* rfe, jsbytecode** pc) {
   RootedScript script(cx, frame.baselineFrame()->script());
-  bool inForOfIterClose = false;
 
   for (TryNoteIterBaseline tni(cx, frame.baselineFrame(), *pc); !tni.done();
        ++tni) {
@@ -401,11 +365,6 @@ static bool ProcessTryNotesBaseline(JSContext* cx, const JSJitFrameIter& frame,
         // If we're closing a legacy generator, we have to skip catch
         // blocks.
         if (cx->isClosingGenerator()) {
-          break;
-        }
-
-        // See corresponding comment in ProcessTryNotes.
-        if (inForOfIterClose) {
           break;
         }
 
@@ -426,11 +385,6 @@ static bool ProcessTryNotesBaseline(JSContext* cx, const JSJitFrameIter& frame,
       }
 
       case JSTRY_FINALLY: {
-        // See corresponding comment in ProcessTryNotes.
-        if (inForOfIterClose) {
-          break;
-        }
-
         PCMappingSlotInfo slotInfo;
         SettleOnTryNote(cx, tn, frame, ei, rfe, pc);
         rfe->kind = ResumeFromException::RESUME_FINALLY;
@@ -447,11 +401,6 @@ static bool ProcessTryNotesBaseline(JSContext* cx, const JSJitFrameIter& frame,
       }
 
       case JSTRY_FOR_IN: {
-        // See corresponding comment in ProcessTryNotes.
-        if (inForOfIterClose) {
-          break;
-        }
-
         uint8_t* framePointer;
         uint8_t* stackPointer;
         BaselineFrameAndStackPointersFromTryNote(tn, frame, &framePointer,
@@ -462,12 +411,7 @@ static bool ProcessTryNotesBaseline(JSContext* cx, const JSJitFrameIter& frame,
         break;
       }
 
-      case JSTRY_DESTRUCTURING_ITERCLOSE: {
-        // See corresponding comment in ProcessTryNotes.
-        if (inForOfIterClose) {
-          break;
-        }
-
+      case JSTRY_DESTRUCTURING: {
         uint8_t* framePointer;
         uint8_t* stackPointer;
         BaselineFrameAndStackPointersFromTryNote(tn, frame, &framePointer,
@@ -485,17 +429,11 @@ static bool ProcessTryNotesBaseline(JSContext* cx, const JSJitFrameIter& frame,
         break;
       }
 
-      case JSTRY_FOR_OF_ITERCLOSE:
-        inForOfIterClose = true;
-        break;
-
       case JSTRY_FOR_OF:
-        inForOfIterClose = false;
-        break;
-
       case JSTRY_LOOP:
         break;
 
+      // JSTRY_FOR_OF_ITERCLOSE is handled internally by the try note iterator.
       default:
         MOZ_CRASH("Invalid try note");
     }
@@ -921,7 +859,7 @@ static void TraceIonJSFrame(JSTracer* trc, const JSJitFrameIter& frame) {
   TraceThisAndArguments(trc, frame, frame.jsFrame());
 
   const SafepointIndex* si =
-      ionScript->getSafepointIndex(frame.returnAddressToFp());
+      ionScript->getSafepointIndex(frame.resumePCinCurrentFrame());
 
   SafepointReader safepoint(ionScript, si);
 
@@ -1027,7 +965,7 @@ static void UpdateIonJSFrameForMinorGC(JSRuntime* rt,
   Nursery& nursery = rt->gc.nursery();
 
   const SafepointIndex* si =
-      ionScript->getSafepointIndex(frame.returnAddressToFp());
+      ionScript->getSafepointIndex(frame.resumePCinCurrentFrame());
   SafepointReader safepoint(ionScript, si);
 
   LiveGeneralRegisterSet slotsRegs = safepoint.slotsOrElementsSpills();
@@ -1084,7 +1022,8 @@ uint8_t* alignDoubleSpillWithOffset(uint8_t* pointer, int32_t offset) {
   return reinterpret_cast<uint8_t*>(address);
 }
 
-static void TraceJitExitFrameCopiedArguments(JSTracer* trc, const VMFunction* f,
+static void TraceJitExitFrameCopiedArguments(JSTracer* trc,
+                                             const VMFunctionData* f,
                                              ExitFooterFrame* footer) {
   uint8_t* doubleArgs = reinterpret_cast<uint8_t*>(footer);
   doubleArgs = alignDoubleSpillWithOffset(doubleArgs, sizeof(intptr_t));
@@ -1094,19 +1033,20 @@ static void TraceJitExitFrameCopiedArguments(JSTracer* trc, const VMFunction* f,
   doubleArgs -= f->doubleByRefArgs() * sizeof(double);
 
   for (uint32_t explicitArg = 0; explicitArg < f->explicitArgs; explicitArg++) {
-    if (f->argProperties(explicitArg) == VMFunction::DoubleByRef) {
+    if (f->argProperties(explicitArg) == VMFunctionData::DoubleByRef) {
       // Arguments with double size can only have RootValue type.
-      if (f->argRootType(explicitArg) == VMFunction::RootValue) {
+      if (f->argRootType(explicitArg) == VMFunctionData::RootValue) {
         TraceRoot(trc, reinterpret_cast<Value*>(doubleArgs), "ion-vm-args");
       } else {
-        MOZ_ASSERT(f->argRootType(explicitArg) == VMFunction::RootNone);
+        MOZ_ASSERT(f->argRootType(explicitArg) == VMFunctionData::RootNone);
       }
       doubleArgs += sizeof(double);
     }
   }
 }
 #else
-static void TraceJitExitFrameCopiedArguments(JSTracer* trc, const VMFunction* f,
+static void TraceJitExitFrameCopiedArguments(JSTracer* trc,
+                                             const VMFunctionData* f,
                                              ExitFooterFrame* footer) {
   // This is NO-OP on other platforms.
 }
@@ -1189,16 +1129,16 @@ static void TraceJitExitFrame(JSTracer* trc, const JSJitFrameIter& frame) {
 
   MOZ_ASSERT(frame.exitFrame()->isWrapperExit());
 
-  const VMFunction* f = footer->function();
+  const VMFunctionData* f = footer->function();
   MOZ_ASSERT(f);
 
   // Trace arguments of the VM wrapper.
   uint8_t* argBase = frame.exitFrame()->argBase();
   for (uint32_t explicitArg = 0; explicitArg < f->explicitArgs; explicitArg++) {
     switch (f->argRootType(explicitArg)) {
-      case VMFunction::RootNone:
+      case VMFunctionData::RootNone:
         break;
-      case VMFunction::RootObject: {
+      case VMFunctionData::RootObject: {
         // Sometimes we can bake in HandleObjects to nullptr.
         JSObject** pobj = reinterpret_cast<JSObject**>(argBase);
         if (*pobj) {
@@ -1206,31 +1146,31 @@ static void TraceJitExitFrame(JSTracer* trc, const JSJitFrameIter& frame) {
         }
         break;
       }
-      case VMFunction::RootString:
+      case VMFunctionData::RootString:
         TraceRoot(trc, reinterpret_cast<JSString**>(argBase), "ion-vm-args");
         break;
-      case VMFunction::RootFunction:
+      case VMFunctionData::RootFunction:
         TraceRoot(trc, reinterpret_cast<JSFunction**>(argBase), "ion-vm-args");
         break;
-      case VMFunction::RootValue:
+      case VMFunctionData::RootValue:
         TraceRoot(trc, reinterpret_cast<Value*>(argBase), "ion-vm-args");
         break;
-      case VMFunction::RootId:
+      case VMFunctionData::RootId:
         TraceRoot(trc, reinterpret_cast<jsid*>(argBase), "ion-vm-args");
         break;
-      case VMFunction::RootCell:
+      case VMFunctionData::RootCell:
         TraceGenericPointerRoot(trc, reinterpret_cast<gc::Cell**>(argBase),
                                 "ion-vm-args");
         break;
     }
 
     switch (f->argProperties(explicitArg)) {
-      case VMFunction::WordByValue:
-      case VMFunction::WordByRef:
+      case VMFunctionData::WordByValue:
+      case VMFunctionData::WordByRef:
         argBase += sizeof(void*);
         break;
-      case VMFunction::DoubleByValue:
-      case VMFunction::DoubleByRef:
+      case VMFunctionData::DoubleByValue:
+      case VMFunctionData::DoubleByRef:
         argBase += 2 * sizeof(void*);
         break;
     }
@@ -1238,24 +1178,24 @@ static void TraceJitExitFrame(JSTracer* trc, const JSJitFrameIter& frame) {
 
   if (f->outParam == Type_Handle) {
     switch (f->outParamRootType) {
-      case VMFunction::RootNone:
+      case VMFunctionData::RootNone:
         MOZ_CRASH("Handle outparam must have root type");
-      case VMFunction::RootObject:
+      case VMFunctionData::RootObject:
         TraceRoot(trc, footer->outParam<JSObject*>(), "ion-vm-out");
         break;
-      case VMFunction::RootString:
+      case VMFunctionData::RootString:
         TraceRoot(trc, footer->outParam<JSString*>(), "ion-vm-out");
         break;
-      case VMFunction::RootFunction:
+      case VMFunctionData::RootFunction:
         TraceRoot(trc, footer->outParam<JSFunction*>(), "ion-vm-out");
         break;
-      case VMFunction::RootValue:
+      case VMFunctionData::RootValue:
         TraceRoot(trc, footer->outParam<Value>(), "ion-vm-outvp");
         break;
-      case VMFunction::RootId:
+      case VMFunctionData::RootId:
         TraceRoot(trc, footer->outParam<jsid>(), "ion-vm-outvp");
         break;
-      case VMFunction::RootCell:
+      case VMFunctionData::RootCell:
         TraceGenericPointerRoot(trc, footer->outParam<gc::Cell*>(),
                                 "ion-vm-out");
         break;
@@ -1295,6 +1235,10 @@ static void TraceJitActivation(JSTracer* trc, JitActivation* activation) {
   activation->traceRematerializedFrames(trc);
   activation->traceIonRecovery(trc);
 
+  // This is used for sanity checking continuity of the sequence of wasm stack
+  // maps as we unwind.  It has no functional purpose.
+  uintptr_t highestByteVisitedInPrevWasmFrame = 0;
+
   for (JitFrameIter frames(activation); !frames.done(); ++frames) {
     if (frames.isJSJit()) {
       const JSJitFrameIter& jitFrame = frames.asJSJit();
@@ -1331,9 +1275,16 @@ static void TraceJitActivation(JSTracer* trc, JitActivation* activation) {
         default:
           MOZ_CRASH("unexpected frame type");
       }
+      highestByteVisitedInPrevWasmFrame = 0; /* "unknown" */
     } else {
       MOZ_ASSERT(frames.isWasm());
-      frames.asWasm().instance()->trace(trc);
+      uint8_t* nextPC = frames.resumePCinCurrentFrame();
+      MOZ_ASSERT(nextPC != 0);
+      wasm::WasmFrameIter& wasmFrameIter = frames.asWasm();
+      wasm::Instance* instance = wasmFrameIter.instance();
+      instance->trace(trc);
+      highestByteVisitedInPrevWasmFrame = instance->traceFrame(
+          trc, wasmFrameIter, nextPC, highestByteVisitedInPrevWasmFrame);
     }
   }
 }
@@ -1395,7 +1346,7 @@ void GetPcScript(JSContext* cx, JSScript** scriptRes, jsbytecode** pcRes) {
     // since we do not return to the frame that threw the exception.
     if (!it.frame().isBaselineJS() ||
         !it.frame().baselineFrame()->hasOverridePc()) {
-      retAddr = it.frame().returnAddressToFp();
+      retAddr = it.frame().resumePCinCurrentFrame();
       MOZ_ASSERT(retAddr);
     } else {
       retAddr = nullptr;
@@ -1551,6 +1502,10 @@ static Value FromSymbolPayload(uintptr_t payload) {
   return SymbolValue(reinterpret_cast<JS::Symbol*>(payload));
 }
 
+static Value FromBigIntPayload(uintptr_t payload) {
+  return BigIntValue(reinterpret_cast<JS::BigInt*>(payload));
+}
+
 static Value FromTypedPayload(JSValueType type, uintptr_t payload) {
   switch (type) {
     case JSVAL_TYPE_INT32:
@@ -1561,6 +1516,8 @@ static Value FromTypedPayload(JSValueType type, uintptr_t payload) {
       return FromStringPayload(payload);
     case JSVAL_TYPE_SYMBOL:
       return FromSymbolPayload(payload);
+    case JSVAL_TYPE_BIGINT:
+      return FromBigIntPayload(payload);
     case JSVAL_TYPE_OBJECT:
       return FromObjectPayload(payload);
     default:
@@ -1657,6 +1614,8 @@ Value SnapshotIterator::allocationValue(const RValueAllocation& alloc,
           return FromStringPayload(fromStack(alloc.stackOffset2()));
         case JSVAL_TYPE_SYMBOL:
           return FromSymbolPayload(fromStack(alloc.stackOffset2()));
+        case JSVAL_TYPE_BIGINT:
+          return FromBigIntPayload(fromStack(alloc.stackOffset2()));
         case JSVAL_TYPE_OBJECT:
           return FromObjectPayload(fromStack(alloc.stackOffset2()));
         default:
@@ -1778,6 +1737,7 @@ void SnapshotIterator::writeAllocationValuePayload(
           break;
         case JSVAL_TYPE_STRING:
         case JSVAL_TYPE_SYMBOL:
+        case JSVAL_TYPE_BIGINT:
         case JSVAL_TYPE_OBJECT:
           WriteFrameSlot(fp_, alloc.stackOffset2(), uintptr_t(v.toGCThing()));
           break;
@@ -2084,7 +2044,7 @@ void InlineFrameIterator::findNextFrame() {
     if (JSOp(*pc_) == JSOP_FUNCALL) {
       MOZ_ASSERT(GET_ARGC(pc_) > 0);
       numActualArgs_ = GET_ARGC(pc_) - 1;
-    } else if (IsGetPropPC(pc_)) {
+    } else if (IsGetPropPC(pc_) || IsGetElemPC(pc_)) {
       numActualArgs_ = 0;
     } else if (IsSetPropPC(pc_)) {
       numActualArgs_ = 1;
@@ -2246,7 +2206,7 @@ MachineState MachineState::FromBailout(RegisterDump::GPRArray& regs,
 #elif defined(JS_CODEGEN_NONE)
   MOZ_CRASH();
 #else
-#error "Unknown architecture!"
+#  error "Unknown architecture!"
 #endif
   return machine;
 }
@@ -2258,7 +2218,7 @@ bool InlineFrameIterator::isConstructing() const {
     ++parent;
 
     // Inlined Getters and Setters are never constructing.
-    if (IsGetPropPC(parent.pc()) || IsSetPropPC(parent.pc())) {
+    if (IsIonInlinableGetterOrSetterPC(parent.pc())) {
       return false;
     }
 

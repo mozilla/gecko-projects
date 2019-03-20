@@ -34,7 +34,7 @@ static void SetParamsOnBiquad(WebCore::Biquad& aBiquad, float aSampleRate,
   double normalizedFrequency = aFrequency / nyquist;
 
   if (aDetune) {
-    normalizedFrequency *= std::pow(2.0, aDetune / 1200);
+    normalizedFrequency *= std::exp2(aDetune / 1200);
   }
 
   switch (aType) {
@@ -140,7 +140,7 @@ class BiquadFilterNodeEngine final : public AudioNodeEngine {
           RefPtr<PlayingRefChangeHandler> refchanged =
               new PlayingRefChangeHandler(aStream,
                                           PlayingRefChangeHandler::RELEASE);
-          aStream->Graph()->DispatchToMainThreadAfterStreamStateUpdate(
+          aStream->Graph()->DispatchToMainThreadStableState(
               refchanged.forget());
         }
 
@@ -155,8 +155,7 @@ class BiquadFilterNodeEngine final : public AudioNodeEngine {
         RefPtr<PlayingRefChangeHandler> refchanged =
             new PlayingRefChangeHandler(aStream,
                                         PlayingRefChangeHandler::ADDREF);
-        aStream->Graph()->DispatchToMainThreadAfterStreamStateUpdate(
-            refchanged.forget());
+        aStream->Graph()->DispatchToMainThreadStableState(refchanged.forget());
       } else {  // Help people diagnose bug 924718
         WebAudioUtils::LogToDeveloperConsole(
             mWindowID, "BiquadFilterChannelCountChangeWarning");
@@ -240,7 +239,8 @@ BiquadFilterNode::BiquadFilterNode(AudioContext* aContext)
       aContext, engine, AudioNodeStream::NO_STREAM_FLAGS, aContext->Graph());
 }
 
-/* static */ already_AddRefed<BiquadFilterNode> BiquadFilterNode::Create(
+/* static */
+already_AddRefed<BiquadFilterNode> BiquadFilterNode::Create(
     AudioContext& aAudioContext, const BiquadFilterOptions& aOptions,
     ErrorResult& aRv) {
   if (aAudioContext.CheckClosed(aRv)) {

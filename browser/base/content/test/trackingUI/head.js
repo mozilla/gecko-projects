@@ -1,4 +1,4 @@
-var {UrlClassifierTestUtils} = ChromeUtils.import("resource://testing-common/UrlClassifierTestUtils.jsm", {});
+var {UrlClassifierTestUtils} = ChromeUtils.import("resource://testing-common/UrlClassifierTestUtils.jsm");
 
 /**
  * Waits for a load (or custom) event to finish in a given tab. If provided
@@ -31,4 +31,51 @@ function promiseTabLoadEvent(tab, url) {
     BrowserTestUtils.loadURI(tab.linkedBrowser, url);
 
   return loaded;
+}
+
+function openIdentityPopup() {
+  let mainView = document.getElementById("identity-popup-mainView");
+  let viewShown = BrowserTestUtils.waitForEvent(mainView, "ViewShown");
+  gIdentityHandler._identityBox.click();
+  return viewShown;
+}
+
+function waitForSecurityChange(numChanges = 1, win = null) {
+  if (!win) {
+    win = window;
+  }
+  return new Promise(resolve => {
+    let n = 0;
+    let listener = {
+      onSecurityChange() {
+        n = n + 1;
+        info("Received onSecurityChange event " + n + " of " + numChanges);
+        if (n >= numChanges) {
+          win.gBrowser.removeProgressListener(listener);
+          resolve(n);
+        }
+      },
+    };
+    win.gBrowser.addProgressListener(listener);
+  });
+}
+
+function waitForContentBlockingEvent(numChanges = 1, win = null) {
+  if (!win) {
+    win = window;
+  }
+  return new Promise(resolve => {
+    let n = 0;
+    let listener = {
+      onContentBlockingEvent() {
+        n = n + 1;
+        info("Received onContentBlockingEvent event " + n + " of " + numChanges);
+        if (n >= numChanges) {
+          win.gBrowser.removeProgressListener(listener);
+          resolve(n);
+        }
+      },
+    };
+    win.gBrowser.addProgressListener(listener);
+  });
 }

@@ -3,9 +3,8 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 /** * =================== SAVED SIGNONS CODE =================== ***/
-ChromeUtils.import("resource://gre/modules/AppConstants.jsm");
-ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
-ChromeUtils.import("resource://gre/modules/Services.jsm");
+var {AppConstants} = ChromeUtils.import("resource://gre/modules/AppConstants.jsm");
+var {Services} = ChromeUtils.import("resource://gre/modules/Services.jsm");
 
 ChromeUtils.defineModuleGetter(this, "DeferredTask",
                                "resource://gre/modules/DeferredTask.jsm");
@@ -31,6 +30,7 @@ let signonsIntro;
 let removeButton;
 let removeAllButton;
 let signonsTree;
+let autofillCheckbox;
 
 let signonReloadDisplay = {
   observe(subject, topic, data) {
@@ -49,7 +49,7 @@ let signonReloadDisplay = {
           if (filterField && filterField.value != "") {
             FilterPasswords();
           }
-          signonsTree.treeBoxObject.ensureRowIsVisible(signonsTree.view.selection.currentIndex);
+          signonsTree.ensureRowIsVisible(signonsTree.view.selection.currentIndex);
           break;
       }
       Services.obs.notifyObservers(null, "passwordmgr-dialog-updated");
@@ -59,10 +59,10 @@ let signonReloadDisplay = {
 
 // Formatter for localization.
 let dateFormatter = new Services.intl.DateTimeFormat(undefined,
-                      { dateStyle: "medium" });
+                                                     { dateStyle: "medium" });
 let dateAndTimeFormatter = new Services.intl.DateTimeFormat(undefined,
-                             { dateStyle: "medium",
-                               timeStyle: "short" });
+                                                            { dateStyle: "medium",
+                                                              timeStyle: "short" });
 
 function Startup() {
   // be prepared to reload the display if anything changes
@@ -73,12 +73,15 @@ function Startup() {
   filterField = document.getElementById("filter");
   togglePasswordsButton = document.getElementById("togglePasswords");
   signonsIntro = document.getElementById("signonsIntro");
+  autofillCheckbox = document.getElementById("passwordAutofillCheckbox");
   removeButton = document.getElementById("removeSignon");
   removeAllButton = document.getElementById("removeAllSignons");
 
   togglePasswordsButton.label = kSignonBundle.getString("showPasswords");
   togglePasswordsButton.accessKey = kSignonBundle.getString("showPasswordsAccessKey");
   signonsIntro.textContent = kSignonBundle.getString("loginsDescriptionAll2");
+  autofillCheckbox.label = kSignonBundle.getString("autofillLoginsAndPasswords");
+  autofillCheckbox.checked = Services.prefs.getBoolPref("signon.autofillForms");
   removeAllButton.setAttribute("label", kSignonBundle.getString("removeAll.label"));
   removeAllButton.setAttribute("accesskey", kSignonBundle.getString("removeAll.accesskey"));
   document.getElementsByTagName("treecols")[0].addEventListener("click", (event) => {
@@ -108,6 +111,10 @@ function Startup() {
   }
 
   FocusFilterBox();
+}
+
+function watchLoginAutofill() {
+  Services.prefs.setBoolPref("signon.autofillForms", autofillCheckbox.checked);
 }
 
 function Shutdown() {
@@ -169,15 +176,26 @@ let signonsTreeView = {
     }
     return false;
   },
-  isSeparator(index) { return false; },
-  isSorted() { return false; },
-  isContainer(index) { return false; },
+  isSeparator(index) {
+    return false;
+  },
+  isSorted() {
+    return false;
+  },
+  isContainer(index) {
+    return false;
+  },
   cycleHeader(column) {},
-  getRowProperties(row) { return ""; },
-  getColumnProperties(column) { return ""; },
+  getRowProperties(row) {
+    return "";
+  },
+  getColumnProperties(column) {
+    return "";
+  },
   getCellProperties(row, column) {
-    if (column.element.getAttribute("id") == "siteCol")
+    if (column.element.getAttribute("id") == "siteCol") {
       return "ltr";
+    }
 
     return "";
   },
@@ -191,12 +209,11 @@ let signonsTreeView = {
       table[row][field] = value;
       table[row].timePasswordChanged = Date.now();
       Services.logins.modifyLogin(existingLogin, table[row]);
-      signonsTree.treeBoxObject.invalidateRow(row);
+      signonsTree.invalidateRow(row);
     }
 
     if (col.id == "userCol") {
-     _editLogin("username");
-
+      _editLogin("username");
     } else if (col.id == "passwordCol") {
       if (!value) {
         return;
@@ -235,10 +252,12 @@ function SortTree(column, ascending) {
         valB = b[column];
     }
 
-    if (valA < valB)
+    if (valA < valB) {
       return -1;
-    if (valA > valB)
+    }
+    if (valA > valB) {
       return 1;
+    }
     return 0;
   }
 
@@ -264,9 +283,9 @@ function SortTree(column, ascending) {
   }
 
   // display the results
-  signonsTree.treeBoxObject.invalidate();
+  signonsTree.invalidate();
   if (selectedRow >= 0) {
-    signonsTree.treeBoxObject.ensureRowIsVisible(selectedRow);
+    signonsTree.ensureRowIsVisible(selectedRow);
   }
 }
 
@@ -358,7 +377,7 @@ function DeleteSignon() {
       }
       table.splice(j, k - j);
       view.rowCount -= k - j;
-      tree.treeBoxObject.rowCountChanged(j, j - k);
+      tree.rowCountChanged(j, j - k);
     }
   }
 
@@ -380,11 +399,12 @@ function DeleteAllSignons() {
   // Confirm the user wants to remove all passwords
   let dummy = { value: false };
   if (Services.prompt.confirmEx(window,
-    kSignonBundle.getString("removeAllPasswordsTitle"),
-    kSignonBundle.getString("removeAllPasswordsPrompt"),
-    Services.prompt.STD_YES_NO_BUTTONS + Services.prompt.BUTTON_POS_1_DEFAULT,
-    null, null, null, null, dummy) == 1) // 1 == "No" button
+                                kSignonBundle.getString("removeAllPasswordsTitle"),
+                                kSignonBundle.getString("removeAllPasswordsPrompt"),
+                                Services.prompt.STD_YES_NO_BUTTONS + Services.prompt.BUTTON_POS_1_DEFAULT,
+                                null, null, null, null, dummy) == 1) { // 1 == "No" button
     return;
+  }
 
   let syncNeeded = signonsTreeView._filterSet.length != 0;
   let view = signonsTreeView;
@@ -402,9 +422,8 @@ function DeleteAllSignons() {
   // update the tree view and notify the tree
   view.rowCount = 0;
 
-  let box = signonsTree.treeBoxObject;
-  box.rowCountChanged(0, -deletedSignons.length);
-  box.invalidate();
+  signonsTree.rowCountChanged(0, -deletedSignons.length);
+  signonsTree.invalidate();
 
   // disable buttons
   removeButton.setAttribute("disabled", "true");
@@ -435,9 +454,9 @@ function AskUserShowPasswords() {
 
   // Confirm the user wants to display passwords
   return Services.prompt.confirmEx(window,
-          null,
-          kSignonBundle.getString("noMasterPasswordPrompt"), Services.prompt.STD_YES_NO_BUTTONS,
-          null, null, null, null, dummy) == 0; // 0=="Yes" button
+                                   null,
+                                   kSignonBundle.getString("noMasterPasswordPrompt"), Services.prompt.STD_YES_NO_BUTTONS,
+                                   null, null, null, null, dummy) == 0; // 0=="Yes" button
 }
 
 function FinalizeSignonDeletions(syncNeeded) {
@@ -516,7 +535,7 @@ function SignonClearFilter() {
 
   // Clear the Tree Display
   signonsTreeView.rowCount = 0;
-  signonsTree.treeBoxObject.rowCountChanged(0, -signonsTreeView._filterSet.length);
+  signonsTree.rowCountChanged(0, -signonsTreeView._filterSet.length);
   signonsTreeView._filterSet = [];
 
   // Just reload the list to make sure deletions are respected
@@ -546,17 +565,21 @@ function FocusFilterBox() {
 }
 
 function SignonMatchesFilter(aSignon, aFilterValue) {
-  if (aSignon.hostname.toLowerCase().includes(aFilterValue))
+  if (aSignon.hostname.toLowerCase().includes(aFilterValue)) {
     return true;
+  }
   if (aSignon.username &&
-      aSignon.username.toLowerCase().includes(aFilterValue))
+      aSignon.username.toLowerCase().includes(aFilterValue)) {
     return true;
+  }
   if (aSignon.httpRealm &&
-      aSignon.httpRealm.toLowerCase().includes(aFilterValue))
+      aSignon.httpRealm.toLowerCase().includes(aFilterValue)) {
     return true;
+  }
   if (showingPasswords && aSignon.password &&
-      aSignon.password.toLowerCase().includes(aFilterValue))
+      aSignon.password.toLowerCase().includes(aFilterValue)) {
     return true;
+  }
 
   return false;
 }
@@ -595,14 +618,15 @@ function FilterPasswords() {
   // Clear the display
   let oldRowCount = signonsTreeView.rowCount;
   signonsTreeView.rowCount = 0;
-  signonsTree.treeBoxObject.rowCountChanged(0, -oldRowCount);
+  signonsTree.rowCountChanged(0, -oldRowCount);
   // Set up the filtered display
   signonsTreeView.rowCount = signonsTreeView._filterSet.length;
-  signonsTree.treeBoxObject.rowCountChanged(0, signonsTreeView.rowCount);
+  signonsTree.rowCountChanged(0, signonsTreeView.rowCount);
 
   // if the view is not empty then select the first item
-  if (signonsTreeView.rowCount > 0)
+  if (signonsTreeView.rowCount > 0) {
     signonsTreeView.selection.select(0);
+  }
 
   signonsIntro.textContent = kSignonBundle.getString("loginsDescriptionFiltered");
   removeAllButton.setAttribute("label", kSignonBundle.getString("removeAllShown.label"));
@@ -621,8 +645,9 @@ function CopySiteUrl() {
 function CopyPassword() {
   // Don't copy passwords if we aren't already showing the passwords & a master
   // password hasn't been entered.
-  if (!showingPasswords && !masterPasswordLogin())
+  if (!showingPasswords && !masterPasswordLogin()) {
     return;
+  }
   // Copy selected signon's password to clipboard
   let clipboard = Cc["@mozilla.org/widget/clipboardhelper;1"].
                   getService(Ci.nsIClipboardHelper);
@@ -707,14 +732,15 @@ function masterPasswordLogin(noPasswordCallback) {
   let token = tokendb.getInternalKeyToken();
 
   // If there is no master password, still give the user a chance to opt-out of displaying passwords
-  if (token.checkPassword(""))
+  if (token.checkPassword("")) {
     return noPasswordCallback ? noPasswordCallback() : true;
+  }
 
   // So there's a master password. But since checkPassword didn't succeed, we're logged out (per nsIPK11Token.idl).
   try {
     // Relogin and ask for the master password.
     token.login(true); // 'true' means always prompt for token password. User will be prompted until
-                        // clicking 'Cancel' or entering the correct password.
+    // clicking 'Cancel' or entering the correct password.
   } catch (e) {
     // An exception will be thrown if the user cancels the login prompt dialog.
     // User is also logged out of Software Security Device.
@@ -732,7 +758,7 @@ function escapeKeyHandler() {
 }
 
 function OpenMigrator() {
-  const { MigrationUtils } = ChromeUtils.import("resource:///modules/MigrationUtils.jsm", {});
+  const { MigrationUtils } = ChromeUtils.import("resource:///modules/MigrationUtils.jsm");
   // We pass in the type of source we're using for use in telemetry:
   MigrationUtils.showMigrationWizard(window, [MigrationUtils.MIGRATION_ENTRYPOINT_PASSWORDS]);
 }

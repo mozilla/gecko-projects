@@ -385,6 +385,12 @@ class FrameLayerBuilder : public layers::LayerUserData {
   FrameLayerBuilder();
   ~FrameLayerBuilder() override;
 
+  static gfx::Size ChooseScale(nsIFrame* aContainerFrame,
+                               nsDisplayItem* aContainerItem,
+                               const nsRect& aVisibleRect, float aXScale,
+                               float aYScale, const gfx::Matrix& aTransform2d,
+                               bool aCanDraw2D);
+
   static void Shutdown();
 
   void Init(nsDisplayListBuilder* aBuilder, LayerManager* aManager,
@@ -472,12 +478,11 @@ class FrameLayerBuilder : public layers::LayerUserData {
   static Layer* GetDedicatedLayer(nsIFrame* aFrame,
                                   DisplayItemType aDisplayItemType);
 
-  using CompositorAnimatableDisplayItemTypes =
-      Array<DisplayItemType, nsCSSPropertyIDSet::CompositorAnimatableCount()>;
   using AnimationGenerationCallback = std::function<bool(
       const Maybe<uint64_t>& aGeneration, DisplayItemType aDisplayItemType)>;
   /**
-   * Enumerates layers for the given display item types and calls |aCallback|
+   * Enumerates layers for the all display item types that correspond to
+   * properties we can animate on layers and calls |aCallback|
    * with the animation generation for the layer.  If there is no corresponding
    * layer for the display item or the layer has no animation, the animation
    * generation is Nothing().
@@ -485,9 +490,7 @@ class FrameLayerBuilder : public layers::LayerUserData {
    * The enumeration stops if |aCallback| returns false.
    */
   static void EnumerateGenerationForDedicatedLayers(
-      const nsIFrame* aFrame,
-      const CompositorAnimatableDisplayItemTypes& aDisplayItemTypes,
-      const AnimationGenerationCallback& aCallback);
+      const nsIFrame* aFrame, const AnimationGenerationCallback& aCallback);
 
   /**
    * This callback must be provided to EndTransaction. The callback data

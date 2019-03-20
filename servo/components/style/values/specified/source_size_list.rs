@@ -1,16 +1,16 @@
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
- * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 //! https://html.spec.whatwg.org/multipage/#source-size-list
 
-use app_units::Au;
 #[cfg(feature = "gecko")]
 use crate::gecko_bindings::sugar::ownership::{HasBoxFFI, HasFFI, HasSimpleFFI};
 use crate::media_queries::{Device, MediaCondition};
 use crate::parser::{Parse, ParserContext};
 use crate::values::computed::{self, ToComputedValue};
 use crate::values::specified::{Length, NoCalcLength, ViewportPercentageLength};
+use app_units::Au;
 use cssparser::{Delimiter, Parser, Token};
 use selectors::context::QuirksMode;
 use style_traits::ParseError;
@@ -118,7 +118,7 @@ impl SourceSizeList {
                     return Self {
                         source_sizes,
                         value: Some(value),
-                    }
+                    };
                 },
                 Ok(SourceSizeOrLength::SourceSize(source_size)) => {
                     source_sizes.push(source_size);

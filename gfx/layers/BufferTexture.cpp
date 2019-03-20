@@ -15,7 +15,7 @@
 #include "mozilla/layers/ImageDataSerializer.h"
 
 #ifdef MOZ_WIDGET_GTK
-#include "gfxPlatformGtk.h"
+#  include "gfxPlatformGtk.h"
 #endif
 
 namespace mozilla {
@@ -484,7 +484,8 @@ bool ShmemTextureData::Serialize(SurfaceDescriptor& aOutDescriptor) {
     return false;
   }
 
-  aOutDescriptor = SurfaceDescriptorBuffer(mDescriptor, MemoryOrShmem(mShmem));
+  aOutDescriptor =
+      SurfaceDescriptorBuffer(mDescriptor, MemoryOrShmem(std::move(mShmem)));
 
   return true;
 }

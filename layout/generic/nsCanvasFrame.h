@@ -36,8 +36,8 @@ class nsCanvasFrame final : public nsContainerFrame,
                             public nsIAnonymousContentCreator,
                             public nsIPopupContainer {
  public:
-  explicit nsCanvasFrame(ComputedStyle* aStyle)
-      : nsContainerFrame(aStyle, kClassID),
+  explicit nsCanvasFrame(ComputedStyle* aStyle, nsPresContext* aPresContext)
+      : nsContainerFrame(aStyle, aPresContext, kClassID),
         mDoPaintFocus(false),
         mAddedScrollPositionListener(false),
         mPopupSetFrame(nullptr) {}
@@ -169,7 +169,7 @@ class nsDisplayCanvasBackgroundColor final : public nsDisplaySolidColorBase {
       mozilla::wr::DisplayListBuilder& aBuilder,
       mozilla::wr::IpcResourceUpdateQueue& aResources,
       const StackingContextHelper& aSc,
-      mozilla::layers::WebRenderLayerManager* aManager,
+      mozilla::layers::RenderRootStateManager* aManager,
       nsDisplayListBuilder* aDisplayListBuilder) override;
   virtual LayerState GetLayerState(
       nsDisplayListBuilder* aBuilder, LayerManager* aManager,

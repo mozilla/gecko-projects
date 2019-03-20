@@ -31,7 +31,7 @@
 #include "nsGkAtoms.h"
 #include "nsCSSAnonBoxes.h"
 #include "nsIContent.h"
-#include "nsIDocumentInlines.h"
+#include "mozilla/dom/DocumentInlines.h"
 #include "nsIScrollableFrame.h"
 #include "imgIRequest.h"
 #include "imgIContainer.h"
@@ -39,7 +39,6 @@
 #include "nsCSSRendering.h"
 #include "nsCSSColorUtils.h"
 #include "nsITheme.h"
-#include "nsStyleConsts.h"
 #include "nsLayoutUtils.h"
 #include "nsBlockFrame.h"
 #include "nsStyleStructInlines.h"
@@ -67,6 +66,7 @@ using namespace mozilla::css;
 using namespace mozilla::gfx;
 using namespace mozilla::image;
 using mozilla::CSSSizeOrRatio;
+using mozilla::dom::Document;
 
 static int gFrameTreeLockCount = 0;
 
@@ -556,12 +556,13 @@ static nsRect JoinBoxesForSlice(nsIFrame* aFrame, const nsRect& aBorderArea,
   return JoinBoxesForBlockAxisSlice(aFrame, aBorderArea);
 }
 
-/* static */ bool nsCSSRendering::IsBoxDecorationSlice(
-    const nsStyleBorder& aStyleBorder) {
+/* static */
+bool nsCSSRendering::IsBoxDecorationSlice(const nsStyleBorder& aStyleBorder) {
   return aStyleBorder.mBoxDecorationBreak == StyleBoxDecorationBreak::Slice;
 }
 
-/* static */ nsRect nsCSSRendering::BoxDecorationRectForBorder(
+/* static */
+nsRect nsCSSRendering::BoxDecorationRectForBorder(
     nsIFrame* aFrame, const nsRect& aBorderArea, Sides aSkipSides,
     const nsStyleBorder* aStyleBorder) {
   if (!aStyleBorder) {
@@ -574,7 +575,8 @@ static nsRect JoinBoxesForSlice(nsIFrame* aFrame, const nsRect& aBorderArea,
              : aBorderArea;
 }
 
-/* static */ nsRect nsCSSRendering::BoxDecorationRectForBackground(
+/* static */
+nsRect nsCSSRendering::BoxDecorationRectForBackground(
     nsIFrame* aFrame, const nsRect& aBorderArea, Sides aSkipSides,
     const nsStyleBorder* aStyleBorder) {
   if (!aStyleBorder) {
@@ -594,9 +596,10 @@ static nsRect JoinBoxesForSlice(nsIFrame* aFrame, const nsRect& aBorderArea,
  * Compute the float-pixel radii that should be used for drawing
  * this border/outline, given the various input bits.
  */
-/* static */ void nsCSSRendering::ComputePixelRadii(
-    const nscoord* aAppUnitsRadii, nscoord aAppUnitsPerPixel,
-    RectCornerRadii* oBorderRadii) {
+/* static */
+void nsCSSRendering::ComputePixelRadii(const nscoord* aAppUnitsRadii,
+                                       nscoord aAppUnitsPerPixel,
+                                       RectCornerRadii* oBorderRadii) {
   Float radii[8];
   NS_FOR_CSS_HALF_CORNERS(corner)
   radii[corner] = Float(aAppUnitsRadii[corner]) / aAppUnitsPerPixel;
@@ -669,14 +672,30 @@ ImgDrawResult nsCSSRendering::CreateWebRenderCommandsForBorder(
     mozilla::wr::DisplayListBuilder& aBuilder,
     mozilla::wr::IpcResourceUpdateQueue& aResources,
     const mozilla::layers::StackingContextHelper& aSc,
-    mozilla::layers::WebRenderLayerManager* aManager,
+    mozilla::layers::RenderRootStateManager* aManager,
     nsDisplayListBuilder* aDisplayListBuilder) {
+  const nsStyleBorder* styleBorder = aForFrame->Style()->StyleBorder();
+  return nsCSSRendering::CreateWebRenderCommandsForBorderWithStyleBorder(
+      aItem, aForFrame, aBorderArea, aBuilder, aResources, aSc, aManager,
+      aDisplayListBuilder, *styleBorder);
+}
+
+ImgDrawResult nsCSSRendering::CreateWebRenderCommandsForBorderWithStyleBorder(
+    nsDisplayItem* aItem, nsIFrame* aForFrame, const nsRect& aBorderArea,
+    mozilla::wr::DisplayListBuilder& aBuilder,
+    mozilla::wr::IpcResourceUpdateQueue& aResources,
+    const mozilla::layers::StackingContextHelper& aSc,
+    mozilla::layers::RenderRootStateManager* aManager,
+    nsDisplayListBuilder* aDisplayListBuilder,
+    const nsStyleBorder& aStyleBorder) {
   // First try to draw a normal border
   {
     bool borderIsEmpty = false;
-    Maybe<nsCSSBorderRenderer> br = nsCSSRendering::CreateBorderRenderer(
-        aForFrame->PresContext(), nullptr, aForFrame, nsRect(), aBorderArea,
-        aForFrame->Style(), &borderIsEmpty, aForFrame->GetSkipSides());
+    Maybe<nsCSSBorderRenderer> br =
+        nsCSSRendering::CreateBorderRendererWithStyleBorder(
+            aForFrame->PresContext(), nullptr, aForFrame, nsRect(), aBorderArea,
+            aStyleBorder, aForFrame->Style(), &borderIsEmpty,
+            aForFrame->GetSkipSides());
     if (borderIsEmpty) {
       return ImgDrawResult::SUCCESS;
     }
@@ -688,8 +707,7 @@ ImgDrawResult nsCSSRendering::CreateWebRenderCommandsForBorder(
   }
 
   // Next try to draw an image border
-  const nsStyleBorder* styleBorder = aForFrame->Style()->StyleBorder();
-  const nsStyleImage* image = &styleBorder->mBorderImageSource;
+  const nsStyleImage* image = &aStyleBorder.mBorderImageSource;
 
   // Filter out unsupported image/border types
   if (!image) {
@@ -705,10 +723,10 @@ ImgDrawResult nsCSSRendering::CreateWebRenderCommandsForBorder(
     return ImgDrawResult::NOT_SUPPORTED;
   }
 
-  if (styleBorder->mBorderImageRepeatH == StyleBorderImageRepeat::Round ||
-      styleBorder->mBorderImageRepeatH == StyleBorderImageRepeat::Space ||
-      styleBorder->mBorderImageRepeatV == StyleBorderImageRepeat::Round ||
-      styleBorder->mBorderImageRepeatV == StyleBorderImageRepeat::Space) {
+  if (aStyleBorder.mBorderImageRepeatH == StyleBorderImageRepeat::Round ||
+      aStyleBorder.mBorderImageRepeatH == StyleBorderImageRepeat::Space ||
+      aStyleBorder.mBorderImageRepeatV == StyleBorderImageRepeat::Round ||
+      aStyleBorder.mBorderImageRepeatV == StyleBorderImageRepeat::Space) {
     return ImgDrawResult::NOT_SUPPORTED;
   }
 
@@ -720,7 +738,7 @@ ImgDrawResult nsCSSRendering::CreateWebRenderCommandsForBorder(
   image::ImgDrawResult result;
   Maybe<nsCSSBorderImageRenderer> bir =
       nsCSSBorderImageRenderer::CreateBorderImageRenderer(
-          aForFrame->PresContext(), aForFrame, aBorderArea, *styleBorder,
+          aForFrame->PresContext(), aForFrame, aBorderArea, aStyleBorder,
           aItem->GetPaintRect(), aForFrame->GetSkipSides(), flags, &result);
 
   if (!bir) {
@@ -796,7 +814,7 @@ static nsCSSBorderRenderer ConstructBorderRenderer(
       static_cast<int>(borderStyles[1]), static_cast<int>(borderStyles[2]),
       static_cast<int>(borderStyles[3]));
 
-  nsIDocument* document = nullptr;
+  Document* document = nullptr;
   nsIContent* content = aForFrame->GetContent();
   if (content) {
     document = content->OwnerDoc();
@@ -928,7 +946,9 @@ Maybe<nsCSSBorderRenderer> nsCSSRendering::CreateBorderRendererWithStyleBorder(
 static nsRect GetOutlineInnerRect(nsIFrame* aFrame) {
   nsRect* savedOutlineInnerRect =
       aFrame->GetProperty(nsIFrame::OutlineInnerRectProperty());
-  if (savedOutlineInnerRect) return *savedOutlineInnerRect;
+  if (savedOutlineInnerRect) {
+    return *savedOutlineInnerRect;
+  }
 
   // FIXME bug 1221888
   NS_ERROR("we should have saved a frame property");
@@ -952,7 +972,7 @@ Maybe<nsCSSBorderRenderer> nsCSSRendering::CreateBorderRendererForOutline(
   nsRect innerRect;
   if (
 #ifdef MOZ_XUL
-      aComputedStyle->GetPseudoType() == CSSPseudoElementType::XULTree
+      aComputedStyle->GetPseudoType() == PseudoStyleType::XULTree
 #else
       false
 #endif
@@ -1009,8 +1029,7 @@ Maybe<nsCSSBorderRenderer> nsCSSRendering::CreateBorderRendererForOutline(
     // "User agents may treat 'auto' as 'solid'."
     outlineStyle = StyleBorderStyle::Solid;
   } else {
-    MOZ_ASSERT(ourOutline->mOutlineStyle.IsBorderStyle());
-    outlineStyle = ourOutline->mOutlineStyle.border_style._0;
+    outlineStyle = ourOutline->mOutlineStyle.AsBorderStyle();
   }
 
   StyleBorderStyle outlineStyles[4] = {outlineStyle, outlineStyle, outlineStyle,
@@ -1029,7 +1048,7 @@ Maybe<nsCSSBorderRenderer> nsCSSRendering::CreateBorderRendererForOutline(
       Float(width) / oneDevPixel, Float(width) / oneDevPixel};
   Rect dirtyRect = NSRectToRect(aDirtyRect, oneDevPixel);
 
-  nsIDocument* document = nullptr;
+  Document* document = nullptr;
   nsIContent* content = aForFrame->GetContent();
   if (content) {
     document = content->OwnerDoc();
@@ -1112,23 +1131,18 @@ void nsCSSRendering::PaintFocus(nsPresContext* aPresContext,
  * that function, except they're for a single coordinate / a single size
  * dimension. (so, x/width vs. y/height)
  */
-static void ComputeObjectAnchorCoord(const Position::Coord& aCoord,
+static void ComputeObjectAnchorCoord(const LengthPercentage& aCoord,
                                      const nscoord aOriginBounds,
                                      const nscoord aImageSize,
                                      nscoord* aTopLeftCoord,
                                      nscoord* aAnchorPointCoord) {
-  *aAnchorPointCoord = aCoord.mLength;
-  *aTopLeftCoord = aCoord.mLength;
+  nscoord extraSpace = aOriginBounds - aImageSize;
 
-  if (aCoord.mHasPercent) {
-    // Adjust aTopLeftCoord by the specified % of the extra space.
-    nscoord extraSpace = aOriginBounds - aImageSize;
-    *aTopLeftCoord += NSToCoordRound(aCoord.mPercent * extraSpace);
-
-    // The anchor-point doesn't care about our image's size; just the size
-    // of the region we're rendering into.
-    *aAnchorPointCoord += NSToCoordRound(aCoord.mPercent * aOriginBounds);
-  }
+  // The anchor-point doesn't care about our image's size; just the size
+  // of the region we're rendering into.
+  *aAnchorPointCoord = aCoord.Resolve(aOriginBounds, NSToCoordRoundWithClamp);
+  // Adjust aTopLeftCoord by the specified % of the extra space.
+  *aTopLeftCoord = aCoord.Resolve(extraSpace, NSToCoordRoundWithClamp);
 }
 
 void nsImageRenderer::ComputeObjectAnchorPoint(const Position& aPos,
@@ -1136,10 +1150,10 @@ void nsImageRenderer::ComputeObjectAnchorPoint(const Position& aPos,
                                                const nsSize& aImageSize,
                                                nsPoint* aTopLeft,
                                                nsPoint* aAnchorPoint) {
-  ComputeObjectAnchorCoord(aPos.mXPosition, aOriginBounds.width,
+  ComputeObjectAnchorCoord(aPos.horizontal, aOriginBounds.width,
                            aImageSize.width, &aTopLeft->x, &aAnchorPoint->x);
 
-  ComputeObjectAnchorCoord(aPos.mYPosition, aOriginBounds.height,
+  ComputeObjectAnchorCoord(aPos.vertical, aOriginBounds.height,
                            aImageSize.height, &aTopLeft->y, &aAnchorPoint->y);
 }
 
@@ -1201,7 +1215,7 @@ nsIFrame* nsCSSRendering::FindBackgroundStyleFrame(nsIFrame* aForFrame) {
     return aForFrame;
   }
 
-  nsIDocument* document = content->OwnerDoc();
+  Document* document = content->OwnerDoc();
 
   dom::Element* bodyContent = document->GetBodyElement();
   // We need to null check the body node (bug 118829) since
@@ -1272,10 +1286,12 @@ inline bool FindElementBackground(nsIFrame* aForFrame,
   // It could be a non-HTML "body" element but that's OK, we'd fail the
   // bodyContent check below
 
-  if (aForFrame->Style()->GetPseudo()) return true;  // A pseudo-element frame.
+  if (aForFrame->Style()->GetPseudoType() != PseudoStyleType::NotPseudo) {
+    return true;  // A pseudo-element frame.
+  }
 
   // We should only look at the <html> background if we're in an HTML document
-  nsIDocument* document = content->OwnerDoc();
+  Document* document = content->OwnerDoc();
 
   dom::Element* bodyContent = document->GetBodyElement();
   if (bodyContent != content)
@@ -1424,8 +1440,8 @@ void nsCSSRendering::PaintBoxShadowOuter(nsPresContext* aPresContext,
     // by optimizing box-shadow drawing more for the cases where we don't have a
     // skip-rect.
     useSkipGfxRect = !aForFrame->IsLeaf();
-    nsRect paddingRect = aForFrame->GetPaddingRect() -
-                         aForFrame->GetPosition() + aFrameArea.TopLeft();
+    nsRect paddingRect =
+        aForFrame->GetPaddingRectRelativeToSelf() + aFrameArea.TopLeft();
     skipGfxRect = nsLayoutUtils::RectToGfxRect(paddingRect, oneDevPixel);
   } else if (hasBorderRadius) {
     skipGfxRect.Deflate(gfxMargin(
@@ -1881,7 +1897,7 @@ ImgDrawResult nsCSSRendering::BuildWebRenderDisplayItemsForStyleImageLayer(
     const PaintBGParams& aParams, mozilla::wr::DisplayListBuilder& aBuilder,
     mozilla::wr::IpcResourceUpdateQueue& aResources,
     const mozilla::layers::StackingContextHelper& aSc,
-    mozilla::layers::WebRenderLayerManager* aManager, nsDisplayItem* aItem) {
+    mozilla::layers::RenderRootStateManager* aManager, nsDisplayItem* aItem) {
   MOZ_ASSERT(aParams.frame,
              "Frame is expected to be provided to "
              "BuildWebRenderDisplayItemsForStyleImageLayer");
@@ -2007,7 +2023,8 @@ bool nsCSSRendering::ImageLayerClipState::IsValid() const {
   return true;
 }
 
-/* static */ void nsCSSRendering::GetImageLayerClip(
+/* static */
+void nsCSSRendering::GetImageLayerClip(
     const nsStyleImageLayers::Layer& aLayer, nsIFrame* aForFrame,
     const nsStyleBorder& aBorder, const nsRect& aBorderArea,
     const nsRect& aCallerDirtyRect, bool aWillPaintBorder,
@@ -2318,7 +2335,7 @@ nscolor nsCSSRendering::DetermineBackgroundColor(nsPresContext* aPresContext,
 
   const nsStyleVisibility* visibility = aComputedStyle->StyleVisibility();
 
-  if (visibility->mColorAdjust != NS_STYLE_COLOR_ADJUST_EXACT &&
+  if (visibility->mColorAdjust != StyleColorAdjust::Exact &&
       aFrame->HonorPrintBackgroundSettings()) {
     aDrawBackgroundImage = aPresContext->GetBackgroundImageDraw();
     aDrawBackgroundColor = aPresContext->GetBackgroundColorDraw();
@@ -2606,7 +2623,7 @@ nsCSSRendering::BuildWebRenderDisplayItemsForStyleImageLayerWithSC(
     const PaintBGParams& aParams, mozilla::wr::DisplayListBuilder& aBuilder,
     mozilla::wr::IpcResourceUpdateQueue& aResources,
     const mozilla::layers::StackingContextHelper& aSc,
-    mozilla::layers::WebRenderLayerManager* aManager, nsDisplayItem* aItem,
+    mozilla::layers::RenderRootStateManager* aManager, nsDisplayItem* aItem,
     ComputedStyle* aBackgroundSC, const nsStyleBorder& aBorder) {
   MOZ_ASSERT(!(aParams.paintFlags & PAINTBG_MASK_IMAGE));
 
@@ -2794,8 +2811,9 @@ nsRect nsCSSRendering::ComputeImageLayerPositioningArea(
   return positionArea;
 }
 
-/* static */ nscoord nsCSSRendering::ComputeRoundedSize(
-    nscoord aCurrentSize, nscoord aPositioningSize) {
+/* static */
+nscoord nsCSSRendering::ComputeRoundedSize(nscoord aCurrentSize,
+                                           nscoord aPositioningSize) {
   float repeatCount = NS_roundf(float(aPositioningSize) / float(aCurrentSize));
   if (repeatCount < 1.0f) {
     return aPositioningSize;
@@ -2809,29 +2827,30 @@ nsRect nsCSSRendering::ComputeImageLayerPositioningArea(
 // It can be found by calling nsImageRenderer::ComputeIntrinsicSize.
 static nsSize ComputeDrawnSizeForBackground(
     const CSSSizeOrRatio& aIntrinsicSize, const nsSize& aBgPositioningArea,
-    const nsStyleImageLayers::Size& aLayerSize, StyleImageLayerRepeat aXRepeat,
+    const StyleBackgroundSize& aLayerSize, StyleImageLayerRepeat aXRepeat,
     StyleImageLayerRepeat aYRepeat) {
   nsSize imageSize;
 
   // Size is dictated by cover or contain rules.
-  if (aLayerSize.mWidthType == nsStyleImageLayers::Size::eContain ||
-      aLayerSize.mWidthType == nsStyleImageLayers::Size::eCover) {
-    nsImageRenderer::FitType fitType =
-        aLayerSize.mWidthType == nsStyleImageLayers::Size::eCover
-            ? nsImageRenderer::COVER
-            : nsImageRenderer::CONTAIN;
+  if (aLayerSize.IsContain() || aLayerSize.IsCover()) {
+    nsImageRenderer::FitType fitType = aLayerSize.IsCover()
+                                           ? nsImageRenderer::COVER
+                                           : nsImageRenderer::CONTAIN;
     imageSize = nsImageRenderer::ComputeConstrainedSize(
         aBgPositioningArea, aIntrinsicSize.mRatio, fitType);
   } else {
+    MOZ_ASSERT(aLayerSize.IsExplicitSize());
+    const auto& width = aLayerSize.explicit_size.width;
+    const auto& height = aLayerSize.explicit_size.height;
     // No cover/contain constraint, use default algorithm.
     CSSSizeOrRatio specifiedSize;
-    if (aLayerSize.mWidthType == nsStyleImageLayers::Size::eLengthPercentage) {
+    if (width.IsLengthPercentage()) {
       specifiedSize.SetWidth(
-          aLayerSize.ResolveWidthLengthPercentage(aBgPositioningArea));
+          width.AsLengthPercentage().Resolve(aBgPositioningArea.width));
     }
-    if (aLayerSize.mHeightType == nsStyleImageLayers::Size::eLengthPercentage) {
+    if (height.IsLengthPercentage()) {
       specifiedSize.SetHeight(
-          aLayerSize.ResolveHeightLengthPercentage(aBgPositioningArea));
+          height.AsLengthPercentage().Resolve(aBgPositioningArea.height));
     }
 
     imageSize = nsImageRenderer::ComputeConcreteSize(
@@ -2857,9 +2876,8 @@ static nsSize ComputeDrawnSizeForBackground(
   if (imageSize.width && aXRepeat == StyleImageLayerRepeat::Round) {
     imageSize.width = nsCSSRendering::ComputeRoundedSize(
         imageSize.width, aBgPositioningArea.width);
-    if (!isRepeatRoundInBothDimensions &&
-        aLayerSize.mHeightType ==
-            nsStyleImageLayers::Size::DimensionType::eAuto) {
+    if (!isRepeatRoundInBothDimensions && aLayerSize.IsExplicitSize() &&
+        aLayerSize.explicit_size.height.IsAuto()) {
       // Restore intrinsic rato
       if (aIntrinsicSize.mRatio.width) {
         float scale =
@@ -2875,9 +2893,8 @@ static nsSize ComputeDrawnSizeForBackground(
   if (imageSize.height && aYRepeat == StyleImageLayerRepeat::Round) {
     imageSize.height = nsCSSRendering::ComputeRoundedSize(
         imageSize.height, aBgPositioningArea.height);
-    if (!isRepeatRoundInBothDimensions &&
-        aLayerSize.mWidthType ==
-            nsStyleImageLayers::Size::DimensionType::eAuto) {
+    if (!isRepeatRoundInBothDimensions && aLayerSize.IsExplicitSize() &&
+        aLayerSize.explicit_size.width.IsAuto()) {
       // Restore intrinsic rato
       if (aIntrinsicSize.mRatio.height) {
         float scale =
@@ -2910,8 +2927,10 @@ static nscoord ComputeSpacedRepeatSize(nscoord aImageDimension,
   return (aAvailableSpace - aImageDimension) / (NSToIntFloor(ratio) - 1);
 }
 
-/* static */ nscoord nsCSSRendering::ComputeBorderSpacedRepeatSize(
-    nscoord aImageDimension, nscoord aAvailableSpace, nscoord& aSpace) {
+/* static */
+nscoord nsCSSRendering::ComputeBorderSpacedRepeatSize(nscoord aImageDimension,
+                                                      nscoord aAvailableSpace,
+                                                      nscoord& aSpace) {
   int32_t count = aImageDimension ? (aAvailableSpace / aImageDimension) : 0;
   aSpace = (aAvailableSpace - aImageDimension * count) / (count + 1);
   return aSpace + aImageDimension;
@@ -3586,6 +3605,7 @@ void nsCSSRendering::GetTableBorderSolidSegments(
                                         {aStartBevelSide, startBevel},
                                         {aEndBevelSide, endBevel}});
         }
+        break;
       }
       // else fall through to solid
       MOZ_FALLTHROUGH;
@@ -4253,8 +4273,9 @@ void nsContextBoxBlur::DoPaint() {
 
 gfxContext* nsContextBoxBlur::GetContext() { return mContext; }
 
-/* static */ nsMargin nsContextBoxBlur::GetBlurRadiusMargin(
-    nscoord aBlurRadius, int32_t aAppUnitsPerDevPixel) {
+/* static */
+nsMargin nsContextBoxBlur::GetBlurRadiusMargin(nscoord aBlurRadius,
+                                               int32_t aAppUnitsPerDevPixel) {
   IntSize blurRadius = ComputeBlurRadius(aBlurRadius, aAppUnitsPerDevPixel);
 
   nsMargin result;
@@ -4263,7 +4284,8 @@ gfxContext* nsContextBoxBlur::GetContext() { return mContext; }
   return result;
 }
 
-/* static */ void nsContextBoxBlur::BlurRectangle(
+/* static */
+void nsContextBoxBlur::BlurRectangle(
     gfxContext* aDestinationCtx, const nsRect& aRect,
     int32_t aAppUnitsPerDevPixel, RectCornerRadii* aCornerRadii,
     nscoord aBlurRadius, const Color& aShadowColor, const nsRect& aDirtyRect,
@@ -4327,7 +4349,8 @@ gfxContext* nsContextBoxBlur::GetContext() { return mContext; }
                                  dirtyRect, skipRect);
 }
 
-/* static */ void nsContextBoxBlur::GetBlurAndSpreadRadius(
+/* static */
+void nsContextBoxBlur::GetBlurAndSpreadRadius(
     DrawTarget* aDestDrawTarget, int32_t aAppUnitsPerDevPixel,
     nscoord aBlurRadius, nscoord aSpreadRadius, IntSize& aOutBlurRadius,
     IntSize& aOutSpreadRadius, bool aConstrainSpreadRadius) {
@@ -4362,7 +4385,8 @@ gfxContext* nsContextBoxBlur::GetContext() { return mContext; }
   }
 }
 
-/* static */ bool nsContextBoxBlur::InsetBoxBlur(
+/* static */
+bool nsContextBoxBlur::InsetBoxBlur(
     gfxContext* aDestinationCtx, Rect aDestinationRect, Rect aShadowClipRect,
     Color& aShadowColor, nscoord aBlurRadiusAppUnits,
     nscoord aSpreadDistanceAppUnits, int32_t aAppUnitsPerDevPixel,

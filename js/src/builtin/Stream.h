@@ -242,19 +242,34 @@ class ReadableStreamController : public StreamController {
    * Memory layout for ReadableStream controllers, starting after the slots
    * reserved for queue container usage.
    *
-   * UnderlyingSource is usually treated as an opaque value. It might be a
-   * wrapped object from another compartment, but that case is handled
-   * correctly by all operations the controller might invoke on it.
+   * Storage of the internal slots listed in the standard is fairly
+   * straightforward except for [[pullAlgorithm]] and [[cancelAlgorithm]].
+   * These algorithms are not stored as JSFunction objects. Rather, there are
+   * three cases:
    *
-   * The only case where we don't treat underlyingSource as an opaque value is
-   * if it's a TeeState. All functions operating on TeeState properly handle
-   * TeeState instances from other compartments.
+   * -   Streams created with `new ReadableStream`: The methods are stored
+   *     in Slot_PullMethod and Slot_CancelMethod. The underlying source
+   *     object (`this` for these methods) is in Slot_UnderlyingSource.
+   *
+   * -   External source streams. Slot_UnderlyingSource is a PrivateValue
+   *     pointing to the JS::ReadableStreamUnderlyingSource object. The
+   *     algorithms are implemented using the .pull() and .cancel() methods
+   *     of that object. Slot_Pull/CancelMethod are undefined.
+   *
+   * -   Tee streams. Slot_UnderlyingSource is a TeeState object. The
+   *     pull/cancel algorithms are implemented as separate functions in
+   *     Stream.cpp. Slot_Pull/CancelMethod are undefined.
+   *
+   * UnderlyingSource, PullMethod, and CancelMethod can be wrappers to objects
+   * in other compartments.
    *
    * StrategyHWM and Flags are both primitive (numeric) values.
    */
   enum Slots {
     Slot_Stream = StreamController::SlotCount,
     Slot_UnderlyingSource,
+    Slot_PullMethod,
+    Slot_CancelMethod,
     Slot_StrategyHWM,
     Slot_Flags,
     SlotCount
@@ -265,11 +280,10 @@ class ReadableStreamController : public StreamController {
     Flag_Pulling = 1 << 1,
     Flag_PullAgain = 1 << 2,
     Flag_CloseRequested = 1 << 3,
-    Flag_TeeBranch = 1 << 4,
-    Flag_TeeBranch1 = 1 << 5,
-    Flag_TeeBranch2 = 1 << 6,
-    Flag_ExternalSource = 1 << 7,
-    Flag_SourceLocked = 1 << 8,
+    Flag_TeeBranch1 = 1 << 4,
+    Flag_TeeBranch2 = 1 << 5,
+    Flag_ExternalSource = 1 << 6,
+    Flag_SourceLocked = 1 << 7,
   };
 
   ReadableStream* stream() const {
@@ -282,6 +296,14 @@ class ReadableStreamController : public StreamController {
   void setUnderlyingSource(const Value& underlyingSource) {
     setFixedSlot(Slot_UnderlyingSource, underlyingSource);
   }
+  Value pullMethod() const { return getFixedSlot(Slot_PullMethod); }
+  void setPullMethod(const Value& pullMethod) {
+    setFixedSlot(Slot_PullMethod, pullMethod);
+  }
+  Value cancelMethod() const { return getFixedSlot(Slot_CancelMethod); }
+  void setCancelMethod(const Value& cancelMethod) {
+    setFixedSlot(Slot_CancelMethod, cancelMethod);
+  }
   JS::ReadableStreamUnderlyingSource* externalSource() const {
     static_assert(alignof(JS::ReadableStreamUnderlyingSource) >= 2,
                   "External underling sources are stored as PrivateValues, "
@@ -291,9 +313,16 @@ class ReadableStreamController : public StreamController {
         underlyingSource().toPrivate());
   }
   void setExternalSource(JS::ReadableStreamUnderlyingSource* underlyingSource) {
-    MOZ_ASSERT(getFixedSlot(Slot_Flags).isUndefined());
     setUnderlyingSource(JS::PrivateValue(underlyingSource));
-    setFlags(Flag_ExternalSource);
+    addFlags(Flag_ExternalSource);
+  }
+  static void clearUnderlyingSource(
+      JS::Handle<ReadableStreamController*> controller) {
+    if (controller->hasExternalSource()) {
+      controller->externalSource()->finalize();
+      controller->setFlags(controller->flags() & ~Flag_ExternalSource);
+    }
+    controller->setUnderlyingSource(JS::UndefinedHandleValue);
   }
   double strategyHWM() const {
     return getFixedSlot(Slot_StrategyHWM).toNumber();
@@ -315,15 +344,19 @@ class ReadableStreamController : public StreamController {
   bool closeRequested() const { return flags() & Flag_CloseRequested; }
   void setCloseRequested() { addFlags(Flag_CloseRequested); }
   bool isTeeBranch1() const { return flags() & Flag_TeeBranch1; }
-  void setTeeBranch1() { addFlags(Flag_TeeBranch | Flag_TeeBranch1); }
+  void setTeeBranch1() {
+    MOZ_ASSERT(!isTeeBranch2());
+    addFlags(Flag_TeeBranch1);
+  }
   bool isTeeBranch2() const { return flags() & Flag_TeeBranch2; }
-  void setTeeBranch2() { addFlags(Flag_TeeBranch | Flag_TeeBranch2); }
+  void setTeeBranch2() {
+    MOZ_ASSERT(!isTeeBranch1());
+    addFlags(Flag_TeeBranch2);
+  }
   bool hasExternalSource() const { return flags() & Flag_ExternalSource; }
   bool sourceLocked() const { return flags() & Flag_SourceLocked; }
   void setSourceLocked() { addFlags(Flag_SourceLocked); }
   void clearSourceLocked() { removeFlags(Flag_SourceLocked); }
-
-  static const Class class_;
 };
 
 class ReadableStreamDefaultController : public ReadableStreamController {

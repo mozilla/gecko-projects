@@ -43,8 +43,8 @@
 #include <algorithm>
 
 #ifdef MOZ_XUL
-#include "nsIAutoCompleteInput.h"
-#include "nsIAutoCompletePopup.h"
+#  include "nsIAutoCompleteInput.h"
+#  include "nsIAutoCompletePopup.h"
 #endif
 
 using namespace mozilla;
@@ -143,7 +143,7 @@ using namespace mozilla::places;
 
 // Observed topics.
 #ifdef MOZ_XUL
-#define TOPIC_AUTOCOMPLETE_FEEDBACK_INCOMING "autocomplete-will-enter-text"
+#  define TOPIC_AUTOCOMPLETE_FEEDBACK_INCOMING "autocomplete-will-enter-text"
 #endif
 #define TOPIC_IDLE_DAILY "idle-daily"
 #define TOPIC_PREF_CHANGED "nsPref:changed"
@@ -931,8 +931,7 @@ nsNavHistory::CanAddURI(nsIURI* aURI, bool* canAdd) {
       scheme.EqualsLiteral("imap") || scheme.EqualsLiteral("javascript") ||
       scheme.EqualsLiteral("mailbox") || scheme.EqualsLiteral("moz-anno") ||
       scheme.EqualsLiteral("news") || scheme.EqualsLiteral("page-icon") ||
-      scheme.EqualsLiteral("resource") || scheme.EqualsLiteral("view-source") ||
-      scheme.EqualsLiteral("wyciwyg")) {
+      scheme.EqualsLiteral("resource") || scheme.EqualsLiteral("view-source")) {
     return NS_OK;
   }
   *canAdd = true;
@@ -1620,7 +1619,7 @@ nsresult PlacesSQLQueryBuilder::SelectAsRoots() {
           "null, null, 0, 0, null, null, null, null, 'menu_______v', null), "
           "(null, 'place:parent=" UNFILED_ROOT_GUID
           "', :OtherBookmarksFolderTitle, null, null, null, "
-          "null, null, 0, 0, null, null, null, null, 'unfiled___v', null) ") +
+          "null, null, 0, 0, null, null, null, null, 'unfiled____v', null) ") +
       mobileString + NS_LITERAL_CSTRING(")");
 
   return NS_OK;
@@ -2274,7 +2273,17 @@ nsNavHistory::Observe(nsISupports* aSubject, const char* aTopic,
 
     nsCOMPtr<nsIAutoCompletePopup> popup;
     input->GetPopup(getter_AddRefs(popup));
-    if (!popup) return NS_OK;
+    if (!popup) {
+      nsCOMPtr<Element> popupEl;
+      input->GetPopupElement(getter_AddRefs(popupEl));
+      if (!popupEl) {
+        return NS_OK;
+      }
+      popup = popupEl->AsAutoCompletePopup();
+      if (!popup) {
+        return NS_OK;
+      }
+    }
 
     nsCOMPtr<nsIAutoCompleteController> controller;
     input->GetController(getter_AddRefs(controller));

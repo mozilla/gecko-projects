@@ -21,7 +21,7 @@ class nsIContent;
 class nsIPresShell;
 
 namespace mozilla {
-class nsSVGAnimatedTransformList;
+class SVGAnimatedTransformList;
 
 namespace dom {
 class SVGLinearGradientElement;
@@ -33,7 +33,8 @@ class nsSVGGradientFrame : public nsSVGPaintServerFrame {
   typedef mozilla::gfx::ExtendMode ExtendMode;
 
  protected:
-  nsSVGGradientFrame(ComputedStyle* aStyle, ClassID aID);
+  nsSVGGradientFrame(ComputedStyle* aStyle, nsPresContext* aPresContext,
+                     ClassID aID);
 
  public:
   NS_DECL_ABSTRACT_FRAME(nsSVGGradientFrame)
@@ -65,7 +66,7 @@ class nsSVGGradientFrame : public nsSVGPaintServerFrame {
   // Optionally get a stop frame (returns stop index/count)
   void GetStopFrames(nsTArray<nsIFrame*>* aStopFrames);
 
-  const mozilla::nsSVGAnimatedTransformList* GetGradientTransformList(
+  const mozilla::SVGAnimatedTransformList* GetGradientTransformList(
       nsIContent* aDefault);
   // Will be singular for gradientUnits="objectBoundingBox" with an empty bbox.
   gfxMatrix GetGradientTransform(nsIFrame* aSource,
@@ -112,8 +113,9 @@ class nsSVGLinearGradientFrame final : public nsSVGGradientFrame {
                                                 ComputedStyle* aStyle);
 
  protected:
-  explicit nsSVGLinearGradientFrame(ComputedStyle* aStyle)
-      : nsSVGGradientFrame(aStyle, kClassID) {}
+  explicit nsSVGLinearGradientFrame(ComputedStyle* aStyle,
+                                    nsPresContext* aPresContext)
+      : nsSVGGradientFrame(aStyle, aPresContext, kClassID) {}
 
  public:
   NS_DECL_FRAMEARENA_HELPERS(nsSVGLinearGradientFrame)
@@ -151,8 +153,9 @@ class nsSVGRadialGradientFrame final : public nsSVGGradientFrame {
                                                 ComputedStyle* aStyle);
 
  protected:
-  explicit nsSVGRadialGradientFrame(ComputedStyle* aStyle)
-      : nsSVGGradientFrame(aStyle, kClassID) {}
+  explicit nsSVGRadialGradientFrame(ComputedStyle* aStyle,
+                                    nsPresContext* aPresContext)
+      : nsSVGGradientFrame(aStyle, aPresContext, kClassID) {}
 
  public:
   NS_DECL_FRAMEARENA_HELPERS(nsSVGRadialGradientFrame)

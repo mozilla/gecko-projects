@@ -13,8 +13,8 @@
 // C++ Debugger (Debugger, Debugger.Object, etc.), which implement similar
 // methods and properties to those C++ objects. These replay objects are
 // created in the middleman process, and describe things that exist in the
-// recording/replaying process, inspecting them via the RecordReplayControl
-// interface.
+// recording/replaying process, inspecting them via the interface provided by
+// control.js.
 
 "use strict";
 
@@ -40,8 +40,9 @@ function ReplayDebugger() {
     return existing;
   }
 
-  // Whether the process is currently paused.
-  this._paused = false;
+  // We should have been connected to control.js by the call above.
+  assert(this._control);
+  assert(this._searchControl);
 
   // Preferred direction of travel when not explicitly resumed.
   this._direction = Direction.NONE;
@@ -75,6 +76,9 @@ function ReplayDebugger() {
   // After we are done pausing, callback describing how to resume.
   this._resumeCallback = null;
 
+  // Information about all searches that exist.
+  this._searches = [];
+
   // Handler called when hitting the beginning/end of the recording, or when
   // a time warp target has been reached.
   this.replayingOnForcedPause = null;
@@ -97,14 +101,17 @@ ReplayDebugger.prototype = {
   canRewind: RecordReplayControl.canRewind,
 
   replayCurrentExecutionPoint() {
-    return this._sendRequest({ type: "currentExecutionPoint" });
+    assert(this._paused);
+    return this._control.pausePoint();
   },
 
   replayRecordingEndpoint() {
     return this._sendRequest({ type: "recordingEndpoint" });
   },
 
-  replayIsRecording: RecordReplayControl.childIsRecording,
+  replayIsRecording() {
+    return this._control.childIsRecording();
+  },
 
   addDebuggee() {},
   removeAllDebuggees() {},
@@ -117,8 +124,7 @@ ReplayDebugger.prototype = {
   // Send a request object to the child process, and synchronously wait for it
   // to respond.
   _sendRequest(request) {
-    assert(this._paused);
-    const data = RecordReplayControl.sendRequest(request);
+    const data = this._control.sendRequest(request);
     dumpv("SendRequest: " +
           JSON.stringify(request) + " -> " + JSON.stringify(data));
     if (data.exception) {
@@ -132,8 +138,7 @@ ReplayDebugger.prototype = {
   // replaying process (if there is one), as recording child processes won't
   // provide useful responses to such requests.
   _sendRequestAllowDiverge(request) {
-    assert(this._paused);
-    RecordReplayControl.maybeSwitchToReplayingChild();
+    this._control.maybeSwitchToReplayingChild();
     return this._sendRequest(request);
   },
 
@@ -173,16 +178,19 @@ ReplayDebugger.prototype = {
   //   when an event loop is running (which, because of the above point, cannot
   //   be associated with a thread actor's nested pause).
 
+  get _paused() {
+    return !!this._control.pausePoint();
+  },
+
   replayResumeBackward() { this._resume(/* forward = */ false); },
   replayResumeForward() { this._resume(/* forward = */ true); },
 
   _resume(forward) {
     this._ensurePaused();
     this._setResume(() => {
-      this._paused = false;
       this._direction = forward ? Direction.FORWARD : Direction.BACKWARD;
       dumpv("Resuming " + this._direction);
-      RecordReplayControl.resume(forward);
+      this._control.resume(forward);
       if (this._paused) {
         // If we resume and immediately pause, we are at an endpoint of the
         // recording. Force the thread to pause.
@@ -194,10 +202,9 @@ ReplayDebugger.prototype = {
   replayTimeWarp(target) {
     this._ensurePaused();
     this._setResume(() => {
-      this._paused = false;
       this._direction = Direction.NONE;
       dumpv("Warping " + JSON.stringify(target));
-      RecordReplayControl.timeWarp(target);
+      this._control.timeWarp(target);
 
       // timeWarp() doesn't return until the child has reached the target of
       // the warp, after which we force the thread to pause.
@@ -215,17 +222,15 @@ ReplayDebugger.prototype = {
 
   _ensurePaused() {
     if (!this._paused) {
-      RecordReplayControl.waitUntilPaused();
+      this._control.waitUntilPaused();
       assert(this._paused);
     }
   },
 
   // This hook is called whenever the child has paused, which can happen
-  // within a RecordReplayControl method (resume, timeWarp, waitUntilPaused) or
-  // or be delivered via the event loop.
+  // within a control method (resume, timeWarp, waitUntilPaused) or be
+  // delivered via the event loop.
   _onPause() {
-    this._paused = true;
-
     // The position change handler is always called on pause notifications.
     if (this.replayingOnPositionChange) {
       this.replayingOnPositionChange();
@@ -248,7 +253,7 @@ ReplayDebugger.prototype = {
     const point = this.replayCurrentExecutionPoint();
     dumpv("PerformPause " + JSON.stringify(point));
 
-    if (point.position.kind == "Invalid") {
+    if (!point.position) {
       // We paused at a checkpoint, and there are no handlers to call.
     } else {
       // Call any handlers for this point, unless one resumes execution.
@@ -280,11 +285,7 @@ ReplayDebugger.prototype = {
   _onSwitchChild() {
     // The position change handler listens to changes to the current child.
     if (this.replayingOnPositionChange) {
-      // Children are paused whenever we switch between them.
-      const paused = this._paused;
-      this._paused = true;
       this.replayingOnPositionChange();
-      this._paused = paused;
     }
   },
 
@@ -295,7 +296,7 @@ ReplayDebugger.prototype = {
     assert(!this._resumeCallback);
     if (++this._threadPauseCount == 1) {
       // Save checkpoints near the current position in case the user rewinds.
-      RecordReplayControl.markExplicitPause();
+      this._control.markExplicitPause();
 
       // There is no preferred direction of travel after an explicit pause.
       this._direction = Direction.NONE;
@@ -352,13 +353,72 @@ ReplayDebugger.prototype = {
   },
 
   /////////////////////////////////////////////////////////
+  // Search management
+  /////////////////////////////////////////////////////////
+
+  _forEachSearch(callback) {
+    for (const { position } of this._searches) {
+      callback(position);
+    }
+  },
+
+  _virtualConsoleLog(position, text, condition, callback) {
+    this._searches.push({ position, text, condition, callback, results: [] });
+    this._searchControl.reset();
+  },
+
+  _evaluateVirtualConsoleLog(search) {
+    const frameData = this._searchControl.sendRequest({
+      type: "getFrame",
+      index: NewestFrameIndex,
+    });
+    if (!("index" in frameData)) {
+      return null;
+    }
+    if (search.condition) {
+      const rv = this._searchControl.sendRequest({
+        type: "frameEvaluate",
+        index: frameData.index,
+        text: search.condition,
+        convertOptions: { snapshot: true },
+      });
+      const crv = this._convertCompletionValue(rv);
+      if ("return" in crv && !crv.return) {
+        return null;
+      }
+    }
+    const rv = this._searchControl.sendRequest({
+      type: "frameEvaluate",
+      index: frameData.index,
+      text: search.text,
+      convertOptions: { snapshot: true },
+    });
+    return this._convertCompletionValue(rv);
+  },
+
+  _onSearchPause(point) {
+    for (const search of this._searches) {
+      if (RecordReplayControl.positionSubsumes(search.position, point.position)) {
+        if (!search.results.some(existing => point.progress == existing.progress)) {
+          search.results.push(point);
+
+          const evaluateResult = this._evaluateVirtualConsoleLog(search);
+          if (evaluateResult) {
+            search.callback(point, evaluateResult);
+          }
+        }
+      }
+    }
+  },
+
+  /////////////////////////////////////////////////////////
   // Breakpoint management
   /////////////////////////////////////////////////////////
 
   _setBreakpoint(handler, position, data) {
     this._ensurePaused();
     dumpv("AddBreakpoint " + JSON.stringify(position));
-    RecordReplayControl.addBreakpoint(position);
+    this._control.addBreakpoint(position);
     this._breakpoints.push({handler, position, data});
   },
 
@@ -367,10 +427,10 @@ ReplayDebugger.prototype = {
     const newBreakpoints = this._breakpoints.filter(bp => !callback(bp));
     if (newBreakpoints.length != this._breakpoints.length) {
       dumpv("ClearBreakpoints");
-      RecordReplayControl.clearBreakpoints();
+      this._control.clearBreakpoints();
       for (const { position } of newBreakpoints) {
         dumpv("AddBreakpoint " + JSON.stringify(position));
-        RecordReplayControl.addBreakpoint(position);
+        this._control.addBreakpoint(position);
       }
     }
     this._breakpoints = newBreakpoints;
@@ -445,6 +505,7 @@ ReplayDebugger.prototype = {
   },
 
   findScripts(query) {
+    this._ensurePaused();
     const data = this._sendRequest({
       type: "findScripts",
       query: this._convertScriptQuery(query),
@@ -487,15 +548,12 @@ ReplayDebugger.prototype = {
   // Object methods
   /////////////////////////////////////////////////////////
 
-  // Objects which |forConsole| is set are objects that were logged in console
-  // messages, and had their properties recorded so that they can be inspected
-  // without switching to a replaying child.
-  _getObject(id, forConsole) {
+  _getObject(id) {
     if (id && !this._objects[id]) {
       const data = this._sendRequest({ type: "getObject", id });
       switch (data.kind) {
       case "Object":
-        this._objects[id] = new ReplayDebuggerObject(this, data, forConsole);
+        this._objects[id] = new ReplayDebuggerObject(this, data);
         break;
       case "Environment":
         this._objects[id] = new ReplayDebuggerEnvironment(this, data);
@@ -504,25 +562,24 @@ ReplayDebugger.prototype = {
         ThrowError("Unknown object kind");
       }
     }
-    const rv = this._objects[id];
-    if (forConsole) {
-      rv._forConsole = true;
-    }
-    return rv;
+    return this._objects[id];
   },
 
-  _convertValue(value, forConsole) {
+  // Convert a value we received from the child.
+  _convertValue(value) {
     if (isNonNullObject(value)) {
       if (value.object) {
-        return this._getObject(value.object, forConsole);
-      } else if (value.special == "undefined") {
-        return undefined;
-      } else if (value.special == "NaN") {
-        return NaN;
-      } else if (value.special == "Infinity") {
-        return Infinity;
-      } else if (value.special == "-Infinity") {
-        return -Infinity;
+        return this._getObject(value.object);
+      }
+      if (value.snapshot) {
+        return new ReplayDebuggerObjectSnapshot(this, value.snapshot);
+      }
+      switch (value.special) {
+      case "undefined": return undefined;
+      case "Infinity": return Infinity;
+      case "-Infinity": return -Infinity;
+      case "NaN": return NaN;
+      case "0": return -0;
       }
     }
     return value;
@@ -537,6 +594,21 @@ ReplayDebugger.prototype = {
     }
     ThrowError("Unexpected completion value");
     return null; // For eslint
+  },
+
+  // Convert a value for sending to the child.
+  _convertValueForChild(value) {
+    if (isNonNullObject(value)) {
+      assert(value instanceof ReplayDebuggerObject);
+      return { object: value._data.id };
+    } else if (value === undefined ||
+               value == Infinity ||
+               value == -Infinity ||
+               Object.is(value, NaN) ||
+               Object.is(value, -0)) {
+      return { special: "" + value };
+    }
+    return value;
   },
 
   /////////////////////////////////////////////////////////
@@ -583,8 +655,7 @@ ReplayDebugger.prototype = {
     // other contents of the message can be left alone.
     if (message.messageType == "ConsoleAPI" && message.arguments) {
       for (let i = 0; i < message.arguments.length; i++) {
-        message.arguments[i] = this._convertValue(message.arguments[i],
-                                                  /* forConsole = */ true);
+        message.arguments[i] = this._convertValue(message.arguments[i]);
       }
     }
     return message;
@@ -661,8 +732,10 @@ ReplayDebuggerScript.prototype = {
   get source() { return this._dbg._getSource(this._data.sourceId); },
   get sourceStart() { return this._data.sourceStart; },
   get sourceLength() { return this._data.sourceLength; },
+  get format() { return this._data.format; },
 
   _forward(type, value) {
+    this._dbg._ensurePaused();
     return this._dbg._sendRequest({ type, id: this._data.id, value });
   },
 
@@ -670,6 +743,14 @@ ReplayDebuggerScript.prototype = {
   getOffsetLocation(pc) { return this._forward("getOffsetLocation", pc); },
   getSuccessorOffsets(pc) { return this._forward("getSuccessorOffsets", pc); },
   getPredecessorOffsets(pc) { return this._forward("getPredecessorOffsets", pc); },
+  getAllColumnOffsets() { return this._forward("getAllColumnOffsets"); },
+  getOffsetMetadata(pc) { return this._forward("getOffsetMetadata", pc); },
+  getPossibleBreakpoints(query) {
+    return this._forward("getPossibleBreakpoints", query);
+  },
+  getPossibleBreakpointOffsets(query) {
+    return this._forward("getPossibleBreakpointOffsets", query);
+  },
 
   setBreakpoint(offset, handler) {
     this._dbg._setBreakpoint(() => { handler.hit(this._dbg.getNewestFrame()); },
@@ -683,12 +764,15 @@ ReplayDebuggerScript.prototype = {
     });
   },
 
+  replayVirtualConsoleLog(offset, text, condition, callback) {
+    this._dbg._virtualConsoleLog({ kind: "Break", script: this._data.id, offset },
+                                 text, condition, callback);
+  },
+
   get isGeneratorFunction() { NYI(); },
   get isAsyncFunction() { NYI(); },
-  get format() { NYI(); },
   getChildScripts: NYI,
   getAllOffsets: NYI,
-  getAllColumnOffsets: NYI,
   getBreakpoints: NYI,
   clearAllBreakpoints: NYI,
   isInCatchScope: NYI,
@@ -825,17 +909,18 @@ ReplayDebuggerFrame.prototype = {
 // ReplayDebuggerObject
 ///////////////////////////////////////////////////////////////////////////////
 
-function ReplayDebuggerObject(dbg, data, forConsole) {
+function ReplayDebuggerObject(dbg, data) {
   this._dbg = dbg;
   this._data = data;
-  this._forConsole = forConsole;
   this._properties = null;
+  this._proxyData = null;
 }
 
 ReplayDebuggerObject.prototype = {
   _invalidate() {
     this._data = null;
     this._properties = null;
+    this._proxyData = null;
   },
 
   get callable() { return this._data.callable; },
@@ -854,18 +939,11 @@ ReplayDebuggerObject.prototype = {
   get boundArguments() { return this.isBoundFunction ? NYI() : undefined; },
   get global() { return this._dbg._getObject(this._data.global); },
   get isProxy() { return this._data.isProxy; },
+  get proto() { return this._dbg._getObject(this._data.proto); },
 
   isExtensible() { return this._data.isExtensible; },
   isSealed() { return this._data.isSealed; },
   isFrozen() { return this._data.isFrozen; },
-  unwrap() { return this.isProxy ? NYI() : this; },
-
-  get proto() {
-    // Don't allow inspection of the prototypes of objects logged to the
-    // console. This is a hack that prevents the object inspector from crawling
-    // the object's prototype chain.
-    return this._forConsole ? null : this._dbg._getObject(this._data.proto);
-  },
 
   unsafeDereference() {
     // Direct access to the referent is not currently available.
@@ -885,16 +963,15 @@ ReplayDebuggerObject.prototype = {
   getOwnPropertyDescriptor(name) {
     this._ensureProperties();
     const desc = this._properties[name];
-    return desc ? this._convertPropertyDescriptor(desc) : null;
+    return desc ? this._convertPropertyDescriptor(desc) : undefined;
   },
 
   _ensureProperties() {
     if (!this._properties) {
       const id = this._data.id;
-      const properties = this._forConsole
-        ? this._dbg._sendRequest({ type: "getObjectPropertiesForConsole", id })
-        : this._dbg._sendRequestAllowDiverge({ type: "getObjectProperties", id });
-      this._properties = {};
+      const properties =
+        this._dbg._sendRequestAllowDiverge({ type: "getObjectProperties", id });
+      this._properties = Object.create(null);
       properties.forEach(({name, desc}) => { this._properties[name] = desc; });
     }
   },
@@ -913,16 +990,60 @@ ReplayDebuggerObject.prototype = {
     return rv;
   },
 
+  _ensureProxyData() {
+    if (!this._proxyData) {
+      const data = this._dbg._sendRequestAllowDiverge({
+        type: "objectProxyData",
+        id: this._data.id,
+      });
+      if (data.exception) {
+        throw new Error(data.exception);
+      }
+      this._proxyData = data;
+    }
+  },
+
+  unwrap() {
+    if (!this.isProxy) {
+      return this;
+    }
+    this._ensureProxyData();
+    return this._dbg._convertValue(this._proxyData.unwrapped);
+  },
+
+  get proxyTarget() {
+    this._ensureProxyData();
+    return this._dbg._convertValue(this._proxyData.target);
+  },
+
+  get proxyHandler() {
+    this._ensureProxyData();
+    return this._dbg._convertValue(this._proxyData.handler);
+  },
+
+  call(thisv, ...args) {
+    return this.apply(thisv, args);
+  },
+
+  apply(thisv, args) {
+    thisv = this._dbg._convertValueForChild(thisv);
+    args = (args || []).map(v => this._dbg._convertValueForChild(v));
+
+    const rv = this._dbg._sendRequestAllowDiverge({
+      type: "objectApply",
+      id: this._data.id,
+      thisv,
+      args,
+    });
+    return this._dbg._convertCompletionValue(rv);
+  },
+
   get allocationSite() { NYI(); },
   get errorMessageName() { NYI(); },
   get errorNotes() { NYI(); },
   get errorLineNumber() { NYI(); },
   get errorColumnNumber() { NYI(); },
-  get proxyTarget() { NYI(); },
-  get proxyHandler() { NYI(); },
   get isPromise() { NYI(); },
-  call: NYI,
-  apply: NYI,
   asEnvironment: NYI,
   executeInGlobal: NYI,
   executeInGlobalWithBindings: NYI,
@@ -936,6 +1057,23 @@ ReplayDebuggerObject.prototype = {
   deleteProperty: NotAllowed,
   forceLexicalInitializationByName: NotAllowed,
 };
+
+///////////////////////////////////////////////////////////////////////////////
+// ReplayDebuggerObjectSnapshot
+///////////////////////////////////////////////////////////////////////////////
+
+// Create an object based on snapshot data which can be consulted without
+// communicating with the child process. This uses data provided by the child
+// process in the same format as for normal ReplayDebuggerObjects, except that
+// it does not contain references to any other objects.
+function ReplayDebuggerObjectSnapshot(dbg, data) {
+  this._dbg = dbg;
+  this._data = data;
+  this._properties = Object.create(null);
+  data.properties.forEach(({name, desc}) => { this._properties[name] = desc; });
+}
+
+ReplayDebuggerObjectSnapshot.prototype = ReplayDebuggerObject.prototype;
 
 ///////////////////////////////////////////////////////////////////////////////
 // ReplayDebuggerEnvironment

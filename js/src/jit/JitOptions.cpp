@@ -101,9 +101,6 @@ DefaultJitOptions::DefaultJitOptions() {
   // Toggles whether loop invariant code motion is globally disabled.
   SET_DEFAULT(disableLicm, false);
 
-  // Toggles whether Loop Unrolling is globally disabled.
-  SET_DEFAULT(disableLoopUnrolling, true);
-
   // Toggles wheter optimization tracking is globally disabled.
   SET_DEFAULT(disableOptimizationTracking, true);
 
@@ -275,6 +272,14 @@ DefaultJitOptions::DefaultJitOptions() {
   // the traceLoggerState.  However, unless this option is set to true
   // the traceLogger will not be recording any events.
   SET_DEFAULT(enableTraceLogger, false);
+#endif
+
+#ifdef WASM_CODEGEN_DEBUG
+  SET_DEFAULT(enableWasmJitExit, true);
+  SET_DEFAULT(enableWasmJitEntry, true);
+  SET_DEFAULT(enableWasmIonFastCalls, true);
+  SET_DEFAULT(enableWasmImportCallSpew, false);
+  SET_DEFAULT(enableWasmFuncCallSpew, false);
 #endif
 }
 

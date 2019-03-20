@@ -9,9 +9,11 @@ import hashlib
 import itertools
 import json
 import logging
+import ntpath
 import operator
 import os
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -32,6 +34,7 @@ from mach.decorators import (
 
 from mach.main import Mach
 
+from mozbuild.artifact_builds import JOB_CHOICES
 from mozbuild.base import (
     BuildEnvironmentNotFoundException,
     MachCommandBase,
@@ -70,6 +73,15 @@ and tell us about your machine and build configuration so we can adjust the
 warning heuristic.
 ===================
 '''
+
+
+# Function used to run clang-format on a batch of files. It is a helper function
+# in order to integrate into the futures ecosystem clang-format.
+def run_one_clang_format_batch(args):
+    try:
+        subprocess.check_output(args)
+    except subprocess.CalledProcessError as e:
+        return e
 
 
 class StoreDebugParamsAndWarnAction(argparse.Action):
@@ -564,9 +576,8 @@ class Warnings(MachCommandBase):
         joined_path = mozpath.join(dir1, dir2)
         if os.path.isdir(joined_path):
             return joined_path
-        else:
-            print('Specified directory not found.')
-            return None
+        print('Specified directory not found.')
+        return None
 
 @CommandProvider
 class GTestCommands(MachCommandBase):
@@ -937,6 +948,7 @@ class RunProgram(MachCommandBase):
                 all(p not in params for p in ['-profile', '--profile', '-P'])
             if no_profile_option_given and not noprofile:
                 prefs = {
+                   'browser.aboutConfig.showWarning': False,
                    'browser.shell.checkDefaultBrowser': False,
                    'general.warnOnAboutConfig': False,
                 }
@@ -988,9 +1000,10 @@ class RunProgram(MachCommandBase):
 
             if debugger:
                 self.debuggerInfo = mozdebug.get_debugger_info(debugger, debugger_args)
-                if not self.debuggerInfo:
-                    print("Could not find a suitable debugger in your PATH.")
-                    return 1
+
+            if not debugger or not self.debuggerInfo:
+                print("Could not find a suitable debugger in your PATH.")
+                return 1
 
             # Parameters come from the CLI. We need to convert them before
             # their use.
@@ -1181,22 +1194,14 @@ class MachDebug(MachCommandBase):
                 return json.JSONEncoder.default(self, obj)
         json.dump(self, cls=EnvironmentEncoder, sort_keys=True, fp=out)
 
+
 class ArtifactSubCommand(SubCommand):
     def __call__(self, func):
         after = SubCommand.__call__(self, func)
-        jobchoices = {
-            'android-api-16',
-            'android-x86',
-            'linux',
-            'linux64',
-            'macosx64',
-            'win32',
-            'win64'
-        }
         args = [
             CommandArgument('--tree', metavar='TREE', type=str,
                 help='Firefox tree.'),
-            CommandArgument('--job', metavar='JOB', choices=jobchoices,
+            CommandArgument('--job', metavar='JOB', choices=JOB_CHOICES,
                 help='Build job.'),
             CommandArgument('--verbose', '-v', action='store_true',
                 help='Print verbose output.'),
@@ -1204,6 +1209,14 @@ class ArtifactSubCommand(SubCommand):
         for arg in args:
             after = arg(after)
         return after
+
+
+class SymbolsAction(argparse.Action):
+    def __call__(self, parser, namespace, values, option_string=None):
+        # If this function is called, it means the --symbols option was given,
+        # so we want to store the value `True` if no explicit value was given
+        # to the option.
+        setattr(namespace, self.dest, values or True)
 
 
 @CommandProvider
@@ -1226,7 +1239,9 @@ class PackageFrontend(MachCommandBase):
         '''
         pass
 
-    def _make_artifacts(self, tree=None, job=None, skip_cache=False):
+    def _make_artifacts(self, tree=None, job=None, skip_cache=False,
+                        download_tests=True, download_symbols=False,
+                        download_host_bins=False):
         state_dir = self._mach_context.state_dir
         cache_dir = os.path.join(state_dir, 'package-frontend')
 
@@ -1242,7 +1257,10 @@ class PackageFrontend(MachCommandBase):
         artifacts = Artifacts(tree, self.substs, self.defines, job,
                               log=self.log, cache_dir=cache_dir,
                               skip_cache=skip_cache, hg=hg, git=git,
-                              topsrcdir=self.topsrcdir)
+                              topsrcdir=self.topsrcdir,
+                              download_tests=download_tests,
+                              download_symbols=download_symbols,
+                              download_host_bins=download_host_bins)
         return artifacts
 
     @ArtifactSubCommand('artifact', 'install',
@@ -1255,11 +1273,19 @@ class PackageFrontend(MachCommandBase):
     @CommandArgument('--skip-cache', action='store_true',
         help='Skip all local caches to force re-fetching remote artifacts.',
         default=False)
-    def artifact_install(self, source=None, skip_cache=False, tree=None, job=None, verbose=False):
+    @CommandArgument('--no-tests', action='store_true', help="Don't install tests.")
+    @CommandArgument('--symbols', nargs='?', action=SymbolsAction, help='Download symbols.')
+    @CommandArgument('--host-bins', action='store_true', help='Download host binaries.')
+    @CommandArgument('--distdir', help='Where to install artifacts to.')
+    def artifact_install(self, source=None, skip_cache=False, tree=None, job=None, verbose=False,
+                         no_tests=False, symbols=False, host_bins=False, distdir=None):
         self._set_log_level(verbose)
-        artifacts = self._make_artifacts(tree=tree, job=job, skip_cache=skip_cache)
+        artifacts = self._make_artifacts(tree=tree, job=job, skip_cache=skip_cache,
+                                         download_tests=not no_tests,
+                                         download_symbols=symbols,
+                                         download_host_bins=host_bins)
 
-        return artifacts.install_from(source, self.distdir)
+        return artifacts.install_from(source, distdir or self.distdir)
 
     @ArtifactSubCommand('artifact', 'clear-cache',
         'Delete local artifacts and reset local artifact cache.')
@@ -1311,7 +1337,6 @@ class PackageFrontend(MachCommandBase):
         from requests.adapters import HTTPAdapter
         import redo
         import requests
-        import shutil
 
         from taskgraph.util.taskcluster import (
             get_artifact_url,
@@ -1372,7 +1397,7 @@ class PackageFrontend(MachCommandBase):
             def __init__(self, task_id, artifact_name):
                 for _ in redo.retrier(attempts=retry+1, sleeptime=60):
                     cot = cache._download_manager.session.get(
-                        get_artifact_url(task_id, 'public/chainOfTrust.json.asc'))
+                        get_artifact_url(task_id, 'public/chain-of-trust.json'))
                     if cot.status_code >= 500:
                         continue
                     cot.raise_for_status()
@@ -1381,17 +1406,7 @@ class PackageFrontend(MachCommandBase):
                     cot.raise_for_status()
 
                 digest = algorithm = None
-                data = {}
-                # The file is GPG-signed, but we don't care about validating
-                # that. Instead of parsing the PGP signature, we just take
-                # the one line we're interested in, which starts with a `{`.
-                for l in cot.content.splitlines():
-                    if l.startswith('{'):
-                        try:
-                            data = json.loads(l)
-                            break
-                        except Exception:
-                            pass
+                data = json.loads(cot.content)
                 for algorithm, digest in (data.get('artifacts', {})
                                               .get(artifact_name, {}).items()):
                     pass
@@ -1521,7 +1536,7 @@ class PackageFrontend(MachCommandBase):
                     os.unlink(record.filename)
                     if attempt < retry:
                         self.log(logging.INFO, 'artifact', {},
-                                 'Will retry in a moment...')
+                                 'Corrupt download. Will retry in a moment...')
                     continue
 
                 downloaded.append(record)
@@ -1602,7 +1617,6 @@ class StaticAnalysisMonitor(object):
         self._warnings_database = WarningsDatabase()
 
         def on_warning(warning):
-            filename = warning['filename']
             self._warnings_database.insert(warning)
 
         self._warnings_collector = WarningsCollector(on_warning, objdir=objdir)
@@ -1647,7 +1661,7 @@ class StaticAnalysis(MachCommandBase):
     """Utilities for running C++ static analysis checks and format."""
 
     # List of file extension to consider (should start with dot)
-    _format_include_extensions = ('.cpp', '.c', '.cc', '.h', '.java')
+    _format_include_extensions = ('.cpp', '.c', '.cc', '.h', '.m', '.mm')
     # File contaning all paths to exclude from formatting
     _format_ignore_file = '.clang-format-ignore'
 
@@ -1931,13 +1945,13 @@ class StaticAnalysis(MachCommandBase):
                 infer_args + [gradle] + args,
                 env=dict(os.environ, **extra_env),
                 cwd=cwd, stdout=devnull, stderr=subprocess.STDOUT, close_fds=True)
-        else:
-            return self.run_process(
-                infer_args + [gradle] + args,
-                append_env=extra_env,
-                pass_thru=True,  # Allow user to run gradle interactively.
-                ensure_exit_code=False,  # Don't throw on non-zero exit code.
-                cwd=cwd)
+
+        return self.run_process(
+            infer_args + [gradle] + args,
+            append_env=extra_env,
+            pass_thru=True,  # Allow user to run gradle interactively.
+            ensure_exit_code=False,  # Don't throw on non-zero exit code.
+            cwd=cwd)
 
     @StaticAnalysisSubCommand('static-analysis', 'autotest',
                               'Run the auto-test suite in order to determine that'
@@ -2012,7 +2026,6 @@ class StaticAnalysis(MachCommandBase):
 
         import concurrent.futures
         import multiprocessing
-        import shutil
 
         max_workers = multiprocessing.cpu_count()
 
@@ -2221,7 +2234,6 @@ class StaticAnalysis(MachCommandBase):
             return self.TOOLS_GRADLE_FAILED
         issues = json.load(open(mozpath.join(out_folder, 'report.json')))
         # remove folder that infer creates because the issues are loaded into memory
-        import shutil
         shutil.rmtree(out_folder)
         # Verify to see if we got any issues, if not raise exception
         if not issues:
@@ -2335,7 +2347,11 @@ class StaticAnalysis(MachCommandBase):
                           'location')
     @CommandArgument('--path', '-p', nargs='+', default=None,
                      help='Specify the path(s) to reformat')
-    def clang_format(self, show, assume_filename, path, verbose=False):
+    @CommandArgument('--commit', '-c', default=None,
+                     help='Specify a commit to reformat from.'
+                          'For git you can also pass a range of commits (foo..bar)'
+                          'to format all of them at the same time.')
+    def clang_format(self, show, assume_filename, path, commit, verbose=False):
         # Run clang-format or clang-format-diff on the local changes
         # or files/directories
         if path is not None:
@@ -2366,10 +2382,10 @@ class StaticAnalysis(MachCommandBase):
 
         if path is None:
             return self._run_clang_format_diff(self._clang_format_diff,
-                                               self._clang_format_path, show)
-        else:
-            if assume_filename:
-                return self._run_clang_format_in_console(self._clang_format_path, path, assume_filename)
+                                               self._clang_format_path, show, commit)
+
+        if assume_filename:
+            return self._run_clang_format_in_console(self._clang_format_path, path, assume_filename)
 
         return self._run_clang_format_path(self._clang_format_path, show, path)
 
@@ -2449,7 +2465,6 @@ class StaticAnalysis(MachCommandBase):
         regex_header = re.compile(
             r'(.+):(\d+):(\d+): (warning|error): ([^\[\]\n]+)(?: \[([\.\w-]+)\])?$', re.MULTILINE)
 
-        something = regex_header.finditer(clang_output)
         headers = sorted(
             regex_header.finditer(clang_output),
             key=lambda h: h.start()
@@ -2524,26 +2539,26 @@ class StaticAnalysis(MachCommandBase):
         self._compile_db = mozpath.join(self.topobjdir, 'compile_commands.json')
         if os.path.exists(self._compile_db):
             return 0
-        else:
-            rc, config, ran_configure = self._get_config_environment()
+
+        rc, config, ran_configure = self._get_config_environment()
+        if rc != 0:
+            return rc
+
+        if ran_configure:
+            # Configure may have created the compilation database if the
+            # mozconfig enables building the CompileDB backend by default,
+            # So we recurse to see if the file exists once again.
+            return self._build_compile_db(verbose=verbose)
+
+        if config:
+            print('Looks like a clang compilation database has not been '
+                  'created yet, creating it now...')
+            builder = Build(self._mach_context)
+            rc = builder.build_backend(['CompileDB'], verbose=verbose)
             if rc != 0:
                 return rc
-
-            if ran_configure:
-                # Configure may have created the compilation database if the
-                # mozconfig enables building the CompileDB backend by default,
-                # So we recurse to see if the file exists once again.
-                return self._build_compile_db(verbose=verbose)
-
-            if config:
-                print('Looks like a clang compilation database has not been '
-                      'created yet, creating it now...')
-                builder = Build(self._mach_context)
-                rc = builder.build_backend(['CompileDB'], verbose=verbose)
-                if rc != 0:
-                    return rc
-                assert os.path.exists(self._compile_db)
-                return 0
+            assert os.path.exists(self._compile_db)
+            return 0
 
     def _build_export(self, jobs, verbose=False):
         def on_line(line):
@@ -2611,7 +2626,6 @@ class StaticAnalysis(MachCommandBase):
         if os.path.isdir(self._clang_tools_path) and download_if_needed:
             # The directory exists, perhaps it's corrupted?  Delete it
             # and start from scratch.
-            import shutil
             shutil.rmtree(self._clang_tools_path)
             return self._get_clang_tools(force=force, skip_cache=skip_cache,
                                             source=source, verbose=verbose,
@@ -2634,8 +2648,8 @@ class StaticAnalysis(MachCommandBase):
             raise Exception('The current platform isn\'t supported. '
                             'Currently only the following platforms are '
                             'supported: win32/win64, linux64 and macosx64.')
-        else:
-            job += '-clang-tidy'
+
+        job += '-clang-tidy'
 
         # We want to unpack data in the clang-tidy mozbuild folder
         currentWorkingDir = os.getcwd()
@@ -2675,14 +2689,21 @@ class StaticAnalysis(MachCommandBase):
         assert os.path.exists(self._run_clang_tidy_path)
         return 0
 
-    def _get_clang_format_diff_command(self):
+    def _get_clang_format_diff_command(self, commit):
         if self.repository.name == 'hg':
-            args = ["hg", "diff", "-U0", "-r" ".^"]
+            args = ["hg", "diff", "-U0"]
+            if commit:
+                args += ["-c", commit]
+            else:
+                args += ["-r", ".^"]
             for dot_extension in self._format_include_extensions:
                 args += ['--include', 'glob:**{0}'.format(dot_extension)]
             args += ['--exclude', 'listfile:{0}'.format(self._format_ignore_file)]
         else:
-            args = ["git", "diff", "--no-color", "-U0", "HEAD", "--"]
+            commit_range = "HEAD" # All uncommitted changes.
+            if commit:
+                commit_range = commit if ".." in commit else "{}~..{}".format(commit, commit)
+            args = ["git", "diff", "--no-color", "-U0", commit_range, "--"]
             for dot_extension in self._format_include_extensions:
                 args += ['*{0}'.format(dot_extension)]
             # git-diff doesn't support an 'exclude-from-files' param, but
@@ -2714,42 +2735,41 @@ class StaticAnalysis(MachCommandBase):
             return not os.path.exists(self._infer_path)
         if os.path.exists(self._infer_path) and not force:
             return 0
-        else:
-            if os.path.isdir(infer_path) and download_if_needed:
-                # The directory exists, perhaps it's corrupted?  Delete it
-                # and start from scratch.
-                import shutil
-                shutil.rmtree(infer_path)
-                return self._get_infer(force=force, skip_cache=skip_cache,
-                                       verbose=verbose,
-                                       download_if_needed=download_if_needed)
-            os.mkdir(infer_path)
-            self._artifact_manager = PackageFrontend(self._mach_context)
-            if not download_if_needed:
-                return 0
-            job, _ = self.platform
-            if job != 'linux64':
-                return -1
-            else:
-                job += '-infer'
-            # We want to unpack data in the infer mozbuild folder
-            currentWorkingDir = os.getcwd()
-            os.chdir(infer_path)
-            rc = self._artifact_manager.artifact_toolchain(verbose=verbose,
-                                                           skip_cache=skip_cache,
-                                                           from_build=[job],
-                                                           no_unpack=False,
-                                                           retry=0)
-            # Change back the cwd
-            os.chdir(currentWorkingDir)
-            return rc
 
-    def _run_clang_format_diff(self, clang_format_diff, clang_format, show):
+        if os.path.isdir(infer_path) and download_if_needed:
+            # The directory exists, perhaps it's corrupted?  Delete it
+            # and start from scratch.
+            shutil.rmtree(infer_path)
+            return self._get_infer(force=force, skip_cache=skip_cache,
+                                   verbose=verbose,
+                                   download_if_needed=download_if_needed)
+        os.mkdir(infer_path)
+        self._artifact_manager = PackageFrontend(self._mach_context)
+        if not download_if_needed:
+            return 0
+        job, _ = self.platform
+        if job != 'linux64':
+            return -1
+        else:
+            job += '-infer'
+        # We want to unpack data in the infer mozbuild folder
+        currentWorkingDir = os.getcwd()
+        os.chdir(infer_path)
+        rc = self._artifact_manager.artifact_toolchain(verbose=verbose,
+                                                       skip_cache=skip_cache,
+                                                       from_build=[job],
+                                                       no_unpack=False,
+                                                       retry=0)
+        # Change back the cwd
+        os.chdir(currentWorkingDir)
+        return rc
+
+    def _run_clang_format_diff(self, clang_format_diff, clang_format, show, commit):
         # Run clang-format on the diff
         # Note that this will potentially miss a lot things
         from subprocess import Popen, PIPE, check_output, CalledProcessError
 
-        diff_process = Popen(self._get_clang_format_diff_command(), stdout=PIPE)
+        diff_process = Popen(self._get_clang_format_diff_command(commit), stdout=PIPE)
         args = [sys.executable, clang_format_diff, "-p1", "-binary=%s" % clang_format]
 
         if not show:
@@ -2807,7 +2827,8 @@ class StaticAnalysis(MachCommandBase):
                             # Supported extension and accepted path
                             path_list.append(f_in_dir)
             else:
-                if f.endswith(extensions):
+                # Make sure that the file exists and it has a supported extension
+                if os.path.isfile(f) and f.endswith(extensions):
                     path_list.append(f)
 
         return path_list
@@ -2831,10 +2852,17 @@ class StaticAnalysis(MachCommandBase):
             return 0
 
     def _run_clang_format_path(self, clang_format, show, paths):
+
         # Run clang-format on files or directories directly
         from subprocess import check_output, CalledProcessError
 
         args = [clang_format, "-i"]
+
+        if show:
+            # We just want to show the diff, we create the directory to copy it
+            tmpdir = os.path.join(self.topobjdir, 'tmp')
+            if not os.path.exists(tmpdir):
+                os.makedirs(tmpdir)
 
         path_list = self._generate_path_list(paths)
 
@@ -2843,32 +2871,83 @@ class StaticAnalysis(MachCommandBase):
 
         print("Processing %d file(s)..." % len(path_list))
 
-        batchsize = 200
-
-        for i in range(0, len(path_list), batchsize):
-            l = path_list[i: (i + batchsize)]
-            # Run clang-format on the list
-            try:
-                check_output(args + l)
-            except CalledProcessError as e:
-                # Something wrong happend
-                print("clang-format: An error occured while running clang-format.")
-                return e.returncode
-
         if show:
-            # show the diff
-            if self.repository.name == 'hg':
-                diff_command = ["hg", "diff"] + paths
-            else:
-                assert self.repository.name == 'git'
-                diff_command = ["git", "diff"] + paths
-            try:
-                output = check_output(diff_command)
-                print(output)
-            except CalledProcessError as e:
-                # Something wrong happend
-                print("clang-format: Unable to run the diff command.")
-                return e.returncode
+            for i in range(0, len(path_list)):
+                l = path_list[i: (i + 1)]
+
+                # Copy the files into a temp directory
+                # and run clang-format on the temp directory
+                # and show the diff
+                original_path = l[0]
+                local_path = ntpath.basename(original_path)
+                target_file = os.path.join(tmpdir, local_path)
+                faketmpdir = os.path.dirname(target_file)
+                if not os.path.isdir(faketmpdir):
+                    os.makedirs(faketmpdir)
+                shutil.copy(l[0], faketmpdir)
+                l[0] = target_file
+
+                # Run clang-format on the list
+                try:
+                    check_output(args + l)
+                except CalledProcessError as e:
+                    # Something wrong happend
+                    print("clang-format: An error occured while running clang-format.")
+                    return e.returncode
+
+                # show the diff
+                diff_command = ["diff", "-u", original_path, target_file]
+                try:
+                    output = check_output(diff_command)
+                except CalledProcessError as e:
+                    # diff -u returns 0 when no change
+                    # here, we expect changes. if we are here, this means that
+                    # there is a diff to show
+                    if e.output:
+                        print(e.output)
+
+            shutil.rmtree(tmpdir)
+            return 0
+
+        # Run clang-format in parallel trying to saturate all of the available cores.
+        import concurrent.futures
+        import multiprocessing
+        import math
+
+        max_workers = multiprocessing.cpu_count()
+
+        # To maximize CPU usage when there are few items to handle,
+        # underestimate the number of items per batch, then dispatch
+        # outstanding items across workers. Per definition, each worker will
+        # handle at most one outstanding item.
+        batch_size = int(math.floor(float(len(path_list)) / max_workers))
+        outstanding_items = len(path_list) - batch_size * max_workers
+
+        batches = []
+
+        i = 0
+        while i < len(path_list):
+            num_items = batch_size + (1 if outstanding_items > 0 else 0)
+            batches.append(args + path_list[i: (i + num_items)])
+
+            outstanding_items -= 1
+            i += num_items
+
+        error_code = None
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+            futures = []
+            for batch in batches:
+                futures.append(executor.submit(run_one_clang_format_batch, batch))
+
+            for future in concurrent.futures.as_completed(futures):
+                # Wait for every task to finish
+                ret_val = future.result()
+                if ret_val is not None:
+                    error_code = ret_val
+
+            if error_code is not None:
+                return error_code
         return 0
 
 @CommandProvider
@@ -3036,7 +3115,9 @@ class Repackage(MachCommandBase):
         help='Name of the package being rebuilt')
     @CommandArgument('--sfx-stub', type=str, required=True,
         help='Path to the self-extraction stub.')
-    def repackage_installer(self, tag, setupexe, package, output, package_name, sfx_stub):
+    @CommandArgument('--use-upx', required=False, action='store_true',
+        help='Run UPX on the self-extraction stub.')
+    def repackage_installer(self, tag, setupexe, package, output, package_name, sfx_stub, use_upx):
         from mozbuild.repackaging.installer import repackage_installer
         repackage_installer(
             topsrcdir=self.topsrcdir,
@@ -3046,6 +3127,7 @@ class Repackage(MachCommandBase):
             output=output,
             package_name=package_name,
             sfx_stub=sfx_stub,
+            use_upx=use_upx,
         )
 
     @SubCommand('repackage', 'msi',
@@ -3057,7 +3139,7 @@ class Repackage(MachCommandBase):
     @CommandArgument('--locale', type=str, required=True,
         help='The locale of the installer')
     @CommandArgument('--arch', type=str, required=True,
-        help='The archtecture you are building x64 or x32')
+        help='The archtecture you are building.')
     @CommandArgument('--setupexe', type=str, required=True,
         help='setup.exe installer')
     @CommandArgument('--candle', type=str, required=False,
@@ -3091,9 +3173,11 @@ class Repackage(MachCommandBase):
     @CommandArgument('--format', type=str, default='lzma',
         choices=('lzma', 'bz2'),
         help='Mar format')
-    def repackage_mar(self, input, mar, output, format):
+    @CommandArgument('--arch', type=str, required=True,
+        help='The archtecture you are building.')
+    def repackage_mar(self, input, mar, output, format, arch):
         from mozbuild.repackaging.mar import repackage_mar
-        repackage_mar(self.topsrcdir, input, mar, output, format)
+        repackage_mar(self.topsrcdir, input, mar, output, format, arch=arch)
 
 @CommandProvider
 class Analyze(MachCommandBase):
@@ -3171,3 +3255,79 @@ class TelemetrySettings():
 Enable submission of build system telemetry.
         """.strip(), False),
     ]
+
+
+@CommandProvider
+class L10NCommands(MachCommandBase):
+    @Command('package-multi-locale', category='post-build',
+             description='Package a multi-locale version of the built product '
+                         'for distribution as an APK, DMG, etc.')
+    @CommandArgument('--locales', metavar='LOCALES', nargs='+',
+                     required=True,
+                     help='List of locales to package, including "en-US"')
+    @CommandArgument('--verbose', action='store_true',
+                     help='Log informative status messages.')
+    def package_l10n(self, verbose=False, locales=[]):
+        backends = self.substs['BUILD_BACKENDS']
+        if 'RecursiveMake' not in backends:
+            self.log(logging.ERROR, 'package-multi-locale', {'backends': backends},
+                     "Multi-locale packaging requires the full (non-artifact) "
+                     "'RecursiveMake' build backend; got {backends}.")
+            return 1
+
+        if 'en-US' not in locales:
+            self.log(logging.WARN, 'package-multi-locale', {'locales': locales},
+                     'List of locales does not include default locale "en-US": '
+                     '{locales}; adding "en-US"')
+            locales.append('en-US')
+        locales = list(sorted(locales))
+
+        append_env = {
+            'MOZ_CHROME_MULTILOCALE': ' '.join(locales),
+        }
+
+        for locale in locales:
+            if locale == 'en-US':
+                self.log(logging.INFO, 'package-multi-locale', {'locale': locale},
+                         'Skipping default locale {locale}')
+                continue
+
+            self.log(logging.INFO, 'package-multi-locale', {'locale': locale},
+                     'Processing chrome Gecko resources for locale {locale}')
+            self.run_process(
+                [mozpath.join(self.topsrcdir, 'mach'), 'build', 'chrome-{}'.format(locale)],
+                append_env=append_env,
+                pass_thru=True,
+                ensure_exit_code=True,
+                cwd=mozpath.join(self.topsrcdir))
+
+        if self.substs['MOZ_BUILD_APP'] == 'mobile/android':
+            self.log(logging.INFO, 'package-multi-locale', {},
+                     'Invoking `mach android assemble-app`')
+            self.run_process(
+                [mozpath.join(self.topsrcdir, 'mach'), 'android', 'assemble-app'],
+                append_env=append_env,
+                pass_thru=True,
+                ensure_exit_code=True,
+                cwd=mozpath.join(self.topsrcdir))
+
+        self.log(logging.INFO, 'package-multi-locale', {},
+                 'Invoking multi-locale `mach package`')
+        self._run_make(
+            directory=self.topobjdir,
+            target=['package', 'AB_CD=multi'],
+            append_env=append_env,
+            pass_thru=True,
+            ensure_exit_code=True)
+
+        if self.substs['MOZ_BUILD_APP'] == 'mobile/android':
+            self.log(logging.INFO, 'package-multi-locale', {},
+                     'Invoking `mach android archive-geckoview`')
+            self.run_process(
+                [mozpath.join(self.topsrcdir, 'mach'), 'android', 'archive-geckoview'.format(locale)],
+                append_env=append_env,
+                pass_thru=True,
+                ensure_exit_code=True,
+                cwd=mozpath.join(self.topsrcdir))
+
+        return 0

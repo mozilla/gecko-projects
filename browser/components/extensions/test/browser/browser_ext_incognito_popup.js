@@ -4,6 +4,7 @@
 
 add_task(async function testIncognitoPopup() {
   let extension = ExtensionTestUtils.loadExtension({
+    incognitoOverride: "spanning",
     manifest: {
       "permissions": ["tabs"],
       "browser_action": {
@@ -104,5 +105,37 @@ add_task(async function testIncognitoPopup() {
 
   await extension.startup();
   await extension.awaitFinish("incognito");
+  await extension.unload();
+});
+
+add_task(async function test_pageAction_incognito_not_allowed() {
+  SpecialPowers.pushPrefEnv({set: [
+    ["extensions.allowPrivateBrowsingByDefault", false],
+  ]});
+
+  const URL = "http://example.com/";
+  let extension = ExtensionTestUtils.loadExtension({
+    manifest: {
+      "permissions": ["*://example.com/*"],
+      "page_action": {
+        "show_matches": ["<all_urls>"],
+        "pinned": true,
+      },
+    },
+  });
+
+  await extension.startup();
+  let tab = await BrowserTestUtils.openNewForegroundTab(gBrowser, URL, true, true);
+  let privateWindow = await BrowserTestUtils.openNewBrowserWindow({private: true});
+  await BrowserTestUtils.openNewForegroundTab(privateWindow.gBrowser, URL, true, true);
+
+  let elem = await getPageActionButton(extension, window);
+  ok(elem, "pageAction button state correct in non-PB");
+
+  elem = await getPageActionButton(extension, privateWindow);
+  ok(!elem, "pageAction button state correct in private window");
+
+  BrowserTestUtils.removeTab(tab);
+  await BrowserTestUtils.closeWindow(privateWindow);
   await extension.unload();
 });

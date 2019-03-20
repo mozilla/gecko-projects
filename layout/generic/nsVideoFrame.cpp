@@ -13,7 +13,7 @@
 
 #include "mozilla/dom/HTMLVideoElement.h"
 #include "mozilla/dom/ShadowRoot.h"
-#include "mozilla/layers/WebRenderLayerManager.h"
+#include "mozilla/layers/RenderRootStateManager.h"
 #include "nsDisplayList.h"
 #include "nsGenericHTMLElement.h"
 #include "nsPresContext.h"
@@ -36,7 +36,7 @@ using namespace mozilla::gfx;
 
 nsIFrame* NS_NewHTMLVideoFrame(nsIPresShell* aPresShell,
                                ComputedStyle* aStyle) {
-  return new (aPresShell) nsVideoFrame(aStyle);
+  return new (aPresShell) nsVideoFrame(aStyle, aPresShell->GetPresContext());
 }
 
 NS_IMPL_FRAMEARENA_HELPERS(nsVideoFrame)
@@ -71,16 +71,16 @@ static void SwapScaleWidthHeightForRotation(IntSize& aSize,
   }
 }
 
-nsVideoFrame::nsVideoFrame(ComputedStyle* aStyle)
-    : nsContainerFrame(aStyle, kClassID) {
+nsVideoFrame::nsVideoFrame(ComputedStyle* aStyle, nsPresContext* aPresContext)
+    : nsContainerFrame(aStyle, aPresContext, kClassID) {
   EnableVisibilityTracking();
 }
 
 nsVideoFrame::~nsVideoFrame() {}
 
 NS_QUERYFRAME_HEAD(nsVideoFrame)
-NS_QUERYFRAME_ENTRY(nsVideoFrame)
-NS_QUERYFRAME_ENTRY(nsIAnonymousContentCreator)
+  NS_QUERYFRAME_ENTRY(nsVideoFrame)
+  NS_QUERYFRAME_ENTRY(nsIAnonymousContentCreator)
 NS_QUERYFRAME_TAIL_INHERITING(nsContainerFrame)
 
 nsresult nsVideoFrame::CreateAnonymousContent(
@@ -129,18 +129,6 @@ nsresult nsVideoFrame::CreateAnonymousContent(
     UpdateTextTrack();
   }
 
-  // Set up "videocontrols" XUL element which will be XBL-bound to the
-  // actual controls.
-  nodeInfo =
-      nodeInfoManager->GetNodeInfo(nsGkAtoms::videocontrols, nullptr,
-                                   kNameSpaceID_XUL, nsINode::ELEMENT_NODE);
-  NS_ENSURE_TRUE(nodeInfo, NS_ERROR_OUT_OF_MEMORY);
-
-  if (!nsContentUtils::IsUAWidgetEnabled()) {
-    NS_TrustedNewXULElement(getter_AddRefs(mVideoControls), nodeInfo.forget());
-    if (!aElements.AppendElement(mVideoControls)) return NS_ERROR_OUT_OF_MEMORY;
-  }
-
   return NS_OK;
 }
 
@@ -150,34 +138,27 @@ void nsVideoFrame::AppendAnonymousContentTo(nsTArray<nsIContent*>& aElements,
     aElements.AppendElement(mPosterImage);
   }
 
-  if (mVideoControls) {
-    aElements.AppendElement(mVideoControls);
-  }
-
   if (mCaptionDiv) {
     aElements.AppendElement(mCaptionDiv);
   }
 }
 
 nsIContent* nsVideoFrame::GetVideoControls() {
-  if (mVideoControls) {
-    return mVideoControls;
+  if (!mContent->GetShadowRoot()) {
+    return nullptr;
   }
-  if (mContent->GetShadowRoot()) {
-    // The video controls <div> is the only child of the UA Widget Shadow Root
-    // if it is present. It is only lazily inserted into the DOM when
-    // the controls attribute is set.
-    MOZ_ASSERT(mContent->GetShadowRoot()->IsUAWidget());
-    MOZ_ASSERT(1 >= mContent->GetShadowRoot()->GetChildCount());
-    return mContent->GetShadowRoot()->GetFirstChild();
-  }
-  return nullptr;
+
+  // The video controls <div> is the only child of the UA Widget Shadow Root
+  // if it is present. It is only lazily inserted into the DOM when
+  // the controls attribute is set.
+  MOZ_ASSERT(mContent->GetShadowRoot()->IsUAWidget());
+  MOZ_ASSERT(1 >= mContent->GetShadowRoot()->GetChildCount());
+  return mContent->GetShadowRoot()->GetFirstChild();
 }
 
 void nsVideoFrame::DestroyFrom(nsIFrame* aDestructRoot,
                                PostDestroyData& aPostDestroyData) {
   aPostDestroyData.AddAnonymousContent(mCaptionDiv.forget());
-  aPostDestroyData.AddAnonymousContent(mVideoControls.forget());
   aPostDestroyData.AddAnonymousContent(mPosterImage.forget());
   nsContainerFrame::DestroyFrom(aDestructRoot, aPostDestroyData);
 }
@@ -405,21 +386,6 @@ void nsVideoFrame::Reflow(nsPresContext* aPresContext, ReflowOutput& aMetrics,
   NS_FRAME_SET_TRUNCATION(aStatus, aReflowInput, aMetrics);
 }
 
-/**
- * nsVideoFrame should be a non-leaf frame when UA Widget is enabled,
- * so the videocontrols container element inserted under the Shadow Root can be
- * picked up. No frames will be generated from elements from the web content,
- * given that they have been replaced by the Shadow Root without and <slots>
- * element in the DOM tree.
- *
- * When the UA Widget is disabled, i.e. the videocontrols is bound as anonymous
- * content with XBL, nsVideoFrame has to be a leaf so no frames from web content
- * element will be generated.
- */
-bool nsVideoFrame::IsLeafDynamic() const {
-  return !nsContentUtils::IsUAWidgetEnabled();
-}
-
 class nsDisplayVideo : public nsDisplayItem {
  public:
   nsDisplayVideo(nsDisplayListBuilder* aBuilder, nsVideoFrame* aFrame)
@@ -436,7 +402,7 @@ class nsDisplayVideo : public nsDisplayItem {
       mozilla::wr::DisplayListBuilder& aBuilder,
       mozilla::wr::IpcResourceUpdateQueue& aResources,
       const mozilla::layers::StackingContextHelper& aSc,
-      mozilla::layers::WebRenderLayerManager* aManager,
+      mozilla::layers::RenderRootStateManager* aManager,
       nsDisplayListBuilder* aDisplayListBuilder) override {
     nsRect area = Frame()->GetContentRectRelativeToSelf() + ToReferenceFrame();
     HTMLVideoElement* element =
@@ -499,7 +465,7 @@ class nsDisplayVideo : public nsDisplayItem {
     LayoutDeviceRect rect(destGFXRect.x, destGFXRect.y, destGFXRect.width,
                           destGFXRect.height);
     aManager->CommandBuilder().PushImage(this, container, aBuilder, aResources,
-                                         aSc, rect);
+                                         aSc, rect, rect);
     return true;
   }
 
@@ -545,7 +511,7 @@ class nsDisplayVideo : public nsDisplayItem {
 
 void nsVideoFrame::BuildDisplayList(nsDisplayListBuilder* aBuilder,
                                     const nsDisplayListSet& aLists) {
-  if (!IsVisibleForPainting(aBuilder)) return;
+  if (!IsVisibleForPainting()) return;
 
   DO_GLOBAL_REFLOW_COUNT_DSP("nsVideoFrame");
 
@@ -581,8 +547,7 @@ void nsVideoFrame::BuildDisplayList(nsDisplayListBuilder* aBuilder,
       nsDisplayListBuilder::AutoBuildingDisplayList buildingForChild(
           aBuilder, child,
           aBuilder->GetVisibleRect() - child->GetOffsetTo(this),
-          aBuilder->GetDirtyRect() - child->GetOffsetTo(this),
-          aBuilder->IsAtRootOfPseudoStackingContext());
+          aBuilder->GetDirtyRect() - child->GetOffsetTo(this));
 
       child->BuildDisplayListForStackingContext(aBuilder, aLists.Content());
     }

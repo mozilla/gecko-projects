@@ -32,7 +32,7 @@
 #include "nsContentUtils.h"
 #include "nsDocShell.h"
 #include "nsError.h"
-#include "nsIDocument.h"
+#include "mozilla/dom/Document.h"
 #include "nsIPermissionManager.h"
 #include "nsIPrincipal.h"
 #include "nsIScriptError.h"
@@ -41,7 +41,7 @@
 #include "nsTArray.h"
 
 #ifdef LOG
-#undef LOG
+#  undef LOG
 #endif
 
 mozilla::LazyLogModule gMediaRecorderLog("MediaRecorder");
@@ -324,28 +324,30 @@ class MediaRecorder::Session : public PrincipalChangeObserver<MediaStreamTrack>,
     RefPtr<Session> mSession;
   };
 
-  // Fire start event and set mimeType, run in main thread task.
-  class DispatchStartEventRunnable : public Runnable {
+  // Fire a named event, run in main thread task.
+  class DispatchEventRunnable : public Runnable {
    public:
-    explicit DispatchStartEventRunnable(Session* aSession)
-        : Runnable("dom::MediaRecorder::Session::DispatchStartEventRunnable"),
-          mSession(aSession) {}
+    explicit DispatchEventRunnable(Session* aSession,
+                                   const nsAString& aEventName)
+        : Runnable("dom::MediaRecorder::Session::DispatchEventRunnable"),
+          mSession(aSession),
+          mEventName(aEventName) {}
 
     NS_IMETHOD Run() override {
       LOG(LogLevel::Debug,
-          ("Session.DispatchStartEventRunnable s=(%p)", mSession.get()));
+          ("Session.DispatchEventRunnable s=(%p) e=(%s)", mSession.get(),
+           NS_ConvertUTF16toUTF8(mEventName).get()));
       MOZ_ASSERT(NS_IsMainThread());
 
       NS_ENSURE_TRUE(mSession->mRecorder, NS_OK);
-      RefPtr<MediaRecorder> recorder = mSession->mRecorder;
-
-      recorder->DispatchSimpleEvent(NS_LITERAL_STRING("start"));
+      mSession->mRecorder->DispatchSimpleEvent(mEventName);
 
       return NS_OK;
     }
 
    private:
     RefPtr<Session> mSession;
+    nsString mEventName;
   };
 
   // Main thread task.
@@ -591,6 +593,8 @@ class MediaRecorder::Session : public PrincipalChangeObserver<MediaStreamTrack>,
     }
 
     mEncoder->Suspend(TimeStamp::Now());
+    NS_DispatchToMainThread(
+        new DispatchEventRunnable(this, NS_LITERAL_STRING("pause")));
     return NS_OK;
   }
 
@@ -603,6 +607,8 @@ class MediaRecorder::Session : public PrincipalChangeObserver<MediaStreamTrack>,
     }
 
     mEncoder->Resume(TimeStamp::Now());
+    NS_DispatchToMainThread(
+        new DispatchEventRunnable(this, NS_LITERAL_STRING("resume")));
     return NS_OK;
   }
 
@@ -760,7 +766,7 @@ class MediaRecorder::Session : public PrincipalChangeObserver<MediaStreamTrack>,
       // MediaInputPort from the input stream, and let main thread check
       // track principals async later.
       nsPIDOMWindowInner* window = mRecorder->GetParentObject();
-      nsIDocument* document = window ? window->GetExtantDoc() : nullptr;
+      Document* document = window ? window->GetExtantDoc() : nullptr;
       nsContentUtils::ReportToConsole(nsIScriptError::errorFlag,
                                       NS_LITERAL_CSTRING("Media"), document,
                                       nsContentUtils::eDOM_PROPERTIES,
@@ -799,7 +805,7 @@ class MediaRecorder::Session : public PrincipalChangeObserver<MediaStreamTrack>,
 
   bool PrincipalSubsumes(nsIPrincipal* aPrincipal) {
     if (!mRecorder->GetOwner()) return false;
-    nsCOMPtr<nsIDocument> doc = mRecorder->GetOwner()->GetExtantDoc();
+    nsCOMPtr<Document> doc = mRecorder->GetOwner()->GetExtantDoc();
     if (!doc) {
       return false;
     }
@@ -825,9 +831,9 @@ class MediaRecorder::Session : public PrincipalChangeObserver<MediaStreamTrack>,
 
   bool AudioNodePrincipalSubsumes() {
     MOZ_ASSERT(mRecorder->mAudioNode);
-    nsIDocument* doc = mRecorder->mAudioNode->GetOwner()
-                           ? mRecorder->mAudioNode->GetOwner()->GetExtantDoc()
-                           : nullptr;
+    Document* doc = mRecorder->mAudioNode->GetOwner()
+                        ? mRecorder->mAudioNode->GetOwner()->GetExtantDoc()
+                        : nullptr;
     nsCOMPtr<nsIPrincipal> principal = doc ? doc->NodePrincipal() : nullptr;
     return PrincipalSubsumes(principal);
   }
@@ -983,7 +989,8 @@ class MediaRecorder::Session : public PrincipalChangeObserver<MediaStreamTrack>,
     if (mRunningState.isOk() &&
         (mRunningState.unwrap() == RunningState::Idling ||
          mRunningState.unwrap() == RunningState::Starting)) {
-      NS_DispatchToMainThread(new DispatchStartEventRunnable(this));
+      NS_DispatchToMainThread(
+          new DispatchEventRunnable(this, NS_LITERAL_STRING("start")));
     }
 
     if (rv == NS_OK) {
@@ -1050,7 +1057,8 @@ class MediaRecorder::Session : public PrincipalChangeObserver<MediaStreamTrack>,
           }
           self->mMimeType = mime;
           self->mRecorder->SetMimeType(self->mMimeType);
-          auto startEvent = MakeRefPtr<DispatchStartEventRunnable>(self);
+          auto startEvent = MakeRefPtr<DispatchEventRunnable>(
+              self, NS_LITERAL_STRING("start"));
           startEvent->Run();
         }
       }
@@ -1290,7 +1298,7 @@ void MediaRecorder::Start(const Optional<int32_t>& aTimeSlice,
     // to record, we should throw a security error.
     bool subsumes = false;
     nsPIDOMWindowInner* window;
-    nsIDocument* doc;
+    Document* doc;
     if (!(window = GetOwner()) || !(doc = window->GetExtantDoc()) ||
         NS_FAILED(doc->NodePrincipal()->Subsumes(mDOMStream->GetPrincipal(),
                                                  &subsumes)) ||
@@ -1323,7 +1331,6 @@ void MediaRecorder::Stop(ErrorResult& aResult) {
   LOG(LogLevel::Debug, ("MediaRecorder.Stop %p", this));
   MediaRecorderReporter::RemoveMediaRecorder(this);
   if (mState == RecordingState::Inactive) {
-    aResult.Throw(NS_ERROR_DOM_INVALID_STATE_ERR);
     return;
   }
   mState = RecordingState::Inactive;
@@ -1332,9 +1339,13 @@ void MediaRecorder::Stop(ErrorResult& aResult) {
 }
 
 void MediaRecorder::Pause(ErrorResult& aResult) {
-  LOG(LogLevel::Debug, ("MediaRecorder.Pause"));
+  LOG(LogLevel::Debug, ("MediaRecorder.Pause %p", this));
   if (mState == RecordingState::Inactive) {
     aResult.Throw(NS_ERROR_DOM_INVALID_STATE_ERR);
+    return;
+  }
+
+  if (mState == RecordingState::Paused) {
     return;
   }
 
@@ -1346,13 +1357,16 @@ void MediaRecorder::Pause(ErrorResult& aResult) {
   }
 
   mState = RecordingState::Paused;
-  DispatchSimpleEvent(NS_LITERAL_STRING("pause"));
 }
 
 void MediaRecorder::Resume(ErrorResult& aResult) {
-  LOG(LogLevel::Debug, ("MediaRecorder.Resume"));
+  LOG(LogLevel::Debug, ("MediaRecorder.Resume %p", this));
   if (mState == RecordingState::Inactive) {
     aResult.Throw(NS_ERROR_DOM_INVALID_STATE_ERR);
+    return;
+  }
+
+  if (mState == RecordingState::Recording) {
     return;
   }
 
@@ -1364,7 +1378,6 @@ void MediaRecorder::Resume(ErrorResult& aResult) {
   }
 
   mState = RecordingState::Recording;
-  DispatchSimpleEvent(NS_LITERAL_STRING("resume"));
 }
 
 void MediaRecorder::RequestData(ErrorResult& aResult) {
@@ -1384,7 +1397,8 @@ JSObject* MediaRecorder::WrapObject(JSContext* aCx,
   return MediaRecorder_Binding::Wrap(aCx, this, aGivenProto);
 }
 
-/* static */ already_AddRefed<MediaRecorder> MediaRecorder::Constructor(
+/* static */
+already_AddRefed<MediaRecorder> MediaRecorder::Constructor(
     const GlobalObject& aGlobal, DOMMediaStream& aStream,
     const MediaRecorderOptions& aInitDict, ErrorResult& aRv) {
   nsCOMPtr<nsPIDOMWindowInner> ownerWindow =
@@ -1404,7 +1418,8 @@ JSObject* MediaRecorder::WrapObject(JSContext* aCx,
   return object.forget();
 }
 
-/* static */ already_AddRefed<MediaRecorder> MediaRecorder::Constructor(
+/* static */
+already_AddRefed<MediaRecorder> MediaRecorder::Constructor(
     const GlobalObject& aGlobal, AudioNode& aSrcAudioNode, uint32_t aSrcOutput,
     const MediaRecorderOptions& aInitDict, ErrorResult& aRv) {
   // Allow recording from audio node only when pref is on.
@@ -1576,15 +1591,12 @@ void MediaRecorder::DispatchSimpleEvent(const nsAString& aStr) {
     return;
   }
 
-  RefPtr<Event> event = NS_NewDOMEvent(this, nullptr, nullptr);
-  event->InitEvent(aStr, false, false);
-  event->SetTrusted(true);
-
-  IgnoredErrorResult res;
-  DispatchEvent(*event, res);
-  if (res.Failed()) {
+  rv = DOMEventTargetHelper::DispatchTrustedEvent(aStr);
+  if (NS_FAILED(rv)) {
+    LOG(LogLevel::Error,
+        ("MediaRecorder.DispatchSimpleEvent: DispatchTrustedEvent failed  %p",
+         this));
     NS_ERROR("Failed to dispatch the event!!!");
-    return;
   }
 }
 
@@ -1640,7 +1652,7 @@ void MediaRecorder::RemoveSession(Session* aSession) {
 void MediaRecorder::NotifyOwnerDocumentActivityChanged() {
   nsPIDOMWindowInner* window = GetOwner();
   NS_ENSURE_TRUE_VOID(window);
-  nsIDocument* doc = window->GetExtantDoc();
+  Document* doc = window->GetExtantDoc();
   NS_ENSURE_TRUE_VOID(doc);
 
   bool inFrameSwap = false;

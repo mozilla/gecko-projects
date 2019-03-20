@@ -25,8 +25,8 @@ interface Blob {
   //slice Blob into byte-ranged chunks
 
   [Throws]
-  Blob slice([Clamp] optional long long start,
-             [Clamp] optional long long end,
+  Blob slice(optional [Clamp] long long start,
+             optional [Clamp] long long end,
              optional DOMString contentType);
 };
 
@@ -36,3 +36,10 @@ dictionary BlobPropertyBag {
   DOMString type = "";
   EndingTypes endings = "transparent";
 };
+
+partial interface Blob {
+  // This returns the type of BlobImpl used for this Blob.
+  [ChromeOnly]
+  readonly attribute DOMString blobImplType;
+};
+

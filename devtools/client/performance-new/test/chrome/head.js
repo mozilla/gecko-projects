@@ -6,7 +6,7 @@
 /* exported addPerfTest, MockPerfFront */
 /* globals URL_ROOT */
 
-const { BrowserLoader } = ChromeUtils.import("resource://devtools/client/shared/browser-loader.js", {});
+const { BrowserLoader } = ChromeUtils.import("resource://devtools/client/shared/browser-loader.js");
 var { require } = BrowserLoader({
   baseURI: "resource://devtools/client/performance-new/",
   window,
@@ -190,7 +190,6 @@ function createPerfComponent() {
     store.dispatch(actions.initializeStore({
       perfFront: perfFrontMock,
       receiveProfile: receiveProfileMock,
-      actorVersion: 1,
       recordingSettingsFromPreferences: selectors.getRecordingSettings(store.getState()),
       setRecordingPreferences: recordingPreferencesMock,
     }));

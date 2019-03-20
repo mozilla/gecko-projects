@@ -5,9 +5,9 @@
 
 var EXPORTED_SYMBOLS = ["NetErrorChild"];
 
-ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
-ChromeUtils.import("resource://gre/modules/Services.jsm");
-ChromeUtils.import("resource://gre/modules/ActorChild.jsm");
+const {XPCOMUtils} = ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
+const {Services} = ChromeUtils.import("resource://gre/modules/Services.jsm");
+const {ActorChild} = ChromeUtils.import("resource://gre/modules/ActorChild.jsm");
 
 ChromeUtils.defineModuleGetter(this, "BrowserUtils",
                                "resource://gre/modules/BrowserUtils.jsm");
@@ -26,6 +26,10 @@ XPCOMUtils.defineLazyGetter(this, "gBrandBundle", function() {
 });
 XPCOMUtils.defineLazyPreferenceGetter(this, "newErrorPagesEnabled",
   "browser.security.newcerterrorpage.enabled");
+XPCOMUtils.defineLazyPreferenceGetter(this, "mitmErrorPageEnabled",
+  "browser.security.newcerterrorpage.mitm.enabled");
+XPCOMUtils.defineLazyPreferenceGetter(this, "mitmPrimingEnabled",
+  "security.certerrors.mitm.priming.enabled");
 XPCOMUtils.defineLazyGetter(this, "gNSSErrorsBundle", function() {
   return Services.strings.createBundle("chrome://pipnss/locale/nsserrors.properties");
 });
@@ -124,8 +128,18 @@ class NetErrorChild extends ActorChild {
 
     if (input.data.certIsUntrusted) {
       switch (input.data.code) {
-        // We only want to measure MitM rates for now. Treat it as unkown issuer.
         case MOZILLA_PKIX_ERROR_MITM_DETECTED:
+          if (newErrorPagesEnabled && mitmErrorPageEnabled) {
+            let brandName = gBrandBundle.GetStringFromName("brandShortName");
+            msg1 = gPipNSSBundle.GetStringFromName("certErrorMitM");
+            msg1 += "\n\n";
+            msg1 += gPipNSSBundle.formatStringFromName("certErrorMitM2", [brandName], 1);
+            msg1 += "\n\n";
+            msg1 += gPipNSSBundle.formatStringFromName("certErrorMitM3", [brandName], 1);
+            msg1 += "\n";
+            break;
+          }
+          // If the condition is false, fall through...
         case SEC_ERROR_UNKNOWN_ISSUER:
           let brandName = gBrandBundle.GetStringFromName("brandShortName");
           if (newErrorPagesEnabled) {
@@ -170,6 +184,10 @@ class NetErrorChild extends ActorChild {
     if (input.data.isDomainMismatch) {
       let subjectAltNames = input.data.certSubjectAltNames.split(",");
       let numSubjectAltNames = subjectAltNames.length;
+
+      subjectAltNames = subjectAltNames.filter(name => name.length > 0);
+      numSubjectAltNames = subjectAltNames.length;
+
       let msgPrefix = "";
       if (numSubjectAltNames != 0) {
         if (numSubjectAltNames == 1) {
@@ -344,12 +362,37 @@ class NetErrorChild extends ActorChild {
     }
   }
 
+  // eslint-disable-next-line complexity
   onCertErrorDetails(msg, docShell) {
     let doc = docShell.document;
 
+    // This function centers the error container after its content updates.
+    // It is currently duplicated in aboutNetError.js to avoid having to do
+    // async communication to the page that would result in flicker.
+    // TODO(johannh): Get rid of this duplication.
     function updateContainerPosition() {
       let textContainer = doc.getElementById("text-container");
-      textContainer.style.marginTop = `calc(50vh - ${textContainer.clientHeight / 2}px)`;
+      // Using the vh CSS property our margin adapts nicely to window size changes.
+      // Unfortunately, this doesn't work correctly in iframes, which is why we need
+      // to manually compute the height there.
+      if (doc.ownerGlobal.parent == doc.ownerGlobal) {
+        textContainer.style.marginTop = `calc(50vh - ${textContainer.clientHeight / 2}px)`;
+      } else {
+        let offset = (doc.documentElement.clientHeight / 2) - (textContainer.clientHeight / 2);
+        if (offset > 0) {
+          textContainer.style.marginTop = `${offset}px`;
+        }
+      }
+    }
+
+    // Check if the connection is being man-in-the-middled. When the parent
+    // detects an intercepted connection, the page may be reloaded with a new
+    // error code (MOZILLA_PKIX_ERROR_MITM_DETECTED).
+    if (newErrorPagesEnabled && mitmPrimingEnabled &&
+        msg.data.code == SEC_ERROR_UNKNOWN_ISSUER &&
+        // Only do this check for top-level failures.
+        doc.ownerGlobal.top === doc.ownerGlobal) {
+      this.mm.sendAsyncMessage("Browser:PrimeMitm");
     }
 
     let div = doc.getElementById("certificateErrorText");
@@ -357,10 +400,26 @@ class NetErrorChild extends ActorChild {
     this._setTechDetails(msg, doc);
     let learnMoreLink = doc.getElementById("learnMoreLink");
     let baseURL = Services.urlFormatter.formatURLPref("app.support.baseURL");
+    learnMoreLink.setAttribute("href", baseURL + "connection-not-secure");
     let errWhatToDo = doc.getElementById("es_nssBadCert_" + msg.data.codeString);
     let es = doc.getElementById("errorWhatToDoText");
     let errWhatToDoTitle = doc.getElementById("edd_nssBadCert");
     let est = doc.getElementById("errorWhatToDoTitleText");
+    let searchParams = new URLSearchParams(doc.documentURI.split("?")[1]);
+    let error = searchParams.get("e");
+
+    if (error == "sslv3Used") {
+      learnMoreLink.setAttribute("href", baseURL + "sslv3-error-messages");
+    }
+
+    if (error == "nssFailure2") {
+      let shortDesc = doc.getElementById("errorShortDescText").textContent;
+      // nssFailure2 also gets us other non-overrideable errors. Choose
+      // a "learn more" link based on description:
+      if (shortDesc.includes("MOZILLA_PKIX_ERROR_KEY_PINNING_FAILURE")) {
+        learnMoreLink.setAttribute("href", baseURL + "certificate-pinning-reports");
+      }
+    }
 
     // This is set to true later if the user's system clock is at fault for this error.
     let clockSkew = false;
@@ -410,6 +469,47 @@ class NetErrorChild extends ActorChild {
         updateContainerPosition();
         break;
       case MOZILLA_PKIX_ERROR_MITM_DETECTED:
+        if (newErrorPagesEnabled && mitmErrorPageEnabled) {
+          let autoEnabledEnterpriseRoots =
+            Services.prefs.getBoolPref("security.enterprise_roots.auto-enabled", false);
+          if (mitmPrimingEnabled && autoEnabledEnterpriseRoots) {
+            // If we automatically tried to import enterprise root certs but it didn't
+            // fix the MITM, reset the pref.
+            this.mm.sendAsyncMessage("Browser:ResetEnterpriseRootsPref");
+          }
+
+          // We don't actually know what the MitM is called (since we don't
+          // maintain a list), so we'll try and display the common name of the
+          // root issuer to the user. In the worst case they are as clueless as
+          // before, in the best case this gives them an actionable hint.
+          // This may be revised in the future.
+          let {securityInfo} = docShell.failedChannel;
+          securityInfo.QueryInterface(Ci.nsITransportSecurityInfo);
+          let mitmName = null;
+          for (let cert of securityInfo.failedCertChain.getEnumerator()) {
+            mitmName = cert.issuerCommonName;
+          }
+          for (let span of doc.querySelectorAll(".mitm-name")) {
+            span.textContent = mitmName;
+          }
+
+          learnMoreLink.href = baseURL + "security-error";
+
+          let title = doc.getElementById("et_mitm");
+          let desc = doc.getElementById("ed_mitm");
+          doc.querySelector(".title-text").textContent = title.textContent;
+          // eslint-disable-next-line no-unsanitized/property
+          doc.getElementById("errorShortDescText").innerHTML = desc.innerHTML;
+
+          // eslint-disable-next-line no-unsanitized/property
+          es.innerHTML = errWhatToDo.innerHTML;
+          // eslint-disable-next-line no-unsanitized/property
+          est.innerHTML = errWhatToDoTitle.innerHTML;
+
+          updateContainerPosition();
+          break;
+        }
+        // If the condition is false, fall through...
       case MOZILLA_PKIX_ERROR_SELF_SIGNED_CERT:
         learnMoreLink.href = baseURL + "security-error";
         break;
@@ -430,6 +530,9 @@ class NetErrorChild extends ActorChild {
 
         let now = Date.now();
         let certRange = this._getCertValidityRange(docShell);
+        let formatter = new Services.intl.DateTimeFormat(undefined, {
+          dateStyle: "short",
+        });
 
         let approximateDate = now - difference * 1000;
         // If the difference is more than a day, we last fetched the date in the last 5 days,
@@ -437,9 +540,6 @@ class NetErrorChild extends ActorChild {
         if (Math.abs(difference) > 60 * 60 * 24 && (now - lastFetched) <= 60 * 60 * 24 * 5 &&
             certRange.notBefore < approximateDate && certRange.notAfter > approximateDate) {
           clockSkew = true;
-          let formatter = new Services.intl.DateTimeFormat(undefined, {
-            dateStyle: "short",
-          });
           let systemDate = formatter.format(new Date());
           // negative difference means local time is behind server time
           approximateDate = formatter.format(new Date(approximateDate));
@@ -469,9 +569,6 @@ class NetErrorChild extends ActorChild {
           // since the build date.
           if (buildDate > systemDate && new Date(certRange.notAfter) > buildDate) {
             clockSkew = true;
-            let formatter = new Services.intl.DateTimeFormat(undefined, {
-              dateStyle: "short",
-            });
 
             doc.getElementById("wrongSystemTimeWithoutReference_URL")
               .textContent = doc.location.hostname;
@@ -482,8 +579,7 @@ class NetErrorChild extends ActorChild {
         if (!newErrorPagesEnabled) {
           break;
         }
-        let dateOptions = { year: "numeric", month: "long", day: "numeric", hour: "numeric", minute: "numeric" };
-        let systemDate = new Services.intl.DateTimeFormat(undefined, dateOptions).format(new Date());
+        let systemDate = formatter.format(new Date());
         doc.getElementById("wrongSystemTime_systemDate1").textContent = systemDate;
         if (clockSkew) {
           doc.body.classList.add("illustrated", "clockSkewError");
@@ -582,6 +678,8 @@ class NetErrorChild extends ActorChild {
         } else {
           this.onClick(aEvent);
         }
+      } else if (this.isAboutCertError(doc)) {
+          this.recordClick(aEvent.originalTarget);
       }
       break;
     }

@@ -75,9 +75,12 @@ class nsTableRowGroupFrame final : public nsContainerFrame,
   virtual void BuildDisplayList(nsDisplayListBuilder* aBuilder,
                                 const nsDisplayListSet& aLists) override;
 
-  /** calls Reflow for all of its child rows.
+  /**
+   * Calls Reflow for all of its child rows.
+   *
    * Rows are all set to the same isize and stacked in the block direction.
-   * <P> rows are not split unless absolutely necessary.
+   *
+   * Rows are not split unless absolutely necessary.
    *
    * @param aDesiredSize isize set to isize of rows, bsize set to
    *                     sum of bsize of rows that fit in AvailableBSize.
@@ -223,11 +226,10 @@ class nsTableRowGroupFrame final : public nsContainerFrame,
 
   /** Find the orginating cell frame on a row that is the nearest to the
    * inline-dir coordinate of aPos.
-   * @param aLineNumber          - the index of the row relative to the row
-   * group
-   * @param aPos                 - coordinate in twips relative to the
-   *                               origin of the row group
-   * @param aFrameFound          - pointer to the cellframe
+   * @param aLineNumber        - the index of the row relative to the row group
+   * @param aPos               - coordinate in twips relative to the
+   *                             origin of the row group
+   * @param aFrameFound        - pointer to the cellframe
    * @param aPosIsBeforeFirstFrame - the point is before the first originating
    *                               cellframe
    * @param aPosIsAfterLastFrame   - the point is after the last originating
@@ -289,8 +291,9 @@ class nsTableRowGroupFrame final : public nsContainerFrame,
 
   /**
    * Get the first row that might contain y-coord 'aY', or nullptr if you must
-   * search all rows. The actual row returned might not contain 'aY', but if
-   * not, it is guaranteed to be before any row which does contain 'aY'.
+   * search all rows.
+   * The actual row returned might not contain 'aY', but if not, it is
+   * guaranteed to be before any row which does contain 'aY'.
    * aOverflowAbove is the maximum over all rows of -row.GetOverflowRect().y.
    * To find all rows that intersect the vertical interval aY/aYMost, call
    * GetFirstRowContaining(aY, &overflowAbove), and then iterate through all
@@ -328,7 +331,8 @@ class nsTableRowGroupFrame final : public nsContainerFrame,
   }
 
  protected:
-  explicit nsTableRowGroupFrame(ComputedStyle* aStyle);
+  explicit nsTableRowGroupFrame(ComputedStyle* aStyle,
+                                nsPresContext* aPresContext);
 
   void InitChildReflowInput(nsPresContext& aPresContext, bool aBorderCollapse,
                             ReflowInput& aReflowInput);

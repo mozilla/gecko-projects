@@ -25,8 +25,9 @@
 #include "nsCSSRendering.h"
 #include "nsGenericHTMLFrameElement.h"
 #include "mozilla/dom/Attr.h"
-#include "mozilla/EventListenerManager.h"
+#include "mozilla/dom/PopupBlocker.h"
 #include "nsFrame.h"
+#include "nsFrameState.h"
 #include "nsGlobalWindow.h"
 #include "nsGkAtoms.h"
 #include "nsImageFrame.h"
@@ -72,12 +73,12 @@
 #include "mozilla/dom/WebCryptoThreadPool.h"
 
 #ifdef MOZ_XUL
-#include "nsXULPopupManager.h"
-#include "nsXULContentUtils.h"
-#include "nsXULPrototypeCache.h"
-#include "nsXULTooltipListener.h"
+#  include "nsXULPopupManager.h"
+#  include "nsXULContentUtils.h"
+#  include "nsXULPrototypeCache.h"
+#  include "nsXULTooltipListener.h"
 
-#include "nsMenuBarListener.h"
+#  include "nsMenuBarListener.h"
 #endif
 
 #include "CubebUtils.h"
@@ -110,10 +111,16 @@
 #include "mozilla/dom/WebIDLGlobalNameHash.h"
 #include "mozilla/dom/ipc/IPCBlobInputStreamStorage.h"
 #include "mozilla/dom/U2FTokenManager.h"
+#ifdef OS_WIN
+#  include "mozilla/dom/WinWebAuthnManager.h"
+#endif
 #include "mozilla/dom/PointerEventHandler.h"
 #include "mozilla/dom/RemoteWorkerService.h"
 #include "mozilla/dom/BlobURLProtocolHandler.h"
 #include "mozilla/dom/ReportingHeader.h"
+#include "mozilla/dom/quota/ActorsParent.h"
+#include "mozilla/dom/localstorage/ActorsParent.h"
+#include "mozilla/net/UrlClassifierFeatureFactory.h"
 #include "nsThreadManager.h"
 #include "mozilla/css/ImageLoader.h"
 
@@ -121,6 +128,7 @@ using namespace mozilla;
 using namespace mozilla::net;
 using namespace mozilla::dom;
 using namespace mozilla::dom::ipc;
+using namespace mozilla::dom::quota;
 
 nsrefcnt nsLayoutStatics::sLayoutStaticRefcnt = 0;
 
@@ -142,6 +150,7 @@ nsresult nsLayoutStatics::Initialize() {
 #ifdef DEBUG
   nsCSSPseudoElements::AssertAtoms();
   nsCSSAnonBoxes::AssertAtoms();
+  DebugVerifyFrameStateBits();
 #endif
 
   StartupJSEnvironment();
@@ -189,6 +198,8 @@ nsresult nsLayoutStatics::Initialize() {
   nsFrame::DisplayReflowStartup();
 #endif
   Attr::Initialize();
+
+  PopupBlocker::Initialize();
 
   rv = txMozillaXSLTProcessor::Startup();
   if (NS_FAILED(rv)) {
@@ -246,7 +257,7 @@ nsresult nsLayoutStatics::Initialize() {
   nsCookieService::AppClearDataObserverInit();
   nsApplicationCacheService::AppClearDataObserverInit();
 
-  HTMLVideoElement::Init();
+  HTMLVideoElement::InitStatics();
   nsGenericHTMLFrameElement::InitStatics();
 
 #ifdef MOZ_XUL
@@ -274,6 +285,10 @@ nsresult nsLayoutStatics::Initialize() {
 
   mozilla::dom::U2FTokenManager::Initialize();
 
+#ifdef OS_WIN
+  mozilla::dom::WinWebAuthnManager::Initialize();
+#endif
+
   if (XRE_IsParentProcess()) {
     // On content process we initialize these components when PContentChild is
     // fully initialized.
@@ -289,6 +304,13 @@ nsresult nsLayoutStatics::Initialize() {
 
   // Reporting API.
   ReportingHeader::Initialize();
+
+  if (XRE_IsParentProcess()) {
+    InitializeQuotaManager();
+    InitializeLocalStorage();
+  }
+
+  ThirdPartyUtil::Startup();
 
   return NS_OK;
 }
@@ -310,7 +332,7 @@ void nsLayoutStatics::Shutdown() {
   StorageObserver::Shutdown();
   txMozillaXSLTProcessor::Shutdown();
   Attr::Shutdown();
-  EventListenerManager::Shutdown();
+  PopupBlocker::Shutdown();
   IMEStateManager::Shutdown();
   nsMediaFeatures::Shutdown();
   nsHTMLDNSPrefetch::Shutdown();
@@ -395,4 +417,6 @@ void nsLayoutStatics::Shutdown() {
   BlobURLProtocolHandler::RemoveDataEntries();
 
   css::ImageLoader::Shutdown();
+
+  mozilla::net::UrlClassifierFeatureFactory::Shutdown();
 }

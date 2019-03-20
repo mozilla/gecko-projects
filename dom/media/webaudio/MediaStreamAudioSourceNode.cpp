@@ -9,7 +9,7 @@
 #include "AudioNodeEngine.h"
 #include "AudioNodeExternalInputStream.h"
 #include "AudioStreamTrack.h"
-#include "nsIDocument.h"
+#include "mozilla/dom/Document.h"
 #include "mozilla/CORSMode.h"
 #include "nsContentUtils.h"
 #include "nsIScriptError.h"
@@ -41,8 +41,8 @@ MediaStreamAudioSourceNode::MediaStreamAudioSourceNode(AudioContext* aContext)
     : AudioNode(aContext, 2, ChannelCountMode::Max,
                 ChannelInterpretation::Speakers) {}
 
-/* static */ already_AddRefed<MediaStreamAudioSourceNode>
-MediaStreamAudioSourceNode::Create(
+/* static */
+already_AddRefed<MediaStreamAudioSourceNode> MediaStreamAudioSourceNode::Create(
     AudioContext& aAudioContext, const MediaStreamAudioSourceOptions& aOptions,
     ErrorResult& aRv) {
   if (aAudioContext.IsOffline()) {
@@ -57,7 +57,7 @@ MediaStreamAudioSourceNode::Create(
   if (aAudioContext.Graph() !=
       aOptions.mMediaStream->GetPlaybackStream()->Graph()) {
     nsCOMPtr<nsPIDOMWindowInner> pWindow = aAudioContext.GetParentObject();
-    nsIDocument* document = pWindow ? pWindow->GetExtantDoc() : nullptr;
+    Document* document = pWindow ? pWindow->GetExtantDoc() : nullptr;
     nsContentUtils::ReportToConsole(nsIScriptError::warningFlag,
                                     NS_LITERAL_CSTRING("Web Audio"), document,
                                     nsContentUtils::eDOM_PROPERTIES,
@@ -97,6 +97,9 @@ void MediaStreamAudioSourceNode::Init(DOMMediaStream* aMediaStream,
   mInputStream->AddConsumerToKeepAlive(ToSupports(this));
 
   mInputStream->RegisterTrackListener(this);
+  if (mInputStream->Active()) {
+    NotifyActive();
+  }
   AttachToFirstTrack(mInputStream);
 }
 
@@ -180,6 +183,11 @@ void MediaStreamAudioSourceNode::NotifyTrackRemoved(
   AttachToFirstTrack(mInputStream);
 }
 
+void MediaStreamAudioSourceNode::NotifyActive() {
+  MOZ_ASSERT(mInputStream);
+  Context()->StartBlockedAudioContextIfAllowed();
+}
+
 /**
  * Changes the principal. Note that this will be called on the main thread, but
  * changes will be enacted on the MediaStreamGraph thread. If the principal
@@ -199,7 +207,7 @@ void MediaStreamAudioSourceNode::PrincipalChanged(
   MOZ_ASSERT(aMediaStreamTrack == mInputTrack);
 
   bool subsumes = false;
-  nsIDocument* doc = nullptr;
+  Document* doc = nullptr;
   if (nsPIDOMWindowInner* parent = Context()->GetParentObject()) {
     doc = parent->GetExtantDoc();
     if (doc) {

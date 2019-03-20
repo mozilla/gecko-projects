@@ -9,6 +9,9 @@
 
 #include "vm/Debugger.h"
 
+#include "builtin/Promise.h"
+#include "vm/GeneratorObject.h"
+
 #include "gc/WeakMap-inl.h"
 #include "vm/Stack-inl.h"
 
@@ -31,7 +34,8 @@
 }
 
 /* static */ inline bool js::Debugger::onNewGenerator(
-    JSContext* cx, AbstractFramePtr frame, Handle<GeneratorObject*> genObj) {
+    JSContext* cx, AbstractFramePtr frame,
+    Handle<AbstractGeneratorObject*> genObj) {
   if (frame.isDebuggee()) {
     return slowPathOnNewGenerator(cx, frame, genObj);
   }
@@ -104,7 +108,7 @@
 
 /* static */ void js::Debugger::onPromiseSettled(
     JSContext* cx, Handle<PromiseObject*> promise) {
-  if (MOZ_UNLIKELY(cx->realm()->isDebuggee())) {
+  if (MOZ_UNLIKELY(promise->realm()->isDebuggee())) {
     slowPathPromiseHook(cx, Debugger::OnPromiseSettled, promise);
   }
 }
@@ -124,7 +128,8 @@ inline js::PromiseObject* js::DebuggerObject::promise() const {
 
   JSObject* referent = this->referent();
   if (IsCrossCompartmentWrapper(referent)) {
-    referent = CheckedUnwrap(referent);
+    // We know we have a Promise here, so CheckedUnwrapStatic is fine.
+    referent = CheckedUnwrapStatic(referent);
     MOZ_ASSERT(referent);
   }
 

@@ -13,19 +13,33 @@
 #include "mozilla/widget/CompositorWidget.h"
 
 #ifdef XP_WIN
-#include "mozilla/webrender/RenderCompositorANGLE.h"
+#  include "mozilla/webrender/RenderCompositorANGLE.h"
+#endif
+
+#ifdef MOZ_WAYLAND
+#  include "mozilla/webrender/RenderCompositorEGL.h"
 #endif
 
 namespace mozilla {
 namespace wr {
 
-/* static */ UniquePtr<RenderCompositor> RenderCompositor::Create(
+/* static */
+UniquePtr<RenderCompositor> RenderCompositor::Create(
     RefPtr<widget::CompositorWidget>&& aWidget) {
 #ifdef XP_WIN
   if (gfx::gfxVars::UseWebRenderANGLE()) {
     return RenderCompositorANGLE::Create(std::move(aWidget));
   }
 #endif
+
+#ifdef MOZ_WAYLAND
+  UniquePtr<RenderCompositor> eglCompositor =
+      RenderCompositorEGL::Create(aWidget);
+  if (eglCompositor) {
+    return eglCompositor;
+  }
+#endif
+
   return RenderCompositorOGL::Create(std::move(aWidget));
 }
 

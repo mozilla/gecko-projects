@@ -5,8 +5,6 @@
 
 const Cm = Components.manager;
 
-ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
-
 const uuidGenerator = Cc["@mozilla.org/uuid-generator;1"].getService(Ci.nsIUUIDGenerator);
 
 const mockUpdateManager = {
@@ -15,8 +13,6 @@ const mockUpdateManager = {
   _mockClassId: uuidGenerator.generateUUID(),
 
   _originalClassId: "",
-
-  _originalFactory: null,
 
   QueryInterface: ChromeUtils.generateQI([Ci.nsIUpdateManager]),
 
@@ -31,8 +27,6 @@ const mockUpdateManager = {
     let registrar = Cm.QueryInterface(Ci.nsIComponentRegistrar);
     if (!registrar.isCIDRegistered(this._mockClassId)) {
       this._originalClassId = registrar.contractIDToCID(this.contractId);
-      this._originalFactory = Cm.getClassObject(Cc[this.contractId], Ci.nsIFactory);
-      registrar.unregisterFactory(this._originalClassId, this._originalFactory);
       registrar.registerFactory(this._mockClassId, "Unregister after testing", this.contractId, this);
     }
   },
@@ -40,7 +34,7 @@ const mockUpdateManager = {
   unregister() {
     let registrar = Cm.QueryInterface(Ci.nsIComponentRegistrar);
     registrar.unregisterFactory(this._mockClassId, this);
-    registrar.registerFactory(this._originalClassId, "", this.contractId, this._originalFactory);
+    registrar.registerFactory(this._originalClassId, "", this.contractId, null);
   },
 
   get updateCount() {
@@ -140,14 +134,38 @@ add_task(async function() {
   for (let i = 0; i < updates.length; ++i) {
     update = updates[i];
     updateData = mockUpdateManager.getUpdateAt(i);
-    const l10nAttrs = frameDoc.l10n.getAttributes(update);
-    Assert.deepEqual(l10nAttrs, {
-      id: "update-full-name",
-      args: { name: updateData.name, buildID: updateData.buildID },
-    }, "Wrong update name");
-    is(update.installDate, formatInstallDate(updateData.installDate), "Wrong update installDate");
-    is(update.detailsURL, updateData.detailsURL, "Wrong update detailsURL");
-    is(update.status, updateData.statusText, "Wrong update status");
+
+    let testcases = [
+      {
+        selector: ".update-name",
+        id: "update-full-build-name",
+        args: { name: updateData.name, buildID: updateData.buildID },
+      },
+      {
+        selector: ".update-installedOn-label",
+        id: "update-installed-on",
+        args: { date: formatInstallDate(updateData.installDate) },
+      },
+      {
+        selector: ".update-status-label",
+        id: "update-status",
+        args: { status: updateData.statusText },
+      },
+    ];
+
+    for (let {selector, id, args} of testcases) {
+      const element = update.querySelector(selector);
+      const l10nAttrs = frameDoc.l10n.getAttributes(element);
+      Assert.deepEqual(l10nAttrs, {
+        id,
+        args,
+      }, "Wrong " + id);
+    }
+
+    if (update.detailsURL) {
+      is(update.detailsURL, update.querySelector(".text-link").href,
+         "Wrong detailsURL");
+    }
   }
 
   // Test the dialog window closes

@@ -13,6 +13,7 @@ import os
 import sys
 import traceback
 import re
+from distutils.util import strtobool
 
 from mach.decorators import (
     CommandArgument,
@@ -148,9 +149,6 @@ class MachCommands(MachCommandBase):
     @CommandArgument('--comm-head-rev',
                      required=False,
                      help='Commit revision to use from head comm-* repository')
-    @CommandArgument('--message',
-                     required=True,
-                     help='Commit message to be parsed. Example: "try: -b do -p all -u all"')
     @CommandArgument('--project',
                      required=True,
                      help='Project to use for creating task graph. Example: --project=try')
@@ -171,8 +169,16 @@ class MachCommands(MachCommandBase):
                      help='SCM level of this repository')
     @CommandArgument('--target-tasks-method',
                      help='method for selecting the target tasks to generate')
+    @CommandArgument('--optimize-target-tasks',
+                     type=strtobool,
+                     nargs='?', const='true',
+                     help='If specified, this indicates whether the target '
+                          'tasks are eligible for optimization. Otherwise, '
+                          'the default for the project is used.')
     @CommandArgument('--try-task-config-file',
                      help='path to try task configuration file')
+    @CommandArgument('--tasks-for',
+                     help='the tasks_for value used to generate this task')
     def taskgraph_decision(self, **options):
         """Run the decision task: generate a task graph and submit to
         TaskCluster.  This is only meant to be called within decision tasks,
@@ -275,12 +281,12 @@ class MachCommands(MachCommandBase):
     def test_action_callback(self, **options):
         import taskgraph.parameters
         import taskgraph.actions
-        import yaml
+        from taskgraph.util import yaml
 
         def load_data(filename):
             with open(filename) as f:
                 if filename.endswith('.yml'):
-                    return yaml.safe_load(f)
+                    return yaml.load_stream(f)
                 elif filename.endswith('.json'):
                     return json.load(f)
                 else:
@@ -295,7 +301,12 @@ class MachCommands(MachCommandBase):
             else:
                 input = None
 
-            parameters = taskgraph.parameters.load_parameters_file(options['parameters'])
+            parameters = taskgraph.parameters.load_parameters_file(
+                options['parameters'],
+                strict=False,
+                # FIXME: There should be a way to parameterize this.
+                trust_domain="gecko",
+            )
             parameters.check()
 
             root = options['root']
@@ -341,8 +352,7 @@ class MachCommands(MachCommandBase):
 
         try:
             self.setup_logging(quiet=options['quiet'], verbose=options['verbose'])
-            parameters = taskgraph.parameters.load_parameters_file(options['parameters'])
-            parameters.check()
+            parameters = taskgraph.parameters.parameters_loader(options['parameters'])
 
             tgg = taskgraph.generator.TaskGraphGenerator(
                 root_dir=options.get('root'),
@@ -400,14 +410,13 @@ class MachCommands(MachCommandBase):
 
         try:
             self.setup_logging(quiet=options['quiet'], verbose=options['verbose'])
-            parameters = taskgraph.parameters.load_parameters_file(options['parameters'])
-            parameters.check()
+            parameters = taskgraph.parameters.parameters_loader(options['parameters'])
 
             tgg = taskgraph.generator.TaskGraphGenerator(
                 root_dir=options.get('root'),
                 parameters=parameters)
 
-            actions = taskgraph.actions.render_actions_json(parameters, tgg.graph_config)
+            actions = taskgraph.actions.render_actions_json(tgg.parameters, tgg.graph_config)
             print(json.dumps(actions, sort_keys=True, indent=2, separators=(',', ': ')))
         except Exception:
             traceback.print_exc()

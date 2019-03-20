@@ -369,8 +369,9 @@ PlacesViewBase.prototype = {
         }
 
         this._domNodes.set(aPlacesNode, popup);
-      } else
+      } else {
         throw "Unexpected node";
+      }
 
       element.setAttribute("label", PlacesUIUtils.getBestTitle(aPlacesNode));
 
@@ -658,7 +659,7 @@ PlacesViewBase.prototype = {
         aPopup._endOptOpenAllInTabs.classList.add(this.options.extraClasses.footer);
 
       aPopup._endOptOpenAllInTabs.setAttribute("oncommand",
-        "PlacesUIUtils.openContainerNodeInTabs(this.parentNode._placesNode, event, " +
+        "PlacesUIUtils.openMultipleLinksInTabs(this.parentNode._placesNode, event, " +
                                                "PlacesUIUtils.getViewForNode(this));");
       aPopup._endOptOpenAllInTabs.setAttribute("onclick",
         "checkForMiddleClick(this, event); event.stopPropagation();");
@@ -798,7 +799,7 @@ PlacesToolbar.prototype = {
   __proto__: PlacesViewBase.prototype,
 
   _cbEvents: ["dragstart", "dragover", "dragexit", "dragend", "drop",
-              "mousemove", "mouseover", "mouseout"],
+              "mousemove", "mouseover", "mouseout", "mousedown"],
 
   QueryInterface: ChromeUtils.generateQI(["nsITimerCallback",
                                           ...PlacesViewBase.interfaces]),
@@ -1016,6 +1017,9 @@ PlacesToolbar.prototype = {
         break;
       case "mouseout":
         this._onMouseOut(aEvent);
+        break;
+      case "mousedown":
+        this._onMouseDown(aEvent);
         break;
       case "popupshowing":
         this._onPopupShowing(aEvent);
@@ -1469,6 +1473,20 @@ PlacesToolbar.prototype = {
     window.XULBrowserWindow.setOverLink("", null);
   },
 
+  _onMouseDown: function PT__onMouseDown(aEvent) {
+    let target = aEvent.target;
+    if (aEvent.button == 0 &&
+        target.localName == "toolbarbutton" &&
+        target.getAttribute("type") == "menu") {
+      let modifKey = aEvent.shiftKey || aEvent.getModifierState("Accel");
+      if (modifKey) {
+        // Do not open the popup since BEH_onClick is about to
+        // open all child uri nodes in tabs.
+        this._allowPopupShowing = false;
+      }
+    }
+  },
+
   _cleanupDragDetails: function PT__cleanupDragDetails() {
     // Called on dragend and drop.
     PlacesControllerDragHelper.currentDropTarget = null;
@@ -1556,9 +1574,9 @@ PlacesToolbar.prototype = {
         halfInd = Math.ceil(halfInd);
         translateX = 0 - this._rootElt.getBoundingClientRect().right - halfInd;
         if (this._rootElt.firstElementChild) {
-          if (dropPoint.beforeIndex == -1)
+          if (dropPoint.beforeIndex == -1) {
             translateX += this._rootElt.lastElementChild.getBoundingClientRect().left;
-          else {
+          } else {
             translateX += this._rootElt.children[dropPoint.beforeIndex]
                               .getBoundingClientRect().right;
           }
@@ -1568,9 +1586,9 @@ PlacesToolbar.prototype = {
         translateX = 0 - this._rootElt.getBoundingClientRect().left +
                      halfInd;
         if (this._rootElt.firstElementChild) {
-          if (dropPoint.beforeIndex == -1)
+          if (dropPoint.beforeIndex == -1) {
             translateX += this._rootElt.lastElementChild.getBoundingClientRect().right;
-          else {
+          } else {
             translateX += this._rootElt.children[dropPoint.beforeIndex]
                               .getBoundingClientRect().left;
           }
@@ -1920,6 +1938,7 @@ this.PlacesPanelview = class extends PlacesViewBase {
   }
 
   _onCommand(event) {
+    event = getRootEvent(event);
     let button = event.originalTarget;
     if (!button._placesNode)
       return;

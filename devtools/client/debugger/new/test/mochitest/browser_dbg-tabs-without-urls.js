@@ -1,10 +1,6 @@
 /* Any copyright is dedicated to the Public Domain.
  * http://creativecommons.org/publicdomain/zero/1.0/ */
 
-function countTabs(dbg) {
-  return findElement(dbg, "sourceTabs").children.length;
-}
-
 // Test that URL-less sources have tabs added to the UI but 
 // do not persist upon reload
 add_task(async function() {
@@ -28,4 +24,11 @@ add_task(async function() {
   // Test reloading the debugger
   await reload(dbg, "simple1", "simple2");
   is(countTabs(dbg), 2);
+
+  // TODO: This is here to make this test less flakey because otherwise the
+  // test will end while the files are still loading, which will stop all
+  // in-progress requests causing uncaught rejections when querying
+  // 'getBreakpointPositionsCompressed'.
+  await selectSource(dbg, "simple1");
+  await selectSource(dbg, "simple2");
 });

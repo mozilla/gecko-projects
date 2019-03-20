@@ -2,14 +2,19 @@
 /* vim: set sts=2 sw=2 et tw=80: */
 "use strict";
 
-ChromeUtils.import("resource://gre/modules/Services.jsm");
+var {Services} = ChromeUtils.import("resource://gre/modules/Services.jsm");
+ChromeUtils.defineModuleGetter(this, "PrivateBrowsingUtils",
+                               "resource://gre/modules/PrivateBrowsingUtils.jsm");
+
+ChromeUtils.defineModuleGetter(this, "Bookmarks",
+                               "resource://gre/modules/Bookmarks.jsm");
 
 var {
   DefaultMap,
   ExtensionError,
 } = ExtensionUtils;
 
-ChromeUtils.import("resource://gre/modules/ExtensionParent.jsm");
+var {ExtensionParent} = ChromeUtils.import("resource://gre/modules/ExtensionParent.jsm");
 
 var {
   IconDetails,
@@ -95,8 +100,23 @@ var gMenuBuilder = {
     throw new Error(`Unexpected overrideContext: ${webExtContextData.overrideContext}`);
   },
 
+  canAccessContext(extension, contextData) {
+    if (!extension.privateBrowsingAllowed) {
+      let nativeTab = contextData.tab;
+      if (nativeTab && PrivateBrowsingUtils.isBrowserPrivate(nativeTab.linkedBrowser)) {
+        return false;
+      } else if (PrivateBrowsingUtils.isWindowPrivate(contextData.menu.ownerGlobal)) {
+        return false;
+      }
+    }
+    return true;
+  },
+
   createAndInsertTopLevelElements(root, contextData, nextSibling) {
     let rootElements;
+    if (!this.canAccessContext(root.extension, contextData)) {
+      return;
+    }
     if (contextData.onBrowserAction || contextData.onPageAction) {
       if (contextData.extension.id !== root.extension.id) {
         return;
@@ -465,14 +485,18 @@ var gMenuBuilder = {
 
   // This should be called once, after constructing the top-level menus, if any.
   afterBuildingMenu(contextData) {
-    function dispatchOnShownEvent(extension) {
+    let dispatchOnShownEvent = (extension) => {
+      if (!this.canAccessContext(extension, contextData)) {
+        return;
+      }
+
       // Note: gShownMenuItems is a DefaultMap, so .get(extension) causes the
       // extension to be stored in the map even if there are currently no
       // shown menu items. This ensures that the onHidden event can be fired
       // when the menu is closed.
       let menuIds = gShownMenuItems.get(extension);
       extension.emit("webext-menu-shown", menuIds, contextData);
-    }
+    };
 
     if (contextData.onBrowserAction || contextData.onPageAction) {
       dispatchOnShownEvent(contextData.extension);
@@ -655,11 +679,17 @@ MenuItem.prototype = {
     }
 
     if (createProperties.documentUrlPatterns != null) {
-      this.documentUrlMatchPattern = new MatchPatternSet(this.documentUrlPatterns);
+      this.documentUrlMatchPattern = new MatchPatternSet(this.documentUrlPatterns, {
+        restrictSchemes: this.extension.restrictSchemes,
+      });
     }
 
     if (createProperties.targetUrlPatterns != null) {
-      this.targetUrlMatchPattern = new MatchPatternSet(this.targetUrlPatterns, {restrictSchemes: false});
+      this.targetUrlMatchPattern = new MatchPatternSet(this.targetUrlPatterns, {
+        // restrictSchemes default to false when matching links instead of pages
+        // (see Bug 1280370 for a rationale).
+        restrictSchemes: false,
+      });
     }
 
     // If a child MenuItem does not specify any contexts, then it should
@@ -857,6 +887,74 @@ MenuItem.prototype = {
   },
 };
 
+// windowTracker only looks as browser windows, but we're also interested in
+// the Library window.  Helper for menuTracker below.
+const libraryTracker = {
+  libraryWindowType: "Places:Organizer",
+
+  isLibraryWindow(window) {
+    let winType = window.document.documentElement.getAttribute("windowtype");
+    return winType === this.libraryWindowType;
+  },
+
+  init(listener) {
+    this._listener = listener;
+    Services.ww.registerNotification(this);
+
+    // See WindowTrackerBase#*browserWindows in ext-tabs-base.js for why we
+    // can't use the enumerator's windowtype filter.
+    for (let window of Services.wm.getEnumerator("")) {
+      if (window.document.readyState === "complete") {
+        if (this.isLibraryWindow(window)) {
+          this.notify(window);
+        }
+      } else {
+        window.addEventListener("load", this, {once: true});
+      }
+    }
+  },
+
+  // cleanupWindow is called on any library window that's open.
+  uninit(cleanupWindow) {
+    Services.ww.unregisterNotification(this);
+
+    for (let window of Services.wm.getEnumerator("")) {
+      window.removeEventListener("load", this);
+      try {
+        if (this.isLibraryWindow(window)) {
+          cleanupWindow(window);
+        }
+      } catch (e) {
+        Cu.reportError(e);
+      }
+    }
+  },
+
+  // Gets notifications from Services.ww.registerNotification.
+  // Defer actually doing anything until the window's loaded, though.
+  observe(window, topic) {
+    if (topic === "domwindowopened") {
+      window.addEventListener("load", this, {once: true});
+    }
+  },
+
+  // Gets the load event for new windows(registered in observe()).
+  handleEvent(event) {
+    let window = event.target.defaultView;
+    if (this.isLibraryWindow(window)) {
+      this.notify(window);
+    }
+  },
+
+  notify(window) {
+    try {
+      this._listener.call(null, window);
+    } catch (e) {
+      Cu.reportError(e);
+    }
+  },
+};
+
 // While any extensions are active, this Tracker registers to observe/listen
 // for menu events from both Tools and context menus, both content and chrome.
 const menuTracker = {
@@ -868,17 +966,16 @@ const menuTracker = {
       this.onWindowOpen(window);
     }
     windowTracker.addOpenListener(this.onWindowOpen);
+    libraryTracker.init(this.onLibraryOpen);
   },
 
   unregister() {
     Services.obs.removeObserver(this, "on-build-contextmenu");
     for (const window of windowTracker.browserWindows()) {
-      for (const id of this.menuIds) {
-        const menu = window.document.getElementById(id);
-        menu.removeEventListener("popupshowing", this);
-      }
+      this.cleanupWindow(window);
     }
     windowTracker.removeOpenListener(this.onWindowOpen);
+    libraryTracker.uninit(this.cleanupLibrary);
   },
 
   observe(subject, topic, data) {
@@ -891,10 +988,62 @@ const menuTracker = {
       const menu = window.document.getElementById(id);
       menu.addEventListener("popupshowing", menuTracker);
     }
+
+    const sidebarHeader = window.document.getElementById("sidebar-switcher-target");
+    sidebarHeader.addEventListener("SidebarShown", menuTracker.onSidebarShown);
+    if (window.SidebarUI.currentID === "viewBookmarksSidebar") {
+      menuTracker.onSidebarShown({currentTarget: sidebarHeader});
+    }
+  },
+
+  cleanupWindow(window) {
+    for (const id of this.menuIds) {
+      const menu = window.document.getElementById(id);
+      menu.removeEventListener("popupshowing", this);
+    }
+
+    const sidebarHeader = window.document.getElementById("sidebar-switcher-target");
+    sidebarHeader.removeEventListener("SidebarShown", this.onSidebarShown);
+
+    if (window.SidebarUI.currentID === "viewBookmarksSidebar") {
+      let sidebarBrowser = window.SidebarUI.browser;
+      sidebarBrowser.removeEventListener("load", this.onSidebarShown);
+      const menu = sidebarBrowser.contentDocument.getElementById("placesContext");
+      menu.removeEventListener("popupshowing", this.onBookmarksContextMenu);
+    }
+  },
+
+  onSidebarShown(event) {
+    // The event target is an element in a browser window, so |window| will be
+    // the browser window that contains the sidebar.
+    const window = event.currentTarget.ownerGlobal;
+    if (window.SidebarUI.currentID === "viewBookmarksSidebar") {
+      let sidebarBrowser = window.SidebarUI.browser;
+      if (sidebarBrowser.contentDocument.readyState !== "complete") {
+        // SidebarUI.currentID may be updated before the bookmark sidebar's
+        // document has finished loading. This sometimes happens when the
+        // sidebar is automatically shown when a new window is opened.
+        sidebarBrowser.addEventListener("load", menuTracker.onSidebarShown, {once: true});
+        return;
+      }
+      const menu = sidebarBrowser.contentDocument.getElementById("placesContext");
+      menu.addEventListener("popupshowing", menuTracker.onBookmarksContextMenu);
+    }
+  },
+
+  onLibraryOpen(window) {
+    const menu = window.document.getElementById("placesContext");
+    menu.addEventListener("popupshowing", menuTracker.onBookmarksContextMenu);
+  },
+
+  cleanupLibrary(window) {
+    const menu = window.document.getElementById("placesContext");
+    menu.removeEventListener("popupshowing", menuTracker.onBookmarksContextMenu);
   },
 
   handleEvent(event) {
     const menu = event.target;
+
     if (menu.id === "placesContext") {
       const trigger = menu.triggerNode;
       if (!trigger._placesNode) {
@@ -918,6 +1067,23 @@ const menuTracker = {
       const pageUrl = tab.linkedBrowser.currentURI.spec;
       gMenuBuilder.build({menu, tab, pageUrl, onTab: true});
     }
+  },
+
+  onBookmarksContextMenu(event) {
+    const menu = event.target;
+    const tree = menu.triggerNode.parentElement;
+    const cell = tree.getCellAt(event.x, event.y);
+    const node = tree.view.nodeForTreeIndex(cell.row);
+
+    if (!node.bookmarkGuid || Bookmarks.isVirtualRootItem(node.bookmarkGuid)) {
+      return;
+    }
+
+    gMenuBuilder.build({
+      menu,
+      bookmarkId: node.bookmarkGuid,
+      onBookmark: true,
+    });
   },
 };
 

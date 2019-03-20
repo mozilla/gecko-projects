@@ -44,8 +44,8 @@
 #include "nsQueryObject.h"
 
 #ifdef MOZ_WEBRTC
-#include "mozilla/dom/RTCCertificate.h"
-#include "mozilla/dom/RTCCertificateBinding.h"
+#  include "mozilla/dom/RTCCertificate.h"
+#  include "mozilla/dom/RTCCertificateBinding.h"
 #endif
 
 using namespace mozilla::ipc;
@@ -317,7 +317,8 @@ void StructuredCloneHolder::ReadFromBuffer(nsISupports* aParent, JSContext* aCx,
   }
 }
 
-/* static */ JSObject* StructuredCloneHolder::ReadFullySerializableObjects(
+/* static */
+JSObject* StructuredCloneHolder::ReadFullySerializableObjects(
     JSContext* aCx, JSStructuredCloneReader* aReader, uint32_t aTag) {
   if (aTag == SCTAG_DOM_IMAGEDATA) {
     return ReadStructuredCloneImageData(aCx, aReader);
@@ -409,7 +410,8 @@ void StructuredCloneHolder::ReadFromBuffer(nsISupports* aParent, JSContext* aCx,
   return nullptr;
 }
 
-/* static */ bool StructuredCloneHolder::WriteFullySerializableObjects(
+/* static */
+bool StructuredCloneHolder::WriteFullySerializableObjects(
     JSContext* aCx, JSStructuredCloneWriter* aWriter,
     JS::Handle<JSObject*> aObj) {
   JS::Rooted<JSObject*> obj(aCx, aObj);
@@ -468,8 +470,9 @@ void StructuredCloneHolder::ReadFromBuffer(nsISupports* aParent, JSContext* aCx,
     }
   }
 
-  if (NS_IsMainThread() && xpc::IsReflector(obj)) {
-    nsCOMPtr<nsISupports> base = xpc::UnwrapReflectorToISupports(obj);
+  if (NS_IsMainThread() && xpc::IsReflector(obj, aCx)) {
+    // We only care about principals, so ReflectorToISupportsStatic is fine.
+    nsCOMPtr<nsISupports> base = xpc::ReflectorToISupportsStatic(obj);
     nsCOMPtr<nsIPrincipal> principal = do_QueryInterface(base);
     if (principal) {
       auto nsjsprincipals = nsJSPrincipals::get(principal);
@@ -1042,7 +1045,8 @@ bool StructuredCloneHolder::CustomWriteHandler(JSContext* aCx,
   }
 
   {
-    nsCOMPtr<nsISupports> base = xpc::UnwrapReflectorToISupports(aObj);
+    // We only care about streams, so ReflectorToISupportsStatic is fine.
+    nsCOMPtr<nsISupports> base = xpc::ReflectorToISupportsStatic(aObj);
     nsCOMPtr<nsIInputStream> inputStream = do_QueryInterface(base);
     if (inputStream) {
       return WriteInputStream(aWriter, inputStream, this);

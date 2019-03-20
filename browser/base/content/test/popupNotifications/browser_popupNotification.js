@@ -218,7 +218,7 @@ var tests = [
     },
     onShown(popup) {
       let notification = popup.children[0];
-      is(notification.getAttribute("buttonhighlight"), "true", "default action is highlighted");
+      ok(notification.hasAttribute("buttonhighlight"), "default action is highlighted");
       triggerMainCommand(popup);
     },
     onHidden(popup) {
@@ -239,7 +239,7 @@ var tests = [
     onShown(popup) {
       let notification = popup.children[0];
       is(notification.getAttribute("secondarybuttonhidden"), "true", "secondary button is hidden");
-      is(notification.getAttribute("buttonhighlight"), "true", "default action is highlighted");
+      ok(notification.hasAttribute("buttonhighlight"), "default action is highlighted");
       triggerMainCommand(popup);
     },
     onHidden(popup) {
@@ -262,7 +262,7 @@ var tests = [
     onShown(popup) {
       // This also checks that only one element is shown.
       checkPopup(popup, this.notifyObj2);
-      is(document.getElementById("geo-notification-icon").boxObject.width, 0,
+      is(document.getElementById("geo-notification-icon").getBoundingClientRect().width, 0,
          "geo anchor shouldn't be visible");
       dismissNotification(popup);
     },

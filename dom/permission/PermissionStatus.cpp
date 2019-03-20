@@ -15,7 +15,8 @@
 namespace mozilla {
 namespace dom {
 
-/* static */ already_AddRefed<PermissionStatus> PermissionStatus::Create(
+/* static */
+already_AddRefed<PermissionStatus> PermissionStatus::Create(
     nsPIDOMWindowInner* aWindow, PermissionName aName, ErrorResult& aRv) {
   RefPtr<PermissionStatus> status = new PermissionStatus(aWindow, aName);
   aRv = status->Init();
@@ -89,7 +90,7 @@ already_AddRefed<nsIPrincipal> PermissionStatus::GetPrincipal() const {
     return nullptr;
   }
 
-  nsIDocument* doc = window->GetExtantDoc();
+  Document* doc = window->GetExtantDoc();
   if (NS_WARN_IF(!doc)) {
     return nullptr;
   }

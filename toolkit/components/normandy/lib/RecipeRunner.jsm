@@ -4,15 +4,17 @@
 
 "use strict";
 
-ChromeUtils.import("resource://gre/modules/Services.jsm");
-ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
-ChromeUtils.import("resource://normandy/lib/LogManager.jsm");
+const {Services} = ChromeUtils.import("resource://gre/modules/Services.jsm");
+const {XPCOMUtils} = ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
+const {LogManager} = ChromeUtils.import("resource://normandy/lib/LogManager.jsm");
 
 XPCOMUtils.defineLazyServiceGetter(this, "timerManager",
                                    "@mozilla.org/updates/timer-manager;1",
                                    "nsIUpdateTimerManager");
 
 XPCOMUtils.defineLazyModuleGetters(this, {
+  RemoteSettings: "resource://services-settings/remote-settings.js",
+  FeatureGate: "resource://featuregates/FeatureGate.jsm",
   Storage: "resource://normandy/lib/Storage.jsm",
   FilterExpressions: "resource://gre/modules/components-utils/FilterExpressions.jsm",
   NormandyApi: "resource://normandy/lib/NormandyApi.jsm",
@@ -26,6 +28,7 @@ var EXPORTED_SYMBOLS = ["RecipeRunner"];
 
 const log = LogManager.getLogger("recipe-runner");
 const TIMER_NAME = "recipe-client-addon-run";
+const REMOTE_SETTINGS_COLLECTION = "normandy-recipes";
 const PREF_CHANGED_TOPIC = "nsPref:changed";
 
 const TELEMETRY_ENABLED_PREF = "datareporting.healthreport.uploadEnabled";
@@ -44,6 +47,12 @@ const PREFS_TO_WATCH = [
   SHIELD_ENABLED_PREF,
   API_URL_PREF,
 ];
+
+XPCOMUtils.defineLazyGetter(this, "gRemoteSettingsClient", () => {
+  return RemoteSettings(REMOTE_SETTINGS_COLLECTION, {
+    filterFunc: async recipe => (await RecipeRunner.checkFilter(recipe)) ? recipe : null,
+  });
+});
 
 /**
  * cacheProxy returns an object Proxy that will memoize properties of the target.
@@ -202,39 +211,17 @@ var RecipeRunner = {
     }
 
     // Fetch recipes before execution in case we fail and exit early.
-    let recipes;
+    let recipesToRun;
     try {
-      recipes = await NormandyApi.fetchRecipes({enabled: true});
-      log.debug(
-        `Fetched ${recipes.length} recipes from the server: ` +
-        recipes.map(r => r.name).join(", ")
-      );
-
+      recipesToRun = await this.loadRecipes();
     } catch (e) {
-      const apiUrl = Services.prefs.getCharPref(API_URL_PREF);
-      log.error(`Could not fetch recipes from ${apiUrl}: "${e}"`);
-
-      let status = Uptake.RUNNER_SERVER_ERROR;
-      if (/NetworkError/.test(e)) {
-        status = Uptake.RUNNER_NETWORK_ERROR;
-      } else if (e instanceof NormandyApi.InvalidSignatureError) {
-        status = Uptake.RUNNER_INVALID_SIGNATURE;
-      }
-      Uptake.reportRunner(status);
+      // The legacy call to `Normandy.fetchRecipes()` can throw.
       return;
     }
 
     const actions = new ActionsManager();
     await actions.fetchRemoteActions();
     await actions.preExecution();
-
-    // Evaluate recipe filters
-    const recipesToRun = [];
-    for (const recipe of recipes) {
-      if (await this.checkFilter(recipe)) {
-        recipesToRun.push(recipe);
-      }
-    }
 
     // Execute recipes, if we have any.
     if (recipesToRun.length === 0) {
@@ -250,6 +237,46 @@ var RecipeRunner = {
     Uptake.reportRunner(Uptake.RUNNER_SUCCESS);
   },
 
+  /**
+   * Return the list of recipes to run, filtered for the current environment.
+   */
+  async loadRecipes() {
+    // If RemoteSettings is enabled, we read the list of recipes from there.
+    // The JEXL filtering is done via the provided callback.
+    if (await FeatureGate.isEnabled("normandy-remote-settings")) {
+      return gRemoteSettingsClient.get();
+    }
+    // Obtain the recipes from the Normandy server (legacy).
+    let recipes;
+    try {
+      recipes = await NormandyApi.fetchRecipes({enabled: true});
+      log.debug(
+        `Fetched ${recipes.length} recipes from the server: ` +
+        recipes.map(r => r.name).join(", ")
+      );
+    } catch (e) {
+      const apiUrl = Services.prefs.getCharPref(API_URL_PREF);
+      log.error(`Could not fetch recipes from ${apiUrl}: "${e}"`);
+
+      let status = Uptake.RUNNER_SERVER_ERROR;
+      if (/NetworkError/.test(e)) {
+        status = Uptake.RUNNER_NETWORK_ERROR;
+      } else if (e instanceof NormandyApi.InvalidSignatureError) {
+        status = Uptake.RUNNER_INVALID_SIGNATURE;
+      }
+      Uptake.reportRunner(status);
+      throw e;
+    }
+    // Evaluate recipe filters
+    const recipesToRun = [];
+    for (const recipe of recipes) {
+      if (await this.checkFilter(recipe)) {
+        recipesToRun.push(recipe);
+      }
+    }
+    return recipesToRun;
+  },
+
   getFilterContext(recipe) {
     const environment = cacheProxy(ClientEnvironment);
     environment.recipe = {
@@ -257,6 +284,8 @@ var RecipeRunner = {
       arguments: recipe.arguments,
     };
     return {
+      env: environment,
+      // Backwards compatibility -- see bug 1477255.
       normandy: environment,
     };
   },
@@ -270,13 +299,24 @@ var RecipeRunner = {
    */
   async checkFilter(recipe) {
     const context = this.getFilterContext(recipe);
+    let result;
     try {
-      const result = await FilterExpressions.eval(recipe.filter_expression, context);
-      return !!result;
+      result = await FilterExpressions.eval(recipe.filter_expression, context);
     } catch (err) {
       log.error(`Error checking filter for "${recipe.name}". Filter: [${recipe.filter_expression}]. Error: "${err}"`);
+      Uptake.reportRecipe(recipe, Uptake.RECIPE_FILTER_BROKEN);
       return false;
     }
+
+    if (!result) {
+      // This represents a terminal state for the given recipe, so
+      // report its outcome. Others are reported when executed in
+      // ActionsManager.
+      Uptake.reportRecipe(recipe, Uptake.RECIPE_DIDNT_MATCH_FILTER);
+      return false;
+    }
+
+    return true;
   },
 
   /**
@@ -305,5 +345,19 @@ var RecipeRunner = {
       Services.prefs.setCharPref(API_URL_PREF, oldApiUrl);
       this.clearCaches();
     }
+  },
+
+  /**
+   * Offer a mechanism to get access to the lazily-instantiated
+   * gRemoteSettingsClient, because if someone instantiates it
+   * themselves, it won't have the options we provided in this module,
+   * and it will prevent instantiation by this module later.
+   *
+   * This is only meant to be used in testing, where it is a
+   * convenient hook to store data in the underlying remote-settings
+   * collection.
+   */
+  get _remoteSettingsClientForTesting() {
+    return gRemoteSettingsClient;
   },
 };

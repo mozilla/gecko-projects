@@ -13,6 +13,7 @@
 #include "nsStringFwd.h"
 #include "mozilla/Logging.h"
 #include "mozilla/BasePrincipal.h"
+#include "mozilla/AlreadyAddRefed.h"
 #include "ARefBase.h"
 
 //-----------------------------------------------------------------------------
@@ -70,7 +71,7 @@ class nsHttpConnectionInfo final : public ARefBase {
   int32_t RoutedPort() const { return mRoutedPort; }
 
   // OK to treat these as an infalible allocation
-  nsHttpConnectionInfo *Clone() const;
+  already_AddRefed<nsHttpConnectionInfo> Clone() const;
   void CloneAsDirectRoute(nsHttpConnectionInfo **outParam);
   MOZ_MUST_USE nsresult CreateWildCard(nsHttpConnectionInfo **outParam);
 
@@ -133,6 +134,12 @@ class nsHttpConnectionInfo final : public ARefBase {
   void SetTrrDisabled(bool aNoTrr);
   bool GetTrrDisabled() const { return mTrrDisabled; }
 
+  void SetIPv4Disabled(bool aNoIPv4);
+  bool GetIPv4Disabled() const { return mIPv4Disabled; }
+
+  void SetIPv6Disabled(bool aNoIPv6);
+  bool GetIPv6Disabled() const { return mIPv6Disabled; }
+
   const nsCString &GetNPNToken() { return mNPNToken; }
   const nsCString &GetUsername() { return mUsername; }
 
@@ -190,6 +197,8 @@ class nsHttpConnectionInfo final : public ARefBase {
   uint32_t mTlsFlags;
   uint16_t mTrrUsed : 1;
   uint16_t mTrrDisabled : 1;
+  uint16_t mIPv4Disabled : 1;
+  uint16_t mIPv6Disabled : 1;
 
   bool mLessThanTls13;  // This will be set to true if we negotiate less than
                         // tls1.3. If the tls version is till not know or it

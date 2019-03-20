@@ -26,13 +26,15 @@ using namespace mozilla::layout;
 
 nsContainerFrame* NS_NewFieldSetFrame(nsIPresShell* aPresShell,
                                       ComputedStyle* aStyle) {
-  return new (aPresShell) nsFieldSetFrame(aStyle);
+  return new (aPresShell) nsFieldSetFrame(aStyle, aPresShell->GetPresContext());
 }
 
 NS_IMPL_FRAMEARENA_HELPERS(nsFieldSetFrame)
 
-nsFieldSetFrame::nsFieldSetFrame(ComputedStyle* aStyle)
-    : nsContainerFrame(aStyle, kClassID), mLegendRect(GetWritingMode()) {
+nsFieldSetFrame::nsFieldSetFrame(ComputedStyle* aStyle,
+                                 nsPresContext* aPresContext)
+    : nsContainerFrame(aStyle, aPresContext, kClassID),
+      mLegendRect(GetWritingMode()) {
   mLegendSpace = 0;
 }
 
@@ -69,7 +71,8 @@ nsRect nsFieldSetFrame::VisualBorderRectRelativeToSelf() const {
 
 nsIFrame* nsFieldSetFrame::GetInner() const {
   nsIFrame* last = mFrames.LastChild();
-  if (last && last->Style()->GetPseudo() == nsCSSAnonBoxes::fieldsetContent()) {
+  if (last &&
+      last->Style()->GetPseudoType() == PseudoStyleType::fieldsetContent) {
     return last;
   }
   MOZ_ASSERT(mFrames.LastChild() == mFrames.FirstChild());
@@ -108,7 +111,7 @@ class nsDisplayFieldSetBorder final : public nsDisplayItem {
       mozilla::wr::DisplayListBuilder& aBuilder,
       mozilla::wr::IpcResourceUpdateQueue& aResources,
       const StackingContextHelper& aSc,
-      mozilla::layers::WebRenderLayerManager* aManager,
+      mozilla::layers::RenderRootStateManager* aManager,
       nsDisplayListBuilder* aDisplayListBuilder) override;
   virtual nsRect GetBounds(nsDisplayListBuilder* aBuilder,
                            bool* aSnap) const override;
@@ -159,7 +162,7 @@ bool nsDisplayFieldSetBorder::CreateWebRenderCommands(
     mozilla::wr::DisplayListBuilder& aBuilder,
     mozilla::wr::IpcResourceUpdateQueue& aResources,
     const StackingContextHelper& aSc,
-    mozilla::layers::WebRenderLayerManager* aManager,
+    mozilla::layers::RenderRootStateManager* aManager,
     nsDisplayListBuilder* aDisplayListBuilder) {
   auto frame = static_cast<nsFieldSetFrame*>(mFrame);
   auto offset = ToReferenceFrame();
@@ -196,7 +199,7 @@ void nsFieldSetFrame::BuildDisplayList(nsDisplayListBuilder* aBuilder,
   // the background/border display item won't do anything, and if it isn't
   // empty, we need to paint the outline
   if (!(GetStateBits() & NS_FRAME_IS_OVERFLOW_CONTAINER) &&
-      IsVisibleForPainting(aBuilder)) {
+      IsVisibleForPainting()) {
     if (StyleEffects()->mBoxShadow) {
       aLists.BorderBackground()->AppendToTop(
           MakeDisplayItem<nsDisplayBoxShadowOuter>(aBuilder, this));

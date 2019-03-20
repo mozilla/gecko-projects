@@ -9,6 +9,7 @@
 #define __MOZ_CONTAINER_H__
 
 #include <gtk/gtk.h>
+#include <functional>
 
 /*
  * MozContainer
@@ -75,10 +76,12 @@ struct _MozContainer {
   struct wl_surface *surface;
   struct wl_subsurface *subsurface;
   struct wl_egl_window *eglwindow;
-  gboolean needs_clear;
-  gboolean parent_surface_committed;
-  gulong parent_surface_committed_handler;
+  struct wl_callback *frame_callback_handler;
+  gboolean surface_needs_clear;
+  gboolean ready_to_draw;
+  std::function<void(void)> inital_draw_cb;
 #endif
+  gboolean force_default_visual;
 };
 
 struct _MozContainerClass {
@@ -89,14 +92,18 @@ GType moz_container_get_type(void);
 GtkWidget *moz_container_new(void);
 void moz_container_put(MozContainer *container, GtkWidget *child_widget, gint x,
                        gint y);
-void moz_container_move(MozContainer *container, GtkWidget *child_widget,
-                        gint x, gint y, gint width, gint height);
+void moz_container_force_default_visual(MozContainer *container);
 
 #ifdef MOZ_WAYLAND
 struct wl_surface *moz_container_get_wl_surface(MozContainer *container);
 struct wl_egl_window *moz_container_get_wl_egl_window(MozContainer *container);
+
 gboolean moz_container_has_wl_egl_window(MozContainer *container);
-gboolean moz_container_needs_clear(MozContainer *container);
+gboolean moz_container_surface_needs_clear(MozContainer *container);
+void moz_container_scale_changed(MozContainer *container,
+                                 GtkAllocation *aAllocation);
+void moz_container_set_initial_draw_callback(
+    MozContainer *container, std::function<void(void)> inital_draw_cb);
 #endif
 
 #endif /* __MOZ_CONTAINER_H__ */

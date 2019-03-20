@@ -6,7 +6,7 @@
 
 var EXPORTED_SYMBOLS = ["GeckoViewTab"];
 
-ChromeUtils.import("resource://gre/modules/GeckoViewModule.jsm");
+const {GeckoViewModule} = ChromeUtils.import("resource://gre/modules/GeckoViewModule.jsm");
 
 // Based on the "Tab" prototype from mobile/android/chrome/content/browser.js
 class Tab {
@@ -53,6 +53,12 @@ class GeckoViewTab extends GeckoViewModule {
       getBrowserForOuterWindowID: function(aID) {
         return this.browser;
       },
+
+      getBrowserForDocument: function(aDocument) {
+        return this.selectedBrowser;
+      },
     };
   }
 }
+
+const {debug, warn} = GeckoViewTab.initLogging("GeckoViewTab"); // eslint-disable-line no-unused-vars

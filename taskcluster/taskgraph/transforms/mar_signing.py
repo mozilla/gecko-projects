@@ -11,6 +11,7 @@ import os
 from taskgraph.transforms.base import TransformSequence
 from taskgraph.util.attributes import copy_attributes_from_dependent_job, sorted_unique_list
 from taskgraph.util.scriptworker import (
+    add_scope_prefix,
     get_signing_cert_scope_per_platform,
     get_worker_type_for_scope,
 )
@@ -20,6 +21,16 @@ from taskgraph.util.treeherder import join_symbol
 
 import logging
 logger = logging.getLogger(__name__)
+
+SIGNING_FORMATS = {
+    'mar-signing-autograph-stage': {
+        'target.complete.mar': ['autograph_stage_mar384'],
+    },
+    'default': {
+        'target.complete.mar': ['autograph_hash_only_mar384'],
+        'target.bz2.complete.mar': ['mar'],
+    },
+}
 
 transforms = TransformSequence()
 
@@ -65,16 +76,18 @@ def generate_partials_artifacts(job, release_history, platform, locale=None):
     return upstream_artifacts
 
 
-def generate_complete_artifacts(job):
+def generate_complete_artifacts(job, kind):
     upstream_artifacts = []
+    if kind not in SIGNING_FORMATS:
+        kind = 'default'
     for artifact in job.release_artifacts:
         basename = os.path.basename(artifact)
-        if basename.endswith('.complete.mar'):
+        if basename in SIGNING_FORMATS[kind]:
             upstream_artifacts.append({
                 "taskId": {"task-reference": '<{}>'.format(job.kind)},
                 "taskType": 'build',
                 "paths": [artifact],
-                "formats": ["autograph_hash_only_mar384"],
+                "formats": SIGNING_FORMATS[kind][basename],
             })
 
     return upstream_artifacts
@@ -87,13 +100,10 @@ def make_task_description(config, jobs):
         locale = dep_job.attributes.get('locale')
 
         treeherder = job.get('treeherder', {})
-        treeherder['symbol'] = join_symbol(
-            job.get('treeherder-group', 'ms'),
-            locale or 'N'
+        treeherder.setdefault(
+            'symbol', join_symbol(job.get('treeherder-group', 'ms'), locale or 'N')
         )
 
-        dep_th_platform = dep_job.task.get('extra', {}).get(
-            'treeherder', {}).get('machine', {}).get('platform', '')
         label = job.get('label', "{}-{}".format(config.kind, dep_job.label))
         dep_th_platform = dep_job.task.get('extra', {}).get(
             'treeherder', {}).get('machine', {}).get('platform', '')
@@ -102,8 +112,7 @@ def make_task_description(config, jobs):
         treeherder.setdefault('kind', 'build')
         treeherder.setdefault('tier', 1)
 
-        dependent_kind = str(dep_job.kind)
-        dependencies = {dependent_kind: dep_job.label}
+        dependencies = {dep_job.kind: dep_job.label}
         signing_dependencies = dep_job.dependencies
         # This is so we get the build task etc in our dependencies to
         # have better beetmover support.
@@ -123,17 +132,19 @@ def make_task_description(config, jobs):
             upstream_artifacts = generate_partials_artifacts(
                 dep_job, config.params['release_history'], balrog_platform, locale)
         else:
-            upstream_artifacts = generate_complete_artifacts(dep_job)
+            upstream_artifacts = generate_complete_artifacts(dep_job, config.kind)
 
         build_platform = dep_job.attributes.get('build_platform')
-        is_nightly = dep_job.attributes.get('nightly')
+        is_nightly = job.get('nightly', dep_job.attributes.get('nightly'))
         signing_cert_scope = get_signing_cert_scope_per_platform(
             build_platform, is_nightly, config
         )
 
-        scopes = [signing_cert_scope, 'project:releng:signing:format:autograph_hash_only_mar384']
-        if any("mar" in upstream_details["formats"] for upstream_details in upstream_artifacts):
-            scopes.append('project:releng:signing:format:mar')
+        scopes = [signing_cert_scope] + list({
+            add_scope_prefix(config, 'signing:format:{}'.format(format))
+            for artifact in upstream_artifacts
+            for format in artifact['formats']
+        })
 
         task = {
             'label': label,
@@ -146,7 +157,8 @@ def make_task_description(config, jobs):
             'dependencies': dependencies,
             'attributes': attributes,
             'scopes': scopes,
-            'run-on-projects': dep_job.attributes.get('run_on_projects'),
+            'run-on-projects': job.get('run-on-projects',
+                                       dep_job.attributes.get('run_on_projects')),
             'treeherder': treeherder,
         }
 

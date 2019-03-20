@@ -5,7 +5,7 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "MediaStreamAudioDestinationNode.h"
-#include "nsIDocument.h"
+#include "mozilla/dom/Document.h"
 #include "mozilla/dom/MediaStreamAudioDestinationNodeBinding.h"
 #include "AudioNodeEngine.h"
 #include "AudioNodeStream.h"
@@ -72,7 +72,7 @@ MediaStreamAudioDestinationNode::MediaStreamAudioDestinationNode(
       mDOMStream(DOMAudioNodeMediaStream::CreateTrackUnionStreamAsInput(
           GetOwner(), this, aContext->Graph())) {
   // Ensure an audio track with the correct ID is exposed to JS
-  nsIDocument* doc = aContext->GetParentObject()->GetExtantDoc();
+  Document* doc = aContext->GetParentObject()->GetExtantDoc();
   RefPtr<MediaStreamTrackSource> source =
       new AudioDestinationTrackSource(this, doc->NodePrincipal());
   RefPtr<MediaStreamTrack> track = mDOMStream->CreateDOMTrack(
@@ -90,7 +90,8 @@ MediaStreamAudioDestinationNode::MediaStreamAudioDestinationNode(
       outputStream->AllocateInputPort(mStream, AudioNodeStream::AUDIO_TRACK);
 }
 
-/* static */ already_AddRefed<MediaStreamAudioDestinationNode>
+/* static */
+already_AddRefed<MediaStreamAudioDestinationNode>
 MediaStreamAudioDestinationNode::Create(AudioContext& aAudioContext,
                                         const AudioNodeOptions& aOptions,
                                         ErrorResult& aRv) {

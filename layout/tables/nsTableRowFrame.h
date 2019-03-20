@@ -80,13 +80,17 @@ class nsTableRowFrame : public nsContainerFrame {
   inline nsTableCellFrame* GetFirstCell() const;
 
   /** calls Reflow for all of its child cells.
+   *
    * Cells with rowspan=1 are all set to the same height and stacked
-   * horizontally. <P> Cells are not split unless absolutely necessary. <P>
+   * horizontally.
+   *
+   * Cells are not split unless absolutely necessary.
+   *
    * Cells are resized in nsTableFrame::BalanceColumnWidths and
    * nsTableFrame::ShrinkWrapChildren
    *
-   * @param aDesiredSize width set to width of the sum of the cells, height set
-   * to height of cells with rowspan=1.
+   * @param aDesiredSize width set to width of the sum of the cells,
+   *                     height set to height of cells with rowspan=1.
    *
    * @see nsIFrame::Reflow
    * @see nsTableFrame::BalanceColumnWidths
@@ -250,7 +254,8 @@ class nsTableRowFrame : public nsContainerFrame {
   /** protected constructor.
    * @see NewFrame
    */
-  explicit nsTableRowFrame(ComputedStyle* aStyle, ClassID aID = kClassID);
+  explicit nsTableRowFrame(ComputedStyle* aStyle, nsPresContext* aPresContext,
+                           ClassID aID = kClassID);
 
   void InitChildReflowInput(nsPresContext& aPresContext,
                             const mozilla::LogicalSize& aAvailSize,
@@ -292,8 +297,8 @@ class nsTableRowFrame : public nsContainerFrame {
   // cell if mHasFixedBSize is set
   nscoord mStyleFixedBSize;
 
-  // max-ascent and max-descent amongst all cells that have 'vertical-align:
-  // baseline'
+  // max-ascent and max-descent amongst all cells that have
+  // 'vertical-align: baseline'
   nscoord mMaxCellAscent;   // does include cells with rowspan > 1
   nscoord mMaxCellDescent;  // does *not* include cells with rowspan > 1
 

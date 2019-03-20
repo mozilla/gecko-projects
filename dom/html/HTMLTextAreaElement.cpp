@@ -23,7 +23,7 @@
 #include "nsIComponentManager.h"
 #include "nsIConstraintValidation.h"
 #include "nsIControllers.h"
-#include "nsIDocument.h"
+#include "mozilla/dom/Document.h"
 #include "nsIFormControlFrame.h"
 #include "nsIFormControl.h"
 #include "nsIForm.h"
@@ -258,7 +258,7 @@ HTMLTextAreaElement::EnablePreview() {
 
   mIsPreviewEnabled = true;
   // Reconstruct the frame to append an anonymous preview node
-  nsLayoutUtils::PostRestyleEvent(this, nsRestyleHint(0),
+  nsLayoutUtils::PostRestyleEvent(this, RestyleHint{0},
                                   nsChangeHint_ReconstructFrame);
 }
 
@@ -799,7 +799,7 @@ EventStates HTMLTextAreaElement::IntrinsicState() const {
   return state;
 }
 
-nsresult HTMLTextAreaElement::BindToTree(nsIDocument* aDocument,
+nsresult HTMLTextAreaElement::BindToTree(Document* aDocument,
                                          nsIContent* aParent,
                                          nsIContent* aBindingParent) {
   nsresult rv = nsGenericHTMLFormElementWithState::BindToTree(
@@ -1111,9 +1111,10 @@ HTMLTextAreaElement::InitializeKeyboardEventListeners() {
 }
 
 NS_IMETHODIMP_(void)
-HTMLTextAreaElement::OnValueChanged(bool aNotify,
-                                    bool aWasInteractiveUserChange) {
-  mLastValueChangeWasInteractive = aWasInteractiveUserChange;
+HTMLTextAreaElement::OnValueChanged(bool aNotify, ValueChangeKind aKind) {
+  if (aKind != ValueChangeKind::Internal) {
+    mLastValueChangeWasInteractive = aKind == ValueChangeKind::UserInteraction;
+  }
 
   // Update the validity state
   bool validBefore = IsValid();

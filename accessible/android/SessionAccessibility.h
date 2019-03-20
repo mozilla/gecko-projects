@@ -75,6 +75,7 @@ class SessionAccessibility final
   using Base::DisposeNative;
   jni::Object::LocalRef GetNodeInfo(int32_t aID);
   void SetText(int32_t aID, jni::String::Param aText);
+  void Click(int32_t aID);
   void StartNativeAccessibility();
 
   // Event methods
@@ -93,7 +94,7 @@ class SessionAccessibility final
                             bool aFromUser);
   void SendSelectedEvent(AccessibleWrap* aAccessible, bool aSelected);
   void SendClickedEvent(AccessibleWrap* aAccessible, bool aChecked);
-  void SendWindowContentChangedEvent(AccessibleWrap* aAccessible);
+  void SendWindowContentChangedEvent();
   void SendWindowStateChangedEvent(AccessibleWrap* aAccessible);
 
   // Cache methods

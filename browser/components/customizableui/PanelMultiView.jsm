@@ -104,8 +104,8 @@ var EXPORTED_SYMBOLS = [
   "PanelView",
 ];
 
-ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
-ChromeUtils.import("resource://gre/modules/Services.jsm");
+const {XPCOMUtils} = ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
+const {Services} = ChromeUtils.import("resource://gre/modules/Services.jsm");
 ChromeUtils.defineModuleGetter(this, "CustomizableUI",
   "resource:///modules/CustomizableUI.jsm");
 
@@ -604,6 +604,17 @@ var PanelMultiView = class extends AssociatedToNode {
    *        subview when a "title" attribute is not specified.
    */
   showSubView(viewIdOrNode, anchor) {
+    // When autoPosition is true, the popup window manager would attempt to re-position
+    // the panel as subviews are opened and it changes size. The resulting popoppositioned
+    // events triggers the binding's arrow position adjustment - and its reflow.
+    // This is not needed here, as we calculated and set maxHeight so it is known
+    // to fit the screen while open.
+    // We do need autoposition for cases where the panel's anchor moves, which can happen
+    // especially with the "page actions" button in the URL bar (see bug 1520607), so
+    // we only set this to false when showing a subview, and set it back to true after we
+    // activate the subview.
+    this._panel.autoPosition = false;
+
     this._showSubView(viewIdOrNode, anchor).catch(Cu.reportError);
   }
   async _showSubView(viewIdOrNode, anchor) {
@@ -807,6 +818,9 @@ var PanelMultiView = class extends AssociatedToNode {
         panelView.focusWhenActive = false;
       }
       panelView.dispatchCustomEvent("ViewShown");
+
+      // Re-enable panel autopositioning.
+      this._panel.autoPosition = true;
     }
   }
 
@@ -1043,11 +1057,13 @@ var PanelMultiView = class extends AssociatedToNode {
     // view based on the space that will be available. We cannot just use
     // window.screen.availTop and availHeight because these may return an
     // incorrect value when the window spans multiple screens.
-    let anchorBox = this._panel.anchorNode.boxObject;
-    let screen = this._screenManager.screenForRect(anchorBox.screenX,
-                                                   anchorBox.screenY,
-                                                   anchorBox.width,
-                                                   anchorBox.height);
+    let anchor = this._panel.anchorNode;
+    let anchorRect = anchor.getBoundingClientRect();
+
+    let screen = this._screenManager.screenForRect(anchor.screenX,
+                                                   anchor.screenY,
+                                                   anchorRect.width,
+                                                   anchorRect.height);
     let availTop = {}, availHeight = {};
     screen.GetAvailRect({}, availTop, {}, availHeight);
     let cssAvailTop = availTop.value / screen.defaultCSSScaleFactor;
@@ -1056,9 +1072,9 @@ var PanelMultiView = class extends AssociatedToNode {
     // based on whether the panel will open towards the top or the bottom.
     let maxHeight;
     if (this._panel.alignmentPosition.startsWith("before_")) {
-      maxHeight = anchorBox.screenY - cssAvailTop;
+      maxHeight = anchor.screenY - cssAvailTop;
     } else {
-      let anchorScreenBottom = anchorBox.screenY + anchorBox.height;
+      let anchorScreenBottom = anchor.screenY + anchorRect.height;
       let cssAvailHeight = availHeight.value / screen.defaultCSSScaleFactor;
       maxHeight = cssAvailTop + cssAvailHeight - anchorScreenBottom;
     }
@@ -1104,15 +1120,6 @@ var PanelMultiView = class extends AssociatedToNode {
         break;
       }
       case "popuppositioned": {
-        // When autoPosition is true, the popup window manager would attempt to re-position
-        // the panel as subviews are opened and it changes size. The resulting popoppositioned
-        // events triggers the binding's arrow position adjustment - and its reflow.
-        // This is not needed here, as we calculated and set maxHeight so it is known
-        // to fit the screen while open.
-        // autoPosition gets reset after each popuppositioned event, and when the
-        // popup closes, so we must set it back to false each time.
-        this._panel.autoPosition = false;
-
         if (this._panel.state == "showing") {
           let maxHeight = this._calculateMaxHeight();
           this._viewStack.style.maxHeight = maxHeight + "px";
@@ -1328,8 +1335,9 @@ var PanelView = class extends AssociatedToNode {
         if (element.closest("[hidden]")) {
           continue;
         }
+
         // Take the label for toolbarbuttons; it only exists on those elements.
-        element = element.labelElement || element;
+        element = element.multilineLabel || element;
 
         let bounds = element.getBoundingClientRect();
         let previous = gMultiLineElementsMap.get(element);
@@ -1397,7 +1405,7 @@ var PanelView = class extends AssociatedToNode {
     }
 
     let navigableElements = Array.from(this.node.querySelectorAll(
-      ":-moz-any(button,toolbarbutton,menulist,.text-link):not([disabled])"));
+      ":-moz-any(button,toolbarbutton,menulist,.text-link,.navigable):not([disabled])"));
     return this.__navigableElements = navigableElements.filter(element => {
       // Set the "tabindex" attribute to make sure the element is focusable.
       if (!element.hasAttribute("tabindex")) {

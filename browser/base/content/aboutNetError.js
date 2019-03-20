@@ -134,6 +134,11 @@ function disallowCertOverridesIfNeeded() {
       let stsReturnButtonText = document.getElementById("stsReturnButtonText").textContent;
       document.getElementById("returnButton").textContent = stsReturnButtonText;
       document.getElementById("advancedPanelReturnButton").textContent = stsReturnButtonText;
+
+      let stsMitmWhatCanYouDoAboutIt3 =
+        document.getElementById("stsMitmWhatCanYouDoAboutIt3").innerHTML;
+      // eslint-disable-next-line no-unsanitized/property
+      document.getElementById("mitmWhatCanYouDoAboutIt3").innerHTML = stsMitmWhatCanYouDoAboutIt3;
     }
   }
 }
@@ -217,30 +222,12 @@ function initPage() {
 
   if (err == "sslv3Used") {
     document.getElementById("learnMoreContainer").style.display = "block";
-    let learnMoreLink = document.getElementById("learnMoreLink");
-    learnMoreLink.href = "https://support.mozilla.org/kb/how-resolve-sslv3-error-messages-firefox";
     document.body.className = "certerror";
   }
 
   // remove undisplayed errors to avoid bug 39098
   var errContainer = document.getElementById("errorContainer");
   errContainer.remove();
-
-  if (className && className != "expertBadCert") {
-    // Associate a CSS class with the root of the page, if one was passed in,
-    // to allow custom styling.
-    // Not "expertBadCert" though, don't want to deal with the favicon
-    document.documentElement.className = className;
-
-    // Also, if they specified a CSS class, they must supply their own
-    // favicon.  In order to trigger the browser to repaint though, we
-    // need to remove/add the link element.
-    var favicon = document.getElementById("favicon");
-    var faviconParent = favicon.parentNode;
-    faviconParent.removeChild(favicon);
-    favicon.setAttribute("href", "chrome://global/skin/icons/" + className + "_favicon.png");
-    faviconParent.appendChild(favicon);
-  }
 
   if (err == "remoteXUL") {
     // Remove the "Try again" button for remote XUL errors given that
@@ -259,13 +246,6 @@ function initPage() {
     if (getErrorCode() == "nssFailure2") {
       let shortDesc = document.getElementById("errorShortDescText").textContent;
       document.getElementById("learnMoreContainer").style.display = "block";
-      let learnMoreLink = document.getElementById("learnMoreLink");
-      // nssFailure2 also gets us other non-overrideable errors. Choose
-      // a "learn more" link based on description:
-      if (shortDesc.includes("MOZILLA_PKIX_ERROR_KEY_PINNING_FAILURE")) {
-        learnMoreLink.href = "https://support.mozilla.org/kb/certificate-pinning-reports";
-      }
-
       var options = JSON.parse(evt.detail);
       if (options && options.enabled) {
         var checkbox = document.getElementById("automaticallyReportInFuture");
@@ -315,9 +295,23 @@ function initPage() {
   }
 }
 
+// This function centers the error container after its content updates.
+// It is currently duplicated in NetErrorChild.jsm to avoid having to do
+// async communication to the page that would result in flicker.
+// TODO(johannh): Get rid of this duplication.
 function updateContainerPosition() {
   let textContainer = document.getElementById("text-container");
-  textContainer.style.marginTop = `calc(50vh - ${textContainer.clientHeight / 2}px)`;
+  // Using the vh CSS property our margin adapts nicely to window size changes.
+  // Unfortunately, this doesn't work correctly in iframes, which is why we need
+  // to manually compute the height there.
+  if (window.parent == window) {
+    textContainer.style.marginTop = `calc(50vh - ${textContainer.clientHeight / 2}px)`;
+  } else {
+    let offset = (document.documentElement.clientHeight / 2) - (textContainer.clientHeight / 2);
+    if (offset > 0) {
+      textContainer.style.marginTop = `${offset}px`;
+    }
+  }
 }
 
 function initPageCaptivePortal() {

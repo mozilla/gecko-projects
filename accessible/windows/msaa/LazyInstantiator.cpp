@@ -11,7 +11,7 @@
 #include "mozilla/a11y/Compatibility.h"
 #include "mozilla/a11y/Platform.h"
 #include "mozilla/Assertions.h"
-#include "mozilla/mscom/MainThreadRuntime.h"
+#include "mozilla/mscom/ProcessRuntime.h"
 #include "mozilla/mscom/Registration.h"
 #include "mozilla/UniquePtr.h"
 #include "nsAccessibilityService.h"
@@ -25,7 +25,7 @@
 #include <oaidl.h>
 
 #if !defined(STATE_SYSTEM_NORMAL)
-#define STATE_SYSTEM_NORMAL (0)
+#  define STATE_SYSTEM_NORMAL (0)
 #endif  // !defined(STATE_SYSTEM_NORMAL)
 
 namespace mozilla {
@@ -313,7 +313,7 @@ LazyInstantiator::MaybeResolveRoot() {
   }
 
   if (GetAccService() ||
-      ShouldInstantiate(mscom::MainThreadRuntime::GetClientThreadId())) {
+      ShouldInstantiate(mscom::ProcessRuntime::GetClientThreadId())) {
     mWeakRootAccWrap = ResolveRootAccWrap();
     if (!mWeakRootAccWrap) {
       return E_POINTER;

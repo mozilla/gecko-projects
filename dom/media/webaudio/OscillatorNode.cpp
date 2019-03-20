@@ -171,7 +171,7 @@ class OscillatorNodeEngine final : public AudioNodeEngine {
       detune = mDetune.GetValueAtTime(ticks, count);
     }
 
-    float finalFrequency = frequency * pow(2., detune / 1200.);
+    float finalFrequency = frequency * exp2(detune / 1200.);
     float signalPeriod = mSource->SampleRate() / finalFrequency;
     mRecomputeParameters = false;
 
@@ -386,7 +386,8 @@ OscillatorNode::OscillatorNode(AudioContext* aContext)
   mStream->AddMainThreadListener(this);
 }
 
-/* static */ already_AddRefed<OscillatorNode> OscillatorNode::Create(
+/* static */
+already_AddRefed<OscillatorNode> OscillatorNode::Create(
     AudioContext& aAudioContext, const OscillatorOptions& aOptions,
     ErrorResult& aRv) {
   if (aAudioContext.CheckClosed(aRv)) {
@@ -488,7 +489,7 @@ void OscillatorNode::Start(double aWhen, ErrorResult& aRv) {
                                   aWhen);
 
   MarkActive();
-  Context()->NotifyScheduledSourceNodeStarted();
+  Context()->StartBlockedAudioContextIfAllowed();
 }
 
 void OscillatorNode::Stop(double aWhen, ErrorResult& aRv) {

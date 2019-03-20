@@ -11,7 +11,7 @@ const TEST_URI = TEST_PATH + TEST_FILE;
 const NET_PREF = "devtools.webconsole.filter.net";
 const XHR_PREF = "devtools.webconsole.filter.netxhr";
 const { l10n } = require("devtools/client/webconsole/utils/messages");
-const LEARN_MORE_URI = "https://developer.mozilla.org/docs/Web/HTTP/Status/200" + STATUS_CODES_GA_PARAMS;
+const LEARN_MORE_URI = "https://developer.mozilla.org/docs/Web/HTTP/Status/200" + GA_PARAMS;
 
 pushPref(NET_PREF, true);
 pushPref(XHR_PREF, true);
@@ -23,7 +23,7 @@ add_task(async function task() {
   const target = await TargetFactory.forTab(currentTab);
   const toolbox = gDevTools.getToolbox(target);
   const {ui} = toolbox.getCurrentPanel().hud;
-  const onNetworkMessageUpdate = ui.jsterm.hud.once("network-message-updated");
+  const onNetworkMessageUpdate = ui.once("network-message-updated");
 
   // Fire an XHR POST request.
   await ContentTask.spawn(gBrowser.selectedBrowser, null, function() {
@@ -55,7 +55,7 @@ add_task(async function task() {
     const onConsoleMenuOpened = [
       rightClickMouseEvent,
       rightClickCtrlOrCmdKeyMouseEvent,
-    ].includes(clickEvent) ? hud.ui.consoleOutput.once("menu-open") : null;
+    ].includes(clickEvent) ? hud.ui.wrapper.once("menu-open") : null;
 
     const { link, where } = await simulateLinkClick(statusCodeNode, testCase.clickEvent);
     is(link, testCase.link, `Clicking the provided link opens ${link}`);

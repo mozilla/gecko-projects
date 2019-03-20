@@ -1,6 +1,6 @@
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
- * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 //! High-level interface to CSS selector matching.
 
@@ -469,11 +469,9 @@ trait PrivateMatchMethods: TElement {
         pseudo: Option<&PseudoElement>,
     ) -> ChildCascadeRequirement {
         debug!("accumulate_damage_for: {:?}", self);
-        debug_assert!(
-            !shared_context
-                .traversal_flags
-                .contains(TraversalFlags::Forgetful)
-        );
+        debug_assert!(!shared_context
+            .traversal_flags
+            .contains(TraversalFlags::Forgetful));
 
         let difference = self.compute_style_difference(old_values, new_values, pseudo);
 

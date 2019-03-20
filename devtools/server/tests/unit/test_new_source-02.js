@@ -9,6 +9,7 @@
 
 var gDebuggee;
 var gClient;
+var gTargetFront;
 var gThreadClient;
 
 function run_test() {
@@ -23,6 +24,7 @@ function run_test() {
     attachTestTabAndResume(gClient, "test-stack",
                            function(response, targetFront, threadClient) {
                              gThreadClient = threadClient;
+                             gTargetFront = targetFront;
                              test_simple_new_source();
                            });
   });
@@ -31,15 +33,26 @@ function run_test() {
 
 function test_simple_new_source() {
   gThreadClient.addOneTimeListener("paused", function() {
-    gThreadClient.addOneTimeListener("newSource", function(event, packet) {
-      Assert.equal(event, "newSource");
-      Assert.equal(packet.type, "newSource");
-      Assert.ok(!!packet.source);
-      Assert.ok(!!packet.source.url.match(/example\.com/));
+    gThreadClient.addOneTimeListener("newSource", async function(event2, packet2) {
+      // The "stopMe" eval source is emitted first.
+      Assert.equal(event2, "newSource");
+      Assert.equal(packet2.type, "newSource");
+      Assert.ok(!!packet2.source);
+      Assert.ok(packet2.source.introductionType, "eval");
 
-      finishClient(gClient);
+      gThreadClient.addOneTimeListener("newSource", function(event, packet) {
+        Assert.equal(event, "newSource");
+        Assert.equal(packet.type, "newSource");
+        dump(JSON.stringify(packet, null, 2));
+        Assert.ok(!!packet.source);
+        Assert.ok(!!packet.source.url.match(/example\.com/));
+
+        finishClient(gClient);
+      });
+
+      const consoleFront = await gTargetFront.getFront("console");
+      consoleFront.evaluateJSAsync("function f() { }\n//# sourceURL=http://example.com/code.js");
     });
-    gThreadClient.eval(null, "function f() { }\n//# sourceURL=http://example.com/code.js");
   });
 
   /* eslint-disable */

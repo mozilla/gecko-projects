@@ -27,6 +27,28 @@ InputEvent::InputEvent(EventTarget* aOwner, nsPresContext* aPresContext,
   }
 }
 
+void InputEvent::GetData(nsAString& aData) {
+  InternalEditorInputEvent* editorInputEvent = mEvent->AsEditorInputEvent();
+  MOZ_ASSERT(editorInputEvent);
+  aData = editorInputEvent->mData;
+}
+
+DataTransfer* InputEvent::GetDataTransfer() {
+  InternalEditorInputEvent* editorInputEvent = mEvent->AsEditorInputEvent();
+  MOZ_ASSERT(editorInputEvent);
+  return editorInputEvent->mDataTransfer;
+}
+
+void InputEvent::GetInputType(nsAString& aInputType) {
+  InternalEditorInputEvent* editorInputEvent = mEvent->AsEditorInputEvent();
+  MOZ_ASSERT(editorInputEvent);
+  if (editorInputEvent->mInputType == EditorInputType::eUnknown) {
+    aInputType = mInputTypeValue;
+  } else {
+    editorInputEvent->GetDOMInputTypeName(aInputType);
+  }
+}
+
 bool InputEvent::IsComposing() {
   return mEvent->AsEditorInputEvent()->mIsComposing;
 }
@@ -40,6 +62,13 @@ already_AddRefed<InputEvent> InputEvent::Constructor(
   e->InitUIEvent(aType, aParam.mBubbles, aParam.mCancelable, aParam.mView,
                  aParam.mDetail);
   InternalEditorInputEvent* internalEvent = e->mEvent->AsEditorInputEvent();
+  internalEvent->mInputType =
+      InternalEditorInputEvent::GetEditorInputType(aParam.mInputType);
+  if (internalEvent->mInputType == EditorInputType::eUnknown) {
+    e->mInputTypeValue = aParam.mInputType;
+  }
+  internalEvent->mData = aParam.mData;
+  internalEvent->mDataTransfer = aParam.mDataTransfer;
   internalEvent->mIsComposing = aParam.mIsComposing;
   e->SetTrusted(trusted);
   e->SetComposed(aParam.mComposed);

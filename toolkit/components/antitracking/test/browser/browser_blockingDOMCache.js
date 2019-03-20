@@ -29,13 +29,19 @@ AntiTracking.runTest("DOM Cache and Storage Access API",
     /* import-globals-from storageAccessAPIHelpers.js */
     await callRequestStorageAccess();
 
+    let shouldThrow = SpecialPowers.Services.prefs.getIntPref("network.cookie.cookieBehavior") == SpecialPowers.Ci.nsICookieService.BEHAVIOR_REJECT;
+
     await caches.open("wow").then(
-      _ => { ok(true, "DOM Cache can be used!"); },
-      _ => { ok(false, "DOM Cache can be used!"); });
+      _ => { ok(!shouldThrow, "DOM Cache can be used!"); },
+      _ => { ok(shouldThrow, "DOM Cache can be used!"); });
   },
   async _ => {
     /* import-globals-from storageAccessAPIHelpers.js */
-    await noStorageAccessInitially();
+    if (allowListed) {
+      await hasStorageAccessInitially();
+    } else {
+      await noStorageAccessInitially();
+    }
 
     await caches.open("wow").then(
       _ => { ok(true, "DOM Cache can be used!"); },

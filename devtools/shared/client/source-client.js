@@ -4,8 +4,7 @@
 
 "use strict";
 
-const {DebuggerClient} = require("devtools/shared/client/debugger-client");
-loader.lazyRequireGetter(this, "BreakpointClient", "devtools/shared/client/breakpoint-client");
+const {arg, DebuggerClient} = require("devtools/shared/client/debugger-client");
 
 const noop = () => {};
 
@@ -19,8 +18,6 @@ const noop = () => {};
  */
 function SourceClient(client, form) {
   this._form = form;
-  this._isBlackBoxed = form.isBlackBoxed;
-  this._isPrettyPrinted = form.isPrettyPrinted;
   this._activeThread = client;
   this._client = client.client;
 }
@@ -28,12 +25,6 @@ function SourceClient(client, form) {
 SourceClient.prototype = {
   get _transport() {
     return this._client._transport;
-  },
-  get isBlackBoxed() {
-    return this._isBlackBoxed;
-  },
-  get isPrettyPrinted() {
-    return this._isPrettyPrinted;
   },
   get actor() {
     return this._form.actor;
@@ -48,36 +39,28 @@ SourceClient.prototype = {
   /**
    * Black box this SourceClient's source.
    */
-  blackBox: DebuggerClient.requester({
-    type: "blackbox",
-  }, {
-    after: function(response) {
-      if (!response.error) {
-        this._isBlackBoxed = true;
-        if (this._activeThread) {
-          this._activeThread.emit("blackboxchange", this);
-        }
-      }
-      return response;
+  blackBox: DebuggerClient.requester(
+    {
+      type: "blackbox",
+      range: arg(0),
     },
-  }),
+    {
+      telemetry: "BLACKBOX",
+    },
+  ),
 
   /**
    * Un-black box this SourceClient's source.
    */
-  unblackBox: DebuggerClient.requester({
-    type: "unblackbox",
-  }, {
-    after: function(response) {
-      if (!response.error) {
-        this._isBlackBoxed = false;
-        if (this._activeThread) {
-          this._activeThread.emit("blackboxchange", this);
-        }
-      }
-      return response;
+  unblackBox: DebuggerClient.requester(
+    {
+      type: "unblackbox",
+      range: arg(0),
     },
-  }),
+    {
+      telemetry: "UNBLACKBOX",
+    },
+  ),
 
   /**
    * Get Executable Lines from a source
@@ -94,6 +77,24 @@ SourceClient.prototype = {
     });
   },
 
+  getBreakpointPositions: function(query) {
+    const packet = {
+      to: this._form.actor,
+      type: "getBreakpointPositions",
+      query,
+    };
+    return this._client.request(packet);
+  },
+
+  getBreakpointPositionsCompressed: function(query) {
+    const packet = {
+      to: this._form.actor,
+      type: "getBreakpointPositionsCompressed",
+      query,
+    };
+    return this._client.request(packet);
+  },
+
   /**
    * Get a long string grip for this SourceClient's source.
    */
@@ -103,39 +104,6 @@ SourceClient.prototype = {
       type: "source",
     };
     return this._client.request(packet).then(response => {
-      return this._onSourceResponse(response);
-    });
-  },
-
-  /**
-   * Pretty print this source's text.
-   */
-  prettyPrint: function(indent) {
-    const packet = {
-      to: this._form.actor,
-      type: "prettyPrint",
-      indent,
-    };
-    return this._client.request(packet).then(response => {
-      this._isPrettyPrinted = true;
-      this._activeThread._clearFrames();
-      this._activeThread.emit("prettyprintchange", this);
-      return this._onSourceResponse(response);
-    });
-  },
-
-  /**
-   * Stop pretty printing this source's text.
-   */
-  disablePrettyPrint: function() {
-    const packet = {
-      to: this._form.actor,
-      type: "disablePrettyPrint",
-    };
-    return this._client.request(packet).then(response => {
-      this._isPrettyPrinted = false;
-      this._activeThread._clearFrames();
-      this._activeThread.emit("prettyprintchange", this);
       return this._onSourceResponse(response);
     });
   },
@@ -177,77 +145,6 @@ SourceClient.prototype = {
         contentType: contentType,
       };
       return newResponse;
-    });
-  },
-
-  /**
-   * Request to set a breakpoint in the specified location.
-   *
-   * @param object location
-   *        The location and condition of the breakpoint in
-   *        the form of { line[, column, condition] }.
-   */
-  setBreakpoint: function({ line, column, condition, noSliding }) {
-    // A helper function that sets the breakpoint.
-    const doSetBreakpoint = callback => {
-      const root = this._client.mainRoot;
-      const location = {
-        line,
-        column,
-      };
-
-      const packet = {
-        to: this.actor,
-        type: "setBreakpoint",
-        location,
-        condition,
-        noSliding,
-      };
-
-      // Backwards compatibility: send the breakpoint request to the
-      // thread if the server doesn't support Debugger.Source actors.
-      if (!root.traits.debuggerSourceActors) {
-        packet.to = this._activeThread.actor;
-        packet.location.url = this.url;
-      }
-
-      return this._client.request(packet).then(response => {
-        // Ignoring errors, since the user may be setting a breakpoint in a
-        // dead script that will reappear on a page reload.
-        let bpClient;
-        if (response.actor) {
-          bpClient = new BreakpointClient(
-            this._client,
-            this,
-            response.actor,
-            location,
-            root.traits.conditionalBreakpoints ? condition : undefined
-          );
-        }
-        if (callback) {
-          callback();
-        }
-        return [response, bpClient];
-      });
-    };
-
-    // If the debuggee is paused, just set the breakpoint.
-    if (this._activeThread.paused) {
-      return doSetBreakpoint();
-    }
-    // Otherwise, force a pause in order to set the breakpoint.
-    return this._activeThread.interrupt().then(response => {
-      if (response.error) {
-        // Can't set the breakpoint if pausing failed.
-        return response;
-      }
-
-      const { type, why } = response;
-      const cleanUp = type == "paused" && why.type == "interrupted"
-            ? () => this._activeThread.resume()
-            : noop;
-
-      return doSetBreakpoint(cleanUp);
     });
   },
 

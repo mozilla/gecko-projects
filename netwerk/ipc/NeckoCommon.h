@@ -20,9 +20,9 @@ class TabChild;
 }  // namespace mozilla
 
 #if defined(DEBUG)
-#define NECKO_ERRORS_ARE_FATAL_DEFAULT true
+#  define NECKO_ERRORS_ARE_FATAL_DEFAULT true
 #else
-#define NECKO_ERRORS_ARE_FATAL_DEFAULT false
+#  define NECKO_ERRORS_ARE_FATAL_DEFAULT false
 #endif
 
 // TODO: Eventually remove NECKO_MAYBE_ABORT and DROP_DEAD (bug 575494).
@@ -38,7 +38,7 @@ class TabChild;
       msg.AppendLiteral(                                        \
           " (set NECKO_ERRORS_ARE_FATAL=0 in your environment " \
           "to convert this error into a warning.)");            \
-      MOZ_CRASH_UNSAFE_OOL(msg.get());                          \
+      MOZ_CRASH_UNSAFE(msg.get());                              \
     } else {                                                    \
       msg.AppendLiteral(                                        \
           " (set NECKO_ERRORS_ARE_FATAL=1 in your environment " \
@@ -92,6 +92,11 @@ inline bool IsNeckoChild() {
     amChild = (XRE_GetProcessType() == GeckoProcessType_Content) &&
               !recordreplay::IsMiddleman();
   }
+  return amChild;
+}
+
+inline bool IsSocketProcessChild() {
+  static bool amChild = (XRE_GetProcessType() == GeckoProcessType_Socket);
   return amChild;
 }
 

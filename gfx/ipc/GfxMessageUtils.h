@@ -28,7 +28,7 @@
 #include <stdint.h>
 
 #ifdef _MSC_VER
-#pragma warning(disable : 4800)
+#  pragma warning(disable : 4800)
 #endif
 
 namespace mozilla {
@@ -1168,9 +1168,9 @@ struct ParamTraits<mozilla::Array<T, Length>> {
 template <>
 struct ParamTraits<mozilla::gfx::PaintFragment> {
   typedef mozilla::gfx::PaintFragment paramType;
-  static void Write(Message* aMsg, paramType& aParam) {
+  static void Write(Message* aMsg, paramType&& aParam) {
     WriteParam(aMsg, aParam.mSize);
-    WriteParam(aMsg, aParam.mRecording);
+    WriteParam(aMsg, std::move(aParam.mRecording));
     WriteParam(aMsg, aParam.mDependencies);
   }
 

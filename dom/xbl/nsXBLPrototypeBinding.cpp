@@ -19,7 +19,7 @@
 #include "nsNetUtil.h"
 #include "plstr.h"
 #include "nsContentCreatorFunctions.h"
-#include "nsIDocument.h"
+#include "mozilla/dom/Document.h"
 #include "nsIXMLContentSink.h"
 #include "nsContentCID.h"
 #include "mozilla/dom/XMLDocument.h"
@@ -46,7 +46,7 @@
 #include "mozilla/StyleSheetInlines.h"
 
 #ifdef MOZ_XUL
-#include "nsXULElement.h"
+#  include "nsXULElement.h"
 #endif
 
 using namespace mozilla;
@@ -113,12 +113,10 @@ nsXBLPrototypeBinding::nsXBLPrototypeBinding()
       mInheritStyle(true),
       mCheckedBaseProto(false),
       mKeyHandlersRegistered(false),
-      mChromeOnlyContent(false),
       mBindToUntrustedContent(false),
       mSimpleScopeChain(false),
       mResources(nullptr),
-      mXBLDocInfoWeak(nullptr),
-      mBaseNameSpaceID(kNameSpaceID_None) {
+      mXBLDocInfoWeak(nullptr) {
   MOZ_COUNT_CTOR(nsXBLPrototypeBinding);
 }
 
@@ -210,10 +208,6 @@ void nsXBLPrototypeBinding::SetBindingElement(Element* aElement) {
   if (mBinding->AttrValueIs(kNameSpaceID_None, nsGkAtoms::inheritstyle,
                             nsGkAtoms::_false, eCaseMatters))
     mInheritStyle = false;
-
-  mChromeOnlyContent =
-      mBinding->AttrValueIs(kNameSpaceID_None, nsGkAtoms::chromeOnlyContent,
-                            nsGkAtoms::_true, eCaseMatters);
 
   mBindToUntrustedContent = mBinding->AttrValueIs(
       kNameSpaceID_None, nsGkAtoms::bindToUntrustedContent, nsGkAtoms::_true,
@@ -374,20 +368,6 @@ void nsXBLPrototypeBinding::AttributeChanged(
 
     xblAttr = xblAttr->GetNext();
   }
-}
-
-void nsXBLPrototypeBinding::SetBaseTag(int32_t aNamespaceID, nsAtom* aTag) {
-  mBaseNameSpaceID = aNamespaceID;
-  mBaseTag = aTag;
-}
-
-nsAtom* nsXBLPrototypeBinding::GetBaseTag(int32_t* aNamespaceID) {
-  if (mBaseTag) {
-    *aNamespaceID = mBaseNameSpaceID;
-    return mBaseTag;
-  }
-
-  return nullptr;
 }
 
 bool nsXBLPrototypeBinding::ImplementsInterface(REFNSIID aIID) const {
@@ -720,10 +700,8 @@ class XBLPrototypeSetupCleanup {
 
 nsresult nsXBLPrototypeBinding::Read(nsIObjectInputStream* aStream,
                                      nsXBLDocumentInfo* aDocInfo,
-                                     nsIDocument* aDocument, uint8_t aFlags) {
+                                     Document* aDocument, uint8_t aFlags) {
   mInheritStyle = (aFlags & XBLBinding_Serialize_InheritStyle) ? true : false;
-  mChromeOnlyContent =
-      (aFlags & XBLBinding_Serialize_ChromeOnlyContent) ? true : false;
   mBindToUntrustedContent =
       (aFlags & XBLBinding_Serialize_BindToUntrustedContent) ? true : false;
   mSimpleScopeChain =
@@ -745,16 +723,6 @@ nsresult nsXBLPrototypeBinding::Read(nsIObjectInputStream* aStream,
   if (!baseBindingURI.IsEmpty()) {
     rv = NS_NewURI(getter_AddRefs(mBaseBindingURI), baseBindingURI);
     NS_ENSURE_SUCCESS(rv, rv);
-  }
-
-  rv = ReadNamespace(aStream, mBaseNameSpaceID);
-  NS_ENSURE_SUCCESS(rv, rv);
-
-  nsAutoString baseTag;
-  rv = aStream->ReadString(baseTag);
-  NS_ENSURE_SUCCESS(rv, rv);
-  if (!baseTag.IsEmpty()) {
-    mBaseTag = NS_Atomize(baseTag);
   }
 
   mBinding = aDocument->CreateElem(NS_LITERAL_STRING("binding"), nullptr,
@@ -909,7 +877,7 @@ nsresult nsXBLPrototypeBinding::Read(nsIObjectInputStream* aStream,
 // static
 nsresult nsXBLPrototypeBinding::ReadNewBinding(nsIObjectInputStream* aStream,
                                                nsXBLDocumentInfo* aDocInfo,
-                                               nsIDocument* aDocument,
+                                               Document* aDocument,
                                                uint8_t aFlags) {
   // If the Read() succeeds, |binding| will end up being owned by aDocInfo's
   // binding table. Otherwise, we must manually delete it.
@@ -940,10 +908,6 @@ nsresult nsXBLPrototypeBinding::Write(nsIObjectOutputStream* aStream) {
     flags |= XBLBinding_Serialize_IsFirstBinding;
   }
 
-  if (mChromeOnlyContent) {
-    flags |= XBLBinding_Serialize_ChromeOnlyContent;
-  }
-
   if (mBindToUntrustedContent) {
     flags |= XBLBinding_Serialize_BindToUntrustedContent;
   }
@@ -969,16 +933,6 @@ nsresult nsXBLPrototypeBinding::Write(nsIObjectOutputStream* aStream) {
   }
 
   rv = aStream->WriteStringZ(extends.get());
-  NS_ENSURE_SUCCESS(rv, rv);
-
-  rv = WriteNamespace(aStream, mBaseNameSpaceID);
-  NS_ENSURE_SUCCESS(rv, rv);
-
-  nsAutoString baseTag;
-  if (mBaseTag) {
-    mBaseTag->ToString(baseTag);
-  }
-  rv = aStream->WriteWStringZ(baseTag.get());
   NS_ENSURE_SUCCESS(rv, rv);
 
   nsIContent* content = GetImmediateChild(nsGkAtoms::content);
@@ -1070,7 +1024,7 @@ nsresult nsXBLPrototypeBinding::Write(nsIObjectOutputStream* aStream) {
 }
 
 nsresult nsXBLPrototypeBinding::ReadContentNode(nsIObjectInputStream* aStream,
-                                                nsIDocument* aDocument,
+                                                Document* aDocument,
                                                 nsNodeInfoManager* aNim,
                                                 nsIContent** aContent) {
   *aContent = nullptr;
@@ -1413,101 +1367,24 @@ nsresult nsXBLPrototypeBinding::WriteNamespace(nsIObjectOutputStream* aStream,
   return NS_OK;
 }
 
-bool CheckTagNameWhiteList(int32_t aNameSpaceID, nsAtom* aTagName) {
-  static Element::AttrValuesArray kValidXULTagNames[] = {
-      nsGkAtoms::box,       nsGkAtoms::browser,
-      nsGkAtoms::button,    nsGkAtoms::hbox,
-      nsGkAtoms::image,     nsGkAtoms::menu,
-      nsGkAtoms::menubar,   nsGkAtoms::menuitem,
-      nsGkAtoms::menupopup, nsGkAtoms::row,
-      nsGkAtoms::slider,    nsGkAtoms::spacer,
-      nsGkAtoms::splitter,  nsGkAtoms::text,
-      nsGkAtoms::tree,      nullptr};
-
-  uint32_t i;
-  if (aNameSpaceID == kNameSpaceID_XUL) {
-    for (i = 0; kValidXULTagNames[i]; ++i) {
-      if (aTagName == kValidXULTagNames[i]) {
-        return true;
-      }
-    }
-  } else if (aNameSpaceID == kNameSpaceID_SVG &&
-             aTagName == nsGkAtoms::generic_) {
-    return true;
-  }
-
-  return false;
-}
-
 nsresult nsXBLPrototypeBinding::ResolveBaseBinding() {
   if (mCheckedBaseProto) return NS_OK;
   mCheckedBaseProto = true;
 
-  nsCOMPtr<nsIDocument> doc = mXBLDocInfoWeak->GetDocument();
+  RefPtr<Document> doc = mXBLDocInfoWeak->GetDocument();
 
-  // Check for the presence of 'extends' and 'display' attributes
-  nsAutoString display, extends;
+  NS_WARNING_ASSERTION(!mBinding->HasAttr(nsGkAtoms::display),
+                       "display is no longer supported");
+
+  // Check for the presence of 'extends'.
+  nsAutoString extends;
   mBinding->GetAttr(kNameSpaceID_None, nsGkAtoms::extends, extends);
-  if (extends.IsEmpty()) return NS_OK;
-
-  mBinding->GetAttr(kNameSpaceID_None, nsGkAtoms::display, display);
-  bool hasDisplay = !display.IsEmpty();
-
-  nsAutoString value(extends);
-
-  // Now slice 'em up to see what we've got.
-  nsAutoString prefix;
-  int32_t offset;
-  if (hasDisplay) {
-    offset = display.FindChar(':');
-    if (-1 != offset) {
-      display.Left(prefix, offset);
-      display.Cut(0, offset + 1);
-    }
-  } else {
-    offset = extends.FindChar(':');
-    if (-1 != offset) {
-      extends.Left(prefix, offset);
-      extends.Cut(0, offset + 1);
-      display = extends;
-    }
+  if (extends.IsEmpty()) {
+    return NS_OK;
   }
 
-  nsAutoString nameSpace;
-
-  if (!prefix.IsEmpty()) {
-    mBinding->LookupNamespaceURI(prefix, nameSpace);
-    if (!nameSpace.IsEmpty()) {
-      int32_t nameSpaceID = nsContentUtils::NameSpaceManager()->GetNameSpaceID(
-          nameSpace, nsContentUtils::IsChromeDoc(doc));
-
-      RefPtr<nsAtom> tagName = NS_Atomize(display);
-      // Check the white list
-      if (!CheckTagNameWhiteList(nameSpaceID, tagName)) {
-        const char16_t* params[] = {display.get()};
-        nsContentUtils::ReportToConsole(
-            nsIScriptError::errorFlag, NS_LITERAL_CSTRING("XBL"), nullptr,
-            nsContentUtils::eXBL_PROPERTIES, "InvalidExtendsBinding", params,
-            ArrayLength(params), doc->GetDocumentURI());
-        NS_ASSERTION(
-            !nsXBLService::IsChromeOrResourceURI(doc->GetDocumentURI()),
-            "Invalid extends value");
-        return NS_ERROR_ILLEGAL_VALUE;
-      }
-
-      SetBaseTag(nameSpaceID, tagName);
-    }
-  }
-
-  if (hasDisplay || nameSpace.IsEmpty()) {
-    mBinding->UnsetAttr(kNameSpaceID_None, nsGkAtoms::extends, false);
-    mBinding->UnsetAttr(kNameSpaceID_None, nsGkAtoms::display, false);
-
-    return NS_NewURI(getter_AddRefs(mBaseBindingURI), value,
-                     doc->GetDocumentCharacterSet(), doc->GetDocBaseURI());
-  }
-
-  return NS_OK;
+  return NS_NewURI(getter_AddRefs(mBaseBindingURI), extends,
+                   doc->GetDocumentCharacterSet(), doc->GetDocBaseURI());
 }
 
 void nsXBLPrototypeBinding::EnsureResources() {

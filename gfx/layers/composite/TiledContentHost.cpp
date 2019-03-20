@@ -18,7 +18,7 @@
 #include "mozilla/layers/LayerMetricsWrapper.h"  // for LayerMetricsWrapper
 #include "mozilla/layers/TextureHostOGL.h"       // for TextureHostOGL
 #ifdef XP_DARWIN
-#include "mozilla/layers/TextureSync.h"  // for TextureSync
+#  include "mozilla/layers/TextureSync.h"  // for TextureSync
 #endif
 #include "nsAString.h"
 #include "nsDebug.h"          // for NS_WARNING
@@ -153,10 +153,10 @@ bool TiledContentHost::UseTiledLayerBuffer(
   return true;
 }
 
-void UseTileTexture(CompositableTextureHostRef& aTexture,
-                    CompositableTextureSourceRef& aTextureSource,
-                    const IntRect& aUpdateRect,
-                    TextureSourceProvider* aProvider) {
+static void UseTileTexture(CompositableTextureHostRef& aTexture,
+                           CompositableTextureSourceRef& aTextureSource,
+                           const IntRect& aUpdateRect,
+                           TextureSourceProvider* aProvider) {
   MOZ_ASSERT(aTexture);
   if (!aTexture) {
     return;

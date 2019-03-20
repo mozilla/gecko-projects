@@ -9,11 +9,27 @@ add_task(async function() {
 
   await BrowserTestUtils.withNewTab({ gBrowser, url: "about:home" }, async function(browser) {
     // Add a test engine that provides suggestions and switch to it.
-    let currEngine = Services.search.defaultEngine;
+    let currEngine = await Services.search.getDefault();
     let engine = await promiseNewEngine("searchSuggestionEngine.xml");
     let p = promiseContentSearchChange(browser, engine.name);
-    Services.search.defaultEngine = engine;
+    await Services.search.setDefault(engine);
     await p;
+
+    // Clear any search history results
+    await new Promise((resolve, reject) => {
+      FormHistory.update({op: "remove"}, {
+        handleError(error) {
+          reject(error);
+        },
+        handleCompletion(reason) {
+          if (!reason) {
+            resolve();
+          } else {
+            reject();
+          }
+        },
+      });
+    });
 
     await ContentTask.spawn(browser, null, async function() {
       // Start composition and type "x"
@@ -68,17 +84,16 @@ add_task(async function() {
     await mutationPromise;
 
     // Click the second suggestion.
-    let expectedURL = Services.search.defaultEngine
-      .getSubmission("xbar", null, "homepage").uri.spec;
-    let loadPromise = waitForDocLoadAndStopIt(expectedURL);
+    let expectedURL = (await Services.search.getDefault()).getSubmission("xbar", null, "homepage").uri.spec;
+    let loadPromise = BrowserTestUtils.waitForDocLoadAndStopIt(expectedURL, gBrowser.selectedBrowser);
     await BrowserTestUtils.synthesizeMouseAtCenter("#TEMPID", {
       button: 0,
     }, browser);
     await loadPromise;
 
-    Services.search.defaultEngine = currEngine;
+    Services.search.setDefault(currEngine);
     try {
-      Services.search.removeEngine(engine);
+      await Services.search.removeEngine(engine);
     } catch (ex) { }
   });
 });

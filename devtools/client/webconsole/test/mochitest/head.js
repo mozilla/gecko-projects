@@ -3,6 +3,7 @@
 /* Any copyright is dedicated to the Public Domain.
  * http://creativecommons.org/publicdomain/zero/1.0/ */
 /* eslint no-unused-vars: [2, {"vars": "local"}] */
+/* import-globals-from ../../../shared/test/telemetry-test-helpers.js */
 
 "use strict";
 
@@ -25,6 +26,12 @@ Services.scriptloader.loadSubScript(
   "chrome://mochitests/content/browser/devtools/client/debugger/new/test/mochitest/helpers/context.js",
   this);
 
+// Import helpers for the new debugger
+/* import-globals-from ../../../debugger/new/test/mochitest/helpers.js*/
+Services.scriptloader.loadSubScript(
+  "chrome://mochitests/content/browser/devtools/client/debugger/new/test/mochitest/helpers.js",
+  this);
+
 var {HUDService} = require("devtools/client/webconsole/hudservice");
 var WCUL10n = require("devtools/client/webconsole/webconsole-l10n");
 const DOCS_GA_PARAMS = `?${new URLSearchParams({
@@ -32,7 +39,7 @@ const DOCS_GA_PARAMS = `?${new URLSearchParams({
   "utm_medium": "firefox-console-errors",
   "utm_campaign": "default",
 })}`;
-const STATUS_CODES_GA_PARAMS = `?${new URLSearchParams({
+const GA_PARAMS = `?${new URLSearchParams({
   "utm_source": "mozilla",
   "utm_medium": "devtools-webconsole",
   "utm_campaign": "default",
@@ -51,9 +58,7 @@ registerCleanupFunction(async function() {
   });
   const browserConsole = HUDService.getBrowserConsole();
   if (browserConsole) {
-    if (browserConsole.jsterm) {
-      browserConsole.jsterm.hud.clearOutput(true);
-    }
+    browserConsole.ui.clearOutput(true);
     await HUDService.toggleBrowserConsole();
   }
 });
@@ -75,7 +80,7 @@ async function openNewTabAndConsole(url, clearJstermHistory = true) {
 
   if (clearJstermHistory) {
     // Clearing history that might have been set in previous tests.
-    await hud.ui.consoleOutput.dispatchClearHistory();
+    await hud.ui.wrapper.dispatchClearHistory();
   }
 
   return hud;
@@ -89,7 +94,7 @@ async function openNewTabAndConsole(url, clearJstermHistory = true) {
  * @param object hud
  */
 function logAllStoreChanges(hud) {
-  const store = hud.ui.consoleOutput.getStore();
+  const store = hud.ui.wrapper.getStore();
   // Adding logging each time the store is modified in order to check
   // the store state in case of failure.
   store.subscribe(() => {
@@ -272,10 +277,10 @@ function findMessages(hud, text, selector = ".message") {
  * @return promise
  */
 async function openContextMenu(hud, element) {
-  const onConsoleMenuOpened = hud.ui.consoleOutput.once("menu-open");
+  const onConsoleMenuOpened = hud.ui.wrapper.once("menu-open");
   synthesizeContextMenuEvent(element);
   await onConsoleMenuOpened;
-  const doc = hud.ui.consoleOutput.owner.chromeWindow.document;
+  const doc = hud.chromeWindow.document;
   return doc.getElementById("webconsole-menu");
 }
 
@@ -288,7 +293,7 @@ async function openContextMenu(hud, element) {
  * @return promise
  */
 function hideContextMenu(hud) {
-  const doc = hud.ui.consoleOutput.owner.chromeWindow.document;
+  const doc = hud.chromeWindow.document;
   const popup = doc.getElementById("webconsole-menu");
   if (!popup) {
     return Promise.resolve();
@@ -334,19 +339,22 @@ function waitForNodeMutation(node, observeConfig = {}) {
  * @param {String} text
  *        The text to search for.  This should be contained in the
  *        message.  The searching is done with @see findMessage.
+ * @param {boolean} expectUrl
+ *        Whether the URL in the opened source should match the link, or whether
+ *        it is expected to be null.
  */
-async function testOpenInDebugger(hud, toolbox, text) {
+async function testOpenInDebugger(hud, toolbox, text, expectUrl = true) {
   info(`Finding message for open-in-debugger test; text is "${text}"`);
   const messageNode = await waitFor(() => findMessage(hud, text));
   const frameLinkNode = messageNode.querySelector(".message-location .frame-link");
   ok(frameLinkNode, "The message does have a location link");
-  await checkClickOnNode(hud, toolbox, frameLinkNode);
+  await checkClickOnNode(hud, toolbox, frameLinkNode, expectUrl);
 }
 
 /**
  * Helper function for testOpenInDebugger.
  */
-async function checkClickOnNode(hud, toolbox, frameLinkNode) {
+async function checkClickOnNode(hud, toolbox, frameLinkNode, expectUrl) {
   info("checking click on node location");
 
   const url = frameLinkNode.getAttribute("data-url");
@@ -363,11 +371,18 @@ async function checkClickOnNode(hud, toolbox, frameLinkNode) {
   await onSourceInDebuggerOpened;
 
   const dbg = toolbox.getPanel("jsdebugger");
-  is(
-    dbg._selectors.getSelectedSource(dbg._getState()).url,
-    url,
-    "expected source url"
-  );
+
+  // Wait for the source to finish loading, if it is pending.
+  await waitFor(() => {
+    return !!dbg._selectors.getSelectedSource(dbg._getState());
+  });
+
+  if (expectUrl) {
+    is(
+      dbg._selectors.getSelectedSource(dbg._getState()).url, url,
+      "expected source url"
+    );
+  }
 }
 
 /**
@@ -379,10 +394,30 @@ function hasFocus(node) {
 }
 
 /**
- * Set the value of the JsTerm and its caret position, and wait for the autocompletion
- * to be updated.
+ * Get the value of the console input .
  *
- * @param {JsTerm} jsterm
+ * @param {WebConsole} hud: The webconsole
+ * @returns {String}: The value of the console input.
+ */
+function getInputValue(hud) {
+  return hud.jsterm._getValue();
+}
+
+/**
+ * Set the value of the console input .
+ *
+ * @param {WebConsole} hud: The webconsole
+ * @param {String} value : The value to set the console input to.
+ */
+function setInputValue(hud, value) {
+  return hud.jsterm._setValue(value);
+}
+
+/**
+ * Set the value of the console input and its caret position, and wait for the
+ * autocompletion to be updated.
+ *
+ * @param {WebConsole} hud: The webconsole
  * @param {String} value : The value to set the jsterm to.
  * @param {Integer} caretPosition : The index where to place the cursor. A negative
  *                  number will place the caret at (value.length - offset) position.
@@ -390,11 +425,13 @@ function hasFocus(node) {
  * @returns {Promise} resolves when the jsterm is completed.
  */
 async function setInputValueForAutocompletion(
-  jsterm,
+  hud,
   value,
   caretPosition = value.length,
 ) {
-  jsterm.setInputValue("");
+  const {jsterm} = hud;
+
+  setInputValue(hud, "");
   jsterm.focus();
 
   const updated = jsterm.once("autocomplete-updated");
@@ -419,21 +456,37 @@ async function setInputValueForAutocompletion(
 }
 
 /**
- * Checks if the jsterm has the expected completion value.
+ * Set the value of the console input and wait for the confirm dialog to be displayed.
  *
- * @param {JsTerm} jsterm
+ * @param {Toolbox} toolbox
+ * @param {WebConsole} hud
+ * @param {String} value : The value to set the jsterm to.
+ *                  Default to value.length (caret set at the end).
+ * @returns {Promise<HTMLElement>} resolves with dialog element when it is opened.
+ */
+async function setInputValueForGetterConfirmDialog(toolbox, hud, value) {
+  await setInputValueForAutocompletion(hud, value);
+  await waitFor(() => isConfirmDialogOpened(toolbox));
+  ok(true, "The confirm dialog is displayed");
+  return getConfirmDialog(toolbox);
+}
+
+/**
+ * Checks if the console input has the expected completion value.
+ *
+ * @param {WebConsole} hud
  * @param {String} expectedValue
  * @param {String} assertionInfo: Description of the assertion passed to `is`.
  */
-function checkJsTermCompletionValue(jsterm, expectedValue, assertionInfo) {
-  const completionValue = getJsTermCompletionValue(jsterm);
+function checkInputCompletionValue(hud, expectedValue, assertionInfo) {
+  const completionValue = getInputCompletionValue(hud);
   if (completionValue === null) {
     ok(false, "Couldn't retrieve the completion value");
   }
 
   info(`Expects "${expectedValue}", is "${completionValue}"`);
 
-  if (jsterm.completeNode) {
+  if (hud.jsterm.completeNode) {
     is(completionValue, expectedValue, assertionInfo);
   } else {
     // CodeMirror jsterm doesn't need to add prefix-spaces.
@@ -442,13 +495,14 @@ function checkJsTermCompletionValue(jsterm, expectedValue, assertionInfo) {
 }
 
 /**
- * Checks if the cursor on jsterm is at the expected position.
+ * Checks if the cursor on console input is at expected position.
  *
- * @param {JsTerm} jsterm
+ * @param {WebConsole} hud
  * @param {Integer} expectedCursorIndex
  * @param {String} assertionInfo: Description of the assertion passed to `is`.
  */
-function checkJsTermCursor(jsterm, expectedCursorIndex, assertionInfo) {
+function checkInputCursorPosition(hud, expectedCursorIndex, assertionInfo) {
+  const {jsterm} = hud;
   if (jsterm.inputNode) {
     const {selectionStart, selectionEnd} = jsterm.inputNode;
     is(selectionStart, expectedCursorIndex, assertionInfo);
@@ -459,10 +513,10 @@ function checkJsTermCursor(jsterm, expectedCursorIndex, assertionInfo) {
 }
 
 /**
- * Checks the jsterm value and the cursor position given an expected string containing
- * a "|" to indicate the expected cursor position.
+ * Checks the console input value and the cursor position given an expected string
+ * containing a "|" to indicate the expected cursor position.
  *
- * @param {JsTerm} jsterm
+ * @param {WebConsole} hud
  * @param {String} expectedStringWithCursor:
  *                  String with a "|" to indicate the expected cursor position.
  *                  For example, this is how you assert an empty value with the focus "|",
@@ -470,7 +524,7 @@ function checkJsTermCursor(jsterm, expectedCursorIndex, assertionInfo) {
  *                  end of the input: "test|".
  * @param {String} assertionInfo: Description of the assertion passed to `is`.
  */
-function checkJsTermValueAndCursor(jsterm, expectedStringWithCursor, assertionInfo) {
+function checkInputValueAndCursorPosition(hud, expectedStringWithCursor, assertionInfo) {
   info(`Checking jsterm state: \n${expectedStringWithCursor}`);
   if (!expectedStringWithCursor.includes("|")) {
     ok(false,
@@ -478,7 +532,8 @@ function checkJsTermValueAndCursor(jsterm, expectedStringWithCursor, assertionIn
   }
 
   const inputValue = expectedStringWithCursor.replace("|", "");
-  is(jsterm.getInputValue(), inputValue, "jsterm has expected value");
+  const {jsterm} = hud;
+  is(getInputValue(hud), inputValue, "console input has expected value");
   if (jsterm.inputNode) {
     is(jsterm.inputNode.selectionStart, jsterm.inputNode.selectionEnd);
     is(jsterm.inputNode.selectionStart, expectedStringWithCursor.indexOf("|"),
@@ -493,12 +548,13 @@ function checkJsTermValueAndCursor(jsterm, expectedStringWithCursor, assertionIn
 }
 
 /**
- * Returns the jsterm completion value, whether there's CodeMirror enabled or not.
+ * Returns the console input completion value.
  *
- * @param {JsTerm} jsterm
+ * @param {WebConsole} hud
  * @returns {String}
  */
-function getJsTermCompletionValue(jsterm) {
+function getInputCompletionValue(hud) {
+  const {jsterm} = hud;
   if (jsterm.completeNode) {
     return jsterm.completeNode.value;
   }
@@ -511,13 +567,13 @@ function getJsTermCompletionValue(jsterm) {
 }
 
 /**
- * Returns a boolean indicating if the jsterm is focused, whether there's CodeMirror
- * enabled or not.
+ * Returns a boolean indicating if the console input is focused.
  *
- * @param {JsTerm} jsterm
+ * @param {WebConsole} hud
  * @returns {Boolean}
  */
-function isJstermFocused(jsterm) {
+function isInputFocused(hud) {
+  const {jsterm} = hud;
   const document = jsterm.outputNode.ownerDocument;
   const documentIsFocused = document.hasFocus();
 
@@ -644,6 +700,29 @@ async function closeConsole(tab = gBrowser.selectedTab) {
  *            or null(if event not fired)
  */
 function simulateLinkClick(element, clickEventProps) {
+  return overrideOpenLink(() => {
+    if (clickEventProps) {
+      // Click on the link using the event properties.
+      element.dispatchEvent(clickEventProps);
+    } else {
+      // Click on the link.
+      element.click();
+    }
+  });
+}
+
+/**
+ * Override the browserWindow open*Link function, executes the passed function and either
+ * wait for:
+ * - the link to be "opened"
+ * - 1s before timing out
+ * Then it puts back the original open*Link functions in browserWindow.
+ *
+ * @returns {Promise<Object>}: A promise resolving with an object of the following shape:
+ * - link: The link that was "opened"
+ * - where: If the link was opened in the background (null) or not ("tab").
+ */
+function overrideOpenLink(fn) {
   const browserWindow = Services.wm.getMostRecentWindow(gDevTools.chromeWindowType);
 
   // Override LinkIn methods to prevent navigating.
@@ -657,13 +736,7 @@ function simulateLinkClick(element, clickEventProps) {
       resolve({link: link, where});
     };
     browserWindow.openWebLinkIn = browserWindow.openTrustedLinkIn = openLinkIn;
-    if (clickEventProps) {
-      // Click on the link using the event properties.
-      element.dispatchEvent(clickEventProps);
-    } else {
-      // Click on the link.
-      element.click();
-    }
+    fn();
   });
 
   // Declare a timeout Promise that we can use to make sure openTrustedLinkIn or
@@ -786,7 +859,8 @@ async function waitForBrowserConsole() {
  * @param {Object} hud
  */
 async function getFilterState(hud) {
-  const filterBar = await setFilterBarVisible(hud, true);
+  const {outputNode} = hud.ui;
+  const filterBar = outputNode.querySelector(".webconsole-filterbar-secondary");
   const buttons = filterBar.querySelectorAll("button");
   const result = { };
 
@@ -823,7 +897,8 @@ async function getFilterState(hud) {
  *          }
  */
 async function setFilterState(hud, settings) {
-  const filterBar = await setFilterBarVisible(hud, true);
+  const {outputNode} = hud.ui;
+  const filterBar = outputNode.querySelector(".webconsole-filterbar-secondary");
 
   for (const category in settings) {
     const setActive = settings[category];
@@ -849,46 +924,6 @@ async function setFilterState(hud, settings) {
 }
 
 /**
- * Set the visibility of the filter bar.
- *
- * @param {Object} hud
- * @param {Boolean} state
- *        Set filter bar visibility
- */
-async function setFilterBarVisible(hud, state) {
-  info(`Setting the filter bar visibility to ${state}`);
-
-  const outputNode = hud.ui.outputNode;
-  const toolbar = await waitFor(() => {
-    return outputNode.querySelector(".webconsole-filterbar-primary");
-  });
-  let filterBar = outputNode.querySelector(".webconsole-filterbar-secondary");
-
-  // Show filter bar if state is true
-  if (state) {
-    if (!filterBar) {
-      // Click the filter icon to show the filter bar.
-      toolbar.querySelector(".devtools-filter-icon").click();
-      filterBar = await waitFor(() => {
-        return outputNode.querySelector(".webconsole-filterbar-secondary");
-      });
-    }
-    return filterBar;
-  }
-
-  // Hide filter bar if it is visible.
-  if (filterBar) {
-    // Click the filter icon to hide the filter bar.
-    toolbar.querySelector(".devtools-filter-icon").click();
-    await waitFor(() => {
-      return !outputNode.querySelector(".webconsole-filterbar-secondary");
-    });
-  }
-
-  return null;
-}
-
-/**
  * Reset the filters at the end of a test that has changed them. This is
  * important when using the `--verify` test option as when it is used you need
  * to manually reset the filters.
@@ -900,7 +935,7 @@ async function setFilterBarVisible(hud, state) {
 async function resetFilters(hud) {
   info("Resetting filters to their default state");
 
-  const store = hud.ui.consoleOutput.getStore();
+  const store = hud.ui.wrapper.getStore();
   store.dispatch(wcActions.filtersClear());
 }
 
@@ -941,7 +976,7 @@ function getReverseSearchInfoElement(hud) {
 /**
  * Returns a boolean indicating if the reverse search input is focused.
  *
- * @param {JsTerm} jsterm
+ * @param {WebConsole} hud
  * @returns {Boolean}
  */
 function isReverseSearchInputFocused(hud) {
@@ -963,13 +998,14 @@ function isReverseSearchInputFocused(hud) {
  */
 async function selectNodeWithPicker(toolbox, testActor, selector) {
   const inspector = toolbox.getPanel("inspector");
+  const inspectorFront = inspector.inspector;
 
-  const onPickerStarted = inspector.toolbox.once("picker-started");
-  inspector.toolbox.highlighterUtils.startPicker();
+  const onPickerStarted = inspectorFront.nodePicker.once("picker-started");
+  inspectorFront.nodePicker.start();
   await onPickerStarted;
 
   info(`Picker mode started, now clicking on "${selector}" to select that node`);
-  const onPickerStopped = toolbox.once("picker-stopped");
+  const onPickerStopped = inspectorFront.nodePicker.once("picker-stopped");
   const onInspectorUpdated = inspector.once("inspector-updated");
 
   testActor.synthesizeMouse({
@@ -980,4 +1016,148 @@ async function selectNodeWithPicker(toolbox, testActor, selector) {
 
   await onPickerStopped;
   await onInspectorUpdated;
+}
+
+/**
+ * Clicks on the arrow of a single object inspector node if it exists.
+ *
+ * @param {HTMLElement} node: Object inspector node (.tree-node)
+ */
+function expandObjectInspectorNode(node) {
+  const arrow = getObjectInspectorNodeArrow(node);
+  if (!arrow) {
+    ok(false, "Node can't be expanded");
+    return;
+  }
+  arrow.click();
+}
+
+/**
+ * Retrieve the arrow of a single object inspector node.
+ *
+ * @param {HTMLElement} node: Object inspector node (.tree-node)
+ * @return {HTMLElement|null} the arrow element
+ */
+function getObjectInspectorNodeArrow(node) {
+  return node.querySelector(".arrow");
+}
+
+/**
+ * Check if a single object inspector node is expandable.
+ *
+ * @param {HTMLElement} node: Object inspector node (.tree-node)
+ * @return {Boolean} true if the node can be expanded
+ */
+function isObjectInspectorNodeExpandable(node) {
+  return !!getObjectInspectorNodeArrow(node);
+}
+
+/**
+ * Retrieve the nodes for a given object inspector element.
+ *
+ * @param {HTMLElement} oi: Object inspector element
+ * @return {NodeList} the object inspector nodes
+ */
+function getObjectInspectorNodes(oi) {
+  return oi.querySelectorAll(".tree-node");
+}
+
+/**
+ * Retrieve the "children" nodes for a given object inspector node.
+ *
+ * @param {HTMLElement} node: Object inspector node (.tree-node)
+ * @return {Array<HTMLElement>} the direct children (i.e. the ones that are one level
+ *                              deeper than the passed node)
+ */
+function getObjectInspectorChildrenNodes(node) {
+  const getLevel = n => parseInt(n.getAttribute("aria-level"), 10);
+  const level = getLevel(node);
+  const childLevel = level + 1;
+  const children = [];
+
+  let currentNode = node;
+  while (currentNode.nextSibling && getLevel(currentNode.nextSibling) === childLevel) {
+    currentNode = currentNode.nextSibling;
+    children.push(currentNode);
+  }
+
+  return children;
+}
+
+/**
+ * Retrieve the invoke getter button for a given object inspector node.
+ *
+ * @param {HTMLElement} node: Object inspector node (.tree-node)
+ * @return {HTMLElement|null} the invoke button element
+ */
+function getObjectInspectorInvokeGetterButton(node) {
+  return node.querySelector(".invoke-getter");
+}
+
+/**
+ * Retrieve the first node that match the passed node label, for a given object inspector
+ * element.
+ *
+ * @param {HTMLElement} oi: Object inspector element
+ * @param {String} nodeLabel: label of the searched node
+ * @return {HTMLElement|null} the Object inspector node with the matching label
+ */
+function findObjectInspectorNode(oi, nodeLabel) {
+  return [...oi.querySelectorAll(".tree-node")].find(node => {
+    const label = node.querySelector(".object-label");
+    if (!label) {
+      return false;
+    }
+    return label.textContent === nodeLabel;
+  });
+}
+
+/**
+ * Return an array of the label of the autocomplete popup items.
+ *
+ * @param {AutocompletPopup} popup
+ * @returns {Array<String>}
+ */
+function getAutocompletePopupLabels(popup) {
+  return popup.getItems().map(item => item.label);
+}
+
+/**
+ * Return the "Confirm Dialog" element.
+ *
+ * @param toolbox
+ * @returns {HTMLElement|null}
+ */
+function getConfirmDialog(toolbox) {
+  const {doc} = toolbox;
+  return doc.querySelector(".invoke-confirm");
+}
+
+/**
+ * Returns true if the Confirm Dialog is opened.
+ * @param toolbox
+ * @returns {Boolean}
+ */
+function isConfirmDialogOpened(toolbox) {
+  const tooltip = getConfirmDialog(toolbox);
+  if (!tooltip) {
+    return false;
+  }
+
+  return tooltip.classList.contains("tooltip-visible");
+}
+
+async function selectFrame(dbg, frame) {
+  const onScopes = waitForDispatch(dbg, "ADD_SCOPES");
+  await dbg.actions.selectFrame(frame);
+  await onScopes;
+}
+
+async function pauseDebugger(dbg) {
+  info("Waiting for debugger to pause");
+  const onPaused = waitForPaused(dbg);
+  ContentTask.spawn(gBrowser.selectedBrowser, {}, async function() {
+    content.wrappedJSObject.firstCall();
+  });
+  await onPaused;
 }

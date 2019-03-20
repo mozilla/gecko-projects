@@ -8,7 +8,7 @@
 #define mozilla_Preferences_h
 
 #ifndef MOZILLA_INTERNAL_API
-#error "This header is only usable from within libxul (MOZILLA_INTERNAL_API)."
+#  error "This header is only usable from within libxul (MOZILLA_INTERNAL_API)."
 #endif
 
 #include "mozilla/Atomics.h"
@@ -32,6 +32,8 @@ typedef void (*PrefChangedFunc)(const char* aPref, void* aData);
 class nsPrefBranch;
 
 namespace mozilla {
+
+void UnloadPrefsModule();
 
 // A typesafe version of PrefChangeFunc, with its data argument type deduced
 // from the type of the argument passed to RegisterCallback.

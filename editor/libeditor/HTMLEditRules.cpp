@@ -12,6 +12,7 @@
 #include "TextEditUtils.h"
 #include "WSRunObject.h"
 #include "mozilla/Assertions.h"
+#include "mozilla/ContentIterator.h"
 #include "mozilla/CSSEditUtils.h"
 #include "mozilla/EditAction.h"
 #include "mozilla/EditorDOMPoint.h"
@@ -39,7 +40,6 @@
 #include "nsAtom.h"
 #include "nsHTMLDocument.h"
 #include "nsIContent.h"
-#include "nsIContentIterator.h"
 #include "nsID.h"
 #include "nsIFrame.h"
 #include "nsIHTMLAbsPosEditor.h"
@@ -57,7 +57,7 @@
 
 // Workaround for windows headers
 #ifdef SetProp
-#undef SetProp
+#  undef SetProp
 #endif
 
 class nsISupports;
@@ -1301,7 +1301,7 @@ nsresult HTMLEditRules::WillInsertText(EditSubAction aEditSubAction,
   NS_WARNING_ASSERTION(NS_SUCCEEDED(rv), "WillInsert() failed");
 
   // we need to get the doc
-  nsCOMPtr<nsIDocument> doc = HTMLEditorRef().GetDocument();
+  RefPtr<Document> doc = HTMLEditorRef().GetDocument();
   if (NS_WARN_IF(!doc)) {
     return NS_ERROR_FAILURE;
   }
@@ -1731,7 +1731,8 @@ EditActionResult HTMLEditRules::WillInsertParagraphSeparator() {
     // MakeBasicBlock() creates AutoSelectionRestorer.
     // Therefore, even if it returns NS_OK, editor might have been destroyed
     // at restoring Selection.
-    nsresult rv = MakeBasicBlock(ParagraphSeparatorElement(separator));
+    OwningNonNull<nsAtom> separatorTag = ParagraphSeparatorElement(separator);
+    nsresult rv = MakeBasicBlock(separatorTag);
     if (NS_WARN_IF(rv == NS_ERROR_EDITOR_DESTROYED) ||
         NS_WARN_IF(!CanHandleEditAction())) {
       return EditActionIgnored(NS_ERROR_EDITOR_DESTROYED);
@@ -2065,8 +2066,7 @@ EditActionResult HTMLEditRules::SplitMailCites() {
   if (previousNodeOfSplitPoint &&
       previousNodeOfSplitPoint->IsHTMLElement(nsGkAtoms::span) &&
       previousNodeOfSplitPoint->GetPrimaryFrame() &&
-      previousNodeOfSplitPoint->GetPrimaryFrame()->IsFrameOfType(
-          nsIFrame::eBlockFrame)) {
+      previousNodeOfSplitPoint->GetPrimaryFrame()->IsBlockFrameOrSubclass()) {
     nsCOMPtr<nsINode> lastChild = previousNodeOfSplitPoint->GetLastChild();
     if (lastChild && !lastChild->IsHTMLElement(nsGkAtoms::br)) {
       // We ignore the result here.
@@ -2222,7 +2222,8 @@ nsresult HTMLEditRules::WillDeleteSelection(
       HTMLEditorRef().GetFirstSelectedTableCellElement(error);
   if (cellElement) {
     error.SuppressException();
-    nsresult rv = HTMLEditorRef().DeleteTableCellContentsWithTransaction();
+    nsresult rv =
+        MOZ_KnownLive(HTMLEditorRef()).DeleteTableCellContentsWithTransaction();
     if (NS_WARN_IF(!CanHandleEditAction())) {
       return NS_ERROR_EDITOR_DESTROYED;
     }
@@ -5657,7 +5658,7 @@ CreateElementResult HTMLEditRules::ConvertListType(Element& aListElement,
   return CreateElementResult(listElement.forget());
 }
 
-nsresult HTMLEditRules::CreateStyleForInsertText(nsIDocument& aDocument) {
+nsresult HTMLEditRules::CreateStyleForInsertText(Document& aDocument) {
   MOZ_ASSERT(IsEditorDataAvailable());
   MOZ_ASSERT(HTMLEditorRef().mTypeInState);
 
@@ -6509,13 +6510,6 @@ nsresult HTMLEditRules::ExpandSelectionForDeletion() {
       }
     }
   }
-  // Now set the selection to the new range
-  DebugOnly<nsresult> rv =
-      SelectionRefPtr()->Collapse(selStartNode, selStartOffset);
-  if (NS_WARN_IF(!CanHandleEditAction())) {
-    return NS_ERROR_EDITOR_DESTROYED;
-  }
-  NS_WARNING_ASSERTION(NS_SUCCEEDED(rv), "Failed to collapse selection");
 
   // Expand selection endpoint only if we didn't pass a <br>, or if we really
   // needed to pass that <br> (i.e., its block is now totally selected).
@@ -6543,26 +6537,20 @@ nsresult HTMLEditRules::ExpandSelectionForDeletion() {
       doEndExpansion = false;
     }
   }
-  if (doEndExpansion) {
-    nsresult rv = SelectionRefPtr()->Extend(selEndNode, selEndOffset);
-    if (NS_WARN_IF(!CanHandleEditAction())) {
-      return NS_ERROR_EDITOR_DESTROYED;
-    }
-    if (NS_WARN_IF(NS_FAILED(rv))) {
-      return rv;
-    }
-  } else {
-    // Only expand to just before <br>.
-    nsresult rv = SelectionRefPtr()->Extend(firstBRParent, firstBROffset);
-    if (NS_WARN_IF(!CanHandleEditAction())) {
-      return NS_ERROR_EDITOR_DESTROYED;
-    }
-    if (NS_WARN_IF(NS_FAILED(rv))) {
-      return rv;
-    }
-  }
 
-  return NS_OK;
+  EditorRawDOMPoint newSelectionStart(selStartNode, selStartOffset);
+  EditorRawDOMPoint newSelectionEnd(
+      doEndExpansion ? selEndNode : firstBRParent,
+      doEndExpansion ? selEndOffset : firstBROffset);
+  ErrorResult error;
+  MOZ_KnownLive(SelectionRefPtr())
+      ->SetStartAndEndInLimiter(newSelectionStart, newSelectionEnd, error);
+  if (NS_WARN_IF(!CanHandleEditAction())) {
+    error.SuppressException();
+    return NS_ERROR_EDITOR_DESTROYED;
+  }
+  NS_WARNING_ASSERTION(!error.Failed(), "Failed to set selection for deletion");
+  return error.StealNSResult();
 }
 
 nsresult HTMLEditRules::NormalizeSelection() {
@@ -6715,20 +6703,18 @@ nsresult HTMLEditRules::NormalizeSelection() {
     return NS_OK;  // New start after old end.
   }
 
-  // otherwise set selection to new values.
-  // XXX Why don't we use SetBaseAndExtent()?
-  DebugOnly<nsresult> rv =
-      SelectionRefPtr()->Collapse(newStartNode, newStartOffset);
+  // Otherwise set selection to new values.  Note that end point may be prior
+  // to start point.  So, we cannot use Selection::SetStartAndEndInLimit() here.
+  ErrorResult error;
+  MOZ_KnownLive(SelectionRefPtr())
+      ->SetBaseAndExtentInLimiter(*newStartNode, newStartOffset, *newEndNode,
+                                  newEndOffset, error);
   if (NS_WARN_IF(!CanHandleEditAction())) {
+    error.SuppressException();
     return NS_ERROR_EDITOR_DESTROYED;
   }
-  NS_WARNING_ASSERTION(NS_SUCCEEDED(rv), "Failed to collapse selection");
-  rv = SelectionRefPtr()->Extend(newEndNode, newEndOffset);
-  if (NS_WARN_IF(!CanHandleEditAction())) {
-    return NS_ERROR_EDITOR_DESTROYED;
-  }
-  NS_WARNING_ASSERTION(NS_SUCCEEDED(rv), "Failed to extend selection");
-  return NS_OK;
+  NS_WARNING_ASSERTION(!error.Failed(), "Failed to set selection");
+  return error.StealNSResult();
 }
 
 EditorDOMPoint HTMLEditRules::GetPromotedPoint(RulesEndpoint aWhere,
@@ -9437,10 +9423,8 @@ nsresult HTMLEditRules::RemoveEmptyNodesInChangedRange() {
   // include some children of a node while excluding others.  Thus I could find
   // all the _examined_ children empty, but still not have an empty parent.
 
-  // need an iterator
-  nsCOMPtr<nsIContentIterator> iter = NS_NewContentIterator();
-
-  nsresult rv = iter->Init(mDocChangeRange);
+  PostContentIterator postOrderIter;
+  nsresult rv = postOrderIter.Init(mDocChangeRange);
   if (NS_WARN_IF(NS_FAILED(rv))) {
     return rv;
   }
@@ -9449,8 +9433,8 @@ nsresult HTMLEditRules::RemoveEmptyNodesInChangedRange() {
       skipList;
 
   // Check for empty nodes
-  while (!iter->IsDone()) {
-    OwningNonNull<nsINode> node = *iter->GetCurrentNode();
+  for (; !postOrderIter.IsDone(); postOrderIter.Next()) {
+    OwningNonNull<nsINode> node = *postOrderIter.GetCurrentNode();
 
     nsCOMPtr<nsINode> parent = node->GetParentNode();
 
@@ -9515,8 +9499,6 @@ nsresult HTMLEditRules::RemoveEmptyNodesInChangedRange() {
         skipList.AppendElement(*parent);
       }
     }
-
-    iter->Next();
   }
 
   // now delete the empty nodes

@@ -26,19 +26,19 @@
 #include "Tools.h"
 
 #ifdef CAIRO_HAS_QUARTZ_SURFACE
-#include "cairo-quartz.h"
-#ifdef MOZ_WIDGET_COCOA
-#include <ApplicationServices/ApplicationServices.h>
-#endif
+#  include "cairo-quartz.h"
+#  ifdef MOZ_WIDGET_COCOA
+#    include <ApplicationServices/ApplicationServices.h>
+#  endif
 #endif
 
 #ifdef CAIRO_HAS_XLIB_SURFACE
-#include "cairo-xlib.h"
-#include "cairo-xlib-xrender.h"
+#  include "cairo-xlib.h"
+#  include "cairo-xlib-xrender.h"
 #endif
 
 #ifdef CAIRO_HAS_WIN32_SURFACE
-#include "cairo-win32.h"
+#  include "cairo-win32.h"
 #endif
 
 #define PIXMAN_DONT_DEFINE_STDINT
@@ -192,14 +192,16 @@ static bool PatternIsCompatible(const Pattern& aPattern) {
 
 static cairo_user_data_key_t surfaceDataKey;
 
-void ReleaseData(void* aData) {
+static void ReleaseData(void* aData) {
   DataSourceSurface* data = static_cast<DataSourceSurface*>(aData);
   data->Unmap();
   data->Release();
 }
 
-cairo_surface_t* CopyToImageSurface(unsigned char* aData, const IntRect& aRect,
-                                    int32_t aStride, SurfaceFormat aFormat) {
+static cairo_surface_t* CopyToImageSurface(unsigned char* aData,
+                                           const IntRect& aRect,
+                                           int32_t aStride,
+                                           SurfaceFormat aFormat) {
   MOZ_ASSERT(aData);
 
   auto aRectWidth = aRect.Width();
@@ -236,7 +238,7 @@ cairo_surface_t* CopyToImageSurface(unsigned char* aData, const IntRect& aRect,
  * CAIRO_SURFACE_TYPE_IMAGE then returns that surface. Does
  * not add a reference.
  */
-cairo_surface_t* GetAsImageSurface(cairo_surface_t* aSurface) {
+static cairo_surface_t* GetAsImageSurface(cairo_surface_t* aSurface) {
   if (cairo_surface_get_type(aSurface) == CAIRO_SURFACE_TYPE_IMAGE) {
     return aSurface;
 #ifdef CAIRO_HAS_WIN32_SURFACE
@@ -248,9 +250,9 @@ cairo_surface_t* GetAsImageSurface(cairo_surface_t* aSurface) {
   return nullptr;
 }
 
-cairo_surface_t* CreateSubImageForData(unsigned char* aData,
-                                       const IntRect& aRect, int aStride,
-                                       SurfaceFormat aFormat) {
+static cairo_surface_t* CreateSubImageForData(unsigned char* aData,
+                                              const IntRect& aRect, int aStride,
+                                              SurfaceFormat aFormat) {
   if (!aData) {
     gfxWarning() << "DrawTargetCairo.CreateSubImageForData null aData";
     return nullptr;
@@ -269,9 +271,9 @@ cairo_surface_t* CreateSubImageForData(unsigned char* aData,
  * Returns a referenced cairo_surface_t representing the
  * sub-image specified by aSubImage.
  */
-cairo_surface_t* ExtractSubImage(cairo_surface_t* aSurface,
-                                 const IntRect& aSubImage,
-                                 SurfaceFormat aFormat) {
+static cairo_surface_t* ExtractSubImage(cairo_surface_t* aSurface,
+                                        const IntRect& aSubImage,
+                                        SurfaceFormat aFormat) {
   // No need to worry about retaining a reference to the original
   // surface since the only caller of this function guarantees
   // that aSurface will stay alive as long as the result
@@ -305,7 +307,7 @@ cairo_surface_t* ExtractSubImage(cairo_surface_t* aSurface,
  * In either case, the caller must call cairo_surface_destroy on the
  * result when it is done with it.
  */
-cairo_surface_t* GetCairoSurfaceForSourceSurface(
+static cairo_surface_t* GetCairoSurfaceForSourceSurface(
     SourceSurface* aSurface, bool aExistingOnly = false,
     const IntRect& aSubImage = IntRect()) {
   if (!aSurface) {
@@ -1655,7 +1657,7 @@ already_AddRefed<SourceSurface> DrawTargetCairo::OptimizeSourceSurface(
 // Although the dimension parameters in the xCreatePixmapReq wire protocol are
 // 16-bit unsigned integers, the server's CreatePixmap returns BadAlloc if
 // either dimension cannot be represented by a 16-bit *signed* integer.
-#define XLIB_IMAGE_SIDE_SIZE_LIMIT 0x7fff
+#  define XLIB_IMAGE_SIDE_SIZE_LIMIT 0x7fff
 
   if (size.width > XLIB_IMAGE_SIDE_SIZE_LIMIT ||
       size.height > XLIB_IMAGE_SIDE_SIZE_LIMIT) {
@@ -2180,7 +2182,7 @@ bool BorrowedXlibDrawable::Init(DrawTarget* aDT) {
   mDT = aDT;
   mDrawable = X11None;
 
-#ifdef CAIRO_HAS_XLIB_SURFACE
+#  ifdef CAIRO_HAS_XLIB_SURFACE
   if (aDT->GetBackendType() != BackendType::CAIRO || aDT->IsDualDrawTarget() ||
       aDT->IsTiledDrawTarget()) {
     return false;
@@ -2208,9 +2210,9 @@ bool BorrowedXlibDrawable::Init(DrawTarget* aDT) {
   mOffset = Point(x, y);
 
   return true;
-#else
+#  else
   return false;
-#endif
+#  endif
 }
 
 void BorrowedXlibDrawable::Finish() {

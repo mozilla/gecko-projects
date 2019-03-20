@@ -14,6 +14,7 @@ mod image_helper;
 
 use boilerplate::{Example, HandyDandyRectBuilder};
 use webrender::api::*;
+use webrender::api::units::*;
 
 struct App {
     image_key: ImageKey,
@@ -25,8 +26,8 @@ impl Example for App {
         _api: &RenderApi,
         builder: &mut DisplayListBuilder,
         txn: &mut Transaction,
-        _framebuffer_size: DeviceIntSize,
-        _pipeline_id: PipelineId,
+        _framebuffer_size: FramebufferIntSize,
+        pipeline_id: PipelineId,
         _document_id: DocumentId,
     ) {
         let (image_descriptor, image_data) = image_helper::make_checkerboard(32, 32);
@@ -39,13 +40,11 @@ impl Example for App {
 
         let bounds = (0, 0).to(512, 512);
         let info = LayoutPrimitiveInfo::new(bounds);
-        builder.push_stacking_context(
+        let space_and_clip = SpaceAndClipInfo::root_scroll(pipeline_id);
+
+        builder.push_simple_stacking_context(
             &info,
-            None,
-            TransformStyle::Flat,
-            MixBlendMode::Normal,
-            &[],
-            RasterSpace::Screen,
+            space_and_clip.spatial_id,
         );
 
         let image_size = LayoutSize::new(100.0, 100.0);
@@ -56,6 +55,7 @@ impl Example for App {
         );
         builder.push_image(
             &info,
+            &space_and_clip,
             image_size,
             LayoutSize::zero(),
             ImageRendering::Auto,
@@ -70,6 +70,7 @@ impl Example for App {
         );
         builder.push_image(
             &info,
+            &space_and_clip,
             image_size,
             LayoutSize::zero(),
             ImageRendering::Pixelated,

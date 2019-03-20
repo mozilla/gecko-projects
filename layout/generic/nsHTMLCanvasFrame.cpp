@@ -13,7 +13,7 @@
 #include "mozilla/dom/HTMLCanvasElement.h"
 #include "mozilla/layers/WebRenderBridgeChild.h"
 #include "mozilla/layers/WebRenderCanvasRenderer.h"
-#include "mozilla/layers/WebRenderLayerManager.h"
+#include "mozilla/layers/RenderRootStateManager.h"
 #include "nsDisplayList.h"
 #include "nsLayoutUtils.h"
 #include "nsStyleUtil.h"
@@ -115,7 +115,7 @@ class nsDisplayCanvas final : public nsDisplayItem {
   virtual bool CreateWebRenderCommands(
       mozilla::wr::DisplayListBuilder& aBuilder,
       wr::IpcResourceUpdateQueue& aResources, const StackingContextHelper& aSc,
-      mozilla::layers::WebRenderLayerManager* aManager,
+      mozilla::layers::RenderRootStateManager* aManager,
       nsDisplayListBuilder* aDisplayListBuilder) override {
     HTMLCanvasElement* element =
         static_cast<HTMLCanvasElement*>(mFrame->GetContent());
@@ -227,11 +227,12 @@ class nsDisplayCanvas final : public nsDisplayItem {
 
 nsIFrame* NS_NewHTMLCanvasFrame(nsIPresShell* aPresShell,
                                 ComputedStyle* aStyle) {
-  return new (aPresShell) nsHTMLCanvasFrame(aStyle);
+  return new (aPresShell)
+      nsHTMLCanvasFrame(aStyle, aPresShell->GetPresContext());
 }
 
 NS_QUERYFRAME_HEAD(nsHTMLCanvasFrame)
-NS_QUERYFRAME_ENTRY(nsHTMLCanvasFrame)
+  NS_QUERYFRAME_ENTRY(nsHTMLCanvasFrame)
 NS_QUERYFRAME_TAIL_INHERITING(nsContainerFrame)
 
 NS_IMPL_FRAMEARENA_HELPERS(nsHTMLCanvasFrame)
@@ -263,8 +264,8 @@ nsIntSize nsHTMLCanvasFrame::GetCanvasSize() {
   return size;
 }
 
-/* virtual */ nscoord nsHTMLCanvasFrame::GetMinISize(
-    gfxContext* aRenderingContext) {
+/* virtual */
+nscoord nsHTMLCanvasFrame::GetMinISize(gfxContext* aRenderingContext) {
   // XXX The caller doesn't account for constraints of the height,
   // min-height, and max-height properties.
   bool vertical = GetWritingMode().IsVertical();
@@ -274,8 +275,8 @@ nsIntSize nsHTMLCanvasFrame::GetCanvasSize() {
   return result;
 }
 
-/* virtual */ nscoord nsHTMLCanvasFrame::GetPrefISize(
-    gfxContext* aRenderingContext) {
+/* virtual */
+nscoord nsHTMLCanvasFrame::GetPrefISize(gfxContext* aRenderingContext) {
   // XXX The caller doesn't account for constraints of the height,
   // min-height, and max-height properties.
   bool vertical = GetWritingMode().IsVertical();
@@ -285,11 +286,13 @@ nsIntSize nsHTMLCanvasFrame::GetCanvasSize() {
   return result;
 }
 
-/* virtual */ IntrinsicSize nsHTMLCanvasFrame::GetIntrinsicSize() {
+/* virtual */
+IntrinsicSize nsHTMLCanvasFrame::GetIntrinsicSize() {
   return IntrinsicSizeFromCanvasSize(GetCanvasSize());
 }
 
-/* virtual */ nsSize nsHTMLCanvasFrame::GetIntrinsicRatio() {
+/* virtual */
+nsSize nsHTMLCanvasFrame::GetIntrinsicRatio() {
   return IntrinsicRatioFromCanvasSize(GetCanvasSize());
 }
 
@@ -440,7 +443,7 @@ bool nsHTMLCanvasFrame::UpdateWebRenderCanvasData(
 
 void nsHTMLCanvasFrame::BuildDisplayList(nsDisplayListBuilder* aBuilder,
                                          const nsDisplayListSet& aLists) {
-  if (!IsVisibleForPainting(aBuilder)) return;
+  if (!IsVisibleForPainting()) return;
 
   DisplayBorderBackgroundOutline(aBuilder, aLists);
 

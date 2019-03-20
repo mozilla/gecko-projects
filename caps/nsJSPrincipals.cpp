@@ -46,15 +46,16 @@ nsJSPrincipals::Release() {
   return count;
 }
 
-/* static */ bool nsJSPrincipals::Subsume(JSPrincipals* jsprin,
-                                          JSPrincipals* other) {
+/* static */
+bool nsJSPrincipals::Subsume(JSPrincipals* jsprin, JSPrincipals* other) {
   bool result;
   nsresult rv = nsJSPrincipals::get(jsprin)->Subsumes(
       nsJSPrincipals::get(other), &result);
   return NS_SUCCEEDED(rv) && result;
 }
 
-/* static */ void nsJSPrincipals::Destroy(JSPrincipals* jsprin) {
+/* static */
+void nsJSPrincipals::Destroy(JSPrincipals* jsprin) {
   // The JS runtime can call this method during the last GC when
   // nsScriptSecurityManager is destroyed. So we must not assume here that
   // the security manager still exists.
@@ -101,9 +102,10 @@ JS_PUBLIC_API void JSPrincipals::dump() {
 
 #endif
 
-/* static */ bool nsJSPrincipals::ReadPrincipals(
-    JSContext* aCx, JSStructuredCloneReader* aReader,
-    JSPrincipals** aOutPrincipals) {
+/* static */
+bool nsJSPrincipals::ReadPrincipals(JSContext* aCx,
+                                    JSStructuredCloneReader* aReader,
+                                    JSPrincipals** aOutPrincipals) {
   uint32_t tag;
   uint32_t unused;
   if (!JS_ReadUint32Pair(aReader, &tag, &unused)) {
@@ -120,9 +122,10 @@ JS_PUBLIC_API void JSPrincipals::dump() {
   return ReadKnownPrincipalType(aCx, aReader, tag, aOutPrincipals);
 }
 
-static bool ReadPrincipalInfo(JSStructuredCloneReader* aReader,
-                              OriginAttributes& aAttrs, nsACString& aSpec,
-                              nsACString& aOriginNoSuffix) {
+static bool ReadPrincipalInfo(
+    JSStructuredCloneReader* aReader, OriginAttributes& aAttrs,
+    nsACString& aSpec, nsACString& aOriginNoSuffix, nsACString& aBaseDomain,
+    nsTArray<ContentSecurityPolicy>* aPolicies = nullptr) {
   uint32_t suffixLength, specLength;
   if (!JS_ReadUint32Pair(aReader, &suffixLength, &specLength)) {
     return false;
@@ -149,12 +152,14 @@ static bool ReadPrincipalInfo(JSStructuredCloneReader* aReader,
     return false;
   }
 
-  uint32_t originNoSuffixLength, dummy;
-  if (!JS_ReadUint32Pair(aReader, &originNoSuffixLength, &dummy)) {
+  uint32_t originNoSuffixLength, policyCount;
+  if (!JS_ReadUint32Pair(aReader, &originNoSuffixLength, &policyCount)) {
     return false;
   }
 
-  MOZ_ASSERT(dummy == 0);
+  if (!aPolicies) {
+    MOZ_ASSERT(policyCount == 0);
+  }
 
   if (!aOriginNoSuffix.SetLength(originNoSuffixLength, fallible)) {
     return false;
@@ -162,6 +167,51 @@ static bool ReadPrincipalInfo(JSStructuredCloneReader* aReader,
 
   if (!JS_ReadBytes(aReader, aOriginNoSuffix.BeginWriting(),
                     originNoSuffixLength)) {
+    return false;
+  }
+
+  for (uint32_t i = 0; i < policyCount; i++) {
+    uint32_t policyLength, reportAndMeta;
+    if (!JS_ReadUint32Pair(aReader, &policyLength, &reportAndMeta)) {
+      return false;
+    }
+    bool reportOnly = reportAndMeta & 1;
+    bool deliveredViaMetaTag = reportAndMeta & 2;
+
+    nsAutoCString policyStr;
+    if (!policyStr.SetLength(policyLength, fallible)) {
+      return false;
+    }
+
+    if (!JS_ReadBytes(aReader, policyStr.BeginWriting(), policyLength)) {
+      return false;
+    }
+
+    if (aPolicies) {
+      aPolicies->AppendElement(ContentSecurityPolicy(
+          NS_ConvertUTF8toUTF16(policyStr), reportOnly, deliveredViaMetaTag));
+    }
+  }
+
+  uint32_t baseDomainIsVoid, baseDomainLength;
+  if (!JS_ReadUint32Pair(aReader, &baseDomainIsVoid, &baseDomainLength)) {
+    return false;
+  }
+
+  MOZ_ASSERT(baseDomainIsVoid == 0 || baseDomainIsVoid == 1);
+
+  if (baseDomainIsVoid) {
+    MOZ_ASSERT(baseDomainLength == 0);
+
+    aBaseDomain.SetIsVoid(true);
+    return true;
+  }
+
+  if (!aBaseDomain.SetLength(baseDomainLength, fallible)) {
+    return false;
+  }
+
+  if (!JS_ReadBytes(aReader, aBaseDomain.BeginWriting(), baseDomainLength)) {
     return false;
   }
 
@@ -176,7 +226,8 @@ static bool ReadPrincipalInfo(JSStructuredCloneReader* aReader, uint32_t aTag,
     OriginAttributes attrs;
     nsAutoCString spec;
     nsAutoCString originNoSuffix;
-    if (!ReadPrincipalInfo(aReader, attrs, spec, originNoSuffix)) {
+    nsAutoCString baseDomain;
+    if (!ReadPrincipalInfo(aReader, attrs, spec, originNoSuffix, baseDomain)) {
       return false;
     }
     aInfo = NullPrincipalInfo(attrs, spec);
@@ -206,7 +257,10 @@ static bool ReadPrincipalInfo(JSStructuredCloneReader* aReader, uint32_t aTag,
     OriginAttributes attrs;
     nsAutoCString spec;
     nsAutoCString originNoSuffix;
-    if (!ReadPrincipalInfo(aReader, attrs, spec, originNoSuffix)) {
+    nsAutoCString baseDomain;
+    nsTArray<ContentSecurityPolicy> policies;
+    if (!ReadPrincipalInfo(aReader, attrs, spec, originNoSuffix, baseDomain,
+                           &policies)) {
       return false;
     }
 
@@ -218,7 +272,9 @@ static bool ReadPrincipalInfo(JSStructuredCloneReader* aReader, uint32_t aTag,
 
     MOZ_DIAGNOSTIC_ASSERT(!originNoSuffix.IsEmpty());
 
-    aInfo = ContentPrincipalInfo(attrs, originNoSuffix, spec);
+    // XXX: Do we care about mDomain for structured clone?
+    aInfo = ContentPrincipalInfo(attrs, originNoSuffix, spec, Nothing(),
+                                 std::move(policies), baseDomain);
   } else {
 #ifdef FUZZING
     return false;
@@ -230,9 +286,11 @@ static bool ReadPrincipalInfo(JSStructuredCloneReader* aReader, uint32_t aTag,
   return true;
 }
 
-/* static */ bool nsJSPrincipals::ReadKnownPrincipalType(
-    JSContext* aCx, JSStructuredCloneReader* aReader, uint32_t aTag,
-    JSPrincipals** aOutPrincipals) {
+/* static */
+bool nsJSPrincipals::ReadKnownPrincipalType(JSContext* aCx,
+                                            JSStructuredCloneReader* aReader,
+                                            uint32_t aTag,
+                                            JSPrincipals** aOutPrincipals) {
   MOZ_ASSERT(aTag == SCTAG_DOM_NULL_PRINCIPAL ||
              aTag == SCTAG_DOM_SYSTEM_PRINCIPAL ||
              aTag == SCTAG_DOM_CONTENT_PRINCIPAL ||
@@ -259,19 +317,43 @@ static bool ReadPrincipalInfo(JSStructuredCloneReader* aReader, uint32_t aTag,
   return true;
 }
 
-static bool WritePrincipalInfo(JSStructuredCloneWriter* aWriter,
-                               const OriginAttributes& aAttrs,
-                               const nsCString& aSpec,
-                               const nsCString& aOriginNoSuffix) {
+static bool WritePrincipalInfo(
+    JSStructuredCloneWriter* aWriter, const OriginAttributes& aAttrs,
+    const nsCString& aSpec, const nsCString& aOriginNoSuffix,
+    const nsCString& aBaseDomain,
+    const nsTArray<ContentSecurityPolicy>* aPolicies = nullptr) {
   nsAutoCString suffix;
   aAttrs.CreateSuffix(suffix);
+  size_t policyCount = aPolicies ? aPolicies->Length() : 0;
 
-  return JS_WriteUint32Pair(aWriter, suffix.Length(), aSpec.Length()) &&
-         JS_WriteBytes(aWriter, suffix.get(), suffix.Length()) &&
-         JS_WriteBytes(aWriter, aSpec.get(), aSpec.Length()) &&
-         JS_WriteUint32Pair(aWriter, aOriginNoSuffix.Length(), 0) &&
-         JS_WriteBytes(aWriter, aOriginNoSuffix.get(),
-                       aOriginNoSuffix.Length());
+  if (!(JS_WriteUint32Pair(aWriter, suffix.Length(), aSpec.Length()) &&
+        JS_WriteBytes(aWriter, suffix.get(), suffix.Length()) &&
+        JS_WriteBytes(aWriter, aSpec.get(), aSpec.Length()) &&
+        JS_WriteUint32Pair(aWriter, aOriginNoSuffix.Length(), policyCount) &&
+        JS_WriteBytes(aWriter, aOriginNoSuffix.get(),
+                      aOriginNoSuffix.Length()))) {
+    return false;
+  }
+
+  for (uint32_t i = 0; i < policyCount; i++) {
+    nsCString policy;
+    CopyUTF16toUTF8((*aPolicies)[i].policy(), policy);
+    uint32_t reportAndMeta =
+        ((*aPolicies)[i].reportOnlyFlag() ? 1 : 0) |
+        ((*aPolicies)[i].deliveredViaMetaTagFlag() ? 2 : 0);
+    if (!(JS_WriteUint32Pair(aWriter, policy.Length(), reportAndMeta) &&
+          JS_WriteBytes(aWriter, PromiseFlatCString(policy).get(),
+                        policy.Length()))) {
+      return false;
+    }
+  }
+
+  if (aBaseDomain.IsVoid()) {
+    return JS_WriteUint32Pair(aWriter, 1, 0);
+  }
+
+  return JS_WriteUint32Pair(aWriter, 0, aBaseDomain.Length()) &&
+         JS_WriteBytes(aWriter, aBaseDomain.get(), aBaseDomain.Length());
 }
 
 static bool WritePrincipalInfo(JSStructuredCloneWriter* aWriter,
@@ -280,7 +362,7 @@ static bool WritePrincipalInfo(JSStructuredCloneWriter* aWriter,
     const NullPrincipalInfo& nullInfo = aInfo;
     return JS_WriteUint32Pair(aWriter, SCTAG_DOM_NULL_PRINCIPAL, 0) &&
            WritePrincipalInfo(aWriter, nullInfo.attrs(), nullInfo.spec(),
-                              EmptyCString());
+                              EmptyCString(), EmptyCString());
   }
   if (aInfo.type() == PrincipalInfo::TSystemPrincipalInfo) {
     return JS_WriteUint32Pair(aWriter, SCTAG_DOM_SYSTEM_PRINCIPAL, 0);
@@ -304,7 +386,8 @@ static bool WritePrincipalInfo(JSStructuredCloneWriter* aWriter,
   const ContentPrincipalInfo& cInfo = aInfo;
   return JS_WriteUint32Pair(aWriter, SCTAG_DOM_CONTENT_PRINCIPAL, 0) &&
          WritePrincipalInfo(aWriter, cInfo.attrs(), cInfo.spec(),
-                            cInfo.originNoSuffix());
+                            cInfo.originNoSuffix(), cInfo.baseDomain(),
+                            &(cInfo.securityPolicies()));
 }
 
 bool nsJSPrincipals::write(JSContext* aCx, JSStructuredCloneWriter* aWriter) {

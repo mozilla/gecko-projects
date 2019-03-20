@@ -10,9 +10,9 @@
 
 var EXPORTED_SYMBOLS = ["FormAutofillHeuristics", "LabelUtils"];
 
-ChromeUtils.import("resource://gre/modules/Services.jsm");
-ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
-ChromeUtils.import("resource://formautofill/FormAutofill.jsm");
+const {Services} = ChromeUtils.import("resource://gre/modules/Services.jsm");
+const {XPCOMUtils} = ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
+const {FormAutofill} = ChromeUtils.import("resource://formautofill/FormAutofill.jsm");
 ChromeUtils.defineModuleGetter(this, "FormAutofillUtils",
                                "resource://formautofill/FormAutofillUtils.jsm");
 
@@ -1090,7 +1090,7 @@ this.FormAutofillHeuristics = {
 XPCOMUtils.defineLazyGetter(this.FormAutofillHeuristics, "RULES", () => {
   let sandbox = {};
   const HEURISTICS_REGEXP = "chrome://formautofill/content/heuristicsRegexp.js";
-  Services.scriptloader.loadSubScript(HEURISTICS_REGEXP, sandbox, "utf-8");
+  Services.scriptloader.loadSubScript(HEURISTICS_REGEXP, sandbox);
   return sandbox.HeuristicsRegExp.RULES;
 });
 

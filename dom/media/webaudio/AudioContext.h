@@ -7,6 +7,7 @@
 #ifndef AudioContext_h_
 #define AudioContext_h_
 
+#include "AudioParamDescriptorMap.h"
 #include "mozilla/dom/OfflineAudioContextBinding.h"
 #include "MediaBufferDecoder.h"
 #include "mozilla/Attributes.h"
@@ -25,7 +26,7 @@
 // X11 has a #define for CurrentTime. Unbelievable :-(.
 // See dom/media/DOMMediaStream.h for more fun!
 #ifdef CurrentTime
-#undef CurrentTime
+#  undef CurrentTime
 #endif
 
 namespace WebCore {
@@ -183,9 +184,9 @@ class AudioContext final : public DOMEventTargetHelper,
 
   bool IsRunning() const;
 
-  // Called when an AudioScheduledSourceNode started, this method might resume
-  // the AudioContext if it was not allowed to start.
-  void NotifyScheduledSourceNodeStarted();
+  // Called when an AudioScheduledSourceNode started or the source node starts,
+  // this method might resume the AudioContext if it was not allowed to start.
+  void StartBlockedAudioContextIfAllowed();
 
   // Those three methods return a promise to content, that is resolved when an
   // (possibly long) operation is completed on the MSG (and possibly other)
@@ -200,6 +201,12 @@ class AudioContext final : public DOMEventTargetHelper,
   already_AddRefed<Promise> Resume(ErrorResult& aRv);
   already_AddRefed<Promise> Close(ErrorResult& aRv);
   IMPL_EVENT_HANDLER(statechange)
+
+  // These two functions are similar with Suspend() and Resume(), the difference
+  // is they are designed for calling from chrome side, not content side. eg.
+  // calling from inner window, so we won't need to return promise for caller.
+  void SuspendFromChrome();
+  void ResumeFromChrome();
 
   already_AddRefed<AudioBufferSourceNode> CreateBufferSource(ErrorResult& aRv);
 
@@ -305,6 +312,14 @@ class AudioContext final : public DOMEventTargetHelper,
 
   bool CheckClosed(ErrorResult& aRv);
 
+  // Steals from |aParamMap|
+  void SetParamMapForWorkletName(const nsAString& aName,
+                                 AudioParamDescriptorMap* aParamMap);
+  const AudioParamDescriptorMap* GetParamMapForWorkletName(
+      const nsAString& aName) {
+    return mWorkletParamDescriptors.GetValue(aName);
+  }
+
   void Dispatch(already_AddRefed<nsIRunnable>&& aRunnable);
 
  private:
@@ -319,14 +334,25 @@ class AudioContext final : public DOMEventTargetHelper,
 
   nsTArray<MediaStream*> GetAllStreams() const;
 
-  // Request the prompt to ask for user's approval for autoplay.
-  void EnsureAutoplayRequested();
-
   void ResumeInternal();
   void SuspendInternal(void* aPromise);
 
-  // This event is used for testing only.
-  void DispatchBlockedEvent();
+  // Will report error message to console and dispatch testing event if needed
+  // when AudioContext is blocked by autoplay policy.
+  void ReportBlocked();
+
+  void ReportToConsole(uint32_t aErrorFlags, const char* aMsg) const;
+
+  // This function should be called everytime we decide whether allow to start
+  // audio context, it's used to update Telemetry related variables.
+  void UpdateAutoplayAssumptionStatus();
+
+  // These functions are used for updating Telemetry.
+  // - MaybeUpdateAutoplayTelemetry: update category 'AllowedAfterBlocked'
+  // - MaybeUpdateAutoplayTelemetryWhenShutdown: update category 'NeverBlocked'
+  //   and 'NeverAllowed', so we need to call it when shutdown AudioContext
+  void MaybeUpdateAutoplayTelemetry();
+  void MaybeUpdateAutoplayTelemetryWhenShutdown();
 
  private:
   // Each AudioContext has an id, that is passed down the MediaStreams that
@@ -354,6 +380,8 @@ class AudioContext final : public DOMEventTargetHelper,
   nsTHashtable<nsRefPtrHashKey<AudioNode>> mActiveNodes;
   // Raw (non-owning) references to all AudioNodes for this AudioContext.
   nsTHashtable<nsPtrHashKey<AudioNode>> mAllNodes;
+  nsDataHashtable<nsStringHashKey, AudioParamDescriptorMap>
+      mWorkletParamDescriptors;
   // Cache to avoid recomputing basic waveforms all the time.
   RefPtr<BasicWaveFormCache> mBasicWaveFormCache;
   // Number of channels passed in the OfflineAudioContext ctor.
@@ -368,11 +396,34 @@ class AudioContext final : public DOMEventTargetHelper,
   bool mIsDisconnecting;
   // This flag stores the value of previous status of `allowed-to-start`.
   bool mWasAllowedToStart;
+
+  // True if this AudioContext has been suspended by the page.
+  bool mSuspendedByContent;
+  // True if this AudioContext has been suspended by the chrome.
+  bool mSuspendedByChrome;
+
+  // These variables are used for telemetry, they're not reflect the actual
+  // status of AudioContext, they are based on the "assumption" of enabling
+  // blocking web audio. Because we want to record Telemetry no matter user
+  // enable blocking autoplay or not.
+  // - 'mWasEverAllowedToStart' would be true when AudioContext had ever been
+  //   allowed to start if we enable blocking web audio.
+  // - 'mWasEverBlockedToStart' would be true when AudioContext had ever been
+  //   blocked to start if we enable blocking web audio.
+  // - 'mWouldBeAllowedToStart' stores the value of previous status of
+  //   `allowed-to-start` if we enable blocking web audio.
+  bool mWasEverAllowedToStart;
+  bool mWasEverBlockedToStart;
+  bool mWouldBeAllowedToStart;
 };
 
 static const dom::AudioContext::AudioContextId NO_AUDIO_CONTEXT = 0;
 
 }  // namespace dom
 }  // namespace mozilla
+
+inline nsISupports* ToSupports(mozilla::dom::AudioContext* p) {
+  return NS_CYCLE_COLLECTION_CLASSNAME(mozilla::dom::AudioContext)::Upcast(p);
+}
 
 #endif

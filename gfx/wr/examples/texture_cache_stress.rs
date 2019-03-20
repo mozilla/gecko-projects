@@ -14,6 +14,8 @@ use boilerplate::{Example, HandyDandyRectBuilder};
 use gleam::gl;
 use std::mem;
 use webrender::api::*;
+use webrender::api::units::*;
+
 
 struct ImageGenerator {
     patterns: [[u8; 3]; 6],
@@ -90,19 +92,17 @@ impl Example for App {
         api: &RenderApi,
         builder: &mut DisplayListBuilder,
         txn: &mut Transaction,
-        _framebuffer_size: DeviceIntSize,
-        _pipeline_id: PipelineId,
+        _framebuffer_size: FramebufferIntSize,
+        pipeline_id: PipelineId,
         _document_id: DocumentId,
     ) {
         let bounds = (0, 0).to(512, 512);
         let info = LayoutPrimitiveInfo::new(bounds);
-        builder.push_stacking_context(
+        let space_and_clip = SpaceAndClipInfo::root_scroll(pipeline_id);
+
+        builder.push_simple_stacking_context(
             &info,
-            None,
-            TransformStyle::Flat,
-            MixBlendMode::Normal,
-            &[],
-            RasterSpace::Screen,
+            space_and_clip.spatial_id,
         );
 
         let x0 = 50.0;
@@ -146,6 +146,7 @@ impl Example for App {
 
             builder.push_image(
                 &info,
+                &space_and_clip,
                 image_size,
                 LayoutSize::zero(),
                 ImageRendering::Auto,
@@ -163,6 +164,7 @@ impl Example for App {
             );
             builder.push_image(
                 &info,
+                &space_and_clip,
                 image_size,
                 LayoutSize::zero(),
                 ImageRendering::Auto,
@@ -180,6 +182,7 @@ impl Example for App {
         );
         builder.push_image(
             &info,
+            &space_and_clip,
             image_size,
             LayoutSize::zero(),
             ImageRendering::Auto,

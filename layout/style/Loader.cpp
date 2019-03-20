@@ -15,7 +15,6 @@
 #include "mozilla/LoadInfo.h"
 #include "mozilla/Logging.h"
 #include "mozilla/MemoryReporting.h"
-#include "mozilla/StyleSheetInlines.h"
 #include "mozilla/SystemGroup.h"
 #include "mozilla/ResultExtensions.h"
 #include "mozilla/URLPreloader.h"
@@ -25,7 +24,7 @@
 #include "nsCOMPtr.h"
 #include "nsString.h"
 #include "nsIContent.h"
-#include "nsIDocument.h"
+#include "mozilla/dom/Document.h"
 #include "nsIURI.h"
 #include "nsNetUtil.h"
 #include "nsIProtocolHandler.h"
@@ -47,6 +46,7 @@
 #include "mozilla/dom/MediaList.h"
 #include "mozilla/dom/ShadowRoot.h"
 #include "mozilla/dom/URL.h"
+#include "mozilla/net/UrlClassifierFeatureFactory.h"
 #include "mozilla/AsyncEventDispatcher.h"
 #include "mozilla/ServoBindings.h"
 #include "mozilla/StyleSheet.h"
@@ -56,7 +56,7 @@
 #include "mozilla/css/StreamLoader.h"
 
 #ifdef MOZ_XUL
-#include "nsXULPrototypeCache.h"
+#  include "nsXULPrototypeCache.h"
 #endif
 
 #include "nsError.h"
@@ -65,7 +65,6 @@
 #include "mozilla/dom/SRICheck.h"
 
 #include "mozilla/Encoding.h"
-#include "mozilla/Logging.h"
 
 using namespace mozilla::dom;
 
@@ -369,7 +368,7 @@ Loader::Loader()
 
 Loader::Loader(DocGroup* aDocGroup) : Loader() { mDocGroup = aDocGroup; }
 
-Loader::Loader(nsIDocument* aDocument) : Loader() {
+Loader::Loader(Document* aDocument) : Loader() {
   mDocument = aDocument;
   MOZ_ASSERT(mDocument, "We should get a valid document from the caller!");
 }
@@ -597,20 +596,22 @@ nsresult SheetLoadData::VerifySheetReadyToParse(nsresult aStatus,
   if (NS_FAILED(aStatus)) {
     LOG_WARN(
         ("  Load failed: status 0x%" PRIx32, static_cast<uint32_t>(aStatus)));
-    // Handle sheet not loading error because source was a tracking URL.
+    // Handle sheet not loading error because source was a tracking URL (or
+    // fingerprinting, cryptomining, etc).
     // We make a note of this sheet node by including it in a dedicated
     // array of blocked tracking nodes under its parent document.
     //
     // Multiple sheet load instances might be tied to this request,
     // we annotate each one linked to a valid owning element (node).
-    if (aStatus == NS_ERROR_TRACKING_URI) {
-      nsIDocument* doc = mLoader->GetDocument();
+    if (net::UrlClassifierFeatureFactory::IsClassifierBlockingErrorCode(
+            aStatus)) {
+      Document* doc = mLoader->GetDocument();
       if (doc) {
         for (SheetLoadData* data = this; data; data = data->mNext) {
           // mOwningElement may be null but AddBlockTrackingNode can cope
           nsCOMPtr<nsIContent> content =
               do_QueryInterface(data->mOwningElement);
-          doc->AddBlockedTrackingNode(content);
+          doc->AddBlockedNodeByClassifier(content);
         }
       }
     }
@@ -742,8 +743,8 @@ nsresult SheetLoadData::VerifySheetReadyToParse(nsresult aStatus,
   SRIMetadata sriMetadata;
   mSheet->GetIntegrity(sriMetadata);
   if (sriMetadata.IsEmpty()) {
-    nsCOMPtr<nsILoadInfo> loadInfo = aChannel->GetLoadInfo();
-    if (loadInfo && loadInfo->GetEnforceSRI()) {
+    nsCOMPtr<nsILoadInfo> loadInfo = aChannel->LoadInfo();
+    if (loadInfo->GetEnforceSRI()) {
       LOG(("  Load was blocked by SRI"));
       MOZ_LOG(gSriPRLog, mozilla::LogLevel::Debug,
               ("css::Loader::OnStreamComplete, required SRI not found"));
@@ -856,6 +857,16 @@ nsresult Loader::CheckContentPolicy(nsIPrincipal* aLoadingPrincipal,
   nsCOMPtr<nsILoadInfo> secCheckLoadInfo = new net::LoadInfo(
       aLoadingPrincipal, aTriggeringPrincipal, aRequestingNode,
       nsILoadInfo::SEC_ONLY_FOR_EXPLICIT_CONTENTSEC_CHECK, contentPolicyType);
+
+  // snapshot the nonce at load start time for performing CSP checks
+  if (contentPolicyType == nsIContentPolicy::TYPE_INTERNAL_STYLESHEET) {
+    nsCOMPtr<Element> element = do_QueryInterface(aRequestingNode);
+    if (element && element->IsHTMLElement()) {
+      nsAutoString cspNonce;
+      element->GetAttribute(NS_LITERAL_STRING("nonce"), cspNonce);
+      secCheckLoadInfo->SetCspNonce(cspNonce);
+    }
+  }
 
   int16_t shouldLoad = nsIContentPolicy::ACCEPT;
   nsresult rv = NS_CheckContentLoadPolicy(
@@ -1059,7 +1070,7 @@ nsresult Loader::CreateSheet(nsIURI* aURI, nsIContent* aLinkingContent,
 }
 
 static Loader::MediaMatched MediaListMatches(const MediaList* aMediaList,
-                                             const nsIDocument* aDocument) {
+                                             const Document* aDocument) {
   if (!aMediaList || !aDocument) {
     return Loader::MediaMatched::Yes;
   }
@@ -1309,8 +1320,19 @@ nsresult Loader::LoadSheet(SheetLoadData* aLoadData,
       return rv;
     }
 
+    // snapshot the nonce at load start time for performing CSP checks
+    if (contentPolicyType == nsIContentPolicy::TYPE_INTERNAL_STYLESHEET) {
+      nsCOMPtr<Element> element = do_QueryInterface(aLoadData->mRequestingNode);
+      if (element && element->IsHTMLElement()) {
+        nsAutoString cspNonce;
+        element->GetAttribute(NS_LITERAL_STRING("nonce"), cspNonce);
+        nsCOMPtr<nsILoadInfo> loadInfo = channel->LoadInfo();
+        loadInfo->SetCspNonce(cspNonce);
+      }
+    }
+
     nsCOMPtr<nsIInputStream> stream;
-    rv = channel->Open2(getter_AddRefs(stream));
+    rv = channel->Open(getter_AddRefs(stream));
 
     if (NS_FAILED(rv)) {
       LOG_ERROR(("  Failed to open URI synchronously"));
@@ -1371,6 +1393,7 @@ nsresult Loader::LoadSheet(SheetLoadData* aLoadData,
   }
 
   nsCOMPtr<nsILoadGroup> loadGroup;
+  nsCOMPtr<nsICookieSettings> cookieSettings;
   if (mDocument) {
     loadGroup = mDocument->GetDocumentLoadGroup();
     // load for a document with no loadgrup indicates that something is
@@ -1380,6 +1403,8 @@ nsresult Loader::LoadSheet(SheetLoadData* aLoadData,
       SheetComplete(aLoadData, NS_ERROR_UNEXPECTED);
       return NS_ERROR_UNEXPECTED;
     }
+
+    cookieSettings = mDocument->CookieSettings();
   }
 #ifdef DEBUG
   mSyncCallback = true;
@@ -1421,7 +1446,7 @@ nsresult Loader::LoadSheet(SheetLoadData* aLoadData,
     // triggeringPrincipal should always be the systemPrincipal.
     rv = NS_NewChannel(getter_AddRefs(channel), aLoadData->mURI,
                        nsContentUtils::GetSystemPrincipal(), securityFlags,
-                       contentPolicyType,
+                       contentPolicyType, cookieSettings,
                        nullptr,  // aPerformanceStorage
                        loadGroup,
                        nullptr,  // aCallbacks
@@ -1437,6 +1462,17 @@ nsresult Loader::LoadSheet(SheetLoadData* aLoadData,
     return rv;
   }
 
+  // snapshot the nonce at load start time for performing CSP checks
+  if (contentPolicyType == nsIContentPolicy::TYPE_INTERNAL_STYLESHEET) {
+    nsCOMPtr<Element> element = do_QueryInterface(aLoadData->mRequestingNode);
+    if (element && element->IsHTMLElement()) {
+      nsAutoString cspNonce;
+      element->GetAttribute(NS_LITERAL_STRING("nonce"), cspNonce);
+      nsCOMPtr<nsILoadInfo> loadInfo = channel->LoadInfo();
+      loadInfo->SetCspNonce(cspNonce);
+    }
+  }
+
   if (!aLoadData->ShouldDefer()) {
     nsCOMPtr<nsIClassOfService> cos(do_QueryInterface(channel));
     if (cos) {
@@ -1446,12 +1482,6 @@ nsresult Loader::LoadSheet(SheetLoadData* aLoadData,
 
   nsCOMPtr<nsIHttpChannel> httpChannel(do_QueryInterface(channel));
   if (httpChannel) {
-    // Send a minimal Accept header for text/css
-    rv = httpChannel->SetRequestHeader(NS_LITERAL_CSTRING("Accept"),
-                                       NS_LITERAL_CSTRING("text/css,*/*;q=0.1"),
-                                       false);
-    NS_ENSURE_SUCCESS(rv, rv);
-
     nsCOMPtr<nsIURI> referrerURI = aLoadData->GetReferrerURI();
     if (referrerURI) {
       rv = httpChannel->SetReferrerWithPolicy(
@@ -1526,7 +1556,7 @@ nsresult Loader::LoadSheet(SheetLoadData* aLoadData,
                                  mDocument);
   }
 
-  rv = channel->AsyncOpen2(streamLoader);
+  rv = channel->AsyncOpen(streamLoader);
 
 #ifdef DEBUG
   mSyncCallback = false;
@@ -1551,7 +1581,7 @@ Loader::Completed Loader::ParseSheet(const nsACString& aBytes,
                                      SheetLoadData* aLoadData,
                                      AllowAsyncParse aAllowAsync) {
   LOG(("css::Loader::ParseSheet"));
-  AUTO_PROFILER_LABEL("css::Loader::ParseSheet", LAYOUT);
+  AUTO_PROFILER_LABEL("css::Loader::ParseSheet", LAYOUT_CSSParsing);
   MOZ_ASSERT(aLoadData);
   aLoadData->mIsBeingParsed = true;
 

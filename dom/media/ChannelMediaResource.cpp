@@ -27,10 +27,12 @@ namespace mozilla {
 
 ChannelMediaResource::ChannelMediaResource(MediaResourceCallback* aCallback,
                                            nsIChannel* aChannel, nsIURI* aURI,
+                                           int64_t aStreamLength,
                                            bool aIsPrivateBrowsing)
     : BaseMediaResource(aCallback, aChannel, aURI),
       mCacheStream(this, aIsPrivateBrowsing),
-      mSuspendAgent(mCacheStream) {}
+      mSuspendAgent(mCacheStream),
+      mKnownStreamLength(aStreamLength) {}
 
 ChannelMediaResource::~ChannelMediaResource() {
   MOZ_ASSERT(mClosed);
@@ -51,15 +53,13 @@ NS_IMPL_ISUPPORTS(ChannelMediaResource::Listener, nsIRequestObserver,
                   nsIStreamListener, nsIChannelEventSink, nsIInterfaceRequestor,
                   nsIThreadRetargetableStreamListener)
 
-nsresult ChannelMediaResource::Listener::OnStartRequest(nsIRequest* aRequest,
-                                                        nsISupports* aContext) {
+nsresult ChannelMediaResource::Listener::OnStartRequest(nsIRequest* aRequest) {
   MOZ_ASSERT(NS_IsMainThread());
   if (!mResource) return NS_OK;
   return mResource->OnStartRequest(aRequest, mOffset);
 }
 
 nsresult ChannelMediaResource::Listener::OnStopRequest(nsIRequest* aRequest,
-                                                       nsISupports* aContext,
                                                        nsresult aStatus) {
   MOZ_ASSERT(NS_IsMainThread());
   if (!mResource) return NS_OK;
@@ -67,8 +67,8 @@ nsresult ChannelMediaResource::Listener::OnStopRequest(nsIRequest* aRequest,
 }
 
 nsresult ChannelMediaResource::Listener::OnDataAvailable(
-    nsIRequest* aRequest, nsISupports* aContext, nsIInputStream* aStream,
-    uint64_t aOffset, uint32_t aCount) {
+    nsIRequest* aRequest, nsIInputStream* aStream, uint64_t aOffset,
+    uint32_t aCount) {
   // This might happen off the main thread.
   RefPtr<ChannelMediaResource> res;
   {
@@ -514,7 +514,8 @@ nsresult ChannelMediaResource::Open(nsIStreamListener** aStreamListener) {
   MOZ_ASSERT(aStreamListener);
   MOZ_ASSERT(mChannel);
 
-  int64_t streamLength = CalculateStreamLength();
+  int64_t streamLength =
+      mKnownStreamLength < 0 ? CalculateStreamLength() : mKnownStreamLength;
   nsresult rv = mCacheStream.Init(streamLength);
   if (NS_FAILED(rv)) {
     return rv;
@@ -543,7 +544,7 @@ nsresult ChannelMediaResource::OpenChannel(int64_t aOffset) {
   rv = SetupChannelHeaders(aOffset);
   NS_ENSURE_SUCCESS(rv, rv);
 
-  rv = mChannel->AsyncOpen2(mListener);
+  rv = mChannel->AsyncOpen(mListener);
   NS_ENSURE_SUCCESS(rv, rv);
 
   // Tell the media element that we are fetching data from a channel.
@@ -613,7 +614,7 @@ already_AddRefed<BaseMediaResource> ChannelMediaResource::CloneData(
   MOZ_ASSERT(CanClone(), "Stream can't be cloned");
 
   RefPtr<ChannelMediaResource> resource =
-      new ChannelMediaResource(aCallback, nullptr, mURI);
+      new ChannelMediaResource(aCallback, nullptr, mURI, mKnownStreamLength);
 
   resource->mIsLiveStream = mIsLiveStream;
   resource->mIsTransportSeekable = mIsTransportSeekable;
@@ -762,12 +763,10 @@ nsresult ChannelMediaResource::RecreateChannel() {
   NS_ENSURE_SUCCESS(rv, rv);
 
   if (setAttrs) {
-    nsCOMPtr<nsILoadInfo> loadInfo = mChannel->GetLoadInfo();
-    if (loadInfo) {
-      // The function simply returns NS_OK, so we ignore the return value.
-      Unused << loadInfo->SetOriginAttributes(
-          triggeringPrincipal->OriginAttributesRef());
-    }
+    nsCOMPtr<nsILoadInfo> loadInfo = mChannel->LoadInfo();
+    // The function simply returns NS_OK, so we ignore the return value.
+    Unused << loadInfo->SetOriginAttributes(
+        triggeringPrincipal->OriginAttributesRef());
   }
 
   nsCOMPtr<nsIClassOfService> cos(do_QueryInterface(mChannel));

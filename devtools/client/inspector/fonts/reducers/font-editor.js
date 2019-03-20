@@ -10,6 +10,7 @@ const { parseFontVariationAxes } = require("../utils/font-utils");
 const {
   APPLY_FONT_VARIATION_INSTANCE,
   RESET_EDITOR,
+  SET_FONT_EDITOR_DISABLED,
   UPDATE_AXIS_VALUE,
   UPDATE_CUSTOM_INSTANCE,
   UPDATE_EDITOR_STATE,
@@ -22,6 +23,8 @@ const INITIAL_STATE = {
   axes: {},
   // Copy of the most recent axes values. Used to revert from a named instance.
   customInstanceValues: [],
+  // When true, prevent users from interacting with inputs in the font editor.
+  disabled: false,
   // Fonts used on the selected element.
   fonts: [],
   // Current selected font variation instance.
@@ -75,6 +78,10 @@ const reducers = {
     return newState;
   },
 
+  [SET_FONT_EDITOR_DISABLED](state, { disabled }) {
+    return { ...state, disabled };
+  },
+
   [UPDATE_EDITOR_STATE](state, { fonts, properties, id }) {
     const axes = parseFontVariationAxes(properties["font-variation-settings"]);
 
@@ -82,7 +89,7 @@ const reducers = {
     // "font-weight" if it is numeric and not a keyword.
     const weight = properties["font-weight"];
     if (axes.wght === undefined && parseFloat(weight).toString() === weight.toString()) {
-      axes.wght = weight;
+      axes.wght = parseFloat(weight);
     }
 
     // If not defined in font-variation-settings, setup "wdth" axis with the percentage
@@ -92,7 +99,7 @@ const reducers = {
     // If there's a match, the number is the second item in the match array.
     const match = stretch.trim().match(/^(\d+(.\d+)?)%$/);
     if (axes.wdth === undefined && match && match[1]) {
-      axes.wdth = match[1];
+      axes.wdth = parseFloat(match[1]);
     }
 
     return { ...state, axes, fonts, properties, id };

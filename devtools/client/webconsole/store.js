@@ -38,8 +38,8 @@ const enableMessagesCacheClearing = require("./enhancers/message-cache-clearing"
  * Create and configure store for the Console panel. This is the place
  * where various enhancers and middleware can be registered.
  */
-function configureStore(hud, options = {}) {
-  const prefsService = getPrefsService(hud);
+function configureStore(webConsoleUI, options = {}) {
+  const prefsService = getPrefsService(webConsoleUI);
   const {
     getBoolPref,
     getIntPref,
@@ -49,7 +49,6 @@ function configureStore(hud, options = {}) {
     || Math.max(getIntPref("devtools.hud.loglimit"), 1);
   const sidebarToggle = getBoolPref(PREFS.FEATURES.SIDEBAR_TOGGLE);
   const jstermCodeMirror = getBoolPref(PREFS.FEATURES.JSTERM_CODE_MIRROR);
-  const jstermReverseSearch = getBoolPref(PREFS.FEATURES.JSTERM_REVERSE_SEARCH);
   const historyCount = getIntPref(PREFS.UI.INPUT_HISTORY_COUNT);
 
   const initialState = {
@@ -57,7 +56,6 @@ function configureStore(hud, options = {}) {
       logLimit,
       sidebarToggle,
       jstermCodeMirror,
-      jstermReverseSearch,
       historyCount,
     }),
     filters: FilterState({
@@ -71,15 +69,26 @@ function configureStore(hud, options = {}) {
       netxhr: getBoolPref(PREFS.FILTER.NETXHR),
     }),
     ui: UiState({
-      filterBarVisible: getBoolPref(PREFS.UI.FILTER_BAR),
       networkMessageActiveTabId: "headers",
       persistLogs: getBoolPref(PREFS.UI.PERSIST),
+      editor: getBoolPref(PREFS.UI.EDITOR),
     }),
   };
 
   // Prepare middleware.
+  const services = (options.services || {});
+
   const middleware = applyMiddleware(
-    thunk.bind(null, {prefsService, client: (options.services || {})}),
+    thunk.bind(null, {
+      prefsService,
+      services,
+      // Needed for the ObjectInspector
+      client: {
+        createObjectClient: services.createObjectClient,
+        createLongStringClient: services.createLongStringClient,
+        releaseActor: services.releaseActor,
+      },
+    }),
     historyPersistence,
     eventTelemetry.bind(null, options.telemetry, options.sessionId),
   );
@@ -89,11 +98,11 @@ function configureStore(hud, options = {}) {
     initialState,
     compose(
       middleware,
-      enableActorReleaser(hud),
+      enableActorReleaser(webConsoleUI),
       enableBatching(),
-      enableNetProvider(hud),
-      enableMessagesCacheClearing(hud),
-      ensureCSSErrorReportingEnabled(hud),
+      enableNetProvider(webConsoleUI),
+      enableMessagesCacheClearing(webConsoleUI),
+      ensureCSSErrorReportingEnabled(webConsoleUI),
     )
   );
 }

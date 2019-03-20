@@ -42,11 +42,15 @@ DeviceInfoIos::DeviceInfoIos() {
   this->Init();
 }
 
-DeviceInfoIos::~DeviceInfoIos() {}
+DeviceInfoIos::~DeviceInfoIos() {
+  [_captureInfo registerOwner:nil];
+}
 
 int32_t DeviceInfoIos::Init() {
-  // Fill in all device capabilities.
+  _captureInfo = [[DeviceInfoIosObjC alloc] init];
+  [_captureInfo registerOwner:this];
 
+  // Fill in all device capabilities.
   int deviceCount = [DeviceInfoIosObjC captureDeviceCount];
 
   for (int i = 0; i < deviceCount; i++) {
@@ -63,7 +67,10 @@ int32_t DeviceInfoIos::Init() {
 
     char deviceNameUTF8[256];
     char deviceId[256];
-    this->GetDeviceName(i, deviceNameUTF8, 256, deviceId, 256);
+    int error = this->GetDeviceName(i, deviceNameUTF8, 256, deviceId, 256);
+    if (error) {
+      return error;
+    }
     std::string deviceIdCopy(deviceId);
     std::pair<std::string, VideoCaptureCapabilities> mapPair =
         std::pair<std::string, VideoCaptureCapabilities>(deviceIdCopy, capabilityVector);
@@ -85,6 +92,11 @@ int32_t DeviceInfoIos::GetDeviceName(uint32_t deviceNumber,
                                      char* productUniqueIdUTF8,
                                      uint32_t productUniqueIdUTF8Length,
                                      pid_t* pid) {
+
+  if (deviceNumber >= NumberOfDevices()) {
+    return -1;
+  }
+
   NSString* deviceName = [DeviceInfoIosObjC deviceNameForIndex:deviceNumber];
 
   NSString* deviceUniqueId = [DeviceInfoIosObjC deviceUniqueIdForIndex:deviceNumber];

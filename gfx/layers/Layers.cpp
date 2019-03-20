@@ -55,8 +55,6 @@ uint8_t gLayerManagerLayerBuilder;
 namespace mozilla {
 namespace layers {
 
-FILE* FILEOrDefault(FILE* aFile) { return aFile ? aFile : stderr; }
-
 typedef ScrollableLayerGuid::ViewID ViewID;
 
 using namespace mozilla::gfx;
@@ -144,7 +142,8 @@ bool LayerManager::AreComponentAlphaLayersEnabled() {
   return gfxPrefs::ComponentAlphaEnabled();
 }
 
-/*static*/ void LayerManager::LayerUserDataDestroy(void* data) {
+/*static*/
+void LayerManager::LayerUserDataDestroy(void* data) {
   delete static_cast<LayerUserData*>(data);
 }
 
@@ -152,6 +151,29 @@ UniquePtr<LayerUserData> LayerManager::RemoveUserData(void* aKey) {
   UniquePtr<LayerUserData> d(static_cast<LayerUserData*>(
       mUserData.Remove(static_cast<gfx::UserDataKey*>(aKey))));
   return d;
+}
+
+void LayerManager::PayloadPresented() {
+  if (mPayload.Length()) {
+    TimeStamp presented = TimeStamp::Now();
+    for (CompositionPayload& payload : mPayload) {
+#if MOZ_GECKO_PROFILER
+      if (profiler_is_active()) {
+        nsPrintfCString marker(
+            "Payload Presented, type: %d latency: %dms\n",
+            int32_t(payload.mType),
+            int32_t((presented - payload.mTimeStamp).ToMilliseconds()));
+        profiler_add_marker(marker.get(), JS::ProfilingCategoryPair::GRAPHICS);
+      }
+#endif
+
+      if (payload.mType == CompositionPayloadType::eKeyPress) {
+        Telemetry::AccumulateTimeDelta(
+            mozilla::Telemetry::KEYPRESS_PRESENT_LATENCY, payload.mTimeStamp,
+            presented);
+      }
+    }
+  }
 }
 
 //--------------------------------------------------
@@ -650,7 +672,8 @@ void Layer::ComputeEffectiveTransformForMaskLayers(
   }
 }
 
-/* static */ void Layer::ComputeEffectiveTransformForMaskLayer(
+/* static */
+void Layer::ComputeEffectiveTransformForMaskLayer(
     Layer* aMaskLayer, const gfx::Matrix4x4& aTransformToSurface) {
   aMaskLayer->mEffectiveTransform = aTransformToSurface;
 
@@ -765,7 +788,6 @@ ContainerLayer::ContainerLayer(LayerManager* aManager, void* aImplData)
       mInheritedXScale(1.0f),
       mInheritedYScale(1.0f),
       mPresShellResolution(1.0f),
-      mScaleToResolution(false),
       mUseIntermediateSurface(false),
       mSupportsComponentAlphaChildren(false),
       mMayHaveReadbackChild(false),
@@ -945,8 +967,7 @@ bool ContainerLayer::RepositionChild(Layer* aChild, Layer* aAfter) {
 
 void ContainerLayer::FillSpecificAttributes(SpecificLayerAttributes& aAttrs) {
   aAttrs = ContainerLayerAttributes(mPreXScale, mPreYScale, mInheritedXScale,
-                                    mInheritedYScale, mPresShellResolution,
-                                    mScaleToResolution);
+                                    mInheritedYScale, mPresShellResolution);
 }
 
 bool ContainerLayer::Creates3DContextWithExtendingChildren() {
@@ -1269,7 +1290,8 @@ void ContainerLayer::ComputeEffectiveTransformsForChildren(
   }
 }
 
-/* static */ bool ContainerLayer::HasOpaqueAncestorLayer(Layer* aLayer) {
+/* static */
+bool ContainerLayer::HasOpaqueAncestorLayer(Layer* aLayer) {
   for (Layer* l = aLayer->GetParent(); l; l = l->GetParent()) {
     if (l->GetContentFlags() & Layer::CONTENT_OPAQUE) return true;
   }
@@ -1696,6 +1718,11 @@ void Layer::PrintInfo(std::stringstream& aStream, const char* aPrefix) {
   if (Is3DContextLeaf()) {
     aStream << " [is3DContextLeaf]";
   }
+  if (Maybe<FrameMetrics::ViewID> viewId = IsAsyncZoomContainer()) {
+    aStream << nsPrintfCString(" [asyncZoomContainer scrollId=%" PRIu64 "]",
+                               *viewId)
+                   .get();
+  }
   if (IsScrollbarContainer()) {
     aStream << " [scrollbar]";
   }
@@ -1956,11 +1983,8 @@ void ContainerLayer::PrintInfo(std::stringstream& aStream,
     aStream
         << nsPrintfCString(" [preScale=%g, %g]", mPreXScale, mPreYScale).get();
   }
-  if (mScaleToResolution) {
-    aStream << nsPrintfCString(" [presShellResolution=%g]",
-                               mPresShellResolution)
-                   .get();
-  }
+  aStream << nsPrintfCString(" [presShellResolution=%g]", mPresShellResolution)
+                 .get();
 }
 
 void ContainerLayer::DumpPacket(layerscope::LayersPacket* aPacket,
@@ -2201,7 +2225,8 @@ void LayerManager::DumpPacket(layerscope::LayersPacket* aPacket) {
   layer->set_parentptr(0);
 }
 
-/*static*/ bool LayerManager::IsLogEnabled() {
+/*static*/
+bool LayerManager::IsLogEnabled() {
   return MOZ_LOG_TEST(GetLog(), LogLevel::Debug);
 }
 

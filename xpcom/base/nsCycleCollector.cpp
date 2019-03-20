@@ -143,10 +143,10 @@
 //
 
 #if !defined(__MINGW32__)
-#ifdef WIN32
-#include <crtdbg.h>
-#include <errno.h>
-#endif
+#  ifdef WIN32
+#    include <crtdbg.h>
+#    include <errno.h>
+#  endif
 #endif
 
 #include "base/process_util.h"
@@ -209,9 +209,9 @@ uint32_t gNurseryPurpleBufferEntryCount = 0;
 
 void ClearNurseryPurpleBuffer();
 
-void SuspectUsingNurseryPurpleBuffer(void* aPtr,
-                                     nsCycleCollectionParticipant* aCp,
-                                     nsCycleCollectingAutoRefCnt* aRefCnt) {
+static void SuspectUsingNurseryPurpleBuffer(
+    void* aPtr, nsCycleCollectionParticipant* aCp,
+    nsCycleCollectingAutoRefCnt* aRefCnt) {
   MOZ_ASSERT(NS_IsMainThread(), "Wrong thread!");
   MOZ_ASSERT(gNurseryPurpleBufferEnabled);
   if (gNurseryPurpleBufferEntryCount == NURSERY_PURPLE_BUFFER_SIZE) {
@@ -502,9 +502,9 @@ class EdgePool {
 };
 
 #ifdef DEBUG_CC_GRAPH
-#define CC_GRAPH_ASSERT(b) MOZ_ASSERT(b)
+#  define CC_GRAPH_ASSERT(b) MOZ_ASSERT(b)
 #else
-#define CC_GRAPH_ASSERT(b)
+#  define CC_GRAPH_ASSERT(b)
 #endif
 
 #define CC_TELEMETRY(_name, _value)                                            \
@@ -3272,8 +3272,8 @@ void nsCycleCollector::FixGrayBits(bool aForceGC, TimeLog& aTimeLog) {
 
   uint32_t count = 0;
   do {
-    mCCJSRuntime->GarbageCollect(aForceGC ? JS::gcreason::SHUTDOWN_CC
-                                          : JS::gcreason::CC_FORCED);
+    mCCJSRuntime->GarbageCollect(aForceGC ? JS::GCReason::SHUTDOWN_CC
+                                          : JS::GCReason::CC_FORCED);
 
     mCCJSRuntime->FixWeakMappingGrayBits();
 
@@ -3296,7 +3296,7 @@ void nsCycleCollector::FinishAnyIncrementalGCInProgress() {
     NS_WARNING("Finishing incremental GC in progress during CC");
     JSContext* cx = CycleCollectedJSContext::Get()->Context();
     JS::PrepareForIncrementalGC(cx);
-    JS::FinishIncrementalGC(cx, JS::gcreason::CC_FORCED);
+    JS::FinishIncrementalGC(cx, JS::GCReason::CC_FORCED);
   }
 }
 
@@ -3719,7 +3719,8 @@ void nsCycleCollector_forgetJSContext() {
   }
 }
 
-/* static */ CycleCollectedJSContext* CycleCollectedJSContext::Get() {
+/* static */
+CycleCollectedJSContext* CycleCollectedJSContext::Get() {
   CollectorData* data = sCollectorData.get();
   if (data) {
     return data->mContext;

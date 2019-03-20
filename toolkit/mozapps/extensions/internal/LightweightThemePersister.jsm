@@ -6,7 +6,7 @@
 
 var EXPORTED_SYMBOLS = ["LightweightThemePersister"];
 
-ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
+const {XPCOMUtils} = ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
 
 ChromeUtils.defineModuleGetter(this, "Services",
   "resource://gre/modules/Services.jsm");
@@ -110,9 +110,10 @@ function _persistImage(sourceURL, localFileName, successCallback) {
 function _persistProgressListener(successCallback) {
   this.onLocationChange = function() {};
   this.onProgressChange = function() {};
-  this.onStatusChange   = function() {};
+  this.onStatusChange = function() {};
   this.onSecurityChange = function() {};
-  this.onStateChange    = function(aWebProgress, aRequest, aStateFlags, aStatus) {
+  this.onContentBlockingEvent = function() {};
+  this.onStateChange = function(aWebProgress, aRequest, aStateFlags, aStatus) {
     if (aRequest &&
         aStateFlags & Ci.nsIWebProgressListener.STATE_IS_NETWORK &&
         aStateFlags & Ci.nsIWebProgressListener.STATE_STOP) {

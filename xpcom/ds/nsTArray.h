@@ -768,9 +768,9 @@ struct IsCompareMethod<T, U,
 template <typename T, typename U, bool IsCompare = IsCompareMethod<T, U>::value>
 struct CompareWrapper {
 #ifdef _MSC_VER
-#pragma warning(push)
-#pragma warning(disable : 4180) /* Silence "qualifier applied to function type \
-                                   has no meaning" warning */
+#  pragma warning(push)
+#  pragma warning(disable : 4180) /* Silence "qualifier applied to function \
+                                     type has no meaning" warning */
 #endif
   MOZ_IMPLICIT CompareWrapper(const T& aComparator)
       : mComparator(aComparator) {}
@@ -792,7 +792,7 @@ struct CompareWrapper {
 
   const T& mComparator;
 #ifdef _MSC_VER
-#pragma warning(pop)
+#  pragma warning(pop)
 #endif
 };
 
@@ -1234,7 +1234,7 @@ class nsTArray_Impl
 
     size_t index;
     bool found = BinarySearchIf(
-        *this, 0, Length(),
+        Elements(), 0, Length(),
         // Note: We pass the Compare() args here in reverse order and negate the
         // results for compatibility reasons. Some existing callers use Equals()
         // functions with first arguments which match aElement but not aItem, or
@@ -1509,7 +1509,7 @@ class nsTArray_Impl
     ::detail::CompareWrapper<Comparator, Item> comp(aComp);
 
     size_t index;
-    BinarySearchIf(*this, 0, Length(),
+    BinarySearchIf(Elements(), 0, Length(),
                    [&](const elem_type& aElement) {
                      return comp.Compare(aElement, aItem) <= 0 ? 1 : -1;
                    },

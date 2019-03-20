@@ -179,7 +179,7 @@ VARCACHE_PREF(
 )
 #undef PREF_VALUE
 
-// Whehter Mozilla specific "text" event should be dispatched only in the
+// Whether Mozilla specific "text" event should be dispatched only in the
 // system group or not in content.
 VARCACHE_PREF(
   "dom.compositionevent.text.dispatch_only_system_group_in_content",
@@ -211,6 +211,15 @@ VARCACHE_PREF(
   bool, true
 )
 
+// Whether we conform to Input Events Level 1 or Input Events Level 2.
+// true:  conforming to Level 1
+// false: conforming to Level 2
+VARCACHE_PREF(
+  "dom.input_events.conform_to_level_1",
+   dom_input_events_conform_to_level_1,
+  bool, true
+)
+
 // NOTE: This preference is used in unit tests. If it is removed or its default
 // value changes, please update test_sharedMap_var_caches.js accordingly.
 VARCACHE_PREF(
@@ -235,6 +244,21 @@ VARCACHE_PREF(
   RelaxedAtomicBool, true
 )
 
+// Should we defer timeouts and intervals while loading a page.  Released
+// on Idle or when the page is loaded.
+VARCACHE_PREF(
+  "dom.timeout.defer_during_load",
+  dom_timeout_defer_during_load,
+  bool, true
+)
+
+// Maximum deferral time for setTimeout/Interval in milliseconds
+VARCACHE_PREF(
+  "dom.timeout.max_idle_defer_ms",
+  dom_timeout_max_idle_defer_ms,
+  uint32_t, 10*1000
+)
+
 VARCACHE_PREF(
   "dom.performance.children_results_ipc_timeout",
   dom_performance_children_results_ipc_timeout,
@@ -246,18 +270,12 @@ VARCACHE_PREF(
 // Note, this is not currently safe to use for normal browsing yet.
 PREF("dom.serviceWorkers.parent_intercept", bool, false)
 
-// Enable PaymentRequest API
-#if defined(NIGHTLY_BUILD) && (defined(XP_WIN) || defined(XP_MACOSX))
-# define PREF_VALUE  true
-#else
-# define PREF_VALUE  false
-#endif
+// Enable/disable the PaymentRequest API
 VARCACHE_PREF(
   "dom.payments.request.enabled",
    dom_payments_request_enabled,
-  bool, PREF_VALUE
+  bool, false
 )
-#undef PREF_VALUE
 
 // Whether a user gesture is required to call PaymentRequest.prototype.show().
 VARCACHE_PREF(
@@ -298,6 +316,12 @@ VARCACHE_PREF(
   "dom.webnotifications.enabled",
    dom_webnotifications_enabled,
   RelaxedAtomicBool, true
+)
+
+VARCACHE_PREF(
+  "dom.webnotifications.allowinsecure",
+   dom_webnotifications_allowinsecure,
+  RelaxedAtomicBool, false
 )
 
 VARCACHE_PREF(
@@ -403,6 +427,13 @@ VARCACHE_PREF(
   RelaxedAtomicBool, true
 )
 
+// Render animations and videos as a solid color
+VARCACHE_PREF(
+  "browser.measurement.render_anims_and_video_solid",
+  browser_measurement_render_anims_and_video_solid,
+  RelaxedAtomicBool, false
+)
+
 // Enable passing the "storage" option to indexedDB.open.
 VARCACHE_PREF(
   "dom.indexedDB.storageOption.enabled",
@@ -415,6 +446,12 @@ VARCACHE_PREF(
   "dom.script_loader.binast_encoding.enabled",
    dom_script_loader_binast_encoding_enabled,
   RelaxedAtomicBool, false
+)
+
+VARCACHE_PREF(
+  "dom.script_loader.binast_encoding.domain.restrict",
+   dom_script_loader_binast_encoding_domain_restrict,
+  bool, true
 )
 #endif
 
@@ -439,12 +476,33 @@ VARCACHE_PREF(
   RelaxedAtomicUint32, 30000 /* 30 seconds */
 )
 
+VARCACHE_PREF(
+  "dom.worker.use_medium_high_event_queue",
+   dom_worker_use_medium_high_event_queue,
+  RelaxedAtomicBool, true
+)
+
 // Enable content type normalization of XHR uploads via MIME Sniffing standard
 // Disabled for now in bz1499136
 VARCACHE_PREF(
   "dom.xhr.standard_content_type_normalization",
    dom_xhr_standard_content_type_normalization,
   RelaxedAtomicBool, false
+)
+
+// Block multiple external protocol URLs in iframes per single event.
+VARCACHE_PREF(
+  "dom.block_external_protocol_in_iframes",
+   dom_block_external_protocol_in_iframes,
+  bool, true
+)
+
+// Any how many seconds we allow external protocol URLs in iframe when not in
+// single events
+VARCACHE_PREF(
+  "dom.delay.block_external_protocol_in_iframes",
+   dom_delay_block_external_protocol_in_iframes,
+  uint32_t, 10 // in seconds
 )
 
 // Block multiple window.open() per single event.
@@ -456,27 +514,54 @@ VARCACHE_PREF(
 
 // For area and anchor elements with target=_blank and no rel set to
 // opener/noopener, this pref sets noopener by default.
-#ifdef EARLY_BETA_OR_EARLIER
-#define PREF_VALUE true
-#else
-#define PREF_VALUE false
-#endif
 VARCACHE_PREF(
   "dom.targetBlankNoOpener.enabled",
    dom_targetBlankNoOpener_enabled,
+  bool, true
+)
+
+VARCACHE_PREF(
+  "dom.disable_open_during_load",
+   dom_disable_open_during_load,
+  bool, false
+)
+
+// Storage-access API.
+VARCACHE_PREF(
+  "dom.storage_access.enabled",
+   dom_storage_access_enabled,
+  bool, false
+)
+
+// This currently only affects XHTML. For XUL the cache is always allowed.
+VARCACHE_PREF(
+  "dom.prototype_document_cache.enabled",
+   dom_prototype_document_cache_enabled,
+  bool, true
+)
+
+VARCACHE_PREF(
+  "dom.storage_access.auto_grants.delayed",
+   dom_storage_access_auto_grants_delayed,
+  bool, true
+)
+
+//---------------------------------------------------------------------------
+// Extension prefs
+//---------------------------------------------------------------------------
+
+#ifdef ANDROID
+// Private browsing opt-in is only supported on Firefox desktop.
+# define PREF_VALUE true
+#else
+# define PREF_VALUE false
+#endif
+VARCACHE_PREF(
+  "extensions.allowPrivateBrowsingByDefault",
+   extensions_allowPrivateBrowsingByDefault,
   bool, PREF_VALUE
 )
 #undef PREF_VALUE
-
-//---------------------------------------------------------------------------
-// Clear-Site-Data prefs
-//---------------------------------------------------------------------------
-
-VARCACHE_PREF(
-  "dom.clearSiteData.enabled",
-   dom_clearSiteData_enabled,
-  bool, true
-)
 
 //---------------------------------------------------------------------------
 // Full-screen prefs
@@ -489,8 +574,73 @@ VARCACHE_PREF(
 )
 
 //---------------------------------------------------------------------------
+// Preference stylesheet prefs.
+//---------------------------------------------------------------------------
+
+VARCACHE_PREF(
+  "browser.display.focus_ring_on_anything",
+   browser_display_focus_ring_on_anything,
+  bool, false
+)
+
+VARCACHE_PREF(
+  "browser.display.focus_ring_width",
+   browser_display_focus_ring_width,
+  uint32_t, 1
+)
+
+// 0=solid, 1=dotted
+VARCACHE_PREF(
+  "browser.display.focus_ring_style",
+   browser_display_focus_ring_style,
+  uint32_t, 1
+)
+
+VARCACHE_PREF(
+  "browser.display.use_system_colors",
+   browser_display_use_system_colors,
+  bool, true
+)
+
+// 0 = default: always, except in high contrast mode
+// 1 = always
+// 2 = never
+VARCACHE_PREF(
+  "browser.display.document_color_use",
+   browser_display_document_color_use,
+  uint32_t, 0
+)
+VARCACHE_PREF(
+  "browser.display.use_focus_colors",
+   browser_display_use_focus_colors,
+  bool, false
+)
+
+VARCACHE_PREF(
+  "browser.underline_anchors",
+   browser_underline_anchors,
+  bool, true
+)
+
+PREF("browser.display.foreground_color", String, "")
+PREF("browser.display.background_color", String, "")
+PREF("browser.display.focus_background_color", String, "")
+PREF("browser.display.focus_text_color", String, "")
+PREF("browser.anchor_color", String, "")
+PREF("browser.active_color", String, "")
+PREF("browser.visited_color", String, "")
+
+//---------------------------------------------------------------------------
 // Graphics prefs
 //---------------------------------------------------------------------------
+
+// In theory: 0 = never, 1 = quick, 2 = always, though we always just use it as
+// a bool!
+VARCACHE_PREF(
+  "browser.display.use_document_fonts",
+   browser_display_use_document_fonts,
+  RelaxedAtomicInt32, 1
+)
 
 VARCACHE_PREF(
   "gfx.font_rendering.opentype_svg.enabled",
@@ -539,7 +689,7 @@ VARCACHE_PREF(
 VARCACHE_PREF(
   "html5.flushtimer.initialdelay",
    html5_flushtimer_initialdelay,
-  RelaxedAtomicInt32, 120
+  RelaxedAtomicInt32, 16
 )
 
 // Time in milliseconds between the time a network buffer is seen and the timer
@@ -547,12 +697,27 @@ VARCACHE_PREF(
 VARCACHE_PREF(
   "html5.flushtimer.subsequentdelay",
    html5_flushtimer_subsequentdelay,
-  RelaxedAtomicInt32, 120
+  RelaxedAtomicInt32, 16
 )
 
 //---------------------------------------------------------------------------
 // Layout prefs
 //---------------------------------------------------------------------------
+
+// Whether to block large cursors intersecting UI.
+VARCACHE_PREF(
+  "layout.cursor.block.enabled",
+   layout_cursor_block_enabled,
+  bool, true
+)
+
+// The maximum width or height of the cursor we should allow when intersecting
+// the UI, in CSS pixels.
+VARCACHE_PREF(
+  "layout.cursor.block.max-size",
+   layout_cursor_block_max_size,
+  uint32_t, 32
+)
 
 // Debug-only pref to force enable the AccessibleCaret. If you want to
 // control AccessibleCaret by mouse, you'll need to set
@@ -709,17 +874,11 @@ VARCACHE_PREF(
 )
 
 // Are -moz-prefixed gradient functions enabled?
-#ifdef EARLY_BETA_OR_EARLIER
-# define PREF_VALUE false
-#else
-# define PREF_VALUE true
-#endif
 VARCACHE_PREF(
   "layout.css.prefixes.gradients",
    layout_css_prefixes_gradients,
-  bool, PREF_VALUE
+  bool, true
 )
-#undef PREF_VALUE
 
 // Whether the offset-* logical property aliases are enabled.
 VARCACHE_PREF(
@@ -831,13 +990,6 @@ VARCACHE_PREF(
   bool, false
 )
 
-// Is overflow: -moz-scrollbars-* value enabled?
-VARCACHE_PREF(
-  "layout.css.overflow.moz-scrollbars.enabled",
-   layout_css_overflow_moz_scrollbars_enabled,
-  bool, false
-)
-
 // Does arbitrary ::-webkit-* pseudo-element parsed?
 VARCACHE_PREF(
   "layout.css.unknown-webkit-pseudo-element",
@@ -864,6 +1016,39 @@ VARCACHE_PREF(
   "layout.css.step-position-jump.enabled",
    layout_css_step_position_jump_enabled,
   bool, true
+)
+
+// Are dynamic reflow roots enabled?
+VARCACHE_PREF(
+   "layout.dynamic-reflow-roots.enabled",
+   layout_dynamic_reflow_roots_enabled,
+  bool, true
+)
+
+VARCACHE_PREF(
+   "layout.lower_priority_refresh_driver_during_load",
+   layout_lower_priority_refresh_driver_during_load,
+  bool, true
+)
+
+// Pref to control enabling scroll anchoring.
+VARCACHE_PREF(
+  "layout.css.scroll-anchoring.enabled",
+   layout_css_scroll_anchoring_enabled,
+  bool, true
+)
+
+VARCACHE_PREF(
+  "layout.css.scroll-anchoring.highlight",
+   layout_css_scroll_anchoring_highlight,
+  bool, false
+)
+
+// Is the CSS Scroll Snap Module Level 1 enabled?
+VARCACHE_PREF(
+  "layout.css.scroll-snap-v1.enabled",
+   layout_css_scroll_snap_v1_enabled,
+  RelaxedAtomicBool, false
 )
 
 //---------------------------------------------------------------------------
@@ -928,14 +1113,18 @@ VARCACHE_PREF(
   RelaxedAtomicBool, false
 )
 
-#ifdef ENABLE_BIGINT
 // BigInt API
 VARCACHE_PREF(
   "javascript.options.bigint",
    javascript_options_bigint,
   RelaxedAtomicBool, false
 )
-#endif
+
+VARCACHE_PREF(
+  "javascript.options.experimental.fields",
+   javascript_options_experimental_fields,
+  RelaxedAtomicBool, false
+)
 
 
 //---------------------------------------------------------------------------
@@ -1103,16 +1292,32 @@ VARCACHE_PREF(
 )
 #undef PREF_VALUE
 
+#if defined(XP_WIN) && !defined(_ARM64_)
+# define PREF_VALUE true
+#elif defined(XP_MACOSX)
+# define PREF_VALUE true
+#elif defined(XP_UNIX)
+# define PREF_VALUE true
+#else
+# define PREF_VALUE false
+#endif
 VARCACHE_PREF(
   "media.rdd-process.enabled",
    MediaRddProcessEnabled,
-  RelaxedAtomicBool, false
+  RelaxedAtomicBool, PREF_VALUE
 )
+#undef PREF_VALUE
 
 VARCACHE_PREF(
   "media.rdd-process.startup_timeout_ms",
    MediaRddProcessStartupTimeoutMs,
   RelaxedAtomicInt32, 5000
+)
+
+VARCACHE_PREF(
+  "media.rdd-vorbis.enabled",
+   MediaRddVorbisEnabled,
+  RelaxedAtomicBool, false
 )
 
 #ifdef ANDROID
@@ -1418,11 +1623,21 @@ VARCACHE_PREF(
 )
 
 // AV1
+#if defined(XP_WIN) && !defined(_ARM64_)
+# define PREF_VALUE true
+#elif defined(XP_MACOSX)
+# define PREF_VALUE true
+#elif defined(XP_UNIX)
+# define PREF_VALUE true
+#else
+# define PREF_VALUE false
+#endif
 VARCACHE_PREF(
   "media.av1.enabled",
    MediaAv1Enabled,
-  RelaxedAtomicBool, false
+  RelaxedAtomicBool, PREF_VALUE
 )
+#undef PREF_VALUE
 VARCACHE_PREF(
   "media.av1.use-dav1d",
    MediaAv1UseDav1d,
@@ -1447,6 +1662,16 @@ VARCACHE_PREF(
   bool, PREF_VALUE
 )
 #undef PREF_VALUE
+
+// Max number of HLS players that can be created concurrently. Used only on
+// Android and when "media.hls.enabled" is true.
+#ifdef ANDROID
+VARCACHE_PREF(
+  "media.hls.max-allocations",
+   MediaHlsMaxAllocations,
+  uint32_t, 20
+)
+#endif
 
 #ifdef MOZ_FMP4
 # define PREF_VALUE true
@@ -1544,6 +1769,24 @@ VARCACHE_PREF(
   RelaxedAtomicUint32, 1000
 )
 
+VARCACHE_PREF(
+  "media.test.video-suspend",
+   MediaTestVideoSuspend,
+  RelaxedAtomicBool, false
+)
+
+VARCACHE_PREF(
+  "media.autoplay.allow-muted",
+   MediaAutoplayAllowMuted,
+  RelaxedAtomicBool, true
+)
+
+VARCACHE_PREF(
+  "media.autoplay.blackList-override-default",
+   MediaAutoplayBlackListOverrideDefault,
+  RelaxedAtomicBool, true
+)
+
 //---------------------------------------------------------------------------
 // Network prefs
 //---------------------------------------------------------------------------
@@ -1594,6 +1837,14 @@ VARCACHE_PREF(
   "network.predictor.enabled",
    network_predictor_enabled,
   bool, true
+)
+
+// Allow CookieSettings to be unblocked for channels without a document.
+// This is for testing only.
+VARCACHE_PREF(
+  "network.cookieSettings.unblocked_for_testing",
+   network_cookieSettings_unblocked_for_testing,
+  bool, false
 )
 
 VARCACHE_PREF(
@@ -1712,6 +1963,16 @@ VARCACHE_PREF(
 )
 
 //---------------------------------------------------------------------------
+// ContentSessionStore prefs
+//---------------------------------------------------------------------------
+// Maximum number of bytes of DOMSessionStorage data we collect per origin.
+VARCACHE_PREF(
+  "browser.sessionstore.dom_storage_limit",
+  browser_sessionstore_dom_storage_limit,
+  uint32_t, 2048
+)
+
+//---------------------------------------------------------------------------
 // Preferences prefs
 //---------------------------------------------------------------------------
 
@@ -1742,6 +2003,57 @@ VARCACHE_PREF(
   uint32_t, 32
 )
 
+// Annotate channels based on the tracking protection list in all modes
+VARCACHE_PREF(
+  "privacy.trackingprotection.annotate_channels",
+   privacy_trackingprotection_annotate_channels,
+  bool, true
+)
+
+// Block 3rd party fingerprinting resources.
+VARCACHE_PREF(
+  "privacy.trackingprotection.fingerprinting.enabled",
+   privacy_trackingprotection_fingerprinting_enabled,
+  bool, false
+)
+
+// Annotate fingerprinting resources.
+VARCACHE_PREF(
+  "privacy.trackingprotection.fingerprinting.annotate.enabled",
+   privacy_trackingprotection_fingerprinting_annotate_enabled,
+  bool, false
+)
+
+// Block 3rd party cryptomining resources.
+VARCACHE_PREF(
+  "privacy.trackingprotection.cryptomining.enabled",
+   privacy_trackingprotection_cryptomining_enabled,
+  bool, false
+)
+
+// Annotate cryptomining resources.
+VARCACHE_PREF(
+  "privacy.trackingprotection.cryptomining.annotate.enabled",
+   privacy_trackingprotection_cryptomining_annotate_enabled,
+  bool, false
+)
+
+// Lower the priority of network loads for resources on the tracking protection
+// list.  Note that this requires the
+// privacy.trackingprotection.annotate_channels pref to be on in order to have
+// any effect.
+#ifdef NIGHTLY_BUILD
+# define PREF_VALUE true
+#else
+# define PREF_VALUE false
+#endif
+VARCACHE_PREF(
+  "privacy.trackingprotection.lower_network_priority",
+   privacy_trackingprotection_lower_network_priority,
+  bool, PREF_VALUE
+)
+#undef PREF_VALUE
+
 // Anti-tracking permission expiration
 VARCACHE_PREF(
   "privacy.restrict3rdpartystorage.expiration",
@@ -1763,6 +2075,13 @@ VARCACHE_PREF(
   uint32_t, 1800 // 30 minutes (in seconds)
 )
 
+// Maximum client-side cookie life-time cap
+VARCACHE_PREF(
+  "privacy.documentCookies.maxage",
+   privacy_documentCookies_maxage,
+  uint32_t, 0 // Disabled (in seconds, set to 0 to disable)
+)
+
 // Anti-fingerprinting, disabled by default
 VARCACHE_PREF(
   "privacy.resistFingerprinting",
@@ -1774,6 +2093,58 @@ VARCACHE_PREF(
   "privacy.resistFingerprinting.autoDeclineNoUserInputCanvasPrompts",
    privacy_resistFingerprinting_autoDeclineNoUserInputCanvasPrompts,
   RelaxedAtomicBool, false
+)
+
+// Password protection
+VARCACHE_PREF(
+  "browser.safebrowsing.passwords.enabled",
+   browser_safebrowsing_passwords_enabled,
+  bool, false
+)
+
+// Malware protection
+VARCACHE_PREF(
+  "browser.safebrowsing.malware.enabled",
+   browser_safebrowsing_malware_enabled,
+  bool, true
+)
+
+// Phishing protection
+VARCACHE_PREF(
+  "browser.safebrowsing.phishing.enabled",
+   browser_safebrowsing_phishing_enabled,
+  bool, true
+)
+
+// Blocked plugin content
+VARCACHE_PREF(
+  "browser.safebrowsing.blockedURIs.enabled",
+   browser_safebrowsing_blockedURIs_enabled,
+  bool, true
+)
+
+// When this pref is enabled document loads with a mismatched
+// Cross-Origin header will fail to load
+VARCACHE_PREF("browser.tabs.remote.useCrossOriginPolicy",
+              browser_tabs_remote_useCrossOriginPolicy,
+              bool, false
+)
+
+// Prevent system colors from being exposed to CSS or canvas.
+VARCACHE_PREF(
+  "ui.use_standins_for_native_colors",
+   ui_use_standins_for_native_colors,
+   RelaxedAtomicBool, false
+)
+
+//---------------------------------------------------------------------------
+// ChannelClassifier prefs
+//---------------------------------------------------------------------------
+
+VARCACHE_PREF(
+  "channelclassifier.allowlist_example",
+   channelclassifier_allowlist_example,
+  bool, false
 )
 
 //---------------------------------------------------------------------------
@@ -1875,6 +2246,22 @@ VARCACHE_PREF(
 #undef PREF_VALUE
 
 //---------------------------------------------------------------------------
+// Plugins prefs
+//---------------------------------------------------------------------------
+
+VARCACHE_PREF(
+  "plugins.flashBlock.enabled",
+   plugins_flashBlock_enabled,
+  bool, false
+)
+
+VARCACHE_PREF(
+  "plugins.http_https_only",
+   plugins_http_https_only,
+  bool, true
+)
+
+//---------------------------------------------------------------------------
 // Reporting API
 //---------------------------------------------------------------------------
 
@@ -1940,6 +2327,34 @@ VARCACHE_PREF(
   "dom.reporting.delivering.maxReports",
    dom_reporting_delivering_maxReports,
   uint32_t, 100
+)
+
+// In case Touch API is enabled, this pref controls whether to support
+// ontouch* event handlers, document.createTouch, document.createTouchList and
+// document.createEvent("TouchEvent").
+#ifdef ANDROID
+# define PREF_VALUE true
+#else
+# define PREF_VALUE false
+#endif
+VARCACHE_PREF(
+  "dom.w3c_touch_events.legacy_apis.enabled",
+   dom_w3c_touch_events_legacy_apis_enabled,
+  bool, PREF_VALUE
+)
+#undef PREF_VALUE
+
+VARCACHE_PREF(
+  "medium_high_event_queue.enabled",
+   medium_high_event_queue_enabled,
+  RelaxedAtomicBool, true
+)
+
+// Whether strict file origin policy is in effect.
+VARCACHE_PREF(
+  "security.fileuri.strict_origin_policy",
+   security_fileuri_strict_origin_policy,
+  RelaxedAtomicBool, true
 )
 
 //---------------------------------------------------------------------------

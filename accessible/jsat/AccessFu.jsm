@@ -6,14 +6,10 @@
 
 var EXPORTED_SYMBOLS = ["AccessFu"];
 
-ChromeUtils.import("resource://gre/modules/Services.jsm");
-ChromeUtils.import("resource://gre/modules/accessibility/Utils.jsm");
+const {Services} = ChromeUtils.import("resource://gre/modules/Services.jsm");
+const {Logger, Utils} = ChromeUtils.import("resource://gre/modules/accessibility/Utils.jsm");
 ChromeUtils.defineModuleGetter(this, "Rect",
                                "resource://gre/modules/Geometry.jsm");
-
-if (Utils.MozBuildApp === "mobile/android") {
-  ChromeUtils.import("resource://gre/modules/Messaging.jsm");
-}
 
 const GECKOVIEW_MESSAGE = {
   ACTIVATE: "GeckoView:AccessibilityActivate",
@@ -26,7 +22,6 @@ const GECKOVIEW_MESSAGE = {
   PREVIOUS: "GeckoView:AccessibilityPrevious",
   SCROLL_BACKWARD: "GeckoView:AccessibilityScrollBackward",
   SCROLL_FORWARD: "GeckoView:AccessibilityScrollForward",
-  SELECT: "GeckoView:AccessibilitySelect",
   SET_SELECTION: "GeckoView:AccessibilitySetSelection",
   VIEW_FOCUSED: "GeckoView:AccessibilityViewFocused",
 };
@@ -55,8 +50,6 @@ var AccessFu = {
       return;
     }
     this._enabled = true;
-
-    ChromeUtils.import("resource://gre/modules/accessibility/Utils.jsm");
 
     Services.obs.addObserver(this, "remote-browser-shown");
     Services.obs.addObserver(this, "inprocess-browser-shown");
@@ -192,9 +185,6 @@ var AccessFu = {
       case GECKOVIEW_MESSAGE.CLIPBOARD:
         this.Input.clipboard(data);
         break;
-      case GECKOVIEW_MESSAGE.SELECT:
-        this.Input.selectCurrent(data);
-        break;
     }
   },
 
@@ -299,11 +289,6 @@ var Input = {
   activateCurrent: function activateCurrent(aData) {
     let mm = Utils.getMessageManager();
     mm.sendAsyncMessage("AccessFu:Activate", { offset: 0 });
-  },
-
-  selectCurrent: function selectCurrent(aData) {
-    let mm = Utils.getMessageManager();
-    mm.sendAsyncMessage("AccessFu:Select", aData);
   },
 
   doScroll: function doScroll(aDetails, aBrowser) {

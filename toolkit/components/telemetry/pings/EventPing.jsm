@@ -42,7 +42,6 @@ const LOGGER_NAME = "Toolkit.Telemetry";
 const LOGGER_PREFIX = "TelemetryEventPing::";
 
 const EVENT_LIMIT_REACHED_TOPIC = "event-telemetry-storage-limit-reached";
-const PROFILE_BEFORE_CHANGE_TOPIC = "profile-before-change";
 
 var Policy = {
   setTimeout: (callback, delayMs) => setTimeout(callback, delayMs),
@@ -66,6 +65,8 @@ var TelemetryEventPing = {
   // So that if we quickly reach the max limit we can immediately send.
   _lastSendTime: -DEFAULT_MIN_FREQUENCY_MS,
 
+  _processStartTimestamp: 0,
+
   get dataset() {
     return Telemetry.canRecordPrereleaseData ? Ci.nsITelemetry.DATASET_RELEASE_CHANNEL_OPTIN
                                              : Ci.nsITelemetry.DATASET_RELEASE_CHANNEL_OPTOUT;
@@ -75,8 +76,12 @@ var TelemetryEventPing = {
     if (!Services.prefs.getBoolPref(Utils.Preferences.EventPingEnabled, true)) {
       return;
     }
+    this._log.trace("Starting up.");
+
+    // Calculate process creation once.
+    this._processStartTimestamp = Math.round((Date.now() - TelemetryUtils.monotonicNow()) / MS_IN_A_MINUTE) * MS_IN_A_MINUTE;
+
     Services.obs.addObserver(this, EVENT_LIMIT_REACHED_TOPIC);
-    Services.obs.addObserver(this, PROFILE_BEFORE_CHANGE_TOPIC);
 
     XPCOMUtils.defineLazyPreferenceGetter(this, "maxEventsPerPing",
                                           Utils.Preferences.EventPingEventLimit,
@@ -92,12 +97,13 @@ var TelemetryEventPing = {
   },
 
   shutdown() {
+    this._log.trace("Shutting down.");
     // removeObserver may throw, which could interrupt shutdown.
     try {
       Services.obs.removeObserver(this, EVENT_LIMIT_REACHED_TOPIC);
-      Services.obs.removeObserver(this, PROFILE_BEFORE_CHANGE_TOPIC);
     } catch (ex) {}
 
+    this._submitPing(this.Reason.SHUTDOWN, true /* discardLeftovers */);
     this._clearTimer();
   },
 
@@ -115,10 +121,6 @@ var TelemetryEventPing = {
           this._log.trace("submitting ping immediately");
           this._submitPing(this.Reason.MAX);
         }
-        break;
-      case PROFILE_BEFORE_CHANGE_TOPIC:
-        this._log.trace("profile before change");
-        this._submitPing(this.Reason.SHUTDOWN, true /* discardLeftovers */);
         break;
     }
   },
@@ -169,11 +171,9 @@ var TelemetryEventPing = {
     // The reason doesn't matter as it will just be echo'd back.
     let sessionMeta = TelemetrySession.getMetadata(reason);
 
-    let processStartTimestamp = Math.round((Date.now() - TelemetryUtils.monotonicNow()) / MS_IN_A_MINUTE) * MS_IN_A_MINUTE;
-
     let payload = {
       reason,
-      processStartTimestamp,
+      processStartTimestamp: this._processStartTimestamp,
       sessionId: sessionMeta.sessionId,
       subsessionId: sessionMeta.subsessionId,
       lostEventsCount: 0,

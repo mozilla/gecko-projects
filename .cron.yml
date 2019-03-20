@@ -54,6 +54,15 @@ jobs:
           - mozilla-central
       when: []  # never (hook only)
 
+    - name: nightly-desktop-win64-aarch64
+      job:
+          type: decision-task
+          treeherder-symbol: Nd-win64-aarch64
+          target-tasks-method: nightly_win64_aarch64
+      run-on-projects:
+          - mozilla-central
+      when: []  # never (hook only)
+
     - name: nightly-android
       job:
           type: decision-task
@@ -85,10 +94,34 @@ jobs:
           target-tasks-method: searchfox_index
       run-on-projects:
           - mozilla-central
+          - mozilla-beta
+          - mozilla-release
+      when:
+          - {hour: 10, minute: 0}
+
+    - name: customv8-update
+      job:
+          type: decision-task
+          treeherder-symbol: customv8
+          target-tasks-method: customv8_update
+          optimize-target-tasks: false
+      run-on-projects:
+          - mozilla-central
       when:
           by-project:
-              mozilla-central: [{hour: 10, minute: 0}]
-              # No default
+              mozilla-central: [{hour: 10, minute: 30}]
+
+    - name: chromium-update
+      job:
+          type: decision-task
+          treeherder-symbol: Chromium
+          target-tasks-method: chromium_update
+          optimize-target-tasks: false
+      run-on-projects:
+          - mozilla-central
+      when:
+          by-project:
+              mozilla-central: [{hour: 10, minute: 30}]
 
     - name: bouncer-check
       job:

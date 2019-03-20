@@ -62,9 +62,9 @@ class TextEditor : public EditorBase, public nsIPlaintextEditor {
 
   // If there are some good name to create non-virtual Undo()/Redo() methods,
   // we should create them and those methods should just run them.
-  MOZ_CAN_RUN_SCRIPT_BOUNDARY
+  MOZ_CAN_RUN_SCRIPT
   NS_IMETHOD Undo(uint32_t aCount) final;
-  MOZ_CAN_RUN_SCRIPT_BOUNDARY
+  MOZ_CAN_RUN_SCRIPT
   NS_IMETHOD Redo(uint32_t aCount) final;
 
   NS_IMETHOD Cut() override;
@@ -73,6 +73,7 @@ class TextEditor : public EditorBase, public nsIPlaintextEditor {
   NS_IMETHOD CanCopy(bool* aCanCopy) override;
   NS_IMETHOD CanDelete(bool* aCanDelete) override;
   NS_IMETHOD CanPaste(int32_t aSelectionType, bool* aCanPaste) override;
+  MOZ_CAN_RUN_SCRIPT
   NS_IMETHOD PasteTransferable(nsITransferable* aTransferable) override;
 
   NS_IMETHOD OutputToString(const nsAString& aFormatType, uint32_t aFlags,
@@ -86,7 +87,7 @@ class TextEditor : public EditorBase, public nsIPlaintextEditor {
   virtual bool CanPasteTransferable(nsITransferable* aTransferable);
 
   // Overrides of EditorBase
-  virtual nsresult Init(nsIDocument& aDoc, Element* aRoot,
+  virtual nsresult Init(Document& aDoc, Element* aRoot,
                         nsISelectionController* aSelCon, uint32_t aFlags,
                         const nsAString& aValue) override;
 
@@ -104,6 +105,7 @@ class TextEditor : public EditorBase, public nsIPlaintextEditor {
     return NS_SUCCEEDED(rv) && isEmpty;
   }
 
+  MOZ_CAN_RUN_SCRIPT
   virtual nsresult HandleKeyPressEvent(
       WidgetKeyboardEvent* aKeyboardEvent) override;
 
@@ -119,6 +121,7 @@ class TextEditor : public EditorBase, public nsIPlaintextEditor {
    * @param aDispatchPasteEvent true if this should dispatch ePaste event
    *                            before pasting.  Otherwise, false.
    */
+  MOZ_CAN_RUN_SCRIPT
   nsresult PasteAsAction(int32_t aClipboardType, bool aDispatchPasteEvent);
 
   /**
@@ -141,6 +144,7 @@ class TextEditor : public EditorBase, public nsIPlaintextEditor {
    * @param aDispatchPasteEvent true if this should dispatch ePaste event
    *                            before pasting.  Otherwise, false.
    */
+  MOZ_CAN_RUN_SCRIPT
   virtual nsresult PasteAsQuotationAsAction(int32_t aClipboardType,
                                             bool aDispatchPasteEvent);
 
@@ -170,6 +174,7 @@ class TextEditor : public EditorBase, public nsIPlaintextEditor {
    *
    * @ param aString   the string to be set
    */
+  MOZ_CAN_RUN_SCRIPT
   nsresult SetText(const nsAString& aString);
 
   /**
@@ -180,6 +185,7 @@ class TextEditor : public EditorBase, public nsIPlaintextEditor {
    * @param aReplaceRange       The range to be replaced.
    *                            If nullptr, all contents will be replaced.
    */
+  MOZ_CAN_RUN_SCRIPT
   nsresult ReplaceTextAsAction(const nsAString& aString,
                                nsRange* aReplaceRange = nullptr);
 
@@ -233,8 +239,12 @@ class TextEditor : public EditorBase, public nsIPlaintextEditor {
     if (NS_WARN_IF(!editActionData.CanHandle())) {
       return NS_ERROR_NOT_INITIALIZED;
     }
-    return ComputeValueInternal(NS_LITERAL_STRING("text/plain"),
-                                aDocumentEncoderFlags, aOutputString);
+    nsresult rv = ComputeValueInternal(NS_LITERAL_STRING("text/plain"),
+                                       aDocumentEncoderFlags, aOutputString);
+    if (NS_WARN_IF(NS_FAILED(rv))) {
+      return EditorBase::ToGenericNSResult(rv);
+    }
+    return NS_OK;
   }
 
  protected:  // May be called by friends.
@@ -358,6 +368,7 @@ class TextEditor : public EditorBase, public nsIPlaintextEditor {
   /**
    * Make the given selection span the entire document.
    */
+  MOZ_CAN_RUN_SCRIPT
   virtual nsresult SelectEntireDocument() override;
 
   /**
@@ -403,24 +414,6 @@ class TextEditor : public EditorBase, public nsIPlaintextEditor {
                         bool aDoDeleteSelection);
 
   /**
-   * InsertFromDataTransfer() inserts the data in aDataTransfer at aIndex.
-   * This is intended to handle "drop" event.
-   *
-   * @param aDataTransfer       Dropped data transfer.
-   * @param aIndex              Index of the data which should be inserted.
-   * @param aSourceDoc          The document which the source comes from.
-   * @param aDroppedAt          The dropped position.
-   * @param aDoDeleteSelection  true if this should delete selected content.
-   *                            false otherwise.
-   */
-  MOZ_CAN_RUN_SCRIPT
-  virtual nsresult InsertFromDataTransfer(dom::DataTransfer* aDataTransfer,
-                                          int32_t aIndex,
-                                          nsIDocument* aSourceDoc,
-                                          const EditorDOMPoint& aDroppedAt,
-                                          bool aDoDeleteSelection);
-
-  /**
    * InsertWithQuotationsAsSubAction() inserts aQuotedText with appending ">"
    * to start of every line.
    *
@@ -434,7 +427,7 @@ class TextEditor : public EditorBase, public nsIPlaintextEditor {
    * principals match, or we are in a editor context where this doesn't matter.
    * Otherwise, the data must be sanitized first.
    */
-  bool IsSafeToInsertData(nsIDocument* aSourceDoc);
+  bool IsSafeToInsertData(Document* aSourceDoc);
 
   virtual nsresult InitRules();
 
@@ -501,8 +494,7 @@ class TextEditor : public EditorBase, public nsIPlaintextEditor {
   bool FireClipboardEvent(EventMessage aEventMessage, int32_t aSelectionType,
                           bool* aActionTaken = nullptr);
 
-  bool UpdateMetaCharset(nsIDocument& aDocument,
-                         const nsACString& aCharacterSet);
+  bool UpdateMetaCharset(Document& aDocument, const nsACString& aCharacterSet);
 
   /**
    * EnsureComposition() should be called by composition event handlers.  This

@@ -29,6 +29,14 @@ DebuggerServer.getTestGlobal = function(name) {
   return null;
 };
 
+var gAllowNewThreadGlobals = false;
+DebuggerServer.allowNewThreadGlobals = function() {
+  gAllowNewThreadGlobals = true;
+};
+DebuggerServer.disallowNewThreadGlobals = function() {
+  gAllowNewThreadGlobals = false;
+};
+
 // A mock tab list, for use by tests. This simply presents each global in
 // gTestGlobals as a tab, and the list is fixed: it never calls its
 // onListChanged handler.
@@ -65,6 +73,11 @@ TestTabList.prototype = {
 };
 
 exports.createRootActor = function createRootActor(connection) {
+  ActorRegistry.registerModule("devtools/server/actors/webconsole", {
+    prefix: "console",
+    constructor: "WebConsoleActor",
+    type: { target: true },
+  });
   const root = new RootActor(connection, {
     tabList: new TestTabList(connection),
     globalActorFactories: ActorRegistry.globalActorFactories,
@@ -84,10 +97,15 @@ function TestTargetActor(connection, global) {
   this._extraActors = {};
   this.makeDebugger = makeDebugger.bind(null, {
     findDebuggees: () => [this._global],
-    shouldAddNewGlobalAsDebuggee: g => g.hostAnnotations &&
-                                       g.hostAnnotations.type == "document" &&
-                                       g.hostAnnotations.element === this._global,
+    shouldAddNewGlobalAsDebuggee: g => {
+      if (gAllowNewThreadGlobals) {
+        return true;
+      }
 
+      return g.hostAnnotations &&
+        g.hostAnnotations.type == "document" &&
+        g.hostAnnotations.element === this._global;
+    },
   });
 }
 
@@ -142,7 +160,7 @@ TestTargetActor.prototype = {
   },
 
   onReload: function(request) {
-    this.sources.reset({ sourceMaps: true });
+    this.sources.reset();
     this.threadActor.clearDebuggees();
     this.threadActor.dbg.addDebuggees();
     return {};

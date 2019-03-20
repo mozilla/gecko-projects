@@ -9,29 +9,45 @@
  * @module reducers/breakpoints
  */
 
-import * as I from "immutable";
+import { isGeneratedId, isOriginalId } from "devtools-source-map";
+import { isEqual } from "lodash";
 
-import { isGeneratedId } from "devtools-source-map";
-import { makeLocationId } from "../utils/breakpoint";
+import { makeBreakpointId } from "../utils/breakpoint";
+import { findEmptyLines } from "../utils/empty-lines";
 
-import type { XHRBreakpoint, Breakpoint, SourceLocation } from "../types";
+// eslint-disable-next-line max-len
+import { getBreakpointsList as getBreakpointsListSelector } from "../selectors/breakpoints";
+
+import type {
+  XHRBreakpoint,
+  Breakpoint,
+  BreakpointId,
+  SourceLocation,
+  BreakpointPositions
+} from "../types";
 import type { Action, DonePromiseAction } from "../actions/types";
 
-export type BreakpointsMap = { [string]: Breakpoint };
-export type XHRBreakpointsList = I.List<XHRBreakpoint>;
+export type BreakpointsMap = { [BreakpointId]: Breakpoint };
+export type XHRBreakpointsList = $ReadOnlyArray<XHRBreakpoint>;
+export type BreakpointPositionsMap = { [string]: BreakpointPositions };
 
 export type BreakpointsState = {
   breakpoints: BreakpointsMap,
-  xhrBreakpoints: XHRBreakpointsList
+  breakpointPositions: BreakpointPositionsMap,
+  xhrBreakpoints: XHRBreakpointsList,
+  breakpointsDisabled: boolean,
+  emptyLines: { [string]: number[] }
 };
 
 export function initialBreakpointsState(
-  xhrBreakpoints?: any[] = []
+  xhrBreakpoints?: XHRBreakpointsList = []
 ): BreakpointsState {
   return {
     breakpoints: {},
-    xhrBreakpoints: I.List(xhrBreakpoints),
-    breakpointsDisabled: false
+    xhrBreakpoints: xhrBreakpoints,
+    breakpointPositions: {},
+    breakpointsDisabled: false,
+    emptyLines: {}
   };
 }
 
@@ -64,7 +80,7 @@ function update(
       return updateAllBreakpoints(state, action);
     }
 
-    case "SET_BREAKPOINT_CONDITION": {
+    case "SET_BREAKPOINT_OPTIONS": {
       return updateBreakpoint(state, action);
     }
 
@@ -99,6 +115,23 @@ function update(
     case "DISABLE_XHR_BREAKPOINT": {
       return updateXHRBreakpoint(state, action);
     }
+
+    case "ADD_BREAKPOINT_POSITIONS": {
+      const { source, positions } = action;
+      const emptyLines = findEmptyLines(source, positions);
+
+      return {
+        ...state,
+        breakpointPositions: {
+          ...state.breakpointPositions,
+          [source.id]: positions
+        },
+        emptyLines: {
+          ...state.emptyLines,
+          [source.id]: emptyLines
+        }
+      };
+    }
   }
 
   return state;
@@ -116,12 +149,14 @@ function addXHRBreakpoint(state, action) {
   if (existingBreakpointIndex === -1) {
     return {
       ...state,
-      xhrBreakpoints: xhrBreakpoints.push(breakpoint)
+      xhrBreakpoints: [...xhrBreakpoints, breakpoint]
     };
-  } else if (xhrBreakpoints.get(existingBreakpointIndex) !== breakpoint) {
+  } else if (xhrBreakpoints[existingBreakpointIndex] !== breakpoint) {
+    const newXhrBreakpoints = [...xhrBreakpoints];
+    newXhrBreakpoints[existingBreakpointIndex] = breakpoint;
     return {
       ...state,
-      xhrBreakpoints: xhrBreakpoints.set(existingBreakpointIndex, breakpoint)
+      xhrBreakpoints: newXhrBreakpoints
     };
   }
 
@@ -129,31 +164,27 @@ function addXHRBreakpoint(state, action) {
 }
 
 function removeXHRBreakpoint(state, action) {
-  const {
-    breakpoint: { path, method }
-  } = action;
+  const { breakpoint } = action;
   const { xhrBreakpoints } = state;
 
   if (action.status === "start") {
     return state;
   }
 
-  const index = xhrBreakpoints.findIndex(
-    bp => bp.path === path && bp.method === method
-  );
-
   return {
     ...state,
-    xhrBreakpoints: xhrBreakpoints.delete(index)
+    xhrBreakpoints: xhrBreakpoints.filter(bp => !isEqual(bp, breakpoint))
   };
 }
 
 function updateXHRBreakpoint(state, action) {
   const { breakpoint, index } = action;
   const { xhrBreakpoints } = state;
+  const newXhrBreakpoints = [...xhrBreakpoints];
+  newXhrBreakpoints[index] = breakpoint;
   return {
     ...state,
-    xhrBreakpoints: xhrBreakpoints.set(index, breakpoint)
+    xhrBreakpoints: newXhrBreakpoints
   };
 }
 
@@ -176,19 +207,19 @@ function unsetBreakpoint(state, locationId) {
 function addBreakpoint(state, action): BreakpointsState {
   if (action.status === "start" && action.breakpoint) {
     const { breakpoint } = action;
-    const locationId = makeLocationId(breakpoint.location);
+    const locationId = makeBreakpointId(breakpoint.location);
     return setBreakpoint(state, locationId, breakpoint);
   }
 
   // when the action completes, we can commit the breakpoint
   if (action.status === "done") {
     const { value } = ((action: any): DonePromiseAction);
-    return syncBreakpoint(state, value);
+    return syncBreakpoint(state, { breakpoint: value, previousLocation: null });
   }
 
   // Remove the optimistic update
   if (action.status === "error" && action.breakpoint) {
-    const locationId = makeLocationId(action.breakpoint.location);
+    const locationId = makeBreakpointId(action.breakpoint.location);
     return unsetBreakpoint(state, locationId);
   }
 
@@ -203,20 +234,20 @@ function syncBreakpoint(state, data): BreakpointsState {
       ...state,
       breakpoints: { ...state.breakpoints }
     };
-    delete state.breakpoints[makeLocationId(previousLocation)];
+    delete state.breakpoints[makeBreakpointId(previousLocation)];
   }
 
   if (!breakpoint) {
     return state;
   }
 
-  const locationId = makeLocationId(breakpoint.location);
+  const locationId = makeBreakpointId(breakpoint.location);
   return setBreakpoint(state, locationId, breakpoint);
 }
 
 function updateBreakpoint(state, action): BreakpointsState {
   const { breakpoint } = action;
-  const locationId = makeLocationId(breakpoint.location);
+  const locationId = makeBreakpointId(breakpoint.location);
   return setBreakpoint(state, locationId, breakpoint);
 }
 
@@ -227,7 +258,7 @@ function updateAllBreakpoints(state, action): BreakpointsState {
     breakpoints: { ...state.breakpoints }
   };
   breakpoints.forEach(breakpoint => {
-    const locationId = makeLocationId(breakpoint.location);
+    const locationId = makeBreakpointId(breakpoint.location);
     state.breakpoints[locationId] = breakpoint;
   });
   return state;
@@ -236,7 +267,7 @@ function updateAllBreakpoints(state, action): BreakpointsState {
 function remapBreakpoints(state, action): BreakpointsState {
   const breakpoints = action.breakpoints.reduce(
     (updatedBreakpoints, breakpoint) => {
-      const locationId = makeLocationId(breakpoint.location);
+      const locationId = makeBreakpointId(breakpoint.location);
       return { ...updatedBreakpoints, [locationId]: breakpoint };
     },
     {}
@@ -247,8 +278,12 @@ function remapBreakpoints(state, action): BreakpointsState {
 
 function removeBreakpoint(state, action): BreakpointsState {
   const { breakpoint } = action;
-  const id = makeLocationId(breakpoint.location);
+  const id = makeBreakpointId(breakpoint.location);
   return unsetBreakpoint(state, id);
+}
+
+function isMatchingLocation(location1, location2) {
+  return isEqual(location1, location2);
 }
 
 // Selectors
@@ -261,7 +296,7 @@ export function getBreakpointsMap(state: OuterState): BreakpointsMap {
 }
 
 export function getBreakpointsList(state: OuterState): Breakpoint[] {
-  return (Object.values(getBreakpointsMap(state)): any);
+  return getBreakpointsListSelector((state: any));
 }
 
 export function getBreakpointCount(state: OuterState): number {
@@ -273,7 +308,7 @@ export function getBreakpoint(
   location: SourceLocation
 ): ?Breakpoint {
   const breakpoints = getBreakpointsMap(state);
-  return breakpoints[makeLocationId(location)];
+  return breakpoints[makeBreakpointId(location)];
 }
 
 export function getBreakpointsDisabled(state: OuterState): boolean {
@@ -289,7 +324,8 @@ export function getBreakpointsLoading(state: OuterState): boolean {
 
 export function getBreakpointsForSource(
   state: OuterState,
-  sourceId: string
+  sourceId: string,
+  line: ?number
 ): Breakpoint[] {
   if (!sourceId) {
     return [];
@@ -298,38 +334,82 @@ export function getBreakpointsForSource(
   const isGeneratedSource = isGeneratedId(sourceId);
   const breakpoints = getBreakpointsList(state);
   return breakpoints.filter(bp => {
-    const location = isGeneratedSource
-      ? bp.generatedLocation || bp.location
-      : bp.location;
-    return location.sourceId === sourceId;
+    const location = isGeneratedSource ? bp.generatedLocation : bp.location;
+    return location.sourceId === sourceId && (!line || line == location.line);
   });
 }
 
-export function getBreakpointForLine(
+export function getBreakpointForLocation(
   state: OuterState,
-  sourceId: string,
-  line: number | null
+  location: SourceLocation | null
 ): ?Breakpoint {
-  if (!sourceId) {
+  if (!location || !location.sourceId) {
     return undefined;
   }
-  const breakpoints = getBreakpointsList(state);
-  return breakpoints.find(breakpoint => breakpoint.location.line === line);
+
+  const isGeneratedSource = isGeneratedId(location.sourceId);
+  return getBreakpointsList(state).find(bp => {
+    const loc = isGeneratedSource ? bp.generatedLocation : bp.location;
+    return isMatchingLocation(loc, location);
+  });
 }
 
 export function getHiddenBreakpoint(state: OuterState): ?Breakpoint {
   const breakpoints = getBreakpointsList(state);
-  return breakpoints.find(bp => bp.hidden);
+  return breakpoints.find(bp => bp.options.hidden);
 }
 
-export function getHiddenBreakpointLocation(
+export function getBreakpointPositions(
   state: OuterState
-): ?SourceLocation {
-  const hiddenBreakpoint = getHiddenBreakpoint(state);
-  if (!hiddenBreakpoint) {
+): BreakpointPositionsMap {
+  return state.breakpoints.breakpointPositions;
+}
+
+export function getBreakpointPositionsForSource(
+  state: OuterState,
+  sourceId: string
+): ?BreakpointPositions {
+  const positions = getBreakpointPositions(state);
+  return positions && positions[sourceId];
+}
+
+export function hasBreakpointPositions(
+  state: OuterState,
+  sourceId: string
+): boolean {
+  return !!getBreakpointPositionsForSource(state, sourceId);
+}
+
+export function getBreakpointPositionsForLine(
+  state: OuterState,
+  sourceId: string,
+  line: number
+): ?BreakpointPositions {
+  const positions = getBreakpointPositionsForSource(state, sourceId);
+  if (!positions) {
     return null;
   }
-  return hiddenBreakpoint.location;
+  return positions.filter(({ location, generatedLocation }) => {
+    const loc = isOriginalId(sourceId) ? location : generatedLocation;
+    return loc.line == line;
+  });
+}
+
+export function isEmptyLineInSource(
+  state: OuterState,
+  line: number,
+  selectedSourceId: string
+) {
+  const emptyLines = getEmptyLines(state, selectedSourceId);
+  return emptyLines && emptyLines.includes(line);
+}
+
+export function getEmptyLines(state: OuterState, sourceId: string) {
+  if (!sourceId) {
+    return null;
+  }
+
+  return state.breakpoints.emptyLines[sourceId];
 }
 
 export default update;

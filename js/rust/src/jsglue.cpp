@@ -9,7 +9,7 @@
 
 #ifdef JS_DEBUG
 // A hack for MFBT. Guard objects need this to work.
-#define DEBUG 1
+#  define DEBUG 1
 #endif
 
 #include "jsapi.h"
@@ -38,7 +38,8 @@ struct ProxyTraps {
   bool (*delete_)(JSContext* cx, JS::HandleObject proxy, JS::HandleId id,
                   JS::ObjectOpResult& result);
 
-  JSObject* (*enumerate)(JSContext* cx, JS::HandleObject proxy);
+  bool (*enumerate)(JSContext* cx, JS::HandleObject proxy,
+                    JS::AutoIdVector& props);
 
   bool (*getPrototypeIfOrdinary)(JSContext* cx, JS::HandleObject proxy,
                                  bool* isOrdinary,
@@ -63,9 +64,6 @@ struct ProxyTraps {
   bool (*construct)(JSContext* cx, JS::HandleObject proxy,
                     const JS::CallArgs& args);
 
-  bool (*getPropertyDescriptor)(JSContext* cx, JS::HandleObject proxy,
-                                JS::HandleId id,
-                                JS::MutableHandle<JS::PropertyDescriptor> desc);
   bool (*hasOwn)(JSContext* cx, JS::HandleObject proxy, JS::HandleId id,
                  bool* bp);
   bool (*getOwnEnumerablePropertyKeys)(JSContext* cx, JS::HandleObject proxy,
@@ -94,7 +92,6 @@ struct ProxyTraps {
 
   // getElements
 
-  // weakmapKeyDelegate
   // isScripted
 };
 
@@ -103,10 +100,10 @@ static int HandlerFamily;
 #define DEFER_TO_TRAP_OR_BASE_CLASS(_base)                                    \
                                                                               \
   /* Standard internal methods. */                                            \
-  virtual JSObject* enumerate(JSContext* cx, JS::HandleObject proxy)          \
-      const override {                                                        \
-    return mTraps.enumerate ? mTraps.enumerate(cx, proxy)                     \
-                            : _base::enumerate(cx, proxy);                    \
+  virtual bool enumerate(JSContext* cx, JS::HandleObject proxy,               \
+                         JS::AutoIdVector& props) const override {            \
+    return mTraps.enumerate ? mTraps.enumerate(cx, proxy, props)              \
+                            : _base::enumerate(cx, proxy, props);             \
   }                                                                           \
                                                                               \
   virtual bool has(JSContext* cx, JS::HandleObject proxy, JS::HandleId id,    \
@@ -268,14 +265,6 @@ class WrapperProxyHandler : public js::Wrapper {
                ? mTraps.isExtensible(cx, proxy, succeeded)
                : js::Wrapper::isExtensible(cx, proxy, succeeded);
   }
-
-  virtual bool getPropertyDescriptor(
-      JSContext* cx, JS::HandleObject proxy, JS::HandleId id,
-      JS::MutableHandle<JS::PropertyDescriptor> desc) const override {
-    return mTraps.getPropertyDescriptor
-               ? mTraps.getPropertyDescriptor(cx, proxy, id, desc)
-               : js::Wrapper::getPropertyDescriptor(cx, proxy, id, desc);
-  }
 };
 
 class RustJSPrincipal : public JSPrincipals {
@@ -356,12 +345,6 @@ class ForwardingProxyHandler : public js::BaseProxyHandler {
   virtual bool isExtensible(JSContext* cx, JS::HandleObject proxy,
                             bool* succeeded) const override {
     return mTraps.isExtensible(cx, proxy, succeeded);
-  }
-
-  virtual bool getPropertyDescriptor(
-      JSContext* cx, JS::HandleObject proxy, JS::HandleId id,
-      JS::MutableHandle<JS::PropertyDescriptor> desc) const override {
-    return mTraps.getPropertyDescriptor(cx, proxy, id, desc);
   }
 };
 
@@ -547,8 +530,8 @@ void ReportError(JSContext* aCx, const char* aError) {
 
 bool IsWrapper(JSObject* obj) { return js::IsWrapper(obj); }
 
-JSObject* UnwrapObject(JSObject* obj, bool stopAtOuter) {
-  return js::CheckedUnwrap(obj, stopAtOuter);
+JSObject* UnwrapObjectStatic(JSObject* obj) {
+  return js::CheckedUnwrapStatic(obj);
 }
 
 JSObject* UncheckedUnwrapObject(JSObject* obj, bool stopAtOuter) {
@@ -582,15 +565,15 @@ bool AppendToAutoObjectVector(JS::AutoObjectVector* v, JSObject* obj) {
 void DeleteAutoObjectVector(JS::AutoObjectVector* v) { delete v; }
 
 #if defined(__linux__)
-#include <malloc.h>
+#  include <malloc.h>
 #elif defined(__APPLE__)
-#include <malloc/malloc.h>
+#  include <malloc/malloc.h>
 #elif defined(__MINGW32__) || defined(__MINGW64__)
 // nothing needed here
 #elif defined(_MSC_VER)
 // nothing needed here
 #else
-#error "unsupported platform"
+#  error "unsupported platform"
 #endif
 
 // SpiderMonkey-in-Rust currently uses system malloc, not jemalloc.
@@ -604,7 +587,7 @@ static size_t MallocSizeOf(const void* aPtr) {
 #elif defined(_MSC_VER)
   return _msize((void*)aPtr);
 #else
-#error "unsupported platform"
+#  error "unsupported platform"
 #endif
 }
 

@@ -10,6 +10,7 @@
 #include "mozilla/gfx/Logging.h"
 #include "nsITimer.h"
 #include "mozilla/Preferences.h"
+#include "VRGPUChild.h"
 
 namespace mozilla {
 namespace gfx {
@@ -150,6 +151,9 @@ void GPUProcessHost::Shutdown() {
 
     // The channel might already be closed if we got here unexpectedly.
     if (!mChannelClosed) {
+      if (VRGPUChild::IsCreated()) {
+        VRGPUChild::Get()->Close();
+      }
       mGPUChild->SendShutdownVR();
       mGPUChild->Close();
     }
@@ -198,11 +202,6 @@ void GPUProcessHost::KillHard(const char* aReason) {
 
 uint64_t GPUProcessHost::GetProcessToken() const { return mProcessToken; }
 
-static void DelayedDeleteSubprocess(GeckoChildProcessHost* aSubprocess) {
-  XRE_GetIOMessageLoop()->PostTask(
-      mozilla::MakeAndAddRef<DeleteTask<GeckoChildProcessHost>>(aSubprocess));
-}
-
 void GPUProcessHost::KillProcess() { KillHard("DiagnosticKill"); }
 
 void GPUProcessHost::DestroyProcess() {
@@ -213,8 +212,8 @@ void GPUProcessHost::DestroyProcess() {
     mTaskFactory.RevokeAll();
   }
 
-  MessageLoop::current()->PostTask(NewRunnableFunction(
-      "DestroyProcessRunnable", DelayedDeleteSubprocess, this));
+  MessageLoop::current()->PostTask(
+      NS_NewRunnableFunction("DestroyProcessRunnable", [this] { Destroy(); }));
 }
 
 }  // namespace gfx

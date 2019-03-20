@@ -178,12 +178,15 @@ https://bugzilla.mozilla.org/show_bug.cgi?id=533596
       outerSB.sop = this;
       Cu.evalInSandbox('checkExplicitVersions();', outerSB);
 
-      ChromeUtils.import("resource://gre/modules/jsdebugger.jsm");
+      const {addDebuggerToGlobal} = ChromeUtils.import("resource://gre/modules/jsdebugger.jsm");
       addDebuggerToGlobal(this);
 
       try {
         let dbg = new Debugger();
-        let sandbox = new Cu.Sandbox(this, { invisibleToDebugger: false });
+        let sandbox = new Cu.Sandbox(this, {
+          invisibleToDebugger: false,
+          freshCompartment: true,
+        });
         dbg.addDebuggee(sandbox);
         ok(true, "debugger added visible value");
       } catch(e) {

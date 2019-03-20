@@ -11,12 +11,10 @@
 
 "use strict";
 
-ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
-
 const { ManifestObtainer } =
-  ChromeUtils.import("resource://gre/modules/ManifestObtainer.jsm", {});
+  ChromeUtils.import("resource://gre/modules/ManifestObtainer.jsm");
 const { ManifestIcons } =
-  ChromeUtils.import("resource://gre/modules/ManifestIcons.jsm", {});
+  ChromeUtils.import("resource://gre/modules/ManifestIcons.jsm");
 
 ChromeUtils.defineModuleGetter(this, "OS",
                                "resource://gre/modules/osfile.jsm");
@@ -60,7 +58,6 @@ const MANIFESTS_FILE = "manifest-scopes.json";
  */
 
 class Manifest {
-
   constructor(browser, manifestUrl) {
     this._manifestUrl = manifestUrl;
     // The key for this is the manifests URL that is required to be unique.
@@ -81,7 +78,7 @@ class Manifest {
     const data = {
       installed: false,
       manifest: manifestData,
-      cached_icon: icon
+      cached_icon: icon,
     };
     return data;
   }
@@ -90,14 +87,14 @@ class Manifest {
     const manifestData = await ManifestObtainer.browserObtainManifest(this._browser);
     this._store.data = {
       installed: true,
-      manifest: manifestData
+      manifest: manifestData,
     };
     Manifests.manifestInstalled(this);
     this._store.saveSoon();
   }
 
   async icon(expectedSize) {
-    if ('cached_icon' in this._store.data) {
+    if ("cached_icon" in this._store.data) {
       return this._store.data.cached_icon;
     }
     const icon = await ManifestIcons
@@ -142,14 +139,12 @@ class Manifest {
  */
 var Manifests = {
 
-  async initialise () {
-
+  async initialise() {
     if (this.started) {
       return this.started;
     }
 
     this.started = (async () => {
-
       // Make sure the manifests have the folder needed to save into
       await OS.File.makeDir(MANIFESTS_DIR, {ignoreExisting: true});
 
@@ -166,7 +161,6 @@ var Manifests = {
       // Cache the Manifest objects creates as they are references to files
       // and we do not want multiple file handles
       this.manifestObjs = {};
-
     })();
 
     return this.started;
@@ -193,7 +187,6 @@ var Manifests = {
   // Get the manifest given a url, or if not look for a manifest that is
   // tied to the current page
   async getManifest(browser, manifestUrl) {
-
     // Ensure we have all started up
     await this.initialise();
 
@@ -219,7 +212,7 @@ var Manifests = {
     this.manifestObjs[manifestUrl] = new Manifest(browser, manifestUrl);
     await this.manifestObjs[manifestUrl].initialise();
     return this.manifestObjs[manifestUrl];
-  }
+  },
 
 };
 

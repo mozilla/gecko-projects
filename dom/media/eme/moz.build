@@ -18,7 +18,6 @@ EXPORTS.mozilla.dom += [
 EXPORTS.mozilla += [
     'CDMCaps.h',
     'CDMProxy.h',
-    'DataMutex.h',
     'DecryptorProxyCallback.h',
     'DetailedPromise.h',
     'EMEUtils.h',
@@ -40,6 +39,7 @@ UNIFIED_SOURCES += [
 
 if CONFIG['MOZ_WIDGET_TOOLKIT'] == 'android':
   DIRS += ['mediadrm']
+  LOCAL_INCLUDES += ['/dom/media/platforms/android']
 
 include('/ipc/chromium/chromium-config.mozbuild')
 

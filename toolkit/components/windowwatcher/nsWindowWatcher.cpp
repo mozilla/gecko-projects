@@ -26,7 +26,7 @@
 #include "nsIDocShellTreeItem.h"
 #include "nsIDocShellTreeOwner.h"
 #include "nsIDocumentLoader.h"
-#include "nsIDocument.h"
+#include "mozilla/dom/Document.h"
 #include "nsIDOMWindow.h"
 #include "nsIDOMChromeWindow.h"
 #include "nsIPrompt.h"
@@ -71,6 +71,7 @@
 #include "nsIXULWindow.h"
 #include "nsIXULBrowserWindow.h"
 #include "nsGlobalWindow.h"
+#include "ReferrerInfo.h"
 
 using namespace mozilla;
 using namespace mozilla::dom;
@@ -652,7 +653,7 @@ nsresult nsWindowWatcher::OpenWindowInternal(
   bool hasChromeParent = XRE_IsContentProcess() ? false : true;
   if (aParent) {
     // Check if the parent document has chrome privileges.
-    nsIDocument* doc = parentWindow->GetDoc();
+    Document* doc = parentWindow->GetDoc();
     hasChromeParent = doc && nsContentUtils::IsChromeDoc(doc);
   }
 
@@ -721,7 +722,7 @@ nsresult nsWindowWatcher::OpenWindowInternal(
     // If the parent trying to open a new window is sandboxed
     // without 'allow-popups', this is not allowed and we fail here.
     if (aParent) {
-      if (nsIDocument* doc = parentWindow->GetDoc()) {
+      if (Document* doc = parentWindow->GetDoc()) {
         // Save sandbox flags for copying to new browsing context (docShell).
         activeDocsSandboxFlags = doc->GetSandboxFlags();
         if (activeDocsSandboxFlags & SANDBOXED_AUXILIARY_NAVIGATION) {
@@ -1051,8 +1052,12 @@ nsresult nsWindowWatcher::OpenWindowInternal(
   }
 
   RefPtr<nsDocShellLoadState> loadState = aLoadState;
-  if (uriToLoad && aNavigate && !loadState) {
-    loadState = new nsDocShellLoadState();
+  if (uriToLoad && loadState) {
+    // If a URI was passed to this function, open that, not what was passed in
+    // the original LoadState. See Bug 1515433.
+    loadState->SetURI(uriToLoad);
+  } else if (uriToLoad && aNavigate && !loadState) {
+    loadState = new nsDocShellLoadState(uriToLoad);
 
     if (subjectPrincipal) {
       loadState->SetTriggeringPrincipal(subjectPrincipal);
@@ -1068,15 +1073,24 @@ nsresult nsWindowWatcher::OpenWindowInternal(
        Also using GetDocument to force document creation seems to
        screw up focus in the hidden window; see bug 36016.
     */
-    nsCOMPtr<nsIDocument> doc = GetEntryDocument();
+    RefPtr<Document> doc = GetEntryDocument();
     if (!doc && parentWindow) {
       doc = parentWindow->GetExtantDoc();
     }
     if (doc) {
-      // Set the referrer
-      loadState->SetReferrer(doc->GetDocumentURI());
-      loadState->SetReferrerPolicy(doc->GetReferrerPolicy());
+      nsCOMPtr<nsIReferrerInfo> referrerInfo =
+          new ReferrerInfo(doc->GetDocumentURI(), doc->GetReferrerPolicy());
+      loadState->SetReferrerInfo(referrerInfo);
     }
+  }
+
+  // Currently we query the CSP from the subjectPrincipal. After Bug 965637
+  // we should query the CSP from the doc, similar to the referrerInfo above.
+  if (subjectPrincipal && loadState) {
+    nsCOMPtr<nsIContentSecurityPolicy> csp;
+    rv = subjectPrincipal->GetCsp(getter_AddRefs(csp));
+    NS_ENSURE_SUCCESS(rv, rv);
+    loadState->SetCsp(csp);
   }
 
   if (isNewToplevelWindow) {
@@ -1122,7 +1136,6 @@ nsresult nsWindowWatcher::OpenWindowInternal(
   }
 
   if (uriToLoad && aNavigate) {
-    loadState->SetURI(uriToLoad);
     loadState->SetLoadFlags(
         windowIsNew
             ? static_cast<uint32_t>(nsIWebNavigation::LOAD_FLAGS_FIRST_LOAD)
@@ -1202,7 +1215,7 @@ nsresult nsWindowWatcher::OpenWindowInternal(
       // Reset popup state while opening a modal dialog, and firing
       // events about the dialog, to prevent the current state from
       // being active the whole time a modal dialog is open.
-      nsAutoPopupStatePusher popupStatePusher(openAbused);
+      nsAutoPopupStatePusher popupStatePusher(PopupBlocker::openAbused);
 
       newChrome->ShowAsModal();
     }
@@ -1548,7 +1561,7 @@ nsresult nsWindowWatcher::URIfromURL(const char* aURL,
 
   // get baseWindow's document URI
   if (baseWindow) {
-    if (nsIDocument* doc = baseWindow->GetDoc()) {
+    if (Document* doc = baseWindow->GetDoc()) {
       baseURI = doc->GetDocBaseURI();
     }
   }
@@ -1771,7 +1784,9 @@ uint32_t nsWindowWatcher::CalculateChromeFlagsForParent(
   chromeFlags |= WinHasOption(aFeatures, "suppressanimation", 0, nullptr)
                      ? nsIWebBrowserChrome::CHROME_SUPPRESS_ANIMATION
                      : 0;
-
+  chromeFlags |= WinHasOption(aFeatures, "alwaysontop", 0, nullptr)
+                     ? nsIWebBrowserChrome::CHROME_ALWAYS_ON_TOP
+                     : 0;
   chromeFlags |= WinHasOption(aFeatures, "chrome", 0, nullptr)
                      ? nsIWebBrowserChrome::CHROME_OPENAS_CHROME
                      : 0;
@@ -1995,7 +2010,7 @@ nsresult nsWindowWatcher::ReadyOpenedDocShellItem(
       NS_ASSERTION(!chan, "Why is there a document channel?");
 #endif
 
-      nsCOMPtr<nsIDocument> doc = piOpenedWindow->GetExtantDoc();
+      RefPtr<Document> doc = piOpenedWindow->GetExtantDoc();
       if (doc) {
         doc->SetIsInitialDocument(true);
       }
@@ -2110,7 +2125,7 @@ void nsWindowWatcher::SizeOpenedWindow(nsIDocShellTreeOwner* aTreeOwner,
   double openerZoom = aOpenerFullZoom.valueOr(1.0);
   if (aParent && aOpenerFullZoom.isNothing()) {
     nsCOMPtr<nsPIDOMWindowOuter> piWindow = nsPIDOMWindowOuter::From(aParent);
-    if (nsIDocument* doc = piWindow->GetDoc()) {
+    if (Document* doc = piWindow->GetDoc()) {
       if (nsPresContext* presContext = doc->GetPresContext()) {
         openerZoom = presContext->GetFullZoom();
       }

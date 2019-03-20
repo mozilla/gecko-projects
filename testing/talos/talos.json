@@ -13,7 +13,7 @@
             "tests": ["tart_flex", "ts_paint_flex"]
         },
         "other-e10s": {
-            "tests": ["a11yr", "ts_paint", "tpaint", "sessionrestore", "sessionrestore_no_auto_restore", "tabpaint", "cpstartup"]
+            "tests": ["a11yr", "ts_paint", "tpaint", "twinopen", "sessionrestore", "sessionrestore_no_auto_restore", "tabpaint", "cpstartup", "startup_about_home_paint"]
         },
         "sessionrestore-many-windows-e10s": {
             "tests": ["sessionrestore_many_windows"]
@@ -26,8 +26,8 @@
             "tests": ["damp"],
             "pagesets_name": "tp5n.zip"
         },
-        "tps-e10s": {
-            "tests": ["tps"],
+        "tabswitch-e10s": {
+            "tests": ["tabswitch"],
             "pagesets_name": "tp5n.zip"
         },
         "g3-e10s": {
@@ -69,7 +69,7 @@
             ]
         },
         "tp6-e10s": {
-            "tests": ["tp6_google", "tp6_youtube", "tp6_amazon", "tp6_facebook"],
+            "tests": ["tp6_youtube", "tp6_amazon", "tp6_facebook"],
             "mitmproxy_release_bin_osx": "mitmproxy-2.0.2-osx.tar.gz",
             "mitmproxy_release_bin_linux64": "mitmproxy-2.0.2-linux.tar.gz",
             "mitmproxy_recording_set": "mitmproxy-recording-set-win10.zip",
@@ -80,7 +80,7 @@
             ]
         },
         "tp6-stylo-threads-e10s": {
-            "tests": ["tp6_google", "tp6_youtube", "tp6_amazon", "tp6_facebook"],
+            "tests": ["tp6_youtube", "tp6_amazon", "tp6_facebook"],
             "mitmproxy_release_bin_osx": "mitmproxy-2.0.2-osx.tar.gz",
             "mitmproxy_release_bin_linux64": "mitmproxy-2.0.2-linux.tar.gz",
             "mitmproxy_recording_set": "mitmproxy-recording-set-win10.zip",

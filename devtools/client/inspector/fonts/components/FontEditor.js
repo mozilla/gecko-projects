@@ -54,6 +54,7 @@ class FontEditor extends PureComponent {
       return FontAxis({
         key: axis.tag,
         axis,
+        disabled: this.props.fontEditor.disabled,
         onChange: this.props.onPropertyChange,
         minLabel: true,
         maxLabel: true,
@@ -122,6 +123,7 @@ class FontEditor extends PureComponent {
   renderFontGroup(family, fonts = []) {
     const group = fonts.map(font => {
       return FontName({
+        key: font.name,
         font,
         onToggleFontHighlight: this.props.onToggleFontHighlight,
       });
@@ -129,6 +131,7 @@ class FontEditor extends PureComponent {
 
     return dom.div(
       {
+        key: family,
         className: "font-group",
       },
       dom.div(
@@ -143,6 +146,7 @@ class FontEditor extends PureComponent {
   renderFontSize(value) {
     return value !== null && FontSize({
       key: `${this.props.fontEditor.id}:font-size`,
+      disabled: this.props.fontEditor.disabled,
       onChange: this.props.onPropertyChange,
       value,
     });
@@ -151,6 +155,7 @@ class FontEditor extends PureComponent {
   renderLineHeight(value) {
     return value !== null && LineHeight({
       key: `${this.props.fontEditor.id}:line-height`,
+      disabled: this.props.fontEditor.disabled,
       onChange: this.props.onPropertyChange,
       value,
     });
@@ -159,6 +164,7 @@ class FontEditor extends PureComponent {
   renderFontStyle(value) {
     return value && FontStyle({
       onChange: this.props.onPropertyChange,
+      disabled: this.props.fontEditor.disabled,
       value,
     });
   }
@@ -166,6 +172,7 @@ class FontEditor extends PureComponent {
   renderFontWeight(value) {
     return value !== null && FontWeight({
       onChange: this.props.onPropertyChange,
+      disabled: this.props.fontEditor.disabled,
       value,
     });
   }
@@ -184,7 +191,7 @@ class FontEditor extends PureComponent {
    *        }
    * @return {DOMNode}
    */
-  renderInstances(fontInstances = [], selectedInstance) {
+  renderInstances(fontInstances = [], selectedInstance = {}) {
     // Append a "Custom" instance entry which represents the latest manual axes changes.
     const customInstance = {
       name: getStr("fontinspector.customInstanceName"),
@@ -196,8 +203,8 @@ class FontEditor extends PureComponent {
     const instanceOptions = fontInstances.map(instance =>
       dom.option(
         {
+          key: instance.name,
           value: instance.name,
-          selected: instance.name === selectedInstance.name ? "selected" : null,
         },
         instance.name
       )
@@ -207,6 +214,7 @@ class FontEditor extends PureComponent {
     const instanceSelect = dom.select(
       {
         className: "font-control-input font-value-select",
+        value: selectedInstance.name || customInstance.name,
         onChange: (e) => {
           const instance = fontInstances.find(inst => e.target.value === inst.name);
           instance && this.props.onInstanceChange(instance.name, instance.values);

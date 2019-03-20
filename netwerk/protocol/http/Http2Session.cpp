@@ -168,7 +168,7 @@ void Http2Session::Shutdown() {
       CloseStream(stream, NS_ERROR_NET_PARTIAL_TRANSFER);
     } else if (mGoAwayReason == INADEQUATE_SECURITY) {
       CloseStream(stream, NS_ERROR_NET_INADEQUATE_SECURITY);
-    } else if (!mCleanShutdown) {
+    } else if (!mCleanShutdown && (mGoAwayReason != NO_HTTP_ERROR)) {
       CloseStream(stream, NS_ERROR_NET_HTTP2_SENT_GOAWAY);
     } else {
       CloseStream(stream, NS_ERROR_ABORT);
@@ -3835,12 +3835,43 @@ void Http2Session::Close(nsresult aReason) {
   mStreamIDHash.Clear();
   mStreamTransactionHash.Clear();
 
+  // If we have any websocket transactions waiting for settings frame,
+  // reinitiate them. This can happend if we close a h2 connection before the
+  // settings frame is received.
+  if (mWaitingWebsockets.Length()) {
+    MOZ_ASSERT(!mProcessedWaitingWebsockets);
+    MOZ_ASSERT(mWaitingWebsockets.Length() ==
+               mWaitingWebsocketCallbacks.Length());
+
+    mProcessedWaitingWebsockets = true;
+    for (size_t i = 0; i < mWaitingWebsockets.Length(); ++i) {
+      RefPtr<nsAHttpTransaction> httpTransaction = mWaitingWebsockets[i];
+      LOG3(("Http2Session::Close %p Re-queuing websocket.", this));
+      httpTransaction->SetConnection(nullptr);
+      nsHttpTransaction *trans = httpTransaction->QueryHttpTransaction();
+      if (trans) {
+        nsresult rv =
+            gHttpHandler->InitiateTransaction(trans, trans->Priority());
+        if (NS_FAILED(rv)) {
+          LOG3(
+              ("Http2Session::Close %p failed to reinitiate websocket "
+               "transaction (%08x).\n",
+               this, static_cast<uint32_t>(rv)));
+        }
+      } else {
+        LOG3(("Http2Session::Close %p missing transaction?!", this));
+      }
+    }
+    mWaitingWebsockets.Clear();
+    mWaitingWebsocketCallbacks.Clear();
+  }
+
   uint32_t goAwayReason;
   if (mGoAwayReason != NO_HTTP_ERROR) {
     goAwayReason = mGoAwayReason;
   } else if (NS_SUCCEEDED(aReason)) {
     goAwayReason = NO_HTTP_ERROR;
-  } else if (aReason == NS_ERROR_ILLEGAL_VALUE) {
+  } else if (aReason == NS_ERROR_NET_HTTP2_SENT_GOAWAY) {
     goAwayReason = PROTOCOL_ERROR;
   } else if (mCleanShutdown) {
     goAwayReason = NO_HTTP_ERROR;

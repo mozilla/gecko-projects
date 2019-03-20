@@ -25,7 +25,7 @@
 #include "nsIAppShellService.h"
 #include "nsIServiceManager.h"
 #include "nsIContentViewer.h"
-#include "nsIDocument.h"
+#include "mozilla/dom/Document.h"
 #include "nsPIDOMWindow.h"
 #include "nsScreen.h"
 #include "nsIEmbeddingSiteWindow.h"
@@ -216,7 +216,7 @@ NS_IMETHODIMP nsXULWindow::SetZLevel(uint32_t aLevel) {
   nsCOMPtr<nsIContentViewer> cv;
   mDocShell->GetContentViewer(getter_AddRefs(cv));
   if (cv) {
-    nsCOMPtr<nsIDocument> doc = cv->GetDocument();
+    RefPtr<dom::Document> doc = cv->GetDocument();
     if (doc) {
       ErrorResult rv;
       RefPtr<dom::Event> event = doc->CreateEvent(NS_LITERAL_STRING("Events"),
@@ -462,19 +462,28 @@ NS_IMETHODIMP nsXULWindow::Destroy() {
   if (parent) {
     nsCOMPtr<nsIWidget> parentWidget;
     parent->GetMainWidget(getter_AddRefs(parentWidget));
-    if (!parentWidget || parentWidget->IsVisible()) {
-      nsCOMPtr<nsIBaseWindow> baseHiddenWindow;
+
+    if (parentWidget && parentWidget->IsVisible()) {
+      bool isParentHiddenWindow = false;
+
       if (appShell) {
-        nsCOMPtr<nsIXULWindow> hiddenWindow;
-        appShell->GetHiddenWindow(getter_AddRefs(hiddenWindow));
-        if (hiddenWindow) baseHiddenWindow = do_GetInterface(hiddenWindow);
+        bool hasHiddenWindow = false;
+        appShell->GetHasHiddenWindow(&hasHiddenWindow);
+        if (hasHiddenWindow) {
+          nsCOMPtr<nsIBaseWindow> baseHiddenWindow;
+          nsCOMPtr<nsIXULWindow> hiddenWindow;
+          appShell->GetHiddenWindow(getter_AddRefs(hiddenWindow));
+          if (hiddenWindow) {
+            baseHiddenWindow = do_GetInterface(hiddenWindow);
+            isParentHiddenWindow = (baseHiddenWindow == parent);
+          }
+        }
       }
+
       // somebody screwed up somewhere. hiddenwindow shouldn't be anybody's
       // parent. still, when it happens, skip activating it.
-      if (baseHiddenWindow != parent) {
-        nsCOMPtr<nsIWidget> parentWidget;
-        parent->GetMainWidget(getter_AddRefs(parentWidget));
-        if (parentWidget) parentWidget->PlaceBehind(eZPlacementTop, 0, true);
+      if (!isParentHiddenWindow) {
+        parentWidget->PlaceBehind(eZPlacementTop, 0, true);
       }
     }
   }
@@ -1506,14 +1515,13 @@ void nsXULWindow::SyncAttributesToWidget() {
 
   NS_ENSURE_TRUE_VOID(mWindow);
 
-  // "id" attribute for icon
-  windowElement->GetAttribute(NS_LITERAL_STRING("id"), attr);
-  if (attr.IsEmpty()) {
-    attr.AssignLiteral("default");
-  }
-  mWindow->SetIcon(attr);
+  // "icon" attribute
+  windowElement->GetAttribute(NS_LITERAL_STRING("icon"), attr);
+  if (!attr.IsEmpty()) {
+    mWindow->SetIcon(attr);
 
-  NS_ENSURE_TRUE_VOID(mWindow);
+    NS_ENSURE_TRUE_VOID(mWindow);
+  }
 
   // "drawtitle" attribute
   windowElement->GetAttribute(NS_LITERAL_STRING("drawtitle"), attr);
@@ -1585,7 +1593,7 @@ nsresult nsXULWindow::GetPersistentValue(const nsAtom* aAttr,
     return NS_OK;
   }
 
-  nsCOMPtr<nsIDocument> ownerDoc = docShellElement->OwnerDoc();
+  RefPtr<dom::Document> ownerDoc = docShellElement->OwnerDoc();
   nsIURI* docURI = ownerDoc->GetDocumentURI();
   if (!docURI) {
     return NS_ERROR_FAILURE;
@@ -1632,7 +1640,7 @@ nsresult nsXULWindow::SetPersistentValue(const nsAtom* aAttr,
     return NS_OK;
   }
 
-  nsCOMPtr<nsIDocument> ownerDoc = docShellElement->OwnerDoc();
+  RefPtr<dom::Document> ownerDoc = docShellElement->OwnerDoc();
   nsIURI* docURI = ownerDoc->GetDocumentURI();
   if (!docURI) {
     return NS_ERROR_FAILURE;
@@ -1798,7 +1806,7 @@ dom::Element* nsXULWindow::GetWindowDOMElement() const {
   mDocShell->GetContentViewer(getter_AddRefs(cv));
   NS_ENSURE_TRUE(cv, nullptr);
 
-  const nsIDocument* document = cv->GetDocument();
+  const dom::Document* document = cv->GetDocument();
   NS_ENSURE_TRUE(document, nullptr);
 
   return document->GetRootElement();
@@ -2027,7 +2035,7 @@ NS_IMETHODIMP nsXULWindow::CreateNewContentWindow(int32_t aChromeFlags,
     nsCOMPtr<nsPIDOMWindowOuter> window = docShell->GetWindow();
     MOZ_ASSERT(window);
     window->SetOpenerForInitialContentBrowser(
-        nsPIDOMWindowOuter::From(aOpener));
+        nsPIDOMWindowOuter::From(aOpener)->GetBrowsingContext());
   }
 
   xulWin->LockUntilChromeLoad();

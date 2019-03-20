@@ -88,6 +88,7 @@ add_task(async function test_setup() {
   do_get_profile();
   loadAddonManager("xpcshell@tests.mozilla.org", "XPCShell", "1", "1.9.2");
   finishAddonManagerStartup();
+  fakeIntlReady();
   // Make sure we don't generate unexpected pings due to pref changes.
   await setEmptyPrefWatchlist();
 });
@@ -151,7 +152,7 @@ add_task(async function test_subsessionsChaining() {
   // subsessionId: D and previousSubsessionId: C to be archived.
   moveClockForward(30);
   await TelemetryController.testReset();
-  TelemetryEnvironment.testWatchPreferences(PREFS_TO_WATCH);
+  await TelemetryEnvironment.testWatchPreferences(PREFS_TO_WATCH);
   moveClockForward(30);
   Preferences.set(PREF_TEST, 1);
   expectedReasons.push(REASON_ENVIRONMENT_CHANGE);
@@ -188,7 +189,7 @@ add_task(async function test_subsessionsChaining() {
 
   // Start Telemetry and trigger an environment change.
   await TelemetryController.testReset();
-  TelemetryEnvironment.testWatchPreferences(PREFS_TO_WATCH);
+  await TelemetryEnvironment.testWatchPreferences(PREFS_TO_WATCH);
   moveClockForward(30);
   Preferences.set(PREF_TEST, 1);
   expectedReasons.push(REASON_ENVIRONMENT_CHANGE);

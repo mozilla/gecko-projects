@@ -4,10 +4,10 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
-#include "NativeNt.h"
 #include "nsWindowsDllInterceptor.h"
 #include "mozilla/ArrayUtils.h"
 #include "mozilla/Attributes.h"
+#include "mozilla/NativeNt.h"
 #include "mozilla/Types.h"
 #include "mozilla/WindowsDllBlocklist.h"
 #include "mozilla/WinHeaderOnlyUtils.h"
@@ -26,9 +26,9 @@
 #define DLL_BLOCKLIST_STRING_TYPE UNICODE_STRING
 
 #if defined(MOZ_LAUNCHER_PROCESS) || defined(NIGHTLY_BUILD)
-#include "mozilla/WindowsDllBlocklistDefs.h"
+#  include "mozilla/WindowsDllBlocklistDefs.h"
 #else
-#include "mozilla/WindowsDllBlocklistCommon.h"
+#  include "mozilla/WindowsDllBlocklistCommon.h"
 DLL_BLOCKLIST_DEFINITIONS_BEGIN
 DLL_BLOCKLIST_DEFINITIONS_END
 #endif
@@ -305,47 +305,6 @@ static NTSTATUS NTAPI patched_NtMapViewOfSection(
 }
 
 namespace mozilla {
-
-class MOZ_RAII AutoVirtualProtect final {
- public:
-  AutoVirtualProtect(void* aAddress, size_t aLength, DWORD aProtFlags,
-                     HANDLE aTargetProcess = nullptr)
-      : mAddress(aAddress),
-        mLength(aLength),
-        mTargetProcess(aTargetProcess),
-        mPrevProt(0),
-        mError(WindowsError::CreateSuccess()) {
-    if (!::VirtualProtectEx(aTargetProcess, aAddress, aLength, aProtFlags,
-                            &mPrevProt)) {
-      mError = WindowsError::FromLastError();
-    }
-  }
-
-  ~AutoVirtualProtect() {
-    if (mError.IsFailure()) {
-      return;
-    }
-
-    ::VirtualProtectEx(mTargetProcess, mAddress, mLength, mPrevProt,
-                       &mPrevProt);
-  }
-
-  explicit operator bool() const { return mError.IsSuccess(); }
-
-  WindowsError GetError() const { return mError; }
-
-  AutoVirtualProtect(const AutoVirtualProtect&) = delete;
-  AutoVirtualProtect(AutoVirtualProtect&&) = delete;
-  AutoVirtualProtect& operator=(const AutoVirtualProtect&) = delete;
-  AutoVirtualProtect& operator=(AutoVirtualProtect&&) = delete;
-
- private:
-  void* mAddress;
-  size_t mLength;
-  HANDLE mTargetProcess;
-  DWORD mPrevProt;
-  WindowsError mError;
-};
 
 LauncherVoidResult InitializeDllBlocklistOOP(HANDLE aChildProcess) {
   mozilla::CrossProcessDllInterceptor intcpt(aChildProcess);

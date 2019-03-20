@@ -44,13 +44,15 @@ add_task(threadClientTest(({ threadClient, debuggee, client }) => {
 }));
 
 function setBreakpoint(packet, threadClient, client) {
-  return new Promise(resolve => {
-    const source = threadClient.source(packet.frame.where.source);
+  return new Promise(async resolve => {
+    const source = await getSourceById(
+      threadClient,
+      packet.frame.where.actor
+    );
     client.addOneTimeListener("resumed", resolve);
 
-    source.setBreakpoint({ line: 2 }).then(() => {
-      threadClient.resume();
-    });
+    threadClient.setBreakpoint({ sourceUrl: source.url, line: 3 }, {});
+    threadClient.resume();
   });
 }
 

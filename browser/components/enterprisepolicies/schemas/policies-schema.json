@@ -2,6 +2,21 @@
   "$schema": "http://json-schema.org/draft-04/schema#",
   "type": "object",
   "properties": {
+
+    "3rdparty": {
+      "type": "object",
+      "properties": {
+        "Extensions" : {
+          "type": "object",
+          "patternProperties": {
+            "^.*$": {
+              "type": "JSON"
+            }
+          }
+        }
+      }
+    },
+
     "AppUpdateURL": {
       "type": "URL"
     },
@@ -88,6 +103,10 @@
       }
     },
 
+    "CaptivePortal": {
+      "type": "boolean"
+    },
+
     "Certificates": {
       "type": "object",
       "properties": {
@@ -139,21 +158,6 @@
           "type": "boolean"
         },
 
-        "Locked": {
-          "type": "boolean"
-        }
-      }
-    },
-
-    "DNSOverHTTPS": {
-      "type": "object",
-      "properties": {
-        "Enabled": {
-          "type": "boolean"
-        },
-        "ProviderURL": {
-          "type": "URLorEmpty"
-        },
         "Locked": {
           "type": "boolean"
         }
@@ -253,6 +257,21 @@
       "type": "boolean"
     },
 
+    "DNSOverHTTPS": {
+      "type": "object",
+      "properties": {
+        "Enabled": {
+          "type": "boolean"
+        },
+        "ProviderURL": {
+          "type": "URLorEmpty"
+        },
+        "Locked": {
+          "type": "boolean"
+        }
+      }
+    },
+
     "DontCheckDefaultBrowser": {
       "type": "boolean"
     },
@@ -292,6 +311,10 @@
           }
         }
       }
+    },
+
+    "ExtensionUpdate": {
+      "type": "boolean"
     },
 
     "FlashPlugin": {
@@ -364,6 +387,10 @@
           "type": "boolean"
         }
       }
+    },
+
+    "NetworkPrediction": {
+      "type": "boolean"
     },
 
     "NoDefaultBookmarks": {
@@ -626,6 +653,9 @@
               "URLTemplate": {
                 "type": "string"
               },
+              "PostData": {
+                "type": "string"
+              },
               "SuggestURLTemplate": {
                 "type": "string"
               }
@@ -652,6 +682,32 @@
       "patternProperties": {
         "^.*$": { "type": "string" }
       }
+    },
+
+    "SSLVersionMax": {
+      "type": "string",
+      "enum": ["tls1", "tls1.1", "tls1.2", "tls1.3"]
+    },
+
+    "SSLVersionMin": {
+      "type": "string",
+      "enum": ["tls1", "tls1.1", "tls1.2", "tls1.3"]
+    },
+
+    "SupportMenu": {
+      "type": "object",
+      "properties": {
+        "Title": {
+          "type": "string"
+        },
+        "URL": {
+          "type": "URL"
+        },
+        "AccessKey": {
+          "type": "string"
+        }
+      },
+      "required": ["Title", "URL"],
     },
 
     "WebsiteFilter": {

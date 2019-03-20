@@ -33,8 +33,9 @@ class nsMathMLContainerFrame : public nsContainerFrame, public nsMathMLFrame {
   friend class nsMathMLmfencedFrame;
 
  public:
-  nsMathMLContainerFrame(ComputedStyle* aStyle, ClassID aID)
-      : nsContainerFrame(aStyle, aID),
+  nsMathMLContainerFrame(ComputedStyle* aStyle, nsPresContext* aPresContext,
+                         ClassID aID)
+      : nsContainerFrame(aStyle, aPresContext, aID),
         mIntrinsicWidth(NS_INTRINSIC_WIDTH_UNKNOWN),
         mBlockStartAscent(0) {}
 
@@ -124,8 +125,7 @@ class nsMathMLContainerFrame : public nsContainerFrame, public nsMathMLFrame {
   //        we just re-layout them using ReLayoutChildren(this);
   //        (e.g., this happens with <ms>).
   //    2b. If the automatic data to update affects us in some way, we ask our
-  //    parent
-  //        to re-layout its children using ReLayoutChildren(mParent);
+  //        parent to re-layout its children using ReLayoutChildren(mParent);
   //        Therefore, there is an overhead here in that our siblings are
   //        re-laid too (e.g., this happens with <munder>, <mover>,
   //        <munderover>).
@@ -361,8 +361,9 @@ class nsMathMLContainerFrame : public nsContainerFrame, public nsMathMLFrame {
 // 1) line-breaking
 // 2) proper inter-frame spacing
 // 3) firing of Stretch() (in which case FinalizeReflow() would have to be
-// cleaned) Issues: If/when mathml becomes a pluggable component, the separation
-// will be needed.
+//    cleaned)
+// Issues: If/when mathml becomes a pluggable component, the separation will be
+// needed.
 class nsMathMLmathBlockFrame final : public nsBlockFrame {
  public:
   NS_DECL_QUERYFRAME
@@ -422,8 +423,9 @@ class nsMathMLmathBlockFrame final : public nsBlockFrame {
   }
 
  protected:
-  explicit nsMathMLmathBlockFrame(ComputedStyle* aStyle)
-      : nsBlockFrame(aStyle, kClassID) {
+  explicit nsMathMLmathBlockFrame(ComputedStyle* aStyle,
+                                  nsPresContext* aPresContext)
+      : nsBlockFrame(aStyle, aPresContext, kClassID) {
     // We should always have a float manager.  Not that things can really try
     // to float out of us anyway, but we need one for line layout.
     // Bug 1301881: Do we still need to set NS_BLOCK_FLOAT_MGR?
@@ -487,8 +489,9 @@ class nsMathMLmathInlineFrame final : public nsInlineFrame,
   }
 
  protected:
-  explicit nsMathMLmathInlineFrame(ComputedStyle* aStyle)
-      : nsInlineFrame(aStyle, kClassID) {}
+  explicit nsMathMLmathInlineFrame(ComputedStyle* aStyle,
+                                   nsPresContext* aPresContext)
+      : nsInlineFrame(aStyle, aPresContext, kClassID) {}
 
   virtual ~nsMathMLmathInlineFrame() {}
 };

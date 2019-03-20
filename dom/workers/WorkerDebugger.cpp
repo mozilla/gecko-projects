@@ -19,10 +19,10 @@
 #include "WorkerRunnable.h"
 #include "WorkerScope.h"
 #if defined(XP_WIN)
-#include <processthreadsapi.h>  // for GetCurrentProcessId()
+#  include <processthreadsapi.h>  // for GetCurrentProcessId()
 #else
-#include <unistd.h>  // for getpid()
-#endif               // defined(XP_WIN)
+#  include <unistd.h>  // for getpid()
+#endif                 // defined(XP_WIN)
 
 namespace mozilla {
 namespace dom {
@@ -86,6 +86,17 @@ class CompileDebuggerScriptRunnable final : public WorkerDebuggerRunnable {
 
     if (NS_WARN_IF(!aWorkerPrivate->EnsureClientSource())) {
       return false;
+    }
+
+    if (NS_WARN_IF(!aWorkerPrivate->EnsureCSPEventListener())) {
+      return false;
+    }
+
+    // Initialize performance state which might be used on the main thread, as
+    // in CompileScriptRunnable. This runnable might execute first.
+    aWorkerPrivate->EnsurePerformanceStorage();
+    if (mozilla::StaticPrefs::dom_performance_enable_scheduler_timing()) {
+      aWorkerPrivate->EnsurePerformanceCounter();
     }
 
     JS::Rooted<JSObject*> global(aCx, globalScope->GetWrapper());
@@ -368,6 +379,11 @@ WorkerDebugger::RemoveListener(nsIWorkerDebuggerListener* aListener) {
   return NS_OK;
 }
 
+NS_IMETHODIMP
+WorkerDebugger::SetDebuggerReady(bool aReady) {
+  return mWorkerPrivate->SetIsDebuggerReady(aReady);
+}
+
 void WorkerDebugger::Close() {
   MOZ_ASSERT(mWorkerPrivate);
   mWorkerPrivate = nullptr;
@@ -383,7 +399,8 @@ void WorkerDebugger::PostMessageToDebugger(const nsAString& aMessage) {
 
   RefPtr<PostDebuggerMessageRunnable> runnable =
       new PostDebuggerMessageRunnable(this, aMessage);
-  if (NS_FAILED(mWorkerPrivate->DispatchToMainThread(runnable.forget()))) {
+  if (NS_FAILED(mWorkerPrivate->DispatchToMainThreadForMessaging(
+          runnable.forget()))) {
     NS_WARNING("Failed to post message to debugger on main thread!");
   }
 }
@@ -405,7 +422,8 @@ void WorkerDebugger::ReportErrorToDebugger(const nsAString& aFilename,
 
   RefPtr<ReportDebuggerErrorRunnable> runnable =
       new ReportDebuggerErrorRunnable(this, aFilename, aLineno, aMessage);
-  if (NS_FAILED(mWorkerPrivate->DispatchToMainThread(runnable.forget()))) {
+  if (NS_FAILED(mWorkerPrivate->DispatchToMainThreadForMessaging(
+          runnable.forget()))) {
     NS_WARNING("Failed to report error to debugger on main thread!");
   }
 }
@@ -458,6 +476,10 @@ RefPtr<PerformanceInfoPromise> WorkerDebugger::ReportPerformanceInfo() {
 
   // getting the worker URL
   RefPtr<nsIURI> scriptURI = mWorkerPrivate->GetResolvedScriptURI();
+  if (NS_WARN_IF(!scriptURI)) {
+    // This can happen at shutdown, let's stop here.
+    return PerformanceInfoPromise::CreateAndReject(NS_ERROR_FAILURE, __func__);
+  }
   nsCString url = scriptURI->GetSpecOrDefault();
 
   // Workers only produce metrics for a single category -

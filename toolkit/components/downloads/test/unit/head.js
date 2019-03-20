@@ -11,8 +11,9 @@
 
 // Globals
 
-ChromeUtils.import("resource://gre/modules/Integration.jsm");
-ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
+var {AppConstants} = ChromeUtils.import("resource://gre/modules/AppConstants.jsm");
+var {Integration} = ChromeUtils.import("resource://gre/modules/Integration.jsm");
+var {XPCOMUtils} = ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
 
 ChromeUtils.defineModuleGetter(this, "DownloadPaths",
                                "resource://gre/modules/DownloadPaths.jsm");
@@ -256,7 +257,6 @@ function promiseStartLegacyDownload(aSourceUrl, aOptions) {
   let transfer = Cc["@mozilla.org/transfer;1"].createInstance(Ci.nsITransfer);
 
   return new Promise(resolve => {
-
     Downloads.getList(Downloads.ALL).then(function(aList) {
       // Temporarily register a view that will get notified when the download we
       // are controlling becomes visible in the list of downloads.
@@ -289,7 +289,6 @@ function promiseStartLegacyDownload(aSourceUrl, aOptions) {
         0, referrer, Ci.nsIHttpChannel.REFERRER_POLICY_UNSAFE_URL,
         null, null, targetFile, isPrivate);
     }).catch(do_report_unexpected_exception);
-
   });
 }
 
@@ -312,7 +311,6 @@ function promiseStartExternalHelperAppServiceDownload(aSourceUrl) {
                                  httpUrl("interruptible_resumable.txt"));
 
   return new Promise(resolve => {
-
     Downloads.getList(Downloads.PUBLIC).then(function(aList) {
       // Temporarily register a view that will get notified when the download we
       // are controlling becomes visible in the list of downloads.
@@ -336,28 +334,27 @@ function promiseStartExternalHelperAppServiceDownload(aSourceUrl) {
       });
 
       // Start the actual download process.
-      channel.asyncOpen2({
+      channel.asyncOpen({
         contentListener: null,
 
-        onStartRequest(aRequest, aContext) {
+        onStartRequest(aRequest) {
           let requestChannel = aRequest.QueryInterface(Ci.nsIChannel);
           this.contentListener = gExternalHelperAppService.doContent(
                                        requestChannel.contentType, aRequest, null, true);
-          this.contentListener.onStartRequest(aRequest, aContext);
+          this.contentListener.onStartRequest(aRequest);
         },
 
-        onStopRequest(aRequest, aContext, aStatusCode) {
-          this.contentListener.onStopRequest(aRequest, aContext, aStatusCode);
+        onStopRequest(aRequest, aStatusCode) {
+          this.contentListener.onStopRequest(aRequest, aStatusCode);
         },
 
-        onDataAvailable(aRequest, aContext, aInputStream, aOffset,
+        onDataAvailable(aRequest, aInputStream, aOffset,
                                   aCount) {
-          this.contentListener.onDataAvailable(aRequest, aContext, aInputStream,
+          this.contentListener.onDataAvailable(aRequest, aInputStream,
                                                aOffset, aCount);
         },
       });
     }).catch(do_report_unexpected_exception);
-
   });
 }
 
@@ -374,7 +371,6 @@ function promiseStartExternalHelperAppServiceDownload(aSourceUrl) {
  */
 function promiseDownloadMidway(aDownload) {
   return new Promise(resolve => {
-
     // Wait for the download to reach half of its progress.
     let onchange = function() {
       if (!aDownload.stopped && !aDownload.canceled && aDownload.progress == 50) {
@@ -387,7 +383,6 @@ function promiseDownloadMidway(aDownload) {
     // case the download already reached the expected progress.
     aDownload.onchange = onchange;
     onchange();
-
   });
 }
 
@@ -479,7 +474,6 @@ function promiseVerifyContents(aPath, aExpectedContents) {
           }
           resolve();
         });
-
     });
   })();
 }
@@ -716,6 +710,20 @@ add_task(function test_common_initialize() {
     function(aRequest, aResponse) {
       aResponse.setStatusLine(aRequest.httpVersion, 450,
                               "Blocked by Windows Parental Controls");
+    });
+
+  // This URL sends some data followed by an RST packet
+  gHttpServer.registerPathHandler("/netreset.txt",
+    function(aRequest, aResponse) {
+      info("Starting response that will be aborted.");
+      aResponse.processAsync();
+      aResponse.setHeader("Content-Type", "text/plain", false);
+      aResponse.write(TEST_DATA_SHORT);
+      promiseExecuteSoon().then(() => {
+        aResponse.abort(null, true);
+        aResponse.finish();
+        info("Aborting response with network reset.");
+      }).then(null, Cu.reportError);
     });
 
   // During unit tests, most of the functions that require profile access or

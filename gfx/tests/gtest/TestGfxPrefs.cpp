@@ -8,7 +8,7 @@
 
 #include "gfxPrefs.h"
 #ifdef GFX_DECL_PREF
-#error "This is not supposed to be defined outside of gfxPrefs.h"
+#  error "This is not supposed to be defined outside of gfxPrefs.h"
 #endif
 
 // If the default values for any of these preferences change,
@@ -44,9 +44,6 @@ TEST(GfxPrefs, OnceValues) {
 
   // Once boolean, default false
   ASSERT_FALSE(gfxPrefs::LayersDump());
-
-  // Once int32_t, default 95
-  ASSERT_TRUE(gfxPrefs::CanvasSkiaGLCacheSize() == 96);
 
   // Once uint32_t, default 5
   ASSERT_TRUE(gfxPrefs::APZMaxVelocityQueueSize() == 5);

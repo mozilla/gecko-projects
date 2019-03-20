@@ -291,6 +291,10 @@ public abstract class BrowserToolbar extends ThemedRelativeLayout
         });
     }
 
+    public void launchVoiceRecognizer() {
+        urlEditLayout.launchVoiceRecognizer();
+    }
+
     @Override
     public void onAttachedToWindow() {
         super.onAttachedToWindow();
@@ -525,6 +529,7 @@ public abstract class BrowserToolbar extends ThemedRelativeLayout
                     break;
 
                 case SECURITY_CHANGE:
+                case TRACKING_CHANGE:
                     flags.add(UpdateFlags.SITE_IDENTITY);
                     break;
             }

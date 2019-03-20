@@ -79,7 +79,7 @@ class ShutdownObserver : public nsIObserver {
 
 NS_IMPL_ISUPPORTS(ShutdownObserver, nsIObserver)
 
-void InitGfxDriverInfoShutdownObserver() {
+static void InitGfxDriverInfoShutdownObserver() {
   if (GfxInfoBase::sDriverInfoObserverInitialized) return;
 
   GfxInfoBase::sDriverInfoObserverInitialized = true;
@@ -695,7 +695,7 @@ int32_t GfxInfoBase::FindBlocklistedDeviceInList(
     return 0;
   }
 
-#if defined(XP_WIN) || defined(ANDROID)
+#if defined(XP_WIN) || defined(ANDROID) || defined(MOZ_X11)
   uint64_t driverVersion[2] = {0, 0};
   if (!adapterInfoFailed[0]) {
     ParseDriverVersion(adapterDriverVersionString[0], &driverVersion[0]);
@@ -728,11 +728,7 @@ int32_t GfxInfoBase::FindBlocklistedDeviceInList(
       continue;
     }
 
-    if (!info[i].mAdapterVendor.Equals(
-            GfxDriverInfo::GetDeviceVendor(VendorAll),
-            nsCaseInsensitiveStringComparator()) &&
-        !info[i].mAdapterVendor.Equals(adapterVendorID[infoIndex],
-                                       nsCaseInsensitiveStringComparator())) {
+    if (!DoesVendorMatch(info[i].mAdapterVendor, adapterVendorID[infoIndex])) {
       continue;
     }
 
@@ -769,7 +765,7 @@ int32_t GfxInfoBase::FindBlocklistedDeviceInList(
       continue;
     }
 
-#if defined(XP_WIN) || defined(ANDROID)
+#if defined(XP_WIN) || defined(ANDROID) || defined(MOZ_X11)
     switch (info[i].mComparisonOp) {
       case DRIVER_LESS_THAN:
         match = driverVersion[infoIndex] < info[i].mDriverVersion;
@@ -881,6 +877,14 @@ void GfxInfoBase::SetFeatureStatus(
     const nsTArray<dom::GfxInfoFeatureStatus>& aFS) {
   MOZ_ASSERT(!sFeatureStatus);
   sFeatureStatus = new nsTArray<dom::GfxInfoFeatureStatus>(aFS);
+}
+
+bool GfxInfoBase::DoesVendorMatch(const nsAString& aBlocklistVendor,
+                                  const nsAString& aAdapterVendor) {
+  return aBlocklistVendor.Equals(aAdapterVendor,
+                                 nsCaseInsensitiveStringComparator()) ||
+         aBlocklistVendor.Equals(GfxDriverInfo::GetDeviceVendor(VendorAll),
+                                 nsCaseInsensitiveStringComparator());
 }
 
 nsresult GfxInfoBase::GetFeatureStatusImpl(
@@ -1455,6 +1459,18 @@ GfxInfoBase::GetOffMainThreadPaintWorkerCount(
   } else {
     *aOffMainThreadPaintWorkerCount = 0;
   }
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+GfxInfoBase::GetLowEndMachine(bool* aLowEndMachine) {
+  *aLowEndMachine = gfxPlatform::ShouldAdjustForLowEndMachine();
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+GfxInfoBase::GetTargetFrameRate(uint32_t* aTargetFrameRate) {
+  *aTargetFrameRate = gfxPlatform::TargetFrameRate();
   return NS_OK;
 }
 

@@ -129,8 +129,8 @@ Scope* EmitterScope::enclosingScope(BytecodeEmitter* bce) const {
   return bce->sc->compilationEnclosingScope();
 }
 
-/* static */ bool EmitterScope::nameCanBeFree(BytecodeEmitter* bce,
-                                              JSAtom* name) {
+/* static */
+bool EmitterScope::nameCanBeFree(BytecodeEmitter* bce, JSAtom* name) {
   // '.generator' cannot be accessed by name.
   return name != bce->cx->names().dotGenerator;
 }
@@ -167,9 +167,9 @@ static bool NameIsOnEnvironment(Scope* scope, JSAtom* name) {
 }
 #endif
 
-/* static */ NameLocation EmitterScope::searchInEnclosingScope(JSAtom* name,
-                                                               Scope* scope,
-                                                               uint8_t hops) {
+/* static */
+NameLocation EmitterScope::searchInEnclosingScope(JSAtom* name, Scope* scope,
+                                                  uint8_t hops) {
   for (ScopeIter si(scope); si; si++) {
     MOZ_ASSERT(NameIsOnEnvironment(si.scope(), name));
 
@@ -359,7 +359,7 @@ bool EmitterScope::appendScopeNote(BytecodeEmitter* bce) {
   MOZ_ASSERT(ScopeKindIsInBody(scope(bce)->kind()) && enclosingInFrame(),
              "Scope notes are not needed for body-level scopes.");
   noteIndex_ = bce->scopeNoteList.length();
-  return bce->scopeNoteList.append(index(), bce->offset(), bce->inPrologue(),
+  return bce->scopeNoteList.append(index(), bce->offset(),
                                    enclosingInFrame()
                                        ? enclosingInFrame()->noteIndex()
                                        : ScopeNote::NoScopeNoteIndex);
@@ -1059,7 +1059,7 @@ bool EmitterScope::leave(BytecodeEmitter* bce, bool nonLocal) {
       // so its scope note extends until the end of any possible code.
       uint32_t offset =
           kind == ScopeKind::FunctionBodyVar ? UINT32_MAX : bce->offset();
-      bce->scopeNoteList.recordEnd(noteIndex_, offset, bce->inPrologue());
+      bce->scopeNoteList.recordEnd(noteIndex_, offset);
     }
   }
 

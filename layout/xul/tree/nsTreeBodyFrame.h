@@ -54,7 +54,7 @@ class nsTreeBodyFrame final : public nsLeafBoxFrame,
   typedef mozilla::image::ImgDrawResult ImgDrawResult;
 
  public:
-  explicit nsTreeBodyFrame(ComputedStyle* aStyle);
+  explicit nsTreeBodyFrame(ComputedStyle* aStyle, nsPresContext* aPresContext);
   ~nsTreeBodyFrame();
 
   NS_DECL_QUERYFRAME
@@ -156,8 +156,7 @@ class nsTreeBodyFrame final : public nsLeafBoxFrame,
   virtual void DestroyFrom(nsIFrame* aDestructRoot,
                            PostDestroyData& aPostDestroyData) override;
 
-  virtual nsresult GetCursor(const nsPoint& aPoint,
-                             nsIFrame::Cursor& aCursor) override;
+  mozilla::Maybe<Cursor> GetCursor(const nsPoint&) override;
 
   virtual nsresult HandleEvent(nsPresContext* aPresContext,
                                mozilla::WidgetGUIEvent* aEvent,
@@ -184,10 +183,8 @@ class nsTreeBodyFrame final : public nsLeafBoxFrame,
                               const nsRect& aDirtyRect, nsPoint aPt,
                               nsDisplayListBuilder* aBuilder);
 
-  nsITreeBoxObject* GetTreeBoxObject() const { return mTreeBoxObject; }
-
   // Get the base element, <tree>
-  mozilla::dom::Element* GetBaseElement();
+  mozilla::dom::XULTreeElement* GetBaseElement();
 
   bool GetVerticalOverflow() const { return mVerticalOverflow; }
   bool GetHorizontalOverflow() const { return mHorizontalOverflow; }
@@ -371,9 +368,6 @@ class nsTreeBodyFrame final : public nsLeafBoxFrame,
   // Convert client pixels into appunits in our coordinate space.
   nsPoint AdjustClientCoordsToBoxCoordSpace(int32_t aX, int32_t aY);
 
-  // Cache the box object
-  void EnsureBoxObject();
-
   void EnsureView();
 
   nsresult GetCellWidth(int32_t aRow, nsTreeColumn* aCol,
@@ -473,7 +467,7 @@ class nsTreeBodyFrame final : public nsLeafBoxFrame,
    * @param aEndRow    the end index of invalidated rows, -1 means that columns
    *                   have been invalidated only
    * @param aStartCol  the start invalidated column, nullptr means that only
-   * rows have been invalidated
+   *                   rows have been invalidated
    * @param aEndCol    the end invalidated column, nullptr means that rows have
    *                   been invalidated only
    */
@@ -530,8 +524,8 @@ class nsTreeBodyFrame final : public nsLeafBoxFrame,
 
   RefPtr<ScrollbarActivity> mScrollbarActivity;
 
-  // The cached box object parent.
-  nsCOMPtr<nsITreeBoxObject> mTreeBoxObject;
+  // The <tree> element containing this treebody.
+  RefPtr<mozilla::dom::XULTreeElement> mTree;
 
   // Cached column information.
   RefPtr<nsTreeColumns> mColumns;

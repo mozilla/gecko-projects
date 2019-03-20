@@ -20,17 +20,17 @@
 #include "nsIDNSListener.h"
 #include "nsIWebProgressListener.h"
 #include "nsIWebProgress.h"
-#include "nsCURILoader.h"
 #include "nsIDNSRecord.h"
 #include "nsIDNSService.h"
 #include "nsICancelable.h"
 #include "nsGkAtoms.h"
-#include "nsIDocument.h"
+#include "mozilla/dom/Document.h"
 #include "nsThreadUtils.h"
 #include "nsITimer.h"
 #include "nsIObserverService.h"
 #include "mozilla/dom/Link.h"
 
+#include "mozilla/Components.h"
 #include "mozilla/Preferences.h"
 
 using namespace mozilla;
@@ -94,7 +94,7 @@ nsresult nsHTMLDNSPrefetch::Shutdown() {
   return NS_OK;
 }
 
-bool nsHTMLDNSPrefetch::IsAllowed(nsIDocument *aDocument) {
+bool nsHTMLDNSPrefetch::IsAllowed(Document *aDocument) {
   // There is no need to do prefetch on non UI scenarios such as XMLHttpRequest.
   return aDocument->IsDNSPrefetchAllowed() && aDocument->GetWindow();
 }
@@ -410,8 +410,7 @@ void nsHTMLDNSPrefetch::nsDeferrals::SubmitQueue() {
 
 void nsHTMLDNSPrefetch::nsDeferrals::Activate() {
   // Register as an observer for the document loader
-  nsCOMPtr<nsIWebProgress> progress =
-      do_GetService(NS_DOCUMENTLOADER_SERVICE_CONTRACTID);
+  nsCOMPtr<nsIWebProgress> progress = components::DocLoader::Service();
   if (progress)
     progress->AddProgressListener(this, nsIWebProgress::NOTIFY_STATE_DOCUMENT);
 
@@ -504,9 +503,15 @@ nsHTMLDNSPrefetch::nsDeferrals::OnStatusChange(nsIWebProgress *aWebProgress,
 }
 
 NS_IMETHODIMP
-nsHTMLDNSPrefetch::nsDeferrals::OnSecurityChange(
-    nsIWebProgress *aWebProgress, nsIRequest *aRequest, uint32_t aOldState,
-    uint32_t aState, const nsAString &aContentBlockingLogJSON) {
+nsHTMLDNSPrefetch::nsDeferrals::OnSecurityChange(nsIWebProgress *aWebProgress,
+                                                 nsIRequest *aRequest,
+                                                 uint32_t aState) {
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+nsHTMLDNSPrefetch::nsDeferrals::OnContentBlockingEvent(
+    nsIWebProgress *aWebProgress, nsIRequest *aRequest, uint32_t aEvent) {
   return NS_OK;
 }
 

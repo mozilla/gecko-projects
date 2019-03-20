@@ -193,8 +193,6 @@ class WebrtcAudioConduit : public AudioSessionConduit,
         mDtmfEnabled(false),
         mMutex("WebrtcAudioConduit::mMutex"),
         mCaptureDelay(150),
-        mSamples(0),
-        mLastSyncLog(0),
         mStsThread(aStsThread) {}
 
   virtual ~WebrtcAudioConduit();
@@ -226,27 +224,12 @@ class WebrtcAudioConduit : public AudioSessionConduit,
   bool GetRecvPacketTypeStats(
       webrtc::RtcpPacketTypeCounter* aPacketCounts) override;
 
-  bool GetVideoEncoderStats(double* framerateMean, double* framerateStdDev,
-                            double* bitrateMean, double* bitrateStdDev,
-                            uint32_t* droppedFrames,
-                            uint32_t* framesEncoded) override {
-    return false;
-  }
-  bool GetVideoDecoderStats(double* framerateMean, double* framerateStdDev,
-                            double* bitrateMean, double* bitrateStdDev,
-                            uint32_t* discardedPackets,
-                            uint32_t* framesDecoded) override {
-    return false;
-  }
-  bool GetAVStats(int32_t* jitterBufferDelayMs, int32_t* playoutBufferDelayMs,
-                  int32_t* avSyncOffsetMs) override;
-  bool GetRTPStats(unsigned int* jitterMs,
-                   unsigned int* cumulativeLost) override;
-  bool GetRTCPReceiverReport(DOMHighResTimeStamp* timestamp, uint32_t* jitterMs,
-                             uint32_t* packetsReceived, uint64_t* bytesReceived,
-                             uint32_t* cumulativeLost, int32_t* rttMs) override;
-  bool GetRTCPSenderReport(DOMHighResTimeStamp* timestamp,
-                           unsigned int* packetsSent,
+  bool GetRTPReceiverStats(unsigned int* jitterMs,
+                           unsigned int* cumulativeLost) override;
+  bool GetRTCPReceiverReport(uint32_t* jitterMs, uint32_t* packetsReceived,
+                             uint64_t* bytesReceived, uint32_t* cumulativeLost,
+                             int32_t* rttMs) override;
+  bool GetRTCPSenderReport(unsigned int* packetsSent,
                            uint64_t* bytesSent) override;
 
   bool SetDtmfPayloadType(unsigned char type, int freq) override;
@@ -341,9 +324,6 @@ class WebrtcAudioConduit : public AudioSessionConduit,
   int32_t mCaptureDelay;
 
   webrtc::AudioFrame mAudioFrame;  // for output pulls
-
-  uint32_t mSamples;
-  uint32_t mLastSyncLog;
 
   RtpSourceObserver mRtpSourceObserver;
 

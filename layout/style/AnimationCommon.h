@@ -19,7 +19,7 @@
 class nsPresContext;
 
 namespace mozilla {
-enum class CSSPseudoElementType : uint8_t;
+enum class PseudoStyleType : uint8_t;
 
 namespace dom {
 class Element;
@@ -50,7 +50,7 @@ class CommonAnimationManager {
    * ::before and ::after.
    */
   void StopAnimationsForElement(dom::Element* aElement,
-                                CSSPseudoElementType aPseudoType) {
+                                PseudoStyleType aPseudoType) {
     MOZ_ASSERT(aElement);
     AnimationCollection<AnimationType>* collection =
         AnimationCollection<AnimationType>::GetAnimationCollection(aElement,
@@ -103,7 +103,7 @@ class OwningElementRef final {
   explicit OwningElementRef(const NonOwningAnimationTarget& aTarget)
       : mTarget(aTarget) {}
 
-  OwningElementRef(dom::Element& aElement, CSSPseudoElementType aPseudoType)
+  OwningElementRef(dom::Element& aElement, PseudoStyleType aPseudoType)
       : mTarget(&aElement, aPseudoType) {}
 
   bool Equals(const OwningElementRef& aOther) const {
@@ -121,15 +121,14 @@ class OwningElementRef final {
                                               &aChildIndex, &aOtherChildIndex);
     }
 
-    return mTarget.mPseudoType == CSSPseudoElementType::NotPseudo ||
-           (mTarget.mPseudoType == CSSPseudoElementType::before &&
-            aOther.mTarget.mPseudoType == CSSPseudoElementType::after);
+    return mTarget.mPseudoType == PseudoStyleType::NotPseudo ||
+           (mTarget.mPseudoType == PseudoStyleType::before &&
+            aOther.mTarget.mPseudoType == PseudoStyleType::after);
   }
 
   bool IsSet() const { return !!mTarget.mElement; }
 
-  void GetElement(dom::Element*& aElement,
-                  CSSPseudoElementType& aPseudoType) const {
+  void GetElement(dom::Element*& aElement, PseudoStyleType& aPseudoType) const {
     aElement = mTarget.mElement;
     aPseudoType = mTarget.mPseudoType;
   }
@@ -151,13 +150,8 @@ PhaseType GetAnimationPhaseWithoutEffect(const dom::Animation& aAnimation) {
   MOZ_ASSERT(!aAnimation.GetEffect(),
              "Should only be called when we do not have an effect");
 
-// GetCurrentTime is defined in winbase.h as zero argument macro forwarding to
-// GetTickCount().
-#ifdef GetCurrentTime
-#undef GetCurrentTime
-#endif
-
-  dom::Nullable<TimeDuration> currentTime = aAnimation.GetCurrentTime();
+  dom::Nullable<TimeDuration> currentTime =
+      aAnimation.GetCurrentTimeAsDuration();
   if (currentTime.IsNull()) {
     return PhaseType::Idle;
   }

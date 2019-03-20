@@ -9,9 +9,13 @@
  */
 
 add_task(threadClientTest(({ threadClient, debuggee }) => {
-  return new Promise(resolve => {
-    threadClient.addOneTimeListener("paused", function(event, packet) {
-      const location = { line: debuggee.line0 + 3 };
+  return new Promise((resolve) => {
+    threadClient.addOneTimeListener("paused", async function(event, packet) {
+      const source = await getSourceById(
+        threadClient,
+        packet.frame.where.actor
+      );
+      const location = { sourceUrl: source.url, line: debuggee.line0 + 3 };
 
       threadClient.resume();
 
@@ -21,16 +25,8 @@ add_task(threadClientTest(({ threadClient, debuggee }) => {
         Assert.equal(packet.why.type, "interrupted");
       });
 
-      const source = threadClient.source(packet.frame.where.source);
-      source.setBreakpoint(location).then(function() {
-        executeSoon(resolve);
-      }, function(response) {
-        // Eval scripts don't stick around long enough for the breakpoint to be set,
-        // so just make sure we got the expected response from the actor.
-        Assert.notEqual(response.error, "noScript");
-
-        executeSoon(resolve);
-      });
+      threadClient.setBreakpoint(location, {});
+      executeSoon(resolve);
     });
 
     /* eslint-disable */

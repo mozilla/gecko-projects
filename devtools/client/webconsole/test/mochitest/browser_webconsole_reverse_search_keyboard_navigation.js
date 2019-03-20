@@ -10,9 +10,6 @@ const TEST_URI = `data:text/html,<meta charset=utf8>Test reverse search`;
 const isMacOS = AppConstants.platform === "macosx";
 
 add_task(async function() {
-  // Force reverse search on.
-  await pushPref("devtools.webconsole.jsterm.reverse-search", true);
-
   const hud = await openNewTabAndConsole(TEST_URI);
 
   const jstermHistory = [
@@ -34,7 +31,7 @@ add_task(async function() {
   const infoElement = await waitFor(() => getReverseSearchInfoElement(hud));
   is(infoElement.textContent, "3 of 3 results", "The reverse info has the expected text");
 
-  is(hud.jsterm.getInputValue(), jstermHistory[2], "JsTerm has the expected input");
+  is(getInputValue(hud), jstermHistory[2], "JsTerm has the expected input");
   is(hud.jsterm.autocompletePopup.isOpen, false,
     "Setting the input value did not trigger the autocompletion");
 
@@ -101,7 +98,7 @@ async function navigateResultsAndCheckState(hud, {
   }
   await onJsTermValueChanged;
 
-  is(hud.jsterm.getInputValue(), expectedJsTermInputValue, "JsTerm has expected value");
+  is(getInputValue(hud), expectedJsTermInputValue, "JsTerm has expected value");
 
   const infoElement = getReverseSearchInfoElement(hud);
   is(infoElement.textContent, expectedInfoText, "The reverse info has the expected text");

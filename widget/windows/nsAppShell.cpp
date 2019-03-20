@@ -30,8 +30,8 @@
 #include "mozilla/Atomics.h"
 
 #if defined(ACCESSIBILITY)
-#include "mozilla/a11y/Compatibility.h"
-#include "mozilla/a11y/Platform.h"
+#  include "mozilla/a11y/Compatibility.h"
+#  include "mozilla/a11y/Platform.h"
 #endif  // defined(ACCESSIBILITY)
 
 // These are two messages that the code in winspool.drv on Windows 7 explicitly
@@ -323,9 +323,11 @@ nsresult nsAppShell::Init() {
 
   mozilla::ipc::windows::InitUIThread();
 
-  sTaskbarButtonCreatedMsg = ::RegisterWindowMessageW(kTaskbarButtonEventId);
-  NS_ASSERTION(sTaskbarButtonCreatedMsg,
-               "Could not register taskbar button creation message");
+  if (XRE_Win32kCallsAllowed()) {
+    sTaskbarButtonCreatedMsg = ::RegisterWindowMessageW(kTaskbarButtonEventId);
+    NS_ASSERTION(sTaskbarButtonCreatedMsg,
+                 "Could not register taskbar button creation message");
+  }
 
   // The hidden message window is used for interrupting the processing of native
   // events, so that we can process gecko events. Therefore, we only need it if
@@ -354,7 +356,7 @@ nsresult nsAppShell::Init() {
     mEventWnd = CreateWindowW(kWindowClass, L"nsAppShell:EventWindow", 0, 0, 0,
                               10, 10, HWND_MESSAGE, nullptr, module, nullptr);
     NS_ENSURE_STATE(mEventWnd);
-  } else {
+  } else if (XRE_IsContentProcess()) {
     // We're not generally processing native events, but still using GDI and we
     // still have some internal windows, e.g. from calling CoInitializeEx.
     // So we use a class that will do a single event pump where previously we

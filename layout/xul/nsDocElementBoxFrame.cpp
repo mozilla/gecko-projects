@@ -6,7 +6,7 @@
 #include "nsHTMLParts.h"
 #include "nsContainerFrame.h"
 #include "nsCSSRendering.h"
-#include "nsIDocument.h"
+#include "mozilla/dom/Document.h"
 #include "nsPageFrame.h"
 #include "nsStyleConsts.h"
 #include "nsGkAtoms.h"
@@ -35,8 +35,9 @@ class nsDocElementBoxFrame final : public nsBoxFrame,
   friend nsIFrame* NS_NewBoxFrame(nsIPresShell* aPresShell,
                                   ComputedStyle* aStyle);
 
-  explicit nsDocElementBoxFrame(ComputedStyle* aStyle)
-      : nsBoxFrame(aStyle, kClassID, true) {}
+  explicit nsDocElementBoxFrame(ComputedStyle* aStyle,
+                                nsPresContext* aPresContext)
+      : nsBoxFrame(aStyle, aPresContext, kClassID, true) {}
 
   NS_DECL_QUERYFRAME
   NS_DECL_FRAMEARENA_HELPERS(nsDocElementBoxFrame)
@@ -66,7 +67,8 @@ class nsDocElementBoxFrame final : public nsBoxFrame,
 
 nsContainerFrame* NS_NewDocElementBoxFrame(nsIPresShell* aPresShell,
                                            ComputedStyle* aStyle) {
-  return new (aPresShell) nsDocElementBoxFrame(aStyle);
+  return new (aPresShell)
+      nsDocElementBoxFrame(aStyle, aPresShell->GetPresContext());
 }
 
 NS_IMPL_FRAMEARENA_HELPERS(nsDocElementBoxFrame)
@@ -80,7 +82,7 @@ void nsDocElementBoxFrame::DestroyFrom(nsIFrame* aDestructRoot,
 
 nsresult nsDocElementBoxFrame::CreateAnonymousContent(
     nsTArray<ContentInfo>& aElements) {
-  nsIDocument* doc = mContent->GetComposedDoc();
+  Document* doc = mContent->GetComposedDoc();
   if (!doc) {
     // The page is currently being torn down.  Why bother.
     return NS_ERROR_FAILURE;
@@ -129,7 +131,7 @@ void nsDocElementBoxFrame::AppendAnonymousContentTo(
 }
 
 NS_QUERYFRAME_HEAD(nsDocElementBoxFrame)
-NS_QUERYFRAME_ENTRY(nsIAnonymousContentCreator)
+  NS_QUERYFRAME_ENTRY(nsIAnonymousContentCreator)
 NS_QUERYFRAME_TAIL_INHERITING(nsBoxFrame)
 
 #ifdef DEBUG_FRAME_DUMP

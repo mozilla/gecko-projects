@@ -26,6 +26,7 @@
 
 #include "jit/arm64/vixl/Disasm-vixl.h"
 
+#include "mozilla/Sprintf.h"
 #include <cstdlib>
 
 namespace vixl {
@@ -2615,7 +2616,7 @@ void Disassembler::VisitNEONTable(const Instruction* instr) {
 
   char re_form[sizeof(form_4v) + 6];
   int reg_num = instr->Rn();
-  snprintf(re_form, sizeof(re_form), form,
+  SprintfLiteral(re_form, form,
            (reg_num + 1) % kNumberOfVRegisters,
            (reg_num + 2) % kNumberOfVRegisters,
            (reg_num + 3) % kNumberOfVRegisters);
@@ -3501,6 +3502,13 @@ void DisassembleInstruction(char* buffer, size_t bufsize, const Instruction* ins
     decoder.AppendVisitor(&disasm);
     decoder.Decode(instr);
     buffer[bufsize-1] = 0;      // Just to be safe
+}
+
+char* GdbDisassembleInstruction(const Instruction* instr)
+{
+    static char buffer[1024];
+    DisassembleInstruction(buffer, sizeof(buffer), instr);
+    return buffer;
 }
 
 }  // namespace vixl

@@ -20,8 +20,8 @@ class nsSVGSwitchFrame final : public nsSVGGFrame {
                                         ComputedStyle* aStyle);
 
  protected:
-  explicit nsSVGSwitchFrame(ComputedStyle* aStyle)
-      : nsSVGGFrame(aStyle, kClassID) {}
+  explicit nsSVGSwitchFrame(ComputedStyle* aStyle, nsPresContext* aPresContext)
+      : nsSVGGFrame(aStyle, aPresContext, kClassID) {}
 
  public:
   NS_DECL_FRAMEARENA_HELPERS(nsSVGSwitchFrame)
@@ -58,7 +58,8 @@ class nsSVGSwitchFrame final : public nsSVGGFrame {
 
 nsIFrame* NS_NewSVGSwitchFrame(nsIPresShell* aPresShell,
                                ComputedStyle* aStyle) {
-  return new (aPresShell) nsSVGSwitchFrame(aStyle);
+  return new (aPresShell)
+      nsSVGSwitchFrame(aStyle, aPresShell->GetPresContext());
 }
 
 NS_IMPL_FRAMEARENA_HELPERS(nsSVGSwitchFrame)
@@ -98,7 +99,7 @@ void nsSVGSwitchFrame::PaintSVG(gfxContext& aContext,
   if (kid) {
     gfxMatrix tm = aTransform;
     if (kid->GetContent()->IsSVGElement()) {
-      tm = static_cast<nsSVGElement*>(kid->GetContent())
+      tm = static_cast<SVGElement*>(kid->GetContent())
                ->PrependLocalTransformsTo(tm, eUserSpaceToParent);
     }
     nsSVGUtils::PaintFrameWithEffects(kid, aContext, tm, aImgParams,
@@ -118,9 +119,9 @@ nsIFrame* nsSVGSwitchFrame::GetFrameForPoint(const gfxPoint& aPoint) {
     // Transform the point from our SVG user space to our child's.
     gfxPoint point = aPoint;
     gfxMatrix m =
-        static_cast<const nsSVGElement*>(GetContent())
+        static_cast<const SVGElement*>(GetContent())
             ->PrependLocalTransformsTo(gfxMatrix(), eChildToUserSpace);
-    m = static_cast<const nsSVGElement*>(kid->GetContent())
+    m = static_cast<const SVGElement*>(kid->GetContent())
             ->PrependLocalTransformsTo(m, eUserSpaceToParent);
     if (!m.IsIdentity()) {
       if (!m.Invert()) {
@@ -199,7 +200,7 @@ SVGBBox nsSVGSwitchFrame::GetBBoxContribution(const Matrix& aToBBoxUserspace,
     nsIContent* content = kid->GetContent();
     gfxMatrix transform = ThebesMatrix(aToBBoxUserspace);
     if (content->IsSVGElement()) {
-      transform = static_cast<nsSVGElement*>(content)->PrependLocalTransformsTo(
+      transform = static_cast<SVGElement*>(content)->PrependLocalTransformsTo(
           transform);
     }
     return svgKid->GetBBoxContribution(ToMatrix(transform), aFlags);

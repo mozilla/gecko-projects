@@ -6,8 +6,8 @@
 
 #include "VideoDecoderManagerChild.h"
 #include "VideoDecoderChild.h"
-#include "mozilla/dom/ContentChild.h"
 #include "nsThreadUtils.h"
+#include "mozilla/dom/ContentChild.h"
 #include "mozilla/gfx/2D.h"
 #include "mozilla/ipc/ProtocolUtils.h"
 #include "mozilla/layers/SynchronousTask.h"
@@ -16,7 +16,6 @@
 #include "base/task.h"
 
 namespace mozilla {
-namespace dom {
 
 using namespace ipc;
 using namespace layers;
@@ -30,7 +29,8 @@ StaticRefPtr<AbstractThread> sVideoDecoderChildAbstractThread;
 static StaticRefPtr<VideoDecoderManagerChild> sDecoderManager;
 static UniquePtr<nsTArray<RefPtr<Runnable>>> sRecreateTasks;
 
-/* static */ void VideoDecoderManagerChild::InitializeThread() {
+/* static */
+void VideoDecoderManagerChild::InitializeThread() {
   MOZ_ASSERT(NS_IsMainThread());
 
   if (!sVideoDecoderChildThread) {
@@ -46,7 +46,8 @@ static UniquePtr<nsTArray<RefPtr<Runnable>>> sRecreateTasks;
   }
 }
 
-/* static */ void VideoDecoderManagerChild::InitForContent(
+/* static */
+void VideoDecoderManagerChild::InitForContent(
     Endpoint<PVideoDecoderManagerChild>&& aVideoManager) {
   InitializeThread();
   sVideoDecoderChildThread->Dispatch(
@@ -55,12 +56,13 @@ static UniquePtr<nsTArray<RefPtr<Runnable>>> sRecreateTasks;
       NS_DISPATCH_NORMAL);
 }
 
-/* static */ void VideoDecoderManagerChild::Shutdown() {
+/* static */
+void VideoDecoderManagerChild::Shutdown() {
   MOZ_ASSERT(NS_IsMainThread());
 
   if (sVideoDecoderChildThread) {
     sVideoDecoderChildThread->Dispatch(
-        NS_NewRunnableFunction("dom::VideoDecoderManagerChild::Shutdown",
+        NS_NewRunnableFunction("VideoDecoderManagerChild::Shutdown",
                                []() {
                                  if (sDecoderManager &&
                                      sDecoderManager->CanSend()) {
@@ -92,18 +94,19 @@ void VideoDecoderManagerChild::RunWhenRecreated(
   }
 }
 
-/* static */ VideoDecoderManagerChild*
-VideoDecoderManagerChild::GetSingleton() {
+/* static */
+VideoDecoderManagerChild* VideoDecoderManagerChild::GetSingleton() {
   MOZ_ASSERT(NS_GetCurrentThread() == GetManagerThread());
   return sDecoderManager;
 }
 
-/* static */ nsIThread* VideoDecoderManagerChild::GetManagerThread() {
+/* static */
+nsIThread* VideoDecoderManagerChild::GetManagerThread() {
   return sVideoDecoderChildThread;
 }
 
-/* static */ AbstractThread*
-VideoDecoderManagerChild::GetManagerAbstractThread() {
+/* static */
+AbstractThread* VideoDecoderManagerChild::GetManagerAbstractThread() {
   return sVideoDecoderChildAbstractThread;
 }
 
@@ -164,7 +167,7 @@ bool VideoDecoderManagerChild::DeallocShmem(mozilla::ipc::Shmem& aShmem) {
     RefPtr<VideoDecoderManagerChild> self = this;
     mozilla::ipc::Shmem shmem = aShmem;
     sVideoDecoderChildThread->Dispatch(
-        NS_NewRunnableFunction("dom::VideoDecoderManagerChild::DeallocShmem",
+        NS_NewRunnableFunction("VideoDecoderManagerChild::DeallocShmem",
                                [self, shmem]() {
                                  if (self->CanSend()) {
                                    mozilla::ipc::Shmem shmemCopy = shmem;
@@ -241,7 +244,7 @@ void VideoDecoderManagerChild::DeallocateSurfaceDescriptorGPUVideo(
   SurfaceDescriptorGPUVideo sd = std::move(aSD);
   sVideoDecoderChildThread->Dispatch(
       NS_NewRunnableFunction(
-          "dom::VideoDecoderManagerChild::DeallocateSurfaceDescriptorGPUVideo",
+          "VideoDecoderManagerChild::DeallocateSurfaceDescriptorGPUVideo",
           [ref, sd]() {
             if (ref->CanSend()) {
               ref->SendDeallocateSurfaceDescriptorGPUVideo(sd);
@@ -254,5 +257,4 @@ void VideoDecoderManagerChild::HandleFatalError(const char* aMsg) const {
   dom::ContentChild::FatalErrorIfNotUsingGPUProcess(aMsg, OtherPid());
 }
 
-}  // namespace dom
 }  // namespace mozilla

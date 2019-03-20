@@ -16,7 +16,7 @@
 #include "mozilla/MouseEvents.h"
 #ifdef XP_WIN
 // This is needed for DoublePassRenderingEvent.
-#include "mozilla/plugins/PluginMessageUtils.h"
+#  include "mozilla/plugins/PluginMessageUtils.h"
 #endif
 
 #include "nscore.h"
@@ -49,41 +49,41 @@
 #include "nsPluginInstanceOwner.h"
 
 #ifdef XP_WIN
-#include "gfxWindowsNativeDrawing.h"
-#include "gfxWindowsSurface.h"
+#  include "gfxWindowsNativeDrawing.h"
+#  include "gfxWindowsSurface.h"
 #endif
 
 #include "Layers.h"
 #include "ReadbackLayer.h"
 #include "ImageContainer.h"
-#include "mozilla/layers/WebRenderLayerManager.h"
+#include "mozilla/layers/RenderRootStateManager.h"
 
 // accessibility support
 #ifdef ACCESSIBILITY
-#include "nsAccessibilityService.h"
+#  include "nsAccessibilityService.h"
 #endif
 
 #include "mozilla/Logging.h"
 
 #ifdef XP_MACOSX
-#include "gfxQuartzNativeDrawing.h"
-#include "mozilla/gfx/QuartzSupport.h"
+#  include "gfxQuartzNativeDrawing.h"
+#  include "mozilla/gfx/QuartzSupport.h"
 #endif
 
 #ifdef MOZ_X11
-#include "mozilla/X11Util.h"
+#  include "mozilla/X11Util.h"
 using mozilla::DefaultXDisplay;
 #endif
 
 #ifdef XP_WIN
-#include <wtypes.h>
-#include <winuser.h>
+#  include <wtypes.h>
+#  include <winuser.h>
 #endif
 
 #include "mozilla/dom/TabChild.h"
 
 #ifdef CreateEvent  // Thank you MS.
-#undef CreateEvent
+#  undef CreateEvent
 #endif
 
 static mozilla::LazyLogModule sPluginFrameLog("nsPluginFrame");
@@ -133,8 +133,8 @@ class PluginBackgroundSink : public ReadbackSink {
   nsPluginFrame* mFrame;
 };
 
-nsPluginFrame::nsPluginFrame(ComputedStyle* aStyle)
-    : nsFrame(aStyle, kClassID),
+nsPluginFrame::nsPluginFrame(ComputedStyle* aStyle, nsPresContext* aPresContext)
+    : nsFrame(aStyle, aPresContext, kClassID),
       mInstanceOwner(nullptr),
       mOuterView(nullptr),
       mInnerView(nullptr),
@@ -150,19 +150,19 @@ nsPluginFrame::~nsPluginFrame() {
 }
 
 NS_QUERYFRAME_HEAD(nsPluginFrame)
-NS_QUERYFRAME_ENTRY(nsPluginFrame)
-NS_QUERYFRAME_ENTRY(nsIObjectFrame)
+  NS_QUERYFRAME_ENTRY(nsPluginFrame)
+  NS_QUERYFRAME_ENTRY(nsIObjectFrame)
 NS_QUERYFRAME_TAIL_INHERITING(nsFrame)
 
 #ifdef ACCESSIBILITY
 a11y::AccType nsPluginFrame::AccessibleType() { return a11y::ePluginType; }
 
-#ifdef XP_WIN
+#  ifdef XP_WIN
 NS_IMETHODIMP nsPluginFrame::GetPluginPort(HWND* aPort) {
   *aPort = (HWND)mInstanceOwner->GetPluginPort();
   return NS_OK;
 }
-#endif
+#  endif
 #endif
 
 void nsPluginFrame::Init(nsIContent* aContent, nsContainerFrame* aParent,
@@ -202,8 +202,8 @@ void nsPluginFrame::DestroyFrom(nsIFrame* aDestructRoot,
   nsFrame::DestroyFrom(aDestructRoot, aPostDestroyData);
 }
 
-/* virtual */ void nsPluginFrame::DidSetComputedStyle(
-    ComputedStyle* aOldComputedStyle) {
+/* virtual */
+void nsPluginFrame::DidSetComputedStyle(ComputedStyle* aOldComputedStyle) {
   if (HasView()) {
     nsView* view = GetView();
     nsViewManager* vm = view->GetViewManager();
@@ -351,8 +351,8 @@ nsresult nsPluginFrame::PrepForDrawing(nsIWidget* aWidget) {
 #define EMBED_DEF_WIDTH 240
 #define EMBED_DEF_HEIGHT 200
 
-/* virtual */ nscoord nsPluginFrame::GetMinISize(
-    gfxContext* aRenderingContext) {
+/* virtual */
+nscoord nsPluginFrame::GetMinISize(gfxContext* aRenderingContext) {
   nscoord result = 0;
 
   if (!IsHidden(false)) {
@@ -367,8 +367,8 @@ nsresult nsPluginFrame::PrepForDrawing(nsIWidget* aWidget) {
   return result;
 }
 
-/* virtual */ nscoord nsPluginFrame::GetPrefISize(
-    gfxContext* aRenderingContext) {
+/* virtual */
+nscoord nsPluginFrame::GetPrefISize(gfxContext* aRenderingContext) {
   return nsPluginFrame::GetMinISize(aRenderingContext);
 }
 
@@ -802,10 +802,9 @@ void nsPluginFrame::DidReflow(nsPresContext* aPresContext,
   }
 }
 
-/* static */ void nsPluginFrame::PaintPrintPlugin(nsIFrame* aFrame,
-                                                  gfxContext* aCtx,
-                                                  const nsRect& aDirtyRect,
-                                                  nsPoint aPt) {
+/* static */
+void nsPluginFrame::PaintPrintPlugin(nsIFrame* aFrame, gfxContext* aCtx,
+                                     const nsRect& aDirtyRect, nsPoint aPt) {
   // Translate the context:
   nsPoint pt = aPt + aFrame->GetContentRectRelativeToSelf().TopLeft();
   gfxPoint devPixelPt = nsLayoutUtils::PointToGfxPoint(
@@ -980,7 +979,7 @@ bool nsDisplayPlugin::CreateWebRenderCommands(
     mozilla::wr::DisplayListBuilder& aBuilder,
     mozilla::wr::IpcResourceUpdateQueue& aResources,
     const StackingContextHelper& aSc,
-    mozilla::layers::WebRenderLayerManager* aManager,
+    mozilla::layers::RenderRootStateManager* aManager,
     nsDisplayListBuilder* aDisplayListBuilder) {
   return static_cast<nsPluginFrame*>(mFrame)->CreateWebRenderCommands(
       this, aBuilder, aResources, aSc, aManager, aDisplayListBuilder);
@@ -1057,7 +1056,7 @@ bool nsPluginFrame::IsTransparentMode() const {
 void nsPluginFrame::BuildDisplayList(nsDisplayListBuilder* aBuilder,
                                      const nsDisplayListSet& aLists) {
   // XXX why are we painting collapsed object frames?
-  if (!IsVisibleOrCollapsedForPainting(aBuilder)) return;
+  if (!IsVisibleOrCollapsedForPainting()) return;
 
   DisplayBorderBackgroundOutline(aBuilder, aLists);
 
@@ -1181,8 +1180,7 @@ void nsPluginFrame::PrintPlugin(gfxContext& aRenderingContext,
    * meta surface.
    */
 
-  /* we'll already be translated into the right spot by gfxWindowsNativeDrawing
-   */
+  // we'll already be translated into the right spot by gfxWindowsNativeDrawing
   nsSize contentSize = GetContentRectRelativeToSelf().Size();
   window.x = 0;
   window.y = 0;
@@ -1191,8 +1189,7 @@ void nsPluginFrame::PrintPlugin(gfxContext& aRenderingContext,
 
   aRenderingContext.Save();
 
-  /* Make sure plugins don't do any damage outside of where they're supposed to
-   */
+  // Make sure plugins don't do any damage outside of where they're supposed to
   aRenderingContext.NewPath();
   gfxRect r(window.x, window.y, window.width, window.height);
   aRenderingContext.Rectangle(r);
@@ -1306,7 +1303,7 @@ bool nsPluginFrame::CreateWebRenderCommands(
     nsDisplayItem* aItem, mozilla::wr::DisplayListBuilder& aBuilder,
     mozilla::wr::IpcResourceUpdateQueue& aResources,
     const StackingContextHelper& aSc,
-    mozilla::layers::WebRenderLayerManager* aManager,
+    mozilla::layers::RenderRootStateManager* aManager,
     nsDisplayListBuilder* aDisplayListBuilder) {
   IntSize size;
   gfxRect r;
@@ -1342,7 +1339,7 @@ bool nsPluginFrame::CreateWebRenderCommands(
   // help us. Hence we can ignore the return value from PushImage.
   LayoutDeviceRect dest(r.x, r.y, size.width, size.height);
   aManager->CommandBuilder().PushImage(aItem, container, aBuilder, aResources,
-                                       aSc, dest);
+                                       aSc, dest, dest);
   return true;
 }
 
@@ -1591,24 +1588,23 @@ nsNPAPIPluginInstance* nsPluginFrame::GetPluginInstance() {
   return mInstanceOwner->GetInstance();
 }
 
-nsresult nsPluginFrame::GetCursor(const nsPoint& aPoint,
-                                  nsIFrame::Cursor& aCursor) {
+Maybe<nsIFrame::Cursor> nsPluginFrame::GetCursor(const nsPoint& aPoint) {
   if (!mInstanceOwner) {
-    return NS_ERROR_FAILURE;
+    return Nothing();
   }
 
   RefPtr<nsNPAPIPluginInstance> inst = mInstanceOwner->GetInstance();
   if (!inst) {
-    return NS_ERROR_FAILURE;
+    return Nothing();
   }
 
   bool useDOMCursor =
       static_cast<nsNPAPIPluginInstance*>(inst.get())->UsesDOMForCursor();
   if (!useDOMCursor) {
-    return NS_ERROR_FAILURE;
+    return Nothing();
   }
 
-  return nsFrame::GetCursor(aPoint, aCursor);
+  return nsFrame::GetCursor(aPoint);
 }
 
 void nsPluginFrame::SetIsDocumentActive(bool aIsActive) {
@@ -1635,8 +1631,8 @@ nsIObjectFrame* nsPluginFrame::GetNextObjectFrame(nsPresContext* aPresContext,
   return nullptr;
 }
 
-/*static*/ void nsPluginFrame::BeginSwapDocShells(nsISupports* aSupports,
-                                                  void*) {
+/*static*/
+void nsPluginFrame::BeginSwapDocShells(nsISupports* aSupports, void*) {
   MOZ_ASSERT(aSupports, "null parameter");
   nsCOMPtr<nsIContent> content(do_QueryInterface(aSupports));
   if (!content) {
@@ -1654,7 +1650,8 @@ nsIObjectFrame* nsPluginFrame::GetNextObjectFrame(nsPresContext* aPresContext,
   objectFrame->UnregisterPluginForGeometryUpdates();
 }
 
-/*static*/ void nsPluginFrame::EndSwapDocShells(nsISupports* aSupports, void*) {
+/*static*/
+void nsPluginFrame::EndSwapDocShells(nsISupports* aSupports, void*) {
   MOZ_ASSERT(aSupports, "null parameter");
   nsCOMPtr<nsIContent> content(do_QueryInterface(aSupports));
   if (!content) {
@@ -1687,7 +1684,7 @@ nsIObjectFrame* nsPluginFrame::GetNextObjectFrame(nsPresContext* aPresContext,
 }
 
 nsIFrame* NS_NewObjectFrame(nsIPresShell* aPresShell, ComputedStyle* aStyle) {
-  return new (aPresShell) nsPluginFrame(aStyle);
+  return new (aPresShell) nsPluginFrame(aStyle, aPresShell->GetPresContext());
 }
 
 bool nsPluginFrame::IsPaintedByGecko() const {

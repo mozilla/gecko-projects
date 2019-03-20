@@ -13,6 +13,7 @@
 #include "mozilla/MediaFeatureChange.h"
 #include "mozilla/NotNull.h"
 #include "mozilla/ScrollStyles.h"
+#include "mozilla/PreferenceSheet.h"
 #include "mozilla/UniquePtr.h"
 #include "mozilla/WeakPtr.h"
 #include "nsColor.h"
@@ -28,7 +29,6 @@
 #include "nsITimer.h"
 #include "nsCRT.h"
 #include "nsIWidgetListener.h"
-#include "nsLanguageAtomService.h"
 #include "nsGkAtoms.h"
 #include "nsCycleCollectionParticipant.h"
 #include "nsChangeHint.h"
@@ -50,7 +50,6 @@ class nsBidi;
 class nsIPrintSettings;
 class nsDocShell;
 class nsIDocShell;
-class nsIDocument;
 class nsITheme;
 class nsIContent;
 class nsIFrame;
@@ -83,15 +82,10 @@ class ContainerLayer;
 class LayerManager;
 }  // namespace layers
 namespace dom {
+class Document;
 class Element;
 }  // namespace dom
 }  // namespace mozilla
-
-// supported values for cached bool types
-enum nsPresContext_CachedBoolPrefType {
-  kPresContext_UseDocumentFonts = 1,
-  kPresContext_UnderlineLinks
-};
 
 // supported values for cached integer pref types
 enum nsPresContext_CachedIntPrefType {
@@ -102,10 +96,11 @@ enum nsPresContext_CachedIntPrefType {
 // IDs for the default variable and fixed fonts (not to be changed, see
 // nsFont.h) To be used for Get/SetDefaultFont(). The other IDs in nsFont.h are
 // also supported.
-const uint8_t kPresContext_DefaultVariableFont_ID =
-    0x00;  // kGenericFont_moz_variable
-const uint8_t kPresContext_DefaultFixedFont_ID =
-    0x01;  // kGenericFont_moz_fixed
+//
+// kGenericFont_moz_variable
+const uint8_t kPresContext_DefaultVariableFont_ID = 0x00;
+// kGenericFont_moz_fixed
+const uint8_t kPresContext_DefaultFixedFont_ID = 0x01;
 
 #ifdef DEBUG
 struct nsAutoLayoutPhase;
@@ -135,7 +130,6 @@ class nsPresContext : public nsISupports,
   using Encoding = mozilla::Encoding;
   template <typename T>
   using NotNull = mozilla::NotNull<T>;
-  typedef mozilla::LangGroupFontPrefs LangGroupFontPrefs;
   typedef mozilla::ScrollStyles ScrollStyles;
   typedef mozilla::StaticPresData StaticPresData;
   using TransactionId = mozilla::layers::TransactionId;
@@ -151,7 +145,7 @@ class nsPresContext : public nsISupports,
     eContext_PageLayout     // paginated & editable.
   };
 
-  nsPresContext(nsIDocument* aDocument, nsPresContextType aType);
+  nsPresContext(mozilla::dom::Document* aDocument, nsPresContextType aType);
 
   /**
    * Initialize the presentation context from a particular device.
@@ -216,7 +210,7 @@ class nsPresContext : public nsISupports,
 
   virtual bool IsRoot() { return false; }
 
-  nsIDocument* Document() const {
+  mozilla::dom::Document* Document() const {
     NS_ASSERTION(
         !mShell || !mShell->GetDocument() || mShell->GetDocument() == mDocument,
         "nsPresContext doesn't have the same document as nsPresShell!");
@@ -264,33 +258,18 @@ class nsPresContext : public nsISupports,
    * For aRestyleHint, see RestyleManager::RebuildAllStyleData.
    * Also rebuild the user font set and counter style manager.
    */
-  void RebuildAllStyleData(nsChangeHint aExtraHint, nsRestyleHint aRestyleHint);
+  void RebuildAllStyleData(nsChangeHint aExtraHint, mozilla::RestyleHint);
   /**
    * Just like RebuildAllStyleData, except (1) asynchronous and (2) it
    * doesn't rebuild the user font set.
    */
   void PostRebuildAllStyleDataEvent(nsChangeHint aExtraHint,
-                                    nsRestyleHint aRestyleHint);
+                                    mozilla::RestyleHint);
+
+  void ContentLanguageChanged();
 
   /**
-   * Handle changes in the values of media features (used in media
-   * queries).
-   *
-   * There are three sensible values to use for aRestyleHint:
-   *  * nsRestyleHint(0) to rebuild style data, with rerunning of
-   *    selector matching, only if media features have changed
-   *  * eRestyle_ForceDescendants to force rebuilding of style data (but
-   *    still only rerun selector matching if media query results have
-   *    changed).  (RebuildAllStyleData always adds
-   *    eRestyle_ForceDescendants internally, so here we're only using
-   *    it to distinguish from nsRestyleHint(0) whether we need to call
-   *    RebuildAllStyleData at all.)
-   *  * eRestyle_Subtree to force rebuilding of style data with
-   *    rerunning of selector matching
-   *
-   * For aChangeHint, see RestyleManager::RebuildAllStyleData.  (Passing
-   * a nonzero aChangeHint forces rebuilding style data even if
-   * nsRestyleHint(0) is passed.)
+   * Handle changes in the values of media features (used in media queries).
    */
   void MediaFeatureValuesChanged(const mozilla::MediaFeatureChange& aChange) {
     if (mShell) {
@@ -358,42 +337,6 @@ class nsPresContext : public nsISupports,
    */
   void StopEmulatingMedium();
 
-  /**
-   * Get the default font for the given language and generic font ID.
-   * If aLanguage is nullptr, the document's language is used.
-   *
-   * See the comment in StaticPresData::GetDefaultFont.
-   */
-  const nsFont* GetDefaultFont(uint8_t aFontID, nsAtom* aLanguage,
-                               bool* aNeedsToCache = nullptr) const {
-    nsAtom* lang = aLanguage ? aLanguage : mLanguage.get();
-    const LangGroupFontPrefs* prefs = GetFontPrefsForLang(lang, aNeedsToCache);
-    if (aNeedsToCache && *aNeedsToCache) {
-      return nullptr;
-    }
-    return StaticPresData::Get()->GetDefaultFontHelper(aFontID, lang, prefs);
-  }
-
-  void ForceCacheLang(nsAtom* aLanguage);
-  void CacheAllLangs();
-
-  /** Get a cached boolean pref, by its type */
-  // *  - initially created for bugs 31816, 20760, 22963
-  bool GetCachedBoolPref(nsPresContext_CachedBoolPrefType aPrefType) const {
-    // If called with a constant parameter, the compiler should optimize
-    // this switch statement away.
-    switch (aPrefType) {
-      case kPresContext_UseDocumentFonts:
-        return mUseDocumentFonts;
-      case kPresContext_UnderlineLinks:
-        return mUnderlineLinks;
-      default:
-        NS_ERROR("Invalid arg passed to GetCachedBoolPref");
-    }
-
-    return false;
-  }
-
   /** Get a cached integer pref, by its type */
   // *  - initially created for bugs 30910, 61883, 74186, 84398
   int32_t GetCachedIntPref(nsPresContext_CachedIntPrefType aPrefType) const {
@@ -411,29 +354,12 @@ class nsPresContext : public nsISupports,
     return false;
   }
 
-  /**
-   * Get the default colors
-   */
-  nscolor DefaultColor() const { return mDefaultColor; }
-  nscolor DefaultBackgroundColor() const { return mBackgroundColor; }
-  nscolor DefaultLinkColor() const { return mLinkColor; }
-  nscolor DefaultActiveLinkColor() const { return mActiveLinkColor; }
-  nscolor DefaultVisitedLinkColor() const { return mVisitedLinkColor; }
-  nscolor FocusBackgroundColor() const { return mFocusBackgroundColor; }
-  nscolor FocusTextColor() const { return mFocusTextColor; }
-
-  /**
-   * Body text color, for use in quirks mode only.
-   */
-  nscolor BodyTextColor() const { return mBodyTextColor; }
-  void SetBodyTextColor(nscolor aColor) { mBodyTextColor = aColor; }
-
-  bool GetUseFocusColors() const { return mUseFocusColors; }
-  uint8_t FocusRingWidth() const { return mFocusRingWidth; }
-  bool GetFocusRingOnAnything() const { return mFocusRingOnAnything; }
-  uint8_t GetFocusRingStyle() const { return mFocusRingStyle; }
-
-  void SetContainer(nsIDocShell* aContainer);
+  const mozilla::PreferenceSheet::Prefs& PrefSheetPrefs() const {
+    return mozilla::PreferenceSheet::PrefsFor(*mDocument);
+  }
+  nscolor DefaultBackgroundColor() const {
+    return PrefSheetPrefs().mDefaultBackgroundColor;
+  }
 
   nsISupports* GetContainerWeak() const;
 
@@ -445,7 +371,7 @@ class nsPresContext : public nsISupports,
 
   /**
    * Detach this pres context - i.e. cancel relevant timers,
-   * SetLinkHandler(null), SetContainer(null) etc.
+   * SetLinkHandler(null), etc.
    * Only to be used by the DocumentViewer.
    */
   virtual void Detach();
@@ -472,12 +398,6 @@ class nsPresContext : public nsISupports,
       }
     }
   }
-
-  bool ShouldFireResizeEvent() const {
-    return !mLastResizeEventVisibleArea.IsEqualEdges(mVisibleArea);
-  }
-
-  void WillFireResizeEvent() { mLastResizeEventVisibleArea = mVisibleArea; }
 
   /**
    * Return true if this presentation context is a paginated
@@ -535,8 +455,6 @@ class nsPresContext : public nsISupports,
 
   nsDeviceContext* DeviceContext() const { return mDeviceContext; }
   mozilla::EventStateManager* EventStateManager() { return mEventManager; }
-  nsAtom* GetLanguageFromCharset() const { return mLanguage; }
-  already_AddRefed<nsAtom> GetContentLanguage() const;
 
   /**
    * Get/set a text zoom factor that is applied on top of the normal text zoom
@@ -584,45 +502,6 @@ class nsPresContext : public nsISupports,
    * the front-end/user.
    */
   float EffectiveTextZoom() const { return mEffectiveTextZoom; }
-
-  /**
-   * Get the minimum font size for the specified language. If aLanguage
-   * is nullptr, then the document's language is used.  This combines
-   * the language-specific global preference with the per-presentation
-   * base minimum font size.
-   */
-  int32_t MinFontSize(nsAtom* aLanguage, bool* aNeedsToCache = nullptr) const {
-    const LangGroupFontPrefs* prefs =
-        GetFontPrefsForLang(aLanguage, aNeedsToCache);
-    if (aNeedsToCache && *aNeedsToCache) {
-      return 0;
-    }
-    return std::max(mBaseMinFontSize, prefs->mMinimumFontSize);
-  }
-
-  /**
-   * Get the per-presentation base minimum font size.  This size is
-   * independent of the language-specific global preference.
-   */
-  int32_t BaseMinFontSize() const { return mBaseMinFontSize; }
-
-  /**
-   * Set the per-presentation base minimum font size.  This size is
-   * independent of the language-specific global preference.
-   */
-  void SetBaseMinFontSize(int32_t aMinFontSize) {
-    if (aMinFontSize == mBaseMinFontSize) {
-      return;
-    }
-
-    mBaseMinFontSize = aMinFontSize;
-
-    // Media queries could have changed, since we changed the meaning
-    // of 'em' units in them.
-    MediaFeatureValuesChanged(
-        {eRestyle_ForceDescendants, NS_STYLE_HINT_REFLOW,
-         mozilla::MediaFeatureChangeReason::MinFontSizeChange});
-  }
 
   float GetFullZoom() { return mFullZoom; }
   /**
@@ -854,18 +733,9 @@ class nsPresContext : public nsISupports,
   /**
    * Get the Bidi options for the presentation context
    * Not inline so consumers of nsPresContext are not forced to
-   * include nsIDocument.
+   * include Document.
    */
   uint32_t GetBidi() const;
-
-  /**
-   * Render only Selection
-   */
-  void SetIsRenderingOnlySelection(bool aResult) {
-    mIsRenderingOnlySelection = aResult;
-  }
-
-  bool IsRenderingOnlySelection() const { return mIsRenderingOnlySelection; }
 
   bool IsTopLevelWindowInactive();
 
@@ -947,21 +817,12 @@ class nsPresContext : public nsISupports,
   }
 
   // Is this presentation in a chrome docshell?
-  bool IsChrome() const { return mIsChrome; }
-  bool IsChromeOriginImage() const { return mIsChromeOriginImage; }
-  void UpdateIsChrome();
+  bool IsChrome() const;
+  bool IsChromeOriginImage() const;
 
   // Public API for native theme code to get style internals.
   bool HasAuthorSpecifiedRules(const nsIFrame* aFrame,
                                uint32_t ruleTypeMask) const;
-
-  // Is it OK to let the page specify colors and backgrounds?
-  bool UseDocumentColors() const {
-    MOZ_ASSERT(mUseDocumentColors || !(IsChrome() || IsChromeOriginImage()),
-               "We should never have a chrome doc or image that can't use its "
-               "colors.");
-    return mUseDocumentColors;
-  }
 
   // Explicitly enable and disable paint flashing.
   void SetPaintFlashing(bool aPaintFlashing) {
@@ -975,7 +836,7 @@ class nsPresContext : public nsISupports,
 
   bool SuppressingResizeReflow() const { return mSuppressResizeReflow; }
 
-  gfxUserFontSet* GetUserFontSet(bool aFlushUserFontSet = true);
+  gfxUserFontSet* GetUserFontSet();
 
   // Should be called whenever the set of fonts available in the user
   // font set changes (e.g., because a new font loads, or because the
@@ -1168,11 +1029,11 @@ class nsPresContext : public nsISupports,
   // aData here is a pointer to a double that holds the CSS to device-pixel
   // scale factor from the parent, which will be applied to the subdocument's
   // device context instead of retrieving a scale from the widget.
-  static bool UIResolutionChangedSubdocumentCallback(nsIDocument* aDocument,
-                                                     void* aData);
+  static bool UIResolutionChangedSubdocumentCallback(
+      mozilla::dom::Document* aDocument, void* aData);
 
   void SetImgAnimations(nsIContent* aParent, uint16_t aMode);
-  void SetSMILAnimations(nsIDocument* aDoc, uint16_t aNewMode,
+  void SetSMILAnimations(mozilla::dom::Document* aDoc, uint16_t aNewMode,
                          uint16_t aOldMode);
   void GetDocumentColorPreferences();
 
@@ -1183,23 +1044,12 @@ class nsPresContext : public nsISupports,
 
   void GetUserPreferences();
 
-  /**
-   * Fetch the user's font preferences for the given aLanguage's
-   * langugage group.
-   */
-  const LangGroupFontPrefs* GetFontPrefsForLang(
-      nsAtom* aLanguage, bool* aNeedsToCache = nullptr) const {
-    nsAtom* lang = aLanguage ? aLanguage : mLanguage.get();
-    return StaticPresData::Get()->GetFontPrefsForLangHelper(
-        lang, &mLangGroupFontPrefs, aNeedsToCache);
-  }
-
   void UpdateCharSet(NotNull<const Encoding*> aCharSet);
 
-  static bool NotifyDidPaintSubdocumentCallback(nsIDocument* aDocument,
-                                                void* aData);
-  static bool NotifyRevokingDidPaintSubdocumentCallback(nsIDocument* aDocument,
-                                                        void* aData);
+  static bool NotifyDidPaintSubdocumentCallback(
+      mozilla::dom::Document* aDocument, void* aData);
+  static bool NotifyRevokingDidPaintSubdocumentCallback(
+      mozilla::dom::Document* aDocument, void* aData);
 
  public:
   // Used by the PresShell to force a reflow when some aspect of font info
@@ -1250,7 +1100,7 @@ class nsPresContext : public nsISupports,
   // the nsPresShell owns a strong reference to the nsPresContext, and is
   // responsible for nulling this pointer before it is destroyed
   nsIPresShell* MOZ_NON_OWNING_REF mShell;  // [WEAK]
-  nsCOMPtr<nsIDocument> mDocument;
+  RefPtr<mozilla::dom::Document> mDocument;
   RefPtr<nsDeviceContext> mDeviceContext;  // [STRONG] could be weak, but
                                            // better safe than sorry.
                                            // Cannot reintroduce cycles
@@ -1273,13 +1123,6 @@ class nsPresContext : public nsISupports,
   // the classes which set it. (using SetLinkHandler() again).
   nsILinkHandler* MOZ_NON_OWNING_REF mLinkHandler;
 
-  // Formerly mLangGroup; moving from charset-oriented langGroup to
-  // maintaining actual language settings everywhere (see bug 524107).
-  // This may in fact hold a langGroup such as x-western rather than
-  // a specific language, however (e.g, if it is inferred from the
-  // charset rather than explicitly specified as a lang attribute).
-  RefPtr<nsAtom> mLanguage;
-
  public:
   // The following are public member variables so that we can use them
   // with mozilla::AutoToggle or mozilla::AutoRestore.
@@ -1289,11 +1132,6 @@ class nsPresContext : public nsISupports,
   bool mInflationDisabledForShrinkWrap;
 
  protected:
-  mozilla::WeakPtr<nsDocShell> mContainer;
-
-  // Base minimum font size, independent of the language-specific global
-  // preference. Defaults to 0
-  int32_t mBaseMinFontSize;
   float mSystemFontScale;    // Internal text zoom factor, defaults to 1.0
   float mTextZoom;           // Text zoom, defaults to 1.0
   float mEffectiveTextZoom;  // Text zoom * system font scale
@@ -1305,7 +1143,6 @@ class nsPresContext : public nsISupports,
   int32_t mAutoQualityMinFontSizePixelsPref;
 
   nsCOMPtr<nsITheme> mTheme;
-  nsLanguageAtomService* mLangService;
   nsCOMPtr<nsIPrintSettings> mPrintSettings;
 
   mozilla::UniquePtr<nsBidi> mBidiEngine;
@@ -1318,22 +1155,9 @@ class nsPresContext : public nsISupports,
   mozilla::UniquePtr<gfxMissingFontRecorder> mMissingFonts;
 
   nsRect mVisibleArea;
-  nsRect mLastResizeEventVisibleArea;
   nsSize mPageSize;
   float mPageScale;
   float mPPScale;
-
-  nscolor mDefaultColor;
-  nscolor mBackgroundColor;
-
-  nscolor mLinkColor;
-  nscolor mActiveLinkColor;
-  nscolor mVisitedLinkColor;
-
-  nscolor mFocusBackgroundColor;
-  nscolor mFocusTextColor;
-
-  nscolor mBodyTextColor;
 
   // This is a non-owning pointer. May be null. If non-null, it's guaranteed to
   // be pointing to an element that's still alive, because we'll reset it in
@@ -1345,22 +1169,10 @@ class nsPresContext : public nsISupports,
   mozilla::dom::Element* MOZ_NON_OWNING_REF mViewportScrollOverrideElement;
   ScrollStyles mViewportScrollStyles;
 
-  uint8_t mFocusRingWidth;
-
   bool mExistThrottledUpdates;
 
   uint16_t mImageAnimationMode;
   uint16_t mImageAnimationModePref;
-
-  // Most documents will only use one (or very few) language groups. Rather
-  // than have the overhead of a hash lookup, we simply look along what will
-  // typically be a very short (usually of length 1) linked list. There are 31
-  // language groups, so in the worst case scenario we'll need to traverse 31
-  // link items.
-  LangGroupFontPrefs mLangGroupFontPrefs;
-
-  bool mFontGroupCacheDirty;
-  nsTHashtable<nsRefPtrHashKey<nsAtom>> mLanguagesUsed;
 
   uint32_t mInterruptChecksToSkip;
 
@@ -1372,14 +1184,16 @@ class nsPresContext : public nsISupports,
 
   mozilla::TimeStamp mReflowStartTime;
 
+  mozilla::Maybe<TransactionId> mFirstContentfulPaintTransactionId;
+
   // Time of various first interaction types, used to report time from
   // first paint of the top level content pres shell to first interaction.
   mozilla::TimeStamp mFirstNonBlankPaintTime;
-  mozilla::TimeStamp mFirstContentfulPaintTime;
   mozilla::TimeStamp mFirstClickTime;
   mozilla::TimeStamp mFirstKeyTime;
   mozilla::TimeStamp mFirstMouseMoveTime;
   mozilla::TimeStamp mFirstScrollTime;
+
   bool mInteractionTimeEnabled;
 
   // last time we did a full style flush
@@ -1388,17 +1202,10 @@ class nsPresContext : public nsISupports,
   unsigned mHasPendingInterrupt : 1;
   unsigned mPendingInterruptFromTest : 1;
   unsigned mInterruptsEnabled : 1;
-  unsigned mUseDocumentFonts : 1;
-  unsigned mUseDocumentColors : 1;
-  unsigned mUnderlineLinks : 1;
   unsigned mSendAfterPaintToContent : 1;
-  unsigned mUseFocusColors : 1;
-  unsigned mFocusRingOnAnything : 1;
-  unsigned mFocusRingStyle : 1;
   unsigned mDrawImageBackground : 1;
   unsigned mDrawColorBackground : 1;
   unsigned mNeverAnimate : 1;
-  unsigned mIsRenderingOnlySelection : 1;
   unsigned mPaginated : 1;
   unsigned mCanPaginatedScroll : 1;
   unsigned mDoScaledTwips : 1;
@@ -1432,9 +1239,6 @@ class nsPresContext : public nsISupports,
 
   unsigned mIsVisual : 1;
 
-  unsigned mIsChrome : 1;
-  unsigned mIsChromeOriginImage : 1;
-
   // Should we paint flash in this context? Do not use this variable directly.
   // Use GetPaintFlashing() method instead.
   mutable unsigned mPaintFlashing : 1;
@@ -1447,13 +1251,12 @@ class nsPresContext : public nsISupports,
   // Have we added quirk.css to the style set?
   unsigned mQuirkSheetAdded : 1;
 
-  // Is there a pref update to process once we have a container?
-  unsigned mNeedsPrefUpdate : 1;
-
   // Has NotifyNonBlankPaint been called on this PresContext?
   unsigned mHadNonBlankPaint : 1;
   // Has NotifyContentfulPaint been called on this PresContext?
   unsigned mHadContentfulPaint : 1;
+  // Has NotifyDidPaintForSubtree been called for a contentful paint?
+  unsigned mHadContentfulPaintComposite : 1;
 
 #ifdef DEBUG
   unsigned mInitialized : 1;
@@ -1463,8 +1266,6 @@ class nsPresContext : public nsISupports,
 
  protected:
   virtual ~nsPresContext();
-
-  nscolor MakeColorPref(const nsString& aColor);
 
   void LastRelease();
 
@@ -1482,7 +1283,7 @@ class nsPresContext : public nsISupports,
 
 class nsRootPresContext final : public nsPresContext {
  public:
-  nsRootPresContext(nsIDocument* aDocument, nsPresContextType aType);
+  nsRootPresContext(mozilla::dom::Document* aDocument, nsPresContextType aType);
   virtual ~nsRootPresContext();
   virtual void Detach() override;
 
@@ -1585,10 +1386,10 @@ class nsRootPresContext final : public nsPresContext {
 
 #ifdef MOZ_REFLOW_PERF
 
-#define DO_GLOBAL_REFLOW_COUNT(_name) \
-  aPresContext->CountReflows((_name), (nsIFrame*)this);
+#  define DO_GLOBAL_REFLOW_COUNT(_name) \
+    aPresContext->CountReflows((_name), (nsIFrame*)this);
 #else
-#define DO_GLOBAL_REFLOW_COUNT(_name)
+#  define DO_GLOBAL_REFLOW_COUNT(_name)
 #endif  // MOZ_REFLOW_PERF
 
 #endif /* nsPresContext_h___ */

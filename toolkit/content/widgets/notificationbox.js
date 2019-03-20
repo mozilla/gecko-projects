@@ -6,6 +6,8 @@
 
 // This is loaded into chrome windows with the subscript loader. If you need to
 // define globals, wrap in a block to prevent leaking onto `window`.
+{
+const {Services} = ChromeUtils.import("resource://gre/modules/Services.jsm");
 
 MozElements.NotificationBox = class NotificationBox {
   /**
@@ -243,7 +245,7 @@ MozElements.NotificationBox = class NotificationBox {
   _showNotification(aNotification, aSlideIn, aSkipAnimation) {
     this._finishAnimation();
 
-    var height = aNotification.boxObject.height;
+    var height = aNotification.getBoundingClientRect().height;
     var skipAnimation = aSkipAnimation || height == 0 ||
       !this._allowAnimation;
     aNotification.classList.toggle("animated", !skipAnimation);
@@ -338,6 +340,14 @@ MozElements.Notification = class Notification extends MozXULElement {
   }
 
   /**
+   * Changes the text of an existing notification. If the notification was
+   * created with a custom fragment, it will be overwritten with plain text.
+   */
+  set label(value) {
+    this.messageText.textContent = value;
+  }
+
+  /**
    * This method should only be called when the user has manually closed the
    * notification. If you want to programmatically close the notification, you
    * should call close() instead.
@@ -377,3 +387,4 @@ MozElements.Notification = class Notification extends MozXULElement {
 };
 
 customElements.define("notification", MozElements.Notification);
+}

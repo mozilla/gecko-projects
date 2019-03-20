@@ -149,8 +149,7 @@ class AudioDataListener : public AudioDataListenerInterface {
  * These methods are called with the media graph monitor held, so
  * reentry into general media graph methods is not possible.
  * You should do something non-blocking and non-reentrant (e.g. dispatch an
- * event) and return. DispatchFromMainThreadAfterNextStreamStateUpdate
- * would be a good choice.
+ * event) and return. NS_DispatchToCurrentThread would be a good choice.
  * The listener is allowed to synchronously remove itself from the stream, but
  * not add or remove any other listeners.
  */
@@ -258,7 +257,7 @@ struct TrackBound {
 // GetCurrentTime is defined in winbase.h as zero argument macro forwarding to
 // GetTickCount() and conflicts with MediaStream::GetCurrentTime.
 #ifdef GetCurrentTime
-#undef GetCurrentTime
+#  undef GetCurrentTime
 #endif
 
 class MediaStream : public mozilla::LinkedListElement<MediaStream> {
@@ -1206,6 +1205,14 @@ class MediaStreamGraph {
     SYSTEM_THREAD_DRIVER,
     OFFLINE_THREAD_DRIVER
   };
+  // A MediaStreamGraph running an AudioWorklet must always be run from the
+  // same thread, in order to run js. To acheive this, create the graph with
+  // a SINGLE_THREAD RunType. DIRECT_DRIVER will run the graph directly off
+  // the GraphDriver's thread.
+  enum GraphRunType {
+    DIRECT_DRIVER,
+    SINGLE_THREAD,
+  };
   static const uint32_t AUDIO_CALLBACK_DRIVER_SHUTDOWN_TIMEOUT = 20 * 1000;
   static const TrackRate REQUEST_DEFAULT_SAMPLE_RATE = 0;
 
@@ -1286,7 +1293,7 @@ class MediaStreamGraph {
   /**
    * Media graph thread only.
    * Dispatches a runnable that will run on the main thread after all
-   * main-thread stream state has been next updated.
+   * main-thread stream state has been updated, i.e., during stable state.
    *
    * Should only be called during MediaStreamTrackListener callbacks or during
    * ProcessedMediaStream::ProcessInput().
@@ -1294,8 +1301,7 @@ class MediaStreamGraph {
    * Note that if called during shutdown the runnable will be ignored and
    * released on main thread.
    */
-  void DispatchToMainThreadAfterStreamStateUpdate(
-      already_AddRefed<nsIRunnable> aRunnable);
+  void DispatchToMainThreadStableState(already_AddRefed<nsIRunnable> aRunnable);
 
   /**
    * Returns graph sample rate in Hz.
@@ -1326,8 +1332,8 @@ class MediaStreamGraph {
 
   // Intended only for assertions, either on graph thread or not running (in
   // which case we must be on the main thread).
-  bool OnGraphThreadOrNotRunning() const;
-  bool OnGraphThread() const;
+  virtual bool OnGraphThreadOrNotRunning() const = 0;
+  virtual bool OnGraphThread() const = 0;
 
   /**
    * Sample rate at which this graph runs. For real time graphs, this is

@@ -6,7 +6,7 @@
   <script type="text/javascript" src="/tests/SimpleTest/SimpleTest.js"></script>
   <script type="text/javascript" src="/tests/SimpleTest/EventUtils.js"></script>
   <script type="text/javascript" src="/tests/SimpleTest/AddTask.js"></script>
-  <script type="text/javascript" src="satchel_common.js"></script>
+  <script type="text/javascript" src="../../../satchel/test/satchel_common.js"></script>
   <script type="text/javascript" src="pwmgr_common.js"></script>
   <link rel="stylesheet" type="text/css" href="/tests/SimpleTest/test.css" />
 </head>
@@ -16,80 +16,79 @@
 var chromeScript = runChecksAfterCommonInit();
 
 var setupScript = runInParent(function setup() {
-  ChromeUtils.import("resource://gre/modules/Services.jsm");
+  const {Services} = ChromeUtils.import("resource://gre/modules/Services.jsm");
 
   // Create some logins just for this form, since we'll be deleting them.
   var nsLoginInfo = Components.Constructor("@mozilla.org/login-manager/loginInfo;1",
                                            Ci.nsILoginInfo, "init");
   assert.ok(nsLoginInfo != null, "nsLoginInfo constructor");
 
+  let logins = {};
   // login0 has no username, so should be filtered out from the autocomplete list.
-  var login0 = new nsLoginInfo("http://mochi.test:8888", "http://autocomplete:8888", null,
-                               "", "user0pass", "", "pword");
+  logins.login0 = new nsLoginInfo("http://mochi.test:8888", "http://autocomplete:8888", null,
+                                  "", "user0pass", "", "pword");
 
-  var login1 = new nsLoginInfo("http://mochi.test:8888", "http://autocomplete:8888", null,
-                               "tempuser1", "temppass1", "uname", "pword");
+  logins.login1 = new nsLoginInfo("http://mochi.test:8888", "http://autocomplete:8888", null,
+                                  "tempuser1", "temppass1", "uname", "pword");
 
-  var login2 = new nsLoginInfo("http://mochi.test:8888", "http://autocomplete:8888", null,
-                               "testuser2", "testpass2", "uname", "pword");
+  logins.login2 = new nsLoginInfo("http://mochi.test:8888", "http://autocomplete:8888", null,
+                                  "testuser2", "testpass2", "uname", "pword");
 
-  var login3 = new nsLoginInfo("http://mochi.test:8888", "http://autocomplete:8888", null,
-                               "testuser3", "testpass3", "uname", "pword");
+  logins.login3 = new nsLoginInfo("http://mochi.test:8888", "http://autocomplete:8888", null,
+                                  "testuser3", "testpass3", "uname", "pword");
 
-  var login4 = new nsLoginInfo("http://mochi.test:8888", "http://autocomplete:8888", null,
-                               "zzzuser4", "zzzpass4", "uname", "pword");
+  logins.login4 = new nsLoginInfo("http://mochi.test:8888", "http://autocomplete:8888", null,
+                                  "zzzuser4", "zzzpass4", "uname", "pword");
 
   // login 5 only used in the single-user forms
-  var login5 = new nsLoginInfo("http://mochi.test:8888", "http://autocomplete2", null,
-                               "singleuser5", "singlepass5", "uname", "pword");
+  logins.login5 = new nsLoginInfo("http://mochi.test:8888", "http://autocomplete2", null,
+                                  "singleuser5", "singlepass5", "uname", "pword");
 
-  var login6A = new nsLoginInfo("http://mochi.test:8888", "http://autocomplete3", null,
-                                "form7user1", "form7pass1", "uname", "pword");
-  var login6B = new nsLoginInfo("http://mochi.test:8888", "http://autocomplete3", null,
-                                "form7user2", "form7pass2", "uname", "pword");
+  logins.login6A = new nsLoginInfo("http://mochi.test:8888", "http://autocomplete3", null,
+                                   "form7user1", "form7pass1", "uname", "pword");
+  logins.login6B = new nsLoginInfo("http://mochi.test:8888", "http://autocomplete3", null,
+                                   "form7user2", "form7pass2", "uname", "pword");
 
-  var login7  = new nsLoginInfo("http://mochi.test:8888", "http://autocomplete4", null,
-                                "form8user", "form8pass", "uname", "pword");
+  logins.login7  = new nsLoginInfo("http://mochi.test:8888", "http://autocomplete4", null,
+                                   "form8user", "form8pass", "uname", "pword");
 
-  var login8A = new nsLoginInfo("http://mochi.test:8888", "http://autocomplete5", null,
-                                "form9userAB", "form9pass", "uname", "pword");
-  var login8B = new nsLoginInfo("http://mochi.test:8888", "http://autocomplete5", null,
-                                "form9userAAB", "form9pass", "uname", "pword");
-  var login8C = new nsLoginInfo("http://mochi.test:8888", "http://autocomplete5", null,
-                                "form9userAABzz", "form9pass", "uname", "pword");
+  logins.login8A = new nsLoginInfo("http://mochi.test:8888", "http://autocomplete5", null,
+                                   "form9userAB", "form9pass", "uname", "pword");
+  logins.login8B = new nsLoginInfo("http://mochi.test:8888", "http://autocomplete5", null,
+                                   "form9userAAB", "form9pass", "uname", "pword");
+  logins.login8C = new nsLoginInfo("http://mochi.test:8888", "http://autocomplete5", null,
+                                   "form9userAABzz", "form9pass", "uname", "pword");
 
-  var login10 = new nsLoginInfo("http://mochi.test:8888", "http://autocomplete7", null,
-                                "testuser10", "testpass10", "uname", "pword");
+  logins.login10 = new nsLoginInfo("http://mochi.test:8888", "http://autocomplete7", null,
+                                   "testuser10", "testpass10", "uname", "pword");
 
 
   // try/catch in case someone runs the tests manually, twice.
   try {
-    Services.logins.addLogin(login0);
-    Services.logins.addLogin(login1);
-    Services.logins.addLogin(login2);
-    Services.logins.addLogin(login3);
-    Services.logins.addLogin(login4);
-    Services.logins.addLogin(login5);
-    Services.logins.addLogin(login6A);
-    Services.logins.addLogin(login6B);
-    Services.logins.addLogin(login7);
-    Services.logins.addLogin(login8A);
-    Services.logins.addLogin(login8B);
+    Services.logins.addLogin(logins.login0);
+    Services.logins.addLogin(logins.login1);
+    Services.logins.addLogin(logins.login2);
+    Services.logins.addLogin(logins.login3);
+    Services.logins.addLogin(logins.login4);
+    Services.logins.addLogin(logins.login5);
+    Services.logins.addLogin(logins.login6A);
+    Services.logins.addLogin(logins.login6B);
+    Services.logins.addLogin(logins.login7);
+    Services.logins.addLogin(logins.login8A);
+    Services.logins.addLogin(logins.login8B);
     // login8C is added later
-    Services.logins.addLogin(login10);
+    Services.logins.addLogin(logins.login10);
   } catch (e) {
     assert.ok(false, "addLogin threw: " + e);
   }
 
   addMessageListener("addLogin", loginVariableName => {
-    // eslint-disable-next-line no-eval
-    let login = eval(loginVariableName);
+    let login = logins[loginVariableName];
     assert.ok(!!login, "Login to add is defined: " + loginVariableName);
     Services.logins.addLogin(login);
   });
   addMessageListener("removeLogin", loginVariableName => {
-    // eslint-disable-next-line no-eval
-    let login = eval(loginVariableName);
+    let login = logins[loginVariableName];
     assert.ok(!!login, "Login to delete is defined: " + loginVariableName);
     Services.logins.removeLogin(login);
   });
@@ -172,13 +171,22 @@ var setupScript = runInParent(function setup() {
      <input  type="text"       name="uname" id="uname">
      <input  type="password"   name="pword" id="pword">
      <button type="submit">Submit</button>
-   </div>
+  </div>
+
+  <!-- test not closing when the search string (.value) becomes empty -->
+  <form id="form13" action="http://autocomplete:8888/formtest.js" onsubmit="return false;">
+    <input  type="text"       name="uname" value="prefilled">
+    <input  type="password"   name="pword" value="prefilled">
+    <button type="submit">Submit</button>
+  </form>
 </div>
 
 <pre id="test">
 <script class="testbody" type="text/javascript">
 
 /** Test for Login Manager: multiple login autocomplete. **/
+
+SpecialPowers.pushPrefEnv({"set": [["security.allow_eval_with_system_principal", true]]});
 
 var uname = $_(1, "uname");
 var pword = $_(1, "pword");
@@ -208,8 +216,7 @@ function spinEventLoop() {
 }
 
 add_task(async function setup() {
-  await SpecialPowers.pushPrefEnv({"set": [["security.insecure_field_warning.contextual.enabled", true],
-                                           ["signon.autofillForms.http", true]]});
+  await SpecialPowers.pushPrefEnv({"set": [["security.insecure_field_warning.contextual.enabled", true]]});
   listenForUnexpectedPopupShown();
 });
 
@@ -238,7 +245,7 @@ add_task(async function test_form1_warning_entry() {
                            "testuser2",
                            "testuser3",
                            "zzzuser4"];
-  checkArrayValues(results, expectedMenuItems, "Check all menuitems are displayed correctly.");
+  checkAutoCompleteResults(results, expectedMenuItems, "mochi.test", "Check all menuitems are displayed correctly.");
 
   synthesizeKey("KEY_ArrowDown"); // select insecure warning
   checkACForm("", ""); // value shouldn't update just by selecting
@@ -327,6 +334,7 @@ add_task(async function test_form1_wraparound_first_entry() {
   synthesizeKey("KEY_ArrowDown"); // second
   synthesizeKey("KEY_ArrowDown"); // third
   synthesizeKey("KEY_ArrowDown"); // fourth
+  synthesizeKey("KEY_ArrowDown"); // footer
   synthesizeKey("KEY_ArrowDown"); // deselects
   synthesizeKey("KEY_ArrowDown"); // skip insecure warning
   synthesizeKey("KEY_ArrowDown"); // first
@@ -342,6 +350,7 @@ add_task(async function test_form1_wraparound_up_last_entry() {
   synthesizeKey("KEY_ArrowDown"); // open
   await shownPromise;
 
+  synthesizeKey("KEY_ArrowUp"); // footer
   synthesizeKey("KEY_ArrowUp"); // last (fourth)
   synthesizeKey("KEY_Enter");
   await promiseFormsProcessed();
@@ -357,6 +366,7 @@ add_task(async function test_form1_wraparound_down_up_up() {
 
   synthesizeKey("KEY_ArrowDown"); // select first entry
   synthesizeKey("KEY_ArrowUp"); // selects nothing!
+  synthesizeKey("KEY_ArrowUp"); // selects footer
   synthesizeKey("KEY_ArrowUp"); // select last entry
   synthesizeKey("KEY_Enter");
   await promiseFormsProcessed();
@@ -371,12 +381,14 @@ add_task(async function test_form1_wraparound_up_last() {
 
   synthesizeKey("KEY_ArrowDown");
   synthesizeKey("KEY_ArrowUp"); // deselects
+  synthesizeKey("KEY_ArrowUp"); // footer
   synthesizeKey("KEY_ArrowUp"); // last entry
   synthesizeKey("KEY_ArrowUp");
   synthesizeKey("KEY_ArrowUp");
   synthesizeKey("KEY_ArrowUp"); // skip insecure warning
   synthesizeKey("KEY_ArrowUp"); // first entry
   synthesizeKey("KEY_ArrowUp"); // deselects
+  synthesizeKey("KEY_ArrowUp"); // footer
   synthesizeKey("KEY_ArrowUp"); // last entry
   synthesizeKey("KEY_Enter");
   await promiseFormsProcessed();
@@ -436,6 +448,7 @@ add_task(async function test_form1_pagedown_last() {
   // Check last entry (page down)
   synthesizeKey("KEY_ArrowDown"); // first
   synthesizeKey("KEY_PageDown"); // last
+  synthesizeKey("KEY_ArrowUp"); // skip footer
   synthesizeKey("KEY_Enter");
   await promiseFormsProcessed();
   checkACForm("zzzuser4", "zzzpass4");
@@ -471,7 +484,7 @@ add_task(async function test_form1_delete() {
   numLogins = LoginManager.countLogins("http://mochi.test:8888", "http://autocomplete:8888", null);
   is(numLogins, 5, "Correct number of logins before deleting one");
 
-  let countChangedPromise = notifyMenuChanged(4);
+  let countChangedPromise = notifyMenuChanged(5);
   var deletionPromise = promiseStorageChanged(["removeLogin"]);
   // On OS X, shift-backspace and shift-delete work, just delete does not.
   // On Win/Linux, shift-backspace does not work, delete and shift-delete do.
@@ -513,7 +526,7 @@ add_task(async function test_form1_delete_second() {
   synthesizeKey("KEY_ArrowDown");
   synthesizeKey("KEY_Delete", {shiftKey: true});
   checkACForm("", "");
-  numLogins = LoginManager.countLogins("http://mochi.test:8888", "http://autocomplete:8888", null);
+  let numLogins = LoginManager.countLogins("http://mochi.test:8888", "http://autocomplete:8888", null);
   is(numLogins, 3, "Correct number of logins after deleting one");
   synthesizeKey("KEY_Enter");
   await promiseFormsProcessed();
@@ -547,8 +560,10 @@ add_task(async function test_form1_delete_last() {
   synthesizeKey("KEY_ArrowDown");
   synthesizeKey("KEY_Delete", {shiftKey: true});
   checkACForm("", "");
-  numLogins = LoginManager.countLogins("http://mochi.test:8888", "http://autocomplete:8888", null);
+  let numLogins = LoginManager.countLogins("http://mochi.test:8888", "http://autocomplete:8888", null);
   is(numLogins, 2, "Correct number of logins after deleting one");
+  synthesizeKey("KEY_ArrowDown"); // skip insecure warning
+  synthesizeKey("KEY_ArrowDown");
   synthesizeKey("KEY_Enter");
   await promiseFormsProcessed();
   checkACForm("testuser2", "testpass2");
@@ -580,7 +595,7 @@ add_task(async function test_form1_check_only_entry_remaining() {
   synthesizeKey("KEY_ArrowDown");
   synthesizeKey("KEY_Delete", {shiftKey: true});
   checkACForm("", "");
-  numLogins = LoginManager.countLogins("http://mochi.test:8888", "http://autocomplete:8888", null);
+  let numLogins = LoginManager.countLogins("http://mochi.test:8888", "http://autocomplete:8888", null);
   is(numLogins, 1, "Correct number of logins after deleting one");
 
   // remove the login that's not shown in the list.
@@ -765,8 +780,10 @@ add_task(async function test_form9_filtering() {
   let results = await shownPromise;
 
   checkACForm("form9userAAB", "");
-  checkArrayValues(results, ["This connection is not secure. Logins entered here could be compromised. Learn More", "form9userAAB"],
-                            "Check dropdown is updated after inserting 'A'");
+  checkAutoCompleteResults(results,
+                           ["This connection is not secure. Logins entered here could be compromised. Learn More", "form9userAAB"],
+                           "mochi.test",
+                           "Check dropdown is updated after inserting 'A'");
   synthesizeKey("KEY_ArrowDown"); // skip insecure warning
   synthesizeKey("KEY_ArrowDown");
   synthesizeKey("KEY_Enter");
@@ -780,20 +797,23 @@ add_task(async function test_form9_autocomplete_cache() {
   // autocomplete results.
   setupScript.sendSyncMessage("addLogin", "login8C");
   uname.focus();
-  let promise0 = notifyMenuChanged(1);
+  let promise2 = notifyMenuChanged(2);
   let shownPromise = promiseACShown();
   sendString("z");
-  await promise0;
+  let results = await promise2;
   await shownPromise;
-  let popupState = await getPopupState();
-  is(popupState.open, true, "Check popup should open");
-
+  checkAutoCompleteResults(results,
+                           ["This connection is not secure. Logins entered here could be compromised. Learn More"],
+                           "mochi.test",
+                           "Check popup only has the footer and insecure warning");
   // check that empty results are cached - bug 496466
-  promise0 = notifyMenuChanged(1);
+  promise2 = notifyMenuChanged(2);
   sendString("z");
-  await promise0;
-  popupState = await getPopupState();
-  is(popupState.open, true, "Check popup stays opened due to cached empty result");
+  results = await promise2;
+  checkAutoCompleteResults(results,
+                           ["This connection is not secure. Logins entered here could be compromised. Learn More"],
+                           "mochi.test",
+                           "Check popup only has the footer and insecure warning");
 });
 
 add_task(async function test_form11_recipes() {
@@ -854,6 +874,34 @@ add_task(async function test_form12_formless() {
   synthesizeKey("KEY_Enter");
   await processedPromise;
   checkACForm("testuser", "testpass");
+});
+
+add_task(async function test_form13_stays_open_upon_empty_search() {
+  uname = $_(13, "uname");
+  pword = $_(13, "pword");
+  checkACForm("prefilled", "prefilled");
+
+  uname.scrollIntoView();
+  let shownPromise = promiseACShown();
+  synthesizeMouseAtCenter(uname, {});
+  await shownPromise;
+  uname.select();
+  synthesizeKey("KEY_Delete");
+
+  await spinEventLoop();
+  let popupState = await getPopupState();
+  is(popupState.open, true, "Check popup is still open");
+  checkACForm("", "prefilled");
+
+  info("testing password field");
+  synthesizeMouseAtCenter(pword, {});
+  pword.select();
+  popupState = await getPopupState();
+  is(popupState.open, false, "Check popup closed since password field isn't empty");
+  shownPromise = promiseACShown();
+  synthesizeKey("KEY_Delete");
+  await shownPromise;
+  checkACForm("", "");
 });
 </script>
 </pre>

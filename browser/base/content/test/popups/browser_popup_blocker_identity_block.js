@@ -4,8 +4,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-ChromeUtils.import("resource:///modules/SitePermissions.jsm");
-ChromeUtils.import("resource://gre/modules/Services.jsm");
+const {SitePermissions} = ChromeUtils.import("resource:///modules/SitePermissions.jsm");
 
 const baseURL = getRootDirectory(gTestPath).replace("chrome://mochitests/content", "http://example.com");
 const URL = baseURL + "popup_blocker2.html";
@@ -127,6 +126,7 @@ add_task(async function check_permission_state_change() {
   // Open identity popup and change permission state to allow.
   await openIdentityPopup();
   let menulist = document.getElementById("identity-popup-popup-menulist");
+  menulist.menupopup.openPopup(); // Open the allow/block menu
   let menuitem = menulist.getElementsByTagName("menuitem")[0];
   menuitem.click();
   await closeIdentityPopup();
@@ -160,6 +160,7 @@ add_task(async function check_permission_state_change() {
   // Open identity popup and change permission state to block.
   await openIdentityPopup();
   menulist = document.getElementById("identity-popup-popup-menulist");
+  menulist.menupopup.openPopup(); // Open the allow/block menu
   menuitem = menulist.getElementsByTagName("menuitem")[1];
   menuitem.click();
   await closeIdentityPopup();

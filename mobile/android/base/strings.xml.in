@@ -69,6 +69,10 @@
   <string name="url_bar_qrcode_text">&url_bar_qrcode_text2;</string>
   <string name="url_bar_mic_text">&url_bar_mic_text2;</string>
 
+  <string name="search_widget_default_text">&search_widget_default_text;</string>
+  <string name="search_widget_default_cropped_text">&search_widget_default_cropped_text;</string>
+  <string name="search_widget_logo_description">&search_widget_logo_description;</string>
+
   <!-- https://support.mozilla.org/1/mobile/%VERSION%/%OS%/%LOCALE%/mobile-help -->
   <string name="help_link">https://support.mozilla.org/1/mobile/&formatS1;/&formatS2;/&formatS3;/mobile-help</string>
   <string name="help_menu">&help_menu;</string>
@@ -268,7 +272,6 @@
   <string name="pref_private_data_searchHistory">&pref_private_data_searchHistory;</string>
   <string name="pref_private_data_formdata2">&pref_private_data_formdata2;</string>
   <string name="pref_private_data_cookies2">&pref_private_data_cookies2;</string>
-  <string name="pref_private_data_passwords">&pref_private_data_passwords2;</string>
   <string name="pref_private_data_cache">&pref_private_data_cache;</string>
   <string name="pref_private_data_offlineApps">&pref_private_data_offlineApps;</string>
   <string name="pref_private_data_siteSettings">&pref_private_data_siteSettings2;</string>
@@ -299,6 +302,7 @@
   <string name="tab_queue_toast_action">&tab_queue_toast_action;</string>
   <string name="tab_queue_notification_text_singular">&tab_queue_notification_text_singular2;</string>
   <string name="tab_queue_notification_text_plural">&tab_queue_notification_text_plural2;</string>
+  <string name="tab_queue_notification_prompt">&tab_queue_notification_prompt;</string>
   <string name="tab_queue_notification_title">&tab_queue_notification_title;</string>
   <string name="tab_queue_notification_settings">&tab_queue_notification_settings;</string>
 

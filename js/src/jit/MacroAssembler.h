@@ -14,21 +14,21 @@
 #include "vm/Realm.h"
 
 #if defined(JS_CODEGEN_X86)
-#include "jit/x86/MacroAssembler-x86.h"
+#  include "jit/x86/MacroAssembler-x86.h"
 #elif defined(JS_CODEGEN_X64)
-#include "jit/x64/MacroAssembler-x64.h"
+#  include "jit/x64/MacroAssembler-x64.h"
 #elif defined(JS_CODEGEN_ARM)
-#include "jit/arm/MacroAssembler-arm.h"
+#  include "jit/arm/MacroAssembler-arm.h"
 #elif defined(JS_CODEGEN_ARM64)
-#include "jit/arm64/MacroAssembler-arm64.h"
+#  include "jit/arm64/MacroAssembler-arm64.h"
 #elif defined(JS_CODEGEN_MIPS32)
-#include "jit/mips32/MacroAssembler-mips32.h"
+#  include "jit/mips32/MacroAssembler-mips32.h"
 #elif defined(JS_CODEGEN_MIPS64)
-#include "jit/mips64/MacroAssembler-mips64.h"
+#  include "jit/mips64/MacroAssembler-mips64.h"
 #elif defined(JS_CODEGEN_NONE)
-#include "jit/none/MacroAssembler-none.h"
+#  include "jit/none/MacroAssembler-none.h"
 #else
-#error "Unknown architecture!"
+#  error "Unknown architecture!"
 #endif
 #include "jit/AtomicOp.h"
 #include "jit/IonInstrumentation.h"
@@ -140,36 +140,36 @@
 
 // Specialize for each architecture.
 #if defined(JS_CODEGEN_X86)
-#undef DEFINED_ON_x86
-#define DEFINED_ON_x86 define
-#undef DEFINED_ON_x86_shared
-#define DEFINED_ON_x86_shared define
+#  undef DEFINED_ON_x86
+#  define DEFINED_ON_x86 define
+#  undef DEFINED_ON_x86_shared
+#  define DEFINED_ON_x86_shared define
 #elif defined(JS_CODEGEN_X64)
-#undef DEFINED_ON_x64
-#define DEFINED_ON_x64 define
-#undef DEFINED_ON_x86_shared
-#define DEFINED_ON_x86_shared define
+#  undef DEFINED_ON_x64
+#  define DEFINED_ON_x64 define
+#  undef DEFINED_ON_x86_shared
+#  define DEFINED_ON_x86_shared define
 #elif defined(JS_CODEGEN_ARM)
-#undef DEFINED_ON_arm
-#define DEFINED_ON_arm define
+#  undef DEFINED_ON_arm
+#  define DEFINED_ON_arm define
 #elif defined(JS_CODEGEN_ARM64)
-#undef DEFINED_ON_arm64
-#define DEFINED_ON_arm64 define
+#  undef DEFINED_ON_arm64
+#  define DEFINED_ON_arm64 define
 #elif defined(JS_CODEGEN_MIPS32)
-#undef DEFINED_ON_mips32
-#define DEFINED_ON_mips32 define
-#undef DEFINED_ON_mips_shared
-#define DEFINED_ON_mips_shared define
+#  undef DEFINED_ON_mips32
+#  define DEFINED_ON_mips32 define
+#  undef DEFINED_ON_mips_shared
+#  define DEFINED_ON_mips_shared define
 #elif defined(JS_CODEGEN_MIPS64)
-#undef DEFINED_ON_mips64
-#define DEFINED_ON_mips64 define
-#undef DEFINED_ON_mips_shared
-#define DEFINED_ON_mips_shared define
+#  undef DEFINED_ON_mips64
+#  define DEFINED_ON_mips64 define
+#  undef DEFINED_ON_mips_shared
+#  define DEFINED_ON_mips_shared define
 #elif defined(JS_CODEGEN_NONE)
-#undef DEFINED_ON_none
-#define DEFINED_ON_none crash
+#  undef DEFINED_ON_none
+#  define DEFINED_ON_none crash
 #else
-#error "Unknown architecture!"
+#  error "Unknown architecture!"
 #endif
 
 #define DEFINED_ON_RESULT_crash \
@@ -201,9 +201,9 @@
 #define OOL_IN_HEADER
 
 #if MOZ_LITTLE_ENDIAN
-#define IMM32_16ADJ(X) (X) << 16
+#  define IMM32_16ADJ(X) (X) << 16
 #else
-#define IMM32_16ADJ(X) (X)
+#  define IMM32_16ADJ(X) (X)
 #endif
 
 namespace js {
@@ -380,13 +380,14 @@ class MacroAssembler : public MacroAssemblerSpecific {
   void Push(FloatRegister reg) PER_SHARED_ARCH;
   void PushFlags() DEFINED_ON(x86_shared);
   void Push(jsid id, Register scratchReg);
+  void Push(const Address& addr);
   void Push(TypedOrValueRegister v);
   void Push(const ConstantOrRegister& v);
   void Push(const ValueOperand& val);
   void Push(const Value& val);
   void Push(JSValueType type, Register reg);
   void PushValue(const Address& addr);
-  void PushEmptyRooted(VMFunction::RootType rootType);
+  void PushEmptyRooted(VMFunctionData::RootType rootType);
   inline CodeOffset PushWithPatch(ImmWord word);
   inline CodeOffset PushWithPatch(ImmPtr imm);
 
@@ -396,7 +397,7 @@ class MacroAssembler : public MacroAssemblerSpecific {
   void Pop(const ValueOperand& val) PER_SHARED_ARCH;
   void PopFlags() DEFINED_ON(x86_shared);
   void PopStackPtr() DEFINED_ON(arm, mips_shared, x86_shared);
-  void popRooted(VMFunction::RootType rootType, Register cellReg,
+  void popRooted(VMFunctionData::RootType rootType, Register cellReg,
                  const ValueOperand& valueReg);
 
   // Move the stack pointer based on the requested amount.
@@ -421,22 +422,26 @@ class MacroAssembler : public MacroAssemblerSpecific {
   // ===============================================================
   // Simple call functions.
 
+  // The returned CodeOffset is the assembler offset for the instruction
+  // immediately following the call; that is, for the return point.
   CodeOffset call(Register reg) PER_SHARED_ARCH;
   CodeOffset call(Label* label) PER_SHARED_ARCH;
+
   void call(const Address& addr) PER_SHARED_ARCH;
   void call(ImmWord imm) PER_SHARED_ARCH;
   // Call a target native function, which is neither traceable nor movable.
   void call(ImmPtr imm) PER_SHARED_ARCH;
-  void call(wasm::SymbolicAddress imm) PER_SHARED_ARCH;
-  inline void call(const wasm::CallSiteDesc& desc, wasm::SymbolicAddress imm);
+  CodeOffset call(wasm::SymbolicAddress imm) PER_SHARED_ARCH;
+  inline CodeOffset call(const wasm::CallSiteDesc& desc,
+                         wasm::SymbolicAddress imm);
 
   // Call a target JitCode, which must be traceable, and may be movable.
   void call(JitCode* c) PER_SHARED_ARCH;
 
   inline void call(TrampolinePtr code);
 
-  inline void call(const wasm::CallSiteDesc& desc, const Register reg);
-  inline void call(const wasm::CallSiteDesc& desc, uint32_t funcDefIndex);
+  inline CodeOffset call(const wasm::CallSiteDesc& desc, const Register reg);
+  inline CodeOffset call(const wasm::CallSiteDesc& desc, uint32_t funcDefIndex);
   inline void call(const wasm::CallSiteDesc& desc, wasm::Trap trap);
 
   CodeOffset callWithPatch() PER_SHARED_ARCH;
@@ -451,6 +456,10 @@ class MacroAssembler : public MacroAssemblerSpecific {
   // These do not adjust framePushed().
   void pushReturnAddress() DEFINED_ON(mips_shared, arm, arm64);
   void popReturnAddress() DEFINED_ON(mips_shared, arm, arm64);
+
+  // Useful for dealing with two-valued returns.
+  void moveRegPair(Register src0, Register src1, Register dst0, Register dst1,
+                   MoveOp::Type type = MoveOp::GENERAL);
 
  public:
   // ===============================================================
@@ -582,8 +591,10 @@ class MacroAssembler : public MacroAssemblerSpecific {
   inline void callWithABI(const Address& fun,
                           MoveOp::Type result = MoveOp::GENERAL);
 
-  void callWithABI(wasm::BytecodeOffset offset, wasm::SymbolicAddress fun,
-                   MoveOp::Type result = MoveOp::GENERAL);
+  CodeOffset callWithABI(wasm::BytecodeOffset offset, wasm::SymbolicAddress fun,
+                         MoveOp::Type result = MoveOp::GENERAL);
+  void callDebugWithABI(wasm::SymbolicAddress fun,
+                        MoveOp::Type result = MoveOp::GENERAL);
 
  private:
   // Reinitialize the variables which have to be cleared before making a call
@@ -703,9 +714,9 @@ class MacroAssembler : public MacroAssemblerSpecific {
   //
   // See JitFrames.h, and MarkJitExitFrame in JitFrames.cpp.
 
-  // Push stub code and the VMFunction pointer.
+  // Push stub code and the VMFunctionData pointer.
   inline void enterExitFrame(Register cxreg, Register scratch,
-                             const VMFunction* f);
+                             const VMFunctionData* f);
 
   // Push an exit frame token to identify which fake exit frame this footer
   // corresponds to.
@@ -760,6 +771,11 @@ class MacroAssembler : public MacroAssemblerSpecific {
                  const ValueOperand& dest) PER_ARCH;
   void moveValue(const ValueOperand& src, const ValueOperand& dest) PER_ARCH;
   void moveValue(const Value& src, const ValueOperand& dest) PER_ARCH;
+
+  // ===============================================================
+  // Load instructions
+
+  inline void load32SignExtendToPtr(const Address& src, Register dest) PER_ARCH;
 
  public:
   // ===============================================================
@@ -945,6 +961,7 @@ class MacroAssembler : public MacroAssemblerSpecific {
 
   inline void neg32(Register reg) PER_SHARED_ARCH;
   inline void neg64(Register64 reg) DEFINED_ON(x86, x64, arm, mips32, mips64);
+  inline void negPtr(Register reg) PER_ARCH;
 
   inline void negateFloat(FloatRegister reg) PER_SHARED_ARCH;
 
@@ -973,13 +990,13 @@ class MacroAssembler : public MacroAssemblerSpecific {
   // ===============================================================
   // Shift functions
 
-  // For shift-by-register there may be platform-specific
-  // variations, for example, x86 will perform the shift mod 32 but
-  // ARM will perform the shift mod 256.
+  // For shift-by-register there may be platform-specific variations, for
+  // example, x86 will perform the shift mod 32 but ARM will perform the shift
+  // mod 256.
   //
-  // For shift-by-immediate the platform assembler may restrict the
-  // immediate, for example, the ARM assembler requires the count
-  // for 32-bit shifts to be in the range [0,31].
+  // For shift-by-immediate the platform assembler may restrict the immediate,
+  // for example, the ARM assembler requires the count for 32-bit shifts to be
+  // in the range [0,31].
 
   inline void lshift32(Imm32 shift, Register srcDest) PER_SHARED_ARCH;
   inline void rshift32(Imm32 shift, Register srcDest) PER_SHARED_ARCH;
@@ -1397,6 +1414,9 @@ class MacroAssembler : public MacroAssemblerSpecific {
                            Label* label);
 
   inline void branchTestNeedsIncrementalBarrier(Condition cond, Label* label);
+  inline void branchTestNeedsIncrementalBarrierAnyZone(Condition cond,
+                                                       Label* label,
+                                                       Register scratch);
 
   // Perform a type-test on a tag of a Value (32bits boxing), or the tagged
   // value (64bits boxing).
@@ -1413,6 +1433,8 @@ class MacroAssembler : public MacroAssemblerSpecific {
   inline void branchTestString(Condition cond, Register tag,
                                Label* label) PER_SHARED_ARCH;
   inline void branchTestSymbol(Condition cond, Register tag,
+                               Label* label) PER_SHARED_ARCH;
+  inline void branchTestBigInt(Condition cond, Register tag,
                                Label* label) PER_SHARED_ARCH;
   inline void branchTestNull(Condition cond, Register tag,
                              Label* label) PER_SHARED_ARCH;
@@ -1477,6 +1499,12 @@ class MacroAssembler : public MacroAssemblerSpecific {
                                Label* label)
       DEFINED_ON(arm, arm64, mips32, mips64, x86_shared);
 
+  inline void branchTestBigInt(Condition cond, const BaseIndex& address,
+                               Label* label) PER_SHARED_ARCH;
+  inline void branchTestBigInt(Condition cond, const ValueOperand& value,
+                               Label* label)
+      DEFINED_ON(arm, arm64, mips32, mips64, x86_shared);
+
   inline void branchTestNull(Condition cond, const Address& address,
                              Label* label) PER_SHARED_ARCH;
   inline void branchTestNull(Condition cond, const BaseIndex& address,
@@ -1533,6 +1561,9 @@ class MacroAssembler : public MacroAssemblerSpecific {
   inline void branchTestStringTruthy(bool truthy, const ValueOperand& value,
                                      Label* label)
       DEFINED_ON(arm, arm64, mips32, mips64, x86_shared);
+  inline void branchTestBigIntTruthy(bool truthy, const ValueOperand& value,
+                                     Label* label)
+      DEFINED_ON(arm, arm64, mips32, mips64, x86_shared);
 
   // Create an unconditional branch to the address given as argument.
   inline void branchToComputedAddress(const BaseIndex& address) PER_ARCH;
@@ -1569,6 +1600,9 @@ class MacroAssembler : public MacroAssemblerSpecific {
       DEFINED_ON(arm, arm64, x86_shared);
   template <typename T>
   inline void branchTestSymbolImpl(Condition cond, const T& t, Label* label)
+      DEFINED_ON(arm, arm64, x86_shared);
+  template <typename T>
+  inline void branchTestBigIntImpl(Condition cond, const T& t, Label* label)
       DEFINED_ON(arm, arm64, x86_shared);
   template <typename T>
   inline void branchTestNullImpl(Condition cond, const T& t, Label* label)
@@ -1725,8 +1759,12 @@ class MacroAssembler : public MacroAssemblerSpecific {
 
   void wasmTrap(wasm::Trap trap, wasm::BytecodeOffset bytecodeOffset);
   void wasmInterruptCheck(Register tls, wasm::BytecodeOffset bytecodeOffset);
-  void wasmReserveStackChecked(uint32_t amount,
-                               wasm::BytecodeOffset trapOffset);
+
+  // Returns a pair: the offset of the undefined (trapping) instruction, and
+  // the number of extra bytes of stack allocated prior to the trap
+  // instruction proper.
+  std::pair<CodeOffset, uint32_t> wasmReserveStackChecked(
+      uint32_t amount, wasm::BytecodeOffset trapOffset);
 
   // Emit a bounds check against the wasm heap limit, jumping to 'label' if
   // 'cond' holds. If JitOptions.spectreMaskIndex is true, in speculative
@@ -1863,19 +1901,20 @@ class MacroAssembler : public MacroAssemblerSpecific {
 
   // This function takes care of loading the callee's TLS and pinned regs but
   // it is the caller's responsibility to save/restore TLS or pinned regs.
-  void wasmCallImport(const wasm::CallSiteDesc& desc,
-                      const wasm::CalleeDesc& callee);
+  CodeOffset wasmCallImport(const wasm::CallSiteDesc& desc,
+                            const wasm::CalleeDesc& callee);
 
   // WasmTableCallIndexReg must contain the index of the indirect call.
-  void wasmCallIndirect(const wasm::CallSiteDesc& desc,
-                        const wasm::CalleeDesc& callee, bool needsBoundsCheck);
+  CodeOffset wasmCallIndirect(const wasm::CallSiteDesc& desc,
+                              const wasm::CalleeDesc& callee,
+                              bool needsBoundsCheck);
 
   // This function takes care of loading the pointer to the current instance
   // as the implicit first argument. It preserves TLS and pinned registers.
   // (TLS & pinned regs are non-volatile registers in the system ABI).
-  void wasmCallBuiltinInstanceMethod(const wasm::CallSiteDesc& desc,
-                                     const ABIArg& instanceArg,
-                                     wasm::SymbolicAddress builtin);
+  CodeOffset wasmCallBuiltinInstanceMethod(const wasm::CallSiteDesc& desc,
+                                           const ABIArg& instanceArg,
+                                           wasm::SymbolicAddress builtin);
 
   // As enterFakeExitFrame(), but using register conventions appropriate for
   // wasm stubs.
@@ -1942,6 +1981,14 @@ class MacroAssembler : public MacroAssemblerSpecific {
                        Register offsetTemp, Register maskTemp, Register output)
       DEFINED_ON(mips_shared);
 
+  // x64: `output` must be rax.
+  // ARM: Registers must be distinct; `replacement` and `output` must be
+  // (even,odd) pairs.
+
+  void compareExchange64(const Synchronization& sync, const Address& mem,
+                         Register64 expected, Register64 replacement,
+                         Register64 output) DEFINED_ON(arm, arm64, x64);
+
   // Exchange with memory.  Return the value initially in memory.
   // MIPS: `valueTemp`, `offsetTemp` and `maskTemp` must be defined for 8-bit
   // and 16-bit wide operations.
@@ -1963,6 +2010,10 @@ class MacroAssembler : public MacroAssemblerSpecific {
                       const BaseIndex& mem, Register value, Register valueTemp,
                       Register offsetTemp, Register maskTemp, Register output)
       DEFINED_ON(mips_shared);
+
+  void atomicExchange64(const Synchronization& sync, const Address& mem,
+                        Register64 value, Register64 output)
+      DEFINED_ON(arm64, x64);
 
   // Read-modify-write with memory.  Return the value in memory before the
   // operation.
@@ -2004,6 +2055,15 @@ class MacroAssembler : public MacroAssemblerSpecific {
                      AtomicOp op, Register value, const BaseIndex& mem,
                      Register valueTemp, Register offsetTemp, Register maskTemp,
                      Register output) DEFINED_ON(mips_shared);
+
+  // x64:
+  //   For Add and Sub, `temp` must be invalid.
+  //   For And, Or, and Xor, `output` must be eax and `temp` must have a byte
+  //   subregister.
+
+  void atomicFetchOp64(const Synchronization& sync, AtomicOp op,
+                       Register64 value, const Address& mem, Register64 temp,
+                       Register64 output) DEFINED_ON(arm64, x64);
 
   // ========================================================================
   // Wasm atomic operations.
@@ -2128,11 +2188,13 @@ class MacroAssembler : public MacroAssemblerSpecific {
                         const BaseIndex& mem, Register64 temp,
                         Register64 output) DEFINED_ON(arm, mips32, x86);
 
-  // x86: `expected` must be the same as `output`, and must be edx:eax
-  // x86: `replacement` must be ecx:ebx
+  // x86: `expected` must be the same as `output`, and must be edx:eax.
+  // x86: `replacement` must be ecx:ebx.
   // x64: `output` must be rax.
   // ARM: Registers must be distinct; `replacement` and `output` must be
-  // (even,odd) pairs. MIPS: Registers must be distinct.
+  // (even,odd) pairs.
+  // ARM64: The base register in `mem` must not overlap `output`.
+  // MIPS: Registers must be distinct.
 
   void wasmCompareExchange64(const wasm::MemoryAccessDesc& access,
                              const Address& mem, Register64 expected,
@@ -2146,7 +2208,8 @@ class MacroAssembler : public MacroAssemblerSpecific {
 
   // x86: `value` must be ecx:ebx; `output` must be edx:eax.
   // ARM: Registers must be distinct; `value` and `output` must be (even,odd)
-  // pairs. MIPS: Registers must be distinct.
+  // pairs.
+  // MIPS: Registers must be distinct.
 
   void wasmAtomicExchange64(const wasm::MemoryAccessDesc& access,
                             const Address& mem, Register64 value,
@@ -2159,7 +2222,9 @@ class MacroAssembler : public MacroAssemblerSpecific {
   // x86: `output` must be edx:eax, `temp` must be ecx:ebx.
   // x64: For And, Or, and Xor `output` must be rax.
   // ARM: Registers must be distinct; `temp` and `output` must be (even,odd)
-  // pairs. MIPS: Registers must be distinct. MIPS32: `temp` should be invalid.
+  // pairs.
+  // MIPS: Registers must be distinct.
+  // MIPS32: `temp` should be invalid.
 
   void wasmAtomicFetchOp64(const wasm::MemoryAccessDesc& access, AtomicOp op,
                            Register64 value, const Address& mem,
@@ -2491,10 +2556,12 @@ class MacroAssembler : public MacroAssemblerSpecific {
     } else if (IsFloatingPointType(src.type())) {
       FloatRegister reg = src.typedReg().fpu();
       if (src.type() == MIRType::Float32) {
-        convertFloat32ToDouble(reg, ScratchDoubleReg);
-        reg = ScratchDoubleReg;
+        ScratchDoubleScope fpscratch(*this);
+        convertFloat32ToDouble(reg, fpscratch);
+        storeDouble(fpscratch, dest);
+      } else {
+        storeDouble(reg, dest);
       }
-      storeDouble(reg, dest);
     } else {
       storeValue(ValueTypeFromMIRType(src.type()), src.typedReg().gpr(), dest);
     }
@@ -2555,18 +2622,16 @@ class MacroAssembler : public MacroAssemblerSpecific {
       mov(JSReturnReg, dest.valueReg());
     }
 #else
-#error "Bad architecture"
+#  error "Bad architecture"
 #endif
   }
 
   inline void storeCallResultValue(TypedOrValueRegister dest);
 
+ private:
   template <typename T>
-  void guardedCallPreBarrier(const T& address, MIRType type) {
+  void unguardedCallPreBarrier(const T& address, MIRType type) {
     Label done;
-
-    branchTestNeedsIncrementalBarrier(Assembler::Zero, &done);
-
     if (type == MIRType::Value) {
       branchTestGCThing(Assembler::NotEqual, address, &done);
     } else if (type == MIRType::Object || type == MIRType::String) {
@@ -2581,7 +2646,27 @@ class MacroAssembler : public MacroAssemblerSpecific {
 
     call(preBarrier);
     Pop(PreBarrierReg);
+    bind(&done);
+  }
 
+ public:
+  template <typename T>
+  void guardedCallPreBarrier(const T& address, MIRType type) {
+    Label done;
+    branchTestNeedsIncrementalBarrier(Assembler::Zero, &done);
+    unguardedCallPreBarrier(address, type);
+    bind(&done);
+  }
+
+  // Like guardedCallPreBarrier, but unlike guardedCallPreBarrier this can be
+  // called from runtime-wide trampolines because it loads cx->zone (instead of
+  // baking in the current Zone) if JitContext::realm is nullptr.
+  template <typename T>
+  void guardedCallPreBarrierAnyZone(const T& address, MIRType type,
+                                    Register scratch) {
+    Label done;
+    branchTestNeedsIncrementalBarrierAnyZone(Assembler::Zero, &done, scratch);
+    unguardedCallPreBarrier(address, type);
     bind(&done);
   }
 
@@ -2641,6 +2726,10 @@ class MacroAssembler : public MacroAssemblerSpecific {
   void debugAssertObjHasFixedSlots(Register obj, Register scratch);
 
   void branchIfNativeIteratorNotReusable(Register ni, Label* notReusable);
+
+  void iteratorMore(Register obj, ValueOperand output, Register temp);
+  void iteratorClose(Register obj, Register temp1, Register temp2,
+                     Register temp3);
 
   using MacroAssemblerSpecific::extractTag;
   MOZ_MUST_USE Register extractTag(const TypedOrValueRegister& reg,

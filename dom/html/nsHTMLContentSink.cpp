@@ -41,12 +41,13 @@
 #include "nsIComponentManager.h"
 #include "nsIServiceManager.h"
 
+#include "nsDocElementCreatedNotificationRunner.h"
 #include "nsGkAtoms.h"
 #include "nsContentUtils.h"
 #include "nsIChannel.h"
 #include "nsIHttpChannel.h"
 #include "nsIDocShell.h"
-#include "nsIDocument.h"
+#include "mozilla/dom/Document.h"
 #include "nsStubDocumentObserver.h"
 #include "nsIHTMLDocument.h"
 #include "nsICookieService.h"
@@ -109,7 +110,7 @@ class HTMLContentSink : public nsContentSink, public nsIHTMLContentSink {
 
   HTMLContentSink();
 
-  nsresult Init(nsIDocument* aDoc, nsIURI* aURI, nsISupports* aContainer,
+  nsresult Init(Document* aDoc, nsIURI* aURI, nsISupports* aContainer,
                 nsIChannel* aChannel);
 
   // nsISupports
@@ -539,7 +540,7 @@ void SinkContext::UpdateChildCounts() {
   mNotifyLevel = mStackPos - 1;
 }
 
-nsresult NS_NewHTMLContentSink(nsIHTMLContentSink** aResult, nsIDocument* aDoc,
+nsresult NS_NewHTMLContentSink(nsIHTMLContentSink** aResult, Document* aDoc,
                                nsIURI* aURI, nsISupports* aContainer,
                                nsIChannel* aChannel) {
   NS_ENSURE_ARG_POINTER(aResult);
@@ -603,7 +604,7 @@ NS_IMPL_CYCLE_COLLECTION_INHERITED(HTMLContentSink, nsContentSink,
 NS_IMPL_ISUPPORTS_CYCLE_COLLECTION_INHERITED(HTMLContentSink, nsContentSink,
                                              nsIContentSink, nsIHTMLContentSink)
 
-nsresult HTMLContentSink::Init(nsIDocument* aDoc, nsIURI* aURI,
+nsresult HTMLContentSink::Init(Document* aDoc, nsIURI* aURI,
                                nsISupports* aContainer, nsIChannel* aChannel) {
   NS_ENSURE_TRUE(aContainer, NS_ERROR_NULL_POINTER);
 
@@ -905,6 +906,9 @@ void HTMLContentSink::NotifyRootInsertion() {
   // contexts, since we just inserted the root and notified on
   // our whole tree
   UpdateChildCounts();
+
+  nsContentUtils::AddScriptRunner(
+      new nsDocElementCreatedNotificationRunner(mDocument));
 }
 
 void HTMLContentSink::UpdateChildCounts() {
@@ -950,7 +954,7 @@ void HTMLContentSink::SetDocumentCharset(NotNull<const Encoding*> aEncoding) {
   MOZ_ASSERT_UNREACHABLE("<meta charset> case doesn't occur with about:blank");
 }
 
-nsISupports* HTMLContentSink::GetTarget() { return mDocument; }
+nsISupports* HTMLContentSink::GetTarget() { return ToSupports(mDocument); }
 
 bool HTMLContentSink::IsScriptExecuting() { return IsScriptExecutingImpl(); }
 
@@ -965,6 +969,6 @@ void HTMLContentSink::ContinueInterruptedParsingAsync() {
       "HTMLContentSink::ContinueInterruptedParsingIfEnabled", this,
       &HTMLContentSink::ContinueInterruptedParsingIfEnabled);
 
-  nsCOMPtr<nsIDocument> doc = do_QueryInterface(mHTMLDocument);
+  nsCOMPtr<Document> doc = do_QueryInterface(mHTMLDocument);
   doc->Dispatch(mozilla::TaskCategory::Other, ev.forget());
 }

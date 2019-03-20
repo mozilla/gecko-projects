@@ -9,7 +9,7 @@
 #include "mozilla/Telemetry.h"
 #include "nsIDocShell.h"
 #include "nsIDocShellTreeItem.h"
-#include "nsIDocument.h"
+#include "mozilla/dom/Document.h"
 #include "nsITimedChannel.h"
 
 namespace mozilla {
@@ -20,7 +20,8 @@ NS_IMPL_CYCLE_COLLECTION_WRAPPERCACHE(PerformanceTiming, mPerformance)
 NS_IMPL_CYCLE_COLLECTION_ROOT_NATIVE(PerformanceTiming, AddRef)
 NS_IMPL_CYCLE_COLLECTION_UNROOT_NATIVE(PerformanceTiming, Release)
 
-/* static */ PerformanceTimingData* PerformanceTimingData::Create(
+/* static */
+PerformanceTimingData* PerformanceTimingData::Create(
     nsITimedChannel* aTimedChannel, nsIHttpChannel* aChannel,
     DOMHighResTimeStamp aZeroTime, nsAString& aInitiatorType,
     nsAString& aEntryName) {
@@ -267,11 +268,7 @@ bool PerformanceTimingData::CheckAllowedOrigin(nsIHttpChannel* aResourceChannel,
   }
 
   // Check that the current document passes the ckeck.
-  nsCOMPtr<nsILoadInfo> loadInfo;
-  aResourceChannel->GetLoadInfo(getter_AddRefs(loadInfo));
-  if (!loadInfo) {
-    return false;
-  }
+  nsCOMPtr<nsILoadInfo> loadInfo = aResourceChannel->LoadInfo();
 
   // TYPE_DOCUMENT loads have no loadingPrincipal.
   if (loadInfo->GetExternalContentPolicyType() ==
@@ -616,7 +613,7 @@ JSObject* PerformanceTiming::WrapObject(JSContext* cx,
 }
 
 bool PerformanceTiming::IsTopLevelContentDocument() const {
-  nsCOMPtr<nsIDocument> document = mPerformance->GetDocumentIfCurrent();
+  nsCOMPtr<Document> document = mPerformance->GetDocumentIfCurrent();
   if (!document) {
     return false;
   }

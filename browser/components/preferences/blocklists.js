@@ -2,7 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-ChromeUtils.import("resource://gre/modules/Services.jsm");
+var {Services} = ChromeUtils.import("resource://gre/modules/Services.jsm");
 const BASE_LIST_ID = "base";
 const CONTENT_LIST_ID = "content";
 const TRACK_SUFFIX = "-track-digest256";
@@ -137,8 +137,8 @@ var gBlocklistManager = {
     let branch = Services.prefs.getBranch(LISTS_PREF_BRANCH);
     let l10nKey = branch.getCharPref(id);
     let [listName, description] = await document.l10n.formatValues([
-      {id: `blocklist-item-${l10nKey}-name`},
-      {id: `blocklist-item-${l10nKey}-desc`},
+      {id: `blocklist-item-${l10nKey}-listName`},
+      {id: `blocklist-item-${l10nKey}-description`},
     ]);
     let name = await document.l10n.formatValue(
       "blocklist-item-list-template", {listName, description});

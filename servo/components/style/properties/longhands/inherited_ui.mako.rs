@@ -1,6 +1,6 @@
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
- * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 <%namespace name="helpers" file="/helpers.mako.rs" />
 
@@ -60,7 +60,7 @@ ${helpers.single_keyword(
 ${helpers.predefined_type(
     "caret-color",
     "ColorOrAuto",
-    "Either::Second(Auto)",
+    "generics::color::ColorOrAuto::Auto",
     spec="https://drafts.csswg.org/css-ui/#caret-color",
     animation_value_type="AnimatedCaretColor",
     ignored_when_colors_disabled=True,

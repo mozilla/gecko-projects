@@ -1,6 +1,6 @@
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
- * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 <%namespace name="helpers" file="/helpers.mako.rs" />
 <% from data import Method, to_camel_case, to_rust_ident, to_camel_case_lower, SYSTEM_FONT_LONGHANDS %>
@@ -396,7 +396,7 @@ ${helpers.predefined_type(
                         &mut system,
                         id as i32,
                         cx.style().get_font().gecko(),
-                        cx.device().pres_context()
+                        cx.device().document()
                     )
                 }
                 let font_weight = longhands::font_weight::computed_value::T::from_gecko_weight(system.weight);

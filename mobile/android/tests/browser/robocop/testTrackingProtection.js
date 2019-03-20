@@ -6,8 +6,10 @@
 "use strict";
 
 ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
-ChromeUtils.import("resource://gre/modules/Services.jsm");
-ChromeUtils.import("resource://gre/modules/Messaging.jsm");
+const {Services} = ChromeUtils.import("resource://gre/modules/Services.jsm");
+const {EventDispatcher} = ChromeUtils.import("resource://gre/modules/Messaging.jsm");
+
+const DTSCBN_PREF = "dom.testing.sync-content-blocking-notifications";
 
 function promiseLoadEvent(browser, url, eventType = "load", runBeforeLoad) {
   return new Promise((resolve, reject) => {
@@ -20,8 +22,8 @@ function promiseLoadEvent(browser, url, eventType = "load", runBeforeLoad) {
       }
 
       browser.removeEventListener(eventType, handle, true);
-      do_print("Browser event received: " + eventType);
-      resolve(event);
+      do_print("Browser event received: " + eventType + ". Will wait 500ms for the tracking event also.");
+      do_timeout(500, () => { resolve(event); });
     }
 
     browser.addEventListener(eventType, handle, true);
@@ -36,7 +38,7 @@ function promiseLoadEvent(browser, url, eventType = "load", runBeforeLoad) {
 }
 
 // Test that the Tracking Protection is active and has the correct state when
-// tracking content is blocked (Bug 1063831)
+// tracking content is blocked (Bug 1063831 + Bug 1520520)
 
 // Code is mostly stolen from:
 // http://dxr.mozilla.org/mozilla-central/source/browser/base/content/test/general/browser_trackingUI.js
@@ -81,6 +83,8 @@ var BrowserApp = Services.wm.getMostRecentWindow("navigator:browser").BrowserApp
 // Tests the tracking protection UI in private browsing. By default, tracking protection is
 // enabled in private browsing ("privacy.trackingprotection.pbmode.enabled").
 add_task(async function test_tracking_pb() {
+  Services.prefs.setBoolPref(DTSCBN_PREF, true);
+
   // Load a blank page
   let browser = BrowserApp.addTab("about:blank", { selected: true, parentId: BrowserApp.selectedTab.id, isPrivate: true }).browser;
   await new Promise((resolve, reject) => {
@@ -158,6 +162,10 @@ add_task(async function test_tracking_not_pb() {
   // Point tab to a test page containing tracking elements (tracking protection UI *should* be shown)
   await promiseLoadEvent(browser, "http://tracking.example.org/tests/robocop/tracking_bad.html");
   EventDispatcher.instance.sendRequest({ type: "Test:Expected", expected: "tracking_content_blocked" });
+});
+
+add_task(async function cleanup() {
+  Services.prefs.clearUserPref(DTSCBN_PREF);
 });
 
 run_next_test();

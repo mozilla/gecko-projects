@@ -6,6 +6,7 @@
   --markup-hidden-attr-name-color: #BA89B8;
   --markup-hidden-attr-value-color: #5C6D87;
   --markup-hidden-punctuation-color: #909090;
+  --markup-pseudoclass-disk-color: var(--yellow-60);
   --markup-hidden-tag-color: #97A4B3;
   --markup-outline: var(--theme-splitter-color);
 }
@@ -237,6 +238,7 @@ ul.children + .tag-line::before {
   background-image: url(chrome://devtools/skin/images/more.svg);
   background-repeat: no-repeat;
   background-position: center;
+  background-size: 8px;
   border: 1px solid var(--badge-border-color);
   color: var(--badge-color);
   fill: var(--badge-interactive-color);
@@ -358,7 +360,7 @@ ul.children + .tag-line::before {
    Center vertically with the 1.4em line height on .tag-line */
 .child.pseudoclass-locked::before {
   content: "";
-  background: var(--theme-highlight-lightorange);
+  background: var(--markup-pseudoclass-disk-color);
   border-radius: 50%;
   width: .8em;
   height: .8em;
@@ -391,9 +393,7 @@ ul.children + .tag-line::before {
 .theme-selected ~ .editor.comment,
 .theme-selected ~ .editor .theme-fg-color1,
 .theme-selected ~ .editor .theme-fg-color2,
-.theme-selected ~ .editor .theme-fg-color3,
-.theme-selected ~ .editor .theme-fg-color4,
-.theme-selected ~ .editor .theme-fg-color5 {
+.theme-selected ~ .editor .theme-fg-color3 {
   color: var(--theme-selection-color);
 }
 

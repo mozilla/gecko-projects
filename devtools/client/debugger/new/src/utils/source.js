@@ -19,7 +19,7 @@ import { renderWasmText } from "./wasm";
 import { toEditorPosition } from "./editor";
 export { isMinified } from "./isMinified";
 import { getURL, getFileExtension } from "./sources-tree";
-import { prefs } from "./prefs";
+import { prefs, features } from "./prefs";
 
 import type { Source, SourceLocation, JsSource } from "../types";
 import type { SourceMetaDataType } from "../reducers/ast";
@@ -53,6 +53,22 @@ function trimUrlQuery(url: string): string {
   );
 
   return url.slice(0, q);
+}
+
+export function shouldBlackbox(source: ?Source) {
+  if (!source) {
+    return false;
+  }
+
+  if (!isLoaded(source) || !source.url) {
+    return false;
+  }
+
+  if (isOriginalId(source.id) && !features.originalBlackbox) {
+    return false;
+  }
+
+  return true;
 }
 
 export function shouldPrettyPrint(source: Source) {
@@ -249,6 +265,7 @@ const contentTypeModeMap = {
   "text/jsx": { name: "jsx" },
   "text/x-elm": { name: "elm" },
   "text/x-clojure": { name: "clojure" },
+  "text/x-clojurescript": { name: "clojure" },
   "text/wasm": { name: "text" },
   "text/html": { name: "htmlmixed" }
 };
@@ -300,7 +317,7 @@ export function getSourceLineCount(source: Source) {
 export function getMode(
   source: Source,
   symbols?: SymbolDeclarations
-): { name: string } {
+): { name: string, base?: Object } {
   if (source.isWasm) {
     return { name: "text" };
   }
@@ -420,16 +437,16 @@ export function getSourceClassnames(
     return defaultClassName;
   }
 
-  if (sourceMetaData && sourceMetaData.framework) {
-    return sourceMetaData.framework.toLowerCase();
-  }
-
   if (isPretty(source)) {
     return "prettyPrint";
   }
 
   if (source.isBlackBoxed) {
     return "blackBox";
+  }
+
+  if (sourceMetaData && sourceMetaData.framework) {
+    return sourceMetaData.framework.toLowerCase();
   }
 
   return sourceTypes[getFileExtension(source)] || defaultClassName;
@@ -461,5 +478,13 @@ export function isGenerated(source: Source) {
 }
 
 export function getSourceQueryString(source: ?Source) {
-  return source ? parseURL(source.url).search : "";
+  if (!source) {
+    return;
+  }
+
+  return parseURL(getRawSourceURL(source.url)).search;
+}
+
+export function isUrlExtension(url: string) {
+  return /^(chrome|moz)-extension:\//.test(url);
 }

@@ -34,6 +34,21 @@
   list-style-image: url("chrome://browser/skin/controlcenter/3rdpartycookies-disabled.svg");
 }
 
+#contentBlockingCryptominersCheckbox > .checkbox-label-box {
+  list-style-image: url("chrome://browser/skin/controlcenter/cryptominers.svg");
+}
+
+#contentBlockingCryptominersCheckbox[checked] > .checkbox-label-box {
+  list-style-image: url("chrome://browser/skin/controlcenter/cryptominers-disabled.svg");
+}
+
+#contentBlockingFingerprintersCheckbox > .checkbox-label-box {
+  list-style-image: url("chrome://browser/skin/controlcenter/fingerprinters.svg");
+}
+
+#contentBlockingFingerprintersCheckbox[checked] > .checkbox-label-box {
+  list-style-image: url("chrome://browser/skin/controlcenter/fingerprinters-disabled.svg");
+}
 
 .content-blocking-icon,
 .permission-icon {
@@ -113,6 +128,11 @@
   margin-inline-end: 28px;
 }
 
+#contentBlockingCategories[fallback-ui] .default-content-blocking-ui,
+#contentBlockingCategories:not([fallback-ui]) .fallback-content-blocking-ui {
+  display: none;
+}
+
 .arrowhead {
   -moz-appearance: none;
   border: none;
@@ -142,6 +162,53 @@
 
 .arrowhead > .button-box {
   padding: 0 !important;
+}
+
+.content-blocking-category.expanded:not(.selected) .reload-tabs {
+  display: none;
+}
+
+.content-blocking-warning.reload-tabs description {
+  width: 318px;
+  margin-inline-end: 5px;
+}
+
+.content-blocking-warning.reload-tabs .indent {
+  min-height: 30px;
+}
+
+.content-blocking-warning.reload-tabs .content-blocking-info-image {
+  list-style-image: url(chrome://browser/skin/identity-icon.svg);
+  margin-top: 5px;
+  margin-inline-end: 8px;
+  margin-inline-start: 4px;
+}
+
+.reload-tabs-button {
+  -moz-context-properties: fill;
+  fill: currentColor;
+  max-height: 30px;
+  min-height: 30px;
+  padding: 0 20px;
+  list-style-image: url("chrome://browser/skin/reload.svg");
+  background-color: var(--blue-50);
+}
+
+.reload-tabs-button:not([disabled="true"]):hover {
+  background-color: var(--blue-60);
+}
+
+.reload-tabs-button:not([disabled="true"]):hover:active {
+  background-color: var(--blue-70);
+}
+
+.reload-tabs-button .button-icon {
+  margin: 0 6px;
+  color: white;
+}
+
+.reload-tabs-button .button-text {
+  color: white;
 }
 
 .content-blocking-category.expanded:not(.selected) .content-blocking-warning {
@@ -188,6 +255,10 @@
   border-radius: 4px;
   padding: 10px 0;
   margin: 10px 0;
+}
+
+.content-blocking-warning + .content-blocking-warning {
+  margin-top: 0;
 }
 
 .content-blocking-trackers-image {
@@ -238,4 +309,9 @@
 #contentBlockingChangeCookieSettings {
   padding: 0.25em 0.75em;
   margin: 4px 8px;
+}
+
+#deleteOnCloseNote {
+  margin-bottom: 0 !important; /* Overrides .info-panel margin-bottom. */
+  margin-inline-end: 32px;
 }

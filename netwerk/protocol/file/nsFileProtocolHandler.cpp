@@ -18,18 +18,18 @@
 // URL file handling, copied and modified from
 // xpfe/components/bookmarks/src/nsBookmarksService.cpp
 #ifdef XP_WIN
-#include <shlobj.h>
-#include <intshcut.h>
-#include "nsIFileURL.h"
-#ifdef CompareString
-#undef CompareString
-#endif
+#  include <shlobj.h>
+#  include <intshcut.h>
+#  include "nsIFileURL.h"
+#  ifdef CompareString
+#    undef CompareString
+#  endif
 #endif
 
 // URL file handling for freedesktop.org
 #ifdef XP_UNIX
-#include "nsINIParser.h"
-#define DESKTOP_ENTRY_SECTION "Desktop Entry"
+#  include "nsINIParser.h"
+#  define DESKTOP_ENTRY_SECTION "Desktop Entry"
 #endif
 
 //-----------------------------------------------------------------------------
@@ -164,41 +164,32 @@ nsFileProtocolHandler::NewURI(const nsACString &spec, const char *charset,
 }
 
 NS_IMETHODIMP
-nsFileProtocolHandler::NewChannel2(nsIURI *uri, nsILoadInfo *aLoadInfo,
-                                   nsIChannel **result) {
+nsFileProtocolHandler::NewChannel(nsIURI *uri, nsILoadInfo *aLoadInfo,
+                                  nsIChannel **result) {
   nsresult rv;
 
-  nsFileChannel *chan;
+  RefPtr<nsFileChannel> chan;
   if (IsNeckoChild()) {
     chan = new mozilla::net::FileChannelChild(uri);
   } else {
     chan = new nsFileChannel(uri);
   }
-  if (!chan) return NS_ERROR_OUT_OF_MEMORY;
-  NS_ADDREF(chan);
 
   // set the loadInfo on the new channel ; must do this
   // before calling Init() on it, since it needs the load
   // info be already set.
   rv = chan->SetLoadInfo(aLoadInfo);
   if (NS_FAILED(rv)) {
-    NS_RELEASE(chan);
     return rv;
   }
 
   rv = chan->Init();
   if (NS_FAILED(rv)) {
-    NS_RELEASE(chan);
     return rv;
   }
 
-  *result = chan;
+  chan.forget(result);
   return NS_OK;
-}
-
-NS_IMETHODIMP
-nsFileProtocolHandler::NewChannel(nsIURI *uri, nsIChannel **result) {
-  return NewChannel2(uri, nullptr, result);
 }
 
 NS_IMETHODIMP

@@ -28,7 +28,7 @@
 
 #define JS_ARRAYBUFFER_FLAGS_SLOT 3
 
-#define JS_ARRAYBUFFER_DETACHED_FLAG 0x4
+#define JS_ARRAYBUFFER_DETACHED_FLAG 0x8
 
 ///////////////////////////////////////////////////////////////////////////
 // Slots for typed prototypes
@@ -99,6 +99,7 @@
 // case.
 #define JS_REFERENCETYPEREPR_ANY 0
 #define JS_REFERENCETYPEREPR_OBJECT 1
-#define JS_REFERENCETYPEREPR_STRING 2
+#define JS_REFERENCETYPEREPR_WASM_ANYREF 2
+#define JS_REFERENCETYPEREPR_STRING 3
 
 #endif

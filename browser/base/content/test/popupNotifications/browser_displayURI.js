@@ -8,9 +8,7 @@ async function check(contentTask, options = {}) {
     await ContentTask.spawn(browser, null, contentTask);
     let panel = await popupShownPromise;
     let notification = panel.children[0];
-    let body = document.getAnonymousElementByAttribute(notification,
-                                                       "class",
-                                                       "popup-notification-body");
+    let body = notification.querySelector(".popup-notification-body");
     ok(body.innerHTML.includes("example.com"), "Check that at least the eTLD+1 is present in the markup");
   });
 
@@ -25,9 +23,7 @@ async function check(contentTask, options = {}) {
     await ContentTask.spawn(browser, null, contentTask);
     let panel = await popupShownPromise;
     let notification = panel.children[0];
-    let body = document.getAnonymousElementByAttribute(notification,
-                                                       "class",
-                                                       "popup-notification-body");
+    let body = notification.querySelector(".popup-notification-body");
     if (notification.id == "geolocation-notification") {
       ok(body.innerHTML.includes("local file"), `file:// URIs should be displayed as local file.`);
     } else {
@@ -60,9 +56,7 @@ async function check(contentTask, options = {}) {
       await ContentTask.spawn(browser, null, contentTask);
       let panel = await popupShownPromise;
       let notification = panel.children[0];
-      let body = document.getAnonymousElementByAttribute(notification,
-                                                         "class",
-                                                         "popup-notification-body");
+      let body = notification.querySelector(".popup-notification-body");
       ok(body.innerHTML.includes("Test Extension Name"),
          "Check the the extension name is present in the markup");
     });
@@ -92,7 +86,6 @@ add_task(async function test_displayURI_camera() {
 
 add_task(async function test_displayURI_geo_blob() {
   await check(async function() {
-    Cu.importGlobalProperties(["Blob"]);
     let text = "<script>navigator.geolocation.getCurrentPosition(() => {})</script>";
     let blob = new Blob([text], {type: "text/html"});
     let url = content.URL.createObjectURL(blob);
@@ -102,11 +95,9 @@ add_task(async function test_displayURI_geo_blob() {
 
 add_task(async function test_displayURI_camera_blob() {
   await check(async function() {
-    Cu.importGlobalProperties(["Blob"]);
     let text = "<script>navigator.mediaDevices.getUserMedia({video: true, fake: true})</script>";
     let blob = new Blob([text], {type: "text/html"});
     let url = content.URL.createObjectURL(blob);
     content.location.href = url;
   }, {skipOnExtension: true});
 });
-

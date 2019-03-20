@@ -339,8 +339,6 @@ class JSObject : public js::gc::Cell {
 
   js::TaggedProto taggedProto() const { return group_->proto(); }
 
-  bool hasTenuredProto() const;
-
   bool uninlinedIsProxy() const;
 
   JSObject* staticPrototype() const {
@@ -392,14 +390,7 @@ class JSObject : public js::gc::Cell {
 
   /* Set a new prototype for an object with a singleton type. */
   static bool splicePrototype(JSContext* cx, js::HandleObject obj,
-                              const js::Class* clasp,
                               js::Handle<js::TaggedProto> proto);
-
-  /*
-   * For bootstrapping, whether to splice a prototype for Function.prototype
-   * or the global object.
-   */
-  bool shouldSplicePrototype();
 
   /*
    * Environment chains.
@@ -435,15 +426,12 @@ class JSObject : public js::gc::Cell {
     MOZ_ASSERT(!js::UninlinedIsCrossCompartmentWrapper(this));
     return group_->realm();
   }
+  bool hasSameRealmAs(JSContext* cx) const;
 
   // Returns the object's realm even if the object is a CCW (be careful, in
   // this case the realm is not very meaningful because wrappers are shared by
   // all realms in the compartment).
   JS::Realm* maybeCCWRealm() const { return group_->realm(); }
-
-  // Deprecated: call nonCCWRealm(), maybeCCWRealm(), or NativeObject::realm()
-  // instead!
-  JS::Realm* deprecatedRealm() const { return group_->realm(); }
 
   /*
    * ES5 meta-object properties and operations.
@@ -458,12 +446,6 @@ class JSObject : public js::gc::Cell {
   bool uninlinedNonProxyIsExtensible() const;
 
  public:
-  /*
-   * Iterator-specific getters and setters.
-   */
-
-  static const uint32_t ITER_CLASS_NFIXED_SLOTS = 1;
-
   /*
    * Back to generic stuff.
    */
@@ -490,8 +472,6 @@ class JSObject : public js::gc::Cell {
   void fixDictionaryShapeAfterSwap();
 
  public:
-  inline void initArrayClass();
-
   /*
    * In addition to the generic object interface provided by JSObject,
    * specific types of objects may provide additional operations. To access,
@@ -552,6 +532,22 @@ class JSObject : public js::gc::Cell {
    */
   template <class T>
   T& unwrapAs();
+
+  /*
+   * Tries to unwrap and downcast to class T. Returns nullptr if (and only if) a
+   * wrapper with a security policy is involved. Crashes in all builds if the
+   * (possibly unwrapped) object is not of class T (for example because it's a
+   * dead wrapper).
+   */
+  template <class T>
+  T* maybeUnwrapAs();
+
+  /*
+   * Tries to unwrap and downcast to class T. Returns nullptr if a wrapper with
+   * a security policy is involved or if the object does not have class T.
+   */
+  template <class T>
+  T* maybeUnwrapIf();
 
 #if defined(DEBUG) || defined(JS_JITSPEW)
   void dump(js::GenericPrinter& fp) const;
@@ -614,7 +610,7 @@ bool JSObject::canUnwrapAs() {
   if (is<T>()) {
     return true;
   }
-  JSObject* obj = js::CheckedUnwrap(this);
+  JSObject* obj = js::CheckedUnwrapStatic(this);
   return obj && obj->is<T>();
 }
 
@@ -630,9 +626,43 @@ T& JSObject::unwrapAs() {
   // Since the caller just called canUnwrapAs<T>(), which does a
   // CheckedUnwrap, this does not need to repeat the security check.
   JSObject* unwrapped = js::UncheckedUnwrap(this);
-  MOZ_ASSERT(js::CheckedUnwrap(this) == unwrapped,
+  MOZ_ASSERT(js::CheckedUnwrapStatic(this) == unwrapped,
              "check that the security check we skipped really is redundant");
   return unwrapped->as<T>();
+}
+
+template <class T>
+T* JSObject::maybeUnwrapAs() {
+  static_assert(!std::is_convertible<T*, js::Wrapper*>::value,
+                "T can't be a Wrapper type; this function discards wrappers");
+
+  if (is<T>()) {
+    return &as<T>();
+  }
+
+  JSObject* unwrapped = js::CheckedUnwrapStatic(this);
+  if (!unwrapped) {
+    return nullptr;
+  }
+
+  if (MOZ_LIKELY(unwrapped->is<T>())) {
+    return &unwrapped->as<T>();
+  }
+
+  MOZ_CRASH("Invalid object. Dead wrapper?");
+}
+
+template <class T>
+T* JSObject::maybeUnwrapIf() {
+  static_assert(!std::is_convertible<T*, js::Wrapper*>::value,
+                "T can't be a Wrapper type; this function discards wrappers");
+
+  if (is<T>()) {
+    return &as<T>();
+  }
+
+  JSObject* unwrapped = js::CheckedUnwrapStatic(this);
+  return (unwrapped && unwrapped->is<T>()) ? &unwrapped->as<T>() : nullptr;
 }
 
 /*
@@ -797,14 +827,35 @@ bool NewObjectWithTaggedProtoIsCachable(JSContext* cx,
 // ES6 9.1.15 GetPrototypeFromConstructor.
 extern bool GetPrototypeFromConstructor(JSContext* cx,
                                         js::HandleObject newTarget,
+                                        JSProtoKey intrinsicDefaultProto,
                                         js::MutableHandleObject proto);
 
+// https://tc39.github.io/ecma262/#sec-getprototypefromconstructor
+//
+// Determine which [[Prototype]] to use when creating a new object using a
+// builtin constructor.
+//
+// This sets `proto` to `nullptr` to mean "the builtin prototype object for
+// this type in the current realm", the common case.
+//
+// We could set it to `cx->global()->getOrCreatePrototype(protoKey)`, but
+// nullptr gets a fast path in e.g. js::NewObjectWithClassProtoCommon.
+//
+// intrinsicDefaultProto can be JSProto_Null if there's no appropriate
+// JSProtoKey enum; but we then select the wrong prototype object in a
+// multi-realm corner case (see bug 1515167).
 MOZ_ALWAYS_INLINE bool GetPrototypeFromBuiltinConstructor(
-    JSContext* cx, const CallArgs& args, js::MutableHandleObject proto) {
-  // When proto is set to nullptr, the caller is expected to select the
-  // correct default built-in prototype for this constructor.
+    JSContext* cx, const CallArgs& args, JSProtoKey intrinsicDefaultProto,
+    js::MutableHandleObject proto) {
+  // We can skip the "prototype" lookup in the two common cases:
+  // 1.  Builtin constructor called without `new`, as in `obj = Object();`.
+  // 2.  Builtin constructor called with `new`, as in `obj = new Object();`.
+  //
+  // Cases that can't take the fast path include `new MySubclassOfObject()`,
+  // `new otherGlobal.Object()`, and `Reflect.construct(Object, [], Date)`.
   if (!args.isConstructing() ||
       &args.newTarget().toObject() == &args.callee()) {
+    MOZ_ASSERT(args.callee().hasSameRealmAs(cx));
     proto.set(nullptr);
     return true;
   }
@@ -812,17 +863,18 @@ MOZ_ALWAYS_INLINE bool GetPrototypeFromBuiltinConstructor(
   // We're calling this constructor from a derived class, retrieve the
   // actual prototype from newTarget.
   RootedObject newTarget(cx, &args.newTarget().toObject());
-  return GetPrototypeFromConstructor(cx, newTarget, proto);
+  return GetPrototypeFromConstructor(cx, newTarget, intrinsicDefaultProto,
+                                     proto);
 }
 
 // Specialized call for constructing |this| with a known function callee,
 // and a known prototype.
 extern JSObject* CreateThisForFunctionWithProto(
-    JSContext* cx, js::HandleObject callee, HandleObject newTarget,
+    JSContext* cx, js::HandleFunction callee, HandleObject newTarget,
     HandleObject proto, NewObjectKind newKind = GenericObject);
 
 // Specialized call for constructing |this| with a known function callee.
-extern JSObject* CreateThisForFunction(JSContext* cx, js::HandleObject callee,
+extern JSObject* CreateThisForFunction(JSContext* cx, js::HandleFunction callee,
                                        js::HandleObject newTarget,
                                        NewObjectKind newKind);
 
@@ -952,38 +1004,6 @@ MOZ_ALWAYS_INLINE JSObject* ToObjectFromStack(JSContext* cx, HandleValue vp) {
     return &vp.toObject();
   }
   return js::ToObjectSlow(cx, vp, true);
-}
-
-JSObject* ToObjectSlowForPropertyAccess(JSContext* cx, JS::HandleValue val,
-                                        HandleId key, bool reportScanStack);
-JSObject* ToObjectSlowForPropertyAccess(JSContext* cx, JS::HandleValue val,
-                                        HandlePropertyName key,
-                                        bool reportScanStack);
-JSObject* ToObjectSlowForPropertyAccess(JSContext* cx, JS::HandleValue val,
-                                        HandleValue keyValue,
-                                        bool reportScanStack);
-
-MOZ_ALWAYS_INLINE JSObject* ToObjectFromStackForPropertyAccess(JSContext* cx,
-                                                               HandleValue vp,
-                                                               HandleId key) {
-  if (vp.isObject()) {
-    return &vp.toObject();
-  }
-  return js::ToObjectSlowForPropertyAccess(cx, vp, key, true);
-}
-MOZ_ALWAYS_INLINE JSObject* ToObjectFromStackForPropertyAccess(
-    JSContext* cx, HandleValue vp, HandlePropertyName key) {
-  if (vp.isObject()) {
-    return &vp.toObject();
-  }
-  return js::ToObjectSlowForPropertyAccess(cx, vp, key, true);
-}
-MOZ_ALWAYS_INLINE JSObject* ToObjectFromStackForPropertyAccess(
-    JSContext* cx, HandleValue vp, HandleValue key) {
-  if (vp.isObject()) {
-    return &vp.toObject();
-  }
-  return js::ToObjectSlowForPropertyAccess(cx, vp, key, true);
 }
 
 template <XDRMode mode>

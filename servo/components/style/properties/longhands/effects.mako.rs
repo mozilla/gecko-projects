@@ -1,6 +1,6 @@
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
- * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 <%namespace name="helpers" file="/helpers.mako.rs" />
 
@@ -62,6 +62,5 @@ ${helpers.single_keyword(
     gecko_constant_prefix="NS_STYLE_BLEND",
     animation_value_type="discrete",
     flags="CREATES_STACKING_CONTEXT",
-    gecko_pref="layout.css.mix-blend-mode.enabled",
     spec="https://drafts.fxtf.org/compositing/#propdef-mix-blend-mode",
 )}

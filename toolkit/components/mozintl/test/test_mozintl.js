@@ -1,7 +1,7 @@
 /* Any copyright is dedicated to the Public Domain.
    http://creativecommons.org/publicdomain/zero/1.0/ */
 
-ChromeUtils.import("resource://gre/modules/Services.jsm");
+const {Services} = ChromeUtils.import("resource://gre/modules/Services.jsm");
 
 function run_test() {
   test_methods_presence();
@@ -23,7 +23,6 @@ function test_methods_calling() {
   Services.intl.getCalendarInfo("pl");
   Services.intl.getDisplayNames("ar");
   Services.intl.getLocaleInfo("de");
-  Services.intl.getLocaleDisplayNames(undefined, ["en-US", "sr-Cyrl-RU"]);
   new Services.intl.DateTimeFormat("fr");
   new Services.intl.RelativeTimeFormat("fr");
   ok(true);

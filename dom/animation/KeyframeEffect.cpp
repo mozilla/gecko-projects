@@ -27,8 +27,9 @@
 #include "nsComputedDOMStyle.h"  // nsComputedDOMStyle::GetComputedStyle
 #include "nsContentUtils.h"
 #include "nsCSSPropertyIDSet.h"
-#include "nsCSSProps.h"           // For nsCSSProps::PropHasFlags
-#include "nsCSSPseudoElements.h"  // For CSSPseudoElementType
+#include "nsCSSProps.h"             // For nsCSSProps::PropHasFlags
+#include "nsCSSPseudoElements.h"    // For PseudoStyleType
+#include "nsDOMMutationObserver.h"  // For nsAutoAnimationMutationBatch
 #include "nsIFrame.h"
 #include "nsIPresShell.h"
 #include "nsIScriptError.h"
@@ -63,14 +64,13 @@ NS_INTERFACE_MAP_END_INHERITING(AnimationEffect)
 NS_IMPL_ADDREF_INHERITED(KeyframeEffect, AnimationEffect)
 NS_IMPL_RELEASE_INHERITED(KeyframeEffect, AnimationEffect)
 
-KeyframeEffect::KeyframeEffect(nsIDocument* aDocument,
+KeyframeEffect::KeyframeEffect(Document* aDocument,
                                const Maybe<OwningAnimationTarget>& aTarget,
                                TimingParams&& aTiming,
                                const KeyframeEffectParams& aOptions)
     : AnimationEffect(aDocument, std::move(aTiming)),
       mTarget(aTarget),
       mEffectOptions(aOptions),
-      mInEffectOnLastAnimationTimingUpdate(false),
       mCumulativeChangeHint(nsChangeHint(0)) {}
 
 JSObject* KeyframeEffect::WrapObject(JSContext* aCx,
@@ -112,7 +112,7 @@ void KeyframeEffect::SetComposite(const CompositeOperation& aComposite) {
   }
 
   if (mTarget) {
-    RefPtr<ComputedStyle> computedStyle = GetTargetComputedStyle();
+    RefPtr<ComputedStyle> computedStyle = GetTargetComputedStyle(Flush::None);
     if (computedStyle) {
       UpdateProperties(computedStyle);
     }
@@ -206,7 +206,7 @@ void KeyframeEffect::SetKeyframes(JSContext* aContext,
     return;
   }
 
-  RefPtr<ComputedStyle> style = GetTargetComputedStyle();
+  RefPtr<ComputedStyle> style = GetTargetComputedStyle(Flush::None);
   SetKeyframes(std::move(keyframes), style);
 }
 
@@ -227,7 +227,6 @@ void KeyframeEffect::SetKeyframes(nsTArray<Keyframe>&& aKeyframes,
   // style (e.g. the target element is not associated with any document).
   if (aStyle) {
     UpdateProperties(aStyle);
-    MaybeUpdateFrameForCompositor();
   }
 }
 
@@ -258,6 +257,39 @@ const AnimationProperty* KeyframeEffect::GetEffectiveAnimationOfProperty(
   return nullptr;
 }
 
+bool KeyframeEffect::HasEffectiveAnimationOfPropertySet(
+    const nsCSSPropertyIDSet& aPropertySet, const EffectSet& aEffectSet) const {
+  // The various transform properties ('transform', 'scale' etc.) get combined
+  // on the compositor.
+  //
+  // As a result, if we have an animation of 'scale' and 'translate', but the
+  // 'translate' property is covered by an !important rule, we will not be
+  // able to combine the result on the compositor since we won't have the
+  // !important rule to incorporate. In that case we should run all the
+  // transform-related animations on the main thread (where we have the
+  // !important rule).
+  //
+  // Bug 1534884: Move this check to ShouldBlockAsyncTransformAnimations (or
+  // similar) and add a performance warning for this case.
+
+  bool result = false;
+
+  for (const AnimationProperty& property : mProperties) {
+    if (!aPropertySet.HasProperty(property.mProperty)) {
+      continue;
+    }
+
+    if (IsEffectiveProperty(aEffectSet, property.mProperty)) {
+      result = true;
+    } else if (nsCSSPropertyIDSet::TransformLikeProperties().HasProperty(
+                   property.mProperty)) {
+      return false;
+    }
+  }
+
+  return result;
+}
+
 nsCSSPropertyIDSet KeyframeEffect::GetPropertiesForCompositor(
     EffectSet& aEffects, const nsIFrame* aFrame) const {
   MOZ_ASSERT(&aEffects ==
@@ -277,8 +309,8 @@ nsCSSPropertyIDSet KeyframeEffect::GetPropertiesForCompositor(
     }
 
     AnimationPerformanceWarning::Type warning;
-    KeyframeEffect::MatchForCompositor matchResult =
-        IsMatchForCompositor(property.mProperty, aFrame, aEffects, warning);
+    KeyframeEffect::MatchForCompositor matchResult = IsMatchForCompositor(
+        nsCSSPropertyIDSet{property.mProperty}, aFrame, aEffects, warning);
     if (matchResult ==
             KeyframeEffect::MatchForCompositor::NoAndBlockThisProperty ||
         matchResult == KeyframeEffect::MatchForCompositor::No) {
@@ -290,9 +322,10 @@ nsCSSPropertyIDSet KeyframeEffect::GetPropertiesForCompositor(
   return properties;
 }
 
-bool KeyframeEffect::HasAnimationOfProperty(nsCSSPropertyID aProperty) const {
+bool KeyframeEffect::HasAnimationOfPropertySet(
+    const nsCSSPropertyIDSet& aPropertySet) const {
   for (const AnimationProperty& property : mProperties) {
-    if (property.mProperty == aProperty) {
+    if (aPropertySet.HasProperty(property.mProperty)) {
       return true;
     }
   }
@@ -324,11 +357,23 @@ void KeyframeEffect::UpdateProperties(const ComputedStyle* aStyle) {
 
   nsTArray<AnimationProperty> properties = BuildProperties(aStyle);
 
+  bool propertiesChanged = mProperties != properties;
+
   // We need to update base styles even if any properties are not changed at all
   // since base styles might have been changed due to parent style changes, etc.
-  EnsureBaseStyles(aStyle, properties);
+  bool baseStylesChanged = false;
+  EnsureBaseStyles(aStyle, properties,
+                   !propertiesChanged ? &baseStylesChanged : nullptr);
 
-  if (mProperties == properties) {
+  if (!propertiesChanged) {
+    if (baseStylesChanged) {
+      RequestRestyle(EffectCompositor::RestyleType::Layer);
+    }
+    // Check if we need to update the cumulative change hint because we now have
+    // style data.
+    if (mNeedsStyleData && mTarget && mTarget->mElement->HasServoData()) {
+      CalculateCumulativeChangeHint(aStyle);
+    }
     return;
   }
 
@@ -358,12 +403,21 @@ void KeyframeEffect::UpdateProperties(const ComputedStyle* aStyle) {
 
 void KeyframeEffect::EnsureBaseStyles(
     const ComputedStyle* aComputedValues,
-    const nsTArray<AnimationProperty>& aProperties) {
+    const nsTArray<AnimationProperty>& aProperties, bool* aBaseStylesChanged) {
+  if (aBaseStylesChanged != nullptr) {
+    *aBaseStylesChanged = false;
+  }
+
   if (!mTarget) {
     return;
   }
 
-  mBaseStyleValuesForServo.Clear();
+  BaseValuesHashmap previousBaseStyles;
+  if (aBaseStylesChanged != nullptr) {
+    previousBaseStyles = std::move(mBaseValues);
+  }
+
+  mBaseValues.Clear();
 
   nsPresContext* presContext =
       nsContentUtils::GetContextForContent(mTarget->mElement);
@@ -384,6 +438,16 @@ void KeyframeEffect::EnsureBaseStyles(
   RefPtr<ComputedStyle> baseComputedStyle;
   for (const AnimationProperty& property : aProperties) {
     EnsureBaseStyle(property, presContext, aComputedValues, baseComputedStyle);
+  }
+
+  if (aBaseStylesChanged != nullptr) {
+    for (auto iter = mBaseValues.Iter(); !iter.Done(); iter.Next()) {
+      if (AnimationValue(iter.Data()) !=
+          AnimationValue(previousBaseStyles.Get(iter.Key()))) {
+        *aBaseStylesChanged = true;
+        break;
+      }
+    }
   }
 }
 
@@ -407,6 +471,9 @@ void KeyframeEffect::EnsureBaseStyle(
   if (!aBaseComputedStyle) {
     Element* animatingElement = EffectCompositor::GetElementToRestyle(
         mTarget->mElement, mTarget->mPseudoType);
+    if (!animatingElement) {
+      return;
+    }
     aBaseComputedStyle = aPresContext->StyleSet()->GetBaseContextForElement(
         animatingElement, aComputedStyle);
   }
@@ -414,7 +481,7 @@ void KeyframeEffect::EnsureBaseStyle(
       Servo_ComputedValues_ExtractAnimationValue(aBaseComputedStyle,
                                                  aProperty.mProperty)
           .Consume();
-  mBaseStyleValuesForServo.Put(aProperty.mProperty, baseValue);
+  mBaseValues.Put(aProperty.mProperty, baseValue);
 }
 
 void KeyframeEffect::WillComposeStyle() {
@@ -428,10 +495,9 @@ void KeyframeEffect::ComposeStyleRule(
     const AnimationProperty& aProperty,
     const AnimationPropertySegment& aSegment,
     const ComputedTiming& aComputedTiming) {
-  Servo_AnimationCompose(&aAnimationValues, &mBaseStyleValuesForServo,
-                         aProperty.mProperty, &aSegment,
-                         &aProperty.mSegments.LastElement(), &aComputedTiming,
-                         mEffectOptions.mIterationComposite);
+  Servo_AnimationCompose(&aAnimationValues, &mBaseValues, aProperty.mProperty,
+                         &aSegment, &aProperty.mSegments.LastElement(),
+                         &aComputedTiming, mEffectOptions.mIterationComposite);
 }
 
 void KeyframeEffect::ComposeStyle(RawServoAnimationValueMap& aComposeResult,
@@ -532,6 +598,25 @@ void KeyframeEffect::SetIsRunningOnCompositor(nsCSSPropertyID aProperty,
   }
 }
 
+void KeyframeEffect::SetIsRunningOnCompositor(
+    const nsCSSPropertyIDSet& aPropertySet, bool aIsRunning) {
+  for (AnimationProperty& property : mProperties) {
+    if (aPropertySet.HasProperty(property.mProperty)) {
+      MOZ_ASSERT(nsCSSProps::PropHasFlags(property.mProperty,
+                                          CSSPropFlags::CanAnimateOnCompositor),
+                 "Property being animated on compositor is a recognized "
+                 "compositor-animatable property");
+      property.mIsRunningOnCompositor = aIsRunning;
+      // We currently only set a performance warning message when animations
+      // cannot be run on the compositor, so if this animation is running
+      // on the compositor we don't need a message.
+      if (aIsRunning) {
+        property.mPerformanceWarning.reset();
+      }
+    }
+  }
+}
+
 void KeyframeEffect::ResetIsRunningOnCompositor() {
   for (AnimationProperty& property : mProperties) {
     property.mIsRunningOnCompositor = false;
@@ -568,7 +653,8 @@ static KeyframeEffectParams KeyframeEffectParamsFromUnion(
   return result;
 }
 
-/* static */ Maybe<OwningAnimationTarget> KeyframeEffect::ConvertTarget(
+/* static */
+Maybe<OwningAnimationTarget> KeyframeEffect::ConvertTarget(
     const Nullable<ElementOrCSSPseudoElement>& aTarget) {
   // Return value optimization.
   Maybe<OwningAnimationTarget> result;
@@ -584,15 +670,15 @@ static KeyframeEffectParams KeyframeEffectParamsFromUnion(
   if (target.IsElement()) {
     result.emplace(&target.GetAsElement());
   } else {
-    RefPtr<Element> elem = target.GetAsCSSPseudoElement().ParentElement();
+    RefPtr<Element> elem = target.GetAsCSSPseudoElement().Element();
     result.emplace(elem, target.GetAsCSSPseudoElement().GetType());
   }
   return result;
 }
 
 template <class OptionsType>
-/* static */ already_AddRefed<KeyframeEffect>
-KeyframeEffect::ConstructKeyframeEffect(
+/* static */
+already_AddRefed<KeyframeEffect> KeyframeEffect::ConstructKeyframeEffect(
     const GlobalObject& aGlobal,
     const Nullable<ElementOrCSSPseudoElement>& aTarget,
     JS::Handle<JSObject*> aKeyframes, const OptionsType& aOptions,
@@ -606,7 +692,7 @@ KeyframeEffect::ConstructKeyframeEffect(
   // In Xray case, the new objects should be created using the document of
   // the target global, but the KeyframeEffect constructors are called in the
   // caller's compartment to access `aKeyframes` object.
-  nsIDocument* doc = AnimationUtils::GetDocumentFromGlobal(aGlobal.Get());
+  Document* doc = AnimationUtils::GetDocumentFromGlobal(aGlobal.Get());
   if (!doc) {
     aRv.Throw(NS_ERROR_FAILURE);
     return nullptr;
@@ -738,7 +824,8 @@ void KeyframeEffect::RequestRestyle(
   }
 }
 
-already_AddRefed<ComputedStyle> KeyframeEffect::GetTargetComputedStyle() {
+already_AddRefed<ComputedStyle> KeyframeEffect::GetTargetComputedStyle(
+    Flush aFlushType) const {
   if (!GetRenderedDocument()) {
     return nullptr;
   }
@@ -747,14 +834,17 @@ already_AddRefed<ComputedStyle> KeyframeEffect::GetTargetComputedStyle() {
              "Should only have a document when we have a target element");
 
   nsAtom* pseudo =
-      mTarget->mPseudoType < CSSPseudoElementType::Count
+      PseudoStyle::IsPseudoElement(mTarget->mPseudoType)
           ? nsCSSPseudoElements::GetPseudoAtom(mTarget->mPseudoType)
           : nullptr;
 
   OwningAnimationTarget kungfuDeathGrip(mTarget->mElement,
                                         mTarget->mPseudoType);
 
-  return nsComputedDOMStyle::GetComputedStyle(mTarget->mElement, pseudo);
+  return aFlushType == Flush::Style
+             ? nsComputedDOMStyle::GetComputedStyle(mTarget->mElement, pseudo)
+             : nsComputedDOMStyle::GetComputedStyleNoFlush(mTarget->mElement,
+                                                           pseudo);
 }
 
 #ifdef DEBUG
@@ -774,7 +864,8 @@ void DumpAnimationProperties(
 }
 #endif
 
-/* static */ already_AddRefed<KeyframeEffect> KeyframeEffect::Constructor(
+/* static */
+already_AddRefed<KeyframeEffect> KeyframeEffect::Constructor(
     const GlobalObject& aGlobal,
     const Nullable<ElementOrCSSPseudoElement>& aTarget,
     JS::Handle<JSObject*> aKeyframes,
@@ -783,7 +874,8 @@ void DumpAnimationProperties(
   return ConstructKeyframeEffect(aGlobal, aTarget, aKeyframes, aOptions, aRv);
 }
 
-/* static */ already_AddRefed<KeyframeEffect> KeyframeEffect::Constructor(
+/* static */
+already_AddRefed<KeyframeEffect> KeyframeEffect::Constructor(
     const GlobalObject& aGlobal,
     const Nullable<ElementOrCSSPseudoElement>& aTarget,
     JS::Handle<JSObject*> aKeyframes,
@@ -792,9 +884,10 @@ void DumpAnimationProperties(
   return ConstructKeyframeEffect(aGlobal, aTarget, aKeyframes, aOptions, aRv);
 }
 
-/* static */ already_AddRefed<KeyframeEffect> KeyframeEffect::Constructor(
+/* static */
+already_AddRefed<KeyframeEffect> KeyframeEffect::Constructor(
     const GlobalObject& aGlobal, KeyframeEffect& aSource, ErrorResult& aRv) {
-  nsIDocument* doc = AnimationUtils::GetCurrentRealmDocument(aGlobal.Context());
+  Document* doc = AnimationUtils::GetCurrentRealmDocument(aGlobal.Context());
   if (!doc) {
     aRv.Throw(NS_ERROR_FAILURE);
     return nullptr;
@@ -829,14 +922,14 @@ void KeyframeEffect::GetTarget(
   }
 
   switch (mTarget->mPseudoType) {
-    case CSSPseudoElementType::before:
-    case CSSPseudoElementType::after:
+    case PseudoStyleType::before:
+    case PseudoStyleType::after:
       aRv.SetValue().SetAsCSSPseudoElement() =
           CSSPseudoElement::GetCSSPseudoElement(mTarget->mElement,
                                                 mTarget->mPseudoType);
       break;
 
-    case CSSPseudoElementType::NotPseudo:
+    case PseudoStyleType::NotPseudo:
       aRv.SetValue().SetAsElement() = mTarget->mElement;
       break;
 
@@ -870,12 +963,10 @@ void KeyframeEffect::SetTarget(
 
   if (mTarget) {
     UpdateTargetRegistration();
-    RefPtr<ComputedStyle> computedStyle = GetTargetComputedStyle();
+    RefPtr<ComputedStyle> computedStyle = GetTargetComputedStyle(Flush::None);
     if (computedStyle) {
       UpdateProperties(computedStyle);
     }
-
-    MaybeUpdateFrameForCompositor();
 
     RequestRestyle(EffectCompositor::RestyleType::Layer);
 
@@ -970,7 +1061,7 @@ void KeyframeEffect::GetProperties(
 }
 
 void KeyframeEffect::GetKeyframes(JSContext*& aCx, nsTArray<JSObject*>& aResult,
-                                  ErrorResult& aRv) {
+                                  ErrorResult& aRv) const {
   MOZ_ASSERT(aResult.IsEmpty());
   MOZ_ASSERT(!aRv.Failed());
 
@@ -1002,7 +1093,7 @@ void KeyframeEffect::GetKeyframes(JSContext*& aCx, nsTArray<JSObject*>& aResult,
     // we might end up returning variables as-is or empty string. That should be
     // acceptable however, since such a case is rare and this is only
     // short-term (and unshipped) behavior until bug 1391537 is fixed.
-    computedStyle = GetTargetComputedStyle();
+    computedStyle = GetTargetComputedStyle(Flush::Style);
   }
 
   for (const Keyframe& keyframe : mKeyframes) {
@@ -1056,7 +1147,7 @@ void KeyframeEffect::GetKeyframes(JSContext*& aCx, nsTArray<JSObject*>& aResult,
             &stringValue, computedStyle, customProperties);
       } else {
         RawServoAnimationValue* value =
-            mBaseStyleValuesForServo.GetWeak(propertyValue.mProperty);
+            mBaseValues.GetWeak(propertyValue.mProperty);
 
         if (value) {
           Servo_AnimationValue_Serialize(value, propertyValue.mProperty,
@@ -1216,7 +1307,7 @@ bool KeyframeEffect::CanThrottleOverflowChangesInScrollable(
     nsIFrame& aFrame) const {
   // If the target element is not associated with any documents, we don't care
   // it.
-  nsIDocument* doc = GetRenderedDocument();
+  Document* doc = GetRenderedDocument();
   if (!doc) {
     return true;
   }
@@ -1252,8 +1343,8 @@ bool KeyframeEffect::CanThrottleOverflowChangesInScrollable(
   }
 
   ScrollStyles ss = scrollable->GetScrollStyles();
-  if (ss.mVertical == NS_STYLE_OVERFLOW_HIDDEN &&
-      ss.mHorizontal == NS_STYLE_OVERFLOW_HIDDEN &&
+  if (ss.mVertical == StyleOverflow::Hidden &&
+      ss.mHorizontal == StyleOverflow::Hidden &&
       scrollable->GetLogicalScrollPosition() == nsPoint(0, 0)) {
     return true;
   }
@@ -1276,20 +1367,20 @@ nsIFrame* KeyframeEffect::GetPrimaryFrame() const {
     return frame;
   }
 
-  if (mTarget->mPseudoType == CSSPseudoElementType::before) {
+  if (mTarget->mPseudoType == PseudoStyleType::before) {
     frame = nsLayoutUtils::GetBeforeFrame(mTarget->mElement);
-  } else if (mTarget->mPseudoType == CSSPseudoElementType::after) {
+  } else if (mTarget->mPseudoType == PseudoStyleType::after) {
     frame = nsLayoutUtils::GetAfterFrame(mTarget->mElement);
   } else {
     frame = mTarget->mElement->GetPrimaryFrame();
-    MOZ_ASSERT(mTarget->mPseudoType == CSSPseudoElementType::NotPseudo,
+    MOZ_ASSERT(mTarget->mPseudoType == PseudoStyleType::NotPseudo,
                "unknown mTarget->mPseudoType");
   }
 
   return frame;
 }
 
-nsIDocument* KeyframeEffect::GetRenderedDocument() const {
+Document* KeyframeEffect::GetRenderedDocument() const {
   if (!mTarget) {
     return nullptr;
   }
@@ -1297,15 +1388,15 @@ nsIDocument* KeyframeEffect::GetRenderedDocument() const {
 }
 
 nsIPresShell* KeyframeEffect::GetPresShell() const {
-  nsIDocument* doc = GetRenderedDocument();
+  Document* doc = GetRenderedDocument();
   if (!doc) {
     return nullptr;
   }
   return doc->GetShell();
 }
 
-/* static */ bool KeyframeEffect::IsGeometricProperty(
-    const nsCSSPropertyID aProperty) {
+/* static */
+bool KeyframeEffect::IsGeometricProperty(const nsCSSPropertyID aProperty) {
   MOZ_ASSERT(!nsCSSProps::IsShorthand(aProperty),
              "Property should be a longhand property");
 
@@ -1330,14 +1421,23 @@ nsIPresShell* KeyframeEffect::GetPresShell() const {
   }
 }
 
-/* static */ bool KeyframeEffect::CanAnimateTransformOnCompositor(
+/* static */
+bool KeyframeEffect::CanAnimateTransformOnCompositor(
     const nsIFrame* aFrame,
     AnimationPerformanceWarning::Type& aPerformanceWarning /* out */) {
+  // In some cases, such as when we are simply collecting all the compositor
+  // animations regardless of the frame on which they run in order to calculate
+  // change hints, |aFrame| will be the style frame. However, even in that case
+  // we should look at the primary frame since that is where the transform will
+  // be applied.
+  const nsIFrame* primaryFrame =
+      nsLayoutUtils::GetPrimaryFrameFromStyleFrame(aFrame);
+
   // Disallow OMTA for preserve-3d transform. Note that we check the style
   // property rather than Extend3DContext() since that can recurse back into
   // this function via HasOpacity(). See bug 779598.
-  if (aFrame->Combines3DTransformWithAncestors() ||
-      aFrame->StyleDisplay()->mTransformStyle ==
+  if (primaryFrame->Combines3DTransformWithAncestors() ||
+      primaryFrame->StyleDisplay()->mTransformStyle ==
           NS_STYLE_TRANSFORM_STYLE_PRESERVE_3D) {
     aPerformanceWarning =
         AnimationPerformanceWarning::Type::TransformPreserve3D;
@@ -1347,14 +1447,14 @@ nsIPresShell* KeyframeEffect::GetPresShell() const {
   // what we need for animating backface-visibility correctly if we
   // remove the above test for Extend3DContext(); that would require
   // looking at backface-visibility on descendants as well. See bug 1186204.
-  if (aFrame->BackfaceIsHidden()) {
+  if (primaryFrame->BackfaceIsHidden()) {
     aPerformanceWarning =
         AnimationPerformanceWarning::Type::TransformBackfaceVisibilityHidden;
     return false;
   }
   // Async 'transform' animations of aFrames with SVG transforms is not
   // supported.  See bug 779599.
-  if (aFrame->IsSVGTransformed()) {
+  if (primaryFrame->IsSVGTransformed()) {
     aPerformanceWarning = AnimationPerformanceWarning::Type::TransformSVG;
     return false;
   }
@@ -1390,13 +1490,15 @@ bool KeyframeEffect::ShouldBlockAsyncTransformAnimations(
     }
 
     // Check for unsupported transform animations
-    if (property.mProperty == eCSSProperty_transform) {
+    if (LayerAnimationInfo::GetCSSPropertiesFor(DisplayItemType::TYPE_TRANSFORM)
+            .HasProperty(property.mProperty)) {
       if (!CanAnimateTransformOnCompositor(aFrame, aPerformanceWarning)) {
         return true;
       }
     }
   }
 
+  // FIXME: Bug 1425837: drop this hack.
   // XXX cku temporarily disable async-animation when this frame has any
   // individual transforms before bug 1425837 been fixed.
   if (aFrame->StyleDisplay()->HasIndividualTransform()) {
@@ -1443,10 +1545,15 @@ KeyframeEffect::CreateComputedStyleForAnimationValue(
              "CreateComputedStyleForAnimationValue needs to be called "
              "with a valid ComputedStyle");
 
-  ServoStyleSet* styleSet = aPresContext->StyleSet();
   Element* elementForResolve = EffectCompositor::GetElementToRestyle(
       mTarget->mElement, mTarget->mPseudoType);
-  MOZ_ASSERT(elementForResolve, "The target element shouldn't be null");
+  // The element may be null if, for example, we target a pseudo-element that no
+  // longer exists.
+  if (!elementForResolve) {
+    return nullptr;
+  }
+
+  ServoStyleSet* styleSet = aPresContext->StyleSet();
   return styleSet->ResolveServoStyleByAddingAnimation(
       elementForResolve, aBaseComputedStyle, aValue.mServo);
 }
@@ -1454,6 +1561,7 @@ KeyframeEffect::CreateComputedStyleForAnimationValue(
 void KeyframeEffect::CalculateCumulativeChangeHint(
     const ComputedStyle* aComputedStyle) {
   mCumulativeChangeHint = nsChangeHint(0);
+  mNeedsStyleData = false;
 
   nsPresContext* presContext =
       nsContentUtils::GetContextForContent(mTarget->mElement);
@@ -1461,6 +1569,7 @@ void KeyframeEffect::CalculateCumulativeChangeHint(
     // Change hints make no sense if we're not rendered.
     //
     // Actually, we cannot even post them anywhere.
+    mNeedsStyleData = true;
     return;
   }
 
@@ -1501,6 +1610,7 @@ void KeyframeEffect::CalculateCumulativeChangeHint(
           property.mProperty, segment.mFromValue, presContext, aComputedStyle);
       if (!fromContext) {
         mCumulativeChangeHint = ~nsChangeHint_Hints_CanIgnoreIfNotVisible;
+        mNeedsStyleData = true;
         return;
       }
 
@@ -1508,12 +1618,13 @@ void KeyframeEffect::CalculateCumulativeChangeHint(
           property.mProperty, segment.mToValue, presContext, aComputedStyle);
       if (!toContext) {
         mCumulativeChangeHint = ~nsChangeHint_Hints_CanIgnoreIfNotVisible;
+        mNeedsStyleData = true;
         return;
       }
 
       uint32_t equalStructs = 0;
       nsChangeHint changeHint =
-          fromContext->CalcStyleDifference(toContext, &equalStructs);
+          fromContext->CalcStyleDifference(*toContext, &equalStructs);
 
       mCumulativeChangeHint |= changeHint;
     }
@@ -1554,24 +1665,6 @@ bool KeyframeEffect::CanIgnoreIfNotVisible() const {
                          nsChangeHint_Hints_CanIgnoreIfNotVisible);
 }
 
-void KeyframeEffect::MaybeUpdateFrameForCompositor() {
-  nsIFrame* frame = GetStyleFrame();
-  if (!frame) {
-    return;
-  }
-
-  // FIXME: Bug 1272495: If this effect does not win in the cascade, the
-  // NS_FRAME_MAY_BE_TRANSFORMED flag should be removed when the animation
-  // will be removed from effect set or the transform keyframes are removed
-  // by setKeyframes. The latter case will be hard to solve though.
-  for (const AnimationProperty& property : mProperties) {
-    if (property.mProperty == eCSSProperty_transform) {
-      frame->AddStateBits(NS_FRAME_MAY_BE_TRANSFORMED);
-      return;
-    }
-  }
-}
-
 void KeyframeEffect::MarkCascadeNeedsUpdate() {
   if (!mTarget) {
     return;
@@ -1585,7 +1678,8 @@ void KeyframeEffect::MarkCascadeNeedsUpdate() {
   effectSet->MarkCascadeNeedsUpdate();
 }
 
-/* static */ bool KeyframeEffect::HasComputedTimingChanged(
+/* static */
+bool KeyframeEffect::HasComputedTimingChanged(
     const ComputedTiming& aComputedTiming,
     IterationCompositeOperation aIterationComposite,
     const Nullable<double>& aProgressOnLastCompose,
@@ -1607,12 +1701,21 @@ bool KeyframeEffect::HasComputedTimingChanged() const {
 }
 
 bool KeyframeEffect::ContainsAnimatedScale(const nsIFrame* aFrame) const {
+  // For display:table content, transform animations run on the table wrapper
+  // frame. If we are being passed a frame that doesn't support transforms
+  // (i.e. the inner table frame) we could just return false, but it possibly
+  // means we looked up the wrong EffectSet so for now we just assert instead.
+  MOZ_ASSERT(aFrame && aFrame->IsFrameOfType(nsIFrame::eSupportsCSSTransforms),
+             "We should be passed a frame that supports transforms");
+
   if (!IsCurrent()) {
     return false;
   }
 
   for (const AnimationProperty& prop : mProperties) {
-    if (prop.mProperty != eCSSProperty_transform) {
+    if (prop.mProperty != eCSSProperty_transform &&
+        prop.mProperty != eCSSProperty_scale &&
+        prop.mProperty != eCSSProperty_rotate) {
       continue;
     }
 
@@ -1662,22 +1765,31 @@ void KeyframeEffect::UpdateEffectSet(EffectSet* aEffectSet) const {
     return;
   }
 
-  nsIFrame* frame = GetStyleFrame();
-  if (HasAnimationOfProperty(eCSSProperty_opacity)) {
+  nsIFrame* styleFrame = GetStyleFrame();
+  if (HasAnimationOfPropertySet(nsCSSPropertyIDSet::OpacityProperties())) {
     effectSet->SetMayHaveOpacityAnimation();
-    EnumerateContinuationsOrIBSplitSiblings(
-        frame, [](nsIFrame* aFrame) { aFrame->SetMayHaveOpacityAnimation(); });
+    EnumerateContinuationsOrIBSplitSiblings(styleFrame, [](nsIFrame* aFrame) {
+      aFrame->SetMayHaveOpacityAnimation();
+    });
   }
-  if (HasAnimationOfProperty(eCSSProperty_transform)) {
+
+  nsIFrame* primaryFrame = GetPrimaryFrame();
+  if (HasAnimationOfPropertySet(
+          nsCSSPropertyIDSet::TransformLikeProperties())) {
     effectSet->SetMayHaveTransformAnimation();
-    EnumerateContinuationsOrIBSplitSiblings(frame, [](nsIFrame* aFrame) {
+    // For table frames, it's not clear if we should iterate over the
+    // continuations of the table wrapper or the inner table frame.
+    //
+    // Fortunately, this is not currently an issue because we only split tables
+    // when printing (page breaks) where we don't run animations.
+    EnumerateContinuationsOrIBSplitSiblings(primaryFrame, [](nsIFrame* aFrame) {
       aFrame->SetMayHaveTransformAnimation();
     });
   }
 }
 
 KeyframeEffect::MatchForCompositor KeyframeEffect::IsMatchForCompositor(
-    nsCSSPropertyID aProperty, const nsIFrame* aFrame,
+    const nsCSSPropertyIDSet& aPropertySet, const nsIFrame* aFrame,
     const EffectSet& aEffects,
     AnimationPerformanceWarning::Type& aPerformanceWarning /* out */) const {
   MOZ_ASSERT(mAnimation);
@@ -1686,7 +1798,7 @@ KeyframeEffect::MatchForCompositor KeyframeEffect::IsMatchForCompositor(
     return KeyframeEffect::MatchForCompositor::No;
   }
 
-  if (mAnimation->ShouldBeSynchronizedWithMainThread(aProperty, aFrame,
+  if (mAnimation->ShouldBeSynchronizedWithMainThread(aPropertySet, aFrame,
                                                      aPerformanceWarning)) {
     // For a given |aFrame|, we don't want some animations of |aProperty| to
     // run on the compositor and others to run on the main thread, so if any
@@ -1694,7 +1806,7 @@ KeyframeEffect::MatchForCompositor KeyframeEffect::IsMatchForCompositor(
     return KeyframeEffect::MatchForCompositor::NoAndBlockThisProperty;
   }
 
-  if (!HasEffectiveAnimationOfProperty(aProperty, aEffects)) {
+  if (!HasEffectiveAnimationOfPropertySet(aPropertySet, aEffects)) {
     return KeyframeEffect::MatchForCompositor::No;
   }
 
@@ -1705,7 +1817,7 @@ KeyframeEffect::MatchForCompositor KeyframeEffect::IsMatchForCompositor(
     return KeyframeEffect::MatchForCompositor::NoAndBlockThisProperty;
   }
 
-  if (aProperty == eCSSProperty_background_color) {
+  if (aPropertySet.HasProperty(eCSSProperty_background_color)) {
     if (!StaticPrefs::gfx_omta_background_color()) {
       return KeyframeEffect::MatchForCompositor::No;
     }

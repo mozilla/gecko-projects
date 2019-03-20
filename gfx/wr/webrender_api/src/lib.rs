@@ -25,16 +25,20 @@ extern crate core;
 extern crate core_foundation;
 #[cfg(target_os = "macos")]
 extern crate core_graphics;
-#[cfg(target_os = "windows")]
-extern crate dwrote;
+#[macro_use]
+extern crate derive_more;
 pub extern crate euclid;
 #[cfg(feature = "ipc")]
 extern crate ipc_channel;
+#[macro_use]
+extern crate malloc_size_of_derive;
 extern crate serde;
 #[macro_use]
 extern crate serde_derive;
 extern crate time;
 
+extern crate wr_malloc_size_of;
+use wr_malloc_size_of as malloc_size_of;
 
 mod api;
 pub mod channel;
@@ -44,7 +48,7 @@ mod display_list;
 mod font;
 mod gradient_builder;
 mod image;
-mod units;
+pub mod units;
 
 pub use api::*;
 pub use color::*;
@@ -53,4 +57,3 @@ pub use display_list::*;
 pub use font::*;
 pub use gradient_builder::*;
 pub use image::*;
-pub use units::*;

@@ -3,12 +3,10 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-ChromeUtils.import("resource://gre/modules/UpdateUtils.jsm");
-ChromeUtils.import("resource://gre/modules/Services.jsm");
-ChromeUtils.import("resource://gre/modules/AppConstants.jsm");
-ChromeUtils.import("resource://testing-common/AppInfo.jsm");
-ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
-ChromeUtils.import("resource://gre/modules/ctypes.jsm");
+const {UpdateUtils} = ChromeUtils.import("resource://gre/modules/UpdateUtils.jsm");
+const {AppConstants} = ChromeUtils.import("resource://gre/modules/AppConstants.jsm");
+const {getAppInfo, updateAppInfo} = ChromeUtils.import("resource://testing-common/AppInfo.jsm");
+const {ctypes} = ChromeUtils.import("resource://gre/modules/ctypes.jsm");
 
 ChromeUtils.defineModuleGetter(this, "WindowsRegistry",
                                "resource://gre/modules/WindowsRegistry.jsm");
@@ -117,6 +115,8 @@ function getProcArchitecture() {
 
     GetNativeSystemInfo(sysInfo.address());
     switch (sysInfo.wProcessorArchitecture) {
+      case 12:
+        return "aarch64";
       case 9:
         return "x64";
       case 6:

@@ -4,17 +4,17 @@
 
 "use strict";
 
-ChromeUtils.import("resource://gre/modules/Preferences.jsm");
-ChromeUtils.import("resource://gre/modules/Services.jsm");
-ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
+const {Preferences} = ChromeUtils.import("resource://gre/modules/Preferences.jsm");
+const {Services} = ChromeUtils.import("resource://gre/modules/Services.jsm");
+const {XPCOMUtils} = ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
 
-ChromeUtils.import("chrome://marionette/content/assert.js");
+const {assert} = ChromeUtils.import("chrome://marionette/content/assert.js");
 const {
   InvalidArgumentError,
-} = ChromeUtils.import("chrome://marionette/content/error.js", {});
+} = ChromeUtils.import("chrome://marionette/content/error.js");
 const {
   pprint,
-} = ChromeUtils.import("chrome://marionette/content/format.js", {});
+} = ChromeUtils.import("chrome://marionette/content/format.js");
 
 XPCOMUtils.defineLazyGlobalGetters(this, ["URL"]);
 
@@ -67,8 +67,11 @@ class Timeouts {
           break;
 
         case "script":
-          t.script = assert.positiveInteger(ms,
-              pprint`Expected ${type} to be a positive integer, got ${ms}`);
+          if (ms !== null) {
+            assert.positiveInteger(ms,
+                pprint`Expected ${type} to be a positive integer, got ${ms}`);
+          }
+          t.script = ms;
           break;
 
         case "pageLoad":
@@ -405,6 +408,7 @@ class Capabilities extends Map {
 
       // proprietary
       ["moz:accessibilityChecks", false],
+      ["moz:buildID", Services.appinfo.appBuildID],
       ["moz:headless", Cc["@mozilla.org/gfx/info;1"].getService(Ci.nsIGfxInfo).isHeadless],
       ["moz:processID", Services.appinfo.processID],
       ["moz:profile", maybeProfile()],
@@ -438,7 +442,9 @@ class Capabilities extends Map {
    * @return {Object.<string, ?>}
    */
   toJSON() {
-    return marshal(this);
+    let marshalled = marshal(this);
+    marshalled.timeouts = super.get("timeouts");
+    return marshalled;
   }
 
   /**
@@ -549,7 +555,7 @@ function getWebDriverPlatformName() {
 
 // Specialisation of |JSON.stringify| that produces JSON-safe object
 // literals, dropping empty objects and entries which values are undefined
-// or null.  Objects are allowed to produce their own JSON representations
+// or null. Objects are allowed to produce their own JSON representations
 // by implementing a |toJSON| function.
 function marshal(obj) {
   let rv = Object.create(null);

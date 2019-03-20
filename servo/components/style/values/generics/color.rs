@@ -1,6 +1,6 @@
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
- * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 //! Generic types for color properties.
 
@@ -73,4 +73,27 @@ impl<RGBA> From<RGBA> for Color<RGBA> {
     fn from(color: RGBA) -> Self {
         Self::rgba(color)
     }
+}
+
+/// Either `<color>` or `auto`.
+#[derive(
+    Animate,
+    Clone,
+    ComputeSquaredDistance,
+    Copy,
+    Debug,
+    MallocSizeOf,
+    PartialEq,
+    Parse,
+    SpecifiedValueInfo,
+    ToAnimatedValue,
+    ToAnimatedZero,
+    ToComputedValue,
+    ToCss,
+)]
+pub enum ColorOrAuto<C> {
+    /// A `<color>
+    Color(C),
+    /// `auto`
+    Auto,
 }

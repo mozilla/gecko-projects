@@ -1285,18 +1285,6 @@ void CodeGenerator::visitTruncF(LTruncF* lir) {
   bailoutFrom(&bail, lir->snapshot());
 }
 
-void CodeGeneratorARM::emitRoundDouble(FloatRegister src, Register dest,
-                                       Label* fail) {
-  ScratchDoubleScope scratch(masm);
-  ScratchRegisterScope scratchReg(masm);
-
-  masm.ma_vcvt_F64_I32(src, scratch);
-  masm.ma_vxfer(scratch, dest);
-  masm.ma_cmp(dest, Imm32(0x7fffffff), scratchReg);
-  masm.ma_cmp(dest, Imm32(0x80000000), scratchReg, Assembler::NotEqual);
-  masm.ma_b(fail, Assembler::Equal);
-}
-
 void CodeGenerator::visitTruncateDToInt32(LTruncateDToInt32* ins) {
   emitTruncateDouble(ToFloatRegister(ins->input()), ToRegister(ins->output()),
                      ins->mir());
@@ -1794,7 +1782,7 @@ void CodeGenerator::visitWasmSelect(LWasmSelect* ins) {
   Register cond = ToRegister(ins->condExpr());
   masm.as_cmp(cond, Imm8(0));
 
-  if (mirType == MIRType::Int32) {
+  if (mirType == MIRType::Int32 || mirType == MIRType::RefOrNull) {
     Register falseExpr = ToRegister(ins->falseExpr());
     Register out = ToRegister(ins->output());
     MOZ_ASSERT(ToRegister(ins->trueExpr()) == out,
@@ -2455,9 +2443,9 @@ void CodeGenerator::visitWasmTruncateToInt64(LWasmTruncateToInt64* lir) {
     addOutOfLineCode(ool, mir);
   }
 
-  ScratchDoubleScope scratchScope(masm);
+  ScratchDoubleScope fpscratch(masm);
   if (fromType == MIRType::Float32) {
-    inputDouble = ScratchDoubleReg;
+    inputDouble = fpscratch;
     masm.convertFloat32ToDouble(input, inputDouble);
   }
 

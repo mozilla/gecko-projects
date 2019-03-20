@@ -16,11 +16,12 @@
 
 <stringbundle id="bundlePreferences" src="chrome://browser/locale/preferences.properties"/>
 
+<box id="template-paneGeneral" hidden="true"><![CDATA[
 <hbox id="generalCategory"
       class="subcategory"
       hidden="true"
       data-category="paneGeneral">
-      <label class="header-name" flex="1" data-l10n-id="pane-general-title"/>
+  <html:h1 data-l10n-id="pane-general-title"/>
 </hbox>
 
 <!-- Startup -->
@@ -28,20 +29,6 @@
           data-category="paneGeneral"
           hidden="true">
   <label><html:h2 data-l10n-id="startup-header"/></label>
-
-#ifdef MOZ_DEV_EDITION
-  <vbox id="separateProfileBox">
-    <checkbox id="separateProfileMode"
-              data-l10n-id="separate-profile-mode"/>
-    <hbox id="sync-dev-edition-root" lign="center" class="indent" hidden="true">
-      <label id="useFirefoxSync" data-l10n-id="use-firefox-sync"/>
-      <deck id="getStarted">
-        <label class="text-link" data-l10n-id="get-started-not-logged-in"/>
-        <label class="text-link" data-l10n-id="get-started-configured"/>
-      </deck>
-    </hbox>
-  </vbox>
-#endif
 
   <vbox id="startupPageBox">
     <checkbox id="browserRestoreSession"
@@ -91,7 +78,7 @@
               onsyncfrompreference="return gMainPane.readLinkTarget();"
               onsynctopreference="return gMainPane.writeLinkTarget();"/>
 
-    <checkbox id="warnCloseMultiple" data-l10n-id="warn-on-quit-close-multiple-tabs"
+    <checkbox id="warnCloseMultiple" data-l10n-id="warn-on-close-multiple-tabs"
               preference="browser.tabs.warnOnClose"/>
 
     <checkbox id="warnOpenMany" data-l10n-id="warn-on-open-many-tabs"
@@ -119,7 +106,7 @@
                   data-l10n-id="browser-containers-enabled"
                   preference="privacy.userContext.enabled"
                   onsyncfrompreference="return gMainPane.readBrowserContainersCheckbox();"/>
-        <label id="browserContainersLearnMore" class="learnMore text-link" data-l10n-id="browser-containers-learn-more"/>
+        <label id="browserContainersLearnMore" is="text-link" class="learnMore" data-l10n-id="browser-containers-learn-more"/>
         <spacer flex="1"/>
         <!-- Please don't remove the wrapping hbox/vbox/box for these elements. It's used to properly compute the search tooltip position. -->
         <hbox>
@@ -139,7 +126,7 @@
       class="subcategory"
       hidden="true"
       data-category="paneGeneral">
-  <label class="header-name" flex="1" data-l10n-id="language-and-appearance-header"/>
+  <html:h1 data-l10n-id="language-and-appearance-header"/>
 </hbox>
 
 <!-- Fonts and Colors -->
@@ -354,7 +341,7 @@
       class="subcategory"
       hidden="true"
       data-category="paneGeneral">
-  <label class="header-name" flex="1" data-l10n-id="files-and-applications-title"/>
+  <html:h1 data-l10n-id="files-and-applications-title"/>
 </hbox>
 
 <!--Downloads-->
@@ -393,38 +380,27 @@
            data-l10n-id="applications-filter"
            aria-controls="handlersView"/>
 
+  <listheader equalsize="always">
+    <treecol id="typeColumn" data-l10n-id="applications-type-column" value="type"
+             persist="sortDirection"
+             flex="1" sortDirection="ascending"/>
+    <treecol id="actionColumn" data-l10n-id="applications-action-column" value="action"
+             persist="sortDirection"
+             flex="1"/>
+  </listheader>
   <richlistbox id="handlersView"
-               preference="pref.downloads.disable_button.edit_actions">
-    <listheader equalsize="always">
-        <treecol id="typeColumn" data-l10n-id="applications-type-column" value="type"
-                 persist="sortDirection"
-                 flex="1" sortDirection="ascending"/>
-        <treecol id="actionColumn" data-l10n-id="applications-action-column" value="action"
-                 persist="sortDirection"
-                 flex="1"/>
-    </listheader>
-  </richlistbox>
+               preference="pref.downloads.disable_button.edit_actions"/>
 </groupbox>
 
 
 <!-- DRM Content -->
 <groupbox id="drmGroup" data-category="paneGeneral" data-subcategory="drm" hidden="true">
   <label><html:h2 data-l10n-id="drm-content-header"/></label>
-  <grid id="contentGrid2">
-    <columns>
-      <column flex="1"/>
-      <column/>
-    </columns>
-    <rows id="contentRows-2">
-      <row id="playDRMContentRow">
-        <hbox align="center">
-          <checkbox id="playDRMContent" preference="media.eme.enabled"
-                    class="tail-with-learn-more" data-l10n-id="play-drm-content" />
-          <label id="playDRMContentLink" class="learnMore text-link" data-l10n-id="play-drm-content-learn-more"/>
-        </hbox>
-      </row>
-    </rows>
-  </grid>
+  <hbox align="center">
+    <checkbox id="playDRMContent" preference="media.eme.enabled"
+              class="tail-with-learn-more" data-l10n-id="play-drm-content" />
+    <label id="playDRMContentLink" class="learnMore" data-l10n-id="play-drm-content-learn-more" is="text-link"/>
+  </hbox>
 </groupbox>
 
 #ifdef HAVE_SHELL_SERVICE
@@ -436,7 +412,7 @@
       class="subcategory"
       hidden="true"
       data-category="paneGeneral">
-  <label class="header-name" flex="1" data-l10n-id="update-application-title"/>
+  <html:h1 data-l10n-id="update-application-title"/>
 </hbox>
 
 <!-- Update -->
@@ -533,7 +509,7 @@
       <hbox id="manualUpdate" align="start">
         <image class="face-sad"/>
         <description flex="1" data-l10n-id="update-manual">
-          <label id="manualLink" class="text-link" data-l10n-name="manual-link"/>
+          <label id="manualLink" data-l10n-name="manual-link" is="text-link"/>
         </description>
         <spacer flex="1"/>
         <button data-l10n-id="update-checkForUpdatesButton"
@@ -541,7 +517,7 @@
       </hbox>
       <hbox id="unsupportedSystem" align="start">
         <description flex="1" data-l10n-id="update-unsupported">
-          <label id="unsupportedLink" class="learnMore text-link" data-l10n-name="unsupported-link"></label>
+          <label id="unsupportedLink" class="learnMore" data-l10n-name="unsupported-link" is="text-link"></label>
         </description>
         <spacer flex="1"/>
         <button data-l10n-id="update-checkForUpdatesButton"
@@ -559,14 +535,19 @@
 
 #ifdef MOZ_UPDATER
   <description id="updateAllowDescription" data-l10n-id="update-application-allow-description"></description>
-  <radiogroup id="updateRadioGroup">
-    <radio id="autoDesktop"
-           value="true"
-           data-l10n-id="update-application-auto"/>
-    <radio id="manualDesktop"
-           value="false"
-           data-l10n-id="update-application-check-choose"/>
-  </radiogroup>
+  <vbox id="updateSettingsContainer">
+    <radiogroup id="updateRadioGroup">
+      <radio id="autoDesktop"
+             value="true"
+             data-l10n-id="update-application-auto"/>
+      <radio id="manualDesktop"
+             value="false"
+             data-l10n-id="update-application-check-choose"/>
+    </radiogroup>
+    <description id="updateSettingCrossUserWarning" hidden="true"
+                 data-l10n-id="update-application-warning-cross-user-setting">
+    </description>
+  </vbox>
 #ifdef MOZ_MAINTENANCE_SERVICE
   <checkbox id="useService"
             data-l10n-id="update-application-use-service"
@@ -582,7 +563,7 @@
       class="subcategory"
       hidden="true"
       data-category="paneGeneral">
-  <label class="header-name" flex="1" data-l10n-id="performance-title"/>
+  <html:h1 data-l10n-id="performance-title"/>
 </hbox>
 
 <!-- Performance -->
@@ -594,7 +575,7 @@
               class="tail-with-learn-more"
               data-l10n-id="performance-use-recommended-settings-checkbox"
               preference="browser.preferences.defaultPerformanceSettings.enabled"/>
-    <label id="performanceSettingsLearnMore" class="learnMore text-link" data-l10n-id="performance-settings-learn-more"/>
+    <label id="performanceSettingsLearnMore" class="learnMore" data-l10n-id="performance-settings-learn-more" is="text-link"/>
   </hbox>
   <description class="indent tip-caption" data-l10n-id="performance-use-recommended-settings-desc"/>
 
@@ -628,7 +609,7 @@
       class="subcategory"
       hidden="true"
       data-category="paneGeneral">
-  <label class="header-name" flex="1" data-l10n-id="browsing-title"/>
+  <html:h1 data-l10n-id="browsing-title"/>
 </hbox>
 
 <!-- Browsing -->
@@ -654,12 +635,19 @@
   <checkbox id="searchStartTyping"
             data-l10n-id="browsing-search-on-start-typing"
             preference="accessibility.typeaheadfind"/>
-  <hbox align="center" data-subcategory="cfr">
+  <hbox align="center" data-subcategory="cfraddons">
     <checkbox id="cfrRecommendations"
             class="tail-with-learn-more"
             data-l10n-id="browsing-cfr-recommendations"
-            preference="browser.newtabpage.activity-stream.asrouter.userprefs.cfr"/>
-    <label id="cfrLearnMore" class="learnMore text-link" data-l10n-id="browsing-cfr-recommendations-learn-more"/>
+            preference="browser.newtabpage.activity-stream.asrouter.userprefs.cfr.addons"/>
+    <label id="cfrLearnMore" class="learnMore" data-l10n-id="browsing-cfr-recommendations-learn-more" is="text-link"/>
+  </hbox>
+  <hbox align="center" data-subcategory="cfrfeatures">
+    <checkbox id="cfrRecommendations-features"
+            class="tail-with-learn-more"
+            data-l10n-id="browsing-cfr-features"
+            preference="browser.newtabpage.activity-stream.asrouter.userprefs.cfr.features"/>
+    <label id="cfrFeaturesLearnMore" class="learnMore" data-l10n-id="browsing-cfr-recommendations-learn-more" is="text-link"/>
   </hbox>
 </groupbox>
 
@@ -667,7 +655,7 @@
       class="subcategory"
       hidden="true"
       data-category="paneGeneral">
-  <label class="header-name" flex="1" data-l10n-id="network-settings-title"/>
+  <html:h1 data-l10n-id="network-settings-title"/>
 </hbox>
 
 <!-- Network Settings-->
@@ -678,7 +666,7 @@
     <hbox align="center" flex="1">
       <description id="connectionSettingsDescription" control="connectionSettings"/>
       <spacer width="5"/>
-      <label id="connectionSettingsLearnMore" class="learnMore text-link"
+      <label id="connectionSettingsLearnMore" class="learnMore" is="text-link"
         data-l10n-id="network-proxy-connection-learn-more">
       </label>
       <separator orient="vertical"/>
@@ -718,3 +706,4 @@
     </hbox>
   </hbox>
 </groupbox>
+]]></box>

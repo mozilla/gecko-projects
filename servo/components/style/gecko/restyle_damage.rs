@@ -1,6 +1,6 @@
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
- * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 //! Gecko's restyle damage computation (aka change hints, aka `nsChangeHint`).
 
@@ -83,7 +83,7 @@ impl GeckoRestyleDamage {
     /// Gets restyle damage to reconstruct the entire frame, subsuming all
     /// other damage.
     pub fn reconstruct() -> Self {
-        GeckoRestyleDamage(structs::nsChangeHint_nsChangeHint_ReconstructFrame)
+        GeckoRestyleDamage(structs::nsChangeHint::nsChangeHint_ReconstructFrame)
     }
 }
 

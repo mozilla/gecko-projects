@@ -13,14 +13,16 @@ namespace layers {
 
 const ScrollableLayerGuid::ViewID ScrollableLayerGuid::NULL_SCROLL_ID = 0;
 
-void FrameMetrics::RecalculateViewportOffset() {
+void FrameMetrics::RecalculateLayoutViewportOffset() {
   if (!mIsRootContent) {
     return;
   }
-  KeepLayoutViewportEnclosingVisualViewport(GetVisualViewport(), mViewport);
+  KeepLayoutViewportEnclosingVisualViewport(GetVisualViewport(),
+                                            mLayoutViewport);
 }
 
-/* static */ void FrameMetrics::KeepLayoutViewportEnclosingVisualViewport(
+/* static */
+void FrameMetrics::KeepLayoutViewportEnclosingVisualViewport(
     const CSSRect& aVisualViewport, CSSRect& aLayoutViewport) {
   // If the visual viewport is contained within the layout viewport, we don't
   // need to make any adjustments, so we can exit early.

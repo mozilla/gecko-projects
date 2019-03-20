@@ -3,15 +3,12 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-include "mozilla/dom/MediaIPCUtils.h";
-
 include protocol PVideoDecoderManager;
 include PMediaDecoderParams;
 include LayersSurfaces;
 using mozilla::layers::LayersBackend from "mozilla/layers/LayersTypes.h";
 
 namespace mozilla {
-namespace dom {
 
 struct VideoDataIPDL
 {
@@ -38,8 +35,8 @@ parent:
   async Flush();
   async Drain();
   async Shutdown();
-
-  async SetSeekThreshold(int64_t time);
+  // To clear the threshold, call with INT64_MIN.
+  async SetSeekThreshold(TimeUnit time);
 
   async __delete__();
 
@@ -59,5 +56,4 @@ child:
   async Error(nsresult error);
 };
 
-} // namespace dom
 } // namespace mozilla

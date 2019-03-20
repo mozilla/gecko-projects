@@ -18,7 +18,6 @@
 #include "nsIObjectOutputStream.h"
 #include "nsEscape.h"
 #include "nsError.h"
-#include "nsIIPCSerializableURI.h"
 #include "mozilla/MemoryReporting.h"
 #include "mozilla/ipc/URIUtils.h"
 #include "nsIURIMutator.h"
@@ -32,7 +31,8 @@ static NS_DEFINE_CID(kThisSimpleURIImplementationCID,
                      NS_THIS_SIMPLEURI_IMPLEMENTATION_CID);
 static NS_DEFINE_CID(kSimpleURICID, NS_SIMPLEURI_CID);
 
-/* static */ already_AddRefed<nsSimpleURI> nsSimpleURI::From(nsIURI *aURI) {
+/* static */
+already_AddRefed<nsSimpleURI> nsSimpleURI::From(nsIURI *aURI) {
   RefPtr<nsSimpleURI> uri;
   nsresult rv = aURI->QueryInterface(kThisSimpleURIImplementationCID,
                                      getter_AddRefs(uri));
@@ -51,8 +51,7 @@ nsSimpleURI::nsSimpleURI() : mIsRefValid(false), mIsQueryValid(false) {}
 NS_IMPL_ADDREF(nsSimpleURI)
 NS_IMPL_RELEASE(nsSimpleURI)
 NS_INTERFACE_TABLE_HEAD(nsSimpleURI)
-  NS_INTERFACE_TABLE(nsSimpleURI, nsIURI, nsISerializable, nsIClassInfo,
-                     nsIIPCSerializableURI)
+  NS_INTERFACE_TABLE(nsSimpleURI, nsIURI, nsISerializable, nsIClassInfo)
   NS_INTERFACE_TABLE_TO_MAP_SEGUE
   if (aIID.Equals(kThisSimpleURIImplementationCID))
     foundInterface = static_cast<nsIURI *>(this);
@@ -141,9 +140,6 @@ nsSimpleURI::Write(nsIObjectOutputStream *aStream) {
 
   return NS_OK;
 }
-
-////////////////////////////////////////////////////////////////////////////////
-// nsIIPCSerializableURI methods:
 
 void nsSimpleURI::Serialize(URIParams &aParams) {
   SimpleURIParams params;
@@ -487,7 +483,8 @@ nsSimpleURI::EqualsExceptRef(nsIURI *other, bool *result) {
   return EqualsInternal(other, eIgnoreRef, result);
 }
 
-/* virtual */ nsresult nsSimpleURI::EqualsInternal(
+/* virtual */
+nsresult nsSimpleURI::EqualsInternal(
     nsIURI *other, nsSimpleURI::RefHandlingEnum refHandlingMode, bool *result) {
   NS_ENSURE_ARG_POINTER(other);
   MOZ_ASSERT(result, "null pointer");
@@ -523,8 +520,11 @@ bool nsSimpleURI::EqualsInternal(nsSimpleURI *otherUri,
 
 NS_IMETHODIMP
 nsSimpleURI::SchemeIs(const char *i_Scheme, bool *o_Equals) {
-  NS_ENSURE_ARG_POINTER(o_Equals);
-  if (!i_Scheme) return NS_ERROR_NULL_POINTER;
+  MOZ_ASSERT(o_Equals, "null pointer");
+  if (!i_Scheme) {
+    *o_Equals = false;
+    return NS_OK;
+  }
 
   const char *this_scheme = mScheme.get();
 
@@ -545,9 +545,10 @@ nsSimpleURI::SchemeIs(const char *i_Scheme, bool *o_Equals) {
   return url;
 }
 
-/* virtual */ void nsSimpleURI::SetRefOnClone(
-    nsSimpleURI *url, nsSimpleURI::RefHandlingEnum refHandlingMode,
-    const nsACString &newRef) {
+/* virtual */
+void nsSimpleURI::SetRefOnClone(nsSimpleURI *url,
+                                nsSimpleURI::RefHandlingEnum refHandlingMode,
+                                const nsACString &newRef) {
   if (refHandlingMode == eHonorRef) {
     url->mRef = mRef;
     url->mIsRefValid = mIsRefValid;
@@ -609,9 +610,8 @@ nsSimpleURI::GetAsciiHost(nsACString &result) {
 //----------------------------------------------------------------------------
 
 NS_IMETHODIMP
-nsSimpleURI::GetInterfaces(uint32_t *count, nsIID ***array) {
-  *count = 0;
-  *array = nullptr;
+nsSimpleURI::GetInterfaces(nsTArray<nsIID> &array) {
+  array.Clear();
   return NS_OK;
 }
 
@@ -677,7 +677,21 @@ nsSimpleURI::GetFilePath(nsACString &aFilePath) {
 }
 
 nsresult nsSimpleURI::SetFilePath(const nsACString &aFilePath) {
-  return NS_ERROR_FAILURE;
+  if (mPath.IsEmpty() || mPath.First() != '/') {
+    // cannot-be-a-base
+    return NS_ERROR_MALFORMED_URI;
+  }
+  const char *current = aFilePath.BeginReading();
+  const char *end = aFilePath.EndReading();
+
+  // Only go up to the first ? or # symbol
+  for (; current < end; ++current) {
+    if (*current == '?' || *current == '#') {
+      break;
+    }
+  }
+  return SetPathQueryRef(
+      nsDependentCSubstring(aFilePath.BeginReading(), current));
 }
 
 NS_IMETHODIMP

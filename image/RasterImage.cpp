@@ -276,6 +276,14 @@ RasterImage::GetType(uint16_t* aType) {
   return NS_OK;
 }
 
+NS_IMETHODIMP
+RasterImage::GetProducerId(uint32_t* aId) {
+  NS_ENSURE_ARG_POINTER(aId);
+
+  *aId = ImageResource::GetImageProducerId();
+  return NS_OK;
+}
+
 LookupResult RasterImage::LookupFrameInternal(const IntSize& aSize,
                                               uint32_t aFlags,
                                               PlaybackType aPlaybackType,
@@ -363,14 +371,6 @@ LookupResult RasterImage::LookupFrame(const IntSize& aSize, uint32_t aFlags,
     // We still weren't able to get a frame. Give up.
     return result;
   }
-
-  if (result.Surface()->GetCompositingFailed()) {
-    DrawableSurface tmp = std::move(result.Surface());
-    return result;
-  }
-
-  MOZ_ASSERT(!result.Surface()->GetIsPaletted(),
-             "Should not have a paletted frame");
 
   // Sync decoding guarantees that we got the frame, but if it's owned by an
   // async decoder that's currently running, the contents of the frame may not
@@ -674,9 +674,6 @@ void RasterImage::CollectSizeOfSurfaces(
     nsTArray<SurfaceMemoryCounter>& aCounters,
     MallocSizeOf aMallocSizeOf) const {
   SurfaceCache::CollectSizeOfSurfaces(ImageKey(this), aCounters, aMallocSizeOf);
-  if (mFrameAnimator) {
-    mFrameAnimator->CollectSizeOfCompositingSurfaces(aCounters, aMallocSizeOf);
-  }
 }
 
 bool RasterImage::SetMetadata(const ImageMetadata& aMetadata,
@@ -1199,10 +1196,6 @@ bool RasterImage::Decode(const IntSize& aSize, uint32_t aFlags,
   nsresult rv;
   bool animated = mAnimationState && aPlaybackType == PlaybackType::eAnimated;
   if (animated) {
-    if (gfxPrefs::ImageAnimatedGenerateFullFrames()) {
-      decoderFlags |= DecoderFlags::BLEND_ANIMATION;
-    }
-
     size_t currentFrame = mAnimationState->GetCurrentAnimationFrameIndex();
     rv = DecoderFactory::CreateAnimationDecoder(
         mDecoderType, WrapNotNull(this), mSourceBuffer, mSize, decoderFlags,
@@ -1353,7 +1346,7 @@ ImgDrawResult RasterImage::DrawInternal(DrawableSurface&& aSurface,
 
   // By now we may have a frame with the requested size. If not, we need to
   // adjust the drawing parameters accordingly.
-  IntSize finalSize = aSurface->GetImageSize();
+  IntSize finalSize = aSurface->GetSize();
   bool couldRedecodeForBetterFrame = false;
   if (finalSize != aSize) {
     gfx::Size scale(double(aSize.width) / finalSize.width,
@@ -1538,8 +1531,8 @@ void RasterImage::DoError() {
           ("RasterImage: [this=%p] Error detected for image\n", this));
 }
 
-/* static */ void RasterImage::HandleErrorWorker::DispatchIfNeeded(
-    RasterImage* aImage) {
+/* static */
+void RasterImage::HandleErrorWorker::DispatchIfNeeded(RasterImage* aImage) {
   RefPtr<HandleErrorWorker> worker = new HandleErrorWorker(aImage);
   NS_DispatchToMainThread(worker);
 }
@@ -1727,7 +1720,7 @@ already_AddRefed<imgIContainer> RasterImage::Unwrap() {
   return self.forget();
 }
 
-void RasterImage::PropagateUseCounters(nsIDocument*) {
+void RasterImage::PropagateUseCounters(dom::Document*) {
   // No use counters.
 }
 

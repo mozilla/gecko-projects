@@ -12,7 +12,7 @@
 #include <algorithm>
 
 #ifdef MOZ_TOOLKIT_SEARCH
-#include "nsIBrowserSearchService.h"
+#  include "nsISearchService.h"
 #endif
 
 #include "nsIURIFixup.h"
@@ -51,29 +51,18 @@ nsDefaultURIFixup::CreateExposableURI(nsIURI* aURI, nsIURI** aReturn) {
   NS_ENSURE_ARG_POINTER(aURI);
   NS_ENSURE_ARG_POINTER(aReturn);
 
-  bool isWyciwyg = false;
-  aURI->SchemeIs("wyciwyg", &isWyciwyg);
-
   nsAutoCString userPass;
   aURI->GetUserPass(userPass);
 
   // most of the time we can just AddRef and return
-  if (!isWyciwyg && userPass.IsEmpty()) {
+  if (userPass.IsEmpty()) {
     *aReturn = aURI;
     NS_ADDREF(*aReturn);
     return NS_OK;
   }
 
   // Rats, we have to massage the URI
-  nsCOMPtr<nsIURI> uri;
-  if (isWyciwyg) {
-    nsresult rv =
-        nsContentUtils::RemoveWyciwygScheme(aURI, getter_AddRefs(uri));
-    NS_ENSURE_SUCCESS(rv, rv);
-  } else {
-    // No need to clone the URI as NS_MutateURI does that for us.
-    uri = aURI;
-  }
+  nsCOMPtr<nsIURI> uri = aURI;
 
   Unused << NS_MutateURI(uri).SetUserPass(EmptyCString()).Finalize(uri);
 
@@ -421,7 +410,7 @@ nsDefaultURIFixup::KeywordToURI(const nsACString& aKeyword,
     }
 
     RefPtr<nsIInputStream> postData;
-    ipc::OptionalURIParams uri;
+    Maybe<ipc::URIParams> uri;
     nsAutoString providerName;
     if (!contentChild->SendKeywordToURI(keyword, &providerName, &postData,
                                         &uri)) {
@@ -442,7 +431,7 @@ nsDefaultURIFixup::KeywordToURI(const nsACString& aKeyword,
 
 #ifdef MOZ_TOOLKIT_SEARCH
   // Try falling back to the search service's default search engine
-  nsCOMPtr<nsIBrowserSearchService> searchSvc =
+  nsCOMPtr<nsISearchService> searchSvc =
       do_GetService("@mozilla.org/browser/search-service;1");
   if (searchSvc) {
     nsCOMPtr<nsISearchEngine> defaultEngine;
@@ -515,9 +504,7 @@ bool nsDefaultURIFixup::MakeAlternateURI(nsCOMPtr<nsIURI>& aURI) {
   }
 
   // Code only works for http. Not for any other protocol including https!
-  bool isHttp = false;
-  aURI->SchemeIs("http", &isHttp);
-  if (!isHttp) {
+  if (!net::SchemeIsHTTP(aURI)) {
     return false;
   }
 

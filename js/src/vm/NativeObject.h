@@ -506,6 +506,8 @@ class NativeObject : public ShapedObject {
 
   bool hasShapeTable() const { return lastProperty()->hasTable(); }
 
+  bool hasShapeIC() const { return lastProperty()->hasIC(); }
+
   HeapSlotArray getDenseElements() {
     return HeapSlotArray(elements_, !getElementsHeader()->isCopyOnWrite());
   }
@@ -664,12 +666,6 @@ class NativeObject : public ShapedObject {
    * caller must ensure that are enough slots.
    */
   void initSlotRange(uint32_t start, const Value* vector, uint32_t length);
-
-  /*
-   * Copy a flat array of slots to this object at a start slot. Caller must
-   * ensure there are enough slots in this object.
-   */
-  void copySlotRange(uint32_t start, const Value* vector, uint32_t length);
 
 #ifdef DEBUG
   enum SentinelAllowed{SENTINEL_NOT_ALLOWED, SENTINEL_ALLOWED};
@@ -884,7 +880,7 @@ class NativeObject : public ShapedObject {
 
   static MOZ_ALWAYS_INLINE bool maybeConvertToOrGrowDictionaryForAdd(
       JSContext* cx, HandleNativeObject obj, HandleId id, ShapeTable** table,
-      ShapeTable::Entry** entry, const AutoKeepShapeTables& keep);
+      ShapeTable::Entry** entry, const AutoKeepShapeCaches& keep);
 
   static bool maybeToDictionaryModeForPut(JSContext* cx, HandleNativeObject obj,
                                           MutableHandleShape shape);
@@ -939,12 +935,12 @@ class NativeObject : public ShapedObject {
                                         HandleId id, uint32_t slot,
                                         unsigned attrs, ShapeTable* table,
                                         ShapeTable::Entry* entry,
-                                        const AutoKeepShapeTables& keep);
+                                        const AutoKeepShapeCaches& keep);
 
   static Shape* addAccessorPropertyInternal(
       JSContext* cx, HandleNativeObject obj, HandleId id, JSGetterOp getter,
       JSSetterOp setter, unsigned attrs, ShapeTable* table,
-      ShapeTable::Entry* entry, const AutoKeepShapeTables& keep);
+      ShapeTable::Entry* entry, const AutoKeepShapeCaches& keep);
 
   static MOZ_MUST_USE bool fillInAfterSwap(JSContext* cx,
                                            HandleNativeObject obj,
@@ -1037,7 +1033,7 @@ class NativeObject : public ShapedObject {
 
   // MAX_FIXED_SLOTS is the biggest number of fixed slots our GC
   // size classes will give an object.
-  static const uint32_t MAX_FIXED_SLOTS = shadow::Object::MAX_FIXED_SLOTS;
+  static constexpr uint32_t MAX_FIXED_SLOTS = shadow::Object::MAX_FIXED_SLOTS;
 
  protected:
   MOZ_ALWAYS_INLINE bool updateSlotsForSpan(JSContext* cx, size_t oldSpan,
@@ -1465,7 +1461,11 @@ class NativeObject : public ShapedObject {
   }
 
   void setPrivateGCThing(gc::Cell* cell) {
-    MOZ_ASSERT_IF(IsMarkedBlack(this), !cell->isMarkedGray());
+#ifdef DEBUG
+    if (IsMarkedBlack(this)) {
+      JS::AssertCellIsNotGray(cell);
+    }
+#endif
     void** pprivate = &privateRef(numFixedSlots());
     privateWriteBarrierPre(pprivate);
     *pprivate = reinterpret_cast<void*>(cell);
@@ -1485,10 +1485,6 @@ class NativeObject : public ShapedObject {
     *pprivate = data;
   }
 
-  static inline NativeObject* copy(JSContext* cx, gc::AllocKind kind,
-                                   gc::InitialHeap heap,
-                                   HandleNativeObject templateObject);
-
   /* Return the allocKind we would use if we were to tenure this object. */
   inline js::gc::AllocKind allocKindForTenure() const;
 
@@ -1507,10 +1503,10 @@ class NativeObject : public ShapedObject {
     return sizeof(NativeObject) + sizeof(ObjectElements);
   }
 
-  static size_t getFixedSlotOffset(size_t slot) {
+  static constexpr size_t getFixedSlotOffset(size_t slot) {
     return sizeof(NativeObject) + slot * sizeof(Value);
   }
-  static size_t getPrivateDataOffset(size_t nfixed) {
+  static constexpr size_t getPrivateDataOffset(size_t nfixed) {
     return getFixedSlotOffset(nfixed);
   }
   static size_t offsetOfSlots() { return offsetof(NativeObject, slots_); }

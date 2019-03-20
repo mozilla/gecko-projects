@@ -7,8 +7,9 @@
 import type { Action, ThunkArgs } from "./types";
 
 export function updateWorkers() {
-  return async function({ dispatch, client }: ThunkArgs) {
-    const { workers } = await client.fetchWorkers();
-    dispatch(({ type: "SET_WORKERS", workers }: Action));
+  return async function({ dispatch, getState, client }: ThunkArgs) {
+    const workers = await client.fetchWorkers();
+    const mainThread = client.getMainThread();
+    dispatch(({ type: "SET_WORKERS", workers, mainThread }: Action));
   };
 }

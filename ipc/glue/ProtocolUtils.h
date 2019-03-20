@@ -34,10 +34,9 @@
 #include "mozilla/UniquePtr.h"
 #include "MainThreadUtils.h"
 #include "nsICrashReporter.h"
-#include "nsILabelableRunnable.h"
 
 #if defined(ANDROID) && defined(DEBUG)
-#include <android/log.h>
+#  include <android/log.h>
 #endif
 
 template <typename T>
@@ -438,19 +437,18 @@ class IToplevelProtocol : public IProtocol {
     MessageChannel* GetIPCChannel() override;
 
    private:
+    int32_t NextId();
+
     IToplevelProtocol* const mProtocol;
+    int32_t mLastLocalId;
     IDMap<IProtocol*> mActorMap;
-    int32_t mLastRouteId;
     IDMap<Shmem::SharedMemory*> mShmemMap;
-    Shmem::id_t mLastShmemId;
 
     Mutex mEventTargetMutex;
     IDMap<nsCOMPtr<nsIEventTarget>> mEventTargetMap;
 
     MessageChannel mChannel;
   };
-
-  using SchedulerGroupSet = nsILabelableRunnable::SchedulerGroupSet;
 
   void SetTransport(UniquePtr<Transport> aTrans) { mTrans = std::move(aTrans); }
 
@@ -480,6 +478,15 @@ class IToplevelProtocol : public IProtocol {
 
   bool OpenWithAsyncPid(mozilla::ipc::Transport* aTransport,
                         MessageLoop* aThread = nullptr,
+                        mozilla::ipc::Side aSide = mozilla::ipc::UnknownSide);
+
+  // Open a toplevel actor such that both ends of the actor's channel are on
+  // the same thread. This method should be called on the thread to perform
+  // the link.
+  //
+  // WARNING: Attempting to send a sync or intr message on the same thread
+  // will crash.
+  bool OpenOnSameThread(MessageChannel* aChannel,
                         mozilla::ipc::Side aSide = mozilla::ipc::UnknownSide);
 
   void Close();
@@ -545,15 +552,6 @@ class IToplevelProtocol : public IProtocol {
   virtual void OnExitedSyncSend() {}
 
   virtual void ProcessRemoteNativeEventsInInterruptCall() {}
-
-  // Override this method in top-level protocols to change the SchedulerGroups
-  // that a message might affect. This should be used only as a last resort
-  // when it's difficult to determine an EventTarget ahead of time. See the
-  // comment in nsILabelableRunnable.h for more information.
-  virtual bool GetMessageSchedulerGroups(const Message& aMsg,
-                                         SchedulerGroupSet& aGroups) {
-    return false;
-  }
 
   virtual void OnChannelReceivedMessage(const Message& aMsg) {}
 

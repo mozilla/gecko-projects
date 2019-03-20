@@ -41,7 +41,7 @@ function getWorkerContainers(doc) {
 }
 
 function navigate(target, url, waitForTargetEvent = "navigate") {
-  executeSoon(() => target.activeTab.navigateTo({ url }));
+  executeSoon(() => target.navigateTo({ url }));
   return once(target, waitForTargetEvent);
 }
 
@@ -55,20 +55,17 @@ async function openNewTabAndApplicationPanel(url) {
 }
 
 async function unregisterAllWorkers(client) {
-  info("Wait until all workers have a valid registrationActor");
+  info("Wait until all workers have a valid registrationFront");
   let workers;
   await asyncWaitUntil(async function() {
     workers = await client.mainRoot.listAllWorkers();
     const allWorkersRegistered =
-      workers.service.every(worker => !!worker.registrationActor);
+      workers.service.every(worker => !!worker.registrationFront);
     return allWorkersRegistered;
   });
 
   info("Unregister all service workers");
   for (const worker of workers.service) {
-    await client.request({
-      to: worker.registrationActor,
-      type: "unregister",
-    });
+    await worker.registrationFront.unregister();
   }
 }

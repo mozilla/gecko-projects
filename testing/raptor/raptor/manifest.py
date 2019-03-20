@@ -18,8 +18,8 @@ LOG = get_proxy_logger(component="raptor-manifest")
 required_settings = ['apps', 'type', 'page_cycles', 'test_url', 'measure',
                      'unit', 'lower_is_better', 'alert_threshold']
 
-playback_settings = ['playback_binary_manifest', 'playback_pageset_manifest',
-                     'playback_recordings', 'python3_win_manifest']
+playback_settings = ['playback_pageset_manifest',
+                     'playback_recordings']
 
 
 def filter_app(tests, values):
@@ -28,13 +28,29 @@ def filter_app(tests, values):
             yield test
 
 
-def get_browser_test_list(browser_app):
+def filter_live_sites(tests, values):
+    # if a test uses live sites only allow it to run if running locally or on try
+    # this prevents inadvertently submitting live site data to perfherder
+    for test in tests:
+        if test.get("use_live_sites", "false") == "true":
+            # can run with live sites when running locally
+            if values["run_local"] is True:
+                yield test
+            # can run with live sites if running on try
+            if "hg.mozilla.org/try" in os.environ.get('GECKO_HEAD_REPOSITORY', 'n/a'):
+                yield test
+        else:
+            # not using live-sites so go ahead
+            yield test
+
+
+def get_browser_test_list(browser_app, run_local):
     LOG.info(raptor_ini)
     test_manifest = TestManifest([raptor_ini], strict=False)
-    info = {"app": browser_app}
+    info = {"app": browser_app, "run_local": run_local}
     return test_manifest.active_tests(exists=False,
                                       disabled=False,
-                                      filters=[filter_app],
+                                      filters=[filter_app, filter_live_sites],
                                       **info)
 
 
@@ -48,17 +64,34 @@ def validate_test_ini(test_details):
             continue
         if setting not in test_details:
             valid_settings = False
-            LOG.info("setting '%s' is required but not found in %s"
-                     % (setting, test_details['manifest']))
+            LOG.error("ERROR: setting '%s' is required but not found in %s"
+                      % (setting, test_details['manifest']))
+
+    test_details.setdefault("page_timeout", 30000)
 
     # if playback is specified, we need more playback settings
     if 'playback' in test_details:
         for setting in playback_settings:
             if setting not in test_details:
                 valid_settings = False
-                LOG.info("setting '%s' is required but not found in %s"
-                         % (setting, test_details['manifest']))
+                LOG.error("ERROR: setting '%s' is required but not found in %s"
+                          % (setting, test_details['manifest']))
 
+    # if 'alert-on' is specified, we need to make sure that the value given is valid
+    # i.e. any 'alert_on' values must be values that exist in the 'measure' ini setting
+    if 'alert_on' in test_details:
+
+        # support with or without spaces, i.e. 'measure = fcp, loadtime' or '= fcp,loadtime'
+        # convert to a list; and remove any spaces
+        test_details['alert_on'] = [_item.strip() for _item in test_details['alert_on'].split(',')]
+
+        # now make sure each alert_on value provided is valid
+        for alert_on_value in test_details['alert_on']:
+            if alert_on_value not in test_details['measure']:
+                LOG.error("ERROR: The 'alert_on' value of '%s' is not valid because "
+                          "it doesn't exist in the 'measure' test setting!"
+                          % alert_on_value)
+                valid_settings = False
     return valid_settings
 
 
@@ -78,19 +111,24 @@ def write_test_settings_json(args, test_details, oskey):
 
     if test_details['type'] == "pageload":
         test_settings['raptor-options']['measure'] = {}
-        if "dcf" in test_details['measure']:
-            test_settings['raptor-options']['measure']['dcf'] = True
-        if "fnbpaint" in test_details['measure']:
-            test_settings['raptor-options']['measure']['fnbpaint'] = True
-        if "fcp" in test_details['measure']:
-            test_settings['raptor-options']['measure']['fcp'] = True
-        if "hero" in test_details['measure']:
-            test_settings['raptor-options']['measure']['hero'] = test_details['hero'].split()
-        if "ttfi" in test_details['measure']:
-            test_settings['raptor-options']['measure']['ttfi'] = True
+
+        # test_details['measure'] was already converted to a list in get_raptor_test_list below
+        # the 'hero=' line is still a raw string from the test INI
+        for m in test_details['measure']:
+            test_settings['raptor-options']['measure'][m] = True
+            if m == 'hero':
+                test_settings['raptor-options']['measure'][m] = [h.strip() for h in
+                                                                 test_details['hero'].split(',')]
+
+        if test_details.get("alert_on", None) is not None:
+            # alert_on was already converted to list above
+            test_settings['raptor-options']['alert_on'] = test_details['alert_on']
+
     if test_details.get("page_timeout", None) is not None:
         test_settings['raptor-options']['page_timeout'] = int(test_details['page_timeout'])
+
     test_settings['raptor-options']['unit'] = test_details.get("unit", "ms")
+
     if test_details.get("lower_is_better", "true") == "false":
         test_settings['raptor-options']['lower_is_better'] = False
     else:
@@ -108,6 +146,9 @@ def write_test_settings_json(args, test_details, oskey):
 
     if test_details.get("alert_threshold", None) is not None:
         test_settings['raptor-options']['alert_threshold'] = float(test_details['alert_threshold'])
+
+    if test_details.get("screen_capture", None) is not None:
+        test_settings['raptor-options']['screen_capture'] = test_details.get("screen_capture")
 
     # if gecko profiling is enabled, write profiling settings for webext
     if test_details.get("gecko_profile", False):
@@ -159,7 +200,7 @@ def get_raptor_test_list(args, oskey):
     '''
     tests_to_run = []
     # get list of all available tests for the browser we are testing against
-    available_tests = get_browser_test_list(args.app)
+    available_tests = get_browser_test_list(args.app, args.run_local)
 
     # look for single subtest that matches test name provided on cmd line
     for next_test in available_tests:
@@ -202,6 +243,31 @@ def get_raptor_test_list(args, oskey):
         if args.page_timeout is not None:
             LOG.info("setting page-timeout to %d as specified on cmd line" % args.page_timeout)
             next_test['page_timeout'] = args.page_timeout
+
+        if next_test.get('use_live_sites', "false") == "true":
+            # when using live sites we want to turn off playback
+            LOG.info("using live sites so turning playback off!")
+            next_test['playback'] = None
+            LOG.info("using live sites so appending '-live' to the test name")
+            next_test['name'] = next_test['name'] + "-live"
+            # we also want to increase the page timeout since may be longer live
+            next_test['page_timeout'] = 180000
+
+        # convert 'measure =' test INI line to list
+        if next_test.get('measure') is not None:
+            _measures = []
+            for m in [m.strip() for m in next_test['measure'].split(',')]:
+                # build the 'measures =' list
+                _measures.append(m)
+            next_test['measure'] = _measures
+
+            # if using live sites, don't measure hero element as it only exists in recordings
+            if 'hero' in next_test['measure'] and \
+               next_test.get('use_live_sites', "false") == "true":
+                # remove 'hero' from the 'measures =' list
+                next_test['measure'].remove('hero')
+                # remove the 'hero =' line since no longer measuring hero
+                del next_test['hero']
 
     # write out .json test setting files for the control server to read and send to web ext
     if len(tests_to_run) != 0:

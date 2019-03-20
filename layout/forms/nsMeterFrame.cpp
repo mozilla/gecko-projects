@@ -10,7 +10,7 @@
 #include "nsPresContext.h"
 #include "nsGkAtoms.h"
 #include "nsNameSpaceManager.h"
-#include "nsIDocument.h"
+#include "mozilla/dom/Document.h"
 #include "nsIPresShell.h"
 #include "nsNodeInfoManager.h"
 #include "nsContentCreatorFunctions.h"
@@ -27,13 +27,13 @@ using mozilla::dom::Element;
 using mozilla::dom::HTMLMeterElement;
 
 nsIFrame* NS_NewMeterFrame(nsIPresShell* aPresShell, ComputedStyle* aStyle) {
-  return new (aPresShell) nsMeterFrame(aStyle);
+  return new (aPresShell) nsMeterFrame(aStyle, aPresShell->GetPresContext());
 }
 
 NS_IMPL_FRAMEARENA_HELPERS(nsMeterFrame)
 
-nsMeterFrame::nsMeterFrame(ComputedStyle* aStyle)
-    : nsContainerFrame(aStyle, kClassID), mBarDiv(nullptr) {}
+nsMeterFrame::nsMeterFrame(ComputedStyle* aStyle, nsPresContext* aPresContext)
+    : nsContainerFrame(aStyle, aPresContext, kClassID), mBarDiv(nullptr) {}
 
 nsMeterFrame::~nsMeterFrame() {}
 
@@ -50,13 +50,13 @@ void nsMeterFrame::DestroyFrom(nsIFrame* aDestructRoot,
 nsresult nsMeterFrame::CreateAnonymousContent(
     nsTArray<ContentInfo>& aElements) {
   // Get the NodeInfoManager and tag necessary to create the meter bar div.
-  nsCOMPtr<nsIDocument> doc = mContent->GetComposedDoc();
+  nsCOMPtr<Document> doc = mContent->GetComposedDoc();
 
   // Create the div.
   mBarDiv = doc->CreateHTMLElement(nsGkAtoms::div);
 
   // Associate ::-moz-meter-bar pseudo-element to the anonymous child.
-  mBarDiv->SetPseudoElementType(CSSPseudoElementType::mozMeterBar);
+  mBarDiv->SetPseudoElementType(PseudoStyleType::mozMeterBar);
 
   aElements.AppendElement(mBarDiv);
 
@@ -71,8 +71,8 @@ void nsMeterFrame::AppendAnonymousContentTo(nsTArray<nsIContent*>& aElements,
 }
 
 NS_QUERYFRAME_HEAD(nsMeterFrame)
-NS_QUERYFRAME_ENTRY(nsMeterFrame)
-NS_QUERYFRAME_ENTRY(nsIAnonymousContentCreator)
+  NS_QUERYFRAME_ENTRY(nsMeterFrame)
+  NS_QUERYFRAME_ENTRY(nsIAnonymousContentCreator)
 NS_QUERYFRAME_TAIL_INHERITING(nsContainerFrame)
 
 void nsMeterFrame::Reflow(nsPresContext* aPresContext,

@@ -40,6 +40,10 @@ const { EVENTS } = require("devtools/client/netmonitor/src/constants");
 /* eslint-disable no-unused-vars, max-len */
 const EXAMPLE_URL = "http://example.com/browser/devtools/client/netmonitor/test/";
 const HTTPS_EXAMPLE_URL = "https://example.com/browser/devtools/client/netmonitor/test/";
+/* Since the test server will proxy `ws://example.com` to websocket server on 9988,
+so we must sepecify the port explicitly */
+const WS_URL = "ws://127.0.0.1:8888/browser/devtools/client/netmonitor/test/";
+const WS_HTTP_URL = "http://127.0.0.1:8888/browser/devtools/client/netmonitor/test/";
 
 const API_CALLS_URL = EXAMPLE_URL + "html_api-calls-test-page.html";
 const SIMPLE_URL = EXAMPLE_URL + "html_simple-test-page.html";
@@ -78,6 +82,7 @@ const OPEN_REQUEST_IN_TAB_URL = EXAMPLE_URL + "html_open-request-in-tab.html";
 const SIMPLE_SJS = EXAMPLE_URL + "sjs_simple-test-server.sjs";
 const SIMPLE_UNSORTED_COOKIES_SJS = EXAMPLE_URL + "sjs_simple-unsorted-cookies-test-server.sjs";
 const CONTENT_TYPE_SJS = EXAMPLE_URL + "sjs_content-type-test-server.sjs";
+const WS_CONTENT_TYPE_SJS = WS_HTTP_URL + "sjs_content-type-test-server.sjs";
 const HTTPS_CONTENT_TYPE_SJS = HTTPS_EXAMPLE_URL + "sjs_content-type-test-server.sjs";
 const STATUS_CODES_SJS = EXAMPLE_URL + "sjs_status-codes-test-server.sjs";
 const SORTING_SJS = EXAMPLE_URL + "sjs_sorting-test-server.sjs";
@@ -118,12 +123,34 @@ Services.prefs.setCharPref(
   "\"startTime\",\"status\",\"transferred\",\"type\",\"waterfall\"]"
 );
 
+Services.prefs.setCharPref("devtools.netmonitor.columnsData",
+'[{"name":"status","minWidth":30,"width":5},' +
+  '{"name":"method","minWidth":30,"width":5},' +
+  '{"name":"domain","minWidth":30,"width":10},' +
+  '{"name":"file","minWidth":30,"width":25},' +
+  '{"name":"cause","minWidth":30,"width":10},' +
+  '{"name":"type","minWidth":30,"width":5},' +
+  '{"name":"transferred","minWidth":30,"width":10},' +
+  '{"name":"contentSize","minWidth":30,"width":5},' +
+  '{"name":"waterfall","minWidth":150,"width":25}]');
+
+// Increase UI limit for responses rendered using CodeMirror in tests.
+Services.prefs.setIntPref("devtools.netmonitor.response.ui.limit", 1024 * 105);
+
+// Support for columns resizing is currently hidden behind this pref,
+// but testing is on
+Services.prefs.setBoolPref("devtools.netmonitor.features.resizeColumns", true);
+
 registerCleanupFunction(() => {
   info("finish() was called, cleaning up...");
 
   Services.prefs.setBoolPref("devtools.debugger.log", gEnableLogging);
   Services.prefs.setCharPref("devtools.netmonitor.filters", gDefaultFilters);
   Services.prefs.clearUserPref("devtools.cache.disabled");
+  Services.prefs.clearUserPref("devtools.netmonitor.columnsData");
+  Services.prefs.clearUserPref("devtools.netmonitor.response.ui.limit");
+  Services.prefs.clearUserPref("devtools.netmonitor.visibleColumns");
+  Services.prefs.clearUserPref("devtools.netmonitor.features.resizeColumns");
   Services.cookies.removeAll();
 });
 
@@ -144,7 +171,7 @@ function toggleCache(target, disabled) {
   // Disable the cache for any toolbox that it is opened from this point on.
   Services.prefs.setBoolPref("devtools.cache.disabled", disabled);
 
-  return target.activeTab.reconfigure({ options }).then(() => navigationFinished);
+  return target.reconfigure({ options }).then(() => navigationFinished);
 }
 
 /**
@@ -684,8 +711,7 @@ function waitForContentMessage(name) {
 }
 
 function testColumnsAlignment(headers, requestList) {
-  // Get first request line, not child 0 as this is the headers
-  const firstRequestLine = requestList.childNodes[1];
+  const firstRequestLine = requestList.childNodes[0];
 
   // Find number of columns
   const numberOfColumns = headers.childElementCount;
@@ -704,7 +730,7 @@ async function hideColumn(monitor, column) {
 
   info(`Clicking context-menu item for ${column}`);
   EventUtils.sendMouseEvent({ type: "contextmenu" },
-    document.querySelector(".devtools-toolbar.requests-list-headers"));
+    document.querySelector(".requests-list-headers"));
 
   const onHeaderRemoved = waitForDOM(document, `#requests-list-${column}-button`, 0);
   parent.document.querySelector(`#request-list-header-${column}-toggle`).click();
@@ -719,7 +745,7 @@ async function showColumn(monitor, column) {
 
   info(`Clicking context-menu item for ${column}`);
   EventUtils.sendMouseEvent({ type: "contextmenu" },
-    document.querySelector(".devtools-toolbar.requests-list-headers"));
+    document.querySelector(".requests-list-headers"));
 
   const onHeaderAdded = waitForDOM(document, `#requests-list-${column}-button`, 1);
   parent.document.querySelector(`#request-list-header-${column}-toggle`).click();
@@ -762,6 +788,14 @@ async function performRequests(monitor, tab, count) {
     content.wrappedJSObject.performRequests(requestCount);
   });
   await wait;
+}
+
+/**
+ * Helper function for retrieving `.CodeMirror` content
+ */
+function getCodeMirrorValue(monitor) {
+  const document = monitor.panelWin.document;
+  return document.querySelector(".CodeMirror").CodeMirror.getValue();
 }
 
 /**

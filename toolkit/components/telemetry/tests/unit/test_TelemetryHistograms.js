@@ -1268,7 +1268,16 @@ add_task(async function test_multistore_main_snapshot() {
   hist = Telemetry.getHistogramById(id);
   hist.add(1);
 
-  // Getting snapshot and clearing
+  // Getting snapshot and NOT clearing (using default values for optional parameters)
+  snapshot = Telemetry.getSnapshotForHistograms().parent;
+  id = "TELEMETRY_TEST_MAIN_ONLY";
+  Assert.ok(id in snapshot, `${id} should be in a main store snapshot`);
+  id = "TELEMETRY_TEST_MULTIPLE_STORES";
+  Assert.ok(id in snapshot, `${id} should be in a main store snapshot`);
+  id = "TELEMETRY_TEST_SYNC_ONLY";
+  Assert.ok(!(id in snapshot), `${id} should not be in a main store snapshot`);
+
+  // Data should still be in, getting snapshot and clearing
   snapshot = Telemetry.getSnapshotForHistograms("main", /* clear */ true).parent;
   id = "TELEMETRY_TEST_MAIN_ONLY";
   Assert.ok(id in snapshot, `${id} should be in a main store snapshot`);
@@ -1297,7 +1306,14 @@ add_task(async function test_multistore_main_snapshot() {
   hist = Telemetry.getKeyedHistogramById(id);
   hist.add("key-b", 1);
 
-  // Getting snapshot and clearing
+  // Getting snapshot and NOT clearing (using default values for optional parameters)
+  snapshot = Telemetry.getSnapshotForKeyedHistograms().parent;
+  id = "TELEMETRY_TEST_KEYED_MULTIPLE_STORES";
+  Assert.ok(id in snapshot, `${id} should be in a main store snapshot`);
+  id = "TELEMETRY_TEST_KEYED_SYNC_ONLY";
+  Assert.ok(!(id in snapshot), `${id} should not be in a main store snapshot`);
+
+  // Data should still be in, getting snapshot and clearing
   snapshot = Telemetry.getSnapshotForKeyedHistograms("main", /* clear */ true).parent;
   id = "TELEMETRY_TEST_KEYED_MULTIPLE_STORES";
   Assert.ok(id in snapshot, `${id} should be in a main store snapshot`);
@@ -1602,4 +1618,45 @@ add_task(async function test_multistore_keyed_individual_snapshot() {
   hist.clear({store: "sync"});
   Assert.deepEqual(undefined, hist.snapshot({store: "main"}));
   Assert.deepEqual({}, hist.snapshot({store: "sync"}));
+});
+
+add_task(async function test_can_record_in_process_regression_bug_1530361() {
+  Telemetry.getSnapshotForHistograms("main", true);
+
+  // The socket and gpu processes should not have any histograms.
+  // Flag and count histograms have defaults, so if we're accidentally recording them
+  // in these processes they'd show up even immediately after being cleared.
+  let snapshot = Telemetry.getSnapshotForHistograms("main", true);
+
+  Assert.deepEqual(snapshot.gpu, {}, "No histograms should have been recorded for the gpu process");
+  Assert.deepEqual(snapshot.socket, {}, "No histograms should have been recorded for the socket process");
+});
+
+add_task(function test_knows_its_name() {
+  let h;
+
+  // Plain histograms
+  const histNames = [
+    "TELEMETRY_TEST_FLAG",
+    "TELEMETRY_TEST_COUNT",
+    "TELEMETRY_TEST_CATEGORICAL",
+    "TELEMETRY_TEST_EXPIRED",
+  ];
+
+  for (let name of histNames) {
+    h = Telemetry.getHistogramById(name);
+    Assert.equal(name, h.name());
+  }
+
+  // Keyed histograms
+  const keyedHistNames = [
+    "TELEMETRY_TEST_KEYED_EXPONENTIAL",
+    "TELEMETRY_TEST_KEYED_BOOLEAN",
+    "TELEMETRY_TEST_EXPIRED_KEYED",
+  ];
+
+  for (let name of keyedHistNames) {
+    h = Telemetry.getKeyedHistogramById(name);
+    Assert.equal(name, h.name());
+  }
 });

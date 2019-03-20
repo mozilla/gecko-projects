@@ -16,7 +16,7 @@
 
 var EXPORTED_SYMBOLS = ["UIState"];
 
-ChromeUtils.import("resource://gre/modules/Services.jsm");
+const {Services} = ChromeUtils.import("resource://gre/modules/Services.jsm");
 ChromeUtils.defineModuleGetter(this, "Weave",
                                "resource://services-sync/main.js");
 
@@ -163,6 +163,7 @@ const UIStateInternal = {
       } else {
         status = STATUS_SIGNED_IN;
       }
+      state.uid = userData.uid;
       state.email = userData.email;
     }
     state.status = status;

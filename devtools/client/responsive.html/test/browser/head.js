@@ -319,7 +319,7 @@ function getSessionHistory(browser) {
   return ContentTask.spawn(browser, {}, async function() {
     /* eslint-disable no-undef */
     const { SessionHistory } =
-      ChromeUtils.import("resource://gre/modules/sessionstore/SessionHistory.jsm", {});
+      ChromeUtils.import("resource://gre/modules/sessionstore/SessionHistory.jsm");
     return SessionHistory.collect(docShell);
     /* eslint-enable no-undef */
   });
@@ -329,6 +329,13 @@ function getContentSize(ui) {
   return spawnViewportTask(ui, {}, () => ({
     width: content.screen.width,
     height: content.screen.height,
+  }));
+}
+
+function getViewportScroll(ui) {
+  return spawnViewportTask(ui, {}, () => ({
+    x: content.scrollX,
+    y: content.scrollY,
   }));
 }
 
@@ -347,6 +354,10 @@ async function waitForPageShow(browser) {
 
 function waitForViewportLoad(ui) {
   return BrowserTestUtils.waitForContentEvent(ui.getViewportBrowser(), "load", true);
+}
+
+function waitForViewportScroll(ui) {
+  return BrowserTestUtils.waitForContentEvent(ui.getViewportBrowser(), "scroll", true);
 }
 
 function load(browser, url) {

@@ -14,7 +14,7 @@
 #include "jit/mips-shared/SharedICHelpers-mips-shared.h"
 #include "jit/mips64/Bailouts-mips64.h"
 #ifdef JS_ION_PERF
-#include "jit/PerfSpewer.h"
+#  include "jit/PerfSpewer.h"
 #endif
 #include "jit/VMFunctions.h"
 #include "vm/Realm.h"
@@ -943,8 +943,7 @@ JitCode* JitRuntime::generateDebugTrapHandler(JSContext* cx) {
 
   masm.ret();
 
-  Linker linker(masm);
-  AutoFlushICache afc("DebugTrapHandler");
+  Linker linker(masm, "DebugTrapHandler");
   JitCode* codeDbg = linker.newCode(cx, CodeKind::Other);
 
 #ifdef JS_ION_PERF

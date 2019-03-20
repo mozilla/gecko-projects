@@ -8,12 +8,13 @@ var EXPORTED_SYMBOLS = [
   "PageActions",
   // PageActions.Action
   // PageActions.ACTION_ID_BOOKMARK
+  // PageActions.ACTION_ID_PIN_TAB
   // PageActions.ACTION_ID_BOOKMARK_SEPARATOR
   // PageActions.ACTION_ID_BUILT_IN_SEPARATOR
   // PageActions.ACTION_ID_TRANSIENT_SEPARATOR
 ];
 
-ChromeUtils.import("resource://gre/modules/Services.jsm");
+const {Services} = ChromeUtils.import("resource://gre/modules/Services.jsm");
 
 ChromeUtils.defineModuleGetter(this, "AppConstants",
   "resource://gre/modules/AppConstants.jsm");
@@ -21,9 +22,11 @@ ChromeUtils.defineModuleGetter(this, "AsyncShutdown",
   "resource://gre/modules/AsyncShutdown.jsm");
 ChromeUtils.defineModuleGetter(this, "BinarySearch",
   "resource://gre/modules/BinarySearch.jsm");
-
+ChromeUtils.defineModuleGetter(this, "PrivateBrowsingUtils",
+  "resource://gre/modules/PrivateBrowsingUtils.jsm");
 
 const ACTION_ID_BOOKMARK = "bookmark";
+const ACTION_ID_PIN_TAB = "pinTab";
 const ACTION_ID_BOOKMARK_SEPARATOR = "bookmarkSeparator";
 const ACTION_ID_BUILT_IN_SEPARATOR = "builtInSeparator";
 const ACTION_ID_TRANSIENT_SEPARATOR = "transientSeparator";
@@ -523,6 +526,8 @@ var PageActions = {
  *        clicked.
  * @param wantsSubview (bool, optional)
  *        Pass true to make an action that shows a panel subview when clicked.
+ * @param disablePrivateBrowsing (bool, optional)
+ *        Pass true to prevent the action from showing in a private browsing window.
  */
 function Action(options) {
   setProperties(this, options, {
@@ -550,6 +555,7 @@ function Action(options) {
     urlbarIDOverride: false,
     wantsIframe: false,
     wantsSubview: false,
+    disablePrivateBrowsing: false,
 
     // private
 
@@ -616,6 +622,25 @@ Action.prototype = {
    */
   get id() {
     return this._id;
+  },
+
+  get disablePrivateBrowsing() {
+    return !!this._disablePrivateBrowsing;
+  },
+
+  /**
+   * Verifies that the action can be shown in a private window.  For
+   * extensions, verifies the extension has access to the window.
+   */
+  canShowInWindow(browserWindow) {
+    if (this._extensionID) {
+      let policy = WebExtensionPolicy.getByID(this._extensionID);
+      if (!policy.canAccessWindow(browserWindow)) {
+        return false;
+      }
+    }
+    return !(this.disablePrivateBrowsing &&
+             PrivateBrowsingUtils.isWindowPrivate(browserWindow));
   },
 
   /**
@@ -1021,7 +1046,8 @@ Action.prototype = {
    *         disabled.
    */
   shouldShowInPanel(browserWindow) {
-    return !this.__transient || !this.getDisabled(browserWindow);
+    return (!this.__transient || !this.getDisabled(browserWindow)) &&
+            this.canShowInWindow(browserWindow);
   },
 
   /**
@@ -1033,7 +1059,8 @@ Action.prototype = {
    *         should be shown if it's both pinned and not disabled.
    */
   shouldShowInUrlbar(browserWindow) {
-    return this.pinnedToUrlbar && !this.getDisabled(browserWindow);
+    return (this.pinnedToUrlbar && !this.getDisabled(browserWindow)) &&
+            this.canShowInWindow(browserWindow);
   },
 
   get _isBuiltIn() {
@@ -1056,6 +1083,7 @@ this.PageActions.ACTION_ID_TRANSIENT_SEPARATOR = ACTION_ID_TRANSIENT_SEPARATOR;
 
 // These are only necessary so that Pocket and the test can use them.
 this.PageActions.ACTION_ID_BOOKMARK = ACTION_ID_BOOKMARK;
+this.PageActions.ACTION_ID_PIN_TAB = ACTION_ID_PIN_TAB;
 this.PageActions.ACTION_ID_BOOKMARK_SEPARATOR = ACTION_ID_BOOKMARK_SEPARATOR;
 this.PageActions.PREF_PERSISTED_ACTIONS = PREF_PERSISTED_ACTIONS;
 
@@ -1082,6 +1110,40 @@ var gBuiltInActions = [
     },
     onCommand(event, buttonNode) {
       browserPageActions(buttonNode).bookmark.onCommand(event, buttonNode);
+    },
+  },
+
+  // pin tab
+  {
+    id: ACTION_ID_PIN_TAB,
+    // The title is set in browser-pageActions.js.
+    title: "",
+    onBeforePlacedInWindow(browserWindow) {
+      function handlePinEvent() {
+        browserPageActions(browserWindow).pinTab.updateState();
+      }
+      function handleWindowUnload() {
+        for (let event of ["TabPinned", "TabUnpinned"]) {
+          browserWindow.removeEventListener(event, handlePinEvent);
+        }
+      }
+
+      for (let event of ["TabPinned", "TabUnpinned"]) {
+        browserWindow.addEventListener(event, handlePinEvent);
+      }
+      browserWindow.addEventListener("unload", handleWindowUnload, {once: true});
+    },
+    onPlacedInPanel(buttonNode) {
+      browserPageActions(buttonNode).pinTab.updateState();
+    },
+    onPlacedInUrlbar(buttonNode) {
+      browserPageActions(buttonNode).pinTab.updateState();
+    },
+    onLocationChange(browserWindow) {
+      browserPageActions(browserWindow).pinTab.updateState();
+    },
+    onCommand(event, buttonNode) {
+      browserPageActions(buttonNode).pinTab.onCommand(event, buttonNode);
     },
   },
 

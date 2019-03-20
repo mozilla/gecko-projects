@@ -54,9 +54,12 @@ UNIFIED_SOURCES += [
     'nsStandaloneNativeMenu.mm',
     'nsSystemStatusBarCocoa.mm',
     'nsToolkit.mm',
+    'nsTouchBar.mm',
+    'nsTouchBarUpdater.mm',
     'nsWidgetFactory.mm',
     'nsWindowMap.mm',
     'OSXNotificationCenter.mm',
+    'ProcInfo.mm',
     'RectTextureImage.mm',
     'ScreenHelperCocoa.mm',
     'SwipeTracker.mm',
@@ -84,6 +87,7 @@ include('/ipc/chromium/chromium-config.mozbuild')
 
 FINAL_LIBRARY = 'xul'
 LOCAL_INCLUDES += [
+    '/layout/base',
     '/layout/forms',
     '/layout/generic',
     '/layout/style',
@@ -132,6 +136,22 @@ RESOURCE_FILES.cursors += [
     'cursors/zoomIn@2x.png',
     'cursors/zoomOut.png',
     'cursors/zoomOut@2x.png',
+]
+
+RESOURCE_FILES.touchbar += [
+    'touchbar/back.pdf',
+    'touchbar/bookmark-filled.pdf',
+    'touchbar/bookmark.pdf',
+    'touchbar/forward.pdf',
+    'touchbar/fullscreen.pdf',
+    'touchbar/home.pdf',
+    'touchbar/new.pdf',
+    'touchbar/reader-mode.pdf',
+    'touchbar/refresh.pdf',
+    'touchbar/search.pdf',
+    'touchbar/share.pdf',
+    'touchbar/sidebar-left.pdf',
+    'touchbar/sidebar-right.pdf',
 ]
 
 # These resources go in $(DIST)/bin/res/MainMenu.nib, but we can't use a magic

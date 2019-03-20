@@ -5,9 +5,9 @@
 
 const {
   EncryptionRemoteTransformer,
-} = ChromeUtils.import("resource://gre/modules/ExtensionStorageSync.jsm", {});
-ChromeUtils.import("resource://services-crypto/utils.js");
-ChromeUtils.import("resource://services-sync/util.js");
+} = ChromeUtils.import("resource://gre/modules/ExtensionStorageSync.jsm", null);
+const {CryptoUtils} = ChromeUtils.import("resource://services-crypto/utils.js");
+const {Utils} = ChromeUtils.import("resource://services-sync/util.js");
 
 /**
  * Like Assert.throws, but for generators.
@@ -57,12 +57,15 @@ class StaticKeyEncryptionRemoteTransformer extends EncryptionRemoteTransformer {
   }
 }
 const BORING_KB = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
-const STRETCHED_KEY = CryptoUtils.hkdf(BORING_KB, undefined, `testing storage.sync encryption`, 2 * 32);
-const KEY_BUNDLE = {
-  sha256HMACHasher: Utils.makeHMACHasher(Ci.nsICryptoHMAC.SHA256, Utils.makeHMACKey(STRETCHED_KEY.slice(0, 32))),
-  encryptionKeyB64: btoa(STRETCHED_KEY.slice(32, 64)),
-};
-const transformer = new StaticKeyEncryptionRemoteTransformer(KEY_BUNDLE);
+let transformer;
+add_task(async function setup() {
+  const STRETCHED_KEY = await CryptoUtils.hkdfLegacy(BORING_KB, undefined, `testing storage.sync encryption`, 2 * 32);
+  const KEY_BUNDLE = {
+    sha256HMACHasher: Utils.makeHMACHasher(Ci.nsICryptoHMAC.SHA256, Utils.makeHMACKey(STRETCHED_KEY.slice(0, 32))),
+    encryptionKeyB64: btoa(STRETCHED_KEY.slice(32, 64)),
+  };
+  transformer = new StaticKeyEncryptionRemoteTransformer(KEY_BUNDLE);
+});
 
 add_task(async function test_encryption_transformer_roundtrip() {
   const POSSIBLE_DATAS = [

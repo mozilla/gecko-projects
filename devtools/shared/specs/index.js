@@ -28,11 +28,6 @@ const Types = exports.__TypesForTests = [
     front: "devtools/shared/fronts/addon/addons",
   },
   {
-    types: ["addonConsole"],
-    spec: "devtools/shared/specs/addon/console",
-    front: null,
-  },
-  {
     types: ["webExtension"],
     spec: "devtools/shared/specs/addon/webextension",
     front: null,
@@ -46,17 +41,6 @@ const Types = exports.__TypesForTests = [
     types: ["animationplayer", "animations"],
     spec: "devtools/shared/specs/animation",
     front: "devtools/shared/fronts/animation",
-  },
-  /* breakpoint has old fashion client and no front */
-  {
-    types: ["breakpoint"],
-    spec: "devtools/shared/specs/breakpoint",
-    front: null,
-  },
-  {
-    types: ["frame-snapshot", "canvas"],
-    spec: "devtools/shared/specs/canvas",
-    front: "devtools/shared/fronts/canvas",
   },
   {
     types: ["changes"],
@@ -99,11 +83,6 @@ const Types = exports.__TypesForTests = [
     types: ["framerate"],
     spec: "devtools/shared/specs/framerate",
     front: "devtools/shared/fronts/framerate",
-  },
-  {
-    types: ["function-call"],
-    spec: "devtools/shared/specs/function-call",
-    front: "devtools/shared/fronts/function-call",
   },
   /* heap snapshot has old fashion client and no front */
   {
@@ -247,7 +226,7 @@ const Types = exports.__TypesForTests = [
   {
     types: ["browsingContextTarget"],
     spec: "devtools/shared/specs/targets/browsing-context",
-    front: null,
+    front: "devtools/shared/fronts/targets/browsing-context",
   },
   {
     types: ["chromeWindowTarget"],
@@ -280,24 +259,24 @@ const Types = exports.__TypesForTests = [
     front: "devtools/shared/fronts/targets/worker",
   },
   {
-    types: ["audionode", "webaudio"],
-    spec: "devtools/shared/specs/webaudio",
-    front: "devtools/shared/fronts/webaudio",
-  },
-  {
     types: ["console"],
     spec: "devtools/shared/specs/webconsole",
-    front: null,
+    front: "devtools/shared/fronts/webconsole",
   },
   {
-    types: ["gl-shader", "gl-program", "webgl"],
-    spec: "devtools/shared/specs/webgl",
-    front: "devtools/shared/fronts/webgl",
+    types: ["pushSubscription"],
+    spec: "devtools/shared/specs/worker/push-subscription",
+    front: "devtools/shared/fronts/worker/push-subscription",
   },
   {
-    types: ["pushSubscription", "serviceWorkerRegistration", "serviceWorker"],
+    types: ["serviceWorker"],
     spec: "devtools/shared/specs/worker/service-worker",
-    front: null,
+    front: "devtools/shared/fronts/worker/service-worker",
+  },
+  {
+    types: ["serviceWorkerRegistration"],
+    spec: "devtools/shared/specs/worker/service-worker-registration",
+    front: "devtools/shared/fronts/worker/service-worker-registration",
   },
 ];
 

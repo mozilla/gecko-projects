@@ -1,6 +1,10 @@
 /* eslint-disable strict */
 function run_test() {
-  ChromeUtils.import("resource://gre/modules/jsdebugger.jsm");
+  Services.prefs.setBoolPref("security.allow_eval_with_system_principal", true);
+  registerCleanupFunction(() => {
+    Services.prefs.clearUserPref("security.allow_eval_with_system_principal");
+  });
+  const {addDebuggerToGlobal} = ChromeUtils.import("resource://gre/modules/jsdebugger.jsm");
   addDebuggerToGlobal(this);
   const g = testGlobal("test");
   const dbg = new Debugger();

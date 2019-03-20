@@ -11,16 +11,8 @@ let gLoadedInProcess2Promise = null;
 
 function _createProcessChooser(tabParent, from, to, rejectPromise = false) {
   let processChooser = new ProcessChooser(tabParent, "example.com", "example.org", rejectPromise);
-  processChooser.onComplete = () => {
-    gRegistrar.unregisterFactory(processChooser.classID, processChooser);
-  };
-  gRegistrar.registerFactory(processChooser.classID, "",
-                            "@mozilla.org/network/processChooser",
-                            processChooser);
   registerCleanupFunction(function() {
-    if (processChooser.onComplete) {
-      processChooser.onComplete();
-    }
+    processChooser.unregister();
   });
 }
 
@@ -29,43 +21,47 @@ function ProcessChooser(tabParent, from, to, rejectPromise = false) {
   this.fromDomain = from;
   this.toDomain = to;
   this.rejectPromise = rejectPromise;
+
+  this.registered = true;
+  Services.obs.addObserver(this, "http-on-may-change-process");
 }
 
 ProcessChooser.prototype = {
-  // nsIRedirectProcessChooser
-  getChannelRedirectTarget: function(aChannel, aParentChannel, aIdentifier) {
-    // Don't report failure when returning NS_ERROR_NOT_AVAILABLE
-    expectUncaughtException(true);
+  unregister() {
+    if (!this.registered) {
+      return;
+    }
+    this.registered = false;
+    Services.obs.removeObserver(this, "http-on-may-change-process");
+  },
 
-    // let tabParent = aParentChannel.QueryInterface(Ci.nsIInterfaceRequestor).getInterface(Ci.nsITabParent);
+  examine(aChannel) {
     if (this.channel && this.channel != aChannel) {
       // Hack: this is just so we don't get redirected multiple times.
       info("same channel. give null");
-      throw Cr.NS_ERROR_NOT_AVAILABLE;
+      return;
     }
 
     if (aChannel.URI.host != this.toDomain) {
       info("wrong host for channel " + aChannel.URI.host);
-      throw Cr.NS_ERROR_NOT_AVAILABLE;
+      return;
     }
 
     let redirects = aChannel.loadInfo.redirectChain;
     if (redirects[redirects.length - 1].principal.URI.host != this.fromDomain) {
       info("didn't find redirect");
-      throw Cr.NS_ERROR_NOT_AVAILABLE;
+      return;
     }
 
-    info("returning promise");
+    info("setting channel");
     this.channel = aChannel;
     let self = this;
 
-    expectUncaughtException(false);
-    if (this.onComplete) {
-      this.onComplete();
-      this.onComplete = null;
-    }
-    aIdentifier.value = 42;
-    return new Promise((resolve, reject) => {
+    info("unregistering");
+    this.unregister();
+
+    let identifier = 42;
+    let tabPromise = new Promise((resolve, reject) => {
       if (self.rejectPromise) {
         info("rejecting");
         reject(Cr.NS_ERROR_NOT_AVAILABLE);
@@ -76,20 +72,24 @@ ProcessChooser.prototype = {
       info("resolving");
       resolve(self.tabParent);
     });
+
+    info("calling switchprocessto");
+    aChannel.switchProcessTo(tabPromise, identifier);
   },
 
-  // nsIFactory
-  createInstance: function(aOuter, aIID) {
-    if (aOuter) {
-      throw Cr.NS_ERROR_NO_AGGREGATION;
+  observe(aSubject, aTopic, aData) {
+    switch (aTopic) {
+      case "http-on-may-change-process":
+        this.examine(aSubject.QueryInterface(Ci.nsIHttpChannel));
+        break;
+      default:
+        ok(false, "Unexpected topic observed!");
+        break;
     }
-    return this.QueryInterface(aIID);
   },
-  lockFactory: function() {},
 
   // nsISupports
-  QueryInterface: ChromeUtils.generateQI([Ci.nsIRedirectProcessChooser, Ci.nsIFactory]),
-  classID: Components.ID("{62561fa8-c091-4c9f-8897-b59ae18b0979}")
+  QueryInterface: ChromeUtils.generateQI([Ci.nsIObserver]),
 }
 
 add_task(async function() {
@@ -122,13 +122,13 @@ add_task(async function() {
   await ContentTask.spawn(browser2, null, async function(arg) {
     function ChannelListener(childListener) { this.childListener = childListener; }
     ChannelListener.prototype = {
-      onStartRequest: function(aRequest, aContext) {
+      onStartRequest: function(aRequest) {
         info("onStartRequest");
         let channel = aRequest.QueryInterface(Ci.nsIChannel);
         Assert.equal(channel.URI.spec, this.childListener.URI, "Make sure the channel has the proper URI");
         Assert.equal(channel.originalURI.spec, this.childListener.originalURI, "Make sure the originalURI is correct");
       },
-      onStopRequest: function(aRequest, aContext, aStatusCode) {
+      onStopRequest: function(aRequest, aStatusCode) {
         info("onStopRequest");
         Assert.equal(aStatusCode, Cr.NS_OK, "Check the status code");
         Assert.equal(this.gotData, true, "Check that the channel received data");
@@ -181,7 +181,7 @@ add_task(async function() {
         registrar.unregisterFactory(childListener.classID, childListener);
       }
       registrar.registerFactory(childListener.classID, "",
-                              "@mozilla.org/network/childProcessChannelListener",
+                              "@mozilla.org/network/childProcessChannelListener;1",
                               childListener);
     });
   });

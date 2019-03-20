@@ -34,6 +34,10 @@ namespace wasm {
 //
 // A table of AnyRef holds JSObject pointers, which must be traced.
 
+// TODO/AnyRef-boxing: With boxed immediates and strings, JSObject* is no longer
+// the most appropriate representation for Cell::anyref.
+STATIC_ASSERT_ANYREF_IS_JSOBJECT;
+
 typedef GCVector<JS::Heap<JSObject*>, 0, SystemAllocPolicy> TableAnyRefVector;
 
 class Table : public ShareableBase<Table> {
@@ -76,14 +80,15 @@ class Table : public ShareableBase<Table> {
   // Only for function values.  Raw pointer to the table.
   uint8_t* functionBase() const;
 
-  // get/setAnyFunc is allowed only on table-of-anyfunc.
+  // get/setAnyFunc is allowed only on table-of-funcref.
   // get/setAnyRef is allowed only on table-of-anyref.
   // setNull is allowed on either.
   const FunctionTableElem& getAnyFunc(uint32_t index) const;
   void setAnyFunc(uint32_t index, void* code, const Instance* instance);
 
-  JSObject* getAnyRef(uint32_t index) const;
-  void setAnyRef(uint32_t index, JSObject* obj);
+  AnyRef getAnyRef(uint32_t index) const;
+  const void* getAnyRefLocForCompiledCode(uint32_t index) const;
+  void setAnyRef(uint32_t index, AnyRef);
 
   void setNull(uint32_t index);
 

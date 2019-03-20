@@ -27,8 +27,6 @@
 
 struct CachedOffsetForFrame;
 class nsAutoScrollTimer;
-class nsIContentIterator;
-class nsIDocument;
 class nsIFrame;
 class nsFrameSelection;
 class nsPIDOMWindowOuter;
@@ -40,6 +38,7 @@ class nsHTMLCopyEncoder;
 namespace mozilla {
 class ErrorResult;
 class HTMLEditor;
+class PostContentIterator;
 enum class TableSelection : uint32_t;
 struct AutoPrepareFocusRange;
 namespace dom {
@@ -118,7 +117,7 @@ class Selection final : public nsSupportsWeakReference,
     }
   }
 
-  nsIDocument* GetParentObject() const;
+  Document* GetParentObject() const;
   DocGroup* GetDocGroup() const;
 
   // utility methods for scrolling the selection into view
@@ -304,7 +303,12 @@ class Selection final : public nsSupportsWeakReference,
    */
   nsresult RemoveAllRangesTemporarily();
 
-  void Stringify(nsAString& aResult);
+  /**
+   * Whether Stringify should flush layout or not.
+   */
+  enum class FlushFrames { No, Yes };
+  MOZ_CAN_RUN_SCRIPT
+  void Stringify(nsAString& aResult, FlushFrames = FlushFrames::Yes);
 
   /**
    * Indicates whether the node is part of the selection. If partlyContained
@@ -345,6 +349,7 @@ class Selection final : public nsSupportsWeakReference,
   void Modify(const nsAString& aAlter, const nsAString& aDirection,
               const nsAString& aGranularity, mozilla::ErrorResult& aRv);
 
+  MOZ_CAN_RUN_SCRIPT
   void SetBaseAndExtentJS(nsINode& aAnchorNode, uint32_t aAnchorOffset,
                           nsINode& aFocusNode, uint32_t aFocusOffset,
                           mozilla::ErrorResult& aRv);
@@ -440,9 +445,84 @@ class Selection final : public nsSupportsWeakReference,
   MOZ_CAN_RUN_SCRIPT_BOUNDARY
   void SelectAllChildren(nsINode& aNode, mozilla::ErrorResult& aRv);
 
+  /**
+   * SetStartAndEnd() removes all ranges and sets new range as given range.
+   * Different from SetBaseAndExtent(), this won't compare the DOM points of
+   * aStartRef and aEndRef for performance nor set direction to eDirPrevious.
+   * Note that this may reset the limiter and move focus.  If you don't want
+   * that, use SetStartAndEndInLimiter() instead.
+   */
+  MOZ_CAN_RUN_SCRIPT
+  void SetStartAndEnd(const RawRangeBoundary& aStartRef,
+                      const RawRangeBoundary& aEndRef, ErrorResult& aRv) {
+    SetStartAndEndInternal(InLimiter::eNo, aStartRef, aEndRef, eDirNext, aRv);
+  }
+  MOZ_CAN_RUN_SCRIPT
+  void SetStartAndEnd(nsINode& aStartContainer, uint32_t aStartOffset,
+                      nsINode& aEndContainer, uint32_t aEndOffset,
+                      ErrorResult& aRv) {
+    SetStartAndEnd(RawRangeBoundary(&aStartContainer, aStartOffset),
+                   RawRangeBoundary(&aEndContainer, aEndOffset), aRv);
+  }
+
+  /**
+   * SetStartAndEndInLimiter() is similar to SetStartAndEnd(), but this respects
+   * the selection limiter.  If all or part of given range is not in the
+   * limiter, this returns error.
+   */
+  MOZ_CAN_RUN_SCRIPT
+  void SetStartAndEndInLimiter(const RawRangeBoundary& aStartRef,
+                               const RawRangeBoundary& aEndRef,
+                               ErrorResult& aRv) {
+    SetStartAndEndInternal(InLimiter::eYes, aStartRef, aEndRef, eDirNext, aRv);
+  }
+  MOZ_CAN_RUN_SCRIPT
+  void SetStartAndEndInLimiter(nsINode& aStartContainer, uint32_t aStartOffset,
+                               nsINode& aEndContainer, uint32_t aEndOffset,
+                               ErrorResult& aRv) {
+    SetStartAndEndInLimiter(RawRangeBoundary(&aStartContainer, aStartOffset),
+                            RawRangeBoundary(&aEndContainer, aEndOffset), aRv);
+  }
+
+  /**
+   * SetBaseAndExtent() is alternative of the JS API for internal use.
+   * Different from SetStartAndEnd(), this sets anchor and focus points as
+   * specified, then if anchor point is after focus node, this sets the
+   * direction to eDirPrevious.
+   * Note that this may reset the limiter and move focus.  If you don't want
+   * that, use SetBaseAndExtentInLimier() instead.
+   */
+  MOZ_CAN_RUN_SCRIPT
   void SetBaseAndExtent(nsINode& aAnchorNode, uint32_t aAnchorOffset,
                         nsINode& aFocusNode, uint32_t aFocusOffset,
-                        mozilla::ErrorResult& aRv);
+                        ErrorResult& aRv) {
+    SetBaseAndExtent(RawRangeBoundary(&aAnchorNode, aAnchorOffset),
+                     RawRangeBoundary(&aFocusNode, aFocusOffset), aRv);
+  }
+  MOZ_CAN_RUN_SCRIPT
+  void SetBaseAndExtent(const RawRangeBoundary& aAnchorRef,
+                        const RawRangeBoundary& aFocusRef, ErrorResult& aRv) {
+    SetBaseAndExtentInternal(InLimiter::eNo, aAnchorRef, aFocusRef, aRv);
+  }
+
+  /**
+   * SetBaseAndExtentInLimier() is similar to SetBaseAndExtent(), but this
+   * respects the selection limiter.  If all or part of given range is not in
+   * the limiter, this returns error.
+   */
+  MOZ_CAN_RUN_SCRIPT
+  void SetBaseAndExtentInLimiter(nsINode& aAnchorNode, uint32_t aAnchorOffset,
+                                 nsINode& aFocusNode, uint32_t aFocusOffset,
+                                 ErrorResult& aRv) {
+    SetBaseAndExtentInLimiter(RawRangeBoundary(&aAnchorNode, aAnchorOffset),
+                              RawRangeBoundary(&aFocusNode, aFocusOffset), aRv);
+  }
+  MOZ_CAN_RUN_SCRIPT
+  void SetBaseAndExtentInLimiter(const RawRangeBoundary& aAnchorRef,
+                                 const RawRangeBoundary& aFocusRef,
+                                 ErrorResult& aRv) {
+    SetBaseAndExtentInternal(InLimiter::eYes, aAnchorRef, aFocusRef, aRv);
+  }
 
   void AddSelectionChangeBlocker();
   void RemoveSelectionChangeBlocker();
@@ -517,7 +597,7 @@ class Selection final : public nsSupportsWeakReference,
   friend class ::nsCopySupport;
   friend class ::nsHTMLCopyEncoder;
   MOZ_CAN_RUN_SCRIPT
-  void AddRangeInternal(nsRange& aRange, nsIDocument* aDocument, ErrorResult&);
+  void AddRangeInternal(nsRange& aRange, Document* aDocument, ErrorResult&);
 
   // This is helper method for GetPrimaryFrameForFocusNode.
   // If aVisual is true, this returns caret frame.
@@ -531,6 +611,25 @@ class Selection final : public nsSupportsWeakReference,
   // Get the cached value for nsTextFrame::GetPointFromOffset.
   nsresult GetCachedFrameOffset(nsIFrame* aFrame, int32_t inOffset,
                                 nsPoint& aPoint);
+
+  enum class InLimiter {
+    // If eYes, the method may reset selection limiter and move focus if the
+    // given range is out of the limiter.
+    eYes,
+    // If eNo, the method won't reset selection limiter.  So, if given range
+    // is out of bounds, the method may return error.
+    eNo,
+  };
+  MOZ_CAN_RUN_SCRIPT
+  void SetStartAndEndInternal(InLimiter aInLimiter,
+                              const RawRangeBoundary& aStartRef,
+                              const RawRangeBoundary& aEndRef,
+                              nsDirection aDirection, ErrorResult& aRv);
+  MOZ_CAN_RUN_SCRIPT
+  void SetBaseAndExtentInternal(InLimiter aInLimiter,
+                                const RawRangeBoundary& aAnchorRef,
+                                const RawRangeBoundary& aFocusRef,
+                                ErrorResult& aRv);
 
  public:
   SelectionType GetType() const { return mSelectionType; }
@@ -593,7 +692,7 @@ class Selection final : public nsSupportsWeakReference,
    */
   void SetAnchorFocusRange(int32_t aIndex);
   void SelectFramesForContent(nsIContent* aContent, bool aSelected);
-  nsresult SelectAllFramesForContent(nsIContentIterator* aInnerIter,
+  nsresult SelectAllFramesForContent(PostContentIterator& aPostOrderIter,
                                      nsIContent* aContent, bool aSelected);
   nsresult SelectFrames(nsPresContext* aPresContext, nsRange* aRange,
                         bool aSelect);
@@ -633,7 +732,7 @@ class Selection final : public nsSupportsWeakReference,
    */
   nsresult AddItemInternal(nsRange* aRange, int32_t* aOutIndex);
 
-  nsIDocument* GetDocument() const;
+  Document* GetDocument() const;
   nsPIDOMWindowOuter* GetWindow() const;
   HTMLEditor* GetHTMLEditor() const;
 
@@ -669,6 +768,8 @@ class Selection final : public nsSupportsWeakReference,
    *  non-editable area.
    */
   Element* GetCommonEditingHostForAllRanges();
+
+  void Disconnect();
 
   // These are the ranges inside this selection. They are kept sorted in order
   // of DOM start position.

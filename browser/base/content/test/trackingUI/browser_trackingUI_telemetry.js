@@ -3,6 +3,7 @@
  */
 
 const PREF = "privacy.trackingprotection.enabled";
+const DTSCBN_PREF = "dom.testing.sync-content-blocking-notifications";
 const BENIGN_PAGE = "http://tracking.example.org/browser/browser/base/content/test/trackingUI/benignPage.html";
 const TRACKING_PAGE = "http://tracking.example.org/browser/browser/base/content/test/trackingUI/trackingPage.html";
 
@@ -15,6 +16,7 @@ registerCleanupFunction(function() {
   UrlClassifierTestUtils.cleanupTestTrackers();
   Services.telemetry.canRecordExtended = oldCanRecord;
   Services.prefs.clearUserPref(PREF);
+  Services.prefs.clearUserPref(DTSCBN_PREF);
 });
 
 function getShieldHistogram() {
@@ -27,6 +29,7 @@ function getShieldCounts() {
 
 add_task(async function setup() {
   await UrlClassifierTestUtils.addTestTrackers();
+  Services.prefs.setBoolPref(DTSCBN_PREF, true);
 
   let TrackingProtection = gBrowser.ownerGlobal.TrackingProtection;
   ok(TrackingProtection, "TP is attached to the browser window");
@@ -50,11 +53,11 @@ add_task(async function testShieldHistogram() {
   getShieldHistogram().clear();
 
   await promiseTabLoadEvent(tab, BENIGN_PAGE);
-  is(getShieldCounts()[0], 2, "Page loads without tracking");
+  is(getShieldCounts()[0], 1, "Page loads without tracking");
 
   await promiseTabLoadEvent(tab, TRACKING_PAGE);
   // Note that right now the shield histogram is not measuring what
-  // you might think.  Since onSecurityChange fires twice for a tracking page,
+  // you might think.  Since onContentBlockingEvent fires twice for a tracking page,
   // the total page loads count is double counting, and the shield count
   // (which is meant to measure times when the shield wasn't shown) fires even
   // when tracking elements exist on the page.
@@ -86,10 +89,7 @@ add_task(async function testIdentityPopupEvents() {
 
   Services.telemetry.clearEvents();
 
-  let { gIdentityHandler } = gBrowser.ownerGlobal;
-  let promisePanelOpen = BrowserTestUtils.waitForEvent(gIdentityHandler._identityPopup, "popupshown");
-  gIdentityHandler._identityBox.click();
-  await promisePanelOpen;
+  await openIdentityPopup();
 
   let events = Services.telemetry.snapshotEvents(Ci.nsITelemetry.DATASET_RELEASE_CHANNEL_OPTIN, true).parent;
   let openEvents = events.filter(
@@ -99,9 +99,7 @@ add_task(async function testIdentityPopupEvents() {
 
   await promiseTabLoadEvent(tab, TRACKING_PAGE);
 
-  promisePanelOpen = BrowserTestUtils.waitForEvent(gIdentityHandler._identityPopup, "popupshown");
-  gIdentityHandler._identityBox.click();
-  await promisePanelOpen;
+  await openIdentityPopup();
 
   events = Services.telemetry.snapshotEvents(Ci.nsITelemetry.DATASET_RELEASE_CHANNEL_OPTIN, true).parent;
   openEvents = events.filter(

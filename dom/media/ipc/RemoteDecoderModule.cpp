@@ -6,28 +6,25 @@
 #include "RemoteDecoderModule.h"
 
 #include "base/thread.h"
+#include "mozilla/dom/ContentChild.h"  // for launching RDD w/ ContentChild
 #include "mozilla/layers/SynchronousTask.h"
 #include "mozilla/StaticPrefs.h"
 
 #ifdef MOZ_AV1
-#include "AOMDecoder.h"
+#  include "AOMDecoder.h"
 #endif
+#include "RemoteAudioDecoder.h"
 #include "RemoteDecoderManagerChild.h"
 #include "RemoteMediaDataDecoder.h"
-#include "RemoteVideoDecoderChild.h"
+#include "RemoteVideoDecoder.h"
+#include "VorbisDecoder.h"
 
 namespace mozilla {
 
 using base::Thread;
+using dom::ContentChild;
 using namespace ipc;
 using namespace layers;
-
-nsresult RemoteDecoderModule::Startup() {
-  if (!RemoteDecoderManagerChild::GetManagerThread()) {
-    return NS_ERROR_FAILURE;
-  }
-  return NS_OK;
-}
 
 bool RemoteDecoderModule::SupportsMimeType(
     const nsACString& aMimeType, DecoderDoctorDiagnostics* aDiagnostics) const {
@@ -38,14 +35,67 @@ bool RemoteDecoderModule::SupportsMimeType(
     supports |= AOMDecoder::IsAV1(aMimeType);
   }
 #endif
+  if (StaticPrefs::MediaRddVorbisEnabled()) {
+    supports |= VorbisDataDecoder::IsVorbis(aMimeType);
+  }
+
   MOZ_LOG(
       sPDMLog, LogLevel::Debug,
       ("Sandbox decoder %s requested type", supports ? "supports" : "rejects"));
   return supports;
 }
 
+already_AddRefed<MediaDataDecoder> RemoteDecoderModule::CreateAudioDecoder(
+    const CreateDecoderParams& aParams) {
+  if (XRE_IsContentProcess()) {
+    ContentChild* contentChild = ContentChild::GetSingleton();
+    contentChild->LaunchRDDProcess();
+  }
+
+  if (!RemoteDecoderManagerChild::GetManagerThread()) {
+    return nullptr;
+  }
+
+  RemoteAudioDecoderChild* child = new RemoteAudioDecoderChild();
+  RefPtr<RemoteMediaDataDecoder> object = new RemoteMediaDataDecoder(
+      child, RemoteDecoderManagerChild::GetManagerThread(),
+      RemoteDecoderManagerChild::GetManagerAbstractThread());
+
+  // (per Matt Woodrow) We can't use NS_DISPATCH_SYNC here since that
+  // can spin the event loop while it waits.
+  SynchronousTask task("InitIPDL");
+  MediaResult result(NS_OK);
+  RemoteDecoderManagerChild::GetManagerThread()->Dispatch(
+      NS_NewRunnableFunction("RemoteDecoderModule::CreateAudioDecoder",
+                             [&, child]() {
+                               AutoCompleteTask complete(&task);
+                               result = child->InitIPDL(aParams.AudioConfig(),
+                                                        aParams.mOptions);
+                             }),
+      NS_DISPATCH_NORMAL);
+  task.Wait();
+
+  if (NS_FAILED(result)) {
+    if (aParams.mError) {
+      *aParams.mError = result;
+    }
+    return nullptr;
+  }
+
+  return object.forget();
+}
+
 already_AddRefed<MediaDataDecoder> RemoteDecoderModule::CreateVideoDecoder(
     const CreateDecoderParams& aParams) {
+  if (XRE_IsContentProcess()) {
+    ContentChild* contentChild = ContentChild::GetSingleton();
+    contentChild->LaunchRDDProcess();
+  }
+
+  if (!RemoteDecoderManagerChild::GetManagerThread()) {
+    return nullptr;
+  }
+
   RemoteVideoDecoderChild* child = new RemoteVideoDecoderChild();
   RefPtr<RemoteMediaDataDecoder> object = new RemoteMediaDataDecoder(
       child, RemoteDecoderManagerChild::GetManagerThread(),
@@ -56,7 +106,7 @@ already_AddRefed<MediaDataDecoder> RemoteDecoderModule::CreateVideoDecoder(
   SynchronousTask task("InitIPDL");
   MediaResult result(NS_OK);
   RemoteDecoderManagerChild::GetManagerThread()->Dispatch(
-      NS_NewRunnableFunction("dom::RemoteDecoderModule::CreateVideoDecoder",
+      NS_NewRunnableFunction("RemoteDecoderModule::CreateVideoDecoder",
                              [&, child]() {
                                AutoCompleteTask complete(&task);
                                result = child->InitIPDL(aParams.VideoConfig(),

@@ -1,6 +1,6 @@
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
- * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 //! Parsing of the stylesheet contents.
 
@@ -107,9 +107,10 @@ impl<'b> TopLevelRuleParser<'b> {
         // If there's anything that isn't a namespace rule (or import rule, but
         // we checked that already at the beginning), reject with a
         // StateError.
-        if new_state == State::Namespaces && ctx.rule_list[ctx.index..]
-            .iter()
-            .any(|r| !matches!(*r, CssRule::Namespace(..)))
+        if new_state == State::Namespaces &&
+            ctx.rule_list[ctx.index..]
+                .iter()
+                .any(|r| !matches!(*r, CssRule::Namespace(..)))
         {
             self.dom_error = Some(RulesMutateError::InvalidState);
             return false;
@@ -185,6 +186,13 @@ impl<'a, 'i> AtRuleParser<'i> for TopLevelRuleParser<'a> {
         match_ignore_ascii_case! { &*name,
             "import" => {
                 if !self.check_state(State::Imports) {
+                    return Err(input.new_custom_error(StyleParseErrorKind::UnexpectedImportRule))
+                }
+
+                // FIXME(emilio): We should always be able to have a loader
+                // around! See bug 1533783.
+                if self.loader.is_none() {
+                    error!("Saw @import rule, but no way to trigger the load");
                     return Err(input.new_custom_error(StyleParseErrorKind::UnexpectedImportRule))
                 }
 

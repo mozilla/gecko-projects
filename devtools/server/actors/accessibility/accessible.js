@@ -8,7 +8,7 @@ const { Ci, Cu } = require("chrome");
 const { Actor, ActorClassWithSpec } = require("devtools/shared/protocol");
 const { accessibleSpec } = require("devtools/shared/specs/accessibility");
 
-loader.lazyRequireGetter(this, "getContrastRatioFor", "devtools/server/actors/utils/accessibility", true);
+loader.lazyRequireGetter(this, "getContrastRatioFor", "devtools/server/actors/accessibility/contrast", true);
 loader.lazyRequireGetter(this, "isDefunct", "devtools/server/actors/utils/accessibility", true);
 loader.lazyRequireGetter(this, "findCssSelector", "devtools/shared/inspector/css-logic", true);
 
@@ -19,6 +19,12 @@ const RELATIONS_TO_IGNORE = new Set([
   nsIAccessibleRelation.RELATION_CONTAINING_WINDOW,
   nsIAccessibleRelation.RELATION_PARENT_WINDOW_OF,
   nsIAccessibleRelation.RELATION_SUBWINDOW_OF,
+]);
+
+const nsIAccessibleRole = Ci.nsIAccessibleRole;
+const TEXT_ROLES = new Set([
+  nsIAccessibleRole.ROLE_TEXT_LEAF,
+  nsIAccessibleRole.ROLE_STATICTEXT,
 ]);
 
 const STATE_DEFUNCT = Ci.nsIAccessibleStates.EXT_STATE_DEFUNCT;
@@ -369,27 +375,29 @@ const AccessibleActor = ActorClassWithSpec(accessibleSpec, {
 
   _isValidTextLeaf(rawAccessible) {
     return !isDefunct(rawAccessible) &&
-           rawAccessible.role === Ci.nsIAccessibleRole.ROLE_TEXT_LEAF &&
+           TEXT_ROLES.has(rawAccessible.role) &&
            rawAccessible.name && rawAccessible.name.trim().length > 0;
-  },
-
-  get _nonEmptyTextLeafs() {
-    return this.children().filter(child => this._isValidTextLeaf(child.rawAccessible));
   },
 
   /**
    * Calculate the contrast ratio of the given accessible.
    */
-  _getContrastRatio() {
+  async _getContrastRatio() {
     if (!this._isValidTextLeaf(this.rawAccessible)) {
       return null;
     }
 
-    return getContrastRatioFor(this.rawAccessible.DOMNode.parentNode, {
+    const { DOMNode: rawNode } = this.rawAccessible;
+    const win = rawNode.ownerGlobal;
+    this.walker.loadTransitionDisablingStyleSheet(win);
+    const contrastRatio = await getContrastRatioFor(rawNode.parentNode, {
       bounds: this.bounds,
-      contexts: this.walker.contexts,
-      win: this.walker.rootWin,
+      win,
     });
+
+    this.walker.removeTransitionDisablingStyleSheet(win);
+
+    return contrastRatio;
   },
 
   /**
@@ -398,9 +406,16 @@ const AccessibleActor = ActorClassWithSpec(accessibleSpec, {
    * @return {Object|null}
    *         Audit results for the accessible object.
   */
-  get audit() {
+  async audit() {
+    // More audit steps will be added here in the near future. In addition to colour
+    // contrast ratio we will add autits for to the missing names, invalid states, etc.
+    // (For example see bug 1518808).
+    const [ contrastRatio ] = await Promise.all([
+      this._getContrastRatio(),
+    ]);
+
     return this.isDefunct ? null : {
-      contrastRatio: this._getContrastRatio(),
+      contrastRatio,
     };
   },
 

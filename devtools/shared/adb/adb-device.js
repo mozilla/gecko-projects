@@ -4,7 +4,7 @@
 
 "use strict";
 
-const { ADB } = require("devtools/shared/adb/adb");
+const { shell } = require("devtools/shared/adb/commands/index");
 
 /**
  * A Device instance is created and registered with the Devices module whenever
@@ -15,25 +15,21 @@ class AdbDevice {
     this.id = id;
   }
 
-  async getModel() {
-    if (this._model) {
-      return this._model;
-    }
-    const model = await ADB.shell("getprop ro.product.model");
-    this._model = model.trim();
-    return this._model;
+  async initialize() {
+    const model = await shell(this.id, "getprop ro.product.model");
+    this.model = model.trim();
   }
 
-  // This method is not using any information from the instance, but in theory getting
-  // runtime socket paths (as well as model) should be device specific. So we should use
-  // information available on the instance when implementing multi device support.
-  // See Bug 1507126.
+  get name() {
+    return this.model || this.id;
+  }
+
   async getRuntimeSocketPaths() {
     // A matching entry looks like:
     // 00000000: 00000002 00000000 00010000 0001 01 6551588
     //  /data/data/org.mozilla.fennec/firefox-debugger-socket
     const query = "cat /proc/net/unix";
-    const rawSocketInfo = await ADB.shell(query);
+    const rawSocketInfo = await shell(this.id, query);
 
     // Filter to lines with "firefox-debugger-socket"
     let socketInfos = rawSocketInfo.split(/\r?\n/);

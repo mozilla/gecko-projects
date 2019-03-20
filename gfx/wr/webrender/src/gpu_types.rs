@@ -2,11 +2,8 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-use api::{
-    DevicePoint, DeviceSize, DeviceRect, LayoutRect, LayoutToWorldTransform, LayoutTransform,
-    PremultipliedColorF, LayoutToPictureTransform, PictureToLayoutTransform, PicturePixel,
-    WorldPixel, WorldToLayoutTransform,
-};
+use api::PremultipliedColorF;
+use api::units::*;
 use clip_scroll_tree::{ClipScrollTree, ROOT_SPATIAL_NODE_INDEX, SpatialNodeIndex};
 use gpu_cache::{GpuCacheAddress, GpuDataRequest};
 use internal_types::FastHashMap;
@@ -16,6 +13,8 @@ use std::i32;
 use util::{TransformedRectKind, MatrixHelpers};
 
 // Contains type that must exactly match the same structures declared in GLSL.
+
+pub const VECS_PER_TRANSFORM: usize = 8;
 
 #[derive(Copy, Clone, Debug, PartialEq)]
 #[repr(C)]
@@ -59,7 +58,7 @@ pub enum RasterizationSpace {
     Screen = 1,
 }
 
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Copy, Clone, MallocSizeOf)]
 #[cfg_attr(feature = "capture", derive(Serialize))]
 #[cfg_attr(feature = "replay", derive(Deserialize))]
 #[repr(C)]
@@ -96,7 +95,7 @@ pub struct ScalingInstance {
     pub src_task_address: RenderTaskAddress,
 }
 
-#[derive(Copy, Clone, Debug, Hash, PartialEq, Eq)]
+#[derive(Copy, Clone, Debug, Hash, MallocSizeOf, PartialEq, Eq)]
 #[repr(C)]
 #[cfg_attr(feature = "capture", derive(Serialize))]
 #[cfg_attr(feature = "replay", derive(Deserialize))]
@@ -134,12 +133,17 @@ pub struct BorderInstance {
 #[cfg_attr(feature = "replay", derive(Deserialize))]
 #[repr(C)]
 pub struct ClipMaskInstance {
-    pub render_task_address: RenderTaskAddress,
     pub clip_transform_id: TransformPaletteId,
     pub prim_transform_id: TransformPaletteId,
-    pub segment: i32,
     pub clip_data_address: GpuCacheAddress,
     pub resource_address: GpuCacheAddress,
+    pub local_pos: LayoutPoint,
+    pub tile_rect: LayoutRect,
+    pub sub_rect: DeviceRect,
+    pub snap_offsets: SnapOffsets,
+    pub task_origin: DevicePoint,
+    pub screen_origin: DevicePoint,
+    pub device_pixel_scale: f32,
 }
 
 /// A border corner dot or dash drawn into the clipping mask.
@@ -315,6 +319,7 @@ bitflags! {
     /// code should process this instance.
     #[cfg_attr(feature = "capture", derive(Serialize))]
     #[cfg_attr(feature = "replay", derive(Deserialize))]
+    #[derive(MallocSizeOf)]
     pub struct BrushFlags: u8 {
         /// Apply perspective interpolation to UVs
         const PERSPECTIVE_INTERPOLATION = 0x1;
@@ -327,6 +332,8 @@ bitflags! {
         const SEGMENT_REPEAT_Y = 0x8;
         /// The extra segment data is a texel rect.
         const SEGMENT_TEXEL_RECT = 0x10;
+        /// Snap to the primitive rect instead of the visible rect.
+        const SNAP_TO_PRIMITIVE = 0x20;
     }
 }
 
@@ -384,7 +391,7 @@ impl TransformPaletteId {
     }
 }
 
-// The GPU data payload for a transform palette entry.
+/// The GPU data payload for a transform palette entry.
 #[derive(Debug, Clone)]
 #[cfg_attr(feature = "capture", derive(Serialize))]
 #[cfg_attr(feature = "replay", derive(Deserialize))]
@@ -438,6 +445,7 @@ pub struct TransformPalette {
 
 impl TransformPalette {
     pub fn new() -> Self {
+        let _ = VECS_PER_TRANSFORM;
         TransformPalette {
             transforms: Vec::new(),
             metadata: Vec::new(),
@@ -467,18 +475,18 @@ impl TransformPalette {
 
     fn get_index(
         &mut self,
-        from_index: SpatialNodeIndex,
-        to_index: SpatialNodeIndex,
+        child_index: SpatialNodeIndex,
+        parent_index: SpatialNodeIndex,
         clip_scroll_tree: &ClipScrollTree,
     ) -> usize {
-        if to_index == ROOT_SPATIAL_NODE_INDEX {
-            from_index.0
-        } else if from_index == to_index {
+        if parent_index == ROOT_SPATIAL_NODE_INDEX {
+            child_index.0 as usize
+        } else if child_index == parent_index {
             0
         } else {
             let key = RelativeTransformKey {
-                from_index,
-                to_index,
+                from_index: child_index,
+                to_index: parent_index,
             };
 
             let metadata = &mut self.metadata;
@@ -488,17 +496,17 @@ impl TransformPalette {
                 .entry(key)
                 .or_insert_with(|| {
                     let transform = clip_scroll_tree.get_relative_transform(
-                        from_index,
-                        to_index,
+                        child_index,
+                        parent_index,
                     )
-                    .unwrap_or(LayoutTransform::identity())
+                    .flattened
                     .with_destination::<PicturePixel>();
 
                     register_transform(
                         metadata,
                         transforms,
-                        from_index,
-                        to_index,
+                        child_index,
+                        parent_index,
                         transform,
                     )
                 })
@@ -509,7 +517,7 @@ impl TransformPalette {
         &self,
         index: SpatialNodeIndex,
     ) -> LayoutToWorldTransform {
-        self.transforms[index.0]
+        self.transforms[index.0 as usize]
             .transform
             .with_destination::<WorldPixel>()
     }
@@ -518,7 +526,7 @@ impl TransformPalette {
         &self,
         index: SpatialNodeIndex,
     ) -> WorldToLayoutTransform {
-        self.transforms[index.0]
+        self.transforms[index.0 as usize]
             .inv_transform
             .with_source::<WorldPixel>()
     }
@@ -562,11 +570,33 @@ pub enum UvRectKind {
     // use a bilerp() to correctly interpolate a
     // UV coord in the vertex shader.
     Quad {
-        top_left: DevicePoint,
-        top_right: DevicePoint,
-        bottom_left: DevicePoint,
-        bottom_right: DevicePoint,
+        top_left: DeviceHomogeneousVector,
+        top_right: DeviceHomogeneousVector,
+        bottom_left: DeviceHomogeneousVector,
+        bottom_right: DeviceHomogeneousVector,
     },
+}
+
+/// Represents offsets in device pixels that a primitive
+/// was snapped to.
+#[cfg_attr(feature = "capture", derive(Serialize))]
+#[cfg_attr(feature = "replay", derive(Deserialize))]
+#[derive(Copy, Clone, Debug)]
+#[repr(C)]
+pub struct SnapOffsets {
+    /// How far the top left corner was snapped
+    pub top_left: DeviceVector2D,
+    /// How far the bottom right corner was snapped
+    pub bottom_right: DeviceVector2D,
+}
+
+impl SnapOffsets {
+    pub fn empty() -> Self {
+        SnapOffsets {
+            top_left: DeviceVector2D::zero(),
+            bottom_right: DeviceVector2D::zero(),
+        }
+    }
 }
 
 #[derive(Debug, Copy, Clone)]
@@ -582,6 +612,8 @@ pub struct ImageSource {
 
 impl ImageSource {
     pub fn write_gpu_blocks(&self, request: &mut GpuDataRequest) {
+        // see fetch_image_resource in GLSL
+        // has to be VECS_PER_IMAGE_RESOURCE vectors
         request.push([
             self.p0.x,
             self.p0.y,
@@ -597,19 +629,12 @@ impl ImageSource {
 
         // If this is a polygon uv kind, then upload the four vertices.
         if let UvRectKind::Quad { top_left, top_right, bottom_left, bottom_right } = self.uv_rect_kind {
-            request.push([
-                top_left.x,
-                top_left.y,
-                top_right.x,
-                top_right.y,
-            ]);
-
-            request.push([
-                bottom_left.x,
-                bottom_left.y,
-                bottom_right.x,
-                bottom_right.y,
-            ]);
+            // see fetch_image_resource_extra in GLSL
+            //Note: we really need only 3 components per point here: X, Y, and W
+            request.push(top_left);
+            request.push(top_right);
+            request.push(bottom_left);
+            request.push(bottom_right);
         }
     }
 }

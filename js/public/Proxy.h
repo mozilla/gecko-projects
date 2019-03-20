@@ -184,11 +184,10 @@ class JS_FRIEND_API BaseProxyHandler {
    * treatment from the JS engine:
    *
    *   - When mHasPrototype is true, the engine never calls these methods:
-   *     getPropertyDescriptor, has, set, enumerate, iterate.  Instead, for
-   *     these operations, it calls the "own" methods like
-   *     getOwnPropertyDescriptor, hasOwn, defineProperty,
-   *     getOwnEnumerablePropertyKeys, etc., and consults the prototype chain
-   *     if needed.
+   *     has, set, enumerate, iterate.  Instead, for these operations,
+   *     it calls the "own" methods like getOwnPropertyDescriptor, hasOwn,
+   *     defineProperty, getOwnEnumerablePropertyKeys, etc.,
+   *     and consults the prototype chain if needed.
    *
    *   - When mHasPrototype is true, the engine calls handler->get() only if
    *     handler->hasOwn() says an own property exists on the proxy. If not,
@@ -307,7 +306,9 @@ class JS_FRIEND_API BaseProxyHandler {
    * These standard internal methods are implemented, as a convenience, so
    * that ProxyHandler subclasses don't have to provide every single method.
    *
-   * The base-class implementations work by calling getPropertyDescriptor().
+   * The base-class implementations work by calling getOwnPropertyDescriptor()
+   * and going up the [[Prototype]] chain if necessary. The algorithm for this
+   * follows what is defined for Ordinary Objects in the ES spec.
    * They do not follow any standard. When in doubt, override them.
    */
   virtual bool has(JSContext* cx, HandleObject proxy, HandleId id,
@@ -336,10 +337,8 @@ class JS_FRIEND_API BaseProxyHandler {
                          const CallArgs& args) const;
 
   /* SpiderMonkey extensions. */
-  virtual JSObject* enumerate(JSContext* cx, HandleObject proxy) const;
-  virtual bool getPropertyDescriptor(
-      JSContext* cx, HandleObject proxy, HandleId id,
-      MutableHandle<PropertyDescriptor> desc) const;
+  virtual bool enumerate(JSContext* cx, HandleObject proxy,
+                         AutoIdVector& props) const;
   virtual bool hasOwn(JSContext* cx, HandleObject proxy, HandleId id,
                       bool* bp) const;
   virtual bool getOwnEnumerablePropertyKeys(JSContext* cx, HandleObject proxy,
@@ -373,8 +372,6 @@ class JS_FRIEND_API BaseProxyHandler {
   virtual bool getElements(JSContext* cx, HandleObject proxy, uint32_t begin,
                            uint32_t end, ElementAdder* adder) const;
 
-  /* See comment for weakmapKeyDelegateOp in js/Class.h. */
-  virtual JSObject* weakmapKeyDelegate(JSObject* proxy) const;
   virtual bool isScripted() const { return false; }
 };
 
@@ -524,14 +521,21 @@ inline void SetProxyHandler(JSObject* obj, const BaseProxyHandler* handler) {
 }
 
 inline void SetProxyReservedSlot(JSObject* obj, size_t n, const Value& extra) {
-  MOZ_ASSERT_IF(gc::detail::ObjectIsMarkedBlack(obj),
-                JS::ValueIsNotGray(extra));
+#ifdef DEBUG
+  if (gc::detail::ObjectIsMarkedBlack(obj)) {
+    JS::AssertValueIsNotGray(extra);
+  }
+#endif
+
   detail::SetProxyReservedSlotUnchecked(obj, n, extra);
 }
 
 inline void SetProxyPrivate(JSObject* obj, const Value& value) {
-  MOZ_ASSERT_IF(gc::detail::ObjectIsMarkedBlack(obj),
-                JS::ValueIsNotGray(value));
+#ifdef DEBUG
+  if (gc::detail::ObjectIsMarkedBlack(obj)) {
+    JS::AssertValueIsNotGray(value);
+  }
+#endif
 
   Value* vp = &detail::GetProxyDataLayout(obj)->values()->privateSlot;
 

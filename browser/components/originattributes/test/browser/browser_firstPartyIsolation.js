@@ -287,6 +287,11 @@ add_task(async function ip_address_test() {
   const ipAddr = "127.0.0.1";
   const ipHost = `http://${ipAddr}/browser/browser/components/originattributes/test/browser/`;
 
+  Services.prefs.setBoolPref("network.proxy.allow_hijacking_localhost", true);
+  registerCleanupFunction(function() {
+    Services.prefs.clearUserPref("network.proxy.allow_hijacking_localhost");
+  });
+
   let tab = BrowserTestUtils.addTab(gBrowser, ipHost + "test_firstParty.html");
   await BrowserTestUtils.browserLoaded(tab.linkedBrowser, true);
 

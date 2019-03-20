@@ -31,6 +31,7 @@ add_task(async function() {
   ];
 
   let extension = ExtensionTestUtils.loadExtension({
+    incognitoOverride: "spanning",
     manifest: {
       "permissions": ["tabs", "cookies"],
     },
@@ -154,36 +155,6 @@ add_task(async function() {
   await extension.awaitMessage("gone");
 
   await extension.unload();
-});
-
-add_task(async function perma_private_browsing_mode() {
-  await SpecialPowers.pushPrefEnv({set: [["browser.privatebrowsing.autostart", true]]});
-
-  let extension = ExtensionTestUtils.loadExtension({
-    manifest: {
-      "permissions": ["tabs", "cookies"],
-    },
-    async background() {
-      await browser.test.assertRejects(
-        browser.tabs.create({cookieStoreId: "firefox-container-1"}),
-        /Contextual identities are unavailable in permanent private browsing mode/,
-        "should refuse to open container tab in existing non-private window");
-
-      let win = await browser.windows.create({});
-      browser.test.assertTrue(win.incognito, "New window should be private when perma-PBM is enabled.");
-      await browser.test.assertRejects(
-        browser.tabs.create({cookieStoreId: "firefox-container-1", windowId: win.id}),
-        /Illegal to set non-private cookieStoreId in a private window/,
-        "should refuse to open container tab in private browsing window");
-      await browser.windows.remove(win.id);
-
-      browser.test.sendMessage("done");
-    },
-  });
-  await extension.startup();
-  await extension.awaitMessage("done");
-  await extension.unload();
-  await SpecialPowers.popPrefEnv();
 });
 
 add_task(async function userContext_disabled() {

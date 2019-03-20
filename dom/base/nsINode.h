@@ -30,9 +30,9 @@
 
 // Including 'windows.h' will #define GetClassInfo to something else.
 #ifdef XP_WIN
-#ifdef GetClassInfo
-#undef GetClassInfo
-#endif
+#  ifdef GetClassInfo
+#    undef GetClassInfo
+#  endif
 #endif
 
 class AttrArray;
@@ -40,7 +40,6 @@ class nsAttrChildContentList;
 class nsDOMAttributeMap;
 class nsIAnimationObserver;
 class nsIContent;
-class nsIDocument;
 class nsIFrame;
 class nsIHTMLCollection;
 class nsIMutationObserver;
@@ -75,6 +74,7 @@ class AccessibleNode;
 struct BoxQuadOptions;
 struct ConvertCoordinateOptions;
 class DocGroup;
+class Document;
 class DocumentFragment;
 class DocumentOrShadowRoot;
 class DOMPoint;
@@ -183,12 +183,10 @@ enum {
 
   NODE_ALL_DIRECTION_FLAGS = NODE_HAS_DIRECTION_LTR | NODE_HAS_DIRECTION_RTL,
 
-  NODE_CHROME_ONLY_ACCESS = NODE_FLAG_BIT(18),
-
-  NODE_IS_ROOT_OF_CHROME_ONLY_ACCESS = NODE_FLAG_BIT(19),
+  NODE_HAS_BEEN_IN_UA_WIDGET = NODE_FLAG_BIT(18),
 
   // Remaining bits are node type specific.
-  NODE_TYPE_SPECIFIC_BITS_OFFSET = 20
+  NODE_TYPE_SPECIFIC_BITS_OFFSET = 19
 };
 
 // Make sure we have space for our bits
@@ -276,7 +274,7 @@ class nsNodeWeakReference final : public nsIWeakReference {
 
 /**
  * An internal interface that abstracts some DOMNode-related parts that both
- * nsIContent and nsIDocument share.  An instance of this interface has a list
+ * nsIContent and Document share.  An instance of this interface has a list
  * of nsIContent children and provides access to them.
  */
 class nsINode : public mozilla::dom::EventTarget {
@@ -284,6 +282,7 @@ class nsINode : public mozilla::dom::EventTarget {
   typedef mozilla::dom::BoxQuadOptions BoxQuadOptions;
   typedef mozilla::dom::ConvertCoordinateOptions ConvertCoordinateOptions;
   typedef mozilla::dom::DocGroup DocGroup;
+  typedef mozilla::dom::Document Document;
   typedef mozilla::dom::DOMPoint DOMPoint;
   typedef mozilla::dom::DOMPointInit DOMPointInit;
   typedef mozilla::dom::DOMQuad DOMQuad;
@@ -407,10 +406,10 @@ class nsINode : public mozilla::dom::EventTarget {
   /**
    * Return this node as a document. Asserts IsDocument().
    *
-   * This is defined inline in nsIDocument.h.
+   * This is defined inline in Document.h.
    */
-  inline nsIDocument* AsDocument();
-  inline const nsIDocument* AsDocument() const;
+  inline Document* AsDocument();
+  inline const Document* AsDocument() const;
 
   /**
    * Returns true if this is a document fragment node.
@@ -457,7 +456,7 @@ class nsINode : public mozilla::dom::EventTarget {
 
  public:
   mozilla::dom::ParentObject GetParentObject()
-      const;  // Implemented in nsIDocument.h
+      const;  // Implemented in Document.h
 
   /**
    * Return the scope chain parent for this node, for use in things
@@ -465,6 +464,8 @@ class nsINode : public mozilla::dom::EventTarget {
    * global object as the scope chain parent.
    */
   virtual nsINode* GetScopeChainParent() const;
+
+  MOZ_CAN_RUN_SCRIPT mozilla::dom::Element* GetParentFlexElement();
 
   /**
    * Return whether the node is an Element node
@@ -580,11 +581,11 @@ class nsINode : public mozilla::dom::EventTarget {
    *
    * For all other cases OwnerDoc and GetOwnerDocument behave identically.
    */
-  nsIDocument* OwnerDoc() const { return mNodeInfo->GetDocument(); }
+  Document* OwnerDoc() const { return mNodeInfo->GetDocument(); }
 
   /**
    * Return the "owner document" of this node as an nsINode*.  Implemented
-   * in nsIDocument.h.
+   * in Document.h.
    */
   inline nsINode* OwnerDocAsNode() const;
 
@@ -602,7 +603,7 @@ class nsINode : public mozilla::dom::EventTarget {
    * @return the current document
    */
 
-  nsIDocument* GetUncomposedDoc() const {
+  Document* GetUncomposedDoc() const {
     return IsInUncomposedDoc() ? OwnerDoc() : nullptr;
   }
 
@@ -619,7 +620,7 @@ class nsINode : public mozilla::dom::EventTarget {
    * Shadow DOM, if there is a possibly shadow boundary crossing path from
    * the node to its owner document.
    */
-  nsIDocument* GetComposedDoc() const {
+  Document* GetComposedDoc() const {
     return IsInComposedDoc() ? OwnerDoc() : nullptr;
   }
 
@@ -736,15 +737,13 @@ class nsINode : public mozilla::dom::EventTarget {
    * @param aBeforeThis an existing node. Use nullptr if you want to
    *        add aKid at the end.
    * @param aNotify whether to notify the document (current document for
-   *        nsIContent, and |this| for nsIDocument) that the insert has
-   *        occurred
+   *        nsIContent, and |this| for Document) that the insert has occurred
    *
    * @throws NS_ERROR_DOM_HIERARCHY_REQUEST_ERR if one attempts to have more
    * than one element node as a child of a document.  Doing this will also
-   * assert -- you shouldn't be doing it!  Check with
-   * nsIDocument::GetRootElement() first if you're not sure.  Apart from this
-   * one constraint, this doesn't do any checking on whether aKid is a valid
-   * child of |this|.
+   * assert -- you shouldn't be doing it!  Check with Document::GetRootElement()
+   * first if you're not sure.  Apart from this one constraint, this doesn't do
+   * any checking on whether aKid is a valid child of |this|.
    *
    * @throws NS_ERROR_OUT_OF_MEMORY in some cases (from BindToTree).
    */
@@ -757,15 +756,13 @@ class nsINode : public mozilla::dom::EventTarget {
    *
    * @param aKid the content to append
    * @param aNotify whether to notify the document (current document for
-   *        nsIContent, and |this| for nsIDocument) that the append has
-   *        occurred
+   *        nsIContent, and |this| for Document) that the append has occurred
    *
    * @throws NS_ERROR_DOM_HIERARCHY_REQUEST_ERR if one attempts to have more
    * than one element node as a child of a document.  Doing this will also
-   * assert -- you shouldn't be doing it!  Check with
-   * nsIDocument::GetRootElement() first if you're not sure.  Apart from this
-   * one constraint, this doesn't do any checking on whether aKid is a valid
-   * child of |this|.
+   * assert -- you shouldn't be doing it!  Check with Document::GetRootElement()
+   * first if you're not sure.  Apart from this one constraint, this doesn't do
+   * any checking on whether aKid is a valid child of |this|.
    *
    * @throws NS_ERROR_OUT_OF_MEMORY in some cases (from BindToTree).
    */
@@ -779,8 +776,7 @@ class nsINode : public mozilla::dom::EventTarget {
    *
    * @param aKid the content to remove
    * @param aNotify whether to notify the document (current document for
-   *        nsIContent, and |this| for nsIDocument) that the remove has
-   *        occurred
+   *        nsIContent, and |this| for Document) that the remove has occurred
    */
   virtual void RemoveChildNode(nsIContent* aKid, bool aNotify);
 
@@ -871,8 +867,8 @@ class nsINode : public mozilla::dom::EventTarget {
   }
 
   /**
-   * Get the parent nsINode for this node. This can be either an nsIContent,
-   * an nsIDocument or an Attr.
+   * Get the parent nsINode for this node. This can be either an nsIContent, a
+   * Document or an Attr.
    * @return the parent node
    */
   nsINode* GetParentNode() const { return mParent; }
@@ -944,7 +940,7 @@ class nsINode : public mozilla::dom::EventTarget {
 
   virtual bool IsApzAware() const override;
 
-  virtual nsPIDOMWindowOuter* GetOwnerGlobalForBindings() override;
+  virtual nsPIDOMWindowOuter* GetOwnerGlobalForBindingsInternal() override;
   virtual nsIGlobalObject* GetOwnerGlobal() const override;
 
   using mozilla::dom::EventTarget::DispatchEvent;
@@ -1075,17 +1071,17 @@ class nsINode : public mozilla::dom::EventTarget {
         !(aFlagsToSet &
           (NODE_IS_ANONYMOUS_ROOT | NODE_IS_NATIVE_ANONYMOUS_ROOT |
            NODE_IS_IN_NATIVE_ANONYMOUS_SUBTREE | NODE_DESCENDANTS_NEED_FRAMES |
-           NODE_NEEDS_FRAME | NODE_CHROME_ONLY_ACCESS)) ||
+           NODE_NEEDS_FRAME | NODE_HAS_BEEN_IN_UA_WIDGET)) ||
             IsContent(),
         "Flag only permitted on nsIContent nodes");
     nsWrapperCache::SetFlags(aFlagsToSet);
   }
 
   void UnsetFlags(FlagsType aFlagsToUnset) {
-    NS_ASSERTION(!(aFlagsToUnset & (NODE_IS_ANONYMOUS_ROOT |
-                                    NODE_IS_IN_NATIVE_ANONYMOUS_SUBTREE |
-                                    NODE_IS_NATIVE_ANONYMOUS_ROOT)),
-                 "Trying to unset write-only flags");
+    NS_ASSERTION(
+        !(aFlagsToUnset & (NODE_IS_ANONYMOUS_ROOT | NODE_HAS_BEEN_IN_UA_WIDGET |
+                           NODE_IS_NATIVE_ANONYMOUS_ROOT)),
+        "Trying to unset write-only flags");
     nsWrapperCache::UnsetFlags(aFlagsToUnset);
   }
 
@@ -1127,13 +1123,13 @@ class nsINode : public mozilla::dom::EventTarget {
     return DoGetContainingSVGUseShadowHost();
   }
 
-  bool IsInUAWidget() const;
+  // Whether this node has ever been part of a UA widget shadow tree.
+  bool HasBeenInUAWidget() const { return HasFlag(NODE_HAS_BEEN_IN_UA_WIDGET); }
 
-  // True for native anonymous content and for XBL content if the binding
-  // has chromeOnlyContent="true".
+  // True for native anonymous content and for content in UA widgets.
   bool ChromeOnlyAccess() const {
     return HasFlag(NODE_IS_IN_NATIVE_ANONYMOUS_SUBTREE |
-                   NODE_CHROME_ONLY_ACCESS);
+                   NODE_HAS_BEEN_IN_UA_WIDGET);
   }
 
   bool IsInShadowTree() const { return HasFlag(NODE_IS_IN_SHADOW_TREE); }
@@ -1151,10 +1147,12 @@ class nsINode : public mozilla::dom::EventTarget {
     return HasFlag(NODE_IS_NATIVE_ANONYMOUS_ROOT);
   }
 
-  bool IsRootOfChromeAccessOnlySubtree() const {
-    return HasFlag(NODE_IS_NATIVE_ANONYMOUS_ROOT |
-                   NODE_IS_ROOT_OF_CHROME_ONLY_ACCESS);
-  }
+  // Whether this node is a UA Widget ShadowRoot.
+  inline bool IsUAWidget() const;
+  // Whether this node is currently in a UA Widget Shadow tree.
+  inline bool IsInUAWidget() const;
+  // Whether this node is the root of a ChromeOnlyAccess DOM subtree.
+  inline bool IsRootOfChromeAccessOnlySubtree() const;
 
   /**
    * Returns true if |this| node is the common ancestor of the start/end
@@ -1192,10 +1190,10 @@ class nsINode : public mozilla::dom::EventTarget {
   nsIContent* GetLastChild() const;
 
   /**
-   * Implementation is in nsIDocument.h, because it needs to cast from
-   * nsIDocument* to nsINode*.
+   * Implementation is in Document.h, because it needs to cast from
+   * Document* to nsINode*.
    */
-  nsIDocument* GetOwnerDocument() const;
+  Document* GetOwnerDocument() const;
 
   void Normalize();
 
@@ -1252,8 +1250,8 @@ class nsINode : public mozilla::dom::EventTarget {
                                                  mozilla::ErrorResult& aResult);
 
  protected:
-  // nsIDocument overrides this with its own (faster) version.  This
-  // should really only be called for elements and document fragments.
+  // Document and ShadowRoot override this with its own (faster) version.
+  // This should really only be called for elements and document fragments.
   mozilla::dom::Element* GetElementById(const nsAString& aId);
 
   void AppendChildToChildList(nsIContent* aKid);
@@ -1918,10 +1916,10 @@ class nsINode : public mozilla::dom::EventTarget {
   nsSlots* mSlots;
 };
 
-// Useful inline function for getting a node given an nsIContent and an
-// nsIDocument.  Returns the first argument cast to nsINode if it is non-null,
-// otherwise returns the second (which may be null).  We use type variables
-// instead of nsIContent* and nsIDocument* because the actual types must be
+// Useful inline function for getting a node given an nsIContent and a Document.
+// Returns the first argument cast to nsINode if it is non-null, otherwise
+// returns the second (which may be null).  We use type variables instead of
+// nsIContent* and Document* because the actual types must be
 // known for the cast to work.
 template <class C, class D>
 inline nsINode* NODE_FROM(C& aContent, D& aDocument) {

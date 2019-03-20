@@ -11,14 +11,14 @@
 
 #include "builtin/String.h"
 #ifdef DEBUG
-#include "jsutil.h"
+#  include "jsutil.h"
 #endif
 
 #include "builtin/RegExp.h"
 #include "frontend/TokenStream.h"
 #include "gc/HashUtil.h"
 #ifdef DEBUG
-#include "irregexp/RegExpBytecode.h"
+#  include "irregexp/RegExpBytecode.h"
 #endif
 #include "irregexp/RegExpParser.h"
 #include "jit/VMFunctions.h"
@@ -29,7 +29,7 @@
 #include "vm/StringType.h"
 #include "vm/TraceLogging.h"
 #ifdef DEBUG
-#include "util/Unicode.h"
+#  include "util/Unicode.h"
 #endif
 #include "vm/Xdr.h"
 
@@ -100,8 +100,9 @@ bool VectorMatchPairs::allocOrExpandArray(size_t pairCount) {
 
 /* RegExpObject */
 
-/* static */ RegExpShared* RegExpObject::getShared(
-    JSContext* cx, Handle<RegExpObject*> regexp) {
+/* static */
+RegExpShared* RegExpObject::getShared(JSContext* cx,
+                                      Handle<RegExpObject*> regexp) {
   if (regexp->hasShared()) {
     return regexp->sharedRef();
   }
@@ -109,8 +110,8 @@ bool VectorMatchPairs::allocOrExpandArray(size_t pairCount) {
   return createShared(cx, regexp);
 }
 
-/* static */ bool RegExpObject::isOriginalFlagGetter(JSNative native,
-                                                     RegExpFlag* mask) {
+/* static */
+bool RegExpObject::isOriginalFlagGetter(JSNative native, RegExpFlag* mask) {
   if (native == regexp_global) {
     *mask = GlobalFlag;
     return true;
@@ -135,7 +136,8 @@ bool VectorMatchPairs::allocOrExpandArray(size_t pairCount) {
   return false;
 }
 
-/* static */ void RegExpObject::trace(JSTracer* trc, JSObject* obj) {
+/* static */
+void RegExpObject::trace(JSTracer* trc, JSObject* obj) {
   obj->as<RegExpObject>().trace(trc);
 }
 
@@ -270,8 +272,9 @@ RegExpObject* RegExpObject::create(JSContext* cx, HandleAtom source,
   return regexp;
 }
 
-/* static */ RegExpShared* RegExpObject::createShared(
-    JSContext* cx, Handle<RegExpObject*> regexp) {
+/* static */
+RegExpShared* RegExpObject::createShared(JSContext* cx,
+                                         Handle<RegExpObject*> regexp) {
   MOZ_ASSERT(!regexp->hasShared());
   RootedAtom source(cx, regexp->getSource());
   RegExpShared* shared =
@@ -514,10 +517,9 @@ JSFlatString* RegExpObject::toString(JSContext* cx) const {
 }
 
 #ifdef DEBUG
-/* static */ bool RegExpShared::dumpBytecode(JSContext* cx,
-                                             MutableHandleRegExpShared re,
-                                             bool match_only,
-                                             HandleLinearString input) {
+/* static */
+bool RegExpShared::dumpBytecode(JSContext* cx, MutableHandleRegExpShared re,
+                                bool match_only, HandleLinearString input) {
   CompilationMode mode = match_only ? MatchOnly : Normal;
   if (!RegExpShared::compileIfNecessary(cx, re, input, mode, ForceByteCode)) {
     return false;
@@ -551,28 +553,28 @@ JSFlatString* RegExpObject::toString(JSContext* cx) const {
     }
   };
 
-#define BYTECODE(NAME)      \
-  case irregexp::BC_##NAME: \
-    DumpLower(#NAME);
-#define ADVANCE(NAME)                 \
-  fprintf(stderr, "\n");              \
-  pc += irregexp::BC_##NAME##_LENGTH; \
-  maxPc = js::Max(maxPc, pc);         \
-  break;
-#define STOP(NAME)                    \
-  fprintf(stderr, "\n");              \
-  pc += irregexp::BC_##NAME##_LENGTH; \
-  break;
-#define JUMP(NAME, OFFSET)                   \
-  fprintf(stderr, "\n");                     \
-  maxPc = js::Max(maxPc, byteCode + OFFSET); \
-  pc += irregexp::BC_##NAME##_LENGTH;        \
-  break;
-#define BRANCH(NAME, OFFSET)                              \
-  fprintf(stderr, "\n");                                  \
-  pc += irregexp::BC_##NAME##_LENGTH;                     \
-  maxPc = js::Max(maxPc, js::Max(pc, byteCode + OFFSET)); \
-  break;
+#  define BYTECODE(NAME)      \
+    case irregexp::BC_##NAME: \
+      DumpLower(#NAME);
+#  define ADVANCE(NAME)                 \
+    fprintf(stderr, "\n");              \
+    pc += irregexp::BC_##NAME##_LENGTH; \
+    maxPc = js::Max(maxPc, pc);         \
+    break;
+#  define STOP(NAME)                    \
+    fprintf(stderr, "\n");              \
+    pc += irregexp::BC_##NAME##_LENGTH; \
+    break;
+#  define JUMP(NAME, OFFSET)                   \
+    fprintf(stderr, "\n");                     \
+    maxPc = js::Max(maxPc, byteCode + OFFSET); \
+    pc += irregexp::BC_##NAME##_LENGTH;        \
+    break;
+#  define BRANCH(NAME, OFFSET)                              \
+    fprintf(stderr, "\n");                                  \
+    pc += irregexp::BC_##NAME##_LENGTH;                     \
+    maxPc = js::Max(maxPc, js::Max(pc, byteCode + OFFSET)); \
+    break;
 
   // Bytecode has no end marker, we need to calculate the bytecode length by
   // tracing jumps and branches.
@@ -818,19 +820,18 @@ JSFlatString* RegExpObject::toString(JSContext* cx) const {
     }
   }
 
-#undef BYTECODE
-#undef ADVANCE
-#undef STOP
-#undef JUMP
-#undef BRANCH
+#  undef BYTECODE
+#  undef ADVANCE
+#  undef STOP
+#  undef JUMP
+#  undef BRANCH
 
   return true;
 }
 
-/* static */ bool RegExpObject::dumpBytecode(JSContext* cx,
-                                             Handle<RegExpObject*> regexp,
-                                             bool match_only,
-                                             HandleLinearString input) {
+/* static */
+bool RegExpObject::dumpBytecode(JSContext* cx, Handle<RegExpObject*> regexp,
+                                bool match_only, HandleLinearString input) {
   RootedRegExpShared shared(cx, getShared(cx, regexp));
   if (!shared) {
     return false;
@@ -922,11 +923,10 @@ void RegExpShared::finalize(FreeOp* fop) {
   tables.~JitCodeTables();
 }
 
-/* static */ bool RegExpShared::compile(JSContext* cx,
-                                        MutableHandleRegExpShared re,
-                                        HandleLinearString input,
-                                        CompilationMode mode,
-                                        ForceByteCodeEnum force) {
+/* static */
+bool RegExpShared::compile(JSContext* cx, MutableHandleRegExpShared re,
+                           HandleLinearString input, CompilationMode mode,
+                           ForceByteCodeEnum force) {
   TraceLoggerThread* logger = TraceLoggerForCurrentThread(cx);
   AutoTraceLog logCompile(logger, TraceLogger_IrregexpCompile);
 
@@ -934,9 +934,10 @@ void RegExpShared::finalize(FreeOp* fop) {
   return compile(cx, re, pattern, input, mode, force);
 }
 
-/* static */ bool RegExpShared::compile(
-    JSContext* cx, MutableHandleRegExpShared re, HandleAtom pattern,
-    HandleLinearString input, CompilationMode mode, ForceByteCodeEnum force) {
+/* static */
+bool RegExpShared::compile(JSContext* cx, MutableHandleRegExpShared re,
+                           HandleAtom pattern, HandleLinearString input,
+                           CompilationMode mode, ForceByteCodeEnum force) {
   if (!re->ignoreCase() && !StringHasRegExpMetaChars(pattern)) {
     re->canStringMatch = true;
   }
@@ -991,20 +992,24 @@ void RegExpShared::finalize(FreeOp* fop) {
   return true;
 }
 
-/* static */ bool RegExpShared::compileIfNecessary(JSContext* cx,
-                                                   MutableHandleRegExpShared re,
-                                                   HandleLinearString input,
-                                                   CompilationMode mode,
-                                                   ForceByteCodeEnum force) {
+/* static */
+bool RegExpShared::compileIfNecessary(JSContext* cx,
+                                      MutableHandleRegExpShared re,
+                                      HandleLinearString input,
+                                      CompilationMode mode,
+                                      ForceByteCodeEnum force) {
   if (re->isCompiled(mode, input->hasLatin1Chars(), force)) {
     return true;
   }
   return compile(cx, re, input, mode, force);
 }
 
-/* static */ RegExpRunStatus RegExpShared::execute(
-    JSContext* cx, MutableHandleRegExpShared re, HandleLinearString input,
-    size_t start, VectorMatchPairs* matches, size_t* endIndex) {
+/* static */
+RegExpRunStatus RegExpShared::execute(JSContext* cx,
+                                      MutableHandleRegExpShared re,
+                                      HandleLinearString input, size_t start,
+                                      VectorMatchPairs* matches,
+                                      size_t* endIndex) {
   MOZ_ASSERT_IF(matches, !endIndex);
   MOZ_ASSERT_IF(!matches, endIndex);
   TraceLoggerThread* logger = TraceLoggerForCurrentThread(cx);

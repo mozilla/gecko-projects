@@ -16,6 +16,8 @@ const nsIAccessibleVirtualCursorChangeEvent =
   Ci.nsIAccessibleVirtualCursorChangeEvent;
 const nsIAccessibleObjectAttributeChangedEvent =
   Ci.nsIAccessibleObjectAttributeChangedEvent;
+const nsIAccessibleAnnouncementEvent =
+  Ci.nsIAccessibleAnnouncementEvent;
 
 const nsIAccessibleStates = Ci.nsIAccessibleStates;
 const nsIAccessibleRole = Ci.nsIAccessibleRole;
@@ -49,24 +51,6 @@ const nsIObserverService = Ci.nsIObserverService;
 const nsIDOMWindow = Ci.nsIDOMWindow;
 
 const nsIPropertyElement = Ci.nsIPropertyElement;
-
-// Testing "'Node' in this" doesn't do the right thing because there are cases
-// when our "this" is not the global even though we're at toplevel.  In those
-// cases, the import could fail because our global is a Window and we in fact
-// have a Node all along.
-//
-// We could get the global via the (function() { return this; })() trick, but
-// that might break any time if people switch us to strict mode.  So let's just
-// test the thing we care about directly: does bareword Node exist?
-let needToImportNode = false;
-try {
-    Node;
-} catch (e) {
-    needToImportNode = true;
-}
-if (needToImportNode) {
-    Cu.importGlobalProperties(["Node"]);
-}
 
 // //////////////////////////////////////////////////////////////////////////////
 // OS detect
@@ -105,7 +89,7 @@ const MAX_TRIM_LENGTH = 100;
 /**
  * Services to determine if e10s is enabled.
  */
-ChromeUtils.import("resource://gre/modules/Services.jsm");
+var {Services} = ChromeUtils.import("resource://gre/modules/Services.jsm");
 
 /**
  * nsIAccessibilityService service.
@@ -173,8 +157,10 @@ function addA11yLoadEvent(aFunc, aWindow) {
         var accDoc = getAccessible(targetDocument);
         var state = {};
         accDoc.getState(state, {});
-        if (state.value & STATE_BUSY)
-          return waitForDocLoad();
+        if (state.value & STATE_BUSY) {
+          waitForDocLoad();
+          return;
+        }
 
         window.setTimeout(aFunc, 0);
       },
@@ -274,10 +260,8 @@ function getAccessible(aAccOrElmOrID, aInterfaces, aElmObj, aDoNotFailIf) {
 
   if (aAccOrElmOrID instanceof nsIAccessible) {
     try { elm = aAccOrElmOrID.DOMNode; } catch (e) { }
-
   } else if (Node.isInstance(aAccOrElmOrID)) {
     elm = aAccOrElmOrID;
-
   } else {
     elm = document.getElementById(aAccOrElmOrID);
     if (!elm) {
@@ -406,6 +390,7 @@ const kSkipTreeFullCheck = 1;
  *                                      fields
  * @param aFlags          [in, optional] flags, see constants above
  */
+// eslint-disable-next-line complexity
 function testAccessibleTree(aAccOrElmOrID, aAccTree, aFlags) {
   var acc = getAccessible(aAccOrElmOrID);
   if (!acc)
@@ -521,7 +506,6 @@ function testAccessibleTree(aAccOrElmOrID, aAccTree, aFlags) {
           }
           info("Matching " + prettyName(accTree) + " and " + prettyName(acc) +
                " child at index " + i + " : " + prettyName(accChild));
-
         } catch (e) {
           ok(false, prettyName(accTree) + " is expected to have a child at index " + i +
              " : " + prettyName(testChild) + ", original tested: " +
@@ -764,6 +748,7 @@ function getAccessibleDOMNodeID(accessible) {
     // property corresponds to the "id" of its body element.
     return accessible.id;
   } catch (e) { /* This will fail if accessible is not a proxy. */ }
+  return null;
 }
 
 /**

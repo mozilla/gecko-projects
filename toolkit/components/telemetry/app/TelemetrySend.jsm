@@ -17,9 +17,9 @@ var EXPORTED_SYMBOLS = [
 
 ChromeUtils.import("resource://gre/modules/AppConstants.jsm", this);
 ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm", this);
-ChromeUtils.import("resource://gre/modules/ClientID.jsm");
+const {ClientID} = ChromeUtils.import("resource://gre/modules/ClientID.jsm");
 ChromeUtils.import("resource://gre/modules/Log.jsm", this);
-ChromeUtils.import("resource://gre/modules/PromiseUtils.jsm");
+const {PromiseUtils} = ChromeUtils.import("resource://gre/modules/PromiseUtils.jsm");
 ChromeUtils.import("resource://gre/modules/ServiceRequest.jsm", this);
 ChromeUtils.import("resource://gre/modules/Services.jsm", this);
 ChromeUtils.import("resource://gre/modules/TelemetryUtils.jsm", this);
@@ -54,8 +54,6 @@ const TOPIC_PROFILE_CHANGE_NET_TEARDOWN = "profile-change-net-teardown";
 // Whether the FHR/Telemetry unification features are enabled.
 // Changing this pref requires a restart.
 const IS_UNIFIED_TELEMETRY = Services.prefs.getBoolPref(TelemetryUtils.Preferences.Unified, false);
-
-const PING_FORMAT_VERSION = 4;
 
 const MS_IN_A_MINUTE = 60 * 1000;
 
@@ -162,7 +160,7 @@ function gzipCompressString(string) {
                      .createInstance(Ci.nsIStringInputStream);
   stringStream.data = string;
   converter.onStartRequest(null, null);
-  converter.onDataAvailable(null, null, stringStream, 0, string.length);
+  converter.onDataAvailable(null, stringStream, 0, string.length);
   converter.onStopRequest(null, null, null);
   return observer.buffer;
 }
@@ -546,11 +544,17 @@ var SendScheduler = {
    * @return Number The next time (ms from UNIX epoch) when we can send pings.
    */
   _getNextPingSendTime(now) {
-    // 1. First we check if the time is between 0am and 1am. If it's not, we send
+    // 1. First we check if the pref is set to skip any delay and send immediately.
+    // 2. Next we check if the time is between 0am and 1am. If it's not, we send
     // immediately.
-    // 2. If we confirmed the time is indeed between 0am and 1am in step 1, we disallow
+    // 3. If we confirmed the time is indeed between 0am and 1am in step 1, we disallow
     // sending before (midnight + fuzzing delay), which is a random time between 0am-1am
     // (decided at startup).
+
+    let disableFuzzingDelay = Services.prefs.getBoolPref(TelemetryUtils.Preferences.DisableFuzzingDelay, false);
+    if (disableFuzzingDelay) {
+      return now.getTime();
+    }
 
     const midnight = Utils.truncateToDays(now);
     // Don't delay pings if we are not within the fuzzing interval.
@@ -1040,7 +1044,7 @@ var TelemetrySendImpl = {
   },
 
   _buildSubmissionURL(ping) {
-    const version = isV4PingFormat(ping) ? PING_FORMAT_VERSION : 1;
+    const version = isV4PingFormat(ping) ? AppConstants.TELEMETRY_PING_FORMAT_VERSION : 1;
     return this._server + this._getSubmissionPath(ping) + "?v=" + version;
   },
 

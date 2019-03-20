@@ -1,7 +1,6 @@
 /* eslint-env mozilla/frame-script */
 
-ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
-ChromeUtils.import("resource://gre/modules/Services.jsm");
+const {Services} = ChromeUtils.import("resource://gre/modules/Services.jsm");
 
 const gfxFrameScript = {
   domUtils: null,
@@ -14,11 +13,10 @@ const gfxFrameScript = {
 
     this.domUtils = content.windowUtils;
 
-    let triggeringPrincipal = Services.scriptSecurityManager.getSystemPrincipal();
-    webNav.loadURI("chrome://gfxsanity/content/sanitytest.html",
-                   Ci.nsIWebNavigation.LOAD_FLAGS_NONE,
-                   null, null, null, triggeringPrincipal);
-
+    let loadURIOptions = {
+      triggeringPrincipal: Services.scriptSecurityManager.getSystemPrincipal(),
+    };
+    webNav.loadURI("chrome://gfxsanity/content/sanitytest.html", loadURIOptions);
   },
 
   handleEvent(aEvent) {
@@ -42,7 +40,6 @@ const gfxFrameScript = {
     if (webProgress.isTopLevel &&
         (flags & Ci.nsIWebProgressListener.STATE_STOP) &&
         this.isSanityTest(req.name)) {
-
       webProgress.removeProgressListener(this);
 
       // If no paint is pending, then the test already painted

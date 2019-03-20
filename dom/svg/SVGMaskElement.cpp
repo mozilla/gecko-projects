@@ -4,16 +4,16 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "mozilla/ArrayUtils.h"
-
-#include "nsCOMPtr.h"
-#include "nsGkAtoms.h"
-#include "mozilla/dom/SVGLengthBinding.h"
 #include "mozilla/dom/SVGMaskElement.h"
+
+#include "nsGkAtoms.h"
+#include "mozilla/AlreadyAddRefed.h"
+#include "mozilla/ArrayUtils.h"
+#include "mozilla/dom/SVGLengthBinding.h"
 #include "mozilla/dom/SVGMaskElementBinding.h"
 #include "mozilla/dom/SVGUnitTypesBinding.h"
 
-NS_IMPL_NS_NEW_NAMESPACED_SVG_ELEMENT(Mask)
+NS_IMPL_NS_NEW_SVG_ELEMENT(Mask)
 
 namespace mozilla {
 namespace dom {
@@ -27,7 +27,7 @@ JSObject* SVGMaskElement::WrapNode(JSContext* aCx,
 
 //--------------------- Masks ------------------------
 
-nsSVGElement::LengthInfo SVGMaskElement::sLengthInfo[4] = {
+SVGElement::LengthInfo SVGMaskElement::sLengthInfo[4] = {
     {nsGkAtoms::x, -10, SVGLength_Binding::SVG_LENGTHTYPE_PERCENTAGE,
      SVGContentUtils::X},
     {nsGkAtoms::y, -10, SVGLength_Binding::SVG_LENGTHTYPE_PERCENTAGE,
@@ -38,7 +38,7 @@ nsSVGElement::LengthInfo SVGMaskElement::sLengthInfo[4] = {
      SVGContentUtils::Y},
 };
 
-nsSVGElement::EnumInfo SVGMaskElement::sEnumInfo[2] = {
+SVGElement::EnumInfo SVGMaskElement::sEnumInfo[2] = {
     {nsGkAtoms::maskUnits, sSVGUnitTypesMap, SVG_UNIT_TYPE_OBJECTBOUNDINGBOX},
     {nsGkAtoms::maskContentUnits, sSVGUnitTypesMap,
      SVG_UNIT_TYPE_USERSPACEONUSE}};
@@ -82,21 +82,22 @@ already_AddRefed<SVGAnimatedLength> SVGMaskElement::Height() {
 }
 
 //----------------------------------------------------------------------
-// nsSVGElement methods
+// SVGElement methods
 
-/* virtual */ bool SVGMaskElement::HasValidDimensions() const {
+/* virtual */
+bool SVGMaskElement::HasValidDimensions() const {
   return (!mLengthAttributes[ATTR_WIDTH].IsExplicitlySet() ||
           mLengthAttributes[ATTR_WIDTH].GetAnimValInSpecifiedUnits() > 0) &&
          (!mLengthAttributes[ATTR_HEIGHT].IsExplicitlySet() ||
           mLengthAttributes[ATTR_HEIGHT].GetAnimValInSpecifiedUnits() > 0);
 }
 
-nsSVGElement::LengthAttributesInfo SVGMaskElement::GetLengthInfo() {
+SVGElement::LengthAttributesInfo SVGMaskElement::GetLengthInfo() {
   return LengthAttributesInfo(mLengthAttributes, sLengthInfo,
                               ArrayLength(sLengthInfo));
 }
 
-nsSVGElement::EnumAttributesInfo SVGMaskElement::GetEnumInfo() {
+SVGElement::EnumAttributesInfo SVGMaskElement::GetEnumInfo() {
   return EnumAttributesInfo(mEnumAttributes, sEnumInfo, ArrayLength(sEnumInfo));
 }
 

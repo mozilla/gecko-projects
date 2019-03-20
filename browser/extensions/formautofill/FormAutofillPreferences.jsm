@@ -16,9 +16,9 @@ const BUNDLE_URI = "chrome://formautofill/locale/formautofill.properties";
 const MANAGE_ADDRESSES_URL = "chrome://formautofill/content/manageAddresses.xhtml";
 const MANAGE_CREDITCARDS_URL = "chrome://formautofill/content/manageCreditCards.xhtml";
 
-ChromeUtils.import("resource://gre/modules/Services.jsm");
-ChromeUtils.import("resource://formautofill/FormAutofill.jsm");
-ChromeUtils.import("resource://formautofill/FormAutofillUtils.jsm");
+const {Services} = ChromeUtils.import("resource://gre/modules/Services.jsm");
+const {FormAutofill} = ChromeUtils.import("resource://formautofill/FormAutofill.jsm");
+const {FormAutofillUtils} = ChromeUtils.import("resource://formautofill/FormAutofillUtils.jsm");
 
 const {
   ENABLED_AUTOFILL_ADDRESSES_PREF,
@@ -74,12 +74,11 @@ FormAutofillPreferences.prototype = {
     let formAutofillFragment = document.createDocumentFragment();
     let formAutofillGroupBoxLabel = document.createXULElement("label");
     let formAutofillGroupBoxLabelHeading = document.createElementNS(HTML_NS, "h2");
-    let formAutofillGroupBoxDescription = document.createXULElement("description");
     let formAutofillGroup = document.createXULElement("vbox");
     let addressAutofill = document.createXULElement("hbox");
     let addressAutofillCheckboxGroup = document.createXULElement("hbox");
     let addressAutofillCheckbox = document.createXULElement("checkbox");
-    let addressAutofillLearnMore = document.createXULElement("label");
+    let addressAutofillLearnMore = document.createXULElement("label", {is: "text-link"});
     let savedAddressesBtn = document.createXULElement("button");
     // Wrappers are used to properly compute the search tooltip positions
     let savedAddressesBtnWrapper = document.createXULElement("hbox");
@@ -87,17 +86,13 @@ FormAutofillPreferences.prototype = {
 
     savedAddressesBtn.className = "accessory-button";
     addressAutofillCheckbox.className = "tail-with-learn-more";
-    addressAutofillLearnMore.className = "learnMore text-link";
+    addressAutofillLearnMore.className = "learnMore";
 
     formAutofillGroup.id = "formAutofillGroup";
     addressAutofill.id = "addressAutofill";
     addressAutofillLearnMore.id = "addressAutofillLearnMore";
 
     formAutofillGroupBoxLabelHeading.textContent = this.bundle.GetStringFromName("autofillHeader");
-    formAutofillGroupBoxDescription.textContent =
-      this.bundle.formatStringFromName("autofillDescription",
-                                       [FormAutofillUtils.brandBundle.GetStringFromName("brandShortName")],
-                                       1);
 
     addressAutofill.setAttribute("data-subcategory", "address-autofill");
     addressAutofillCheckbox.setAttribute("label", this.bundle.GetStringFromName("autofillAddressesCheckbox"));
@@ -123,7 +118,6 @@ FormAutofillPreferences.prototype = {
 
     formAutofillGroupBoxLabel.appendChild(formAutofillGroupBoxLabelHeading);
     formAutofillFragment.appendChild(formAutofillGroupBoxLabel);
-    formAutofillFragment.appendChild(formAutofillGroupBoxDescription);
     formAutofillFragment.appendChild(formAutofillGroup);
     formAutofillGroup.appendChild(addressAutofill);
     addressAutofill.appendChild(addressAutofillCheckboxGroup);
@@ -143,11 +137,11 @@ FormAutofillPreferences.prototype = {
       let creditCardAutofill = document.createXULElement("hbox");
       let creditCardAutofillCheckboxGroup = document.createXULElement("hbox");
       let creditCardAutofillCheckbox = document.createXULElement("checkbox");
-      let creditCardAutofillLearnMore = document.createXULElement("label");
+      let creditCardAutofillLearnMore = document.createXULElement("label", {is: "text-link"});
       let savedCreditCardsBtn = document.createXULElement("button");
       savedCreditCardsBtn.className = "accessory-button";
       creditCardAutofillCheckbox.className = "tail-with-learn-more";
-      creditCardAutofillLearnMore.className = "learnMore text-link";
+      creditCardAutofillLearnMore.className = "learnMore";
 
       creditCardAutofill.id = "creditCardAutofill";
       creditCardAutofillLearnMore.id = "creditCardAutofillLearnMore";

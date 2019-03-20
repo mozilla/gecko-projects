@@ -7,26 +7,19 @@
 import {
   getSource,
   getSourceFromId,
-  hasSymbols,
-  getSelectedLocation,
-  isPaused
+  getSourceThreads,
+  getSymbols,
+  getSelectedLocation
 } from "../selectors";
 
-import { mapFrames, fetchExtra } from "./pause";
+import { mapFrames } from "./pause";
 import { updateTab } from "./tabs";
 
 import { PROMISE } from "./utils/middleware/promise";
 
 import { setInScopeLines } from "./ast/setInScopeLines";
-import { setPausePoints } from "./ast/setPausePoints";
-export { setPausePoints };
 
-import {
-  getSymbols,
-  findOutOfScopeLocations,
-  getFramework,
-  type AstPosition
-} from "../workers/parser";
+import * as parser from "../workers/parser";
 
 import { isLoaded } from "../utils/source";
 
@@ -40,7 +33,7 @@ export function setSourceMetaData(sourceId: SourceId) {
       return;
     }
 
-    const framework = await getFramework(source.id);
+    const framework = await parser.getFramework(source.id);
     if (framework) {
       dispatch(updateTab(source, framework));
     }
@@ -61,22 +54,19 @@ export function setSymbols(sourceId: SourceId) {
   return async ({ dispatch, getState, sourceMaps }: ThunkArgs) => {
     const source = getSourceFromId(getState(), sourceId);
 
-    if (source.isWasm || hasSymbols(getState(), source) || !isLoaded(source)) {
+    if (source.isWasm || getSymbols(getState(), source) || !isLoaded(source)) {
       return;
     }
 
     await dispatch({
       type: "SET_SYMBOLS",
       sourceId,
-      [PROMISE]: getSymbols(sourceId)
+      [PROMISE]: parser.getSymbols(sourceId)
     });
 
-    if (isPaused(getState())) {
-      await dispatch(fetchExtra());
-      await dispatch(mapFrames());
-    }
+    const threads = getSourceThreads(getState(), source);
+    await Promise.all(threads.map(thread => dispatch(mapFrames(thread))));
 
-    await dispatch(setPausePoints(sourceId));
     await dispatch(setSourceMetaData(sourceId));
   };
 }
@@ -90,11 +80,15 @@ export function setOutOfScopeLocations() {
 
     const source = getSourceFromId(getState(), location.sourceId);
 
+    if (!isLoaded(source)) {
+      return;
+    }
+
     let locations = null;
-    if (location.line && source && !source.isWasm && isPaused(getState())) {
-      locations = await findOutOfScopeLocations(
+    if (location.line && source && !source.isWasm) {
+      locations = await parser.findOutOfScopeLocations(
         source.id,
-        ((location: any): AstPosition)
+        ((location: any): parser.AstPosition)
       );
     }
 

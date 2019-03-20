@@ -20,7 +20,7 @@
 #include "mozilla/net/WebSocketFrame.h"
 #include "mozilla/TimeStamp.h"
 #ifdef XP_WIN
-#include "mozilla/TimeStamp_windows.h"
+#  include "mozilla/TimeStamp_windows.h"
 #endif
 #include "mozilla/TypeTraits.h"
 #include "mozilla/IntegerTypeTraits.h"
@@ -32,6 +32,7 @@
 #include "nsExceptionHandler.h"
 #include "nsHashKeys.h"
 #include "nsID.h"
+#include "nsILoadInfo.h"
 #include "nsIWidget.h"
 #include "nsMemory.h"
 #include "nsString.h"
@@ -41,7 +42,7 @@
 #include "nsCSSPropertyID.h"
 
 #ifdef _MSC_VER
-#pragma warning(disable : 4800)
+#  pragma warning(disable : 4800)
 #endif
 
 #if !defined(OS_POSIX)
@@ -1072,6 +1073,34 @@ struct ParamTraits<mozilla::dom::Optional<T>> {
     return true;
   }
 };
+
+struct CrossOriginOpenerPolicyValidator {
+  static bool IsLegalValue(nsILoadInfo::CrossOriginOpenerPolicy e) {
+    return e == nsILoadInfo::OPENER_POLICY_NULL ||
+           e == nsILoadInfo::OPENER_POLICY_SAME_ORIGIN ||
+           e == nsILoadInfo::OPENER_POLICY_SAME_SITE ||
+           e == nsILoadInfo::OPENER_POLICY_SAME_ORIGIN_ALLOW_OUTGOING ||
+           e == nsILoadInfo::OPENER_POLICY_SAME_SITE_ALLOW_OUTGOING;
+  }
+};
+
+template <>
+struct ParamTraits<nsILoadInfo::CrossOriginOpenerPolicy>
+    : EnumSerializer<nsILoadInfo::CrossOriginOpenerPolicy,
+                     CrossOriginOpenerPolicyValidator> {};
+
+struct CrossOriginPolicyValidator {
+  static bool IsLegalValue(nsILoadInfo::CrossOriginPolicy e) {
+    return e == nsILoadInfo::CROSS_ORIGIN_POLICY_NULL ||
+           e == nsILoadInfo::CROSS_ORIGIN_POLICY_ANONYMOUS ||
+           e == nsILoadInfo::CROSS_ORIGIN_POLICY_USE_CREDENTIALS;
+  }
+};
+
+template <>
+struct ParamTraits<nsILoadInfo::CrossOriginPolicy>
+    : EnumSerializer<nsILoadInfo::CrossOriginPolicy,
+                     CrossOriginPolicyValidator> {};
 
 } /* namespace IPC */
 

@@ -9,9 +9,12 @@
 #include "jsfriendapi.h"
 #include "js/CharacterEncoding.h"
 #include "js/CompilationAndEvaluation.h"
+#include "js/ContextOptions.h"
 #include "js/Printf.h"
+#include "js/PropertySpec.h"
 #include "mozilla/ChaosMode.h"
 #include "mozilla/dom/ScriptSettings.h"
+#include "mozilla/IOInterposer.h"
 #include "mozilla/Preferences.h"
 #include "nsServiceManagerUtils.h"
 #include "nsComponentManagerUtils.h"
@@ -39,35 +42,35 @@
 #include "GeckoProfiler.h"
 
 #ifdef ANDROID
-#include <android/log.h>
+#  include <android/log.h>
 #endif
 
 #ifdef XP_WIN
-#include "mozilla/ScopeExit.h"
-#include "mozilla/widget/AudioSession.h"
-#include "mozilla/WinDllServices.h"
-#include <windows.h>
-#if defined(MOZ_SANDBOX)
-#include "sandboxBroker.h"
-#endif
+#  include "mozilla/ScopeExit.h"
+#  include "mozilla/widget/AudioSession.h"
+#  include "mozilla/WinDllServices.h"
+#  include <windows.h>
+#  if defined(MOZ_SANDBOX)
+#    include "sandboxBroker.h"
+#  endif
 #endif
 
 #ifdef MOZ_CODE_COVERAGE
-#include "mozilla/CodeCoverageHandler.h"
+#  include "mozilla/CodeCoverageHandler.h"
 #endif
 
 // all this crap is needed to do the interactive shell stuff
 #include <stdlib.h>
 #include <errno.h>
 #ifdef HAVE_IO_H
-#include <io.h> /* for isatty() */
+#  include <io.h> /* for isatty() */
 #endif
 #ifdef HAVE_UNISTD_H
-#include <unistd.h> /* for isatty() */
+#  include <unistd.h> /* for isatty() */
 #endif
 
 #ifdef ENABLE_TESTS
-#include "xpctest_private.h"
+#  include "xpctest_private.h"
 #endif
 
 using namespace mozilla;
@@ -144,7 +147,7 @@ static bool GetLocationProperty(JSContext* cx, unsigned argc, Value* vp) {
 #else
   JS::AutoFilename filename;
   if (JS::DescribeScriptedCaller(cx, &filename) && filename.get()) {
-#if defined(XP_WIN)
+#  if defined(XP_WIN)
     // convert from the system codepage to UTF-16
     int bufferSize =
         MultiByteToWideChar(CP_ACP, 0, filename.get(), -1, nullptr, 0);
@@ -167,9 +170,9 @@ static bool GetLocationProperty(JSContext* cx, unsigned argc, Value* vp) {
       }
       start++;
     }
-#elif defined(XP_UNIX)
+#  elif defined(XP_UNIX)
     NS_ConvertUTF8toUTF16 filenameString(filename.get());
-#endif
+#  endif
 
     nsCOMPtr<nsIFile> location;
     nsresult rv =
@@ -445,7 +448,7 @@ static bool SendCommand(JSContext* cx, unsigned argc, Value* vp) {
     return false;
   }
 
-  if (args.get(1).isObject() && !JS_ObjectIsFunction(cx, &args[1].toObject())) {
+  if (args.get(1).isObject() && !JS_ObjectIsFunction(&args[1].toObject())) {
     JS_ReportErrorASCII(cx, "Could not convert argument 2 to function!");
     return false;
   }
@@ -1073,6 +1076,10 @@ int XRE_XPCShellMain(int argc, char** argv, char** envp,
 
   mozilla::LogModule::Init(argc, argv);
 
+  // This guard ensures that all threads that attempt to register themselves
+  // with the IOInterposer will be properly tracked.
+  mozilla::IOInterposerInit ioInterposerGuard;
+
 #ifdef MOZ_GECKO_PROFILER
   char aLocal;
   profiler_init(&aLocal);
@@ -1226,9 +1233,9 @@ int XRE_XPCShellMain(int argc, char** argv, char** envp,
     }
 
     nsCOMPtr<nsIServiceManager> servMan;
-    rv = NS_InitXPCOM2(getter_AddRefs(servMan), appDir, &dirprovider);
+    rv = NS_InitXPCOM(getter_AddRefs(servMan), appDir, &dirprovider);
     if (NS_FAILED(rv)) {
-      printf("NS_InitXPCOM2 failed!\n");
+      printf("NS_InitXPCOM failed!\n");
       return 1;
     }
 
@@ -1319,9 +1326,10 @@ int XRE_XPCShellMain(int argc, char** argv, char** envp,
 
     // Ensure that DLL Services are running
     RefPtr<DllServices> dllSvc(DllServices::Get());
-    auto dllServicesDisable = MakeScopeExit([&dllSvc]() { dllSvc->Disable(); });
+    auto dllServicesDisable =
+        MakeScopeExit([&dllSvc]() { dllSvc->DisableFull(); });
 
-#if defined(MOZ_SANDBOX)
+#  if defined(MOZ_SANDBOX)
     // Required for sandboxed child processes.
     if (aShellData->sandboxBrokerServices) {
       SandboxBroker::Initialize(aShellData->sandboxBrokerServices);
@@ -1331,7 +1339,7 @@ int XRE_XPCShellMain(int argc, char** argv, char** envp,
           "Failed to initialize broker services, sandboxed "
           "processes will fail to start.");
     }
-#endif
+#  endif
 #endif
 
 #ifdef MOZ_CODE_COVERAGE

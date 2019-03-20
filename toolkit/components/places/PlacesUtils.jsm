@@ -5,8 +5,8 @@
 
 var EXPORTED_SYMBOLS = ["PlacesUtils"];
 
-ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
-ChromeUtils.import("resource://gre/modules/AppConstants.jsm");
+const {XPCOMUtils} = ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
+const {AppConstants} = ChromeUtils.import("resource://gre/modules/AppConstants.jsm");
 
 XPCOMUtils.defineLazyGlobalGetters(this, ["URL"]);
 
@@ -469,6 +469,18 @@ var PlacesUtils = {
      return typeof guidPrefix == "string" && guidPrefix &&
             (/^[a-zA-Z0-9\-_]{1,11}$/.test(guidPrefix));
    },
+
+  /**
+   * Generates a random GUID and replace its beginning with the given
+   * prefix. We do this instead of just prepending the prefix to keep
+   * the correct character length.
+   *
+   * @param prefix: (String)
+   * @return (String)
+   */
+  generateGuidWithPrefix(prefix) {
+    return prefix + this.history.makeGuid().substring(prefix.length);
+  },
 
   /**
    * Converts a string or n URL object to an nsIURI.
@@ -1057,9 +1069,9 @@ var PlacesUtils = {
         for (let i = 0; i < parts.length; i = i + 2) {
           let uriString = parts[i];
           let titleString = "";
-          if (parts.length > i + 1)
+          if (parts.length > i + 1) {
             titleString = parts[i + 1];
-          else {
+          } else {
             // for drag and drop of files, try to use the leafName as title
             try {
               titleString = Services.io.newURI(uriString).QueryInterface(Ci.nsIURL)
@@ -2617,7 +2629,6 @@ var GuidHelper = {
 
     let guid = await PlacesUtils.withConnectionWrapper("GuidHelper.getItemGuid",
                                                        async function(db) {
-
       let rows = await db.executeCached(
         "SELECT b.id, b.guid from moz_bookmarks b WHERE b.id = :id LIMIT 1",
         { id: aItemId });

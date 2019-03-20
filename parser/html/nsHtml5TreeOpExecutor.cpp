@@ -51,6 +51,20 @@ class nsHtml5ExecutorReflusher : public Runnable {
   explicit nsHtml5ExecutorReflusher(nsHtml5TreeOpExecutor* aExecutor)
       : mozilla::Runnable("nsHtml5ExecutorReflusher"), mExecutor(aExecutor) {}
   NS_IMETHOD Run() override {
+    Document* doc = mExecutor->GetDocument();
+    if (XRE_IsContentProcess() &&
+        nsContentUtils::
+            HighPriorityEventPendingForTopLevelDocumentBeforeContentfulPaint(
+                doc)) {
+      // Possible early paint pending, reuse the runnable and try to
+      // call RunFlushLoop later.
+      nsCOMPtr<nsIRunnable> flusher = this;
+      if (NS_SUCCEEDED(
+              doc->Dispatch(TaskCategory::Network, flusher.forget()))) {
+        PROFILER_ADD_MARKER("HighPrio blocking parser flushing(2)", DOM);
+        return NS_OK;
+      }
+    }
     mExecutor->RunFlushLoop();
     return NS_OK;
   }
@@ -103,7 +117,8 @@ nsHtml5TreeOpExecutor::nsHtml5TreeOpExecutor()
       mStarted(false),
       mRunFlushLoopOnStack(false),
       mCallContinueInterruptedParsingIfEnabled(false),
-      mAlreadyComplainedAboutCharset(false) {}
+      mAlreadyComplainedAboutCharset(false),
+      mAlreadyComplainedAboutDeepTree(false) {}
 
 nsHtml5TreeOpExecutor::~nsHtml5TreeOpExecutor() {
   if (gBackgroundFlushList && isInList()) {
@@ -169,6 +184,7 @@ nsHtml5TreeOpExecutor::DidBuildModel(bool aTerminated) {
     }
 
     if (!destroying) {
+      mDocument->TriggerInitialDocumentTranslation();
       nsContentSink::StartLayout(false);
     }
   }
@@ -227,6 +243,10 @@ nsHtml5TreeOpExecutor::SetParser(nsParserBase* aParser) {
   return NS_OK;
 }
 
+void nsHtml5TreeOpExecutor::InitialDocumentTranslationCompleted() {
+  nsContentSink::StartLayout(false);
+}
+
 void nsHtml5TreeOpExecutor::FlushPendingNotifications(FlushType aType) {
   if (aType >= FlushType::EnsurePresShellInitAndFrames) {
     // Bug 577508 / 253951
@@ -234,7 +254,9 @@ void nsHtml5TreeOpExecutor::FlushPendingNotifications(FlushType aType) {
   }
 }
 
-nsISupports* nsHtml5TreeOpExecutor::GetTarget() { return mDocument; }
+nsISupports* nsHtml5TreeOpExecutor::GetTarget() {
+  return ToSupports(mDocument);
+}
 
 nsresult nsHtml5TreeOpExecutor::MarkAsBroken(nsresult aReason) {
   NS_ASSERTION(NS_IsMainThread(), "Wrong thread!");
@@ -359,6 +381,12 @@ void nsHtml5TreeOpExecutor::RunFlushLoop() {
   nsHtml5FlushLoopGuard guard(this);  // this is also the self-kungfu!
 
   RefPtr<nsParserBase> parserKungFuDeathGrip(mParser);
+  RefPtr<nsHtml5StreamParser> streamParserGrip;
+  if (mParser) {
+    streamParserGrip = GetParser()->GetStreamParser();
+  }
+  mozilla::Unused
+      << streamParserGrip;  // Intentionally not used within function
 
   // Remember the entry time
   (void)nsContentSink::WillParseImpl();
@@ -417,11 +445,6 @@ void nsHtml5TreeOpExecutor::RunFlushLoop() {
         ClearOpQueue();  // clear in order to be able to assert in destructor
         return;
       }
-      // Not sure if this grip is still needed, but previously, the code
-      // gripped before calling ParseUntilBlocked();
-      RefPtr<nsHtml5StreamParser> streamKungFuDeathGrip =
-          GetParser()->GetStreamParser();
-      mozilla::Unused << streamKungFuDeathGrip;  // Not used within function
       // Now parse content left in the document.write() buffer queue if any.
       // This may generate tree ops on its own or dequeue a speculation.
       nsresult rv = GetParser()->ParseUntilBlocked();
@@ -544,6 +567,12 @@ nsresult nsHtml5TreeOpExecutor::FlushDocumentWrite() {
   RefPtr<nsParserBase> parserKungFuDeathGrip(mParser);
   mozilla::Unused
       << parserKungFuDeathGrip;  // Intentionally not used within function
+  RefPtr<nsHtml5StreamParser> streamParserGrip;
+  if (mParser) {
+    streamParserGrip = GetParser()->GetStreamParser();
+  }
+  mozilla::Unused
+      << streamParserGrip;  // Intentionally not used within function
 
   MOZ_RELEASE_ASSERT(!mReadingFromStage,
                      "Got doc write flush when reading from stage");
@@ -784,14 +813,24 @@ void nsHtml5TreeOpExecutor::MaybeComplainAboutCharset(const char* aMsgId,
       EmptyString(), aLineNumber);
 }
 
-void nsHtml5TreeOpExecutor::ComplainAboutBogusProtocolCharset(
-    nsIDocument* aDoc) {
+void nsHtml5TreeOpExecutor::ComplainAboutBogusProtocolCharset(Document* aDoc) {
   NS_ASSERTION(!mAlreadyComplainedAboutCharset,
                "How come we already managed to complain?");
   mAlreadyComplainedAboutCharset = true;
   nsContentUtils::ReportToConsole(
       nsIScriptError::errorFlag, NS_LITERAL_CSTRING("HTML parser"), aDoc,
       nsContentUtils::eHTMLPARSER_PROPERTIES, "EncProtocolUnsupported");
+}
+
+void nsHtml5TreeOpExecutor::MaybeComplainAboutDeepTree(uint32_t aLineNumber) {
+  if (mAlreadyComplainedAboutDeepTree) {
+    return;
+  }
+  mAlreadyComplainedAboutDeepTree = true;
+  nsContentUtils::ReportToConsole(
+      nsIScriptError::errorFlag, NS_LITERAL_CSTRING("HTML parser"), mDocument,
+      nsContentUtils::eHTMLPARSER_PROPERTIES, "errDeepTree", nullptr, 0,
+      nullptr, EmptyString(), aLineNumber);
 }
 
 nsHtml5Parser* nsHtml5TreeOpExecutor::GetParser() {

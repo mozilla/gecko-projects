@@ -39,19 +39,16 @@ const WRAP_TEXT = "devtools.scratchpad.wrapText";
 const SHOW_TRAILING_SPACE = "devtools.scratchpad.showTrailingSpace";
 const EDITOR_FONT_SIZE = "devtools.scratchpad.editorFontSize";
 const ENABLE_AUTOCOMPLETION = "devtools.scratchpad.enableAutocompletion";
-const TAB_SIZE = "devtools.editor.tabsize";
 const FALLBACK_CHARSET_LIST = "intl.fallbackCharsetList.ISO-8859-1";
 
 const VARIABLES_VIEW_URL = "chrome://devtools/content/shared/widgets/VariablesView.xul";
 
-const {require, loader} = ChromeUtils.import("resource://devtools/shared/Loader.jsm", {});
+const {require, loader} = ChromeUtils.import("resource://devtools/shared/Loader.jsm");
 
-const Editor = require("devtools/client/sourceeditor/editor");
+const Editor = require("devtools/client/shared/sourceeditor/editor");
 const TargetFactory = require("devtools/client/framework/target").TargetFactory;
 const EventEmitter = require("devtools/shared/event-emitter");
-const {DevToolsWorker} = require("devtools/shared/worker/worker");
 const DevToolsUtils = require("devtools/shared/DevToolsUtils");
-const flags = require("devtools/shared/flags");
 const Services = require("Services");
 const {gDevTools} = require("devtools/client/framework/devtools");
 const { extend } = require("devtools/shared/extend");
@@ -202,9 +199,6 @@ var Scratchpad = {
       },
       "sp-cmd-display": () => {
         Scratchpad.display();
-      },
-      "sp-cmd-pprint": () => {
-        Scratchpad.prettyPrint();
       },
       "sp-cmd-contentContext": () => {
         Scratchpad.setContentContext();
@@ -488,7 +482,7 @@ var Scratchpad = {
     const { debuggerClient, webConsoleClient } = await connection;
     this.debuggerClient = debuggerClient;
     this.webConsoleClient = webConsoleClient;
-    const response = await webConsoleClient.evaluateJSAsync(string, null, evalOptions);
+    const response = await webConsoleClient.evaluateJSAsync(string, evalOptions);
 
     if (response.error) {
       throw new Error(response.error);
@@ -565,7 +559,7 @@ var Scratchpad = {
     const target = await TargetFactory.forTab(this.gBrowser.selectedTab);
     await target.attach();
     const onNavigate = target.once("navigate");
-    target.activeTab.reload();
+    target.reload();
     await onNavigate;
     await this.run();
   },
@@ -597,45 +591,6 @@ var Scratchpad = {
       this.writeAsComment(response.displayString);
       return [string, error, result];
     }
-  },
-
-  _prettyPrintWorker: null,
-
-  /**
-   * Get or create the worker that handles pretty printing.
-   */
-  get prettyPrintWorker() {
-    if (!this._prettyPrintWorker) {
-      this._prettyPrintWorker = new DevToolsWorker(
-        "resource://devtools/server/actors/pretty-print-worker.js",
-        { name: "pretty-print",
-          verbose: flags.wantLogging }
-      );
-    }
-    return this._prettyPrintWorker;
-  },
-
-  /**
-   * Pretty print the source text inside the scratchpad.
-   *
-   * @return Promise
-   *         A promise resolved with the pretty printed code, or rejected with
-   *         an error.
-   */
-  prettyPrint: function SP_prettyPrint() {
-    const uglyText = this.getText();
-    const tabsize = Services.prefs.getIntPref(TAB_SIZE);
-
-    return this.prettyPrintWorker.performTask("pretty-print", {
-      url: "(scratchpad)",
-      indent: tabsize,
-      source: uglyText,
-    }).then(data => {
-      this.editor.setText(data.code);
-    }).catch(error => {
-      this.writeAsErrorComment({ exception: error });
-      throw error;
-    });
   },
 
   /**
@@ -1134,16 +1089,28 @@ var Scratchpad = {
    *
    * @param integer aIndex
    *        Optional integer: clicked menuitem in the 'Open Recent'-menu.
+   *        If omitted, prompt the user to pick a file to open.
+   *
+   * @return Promise
+   *        A Promise that resolves to undefined when the file is opened (or
+   *        can't be opened), or when the user cancels the file picker dialog.
+   *        This method effectively catches all errors and reports them to the
+   *        notificationBox, so the promise never becomes rejected.
    */
-  openFile: function SP_openFile(aIndex) {
-    const promptCallback = aFile => {
-      this.promptSave((aCloseFile, aSaved, aStatus) => {
-        let shouldOpen = aCloseFile;
-        if (aSaved && !Components.isSuccessCode(aStatus)) {
-          shouldOpen = false;
-        }
+  openFile(aIndex) {
+    return new Promise(resolve => {
+      const promptCallback = aFile => {
+        this.promptSave((aCloseFile, aSaved, aStatus) => {
+          let shouldOpen = aCloseFile;
+          if (aSaved && !Components.isSuccessCode(aStatus)) {
+            shouldOpen = false;
+          }
 
-        if (shouldOpen) {
+          if (!shouldOpen) {
+            resolve();
+            return;
+          }
+
           let file;
           if (aFile) {
             file = aFile;
@@ -1163,29 +1130,32 @@ var Scratchpad = {
               null);
 
             this.clearFiles(aIndex, 1);
+            resolve();
             return;
           }
 
-          this.importFromFile(file, false);
-        }
-      });
-    };
+          this.importFromFile(file, false).finally(_ => resolve());
+        });
+      };
 
-    if (aIndex > -1) {
-      promptCallback();
-    } else {
-      const fp = Cc["@mozilla.org/filepicker;1"].createInstance(Ci.nsIFilePicker);
-      fp.init(window, this.strings.GetStringFromName("openFile.title"),
-              Ci.nsIFilePicker.modeOpen);
-      fp.defaultString = "";
-      fp.appendFilter("JavaScript Files", "*.js; *.jsm; *.json");
-      fp.appendFilter("All Files", "*.*");
-      fp.open(aResult => {
-        if (aResult != Ci.nsIFilePicker.returnCancel) {
-          promptCallback(fp.file);
-        }
-      });
-    }
+      if (aIndex > -1) {
+        promptCallback();
+      } else {
+        const fp = Cc["@mozilla.org/filepicker;1"].createInstance(Ci.nsIFilePicker);
+        fp.init(window, this.strings.GetStringFromName("openFile.title"),
+                Ci.nsIFilePicker.modeOpen);
+        fp.defaultString = "";
+        fp.appendFilter("JavaScript Files", "*.js; *.jsm; *.json");
+        fp.appendFilter("All Files", "*.*");
+        fp.open(aResult => {
+          if (aResult == Ci.nsIFilePicker.returnCancel) {
+            resolve();
+          } else {
+            promptCallback(fp.file);
+          }
+        });
+      }
+    });
   },
 
   /**
@@ -1626,9 +1596,9 @@ var Scratchpad = {
       this.editor.on("cursorActivity", this.updateStatusBar);
       const okstring = this.strings.GetStringFromName("selfxss.okstring");
       const msg = this.strings.formatStringFromName("selfxss.msg", [okstring], 1);
-      this._onPaste = WebConsoleUtils.pasteHandlerGen(this.editor.container.contentDocument.body,
-                                                      this.notificationBox,
-                                                      msg, okstring);
+      this._onPaste = pasteHandlerGen(this.editor.container.contentDocument.body,
+        this.notificationBox, msg, okstring);
+
       editorElement.addEventListener("paste", this._onPaste, true);
       editorElement.addEventListener("drop", this._onPaste);
       this.editor.on("saveRequested", () => this.saveFile());
@@ -1726,11 +1696,6 @@ var Scratchpad = {
     if (this._sidebar) {
       this._sidebar.destroy();
       this._sidebar = null;
-    }
-
-    if (this._prettyPrintWorker) {
-      this._prettyPrintWorker.destroy();
-      this._prettyPrintWorker = null;
     }
 
     scratchpadTargets = null;
@@ -2010,16 +1975,12 @@ ScratchpadTab.prototype = {
           message: Scratchpad.strings.GetStringFromName("connectionTimeout"),
         });
       }, REMOTE_TIMEOUT);
-
-      const target = await this._attach(subject);
-      const consoleActor = target.form.consoleActor;
-      const client = target.client;
       try {
-        const [, webConsoleClient] = await client.attachConsole(consoleActor, []);
+        const target = await this._attach(subject);
         clearTimeout(connectTimer);
         resolve({
-          webConsoleClient,
-          debuggerClient: client,
+          webConsoleClient: target.activeConsole,
+          debuggerClient: target.client,
         });
       } catch (error) {
         reportError("attachConsole", error);
@@ -2071,11 +2032,8 @@ ScratchpadWindow.prototype = extend(ScratchpadTab.prototype, {
 
     const client = new DebuggerClient(DebuggerServer.connectPipe());
     await client.connect();
-    const front = await client.mainRoot.getMainProcess();
-    const target = await TargetFactory.forRemoteTab({
-      activeTab: front,
-      client,
-    });
+    const target = await client.mainRoot.getMainProcess();
+    await target.attach();
     return target;
   },
 });
@@ -2325,3 +2283,52 @@ XPCOMUtils.defineLazyGetter(Scratchpad, "strings", function() {
 addEventListener("load", Scratchpad.onLoad.bind(Scratchpad), false);
 addEventListener("unload", Scratchpad.onUnload.bind(Scratchpad), false);
 addEventListener("close", Scratchpad.onClose.bind(Scratchpad), false);
+
+/**
+ * The inputNode "paste" event handler generator. Helps prevent
+ * self-xss attacks
+ *
+ * @param Element inputField
+ * @param Element notificationBox
+ * @returns A function to be added as a handler to 'paste' and
+ *'drop' events on the input field
+ */
+function pasteHandlerGen(inputField, notificationBox, msg, okstring) {
+  const handler = function(event) {
+    if (WebConsoleUtils.usageCount >= WebConsoleUtils.CONSOLE_ENTRY_THRESHOLD) {
+      inputField.removeEventListener("paste", handler);
+      inputField.removeEventListener("drop", handler);
+      return true;
+    }
+    if (notificationBox.getNotificationWithValue("selfxss-notification")) {
+      event.preventDefault();
+      event.stopPropagation();
+      return false;
+    }
+
+    const notification = notificationBox.appendNotification(msg,
+      "selfxss-notification", null,
+      notificationBox.PRIORITY_WARNING_HIGH, null,
+      function(eventType) {
+        // Cleanup function if notification is dismissed
+        if (eventType == "removed") {
+          inputField.removeEventListener("keyup", pasteKeyUpHandler);
+        }
+      });
+
+    function pasteKeyUpHandler() {
+      const value = inputField.value || inputField.textContent;
+      if (value.includes(okstring)) {
+        notificationBox.removeNotification(notification);
+        inputField.removeEventListener("keyup", pasteKeyUpHandler);
+        WebConsoleUtils.usageCount = WebConsoleUtils.CONSOLE_ENTRY_THRESHOLD;
+      }
+    }
+    inputField.addEventListener("keyup", pasteKeyUpHandler);
+
+    event.preventDefault();
+    event.stopPropagation();
+    return false;
+  };
+  return handler;
+}

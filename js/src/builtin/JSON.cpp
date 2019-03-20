@@ -6,6 +6,7 @@
 
 #include "builtin/JSON.h"
 
+#include "mozilla/CheckedInt.h"
 #include "mozilla/FloatingPoint.h"
 #include "mozilla/Range.h"
 #include "mozilla/ScopeExit.h"
@@ -15,10 +16,9 @@
 #include "jsutil.h"
 
 #include "builtin/Array.h"
-#ifdef ENABLE_BIGINT
 #include "builtin/BigInt.h"
-#endif
 #include "builtin/String.h"
+#include "js/PropertySpec.h"
 #include "js/StableStringChars.h"
 #include "util/StringBuffer.h"
 #include "vm/Interpreter.h"
@@ -34,6 +34,7 @@
 
 using namespace js;
 
+using mozilla::CheckedInt;
 using mozilla::IsFinite;
 using mozilla::Maybe;
 using mozilla::RangedPtr;
@@ -138,13 +139,20 @@ static MOZ_ALWAYS_INLINE RangedPtr<DstCharT> InfallibleQuote(
 }
 
 template <typename SrcCharT, typename CharVectorT>
-static bool Quote(CharVectorT& sb, JSLinearString* str) {
+static bool Quote(JSContext* cx, CharVectorT& sb, JSLinearString* str) {
   // We resize the backing buffer to the maximum size we could possibly need,
   // write the escaped string into it, and shrink it back to the size we ended
   // up needing.
+
   size_t len = str->length();
+  CheckedInt<size_t> reservedLen = CheckedInt<size_t>(len) * 6 + 2;
+  if (MOZ_UNLIKELY(!reservedLen.isValid())) {
+    ReportAllocationOverflow(cx);
+    return false;
+  }
+
   size_t sbInitialLen = sb.length();
-  if (!sb.growByUninitialized(len * 6 + 2)) {
+  if (!sb.growByUninitialized(reservedLen.value())) {
     return false;
   }
 
@@ -174,12 +182,12 @@ static bool Quote(JSContext* cx, StringBuffer& sb, JSString* str) {
     }
   }
   if (linear->hasTwoByteChars()) {
-    return Quote<char16_t>(sb.rawTwoByteBuffer(), linear);
+    return Quote<char16_t>(cx, sb.rawTwoByteBuffer(), linear);
   }
 
   return sb.isUnderlyingBufferLatin1()
-             ? Quote<Latin1Char>(sb.latin1Chars(), linear)
-             : Quote<Latin1Char>(sb.rawTwoByteBuffer(), linear);
+             ? Quote<Latin1Char>(cx, sb.latin1Chars(), linear)
+             : Quote<Latin1Char>(cx, sb.rawTwoByteBuffer(), linear);
 }
 
 namespace {
@@ -279,11 +287,17 @@ static bool PreprocessValue(JSContext* cx, HandleObject holder, KeyType key,
 
   RootedString keyStr(cx);
 
-  /* Step 2. */
-  if (vp.isObject()) {
+  // Step 2. Modified by BigInt spec 6.1 to check for a toJSON method on the
+  // BigInt prototype when the value is a BigInt, and to pass the BigInt
+  // primitive value as receiver.
+  if (vp.isObject() || vp.isBigInt()) {
     RootedValue toJSON(cx);
-    RootedObject obj(cx, &vp.toObject());
-    if (!GetProperty(cx, obj, obj, cx->names().toJSON, &toJSON)) {
+    RootedObject obj(cx, JS::ToObject(cx, vp));
+    if (!obj) {
+      return false;
+    }
+
+    if (!GetProperty(cx, obj, vp, cx->names().toJSON, &toJSON)) {
       return false;
     }
 
@@ -344,14 +358,11 @@ static bool PreprocessValue(JSContext* cx, HandleObject holder, KeyType key,
       if (!Unbox(cx, obj, vp)) {
         return false;
       }
-    }
-#ifdef ENABLE_BIGINT
-    else if (cls == ESClass::BigInt) {
+    } else if (cls == ESClass::BigInt) {
       if (!Unbox(cx, obj, vp)) {
         return false;
       }
     }
-#endif
   }
 
   return true;
@@ -666,14 +677,12 @@ static bool Str(JSContext* cx, const Value& v, StringifyContext* scx) {
     return NumberValueToStringBuffer(cx, v, scx->sb);
   }
 
-#ifdef ENABLE_BIGINT
   /* Step 10 in the BigInt proposal. */
   if (v.isBigInt()) {
     JS_ReportErrorNumberASCII(cx, GetErrorMessage, nullptr,
                               JSMSG_BIGINT_NOT_SERIALIZABLE);
     return false;
   }
-#endif
 
   /* Step 10. */
   MOZ_ASSERT(v.isObject());

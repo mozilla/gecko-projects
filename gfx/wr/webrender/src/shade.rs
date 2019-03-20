@@ -2,10 +2,6 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-use api::{
-    YUV_COLOR_SPACES, YUV_FORMATS,
-    YuvColorSpace, YuvFormat,
-};
 use batch::{BatchKey, BatchKind, BrushBatchKind};
 use device::{Device, Program, ShaderError};
 use euclid::{Transform3D};
@@ -171,6 +167,7 @@ impl LazilyCompiledShader {
             let vertex_descriptor = match vertex_format {
                 VertexArrayKind::Primitive => &desc::PRIM_INSTANCES,
                 VertexArrayKind::LineDecoration => &desc::LINE,
+                VertexArrayKind::Gradient => &desc::GRADIENT,
                 VertexArrayKind::Blur => &desc::BLUR,
                 VertexArrayKind::Clip => &desc::CLIP,
                 VertexArrayKind::VectorStencil => &desc::VECTOR_STENCIL,
@@ -451,6 +448,7 @@ pub struct Shaders {
     pub cs_scale_a8: LazilyCompiledShader,
     pub cs_scale_rgba8: LazilyCompiledShader,
     pub cs_line_decoration: LazilyCompiledShader,
+    pub cs_gradient: LazilyCompiledShader,
 
     // Brush shaders
     brush_solid: BrushShader,
@@ -635,7 +633,7 @@ impl Shaders {
 
         // All yuv_image configuration.
         let mut yuv_features = Vec::new();
-        let yuv_shader_num = IMAGE_BUFFER_KINDS.len() * YUV_FORMATS.len() * YUV_COLOR_SPACES.len();
+        let yuv_shader_num = IMAGE_BUFFER_KINDS.len();
         let mut brush_yuv_image = Vec::new();
         // PrimitiveShader is not clonable. Use push() to initialize the vec.
         for _ in 0 .. yuv_shader_num {
@@ -643,43 +641,37 @@ impl Shaders {
         }
         for image_buffer_kind in &IMAGE_BUFFER_KINDS {
             if image_buffer_kind.has_platform_support(&gl_type) {
-                for format_kind in &YUV_FORMATS {
-                    for color_space_kind in &YUV_COLOR_SPACES {
-                        let feature_string = image_buffer_kind.get_feature_string();
-                        if feature_string != "" {
-                            yuv_features.push(feature_string);
-                        }
-                        let feature_string = format_kind.get_feature_string();
-                        if feature_string != "" {
-                            yuv_features.push(feature_string);
-                        }
-                        let feature_string = color_space_kind.get_feature_string();
-                        if feature_string != "" {
-                            yuv_features.push(feature_string);
-                        }
-
-                        let shader = BrushShader::new(
-                            "brush_yuv_image",
-                            device,
-                            &yuv_features,
-                            options.precache_flags,
-                            false,
-                        )?;
-                        let index = Self::get_yuv_shader_index(
-                            *image_buffer_kind,
-                            *format_kind,
-                            *color_space_kind,
-                        );
-                        brush_yuv_image[index] = Some(shader);
-                        yuv_features.clear();
-                    }
+                let feature_string = image_buffer_kind.get_feature_string();
+                if feature_string != "" {
+                    yuv_features.push(feature_string);
                 }
+
+                let shader = BrushShader::new(
+                    "brush_yuv_image",
+                    device,
+                    &yuv_features,
+                    options.precache_flags,
+                    false,
+                )?;
+                let index = Self::get_yuv_shader_index(
+                    *image_buffer_kind,
+                );
+                brush_yuv_image[index] = Some(shader);
+                yuv_features.clear();
             }
         }
 
         let cs_line_decoration = LazilyCompiledShader::new(
             ShaderKind::Cache(VertexArrayKind::LineDecoration),
             "cs_line_decoration",
+            &[],
+            device,
+            options.precache_flags,
+        )?;
+
+        let cs_gradient = LazilyCompiledShader::new(
+            ShaderKind::Cache(VertexArrayKind::Gradient),
+            "cs_gradient",
             &[],
             device,
             options.precache_flags,
@@ -714,6 +706,7 @@ impl Shaders {
             cs_blur_rgba8,
             cs_border_segment,
             cs_line_decoration,
+            cs_gradient,
             cs_border_solid,
             cs_scale_a8,
             cs_scale_rgba8,
@@ -733,13 +726,8 @@ impl Shaders {
         })
     }
 
-    fn get_yuv_shader_index(
-        buffer_kind: ImageBufferKind,
-        format: YuvFormat,
-        color_space: YuvColorSpace,
-    ) -> usize {
-        ((buffer_kind as usize) * YUV_FORMATS.len() + (format as usize)) * YUV_COLOR_SPACES.len() +
-            (color_space as usize)
+    fn get_yuv_shader_index(buffer_kind: ImageBufferKind) -> usize {
+        (buffer_kind as usize)
     }
 
     pub fn get(&mut self, key: &BatchKey, debug_flags: DebugFlags) -> &mut LazilyCompiledShader {
@@ -769,9 +757,9 @@ impl Shaders {
                     BrushBatchKind::LinearGradient => {
                         &mut self.brush_linear_gradient
                     }
-                    BrushBatchKind::YuvImage(image_buffer_kind, format, _color_depth, color_space) => {
+                    BrushBatchKind::YuvImage(image_buffer_kind, ..) => {
                         let shader_index =
-                            Self::get_yuv_shader_index(image_buffer_kind, format, color_space);
+                            Self::get_yuv_shader_index(image_buffer_kind);
                         self.brush_yuv_image[shader_index]
                             .as_mut()
                             .expect("Unsupported YUV shader kind")
@@ -815,6 +803,7 @@ impl Shaders {
             }
         }
         self.cs_border_solid.deinit(device);
+        self.cs_gradient.deinit(device);
         self.cs_line_decoration.deinit(device);
         self.cs_border_segment.deinit(device);
         self.ps_split_composite.deinit(device);

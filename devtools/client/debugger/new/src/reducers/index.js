@@ -2,6 +2,8 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
 
+// @flow
+
 /**
  * Reducer index
  * @module reducers/index
@@ -22,6 +24,7 @@ import quickOpen from "./quick-open";
 import sourceTree from "./source-tree";
 import debuggee from "./debuggee";
 import { objectInspector } from "devtools-reps";
+import eventListenerBreakpoints from "./event-listeners";
 
 export default {
   expressions,
@@ -38,5 +41,6 @@ export default {
   quickOpen,
   sourceTree,
   debuggee,
-  objectInspector: objectInspector.reducer.default
+  objectInspector: objectInspector.reducer.default,
+  eventListenerBreakpoints
 };

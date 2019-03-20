@@ -271,6 +271,7 @@ nsresult HeadlessLookAndFeel::GetIntImpl(IntID aID, int32_t& aResult) {
       aResult = 1;
       break;
     case eIntID_GTKCSDAvailable:
+    case eIntID_GTKCSDHideTitlebarByDefault:
     case eIntID_GTKCSDTransparentBackground:
       aResult = 0;
       break;
@@ -282,6 +283,9 @@ nsresult HeadlessLookAndFeel::GetIntImpl(IntID aID, int32_t& aResult) {
       break;
     case eIntID_GTKCSDCloseButton:
       aResult = 1;
+      break;
+    case eIntID_GTKCSDReversedPlacement:
+      aResult = 0;
       break;
     default:
       NS_WARNING(
@@ -323,13 +327,12 @@ nsresult HeadlessLookAndFeel::GetFloatImpl(FloatID aID, float& aResult) {
 }
 
 bool HeadlessLookAndFeel::GetFontImpl(FontID aID, nsString& aFontName,
-                                      gfxFontStyle& aFontStyle,
-                                      float aDevPixPerCSSPixel) {
+                                      gfxFontStyle& aFontStyle) {
   // Default to san-serif for everything.
   aFontStyle.style = FontSlantStyle::Normal();
   aFontStyle.weight = FontWeight::Normal();
   aFontStyle.stretch = FontStretch::Normal();
-  aFontStyle.size = 14 * aDevPixPerCSSPixel;
+  aFontStyle.size = 14;
   aFontStyle.systemFont = true;
 
   aFontName.AssignLiteral("sans-serif");

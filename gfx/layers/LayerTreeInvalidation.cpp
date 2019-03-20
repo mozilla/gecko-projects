@@ -33,16 +33,16 @@
 #define LTI_DEBUG 0
 
 #if LTI_DEBUG
-#define LTI_DEEPER(aPrefix) nsPrintfCString("%s  ", aPrefix).get()
-#define LTI_DUMP(rgn, label)                                                \
-  if (!(rgn).IsEmpty())                                                     \
-    printf_stderr("%s%p: " label " portion is %s\n", aPrefix, mLayer.get(), \
-                  Stringify(rgn).c_str());
-#define LTI_LOG(...) printf_stderr(__VA_ARGS__)
+#  define LTI_DEEPER(aPrefix) nsPrintfCString("%s  ", aPrefix).get()
+#  define LTI_DUMP(rgn, label)                                                \
+    if (!(rgn).IsEmpty())                                                     \
+      printf_stderr("%s%p: " label " portion is %s\n", aPrefix, mLayer.get(), \
+                    Stringify(rgn).c_str());
+#  define LTI_LOG(...) printf_stderr(__VA_ARGS__)
 #else
-#define LTI_DEEPER(aPrefix) nullptr
-#define LTI_DUMP(rgn, label)
-#define LTI_LOG(...)
+#  define LTI_DEEPER(aPrefix) nullptr
+#  define LTI_DUMP(rgn, label)
+#  define LTI_LOG(...)
 #endif
 
 using namespace mozilla::gfx;
@@ -739,12 +739,13 @@ UniquePtr<LayerPropertiesBase> CloneLayerTreePropertiesInternal(
   return MakeUnique<LayerPropertiesBase>(aRoot);
 }
 
-/* static */ UniquePtr<LayerProperties> LayerProperties::CloneFrom(
-    Layer* aRoot) {
+/* static */
+UniquePtr<LayerProperties> LayerProperties::CloneFrom(Layer* aRoot) {
   return CloneLayerTreePropertiesInternal(aRoot);
 }
 
-/* static */ void LayerProperties::ClearInvalidations(Layer* aLayer) {
+/* static */
+void LayerProperties::ClearInvalidations(Layer* aLayer) {
   ForEachNode<ForwardIterator>(aLayer, [](Layer* layer) {
     layer->ClearInvalidRegion();
     if (layer->GetMaskLayer()) {

@@ -3,8 +3,8 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 "use strict";
 
-const {actionTypes: at} = ChromeUtils.import("resource://activity-stream/common/Actions.jsm", {});
-const {Dedupe} = ChromeUtils.import("resource://activity-stream/common/Dedupe.jsm", {});
+const {actionTypes: at} = ChromeUtils.import("resource://activity-stream/common/Actions.jsm");
+const {Dedupe} = ChromeUtils.import("resource://activity-stream/common/Dedupe.jsm");
 
 const TOP_SITES_DEFAULT_ROWS = 1;
 const TOP_SITES_MAX_SITES_PER_ROW = 8;
@@ -46,6 +46,34 @@ const INITIAL_STATE = {
     isUserLoggedIn: null,
     pocketCta: {},
     waitingForSpoc: true,
+  },
+  // This is the new pocket configurable layout state.
+  DiscoveryStream: {
+    // This is a JSON-parsed copy of the discoverystream.config pref value.
+    config: {enabled: false, layout_endpoint: ""},
+    layout: [],
+    lastUpdated: null,
+    feeds: {
+      data: {
+        // "https://foo.com/feed1": {lastUpdated: 123, data: []}
+      },
+      loaded: false,
+    },
+    spocs: {
+      spocs_endpoint: "",
+      lastUpdated: null,
+      data: {}, // {spocs: []}
+      loaded: false,
+    },
+  },
+  Search: {
+    // When search hand-off is enabled, we render a big button that is styled to
+    // look like a search textbox. If the button is clicked, we style
+    // the button as if it was a focused search box and show a fake cursor but
+    // really focus the awesomebar without the focus styles ("hidden focus").
+    fakeFocus: false,
+    // Hide the search box after handing off to AwesomeBar and user starts typing.
+    hide: false,
   },
 };
 
@@ -429,10 +457,113 @@ function Pocket(prevState = INITIAL_STATE.Pocket, action) {
   }
 }
 
+function DiscoveryStream(prevState = INITIAL_STATE.DiscoveryStream, action) {
+  switch (action.type) {
+    case at.DISCOVERY_STREAM_CONFIG_CHANGE:
+    // The reason this is a separate action is so it doesn't trigger a listener update on init
+    case at.DISCOVERY_STREAM_CONFIG_SETUP:
+      return {...prevState, config: action.data || {}};
+    case at.DISCOVERY_STREAM_LAYOUT_UPDATE:
+      return {...prevState, lastUpdated: action.data.lastUpdated || null, layout: action.data.layout || []};
+    case at.DISCOVERY_STREAM_LAYOUT_RESET:
+      return {...prevState, lastUpdated: INITIAL_STATE.DiscoveryStream.lastUpdated, layout: INITIAL_STATE.DiscoveryStream.layout};
+    case at.DISCOVERY_STREAM_FEEDS_UPDATE:
+      return {
+        ...prevState,
+        feeds: {
+          ...prevState.feeds,
+          data: action.data || prevState.feeds.data,
+          loaded: true,
+        },
+      };
+    case at.DISCOVERY_STREAM_SPOCS_ENDPOINT:
+      return {
+        ...prevState,
+        spocs: {
+          ...INITIAL_STATE.DiscoveryStream.spocs,
+          spocs_endpoint: action.data || INITIAL_STATE.DiscoveryStream.spocs.spocs_endpoint,
+        },
+      };
+    case at.PLACES_LINK_BLOCKED:
+      // Return if action data is empty, or spocs or feeds data is not loaded
+      if (!action.data || !prevState.spocs.loaded || !prevState.feeds.loaded) {
+        return prevState;
+      }
+      // Filter spocs and recommendations data inside feeds by removing action.data.url
+      // received on PLACES_LINK_BLOCKED triggered by dismiss link menu option
+      return {
+        ...prevState,
+        spocs: {
+          ...prevState.spocs,
+          data: prevState.spocs.data.spocs ? {
+            spocs: prevState.spocs.data.spocs.filter(s => s.url !== action.data.url),
+          } : {},
+        },
+        feeds: {
+          ...prevState.feeds,
+          data: Object.keys(prevState.feeds.data).reduce((accumulator, feed_url) => {
+            accumulator[feed_url] = {
+              data: {
+                ...prevState.feeds.data[feed_url].data,
+                recommendations: prevState.feeds.data[feed_url].data.recommendations.filter(r => r.url !== action.data.url),
+              },
+            };
+            return accumulator;
+          }, {}),
+        },
+      };
+    case at.DISCOVERY_STREAM_SPOCS_UPDATE:
+      if (action.data) {
+        return {
+          ...prevState,
+          spocs: {
+            ...prevState.spocs,
+            lastUpdated: action.data.lastUpdated,
+            data: action.data.spocs,
+            loaded: true,
+          },
+        };
+      }
+      return prevState;
+    default:
+      return prevState;
+  }
+}
+
+function Search(prevState = INITIAL_STATE.Search, action) {
+  switch (action.type) {
+    case at.HIDE_SEARCH:
+      return Object.assign({...prevState, hide: true});
+    case at.FAKE_FOCUS_SEARCH:
+      return Object.assign({...prevState, fakeFocus: true});
+    case at.SHOW_SEARCH:
+      return Object.assign({...prevState, hide: false, fakeFocus: false});
+    default:
+      return prevState;
+  }
+}
+
 this.INITIAL_STATE = INITIAL_STATE;
 this.TOP_SITES_DEFAULT_ROWS = TOP_SITES_DEFAULT_ROWS;
 this.TOP_SITES_MAX_SITES_PER_ROW = TOP_SITES_MAX_SITES_PER_ROW;
 
-this.reducers = {TopSites, App, ASRouter, Snippets, Prefs, Dialog, Sections, Pocket};
+this.reducers = {
+  TopSites,
+  App,
+  ASRouter,
+  Snippets,
+  Prefs,
+  Dialog,
+  Sections,
+  Pocket,
+  DiscoveryStream,
+  Search,
+};
 
-const EXPORTED_SYMBOLS = ["reducers", "INITIAL_STATE", "insertPinned", "TOP_SITES_DEFAULT_ROWS", "TOP_SITES_MAX_SITES_PER_ROW"];
+const EXPORTED_SYMBOLS = [
+  "reducers",
+  "INITIAL_STATE",
+  "insertPinned",
+  "TOP_SITES_DEFAULT_ROWS",
+  "TOP_SITES_MAX_SITES_PER_ROW",
+];

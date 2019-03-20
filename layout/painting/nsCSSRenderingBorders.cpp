@@ -27,10 +27,10 @@
 #include "nsClassHashtable.h"
 #include "nsPresContext.h"
 #include "nsStyleStruct.h"
-#include "mozilla/gfx/2D.h"
 #include "gfx2DGlue.h"
 #include "gfxGradientCache.h"
 #include "mozilla/layers/StackingContextHelper.h"
+#include "mozilla/layers/RenderRootStateManager.h"
 #include "mozilla/layers/WebRenderLayerManager.h"
 #include "mozilla/Range.h"
 #include <algorithm>
@@ -38,6 +38,7 @@
 using namespace mozilla;
 using namespace mozilla::gfx;
 using namespace mozilla::image;
+using mozilla::dom::Document;
 
 #define MAX_COMPOSITE_BORDER_WIDTH LayoutDeviceIntCoord(10000)
 
@@ -101,8 +102,8 @@ static bool IsZeroSize(const Size& sz) {
   return sz.width == 0.0 || sz.height == 0.0;
 }
 
-/* static */ bool nsCSSBorderRenderer::AllCornersZeroSize(
-    const RectCornerRadii& corners) {
+/* static */
+bool nsCSSBorderRenderer::AllCornersZeroSize(const RectCornerRadii& corners) {
   return IsZeroSize(corners[eCornerTopLeft]) &&
          IsZeroSize(corners[eCornerTopRight]) &&
          IsZeroSize(corners[eCornerBottomRight]) &&
@@ -148,7 +149,7 @@ typedef enum {
 } CornerStyle;
 
 nsCSSBorderRenderer::nsCSSBorderRenderer(
-    nsPresContext* aPresContext, const nsIDocument* aDocument,
+    nsPresContext* aPresContext, const Document* aDocument,
     DrawTarget* aDrawTarget, const Rect& aDirtyRect, Rect& aOuterRect,
     const StyleBorderStyle* aBorderStyles, const Float* aBorderWidths,
     RectCornerRadii& aBorderRadii, const nscolor* aBorderColors,
@@ -181,9 +182,10 @@ nsCSSBorderRenderer::nsCSSBorderRenderer(
   mAvoidStroke = false;
 }
 
-/* static */ void nsCSSBorderRenderer::ComputeInnerRadii(
-    const RectCornerRadii& aRadii, const Float* aBorderSizes,
-    RectCornerRadii* aInnerRadiiRet) {
+/* static */
+void nsCSSBorderRenderer::ComputeInnerRadii(const RectCornerRadii& aRadii,
+                                            const Float* aBorderSizes,
+                                            RectCornerRadii* aInnerRadiiRet) {
   RectCornerRadii& iRadii = *aInnerRadiiRet;
 
   iRadii[C_TL].width =
@@ -207,9 +209,10 @@ nsCSSBorderRenderer::nsCSSBorderRenderer(
       std::max(0.f, aRadii[C_BL].height - aBorderSizes[eSideBottom]);
 }
 
-/* static */ void nsCSSBorderRenderer::ComputeOuterRadii(
-    const RectCornerRadii& aRadii, const Float* aBorderSizes,
-    RectCornerRadii* aOuterRadiiRet) {
+/* static */
+void nsCSSBorderRenderer::ComputeOuterRadii(const RectCornerRadii& aRadii,
+                                            const Float* aBorderSizes,
+                                            RectCornerRadii* aOuterRadiiRet) {
   RectCornerRadii& oRadii = *aOuterRadiiRet;
 
   // default all corners to sharp corners
@@ -3302,6 +3305,7 @@ void nsCSSBorderRenderer::CreateWebRenderCommands(
     const layers::StackingContextHelper& aSc) {
   LayoutDeviceRect outerRect = LayoutDeviceRect::FromUnknownRect(mOuterRect);
   wr::LayoutRect roundedRect = wr::ToRoundedLayoutRect(outerRect);
+  wr::LayoutRect clipRect = roundedRect;
   wr::BorderSide side[4];
   NS_FOR_CSS_SIDES(i) {
     side[i] =
@@ -3315,25 +3319,20 @@ void nsCSSBorderRenderer::CreateWebRenderCommands(
                          LayoutDeviceSize::FromUnknownSize(mBorderRadii[2]));
 
   if (mLocalClip) {
-    LayoutDeviceRect clip =
+    LayoutDeviceRect localClip =
         LayoutDeviceRect::FromUnknownRect(mLocalClip.value());
-    wr::LayoutRect clipRect = wr::ToRoundedLayoutRect(clip);
-    wr::WrClipId clipId = aBuilder.DefineClip(Nothing(), clipRect);
-    aBuilder.PushClip(clipId);
+    clipRect = wr::ToRoundedLayoutRect(localClip.Intersect(outerRect));
   }
 
   Range<const wr::BorderSide> wrsides(side, 4);
-  aBuilder.PushBorder(roundedRect, roundedRect, mBackfaceIsVisible,
+  aBuilder.PushBorder(roundedRect, clipRect, mBackfaceIsVisible,
                       wr::ToBorderWidths(mBorderWidths[0], mBorderWidths[1],
                                          mBorderWidths[2], mBorderWidths[3]),
                       wrsides, borderRadius);
-
-  if (mLocalClip) {
-    aBuilder.PopClip();
-  }
 }
 
-/* static */ Maybe<nsCSSBorderImageRenderer>
+/* static */
+Maybe<nsCSSBorderImageRenderer>
 nsCSSBorderImageRenderer::CreateBorderImageRenderer(
     nsPresContext* aPresContext, nsIFrame* aForFrame, const nsRect& aBorderArea,
     const nsStyleBorder& aStyleBorder, const nsRect& aDirtyRect,
@@ -3446,12 +3445,9 @@ ImgDrawResult nsCSSBorderImageRenderer::DrawBorderImage(
 
       if (i == MIDDLE && j == MIDDLE) {
         // Discard the middle portion unless set to fill.
-        if (NS_STYLE_BORDER_IMAGE_SLICE_NOFILL == mFill) {
+        if (!mFill) {
           continue;
         }
-
-        NS_ASSERTION(NS_STYLE_BORDER_IMAGE_SLICE_FILL == mFill,
-                     "Unexpected border image fill");
 
         // css-background:
         //     The middle image's width is scaled by the same factor as the
@@ -3539,7 +3535,7 @@ ImgDrawResult nsCSSBorderImageRenderer::CreateWebRenderCommands(
     mozilla::wr::DisplayListBuilder& aBuilder,
     mozilla::wr::IpcResourceUpdateQueue& aResources,
     const mozilla::layers::StackingContextHelper& aSc,
-    mozilla::layers::WebRenderLayerManager* aManager,
+    mozilla::layers::RenderRootStateManager* aManager,
     nsDisplayListBuilder* aDisplayListBuilder) {
   if (!mImageRenderer.IsReady()) {
     return ImgDrawResult::NOT_READY;
@@ -3558,7 +3554,8 @@ ImgDrawResult nsCSSBorderImageRenderer::CreateWebRenderCommands(
 
   LayoutDeviceRect destRect =
       LayoutDeviceRect::FromAppUnits(mArea, appUnitsPerDevPixel);
-  wr::LayoutRect dest = wr::ToRoundedLayoutRect(destRect);
+  destRect.Round();
+  wr::LayoutRect dest = wr::ToLayoutRect(destRect);
 
   wr::LayoutRect clip = dest;
   if (!mClip.IsEmpty()) {
@@ -3585,8 +3582,9 @@ ImgDrawResult nsCSSBorderImageRenderer::CreateWebRenderCommands(
               img, aForFrame, destRect, aSc, flags, svgContext);
 
       RefPtr<layers::ImageContainer> container;
-      drawResult = img->GetImageContainerAtSize(
-          aManager, decodeSize, svgContext, flags, getter_AddRefs(container));
+      drawResult = img->GetImageContainerAtSize(aManager->LayerManager(),
+                                                decodeSize, svgContext, flags,
+                                                getter_AddRefs(container));
       if (!container) {
         break;
       }
@@ -3737,29 +3735,22 @@ nsCSSBorderImageRenderer::nsCSSBorderImageRenderer(
   nsMargin slice;
   nsMargin border;
   NS_FOR_CSS_SIDES(s) {
-    nsStyleCoord coord = aStyleBorder.mBorderImageSlice.Get(s);
+    const auto& slice = aStyleBorder.mBorderImageSlice.offsets.Get(s);
     int32_t imgDimension =
         SideIsVertical(s) ? mImageSize.width : mImageSize.height;
     nscoord borderDimension = SideIsVertical(s) ? mArea.width : mArea.height;
     double value;
-    switch (coord.GetUnit()) {
-      case eStyleUnit_Percent:
-        value = coord.GetPercentValue() * imgDimension;
-        break;
-      case eStyleUnit_Factor:
-        value = nsPresContext::CSSPixelsToAppUnits(
-            NS_lround(coord.GetFactorValue()));
-        break;
-      default:
-        MOZ_ASSERT_UNREACHABLE("unexpected CSS unit for image slice");
-        value = 0;
-        break;
+    if (slice.IsNumber()) {
+      value = nsPresContext::CSSPixelsToAppUnits(NS_lround(slice.AsNumber()));
+    } else {
+      MOZ_ASSERT(slice.IsPercentage());
+      value = slice.AsPercentage()._0 * imgDimension;
     }
     if (value < 0) value = 0;
     if (value > imgDimension) value = imgDimension;
     mSlice.Side(s) = value;
 
-    coord = aStyleBorder.mBorderImageWidth.Get(s);
+    nsStyleCoord coord = aStyleBorder.mBorderImageWidth.Get(s);
     switch (coord.GetUnit()) {
       case eStyleUnit_Coord:  // absolute dimension
         value = coord.GetCoordValue();
@@ -3772,6 +3763,9 @@ nsCSSBorderImageRenderer::nsCSSBorderImageRenderer(
         break;
       case eStyleUnit_Auto:  // same as the slice value, in CSS pixels
         value = mSlice.Side(s);
+        break;
+      case eStyleUnit_Calc:
+        value = std::max(0, coord.ComputeComputedCalc(borderDimension));
         break;
       default:
         MOZ_ASSERT_UNREACHABLE(
@@ -3813,5 +3807,5 @@ nsCSSBorderImageRenderer::nsCSSBorderImageRenderer(
 
   mRepeatModeHorizontal = aStyleBorder.mBorderImageRepeatH;
   mRepeatModeVertical = aStyleBorder.mBorderImageRepeatV;
-  mFill = aStyleBorder.mBorderImageFill;
+  mFill = aStyleBorder.mBorderImageSlice.fill;
 }

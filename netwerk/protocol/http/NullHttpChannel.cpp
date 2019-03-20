@@ -84,12 +84,35 @@ NullHttpChannel::SetTopLevelOuterContentWindowId(uint64_t aWindowId) {
 }
 
 NS_IMETHODIMP
-NullHttpChannel::GetIsTrackingResource(bool *aIsTrackingResource) {
+NullHttpChannel::IsTrackingResource(bool *aIsTrackingResource) {
   return NS_ERROR_NOT_IMPLEMENTED;
 }
 
 NS_IMETHODIMP
-NullHttpChannel::GetIsThirdPartyTrackingResource(bool *aIsTrackingResource) {
+NullHttpChannel::IsThirdPartyTrackingResource(bool *aIsTrackingResource) {
+  return NS_ERROR_NOT_IMPLEMENTED;
+}
+
+NS_IMETHODIMP
+NullHttpChannel::GetClassificationFlags(uint32_t *aClassificationFlags) {
+  return NS_ERROR_NOT_IMPLEMENTED;
+}
+
+NS_IMETHODIMP
+NullHttpChannel::GetFlashPluginState(
+    nsIHttpChannel::FlashPluginState *aResult) {
+  return NS_ERROR_NOT_IMPLEMENTED;
+}
+
+NS_IMETHODIMP
+NullHttpChannel::GetFirstPartyClassificationFlags(
+    uint32_t *aClassificationFlags) {
+  return NS_ERROR_NOT_IMPLEMENTED;
+}
+
+NS_IMETHODIMP
+NullHttpChannel::GetThirdPartyClassificationFlags(
+    uint32_t *aClassificationFlags) {
   return NS_ERROR_NOT_IMPLEMENTED;
 }
 
@@ -263,6 +286,17 @@ NullHttpChannel::RedirectTo(nsIURI *aNewURI) {
 }
 
 NS_IMETHODIMP
+NullHttpChannel::SwitchProcessTo(mozilla::dom::Promise *aTabParent,
+                                 uint64_t aIdentifier) {
+  return NS_ERROR_NOT_AVAILABLE;
+}
+
+NS_IMETHODIMP
+NullHttpChannel::HasCrossOriginOpenerPolicyMismatch(bool *aMismatch) {
+  return NS_ERROR_NOT_AVAILABLE;
+}
+
+NS_IMETHODIMP
 NullHttpChannel::UpgradeToSecure() { return NS_ERROR_NOT_IMPLEMENTED; }
 
 NS_IMETHODIMP
@@ -365,32 +399,22 @@ NullHttpChannel::SetContentLength(int64_t aContentLength) {
 }
 
 NS_IMETHODIMP
-NullHttpChannel::Open(nsIInputStream **_retval) {
-  return NS_ERROR_NOT_IMPLEMENTED;
-}
-
-NS_IMETHODIMP
-NullHttpChannel::Open2(nsIInputStream **aStream) {
+NullHttpChannel::Open(nsIInputStream **aStream) {
   nsCOMPtr<nsIStreamListener> listener;
   nsresult rv =
       nsContentSecurityManager::doContentSecurityCheck(this, listener);
   NS_ENSURE_SUCCESS(rv, rv);
-  return Open(aStream);
-}
 
-NS_IMETHODIMP
-NullHttpChannel::AsyncOpen(nsIStreamListener *aListener,
-                           nsISupports *aContext) {
   return NS_ERROR_NOT_IMPLEMENTED;
 }
 
 NS_IMETHODIMP
-NullHttpChannel::AsyncOpen2(nsIStreamListener *aListener) {
+NullHttpChannel::AsyncOpen(nsIStreamListener *aListener) {
   nsCOMPtr<nsIStreamListener> listener = aListener;
   nsresult rv =
       nsContentSecurityManager::doContentSecurityCheck(this, listener);
   NS_ENSURE_SUCCESS(rv, rv);
-  return AsyncOpen(listener, nullptr);
+  return NS_ERROR_NOT_IMPLEMENTED;
 }
 
 NS_IMETHODIMP
@@ -786,6 +810,13 @@ NullHttpChannel::SetIsMainDocumentChannel(bool aValue) {
 NS_IMETHODIMP
 NullHttpChannel::LogBlockedCORSRequest(const nsAString &aMessage,
                                        const nsACString &aCategory) {
+  return NS_ERROR_NOT_IMPLEMENTED;
+}
+
+NS_IMETHODIMP
+NullHttpChannel::LogMimeTypeMismatch(const nsACString &aMessageName,
+                                     bool aWarning, const nsAString &aURL,
+                                     const nsAString &aContentType) {
   return NS_ERROR_NOT_IMPLEMENTED;
 }
 

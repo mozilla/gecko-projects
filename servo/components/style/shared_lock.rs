@@ -1,13 +1,13 @@
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
- * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 //! Different objects protected by the same lock
 
-#[cfg(feature = "gecko")]
-use atomic_refcell::{AtomicRef, AtomicRefCell, AtomicRefMut};
 use crate::str::{CssString, CssStringWriter};
 use crate::stylesheets::Origin;
+#[cfg(feature = "gecko")]
+use atomic_refcell::{AtomicRef, AtomicRefCell, AtomicRefMut};
 #[cfg(feature = "servo")]
 use parking_lot::RwLock;
 use servo_arc::Arc;

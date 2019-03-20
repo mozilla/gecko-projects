@@ -18,7 +18,7 @@
 #include "gfxContext.h"
 #include "nsSVGClipPathFrame.h"
 #include "SVGObserverUtils.h"
-#include "nsSVGElement.h"
+#include "SVGElement.h"
 #include "nsSVGFilterPaintCallback.h"
 #include "nsSVGMaskFrame.h"
 #include "nsSVGPaintServerFrame.h"
@@ -184,8 +184,8 @@ nsPoint nsSVGIntegrationUtils::GetOffsetToBoundingBox(nsIFrame* aFrame) {
   return -nsLayoutUtils::GetAllInFlowRectsUnion(aFrame, aFrame).TopLeft();
 }
 
-/* static */ nsSize nsSVGIntegrationUtils::GetContinuationUnionSize(
-    nsIFrame* aNonSVGFrame) {
+/* static */
+nsSize nsSVGIntegrationUtils::GetContinuationUnionSize(nsIFrame* aNonSVGFrame) {
   NS_ASSERTION(!aNonSVGFrame->IsFrameOfType(nsIFrame::eSVG),
                "SVG frames should not get here");
   nsIFrame* firstFrame =
@@ -310,7 +310,6 @@ nsIntRegion nsSVGIntegrationUtils::AdjustInvalidAreaForSVGEffects(
     return nsIntRect();
   }
 
-  int32_t appUnitsPerDevPixel = aFrame->PresContext()->AppUnitsPerDevPixel();
   nsIFrame* firstFrame =
       nsLayoutUtils::FirstContinuationOrIBSplitSibling(aFrame);
 
@@ -321,17 +320,10 @@ nsIntRegion nsSVGIntegrationUtils::AdjustInvalidAreaForSVGEffects(
   if (!aFrame->StyleEffects()->HasFilters() ||
       SVGObserverUtils::GetFiltersIfObserving(firstFrame, nullptr) ==
           SVGObserverUtils::eHasRefsSomeInvalid) {
-    // The frame is either not there or not currently available,
-    // perhaps because we're in the middle of tearing stuff down.
-    // Be conservative, return our visual overflow rect relative
-    // to the reference frame.
-    // XXX we may get here purely due to an SVG mask, in which case there is
-    // no need to do this it causes over-invalidation. See:
-    // https://bugzilla.mozilla.org/show_bug.cgi?id=1494110
-    // Do we still even need this for filters? If so, why?
-    nsRect overflow = aFrame->GetVisualOverflowRect() + aToReferenceFrame;
-    return overflow.ToOutsidePixels(appUnitsPerDevPixel);
+    return aInvalidRegion;
   }
+
+  int32_t appUnitsPerDevPixel = aFrame->PresContext()->AppUnitsPerDevPixel();
 
   // Convert aInvalidRegion into bounding box frame space in app units:
   nsPoint toBoundingBox =
@@ -546,8 +538,9 @@ static MaskPaintResult CreateAndPaintMaskSurface(
                                                        SurfaceFormat::A8)) {
     return paintResult;
   }
-  RefPtr<DrawTarget> maskDT = ctx.GetDrawTarget()->CreateSimilarDrawTarget(
-      maskSurfaceRect.Size(), SurfaceFormat::A8);
+  RefPtr<DrawTarget> maskDT = ctx.GetDrawTarget()->CreateClippedDrawTarget(
+      maskSurfaceRect.Size(), Matrix::Translation(aParams.maskRect.TopLeft()),
+      SurfaceFormat::A8);
   if (!maskDT || !maskDT->IsValid()) {
     return paintResult;
   }
@@ -616,7 +609,7 @@ static bool ValidateSVGFrame(nsIFrame* aFrame) {
 #endif
 
     const nsIContent* content = aFrame->GetContent();
-    if (!static_cast<const nsSVGElement*>(content)->HasValidDimensions()) {
+    if (!static_cast<const SVGElement*>(content)->HasValidDimensions()) {
       // The SVG spec says not to draw _anything_
       return false;
     }
@@ -1094,12 +1087,10 @@ void nsSVGIntegrationUtils::PaintFilter(const PaintFramesParams& aParams) {
 }
 
 bool nsSVGIntegrationUtils::BuildWebRenderFilters(
-    nsIFrame* aFilteredFrame,
-    const mozilla::LayoutDeviceIntRect& aPreFilterBounds,
-    nsTArray<mozilla::wr::WrFilterOp>& aWrFilters,
-    mozilla::LayoutDeviceIntRect& aPostFilterBounds) {
-  return nsFilterInstance::BuildWebRenderFilters(
-      aFilteredFrame, aPreFilterBounds, aWrFilters, aPostFilterBounds);
+    nsIFrame* aFilteredFrame, WrFiltersHolder& aWrFilters,
+    Maybe<nsRect>& aPostFilterClip) {
+  return nsFilterInstance::BuildWebRenderFilters(aFilteredFrame, aWrFilters,
+                                                 aPostFilterClip);
 }
 
 class PaintFrameCallback : public gfxDrawingCallback {
@@ -1125,7 +1116,9 @@ bool PaintFrameCallback::operator()(gfxContext* aContext,
                                     const gfxRect& aFillRect,
                                     const SamplingFilter aSamplingFilter,
                                     const gfxMatrix& aTransform) {
-  if (mFrame->GetStateBits() & NS_FRAME_DRAWING_AS_PAINTSERVER) return false;
+  if (mFrame->GetStateBits() & NS_FRAME_DRAWING_AS_PAINTSERVER) {
+    return false;
+  }
 
   AutoSetRestorePaintServerState paintServer(mFrame);
 
@@ -1194,8 +1187,8 @@ bool PaintFrameCallback::operator()(gfxContext* aContext,
   return true;
 }
 
-/* static */ already_AddRefed<gfxDrawable>
-nsSVGIntegrationUtils::DrawableFromPaintServer(
+/* static */
+already_AddRefed<gfxDrawable> nsSVGIntegrationUtils::DrawableFromPaintServer(
     nsIFrame* aFrame, nsIFrame* aTarget, const nsSize& aPaintServerSize,
     const IntSize& aRenderSize, const DrawTarget* aDrawTarget,
     const gfxMatrix& aContextMatrix, uint32_t aFlags) {
@@ -1219,7 +1212,9 @@ nsSVGIntegrationUtils::DrawableFromPaintServer(
         aTarget, aDrawTarget, aContextMatrix, &nsStyleSVG::mFill, 1.0,
         imgParams, &overrideBounds);
 
-    if (!pattern) return nullptr;
+    if (!pattern) {
+      return nullptr;
+    }
 
     // pattern is now set up to fill aPaintServerSize. But we want it to
     // fill aRenderSize, so we need to add a scaling transform.

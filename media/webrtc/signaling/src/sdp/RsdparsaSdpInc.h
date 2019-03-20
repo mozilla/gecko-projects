@@ -52,8 +52,11 @@ enum class RustSdpMediaValue { kRustAudio, kRustVideo, kRustApplication };
 
 enum class RustSdpProtocolValue {
   kRustRtpSavpf,
+  kRustUdpTlsRtpSavp,
+  kRustTcpDtlsRtpSavp,
   kRustUdpTlsRtpSavpf,
   kRustTcpTlsRtpSavpf,
+  kRustTcpDtlsRtpSavpf,
   kRustDtlsSctp,
   kRustUdpDtlsSctp,
   kRustTcpDtlsSctp,

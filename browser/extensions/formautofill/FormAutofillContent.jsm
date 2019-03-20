@@ -2,7 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-/*
+/**
  * Form Autofill content process module.
  */
 
@@ -14,8 +14,8 @@ var EXPORTED_SYMBOLS = ["FormAutofillContent"];
 
 const Cm = Components.manager;
 
-ChromeUtils.import("resource://gre/modules/Services.jsm");
-ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
+const {Services} = ChromeUtils.import("resource://gre/modules/Services.jsm");
+const {XPCOMUtils} = ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
 
 ChromeUtils.defineModuleGetter(this, "AddressResult",
                                "resource://formautofill/ProfileAutoCompleteResult.jsm");
@@ -117,6 +117,7 @@ AutofillProfileAutoCompleteSearch.prototype = {
                           FormAutofill.isAutofillAddressesEnabled :
                           FormAutofill.isAutofillCreditCardsEnabled;
     let AutocompleteResult = isAddressField ? AddressResult : CreditCardResult;
+    let isFormAutofillSearch = true;
     let pendingSearchResult = null;
 
     ProfileAutocomplete.lastProfileAutoCompleteFocusedInput = activeInput;
@@ -128,6 +129,7 @@ AutofillProfileAutoCompleteSearch.prototype = {
     if (!searchPermitted || !savedFieldNames.has(activeFieldDetail.fieldName) ||
         (!isInputAutofilled && filledRecordGUID) || (isAddressField &&
         allFieldNames.filter(field => savedFieldNames.has(field)).length < FormAutofillUtils.AUTOFILL_FIELDS_THRESHOLD)) {
+      isFormAutofillSearch = false;
       if (activeInput.autocomplete == "off") {
         // Create a dummy result as an empty search result.
         pendingSearchResult = new AutocompleteResult("", "", [], [], {});
@@ -173,11 +175,19 @@ AutofillProfileAutoCompleteSearch.prototype = {
 
     Promise.resolve(pendingSearchResult).then((result) => {
       listener.onSearchResult(this, result);
-      ProfileAutocomplete.lastProfileAutoCompleteResult = result;
-      // Reset AutoCompleteController's state at the end of startSearch to ensure that
-      // none of form autofill result will be cached in other places and make the
-      // result out of sync.
-      autocompleteController.resetInternalState();
+      // Don't save cache results or reset state when returning non-autofill results such as the
+      // form history fallback above.
+      if (isFormAutofillSearch) {
+        ProfileAutocomplete.lastProfileAutoCompleteResult = result;
+        // Reset AutoCompleteController's state at the end of startSearch to ensure that
+        // none of form autofill result will be cached in other places and make the
+        // result out of sync.
+        autocompleteController.resetInternalState();
+      } else {
+        // Clear the cache so that we don't try to autofill from it after falling
+        // back to form history.
+        ProfileAutocomplete.lastProfileAutoCompleteResult = null;
+      }
     });
   },
 
@@ -237,6 +247,8 @@ let ProfileAutocomplete = {
     this._registered = true;
 
     Services.obs.addObserver(this, "autocomplete-will-enter-text");
+
+    this.debug("ensureRegistered. Finished with _registered:", this._registered);
   },
 
   ensureUnregistered() {
@@ -330,7 +342,6 @@ let ProfileAutocomplete = {
  * NOTE: Declares it by "var" to make it accessible in unit tests.
  */
 var FormAutofillContent = {
-  QueryInterface: ChromeUtils.generateQI([Ci.nsIFormSubmitObserver]),
   /**
    * @type {WeakMap} mapping FormLike root HTML elements to FormAutofillHandler objects.
    */
@@ -339,7 +350,9 @@ var FormAutofillContent = {
   /**
    * @type {Set} Set of the fields with usable values in any saved profile.
    */
-  savedFieldNames: null,
+  get savedFieldNames() {
+    return Services.cpmm.sharedData.get("FormAutofill:savedFieldNames");
+  },
 
   /**
    * @type {Object} The object where to store the active items, e.g. element,
@@ -349,12 +362,12 @@ var FormAutofillContent = {
 
   init() {
     FormAutofill.defineLazyLogGetter(this, "FormAutofillContent");
+    this.debug("init");
 
-    Services.cpmm.addMessageListener("FormAutofill:enabledStatus", this);
-    Services.cpmm.addMessageListener("FormAutofill:savedFieldNames", this);
-    Services.obs.addObserver(this, "earlyformsubmit");
+    // eslint-disable-next-line mozilla/balanced-listeners
+    Services.cpmm.sharedData.addEventListener("change", this);
 
-    let autofillEnabled = Services.cpmm.initialProcessData.autofillEnabled;
+    let autofillEnabled = Services.cpmm.sharedData.get("FormAutofill:enabled");
     // If storage hasn't be initialized yet autofillEnabled is undefined but we need to ensure
     // autocomplete is registered before the focusin so register it in this case as long as the
     // pref is true.
@@ -364,9 +377,6 @@ var FormAutofillContent = {
     if (autofillEnabled || shouldEnableAutofill) {
       ProfileAutocomplete.ensureRegistered();
     }
-
-    this.savedFieldNames =
-      Services.cpmm.initialProcessData.autofillSavedFieldNames;
   },
 
   /**
@@ -383,59 +393,54 @@ var FormAutofillContent = {
   },
 
   /**
-   * Handle earlyformsubmit event and early return when:
+   * Handle a form submission and early return when:
    * 1. In private browsing mode.
    * 2. Could not map any autofill handler by form element.
    * 3. Number of filled fields is less than autofill threshold
    *
-   * @param {HTMLElement} formElement Root element which receives earlyformsubmit event.
-   * @param {Object} domWin Content window
-   * @returns {boolean} Should always return true so form submission isn't canceled.
+   * @param {HTMLElement} formElement Root element which receives submit event.
+   * @param {Window} domWin Content window only passed for unit tests
    */
-  notify(formElement, domWin) {
-    try {
-      this.debug("Notifying form early submission");
+  formSubmitted(formElement, domWin = formElement.ownerGlobal) {
+    this.debug("Handling form submission");
 
-      if (!FormAutofill.isAutofillEnabled) {
-        this.debug("Form Autofill is disabled");
-        return true;
-      }
-
-      if (domWin && PrivateBrowsingUtils.isContentWindowPrivate(domWin)) {
-        this.debug("Ignoring submission in a private window");
-        return true;
-      }
-
-      let handler = this._formsDetails.get(formElement);
-      if (!handler) {
-        this.debug("Form element could not map to an existing handler");
-        return true;
-      }
-
-      let records = handler.createRecords();
-      if (!Object.values(records).some(typeRecords => typeRecords.length)) {
-        return true;
-      }
-
-      this._onFormSubmit(records, domWin, handler.timeStartedFillingMS);
-    } catch (ex) {
-      Cu.reportError(ex);
+    if (!FormAutofill.isAutofillEnabled) {
+      this.debug("Form Autofill is disabled");
+      return;
     }
-    return true;
+
+    // The `domWin` truthiness test is used by unit tests to bypass this check.
+    if (domWin && PrivateBrowsingUtils.isContentWindowPrivate(domWin)) {
+      this.debug("Ignoring submission in a private window");
+      return;
+    }
+
+    let handler = this._formsDetails.get(formElement);
+    if (!handler) {
+      this.debug("Form element could not map to an existing handler");
+      return;
+    }
+
+    let records = handler.createRecords();
+    if (!Object.values(records).some(typeRecords => typeRecords.length)) {
+      return;
+    }
+
+    this._onFormSubmit(records, domWin, handler.timeStartedFillingMS);
   },
 
-  receiveMessage({name, data}) {
-    switch (name) {
-      case "FormAutofill:enabledStatus": {
-        if (data) {
+  handleEvent(evt) {
+    switch (evt.type) {
+      case "change": {
+        if (!evt.changedKeys.includes("FormAutofill:enabled")) {
+          return;
+        }
+        if (Services.cpmm.sharedData.get("FormAutofill:enabled")) {
           ProfileAutocomplete.ensureRegistered();
         } else {
           ProfileAutocomplete.ensureUnregistered();
         }
         break;
-      }
-      case "FormAutofill:savedFieldNames": {
-        this.savedFieldNames = data;
       }
     }
   },

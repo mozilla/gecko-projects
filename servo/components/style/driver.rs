@@ -1,6 +1,6 @@
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
- * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 //! Implements traversal over the DOM tree. The traversal starts in sequential
 //! mode, and optionally parallelizes as it discovers work.
@@ -161,10 +161,11 @@ pub fn traverse_dom<E, D>(
         let parallel = maybe_tls.is_some();
         if let Some(ref mut tls) = maybe_tls {
             let slots = unsafe { tls.unsafe_get() };
-            aggregate = slots.iter().fold(aggregate, |acc, t| match *t.borrow() {
-                None => acc,
-                Some(ref cx) => &cx.statistics + &acc,
-            });
+            for slot in slots {
+                if let Some(ref cx) = *slot.borrow() {
+                    aggregate += cx.statistics.clone();
+                }
+            }
         }
 
         if report_stats {

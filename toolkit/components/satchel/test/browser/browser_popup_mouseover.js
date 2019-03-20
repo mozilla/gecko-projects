@@ -2,7 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-const {FormHistory} = ChromeUtils.import("resource://gre/modules/FormHistory.jsm", {});
+const {FormHistory} = ChromeUtils.import("resource://gre/modules/FormHistory.jsm");
 
 
 add_task(async function test() {
@@ -33,7 +33,7 @@ add_task(async function test() {
     });
     const listItemElems = itemsBox.querySelectorAll(".autocomplete-richlistitem");
     is(listItemElems.length, mockHistory.length, "ensure result length");
-    is(itemsBox.mousedOverIndex, -1, "mousedOverIndex should be -1");
+    is(autoCompletePopup.mousedOverIndex, -1, "mousedOverIndex should be -1");
 
     // navigate to the first item
     await BrowserTestUtils.synthesizeKey("VK_DOWN", {}, browser);
@@ -42,7 +42,7 @@ add_task(async function test() {
     // mouseover the second item
     EventUtils.synthesizeMouseAtCenter(listItemElems[1], {type: "mouseover"});
     await BrowserTestUtils.waitForCondition(() => {
-      return itemsBox.mousedOverIndex = 1;
+      return autoCompletePopup.mousedOverIndex = 1;
     });
     ok(true, "mousedOverIndex changed");
     is(autoCompletePopup.selectedIndex, 0, "selectedIndex should not be changed by mouseover");

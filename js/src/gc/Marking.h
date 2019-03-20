@@ -68,25 +68,43 @@ template <typename T>
 bool IsMarkedInternal(JSRuntime* rt, T** thing);
 
 template <typename T>
+bool IsMarkedBlackInternal(JSRuntime* rt, T* thing);
+template <typename T>
+bool IsMarkedBlackInternal(JSRuntime* rt, T** thing);
+
+template <typename T>
 bool IsAboutToBeFinalizedInternal(T* thingp);
 template <typename T>
 bool IsAboutToBeFinalizedInternal(T** thingp);
 
-// Report whether a thing has been marked.  Things which are in zones that are
-// not currently being collected or are owned by another runtime are always
-// reported as being marked.
+// Report whether a GC thing has been marked with any color. Things which are in
+// zones that are not currently being collected or are owned by another runtime
+// are always reported as being marked.
 template <typename T>
 inline bool IsMarkedUnbarriered(JSRuntime* rt, T* thingp) {
   return IsMarkedInternal(rt, ConvertToBase(thingp));
 }
 
-// Report whether a thing has been marked.  Things which are in zones that are
-// not currently being collected or are owned by another runtime are always
-// reported as being marked.
+// Report whether a GC thing has been marked with any color. Things which are in
+// zones that are not currently being collected or are owned by another runtime
+// are always reported as being marked.
 template <typename T>
 inline bool IsMarked(JSRuntime* rt, WriteBarrieredBase<T>* thingp) {
   return IsMarkedInternal(rt,
                           ConvertToBase(thingp->unsafeUnbarrieredForTracing()));
+}
+
+// Report whether a GC thing has been marked black.
+template <typename T>
+inline bool IsMarkedBlackUnbarriered(JSRuntime* rt, T* thingp) {
+  return IsMarkedBlackInternal(rt, ConvertToBase(thingp));
+}
+
+// Report whether a GC thing has been marked black.
+template <typename T>
+inline bool IsMarkedBlack(JSRuntime* rt, WriteBarrieredBase<T>* thingp) {
+  return IsMarkedBlackInternal(
+      rt, ConvertToBase(thingp->unsafeUnbarrieredForTracing()));
 }
 
 template <typename T>
@@ -116,49 +134,6 @@ inline Cell* ToMarkable(const Value& v) {
 }
 
 inline Cell* ToMarkable(Cell* cell) { return cell; }
-
-// Wrap a GC thing pointer into a new Value or jsid. The type system enforces
-// that the thing pointer is a wrappable type.
-template <typename S, typename T>
-struct RewrapTaggedPointer {};
-#define DECLARE_REWRAP(S, T, method, prefix)                 \
-  template <>                                                \
-  struct RewrapTaggedPointer<S, T> {                         \
-    static S wrap(T* thing) { return method(prefix thing); } \
-  }
-DECLARE_REWRAP(JS::Value, JSObject, JS::ObjectOrNullValue, );
-DECLARE_REWRAP(JS::Value, JSString, JS::StringValue, );
-DECLARE_REWRAP(JS::Value, JS::Symbol, JS::SymbolValue, );
-#ifdef ENABLE_BIGINT
-DECLARE_REWRAP(JS::Value, JS::BigInt, JS::BigIntValue, );
-#endif
-DECLARE_REWRAP(jsid, JSString, NON_INTEGER_ATOM_TO_JSID, (JSAtom*));
-DECLARE_REWRAP(jsid, JS::Symbol, SYMBOL_TO_JSID, );
-DECLARE_REWRAP(js::TaggedProto, JSObject, js::TaggedProto, );
-#undef DECLARE_REWRAP
-
-template <typename T>
-struct IsPrivateGCThingInValue
-    : public mozilla::EnableIf<mozilla::IsBaseOf<Cell, T>::value &&
-                                   !mozilla::IsBaseOf<JSObject, T>::value &&
-                                   !mozilla::IsBaseOf<JSString, T>::value &&
-                                   !mozilla::IsBaseOf<JS::Symbol, T>::value
-#ifdef ENABLE_BIGINT
-                                   && !mozilla::IsBaseOf<JS::BigInt, T>::value
-#endif
-                               ,
-                               T> {
-  static_assert(!mozilla::IsSame<Cell, T>::value &&
-                    !mozilla::IsSame<TenuredCell, T>::value,
-                "T must not be Cell or TenuredCell");
-};
-
-template <typename T>
-struct RewrapTaggedPointer<Value, T> {
-  static Value wrap(typename IsPrivateGCThingInValue<T>::Type* thing) {
-    return JS::PrivateGCThingValue(thing);
-  }
-};
 
 } /* namespace gc */
 

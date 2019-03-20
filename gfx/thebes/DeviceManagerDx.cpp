@@ -55,9 +55,11 @@ PFN_DCOMPOSITION_CREATE_DEVICE sDcompCreateDeviceFn = nullptr;
 // be used within InitializeDirectDrawConfig.
 decltype(DirectDrawCreateEx)* sDirectDrawCreateExFn = nullptr;
 
-/* static */ void DeviceManagerDx::Init() { sInstance = new DeviceManagerDx(); }
+/* static */
+void DeviceManagerDx::Init() { sInstance = new DeviceManagerDx(); }
 
-/* static */ void DeviceManagerDx::Shutdown() { sInstance = nullptr; }
+/* static */
+void DeviceManagerDx::Shutdown() { sInstance = nullptr; }
 
 DeviceManagerDx::DeviceManagerDx()
     : mDeviceLock("gfxWindowsPlatform.mDeviceLock"),
@@ -102,8 +104,7 @@ bool DeviceManagerDx::LoadD3D11() {
 }
 
 bool DeviceManagerDx::LoadDcomp() {
-  FeatureState& d3d11 = gfxConfig::GetFeature(Feature::D3D11_COMPOSITING);
-  MOZ_ASSERT(d3d11.IsEnabled());
+  MOZ_ASSERT(gfxConfig::GetFeature(Feature::D3D11_COMPOSITING).IsEnabled());
   MOZ_ASSERT(gfxVars::UseWebRender());
   MOZ_ASSERT(gfxVars::UseWebRenderANGLE());
   MOZ_ASSERT(gfxVars::UseWebRenderDCompWin());
@@ -137,11 +138,44 @@ void DeviceManagerDx::ReleaseD3D11() {
   sD3D11CreateDeviceFn = nullptr;
 }
 
+nsTArray<DXGI_OUTPUT_DESC1> DeviceManagerDx::EnumerateOutputs() {
+  RefPtr<IDXGIAdapter> adapter = GetDXGIAdapter();
+
+  if (!adapter) {
+    NS_WARNING("Failed to acquire a DXGI adapter for enumerating outputs.");
+    return nsTArray<DXGI_OUTPUT_DESC1>();
+  }
+
+  nsTArray<DXGI_OUTPUT_DESC1> outputs;
+  for (UINT i = 0;; ++i) {
+    RefPtr<IDXGIOutput> output = nullptr;
+    if (FAILED(adapter->EnumOutputs(i, getter_AddRefs(output)))) {
+      break;
+    }
+
+    RefPtr<IDXGIOutput6> output6 = nullptr;
+    if (FAILED(output->QueryInterface(__uuidof(IDXGIOutput6),
+                                      getter_AddRefs(output6)))) {
+      break;
+    }
+
+    DXGI_OUTPUT_DESC1 desc;
+    if (FAILED(output6->GetDesc1(&desc))) {
+      break;
+    }
+
+    outputs.AppendElement(desc);
+  }
+  return outputs;
+}
+
+#ifdef DEBUG
 static inline bool ProcessOwnsCompositor() {
   return XRE_GetProcessType() == GeckoProcessType_GPU ||
          XRE_GetProcessType() == GeckoProcessType_VR ||
          (XRE_IsParentProcess() && !gfxConfig::IsEnabled(Feature::GPU_PROCESS));
 }
+#endif
 
 bool DeviceManagerDx::CreateCompositorDevices() {
   MOZ_ASSERT(ProcessOwnsCompositor());
@@ -991,6 +1025,9 @@ RefPtr<ID3D11Device> DeviceManagerDx::GetCompositorDevice() {
 }
 
 RefPtr<ID3D11Device> DeviceManagerDx::GetContentDevice() {
+  MOZ_ASSERT(XRE_IsGPUProcess() ||
+             gfxPlatform::GetPlatform()->DevicesInitialized());
+
   MutexAutoLock lock(mDeviceLock);
   return mContentDevice;
 }
@@ -1209,7 +1246,8 @@ void DeviceManagerDx::GetCompositorDevices(
   *aOutAttachments = attachments;
 }
 
-/* static */ void DeviceManagerDx::PreloadAttachmentsOnCompositorThread() {
+/* static */
+void DeviceManagerDx::PreloadAttachmentsOnCompositorThread() {
   MessageLoop* loop = layers::CompositorThreadHolder::Loop();
   if (!loop) {
     return;

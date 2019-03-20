@@ -12,7 +12,7 @@
 #include <stdint.h>
 
 #ifdef DEBUG
-#include "nsString.h"
+#  include "nsString.h"
 
 class nsIFrame;
 #endif
@@ -67,6 +67,7 @@ namespace mozilla {
 #ifdef DEBUG
 nsCString GetFrameState(nsIFrame* aFrame);
 void PrintFrameState(nsIFrame* aFrame);
+void DebugVerifyFrameStateBits();
 #endif
 }  // namespace mozilla
 

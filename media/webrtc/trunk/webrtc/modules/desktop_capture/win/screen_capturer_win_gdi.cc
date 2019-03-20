@@ -38,22 +38,29 @@ const wchar_t kDwmapiLibraryName[] = L"dwmapi.dll";
 
 ScreenCapturerWinGdi::ScreenCapturerWinGdi(
     const DesktopCaptureOptions& options) {
-  // Load dwmapi.dll dynamically since it is not available on XP.
-  if (!dwmapi_library_)
-    dwmapi_library_ = LoadLibrary(kDwmapiLibraryName);
+  if (options.disable_effects()) {
+    // Load dwmapi.dll dynamically since it is not available on XP.
+    if (!dwmapi_library_)
+      dwmapi_library_ = LoadLibrary(kDwmapiLibraryName);
 
-  if (dwmapi_library_) {
-    composition_func_ = reinterpret_cast<DwmEnableCompositionFunc>(
-      GetProcAddress(dwmapi_library_, "DwmEnableComposition"));
-    composition_enabled_func_ = reinterpret_cast<DwmIsCompositionEnabledFunc>
-      (GetProcAddress(dwmapi_library_, "DwmIsCompositionEnabled"));
+    if (dwmapi_library_) {
+      composition_func_ = reinterpret_cast<DwmEnableCompositionFunc>(
+        GetProcAddress(dwmapi_library_, "DwmEnableComposition"));
+      composition_enabled_func_ = reinterpret_cast<DwmIsCompositionEnabledFunc>
+        (GetProcAddress(dwmapi_library_, "DwmIsCompositionEnabled"));
+    }
   }
-
-  disable_composition_ = options.disable_effects();
 }
 
 ScreenCapturerWinGdi::~ScreenCapturerWinGdi() {
-  Stop();
+  if (desktop_dc_)
+    ReleaseDC(NULL, desktop_dc_);
+  if (memory_dc_)
+    DeleteDC(memory_dc_);
+
+  // Restore Aero.
+  if (composition_func_)
+    (*composition_func_)(DWM_EC_ENABLECOMPOSITION);
 
   if (dwmapi_library_)
     FreeLibrary(dwmapi_library_);
@@ -113,28 +120,8 @@ void ScreenCapturerWinGdi::Start(Callback* callback) {
   // Vote to disable Aero composited desktop effects while capturing. Windows
   // will restore Aero automatically if the process exits. This has no effect
   // under Windows 8 or higher.  See crbug.com/124018.
-  if (disable_composition_) {
-    if (composition_func_)
-      (*composition_func_)(DWM_EC_DISABLECOMPOSITION);
-  }
-}
-
-void ScreenCapturerWinGdi::Stop() {
-  if (desktop_dc_) {
-    ReleaseDC(NULL, desktop_dc_);
-    desktop_dc_ = NULL;
-  }
-  if (memory_dc_) {
-    DeleteDC(memory_dc_);
-    memory_dc_ = NULL;
-  }
-
-  if (disable_composition_) {
-    // Restore Aero.
-    if (composition_func_)
-      (*composition_func_)(DWM_EC_ENABLECOMPOSITION);
-  }
-  callback_ = NULL;
+  if (composition_func_)
+    (*composition_func_)(DWM_EC_DISABLECOMPOSITION);
 }
 
 void ScreenCapturerWinGdi::PrepareCaptureResources() {

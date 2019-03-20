@@ -10,16 +10,15 @@ var EXPORTED_SYMBOLS = [
   "Changeset",
 ];
 
-ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
-ChromeUtils.import("resource://gre/modules/JSONFile.jsm");
-ChromeUtils.import("resource://gre/modules/Log.jsm");
-ChromeUtils.import("resource://services-common/async.js");
-ChromeUtils.import("resource://services-common/observers.js");
-ChromeUtils.import("resource://services-common/utils.js");
-ChromeUtils.import("resource://services-sync/constants.js");
-ChromeUtils.import("resource://services-sync/record.js");
-ChromeUtils.import("resource://services-sync/resource.js");
-ChromeUtils.import("resource://services-sync/util.js");
+const {XPCOMUtils} = ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
+const {JSONFile} = ChromeUtils.import("resource://gre/modules/JSONFile.jsm");
+const {Log} = ChromeUtils.import("resource://gre/modules/Log.jsm");
+const {Async} = ChromeUtils.import("resource://services-common/async.js");
+const {Observers} = ChromeUtils.import("resource://services-common/observers.js");
+const {DEFAULT_DOWNLOAD_BATCH_SIZE, DEFAULT_GUID_FETCH_BATCH_SIZE, ENGINE_BATCH_INTERRUPTED, ENGINE_DOWNLOAD_FAIL, ENGINE_UPLOAD_FAIL, VERSION_OUT_OF_DATE} = ChromeUtils.import("resource://services-sync/constants.js");
+const {Collection, CryptoWrapper} = ChromeUtils.import("resource://services-sync/record.js");
+const {Resource} = ChromeUtils.import("resource://services-sync/resource.js");
+const {SerializableSet, Svc, Utils} = ChromeUtils.import("resource://services-sync/util.js");
 
 XPCOMUtils.defineLazyModuleGetters(this, {
   fxAccounts: "resource://gre/modules/FxAccounts.jsm",
@@ -785,6 +784,8 @@ SyncEngine.prototype = {
   // Which sortindex to use when retrieving records for this engine.
   _defaultSort: undefined,
 
+  _hasSyncedThisSession: false,
+
   _metadataPostProcessor(json) {
     if (Array.isArray(json)) {
       // Pre-`JSONFile` storage stored an array, but `JSONFile` defaults to
@@ -975,6 +976,14 @@ SyncEngine.prototype = {
   async resetLastSync() {
     this._log.debug("Resetting " + this.name + " last sync time");
     await this.setLastSync(0);
+  },
+
+  get hasSyncedThisSession() {
+    return this._hasSyncedThisSession;
+  },
+
+  set hasSyncedThisSession(hasSynced) {
+    this._hasSyncedThisSession = hasSynced;
   },
 
   get toFetch() {
@@ -1680,7 +1689,7 @@ SyncEngine.prototype = {
       let failed = [];
       let successful = [];
       let lastSync = await this.getLastSync();
-      let handleResponse = async (resp, batchOngoing = false) => {
+      let handleResponse = async (postQueue, resp, batchOngoing) => {
         // Note: We don't want to update this.lastSync, or this._modified until
         // the batch is complete, however we want to remember success/failure
         // indicators for when that happens.
@@ -1698,7 +1707,6 @@ SyncEngine.prototype = {
           // Nothing to do yet
           return;
         }
-        let serverModifiedTime = parseFloat(resp.headers["x-weave-timestamp"]);
 
         if (failed.length && this._log.level <= Log.Level.Debug) {
           this._log.debug("Records that will be uploaded again because "
@@ -1712,11 +1720,11 @@ SyncEngine.prototype = {
           this._modified.delete(id);
         }
 
-        await this._onRecordsWritten(successful, failed, serverModifiedTime);
+        await this._onRecordsWritten(successful, failed, postQueue.lastModified);
 
         // Advance lastSync since we've finished the batch.
-        if (serverModifiedTime > lastSync) {
-          lastSync = serverModifiedTime;
+        if (postQueue.lastModified > lastSync) {
+          lastSync = postQueue.lastModified;
           await this.setLastSync(lastSync);
         }
 
@@ -1809,6 +1817,7 @@ SyncEngine.prototype = {
         }
       }
     }
+    this.hasSyncedThisSession = true;
     await this._tracker.asyncObserver.promiseObserversComplete();
   },
 
@@ -1986,6 +1995,7 @@ SyncEngine.prototype = {
 
   async _resetClient() {
     await this.resetLastSync();
+    this.hasSyncedThisSession = false;
     this.previousFailed = new SerializableSet();
     this.toFetch = new SerializableSet();
     this._needWeakUpload.clear();

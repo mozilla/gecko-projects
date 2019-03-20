@@ -38,21 +38,13 @@ using namespace js;
 
 using JS::AutoStableStringChars;
 
-Compartment::Compartment(Zone* zone)
+Compartment::Compartment(Zone* zone, bool invisibleToDebugger)
     : zone_(zone),
       runtime_(zone->runtimeFromAnyThread()),
+      invisibleToDebugger_(invisibleToDebugger),
       crossCompartmentWrappers(0) {}
 
 #ifdef JSGC_HASH_TABLE_CHECKS
-
-namespace {
-struct CheckGCThingAfterMovingGCFunctor {
-  template <class T>
-  void operator()(T* t) {
-    CheckGCThingAfterMovingGC(*t);
-  }
-};
-}  // namespace
 
 void Compartment::checkWrapperMapAfterMovingGC() {
   /*
@@ -61,8 +53,9 @@ void Compartment::checkWrapperMapAfterMovingGC() {
    * are discoverable.
    */
   for (WrapperMap::Enum e(crossCompartmentWrappers); !e.empty(); e.popFront()) {
-    e.front().mutableKey().applyToWrapped(CheckGCThingAfterMovingGCFunctor());
-    e.front().mutableKey().applyToDebugger(CheckGCThingAfterMovingGCFunctor());
+    auto checkGCThing = [](auto tp) { CheckGCThingAfterMovingGC(*tp); };
+    e.front().mutableKey().applyToWrapped(checkGCThing);
+    e.front().mutableKey().applyToDebugger(checkGCThing);
 
     WrapperMap::Ptr ptr = crossCompartmentWrappers.lookup(e.front().key());
     MOZ_RELEASE_ASSERT(ptr.found() && &*ptr == &e.front());
@@ -175,7 +168,6 @@ bool Compartment::wrap(JSContext* cx, MutableHandleString strp) {
   return true;
 }
 
-#ifdef ENABLE_BIGINT
 bool Compartment::wrap(JSContext* cx, MutableHandleBigInt bi) {
   MOZ_ASSERT(cx->compartment() == this);
 
@@ -190,7 +182,6 @@ bool Compartment::wrap(JSContext* cx, MutableHandleBigInt bi) {
   bi.set(copy);
   return true;
 }
-#endif
 
 bool Compartment::getNonWrapperObjectForCurrentCompartment(
     JSContext* cx, MutableHandleObject obj) {
@@ -221,6 +212,18 @@ bool Compartment::getNonWrapperObjectForCurrentCompartment(
   obj.set(UncheckedUnwrap(obj, /* stopAtWindowProxy = */ true));
   if (obj->compartment() == this) {
     MOZ_ASSERT(!IsWindow(obj));
+    return true;
+  }
+
+  // Disallow creating new wrappers if we nuked the object's realm or the
+  // current compartment.
+  if (!AllowNewWrapper(this, obj)) {
+    JSObject* res = NewDeadProxyObject(cx, IsCallableFlag(obj->isCallable()),
+                                       IsConstructorFlag(obj->isConstructor()));
+    if (!res) {
+      return false;
+    }
+    obj.set(res);
     return true;
   }
 
@@ -298,7 +301,7 @@ bool Compartment::wrap(JSContext* cx, MutableHandleObject obj) {
 
   // Anything we're wrapping has already escaped into script, so must have
   // been unmarked-gray at some point in the past.
-  MOZ_ASSERT(JS::ObjectIsNotGray(obj));
+  JS::AssertObjectIsNotGray(obj);
 
   // The passed object may already be wrapped, or may fit a number of special
   // cases that we need to check for and manually correct.
@@ -402,8 +405,8 @@ void Compartment::traceOutgoingCrossCompartmentWrappers(JSTracer* trc) {
   }
 }
 
-/* static */ void Compartment::traceIncomingCrossCompartmentEdgesForZoneGC(
-    JSTracer* trc) {
+/* static */
+void Compartment::traceIncomingCrossCompartmentEdgesForZoneGC(JSTracer* trc) {
   gcstats::AutoPhase ap(trc->runtime()->gc.stats(),
                         gcstats::PhaseKind::MARK_CCWS);
   MOZ_ASSERT(JS::RuntimeHeapIsMajorCollecting());
@@ -432,36 +435,20 @@ void Compartment::sweepCrossCompartmentWrappers() {
   crossCompartmentWrappers.sweep();
 }
 
-namespace {
-struct TraceRootFunctor {
-  JSTracer* trc;
-  const char* name;
-  TraceRootFunctor(JSTracer* trc, const char* name) : trc(trc), name(name) {}
-  template <class T>
-  void operator()(T* t) {
-    return TraceRoot(trc, t, name);
-  }
-};
-struct NeedsSweepUnbarrieredFunctor {
-  template <class T>
-  bool operator()(T* t) const {
-    return IsAboutToBeFinalizedUnbarriered(t);
-  }
-};
-}  // namespace
-
 void CrossCompartmentKey::trace(JSTracer* trc) {
-  applyToWrapped(TraceRootFunctor(trc, "CrossCompartmentKey::wrapped"));
-  applyToDebugger(TraceRootFunctor(trc, "CrossCompartmentKey::debugger"));
+  applyToWrapped(
+      [trc](auto tp) { TraceRoot(trc, tp, "CrossCompartmentKey::wrapped"); });
+  applyToDebugger(
+      [trc](auto tp) { TraceRoot(trc, tp, "CrossCompartmentKey::debugger"); });
 }
 
 bool CrossCompartmentKey::needsSweep() {
-  return applyToWrapped(NeedsSweepUnbarrieredFunctor()) ||
-         applyToDebugger(NeedsSweepUnbarrieredFunctor());
+  auto needsSweep = [](auto tp) { return IsAboutToBeFinalizedUnbarriered(tp); };
+  return applyToWrapped(needsSweep) || applyToDebugger(needsSweep);
 }
 
-/* static */ void Compartment::fixupCrossCompartmentWrappersAfterMovingGC(
-    JSTracer* trc) {
+/* static */
+void Compartment::fixupCrossCompartmentWrappersAfterMovingGC(JSTracer* trc) {
   MOZ_ASSERT(trc->runtime()->gc.isHeapCompacting());
 
   for (CompartmentsIter comp(trc->runtime()); !comp.done(); comp.next()) {
@@ -497,4 +484,30 @@ void Compartment::addSizeOfIncludingThis(mozilla::MallocSizeOf mallocSizeOf,
   if (auto callback = runtime_->sizeOfIncludingThisCompartmentCallback) {
     *compartmentsPrivateData += callback(mallocSizeOf, this);
   }
+}
+
+GlobalObject& Compartment::firstGlobal() const {
+  for (Realm* realm : realms_) {
+    if (!realm->hasLiveGlobal()) {
+      continue;
+    }
+    GlobalObject* global = realm->maybeGlobal();
+    ExposeObjectToActiveJS(global);
+    return *global;
+  }
+  MOZ_CRASH("If all our globals are dead, why is someone expecting a global?");
+}
+
+JS_FRIEND_API JSObject* js::GetFirstGlobalInCompartment(JS::Compartment* comp) {
+  return &comp->firstGlobal();
+}
+
+JS_FRIEND_API bool js::CompartmentHasLiveGlobal(JS::Compartment* comp) {
+  MOZ_ASSERT(comp);
+  for (Realm* r : comp->realms()) {
+    if (r->hasLiveGlobal()) {
+      return true;
+    }
+  }
+  return false;
 }

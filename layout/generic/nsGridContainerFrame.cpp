@@ -103,7 +103,8 @@ static nscoord ClampToCSSMaxBSize(nscoord aSize,
   return aSize;
 }
 
-static bool IsPercentOfIndefiniteSize(const nsStyleCoord& aCoord,
+template <typename Size>
+static bool IsPercentOfIndefiniteSize(const Size& aCoord,
                                       nscoord aPercentBasis) {
   return aPercentBasis == NS_UNCONSTRAINEDSIZE && aCoord.HasPercent();
 }
@@ -592,10 +593,10 @@ struct nsGridContainerFrame::GridItemInfo {
     // FIXME: Bug 567039: moz-fit-content and -moz-available are not supported
     // for block size dimension on sizing properties (e.g. height), so we
     // treat it as `auto`.
-    bool isAuto = size.GetUnit() == eStyleUnit_Auto ||
+    bool isAuto = size.IsAuto() ||
                   (isInlineAxis ==
                        aContainerWM.IsOrthogonalTo(mFrame->GetWritingMode()) &&
-                   size.GetUnit() == eStyleUnit_Enumerated);
+                   size.IsExtremumLength());
     // NOTE: if we have a definite size then our automatic minimum size
     // can't affect our size.  Excluding these simplifies applying
     // the clamping in the right cases later.
@@ -608,12 +609,12 @@ struct nsGridContainerFrame::GridItemInfo {
     // FIXME: Bug 567039: moz-fit-content and -moz-available are not supported
     // for block size dimension on sizing properties (e.g. height), so we
     // treat it as `auto`.
-    isAuto = minSize.GetUnit() == eStyleUnit_Auto ||
+    isAuto = minSize.IsAuto() ||
              (isInlineAxis ==
                   aContainerWM.IsOrthogonalTo(mFrame->GetWritingMode()) &&
-              minSize.GetUnit() == eStyleUnit_Enumerated);
+              minSize.IsExtremumLength());
     return isAuto &&
-           mFrame->StyleDisplay()->mOverflowX == NS_STYLE_OVERFLOW_VISIBLE;
+           mFrame->StyleDisplay()->mOverflowX == StyleOverflow::Visible;
   }
 
 #ifdef DEBUG
@@ -2322,7 +2323,7 @@ void nsGridContainerFrame::GridReflowInput::CalculateTrackSizes(
  */
 static uint32_t GetDisplayFlagsForGridItem(nsIFrame* aFrame) {
   const nsStylePosition* pos = aFrame->StylePosition();
-  if (pos->mZIndex.GetUnit() == eStyleUnit_Integer) {
+  if (pos->mZIndex.IsInteger()) {
     return nsIFrame::DISPLAY_CHILD_FORCE_STACKING_CONTEXT;
   }
   return nsIFrame::DISPLAY_CHILD_FORCE_PSEUDO_STACKING_CONTEXT;
@@ -2484,14 +2485,15 @@ static uint16_t GetAlignJustifyFallbackIfAny(uint16_t aAlignment,
 // =======================
 
 NS_QUERYFRAME_HEAD(nsGridContainerFrame)
-NS_QUERYFRAME_ENTRY(nsGridContainerFrame)
+  NS_QUERYFRAME_ENTRY(nsGridContainerFrame)
 NS_QUERYFRAME_TAIL_INHERITING(nsContainerFrame)
 
 NS_IMPL_FRAMEARENA_HELPERS(nsGridContainerFrame)
 
 nsContainerFrame* NS_NewGridContainerFrame(nsIPresShell* aPresShell,
                                            ComputedStyle* aStyle) {
-  return new (aPresShell) nsGridContainerFrame(aStyle);
+  return new (aPresShell)
+      nsGridContainerFrame(aStyle, aPresShell->GetPresContext());
 }
 
 //----------------------------------------------------------------------
@@ -3437,7 +3439,7 @@ static nscoord ContentContribution(
     // The next two variables are MinSizeClamp values in the child's axes.
     nscoord iMinSizeClamp = NS_MAXSIZE;
     nscoord bMinSizeClamp = NS_MAXSIZE;
-    LogicalSize cbSize(childWM, 0, 0);
+    LogicalSize cbSize(childWM, 0, NS_UNCONSTRAINEDSIZE);
     if (aState.mCols.mCanResolveLineRangeSize) {
       nscoord sz = aState.mCols.ResolveSize(aGridItem.mArea.mCols);
       if (isOrthogonal) {
@@ -3547,7 +3549,7 @@ static nscoord MinSize(const GridItemInfo& aGridItem,
   nsIFrame* child = aGridItem.mFrame;
   PhysicalAxis axis(aCBWM.PhysicalAxis(aAxis));
   const nsStylePosition* stylePos = child->StylePosition();
-  nsStyleCoord sizeStyle =
+  StyleSize sizeStyle =
       axis == eAxisHorizontal ? stylePos->mWidth : stylePos->mHeight;
 
   auto ourInlineAxis = child->GetWritingMode().PhysicalAxis(eLogicalAxisInline);
@@ -3555,11 +3557,11 @@ static nscoord MinSize(const GridItemInfo& aGridItem,
   // FIXME: Bug 567039: moz-fit-content and -moz-available are not supported
   // for block size dimension on sizing properties (e.g. height), so we
   // treat it as `auto`.
-  if (axis != ourInlineAxis && sizeStyle.GetUnit() == eStyleUnit_Enumerated) {
-    sizeStyle.SetAutoValue();
+  if (axis != ourInlineAxis && sizeStyle.IsExtremumLength()) {
+    sizeStyle = StyleSize::Auto();
   }
 
-  if (sizeStyle.GetUnit() != eStyleUnit_Auto && !sizeStyle.HasPercent()) {
+  if (!sizeStyle.IsAuto() && !sizeStyle.HasPercent()) {
     nscoord s =
         MinContentContribution(aGridItem, aState, aRC, aCBWM, aAxis, aCache);
     aCache->mMinSize.emplace(s);
@@ -3586,20 +3588,19 @@ static nscoord MinSize(const GridItemInfo& aGridItem,
                nsLayoutUtils::MinSizeContributionForAxis(
                    axis, aRC, child, nsLayoutUtils::MIN_ISIZE,
                    *aCache->mPercentageBasis);
-  const nsStyleCoord& style =
+  const StyleSize& style =
       axis == eAxisHorizontal ? stylePos->mMinWidth : stylePos->mMinHeight;
   // max-content and min-content should behave as initial value in block axis.
   // FIXME: Bug 567039: moz-fit-content and -moz-available are not supported
   // for block size dimension on sizing properties (e.g. height), so we
   // treat it as `auto`.
-  auto unit = axis != ourInlineAxis && style.GetUnit() == eStyleUnit_Enumerated
-                  ? eStyleUnit_Auto
-                  : style.GetUnit();
-  if (unit == eStyleUnit_Enumerated ||
-      (unit == eStyleUnit_Auto &&
-       child->StyleDisplay()->mOverflowX == NS_STYLE_OVERFLOW_VISIBLE)) {
+  const bool inInlineAxis = axis == ourInlineAxis;
+  const bool isAuto =
+      style.IsAuto() || (!inInlineAxis && style.IsExtremumLength());
+  if ((inInlineAxis && style.IsExtremumLength()) ||
+      (isAuto && child->StyleDisplay()->mOverflowX == StyleOverflow::Visible)) {
     // Now calculate the "content size" part and return whichever is smaller.
-    MOZ_ASSERT(unit != eStyleUnit_Enumerated || sz == NS_UNCONSTRAINEDSIZE);
+    MOZ_ASSERT(isAuto || sz == NS_UNCONSTRAINEDSIZE);
     sz = std::min(
         sz, ContentContribution(aGridItem, aState, aRC, aCBWM, aAxis,
                                 aCache->mPercentageBasis,
@@ -4866,7 +4867,8 @@ void nsGridContainerFrame::ReflowInFlowChild(
   if (isConstrainedBSize && !wm.IsOrthogonalTo(childWM)) {
     bool stretch = false;
     if (!childRI.mStyleMargin->HasBlockAxisAuto(childWM) &&
-        childRI.mStylePosition->BSize(childWM).IsAutoOrEnum()) {
+        (childRI.mStylePosition->BSize(childWM).IsAuto() ||
+         childRI.mStylePosition->BSize(childWM).IsExtremumLength())) {
       auto blockAxisAlignment = childRI.mStylePosition->UsedAlignSelf(Style());
       if (blockAxisAlignment == NS_STYLE_ALIGN_NORMAL ||
           blockAxisAlignment == NS_STYLE_ALIGN_STRETCH) {
@@ -6156,9 +6158,9 @@ nscoord nsGridContainerFrame::IntrinsicISize(gfxContext* aRenderingContext,
   GridReflowInput state(this, *aRenderingContext);
   InitImplicitNamedAreas(state.mGridStyle);  // XXX optimize
 
-  auto GetDefiniteSizes = [](const nsStyleCoord& aMinCoord,
-                             const nsStyleCoord& aSizeCoord,
-                             const nsStyleCoord& aMaxCoord, nscoord* aMin,
+  auto GetDefiniteSizes = [](const StyleSize& aMinCoord,
+                             const StyleSize& aSizeCoord,
+                             const StyleMaxSize& aMaxCoord, nscoord* aMin,
                              nscoord* aSize, nscoord* aMax) {
     if (aMinCoord.ConvertsToLength()) {
       *aMin = aMinCoord.ToLength();
@@ -6300,12 +6302,12 @@ void nsGridContainerFrame::InsertFrames(ChildListID aListID,
 void nsGridContainerFrame::RemoveFrame(ChildListID aListID,
                                        nsIFrame* aOldFrame) {
 #ifdef DEBUG
-  ChildListIDs supportedLists =
-      kAbsoluteList | kFixedList | kPrincipalList | kNoReflowPrincipalList;
+  ChildListIDs supportedLists = {kAbsoluteList, kFixedList, kPrincipalList,
+                                 kNoReflowPrincipalList};
   // We don't handle the kBackdropList frames in any way, but it only contains
   // a placeholder for ::backdrop which is OK to not reflow (for now anyway).
-  supportedLists |= kBackdropList;
-  MOZ_ASSERT(supportedLists.Contains(aListID), "unexpected child list");
+  supportedLists += kBackdropList;
+  MOZ_ASSERT(supportedLists.contains(aListID), "unexpected child list");
 
   // Note that kPrincipalList doesn't mean aOldFrame must be on that list.
   // It can also be on kOverflowList, in which case it might be a pushed
@@ -6504,12 +6506,12 @@ nsresult nsGridContainerFrame::GetFrameName(nsAString& aResult) const {
 void nsGridContainerFrame::NoteNewChildren(ChildListID aListID,
                                            const nsFrameList& aFrameList) {
 #ifdef DEBUG
-  ChildListIDs supportedLists =
-      kAbsoluteList | kFixedList | kPrincipalList | kNoReflowPrincipalList;
+  ChildListIDs supportedLists = {kAbsoluteList, kFixedList, kPrincipalList,
+                                 kNoReflowPrincipalList};
   // We don't handle the kBackdropList frames in any way, but it only contains
   // a placeholder for ::backdrop which is OK to not reflow (for now anyway).
-  supportedLists |= kBackdropList;
-  MOZ_ASSERT(supportedLists.Contains(aListID), "unexpected child list");
+  supportedLists += kBackdropList;
+  MOZ_ASSERT(supportedLists.contains(aListID), "unexpected child list");
 #endif
 
   nsIPresShell* shell = PresShell();
@@ -6619,29 +6621,29 @@ nsGridContainerFrame::FindLastItemInGridOrder(
 #ifdef DEBUG
 void nsGridContainerFrame::SetInitialChildList(ChildListID aListID,
                                                nsFrameList& aChildList) {
-#ifdef DEBUG
-  ChildListIDs supportedLists = kAbsoluteList | kFixedList | kPrincipalList;
+#  ifdef DEBUG
+  ChildListIDs supportedLists = {kAbsoluteList, kFixedList, kPrincipalList};
   // We don't handle the kBackdropList frames in any way, but it only contains
   // a placeholder for ::backdrop which is OK to not reflow (for now anyway).
-  supportedLists |= kBackdropList;
-  MOZ_ASSERT(supportedLists.Contains(aListID), "unexpected child list");
-#endif
+  supportedLists += kBackdropList;
+  MOZ_ASSERT(supportedLists.contains(aListID), "unexpected child list");
+#  endif
 
   return nsContainerFrame::SetInitialChildList(aListID, aChildList);
 }
 
 void nsGridContainerFrame::SanityCheckGridItemsBeforeReflow() const {
-  ChildListIDs absLists = kAbsoluteList | kFixedList | kOverflowContainersList |
-                          kExcessOverflowContainersList;
-  ChildListIDs itemLists = kPrincipalList | kOverflowList;
+  ChildListIDs absLists = {kAbsoluteList, kFixedList, kOverflowContainersList,
+                           kExcessOverflowContainersList};
+  ChildListIDs itemLists = {kPrincipalList, kOverflowList};
   for (const nsIFrame* f = this; f; f = f->GetNextInFlow()) {
     MOZ_ASSERT(!f->HasAnyStateBits(NS_STATE_GRID_DID_PUSH_ITEMS),
                "At start of reflow, we should've pulled items back from all "
                "NIFs and cleared NS_STATE_GRID_DID_PUSH_ITEMS in the process");
     for (nsIFrame::ChildListIterator childLists(f); !childLists.IsDone();
          childLists.Next()) {
-      if (!itemLists.Contains(childLists.CurrentID())) {
-        MOZ_ASSERT(absLists.Contains(childLists.CurrentID()) ||
+      if (!itemLists.contains(childLists.CurrentID())) {
+        MOZ_ASSERT(absLists.contains(childLists.CurrentID()) ||
                        childLists.CurrentID() == kBackdropList,
                    "unexpected non-empty child list");
         continue;

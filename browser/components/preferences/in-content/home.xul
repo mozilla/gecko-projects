@@ -6,12 +6,12 @@
 
 <script type="application/javascript"
         src="chrome://browser/content/preferences/in-content/home.js"/>
-
+<box id="template-paneHome" hidden="true"><![CDATA[
 <hbox id="firefoxHomeCategory"
       class="subcategory"
       hidden="true"
       data-category="paneHome">
-  <label class="header-name" data-l10n-id="pane-home-title" flex="1"/>
+  <html:h1 style="-moz-box-flex: 1;" data-l10n-id="pane-home-title"/>
   <button id="restoreDefaultHomePageBtn"
           class="homepage-button check-home-page-controlled"
           data-preference-related="browser.startup.homepage"
@@ -98,3 +98,4 @@
             data-l10n-id="disable-extension" />
   </hbox>
 </groupbox>
+]]></box>

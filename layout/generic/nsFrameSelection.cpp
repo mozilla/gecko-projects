@@ -29,7 +29,6 @@
 #include "nsTableCellFrame.h"
 #include "nsIScrollableFrame.h"
 #include "nsCCUncollectableMarker.h"
-#include "nsIContentIterator.h"
 #include "nsIDocumentEncoder.h"
 #include "nsTextFragment.h"
 #include <algorithm>
@@ -44,7 +43,6 @@
 static NS_DEFINE_CID(kFrameTraversalCID, NS_FRAMETRAVERSAL_CID);
 #include "nsTextFrame.h"
 
-#include "nsContentUtils.h"
 #include "nsThreadUtils.h"
 #include "mozilla/Preferences.h"
 
@@ -57,7 +55,7 @@ static NS_DEFINE_CID(kFrameTraversalCID, NS_FRAMETRAVERSAL_CID);
 
 #include "nsITimer.h"
 // notifications
-#include "nsIDocument.h"
+#include "mozilla/dom/Document.h"
 
 #include "nsISelectionController.h"  //for the enums
 #include "nsCopySupport.h"
@@ -94,9 +92,9 @@ static nsINode* GetCellParent(nsINode* aDomNode);
 
 #ifdef PRINT_RANGE
 static void printRange(nsRange* aDomRange);
-#define DEBUG_OUT_RANGE(x) printRange(x)
+#  define DEBUG_OUT_RANGE(x) printRange(x)
 #else
-#define DEBUG_OUT_RANGE(x)
+#  define DEBUG_OUT_RANGE(x)
 #endif  // PRINT_RANGE
 
 /******************************************************************************
@@ -113,13 +111,14 @@ nsPeekOffsetStruct::nsPeekOffsetStruct(
     nsPoint aDesiredPos, bool aJumpLines, bool aScrollViewStop,
     bool aIsKeyboardSelect, bool aVisual, bool aExtend,
     ForceEditableRegion aForceEditableRegion,
-    EWordMovementType aWordMovementType)
+    EWordMovementType aWordMovementType, bool aTrimSpaces)
     : mAmount(aAmount),
       mDirection(aDirection),
       mStartOffset(aStartOffset),
       mDesiredPos(aDesiredPos),
       mWordMovementType(aWordMovementType),
       mJumpLines(aJumpLines),
+      mTrimSpaces(aTrimSpaces),
       mScrollViewStop(aScrollViewStop),
       mIsKeyboardSelect(aIsKeyboardSelect),
       mVisual(aVisual),
@@ -603,7 +602,7 @@ void nsFrameSelection::Init(nsIPresShell* aShell, nsIContent* aLimiter,
                               ? sSelectionEventsOnTextControlsEnabled
                               : sSelectionEventsEnabled;
 
-  nsIDocument* doc = aShell->GetDocument();
+  Document* doc = aShell->GetDocument();
   if (initSelectEvents ||
       (doc && nsContentUtils::IsSystemPrincipal(doc->NodePrincipal()))) {
     int8_t index = GetIndexFromSelectionType(SelectionType::eNormal);
@@ -637,9 +636,8 @@ nsresult nsFrameSelection::MoveCaret(nsDirection aDirection,
   nsPresContext* context = mShell->GetPresContext();
   if (!context) return NS_ERROR_FAILURE;
 
-  nsPoint desiredPos(
-      0,
-      0);  // we must keep this around and revalidate it when its just UP/DOWN
+  // we must keep this around and revalidate it when its just UP/DOWN
+  nsPoint desiredPos(0, 0);
 
   int8_t index = GetIndexFromSelectionType(SelectionType::eNormal);
   RefPtr<Selection> sel = mDomSelections[index];
@@ -812,7 +810,9 @@ nsresult nsFrameSelection::MoveCaret(nsDirection aDirection,
           }
       }
     }
-    result = TakeFocus(pos.mResultContent, pos.mContentOffset,
+    // "pos" is on the stack, so pos.mResultContent has stack lifetime, so using
+    // MOZ_KnownLive is ok.
+    result = TakeFocus(MOZ_KnownLive(pos.mResultContent), pos.mContentOffset,
                        pos.mContentOffset, tHint, aContinueSelection, false);
   } else if (aAmount <= eSelectWordNoSpace && aDirection == eDirNext &&
              !aContinueSelection) {
@@ -965,16 +965,17 @@ nsresult nsFrameSelection::MaintainSelection(nsSelectionAmount aAmount) {
   return NS_OK;
 }
 
-/** After moving the caret, its Bidi level is set according to the following
+/**
+ * After moving the caret, its Bidi level is set according to the following
  * rules:
  *
- *  After moving over a character with left/right arrow, set to the Bidi level
+ * After moving over a character with left/right arrow, set to the Bidi level
  * of the last moved over character. After Home and End, set to the paragraph
  * embedding level. After up/down arrow, PageUp/Down, set to the lower level of
  * the 2 surrounding characters. After mouse click, set to the level of the
  * current frame.
  *
- *  The following two methods use GetPrevNextBidiLevels to determine the new
+ * The following two methods use GetPrevNextBidiLevels to determine the new
  * Bidi level. BidiLevelFromMove is called when the caret is moved in response
  * to a keyboard event
  *
@@ -1245,8 +1246,8 @@ nsresult nsFrameSelection::TakeFocus(nsIContent* aNewFocus,
       mBatching = batching;
       mChangesDuringBatching = changes;
     } else {
-      bool oldDesiredPosSet =
-          mDesiredPosSet;  // need to keep old desired position if it was set.
+      bool oldDesiredPosSet = mDesiredPosSet;  // need to keep old desired
+                                               // position if it was set.
       mDomSelections[index]->Collapse(aNewFocus, aContentOffset);
       mDesiredPosSet = oldDesiredPosSet;  // now reset desired pos back.
       mBatching = batching;
@@ -1614,7 +1615,7 @@ nsIFrame* nsFrameSelection::GetFrameToPageSelect() const {
         continue;
       }
       ScrollStyles scrollStyles = scrollableFrame->GetScrollStyles();
-      if (scrollStyles.mVertical == NS_STYLE_OVERFLOW_HIDDEN) {
+      if (scrollStyles.mVertical == StyleOverflow::Hidden) {
         continue;
       }
       uint32_t directions = scrollableFrame->GetPerceivedScrollingDirections();
@@ -1861,7 +1862,7 @@ nsresult nsFrameSelection::SelectAll() {
     rootContent = mAncestorLimiter;
   } else {
     NS_ENSURE_STATE(mShell);
-    nsIDocument* doc = mShell->GetDocument();
+    Document* doc = mShell->GetDocument();
     if (!doc) return NS_ERROR_FAILURE;
     rootContent = doc->GetRootElement();
     if (!rootContent) return NS_ERROR_FAILURE;
@@ -2649,7 +2650,8 @@ void nsFrameSelection::SetAncestorLimiter(nsIContent* aLimiter) {
       ClearNormalSelection();
       if (mAncestorLimiter) {
         PostReason(nsISelectionListener::NO_REASON);
-        TakeFocus(mAncestorLimiter, 0, 0, CARET_ASSOCIATE_BEFORE, false, false);
+        nsCOMPtr<nsIContent> limiter(mAncestorLimiter);
+        TakeFocus(limiter, 0, 0, CARET_ASSOCIATE_BEFORE, false, false);
       }
     }
   }
@@ -2736,7 +2738,7 @@ nsresult nsFrameSelection::UpdateSelectionCacheOnRepaintSelection(
   if (!ps) {
     return NS_OK;
   }
-  nsCOMPtr<nsIDocument> aDoc = ps->GetDocument();
+  nsCOMPtr<Document> aDoc = ps->GetDocument();
 
   if (aDoc && aSel && !aSel->IsCollapsed()) {
     return nsCopySupport::HTMLCopy(aSel, aDoc, nsIClipboard::kSelectionCache,
@@ -2783,7 +2785,7 @@ int16_t AutoCopyListener::sClipboardID = -1;
  */
 
 // static
-void AutoCopyListener::OnSelectionChange(nsIDocument* aDocument,
+void AutoCopyListener::OnSelectionChange(Document* aDocument,
                                          Selection& aSelection,
                                          int16_t aReason) {
   MOZ_ASSERT(IsValidClipboardID(sClipboardID));

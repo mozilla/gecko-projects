@@ -16,6 +16,7 @@
 #include "mozilla/dom/Element.h"
 #include "mozilla/dom/HTMLSlotElement.h"
 #include "mozilla/EventDispatcher.h"
+#include "mozilla/IdentifierMapEntry.h"
 #include "mozilla/ServoStyleRuleMap.h"
 #include "mozilla/StyleSheet.h"
 #include "mozilla/StyleSheetInlines.h"
@@ -179,7 +180,7 @@ void ShadowRoot::Unattach() {
 
 void ShadowRoot::InvalidateStyleAndLayoutOnSubtree(Element* aElement) {
   MOZ_ASSERT(aElement);
-  nsIDocument* doc = GetComposedDoc();
+  Document* doc = GetComposedDoc();
   if (!doc) {
     return;
   }
@@ -343,7 +344,7 @@ void ShadowRoot::RuleChanged(StyleSheet& aSheet, css::Rule*) {
 }
 
 void ShadowRoot::ApplicableRulesChanged() {
-  nsIDocument* doc = GetComposedDoc();
+  Document* doc = GetComposedDoc();
   if (!doc) {
     return;
   }
@@ -430,14 +431,14 @@ void ShadowRoot::RemoveSheet(StyleSheet* aSheet) {
 }
 
 void ShadowRoot::AddToIdTable(Element* aElement, nsAtom* aId) {
-  nsIdentifierMapEntry* entry = mIdentifierMap.PutEntry(aId);
+  IdentifierMapEntry* entry = mIdentifierMap.PutEntry(aId);
   if (entry) {
     entry->AddIdElement(aElement);
   }
 }
 
 void ShadowRoot::RemoveFromIdTable(Element* aElement, nsAtom* aId) {
-  nsIdentifierMapEntry* entry = mIdentifierMap.GetEntry(aId);
+  IdentifierMapEntry* entry = mIdentifierMap.GetEntry(aId);
   if (entry) {
     entry->RemoveIdElement(aElement);
     if (entry->IsEmpty()) {
@@ -456,7 +457,7 @@ void ShadowRoot::GetEventTargetParent(EventChainPreVisitor& aVisitor) {
   if (!aVisitor.mEvent->mFlags.mComposed) {
     nsCOMPtr<nsIContent> originalTarget =
         do_QueryInterface(aVisitor.mEvent->mOriginalTarget);
-    if (originalTarget->GetContainingShadow() == this) {
+    if (originalTarget && originalTarget->GetContainingShadow() == this) {
       // If we do stop propagation, we still want to propagate
       // the event to chrome (nsPIDOMWindow::GetParentTarget()).
       // The load event is special in that we don't ever propagate it
@@ -532,7 +533,7 @@ void ShadowRoot::MaybeReassignElement(Element* aElement) {
     return;
   }
 
-  if (nsIDocument* doc = GetComposedDoc()) {
+  if (Document* doc = GetComposedDoc()) {
     if (nsIPresShell* shell = doc->GetShell()) {
       shell->SlotAssignmentWillChange(*aElement, oldSlot, assignment.mSlot);
     }
@@ -591,7 +592,6 @@ nsINode* ShadowRoot::CreateElementAndAppendChildAt(nsINode& aParentNode,
                                                    const nsAString& aTagName,
                                                    mozilla::ErrorResult& rv) {
   MOZ_ASSERT(mIsUAWidget);
-  MOZ_ASSERT(OwnerDoc());
 
   if (!aParentNode.IsInUAWidget()) {
     rv.Throw(NS_ERROR_INVALID_ARG);

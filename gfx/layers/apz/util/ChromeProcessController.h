@@ -10,15 +10,18 @@
 #include "mozilla/layers/GeckoContentController.h"
 #include "nsCOMPtr.h"
 #include "mozilla/RefPtr.h"
+#include "mozilla/layers/MatrixMessage.h"
 
 class nsIDOMWindowUtils;
-class nsIDocument;
+
 class nsIPresShell;
 class nsIWidget;
-
 class MessageLoop;
 
 namespace mozilla {
+namespace dom {
+class Document;
+}
 
 namespace layers {
 
@@ -47,6 +50,8 @@ class ChromeProcessController : public mozilla::layers::GeckoContentController {
   virtual void Destroy() override;
 
   // GeckoContentController interface
+  virtual void NotifyLayerTransforms(
+      const nsTArray<MatrixMessage>& aTransforms) override;
   virtual void RequestContentRepaint(const RepaintRequest& aRequest) override;
   virtual void PostDelayedTask(already_AddRefed<Runnable> aTask,
                                int aDelayMs) override;
@@ -85,8 +90,8 @@ class ChromeProcessController : public mozilla::layers::GeckoContentController {
 
   void InitializeRoot();
   nsIPresShell* GetPresShell() const;
-  nsIDocument* GetRootDocument() const;
-  nsIDocument* GetRootContentDocument(
+  dom::Document* GetRootDocument() const;
+  dom::Document* GetRootContentDocument(
       const ScrollableLayerGuid::ViewID& aScrollId) const;
   void HandleDoubleTap(const mozilla::CSSPoint& aPoint, Modifiers aModifiers,
                        const ScrollableLayerGuid& aGuid);

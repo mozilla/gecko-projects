@@ -6,8 +6,8 @@
 
 var EXPORTED_SYMBOLS = ["HiddenFrame"];
 
-ChromeUtils.import("resource://gre/modules/PromiseUtils.jsm");
-ChromeUtils.import("resource://gre/modules/Services.jsm");
+const {PromiseUtils} = ChromeUtils.import("resource://gre/modules/PromiseUtils.jsm");
+const {Services} = ChromeUtils.import("resource://gre/modules/Services.jsm");
 
 const XUL_PAGE = "chrome://global/content/win.xul";
 
@@ -108,6 +108,9 @@ HiddenFrame.prototype = {
     let systemPrincipal = Services.scriptSecurityManager.getSystemPrincipal();
     docShell.createAboutBlankContentViewer(systemPrincipal);
     docShell.useGlobalHistory = false;
-    this._browser.loadURI(XUL_PAGE, 0, null, null, null, systemPrincipal);
+    let loadURIOptions = {
+      triggeringPrincipal: systemPrincipal,
+    };
+    this._browser.loadURI(XUL_PAGE, loadURIOptions);
   },
 };

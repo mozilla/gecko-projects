@@ -5,7 +5,7 @@
 // @flow
 import React, { Component } from "react";
 
-import { connect } from "react-redux";
+import { connect } from "../utils/connect";
 
 import actions from "../actions";
 import { getPaneCollapse } from "../selectors";
@@ -21,7 +21,7 @@ type Props = {
   endPanelCollapsed: boolean,
   togglePaneCollapse: Function,
   setActiveSearch: (?ActiveSearchType) => any,
-  openQuickOpen: (query?: string) => void,
+  openQuickOpen: typeof actions.openQuickOpen,
   toggleShortcutsModal: () => void
 };
 
@@ -35,7 +35,7 @@ export class WelcomeBox extends Component<Props> {
     return (
       <PaneToggleButton
         position="end"
-        collapsed={!endPanelCollapsed}
+        collapsed={endPanelCollapsed}
         horizontal={horizontal}
         handleClick={togglePaneCollapse}
       />
@@ -92,8 +92,8 @@ export class WelcomeBox extends Component<Props> {
               <span className="shortcutLabel">{allShortcutsLabel}</span>
             </p>
           </div>
-          {this.renderToggleButton()}
         </div>
+        {this.renderToggleButton()}
       </div>
     );
   }

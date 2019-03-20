@@ -1,6 +1,6 @@
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
- * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 //! Gecko's definition of a pseudo-element.
 //!
@@ -8,7 +8,7 @@
 //! `pseudo_element_definition.mako.rs`. If you touch that file, you probably
 //! need to update the checked-in files for Servo.
 
-use crate::gecko_bindings::structs::{self, CSSPseudoElementType};
+use crate::gecko_bindings::structs::{self, PseudoStyleType};
 use crate::properties::longhands::display::computed_value::T as Display;
 use crate::properties::{ComputedValues, PropertyFlags};
 use crate::selector_parser::{NonTSPseudoClass, PseudoElementCascadeType, SelectorImpl};

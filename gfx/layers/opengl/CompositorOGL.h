@@ -7,10 +7,13 @@
 #ifndef MOZILLA_GFX_COMPOSITOROGL_H
 #define MOZILLA_GFX_COMPOSITOROGL_H
 
+#include <map>
+#include <unordered_set>
+
 #include "gfx2DGlue.h"
 #include "GLContextTypes.h"             // for GLContext, etc
 #include "GLDefs.h"                     // for GLuint, LOCAL_GL_TEXTURE_2D, etc
-#include "OGLShaderProgram.h"           // for ShaderProgramOGL, etc
+#include "OGLShaderConfig.h"            // for ShaderConfigOGL
 #include "Units.h"                      // for ScreenPoint
 #include "mozilla/Assertions.h"         // for MOZ_ASSERT, etc
 #include "mozilla/Attributes.h"         // for override, final
@@ -43,6 +46,7 @@ class CompositingRenderTarget;
 class CompositingRenderTargetOGL;
 class DataTextureSource;
 class GLManagerCompositor;
+class ShaderProgramOGL;
 class TextureSource;
 class TextureSourceOGL;
 class BufferTextureHost;
@@ -79,12 +83,8 @@ class CompositorTexturePoolOGL {
  */
 class PerUnitTexturePoolOGL : public CompositorTexturePoolOGL {
  public:
-  explicit PerUnitTexturePoolOGL(gl::GLContext* aGL)
-      : mTextureTarget(0)  // zero is never a valid texture target
-        ,
-        mGL(aGL) {}
-
-  virtual ~PerUnitTexturePoolOGL() { DestroyTextures(); }
+  explicit PerUnitTexturePoolOGL(gl::GLContext* aGL);
+  virtual ~PerUnitTexturePoolOGL();
 
   virtual void Clear() override { DestroyTextures(); }
 
@@ -153,8 +153,10 @@ class CompositorOGL final : public Compositor {
                                const gfx::IntPoint& aSourcePoint) override;
 
   virtual void SetRenderTarget(CompositingRenderTarget* aSurface) override;
-  virtual CompositingRenderTarget* GetCurrentRenderTarget() const override;
-  virtual CompositingRenderTarget* GetWindowRenderTarget() const override;
+  virtual already_AddRefed<CompositingRenderTarget> GetCurrentRenderTarget()
+      const override;
+  virtual already_AddRefed<CompositingRenderTarget> GetWindowRenderTarget()
+      const override;
 
   virtual bool ReadbackRenderTarget(CompositingRenderTarget* aSource,
                                     AsyncReadbackBuffer* aDest) override;
@@ -261,6 +263,11 @@ class CompositorOGL final : public Compositor {
   void SetSurfaceOrigin(const ScreenIntPoint& aOrigin) {
     mSurfaceOrigin = aOrigin;
   }
+
+  // Register TextureSource which own device data that have to be deleted before
+  // destroying this CompositorOGL.
+  void RegisterTextureSource(TextureSource* aTextureSource);
+  void UnregisterTextureSource(TextureSource* aTextureSource);
 
  private:
   template <typename Geometry>
@@ -442,6 +449,12 @@ class CompositorOGL final : public Compositor {
   GLint FlipY(GLint y) const { return mViewportSize.height - y; }
 
   RefPtr<CompositorTexturePoolOGL> mTexturePool;
+
+#ifdef MOZ_WIDGET_GTK
+  // Hold TextureSources which own device data that have to be deleted before
+  // destroying this CompositorOGL.
+  std::unordered_set<TextureSource*> mRegisteredTextureSources;
+#endif
 
   bool mDestroyed;
 

@@ -27,6 +27,14 @@ static constexpr FloatRegister ScratchSimd128Reg = {
     FloatRegisters::invalid_reg};
 static constexpr FloatRegister InvalidFloatReg = {FloatRegisters::invalid_reg};
 
+struct ScratchFloat32Scope : FloatRegister {
+  explicit ScratchFloat32Scope(MacroAssembler& masm) {}
+};
+
+struct ScratchDoubleScope : FloatRegister {
+  explicit ScratchDoubleScope(MacroAssembler& masm) {}
+};
+
 static constexpr Register OsrFrameReg{Registers::invalid_reg};
 static constexpr Register PreBarrierReg{Registers::invalid_reg};
 static constexpr Register CallTempReg0{Registers::invalid_reg};
@@ -64,7 +72,7 @@ static constexpr Register64 ReturnReg64(InvalidReg, InvalidReg);
 static constexpr ValueOperand JSReturnOperand(InvalidReg);
 static constexpr Register64 ReturnReg64(InvalidReg);
 #else
-#error "Bad architecture"
+#  error "Bad architecture"
 #endif
 
 static constexpr Register ABINonArgReg0{Registers::invalid_reg};
@@ -456,6 +464,10 @@ class MacroAssemblerNone : public Assembler {
     MOZ_CRASH();
   }
   template <typename T>
+  void unboxBigInt(T, Register) {
+    MOZ_CRASH();
+  }
+  template <typename T>
   void unboxObject(T, Register) {
     MOZ_CRASH();
   }
@@ -514,6 +526,7 @@ class MacroAssemblerNone : public Assembler {
   void loadConstantFloat32(float, FloatRegister) { MOZ_CRASH(); }
   Condition testInt32Truthy(bool, ValueOperand) { MOZ_CRASH(); }
   Condition testStringTruthy(bool, ValueOperand) { MOZ_CRASH(); }
+  Condition testBigIntTruthy(bool, ValueOperand) { MOZ_CRASH(); }
 
   template <typename T>
   void loadUnboxedValue(T, MIRType, AnyRegister) {

@@ -14,7 +14,6 @@ add_task(async function() {
                                                 "https://example.com") + "dummy_page.html";
   await BrowserTestUtils.withNewTab(uri, async (browser) => {
     await ContentTask.spawn(browser, null, async () => {
-      Cu.importGlobalProperties(["Blob", "URL"]);
       let debug = {hello: "world"};
       let blob = new Blob([JSON.stringify(debug, null, 2)], {type: "application/json"});
       let blobUri = URL.createObjectURL(blob);
@@ -114,7 +113,7 @@ add_task(async function() {
   };
   let oldProxyType = Services.prefs.getIntPref("network.proxy.type");
   Services.prefs.setIntPref("network.proxy.type", Ci.nsIProtocolProxyService.PROXYCONFIG_SYSTEM);
-  let { MockRegistrar } = ChromeUtils.import("resource://testing-common/MockRegistrar.jsm", {});
+  let { MockRegistrar } = ChromeUtils.import("resource://testing-common/MockRegistrar.jsm");
   let mockProxy = MockRegistrar.register("@mozilla.org/system-proxy-settings;1",
                                          systemProxySettings);
   // Register cleanup to undo the configuration changes we've made.

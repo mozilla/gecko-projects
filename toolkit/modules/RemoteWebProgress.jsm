@@ -5,13 +5,15 @@
 
 var EXPORTED_SYMBOLS = ["RemoteWebProgressManager"];
 
-ChromeUtils.import("resource://gre/modules/Services.jsm");
+const {Services} = ChromeUtils.import("resource://gre/modules/Services.jsm");
 
-function RemoteWebProgressRequest(spec, originalSpec, matchedList) {
+function RemoteWebProgressRequest(uriOrSpec, originalURIOrSpec, matchedList) {
   this.wrappedJSObject = this;
 
-  this._uri = Services.io.newURI(spec);
-  this._originalURI = Services.io.newURI(originalSpec);
+  this._uri = uriOrSpec instanceof Ci.nsIURI ? uriOrSpec
+                                          : Services.io.newURI(uriOrSpec);
+  this._originalURI = originalURIOrSpec instanceof Ci.nsIURI ?
+                        originalURIOrSpec : Services.io.newURI(originalURIOrSpec);
   this._matchedList = matchedList;
 }
 
@@ -35,17 +37,18 @@ function RemoteWebProgress(aManager, aIsTopLevel) {
 }
 
 RemoteWebProgress.prototype = {
-  NOTIFY_STATE_REQUEST:  0x00000001,
-  NOTIFY_STATE_DOCUMENT: 0x00000002,
-  NOTIFY_STATE_NETWORK:  0x00000004,
-  NOTIFY_STATE_WINDOW:   0x00000008,
-  NOTIFY_STATE_ALL:      0x0000000f,
-  NOTIFY_PROGRESS:       0x00000010,
-  NOTIFY_STATUS:         0x00000020,
-  NOTIFY_SECURITY:       0x00000040,
-  NOTIFY_LOCATION:       0x00000080,
-  NOTIFY_REFRESH:        0x00000100,
-  NOTIFY_ALL:            0x000001ff,
+  NOTIFY_STATE_REQUEST:    0x00000001,
+  NOTIFY_STATE_DOCUMENT:   0x00000002,
+  NOTIFY_STATE_NETWORK:    0x00000004,
+  NOTIFY_STATE_WINDOW:     0x00000008,
+  NOTIFY_STATE_ALL:        0x0000000f,
+  NOTIFY_PROGRESS:         0x00000010,
+  NOTIFY_STATUS:           0x00000020,
+  NOTIFY_SECURITY:         0x00000040,
+  NOTIFY_LOCATION:         0x00000080,
+  NOTIFY_REFRESH:          0x00000100,
+  NOTIFY_CONTENT_BLOCKING: 0x00000200,
+  NOTIFY_ALL:              0x000003ff,
 
   get isLoadingDocument() { return this._isLoadingDocument; },
   get DOMWindow() {
@@ -119,7 +122,7 @@ RemoteWebProgressManager.prototype = {
       this._progressListeners.filter(l => l.listener != aListener);
   },
 
-  _fixSecInfo(aSecInfo) {
+  _fixSecInfoAndState(aSecInfo, aState) {
     let deserialized = null;
     if (aSecInfo) {
       let helper = Cc["@mozilla.org/network/serialization-helper;1"]
@@ -129,7 +132,7 @@ RemoteWebProgressManager.prototype = {
       deserialized.QueryInterface(Ci.nsITransportSecurityInfo);
     }
 
-    return deserialized;
+    return [deserialized, aState];
   },
 
   setCurrentURI(aURI) {
@@ -156,6 +159,58 @@ RemoteWebProgressManager.prototype = {
         }
       }
     }
+  },
+
+  callWebProgressContentBlockingEventListeners(aIsWebProgressPassed,
+                                               aIsTopLevel,
+                                               aIsLoadingDocument,
+                                               aLoadType,
+                                               aDOMWindowID,
+                                               aRequestURI,
+                                               aOriginalRequestURI,
+                                               aMatchedList,
+                                               aEvent) {
+    let [webProgress, request] =
+      this.getWebProgressAndRequest(aIsWebProgressPassed, aIsTopLevel,
+                                    aIsLoadingDocument, aLoadType,
+                                    aDOMWindowID, aRequestURI,
+                                    aOriginalRequestURI, aMatchedList);
+    this._callProgressListeners(
+      Ci.nsIWebProgress.NOTIFY_CONTENT_BLOCKING, "onContentBlockingEvent",
+      webProgress, request, aEvent
+    );
+  },
+
+  getWebProgressAndRequest(aIsWebProgressPassed,
+                           aIsTopLevel,
+                           aIsLoadingDocument,
+                           aLoadType,
+                           aDOMWindowID,
+                           aRequestURI,
+                           aOriginalRequestURI,
+                           aMatchedList) {
+    let webProgress = null;
+    if (aIsWebProgressPassed) {
+      // The top-level WebProgress is always the same, but because we don't
+      // really have a concept of subframes/content we always create a new object
+      // for those.
+      webProgress = aIsTopLevel ? this._topLevelWebProgress
+                                : new RemoteWebProgress(this, false);
+
+      // Update the actual WebProgress fields.
+      webProgress._isLoadingDocument = aIsLoadingDocument;
+      webProgress._DOMWindowID = aDOMWindowID;
+      webProgress._loadType = aLoadType;
+    }
+
+    let request =
+      aRequestURI ?
+        new RemoteWebProgressRequest(aRequestURI,
+                                     aOriginalRequestURI,
+                                     aMatchedList) :
+        null;
+
+    return [webProgress, request];
   },
 
   receiveMessage(aMessage) {
@@ -244,23 +299,19 @@ RemoteWebProgressManager.prototype = {
       break;
 
     case "Content:SecurityChange":
-      let secInfo = this._fixSecInfo(json.secInfo);
-      let oldState = json.oldState;
-      let state = json.state;
-      let contentBlockingLogJSON = json.contentBlockingLogJSON;
+      let [secInfo, state] = this._fixSecInfoAndState(json.secInfo, json.state);
 
       if (isTopLevel) {
         // Invoking this getter triggers the generation of the underlying object,
         // which we need to access with ._securityUI, because .securityUI returns
         // a wrapper that makes _update inaccessible.
         void this._browser.securityUI;
-        this._browser._securityUI._update(secInfo, oldState, state,
-                                          contentBlockingLogJSON);
+        this._browser._securityUI._update(secInfo, state);
       }
 
       this._callProgressListeners(
         Ci.nsIWebProgress.NOTIFY_SECURITY, "onSecurityChange", webProgress,
-        request, oldState, state, contentBlockingLogJSON
+        request, state
       );
       break;
 

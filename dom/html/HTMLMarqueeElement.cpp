@@ -22,12 +22,6 @@ namespace dom {
 
 HTMLMarqueeElement::~HTMLMarqueeElement() {}
 
-NS_IMPL_CYCLE_COLLECTION_INHERITED(HTMLMarqueeElement, nsGenericHTMLElement,
-                                   mStartStopCallback)
-
-NS_IMPL_ISUPPORTS_CYCLE_COLLECTION_INHERITED_0(HTMLMarqueeElement,
-                                               nsGenericHTMLElement)
-
 NS_IMPL_ELEMENT_CLONE(HTMLMarqueeElement)
 
 static const nsAttrValue::EnumTable kBehaviorTable[] = {
@@ -52,38 +46,29 @@ JSObject* HTMLMarqueeElement::WrapNode(JSContext* aCx,
   return dom::HTMLMarqueeElement_Binding::Wrap(aCx, this, aGivenProto);
 }
 
-nsresult HTMLMarqueeElement::BindToTree(nsIDocument* aDocument,
+nsresult HTMLMarqueeElement::BindToTree(Document* aDocument,
                                         nsIContent* aParent,
                                         nsIContent* aBindingParent) {
   nsresult rv =
       nsGenericHTMLElement::BindToTree(aDocument, aParent, aBindingParent);
   NS_ENSURE_SUCCESS(rv, rv);
 
-  if (nsContentUtils::IsUAWidgetEnabled() && IsInComposedDoc()) {
+  if (IsInComposedDoc()) {
     AttachAndSetUAShadowRoot();
-    AsyncEventDispatcher* dispatcher =
-        new AsyncEventDispatcher(this, NS_LITERAL_STRING("UAWidgetBindToTree"),
-                                 CanBubble::eYes, ChromeOnlyDispatch::eYes);
-    dispatcher->RunDOMEventWhenSafe();
+    NotifyUAWidgetSetupOrChange();
   }
 
   return rv;
 }
 
 void HTMLMarqueeElement::UnbindFromTree(bool aDeep, bool aNullParent) {
-  if (GetShadowRoot() && IsInComposedDoc()) {
-    AsyncEventDispatcher* dispatcher = new AsyncEventDispatcher(
-        this, NS_LITERAL_STRING("UAWidgetUnbindFromTree"), CanBubble::eYes,
-        ChromeOnlyDispatch::eYes);
-    dispatcher->RunDOMEventWhenSafe();
+  if (IsInComposedDoc()) {
+    // We don't want to unattach the shadow root because it used to
+    // contain a <slot>.
+    NotifyUAWidgetTeardown(UnattachShadowRoot::No);
   }
 
   nsGenericHTMLElement::UnbindFromTree(aDeep, aNullParent);
-}
-
-void HTMLMarqueeElement::SetStartStopCallback(
-    FunctionStringCallback* aCallback) {
-  mStartStopCallback = aCallback;
 }
 
 void HTMLMarqueeElement::GetBehavior(nsAString& aValue) {
@@ -138,12 +123,9 @@ nsresult HTMLMarqueeElement::AfterSetAttr(int32_t aNameSpaceID, nsAtom* aName,
                                           const nsAttrValue* aOldValue,
                                           nsIPrincipal* aMaybeScriptedPrincipal,
                                           bool aNotify) {
-  if (nsContentUtils::IsUAWidgetEnabled() && IsInComposedDoc() &&
-      aNameSpaceID == kNameSpaceID_None && aName == nsGkAtoms::direction) {
-    AsyncEventDispatcher* dispatcher = new AsyncEventDispatcher(
-        this, NS_LITERAL_STRING("UAWidgetAttributeChanged"), CanBubble::eYes,
-        ChromeOnlyDispatch::eYes);
-    dispatcher->RunDOMEventWhenSafe();
+  if (IsInComposedDoc() && aNameSpaceID == kNameSpaceID_None &&
+      aName == nsGkAtoms::direction) {
+    NotifyUAWidgetSetupOrChange();
   }
   return nsGenericHTMLElement::AfterSetAttr(
       aNameSpaceID, aName, aValue, aOldValue, aMaybeScriptedPrincipal, aNotify);
@@ -185,16 +167,12 @@ void HTMLMarqueeElement::DispatchEventToShadowRoot(
 void HTMLMarqueeElement::Start() {
   if (GetShadowRoot()) {
     DispatchEventToShadowRoot(NS_LITERAL_STRING("marquee-start"));
-  } else if (mStartStopCallback) {
-    mStartStopCallback->Call(NS_LITERAL_STRING("start"));
   }
 }
 
 void HTMLMarqueeElement::Stop() {
   if (GetShadowRoot()) {
     DispatchEventToShadowRoot(NS_LITERAL_STRING("marquee-stop"));
-  } else if (mStartStopCallback) {
-    mStartStopCallback->Call(NS_LITERAL_STRING("stop"));
   }
 }
 

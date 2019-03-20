@@ -33,14 +33,13 @@
 struct JSContext;
 class JSObject;
 class nsIContent;
-class nsIDocument;
 class nsIFrame;
 class nsIPresShell;
 
 namespace mozilla {
 
 class AnimValuesStyleRule;
-enum class CSSPseudoElementType : uint8_t;
+enum class PseudoStyleType : uint8_t;
 class ErrorResult;
 struct AnimationRule;
 struct TimingParams;
@@ -106,10 +105,11 @@ struct ElementPropertyTransition;
 namespace dom {
 
 class Animation;
+class Document;
 
 class KeyframeEffect : public AnimationEffect {
  public:
-  KeyframeEffect(nsIDocument* aDocument,
+  KeyframeEffect(Document* aDocument,
                  const Maybe<OwningAnimationTarget>& aTarget,
                  TimingParams&& aTiming, const KeyframeEffectParams& aOptions);
 
@@ -159,7 +159,7 @@ class KeyframeEffect : public AnimationEffect {
   void SetTarget(const Nullable<ElementOrCSSPseudoElement>& aTarget);
 
   void GetKeyframes(JSContext*& aCx, nsTArray<JSObject*>& aResult,
-                    ErrorResult& aRv);
+                    ErrorResult& aRv) const;
   void GetProperties(nsTArray<AnimationPropertyDetails>& aProperties,
                      ErrorResult& aRv) const;
 
@@ -179,9 +179,9 @@ class KeyframeEffect : public AnimationEffect {
   void SetKeyframes(nsTArray<Keyframe>&& aKeyframes,
                     const ComputedStyle* aStyle);
 
-  // Returns true if the effect includes |aProperty| regardless of whether the
-  // property is overridden by !important rule.
-  bool HasAnimationOfProperty(nsCSSPropertyID aProperty) const;
+  // Returns true if the effect includes a property in |aPropertySet| regardless
+  // of whether any property in the set is overridden by !important rule.
+  bool HasAnimationOfPropertySet(const nsCSSPropertyIDSet& aPropertySet) const;
 
   // GetEffectiveAnimationOfProperty returns AnimationProperty corresponding
   // to a given CSS property if the effect includes the property and the
@@ -192,14 +192,34 @@ class KeyframeEffect : public AnimationEffect {
   // this function is typically called for all KeyframeEffects on an element
   // so that we can avoid multiple calls of EffectSet::GetEffect().
   //
-  // NOTE: We don't currently check for !important rules for properties that
-  // can't run on the compositor.
+  // NOTE: Unlike HasEffectiveAnimationOfPropertySet below, this function does
+  // not check for the effect of !important rules on animations of related
+  // transform properties.
   bool HasEffectiveAnimationOfProperty(nsCSSPropertyID aProperty,
                                        const EffectSet& aEffect) const {
     return GetEffectiveAnimationOfProperty(aProperty, aEffect) != nullptr;
   }
   const AnimationProperty* GetEffectiveAnimationOfProperty(
       nsCSSPropertyID aProperty, const EffectSet& aEffect) const;
+
+  // Similar to HasEffectiveAnimationOfProperty, above, but for
+  // an nsCSSPropertyIDSet. Returns true if this keyframe effect has at least
+  // one property in |aPropertySet| that is not overridden by an !important
+  // rule.
+  //
+  // Unlike HasEffectiveAnimationOfProperty, however, when |aPropertySet|
+  // includes transform-like properties (transform, rotate etc.) this function
+  // returns true if and only if all the transform-like properties that are
+  // present are effective.
+  //
+  // That is because the transform-like properties, unlike other properties, are
+  // combined on the compositor and if !important rules affect any of the
+  // individual properties we will not be able to correctly compose the result
+  // on the compositor so we should run the animations on the main thread
+  // instead.
+  bool HasEffectiveAnimationOfPropertySet(
+      const nsCSSPropertyIDSet& aPropertySet,
+      const EffectSet& aEffectSet) const;
 
   // Returns all the effective animated CSS properties that can be animated on
   // the compositor and are not overridden by a higher cascade level.
@@ -238,6 +258,8 @@ class KeyframeEffect : public AnimationEffect {
   // Returns true if at least one property is being animated on compositor.
   bool IsRunningOnCompositor() const;
   void SetIsRunningOnCompositor(nsCSSPropertyID aProperty, bool aIsRunning);
+  void SetIsRunningOnCompositor(const nsCSSPropertyIDSet& aPropertySet,
+                                bool aIsRunning);
   void ResetIsRunningOnCompositor();
 
   // Returns true if this effect, applied to |aFrame|, contains properties
@@ -257,7 +279,7 @@ class KeyframeEffect : public AnimationEffect {
     return GetTarget() && HasGeometricProperties();
   }
 
-  nsIDocument* GetRenderedDocument() const;
+  Document* GetRenderedDocument() const;
   nsIPresShell* GetPresShell() const;
 
   // Associates a warning with the animated property on the specified frame
@@ -287,7 +309,7 @@ class KeyframeEffect : public AnimationEffect {
     // We cannot use getters_AddRefs on RawServoAnimationValue because it is
     // an incomplete type, so Get() doesn't work. Instead, use GetWeak, and
     // then assign the raw pointer to a RefPtr.
-    result.mServo = mBaseStyleValuesForServo.GetWeak(aProperty, &hasProperty);
+    result.mServo = mBaseValues.GetWeak(aProperty, &hasProperty);
     MOZ_ASSERT(hasProperty || result.IsNull());
     return result;
   }
@@ -308,7 +330,7 @@ class KeyframeEffect : public AnimationEffect {
   };
 
   MatchForCompositor IsMatchForCompositor(
-      nsCSSPropertyID aProperty, const nsIFrame* aFrame,
+      const nsCSSPropertyIDSet& aPropertySet, const nsIFrame* aFrame,
       const EffectSet& aEffects,
       AnimationPerformanceWarning::Type& aPerformanceWarning /* out */) const;
 
@@ -350,28 +372,25 @@ class KeyframeEffect : public AnimationEffect {
   // Remove the current effect target from its EffectSet.
   void UnregisterTarget();
 
-  // Update the associated frame state bits so that, if necessary, a stacking
-  // context will be created and the effect sent to the compositor.  We
-  // typically need to do this when the properties referenced by the keyframe
-  // have changed, or when the target frame might have changed.
-  void MaybeUpdateFrameForCompositor();
-
   // Looks up the ComputedStyle associated with the target element, if any.
   // We need to be careful to *not* call this when we are updating the style
   // context. That's because calling GetComputedStyle when we are in the process
   // of building a ComputedStyle may trigger various forms of infinite
   // recursion.
-  already_AddRefed<ComputedStyle> GetTargetComputedStyle();
+  enum class Flush {
+    Style,
+    None,
+  };
+  already_AddRefed<ComputedStyle> GetTargetComputedStyle(
+      Flush aFlushType) const;
 
   // A wrapper for marking cascade update according to the current
   // target and its effectSet.
   void MarkCascadeNeedsUpdate();
 
   void EnsureBaseStyles(const ComputedStyle* aComputedValues,
-                        const nsTArray<AnimationProperty>& aProperties);
-
-  // Stylo version of the above function that also first checks for an additive
-  // value in |aProperty|'s list of segments.
+                        const nsTArray<AnimationProperty>& aProperties,
+                        bool* aBaseStylesChanged);
   void EnsureBaseStyle(const AnimationProperty& aProperty,
                        nsPresContext* aPresContext,
                        const ComputedStyle* aComputedValues,
@@ -399,18 +418,25 @@ class KeyframeEffect : public AnimationEffect {
 
   // We need to track when we go to or from being "in effect" since
   // we need to re-evaluate the cascade of animations when that changes.
-  bool mInEffectOnLastAnimationTimingUpdate;
-
-  // The non-animated values for properties in this effect that contain at
-  // least one animation value that is composited with the underlying value
-  // (i.e. it uses the additive or accumulate composite mode).
-  nsRefPtrHashtable<nsUint32HashKey, RawServoAnimationValue>
-      mBaseStyleValuesForServo;
+  bool mInEffectOnLastAnimationTimingUpdate = false;
 
   // True if this effect is in the EffectSet for its target element. This is
   // used as an optimization to avoid unnecessary hashmap lookups on the
   // EffectSet.
   bool mInEffectSet = false;
+
+  // True if the last time we tried to update the cumulative change hint we
+  // didn't have style data to do so. We set this flag so that the next time
+  // our style context changes we know to update the cumulative change hint even
+  // if our properties haven't changed.
+  bool mNeedsStyleData = false;
+
+  // The non-animated values for properties in this effect that contain at
+  // least one animation value that is composited with the underlying value
+  // (i.e. it uses the additive or accumulate composite mode).
+  using BaseValuesHashmap =
+      nsRefPtrHashtable<nsUint32HashKey, RawServoAnimationValue>;
+  BaseValuesHashmap mBaseValues;
 
  private:
   nsChangeHint mCumulativeChangeHint;

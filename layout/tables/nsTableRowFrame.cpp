@@ -114,11 +114,12 @@ void nsTableRowFrame::SetPctBSize(float aPctValue, bool aForce) {
 /* ----------- nsTableRowFrame ---------- */
 
 NS_QUERYFRAME_HEAD(nsTableRowFrame)
-NS_QUERYFRAME_ENTRY(nsTableRowFrame)
+  NS_QUERYFRAME_ENTRY(nsTableRowFrame)
 NS_QUERYFRAME_TAIL_INHERITING(nsContainerFrame)
 
-nsTableRowFrame::nsTableRowFrame(ComputedStyle* aStyle, ClassID aID)
-    : nsContainerFrame(aStyle, aID),
+nsTableRowFrame::nsTableRowFrame(ComputedStyle* aStyle,
+                                 nsPresContext* aPresContext, ClassID aID)
+    : nsContainerFrame(aStyle, aPresContext, aID),
       mContentBSize(0),
       mStylePctBSize(0),
       mStyleFixedBSize(0),
@@ -165,8 +166,8 @@ void nsTableRowFrame::DestroyFrom(nsIFrame* aDestructRoot,
   nsContainerFrame::DestroyFrom(aDestructRoot, aPostDestroyData);
 }
 
-/* virtual */ void nsTableRowFrame::DidSetComputedStyle(
-    ComputedStyle* aOldComputedStyle) {
+/* virtual */
+void nsTableRowFrame::DidSetComputedStyle(ComputedStyle* aOldComputedStyle) {
   nsContainerFrame::DidSetComputedStyle(aOldComputedStyle);
 
   if (!aOldComputedStyle)  // avoid this on init
@@ -266,15 +267,14 @@ void nsTableRowFrame::RemoveFrame(ChildListID aListID, nsIFrame* aOldFrame) {
   tableFrame->SetGeometryDirty();
 }
 
-/* virtual */ nsMargin nsTableRowFrame::GetUsedMargin() const {
-  return nsMargin(0, 0, 0, 0);
-}
+/* virtual */
+nsMargin nsTableRowFrame::GetUsedMargin() const { return nsMargin(0, 0, 0, 0); }
 
-/* virtual */ nsMargin nsTableRowFrame::GetUsedBorder() const {
-  return nsMargin(0, 0, 0, 0);
-}
+/* virtual */
+nsMargin nsTableRowFrame::GetUsedBorder() const { return nsMargin(0, 0, 0, 0); }
 
-/* virtual */ nsMargin nsTableRowFrame::GetUsedPadding() const {
+/* virtual */
+nsMargin nsTableRowFrame::GetUsedPadding() const {
   return nsMargin(0, 0, 0, 0);
 }
 
@@ -500,13 +500,12 @@ nscoord nsTableRowFrame::CalcBSize(const ReflowInput& aReflowInput) {
 
   WritingMode wm = aReflowInput.GetWritingMode();
   const nsStylePosition* position = StylePosition();
-  const nsStyleCoord& bsizeStyleCoord = position->BSize(wm);
+  const auto& bsizeStyleCoord = position->BSize(wm);
   if (bsizeStyleCoord.ConvertsToLength()) {
-    SetFixedBSize(bsizeStyleCoord.ComputeCoordPercentCalc(0));
-  } else if (eStyleUnit_Percent == bsizeStyleCoord.GetUnit()) {
-    SetPctBSize(bsizeStyleCoord.GetPercentValue());
+    SetFixedBSize(bsizeStyleCoord.ToLength());
+  } else if (bsizeStyleCoord.ConvertsToPercentage()) {
+    SetPctBSize(bsizeStyleCoord.ToPercentage());
   }
-  // calc() with percentages is treated like 'auto' on table rows.
 
   for (nsIFrame* kidFrame : mFrames) {
     nsTableCellFrame* cellFrame = do_QueryFrame(kidFrame);
@@ -568,45 +567,27 @@ nsresult nsTableRowFrame::CalculateCellActualBSize(nsTableCellFrame* aCellFrame,
 
   int32_t rowSpan = GetTableFrame()->GetEffectiveRowSpan(*aCellFrame);
 
-  const nsStyleCoord& bsizeStyleCoord = position->BSize(aWM);
-  switch (bsizeStyleCoord.GetUnit()) {
-    case eStyleUnit_Calc: {
-      if (bsizeStyleCoord.CalcHasPercent()) {
-        // Treat this like "auto"
-        break;
-      }
-      // Fall through to the coord case
-      MOZ_FALLTHROUGH;
+  const auto& bsizeStyleCoord = position->BSize(aWM);
+  if (bsizeStyleCoord.ConvertsToLength()) {
+    // In quirks mode, table cell isize should be content-box, but bsize
+    // should be border-box.
+    // Because of this historic anomaly, we do not use quirk.css
+    // (since we can't specify one value of box-sizing for isize and another
+    // for bsize)
+    specifiedBSize = bsizeStyleCoord.ToLength();
+    if (PresContext()->CompatibilityMode() != eCompatibility_NavQuirks &&
+        position->mBoxSizing == StyleBoxSizing::Content) {
+      specifiedBSize +=
+          aCellFrame->GetLogicalUsedBorderAndPadding(aWM).BStartEnd(aWM);
     }
-    case eStyleUnit_Coord: {
-      // In quirks mode, table cell isize should be content-box, but bsize
-      // should be border-box.
-      // Because of this historic anomaly, we do not use quirk.css
-      // (since we can't specify one value of box-sizing for isize and another
-      // for bsize)
-      specifiedBSize = bsizeStyleCoord.ComputeCoordPercentCalc(0);
-      if (PresContext()->CompatibilityMode() != eCompatibility_NavQuirks &&
-          position->mBoxSizing == StyleBoxSizing::Content) {
-        specifiedBSize +=
-            aCellFrame->GetLogicalUsedBorderAndPadding(aWM).BStartEnd(aWM);
-      }
 
-      if (1 == rowSpan) {
-        SetFixedBSize(specifiedBSize);
-      }
-      break;
+    if (1 == rowSpan) {
+      SetFixedBSize(specifiedBSize);
     }
-    case eStyleUnit_Percent: {
-      if (1 == rowSpan) {
-        SetPctBSize(bsizeStyleCoord.GetPercentValue());
-      }
-      // pct bsizes are handled when all of the cells are finished,
-      // so don't set specifiedBSize
-      break;
+  } else if (bsizeStyleCoord.ConvertsToPercentage()) {
+    if (1 == rowSpan) {
+      SetPctBSize(bsizeStyleCoord.ToPercentage());
     }
-    case eStyleUnit_Auto:
-    default:
-      break;
   }
 
   // If the specified bsize is greater than the desired bsize,
@@ -1354,11 +1335,11 @@ void nsTableRowFrame::InitHasCellWithStyleBSize(nsTableFrame* aTableFrame) {
       continue;
     }
     // Ignore row-spanning cells
-    const nsStyleCoord& cellBSize = cellFrame->StylePosition()->BSize(wm);
+    const auto& cellBSize = cellFrame->StylePosition()->BSize(wm);
     if (aTableFrame->GetEffectiveRowSpan(*cellFrame) == 1 &&
-        cellBSize.GetUnit() != eStyleUnit_Auto &&
-        /* calc() with percentages treated like 'auto' */
-        (!cellBSize.IsCalcUnit() || !cellBSize.HasPercent())) {
+        !cellBSize.IsAuto() &&
+        /* calc() with both percentages and lengths treated like 'auto' */
+        (cellBSize.ConvertsToLength() || cellBSize.ConvertsToPercentage())) {
       AddStateBits(NS_ROW_HAS_CELL_WITH_STYLE_BSIZE);
       return;
     }
@@ -1391,7 +1372,7 @@ void nsTableRowFrame::InvalidateFrameWithRect(const nsRect& aRect,
 
 nsTableRowFrame* NS_NewTableRowFrame(nsIPresShell* aPresShell,
                                      ComputedStyle* aStyle) {
-  return new (aPresShell) nsTableRowFrame(aStyle);
+  return new (aPresShell) nsTableRowFrame(aStyle, aPresShell->GetPresContext());
 }
 
 NS_IMPL_FRAMEARENA_HELPERS(nsTableRowFrame)

@@ -13,6 +13,8 @@ from taskgraph.util.attributes import RELEASE_PROJECTS
 from taskgraph.util.schema import resolve_keyed_by
 from taskgraph.util.workertypes import worker_type_implementation
 
+from mozbuild.artifact_builds import JOB_CHOICES as ARTIFACT_JOBS
+
 import logging
 logger = logging.getLogger(__name__)
 
@@ -53,6 +55,18 @@ def stub_installer(config, jobs):
 
 
 @transforms.add
+def resolve_shipping_product(config, jobs):
+    for job in jobs:
+        resolve_keyed_by(
+            job, 'shipping-product', item_name=job['name'],
+            **{
+                'release-type': config.params['release_type'],
+            }
+        )
+        yield job
+
+
+@transforms.add
 def update_channel(config, jobs):
     for job in jobs:
         resolve_keyed_by(
@@ -64,6 +78,7 @@ def update_channel(config, jobs):
         update_channel = job['run'].pop('update-channel', None)
         if update_channel:
             job['run'].setdefault('extra-config', {})['update_channel'] = update_channel
+            job['attributes']['update-channel'] = update_channel
         yield job
 
 
@@ -79,6 +94,19 @@ def mozconfig(config, jobs):
         mozconfig_variant = job['run'].pop('mozconfig-variant', None)
         if mozconfig_variant:
             job['run'].setdefault('extra-config', {})['mozconfig_variant'] = mozconfig_variant
+        yield job
+
+
+@transforms.add
+def use_profile_data(config, jobs):
+    for job in jobs:
+        if not job.pop('use-pgo', False):
+            yield job
+            continue
+
+        dependencies = 'generate-profile-{}'.format(job['name'])
+        job.setdefault('dependencies', {})['generate-profile'] = dependencies
+        job.setdefault('fetches', {})['generate-profile'] = ['profdata.tar.xz']
         yield job
 
 
@@ -107,4 +135,21 @@ def enable_full_crashsymbols(config, jobs):
         else:
             logger.debug("Disabling full symbol generation for %s", job['name'])
             job['worker']['env']['MOZ_DISABLE_FULL_SYMBOLS'] = '1'
+        yield job
+
+
+@transforms.add
+def use_artifact(config, jobs):
+    if config.params['try_mode'] == 'try_task_config':
+        use_artifact = config.params['try_task_config'] \
+            .get('templates', {}).get('artifact', {}).get('enabled')
+    elif config.params['try_mode'] == 'try_option_syntax':
+        use_artifact = config.params['try_options'].get('artifact')
+    else:
+        use_artifact = False
+    for job in jobs:
+        if config.kind == 'build' and use_artifact and \
+                job.get('index', {}).get('job-name') in ARTIFACT_JOBS:
+            job['treeherder']['symbol'] += 'a'
+            job['worker']['env']['USE_ARTIFACT'] = '1'
         yield job

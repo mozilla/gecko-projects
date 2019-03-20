@@ -16,7 +16,6 @@
 #include "mozilla/Attributes.h"
 #include "mozilla/MemoryReporting.h"
 #include "mozilla/UniquePtr.h"
-#include "AttrArray.h"                     // member
 #include "nsCycleCollectionParticipant.h"  // NS_DECL_CYCLE_*
 #include "nsIContent.h"                    // base class
 #include "nsNodeUtils.h"  // class member nsNodeUtils::CloneNodeImpl
@@ -32,7 +31,6 @@ class nsDOMTokenList;
 class nsIControllers;
 class nsICSSDeclaration;
 class nsDOMCSSAttributeDeclaration;
-class nsIDocument;
 class nsDOMStringMap;
 class nsIURI;
 
@@ -116,7 +114,7 @@ class FragmentOrElement : public nsIContent {
    * If there are listeners for DOMNodeInserted event, fires the event on all
    * aNodes
    */
-  static void FireNodeInserted(nsIDocument* aDoc, nsINode* aParent,
+  static void FireNodeInserted(Document* aDoc, nsINode* aParent,
                                nsTArray<nsCOMPtr<nsIContent> >& aNodes);
 
   NS_DECL_CYCLE_COLLECTION_SKIPPABLE_SCRIPT_HOLDER_CLASS_INHERITED(
@@ -144,10 +142,10 @@ class FragmentOrElement : public nsIContent {
   virtual ~FragmentOrElement();
 
   /**
-   * Copy attributes and state to another element
-   * @param aDest the object to copy to
+   * Dummy CopyInnerTo so that we can use the same macros for
+   * Elements and DocumentFragments.
    */
-  nsresult CopyInnerTo(FragmentOrElement* aDest);
+  nsresult CopyInnerTo(FragmentOrElement* aDest) { return NS_OK; }
 
  public:
   /**
@@ -305,10 +303,6 @@ class FragmentOrElement : public nsIContent {
   }
 
   friend class ::ContentUnbinder;
-  /**
-   * Array containing all attributes for this element
-   */
-  AttrArray mAttrs;
 };
 
 }  // namespace dom

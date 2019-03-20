@@ -4,13 +4,13 @@
 
 "use strict";
 
-ChromeUtils.import("resource://gre/modules/Services.jsm");
-ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
+const {Services} = ChromeUtils.import("resource://gre/modules/Services.jsm");
+const {XPCOMUtils} = ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
 
 const {
   EnvironmentPrefs,
   MarionettePrefs,
-} = ChromeUtils.import("chrome://marionette/content/prefs.js", {});
+} = ChromeUtils.import("chrome://marionette/content/prefs.js", null);
 
 XPCOMUtils.defineLazyModuleGetters(this, {
   Log: "chrome://marionette/content/log.js",
@@ -63,6 +63,13 @@ const RECOMMENDED_PREFS = new Map([
 
   // Make sure Shield doesn't hit the network.
   ["app.normandy.api_url", ""],
+
+  // Disable automatically upgrading Firefox
+  //
+  // Note: This preference should have already been set by the client when
+  // creating the profile. But if not and to absolutely make sure that updates
+  // of Firefox aren't downloaded and applied, enforce its presence.
+  ["app.update.disabledForTesting", true],
 
   // Increase the APZ content response timeout in tests to 1 minute.
   // This is to accommodate the fact that test environments tends to be
@@ -234,6 +241,9 @@ const RECOMMENDED_PREFS = new Map([
   // Make sure SNTP requests do not hit the network
   ["network.sntp.pools", "%(server)s"],
 
+  // Don't do network connections for mitm priming
+  ["security.certerrors.mitm.priming.enabled", false],
+
   // Local documents have access to all other local documents,
   // including directory listings
   ["security.fileuri.strict_origin_policy", false],
@@ -323,9 +333,8 @@ class MarionetteParentProcess {
 
       case "profile-after-change":
         Services.obs.addObserver(this, "command-line-startup");
-        Services.obs.addObserver(this, "sessionstore-windows-restored");
-        Services.obs.addObserver(this, "mail-startup-done");
         Services.obs.addObserver(this, "toplevel-window-ready");
+        Services.obs.addObserver(this, "marionette-startup-requested");
 
         for (let [pref, value] of EnvironmentPrefs.from(ENV_PRESERVE_PREFS)) {
           Preferences.set(pref, value);
@@ -354,8 +363,10 @@ class MarionetteParentProcess {
       case "domwindowclosed":
         if (this.gfxWindow === null || subject === this.gfxWindow) {
           Services.obs.removeObserver(this, topic);
+          Services.obs.removeObserver(this, "toplevel-window-ready");
 
           Services.obs.addObserver(this, "xpcom-will-shutdown");
+
           this.finalUIStartup = true;
           this.init();
         }
@@ -379,15 +390,8 @@ class MarionetteParentProcess {
         }, {once: true});
         break;
 
-      // Thunderbird only, instead of sessionstore-windows-restored.
-      case "mail-startup-done":
-        this.finalUIStartup = true;
-        this.init();
-        break;
-
-      case "sessionstore-windows-restored":
+      case "marionette-startup-requested":
         Services.obs.removeObserver(this, topic);
-        Services.obs.removeObserver(this, "toplevel-window-ready");
 
         // When Firefox starts on Windows, an additional GFX sanity test
         // window may appear off-screen.  Marionette should wait for it
@@ -403,7 +407,10 @@ class MarionetteParentProcess {
           log.trace("GFX sanity window detected, waiting until it has been closed...");
           Services.obs.addObserver(this, "domwindowclosed");
         } else {
+          Services.obs.removeObserver(this, "toplevel-window-ready");
+
           Services.obs.addObserver(this, "xpcom-will-shutdown");
+
           this.finalUIStartup = true;
           this.init();
         }

@@ -40,11 +40,11 @@ APPLICATION_CHOICE = '''
 Note on Artifact Mode:
 
 Artifact builds download prebuilt C++ components rather than building
-them locally.
+them locally. Artifact builds are faster!
 
 Artifact builds are recommended for people working on Firefox or
-Firefox for Android frontends. They are unsuitable for those working
-on C++ code. For more information see:
+Firefox for Android frontends, or the GeckoView Java API. They are unsuitable
+for those working on C++ code. For more information see:
 https://developer.mozilla.org/en-US/docs/Artifact_builds.
 
 Please choose the version of Firefox you want to build:
@@ -54,8 +54,8 @@ Your choice: '''
 APPLICATIONS_LIST = [
     ('Firefox for Desktop Artifact Mode', 'browser_artifact_mode'),
     ('Firefox for Desktop', 'browser'),
-    ('Firefox for Android Artifact Mode', 'mobile_android_artifact_mode'),
-    ('Firefox for Android', 'mobile_android'),
+    ('GeckoView/Firefox for Android Artifact Mode', 'mobile_android_artifact_mode'),
+    ('GeckoView/Firefox for Android', 'mobile_android'),
 ]
 
 # This is a workaround for the fact that we must support python2.6 (which has
@@ -181,8 +181,7 @@ DEBIAN_DISTROS = (
     'LinuxMint',
     'Elementary OS',
     'Elementary',
-    '"elementary OS"',
-    '"elementary"'
+    'elementary'
 )
 
 ADD_GIT_TOOLS_PATH = '''
@@ -236,13 +235,15 @@ class Bootstrapper(object):
     """Main class that performs system bootstrap."""
 
     def __init__(self, finished=FINISHED, choice=None, no_interactive=False,
-                 hg_configure=False, no_system_changes=False, mach_context=None):
+                 hg_configure=False, no_system_changes=False, mach_context=None,
+                 vcs=None):
         self.instance = None
         self.finished = finished
         self.choice = choice
         self.hg_configure = hg_configure
         self.no_system_changes = no_system_changes
         self.mach_context = mach_context
+        self.vcs = vcs
         cls = None
         args = {'no_interactive': no_interactive,
                 'no_system_changes': no_system_changes}
@@ -341,7 +342,7 @@ class Bootstrapper(object):
     # be available. We /could/ refactor parts of mach_bootstrap.py to be
     # part of this directory to avoid the code duplication.
     def try_to_create_state_dir(self):
-        state_dir, _ = get_state_dir()
+        state_dir = get_state_dir()
 
         if not os.path.exists(state_dir):
             should_create_state_dir = True
@@ -380,9 +381,11 @@ class Bootstrapper(object):
             sys.exit(1)
 
         self.instance.state_dir = state_dir
-        self.instance.ensure_clang_static_analysis_package(checkout_root)
-        self.instance.ensure_stylo_packages(state_dir, checkout_root)
         self.instance.ensure_node_packages(state_dir, checkout_root)
+        if not self.instance.artifact_mode:
+            self.instance.ensure_stylo_packages(state_dir, checkout_root)
+            self.instance.ensure_clang_static_analysis_package(state_dir, checkout_root)
+            self.instance.ensure_nasm_packages(state_dir, checkout_root)
 
     def check_telemetry_opt_in(self, state_dir):
         # We can't prompt the user.
@@ -411,6 +414,9 @@ class Bootstrapper(object):
         else:
             name, application = APPLICATIONS[self.choice]
 
+        self.instance.application = application
+        self.instance.artifact_mode = 'artifact_mode' in application
+
         if self.instance.no_system_changes:
             state_dir_available, state_dir = self.try_to_create_state_dir()
             # We need to enable the loading of hgrc in case extensions are
@@ -437,7 +443,8 @@ class Bootstrapper(object):
 
         hg_installed, hg_modern = self.instance.ensure_mercurial_modern()
         self.instance.ensure_python_modern()
-        self.instance.ensure_rust_modern()
+        if not self.instance.artifact_mode:
+            self.instance.ensure_rust_modern()
 
         state_dir_available, state_dir = self.try_to_create_state_dir()
 
@@ -448,8 +455,9 @@ class Bootstrapper(object):
                                      hg=self.instance.which('hg'))
         (checkout_type, checkout_root) = r
 
-        # Possibly configure Mercurial, but not if the current checkout is Git.
-        if hg_installed and state_dir_available and checkout_type != 'git':
+        # Possibly configure Mercurial, but not if the current checkout or repo
+        # type is Git.
+        if hg_installed and state_dir_available and (checkout_type == 'hg' or self.vcs == 'hg'):
             configure_hg = False
             if not self.instance.no_interactive:
                 choice = self.instance.prompt_int(prompt=CONFIGURE_MERCURIAL,
@@ -462,8 +470,8 @@ class Bootstrapper(object):
             if configure_hg:
                 configure_mercurial(self.instance.which('hg'), state_dir)
 
-        # Offer to configure Git, if the current checkout is Git.
-        elif self.instance.which('git') and checkout_type == 'git':
+        # Offer to configure Git, if the current checkout or repo type is Git.
+        elif self.instance.which('git') and (checkout_type == 'git' or self.vcs == 'git'):
             should_configure_git = False
             if not self.instance.no_interactive:
                 choice = self.instance.prompt_int(prompt=CONFIGURE_GIT,
@@ -483,12 +491,12 @@ class Bootstrapper(object):
 
         if checkout_type:
             have_clone = True
-        elif hg_installed and not self.instance.no_interactive:
+        elif hg_installed and not self.instance.no_interactive and self.vcs == 'hg':
             dest = self.input_clone_dest()
             if dest:
                 have_clone = hg_clone_firefox(self.instance.which('hg'), dest)
                 checkout_root = dest
-        elif self.instance.which('git') and checkout_type == 'git':
+        elif self.instance.which('git') and self.vcs == 'git':
             dest = self.input_clone_dest(False)
             if dest:
                 git = self.instance.which('git')
@@ -681,15 +689,16 @@ def update_git_tools(git, root_state_dir, top_src_dir):
     """Update git tools, hooks and extensions"""
     # Bug 1481425 - delete the git-mozreview
     # commit message hook in .git/hooks dir
-    mozreview_commit_hook = os.path.join(top_src_dir, '.git/hooks/commit-msg')
-    if os.path.exists(mozreview_commit_hook):
-        with open(mozreview_commit_hook, 'rb') as f:
-            contents = f.read()
+    if top_src_dir:
+        mozreview_commit_hook = os.path.join(top_src_dir, '.git/hooks/commit-msg')
+        if os.path.exists(mozreview_commit_hook):
+            with open(mozreview_commit_hook, 'rb') as f:
+                contents = f.read()
 
-        if b'MozReview' in contents:
-            print('removing git-mozreview commit message hook...')
-            os.remove(mozreview_commit_hook)
-            print('git-mozreview commit message hook removed.')
+            if b'MozReview' in contents:
+                print('removing git-mozreview commit message hook...')
+                os.remove(mozreview_commit_hook)
+                print('git-mozreview commit message hook removed.')
 
     # Ensure git-cinnabar is up to date.
     cinnabar_dir = os.path.join(root_state_dir, 'git-cinnabar')

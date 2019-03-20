@@ -354,16 +354,52 @@ add_task(async function test_windows_zoneInformation() {
                                          ["T".repeat(256) + ".txt"]);
   longTargetFile.createUnique(Ci.nsIFile.NORMAL_FILE_TYPE, 0o600);
 
-  for (let targetFile of [normalTargetFile, longTargetFile]) {
+  const httpSourceUrl = httpUrl("source.txt");
+  const dataSourceUrl = "data:text/html," + TEST_DATA_SHORT;
+  const tests = [
+    { expectedZoneId: "[ZoneTransfer]\r\nZoneId=3\r\n" +
+                      "HostUrl=" + httpSourceUrl + "\r\n" },
+    { targetFile: longTargetFile,
+      expectedZoneId: "[ZoneTransfer]\r\nZoneId=3\r\n" +
+                      "HostUrl=" + httpSourceUrl + "\r\n" },
+    { sourceUrl: dataSourceUrl,
+      expectedZoneId: "[ZoneTransfer]\r\nZoneId=3\r\n" +
+                      "HostUrl=about:internet\r\n" },
+    { options: { referrer: TEST_REFERRER_URL },
+      expectedZoneId: "[ZoneTransfer]\r\nZoneId=3\r\n" +
+                      "ReferrerUrl=" + TEST_REFERRER_URL + "\r\n" +
+                      "HostUrl=" + httpSourceUrl + "\r\n" },
+    { options: { referrer: dataSourceUrl },
+      expectedZoneId: "[ZoneTransfer]\r\nZoneId=3\r\n" +
+                      "HostUrl=" + httpSourceUrl + "\r\n" },
+    { options: { referrer: "http://example.com/a\rb\nc" },
+      expectedZoneId: "[ZoneTransfer]\r\nZoneId=3\r\n" +
+                      "ReferrerUrl=http://example.com/abc\r\n" +
+                      "HostUrl=" + httpSourceUrl + "\r\n" },
+    { options: { referrer: "ftp://user:pass@example.com/" },
+      expectedZoneId: "[ZoneTransfer]\r\nZoneId=3\r\n" +
+                      "ReferrerUrl=ftp://example.com/\r\n" +
+                      "HostUrl=" + httpSourceUrl + "\r\n" },
+    { options: { isPrivate: true },
+      expectedZoneId: "[ZoneTransfer]\r\nZoneId=3\r\n" },
+    { options: { referrer: TEST_REFERRER_URL, isPrivate: true },
+      expectedZoneId: "[ZoneTransfer]\r\nZoneId=3\r\n" },
+  ];
+  for (const test of tests) {
+    const sourceUrl = test.sourceUrl || httpSourceUrl;
+    const targetFile = test.targetFile || normalTargetFile;
+    info(targetFile.path);
     try {
       if (!gUseLegacySaver) {
         let download = await Downloads.createDownload({
-          source: httpUrl("source.txt"),
+          source: test.options ? Object.assign({ url: sourceUrl }, test.options)
+                               : sourceUrl,
           target: targetFile.path,
         });
         await download.start();
       } else {
-        let download = await promiseStartLegacyDownload(null, { targetFile });
+        let download = await promiseStartLegacyDownload(sourceUrl,
+          Object.assign({ targetFile }, test.options || {}));
         await promiseDownloadStopped(download);
       }
       await promiseVerifyContents(targetFile.path, TEST_DATA_SHORT);
@@ -373,7 +409,7 @@ add_task(async function test_windows_zoneInformation() {
                  { winAllowLengthBeyondMaxPathWithCaveats: true });
       try {
         Assert.equal(new TextDecoder().decode(await file.read()),
-                     "[ZoneTransfer]\r\nZoneId=3\r\n");
+                     test.expectedZoneId);
       } finally {
         file.close();
       }
@@ -1452,6 +1488,51 @@ add_task(async function test_error_source_partial() {
 });
 
 /**
+ * Ensures a download error is reported when an RST packet is received.
+ */
+add_task(async function test_error_source_netreset() {
+  if (AppConstants.platform == "win") {
+    return;
+  }
+
+  let download;
+  try {
+    if (!gUseLegacySaver) {
+      // When testing DownloadCopySaver, we want to check that the promise
+      // returned by the "start" method is rejected.
+      download = await promiseNewDownload(httpUrl("netreset.txt"));
+
+      Assert.ok(download.error === null);
+
+      await download.start();
+    } else {
+      // When testing DownloadLegacySaver, we cannot be sure whether we are
+      // testing the promise returned by the "start" method or we are testing
+      // the "error" property checked by promiseDownloadStopped.  This happens
+      // because we don't have control over when the download is started.
+      download = await promiseStartLegacyDownload(httpUrl("netreset.txt"));
+      await promiseDownloadStopped(download);
+    }
+    do_throw("The download should have failed.");
+  } catch (ex) {
+    if (!(ex instanceof Downloads.Error) || !ex.becauseSourceFailed) {
+      throw ex;
+    }
+    // A specific error object is thrown when reading from the source fails.
+  }
+
+  // Check the properties now that the download stopped.
+  Assert.ok(download.stopped);
+  Assert.ok(!download.canceled);
+  Assert.ok(download.error !== null);
+  Assert.ok(download.error.becauseSourceFailed);
+  Assert.ok(!download.error.becauseTargetFailed);
+  Assert.equal(download.error.result, Cr.NS_ERROR_NET_RESET);
+
+  Assert.equal(false, await OS.File.exists(download.target.path));
+});
+
+/**
  * Ensures download error details are reported on local writing failures.
  */
 add_task(async function test_error_target() {
@@ -1724,7 +1805,6 @@ add_task(async function test_cancel_midway_restart_with_content_encoding() {
     // case the download already reached the expected progress.
     download.onchange = onchange;
     onchange();
-
   });
 
   Assert.ok(download.stopped);

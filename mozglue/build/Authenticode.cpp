@@ -5,25 +5,25 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #ifdef MOZ_MEMORY
-#define MOZ_MEMORY_IMPL
-#include "mozmemory_wrap.h"
-#define MALLOC_FUNCS MALLOC_FUNCS_MALLOC
+#  define MOZ_MEMORY_IMPL
+#  include "mozmemory_wrap.h"
+#  define MALLOC_FUNCS MALLOC_FUNCS_MALLOC
 // See mozmemory_wrap.h for more details. This file is part of libmozglue, so
 // it needs to use _impl suffixes.
-#define MALLOC_DECL(name, return_type, ...) \
-  extern "C" MOZ_MEMORY_API return_type name##_impl(__VA_ARGS__);
-#include "malloc_decls.h"
-#include "mozilla/mozalloc.h"
+#  define MALLOC_DECL(name, return_type, ...) \
+    MOZ_MEMORY_API return_type name##_impl(__VA_ARGS__);
+#  include "malloc_decls.h"
+#  include "mozilla/mozalloc.h"
 #endif
 
 // We need Windows 8 functions and structures to be able to verify SHA-256.
 #if defined(_WIN32_WINNT)
-#undef _WIN32_WINNT
-#define _WIN32_WINNT _WIN32_WINNT_WIN8
+#  undef _WIN32_WINNT
+#  define _WIN32_WINNT _WIN32_WINNT_WIN8
 #endif  // defined(_WIN32_WINNT)
 #if defined(NTDDI_VERSION)
-#undef NTDDI_VERSION
-#define NTDDI_VERSION NTDDI_WIN8
+#  undef NTDDI_VERSION
+#  define NTDDI_VERSION NTDDI_WIN8
 #endif  // defined(NTDDI_VERSION)
 
 #include "Authenticode.h"
@@ -172,8 +172,8 @@ bool SignedBinary::QueryObject(const wchar_t* aFilePath) {
  *                   |dwUnionChoice|, and appropriate union field. This function
  *                   will then populate the remaining fields as appropriate.
  */
-/* static */ bool SignedBinary::VerifySignatureInternal(
-    WINTRUST_DATA& aTrustData) {
+/* static */
+bool SignedBinary::VerifySignatureInternal(WINTRUST_DATA& aTrustData) {
   aTrustData.dwUIChoice = WTD_UI_NONE;
   aTrustData.fdwRevocationChecks = WTD_REVOKE_NONE;
   aTrustData.dwStateAction = WTD_STATEACTION_VERIFY;

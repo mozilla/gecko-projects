@@ -78,6 +78,8 @@ interface nsIXULRuntime : nsISupports
   const unsigned long PROCESS_TYPE_GPU = 5;
   const unsigned long PROCESS_TYPE_VR = 6;
   const unsigned long PROCESS_TYPE_RDD = 7;
+  const unsigned long PROCESS_TYPE_SOCKET = 8;
+  const unsigned long PROCESS_TYPE_SANDBOX_BROKER = 9;
 
   /**
    * The type of the caller's process.  Returns one of the values above.
@@ -201,4 +203,10 @@ interface nsIXULRuntime : nsISupports
    * restart mechanism (such as RegisterApplicationRestart on Windows).
    */
   readonly attribute boolean restartedByOS;
+
+  /**
+   * Returns a value corresponding to one of the
+   * |mozilla::LauncherRegistryInfo::EnabledState| values.
+   */
+  readonly attribute uint32_t launcherProcessState;
 };

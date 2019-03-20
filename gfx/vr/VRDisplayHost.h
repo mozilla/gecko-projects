@@ -21,7 +21,7 @@
 #include "mozilla/layers/LayersSurfaces.h"  // for SurfaceDescriptor
 
 #if defined(XP_WIN)
-#include <d3d11_1.h>
+#  include <d3d11_1.h>
 #elif defined(XP_MACOSX)
 class MacIOSurface;
 #endif
@@ -54,7 +54,7 @@ class VRDisplayHost {
                    const layers::SurfaceDescriptor& aTexture, uint64_t aFrameId,
                    const gfx::Rect& aLeftEyeRect,
                    const gfx::Rect& aRightEyeRect);
-
+  void CancelCurrentSubmitTask();
   bool CheckClearDisplayInfoDirty();
   void SetGroupMask(uint32_t aGroupMask);
   bool GetIsConnected();
@@ -91,7 +91,7 @@ class VRDisplayHost {
   // VRLayerParent destructor
 
  protected:
-  virtual VRHMDSensorState GetSensorState() = 0;
+  virtual VRHMDSensorState& GetSensorState() = 0;
 
   RefPtr<VRThread> mSubmitThread;
 
@@ -102,6 +102,9 @@ class VRDisplayHost {
   void CheckWatchDog();
 
   VRDisplayInfo mLastUpdateDisplayInfo;
+
+  mozilla::Monitor mCurrentSubmitTaskMonitor;
+  RefPtr<CancelableRunnable> mCurrentSubmitTask;
   bool mFrameStarted;
 #if defined(MOZ_WIDGET_ANDROID)
  protected:

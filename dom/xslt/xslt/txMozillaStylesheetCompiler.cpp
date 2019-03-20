@@ -5,7 +5,7 @@
 
 #include "nsCOMArray.h"
 #include "nsIAuthPrompt.h"
-#include "nsIDocument.h"
+#include "mozilla/dom/Document.h"
 #include "nsIExpatSink.h"
 #include "nsIChannelEventSink.h"
 #include "nsIInterfaceRequestor.h"
@@ -197,7 +197,7 @@ txStylesheetSink::DidBuildModel(bool aTerminated) {
 }
 
 NS_IMETHODIMP
-txStylesheetSink::OnDataAvailable(nsIRequest* aRequest, nsISupports* aContext,
+txStylesheetSink::OnDataAvailable(nsIRequest* aRequest,
                                   nsIInputStream* aInputStream,
                                   uint64_t aOffset, uint32_t aCount) {
   if (!mCheckedForXML) {
@@ -216,12 +216,11 @@ txStylesheetSink::OnDataAvailable(nsIRequest* aRequest, nsISupports* aContext,
     }
   }
 
-  return mListener->OnDataAvailable(aRequest, mParser, aInputStream, aOffset,
-                                    aCount);
+  return mListener->OnDataAvailable(aRequest, aInputStream, aOffset, aCount);
 }
 
 NS_IMETHODIMP
-txStylesheetSink::OnStartRequest(nsIRequest* aRequest, nsISupports* aContext) {
+txStylesheetSink::OnStartRequest(nsIRequest* aRequest) {
   int32_t charsetSource = kCharsetFromDocTypeDefault;
 
   nsCOMPtr<nsIChannel> channel = do_QueryInterface(aRequest);
@@ -265,12 +264,11 @@ txStylesheetSink::OnStartRequest(nsIRequest* aRequest, nsISupports* aContext) {
     }
   }
 
-  return mListener->OnStartRequest(aRequest, mParser);
+  return mListener->OnStartRequest(aRequest);
 }
 
 NS_IMETHODIMP
-txStylesheetSink::OnStopRequest(nsIRequest* aRequest, nsISupports* aContext,
-                                nsresult aStatusCode) {
+txStylesheetSink::OnStopRequest(nsIRequest* aRequest, nsresult aStatusCode) {
   bool success = true;
 
   nsCOMPtr<nsIHttpChannel> httpChannel = do_QueryInterface(aRequest);
@@ -299,7 +297,7 @@ txStylesheetSink::OnStopRequest(nsIRequest* aRequest, nsISupports* aContext,
     mCompiler->cancel(result, nullptr, spec.get());
   }
 
-  nsresult rv = mListener->OnStopRequest(aRequest, mParser, aStatusCode);
+  nsresult rv = mListener->OnStopRequest(aRequest, aStatusCode);
   mListener = nullptr;
   mParser = nullptr;
   return rv;
@@ -331,7 +329,7 @@ txStylesheetSink::GetInterface(const nsIID& aIID, void** aResult) {
 class txCompileObserver final : public txACompileObserver {
  public:
   txCompileObserver(txMozillaXSLTProcessor* aProcessor,
-                    nsIDocument* aLoaderDocument);
+                    Document* aLoaderDocument);
 
   TX_DECL_ACOMPILEOBSERVER
   NS_INLINE_DECL_REFCOUNTING(txCompileObserver, override)
@@ -342,7 +340,7 @@ class txCompileObserver final : public txACompileObserver {
 
  private:
   RefPtr<txMozillaXSLTProcessor> mProcessor;
-  nsCOMPtr<nsIDocument> mLoaderDocument;
+  nsCOMPtr<Document> mLoaderDocument;
 
   // This exists solely to suppress a warning from nsDerivedSafe
   txCompileObserver();
@@ -352,7 +350,7 @@ class txCompileObserver final : public txACompileObserver {
 };
 
 txCompileObserver::txCompileObserver(txMozillaXSLTProcessor* aProcessor,
-                                     nsIDocument* aLoaderDocument)
+                                     Document* aLoaderDocument)
     : mProcessor(aProcessor), mLoaderDocument(aLoaderDocument) {}
 
 nsresult txCompileObserver::loadURI(const nsAString& aUri,
@@ -413,14 +411,10 @@ nsresult txCompileObserver::startLoad(nsIURI* aUri,
 
   nsCOMPtr<nsIHttpChannel> httpChannel(do_QueryInterface(channel));
   if (httpChannel) {
-    DebugOnly<nsresult> rv;
-    rv = httpChannel->SetRequestHeader(NS_LITERAL_CSTRING("Accept"),
-                                       NS_LITERAL_CSTRING("*/*"), false);
-    MOZ_ASSERT(NS_SUCCEEDED(rv));
-
     nsCOMPtr<nsIURI> referrerURI;
     aReferrerPrincipal->GetURI(getter_AddRefs(referrerURI));
     if (referrerURI) {
+      DebugOnly<nsresult> rv;
       rv = httpChannel->SetReferrerWithPolicy(referrerURI, aReferrerPolicy);
       MOZ_ASSERT(NS_SUCCEEDED(rv));
     }
@@ -438,11 +432,11 @@ nsresult txCompileObserver::startLoad(nsIURI* aUri,
   parser->SetContentSink(sink);
   parser->Parse(aUri);
 
-  return channel->AsyncOpen2(sink);
+  return channel->AsyncOpen(sink);
 }
 
 nsresult TX_LoadSheet(nsIURI* aUri, txMozillaXSLTProcessor* aProcessor,
-                      nsIDocument* aLoaderDocument,
+                      Document* aLoaderDocument,
                       ReferrerPolicy aReferrerPolicy) {
   nsIPrincipal* principal = aLoaderDocument->NodePrincipal();
 
@@ -563,11 +557,12 @@ nsresult txSyncCompileObserver::loadURI(const nsAString& aUri,
     source = mProcessor->GetSourceContentModel();
   }
   nsAutoSyncOperation sync(source ? source->OwnerDoc() : nullptr);
-  nsCOMPtr<nsIDocument> document;
+  nsCOMPtr<Document> document;
 
   rv = nsSyncLoadService::LoadDocument(
       uri, nsIContentPolicy::TYPE_XSLT, referrerPrincipal,
-      nsILoadInfo::SEC_REQUIRE_CORS_DATA_INHERITS, nullptr, false,
+      nsILoadInfo::SEC_REQUIRE_CORS_DATA_INHERITS, nullptr,
+      source ? source->OwnerDoc()->CookieSettings() : nullptr, false,
       aReferrerPolicy, getter_AddRefs(document));
   NS_ENSURE_SUCCESS(rv, rv);
 
@@ -592,7 +587,7 @@ nsresult TX_CompileStylesheet(nsINode* aNode,
                               txMozillaXSLTProcessor* aProcessor,
                               txStylesheet** aStylesheet) {
   // If we move GetBaseURI to nsINode this can be simplified.
-  nsCOMPtr<nsIDocument> doc = aNode->OwnerDoc();
+  nsCOMPtr<Document> doc = aNode->OwnerDoc();
 
   nsCOMPtr<nsIURI> uri;
   if (aNode->IsContent()) {

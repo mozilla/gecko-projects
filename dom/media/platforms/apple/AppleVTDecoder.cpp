@@ -245,8 +245,11 @@ AppleVTDecoder::AppleFrameRef* AppleVTDecoder::CreateAppleFrameRef(
 }
 
 void AppleVTDecoder::SetSeekThreshold(const media::TimeUnit& aTime) {
-  LOG("SetSeekThreshold %lld", aTime.ToMicroseconds());
-  mSeekTargetThreshold = Some(aTime);
+  if (aTime.IsValid()) {
+    mSeekTargetThreshold = Some(aTime);
+  } else {
+    mSeekTargetThreshold.reset();
+  }
 }
 
 //
@@ -462,7 +465,7 @@ MediaResult AppleVTDecoder::InitializeSession() {
   CFBooleanRef isUsingHW = nullptr;
   rv = VTSessionCopyProperty(
       mSession,
-      kVTVideoDecoderSpecification_EnableHardwareAcceleratedVideoDecoder,
+      kVTDecompressionPropertyKey_UsingHardwareAcceleratedVideoDecoder,
       kCFAllocatorDefault, &isUsingHW);
   if (rv != noErr) {
     LOG("AppleVTDecoder: system doesn't support hardware acceleration");

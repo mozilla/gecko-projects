@@ -155,6 +155,12 @@ def parse_args():
                         help='Get tests from the given file.')
     input_og.add_option('-x', '--exclude-file', action='append',
                         help='Exclude tests from the given file.')
+    input_og.add_option('--wpt', dest='wpt',
+                        type='choice',
+                        choices=['enabled', 'disabled', 'if-running-everything'],
+                        default='if-running-everything',
+                        help="Enable or disable shell web-platform-tests "
+                        "(default: enable if no test paths are specified).")
     input_og.add_option('--include', action='append', dest='requested_paths', default=[],
                         help='Include the given test file or directory.')
     input_og.add_option('--exclude', action='append', dest='excluded_paths', default=[],
@@ -298,7 +304,7 @@ def parse_args():
     return (options, prefix, requested_paths, excluded_paths)
 
 
-def load_wpt_tests(xul_tester, requested_paths, excluded_paths):
+def load_wpt_tests(xul_tester, requested_paths, excluded_paths, update_manifest=True):
     """Return a list of `RefTestCase` objects for the jsshell testharness.js
     tests filtered by the given paths and debug-ness."""
     repo_root = abspath(os.path.join(here, "..", "..", ".."))
@@ -317,6 +323,7 @@ def load_wpt_tests(xul_tester, requested_paths, excluded_paths):
         "testing/mozbase/mozprocess",
         "testing/mozbase/mozprofile",
         "testing/mozbase/mozrunner",
+        "testing/mozbase/mozversion",
         "testing/web-platform/",
         "testing/web-platform/tests/tools",
         "testing/web-platform/tests/tools/third_party/html5lib",
@@ -350,7 +357,8 @@ def load_wpt_tests(xul_tester, requested_paths, excluded_paths):
 
     logger = wptlogging.setup({}, {})
 
-    manifestupdate.run(repo_root, manifest_root, logger)
+    test_manifests = manifestupdate.run(repo_root, manifest_root, logger,
+                                        update=update_manifest)
 
     kwargs = vars(wptcommandline.create_parser().parse_args([]))
     kwargs.update({
@@ -360,21 +368,19 @@ def load_wpt_tests(xul_tester, requested_paths, excluded_paths):
         "wasm": xul_tester.test("wasmIsSupported()"),
     })
     wptcommandline.set_from_config(kwargs)
-    test_paths = kwargs["test_paths"]
 
     def filter_jsshell_tests(it):
-        for test in it:
-            if test[1].get("jsshell"):
-                yield test
-
-    test_manifests = testloader.ManifestLoader(test_paths, types=["testharness"],
-                                               meta_filters=[filter_jsshell_tests]).load()
+        for item_type, path, tests in it:
+            tests = set(item for item in tests if item.jsshell)
+            if tests:
+                yield item_type, path, tests
 
     run_info_extras = products.load_product(kwargs["config"], "firefox")[-1](**kwargs)
     run_info = wpttest.get_run_info(kwargs["test_paths"]["/"]["metadata_path"],
                                     "firefox",
                                     debug=xul_tester.test("isDebugBuild"),
                                     extras=run_info_extras)
+    run_info["release_or_beta"] = xul_tester.test("getBuildConfiguration().release_or_beta")
 
     path_filter = testloader.TestFilter(test_manifests,
                                         include=requested_paths,
@@ -382,9 +388,10 @@ def load_wpt_tests(xul_tester, requested_paths, excluded_paths):
     loader = testloader.TestLoader(test_manifests,
                                    ["testharness"],
                                    run_info,
-                                   manifest_filters=[path_filter])
+                                   manifest_filters=[path_filter, filter_jsshell_tests])
 
     extra_helper_paths = [
+        os.path.join(here, "web-platform-test-shims.js"),
         os.path.join(wpt, "resources", "testharness.js"),
         os.path.join(here, "testharnessreport.js"),
     ]
@@ -433,7 +440,11 @@ def load_tests(options, requested_paths, excluded_paths):
     test_gen = manifest.load_reftests(test_dir, path_options, xul_tester)
 
     # WPT tests are already run in the browser in their own harness.
-    if not options.make_manifests:
+    wpt_enabled = (options.wpt == 'enabled' or
+                   (options.wpt == 'if-running-everything' and
+                    len(requested_paths) == 0 and
+                    not options.make_manifests))
+    if wpt_enabled:
         wpt_tests = load_wpt_tests(xul_tester,
                                    requested_paths,
                                    excluded_paths)

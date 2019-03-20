@@ -6,7 +6,7 @@
 
 #include shared,prim_shared,brush
 
-flat varying int vGradientAddress;
+flat varying HIGHP_FS_ADDRESS int vGradientAddress;
 flat varying float vGradientRepeat;
 
 flat varying vec2 vCenter;
@@ -56,6 +56,7 @@ void brush_vs(
     if ((brush_flags & BRUSH_FLAG_SEGMENT_RELATIVE) != 0) {
         vPos = (vi.local_pos - segment_rect.p0) / segment_rect.size;
         vPos = vPos * (texel_rect.zw - texel_rect.xy) + texel_rect.xy;
+        vPos = vPos * local_rect.size;
     } else {
         vPos = vi.local_pos - local_rect.p0;
     }

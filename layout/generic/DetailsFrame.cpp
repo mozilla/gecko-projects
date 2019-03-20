@@ -19,19 +19,19 @@ using namespace mozilla::dom;
 NS_IMPL_FRAMEARENA_HELPERS(DetailsFrame)
 
 NS_QUERYFRAME_HEAD(DetailsFrame)
-NS_QUERYFRAME_ENTRY(DetailsFrame)
-NS_QUERYFRAME_ENTRY(nsIAnonymousContentCreator)
+  NS_QUERYFRAME_ENTRY(DetailsFrame)
+  NS_QUERYFRAME_ENTRY(nsIAnonymousContentCreator)
 NS_QUERYFRAME_TAIL_INHERITING(nsBlockFrame)
 
 nsBlockFrame* NS_NewDetailsFrame(nsIPresShell* aPresShell,
                                  ComputedStyle* aStyle) {
-  return new (aPresShell) DetailsFrame(aStyle);
+  return new (aPresShell) DetailsFrame(aStyle, aPresShell->GetPresContext());
 }
 
 namespace mozilla {
 
-DetailsFrame::DetailsFrame(ComputedStyle* aStyle)
-    : nsBlockFrame(aStyle, kClassID) {}
+DetailsFrame::DetailsFrame(ComputedStyle* aStyle, nsPresContext* aPresContext)
+    : nsBlockFrame(aStyle, aPresContext, kClassID) {}
 
 DetailsFrame::~DetailsFrame() {}
 
@@ -115,10 +115,10 @@ void DetailsFrame::AppendAnonymousContentTo(nsTArray<nsIContent*>& aElements,
 }
 
 bool DetailsFrame::HasMainSummaryFrame(nsIFrame* aSummaryFrame) {
-  const ChildListIDs flowLists(kPrincipalList | kOverflowList);
+  const ChildListIDs flowLists = {kPrincipalList, kOverflowList};
   for (nsIFrame* frag = this; frag; frag = frag->GetNextInFlow()) {
     for (ChildListIterator lists(frag); !lists.IsDone(); lists.Next()) {
-      if (!flowLists.Contains(lists.CurrentID())) {
+      if (!flowLists.contains(lists.CurrentID())) {
         continue;
       }
       for (nsIFrame* child : lists.CurrentList()) {

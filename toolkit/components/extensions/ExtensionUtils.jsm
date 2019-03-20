@@ -7,8 +7,8 @@
 
 var EXPORTED_SYMBOLS = ["ExtensionUtils"];
 
-ChromeUtils.import("resource://gre/modules/Services.jsm");
-ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
+const {Services} = ChromeUtils.import("resource://gre/modules/Services.jsm");
+const {XPCOMUtils} = ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
 
 ChromeUtils.defineModuleGetter(this, "setTimeout",
                                "resource://gre/modules/Timer.jsm");
@@ -259,17 +259,7 @@ function flushJarCache(jarPath) {
   Services.obs.notifyObservers(null, "flush-cache-entry", jarPath);
 }
 
-const chromeModifierKeyMap = {
-  "Alt": "alt",
-  "Command": "accel",
-  "Ctrl": "accel",
-  "MacCtrl": "control",
-  "Shift": "shift",
-};
-
-
 var ExtensionUtils = {
-  chromeModifierKeyMap,
   flushJarCache,
   getInnerWindowID,
   getMessageManager,

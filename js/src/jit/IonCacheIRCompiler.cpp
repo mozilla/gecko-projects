@@ -19,6 +19,7 @@
 
 #include "jit/JSJitFrameIter-inl.h"
 #include "jit/MacroAssembler-inl.h"
+#include "jit/VMFunctionList-inl.h"
 #include "vm/Realm-inl.h"
 #include "vm/TypeInference-inl.h"
 
@@ -103,7 +104,13 @@ class MOZ_RAII IonCacheIRCompiler : public CacheIRCompiler {
   }
 
   void prepareVMCall(MacroAssembler& masm, const AutoSaveLiveRegisters&);
-  MOZ_MUST_USE bool callVM(MacroAssembler& masm, const VMFunction& fun);
+  void callVMInternal(MacroAssembler& masm, VMFunctionId id);
+
+  template <typename Fn, Fn fn>
+  void callVM(MacroAssembler& masm) {
+    VMFunctionId id = VMFunctionToId<Fn, fn>::id;
+    callVMInternal(masm, id);
+  }
 
   MOZ_MUST_USE bool emitAddAndStoreSlotShared(CacheOp op);
 
@@ -115,7 +122,7 @@ class MOZ_RAII IonCacheIRCompiler : public CacheIRCompiler {
     stubJitCodeOffset_.emplace(masm.PushWithPatch(ImmPtr((void*)-1)));
   }
 
-#define DEFINE_OP(op) MOZ_MUST_USE bool emit##op();
+#define DEFINE_OP(op, ...) MOZ_MUST_USE bool emit##op();
   CACHE_IR_OPS(DEFINE_OP)
 #undef DEFINE_OP
 };
@@ -324,11 +331,12 @@ void IonCacheIRCompiler::prepareVMCall(MacroAssembler& masm,
 #endif
 }
 
-bool IonCacheIRCompiler::callVM(MacroAssembler& masm, const VMFunction& fun) {
+void IonCacheIRCompiler::callVMInternal(MacroAssembler& masm, VMFunctionId id) {
   MOZ_ASSERT(calledPrepareVMCall_);
 
-  TrampolinePtr code = cx_->runtime()->jitRuntime()->getVMWrapper(fun);
+  TrampolinePtr code = cx_->runtime()->jitRuntime()->getVMWrapper(id);
 
+  const VMFunctionData& fun = GetVMFunction(id);
   uint32_t frameSize = fun.explicitStackSlots() * sizeof(void*);
   uint32_t descriptor = MakeFrameDescriptor(frameSize, FrameType::IonICCall,
                                             ExitFrameLayout::Size());
@@ -336,13 +344,12 @@ bool IonCacheIRCompiler::callVM(MacroAssembler& masm, const VMFunction& fun) {
   masm.callJit(code);
 
   // Remove rest of the frame left on the stack. We remove the return address
-  // which is implicitly poped when returning.
+  // which is implicitly popped when returning.
   int framePop = sizeof(ExitFrameLayout) - sizeof(void*);
 
   // Pop arguments from framePushed.
   masm.implicitPop(frameSize + framePop);
   masm.freeStack(IonICCallFrameLayout::Size());
-  return true;
 }
 
 bool IonCacheIRCompiler::init() {
@@ -588,7 +595,7 @@ JitCode* IonCacheIRCompiler::compile() {
 
   do {
     switch (reader.readOp()) {
-#define DEFINE_OP(op)                \
+#define DEFINE_OP(op, ...)           \
   case CacheOp::op:                  \
     if (!emit##op()) return nullptr; \
     break;
@@ -598,7 +605,9 @@ JitCode* IonCacheIRCompiler::compile() {
       default:
         MOZ_CRASH("Invalid op");
     }
-
+#ifdef DEBUG
+    assertAllArgumentsConsumed();
+#endif
     allocator.nextOp();
   } while (reader.more());
 
@@ -617,8 +626,7 @@ JitCode* IonCacheIRCompiler::compile() {
     }
   }
 
-  Linker linker(masm);
-  AutoFlushICache afc("getStubCode");
+  Linker linker(masm, "getStubCode");
   Rooted<JitCode*> newStubCode(cx_, linker.newCode(cx_, CodeKind::Ion));
   if (!newStubCode) {
     cx_->recoverFromOutOfMemory();
@@ -644,6 +652,7 @@ JitCode* IonCacheIRCompiler::compile() {
 }
 
 bool IonCacheIRCompiler::emitGuardShape() {
+  JitSpew(JitSpew_Codegen, __FUNCTION__);
   ObjOperandId objId = reader.objOperandId();
   Register obj = allocator.useRegister(masm, objId);
   Shape* shape = shapeStubField(reader.stubOffset());
@@ -672,6 +681,7 @@ bool IonCacheIRCompiler::emitGuardShape() {
 }
 
 bool IonCacheIRCompiler::emitGuardGroup() {
+  JitSpew(JitSpew_Codegen, __FUNCTION__);
   ObjOperandId objId = reader.objOperandId();
   Register obj = allocator.useRegister(masm, objId);
   ObjectGroup* group = groupStubField(reader.stubOffset());
@@ -700,6 +710,7 @@ bool IonCacheIRCompiler::emitGuardGroup() {
 }
 
 bool IonCacheIRCompiler::emitGuardProto() {
+  JitSpew(JitSpew_Codegen, __FUNCTION__);
   Register obj = allocator.useRegister(masm, reader.objOperandId());
   JSObject* proto = objectStubField(reader.stubOffset());
 
@@ -717,6 +728,7 @@ bool IonCacheIRCompiler::emitGuardProto() {
 }
 
 bool IonCacheIRCompiler::emitGuardCompartment() {
+  JitSpew(JitSpew_Codegen, __FUNCTION__);
   Register obj = allocator.useRegister(masm, reader.objOperandId());
   JSObject* globalWrapper = objectStubField(reader.stubOffset());
   JS::Compartment* compartment = compartmentStubField(reader.stubOffset());
@@ -740,6 +752,7 @@ bool IonCacheIRCompiler::emitGuardCompartment() {
 }
 
 bool IonCacheIRCompiler::emitGuardAnyClass() {
+  JitSpew(JitSpew_Codegen, __FUNCTION__);
   ObjOperandId objId = reader.objOperandId();
   Register obj = allocator.useRegister(masm, objId);
   AutoScratchRegister scratch(allocator, masm);
@@ -763,6 +776,7 @@ bool IonCacheIRCompiler::emitGuardAnyClass() {
 }
 
 bool IonCacheIRCompiler::emitGuardHasProxyHandler() {
+  JitSpew(JitSpew_Codegen, __FUNCTION__);
   Register obj = allocator.useRegister(masm, reader.objOperandId());
   const void* handler = proxyHandlerStubField(reader.stubOffset());
 
@@ -778,6 +792,7 @@ bool IonCacheIRCompiler::emitGuardHasProxyHandler() {
 }
 
 bool IonCacheIRCompiler::emitGuardSpecificObject() {
+  JitSpew(JitSpew_Codegen, __FUNCTION__);
   Register obj = allocator.useRegister(masm, reader.objOperandId());
   JSObject* expected = objectStubField(reader.stubOffset());
 
@@ -792,6 +807,7 @@ bool IonCacheIRCompiler::emitGuardSpecificObject() {
 }
 
 bool IonCacheIRCompiler::emitGuardSpecificAtom() {
+  JitSpew(JitSpew_Codegen, __FUNCTION__);
   Register str = allocator.useRegister(masm, reader.stringOperandId());
   AutoScratchRegister scratch(allocator, masm);
 
@@ -837,6 +853,7 @@ bool IonCacheIRCompiler::emitGuardSpecificAtom() {
 }
 
 bool IonCacheIRCompiler::emitGuardSpecificSymbol() {
+  JitSpew(JitSpew_Codegen, __FUNCTION__);
   Register sym = allocator.useRegister(masm, reader.symbolOperandId());
   JS::Symbol* expected = symbolStubField(reader.stubOffset());
 
@@ -855,6 +872,7 @@ bool IonCacheIRCompiler::emitLoadValueResult() {
 }
 
 bool IonCacheIRCompiler::emitLoadFixedSlotResult() {
+  JitSpew(JitSpew_Codegen, __FUNCTION__);
   AutoOutputRegister output(*this);
   Register obj = allocator.useRegister(masm, reader.objOperandId());
   int32_t offset = int32StubField(reader.stubOffset());
@@ -863,6 +881,7 @@ bool IonCacheIRCompiler::emitLoadFixedSlotResult() {
 }
 
 bool IonCacheIRCompiler::emitLoadDynamicSlotResult() {
+  JitSpew(JitSpew_Codegen, __FUNCTION__);
   AutoOutputRegister output(*this);
   Register obj = allocator.useRegister(masm, reader.objOperandId());
   int32_t offset = int32StubField(reader.stubOffset());
@@ -874,6 +893,7 @@ bool IonCacheIRCompiler::emitLoadDynamicSlotResult() {
 }
 
 bool IonCacheIRCompiler::emitGuardHasGetterSetter() {
+  JitSpew(JitSpew_Codegen, __FUNCTION__);
   Register obj = allocator.useRegister(masm, reader.objOperandId());
   Shape* shape = shapeStubField(reader.stubOffset());
 
@@ -906,6 +926,7 @@ bool IonCacheIRCompiler::emitGuardHasGetterSetter() {
 }
 
 bool IonCacheIRCompiler::emitCallScriptedGetterResult() {
+  JitSpew(JitSpew_Codegen, __FUNCTION__);
   AutoSaveLiveRegisters save(*this);
   AutoOutputRegister output(*this);
 
@@ -977,6 +998,7 @@ bool IonCacheIRCompiler::emitCallScriptedGetterResult() {
 }
 
 bool IonCacheIRCompiler::emitCallNativeGetterResult() {
+  JitSpew(JitSpew_Codegen, __FUNCTION__);
   AutoSaveLiveRegisters save(*this);
   AutoOutputRegister output(*this);
 
@@ -1050,6 +1072,7 @@ bool IonCacheIRCompiler::emitCallNativeGetterResult() {
 }
 
 bool IonCacheIRCompiler::emitCallProxyGetResult() {
+  JitSpew(JitSpew_Codegen, __FUNCTION__);
   AutoSaveLiveRegisters save(*this);
   AutoOutputRegister output(*this);
 
@@ -1116,6 +1139,7 @@ bool IonCacheIRCompiler::emitCallProxyGetResult() {
 }
 
 bool IonCacheIRCompiler::emitCallProxyGetByValueResult() {
+  JitSpew(JitSpew_Codegen, __FUNCTION__);
   AutoSaveLiveRegisters save(*this);
   AutoOutputRegister output(*this);
 
@@ -1129,15 +1153,16 @@ bool IonCacheIRCompiler::emitCallProxyGetByValueResult() {
   masm.Push(idVal);
   masm.Push(obj);
 
-  if (!callVM(masm, ProxyGetPropertyByValueInfo)) {
-    return false;
-  }
+  using Fn =
+      bool (*)(JSContext*, HandleObject, HandleValue, MutableHandleValue);
+  callVM<Fn, ProxyGetPropertyByValue>(masm);
 
   masm.storeCallResultValue(output);
   return true;
 }
 
 bool IonCacheIRCompiler::emitCallProxyHasPropResult() {
+  JitSpew(JitSpew_Codegen, __FUNCTION__);
   AutoSaveLiveRegisters save(*this);
   AutoOutputRegister output(*this);
 
@@ -1152,14 +1177,12 @@ bool IonCacheIRCompiler::emitCallProxyHasPropResult() {
   masm.Push(idVal);
   masm.Push(obj);
 
+  using Fn =
+      bool (*)(JSContext*, HandleObject, HandleValue, MutableHandleValue);
   if (hasOwn) {
-    if (!callVM(masm, ProxyHasOwnInfo)) {
-      return false;
-    }
+    callVM<Fn, ProxyHasOwn>(masm);
   } else {
-    if (!callVM(masm, ProxyHasInfo)) {
-      return false;
-    }
+    callVM<Fn, ProxyHas>(masm);
   }
 
   masm.storeCallResultValue(output);
@@ -1167,6 +1190,7 @@ bool IonCacheIRCompiler::emitCallProxyHasPropResult() {
 }
 
 bool IonCacheIRCompiler::emitCallNativeGetElementResult() {
+  JitSpew(JitSpew_Codegen, __FUNCTION__);
   AutoSaveLiveRegisters save(*this);
   AutoOutputRegister output(*this);
 
@@ -1181,19 +1205,20 @@ bool IonCacheIRCompiler::emitCallNativeGetElementResult() {
   masm.Push(TypedOrValueRegister(MIRType::Object, AnyRegister(obj)));
   masm.Push(obj);
 
-  if (!callVM(masm, NativeGetElementInfo)) {
-    return false;
-  }
+  using Fn = bool (*)(JSContext*, HandleNativeObject, HandleValue, int32_t,
+                      MutableHandleValue);
+  callVM<Fn, NativeGetElement>(masm);
 
   masm.storeCallResultValue(output);
   return true;
 }
 
 bool IonCacheIRCompiler::emitLoadUnboxedPropertyResult() {
+  JitSpew(JitSpew_Codegen, __FUNCTION__);
   AutoOutputRegister output(*this);
   Register obj = allocator.useRegister(masm, reader.objOperandId());
 
-  JSValueType fieldType = reader.valueType();
+  JSValueType fieldType = reader.jsValueType();
   int32_t fieldOffset = int32StubField(reader.stubOffset());
   masm.loadUnboxedProperty(Address(obj, fieldOffset), fieldType, output);
   return true;
@@ -1216,6 +1241,7 @@ bool IonCacheIRCompiler::emitLoadFrameArgumentResult() {
 }
 
 bool IonCacheIRCompiler::emitLoadEnvironmentFixedSlotResult() {
+  JitSpew(JitSpew_Codegen, __FUNCTION__);
   AutoOutputRegister output(*this);
   Register obj = allocator.useRegister(masm, reader.objOperandId());
   int32_t offset = int32StubField(reader.stubOffset());
@@ -1235,6 +1261,7 @@ bool IonCacheIRCompiler::emitLoadEnvironmentFixedSlotResult() {
 }
 
 bool IonCacheIRCompiler::emitLoadEnvironmentDynamicSlotResult() {
+  JitSpew(JitSpew_Codegen, __FUNCTION__);
   AutoOutputRegister output(*this);
   Register obj = allocator.useRegister(masm, reader.objOperandId());
   int32_t offset = int32StubField(reader.stubOffset());
@@ -1257,10 +1284,12 @@ bool IonCacheIRCompiler::emitLoadEnvironmentDynamicSlotResult() {
 }
 
 bool IonCacheIRCompiler::emitLoadStringResult() {
+  JitSpew(JitSpew_Codegen, __FUNCTION__);
   MOZ_CRASH("not used in ion");
 }
 
 bool IonCacheIRCompiler::emitCallStringSplitResult() {
+  JitSpew(JitSpew_Codegen, __FUNCTION__);
   AutoSaveLiveRegisters save(*this);
   AutoOutputRegister output(*this);
 
@@ -1277,15 +1306,16 @@ bool IonCacheIRCompiler::emitCallStringSplitResult() {
   masm.Push(ImmGCPtr(group));
   masm.Push(Imm32(INT32_MAX));
 
-  if (!callVM(masm, StringSplitHelperInfo)) {
-    return false;
-  }
+  using Fn = bool (*)(JSContext*, HandleString, HandleString, HandleObjectGroup,
+                      uint32_t limit, MutableHandleValue);
+  callVM<Fn, StringSplitHelper>(masm);
 
   masm.storeCallResultValue(output);
   return true;
 }
 
 bool IonCacheIRCompiler::emitCompareStringResult() {
+  JitSpew(JitSpew_Codegen, __FUNCTION__);
   AutoSaveLiveRegisters save(*this);
   AutoOutputRegister output(*this);
 
@@ -1306,10 +1336,11 @@ bool IonCacheIRCompiler::emitCompareStringResult() {
   masm.Push(right);
   masm.Push(left);
 
-  if (!callVM(masm, (op == JSOP_EQ || op == JSOP_STRICTEQ)
-                        ? StringsEqualInfo
-                        : StringsNotEqualInfo)) {
-    return false;
+  using Fn = bool (*)(JSContext*, HandleString, HandleString, bool*);
+  if (op == JSOP_EQ || op == JSOP_STRICTEQ) {
+    callVM<Fn, jit::StringsEqual<true>>(masm);
+  } else {
+    callVM<Fn, jit::StringsEqual<false>>(masm);
   }
 
   masm.storeCallBoolResult(output.typedReg().gpr());
@@ -1475,6 +1506,7 @@ static void EmitCheckPropertyTypes(MacroAssembler& masm,
 }
 
 bool IonCacheIRCompiler::emitStoreFixedSlot() {
+  JitSpew(JitSpew_Codegen, __FUNCTION__);
   Register obj = allocator.useRegister(masm, reader.objOperandId());
   int32_t offset = int32StubField(reader.stubOffset());
   ConstantOrRegister val =
@@ -1505,6 +1537,7 @@ bool IonCacheIRCompiler::emitStoreFixedSlot() {
 }
 
 bool IonCacheIRCompiler::emitStoreDynamicSlot() {
+  JitSpew(JitSpew_Codegen, __FUNCTION__);
   Register obj = allocator.useRegister(masm, reader.objOperandId());
   int32_t offset = int32StubField(reader.stubOffset());
   ConstantOrRegister val =
@@ -1532,6 +1565,7 @@ bool IonCacheIRCompiler::emitStoreDynamicSlot() {
 }
 
 bool IonCacheIRCompiler::emitAddAndStoreSlotShared(CacheOp op) {
+  JitSpew(JitSpew_Codegen, __FUNCTION__);
   Register obj = allocator.useRegister(masm, reader.objOperandId());
   int32_t offset = int32StubField(reader.stubOffset());
   ConstantOrRegister val =
@@ -1626,20 +1660,24 @@ bool IonCacheIRCompiler::emitAddAndStoreSlotShared(CacheOp op) {
 }
 
 bool IonCacheIRCompiler::emitAddAndStoreFixedSlot() {
+  JitSpew(JitSpew_Codegen, __FUNCTION__);
   return emitAddAndStoreSlotShared(CacheOp::AddAndStoreFixedSlot);
 }
 
 bool IonCacheIRCompiler::emitAddAndStoreDynamicSlot() {
+  JitSpew(JitSpew_Codegen, __FUNCTION__);
   return emitAddAndStoreSlotShared(CacheOp::AddAndStoreDynamicSlot);
 }
 
 bool IonCacheIRCompiler::emitAllocateAndStoreDynamicSlot() {
+  JitSpew(JitSpew_Codegen, __FUNCTION__);
   return emitAddAndStoreSlotShared(CacheOp::AllocateAndStoreDynamicSlot);
 }
 
 bool IonCacheIRCompiler::emitStoreUnboxedProperty() {
+  JitSpew(JitSpew_Codegen, __FUNCTION__);
   Register obj = allocator.useRegister(masm, reader.objOperandId());
-  JSValueType fieldType = reader.valueType();
+  JSValueType fieldType = reader.jsValueType();
   int32_t offset = int32StubField(reader.stubOffset());
   ConstantOrRegister val =
       allocator.useConstantOrRegister(masm, reader.valOperandId());
@@ -1670,6 +1708,7 @@ bool IonCacheIRCompiler::emitStoreUnboxedProperty() {
 }
 
 bool IonCacheIRCompiler::emitStoreTypedObjectReferenceProperty() {
+  JitSpew(JitSpew_Codegen, __FUNCTION__);
   Register obj = allocator.useRegister(masm, reader.objOperandId());
   int32_t offset = int32StubField(reader.stubOffset());
   TypedThingLayout layout = reader.typedThingLayout();
@@ -1704,6 +1743,7 @@ bool IonCacheIRCompiler::emitStoreTypedObjectReferenceProperty() {
 }
 
 bool IonCacheIRCompiler::emitStoreTypedObjectScalarProperty() {
+  JitSpew(JitSpew_Codegen, __FUNCTION__);
   Register obj = allocator.useRegister(masm, reader.objOperandId());
   int32_t offset = int32StubField(reader.stubOffset());
   TypedThingLayout layout = reader.typedThingLayout();
@@ -1765,14 +1805,15 @@ static void EmitStoreDenseElement(MacroAssembler& masm,
   masm.jump(&done);
 
   masm.bind(&convert);
+  ScratchDoubleScope fpscratch(masm);
   if (reg.hasValue()) {
     masm.branchTestInt32(Assembler::NotEqual, reg.valueReg(), &storeValue);
-    masm.int32ValueToDouble(reg.valueReg(), ScratchDoubleReg);
-    masm.storeDouble(ScratchDoubleReg, target);
+    masm.int32ValueToDouble(reg.valueReg(), fpscratch);
+    masm.storeDouble(fpscratch, target);
   } else {
     MOZ_ASSERT(reg.type() == MIRType::Int32);
-    masm.convertInt32ToDouble(reg.typedReg().gpr(), ScratchDoubleReg);
-    masm.storeDouble(ScratchDoubleReg, target);
+    masm.convertInt32ToDouble(reg.typedReg().gpr(), fpscratch);
+    masm.storeDouble(fpscratch, target);
   }
 
   masm.bind(&done);
@@ -1793,6 +1834,7 @@ static void EmitAssertNoCopyOnWriteElements(MacroAssembler& masm,
 }
 
 bool IonCacheIRCompiler::emitStoreDenseElement() {
+  JitSpew(JitSpew_Codegen, __FUNCTION__);
   Register obj = allocator.useRegister(masm, reader.objOperandId());
   Register index = allocator.useRegister(masm, reader.int32OperandId());
   ConstantOrRegister val =
@@ -1838,6 +1880,7 @@ bool IonCacheIRCompiler::emitStoreDenseElement() {
 }
 
 bool IonCacheIRCompiler::emitStoreDenseElementHole() {
+  JitSpew(JitSpew_Codegen, __FUNCTION__);
   Register obj = allocator.useRegister(masm, reader.objOperandId());
   Register index = allocator.useRegister(masm, reader.int32OperandId());
   ConstantOrRegister val =
@@ -1942,6 +1985,7 @@ bool IonCacheIRCompiler::emitArrayPush() {
 }
 
 bool IonCacheIRCompiler::emitStoreTypedElement() {
+  JitSpew(JitSpew_Codegen, __FUNCTION__);
   Register obj = allocator.useRegister(masm, reader.objOperandId());
   Register index = allocator.useRegister(masm, reader.int32OperandId());
   ConstantOrRegister val =
@@ -2011,6 +2055,7 @@ bool IonCacheIRCompiler::emitStoreTypedElement() {
 }
 
 bool IonCacheIRCompiler::emitCallNativeSetter() {
+  JitSpew(JitSpew_Codegen, __FUNCTION__);
   AutoSaveLiveRegisters save(*this);
 
   Register obj = allocator.useRegister(masm, reader.objOperandId());
@@ -2076,6 +2121,7 @@ bool IonCacheIRCompiler::emitCallNativeSetter() {
 }
 
 bool IonCacheIRCompiler::emitCallScriptedSetter() {
+  JitSpew(JitSpew_Codegen, __FUNCTION__);
   AutoSaveLiveRegisters save(*this);
 
   Register obj = allocator.useRegister(masm, reader.objOperandId());
@@ -2148,6 +2194,7 @@ bool IonCacheIRCompiler::emitCallScriptedSetter() {
 }
 
 bool IonCacheIRCompiler::emitCallSetArrayLength() {
+  JitSpew(JitSpew_Codegen, __FUNCTION__);
   AutoSaveLiveRegisters save(*this);
 
   Register obj = allocator.useRegister(masm, reader.objOperandId());
@@ -2162,10 +2209,13 @@ bool IonCacheIRCompiler::emitCallSetArrayLength() {
   masm.Push(val);
   masm.Push(obj);
 
-  return callVM(masm, SetArrayLengthInfo);
+  using Fn = bool (*)(JSContext*, HandleObject, HandleValue, bool);
+  callVM<Fn, jit::SetArrayLength>(masm);
+  return true;
 }
 
 bool IonCacheIRCompiler::emitCallProxySet() {
+  JitSpew(JitSpew_Codegen, __FUNCTION__);
   AutoSaveLiveRegisters save(*this);
 
   Register obj = allocator.useRegister(masm, reader.objOperandId());
@@ -2184,10 +2234,13 @@ bool IonCacheIRCompiler::emitCallProxySet() {
   masm.Push(id, scratch);
   masm.Push(obj);
 
-  return callVM(masm, ProxySetPropertyInfo);
+  using Fn = bool (*)(JSContext*, HandleObject, HandleId, HandleValue, bool);
+  callVM<Fn, ProxySetProperty>(masm);
+  return true;
 }
 
 bool IonCacheIRCompiler::emitCallProxySetByValue() {
+  JitSpew(JitSpew_Codegen, __FUNCTION__);
   AutoSaveLiveRegisters save(*this);
 
   Register obj = allocator.useRegister(masm, reader.objOperandId());
@@ -2205,10 +2258,13 @@ bool IonCacheIRCompiler::emitCallProxySetByValue() {
   masm.Push(idVal);
   masm.Push(obj);
 
-  return callVM(masm, ProxySetPropertyByValueInfo);
+  using Fn = bool (*)(JSContext*, HandleObject, HandleValue, HandleValue, bool);
+  callVM<Fn, ProxySetPropertyByValue>(masm);
+  return true;
 }
 
 bool IonCacheIRCompiler::emitCallAddOrUpdateSparseElementHelper() {
+  JitSpew(JitSpew_Codegen, __FUNCTION__);
   AutoSaveLiveRegisters save(*this);
 
   Register obj = allocator.useRegister(masm, reader.objOperandId());
@@ -2224,10 +2280,14 @@ bool IonCacheIRCompiler::emitCallAddOrUpdateSparseElementHelper() {
   masm.Push(id);
   masm.Push(obj);
 
-  return callVM(masm, AddOrUpdateSparseElementHelperInfo);
+  using Fn = bool (*)(JSContext * cx, HandleArrayObject obj, int32_t int_id,
+                      HandleValue v, bool strict);
+  callVM<Fn, AddOrUpdateSparseElementHelper>(masm);
+  return true;
 }
 
 bool IonCacheIRCompiler::emitCallGetSparseElementResult() {
+  JitSpew(JitSpew_Codegen, __FUNCTION__);
   AutoSaveLiveRegisters save(*this);
   AutoOutputRegister output(*this);
 
@@ -2239,15 +2299,16 @@ bool IonCacheIRCompiler::emitCallGetSparseElementResult() {
   masm.Push(id);
   masm.Push(obj);
 
-  if (!callVM(masm, GetSparseElementHelperInfo)) {
-    return false;
-  }
+  using Fn = bool (*)(JSContext * cx, HandleArrayObject obj, int32_t int_id,
+                      MutableHandleValue result);
+  callVM<Fn, GetSparseElementHelper>(masm);
 
   masm.storeCallResultValue(output);
   return true;
 }
 
 bool IonCacheIRCompiler::emitMegamorphicSetElement() {
+  JitSpew(JitSpew_Codegen, __FUNCTION__);
   AutoSaveLiveRegisters save(*this);
 
   Register obj = allocator.useRegister(masm, reader.objOperandId());
@@ -2266,10 +2327,14 @@ bool IonCacheIRCompiler::emitMegamorphicSetElement() {
   masm.Push(idVal);
   masm.Push(obj);
 
-  return callVM(masm, SetObjectElementInfo);
+  using Fn = bool (*)(JSContext*, HandleObject, HandleValue, HandleValue,
+                      HandleValue, bool);
+  callVM<Fn, SetObjectElementWithReceiver>(masm);
+  return true;
 }
 
 bool IonCacheIRCompiler::emitLoadTypedObjectResult() {
+  JitSpew(JitSpew_Codegen, __FUNCTION__);
   AutoOutputRegister output(*this);
   Register obj = allocator.useRegister(masm, reader.objOperandId());
   AutoScratchRegister scratch1(allocator, masm);
@@ -2287,9 +2352,13 @@ bool IonCacheIRCompiler::emitLoadTypedObjectResult() {
   return true;
 }
 
-bool IonCacheIRCompiler::emitTypeMonitorResult() { return emitReturnFromIC(); }
+bool IonCacheIRCompiler::emitTypeMonitorResult() {
+  JitSpew(JitSpew_Codegen, __FUNCTION__);
+  return emitReturnFromIC();
+}
 
 bool IonCacheIRCompiler::emitReturnFromIC() {
+  JitSpew(JitSpew_Codegen, __FUNCTION__);
   if (!savedLiveRegs_) {
     allocator.restoreInputState(masm);
   }
@@ -2306,6 +2375,7 @@ bool IonCacheIRCompiler::emitLoadStackValue() {
 }
 
 bool IonCacheIRCompiler::emitGuardAndGetIterator() {
+  JitSpew(JitSpew_Codegen, __FUNCTION__);
   Register obj = allocator.useRegister(masm, reader.objOperandId());
 
   AutoScratchRegister scratch1(allocator, masm);
@@ -2326,7 +2396,8 @@ bool IonCacheIRCompiler::emitGuardAndGetIterator() {
 
   // Load our PropertyIteratorObject* and its NativeIterator.
   masm.movePtr(ImmGCPtr(iterobj), output);
-  masm.loadObjPrivate(output, JSObject::ITER_CLASS_NFIXED_SLOTS, niScratch);
+  masm.loadObjPrivate(output, PropertyIteratorObject::NUM_FIXED_SLOTS,
+                      niScratch);
 
   // Ensure the iterator is reusable: see NativeIterator::isReusable.
   masm.branchIfNativeIteratorNotReusable(niScratch, failure->label());
@@ -2353,6 +2424,7 @@ bool IonCacheIRCompiler::emitGuardAndGetIterator() {
 }
 
 bool IonCacheIRCompiler::emitGuardDOMExpandoMissingOrGuardShape() {
+  JitSpew(JitSpew_Codegen, __FUNCTION__);
   ValueOperand val = allocator.useValueRegister(masm, reader.valOperandId());
   Shape* shape = shapeStubField(reader.stubOffset());
 
@@ -2378,6 +2450,7 @@ bool IonCacheIRCompiler::emitGuardDOMExpandoMissingOrGuardShape() {
 }
 
 bool IonCacheIRCompiler::emitLoadDOMExpandoValueGuardGeneration() {
+  JitSpew(JitSpew_Codegen, __FUNCTION__);
   Register obj = allocator.useRegister(masm, reader.objOperandId());
   ExpandoAndGeneration* expandoAndGeneration =
       rawWordStubField<ExpandoAndGeneration*>(reader.stubOffset());
@@ -2521,6 +2594,7 @@ void IonIC::attachCacheIRStub(JSContext* cx, const CacheIRWriter& writer,
 }
 
 bool IonCacheIRCompiler::emitCallStringConcatResult() {
+  JitSpew(JitSpew_Codegen, __FUNCTION__);
   AutoSaveLiveRegisters save(*this);
   AutoOutputRegister output(*this);
 
@@ -2534,21 +2608,15 @@ bool IonCacheIRCompiler::emitCallStringConcatResult() {
   masm.Push(rhs);
   masm.Push(lhs);
 
-  if (!callVM(masm, ConcatStringsInfo)) {
-    return false;
-  }
+  using Fn = JSString* (*)(JSContext*, HandleString, HandleString);
+  callVM<Fn, ConcatStrings<CanGC>>(masm);
 
   masm.tagValue(JSVAL_TYPE_STRING, ReturnReg, output.valueReg());
   return true;
 }
 
-typedef bool (*DoConcatStringObjectFn)(JSContext*, HandleValue, HandleValue,
-                                       MutableHandleValue);
-const VMFunction DoIonConcatStringObjectInfo =
-    FunctionInfo<DoConcatStringObjectFn>(DoConcatStringObject,
-                                         "DoIonConcatStringObject");
-
 bool IonCacheIRCompiler::emitCallStringObjectConcatResult() {
+  JitSpew(JitSpew_Codegen, __FUNCTION__);
   AutoSaveLiveRegisters save(*this);
   AutoOutputRegister output(*this);
 
@@ -2561,9 +2629,8 @@ bool IonCacheIRCompiler::emitCallStringObjectConcatResult() {
   masm.Push(rhs);
   masm.Push(lhs);
 
-  if (!callVM(masm, DoIonConcatStringObjectInfo)) {
-    return false;
-  }
+  using Fn = bool (*)(JSContext*, HandleValue, HandleValue, MutableHandleValue);
+  callVM<Fn, DoConcatStringObject>(masm);
 
   masm.storeCallResultValue(output);
   return true;

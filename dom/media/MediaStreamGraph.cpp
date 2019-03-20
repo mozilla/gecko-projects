@@ -32,6 +32,7 @@
 #include "mozilla/Unused.h"
 #include "mtransport/runnable_utils.h"
 #include "VideoUtils.h"
+#include "GraphRunner.h"
 #include "Tracing.h"
 
 #include "webaudio/blink/DenormalDisabler.h"
@@ -48,7 +49,7 @@ namespace mozilla {
 
 LazyLogModule gMediaStreamGraphLog("MediaStreamGraph");
 #ifdef LOG
-#undef LOG
+#  undef LOG
 #endif  // LOG
 #define LOG(type, msg) MOZ_LOG(gMediaStreamGraphLog, type, msg)
 
@@ -912,7 +913,7 @@ void MediaStreamGraphImpl::NotifyInputData(const AudioDataValue* aBuffer,
     return;
   }
 #else
-#ifdef DEBUG
+#  ifdef DEBUG
   {
     MonitorAutoLock lock(mMonitor);
     // Either we have an audio input device, or we just removed the audio input
@@ -920,7 +921,7 @@ void MediaStreamGraphImpl::NotifyInputData(const AudioDataValue* aBuffer,
     // iteration.
     MOZ_ASSERT(mInputDeviceID || CurrentDriver()->Switching());
   }
-#endif
+#  endif
   if (!mInputDeviceID) {
     return;
   }
@@ -1011,22 +1012,20 @@ void MediaStreamGraphImpl::ReevaluateInputDevice() {
   }
 }
 
-bool MediaStreamGraph::OnGraphThreadOrNotRunning() const {
+bool MediaStreamGraphImpl::OnGraphThreadOrNotRunning() const {
   // either we're on the right thread (and calling CurrentDriver() is safe),
   // or we're going to fail the assert anyway, so don't cross-check
   // via CurrentDriver().
-  MediaStreamGraphImpl const* graph =
-      static_cast<MediaStreamGraphImpl const*>(this);
-  return graph->mDetectedNotRunning ? NS_IsMainThread()
-                                    : graph->mDriver->OnThread();
+  return mDetectedNotRunning ? NS_IsMainThread() : OnGraphThread();
 }
 
-bool MediaStreamGraph::OnGraphThread() const {
+bool MediaStreamGraphImpl::OnGraphThread() const {
   // we're on the right thread (and calling mDriver is safe),
-  MediaStreamGraphImpl const* graph =
-      static_cast<MediaStreamGraphImpl const*>(this);
-  MOZ_ASSERT(graph->mDriver);
-  return graph->mDriver->OnThread();
+  MOZ_ASSERT(mDriver);
+  if (mGraphRunner && mGraphRunner->OnThread()) {
+    return true;
+  }
+  return mDriver->OnThread();
 }
 
 bool MediaStreamGraphImpl::ShouldUpdateMainThread() {
@@ -1379,13 +1378,23 @@ bool MediaStreamGraphImpl::UpdateMainThreadState() {
 }
 
 bool MediaStreamGraphImpl::OneIteration(GraphTime aStateEnd) {
+  if (mGraphRunner) {
+    return mGraphRunner->OneIteration(aStateEnd);
+  }
+
+  return OneIterationImpl(aStateEnd);
+}
+
+bool MediaStreamGraphImpl::OneIterationImpl(GraphTime aStateEnd) {
   TRACE_AUDIO_CALLBACK();
+
   // Changes to LIFECYCLE_RUNNING occur before starting or reviving the graph
   // thread, and so the monitor need not be held to check mLifecycleState.
   // LIFECYCLE_THREAD_NOT_STARTED is possible when shutting down offline
   // graphs that have not started.
   MOZ_DIAGNOSTIC_ASSERT(mLifecycleState <= LIFECYCLE_RUNNING);
   MOZ_ASSERT(OnGraphThread());
+
   WebCore::DenormalDisabler disabler;
 
   // Process graph message from the main thread for this iteration.
@@ -1498,6 +1507,10 @@ class MediaStreamGraphShutDownRunnable : public Runnable {
       MOZ_ASSERT(!mGraph->mDriver->AsAudioCallbackDriver()->InCallback());
     }
 #endif
+
+    if (mGraph->mGraphRunner) {
+      mGraph->mGraphRunner->Shutdown();
+    }
 
     mGraph->mDriver
         ->Shutdown();  // This will wait until it's shutdown since
@@ -2353,8 +2366,7 @@ void MediaStream::RunAfterPendingUpdates(
     Message(MediaStream* aStream, already_AddRefed<nsIRunnable> aRunnable)
         : ControlMessage(aStream), mRunnable(aRunnable) {}
     void Run() override {
-      mStream->Graph()->DispatchToMainThreadAfterStreamStateUpdate(
-          mRunnable.forget());
+      mStream->Graph()->DispatchToMainThreadStableState(mRunnable.forget());
     }
     void RunDuringShutdown() override {
       // Don't run mRunnable now as it may call AppendMessage() which would
@@ -2540,25 +2552,49 @@ bool SourceMediaStream::PullNewData(GraphTime aDesiredUpToTime) {
   if (mFinished) {
     return false;
   }
+  bool streamPullingEnabled = false;
+  for (const TrackData& track : mUpdateTracks) {
+    if (!(track.mCommands & TrackEventCommand::TRACK_EVENT_ENDED) &&
+        track.mPullingEnabled) {
+      // At least one track in this stream is pulled. We want to consume it in
+      // real-time (i.e., not block the stream).
+      streamPullingEnabled = true;
+      break;
+    }
+  }
   // Compute how much stream time we'll need assuming we don't block
   // the stream at all.
   StreamTime t = GraphTimeToStreamTime(aDesiredUpToTime);
-  StreamTime current = mTracks.GetEarliestTrackEnd();
-  LOG(LogLevel::Verbose,
-      ("%p: Calling NotifyPull aStream=%p t=%f current end=%f", GraphImpl(),
-       this, GraphImpl()->MediaTimeToSeconds(t),
-       GraphImpl()->MediaTimeToSeconds(current)));
   for (const TrackData& track : mUpdateTracks) {
-    if (!track.mPullingEnabled) {
+    if (track.mCommands & TRACK_END) {
       continue;
     }
-    if (track.mCommands & TrackEventCommand::TRACK_EVENT_ENDED) {
-      continue;
+    StreamTime current;
+    if (track.mCommands & TRACK_CREATE) {
+      // This track hasn't been created yet. Use the stream's current time
+      // (which the track will get as its start time later).
+      current = GraphTimeToStreamTime(GraphImpl()->mStateComputedTime);
+    } else {
+      current = track.mEndOfFlushedData + track.mData->GetDuration();
     }
-    current = track.mEndOfFlushedData + track.mData->GetDuration();
     if (t <= current) {
       continue;
     }
+    if (!track.mPullingEnabled) {
+      if (streamPullingEnabled) {
+        LOG(LogLevel::Verbose,
+            ("%p: Pulling disabled for track but enabled for stream, append "
+             "null data; stream=%p track=%d t=%f current end=%f",
+             GraphImpl(), this, track.mID, GraphImpl()->MediaTimeToSeconds(t),
+             GraphImpl()->MediaTimeToSeconds(current)));
+        track.mData->AppendNullData(t - current);
+      }
+      continue;
+    }
+    LOG(LogLevel::Verbose,
+        ("%p: Calling NotifyPull stream=%p track=%d t=%f current end=%f",
+         GraphImpl(), this, track.mID, GraphImpl()->MediaTimeToSeconds(t),
+         GraphImpl()->MediaTimeToSeconds(current)));
     MutexAutoUnlock unlock(mMutex);
     for (TrackBound<MediaStreamTrackListener>& l : mTrackListeners) {
       if (l.mTrackID == track.mID) {
@@ -2601,8 +2637,8 @@ void SourceMediaStream::ExtractPendingInput(GraphTime aCurrentTime) {
            GraphImpl(), this, data->mID, int64_t(streamCurrentTime),
            int64_t(segment->GetDuration())));
 
-      data->mEndOfFlushedData += segment->GetDuration();
       segment->InsertNullDataAtStart(streamCurrentTime);
+      data->mEndOfFlushedData += segment->GetDuration();
       mTracks.AddTrack(data->mID, streamCurrentTime, segment);
       // The track has taken ownership of data->mData, so let's replace
       // data->mData with an empty clone.
@@ -3025,8 +3061,7 @@ RefPtr<GenericPromise> MediaInputPort::BlockSourceTrackId(
     void Run() override {
       mPort->BlockSourceTrackIdImpl(mTrackId, mBlockingMode);
       if (mRunnable) {
-        mStream->Graph()->DispatchToMainThreadAfterStreamStateUpdate(
-            mRunnable.forget());
+        mStream->Graph()->DispatchToMainThreadStableState(mRunnable.forget());
       }
     }
     void RunDuringShutdown() override { Run(); }
@@ -3040,12 +3075,27 @@ RefPtr<GenericPromise> MediaInputPort::BlockSourceTrackId(
 
   MozPromiseHolder<GenericPromise> holder;
   RefPtr<GenericPromise> p = holder.Ensure(__func__);
-  nsCOMPtr<nsIRunnable> runnable =
-      NewRunnableFrom([h = std::move(holder)]() mutable {
-        MOZ_ASSERT(NS_IsMainThread());
-        h.Resolve(true, __func__);
-        return NS_OK;
-      });
+
+  class HolderRunnable : public Runnable {
+   public:
+    explicit HolderRunnable(MozPromiseHolder<GenericPromise>&& aHolder)
+        : Runnable("MediaInputPort::HolderRunnable"),
+          mHolder(std::move(aHolder)) {}
+
+    NS_IMETHOD Run() override {
+      MOZ_ASSERT(NS_IsMainThread());
+      mHolder.Resolve(true, __func__);
+      return NS_OK;
+    }
+
+   private:
+    ~HolderRunnable() {
+      mHolder.RejectIfExists(NS_ERROR_DOM_MEDIA_CANCELED, __func__);
+    }
+    MozPromiseHolder<GenericPromise> mHolder;
+  };
+
+  auto runnable = MakeRefPtr<HolderRunnable>(std::move(holder));
   GraphImpl()->AppendMessage(
       MakeUnique<Message>(this, aTrackId, aBlockingMode, runnable.forget()));
   return p;
@@ -3123,9 +3173,12 @@ void ProcessedMediaStream::DestroyImpl() {
 }
 
 MediaStreamGraphImpl::MediaStreamGraphImpl(GraphDriverType aDriverRequested,
+                                           GraphRunType aRunTypeRequested,
                                            TrackRate aSampleRate,
                                            AbstractThread* aMainThread)
     : MediaStreamGraph(aSampleRate),
+      mGraphRunner(aRunTypeRequested == SINGLE_THREAD ? new GraphRunner(this)
+                                                      : nullptr),
       mFirstCycleBreaker(0)
       // An offline graph is not initially processing.
       ,
@@ -3179,6 +3232,13 @@ AbstractThread* MediaStreamGraph::AbstractMainThread() {
   MOZ_ASSERT(static_cast<MediaStreamGraphImpl*>(this)->mAbstractMainThread);
   return static_cast<MediaStreamGraphImpl*>(this)->mAbstractMainThread;
 }
+
+#ifdef DEBUG
+bool MediaStreamGraphImpl::RunByGraphDriver(GraphDriver* aDriver) {
+  return aDriver->OnThread() ||
+         (mGraphRunner && mGraphRunner->RunByGraphDriver(aDriver));
+}
+#endif
 
 void MediaStreamGraphImpl::Destroy() {
   // First unregister from memory reporting.
@@ -3261,8 +3321,14 @@ MediaStreamGraph* MediaStreamGraph::GetInstance(
       // Uncommon case, only for some old configuration of webspeech.
       mainThread = AbstractThread::MainThread();
     }
-    graph =
-        new MediaStreamGraphImpl(aGraphDriverRequested, sampleRate, mainThread);
+
+    GraphRunType runType = DIRECT_DRIVER;
+    if (aGraphDriverRequested != OFFLINE_THREAD_DRIVER &&
+        Preferences::GetBool("dom.audioworklet.enabled", false)) {
+      runType = SINGLE_THREAD;
+    }
+    graph = new MediaStreamGraphImpl(aGraphDriverRequested, runType, sampleRate,
+                                     mainThread);
 
     uint32_t hashkey = WindowToHash(aWindow, sampleRate);
     gGraphs.Put(hashkey, graph);
@@ -3279,7 +3345,7 @@ MediaStreamGraph* MediaStreamGraph::CreateNonRealtimeInstance(
   MOZ_ASSERT(NS_IsMainThread(), "Main thread only");
 
   MediaStreamGraphImpl* graph = new MediaStreamGraphImpl(
-      OFFLINE_THREAD_DRIVER, aSampleRate,
+      OFFLINE_THREAD_DRIVER, DIRECT_DRIVER, aSampleRate,
       aWindow->AsGlobal()->AbstractMainThreadFor(TaskCategory::Other));
 
   LOG(LogLevel::Debug, ("Starting up Offline MediaStreamGraph %p", graph));
@@ -3816,12 +3882,11 @@ already_AddRefed<MediaInputPort> MediaStreamGraphImpl::ConnectToCaptureStream(
   return nullptr;
 }
 
-void MediaStreamGraph::DispatchToMainThreadAfterStreamStateUpdate(
+void MediaStreamGraph::DispatchToMainThreadStableState(
     already_AddRefed<nsIRunnable> aRunnable) {
   AssertOnGraphThreadOrNotRunning();
-  *static_cast<MediaStreamGraphImpl*>(this)
-       ->mPendingUpdateRunnables.AppendElement() =
-      AbstractMainThread()->CreateDirectTaskDrainer(std::move(aRunnable));
+  static_cast<MediaStreamGraphImpl*>(this)
+      ->mPendingUpdateRunnables.AppendElement(std::move(aRunnable));
 }
 
 Watchable<mozilla::GraphTime>& MediaStreamGraphImpl::CurrentTime() {

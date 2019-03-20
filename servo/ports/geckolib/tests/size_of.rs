@@ -1,6 +1,6 @@
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
- * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 use selectors;
 use servo_arc::Arc;
@@ -33,7 +33,7 @@ size_of_test!(size_of_pseudo_class, selector_parser::NonTSPseudoClass, 16);
 size_of_test!(test_size_of_rule, style::stylist::Rule, 32);
 
 // Large pages generate tens of thousands of ComputedValues.
-size_of_test!(test_size_of_cv, ComputedValues, 248);
+size_of_test!(test_size_of_cv, ComputedValues, 232);
 
 size_of_test!(test_size_of_option_arc_cv, Option<Arc<ComputedValues>>, 8);
 size_of_test!(test_size_of_option_rule_node, Option<StrongRuleNode>, 8);

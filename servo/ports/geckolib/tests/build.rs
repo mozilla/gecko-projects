@@ -1,6 +1,6 @@
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
- * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 extern crate regex;
 
@@ -85,6 +85,7 @@ fn main() {
         for line in r.lines() {
             let s = line
                 .unwrap()
+                .replace("#[no_mangle]", "")
                 .replace("pub extern \"C\" fn", "pub unsafe extern \"C\" fn");
             w.write_all(s.as_bytes()).unwrap();
             w.write_all(b"\n").unwrap();

@@ -1,20 +1,20 @@
 //! x86 ABI implementation.
 
 use super::registers::{FPR, GPR, RU};
-use abi::{legalize_args, ArgAction, ArgAssigner, ValueConversion};
-use cursor::{Cursor, CursorPosition, EncCursor};
-use ir;
-use ir::immediates::Imm64;
-use ir::stackslot::{StackOffset, StackSize};
-use ir::{
+use crate::abi::{legalize_args, ArgAction, ArgAssigner, ValueConversion};
+use crate::cursor::{Cursor, CursorPosition, EncCursor};
+use crate::ir;
+use crate::ir::immediates::Imm64;
+use crate::ir::stackslot::{StackOffset, StackSize};
+use crate::ir::{
     get_probestack_funcref, AbiParam, ArgumentExtension, ArgumentLoc, ArgumentPurpose, InstBuilder,
     ValueLoc,
 };
-use isa::{CallConv, RegClass, RegUnit, TargetIsa};
-use regalloc::RegisterSet;
-use result::CodegenResult;
-use stack_layout::layout_stack;
-use std::i32;
+use crate::isa::{CallConv, RegClass, RegUnit, TargetIsa};
+use crate::regalloc::RegisterSet;
+use crate::result::CodegenResult;
+use crate::stack_layout::layout_stack;
+use core::i32;
 use target_lexicon::{PointerWidth, Triple};
 
 /// Argument registers for x86-64
@@ -98,7 +98,8 @@ impl ArgAssigner for Args {
                         RU::r14
                     } else {
                         RU::rsi
-                    } as RegUnit).into()
+                    } as RegUnit)
+                    .into();
                 }
                 // This is SpiderMonkey's `WasmTableCallSigReg`.
                 ArgumentPurpose::SignatureId => return ArgumentLoc::Reg(RU::r10 as RegUnit).into(),
@@ -114,9 +115,18 @@ impl ArgAssigner for Args {
         }
 
         // Try to use an FPR.
-        if ty.is_float() && self.fpr_used < self.fpr_limit {
-            let reg = FPR.unit(self.fpr_used);
-            self.fpr_used += 1;
+        let fpr_offset = if self.call_conv == CallConv::WindowsFastcall {
+            // Float and general registers on windows share the same parameter index.
+            // The used register depends entirely on the parameter index: Even if XMM0
+            // is not used for the first parameter, it cannot be used for the second parameter.
+            debug_assert_eq!(self.fpr_limit, self.gpr.len());
+            &mut self.gpr_used
+        } else {
+            &mut self.fpr_used
+        };
+        if ty.is_float() && *fpr_offset < self.fpr_limit {
+            let reg = FPR.unit(*fpr_offset);
+            *fpr_offset += 1;
             return ArgumentLoc::Reg(reg).into();
         }
 
@@ -510,7 +520,7 @@ fn insert_common_prologue(
 /// Insert a check that generates a trap if the stack pointer goes
 /// below a value in `stack_limit_arg`.
 fn insert_stack_check(pos: &mut EncCursor, stack_size: i64, stack_limit_arg: ir::Value) {
-    use ir::condcodes::IntCC;
+    use crate::ir::condcodes::IntCC;
 
     // Copy `stack_limit_arg` into a %rax and use it for calculating
     // a SP threshold.

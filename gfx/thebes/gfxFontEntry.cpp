@@ -118,13 +118,8 @@ gfxFontEntry::gfxFontEntry(const nsACString& aName, bool aIsStandardFace)
 gfxFontEntry::~gfxFontEntry() {
   // Should not be dropped by stylo
   MOZ_ASSERT(NS_IsMainThread());
-  if (mCOLR) {
-    hb_blob_destroy(mCOLR);
-  }
-
-  if (mCPAL) {
-    hb_blob_destroy(mCPAL);
-  }
+  hb_blob_destroy(mCOLR);
+  hb_blob_destroy(mCPAL);
 
   // For downloaded fonts, we need to tell the user font cache that this
   // entry is being deleted.
@@ -201,7 +196,8 @@ uint16_t gfxFontEntry::GetUVSGlyph(uint32_t aCh, uint32_t aVS) {
   return 0;
 }
 
-bool gfxFontEntry::SupportsScriptInGSUB(const hb_tag_t* aScriptTags) {
+bool gfxFontEntry::SupportsScriptInGSUB(const hb_tag_t* aScriptTags,
+                                        uint32_t aNumTags) {
   hb_face_t* face = GetHBFace();
   if (!face) {
     return false;
@@ -209,9 +205,9 @@ bool gfxFontEntry::SupportsScriptInGSUB(const hb_tag_t* aScriptTags) {
 
   unsigned int index;
   hb_tag_t chosenScript;
-  bool found =
-      hb_ot_layout_table_choose_script(face, TRUETYPE_TAG('G', 'S', 'U', 'B'),
-                                       aScriptTags, &index, &chosenScript);
+  bool found = hb_ot_layout_table_select_script(
+      face, TRUETYPE_TAG('G', 'S', 'U', 'B'), aNumTags, aScriptTags, &index,
+      &chosenScript);
   hb_face_destroy(face);
 
   return found && chosenScript != TRUETYPE_TAG('D', 'F', 'L', 'T');
@@ -467,7 +463,7 @@ void gfxFontEntry::FontTableHashEntry::Clear() {
   if (mSharedBlobData) {
     mSharedBlobData->ForgetHashEntry();
     mSharedBlobData = nullptr;
-  } else if (mBlob) {
+  } else {
     hb_blob_destroy(mBlob);
   }
   mBlob = nullptr;
@@ -475,7 +471,8 @@ void gfxFontEntry::FontTableHashEntry::Clear() {
 
 // a hb_destroy_func for hb_blob_create
 
-/* static */ void gfxFontEntry::FontTableHashEntry::DeleteFontTableBlobData(
+/* static */
+void gfxFontEntry::FontTableHashEntry::DeleteFontTableBlobData(
     void* aBlobData) {
   delete static_cast<FontTableBlobData*>(aBlobData);
 }
@@ -546,8 +543,9 @@ hb_blob_t* gfxFontEntry::GetFontTable(uint32_t aTag) {
 
 // callback for HarfBuzz to get a font table (in hb_blob_t form)
 // from the font entry (passed as aUserData)
-/*static*/ hb_blob_t* gfxFontEntry::HBGetTable(hb_face_t* face, uint32_t aTag,
-                                               void* aUserData) {
+/*static*/
+hb_blob_t* gfxFontEntry::HBGetTable(hb_face_t* face, uint32_t aTag,
+                                    void* aUserData) {
   gfxFontEntry* fontEntry = static_cast<gfxFontEntry*>(aUserData);
 
   // bug 589682 - ignore the GDEF table in buggy fonts (applies to
@@ -565,7 +563,8 @@ hb_blob_t* gfxFontEntry::GetFontTable(uint32_t aTag) {
   return fontEntry->GetFontTable(aTag);
 }
 
-/*static*/ void gfxFontEntry::HBFaceDeletedCallback(void* aUserData) {
+/*static*/
+void gfxFontEntry::HBFaceDeletedCallback(void* aUserData) {
   gfxFontEntry* fe = static_cast<gfxFontEntry*>(aUserData);
   fe->ForgetHBFace();
 }
@@ -598,8 +597,9 @@ hb_face_t* gfxFontEntry::GetHBFace() {
   return nullptr;
 }
 
-/*static*/ void gfxFontEntry::GrReleaseTable(const void* aAppFaceHandle,
-                                             const void* aTableBuffer) {
+/*static*/
+void gfxFontEntry::GrReleaseTable(const void* aAppFaceHandle,
+                                  const void* aTableBuffer) {
   gfxFontEntry* fontEntry =
       static_cast<gfxFontEntry*>(const_cast<void*>(aAppFaceHandle));
   void* value;
@@ -707,23 +707,22 @@ bool gfxFontEntry::SupportsOpenTypeFeature(Script aScript,
         gfxHarfBuzzShaper::GetHBScriptUsedForShaping(aScript);
 
     // Get the OpenType tag(s) that match this script code
-    hb_tag_t scriptTags[4] = {HB_TAG_NONE, HB_TAG_NONE, HB_TAG_NONE,
-                              HB_TAG_NONE};
-    hb_ot_tags_from_script(hbScript, &scriptTags[0], &scriptTags[1]);
+    unsigned int scriptCount = 4;
+    hb_tag_t scriptTags[4];
+    hb_ot_tags_from_script_and_language(hbScript, HB_LANGUAGE_INVALID,
+                                        &scriptCount, scriptTags, nullptr,
+                                        nullptr);
 
-    // Replace the first remaining NONE with DEFAULT
-    hb_tag_t* scriptTag = &scriptTags[0];
-    while (*scriptTag != HB_TAG_NONE) {
-      ++scriptTag;
+    // Append DEFAULT to the returned tags, if room
+    if (scriptCount < 4) {
+      scriptTags[scriptCount++] = HB_OT_TAG_DEFAULT_SCRIPT;
     }
-    *scriptTag = HB_OT_TAG_DEFAULT_SCRIPT;
 
     // Now check for 'smcp' under the first of those scripts that is present
     const hb_tag_t kGSUB = HB_TAG('G', 'S', 'U', 'B');
-    scriptTag = &scriptTags[0];
-    while (*scriptTag != HB_TAG_NONE) {
+    for (unsigned int i = 0; i < scriptCount; i++) {
       unsigned int scriptIndex;
-      if (hb_ot_layout_table_find_script(face, kGSUB, *scriptTag,
+      if (hb_ot_layout_table_find_script(face, kGSUB, scriptTags[i],
                                          &scriptIndex)) {
         if (hb_ot_layout_language_find_feature(
                 face, kGSUB, scriptIndex, HB_OT_LAYOUT_DEFAULT_LANGUAGE_INDEX,
@@ -732,7 +731,6 @@ bool gfxFontEntry::SupportsOpenTypeFeature(Script aScript,
         }
         break;
       }
-      ++scriptTag;
     }
   }
 
@@ -769,16 +767,17 @@ const hb_set_t* gfxFontEntry::InputsForOpenTypeFeature(Script aScript,
         gfxHarfBuzzShaper::GetHBScriptUsedForShaping(aScript);
 
     // Get the OpenType tag(s) that match this script code
-    hb_tag_t scriptTags[4] = {HB_TAG_NONE, HB_TAG_NONE, HB_TAG_NONE,
-                              HB_TAG_NONE};
-    hb_ot_tags_from_script(hbScript, &scriptTags[0], &scriptTags[1]);
+    unsigned int scriptCount = 4;
+    hb_tag_t scriptTags[5];  // space for null terminator
+    hb_ot_tags_from_script_and_language(hbScript, HB_LANGUAGE_INVALID,
+                                        &scriptCount, scriptTags, nullptr,
+                                        nullptr);
 
-    // Replace the first remaining NONE with DEFAULT
-    hb_tag_t* scriptTag = &scriptTags[0];
-    while (*scriptTag != HB_TAG_NONE) {
-      ++scriptTag;
+    // Append DEFAULT to the returned tags, if room
+    if (scriptCount < 4) {
+      scriptTags[scriptCount++] = HB_OT_TAG_DEFAULT_SCRIPT;
     }
-    *scriptTag = HB_OT_TAG_DEFAULT_SCRIPT;
+    scriptTags[scriptCount++] = 0;
 
     const hb_tag_t kGSUB = HB_TAG('G', 'S', 'U', 'B');
     hb_tag_t features[2] = {aFeatureTag, HB_TAG_NONE};
@@ -1699,43 +1698,66 @@ void gfxFontFamily::FindFontForChar(GlobalFontMatch* aMatchData) {
     return;
   }
 
-  gfxFontEntry* fe =
-      FindFontForStyle(aMatchData->mStyle, /*aIgnoreSizeTolerance*/ true);
-  if (!fe || fe->SkipDuringSystemFallback()) {
+#ifdef MOZ_GECKO_PROFILER
+  nsCString charAndName;
+  if (profiler_is_active()) {
+    charAndName = nsPrintfCString("\\u%x %s", aMatchData->mCh, mName.get());
+  }
+
+  AUTO_PROFILER_LABEL_DYNAMIC_NSCSTRING("gfxFontFamily::FindFontForChar",
+                                        LAYOUT, charAndName);
+#endif
+
+  AutoTArray<gfxFontEntry*, 4> entries;
+  FindAllFontsForStyle(aMatchData->mStyle, entries,
+                       /*aIgnoreSizeTolerance*/ true);
+  if (entries.IsEmpty()) {
     return;
   }
 
+  gfxFontEntry* fe = nullptr;
   float distance = INFINITY;
 
-  if (fe->HasCharacter(aMatchData->mCh)) {
-    aMatchData->mCount++;
-
-    LogModule* log = gfxPlatform::GetLog(eGfxLog_textrun);
-
-    if (MOZ_UNLIKELY(MOZ_LOG_TEST(log, LogLevel::Debug))) {
-      uint32_t unicodeRange = FindCharUnicodeRange(aMatchData->mCh);
-      Script script = GetScriptCode(aMatchData->mCh);
-      MOZ_LOG(log, LogLevel::Debug,
-              ("(textrun-systemfallback-fonts) char: u+%6.6x "
-               "unicode-range: %d script: %d match: [%s]\n",
-               aMatchData->mCh, unicodeRange, int(script), fe->Name().get()));
+  for (auto e : entries) {
+    if (e->SkipDuringSystemFallback()) {
+      continue;
     }
 
-    distance = WeightStyleStretchDistance(fe, aMatchData->mStyle);
-  } else if (!fe->IsNormalStyle()) {
+    aMatchData->mCmapsTested++;
+    if (e->HasCharacter(aMatchData->mCh)) {
+      aMatchData->mCount++;
+
+      LogModule* log = gfxPlatform::GetLog(eGfxLog_textrun);
+
+      if (MOZ_UNLIKELY(MOZ_LOG_TEST(log, LogLevel::Debug))) {
+        uint32_t unicodeRange = FindCharUnicodeRange(aMatchData->mCh);
+        Script script = GetScriptCode(aMatchData->mCh);
+        MOZ_LOG(log, LogLevel::Debug,
+                ("(textrun-systemfallback-fonts) char: u+%6.6x "
+                 "unicode-range: %d script: %d match: [%s]\n",
+                 aMatchData->mCh, unicodeRange, int(script), e->Name().get()));
+      }
+
+      fe = e;
+      distance = WeightStyleStretchDistance(fe, aMatchData->mStyle);
+      break;
+    }
+  }
+
+  if (!fe && !aMatchData->mStyle.IsNormalStyle()) {
     // If style/weight/stretch was not Normal, see if we can
     // fall back to a next-best face (e.g. Arial Black -> Bold,
     // or Arial Narrow -> Regular).
     GlobalFontMatch data(aMatchData->mCh, aMatchData->mStyle);
     SearchAllFontsForChar(&data);
-    if (std::isfinite(data.mMatchDistance)) {
-      fe = data.mBestMatch;
-      distance = data.mMatchDistance;
+    if (!data.mBestMatch) {
+      return;
     }
+    fe = data.mBestMatch;
+    distance = data.mMatchDistance;
   }
-  aMatchData->mCmapsTested++;
 
-  if (std::isinf(distance)) {
+  if (!fe) {
     return;
   }
 
@@ -1771,7 +1793,8 @@ gfxFontFamily::~gfxFontFamily() {
   MOZ_ASSERT(NS_IsMainThread());
 }
 
-/*static*/ void gfxFontFamily::ReadOtherFamilyNamesForFace(
+/*static*/
+void gfxFontFamily::ReadOtherFamilyNamesForFace(
     const nsACString& aFamilyName, const char* aNameData, uint32_t aDataLength,
     nsTArray<nsCString>& aOtherFamilyNames, bool useFullName) {
   const gfxFontUtils::NameHeader* nameHeader =

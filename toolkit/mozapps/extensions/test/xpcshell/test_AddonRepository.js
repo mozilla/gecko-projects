@@ -4,8 +4,6 @@
 
 // Tests AddonRepository.jsm
 
-ChromeUtils.import("resource://gre/modules/addons/AddonRepository.jsm");
-
 var gServer = createHttpServer({hosts: ["example.com"]});
 
 const PREF_GETADDONS_BROWSEADDONS        = "extensions.getAddons.browseAddons";
@@ -120,6 +118,10 @@ var GET_TEST = {
                     "test2%40tests.mozilla.org%2C" +
                     "%7B00000000-1111-2222-3333-444444444444%7D%2C" +
                     "test_AddonRepository_1%40tests.mozilla.org",
+  successfulRTAURL: "/XPCShell/1/rta%3AdGVzdDFAdGVzdHMubW96aWxsYS5vcmc%2C" +
+                    "test2%40tests.mozilla.org%2C" +
+                    "%7B00000000-1111-2222-3333-444444444444%7D%2C" +
+                    "test_AddonRepository_1%40tests.mozilla.org",
 };
 
 // Test that actual results and expected results are equal
@@ -133,7 +135,6 @@ function check_results(aActualAddons, aExpectedAddons) {
       do_throw(aActualAddon.id + " - " + aActualAddon.description);
     if (aActualAddon.name != "PASS")
       do_throw(aActualAddon.id + " - invalid add-on name " + aActualAddon.name);
-
   });
 }
 
@@ -154,6 +155,9 @@ add_task(async function setup() {
   // Register files used to test search success
   gServer.registerFile(GET_TEST.successfulURL,
                        do_get_file("data/test_AddonRepository_getAddonsByIDs.json"));
+  // Register file for RTA test
+  gServer.registerFile(GET_TEST.successfulRTAURL,
+                       do_get_file("data/test_AddonRepository_getAddonsByIDs.json"));
 
   await promiseStartupManager();
 
@@ -162,12 +166,12 @@ add_task(async function setup() {
   await promiseRestartManager();
 
   // Create an active AddonInstall so can check that it isn't returned in the results
-  let install = await AddonManager.getInstallForURL(BASE_URL + INSTALL_URL2, "application/x-xpinstall");
+  let install = await AddonManager.getInstallForURL(BASE_URL + INSTALL_URL2);
   let promise = promiseCompleteInstall(install);
   registerCleanupFunction(() => promise);
 
   // Create a non-active AddonInstall so can check that it is returned in the results
-  await AddonManager.getInstallForURL(BASE_URL + INSTALL_URL3, "application/x-xpinstall");
+  await AddonManager.getInstallForURL(BASE_URL + INSTALL_URL3);
 });
 
 // Tests homepageURL and getSearchURL()
@@ -242,6 +246,15 @@ add_task(async function test_getAddonsByID_fails() {
 
 // Tests success of AddonRepository.getAddonsByIDs()
 add_task(async function test_getAddonsByID_succeeds() {
+  let result = await AddonRepository.getAddonsByIDs(GET_TEST.successfulIDs);
+
+  check_results(result, GET_RESULTS);
+});
+
+// Tests success of AddonRepository.getAddonsByIDs() with rta ID.
+add_task(async function test_getAddonsByID_rta() {
+  let id = `rta:${btoa(GET_TEST.successfulIDs[0])}`.slice(0, -1);
+  GET_TEST.successfulIDs[0] = id;
   let result = await AddonRepository.getAddonsByIDs(GET_TEST.successfulIDs);
 
   check_results(result, GET_RESULTS);

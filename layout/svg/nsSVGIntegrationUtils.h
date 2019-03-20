@@ -34,6 +34,14 @@ class LayerManager;
 struct nsPoint;
 struct nsSize;
 
+struct WrFiltersHolder {
+  nsTArray<mozilla::wr::FilterOp> filters;
+  nsTArray<mozilla::wr::WrFilterData> filter_datas;
+  // This exists just to own the values long enough for them to be copied into
+  // rust.
+  nsTArray<nsTArray<float>> values;
+};
+
 /**
  * Integration of SVG effects (clipPath clipping, masking and filters) into
  * regular display list based painting and hit-testing.
@@ -195,11 +203,9 @@ class nsSVGIntegrationUtils final {
    * Try to build WebRender filters for a frame if the filters applied to it are
    * supported.
    */
-  static bool BuildWebRenderFilters(
-      nsIFrame* aFilteredFrame,
-      const mozilla::LayoutDeviceIntRect& aPreFilterBounds,
-      nsTArray<mozilla::wr::WrFilterOp>& aWrFilters,
-      mozilla::LayoutDeviceIntRect& aPostFilterBounds);
+  static bool BuildWebRenderFilters(nsIFrame* aFilteredFrame,
+                                    WrFiltersHolder& aWrFilters,
+                                    mozilla::Maybe<nsRect>& aPostFilterClip);
 
   /**
    * @param aRenderingContext the target rendering context in which the paint

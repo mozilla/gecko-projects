@@ -117,6 +117,81 @@ enum CodeNameIndex : CodeNameIndexType {
 
 const nsCString ToString(CodeNameIndex aCodeNameIndex);
 
+#define NS_DEFINE_INPUTTYPE(aCPPName, aDOMName) e##aCPPName,
+
+typedef uint8_t EditorInputTypeType;
+enum class EditorInputType : EditorInputTypeType {
+#include "mozilla/InputTypeList.h"
+  // If a DOM input event is synthesized by script, this is used.  Then,
+  // specified input type should be stored as string and use it as .inputType
+  // value.
+  eUnknown,
+};
+
+#undef NS_DEFINE_INPUTTYPE
+
+/**
+ * IsDataAvailableOnTextEditor() returns true if aInputType on TextEditor
+ * should have non-null InputEvent.data value.
+ */
+inline bool IsDataAvailableOnTextEditor(EditorInputType aInputType) {
+  switch (aInputType) {
+    case EditorInputType::eInsertText:
+    case EditorInputType::eInsertCompositionText:
+    case EditorInputType::eInsertFromComposition:  // Only level 2
+    case EditorInputType::eInsertFromPaste:
+    case EditorInputType::eInsertFromPasteAsQuotation:
+    case EditorInputType::eInsertTranspose:
+    case EditorInputType::eInsertFromDrop:
+    case EditorInputType::eInsertReplacementText:
+    case EditorInputType::eInsertFromYank:
+    case EditorInputType::eFormatSetBlockTextDirection:
+    case EditorInputType::eFormatSetInlineTextDirection:
+      return true;
+    default:
+      return false;
+  }
+}
+
+/**
+ * IsDataAvailableOnHTMLEditor() returns true if aInputType on HTMLEditor
+ * should have non-null InputEvent.data value.
+ */
+inline bool IsDataAvailableOnHTMLEditor(EditorInputType aInputType) {
+  switch (aInputType) {
+    case EditorInputType::eInsertText:
+    case EditorInputType::eInsertCompositionText:
+    case EditorInputType::eInsertFromComposition:  // Only level 2
+    case EditorInputType::eFormatSetBlockTextDirection:
+    case EditorInputType::eFormatSetInlineTextDirection:
+    case EditorInputType::eInsertLink:
+    case EditorInputType::eFormatBackColor:
+    case EditorInputType::eFormatFontColor:
+    case EditorInputType::eFormatFontName:
+      return true;
+    default:
+      return false;
+  }
+}
+
+/**
+ * IsDataTransferAvailableOnHTMLEditor() returns true if aInputType on
+ * HTMLEditor should have non-null InputEvent.dataTransfer value.
+ */
+inline bool IsDataTransferAvailableOnHTMLEditor(EditorInputType aInputType) {
+  switch (aInputType) {
+    case EditorInputType::eInsertFromPaste:
+    case EditorInputType::eInsertFromPasteAsQuotation:
+    case EditorInputType::eInsertFromDrop:
+    case EditorInputType::eInsertTranspose:
+    case EditorInputType::eInsertReplacementText:
+    case EditorInputType::eInsertFromYank:
+      return true;
+    default:
+      return false;
+  }
+}
+
 #define NS_DEFINE_COMMAND(aName, aCommandStr) , Command##aName
 #define NS_DEFINE_COMMAND_NO_EXEC_COMMAND(aName) , Command##aName
 

@@ -8,7 +8,7 @@
 const BrowserLoaderModule = {};
 ChromeUtils.import("resource://devtools/client/shared/browser-loader.js", BrowserLoaderModule);
 const { require } = BrowserLoaderModule.BrowserLoader({
-  baseURI: "resource://devtools/client/memory/",
+  baseURI: "resource://devtools/client/performance-new/",
   window,
 });
 const Perf = require("devtools/client/performance-new/components/Perf");
@@ -30,18 +30,15 @@ const {
  *
  * @param perfFront - The Perf actor's front. Used to start and stop recordings.
  * @param preferenceFront - Used to get the recording preferences from the device.
- * @param actorVersion {(number|undefined)} - The Perf actor's version.
  */
-async function gInit(perfFront, preferenceFront, actorVersion) {
+async function gInit(perfFront, preferenceFront) {
   const store = createStore(reducers);
-  actorVersion = actorVersion || 0;
 
   // Do some initialization, especially with privileged things that are part of the
   // the browser.
   store.dispatch(actions.initializeStore({
     perfFront,
     receiveProfile,
-    actorVersion,
     // Pull the default recording settings from the reducer, and update them according
     // to what's in the target's preferences. This way the preferences are stored
     // on the target. This could be useful for something like Android where you might

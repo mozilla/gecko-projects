@@ -151,6 +151,8 @@ const POLICIES_TESTS = [
     },
     lockedPrefs: {
       "xpinstall.enabled": false,
+      "browser.newtabpage.activity-stream.asrouter.userprefs.cfr.addons": false,
+      "browser.newtabpage.activity-stream.asrouter.userprefs.cfr.features": false,
     },
   },
 
@@ -198,6 +200,72 @@ const POLICIES_TESTS = [
     unlockedPrefs: {
       "network.trr.mode": 5,
       "network.trr.uri": "http://example.com/provider",
+    },
+  },
+
+  // POLICY: SSLVersionMin/SSLVersionMax (1)
+  {
+    policies: {
+      "SSLVersionMin": "tls1",
+      "SSLVersionMax": "tls1.1",
+    },
+    lockedPrefs: {
+      "security.tls.version.min": 1,
+      "security.tls.version.max": 2,
+    },
+  },
+
+  // POLICY: SSLVersionMin/SSLVersionMax (2)
+  {
+    policies: {
+      "SSLVersionMin": "tls1.2",
+      "SSLVersionMax": "tls1.3",
+    },
+    lockedPrefs: {
+      "security.tls.version.min": 3,
+      "security.tls.version.max": 4,
+    },
+  },
+
+  // POLICY: CaptivePortal
+  {
+    policies: {
+      "CaptivePortal": false,
+    },
+    lockedPrefs: {
+      "network.captive-portal-service.enabled": false,
+    },
+  },
+
+  // POLICY: NetworkPrediction
+  {
+    policies: {
+      "NetworkPrediction": false,
+    },
+    lockedPrefs: {
+      "network.dns.disablePrefetch": true,
+      "network.dns.disablePrefetchFromHTTPS": true,
+    },
+  },
+
+  // POLICY: ExtensionUpdate
+  {
+    policies: {
+      "ExtensionUpdate": false,
+    },
+    lockedPrefs: {
+      "extensions.update.enabled": false,
+    },
+  },
+
+  // POLICY: DisableShield
+  {
+    policies: {
+      "DisableFirefoxStudies": true,
+    },
+    lockedPrefs: {
+      "browser.newtabpage.activity-stream.asrouter.userprefs.cfr.addons": false,
+      "browser.newtabpage.activity-stream.asrouter.userprefs.cfr.features": false,
     },
   },
 ];

@@ -9,7 +9,7 @@
 
 namespace mozilla {
 
-ScrollStyles::ScrollStyles(uint8_t aH, uint8_t aV,
+ScrollStyles::ScrollStyles(StyleOverflow aH, StyleOverflow aV,
                            const nsStyleDisplay* aDisplay)
     : mHorizontal(aH),
       mVertical(aV),
@@ -20,8 +20,8 @@ ScrollStyles::ScrollStyles(uint8_t aH, uint8_t aV,
       mScrollSnapTypeY(aDisplay->mScrollSnapTypeY),
       mScrollSnapPointsX(aDisplay->mScrollSnapPointsX),
       mScrollSnapPointsY(aDisplay->mScrollSnapPointsY),
-      mScrollSnapDestinationX(aDisplay->mScrollSnapDestination.mXPosition),
-      mScrollSnapDestinationY(aDisplay->mScrollSnapDestination.mYPosition) {}
+      mScrollSnapDestinationX(aDisplay->mScrollSnapDestination.horizontal),
+      mScrollSnapDestinationY(aDisplay->mScrollSnapDestination.vertical) {}
 
 ScrollStyles::ScrollStyles(const nsStyleDisplay* aDisplay)
     : mHorizontal(aDisplay->mOverflowX),
@@ -33,7 +33,7 @@ ScrollStyles::ScrollStyles(const nsStyleDisplay* aDisplay)
       mScrollSnapTypeY(aDisplay->mScrollSnapTypeY),
       mScrollSnapPointsX(aDisplay->mScrollSnapPointsX),
       mScrollSnapPointsY(aDisplay->mScrollSnapPointsY),
-      mScrollSnapDestinationX(aDisplay->mScrollSnapDestination.mXPosition),
-      mScrollSnapDestinationY(aDisplay->mScrollSnapDestination.mYPosition) {}
+      mScrollSnapDestinationX(aDisplay->mScrollSnapDestination.horizontal),
+      mScrollSnapDestinationY(aDisplay->mScrollSnapDestination.vertical) {}
 
 }  // namespace mozilla

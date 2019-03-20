@@ -23,7 +23,7 @@
 #include "qcms.h"
 
 #ifdef DEBUG
-#include "nsSize.h"
+#  include "nsSize.h"
 #endif
 
 using namespace mozilla;
@@ -71,6 +71,8 @@ nsLookAndFeelIntPref nsXPLookAndFeel::sIntPrefs[] = {
     {"ui.contextMenuOffsetHorizontal", eIntID_ContextMenuOffsetHorizontal,
      false, 0},
     {"ui.GtkCSDAvailable", eIntID_GTKCSDAvailable, false, 0},
+    {"ui.GtkCSDHideTitlebarByDefault", eIntID_GTKCSDHideTitlebarByDefault,
+     false, 0},
     {"ui.GtkCSDTransparentBackground", eIntID_GTKCSDTransparentBackground,
      false, 0},
     {"ui.GtkCSDMinimizeButton", eIntID_GTKCSDMinimizeButton, false, 0},
@@ -197,19 +199,23 @@ const char nsXPLookAndFeel::sColorPrefs[][41] = {
     "ui.-moz-mac-source-list-selection",
     "ui.-moz-mac-active-source-list-selection",
     "ui.-moz-mac-tooltip",
+    "ui.-moz-win-accentcolor",
+    "ui.-moz-win-accentcolortext",
     "ui.-moz-win-mediatext",
     "ui.-moz-win-communicationstext",
     "ui.-moz-nativehyperlinktext",
     "ui.-moz-comboboxtext",
-    "ui.-moz-combobox"};
+    "ui.-moz-combobox",
+    "ui.-moz-gtk-info-bar-text"};
 
 int32_t nsXPLookAndFeel::sCachedColors[LookAndFeel::eColorID_LAST_COLOR] = {0};
 int32_t nsXPLookAndFeel::sCachedColorBits[COLOR_CACHE_SIZE] = {0};
 
 bool nsXPLookAndFeel::sInitialized = false;
 bool nsXPLookAndFeel::sUseNativeColors = true;
-bool nsXPLookAndFeel::sUseStandinsForNativeColors = false;
 bool nsXPLookAndFeel::sFindbarModalHighlight = false;
+bool nsXPLookAndFeel::sIsInPrefersReducedMotionForTest = false;
+bool nsXPLookAndFeel::sPrefersReducedMotionForTest = false;
 
 nsXPLookAndFeel* nsXPLookAndFeel::sInstance = nullptr;
 bool nsXPLookAndFeel::sShutdown = false;
@@ -410,9 +416,6 @@ void nsXPLookAndFeel::Init() {
 
   Preferences::AddBoolVarCache(&sUseNativeColors, "ui.use_native_colors",
                                sUseNativeColors);
-  Preferences::AddBoolVarCache(&sUseStandinsForNativeColors,
-                               "ui.use_standins_for_native_colors",
-                               sUseStandinsForNativeColors);
   Preferences::AddBoolVarCache(&sFindbarModalHighlight,
                                "findbar.modalHighlight",
                                sFindbarModalHighlight);
@@ -822,7 +825,8 @@ nsresult nsXPLookAndFeel::GetColorImpl(ColorID aID,
 #endif  // DEBUG_SYSTEM_COLOR_USE
 
   if (aUseStandinsForNativeColors &&
-      (ColorIsNotCSSAccessible(aID) || !sUseStandinsForNativeColors)) {
+      (ColorIsNotCSSAccessible(aID) ||
+       !nsContentUtils::UseStandinsForNativeColors())) {
     aUseStandinsForNativeColors = false;
   }
 
@@ -981,10 +985,8 @@ nsresult LookAndFeel::GetFloat(FloatID aID, float* aResult) {
 }
 
 // static
-bool LookAndFeel::GetFont(FontID aID, nsString& aName, gfxFontStyle& aStyle,
-                          float aDevPixPerCSSPixel) {
-  return nsLookAndFeel::GetInstance()->GetFontImpl(aID, aName, aStyle,
-                                                   aDevPixPerCSSPixel);
+bool LookAndFeel::GetFont(FontID aID, nsString& aName, gfxFontStyle& aStyle) {
+  return nsLookAndFeel::GetInstance()->GetFontImpl(aID, aName, aStyle);
 }
 
 // static

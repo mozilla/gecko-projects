@@ -23,7 +23,7 @@
 #include "nsError.h"                       // for NS_ERROR_NOT_INITIALIZED, etc
 #include "nsIContent.h"                    // for nsIContent
 #include "nsIContentPrefService2.h"        // for nsIContentPrefService2, etc
-#include "nsIDocument.h"                   // for nsIDocument
+#include "mozilla/dom/Document.h"          // for Document
 #include "nsIEditor.h"                     // for nsIEditor
 #include "nsILoadContext.h"
 #include "nsISupportsBase.h"   // for nsISupports
@@ -73,7 +73,7 @@ class UpdateDictionaryHolder {
 static nsIURI* GetDocumentURI(EditorBase* aEditor) {
   MOZ_ASSERT(aEditor);
 
-  nsIDocument* doc = aEditor->AsEditorBase()->GetDocument();
+  Document* doc = aEditor->AsEditorBase()->GetDocument();
   if (NS_WARN_IF(!doc)) {
     return nullptr;
   }
@@ -82,7 +82,7 @@ static nsIURI* GetDocumentURI(EditorBase* aEditor) {
 }
 
 static nsILoadContext* GetLoadContext(nsIEditor* aEditor) {
-  nsIDocument* doc = aEditor->AsEditorBase()->GetDocument();
+  Document* doc = aEditor->AsEditorBase()->GetDocument();
   if (NS_WARN_IF(!doc)) {
     return nullptr;
   }
@@ -188,7 +188,8 @@ DictionaryFetcher::Fetch(nsIEditor* aEditor) {
 
   nsCOMPtr<nsIRunnable> runnable =
       new ContentPrefInitializerRunnable(aEditor, this);
-  NS_IdleDispatchToCurrentThread(runnable.forget(), 1000);
+  NS_DispatchToCurrentThreadQueue(runnable.forget(), 1000,
+                                  EventQueuePriority::Idle);
 
   return NS_OK;
 }
@@ -324,7 +325,7 @@ EditorSpellCheck::InitSpellChecker(nsIEditor* aEditor,
   NS_ENSURE_TRUE(aEditor, NS_ERROR_NULL_POINTER);
   mEditor = aEditor->AsEditorBase();
 
-  nsCOMPtr<nsIDocument> doc = mEditor->GetDocument();
+  RefPtr<Document> doc = mEditor->GetDocument();
   if (NS_WARN_IF(!doc)) {
     return NS_ERROR_FAILURE;
   }
@@ -406,8 +407,9 @@ EditorSpellCheck::GetNextMisspelledWord(nsAString& aNextMisspelledWord) {
   DeleteSuggestedWordList();
   // Beware! This may flush notifications via synchronous
   // ScrollSelectionIntoView.
-  return mSpellChecker->NextMisspelledWord(aNextMisspelledWord,
-                                           &mSuggestedWordList);
+  RefPtr<mozSpellChecker> spellChecker(mSpellChecker);
+  return spellChecker->NextMisspelledWord(aNextMisspelledWord,
+                                          &mSuggestedWordList);
 }
 
 NS_IMETHODIMP
@@ -433,12 +435,14 @@ EditorSpellCheck::CheckCurrentWord(const nsAString& aSuggestedWord,
                                   &mSuggestedWordList);
 }
 
-NS_IMETHODIMP
-EditorSpellCheck::CheckCurrentWordNoSuggest(const nsAString& aSuggestedWord,
-                                            bool* aIsMisspelled) {
-  NS_ENSURE_TRUE(mSpellChecker, NS_ERROR_NOT_INITIALIZED);
+RefPtr<CheckWordPromise> EditorSpellCheck::CheckCurrentWordsNoSuggest(
+    const nsTArray<nsString>& aSuggestedWords) {
+  if (NS_WARN_IF(!mSpellChecker)) {
+    return CheckWordPromise::CreateAndReject(NS_ERROR_NOT_INITIALIZED,
+                                             __func__);
+  }
 
-  return mSpellChecker->CheckWord(aSuggestedWord, aIsMisspelled, nullptr);
+  return mSpellChecker->CheckWords(aSuggestedWords);
 }
 
 NS_IMETHODIMP
@@ -447,7 +451,8 @@ EditorSpellCheck::ReplaceWord(const nsAString& aMisspelledWord,
                               bool aAllOccurrences) {
   NS_ENSURE_TRUE(mSpellChecker, NS_ERROR_NOT_INITIALIZED);
 
-  return mSpellChecker->Replace(aMisspelledWord, aReplaceWord, aAllOccurrences);
+  RefPtr<mozSpellChecker> spellChecker(mSpellChecker);
+  return spellChecker->Replace(aMisspelledWord, aReplaceWord, aAllOccurrences);
 }
 
 NS_IMETHODIMP
@@ -646,31 +651,33 @@ EditorSpellCheck::UpdateCurrentDictionary(
   nsCOMPtr<nsIContent> rootContent;
   HTMLEditor* htmlEditor = mEditor->AsHTMLEditor();
   if (htmlEditor) {
-    rootContent = htmlEditor->GetActiveEditingHost();
+    rootContent = htmlEditor->GetFocusedContent();
   } else {
     rootContent = mEditor->GetRoot();
-  }
-
-  // Try to get topmost document's document element for embedded mail editor.
-  uint32_t flags = 0;
-  mEditor->GetFlags(&flags);
-  if (flags & nsIPlaintextEditor::eEditorMailMask) {
-    nsCOMPtr<nsIDocument> ownerDoc = rootContent->OwnerDoc();
-    NS_ENSURE_TRUE(ownerDoc, NS_ERROR_FAILURE);
-    nsIDocument* parentDoc = ownerDoc->GetParentDocument();
-    if (parentDoc) {
-      rootContent = parentDoc->GetDocumentElement();
-    }
   }
 
   if (!rootContent) {
     return NS_ERROR_FAILURE;
   }
 
+  // Try to get topmost document's document element for embedded mail editor.
+  uint32_t flags = 0;
+  mEditor->GetFlags(&flags);
+  if (flags & nsIPlaintextEditor::eEditorMailMask) {
+    RefPtr<Document> ownerDoc = rootContent->OwnerDoc();
+    Document* parentDoc = ownerDoc->GetParentDocument();
+    if (parentDoc) {
+      rootContent = parentDoc->GetDocumentElement();
+      if (!rootContent) {
+        return NS_ERROR_FAILURE;
+      }
+    }
+  }
+
   RefPtr<DictionaryFetcher> fetcher =
       new DictionaryFetcher(this, aCallback, mDictionaryFetcherGroup);
   rootContent->GetLang(fetcher->mRootContentLang);
-  nsCOMPtr<nsIDocument> doc = rootContent->GetComposedDoc();
+  RefPtr<Document> doc = rootContent->GetComposedDoc();
   NS_ENSURE_STATE(doc);
   doc->GetContentLanguage(fetcher->mRootDocContentLang);
 

@@ -17,12 +17,12 @@
 class nsIFile;
 
 #if defined(XP_WIN)
-#include <windows.h>
+#  include <windows.h>
 typedef HANDLE ProcessType;
 #elif defined(XP_UNIX)
 typedef pid_t ProcessType;
 #else
-#include "prproces.h"
+#  include "prproces.h"
 typedef PRProcess *ProcessType;
 #endif
 
@@ -65,7 +65,7 @@ class nsUpdateProcessor final : public nsIUpdateProcessor {
   ~nsUpdateProcessor();
 
   struct StagedUpdateInfo {
-    StagedUpdateInfo() : mArgc(0), mArgv(nullptr), mIsOSUpdate(false) {}
+    StagedUpdateInfo() : mArgc(0), mArgv(nullptr) {}
     ~StagedUpdateInfo() {
       for (int i = 0; i < mArgc; ++i) {
         delete[] mArgv[i];
@@ -76,11 +76,9 @@ class nsUpdateProcessor final : public nsIUpdateProcessor {
     nsCOMPtr<nsIFile> mGREDir;
     nsCOMPtr<nsIFile> mAppDir;
     nsCOMPtr<nsIFile> mUpdateRoot;
-    nsCOMPtr<nsIFile> mOSApplyToDir;
     int mArgc;
     char **mArgv;
     nsCString mAppVersion;
-    bool mIsOSUpdate;
   };
 
  private:

@@ -126,7 +126,7 @@ class HTMLEditor final : public TextEditor,
   bool GetReturnInParagraphCreatesNewParagraph();
 
   // TextEditor overrides
-  virtual nsresult Init(nsIDocument& aDoc, Element* aRoot,
+  virtual nsresult Init(Document& aDoc, Element* aRoot,
                         nsISelectionController* aSelCon, uint32_t aFlags,
                         const nsAString& aValue) override;
   NS_IMETHOD BeginningOfDocument() override;
@@ -134,12 +134,14 @@ class HTMLEditor final : public TextEditor,
 
   NS_IMETHOD CanPaste(int32_t aSelectionType, bool* aCanPaste) override;
 
+  MOZ_CAN_RUN_SCRIPT
   NS_IMETHOD PasteTransferable(nsITransferable* aTransferable) override;
 
   NS_IMETHOD DeleteNode(nsINode* aNode) override;
 
   NS_IMETHOD InsertLineBreak() override;
 
+  MOZ_CAN_RUN_SCRIPT
   virtual nsresult HandleKeyPressEvent(
       WidgetKeyboardEvent* aKeyboardEvent) override;
   virtual nsIContent* GetFocusedContent() override;
@@ -160,6 +162,7 @@ class HTMLEditor final : public TextEditor,
    * @param aDispatchPasteEvent true if this should dispatch ePaste event
    *                            before pasting.  Otherwise, false.
    */
+  MOZ_CAN_RUN_SCRIPT
   virtual nsresult PasteAsQuotationAsAction(int32_t aClipboardType,
                                             bool aDispatchPasteEvent) override;
 
@@ -421,6 +424,7 @@ class HTMLEditor final : public TextEditor,
    * activation of an inline table editing UI element
    * @param aUIAnonymousElement [IN] the inline table editing UI element
    */
+  MOZ_CAN_RUN_SCRIPT
   nsresult DoInlineTableEditingAction(const Element& aUIAnonymousElement);
 
   /**
@@ -519,7 +523,7 @@ class HTMLEditor final : public TextEditor,
    * InsertTextWithTransaction() inserts aStringToInsert at aPointToInsert.
    */
   virtual nsresult InsertTextWithTransaction(
-      nsIDocument& aDocument, const nsAString& aStringToInsert,
+      Document& aDocument, const nsAString& aStringToInsert,
       const EditorRawDOMPoint& aPointToInsert,
       EditorRawDOMPoint* aPointAfterInsertedString = nullptr) override;
 
@@ -639,6 +643,7 @@ class HTMLEditor final : public TextEditor,
    * a cell which contains first selection range.  This does not return
    * error even if selection is not in cell element, just does nothing.
    */
+  MOZ_CAN_RUN_SCRIPT
   nsresult DeleteTableCellContentsWithTransaction();
 
   void IsNextCharInNodeWhitespace(nsIContent* aContent, int32_t aOffset,
@@ -953,6 +958,7 @@ class HTMLEditor final : public TextEditor,
    */
   nsresult InsertParagraphSeparatorAsSubAction();
 
+  MOZ_CAN_RUN_SCRIPT
   virtual nsresult SelectAllInternal() override;
 
   /**
@@ -961,6 +967,7 @@ class HTMLEditor final : public TextEditor,
    *
    * @param aContentToSelect    The content which should be selected.
    */
+  MOZ_CAN_RUN_SCRIPT
   nsresult SelectContentInternal(nsIContent& aContentToSelect);
 
   /**
@@ -1410,6 +1417,7 @@ class HTMLEditor final : public TextEditor,
    * @param aDispatchPasteEvent true if this should dispatch ePaste event
    *                            before pasting.  Otherwise, false.
    */
+  MOZ_CAN_RUN_SCRIPT
   nsresult PasteInternal(int32_t aClipboardType, bool aDispatchPasteEvent);
 
   /**
@@ -1518,6 +1526,7 @@ class HTMLEditor final : public TextEditor,
   /**
    * Make the given selection span the entire document.
    */
+  MOZ_CAN_RUN_SCRIPT
   virtual nsresult SelectEntireDocument() override;
 
   /**
@@ -1615,7 +1624,7 @@ class HTMLEditor final : public TextEditor,
 
    public:
     BlobReader(dom::BlobImpl* aBlob, HTMLEditor* aHTMLEditor, bool aIsSafe,
-               nsIDocument* aSourceDoc, const EditorDOMPoint& aPointToInsert,
+               Document* aSourceDoc, const EditorDOMPoint& aPointToInsert,
                bool aDoDeleteSelection);
 
     NS_INLINE_DECL_CYCLE_COLLECTING_NATIVE_REFCOUNTING(BlobReader)
@@ -1629,7 +1638,7 @@ class HTMLEditor final : public TextEditor,
 
     RefPtr<dom::BlobImpl> mBlob;
     RefPtr<HTMLEditor> mHTMLEditor;
-    nsCOMPtr<nsIDocument> mSourceDoc;
+    nsCOMPtr<Document> mSourceDoc;
     EditorDOMPoint mPointToInsert;
     EditAction mEditAction;
     bool mIsSafe;
@@ -1660,6 +1669,7 @@ class HTMLEditor final : public TextEditor,
    */
   bool SetCaretInTableCell(dom::Element* aElement);
 
+  MOZ_CAN_RUN_SCRIPT
   nsresult TabInTable(bool inIsShift, bool* outHandled);
 
   /**
@@ -1691,6 +1701,7 @@ class HTMLEditor final : public TextEditor,
    * @param aInsertPosition             Before or after the target cell which
    *                                    contains first selection range.
    */
+  MOZ_CAN_RUN_SCRIPT
   nsresult InsertTableCellsWithTransaction(int32_t aNumberOfCellsToInsert,
                                            InsertPosition aInsertPosition);
 
@@ -1706,6 +1717,7 @@ class HTMLEditor final : public TextEditor,
    * @param aInsertPosition             Before or after the target cell which
    *                                    contains first selection range.
    */
+  MOZ_CAN_RUN_SCRIPT
   nsresult InsertTableColumnsWithTransaction(int32_t aNumberOfColumnsToInsert,
                                              InsertPosition aInsertPosition);
 
@@ -1721,6 +1733,7 @@ class HTMLEditor final : public TextEditor,
    * @param aInsertPosition             Before or after the target cell which
    *                                    contains first selection range.
    */
+  MOZ_CAN_RUN_SCRIPT
   nsresult InsertTableRowsWithTransaction(int32_t aNumberOfRowsToInsert,
                                           InsertPosition aInsertPosition);
 
@@ -1750,6 +1763,7 @@ class HTMLEditor final : public TextEditor,
    *                                    ignored if 2 ore more cells are
    *                                    selected.
    */
+  MOZ_CAN_RUN_SCRIPT
   nsresult DeleteSelectedTableColumnsWithTransaction(
       int32_t aNumberOfColumnsToDelete);
 
@@ -1765,6 +1779,7 @@ class HTMLEditor final : public TextEditor,
    * @param aRowIndex           Index of the column which you want to remove.
    *                            0 is the first column.
    */
+  MOZ_CAN_RUN_SCRIPT
   nsresult DeleteTableColumnWithTransaction(Element& aTableElement,
                                             int32_t aColumnIndex);
 
@@ -1783,6 +1798,7 @@ class HTMLEditor final : public TextEditor,
    * @param aNumberOfRowsToDelete   Number of rows to remove.  This is ignored
    *                                if 2 or more cells are selected.
    */
+  MOZ_CAN_RUN_SCRIPT
   nsresult DeleteSelectedTableRowsWithTransaction(
       int32_t aNumberOfRowsToDelete);
 
@@ -1797,6 +1813,7 @@ class HTMLEditor final : public TextEditor,
    * @param aRowIndex           Index of the <tr> element which you want to
    *                            remove.  0 is the first row.
    */
+  MOZ_CAN_RUN_SCRIPT
   nsresult DeleteTableRowWithTransaction(Element& aTableElement,
                                          int32_t aRowIndex);
 
@@ -1814,6 +1831,7 @@ class HTMLEditor final : public TextEditor,
    * @param aNumberOfCellsToDelete  Number of cells to remove.  This is ignored
    *                                if 2 or more cells are selected.
    */
+  MOZ_CAN_RUN_SCRIPT
   nsresult DeleteTableCellWithTransaction(int32_t aNumberOfCellsToDelete);
 
   /**
@@ -1940,9 +1958,9 @@ class HTMLEditor final : public TextEditor,
   /**
    * InsertObject() inserts given object at aPointToInsert.
    */
-  MOZ_CAN_RUN_SCRIPT_BOUNDARY
+  MOZ_CAN_RUN_SCRIPT
   nsresult InsertObject(const nsACString& aType, nsISupports* aObject,
-                        bool aIsSafe, nsIDocument* aSourceDoc,
+                        bool aIsSafe, Document* aSourceDoc,
                         const EditorDOMPoint& aPointToInsert,
                         bool aDoDeleteSelection);
 
@@ -1950,9 +1968,9 @@ class HTMLEditor final : public TextEditor,
   // (drag&drop or clipboard)
   virtual nsresult PrepareTransferable(nsITransferable** transferable) override;
   nsresult PrepareHTMLTransferable(nsITransferable** transferable);
-  MOZ_CAN_RUN_SCRIPT_BOUNDARY
+  MOZ_CAN_RUN_SCRIPT
   nsresult InsertFromTransferable(nsITransferable* transferable,
-                                  nsIDocument* aSourceDoc,
+                                  Document* aSourceDoc,
                                   const nsAString& aContextStr,
                                   const nsAString& aInfoStr,
                                   bool havePrivateHTMLFlavor,
@@ -1963,11 +1981,10 @@ class HTMLEditor final : public TextEditor,
    * this editor.  Don't use this method for other purposes.
    */
   MOZ_CAN_RUN_SCRIPT
-  virtual nsresult InsertFromDataTransfer(dom::DataTransfer* aDataTransfer,
-                                          int32_t aIndex,
-                                          nsIDocument* aSourceDoc,
-                                          const EditorDOMPoint& aDroppedAt,
-                                          bool aDoDeleteSelection) override;
+  nsresult InsertFromDataTransfer(dom::DataTransfer* aDataTransfer,
+                                  int32_t aIndex, Document* aSourceDoc,
+                                  const EditorDOMPoint& aDroppedAt,
+                                  bool aDoDeleteSelection);
 
   bool HavePrivateHTMLFlavor(nsIClipboard* clipboard);
   nsresult ParseCFHTML(nsCString& aCfhtml, char16_t** aStuffToPaste,
@@ -1980,7 +1997,7 @@ class HTMLEditor final : public TextEditor,
       nsCOMPtr<nsINode>* outStartNode, nsCOMPtr<nsINode>* outEndNode,
       int32_t* outStartOffset, int32_t* outEndOffset, bool aTrustedInput);
   nsresult ParseFragment(const nsAString& aStr, nsAtom* aContextLocalName,
-                         nsIDocument* aTargetDoc,
+                         Document* aTargetDoc,
                          dom::DocumentFragment** aFragment, bool aTrustedInput);
   void CreateListOfNodesToPaste(dom::DocumentFragment& aFragment,
                                 nsTArray<OwningNonNull<nsINode>>& outNodeList,
@@ -2085,9 +2102,9 @@ class HTMLEditor final : public TextEditor,
   MOZ_CAN_RUN_SCRIPT_BOUNDARY
   nsresult DoInsertHTMLWithContext(
       const nsAString& aInputString, const nsAString& aContextStr,
-      const nsAString& aInfoStr, const nsAString& aFlavor,
-      nsIDocument* aSourceDoc, const EditorDOMPoint& aPointToInsert,
-      bool aDeleteSelection, bool aTrustedInput, bool aClearStyle = true);
+      const nsAString& aInfoStr, const nsAString& aFlavor, Document* aSourceDoc,
+      const EditorDOMPoint& aPointToInsert, bool aDeleteSelection,
+      bool aTrustedInput, bool aClearStyle = true);
 
   /**
    * sets the position of an element; warning it does NOT check if the
@@ -2118,14 +2135,15 @@ class HTMLEditor final : public TextEditor,
    *                    AutoSelectionSetterAfterTableEdit stack-based object to
    *                    insure we reset the caret in a table-editing method.
    */
+  MOZ_CAN_RUN_SCRIPT
   void SetSelectionAfterTableEdit(Element* aTable, int32_t aRow, int32_t aCol,
                                   int32_t aDirection, bool aSelected);
 
   void RemoveListenerAndDeleteRef(const nsAString& aEvent,
                                   nsIDOMEventListener* aListener,
                                   bool aUseCapture, ManualNACPtr aElement,
-                                  nsIPresShell* aShell);
-  void DeleteRefToAnonymousNode(ManualNACPtr aContent, nsIPresShell* aShell);
+                                  PresShell* aPresShell);
+  void DeleteRefToAnonymousNode(ManualNACPtr aContent, PresShell* aPresShell);
 
   /**
    * RefereshEditingUI() may refresh editing UIs for current Selection, focus,
@@ -2357,9 +2375,6 @@ class HTMLEditor final : public TextEditor,
   nsTArray<RefPtr<StyleSheet>> mStyleSheets;
 
   // resizing
-  // If the instance has shown resizers at least once, mHasShownResizers is
-  // set to true.
-  bool mHasShownResizers;
   bool mIsObjectResizingEnabled;
   bool mIsResizing;
   bool mPreserveRatio;
@@ -2368,18 +2383,12 @@ class HTMLEditor final : public TextEditor,
   // absolute positioning
   bool mIsAbsolutelyPositioningEnabled;
   bool mResizedObjectIsAbsolutelyPositioned;
-  // If the instance has shown grabber at least once, mHasShownGrabber is
-  // set to true.
-  bool mHasShownGrabber;
   bool mGrabberClicked;
   bool mIsMoving;
 
   bool mSnapToGridEnabled;
 
   // inline table editing
-  // If the instance has shown inline table editor at least once,
-  // mHasShownInlineTableEditor is set to true.
-  bool mHasShownInlineTableEditor;
   bool mIsInlineTableEditingEnabled;
 
   // resizing
@@ -2416,12 +2425,6 @@ class HTMLEditor final : public TextEditor,
   int32_t mYIncrementFactor;
   int32_t mWidthIncrementFactor;
   int32_t mHeightIncrementFactor;
-
-  // When resizers, grabber and/or inline table editor are operated by user
-  // actually, the following counters are increased.
-  uint32_t mResizerUsedCount;
-  uint32_t mGrabberUsedCount;
-  uint32_t mInlineTableEditorUsedCount;
 
   int8_t mInfoXIncrement;
   int8_t mInfoYIncrement;

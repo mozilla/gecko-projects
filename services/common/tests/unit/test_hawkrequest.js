@@ -3,10 +3,9 @@
 
 "use strict";
 
-ChromeUtils.import("resource://gre/modules/Log.jsm");
-ChromeUtils.import("resource://services-common/utils.js");
-ChromeUtils.import("resource://services-common/hawkrequest.js");
-ChromeUtils.import("resource://services-common/async.js");
+const {HAWKAuthenticatedRESTRequest, deriveHawkCredentials} = ChromeUtils.import("resource://services-common/hawkrequest.js");
+const {Services} = ChromeUtils.import("resource://gre/modules/Services.jsm");
+const {Async} = ChromeUtils.import("resource://services-common/async.js");
 
 // https://github.com/mozilla/fxa-auth-server/wiki/onepw-protocol#wiki-use-session-certificatesign-etc
 var SESSION_KEYS = {
@@ -197,11 +196,8 @@ add_task(async function test_hawk_language_pref_changed() {
   await promiseStopServer(server);
 });
 
-add_task(function test_deriveHawkCredentials() {
-  let credentials = deriveHawkCredentials(
-    SESSION_KEYS.sessionToken, "sessionToken");
-
-  Assert.equal(credentials.algorithm, "sha256");
+add_task(async function test_deriveHawkCredentials() {
+  let credentials = await deriveHawkCredentials(SESSION_KEYS.sessionToken, "sessionToken");
   Assert.equal(credentials.id, SESSION_KEYS.tokenID);
   Assert.equal(CommonUtils.bytesAsHex(credentials.key), SESSION_KEYS.reqHMACkey);
 });

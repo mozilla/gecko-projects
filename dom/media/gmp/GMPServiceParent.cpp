@@ -28,7 +28,7 @@
 #include "runnable_utils.h"
 #include "VideoUtils.h"
 #if defined(XP_LINUX) && defined(MOZ_GMP_SANDBOX)
-#include "mozilla/SandboxInfo.h"
+#  include "mozilla/SandboxInfo.h"
 #endif
 #include "nsAppDirectoryServiceDefs.h"
 #include "nsDirectoryServiceUtils.h"
@@ -46,16 +46,16 @@ using mozilla::ipc::Transport;
 namespace mozilla {
 
 #ifdef LOG
-#undef LOG
+#  undef LOG
 #endif
 
 #define LOGD(msg) MOZ_LOG(GetGMPLog(), mozilla::LogLevel::Debug, msg)
 #define LOG(level, msg) MOZ_LOG(GetGMPLog(), (level), msg)
 
 #ifdef __CLASS__
-#undef __CLASS__
+#  undef __CLASS__
 #endif
-#define __CLASS__ "GMPService"
+#define __CLASS__ "GMPServiceParent"
 
 #define NS_DispatchToMainThread(...) CompileError_UseAbstractMainThreadInstead
 
@@ -486,25 +486,22 @@ void GeckoMediaPluginServiceParent::CrashPlugins() {
   }
 }
 
-RefPtr<GenericPromise::AllPromiseType>
-GeckoMediaPluginServiceParent::LoadFromEnvironment() {
+RefPtr<GenericPromise> GeckoMediaPluginServiceParent::LoadFromEnvironment() {
   MOZ_ASSERT(mGMPThread->EventTarget()->IsOnCurrentThread());
   RefPtr<AbstractThread> thread(GetAbstractGMPThread());
   if (!thread) {
-    return GenericPromise::AllPromiseType::CreateAndReject(NS_ERROR_FAILURE,
-                                                           __func__);
+    return GenericPromise::CreateAndReject(NS_ERROR_FAILURE, __func__);
   }
 
   const char* env = PR_GetEnv("MOZ_GMP_PATH");
   if (!env || !*env) {
-    return GenericPromise::AllPromiseType::CreateAndResolve(true, __func__);
+    return GenericPromise::CreateAndResolve(true, __func__);
   }
 
   nsString allpaths;
   if (NS_WARN_IF(NS_FAILED(
           NS_CopyNativeToUnicode(nsDependentCString(env), allpaths)))) {
-    return GenericPromise::AllPromiseType::CreateAndReject(NS_ERROR_FAILURE,
-                                                           __func__);
+    return GenericPromise::CreateAndReject(NS_ERROR_FAILURE, __func__);
   }
 
   nsTArray<RefPtr<GenericPromise>> promises;
@@ -525,7 +522,13 @@ GeckoMediaPluginServiceParent::LoadFromEnvironment() {
   }
 
   mScannedPluginOnDisk = true;
-  return GenericPromise::All(thread, promises);
+  return GenericPromise::All(thread, promises)
+      ->Then(thread, __func__,
+             []() { return GenericPromise::CreateAndResolve(true, __func__); },
+             []() {
+               return GenericPromise::CreateAndReject(NS_ERROR_FAILURE,
+                                                      __func__);
+             });
 }
 
 class NotifyObserversTask final : public mozilla::Runnable {
@@ -1725,17 +1728,6 @@ mozilla::ipc::IPCResult GMPServiceParent::RecvGetGMPNodeId(
   }
   return IPC_OK();
 }
-
-class DeleteGMPServiceParent : public mozilla::Runnable {
- public:
-  explicit DeleteGMPServiceParent(GMPServiceParent* aToDelete)
-      : Runnable("gmp::DeleteGMPServiceParent"), mToDelete(aToDelete) {}
-
-  NS_IMETHOD Run() override { return NS_OK; }
-
- private:
-  nsAutoPtr<GMPServiceParent> mToDelete;
-};
 
 void GMPServiceParent::CloseTransport(Monitor* aSyncMonitor, bool* aCompleted) {
   MOZ_ASSERT(MessageLoop::current() == XRE_GetIOMessageLoop());

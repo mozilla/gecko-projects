@@ -53,7 +53,7 @@ ALL_FLAVORS = {
     'browser-chrome': {
         'suite': 'browser',
         'aliases': ('browser', 'browser-chrome', 'mochitest-browser-chrome', 'bc'),
-        'enabled_apps': ('firefox',),
+        'enabled_apps': ('firefox', 'thunderbird'),
         'extra_args': {
             'flavor': 'browser',
         }
@@ -370,13 +370,6 @@ class MochitestArguments(ArgumentContainer):
           "default": False,
           "help": "Delay execution between tests.",
           }],
-        [["--metro-immersive"],
-         {"action": "store_true",
-          "dest": "immersiveMode",
-          "default": False,
-          "help": "Launches tests in an immersive browser.",
-          "suppress": True,
-          }],
         [["--httpd-path"],
          {"dest": "httpdPath",
           "default": None,
@@ -389,6 +382,11 @@ class MochitestArguments(ArgumentContainer):
           "default": [],
           "dest": "extraPrefs",
           "help": "Defines an extra user preference.",
+          }],
+        [["--jsconsole"],
+         {"action": "store_true",
+          "default": False,
+          "help": "Open the Browser Console.",
           }],
         [["--jsdebugger"],
          {"action": "store_true",
@@ -605,9 +603,9 @@ class MochitestArguments(ArgumentContainer):
     ]
 
     defaults = {
-        # Bug 1065098 - The geckomediaplugin process fails to produce a leak
+        # Bug 1065098 - The gmplugin process fails to produce a leak
         # log for some reason.
-        'ignoreMissingLeaks': ["geckomediaplugin"],
+        'ignoreMissingLeaks': ["gmplugin"],
         'extensionsToExclude': ['specialpowers'],
         # Set server information on the args object
         'webServer': '127.0.0.1',
@@ -712,13 +710,6 @@ class MochitestArguments(ArgumentContainer):
         elif not options.symbolsPath and build_obj:
             options.symbolsPath = os.path.join(build_obj.distdir, 'crashreporter-symbols')
 
-        if options.jsdebugger:
-            options.extraPrefs += [
-                "devtools.debugger.remote-enabled=true",
-                "devtools.chrome.enabled=true",
-                "devtools.debugger.prompt-connection=false"
-            ]
-
         if options.debugOnFailure and not options.jsdebugger:
             parser.error(
                 "--debug-on-failure requires --jsdebugger.")
@@ -794,15 +785,6 @@ class MochitestArguments(ArgumentContainer):
             if options.testingModulesDir[-1] != '/':
                 options.testingModulesDir += '/'
 
-        if options.immersiveMode:
-            if not mozinfo.isWin:
-                parser.error("immersive is only supported on Windows 8 and up.")
-            options.immersiveHelperPath = os.path.join(
-                options.utilityPath, "metrotestharness.exe")
-            if not os.path.exists(options.immersiveHelperPath):
-                parser.error("%s not found, cannot launch immersive tests." %
-                             options.immersiveHelperPath)
-
         if options.runUntilFailure:
             if not options.repeat:
                 options.repeat = 29
@@ -841,7 +823,8 @@ class MochitestArguments(ArgumentContainer):
             "default": options.defaultLeakThreshold,
             "tab": options.defaultLeakThreshold,
             # GMP rarely gets a log, but when it does, it leaks a little.
-            "geckomediaplugin": 20000,
+            "gmplugin": 20000,
+            "rdd": 400,
         }
 
         # See the dependencies of bug 1401764.
@@ -866,7 +849,9 @@ class AndroidArguments(ArgumentContainer):
     args = [
         [["--deviceSerial"],
          {"dest": "deviceSerial",
-          "help": "ip address of remote device to test",
+          "help": "adb serial number of remote device. This is required "
+                  "when more than one device is connected to the host. "
+                  "Use 'adb devices' to see connected devices.",
           "default": None,
           }],
         [["--adbpath"],
@@ -878,42 +863,42 @@ class AndroidArguments(ArgumentContainer):
         [["--remote-webserver"],
          {"dest": "remoteWebServer",
           "default": None,
-          "help": "ip address where the remote web server is hosted at",
+          "help": "IP address of the remote web server.",
           }],
         [["--http-port"],
          {"dest": "httpPort",
           "default": DEFAULT_PORTS['http'],
-          "help": "http port of the remote web server",
+          "help": "http port of the remote web server.",
           "suppress": True,
           }],
         [["--ssl-port"],
          {"dest": "sslPort",
           "default": DEFAULT_PORTS['https'],
-          "help": "ssl port of the remote web server",
+          "help": "ssl port of the remote web server.",
           "suppress": True,
           }],
         [["--robocop-apk"],
          {"dest": "robocopApk",
           "default": "",
-          "help": "name of the Robocop APK to use for ADB test running",
+          "help": "Name of the robocop APK to use.",
           }],
         [["--remoteTestRoot"],
          {"dest": "remoteTestRoot",
           "default": None,
-          "help": "remote directory to use as test root \
-                   (eg. /mnt/sdcard/tests or /data/local/tests)",
+          "help": "Remote directory to use as test root "
+                  "(eg. /mnt/sdcard/tests or /data/local/tests).",
           "suppress": True,
           }],
         [["--enable-coverage"],
          {"action": "store_true",
           "default": False,
-          "help": "Enable collecting code coverage information when running"
+          "help": "Enable collecting code coverage information when running "
                   "robocop tests.",
           }],
         [["--coverage-output-dir"],
          {"action": "store",
           "default": None,
-          "help": "When using --enable-java-coverage, save the code coverage report"
+          "help": "When using --enable-java-coverage, save the code coverage report "
                   "files to this directory.",
           }],
     ]

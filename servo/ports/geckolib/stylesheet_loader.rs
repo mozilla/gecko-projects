@@ -1,13 +1,12 @@
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
- * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 use cssparser::SourceLocation;
 use nsstring::nsCString;
 use servo_arc::Arc;
 use style::context::QuirksMode;
 use style::gecko::data::GeckoStyleSheet;
-use style::gecko::global_style_data::GLOBAL_STYLE_DATA;
 use style::gecko_bindings::bindings;
 use style::gecko_bindings::bindings::Gecko_LoadStyleSheet;
 use style::gecko_bindings::structs::{Loader, LoaderReusableStyleSheets};
@@ -16,6 +15,7 @@ use style::gecko_bindings::structs::{
 };
 use style::gecko_bindings::sugar::ownership::{FFIArcHelpers, HasBoxFFI, OwnedOrNull};
 use style::gecko_bindings::sugar::refptr::RefPtr;
+use style::global_style_data::GLOBAL_STYLE_DATA;
 use style::media_queries::MediaList;
 use style::parser::ParserContext;
 use style::shared_lock::{Locked, SharedRwLock};

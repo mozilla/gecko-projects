@@ -4,16 +4,15 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 #include "VideoDecoderChild.h"
-#include "VideoDecoderManagerChild.h"
-#include "mozilla/layers/TextureClient.h"
-#include "mozilla/Telemetry.h"
-#include "base/thread.h"
-#include "MediaInfo.h"
-#include "ImageContainer.h"
 #include "GPUVideoImage.h"
+#include "ImageContainer.h"
+#include "MediaInfo.h"
+#include "VideoDecoderManagerChild.h"
+#include "base/thread.h"
+#include "mozilla/Telemetry.h"
+#include "mozilla/layers/TextureClient.h"
 
 namespace mozilla {
-namespace dom {
 
 using base::Thread;
 using namespace ipc;
@@ -59,11 +58,9 @@ mozilla::ipc::IPCResult VideoDecoderChild::RecvOutput(
       new GPUVideoImage(GetManager(), aData.sd(), aData.frameSize());
 
   RefPtr<VideoData> video = VideoData::CreateFromImage(
-      aData.display(), aData.base().offset(),
-      media::TimeUnit::FromMicroseconds(aData.base().time()),
-      media::TimeUnit::FromMicroseconds(aData.base().duration()), image,
-      aData.base().keyframe(),
-      media::TimeUnit::FromMicroseconds(aData.base().timecode()));
+      aData.display(), aData.base().offset(), aData.base().time(),
+      aData.base().duration(), image, aData.base().keyframe(),
+      aData.base().timecode());
 
   mDecodedData.AppendElement(std::move(video));
   return IPC_OK();
@@ -127,7 +124,7 @@ void VideoDecoderChild::ActorDestroy(ActorDestroyReason aWhy) {
     // it'll be safe for MediaFormatReader to recreate decoders
     RefPtr<VideoDecoderChild> ref = this;
     GetManager()->RunWhenRecreated(
-        NS_NewRunnableFunction("dom::VideoDecoderChild::ActorDestroy", [=]() {
+        NS_NewRunnableFunction("VideoDecoderChild::ActorDestroy", [=]() {
           MediaResult error(NS_ERROR_DOM_MEDIA_NEED_NEW_DECODER);
           error.SetGPUCrashTimeStamp(ref->mGPUCrashTime);
           if (ref->mInitialized) {
@@ -244,11 +241,9 @@ RefPtr<MediaDataDecoder::DecodePromise> VideoDecoderChild::Decode(
   memcpy(buffer.get<uint8_t>(), aSample->Data(), aSample->Size());
 
   MediaRawDataIPDL sample(
-      MediaDataIPDL(aSample->mOffset, aSample->mTime.ToMicroseconds(),
-                    aSample->mTimecode.ToMicroseconds(),
-                    aSample->mDuration.ToMicroseconds(), aSample->mFrames,
-                    aSample->mKeyframe),
-      buffer);
+      MediaDataIPDL(aSample->mOffset, aSample->mTime, aSample->mTimecode,
+                    aSample->mDuration, aSample->mKeyframe),
+      std::move(buffer));
   SendInput(sample);
   return mDecodePromise.Ensure(__func__);
 }
@@ -305,7 +300,7 @@ nsCString VideoDecoderChild::GetDescriptionName() const {
 void VideoDecoderChild::SetSeekThreshold(const media::TimeUnit& aTime) {
   AssertOnManagerThread();
   if (mCanSend) {
-    SendSetSeekThreshold(aTime.ToMicroseconds());
+    SendSetSeekThreshold(aTime);
   }
 }
 
@@ -326,5 +321,4 @@ VideoDecoderManagerChild* VideoDecoderChild::GetManager() {
   return static_cast<VideoDecoderManagerChild*>(Manager());
 }
 
-}  // namespace dom
 }  // namespace mozilla

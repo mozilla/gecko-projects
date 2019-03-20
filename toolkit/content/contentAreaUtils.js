@@ -2,7 +2,9 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this file,
  * You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
+var {AppConstants} = ChromeUtils.import("resource://gre/modules/AppConstants.jsm");
+var {Services} = ChromeUtils.import("resource://gre/modules/Services.jsm");
+var {XPCOMUtils} = ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
 
 XPCOMUtils.defineLazyModuleGetters(this, {
   BrowserUtils: "resource://gre/modules/BrowserUtils.jsm",
@@ -12,9 +14,7 @@ XPCOMUtils.defineLazyModuleGetters(this, {
   FileUtils: "resource://gre/modules/FileUtils.jsm",
   OS: "resource://gre/modules/osfile.jsm",
   PrivateBrowsingUtils: "resource://gre/modules/PrivateBrowsingUtils.jsm",
-  Services: "resource://gre/modules/Services.jsm",
   Deprecated: "resource://gre/modules/Deprecated.jsm",
-  AppConstants: "resource://gre/modules/AppConstants.jsm",
   NetUtil: "resource://gre/modules/NetUtil.jsm",
 });
 
@@ -94,7 +94,7 @@ const nsISupportsCString = Ci.nsISupportsCString;
  * @param aReferrer (nsIURI, optional)
  *        The referrer URI object (not a URL string) to use, or null
  *        if no referrer should be sent.
- * @param aDoc (nsIDocument, deprecated, optional)
+ * @param aDoc (Document, deprecated, optional)
  *        The content document that the save is being initiated from. If this
  *        is omitted, then aIsContentWindowPrivate must be provided.
  * @param aContentType (string, optional)
@@ -162,6 +162,25 @@ function saveBrowser(aBrowser, aSkipPrompt, aOuterWindowID = 0) {
     throw "Must have a browser when calling saveBrowser";
   }
   let persistable = aBrowser.frameLoader;
+  // Because of how pdf.js deals with principals, saving the document the "normal"
+  // way won't work. Work around this by saving the pdf's URL directly:
+  if (aBrowser.contentPrincipal.URI &&
+      aBrowser.contentPrincipal.URI.spec == "resource://pdf.js/web/viewer.html" &&
+      aBrowser.currentURI.schemeIs("file")) {
+    let correctPrincipal = Services.scriptSecurityManager.createCodebasePrincipal(
+        aBrowser.currentURI, aBrowser.contentPrincipal.originAttributes);
+    internalSave(aBrowser.currentURI.spec,
+                 null /* no document */, null /* automatically determine filename */,
+                 null /* no content disposition */,
+                 "application/pdf", false /* don't bypass cache */,
+                 null /* no alternative title */, null /* no auto-chosen file info */,
+                 null /* null referrer will be OK for file: */,
+                 null /* no document */, aSkipPrompt /* caller decides about prompting */,
+                 null /* no cache key because the one for the document will be for pdfjs */,
+                 PrivateBrowsingUtils.isWindowPrivate(aBrowser.ownerGlobal),
+                 correctPrincipal);
+    return;
+  }
   let stack = Components.stack.caller;
   persistable.startPersistence(aOuterWindowID, {
     onDocumentReady(document) {
@@ -193,7 +212,7 @@ function saveDocument(aDocument, aSkipPrompt) {
     contentDisposition = aDocument.contentDisposition;
     cacheKey = aDocument.cacheKey;
   } else if (aDocument.nodeType == 9 /* DOCUMENT_NODE */) {
-    // Otherwise it's an actual nsDocument (and possibly a CPOW).
+    // Otherwise it's an actual document (and possibly a CPOW).
     // We want to use cached data because the document is currently visible.
     let win = aDocument.defaultView;
 
@@ -841,7 +860,6 @@ function appendFiltersForContentType(aFilePicker, aContentType, aFileExtension, 
 
     var mimeInfo = getMIMEInfoForType(aContentType, aFileExtension);
     if (mimeInfo) {
-
       var extString = "";
       for (var extension of mimeInfo.getFileExtensions()) {
         if (extString)
@@ -1172,10 +1190,10 @@ function openURL(aURL) {
     var appstartup = Services.startup;
 
     var loadListener = {
-      onStartRequest: function ll_start(aRequest, aContext) {
+      onStartRequest: function ll_start(aRequest) {
         appstartup.enterLastWindowClosingSurvivalArea();
       },
-      onStopRequest: function ll_stop(aRequest, aContext, aStatusCode) {
+      onStopRequest: function ll_stop(aRequest, aStatusCode) {
         appstartup.exitLastWindowClosingSurvivalArea();
       },
       QueryInterface: ChromeUtils.generateQI(["nsIRequestObserver",

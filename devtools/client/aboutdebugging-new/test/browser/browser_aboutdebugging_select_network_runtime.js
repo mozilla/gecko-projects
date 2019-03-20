@@ -8,14 +8,12 @@ const NETWORK_RUNTIME_APP_NAME = "TestNetworkApp";
 const NETWORK_RUNTIME_CHANNEL = "SomeChannel";
 const NETWORK_RUNTIME_VERSION = "12.3";
 
-/* import-globals-from head-mocks.js */
-Services.scriptloader.loadSubScript(CHROME_URL_ROOT + "head-mocks.js", this);
-
 // Test that network runtimes can be selected.
 add_task(async function() {
   const mocks = new Mocks();
 
-  const { document, tab } = await openAboutDebugging();
+  const { document, tab, window } = await openAboutDebugging();
+  await selectThisFirefoxPage(document, window.AboutDebugging.store);
 
   info("Prepare Network client mock");
   const networkClient = mocks.createNetworkRuntime(NETWORK_RUNTIME_HOST, {
@@ -34,7 +32,7 @@ add_task(async function() {
   await selectRuntime(NETWORK_RUNTIME_HOST, NETWORK_RUNTIME_APP_NAME, document);
 
   info("Check that the network runtime mock is properly displayed");
-  const thisFirefoxRuntimeInfo = document.querySelector(".js-runtime-info");
+  const thisFirefoxRuntimeInfo = document.querySelector(".js-runtime-name");
   ok(thisFirefoxRuntimeInfo, "Runtime info for this-firefox runtime is displayed");
   const runtimeInfoText = thisFirefoxRuntimeInfo.textContent;
 

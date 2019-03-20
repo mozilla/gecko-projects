@@ -4,6 +4,8 @@
 
 "use strict";
 
+const { SUPPORTED_HTTP_CODES } = require("../constants");
+
 /**
  * A mapping of header names to external documentation. Any header included
  * here will show a MDN link alongside it.
@@ -95,61 +97,6 @@ const SUPPORTED_HEADERS = [
   "X-XSS-Protection",
 ];
 
-/**
- * A mapping of HTTP status codes to external documentation. Any code included
- * here will show a MDN link alongside it.
- */
-const SUPPORTED_HTTP_CODES = [
-    "100",
-    "101",
-    "200",
-    "201",
-    "202",
-    "203",
-    "204",
-    "205",
-    "206",
-    "300",
-    "301",
-    "302",
-    "303",
-    "304",
-    "307",
-    "308",
-    "400",
-    "401",
-    "403",
-    "404",
-    "405",
-    "406",
-    "407",
-    "408",
-    "409",
-    "410",
-    "411",
-    "412",
-    "413",
-    "414",
-    "415",
-    "416",
-    "417",
-    "418",
-    "422",
-    "425",
-    "426",
-    "428",
-    "429",
-    "431",
-    "451",
-    "500",
-    "501",
-    "502",
-    "503",
-    "504",
-    "505",
-    "511",
-];
-
 const MDN_URL = "https://developer.mozilla.org/docs/";
 const MDN_STATUS_CODES_LIST_URL = `${MDN_URL}Web/HTTP/Status`;
 const getGAParams = (panelId = "netmonitor") => {
@@ -214,10 +161,20 @@ function getFilterBoxURL() {
     `#Filtering_by_properties`;
 }
 
+/**
+ * Get the MDN URL for Tracking Protection
+ *
+ * @return {string} The MDN URL for the documentation of Tracking Protection.
+ */
+function getTrackingProtectionURL() {
+  return `${MDN_URL}Mozilla/Firefox/Privacy/Tracking_Protection${getGAParams()}`;
+}
+
 module.exports = {
   getHeadersURL,
   getHTTPStatusCodeURL,
   getNetMonitorTimingsURL,
   getPerformanceAnalysisURL,
   getFilterBoxURL,
+  getTrackingProtectionURL,
 };

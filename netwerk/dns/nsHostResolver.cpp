@@ -4,12 +4,12 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #if defined(HAVE_RES_NINIT)
-#include <sys/types.h>
-#include <netinet/in.h>
-#include <arpa/inet.h>
-#include <arpa/nameser.h>
-#include <resolv.h>
-#define RES_RETRY_ON_FAILURE
+#  include <sys/types.h>
+#  include <netinet/in.h>
+#  include <arpa/inet.h>
+#  include <arpa/nameser.h>
+#  include <resolv.h>
+#  define RES_RETRY_ON_FAILURE
 #endif
 
 #include <stdlib.h>
@@ -778,6 +778,9 @@ void nsHostResolver::Shutdown() {
 
     if (mNumIdleTasks) mIdleTaskCV.NotifyAll();
 
+    for (auto iter = mRecordDB.Iter(); !iter.Done(); iter.Next()) {
+      iter.UserData()->Cancel();
+    }
     // empty host database
     mRecordDB.Clear();
   }
@@ -796,10 +799,6 @@ void nsHostResolver::Shutdown() {
   pendingQMed.clear();
   pendingQLow.clear();
   evictionQ.clear();
-
-  for (auto iter = mRecordDB.Iter(); !iter.Done(); iter.Next()) {
-    iter.UserData()->Cancel();
-  }
 
   // Shutdown the resolver threads, but with a timeout of 20 seconds.
   // If the timeout is exceeded, any stuck threads will be leaked.

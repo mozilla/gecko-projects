@@ -4,7 +4,7 @@
 
 /* import-globals-from controller.js */
 
-ChromeUtils.import("resource://gre/modules/Services.jsm");
+var {Services} = ChromeUtils.import("resource://gre/modules/Services.jsm");
 
 /**
  * This returns the key for any node/details object.
@@ -31,16 +31,16 @@ function makeNodeDetailsKey(nodeOrDetails) {
   return "";
 }
 
-function PlacesTreeView(aFlatList, aOnOpenFlatContainer, aController) {
+function PlacesTreeView(aContainer) {
   this._tree = null;
   this._result = null;
   this._selection = null;
   this._rootNode = null;
   this._rows = [];
-  this._flatList = aFlatList;
+  this._flatList = aContainer.flatList;
   this._nodeDetails = new Map();
-  this._openContainerCallback = aOnOpenFlatContainer;
-  this._controller = aController;
+  this._element = aContainer;
+  this._controller = aContainer._controller;
 }
 
 PlacesTreeView.prototype = {
@@ -66,8 +66,9 @@ PlacesTreeView.prototype = {
       // This triggers containerStateChanged which then builds the visible
       // section.
       this._rootNode.containerOpen = true;
-    } else
+    } else {
       this.invalidateContainer(this._rootNode);
+    }
 
     // "Activate" the sorting column and update commands.
     this.sortingChanged(this._result.sortingMode);
@@ -883,7 +884,7 @@ PlacesTreeView.prototype = {
 
     // If we are currently editing, don't invalidate the container until we
     // finish.
-    if (this._tree.element.getAttribute("editing")) {
+    if (this._tree.getAttribute("editing")) {
       if (!this._editingObservers) {
         this._editingObservers = new Map();
       }
@@ -896,7 +897,7 @@ PlacesTreeView.prototype = {
           this._editingObservers.delete(aContainer);
         });
 
-        mutationObserver.observe(this._tree.element, {
+        mutationObserver.observe(this._tree, {
           attributes: true,
           attributeFilter: ["editing"],
         });
@@ -1191,9 +1192,9 @@ PlacesTreeView.prototype = {
             break;
           }
         }
-      } else if (nodeType == Ci.nsINavHistoryResultNode.RESULT_TYPE_SEPARATOR)
+      } else if (nodeType == Ci.nsINavHistoryResultNode.RESULT_TYPE_SEPARATOR) {
         properties += " separator";
-      else if (PlacesUtils.nodeIsURI(node)) {
+      } else if (PlacesUtils.nodeIsURI(node)) {
         properties += " " + PlacesUIUtils.guessUrlSchemeForUI(node.uri);
       }
 
@@ -1348,7 +1349,7 @@ PlacesTreeView.prototype = {
     // since this information is specific to the tree view.
     let ip = this._getInsertionPoint(aRow, aOrientation);
     if (ip) {
-      PlacesControllerDragHelper.onDrop(ip, aDataTransfer, this._tree.element)
+      PlacesControllerDragHelper.onDrop(ip, aDataTransfer, this._tree)
                                 .catch(Cu.reportError)
                                 .then(() => {
                                   // We should only clear the drop target once
@@ -1463,6 +1464,7 @@ PlacesTreeView.prototype = {
         // detach from result when we are detaching from the tree.
         // This breaks the reference cycle between us and the result.
         if (!aTree) {
+          // Balances the addObserver call from the load method in tree.xml
           this._result.removeObserver(this);
           this._rootNode.containerOpen = false;
         }
@@ -1477,8 +1479,9 @@ PlacesTreeView.prototype = {
       throw Cr.NS_ERROR_UNEXPECTED;
 
     let node = this._rows[aRow];
-    if (this._flatList && this._openContainerCallback) {
-      this._openContainerCallback(node);
+    if (this._flatList && this._element) {
+      let event = new CustomEvent("onOpenFlatContainer", { detail: node });
+      this._element.dispatchEvent(event);
       return;
     }
 

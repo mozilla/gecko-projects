@@ -168,13 +168,14 @@ module.exports = {
     "max-nested-callbacks": ["error", 10],
 
     "mozilla/avoid-removeChild": "error",
+    "mozilla/consistent-if-bracing": "error",
     "mozilla/import-browser-window-globals": "error",
     "mozilla/import-globals": "error",
     "mozilla/no-compare-against-boolean-literals": "error",
     "mozilla/no-define-cc-etc": "error",
-    "mozilla/no-import-into-var-and-global": "error",
     "mozilla/no-useless-parameters": "error",
     "mozilla/no-useless-removeEventListener": "error",
+    "mozilla/reject-importGlobalProperties": ["error", "allownonwebidl"],
     "mozilla/rejects-requires-await": "error",
     "mozilla/use-cc-etc": "error",
     "mozilla/use-chromeutils-generateqi": "error",
@@ -182,6 +183,7 @@ module.exports = {
     "mozilla/use-default-preference-values": "error",
     "mozilla/use-includes-instead-of-indexOf": "error",
     "mozilla/use-ownerGlobal": "error",
+    "mozilla/use-returnValue": "error",
     "mozilla/use-services": "error",
 
     // Always require parenthesis for new calls
@@ -327,6 +329,9 @@ module.exports = {
     // Require object-literal shorthand with ES6 method syntax
     "object-shorthand": ["error", "always", { "avoidQuotes": true }],
 
+    // Prohibit blank lines at the beginning and end of blocks.
+    "padded-blocks": ["error", "never"],
+
     // Require double-quotes everywhere, except where quotes are escaped
     // or template literals are used.
     "quotes": ["error", "double", {
@@ -370,6 +375,6 @@ module.exports = {
     }],
 
     // Requires or disallows a whitespace (space or tab) beginning a comment
-    "spaced-comment": "error",
+    "spaced-comment": ["error", "always", { "markers": ["#"] }],
   },
 };

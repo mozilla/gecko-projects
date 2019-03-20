@@ -17,13 +17,13 @@
 #include "xpcAccessibleDocument.h"
 
 #ifdef A11Y_LOG
-#include "Logging.h"
+#  include "Logging.h"
 #endif
 
+#include "mozilla/Components.h"
 #include "mozilla/EventListenerManager.h"
 #include "mozilla/dom/Event.h"  // for Event
 #include "nsContentUtils.h"
-#include "nsCURILoader.h"
 #include "nsDocShellLoadTypes.h"
 #include "nsIChannel.h"
 #include "nsIInterfaceRequestorUtils.h"
@@ -52,7 +52,7 @@ DocManager::DocManager() : mDocAccessibleCache(2), mXPCDocumentCache(0) {}
 ////////////////////////////////////////////////////////////////////////////////
 // DocManager public
 
-DocAccessible* DocManager::GetDocAccessible(nsIDocument* aDocument) {
+DocAccessible* DocManager::GetDocAccessible(Document* aDocument) {
   if (!aDocument) return nullptr;
 
   DocAccessible* docAcc = GetExistingDocAccessible(aDocument);
@@ -90,7 +90,7 @@ void DocManager::RemoveFromXPCDocumentCache(DocAccessible* aDocument) {
 }
 
 void DocManager::NotifyOfDocumentShutdown(DocAccessible* aDocument,
-                                          nsIDocument* aDOMDocument) {
+                                          Document* aDOMDocument) {
   // We need to remove listeners in both cases, when document is being shutdown
   // or when accessibility service is being shut down as well.
   RemoveListeners(aDOMDocument);
@@ -171,8 +171,7 @@ bool DocManager::IsProcessingRefreshDriverNotification() const {
 // DocManager protected
 
 bool DocManager::Init() {
-  nsCOMPtr<nsIWebProgress> progress =
-      do_GetService(NS_DOCUMENTLOADER_SERVICE_CONTRACTID);
+  nsCOMPtr<nsIWebProgress> progress = components::DocLoader::Service();
 
   if (!progress) return false;
 
@@ -183,8 +182,7 @@ bool DocManager::Init() {
 }
 
 void DocManager::Shutdown() {
-  nsCOMPtr<nsIWebProgress> progress =
-      do_GetService(NS_DOCUMENTLOADER_SERVICE_CONTRACTID);
+  nsCOMPtr<nsIWebProgress> progress = components::DocLoader::Service();
 
   if (progress)
     progress->RemoveProgressListener(
@@ -218,7 +216,7 @@ DocManager::OnStateChange(nsIWebProgress* aWebProgress, nsIRequest* aRequest,
   nsPIDOMWindowOuter* piWindow = nsPIDOMWindowOuter::From(DOMWindow);
   MOZ_ASSERT(piWindow);
 
-  nsCOMPtr<nsIDocument> document = piWindow->GetDoc();
+  nsCOMPtr<Document> document = piWindow->GetDoc();
   NS_ENSURE_STATE(document);
 
   // Document was loaded.
@@ -303,8 +301,14 @@ DocManager::OnStatusChange(nsIWebProgress* aWebProgress, nsIRequest* aRequest,
 
 NS_IMETHODIMP
 DocManager::OnSecurityChange(nsIWebProgress* aWebProgress, nsIRequest* aRequest,
-                             uint32_t aOldState, uint32_t aState,
-                             const nsAString& aContentBlockingLogJSON) {
+                             uint32_t aState) {
+  MOZ_ASSERT_UNREACHABLE("notification excluded in AddProgressListener(...)");
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+DocManager::OnContentBlockingEvent(nsIWebProgress* aWebProgress,
+                                   nsIRequest* aRequest, uint32_t aEvent) {
   MOZ_ASSERT_UNREACHABLE("notification excluded in AddProgressListener(...)");
   return NS_OK;
 }
@@ -317,7 +321,7 @@ DocManager::HandleEvent(Event* aEvent) {
   nsAutoString type;
   aEvent->GetType(type);
 
-  nsCOMPtr<nsIDocument> document = do_QueryInterface(aEvent->GetTarget());
+  nsCOMPtr<Document> document = do_QueryInterface(aEvent->GetTarget());
   NS_ASSERTION(document, "pagehide or DOMContentLoaded for non document!");
   if (!document) return NS_OK;
 
@@ -362,7 +366,7 @@ DocManager::HandleEvent(Event* aEvent) {
 ////////////////////////////////////////////////////////////////////////////////
 // DocManager private
 
-void DocManager::HandleDOMDocumentLoad(nsIDocument* aDocument,
+void DocManager::HandleDOMDocumentLoad(Document* aDocument,
                                        uint32_t aLoadEventType) {
   // Document accessible can be created before we were notified the DOM document
   // was loaded completely. However if it's not created yet then create it.
@@ -375,7 +379,7 @@ void DocManager::HandleDOMDocumentLoad(nsIDocument* aDocument,
   docAcc->NotifyOfLoad(aLoadEventType);
 }
 
-void DocManager::AddListeners(nsIDocument* aDocument,
+void DocManager::AddListeners(Document* aDocument,
                               bool aAddDOMContentLoadedListener) {
   nsPIDOMWindowOuter* window = aDocument->GetWindow();
   EventTarget* target = window->GetChromeEventHandler();
@@ -398,7 +402,7 @@ void DocManager::AddListeners(nsIDocument* aDocument,
   }
 }
 
-void DocManager::RemoveListeners(nsIDocument* aDocument) {
+void DocManager::RemoveListeners(Document* aDocument) {
   nsPIDOMWindowOuter* window = aDocument->GetWindow();
   if (!window) return;
 
@@ -413,7 +417,7 @@ void DocManager::RemoveListeners(nsIDocument* aDocument) {
                                  TrustedEventsAtCapture());
 }
 
-DocAccessible* DocManager::CreateDocOrRootAccessible(nsIDocument* aDocument) {
+DocAccessible* DocManager::CreateDocOrRootAccessible(Document* aDocument) {
   // Ignore hidden documents, resource documents, static clone
   // (printing) documents and documents without a docshell.
   if (!aDocument->IsVisibleConsideringAncestors() ||

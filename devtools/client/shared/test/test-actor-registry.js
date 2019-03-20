@@ -6,7 +6,7 @@
 (function(exports) {
   const CC = Components.Constructor;
 
-  const { require } = ChromeUtils.import("resource://devtools/shared/Loader.jsm", {});
+  const { require } = ChromeUtils.import("resource://devtools/shared/Loader.jsm");
   const { fetch } = require("devtools/shared/DevToolsUtils");
 
   const TEST_URL_ROOT = "http://example.com/browser/devtools/client/shared/test/";
@@ -41,8 +41,8 @@
   // Ensure fetching a live target actor form
   // (helps fetching the test actor registered dynamically)
   const getUpdatedForm = function(client, tab) {
-    return client.getTab({tab: tab})
-                 .then(response => response.tab);
+    return client.mainRoot.getTab({tab: tab})
+                 .then(front => front.targetForm);
   };
 
   // Spawn an instance of the test actor for the given toolbox
@@ -65,6 +65,11 @@
 
     await client.connect();
 
+    // Force connecting to the tab so that the actor is registered in the tab.
+    // Calling `getTab` will spawn a DebuggerServer and ActorRegistry in the content
+    // process.
+    await client.mainRoot.getTab({tab});
+
     // We also need to make sure the test actor is registered on the server.
     await exports.registerTestActor(client);
 
@@ -83,6 +88,11 @@
 
     const { TestActorFront } = await loadFront();
 
-    return new TestActorFront(client, form, toolbox);
+    const front = new TestActorFront(client, toolbox);
+    // Since we manually instantiate this front instead of going through protocol.js,
+    // we have to manually set its actor ID and manage it.
+    front.actorID = form.testActor;
+    front.manage(front);
+    return front;
   };
 })(this);

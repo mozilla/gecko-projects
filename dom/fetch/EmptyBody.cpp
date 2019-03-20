@@ -38,13 +38,17 @@ EmptyBody::EmptyBody(nsIGlobalObject* aGlobal,
                      AbortSignalImpl* aAbortSignalImpl,
                      already_AddRefed<nsIInputStream> aBodyStream)
     : FetchBody<EmptyBody>(aGlobal),
-      mPrincipalInfo(aPrincipalInfo),
       mAbortSignalImpl(aAbortSignalImpl),
-      mBodyStream(std::move(aBodyStream)) {}
+      mBodyStream(std::move(aBodyStream)) {
+  if (aPrincipalInfo) {
+    mPrincipalInfo = MakeUnique<mozilla::ipc::PrincipalInfo>(*aPrincipalInfo);
+  }
+}
 
 EmptyBody::~EmptyBody() = default;
 
-/* static */ already_AddRefed<EmptyBody> EmptyBody::Create(
+/* static */
+already_AddRefed<EmptyBody> EmptyBody::Create(
     nsIGlobalObject* aGlobal, mozilla::ipc::PrincipalInfo* aPrincipalInfo,
     AbortSignalImpl* aAbortSignalImpl, const nsACString& aMimeType,
     ErrorResult& aRv) {

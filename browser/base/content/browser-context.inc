@@ -22,7 +22,7 @@
                   class="menuitem-iconic"
                   tooltip="dynamic-shortcut-tooltip"
                   aria-label="&reloadCmd.label;"
-                  oncommand="gContextMenu.reload(event);"
+                  command="Browser:ReloadOrDuplicate"
                   accesskey="&reloadCmd.accesskey;"
                   onclick="checkForMiddleClick(this, event);"/>
         <menuitem id="context-stop"
@@ -90,6 +90,10 @@
                 label="&saveLinkCmd.label;"
                 accesskey="&saveLinkCmd.accesskey;"
                 oncommand="gContextMenu.saveLink();"/>
+      <menuitem id="context-savelinktopocket"
+                label="&saveLinkToPocketCmd.label;"
+                accesskey="&saveLinkToPocketCmd.accesskey;"
+                oncommand= "Pocket.savePage(gContextMenu.browser, gContextMenu.linkURL);"/>
       <menuitem id="context-copyemail"
                 label="&copyEmailCmd.label;"
                 accesskey="&copyEmailCmd.accesskey;"
@@ -171,6 +175,13 @@
                 accesskey="&leaveDOMFullScreen.accesskey;"
                 label="&leaveDOMFullScreen.label;"
                 oncommand="gContextMenu.leaveDOMFullScreen();"/>
+#ifdef NIGHTLY_BUILD
+      <!-- Don't forget to add a properly localized label and access key
+           before letting this ride up to beta. -->
+      <menuitem id="context-video-pictureinpicture"
+                label="Picture in Picture"
+                oncommand="gContextMenu.mediaCommand('pictureinpicture');"/>
+#endif
       <menuseparator id="context-media-sep-commands"/>
       <menuitem id="context-reloadimage"
                 label="&reloadImageCmd.label;"
@@ -259,6 +270,10 @@
                 label="&savePageCmd.label;"
                 accesskey="&savePageCmd.accesskey2;"
                 oncommand="gContextMenu.savePageAs();"/>
+      <menuitem id="context-pocket"
+                label="&saveToPocketCmd.label;"
+                accesskey="&saveToPocketCmd.accesskey;"
+                oncommand="Pocket.savePage(gContextMenu.browser, gContextMenu.browser.currentURI.spec, gContextMenu.browser.contentTitle);"/>
       <menuseparator id="context-sep-sendpagetodevice" class="sync-ui-item"
                      hidden="true"/>
       <menu id="context-sendpagetodevice"

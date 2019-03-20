@@ -14,7 +14,7 @@
 #include "nsGkAtoms.h"
 #include "nsPresContext.h"
 #include "mozilla/EventStates.h"
-#include "nsIDocument.h"
+#include "mozilla/dom/Document.h"
 #include "nsIPresShell.h"
 #include "nsStyleConsts.h"
 #include "nsError.h"
@@ -68,14 +68,14 @@ static const PLDHashTableOps MappedAttrTable_Ops = {
 
 // -----------------------------------------------------------
 
-nsHTMLStyleSheet::nsHTMLStyleSheet(nsIDocument *aDocument)
+nsHTMLStyleSheet::nsHTMLStyleSheet(Document *aDocument)
     : mDocument(aDocument),
       mMappedAttrTable(&MappedAttrTable_Ops, sizeof(MappedAttrTableEntry)),
       mMappedAttrsDirty(false) {
   MOZ_ASSERT(aDocument);
 }
 
-void nsHTMLStyleSheet::SetOwningDocument(nsIDocument *aDocument) {
+void nsHTMLStyleSheet::SetOwningDocument(Document *aDocument) {
   mDocument = aDocument;  // not refcounted
 }
 
@@ -94,17 +94,15 @@ nsresult nsHTMLStyleSheet::ImplLinkColorSetter(
     return NS_OK;
   }
 
-  RestyleManager *restyle = mDocument->GetPresContext()->RestyleManager();
-
   MOZ_ASSERT(!ServoStyleSet::IsInServoTraversal());
   aDecl = Servo_DeclarationBlock_CreateEmpty().Consume();
   Servo_DeclarationBlock_SetColorValue(aDecl.get(), eCSSProperty_color, aColor);
 
   // Now make sure we restyle any links that might need it.  This
   // shouldn't happen often, so just rebuilding everything is ok.
-  Element *root = mDocument->GetRootElement();
-  if (root) {
-    restyle->PostRestyleEvent(root, eRestyle_Subtree, nsChangeHint(0));
+  if (Element *root = mDocument->GetRootElement()) {
+    RestyleManager *rm = mDocument->GetPresContext()->RestyleManager();
+    rm->PostRestyleEvent(root, RestyleHint::RestyleSubtree(), nsChangeHint(0));
   }
   return NS_OK;
 }

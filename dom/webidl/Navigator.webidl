@@ -23,6 +23,8 @@
  * and create derivative works of this document.
  */
 
+interface URI;
+
 // http://www.whatwg.org/specs/web-apps/current-work/#the-navigator-object
 [HeaderFile="Navigator.h"]
 interface Navigator {
@@ -80,6 +82,8 @@ interface NavigatorOnLine {
 [NoInterfaceObject]
 interface NavigatorContentUtils {
   // content handler registration
+  [Throws, ChromeOnly]
+  void checkProtocolHandlerAllowed(DOMString scheme, URI handlerURI, URI documentURI);
   [Throws, Func="nsGlobalWindowInner::RegisterProtocolHandlerAllowedForContext"]
   void registerProtocolHandler(DOMString scheme, DOMString url, DOMString title);
   [Pref="dom.registerContentHandler.enabled", Throws]
@@ -171,14 +175,6 @@ partial interface Navigator {
                                 optional boolean persistent = true);
 };
 
-callback interface MozIdleObserver {
-  // Time is in seconds and is read only when idle observers are added
-  // and removed.
-  readonly attribute unsigned long time;
-  void onidle();
-  void onactive();
-};
-
 partial interface Navigator {
   [Throws, Constant, Cached, NeedsCallerType]
   readonly attribute DOMString oscpu;
@@ -196,18 +192,6 @@ partial interface Navigator {
   // WebKit/Blink/Trident/Presto support this.
   [Affects=Nothing, DependsOn=Nothing]
   boolean javaEnabled();
-
-  /**
-   * Navigator requests to add an idle observer to the existing window.
-   */
-  [Throws, ChromeOnly]
-  void addIdleObserver(MozIdleObserver aIdleObserver);
-
-  /**
-   * Navigator requests to remove an idle observer from the existing window.
-   */
-  [Throws, ChromeOnly]
-  void removeIdleObserver(MozIdleObserver aIdleObserver);
 };
 
 // NetworkInformation

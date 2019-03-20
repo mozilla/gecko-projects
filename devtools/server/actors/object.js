@@ -7,7 +7,6 @@
 "use strict";
 
 const { Cu } = require("chrome");
-const { GeneratedLocation } = require("devtools/server/actors/common");
 const DevToolsUtils = require("devtools/shared/DevToolsUtils");
 const { assert } = DevToolsUtils;
 
@@ -212,17 +211,11 @@ const proto = {
       return this.throwError("noScript", this.actorID + " has no Debugger.Script");
     }
 
-    return this.hooks.sources().getOriginalLocation(new GeneratedLocation(
-      this.hooks.sources().createNonSourceMappedActor(this.obj.script.source),
-      this.obj.script.startLine,
-      0 // TODO bug 901138: use Debugger.Script.prototype.startColumn
-    )).then((originalLocation) => {
-      return {
-        source: originalLocation.originalSourceActor,
-        line: originalLocation.originalLine,
-        column: originalLocation.originalColumn,
-      };
-    });
+    return {
+      source: this.hooks.sources().createSourceActor(this.obj.script.source),
+      line: this.obj.script.startLine,
+      column: 0, // TODO bug 901138: use Debugger.Script.prototype.startColumn
+    };
   },
 
   /**
@@ -518,13 +511,26 @@ const proto = {
    *
    * @param {string} name
    *        The property we want the value of.
+   * @param {string|null} receiverId
+   *        The actorId of the receiver to be used if the property is a getter.
+   *        If null or invalid, the receiver will be the referent.
    */
-  propertyValue: function(name) {
+  propertyValue: function(name, receiverId) {
     if (!name) {
       return this.throwError("missingParameter", "no property name was specified");
     }
 
-    const value = this.obj.getProperty(name);
+    let receiver;
+    if (receiverId) {
+      const receiverActor = this.conn.getActor(receiverId);
+      if (receiverActor) {
+        receiver = receiverActor.obj;
+      }
+    }
+
+    const value = receiver
+      ? this.obj.getProperty(name, receiver)
+      : this.obj.getProperty(name);
 
     return { value: this._buildCompletion(value) };
   },
@@ -831,7 +837,7 @@ const proto = {
 
     // Catch any errors if the source actor cannot be found
     try {
-      source = this.hooks.sources().getSourceActorByURL(stack.source);
+      source = this.hooks.sources().getSourceActorsByURL(stack.source)[0];
     } catch (e) {
       // ignored
     }
@@ -840,18 +846,12 @@ const proto = {
       return null;
     }
 
-    return this.hooks.sources().getOriginalLocation(new GeneratedLocation(
+    return {
       source,
-      stack.line,
-      stack.column
-    )).then((originalLocation) => {
-      return {
-        source: originalLocation.originalSourceActor,
-        line: originalLocation.originalLine,
-        column: originalLocation.originalColumn,
-        functionDisplayName: stack.functionDisplayName,
-      };
-    });
+      line: stack.line,
+      column: stack.column,
+      functionDisplayName: stack.functionDisplayName,
+    };
   },
 
   /**

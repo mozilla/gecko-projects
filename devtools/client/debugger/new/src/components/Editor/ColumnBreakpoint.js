@@ -8,72 +8,119 @@ import ReactDOM from "react-dom";
 import classnames from "classnames";
 import { getDocument } from "../../utils/editor";
 import Svg from "../shared/Svg";
+import { showMenu } from "devtools-contextmenu";
+import { breakpointItems, createBreakpointItems } from "./menus/breakpoints";
 
 // eslint-disable-next-line max-len
 import type { ColumnBreakpoint as ColumnBreakpointType } from "../../selectors/visibleColumnBreakpoints";
+import type { BreakpointItemActions } from "./menus/breakpoints";
+import type { Source } from "../../types";
 
 type Bookmark = {
   clear: Function
 };
 
 type Props = {
-  callSite: Object,
   editor: Object,
-  source: Object,
-  enabled: boolean,
-  toggleBreakpoint: (number, number) => void,
-  columnBreakpoint: ColumnBreakpointType
+  source: Source,
+  columnBreakpoint: ColumnBreakpointType,
+  breakpointActions: BreakpointItemActions
 };
 
-const breakpointImg = document.createElement("div");
+const breakpointImg = document.createElement("button");
 ReactDOM.render(<Svg name={"column-marker"} />, breakpointImg);
-function makeBookmark(isActive, { onClick }) {
+
+function makeBookmark({ breakpoint }, { onClick, onContextMenu }) {
   const bp = breakpointImg.cloneNode(true);
-  const className = isActive ? "active" : "disabled";
-  bp.className = classnames("call-site", className);
+
+  const isActive = breakpoint && !breakpoint.disabled;
+  const condition = breakpoint && breakpoint.options.condition;
+  const logValue = breakpoint && breakpoint.options.logValue;
+
+  bp.className = classnames("column-breakpoint", {
+    "has-condition": condition,
+    "has-log": logValue,
+    active: isActive,
+    disabled: !isActive
+  });
+
+  if (condition) {
+    bp.setAttribute("title", condition);
+  }
   bp.onclick = onClick;
+
+  // NOTE: flow does not know about oncontextmenu
+  (bp: any).oncontextmenu = onContextMenu;
+
   return bp;
 }
 
-export default class CallSite extends PureComponent<Props> {
-  addCallSite: Function;
+export default class ColumnBreakpoint extends PureComponent<Props> {
+  addColumnBreakpoint: Function;
   bookmark: ?Bookmark;
 
-  addCallSite = (nextProps: ?Props) => {
+  addColumnBreakpoint = (nextProps: ?Props) => {
     const { columnBreakpoint, source } = nextProps || this.props;
+
     const sourceId = source.id;
-    const { line, column } = columnBreakpoint.location;
-    const widget = makeBookmark(columnBreakpoint.enabled, {
-      onClick: this.toggleBreakpoint
-    });
     const doc = getDocument(sourceId);
+    if (!doc) {
+      return;
+    }
+
+    const { line, column } = columnBreakpoint.location;
+    const widget = makeBookmark(columnBreakpoint, {
+      onClick: this.onClick,
+      onContextMenu: this.onContextMenu
+    });
+
     this.bookmark = doc.setBookmark({ line: line - 1, ch: column }, { widget });
   };
 
-  clearCallSite = () => {
+  clearColumnBreakpoint = () => {
     if (this.bookmark) {
       this.bookmark.clear();
       this.bookmark = null;
     }
   };
 
-  toggleBreakpoint = () => {
-    const { columnBreakpoint, toggleBreakpoint } = this.props;
-    const { line, column } = columnBreakpoint.location;
-    toggleBreakpoint(line, column);
+  onClick = (event: MouseEvent) => {
+    event.stopPropagation();
+    event.preventDefault();
+    const { columnBreakpoint, breakpointActions } = this.props;
+    if (columnBreakpoint.breakpoint) {
+      breakpointActions.removeBreakpoint(columnBreakpoint.breakpoint);
+    } else {
+      breakpointActions.addBreakpoint(columnBreakpoint.location);
+    }
+  };
+
+  onContextMenu = (event: MouseEvent) => {
+    event.stopPropagation();
+    event.preventDefault();
+    const {
+      columnBreakpoint: { breakpoint, location },
+      breakpointActions
+    } = this.props;
+
+    const items = breakpoint
+      ? breakpointItems(breakpoint, breakpointActions)
+      : createBreakpointItems(location, breakpointActions);
+
+    showMenu(event, items);
   };
 
   componentDidMount() {
-    this.addCallSite();
+    this.addColumnBreakpoint();
   }
 
   componentWillUnmount() {
-    this.clearCallSite();
+    this.clearColumnBreakpoint();
   }
 
   componentDidUpdate() {
-    this.clearCallSite();
-    this.addCallSite();
+    this.clearColumnBreakpoint();
+    this.addColumnBreakpoint();
   }
 
   render() {

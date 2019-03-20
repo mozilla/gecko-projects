@@ -1,5 +1,5 @@
-ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
-ChromeUtils.import("resource:///modules/SitePermissions.jsm");
+var {XPCOMUtils} = ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
+var {SitePermissions} = ChromeUtils.import("resource:///modules/SitePermissions.jsm");
 
 const PREF_PERMISSION_FAKE = "media.navigator.permission.fake";
 const PREF_AUDIO_LOOPBACK = "media.audio_loopback_dev";
@@ -32,12 +32,6 @@ function waitForCondition(condition, nextTest, errorMsg, retryTimes) {
     tries++;
   }, 100);
   var moveOn = function() { clearInterval(interval); nextTest(); };
-}
-
-function promiseWaitForCondition(aConditionFn, retryTimes) {
-  return new Promise(resolve => {
-    waitForCondition(aConditionFn, resolve, "Condition didn't pass.", retryTimes);
-  });
 }
 
 /**
@@ -93,7 +87,7 @@ async function assertWebRTCIndicatorStatus(expected) {
     // It seems the global indicator is not always removed synchronously
     // in some cases.
     info("waiting for the global indicator to be hidden");
-    await promiseWaitForCondition(() => !ui.showGlobalIndicator);
+    await TestUtils.waitForCondition(() => !ui.showGlobalIndicator);
   }
   is(ui.showGlobalIndicator, !!expected, msg);
 
@@ -160,27 +154,13 @@ async function assertWebRTCIndicatorStatus(expected) {
   }
 }
 
-function promisePopupEvent(popup, eventSuffix) {
-  let endState = {shown: "open", hidden: "closed"}[eventSuffix];
-
-  if (popup.state == endState)
-    return Promise.resolve();
-
-  let eventType = "popup" + eventSuffix;
-  return new Promise(resolve => {
-    popup.addEventListener(eventType, function(event) {
-      executeSoon(resolve);
-    }, {once: true});
-
-  });
-}
-
 function promiseNotificationShown(notification) {
   let win = notification.browser.ownerGlobal;
   if (win.PopupNotifications.panel.state == "open") {
     return Promise.resolve();
   }
-  let panelPromise = promisePopupEvent(win.PopupNotifications.panel, "shown");
+  let panelPromise =
+    BrowserTestUtils.waitForPopupEvent(win.PopupNotifications.panel, "shown");
   notification.reshow();
   return panelPromise;
 }
@@ -294,6 +274,8 @@ function promiseMessage(aMessage, aAction) {
 
 function promisePopupNotificationShown(aName, aAction) {
   return new Promise(resolve => {
+    // In case the global webrtc indicator has stolen focus (bug 1421724)
+    window.focus();
 
     PopupNotifications.panel.addEventListener("popupshown", function() {
       ok(!!PopupNotifications.getNotification(aName), aName + " notification shown");
@@ -305,13 +287,11 @@ function promisePopupNotificationShown(aName, aAction) {
 
     if (aAction)
       aAction();
-
   });
 }
 
 function promisePopupNotification(aName) {
   return new Promise(resolve => {
-
     waitForCondition(() => PopupNotifications.getNotification(aName),
                      () => {
       ok(!!PopupNotifications.getNotification(aName),
@@ -319,20 +299,17 @@ function promisePopupNotification(aName) {
 
       resolve();
     }, "timeout waiting for popup notification " + aName);
-
   });
 }
 
 function promiseNoPopupNotification(aName) {
   return new Promise(resolve => {
-
     waitForCondition(() => !PopupNotifications.getNotification(aName),
                      () => {
       ok(!PopupNotifications.getNotification(aName),
          aName + " notification removed");
       resolve();
     }, "timeout waiting for popup notification " + aName + " to disappear");
-
   });
 }
 
@@ -344,12 +321,17 @@ function activateSecondaryAction(aAction) {
   let notification = PopupNotifications.panel.firstElementChild;
   switch (aAction) {
     case kActionNever:
-      notification.checkbox.setAttribute("checked", true); // fallthrough
+      if (!notification.checkbox.checked) {
+        notification.checkbox.click();
+      }
+      // fallthrough
     case kActionDeny:
       notification.secondaryButton.click();
       break;
     case kActionAlways:
-      notification.checkbox.setAttribute("checked", true);
+      if (!notification.checkbox.checked) {
+        notification.checkbox.click();
+      }
       notification.button.click();
       break;
   }

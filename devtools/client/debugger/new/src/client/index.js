@@ -5,8 +5,9 @@
 // @flow
 
 import * as firefox from "./firefox";
+import * as chrome from "./chrome";
 
-import { prefs, asyncStore } from "../utils/prefs";
+import { prefs, asyncStore, verifyPrefSchema } from "../utils/prefs";
 import { setupHelper } from "../utils/dbg";
 
 import {
@@ -16,6 +17,8 @@ import {
 } from "../utils/bootstrap";
 import { initialBreakpointsState } from "../reducers/breakpoints";
 
+import type { Panel } from "./firefox/types";
+
 function loadFromPrefs(actions: Object) {
   const { pauseOnExceptions, pauseOnCaughtExceptions } = prefs;
   if (pauseOnExceptions || pauseOnCaughtExceptions) {
@@ -24,6 +27,16 @@ function loadFromPrefs(actions: Object) {
       pauseOnCaughtExceptions
     );
   }
+}
+
+async function syncBreakpoints() {
+  const breakpoints = await asyncStore.pendingBreakpoints;
+  const breakpointValues = (Object.values(breakpoints): any);
+  breakpointValues.forEach(({ disabled, options, generatedLocation }) => {
+    if (!disabled) {
+      firefox.clientCommands.setBreakpoint(generatedLocation, options);
+    }
+  });
 }
 
 function syncXHRBreakpoints() {
@@ -40,43 +53,57 @@ async function loadInitialState() {
   const pendingBreakpoints = await asyncStore.pendingBreakpoints;
   const tabs = await asyncStore.tabs;
   const xhrBreakpoints = await asyncStore.xhrBreakpoints;
+  const eventListenerBreakpoints = await asyncStore.eventListenerBreakpoints;
 
   const breakpoints = initialBreakpointsState(xhrBreakpoints);
 
-  return { pendingBreakpoints, tabs, breakpoints };
+  return { pendingBreakpoints, tabs, breakpoints, eventListenerBreakpoints };
+}
+
+function getClient(connection: any) {
+  const {
+    tab: { clientType }
+  } = connection;
+  return clientType == "firefox" ? firefox : chrome;
 }
 
 export async function onConnect(
   connection: Object,
-  { services, toolboxActions }: Object
+  sourceMaps: Object,
+  panel: Panel
 ) {
   // NOTE: the landing page does not connect to a JS process
   if (!connection) {
     return;
   }
 
-  const commands = firefox.clientCommands;
+  verifyPrefSchema();
+
+  const client = getClient(connection);
+  const commands = client.clientCommands;
+
   const initialState = await loadInitialState();
+
   const { store, actions, selectors } = bootstrapStore(
     commands,
-    {
-      services,
-      toolboxActions
-    },
+    sourceMaps,
+    panel,
     initialState
   );
 
   const workers = bootstrapWorkers();
-  await firefox.onConnect(connection, actions);
+  await client.onConnect(connection, actions);
+
   await loadFromPrefs(actions);
+  syncBreakpoints();
   syncXHRBreakpoints();
   setupHelper({
     store,
     actions,
     selectors,
-    workers: { ...workers, ...services },
+    workers: { ...workers, sourceMaps },
     connection,
-    client: firefox.clientCommands
+    client: client.clientCommands
   });
 
   bootstrapApp(store);

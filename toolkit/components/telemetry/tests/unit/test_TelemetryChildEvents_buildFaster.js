@@ -2,7 +2,6 @@
    http://creativecommons.org/publicdomain/zero/1.0/
 */
 
-ChromeUtils.import("resource://services-common/utils.js");
 ChromeUtils.import("resource://testing-common/ContentTaskUtils.jsm", this);
 
 const MESSAGE_CHILD_TEST_DONE = "ChildTest:Done";
@@ -45,6 +44,7 @@ add_task(async function test_setup() {
   do_get_profile(true);
   loadAddonManager(APP_ID, APP_NAME, APP_VERSION, PLATFORM_VERSION);
   finishAddonManagerStartup();
+  fakeIntlReady();
   await TelemetryController.testSetup();
   // Make sure we don't generate unexpected pings due to pref changes.
   await setEmptyPrefWatchlist();
@@ -56,6 +56,11 @@ add_task(async function test_setup() {
       methods: ["dynamic", "child"],
       objects: ["builtin", "anotherone"],
     },
+    "dynamic_expired": {
+      methods: ["check"],
+      objects: ["expiry"],
+      expired: true,
+    },
   });
   Telemetry.setEventRecordingEnabled(TEST_STATIC_EVENT_NAME, true);
   Telemetry.setEventRecordingEnabled(TEST_EVENT_NAME, true);
@@ -63,6 +68,7 @@ add_task(async function test_setup() {
   Telemetry.recordEvent(TEST_EVENT_NAME, "dynamic", "builtin");
   Telemetry.recordEvent(TEST_STATIC_EVENT_NAME, "main_and_content", "object1");
   Telemetry.recordEvent(TEST_EVENT_NAME, "dynamic", "anotherone");
+  Telemetry.recordEvent(TEST_EVENT_NAME, "check", "expiry");
 
   // Run test in child, don't wait for it to finish: just wait for the
   // MESSAGE_CHILD_TEST_DONE.

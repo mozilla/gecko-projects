@@ -4,15 +4,13 @@
 
 use api::{AddFont, BlobImageResources, AsyncBlobImageRasterizer, ResourceUpdate};
 use api::{BlobImageDescriptor, BlobImageHandler, BlobImageRequest, RasterizedBlobImage};
-use api::{ClearCache, ColorF, DeviceIntPoint, DeviceIntRect, DeviceIntSize};
-use api::{DebugFlags, FontInstanceKey, FontKey, FontTemplate, GlyphIndex};
+use api::{ClearCache, DebugFlags, FontInstanceKey, FontKey, FontTemplate, GlyphIndex};
 use api::{ExternalImageData, ExternalImageType, BlobImageResult, BlobImageParams};
 use api::{FontInstanceData, FontInstanceOptions, FontInstancePlatformOptions, FontVariation};
-use api::{GlyphDimensions, IdNamespace};
-use api::{ImageData, ImageDescriptor, ImageKey, ImageRendering, ImageDirtyRect, DirtyRect};
-use api::{BlobImageKey, BlobDirtyRect, MemoryReport, VoidPtrToSizeFn};
-use api::{TileOffset, TileSize, TileRange, BlobImageData, LayoutIntRect, LayoutIntSize};
-use app_units::Au;
+use api::{DirtyRect, GlyphDimensions, IdNamespace};
+use api::{ImageData, ImageDescriptor, ImageKey, ImageRendering, TileSize};
+use api::{BlobImageData, BlobImageKey, MemoryReport, VoidPtrToSizeFn};
+use api::units::*;
 #[cfg(feature = "capture")]
 use capture::ExternalCaptureImage;
 #[cfg(feature = "replay")]
@@ -24,10 +22,10 @@ use euclid::{point2, size2};
 use glyph_cache::GlyphCache;
 #[cfg(not(feature = "pathfinder"))]
 use glyph_cache::GlyphCacheEntry;
-use glyph_rasterizer::{FontInstance, GlyphFormat, GlyphKey, GlyphRasterizer};
+use glyph_rasterizer::{BaseFontInstance, FontInstance, GlyphFormat, GlyphKey, GlyphRasterizer};
 use gpu_cache::{GpuCache, GpuCacheAddress, GpuCacheHandle};
 use gpu_types::UvRectKind;
-use image::{compute_tile_range, for_each_tile_in_range};
+use image::{compute_tile_size, compute_tile_range, for_each_tile_in_range};
 use internal_types::{FastHashMap, FastHashSet, TextureSource, TextureUpdateList};
 use profiler::{ResourceProfileCounters, TextureCacheProfileCounters};
 use render_backend::{FrameId, FrameStamp};
@@ -45,7 +43,6 @@ use std::os::raw::c_void;
 use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
 use texture_cache::{TextureCache, TextureCacheHandle, Eviction};
-use tiling::SpecialRenderPasses;
 use util::drain_filter;
 
 const DEFAULT_TILE_SIZE: TileSize = 512;
@@ -213,6 +210,13 @@ struct CachedImageInfo {
     manual_eviction: bool,
 }
 
+impl CachedImageInfo {
+    fn mark_unused(&mut self, texture_cache: &mut TextureCache) {
+        texture_cache.mark_unused(&self.texture_cache_handle);
+        self.manual_eviction = false;
+    }
+}
+
 #[cfg(debug_assertions)]
 impl Drop for CachedImageInfo {
     fn drop(&mut self) {
@@ -354,13 +358,11 @@ impl ImageResult {
     fn drop_from_cache(&mut self, texture_cache: &mut TextureCache) {
         match *self {
             ImageResult::UntiledAuto(ref mut entry) => {
-                texture_cache.mark_unused(&entry.texture_cache_handle);
-                entry.manual_eviction = false;
+                entry.mark_unused(texture_cache);
             },
             ImageResult::Multi(ref mut entries) => {
                 for (_, entry) in &mut entries.resources {
-                    texture_cache.mark_unused(&entry.texture_cache_handle);
-                    entry.manual_eviction = false;
+                    entry.mark_unused(texture_cache);
                 }
             },
             ImageResult::Err(_) => {},
@@ -369,7 +371,7 @@ impl ImageResult {
 }
 
 type ImageCache = ResourceClassCache<ImageKey, ImageResult, ()>;
-pub type FontInstanceMap = Arc<RwLock<FastHashMap<FontInstanceKey, FontInstance>>>;
+pub type FontInstanceMap = Arc<RwLock<FastHashMap<FontInstanceKey, Arc<BaseFontInstance>>>>;
 
 #[derive(Default)]
 struct Resources {
@@ -401,7 +403,35 @@ impl BlobImageResources for Resources {
     }
 }
 
-pub type GlyphDimensionsCache = FastHashMap<(FontInstance, GlyphIndex), Option<GlyphDimensions>>;
+// We only use this to report glyph dimensions to the user of the API, so using
+// the font instance key should be enough. If we start using it to cache dimensions
+// for internal font instances we should change the hash key accordingly.
+pub type GlyphDimensionsCache = FastHashMap<(FontInstanceKey, GlyphIndex), Option<GlyphDimensions>>;
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct BlobImageRasterizerEpoch(usize);
+
+/// Stores parameters for clearing blob image tiles.
+///
+/// The clearing is necessary when originally requested tile range exceeds
+/// MAX_TILES_PER_REQUEST. In this case, some tiles are not rasterized by
+/// AsyncBlobImageRasterizer. They need to be cleared.
+#[derive(Clone, Copy, Debug)]
+pub struct BlobImageClearParams {
+    pub key: BlobImageKey,
+    /// Originally requested tile range to rasterize.
+    pub original_tile_range: TileRange,
+    /// Actual tile range that is requested to rasterize by
+    /// AsyncBlobImageRasterizer.
+    pub actual_tile_range: TileRange,
+}
+
+/// Information attached to AsyncBlobImageRasterizer.
+#[derive(Clone, Debug)]
+pub struct AsyncBlobImageInfo {
+    pub epoch: BlobImageRasterizerEpoch,
+    pub clear_requests: Vec<BlobImageClearParams>,
+}
 
 /// High-level container for resources managed by the `RenderBackend`.
 ///
@@ -419,26 +449,35 @@ pub struct ResourceCache {
 
     pub texture_cache: TextureCache,
 
-    // TODO(gw): We should expire (parts of) this cache semi-regularly!
+    /// TODO(gw): We should expire (parts of) this cache semi-regularly!
     cached_glyph_dimensions: GlyphDimensionsCache,
     glyph_rasterizer: GlyphRasterizer,
 
-    // The set of images that aren't present or valid in the texture cache,
-    // and need to be rasterized and/or uploaded this frame. This includes
-    // both blobs and regular images.
+    /// The set of images that aren't present or valid in the texture cache,
+    /// and need to be rasterized and/or uploaded this frame. This includes
+    /// both blobs and regular images.
     pending_image_requests: FastHashSet<ImageRequest>,
 
     blob_image_handler: Option<Box<BlobImageHandler>>,
     rasterized_blob_images: FastHashMap<BlobImageKey, RasterizedBlob>,
     blob_image_templates: FastHashMap<BlobImageKey, BlobImageTemplate>,
 
-    // If while building a frame we encounter blobs that we didn't already
-    // rasterize, add them to this list and rasterize them synchronously.
+    /// If while building a frame we encounter blobs that we didn't already
+    /// rasterize, add them to this list and rasterize them synchronously.
     missing_blob_images: Vec<BlobImageParams>,
-    // The rasterizer associated with the current scene.
+    /// The rasterizer associated with the current scene.
     blob_image_rasterizer: Option<Box<AsyncBlobImageRasterizer>>,
-    // A log of the last three frames worth of deleted image keys kept
-    // for debugging purposes.
+    /// An epoch of the stored blob image rasterizer, used to skip the ones
+    /// coming from low-priority scene builds if the current one is newer.
+    /// This is to be removed when we get rid of the whole "missed" blob
+    /// images concept.
+    /// The produced one gets bumped whenever we produce a rasteriezer,
+    /// which then travels through the scene building and eventually gets
+    /// consumed back by us, bumping the consumed epoch.
+    blob_image_rasterizer_produced_epoch: BlobImageRasterizerEpoch,
+    blob_image_rasterizer_consumed_epoch: BlobImageRasterizerEpoch,
+    /// A log of the last three frames worth of deleted image keys kept
+    /// for debugging purposes.
     deleted_blob_keys: VecDeque<Vec<BlobImageKey>>
 }
 
@@ -464,6 +503,8 @@ impl ResourceCache {
             blob_image_templates: FastHashMap::default(),
             missing_blob_images: Vec::new(),
             blob_image_rasterizer: None,
+            blob_image_rasterizer_produced_epoch: BlobImageRasterizerEpoch(0),
+            blob_image_rasterizer_consumed_epoch: BlobImageRasterizerEpoch(0),
             // We want to keep three frames worth of delete blob keys
             deleted_blob_keys: vec![Vec::new(), Vec::new(), Vec::new()].into(),
         }
@@ -640,8 +681,43 @@ impl ResourceCache {
         );
     }
 
-    pub fn set_blob_rasterizer(&mut self, rasterizer: Box<AsyncBlobImageRasterizer>) {
-        self.blob_image_rasterizer = Some(rasterizer);
+    pub fn set_blob_rasterizer(
+        &mut self, rasterizer: Box<AsyncBlobImageRasterizer>,
+        supp: AsyncBlobImageInfo,
+    ) {
+        if self.blob_image_rasterizer_consumed_epoch.0 < supp.epoch.0 {
+            self.blob_image_rasterizer = Some(rasterizer);
+            self.blob_image_rasterizer_consumed_epoch = supp.epoch;
+        }
+
+        // Discard blob image tiles that are not rendered by AsyncBlobImageRasterizer.
+        // It happens when originally requested tile range exceeds MAX_TILES_PER_REQUEST.
+        for req in supp.clear_requests {
+            let tiles = match self.rasterized_blob_images.get_mut(&req.key) {
+                Some(RasterizedBlob::Tiled(tiles)) => tiles,
+                _ => { continue; }
+            };
+
+            tiles.retain(|tile, _| {
+                !req.original_tile_range.contains(tile) ||
+                req.actual_tile_range.contains(tile)
+            });
+
+            let texture_cache = &mut self.texture_cache;
+            match self.cached_images.try_get_mut(&req.key.as_image()) {
+                Some(&mut ImageResult::Multi(ref mut entries)) => {
+                    entries.retain(|key, entry| {
+                        if !req.original_tile_range.contains(&key.tile.unwrap()) ||
+                           req.actual_tile_range.contains(&key.tile.unwrap()) {
+                            return true;
+                        }
+                        entry.mark_unused(texture_cache);
+                        return false;
+                    });
+                }
+                _ => {}
+            }
+        }
     }
 
     pub fn add_rasterized_blob_images(&mut self, images: Vec<(BlobImageRequest, BlobImageResult)>) {
@@ -704,7 +780,7 @@ impl ResourceCache {
         &mut self,
         instance_key: FontInstanceKey,
         font_key: FontKey,
-        glyph_size: Au,
+        size: Au,
         options: Option<FontInstanceOptions>,
         platform_options: Option<FontInstancePlatformOptions>,
         variations: Vec<FontVariation>,
@@ -716,17 +792,17 @@ impl ResourceCache {
             synthetic_italics,
             ..
         } = options.unwrap_or_default();
-        let instance = FontInstance::new(
+        let instance = Arc::new(BaseFontInstance {
+            instance_key,
             font_key,
-            glyph_size,
-            ColorF::new(0.0, 0.0, 0.0, 1.0),
+            size,
             bg_color,
             render_mode,
             flags,
             synthetic_italics,
             platform_options,
             variations,
-        );
+        });
         self.resources.font_instances
             .write()
             .unwrap()
@@ -747,9 +823,9 @@ impl ResourceCache {
         self.resources.font_instances.clone()
     }
 
-    pub fn get_font_instance(&self, instance_key: FontInstanceKey) -> Option<FontInstance> {
+    pub fn get_font_instance(&self, instance_key: FontInstanceKey) -> Option<Arc<BaseFontInstance>> {
         let instance_map = self.resources.font_instances.read().unwrap();
-        instance_map.get(&instance_key).cloned()
+        instance_map.get(&instance_key).map(|instance| { Arc::clone(instance) })
     }
 
     pub fn add_image_template(
@@ -1050,7 +1126,7 @@ impl ResourceCache {
                             LayoutIntRect {
                                 origin: point2(tile.x, tile.y) * tile_size as i32,
                                 size: blob_size(compute_tile_size(
-                                    &template.descriptor,
+                                    &template.descriptor.size.into(),
                                     tile_size,
                                     tile,
                                 )),
@@ -1081,11 +1157,12 @@ impl ResourceCache {
     pub fn create_blob_scene_builder_requests(
         &mut self,
         keys: &[BlobImageKey]
-    ) -> (Option<Box<AsyncBlobImageRasterizer>>, Vec<BlobImageParams>) {
-        if self.blob_image_handler.is_none() {
+    ) -> (Option<(Box<AsyncBlobImageRasterizer>, AsyncBlobImageInfo)>, Vec<BlobImageParams>) {
+        if self.blob_image_handler.is_none() || keys.is_empty() {
             return (None, Vec::new());
         }
 
+        let mut blob_tiles_clear_requests = Vec::new();
         let mut blob_request_params = Vec::new();
         for key in keys {
             let template = self.blob_image_templates.get_mut(key).unwrap();
@@ -1125,10 +1202,25 @@ impl ResourceCache {
                     tiles = tiles.intersection(&dirty_tiles).unwrap_or(TileRange::zero());
                 }
 
+                let original_tile_range = tiles;
+
                 // This code tries to keep things sane if Gecko sends
                 // nonsensical blob image requests.
                 // Constant here definitely needs to be tweaked.
                 const MAX_TILES_PER_REQUEST: i32 = 64;
+                // For truly nonsensical requests, we might run into overflow
+                // when computing width * height. Even if we don't, the loop
+                // below to reduce the number of tiles is linear and can take
+                // a long time to complete. These preliminary conditions help
+                // get us there faster and avoid the overflow.
+                if tiles.size.width > MAX_TILES_PER_REQUEST {
+                    tiles.origin.x += (tiles.size.width - MAX_TILES_PER_REQUEST) / 2;
+                    tiles.size.width = MAX_TILES_PER_REQUEST;
+                }
+                if tiles.size.height > MAX_TILES_PER_REQUEST {
+                    tiles.origin.y += (tiles.size.height - MAX_TILES_PER_REQUEST) / 2;
+                    tiles.size.height = MAX_TILES_PER_REQUEST;
+                }
                 while tiles.size.width as i32 * tiles.size.height as i32 > MAX_TILES_PER_REQUEST {
                     // Remove tiles in the largest dimension.
                     if tiles.size.width > tiles.size.height {
@@ -1140,12 +1232,24 @@ impl ResourceCache {
                     }
                 }
 
+                // When originally requested tile range exceeds MAX_TILES_PER_REQUEST,
+                // some tiles are not rasterized by AsyncBlobImageRasterizer.
+                // They need to be cleared.
+                if original_tile_range != tiles {
+                    let clear_params = BlobImageClearParams {
+                        key: *key,
+                        original_tile_range,
+                        actual_tile_range: tiles,
+                    };
+                    blob_tiles_clear_requests.push(clear_params);
+                }
+
                 for_each_tile_in_range(&tiles, |tile| {
                     let descriptor = BlobImageDescriptor {
                         rect: LayoutIntRect {
                             origin: point2(tile.x, tile.y) * tile_size as i32,
                             size: blob_size(compute_tile_size(
-                                &template.descriptor,
+                                &template.descriptor.size.into(),
                                 tile_size,
                                 tile,
                             )),
@@ -1217,9 +1321,14 @@ impl ResourceCache {
             }
             template.dirty_rect = DirtyRect::empty();
         }
+        self.blob_image_rasterizer_produced_epoch.0 += 1;
+        let info = AsyncBlobImageInfo {
+            epoch: self.blob_image_rasterizer_produced_epoch,
+            clear_requests: blob_tiles_clear_requests,
+        };
         let handler = self.blob_image_handler.as_mut().unwrap();
         handler.prepare_resources(&self.resources, &blob_request_params);
-        (Some(handler.create_blob_rasterizer()), blob_request_params)
+        (Some((handler.create_blob_rasterizer(), info)), blob_request_params)
     }
 
     fn discard_tiles_outside_visible_area(
@@ -1258,7 +1367,7 @@ impl ResourceCache {
                     if key.tile.is_none() || tile_range.contains(&key.tile.unwrap()) {
                         return true;
                     }
-                    texture_cache.mark_unused(&entry.texture_cache_handle);
+                    entry.mark_unused(texture_cache);
                     return false;
                 });
             }
@@ -1272,7 +1381,6 @@ impl ResourceCache {
         glyph_keys: &[GlyphKey],
         gpu_cache: &mut GpuCache,
         render_task_tree: &mut RenderTaskTree,
-        render_passes: &mut SpecialRenderPasses,
     ) {
         debug_assert_eq!(self.state, State::AddResources);
 
@@ -1285,7 +1393,6 @@ impl ResourceCache {
             gpu_cache,
             &mut self.cached_render_tasks,
             render_task_tree,
-            render_passes,
         );
     }
 
@@ -1396,7 +1503,7 @@ impl ResourceCache {
         font: &FontInstance,
         glyph_index: GlyphIndex,
     ) -> Option<GlyphDimensions> {
-        match self.cached_glyph_dimensions.entry((font.clone(), glyph_index)) {
+        match self.cached_glyph_dimensions.entry((font.instance_key, glyph_index)) {
             Occupied(entry) => *entry.get(),
             Vacant(entry) => *entry.insert(
                 self.glyph_rasterizer
@@ -1504,7 +1611,6 @@ impl ResourceCache {
             &mut self.texture_cache,
             render_tasks,
         );
-        self.texture_cache.end_frame(texture_cache_profile);
     }
 
     fn rasterize_missing_blob_images(&mut self) {
@@ -1586,7 +1692,7 @@ impl ResourceCache {
 
                 if let Some(tile) = request.tile {
                     let tile_size = image_template.tiling.unwrap();
-                    let clipped_tile_size = compute_tile_size(&descriptor, tile_size, tile);
+                    let clipped_tile_size = compute_tile_size(&descriptor.size.into(), tile_size, tile);
 
                     // The tiled image could be stored on the CPU as one large image or be
                     // already broken up into tiles. This affects the way we compute the stride
@@ -1661,9 +1767,10 @@ impl ResourceCache {
         }
     }
 
-    pub fn end_frame(&mut self) {
+    pub fn end_frame(&mut self, texture_cache_profile: &mut TextureCacheProfileCounters) {
         debug_assert_eq!(self.state, State::QueryResources);
         self.state = State::Idle;
+        self.texture_cache.end_frame(texture_cache_profile);
     }
 
     pub fn set_debug_flags(&mut self, flags: DebugFlags) {
@@ -1686,7 +1793,7 @@ impl ResourceCache {
             self.cached_render_tasks.clear();
         }
         if what.contains(ClearCache::TEXTURE_CACHE) {
-            self.texture_cache.clear();
+            self.texture_cache.clear_all();
         }
         if what.contains(ClearCache::RASTERIZED_BLOBS) {
             self.rasterized_blob_images.clear();
@@ -1715,6 +1822,13 @@ impl ResourceCache {
     }
 
     /// Reports the CPU heap usage of this ResourceCache.
+    ///
+    /// NB: It would be much better to use the derive(MallocSizeOf) machinery
+    /// here, but the Arcs complicate things. The two ways to handle that would
+    /// be to either (a) Implement MallocSizeOf manually for the things that own
+    /// them and manually avoid double-counting, or (b) Use the "seen this pointer
+    /// yet" machinery from the proper malloc_size_of crate. We can do this if/when
+    /// more accurate memory reporting on these resources becomes a priority.
     pub fn report_memory(&self, op: VoidPtrToSizeFn) -> MemoryReport {
         let mut report = MemoryReport::default();
 
@@ -1789,32 +1903,6 @@ pub fn get_blob_tiling(
     tiling
 }
 
-
-// Compute the width and height of a tile depending on its position in the image.
-pub fn compute_tile_size(
-    descriptor: &ImageDescriptor,
-    base_size: TileSize,
-    tile: TileOffset,
-) -> DeviceIntSize {
-    let base_size = base_size as i32;
-    // Most tiles are going to have base_size as width and height,
-    // except for tiles around the edges that are shrunk to fit the mage data
-    // (See decompose_tiled_image in frame.rs).
-    let actual_width = if (tile.x as i32) < descriptor.size.width / base_size {
-        base_size
-    } else {
-        descriptor.size.width % base_size
-    };
-
-    let actual_height = if (tile.y as i32) < descriptor.size.height / base_size {
-        base_size
-    } else {
-        descriptor.size.height % base_size
-    };
-
-    size2(actual_width, actual_height)
-}
-
 #[cfg(any(feature = "capture", feature = "replay"))]
 #[cfg_attr(feature = "capture", derive(Serialize))]
 #[cfg_attr(feature = "replay", derive(Deserialize))]
@@ -1840,7 +1928,7 @@ struct PlainImageTemplate {
 #[cfg_attr(feature = "replay", derive(Deserialize))]
 pub struct PlainResources {
     font_templates: FastHashMap<FontKey, PlainFontTemplate>,
-    font_instances: FastHashMap<FontInstanceKey, FontInstance>,
+    font_instances: FastHashMap<FontInstanceKey, Arc<BaseFontInstance>>,
     image_templates: FastHashMap<ImageKey, PlainImageTemplate>,
 }
 
@@ -2112,6 +2200,7 @@ impl ResourceCache {
                 self.texture_cache = TextureCache::new(
                     self.texture_cache.max_texture_size(),
                     self.texture_cache.max_texture_layers(),
+                    self.texture_cache.picture_tile_size(),
                 );
             }
         }

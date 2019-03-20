@@ -26,7 +26,8 @@ function waitForClear() {
 add_task(async function setup() {
   await SpecialPowers.pushPrefEnv({
     set: [["extensions.webapi.testing", true],
-          ["extensions.install.requireBuiltInCerts", false]],
+          ["extensions.install.requireBuiltInCerts", false],
+          ["extensions.allowPrivateBrowsingByDefault", false]],
   });
   info("added preferences");
 });
@@ -39,10 +40,6 @@ add_task(async function setup() {
 // with properties that the AddonInstall object is expected to have when
 // that event is triggered.
 async function testInstall(browser, args, steps, description) {
-  promisePopupNotificationShown("addon-webext-permissions").then(panel => {
-    panel.button.click();
-  });
-
   let success = await ContentTask.spawn(browser, {args, steps}, async function(opts) {
     let { args, steps } = opts;
     let install = await content.navigator.mozAddonManager.createInstall(args);
@@ -202,9 +199,16 @@ function makeRegularTest(options, what) {
       },
     ];
 
-    let promptPromise = acceptAppMenuNotificationWhenShown("addon-installed");
+    let installPromptPromise =
+      promisePopupNotificationShown("addon-webext-permissions").then(panel => {
+        panel.button.click();
+      });
+
+    let promptPromise = acceptAppMenuNotificationWhenShown("addon-installed", "extension");
 
     await testInstall(browser, options, steps, what);
+
+    await installPromptPromise;
 
     await promptPromise;
 
@@ -328,3 +332,24 @@ add_task(async function test_permissions() {
                    "not permitted",
                    "Installing from non-approved URL fails");
 });
+
+add_task(makeInstallTest(async function(browser) {
+  let xpiURL = `${SECURE_TESTROOT}../xpinstall/incompatible.xpi`;
+  let id = "incompatible-xpi@tests.mozilla.org";
+
+  let steps = [
+    {action: "install", expectError: true},
+    {
+      event: "onDownloadStarted",
+      props: {state: "STATE_DOWNLOADING"},
+    },
+    {event: "onDownloadProgress"},
+    {event: "onDownloadEnded"},
+    {event: "onDownloadCancelled"},
+  ];
+
+  await testInstall(browser, {url: xpiURL}, steps, "install of an incompatible XPI fails");
+
+  let addons = await promiseAddonsByIDs([id]);
+  is(addons[0], null, "The addon was not installed");
+}));

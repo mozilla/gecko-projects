@@ -9,10 +9,11 @@ var EXPORTED_SYMBOLS = ["ExtensionContent"];
 
 /* globals ExtensionContent */
 
-ChromeUtils.import("resource://gre/modules/Services.jsm");
-ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
+const {Services} = ChromeUtils.import("resource://gre/modules/Services.jsm");
+const {XPCOMUtils} = ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
 
 XPCOMUtils.defineLazyModuleGetters(this, {
+  ExtensionProcessScript: "resource://gre/modules/ExtensionProcessScript.jsm",
   ExtensionTelemetry: "resource://gre/modules/ExtensionTelemetry.jsm",
   LanguageDetector: "resource:///modules/translation/LanguageDetector.jsm",
   MessageChannel: "resource://gre/modules/MessageChannel.jsm",
@@ -24,14 +25,11 @@ XPCOMUtils.defineLazyServiceGetter(this, "styleSheetService",
                                    "@mozilla.org/content/style-sheet-service;1",
                                    "nsIStyleSheetService");
 
-XPCOMUtils.defineLazyServiceGetter(this, "processScript",
-                                   "@mozilla.org/webextensions/extension-process-script;1");
-
 const Timer = Components.Constructor("@mozilla.org/timer;1", "nsITimer", "initWithCallback");
 
-ChromeUtils.import("resource://gre/modules/ExtensionChild.jsm");
-ChromeUtils.import("resource://gre/modules/ExtensionCommon.jsm");
-ChromeUtils.import("resource://gre/modules/ExtensionUtils.jsm");
+const {ExtensionChild} = ChromeUtils.import("resource://gre/modules/ExtensionChild.jsm");
+const {ExtensionCommon} = ChromeUtils.import("resource://gre/modules/ExtensionCommon.jsm");
+const {ExtensionUtils} = ChromeUtils.import("resource://gre/modules/ExtensionUtils.jsm");
 
 XPCOMUtils.defineLazyGlobalGetters(this, ["crypto", "TextEncoder"]);
 
@@ -314,7 +312,7 @@ class Script {
   }
 
   get requiresCleanup() {
-    return !this.removeCss && (this.css.length > 0 || this.cssCodeHash);
+    return !this.removeCSS && (this.css.length > 0 || this.cssCodeHash);
   }
 
   async addCSSCode(cssCode) {
@@ -648,7 +646,7 @@ class UserScript extends Script {
 }
 
 var contentScripts = new DefaultWeakMap(matcher => {
-  const extension = processScript.extensions.get(matcher.extension);
+  const extension = ExtensionProcessScript.extensions.get(matcher.extension);
 
   if ("userScriptOptions" in matcher) {
     return new UserScript(extension, matcher);

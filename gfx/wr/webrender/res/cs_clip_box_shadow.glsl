@@ -40,17 +40,23 @@ BoxShadowData fetch_data(ivec2 address) {
 
 void main(void) {
     ClipMaskInstance cmi = fetch_clip_item();
-    ClipArea area = fetch_clip_area(cmi.render_task_address);
     Transform clip_transform = fetch_transform(cmi.clip_transform_id);
     Transform prim_transform = fetch_transform(cmi.prim_transform_id);
     BoxShadowData bs_data = fetch_data(cmi.clip_data_address);
     ImageResource res = fetch_image_resource_direct(cmi.resource_address);
 
+    RectWithSize dest_rect = bs_data.dest_rect;
+    dest_rect.p0 += cmi.local_pos;
+
     ClipVertexInfo vi = write_clip_tile_vertex(
-        bs_data.dest_rect,
+        dest_rect,
         prim_transform,
         clip_transform,
-        area
+        cmi.sub_rect,
+        cmi.snap_offsets,
+        cmi.task_origin,
+        cmi.screen_origin,
+        cmi.device_pixel_scale
     );
     vLocalPos = vi.local_pos;
     vLayer = res.layer;
@@ -65,14 +71,14 @@ void main(void) {
     switch (bs_data.stretch_mode_x) {
         case MODE_STRETCH: {
             vEdge.x = 0.5;
-            vEdge.z = (bs_data.dest_rect.size.x / bs_data.src_rect_size.x) - 0.5;
-            vUv.x = (local_pos.x - bs_data.dest_rect.p0.x) / bs_data.src_rect_size.x;
+            vEdge.z = (dest_rect.size.x / bs_data.src_rect_size.x) - 0.5;
+            vUv.x = (local_pos.x - dest_rect.p0.x) / bs_data.src_rect_size.x;
             break;
         }
         case MODE_SIMPLE:
         default: {
             vEdge.xz = vec2(1.0);
-            vUv.x = (local_pos.x - bs_data.dest_rect.p0.x) / bs_data.dest_rect.size.x;
+            vUv.x = (local_pos.x - dest_rect.p0.x) / dest_rect.size.x;
             break;
         }
     }
@@ -80,14 +86,14 @@ void main(void) {
     switch (bs_data.stretch_mode_y) {
         case MODE_STRETCH: {
             vEdge.y = 0.5;
-            vEdge.w = (bs_data.dest_rect.size.y / bs_data.src_rect_size.y) - 0.5;
-            vUv.y = (local_pos.y - bs_data.dest_rect.p0.y) / bs_data.src_rect_size.y;
+            vEdge.w = (dest_rect.size.y / bs_data.src_rect_size.y) - 0.5;
+            vUv.y = (local_pos.y - dest_rect.p0.y) / bs_data.src_rect_size.y;
             break;
         }
         case MODE_SIMPLE:
         default: {
             vEdge.yw = vec2(1.0);
-            vUv.y = (local_pos.y - bs_data.dest_rect.p0.y) / bs_data.dest_rect.size.y;
+            vUv.y = (local_pos.y - dest_rect.p0.y) / dest_rect.size.y;
             break;
         }
     }

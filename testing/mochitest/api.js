@@ -4,10 +4,8 @@
 
 /* globals ExtensionAPI */
 
-ChromeUtils.import("resource://gre/modules/AppConstants.jsm");
-ChromeUtils.import("resource://gre/modules/NetUtil.jsm");
-ChromeUtils.import("resource://gre/modules/Services.jsm");
-ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
+const {AppConstants} = ChromeUtils.import("resource://gre/modules/AppConstants.jsm");
+const {Services} = ChromeUtils.import("resource://gre/modules/Services.jsm");
 
 function loadChromeScripts(win) {
   Services.scriptloader.loadSubScript("chrome://mochikit/content/chrome-harness.js", win);
@@ -16,8 +14,6 @@ function loadChromeScripts(win) {
 }
 
 // ///// Android ///////
-
-Cu.importGlobalProperties(["TextDecoder"]);
 
 const windowTracker = {
   init() {
@@ -41,6 +37,9 @@ const windowTracker = {
 };
 
 function androidStartup() {
+  // Bug 1526086 - we shouldn't need to do this, but otherwise we hang at
+  // shutdown trying to write the startup cache.
+  Services.obs.notifyObservers(null, "startupcache-invalidate");
   // Only browser chrome tests need help starting.
   let testRoot = Services.prefs.getStringPref("mochitest.testRoot", "");
   if (testRoot.endsWith("/chrome")) {
@@ -59,6 +58,10 @@ function androidStartup() {
 }
 
 // ///// Desktop ///////
+
+// Special case for Thunderbird windows.
+const IS_THUNDERBIRD = Services.appinfo.ID == "{3550f703-e582-4d05-9a08-453d09bdfdc6}";
+const WINDOW_TYPE = IS_THUNDERBIRD ? "mail:3pane" : "navigator:browser";
 
 var WindowListener = {
   // browser-test.js is only loaded into the first window. Setup that
@@ -80,7 +83,7 @@ var WindowListener = {
     let win = xulWin.docShell.domWindow;
 
     win.addEventListener("load", function() {
-      if (win.document.documentElement.getAttribute("windowtype") == "navigator:browser") {
+      if (win.document.documentElement.getAttribute("windowtype") == WINDOW_TYPE) {
         WindowListener.setupWindow(win);
       }
     }, {once: true});
@@ -91,12 +94,14 @@ function loadMochitest(e) {
   let flavor = e.detail[0];
   let url = e.detail[1];
 
-  let win = Services.wm.getMostRecentWindow("navigator:browser");
+  let win = Services.wm.getMostRecentWindow(WINDOW_TYPE);
   win.removeEventListener("mochitest-load", loadMochitest);
 
   // for mochitest-plain, navigating to the url is all we need
-  win.loadURI(url, null, null, null, null, null, null, null,
-    Services.scriptSecurityManager.getSystemPrincipal());
+  if (!IS_THUNDERBIRD) {
+    win.loadURI(url, null, null, null, null, null, null,
+      Services.scriptSecurityManager.getSystemPrincipal());
+  }
   if (flavor == "mochitest") {
     return;
   }
@@ -120,7 +125,7 @@ this.mochikit = class extends ExtensionAPI {
     if (AppConstants.platform == "android") {
       androidStartup();
     } else {
-      let win = Services.wm.getMostRecentWindow("navigator:browser");
+      let win = Services.wm.getMostRecentWindow(WINDOW_TYPE);
       // wait for event fired from start_desktop.js containing the
       // suite and url to load
       win.addEventListener("mochitest-load", loadMochitest);
@@ -129,7 +134,7 @@ this.mochikit = class extends ExtensionAPI {
 
   onShutdown() {
     if (AppConstants.platform != "android") {
-      for (let win of Services.wm.getEnumerator("navigator:browser")) {
+      for (let win of Services.wm.getEnumerator(WINDOW_TYPE)) {
         WindowListener.tearDownWindow(win);
       }
 

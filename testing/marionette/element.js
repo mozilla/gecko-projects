@@ -5,16 +5,16 @@
 "use strict";
 /* global XPCNativeWrapper */
 
-ChromeUtils.import("chrome://marionette/content/assert.js");
-ChromeUtils.import("chrome://marionette/content/atom.js");
+const {assert} = ChromeUtils.import("chrome://marionette/content/assert.js");
+const {atom} = ChromeUtils.import("chrome://marionette/content/atom.js");
 const {
   InvalidArgumentError,
   InvalidSelectorError,
   NoSuchElementError,
   StaleElementReferenceError,
-} = ChromeUtils.import("chrome://marionette/content/error.js", {});
-const {pprint} = ChromeUtils.import("chrome://marionette/content/format.js", {});
-const {PollPromise} = ChromeUtils.import("chrome://marionette/content/sync.js", {});
+} = ChromeUtils.import("chrome://marionette/content/error.js");
+const {pprint} = ChromeUtils.import("chrome://marionette/content/format.js");
+const {PollPromise} = ChromeUtils.import("chrome://marionette/content/sync.js");
 
 this.EXPORTED_SYMBOLS = [
   "ChromeWebElement",
@@ -767,7 +767,6 @@ element.isSelected = function(el) {
     } else if (XUL_SELECTED_ELS.has(el.tagName)) {
       return el.selected;
     }
-
   } else if (element.isDOMElement(el)) {
     if (el.localName == "input" && ["checkbox", "radio"].includes(el.type)) {
       return el.checked;
@@ -959,7 +958,6 @@ element.isEditable = function(el) {
  */
 element.coordinates = function(
     node, xOffset = undefined, yOffset = undefined) {
-
   let box = node.getBoundingClientRect();
 
   if (typeof xOffset == "undefined" || xOffset === null) {
@@ -1035,9 +1033,7 @@ element.getContainer = function(el) {
     return element.findClosest(el, "datalist,select") || el;
   }
 
-  // Child nodes of button will not be part of the element tree for
-  // elementsFromPoint until bug 1089326 is fixed.
-  return element.findClosest(el, "button") || el;
+  return el;
 };
 
 /**

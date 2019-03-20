@@ -10,16 +10,18 @@ DIRS += [
     'sources-tree',
 ]
 
-DebuggerModules(
+CompiledModules(
     'assert.js',
     'ast.js',
     'asyncStoreHelper.js',
     'bootstrap.js',
     'build-query.js',
     'clipboard.js',
+    'connect.js',
     'dbg.js',
     'defer.js',
     'DevToolsUtils.js',
+    'empty-lines.js',
     'expressions.js',
     'fromJS.js',
     'function.js',
@@ -48,4 +50,5 @@ DebuggerModules(
     'utils.js',
     'wasm.js',
     'worker.js',
+    'workers.js',
 )

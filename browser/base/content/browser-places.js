@@ -336,7 +336,18 @@ var StarUI = {
   },
 
   showConfirmation() {
-    LibraryUI.triggerLibraryAnimation("bookmark");
+    let animationTriggered = LibraryUI.triggerLibraryAnimation("bookmark");
+
+    // Show the "Saved to Library!" hint in addition to the library button
+    // animation for the first three times, or when the animation was skipped
+    // e.g. because the library button has been customized away.
+    const HINT_COUNT_PREF =
+      "browser.bookmarks.editDialog.confirmationHintShowCount";
+    const HINT_COUNT = Services.prefs.getIntPref(HINT_COUNT_PREF, 0);
+    if (animationTriggered && HINT_COUNT >= 3) {
+      return;
+    }
+    Services.prefs.setIntPref(HINT_COUNT_PREF, HINT_COUNT + 1);
 
     let anchor;
     if (window.toolbar.visible) {
@@ -442,7 +453,7 @@ var PlacesCommandHook = {
     });
     PlacesUIUtils.showBookmarkDialog({ action: "add",
                                        type: "bookmark",
-                                       uri: makeURI(url),
+                                       uri: Services.io.newURI(url),
                                        title,
                                        defaultInsertionPoint,
                                        hiddenRows: [ "location", "keyword" ],
@@ -531,8 +542,7 @@ var PlacesCommandHook = {
   },
 
   searchBookmarks() {
-    focusAndSelectUrlBar();
-    gURLBar.typeRestrictToken(UrlbarTokenizer.RESTRICT.BOOKMARK);
+    gURLBar.search(UrlbarTokenizer.RESTRICT.BOOKMARK);
   },
 };
 
@@ -562,12 +572,12 @@ HistoryMenu.prototype = {
   },
 
   _getClosedTabCount() {
-    // SessionStore doesn't track the hidden window, so just return zero then.
-    if (window == Services.appShell.hiddenDOMWindow) {
+    try {
+      return SessionStore.getClosedTabCount(window);
+    } catch (ex) {
+      // SessionStore doesn't track the hidden window, so just return zero then.
       return 0;
     }
-
-    return SessionStore.getClosedTabCount(window);
   },
 
   toggleHiddenTabs() {
@@ -673,6 +683,7 @@ HistoryMenu.prototype = {
   },
 
   _onCommand: function HM__onCommand(aEvent) {
+    aEvent = getRootEvent(aEvent);
     let placesNode = aEvent.target._placesNode;
     if (placesNode) {
       if (!PrivateBrowsingUtils.isWindowPrivate(window))
@@ -748,7 +759,7 @@ var BookmarksEventHandler = {
       // is middle-clicked or when a non-bookmark item (except for Open in Tabs)
       // in a bookmarks menupopup is middle-clicked.
       if (target.localName == "menu" || target.localName == "toolbarbutton")
-        PlacesUIUtils.openContainerNodeInTabs(target._placesNode, aEvent, aView);
+        PlacesUIUtils.openMultipleLinksInTabs(target._placesNode, aEvent, aView);
     } else if (aEvent.button == 1) {
       // left-clicks with modifier are already served by onCommand
       this.onCommand(aEvent);
@@ -775,19 +786,18 @@ var BookmarksEventHandler = {
 
     if (aDocument.tooltipNode.localName == "treechildren") {
       var tree = aDocument.tooltipNode.parentNode;
-      var tbo = tree.treeBoxObject;
-      var cell = tbo.getCellAt(aEvent.clientX, aEvent.clientY);
+      var cell = tree.getCellAt(aEvent.clientX, aEvent.clientY);
       if (cell.row == -1)
         return false;
       node = tree.view.nodeForTreeIndex(cell.row);
-      cropped = tbo.isCellCropped(cell.row, cell.col);
+      cropped = tree.isCellCropped(cell.row, cell.col);
     } else {
       // Check whether the tooltipNode is a Places node.
       // In such a case use it, otherwise check for targetURI attribute.
       var tooltipNode = aDocument.tooltipNode;
-      if (tooltipNode._placesNode)
+      if (tooltipNode._placesNode) {
         node = tooltipNode._placesNode;
-      else {
+      } else {
         // This is a static non-Places node.
         targetURI = tooltipNode.getAttribute("targetURI");
       }
@@ -1079,6 +1089,9 @@ var PlacesToolbarHelper = {
  * Handles the Library button in the toolbar.
  */
 var LibraryUI = {
+  /**
+   * @returns true if the animation could be triggered, false otherwise.
+   */
   triggerLibraryAnimation(animation) {
     if (!this.hasOwnProperty("COSMETIC_ANIMATIONS_ENABLED")) {
       XPCOMUtils.defineLazyPreferenceGetter(this, "COSMETIC_ANIMATIONS_ENABLED",
@@ -1092,7 +1105,7 @@ var LibraryUI = {
         !libraryButton.closest("#nav-bar") ||
         !window.toolbar.visible ||
         !this.COSMETIC_ANIMATIONS_ENABLED) {
-      return;
+      return false;
     }
 
     let animatableBox = document.getElementById("library-animatable-box");
@@ -1119,6 +1132,8 @@ var LibraryUI = {
     animatableBox.addEventListener("animationend", this._libraryButtonAnimationEndListeners[animation]);
 
     window.addEventListener("resize", this._onWindowResize);
+
+    return true;
   },
 
   _libraryButtonAnimationEndListeners: {},
@@ -1473,8 +1488,10 @@ var BookmarkingUI = {
       }
       if (starred) {
         element.setAttribute("starred", "true");
+        Services.obs.notifyObservers(null, "bookmark-icon-updated", "starred");
       } else {
         element.removeAttribute("starred");
+        Services.obs.notifyObservers(null, "bookmark-icon-updated", "unstarred");
       }
     }
 

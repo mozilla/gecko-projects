@@ -1,6 +1,6 @@
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
- * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 //! Implements parallel traversal over the DOM tree.
 //!
@@ -22,11 +22,11 @@
 
 #![deny(missing_docs)]
 
-use arrayvec::ArrayVec;
 use crate::context::{StyleContext, ThreadLocalStyleContext};
 use crate::dom::{OpaqueNode, SendNode, TElement};
 use crate::scoped_tls::ScopedTLS;
 use crate::traversal::{DomTraversal, PerLevelTraversalData};
+use arrayvec::ArrayVec;
 use itertools::Itertools;
 use rayon;
 use smallvec::SmallVec;

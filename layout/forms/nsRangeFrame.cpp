@@ -15,7 +15,7 @@
 #include "nsCSSRendering.h"
 #include "nsCheckboxRadioFrame.h"
 #include "nsIContent.h"
-#include "nsIDocument.h"
+#include "mozilla/dom/Document.h"
 #include "nsNameSpaceManager.h"
 #include "nsIPresShell.h"
 #include "nsGkAtoms.h"
@@ -27,7 +27,7 @@
 #include "nsStyleConsts.h"
 
 #ifdef ACCESSIBILITY
-#include "nsAccessibilityService.h"
+#  include "nsAccessibilityService.h"
 #endif
 
 // Our intrinsic size is 12em in the main-axis and 1.3em in the cross-axis.
@@ -41,19 +41,19 @@ using namespace mozilla::image;
 NS_IMPL_ISUPPORTS(nsRangeFrame::DummyTouchListener, nsIDOMEventListener)
 
 nsIFrame* NS_NewRangeFrame(nsIPresShell* aPresShell, ComputedStyle* aStyle) {
-  return new (aPresShell) nsRangeFrame(aStyle);
+  return new (aPresShell) nsRangeFrame(aStyle, aPresShell->GetPresContext());
 }
 
-nsRangeFrame::nsRangeFrame(ComputedStyle* aStyle)
-    : nsContainerFrame(aStyle, kClassID) {}
+nsRangeFrame::nsRangeFrame(ComputedStyle* aStyle, nsPresContext* aPresContext)
+    : nsContainerFrame(aStyle, aPresContext, kClassID) {}
 
 nsRangeFrame::~nsRangeFrame() {}
 
 NS_IMPL_FRAMEARENA_HELPERS(nsRangeFrame)
 
 NS_QUERYFRAME_HEAD(nsRangeFrame)
-NS_QUERYFRAME_ENTRY(nsRangeFrame)
-NS_QUERYFRAME_ENTRY(nsIAnonymousContentCreator)
+  NS_QUERYFRAME_ENTRY(nsRangeFrame)
+  NS_QUERYFRAME_ENTRY(nsIAnonymousContentCreator)
 NS_QUERYFRAME_TAIL_INHERITING(nsContainerFrame)
 
 void nsRangeFrame::Init(nsIContent* aContent, nsContainerFrame* aParent,
@@ -74,7 +74,7 @@ void nsRangeFrame::Init(nsIContent* aContent, nsContainerFrame* aParent,
   ServoStyleSet* styleSet = PresContext()->StyleSet();
 
   mOuterFocusStyle = styleSet->ProbePseudoElementStyle(
-      *aContent->AsElement(), CSSPseudoElementType::mozFocusOuter, Style());
+      *aContent->AsElement(), PseudoStyleType::mozFocusOuter, Style());
 
   return nsContainerFrame::Init(aContent, aParent, aPrevInFlow);
 }
@@ -96,9 +96,9 @@ void nsRangeFrame::DestroyFrom(nsIFrame* aDestructRoot,
 }
 
 nsresult nsRangeFrame::MakeAnonymousDiv(Element** aResult,
-                                        CSSPseudoElementType aPseudoType,
+                                        PseudoStyleType aPseudoType,
                                         nsTArray<ContentInfo>& aElements) {
-  nsCOMPtr<nsIDocument> doc = mContent->GetComposedDoc();
+  nsCOMPtr<Document> doc = mContent->GetComposedDoc();
   RefPtr<Element> resultElement = doc->CreateHTMLElement(nsGkAtoms::div);
 
   // Associate the pseudo-element with the anonymous child.
@@ -116,19 +116,19 @@ nsresult nsRangeFrame::CreateAnonymousContent(
     nsTArray<ContentInfo>& aElements) {
   nsresult rv;
 
-  // Create the ::-moz-range-track pseuto-element (a div):
+  // Create the ::-moz-range-track pseudo-element (a div):
   rv = MakeAnonymousDiv(getter_AddRefs(mTrackDiv),
-                        CSSPseudoElementType::mozRangeTrack, aElements);
+                        PseudoStyleType::mozRangeTrack, aElements);
   NS_ENSURE_SUCCESS(rv, rv);
 
   // Create the ::-moz-range-progress pseudo-element (a div):
   rv = MakeAnonymousDiv(getter_AddRefs(mProgressDiv),
-                        CSSPseudoElementType::mozRangeProgress, aElements);
+                        PseudoStyleType::mozRangeProgress, aElements);
   NS_ENSURE_SUCCESS(rv, rv);
 
   // Create the ::-moz-range-thumb pseudo-element (a div):
   rv = MakeAnonymousDiv(getter_AddRefs(mThumbDiv),
-                        CSSPseudoElementType::mozRangeThumb, aElements);
+                        PseudoStyleType::mozRangeThumb, aElements);
   return rv;
 }
 
@@ -246,7 +246,7 @@ void nsRangeFrame::BuildDisplayList(nsDisplayListBuilder* aBuilder,
 
   // Draw a focus outline if appropriate:
 
-  if (!aBuilder->IsForPainting() || !IsVisibleForPainting(aBuilder)) {
+  if (!aBuilder->IsForPainting() || !IsVisibleForPainting()) {
     // we don't want the focus ring item for hit-testing or if the item isn't
     // in the area being [re]painted
     return;
@@ -719,6 +719,20 @@ nsresult nsRangeFrame::AttributeChanged(int32_t aNameSpaceID,
   return nsContainerFrame::AttributeChanged(aNameSpaceID, aAttribute, aModType);
 }
 
+nscoord nsRangeFrame::AutoCrossSize(nscoord aEm) {
+  nscoord minCrossSize(0);
+  if (IsThemed()) {
+    bool unused;
+    LayoutDeviceIntSize size;
+    nsPresContext* pc = PresContext();
+    pc->GetTheme()->GetMinimumWidgetSize(pc, this, StyleAppearance::RangeThumb,
+                                         &size, &unused);
+    minCrossSize =
+        pc->DevPixelsToAppUnits(IsHorizontal() ? size.height : size.width);
+  }
+  return std::max(minCrossSize, NSToCoordRound(CROSS_AXIS_EM_SIZE * aEm));
+}
+
 LogicalSize nsRangeFrame::ComputeAutoSize(
     gfxContext* aRenderingContext, WritingMode aWM, const LogicalSize& aCBSize,
     nscoord aAvailableISize, const LogicalSize& aMargin,
@@ -731,9 +745,9 @@ LogicalSize nsRangeFrame::ComputeAutoSize(
   LogicalSize autoSize(wm);
   if (isInlineOriented) {
     autoSize.ISize(wm) = NSToCoordRound(MAIN_AXIS_EM_SIZE * em);
-    autoSize.BSize(wm) = NSToCoordRound(CROSS_AXIS_EM_SIZE * em);
+    autoSize.BSize(wm) = AutoCrossSize(em);
   } else {
-    autoSize.ISize(wm) = NSToCoordRound(CROSS_AXIS_EM_SIZE * em);
+    autoSize.ISize(wm) = AutoCrossSize(em);
     autoSize.BSize(wm) = NSToCoordRound(MAIN_AXIS_EM_SIZE * em);
   }
 
@@ -741,14 +755,21 @@ LogicalSize nsRangeFrame::ComputeAutoSize(
 }
 
 nscoord nsRangeFrame::GetMinISize(gfxContext* aRenderingContext) {
-  return nscoord(0);
+  auto pos = StylePosition();
+  auto wm = GetWritingMode();
+  if (pos->ISize(wm).HasPercent()) {
+    // https://drafts.csswg.org/css-sizing-3/#percentage-sizing
+    // https://drafts.csswg.org/css-sizing-3/#min-content-zero
+    return nsLayoutUtils::ResolveToLength<true>(
+        pos->ISize(wm).AsLengthPercentage(), nscoord(0));
+  }
+  return GetPrefISize(aRenderingContext);
 }
 
 nscoord nsRangeFrame::GetPrefISize(gfxContext* aRenderingContext) {
   bool isInline = IsInlineOriented();
   auto em = StyleFont()->mFont.size * nsLayoutUtils::FontSizeInflationFor(this);
-  return NSToCoordRound(em *
-                        (isInline ? MAIN_AXIS_EM_SIZE : CROSS_AXIS_EM_SIZE));
+  return isInline ? NSToCoordRound(em * MAIN_AXIS_EM_SIZE) : AutoCrossSize(em);
 }
 
 bool nsRangeFrame::IsHorizontal() const {

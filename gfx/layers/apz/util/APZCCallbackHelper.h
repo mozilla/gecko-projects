@@ -10,6 +10,7 @@
 #include "LayersTypes.h"
 #include "mozilla/EventForwards.h"
 #include "mozilla/layers/APZUtils.h"
+#include "mozilla/layers/MatrixMessage.h"
 #include "mozilla/layers/RepaintRequest.h"
 #include "nsIDOMWindowUtils.h"
 #include "nsRefreshDriver.h"
@@ -17,7 +18,6 @@
 #include <functional>
 
 class nsIContent;
-class nsIDocument;
 class nsIPresShell;
 class nsIScrollableFrame;
 class nsIWidget;
@@ -60,6 +60,8 @@ class APZCCallbackHelper {
   typedef mozilla::layers::ScrollableLayerGuid ScrollableLayerGuid;
 
  public:
+  static void NotifyLayerTransforms(const nsTArray<MatrixMessage>& aTransforms);
+
   /* Applies the scroll and zoom parameters from the given RepaintRequest object
      to the root frame for the given metrics' scrollId. If tiled thebes layers
      are enabled, this will align the displayport to tile boundaries. Setting
@@ -163,13 +165,14 @@ class APZCCallbackHelper {
    *     a defined ordering relative to the APZ messages.
    */
   static UniquePtr<DisplayportSetListener> SendSetTargetAPZCNotification(
-      nsIWidget* aWidget, nsIDocument* aDocument, const WidgetGUIEvent& aEvent,
-      const ScrollableLayerGuid& aGuid, uint64_t aInputBlockId);
+      nsIWidget* aWidget, mozilla::dom::Document* aDocument,
+      const WidgetGUIEvent& aEvent, const ScrollableLayerGuid& aGuid,
+      uint64_t aInputBlockId);
 
   /* Figure out the allowed touch behaviors of each touch point in |aEvent|
    * and send that information to the provided callback. */
   static void SendSetAllowedTouchBehaviorNotification(
-      nsIWidget* aWidget, nsIDocument* aDocument,
+      nsIWidget* aWidget, mozilla::dom::Document* aDocument,
       const WidgetTouchEvent& aEvent, uint64_t aInputBlockId,
       const SetAllowedTouchBehaviorCallback& aCallback);
 

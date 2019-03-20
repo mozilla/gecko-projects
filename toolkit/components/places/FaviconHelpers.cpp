@@ -204,11 +204,14 @@ nsresult SetIconInfo(const RefPtr<Database>& aDB, IconData& aIcon,
       "(icon_url, fixed_icon_url_hash, width, root, expire_ms, data) "
       "VALUES (:url, hash(fixup_url(:url)), :width, :root, :expire, :data) ");
   NS_ENSURE_STATE(insertStmt);
+  // ReplaceFaviconData may replace data for an already existing icon, and in
+  // that case it won't have the page uri at hand, thus it can't tell if the
+  // icon is a root icon or not. For that reason, never overwrite a root = 1.
   nsCOMPtr<mozIStorageStatement> updateStmt = aDB->GetStatement(
       "UPDATE moz_icons SET width = :width, "
       "expire_ms = :expire, "
       "data = :data, "
-      "root = :root "
+      "root = (root  OR :root) "
       "WHERE id = :id ");
   NS_ENSURE_STATE(updateStmt);
 
@@ -602,7 +605,7 @@ nsresult AsyncFetchAndSetIconForPage::FetchFromNetwork() {
     }
   }
 
-  rv = channel->AsyncOpen2(this);
+  rv = channel->AsyncOpen(this);
   if (NS_SUCCEEDED(rv)) {
     mRequest = channel;
   }
@@ -623,8 +626,7 @@ AsyncFetchAndSetIconForPage::Cancel() {
 }
 
 NS_IMETHODIMP
-AsyncFetchAndSetIconForPage::OnStartRequest(nsIRequest* aRequest,
-                                            nsISupports* aContext) {
+AsyncFetchAndSetIconForPage::OnStartRequest(nsIRequest* aRequest) {
   // mRequest should already be set from ::FetchFromNetwork, but in the case of
   // a redirect we might get a new request, and we should make sure we keep a
   // reference to the most current request.
@@ -637,7 +639,6 @@ AsyncFetchAndSetIconForPage::OnStartRequest(nsIRequest* aRequest,
 
 NS_IMETHODIMP
 AsyncFetchAndSetIconForPage::OnDataAvailable(nsIRequest* aRequest,
-                                             nsISupports* aContext,
                                              nsIInputStream* aInputStream,
                                              uint64_t aOffset,
                                              uint32_t aCount) {
@@ -680,7 +681,6 @@ AsyncFetchAndSetIconForPage::AsyncOnChannelRedirect(
 
 NS_IMETHODIMP
 AsyncFetchAndSetIconForPage::OnStopRequest(nsIRequest* aRequest,
-                                           nsISupports* aContext,
                                            nsresult aStatusCode) {
   MOZ_ASSERT(NS_IsMainThread());
 
@@ -814,7 +814,10 @@ AsyncAssociateIconToPage::Run() {
   nsresult rv;
   if (shouldUpdateIcon) {
     rv = SetIconInfo(DB, mIcon);
-    NS_ENSURE_SUCCESS(rv, rv);
+    if (NS_FAILED(rv)) {
+      (void)transaction.Commit();
+      return rv;
+    }
 
     mIcon.status = (mIcon.status & ~(ICON_STATUS_CACHED)) | ICON_STATUS_SAVED;
   }
@@ -1031,6 +1034,7 @@ AsyncReplaceFaviconData::Run() {
   nsresult rv = SetIconInfo(DB, mIcon, true);
   if (rv == NS_ERROR_NOT_AVAILABLE) {
     // There's no previous icon to replace, we don't need to do anything.
+    (void)transaction.Commit();
     return NS_OK;
   }
   NS_ENSURE_SUCCESS(rv, rv);
@@ -1217,8 +1221,8 @@ nsresult FetchAndConvertUnsupportedPayloads::ConvertPayload(
 
   // Convert the payload to an input stream.
   nsCOMPtr<nsIInputStream> stream;
-  nsresult rv = NS_NewByteInputStream(getter_AddRefs(stream), aPayload.get(),
-                                      aPayload.Length(), NS_ASSIGNMENT_DEPEND);
+  nsresult rv = NS_NewByteInputStream(getter_AddRefs(stream), aPayload,
+                                      NS_ASSIGNMENT_DEPEND);
   NS_ENSURE_SUCCESS(rv, rv);
 
   // Decode the input stream to a surface.
@@ -1234,7 +1238,7 @@ nsresult FetchAndConvertUnsupportedPayloads::ConvertPayload(
   // For non-square images, pick the largest side.
   int32_t originalSize = std::max(width, height);
   int32_t size = originalSize;
-  for (uint16_t supportedSize : sFaviconSizes) {
+  for (uint16_t supportedSize : gFaviconSizes) {
     if (supportedSize <= originalSize) {
       size = supportedSize;
       break;

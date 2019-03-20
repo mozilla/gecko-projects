@@ -1,12 +1,11 @@
 /* Any copyright is dedicated to the Public Domain.
    http://creativecommons.org/publicdomain/zero/1.0/ */
 
+"use strict";
+
 /* eslint-env browser */
 /* eslint no-unused-vars: [2, {"vars": "local"}] */
 /* import-globals-from ../../../shared/test/shared-head.js */
-/* import-globals-from debug-target-pane_collapsibilities_head.js */
-
-"use strict";
 
 // Load the shared-head file first.
 Services.scriptloader.loadSubScript(
@@ -18,9 +17,8 @@ Services.scriptloader.loadSubScript(
   "chrome://mochitests/content/browser/devtools/client/shared/test/shared-redux-head.js",
   this);
 
-// Load collapsibilities helpers
-Services.scriptloader.loadSubScript(
-  CHROME_URL_ROOT + "debug-target-pane_collapsibilities_head.js", this);
+/* import-globals-from helper-mocks.js */
+Services.scriptloader.loadSubScript(CHROME_URL_ROOT + "helper-mocks.js", this);
 
 // Make sure the ADB addon is removed and ADB is stopped when the test ends.
 registerCleanupFunction(async function() {
@@ -30,8 +28,8 @@ registerCleanupFunction(async function() {
   } catch (e) {
     // Will throw if the addon is already uninstalled, ignore exceptions here.
   }
-  const { ADB } = require("devtools/shared/adb/adb");
-  await ADB.kill();
+  const { adbProcess } = require("devtools/shared/adb/adb-process");
+  await adbProcess.kill();
 
   const { remoteClientManager } =
     require("devtools/client/shared/remote-debugging/remote-client-manager");
@@ -46,19 +44,66 @@ async function enableNewAboutDebugging() {
   await pushPref("devtools.aboutdebugging.network", true);
 }
 
-async function openAboutDebugging(page, win) {
+async function openAboutDebugging({ enableWorkerUpdates } = {}) {
+  if (!enableWorkerUpdates) {
+    silenceWorkerUpdates();
+  }
+
   await enableNewAboutDebugging();
 
   info("opening about:debugging");
 
-  const tab = await addTab("about:debugging", { window: win });
+  const tab = await addTab("about:debugging");
   const browser = tab.linkedBrowser;
   const document = browser.contentDocument;
   const window = browser.contentWindow;
-  info("wait for the initial about:debugging requests to be successful");
-  await waitForRequestsSuccess(window);
+
+  info("Wait until Connect page is displayed");
+  await waitUntil(() => document.querySelector(".js-connect-page"));
 
   return { tab, document, window };
+}
+
+async function openAboutDevtoolsToolbox(doc, tab, win) {
+  info("Open about:devtools-toolbox page");
+  const target = findDebugTargetByText("about:debugging", doc);
+  ok(target, "about:debugging tab target appeared");
+  const inspectButton = target.querySelector(".js-debug-target-inspect-button");
+  ok(inspectButton, "Inspect button for about:debugging appeared");
+  inspectButton.click();
+  await Promise.all([
+    waitUntil(() => tab.nextElementSibling),
+    waitForRequestsToSettle(win.AboutDebugging.store),
+    gDevTools.once("toolbox-ready"),
+  ]);
+
+  info("Wait for about:devtools-toolbox tab will be selected");
+  const devtoolsTab = tab.nextElementSibling;
+  await waitUntil(() => gBrowser.selectedTab === devtoolsTab);
+  const devtoolsBrowser = gBrowser.selectedBrowser;
+
+  return {
+    devtoolsBrowser,
+    devtoolsDocument: devtoolsBrowser.contentDocument,
+    devtoolsTab,
+    devtoolsWindow: devtoolsBrowser.contentWindow,
+  };
+}
+
+async function closeAboutDevtoolsToolbox(aboutDebuggingDocument, devtoolsTab, win) {
+  info("Close about:devtools-toolbox page");
+  const onToolboxDestroyed = gDevTools.once("toolbox-destroyed");
+  await removeTab(devtoolsTab);
+  await onToolboxDestroyed;
+  // Changing the tab will also trigger a request to list tabs, so wait until the selected
+  // tab has changed to wait for requests to settle.
+  await waitUntil(() => gBrowser.selectedTab !== devtoolsTab);
+
+  // Wait for removing about:devtools-toolbox tab info from about:debugging.
+  await waitUntil(() =>
+    !findDebugTargetByText("about:devtools-toolbox?", aboutDebuggingDocument));
+
+  await waitForRequestsToSettle(win.AboutDebugging.store);
 }
 
 async function reloadAboutDebugging(tab) {
@@ -69,7 +114,7 @@ async function reloadAboutDebugging(tab) {
   const document = browser.contentDocument;
   const window = browser.contentWindow;
   info("wait for the initial about:debugging requests to be successful");
-  await waitForRequestsSuccess(window);
+  await waitForRequestsSuccess(window.AboutDebugging.store);
 
   return document;
 }
@@ -77,12 +122,11 @@ async function reloadAboutDebugging(tab) {
 // Wait for all about:debugging target request actions to succeed.
 // They will typically be triggered after watching a new runtime or loading
 // about:debugging.
-function waitForRequestsSuccess(win) {
-  const { AboutDebugging } = win;
+function waitForRequestsSuccess(store) {
   return Promise.all([
-    waitForDispatch(AboutDebugging.store, "REQUEST_EXTENSIONS_SUCCESS"),
-    waitForDispatch(AboutDebugging.store, "REQUEST_TABS_SUCCESS"),
-    waitForDispatch(AboutDebugging.store, "REQUEST_WORKERS_SUCCESS"),
+    waitForDispatch(store, "REQUEST_EXTENSIONS_SUCCESS"),
+    waitForDispatch(store, "REQUEST_TABS_SUCCESS"),
+    waitForDispatch(store, "REQUEST_WORKERS_SUCCESS"),
   ]);
 }
 
@@ -135,6 +179,19 @@ function waitForDispatch(store, type) {
 }
 
 /**
+ * Navigate to "This Firefox"
+ */
+async function selectThisFirefoxPage(doc, store) {
+  info("Select This Firefox page");
+  const onRequestSuccess = waitForRequestsSuccess(store);
+  doc.location.hash = "#/runtime/this-firefox";
+  info("Wait for requests to be complete");
+  await onRequestSuccess;
+  info("Wait for runtime page to be rendered");
+  await waitUntil(() => doc.querySelector(".js-runtime-page"));
+}
+
+/**
  * Navigate to the Connect page. Resolves when the Connect page is rendered.
  */
 async function selectConnectPage(doc) {
@@ -153,6 +210,24 @@ async function selectConnectPage(doc) {
   await waitUntil(() => doc.querySelector(".js-connect-page"));
 }
 
+function getDebugTargetPane(title, document) {
+  // removes the suffix "(<NUMBER>)" in debug target pane's title, if needed
+  const sanitizeTitle = (x) => {
+    return x.replace(/\s+\(\d+\)$/, "");
+  };
+
+  const targetTitle = sanitizeTitle(title);
+  for (const titleEl of document.querySelectorAll(".js-debug-target-pane-title")) {
+    if (sanitizeTitle(titleEl.textContent) !== targetTitle) {
+      continue;
+    }
+
+    return titleEl.closest(".js-debug-target-pane");
+  }
+
+  return null;
+}
+
 function findDebugTargetByText(text, document) {
   const targets = [...document.querySelectorAll(".js-debug-target-item")];
   return targets.find(target => target.textContent.includes(text));
@@ -161,6 +236,13 @@ function findDebugTargetByText(text, document) {
 function findSidebarItemByText(text, document) {
   const sidebarItems = document.querySelectorAll(".js-sidebar-item");
   return [...sidebarItems].find(element => {
+    return element.textContent.includes(text);
+  });
+}
+
+function findSidebarItemLinkByText(text, document) {
+  const links = document.querySelectorAll(".js-sidebar-link");
+  return [...links].find(element => {
     return element.textContent.includes(text);
   });
 }
@@ -182,7 +264,28 @@ async function selectRuntime(deviceName, name, document) {
   sidebarItem.querySelector(".js-sidebar-link").click();
 
   await waitUntil(() => {
-    const runtimeInfo = document.querySelector(".js-runtime-info");
+    const runtimeInfo = document.querySelector(".js-runtime-name");
     return runtimeInfo && runtimeInfo.textContent.includes(name);
   });
+}
+
+function getToolbox(win) {
+  return gDevTools.getToolboxes().find(toolbox => toolbox.win === win);
+}
+
+/**
+ * Open the performance profiler dialog. Assumes the client is a mocked remote runtime
+ * client.
+ */
+async function openProfilerDialog(client, doc) {
+  const onProfilerLoaded = new Promise(r => {
+    client.loadPerformanceProfiler = r;
+  });
+
+  info("Click on the Profile Runtime button");
+  const profileButton = doc.querySelector(".js-profile-runtime-button");
+  profileButton.click();
+
+  info("Wait for the loadPerformanceProfiler callback to be executed on client-wrapper");
+  return onProfilerLoaded;
 }

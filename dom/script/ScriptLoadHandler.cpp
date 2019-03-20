@@ -301,7 +301,7 @@ nsresult ScriptLoadHandler::EnsureKnownDataType(
     MOZ_ASSERT(altDataType.IsEmpty());
   }
 
-  if (ScriptLoader::BinASTEncodingEnabled()) {
+  if (nsJSUtils::BinASTEncodingEnabled()) {
     nsCOMPtr<nsIHttpChannel> httpChannel = do_QueryInterface(req);
     if (httpChannel) {
       nsAutoCString mimeType;
@@ -312,7 +312,12 @@ nsresult ScriptLoadHandler::EnsureKnownDataType(
           TRACE_FOR_TEST(mRequest->Element(), "scriptloader_load_source");
           return NS_OK;
         }
-        return NS_ERROR_FAILURE;
+
+        // If the request isn't allowed to accept BinAST, fallback to text
+        // source.  The possibly binary source will be passed to normal
+        // JS parser and will throw error there.
+        mRequest->SetTextSource();
+        return NS_OK;
       }
     }
   }

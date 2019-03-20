@@ -4,14 +4,14 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 "use strict";
 
-ChromeUtils.import("resource://gre/modules/AddonManager.jsm");
-ChromeUtils.import("resource://gre/modules/AppConstants.jsm");
-ChromeUtils.import("resource://gre/modules/DelayedInit.jsm");
-ChromeUtils.import("resource://gre/modules/L10nRegistry.jsm");
-ChromeUtils.import("resource://gre/modules/Messaging.jsm");
-ChromeUtils.import("resource://gre/modules/Services.jsm");
-ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
-ChromeUtils.import("resource://gre/modules/TelemetryController.jsm");
+var {AddonManager} = ChromeUtils.import("resource://gre/modules/AddonManager.jsm");
+var {AppConstants} = ChromeUtils.import("resource://gre/modules/AppConstants.jsm");
+var {DelayedInit} = ChromeUtils.import("resource://gre/modules/DelayedInit.jsm");
+var {FileSource, L10nRegistry} = ChromeUtils.import("resource://gre/modules/L10nRegistry.jsm");
+var {EventDispatcher} = ChromeUtils.import("resource://gre/modules/Messaging.jsm");
+var {Services} = ChromeUtils.import("resource://gre/modules/Services.jsm");
+var {XPCOMUtils} = ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
+var {TelemetryController} = ChromeUtils.import("resource://gre/modules/TelemetryController.jsm");
 
 if (AppConstants.ACCESSIBILITY) {
   ChromeUtils.defineModuleGetter(this, "AccessFu",
@@ -39,7 +39,6 @@ ChromeUtils.defineModuleGetter(this, "Downloads",
 ChromeUtils.defineModuleGetter(this, "UserAgentOverrides",
                                "resource://gre/modules/UserAgentOverrides.jsm");
 
-ChromeUtils.defineModuleGetter(this, "Task", "resource://gre/modules/Task.jsm");
 ChromeUtils.defineModuleGetter(this, "OS", "resource://gre/modules/osfile.jsm");
 
 ChromeUtils.defineModuleGetter(this, "SafeBrowsing",
@@ -59,9 +58,6 @@ ChromeUtils.defineModuleGetter(this, "Prompt",
 
 ChromeUtils.defineModuleGetter(this, "HelperApps",
                                "resource://gre/modules/HelperApps.jsm");
-
-ChromeUtils.defineModuleGetter(this, "SSLExceptions",
-                               "resource://gre/modules/SSLExceptions.jsm");
 
 ChromeUtils.defineModuleGetter(this, "FormHistory",
                                "resource://gre/modules/FormHistory.jsm");
@@ -109,7 +105,7 @@ XPCOMUtils.defineLazyServiceGetter(this, "FontEnumerator",
   "@mozilla.org/gfx/fontenumerator;1",
   "nsIFontEnumerator");
 
-ChromeUtils.defineModuleGetter(this, "Utils", "resource://gre/modules/sessionstore/Utils.jsm");
+ChromeUtils.defineModuleGetter(this, "E10SUtils", "resource://gre/modules/E10SUtils.jsm");
 
 ChromeUtils.defineModuleGetter(this, "FormLikeFactory",
                                "resource://gre/modules/FormLikeFactory.jsm");
@@ -489,11 +485,11 @@ var BrowserApp = {
     }
 
     InitLater(() => {
-      Task.spawn(function* () {
-        let downloadsDir = yield Downloads.getPreferredDownloadsDirectory();
+      (async () => {
+        let downloadsDir = await Downloads.getPreferredDownloadsDirectory();
         let logsDir = OS.Path.join(downloadsDir, "memory-reports");
-        yield OS.File.removeDir(logsDir);
-      });
+        await OS.File.removeDir(logsDir);
+      })();
     });
 
     // Don't delay loading content.js because when we restore reader mode tabs,
@@ -512,7 +508,7 @@ var BrowserApp = {
     // fxa-content-server messages.
     if (ParentalControls.isAllowed(ParentalControls.MODIFY_ACCOUNTS)) {
       console.log("browser.js: loading Firefox Accounts WebChannel");
-      ChromeUtils.import("resource://gre/modules/FxAccountsWebChannel.jsm");
+      var {EnsureFxAccountsWebChannel} = ChromeUtils.import("resource://gre/modules/FxAccountsWebChannel.jsm");
       EnsureFxAccountsWebChannel();
     } else {
       console.log("browser.js: not loading Firefox Accounts WebChannel; this profile cannot connect to Firefox Accounts.");
@@ -541,6 +537,11 @@ var BrowserApp = {
 
       // Bug 778855 - Perf regression if we do this here. To be addressed in bug 779008.
       InitLater(() => SafeBrowsing.init(), window, "SafeBrowsing");
+
+      // Start Marionette after all startup scripts have been run.
+      InitLater(() => {
+        Services.obs.notifyObservers(window, "marionette-startup-requested");
+      });
 
       // This should always go last, since the idle tasks (except for the ones with
       // timeouts) should execute in order. Note that this observer notification is
@@ -650,6 +651,7 @@ var BrowserApp = {
         UITelemetry.addEvent("action.1", "contextmenu", null, "web_copy_link");
 
         let url = NativeWindow.contextmenus._getLinkURL(aTarget);
+        url = NativeWindow.contextmenus._stripViewSource(url);
         NativeWindow.contextmenus._copyStringToDefaultClipboard(url);
       });
 
@@ -678,9 +680,11 @@ var BrowserApp = {
       order: NativeWindow.contextmenus.DEFAULT_HTML5_ORDER - 1, // Show above HTML5 menu items
       selector: NativeWindow.contextmenus._disableRestricted("SHARE", NativeWindow.contextmenus.linkShareableContext),
       showAsActions: function(aElement) {
+        let uri = NativeWindow.contextmenus._getLinkURL(aElement);
+        uri = NativeWindow.contextmenus._stripViewSource(uri);
         return {
           title: aElement.textContent.trim() || aElement.title.trim(),
-          uri: NativeWindow.contextmenus._getLinkURL(aElement),
+          uri,
         };
       },
       icon: "drawable://ic_menu_share",
@@ -839,7 +843,7 @@ var BrowserApp = {
     NativeWindow.contextmenus.add(stringGetter("contextmenu.viewImage"),
       NativeWindow.contextmenus.imageLocationCopyableContext,
       function(aTarget) {
-        let url = aTarget.src;
+        let url = aTarget.currentSrc || aTarget.src;
         ContentAreaUtils.urlSecurityCheck(url, aTarget.ownerDocument.nodePrincipal,
                                           Ci.nsIScriptSecurityManager.DISALLOW_SCRIPT);
 
@@ -853,7 +857,8 @@ var BrowserApp = {
       function(aTarget) {
         UITelemetry.addEvent("action.1", "contextmenu", null, "web_copy_image");
 
-        let url = aTarget.src;
+        let url = aTarget.currentSrc || aTarget.src;
+        url = NativeWindow.contextmenus._stripViewSource(url);
         NativeWindow.contextmenus._copyStringToDefaultClipboard(url);
       });
 
@@ -862,7 +867,8 @@ var BrowserApp = {
       selector: NativeWindow.contextmenus._disableRestricted("SHARE", NativeWindow.contextmenus.imageShareableContext),
       order: NativeWindow.contextmenus.DEFAULT_HTML5_ORDER - 1, // Show above HTML5 menu items
       showAsActions: function(aTarget) {
-        let src = aTarget.src;
+        let src = aTarget.currentSrc || aTarget.src;
+        src = NativeWindow.contextmenus._stripViewSource(src);
         return {
           title: src,
           uri: src,
@@ -903,7 +909,7 @@ var BrowserApp = {
       function(aTarget) {
         UITelemetry.addEvent("action.1", "contextmenu", null, "web_background_image");
 
-        let src = aTarget.src;
+        let src = aTarget.currentSrc || aTarget.src;
         GlobalEventDispatcher.sendRequest({
           type: "Image:SetAs",
           url: src
@@ -982,7 +988,7 @@ var BrowserApp = {
   },
 
   _migrateUI: function() {
-    const UI_VERSION = 3;
+    const UI_VERSION = 4;
     let currentUIVersion = Services.prefs.getIntPref("browser.migration.version", 0);
     if (currentUIVersion >= UI_VERSION) {
       return;
@@ -1027,7 +1033,7 @@ var BrowserApp = {
         name = Services.prefs.getCharPref("browser.search.defaultenginename.US");
       }
       if (name) {
-        Services.search.init(() => {
+        Services.search.init().then(() => {
           let engine = Services.search.getEngineByName(name);
           if (engine) {
             Services.search.defaultEngine = engine;
@@ -1049,6 +1055,12 @@ var BrowserApp = {
         // only in about:config
         Services.prefs.clearUserPref(kOldSafeBrowsingPref);
       }
+    }
+
+    if (currentUIVersion < 4) {
+      // The handler app service will read this. We need to wait with migrating
+      // until the handler service has started up, so just set a pref here.
+      Services.prefs.setCharPref("browser.handlers.migrations", "30boxes");
     }
 
     // Update the migration version.
@@ -1313,7 +1325,7 @@ var BrowserApp = {
     }
     this._tabs[toPosition] = movedTab;
 
-    let evt = new UIEvent("TabMove", {"bubbles":true, "cancellable":false, "view":window, "detail":fromPosition});
+    let evt = new UIEvent("TabMove", {"bubbles":true, "cancelable":false, "view":window, "detail":fromPosition});
     this.tabs[toPosition].browser.dispatchEvent(evt);
   },
 
@@ -1501,29 +1513,29 @@ var BrowserApp = {
         return;
       }
 
-      Task.spawn(function* () {
+      (async () => {
         let fileName = ContentAreaUtils.getDefaultFileName(aBrowser.contentTitle, aBrowser.currentURI, null, null);
         fileName = fileName.trim() + ".pdf";
 
-        let downloadsDir = yield Downloads.getPreferredDownloadsDirectory();
+        let downloadsDir = await Downloads.getPreferredDownloadsDirectory();
         let file = OS.Path.join(downloadsDir, fileName);
 
         // Force this to have a unique name.
-        let openedFile = yield OS.File.openUnique(file, { humanReadable: true });
+        let openedFile = await OS.File.openUnique(file, { humanReadable: true });
         file = openedFile.path;
-        yield openedFile.file.close();
+        await openedFile.file.close();
 
-        let download = yield Downloads.createDownload({
+        let download = await Downloads.createDownload({
           source: aBrowser.contentWindow,
           target: file,
           saver: "pdf",
           startTime: Date.now(),
         });
 
-        let list = yield Downloads.getList(download.source.isPrivate ? Downloads.PRIVATE : Downloads.PUBLIC)
-        yield list.add(download);
-        yield download.start();
-      });
+        let list = await Downloads.getList(download.source.isPrivate ? Downloads.PRIVATE : Downloads.PUBLIC);
+        await list.add(download);
+        await download.start();
+      })();
     });
   },
 
@@ -3233,6 +3245,11 @@ var NativeWindow = {
     _stripScheme: function(aString) {
       let index = aString.indexOf(":");
       return aString.slice(index + 1);
+    },
+
+    _stripViewSource: function(aString) {
+      // If we're in a view source tab, remove the view-source: prefix
+      return aString.replace(/^view-source:/, "");
     }
   }
 };
@@ -3666,6 +3683,27 @@ function truncate(text, max) {
   return text.slice(0, max) + "…";
 }
 
+/**
+ * We want to extract base domains only from URIs using one of the following
+ * schemes.
+ */
+const PERMITTED_BASE_DOMAIN_SCHEMES = new Set(["http", "https", "ftp"]);
+
+function getBaseDomain(aURI) {
+  let baseDomain = "";
+  if (aURI && PERMITTED_BASE_DOMAIN_SCHEMES.has(aURI.scheme)) {
+    try {
+      baseDomain = Services.eTLD.getBaseDomainFromHost(aURI.displayHost);
+      if (!aURI.displayHost.endsWith(baseDomain)) {
+        // getBaseDomainFromHost converts its resultant to ACE.
+        let IDNService = Cc["@mozilla.org/network/idn-service;1"].getService(Ci.nsIIDNService);
+        baseDomain = IDNService.convertACEtoUTF8(baseDomain);
+      }
+    } catch (e) {}
+  }
+  return baseDomain;
+}
+
 Tab.prototype = {
   create: function(aURL, aParams) {
     if (this.browser)
@@ -3760,10 +3798,12 @@ Tab.prototype = {
       };
       GlobalEventDispatcher.sendRequest(message);
     }
+    this.browser.contentWindow.windowUtils.setDesktopModeViewport(this.desktopMode);
 
     let flags = Ci.nsIWebProgress.NOTIFY_STATE_ALL |
                 Ci.nsIWebProgress.NOTIFY_LOCATION |
-                Ci.nsIWebProgress.NOTIFY_SECURITY;
+                Ci.nsIWebProgress.NOTIFY_SECURITY |
+                Ci.nsIWebProgress.NOTIFY_CONTENT_BLOCKING;
     this.filter = Cc["@mozilla.org/appshell/component/browser-status-filter;1"].createInstance(Ci.nsIWebProgress);
     this.filter.addProgressListener(this, flags)
     this.browser.addProgressListener(this.filter, flags);
@@ -3803,7 +3843,7 @@ Tab.prototype = {
     // Always initialise new tabs with basic session store data to avoid
     // problems with functions that always expect it to be present
     let triggeringPrincipal_base64 = aParams.triggeringPrincipal ?
-      Utils.serializePrincipal(aParams.triggeringPrincipal) : Utils.SERIALIZED_SYSTEMPRINCIPAL;
+      E10SUtils.serializePrincipal(aParams.triggeringPrincipal) : E10SUtils.SERIALIZED_SYSTEMPRINCIPAL;
     this.browser.__SS_data = {
       entries: [{
         url: uri,
@@ -3895,8 +3935,11 @@ Tab.prototype = {
       // We were redirected; reload the original URL
       url = this.originalURI.spec;
     }
-
-    this.browser.docShell.loadURI(url, flags, null, null, null, this.browser.contentPrincipal);
+    let loadURIOptions = {
+      triggeringPrincipal: this.browser.contentPrincipal,
+      loadFlags: flags,
+    };
+    this.browser.docShell.loadURI(url, loadURIOptions);
   },
 
   destroy: function() {
@@ -4120,7 +4163,7 @@ Tab.prototype = {
       }
   },
 
-  sendOpenSearchMessage: function(eventTarget) {
+  sendOpenSearchMessage: async function(eventTarget) {
     let type = eventTarget.type && eventTarget.type.toLowerCase();
     // Replace all starting or trailing spaces or spaces before "*;" globally w/ "".
     type = type.replace(/^\s+|\s*(?:;.*)?$/g, "");
@@ -4128,49 +4171,47 @@ Tab.prototype = {
     // Check that type matches opensearch.
     let isOpenSearch = (type == "application/opensearchdescription+xml");
     if (isOpenSearch && eventTarget.title && /^(?:https?|ftp):/i.test(eventTarget.href)) {
-      Services.search.init(() => {
-        let visibleEngines = Services.search.getVisibleEngines();
-        // NOTE: Engines are currently identified by name, but this can be changed
-        // when Engines are identified by URL (see bug 335102).
-        if (visibleEngines.some(function(e) {
-          return e.name == eventTarget.title;
+      let visibleEngines = await Services.search.getVisibleEngines();
+      // NOTE: Engines are currently identified by name, but this can be changed
+      // when Engines are identified by URL (see bug 335102).
+      if (visibleEngines.some(function(e) {
+        return e.name == eventTarget.title;
+      })) {
+        // This engine is already present, do nothing.
+        return null;
+      }
+
+      if (this.browser.engines) {
+        // This engine has already been handled, do nothing.
+        if (this.browser.engines.some(function(e) {
+          return e.url == eventTarget.href;
         })) {
-          // This engine is already present, do nothing.
           return null;
         }
+      } else {
+          this.browser.engines = [];
+      }
 
-        if (this.browser.engines) {
-          // This engine has already been handled, do nothing.
-          if (this.browser.engines.some(function(e) {
-            return e.url == eventTarget.href;
-          })) {
-            return null;
-          }
-        } else {
-            this.browser.engines = [];
-        }
+      // Get favicon.
+      let iconURL = eventTarget.ownerDocument.documentURIObject.prePath + "/favicon.ico";
 
-        // Get favicon.
-        let iconURL = eventTarget.ownerDocument.documentURIObject.prePath + "/favicon.ico";
+      let newEngine = {
+        title: eventTarget.title,
+        url: eventTarget.href,
+        iconURL: iconURL
+      };
 
-        let newEngine = {
-          title: eventTarget.title,
-          url: eventTarget.href,
-          iconURL: iconURL
-        };
+      this.browser.engines.push(newEngine);
 
-        this.browser.engines.push(newEngine);
+      // Don't send a message to display engines if we've already handled an engine.
+      if (this.browser.engines.length > 1)
+        return null;
 
-        // Don't send a message to display engines if we've already handled an engine.
-        if (this.browser.engines.length > 1)
-          return null;
-
-        // Broadcast message that this tab contains search engines that should be visible.
-        GlobalEventDispatcher.sendRequest({
-          type: "Link:OpenSearch",
-          tabID: this.id,
-          visible: true
-        });
+      // Broadcast message that this tab contains search engines that should be visible.
+      GlobalEventDispatcher.sendRequest({
+        type: "Link:OpenSearch",
+        tabID: this.id,
+        visible: true
       });
     }
   },
@@ -4621,7 +4662,9 @@ Tab.prototype = {
     let contentType = contentWin.document.contentType;
 
     // If fixedURI matches browser.lastURI, we assume this isn't a real location
-    // change but rather a spurious addition like a wyciwyg URI prefix. See Bug 747883.
+    // change but rather a spurious addition like adding a username/password. See Bug 747883.
+    // XXXbz Is this still relevant now that document.open doesn't do such
+    // things?  See bug 1528448.
     // Note that we have to ensure fixedURI is not the same as aLocationURI so we
     // don't false-positive page reloads as spurious additions.
     let sameDocument = (aFlags & Ci.nsIWebProgressListener.LOCATION_CHANGE_SAME_DOCUMENT) != 0 ||
@@ -4635,19 +4678,8 @@ Tab.prototype = {
       this.browser.messageManager.sendAsyncMessage("Reader:PushState", {isArticle: this.browser.isArticle});
     }
 
-    let baseDomain = "";
-    // For recognized scheme, get base domain from host.
-    let principalURI = contentWin.document.nodePrincipal.URI;
-    if (principalURI && ["http", "https", "ftp"].includes(principalURI.scheme) && principalURI.displayHost) {
-      try {
-        baseDomain = Services.eTLD.getBaseDomainFromHost(principalURI.displayHost);
-        if (!principalURI.displayHost.endsWith(baseDomain)) {
-          // getBaseDomainFromHost converts its resultant to ACE.
-          let IDNService = Cc["@mozilla.org/network/idn-service;1"].getService(Ci.nsIIDNService);
-          baseDomain = IDNService.convertACEtoUTF8(baseDomain);
-        }
-      } catch (e) {}
-    }
+    let baseDomain = getBaseDomain(contentWin.document.nodePrincipal.URI);
+    let highlightDomain = getBaseDomain(fixedURI);
 
     // If we are navigating to a new location with a different host,
     // clear any URL origin that might have been pinned to this tab.
@@ -4697,9 +4729,10 @@ Tab.prototype = {
       tabID: this.id,
       uri: truncate(fixedURI.displaySpec, MAX_URI_LENGTH),
       userRequested: this.userRequested || "",
-      baseDomain: baseDomain,
+      baseDomain,
+      highlightDomain,
       contentType: (contentType ? contentType : ""),
-      sameDocument: sameDocument,
+      sameDocument,
 
       canGoBack: webNav.canGoBack,
       canGoForward: webNav.canGoForward,
@@ -4725,8 +4758,7 @@ Tab.prototype = {
   _state: null,
   _hostChanged: false, // onLocationChange will flip this bit
 
-  onSecurityChange: function(aWebProgress, aRequest, aOldState, aState,
-                             aContentBlockingLogJSON) {
+  onSecurityChange: function(aWebProgress, aRequest, aState) {
     // Don't need to do anything if the data we use to update the UI hasn't changed
     if (this._state == aState && !this._hostChanged)
       return;
@@ -4740,6 +4772,26 @@ Tab.prototype = {
       type: "Content:SecurityChange",
       tabID: this.id,
       identity: identity
+    };
+
+    GlobalEventDispatcher.sendRequest(message);
+  },
+
+  // Cache last tracking event to limit firings and only propagate changes
+  _tracking: null,
+
+  onContentBlockingEvent: function(aWebProgress, aRequest, aState) {
+    let trackingMode = IdentityHandler.getTrackingMode(aState, this.browser);
+    if (this._tracking == trackingMode) {
+        return;
+    } else {
+        this._tracking = trackingMode;
+    }
+
+    let message = {
+      type: "Content:ContentBlockingEvent",
+      tabID: this.id,
+      tracking: trackingMode
     };
 
     GlobalEventDispatcher.sendRequest(message);
@@ -4947,9 +4999,9 @@ var BrowserEventHandler = {
     let uri = this._getLinkURI(target);
     if (uri) {
       try {
-        Services.io.QueryInterface(Ci.nsISpeculativeConnect).speculativeConnect2(uri,
-                                                                                 target.ownerDocument.nodePrincipal,
-                                                                                 null);
+        Services.io.QueryInterface(Ci.nsISpeculativeConnect).speculativeConnect(uri,
+                                                                                target.ownerDocument.nodePrincipal,
+                                                                                null);
       } catch (e) {}
     }
     this._doTapHighlight(target);
@@ -4998,18 +5050,27 @@ var ErrorPageEventHandler = {
           let temp = errorDoc.getElementById("temporaryExceptionButton");
           if (target == temp || target == perm) {
             // Handle setting an cert exception and reloading the page
-            try {
-              // Add a new SSL exception for this URL
-              let uri = Services.io.newURI(errorDoc.location.href);
-              let sslExceptions = new SSLExceptions();
-
-              if (target == perm)
-                sslExceptions.addPermanentException(uri, errorDoc.defaultView);
-              else
-                sslExceptions.addTemporaryException(uri, errorDoc.defaultView);
-            } catch (e) {
-              dump("Failed to set cert exception: " + e + "\n");
+            let uri = Services.io.newURI(errorDoc.location.href);
+            let docShell = BrowserApp.selectedBrowser.docShell;
+            let securityInfo = docShell.failedChannel.securityInfo;
+            securityInfo.QueryInterface(Ci.nsITransportSecurityInfo);
+            let cert = securityInfo.serverCert;
+            let overrideService = Cc["@mozilla.org/security/certoverride;1"]
+                                    .getService(Ci.nsICertOverrideService);
+            let flags = 0;
+            if (securityInfo.isUntrusted) {
+              flags |= overrideService.ERROR_UNTRUSTED;
             }
+            if (securityInfo.isDomainMismatch) {
+              flags |= overrideService.ERROR_MISMATCH;
+            }
+            if (securityInfo.isNotValidAtThisTime) {
+              flags |= overrideService.ERROR_TIME;
+            }
+            let temporary = (target == temp) ||
+                            PrivateBrowsingUtils.isWindowPrivate(errorDoc.defaultView);
+            overrideService.rememberValidityOverride(uri.asciiHost, uri.port, cert, flags,
+                                                     temporary);
             errorDoc.location.reload();
           } else if (target == errorDoc.getElementById("getMeOutOfHereButton")) {
             errorDoc.location = "about:home";
@@ -5071,8 +5132,11 @@ var ErrorPageEventHandler = {
               attrs["privateBrowsingId"] = 1;
             }
 
-            let triggeringPrincipal = nullServices.scriptSecurityManager.createNullPrincipal(attrs);
-            webNav.loadURI(location, Ci.nsIWebNavigation.LOAD_FLAGS_BYPASS_CLASSIFIER, null, null, triggeringPrincipal);
+            let loadURIOptions = {
+              triggeringPrincipal: Services.scriptSecurityManager.createNullPrincipal(attrs),
+              loadFlags: Ci.nsIWebNavigation.LOAD_FLAGS_BYPASS_CLASSIFIER,
+            };
+            webNav.loadURI(location, loadURIOptions);
 
             // ....but add a notify bar as a reminder, so that they don't lose
             // track after, e.g., tab switching.
@@ -5370,7 +5434,7 @@ var XPInstallObserver = {
 };
 
 /**
- * Handler for blocked popups, triggered by DOMUpdateBlockedPopups events in browser.xml
+ * Handler for blocked popups, triggered by DOMUpdateBlockedPopups events in browser.js
  */
 var PopupBlockerObserver = {
   onUpdateBlockedPopups: function onUpdateBlockedPopups(aEvent) {
@@ -5801,14 +5865,12 @@ var IdentityHandler = {
     let identityMode = this.getIdentityMode(aState, this._uri);
     let mixedDisplay = this.getMixedDisplayMode(aState);
     let mixedActive = this.getMixedActiveMode(aState);
-    let trackingMode = this.getTrackingMode(aState, aBrowser);
     let result = {
       origin: locationObj.origin,
       mode: {
         identity: identityMode,
         mixed_display: mixedDisplay,
         mixed_active: mixedActive,
-        tracking: trackingMode
       }
     };
 
@@ -5913,18 +5975,18 @@ var SearchEngines = {
   },
 
   // Fetch list of search engines. all ? All engines : Visible engines only.
-  _handleSearchEnginesGetVisible: function _handleSearchEnginesGetVisible(rv, all) {
+  _handleSearchEnginesGetVisible: async function _handleSearchEnginesGetVisible(rv, all) {
     if (!Components.isSuccessCode(rv)) {
       Cu.reportError("Could not initialize search service, bailing out.");
       return;
     }
 
-    let engineData = Services.search.getVisibleEngines({});
+    let engineData = await Services.search.getVisibleEngines({});
 
     // Our Java UI assumes that the default engine is the first item in the array,
     // so we need to make sure that's the case.
-    if (engineData[0] !== Services.search.defaultEngine) {
-      engineData = engineData.filter(engine => engine !== Services.search.defaultEngine);
+    if (engineData[0].name !== Services.search.defaultEngine.name) {
+      engineData = engineData.filter(engine => engine.name !== Services.search.defaultEngine.name);
       engineData.unshift(Services.search.defaultEngine);
     }
 
@@ -5977,7 +6039,7 @@ var SearchEngines = {
         this.displaySearchEnginesList(data);
         break;
       case "SearchEngines:GetVisible":
-        Services.search.init(this._handleSearchEnginesGetVisible.bind(this));
+        Services.search.init().then(this._handleSearchEnginesGetVisible.bind(this));
         break;
       case "SearchEngines:Remove":
         // Make sure the engine isn't hidden before removing it, to make sure it's
@@ -5993,8 +6055,7 @@ var SearchEngines = {
       case "SearchEngines:SetDefault":
         engine = this._extractEngineFromJSON(data);
         // Move the new default search engine to the top of the search engine list.
-        Services.search.moveEngine(engine, 0);
-        Services.search.defaultEngine = engine;
+        Services.search.moveEngine(engine, 0).then(() => Services.search.defaultEngine = engine);
         break;
       default:
         dump("Unexpected message type observed: " + event);
@@ -6016,7 +6077,7 @@ var SearchEngines = {
   },
 
   migrateSearchActivityDefaultPref: function migrateSearchActivityDefaultPref() {
-    Services.search.init(() => this._setSearchActivityDefaultPref(Services.search.defaultEngine));
+    Services.search.init().then(() => this._setSearchActivityDefaultPref(Services.search.defaultEngine));
   },
 
   // Updates the search activity pref when the default engine changes.
@@ -6058,27 +6119,24 @@ var SearchEngines = {
     });
   },
 
-  addOpenSearchEngine: function addOpenSearchEngine(engine) {
-    Services.search.addEngine(engine.url, engine.iconURL, false, {
-      onSuccess: function() {
-        // Display a toast confirming addition of new search engine.
-        Snackbars.show(Strings.browser.formatStringFromName("alertSearchEngineAddedToast", [engine.title], 1), Snackbars.LENGTH_LONG);
-      },
-
-      onError: function(aCode) {
-        let errorMessage;
-        if (aCode == 2) {
-          // Engine is a duplicate.
-          errorMessage = "alertSearchEngineDuplicateToast";
-
-        } else {
-          // Unknown failure. Display general error message.
-          errorMessage = "alertSearchEngineErrorToast";
-        }
-
-        Snackbars.show(Strings.browser.formatStringFromName(errorMessage, [engine.title], 1), Snackbars.LENGTH_LONG);
+  addOpenSearchEngine: async function addOpenSearchEngine(engine) {
+    try {
+      await Services.search.addEngine(engine.url, engine.iconURL, false);
+      // Display a toast confirming addition of new search engine.
+      Snackbars.show(Strings.browser.formatStringFromName("alertSearchEngineAddedToast", [engine.title], 1), Snackbars.LENGTH_LONG);
+    } catch (ex) {
+      let code = ex.result;
+      let errorMessage;
+      if (code == 2) {
+        // Engine is a duplicate.
+        errorMessage = "alertSearchEngineDuplicateToast";
+      } else {
+        // Unknown failure. Display general error message.
+        errorMessage = "alertSearchEngineErrorToast";
       }
-    });
+
+      Snackbars.show(Strings.browser.formatStringFromName(errorMessage, [engine.title], 1), Snackbars.LENGTH_LONG);
+    }
   },
 
   /**
@@ -6128,7 +6186,7 @@ var SearchEngines = {
 
     // Return valid, pre-sorted queryParams.
     return formData.filter(a => a.name && a.value).sort((a, b) => {
-      // nsIBrowserSearchService.hasEngineWithURL() ensures sort, but this helps.
+      // nsISearchService.hasEngineWithURL() ensures sort, but this helps.
       if (a.name > b.name) {
         return 1;
       }
@@ -6165,7 +6223,7 @@ var SearchEngines = {
   },
 
   /**
-   * Adds a new search engine to the BrowserSearchService, based on its provided element. Prompts for an engine
+   * Adds a new search engine to the SearchService, based on its provided element. Prompts for an engine
    * name, and appends a simple version-number in case of collision with an existing name.
    *
    * @return callback to handle success value. Currently used for ActionBarHandler.js and UI updates.
@@ -6188,7 +6246,7 @@ var SearchEngines = {
       return;
     }
 
-    Services.search.init(function addEngine_cb(rv) {
+    Services.search.init().then(function addEngine_cb(rv) {
       if (!Components.isSuccessCode(rv)) {
         Cu.reportError("Could not initialize search service, bailing out.");
         if (resultCallback) {
@@ -6201,7 +6259,7 @@ var SearchEngines = {
         type: 'Favicon:Request',
         url: docURI.spec,
         skipNetwork: false
-      }).then(data => {
+      }).then(async data => {
         // if there's already an engine with this name, add a number to
         // make the name unique (e.g., "Google" becomes "Google 2")
         let name = title.value;
@@ -6209,7 +6267,7 @@ var SearchEngines = {
             name = title.value + " " + i;
         }
 
-        Services.search.addEngineWithDetails(name, data, null, null, method, formURL);
+        await Services.search.addEngineWithDetails(name, data, null, null, method, formURL);
         Snackbars.show(Strings.browser.formatStringFromName("alertSearchEngineAddedToast", [name], 1), Snackbars.LENGTH_LONG);
 
         let engine = Services.search.getEngineByName(name);
@@ -6441,7 +6499,9 @@ var ExternalApps = {
             buttons: [
               Strings.browser.GetStringFromName("openInApp.ok"),
               Strings.browser.GetStringFromName("openInApp.cancel")
-            ]
+            ],
+            // Support double tapping to launch an app
+            doubleTapButton: 0
           }, (result) => {
             if (result.button != 0) {
               if (wasPlaying) {
@@ -6509,7 +6569,7 @@ var Distribution = {
       case "Distribution:Changed":
         // Re-init the search service.
         try {
-          Services.search._asyncReInit();
+          Services.search._reInit();
         } catch (e) {
           console.log("Unable to reinit search service.");
         }
@@ -6628,26 +6688,29 @@ var Distribution = {
   // aFile is an nsIFile
   // aCallback takes the parsed JSON object as a parameter
   readJSON: function dc_readJSON(aFile, aCallback) {
-    Task.spawn(function*() {
-      let bytes = yield OS.File.read(aFile.path);
-      let raw = new TextDecoder().decode(bytes) || "";
+    (async () => {
+      try {
+        let bytes = await OS.File.read(aFile.path);
+        let raw = new TextDecoder().decode(bytes) || "";
+      } catch (e) {
+        if (!(e instanceof OS.File.Error && e.becauseNoSuchFile)) {
+          Cu.reportError("Distribution: Could not read from " + aFile.leafName + " file");
+        }
+        return;
+      }
 
       try {
         aCallback(JSON.parse(raw));
       } catch (e) {
         Cu.reportError("Distribution: Could not parse JSON: " + e);
       }
-    }).catch(function onError(reason) {
-      if (!(reason instanceof OS.File.Error && reason.becauseNoSuchFile)) {
-        Cu.reportError("Distribution: Could not read from " + aFile.leafName + " file");
-      }
-    });
+    })();
   },
 
   // Track pending installs so we can avoid showing notifications for them.
   pendingAddonInstalls: new Set(),
 
-  installDistroAddons: Task.async(function* () {
+  async installDistroAddons() {
     const PREF_ADDONS_INSTALLED = "distribution.addonsInstalled";
     try {
       let installed = Services.prefs.getBoolPref(PREF_ADDONS_INSTALLED);
@@ -6662,7 +6725,7 @@ var Distribution = {
     try {
       distroPath = FileUtils.getDir("XREAppDist", ["extensions"]).path;
 
-      let info = yield OS.File.stat(distroPath);
+      let info = await OS.File.stat(distroPath);
       if (!info.isDir) {
         return;
       }
@@ -6672,7 +6735,7 @@ var Distribution = {
 
     let it = new OS.File.DirectoryIterator(distroPath);
     try {
-      yield it.forEach(entry => {
+      await it.forEach(entry => {
         // Only support extensions that are zipped in .xpi files.
         if (entry.isDir || !entry.name.endsWith(".xpi")) {
           dump("Ignoring distribution add-on that isn't an XPI: " + entry.path);
@@ -6695,7 +6758,7 @@ var Distribution = {
     } finally {
       it.close();
     }
-  })
+  },
 };
 
 var Tabs = {
@@ -6736,7 +6799,7 @@ var Tabs = {
         try {
           let uri = Services.io.newURI(data.url);
           if (uri && !this._domains.has(uri.host)) {
-            Services.io.QueryInterface(Ci.nsISpeculativeConnect).speculativeConnect2(
+            Services.io.QueryInterface(Ci.nsISpeculativeConnect).speculativeConnect(
                 uri, BrowserApp.selectedBrowser.contentDocument.nodePrincipal, null);
             this._domains.add(uri.host);
           }

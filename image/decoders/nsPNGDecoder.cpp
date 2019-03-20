@@ -38,11 +38,15 @@ static LazyLogModule sPNGDecoderAccountingLog("PNGDecoderAccounting");
 
 // limit image dimensions (bug #251381, #591822, #967656, and #1283961)
 #ifndef MOZ_PNG_MAX_WIDTH
-#define MOZ_PNG_MAX_WIDTH 0x7fffffff  // Unlimited
+#  define MOZ_PNG_MAX_WIDTH 0x7fffffff  // Unlimited
 #endif
 #ifndef MOZ_PNG_MAX_HEIGHT
-#define MOZ_PNG_MAX_HEIGHT 0x7fffffff  // Unlimited
+#  define MOZ_PNG_MAX_HEIGHT 0x7fffffff  // Unlimited
 #endif
+
+/* Controls the maximum chunk size configuration for libpng. We set this to a
+ * very large number, 256MB specifically. */
+static constexpr png_alloc_size_t kPngMaxChunkSize = 0x10000000;
 
 nsPNGDecoder::AnimFrameInfo::AnimFrameInfo()
     : mDispose(DisposalMethod::KEEP), mBlend(BlendMethod::OVER), mTimeout(0) {}
@@ -113,6 +117,7 @@ nsPNGDecoder::nsPNGDecoder(RasterImage* aImage)
       mPass(0),
       mFrameIsHidden(false),
       mDisablePremultipliedAlpha(false),
+      mGotInfoCallback(false),
       mNumFrames(0) {}
 
 nsPNGDecoder::~nsPNGDecoder() {
@@ -190,7 +195,7 @@ nsresult nsPNGDecoder::CreateFrame(const FrameInfo& aFrameInfo) {
 
   Maybe<AnimationParams> animParams;
 #ifdef PNG_APNG_SUPPORTED
-  if (png_get_valid(mPNG, mInfo, PNG_INFO_acTL)) {
+  if (!IsFirstFrameDecode() && png_get_valid(mPNG, mInfo, PNG_INFO_acTL)) {
     mAnimInfo = AnimFrameInfo(mPNG, mInfo);
 
     if (mAnimInfo.mDispose == DisposalMethod::CLEAR) {
@@ -215,10 +220,6 @@ nsresult nsPNGDecoder::CreateFrame(const FrameInfo& aFrameInfo) {
   if (mNumFrames == 0) {
     // The first frame may be displayed progressively.
     pipeFlags |= SurfacePipeFlags::PROGRESSIVE_DISPLAY;
-  }
-
-  if (ShouldBlendAnimation()) {
-    pipeFlags |= SurfacePipeFlags::BLEND_ANIMATION;
   }
 
   Maybe<SurfacePipe> pipe = SurfacePipeFactory::CreateSurfacePipe(
@@ -312,9 +313,7 @@ nsresult nsPNGDecoder::InitInternal() {
 
 #ifdef PNG_SET_USER_LIMITS_SUPPORTED
   png_set_user_limits(mPNG, MOZ_PNG_MAX_WIDTH, MOZ_PNG_MAX_HEIGHT);
-  if (mCMSMode != eCMSMode_Off) {
-    png_set_chunk_malloc_max(mPNG, 4000000L);
-  }
+  png_set_chunk_malloc_max(mPNG, kPngMaxChunkSize);
 #endif
 
 #ifdef PNG_READ_CHECK_FOR_INVALID_INDEX_SUPPORTED
@@ -327,17 +326,17 @@ nsresult nsPNGDecoder::InitInternal() {
 #endif
 
 #ifdef PNG_SET_OPTION_SUPPORTED
-#if defined(PNG_sRGB_PROFILE_CHECKS) && PNG_sRGB_PROFILE_CHECKS >= 0
+#  if defined(PNG_sRGB_PROFILE_CHECKS) && PNG_sRGB_PROFILE_CHECKS >= 0
   // Skip checking of sRGB ICC profiles
   png_set_option(mPNG, PNG_SKIP_sRGB_CHECK_PROFILE, PNG_OPTION_ON);
-#endif
+#  endif
 
-#ifdef PNG_MAXIMUM_INFLATE_WINDOW
+#  ifdef PNG_MAXIMUM_INFLATE_WINDOW
   // Force a larger zlib inflate window as some images in the wild have
   // incorrectly set metadata (specifically CMF bits) which prevent us from
   // decoding them otherwise.
   png_set_option(mPNG, PNG_MAXIMUM_INFLATE_WINDOW, PNG_OPTION_ON);
-#endif
+#  endif
 #endif
 
   // use this as libpng "progressive pointer" (retrieve in callbacks)
@@ -534,6 +533,14 @@ void nsPNGDecoder::info_callback(png_structp png_ptr, png_infop info_ptr) {
 
   nsPNGDecoder* decoder =
       static_cast<nsPNGDecoder*>(png_get_progressive_ptr(png_ptr));
+
+  if (decoder->mGotInfoCallback) {
+    MOZ_LOG(sPNGLog, LogLevel::Warning,
+            ("libpng called info_callback more than once\n"));
+    return;
+  }
+
+  decoder->mGotInfoCallback = true;
 
   // Always decode to 24-bit RGB or 32-bit RGBA
   png_get_IHDR(png_ptr, info_ptr, &width, &height, &bit_depth, &color_type,
@@ -961,7 +968,7 @@ void nsPNGDecoder::frame_info_callback(png_structp png_ptr,
                           png_get_next_frame_height(png_ptr, decoder->mInfo));
   const bool isInterlaced = bool(decoder->interlacebuf);
 
-#ifndef MOZ_EMBEDDED_LIBPNG
+#  ifndef MOZ_EMBEDDED_LIBPNG
   // if using system library, check frame_width and height against 0
   if (frameRect.width == 0) {
     png_error(png_ptr, "Frame width must not be 0");
@@ -969,7 +976,7 @@ void nsPNGDecoder::frame_info_callback(png_structp png_ptr,
   if (frameRect.height == 0) {
     png_error(png_ptr, "Frame height must not be 0");
   }
-#endif
+#  endif
 
   const FrameInfo info{frameRect, isInterlaced};
 

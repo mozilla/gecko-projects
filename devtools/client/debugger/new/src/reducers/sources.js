@@ -15,41 +15,67 @@ import {
   underRoot,
   getRelativeUrl,
   isGenerated,
-  isOriginal as isOriginalSource
+  isOriginal as isOriginalSource,
+  isUrlExtension
 } from "../utils/source";
+
 import { originalToGeneratedId } from "devtools-source-map";
 import { prefs } from "../utils/prefs";
 
-import type { Source, SourceId, SourceLocation } from "../types";
-import type { PendingSelectedLocation } from "./types";
-import type { Action, DonePromiseAction } from "../actions/types";
+import type { Source, SourceId, SourceLocation, ThreadId } from "../types";
+import type { PendingSelectedLocation, Selector } from "./types";
+import type { Action, DonePromiseAction, FocusItem } from "../actions/types";
 import type { LoadSourceAction } from "../actions/types/SourceAction";
+import { mapValues, uniqBy, uniq } from "lodash";
 
-export type SourcesMap = { [string]: Source };
+export type SourcesMap = { [SourceId]: Source };
+export type SourcesMapByThread = { [ThreadId]: SourcesMap };
 
 type UrlsMap = { [string]: SourceId[] };
+type DisplayedSources = { [ThreadId]: { [SourceId]: boolean } };
+type GetDisplayedSourcesSelector = OuterState => { [ThreadId]: SourcesMap };
 
 export type SourcesState = {
+  epoch: number,
+
+  // All known sources.
   sources: SourcesMap,
+
+  // All sources associated with a given URL. When using source maps, multiple
+  // sources can have the same URL.
   urls: UrlsMap,
-  relativeSources: SourcesMap,
+
+  // For each thread, all sources in that thread that are under the project root
+  // and should be shown in the editor's sources pane.
+  displayed: DisplayedSources,
+
   pendingSelectedLocation?: PendingSelectedLocation,
   selectedLocation: ?SourceLocation,
-  projectDirectoryRoot: string
+  projectDirectoryRoot: string,
+  chromeAndExtenstionsEnabled: boolean,
+  focusedItem: ?FocusItem
+};
+
+const emptySources = {
+  sources: {},
+  urls: {},
+  displayed: {}
 };
 
 export function initialSourcesState(): SourcesState {
   return {
-    sources: {},
-    urls: {},
-    relativeSources: {},
+    ...emptySources,
+    epoch: 1,
     selectedLocation: undefined,
     pendingSelectedLocation: prefs.pendingSelectedLocation,
-    projectDirectoryRoot: prefs.projectDirectoryRoot
+    projectDirectoryRoot: prefs.projectDirectoryRoot,
+    chromeAndExtenstionsEnabled: prefs.chromeAndExtenstionsEnabled,
+    focusedItem: null
   };
 }
 
-export function createSource(source: Object): Source {
+export function createSource(state: SourcesState, source: Object): Source {
+  const root = state.projectDirectoryRoot;
   return {
     id: undefined,
     url: undefined,
@@ -57,10 +83,13 @@ export function createSource(source: Object): Source {
     isBlackBoxed: false,
     isPrettyPrinted: false,
     isWasm: false,
+    isExtension: (source.url && isUrlExtension(source.url)) || false,
     text: undefined,
     contentType: "",
     error: undefined,
     loadedState: "unloaded",
+    relativeUrl: getRelativeUrl(source, root),
+    actors: [],
     ...source
   };
 }
@@ -72,19 +101,17 @@ function update(
   let location = null;
 
   switch (action.type) {
-    case "UPDATE_SOURCE": {
-      const source = action.source;
-      return updateSources(state, [source]);
-    }
+    case "UPDATE_SOURCE":
+      return updateSource(state, action.source);
 
-    case "ADD_SOURCE": {
-      const source = action.source;
-      return updateSources(state, [source]);
-    }
+    case "ADD_SOURCE":
+      return addSources(state, [action.source]);
 
-    case "ADD_SOURCES": {
-      return updateSources(state, action.sources);
-    }
+    case "ADD_SOURCES":
+      return addSources(state, action.sources);
+
+    case "SET_WORKERS":
+      return updateWorkers(state, action);
 
     case "SET_SELECTED_LOCATION":
       location = {
@@ -125,142 +152,189 @@ function update(
       return { ...state, pendingSelectedLocation: location };
 
     case "LOAD_SOURCE_TEXT":
-      return setSourceTextProps(state, action);
+      return updateLoadedState(state, action);
 
     case "BLACKBOX":
       if (action.status === "done") {
         const { id, url } = action.source;
         const { isBlackBoxed } = ((action: any): DonePromiseAction).value;
         updateBlackBoxList(url, isBlackBoxed);
-        return updateSources(state, [{ id, isBlackBoxed }]);
+        return updateSource(state, { id, isBlackBoxed });
       }
       break;
 
     case "SET_PROJECT_DIRECTORY_ROOT":
-      return recalculateRelativeSources(state, action.url);
+      return updateProjectDirectoryRoot(state, action.url);
 
     case "NAVIGATE":
-      const source =
-        state.selectedLocation &&
-        state.sources[state.selectedLocation.sourceId];
+      return {
+        ...initialSourcesState(),
+        epoch: state.epoch + 1
+      };
 
-      const url = source && source.url;
-
-      if (!url) {
-        return initialSourcesState();
-      }
-
-      return { ...initialSourcesState(), url };
+    case "SET_FOCUSED_SOURCE_ITEM":
+      return { ...state, focusedItem: action.item };
   }
 
   return state;
 }
 
-function getTextPropsFromAction(action) {
-  const { sourceId } = action;
+/*
+ * Update a source when its state changes
+ * e.g. the text was loaded, it was blackboxed
+ */
+function updateSource(state: SourcesState, source: Object) {
+  const existingSource = state.sources[source.id];
 
-  if (action.status === "start") {
-    return { id: sourceId, loadedState: "loading" };
-  } else if (action.status === "error") {
-    return { id: sourceId, error: action.error, loadedState: "loaded" };
+  // If there is no existing version of the source, it means that we probably
+  // ended up here as a result of an async action, and the sources were cleared
+  // between the action starting and the source being updated.
+  if (!existingSource) {
+    // TODO: We may want to consider throwing here once we have a better
+    // handle on async action flow control.
+    return state;
   }
-
-  if (!action.value) {
-    return null;
-  }
-
   return {
-    id: sourceId,
-    text: action.value.text,
-    contentType: action.value.contentType,
-    loadedState: "loaded"
+    ...state,
+    sources: {
+      ...state.sources,
+      [source.id]: { ...existingSource, ...source }
+    }
   };
 }
 
-// TODO: Action is coerced to `any` unfortunately because how we type
-// asynchronous actions is wrong. The `value` may be null for the
-// "start" and "error" states but we don't type it like that. We need
-// to rethink how we type async actions.
-function setSourceTextProps(state, action: LoadSourceAction): SourcesState {
-  const source = getTextPropsFromAction(action);
-  if (!source) {
-    return state;
-  }
-  return updateSources(state, [source]);
+/*
+ * Update all of the sources when an event occurs.
+ * e.g. workers are updated, project directory root changes
+ */
+function updateAllSources(state: SourcesState, callback: any) {
+  const updatedSources = Object.values(state.sources).map(source => ({
+    ...source,
+    ...callback(source)
+  }));
+
+  return addSources({ ...state, ...emptySources }, updatedSources);
 }
 
-function updateSources(state, sources) {
+/*
+ * Add sources to the sources store
+ * - Add the source to the sources store
+ * - Add the source URL to the urls map
+ * - Add the source ID to the thread displayed map
+ */
+function addSources(state: SourcesState, sources: Source[]) {
   state = {
     ...state,
     sources: { ...state.sources },
-    relativeSources: { ...state.relativeSources },
-    urls: { ...state.urls }
+    urls: { ...state.urls },
+    displayed: { ...state.displayed }
   };
 
-  return sources.reduce(
-    (newState, source) => updateSource(newState, source),
-    state
-  );
-}
+  for (const source of sources) {
+    const existingSource = state.sources[source.id];
+    let updatedSource = existingSource || source;
 
-function updateSource(state: SourcesState, source: Object) {
-  if (!source.id) {
-    return state;
+    // Merge the source actor list
+    if (existingSource && source.actors) {
+      const actors = uniqBy(
+        [...existingSource.actors, ...source.actors],
+        ({ actor }) => actor
+      );
+
+      updatedSource = (({ ...updatedSource, actors }: any): Source);
+    }
+
+    // 1. Add the source to the sources map
+    state.sources[source.id] = updatedSource;
+
+    // 2. Update the source url map
+    const existing = state.urls[source.url] || [];
+    if (!existing.includes(source.id)) {
+      state.urls[source.url] = [...existing, source.id];
+    }
+
+    // 3. Update the displayed actor map
+    if (
+      underRoot(source, state.projectDirectoryRoot) &&
+      (!source.isExtension ||
+        getChromeAndExtenstionsEnabled({ sources: state }))
+    ) {
+      for (const actor of getSourceActors(state, source)) {
+        if (!state.displayed[actor.thread]) {
+          state.displayed[actor.thread] = {};
+        }
+        state.displayed[actor.thread][source.id] = true;
+      }
+    }
   }
-
-  const existingSource = state.sources[source.id];
-  const updatedSource = existingSource
-    ? { ...existingSource, ...source }
-    : createSource(source);
-
-  state.sources[source.id] = updatedSource;
-
-  const existingUrls = state.urls[source.url];
-  state.urls[source.url] = existingUrls
-    ? [...existingUrls, source.id]
-    : [source.id];
-
-  updateRelativeSource(
-    state.relativeSources,
-    updatedSource,
-    state.projectDirectoryRoot
-  );
 
   return state;
 }
 
-function updateRelativeSource(
-  relativeSources: SourcesMap,
-  source: Source,
-  root: string
-): SourcesMap {
-  if (!underRoot(source, root)) {
-    return relativeSources;
-  }
+/*
+ * Update sources when the worker list changes.
+ * - filter source actor lists so that missing threads no longer appear
+ * - NOTE: we do not remove sources for destroyed threads
+ */
+function updateWorkers(state: SourcesState, action: Object) {
+  const threads = [
+    action.mainThread,
+    ...action.workers.map(({ actor }) => actor)
+  ];
 
-  const relativeSource: Source = ({
-    ...source,
-    relativeUrl: getRelativeUrl(source, root)
-  }: any);
-
-  relativeSources[source.id] = relativeSource;
-
-  return relativeSources;
+  return updateAllSources(state, source => ({
+    actors: source.actors.filter(({ thread }) => threads.includes(thread))
+  }));
 }
 
-function recalculateRelativeSources(state: SourcesState, root: string) {
+/*
+ * Update sources when the project directory root changes
+ */
+function updateProjectDirectoryRoot(state: SourcesState, root: string) {
   prefs.projectDirectoryRoot = root;
 
-  const relativeSources = (Object.values(state.sources): any).reduce(
-    (sources, source: Source) => updateRelativeSource(sources, source, root),
-    {}
-  );
+  return updateAllSources({ ...state, projectDirectoryRoot: root }, source => ({
+    relativeUrl: getRelativeUrl(source, root)
+  }));
+}
 
-  return {
-    ...state,
-    projectDirectoryRoot: root,
-    relativeSources
-  };
+/*
+ * Update a source's loaded state fields
+ * i.e. loadedState, text, error
+ */
+function updateLoadedState(
+  state: SourcesState,
+  action: LoadSourceAction
+): SourcesState {
+  const { sourceId } = action;
+  let source;
+
+  // If there was a navigation between the time the action was started and
+  // completed, we don't want to update the store.
+  if (action.epoch !== state.epoch) {
+    return state;
+  }
+
+  if (action.status === "start") {
+    source = { id: sourceId, loadedState: "loading" };
+  } else if (action.status === "error") {
+    source = { id: sourceId, error: action.error, loadedState: "loaded" };
+  } else {
+    // TODO: Remove this once we centralize pretty-print and this can no longer
+    // return a null value when loading a in-progress prettyprinting file.
+    if (!action.value) {
+      return state;
+    }
+
+    source = {
+      id: sourceId,
+      text: action.value.text,
+      contentType: action.value.contentType,
+      loadedState: "loaded"
+    };
+  }
+
+  return updateSource(state, source);
 }
 
 function updateBlackBoxList(url, isBlackBoxed) {
@@ -293,34 +367,86 @@ type OuterState = { sources: SourcesState };
 
 const getSourcesState = (state: OuterState) => state.sources;
 
-export function getSource(state: OuterState, id: string) {
+function getSourceActors(state, source) {
+  if (isGenerated(source)) {
+    return source.actors;
+  }
+
+  // Original sources do not have actors, so use the generated source.
+  const generatedSource = state.sources[originalToGeneratedId(source.id)];
+  return generatedSource ? generatedSource.actors : [];
+}
+
+export function getSourceThreads(
+  state: OuterState,
+  source: Source
+): ThreadId[] {
+  return uniq(
+    getSourceActors(state.sources, source).map(actor => actor.thread)
+  );
+}
+
+export function getSourceInSources(sources: SourcesMap, id: string): ?Source {
+  return sources[id];
+}
+
+export function getSource(state: OuterState, id: SourceId): ?Source {
   return getSourceInSources(getSources(state), id);
 }
 
 export function getSourceFromId(state: OuterState, id: string): Source {
-  return getSourcesState(state).sources[id];
+  const source = getSource(state, id);
+  if (!source) {
+    throw new Error(`source ${id} does not exist`);
+  }
+  return source;
 }
 
-export function getOriginalSourceByURL(
+export function getSourceByActorId(
   state: OuterState,
-  url: string
+  actorId: string
 ): ?Source {
-  return getOriginalSourceByUrlInSources(
-    getSources(state),
-    getUrls(state),
-    url
-  );
+  // We don't index the sources by actor IDs, so this method should be used
+  // sparingly.
+  for (const source of getSourceList(state)) {
+    if (source.actors.some(({ actor }) => actor == actorId)) {
+      return source;
+    }
+  }
+  return null;
 }
 
-export function getGeneratedSourceByURL(
-  state: OuterState,
+export function getSourcesByURLInSources(
+  sources: SourcesMap,
+  urls: UrlsMap,
   url: string
+): Source[] {
+  if (!url || !urls[url]) {
+    return [];
+  }
+  return urls[url].map(id => sources[id]);
+}
+
+export function getSourcesByURL(state: OuterState, url: string): Source[] {
+  return getSourcesByURLInSources(getSources(state), getUrls(state), url);
+}
+
+export function getSourceByURL(state: OuterState, url: string): ?Source {
+  const foundSources = getSourcesByURL(state, url);
+  return foundSources ? foundSources[0] : null;
+}
+
+export function getSpecificSourceByURLInSources(
+  sources: SourcesMap,
+  urls: UrlsMap,
+  url: string,
+  isOriginal: boolean
 ): ?Source {
-  return getGeneratedSourceByUrlInSources(
-    getSources(state),
-    getUrls(state),
-    url
-  );
+  const foundSources = getSourcesByURLInSources(sources, urls, url);
+  if (foundSources) {
+    return foundSources.find(source => isOriginalSource(source) == isOriginal);
+  }
+  return null;
 }
 
 export function getSpecificSourceByURL(
@@ -328,24 +454,36 @@ export function getSpecificSourceByURL(
   url: string,
   isOriginal: boolean
 ): ?Source {
-  return isOriginal
-    ? getOriginalSourceByUrlInSources(getSources(state), getUrls(state), url)
-    : getGeneratedSourceByUrlInSources(getSources(state), getUrls(state), url);
+  return getSpecificSourceByURLInSources(
+    getSources(state),
+    getUrls(state),
+    url,
+    isOriginal
+  );
 }
 
-export function getSourceByURL(state: OuterState, url: string): ?Source {
-  return getSourceByUrlInSources(getSources(state), getUrls(state), url);
+export function getOriginalSourceByURL(
+  state: OuterState,
+  url: string
+): ?Source {
+  return getSpecificSourceByURL(state, url, true);
 }
 
-export function getSourcesByURLs(state: OuterState, urls: string[]) {
-  return urls.map(url => getSourceByURL(state, url)).filter(Boolean);
+export function getGeneratedSourceByURL(
+  state: OuterState,
+  url: string
+): ?Source {
+  return getSpecificSourceByURL(state, url, false);
 }
 
-export function getSourcesByURL(state: OuterState, url: string): Source[] {
-  return getSourcesByUrlInSources(getSources(state), getUrls(state), url);
-}
+export function getGeneratedSource(
+  state: OuterState,
+  source: ?Source
+): ?Source {
+  if (!source) {
+    return null;
+  }
 
-export function getGeneratedSource(state: OuterState, source: Source): Source {
   if (isGenerated(source)) {
     return source;
   }
@@ -357,78 +495,21 @@ export function getPendingSelectedLocation(state: OuterState) {
   return state.sources.pendingSelectedLocation;
 }
 
-export function getPrettySource(state: OuterState, id: string) {
+export function getPrettySource(state: OuterState, id: ?string) {
+  if (!id) {
+    return;
+  }
+
   const source = getSource(state, id);
   if (!source) {
     return;
   }
 
-  return getSpecificSourceByURL(state, getPrettySourceURL(source.url), true);
+  return getOriginalSourceByURL(state, getPrettySourceURL(source.url));
 }
 
 export function hasPrettySource(state: OuterState, id: string) {
   return !!getPrettySource(state, id);
-}
-
-export function getOriginalSourceByUrlInSources(
-  sources: SourcesMap,
-  urls: UrlsMap,
-  url: string
-) {
-  const foundSources = getSourcesByUrlInSources(sources, urls, url);
-  if (!foundSources) {
-    return null;
-  }
-
-  return foundSources.find(source => isOriginalSource(source) == true);
-}
-export function getGeneratedSourceByUrlInSources(
-  sources: SourcesMap,
-  urls: UrlsMap,
-  url: string
-) {
-  const foundSources = getSourcesByUrlInSources(sources, urls, url);
-  if (!foundSources) {
-    return null;
-  }
-
-  return foundSources.find(source => isOriginalSource(source) == false);
-}
-
-export function getSpecificSourceByUrlInSources(
-  sources: SourcesMap,
-  urls: UrlsMap,
-  url: string,
-  isOriginal: boolean
-) {
-  return isOriginal
-    ? getOriginalSourceByUrlInSources(sources, urls, url)
-    : getGeneratedSourceByUrlInSources(sources, urls, url);
-}
-
-export function getSourceByUrlInSources(
-  sources: SourcesMap,
-  urls: UrlsMap,
-  url: string
-) {
-  const foundSources = getSourcesByUrlInSources(sources, urls, url);
-  if (!foundSources) {
-    return null;
-  }
-
-  return foundSources[0];
-}
-
-function getSourcesByUrlInSources(
-  sources: SourcesMap,
-  urls: UrlsMap,
-  url: string
-) {
-  if (!url || !urls[url]) {
-    return [];
-  }
-
-  return urls[url].map(id => sources[id]);
 }
 
 export function getSourcesUrlsInSources(
@@ -454,12 +535,12 @@ export function getHasSiblingOfSameName(state: OuterState, source: ?Source) {
   return getSourcesUrlsInSources(state, source.url).length > 1;
 }
 
-export function getSourceInSources(sources: SourcesMap, id: string): ?Source {
-  return sources[id];
-}
-
 export function getSources(state: OuterState) {
   return state.sources.sources;
+}
+
+export function getSourcesEpoch(state: OuterState) {
+  return state.sources.epoch;
 }
 
 export function getUrls(state: OuterState) {
@@ -470,17 +551,22 @@ export function getSourceList(state: OuterState): Source[] {
   return (Object.values(getSources(state)): any);
 }
 
-export const getSourceCount = createSelector(
-  getSources,
-  sources => Object.keys(sources).length
-);
+export function getDisplayedSourcesList(state: OuterState): Source[] {
+  return ((Object.values(getDisplayedSources(state)): any).flatMap(
+    Object.values
+  ): any);
+}
 
-export const getSelectedLocation = createSelector(
+export function getSourceCount(state: OuterState) {
+  return getSourceList(state).length;
+}
+
+export const getSelectedLocation: Selector<?SourceLocation> = createSelector(
   getSourcesState,
   sources => sources.selectedLocation
 );
 
-export const getSelectedSource = createSelector(
+export const getSelectedSource: Selector<?Source> = createSelector(
   getSelectedLocation,
   getSources,
   (selectedLocation: ?SourceLocation, sources: SourcesMap): ?Source => {
@@ -492,12 +578,43 @@ export const getSelectedSource = createSelector(
   }
 );
 
+export function getSelectedSourceId(state: OuterState) {
+  const source = getSelectedSource((state: any));
+  return source && source.id;
+}
+
 export function getProjectDirectoryRoot(state: OuterState): string {
   return state.sources.projectDirectoryRoot;
 }
 
-export function getRelativeSources(state: OuterState): SourcesMap {
-  return state.sources.relativeSources;
+function getAllDisplayedSources(state: OuterState) {
+  return state.sources.displayed;
+}
+
+function getChromeAndExtenstionsEnabled(state: OuterState) {
+  return state.sources.chromeAndExtenstionsEnabled;
+}
+
+export const getDisplayedSources: GetDisplayedSourcesSelector = createSelector(
+  getSources,
+  getChromeAndExtenstionsEnabled,
+  getAllDisplayedSources,
+  (sources, chromeAndExtenstionsEnabled, displayed) => {
+    return mapValues(displayed, threadSourceIds =>
+      mapValues(threadSourceIds, (_, id) => sources[id])
+    );
+  }
+);
+
+export function getDisplayedSourcesForThread(
+  state: OuterState,
+  thread: string
+): SourcesMap {
+  return getDisplayedSources(state)[thread] || {};
+}
+
+export function getFocusedSourceItem(state: OuterState): ?FocusItem {
+  return state.sources.focusedItem;
 }
 
 export default update;

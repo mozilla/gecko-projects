@@ -1,6 +1,6 @@
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
- * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 use parsing::parse;
 use style::values::generics::text::Spacing;
@@ -18,10 +18,10 @@ fn negative_letter_spacing_should_parse_properly() {
 #[test]
 fn negative_word_spacing_should_parse_properly() {
     use style::properties::longhands::word_spacing;
-    use style::values::specified::length::{NoCalcLength, LengthOrPercentage, FontRelativeLength};
+    use style::values::specified::length::{NoCalcLength, LengthPercentage, FontRelativeLength};
 
     let negative_value = parse_longhand!(word_spacing, "-0.5em");
-    let expected = Spacing::Value(LengthOrPercentage::Length(
+    let expected = Spacing::Value(LengthPercentage::Length(
         NoCalcLength::FontRelative(FontRelativeLength::Em(-0.5))
     ));
     assert_eq!(negative_value, expected);

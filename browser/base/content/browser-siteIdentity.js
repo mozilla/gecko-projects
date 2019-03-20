@@ -50,7 +50,7 @@ var gIdentityHandler = {
    * RegExp used to decide if an about url should be shown as being part of
    * the browser UI.
    */
-  _secureInternalUIWhitelist: /^(?:accounts|addons|cache|config|crashes|customizing|downloads|healthreport|license|permissions|preferences|rights|searchreset|sessionrestore|support|welcomeback)(?:[?#]|$)/i,
+  _secureInternalUIWhitelist: /^(?:accounts|addons|cache|config|crashes|customizing|downloads|healthreport|license|permissions|preferences|rights|sessionrestore|support|welcomeback)(?:[?#]|$)/i,
 
   get _isBroken() {
     return this._state & Ci.nsIWebProgressListener.STATE_IS_BROKEN;
@@ -273,7 +273,9 @@ var gIdentityHandler = {
   recordClick(object) {
     let extra = {};
     for (let blocker of ContentBlocking.blockers) {
-      extra[blocker.telemetryIdentifier] = blocker.activated ? "true" : "false";
+      if (blocker.telemetryIdentifier) {
+        extra[blocker.telemetryIdentifier] = blocker.activated ? "true" : "false";
+      }
     }
     Services.telemetry.recordEvent("security.ui.identitypopup", "click", object, null, extra);
   },
@@ -592,12 +594,10 @@ var gIdentityHandler = {
     let permissions = SitePermissions.getAllForBrowser(gBrowser.selectedBrowser);
     for (let permission of permissions) {
       if (permission.state == SitePermissions.BLOCK) {
-
         let icon = permissionAnchors[permission.id];
         if (icon) {
           icon.setAttribute("showing", "true");
         }
-
       } else if (permission.state != SitePermissions.UNKNOWN) {
         hasGrantedPermissions = true;
       }
@@ -743,6 +743,11 @@ var gIdentityHandler = {
       // Some URIs might have no hosts.
     }
 
+    let readerStrippedURI = ReaderMode.getOriginalUrlObjectForDisplay(this._uri.displaySpec);
+    if (readerStrippedURI) {
+      host = readerStrippedURI.host;
+    }
+
     if (this._pageExtensionPolicy) {
       host = this._pageExtensionPolicy.name;
     }
@@ -760,7 +765,7 @@ var gIdentityHandler = {
     // Fill in organization information if we have a valid EV certificate.
     if (this._isEV) {
       let iData = this.getIdentityData();
-      host = owner = iData.subjectOrg;
+      owner = iData.subjectOrg;
       verifier = this._identityIconLabels.tooltipText;
 
       // Build an appropriate supplemental block out of whatever location data we have
@@ -871,7 +876,9 @@ var gIdentityHandler = {
 
     let extra = {};
     for (let blocker of ContentBlocking.blockers) {
-      extra[blocker.telemetryIdentifier] = blocker.activated ? "true" : "false";
+      if (blocker.telemetryIdentifier) {
+        extra[blocker.telemetryIdentifier] = blocker.activated ? "true" : "false";
+      }
     }
 
     let shieldStatus = ContentBlocking.iconBox.hasAttribute("active") ? "shield-showing" : "shield-hidden";
@@ -900,7 +907,11 @@ var gIdentityHandler = {
   },
 
   observe(subject, topic, data) {
-    if (topic == "perm-changed") {
+    // Exclude permissions which do not appear in the UI in order to avoid
+    // doing extra work here.
+    if (topic == "perm-changed" && subject &&
+        SitePermissions.listPermissions().includes(
+          subject.QueryInterface(Ci.nsIPermission).type)) {
       this.refreshIdentityBlock();
     }
   },
@@ -1055,7 +1066,8 @@ var gIdentityHandler = {
       SitePermissions.SCOPE_POLICY, SitePermissions.SCOPE_GLOBAL,
     ].includes(aPermission.scope);
 
-    if (aPermission.id == "popup" && !isPolicyPermission) {
+    if ((aPermission.id == "popup" && !isPolicyPermission) ||
+        aPermission.id == "autoplay-media") {
       let menulist = document.createXULElement("menulist");
       let menupopup = document.createXULElement("menupopup");
       let block = document.createXULElement("vbox");
@@ -1182,9 +1194,9 @@ var gIdentityHandler = {
     let icon = document.createXULElement("image");
     icon.setAttribute("class", "popup-subitem identity-popup-permission-icon");
 
-    let text = document.createXULElement("label");
+    let text = document.createXULElement("label", {is: "text-link"});
     text.setAttribute("flex", "1");
-    text.setAttribute("class", "identity-popup-permission-label text-link");
+    text.setAttribute("class", "identity-popup-permission-label");
 
     let popupCount = gBrowser.selectedBrowser.blockedPopups.length;
     let messageBase = gNavigatorBundle.getString("popupShowBlockedPopupsIndicatorText");

@@ -7,11 +7,10 @@ DIRS += [
 
 ]
 
-DebuggerModules(
+CompiledModules(
     'breakOnNext.js',
     'commands.js',
     'continueToHere.js',
-    'extra.js',
     'fetchScopes.js',
     'index.js',
     'mapFrames.js',

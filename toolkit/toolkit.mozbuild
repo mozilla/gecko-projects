@@ -64,7 +64,10 @@ if CONFIG['MOZ_AUTH_EXTENSION']:
     DIRS += ['/extensions/auth']
 
 if CONFIG['MOZ_UPDATER'] and CONFIG['OS_TARGET'] != 'Android':
-    DIRS += ['/other-licenses/bsdiff']
+    DIRS += [
+        '/toolkit/mozapps/update/updater/bspatch',
+        '/other-licenses/bsdiff',
+    ]
 
 # Gecko/Core components.
 
@@ -156,8 +159,10 @@ DIRS += [
 if 'gtk' in CONFIG['MOZ_WIDGET_TOOLKIT']:
     DIRS += [
         '/toolkit/system/gnome',
-        '/widget/xremoteclient',
     ]
+
+if CONFIG['ENABLE_REMOTE_AGENT']:
+    DIRS += ['/remote']
 
 if CONFIG['ENABLE_MARIONETTE']:
     DIRS += [
@@ -183,6 +188,7 @@ if CONFIG['ENABLE_TESTS']:
         '/testing/modules',
         '/testing/runtimes',
         '/testing/web-platform',
+        '/testing/extensions',
     ]
 
     # The file id utility requires breakpad libraries.

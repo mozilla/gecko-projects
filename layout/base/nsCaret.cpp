@@ -70,7 +70,7 @@ static nsIFrame* CheckForTrailingTextFrameRecursive(nsIFrame* aFrame,
 static nsLineBox* FindContainingLine(nsIFrame* aFrame) {
   while (aFrame && aFrame->IsFrameOfType(nsIFrame::eLineParticipant)) {
     nsIFrame* parent = aFrame->GetParent();
-    nsBlockFrame* blockParent = nsLayoutUtils::GetAsBlock(parent);
+    nsBlockFrame* blockParent = do_QueryFrame(parent);
     if (blockParent) {
       bool isValid;
       nsBlockInFlowLineIterator iter(blockParent, aFrame, &isValid);
@@ -240,9 +240,9 @@ void nsCaret::SetCaretReadOnly(bool inMakeReadonly) {
   SchedulePaint();
 }
 
-/* static */ nsRect nsCaret::GetGeometryForFrame(nsIFrame* aFrame,
-                                                 int32_t aFrameOffset,
-                                                 nscoord* aBidiIndicatorSize) {
+/* static */
+nsRect nsCaret::GetGeometryForFrame(nsIFrame* aFrame, int32_t aFrameOffset,
+                                    nscoord* aBidiIndicatorSize) {
   nsPoint framePos(0, 0);
   nsRect rect;
   nsresult rv = aFrame->GetPointFromOffset(aFrameOffset, &framePos);
@@ -384,8 +384,8 @@ nsIFrame* nsCaret::GetFrameAndOffset(Selection* aSelection,
   return frame;
 }
 
-/* static */ nsIFrame* nsCaret::GetGeometry(Selection* aSelection,
-                                            nsRect* aRect) {
+/* static */
+nsIFrame* nsCaret::GetGeometry(Selection* aSelection, nsRect* aRect) {
   int32_t frameOffset;
   nsIFrame* frame = GetFrameAndOffset(aSelection, nullptr, 0, &frameOffset);
   if (frame) {
@@ -527,7 +527,7 @@ void nsCaret::PaintCaret(DrawTarget& aDrawTarget, nsIFrame* aForFrame,
 }
 
 NS_IMETHODIMP
-nsCaret::NotifySelectionChanged(nsIDocument*, Selection* aDomSel,
+nsCaret::NotifySelectionChanged(Document*, Selection* aDomSel,
                                 int16_t aReason) {
   // Note that aDomSel, per the comment below may not be the same as our
   // selection, but that's OK since if that is the case, it wouldn't have
@@ -574,7 +574,7 @@ void nsCaret::ResetBlinking() {
   } else {
     nsIEventTarget* target = nullptr;
     if (nsCOMPtr<nsIPresShell> presShell = do_QueryReferent(mPresShell)) {
-      if (nsCOMPtr<nsIDocument> doc = presShell->GetDocument()) {
+      if (nsCOMPtr<Document> doc = presShell->GetDocument()) {
         target = doc->EventTargetFor(TaskCategory::Other);
       }
     }
@@ -669,15 +669,14 @@ nsresult nsCaret::GetCaretFrameForNodeOffset(
                                 std::min(levelBefore, levelAfter));  // rule c3
           aBidiLevel = std::min(aBidiLevel,
                                 std::max(levelBefore, levelAfter));  // rule c4
-          if (aBidiLevel == levelBefore                              // rule c1
-              || (aBidiLevel > levelBefore && aBidiLevel < levelAfter &&
-                  IS_SAME_DIRECTION(aBidiLevel, levelBefore))  // rule c5
-              || (aBidiLevel < levelBefore && aBidiLevel > levelAfter &&
-                  IS_SAME_DIRECTION(aBidiLevel, levelBefore)))  // rule c9
+          if (aBidiLevel == levelBefore ||                           // rule c1
+              (aBidiLevel > levelBefore && aBidiLevel < levelAfter &&
+               IS_SAME_DIRECTION(aBidiLevel, levelBefore)) ||  // rule c5
+              (aBidiLevel < levelBefore && aBidiLevel > levelAfter &&
+               IS_SAME_DIRECTION(aBidiLevel, levelBefore)))  // rule c9
           {
             if (theFrame != frameBefore) {
-              if (frameBefore)  // if there is a frameBefore, move into it
-              {
+              if (frameBefore) {  // if there is a frameBefore, move into it
                 theFrame = frameBefore;
                 theFrame->GetOffsets(start, end);
                 theFrameOffset = end;
@@ -699,10 +698,9 @@ nsresult nsCaret::GetCaretFrameForNodeOffset(
                 }
               }
             }
-          } else if (aBidiLevel == levelAfter  // rule c2
-                     || (aBidiLevel > levelBefore && aBidiLevel < levelAfter &&
-                         IS_SAME_DIRECTION(aBidiLevel, levelAfter))  // rule c6
-                     ||
+          } else if (aBidiLevel == levelAfter ||  // rule c2
+                     (aBidiLevel > levelBefore && aBidiLevel < levelAfter &&
+                      IS_SAME_DIRECTION(aBidiLevel, levelAfter)) ||  // rule c6
                      (aBidiLevel < levelBefore && aBidiLevel > levelAfter &&
                       IS_SAME_DIRECTION(aBidiLevel, levelAfter)))  // rule c10
           {
@@ -732,15 +730,11 @@ nsresult nsCaret::GetCaretFrameForNodeOffset(
               }
             }
           } else if (aBidiLevel > levelBefore &&
-                     aBidiLevel < levelAfter  // rule c7/8
-                     &&
-                     IS_SAME_DIRECTION(
-                         levelBefore,
-                         levelAfter)  // before and after have the same parity
-                     &&
-                     !IS_SAME_DIRECTION(
-                         aBidiLevel, levelAfter))  // caret has different parity
-          {
+                     aBidiLevel < levelAfter &&  // rule c7/8
+                     // before and after have the same parity
+                     IS_SAME_DIRECTION(levelBefore, levelAfter) &&
+                     // caret has different parity
+                     !IS_SAME_DIRECTION(aBidiLevel, levelAfter)) {
             if (NS_SUCCEEDED(aFrameSelection->GetFrameFromLevel(
                     frameAfter, eDirNext, aBidiLevel, &theFrame))) {
               theFrame->GetOffsets(start, end);
@@ -752,15 +746,11 @@ nsresult nsCaret::GetCaretFrameForNodeOffset(
                 theFrameOffset = IS_LEVEL_RTL(levelAfter) ? end : start;
             }
           } else if (aBidiLevel < levelBefore &&
-                     aBidiLevel > levelAfter  // rule c11/12
-                     &&
-                     IS_SAME_DIRECTION(
-                         levelBefore,
-                         levelAfter)  // before and after have the same parity
-                     &&
-                     !IS_SAME_DIRECTION(
-                         aBidiLevel, levelAfter))  // caret has different parity
-          {
+                     aBidiLevel > levelAfter &&  // rule c11/12
+                     // before and after have the same parity
+                     IS_SAME_DIRECTION(levelBefore, levelAfter) &&
+                     // caret has different parity
+                     !IS_SAME_DIRECTION(aBidiLevel, levelAfter)) {
             if (NS_SUCCEEDED(aFrameSelection->GetFrameFromLevel(
                     frameBefore, eDirPrevious, aBidiLevel, &theFrame))) {
               theFrame->GetOffsets(start, end);

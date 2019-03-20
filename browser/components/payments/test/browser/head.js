@@ -18,15 +18,14 @@ const paymentSrv = Cc["@mozilla.org/dom/payments/payment-request-service;1"]
                      .getService(Ci.nsIPaymentRequestService);
 const paymentUISrv = Cc["@mozilla.org/dom/payments/payment-ui-service;1"]
                      .getService(Ci.nsIPaymentUIService).wrappedJSObject;
-const {AppConstants} = ChromeUtils.import("resource://gre/modules/AppConstants.jsm", {});
-const {formAutofillStorage} = ChromeUtils.import(
-  "resource://formautofill/FormAutofillStorage.jsm", {});
-const {OSKeyStoreTestUtils} = ChromeUtils.import(
-  "resource://testing-common/OSKeyStoreTestUtils.jsm", {});
-const {PaymentTestUtils: PTU} = ChromeUtils.import(
-  "resource://testing-common/PaymentTestUtils.jsm", {});
-ChromeUtils.import("resource:///modules/BrowserWindowTracker.jsm");
-ChromeUtils.import("resource://gre/modules/CreditCard.jsm");
+const {AppConstants} = ChromeUtils.import("resource://gre/modules/AppConstants.jsm");
+const {formAutofillStorage} = ChromeUtils.import("resource://formautofill/FormAutofillStorage.jsm");
+const {OSKeyStoreTestUtils} =
+    ChromeUtils.import("resource://testing-common/OSKeyStoreTestUtils.jsm");
+const {PaymentTestUtils: PTU} =
+    ChromeUtils.import("resource://testing-common/PaymentTestUtils.jsm");
+var {BrowserWindowTracker} = ChromeUtils.import("resource:///modules/BrowserWindowTracker.jsm");
+var {CreditCard} = ChromeUtils.import("resource://gre/modules/CreditCard.jsm");
 
 function getPaymentRequests() {
   return Array.from(paymentSrv.enumerate());
@@ -409,7 +408,7 @@ async function navigateToAddAddressPage(frame, aOptions = {}) {
   await spawnPaymentDialogTask(frame, async (options) => {
     let {
       PaymentTestUtils,
-    } = ChromeUtils.import("resource://testing-common/PaymentTestUtils.jsm", {});
+    } = ChromeUtils.import("resource://testing-common/PaymentTestUtils.jsm");
 
     info("navigateToAddAddressPage: check we're on the expected page first");
     await PaymentTestUtils.DialogContentUtils.waitForState(content, (state) => {
@@ -431,7 +430,7 @@ async function navigateToAddAddressPage(frame, aOptions = {}) {
 
 async function navigateToAddShippingAddressPage(frame, aOptions = {}) {
   let options = Object.assign({
-    addLinkSelector: "address-picker[selected-state-key=\"selectedShippingAddress\"] a.add-link",
+    addLinkSelector: "address-picker[selected-state-key=\"selectedShippingAddress\"] .add-link",
     initialPageId: "payment-summary",
     addressPageId: "shipping-address-page",
   }, aOptions);
@@ -573,7 +572,7 @@ async function submitAddressForm(frame, aAddress, aOptions = {
     let nextPageId = options.nextPageId || "payment-summary";
     let {
       PaymentTestUtils,
-    } = ChromeUtils.import("resource://testing-common/PaymentTestUtils.jsm", {});
+    } = ChromeUtils.import("resource://testing-common/PaymentTestUtils.jsm");
 
     let oldState = await PaymentTestUtils.DialogContentUtils.getCurrentState(content);
     let pageId = oldState.page.id;
@@ -625,7 +624,7 @@ async function navigateToAddCardPage(frame, aOptions = {
   await spawnPaymentDialogTask(frame, async (options) => {
     let {
       PaymentTestUtils,
-    } = ChromeUtils.import("resource://testing-common/PaymentTestUtils.jsm", {});
+    } = ChromeUtils.import("resource://testing-common/PaymentTestUtils.jsm");
 
     // check were on the summary page first
     await PaymentTestUtils.DialogContentUtils.waitForState(content, (state) => {
@@ -666,9 +665,14 @@ async function fillInCardForm(frame, aCard, aOptions = {}) {
       // of this should be investigated further.
       await ContentTaskUtils.waitForCondition(() => field == content.document.activeElement,
                                               `Waiting for field #${key} to get focus`);
-      // cc-exp-* fields are numbers so convert to strings and pad left with 0
-      let fillValue = val.toString().padStart(2, "0");
-      EventUtils.synthesizeKey(fillValue, {}, Cu.waiveXrays(content.window));
+      if (key == "billingAddressGUID") {
+        // Can't type the value in, press Down until the value is found
+        content.fillField(field, val);
+      } else {
+        // cc-exp-* fields are numbers so convert to strings and pad left with 0
+        let fillValue = val.toString().padStart(2, "0");
+        EventUtils.synthesizeKey(fillValue, {}, Cu.waiveXrays(content.window));
+      }
       // cc-exp-* field values are not padded, so compare with unpadded string.
       is(field.value, val.toString(), `${key} value is correct after sendString`);
     }

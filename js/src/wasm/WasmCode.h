@@ -19,9 +19,11 @@
 #ifndef wasm_code_h
 #define wasm_code_h
 
+#include "jit/shared/Assembler-shared.h"
 #include "js/HashTable.h"
 #include "threading/ExclusiveData.h"
 #include "vm/MutexIDs.h"
+#include "wasm/WasmGC.h"
 #include "wasm/WasmTypes.h"
 
 namespace js {
@@ -292,11 +294,6 @@ class FuncImport {
 
 typedef Vector<FuncImport, 0, SystemAllocPolicy> FuncImportVector;
 
-// A wasm module can either use no memory, a unshared memory (ArrayBuffer) or
-// shared memory (SharedArrayBuffer).
-
-enum class MemoryUsage { None = false, Unshared = 1, Shared = 2 };
-
 // Metadata holds all the data that is needed to describe compiled wasm code
 // at runtime (as opposed to data that is only used to statically link or
 // instantiate a module).
@@ -312,7 +309,6 @@ enum class MemoryUsage { None = false, Unshared = 1, Shared = 2 };
 struct MetadataCacheablePod {
   ModuleKind kind;
   MemoryUsage memoryUsage;
-  HasGcTypes temporaryGcTypesConfigured;
   uint32_t minMemoryLength;
   uint32_t globalDataLength;
   Maybe<uint32_t> maxMemoryLength;
@@ -323,7 +319,6 @@ struct MetadataCacheablePod {
   explicit MetadataCacheablePod(ModuleKind kind)
       : kind(kind),
         memoryUsage(MemoryUsage::None),
-        temporaryGcTypesConfigured(HasGcTypes::False),
         minMemoryLength(0),
         globalDataLength(0),
         filenameIsURL(false) {}
@@ -394,7 +389,7 @@ struct Metadata : public ShareableBase<Metadata>, public MetadataCacheablePod {
     return getFuncName(NameContext::BeforeLocation, funcIndex, name);
   }
 
-  WASM_DECLARE_SERIALIZABLE_VIRTUAL(Metadata);
+  WASM_DECLARE_SERIALIZABLE(Metadata);
 };
 
 typedef RefPtr<Metadata> MutableMetadata;
@@ -411,6 +406,7 @@ struct MetadataTier {
   TrapSiteVectorArray trapSites;
   FuncImportVector funcImports;
   FuncExportVector funcExports;
+  StackMaps stackMaps;
 
   // Debug information, not serialized.
   Uint32Vector debugTrapFarJumpOffsets;
@@ -500,8 +496,7 @@ class LazyStubTier {
   LazyFuncExportVector exports_;
   size_t lastStubSegmentIndex_;
 
-  bool createMany(HasGcTypes gcTypesEnabled,
-                  const Uint32Vector& funcExportIndices,
+  bool createMany(const Uint32Vector& funcExportIndices,
                   const CodeTier& codeTier, size_t* stubSegmentIndex);
 
  public:
@@ -522,8 +517,7 @@ class LazyStubTier {
   // them in a single stub. Jit entries won't be used until
   // setJitEntries() is actually called, after the Code owner has committed
   // tier2.
-  bool createTier2(HasGcTypes gcTypesConfigured,
-                   const Uint32Vector& funcExportIndices,
+  bool createTier2(const Uint32Vector& funcExportIndices,
                    const CodeTier& codeTier, Maybe<size_t>* stubSegmentIndex);
   void setJitEntries(const Maybe<size_t>& stubSegmentIndex, const Code& code);
 
@@ -699,6 +693,7 @@ class Code : public ShareableBase<Code> {
 
   const CallSite* lookupCallSite(void* returnAddress) const;
   const CodeRange* lookupFuncRange(void* pc) const;
+  const StackMap* lookupStackMap(uint8_t* nextPC) const;
   bool containsCodePC(const void* pc) const;
   bool lookupTrap(void* pc, Trap* trap, BytecodeOffset* bytecode) const;
 
@@ -725,6 +720,8 @@ class Code : public ShareableBase<Code> {
                                     const LinkData& linkData,
                                     Metadata& metadata, SharedCode* code);
 };
+
+void PatchDebugSymbolicAccesses(uint8_t* codeBase, jit::MacroAssembler& masm);
 
 }  // namespace wasm
 }  // namespace js

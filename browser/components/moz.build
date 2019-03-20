@@ -38,7 +38,6 @@ DIRS += [
     'downloads',
     'enterprisepolicies',
     'extensions',
-    'feeds',
     'library',
     'migration',
     'newtab',
@@ -47,6 +46,7 @@ DIRS += [
     'pocket',
     'preferences',
     'privatebrowsing',
+    'protocolhandler',
     'resistfingerprinting',
     'search',
     'sessionstore',
@@ -65,21 +65,28 @@ if CONFIG['NIGHTLY_BUILD']:
         'payments',
     ]
 
+if CONFIG['MOZ_WIDGET_TOOLKIT'] == 'cocoa':
+    DIRS += ['touchbar']
+
 XPIDL_SOURCES += [
     'nsIBrowserHandler.idl',
 ]
 
 XPIDL_MODULE = 'browsercompsbase'
 
+XPCOM_MANIFESTS += [
+    'components.conf',
+]
+
 EXTRA_COMPONENTS += [
     'BrowserComponents.manifest',
-    'nsBrowserContentHandler.js',
-    'nsBrowserGlue.js',
     'tests/startupRecorder.js',
     'tests/testComponents.manifest',
 ]
 
 EXTRA_JS_MODULES += [
+    'BrowserContentHandler.jsm',
+    'BrowserGlue.jsm',
     'distribution.js',
 ]
 

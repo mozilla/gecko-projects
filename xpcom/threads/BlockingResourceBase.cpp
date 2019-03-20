@@ -7,27 +7,27 @@
 #include "mozilla/BlockingResourceBase.h"
 
 #ifdef DEBUG
-#include "prthread.h"
+#  include "prthread.h"
 
-#include "nsAutoPtr.h"
+#  include "nsAutoPtr.h"
 
-#ifndef MOZ_CALLSTACK_DISABLED
-#include "CodeAddressService.h"
-#include "nsHashKeys.h"
-#include "mozilla/StackWalk.h"
-#include "nsTHashtable.h"
-#endif
+#  ifndef MOZ_CALLSTACK_DISABLED
+#    include "CodeAddressService.h"
+#    include "nsHashKeys.h"
+#    include "mozilla/StackWalk.h"
+#    include "nsTHashtable.h"
+#  endif
 
-#include "mozilla/CondVar.h"
-#include "mozilla/DeadlockDetector.h"
-#include "mozilla/RecursiveMutex.h"
-#include "mozilla/ReentrantMonitor.h"
-#include "mozilla/Mutex.h"
-#include "mozilla/RWLock.h"
+#  include "mozilla/CondVar.h"
+#  include "mozilla/DeadlockDetector.h"
+#  include "mozilla/RecursiveMutex.h"
+#  include "mozilla/ReentrantMonitor.h"
+#  include "mozilla/Mutex.h"
+#  include "mozilla/RWLock.h"
 
-#if defined(MOZILLA_INTERNAL_API)
-#include "GeckoProfiler.h"
-#endif  // MOZILLA_INTERNAL_API
+#  if defined(MOZILLA_INTERNAL_API)
+#    include "GeckoProfiler.h"
+#  endif  // MOZILLA_INTERNAL_API
 
 #endif  // ifdef DEBUG
 
@@ -44,19 +44,20 @@ const char* const BlockingResourceBase::kResourceTypeName[] = {
 #ifdef DEBUG
 
 PRCallOnceType BlockingResourceBase::sCallOnce;
-unsigned BlockingResourceBase::sResourceAcqnChainFrontTPI = (unsigned)-1;
+MOZ_THREAD_LOCAL(BlockingResourceBase*)
+BlockingResourceBase::sResourceAcqnChainFront;
 BlockingResourceBase::DDT* BlockingResourceBase::sDeadlockDetector;
 
 void BlockingResourceBase::StackWalkCallback(uint32_t aFrameNumber, void* aPc,
                                              void* aSp, void* aClosure) {
-#ifndef MOZ_CALLSTACK_DISABLED
+#  ifndef MOZ_CALLSTACK_DISABLED
   AcquisitionState* state = (AcquisitionState*)aClosure;
   state->AppendElement(aPc);
-#endif
+#  endif
 }
 
 void BlockingResourceBase::GetStackTrace(AcquisitionState& aState) {
-#ifndef MOZ_CALLSTACK_DISABLED
+#  ifndef MOZ_CALLSTACK_DISABLED
   // Skip this function and the calling function.
   const uint32_t kSkipFrames = 2;
 
@@ -65,7 +66,7 @@ void BlockingResourceBase::GetStackTrace(AcquisitionState& aState) {
   // NB: Ignore the return value, there's nothing useful we can do if this
   //     this fails.
   MozStackWalk(StackWalkCallback, kSkipFrames, 24, &aState);
-#endif
+#  endif
 }
 
 /**
@@ -82,7 +83,7 @@ void BlockingResourceBase::GetStackTrace(AcquisitionState& aState) {
  * contexts into strings, all info is written to stderr, but only
  * some info is written into |aOut|
  */
-bool PrintCycle(
+static bool PrintCycle(
     const BlockingResourceBase::DDT::ResourceAcquisitionArray* aCycle,
     nsACString& aOut) {
   NS_ASSERTION(aCycle->Length() > 1, "need > 1 element for cycle!");
@@ -115,7 +116,7 @@ bool PrintCycle(
   return maybeImminent;
 }
 
-#ifndef MOZ_CALLSTACK_DISABLED
+#  ifndef MOZ_CALLSTACK_DISABLED
 struct CodeAddressServiceLock final {
   static void Unlock() {}
   static void Lock() {}
@@ -149,7 +150,7 @@ typedef CodeAddressService<CodeAddressServiceStringTable,
                            CodeAddressServiceStringAlloc,
                            CodeAddressServiceLock>
     WalkTheStackCodeAddressService;
-#endif
+#  endif
 
 bool BlockingResourceBase::Print(nsACString& aOut) const {
   fprintf(stderr, "--- %s : %s", kResourceTypeName[mType], mName);
@@ -165,9 +166,9 @@ bool BlockingResourceBase::Print(nsACString& aOut) const {
   }
 
   fputs(" calling context\n", stderr);
-#ifdef MOZ_CALLSTACK_DISABLED
+#  ifdef MOZ_CALLSTACK_DISABLED
   fputs("  [stack trace unavailable]\n", stderr);
-#else
+#  else
   const AcquisitionState& state = acquired ? mAcquired : mFirstSeen;
 
   WalkTheStackCodeAddressService addressService;
@@ -183,7 +184,7 @@ bool BlockingResourceBase::Print(nsACString& aOut) const {
     fprintf(stderr, fmt, buffer);
   }
 
-#endif
+#  endif
 
   return acquired;
 }
@@ -192,13 +193,13 @@ BlockingResourceBase::BlockingResourceBase(
     const char* aName, BlockingResourceBase::BlockingResourceType aType)
     : mName(aName),
       mType(aType)
-#ifdef MOZ_CALLSTACK_DISABLED
+#  ifdef MOZ_CALLSTACK_DISABLED
       ,
       mAcquired(false)
-#else
+#  else
       ,
       mAcquired()
-#endif
+#  endif
 {
   MOZ_ASSERT(mName, "Name must be nonnull");
   // PR_CallOnce guaranatees that InitStatics is called in a
@@ -230,7 +231,7 @@ size_t BlockingResourceBase::SizeOfDeadlockDetector(
 }
 
 PRStatus BlockingResourceBase::InitStatics() {
-  PR_NewThreadPrivateIndex(&sResourceAcqnChainFrontTPI, 0);
+  MOZ_ASSERT(sResourceAcqnChainFront.init());
   sDeadlockDetector = new DDT();
   if (!sDeadlockDetector) {
     MOZ_CRASH("can't allocate deadlock detector");
@@ -257,10 +258,10 @@ void BlockingResourceBase::CheckAcquire() {
     return;
   }
 
-#ifndef MOZ_CALLSTACK_DISABLED
+#  ifndef MOZ_CALLSTACK_DISABLED
   // Update the current stack before printing.
   GetStackTrace(mAcquired);
-#endif
+#  endif
 
   fputs("###!!! ERROR: Potential deadlock detected:\n", stderr);
   nsAutoCString out("Potential deadlock detected:\n");
@@ -292,15 +293,15 @@ void BlockingResourceBase::Acquire() {
 
   ResourceChainAppend(ResourceChainFront());
 
-#ifdef MOZ_CALLSTACK_DISABLED
+#  ifdef MOZ_CALLSTACK_DISABLED
   mAcquired = true;
-#else
+#  else
   // Take a stack snapshot.
   GetStackTrace(mAcquired);
   if (mFirstSeen.IsEmpty()) {
     mFirstSeen = mAcquired;
   }
-#endif
+#  endif
 }
 
 void BlockingResourceBase::Release() {
@@ -347,6 +348,16 @@ void OffTheBooksMutex::Lock() {
   this->lock();
   mOwningThread = PR_GetCurrentThread();
   Acquire();
+}
+
+bool OffTheBooksMutex::TryLock() {
+  CheckAcquire();
+  bool locked = this->tryLock();
+  if (locked) {
+    mOwningThread = PR_GetCurrentThread();
+    Acquire();
+  }
+  return locked;
 }
 
 void OffTheBooksMutex::Unlock() {
@@ -450,9 +461,9 @@ nsresult ReentrantMonitor::Wait(PRIntervalTime aInterval) {
 
   nsresult rv;
   {
-#if defined(MOZILLA_INTERNAL_API)
+#  if defined(MOZILLA_INTERNAL_API)
     AUTO_PROFILER_THREAD_SLEEP;
-#endif
+#  endif
     // give up the monitor until we're back from Wait()
     rv = PR_Wait(mReentrantMonitor, aInterval) == PR_SUCCESS ? NS_OK
                                                              : NS_ERROR_FAILURE;

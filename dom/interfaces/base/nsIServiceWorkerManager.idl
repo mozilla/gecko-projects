@@ -10,7 +10,6 @@ interface mozIDOMWindow;
 interface nsPIDOMWindowInner;
 interface mozIDOMWindowProxy;
 interface nsIArray;
-interface nsIDocument;
 interface nsIInterceptedChannel;
 interface nsIPrincipal;
 interface nsIRunnable;
@@ -181,6 +180,8 @@ interface nsIServiceWorkerManager : nsISupports
   void addListener(in nsIServiceWorkerManagerListener aListener);
 
   void removeListener(in nsIServiceWorkerManagerListener aListener);
+
+  bool isParentInterceptEnabled();
 };
 
 %{ C++

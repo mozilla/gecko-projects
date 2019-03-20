@@ -17,9 +17,9 @@ const paymentSrv = Cc["@mozilla.org/dom/payments/payment-request-service;1"]
 const paymentUISrv = Cc["@mozilla.org/dom/payments/payment-ui-service;1"]
                      .getService(Ci.nsIPaymentUIService);
 
-ChromeUtils.import("resource://gre/modules/AppConstants.jsm");
-ChromeUtils.import("resource://gre/modules/Services.jsm");
-ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
+const {AppConstants} = ChromeUtils.import("resource://gre/modules/AppConstants.jsm");
+const {Services} = ChromeUtils.import("resource://gre/modules/Services.jsm");
+const {XPCOMUtils} = ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
 
 ChromeUtils.defineModuleGetter(this, "BrowserWindowTracker",
                                "resource:///modules/BrowserWindowTracker.jsm");
@@ -400,6 +400,17 @@ var paymentDialogWrapper = {
     return savedBasicCards;
   },
 
+  fetchTempPaymentCards() {
+    let creditCards = this.temporaryStore.creditCards.getAll();
+    for (let card of Object.values(creditCards)) {
+      // Ensure each card has a methodName property.
+      if (!card.methodName) {
+        card.methodName = "basic-card";
+      }
+    }
+    return creditCards;
+  },
+
   async onAutofillStorageChange() {
     let [savedAddresses, savedBasicCards] =
       await Promise.all([this.fetchSavedAddresses(), this.fetchSavedPaymentCards()]);
@@ -521,7 +532,7 @@ var paymentDialogWrapper = {
       savedAddresses,
       tempAddresses: this.temporaryStore.addresses.getAll(),
       savedBasicCards,
-      tempBasicCards: this.temporaryStore.creditCards.getAll(),
+      tempBasicCards: this.fetchTempPaymentCards(),
       isPrivate,
     });
   },
@@ -534,7 +545,7 @@ var paymentDialogWrapper = {
     }
     let {
       gDevToolsBrowser,
-    } = ChromeUtils.import("resource://devtools/client/framework/gDevTools.jsm", {});
+    } = ChromeUtils.import("resource://devtools/client/framework/gDevTools.jsm");
     gDevToolsBrowser.openContentProcessToolbox({
       selectedBrowser: this.frameWeakRef.get(),
     });
@@ -627,6 +638,41 @@ var paymentDialogWrapper = {
     this.sendMessageToContent("responseSent");
   },
 
+  async onChangePayerAddress({payerAddressGUID}) {
+    if (payerAddressGUID) {
+      // If a payer address was de-selected e.g. the selected address was deleted, we'll
+      // just wait to send the address change when the payer address is eventually selected
+      // before clicking Pay since it's a required field.
+      let {
+        payerName,
+        payerEmail,
+        payerPhone,
+      } = await this._convertProfileAddressToPayerData(payerAddressGUID);
+      paymentSrv.changePayerDetail(this.request.requestId, payerName, payerEmail, payerPhone);
+    }
+  },
+
+  async onChangePaymentMethod({
+    selectedPaymentCardBillingAddressGUID: billingAddressGUID,
+  }) {
+    const methodName = "basic-card";
+    let methodDetails;
+    try {
+      let billingAddress = await this._convertProfileAddressToPaymentAddress(billingAddressGUID);
+      const basicCardChangeDetails = Cc["@mozilla.org/dom/payments/basiccard-change-details;1"]
+                                       .createInstance(Ci.nsIBasicCardChangeDetails);
+      basicCardChangeDetails.initData(billingAddress);
+      methodDetails = basicCardChangeDetails.QueryInterface(Ci.nsIMethodChangeDetails);
+    } catch (ex) {
+      // TODO (Bug 1498403): Some kind of "credit card storage error" here, perhaps asking user
+      // to re-enter credit card # from management UI.
+      Cu.reportError(ex);
+      return;
+    }
+
+    paymentSrv.changePaymentMethod(this.request.requestId, methodName, methodDetails);
+  },
+
   async onChangeShippingAddress({shippingAddressGUID}) {
     if (shippingAddressGUID) {
       // If a shipping address was de-selected e.g. the selected address was deleted, we'll
@@ -684,7 +730,7 @@ var paymentDialogWrapper = {
         // there will be no formautofill-storage-changed event to update state
         // so add updated collection here
         Object.assign(responseMessage.stateChange, {
-          tempBasicCards: this.temporaryStore.creditCards.getAll(),
+          tempBasicCards: this.fetchTempPaymentCards(),
         });
       }
     } catch (ex) {
@@ -731,6 +777,14 @@ var paymentDialogWrapper = {
       }
       case "initializeRequest": {
         this.initializeFrame();
+        break;
+      }
+      case "changePayerAddress": {
+        this.onChangePayerAddress(data);
+        break;
+      }
+      case "changePaymentMethod": {
+        this.onChangePaymentMethod(data);
         break;
       }
       case "changeShippingAddress": {

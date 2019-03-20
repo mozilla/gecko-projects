@@ -22,7 +22,7 @@ namespace mozilla {
  * via a module loader.
  */
 struct Module {
-  static const unsigned int kVersion = 65;
+  static const unsigned int kVersion = 68;
 
   struct CIDEntry;
 
@@ -39,6 +39,8 @@ struct Module {
    * This selector allows CIDEntrys to be marked so that they're only loaded
    * into certain kinds of processes. Selectors can be combined.
    */
+  // Note: This must be kept in sync with the selector matching in
+  // nsComponentManager.cpp.
   enum ProcessSelector {
     ANY_PROCESS = 0x0,
     MAIN_PROCESS_ONLY = 0x1,
@@ -51,8 +53,16 @@ struct Module {
      */
     ALLOW_IN_GPU_PROCESS = 0x4,
     ALLOW_IN_VR_PROCESS = 0x8,
-    ALLOW_IN_GPU_AND_VR_PROCESS = ALLOW_IN_GPU_PROCESS | ALLOW_IN_VR_PROCESS
+    ALLOW_IN_SOCKET_PROCESS = 0x10,
+    ALLOW_IN_GPU_AND_VR_PROCESS = ALLOW_IN_GPU_PROCESS | ALLOW_IN_VR_PROCESS,
+    ALLOW_IN_GPU_AND_SOCKET_PROCESS =
+        ALLOW_IN_GPU_PROCESS | ALLOW_IN_SOCKET_PROCESS,
+    ALLOW_IN_GPU_VR_AND_SOCKET_PROCESS =
+        ALLOW_IN_GPU_PROCESS | ALLOW_IN_VR_PROCESS | ALLOW_IN_SOCKET_PROCESS
   };
+
+  static constexpr size_t kMaxProcessSelector =
+      size_t(ProcessSelector::ALLOW_IN_GPU_VR_AND_SOCKET_PROCESS);
 
   /**
    * The constructor callback is an implementation detail of the default binary
@@ -128,35 +138,38 @@ struct Module {
 }  // namespace mozilla
 
 #if defined(MOZILLA_INTERNAL_API)
-#define NSMODULE_NAME(_name) _name##_NSModule
-#if defined(_MSC_VER) || (defined(__clang__) && defined(__MINGW32__))
-#pragma section(".kPStaticModules$M", read)
-#pragma comment(linker, "/merge:.kPStaticModules=.rdata")
-#define NSMODULE_SECTION __declspec(allocate(".kPStaticModules$M"), dllexport)
-#elif defined(__GNUC__)
-#if defined(__ELF__)
-#define NSMODULE_SECTION \
-  __attribute__((section("kPStaticModules"), visibility("default")))
-#elif defined(__MACH__)
-#define NSMODULE_SECTION \
-  __attribute__((section("__DATA, .kPStaticModules"), visibility("default")))
-#elif defined(_WIN32)
-#define NSMODULE_SECTION __attribute__((section("kPStaticModules"), dllexport))
-#endif
-#endif
-#if !defined(NSMODULE_SECTION)
-#error Do not know how to define sections.
-#endif
-#if defined(MOZ_HAVE_ASAN_BLACKLIST)
-#define NSMODULE_ASAN_BLACKLIST __attribute__((no_sanitize_address))
+#  define NSMODULE_NAME(_name) _name##_NSModule
+#  if defined(_MSC_VER) || (defined(__clang__) && defined(__MINGW32__))
+#    pragma section(".kPStaticModules$M", read)
+#    pragma comment(linker, "/merge:.kPStaticModules=.rdata")
+#    define NSMODULE_SECTION \
+      __declspec(allocate(".kPStaticModules$M"), dllexport)
+#  elif defined(__GNUC__)
+#    if defined(__ELF__)
+#      define NSMODULE_SECTION \
+        __attribute__((section("kPStaticModules"), visibility("default")))
+#    elif defined(__MACH__)
+#      define NSMODULE_SECTION \
+        __attribute__(         \
+            (section("__DATA, .kPStaticModules"), visibility("default")))
+#    elif defined(_WIN32)
+#      define NSMODULE_SECTION \
+        __attribute__((section("kPStaticModules"), dllexport))
+#    endif
+#  endif
+#  if !defined(NSMODULE_SECTION)
+#    error Do not know how to define sections.
+#  endif
+#  if defined(MOZ_HAVE_ASAN_BLACKLIST)
+#    define NSMODULE_ASAN_BLACKLIST __attribute__((no_sanitize_address))
+#  else
+#    define NSMODULE_ASAN_BLACKLIST
+#  endif
+#  define NSMODULE_DEFN(_name)                      \
+    extern NSMODULE_SECTION NSMODULE_ASAN_BLACKLIST \
+        mozilla::Module const* const NSMODULE_NAME(_name)
 #else
-#define NSMODULE_ASAN_BLACKLIST
-#endif
-#define NSMODULE_DEFN(_name)                      \
-  extern NSMODULE_SECTION NSMODULE_ASAN_BLACKLIST \
-      mozilla::Module const* const NSMODULE_NAME(_name)
-#else
-#error Building binary XPCOM components is not supported anymore.
+#  error Building binary XPCOM components is not supported anymore.
 #endif
 
 #endif  // mozilla_Module_h

@@ -10,6 +10,7 @@ import copy
 import json
 import mozdebug
 import os
+import pipes
 import random
 import re
 import shutil
@@ -285,6 +286,9 @@ class XPCShellTestThread(Thread):
         changedEnv = (set("%s=%s" % i for i in self.env.iteritems())
                       - set("%s=%s" % i for i in os.environ.iteritems()))
         self.log.info("%s | environment: %s" % (name, list(changedEnv)))
+        shell_command_tokens = [pipes.quote(tok) for tok in list(changedEnv) + completeCmd]
+        self.log.info("%s | as shell command: (cd %s; %s)" %
+                      (name, pipes.quote(testdir), ' '.join(shell_command_tokens)))
 
     def killTimeout(self, proc):
         if proc is not None and hasattr(proc, "pid"):
@@ -878,11 +882,6 @@ class XPCShellTests(object):
         if test_paths is None:
             test_paths = []
 
-        if len(test_paths) == 1 and test_paths[0].endswith(".js") and not verify:
-            self.singleFile = os.path.basename(test_paths[0])
-        else:
-            self.singleFile = None
-
         mp = self.getTestManifest(self.manifest)
 
         root = mp.rootdir
@@ -897,7 +896,7 @@ class XPCShellTests(object):
         if test_paths:
             filters.append(pathprefix(test_paths))
 
-        if self.singleFile is None and self.totalChunks > 1:
+        if self.totalChunks > 1:
             filters.append(chunk_by_slice(self.thisChunk, self.totalChunks))
         try:
             self.alltests = map(normalize, mp.active_tests(filters=filters, **mozinfo.info))
@@ -910,6 +909,11 @@ class XPCShellTests(object):
                            "combination of filters: {}".format(
                                 mp.fmt_filters()))
             sys.exit(1)
+
+        if len(self.alltests) == 1 and not verify:
+            self.singleFile = os.path.basename(self.alltests[0]['path'])
+        else:
+            self.singleFile = None
 
         if self.dump_tests:
             self.dump_tests = os.path.expanduser(self.dump_tests)
@@ -1620,7 +1624,7 @@ class XPCShellTests(object):
                 self.log.error(t)
             raise exceptions[0]
 
-        if self.testCount == 0:
+        if self.testCount == 0 and os.environ.get('TRY_SELECTOR') != 'coverage':
             self.log.error("No tests run. Did you pass an invalid --test-path?")
             self.failCount = 1
 

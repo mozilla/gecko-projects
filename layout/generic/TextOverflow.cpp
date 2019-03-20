@@ -61,7 +61,8 @@ static gfxTextRun* GetEllipsisTextRun(nsIFrame* aFrame) {
 }
 
 static nsIFrame* GetSelfOrNearestBlock(nsIFrame* aFrame) {
-  return nsLayoutUtils::GetAsBlock(aFrame)
+  MOZ_ASSERT(aFrame);
+  return aFrame->IsBlockFrameOrSubclass()
              ? aFrame
              : nsLayoutUtils::FindNearestBlockAncestor(aFrame);
 }
@@ -70,7 +71,7 @@ static nsIFrame* GetSelfOrNearestBlock(nsIFrame* aFrame) {
 // It's not supposed to be called for block frames since we never
 // process block descendants for text-overflow.
 static bool IsAtomicElement(nsIFrame* aFrame, LayoutFrameType aFrameType) {
-  MOZ_ASSERT(!nsLayoutUtils::GetAsBlock(aFrame) || !aFrame->IsBlockOutside(),
+  MOZ_ASSERT(!aFrame->IsBlockFrameOrSubclass() || !aFrame->IsBlockOutside(),
              "unexpected block frame");
   MOZ_ASSERT(aFrameType != LayoutFrameType::Placeholder,
              "unexpected placeholder frame");
@@ -89,7 +90,7 @@ static bool IsFullyClipped(nsTextFrame* aFrame, nscoord aLeft, nscoord aRight,
 }
 
 static bool IsInlineAxisOverflowVisible(nsIFrame* aFrame) {
-  MOZ_ASSERT(nsLayoutUtils::GetAsBlock(aFrame) != nullptr,
+  MOZ_ASSERT(aFrame && aFrame->IsBlockFrameOrSubclass(),
              "expected a block frame");
 
   nsIFrame* f = aFrame;
@@ -102,7 +103,7 @@ static bool IsInlineAxisOverflowVisible(nsIFrame* aFrame) {
   auto overflow = aFrame->GetWritingMode().IsVertical()
                       ? f->StyleDisplay()->mOverflowY
                       : f->StyleDisplay()->mOverflowX;
-  return overflow == NS_STYLE_OVERFLOW_VISIBLE;
+  return overflow == StyleOverflow::Visible;
 }
 
 static void ClipMarker(const nsRect& aContentArea, const nsRect& aMarkerRect,
@@ -195,7 +196,8 @@ class nsDisplayTextOverflowMarker final : public nsDisplayItem {
   virtual bool CreateWebRenderCommands(
       mozilla::wr::DisplayListBuilder& aBuilder,
       mozilla::wr::IpcResourceUpdateQueue& aResources,
-      const StackingContextHelper& aSc, layers::WebRenderLayerManager* aManager,
+      const StackingContextHelper& aSc,
+      layers::RenderRootStateManager* aManager,
       nsDisplayListBuilder* aDisplayListBuilder) override;
 
   NS_DISPLAY_DECL_NAME("TextOverflow", TYPE_TEXT_OVERFLOW)
@@ -266,7 +268,7 @@ void nsDisplayTextOverflowMarker::PaintTextToContext(gfxContext* aCtx,
 bool nsDisplayTextOverflowMarker::CreateWebRenderCommands(
     mozilla::wr::DisplayListBuilder& aBuilder,
     mozilla::wr::IpcResourceUpdateQueue& aResources,
-    const StackingContextHelper& aSc, layers::WebRenderLayerManager* aManager,
+    const StackingContextHelper& aSc, layers::RenderRootStateManager* aManager,
     nsDisplayListBuilder* aDisplayListBuilder) {
   bool snap;
   nsRect bounds = GetBounds(aDisplayListBuilder, &snap);
@@ -297,8 +299,8 @@ TextOverflow::TextOverflow(nsDisplayListBuilder* aBuilder,
       mAdjustForPixelSnapping(false) {
 #ifdef MOZ_XUL
   if (!mScrollableFrame) {
-    nsAtom* pseudoType = aBlockFrame->Style()->GetPseudo();
-    if (pseudoType == nsCSSAnonBoxes::mozXULAnonymousBlock()) {
+    auto pseudoType = aBlockFrame->Style()->GetPseudoType();
+    if (pseudoType == PseudoStyleType::mozXULAnonymousBlock) {
       mScrollableFrame =
           nsLayoutUtils::GetScrollableFrameFor(aBlockFrame->GetParent());
       // nsXULScrollFrame::ClampAndSetBounds rounds to nearest pixels
@@ -314,7 +316,7 @@ TextOverflow::TextOverflow(nsDisplayListBuilder* aBuilder,
     auto scrollbarStyle = mBlockWM.IsVertical()
                               ? mScrollableFrame->GetScrollStyles().mVertical
                               : mScrollableFrame->GetScrollStyles().mHorizontal;
-    mCanHaveInlineAxisScrollbar = scrollbarStyle != NS_STYLE_OVERFLOW_HIDDEN;
+    mCanHaveInlineAxisScrollbar = scrollbarStyle != StyleOverflow::Hidden;
     if (!mAdjustForPixelSnapping) {
       // Scrolling to the end position can leave some text still overflowing due
       // to pixel snapping behaviour in our scrolling code.
@@ -339,7 +341,8 @@ TextOverflow::TextOverflow(nsDisplayListBuilder* aBuilder,
   // has overflow on that side.
 }
 
-/* static */ Maybe<TextOverflow> TextOverflow::WillProcessLines(
+/* static */
+Maybe<TextOverflow> TextOverflow::WillProcessLines(
     nsDisplayListBuilder* aBuilder, nsIFrame* aBlockFrame) {
   // Ignore 'text-overflow' for event and frame visibility processing.
   if (aBuilder->IsForEventDelivery() || aBuilder->IsForFrameVisibility() ||
@@ -758,13 +761,15 @@ void TextOverflow::PruneDisplayListContents(
   aList->AppendToTop(&saved);
 }
 
-/* static */ bool TextOverflow::HasClippedOverflow(nsIFrame* aBlockFrame) {
+/* static */
+bool TextOverflow::HasClippedOverflow(nsIFrame* aBlockFrame) {
   const nsStyleTextReset* style = aBlockFrame->StyleTextReset();
   return style->mTextOverflow.mLeft.mType == NS_STYLE_TEXT_OVERFLOW_CLIP &&
          style->mTextOverflow.mRight.mType == NS_STYLE_TEXT_OVERFLOW_CLIP;
 }
 
-/* static */ bool TextOverflow::CanHaveTextOverflow(nsIFrame* aBlockFrame) {
+/* static */
+bool TextOverflow::CanHaveTextOverflow(nsIFrame* aBlockFrame) {
   // Nothing to do for text-overflow:clip or if 'overflow-x/y:visible'.
   if (HasClippedOverflow(aBlockFrame) ||
       IsInlineAxisOverflowVisible(aBlockFrame)) {

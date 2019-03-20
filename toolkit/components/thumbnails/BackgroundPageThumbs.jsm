@@ -15,8 +15,8 @@ const TELEMETRY_HISTOGRAM_ID_PREFIX = "FX_THUMBNAILS_BG_";
 const ABOUT_NEWTAB_SEGREGATION_PREF = "privacy.usercontext.about_newtab_segregation.enabled";
 
 ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm", this);
-ChromeUtils.import("resource://gre/modules/PageThumbs.jsm");
-ChromeUtils.import("resource://gre/modules/Services.jsm");
+const {PageThumbs, PageThumbsStorage} = ChromeUtils.import("resource://gre/modules/PageThumbs.jsm");
+const {Services} = ChromeUtils.import("resource://gre/modules/Services.jsm");
 
 // possible FX_THUMBNAILS_BG_CAPTURE_DONE_REASON_2 telemetry values
 const TEL_CAPTURE_DONE_OK = 0;
@@ -208,9 +208,11 @@ const BackgroundPageThumbs = {
       }
     };
     webProgress.addProgressListener(this._listener, Ci.nsIWebProgress.NOTIFY_STATE_ALL);
-    let triggeringPrincipal = Services.scriptSecurityManager.getSystemPrincipal();
+    let loadURIOptions = {
+      triggeringPrincipal: Services.scriptSecurityManager.getSystemPrincipal(),
+    };
     wlBrowser.loadURI("chrome://global/content/backgroundPageThumbs.xhtml",
-                      0, null, null, null, triggeringPrincipal);
+                      loadURIOptions);
     this._windowlessContainer = wlBrowser;
 
     return false;
@@ -512,8 +514,9 @@ Capture.prototype = {
         // Clear the data in the private container for thumbnails.
         let privateIdentity =
           ContextualIdentityService.getPrivateIdentity("userContextIdInternal.thumbnail");
-        Services.obs.notifyObservers(null, "clear-origin-attributes-data",
-          JSON.stringify({ userContextId: privateIdentity.userContextId }));
+        if (privateIdentity) {
+          Services.clearData.deleteDataFromOriginAttributesPattern({ userContextId: privateIdentity.userContextId });
+        }
       }
     };
 

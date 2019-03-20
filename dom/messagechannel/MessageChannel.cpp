@@ -11,7 +11,7 @@
 #include "mozilla/dom/Navigator.h"
 #include "mozilla/dom/WorkerRunnable.h"
 #include "nsContentUtils.h"
-#include "nsIDocument.h"
+#include "mozilla/dom/Document.h"
 #include "nsIGlobalObject.h"
 #include "nsIPrincipal.h"
 #include "nsServiceManagerUtils.h"
@@ -39,13 +39,15 @@ JSObject* MessageChannel::WrapObject(JSContext* aCx,
   return MessageChannel_Binding::Wrap(aCx, this, aGivenProto);
 }
 
-/* static */ already_AddRefed<MessageChannel> MessageChannel::Constructor(
+/* static */
+already_AddRefed<MessageChannel> MessageChannel::Constructor(
     const GlobalObject& aGlobal, ErrorResult& aRv) {
   nsCOMPtr<nsIGlobalObject> global = do_QueryInterface(aGlobal.GetAsSupports());
   return Constructor(global, aRv);
 }
 
-/* static */ already_AddRefed<MessageChannel> MessageChannel::Constructor(
+/* static */
+already_AddRefed<MessageChannel> MessageChannel::Constructor(
     nsIGlobalObject* aGlobal, ErrorResult& aRv) {
   MOZ_ASSERT(aGlobal);
 

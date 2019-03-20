@@ -31,6 +31,7 @@ var TelemetryUtils = {
     // General Preferences
     ArchiveEnabled: "toolkit.telemetry.archive.enabled",
     CachedClientId: "toolkit.telemetry.cachedClientID",
+    DisableFuzzingDelay: "toolkit.telemetry.testing.disableFuzzingDelay",
     FirstRun: "toolkit.telemetry.reportingpolicy.firstRun",
     FirstShutdownPingEnabled: "toolkit.telemetry.firstShutdownPing.enabled",
     HealthPingEnabled: "toolkit.telemetry.healthping.enabled",
@@ -216,11 +217,7 @@ var TelemetryUtils = {
    * or (non-monotonic) Date value if this fails back.
    */
   monotonicNow() {
-    try {
-      return Services.telemetry.msSinceProcessStart();
-    } catch (ex) {
-      return Date.now();
-    }
+    return Services.telemetry.msSinceProcessStart();
   },
 
   /**

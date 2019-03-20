@@ -101,9 +101,9 @@ var EXPORTED_SYMBOLS = ["MessageChannel"];
 
 /* globals MessageChannel */
 
-ChromeUtils.import("resource://gre/modules/AppConstants.jsm");
-ChromeUtils.import("resource://gre/modules/ExtensionUtils.jsm");
-ChromeUtils.import("resource://gre/modules/Services.jsm");
+const {AppConstants} = ChromeUtils.import("resource://gre/modules/AppConstants.jsm");
+const {ExtensionUtils} = ChromeUtils.import("resource://gre/modules/ExtensionUtils.jsm");
+const {Services} = ChromeUtils.import("resource://gre/modules/Services.jsm");
 
 ChromeUtils.defineModuleGetter(this, "MessageManagerProxy",
                                "resource://gre/modules/MessageManagerProxy.jsm");
@@ -877,9 +877,9 @@ this.MessageChannel = {
       });
     }
 
-    let responses = handlers.map(handler => {
+    let responses = handlers.map((handler, i) => {
       try {
-        return handler.receiveMessage(data);
+        return handler.receiveMessage(data, i + 1 == handlers.length);
       } catch (e) {
         return Promise.reject(e);
       }

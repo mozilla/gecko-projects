@@ -6,7 +6,7 @@
 
 #include "nsAutoPtr.h"
 #include "nsIDocShell.h"
-#include "nsIDocument.h"
+#include "mozilla/dom/Document.h"
 #include "nsIDocumentLoader.h"
 #include "nsIObserverService.h"
 #include "nsIXULRuntime.h"
@@ -482,7 +482,8 @@ void RequestContextService::Shutdown() {
   sShutdown = true;
 }
 
-/* static */ already_AddRefed<nsIRequestContextService>
+/* static */
+already_AddRefed<nsIRequestContextService>
 RequestContextService::GetOrCreate() {
   MOZ_ASSERT(NS_IsMainThread());
 
@@ -576,7 +577,7 @@ RequestContextService::Observe(nsISupports *subject, const char *topic,
   }
 
   if (!strcmp("content-document-interactive", topic)) {
-    nsCOMPtr<nsIDocument> document(do_QueryInterface(subject));
+    nsCOMPtr<dom::Document> document(do_QueryInterface(subject));
     MOZ_ASSERT(document);
     // We want this be triggered also for iframes, since those track their
     // own request context ids.

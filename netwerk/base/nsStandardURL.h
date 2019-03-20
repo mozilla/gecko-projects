@@ -19,12 +19,11 @@
 #include "mozilla/Attributes.h"
 #include "mozilla/LinkedList.h"
 #include "mozilla/MemoryReporting.h"
-#include "nsIIPCSerializableURI.h"
 #include "nsISensitiveInfoHiddenURI.h"
 #include "nsIURIMutator.h"
 
 #ifdef NS_BUILD_REFCNT_LOGGING
-#define DEBUG_DUMP_URLS_AT_SHUTDOWN
+#  define DEBUG_DUMP_URLS_AT_SHUTDOWN
 #endif
 
 class nsIBinaryInputStream;
@@ -47,7 +46,6 @@ class nsStandardURL : public nsIFileURL,
                       public nsISerializable,
                       public nsIClassInfo,
                       public nsISizeOf,
-                      public nsIIPCSerializableURI,
                       public nsISensitiveInfoHiddenURI
 #ifdef DEBUG_DUMP_URLS_AT_SHUTDOWN
     ,
@@ -66,7 +64,6 @@ class nsStandardURL : public nsIFileURL,
   NS_DECL_NSISTANDARDURL
   NS_DECL_NSISERIALIZABLE
   NS_DECL_NSICLASSINFO
-  NS_DECL_NSIIPCSERIALIZABLEURI
   NS_DECL_NSISENSITIVEINFOHIDDENURI
 
   // nsISizeOf
@@ -301,9 +298,8 @@ class nsStandardURL : public nsIFileURL,
                                   // mDisplayHost has a been initialized, or
                                   // that the hostname is not punycode
 
-  // global objects.  don't use COMPtr as its destructor will cause a
-  // coredump if we leak it.
-  static nsIIDNService *gIDN;
+  // global objects.
+  static StaticRefPtr<nsIIDNService> gIDN;
   static const char gHostLimitDigits[];
   static bool gInitialized;
   static bool gPunycodeHost;

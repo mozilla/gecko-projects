@@ -4,13 +4,13 @@
  */
 
 // Tests using testGenerator are expected to define it themselves.
-/* global testGenerator */
+// Testing functions are expected to call testSteps and its type should either
+// be GeneratorFunction or AsyncFunction
+/* global testGenerator, testSteps:false */
 
 var { "classes": Cc, "interfaces": Ci, "utils": Cu } = Components;
 
-ChromeUtils.import("resource://gre/modules/Services.jsm");
-
-Cu.importGlobalProperties(["Blob"]);
+const {Services} = ChromeUtils.import("resource://gre/modules/Services.jsm");
 
 if (!("self" in this)) {
   this.self = this;
@@ -49,10 +49,30 @@ if (!this.runTest) {
       enableExperimental();
     }
 
-    Cu.importGlobalProperties(["indexedDB", "Blob", "File", "FileReader"]);
+    Cu.importGlobalProperties(["indexedDB"]);
 
-    do_test_pending();
-    testGenerator.next();
+    // In order to support converting tests to using async functions from using
+    // generator functions, we detect async functions by checking the name of
+    // function's constructor.
+    Assert.ok(typeof testSteps === "function",
+              "There should be a testSteps function");
+    if (testSteps.constructor.name === "AsyncFunction") {
+      // Do run our existing cleanup function that would normally be called by
+      // the generator's call to finishTest().
+      registerCleanupFunction(resetTesting);
+
+      add_task(testSteps);
+
+      // Since we defined run_test, we must invoke run_next_test() to start the
+      // async test.
+      run_next_test();
+    } else {
+      Assert.ok(testSteps.constructor.name === "GeneratorFunction",
+                "Unsupported function type");
+
+      do_test_pending();
+      testGenerator.next();
+    }
   };
 }
 
@@ -534,6 +554,68 @@ function getPrincipal(url)
 {
   let uri = Services.io.newURI(url);
   return Services.scriptSecurityManager.createCodebasePrincipal(uri, {});
+}
+
+function expectingSuccess(request) {
+  return new Promise(function(resolve, reject) {
+    request.onerror = function(event) {
+      ok(false, "indexedDB error, '" + event.target.error.name + "'");
+      reject(event);
+    };
+    request.onsuccess = function(event) {
+      resolve(event);
+    };
+    request.onupgradeneeded = function(event) {
+      ok(false, "Got upgrade, but did not expect it!");
+      reject(event);
+    };
+  });
+}
+
+function expectingUpgrade(request) {
+  return new Promise(function(resolve, reject) {
+    request.onerror = function(event) {
+      ok(false, "indexedDB error, '" + event.target.error.name + "'");
+      reject(event);
+    };
+    request.onupgradeneeded = function(event) {
+      resolve(event);
+    };
+    request.onsuccess = function(event) {
+      ok(false, "Got success, but did not expect it!");
+      reject(event);
+    };
+  });
+}
+
+function initChromeOrigin(persistence)
+{
+    let principal = Cc["@mozilla.org/systemprincipal;1"]
+                      .createInstance(Ci.nsIPrincipal);
+    return new Promise(function(resolve) {
+      let request =
+        Services.qms.initStoragesForPrincipal(principal, persistence);
+      request.callback = function() {
+        return resolve(request);
+      };
+    });
+}
+
+// Given a "/"-delimited path relative to the profile directory,
+// return an nsIFile representing the path.  This does not test
+// for the existence of the file or parent directories.
+// It is safe even on Windows where the directory separator is not "/",
+// but make sure you're not passing in a "\"-delimited path.
+function getRelativeFile(relativePath)
+{
+    let profileDir = Services.dirsvc.get("ProfD", Ci.nsIFile);
+
+    let file = profileDir.clone();
+    relativePath.split("/").forEach(function(component) {
+      file.append(component);
+    });
+
+    return file;
 }
 
 var SpecialPowers = {

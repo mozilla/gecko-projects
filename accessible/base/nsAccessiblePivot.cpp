@@ -386,7 +386,7 @@ nsAccessiblePivot::MoveNextByText(TextBoundaryType aBoundary,
     Accessible* childAtOffset = nullptr;
     for (int32_t i = tempStart; i < tempEnd; i++) {
       childAtOffset = text->GetChildAtOffset(i);
-      if (childAtOffset && !childAtOffset->IsText()) {
+      if (childAtOffset && childAtOffset->IsHyperText()) {
         tempEnd = i;
         break;
       }
@@ -394,7 +394,7 @@ nsAccessiblePivot::MoveNextByText(TextBoundaryType aBoundary,
     // If there's an embedded character at the very start of the range, we
     // instead want to traverse into it. So restart the movement with
     // the child as the starting point.
-    if (childAtOffset && !childAtOffset->IsText() &&
+    if (childAtOffset && childAtOffset->IsHyperText() &&
         tempStart == static_cast<int32_t>(childAtOffset->StartOffset())) {
       tempPosition = childAtOffset;
       tempStart = tempEnd = -1;
@@ -847,6 +847,11 @@ nsresult RuleCache::ApplyFilter(Accessible* aAccessible, uint16_t* aResult) {
   if (mPreFilter) {
     uint64_t state = aAccessible->State();
 
+    if ((nsIAccessibleTraversalRule::PREFILTER_PLATFORM_PRUNED & mPreFilter) &&
+        nsAccUtils::MustPrune(aAccessible)) {
+      *aResult |= nsIAccessibleTraversalRule::FILTER_IGNORE_SUBTREE;
+    }
+
     if ((nsIAccessibleTraversalRule::PREFILTER_INVISIBLE & mPreFilter) &&
         (state & states::INVISIBLE))
       return NS_OK;
@@ -879,5 +884,10 @@ nsresult RuleCache::ApplyFilter(Accessible* aAccessible, uint16_t* aResult) {
     if (!matchesRole) return NS_OK;
   }
 
-  return mRule->Match(ToXPC(aAccessible), aResult);
+  uint16_t matchResult = nsIAccessibleTraversalRule::FILTER_IGNORE;
+  nsresult rv = mRule->Match(ToXPC(aAccessible), &matchResult);
+  if (NS_SUCCEEDED(rv)) {
+    *aResult |= matchResult;
+  }
+  return rv;
 }

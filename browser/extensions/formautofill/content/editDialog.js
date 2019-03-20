@@ -8,8 +8,7 @@
 "use strict";
 
 // eslint-disable-next-line no-unused-vars
-ChromeUtils.import("resource://formautofill/FormAutofill.jsm");
-ChromeUtils.import("resource://formautofill/FormAutofillUtils.jsm");
+const {FormAutofill} = ChromeUtils.import("resource://formautofill/FormAutofill.jsm");
 
 ChromeUtils.defineModuleGetter(this, "formAutofillStorage",
                                "resource://formautofill/FormAutofillStorage.jsm");
@@ -25,6 +24,7 @@ class AutofillEditDialog {
   }
 
   async init() {
+    this.updateSaveButtonState();
     this.attachEventListeners();
     // For testing only: signal to tests that the dialog is ready for testing.
     // This is likely no longer needed since retrieving from storage is fully
@@ -108,13 +108,7 @@ class AutofillEditDialog {
    * @param  {DOMEvent} event
    */
   handleInput(event) {
-    // Toggle disabled attribute on the save button based on
-    // whether the form is filled or empty.
-    if (Object.keys(this._elements.fieldContainer.buildFormObject()).length == 0) {
-      this._elements.save.setAttribute("disabled", true);
-    } else {
-      this._elements.save.removeAttribute("disabled");
-    }
+    this.updateSaveButtonState();
   }
 
   /**
@@ -125,6 +119,16 @@ class AutofillEditDialog {
   handleKeyPress(event) {
     if (event.keyCode == KeyEvent.DOM_VK_ESCAPE) {
       window.close();
+    }
+  }
+
+  updateSaveButtonState() {
+    // Toggle disabled attribute on the save button based on
+    // whether the form is filled or empty.
+    if (Object.keys(this._elements.fieldContainer.buildFormObject()).length == 0) {
+      this._elements.save.setAttribute("disabled", true);
+    } else {
+      this._elements.save.removeAttribute("disabled");
     }
   }
 

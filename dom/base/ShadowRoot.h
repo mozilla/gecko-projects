@@ -15,7 +15,6 @@
 #include "mozilla/ServoBindings.h"
 #include "nsCOMPtr.h"
 #include "nsCycleCollectionParticipant.h"
-#include "nsIdentifierMapEntry.h"
 #include "nsIRadioGroupContainer.h"
 #include "nsStubMutationObserver.h"
 #include "nsTHashtable.h"
@@ -191,7 +190,7 @@ class ShadowRoot final : public DocumentFragment,
 
   void SetIsUAWidget() {
     MOZ_ASSERT(!HasChildren());
-    SetFlags(NODE_IS_ROOT_OF_CHROME_ONLY_ACCESS | NODE_CHROME_ONLY_ACCESS);
+    SetFlags(NODE_HAS_BEEN_IN_UA_WIDGET);
     mIsUAWidget = true;
   }
 

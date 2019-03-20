@@ -69,13 +69,25 @@ class JitContext {
   // Wrappers with information about the current runtime/realm for use
   // during compilation.
   CompileRuntime* runtime;
-  CompileRealm* realm;
-  CompileZone* zone;
 
   int getNextAssemblerId() { return assemblerCount_++; }
 
+  CompileRealm* maybeRealm() const { return realm_; }
+  CompileRealm* realm() const {
+    MOZ_ASSERT(maybeRealm());
+    return maybeRealm();
+  }
+
+#ifdef DEBUG
+  bool isCompilingWasm() { return isCompilingWasm_; }
+#endif
+
  private:
   JitContext* prev_;
+  CompileRealm* realm_;
+#ifdef DEBUG
+  bool isCompilingWasm_;
+#endif
   int assemblerCount_;
 };
 
@@ -148,8 +160,7 @@ void LinkIonScript(JSContext* cx, HandleScript calleescript);
 uint8_t* LazyLinkTopActivation(JSContext* cx, LazyLinkExitFrameLayout* frame);
 
 static inline bool IsIonEnabled(JSContext* cx) {
-  // The ARM64 Ion engine is not yet implemented.
-#if defined(JS_CODEGEN_NONE) || defined(JS_CODEGEN_ARM64)
+#if defined(JS_CODEGEN_NONE)
   return false;
 #else
   return cx->options().ion() && cx->options().baseline() &&
@@ -157,12 +168,17 @@ static inline bool IsIonEnabled(JSContext* cx) {
 #endif
 }
 
+inline bool IsIonInlinableGetterOrSetterPC(jsbytecode* pc) {
+  // GETPROP, CALLPROP, LENGTH, GETELEM, and JSOP_CALLELEM. (Inlined Getters)
+  // SETPROP, SETNAME, SETGNAME (Inlined Setters)
+  return IsGetPropPC(pc) || IsGetElemPC(pc) || IsSetPropPC(pc);
+}
+
 inline bool IsIonInlinablePC(jsbytecode* pc) {
   // CALL, FUNCALL, FUNAPPLY, EVAL, NEW (Normal Callsites)
-  // GETPROP, CALLPROP, and LENGTH. (Inlined Getters)
-  // SETPROP, SETNAME, SETGNAME (Inlined Setters)
-  return (IsCallPC(pc) && !IsSpreadCallPC(pc)) || IsGetPropPC(pc) ||
-         IsSetPropPC(pc);
+  // or an inlinable getter or setter.
+  return (IsCallPC(pc) && !IsSpreadCallPC(pc)) ||
+         IsIonInlinableGetterOrSetterPC(pc);
 }
 
 inline bool TooManyActualArguments(unsigned nargs) {

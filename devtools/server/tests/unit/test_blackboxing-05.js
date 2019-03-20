@@ -41,7 +41,7 @@ function test_black_box() {
   /* eslint-disable no-multi-spaces, no-unreachable, no-undef */
   Cu.evalInSandbox(
     "" + function doStuff(k) {                                   // line 1
-      throw new Error("wu tang clan ain't nuthin' ta fuck wit"); // line 2
+      throw new Error("error msg");                              // line 2
       k(100);                                                    // line 3
     },                                                           // line 4
     gDebuggee,
@@ -69,23 +69,20 @@ function test_black_box() {
 }
 
 function test_black_box_exception() {
-  gThreadClient.getSources(function({error, sources}) {
+  gThreadClient.getSources(async function({error, sources}) {
     Assert.ok(!error, "Should not get an error: " + error);
-    const sourceClient = gThreadClient.source(
-      sources.filter(s => s.url == BLACK_BOXED_URL)[0]
-    );
+    const sourceClient = await getSource(gThreadClient, BLACK_BOXED_URL);
+    await blackBox(sourceClient);
+    gThreadClient.pauseOnExceptions(true, false);
 
-    sourceClient.blackBox(function({error}) {
-      Assert.ok(!error, "Should not get an error: " + error);
-      gThreadClient.pauseOnExceptions(true);
+    gClient.addOneTimeListener("paused", async function(event, packet) {
+      const source = await getSourceById(gThreadClient, packet.frame.where.actor);
 
-      gClient.addOneTimeListener("paused", function(event, packet) {
-        Assert.equal(packet.frame.where.source.url, SOURCE_URL,
-                     "We shouldn't pause while in the black boxed source.");
-        finishClient(gClient);
-      });
-
-      gThreadClient.resume();
+      Assert.equal(source.url, SOURCE_URL,
+                   "We shouldn't pause while in the black boxed source.");
+      finishClient(gClient);
     });
+
+    gThreadClient.resume();
   });
 }

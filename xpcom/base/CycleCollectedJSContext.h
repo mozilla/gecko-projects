@@ -15,7 +15,7 @@
 #include "mozilla/MemoryReporting.h"
 #include "mozilla/dom/AtomList.h"
 #include "jsapi.h"
-#include "jsfriendapi.h"
+#include "js/Promise.h"
 
 #include "nsCOMPtr.h"
 #include "nsCycleCollectionParticipant.h"
@@ -73,18 +73,19 @@ struct CycleCollectorResults {
 
 class MicroTaskRunnable {
  public:
-  MicroTaskRunnable() {}
+  MicroTaskRunnable() = default;
   NS_INLINE_DECL_REFCOUNTING(MicroTaskRunnable)
   virtual void Run(AutoSlowOperation& aAso) = 0;
   virtual bool Suppressed() { return false; }
 
  protected:
-  virtual ~MicroTaskRunnable() {}
+  virtual ~MicroTaskRunnable() = default;
 };
 
 class CycleCollectedJSContext
     : dom::PerThreadAtomCache,
-      public LinkedListElement<CycleCollectedJSContext> {
+      public LinkedListElement<CycleCollectedJSContext>,
+      private JS::JobQueue {
   friend class CycleCollectedJSRuntime;
 
  protected:
@@ -169,9 +170,9 @@ class CycleCollectedJSContext
   virtual void AfterProcessTask(uint32_t aRecursionDepth);
 
   // Check whether we need an idle GC task.
-  void IsIdleGCTaskNeeded();
+  void IsIdleGCTaskNeeded() const;
 
-  uint32_t RecursionDepth();
+  uint32_t RecursionDepth() const;
 
   // Run in stable state (call through nsContentUtils)
   void RunInStableState(already_AddRefed<nsIRunnable>&& aRunnable);
@@ -201,9 +202,9 @@ class CycleCollectedJSContext
     }
   }
 
-  bool IsInMicroTask() { return mMicroTaskLevel != 0; }
+  bool IsInMicroTask() const { return mMicroTaskLevel != 0; }
 
-  uint32_t MicroTaskLevel() { return mMicroTaskLevel; }
+  uint32_t MicroTaskLevel() const { return mMicroTaskLevel; }
 
   void SetMicroTaskLevel(uint32_t aLevel) { mMicroTaskLevel = aLevel; }
 
@@ -211,7 +212,7 @@ class CycleCollectedJSContext
 
   void PerformDebuggerMicroTaskCheckpoint();
 
-  bool IsInStableOrMetaStableState() { return mDoingStableStates; }
+  bool IsInStableOrMetaStableState() const { return mDoingStableStates; }
 
   // Storage for watching rejected promises waiting for some client to
   // consume their rejection.
@@ -231,6 +232,21 @@ class CycleCollectedJSContext
       mUncaughtRejectionObservers;
 
   virtual bool IsSystemCaller() const = 0;
+
+ private:
+  // JS::JobQueue implementation: see js/public/Promise.h.
+  // SpiderMonkey uses some of these methods to enqueue promise resolution jobs.
+  // Others protect the debuggee microtask queue from the debugger's
+  // interruptions; see the comments on JS::AutoDebuggerJobQueueInterruption for
+  // details.
+  JSObject* getIncumbentGlobal(JSContext* cx) override;
+  bool enqueuePromiseJob(JSContext* cx, JS::HandleObject promise,
+                         JS::HandleObject job, JS::HandleObject allocationSite,
+                         JS::HandleObject incumbentGlobal) override;
+  void runJobs(JSContext* cx) override;
+  bool empty() const override;
+  class SavedMicroTaskQueue;
+  js::UniquePtr<SavedJobQueue> saveJobQueue(JSContext*) override;
 
  private:
   // A primary context owns the mRuntime. Non-main-thread contexts should always

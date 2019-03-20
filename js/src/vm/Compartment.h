@@ -23,10 +23,6 @@
 
 namespace js {
 
-namespace gc {
-struct ZoneComponentFinder;
-}  // namespace gc
-
 class CrossCompartmentKey {
  public:
   enum DebuggerObjectKind : uint8_t {
@@ -87,29 +83,23 @@ class CrossCompartmentKey {
   }
 
   template <typename F>
-  auto applyToWrapped(F f) -> decltype(f(static_cast<JSObject**>(nullptr))) {
-    using ReturnType = decltype(f(static_cast<JSObject**>(nullptr)));
+  auto applyToWrapped(F f) {
     struct WrappedMatcher {
       F f_;
       explicit WrappedMatcher(F f) : f_(f) {}
-      ReturnType match(JSObject*& obj) { return f_(&obj); }
-      ReturnType match(JSString*& str) { return f_(&str); }
-      ReturnType match(DebuggerAndScript& tpl) {
+      auto match(JSObject*& obj) { return f_(&obj); }
+      auto match(JSString*& str) { return f_(&str); }
+      auto match(DebuggerAndScript& tpl) { return f_(&mozilla::Get<1>(tpl)); }
+      auto match(DebuggerAndLazyScript& tpl) {
         return f_(&mozilla::Get<1>(tpl));
       }
-      ReturnType match(DebuggerAndLazyScript& tpl) {
-        return f_(&mozilla::Get<1>(tpl));
-      }
-      ReturnType match(DebuggerAndObject& tpl) {
-        return f_(&mozilla::Get<1>(tpl));
-      }
+      auto match(DebuggerAndObject& tpl) { return f_(&mozilla::Get<1>(tpl)); }
     } matcher(f);
     return wrapped.match(matcher);
   }
 
   template <typename F>
-  auto applyToDebugger(F f)
-      -> decltype(f(static_cast<NativeObject**>(nullptr))) {
+  auto applyToDebugger(F f) {
     using ReturnType = decltype(f(static_cast<NativeObject**>(nullptr)));
     struct DebuggerMatcher {
       F f_;
@@ -130,19 +120,7 @@ class CrossCompartmentKey {
   }
 
   JS::Compartment* compartment() {
-    struct GetCompartmentFunctor {
-      JS::Compartment* operator()(JSObject** tp) const {
-        return (*tp)->compartment();
-      }
-      JS::Compartment* operator()(JSScript** tp) const {
-        return (*tp)->compartment();
-      }
-      JS::Compartment* operator()(LazyScript** tp) const {
-        return (*tp)->compartment();
-      }
-      JS::Compartment* operator()(JSString** tp) const { return nullptr; }
-    };
-    return applyToWrapped(GetCompartmentFunctor());
+    return applyToWrapped([](auto tp) { return (*tp)->maybeCompartment(); });
   }
 
   struct Hasher : public DefaultHasher<CrossCompartmentKey> {
@@ -178,15 +156,8 @@ class CrossCompartmentKey {
   };
 
   bool isTenured() const {
-    struct IsTenuredFunctor {
-      using ReturnType = bool;
-      ReturnType operator()(JSObject** tp) { return !IsInsideNursery(*tp); }
-      ReturnType operator()(JSScript** tp) { return true; }
-      ReturnType operator()(LazyScript** tp) { return true; }
-      ReturnType operator()(JSString** tp) { return !IsInsideNursery(*tp); }
-    };
-    return const_cast<CrossCompartmentKey*>(this)->applyToWrapped(
-        IsTenuredFunctor());
+    auto self = const_cast<CrossCompartmentKey*>(this);
+    return self->applyToWrapped([](auto tp) { return (*tp)->isTenured(); });
   }
 
   void trace(JSTracer* trc);
@@ -410,6 +381,7 @@ class WrapperMap {
 class JS::Compartment {
   JS::Zone* zone_;
   JSRuntime* runtime_;
+  bool invisibleToDebugger_;
 
   js::WrapperMap crossCompartmentWrappers;
 
@@ -446,6 +418,12 @@ class JS::Compartment {
     bool hasEnteredRealm = false;
   } gcState;
 
+  // True if all outgoing wrappers have been nuked. This happens when all realms
+  // have been nuked and NukeCrossCompartmentWrappers is called with the
+  // NukeAllReferences option. This prevents us from creating new wrappers for
+  // the compartment.
+  bool nukedOutgoingWrappers = false;
+
   JS::Zone* zone() { return zone_; }
   const JS::Zone* zone() const { return zone_; }
 
@@ -458,7 +436,21 @@ class JS::Compartment {
   // thread can easily lead to races. Use this method very carefully.
   JSRuntime* runtimeFromAnyThread() const { return runtime_; }
 
+  // Certain compartments are implementation details of the embedding, and
+  // references to them should never leak out to script. For realms belonging to
+  // this compartment, onNewGlobalObject does not fire, and addDebuggee is a
+  // no-op.
+  bool invisibleToDebugger() const { return invisibleToDebugger_; }
+
   RealmVector& realms() { return realms_; }
+
+  // Cross-compartment wrappers are shared by all realms in the compartment, but
+  // they still have a per-realm ObjectGroup etc. To prevent us from having
+  // multiple realms, each with some cross-compartment wrappers potentially
+  // keeping the realm alive longer than necessary, we always allocate CCWs in
+  // the first realm.
+  js::GlobalObject& firstGlobal() const;
+  js::GlobalObject& globalForNewCCW() const { return firstGlobal(); }
 
   void assertNoCrossCompartmentWrappers() {
     MOZ_ASSERT(crossCompartmentWrappers.empty());
@@ -480,16 +472,14 @@ class JS::Compartment {
                           js::MutableHandleObject obj);
 
  public:
-  explicit Compartment(JS::Zone* zone);
+  explicit Compartment(JS::Zone* zone, bool invisibleToDebugger);
 
   void destroy(js::FreeOp* fop);
 
   MOZ_MUST_USE inline bool wrap(JSContext* cx, JS::MutableHandleValue vp);
 
   MOZ_MUST_USE bool wrap(JSContext* cx, js::MutableHandleString strp);
-#ifdef ENABLE_BIGINT
   MOZ_MUST_USE bool wrap(JSContext* cx, js::MutableHandle<JS::BigInt*> bi);
-#endif
   MOZ_MUST_USE bool wrap(JSContext* cx, JS::MutableHandleObject obj);
   MOZ_MUST_USE bool wrap(JSContext* cx,
                          JS::MutableHandle<JS::PropertyDescriptor> desc);
@@ -558,7 +548,7 @@ class JS::Compartment {
   static void fixupCrossCompartmentWrappersAfterMovingGC(JSTracer* trc);
   void fixupAfterMovingGC();
 
-  void findOutgoingEdges(js::gc::ZoneComponentFinder& finder);
+  MOZ_MUST_USE bool findSweepGroupEdges();
 };
 
 namespace js {

@@ -9,6 +9,7 @@
 #include <utility>
 
 #include "js/CompilationAndEvaluation.h"
+#include "js/ContextOptions.h"
 #include "js/LocaleSensitive.h"
 #include "js/MemoryMetrics.h"
 #include "js/SourceText.h"
@@ -58,6 +59,7 @@
 #include "ScriptLoader.h"
 #include "mozilla/dom/ServiceWorkerEvents.h"
 #include "mozilla/dom/ServiceWorkerManager.h"
+#include "mozilla/net/CookieSettings.h"
 #include "WorkerCSPEventListener.h"
 #include "WorkerDebugger.h"
 #include "WorkerDebuggerManager.h"
@@ -72,7 +74,7 @@
 #include "nsThreadManager.h"
 
 #ifdef XP_WIN
-#undef PostMessage
+#  undef PostMessage
 #endif
 
 // JS_MaybeGC will run once every second during normal execution.
@@ -89,7 +91,7 @@ mozilla::LogModule* WorkerLog() { return sWorkerPrivateLog; }
 mozilla::LogModule* TimeoutsLog() { return sWorkerTimeoutsLog; }
 
 #ifdef LOG
-#undef LOG
+#  undef LOG
 #endif
 #define LOG(log, _args) MOZ_LOG(log, LogLevel::Debug, _args);
 
@@ -298,13 +300,14 @@ class ModifyBusyCountRunnable final : public WorkerControlRunnable {
   }
 };
 
-class CompileScriptRunnable final : public WorkerRunnable {
+class CompileScriptRunnable final : public WorkerDebuggeeRunnable {
   nsString mScriptURL;
 
  public:
   explicit CompileScriptRunnable(WorkerPrivate* aWorkerPrivate,
                                  const nsAString& aScriptURL)
-      : WorkerRunnable(aWorkerPrivate), mScriptURL(aScriptURL) {}
+      : WorkerDebuggeeRunnable(aWorkerPrivate, WorkerThreadModifyBusyCount),
+        mScriptURL(aScriptURL) {}
 
  private:
   // We can't implement PreRun effectively, because at the point when that would
@@ -1030,8 +1033,8 @@ class WorkerPrivate::MemoryReporter final : public nsIMemoryReporter {
 
       WorkerPrivate* workerPrivate = GetCurrentThreadWorkerPrivate();
       MOZ_ASSERT(workerPrivate);
-      MOZ_ALWAYS_SUCCEEDS(
-          workerPrivate->DispatchToMainThread(mFinishCollectRunnable.forget()));
+      MOZ_ALWAYS_SUCCEEDS(workerPrivate->DispatchToMainThreadForMessaging(
+          mFinishCollectRunnable.forget()));
     }
   };
 
@@ -1225,7 +1228,7 @@ WorkerPrivate::SyncLoopInfo::SyncLoopInfo(EventTarget* aEventTarget)
 {
 }
 
-nsIDocument* WorkerPrivate::GetDocument() const {
+Document* WorkerPrivate::GetDocument() const {
   AssertIsOnMainThread();
   if (mLoadInfo.mWindow) {
     return mLoadInfo.mWindow->GetExtantDoc();
@@ -1331,51 +1334,59 @@ void WorkerPrivate::Traverse(nsCycleCollectionTraversalCallback& aCb) {
 nsresult WorkerPrivate::Dispatch(already_AddRefed<WorkerRunnable> aRunnable,
                                  nsIEventTarget* aSyncLoopTarget) {
   // May be called on any thread!
+  MutexAutoLock lock(mMutex);
+  return DispatchLockHeld(std::move(aRunnable), aSyncLoopTarget, lock);
+}
+
+nsresult WorkerPrivate::DispatchLockHeld(
+    already_AddRefed<WorkerRunnable> aRunnable, nsIEventTarget* aSyncLoopTarget,
+    const MutexAutoLock& aProofOfLock) {
+  // May be called on any thread!
   RefPtr<WorkerRunnable> runnable(aRunnable);
 
-  {
-    MutexAutoLock lock(mMutex);
+  MOZ_ASSERT_IF(aSyncLoopTarget, mThread);
 
-    MOZ_ASSERT_IF(aSyncLoopTarget, mThread);
-
-    if (!mThread) {
-      if (ParentStatus() == Pending || mStatus == Pending) {
-        mPreStartRunnables.AppendElement(runnable);
-        return NS_OK;
-      }
-
-      NS_WARNING(
-          "Using a worker event target after the thread has already"
-          "been released!");
-      return NS_ERROR_UNEXPECTED;
-    }
-
-    if (mStatus == Dead || (!aSyncLoopTarget && ParentStatus() > Running)) {
-      NS_WARNING(
-          "A runnable was posted to a worker that is already shutting "
-          "down!");
-      return NS_ERROR_UNEXPECTED;
-    }
-
-    nsresult rv;
-    if (aSyncLoopTarget) {
-      rv = aSyncLoopTarget->Dispatch(runnable.forget(), NS_DISPATCH_NORMAL);
-    } else {
-      // WorkerDebuggeeRunnables don't need any special treatment here. True,
-      // they should not be delivered to a frozen worker. But frozen workers
-      // aren't drawing from the thread's main event queue anyway, only from
-      // mControlQueue.
-      rv = mThread->DispatchAnyThread(WorkerThreadFriendKey(),
-                                      runnable.forget());
-    }
-
-    if (NS_WARN_IF(NS_FAILED(rv))) {
-      return rv;
-    }
-
-    mCondVar.Notify();
+  if (mStatus == Dead || (!aSyncLoopTarget && ParentStatus() > Running)) {
+    NS_WARNING(
+        "A runnable was posted to a worker that is already shutting "
+        "down!");
+    return NS_ERROR_UNEXPECTED;
   }
 
+  if (runnable->IsDebuggeeRunnable() && !mDebuggerReady) {
+    MOZ_RELEASE_ASSERT(!aSyncLoopTarget);
+    mDelayedDebuggeeRunnables.AppendElement(runnable);
+    return NS_OK;
+  }
+
+  if (!mThread) {
+    if (ParentStatus() == Pending || mStatus == Pending) {
+      mPreStartRunnables.AppendElement(runnable);
+      return NS_OK;
+    }
+
+    NS_WARNING(
+        "Using a worker event target after the thread has already"
+        "been released!");
+    return NS_ERROR_UNEXPECTED;
+  }
+
+  nsresult rv;
+  if (aSyncLoopTarget) {
+    rv = aSyncLoopTarget->Dispatch(runnable.forget(), NS_DISPATCH_NORMAL);
+  } else {
+    // WorkerDebuggeeRunnables don't need any special treatment here. True,
+    // they should not be delivered to a frozen worker. But frozen workers
+    // aren't drawing from the thread's main event queue anyway, only from
+    // mControlQueue.
+    rv = mThread->DispatchAnyThread(WorkerThreadFriendKey(), runnable.forget());
+  }
+
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return rv;
+  }
+
+  mCondVar.Notify();
   return NS_OK;
 }
 
@@ -2060,6 +2071,7 @@ WorkerPrivate::WorkerPrivate(WorkerPrivate* aParent,
       mIsSecureContext(
           IsNewWorkerSecureContext(mParent, mWorkerType, mLoadInfo)),
       mDebuggerRegistered(false),
+      mDebuggerReady(true),
       mIsInAutomation(false),
       mPerformanceCounter(nullptr) {
   MOZ_ASSERT_IF(!IsDedicatedWorker(), NS_IsMainThread());
@@ -2113,6 +2125,8 @@ WorkerPrivate::WorkerPrivate(WorkerPrivate* aParent,
   // that ThrottledEventQueue can only be created on the main thread at the
   // moment.
   if (aParent) {
+    mMainThreadEventTargetForMessaging =
+        aParent->mMainThreadEventTargetForMessaging;
     mMainThreadEventTarget = aParent->mMainThreadEventTarget;
     mMainThreadDebuggeeEventTarget = aParent->mMainThreadDebuggeeEventTarget;
     return;
@@ -2129,7 +2143,14 @@ WorkerPrivate::WorkerPrivate(WorkerPrivate* aParent,
 
   // Throttle events to the main thread using a ThrottledEventQueue specific to
   // this tree of worker threads.
-  mMainThreadEventTarget = ThrottledEventQueue::Create(target);
+  mMainThreadEventTargetForMessaging = ThrottledEventQueue::Create(target);
+  if (StaticPrefs::dom_worker_use_medium_high_event_queue()) {
+    mMainThreadEventTarget =
+        ThrottledEventQueue::Create(GetMainThreadSerialEventTarget(),
+                                    nsIRunnablePriority::PRIORITY_MEDIUMHIGH);
+  } else {
+    mMainThreadEventTarget = mMainThreadEventTargetForMessaging;
+  }
   mMainThreadDebuggeeEventTarget = ThrottledEventQueue::Create(target);
   if (IsParentWindowPaused() || IsFrozen()) {
     MOZ_ALWAYS_SUCCEEDS(mMainThreadDebuggeeEventTarget->SetIsPaused(true));
@@ -2242,6 +2263,37 @@ already_AddRefed<WorkerPrivate> WorkerPrivate::Constructor(
   return worker.forget();
 }
 
+nsresult WorkerPrivate::SetIsDebuggerReady(bool aReady) {
+  AssertIsOnParentThread();
+  MutexAutoLock lock(mMutex);
+
+  if (mDebuggerReady == aReady) {
+    return NS_OK;
+  }
+
+  if (!aReady && mDebuggerRegistered) {
+    // The debugger can only be marked as not ready during registration.
+    return NS_ERROR_FAILURE;
+  }
+
+  mDebuggerReady = aReady;
+
+  if (aReady && mDebuggerRegistered) {
+    // Dispatch all the delayed runnables without releasing the lock, to ensure
+    // that the order in which debuggee runnables execute is the same as the
+    // order in which they were originally dispatched.
+    auto pending = std::move(mDelayedDebuggeeRunnables);
+    for (uint32_t i = 0; i < pending.Length(); i++) {
+      RefPtr<WorkerRunnable> runnable = pending[i].forget();
+      nsresult rv = DispatchLockHeld(runnable.forget(), nullptr, lock);
+      NS_ENSURE_SUCCESS(rv, rv);
+    }
+    MOZ_RELEASE_ASSERT(mDelayedDebuggeeRunnables.IsEmpty());
+  }
+
+  return NS_OK;
+}
+
 // static
 nsresult WorkerPrivate::GetLoadInfo(JSContext* aCx, nsPIDOMWindowInner* aWindow,
                                     WorkerPrivate* aParent,
@@ -2339,7 +2391,7 @@ nsresult WorkerPrivate::GetLoadInfo(JSContext* aCx, nsPIDOMWindowInner* aWindow,
       globalWindow = xpc::CurrentWindowOrNull(aCx);
     }
 
-    nsCOMPtr<nsIDocument> document;
+    nsCOMPtr<Document> document;
     Maybe<ClientInfo> clientInfo;
 
     if (globalWindow) {
@@ -2388,7 +2440,7 @@ nsresult WorkerPrivate::GetLoadInfo(JSContext* aCx, nsPIDOMWindowInner* aWindow,
         // one. If we can't find one, we fall back to using the GUID of the
         // null principal as the base domain.
         if (document->GetSandboxFlags() & SANDBOXED_ORIGIN) {
-          nsCOMPtr<nsIDocument> tmpDoc = document;
+          nsCOMPtr<Document> tmpDoc = document;
           do {
             tmpDoc = tmpDoc->GetParentDocument();
           } while (tmpDoc && tmpDoc->GetSandboxFlags() & SANDBOXED_ORIGIN);
@@ -2419,8 +2471,8 @@ nsresult WorkerPrivate::GetLoadInfo(JSContext* aCx, nsPIDOMWindowInner* aWindow,
       NS_ENSURE_SUCCESS(rv, rv);
 
       uint32_t perm;
-      rv = permMgr->TestPermissionFromPrincipal(loadInfo.mLoadingPrincipal,
-                                                "systemXHR", &perm);
+      rv = permMgr->TestPermissionFromPrincipal(
+          loadInfo.mLoadingPrincipal, NS_LITERAL_CSTRING("systemXHR"), &perm);
       NS_ENSURE_SUCCESS(rv, rv);
 
       loadInfo.mXHRParamsAllowed = perm == nsIPermissionManager::ALLOW_ACTION;
@@ -2430,6 +2482,7 @@ nsresult WorkerPrivate::GetLoadInfo(JSContext* aCx, nsPIDOMWindowInner* aWindow,
       nsContentUtils::StorageAccess access =
           nsContentUtils::StorageAllowedForWindow(globalWindow);
       loadInfo.mStorageAllowed = access > nsContentUtils::StorageAccess::eDeny;
+      loadInfo.mCookieSettings = document->CookieSettings();
       loadInfo.mOriginAttributes =
           nsContentUtils::GetOriginAttributes(document);
       loadInfo.mParentController = globalWindow->GetController();
@@ -2475,6 +2528,9 @@ nsresult WorkerPrivate::GetLoadInfo(JSContext* aCx, nsPIDOMWindowInner* aWindow,
       loadInfo.mFromWindow = false;
       loadInfo.mWindowID = UINT64_MAX;
       loadInfo.mStorageAllowed = true;
+      loadInfo.mCookieSettings = mozilla::net::CookieSettings::Create();
+      MOZ_ASSERT(loadInfo.mCookieSettings);
+
       loadInfo.mOriginAttributes = OriginAttributes();
     }
 
@@ -2494,10 +2550,10 @@ nsresult WorkerPrivate::GetLoadInfo(JSContext* aCx, nsPIDOMWindowInner* aWindow,
         getter_AddRefs(url), aScriptURL, document, loadInfo.mBaseURI);
     NS_ENSURE_SUCCESS(rv, NS_ERROR_DOM_SYNTAX_ERR);
 
-    rv = ChannelFromScriptURLMainThread(loadInfo.mLoadingPrincipal, document,
-                                        loadInfo.mLoadGroup, url, clientInfo,
-                                        ContentPolicyType(aWorkerType),
-                                        getter_AddRefs(loadInfo.mChannel));
+    rv = ChannelFromScriptURLMainThread(
+        loadInfo.mLoadingPrincipal, document, loadInfo.mLoadGroup, url,
+        clientInfo, ContentPolicyType(aWorkerType), loadInfo.mCookieSettings,
+        getter_AddRefs(loadInfo.mChannel));
     NS_ENSURE_SUCCESS(rv, rv);
 
     rv = NS_GetFinalChannelURI(loadInfo.mChannel,
@@ -2571,9 +2627,15 @@ void WorkerPrivate::DoRunLoop(JSContext* aCx) {
     {
       MutexAutoLock lock(mMutex);
 
+      // Wait for a runnable to arrive that we can execute, or for it to be okay
+      // to shutdown this worker once all holders have been removed.
+      // Holders may be removed from inside normal runnables, but we don't check
+      // for that after processing normal runnables, so we need to let control
+      // flow to the shutdown logic without blocking.
       while (mControlQueue.IsEmpty() &&
              !(debuggerRunnablesPending = !mDebuggerQueue.IsEmpty()) &&
-             !(normalRunnablesPending = NS_HasPendingEvents(mThread))) {
+             !(normalRunnablesPending = NS_HasPendingEvents(mThread)) &&
+             !(mStatus != Running && !HasActiveHolders())) {
         WaitForWorkerEvents();
       }
 
@@ -2699,10 +2761,11 @@ void WorkerPrivate::DoRunLoop(JSContext* aCx) {
     // If the worker thread is spamming the main thread faster than it can
     // process the work, then pause the worker thread until the main thread
     // catches up.
-    size_t queuedEvents = mMainThreadEventTarget->Length() +
+    size_t queuedEvents = mMainThreadEventTargetForMessaging->Length() +
                           mMainThreadDebuggeeEventTarget->Length();
     if (queuedEvents > 5000) {
-      mMainThreadEventTarget->AwaitIdle();
+      // Note, postMessage uses mMainThreadDebuggeeEventTarget!
+      mMainThreadDebuggeeEventTarget->AwaitIdle();
     }
   }
 
@@ -2729,6 +2792,22 @@ void WorkerPrivate::OnProcessNextEvent() {
 void WorkerPrivate::AfterProcessNextEvent() {
   AssertIsOnWorkerThread();
   MOZ_ASSERT(CycleCollectedJSContext::Get()->RecursionDepth());
+}
+
+nsIEventTarget* WorkerPrivate::MainThreadEventTargetForMessaging() {
+  return mMainThreadEventTargetForMessaging;
+}
+
+nsresult WorkerPrivate::DispatchToMainThreadForMessaging(nsIRunnable* aRunnable,
+                                                         uint32_t aFlags) {
+  nsCOMPtr<nsIRunnable> r = aRunnable;
+  return DispatchToMainThreadForMessaging(r.forget(), aFlags);
+}
+
+nsresult WorkerPrivate::DispatchToMainThreadForMessaging(
+    already_AddRefed<nsIRunnable> aRunnable, uint32_t aFlags) {
+  return mMainThreadEventTargetForMessaging->Dispatch(std::move(aRunnable),
+                                                      aFlags);
 }
 
 nsIEventTarget* WorkerPrivate::MainThreadEventTarget() {
@@ -2991,6 +3070,13 @@ void WorkerPrivate::ShutdownGCTimers() {
 bool WorkerPrivate::InterruptCallback(JSContext* aCx) {
   MOZ_ACCESS_THREAD_BOUND(mWorkerThreadAccessible, data);
 
+  // If we are here it's because a WorkerControlRunnable has been dispatched.
+  // The runnable could be processed here or it could have already been
+  // processed by a sync event loop.
+  // The most important thing this method must do, is to decide if the JS
+  // execution should continue or not. If the runnable returns an error or if
+  // the worker status is >= Canceling, we should stop the JS execution.
+
   MOZ_ASSERT(!JS_IsExceptionPending(aCx));
 
   bool mayContinue = true;
@@ -3004,9 +3090,17 @@ bool WorkerPrivate::InterruptCallback(JSContext* aCx) {
     }
 
     bool mayFreeze = data->mFrozen;
-    if (mayFreeze) {
+
+    {
       MutexAutoLock lock(mMutex);
-      mayFreeze = mStatus <= Running;
+
+      if (mayFreeze) {
+        mayFreeze = mStatus <= Running;
+      }
+
+      if (mStatus >= Canceling) {
+        mayContinue = false;
+      }
     }
 
     if (!mayContinue || !mayFreeze) {
@@ -3081,9 +3175,12 @@ void WorkerPrivate::ScheduleDeletion(WorkerRanOrNot aRanOrNot) {
       NS_WARNING("Failed to dispatch runnable!");
     }
   } else {
+    // Note, this uses the lower priority DispatchToMainThreadForMessaging for
+    // dispatching TopLevelWorkerFinishedRunnable to the main thread so that
+    // other relevant runnables are guaranteed to run before it.
     RefPtr<TopLevelWorkerFinishedRunnable> runnable =
         new TopLevelWorkerFinishedRunnable(this);
-    if (NS_FAILED(DispatchToMainThread(runnable.forget()))) {
+    if (NS_FAILED(DispatchToMainThreadForMessaging(runnable.forget()))) {
       NS_WARNING("Failed to dispatch runnable!");
     }
   }
@@ -3510,10 +3607,11 @@ bool WorkerPrivate::RunCurrentSyncLoop() {
 
         auto result = ProcessAllControlRunnablesLocked();
         if (result != ProcessAllControlRunnablesResult::Nothing) {
-          // XXXkhuey how should we handle Abort here? See Bug 1003730.
-
-          // The state of the world may have changed. Recheck it.
-          normalRunnablesPending = NS_HasPendingEvents(mThread);
+          // The state of the world may have changed. Recheck it if we need to
+          // continue.
+          normalRunnablesPending =
+              result == ProcessAllControlRunnablesResult::MayContinue &&
+              NS_HasPendingEvents(mThread);
 
           // NB: If we processed a NotifyRunnable, we might have run
           // non-control runnables, one of which may have shut down the
@@ -4374,13 +4472,13 @@ void WorkerPrivate::GarbageCollectInternal(JSContext* aCx, bool aShrinking,
     JS::PrepareForFullGC(aCx);
 
     if (aShrinking) {
-      JS::NonIncrementalGC(aCx, GC_SHRINK, JS::gcreason::DOM_WORKER);
+      JS::NonIncrementalGC(aCx, GC_SHRINK, JS::GCReason::DOM_WORKER);
 
       if (!aCollectChildren) {
         LOG(WorkerLog(), ("Worker %p collected idle garbage\n", this));
       }
     } else {
-      JS::NonIncrementalGC(aCx, GC_NORMAL, JS::gcreason::DOM_WORKER);
+      JS::NonIncrementalGC(aCx, GC_NORMAL, JS::GCReason::DOM_WORKER);
       LOG(WorkerLog(), ("Worker %p collected garbage\n", this));
     }
   } else {

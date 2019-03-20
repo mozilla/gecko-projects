@@ -45,7 +45,7 @@ namespace mozilla {
 // GetTickCount() and conflicts with MediaDecoder::GetCurrentTime
 // implementation.
 #ifdef GetCurrentTime
-#undef GetCurrentTime
+#  undef GetCurrentTime
 #endif
 
 // avoid redefined macro in unified build
@@ -305,6 +305,7 @@ MediaDecoder::MediaDecoder(MediaDecoderInit& aInit)
       mIsElementInTree(false),
       mForcedHidden(false),
       mHasSuspendTaint(aInit.mHasSuspendTaint),
+      mIsCloningVisually(false),
       mPlaybackRate(aInit.mPlaybackRate),
       mLogicallySeeking(false, "MediaDecoder::mLogicallySeeking"),
       INIT_MIRROR(mBuffered, TimeIntervals()),
@@ -346,7 +347,6 @@ MediaDecoder::MediaDecoder(MediaDecoderInit& aInit)
   mWatchManager.Watch(mIsAudioDataAudible,
                       &MediaDecoder::NotifyAudibleStateChanged);
 
-  MediaShutdownManager::InitStatics();
   mVideoDecodingOberver->RegisterEvent();
 }
 
@@ -435,9 +435,11 @@ void MediaDecoder::OnPlaybackEvent(MediaPlaybackEvent&& aEvent) {
       break;
     case MediaPlaybackEvent::EnterVideoSuspend:
       GetOwner()->DispatchAsyncEvent(NS_LITERAL_STRING("mozentervideosuspend"));
+      mIsVideoDecodingSuspended = true;
       break;
     case MediaPlaybackEvent::ExitVideoSuspend:
       GetOwner()->DispatchAsyncEvent(NS_LITERAL_STRING("mozexitvideosuspend"));
+      mIsVideoDecodingSuspended = false;
       break;
     case MediaPlaybackEvent::StartVideoSuspendTimer:
       GetOwner()->DispatchAsyncEvent(
@@ -460,6 +462,10 @@ void MediaDecoder::OnPlaybackEvent(MediaPlaybackEvent&& aEvent) {
   }
 }
 
+bool MediaDecoder::IsVideoDecodingSuspended() const {
+  return mIsVideoDecodingSuspended;
+}
+
 void MediaDecoder::OnPlaybackErrorEvent(const MediaResult& aError) {
   DecodeError(aError);
 }
@@ -468,7 +474,7 @@ void MediaDecoder::OnDecoderDoctorEvent(DecoderDoctorEvent aEvent) {
   MOZ_ASSERT(NS_IsMainThread());
   // OnDecoderDoctorEvent is disconnected at shutdown time.
   MOZ_DIAGNOSTIC_ASSERT(!IsShutdown());
-  nsIDocument* doc = GetOwner()->GetDocument();
+  Document* doc = GetOwner()->GetDocument();
   if (!doc) {
     return;
   }
@@ -585,12 +591,12 @@ void MediaDecoder::Seek(double aTime, SeekTarget::Type aSeekType) {
   AbstractThread::AutoEnter context(AbstractMainThread());
   MOZ_ASSERT(aTime >= 0.0, "Cannot seek to a negative value.");
 
-  int64_t timeUsecs = TimeUnit::FromSeconds(aTime).ToMicroseconds();
+  auto time = TimeUnit::FromSeconds(aTime);
 
   mLogicalPosition = aTime;
 
   mLogicallySeeking = true;
-  SeekTarget target = SeekTarget(timeUsecs, aSeekType);
+  SeekTarget target = SeekTarget(time, aSeekType);
   CallSeek(target);
 
   if (mPlayState == PLAY_STATE_ENDED) {
@@ -916,7 +922,7 @@ void MediaDecoder::DurationChanged() {
 
 already_AddRefed<KnowsCompositor> MediaDecoder::GetCompositor() {
   MediaDecoderOwner* owner = GetOwner();
-  nsIDocument* ownerDoc = owner ? owner->GetDocument() : nullptr;
+  Document* ownerDoc = owner ? owner->GetDocument() : nullptr;
   RefPtr<LayerManager> layerManager =
       ownerDoc ? nsContentUtils::LayerManagerForDocument(ownerDoc) : nullptr;
   RefPtr<KnowsCompositor> knows =
@@ -967,11 +973,11 @@ void MediaDecoder::UpdateVideoDecodeMode() {
     return;
   }
 
-  // If an element is in-tree with UNTRACKED visibility, the visibility is
-  // incomplete and don't update the video decode mode.
-  if (mIsElementInTree && mElementVisibility == Visibility::UNTRACKED) {
-    LOG("UpdateVideoDecodeMode(), early return because we have incomplete "
-        "visibility states.");
+  // Seeking is required when leaving suspend mode.
+  if (!mMediaSeekable) {
+    LOG("UpdateVideoDecodeMode(), set Normal because the media is not "
+        "seekable");
+    mDecoderStateMachine->SetVideoDecodeMode(VideoDecodeMode::Normal);
     return;
   }
 
@@ -979,6 +985,14 @@ void MediaDecoder::UpdateVideoDecodeMode() {
   if (mHasSuspendTaint) {
     LOG("UpdateVideoDecodeMode(), set Normal because the element has been "
         "tainted.");
+    mDecoderStateMachine->SetVideoDecodeMode(VideoDecodeMode::Normal);
+    return;
+  }
+
+  // If mIsCloningVisually is set, never suspend the video decoder.
+  if (mIsCloningVisually) {
+    LOG("UpdateVideoDecodeMode(), set Normal because the element is cloning "
+        "itself visually to another video container.");
     mDecoderStateMachine->SetVideoDecodeMode(VideoDecodeMode::Normal);
     return;
   }
@@ -1007,6 +1021,16 @@ void MediaDecoder::UpdateVideoDecodeMode() {
     return;
   }
 
+  // If the element is in-tree with UNTRACKED visibility, that means the element
+  // is not close enough to the viewport so we have not start to update its
+  // visibility. In this case, it's equals to invisible.
+  if (mIsElementInTree && mElementVisibility == Visibility::UNTRACKED) {
+    LOG("UpdateVideoDecodeMode(), set Suspend because element hasn't be "
+        "updated visibility state.");
+    mDecoderStateMachine->SetVideoDecodeMode(VideoDecodeMode::Suspend);
+    return;
+  }
+
   // Otherwise, depends on the owner's visibility state.
   // A element is visible only if its document is visible and the element
   // itself is visible.
@@ -1029,6 +1053,13 @@ void MediaDecoder::SetIsBackgroundVideoDecodingAllowed(bool aAllowed) {
 bool MediaDecoder::HasSuspendTaint() const {
   MOZ_ASSERT(NS_IsMainThread());
   return mHasSuspendTaint;
+}
+
+void MediaDecoder::SetCloningVisually(bool aIsCloningVisually) {
+  if (mIsCloningVisually != aIsCloningVisually) {
+    mIsCloningVisually = aIsCloningVisually;
+    UpdateVideoDecodeMode();
+  }
 }
 
 bool MediaDecoder::IsMediaSeekable() {

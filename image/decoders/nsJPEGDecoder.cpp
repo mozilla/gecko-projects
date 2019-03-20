@@ -32,9 +32,9 @@ extern "C" {
 }
 
 #if MOZ_BIG_ENDIAN
-#define MOZ_JCS_EXT_NATIVE_ENDIAN_XRGB JCS_EXT_XRGB
+#  define MOZ_JCS_EXT_NATIVE_ENDIAN_XRGB JCS_EXT_XRGB
 #else
-#define MOZ_JCS_EXT_NATIVE_ENDIAN_XRGB JCS_EXT_BGRX
+#  define MOZ_JCS_EXT_NATIVE_ENDIAN_XRGB JCS_EXT_BGRX
 #endif
 
 static void cmyk_convert_rgb(JSAMPROW row, JDIMENSION width);
@@ -385,8 +385,7 @@ LexerTransition<nsJPEGDecoder::State> nsJPEGDecoder::ReadJPEGData(
       jpeg_calc_output_dimensions(&mInfo);
 
       MOZ_ASSERT(!mImageData, "Already have a buffer allocated?");
-      nsresult rv = AllocateFrame(OutputSize(), FullOutputFrame(),
-                                  SurfaceFormat::B8G8R8X8);
+      nsresult rv = AllocateFrame(OutputSize(), SurfaceFormat::B8G8R8X8);
       if (NS_FAILED(rv)) {
         mState = JPEG_ERROR;
         MOZ_LOG(sJPEGDecoderAccountingLog, LogLevel::Debug,

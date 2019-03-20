@@ -29,7 +29,7 @@
 
 // X.h on Linux #defines CurrentTime as 0L, so we have to #undef it here.
 #ifdef CurrentTime
-#undef CurrentTime
+#  undef CurrentTime
 #endif
 
 #include "mozilla/dom/HTMLMediaElementBinding.h"
@@ -117,6 +117,7 @@ class HTMLMediaElement : public nsGenericHTMLElement,
 
   explicit HTMLMediaElement(
       already_AddRefed<mozilla::dom::NodeInfo>&& aNodeInfo);
+  void Init();
 
   void ReportCanPlayTelemetry();
 
@@ -146,7 +147,7 @@ class HTMLMediaElement : public nsGenericHTMLElement,
                               nsIPrincipal* aMaybeScriptedPrincipal,
                               nsAttrValue& aResult) override;
 
-  virtual nsresult BindToTree(nsIDocument* aDocument, nsIContent* aParent,
+  virtual nsresult BindToTree(Document* aDocument, nsIContent* aParent,
                               nsIContent* aBindingParent) override;
   virtual void UnbindFromTree(bool aDeep = true,
                               bool aNullParent = true) override;
@@ -297,7 +298,7 @@ class HTMLMediaElement : public nsGenericHTMLElement,
 
   // Update the visual size of the media. Called from the decoder on the
   // main thread when/if the size changes.
-  void UpdateMediaSize(const nsIntSize& aSize);
+  virtual void UpdateMediaSize(const nsIntSize& aSize);
   // Like UpdateMediaSize, but only updates the size if no size has yet
   // been set.
   void UpdateInitialMediaSize(const nsIntSize& aSize);
@@ -560,6 +561,12 @@ class HTMLMediaElement : public nsGenericHTMLElement,
   // For use by mochitests. Enabling pref "media.test.video-suspend"
   bool HasSuspendTaint() const;
 
+  // For use by mochitests.
+  bool IsVideoDecodingSuspended() const;
+
+  // For use by mochitests only.
+  bool IsVisible() const;
+
   // Synchronously, return the next video frame and mark the element unable to
   // participate in decode suspending.
   //
@@ -683,7 +690,7 @@ class HTMLMediaElement : public nsGenericHTMLElement,
   };
   void MarkAsContentSource(CallerAPI aAPI);
 
-  nsIDocument* GetDocument() const override;
+  Document* GetDocument() const override;
 
   void ConstructMediaTracks(const MediaInfo* aInfo) override;
 
@@ -716,6 +723,11 @@ class HTMLMediaElement : public nsGenericHTMLElement,
     MOZ_ASSERT(NS_IsMainThread());
     aSinkId = mSink.first();
   }
+
+  // This is used to notify MediaElementAudioSourceNode that media element is
+  // allowed to play when media element is used as a source for web audio, so
+  // that we can start AudioContext if it was not allowed to start.
+  RefPtr<GenericNonExclusivePromise> GetAllowedToPlayPromise();
 
  protected:
   virtual ~HTMLMediaElement();
@@ -781,6 +793,13 @@ class HTMLMediaElement : public nsGenericHTMLElement,
    */
   void ReportLoadError(const char* aMsg, const char16_t** aParams = nullptr,
                        uint32_t aParamCount = 0);
+
+  /**
+   * Log message to web console.
+   */
+  void ReportToConsole(uint32_t aErrorFlags, const char* aMsg,
+                       const char16_t** aParams = nullptr,
+                       uint32_t aParamCount = 0) const;
 
   /**
    * Changes mHasPlayedOrSeeked to aValue. If mHasPlayedOrSeeked changes
@@ -1243,9 +1262,6 @@ class HTMLMediaElement : public nsGenericHTMLElement,
   // is put in the foreground, whereupon we will begin playback.
   bool AudioChannelAgentDelayingPlayback();
 
-  // Ensures we're prompting the user for permission to autoplay.
-  void EnsureAutoplayRequested(bool aHandlingUserInput);
-
   // Update the silence range of the audio track when the audible status of
   // silent audio track changes or seeking to the new position where the audio
   // track is silent.
@@ -1351,7 +1367,7 @@ class HTMLMediaElement : public nsGenericHTMLElement,
 
   // Points to the document whose load we're blocking. This is the document
   // we're bound to when loading starts.
-  nsCOMPtr<nsIDocument> mLoadBlockedDoc;
+  nsCOMPtr<Document> mLoadBlockedDoc;
 
   // Contains names of events that have been raised while in the bfcache.
   // These events get re-dispatched when the bfcache is exited.
@@ -1489,9 +1505,6 @@ class HTMLMediaElement : public nsGenericHTMLElement,
   // Used to indicate if the MediaKeys attaching operation is on-going or not.
   bool mAttachingMediaKey = false;
   MozPromiseRequestHolder<SetCDMPromise> mSetCDMRequest;
-  // Request holder for permission prompt to autoplay. Non-null if we're
-  // currently showing a prompt for permission to autoplay.
-  MozPromiseRequestHolder<GenericPromise> mAutoplayPermissionRequest;
 
   // Stores the time at the start of the current 'played' range.
   double mCurrentPlayRangeStart = 1.0;
@@ -1651,8 +1664,28 @@ class HTMLMediaElement : public nsGenericHTMLElement,
   // yet.
   bool mBlockedAsWithoutMetadata = false;
 
+  // This promise is used to notify MediaElementAudioSourceNode that media
+  // element is allowed to play when MediaElement is used as a source for web
+  // audio.
+  MozPromiseHolder<GenericNonExclusivePromise> mAllowedToPlayPromise;
+
+  // True if media has ever been blocked for autoplay, it's used to notify front
+  // end to show the correct blocking icon when the document goes back from
+  // bfcache.
+  bool mHasEverBeenBlockedForAutoplay = false;
+
+  // True if we have dispatched a task for text track changed, will be unset
+  // when we starts processing text track changed.
+  // https://html.spec.whatwg.org/multipage/media.html#pending-text-track-change-notification-flag
+  bool mPendingTextTrackChanged = false;
+
  public:
-  // Helper class to measure times for MSE telemetry stats
+  // This function will be called whenever a text track that is in a media
+  // element's list of text tracks has its text track mode change value
+  void NotifyTextTrackModeChanged();
+
+ public:
+  // Helper class to measure times for playback telemetry stats
   class TimeDurationAccumulator {
    public:
     TimeDurationAccumulator() : mCount(0) {}
@@ -1685,6 +1718,11 @@ class HTMLMediaElement : public nsGenericHTMLElement,
       // Count current run in this report, without increasing the stored count.
       return mCount + 1;
     }
+    void Reset() {
+      mStartTime = TimeStamp();
+      mSum = TimeDuration();
+      mCount = 0;
+    }
 
    private:
     TimeStamp mStartTime;
@@ -1696,6 +1734,8 @@ class HTMLMediaElement : public nsGenericHTMLElement,
   already_AddRefed<PlayPromise> CreatePlayPromise(ErrorResult& aRv) const;
 
   void UpdateHadAudibleAutoplayState();
+
+  virtual void MaybeBeginCloningVisually(){};
 
   /**
    * This function is called by AfterSetAttr and OnAttrSetButNotChanged.
@@ -1715,6 +1755,21 @@ class HTMLMediaElement : public nsGenericHTMLElement,
 
   // Total time a video has (or would have) spent in video-decode-suspend mode.
   TimeDurationAccumulator mVideoDecodeSuspendTime;
+
+  // Total time a video has spent playing on the current load, it would be reset
+  // when media aborts the current load; be paused when the docuemt enters the
+  // bf-cache and be resumed when the docuemt leaves the bf-cache.
+  TimeDurationAccumulator mCurrentLoadPlayTime;
+
+  // True if media has ever been blocked by autoplay policy before.
+  bool mHasPlayEverBeenBlocked = false;
+
+  // Report the Telemetry about whether media played over the specific time
+  // threshold.
+  void ReportPlayedTimeAfterBlockedTelemetry();
+
+  // True if Init() has been called after construction
+  bool mInitialized = false;
 
   // True if user has called load(), seek() or element has started playing
   // before. It's *only* use for checking autoplay policy
@@ -1776,6 +1831,11 @@ class HTMLMediaElement : public nsGenericHTMLElement,
   // https://w3c.github.io/mediacapture-output/#htmlmediaelement-extensions
   // Read/Write from the main thread only.
   Pair<nsString, RefPtr<AudioDeviceInfo>> mSink;
+
+  // This flag is used to control when the user agent is to show a poster frame
+  // for a video element instead of showing the video contents.
+  // https://html.spec.whatwg.org/multipage/media.html#show-poster-flag
+  bool mShowPoster;
 };
 
 // Check if the context is chrome or has the debugger or tabs permission

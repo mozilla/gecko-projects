@@ -21,7 +21,6 @@
 namespace js {
 namespace jit {
 
-class StackValue;
 class ICEntry;
 class ICStub;
 class ControlFlowGraph;
@@ -46,8 +45,6 @@ class PCMappingSlotInfo {
   static inline bool ValidSlotLocation(SlotLocation loc) {
     return (loc == SlotInR0) || (loc == SlotInR1) || (loc == SlotIgnore);
   }
-
-  static SlotLocation ToSlotLocation(const StackValue* stackVal);
 
   inline static PCMappingSlotInfo MakeSlotInfo() {
     return PCMappingSlotInfo(0);
@@ -246,20 +243,16 @@ struct BaselineScript final {
 
   // The offsets and event used for Tracelogger toggling.
 #ifdef JS_TRACE_LOGGING
-#ifdef DEBUG
+#  ifdef DEBUG
   bool traceLoggerScriptsEnabled_ = false;
   bool traceLoggerEngineEnabled_ = false;
-#endif
+#  endif
   TraceLoggerEvent traceLoggerScriptEvent_ = {};
 #endif
 
  public:
   enum Flag {
-    // (1 << 0) is unused.
-
-    // Flag set when discarding JIT code, to indicate this script is
-    // on the stack and should not be discarded.
-    ACTIVE = 1 << 1,
+    // (1 << 0) and (1 << 1) are unused.
 
     // Flag set when the script contains any writes to its on-stack
     // (rather than call object stored) arguments.
@@ -297,10 +290,6 @@ struct BaselineScript final {
 
   uint32_t pcMappingOffset_ = 0;
   uint32_t pcMappingSize_ = 0;
-
-  // List mapping indexes of bytecode type sets to the offset of the opcode
-  // they correspond to, for use by TypeScript::BytecodeTypes.
-  uint32_t bytecodeTypeMapOffset_ = 0;
 
   // We store the native code address corresponding to each bytecode offset in
   // the script's resumeOffsets list.
@@ -347,8 +336,7 @@ struct BaselineScript final {
       uint32_t debugOsrPrologueOffset, uint32_t debugOsrEpilogueOffset,
       uint32_t profilerEnterToggleOffset, uint32_t profilerExitToggleOffset,
       size_t retAddrEntries, size_t pcMappingIndexEntries, size_t pcMappingSize,
-      size_t bytecodeTypeMapEntries, size_t resumeEntries,
-      size_t traceLoggerToggleOffsetEntries);
+      size_t resumeEntries, size_t traceLoggerToggleOffsetEntries);
 
   static void Trace(JSTracer* trc, BaselineScript* script);
   static void Destroy(FreeOp* fop, BaselineScript* script);
@@ -361,10 +349,6 @@ struct BaselineScript final {
                               size_t* data) const {
     *data += mallocSizeOf(this);
   }
-
-  bool active() const { return flags_ & ACTIVE; }
-  void setActive() { flags_ |= ACTIVE; }
-  void resetActive() { flags_ &= ~ACTIVE; }
 
   void setModifiesArguments() { flags_ |= MODIFIES_ARGUMENTS; }
   bool modifiesArguments() { return flags_ & MODIFIES_ARGUMENTS; }
@@ -505,12 +489,6 @@ struct BaselineScript final {
 
   static void writeBarrierPre(Zone* zone, BaselineScript* script);
 
-  uint32_t* bytecodeTypeMap() {
-    MOZ_ASSERT(bytecodeTypeMapOffset_);
-    return reinterpret_cast<uint32_t*>(reinterpret_cast<uint8_t*>(this) +
-                                       bytecodeTypeMapOffset_);
-  }
-
   uint8_t maxInliningDepth() const { return maxInliningDepth_; }
   void setMaxInliningDepth(uint32_t depth) {
     MOZ_ASSERT(depth <= UINT8_MAX);
@@ -646,9 +624,9 @@ MOZ_MUST_USE bool BailoutIonToBaseline(
     bool invalidate, BaselineBailoutInfo** bailoutInfo,
     const ExceptionBailoutInfo* exceptionInfo);
 
-// Mark baseline scripts on the stack as active, so that they are not discarded
+// Mark TypeScripts on the stack as active, so that they are not discarded
 // during GC.
-void MarkActiveBaselineScripts(Zone* zone);
+void MarkActiveTypeScripts(Zone* zone);
 
 MethodStatus BaselineCompile(JSContext* cx, JSScript* script,
                              bool forceDebugInstrumentation = false);

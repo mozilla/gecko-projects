@@ -35,7 +35,7 @@ class nsMenuBarFrame final : public nsBoxFrame, public nsMenuParent {
   NS_DECL_QUERYFRAME
   NS_DECL_FRAMEARENA_HELPERS(nsMenuBarFrame)
 
-  explicit nsMenuBarFrame(ComputedStyle* aStyle);
+  explicit nsMenuBarFrame(ComputedStyle* aStyle, nsPresContext* aPresContext);
 
   // nsMenuParent interface
   virtual nsMenuFrame* GetCurrentMenuItem() override;
@@ -51,8 +51,9 @@ class nsMenuBarFrame final : public nsBoxFrame, public nsMenuParent {
   virtual bool IsActive() override { return mIsActive; }
   virtual bool IsMenu() override { return false; }
   virtual bool IsOpen() override {
+    // menubars are considered always open
     return true;
-  }  // menubars are considered always open
+  }
 
   bool IsMenuOpen() { return mCurrentMenu && mCurrentMenu->IsOpen(); }
 

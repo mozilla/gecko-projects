@@ -42,11 +42,11 @@
 #ifndef LulDwarfExt_h
 #define LulDwarfExt_h
 
-#include <stdint.h>
+#include "LulDwarfSummariser.h"
 
 #include "mozilla/Assertions.h"
 
-#include "LulDwarfSummariser.h"
+#include <stdint.h>
 
 typedef signed char int8;
 typedef short int16;
@@ -62,10 +62,12 @@ typedef unsigned long long uint64;
 typedef __PTRDIFF_TYPE__ intptr;
 typedef unsigned __PTRDIFF_TYPE__ uintptr;
 #else
-#error "Can't find pointer-sized integral types."
+#  error "Can't find pointer-sized integral types."
 #endif
 
 namespace lul {
+
+class UniqueString;
 
 // Exception handling frame description pointer formats, as described
 // by the Linux Standard Base Core Specification 4.0, section 11.5,
@@ -1277,8 +1279,9 @@ class DwarfCFIToModule : public CallFrameInfo::Handler {
 // Convert the Dwarf expression in |expr| into PfxInstrs stored in the
 // SecMap referred to by |summ|, and return the index of the starting
 // PfxInstr added, which must be >= 0.  In case of failure return -1.
-int32_t parseDwarfExpr(Summariser *summ, const ByteReader *reader, string expr,
-                       bool debug, bool pushCfaAtStart, bool derefAtEnd);
+int32_t parseDwarfExpr(Summariser *summ, const ByteReader *reader,
+                       std::string expr, bool debug, bool pushCfaAtStart,
+                       bool derefAtEnd);
 
 }  // namespace lul
 

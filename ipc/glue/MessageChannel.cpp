@@ -10,6 +10,7 @@
 #include "mozilla/Assertions.h"
 #include "mozilla/DebugOnly.h"
 #include "mozilla/dom/ScriptSettings.h"
+#include "mozilla/ipc/ProcessChild.h"
 #include "mozilla/ipc/ProtocolUtils.h"
 #include "mozilla/Logging.h"
 #include "mozilla/Move.h"
@@ -29,7 +30,7 @@
 #include <math.h>
 
 #ifdef MOZ_TASK_TRACER
-#include "GeckoTaskTracer.h"
+#  include "GeckoTaskTracer.h"
 using namespace mozilla::tasktracer;
 #endif
 
@@ -584,7 +585,8 @@ MessageChannel::MessageChannel(const char* aName, IToplevelProtocol* aListener)
       mPeerPidSet(false),
       mPeerPid(-1),
       mIsPostponingSends(false),
-      mBuildIDsConfirmedMatch(false) {
+      mBuildIDsConfirmedMatch(false),
+      mIsSameThreadChannel(false) {
   MOZ_COUNT_CTOR(ipc::MessageChannel);
 
 #ifdef OS_WIN
@@ -901,6 +903,38 @@ void MessageChannel::CommonThreadOpenInit(MessageChannel* aTargetChan,
   mSide = aSide;
 }
 
+bool MessageChannel::OpenOnSameThread(MessageChannel* aTargetChan,
+                                      mozilla::ipc::Side aSide) {
+  CommonThreadOpenInit(aTargetChan, aSide);
+
+  Side oppSide = UnknownSide;
+  switch (aSide) {
+    case ChildSide:
+      oppSide = ParentSide;
+      break;
+    case ParentSide:
+      oppSide = ChildSide;
+      break;
+    case UnknownSide:
+      break;
+  }
+  mIsSameThreadChannel = true;
+
+  // XXX(nika): Avoid setting up a monitor for same thread channels? We
+  // shouldn't need it.
+  mMonitor = new RefCountedMonitor();
+
+  mChannelState = ChannelOpening;
+  aTargetChan->CommonThreadOpenInit(this, oppSide);
+
+  aTargetChan->mIsSameThreadChannel = true;
+  aTargetChan->mMonitor = mMonitor;
+
+  mChannelState = ChannelConnected;
+  aTargetChan->mChannelState = ChannelConnected;
+  return true;
+}
+
 bool MessageChannel::Echo(Message* aMsg) {
   UniquePtr<Message> msg(aMsg);
   AssertWorkerThread();
@@ -1109,7 +1143,8 @@ bool MessageChannel::MaybeInterceptSpecialIOMessage(const Message& aMsg) {
   return false;
 }
 
-/* static */ bool MessageChannel::IsAlwaysDeferred(const Message& aMsg) {
+/* static */
+bool MessageChannel::IsAlwaysDeferred(const Message& aMsg) {
   // If a message is not NESTED_INSIDE_CPOW and not sync, then we always defer
   // it.
   return aMsg.nested_level() != IPC::Message::NESTED_INSIDE_CPOW &&
@@ -1377,6 +1412,8 @@ bool MessageChannel::Send(Message* aMsg, Message* aReply) {
   // Sanity checks.
   AssertWorkerThread();
   mMonitor->AssertNotCurrentThreadOwns();
+  MOZ_RELEASE_ASSERT(!mIsSameThreadChannel,
+                     "sync send over same-thread channel will deadlock!");
 
 #ifdef OS_WIN
   SyncStackFrame frame(this, false);
@@ -1585,6 +1622,8 @@ bool MessageChannel::Call(Message* aMsg, Message* aReply) {
   UniquePtr<Message> msg(aMsg);
   AssertWorkerThread();
   mMonitor->AssertNotCurrentThreadOwns();
+  MOZ_RELEASE_ASSERT(!mIsSameThreadChannel,
+                     "intr call send over same-thread channel will deadlock!");
 
 #ifdef OS_WIN
   SyncStackFrame frame(this, true);
@@ -1853,7 +1892,7 @@ void MessageChannel::RunMessage(MessageTask& aTask) {
 
   // Check that we're going to run the first message that's valid to run.
 #if 0
-#ifdef DEBUG
+#  ifdef DEBUG
     nsCOMPtr<nsIEventTarget> messageTarget =
         mListener->GetMessageEventTarget(msg);
 
@@ -1870,7 +1909,7 @@ void MessageChannel::RunMessage(MessageTask& aTask) {
                    aTask.Msg().priority() != task->Msg().priority());
 
     }
-#endif
+#  endif
 #endif
 
   if (!mDeferred.empty()) {
@@ -2002,16 +2041,6 @@ MessageChannel::MessageTask::GetPriority(uint32_t* aPriority) {
       break;
   }
   return NS_OK;
-}
-
-bool MessageChannel::MessageTask::GetAffectedSchedulerGroups(
-    SchedulerGroupSet& aGroups) {
-  if (!mChannel) {
-    return false;
-  }
-
-  mChannel->AssertWorkerThread();
-  return mChannel->mListener->GetMessageSchedulerGroups(mMessage, aGroups);
 }
 
 void MessageChannel::DispatchMessage(Message&& aMsg) {
@@ -2291,14 +2320,17 @@ bool MessageChannel::WaitResponse(bool aWaitTimedOut) {
 
 #ifndef OS_WIN
 bool MessageChannel::WaitForSyncNotify(bool /* aHandleWindowsMessages */) {
-#ifdef DEBUG
+#  ifdef DEBUG
   // WARNING: We don't release the lock here. We can't because the link thread
   // could signal at this time and we would miss it. Instead we require
   // ArtificialTimeout() to be extremely simple.
   if (mListener->ArtificialTimeout()) {
     return false;
   }
-#endif
+#  endif
+
+  MOZ_RELEASE_ASSERT(!mIsSameThreadChannel,
+                     "Wait on same-thread channel will deadlock!");
 
   TimeDuration timeout = (kNoTimeout == mTimeoutMs)
                              ? TimeDuration::Forever()
@@ -2484,7 +2516,16 @@ void MessageChannel::OnChannelErrorFromLink() {
 
   if (ChannelClosing != mChannelState) {
     if (mAbortOnError) {
-      MOZ_CRASH("Aborting on channel error.");
+      // mAbortOnError is set by main actors (e.g., ContentChild) to ensure
+      // that the process terminates even if normal shutdown is prevented.
+      // A MOZ_CRASH() here is not helpful because crash reporting relies
+      // on the parent process which we know is dead or otherwise unusable.
+      //
+      // Additionally, the parent process can (and often is) killed on Android
+      // when apps are backgrounded. We don't need to report a crash for
+      // normal behavior in that case.
+      printf_stderr("Exiting due to channel error.\n");
+      ProcessChild::QuickExit();
     }
     mChannelState = ChannelError;
     mMonitor->Notify();
@@ -2580,6 +2621,10 @@ void MessageChannel::SynchronouslyClose() {
   AssertWorkerThread();
   mMonitor->AssertCurrentThreadOwns();
   mLink->SendClose();
+
+  MOZ_RELEASE_ASSERT(!mIsSameThreadChannel || ChannelClosed == mChannelState,
+                     "same-thread channel failed to synchronously close?");
+
   while (ChannelClosed != mChannelState) mMonitor->Wait();
 }
 
@@ -2707,7 +2752,7 @@ void MessageChannel::DebugAbort(const char* file, int line, const char* cond,
     pending.popFirst();
   }
 
-  MOZ_CRASH_UNSAFE_OOL(why);
+  MOZ_CRASH_UNSAFE(why);
 }
 
 void MessageChannel::DumpInterruptStack(const char* const pfx) const {

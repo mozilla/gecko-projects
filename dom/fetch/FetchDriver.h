@@ -21,8 +21,8 @@
 #include "mozilla/net/ReferrerPolicy.h"
 
 class nsIConsoleReportCollector;
+class nsICookieSettings;
 class nsICSPEventListener;
-class nsIDocument;
 class nsIEventTarget;
 class nsIOutputStream;
 class nsILoadGroup;
@@ -31,6 +31,7 @@ class nsIPrincipal;
 namespace mozilla {
 namespace dom {
 
+class Document;
 class InternalRequest;
 class InternalResponse;
 class PerformanceStorage;
@@ -101,11 +102,12 @@ class FetchDriver final : public nsIStreamListener,
 
   FetchDriver(InternalRequest* aRequest, nsIPrincipal* aPrincipal,
               nsILoadGroup* aLoadGroup, nsIEventTarget* aMainThreadEventTarget,
+              nsICookieSettings* aCookieSettings,
               PerformanceStorage* aPerformanceStorage, bool aIsTrackingFetch);
 
   nsresult Fetch(AbortSignalImpl* aSignalImpl, FetchDriverObserver* aObserver);
 
-  void SetDocument(nsIDocument* aDocument);
+  void SetDocument(Document* aDocument);
 
   void SetCSPEventListener(nsICSPEventListener* aCSPEventListener);
 
@@ -128,13 +130,15 @@ class FetchDriver final : public nsIStreamListener,
   RefPtr<InternalResponse> mResponse;
   nsCOMPtr<nsIOutputStream> mPipeOutputStream;
   RefPtr<FetchDriverObserver> mObserver;
-  nsCOMPtr<nsIDocument> mDocument;
+  RefPtr<Document> mDocument;
   nsCOMPtr<nsICSPEventListener> mCSPEventListener;
   Maybe<ClientInfo> mClientInfo;
   Maybe<ServiceWorkerDescriptor> mController;
   nsCOMPtr<nsIChannel> mChannel;
   nsAutoPtr<SRICheckDataVerifier> mSRIDataVerifier;
   nsCOMPtr<nsIEventTarget> mMainThreadEventTarget;
+
+  nsCOMPtr<nsICookieSettings> mCookieSettings;
 
   // This is set only when Fetch is used in workers.
   RefPtr<PerformanceStorage> mPerformanceStorage;

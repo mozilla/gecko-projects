@@ -80,8 +80,8 @@ Response::Response(nsIGlobalObject* aGlobal,
 
 Response::~Response() { mozilla::DropJSObjects(this); }
 
-/* static */ already_AddRefed<Response> Response::Error(
-    const GlobalObject& aGlobal) {
+/* static */
+already_AddRefed<Response> Response::Error(const GlobalObject& aGlobal) {
   nsCOMPtr<nsIGlobalObject> global = do_QueryInterface(aGlobal.GetAsSupports());
   RefPtr<InternalResponse> error =
       InternalResponse::NetworkError(NS_ERROR_FAILURE);
@@ -89,16 +89,18 @@ Response::~Response() { mozilla::DropJSObjects(this); }
   return r.forget();
 }
 
-/* static */ already_AddRefed<Response> Response::Redirect(
-    const GlobalObject& aGlobal, const nsAString& aUrl, uint16_t aStatus,
-    ErrorResult& aRv) {
+/* static */
+already_AddRefed<Response> Response::Redirect(const GlobalObject& aGlobal,
+                                              const nsAString& aUrl,
+                                              uint16_t aStatus,
+                                              ErrorResult& aRv) {
   nsAutoString parsedURL;
 
   if (NS_IsMainThread()) {
     nsCOMPtr<nsIURI> baseURI;
     nsCOMPtr<nsPIDOMWindowInner> inner(
         do_QueryInterface(aGlobal.GetAsSupports()));
-    nsIDocument* doc = inner ? inner->GetExtantDoc() : nullptr;
+    Document* doc = inner ? inner->GetExtantDoc() : nullptr;
     if (doc) {
       baseURI = doc->GetBaseURI();
     }
@@ -158,7 +160,8 @@ Response::~Response() { mozilla::DropJSObjects(this); }
   return r.forget();
 }
 
-/*static*/ already_AddRefed<Response> Response::Constructor(
+/*static*/
+already_AddRefed<Response> Response::Constructor(
     const GlobalObject& aGlobal,
     const Optional<Nullable<fetch::ResponseBodyInit>>& aBody,
     const ResponseInit& aInit, ErrorResult& aRv) {
@@ -187,15 +190,25 @@ Response::~Response() { mozilla::DropJSObjects(this); }
   RefPtr<InternalResponse> internalResponse =
       new InternalResponse(aInit.mStatus, aInit.mStatusText);
 
+  UniquePtr<mozilla::ipc::PrincipalInfo> principalInfo;
+
   // Grab a valid channel info from the global so this response is 'valid' for
   // interception.
   if (NS_IsMainThread()) {
     ChannelInfo info;
     nsCOMPtr<nsPIDOMWindowInner> window = do_QueryInterface(global);
     if (window) {
-      nsIDocument* doc = window->GetExtantDoc();
+      Document* doc = window->GetExtantDoc();
       MOZ_ASSERT(doc);
       info.InitFromDocument(doc);
+
+      principalInfo.reset(new mozilla::ipc::PrincipalInfo());
+      nsresult rv =
+          PrincipalToPrincipalInfo(doc->NodePrincipal(), principalInfo.get());
+      if (NS_WARN_IF(NS_FAILED(rv))) {
+        aRv.ThrowTypeError<MSG_FETCH_BODY_CONSUMED_ERROR>();
+        return nullptr;
+      }
     } else {
       info.InitFromChromeGlobal(global);
     }
@@ -204,7 +217,11 @@ Response::~Response() { mozilla::DropJSObjects(this); }
     WorkerPrivate* worker = GetCurrentThreadWorkerPrivate();
     MOZ_ASSERT(worker);
     internalResponse->InitChannelInfo(worker->GetChannelInfo());
+    principalInfo =
+        MakeUnique<mozilla::ipc::PrincipalInfo>(worker->GetPrincipalInfo());
   }
+
+  internalResponse->SetPrincipalInfo(std::move(principalInfo));
 
   RefPtr<Response> r = new Response(global, internalResponse, nullptr);
 

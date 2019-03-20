@@ -117,6 +117,12 @@ class DocAccessibleParent : public ProxyAccessible,
       const uint32_t& aScrollY, const uint32_t& aMaxScrollX,
       const uint32_t& aMaxScrollY) override;
 
+#if !defined(XP_WIN)
+  virtual mozilla::ipc::IPCResult RecvAnnouncementEvent(
+      const uint64_t& aID, const nsString& aAnnouncement,
+      const uint16_t& aPriority) override;
+#endif
+
   mozilla::ipc::IPCResult RecvRoleChangedEvent(const a11y::role& aRole) final;
 
   virtual mozilla::ipc::IPCResult RecvBindChildDoc(
@@ -251,10 +257,10 @@ class DocAccessibleParent : public ProxyAccessible,
   // The handle associated with the emulated window that contains this document
   HWND mEmulatedWindowHandle;
 
-#if defined(MOZ_CONTENT_SANDBOX)
+#  if defined(MOZ_CONTENT_SANDBOX)
   mscom::PreservedStreamPtr mParentProxyStream;
-#endif  // defined(MOZ_CONTENT_SANDBOX)
-#endif  // defined(XP_WIN)
+#  endif  // defined(MOZ_CONTENT_SANDBOX)
+#endif    // defined(XP_WIN)
 
   /*
    * Conceptually this is a map from IDs to proxies, but we store the ID in the

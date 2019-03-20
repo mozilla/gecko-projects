@@ -5,6 +5,8 @@
 #ifndef nsUrlClassifierUtils_h_
 #define nsUrlClassifierUtils_h_
 
+#include "mozilla/Mutex.h"
+#include "mozilla/Base64.h"
 #include "nsIUrlClassifierUtils.h"
 #include "nsClassHashtable.h"
 #include "nsIObserver.h"
@@ -16,13 +18,12 @@ class nsUrlClassifierUtils final : public nsIUrlClassifierUtils,
  public:
   typedef nsClassHashtable<nsCStringHashKey, nsCString> ProviderDictType;
 
-  nsUrlClassifierUtils();
-
   NS_DECL_THREADSAFE_ISUPPORTS
   NS_DECL_NSIURLCLASSIFIERUTILS
   NS_DECL_NSIOBSERVER
 
-  nsresult Init();
+  static already_AddRefed<nsUrlClassifierUtils> GetXPCOMSingleton();
+  static nsUrlClassifierUtils* GetInstance();
 
   nsresult CanonicalizeHostname(const nsACString& hostname,
                                 nsACString& _retval);
@@ -42,7 +43,10 @@ class nsUrlClassifierUtils final : public nsIUrlClassifierUtils,
                     nsACString& _retval);
 
  private:
-  ~nsUrlClassifierUtils() {}
+  nsUrlClassifierUtils();
+  ~nsUrlClassifierUtils();
+
+  nsresult Init();
 
   // Disallow copy constructor
   nsUrlClassifierUtils(const nsUrlClassifierUtils&);

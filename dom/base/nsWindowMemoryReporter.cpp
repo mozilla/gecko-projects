@@ -7,7 +7,7 @@
 #include "nsWindowMemoryReporter.h"
 #include "nsWindowSizes.h"
 #include "nsGlobalWindow.h"
-#include "nsIDocument.h"
+#include "mozilla/dom/Document.h"
 #include "nsDOMWindowList.h"
 #include "mozilla/ClearOnShutdown.h"
 #include "mozilla/Preferences.h"
@@ -21,7 +21,7 @@
 #include "nsQueryObject.h"
 #include "nsServiceManagerUtils.h"
 #ifdef MOZ_XUL
-#include "nsXULPrototypeCache.h"
+#  include "nsXULPrototypeCache.h"
 #endif
 
 using namespace mozilla;
@@ -92,7 +92,8 @@ static nsresult NonJSSizeOfTab(nsPIDOMWindowOuter* aWindow, size_t* aDomSize,
   return NS_OK;
 }
 
-/* static */ void nsWindowMemoryReporter::Init() {
+/* static */
+void nsWindowMemoryReporter::Init() {
   MOZ_ASSERT(!sWindowReporter);
   sWindowReporter = new nsWindowMemoryReporter();
   ClearOnShutdown(&sWindowReporter);
@@ -112,14 +113,15 @@ static nsresult NonJSSizeOfTab(nsPIDOMWindowOuter* aWindow, size_t* aDomSize,
   RegisterGhostWindowsDistinguishedAmount(GhostWindowsDistinguishedAmount);
 }
 
-/* static */ nsWindowMemoryReporter* nsWindowMemoryReporter::Get() {
+/* static */
+nsWindowMemoryReporter* nsWindowMemoryReporter::Get() {
   return sWindowReporter;
 }
 
 static already_AddRefed<nsIURI> GetWindowURI(nsGlobalWindowInner* aWindow) {
   NS_ENSURE_TRUE(aWindow, nullptr);
 
-  nsCOMPtr<nsIDocument> doc = aWindow->GetExtantDoc();
+  nsCOMPtr<Document> doc = aWindow->GetExtantDoc();
   nsCOMPtr<nsIURI> uri;
 
   if (doc) {
@@ -371,7 +373,7 @@ static void CollectWindowReports(nsGlobalWindowInner* aWindow,
               "Memory used by other parts of style sets within a window.");
 
   REPORT_SIZE("/layout/element-data-objects", mLayoutElementDataObjects,
-              "Memory used for ElementData objects, but not the things"
+              "Memory used for ElementData objects, but not the things "
               "hanging off them.");
 
   REPORT_SIZE("/layout/text-runs", mLayoutTextRunsSize,
@@ -874,7 +876,8 @@ void nsWindowMemoryReporter::CheckForGhostWindows(
       Telemetry::ScalarID::MEMORYREPORTER_MAX_GHOST_WINDOWS, mGhostWindowCount);
 }
 
-/* static */ int64_t nsWindowMemoryReporter::GhostWindowsDistinguishedAmount() {
+/* static */
+int64_t nsWindowMemoryReporter::GhostWindowsDistinguishedAmount() {
   return sWindowReporter->mGhostWindowCount;
 }
 
@@ -886,7 +889,8 @@ void nsWindowMemoryReporter::KillCheckTimer() {
 }
 
 #ifdef DEBUG
-/* static */ void nsWindowMemoryReporter::UnlinkGhostWindows() {
+/* static */
+void nsWindowMemoryReporter::UnlinkGhostWindows() {
   if (!sWindowReporter) {
     return;
   }

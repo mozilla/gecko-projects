@@ -4,9 +4,9 @@
 
 var EXPORTED_SYMBOLS = ["PopupNotifications"];
 
-ChromeUtils.import("resource://gre/modules/Services.jsm");
-ChromeUtils.import("resource://gre/modules/PrivateBrowsingUtils.jsm");
-ChromeUtils.import("resource://gre/modules/PromiseUtils.jsm");
+const {Services} = ChromeUtils.import("resource://gre/modules/Services.jsm");
+const {PrivateBrowsingUtils} = ChromeUtils.import("resource://gre/modules/PrivateBrowsingUtils.jsm");
+const {PromiseUtils} = ChromeUtils.import("resource://gre/modules/PromiseUtils.jsm");
 
 const NOTIFICATION_EVENT_DISMISSED = "dismissed";
 const NOTIFICATION_EVENT_REMOVED = "removed";
@@ -52,16 +52,11 @@ function getAnchorFromBrowser(aBrowser, aAnchorID) {
   return null;
 }
 
+/**
+ * Given a DOM node inside a <popupnotification>, return the parent <popupnotification>.
+ */
 function getNotificationFromElement(aElement) {
-  // Need to find the associated notification object, which is a bit tricky
-  // since it isn't associated with the element directly - this is kind of
-  // gross and very dependent on the structure of the popupnotification
-  // binding's content.
-  let notificationEl;
-  let parent = aElement;
-  while (parent && (parent = aElement.ownerDocument.getBindingParent(parent)))
-    notificationEl = parent;
-  return notificationEl;
+  return aElement.closest("popupnotification");
 }
 
 /**
@@ -251,9 +246,9 @@ function PopupNotifications(tabbrowser, panel,
         focusedElement == doc.body ||
         focusedElement == this.tabbrowser.selectedBrowser ||
         // Ignore focused elements inside the notification.
-        getNotificationFromElement(focusedElement) == notification ||
         notification.contains(focusedElement)) {
-      this._onButtonEvent(aEvent, "secondarybuttoncommand", "esc-press", notification);
+      let escAction = notification.notification.options.escAction;
+      this._onButtonEvent(aEvent, escAction, "esc-press", notification);
     }
   };
 
@@ -467,6 +462,11 @@ PopupNotifications.prototype = {
    *                     notification description header text. Usually a host name or
    *                     addon name. This is similar to name, and only used in case
    *                     where message contains two "<>" placeholders.
+   *        escAction:
+   *                     An optional string indicating the action to take when the
+   *                     Esc key is pressed. This should be set to the name of the
+   *                     command to run. If not provided, "secondarybuttoncommand"
+   *                     will be used.
    * @returns the Notification object corresponding to the added notification.
    */
   show: function PopupNotifications_show(browser, id, message, anchorID,
@@ -487,6 +487,15 @@ PopupNotifications.prototype = {
     let notification = new Notification(id, message, anchorID, mainAction,
                                         secondaryActions, browser, this, options);
 
+    if (options) {
+      let escAction = options.escAction;
+      if (escAction != "buttoncommand" &&
+          escAction != "secondarybuttoncommand") {
+        escAction = "secondarybuttoncommand";
+      }
+      notification.options.escAction = escAction;
+    }
+
     if (options && options.dismissed)
       notification.dismissed = true;
 
@@ -502,7 +511,6 @@ PopupNotifications.prototype = {
 
     if (isActiveBrowser) {
       if (isActiveWindow) {
-
         // Autofocus if the notification requests focus.
         if (options && !options.dismissed && options.autofocus) {
           this.panel.removeAttribute("noautofocus");
@@ -521,7 +529,6 @@ PopupNotifications.prototype = {
           notifications, notification.anchorElement));
         this._notify("backgroundShow");
       }
-
     } else {
       // Notify observers that we're not showing the popup (useful for testing)
       this._notify("backgroundShow");
@@ -744,17 +751,6 @@ PopupNotifications.prototype = {
       if (originalParent) {
         popupnotification.notification = null;
 
-        // Remove nodes dynamically added to the notification's menu button
-        // in _refreshPanel.
-        let contentNode = popupnotification.lastElementChild;
-        while (contentNode) {
-          let previousSibling = contentNode.previousElementSibling;
-          if (contentNode.nodeName == "menuitem" ||
-              contentNode.nodeName == "menuseparator")
-            popupnotification.removeChild(contentNode);
-          contentNode = previousSibling;
-        }
-
         // Re-hide the notification such that it isn't rendered in the chrome
         // document. _refreshPanel will unhide it again when needed.
         popupnotification.hidden = true;
@@ -830,15 +826,11 @@ PopupNotifications.prototype = {
       popupnotification.setAttribute("id", popupnotificationID);
       popupnotification.setAttribute("popupid", n.id);
       popupnotification.setAttribute("oncommand", "PopupNotifications._onCommand(event);");
-      if (Services.prefs.getBoolPref("privacy.permissionPrompts.showCloseButton")) {
-        popupnotification.setAttribute("closebuttoncommand", "PopupNotifications._onButtonEvent(event, 'secondarybuttoncommand', 'esc-press');");
-      } else {
-        popupnotification.setAttribute("closebuttoncommand", `PopupNotifications._dismiss(event, ${TELEMETRY_STAT_DISMISSAL_CLOSE_BUTTON});`);
-      }
+      popupnotification.setAttribute("closebuttoncommand", `PopupNotifications._dismiss(event, ${TELEMETRY_STAT_DISMISSAL_CLOSE_BUTTON});`);
       if (n.mainAction) {
         popupnotification.setAttribute("buttonlabel", n.mainAction.label);
         popupnotification.setAttribute("buttonaccesskey", n.mainAction.accessKey);
-        popupnotification.setAttribute("buttonhighlight", !n.mainAction.disableHighlight);
+        popupnotification.toggleAttribute("buttonhighlight", !n.mainAction.disableHighlight);
         popupnotification.setAttribute("buttoncommand", "PopupNotifications._onButtonEvent(event, 'buttoncommand');");
         popupnotification.setAttribute("dropmarkerpopupshown", "PopupNotifications._onButtonEvent(event, 'dropmarkerpopupshown');");
         popupnotification.setAttribute("learnmoreclick", "PopupNotifications._onButtonEvent(event, 'learnmoreclick');");
@@ -846,7 +838,7 @@ PopupNotifications.prototype = {
       } else {
         // Enable the default button to let the user close the popup if the close button is hidden
         popupnotification.setAttribute("buttoncommand", "PopupNotifications._onButtonEvent(event, 'buttoncommand');");
-        popupnotification.setAttribute("buttonhighlight", "true");
+        popupnotification.toggleAttribute("buttonhighlight", true);
         popupnotification.removeAttribute("buttonlabel");
         popupnotification.removeAttribute("buttonaccesskey");
         popupnotification.removeAttribute("dropmarkerpopupshown");
@@ -883,13 +875,15 @@ PopupNotifications.prototype = {
           Cu.reportError(e);
           popupnotification.removeAttribute("origin");
         }
-      } else
+      } else {
         popupnotification.removeAttribute("origin");
+      }
 
       if (n.options.hideClose)
         popupnotification.setAttribute("closebuttonhidden", "true");
 
       popupnotification.notification = n;
+      let menuitems = [];
 
       if (n.mainAction && n.secondaryActions && n.secondaryActions.length > 0) {
         let telemetryStatId = TELEMETRY_STAT_ACTION_2;
@@ -907,7 +901,7 @@ PopupNotifications.prototype = {
           item.notification = n;
           item.action = action;
 
-          popupnotification.appendChild(item);
+          menuitems.push(item);
 
           // We can only record a limited number of actions in telemetry. If
           // there are more, the latest are all recorded in the last bucket.
@@ -928,12 +922,10 @@ PopupNotifications.prototype = {
       let checkbox = n.options.checkbox;
       if (checkbox && checkbox.label) {
         let checked = n._checkboxChecked != null ? n._checkboxChecked : !!checkbox.checked;
-
-        popupnotification.setAttribute("checkboxhidden", "false");
-        popupnotification.setAttribute("checkboxchecked", checked);
-        popupnotification.setAttribute("checkboxlabel", checkbox.label);
-
-        popupnotification.setAttribute("checkboxcommand", "PopupNotifications._onCheckboxCommand(event);");
+        popupnotification.checkboxState = {
+          checked,
+          label: checkbox.label,
+        };
 
         if (checked) {
           this._setNotificationUIState(popupnotification, checkbox.checkedState);
@@ -941,7 +933,7 @@ PopupNotifications.prototype = {
           this._setNotificationUIState(popupnotification, checkbox.uncheckedState);
         }
       } else {
-        popupnotification.setAttribute("checkboxhidden", "true");
+        popupnotification.checkboxState = null;
         popupnotification.setAttribute("warninghidden", "true");
       }
 
@@ -949,7 +941,10 @@ PopupNotifications.prototype = {
 
       // The popupnotification may be hidden if we got it from the chrome
       // document rather than creating it ad hoc.
-      popupnotification.hidden = false;
+      popupnotification.show();
+
+      popupnotification.menupopup.textContent = "";
+      popupnotification.menupopup.append(...menuitems);
     }, this);
   },
 
@@ -987,23 +982,29 @@ PopupNotifications.prototype = {
 
     this._refreshPanel(notificationsToShow);
 
+    function isNullOrHidden(elem) {
+      if (!elem) {
+        return true;
+      }
+
+      let anchorRect = elem.getBoundingClientRect();
+      return (anchorRect.width == 0 && anchorRect.height == 0);
+    }
+
     // If the anchor element is hidden or null, fall back to the identity icon.
-    if (!anchorElement || (anchorElement.boxObject.height == 0 &&
-                           anchorElement.boxObject.width == 0)) {
+    if (isNullOrHidden(anchorElement)) {
       anchorElement = this.window.document.getElementById("identity-icon");
 
       // If the identity icon is not available in this window, or maybe the
       // entire location bar is hidden for any reason, use the tab as the
       // anchor. We only ever show notifications for the current browser, so we
       // can just use the current tab.
-      if (!anchorElement || (anchorElement.boxObject.height == 0 &&
-                             anchorElement.boxObject.width == 0)) {
+      if (isNullOrHidden(anchorElement)) {
         anchorElement = this.tabbrowser.selectedTab;
 
         // If we're in an entirely chromeless environment, set the anchorElement
         // to null and let openPopup show the notification at (0,0) later.
-        if (!anchorElement || (anchorElement.boxObject.height == 0 &&
-                               anchorElement.boxObject.width == 0)) {
+        if (isNullOrHidden(anchorElement)) {
           anchorElement = null;
         }
       }
@@ -1042,9 +1043,6 @@ PopupNotifications.prototype = {
         this.panel.removeAttribute("noautohide");
       }
 
-      // On OS X and Linux we need a different panel arrow color for
-      // click-to-play plugins, so copy the popupid and use css.
-      this.panel.setAttribute("popupid", this.panel.firstElementChild.getAttribute("popupid"));
       notificationsToShow.forEach(function(n) {
         // Record that the notification was actually displayed on screen.
         // Notifications that were opened a second time or that were originally
@@ -1231,7 +1229,6 @@ PopupNotifications.prototype = {
         if (notification.options.extraAttr) {
           anchorElm.setAttribute("extraAttr", notification.options.extraAttr);
         }
-
       }
     }
   },
@@ -1487,15 +1484,7 @@ PopupNotifications.prototype = {
     if (event.originalTarget.localName == "button") {
       return;
     }
-    let notificationEl = event.target;
-    // Find notification like getNotificationFromElement but some nodes are non-anon
-    while (notificationEl) {
-      if (notificationEl.localName == "popupnotification") {
-        break;
-      }
-      notificationEl =
-        notificationEl.ownerDocument.getBindingParent(notificationEl) || notificationEl.parentNode;
-    }
+    let notificationEl = getNotificationFromElement(event.target);
 
     let notification = notificationEl.notification;
     if (notification.options.checkbox) {
@@ -1593,7 +1582,7 @@ PopupNotifications.prototype = {
     if (!target.action || !target.notification)
       throw "menucommand target has no associated action/notification";
 
-    let notificationEl = target.parentElement;
+    let notificationEl = getNotificationFromElement(target);
     event.stopPropagation();
 
     target.notification._recordTelemetryStat(target.action.telemetryStatId);

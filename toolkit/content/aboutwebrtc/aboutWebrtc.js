@@ -3,8 +3,8 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 "use strict";
 
-ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
-ChromeUtils.import("resource://gre/modules/Services.jsm");
+const {XPCOMUtils} = ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
+const {Services} = ChromeUtils.import("resource://gre/modules/Services.jsm");
 
 ChromeUtils.defineModuleGetter(this, "FileUtils",
                                "resource://gre/modules/FileUtils.jsm");
@@ -517,19 +517,6 @@ RTPStats.prototype = {
     this._stats = rtpStats;
   },
 
-  renderAvStats(stats) {
-    let statsString = "";
-
-    if (stats.mozAvSyncDelay) {
-      statsString += `${getString("av_sync_label")}: ${stats.mozAvSyncDelay} ms `;
-    }
-    if (stats.mozJitterBufferDelay) {
-      statsString += `${getString("jitter_buffer_delay_label")}: ${stats.mozJitterBufferDelay} ms`;
-    }
-
-    return renderElement("p", statsString);
-  },
-
   renderCoderStats(stats) {
     let statsString = "";
     let label;
@@ -577,7 +564,7 @@ RTPStats.prototype = {
       statsString += ` ${getString("lost_label")}: ${stats.packetsLost} ${getString("jitter_label")}: ${stats.jitter}`;
 
       if (stats.roundTripTime) {
-        statsString += ` RTT: ${stats.roundTripTime} ms`;
+        statsString += ` RTT: ${stats.roundTripTime * 1000} ms`;
       }
     } else if (stats.packetsSent) {
       statsString += ` ${getString("sent_label")}: ${stats.packetsSent} ${getString("packets")}`;
@@ -592,10 +579,6 @@ RTPStats.prototype = {
   renderRTPStatSet(stats) {
     let div = document.createElement("div");
     div.appendChild(renderElement("h5", stats.id));
-
-    if (stats.MozAvSyncDelay || stats.mozJitterBufferDelay) {
-      div.appendChild(this.renderAvStats(stats));
-    }
 
     div.appendChild(this.renderCoderStats(stats));
     div.appendChild(this.renderTransportStats(stats, getString("typeLocal")));

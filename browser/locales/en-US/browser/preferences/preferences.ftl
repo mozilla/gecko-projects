@@ -4,8 +4,8 @@
 
 do-not-track-description = Send websites a “Do Not Track” signal that you don’t want to be tracked
 do-not-track-learn-more = Learn more
-do-not-track-option-default-content-blocking =
-    .label = Only when { -brand-short-name } is set to block Detected Trackers
+do-not-track-option-default-content-blocking-known =
+    .label = Only when { -brand-short-name } is set to block known trackers
 do-not-track-option-always =
     .label = Always
 
@@ -54,10 +54,9 @@ pane-privacy-title = Privacy & Security
 category-privacy =
     .tooltiptext = { pane-privacy-title }
 
-# The word "account" can be translated, do not translate or transliterate "Firefox".
-pane-sync-title = Firefox Account
-category-sync =
-    .tooltiptext = { pane-sync-title }
+pane-sync-title2 = { -sync-brand-short-name }
+category-sync2 =
+    .tooltiptext = { pane-sync-title2 }
 
 help-button-label = { -brand-short-name } Support
 addons-button-label = Extensions & Themes
@@ -178,8 +177,8 @@ open-new-link-as-tabs =
     .label = Open links in tabs instead of new windows
     .accesskey = w
 
-warn-on-quit-close-multiple-tabs =
-    .label = Warn you when quitting and closing multiple tabs
+warn-on-close-multiple-tabs =
+    .label = Warn you when closing multiple tabs
     .accesskey = m
 
 warn-on-open-many-tabs =
@@ -236,7 +235,7 @@ containers-remove-cancel-button = Don’t remove this Container
 
 language-and-appearance-header = Language and Appearance
 
-fonts-and-colors-header = Fonts & Colors
+fonts-and-colors-header = Fonts and Colors
 
 default-font = Default font
     .accesskey = D
@@ -355,6 +354,8 @@ update-application-manual =
     .label = Never check for updates (not recommended)
     .accesskey = N
 
+update-application-warning-cross-user-setting = This setting will apply to all Windows accounts and { -brand-short-name } profiles using this installation of { -brand-short-name }.
+
 update-application-use-service =
     .label = Use a background service to install updates
     .accesskey = b
@@ -423,8 +424,11 @@ browsing-search-on-start-typing =
 browsing-cfr-recommendations =
     .label = Recommend extensions as you browse
     .accesskey = R
+browsing-cfr-features =
+    .label = Recommend features as you browse
+    .accesskey = f
 
-browsing-cfr-recommendations-learn-more = Learn More
+browsing-cfr-recommendations-learn-more = Learn more
 
 ## General Section - Proxy
 
@@ -432,7 +436,7 @@ network-settings-title = Network Settings
 
 network-proxy-connection-description = Configure how { -brand-short-name } connects to the internet.
 
-network-proxy-connection-learn-more = Learn More
+network-proxy-connection-learn-more = Learn more
 
 network-proxy-connection-settings =
     .label = Settings…
@@ -662,9 +666,11 @@ sync-device-name-save =
     .label = Save
     .accesskey = v
 
-sync-mobilepromo-single = Connect another device
+sync-connect-another-device = Connect another device
 
-sync-mobilepromo-multi = Manage devices
+sync-manage-devices = Manage devices
+
+sync-fxa-begin-pairing = Pair a device
 
 sync-tos-link = Terms of Service
 
@@ -676,7 +682,7 @@ privacy-header = Browser Privacy
 
 ## Privacy Section - Forms
 
-logins-header = Logins & Passwords
+logins-header = Logins and Passwords
 forms-ask-to-save-logins =
     .label = Ask to save logins and passwords for websites
     .accesskey = r
@@ -716,7 +722,7 @@ history-remember-option-never =
 history-remember-option-custom =
     .label = Use custom settings for history
 
-history-remember-description = { -brand-short-name } will remember your browsing, download, form and search history.
+history-remember-description = { -brand-short-name } will remember your browsing, download, form, and search history.
 history-dontremember-description = { -brand-short-name } will use the same settings as private browsing, and will not remember any history as you browse the Web.
 
 history-private-browsing-permanent =
@@ -752,13 +758,15 @@ sitedata-total-size-calculating = Calculating site data and cache size…
 # Variables:
 #   $value (Number) - Value of the unit (for example: 4.6, 500)
 #   $unit (String) - Name of the unit (for example: "bytes", "KB")
-sitedata-total-size = Your stored cookies, site data and cache are currently using { $value } { $unit } of disk space.
+sitedata-total-size = Your stored cookies, site data, and cache are currently using { $value } { $unit } of disk space.
 
 sitedata-learn-more = Learn more
 
 sitedata-delete-on-close =
     .label = Delete cookies and site data when { -brand-short-name } is closed
     .accesskey = c
+
+sitedata-delete-on-close-private-browsing = In permanent private browsing mode, cookies and site data will always be cleared when { -brand-short-name } is closed.
 
 sitedata-allow-cookies-option =
     .label = Accept cookies and site data
@@ -843,8 +851,13 @@ content-blocking-all-windows-trackers = Known trackers in all windows
 content-blocking-all-third-party-cookies = All third-party cookies
 
 content-blocking-warning-title = Heads up!
-content-blocking-warning-desc = Blocking cookies and trackers can cause some websites to break. It’s easy to disable blocking for sites you trust.
+content-blocking-warning-description = Blocking content can cause some websites to break. It’s easy to disable blocking for sites you trust.
 content-blocking-learn-how = Learn how
+
+content-blocking-reload-description = You will need to reload your tabs to apply these changes.
+content-blocking-reload-tabs-button =
+  .label = Reload All Tabs
+  .accesskey = R
 
 content-blocking-trackers-label =
   .label = Trackers
@@ -860,6 +873,20 @@ content-blocking-tracking-protection-change-block-list = Change block list
 content-blocking-cookies-label =
   .label = Cookies
   .accesskey = C
+
+content-blocking-expand-section = 
+  .tooltiptext = More information
+
+# Cryptomining refers to using scripts on websites that can use a computer’s resources to mine cryptocurrency without a user’s knowledge.
+content-blocking-cryptominers-label =
+  .label = Cryptominers
+  .accesskey = y
+
+# Browser fingerprinting is a method of tracking users by the configuration and settings information (their "digital fingerprint")
+# that is visible to websites they browse, rather than traditional tracking methods such as IP addresses and unique cookies.
+content-blocking-fingerprinters-label =
+  .label = Fingerprinters
+  .accesskey = F
 
 ## Privacy Section - Tracking
 
@@ -896,24 +923,13 @@ permissions-notification-pause =
     .label = Pause notifications until { -brand-short-name } restarts
     .accesskey = n
 
-permissions-block-autoplay-media =
-    .label = Block websites from automatically playing media with sound
+permissions-block-autoplay-media2 =
+    .label = Block websites from automatically playing sound
     .accesskey = B
-
-permissions-block-autoplay-media-menu = For websites that autoplay sound
 
 permissions-block-autoplay-media-exceptions =
     .label = Exceptions…
     .accesskey = E
-
-autoplay-option-ask =
-    .label = Always Ask
-autoplay-option-allow =
-    .label = Allow Autoplay
-autoplay-option-dont =
-    .label = Don't Autoplay
-
-permissions-autoplay-link = Learn more
 
 permissions-block-popups =
     .label = Block pop-up windows
@@ -960,11 +976,6 @@ addon-recommendations-link = Learn more
 # This message is displayed above disabled data sharing options in developer builds
 # or builds with no Telemetry support available.
 collection-health-report-disabled = Data reporting is disabled for this build configuration
-
-collection-browser-errors =
-    .label = Allow { -brand-short-name } to send browser error reports (including error messages) to { -vendor-short-name }
-    .accesskey = b
-collection-browser-errors-link = Learn more
 
 collection-backlogged-crash-reports =
     .label = Allow { -brand-short-name } to send backlogged crash reports on your behalf

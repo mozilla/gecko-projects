@@ -1,6 +1,6 @@
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
- * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 //! Traits that nodes must implement. Breaks the otherwise-cyclic dependency
 //! between layout and style.
@@ -11,9 +11,8 @@ use crate::parser::SelectorImpl;
 use std::fmt::Debug;
 use std::ptr::NonNull;
 
-/// Opaque representation of an Element, for identity comparisons. We use
-/// NonZeroPtrMut to get the NonZero optimization.
-#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+/// Opaque representation of an Element, for identity comparisons.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub struct OpaqueElement(NonNull<()>);
 
 unsafe impl Send for OpaqueElement {}

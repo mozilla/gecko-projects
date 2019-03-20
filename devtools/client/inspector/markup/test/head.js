@@ -354,6 +354,36 @@ function promiseNextTick() {
 }
 
 /**
+ * `await` with timeout.
+ *
+ * Usage:
+ *   const badgeEventAdded = inspector.markup.once("badge-added-event");
+ *   ...
+ *   const result = await awaitWithTimeout(badgeEventAdded, 3000);
+ *   is(result, "timeout", "Ensure that no event badges were added");
+ *
+ * @param  {Promise} promise
+ *         Promise to resolve
+ * @param  {Number} ms
+ *         Milliseconds to wait.
+ * @return "timeout" on timeout, otherwise the result of the fulfilled promise.
+ */
+async function awaitWithTimeout(promise, ms) {
+  const timeout = new Promise(resolve => {
+    // eslint-disable-next-line
+    const wait = setTimeout(() => {
+      clearTimeout(wait);
+      resolve("timeout");
+    }, ms);
+  });
+
+  return Promise.race([
+    promise,
+    timeout,
+  ]);
+}
+
+/**
  * Collapses the current text selection in an input field and tabs to the next
  * field.
  */
@@ -589,7 +619,12 @@ function assertContainerHasText(container, expectedText) {
  *             subchild2
  *           child2
  *             subchild3!slotted`
+ *           child3!ignore-children
  *        Each sub level should be indented by 2 spaces.
+ *        Each line contains text expected to match with the text of the corresponding
+ *        node in the markup view. Some suffixes are supported:
+ *        - !slotted -> indicates that the line corresponds to the slotted version
+ *        - !ignore-children -> the node might have children but do not assert them
  * @param {String} selector
  *        A CSS selector that will uniquely match the "root" element from the tree
  * @param {Inspector} inspector
@@ -612,13 +647,21 @@ async function _checkMarkupViewNode(treeNode, container, inspector) {
   info("Checking [" + path + "]");
   info("Checking node: " + node);
 
+  const ignoreChildren = node.includes("!ignore-children");
   const slotted = node.includes("!slotted");
+
+  // Remove optional suffixes.
+  const nodeText = node.replace("!slotted", "")
+                       .replace("!ignore-children", "");
+
+  assertContainerHasText(container, nodeText);
+
   if (slotted) {
-    const nodeName = node.replace("!slotted", "");
-    assertContainerHasText(container, nodeName);
     assertContainerSlotted(container);
-  } else {
-    assertContainerHasText(container, node);
+  }
+
+  if (ignoreChildren) {
+    return;
   }
 
   if (!children.length) {

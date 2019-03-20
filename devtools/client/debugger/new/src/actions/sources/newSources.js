@@ -13,7 +13,7 @@ import { generatedToOriginalId } from "devtools-source-map";
 import { flatten } from "lodash";
 
 import { toggleBlackBox } from "./blackbox";
-import { syncBreakpoint } from "../breakpoints";
+import { syncBreakpoint, addBreakpoint } from "../breakpoints";
 import { loadSourceText } from "./loadSourceText";
 import { togglePrettyPrint } from "./prettyPrint";
 import { selectLocation } from "../sources";
@@ -26,6 +26,7 @@ import {
 } from "../../selectors";
 
 import { prefs } from "../../utils/prefs";
+import sourceQueue from "../../utils/source-queue";
 
 import type { Source, SourceId } from "../../types";
 import type { Action, ThunkArgs } from "../types";
@@ -42,24 +43,40 @@ function createOriginalSource(
     isPrettyPrinted: false,
     isWasm: false,
     isBlackBoxed: false,
-    loadedState: "unloaded"
+    loadedState: "unloaded",
+    introductionUrl: null,
+    isExtension: false,
+    actors: []
   };
 }
 
-function loadSourceMaps(sources) {
-  return async function({ dispatch, sourceMaps }: ThunkArgs) {
+function loadSourceMaps(sources: Source[]) {
+  return async function({
+    dispatch,
+    sourceMaps
+  }: ThunkArgs): Promise<Promise<Source>[]> {
     if (!prefs.clientSourceMapsEnabled) {
-      return;
+      return [];
     }
 
-    let originalSources = await Promise.all(
-      sources.map(({ id }) => dispatch(loadSourceMap(id)))
+    const sourceList = await Promise.all(
+      sources.map(async ({ id }) => {
+        const originalSources = await dispatch(loadSourceMap(id));
+        sourceQueue.queueSources(originalSources);
+        return originalSources;
+      })
     );
 
-    originalSources = flatten(originalSources).filter(Boolean);
-    if (originalSources.length > 0) {
-      await dispatch(newSources(originalSources));
+    await sourceQueue.flush();
+
+    // We would like to sync breakpoints after we are done
+    // loading source maps as sometimes generated and original
+    // files share the same paths.
+    for (const source of sources) {
+      dispatch(checkPendingBreakpoints(source.id));
     }
+
+    return flatten(sourceList);
   };
 }
 
@@ -68,16 +85,29 @@ function loadSourceMaps(sources) {
  * @static
  */
 function loadSourceMap(sourceId: SourceId) {
-  return async function({ dispatch, getState, sourceMaps }: ThunkArgs) {
+  return async function({
+    dispatch,
+    getState,
+    sourceMaps
+  }: ThunkArgs): Promise<Source[]> {
     const source = getSource(getState(), sourceId);
 
     if (!source || isOriginal(source) || !source.sourceMapURL) {
-      return;
+      return [];
     }
 
     let urls = null;
     try {
-      urls = await sourceMaps.getOriginalURLs(source);
+      const urlInfo = { ...source };
+      if (!urlInfo.url) {
+        // If the source was dynamically generated (via eval, dynamically
+        // created script elements, and so forth), it won't have a URL, so that
+        // it is not collapsed into other sources from the same place. The
+        // introduction URL will include the point it was constructed at,
+        // however, so use that for resolving any source maps in the source.
+        urlInfo.url = urlInfo.introductionUrl;
+      }
+      urls = await sourceMaps.getOriginalURLs(urlInfo);
     } catch (e) {
       console.error(e);
     }
@@ -97,7 +127,7 @@ function loadSourceMap(sourceId: SourceId) {
           source: (({ ...currentSource, sourceMapURL: "" }: any): Source)
         }: Action)
       );
-      return;
+      return [];
     }
 
     return urls.map(url => createOriginalSource(url, source, sourceMaps));
@@ -156,8 +186,19 @@ function checkPendingBreakpoints(sourceId: string) {
     // load the source text if there is a pending breakpoint for it
     await dispatch(loadSourceText(source));
 
+    // Matching pending breakpoints could have either the same generated or the
+    // same original source. We expect the generated source to appear first and
+    // will add a breakpoint at that location initially. If the original source
+    // appears later then we use syncBreakpoint to see if the generated location
+    // changed and we need to remove the breakpoint we added earlier.
     await Promise.all(
-      pendingBreakpoints.map(bp => dispatch(syncBreakpoint(sourceId, bp)))
+      pendingBreakpoints.map(bp => {
+        if (source.url == bp.location.sourceUrl) {
+          return dispatch(syncBreakpoint(sourceId, bp));
+        }
+        const { line, column } = bp.generatedLocation;
+        return dispatch(addBreakpoint({ sourceId, line, column }, bp.options));
+      })
     );
   };
 }
@@ -189,23 +230,17 @@ export function newSource(source: Source) {
 
 export function newSources(sources: Source[]) {
   return async ({ dispatch, getState }: ThunkArgs) => {
-    sources = sources.filter(source => !getSource(getState(), source.id));
+    const _newSources = sources.filter(
+      source => !getSource(getState(), source.id)
+    );
 
-    if (sources.length == 0) {
-      return;
-    }
+    dispatch({ type: "ADD_SOURCES", sources });
 
-    dispatch(({ type: "ADD_SOURCES", sources: sources }: Action));
-
-    await dispatch(loadSourceMaps(sources));
-
-    for (const source of sources) {
+    for (const source of _newSources) {
       dispatch(checkSelectedSource(source.id));
-      dispatch(checkPendingBreakpoints(source.id));
     }
 
-    // We would like to restore the blackboxed state
-    // after loading all states to make sure the correctness.
-    await dispatch(restoreBlackBoxedSources(sources));
+    dispatch(restoreBlackBoxedSources(_newSources));
+    dispatch(loadSourceMaps(_newSources));
   };
 }

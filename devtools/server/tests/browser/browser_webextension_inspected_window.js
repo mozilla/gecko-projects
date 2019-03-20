@@ -24,17 +24,15 @@ async function setup(pageUrl) {
 
   const target = await addTabTarget(pageUrl);
 
-  const { client, form } = target;
+  await target.attach();
 
-  const [, targetFront] = await client.attachTarget(form);
-
-  const [, consoleClient] = await client.attachConsole(form.consoleActor, []);
-
+  const { client } = target;
+  const consoleClient = target.activeConsole;
   const inspectedWindowFront = await target.getFront("webExtensionInspectedWindow");
 
   return {
-    client, form,
-    targetFront, consoleClient,
+    client,
+    target, consoleClient,
     inspectedWindowFront,
     extension, fakeExtCallerInfo,
   };
@@ -47,20 +45,14 @@ async function teardown({client, extension}) {
   await extension.unload();
 }
 
-function waitForNextTabNavigated(targetFront) {
+function waitForNextTabNavigated(target) {
   return new Promise(resolve => {
-    targetFront.on("tabNavigated", function tabNavigatedListener(pkt) {
+    target.on("tabNavigated", function tabNavigatedListener(pkt) {
       if (pkt.state == "stop" && !pkt.isFrameSwitching) {
-        targetFront.off("tabNavigated", tabNavigatedListener);
+        target.off("tabNavigated", tabNavigatedListener);
         resolve();
       }
     });
-  });
-}
-
-function consoleEvalJS(consoleClient, jsCode) {
-  return new Promise(resolve => {
-    consoleClient.evaluateJS(jsCode, resolve);
   });
 }
 
@@ -111,13 +103,14 @@ add_task(async function test_successfull_inspectedWindowEval_result() {
 
 add_task(async function test_successfull_inspectedWindowEval_resultAsGrip() {
   const {
-    client, inspectedWindowFront, form,
+    client, inspectedWindowFront,
     extension, fakeExtCallerInfo,
+    consoleClient,
   } = await setup(MAIN_DOMAIN);
 
   let result = await inspectedWindowFront.eval(fakeExtCallerInfo, "window", {
     evalResultAsGrip: true,
-    toolboxConsoleActorID: form.consoleActor,
+    toolboxConsoleActorID: consoleClient.actor,
   });
 
   ok(result.valueGrip, "Got a result from inspectedWindow eval");
@@ -227,12 +220,12 @@ add_task(async function test_exception_inspectedWindowEval_result() {
 add_task(async function test_exception_inspectedWindowReload() {
   const {
     client, consoleClient, inspectedWindowFront,
-    extension, fakeExtCallerInfo, targetFront,
+    extension, fakeExtCallerInfo, target,
   } = await setup(`${TEST_RELOAD_URL}?test=cache`);
 
   // Test reload with bypassCache=false.
 
-  const waitForNoBypassCacheReload = waitForNextTabNavigated(targetFront);
+  const waitForNoBypassCacheReload = waitForNextTabNavigated(target);
   const reloadResult = await inspectedWindowFront.reload(fakeExtCallerInfo,
                                                          {ignoreCache: false});
 
@@ -240,21 +233,20 @@ add_task(async function test_exception_inspectedWindowReload() {
 
   await waitForNoBypassCacheReload;
 
-  const noBypassCacheEval = await consoleEvalJS(consoleClient,
-                                                "document.body.textContent");
+  const noBypassCacheEval = await consoleClient.evaluateJS("document.body.textContent");
 
   is(noBypassCacheEval.result, "empty cache headers",
      "Got the expected result with reload forceBypassCache=false");
 
   // Test reload with bypassCache=true.
 
-  const waitForForceBypassCacheReload = waitForNextTabNavigated(targetFront);
+  const waitForForceBypassCacheReload = waitForNextTabNavigated(target);
   await inspectedWindowFront.reload(fakeExtCallerInfo, {ignoreCache: true});
 
   await waitForForceBypassCacheReload;
 
-  const forceBypassCacheEval = await consoleEvalJS(consoleClient,
-                                                   "document.body.textContent");
+  const forceBypassCacheEval =
+    await consoleClient.evaluateJS("document.body.textContent");
 
   is(forceBypassCacheEval.result, "no-cache:no-cache",
      "Got the expected result with reload forceBypassCache=true");
@@ -265,32 +257,31 @@ add_task(async function test_exception_inspectedWindowReload() {
 add_task(async function test_exception_inspectedWindowReload_customUserAgent() {
   const {
     client, consoleClient, inspectedWindowFront,
-    extension, fakeExtCallerInfo, targetFront,
+    extension, fakeExtCallerInfo, target,
   } = await setup(`${TEST_RELOAD_URL}?test=user-agent`);
 
   // Test reload with custom userAgent.
 
-  const waitForCustomUserAgentReload = waitForNextTabNavigated(targetFront);
+  const waitForCustomUserAgentReload = waitForNextTabNavigated(target);
   await inspectedWindowFront.reload(fakeExtCallerInfo,
                                     {userAgent: "Customized User Agent"});
 
   await waitForCustomUserAgentReload;
 
-  const customUserAgentEval = await consoleEvalJS(consoleClient,
-                                                  "document.body.textContent");
+  const customUserAgentEval = await consoleClient.evaluateJS("document.body.textContent");
 
   is(customUserAgentEval.result, "Customized User Agent",
      "Got the expected result on reload with a customized userAgent");
 
   // Test reload with no custom userAgent.
 
-  const waitForNoCustomUserAgentReload = waitForNextTabNavigated(targetFront);
+  const waitForNoCustomUserAgentReload = waitForNextTabNavigated(target);
   await inspectedWindowFront.reload(fakeExtCallerInfo, {});
 
   await waitForNoCustomUserAgentReload;
 
-  const noCustomUserAgentEval = await consoleEvalJS(consoleClient,
-                                                    "document.body.textContent");
+  const noCustomUserAgentEval =
+    await consoleClient.evaluateJS("document.body.textContent");
 
   is(noCustomUserAgentEval.result, window.navigator.userAgent,
      "Got the expected result with reload without a customized userAgent");
@@ -301,18 +292,17 @@ add_task(async function test_exception_inspectedWindowReload_customUserAgent() {
 add_task(async function test_exception_inspectedWindowReload_injectedScript() {
   const {
     client, consoleClient, inspectedWindowFront,
-    extension, fakeExtCallerInfo, targetFront,
+    extension, fakeExtCallerInfo, target,
   } = await setup(`${TEST_RELOAD_URL}?test=injected-script&frames=3`);
 
   // Test reload with an injectedScript.
 
-  const waitForInjectedScriptReload = waitForNextTabNavigated(targetFront);
+  const waitForInjectedScriptReload = waitForNextTabNavigated(target);
   await inspectedWindowFront.reload(fakeExtCallerInfo,
                                     {injectedScript: `new ${injectedScript}`});
   await waitForInjectedScriptReload;
 
-  const injectedScriptEval = await consoleEvalJS(consoleClient,
-                                                 `(${collectEvalResults})()`);
+  const injectedScriptEval = await consoleClient.evaluateJS(`(${collectEvalResults})()`);
 
   const expectedResult = (new Array(5)).fill("injected script executed first");
 
@@ -321,12 +311,12 @@ add_task(async function test_exception_inspectedWindowReload_injectedScript() {
 
   // Test reload without an injectedScript.
 
-  const waitForNoInjectedScriptReload = waitForNextTabNavigated(targetFront);
+  const waitForNoInjectedScriptReload = waitForNextTabNavigated(target);
   await inspectedWindowFront.reload(fakeExtCallerInfo, {});
   await waitForNoInjectedScriptReload;
 
-  const noInjectedScriptEval = await consoleEvalJS(consoleClient,
-                                                   `(${collectEvalResults})()`);
+  const noInjectedScriptEval =
+    await consoleClient.evaluateJS(`(${collectEvalResults})()`);
 
   const newExpectedResult = (new Array(5)).fill("injected script NOT executed");
 
@@ -339,34 +329,33 @@ add_task(async function test_exception_inspectedWindowReload_injectedScript() {
 add_task(async function test_exception_inspectedWindowReload_multiple_calls() {
   const {
     client, consoleClient, inspectedWindowFront,
-    extension, fakeExtCallerInfo, targetFront,
+    extension, fakeExtCallerInfo, target,
   } = await setup(`${TEST_RELOAD_URL}?test=user-agent`);
 
   // Test reload with custom userAgent three times (and then
   // check that only the first one has affected the page reload.
 
-  const waitForCustomUserAgentReload = waitForNextTabNavigated(targetFront);
+  const waitForCustomUserAgentReload = waitForNextTabNavigated(target);
 
   inspectedWindowFront.reload(fakeExtCallerInfo, {userAgent: "Customized User Agent 1"});
   inspectedWindowFront.reload(fakeExtCallerInfo, {userAgent: "Customized User Agent 2"});
 
   await waitForCustomUserAgentReload;
 
-  const customUserAgentEval = await consoleEvalJS(consoleClient,
-                                                  "document.body.textContent");
+  const customUserAgentEval = await consoleClient.evaluateJS("document.body.textContent");
 
   is(customUserAgentEval.result, "Customized User Agent 1",
      "Got the expected result on reload with a customized userAgent");
 
   // Test reload with no custom userAgent.
 
-  const waitForNoCustomUserAgentReload = waitForNextTabNavigated(targetFront);
+  const waitForNoCustomUserAgentReload = waitForNextTabNavigated(target);
   await inspectedWindowFront.reload(fakeExtCallerInfo, {});
 
   await waitForNoCustomUserAgentReload;
 
-  const noCustomUserAgentEval = await consoleEvalJS(consoleClient,
-                                                    "document.body.textContent");
+  const noCustomUserAgentEval =
+    await consoleClient.evaluateJS("document.body.textContent");
 
   is(noCustomUserAgentEval.result, window.navigator.userAgent,
      "Got the expected result with reload without a customized userAgent");
@@ -377,12 +366,12 @@ add_task(async function test_exception_inspectedWindowReload_multiple_calls() {
 add_task(async function test_exception_inspectedWindowReload_stopped() {
   const {
     client, consoleClient, inspectedWindowFront,
-    extension, fakeExtCallerInfo, targetFront,
+    extension, fakeExtCallerInfo, target,
   } = await setup(`${TEST_RELOAD_URL}?test=injected-script&frames=3`);
 
   // Test reload on a page that calls window.stop() immediately during the page loading
 
-  const waitForPageLoad = waitForNextTabNavigated(targetFront);
+  const waitForPageLoad = waitForNextTabNavigated(target);
   await inspectedWindowFront.eval(fakeExtCallerInfo,
                                   "window.location += '&stop=windowStop'");
 
@@ -390,13 +379,13 @@ add_task(async function test_exception_inspectedWindowReload_stopped() {
   await waitForPageLoad;
 
   info("Starting a reload with an injectedScript");
-  const waitForInjectedScriptReload = waitForNextTabNavigated(targetFront);
+  const waitForInjectedScriptReload = waitForNextTabNavigated(target);
   await inspectedWindowFront.reload(fakeExtCallerInfo,
                                     {injectedScript: `new ${injectedScript}`});
   await waitForInjectedScriptReload;
 
-  const injectedScriptEval = await consoleEvalJS(consoleClient,
-                                                 `(${collectEvalResults})()`);
+  const injectedScriptEval =
+    await consoleClient.evaluateJS(`(${collectEvalResults})()`);
 
   // The page should have stopped during the reload and only one injected script
   // is expected.
@@ -408,12 +397,12 @@ add_task(async function test_exception_inspectedWindowReload_stopped() {
   // Reload again with no options.
 
   info("Reload the tab again without any reload options");
-  const waitForNoInjectedScriptReload = waitForNextTabNavigated(targetFront);
+  const waitForNoInjectedScriptReload = waitForNextTabNavigated(target);
   await inspectedWindowFront.reload(fakeExtCallerInfo, {});
   await waitForNoInjectedScriptReload;
 
-  const noInjectedScriptEval = await consoleEvalJS(consoleClient,
-                                                   `(${collectEvalResults})()`);
+  const noInjectedScriptEval =
+    await consoleClient.evaluateJS(`(${collectEvalResults})()`);
 
   // The page should have stopped during the reload and no injected script should
   // have been executed during this second reload (or it would mean that the previous

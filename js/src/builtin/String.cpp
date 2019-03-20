@@ -32,13 +32,14 @@
 #include "jit/InlinableNatives.h"
 #include "js/Conversions.h"
 #if !EXPOSE_INTL_API
-#include "js/LocaleSensitive.h"
+#  include "js/LocaleSensitive.h"
 #endif
+#include "js/PropertySpec.h"
 #include "js/StableStringChars.h"
 #include "js/UniquePtr.h"
 #if ENABLE_INTL_API
-#include "unicode/uchar.h"
-#include "unicode/unorm2.h"
+#  include "unicode/uchar.h"
+#  include "unicode/unorm2.h"
 #endif
 #include "util/StringBuffer.h"
 #include "util/Unicode.h"
@@ -2909,7 +2910,7 @@ static bool StrFlatReplaceGlobal(JSContext* cx, JSLinearString* str,
 
 // This is identical to "str.split(pattern).join(replacement)" except that we
 // do some deforestation optimization in Ion.
-JSString* js::str_flat_replace_string(JSContext* cx, HandleString string,
+JSString* js::StringFlatReplaceString(JSContext* cx, HandleString string,
                                       HandleString pattern,
                                       HandleString replacement) {
   MOZ_ASSERT(string);
@@ -3276,9 +3277,9 @@ static ArrayObject* SplitSingleCharHelper(JSContext* cx, HandleLinearString str,
 }
 
 // ES 2016 draft Mar 25, 2016 21.1.3.17 steps 4, 8, 12-18.
-ArrayObject* js::str_split_string(JSContext* cx, HandleObjectGroup group,
-                                  HandleString str, HandleString sep,
-                                  uint32_t limit) {
+ArrayObject* js::StringSplitString(JSContext* cx, HandleObjectGroup group,
+                                   HandleString str, HandleString sep,
+                                   uint32_t limit) {
   MOZ_ASSERT(limit > 0, "Only called for strictly positive limit.");
 
   RootedLinearString linearStr(cx, str->ensureLinear(cx));
@@ -3376,6 +3377,7 @@ static const JSFunctionSpec string_methods[] = {
 
     /* Perl-ish methods (search is actually Python-esque). */
     JS_SELF_HOSTED_FN("match", "String_match", 1, 0),
+    JS_SELF_HOSTED_FN("matchAll", "String_matchAll", 1, 0),
     JS_SELF_HOSTED_FN("search", "String_search", 1, 0),
     JS_SELF_HOSTED_FN("replace", "String_replace", 2, 0),
     JS_SELF_HOSTED_FN("split", "String_split", 2, 0),
@@ -3422,7 +3424,7 @@ bool js::StringConstructor(JSContext* cx, unsigned argc, Value* vp) {
 
   if (args.isConstructing()) {
     RootedObject proto(cx);
-    if (!GetPrototypeFromBuiltinConstructor(cx, args, &proto)) {
+    if (!GetPrototypeFromBuiltinConstructor(cx, args, JSProto_String, &proto)) {
       return false;
     }
 
@@ -3689,8 +3691,9 @@ static const JSFunctionSpec string_static_methods[] = {
     JS_SELF_HOSTED_FN("localeCompare", "String_static_localeCompare", 2, 0),
     JS_FS_END};
 
-/* static */ Shape* StringObject::assignInitialShape(
-    JSContext* cx, Handle<StringObject*> obj) {
+/* static */
+Shape* StringObject::assignInitialShape(JSContext* cx,
+                                        Handle<StringObject*> obj) {
   MOZ_ASSERT(obj->empty());
 
   return NativeObject::addDataProperty(cx, obj, cx->names().length, LENGTH_SLOT,

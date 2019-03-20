@@ -21,7 +21,7 @@
 #include "GeckoProfiler.h"
 #include "nsIPowerManagerService.h"
 #ifdef MOZ_ENABLE_DBUS
-#include "WakeLockListener.h"
+#  include "WakeLockListener.h"
 #endif
 #include "gfxPlatform.h"
 #include "ScreenHelperGTK.h"
@@ -105,9 +105,10 @@ static void WrapGdkFrameClockDispose(GObject* object) {
 }
 #endif
 
-/*static*/ gboolean nsAppShell::EventProcessorCallback(GIOChannel* source,
-                                                       GIOCondition condition,
-                                                       gpointer data) {
+/*static*/
+gboolean nsAppShell::EventProcessorCallback(GIOChannel* source,
+                                            GIOCondition condition,
+                                            gpointer data) {
   nsAppShell* self = static_cast<nsAppShell*>(data);
 
   unsigned char c;

@@ -13,17 +13,17 @@
 
 #include "nsExternalHelperAppService.h"
 #include "nsCExternalHandlerService.h"
-#include "nsMIMEInfoImpl.h"
 #include "nsCOMPtr.h"
 #include <windows.h>
 
 #ifdef _WIN32_WINNT
-#undef _WIN32_WINNT
+#  undef _WIN32_WINNT
 #endif
 #define _WIN32_WINNT 0x0600
 #include <shlobj.h>
 
 class nsMIMEInfoWin;
+class nsIMIMEInfo;
 
 class nsOSHelperAppService : public nsExternalHelperAppService {
  public:

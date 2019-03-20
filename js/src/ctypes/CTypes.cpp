@@ -15,19 +15,19 @@
 #include "mozilla/WrappingOperations.h"
 
 #if defined(XP_UNIX)
-#include <errno.h>
+#  include <errno.h>
 #endif
 #if defined(XP_WIN)
-#include <float.h>
+#  include <float.h>
 #endif
 #if defined(SOLARIS)
-#include <ieeefp.h>
+#  include <ieeefp.h>
 #endif
 #include <limits>
 #include <math.h>
 #include <stdint.h>
 #ifdef HAVE_SSIZE_T
-#include <sys/types.h>
+#  include <sys/types.h>
 #endif
 #include <type_traits>
 
@@ -39,7 +39,10 @@
 #include "gc/FreeOp.h"
 #include "gc/Policy.h"
 #include "jit/AtomicOperations.h"
+#include "js/ArrayBuffer.h"  // JS::{IsArrayBufferObject,GetArrayBufferData,GetArrayBuffer{ByteLength,Data}}
 #include "js/CharacterEncoding.h"
+#include "js/PropertySpec.h"
+#include "js/SharedArrayBuffer.h"  // JS::{GetSharedArrayBuffer{ByteLength,Data},IsSharedArrayBufferObject}
 #include "js/StableStringChars.h"
 #include "js/UniquePtr.h"
 #include "js/Utility.h"
@@ -3240,7 +3243,7 @@ static bool ImplicitConvert(JSContext* cx, HandleValue val,
   case TYPE_##name: {                                                        \
     /* Convert from a 1-character string, regardless of encoding, */         \
     /* or from an integer, provided the result fits in 'type'. */            \
-    type result;                                                             \
+    type result = 0;                                                         \
     if (val.isString()) {                                                    \
       JSString* str = val.toString();                                        \
       if (str->length() != 1)                                                \
@@ -3382,7 +3385,7 @@ static bool ImplicitConvert(JSContext* cx, HandleValue val,
                              arrObj, arrIndex);
         }
         break;
-      } else if (val.isObject() && JS_IsArrayBufferObject(valObj)) {
+      } else if (val.isObject() && JS::IsArrayBufferObject(valObj)) {
         // Convert ArrayBuffer to pointer without any copy. This is only valid
         // when converting an argument to a function call, as it is possible for
         // the pointer to be invalidated by anything that runs JS code. (It is
@@ -3395,7 +3398,7 @@ static bool ImplicitConvert(JSContext* cx, HandleValue val,
         {
           JS::AutoCheckCannotGC nogc;
           bool isShared;
-          ptr = JS_GetArrayBufferData(valObj, &isShared, nogc);
+          ptr = JS::GetArrayBufferData(valObj, &isShared, nogc);
           MOZ_ASSERT(!isShared);  // Because ArrayBuffer
         }
         if (!ptr) {
@@ -3404,7 +3407,7 @@ static bool ImplicitConvert(JSContext* cx, HandleValue val,
         }
         *static_cast<void**>(buffer) = ptr;
         break;
-      } else if (val.isObject() && JS_IsSharedArrayBufferObject(valObj)) {
+      } else if (val.isObject() && JS::IsSharedArrayBufferObject(valObj)) {
         // CTypes has not yet opted in to allowing shared memory pointers
         // to escape.  Exporting a pointer to the shared buffer without
         // indicating sharedness would expose client code to races.
@@ -3559,8 +3562,8 @@ static bool ImplicitConvert(JSContext* cx, HandleValue val,
           // copy the array.
           const bool bufferShared = cls == ESClass::SharedArrayBuffer;
           uint32_t sourceLength =
-              bufferShared ? JS_GetSharedArrayBufferByteLength(valObj)
-                           : JS_GetArrayBufferByteLength(valObj);
+              bufferShared ? JS::GetSharedArrayBufferByteLength(valObj)
+                           : JS::GetArrayBufferByteLength(valObj);
           size_t elementSize = CType::GetSize(baseType);
           size_t arraySize = elementSize * targetLength;
           if (arraySize != size_t(sourceLength)) {
@@ -3574,9 +3577,9 @@ static bool ImplicitConvert(JSContext* cx, HandleValue val,
           SharedMem<void*> src =
               (bufferShared
                    ? SharedMem<void*>::shared(
-                         JS_GetSharedArrayBufferData(valObj, &isShared, nogc))
+                         JS::GetSharedArrayBufferData(valObj, &isShared, nogc))
                    : SharedMem<void*>::unshared(
-                         JS_GetArrayBufferData(valObj, &isShared, nogc)));
+                         JS::GetArrayBufferData(valObj, &isShared, nogc)));
           MOZ_ASSERT(isShared == bufferShared);
           jit::AtomicOperations::memcpySafeWhenRacy(target, src, sourceLength);
           break;
@@ -6221,7 +6224,8 @@ JSObject* StructType::BuildFieldsArray(JSContext* cx, JSObject* obj) {
   return fieldsProp;
 }
 
-/* static */ bool StructType::IsStruct(HandleValue v) {
+/* static */
+bool StructType::IsStruct(HandleValue v) {
   if (!v.isObject()) {
     return false;
   }
@@ -6429,13 +6433,13 @@ static bool GetABI(JSContext* cx, HandleValue abiType, ffi_abi* result) {
       return true;
     case ABI_THISCALL:
 #if defined(_WIN64)
-#if defined(_M_X64)
+#  if defined(_M_X64)
       *result = FFI_WIN64;
-#elif defined(_M_ARM64)
+#  elif defined(_M_ARM64)
       *result = FFI_SYSV;
-#else
-#error unknown 64-bit Windows platform
-#endif
+#  else
+#    error unknown 64-bit Windows platform
+#  endif
       return true;
 #elif defined(_WIN32)
       *result = FFI_THISCALL;
@@ -6451,13 +6455,13 @@ static bool GetABI(JSContext* cx, HandleValue abiType, ffi_abi* result) {
 #elif (defined(_WIN64))
       // We'd like the same code to work across Win32 and Win64, so stdcall_api
       // and winapi_abi become aliases to the lone Win64 ABI.
-#if defined(_M_X64)
+#  if defined(_M_X64)
       *result = FFI_WIN64;
-#elif defined(_M_ARM64)
+#  elif defined(_M_ARM64)
       *result = FFI_SYSV;
-#else
-#error unknown 64-bit Windows platform
-#endif
+#  else
+#    error unknown 64-bit Windows platform
+#  endif
       return true;
 #endif
     case INVALID_ABI:
@@ -7749,12 +7753,11 @@ static bool ReadStringCommon(JSContext* cx, InflateUTF8Method inflateUTF8,
         return false;
       }
 
-      result = JS_NewUCString(cx, dst.get(), length);
+      result = JS_NewUCString(cx, std::move(dst), length);
       if (!result) {
         return false;
       }
 
-      mozilla::Unused << dst.release();
       break;
     }
     case TYPE_int16_t:

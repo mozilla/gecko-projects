@@ -94,9 +94,22 @@
  * illegible.
  */
 @media (-moz-windows-default-theme) {
-  @media not all and (-moz-os-version: windows-win7) {
+  @media not (-moz-os-version: windows-win7) {
     #toolbar-menubar:not(:-moz-lwtheme):-moz-window-inactive {
       color: ThreeDShadow;
+    }
+  }
+}
+
+@media not (-moz-os-version: windows-win7) {
+  @media not (-moz-os-version: windows-win8) {
+    /* On Windows 10, when temporarily showing the menu bar, make it at least as
+     * tall as the tab bar such that the window controls don't appear to move up. */
+    :root[tabsintitlebar] #toolbar-menubar[autohide="true"] {
+      height: calc(var(--tab-min-height) - @navbarTabsShadowSize@);
+    }
+    :root[tabsintitlebar][sizemode="normal"] #toolbar-menubar[autohide="true"] {
+      height: calc(var(--tab-min-height) + var(--space-above-tabbar) - @navbarTabsShadowSize@);
     }
   }
 }
@@ -337,7 +350,7 @@
   }
 }
 
-/* titlebar command buttons */
+/* window control buttons */
 
 .titlebar-min {
   -moz-appearance: -moz-window-button-minimize;
@@ -347,7 +360,7 @@
   -moz-appearance: -moz-window-button-maximize;
 }
 
-#main-window[sizemode="maximized"] .titlebar-max {
+:root[sizemode="maximized"] .titlebar-max {
   -moz-appearance: -moz-window-button-restore;
 }
 
@@ -359,6 +372,11 @@
   .titlebar-min {
     margin-inline-end: 2px;
   }
+}
+
+:root[tabletmode] .titlebar-min,
+:root[tabletmode] .titlebar-max {
+  display: none;
 }
 
 /* ::::: bookmark menus ::::: */
@@ -536,13 +554,14 @@ menuitem.bookmark-item {
 
 @media (-moz-windows-default-theme: 0) {
   #urlbar:not(:-moz-lwtheme):not([focused="true"]),
+  #urlbar:not(:-moz-lwtheme).hidden-focus,
   .searchbar-textbox:not(:-moz-lwtheme):not([focused="true"]) {
     border-color: ThreeDShadow;
   }
 }
 
 html|*.urlbar-input:-moz-lwtheme::placeholder,
-.searchbar-textbox:-moz-lwtheme > .urlbar-textbox-container > moz-input-box > html|*.textbox-input::placeholder {
+.searchbar-textbox:-moz-lwtheme > moz-input-box > html|*.textbox-input::placeholder {
   opacity: 1.0;
   color: #777;
 }
@@ -608,17 +627,16 @@ html|*.urlbar-input:-moz-lwtheme::placeholder,
 
 /* identity box */
 
-#identity-box:not(:active):-moz-focusring {
-  outline: 1px dotted;
-  outline-offset: -3px;
-}
-
 %include ../shared/identity-block/identity-block.inc.css
 
 /* autocomplete */
 
 %include ../shared/autocomplete.inc.css
 %include ../shared/urlbar-autocomplete.inc.css
+
+#urlbarView-results {
+  font-size: 1.15em;
+}
 
 #PopupAutoComplete > richlistbox > richlistitem[originaltype~="datalist-first"] {
   border-top: 1px solid ThreeDShadow;
@@ -740,65 +758,7 @@ toolbarbutton.bookmark-item[dragover="true"][open="true"] {
 }
 
 %include ../shared/notification-icons.inc.css
-
-.popup-notification-body[popupid="addon-progress"],
-.popup-notification-body[popupid="addon-install-confirmation"] {
-  width: 28em;
-  max-width: 28em;
-}
-
-.addon-install-confirmation-name {
-  font-weight: bold;
-}
-
-html|*.addon-webext-perm-list {
-  margin-block-end: 0;
-  padding-inline-start: 10px;
-}
-
-.addon-webext-perm-text {
-  margin-inline-start: 0;
-}
-
-.popup-notification-description[popupid="addon-webext-permissions"],
-.popup-notification-description[popupid="addon-webext-permissions-notification"] {
-  margin-inline-start: -1px;
-}
-
-.addon-webext-perm-notification-content,
-.addon-installed-notification-content {
-  margin-top: 0;
-}
-
-.addon-webext-name {
-  display: inline;
-  font-weight: bold;
-  margin: 0;
-}
-
-.addon-addon-icon,
-.addon-toolbar-icon {
-  width: 14px;
-  height: 14px;
-  vertical-align: bottom;
-  margin-bottom: 1px;
-  -moz-context-properties: fill;
-  fill: currentColor;
-}
-
-.addon-addon-icon {
-  list-style-image: url("chrome://mozapps/skin/extensions/extensionGeneric-16.svg");
-}
-
-.addon-toolbar-icon {
-  list-style-image: url("chrome://browser/skin/menu.svg");
-}
-
-/* Notification icon box */
-
-.notification-anchor-icon:-moz-focusring {
-  outline: 1px dotted -moz-DialogText;
-}
+%include ../shared/addon-notification.inc.css
 
 /* Translation infobar */
 
@@ -956,9 +916,8 @@ notification[value="translation"] {
 
 /* End customization mode */
 
-/* Prevent titlebar items (window caption buttons, private browsing indicator,
- * accessibility indicator, etc) from overlapping the nav bar's shadow on the
- * tab bar. */
+/* Prevent window controls from overlapping the nav bar's shadow on the tab
+ * bar. */
 #TabsToolbar > .titlebar-buttonbox-container {
   margin-bottom: @navbarTabsShadowSize@;
 }

@@ -37,27 +37,27 @@
 #include "mozilla/ipc/CrossProcessSemaphore.h"
 
 #ifdef XP_WIN
-#include "mozilla/gfx/DeviceManagerDx.h"
-#include "mozilla/layers/TextureD3D11.h"
-#include "mozilla/layers/TextureDIB.h"
-#include "gfxWindowsPlatform.h"
-#include "gfx2DGlue.h"
+#  include "mozilla/gfx/DeviceManagerDx.h"
+#  include "mozilla/layers/TextureD3D11.h"
+#  include "mozilla/layers/TextureDIB.h"
+#  include "gfxWindowsPlatform.h"
+#  include "gfx2DGlue.h"
 #endif
 #ifdef MOZ_X11
-#include "mozilla/layers/TextureClientX11.h"
-#include "GLXLibrary.h"
+#  include "mozilla/layers/TextureClientX11.h"
+#  include "GLXLibrary.h"
 #endif
 
 #ifdef XP_MACOSX
-#include "mozilla/layers/MacIOSurfaceTextureClientOGL.h"
+#  include "mozilla/layers/MacIOSurfaceTextureClientOGL.h"
 #endif
 
 #if 0
-#define RECYCLE_LOG(...) printf_stderr(__VA_ARGS__)
+#  define RECYCLE_LOG(...) printf_stderr(__VA_ARGS__)
 #else
-#define RECYCLE_LOG(...) \
-  do {                   \
-  } while (0)
+#  define RECYCLE_LOG(...) \
+    do {                   \
+    } while (0)
 #endif
 
 namespace mozilla {
@@ -298,10 +298,12 @@ void TextureChild::Destroy(const TextureDeallocParams& aParams) {
   }
 }
 
-/* static */ Atomic<uint64_t> TextureClient::sSerialCounter(0);
+/* static */
+Atomic<uint64_t> TextureClient::sSerialCounter(0);
 
-void DeallocateTextureClientSyncProxy(TextureDeallocParams params,
-                                      ReentrantMonitor* aBarrier, bool* aDone) {
+static void DeallocateTextureClientSyncProxy(TextureDeallocParams params,
+                                             ReentrantMonitor* aBarrier,
+                                             bool* aDone) {
   DeallocateTextureClient(params);
   ReentrantMonitorAutoEnter autoMon(*aBarrier);
   *aDone = true;
@@ -791,8 +793,8 @@ void TextureClient::SetAddedToCompositableClient() {
   }
 }
 
-void CancelTextureClientRecycle(uint64_t aTextureId,
-                                LayersIPCChannel* aAllocator) {
+static void CancelTextureClientRecycle(uint64_t aTextureId,
+                                       LayersIPCChannel* aAllocator) {
   if (!aAllocator) {
     return;
   }
@@ -817,8 +819,9 @@ void TextureClient::CancelWaitForRecycle() {
   }
 }
 
-/* static */ void TextureClient::TextureClientRecycleCallback(
-    TextureClient* aClient, void* aClosure) {
+/* static */
+void TextureClient::TextureClientRecycleCallback(TextureClient* aClient,
+                                                 void* aClosure) {
   MOZ_ASSERT(aClient->GetRecycleAllocator());
   aClient->GetRecycleAllocator()->RecycleTextureClient(aClient);
 }

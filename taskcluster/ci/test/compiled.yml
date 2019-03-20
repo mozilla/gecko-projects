@@ -61,7 +61,6 @@ jittest:
             default: default
     run-on-projects:
         by-test-platform:
-            android-hw.*: ['try']
             # Turn off for all linux and windows platforms, since it is
             # redundant with SM(...) jobs -- except for code coverage builds,
             # which are still needed since ccov doesn't yet work with
@@ -84,6 +83,7 @@ jittest:
             windows.*: 1
             windows10-64-ccov/debug: 6
             macosx.*: 1
+            macosx64/debug: 3
             macosx64-ccov/debug: 4
             android-em-4.3-arm7-api-15/debug: 20
             android.*: 10

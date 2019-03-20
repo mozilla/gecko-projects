@@ -6,7 +6,7 @@
 
 const BYTES_PER_MEBIBYTE = 1048576;
 
-ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
+const {XPCOMUtils} = ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
 XPCOMUtils.defineLazyModuleGetters(this, {
   Services: "resource://gre/modules/Services.jsm",
   OS: "resource://gre/modules/osfile.jsm",
@@ -114,7 +114,7 @@ var PlacesDBUtils = {
         logs.push(`The ${dbName} database is sane`);
       } catch (ex) {
         PlacesDBUtils.clearPendingTasks();
-        if (ex.status == Cr.NS_ERROR_FILE_CORRUPTED) {
+        if (ex.result == Cr.NS_ERROR_FILE_CORRUPTED) {
           logs.push(`The ${dbName} database is corrupt`);
           Services.prefs.setCharPref("places.database.replaceDatabaseOnStartup", dbName);
           throw new Error(`Unable to fix corruption, ${dbName} will be replaced on next startup`);
@@ -618,19 +618,18 @@ var PlacesDBUtils = {
         )`,
       },
 
+      // Remove icons whose origin is not in moz_origins, unless referenced.
       { query:
         `DELETE FROM moz_icons WHERE id IN (
           SELECT id FROM moz_icons WHERE root = 0
+          UNION ALL
+          SELECT id FROM moz_icons
+          WHERE root = 1
+            AND get_host_and_port(icon_url) NOT IN (SELECT host FROM moz_origins)
+            AND fixup_url(get_host_and_port(icon_url)) NOT IN (SELECT host FROM moz_origins)
           EXCEPT
           SELECT icon_id FROM moz_icons_to_pages
         )`,
-      },
-
-      { query:
-        `DELETE FROM moz_icons
-         WHERE root = 1
-           AND get_host_and_port(icon_url) NOT IN (SELECT host FROM moz_origins)
-           AND fixup_url(get_host_and_port(icon_url)) NOT IN (SELECT host FROM moz_origins)`,
       },
 
       // MOZ_HISTORYVISITS
@@ -949,7 +948,6 @@ var PlacesDBUtils = {
       await db.execute(query, params, r => {
         logs.push(`Trigger ${r.getResultByIndex(0)}`);
       });
-
     } catch (ex) {
       throw new Error("Unable to collect stats.");
     }
@@ -1176,7 +1174,7 @@ async function integrity(dbName) {
 
   // Create a new connection for this check, so we can operate independently
   // from a broken Places service.
-  // openConnection returns an exception with .status == Cr.NS_ERROR_FILE_CORRUPTED,
+  // openConnection returns an exception with .result == Cr.NS_ERROR_FILE_CORRUPTED,
   // we should do the same everywhere we want maintenance to try replacing the
   // database on next startup.
   let path = OS.Path.join(OS.Constants.Path.profileDir, dbName);
@@ -1190,16 +1188,14 @@ async function integrity(dbName) {
     try {
       await db.execute("REINDEX");
     } catch (ex) {
-      let error = new Error("Impossible to reindex database");
-      error.status = Cr.NS_ERROR_FILE_CORRUPTED;
-      throw error;
+      throw new Components.Exception("Impossible to reindex database",
+                                     Cr.NS_ERROR_FILE_CORRUPTED);
     }
 
     // Check again.
     if (!await check(db)) {
-      let error = new Error("The database is still corrupt");
-      error.status = Cr.NS_ERROR_FILE_CORRUPTED;
-      throw error;
+      throw new Components.Exception("The database is still corrupt",
+                                     Cr.NS_ERROR_FILE_CORRUPTED);
     }
   } finally {
     await db.close();

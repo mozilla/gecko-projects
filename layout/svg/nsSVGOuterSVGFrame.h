@@ -27,7 +27,8 @@ class nsSVGOuterSVGFrame final : public nsSVGDisplayContainerFrame,
                                                   ComputedStyle* aStyle);
 
  protected:
-  explicit nsSVGOuterSVGFrame(ComputedStyle* aStyle);
+  explicit nsSVGOuterSVGFrame(ComputedStyle* aStyle,
+                              nsPresContext* aPresContext);
 
  public:
   NS_DECL_QUERYFRAME
@@ -176,7 +177,7 @@ class nsSVGOuterSVGFrame final : public nsSVGDisplayContainerFrame,
   // A hash-set containing our nsSVGForeignObjectFrame descendants. Note we use
   // a hash-set to avoid the O(N^2) behavior we'd get tearing down an SVG frame
   // subtree if we were to use a list (see bug 381285 comment 20).
-  nsAutoPtr<nsTHashtable<nsPtrHashKey<nsSVGForeignObjectFrame> > >
+  nsAutoPtr<nsTHashtable<nsPtrHashKey<nsSVGForeignObjectFrame>>>
       mForeignObjectHash;
 
   nsRegion mInvalidRegion;
@@ -217,8 +218,9 @@ class nsSVGOuterSVGAnonChildFrame final : public nsSVGDisplayContainerFrame {
   friend nsContainerFrame* NS_NewSVGOuterSVGAnonChildFrame(
       nsIPresShell* aPresShell, ComputedStyle* aStyle);
 
-  explicit nsSVGOuterSVGAnonChildFrame(ComputedStyle* aStyle)
-      : nsSVGDisplayContainerFrame(aStyle, kClassID) {}
+  explicit nsSVGOuterSVGAnonChildFrame(ComputedStyle* aStyle,
+                                       nsPresContext* aPresContext)
+      : nsSVGDisplayContainerFrame(aStyle, aPresContext, kClassID) {}
 
  public:
   NS_DECL_FRAMEARENA_HELPERS(nsSVGOuterSVGAnonChildFrame)

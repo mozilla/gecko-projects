@@ -6,23 +6,24 @@
 
 #include "mozilla/layers/FocusTarget.h"
 
-#include "mozilla/dom/EventTarget.h"     // for EventTarget
-#include "mozilla/dom/TabParent.h"       // for TabParent
-#include "mozilla/EventDispatcher.h"     // for EventDispatcher
-#include "mozilla/layout/RenderFrame.h"  // For RenderFrame
-#include "nsIContentInlines.h"           // for nsINode::IsEditable()
-#include "nsIPresShell.h"                // for nsIPresShell
-#include "nsLayoutUtils.h"               // for nsLayoutUtils
+#include "mozilla/dom/BrowserBridgeChild.h"  // for BrowserBridgeChild
+#include "mozilla/dom/EventTarget.h"         // for EventTarget
+#include "mozilla/dom/TabParent.h"           // for TabParent
+#include "mozilla/EventDispatcher.h"         // for EventDispatcher
+#include "mozilla/layout/RenderFrame.h"      // For RenderFrame
+#include "nsIContentInlines.h"               // for nsINode::IsEditable()
+#include "nsIPresShell.h"                    // for nsIPresShell
+#include "nsLayoutUtils.h"                   // for nsLayoutUtils
 
 #define ENABLE_FT_LOGGING 0
 // #define ENABLE_FT_LOGGING 1
 
 #if ENABLE_FT_LOGGING
-#define FT_LOG(FMT, ...)                                                       \
-  printf_stderr("FT (%s): " FMT, XRE_IsParentProcess() ? "chrome" : "content", \
-                __VA_ARGS__)
+#  define FT_LOG(FMT, ...)         \
+    printf_stderr("FT (%s): " FMT, \
+                  XRE_IsParentProcess() ? "chrome" : "content", __VA_ARGS__)
 #else
-#define FT_LOG(...)
+#  define FT_LOG(...)
 #endif
 
 using namespace mozilla::dom;
@@ -43,7 +44,7 @@ static already_AddRefed<nsIPresShell> GetRetargetEventPresShell(
     return nullptr;
   }
 
-  nsCOMPtr<nsIDocument> retargetEventDoc = window->GetExtantDoc();
+  RefPtr<Document> retargetEventDoc = window->GetExtantDoc();
   if (!retargetEventDoc) {
     return nullptr;
   }
@@ -117,7 +118,7 @@ FocusTarget::FocusTarget(nsIPresShell* aRootPresShell,
     return;
   }
 
-  nsCOMPtr<nsIDocument> document = presShell->GetDocument();
+  RefPtr<Document> document = presShell->GetDocument();
   if (!document) {
     FT_LOG("Creating nil target with seq=%" PRIu64 " (no document)\n",
            aFocusSequenceNumber);
@@ -176,6 +177,17 @@ FocusTarget::FocusTarget(nsIPresShell* aRootPresShell,
            ", kl=%d (remote browser missing layers id)\n",
            aFocusSequenceNumber, mFocusHasKeyEventListeners);
 
+    return;
+  }
+
+  // Check if the key event target is a remote browser
+  if (BrowserBridgeChild* bbc = BrowserBridgeChild::GetFrom(keyEventTarget)) {
+    FT_LOG("Creating oopif reflayer target with seq=%" PRIu64
+           ", kl=%d, lt=%" PRIu64 "\n",
+           aFocusSequenceNumber, mFocusHasKeyEventListeners,
+           bbc->GetLayersId());
+
+    mData = AsVariant<LayersId>(bbc->GetLayersId());
     return;
   }
 

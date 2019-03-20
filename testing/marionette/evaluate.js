@@ -4,20 +4,19 @@
 
 "use strict";
 
-ChromeUtils.import("resource://gre/modules/NetUtil.jsm");
-ChromeUtils.import("resource://gre/modules/Timer.jsm");
-ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
+const {clearTimeout, setTimeout} = ChromeUtils.import("resource://gre/modules/Timer.jsm");
+const {XPCOMUtils} = ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
 
-ChromeUtils.import("chrome://marionette/content/assert.js");
+const {assert} = ChromeUtils.import("chrome://marionette/content/assert.js");
 const {
   element,
   WebElement,
-} = ChromeUtils.import("chrome://marionette/content/element.js", {});
+} = ChromeUtils.import("chrome://marionette/content/element.js");
 const {
   JavaScriptError,
   ScriptTimeoutError,
-} = ChromeUtils.import("chrome://marionette/content/error.js", {});
-const {Log} = ChromeUtils.import("chrome://marionette/content/log.js", {});
+} = ChromeUtils.import("chrome://marionette/content/error.js");
+const {Log} = ChromeUtils.import("chrome://marionette/content/log.js");
 
 XPCOMUtils.defineLazyGetter(this, "log", Log.get);
 
@@ -92,19 +91,21 @@ evaluate.sandbox = function(sb, script, args = [],
       line = 0,
       timeout = DEFAULT_TIMEOUT,
     } = {}) {
-  let scriptTimeoutID, timeoutHandler, unloadHandler;
+  let unloadHandler;
+
+  // timeout handler
+  let scriptTimeoutID, timeoutPromise;
+  if (timeout !== null) {
+    timeoutPromise = new Promise((resolve, reject) => {
+      scriptTimeoutID = setTimeout(() => {
+        reject(new ScriptTimeoutError(`Timed out after ${timeout} ms`));
+      }, timeout);
+    });
+  }
 
   let promise = new Promise((resolve, reject) => {
     let src = "";
     sb[COMPLETE] = resolve;
-    timeoutHandler = () => reject(new ScriptTimeoutError(`Timed out after ${timeout} ms`));
-    unloadHandler = sandbox.cloneInto(
-        () => reject(new JavaScriptError("Document was unloaded")),
-        sb);
-
-    if (async) {
-      sb[CALLBACK] = sb[COMPLETE];
-    }
     sb[ARGUMENTS] = sandbox.cloneInto(args, sb);
 
     // callback function made private
@@ -119,26 +120,39 @@ evaluate.sandbox = function(sb, script, args = [],
       ${script}
     }).apply(null, ${ARGUMENTS})`;
 
-    // timeout and unload handlers
-    scriptTimeoutID = setTimeout(timeoutHandler, timeout);
+    unloadHandler = sandbox.cloneInto(
+        () => reject(new JavaScriptError("Document was unloaded")), sb);
     sb.window.onunload = unloadHandler;
 
-    let res;
-    try {
-      res = Cu.evalInSandbox(src, sb, "1.8", file, line);
-    } catch (e) {
-      reject(new JavaScriptError(e));
-    }
+    let promises = [
+      Cu.evalInSandbox(src, sb, "1.8", file, line),
+      timeoutPromise,
+    ];
 
-    if (!async) {
-      resolve(res);
-    }
+    // Wait for the immediate result of calling evalInSandbox, or a timeout.
+    // Only resolve the promise if the scriptPromise was resolved and is not
+    // async, because the latter has to call resolve() itself.
+    Promise.race(promises).then(value => {
+      if (!async) {
+        resolve(value);
+      }
+    }, err => {
+      reject(err);
+    });
   });
 
-  return promise.then(res => {
+  // This block is mainly for async scripts, which escape the inner promise
+  // when calling resolve() on their own. The timeout promise will be re-used
+  // to break out after the initially setup timeout.
+  return Promise.race([promise, timeoutPromise]).catch(err => {
+    // Only raise valid errors for both the sync and async scripts.
+    if (err instanceof ScriptTimeoutError) {
+      throw err;
+    }
+    throw new JavaScriptError(err);
+  }).finally(() => {
     clearTimeout(scriptTimeoutID);
     sb.window.removeEventListener("unload", unloadHandler);
-    return res;
   });
 };
 
@@ -434,6 +448,7 @@ sandbox.create = function(win, principal = null, opts = {}) {
     sandboxPrototype: win,
     wantComponents: true,
     wantXrays: true,
+    wantGlobalProperties: ["ChromeUtils"],
   }, opts);
   return new Cu.Sandbox(p, opts);
 };

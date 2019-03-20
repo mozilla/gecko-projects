@@ -5,7 +5,9 @@
 // @flow
 // This module converts Firefox specific types to the generic types
 
-import type { Frame, Source, SourceLocation } from "../../types";
+import { isUrlExtension } from "../../utils/source";
+
+import type { Frame, Source, ThreadId } from "../../types";
 import type {
   PausedPacket,
   FramesResponse,
@@ -13,53 +15,65 @@ import type {
   SourcePayload
 } from "./types";
 
-export function createFrame(frame: FramePacket): ?Frame {
+import { clientCommands } from "./commands";
+
+export function createFrame(thread: ThreadId, frame: FramePacket): ?Frame {
   if (!frame) {
     return null;
   }
-  let title;
-  if (frame.type == "call") {
-    const c = frame.callee;
-    title = c.name || c.userDisplayName || c.displayName;
-  } else {
-    title = `(${frame.type})`;
-  }
+
   const location = {
-    sourceId: frame.where.source.actor,
+    sourceId: clientCommands.getSourceForActor(frame.where.actor),
     line: frame.where.line,
     column: frame.where.column
   };
 
   return {
     id: frame.actor,
-    displayName: title,
+    thread,
+    displayName: frame.displayName,
     location,
     generatedLocation: location,
     this: frame.this,
+    source: null,
     scope: frame.environment
   };
 }
 
+function makeSourceId(source) {
+  return source.url ? `sourceURL-${source.url}` : `source-${source.actor}`;
+}
+
 export function createSource(
+  thread: string,
   source: SourcePayload,
   { supportsWasm }: { supportsWasm: boolean }
 ): Source {
-  const createdSource = {
-    id: source.actor,
+  const id = makeSourceId(source);
+  const sourceActor = {
+    actor: source.actor,
+    source: id,
+    thread
+  };
+  const createdSource: any = {
+    id,
     url: source.url,
     relativeUrl: source.url,
     isPrettyPrinted: false,
-    isWasm: false,
     sourceMapURL: source.sourceMapURL,
+    introductionUrl: source.introductionUrl,
     isBlackBoxed: false,
-    loadedState: "unloaded"
+    loadedState: "unloaded",
+    isWasm: supportsWasm && source.introductionType === "wasm",
+    isExtension: (source.url && isUrlExtension(source.url)) || false,
+    actors: [sourceActor]
   };
-  return Object.assign(createdSource, {
-    isWasm: supportsWasm && source.introductionType === "wasm"
-  });
+  clientCommands.registerSourceActor(sourceActor);
+  return createdSource;
 }
 
 export function createPause(
+  thread: string,
   packet: PausedPacket,
   response: FramesResponse
 ): any {
@@ -68,27 +82,17 @@ export function createPause(
 
   return {
     ...packet,
-    frame: createFrame(frame),
-    frames: response.frames.map(createFrame)
+    thread,
+    frame: createFrame(thread, frame),
+    frames: response.frames.map(createFrame.bind(null, thread))
   };
 }
 
-// Firefox only returns `actualLocation` if it actually changed,
-// but we want it always to exist. Format `actualLocation` if it
-// exists, otherwise use `location`.
-
-export function createBreakpointLocation(
-  location: SourceLocation,
-  actualLocation?: Object
-): SourceLocation {
-  if (!actualLocation) {
-    return location;
-  }
-
+export function createWorker(actor: string, url: string) {
   return {
-    sourceId: actualLocation.source.actor,
-    sourceUrl: actualLocation.source.url,
-    line: actualLocation.line,
-    column: actualLocation.column
+    actor,
+    url,
+    // Ci.nsIWorkerDebugger.TYPE_DEDICATED
+    type: 0
   };
 }

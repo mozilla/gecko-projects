@@ -4,16 +4,15 @@
 
 "use strict";
 
-ChromeUtils.import("resource://gre/modules/Services.jsm");
-ChromeUtils.import("resource://gre/modules/Preferences.jsm");
-ChromeUtils.import("resource:///modules/ShellService.jsm");
-ChromeUtils.import("resource://gre/modules/AddonManager.jsm");
-ChromeUtils.import("resource://gre/modules/Timer.jsm");
-ChromeUtils.import("resource://normandy/lib/LogManager.jsm");
-ChromeUtils.import("resource://normandy/lib/Storage.jsm");
-ChromeUtils.import("resource://normandy/lib/Heartbeat.jsm");
-ChromeUtils.import("resource://normandy/lib/ClientEnvironment.jsm");
-ChromeUtils.import("resource://normandy/lib/PreferenceExperiments.jsm");
+const {Services} = ChromeUtils.import("resource://gre/modules/Services.jsm");
+const {Preferences} = ChromeUtils.import("resource://gre/modules/Preferences.jsm");
+const {ShellService} = ChromeUtils.import("resource:///modules/ShellService.jsm");
+const {AddonManager} = ChromeUtils.import("resource://gre/modules/AddonManager.jsm");
+const {clearTimeout, setTimeout} = ChromeUtils.import("resource://gre/modules/Timer.jsm");
+const {LogManager} = ChromeUtils.import("resource://normandy/lib/LogManager.jsm");
+const {Storage} = ChromeUtils.import("resource://normandy/lib/Storage.jsm");
+const {ClientEnvironment} = ChromeUtils.import("resource://normandy/lib/ClientEnvironment.jsm");
+const {PreferenceExperiments} = ChromeUtils.import("resource://normandy/lib/PreferenceExperiments.jsm");
 
 ChromeUtils.defineModuleGetter(
   this, "Sampling", "resource://gre/modules/components-utils/Sampling.jsm");
@@ -23,7 +22,6 @@ const {generateUUID} = Cc["@mozilla.org/uuid-generator;1"].getService(Ci.nsIUUID
 
 var EXPORTED_SYMBOLS = ["NormandyDriver"];
 
-const log = LogManager.getLogger("normandy-driver");
 const actionLog = LogManager.getLogger("normandy-driver.actions");
 
 var NormandyDriver = function(sandboxManager) {
@@ -57,23 +55,6 @@ var NormandyDriver = function(sandboxManager) {
       actionLog[level](message);
     },
 
-    showHeartbeat(options) {
-      log.info(`Showing heartbeat prompt "${options.message}"`);
-      const aWindow = Services.wm.getMostRecentWindow("navigator:browser");
-
-      if (!aWindow) {
-        return sandbox.Promise.reject(new sandbox.Error("No window to show heartbeat in"));
-      }
-
-      const internalOptions = Object.assign({}, options, {testing: this.testing});
-      const heartbeat = new Heartbeat(aWindow, sandboxManager, internalOptions);
-      return sandbox.Promise.resolve(heartbeat.eventEmitter.createSandboxedEmitter());
-    },
-
-    saveHeartbeatFlow() {
-      // no-op required by spec
-    },
-
     client() {
       const appinfo = {
         version: Services.appinfo.version,
@@ -91,12 +72,9 @@ var NormandyDriver = function(sandboxManager) {
       appinfo.syncTotalDevices = appinfo.syncDesktopDevices + appinfo.syncMobileDevices;
 
       const searchEnginePromise = new Promise(resolve => {
-        Services.search.init(rv => {
-          if (Components.isSuccessCode(rv)) {
-            appinfo.searchEngine = Services.search.defaultEngine.identifier;
-          }
-          resolve();
-        });
+        Services.search.init().then(() => {
+          appinfo.searchEngine = Services.search.defaultEngine.identifier;
+        }).finally(resolve);
       });
 
       const pluginsPromise = (async () => {

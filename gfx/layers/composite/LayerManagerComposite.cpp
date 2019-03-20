@@ -27,7 +27,7 @@
 #include "gfxEnv.h"                          // for gfxEnv
 #include "gfxPrefs.h"                        // for gfxPrefs
 #ifdef XP_MACOSX
-#include "gfxPlatformMac.h"
+#  include "gfxPlatformMac.h"
 #endif
 #include "gfxRect.h"                    // for gfxRect
 #include "gfxUtils.h"                   // for frame color util
@@ -56,16 +56,16 @@
 #include "nsRect.h"           // for mozilla::gfx::IntRect
 #include "nsRegion.h"         // for nsIntRegion, etc
 #if defined(MOZ_WIDGET_ANDROID)
-#include <android/log.h>
-#include <android/native_window.h>
-#include "mozilla/jni/Utils.h"
-#include "mozilla/widget/AndroidCompositorWidget.h"
-#include "opengl/CompositorOGL.h"
-#include "GLConsts.h"
-#include "GLContextEGL.h"
-#include "GLContextProvider.h"
-#include "mozilla/Unused.h"
-#include "ScopedGLHelpers.h"
+#  include <android/log.h>
+#  include <android/native_window.h>
+#  include "mozilla/jni/Utils.h"
+#  include "mozilla/widget/AndroidCompositorWidget.h"
+#  include "opengl/CompositorOGL.h"
+#  include "GLConsts.h"
+#  include "GLContextEGL.h"
+#  include "GLContextProvider.h"
+#  include "mozilla/Unused.h"
+#  include "ScopedGLHelpers.h"
 #endif
 #include "GeckoProfiler.h"
 #include "TextRenderer.h"  // for TextRenderer
@@ -73,7 +73,7 @@
 #include "TreeTraversal.h"  // for ForEachNode
 
 #ifdef USE_SKIA
-#include "PaintCounter.h"  // For PaintCounter
+#  include "PaintCounter.h"  // For PaintCounter
 #endif
 
 class gfxContext;
@@ -231,7 +231,7 @@ void LayerManagerComposite::PostProcessLayers(nsIntRegion& aOpaqueRegion) {
 // intermediate surface. We compute occlusions for leaves and intermediate
 // surfaces against the layer that they actually composite into so that we can
 // use the final (snapped) effective transform.
-bool ShouldProcessLayer(Layer* aLayer) {
+static bool ShouldProcessLayer(Layer* aLayer) {
   if (!aLayer->AsContainerLayer()) {
     return true;
   }
@@ -975,6 +975,11 @@ void LayerManagerComposite::Render(const nsIntRegion& aInvalidRegion,
   mProfilerScreenshotGrabber.MaybeProcessQueue();
 
   RecordFrame();
+
+  PayloadPresented();
+
+  // Our payload has now been presented.
+  mPayload.Clear();
 }
 
 #if defined(MOZ_WIDGET_ANDROID)
@@ -1199,7 +1204,7 @@ void LayerManagerComposite::HandlePixelsTarget() {
   gl->fReadPixels(0, 0, bufferWidth, bufferHeight, LOCAL_GL_RGBA,
                   LOCAL_GL_UNSIGNED_BYTE, mem.get<uint8_t>());
   Unused << mScreenPixelsTarget->SendScreenPixels(
-      mem, ScreenIntSize(bufferWidth, bufferHeight));
+      std::move(mem), ScreenIntSize(bufferWidth, bufferHeight));
   mScreenPixelsTarget = nullptr;
 }
 #endif
@@ -1401,8 +1406,8 @@ static void AddTransformedRegion(LayerIntRegion& aDest,
 // Async animations can move child layers without updating our visible region.
 // PostProcessLayers will recompute visible regions for layers with an
 // intermediate surface, but otherwise we need to do it now.
-void ComputeVisibleRegionForChildren(ContainerLayer* aContainer,
-                                     LayerIntRegion& aResult) {
+static void ComputeVisibleRegionForChildren(ContainerLayer* aContainer,
+                                            LayerIntRegion& aResult) {
   for (Layer* l = aContainer->GetFirstChild(); l; l = l->GetNextSibling()) {
     if (l->Extend3DContext()) {
       MOZ_ASSERT(l->AsContainerLayer());
@@ -1429,11 +1434,11 @@ bool LayerComposite::HasStaleCompositor() const {
 
 #ifndef MOZ_HAVE_PLATFORM_SPECIFIC_LAYER_BUFFERS
 
-/*static*/ bool LayerManagerComposite::SupportsDirectTexturing() {
-  return false;
-}
+/*static*/
+bool LayerManagerComposite::SupportsDirectTexturing() { return false; }
 
-/*static*/ void LayerManagerComposite::PlatformSyncBeforeReplyUpdate() {}
+/*static*/
+void LayerManagerComposite::PlatformSyncBeforeReplyUpdate() {}
 
 #endif  // !defined(MOZ_HAVE_PLATFORM_SPECIFIC_LAYER_BUFFERS)
 

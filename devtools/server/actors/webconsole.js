@@ -93,7 +93,6 @@ function WebConsoleActor(connection, parentActor) {
   }
 
   this.traits = {
-    evaluateJSAsync: true,
     transferredResponseSize: true,
     selectedObjectActor: true, // 44+
     fetchCacheDescriptor: true,
@@ -329,39 +328,6 @@ WebConsoleActor.prototype =
    * Destroy the current WebConsoleActor instance.
    */
   destroy() {
-    if (this.consoleServiceListener) {
-      this.consoleServiceListener.destroy();
-      this.consoleServiceListener = null;
-    }
-    if (this.netmonitors) {
-      for (const { messageManager } of this.netmonitors) {
-        messageManager.sendAsyncMessage("debug:destroy-network-monitor", {
-          actorID: this.actorID,
-        });
-      }
-      this.netmonitors = null;
-    }
-    if (this.consoleAPIListener) {
-      this.consoleAPIListener.destroy();
-      this.consoleAPIListener = null;
-    }
-    if (this.stackTraceCollector) {
-      this.stackTraceCollector.destroy();
-      this.stackTraceCollector = null;
-    }
-    if (this.consoleProgressListener) {
-      this.consoleProgressListener.destroy();
-      this.consoleProgressListener = null;
-    }
-    if (this.consoleReflowListener) {
-      this.consoleReflowListener.destroy();
-      this.consoleReflowListener = null;
-    }
-    if (this.contentProcessListener) {
-      this.contentProcessListener.destroy();
-      this.contentProcessListener = null;
-    }
-
     EventEmitter.off(this.parentActor, "changed-toplevel-document",
                this._onChangedToplevelDocument);
 
@@ -376,6 +342,7 @@ WebConsoleActor.prototype =
       this.dbg.onConsoleMessage = null;
     }
 
+    this.stopListeners({ listeners: null });
     this._actorPool = null;
     this._webConsoleCommandsCache = null;
     this._lastConsoleInputEvaluation = null;
@@ -741,8 +708,8 @@ WebConsoleActor.prototype =
     // If no specific listeners are requested to be detached, we stop all
     // listeners.
     const toDetach = request.listeners ||
-      ["PageError", "ConsoleAPI", "NetworkActivity",
-       "FileActivity", "ContentProcessMessages"];
+      ["PageError", "ConsoleAPI", "NetworkActivity", "FileActivity",
+       "ReflowActivity", "ContentProcessMessages", "DocumentEvents"];
 
     while (toDetach.length > 0) {
       const listener = toDetach.shift();
@@ -1031,12 +998,19 @@ WebConsoleActor.prototype =
     };
     const {mapped} = request;
 
+    // Set a flag on the thread actor which indicates an evaluation is being
+    // done for the client. This can affect how debugger handlers behave.
+    this.parentActor.threadActor.insideClientEvaluation = true;
+
     const evalInfo = evalWithDebugger(input, evalOptions, this);
+
+    this.parentActor.threadActor.insideClientEvaluation = false;
+
     const evalResult = evalInfo.result;
     const helperResult = evalInfo.helperResult;
 
     let result, errorDocURL, errorMessage, errorNotes = null, errorGrip = null,
-      frame = null, awaitResult;
+      frame = null, awaitResult, errorMessageName;
     if (evalResult) {
       if ("return" in evalResult) {
         result = evalResult.return;
@@ -1084,6 +1058,7 @@ WebConsoleActor.prototype =
         // object and retrieve its errorMessageName.
         try {
           errorDocURL = ErrorDocs.GetURL(error);
+          errorMessageName = error.errorMessageName;
         } catch (ex) {
           // ignored
         }
@@ -1157,6 +1132,7 @@ WebConsoleActor.prototype =
       exception: errorGrip,
       exceptionMessage: this._createStringGrip(errorMessage),
       exceptionDocURL: errorDocURL,
+      errorMessageName,
       frame,
       helperResult: helperResult,
       notes: errorNotes,
@@ -1214,9 +1190,9 @@ WebConsoleActor.prototype =
         environment,
         inputValue: request.text,
         cursor: request.cursor,
-        invokeUnsafeGetter: false,
         webconsoleActor: this,
         selectedNodeActor: request.selectedNodeActor,
+        authorizedEvaluations: request.authorizedEvaluations,
       });
 
       if (!hadDebuggee && dbgObject) {
@@ -1227,6 +1203,14 @@ WebConsoleActor.prototype =
         return {
           from: this.actorID,
           matches: null,
+        };
+      }
+
+      if (result && result.isUnsafeGetter === true) {
+        return {
+          from: this.actorID,
+          isUnsafeGetter: true,
+          getterPath: result.getterPath,
         };
       }
 
@@ -1258,11 +1242,11 @@ WebConsoleActor.prototype =
 
       // Sort the results in order to display lowercased item first (e.g. we want to
       // display `document` then `Document` as we loosely match the user input if the
-      // first letter they typed was lowercase).
+      // first letter was lowercase).
+      const firstMeaningfulCharIndex = isElementAccess ? 1 : 0;
       matches = Array.from(matches).sort((a, b) => {
-        const startingQuoteRegex = /^('|"|`)/;
-        const aFirstMeaningfulChar = startingQuoteRegex.test(a) ? a[1] : a[0];
-        const bFirstMeaningfulChar = startingQuoteRegex.test(b) ? b[1] : b[0];
+        const aFirstMeaningfulChar = a[firstMeaningfulCharIndex];
+        const bFirstMeaningfulChar = b[firstMeaningfulCharIndex];
         const lA = aFirstMeaningfulChar.toLocaleLowerCase() === aFirstMeaningfulChar;
         const lB = bFirstMeaningfulChar.toLocaleLowerCase() === bFirstMeaningfulChar;
         if (lA === lB) {
@@ -1284,21 +1268,26 @@ WebConsoleActor.prototype =
    * The "clearMessagesCache" request handler.
    */
   clearMessagesCache: function() {
-    // TODO: Bug 717611 - Web Console clear button does not clear cached errors
-    const windowId = !this.parentActor.isRootActor ?
-                   WebConsoleUtils.getInnerWindowId(this.window) : null;
-    const ConsoleAPIStorage = Cc["@mozilla.org/consoleAPI-storage;1"]
-                              .getService(Ci.nsIConsoleAPIStorage);
+    const windowId = !this.parentActor.isRootActor
+      ? WebConsoleUtils.getInnerWindowId(this.window)
+      : null;
+    const ConsoleAPIStorage =
+      Cc["@mozilla.org/consoleAPI-storage;1"].getService(Ci.nsIConsoleAPIStorage);
     ConsoleAPIStorage.clearEvents(windowId);
 
     CONSOLE_WORKER_IDS.forEach((id) => {
       ConsoleAPIStorage.clearEvents(id);
     });
 
+    // If were dealing with the root actor (e.g. the browser console), we want to remove
+    // every cached messages. Calling this.consoleServiceListener.clearCachedMessages
+    // wouldn't work as even the browser console has a window, and that would only clear
+    // cached messages for that window (and not the content messages for example).
     if (this.parentActor.isRootActor) {
       Services.console.reset();
+    } else {
+      this.consoleServiceListener.clearCachedMessages();
     }
-    return {};
   },
 
   /**
@@ -1465,6 +1454,11 @@ WebConsoleActor.prototype =
     this.conn.send(packet);
   },
 
+  getActorIdForInternalSourceId(id) {
+    const actor = this.parentActor.sources.getSourceActorByInternalSourceId(id);
+    return actor ? actor.actorID : null;
+  },
+
   /**
    * Prepare an nsIScriptError to be sent to the client.
    *
@@ -1484,6 +1478,7 @@ WebConsoleActor.prototype =
       while (s !== null) {
         stack.push({
           filename: s.source,
+          sourceId: this.getActorIdForInternalSourceId(s.sourceId),
           lineNumber: s.line,
           columnNumber: s.column,
           functionName: s.functionDisplayName,
@@ -1506,6 +1501,7 @@ WebConsoleActor.prototype =
           messageBody: this._createStringGrip(note.errorMessage),
           frame: {
             source: note.sourceName,
+            sourceId: this.getActorIdForInternalSourceId(note.sourceId),
             line: note.lineNumber,
             column: note.columnNumber,
           },
@@ -1518,6 +1514,7 @@ WebConsoleActor.prototype =
       errorMessageName: pageError.errorMessageName,
       exceptionDocURL: ErrorDocs.GetURL(pageError),
       sourceName: pageError.sourceName,
+      sourceId: this.getActorIdForInternalSourceId(pageError.sourceId),
       lineText: lineText,
       lineNumber: pageError.lineNumber,
       columnNumber: pageError.columnNumber,
@@ -1544,12 +1541,9 @@ WebConsoleActor.prototype =
    *        The console API call we need to send to the remote client.
    */
   onConsoleAPICall: function(message) {
-    const packet = {
-      from: this.actorID,
-      type: "consoleAPICall",
+    this.conn.sendActorEvent(this.actorID, "consoleAPICall", {
       message: this.prepareConsoleMessageForRemote(message),
-    };
-    this.conn.send(packet);
+    });
   },
 
   /**
@@ -1622,8 +1616,10 @@ WebConsoleActor.prototype =
 
     channel.requestMethod = method;
 
-    for (const {name, value} of headers) {
-      channel.setRequestHeader(name, value, false);
+    if (headers) {
+      for (const {name, value} of headers) {
+        channel.setRequestHeader(name, value, false);
+      }
     }
 
     if (body) {
@@ -1679,28 +1675,6 @@ WebConsoleActor.prototype =
     this.conn.send(packet);
   },
 
-  /**
-   * Handler for reflow activity. This method forwards reflow events to the
-   * remote Web Console client.
-   *
-   * @see ConsoleReflowListener
-   * @param Object reflowInfo
-   */
-  onReflowActivity: function(reflowInfo) {
-    const packet = {
-      from: this.actorID,
-      type: "reflowActivity",
-      interruptible: reflowInfo.interruptible,
-      start: reflowInfo.start,
-      end: reflowInfo.end,
-      sourceURL: reflowInfo.sourceURL,
-      sourceLine: reflowInfo.sourceLine,
-      functionName: reflowInfo.functionName,
-    };
-
-    this.conn.send(packet);
-  },
-
   // End of event handlers for various listeners.
 
   /**
@@ -1720,10 +1694,18 @@ WebConsoleActor.prototype =
 
     result.workerType = WebConsoleUtils.getWorkerType(result) || "none";
 
+    result.sourceId = this.getActorIdForInternalSourceId(result.sourceId);
+
     delete result.wrappedJSObject;
     delete result.ID;
     delete result.innerID;
     delete result.consoleID;
+
+    if (result.stacktrace) {
+      result.stacktrace = Array.map(result.stacktrace, (frame) => {
+        return { ...frame, sourceId: this.getActorIdForInternalSourceId(frame.sourceId) };
+      });
+    }
 
     result.arguments = Array.map(message.arguments || [], (obj) => {
       const dbgObj = this.makeDebuggeeValue(obj, useObjectGlobal);

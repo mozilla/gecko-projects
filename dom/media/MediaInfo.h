@@ -4,21 +4,21 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 #if !defined(MediaInfo_h)
-#define MediaInfo_h
+#  define MediaInfo_h
 
-#include "mozilla/UniquePtr.h"
-#include "mozilla/RefPtr.h"
-#include "nsDataHashtable.h"
-#include "nsString.h"
-#include "nsTArray.h"
-#include "AudioConfig.h"
-#include "ImageTypes.h"
-#include "MediaData.h"
-#include "TrackID.h"  // for TrackID
-#include "TimeUnits.h"
-#include "mozilla/gfx/Point.h"  // for gfx::IntSize
-#include "mozilla/gfx/Rect.h"   // for gfx::IntRect
-#include "mozilla/gfx/Types.h"  // for gfx::ColorDepth
+#  include "mozilla/UniquePtr.h"
+#  include "mozilla/RefPtr.h"
+#  include "nsDataHashtable.h"
+#  include "nsString.h"
+#  include "nsTArray.h"
+#  include "AudioConfig.h"
+#  include "ImageTypes.h"
+#  include "MediaData.h"
+#  include "TrackID.h"  // for TrackID
+#  include "TimeUnits.h"
+#  include "mozilla/gfx/Point.h"  // for gfx::IntSize
+#  include "mozilla/gfx/Rect.h"   // for gfx::IntRect
+#  include "mozilla/gfx/Types.h"  // for gfx::ColorDepth
 
 namespace mozilla {
 
@@ -32,6 +32,9 @@ class MetadataTag {
       : mKey(aKey), mValue(aValue) {}
   nsCString mKey;
   nsCString mValue;
+  bool operator==(const MetadataTag& rhs) const {
+    return mKey == rhs.mKey && mValue == rhs.mValue;
+  }
 };
 
 typedef nsDataHashtable<nsCStringHashKey, nsCString> MetadataTags;
@@ -119,6 +122,7 @@ class TrackInfo {
     mTags = aOther.mTags;
     MOZ_COUNT_CTOR(TrackInfo);
   }
+  bool IsEqualTo(const TrackInfo& rhs) const;
 
  private:
   TrackType mType;
@@ -164,6 +168,8 @@ class VideoInfo : public TrackInfo {
         mColorDepth(aOther.mColorDepth),
         mImageRect(aOther.mImageRect),
         mAlphaPresent(aOther.mAlphaPresent) {}
+
+  bool operator==(const VideoInfo& rhs) const;
 
   bool IsValid() const override {
     return mDisplay.width > 0 && mDisplay.height > 0;
@@ -286,6 +292,8 @@ class AudioInfo : public TrackInfo {
         mCodecSpecificConfig(aOther.mCodecSpecificConfig),
         mExtraData(aOther.mExtraData) {}
 
+  bool operator==(const AudioInfo& rhs) const;
+
   static const uint32_t MAX_RATE = 640000;
 
   bool IsValid() const override {
@@ -394,8 +402,8 @@ class MediaInfo {
   }
 
   bool IsEncrypted() const {
-    return (HasAudio() && mAudio.mCrypto.mValid) ||
-           (HasVideo() && mVideo.mCrypto.mValid);
+    return (HasAudio() && mAudio.mCrypto.IsEncrypted()) ||
+           (HasVideo() && mVideo.mCrypto.IsEncrypted());
   }
 
   bool HasValidMedia() const { return HasVideo() || HasAudio(); }

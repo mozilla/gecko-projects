@@ -16,11 +16,11 @@
 
 // XXX need another bug to move this to a common header.
 #ifdef DISABLE_ASSERTS_FOR_FUZZING
-#define ASSERT_UNLESS_FUZZING(...) \
-  do {                             \
-  } while (0)
+#  define ASSERT_UNLESS_FUZZING(...) \
+    do {                             \
+    } while (0)
 #else
-#define ASSERT_UNLESS_FUZZING(...) MOZ_ASSERT(false, __VA_ARGS__)
+#  define ASSERT_UNLESS_FUZZING(...) MOZ_ASSERT(false, __VA_ARGS__)
 #endif
 
 namespace mozilla {
@@ -29,7 +29,8 @@ namespace dom {
 /* static */
 StaticAutoPtr<ContentProcessManager> ContentProcessManager::sSingleton;
 
-/* static */ ContentProcessManager* ContentProcessManager::GetSingleton() {
+/* static */
+ContentProcessManager* ContentProcessManager::GetSingleton() {
   MOZ_ASSERT(XRE_IsParentProcess());
 
   if (!sSingleton) {
@@ -66,19 +67,6 @@ void ContentProcessManager::RemoveContentProcess(
       iter->second.mChildrenCpId.erase(aChildCpId);
     }
   }
-}
-
-bool ContentProcessManager::AddGrandchildProcess(
-    const ContentParentId& aParentCpId, const ContentParentId& aChildCpId) {
-  MOZ_ASSERT(NS_IsMainThread());
-
-  auto iter = mContentParentMap.find(aParentCpId);
-  if (NS_WARN_IF(iter == mContentParentMap.end())) {
-    ASSERT_UNLESS_FUZZING("Parent process should be already in map!");
-    return false;
-  }
-  iter->second.mChildrenCpId.insert(aChildCpId);
-  return true;
 }
 
 bool ContentProcessManager::GetParentProcessId(

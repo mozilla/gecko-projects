@@ -23,7 +23,7 @@ async function run_test() {
   setupTestCommon(null);
   standardInit();
 
-  let configFile = getUpdateConfigFile();
+  let configFile = getUpdateDirFile(FILE_UPDATE_CONFIG_JSON);
 
   // Test migration of a |false| value
   Services.prefs.setBoolPref("app.update.auto.migrated", false);
@@ -37,7 +37,7 @@ async function run_test() {
 
   // If the file is deleted after migration, the default value should be
   // returned, regardless of the pref value.
-  debugDump(`about to remove config file`);
+  debugDump("about to remove config file");
   configFile.remove(false);
   Assert.ok(!configFile.exists(), "Pref file should have been removed");
   let configValue = await UpdateUtils.getAppUpdateAutoEnabled();

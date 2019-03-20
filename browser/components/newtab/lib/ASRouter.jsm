@@ -3,20 +3,22 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 "use strict";
 
-ChromeUtils.import("resource://gre/modules/Services.jsm");
-ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
+const {Services} = ChromeUtils.import("resource://gre/modules/Services.jsm");
+const {XPCOMUtils} = ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
 XPCOMUtils.defineLazyGlobalGetters(this, ["fetch"]);
 XPCOMUtils.defineLazyModuleGetters(this, {
   AddonManager: "resource://gre/modules/AddonManager.jsm",
   UITour: "resource:///modules/UITour.jsm",
   FxAccounts: "resource://gre/modules/FxAccounts.jsm",
+  AppConstants: "resource://gre/modules/AppConstants.jsm",
+  OS: "resource://gre/modules/osfile.jsm",
 });
-const {ASRouterActions: ra, actionTypes: at, actionCreators: ac} = ChromeUtils.import("resource://activity-stream/common/Actions.jsm", {});
-const {CFRMessageProvider} = ChromeUtils.import("resource://activity-stream/lib/CFRMessageProvider.jsm", {});
-const {OnboardingMessageProvider} = ChromeUtils.import("resource://activity-stream/lib/OnboardingMessageProvider.jsm", {});
-const {SnippetsTestMessageProvider} = ChromeUtils.import("resource://activity-stream/lib/SnippetsTestMessageProvider.jsm", {});
-const {RemoteSettings} = ChromeUtils.import("resource://services-settings/remote-settings.js", {});
-const {CFRPageActions} = ChromeUtils.import("resource://activity-stream/lib/CFRPageActions.jsm", {});
+const {ASRouterActions: ra, actionTypes: at, actionCreators: ac} = ChromeUtils.import("resource://activity-stream/common/Actions.jsm");
+const {CFRMessageProvider} = ChromeUtils.import("resource://activity-stream/lib/CFRMessageProvider.jsm");
+const {OnboardingMessageProvider} = ChromeUtils.import("resource://activity-stream/lib/OnboardingMessageProvider.jsm");
+const {SnippetsTestMessageProvider} = ChromeUtils.import("resource://activity-stream/lib/SnippetsTestMessageProvider.jsm");
+const {RemoteSettings} = ChromeUtils.import("resource://services-settings/remote-settings.js");
+const {CFRPageActions} = ChromeUtils.import("resource://activity-stream/lib/CFRPageActions.jsm");
 
 ChromeUtils.defineModuleGetter(this, "ASRouterPreferences",
   "resource://activity-stream/lib/ASRouterPreferences.jsm");
@@ -26,7 +28,7 @@ ChromeUtils.defineModuleGetter(this, "QueryCache",
   "resource://activity-stream/lib/ASRouterTargeting.jsm");
 ChromeUtils.defineModuleGetter(this, "ASRouterTriggerListeners",
   "resource://activity-stream/lib/ASRouterTriggerListeners.jsm");
-ChromeUtils.import("resource:///modules/AttributionCode.jsm");
+const {AttributionCode} = ChromeUtils.import("resource:///modules/AttributionCode.jsm");
 
 const INCOMING_MESSAGE_NAME = "ASRouter:child-to-parent";
 const OUTGOING_MESSAGE_NAME = "ASRouter:parent-to-child";
@@ -43,8 +45,6 @@ const MAX_MESSAGE_LIFETIME_CAP = 100;
 
 const LOCAL_MESSAGE_PROVIDERS = {OnboardingMessageProvider, CFRMessageProvider, SnippetsTestMessageProvider};
 const STARTPAGE_VERSION = "6";
-
-const ADDONS_API_URL = "https://services.addons.mozilla.org/api/v3/addons/addon";
 
 const MessageLoaderUtils = {
   STARTPAGE_VERSION,
@@ -207,6 +207,10 @@ const MessageLoaderUtils = {
       messages = [];
       Cu.reportError(new Error(`Tried to load messages for ${provider.id} but the result was not an Array.`));
     }
+    // Filter out messages we temporarily want to exclude
+    if (provider.exclude && provider.exclude.length) {
+      messages = messages.filter(message => !provider.exclude.includes(message.id));
+    }
     const lastUpdated = Date.now();
     return {
       messages: messages.map(msg => ({weight: 100, ...msg, provider: provider.id}))
@@ -215,19 +219,41 @@ const MessageLoaderUtils = {
     };
   },
 
+  /**
+   * _loadAddonIconInURLBar - load addons-notification icon by displaying
+   * box containing addons icon in urlbar. See Bug 1513882
+   *
+   * @param  {XULElement} Target browser element for showing addons icon
+   */
+  _loadAddonIconInURLBar(browser) {
+    if (!browser) {
+      return;
+    }
+    const chromeDoc = browser.ownerDocument;
+    let notificationPopupBox = chromeDoc.getElementById("notification-popup-box");
+    if (!notificationPopupBox) {
+      return;
+    }
+    if (notificationPopupBox.style.display === "none" ||
+        notificationPopupBox.style.display === "") {
+      notificationPopupBox.style.display = "block";
+    }
+  },
+
   async installAddonFromURL(browser, url) {
     try {
+      MessageLoaderUtils._loadAddonIconInURLBar(browser);
       const aUri = Services.io.newURI(url);
       const systemPrincipal = Services.scriptSecurityManager.getSystemPrincipal();
 
-      // AddonManager installation source associated to the addons installed from activitystream
-      // (See Bug 1496167 for a rationale).
-      const amTelemetryInfo = {source: "activitystream"};
-      const install = await AddonManager.getInstallForURL(aUri.spec, "application/x-xpinstall", null,
-                                                          null, null, null, null, amTelemetryInfo);
+      // AddonManager installation source associated to the addons installed from activitystream's CFR
+      const telemetryInfo = {source: "amo"};
+      const install = await AddonManager.getInstallForURL(aUri.spec, {telemetryInfo});
       await AddonManager.installAddonFromWebpage("application/x-xpinstall", browser,
         systemPrincipal, install);
-    } catch (e) {}
+    } catch (e) {
+      Cu.reportError(e);
+    }
   },
 
   /**
@@ -312,8 +338,13 @@ class _ASRouter {
       // The provider should be enabled and not have a user preference set to false
       ...ASRouterPreferences.providers.filter(p => (
         p.enabled &&
-        ASRouterPreferences.getUserPreference(p.id) !== false)
-      ),
+        (
+          ASRouterPreferences.getUserPreference(p.id) !== false &&
+          // Provider is enabled or if provider has multiple categories
+          // check that at least one category is enabled
+          (!p.categories || p.categories.some(c => ASRouterPreferences.getUserPreference(c) !== false))
+        )
+      )),
     ].map(_provider => {
       // make a copy so we don't modify the source of the pref
       const provider = {..._provider};
@@ -387,7 +418,8 @@ class _ASRouter {
       let newState = {messages: [], providers: []};
       for (const provider of this.state.providers) {
         if (needsUpdate.includes(provider)) {
-          const {messages, lastUpdated} = await MessageLoaderUtils.loadMessagesForProvider(provider, this._storage);
+          let {messages, lastUpdated} = await MessageLoaderUtils.loadMessagesForProvider(provider, this._storage);
+          messages = messages.filter(({content}) => !content || !content.category || ASRouterPreferences.getUserPreference(content.category));
           newState.providers.push({...provider, lastUpdated});
           newState.messages = [...newState.messages, ...messages];
         } else {
@@ -406,7 +438,7 @@ class _ASRouter {
       const unseenListeners = new Set(ASRouterTriggerListeners.keys());
       for (const {trigger} of newState.messages) {
         if (trigger && ASRouterTriggerListeners.has(trigger.id)) {
-          ASRouterTriggerListeners.get(trigger.id).init(this._triggerHandler, trigger.params);
+          await ASRouterTriggerListeners.get(trigger.id).init(this._triggerHandler, trigger.params);
           unseenListeners.delete(trigger.id);
         }
       }
@@ -799,25 +831,6 @@ class _ASRouter {
     return impressions;
   }
 
-  async _fetchAddonInfo() {
-    let data = {};
-    const {content} = await AttributionCode.getAttrDataAsync();
-    if (!content) {
-      return data;
-    }
-    try {
-      const response = await fetch(`${ADDONS_API_URL}/${content}`);
-      if (response.status !== 204 && response.ok) {
-        const json = await response.json();
-        data.url = json.current_version.files[0].url;
-        data.iconURL = json.icon_url;
-      }
-    } catch (e) {
-      Cu.reportError("Failed to get the latest add-on version for Return to AMO");
-    }
-    return data;
-  }
-
   async sendNextMessage(target, trigger) {
     const msgs = this._getUnblockedMessages();
     let message = null;
@@ -827,19 +840,6 @@ class _ASRouter {
       [message] = previewMsgs;
     } else {
       message = await this._findMessage(msgs, trigger);
-    }
-
-    // We need some addon info if we are showing return to amo overlay, so fetch
-    // that, and update the message accordingly
-    if (message && message.template === "return_to_amo_overlay") {
-      const {url, iconURL} = await this._fetchAddonInfo();
-
-      // If we failed to get this info, we do not want to show this message
-      if (!url || !iconURL) {
-        return;
-      }
-      message.content.addon_icon = iconURL;
-      message.content.primary_button.action.data.url = url;
     }
 
     if (previewMsgs.length) {
@@ -880,6 +880,7 @@ class _ASRouter {
       });
 
       this._storage.set("messageBlockList", messageBlockList);
+      this._storage.set("messageImpressions", messageImpressions);
       return {messageBlockList, messageImpressions};
     });
   }
@@ -910,6 +911,16 @@ class _ASRouter {
     } catch (e) {
       return false;
     }
+  }
+
+  // Ensure we switch to the Onboarding message after RTAMO addon was installed
+  _updateOnboardingState() {
+    let addonInstallObs = (subject, topic) => {
+      Services.obs.removeObserver(addonInstallObs, "webextension-install-notify");
+      this.messageChannel.sendAsyncMessage(OUTGOING_MESSAGE_NAME, {type: "CLEAR_MESSAGE", data: {id: "RETURN_TO_AMO_1"}});
+      this.blockMessageById("RETURN_TO_AMO_1");
+    };
+    Services.obs.addObserver(addonInstallObs, "webextension-install-notify");
   }
 
   _loadSnippetsWhitelistHosts() {
@@ -956,24 +967,49 @@ class _ASRouter {
     }
   }
 
+  // Windows specific calls to write attribution data
+  // Used by `forceAttribution` to set required targeting attributes for
+  // RTAMO messages. This should only be called from within about:newtab#asrouter
+  /* istanbul ignore next */
+  async _writeAttributionFile(data) {
+    let appDir = Services.dirsvc.get("LocalAppData", Ci.nsIFile);
+    let file = appDir.clone();
+    file.append(Services.appinfo.vendor || "mozilla");
+    file.append(AppConstants.MOZ_APP_NAME);
+
+    await OS.File.makeDir(file.path,
+        {from: appDir.path, ignoreExisting: true});
+
+    file.append("postSigningData");
+    await OS.File.writeAtomic(file.path, data);
+  }
+
   /**
    * forceAttribution - this function should only be called from within about:newtab#asrouter.
    * It forces the browser attribution to be set to something specified in asrouter admin
    * tools, and reloads the providers in order to get messages that are dependant on this
-   * attribution data (see Return to AMO flow in bug 1475354 for example). Note - only works with OSX
+   * attribution data (see Return to AMO flow in bug 1475354 for example). Note - OSX and Windows only
    * @param {data} Object an object containing the attribtion data that came from asrouter admin page
    */
+  /* istanbul ignore next */
   async forceAttribution(data) {
     // Extract the parameters from data that will make up the referrer url
     const {source, campaign, content} = data;
-    let appPath = Services.dirsvc.get("GreD", Ci.nsIFile).parent.parent.path;
-    let attributionSvc = Cc["@mozilla.org/mac-attribution;1"]
-                            .getService(Ci.nsIMacAttributionService);
+    if (AppConstants.platform === "win") {
+      const attributionData = `source=${source}&campaign=${campaign}&content=${content}`;
+      this._writeAttributionFile(encodeURIComponent(attributionData));
+    } else if (AppConstants.platform === "macosx") {
+      let appPath = Services.dirsvc.get("GreD", Ci.nsIFile).parent.parent.path;
+      let attributionSvc = Cc["@mozilla.org/mac-attribution;1"]
+        .getService(Ci.nsIMacAttributionService);
 
-    let referrer = `https://www.mozilla.org/anything/?utm_campaign=${campaign}&utm_source=${source}&utm_content=${encodeURIComponent(content)}`;
+      let referrer = `https://www.mozilla.org/anything/?utm_campaign=${campaign}&utm_source=${source}&utm_content=${encodeURIComponent(content)}`;
 
-    // This sets the Attribution to be the referrer
-    attributionSvc.setReferrerUrl(appPath, referrer, true);
+      // This sets the Attribution to be the referrer
+      attributionSvc.setReferrerUrl(appPath, referrer, true);
+    }
+
+    // Clear cache call is only possible in a testing environment
     let env = Cc["@mozilla.org/process/environment;1"].getService(Ci.nsIEnvironment);
     env.set("XPCSHELL_TEST_PROFILE_DIR", "testing");
 
@@ -1006,7 +1042,13 @@ class _ASRouter {
         UITour.showMenu(target.browser.ownerGlobal, action.data.args);
         break;
       case ra.INSTALL_ADDON_FROM_URL:
+        this._updateOnboardingState();
         await MessageLoaderUtils.installAddonFromURL(target.browser, action.data.url);
+        break;
+      case ra.PIN_CURRENT_TAB:
+        let tab = target.browser.ownerGlobal.gBrowser.selectedTab;
+        target.browser.ownerGlobal.gBrowser.pinTab(tab);
+        target.browser.ownerGlobal.ConfirmationHint.show(tab, "pinTab", {showDescription: true});
         break;
       case ra.SHOW_FIREFOX_ACCOUNTS:
         const url = await FxAccounts.config.promiseSignUpURI("snippets");

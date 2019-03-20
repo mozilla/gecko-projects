@@ -6,37 +6,37 @@
 
 #ifdef JS_STRUCTURED_SPEW
 
-#include "util/StructuredSpewer.h"
+#  include "util/StructuredSpewer.h"
 
-#include "mozilla/Sprintf.h"
+#  include "mozilla/Sprintf.h"
 
-#include "util/Text.h"
-#include "vm/JSContext.h"
-#include "vm/JSScript.h"
+#  include "util/Text.h"
+#  include "vm/JSContext.h"
+#  include "vm/JSScript.h"
 
 using namespace js;
 
 const StructuredSpewer::NameArray StructuredSpewer::names_ = {
-#define STRUCTURED_CHANNEL(name) #name,
+#  define STRUCTURED_CHANNEL(name) #  name,
     STRUCTURED_CHANNEL_LIST(STRUCTURED_CHANNEL)
-#undef STRUCTURED_CHANNEL
+#  undef STRUCTURED_CHANNEL
 };
 
 // Choose a sensible default spew directory.
 //
 // The preference here is to use the current working directory,
 // except on Android.
-#ifndef DEFAULT_SPEW_DIRECTORY
-#if defined(_WIN32)
-#define DEFAULT_SPEW_DIRECTORY "."
-#elif defined(__ANDROID__)
-#define DEFAULT_SPEW_DIRECTORY "/data/local/tmp"
-#else
-#define DEFAULT_SPEW_DIRECTORY "."
-#endif
-#endif
+#  ifndef DEFAULT_SPEW_DIRECTORY
+#    if defined(_WIN32)
+#      define DEFAULT_SPEW_DIRECTORY "."
+#    elif defined(__ANDROID__)
+#      define DEFAULT_SPEW_DIRECTORY "/data/local/tmp"
+#    else
+#      define DEFAULT_SPEW_DIRECTORY "."
+#    endif
+#  endif
 
-void StructuredSpewer::ensureInitializationAttempted() {
+bool StructuredSpewer::ensureInitializationAttempted() {
   if (!outputInitializationAttempted_) {
     // We cannot call getenv during record replay, so disable
     // the spewer.
@@ -57,6 +57,8 @@ void StructuredSpewer::ensureInitializationAttempted() {
     // we track the attempt separately.
     outputInitializationAttempted_ = true;
   }
+
+  return json_.isSome();
 }
 
 void StructuredSpewer::tryToInitializeOutput(const char* path) {
@@ -100,7 +102,8 @@ static bool MatchJSScript(JSScript* script, const char* pattern) {
   return result != nullptr;
 }
 
-/* static */ bool StructuredSpewer::enabled(JSScript* script) {
+/* static */
+bool StructuredSpewer::enabled(JSScript* script) {
   // We cannot call getenv under record/replay.
   if (mozilla::recordreplay::IsRecordingOrReplaying()) {
     return false;
@@ -137,15 +140,18 @@ void StructuredSpewer::startObject(JSContext* cx, const JSScript* script,
   json.endObject();
 }
 
-/* static */ void StructuredSpewer::spew(JSContext* cx, SpewChannel channel,
-                                         const char* fmt, ...) {
+/* static */
+void StructuredSpewer::spew(JSContext* cx, SpewChannel channel, const char* fmt,
+                            ...) {
   // Because we don't have a script here, use the singleton's
   // filter to determine if the channel is active.
   if (!cx->spewer().filter().enabled(channel)) {
     return;
   }
 
-  cx->spewer().ensureInitializationAttempted();
+  if (!cx->spewer().ensureInitializationAttempted()) {
+    return;
+  }
 
   va_list ap;
   va_start(ap, fmt);
@@ -166,17 +172,17 @@ void StructuredSpewer::startObject(JSContext* cx, const JSScript* script,
 void StructuredSpewer::parseSpewFlags(const char* flags) {
   // If '*' or 'all' are in the list, enable all spew.
   bool star = ContainsFlag(flags, "*") || ContainsFlag(flags, "all");
-#define CHECK_CHANNEL(name)                             \
-  if (ContainsFlag(flags, #name) || star) {             \
-    selectedChannels_.enableChannel(SpewChannel::name); \
-  }
+#  define CHECK_CHANNEL(name)                             \
+    if (ContainsFlag(flags, #name) || star) {             \
+      selectedChannels_.enableChannel(SpewChannel::name); \
+    }
 
   STRUCTURED_CHANNEL_LIST(CHECK_CHANNEL)
 
-#undef CHECK_CHANNEL
+#  undef CHECK_CHANNEL
 
   if (ContainsFlag(flags, "help")) {
-     printf(
+    printf(
         "\n"
         "usage: SPEW=option,option,option,... where options can be:\n"
         "\n"
@@ -208,7 +214,7 @@ void StructuredSpewer::parseSpewFlags(const char* flags) {
         "        output goes to $MOZ_UPLOAD_DIR/spew_output* to ease usage\n"
         "        with Treeherder.\n"
 
-        );
+    );
     exit(0);
   }
 }
@@ -220,7 +226,9 @@ AutoStructuredSpewer::AutoStructuredSpewer(JSContext* cx, SpewChannel channel,
     return;
   }
 
-  cx->spewer().ensureInitializationAttempted();
+  if (!cx->spewer().ensureInitializationAttempted()) {
+    return;
+  }
 
   cx->spewer().startObject(cx, script, channel);
   printer_.emplace(&cx->spewer().json_.ref());

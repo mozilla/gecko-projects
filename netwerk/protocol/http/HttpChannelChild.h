@@ -92,9 +92,7 @@ class HttpChannelChild final : public PHttpChannelChild,
   NS_IMETHOD Resume() override;
   // nsIChannel
   NS_IMETHOD GetSecurityInfo(nsISupports** aSecurityInfo) override;
-  NS_IMETHOD AsyncOpen(nsIStreamListener* listener,
-                       nsISupports* aContext) override;
-  NS_IMETHOD AsyncOpen2(nsIStreamListener* aListener) override;
+  NS_IMETHOD AsyncOpen(nsIStreamListener* aListener) override;
 
   // HttpBaseChannel::nsIHttpChannel
   NS_IMETHOD SetReferrerWithPolicy(nsIURI* referrer,
@@ -178,7 +176,10 @@ class HttpChannelChild final : public PHttpChannelChild,
   mozilla::ipc::IPCResult RecvCancelRedirected() override;
 
   mozilla::ipc::IPCResult RecvOriginalCacheInputStreamAvailable(
-      const OptionalIPCStream& aStream) override;
+      const Maybe<IPCStream>& aStream) override;
+
+  mozilla::ipc::IPCResult RecvAltDataCacheInputStreamAvailable(
+      const Maybe<IPCStream>& aStream) override;
 
   virtual void ActorDestroy(ActorDestroyReason aWhy) override;
 
@@ -203,6 +204,13 @@ class HttpChannelChild final : public PHttpChannelChild,
       const nsString& aMessage, const nsCString& aCategory) override;
   NS_IMETHOD LogBlockedCORSRequest(const nsAString& aMessage,
                                    const nsACString& aCategory) override;
+
+  virtual mozilla::ipc::IPCResult RecvLogMimeTypeMismatch(
+      const nsCString& aMessageName, const bool& aWarning, const nsString& aURL,
+      const nsString& aContentType) override;
+  NS_IMETHOD LogMimeTypeMismatch(const nsACString& aMessageName, bool aWarning,
+                                 const nsAString& aURL,
+                                 const nsAString& aContentType) override;
 
  private:
   nsresult AsyncCallImpl(void (HttpChannelChild::*funcPtr)(),
@@ -254,10 +262,14 @@ class HttpChannelChild final : public PHttpChannelChild,
   void ProcessOnStatus(const nsresult& aStatus);
   void ProcessFlushedForDiversion();
   void ProcessDivertMessages();
-  void ProcessNotifyTrackingProtectionDisabled();
+  void ProcessNotifyChannelClassifierProtectionDisabled(
+      uint32_t aAcceptedReason);
   void ProcessNotifyCookieAllowed();
-  void ProcessNotifyTrackingCookieBlocked(uint32_t aRejectedReason);
-  void ProcessNotifyTrackingResource(bool aIsThirdParty);
+  void ProcessNotifyCookieBlocked(uint32_t aRejectedReason);
+  void ProcessNotifyClassificationFlags(uint32_t aClassificationFlags,
+                                        bool aIsThirdParty);
+  void ProcessNotifyFlashPluginStateChanged(
+      nsIHttpChannel::FlashPluginState aState);
   void ProcessSetClassifierMatchedInfo(const nsCString& aList,
                                        const nsCString& aProvider,
                                        const nsCString& aFullHash);
@@ -330,7 +342,8 @@ class HttpChannelChild final : public PHttpChannelChild,
   nsCOMPtr<nsICacheInfoChannel> mSynthesizedCacheInfo;
   RefPtr<ChannelEventQueue> mEventQ;
 
-  nsCOMPtr<nsIInputStreamReceiver> mInputStreamReceiver;
+  nsCOMPtr<nsIInputStreamReceiver> mOriginalInputStreamReceiver;
+  nsCOMPtr<nsIInputStreamReceiver> mAltDataInputStreamReceiver;
 
   // Used to ensure atomicity of mBgChild and mBgInitFailCallback
   Mutex mBgChildMutex;
@@ -387,7 +400,12 @@ class HttpChannelChild final : public PHttpChannelChild,
   // parent channel, nor dequeued from the ChannelEventQueue.
   Atomic<bool, ReleaseAcquire> mFlushedForDiversion;
 
-  uint8_t mIsFromCache : 1;
+  Atomic<bool, SequentiallyConsistent> mIsFromCache;
+  // Set if we get the result and cache |mNeedToReportBytesRead|
+  Atomic<bool, SequentiallyConsistent> mCacheNeedToReportBytesReadInitialized;
+  // True if we need to tell the parent the size of unreported received data
+  Atomic<bool, SequentiallyConsistent> mNeedToReportBytesRead;
+
   uint8_t mCacheEntryAvailable : 1;
   uint8_t mAltDataCacheEntryAvailable : 1;
 
@@ -395,6 +413,10 @@ class HttpChannelChild final : public PHttpChannelChild,
   uint8_t mSendResumeAt : 1;
 
   uint8_t mKeptAlive : 1;  // IPC kept open, but only for security info
+
+  // Set when ActorDestroy(ActorDestroyReason::Deletion) is called
+  // The channel must ignore any following OnStart/Stop/DataAvailable messages
+  uint8_t mIPCActorDeleted : 1;
 
   // Set if SendSuspend is called. Determines if SendResume is needed when
   // diverting callbacks to parent.
@@ -427,12 +449,6 @@ class HttpChannelChild final : public PHttpChannelChild,
   // Set if the corresponding parent channel should suspend after a response
   // is synthesized.
   uint8_t mSuspendParentAfterSynthesizeResponse : 1;
-
-  // Set if we get the result and cache |mNeedToReportBytesRead|
-  uint8_t mCacheNeedToReportBytesReadInitialized : 1;
-
-  // True if we need to tell the parent the size of unreported received data
-  uint8_t mNeedToReportBytesRead : 1;
 
   void FinishInterceptedRedirect();
   void CleanupRedirectingChannel(nsresult rv);

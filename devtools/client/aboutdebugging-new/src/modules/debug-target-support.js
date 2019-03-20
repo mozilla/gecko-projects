@@ -4,30 +4,7 @@
 
 "use strict";
 
-const { DEBUG_TARGETS, DEBUG_TARGET_PANE, RUNTIMES } = require("../constants");
-
-const ALL_DEBUG_TARGETS = [
-  DEBUG_TARGETS.EXTENSION,
-  DEBUG_TARGETS.TAB,
-  DEBUG_TARGETS.WORKER,
-];
-
-const SUPPORTED_TARGET_BY_RUNTIME = {
-  [RUNTIMES.THIS_FIREFOX]: ALL_DEBUG_TARGETS,
-  [RUNTIMES.USB]: [
-    DEBUG_TARGETS.EXTENSION,
-    DEBUG_TARGETS.TAB,
-  ],
-  [RUNTIMES.NETWORK]: [
-    DEBUG_TARGETS.EXTENSION,
-    DEBUG_TARGETS.TAB,
-  ],
-};
-
-function isSupportedDebugTarget(runtimeType, debugTargetType) {
-  return SUPPORTED_TARGET_BY_RUNTIME[runtimeType].includes(debugTargetType);
-}
-exports.isSupportedDebugTarget = isSupportedDebugTarget;
+const { DEBUG_TARGET_PANE, RUNTIMES } = require("../constants");
 
 const ALL_DEBUG_TARGET_PANES = [
   DEBUG_TARGET_PANE.INSTALLED_EXTENSION,
@@ -38,17 +15,28 @@ const ALL_DEBUG_TARGET_PANES = [
   DEBUG_TARGET_PANE.TEMPORARY_EXTENSION,
 ];
 
+// All debug target panes except temporary extensions
+const REMOTE_DEBUG_TARGET_PANES = ALL_DEBUG_TARGET_PANES.filter(p =>
+  p !== DEBUG_TARGET_PANE.TEMPORARY_EXTENSION);
+
 const SUPPORTED_TARGET_PANE_BY_RUNTIME = {
   [RUNTIMES.THIS_FIREFOX]: ALL_DEBUG_TARGET_PANES,
-  [RUNTIMES.USB]: [
-    DEBUG_TARGET_PANE.INSTALLED_EXTENSION,
-    DEBUG_TARGET_PANE.TAB,
-  ],
-  [RUNTIMES.NETWORK]: [
-    DEBUG_TARGET_PANE.INSTALLED_EXTENSION,
-    DEBUG_TARGET_PANE.TAB,
-  ],
+  [RUNTIMES.USB]: REMOTE_DEBUG_TARGET_PANES,
+  [RUNTIMES.NETWORK]: REMOTE_DEBUG_TARGET_PANES,
 };
+
+/**
+ * If extension debug setting is needed for given runtime type, return true.
+ *
+ * @param {String} runtimeType
+ * @return {bool} true: needed
+ */
+function isExtensionDebugSettingNeeded(runtimeType) {
+  // Debugging local addons for This Firefox reuses the Browser Toolbox, which requires
+  // some preferences to be enabled.
+  return runtimeType === RUNTIMES.THIS_FIREFOX;
+}
+exports.isExtensionDebugSettingNeeded = isExtensionDebugSettingNeeded;
 
 /**
  * A debug target pane is more specialized than a debug target. For instance EXTENSION is

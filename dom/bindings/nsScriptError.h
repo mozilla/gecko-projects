@@ -19,6 +19,8 @@
 #include "nsIScriptError.h"
 #include "nsString.h"
 
+class nsGlobalWindowInner;
+
 class nsScriptErrorNote final : public nsIScriptErrorNote {
  public:
   nsScriptErrorNote();
@@ -27,7 +29,7 @@ class nsScriptErrorNote final : public nsIScriptErrorNote {
   NS_DECL_NSISCRIPTERRORNOTE
 
   void Init(const nsAString& message, const nsAString& sourceName,
-            uint32_t lineNumber, uint32_t columnNumber);
+            uint32_t sourceId, uint32_t lineNumber, uint32_t columnNumber);
 
  private:
   virtual ~nsScriptErrorNote();
@@ -35,6 +37,7 @@ class nsScriptErrorNote final : public nsIScriptErrorNote {
   nsString mMessage;
   nsString mSourceName;
   nsString mSourceLine;
+  uint32_t mSourceId;
   uint32_t mLineNumber;
   uint32_t mColumnNumber;
 };
@@ -48,6 +51,8 @@ class nsScriptErrorBase : public nsIScriptError {
   NS_DECL_NSISCRIPTERROR
 
   void AddNote(nsIScriptErrorNote* note);
+
+  static bool ComputeIsFromPrivateWindow(nsGlobalWindowInner* aWindow);
 
  protected:
   virtual ~nsScriptErrorBase();
@@ -64,6 +69,7 @@ class nsScriptErrorBase : public nsIScriptError {
   nsString mMessage;
   nsString mMessageName;
   nsString mSourceName;
+  uint32_t mSourceId;
   uint32_t mLineNumber;
   nsString mSourceLine;
   uint32_t mColumnNumber;

@@ -101,29 +101,30 @@ def test_output_assertion(runtests):
 
 
 @pytest.mark.skip_mozinfo("!debug")
-def test_output_leak(monkeypatch, runtests):
-    # Monkeypatch mozleak so we always process a failing leak log
-    # instead of the actual one.
-    import mozleak
-    old_process_leak_log = mozleak.process_leak_log
-
-    def process_leak_log(*args, **kwargs):
-        return old_process_leak_log(os.path.join(here, 'files', 'leaks.log'), *args[1:], **kwargs)
-
-    monkeypatch.setattr('mozleak.process_leak_log', process_leak_log)
-
-    status, lines = runtests('test_pass.html')
+def test_output_leak(runtests):
+    status, lines = runtests('test_leak.html')
     # TODO: mochitest should return non-zero here
     assert status == 0
 
     tbpl_status, log_level, summary = get_mozharness_status(lines, status)
-    assert tbpl_status == TBPL_FAILURE
-    assert log_level == ERROR
+    assert tbpl_status == TBPL_WARNING
+    assert log_level == WARNING
 
-    errors = filter_action('log', lines)
-    errors = [e for e in errors if e['level'] == 'ERROR']
-    assert len(errors) == 1
-    assert 'leakcheck' in errors[0]['message']
+    leak_totals = filter_action('mozleak_total', lines)
+    found_leaks = False
+    for lt in leak_totals:
+        if lt['bytes'] == 0:
+            # No leaks in this process.
+            assert len(lt['objects']) == 0
+            continue
+
+        assert not found_leaks, "Only one process should have leaked"
+        found_leaks = True
+        assert lt['process'] == "tab"
+        assert lt['bytes'] == 1
+        assert lt['objects'] == ['IntentionallyLeakedObject']
+
+    assert found_leaks, "At least one process should have leaked"
 
 
 if __name__ == '__main__':

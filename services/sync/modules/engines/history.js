@@ -7,13 +7,12 @@ var EXPORTED_SYMBOLS = ["HistoryEngine", "HistoryRec"];
 const HISTORY_TTL = 5184000; // 60 days in milliseconds
 const THIRTY_DAYS_IN_MS = 2592000000; // 30 days in milliseconds
 
-ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
-ChromeUtils.import("resource://services-common/async.js");
-ChromeUtils.import("resource://services-common/utils.js");
-ChromeUtils.import("resource://services-sync/constants.js");
-ChromeUtils.import("resource://services-sync/engines.js");
-ChromeUtils.import("resource://services-sync/record.js");
-ChromeUtils.import("resource://services-sync/util.js");
+const {Async} = ChromeUtils.import("resource://services-common/async.js");
+const {CommonUtils} = ChromeUtils.import("resource://services-common/utils.js");
+const {MAX_HISTORY_DOWNLOAD, MAX_HISTORY_UPLOAD, SCORE_INCREMENT_SMALL, SCORE_INCREMENT_XLARGE} = ChromeUtils.import("resource://services-sync/constants.js");
+const {Store, SyncEngine, Tracker} = ChromeUtils.import("resource://services-sync/engines.js");
+const {CryptoWrapper} = ChromeUtils.import("resource://services-sync/record.js");
+const {Utils} = ChromeUtils.import("resource://services-sync/util.js");
 
 ChromeUtils.defineModuleGetter(this, "PlacesUtils",
                                "resource://gre/modules/PlacesUtils.jsm");
@@ -44,28 +43,6 @@ HistoryEngine.prototype = {
   downloadLimit: MAX_HISTORY_DOWNLOAD,
 
   syncPriority: 7,
-
-  _migratedSyncMetadata: false,
-  async _migrateSyncMetadata() {
-    if (this._migratedSyncMetadata) {
-      return;
-    }
-    // Migrate the history sync ID and last sync time from prefs, to avoid
-    // triggering a full sync on upgrade. This can be removed in bug 1443021.
-    let existingSyncID = await super.getSyncID();
-    if (existingSyncID) {
-      this._log.debug("Migrating existing sync ID ${existingSyncID} from prefs",
-                      { existingSyncID });
-      await PlacesSyncUtils.history.ensureCurrentSyncId(existingSyncID);
-    }
-    let existingLastSync = await super.getLastSync();
-    if (existingLastSync) {
-      this._log.debug("Migrating existing last sync time ${existingLastSync} " +
-                      "from prefs", { existingLastSync });
-      await PlacesSyncUtils.history.setLastSync(existingLastSync);
-    }
-    this._migratedSyncMetadata = true;
-  },
 
   async getSyncID() {
     return PlacesSyncUtils.history.getSyncId();
@@ -105,11 +82,6 @@ HistoryEngine.prototype = {
     await super.setLastSync(lastSync); // Remove in bug 1443021.
   },
 
-  async _syncStartup() {
-    await this._migrateSyncMetadata();
-    await super._syncStartup();
-  },
-
   shouldSyncURL(url) {
     return !url.startsWith("file:");
   },
@@ -144,7 +116,6 @@ HistoryStore.prototype = {
 
   // Some helper functions to handle GUIDs
   async setGUID(uri, guid) {
-
     if (!guid) {
       guid = Utils.makeGUID();
     }
@@ -159,7 +130,6 @@ HistoryStore.prototype = {
   },
 
   async GUIDForUri(uri, create) {
-
     // Use the existing GUID if it exists
     let guid;
     try {

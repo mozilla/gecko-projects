@@ -51,8 +51,9 @@ Table::Table(JSContext* cx, const TableDesc& desc,
   MOZ_ASSERT(kind_ == TableKind::AnyRef);
 }
 
-/* static */ SharedTable Table::create(JSContext* cx, const TableDesc& desc,
-                                       HandleWasmTableObject maybeObject) {
+/* static */
+SharedTable Table::create(JSContext* cx, const TableDesc& desc,
+                          HandleWasmTableObject maybeObject) {
   switch (desc.kind) {
     case TableKind::AnyFunction:
     case TableKind::TypedFunction: {
@@ -139,9 +140,17 @@ const FunctionTableElem& Table::getAnyFunc(uint32_t index) const {
   return functions_[index];
 }
 
-JSObject* Table::getAnyRef(uint32_t index) const {
+AnyRef Table::getAnyRef(uint32_t index) const {
   MOZ_ASSERT(!isFunction());
-  return objects_[index];
+  // TODO/AnyRef-boxing: With boxed immediates and strings, the write barrier
+  // is going to have to be more complicated.
+  ASSERT_ANYREF_IS_JSOBJECT;
+  return AnyRef::fromJSObject(objects_[index]);
+}
+
+const void* Table::getAnyRefLocForCompiledCode(uint32_t index) const {
+  MOZ_ASSERT(!isFunction());
+  return objects_[index].address();
 }
 
 void Table::setAnyFunc(uint32_t index, void* code, const Instance* instance) {
@@ -168,9 +177,12 @@ void Table::setAnyFunc(uint32_t index, void* code, const Instance* instance) {
   }
 }
 
-void Table::setAnyRef(uint32_t index, JSObject* new_obj) {
+void Table::setAnyRef(uint32_t index, AnyRef new_obj) {
   MOZ_ASSERT(!isFunction());
-  objects_[index] = new_obj;
+  // TODO/AnyRef-boxing: With boxed immediates and strings, the write barrier
+  // is going to have to be more complicated.
+  ASSERT_ANYREF_IS_JSOBJECT;
+  objects_[index] = new_obj.asJSObject();
 }
 
 void Table::setNull(uint32_t index) {
@@ -186,7 +198,7 @@ void Table::setNull(uint32_t index) {
       break;
     }
     case TableKind::AnyRef: {
-      objects_[index] = nullptr;
+      setAnyRef(index, AnyRef::null());
       break;
     }
     case TableKind::TypedFunction: {
@@ -217,7 +229,7 @@ void Table::copy(const Table& srcTable, uint32_t dstIndex, uint32_t srcIndex) {
       break;
     }
     case TableKind::AnyRef: {
-      objects_[dstIndex] = srcTable.objects_[srcIndex];
+      setAnyRef(dstIndex, srcTable.getAnyRef(srcIndex));
       break;
     }
     case TableKind::TypedFunction: {
@@ -237,7 +249,7 @@ uint32_t Table::grow(uint32_t delta, JSContext* cx) {
 
   CheckedInt<uint32_t> newLength = oldLength;
   newLength += delta;
-  if (!newLength.isValid()) {
+  if (!newLength.isValid() || newLength.value() > MaxTableLength) {
     return -1;
   }
 

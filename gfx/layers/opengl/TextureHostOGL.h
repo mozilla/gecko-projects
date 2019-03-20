@@ -27,15 +27,14 @@
 #include "mozilla/layers/TextureHost.h"      // for TextureHost, etc
 #include "mozilla/mozalloc.h"                // for operator delete, etc
 #include "mozilla/webrender/RenderThread.h"
-#include "nsCOMPtr.h"          // for already_AddRefed
-#include "nsDebug.h"           // for NS_WARNING
-#include "nsISupportsImpl.h"   // for TextureImage::Release, etc
-#include "nsRegionFwd.h"       // for nsIntRegion
-#include "OGLShaderProgram.h"  // for ShaderProgramType, etc
+#include "nsCOMPtr.h"         // for already_AddRefed
+#include "nsDebug.h"          // for NS_WARNING
+#include "nsISupportsImpl.h"  // for TextureImage::Release, etc
+#include "nsRegionFwd.h"      // for nsIntRegion
 
 #ifdef MOZ_WIDGET_ANDROID
-#include "GeneratedJNIWrappers.h"
-#include "AndroidSurfaceTexture.h"
+#  include "GeneratedJNIWrappers.h"
+#  include "AndroidSurfaceTexture.h"
 #endif
 
 namespace mozilla {
@@ -50,16 +49,13 @@ class CompositorOGL;
 class TextureImageTextureSourceOGL;
 class GLTextureSource;
 
-inline void ApplySamplingFilterToBoundTexture(
-    gl::GLContext* aGL, gfx::SamplingFilter aSamplingFilter,
-    GLuint aTarget = LOCAL_GL_TEXTURE_2D) {
-  GLenum filter =
-      (aSamplingFilter == gfx::SamplingFilter::POINT ? LOCAL_GL_NEAREST
-                                                     : LOCAL_GL_LINEAR);
+void ApplySamplingFilterToBoundTexture(gl::GLContext* aGL,
+                                       gfx::SamplingFilter aSamplingFilter,
+                                       GLuint aTarget = LOCAL_GL_TEXTURE_2D);
 
-  aGL->fTexParameteri(aTarget, LOCAL_GL_TEXTURE_MIN_FILTER, filter);
-  aGL->fTexParameteri(aTarget, LOCAL_GL_TEXTURE_MAG_FILTER, filter);
-}
+already_AddRefed<TextureHost> CreateTextureHostOGL(
+    const SurfaceDescriptor& aDesc, ISurfaceAllocator* aDeallocator,
+    LayersBackend aBackend, TextureFlags aFlags);
 
 /*
  * TextureHost implementations for the OpenGL backend.
@@ -146,8 +142,7 @@ class TextureImageTextureSourceOGL final : public DataTextureSource,
                                            public BigImageIterator {
  public:
   explicit TextureImageTextureSourceOGL(
-      CompositorOGL* aCompositor, TextureFlags aFlags = TextureFlags::DEFAULT)
-      : mGL(aCompositor->gl()), mFlags(aFlags), mIterating(false) {}
+      CompositorOGL* aCompositor, TextureFlags aFlags = TextureFlags::DEFAULT);
 
   virtual const char* Name() const override {
     return "TextureImageTextureSourceOGL";
@@ -166,10 +161,7 @@ class TextureImageTextureSourceOGL final : public DataTextureSource,
 
   // TextureSource
 
-  virtual void DeallocateDeviceData() override {
-    mTexImage = nullptr;
-    SetUpdateSerial(0);
-  }
+  virtual void DeallocateDeviceData() override;
 
   virtual TextureSourceOGL* AsSourceOGL() override { return this; }
 
@@ -207,8 +199,11 @@ class TextureImageTextureSourceOGL final : public DataTextureSource,
   virtual bool NextTile() override { return mTexImage->NextTile(); }
 
  protected:
+  ~TextureImageTextureSourceOGL();
+
   RefPtr<gl::TextureImage> mTexImage;
   RefPtr<gl::GLContext> mGL;
+  RefPtr<CompositorOGL> mCompositor;
   TextureFlags mFlags;
   bool mIterating;
 };

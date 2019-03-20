@@ -1,6 +1,6 @@
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
- * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 //! Parsing for media feature expressions, like `(foo: bar)` or
 //! `(width >= 400px)`.
@@ -21,9 +21,8 @@ use crate::stylesheets::Origin;
 use crate::values::computed::{self, ToComputedValue};
 use crate::values::specified::{Integer, Length, Number, Resolution};
 use crate::values::{serialize_atom_identifier, CSSFloat};
-use crate::Atom;
+use crate::{Atom, Zero};
 use cssparser::{Parser, Token};
-use num_traits::Zero;
 use std::cmp::{Ordering, PartialOrd};
 use std::fmt::{self, Write};
 use style_traits::{CssWriter, ParseError, StyleParseErrorKind, ToCss};
@@ -134,10 +133,11 @@ impl RangeOrOperator {
 
         match range_or_op {
             RangeOrOperator::Range(range) => {
-                cmp == Ordering::Equal || match range {
-                    Range::Min => cmp == Ordering::Greater,
-                    Range::Max => cmp == Ordering::Less,
-                }
+                cmp == Ordering::Equal ||
+                    match range {
+                        Range::Min => cmp == Ordering::Greater,
+                        Range::Max => cmp == Ordering::Less,
+                    }
             },
             RangeOrOperator::Operator(op) => match op {
                 Operator::Equal => cmp == Ordering::Equal,
@@ -344,7 +344,7 @@ impl MediaFeatureExpression {
                 Err(()) => {
                     return Err(location.new_custom_error(
                         StyleParseErrorKind::MediaQueryExpectedFeatureName(ident.clone()),
-                    ))
+                    ));
                 },
             }
 

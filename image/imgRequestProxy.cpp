@@ -10,6 +10,7 @@
 #include "imgLoader.h"
 #include "Image.h"
 #include "ImageOps.h"
+#include "ImageTypes.h"
 #include "nsError.h"
 #include "nsCRTGlue.h"
 #include "imgINotificationObserver.h"
@@ -20,6 +21,7 @@
 
 using namespace mozilla;
 using namespace mozilla::image;
+using mozilla::dom::Document;
 
 // The split of imgRequestProxy and imgRequestProxyStatic means that
 // certain overridden functions need to be usable in the destructor.
@@ -160,7 +162,7 @@ imgRequestProxy::~imgRequestProxy() {
 }
 
 nsresult imgRequestProxy::Init(imgRequest* aOwner, nsILoadGroup* aLoadGroup,
-                               nsIDocument* aLoadingDocument, nsIURI* aURI,
+                               Document* aLoadingDocument, nsIURI* aURI,
                                imgINotificationObserver* aObserver) {
   MOZ_ASSERT(!GetOwner() && !mListener,
              "imgRequestProxy is already initialized");
@@ -282,11 +284,12 @@ nsresult imgRequestProxy::DispatchWithTargetIfAvailable(
   // rather we need to (e.g. we are in the wrong scheduler group context).
   // As such, we do not set mHadDispatch for telemetry purposes.
   if (mEventTarget) {
-    mEventTarget->Dispatch(std::move(aEvent), NS_DISPATCH_NORMAL);
+    mEventTarget->Dispatch(CreateMediumHighRunnable(std::move(aEvent)),
+                           NS_DISPATCH_NORMAL);
     return NS_OK;
   }
 
-  return NS_DispatchToMainThread(std::move(aEvent));
+  return NS_DispatchToMainThread(CreateMediumHighRunnable(std::move(aEvent)));
 }
 
 void imgRequestProxy::DispatchWithTarget(already_AddRefed<nsIRunnable> aEvent) {
@@ -296,10 +299,11 @@ void imgRequestProxy::DispatchWithTarget(already_AddRefed<nsIRunnable> aEvent) {
   MOZ_ASSERT(mEventTarget);
 
   mHadDispatch = true;
-  mEventTarget->Dispatch(std::move(aEvent), NS_DISPATCH_NORMAL);
+  mEventTarget->Dispatch(CreateMediumHighRunnable(std::move(aEvent)),
+                         NS_DISPATCH_NORMAL);
 }
 
-void imgRequestProxy::AddToOwner(nsIDocument* aLoadingDocument) {
+void imgRequestProxy::AddToOwner(Document* aLoadingDocument) {
   // An imgRequestProxy can be initialized with neither a listener nor a
   // document. The caller could follow up later by cloning the canonical
   // imgRequestProxy with the actual listener. This is possible because
@@ -662,6 +666,21 @@ imgRequestProxy::GetImage(imgIContainer** aImage) {
 }
 
 NS_IMETHODIMP
+imgRequestProxy::GetProducerId(uint32_t* aId) {
+  NS_ENSURE_TRUE(aId, NS_ERROR_NULL_POINTER);
+
+  nsCOMPtr<imgIContainer> image;
+  nsresult rv = GetImage(getter_AddRefs(image));
+  if (NS_SUCCEEDED(rv)) {
+    *aId = image->GetProducerId();
+  } else {
+    *aId = layers::kContainerProducerID_Invalid;
+  }
+
+  return NS_OK;
+}
+
+NS_IMETHODIMP
 imgRequestProxy::GetImageStatus(uint32_t* aStatus) {
   if (IsValidating()) {
     // We are currently validating the image, and so our status could revert if
@@ -742,21 +761,21 @@ imgRequestProxy::Clone(imgINotificationObserver* aObserver,
 }
 
 nsresult imgRequestProxy::SyncClone(imgINotificationObserver* aObserver,
-                                    nsIDocument* aLoadingDocument,
+                                    Document* aLoadingDocument,
                                     imgRequestProxy** aClone) {
   return PerformClone(aObserver, aLoadingDocument,
                       /* aSyncNotify */ true, aClone);
 }
 
 nsresult imgRequestProxy::Clone(imgINotificationObserver* aObserver,
-                                nsIDocument* aLoadingDocument,
+                                Document* aLoadingDocument,
                                 imgRequestProxy** aClone) {
   return PerformClone(aObserver, aLoadingDocument,
                       /* aSyncNotify */ false, aClone);
 }
 
 nsresult imgRequestProxy::PerformClone(imgINotificationObserver* aObserver,
-                                       nsIDocument* aLoadingDocument,
+                                       Document* aLoadingDocument,
                                        bool aSyncNotify,
                                        imgRequestProxy** aClone) {
   MOZ_ASSERT(aClone, "Null out param");
@@ -1036,7 +1055,7 @@ imgRequestProxy::GetStaticRequest(imgIRequest** aReturn) {
   return result;
 }
 
-nsresult imgRequestProxy::GetStaticRequest(nsIDocument* aLoadingDocument,
+nsresult imgRequestProxy::GetStaticRequest(Document* aLoadingDocument,
                                            imgRequestProxy** aReturn) {
   *aReturn = nullptr;
   RefPtr<Image> image = GetImage();

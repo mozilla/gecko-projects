@@ -36,6 +36,12 @@ namespace mozilla {
 
 class OriginAttributes;
 
+namespace ipc {
+
+class PrincipalInfo;
+
+}  // namespace ipc
+
 }  // namespace mozilla
 
 BEGIN_QUOTA_NAMESPACE
@@ -85,23 +91,26 @@ class QuotaManager final : public BackgroundThreadObject {
   friend class OriginInfo;
   friend class QuotaObject;
 
+  typedef mozilla::ipc::PrincipalInfo PrincipalInfo;
   typedef nsClassHashtable<nsCStringHashKey, nsTArray<DirectoryLockImpl*>>
       DirectoryLockTable;
 
- public:
-  class CreateRunnable;
-
- private:
-  class ShutdownRunnable;
-  class ShutdownObserver;
+  class Observer;
 
  public:
   NS_INLINE_DECL_REFCOUNTING(QuotaManager)
+
+  static nsresult Initialize();
 
   static bool IsRunningXPCShellTests() {
     static bool kRunningXPCShellTests =
         !!PR_GetEnv("XPCSHELL_TEST_PROFILE_DIR");
     return kRunningXPCShellTests;
+  }
+
+  static bool IsRunningGTests() {
+    static bool kRunningGTests = !!PR_GetEnv("MOZ_RUN_GTEST");
+    return kRunningGTests;
   }
 
   static const char kReplaceChars[];
@@ -114,6 +123,12 @@ class QuotaManager final : public BackgroundThreadObject {
 
   // Returns true if we've begun the shutdown process.
   static bool IsShuttingDown();
+
+  static void ShutdownInstance();
+
+  static bool IsOSMetadata(const nsAString& aFileName);
+
+  static bool IsDotFile(const nsAString& aFileName);
 
   bool IsOriginInitialized(const nsACString& aOrigin) const {
     AssertIsOnIOThread();
@@ -185,7 +200,7 @@ class QuotaManager final : public BackgroundThreadObject {
   nsresult GetDirectoryMetadata2WithRestore(
       nsIFile* aDirectory, bool aPersistent, int64_t* aTimestamp,
       bool* aPersisted, nsACString& aSuffix, nsACString& aGroup,
-      nsACString& aOrigin);
+      nsACString& aOrigin, const bool aTelemetry = false);
 
   nsresult GetDirectoryMetadata2(nsIFile* aDirectory, int64_t* aTimestamp,
                                  bool* aPersisted);
@@ -317,6 +332,12 @@ class QuotaManager final : public BackgroundThreadObject {
   static void GetStorageId(PersistenceType aPersistenceType,
                            const nsACString& aOrigin, Client::Type aClientType,
                            nsACString& aDatabaseId);
+
+  static bool IsPrincipalInfoValid(const PrincipalInfo& aPrincipalInfo);
+
+  static void GetInfoFromValidatedPrincipalInfo(
+      const PrincipalInfo& aPrincipalInfo, nsACString* aSuffix,
+      nsACString* aGroup, nsACString* aOrigin);
 
   static nsresult GetInfoFromPrincipal(nsIPrincipal* aPrincipal,
                                        nsACString* aSuffix, nsACString* aGroup,

@@ -7,7 +7,6 @@ include('/media/webrtc/webrtc.mozbuild')
 
 EXPORTS += [
     'nsIIPCSerializableInputStream.h',
-    'nsIIPCSerializableURI.h',
 ]
 
 EXPORTS.mozilla.ipc += [
@@ -27,6 +26,8 @@ EXPORTS.mozilla.ipc += [
     'FileDescriptorSetParent.h',
     'FileDescriptorUtils.h',
     'GeckoChildProcessHost.h',
+    'InProcessChild.h',
+    'InProcessParent.h',
     'InputStreamUtils.h',
     'IOThreadChild.h',
     'IPCStreamAlloc.h',
@@ -147,6 +148,9 @@ UNIFIED_SOURCES += [
     'CrashReporterMetadataShmem.cpp',
     'FileDescriptor.cpp',
     'FileDescriptorUtils.cpp',
+    'InProcessChild.cpp',
+    'InProcessImpl.cpp',
+    'InProcessParent.cpp',
     'InputStreamUtils.cpp',
     'IPCMessageUtils.cpp',
     'IPCStreamChild.cpp',
@@ -158,6 +162,7 @@ UNIFIED_SOURCES += [
     'MessageLink.cpp',
     'MessagePump.cpp',
     'ProcessChild.cpp',
+    'ProcessUtils_common.cpp',
     'ProtocolUtils.cpp',
     'ScopedXREEmbed.cpp',
     'SharedMemory.cpp',
@@ -184,12 +189,6 @@ else:
         'GeckoChildProcessHost.cpp',
     ]
 
-if CONFIG['CC_TYPE'] in ('msvc', 'clang-cl'):
-    # This is intended as a temporary hack to support building with VS2015.
-    # 'reinterpret_cast': conversion from 'DWORD' to 'HANDLE' of greater size
-    SOURCES['BackgroundChildImpl.cpp'].flags += ['-wd4312']
-    SOURCES['BackgroundParentImpl.cpp'].flags += ['-wd4312']
-
 LOCAL_INCLUDES += [
     '/caps',
     '/dom/broadcastchannel',
@@ -208,6 +207,7 @@ IPDL_SOURCES = [
     'PBackgroundTest.ipdl',
     'PChildToParentStream.ipdl',
     'PFileDescriptorSet.ipdl',
+    'PInProcess.ipdl',
     'PParentToChildStream.ipdl',
     'ProtocolTypes.ipdlh',
     'URIParams.ipdlh',

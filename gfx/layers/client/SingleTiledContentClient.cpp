@@ -32,7 +32,8 @@ void SingleTiledContentClient::UpdatedBuffer(TiledBufferType aType) {
                                   mTiledBuffer->GetSurfaceDescriptorTiles());
 }
 
-/* static */ bool SingleTiledContentClient::ClientSupportsLayerSize(
+/* static */
+bool SingleTiledContentClient::ClientSupportsLayerSize(
     const gfx::IntSize& aSize, ClientLayerManager* aManager) {
   int32_t maxTextureSize = aManager->GetMaxTextureSize();
   return aSize.width <= maxTextureSize && aSize.height <= maxTextureSize;
@@ -227,6 +228,12 @@ void ClientSingleTiledLayerBuffer::PaintThebes(
       task->mCapture = backBuffer->mCapture;
       task->mTarget = backBuffer->mBackBuffer;
       task->mClients = std::move(backBuffer->mTextureClients);
+      if (discardedFrontBuffer) {
+        task->mClients.AppendElement(discardedFrontBuffer);
+      }
+      if (discardedFrontBufferOnWhite) {
+        task->mClients.AppendElement(discardedFrontBufferOnWhite);
+      }
 
       // The target is an alias for the capture, and the paint thread expects
       // to be the only one with a reference to the capture

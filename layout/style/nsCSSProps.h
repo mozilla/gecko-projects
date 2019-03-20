@@ -165,6 +165,7 @@ class nsCSSProps {
 
   static nsCSSPropertyID Physicalize(nsCSSPropertyID aProperty,
                                      const mozilla::ComputedStyle& aStyle) {
+    MOZ_ASSERT(!IsShorthand(aProperty));
     if (PropHasFlags(aProperty, Flags::IsLogical)) {
       return Servo_ResolveLogicalProperty(aProperty, &aStyle);
     }
@@ -293,36 +294,17 @@ class nsCSSProps {
   // Not const because we modify its entries when various
   // "layout.css.*.enabled" prefs changes:
   static KTableEntry kDisplayKTable[];
-  // -- tables for parsing the {align,justify}-{content,items,self} properties
-  // --
-  static const KTableEntry kAlignAllKeywords[];
-  static const KTableEntry kAlignOverflowPosition[];  // <overflow-position>
-  static const KTableEntry kAlignSelfPosition[];      // <self-position>
-  static const KTableEntry kAlignLegacy[];            // 'legacy'
-  static const KTableEntry kAlignLegacyPosition[];    // 'left/right/center'
-  static const KTableEntry
-      kAlignAutoNormalStretchBaseline[];  // 'auto/normal/stretch/baseline'
-  static const KTableEntry
-      kAlignNormalStretchBaseline[];                // 'normal/stretch/baseline'
-  static const KTableEntry kAlignNormalBaseline[];  // 'normal/baseline'
-  static const KTableEntry
-      kAlignContentDistribution[];                   // <content-distribution>
-  static const KTableEntry kAlignContentPosition[];  // <content-position>
-  // -- tables for auto-completion of the {align,justify}-{content,items,self}
-  // properties --
+  // clang-format off
+  // -- tables for auto-completion of the {align,justify}-{content,items,self} properties --
   static const KTableEntry kAutoCompletionAlignJustifySelf[];
   static const KTableEntry kAutoCompletionAlignItems[];
   static const KTableEntry kAutoCompletionAlignJustifyContent[];
   // ------------------------------------------------------------------
+  // clang-format on
   static const KTableEntry kFontSmoothingKTable[];
   static const KTableEntry kGridAutoFlowKTable[];
   static const KTableEntry kGridTrackBreadthKTable[];
   static const KTableEntry kLineHeightKTable[];
-  static const KTableEntry kContainKTable[];
-  static const KTableEntry kOverflowSubKTable[];
-  static const KTableEntry kOverflowClipBoxKTable[];
-  static const KTableEntry kOverscrollBehaviorKTable[];
-  static const KTableEntry kScrollSnapTypeKTable[];
   static const KTableEntry kTextAlignKTable[];
   static const KTableEntry kTextDecorationLineKTable[];
   static const KTableEntry kTextDecorationStyleKTable[];
@@ -330,8 +312,6 @@ class nsCSSProps {
   static const KTableEntry kTextOverflowKTable[];
   static const KTableEntry kTouchActionKTable[];
   static const KTableEntry kVerticalAlignKTable[];
-  static const KTableEntry kWidthKTable[];  // also min-width, max-width
-  static const KTableEntry kFlexBasisKTable[];
 };
 
 #endif /* nsCSSProps_h___ */

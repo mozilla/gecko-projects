@@ -13,7 +13,7 @@
 #define READTYPE int32_t
 #include "zlib.h"
 #ifdef MOZ_JAR_BROTLI
-#include "brotli/decode.h"  // brotli
+#  include "brotli/decode.h"  // brotli
 #endif
 #include "nsISupportsUtils.h"
 #include "prio.h"
@@ -22,12 +22,14 @@
 #include "mozilla/Logging.h"
 #include "mozilla/UniquePtrExtensions.h"
 #include "stdlib.h"
+#include "nsDirectoryService.h"
 #include "nsWildCard.h"
+#include "nsXULAppAPI.h"
 #include "nsZipArchive.h"
 #include "nsString.h"
 #include "prenv.h"
 #if defined(XP_WIN)
-#include <windows.h>
+#  include <windows.h>
 #endif
 
 // For placement new used for arena allocations of zip file list
@@ -35,33 +37,33 @@
 #define ZIP_ARENABLOCKSIZE (1 * 1024)
 
 #ifdef XP_UNIX
-#include <sys/mman.h>
-#include <sys/types.h>
-#include <sys/stat.h>
-#include <limits.h>
-#include <unistd.h>
+#  include <sys/mman.h>
+#  include <sys/types.h>
+#  include <sys/stat.h>
+#  include <limits.h>
+#  include <unistd.h>
 #elif defined(XP_WIN)
-#include <io.h>
+#  include <io.h>
 #endif
 
 #ifdef __SYMBIAN32__
-#include <sys/syslimits.h>
+#  include <sys/syslimits.h>
 #endif /*__SYMBIAN32__*/
 
 #ifndef XP_UNIX /* we need some constants defined in limits.h and unistd.h */
-#ifndef S_IFMT
-#define S_IFMT 0170000
-#endif
-#ifndef S_IFLNK
-#define S_IFLNK 0120000
-#endif
-#ifndef PATH_MAX
-#define PATH_MAX 1024
-#endif
+#  ifndef S_IFMT
+#    define S_IFMT 0170000
+#  endif
+#  ifndef S_IFLNK
+#    define S_IFLNK 0120000
+#  endif
+#  ifndef PATH_MAX
+#    define PATH_MAX 1024
+#  endif
 #endif /* XP_UNIX */
 
 #ifdef XP_WIN
-#include "private/pprio.h"  // To get PR_ImportFile
+#  include "private/pprio.h"  // To get PR_ImportFile
 #endif
 
 using namespace mozilla;
@@ -77,11 +79,8 @@ static uint32_t HashName(const char *aName, uint16_t nameLen);
 
 class ZipArchiveLogger {
  public:
-  void Write(const nsACString &zip, const char *entry) const {
+  void Init(const char *env) {
     if (!fd) {
-      char *env = PR_GetEnv("MOZ_JAR_LOG_FILE");
-      if (!env) return;
-
       nsCOMPtr<nsIFile> logFile;
       nsresult rv = NS_NewLocalFile(NS_ConvertUTF8toUTF16(env), false,
                                     getter_AddRefs(logFile));
@@ -112,11 +111,16 @@ class ZipArchiveLogger {
 #endif
       fd = file;
     }
-    nsCString buf(zip);
-    buf.Append(' ');
-    buf.Append(entry);
-    buf.Append('\n');
-    PR_Write(fd, buf.get(), buf.Length());
+  }
+
+  void Write(const nsACString &zip, const char *entry) const {
+    if (fd) {
+      nsCString buf(zip);
+      buf.Append(' ');
+      buf.Append(entry);
+      buf.Append('\n');
+      PR_Write(fd, buf.get(), buf.Length());
+    }
   }
 
   void AddRef() {
@@ -134,7 +138,7 @@ class ZipArchiveLogger {
 
  private:
   int refCnt;
-  mutable PRFileDesc *fd;
+  PRFileDesc *fd;
 };
 
 static ZipArchiveLogger zipLog;
@@ -332,7 +336,52 @@ nsresult nsZipArchive::OpenArchive(nsZipHandle *aZipHandle, PRFileDesc *aFd) {
   //-- get table of contents for archive
   nsresult rv = BuildFileList(aFd);
   if (NS_SUCCEEDED(rv)) {
-    if (aZipHandle->mFile) aZipHandle->mFile.GetURIString(mURI);
+    if (aZipHandle->mFile && XRE_IsParentProcess()) {
+      static char *env = PR_GetEnv("MOZ_JAR_LOG_FILE");
+      if (env) {
+        zipLog.Init(env);
+        // We only log accesses in jar/zip archives within the NS_GRE_DIR
+        // and/or the APK on Android. For the former, we log the archive path
+        // relative to NS_GRE_DIR, and for the latter, the nested-archive
+        // path within the APK. This makes the path match the path of the
+        // archives relative to the packaged dist/$APP_NAME directory in a
+        // build.
+        if (aZipHandle->mFile.IsZip()) {
+          // Nested archive, likely omni.ja in APK.
+          aZipHandle->mFile.GetPath(mURI);
+        } else if (nsDirectoryService::gService) {
+          // We can reach here through the initialization of Omnijar from
+          // XRE_InitCommandLine, which happens before the directory service
+          // is initialized. When that happens, it means the opened archive is
+          // the APK, and we don't care to log that one, so we just skip
+          // when the directory service is not initialized.
+          nsCOMPtr<nsIFile> dir = aZipHandle->mFile.GetBaseFile();
+          nsCOMPtr<nsIFile> gre_dir;
+          nsAutoCString path;
+          if (NS_SUCCEEDED(nsDirectoryService::gService->Get(
+                  NS_GRE_DIR, NS_GET_IID(nsIFile), getter_AddRefs(gre_dir)))) {
+            nsAutoCString leaf;
+            nsCOMPtr<nsIFile> parent;
+            while (NS_SUCCEEDED(dir->GetNativeLeafName(leaf)) &&
+                   NS_SUCCEEDED(dir->GetParent(getter_AddRefs(parent)))) {
+              if (!parent) {
+                break;
+              }
+              dir = parent;
+              if (path.Length()) {
+                path.Insert('/', 0);
+              }
+              path.Insert(leaf, 0);
+              bool equals;
+              if (NS_SUCCEEDED(dir->Equals(gre_dir, &equals)) && equals) {
+                mURI.Assign(path);
+                break;
+              }
+            }
+          }
+        }
+      }
+    }
   }
   return rv;
 }
@@ -423,7 +472,9 @@ nsZipItem *nsZipArchive::GetItem(const char *aEntryName) {
           (!memcmp(aEntryName, item->Name(), len))) {
         // Successful GetItem() is a good indicator that the file is about to be
         // read
-        zipLog.Write(mURI, aEntryName);
+        if (mURI.Length()) {
+          zipLog.Write(mURI, aEntryName);
+        }
         return item;  //-- found it
       }
       item = item->next;
@@ -458,8 +509,6 @@ nsresult nsZipArchive::ExtractFile(nsZipItem *item, nsIFile *outFile,
     uint32_t count = 0;
     uint8_t *buf = cursor.Read(&count);
     if (!buf) {
-      nsZipArchive::sFileCorruptedReason =
-          "nsZipArchive: Read() failed to return a buffer";
       rv = NS_ERROR_FILE_CORRUPTED;
       break;
     }
@@ -593,7 +642,11 @@ nsresult nsZipArchive::BuildFileList(PRFileDesc *aFd) {
   const uint8_t *endp = startp + mFd->mLen;
   MOZ_WIN_MEM_TRY_BEGIN
   uint32_t centralOffset = 4;
-  if (mFd->mLen > ZIPCENTRAL_SIZE &&
+  // Only perform readahead in the parent process. Children processes
+  // don't need readahead when the file has already been readahead by
+  // the parent process, and readahead only really happens for omni.ja,
+  // which is used in the parent process.
+  if (XRE_IsParentProcess() && mFd->mLen > ZIPCENTRAL_SIZE &&
       xtolong(startp + centralOffset) == CENTRALSIG) {
     // Success means optimized jar layout from bug 559961 is in effect
     uint32_t readaheadLength = xtolong(startp);
@@ -604,7 +657,25 @@ nsresult nsZipArchive::BuildFileList(PRFileDesc *aFd) {
 #elif defined(XP_UNIX)
       madvise(const_cast<uint8_t *>(startp), readaheadLength, MADV_WILLNEED);
 #elif defined(XP_WIN)
-      if (aFd) {
+      static auto prefetchVirtualMemory =
+          reinterpret_cast<BOOL(WINAPI *)(HANDLE, ULONG_PTR, PVOID, ULONG)>(
+              GetProcAddress(GetModuleHandle(L"kernel32.dll"),
+                             "PrefetchVirtualMemory"));
+      if (prefetchVirtualMemory) {
+        // Normally, we'd use WIN32_MEMORY_RANGE_ENTRY, but that requires
+        // a different _WIN32_WINNT value before including windows.h, but
+        // that causes complications with unified sources. It's a simple
+        // enough struct anyways.
+        struct {
+          PVOID VirtualAddress;
+          SIZE_T NumberOfBytes;
+        } entry;
+        entry.VirtualAddress = const_cast<uint8_t *>(startp);
+        entry.NumberOfBytes = readaheadLength;
+        prefetchVirtualMemory(GetCurrentProcess(), 1, &entry, 0);
+        readaheadLength = 0;
+      }
+      if (readaheadLength && aFd) {
         HANDLE hFile = (HANDLE)PR_FileDesc2NativeHandle(aFd);
         mozilla::ReadAhead(hFile, 0, readaheadLength);
       }
@@ -620,7 +691,6 @@ nsresult nsZipArchive::BuildFileList(PRFileDesc *aFd) {
   }
 
   if (!centralOffset) {
-    nsZipArchive::sFileCorruptedReason = "nsZipArchive: no central offset";
     return NS_ERROR_FILE_CORRUPTED;
   }
 
@@ -628,8 +698,6 @@ nsresult nsZipArchive::BuildFileList(PRFileDesc *aFd) {
 
   // avoid overflow of startp + centralOffset.
   if (buf < startp) {
-    nsZipArchive::sFileCorruptedReason =
-        "nsZipArchive: overflow looking for central directory";
     return NS_ERROR_FILE_CORRUPTED;
   }
 
@@ -640,8 +708,6 @@ nsresult nsZipArchive::BuildFileList(PRFileDesc *aFd) {
          ((sig = xtolong(buf)) == CENTRALSIG)) {
     // Make sure there is enough data available.
     if ((buf > endp) || (endp - buf < ZIPCENTRAL_SIZE)) {
-      nsZipArchive::sFileCorruptedReason =
-          "nsZipArchive: central directory too small";
       return NS_ERROR_FILE_CORRUPTED;
     }
 
@@ -656,13 +722,10 @@ nsresult nsZipArchive::BuildFileList(PRFileDesc *aFd) {
     // Sanity check variable sizes and refuse to deal with
     // anything too big: it's likely a corrupt archive.
     if (namelen < 1 || namelen > kMaxNameLength) {
-      nsZipArchive::sFileCorruptedReason = "nsZipArchive: namelen out of range";
       return NS_ERROR_FILE_CORRUPTED;
     }
     if (buf >= buf + diff ||  // No overflow
         buf >= endp - diff) {
-      nsZipArchive::sFileCorruptedReason =
-          "nsZipArchive: overflow looking for next item";
       return NS_ERROR_FILE_CORRUPTED;
     }
 
@@ -685,7 +748,6 @@ nsresult nsZipArchive::BuildFileList(PRFileDesc *aFd) {
   } /* while reading central directory records */
 
   if (sig != ENDSIG) {
-    nsZipArchive::sFileCorruptedReason = "nsZipArchive: unexpected sig";
     return NS_ERROR_FILE_CORRUPTED;
   }
 
@@ -1175,5 +1237,3 @@ nsZipItemPtr_base::nsZipItemPtr_base(nsZipArchive *aZip, const char *aEntryName,
     return;
   }
 }
-
-/* static */ const char *nsZipArchive::sFileCorruptedReason = nullptr;

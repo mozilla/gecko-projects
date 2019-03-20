@@ -53,6 +53,12 @@ inline NativeObject* NewObjectCache::newObjectFromHit(JSContext* cx,
   // runtimeFromAnyThread.
   ObjectGroup* group = templateObj->group_;
 
+  // If we did the lookup based on the proto we might have a group/object from a
+  // different (same-compartment) realm, so we have to do a realm check.
+  if (group->realm() != cx->realm()) {
+    return nullptr;
+  }
+
   MOZ_ASSERT(!group->hasUnanalyzedPreliminaryObjects());
 
   {
@@ -66,9 +72,8 @@ inline NativeObject* NewObjectCache::newObjectFromHit(JSContext* cx,
     return nullptr;
   }
 
-  NativeObject* obj = static_cast<NativeObject*>(
-      Allocate<JSObject, NoGC>(cx, entry->kind,
-                               /* nDynamicSlots = */ 0, heap, group->clasp()));
+  NativeObject* obj = static_cast<NativeObject*>(AllocateObject<NoGC>(
+      cx, entry->kind, /* nDynamicSlots = */ 0, heap, group->clasp()));
   if (!obj) {
     return nullptr;
   }

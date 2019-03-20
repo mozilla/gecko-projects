@@ -139,9 +139,15 @@ RemotePrintJobChild::OnStatusChange(nsIWebProgress* aProgress,
 }
 
 NS_IMETHODIMP
-RemotePrintJobChild::OnSecurityChange(
-    nsIWebProgress* aProgress, nsIRequest* aRequest, uint32_t aState,
-    uint32_t aOldState, const nsAString& aContentBlockingLogJSON) {
+RemotePrintJobChild::OnSecurityChange(nsIWebProgress* aProgress,
+                                      nsIRequest* aRequest, uint32_t aState) {
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+RemotePrintJobChild::OnContentBlockingEvent(nsIWebProgress* aProgress,
+                                            nsIRequest* aRequest,
+                                            uint32_t aEvent) {
   return NS_OK;
 }
 

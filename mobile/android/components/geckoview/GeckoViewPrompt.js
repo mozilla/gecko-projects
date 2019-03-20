@@ -2,7 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
+const {XPCOMUtils} = ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
 
 XPCOMUtils.defineLazyModuleGetters(this, {
   EventDispatcher: "resource://gre/modules/Messaging.jsm",
@@ -398,7 +398,6 @@ PromptDelegate.prototype = {
         winUtils.enterModalState();
       }
       return true;
-
     } catch (ex) {
       Cu.reportError("Failed to change modal state: " + ex);
     }
@@ -812,44 +811,14 @@ FilePickerDelegate.prototype = {
     };
     this._mode = aMode;
     this._mimeTypes = [];
-    this._extensions = [];
   },
 
   get mode() {
     return this._mode;
   },
 
-  appendFilters: function(aFilterMask) {
-    if (aFilterMask & Ci.nsIFilePicker.filterAll) {
-      this._mimeTypes.push("*/*");
-    }
-    if (aFilterMask & Ci.nsIFilePicker.filterAudio) {
-      this._mimeTypes.push("audio/*");
-    }
-    if (aFilterMask & Ci.nsIFilePicker.filterImages) {
-      this._mimeTypes.push("image/*");
-    }
-    if (aFilterMask & Ci.nsIFilePicker.filterVideo) {
-      this._mimeTypes.push("video/*");
-    }
-    if (aFilterMask & Ci.nsIFilePicker.filterHTML) {
-      this._mimeTypes.push("text/html");
-    }
-    if (aFilterMask & Ci.nsIFilePicker.filterText) {
-      this._mimeTypes.push("text/plain");
-    }
-    if (aFilterMask & Ci.nsIFilePicker.filterXML) {
-      this._mimeTypes.push("text/xml");
-    }
-    if (aFilterMask & Ci.nsIFilePicker.filterXUL) {
-      this._mimeTypes.push("application/vnd.mozilla.xul+xml");
-    }
-  },
-
-  appendFilter: function(aTitle, aFilter) {
-    // Only include filter that specify extensions (i.e. exclude generic ones like "*").
-    let filters = aFilter.split(/[\s,;]+/).filter(filter => filter.includes("."));
-    Array.prototype.push.apply(this._extensions, filters);
+  appendRawFilter: function(aFilter) {
+    this._mimeTypes.push(aFilter);
   },
 
   show: function() {
@@ -858,9 +827,6 @@ FilePickerDelegate.prototype = {
 
   open: function(aFilePickerShownCallback) {
     this._msg.mimeTypes = this._mimeTypes;
-    if (this._extensions.length) {
-      this._msg.extensions = this._extensions;
-    }
     this._prompt.asyncShowPrompt(this._msg, result => {
       // OK: result
       // Cancel: !result

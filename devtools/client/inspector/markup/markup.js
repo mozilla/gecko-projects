@@ -21,9 +21,15 @@ const MarkupReadOnlyContainer = require("devtools/client/inspector/markup/views/
 const MarkupTextContainer = require("devtools/client/inspector/markup/views/text-container");
 const RootContainer = require("devtools/client/inspector/markup/views/root-container");
 
+loader.lazyRequireGetter(this, "MarkupContextMenu", "devtools/client/inspector/markup/markup-context-menu");
 loader.lazyRequireGetter(this, "SlottedNodeContainer", "devtools/client/inspector/markup/views/slotted-node-container");
+loader.lazyRequireGetter(this, "getLongString", "devtools/client/inspector/shared/utils", true);
+loader.lazyRequireGetter(this, "openContentLink", "devtools/client/shared/link", true);
 loader.lazyRequireGetter(this, "HTMLTooltip", "devtools/client/shared/widgets/tooltip/HTMLTooltip", true);
 loader.lazyRequireGetter(this, "UndoStack", "devtools/client/shared/undo", true);
+loader.lazyRequireGetter(this, "clipboardHelper", "devtools/shared/platform/clipboard");
+loader.lazyRequireGetter(this, "beautify", "devtools/shared/jsbeautify/beautify");
+loader.lazyRequireGetter(this, "getTabPrefs", "devtools/shared/indentation", true);
 
 const INSPECTOR_L10N =
   new LocalizationHelper("devtools/client/locales/inspector.properties");
@@ -41,6 +47,7 @@ const DRAG_DROP_HEIGHT_TO_SPEED_MIN = 0.5;
 const DRAG_DROP_HEIGHT_TO_SPEED_MAX = 1;
 const ATTR_COLLAPSE_ENABLED_PREF = "devtools.markup.collapseAttributes";
 const ATTR_COLLAPSE_LENGTH_PREF = "devtools.markup.collapseAttributeLength";
+const BEAUTIFY_HTML_ON_COPY_PREF = "devtools.markup.beautifyOnCopy";
 
 /**
  * Vocabulary for the purposes of this file:
@@ -98,9 +105,10 @@ function MarkupView(inspector, frame, controllerWindow) {
   this._isImagePreviewTarget = this._isImagePreviewTarget.bind(this);
   this._mutationObserver = this._mutationObserver.bind(this);
   this._onBlur = this._onBlur.bind(this);
+  this._onContextMenu = this._onContextMenu.bind(this);
   this._onCopy = this._onCopy.bind(this);
   this._onCollapseAttributesPrefChange = this._onCollapseAttributesPrefChange.bind(this);
-  this._onDisplayChange = this._onDisplayChange.bind(this);
+  this._onWalkerNodeStatesChanged = this._onWalkerNodeStatesChanged.bind(this);
   this._onFocus = this._onFocus.bind(this);
   this._onMouseClick = this._onMouseClick.bind(this);
   this._onMouseMove = this._onMouseMove.bind(this);
@@ -113,16 +121,22 @@ function MarkupView(inspector, frame, controllerWindow) {
   // Listening to various events.
   this._elt.addEventListener("blur", this._onBlur, true);
   this._elt.addEventListener("click", this._onMouseClick);
+  this._elt.addEventListener("contextmenu", this._onContextMenu);
   this._elt.addEventListener("mousemove", this._onMouseMove);
   this._elt.addEventListener("mouseout", this._onMouseOut);
   this._frame.addEventListener("focus", this._onFocus);
   this.inspector.selection.on("new-node-front", this._onNewSelection);
-  this.walker.on("display-change", this._onDisplayChange);
+  this.walker.on("display-change", this._onWalkerNodeStatesChanged);
+  this.walker.on("scrollable-change", this._onWalkerNodeStatesChanged);
   this.walker.on("mutations", this._mutationObserver);
   this.win.addEventListener("copy", this._onCopy);
   this.win.addEventListener("mouseup", this._onMouseUp);
-  this.toolbox.on("picker-canceled", this._onToolboxPickerCanceled);
-  this.toolbox.on("picker-node-hovered", this._onToolboxPickerHover);
+  this.inspector.inspector.nodePicker.on(
+    "picker-node-canceled", this._onToolboxPickerCanceled
+  );
+  this.inspector.inspector.nodePicker.on(
+    "picker-node-hovered", this._onToolboxPickerHover
+  );
 
   if (flags.testing) {
     // In tests, we start listening immediately to avoid having to simulate a mousemove.
@@ -150,6 +164,14 @@ MarkupView.prototype = {
   CONTAINER_FLASHING_DURATION: 500,
 
   _selectedContainer: null,
+
+  get contextMenu() {
+    if (!this._contextMenu) {
+      this._contextMenu = new MarkupContextMenu(this);
+    }
+
+    return this._contextMenu;
+  },
 
   get eventDetailsTooltip() {
     if (!this._eventDetailsTooltip) {
@@ -272,6 +294,10 @@ MarkupView.prototype = {
     if (this._selectedContainer) {
       this._selectedContainer.clearFocus();
     }
+  },
+
+  _onContextMenu: function(event) {
+    this.contextMenu.show(event);
   },
 
   /**
@@ -761,10 +787,82 @@ MarkupView.prototype = {
 
     const selection = this.inspector.selection;
     if (selection.isNode()) {
-      this.inspector.copyOuterHTML();
+      this.copyOuterHTML();
     }
     evt.stopPropagation();
     evt.preventDefault();
+  },
+
+  /**
+   * Copy the outerHTML of the selected Node to the clipboard.
+   */
+  copyOuterHTML: function() {
+    if (!this.inspector.selection.isNode()) {
+      return;
+    }
+    const node = this.inspector.selection.nodeFront;
+
+    switch (node.nodeType) {
+      case nodeConstants.ELEMENT_NODE :
+        copyLongHTMLString(this.walker.outerHTML(node));
+        break;
+      case nodeConstants.COMMENT_NODE :
+        getLongString(node.getNodeValue()).then(comment => {
+          clipboardHelper.copyString("<!--" + comment + "-->");
+        });
+        break;
+      case nodeConstants.DOCUMENT_TYPE_NODE :
+        clipboardHelper.copyString(node.doctypeString);
+        break;
+    }
+  },
+
+  /**
+   * Copy the innerHTML of the selected Node to the clipboard.
+   */
+  copyInnerHTML: function() {
+    if (!this.inspector.selection.isNode()) {
+      return;
+    }
+
+    copyLongHTMLString(this.walker.innerHTML(this.inspector.selection.nodeFront));
+  },
+
+  /**
+   * Given a type and link found in a node's attribute in the markup-view,
+   * attempt to follow that link (which may result in opening a new tab, the
+   * style editor or debugger).
+   */
+  followAttributeLink: function(type, link) {
+    if (!type || !link) {
+      return;
+    }
+
+    if (type === "uri" || type === "cssresource" || type === "jsresource") {
+      // Open link in a new tab.
+      this.inspector.inspector.resolveRelativeURL(
+        link, this.inspector.selection.nodeFront).then(url => {
+          if (type === "uri") {
+            openContentLink(url);
+          } else if (type === "cssresource") {
+            return this.toolbox.viewSourceInStyleEditor(url);
+          } else if (type === "jsresource") {
+            return this.toolbox.viewSourceInDebugger(url);
+          }
+          return null;
+        }).catch(console.error);
+    } else if (type == "idref") {
+      // Select the node in the same document.
+      this.walker.document(this.inspector.selection.nodeFront).then(doc => {
+        return this.walker.querySelector(doc, "#" + CSS.escape(link)).then(node => {
+          if (!node) {
+            this.emit("idref-attribute-link-failed");
+            return;
+          }
+          this.inspector.selection.setNodeFront(node);
+        });
+      }).catch(console.error);
+    }
   },
 
   /**
@@ -815,8 +913,7 @@ MarkupView.prototype = {
         break;
       }
       case "markupView.scrollInto.key": {
-        const selection = this._selectedContainer.node;
-        this.inspector.scrollNodeIntoView(selection);
+        this.scrollNodeIntoView();
         break;
       }
       // Generic keys
@@ -956,6 +1053,18 @@ MarkupView.prototype = {
   },
 
   /**
+   * Returns a value indicating whether a node can be deleted.
+   *
+   * @param {NodeFront} nodeFront
+   *        The node to test for deletion
+   */
+  isDeletable(nodeFront) {
+    return !(nodeFront.isDocumentElement ||
+           nodeFront.nodeType == nodeConstants.DOCUMENT_TYPE_NODE ||
+           nodeFront.isAnonymous);
+  },
+
+  /**
    * Delete a node from the DOM.
    * This is an undoable action.
    *
@@ -965,7 +1074,7 @@ MarkupView.prototype = {
    *         If set to true, focus the previous sibling, otherwise the next one.
    */
   deleteNode: function(node, moveBackward) {
-    if (!this.inspector.isDeletable(node)) {
+    if (!this.isDeletable(node)) {
       return;
     }
 
@@ -1010,6 +1119,17 @@ MarkupView.prototype = {
         this.walker.insertBefore(node, parent, nextSibling);
       });
     }).catch(console.error);
+  },
+
+  /**
+   * Scroll the node into view.
+   */
+  scrollNodeIntoView() {
+    if (!this.inspector.selection.isNode()) {
+      return;
+    }
+
+    this.inspector.selection.nodeFront.scrollIntoView();
   },
 
   /**
@@ -1161,12 +1281,14 @@ MarkupView.prototype = {
   },
 
   /**
-   * React to display-change events from the walker
+   * React to display-change and scrollable-change events from the walker. These are
+   * events that tell us when something of interest changed on a collection of nodes:
+   * whether their display type changed, or whether they became scrollable.
    *
    * @param  {Array} nodes
    *         An array of nodeFronts
    */
-  _onDisplayChange: function(nodes) {
+  _onWalkerNodeStatesChanged: function(nodes) {
     for (const node of nodes) {
       const container = this.getContainer(node);
       if (container) {
@@ -1358,12 +1480,7 @@ MarkupView.prototype = {
       walkerPromise = this.walker.innerHTML(node);
     }
 
-    return walkerPromise.then(longstr => {
-      return longstr.string().then(html => {
-        longstr.release().catch(console.error);
-        return html;
-      });
-    });
+    return getLongString(walkerPromise);
   },
 
   /**
@@ -1920,6 +2037,11 @@ MarkupView.prototype = {
 
     this._hoveredContainer = null;
 
+    if (this._contextMenu) {
+      this._contextMenu.destroy();
+      this._contextMenu = null;
+    }
+
     if (this._eventDetailsTooltip) {
       this._eventDetailsTooltip.destroy();
       this._eventDetailsTooltip = null;
@@ -1945,12 +2067,16 @@ MarkupView.prototype = {
 
     this._elt.removeEventListener("blur", this._onBlur, true);
     this._elt.removeEventListener("click", this._onMouseClick);
+    this._elt.removeEventListener("contextmenu", this._onContextMenu);
     this._elt.removeEventListener("mousemove", this._onMouseMove);
     this._elt.removeEventListener("mouseout", this._onMouseOut);
     this._frame.removeEventListener("focus", this._onFocus);
     this.inspector.selection.off("new-node-front", this._onNewSelection);
-    this.toolbox.off("picker-node-hovered", this._onToolboxPickerHover);
-    this.walker.off("display-change", this._onDisplayChange);
+    this.inspector.inspector.nodePicker.off(
+      "picker-node-hovered", this._onToolboxPickerHover
+    );
+    this.walker.off("display-change", this._onWalkerNodeStatesChanged);
+    this.walker.off("scrollable-change", this._onWalkerNodeStatesChanged);
     this.walker.off("mutations", this._mutationObserver);
     this.win.removeEventListener("copy", this._onCopy);
     this.win.removeEventListener("mouseup", this._onMouseUp);
@@ -2069,6 +2195,33 @@ MarkupView.prototype = {
     return {parent, nextSibling};
   },
 };
+
+/**
+ * Copy the content of a longString containing HTML code to the clipboard.
+ * The string is retrieved, and possibly beautified if the user has the right pref set and
+ * then placed in the clipboard.
+ *
+ * @param  {Promise} longStringActorPromise
+ *         The promise expected to resolve a LongStringActor instance
+ */
+async function copyLongHTMLString(longStringActorPromise) {
+  let string = await getLongString(longStringActorPromise);
+
+  if (Services.prefs.getBoolPref(BEAUTIFY_HTML_ON_COPY_PREF)) {
+    const { indentUnit, indentWithTabs } = getTabPrefs();
+    string = beautify.html(string, {
+      // eslint-disable-next-line camelcase
+      preserve_newlines: false,
+      // eslint-disable-next-line camelcase
+      indent_size: indentWithTabs ? 1 : indentUnit,
+      // eslint-disable-next-line camelcase
+      indent_char: indentWithTabs ? "\t" : " ",
+      unformatted: [],
+    });
+  }
+
+  clipboardHelper.copyString(string);
+}
 
 /**
  * Map a number from one range to another.

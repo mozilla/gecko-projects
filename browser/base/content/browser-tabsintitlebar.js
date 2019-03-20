@@ -6,7 +6,6 @@
 var TabsInTitlebar;
 
 { // start private TabsInTitlebar scope
-
 TabsInTitlebar = {
   init() {
     this._readPref();
@@ -37,7 +36,7 @@ TabsInTitlebar = {
         isSupported = true;
         break;
       case "gtk3":
-        isSupported = window.matchMedia("(-moz-gtk-csd-available)");
+        isSupported = window.matchMedia("(-moz-gtk-csd-available)").matches;
         break;
     }
     delete this.systemSupported;
@@ -58,8 +57,10 @@ TabsInTitlebar = {
   _prefName: "browser.tabs.drawInTitlebar",
 
   _readPref() {
-    this.allowedBy("pref",
-                   Services.prefs.getBoolPref(this._prefName));
+    let hiddenTitlebar =
+      Services.prefs.getBoolPref("browser.tabs.drawInTitlebar",
+        window.matchMedia("(-moz-gtk-csd-hide-titlebar-by-default)").matches);
+    this.allowedBy("pref", hiddenTitlebar);
   },
 
   _update() {
@@ -117,7 +118,6 @@ let dragSpaceObserver = {
     }
   },
 };
-
 } // end private TabsInTitlebar scope
 
 function onTitlebarMaxClick() {

@@ -8,7 +8,7 @@
 #include "mozilla/dom/DOMErrorBinding.h"
 #include "mozilla/dom/DOMException.h"
 #include "mozilla/UseCounter.h"
-#include "nsIDocument.h"
+#include "mozilla/dom/Document.h"
 #include "nsPIDOMWindow.h"
 
 namespace mozilla {
@@ -48,14 +48,16 @@ JSObject* DOMError::WrapObject(JSContext* aCx,
   return DOMError_Binding::Wrap(aCx, this, aGivenProto);
 }
 
-/* static */ already_AddRefed<DOMError> DOMError::Constructor(
-    const GlobalObject& aGlobal, const nsAString& aName,
-    const nsAString& aMessage, ErrorResult& aRv) {
+/* static */
+already_AddRefed<DOMError> DOMError::Constructor(const GlobalObject& aGlobal,
+                                                 const nsAString& aName,
+                                                 const nsAString& aMessage,
+                                                 ErrorResult& aRv) {
   nsCOMPtr<nsPIDOMWindowInner> window =
       do_QueryInterface(aGlobal.GetAsSupports());
 
   if (window) {
-    nsCOMPtr<nsIDocument> doc = window->GetExtantDoc();
+    nsCOMPtr<Document> doc = window->GetExtantDoc();
     if (doc) {
       doc->SetDocumentAndPageUseCounter(eUseCounter_custom_DOMErrorConstructor);
     }

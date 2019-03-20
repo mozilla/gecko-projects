@@ -1,6 +1,5 @@
-commit 2726142bb97e4538703eda748c3b7300183bc66d
-Author: test262-automation <test262-automation@bocoup.com>
-Date:   Wed Nov 14 19:00:37 2018 +0000
+commit c822f4c92914333d197191b2b3dec4e923acb4a3
+Author: André Bargull <andre.bargull@gmail.com>
+Date:   Wed Mar 6 09:24:44 2019 -0800
 
-    [v8-test262-automation] Updated curation log with latest revision sha's from export and changed files.
-        sourceRevisionAtLastExport: ac250b9b targetRevisionAtLastExport: 6218e682b2
+    Fix existing linting errors, update error phase, and add a new flags linter (#2086)

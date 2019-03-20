@@ -104,6 +104,7 @@ APZEventState::APZEventState(nsIWidget* aWidget,
       mPendingTouchPreventedResponse(false),
       mPendingTouchPreventedBlockId(0),
       mEndTouchIsClick(false),
+      mFirstTouchCancelled(false),
       mTouchEndCancelled(false),
       mLastTouchIdentifier(0) {
   nsresult rv;
@@ -215,6 +216,17 @@ bool APZEventState::FireContextmenuEvents(
     const nsCOMPtr<nsIPresShell>& aPresShell, const CSSPoint& aPoint,
     const CSSToLayoutDeviceScale& aScale, Modifiers aModifiers,
     const nsCOMPtr<nsIWidget>& aWidget) {
+  // Synthesize mousemove event for allowing users to emulate to move mouse
+  // cursor over the element.  As a result, users can open submenu UI which
+  // is opened when mouse cursor is moved over a link (i.e., it's a case that
+  // users cannot stay in the page after tapping it).  So, this improves
+  // accessibility in websites which are designed for desktop.
+  // Note that we don't need to check whether mousemove event is consumed or
+  // not because Chrome also ignores the result.
+  APZCCallbackHelper::DispatchSynthesizedMouseEvent(
+      eMouseMove, 0 /* time */, aPoint * aScale, aModifiers, 0 /* clickCount */,
+      aWidget);
+
   // Converting the modifiers to DOM format for the DispatchMouseEvent call
   // is the most useless thing ever because nsDOMWindowUtils::SendMouseEvent
   // just converts them back to widget format, but that API has many callers,
@@ -326,6 +338,22 @@ void APZEventState::ProcessTouchEvent(const WidgetTouchEvent& aEvent,
       // for events that went through APZ (which should be all of them).
       MOZ_ASSERT(aEvent.mFlags.mHandledByAPZ);
 
+      // If the first touchstart event was preventDefaulted, ensure that any
+      // subsequent additional touchstart events also get preventDefaulted. This
+      // ensures that e.g. pinch zooming is prevented even if just the first
+      // touchstart was prevented by content.
+      if (mTouchCounter.GetActiveTouchCount() == 0) {
+        mFirstTouchCancelled = isTouchPrevented;
+      } else {
+        if (mFirstTouchCancelled && !isTouchPrevented) {
+          APZES_LOG(
+              "Propagating prevent-default from first-touch for block %" PRIu64
+              "\n",
+              aInputBlockId);
+        }
+        isTouchPrevented |= mFirstTouchCancelled;
+      }
+
       if (isTouchPrevented) {
         mContentReceivedInputBlockCallback(aGuid, aInputBlockId,
                                            isTouchPrevented);
@@ -360,6 +388,11 @@ void APZEventState::ProcessTouchEvent(const WidgetTouchEvent& aEvent,
     default:
       MOZ_ASSERT_UNREACHABLE("Unknown touch event type");
       break;
+  }
+
+  mTouchCounter.Update(aEvent);
+  if (mTouchCounter.GetActiveTouchCount() == 0) {
+    mFirstTouchCancelled = false;
   }
 
   if (sentContentResponse && !isTouchPrevented &&
@@ -408,7 +441,7 @@ void APZEventState::ProcessAPZStateChange(ViewID aViewId,
       }
 
       nsIContent* content = nsLayoutUtils::FindContentFor(aViewId);
-      nsIDocument* doc = content ? content->GetComposedDoc() : nullptr;
+      dom::Document* doc = content ? content->GetComposedDoc() : nullptr;
       nsCOMPtr<nsIDocShell> docshell(doc ? doc->GetDocShell() : nullptr);
       if (docshell && sf) {
         nsDocShell* nsdocshell = static_cast<nsDocShell*>(docshell.get());
@@ -427,7 +460,7 @@ void APZEventState::ProcessAPZStateChange(ViewID aViewId,
       }
 
       nsIContent* content = nsLayoutUtils::FindContentFor(aViewId);
-      nsIDocument* doc = content ? content->GetComposedDoc() : nullptr;
+      dom::Document* doc = content ? content->GetComposedDoc() : nullptr;
       nsCOMPtr<nsIDocShell> docshell(doc ? doc->GetDocShell() : nullptr);
       if (docshell && sf) {
         nsDocShell* nsdocshell = static_cast<nsDocShell*>(docshell.get());

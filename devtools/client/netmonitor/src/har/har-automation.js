@@ -45,7 +45,7 @@ HarAutomation.prototype = {
     this.toolbox = toolbox;
 
     const target = toolbox.target;
-    this.startMonitoring(target.client, target.form);
+    this.startMonitoring(target.client);
   },
 
   destroy: function() {
@@ -60,17 +60,12 @@ HarAutomation.prototype = {
 
   // Automation
 
-  startMonitoring: function(client, tabGrip, callback) {
+  startMonitoring: function(client, callback) {
     if (!client) {
       return;
     }
 
-    if (!tabGrip) {
-      return;
-    }
-
     this.debuggerClient = client;
-    this.targetFront = this.toolbox.target.activeTab;
     this.webConsoleClient = this.toolbox.target.activeConsole;
 
     this.tabWatcher = new TabWatcher(this.toolbox, this);
@@ -162,8 +157,7 @@ HarAutomation.prototype = {
    */
   executeExport: function(data) {
     const items = this.collector.getItems();
-    const form = this.toolbox.target.form;
-    const title = form.title || form.url;
+    const { title } = this.toolbox.target;
 
     const options = {
       requestData: null,

@@ -6,7 +6,7 @@
 
 #include <string.h>
 #ifdef __GNUC__
-#include <unistd.h>
+#  include <unistd.h>
 #endif
 
 #include "FFmpegLog.h"
@@ -192,6 +192,9 @@ FFmpegDataDecoder<LIBAV_VER>::ProcessDrain() {
   empty->mTimecode = mLastInputDts;
   bool gotFrame = false;
   DecodedData results;
+  // When draining the FFmpeg decoder will return either a single frame at a
+  // time until gotFrame is set to false; or return a block of frames with
+  // NS_ERROR_DOM_MEDIA_END_OF_STREAM
   while (NS_SUCCEEDED(DoDecode(empty, &gotFrame, results)) && gotFrame) {
   }
   return DecodePromise::CreateAndResolve(std::move(results), __func__);

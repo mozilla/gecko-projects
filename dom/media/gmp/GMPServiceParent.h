@@ -90,8 +90,6 @@ class GeckoMediaPluginServiceParent final
   void CrashPlugins();
   void NotifySyncShutdownComplete();
 
-  void ProcessPossiblePlugin(nsIFile* aDir);
-
   void RemoveOnGMPThread(const nsAString& aDirectory,
                          const bool aDeleteFromDisk, const bool aCanDefer);
 
@@ -114,10 +112,10 @@ class GeckoMediaPluginServiceParent final
   void ReAddOnGMPThread(const RefPtr<GMPParent>& aOld);
   void PluginTerminated(const RefPtr<GMPParent>& aOld);
   void InitializePlugins(AbstractThread* aAbstractGMPThread) override;
-  RefPtr<GenericPromise::AllPromiseType> LoadFromEnvironment();
+  RefPtr<GenericPromise> LoadFromEnvironment();
   RefPtr<GenericPromise> AddOnGMPThread(nsString aDirectory);
 
-  virtual RefPtr<GetGMPContentParentPromise> GetContentParent(
+  RefPtr<GetGMPContentParentPromise> GetContentParent(
       GMPCrashHelper* aHelper, const nsACString& aNodeIdString,
       const nsCString& aAPI, const nsTArray<nsCString>& aTags) override;
 

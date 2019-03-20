@@ -35,9 +35,9 @@ bool OpaqueCrossCompartmentWrapper::delete_(JSContext* cx, HandleObject wrapper,
   return result.succeed();
 }
 
-JSObject* OpaqueCrossCompartmentWrapper::enumerate(JSContext* cx,
-                                                   HandleObject wrapper) const {
-  return BaseProxyHandler::enumerate(cx, wrapper);
+bool OpaqueCrossCompartmentWrapper::enumerate(JSContext* cx, HandleObject proxy,
+                                              AutoIdVector& props) const {
+  return BaseProxyHandler::enumerate(cx, proxy, props);
 }
 
 bool OpaqueCrossCompartmentWrapper::getPrototype(
@@ -111,12 +111,6 @@ bool OpaqueCrossCompartmentWrapper::construct(JSContext* cx,
   return false;
 }
 
-bool OpaqueCrossCompartmentWrapper::getPropertyDescriptor(
-    JSContext* cx, HandleObject wrapper, HandleId id,
-    MutableHandle<PropertyDescriptor> desc) const {
-  return BaseProxyHandler::getPropertyDescriptor(cx, wrapper, id, desc);
-}
-
 bool OpaqueCrossCompartmentWrapper::hasOwn(JSContext* cx, HandleObject wrapper,
                                            HandleId id, bool* bp) const {
   return BaseProxyHandler::hasOwn(cx, wrapper, id, bp);
@@ -137,6 +131,14 @@ bool OpaqueCrossCompartmentWrapper::getBuiltinClass(JSContext* cx,
 bool OpaqueCrossCompartmentWrapper::isArray(JSContext* cx, HandleObject obj,
                                             JS::IsArrayAnswer* answer) const {
   *answer = JS::IsArrayAnswer::NotArray;
+  return true;
+}
+
+bool OpaqueCrossCompartmentWrapper::hasInstance(JSContext* cx,
+                                                HandleObject wrapper,
+                                                MutableHandleValue v,
+                                                bool* bp) const {
+  *bp = false;
   return true;
 }
 

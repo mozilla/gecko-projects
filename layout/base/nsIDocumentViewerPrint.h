@@ -3,13 +3,13 @@
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+
 #ifndef nsIDocumentViewerPrint_h___
 #define nsIDocumentViewerPrint_h___
 
 #include "nsISupports.h"
 #include "mozilla/UniquePtr.h"
 
-class nsIDocument;
 namespace mozilla {
 class ServoStyleSet;
 }  // namespace mozilla
@@ -43,7 +43,7 @@ class nsIDocumentViewerPrint : public nsISupports {
   // update batch so that the caller can add sheets to it if needed.
   // Callers should call EndUpdate() on it when ready to use.
   virtual mozilla::UniquePtr<mozilla::ServoStyleSet> CreateStyleSet(
-      nsIDocument* aDocument) = 0;
+      mozilla::dom::Document* aDocument) = 0;
 
   /**
    * This is used by nsPagePrintTimer to make nsDocumentViewer::Destroy()
@@ -83,7 +83,7 @@ NS_DEFINE_STATIC_IID_ACCESSOR(nsIDocumentViewerPrint,
   void SetIsPrintPreview(bool aIsPrintPreview) override;        \
   bool GetIsPrintPreview() override;                            \
   mozilla::UniquePtr<mozilla::ServoStyleSet> CreateStyleSet(    \
-      nsIDocument* aDocument) override;                         \
+      mozilla::dom::Document* aDocument) override;              \
   void IncrementDestroyBlockedCount() override;                 \
   void DecrementDestroyBlockedCount() override;                 \
   void OnDonePrinting() override;                               \

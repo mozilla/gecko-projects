@@ -21,6 +21,9 @@ class nsIURI;
 class ExpandedPrincipal;
 
 namespace mozilla {
+namespace dom {
+class Document;
+}
 namespace extensions {
 class WebExtensionPolicy;
 }
@@ -105,10 +108,10 @@ class BasePrincipal : public nsJSPrincipals {
   NS_IMETHOD GetAddonPolicy(nsISupports** aResult) final;
   NS_IMETHOD GetCsp(nsIContentSecurityPolicy** aCsp) override;
   NS_IMETHOD SetCsp(nsIContentSecurityPolicy* aCsp) override;
-  NS_IMETHOD EnsureCSP(nsIDocument* aDocument,
+  NS_IMETHOD EnsureCSP(dom::Document* aDocument,
                        nsIContentSecurityPolicy** aCSP) override;
   NS_IMETHOD GetPreloadCsp(nsIContentSecurityPolicy** aPreloadCSP) override;
-  NS_IMETHOD EnsurePreloadCSP(nsIDocument* aDocument,
+  NS_IMETHOD EnsurePreloadCSP(dom::Document* aDocument,
                               nsIContentSecurityPolicy** aCSP) override;
   NS_IMETHOD GetCspJSON(nsAString& outCSPinJSON) override;
   NS_IMETHOD GetIsNullPrincipal(bool* aResult) override;
@@ -132,6 +135,10 @@ class BasePrincipal : public nsJSPrincipals {
 
   static BasePrincipal* Cast(nsIPrincipal* aPrin) {
     return static_cast<BasePrincipal*>(aPrin);
+  }
+
+  static const BasePrincipal* Cast(const nsIPrincipal* aPrin) {
+    return static_cast<const BasePrincipal*>(aPrin);
   }
 
   static already_AddRefed<BasePrincipal> CreateCodebasePrincipal(
@@ -178,6 +185,9 @@ class BasePrincipal : public nsJSPrincipals {
   inline bool FastSubsumesConsideringDomain(nsIPrincipal* aOther);
   inline bool FastSubsumesIgnoringFPD(nsIPrincipal* aOther);
   inline bool FastSubsumesConsideringDomainIgnoringFPD(nsIPrincipal* aOther);
+
+  // Fast way to check whether we have a system principal.
+  inline bool IsSystemPrincipal() const;
 
   // Returns the principal to inherit when a caller with this principal loads
   // the given URI.
@@ -231,10 +241,12 @@ class BasePrincipal : public nsJSPrincipals {
 
   void SetHasExplicitDomain() { mHasExplicitDomain = true; }
 
-  // This function should be called as the last step of the initialization of
-  // the principal objects.  It's typically called as the last step from the
-  // Init() method of the child classes.
+  // Either of these functions should be called as the last step of the
+  // initialization of the principal objects.  It's typically called as the
+  // last step from the Init() method of the child classes.
   void FinishInit(const nsACString& aOriginNoSuffix,
+                  const OriginAttributes& aOriginAttributes);
+  void FinishInit(BasePrincipal* aOther,
                   const OriginAttributes& aOriginAttributes);
 
   nsCOMPtr<nsIContentSecurityPolicy> mCSP;
@@ -267,13 +279,11 @@ inline bool BasePrincipal::FastEquals(nsIPrincipal* aOther) {
   // Two principals are considered to be equal if their origins are the same.
   // If the two principals are codebase principals, their origin attributes
   // (aka the origin suffix) must also match.
-  // If the two principals are null principals, they're only equal if they're
-  // the same object.
-  if (Kind() == eNullPrincipal || Kind() == eSystemPrincipal) {
+  if (Kind() == eSystemPrincipal) {
     return this == other;
   }
 
-  if (Kind() == eCodebasePrincipal) {
+  if (Kind() == eCodebasePrincipal || Kind() == eNullPrincipal) {
     return mOriginNoSuffix == other->mOriginNoSuffix &&
            mOriginSuffix == other->mOriginSuffix;
   }
@@ -296,13 +306,6 @@ inline bool BasePrincipal::FastEqualsConsideringDomain(nsIPrincipal* aOther) {
 
 inline bool BasePrincipal::FastSubsumes(nsIPrincipal* aOther) {
   // If two principals are equal, then they both subsume each other.
-  // We deal with two special cases first:
-  // Null principals only subsume each other if they are equal, and are only
-  // equal if they're the same object.
-  auto other = Cast(aOther);
-  if (Kind() == eNullPrincipal && other->Kind() == eNullPrincipal) {
-    return this == other;
-  }
   if (FastEquals(aOther)) {
     return true;
   }
@@ -342,6 +345,14 @@ inline bool BasePrincipal::FastSubsumesConsideringDomainIgnoringFPD(
   return FastSubsumesIgnoringFPD(aOther, ConsiderDocumentDomain);
 }
 
+inline bool BasePrincipal::IsSystemPrincipal() const {
+  return Kind() == eSystemPrincipal;
+}
+
 }  // namespace mozilla
+
+inline bool nsIPrincipal::IsSystemPrincipal() const {
+  return mozilla::BasePrincipal::Cast(this)->IsSystemPrincipal();
+}
 
 #endif /* mozilla_BasePrincipal_h */

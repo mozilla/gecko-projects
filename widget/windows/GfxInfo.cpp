@@ -283,12 +283,12 @@ static int32_t WindowsOSVersion() {
   if (winVersion == UNINITIALIZED_VALUE) {
     vinfo.dwOSVersionInfoSize = sizeof(vinfo);
 #ifdef _MSC_VER
-#pragma warning(push)
-#pragma warning(disable : 4996)
+#  pragma warning(push)
+#  pragma warning(disable : 4996)
 #endif
     if (!GetVersionEx(&vinfo)) {
 #ifdef _MSC_VER
-#pragma warning(pop)
+#  pragma warning(pop)
 #endif
       winVersion = kWindowsUnknown;
     } else {
@@ -1332,6 +1332,13 @@ const nsTArray<GfxDriverInfo>& GfxInfo::GetGfxDriverInfo() {
         DRIVER_LESS_THAN, GfxDriverInfo::allDriverVersions,
         "FEATURE_FAILURE_BUG_1207665_2");
 
+    APPEND_TO_DRIVER_BLOCKLIST2(
+        OperatingSystem::Windows10,
+        (nsAString&)GfxDriverInfo::GetDeviceVendor(VendorQualcomm),
+        GfxDriverInfo::allDevices, nsIGfxInfo::FEATURE_DIRECT2D,
+        nsIGfxInfo::FEATURE_BLOCKED_DRIVER_VERSION, DRIVER_LESS_THAN,
+        GfxDriverInfo::allDriverVersions, "FEATURE_FAILURE_QUALCOMM");
+
     /* Disable D2D on AMD Catalyst 14.4 until 14.6
      * See bug 984488
      */
@@ -1817,6 +1824,10 @@ NS_IMETHODIMP GfxInfo::SpoofDriverVersion(const nsAString& aDriverVersion) {
 
 NS_IMETHODIMP GfxInfo::SpoofOSVersion(uint32_t aVersion) {
   mWindowsVersion = aVersion;
+  return NS_OK;
+}
+
+NS_IMETHODIMP GfxInfo::FireTestProcess() {
   return NS_OK;
 }
 

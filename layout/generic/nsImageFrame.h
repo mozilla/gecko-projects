@@ -94,8 +94,7 @@ class nsImageFrame : public nsAtomicContainerFrame, public nsIReflowCallback {
   virtual nsresult HandleEvent(nsPresContext* aPresContext,
                                mozilla::WidgetGUIEvent* aEvent,
                                nsEventStatus* aEventStatus) override;
-  virtual nsresult GetCursor(const nsPoint& aPoint,
-                             nsIFrame::Cursor& aCursor) override;
+  mozilla::Maybe<Cursor> GetCursor(const nsPoint&) override;
   virtual nsresult AttributeChanged(int32_t aNameSpaceID, nsAtom* aAttribute,
                                     int32_t aModType) override;
 
@@ -150,6 +149,13 @@ class nsImageFrame : public nsAtomicContainerFrame, public nsIReflowCallback {
                                    const nsRect& aDirtyRect, nsPoint aPt,
                                    uint32_t aFlags);
 
+  ImgDrawResult DisplayAltFeedbackWithoutLayer(
+      nsDisplayItem* aItem, mozilla::wr::DisplayListBuilder& aBuilder,
+      mozilla::wr::IpcResourceUpdateQueue& aResources,
+      const mozilla::layers::StackingContextHelper& aSc,
+      mozilla::layers::RenderRootStateManager* aManager,
+      nsDisplayListBuilder* aDisplayListBuilder, nsPoint aPt, uint32_t aFlags);
+
   nsRect GetInnerArea() const;
 
   /**
@@ -195,14 +201,14 @@ class nsImageFrame : public nsAtomicContainerFrame, public nsIReflowCallback {
   friend nsIFrame* NS_NewImageFrameForGeneratedContentIndex(nsIPresShell*,
                                                             ComputedStyle*);
 
-  nsImageFrame(ComputedStyle* aStyle, Kind aKind)
-      : nsImageFrame(aStyle, kClassID, aKind) {}
+  nsImageFrame(ComputedStyle* aStyle, nsPresContext* aPresContext, Kind aKind)
+      : nsImageFrame(aStyle, aPresContext, kClassID, aKind) {}
 
-  nsImageFrame(ComputedStyle*, ClassID, Kind);
+  nsImageFrame(ComputedStyle*, nsPresContext* aPresContext, ClassID, Kind);
 
  protected:
-  nsImageFrame(ComputedStyle* aStyle, ClassID aID)
-      : nsImageFrame(aStyle, aID, Kind::ImageElement) {}
+  nsImageFrame(ComputedStyle* aStyle, nsPresContext* aPresContext, ClassID aID)
+      : nsImageFrame(aStyle, aPresContext, aID, Kind::ImageElement) {}
 
   virtual ~nsImageFrame();
 
@@ -483,7 +489,7 @@ class nsDisplayImage final : public nsDisplayImageContainer {
       mozilla::wr::DisplayListBuilder& aBuilder,
       mozilla::wr::IpcResourceUpdateQueue& aResources,
       const StackingContextHelper& aSc,
-      mozilla::layers::WebRenderLayerManager* aManager,
+      mozilla::layers::RenderRootStateManager* aManager,
       nsDisplayListBuilder* aDisplayListBuilder) override;
 
   NS_DISPLAY_DECL_NAME("Image", TYPE_IMAGE)

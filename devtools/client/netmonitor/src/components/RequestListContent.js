@@ -53,6 +53,7 @@ class RequestListContent extends Component {
       networkDetailsWidth: PropTypes.number,
       networkDetailsHeight: PropTypes.number,
       cloneSelectedRequest: PropTypes.func.isRequired,
+      sendCustomRequest: PropTypes.func.isRequired,
       displayedRequests: PropTypes.array.isRequired,
       firstRequestStartedMillis: PropTypes.number.isRequired,
       fromCache: PropTypes.bool,
@@ -86,24 +87,22 @@ class RequestListContent extends Component {
 
   componentDidMount() {
     // Install event handler for displaying a tooltip
-    this.tooltip.startTogglingOnHover(this.refs.contentEl, this.onHover, {
+    this.tooltip.startTogglingOnHover(this.refs.scrollEl, this.onHover, {
       toggleDelay: REQUESTS_TOOLTIP_TOGGLE_DELAY,
       interactive: true,
     });
     // Install event handler to hide the tooltip on scroll
-    this.refs.contentEl.addEventListener("scroll", this.onScroll, true);
+    this.refs.scrollEl.addEventListener("scroll", this.onScroll, true);
     this.onResize();
   }
 
   componentWillUpdate(nextProps) {
     // Check if the list is scrolled to bottom before the UI update.
-    // The scroll is ever needed only if new rows are added to the list.
-    const delta = nextProps.displayedRequests.size - this.props.displayedRequests.size;
-    this.shouldScrollBottom = delta > 0 && this.isScrolledToBottom();
+    this.shouldScrollBottom = this.isScrolledToBottom();
   }
 
   componentDidUpdate(prevProps) {
-    const node = this.refs.contentEl;
+    const node = this.refs.scrollEl;
     // Keep the list scrolled to bottom if a new row was added
     if (this.shouldScrollBottom && node.scrollTop !== MAX_SCROLL_HEIGHT) {
       // Using maximum scroll height rather than node.scrollHeight to avoid sync reflow.
@@ -118,31 +117,34 @@ class RequestListContent extends Component {
   }
 
   componentWillUnmount() {
-    this.refs.contentEl.removeEventListener("scroll", this.onScroll, true);
+    this.refs.scrollEl.removeEventListener("scroll", this.onScroll, true);
 
     // Uninstall the tooltip event handler
     this.tooltip.stopTogglingOnHover();
     window.removeEventListener("resize", this.onResize);
   }
 
+  /*
+   * Removing onResize() method causes perf regression - too many repaints of the panel.
+   * So it is needed in ComponentDidMount and ComponentDidUpdate. See Bug 1532914.
+   */
   onResize() {
-    const parent = this.refs.contentEl.parentNode;
-    this.refs.contentEl.style.width = parent.offsetWidth + "px";
-    this.refs.contentEl.style.height = parent.offsetHeight + "px";
+    const parent = this.refs.scrollEl.parentNode;
+    this.refs.scrollEl.style.width = parent.offsetWidth + "px";
+    this.refs.scrollEl.style.height = parent.offsetHeight + "px";
   }
 
   isScrolledToBottom() {
-    const { contentEl } = this.refs;
-    const lastChildEl = contentEl.lastElementChild;
+    const { scrollEl, rowGroupEl } = this.refs;
+    const lastChildEl = rowGroupEl.lastElementChild;
 
     if (!lastChildEl) {
       return false;
     }
 
-    const lastChildRect = lastChildEl.getBoundingClientRect();
-    const contentRect = contentEl.getBoundingClientRect();
-
-    return (lastChildRect.height + lastChildRect.top) <= contentRect.bottom;
+    const lastNodeHeight = lastChildEl.clientHeight;
+    return scrollEl.scrollTop + scrollEl.clientHeight >=
+      scrollEl.scrollHeight - lastNodeHeight / 2;
   }
 
   /**
@@ -240,10 +242,16 @@ class RequestListContent extends Component {
     const { selectedRequest, displayedRequests } = this.props;
 
     if (!this.contextMenu) {
-      const { connector, cloneSelectedRequest, openStatistics } = this.props;
+      const {
+        connector,
+        cloneSelectedRequest,
+        sendCustomRequest,
+        openStatistics,
+      } = this.props;
       this.contextMenu = new RequestListContextMenu({
         connector,
         cloneSelectedRequest,
+        sendCustomRequest,
         openStatistics,
       });
     }
@@ -275,16 +283,21 @@ class RequestListContent extends Component {
     } = this.props;
 
     return (
-      div({ className: "requests-list-wrapper" },
-        div({ className: "requests-list-table" },
-          div({
-            ref: "contentEl",
-            className: "requests-list-contents",
+      div({
+        ref: "scrollEl",
+        className: "requests-list-scroll",
+      },
+        dom.table({
+          className: "requests-list-table",
+        },
+          RequestListHeader(),
+          dom.tbody({
+            ref: "rowGroupEl",
+            className: "requests-list-row-group",
             tabIndex: 0,
             onKeyDown: this.onKeyDown,
             style: { "--timings-scale": scale, "--timings-rev-scale": 1 / scale },
           },
-            RequestListHeader(),
             displayedRequests.map((item, index) => RequestListItem({
               firstRequestStartedMillis,
               fromCache: item.status === "304" || item.fromCache,
@@ -302,7 +315,7 @@ class RequestListContent extends Component {
               onWaterfallMouseDown: () => onWaterfallMouseDown(),
               requestFilterTypes,
             }))
-          )
+          ) // end of requests-list-row-group">
         )
       )
     );
@@ -323,6 +336,7 @@ module.exports = connect(
   }),
   (dispatch, props) => ({
     cloneSelectedRequest: () => dispatch(Actions.cloneSelectedRequest()),
+    sendCustomRequest: () => dispatch(Actions.sendCustomRequest(props.connector)),
     openStatistics: (open) => dispatch(Actions.openStatistics(props.connector, open)),
     /**
      * A handler that opens the stack trace tab when a stack trace is available

@@ -30,6 +30,7 @@ const actionTypes = {
   TOGGLE_REQUEST_FILTER_TYPE: "TOGGLE_REQUEST_FILTER_TYPE",
   UPDATE_REQUEST: "UPDATE_REQUEST",
   WATERFALL_RESIZE: "WATERFALL_RESIZE",
+  SET_COLUMNS_WIDTH: "SET_COLUMNS_WIDTH",
 };
 
 // Descriptions for what this frontend is currently doing.
@@ -332,6 +333,64 @@ const TIMING_KEYS = [
   "receive",
 ];
 
+// Minimal width of Network Monitor column is 30px, for Waterfall 150px
+// Default width of columns (which are not defined in DEFAULT_COLUMNS_DATA) is 8%
+const MIN_COLUMN_WIDTH = 30; // in px
+const DEFAULT_COLUMN_WIDTH = 8; // in %
+/**
+ * A mapping of HTTP status codes.
+ */
+const SUPPORTED_HTTP_CODES = [
+  "100",
+  "101",
+  "200",
+  "201",
+  "202",
+  "203",
+  "204",
+  "205",
+  "206",
+  "300",
+  "301",
+  "302",
+  "303",
+  "304",
+  "307",
+  "308",
+  "400",
+  "401",
+  "403",
+  "404",
+  "405",
+  "406",
+  "407",
+  "408",
+  "409",
+  "410",
+  "411",
+  "412",
+  "413",
+  "414",
+  "415",
+  "416",
+  "417",
+  "418",
+  "422",
+  "425",
+  "426",
+  "428",
+  "429",
+  "431",
+  "451",
+  "500",
+  "501",
+  "502",
+  "503",
+  "504",
+  "505",
+  "511",
+];
+
 const general = {
   ACTIVITY_TYPE,
   EVENTS,
@@ -344,6 +403,9 @@ const general = {
   REQUESTS_WATERFALL,
   PANELS,
   TIMING_KEYS,
+  MIN_COLUMN_WIDTH,
+  DEFAULT_COLUMN_WIDTH,
+  SUPPORTED_HTTP_CODES,
 };
 
 // flatten constants

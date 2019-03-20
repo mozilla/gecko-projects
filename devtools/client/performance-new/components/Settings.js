@@ -3,13 +3,17 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 "use strict";
 const { PureComponent, createFactory } = require("devtools/client/shared/vendor/react");
-const { div, details, summary, label, input, span, h2, section } = require("devtools/client/shared/vendor/react-dom-factories");
+const { div, details, summary, label, input, span, h2, section, p } = require("devtools/client/shared/vendor/react-dom-factories");
 const Range = createFactory(require("devtools/client/performance-new/components/Range"));
-const { makeExponentialScale, formatFileSize, calculateOverhead, INFINITE_WINDOW_LENGTH } = require("devtools/client/performance-new/utils");
+const DirectoryPicker = createFactory(require("devtools/client/performance-new/components/DirectoryPicker"));
+const { makeExponentialScale, formatFileSize, calculateOverhead } = require("devtools/client/performance-new/utils");
 const { connect } = require("devtools/client/shared/vendor/react-redux");
 const PropTypes = require("devtools/client/shared/vendor/react-prop-types");
 const actions = require("devtools/client/performance-new/store/actions");
 const selectors = require("devtools/client/performance-new/store/selectors");
+const { XPCOMUtils } = require("resource://gre/modules/XPCOMUtils.jsm");
+XPCOMUtils.defineLazyServiceGetter(this, "FilePicker",
+                                   "@mozilla.org/filepicker;1", "nsIFilePicker");
 
 // sizeof(double) + sizeof(char)
 // http://searchfox.org/mozilla-central/rev/e8835f52eff29772a57dca7bcc86a9a312a23729/tools/profiler/core/ProfileEntry.h#73
@@ -148,6 +152,11 @@ const featureCheckboxes = [
     value: "screenshots",
     title: "Record screenshots of all browser windows.",
   },
+  {
+    name: "JSTracer",
+    value: "jstracer",
+    title: "Trace JS engine (Experimental, requires custom build.)",
+  },
 ];
 
 /**
@@ -159,18 +168,17 @@ class Settings extends PureComponent {
       // StateProps
       interval: PropTypes.number.isRequired,
       entries: PropTypes.number.isRequired,
-      duration: PropTypes.number.isRequired,
       features: PropTypes.array.isRequired,
       threads: PropTypes.array.isRequired,
       threadsString: PropTypes.string.isRequired,
-      actorVersion: PropTypes.string.isRequired,
+      objdirs: PropTypes.array.isRequired,
 
       // DispatchProps
       changeInterval: PropTypes.func.isRequired,
       changeEntries: PropTypes.func.isRequired,
-      changeDuration: PropTypes.func.isRequired,
       changeFeatures: PropTypes.func.isRequired,
       changeThreads: PropTypes.func.isRequired,
+      changeObjdirs: PropTypes.func.isRequired,
     };
   }
 
@@ -183,13 +191,14 @@ class Settings extends PureComponent {
 
     this._handleThreadCheckboxChange = this._handleThreadCheckboxChange.bind(this);
     this._handleFeaturesCheckboxChange = this._handleFeaturesCheckboxChange.bind(this);
+    this._handleAddObjdir = this._handleAddObjdir.bind(this);
+    this._handleRemoveObjdir = this._handleRemoveObjdir.bind(this);
     this._setThreadTextFromInput = this._setThreadTextFromInput.bind(this);
     this._handleThreadTextCleanup = this._handleThreadTextCleanup.bind(this);
     this._renderThreadsColumns = this._renderThreadsColumns.bind(this);
 
     this._intervalExponentialScale = makeExponentialScale(0.01, 100);
     this._entriesExponentialScale = makeExponentialScale(100000, 100000000);
-    this._durationExponentialScale = makeExponentialScale(1, INFINITE_WINDOW_LENGTH);
   }
 
   _renderNotches() {
@@ -243,6 +252,27 @@ class Settings extends PureComponent {
     } else {
       changeFeatures(features.filter(feature => feature !== value));
     }
+  }
+
+  _handleAddObjdir() {
+    const { objdirs, changeObjdirs } = this.props;
+    FilePicker.init(window, "Pick build directory", FilePicker.modeGetFolder);
+    FilePicker.open(rv => {
+      if (rv == FilePicker.returnOK) {
+        const path = FilePicker.file.path;
+        if (path && !objdirs.includes(path)) {
+          const newObjdirs = [...objdirs, path];
+          changeObjdirs(newObjdirs);
+        }
+      }
+    });
+  }
+
+  _handleRemoveObjdir(index) {
+    const { objdirs, changeObjdirs } = this.props;
+    const newObjdirs = [...objdirs];
+    newObjdirs.splice(index, 1);
+    changeObjdirs(newObjdirs);
   }
 
   _setThreadTextFromInput(event) {
@@ -370,6 +400,35 @@ class Settings extends PureComponent {
     );
   }
 
+  _renderLocalBuildSection() {
+    const { objdirs } = this.props;
+    return details(
+      { className: "perf-settings-details" },
+      summary(
+        {
+          className: "perf-settings-summary",
+          id: "perf-settings-local-build-summary",
+        },
+        "Local build:"
+      ),
+      div(
+        { className: "perf-settings-details-contents" },
+        div(
+          { className: "perf-settings-details-contents-slider" },
+          p(null,
+            `If you're profiling a build that you have compiled yourself, on this
+            machine, please add your build's objdir to the list below so that
+            it can be used to look up symbol information.`),
+          DirectoryPicker({
+            dirs: objdirs,
+            onAdd: this._handleAddObjdir,
+            onRemove: this._handleRemoveObjdir,
+          }),
+        )
+      )
+    );
+  }
+
   render() {
     return section(
       { className: "perf-settings" },
@@ -390,20 +449,8 @@ class Settings extends PureComponent {
         display: _intervalTextDisplay,
         onChange: this.props.changeInterval,
       }),
-      // Firefox 65 introduced a duration-based buffer with actorVersion 1.
-      // We are hiding the duration range if the actor is older. Fx65+
-      this.props.actorVersion > 0
-        ? Range({
-          label: "Window length:",
-          value: this.props.duration,
-          id: "perf-range-duration",
-          scale: this._durationExponentialScale,
-          display: _durationTextDisplay,
-          onChange: this.props.changeDuration,
-        })
-        : null,
       Range({
-        label: "Max buffer size:",
+        label: "Buffer size:",
         value: this.props.entries,
         id: "perf-range-entries",
         scale: this._entriesExponentialScale,
@@ -411,7 +458,8 @@ class Settings extends PureComponent {
         onChange: this.props.changeEntries,
       }),
       this._renderThreads(),
-      this._renderFeatures()
+      this._renderFeatures(),
+      this._renderLocalBuildSection()
     );
   }
 }
@@ -449,33 +497,23 @@ function _entriesTextDisplay(value) {
   return formatFileSize(value * PROFILE_ENTRY_SIZE);
 }
 
-/**
- * Format the duration number for display.
- * @param {number} value
- * @return {string}
- */
-function _durationTextDisplay(value) {
-  return value === INFINITE_WINDOW_LENGTH ? `∞` : `${value} sec`;
-}
-
 function mapStateToProps(state) {
   return {
     interval: selectors.getInterval(state),
     entries: selectors.getEntries(state),
-    duration: selectors.getDuration(state),
     features: selectors.getFeatures(state),
     threads: selectors.getThreads(state),
     threadsString: selectors.getThreadsString(state),
-    actorVersion: selectors.getActorVersion(state),
+    objdirs: selectors.getObjdirs(state),
   };
 }
 
 const mapDispatchToProps = {
   changeInterval: actions.changeInterval,
   changeEntries: actions.changeEntries,
-  changeDuration: actions.changeDuration,
   changeFeatures: actions.changeFeatures,
   changeThreads: actions.changeThreads,
+  changeObjdirs: actions.changeObjdirs,
 };
 
 module.exports = connect(mapStateToProps, mapDispatchToProps)(Settings);

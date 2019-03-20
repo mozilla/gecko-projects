@@ -142,9 +142,8 @@ class PersistentStoragePermissionRequest final
  public:
   PersistentStoragePermissionRequest(nsIPrincipal* aPrincipal,
                                      nsPIDOMWindowInner* aWindow,
-                                     bool aIsHandlingUserInput,
                                      Promise* aPromise)
-      : ContentPermissionRequestBase(aPrincipal, aIsHandlingUserInput, aWindow,
+      : ContentPermissionRequestBase(aPrincipal, aWindow,
                                      NS_LITERAL_CSTRING("dom.storageManager"),
                                      NS_LITERAL_CSTRING("persistent-storage")),
         mPromise(aPromise) {
@@ -232,7 +231,7 @@ already_AddRefed<Promise> ExecuteOpOnMainOrWorkerThread(
       return nullptr;
     }
 
-    nsCOMPtr<nsIDocument> doc = window->GetExtantDoc();
+    nsCOMPtr<Document> doc = window->GetExtantDoc();
     if (NS_WARN_IF(!doc)) {
       aRv.Throw(NS_ERROR_FAILURE);
       return nullptr;
@@ -261,9 +260,7 @@ already_AddRefed<Promise> ExecuteOpOnMainOrWorkerThread(
 
       case RequestResolver::Type::Persist: {
         RefPtr<PersistentStoragePermissionRequest> request =
-            new PersistentStoragePermissionRequest(
-                principal, window, EventStateManager::IsHandlingUserInput(),
-                promise);
+            new PersistentStoragePermissionRequest(principal, window, promise);
 
         // In private browsing mode, no permission prompt.
         if (nsContentUtils::IsInPrivateBrowsing(doc)) {

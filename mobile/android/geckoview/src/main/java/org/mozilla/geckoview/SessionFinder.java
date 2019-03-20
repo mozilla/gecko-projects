@@ -11,6 +11,7 @@ import org.mozilla.geckoview.GeckoSession.FinderFindFlags;
 import org.mozilla.geckoview.GeckoSession.FinderDisplayFlags;
 import org.mozilla.geckoview.GeckoSession.FinderResult;
 
+import android.support.annotation.AnyThread;
 import android.support.annotation.NonNull;
 import android.support.annotation.Nullable;
 import android.util.Pair;
@@ -22,6 +23,7 @@ import java.util.List;
  * {@code SessionFinder} instances returned by {@link GeckoSession#getFinder()} performs
  * find-in-page operations.
  */
+@AnyThread
 public final class SessionFinder {
     private static final String LOGTAG = "GeckoSessionFinder";
 
@@ -86,7 +88,7 @@ public final class SessionFinder {
         final GeckoSession.CallbackResult<FinderResult> result =
                 new GeckoSession.CallbackResult<FinderResult>() {
             @Override
-            public void sendSuccess(Object response) {
+            public void sendSuccess(final Object response) {
                 complete(new FinderResult((GeckoBundle) response));
             }
         };

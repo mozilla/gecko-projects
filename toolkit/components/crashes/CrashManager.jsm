@@ -6,12 +6,12 @@
 
 const myScope = this;
 
-ChromeUtils.import("resource://gre/modules/KeyValueParser.jsm");
+const {parseKeyValuePairsFromLines} = ChromeUtils.import("resource://gre/modules/KeyValueParser.jsm");
 ChromeUtils.import("resource://gre/modules/Log.jsm", this);
 ChromeUtils.import("resource://gre/modules/osfile.jsm", this);
-ChromeUtils.import("resource://gre/modules/PromiseUtils.jsm");
+const {PromiseUtils} = ChromeUtils.import("resource://gre/modules/PromiseUtils.jsm");
 ChromeUtils.import("resource://gre/modules/Services.jsm", this);
-ChromeUtils.import("resource://gre/modules/TelemetryController.jsm");
+const {TelemetryController} = ChromeUtils.import("resource://gre/modules/TelemetryController.jsm");
 ChromeUtils.import("resource://gre/modules/Timer.jsm", this);
 ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm", this);
 
@@ -177,8 +177,14 @@ this.CrashManager.prototype = Object.freeze({
   // A crash in the GPU process.
   PROCESS_TYPE_GPU: "gpu",
 
+  // A crash in the VR process.
+  PROCESS_TYPE_VR: "vr",
+
   // A crash in the RDD process.
   PROCESS_TYPE_RDD: "rdd",
+
+  // A crash in the socket process.
+  PROCESS_TYPE_SOCKET: "socket",
 
   // A real crash.
   CRASH_TYPE_CRASH: "crash",
@@ -382,7 +388,6 @@ this.CrashManager.prototype = Object.freeze({
         }
 
         return unprocessedFiles.length;
-
       } finally {
         this._aggregatePromise = false;
         this._storeProtectedCount--;
@@ -464,7 +469,9 @@ this.CrashManager.prototype = Object.freeze({
       // Send a telemetry ping for each non-main process crash
       if (processType === this.PROCESS_TYPE_CONTENT ||
           processType === this.PROCESS_TYPE_GPU ||
-          processType === this.PROCESS_TYPE_RDD) {
+          processType === this.PROCESS_TYPE_VR ||
+          processType === this.PROCESS_TYPE_RDD ||
+          processType === this.PROCESS_TYPE_SOCKET) {
         this._sendCrashPing(id, processType, date, metadata);
       }
     })();
@@ -987,7 +994,6 @@ CrashStore.prototype = Object.freeze({
             let oomKey = key + "-oom";
             actualCounts.set(oomKey, (actualCounts.get(oomKey) || 0) + 1);
           }
-
         }
 
         // The validation in this loop is arguably not necessary. We perform

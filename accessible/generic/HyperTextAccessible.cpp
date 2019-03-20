@@ -519,7 +519,7 @@ uint32_t HyperTextAccessible::FindOffset(uint32_t aOffset,
   nsPeekOffsetStruct pos(
       aAmount, aDirection, innerContentOffset, nsPoint(0, 0), kIsJumpLinesOk,
       kIsScrollViewAStop, kIsKeyboardSelect, kIsVisualBidi, false,
-      nsPeekOffsetStruct::ForceEditableRegion::No, aWordMovementType);
+      nsPeekOffsetStruct::ForceEditableRegion::No, aWordMovementType, false);
   nsresult rv = frameAtOffset->PeekOffset(&pos);
 
   // PeekOffset fails on last/first lines of the text in certain cases.
@@ -1238,7 +1238,7 @@ already_AddRefed<TextEditor> HyperTextAccessible::GetEditor() const {
   docShell->GetEditingSession(getter_AddRefs(editingSession));
   if (!editingSession) return nullptr;  // No editing session interface
 
-  nsIDocument* docNode = mDoc->DocumentNode();
+  dom::Document* docNode = mDoc->DocumentNode();
   RefPtr<HTMLEditor> htmlEditor =
       editingSession->GetHTMLEditorForWindow(docNode->GetWindow());
   return htmlEditor.forget();
@@ -1288,7 +1288,7 @@ nsresult HyperTextAccessible::SetSelectionRange(int32_t aStartPos,
   nsFocusManager* DOMFocusManager = nsFocusManager::GetFocusManager();
   if (DOMFocusManager) {
     NS_ENSURE_TRUE(mDoc, NS_ERROR_FAILURE);
-    nsIDocument* docNode = mDoc->DocumentNode();
+    dom::Document* docNode = mDoc->DocumentNode();
     NS_ENSURE_TRUE(docNode, NS_ERROR_FAILURE);
     nsCOMPtr<nsPIDOMWindowOuter> window = docNode->GetWindow();
     RefPtr<dom::Element> result;

@@ -9,6 +9,34 @@ import os
 from mozlog.commandline import add_logging_group
 
 
+APPS = {
+    "firefox": {
+        "long_name": "Firefox Desktop"},
+    "chrome": {
+        "long_name": "Google Chrome Desktop"},
+    "fennec": {
+        "long_name": "Firefox Fennec on Android"},
+    "geckoview": {
+        "long_name": "Firefox Geckoview on Android",
+        "default_activity": "GeckoViewActivity"},
+    "refbrow": {
+        "long_name": "Firefox Android Components Reference Browser",
+        "default_activity": "BrowserTestActivity"},
+    "fenix": {
+        "long_name": "Firefox Android Fenix Browser",
+        "default_activity": "HomeActivity"}
+}
+
+
+def print_all_activities():
+    all_activities = []
+    for next_app in APPS:
+        if APPS[next_app].get('default_activity', None) is not None:
+            _activity = "%s:%s" % (next_app, APPS[next_app]['default_activity'])
+            all_activities.append(_activity)
+    return all_activities
+
+
 def create_parser(mach_interface=False):
     parser = argparse.ArgumentParser()
     add_arg = parser.add_argument
@@ -17,12 +45,20 @@ def create_parser(mach_interface=False):
             help="name of raptor test to run")
     add_arg('--app', default='firefox', dest='app',
             help="name of the application we are testing (default: firefox)",
-            choices=['firefox', 'chrome', 'geckoview'])
+            choices=APPS.keys())
     add_arg('-b', '--binary', dest='binary',
             help="path to the browser executable that we are testing")
+    add_arg('-a', '--activity', dest='activity', default=None,
+            help="Name of android activity used to launch the android app."
+            "i.e.: %s" % print_all_activities())
     add_arg('--host', dest='host',
-            help="Hostname from which to serve urls, defaults to 127.0.0.1.",
+            help="Hostname from which to serve urls, defaults to 127.0.0.1. "
+            "The value HOST_IP will cause the value of host to be "
+            "loaded from the environment variable HOST_IP.",
             default='127.0.0.1')
+    add_arg('--power-test', dest="power_test", action="store_true",
+            help="Use Raptor to measure power usage. Currently supported for Geckoview. "
+            "The host ip address must be specified via the --host command line argument.")
     add_arg('--is-release-build', dest="is_release_build", default=False,
             action='store_true',
             help="Whether the build is a release build which requires work arounds "
@@ -36,9 +72,9 @@ def create_parser(mach_interface=False):
             help=argparse.SUPPRESS)
     add_arg('--gecko-profile', action="store_true", dest="gecko_profile",
             help="Profile the run and output the results in $MOZ_UPLOAD_DIR. "
-            "After talos is finished, perf-html.io will be launched in Firefox so you "
-            "can analyze the local profiles. To disable auto-launching of perf-html.io "
-            "set the DISABLE_PROFILE_LAUNCH=1 env var.")
+            "After talos is finished, profiler.firefox.com will be launched in Firefox "
+            "so you can analyze the local profiles. To disable auto-launching of "
+            "profiler.firefox.com set the DISABLE_PROFILE_LAUNCH=1 env var.")
     add_arg('--gecko-profile-interval', dest='gecko_profile_interval', type=float,
             help="How frequently to take samples (milliseconds)")
     add_arg('--gecko-profile-entries', dest="gecko_profile_entries", type=int,
@@ -70,7 +106,7 @@ def verify_options(parser, args):
         parser.error("--binary is required!")
 
     # if running on a desktop browser make sure the binary exists
-    if args.app != "geckoview":
+    if args.app in ["firefox", "chrome"]:
         if not os.path.isfile(args.binary):
             parser.error("{binary} does not exist!".format(**ctx))
 
@@ -78,10 +114,29 @@ def verify_options(parser, args):
     if args.gecko_profile is True and args.app != "firefox":
         parser.error("Gecko profiling is only supported when running raptor on Firefox!")
 
+    # if --power-test specified, must be on geckoview/android with --host specified.
+    if args.power_test:
+        if args.app not in ["fennec", "geckoview", "refbrow", "fenix"] \
+          or args.host in ('localhost', '127.0.0.1'):
+            parser.error("Power test is only supported when running raptor on Firefox Android "
+                         "browsers when host is specified!")
+
+    # if running on geckoview/refbrow/fenix, we need an activity name
+    if args.app in ["geckoview", "refbrow", "fenix"]:
+        if not args.activity:
+            # if we have a default activity specified in APPS above, use that
+            if APPS[args.app].get("default_activity", None) is not None:
+                args.activity = APPS[args.app]['default_activity']
+            else:
+                # otherwise fail out
+                parser.error("--activity command line argument is required!")
+
 
 def parse_args(argv=None):
     parser = create_parser()
     args = parser.parse_args(argv)
+    if args.host == 'HOST_IP':
+        args.host = os.environ['HOST_IP']
     verify_options(parser, args)
     return args
 
@@ -104,7 +159,7 @@ class _PrintTests(_StopAction):
         here = os.path.abspath(os.path.dirname(__file__))
         raptor_ini = os.path.join(here, 'raptor.ini')
 
-        for _app in ["firefox", "chrome", "geckoview", "chrome-android"]:
+        for _app in ["firefox", "chrome", "fennec", "geckoview", "refbrow", "fenix"]:
             test_manifest = TestManifest([raptor_ini], strict=False)
             info = {"app": _app}
             available_tests = test_manifest.active_tests(exists=False,
@@ -117,10 +172,10 @@ class _PrintTests(_StopAction):
 
             # print in readable format
             if _app == "firefox":
-                title = "\nRaptor Tests Available for %s" % self.get_long_name(_app)
+                title = "\nRaptor Tests Available for %s" % APPS[_app]['long_name']
             else:
                 title = "\nRaptor Tests Available for %s (--app=%s)" \
-                    % (self.get_long_name(_app), _app)
+                    % (APPS[_app]['long_name'], _app)
 
             print(title)
             print("=" * (len(title) - 1))
@@ -142,7 +197,11 @@ class _PrintTests(_StopAction):
                 if next_test.get("type", None) is not None:
                     test_list[suite]['type'] = next_test['type']
                     if next_test['type'] == "pageload":
-                        test_list[suite]['subtests'].append(next_test['name'])
+                        subtest = next_test['name']
+                        measure = next_test.get("measure")
+                        if measure is not None:
+                            subtest = "{0} ({1})".format(subtest, measure)
+                        test_list[suite]['subtests'].append(subtest)
 
             # print the list in a nice readable format
             for key in sorted(test_list.iterkeys()):
@@ -156,16 +215,6 @@ class _PrintTests(_StopAction):
         print("\nDone.")
         # exit Raptor
         parser.exit()
-
-    def get_long_name(self, app):
-        if app == "firefox":
-            return "Firefox Desktop"
-        elif app == "chrome":
-            return "Google Chrome Desktop"
-        elif app == "geckoview":
-            return "Firefox Geckoview on Android"
-        elif app == "chrome-android":
-            return "Google Chrome on Android"
 
     def filter_app(self, tests, values):
         for test in tests:

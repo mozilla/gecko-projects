@@ -172,7 +172,7 @@ static bool CollectJitStackScripts(JSContext* cx,
                 baselineFrame->getDebugModeOSRInfo()) {
           // If patching a previously patched yet unpopped frame, we can
           // use the BaselineDebugModeOSRInfo on the frame directly to
-          // patch. Indeed, we cannot use frame.returnAddressToFp(), as
+          // patch. Indeed, we cannot use frame.resumePCinCurrentFrame(), as
           // it points into the debug mode OSR handler and cannot be
           // used to look up a corresponding RetAddrEntry.
           //
@@ -190,7 +190,7 @@ static bool CollectJitStackScripts(JSContext* cx,
           }
         } else {
           // The frame must be settled on a pc with a RetAddrEntry.
-          uint8_t* retAddr = frame.returnAddressToFp();
+          uint8_t* retAddr = frame.resumePCinCurrentFrame();
           RetAddrEntry& retAddrEntry =
               script->baselineScript()->retAddrEntryFromReturnAddress(retAddr);
           if (!entries.append(DebugModeOSREntry(script, retAddrEntry))) {
@@ -1007,8 +1007,7 @@ JitCode* JitRuntime::generateBaselineDebugModeOSRHandler(
                                       /* returnFromCallVM = */ true);
   masm.bind(&end);
 
-  Linker linker(masm);
-  AutoFlushICache afc("BaselineDebugModeOSRHandler");
+  Linker linker(masm, "BaselineDebugModeOSRHandler");
   JitCode* code = linker.newCode(cx, CodeKind::Other);
   if (!code) {
     return nullptr;
@@ -1023,8 +1022,10 @@ JitCode* JitRuntime::generateBaselineDebugModeOSRHandler(
   return code;
 }
 
-/* static */ void DebugModeOSRVolatileJitFrameIter::forwardLiveIterators(
-    JSContext* cx, uint8_t* oldAddr, uint8_t* newAddr) {
+/* static */
+void DebugModeOSRVolatileJitFrameIter::forwardLiveIterators(JSContext* cx,
+                                                            uint8_t* oldAddr,
+                                                            uint8_t* newAddr) {
   DebugModeOSRVolatileJitFrameIter* iter;
   for (iter = cx->liveVolatileJitFrameIter_; iter; iter = iter->prev) {
     if (iter->isWasm()) {

@@ -4,51 +4,52 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #if defined(MOZ_WIDGET_GTK)
-#define GET_NATIVE_WINDOW_FROM_REAL_WIDGET(aWidget) \
-  ((EGLNativeWindowType)aWidget->GetNativeData(NS_NATIVE_EGL_WINDOW))
-#define GET_NATIVE_WINDOW_FROM_COMPOSITOR_WIDGET(aWidget)     \
-  ((EGLNativeWindowType)aWidget->RealWidget()->GetNativeData( \
-      NS_NATIVE_EGL_WINDOW))
+#  define GET_NATIVE_WINDOW_FROM_REAL_WIDGET(aWidget) \
+    ((EGLNativeWindowType)aWidget->GetNativeData(NS_NATIVE_EGL_WINDOW))
+#  define GET_NATIVE_WINDOW_FROM_COMPOSITOR_WIDGET(aWidget)     \
+    ((EGLNativeWindowType)aWidget->RealWidget()->GetNativeData( \
+        NS_NATIVE_EGL_WINDOW))
 #elif defined(MOZ_WIDGET_ANDROID)
-#define GET_NATIVE_WINDOW_FROM_REAL_WIDGET(aWidget) \
-  ((EGLNativeWindowType)aWidget->GetNativeData(NS_JAVA_SURFACE))
-#define GET_NATIVE_WINDOW_FROM_COMPOSITOR_WIDGET(aWidget) \
-  (aWidget->AsAndroid()->GetEGLNativeWindow())
+#  define GET_NATIVE_WINDOW_FROM_REAL_WIDGET(aWidget) \
+    ((EGLNativeWindowType)aWidget->GetNativeData(NS_JAVA_SURFACE))
+#  define GET_NATIVE_WINDOW_FROM_COMPOSITOR_WIDGET(aWidget) \
+    (aWidget->AsAndroid()->GetEGLNativeWindow())
 #elif defined(XP_WIN)
-#define GET_NATIVE_WINDOW_FROM_REAL_WIDGET(aWidget) \
-  ((EGLNativeWindowType)aWidget->GetNativeData(NS_NATIVE_WINDOW))
-#define GET_NATIVE_WINDOW_FROM_COMPOSITOR_WIDGET(aWidget) \
-  ((EGLNativeWindowType)aWidget->AsWindows()->GetHwnd())
+#  define GET_NATIVE_WINDOW_FROM_REAL_WIDGET(aWidget) \
+    ((EGLNativeWindowType)aWidget->GetNativeData(NS_NATIVE_WINDOW))
+#  define GET_NATIVE_WINDOW_FROM_COMPOSITOR_WIDGET(aWidget) \
+    ((EGLNativeWindowType)aWidget->AsWindows()->GetHwnd())
 #else
-#define GET_NATIVE_WINDOW_FROM_REAL_WIDGET(aWidget) \
-  ((EGLNativeWindowType)aWidget->GetNativeData(NS_NATIVE_WINDOW))
-#define GET_NATIVE_WINDOW_FROM_COMPOSITOR_WIDGET(aWidget) \
-  ((EGLNativeWindowType)aWidget->RealWidget()->GetNativeData(NS_NATIVE_WINDOW))
+#  define GET_NATIVE_WINDOW_FROM_REAL_WIDGET(aWidget) \
+    ((EGLNativeWindowType)aWidget->GetNativeData(NS_NATIVE_WINDOW))
+#  define GET_NATIVE_WINDOW_FROM_COMPOSITOR_WIDGET(aWidget)     \
+    ((EGLNativeWindowType)aWidget->RealWidget()->GetNativeData( \
+        NS_NATIVE_WINDOW))
 #endif
 
 #if defined(XP_UNIX)
-#ifdef MOZ_WIDGET_ANDROID
-#include <android/native_window.h>
-#include <android/native_window_jni.h>
-#include "mozilla/widget/AndroidCompositorWidget.h"
-#endif
+#  ifdef MOZ_WIDGET_ANDROID
+#    include <android/native_window.h>
+#    include <android/native_window_jni.h>
+#    include "mozilla/widget/AndroidCompositorWidget.h"
+#  endif
 
-#define GLES2_LIB "libGLESv2.so"
-#define GLES2_LIB2 "libGLESv2.so.2"
+#  define GLES2_LIB "libGLESv2.so"
+#  define GLES2_LIB2 "libGLESv2.so.2"
 
 #elif defined(XP_WIN)
-#include "mozilla/widget/WinCompositorWidget.h"
-#include "nsIFile.h"
+#  include "mozilla/widget/WinCompositorWidget.h"
+#  include "nsIFile.h"
 
-#define GLES2_LIB "libGLESv2.dll"
+#  define GLES2_LIB "libGLESv2.dll"
 
-#ifndef WIN32_LEAN_AND_MEAN
-#define WIN32_LEAN_AND_MEAN 1
-#endif
+#  ifndef WIN32_LEAN_AND_MEAN
+#    define WIN32_LEAN_AND_MEAN 1
+#  endif
 
-#include <windows.h>
+#  include <windows.h>
 #else
-#error "Platform not recognized"
+#  error "Platform not recognized"
 #endif
 
 #include "gfxASurface.h"
@@ -73,14 +74,14 @@
 #include "TextureImageEGL.h"
 
 #if defined(MOZ_WAYLAND)
-#include "nsAutoPtr.h"
-#include "nsDataHashtable.h"
+#  include "nsAutoPtr.h"
+#  include "nsDataHashtable.h"
 
-#include <gtk/gtk.h>
-#include <gdk/gdkx.h>
-#include <gdk/gdkwayland.h>
-#include <wayland-egl.h>
-#include <dlfcn.h>
+#  include <gtk/gtk.h>
+#  include <gdk/gdkx.h>
+#  include <gdk/gdkwayland.h>
+#  include <wayland-egl.h>
+#  include <dlfcn.h>
 #endif
 
 using namespace mozilla::gfx;
@@ -295,6 +296,28 @@ already_AddRefed<GLContext> GLContextEGLFactory::Create(
   return gl.forget();
 }
 
+#if defined(MOZ_WAYLAND) || defined(MOZ_WIDGET_ANDROID)
+/* static */
+EGLSurface GLContextEGL::CreateEGLSurfaceForCompositorWidget(
+    widget::CompositorWidget* aCompositorWidget, const EGLConfig aConfig) {
+  nsCString discardFailureId;
+  if (!GLLibraryEGL::EnsureInitialized(false, &discardFailureId)) {
+    gfxCriticalNote << "Failed to load EGL library 6!";
+    return EGL_NO_SURFACE;
+  }
+
+  MOZ_ASSERT(aCompositorWidget);
+  EGLNativeWindowType window =
+      GET_NATIVE_WINDOW_FROM_COMPOSITOR_WIDGET(aCompositorWidget);
+  if (!window) {
+    gfxCriticalNote << "window is null";
+    return EGL_NO_SURFACE;
+  }
+
+  return mozilla::gl::CreateSurfaceFromNativeWindow(window, aConfig);
+}
+#endif
+
 GLContextEGL::GLContextEGL(CreateContextFlags flags, const SurfaceCaps& caps,
                            bool isOffscreen, EGLConfig config,
                            EGLSurface surface, EGLContext context)
@@ -308,6 +331,12 @@ GLContextEGL::GLContextEGL(CreateContextFlags flags, const SurfaceCaps& caps,
   printf_stderr("Initializing context %p surface %p on display %p\n", mContext,
                 mSurface, EGL_DISPLAY());
 #endif
+}
+
+void GLContextEGL::OnMarkDestroyed() {
+  if (mSurfaceOverride != EGL_NO_SURFACE) {
+    SetEGLSurfaceOverride(EGL_NO_SURFACE);
+  }
 }
 
 GLContextEGL::~GLContextEGL() {
@@ -330,22 +359,7 @@ GLContextEGL::~GLContextEGL() {
 }
 
 bool GLContextEGL::Init() {
-#if defined(ANDROID)
-  // We can't use LoadApitraceLibrary here because the GLContext
-  // expects its own handle to the GL library
-  if (!OpenLibrary(APITRACE_LIB))
-#endif
-    if (!OpenLibrary(GLES2_LIB)) {
-#if defined(XP_UNIX)
-      if (!OpenLibrary(GLES2_LIB2)) {
-        NS_WARNING("Couldn't load GLES2 LIB.");
-        return false;
-      }
-#endif
-    }
-
-  SetupLookupFunction();
-  if (!InitWithPrefix("gl", true)) return false;
+  if (!GLContext::Init()) return false;
 
   bool current = MakeCurrent();
   if (!current) {
@@ -353,10 +367,6 @@ bool GLContextEGL::Init() {
         NS_LITERAL_CSTRING("Couldn't get device attachments for device."));
     return false;
   }
-
-  static_assert(sizeof(GLint) >= sizeof(int32_t),
-                "GLint is smaller than int32_t");
-  mMaxTextureImageSize = INT32_MAX;
 
   mShareWithEGLImage = mEgl->HasKHRImageBase() &&
                        mEgl->HasKHRImageTexture2D() &&
@@ -469,9 +479,8 @@ void GLContextEGL::ReleaseSurface() {
   mSurface = EGL_NO_SURFACE;
 }
 
-bool GLContextEGL::SetupLookupFunction() {
-  mLookupFunc = mEgl->GetLookupFunction();
-  return true;
+Maybe<SymbolLoader> GLContextEGL::GetSymbolLoader() const {
+  return mEgl->GetSymbolLoader();
 }
 
 bool GLContextEGL::SwapBuffers() {
@@ -859,11 +868,13 @@ already_AddRefed<GLContext> GLContextProviderEGL::CreateWrappingExisting(
 }
 
 already_AddRefed<GLContext> GLContextProviderEGL::CreateForCompositorWidget(
-    CompositorWidget* aCompositorWidget, bool aForceAccelerated) {
-  MOZ_ASSERT(aCompositorWidget);
-  return GLContextEGLFactory::Create(
-      GET_NATIVE_WINDOW_FROM_COMPOSITOR_WIDGET(aCompositorWidget),
-      aCompositorWidget->GetCompositorOptions().UseWebRender());
+    CompositorWidget* aCompositorWidget, bool aWebRender,
+    bool aForceAccelerated) {
+  EGLNativeWindowType window = nullptr;
+  if (aCompositorWidget) {
+    window = GET_NATIVE_WINDOW_FROM_COMPOSITOR_WIDGET(aCompositorWidget);
+  }
+  return GLContextEGLFactory::Create(window, aWebRender);
 }
 
 already_AddRefed<GLContext> GLContextProviderEGL::CreateForWindow(
@@ -882,8 +893,9 @@ EGLSurface GLContextEGL::CreateCompatibleSurface(void* aWindow) {
   return GLContextProviderEGL::CreateEGLSurface(aWindow, mConfig);
 }
 
-/* static */ EGLSurface GLContextProviderEGL::CreateEGLSurface(
-    void* aWindow, EGLConfig aConfig) {
+/* static */
+EGLSurface GLContextProviderEGL::CreateEGLSurface(void* aWindow,
+                                                  EGLConfig aConfig) {
   // NOTE: aWindow is an ANativeWindow
   nsCString discardFailureId;
   if (!GLLibraryEGL::EnsureInitialized(false, &discardFailureId)) {
@@ -906,7 +918,8 @@ EGLSurface GLContextEGL::CreateCompatibleSurface(void* aWindow) {
   return surface;
 }
 
-/* static */ void GLContextProviderEGL::DestroyEGLSurface(EGLSurface surface) {
+/* static */
+void GLContextProviderEGL::DestroyEGLSurface(EGLSurface surface) {
   nsCString discardFailureId;
   if (!GLLibraryEGL::EnsureInitialized(false, &discardFailureId)) {
     MOZ_CRASH("GFX: Failed to load EGL library 5!");
@@ -1023,8 +1036,8 @@ static EGLConfig ChooseConfig(GLLibraryEGL* egl, CreateContextFlags flags,
   return config;
 }
 
-/*static*/ already_AddRefed<GLContextEGL>
-GLContextEGL::CreateEGLPBufferOffscreenContext(
+/*static*/
+already_AddRefed<GLContextEGL> GLContextEGL::CreateEGLPBufferOffscreenContext(
     CreateContextFlags flags, const mozilla::gfx::IntSize& size,
     const SurfaceCaps& minCaps, nsACString* const out_failureId) {
   bool forceEnableHardware =
@@ -1077,7 +1090,8 @@ GLContextEGL::CreateEGLPBufferOffscreenContext(
   return gl.forget();
 }
 
-/*static*/ already_AddRefed<GLContext> GLContextProviderEGL::CreateHeadless(
+/*static*/
+already_AddRefed<GLContext> GLContextProviderEGL::CreateHeadless(
     CreateContextFlags flags, nsACString* const out_failureId) {
   mozilla::gfx::IntSize dummySize = mozilla::gfx::IntSize(16, 16);
   SurfaceCaps dummyCaps = SurfaceCaps::Any();
@@ -1087,7 +1101,8 @@ GLContextEGL::CreateEGLPBufferOffscreenContext(
 
 // Under EGL, on Android, pbuffers are supported fine, though
 // often without the ability to texture from them directly.
-/*static*/ already_AddRefed<GLContext> GLContextProviderEGL::CreateOffscreen(
+/*static*/
+already_AddRefed<GLContext> GLContextProviderEGL::CreateOffscreen(
     const mozilla::gfx::IntSize& size, const SurfaceCaps& minCaps,
     CreateContextFlags flags, nsACString* const out_failureId) {
   bool forceEnableHardware =
@@ -1154,11 +1169,11 @@ GLContextEGL::CreateEGLPBufferOffscreenContext(
 // fail on many Tegra drivers (bug 759225) and 2) some mobile devices have a
 // very strict limit on global number of GL contexts (bug 754257) and 3) each
 // EGL context eats 750k on B2G (bug 813783)
-/*static*/ GLContext* GLContextProviderEGL::GetGlobalContext() {
-  return nullptr;
-}
+/*static*/
+GLContext* GLContextProviderEGL::GetGlobalContext() { return nullptr; }
 
-/*static*/ void GLContextProviderEGL::Shutdown() {
+/*static*/
+void GLContextProviderEGL::Shutdown() {
   const RefPtr<GLLibraryEGL> egl = GLLibraryEGL::Get();
   if (egl) {
     egl->Shutdown();

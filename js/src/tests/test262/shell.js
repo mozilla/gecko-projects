@@ -1,3 +1,4 @@
+// GENERATED, DO NOT EDIT
 // file: assert.js
 // Copyright (C) 2017 Ecma International.  All rights reserved.
 // This code is governed by the BSD license found in the LICENSE file.
@@ -589,4 +590,9 @@ function $DONE(failure) {
         reportFailure(failure);
     else
         reportCompare(0, 0);
+}
+
+// Some tests in test262 leave promise rejections unhandled.
+if ("ignoreUnhandledRejections" in this) {
+  ignoreUnhandledRejections();
 }

@@ -138,6 +138,7 @@ interface nsIHTMLEditor : nsISupports
     * Paste the text in the OS clipboard at the cursor position, replacing
     * the selected text (if any), but strip out any HTML styles and formatting
     */
+  [can_run_script]
   void pasteNoFormatting(in long aSelectionType);
 
   /**
@@ -146,6 +147,7 @@ interface nsIHTMLEditor : nsISupports
    *
    *  @param aSourceString   HTML source string of the entire new document
    */
+  [can_run_script]
   void rebuildDocumentFromSource(in AString aSourceString);
 
   /**
@@ -181,6 +183,7 @@ interface nsIHTMLEditor : nsISupports
     *
     * @param aElement   An element in the document
     */
+  [can_run_script]
   void selectElement(in Element aElement);
 
   /**

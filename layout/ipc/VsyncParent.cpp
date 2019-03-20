@@ -20,7 +20,8 @@ using namespace ipc;
 
 namespace layout {
 
-/*static*/ already_AddRefed<VsyncParent> VsyncParent::Create() {
+/*static*/
+already_AddRefed<VsyncParent> VsyncParent::Create() {
   AssertIsOnBackgroundThread();
   RefPtr<gfx::VsyncSource> vsyncSource =
       gfxPlatform::GetPlatform()->GetHardwareVsync();
@@ -42,18 +43,18 @@ VsyncParent::~VsyncParent() {
   // VsyncParent is always released on the background thread.
 }
 
-bool VsyncParent::NotifyVsync(TimeStamp aTimeStamp) {
+bool VsyncParent::NotifyVsync(const VsyncEvent& aVsync) {
   // Called on hardware vsync thread. We should post to current ipc thread.
   MOZ_ASSERT(!IsOnBackgroundThread());
-  nsCOMPtr<nsIRunnable> vsyncEvent = NewRunnableMethod<TimeStamp>(
+  nsCOMPtr<nsIRunnable> vsyncEvent = NewRunnableMethod<VsyncEvent>(
       "layout::VsyncParent::DispatchVsyncEvent", this,
-      &VsyncParent::DispatchVsyncEvent, aTimeStamp);
+      &VsyncParent::DispatchVsyncEvent, aVsync);
   MOZ_ALWAYS_SUCCEEDS(
       mBackgroundThread->Dispatch(vsyncEvent, NS_DISPATCH_NORMAL));
   return true;
 }
 
-void VsyncParent::DispatchVsyncEvent(TimeStamp aTimeStamp) {
+void VsyncParent::DispatchVsyncEvent(const VsyncEvent& aVsync) {
   AssertIsOnBackgroundThread();
 
   // If we call NotifyVsync() when we handle ActorDestroy() message, we might
@@ -62,7 +63,7 @@ void VsyncParent::DispatchVsyncEvent(TimeStamp aTimeStamp) {
   // NotifyVsync(). We use mObservingVsync and mDestroyed flags to skip this
   // notification.
   if (mObservingVsync && !mDestroyed) {
-    Unused << SendNotify(aTimeStamp);
+    Unused << SendNotify(aVsync);
   }
 }
 

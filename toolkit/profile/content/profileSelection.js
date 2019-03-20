@@ -4,8 +4,8 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-ChromeUtils.import("resource://gre/modules/AppConstants.jsm");
-ChromeUtils.import("resource://gre/modules/Services.jsm");
+const {AppConstants} = ChromeUtils.import("resource://gre/modules/AppConstants.jsm");
+const {Services} = ChromeUtils.import("resource://gre/modules/Services.jsm");
 
 const C = Cc;
 const I = Ci;
@@ -39,7 +39,7 @@ function startup() {
       listitem.setAttribute("tooltiptext", tooltiptext);
       listitem.profile = profile;
       try {
-        if (profile === gProfileService.selectedProfile) {
+        if (profile === gProfileService.defaultProfile) {
           setTimeout(function(a) {
             profilesElement.ensureElementIsVisible(a);
             profilesElement.selectItem(a);
@@ -71,37 +71,20 @@ function acceptDialog() {
     return false;
   }
 
-  var profileLock;
+  gDialogParams.objects.insertElementAt(selectedProfile.profile.rootDir, 0);
+  gDialogParams.objects.insertElementAt(selectedProfile.profile.localDir, 1);
 
   try {
-    profileLock = selectedProfile.profile.lock({ value: null });
+    gProfileService.defaultProfile = selectedProfile.profile;
   } catch (e) {
-    if (!selectedProfile.profile.rootDir.exists()) {
-      var missingTitle = gProfileManagerBundle.getString("profileMissingTitle");
-      var missing =
-        gProfileManagerBundle.getFormattedString("profileMissing", [appName]);
-      Services.prompt.alert(window, missingTitle, missing);
-      return false;
-    }
-
-    var lockedTitle = gProfileManagerBundle.getString("profileLockedTitle");
-    var locked =
-      gProfileManagerBundle.getFormattedString("profileLocked2", [appName, selectedProfile.profile.name, appName]);
-    Services.prompt.alert(window, lockedTitle, locked);
-
-    return false;
+    // This can happen on dev-edition. We'll still restart with the selected
+    // profile based on the lock's directories.
   }
-  gDialogParams.objects.insertElementAt(profileLock.nsIProfileLock, 0);
-
-  gProfileService.selectedProfile = selectedProfile.profile;
-  gProfileService.defaultProfile = selectedProfile.profile;
   updateStartupPrefs();
 
   gDialogParams.SetInt(0, 1);
   /* Bug 257777 */
   gDialogParams.SetInt(1, document.getElementById("offlineState").checked ? 1 : 0);
-
-  gDialogParams.SetString(0, selectedProfile.profile.name);
 
   return true;
 }

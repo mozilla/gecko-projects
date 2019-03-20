@@ -40,13 +40,11 @@ var _Services = ChromeUtils.import("resource://gre/modules/Services.jsm", null).
 _register_modules_protocol_handler();
 
 var _PromiseTestUtils = ChromeUtils.import("resource://testing-common/PromiseTestUtils.jsm", null).PromiseTestUtils;
-var _Task = ChromeUtils.import("resource://gre/modules/Task.jsm", null).Task;
+var _Task = ChromeUtils.import("resource://testing-common/Task.jsm", null).Task;
 
 let _NetUtil = ChromeUtils.import("resource://gre/modules/NetUtil.jsm", null).NetUtil;
 
 let _XPCOMUtils = ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm", null).XPCOMUtils;
-
-Cu.importGlobalProperties(["XMLHttpRequest"]);
 
 // Support a common assertion library, Assert.jsm.
 var AssertCls = ChromeUtils.import("resource://testing-common/Assert.jsm", null).Assert;
@@ -233,6 +231,11 @@ function _do_quit() {
   _quit = true;
 }
 
+// This is useless, except to the extent that it has the side-effect of
+// initializing the widget module, which some tests unfortunately
+// accidentally rely on.
+void Cc["@mozilla.org/widget/transferable;1"].createInstance();
+
 /**
  * Overrides idleService with a mock.  Idle is commonly used for maintenance
  * tasks, thus if a test uses a service that requires the idle service, it will
@@ -250,18 +253,11 @@ var _fakeIdleService = {
       Components.manager.QueryInterface(Ci.nsIComponentRegistrar);
   },
   contractID: "@mozilla.org/widget/idleservice;1",
-  get CID() {
-    return this.registrar.contractIDToCID(this.contractID);
-  },
+  CID: Components.ID("{9163a4ae-70c2-446c-9ac1-bbe4ab93004e}"),
 
   activate: function FIS_activate() {
-    if (!this.originalFactory) {
-      // Save original factory.
-      this.originalFactory =
-        Components.manager.getClassObject(Cc[this.contractID],
-                                          Ci.nsIFactory);
-      // Unregister original factory.
-      this.registrar.unregisterFactory(this.CID, this.originalFactory);
+    if (!this.originalCID) {
+      this.originalCID = this.registrar.contractIDToCID(this.contractID);
       // Replace with the mock.
       this.registrar.registerFactory(this.CID, "Fake Idle Service",
                                      this.contractID, this.factory
@@ -270,13 +266,13 @@ var _fakeIdleService = {
   },
 
   deactivate: function FIS_deactivate() {
-    if (this.originalFactory) {
+    if (this.originalCID) {
       // Unregister the mock.
       this.registrar.unregisterFactory(this.CID, this.factory);
       // Restore original factory.
-      this.registrar.registerFactory(this.CID, "Idle Service",
-                                     this.contractID, this.originalFactory);
-      delete this.originalFactory;
+      this.registrar.registerFactory(this.originalCID, "Idle Service",
+                                     this.contractID, null);
+      delete this.originalCID;
     }
   },
 
@@ -386,7 +382,7 @@ function _setupDebuggerServer(breakpointFiles, callback) {
 
   let require;
   try {
-    ({ require } = ChromeUtils.import("resource://devtools/shared/Loader.jsm", {}));
+    ({ require } = ChromeUtils.import("resource://devtools/shared/Loader.jsm"));
   } catch (e) {
     throw new Error("resource://devtools appears to be inaccessible from the " +
                     "xpcshell environment.\n" +
@@ -399,7 +395,6 @@ function _setupDebuggerServer(breakpointFiles, callback) {
                     "See also https://bugzil.la/1215378.");
   }
   let { DebuggerServer } = require("devtools/server/main");
-  let { OriginalLocation } = require("devtools/server/actors/common");
   DebuggerServer.init();
   DebuggerServer.registerAllActors();
   let { createRootActor } = require("resource://testing-common/dbg-actors.js");
@@ -408,29 +403,14 @@ function _setupDebuggerServer(breakpointFiles, callback) {
 
   // An observer notification that tells us when we can "resume" script
   // execution.
-  const TOPICS = ["devtools-thread-resumed", "xpcshell-test-devtools-shutdown"];
+  const TOPICS = ["devtools-thread-instantiated", "devtools-thread-resumed", "xpcshell-test-devtools-shutdown"];
   let observe = function(subject, topic, data) {
-    switch (topic) {
-      case "devtools-thread-resumed":
-        // Exceptions in here aren't reported and block the debugger from
-        // resuming, so...
-        try {
-          // Add a breakpoint for the first line in our test files.
-          let threadActor = subject.wrappedJSObject;
-          for (let file of breakpointFiles) {
-            // Pass an empty `source` object to workaround `source` function assertion
-            let sourceActor = threadActor.sources.source({originalUrl: file, source: {}});
-            sourceActor._getOrCreateBreakpointActor(new OriginalLocation(sourceActor, 1));
-          }
-        } catch (ex) {
-          info("Failed to initialize breakpoints: " + ex + "\n" + ex.stack);
-        }
-        break;
-      case "xpcshell-test-devtools-shutdown":
-        // the debugger has shutdown before we got a resume event - nothing
-        // special to do here.
-        break;
+    if (topic === "devtools-thread-instantiated") {
+      const threadActor = subject.wrappedJSObject;
+      threadActor.setBreakpointOnLoad(breakpointFiles);
+      return;
     }
+
     for (let topicToRemove of TOPICS) {
       _Services.obs.removeObserver(observe, topicToRemove);
     }
@@ -525,7 +505,7 @@ function _execute_test() {
     this[func] = Assert[func].bind(Assert);
   }
 
-  const {PerTestCoverageUtils} = ChromeUtils.import("resource://testing-common/PerTestCoverageUtils.jsm", {});
+  const {PerTestCoverageUtils} = ChromeUtils.import("resource://testing-common/PerTestCoverageUtils.jsm");
 
   if (runningInParent) {
     PerTestCoverageUtils.beforeTestSync();

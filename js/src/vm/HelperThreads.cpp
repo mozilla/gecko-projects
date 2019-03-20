@@ -14,6 +14,7 @@
 #include "frontend/BytecodeCompilation.h"
 #include "gc/GCInternals.h"
 #include "jit/IonBuilder.h"
+#include "js/ContextOptions.h"  // JS::ContextOptions
 #include "js/SourceText.h"
 #include "js/UniquePtr.h"
 #include "js/Utility.h"
@@ -56,9 +57,9 @@ GlobalHelperThreadState* gHelperThreadState = nullptr;
 #define PROFILER_RAII_PASTE(id, line) id##line
 #define PROFILER_RAII_EXPAND(id, line) PROFILER_RAII_PASTE(id, line)
 #define PROFILER_RAII PROFILER_RAII_EXPAND(raiiObject, __LINE__)
-#define AUTO_PROFILER_LABEL(label, category)     \
+#define AUTO_PROFILER_LABEL(label, categoryPair) \
   HelperThread::AutoProfilerLabel PROFILER_RAII( \
-      this, label, js::ProfilingStackFrame::Category::category)
+      this, label, JS::ProfilingCategoryPair::categoryPair)
 
 bool js::CreateHelperThreadsState() {
   MOZ_ASSERT(!gHelperThreadState);
@@ -743,6 +744,14 @@ static bool EnsureParserCreatedClasses(JSContext* cx, ParseTaskKind kind) {
 
   if (!GlobalObject::initGenerators(cx, global)) {
     return false;  // needed by function*() {}
+  }
+
+  if (!GlobalObject::initAsyncFunction(cx, global)) {
+    return false;  // needed by async function() {}
+  }
+
+  if (!GlobalObject::initAsyncGenerators(cx, global)) {
+    return false;  // needed by async function*() {}
   }
 
   if (kind == ParseTaskKind::Module &&
@@ -1528,6 +1537,7 @@ js::GCParallelTask::~GCParallelTask() {
 }
 
 bool js::GCParallelTask::startWithLockHeld(AutoLockHelperThreadState& lock) {
+  MOZ_ASSERT(CanUseExtraThreads());
   assertNotStarted();
 
   // If we do the shutdown GC before running anything, we may never
@@ -1550,6 +1560,21 @@ bool js::GCParallelTask::startWithLockHeld(AutoLockHelperThreadState& lock) {
 bool js::GCParallelTask::start() {
   AutoLockHelperThreadState helperLock;
   return startWithLockHeld(helperLock);
+}
+
+void js::GCParallelTask::startOrRunIfIdle(AutoLockHelperThreadState& lock) {
+  if (isRunningWithLockHeld(lock)) {
+    return;
+  }
+
+  // Join the previous invocation of the task. This will return immediately
+  // if the thread has never been started.
+  joinWithLockHeld(lock);
+
+  if (!startWithLockHeld(lock)) {
+    AutoUnlockHelperThreadState unlock(lock);
+    runFromMainThread(runtime());
+  }
 }
 
 void js::GCParallelTask::joinWithLockHeld(AutoLockHelperThreadState& lock) {
@@ -1578,6 +1603,16 @@ static inline TimeDuration TimeSince(TimeStamp prev) {
     now = prev;
   }
   return now - prev;
+}
+
+void GCParallelTask::joinAndRunFromMainThread(JSRuntime* rt) {
+  {
+    AutoLockHelperThreadState lock;
+    MOZ_ASSERT(!isRunningWithLockHeld(lock));
+    joinWithLockHeld(lock);
+  }
+
+  runFromMainThread(rt);
 }
 
 void js::GCParallelTask::runFromMainThread(JSRuntime* rt) {
@@ -2237,6 +2272,35 @@ void js::CancelOffThreadCompressions(JSRuntime* runtime) {
                            runtime);
 }
 
+void js::AttachFinishedCompressions(JSRuntime* runtime,
+                                    AutoLockHelperThreadState& lock) {
+  auto& finished = HelperThreadState().compressionFinishedList(lock);
+  for (size_t i = 0; i < finished.length(); i++) {
+    if (finished[i]->runtimeMatches(runtime)) {
+      UniquePtr<SourceCompressionTask> compressionTask(std::move(finished[i]));
+      HelperThreadState().remove(finished, &i);
+      compressionTask->complete();
+    }
+  }
+}
+
+void js::RunPendingSourceCompressions(JSRuntime* runtime) {
+  AutoLockHelperThreadState lock;
+
+  if (!HelperThreadState().threads) {
+    return;
+  }
+
+  HelperThreadState().startHandlingCompressionTasks(lock);
+
+  // Wait for all in-process compression tasks to complete.
+  while (!HelperThreadState().compressionWorklist(lock).empty()) {
+    HelperThreadState().wait(lock, GlobalHelperThreadState::CONSUMER);
+  }
+
+  AttachFinishedCompressions(runtime, lock);
+}
+
 void PromiseHelperTask::executeAndResolveAndDestroy(JSContext* cx) {
   execute();
   run(cx, JS::Dispatchable::NotShuttingDown);
@@ -2354,10 +2418,10 @@ const HelperThread::TaskSpec HelperThread::taskSpecs[] = {
 
 HelperThread::AutoProfilerLabel::AutoProfilerLabel(
     HelperThread* helperThread, const char* label,
-    ProfilingStackFrame::Category category)
+    JS::ProfilingCategoryPair categoryPair)
     : profilingStack(helperThread->profilingStack) {
   if (profilingStack) {
-    profilingStack->pushLabelFrame(label, nullptr, this, category);
+    profilingStack->pushLabelFrame(label, nullptr, this, categoryPair);
   }
 }
 

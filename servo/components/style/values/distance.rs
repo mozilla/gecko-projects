@@ -1,6 +1,6 @@
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
- * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 //! Machinery to compute distances between animatable values.
 
@@ -31,7 +31,7 @@ pub trait ComputeSquaredDistance {
 }
 
 /// A distance between two animatable values.
-#[derive(Clone, Copy, Debug)]
+#[derive(Add, Clone, Copy, Debug, From)]
 pub struct SquaredDistance {
     value: f64,
 }
@@ -111,24 +111,6 @@ impl SquaredDistance {
     #[inline]
     pub fn sqrt(self) -> f64 {
         self.value.sqrt()
-    }
-}
-
-impl From<SquaredDistance> for f64 {
-    #[inline]
-    fn from(distance: SquaredDistance) -> Self {
-        distance.value
-    }
-}
-
-impl Add for SquaredDistance {
-    type Output = Self;
-
-    #[inline]
-    fn add(self, rhs: Self) -> Self {
-        SquaredDistance {
-            value: self.value + rhs.value,
-        }
     }
 }
 

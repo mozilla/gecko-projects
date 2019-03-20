@@ -26,8 +26,8 @@
 #include "TextDrawTarget.h"
 
 #if XP_WIN
-#include "gfxWindowsPlatform.h"
-#include "mozilla/gfx/DeviceManagerDx.h"
+#  include "gfxWindowsPlatform.h"
+#  include "mozilla/gfx/DeviceManagerDx.h"
 #endif
 
 using namespace mozilla;
@@ -36,9 +36,9 @@ using namespace mozilla::gfx;
 UserDataKey gfxContext::sDontUseAsSourceKey;
 
 #ifdef DEBUG
-#define CURRENTSTATE_CHANGED() CurrentState().mContentChanged = true;
+#  define CURRENTSTATE_CHANGED() CurrentState().mContentChanged = true;
 #else
-#define CURRENTSTATE_CHANGED()
+#  define CURRENTSTATE_CHANGED()
 #endif
 
 PatternFromState::operator mozilla::gfx::Pattern&() {
@@ -66,7 +66,8 @@ gfxContext::gfxContext(DrawTarget* aTarget, const Point& aDeviceOffset)
   mDT->SetTransform(GetDTTransform());
 }
 
-/* static */ already_AddRefed<gfxContext> gfxContext::CreateOrNull(
+/* static */
+already_AddRefed<gfxContext> gfxContext::CreateOrNull(
     DrawTarget* aTarget, const mozilla::gfx::Point& aDeviceOffset) {
   if (!aTarget || !aTarget->IsValid()) {
     gfxCriticalNote << "Invalid target in gfxContext::CreateOrNull "
@@ -78,8 +79,9 @@ gfxContext::gfxContext(DrawTarget* aTarget, const Point& aDeviceOffset)
   return result.forget();
 }
 
-/* static */ already_AddRefed<gfxContext>
-gfxContext::CreatePreservingTransformOrNull(DrawTarget* aTarget) {
+/* static */
+already_AddRefed<gfxContext> gfxContext::CreatePreservingTransformOrNull(
+    DrawTarget* aTarget) {
   if (!aTarget || !aTarget->IsValid()) {
     gfxCriticalNote
         << "Invalid target in gfxContext::CreatePreservingTransformOrNull "
@@ -188,7 +190,8 @@ void gfxContext::SetPath(Path* path) {
   MOZ_ASSERT(path->GetBackendType() == mDT->GetBackendType() ||
              path->GetBackendType() == BackendType::RECORDING ||
              (mDT->GetBackendType() == BackendType::DIRECT2D1_1 &&
-              path->GetBackendType() == BackendType::DIRECT2D));
+              path->GetBackendType() == BackendType::DIRECT2D) ||
+             path->GetBackendType() == BackendType::CAPTURE);
   mPath = path;
   mPathBuilder = nullptr;
   mPathIsRect = false;
@@ -873,11 +876,6 @@ Point gfxContext::GetDeviceOffset() const {
 
 void gfxContext::SetDeviceOffset(const Point& aOffset) {
   CurrentState().deviceOffset = aOffset;
-}
-
-Matrix gfxContext::GetDeviceTransform() const {
-  return Matrix::Translation(-CurrentState().deviceOffset.x,
-                             -CurrentState().deviceOffset.y);
 }
 
 Matrix gfxContext::GetDTTransform() const {

@@ -1,4 +1,4 @@
-const { ContentTaskUtils } = ChromeUtils.import("resource://testing-common/ContentTaskUtils.jsm", {});
+const { ContentTaskUtils } = ChromeUtils.import("resource://testing-common/ContentTaskUtils.jsm");
 const PWMGR_DLG = "chrome://passwordmgr/content/passwordManager.xul";
 
 var doc;
@@ -22,8 +22,7 @@ function getPassword(row) {
 }
 
 function synthesizeDblClickOnCell(aTree, column, row) {
-  let tbo = aTree.treeBoxObject;
-  let rect = tbo.getCoordsForCellItem(row, aTree.columns[column], "text");
+  let rect = aTree.getCoordsForCellItem(row, aTree.columns[column], "text");
   let x = rect.x + rect.width / 2;
   let y = rect.y + rect.height / 2;
   // Simulate the double click.
@@ -42,7 +41,7 @@ async function editUsernamePromises(site, oldUsername, newUsername) {
   let login = Services.logins.findLogins({}, site, "", "")[0];
   is(login.username, oldUsername, "Correct username saved");
   is(getUsername(0), oldUsername, "Correct username shown");
-  let focusPromise = BrowserTestUtils.waitForEvent(signonsTree, "focus", true);
+  let focusPromise = BrowserTestUtils.waitForEvent(signonsTree.inputField, "focus", true);
   synthesizeDblClickOnCell(signonsTree, 1, 0);
   await focusPromise;
 
@@ -64,7 +63,7 @@ async function editPasswordPromises(site, oldPassword, newPassword) {
   is(login.password, oldPassword, "Correct password saved");
   is(getPassword(0), oldPassword, "Correct password shown");
 
-  let focusPromise = BrowserTestUtils.waitForEvent(signonsTree, "focus", true);
+  let focusPromise = BrowserTestUtils.waitForEvent(signonsTree.inputField, "focus", true);
   synthesizeDblClickOnCell(signonsTree, 2, 0);
   await focusPromise;
 

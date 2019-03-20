@@ -16,14 +16,19 @@ namespace gfx {
 
 static StaticAutoPtr<VRProcessManager> sSingleton;
 
-/* static */ VRProcessManager* VRProcessManager::Get() { return sSingleton; }
+/* static */
+VRProcessManager* VRProcessManager::Get() { return sSingleton; }
 
-/* static */ void VRProcessManager::Initialize() {
+/* static */
+void VRProcessManager::Initialize() {
   MOZ_ASSERT(XRE_IsParentProcess());
-  sSingleton = new VRProcessManager();
+  if (sSingleton == nullptr) {
+    sSingleton = new VRProcessManager();
+  }
 }
 
-/* static */ void VRProcessManager::Shutdown() { sSingleton = nullptr; }
+/* static */
+void VRProcessManager::Shutdown() { sSingleton = nullptr; }
 
 VRProcessManager::VRProcessManager() : mProcess(nullptr) {
   MOZ_COUNT_CTOR(VRProcessManager);
@@ -34,6 +39,12 @@ VRProcessManager::VRProcessManager() : mProcess(nullptr) {
 
 VRProcessManager::~VRProcessManager() {
   MOZ_COUNT_DTOR(VRProcessManager);
+
+  if (mObserver) {
+    mObserver->Unregister();
+    nsContentUtils::UnregisterShutdownObserver(mObserver);
+    mObserver = nullptr;
+  }
 
   DestroyProcess();
   // The VR process should have already been shut down.
@@ -47,7 +58,7 @@ void VRProcessManager::LaunchVRProcess() {
 
   // The subprocess is launched asynchronously, so we wait for a callback to
   // acquire the IPDL actor.
-  mProcess = new VRProcessParent();
+  mProcess = new VRProcessParent(this);
   if (!mProcess->Launch()) {
     DisableVRProcess("Failed to launch VR process");
   }
@@ -68,6 +79,27 @@ void VRProcessManager::DestroyProcess() {
 
   mProcess->Shutdown();
   mProcess = nullptr;
+
+  CrashReporter::AnnotateCrashReport(CrashReporter::Annotation::VRProcessStatus,
+                                     NS_LITERAL_CSTRING("Destroyed"));
+}
+
+void VRProcessManager::OnProcessLaunchComplete(VRProcessParent* aParent) {
+  MOZ_ASSERT(mProcess && mProcess == aParent);
+
+  if (!mProcess->IsConnected()) {
+    DestroyProcess();
+    return;
+  }
+
+  CrashReporter::AnnotateCrashReport(CrashReporter::Annotation::VRProcessStatus,
+                                     NS_LITERAL_CSTRING("Running"));
+}
+
+void VRProcessManager::OnProcessUnexpectedShutdown(VRProcessParent* aParent) {
+  MOZ_ASSERT(mProcess && mProcess == aParent);
+
+  DestroyProcess();
 }
 
 bool VRProcessManager::CreateGPUBridges(
@@ -118,6 +150,8 @@ VRProcessManager::Observer::Observe(nsISupports* aSubject, const char* aTopic,
   }
   return NS_OK;
 }
+
+void VRProcessManager::Observer::Unregister() { mManager = nullptr; }
 
 void VRProcessManager::CleanShutdown() { DestroyProcess(); }
 

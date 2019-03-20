@@ -9,7 +9,7 @@
 #include "nsIDocShell.h"
 #include "nsServiceManagerUtils.h"
 #include "nsIContentViewer.h"
-#include "nsIDocument.h"
+#include "mozilla/dom/Document.h"
 #include "XULDocument.h"
 #include "InProcessTabChildMessageManager.h"
 #include "nsIWindowMediator.h"
@@ -51,7 +51,7 @@ static bool sInited = 0;
 // to dom::TraceBlackJS().
 uint32_t nsCCUncollectableMarker::sGeneration = 1;
 #ifdef MOZ_XUL
-#include "nsXULPrototypeCache.h"
+#  include "nsXULPrototypeCache.h"
 #endif
 
 NS_IMPL_ISUPPORTS(nsCCUncollectableMarker, nsIObserver)
@@ -174,7 +174,7 @@ void MarkContentViewer(nsIContentViewer* aViewer, bool aCleanupJS) {
     return;
   }
 
-  nsIDocument* doc = aViewer->GetDocument();
+  Document* doc = aViewer->GetDocument();
   if (doc &&
       doc->GetMarkedCCGeneration() != nsCCUncollectableMarker::sGeneration) {
     doc->MarkUncollectableForCCGeneration(nsCCUncollectableMarker::sGeneration);
@@ -349,9 +349,11 @@ nsresult nsCCUncollectableMarker::Observe(nsISupports* aSubject,
   nsCOMPtr<nsIAppShellService> appShell =
       do_GetService(NS_APPSHELLSERVICE_CONTRACTID);
   if (appShell) {
-    nsCOMPtr<nsIXULWindow> hw;
-    appShell->GetHiddenWindow(getter_AddRefs(hw));
-    if (hw) {
+    bool hasHiddenWindow = false;
+    appShell->GetHasHiddenWindow(&hasHiddenWindow);
+    if (hasHiddenWindow) {
+      nsCOMPtr<nsIXULWindow> hw;
+      appShell->GetHiddenWindow(getter_AddRefs(hw));
       nsCOMPtr<nsIDocShell> shell;
       hw->GetDocShell(getter_AddRefs(shell));
       MarkDocShell(shell, cleanupJS);
@@ -359,6 +361,7 @@ nsresult nsCCUncollectableMarker::Observe(nsISupports* aSubject,
     bool hasHiddenPrivateWindow = false;
     appShell->GetHasHiddenPrivateWindow(&hasHiddenPrivateWindow);
     if (hasHiddenPrivateWindow) {
+      nsCOMPtr<nsIXULWindow> hw;
       appShell->GetHiddenPrivateWindow(getter_AddRefs(hw));
       if (hw) {
         nsCOMPtr<nsIDocShell> shell;
@@ -502,10 +505,9 @@ void mozilla::dom::TraceBlackJS(JSTracer* aTrc, bool aIsShutdownGC) {
         }
 
 #ifdef MOZ_XUL
-        nsIDocument* doc = window->GetExtantDoc();
-        if (doc && doc->IsXULDocument()) {
-          XULDocument* xulDoc = static_cast<XULDocument*>(doc);
-          xulDoc->TraceProtos(aTrc);
+        Document* doc = window->GetExtantDoc();
+        if (doc) {
+          doc->TraceProtos(aTrc);
         }
 #endif
       }

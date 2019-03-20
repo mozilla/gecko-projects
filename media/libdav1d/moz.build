@@ -13,36 +13,43 @@ LOCAL_INCLUDES += [
     '/third_party/dav1d/src',
 ]
 
-if CONFIG['CPU_ARCH'] == 'x86':
-    if CONFIG['OS_TARGET'] == 'Android':
-        LOCAL_INCLUDES += ['/media/libdav1d/config/x86_32/android/']
-        EXPORTS.dav1d += ['config/x86_32/android/config.h']
-    else:
-        LOCAL_INCLUDES += ['/media/libdav1d/config/x86_32/']
-        EXPORTS.dav1d += ['config/x86_32/config.h']
-elif CONFIG['CPU_ARCH'] == 'x86_64':
-    if CONFIG['MOZ_ASAN'] and CONFIG['OS_TARGET'] == 'WINNT':
-        LOCAL_INCLUDES += ['/media/libdav1d/config/x86_64/win_asan/']
-        EXPORTS.dav1d += ['config/x86_64/win_asan/config.h']
-    else:
-        LOCAL_INCLUDES += ['/media/libdav1d/config/x86_64/']
-        EXPORTS.dav1d += ['config/x86_64/config.h']
-elif CONFIG['CPU_ARCH'] == 'arm':
-    LOCAL_INCLUDES += ['/media/libdav1d/config/arm/']
-    EXPORTS.dav1d += ['config/arm/config.h']
-elif CONFIG['CPU_ARCH'] == 'aarch64':
-    LOCAL_INCLUDES += ['/media/libdav1d/config/aarch64/']
-    EXPORTS.dav1d += ['config/aarch64/config.h']
-
 EXPORTS.dav1d += [
+    'config.h',
     'version.h',
 ]
 
 # entrypoint source files
-SOURCES += [
+entrypoint_source_files = [
     '../../third_party/dav1d/src/lib.c',
     '../../third_party/dav1d/src/thread_task.c',
 ]
+SOURCES += [f for f in entrypoint_source_files]
+
+# Don't export DAV1D_API symbols from libxul
+# see: third_party/dav1d/include/dav1d/common.h
+DEFINES['DAV1D_API'] = ''
+
+if CONFIG['MOZ_DAV1D_ASM']:
+    # Default stack aligment is 16 bytes
+    DIRS += ['asm']
+    if CONFIG['OS_TARGET'] in ('WINNT', 'Darwin') and CONFIG['CPU_ARCH'] == 'x86_64':
+         # Update stack aligment to 32 bytes
+         if CONFIG['CC_TYPE'] == 'clang':
+             CFLAGS += ['-mstack-alignment=32']
+             for ep in entrypoint_source_files:
+                 SOURCES[ep].flags += ['-mstackrealign']
+         elif CONFIG['CC_TYPE'] == 'gcc':
+             CFLAGS += ['-mpreferred-stack-boundary=5']
+             for ep in entrypoint_source_files:
+                 SOURCES[ep].flags += ['-mincoming-stack-boundary=4']
+
+if CONFIG['OS_TARGET'] == 'Linux':
+    # For fuzzing, We only support building on Linux currently.
+    include('/tools/fuzzing/libfuzzer-config.mozbuild')
+    if CONFIG['FUZZING_INTERFACES']:
+        TEST_DIRS += [
+            'test/fuzztest'
+        ]
 
 # common sources
 SOURCES += [
@@ -91,7 +98,7 @@ EXPORTS.dav1d.src += [
     '../../third_party/dav1d/src/wedge.h',
 ]
 
-# common BITDEPTH 8, 10
+# common BITDEPTH 8, 16
 relative_path = '../../third_party/dav1d/src/'
 bitdepth_basenames = [
     'cdef_apply_tmpl.c',
@@ -109,14 +116,14 @@ bitdepth_basenames = [
 ]
 
 GENERATED_FILES += [
-    '10bd_%s' % p for p in bitdepth_basenames
+    '16bd_%s' % p for p in bitdepth_basenames
 ]
 
 for f in bitdepth_basenames:
-    a = GENERATED_FILES['10bd_%s' % f]
+    a = GENERATED_FILES['16bd_%s' % f]
     a.script = 'generate_source.py:add_define'
     a.inputs = [relative_path + f]
-    a.flags = ['BITDEPTH', '10']
+    a.flags = ['BITDEPTH', '16']
 
 GENERATED_FILES += [
     '8bd_%s' % p for p in bitdepth_basenames
@@ -171,10 +178,6 @@ if CONFIG['OS_TARGET'] == 'WINNT':
         '../../third_party/dav1d/src/win32/thread.c'
     ]
 
-if CONFIG['CC_TYPE'] == 'msvc':
-    LOCAL_INCLUDES += ['../../third_party/dav1d/include/compat/msvc/']
-    EXPORTS.dav1d += ['../../third_party/dav1d/include/compat/msvc/stdatomic.h']
-
 if CONFIG['CC_TYPE'] == 'gcc':
     LOCAL_INCLUDES += ['../../third_party/dav1d/include/compat/gcc/']
     EXPORTS.dav1d += ['../../third_party/dav1d/include/compat/gcc/stdatomic.h']
@@ -183,6 +186,3 @@ FINAL_LIBRARY = 'gkmedias'
 
 # We allow warnings for third-party code that can be updated from upstream.
 AllowCompilerWarnings()
-
-# And furthermore, don't show warnings.
-DisableCompilerWarnings()

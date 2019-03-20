@@ -14,7 +14,7 @@
 #include "nsAttrValue.h"
 #include "nsAttrValueInlines.h"
 #include "nsFlexContainerFrame.h"
-#include "nsIDocument.h"
+#include "mozilla/dom/Document.h"
 #include "nsPresContext.h"
 #include "nsRect.h"
 #include "nsPoint.h"
@@ -46,7 +46,7 @@ using namespace mozilla::layout;
 nsContainerFrame::~nsContainerFrame() {}
 
 NS_QUERYFRAME_HEAD(nsContainerFrame)
-NS_QUERYFRAME_ENTRY(nsContainerFrame)
+  NS_QUERYFRAME_ENTRY(nsContainerFrame)
 NS_QUERYFRAME_TAIL_INHERITING(nsSplittableFrame)
 
 void nsContainerFrame::Init(nsIContent* aContent, nsContainerFrame* aParent,
@@ -364,7 +364,8 @@ void nsContainerFrame::BuildDisplayListForNonBlockChildren(
   }
 }
 
-/* virtual */ void nsContainerFrame::ChildIsDirty(nsIFrame* aChild) {
+/* virtual */
+void nsContainerFrame::ChildIsDirty(nsIFrame* aChild) {
   NS_ASSERTION(NS_SUBTREE_DIRTY(aChild), "child isn't actually dirty");
 
   AddStateBits(NS_FRAME_HAS_DIRTY_CHILDREN);
@@ -674,11 +675,19 @@ void nsContainerFrame::SyncFrameViewAfterReflow(
   }
 }
 
-static nscoord GetCoord(const nsStyleCoord& aCoord, nscoord aIfNotCoord) {
+static nscoord GetCoord(const LengthPercentage& aCoord, nscoord aIfNotCoord) {
   if (aCoord.ConvertsToLength()) {
-    return aCoord.ComputeCoordPercentCalc(0);
+    return aCoord.ToLength();
   }
   return aIfNotCoord;
+}
+
+static nscoord GetCoord(const LengthPercentageOrAuto& aCoord,
+                        nscoord aIfNotCoord) {
+  if (aCoord.IsAuto()) {
+    return aIfNotCoord;
+  }
+  return GetCoord(aCoord.AsLengthPercentage(), aIfNotCoord);
 }
 
 void nsContainerFrame::DoInlineIntrinsicISize(
@@ -791,10 +800,8 @@ LogicalSize nsContainerFrame::ComputeAutoSize(
     // flex item with our inline axis being the main axis), AND we have
     // flex-basis:content.
     const nsStylePosition* pos = StylePosition();
-    if (pos->ISize(aWM).GetUnit() == eStyleUnit_Auto ||
-        (pos->mFlexBasis.GetUnit() == eStyleUnit_Enumerated &&
-         pos->mFlexBasis.GetIntValue() == NS_STYLE_FLEX_BASIS_CONTENT &&
-         IsFlexItem() &&
+    if (pos->ISize(aWM).IsAuto() ||
+        (pos->mFlexBasis.IsContent() && IsFlexItem() &&
          nsFlexContainerFrame::IsItemInlineAxisMainAxis(this))) {
       result.ISize(aWM) =
           ShrinkWidthToFit(aRenderingContext, availBased, aFlags);
@@ -992,7 +999,7 @@ void nsContainerFrame::PositionChildViews(nsIFrame* aFrame) {
  * https://bugzil.la/1424281#c12
  */
 #if defined(_MSC_VER) && !defined(__clang__) && defined(_M_AMD64)
-#pragma optimize("g", off)
+#  pragma optimize("g", off)
 #endif
 void nsContainerFrame::FinishReflowChild(
     nsIFrame* aKidFrame, nsPresContext* aPresContext,
@@ -1036,7 +1043,7 @@ void nsContainerFrame::FinishReflowChild(
   aKidFrame->DidReflow(aPresContext, aReflowInput);
 }
 #if defined(_MSC_VER) && !defined(__clang__) && defined(_M_AMD64)
-#pragma optimize("", on)
+#  pragma optimize("", on)
 #endif
 
 // XXX temporary: hold on to a copy of the old physical version of
@@ -1627,7 +1634,8 @@ nsIFrame* nsContainerFrame::PullNextInFlowChild(
   return frame;
 }
 
-/* static */ void nsContainerFrame::ReparentFloatsForInlineChild(
+/* static */
+void nsContainerFrame::ReparentFloatsForInlineChild(
     nsIFrame* aOurLineContainer, nsIFrame* aFrame, bool aReparentSiblings,
     ReparentingDirection aDirection) {
   // XXXbz this would be better if it took a nsFrameList or a frame
@@ -1645,7 +1653,7 @@ nsIFrame* nsContainerFrame::PullNextInFlowChild(
     return;
   }
 
-  nsBlockFrame* ourBlock = nsLayoutUtils::GetAsBlock(aOurLineContainer);
+  nsBlockFrame* ourBlock = do_QueryFrame(aOurLineContainer);
   NS_ASSERTION(ourBlock, "Not a block, but broke vertically?");
 
   while (true) {
@@ -1737,8 +1745,8 @@ bool nsContainerFrame::RenumberList() {
 // add in a sanity check for absurdly deep frame trees.  See bug 42138
 // can't just use IsFrameTreeTooDeep() because that method has side effects we
 // don't want
-#define MAX_DEPTH_FOR_LIST_RENUMBERING \
-  200  // 200 open displayable tags is pretty unrealistic
+// 200 open displayable tags is pretty unrealistic
+#define MAX_DEPTH_FOR_LIST_RENUMBERING 200
 
 bool nsContainerFrame::RenumberFrameAndDescendants(int32_t* aOrdinal,
                                                    int32_t aDepth,
@@ -1772,7 +1780,7 @@ bool nsContainerFrame::RenumberFrameAndDescendants(int32_t* aOrdinal,
   if (mozilla::StyleDisplay::ListItem == display->mDisplay) {
     // Make certain that the frame is a block frame in case
     // something foreign has crept in.
-    nsBlockFrame* listItem = nsLayoutUtils::GetAsBlock(kid);
+    nsBlockFrame* listItem = do_QueryFrame(kid);
     if (listItem) {
       nsBulletFrame* bullet = listItem->GetBullet();
       if (bullet) {

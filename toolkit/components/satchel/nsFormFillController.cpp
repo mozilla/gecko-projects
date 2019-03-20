@@ -29,12 +29,11 @@
 #include "nsPIDOMWindow.h"
 #include "nsIWebNavigation.h"
 #include "nsIContentViewer.h"
-#include "nsIDocument.h"
+#include "mozilla/dom/Document.h"
 #include "nsIContent.h"
 #include "nsIPresShell.h"
 #include "nsRect.h"
 #include "nsILoginManager.h"
-#include "mozilla/ModuleUtils.h"
 #include "nsToolkitCompsCID.h"
 #include "nsEmbedCID.h"
 #include "nsContentUtils.h"
@@ -180,8 +179,7 @@ void nsFormFillController::CharacterDataChanged(
 void nsFormFillController::AttributeWillChange(mozilla::dom::Element* aElement,
                                                int32_t aNameSpaceID,
                                                nsAtom* aAttribute,
-                                               int32_t aModType,
-                                               const nsAttrValue* aNewValue) {}
+                                               int32_t aModType) {}
 
 void nsFormFillController::NativeAnonymousChildListChange(nsIContent* aContent,
                                                           bool aIsRemove) {}
@@ -225,7 +223,27 @@ nsFormFillController::AttachToBrowser(nsIDocShell* aDocShell,
   nsCOMPtr<nsPIDOMWindowOuter> window = GetWindowForDocShell(aDocShell);
   AddWindowListeners(window);
 
+  nsFocusManager* fm = nsFocusManager::GetFocusManager();
+  if (fm) {
+    nsCOMPtr<nsIContent> focusedContent = fm->GetFocusedElement();
+    this->HandleFocus(HTMLInputElement::FromNodeOrNull(focusedContent));
+  }
+
   return NS_OK;
+}
+
+NS_IMETHODIMP
+nsFormFillController::AttachPopupElementToBrowser(nsIDocShell* aDocShell,
+                                                  dom::Element* aPopupEl) {
+  MOZ_LOG(sLogger, LogLevel::Debug,
+          ("AttachPopupElementToBrowser for docShell %p with popup %p",
+           aDocShell, aPopupEl));
+  NS_ENSURE_TRUE(aDocShell && aPopupEl, NS_ERROR_ILLEGAL_VALUE);
+
+  nsCOMPtr<nsIAutoCompletePopup> popup = aPopupEl->AsAutoCompletePopup();
+  NS_ENSURE_STATE(popup);
+
+  return AttachToBrowser(aDocShell, popup);
 }
 
 NS_IMETHODIMP
@@ -326,6 +344,11 @@ nsFormFillController::GetPopup(nsIAutoCompletePopup** aPopup) {
   *aPopup = mFocusedPopup;
   NS_IF_ADDREF(*aPopup);
   return NS_OK;
+}
+
+NS_IMETHODIMP
+nsFormFillController::GetPopupElement(Element** aPopup) {
+  return NS_ERROR_NOT_IMPLEMENTED;
 }
 
 NS_IMETHODIMP
@@ -608,7 +631,7 @@ nsFormFillController::GetInPrivateContext(bool* aInPrivateContext) {
     return NS_OK;
   }
 
-  nsCOMPtr<nsIDocument> doc = mFocusedInput->OwnerDoc();
+  RefPtr<Document> doc = mFocusedInput->OwnerDoc();
   nsCOMPtr<nsILoadContext> loadContext = doc->GetLoadContext();
   *aInPrivateContext = loadContext && loadContext->UsePrivateBrowsing();
   return NS_OK;
@@ -617,6 +640,19 @@ nsFormFillController::GetInPrivateContext(bool* aInPrivateContext) {
 NS_IMETHODIMP
 nsFormFillController::GetNoRollupOnCaretMove(bool* aNoRollupOnCaretMove) {
   *aNoRollupOnCaretMove = false;
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+nsFormFillController::GetNoRollupOnEmptySearch(bool* aNoRollupOnEmptySearch) {
+  if (mFocusedInput &&
+      (mPwmgrInputs.Get(mFocusedInput) ||
+       mFocusedInput->ControlType() == NS_FORM_INPUT_PASSWORD)) {
+    // Don't close the login popup when the field is cleared (bug 1534896).
+    *aNoRollupOnEmptySearch = true;
+  } else {
+    *aNoRollupOnEmptySearch = false;
+  }
   return NS_OK;
 }
 
@@ -789,7 +825,7 @@ nsFormFillController::HandleEvent(Event* aEvent) {
     case eKeyPress:
       return KeyPress(aEvent);
     case eEditorInput: {
-      nsCOMPtr<nsINode> input = do_QueryInterface(aEvent->GetTarget());
+      nsCOMPtr<nsINode> input = do_QueryInterface(aEvent->GetComposedTarget());
       if (!IsTextControl(input)) {
         return NS_OK;
       }
@@ -822,7 +858,7 @@ nsFormFillController::HandleEvent(Event* aEvent) {
       }
       return NS_OK;
     case ePageHide: {
-      nsCOMPtr<nsIDocument> doc = do_QueryInterface(aEvent->GetTarget());
+      nsCOMPtr<Document> doc = do_QueryInterface(aEvent->GetTarget());
       if (!doc) {
         return NS_OK;
       }
@@ -850,7 +886,7 @@ nsFormFillController::HandleEvent(Event* aEvent) {
   return NS_OK;
 }
 
-void nsFormFillController::RemoveForDocument(nsIDocument* aDoc) {
+void nsFormFillController::RemoveForDocument(Document* aDoc) {
   MOZ_LOG(sLogger, LogLevel::Verbose, ("RemoveForDocument: %p", aDoc));
   for (auto iter = mPwmgrInputs.Iter(); !iter.Done(); iter.Next()) {
     const nsINode* key = iter.Key();
@@ -926,9 +962,8 @@ void nsFormFillController::MaybeStartControllingInput(
 #endif
 }
 
-nsresult nsFormFillController::Focus(Event* aEvent) {
-  nsCOMPtr<nsIContent> input = do_QueryInterface(aEvent->GetTarget());
-  MaybeStartControllingInput(HTMLInputElement::FromNodeOrNull(input));
+nsresult nsFormFillController::HandleFocus(HTMLInputElement* aInput) {
+  MaybeStartControllingInput(aInput);
 
   // Bail if we didn't start controlling the input.
   if (!mFocusedInput) {
@@ -962,6 +997,11 @@ nsresult nsFormFillController::Focus(Event* aEvent) {
 #endif
 
   return NS_OK;
+}
+
+nsresult nsFormFillController::Focus(Event* aEvent) {
+  nsCOMPtr<nsIContent> input = do_QueryInterface(aEvent->GetComposedTarget());
+  return this->HandleFocus(HTMLInputElement::FromNodeOrNull(input));
 }
 
 nsresult nsFormFillController::KeyDown(Event* aEvent) {
@@ -1094,7 +1134,7 @@ nsresult nsFormFillController::MouseDown(Event* aEvent) {
     return NS_ERROR_FAILURE;
   }
 
-  nsCOMPtr<nsINode> targetNode = do_QueryInterface(aEvent->GetTarget());
+  nsCOMPtr<nsINode> targetNode = do_QueryInterface(aEvent->GetComposedTarget());
   if (!HTMLInputElement::FromNodeOrNull(targetNode)) {
     return NS_OK;
   }
@@ -1202,7 +1242,7 @@ void nsFormFillController::RemoveWindowListeners(nsPIDOMWindowOuter* aWindow) {
 
   StopControllingInput();
 
-  nsCOMPtr<nsIDocument> doc = aWindow->GetDoc();
+  RefPtr<Document> doc = aWindow->GetDoc();
   RemoveForDocument(doc);
 
   EventTarget* target = aWindow->GetChromeEventHandler();
@@ -1319,7 +1359,7 @@ nsPIDOMWindowOuter* nsFormFillController::GetWindowForDocShell(
   aDocShell->GetContentViewer(getter_AddRefs(contentViewer));
   NS_ENSURE_TRUE(contentViewer, nullptr);
 
-  nsCOMPtr<nsIDocument> doc = contentViewer->GetDocument();
+  RefPtr<Document> doc = contentViewer->GetDocument();
   NS_ENSURE_TRUE(doc, nullptr);
 
   return doc->GetWindow();
@@ -1349,23 +1389,3 @@ int32_t nsFormFillController::GetIndexOfDocShell(nsIDocShell* aDocShell) {
 
   return -1;
 }
-
-NS_GENERIC_FACTORY_CONSTRUCTOR(nsFormFillController)
-
-NS_DEFINE_NAMED_CID(NS_FORMFILLCONTROLLER_CID);
-
-static const mozilla::Module::CIDEntry kSatchelCIDs[] = {
-    {&kNS_FORMFILLCONTROLLER_CID, false, nullptr,
-     nsFormFillControllerConstructor},
-    {nullptr}};
-
-static const mozilla::Module::ContractIDEntry kSatchelContracts[] = {
-    {"@mozilla.org/satchel/form-fill-controller;1",
-     &kNS_FORMFILLCONTROLLER_CID},
-    {NS_FORMHISTORYAUTOCOMPLETE_CONTRACTID, &kNS_FORMFILLCONTROLLER_CID},
-    {nullptr}};
-
-static const mozilla::Module kSatchelModule = {mozilla::Module::kVersion,
-                                               kSatchelCIDs, kSatchelContracts};
-
-NSMODULE_DEFN(satchel) = &kSatchelModule;

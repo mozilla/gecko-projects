@@ -4,7 +4,6 @@
 
 "use strict";
 
-const Services = require("Services");
 const {angleUtils} = require("devtools/client/shared/css-angle");
 const {colorUtils} = require("devtools/shared/css/color");
 const {getCSSLexer} = require("devtools/shared/css/lexer");
@@ -35,9 +34,6 @@ const COLOR_TAKING_FUNCTIONS = ["linear-gradient", "-moz-linear-gradient",
 const BASIC_SHAPE_FUNCTIONS = ["polygon", "circle", "ellipse", "inset"];
 
 const HTML_NS = "http://www.w3.org/1999/xhtml";
-
-const FLEXBOX_HIGHLIGHTER_ENABLED_PREF = "devtools.inspector.flexboxHighlighter.enabled";
-const CSS_SHAPES_ENABLED_PREF = "devtools.inspector.shapesHighlighter.enabled";
 
 /**
  * This module is used to process text for output by developer tools. This means
@@ -369,7 +365,6 @@ OutputParser.prototype = {
                          colorUtils.isValidCSSColor(functionText, this.cssColor4)) {
                 this._appendColor(functionText, options);
               } else if (options.expectShape &&
-                         Services.prefs.getBoolPref(CSS_SHAPES_ENABLED_PREF) &&
                          BASIC_SHAPE_FUNCTIONS.includes(token.text)) {
                 this._appendShape(functionText, options);
               } else {
@@ -384,8 +379,7 @@ OutputParser.prototype = {
           if (options.expectCubicBezier &&
               BEZIER_KEYWORDS.includes(token.text)) {
             this._appendCubicBezier(token.text, options);
-          } else if (this._isDisplayFlex(text, token, options) &&
-                     Services.prefs.getBoolPref(FLEXBOX_HIGHLIGHTER_ENABLED_PREF)) {
+          } else if (this._isDisplayFlex(text, token, options)) {
             this._appendHighlighterToggle(token.text, options.flexClass);
           } else if (this._isDisplayGrid(text, token, options)) {
             this._appendHighlighterToggle(token.text, options.gridClass);
@@ -1226,10 +1220,15 @@ OutputParser.prototype = {
         container.appendChild(swatch);
       }
 
-      if (options.defaultColorType) {
-        color = colorObj.toString();
-        container.dataset.color = color;
+      if (!options.defaultColorType) {
+        // If we're not being asked to convert the color to the default color type
+        // specified by the user, then force the CssColor instance to be set to the type
+        // of the current color.
+        // Not having a type means that the default color type will be automatically used.
+        colorObj.colorUnit = colorUtils.classifyColor(color);
       }
+      color = colorObj.toString();
+      container.dataset.color = color;
 
       const value = this._createNode("span", {
         class: options.colorClass,

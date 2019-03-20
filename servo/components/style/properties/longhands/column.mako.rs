@@ -1,6 +1,6 @@
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
- * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 <%namespace name="helpers" file="/helpers.mako.rs" />
 
@@ -9,8 +9,8 @@
 ${helpers.predefined_type(
     "column-width",
     "length::NonNegativeLengthOrAuto",
-    "Either::Second(Auto)",
-    initial_specified_value="Either::Second(Auto)",
+    "computed::length::NonNegativeLengthOrAuto::auto()",
+    initial_specified_value="specified::length::NonNegativeLengthOrAuto::auto()",
     extra_prefixes="moz",
     animation_value_type="NonNegativeLengthOrAuto",
     servo_pref="layout.columns.enabled",

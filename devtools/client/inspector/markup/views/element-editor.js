@@ -272,6 +272,7 @@ ElementEditor.prototype = {
     this.updateEventBadge();
     this.updateDisplayBadge();
     this.updateCustomBadge();
+    this.updateScrollableBadge();
     this.updateTextEditor();
   },
 
@@ -293,6 +294,26 @@ ElementEditor.prototype = {
     this._eventBadge.title = INSPECTOR_L10N.getStr("markupView.event.tooltiptext");
     // Badges order is [event][display][custom], insert event badge before others.
     this.elt.insertBefore(this._eventBadge, this._displayBadge || this._customBadge);
+    this.markup.emit("badge-added-event");
+  },
+
+  updateScrollableBadge: function() {
+    if (this.node.isScrollable && !this._scrollableBadge) {
+      this._createScrollableBadge();
+    } else if (this._scrollableBadge && !this.node.isScrollable) {
+      this._scrollableBadge.remove();
+      this._scrollableBadge = null;
+    }
+  },
+
+  _createScrollableBadge: function() {
+    this._scrollableBadge = this.doc.createElement("div");
+    this._scrollableBadge.className = "inspector-badge scrollable-badge";
+    this._scrollableBadge.textContent =
+      INSPECTOR_L10N.getStr("markupView.scrollableBadge.label");
+    this._scrollableBadge.title =
+      INSPECTOR_L10N.getStr("markupView.scrollableBadge.tooltip");
+    this.elt.insertBefore(this._scrollableBadge, this._customBadge);
   },
 
   /**
@@ -338,8 +359,7 @@ ElementEditor.prototype = {
       this.highlighters.gridHighlighters.has(this.node));
 
     if (displayType === "flex" || displayType === "inline-flex") {
-      this._displayBadge.classList.toggle("interactive",
-        Services.prefs.getBoolPref("devtools.inspector.flexboxHighlighter.enabled"));
+      this._displayBadge.classList.toggle("interactive", true);
     } else if (displayType === "grid" || displayType === "inline-grid") {
       this._displayBadge.classList.toggle("interactive",
         this.highlighters.canGridHighlighterToggle(this.node));
@@ -442,14 +462,14 @@ ElementEditor.prototype = {
 
     const name = this.doc.createElement("span");
     name.classList.add("attr-name");
-    name.classList.add("theme-fg-color2");
+    name.classList.add("theme-fg-color1");
     inner.appendChild(name);
 
     inner.appendChild(this.doc.createTextNode('="'));
 
     const val = this.doc.createElement("span");
     val.classList.add("attr-value");
-    val.classList.add("theme-fg-color4");
+    val.classList.add("theme-fg-color2");
     inner.appendChild(val);
 
     inner.appendChild(this.doc.createTextNode('"'));
@@ -743,8 +763,7 @@ ElementEditor.prototype = {
 
     const target = event.target;
 
-    if (Services.prefs.getBoolPref("devtools.inspector.flexboxHighlighter.enabled") &&
-        (target.dataset.display === "flex" || target.dataset.display === "inline-flex")) {
+    if (target.dataset.display === "flex" || target.dataset.display === "inline-flex") {
       // Stop tracking highlighter events to avoid flickering of the active class.
       this.stopTrackingFlexboxHighlighterEvents();
 
@@ -773,7 +792,7 @@ ElementEditor.prototype = {
 
   onCustomBadgeClick: function() {
     const { url, line } = this.node.customElementLocation;
-    this.markup.toolbox.viewSourceInDebugger(url, line, "show_custom_element");
+    this.markup.toolbox.viewSourceInDebugger(url, line, null, "show_custom_element");
   },
 
   onExpandBadgeClick: function() {

@@ -5,39 +5,39 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #if !defined(MozPromise_h_)
-#define MozPromise_h_
+#  define MozPromise_h_
 
-#include "mozilla/Logging.h"
-#include "mozilla/Maybe.h"
-#include "mozilla/Mutex.h"
-#include "mozilla/Monitor.h"
-#include "mozilla/RefPtr.h"
-#include "mozilla/Tuple.h"
-#include "mozilla/TypeTraits.h"
-#include "mozilla/Variant.h"
+#  include "mozilla/Logging.h"
+#  include "mozilla/Maybe.h"
+#  include "mozilla/Mutex.h"
+#  include "mozilla/Monitor.h"
+#  include "mozilla/RefPtr.h"
+#  include "mozilla/Tuple.h"
+#  include "mozilla/TypeTraits.h"
+#  include "mozilla/Variant.h"
 
-#include "nsISerialEventTarget.h"
-#include "nsTArray.h"
-#include "nsThreadUtils.h"
+#  include "nsISerialEventTarget.h"
+#  include "nsTArray.h"
+#  include "nsThreadUtils.h"
 
-#if MOZ_DIAGNOSTIC_ASSERT_ENABLED
-#define PROMISE_DEBUG
-#endif
+#  if MOZ_DIAGNOSTIC_ASSERT_ENABLED
+#    define PROMISE_DEBUG
+#  endif
 
-#ifdef PROMISE_DEBUG
-#define PROMISE_ASSERT MOZ_RELEASE_ASSERT
-#else
-#define PROMISE_ASSERT(...) \
-  do {                      \
-  } while (0)
-#endif
+#  ifdef PROMISE_DEBUG
+#    define PROMISE_ASSERT MOZ_RELEASE_ASSERT
+#  else
+#    define PROMISE_ASSERT(...) \
+      do {                      \
+      } while (0)
+#  endif
 
 namespace mozilla {
 
 extern LazyLogModule gMozPromiseLog;
 
-#define PROMISE_LOG(x, ...) \
-  MOZ_LOG(gMozPromiseLog, mozilla::LogLevel::Debug, (x, ##__VA_ARGS__))
+#  define PROMISE_LOG(x, ...) \
+    MOZ_LOG(gMozPromiseLog, mozilla::LogLevel::Debug, (x, ##__VA_ARGS__))
 
 namespace detail {
 template <typename F>
@@ -222,10 +222,10 @@ class MozPromise : public MozPromiseBase {
         mMutex("MozPromise Mutex"),
         mHaveRequest(false),
         mIsCompletionPromise(aIsCompletionPromise)
-#ifdef PROMISE_DEBUG
+#  ifdef PROMISE_DEBUG
         ,
         mMagic4(&mMutex)
-#endif
+#  endif
   {
     PROMISE_LOG("%s creating MozPromise (%p)", mCreationSite, this);
   }
@@ -244,6 +244,9 @@ class MozPromise : public MozPromiseBase {
   template <typename ResolveValueType_>
   static RefPtr<MozPromise> CreateAndResolve(ResolveValueType_&& aResolveValue,
                                              const char* aResolveSite) {
+    static_assert(IsConvertible<ResolveValueType_, ResolveValueT>::value,
+                  "Resolve() argument must be implicitly convertible to "
+                  "MozPromise's ResolveValueT");
     RefPtr<typename MozPromise::Private> p =
         new MozPromise::Private(aResolveSite);
     p->Resolve(std::forward<ResolveValueType_>(aResolveValue), aResolveSite);
@@ -253,6 +256,9 @@ class MozPromise : public MozPromiseBase {
   template <typename RejectValueType_>
   static RefPtr<MozPromise> CreateAndReject(RejectValueType_&& aRejectValue,
                                             const char* aRejectSite) {
+    static_assert(IsConvertible<RejectValueType_, RejectValueT>::value,
+                  "Reject() argument must be implicitly convertible to "
+                  "MozPromise's RejectValueT");
     RefPtr<typename MozPromise::Private> p =
         new MozPromise::Private(aRejectSite);
     p->Reject(std::forward<RejectValueType_>(aRejectValue), aRejectSite);
@@ -401,12 +407,12 @@ class MozPromise : public MozPromiseBase {
       MOZ_ASSERT(aResponseTarget);
     }
 
-#ifdef PROMISE_DEBUG
+#  ifdef PROMISE_DEBUG
     ~ThenValueBase() {
       mMagic1 = 0;
       mMagic2 = 0;
     }
-#endif
+#  endif
 
     void AssertIsDead() {
       PROMISE_ASSERT(mMagic1 == sMagic && mMagic2 == sMagic);
@@ -475,13 +481,13 @@ class MozPromise : public MozPromiseBase {
 
     nsCOMPtr<nsISerialEventTarget>
         mResponseTarget;  // May be released on any thread.
-#ifdef PROMISE_DEBUG
+#  ifdef PROMISE_DEBUG
     uint32_t mMagic1 = sMagic;
-#endif
+#  endif
     const char* mCallSite;
-#ifdef PROMISE_DEBUG
+#  ifdef PROMISE_DEBUG
     uint32_t mMagic2 = sMagic;
-#endif
+#  endif
   };
 
   /*
@@ -799,7 +805,9 @@ class MozPromise : public MozPromiseBase {
                    mMagic3 == sMagic && mMagic4 == &mMutex);
     RefPtr<ThenValueBase> thenValue = aThenValue;
     MutexAutoLock lock(mMutex);
-    MOZ_DIAGNOSTIC_ASSERT(!IsExclusive || !mHaveRequest);
+    MOZ_DIAGNOSTIC_ASSERT(
+        !IsExclusive || !mHaveRequest,
+        "Using an exclusive promise in a non-exclusive fashion");
     mHaveRequest = true;
     PROMISE_LOG("%s invoking Then() [this=%p, aThenValue=%p, isPending=%d]",
                 aCallSite, this, thenValue.get(), (int)IsPending());
@@ -910,7 +918,9 @@ class MozPromise : public MozPromiseBase {
   void ChainTo(already_AddRefed<Private> aChainedPromise,
                const char* aCallSite) {
     MutexAutoLock lock(mMutex);
-    MOZ_DIAGNOSTIC_ASSERT(!IsExclusive || !mHaveRequest);
+    MOZ_DIAGNOSTIC_ASSERT(
+        !IsExclusive || !mHaveRequest,
+        "Using an exclusive promise in a non-exclusive fashion");
     mHaveRequest = true;
     RefPtr<Private> chainedPromise = aChainedPromise;
     PROMISE_LOG(
@@ -981,35 +991,35 @@ class MozPromise : public MozPromiseBase {
       MOZ_ASSERT(mThenValues.IsEmpty());
       MOZ_ASSERT(mChainedPromises.IsEmpty());
     }
-#ifdef PROMISE_DEBUG
+#  ifdef PROMISE_DEBUG
     mMagic1 = 0;
     mMagic2 = 0;
     mMagic3 = 0;
     mMagic4 = nullptr;
-#endif
+#  endif
   };
 
   const char* mCreationSite;  // For logging
   Mutex mMutex;
   ResolveOrRejectValue mValue;
-#ifdef PROMISE_DEBUG
+#  ifdef PROMISE_DEBUG
   uint32_t mMagic1 = sMagic;
-#endif
+#  endif
   // Try shows we never have more than 3 elements when IsExclusive is false.
   // So '3' is a good value to avoid heap allocation in most cases.
   AutoTArray<RefPtr<ThenValueBase>, IsExclusive ? 1 : 3> mThenValues;
-#ifdef PROMISE_DEBUG
+#  ifdef PROMISE_DEBUG
   uint32_t mMagic2 = sMagic;
-#endif
+#  endif
   nsTArray<RefPtr<Private>> mChainedPromises;
-#ifdef PROMISE_DEBUG
+#  ifdef PROMISE_DEBUG
   uint32_t mMagic3 = sMagic;
-#endif
+#  endif
   bool mHaveRequest;
   const bool mIsCompletionPromise;
-#ifdef PROMISE_DEBUG
+#  ifdef PROMISE_DEBUG
   void* mMagic4;
-#endif
+#  endif
 };
 
 template <typename ResolveValueT, typename RejectValueT, bool IsExclusive>
@@ -1075,7 +1085,12 @@ class MozPromise<ResolveValueT, RejectValueT, IsExclusive>::Private
 };
 
 // A generic promise type that does the trick for simple use cases.
-typedef MozPromise<bool, nsresult, /* IsExclusive = */ false> GenericPromise;
+typedef MozPromise<bool, nsresult, /* IsExclusive = */ true> GenericPromise;
+
+// A generic, non-exclusive promise type that does the trick for simple use
+// cases.
+typedef MozPromise<bool, nsresult, /* IsExclusive = */ false>
+    GenericNonExclusivePromise;
 
 /*
  * Class to encapsulate a promise for a particular role. Use this as the member
@@ -1130,10 +1145,10 @@ class MozPromiseHolder {
 
   template <typename ResolveValueType_>
   void Resolve(ResolveValueType_&& aResolveValue, const char* aMethodName) {
-    static_assert(
-        IsConvertible<ResolveValueType_,
-                      typename PromiseType::ResolveValueType>::value,
-        "Resolve() argument must be convertible to MozPromise's ResolveValueT");
+    static_assert(IsConvertible<ResolveValueType_,
+                                typename PromiseType::ResolveValueType>::value,
+                  "Resolve() argument must be implicitly convertible to "
+                  "MozPromise's ResolveValueT");
 
     if (mMonitor) {
       mMonitor->AssertCurrentThreadOwns();
@@ -1154,10 +1169,10 @@ class MozPromiseHolder {
 
   template <typename RejectValueType_>
   void Reject(RejectValueType_&& aRejectValue, const char* aMethodName) {
-    static_assert(
-        IsConvertible<RejectValueType_,
-                      typename PromiseType::RejectValueType>::value,
-        "Reject() argument must be convertible to MozPromise's RejectValueT");
+    static_assert(IsConvertible<RejectValueType_,
+                                typename PromiseType::RejectValueType>::value,
+                  "Reject() argument must be implicitly convertible to "
+                  "MozPromise's RejectValueT");
 
     if (mMonitor) {
       mMonitor->AssertCurrentThreadOwns();
@@ -1462,9 +1477,9 @@ static auto InvokeAsync(nsISerialEventTarget* aTarget, const char* aCallerName,
                              std::forward<Function>(aFunction));
 }
 
-#undef PROMISE_LOG
-#undef PROMISE_ASSERT
-#undef PROMISE_DEBUG
+#  undef PROMISE_LOG
+#  undef PROMISE_ASSERT
+#  undef PROMISE_DEBUG
 
 }  // namespace mozilla
 

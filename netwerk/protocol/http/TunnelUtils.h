@@ -100,11 +100,11 @@ class TLSFilterTransaction;
 
 class NudgeTunnelCallback : public nsISupports {
  public:
-  virtual void OnTunnelNudged(TLSFilterTransaction *) = 0;
+  virtual nsresult OnTunnelNudged(TLSFilterTransaction *) = 0;
 };
 
 #define NS_DECL_NUDGETUNNELCALLBACK \
-  void OnTunnelNudged(TLSFilterTransaction *) override;
+  nsresult OnTunnelNudged(TLSFilterTransaction *) override;
 
 class TLSFilterTransaction final : public nsAHttpTransaction,
                                    public nsAHttpSegmentReader,
@@ -181,7 +181,7 @@ class TLSFilterTransaction final : public nsAHttpTransaction,
 
   nsresult mFilterReadCode;
   bool mForce;
-  bool mReadSegmentBlocked;
+  nsresult mReadSegmentReturnValue;
   uint32_t mNudgeCounter;
 };
 
@@ -272,6 +272,8 @@ class SpdyConnectTransaction final : public NullHttpTransaction {
   MOZ_MUST_USE nsresult WebsocketWriteSegments(nsAHttpSegmentWriter *writer,
                                                uint32_t count,
                                                uint32_t *countWritten);
+
+  bool mCreateShimErrorCalled;
 };
 
 }  // namespace net

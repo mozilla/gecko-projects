@@ -9,7 +9,7 @@
 #include "mozilla/dom/WorkerRunnable.h"
 #include "mozilla/ErrorResult.h"
 #include "nsGlobalWindowInner.h"
-#include "nsIDocument.h"
+#include "mozilla/dom/Document.h"
 #include "nsCOMPtr.h"
 #include "nsJSUtils.h"
 
@@ -90,9 +90,11 @@ class WorkerCSPCheckRunnable final : public WorkerMainThreadRunnable {
 
 }  // namespace
 
-/* static */ nsresult CSPEvalChecker::CheckForWindow(
-    JSContext* aCx, nsGlobalWindowInner* aWindow, const nsAString& aExpression,
-    bool* aAllowEval) {
+/* static */
+nsresult CSPEvalChecker::CheckForWindow(JSContext* aCx,
+                                        nsGlobalWindowInner* aWindow,
+                                        const nsAString& aExpression,
+                                        bool* aAllowEval) {
   MOZ_ASSERT(NS_IsMainThread());
   MOZ_ASSERT(aWindow);
   MOZ_ASSERT(aAllowEval);
@@ -102,7 +104,7 @@ class WorkerCSPCheckRunnable final : public WorkerMainThreadRunnable {
 
   // if CSP is enabled, and setTimeout/setInterval was called with a string,
   // disable the registration and log an error
-  nsCOMPtr<nsIDocument> doc = aWindow->GetExtantDoc();
+  nsCOMPtr<Document> doc = aWindow->GetExtantDoc();
   if (!doc) {
     // if there's no document, we don't have to do anything.
     *aAllowEval = true;
@@ -136,9 +138,11 @@ class WorkerCSPCheckRunnable final : public WorkerMainThreadRunnable {
   return NS_OK;
 }
 
-/* static */ nsresult CSPEvalChecker::CheckForWorker(
-    JSContext* aCx, WorkerPrivate* aWorkerPrivate, const nsAString& aExpression,
-    bool* aAllowEval) {
+/* static */
+nsresult CSPEvalChecker::CheckForWorker(JSContext* aCx,
+                                        WorkerPrivate* aWorkerPrivate,
+                                        const nsAString& aExpression,
+                                        bool* aAllowEval) {
   MOZ_ASSERT(aWorkerPrivate);
   aWorkerPrivate->AssertIsOnWorkerThread();
   MOZ_ASSERT(aAllowEval);

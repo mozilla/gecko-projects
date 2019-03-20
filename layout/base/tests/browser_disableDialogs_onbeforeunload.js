@@ -16,7 +16,7 @@ add_task(async function enableDialogs() {
   let dialogShown = false;
   function onDialogShown(node) {
     dialogShown = true;
-    let dismissButton = node.ui.button0;
+    let dismissButton = node.querySelector(".tabmodalprompt-button0");
     dismissButton.click();
   }
   let obsName = "tabmodal-dialog-loaded";
@@ -38,7 +38,7 @@ async function openPage(enableDialogs) {
     // Load the content script in the frame.
     let methodName = enableDialogs ? "enableDialogs" : "disableDialogs";
     await ContentTask.spawn(browser, methodName, async function(name) {
-      ChromeUtils.import("resource://gre/modules/Services.jsm");
+      const {Services} = ChromeUtils.import("resource://gre/modules/Services.jsm");
       Services.obs.addObserver(doc => {
         if (content && doc == content.document) {
           content.windowUtils[name]();

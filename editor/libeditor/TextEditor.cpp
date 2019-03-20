@@ -11,12 +11,14 @@
 #include "TextEditUtils.h"
 #include "gfxFontUtils.h"
 #include "mozilla/Assertions.h"
+#include "mozilla/ContentIterator.h"
 #include "mozilla/EditAction.h"
 #include "mozilla/EditorDOMPoint.h"
 #include "mozilla/HTMLEditor.h"
 #include "mozilla/IMEStateManager.h"
 #include "mozilla/mozalloc.h"
 #include "mozilla/Preferences.h"
+#include "mozilla/PresShell.h"
 #include "mozilla/TextEditRules.h"
 #include "mozilla/TextComposition.h"
 #include "mozilla/TextEvents.h"
@@ -39,10 +41,8 @@
 #include "nsIAbsorbingTransaction.h"
 #include "nsIClipboard.h"
 #include "nsIContent.h"
-#include "nsIContentIterator.h"
 #include "nsIDocumentEncoder.h"
 #include "nsINode.h"
-#include "nsIPresShell.h"
 #include "nsISelectionController.h"
 #include "nsISupportsPrimitives.h"
 #include "nsITransferable.h"
@@ -120,7 +120,7 @@ NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(TextEditor)
   NS_INTERFACE_MAP_ENTRY(nsIPlaintextEditor)
 NS_INTERFACE_MAP_END_INHERITING(EditorBase)
 
-nsresult TextEditor::Init(nsIDocument& aDoc, Element* aRoot,
+nsresult TextEditor::Init(Document& aDoc, Element* aRoot,
                           nsISelectionController* aSelCon, uint32_t aFlags,
                           const nsAString& aInitialValue) {
   if (mRules) {
@@ -198,8 +198,8 @@ nsresult TextEditor::EndEditorInit() {
   }
 
   nsresult rv = InitRules();
-  if (NS_FAILED(rv)) {
-    return rv;
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return EditorBase::ToGenericNSResult(rv);
   }
   // Throw away the old transaction manager if this is not the first time that
   // we're initializing the editor.
@@ -216,10 +216,12 @@ TextEditor::SetDocumentCharacterSet(const nsACString& characterSet) {
   }
 
   nsresult rv = EditorBase::SetDocumentCharacterSet(characterSet);
-  NS_ENSURE_SUCCESS(rv, rv);
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return EditorBase::ToGenericNSResult(rv);
+  }
 
   // Update META charset element.
-  nsCOMPtr<nsIDocument> doc = GetDocument();
+  RefPtr<Document> doc = GetDocument();
   if (NS_WARN_IF(!doc)) {
     return NS_ERROR_NOT_INITIALIZED;
   }
@@ -262,7 +264,7 @@ TextEditor::SetDocumentCharacterSet(const nsACString& characterSet) {
   return NS_OK;
 }
 
-bool TextEditor::UpdateMetaCharset(nsIDocument& aDocument,
+bool TextEditor::UpdateMetaCharset(Document& aDocument,
                                    const nsACString& aCharacterSet) {
   // get a list of META tags
   RefPtr<nsContentList> metaList =
@@ -406,11 +408,13 @@ nsresult TextEditor::OnInputText(const nsAString& aStringToInsert) {
   if (NS_WARN_IF(!editActionData.CanHandle())) {
     return NS_ERROR_NOT_INITIALIZED;
   }
+  MOZ_ASSERT(!aStringToInsert.IsVoid());
+  editActionData.SetData(aStringToInsert);
 
   AutoPlaceholderBatch treatAsOneTransaction(*this, *nsGkAtoms::TypingTxnName);
   nsresult rv = InsertTextAsSubAction(aStringToInsert);
   if (NS_WARN_IF(NS_FAILED(rv))) {
-    return rv;
+    return EditorBase::ToGenericNSResult(rv);
   }
   return NS_OK;
 }
@@ -426,7 +430,7 @@ nsresult TextEditor::InsertLineBreakAsAction() {
   AutoPlaceholderBatch treatAsOneTransaction(*this, *nsGkAtoms::TypingTxnName);
   nsresult rv = InsertLineBreakAsSubAction();
   if (NS_WARN_IF(NS_FAILED(rv))) {
-    return rv;
+    return EditorBase::ToGenericNSResult(rv);
   }
   return NS_OK;
 }
@@ -694,7 +698,7 @@ nsresult TextEditor::DeleteSelectionAsAction(EDirection aDirection,
         ErrorResult error;
         SelectionRefPtr()->CollapseToStart(error);
         if (NS_WARN_IF(error.Failed())) {
-          return error.StealNSResult();
+          return EditorBase::ToGenericNSResult(error.StealNSResult());
         }
         break;
       }
@@ -730,7 +734,7 @@ nsresult TextEditor::DeleteSelectionAsAction(EDirection aDirection,
   AutoPlaceholderBatch treatAsOneTransaction(*this, *nsGkAtoms::DeleteTxnName);
   nsresult rv = DeleteSelectionAsSubAction(aDirection, aStripWrappers);
   if (NS_WARN_IF(NS_FAILED(rv))) {
-    return rv;
+    return EditorBase::ToGenericNSResult(rv);
   }
   return NS_OK;
 }
@@ -982,11 +986,15 @@ nsresult TextEditor::InsertTextAsAction(const nsAString& aStringToInsert) {
   if (NS_WARN_IF(!editActionData.CanHandle())) {
     return NS_ERROR_NOT_INITIALIZED;
   }
+  // Note that we don't need to replace native line breaks with XP line breaks
+  // here because Chrome does not do it.
+  MOZ_ASSERT(!aStringToInsert.IsVoid());
+  editActionData.SetData(aStringToInsert);
 
   AutoPlaceholderBatch treatAsOneTransaction(*this);
   nsresult rv = InsertTextAsSubAction(aStringToInsert);
   if (NS_WARN_IF(NS_FAILED(rv))) {
-    return rv;
+    return EditorBase::ToGenericNSResult(rv);
   }
   return NS_OK;
 }
@@ -1051,7 +1059,7 @@ TextEditor::InsertLineBreak() {
   AutoPlaceholderBatch treatAsOneTransaction(*this);
   nsresult rv = InsertLineBreakAsSubAction();
   if (NS_WARN_IF(NS_FAILED(rv))) {
-    return rv;
+    return EditorBase::ToGenericNSResult(rv);
   }
   return NS_OK;
 }
@@ -1098,7 +1106,7 @@ nsresult TextEditor::SetText(const nsAString& aString) {
   AutoPlaceholderBatch treatAsOneTransaction(*this);
   nsresult rv = SetTextAsSubAction(aString);
   if (NS_WARN_IF(NS_FAILED(rv))) {
-    return rv;
+    return EditorBase::ToGenericNSResult(rv);
   }
   return NS_OK;
 }
@@ -1108,6 +1116,11 @@ nsresult TextEditor::ReplaceTextAsAction(
   AutoEditActionDataSetter editActionData(*this, EditAction::eReplaceText);
   if (NS_WARN_IF(!editActionData.CanHandle())) {
     return NS_ERROR_NOT_INITIALIZED;
+  }
+  if (!AsHTMLEditor()) {
+    editActionData.SetData(aString);
+  } else {
+    editActionData.InitializeDataTransfer(aString);
   }
 
   AutoPlaceholderBatch treatAsOneTransaction(*this);
@@ -1119,7 +1132,7 @@ nsresult TextEditor::ReplaceTextAsAction(
   if (!aReplaceRange) {
     nsresult rv = SetTextAsSubAction(aString);
     if (NS_WARN_IF(NS_FAILED(rv))) {
-      return rv;
+      return EditorBase::ToGenericNSResult(rv);
     }
     return NS_OK;
   }
@@ -1147,7 +1160,7 @@ nsresult TextEditor::ReplaceTextAsAction(
 
   rv = ReplaceSelectionAsSubAction(aString);
   if (NS_WARN_IF(NS_FAILED(rv))) {
-    return rv;
+    return EditorBase::ToGenericNSResult(rv);
   }
   return NS_OK;
 }
@@ -1185,18 +1198,25 @@ nsresult TextEditor::SetTextAsSubAction(const nsAString& aString) {
     // shouldn't receive such selectionchange before the first mutation.
     AutoUpdateViewBatch preventSelectionChangeEvent(*this);
 
+    Element* rootElement = GetRoot();
+    if (NS_WARN_IF(!rootElement)) {
+      return NS_ERROR_FAILURE;
+    }
+
     // We want to select trailing BR node to remove all nodes to replace all,
     // but TextEditor::SelectEntireDocument doesn't select that BR node.
     if (rules->DocumentIsEmpty()) {
-      // if it's empty, don't select entire doc - that would select
-      // the bogus node
-      Element* rootElement = GetRoot();
-      if (NS_WARN_IF(!rootElement)) {
-        return NS_ERROR_FAILURE;
-      }
       rv = SelectionRefPtr()->Collapse(rootElement, 0);
+      NS_WARNING_ASSERTION(
+          NS_SUCCEEDED(rv),
+          "Failed to move caret to start of the editor root element");
     } else {
-      rv = EditorBase::SelectEntireDocument();
+      ErrorResult error;
+      SelectionRefPtr()->SelectAllChildren(*rootElement, error);
+      NS_WARNING_ASSERTION(
+          !error.Failed(),
+          "Failed to select all children of the editor root element");
+      rv = error.StealNSResult();
     }
     if (NS_SUCCEEDED(rv)) {
       rv = ReplaceSelectionAsSubAction(aString);
@@ -1284,10 +1304,6 @@ nsresult TextEditor::OnCompositionChange(
     return NS_ERROR_NOT_INITIALIZED;
   }
 
-  if (!EnsureComposition(aCompositionChangeEvent)) {
-    return NS_OK;
-  }
-
   // If:
   // - new composition string is not empty,
   // - there is no composition string in the DOM tree,
@@ -1298,8 +1314,22 @@ nsresult TextEditor::OnCompositionChange(
     editActionData.UpdateEditAction(EditAction::eDeleteByComposition);
   }
 
-  nsIPresShell* presShell = GetPresShell();
-  if (NS_WARN_IF(!presShell)) {
+  // If Input Events Level 2 is enabled, EditAction::eDeleteByComposition is
+  // mapped to EditorInputType::eDeleteByComposition and it requires null
+  // for InputEvent.data.  Therefore, only otherwise, we should set data.
+  if (ToInputType(editActionData.GetEditAction()) !=
+      EditorInputType::eDeleteByComposition) {
+    MOZ_ASSERT(ToInputType(editActionData.GetEditAction()) ==
+               EditorInputType::eInsertCompositionText);
+    MOZ_ASSERT(!aCompositionChangeEvent.mData.IsVoid());
+    editActionData.SetData(aCompositionChangeEvent.mData);
+  }
+
+  if (!EnsureComposition(aCompositionChangeEvent)) {
+    return NS_OK;
+  }
+
+  if (NS_WARN_IF(!GetPresShell())) {
     return NS_ERROR_NOT_INITIALIZED;
   }
 
@@ -1318,7 +1348,7 @@ nsresult TextEditor::OnCompositionChange(
       compositionChangeEventHandlingMarker(mComposition,
                                            &aCompositionChangeEvent);
 
-  RefPtr<nsCaret> caretP = presShell->GetCaret();
+  RefPtr<nsCaret> caret = GetCaret();
 
   nsresult rv;
   {
@@ -1331,8 +1361,8 @@ nsresult TextEditor::OnCompositionChange(
     NS_WARNING_ASSERTION(NS_SUCCEEDED(rv),
                          "Failed to insert new composition string");
 
-    if (caretP) {
-      caretP->SetSelection(SelectionRefPtr());
+    if (caret) {
+      caret->SetSelection(SelectionRefPtr());
     }
   }
 
@@ -1345,7 +1375,10 @@ nsresult TextEditor::OnCompositionChange(
     NotifyEditorObservers(eNotifyEditorObserversOfEnd);
   }
 
-  return rv;
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return EditorBase::ToGenericNSResult(rv);
+  }
+  return NS_OK;
 }
 
 void TextEditor::OnCompositionEnd(
@@ -1360,6 +1393,16 @@ void TextEditor::OnCompositionEnd(
   AutoEditActionDataSetter editActionData(*this, editAction);
   if (NS_WARN_IF(!editActionData.CanHandle())) {
     return;
+  }
+  // If Input Events Level 2 is enabled, EditAction::eCancelComposition is
+  // mapped to EditorInputType::eDeleteCompositionText and it requires null
+  // for InputEvent.data.  Therefore, only otherwise, we should set data.
+  if (ToInputType(editAction) != EditorInputType::eDeleteCompositionText) {
+    MOZ_ASSERT(
+        ToInputType(editAction) == EditorInputType::eInsertCompositionText ||
+        ToInputType(editAction) == EditorInputType::eInsertFromComposition);
+    MOZ_ASSERT(!aCompositionEndEvent.mData.IsVoid());
+    editActionData.SetData(aCompositionEndEvent.mData);
   }
 
   // commit the IME transaction..we can get at it via the transaction mgr.
@@ -1455,12 +1498,11 @@ TextEditor::GetTextLength(int32_t* aCount) {
     return NS_ERROR_FAILURE;
   }
 
-  nsCOMPtr<nsIContentIterator> iter = NS_NewContentIterator();
-
   uint32_t totalLength = 0;
-  iter->Init(rootElement);
-  for (; !iter->IsDone(); iter->Next()) {
-    nsCOMPtr<nsINode> currentNode = iter->GetCurrentNode();
+  PostContentIterator postOrderIter;
+  postOrderIter.Init(rootElement);
+  for (; !postOrderIter.IsDone(); postOrderIter.Next()) {
+    nsCOMPtr<nsINode> currentNode = postOrderIter.GetCurrentNode();
     if (IsTextNode(currentNode) && IsEditable(currentNode)) {
       totalLength += currentNode->Length();
     }
@@ -1632,7 +1674,10 @@ TextEditor::Undo(uint32_t aCount) {
   }
 
   NotifyEditorObservers(eNotifyEditorObserversOfEnd);
-  return rv;
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return EditorBase::ToGenericNSResult(rv);
+  }
+  return NS_OK;
 }
 
 NS_IMETHODIMP
@@ -1691,7 +1736,10 @@ TextEditor::Redo(uint32_t aCount) {
   }
 
   NotifyEditorObservers(eNotifyEditorObserversOfEnd);
-  return rv;
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return EditorBase::ToGenericNSResult(rv);
+  }
+  return NS_OK;
 }
 
 bool TextEditor::CanCutOrCopy(PasswordFieldAllowed aPasswordFieldAllowed) {
@@ -1713,7 +1761,7 @@ bool TextEditor::FireClipboardEvent(EventMessage aEventMessage,
     CommitComposition();
   }
 
-  nsCOMPtr<nsIPresShell> presShell = GetPresShell();
+  RefPtr<PresShell> presShell = GetPresShell();
   if (NS_WARN_IF(!presShell)) {
     return false;
   }
@@ -1759,7 +1807,7 @@ TextEditor::CanCut(bool* aCanCut) {
   }
 
   // Cut is always enabled in HTML documents
-  nsCOMPtr<nsIDocument> doc = GetDocument();
+  RefPtr<Document> doc = GetDocument();
   *aCanCut = (doc && doc->IsHTMLOrXHTML()) ||
              (IsModifiable() && CanCutOrCopy(ePasswordFieldNotAllowed));
   return NS_OK;
@@ -1790,7 +1838,7 @@ TextEditor::CanCopy(bool* aCanCopy) {
   }
 
   // Copy is always enabled in HTML documents
-  nsCOMPtr<nsIDocument> doc = GetDocument();
+  RefPtr<Document> doc = GetDocument();
   *aCanCopy =
       (doc && doc->IsHTMLOrXHTML()) || CanCutOrCopy(ePasswordFieldNotAllowed);
   return NS_OK;
@@ -1831,7 +1879,7 @@ already_AddRefed<nsIDocumentEncoder> TextEditor::GetAndInitDocEncoder(
     docEncoder = mCachedDocumentEncoder;
   }
 
-  nsCOMPtr<nsIDocument> doc = GetDocument();
+  RefPtr<Document> doc = GetDocument();
   NS_ASSERTION(doc, "Need a document");
 
   nsresult rv = docEncoder->NativeInit(
@@ -1886,8 +1934,14 @@ TextEditor::OutputToString(const nsAString& aFormatType,
     return NS_ERROR_NOT_INITIALIZED;
   }
 
-  return ComputeValueInternal(aFormatType, aDocumentEncoderFlags,
-                              aOutputString);
+  nsresult rv =
+      ComputeValueInternal(aFormatType, aDocumentEncoderFlags, aOutputString);
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    // This is low level API for XUL applcation.  So, we should return raw
+    // error code here.
+    return rv;
+  }
+  return NS_OK;
 }
 
 nsresult TextEditor::ComputeValueInternal(const nsAString& aFormatType,
@@ -1938,7 +1992,7 @@ nsresult TextEditor::PasteAsQuotationAsAction(int32_t aClipboardType,
   MOZ_ASSERT(aClipboardType == nsIClipboard::kGlobalClipboard ||
              aClipboardType == nsIClipboard::kSelectionClipboard);
 
-  AutoEditActionDataSetter editActionData(*this, EditAction::ePaste);
+  AutoEditActionDataSetter editActionData(*this, EditAction::ePasteAsQuotation);
   if (NS_WARN_IF(!editActionData.CanHandle())) {
     return NS_ERROR_NOT_INITIALIZED;
   }
@@ -1957,7 +2011,7 @@ nsresult TextEditor::PasteAsQuotationAsAction(int32_t aClipboardType,
   nsCOMPtr<nsITransferable> trans;
   rv = PrepareTransferable(getter_AddRefs(trans));
   if (NS_WARN_IF(NS_FAILED(rv))) {
-    return rv;
+    return EditorBase::ToGenericNSResult(rv);
   }
   if (!trans) {
     return NS_OK;
@@ -1972,8 +2026,8 @@ nsresult TextEditor::PasteAsQuotationAsAction(int32_t aClipboardType,
   nsCOMPtr<nsISupports> genericDataObj;
   nsAutoCString flav;
   rv = trans->GetAnyTransferData(flav, getter_AddRefs(genericDataObj));
-  if (NS_FAILED(rv)) {
-    return rv;
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return EditorBase::ToGenericNSResult(rv);
   }
 
   if (!flav.EqualsLiteral(kUnicodeMime) &&
@@ -1984,11 +2038,12 @@ nsresult TextEditor::PasteAsQuotationAsAction(int32_t aClipboardType,
   if (nsCOMPtr<nsISupportsString> text = do_QueryInterface(genericDataObj)) {
     nsAutoString stuffToPaste;
     text->GetData(stuffToPaste);
+    editActionData.SetData(stuffToPaste);
     if (!stuffToPaste.IsEmpty()) {
       AutoPlaceholderBatch treatAsOneTransaction(*this);
       rv = InsertWithQuotationsAsSubAction(stuffToPaste);
       if (NS_WARN_IF(NS_FAILED(rv))) {
-        return rv;
+        return EditorBase::ToGenericNSResult(rv);
       }
     }
   }
@@ -2095,31 +2150,28 @@ nsresult TextEditor::SelectEntireDocument() {
     return NS_ERROR_NULL_POINTER;
   }
 
+  Element* rootElement = GetRoot();
+  if (NS_WARN_IF(!rootElement)) {
+    return NS_ERROR_NOT_INITIALIZED;
+  }
+
   // Protect the edit rules object from dying
   RefPtr<TextEditRules> rules(mRules);
 
-  // is doc empty?
+  // If we're empty, don't select all children because that would select the
+  // bogus node.
   if (rules->DocumentIsEmpty()) {
-    // get root node
-    Element* rootElement = GetRoot();
-    if (NS_WARN_IF(!rootElement)) {
-      return NS_ERROR_FAILURE;
-    }
-
-    // if it's empty don't select entire doc - that would select the bogus node
-    return SelectionRefPtr()->Collapse(rootElement, 0);
-  }
-
-  SelectionBatcher selectionBatcher(SelectionRefPtr());
-  nsresult rv = EditorBase::SelectEntireDocument();
-  if (NS_WARN_IF(NS_FAILED(rv))) {
+    nsresult rv = SelectionRefPtr()->Collapse(rootElement, 0);
+    NS_WARNING_ASSERTION(
+        NS_SUCCEEDED(rv),
+        "Failed to move caret to start of the editor root element");
     return rv;
   }
 
   // Don't select the trailing BR node if we have one
   nsCOMPtr<nsIContent> childNode;
-  rv = EditorBase::GetEndChildNode(*SelectionRefPtr(),
-                                   getter_AddRefs(childNode));
+  nsresult rv = EditorBase::GetEndChildNode(*SelectionRefPtr(),
+                                            getter_AddRefs(childNode));
   if (NS_WARN_IF(NS_FAILED(rv))) {
     return rv;
   }
@@ -2128,13 +2180,22 @@ nsresult TextEditor::SelectEntireDocument() {
   }
 
   if (childNode && TextEditUtils::IsMozBR(childNode)) {
-    int32_t parentOffset;
-    nsINode* parentNode = GetNodeLocation(childNode, &parentOffset);
-
-    return SelectionRefPtr()->Extend(parentNode, parentOffset);
+    ErrorResult error;
+    MOZ_KnownLive(SelectionRefPtr())
+        ->SetStartAndEndInLimiter(RawRangeBoundary(rootElement, 0),
+                                  EditorRawDOMPoint(childNode), error);
+    NS_WARNING_ASSERTION(!error.Failed(),
+                         "Failed to select all children of the editor root "
+                         "element except the moz-<br> element");
+    return error.StealNSResult();
   }
 
-  return NS_OK;
+  ErrorResult error;
+  SelectionRefPtr()->SelectAllChildren(*rootElement, error);
+  NS_WARNING_ASSERTION(
+      !error.Failed(),
+      "Failed to select all children of the editor root element");
+  return error.StealNSResult();
 }
 
 EventTarget* TextEditor::GetDOMEventTarget() { return mEventTarget; }
@@ -2152,7 +2213,11 @@ nsresult TextEditor::SetAttributeOrEquivalent(Element* aElement,
     return NS_ERROR_NOT_INITIALIZED;
   }
 
-  return SetAttributeWithTransaction(*aElement, *aAttribute, aValue);
+  nsresult rv = SetAttributeWithTransaction(*aElement, *aAttribute, aValue);
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return EditorBase::ToGenericNSResult(rv);
+  }
+  return NS_OK;
 }
 
 nsresult TextEditor::RemoveAttributeOrEquivalent(Element* aElement,
@@ -2167,7 +2232,11 @@ nsresult TextEditor::RemoveAttributeOrEquivalent(Element* aElement,
     return NS_ERROR_NOT_INITIALIZED;
   }
 
-  return RemoveAttributeWithTransaction(*aElement, *aAttribute);
+  nsresult rv = RemoveAttributeWithTransaction(*aElement, *aAttribute);
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return EditorBase::ToGenericNSResult(rv);
+  }
+  return NS_OK;
 }
 
 nsresult TextEditor::HideLastPasswordInput() {
@@ -2184,7 +2253,7 @@ nsresult TextEditor::HideLastPasswordInput() {
   RefPtr<TextEditRules> rules(mRules);
   nsresult rv = rules->HideLastPasswordInput();
   if (NS_WARN_IF(NS_FAILED(rv))) {
-    return rv;
+    return EditorBase::ToGenericNSResult(rv);
   }
   return NS_OK;
 }

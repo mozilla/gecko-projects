@@ -13,7 +13,9 @@
 
 #include "ds/TraceableFifo.h"
 #include "js/CharacterEncoding.h"
+#include "js/ContextOptions.h"  // JS::ContextOptions
 #include "js/GCVector.h"
+#include "js/Promise.h"
 #include "js/Result.h"
 #include "js/Utility.h"
 #include "js/Vector.h"
@@ -70,7 +72,44 @@ struct AutoResolving;
 
 struct HelperThread;
 
-using JobQueue = TraceableFifo<JSObject*, 0, SystemAllocPolicy>;
+class InternalJobQueue : public JS::JobQueue {
+ public:
+  explicit InternalJobQueue(JSContext* cx)
+      : queue(cx, SystemAllocPolicy()), draining_(false), interrupted_(false) {}
+  ~InternalJobQueue() = default;
+
+  // JS::JobQueue methods.
+  JSObject* getIncumbentGlobal(JSContext* cx) override;
+  bool enqueuePromiseJob(JSContext* cx, JS::HandleObject promise,
+                         JS::HandleObject job, JS::HandleObject allocationSite,
+                         JS::HandleObject incumbentGlobal) override;
+  void runJobs(JSContext* cx) override;
+  bool empty() const override;
+
+  // If we are currently in a call to runJobs(), make that call stop processing
+  // jobs once the current one finishes, and return. If we are not currently in
+  // a call to runJobs, make all future calls return immediately.
+  void interrupt() { interrupted_ = true; }
+
+  // Return the front element of the queue, or nullptr if the queue is empty.
+  // This is only used by shell testing functions.
+  JSObject* maybeFront() const;
+
+ private:
+  using Queue = js::TraceableFifo<JSObject*, 0, SystemAllocPolicy>;
+
+  JS::PersistentRooted<Queue> queue;
+
+  // True if we are in the midst of draining jobs from this queue. We use this
+  // to avoid re-entry (nested calls simply return immediately).
+  bool draining_;
+
+  // True if we've been asked to interrupt draining jobs. Set by interrupt().
+  bool interrupted_;
+
+  class SavedQueue;
+  js::UniquePtr<JobQueue::SavedJobQueue> saveJobQueue(JSContext*) override;
+};
 
 class AutoLockScriptData;
 
@@ -163,13 +202,13 @@ struct JSContext : public JS::RootingContext,
     return thing->compartment() == compartment();
   }
 
-  void* onOutOfMemory(js::AllocFunction allocFunc, size_t nbytes,
-                      void* reallocPtr = nullptr) {
+  void* onOutOfMemory(js::AllocFunction allocFunc, arena_id_t arena,
+                      size_t nbytes, void* reallocPtr = nullptr) {
     if (helperThread()) {
       addPendingOutOfMemory();
       return nullptr;
     }
-    return runtime_->onOutOfMemory(allocFunc, nbytes, reallocPtr, this);
+    return runtime_->onOutOfMemory(allocFunc, arena, nbytes, reallocPtr, this);
   }
 
   /* Clear the pending exception (if any) due to OOM. */
@@ -191,7 +230,7 @@ struct JSContext : public JS::RootingContext,
       return nullptr;
     }
     p = static_cast<T*>(
-        runtime()->onOutOfMemoryCanGC(js::AllocFunction::Calloc, bytes));
+        runtime()->onOutOfMemoryCanGC(js::AllocFunction::Calloc, arena, bytes));
     if (!p) {
       return nullptr;
     }
@@ -228,7 +267,6 @@ struct JSContext : public JS::RootingContext,
   js::WellKnownSymbols& wellKnownSymbols() {
     return *runtime_->wellKnownSymbols;
   }
-  const JS::AsmJSCacheOps& asmJSCacheOps() { return runtime_->asmJSCacheOps; }
   js::PropertyName* emptyString() { return runtime_->emptyString; }
   js::FreeOp* defaultFreeOp() { return runtime_->defaultFreeOp(); }
   void* stackLimitAddress(JS::StackKind kind) {
@@ -680,10 +718,6 @@ struct JSContext : public JS::RootingContext,
 
   bool runtimeMatches(JSRuntime* rt) const { return runtime_ == rt; }
 
-  js::ThreadData<bool> jitIsBroken;
-
-  void updateJITEnabled();
-
  private:
   /*
    * Youngest frame of a saved stack that will be picked up as an async stack
@@ -739,7 +773,7 @@ struct JSContext : public JS::RootingContext,
       AllowCrossRealm allowCrossRealm = AllowCrossRealm::DontAllow) const;
 
   inline js::Nursery& nursery();
-  inline void minorGC(JS::gcreason::Reason reason);
+  inline void minorGC(JS::GCReason reason);
 
  public:
   bool isExceptionPending() const { return throwing; }
@@ -842,6 +876,9 @@ struct JSContext : public JS::RootingContext,
   void* addressOfJitStackLimitNoInterrupt() {
     return &jitStackLimitNoInterrupt;
   }
+  void* addressOfZone() { return &zone_; }
+
+  const void* addressOfRealm() const { return &realm_; }
 
   // Futex state, used by Atomics.wait() and Atomics.wake() on the Atomics
   // object.
@@ -889,20 +926,25 @@ struct JSContext : public JS::RootingContext,
   // Like jitStackLimit, but not reset to trigger interrupts.
   js::ThreadData<uintptr_t> jitStackLimitNoInterrupt;
 
-  // Promise callbacks.
-  js::ThreadData<JSGetIncumbentGlobalCallback> getIncumbentGlobalCallback;
-  js::ThreadData<JSEnqueuePromiseJobCallback> enqueuePromiseJobCallback;
-  js::ThreadData<void*> enqueuePromiseJobCallbackData;
-
   // Queue of pending jobs as described in ES2016 section 8.4.
-  // Only used if internal job queue handling was activated using
-  // `js::UseInternalJobQueues`.
-  js::ThreadData<JS::PersistentRooted<js::JobQueue>*> jobQueue;
-  js::ThreadData<bool> drainingJobQueue;
-  js::ThreadData<bool> stopDrainingJobQueue;
+  //
+  // This is a non-owning pointer to either:
+  // - a JobQueue implementation the embedding provided by calling
+  //   JS::SetJobQueue, owned by the embedding, or
+  // - our internal JobQueue implementation, established by calling
+  //   js::UseInternalJobQueues, owned by JSContext::internalJobQueue below.
+  js::ThreadData<JS::JobQueue*> jobQueue;
+
+  // If the embedding has called js::UseInternalJobQueues, this is the owning
+  // pointer to our internal JobQueue implementation, which JSContext::jobQueue
+  // borrows.
+  js::ThreadData<js::UniquePtr<js::InternalJobQueue>> internalJobQueue;
+
+  // True if jobQueue is empty, or we are running the last job in the queue.
+  // Such conditions permit optimizations around `await` expressions.
   js::ThreadData<bool> canSkipEnqueuingJobs;
 
-  js::ThreadData<JSPromiseRejectionTrackerCallback>
+  js::ThreadData<JS::PromiseRejectionTrackerCallback>
       promiseRejectionTrackerCallback;
   js::ThreadData<void*> promiseRejectionTrackerCallbackData;
 
@@ -1062,13 +1104,7 @@ extern void ReportIsNotDefined(JSContext* cx, HandleId id);
 /*
  * Report an attempt to access the property of a null or undefined value (v).
  */
-extern void ReportIsNullOrUndefinedForPropertyAccess(JSContext* cx,
-                                                     HandleValue v,
-                                                     bool reportScanStack);
-extern void ReportIsNullOrUndefinedForPropertyAccess(JSContext* cx,
-                                                     HandleValue v,
-                                                     HandleId key,
-                                                     bool reportScanStack);
+extern void ReportIsNullOrUndefined(JSContext* cx, int spindex, HandleValue v);
 
 extern void ReportMissingArg(JSContext* cx, js::HandleValue v, unsigned arg);
 

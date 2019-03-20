@@ -151,7 +151,10 @@ MODERN_MERCURIAL_VERSION = LooseVersion('4.3.3')
 MODERN_PYTHON_VERSION = LooseVersion('2.7.3')
 
 # Upgrade rust older than this.
-MODERN_RUST_VERSION = LooseVersion('1.30.1')
+MODERN_RUST_VERSION = LooseVersion('1.32.0')
+
+# Upgrade nasm older than this.
+MODERN_NASM_VERSION = LooseVersion('2.14')
 
 
 class BaseBootstrapper(object):
@@ -216,7 +219,7 @@ class BaseBootstrapper(object):
         Install packages required to build Firefox for Android (application
         'mobile/android', also known as Fennec).
         '''
-        raise NotImplementedError('Cannot bootstrap Firefox for Android: '
+        raise NotImplementedError('Cannot bootstrap GeckoView/Firefox for Android: '
                                   '%s does not yet implement install_mobile_android_packages()'
                                   % __name__)
 
@@ -225,7 +228,7 @@ class BaseBootstrapper(object):
         Print a message to the console detailing what the user's mozconfig
         should contain.
 
-        Firefox for Android needs an application and an ABI set, and it needs
+        GeckoView/Firefox for Android needs an application and an ABI set, and it needs
         paths to the Android SDK and NDK.
         '''
         raise NotImplementedError('%s does not yet implement suggest_mobile_android_mozconfig()' %
@@ -233,11 +236,11 @@ class BaseBootstrapper(object):
 
     def install_mobile_android_artifact_mode_packages(self):
         '''
-        Install packages required to build Firefox for Android (application
+        Install packages required to build GeckoView/Firefox for Android (application
         'mobile/android', also known as Fennec) in Artifact Mode.
         '''
         raise NotImplementedError(
-            'Cannot bootstrap Firefox for Android Artifact Mode: '
+            'Cannot bootstrap GeckoView/Firefox for Android Artifact Mode: '
             '%s does not yet implement install_mobile_android_artifact_mode_packages()'
             % __name__)
 
@@ -246,14 +249,14 @@ class BaseBootstrapper(object):
         Print a message to the console detailing what the user's mozconfig
         should contain.
 
-        Firefox for Android Artifact Mode needs an application and an ABI set,
+        GeckoView/Firefox for Android Artifact Mode needs an application and an ABI set,
         and it needs paths to the Android SDK.
         '''
         raise NotImplementedError(
             '%s does not yet implement suggest_mobile_android_artifact_mode_mozconfig()'
             % __name__)
 
-    def ensure_clang_static_analysis_package(self, checkout_root):
+    def ensure_clang_static_analysis_package(self, state_dir, checkout_root):
         '''
         Install the clang static analysis package
         '''
@@ -269,6 +272,14 @@ class BaseBootstrapper(object):
             '%s does not yet implement ensure_stylo_packages()'
             % __name__)
 
+    def ensure_nasm_packages(self, state_dir, checkout_root):
+        '''
+        Install nasm.
+        '''
+        raise NotImplementedError(
+            '%s does not yet implement ensure_nasm_packages()'
+            % __name__)
+
     def ensure_node_packages(self, state_dir, checkout_root):
         '''
         Install any necessary packages needed to supply NodeJS'''
@@ -276,23 +287,15 @@ class BaseBootstrapper(object):
             '%s does not yet implement ensure_node_packages()'
             % __name__)
 
-    def install_toolchain_static_analysis(self, checkout_root):
-        mach_binary = os.path.join(checkout_root, 'mach')
-        mach_binary = os.path.abspath(mach_binary)
-        if not os.path.exists(mach_binary):
-            raise ValueError("mach not found at %s" % mach_binary)
+    def install_toolchain_static_analysis(self, state_dir, checkout_root, toolchain_job):
+        clang_tools_path = os.path.join(state_dir, 'clang-tools')
+        import shutil
+        if os.path.exists(clang_tools_path):
+            shutil.rmtree(clang_tools_path)
 
-        if not sys.executable:
-            raise ValueError("cannot determine path to Python executable")
-
-        cmd = [sys.executable, mach_binary, 'static-analysis', 'install',
-               '--force', '--minimal-install']
-
-        from subprocess import CalledProcessError
-        try:
-            subprocess.check_call(cmd)
-        except CalledProcessError as e:
-            print(e.output)
+        # Re-create the directory for clang_tools
+        os.mkdir(clang_tools_path)
+        self.install_toolchain_artifact(clang_tools_path, checkout_root, toolchain_job)
 
     def install_toolchain_artifact(self, state_dir, checkout_root, toolchain_job):
         mach_binary = os.path.join(checkout_root, 'mach')
@@ -461,7 +464,7 @@ class BaseBootstrapper(object):
         This should be defined in child classes.
         """
 
-    def _parse_version(self, path, name=None, env=None):
+    def _parse_version_impl(self, path, name, env, version_param):
         '''Execute the given path, returning the version.
 
         Invokes the path argument with the --version switch
@@ -481,7 +484,7 @@ class BaseBootstrapper(object):
         if name.endswith('.exe'):
             name = name[:-4]
 
-        info = self.check_output([path, '--version'],
+        info = self.check_output([path, version_param],
                                  env=env,
                                  stderr=subprocess.STDOUT)
         match = re.search(name + ' ([a-z0-9\.]+)', info)
@@ -490,6 +493,12 @@ class BaseBootstrapper(object):
             return None
 
         return LooseVersion(match.group(1))
+
+    def _parse_version(self, path, name=None, env=None):
+        return self._parse_version_impl(path, name, env, "--version")
+
+    def _parse_version_short(self, path, name=None, env=None):
+        return self._parse_version_impl(path, name, env, "-v")
 
     def _hg_cleanenv(self, load_hgrc=False):
         """ Returns a copy of the current environment updated with the HGPLAIN
@@ -601,6 +610,17 @@ class BaseBootstrapper(object):
         """
         print(PYTHON_UNABLE_UPGRADE % (current, MODERN_PYTHON_VERSION))
 
+    def is_nasm_modern(self):
+        nasm = self.which('nasm')
+        if not nasm:
+            return False
+
+        our = self._parse_version_short(nasm, 'version')
+        if not our:
+            return False
+
+        return our >= MODERN_NASM_VERSION
+
     def is_rust_modern(self, cargo_bin):
         rustc = self.which('rustc', cargo_bin)
         if not rustc:
@@ -690,6 +710,16 @@ class BaseBootstrapper(object):
         if rust.platform() == win64 and win32 not in targets:
             subprocess.check_call([rustup, 'target', 'add', win32])
 
+        if 'mobile_android' in self.application:
+            # Let's add the most common targets.
+            android_targets = ('armv7-linux-androideabi',
+                               'aarch64-linux-android',
+                               'i686-linux-android',
+                               'x86_64-linux-android', )
+            for target in android_targets:
+                if target not in targets:
+                    subprocess.check_call([rustup, 'target', 'add', target])
+
     def upgrade_rust(self, rustup):
         """Upgrade Rust.
 
@@ -747,3 +777,57 @@ class BaseBootstrapper(object):
         if h.hexdigest() != hexhash:
             os.remove(dest)
             raise ValueError('Hash of downloaded file does not match expected hash')
+
+    def ensure_java(self, extra_search_dirs=()):
+        """Verify the presence of java.
+
+        Note that we currently require a JDK (not just a JRE) because we
+        use `jarsigner` in local builds.
+
+        Soon we won't require Java 1.8 to build (after Bug 1515248 and
+        we use Android-Gradle plugin 3.2.1), but the Android
+        `sdkmanager` tool still requires exactly 1.8.  Sigh.  Note that
+        we no longer require javac explicitly; it's fetched by
+        Gradle.
+        """
+
+        if 'JAVA_HOME' in os.environ:
+            extra_search_dirs += (os.path.join(os.environ['JAVA_HOME'], 'bin'),)
+        java = self.which('java', extra_search_dirs)
+
+        if not java:
+            raise Exception('You need to have Java version 1.8 installed. '
+                            'Please visit http://www.java.com/en/download '
+                            'to get version 1.8.')
+
+        try:
+            output = subprocess.check_output([java,
+                                              '-XshowSettings:properties',
+                                              '-version'],
+                                             stderr=subprocess.STDOUT).rstrip()
+
+            # -version strings are pretty free-form, like: 'java version
+            # "1.8.0_192"' or 'openjdk version "11.0.1" 2018-10-16', but the
+            # -XshowSettings:properties gives the information (to stderr, sigh)
+            # like 'java.specification.version = 8'.  That flag is non-standard
+            # but has been around since at least 2011.
+            version = [line for line in output.splitlines()
+                       if 'java.specification.version' in line]
+            if not len(version) == 1:
+                raise Exception('You need to have Java version 1.8 installed '
+                                '(found {} but could not parse version "{}"). '
+                                'Check the JAVA_HOME environment variable. '
+                                'Please visit http://www.java.com/en/download '
+                                'to get version 1.8.'.format(java, output))
+
+            version = version[0].split(' = ')[-1]
+            if version not in ['1.8', '8']:
+                raise Exception('You need to have Java version 1.8 installed '
+                                '(found {} with version "{}"). '
+                                'Check the JAVA_HOME environment variable. '
+                                'Please visit http://www.java.com/en/download '
+                                'to get version 1.8.'.format(java, version))
+        except subprocess.CalledProcessError as e:
+            raise Exception('Failed to get java version from {}: {}'.format(java, e.output))
+
+        print('Your version of Java ({}) is at least 1.8 ({}).'.format(java, version))

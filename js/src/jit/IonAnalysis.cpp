@@ -95,7 +95,8 @@ static bool DepthFirstSearchUse(MIRGenerator* mir,
       }
 
       MPhi* cphi = cdef->toPhi();
-      if (cphi->getUsageAnalysis() == PhiUsage::Used || cphi->isUseRemoved()) {
+      if (cphi->getUsageAnalysis() == PhiUsage::Used || cphi->isUseRemoved() ||
+          cphi->isImplicitlyUsed()) {
         // The information got cached on the Phi the last time it
         // got visited, or when flagging operands of removed
         // instructions.
@@ -225,7 +226,8 @@ static bool FlagPhiInputsAsHavingRemovedUses(MIRGenerator* mir,
 
     // If the Phi is either Used or Unused, set the UseRemoved flag
     // accordingly.
-    if (phi->getUsageAnalysis() == PhiUsage::Used || phi->isUseRemoved()) {
+    if (phi->getUsageAnalysis() == PhiUsage::Used || phi->isUseRemoved() ||
+        phi->isImplicitlyUsed()) {
       def->setUseRemoved();
       continue;
     } else if (phi->getUsageAnalysis() == PhiUsage::Unused) {
@@ -1282,11 +1284,37 @@ bool jit::EliminateDeadResumePointOperands(MIRGenerator* mir, MIRGraph& graph) {
 
 // Test whether |def| would be needed if it had no uses.
 bool js::jit::DeadIfUnused(const MDefinition* def) {
-  return !def->isEffectful() &&
-         (!def->isGuard() ||
-          def->block() == def->block()->graph().osrBlock()) &&
-         !def->isGuardRangeBailouts() && !def->isControlInstruction() &&
-         (!def->isInstruction() || !def->toInstruction()->resumePoint());
+  // Effectful instructions of course cannot be removed.
+  if (def->isEffectful()) {
+    return false;
+  }
+
+  // Guard instructions by definition are live if they have no uses, however,
+  // in the OSR block we are able to eliminate these guards, as some are
+  // artificially created and superceeded by failible unboxes.
+  if (def->isGuard() && (def->block() != def->block()->graph().osrBlock() ||
+                         def->isImplicitlyUsed())) {
+    return false;
+  }
+
+  // Required to be preserved, as the type guard related to this instruction
+  // is part of the semantics of a transformation.
+  if (def->isGuardRangeBailouts()) {
+    return false;
+  }
+
+  // Control instructions have no uses, but also shouldn't be optimized out
+  if (def->isControlInstruction()) {
+    return false;
+  }
+
+  // Used when lowering to generate the corresponding snapshots and aggregate
+  // the list of recover instructions to be repeated.
+  if (def->isInstruction() && def->toInstruction()->resumePoint()) {
+    return false;
+  }
+
+  return true;
 }
 
 // Test whether |def| may be safely discarded, due to being dead or due to being
@@ -2298,7 +2326,8 @@ static bool IsRegExpHoistableCall(CompileRuntime* runtime, MCall* call,
     return IsExclusiveFirstArg(call, def);
   }
 
-  if (name == runtime->names().RegExp_prototype_Exec) {
+  if (name == runtime->names().RegExp_prototype_Exec ||
+      name == runtime->names().CallRegExpMethodIfWrapped) {
     return IsExclusiveThisArg(call, def);
   }
 
@@ -2342,7 +2371,8 @@ static bool CanCompareRegExp(MCompare* compare, MDefinition* def) {
       value->mightBeType(MIRType::Int32) ||
       value->mightBeType(MIRType::Double) ||
       value->mightBeType(MIRType::Float32) ||
-      value->mightBeType(MIRType::Symbol)) {
+      value->mightBeType(MIRType::Symbol) ||
+      value->mightBeType(MIRType::BigInt)) {
     return false;
   }
 
@@ -2889,14 +2919,14 @@ static void CheckOperand(const MNode* consumer, const MUse* use,
   MOZ_ASSERT(!producer->isDiscarded());
   MOZ_ASSERT(producer->block() != nullptr);
   MOZ_ASSERT(use->consumer() == consumer);
-#ifdef _DEBUG_CHECK_OPERANDS_USES_BALANCE
+#  ifdef _DEBUG_CHECK_OPERANDS_USES_BALANCE
   Fprinter print(stderr);
   print.printf("==Check Operand\n");
   use->producer()->dump(print);
   print.printf("  index: %zu\n", use->consumer()->indexOf(use));
   use->consumer()->dump(print);
   print.printf("==End\n");
-#endif
+#  endif
   --*usesBalance;
 }
 
@@ -2907,14 +2937,14 @@ static void CheckUse(const MDefinition* producer, const MUse* use,
                 !use->consumer()->toDefinition()->isDiscarded());
   MOZ_ASSERT(use->consumer()->block() != nullptr);
   MOZ_ASSERT(use->consumer()->getOperand(use->index()) == producer);
-#ifdef _DEBUG_CHECK_OPERANDS_USES_BALANCE
+#  ifdef _DEBUG_CHECK_OPERANDS_USES_BALANCE
   Fprinter print(stderr);
   print.printf("==Check Use\n");
   use->producer()->dump(print);
   print.printf("  index: %zu\n", use->consumer()->indexOf(use));
   use->consumer()->dump(print);
   print.printf("==End\n");
-#endif
+#  endif
   ++*usesBalance;
 }
 
@@ -3174,6 +3204,7 @@ static bool IsResumableMIRType(MIRType type) {
     case MIRType::Float32:
     case MIRType::String:
     case MIRType::Symbol:
+    case MIRType::BigInt:
     case MIRType::Object:
     case MIRType::MagicOptimizedArguments:
     case MIRType::MagicOptimizedOut:
@@ -3200,6 +3231,7 @@ static bool IsResumableMIRType(MIRType type) {
     case MIRType::Doublex2:  // NYI, see also RSimdBox::recover
     case MIRType::SinCosDouble:
     case MIRType::Int64:
+    case MIRType::RefOrNull:
       return false;
   }
   MOZ_CRASH("Unknown MIRType.");
@@ -3417,6 +3449,14 @@ static MathSpace ExtractMathSpace(MDefinition* ins) {
   MOZ_MAKE_COMPILER_ASSUME_IS_UNREACHABLE("Unknown TruncateKind");
 }
 
+static bool MonotoneAdd(int32_t lhs, int32_t rhs) {
+  return (lhs >= 0 && rhs >= 0) || (lhs <= 0 && rhs <= 0);
+}
+
+static bool MonotoneSub(int32_t lhs, int32_t rhs) {
+  return (lhs >= 0 && rhs <= 0) || (lhs <= 0 && rhs >= 0);
+}
+
 // Extract a linear sum from ins, if possible (otherwise giving the
 // sum 'ins + 0').
 SimpleLinearSum jit::ExtractLinearSum(MDefinition* ins, MathSpace space) {
@@ -3466,7 +3506,8 @@ SimpleLinearSum jit::ExtractLinearSum(MDefinition* ins, MathSpace space) {
     int32_t constant;
     if (space == MathSpace::Modulo) {
       constant = uint32_t(lsum.constant) + uint32_t(rsum.constant);
-    } else if (!SafeAdd(lsum.constant, rsum.constant, &constant)) {
+    } else if (!SafeAdd(lsum.constant, rsum.constant, &constant) ||
+               !MonotoneAdd(lsum.constant, rsum.constant)) {
       return SimpleLinearSum(ins, 0);
     }
     return SimpleLinearSum(lsum.term ? lsum.term : rsum.term, constant);
@@ -3478,7 +3519,8 @@ SimpleLinearSum jit::ExtractLinearSum(MDefinition* ins, MathSpace space) {
     int32_t constant;
     if (space == MathSpace::Modulo) {
       constant = uint32_t(lsum.constant) - uint32_t(rsum.constant);
-    } else if (!SafeSub(lsum.constant, rsum.constant, &constant)) {
+    } else if (!SafeSub(lsum.constant, rsum.constant, &constant) ||
+               !MonotoneSub(lsum.constant, rsum.constant)) {
       return SimpleLinearSum(ins, 0);
     }
     return SimpleLinearSum(lsum.term, constant);
@@ -4755,6 +4797,16 @@ bool jit::AnalyzeArgumentsUsage(JSContext* cx, JSScript* scriptArg) {
     return true;
   }
 
+  // Check this before calling ensureJitRealmExists, so we're less
+  // likely to report OOM in JSRuntime::createJitRuntime.
+  if (!jit::CanLikelyAllocateMoreExecutableMemory()) {
+    return true;
+  }
+
+  if (!cx->realm()->ensureJitRealmExists(cx)) {
+    return false;
+  }
+
   AutoKeepTypeScripts keepTypes(cx);
   if (!script->ensureHasTypes(cx, keepTypes)) {
     return false;
@@ -4768,14 +4820,6 @@ bool jit::AnalyzeArgumentsUsage(JSContext* cx, JSScript* scriptArg) {
   LifoAlloc alloc(TempAllocator::PreferredLifoChunkSize);
   TempAllocator temp(&alloc);
   JitContext jctx(cx, &temp);
-
-  if (!jit::CanLikelyAllocateMoreExecutableMemory()) {
-    return true;
-  }
-
-  if (!cx->realm()->ensureJitRealmExists(cx)) {
-    return false;
-  }
 
   MIRGraph graph(&temp);
   InlineScriptTree* inlineScriptTree =
@@ -4860,8 +4904,12 @@ bool jit::AnalyzeArgumentsUsage(JSContext* cx, JSScript* scriptArg) {
   // formals which may be stored as part of a call object, don't use lazy
   // arguments. The compiler can then assume that accesses through
   // arguments[i] will be on unaliased variables.
-  if (script->funHasAnyAliasedFormal() && argumentsContentsObserved) {
-    return true;
+  if (argumentsContentsObserved) {
+    for (PositionalFormalParameterIter fi(script); fi; fi++) {
+      if (fi.closedOver()) {
+        return true;
+      }
+    }
   }
 
   script->setNeedsArgsObj(false);

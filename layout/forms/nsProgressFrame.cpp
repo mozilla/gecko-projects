@@ -10,7 +10,7 @@
 #include "nsPresContext.h"
 #include "nsGkAtoms.h"
 #include "nsNameSpaceManager.h"
-#include "nsIDocument.h"
+#include "mozilla/dom/Document.h"
 #include "nsIPresShell.h"
 #include "nsNodeInfoManager.h"
 #include "nsContentCreatorFunctions.h"
@@ -26,13 +26,14 @@ using namespace mozilla;
 using namespace mozilla::dom;
 
 nsIFrame* NS_NewProgressFrame(nsIPresShell* aPresShell, ComputedStyle* aStyle) {
-  return new (aPresShell) nsProgressFrame(aStyle);
+  return new (aPresShell) nsProgressFrame(aStyle, aPresShell->GetPresContext());
 }
 
 NS_IMPL_FRAMEARENA_HELPERS(nsProgressFrame)
 
-nsProgressFrame::nsProgressFrame(ComputedStyle* aStyle)
-    : nsContainerFrame(aStyle, kClassID), mBarDiv(nullptr) {}
+nsProgressFrame::nsProgressFrame(ComputedStyle* aStyle,
+                                 nsPresContext* aPresContext)
+    : nsContainerFrame(aStyle, aPresContext, kClassID), mBarDiv(nullptr) {}
 
 nsProgressFrame::~nsProgressFrame() {}
 
@@ -49,11 +50,11 @@ void nsProgressFrame::DestroyFrom(nsIFrame* aDestructRoot,
 nsresult nsProgressFrame::CreateAnonymousContent(
     nsTArray<ContentInfo>& aElements) {
   // Create the progress bar div.
-  nsCOMPtr<nsIDocument> doc = mContent->GetComposedDoc();
+  nsCOMPtr<Document> doc = mContent->GetComposedDoc();
   mBarDiv = doc->CreateHTMLElement(nsGkAtoms::div);
 
   // Associate ::-moz-progress-bar pseudo-element to the anonymous child.
-  mBarDiv->SetPseudoElementType(CSSPseudoElementType::mozProgressBar);
+  mBarDiv->SetPseudoElementType(PseudoStyleType::mozProgressBar);
 
   if (!aElements.AppendElement(mBarDiv)) {
     return NS_ERROR_OUT_OF_MEMORY;
@@ -70,8 +71,8 @@ void nsProgressFrame::AppendAnonymousContentTo(nsTArray<nsIContent*>& aElements,
 }
 
 NS_QUERYFRAME_HEAD(nsProgressFrame)
-NS_QUERYFRAME_ENTRY(nsProgressFrame)
-NS_QUERYFRAME_ENTRY(nsIAnonymousContentCreator)
+  NS_QUERYFRAME_ENTRY(nsProgressFrame)
+  NS_QUERYFRAME_ENTRY(nsIAnonymousContentCreator)
 NS_QUERYFRAME_TAIL_INHERITING(nsContainerFrame)
 
 void nsProgressFrame::BuildDisplayList(nsDisplayListBuilder* aBuilder,

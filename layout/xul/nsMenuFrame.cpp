@@ -17,7 +17,7 @@
 #include "nsNameSpaceManager.h"
 #include "nsMenuPopupFrame.h"
 #include "nsMenuBarFrame.h"
-#include "nsIDocument.h"
+#include "mozilla/dom/Document.h"
 #include "nsIComponentManager.h"
 #include "nsBoxLayoutState.h"
 #include "nsIScrollableFrame.h"
@@ -51,7 +51,7 @@ using namespace mozilla;
 #define NS_MENU_POPUP_LIST_INDEX 0
 
 #if defined(XP_WIN)
-#define NSCONTEXTMENUISMOUSEUP 1
+#  define NSCONTEXTMENUISMOUSEUP 1
 #endif
 
 NS_DECLARE_FRAME_PROPERTY_FRAMELIST(PopupListProperty)
@@ -142,13 +142,15 @@ class nsMenuAttributeChangedEvent : public Runnable {
 // Wrappers for creating a new menu popup container
 //
 nsIFrame* NS_NewMenuFrame(nsIPresShell* aPresShell, ComputedStyle* aStyle) {
-  nsMenuFrame* it = new (aPresShell) nsMenuFrame(aStyle);
+  nsMenuFrame* it =
+      new (aPresShell) nsMenuFrame(aStyle, aPresShell->GetPresContext());
   it->SetIsMenu(true);
   return it;
 }
 
 nsIFrame* NS_NewMenuItemFrame(nsIPresShell* aPresShell, ComputedStyle* aStyle) {
-  nsMenuFrame* it = new (aPresShell) nsMenuFrame(aStyle);
+  nsMenuFrame* it =
+      new (aPresShell) nsMenuFrame(aStyle, aPresShell->GetPresContext());
   it->SetIsMenu(false);
   return it;
 }
@@ -156,11 +158,11 @@ nsIFrame* NS_NewMenuItemFrame(nsIPresShell* aPresShell, ComputedStyle* aStyle) {
 NS_IMPL_FRAMEARENA_HELPERS(nsMenuFrame)
 
 NS_QUERYFRAME_HEAD(nsMenuFrame)
-NS_QUERYFRAME_ENTRY(nsMenuFrame)
+  NS_QUERYFRAME_ENTRY(nsMenuFrame)
 NS_QUERYFRAME_TAIL_INHERITING(nsBoxFrame)
 
-nsMenuFrame::nsMenuFrame(ComputedStyle* aStyle)
-    : nsBoxFrame(aStyle, kClassID),
+nsMenuFrame::nsMenuFrame(ComputedStyle* aStyle, nsPresContext* aPresContext)
+    : nsBoxFrame(aStyle, aPresContext, kClassID),
       mIsMenu(false),
       mChecked(false),
       mIgnoreAccelTextChange(false),
@@ -624,7 +626,7 @@ nsIContent* nsMenuFrame::GetAnchor() {
   nsAutoString id;
   mContent->AsElement()->GetAttr(kNameSpaceID_None, nsGkAtoms::anchor, id);
   if (!id.IsEmpty()) {
-    nsIDocument* doc = mContent->OwnerDoc();
+    Document* doc = mContent->OwnerDoc();
 
     anchor =
         doc->GetAnonymousElementByAttribute(mContent, nsGkAtoms::anonid, id);
@@ -662,8 +664,11 @@ bool nsMenuFrame::IsSizedToPopup(nsIContent* aContent, bool aRequireAlways) {
   nsAutoString sizedToPopup;
   aContent->AsElement()->GetAttr(kNameSpaceID_None, nsGkAtoms::sizetopopup,
                                  sizedToPopup);
+  bool sizedToPopupSetToPref =
+      sizedToPopup.EqualsLiteral("pref") ||
+      (sizedToPopup.IsEmpty() && aContent->IsXULElement(nsGkAtoms::menulist));
   return sizedToPopup.EqualsLiteral("always") ||
-         (!aRequireAlways && sizedToPopup.EqualsLiteral("pref"));
+         (!aRequireAlways && sizedToPopupSetToPref);
 }
 
 nsSize nsMenuFrame::GetXULMinSize(nsBoxLayoutState& aBoxLayoutState) {
@@ -879,8 +884,7 @@ void nsMenuFrame::UpdateMenuSpecialState() {
         /* uncheck the old item */
         sib->GetContent()->AsElement()->UnsetAttr(kNameSpaceID_None,
                                                   nsGkAtoms::checked, true);
-        /* XXX in DEBUG, check to make sure that there aren't two checked items
-         */
+        // XXX in DEBUG, check to make sure that there aren't two checked items
         return;
       }
     }
@@ -916,7 +920,7 @@ void nsMenuFrame::BuildAcceleratorText(bool aNotify) {
   if (keyValue.IsEmpty()) return;
 
   // Turn the document into a DOM document so we can use getElementById
-  nsIDocument* document = mContent->GetUncomposedDoc();
+  Document* document = mContent->GetUncomposedDoc();
   if (!document) return;
 
   // XXXsmaug If mContent is in shadow dom, should we use
@@ -1209,8 +1213,7 @@ bool nsMenuFrame::SizeToPopup(nsBoxLayoutState& aState, nsSize& aSize) {
 
       // if there is a scroll frame, add the desired width of the scrollbar as
       // well
-      nsIScrollableFrame* scrollFrame =
-          do_QueryFrame(popupFrame->PrincipalChildList().FirstChild());
+      nsIScrollableFrame* scrollFrame = popupFrame->GetScrollFrame(popupFrame);
       nscoord scrollbarWidth = 0;
       if (scrollFrame) {
         scrollbarWidth =
@@ -1264,6 +1267,13 @@ NS_IMETHODIMP
 nsMenuFrame::SetActiveChild(dom::Element* aChild) {
   nsMenuPopupFrame* popupFrame = GetPopup();
   if (!popupFrame) return NS_ERROR_FAILURE;
+
+  // Force the child frames within the popup to be generated.
+  AutoWeakFrame weakFrame(popupFrame);
+  popupFrame->GenerateFrames();
+  if (!weakFrame.IsAlive()) {
+    return NS_OK;
+  }
 
   if (!aChild) {
     // Remove the current selection

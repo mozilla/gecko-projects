@@ -36,8 +36,7 @@ var gFrontProgressListener = {
   onStatusChange(aWebProgress, aRequest, aStatus, aMessage) {
   },
 
-  onSecurityChange(aWebProgress, aRequest, aOldState, aState,
-                   aContentBlockingLogJSON) {
+  onSecurityChange(aWebProgress, aRequest, aState) {
     if (aRequest &&
         aRequest.QueryInterface(Ci.nsIChannel).originalURI.spec == "about:blank") {
       // ignore initial about blank
@@ -96,8 +95,7 @@ var gAllProgressListener = {
     ok(aBrowser == gTestBrowser, state + " notification came from the correct browser");
   },
 
-  onSecurityChange(aBrowser, aWebProgress, aRequest, aOldState, aState,
-                   aContentBlockingLogJSON) {
+  onSecurityChange(aBrowser, aWebProgress, aRequest, aState) {
     if (aRequest &&
         aRequest.QueryInterface(Ci.nsIChannel).originalURI.spec == "about:blank") {
       // ignore initial about blank
@@ -153,7 +151,6 @@ function startTest1() {
 
   gAllNotifications = [
     "onStateChange",
-    "onSecurityChange",
     "onLocationChange",
     "onSecurityChange",
     "onStateChange",
@@ -166,7 +163,6 @@ function startTest2() {
   info("\nTest 2");
   gAllNotifications = [
     "onStateChange",
-    "onSecurityChange",
     "onLocationChange",
     "onSecurityChange",
     "onStateChange",
@@ -179,7 +175,6 @@ function startTest3() {
   info("\nTest 3");
   gAllNotifications = [
     "onStateChange",
-    "onSecurityChange",
     "onLocationChange",
     "onSecurityChange",
     "onStateChange",
@@ -192,7 +187,6 @@ function startTest4() {
   info("\nTest 4");
   gAllNotifications = [
     "onStateChange",
-    "onSecurityChange",
     "onLocationChange",
     "onSecurityChange",
     "onStateChange",
@@ -213,7 +207,6 @@ function startTest5() {
 
   gAllNotifications = [
     "onStateChange",
-    "onSecurityChange",
     "onLocationChange",
     "onSecurityChange",
     "onStateChange",
@@ -226,7 +219,6 @@ function startTest6() {
   info("\nTest 6");
   gAllNotifications = [
     "onStateChange",
-    "onSecurityChange",
     "onLocationChange",
     "onSecurityChange",
     "onStateChange",

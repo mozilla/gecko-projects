@@ -34,11 +34,11 @@
 #include "nsLayoutUtils.h"
 #include "mozilla/Attributes.h"
 #include "nsUnicodeProperties.h"
-#include "mozilla/layers/WebRenderLayerManager.h"
+#include "mozilla/layers/RenderRootStateManager.h"
 #include "TextDrawTarget.h"
 
 #ifdef ACCESSIBILITY
-#include "nsAccessibilityService.h"
+#  include "nsAccessibilityService.h"
 #endif
 
 #include "nsBidiUtils.h"
@@ -59,13 +59,13 @@ bool nsTextBoxFrame::gInsertSeparatorBeforeAccessKey = false;
 bool nsTextBoxFrame::gInsertSeparatorPrefInitialized = false;
 
 nsIFrame* NS_NewTextBoxFrame(nsIPresShell* aPresShell, ComputedStyle* aStyle) {
-  return new (aPresShell) nsTextBoxFrame(aStyle);
+  return new (aPresShell) nsTextBoxFrame(aStyle, aPresShell->GetPresContext());
 }
 
 NS_IMPL_FRAMEARENA_HELPERS(nsTextBoxFrame)
 
 NS_QUERYFRAME_HEAD(nsTextBoxFrame)
-NS_QUERYFRAME_ENTRY(nsTextBoxFrame)
+  NS_QUERYFRAME_ENTRY(nsTextBoxFrame)
 NS_QUERYFRAME_TAIL_INHERITING(nsLeafBoxFrame)
 
 nsresult nsTextBoxFrame::AttributeChanged(int32_t aNameSpaceID,
@@ -92,8 +92,9 @@ nsresult nsTextBoxFrame::AttributeChanged(int32_t aNameSpaceID,
   return NS_OK;
 }
 
-nsTextBoxFrame::nsTextBoxFrame(ComputedStyle* aStyle)
-    : nsLeafBoxFrame(aStyle, kClassID),
+nsTextBoxFrame::nsTextBoxFrame(ComputedStyle* aStyle,
+                               nsPresContext* aPresContext)
+    : nsLeafBoxFrame(aStyle, aPresContext, kClassID),
       mAccessKeyInfo(nullptr),
       mCropType(CropRight),
       mAscent(0),
@@ -263,7 +264,7 @@ class nsDisplayXULTextBox final : public nsDisplayItem {
       mozilla::wr::DisplayListBuilder& aBuilder,
       mozilla::wr::IpcResourceUpdateQueue& aResources,
       const StackingContextHelper& aSc,
-      mozilla::layers::WebRenderLayerManager* aManager,
+      mozilla::layers::RenderRootStateManager* aManager,
       nsDisplayListBuilder* aDisplayListBuilder) override;
 };
 
@@ -298,7 +299,7 @@ bool nsDisplayXULTextBox::CreateWebRenderCommands(
     mozilla::wr::DisplayListBuilder& aBuilder,
     mozilla::wr::IpcResourceUpdateQueue& aResources,
     const StackingContextHelper& aSc,
-    mozilla::layers::WebRenderLayerManager* aManager,
+    mozilla::layers::RenderRootStateManager* aManager,
     nsDisplayListBuilder* aDisplayListBuilder) {
   bool snap = false;
   auto bounds = GetBounds(aDisplayListBuilder, &snap);
@@ -338,7 +339,7 @@ nsRect nsDisplayXULTextBox::GetComponentAlphaBounds(
 
 void nsTextBoxFrame::BuildDisplayList(nsDisplayListBuilder* aBuilder,
                                       const nsDisplayListSet& aLists) {
-  if (!IsVisibleForPainting(aBuilder)) return;
+  if (!IsVisibleForPainting()) return;
 
   nsLeafBoxFrame::BuildDisplayList(aBuilder, aLists);
 
@@ -887,17 +888,15 @@ void nsTextBoxFrame::RecomputeTitle() {
 }
 
 void nsTextBoxFrame::DidSetComputedStyle(ComputedStyle* aOldComputedStyle) {
+  nsLeafBoxFrame::DidSetComputedStyle(aOldComputedStyle);
+
   if (!aOldComputedStyle) {
     // We're just being initialized
     return;
   }
 
-  const nsStyleText* oldTextStyle = aOldComputedStyle->PeekStyleText();
-  // We should really have oldTextStyle here, since we asked for our
-  // nsStyleText during Init(), but if it's not there for some reason
-  // just assume the worst and recompute mTitle.
-  if (!oldTextStyle ||
-      oldTextStyle->mTextTransform != StyleText()->mTextTransform) {
+  const nsStyleText* oldTextStyle = aOldComputedStyle->StyleText();
+  if (oldTextStyle->mTextTransform != StyleText()->mTextTransform) {
     RecomputeTitle();
     UpdateAccessTitle();
   }
@@ -966,7 +965,8 @@ nsRect nsTextBoxFrame::GetComponentAlphaBounds() const {
 
 bool nsTextBoxFrame::ComputesOwnOverflowArea() { return true; }
 
-/* virtual */ void nsTextBoxFrame::MarkIntrinsicISizesDirty() {
+/* virtual */
+void nsTextBoxFrame::MarkIntrinsicISizesDirty() {
   mNeedsRecalc = true;
   nsLeafBoxFrame::MarkIntrinsicISizesDirty();
 }

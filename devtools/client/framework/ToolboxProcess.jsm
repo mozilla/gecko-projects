@@ -9,7 +9,7 @@
 const DBG_XUL = "chrome://devtools/content/framework/toolbox-process-window.html";
 const CHROME_DEBUGGER_PROFILE_NAME = "chrome_debugger_profile";
 
-const { require, DevToolsLoader } = ChromeUtils.import("resource://devtools/shared/Loader.jsm", {});
+const { require, DevToolsLoader } = ChromeUtils.import("resource://devtools/shared/Loader.jsm");
 const { XPCOMUtils } = require("resource://gre/modules/XPCOMUtils.jsm");
 
 ChromeUtils.defineModuleGetter(this, "Subprocess", "resource://gre/modules/Subprocess.jsm");
@@ -22,7 +22,6 @@ XPCOMUtils.defineLazyGetter(this, "EventEmitter", function() {
   return require("devtools/shared/event-emitter");
 });
 
-const promise = require("promise");
 const Services = require("Services");
 
 this.EXPORTED_SYMBOLS = ["BrowserToolboxProcess"];
@@ -36,10 +35,8 @@ var processes = new Set();
  *        A function called when the process stops running.
  * @param function onRun [optional]
  *        A function called when the process starts running.
- * @param object options [optional]
- *        An object with properties for configuring BrowserToolboxProcess.
  */
-this.BrowserToolboxProcess = function BrowserToolboxProcess(onClose, onRun, options) {
+this.BrowserToolboxProcess = function BrowserToolboxProcess(onClose, onRun) {
   const emitter = new EventEmitter();
   this.on = emitter.on.bind(emitter);
   this.off = emitter.off.bind(emitter);
@@ -50,29 +47,14 @@ this.BrowserToolboxProcess = function BrowserToolboxProcess(onClose, onRun, opti
     BrowserToolboxProcess.emit(...args);
   };
 
-  // If first argument is an object, use those properties instead of
-  // all three arguments
-  if (typeof onClose === "object") {
-    if (onClose.onClose) {
-      this.once("close", onClose.onClose);
-    }
-    if (onClose.onRun) {
-      this.once("run", onClose.onRun);
-    }
-    this._options = onClose;
-  } else {
-    if (onClose) {
-      this.once("close", onClose);
-    }
-    if (onRun) {
-      this.once("run", onRun);
-    }
-    this._options = options || {};
+  if (onClose) {
+    this.once("close", onClose);
+  }
+  if (onRun) {
+    this.once("run", onRun);
   }
 
   this._telemetry = new Telemetry();
-
-  this._onConnectionChange = this._onConnectionChange.bind(this);
 
   this.close = this.close.bind(this);
   Services.obs.addObserver(this.close, "quit-application");
@@ -89,13 +71,13 @@ EventEmitter.decorate(BrowserToolboxProcess);
  * Initializes and starts a chrome toolbox process.
  * @return object
  */
-BrowserToolboxProcess.init = function(onClose, onRun, options) {
+BrowserToolboxProcess.init = function(onClose, onRun) {
   if (!Services.prefs.getBoolPref("devtools.chrome.enabled") ||
       !Services.prefs.getBoolPref("devtools.debugger.remote-enabled")) {
     console.error("Could not start Browser Toolbox, you need to enable it.");
     return null;
   }
-  return new BrowserToolboxProcess(onClose, onRun, options);
+  return new BrowserToolboxProcess(onClose, onRun);
 };
 
 /**
@@ -103,32 +85,7 @@ BrowserToolboxProcess.init = function(onClose, onRun, options) {
  * @return bool
  */
 BrowserToolboxProcess.getBrowserToolboxSessionState = function() {
-  for (const process of processes.values()) {
-    // Don't worry about addon toolboxes, we only want to restore the Browser Toolbox.
-    if (!process._options || !process._options.addonID) {
-      return true;
-    }
-  }
-  return false;
-};
-
-/**
- * Passes a set of options to the AddonTargetActors for the given ID.
- *
- * @param id string
- *        The ID of the add-on to pass the options to
- * @param options object
- *        The options.
- * @return a promise that will be resolved when complete.
- */
-BrowserToolboxProcess.setAddonOptions = function(id, options) {
-  const promises = [];
-
-  for (const process of processes.values()) {
-    promises.push(process.debuggerServer.setAddonOptions(id, options));
-  }
-
-  return promise.all(promises);
+  return processes.size !== 0;
 };
 
 BrowserToolboxProcess.prototype = {
@@ -155,12 +112,9 @@ BrowserToolboxProcess.prototype = {
     this.debuggerServer = DebuggerServer;
     dumpn("Created a separate loader instance for the DebuggerServer.");
 
-    // Forward interesting events.
-    this.debuggerServer.on("connectionchange", this._onConnectionChange);
-
     this.debuggerServer.init();
     // We mainly need a root actor and target actors for opening a toolbox, even
-    // against chrome/content/addon. But the "no auto hide" button uses the
+    // against chrome/content. But the "no auto hide" button uses the
     // preference actor, so also register the browser actors.
     this.debuggerServer.registerAllActors();
     this.debuggerServer.allowChromeProcess = true;
@@ -282,9 +236,6 @@ BrowserToolboxProcess.prototype = {
       MOZ_DISABLE_SAFE_MODE_KEY: "1",
       MOZ_BROWSER_TOOLBOX_PORT: String(this.port),
     };
-    if (this._options.addonID) {
-      environment.MOZ_BROWSER_TOOLBOX_ADDONID = String(this._options.addonID);
-    }
 
     // During local development, incremental builds can trigger the main process
     // to clear its startup cache with the "flag file" .purgecaches, but this
@@ -332,19 +283,6 @@ BrowserToolboxProcess.prototype = {
   },
 
   /**
-   * Called upon receiving the connectionchange event from a debuggerServer.
-   *
-   * @param {String} what
-   *        Type of connection change (can be either 'opened' or 'closed').
-   * @param {DebuggerServerConnection} connection
-   *        The connection that was opened or closed.
-   */
-  _onConnectionChange: function(what, connection) {
-    const wrappedJSObject = { what, connection };
-    Services.obs.notifyObservers({ wrappedJSObject }, "toolbox-connection-change");
-  },
-
-  /**
    * Closes the remote debugging server and kills the toolbox process.
    */
   close: async function() {
@@ -370,7 +308,6 @@ BrowserToolboxProcess.prototype = {
     }
 
     if (this.debuggerServer) {
-      this.debuggerServer.off("connectionchange", this._onConnectionChange);
       this.debuggerServer.destroy();
       this.debuggerServer = null;
     }
@@ -380,7 +317,6 @@ BrowserToolboxProcess.prototype = {
     processes.delete(this);
 
     this._dbgProcess = null;
-    this._options = null;
     if (this.loader) {
       this.loader.destroy();
     }
@@ -404,12 +340,5 @@ var wantLogging = Services.prefs.getBoolPref("devtools.debugger.log");
 Services.prefs.addObserver("devtools.debugger.log", {
   observe: (...args) => {
     wantLogging = Services.prefs.getBoolPref(args.pop());
-  },
-});
-
-Services.prefs.addObserver("toolbox-update-addon-options", {
-  observe: (subject) => {
-    const {id, options} = subject.wrappedJSObject;
-    BrowserToolboxProcess.setAddonOptions(id, options);
   },
 });

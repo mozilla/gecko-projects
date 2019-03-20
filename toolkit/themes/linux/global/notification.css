@@ -7,11 +7,6 @@
 %include ../../shared/notification.inc.css
 %include ../../shared/popupnotification.inc.css
 
-.popup-notification-button:-moz-focusring {
-  outline: 1px -moz-dialogtext dotted;
-  outline-offset: -5px;
-}
-
-.popup-notification-button[anonid="secondarybutton"]:not([hidden="true"])  ~ .popup-notification-button[default]:not([highlight="true"]) {
+.popup-notification-secondary-button:not([hidden="true"]) ~ .popup-notification-primary-button:not([default]) {
   border-inline-start: 1px solid var(--panel-separator-color);
 }

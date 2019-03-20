@@ -27,12 +27,12 @@
 #include "mozilla/ComputedStyle.h"
 #include "mozilla/dom/AnonymousContent.h"
 #include "mozilla/layers/StackingContextHelper.h"
-#include "mozilla/layers/WebRenderLayerManager.h"
+#include "mozilla/layers/RenderRootStateManager.h"
 #include "mozilla/PresShell.h"
 // for focus
 #include "nsIScrollableFrame.h"
 #ifdef DEBUG_CANVAS_FOCUS
-#include "nsIDocShell.h"
+#  include "nsIDocShell.h"
 #endif
 
 //#define DEBUG_CANVAS_FOCUS
@@ -45,15 +45,15 @@ using namespace mozilla::layers;
 
 nsCanvasFrame* NS_NewCanvasFrame(nsIPresShell* aPresShell,
                                  ComputedStyle* aStyle) {
-  return new (aPresShell) nsCanvasFrame(aStyle);
+  return new (aPresShell) nsCanvasFrame(aStyle, aPresShell->GetPresContext());
 }
 
 NS_IMPL_FRAMEARENA_HELPERS(nsCanvasFrame)
 
 NS_QUERYFRAME_HEAD(nsCanvasFrame)
-NS_QUERYFRAME_ENTRY(nsCanvasFrame)
-NS_QUERYFRAME_ENTRY(nsIAnonymousContentCreator)
-NS_QUERYFRAME_ENTRY(nsIPopupContainer)
+  NS_QUERYFRAME_ENTRY(nsCanvasFrame)
+  NS_QUERYFRAME_ENTRY(nsIAnonymousContentCreator)
+  NS_QUERYFRAME_ENTRY(nsIPopupContainer)
 NS_QUERYFRAME_TAIL_INHERITING(nsContainerFrame)
 
 void nsCanvasFrame::ShowCustomContentContainer() {
@@ -78,7 +78,7 @@ nsresult nsCanvasFrame::CreateAnonymousContent(
     return NS_OK;
   }
 
-  nsCOMPtr<nsIDocument> doc = mContent->OwnerDoc();
+  nsCOMPtr<Document> doc = mContent->OwnerDoc();
 
   RefPtr<AccessibleCaretEventHub> eventHub =
       PresShell()->GetAccessibleCaretEventHub();
@@ -361,7 +361,7 @@ already_AddRefed<Layer> nsDisplayCanvasBackgroundColor::BuildLayer(
 bool nsDisplayCanvasBackgroundColor::CreateWebRenderCommands(
     mozilla::wr::DisplayListBuilder& aBuilder,
     mozilla::wr::IpcResourceUpdateQueue& aResources,
-    const StackingContextHelper& aSc, WebRenderLayerManager* aManager,
+    const StackingContextHelper& aSc, RenderRootStateManager* aManager,
     nsDisplayListBuilder* aDisplayListBuilder) {
   ContainerLayerParameters parameter;
 
@@ -478,7 +478,7 @@ void nsCanvasFrame::BuildDisplayList(nsDisplayListBuilder* aBuilder,
   // We don't have any border or outline, and our background draws over
   // the overflow area, so just add nsDisplayCanvasBackground instead of
   // calling DisplayBorderBackgroundOutline.
-  if (IsVisibleForPainting(aBuilder)) {
+  if (IsVisibleForPainting()) {
     ComputedStyle* bg = nullptr;
     nsIFrame* dependentFrame = nullptr;
     bool isThemed = IsThemed();
@@ -529,7 +529,7 @@ void nsCanvasFrame::BuildDisplayList(nsDisplayListBuilder* aBuilder,
         auto* displayData = aBuilder->GetCurrentFixedBackgroundDisplayData();
         nsDisplayListBuilder::AutoBuildingDisplayList buildingDisplayList(
             aBuilder, this, aBuilder->GetVisibleRect(),
-            aBuilder->GetDirtyRect(), false);
+            aBuilder->GetDirtyRect());
 
         DisplayListClipState::AutoSaveRestore clipState(aBuilder);
         nsDisplayListBuilder::AutoCurrentActiveScrolledRootSetter asrSetter(
@@ -640,8 +640,8 @@ void nsCanvasFrame::PaintFocus(DrawTarget* aDrawTarget, nsPoint aPt) {
                              color->mColor);
 }
 
-/* virtual */ nscoord nsCanvasFrame::GetMinISize(
-    gfxContext* aRenderingContext) {
+/* virtual */
+nscoord nsCanvasFrame::GetMinISize(gfxContext* aRenderingContext) {
   nscoord result;
   DISPLAY_MIN_INLINE_SIZE(this, result);
   if (mFrames.IsEmpty())
@@ -651,8 +651,8 @@ void nsCanvasFrame::PaintFocus(DrawTarget* aDrawTarget, nsPoint aPt) {
   return result;
 }
 
-/* virtual */ nscoord nsCanvasFrame::GetPrefISize(
-    gfxContext* aRenderingContext) {
+/* virtual */
+nscoord nsCanvasFrame::GetPrefISize(gfxContext* aRenderingContext) {
   nscoord result;
   DISPLAY_PREF_INLINE_SIZE(this, result);
   if (mFrames.IsEmpty())

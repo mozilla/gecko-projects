@@ -55,7 +55,6 @@ struct DefaultJitOptions {
   bool disableGvn;
   bool disableInlining;
   bool disableLicm;
-  bool disableLoopUnrolling;
   bool disableOptimizationTracking;
   bool disablePgo;
   bool disableInstructionReordering;
@@ -75,6 +74,13 @@ struct DefaultJitOptions {
   bool wasmDelayTier2;
 #ifdef JS_TRACE_LOGGING
   bool enableTraceLogger;
+#endif
+#ifdef WASM_CODEGEN_DEBUG
+  bool enableWasmJitExit;
+  bool enableWasmJitEntry;
+  bool enableWasmIonFastCalls;
+  bool enableWasmImportCallSpew;
+  bool enableWasmFuncCallSpew;
 #endif
   uint32_t baselineWarmUpThreshold;
   uint32_t exceptionBailoutThreshold;

@@ -5,7 +5,8 @@
 
 /* import-globals-from ../../../toolkit/content/preferencesBindings.js */
 
-var {Sanitizer} = ChromeUtils.import("resource:///modules/Sanitizer.jsm", {});
+var {Sanitizer} = ChromeUtils.import("resource:///modules/Sanitizer.jsm");
+var {Services} = ChromeUtils.import("resource://gre/modules/Services.jsm");
 
 Preferences.addAll([
   { id: "privacy.cpd.history", type: "bool" },
@@ -40,9 +41,27 @@ var gSanitizePromptDialog = {
     if (this.selectedTimespan === Sanitizer.TIMESPAN_EVERYTHING) {
       this.prepareWarning();
       this.warningBox.hidden = false;
-      window.document.l10n.setAttributes(window.document.documentElement, "dialog-title-everything");
-    } else
+      document.l10n.setAttributes(document.documentElement, "dialog-title-everything");
+      let warningDesc = document.getElementById("sanitizeEverythingWarning");
+      // Ensure we've translated and sized the warning.
+      document.mozSubdialogReady =
+        document.l10n.translateFragment(warningDesc).then(() => {
+          // And then ensure we've run layout.
+          let rootWin = window.docShell.rootTreeItem.QueryInterface(Ci.nsIDocShell).domWindow;
+          return rootWin.promiseDocumentFlushed(() => {});
+        });
+    } else {
       this.warningBox.hidden = true;
+    }
+
+    // Only apply the following if the dialog is opened outside of the Preferences.
+    if (!("gSubDialog" in window.opener)) {
+      // The style attribute on the dialog may get set after the dialog has been sized.
+      // Force the dialog to size again after the style attribute has been applied.
+      document.l10n.translateElements([document.documentElement]).then(() => {
+        window.sizeToContent();
+      });
+    }
   },
 
   selectByTimespan() {
@@ -58,18 +77,18 @@ var gSanitizePromptDialog = {
       this.prepareWarning();
       if (warningBox.hidden) {
         warningBox.hidden = false;
-        window.resizeBy(0, warningBox.boxObject.height);
+        window.resizeBy(0, warningBox.getBoundingClientRect().height);
       }
-      window.document.l10n.setAttributes(window.document.documentElement, "dialog-title-everything");
+      document.l10n.setAttributes(document.documentElement, "dialog-title-everything");
       return;
     }
 
     // If clearing a specific time range
     if (!warningBox.hidden) {
-      window.resizeBy(0, -warningBox.boxObject.height);
+      window.resizeBy(0, -warningBox.getBoundingClientRect().height);
       warningBox.hidden = true;
     }
-    window.document.l10n.setAttributes(window.document.documentElement, "dialog-title");
+    document.l10n.setAttributes(document.documentElement, "dialog-title");
   },
 
   sanitize() {

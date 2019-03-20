@@ -23,7 +23,7 @@
 #include "nsQueryObject.h"
 #include "nsIContentInlines.h"
 #include "nsIContentViewer.h"
-#include "nsIDocument.h"
+#include "mozilla/dom/Document.h"
 #include "nsIDocumentEncoder.h"
 #include "nsIDOMWindow.h"
 #include "nsMappedAttributes.h"
@@ -158,7 +158,7 @@ static const nsAttrValue::EnumTable kDirTable[] = {
 
 void nsGenericHTMLElement::AddToNameTable(nsAtom* aName) {
   MOZ_ASSERT(HasName(), "Node doesn't have name?");
-  nsIDocument* doc = GetUncomposedDoc();
+  Document* doc = GetUncomposedDoc();
   if (doc && !IsInAnonymousSubtree()) {
     doc->AddToNameTable(this, aName);
   }
@@ -166,7 +166,7 @@ void nsGenericHTMLElement::AddToNameTable(nsAtom* aName) {
 
 void nsGenericHTMLElement::RemoveFromNameTable() {
   if (HasName() && CanHaveName(NodeInfo()->NameAtom())) {
-    if (nsIDocument* doc = GetUncomposedDoc()) {
+    if (Document* doc = GetUncomposedDoc()) {
       doc->RemoveFromNameTable(this,
                                GetParsedAttr(nsGkAtoms::name)->GetAtomValue());
     }
@@ -203,12 +203,15 @@ static bool IsOffsetParent(nsIFrame* aFrame) {
   return false;
 }
 
-Element* nsGenericHTMLElement::GetOffsetRect(CSSIntRect& aRect) {
-  aRect = CSSIntRect();
+struct OffsetResult {
+  Element* mParent = nullptr;
+  CSSIntRect mRect;
+};
 
-  nsIFrame* frame = GetPrimaryFrame(FlushType::Layout);
+static OffsetResult GetUnretargetedOffsetsFor(const Element& aElement) {
+  nsIFrame* frame = aElement.GetPrimaryFrame();
   if (!frame) {
-    return nullptr;
+    return {};
   }
 
   nsIFrame* styleFrame = nsLayoutUtils::GetStyleFrame(frame);
@@ -217,7 +220,7 @@ Element* nsGenericHTMLElement::GetOffsetRect(CSSIntRect& aRect) {
   nsPoint origin(0, 0);
 
   nsIContent* offsetParent = nullptr;
-  Element* docElement = GetComposedDoc()->GetRootElement();
+  Element* docElement = aElement.GetComposedDoc()->GetRootElement();
   nsIContent* content = frame->GetContent();
 
   if (content &&
@@ -270,7 +273,7 @@ Element* nsGenericHTMLElement::GetOffsetRect(CSSIntRect& aRect) {
       //
       // We use GetBodyElement() here, not GetBody(), because we don't want to
       // end up with framesets here.
-      offsetParent = GetComposedDoc()->GetBodyElement();
+      offsetParent = aElement.GetComposedDoc()->GetBodyElement();
     }
   }
 
@@ -289,9 +292,44 @@ Element* nsGenericHTMLElement::GetOffsetRect(CSSIntRect& aRect) {
   // we only care about the size. We just have to use something non-null.
   nsRect rcFrame = nsLayoutUtils::GetAllInFlowRectsUnion(frame, frame);
   rcFrame.MoveTo(origin);
-  aRect = CSSIntRect::FromAppUnitsRounded(rcFrame);
+  return {Element::FromNodeOrNull(offsetParent),
+          CSSIntRect::FromAppUnitsRounded(rcFrame)};
+}
 
-  return offsetParent ? offsetParent->AsElement() : nullptr;
+static bool ShouldBeRetargeted(const Element& aReferenceElement,
+                               const Element& aElementToMaybeRetarget) {
+  ShadowRoot* shadow = aElementToMaybeRetarget.GetContainingShadow();
+  if (!shadow) {
+    return false;
+  }
+  for (ShadowRoot* scope = aReferenceElement.GetContainingShadow(); scope;
+       scope = scope->Host()->GetContainingShadow()) {
+    if (scope == shadow) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+Element* nsGenericHTMLElement::GetOffsetRect(CSSIntRect& aRect) {
+  aRect = CSSIntRect();
+
+  if (!GetPrimaryFrame(FlushType::Layout)) {
+    return nullptr;
+  }
+
+  OffsetResult thisResult = GetUnretargetedOffsetsFor(*this);
+  aRect = thisResult.mRect;
+
+  Element* parent = thisResult.mParent;
+  while (parent && ShouldBeRetargeted(*this, *parent)) {
+    OffsetResult result = GetUnretargetedOffsetsFor(*parent);
+    aRect += result.mRect.TopLeft();
+    parent = result.mParent;
+  }
+
+  return parent;
 }
 
 bool nsGenericHTMLElement::Spellcheck() {
@@ -347,7 +385,7 @@ bool nsGenericHTMLElement::Spellcheck() {
   return spellcheckLevel == 2;  // "Spellcheck multi- and single-line"
 }
 
-bool nsGenericHTMLElement::InNavQuirksMode(nsIDocument* aDoc) {
+bool nsGenericHTMLElement::InNavQuirksMode(Document* aDoc) {
   return aDoc && aDoc->GetCompatibilityMode() == eCompatibility_NavQuirks;
 }
 
@@ -378,7 +416,7 @@ EventStates nsGenericHTMLElement::IntrinsicState() const {
   return state;
 }
 
-nsresult nsGenericHTMLElement::BindToTree(nsIDocument* aDocument,
+nsresult nsGenericHTMLElement::BindToTree(Document* aDocument,
                                           nsIContent* aParent,
                                           nsIContent* aBindingParent) {
   nsresult rv =
@@ -703,7 +741,7 @@ EventListenerManager* nsGenericHTMLElement::GetEventListenerManagerForAttr(
     // normal.
     // XXXbz sXBL/XBL2 issue: should we instead use GetComposedDoc() here,
     // override BindToTree for those classes and munge event listeners there?
-    nsIDocument* document = OwnerDoc();
+    Document* document = OwnerDoc();
 
     *aDefer = false;
     if ((win = document->GetInnerWindow())) {
@@ -843,7 +881,7 @@ bool nsGenericHTMLElement::ParseBackgroundAttribute(int32_t aNamespaceID,
   if (aNamespaceID == kNameSpaceID_None &&
       aAttribute == nsGkAtoms::background && !aValue.IsEmpty()) {
     // Resolve url to an absolute url
-    nsIDocument* doc = OwnerDoc();
+    Document* doc = OwnerDoc();
     nsCOMPtr<nsIURI> baseURI = GetBaseURI();
     nsCOMPtr<nsIURI> uri;
     nsresult rv = nsContentUtils::NewURIWithDocumentCharset(
@@ -898,7 +936,7 @@ nsIFormControlFrame* nsGenericHTMLElement::GetFormControlFrame(
 
 nsPresContext* nsGenericHTMLElement::GetPresContext(PresContextFor aFor) {
   // Get the document
-  nsIDocument* doc =
+  Document* doc =
       (aFor == eForComposedDoc) ? GetComposedDoc() : GetUncomposedDoc();
   if (doc) {
     return doc->GetPresContext();
@@ -1105,36 +1143,43 @@ void nsGenericHTMLElement::MapCommonAttributesInto(
   }
 }
 
-/* static */ const nsGenericHTMLElement::MappedAttributeEntry
+/* static */
+const nsGenericHTMLElement::MappedAttributeEntry
     nsGenericHTMLElement::sCommonAttributeMap[] = {{nsGkAtoms::contenteditable},
                                                    {nsGkAtoms::lang},
                                                    {nsGkAtoms::hidden},
                                                    {nullptr}};
 
-/* static */ const Element::MappedAttributeEntry
+/* static */
+const Element::MappedAttributeEntry
     nsGenericHTMLElement::sImageMarginSizeAttributeMap[] = {{nsGkAtoms::width},
                                                             {nsGkAtoms::height},
                                                             {nsGkAtoms::hspace},
                                                             {nsGkAtoms::vspace},
                                                             {nullptr}};
 
-/* static */ const Element::MappedAttributeEntry
+/* static */
+const Element::MappedAttributeEntry
     nsGenericHTMLElement::sImageAlignAttributeMap[] = {{nsGkAtoms::align},
                                                        {nullptr}};
 
-/* static */ const Element::MappedAttributeEntry
+/* static */
+const Element::MappedAttributeEntry
     nsGenericHTMLElement::sDivAlignAttributeMap[] = {{nsGkAtoms::align},
                                                      {nullptr}};
 
-/* static */ const Element::MappedAttributeEntry
+/* static */
+const Element::MappedAttributeEntry
     nsGenericHTMLElement::sImageBorderAttributeMap[] = {{nsGkAtoms::border},
                                                         {nullptr}};
 
-/* static */ const Element::MappedAttributeEntry
+/* static */
+const Element::MappedAttributeEntry
     nsGenericHTMLElement::sBackgroundAttributeMap[] = {
         {nsGkAtoms::background}, {nsGkAtoms::bgcolor}, {nullptr}};
 
-/* static */ const Element::MappedAttributeEntry
+/* static */
+const Element::MappedAttributeEntry
     nsGenericHTMLElement::sBackgroundColorAttributeMap[] = {
         {nsGkAtoms::bgcolor}, {nullptr}};
 
@@ -1396,7 +1441,7 @@ HTMLMenuElement* nsGenericHTMLElement::GetContextMenu() const {
   GetHTMLAttr(nsGkAtoms::contextmenu, value);
   if (!value.IsEmpty()) {
     // XXXsmaug How should this work in Shadow DOM?
-    nsIDocument* doc = GetUncomposedDoc();
+    Document* doc = GetUncomposedDoc();
     if (doc) {
       return HTMLMenuElement::FromNodeOrNull(doc->GetElementById(value));
     }
@@ -1408,10 +1453,10 @@ bool nsGenericHTMLElement::IsLabelable() const {
   return IsAnyOfHTMLElements(nsGkAtoms::progress, nsGkAtoms::meter);
 }
 
-/* static */ bool nsGenericHTMLElement::MatchLabelsElement(Element* aElement,
-                                                           int32_t aNamespaceID,
-                                                           nsAtom* aAtom,
-                                                           void* aData) {
+/* static */
+bool nsGenericHTMLElement::MatchLabelsElement(Element* aElement,
+                                              int32_t aNamespaceID,
+                                              nsAtom* aAtom, void* aData) {
   HTMLLabelElement* element = HTMLLabelElement::FromNode(aElement);
   return element && element->GetControl() == aData;
 }
@@ -1432,15 +1477,14 @@ already_AddRefed<nsINodeList> nsGenericHTMLElement::Labels() {
 
 bool nsGenericHTMLElement::IsInteractiveHTMLContent(
     bool aIgnoreTabindex) const {
-  return IsAnyOfHTMLElements(nsGkAtoms::details, nsGkAtoms::embed,
-                             nsGkAtoms::keygen) ||
+  return IsAnyOfHTMLElements(nsGkAtoms::embed, nsGkAtoms::keygen) ||
          (!aIgnoreTabindex && HasAttr(kNameSpaceID_None, nsGkAtoms::tabindex));
 }
 
 // static
-bool nsGenericHTMLElement::TouchEventsEnabled(JSContext* aCx,
-                                              JSObject* aGlobal) {
-  return TouchEvent::PrefEnabled(aCx, aGlobal);
+bool nsGenericHTMLElement::LegacyTouchAPIEnabled(JSContext* aCx,
+                                                 JSObject* aGlobal) {
+  return TouchEvent::LegacyAPIEnabled(aCx, aGlobal);
 }
 
 //----------------------------------------------------------------------
@@ -1550,7 +1594,7 @@ nsIContent::IMEState nsGenericHTMLFormElement::GetDesiredIMEState() {
   return state;
 }
 
-nsresult nsGenericHTMLFormElement::BindToTree(nsIDocument* aDocument,
+nsresult nsGenericHTMLFormElement::BindToTree(Document* aDocument,
                                               nsIContent* aParent,
                                               nsIContent* aBindingParent) {
   nsresult rv =
@@ -1855,7 +1899,7 @@ EventStates nsGenericHTMLFormElement::IntrinsicState() const {
 
 nsGenericHTMLFormElement::FocusTristate nsGenericHTMLFormElement::FocusState() {
   // We can't be focused if we aren't in a (composed) document
-  nsIDocument* doc = GetComposedDoc();
+  Document* doc = GetComposedDoc();
   if (!doc) return eUnfocusable;
 
   // first see if we are disabled or not. If disabled then do nothing.
@@ -1932,6 +1976,10 @@ bool nsGenericHTMLFormElement::IsElementDisabledForEvents(WidgetEvent* aEvent,
   }
 
   switch (aEvent->mMessage) {
+    case eAnimationStart:
+    case eAnimationEnd:
+    case eAnimationIteration:
+    case eAnimationCancel:
     case eMouseMove:
     case eMouseOver:
     case eMouseOut:
@@ -1942,6 +1990,10 @@ bool nsGenericHTMLFormElement::IsElementDisabledForEvents(WidgetEvent* aEvent,
     case ePointerOut:
     case ePointerEnter:
     case ePointerLeave:
+    case eTransitionCancel:
+    case eTransitionEnd:
+    case eTransitionRun:
+    case eTransitionStart:
     case eWheel:
     case eLegacyMouseLineOrPageScroll:
     case eLegacyMousePixelScroll:
@@ -2150,7 +2202,7 @@ void nsGenericHTMLFormElement::GetFormAction(nsString& aValue) {
 
   if (!GetAttr(kNameSpaceID_None, nsGkAtoms::formaction, aValue) ||
       aValue.IsEmpty()) {
-    nsIDocument* document = OwnerDoc();
+    Document* document = OwnerDoc();
     nsIURI* docURI = document->GetDocumentURI();
     if (docURI) {
       nsAutoCString spec;
@@ -2174,7 +2226,7 @@ void nsGenericHTMLElement::Click(CallerType aCallerType) {
   }
 
   // Strong in case the event kills it
-  nsCOMPtr<nsIDocument> doc = GetComposedDoc();
+  nsCOMPtr<Document> doc = GetComposedDoc();
 
   RefPtr<nsPresContext> context;
   if (doc) {
@@ -2196,7 +2248,7 @@ void nsGenericHTMLElement::Click(CallerType aCallerType) {
 
 bool nsGenericHTMLElement::IsHTMLFocusable(bool aWithMouse, bool* aIsFocusable,
                                            int32_t* aTabIndex) {
-  nsIDocument* doc = GetComposedDoc();
+  Document* doc = GetComposedDoc();
   if (!doc || doc->HasFlag(NODE_IS_EDITABLE)) {
     // In designMode documents we only allow focusing the document.
     if (aTabIndex) {
@@ -2289,8 +2341,8 @@ bool nsGenericHTMLElement::PerformAccesskey(bool aKeyCausesActivation,
 
   if (aKeyCausesActivation) {
     // Click on it if the users prefs indicate to do so.
-    nsAutoPopupStatePusher popupStatePusher(aIsTrustedEvent ? openAllowed
-                                                            : openAbused);
+    nsAutoPopupStatePusher popupStatePusher(
+        aIsTrustedEvent ? PopupBlocker::openAllowed : PopupBlocker::openAbused);
     DispatchSimulatedClick(this, aIsTrustedEvent, presContext);
   }
 
@@ -2355,7 +2407,7 @@ void nsGenericHTMLElement::RecompileScriptEventListeners() {
 }
 
 bool nsGenericHTMLElement::IsEditableRoot() const {
-  nsIDocument* document = GetComposedDoc();
+  Document* document = GetComposedDoc();
   if (!document) {
     return false;
   }
@@ -2374,7 +2426,7 @@ bool nsGenericHTMLElement::IsEditableRoot() const {
 }
 
 static void MakeContentDescendantsEditable(nsIContent* aContent,
-                                           nsIDocument* aDocument) {
+                                           Document* aDocument) {
   // If aContent is not an element, we just need to update its
   // internal editable state and don't need to notify anyone about
   // that.  For elements, we need to send a ContentStateChanged
@@ -2399,7 +2451,7 @@ static void MakeContentDescendantsEditable(nsIContent* aContent,
 }
 
 void nsGenericHTMLElement::ChangeEditableState(int32_t aChange) {
-  nsIDocument* document = GetComposedDoc();
+  Document* document = GetComposedDoc();
   if (!document) {
     return;
   }
@@ -2435,7 +2487,7 @@ nsresult nsGenericHTMLFormElementWithState::GenerateStateKey() {
     return NS_OK;
   }
 
-  nsIDocument* doc = GetUncomposedDoc();
+  Document* doc = GetUncomposedDoc();
   if (!doc) {
     return NS_OK;
   }
@@ -2481,7 +2533,7 @@ PresState* nsGenericHTMLFormElementWithState::GetPrimaryPresState() {
 
 already_AddRefed<nsILayoutHistoryState>
 nsGenericHTMLFormElementWithState::GetLayoutHistory(bool aRead) {
-  nsCOMPtr<nsIDocument> doc = GetUncomposedDoc();
+  nsCOMPtr<Document> doc = GetUncomposedDoc();
   if (!doc) {
     return nullptr;
   }
@@ -2522,7 +2574,7 @@ bool nsGenericHTMLFormElementWithState::RestoreFormControlState() {
   return false;
 }
 
-void nsGenericHTMLFormElementWithState::NodeInfoChanged(nsIDocument* aOldDoc) {
+void nsGenericHTMLFormElementWithState::NodeInfoChanged(Document* aOldDoc) {
   nsGenericHTMLElement::NodeInfoChanged(aOldDoc);
   mStateKey.SetIsVoid(true);
 }
@@ -2569,19 +2621,6 @@ bool nsGenericHTMLElement::IsEventAttributeNameInternal(nsAtom* aName) {
   return nsContentUtils::IsEventAttributeName(aName, EventNameType_HTML);
 }
 
-void nsGenericHTMLElement::AttachAndSetUAShadowRoot() {
-  MOZ_DIAGNOSTIC_ASSERT(!CanAttachShadowDOM(),
-                        "Cannot be used to attach UI shadow DOM");
-  if (GetShadowRoot()) {
-    MOZ_ASSERT(GetShadowRoot()->IsUAWidget());
-    return;
-  }
-
-  RefPtr<ShadowRoot> shadowRoot =
-      AttachShadowWithoutNameChecks(ShadowRootMode::Closed);
-  shadowRoot->SetIsUAWidget();
-}
-
 /**
  * Construct a URI from a string, as an element.src attribute
  * would be set to. Helper for the media elements.
@@ -2592,7 +2631,7 @@ nsresult nsGenericHTMLElement::NewURIFromString(const nsAString& aURISpec,
 
   *aURI = nullptr;
 
-  nsCOMPtr<nsIDocument> doc = OwnerDoc();
+  nsCOMPtr<Document> doc = OwnerDoc();
 
   nsCOMPtr<nsIURI> baseURI = GetBaseURI();
   nsresult rv =
@@ -2636,7 +2675,7 @@ void nsGenericHTMLElement::GetInnerText(mozilla::dom::DOMString& aValue,
   // are not dirty.
 
   // Obtain the composed doc to handle elements in Shadow DOM.
-  nsIDocument* doc = GetComposedDoc();
+  Document* doc = GetComposedDoc();
   if (doc) {
     doc->FlushPendingNotifications(FlushType::Style);
   }

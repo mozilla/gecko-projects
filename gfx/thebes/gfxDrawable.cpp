@@ -9,8 +9,8 @@
 #include "gfxPlatform.h"
 #include "gfx2DGlue.h"
 #ifdef MOZ_X11
-#include "cairo.h"
-#include "gfxXlibSurface.h"
+#  include "cairo.h"
+#  include "gfxXlibSurface.h"
 #endif
 #include "mozilla/gfx/Logging.h"
 
@@ -98,6 +98,9 @@ already_AddRefed<gfxSurfaceDrawable> gfxCallbackDrawable::MakeSurfaceDrawable(
     gfxContext* aContext, const SamplingFilter aSamplingFilter) {
   SurfaceFormat format = gfxPlatform::GetPlatform()->Optimal2DFormatForContent(
       gfxContentType::COLOR_ALPHA);
+  if (!aContext->GetDrawTarget()->CanCreateSimilarDrawTarget(mSize, format)) {
+    return nullptr;
+  }
   RefPtr<DrawTarget> dt =
       aContext->GetDrawTarget()->CreateSimilarDrawTarget(mSize, format);
 

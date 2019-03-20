@@ -61,7 +61,7 @@ public final class GeckoProcessManager extends IProcessManager.Stub {
         private IChildProcess mChild;
         private int mPid;
 
-        public ChildConnection(String type) {
+        public ChildConnection(final String type) {
             mType = type;
         }
 
@@ -94,17 +94,25 @@ public final class GeckoProcessManager extends IProcessManager.Stub {
             }
 
             Log.e(LOGTAG, "Cannot connect to process " + mType);
-            context.unbindService(this);
+            unbind();
             return null;
         }
 
         public synchronized void unbind() {
+            // This could end up using IPC, so do it before we unbind.
+            final int pid = getPid();
+
             if (mChild != null) {
                 final Context context = GeckoAppShell.getApplicationContext();
-                context.unbindService(this);
+                try {
+                    context.unbindService(this);
+                } catch (IllegalArgumentException e) {
+                    mChild = null;
+                    mPid = 0;
+                    return;
+                }
             }
 
-            final int pid = getPid();
             if (pid != 0) {
                 Process.killProcess(pid);
                 waitForChildLocked();
@@ -126,7 +134,8 @@ public final class GeckoProcessManager extends IProcessManager.Stub {
         }
 
         @Override
-        public synchronized void onServiceConnected(ComponentName name, IBinder service) {
+        public synchronized void onServiceConnected(final ComponentName name,
+                                                    final IBinder service) {
             try {
                 service.linkToDeath(this, 0);
             } catch (final RemoteException e) {
@@ -139,7 +148,7 @@ public final class GeckoProcessManager extends IProcessManager.Stub {
         }
 
         @Override
-        public synchronized void onServiceDisconnected(ComponentName name) {
+        public synchronized void onServiceDisconnected(final ComponentName name) {
             mChild = null;
             mPid = 0;
             mWaiting = false;
@@ -152,7 +161,11 @@ public final class GeckoProcessManager extends IProcessManager.Stub {
             if (mChild != null) {
                 mChild = null;
                 mPid = 0;
-                GeckoAppShell.getApplicationContext().unbindService(this);
+
+                try {
+                    GeckoAppShell.getApplicationContext().unbindService(this);
+                } catch (IllegalArgumentException e) {
+                }
             }
         }
     }
@@ -201,7 +214,7 @@ public final class GeckoProcessManager extends IProcessManager.Stub {
         return INSTANCE.start(type, args, prefsFd, prefMapFd, ipcFd, crashFd, crashAnnotationFd, /* retry */ false);
     }
 
-    private int filterFlagsForChild(int flags) {
+    private int filterFlagsForChild(final int flags) {
         return flags & GeckoThread.FLAG_ENABLE_NATIVE_CRASHREPORTER;
     }
 

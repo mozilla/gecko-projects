@@ -8,19 +8,20 @@ import fileinput
 import glob
 import os
 import platform
-import psutil
 import re
 import shutil
 import signal
+import subprocess
 import sys
 import telnetlib
 import time
-import urlparse
-import urllib2
 from distutils.spawn import find_executable
 
-from mozdevice import ADBHost, ADBAndroid
+import psutil
+import six.moves.urllib as urllib
+from mozdevice import ADBHost, ADBDevice
 from mozprocess import ProcessHandler
+from six.moves.urllib.parse import urlparse
 
 EMULATOR_HOME_DIR = os.path.join(os.path.expanduser('~'), '.mozbuild', 'android-device')
 
@@ -62,15 +63,6 @@ AVD_DICT = {
                    'testing/config/tooltool-manifests/androidarm_4_3/mach-emulator.manifest',
                    ['-skip-adb-auth', '-verbose', '-show-kernel'],
                    False),
-    '7.0': AvdInfo('Android 7.0',
-                   'mozemulator-7.0',
-                   'testing/config/tooltool-manifests/androidarm_7_0/mach-emulator.manifest',
-                   ['-skip-adb-auth', '-verbose',
-                    # does not boot if '-show-kernel' -- how strange!
-                    '-ranchu',
-                    '-selinux', 'permissive',
-                    '-memory', '3072', '-cores', '4'],
-                   False),
     'x86': AvdInfo('Android 4.2 x86',
                    'mozemulator-x86',
                    'testing/config/tooltool-manifests/androidx86/mach-emulator.manifest',
@@ -98,7 +90,7 @@ def _get_device(substs, device_serial=None):
         adb_path = _find_sdk_exe(substs, 'adb', False)
         if not adb_path:
             adb_path = 'adb'
-        device = ADBAndroid(adb=adb_path, verbose=verbose_logging, device=device_serial)
+        device = ADBDevice(adb=adb_path, verbose=verbose_logging, device=device_serial)
         devices[device_serial] = device
     return device
 
@@ -175,7 +167,7 @@ def _maybe_update_host_utils(build_obj):
 
 
 def verify_android_device(build_obj, install=False, xre=False, debugger=False,
-                          verbose=False, app=None, device_serial=None):
+                          network=False, verbose=False, app=None, device_serial=None):
     """
        Determine if any Android device is connected via adb.
        If no device is found, prompt to start an emulator.
@@ -187,6 +179,8 @@ def verify_android_device(build_obj, install=False, xre=False, debugger=False,
        one up.
        If 'debugger' is specified, also check that JimDB is installed;
        if JimDB is not found, prompt to set up JimDB.
+       If 'network' is specified, also check that the device has basic
+       network connectivity.
        Returns True if the emulator was started or another device was
        already connected.
     """
@@ -305,6 +299,28 @@ def verify_android_device(build_obj, install=False, xre=False, debugger=False,
             if response.lower().startswith('y') or response == '':
                 _install_host_utils(build_obj)
 
+    if device_verified and network:
+        # Optionally check the network: If on a device that does not look like
+        # an emulator, verify that the device IP address can be obtained
+        # and check that this host can ping the device.
+        serial = device_serial or os.environ.get('DEVICE_SERIAL')
+        if not serial or ('emulator' not in serial):
+            device = _get_device(build_obj.substs, serial)
+            try:
+                addr = device.get_ip_address()
+                if not addr:
+                    _log_warning("unable to get Android device's IP address!")
+                    _log_warning("tests may fail without network connectivity to the device!")
+                else:
+                    _log_info("Android device's IP address: %s" % addr)
+                    response = subprocess.check_output(["ping", "-c", "1", addr])
+                    _log_debug(response)
+            except Exception as e:
+                _log_warning("unable to verify network connection to device: %s" % str(e))
+                _log_warning("tests may fail without network connectivity to the device!")
+        else:
+            _log_debug("network check skipped on emulator")
+
     if debugger:
         # Optionally set up JimDB. See https://wiki.mozilla.org/Mobile/Fennec/Android/GDB.
         build_platform = _get_device_platform(build_obj.substs)
@@ -415,7 +431,6 @@ def grant_runtime_permissions(build_obj, app, device_serial=None):
 
 
 class AndroidEmulator(object):
-
     """
         Support running the Android emulator with an AVD from Mozilla
         test automation.
@@ -531,6 +546,7 @@ class AndroidEmulator(object):
             self.emulator_log.write("<%s>\n" % line)
             if "Invalid value for -gpu" in line or "Invalid GPU mode" in line:
                 self.gpu = False
+
         env = os.environ
         env['ANDROID_AVD_HOME'] = os.path.join(EMULATOR_HOME_DIR, "avd")
         command = [self.emulator_path, "-avd", self.avd_info.name]
@@ -549,7 +565,7 @@ class AndroidEmulator(object):
                    log_path)
         self.proc = ProcessHandler(
             command, storeOutput=False, processOutputLine=outputHandler,
-            env=env, ignore_children=True)
+            stdin=subprocess.PIPE, env=env, ignore_children=True)
         self.proc.run()
         _log_debug("Emulator started with pid %d" %
                    int(self.proc.proc.pid))
@@ -676,7 +692,7 @@ class AndroidEmulator(object):
     def _verify_emulator(self):
         telnet_ok = False
         tn = None
-        while(not telnet_ok):
+        while (not telnet_ok):
             try:
                 tn = telnetlib.Telnet('localhost', 5554, 10)
                 if tn is not None:
@@ -708,7 +724,7 @@ class AndroidEmulator(object):
             if not self.substs['TARGET_CPU'].startswith('arm'):
                 return 'x86-7.0'
             else:
-                return '7.0'
+                return '4.3'
         return 'x86-7.0'
 
 
@@ -811,7 +827,7 @@ def _log_info(text):
 
 def _download_file(url, filename, path):
     _log_debug("Download %s to %s/%s..." % (url, path, filename))
-    f = urllib2.urlopen(url)
+    f = urllib.request.urlopen(url)
     if not os.path.isdir(path):
         try:
             os.makedirs(path)
@@ -847,6 +863,7 @@ def _get_tooltool_manifest(substs, src_path, dst_path, filename):
 def _tooltool_fetch():
     def outputHandler(line):
         _log_debug(line)
+
     _download_file(TOOLTOOL_URL, 'tooltool.py', EMULATOR_HOME_DIR)
     command = [sys.executable, 'tooltool.py',
                'fetch', '-o', '-m', 'releng.manifest']

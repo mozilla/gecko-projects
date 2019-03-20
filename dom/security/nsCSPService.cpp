@@ -21,6 +21,7 @@
 #include "nsIScriptError.h"
 #include "nsContentUtils.h"
 #include "nsContentPolicyUtils.h"
+#include "nsNetUtil.h"
 
 using namespace mozilla;
 
@@ -171,6 +172,10 @@ CSPService::ShouldLoad(nsIURI *aContentLocation, nsILoadInfo *aLoadInfo,
     return NS_OK;
   }
 
+  nsAutoString cspNonce;
+  rv = aLoadInfo->GetCspNonce(cspNonce);
+  NS_ENSURE_SUCCESS(rv, rv);
+
   // 1) Apply speculate CSP for preloads
   bool isPreload = nsContentUtils::IsPreloadType(contentType);
 
@@ -185,7 +190,7 @@ CSPService::ShouldLoad(nsIURI *aContentLocation, nsILoadInfo *aLoadInfo,
           contentType, cspEventListener, aContentLocation, requestOrigin,
           requestContext, aMimeTypeGuess,
           nullptr,  // no redirect, aOriginal URL is null.
-          aLoadInfo->GetSendCSPViolationEvents(), aDecision);
+          aLoadInfo->GetSendCSPViolationEvents(), cspNonce, aDecision);
       NS_ENSURE_SUCCESS(rv, rv);
 
       // if the preload policy already denied the load, then there
@@ -206,7 +211,8 @@ CSPService::ShouldLoad(nsIURI *aContentLocation, nsILoadInfo *aLoadInfo,
     rv = csp->ShouldLoad(contentType, cspEventListener, aContentLocation,
                          requestOrigin, requestContext, aMimeTypeGuess,
                          nullptr,  // no redirect, aOriginal URL is null.
-                         aLoadInfo->GetSendCSPViolationEvents(), aDecision);
+                         aLoadInfo->GetSendCSPViolationEvents(), cspNonce,
+                         aDecision);
     NS_ENSURE_SUCCESS(rv, rv);
   }
   return NS_OK;
@@ -254,16 +260,10 @@ CSPService::AsyncOnChannelRedirect(nsIChannel *oldChannel,
   nsresult rv = newChannel->GetURI(getter_AddRefs(newUri));
   NS_ENSURE_SUCCESS(rv, rv);
 
-  nsCOMPtr<nsILoadInfo> loadInfo = oldChannel->GetLoadInfo();
-
+  nsCOMPtr<nsILoadInfo> loadInfo = oldChannel->LoadInfo();
   nsCOMPtr<nsICSPEventListener> cspEventListener;
   rv = loadInfo->GetCspEventListener(getter_AddRefs(cspEventListener));
   NS_ENSURE_SUCCESS(rv, rv);
-
-  // if no loadInfo on the channel, nothing for us to do
-  if (!loadInfo) {
-    return NS_OK;
-  }
 
   // No need to continue processing if CSP is disabled or if the protocol
   // is *not* subject to CSP.
@@ -290,6 +290,10 @@ CSPService::AsyncOnChannelRedirect(nsIChannel *oldChannel,
     oldChannel->Cancel(NS_ERROR_DOM_BAD_URI);
     return rv;
   }
+
+  nsAutoString cspNonce;
+  rv = loadInfo->GetCspNonce(cspNonce);
+  NS_ENSURE_SUCCESS(rv, rv);
 
   bool isPreload = nsContentUtils::IsPreloadType(policyType);
 
@@ -318,6 +322,7 @@ CSPService::AsyncOnChannelRedirect(nsIChannel *oldChannel,
           EmptyCString(),  // ACString - MIME guess
           originalUri,     // Original nsIURI
           true,            // aSendViolationReports
+          cspNonce,        // nonce
           &aDecision);
 
       // if the preload policy already denied the load, then there
@@ -344,6 +349,7 @@ CSPService::AsyncOnChannelRedirect(nsIChannel *oldChannel,
                     EmptyCString(),  // ACString - MIME guess
                     originalUri,     // Original nsIURI
                     true,            // aSendViolationReports
+                    cspNonce,        // nonce
                     &aDecision);
   }
 

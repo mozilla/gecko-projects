@@ -225,7 +225,7 @@ PlacesController.prototype = {
       } else {
         host = Services.io.newURI(this._view.selectedNode.uri).host;
       }
-      let {ForgetAboutSite} = ChromeUtils.import("resource://gre/modules/ForgetAboutSite.jsm", {});
+      let {ForgetAboutSite} = ChromeUtils.import("resource://gre/modules/ForgetAboutSite.jsm");
       ForgetAboutSite.removeDataFromDomain(host)
                      .catch(Cu.reportError);
       break;
@@ -646,10 +646,7 @@ PlacesController.prototype = {
     if (!node && !nodes.length) {
       node = this._view.result.root;
     }
-    if (node && PlacesUtils.nodeIsContainer(node))
-      PlacesUIUtils.openContainerNodeInTabs(node, aEvent, this._view);
-    else
-      PlacesUIUtils.openURINodesInTabs(nodes, aEvent, this._view);
+    PlacesUIUtils.openMultipleLinksInTabs(node ? node : nodes, aEvent, this._view);
   },
 
   /**

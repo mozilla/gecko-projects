@@ -29,7 +29,7 @@
 #include "mozilla/dom/WorkerRunnable.h"
 
 #ifdef MOZ_GECKO_PROFILER
-#include "ProfilerMarkerPayload.h"
+#  include "ProfilerMarkerPayload.h"
 #endif
 
 #define PERFLOG(msg, ...) printf_stderr(msg, ##__VA_ARGS__)
@@ -46,7 +46,8 @@ NS_IMPL_CYCLE_COLLECTION_INHERITED(Performance, DOMEventTargetHelper,
 NS_IMPL_ADDREF_INHERITED(Performance, DOMEventTargetHelper)
 NS_IMPL_RELEASE_INHERITED(Performance, DOMEventTargetHelper)
 
-/* static */ already_AddRefed<Performance> Performance::CreateForMainThread(
+/* static */
+already_AddRefed<Performance> Performance::CreateForMainThread(
     nsPIDOMWindowInner* aWindow, nsIPrincipal* aPrincipal,
     nsDOMNavigationTiming* aDOMTiming, nsITimedChannel* aChannel) {
   MOZ_ASSERT(NS_IsMainThread());
@@ -57,7 +58,8 @@ NS_IMPL_RELEASE_INHERITED(Performance, DOMEventTargetHelper)
   return performance.forget();
 }
 
-/* static */ already_AddRefed<Performance> Performance::CreateForWorker(
+/* static */
+already_AddRefed<Performance> Performance::CreateForWorker(
     WorkerPrivate* aWorkerPrivate) {
   MOZ_ASSERT(aWorkerPrivate);
   aWorkerPrivate->AssertIsOnWorkerThread();
@@ -224,9 +226,10 @@ void Performance::Mark(const nsAString& aName, ErrorResult& aRv) {
     nsCOMPtr<nsIDocShell> docShell =
         nsContentUtils::GetDocShellForEventTarget(et);
     DECLARE_DOCSHELL_AND_HISTORY_ID(docShell);
-    profiler_add_marker("UserTiming", MakeUnique<UserTimingMarkerPayload>(
-                                          aName, TimeStamp::Now(), docShellId,
-                                          docShellHistoryId));
+    profiler_add_marker(
+        "UserTiming", JS::ProfilingCategoryPair::DOM,
+        MakeUnique<UserTimingMarkerPayload>(aName, TimeStamp::Now(), docShellId,
+                                            docShellHistoryId));
   }
 #endif
 }
@@ -320,7 +323,7 @@ void Performance::Measure(const nsAString& aName,
     nsCOMPtr<nsIDocShell> docShell =
         nsContentUtils::GetDocShellForEventTarget(et);
     DECLARE_DOCSHELL_AND_HISTORY_ID(docShell);
-    profiler_add_marker("UserTiming",
+    profiler_add_marker("UserTiming", JS::ProfilingCategoryPair::DOM,
                         MakeUnique<UserTimingMarkerPayload>(
                             aName, startMark, endMark, startTimeStamp,
                             endTimeStamp, docShellId, docShellHistoryId));

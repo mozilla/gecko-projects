@@ -22,7 +22,7 @@
 #include "mozilla/layers/ImageDataSerializer.h"
 #include "mozilla/layers/TextureClient.h"
 #ifdef XP_DARWIN
-#include "mozilla/layers/TextureSync.h"
+#  include "mozilla/layers/TextureSync.h"
 #endif
 #include "mozilla/layers/GPUVideoTextureHost.h"
 #include "mozilla/layers/WebRenderTextureHost.h"
@@ -41,27 +41,28 @@
 #include "IPDLActor.h"
 
 #ifdef MOZ_ENABLE_D3D10_LAYER
-#include "../d3d11/CompositorD3D11.h"
+#  include "../d3d11/CompositorD3D11.h"
 #endif
 
 #ifdef MOZ_X11
-#include "mozilla/layers/X11TextureHost.h"
+#  include "mozilla/layers/X11TextureHost.h"
 #endif
 
 #ifdef XP_MACOSX
-#include "../opengl/MacIOSurfaceTextureHostOGL.h"
+#  include "../opengl/MacIOSurfaceTextureHostOGL.h"
 #endif
 
 #ifdef XP_WIN
-#include "mozilla/layers/TextureDIB.h"
+#  include "mozilla/layers/TextureD3D11.h"
+#  include "mozilla/layers/TextureDIB.h"
 #endif
 
 #if 0
-#define RECYCLE_LOG(...) printf_stderr(__VA_ARGS__)
+#  define RECYCLE_LOG(...) printf_stderr(__VA_ARGS__)
 #else
-#define RECYCLE_LOG(...) \
-  do {                   \
-  } while (0)
+#  define RECYCLE_LOG(...) \
+    do {                   \
+    } while (0)
 #endif
 
 namespace mozilla {
@@ -86,7 +87,7 @@ class TextureParent : public ParentActor<PTextureParent> {
   void NotifyNotUsed(uint64_t aTransactionId);
 
   virtual mozilla::ipc::IPCResult RecvRecycleTexture(
-      const TextureFlags& aTextureFlags) override;
+      const TextureFlags& aTextureFlags) final;
 
   TextureHost* GetTextureHost() { return mTextureHost; }
 
@@ -162,21 +163,6 @@ void TextureHost::SetLastFwdTransactionId(uint64_t aTransactionId) {
   MOZ_ASSERT(mFwdTransactionId <= aTransactionId);
   mFwdTransactionId = aTransactionId;
 }
-
-// implemented in TextureHostOGL.cpp
-already_AddRefed<TextureHost> CreateTextureHostOGL(
-    const SurfaceDescriptor& aDesc, ISurfaceAllocator* aDeallocator,
-    LayersBackend aBackend, TextureFlags aFlags);
-
-// implemented in TextureHostBasic.cpp
-already_AddRefed<TextureHost> CreateTextureHostBasic(
-    const SurfaceDescriptor& aDesc, ISurfaceAllocator* aDeallocator,
-    LayersBackend aBackend, TextureFlags aFlags);
-
-// implemented in TextureD3D11.cpp
-already_AddRefed<TextureHost> CreateTextureHostD3D11(
-    const SurfaceDescriptor& aDesc, ISurfaceAllocator* aDeallocator,
-    LayersBackend aBackend, TextureFlags aFlags);
 
 already_AddRefed<TextureHost> TextureHost::Create(
     const SurfaceDescriptor& aDesc, const ReadLockDescriptor& aReadLock,

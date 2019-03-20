@@ -6,6 +6,8 @@
 import React, { Component } from "react";
 import classnames from "classnames";
 
+import AccessibleImage from "./AccessibleImage";
+
 import "./ResultList.css";
 
 type Props = {
@@ -27,10 +29,6 @@ export default class ResultList extends Component<Props> {
     size: "small",
     role: "listbox"
   };
-
-  constructor(props: Props) {
-    super(props);
-  }
 
   renderListItem = (item: any, index: number) => {
     if (item.value === "/" && item.title === "") {
@@ -54,8 +52,8 @@ export default class ResultList extends Component<Props> {
     return (
       <li {...props}>
         {item.icon && (
-          <div>
-            <img className={item.icon} />
+          <div className="icon">
+            <AccessibleImage className={item.icon} />
           </div>
         )}
         <div id={`${item.id}-title`} className="title">

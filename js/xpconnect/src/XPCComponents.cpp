@@ -16,6 +16,7 @@
 #include "nsCycleCollector.h"
 #include "jsfriendapi.h"
 #include "js/CharacterEncoding.h"
+#include "js/ContextOptions.h"
 #include "js/SavedFrameAPI.h"
 #include "js/StructuredClone.h"
 #include "mozilla/Attributes.h"
@@ -31,7 +32,6 @@
 #include "mozilla/dom/BindingUtils.h"
 #include "mozilla/dom/StructuredCloneTags.h"
 #include "mozilla/dom/WindowBinding.h"
-#include "mozilla/Scheduler.h"
 #include "nsZipArchive.h"
 #include "nsWindowMemoryReporter.h"
 #include "nsICycleCollectorListener.h"
@@ -118,13 +118,9 @@ class nsXPCComponents_Interfaces final : public nsIXPCComponents_Interfaces,
 };
 
 NS_IMETHODIMP
-nsXPCComponents_Interfaces::GetInterfaces(uint32_t* aCount, nsIID*** aArray) {
-  *aCount = 2;
-  nsIID** array = static_cast<nsIID**>(moz_xmalloc(2 * sizeof(nsIID*)));
-  *aArray = array;
-
-  array[0] = NS_GET_IID(nsIXPCComponents_Interfaces).Clone();
-  array[1] = NS_GET_IID(nsIXPCScriptable).Clone();
+nsXPCComponents_Interfaces::GetInterfaces(nsTArray<nsIID>& aArray) {
+  aArray = nsTArray<nsIID>{NS_GET_IID(nsIXPCComponents_Interfaces),
+                           NS_GET_IID(nsIXPCScriptable)};
   return NS_OK;
 }
 
@@ -275,13 +271,9 @@ class nsXPCComponents_Classes final : public nsIXPCComponents_Classes,
 
 /***************************************************************************/
 NS_IMETHODIMP
-nsXPCComponents_Classes::GetInterfaces(uint32_t* aCount, nsIID*** aArray) {
-  *aCount = 2;
-  nsIID** array = static_cast<nsIID**>(moz_xmalloc(2 * sizeof(nsIID*)));
-  *aArray = array;
-
-  array[0] = NS_GET_IID(nsIXPCComponents_Classes).Clone();
-  array[1] = NS_GET_IID(nsIXPCScriptable).Clone();
+nsXPCComponents_Classes::GetInterfaces(nsTArray<nsIID>& aArray) {
+  aArray = nsTArray<nsIID>{NS_GET_IID(nsIXPCComponents_Classes),
+                           NS_GET_IID(nsIXPCScriptable)};
   return NS_OK;
 }
 
@@ -432,13 +424,9 @@ class nsXPCComponents_Results final : public nsIXPCComponents_Results,
 
 /***************************************************************************/
 NS_IMETHODIMP
-nsXPCComponents_Results::GetInterfaces(uint32_t* aCount, nsIID*** aArray) {
-  *aCount = 2;
-  nsIID** array = static_cast<nsIID**>(moz_xmalloc(2 * sizeof(nsIID*)));
-  *aArray = array;
-
-  array[0] = NS_GET_IID(nsIXPCComponents_Results).Clone();
-  array[1] = NS_GET_IID(nsIXPCScriptable).Clone();
+nsXPCComponents_Results::GetInterfaces(nsTArray<nsIID>& aArray) {
+  aArray = nsTArray<nsIID>{NS_GET_IID(nsIXPCComponents_Results),
+                           NS_GET_IID(nsIXPCScriptable)};
   return NS_OK;
 }
 
@@ -577,13 +565,9 @@ class nsXPCComponents_ID final : public nsIXPCComponents_ID,
 
 /***************************************************************************/
 NS_IMETHODIMP
-nsXPCComponents_ID::GetInterfaces(uint32_t* aCount, nsIID*** aArray) {
-  *aCount = 2;
-  nsIID** array = static_cast<nsIID**>(moz_xmalloc(2 * sizeof(nsIID*)));
-  *aArray = array;
-
-  array[0] = NS_GET_IID(nsIXPCComponents_ID).Clone();
-  array[1] = NS_GET_IID(nsIXPCScriptable).Clone();
+nsXPCComponents_ID::GetInterfaces(nsTArray<nsIID>& aArray) {
+  aArray = nsTArray<nsIID>{NS_GET_IID(nsIXPCComponents_ID),
+                           NS_GET_IID(nsIXPCScriptable)};
   return NS_OK;
 }
 
@@ -732,13 +716,9 @@ class nsXPCComponents_Exception final : public nsIXPCComponents_Exception,
 
 /***************************************************************************/
 NS_IMETHODIMP
-nsXPCComponents_Exception::GetInterfaces(uint32_t* aCount, nsIID*** aArray) {
-  *aCount = 2;
-  nsIID** array = static_cast<nsIID**>(moz_xmalloc(2 * sizeof(nsIID*)));
-  *aArray = array;
-
-  array[0] = NS_GET_IID(nsIXPCComponents_Exception).Clone();
-  array[1] = NS_GET_IID(nsIXPCScriptable).Clone();
+nsXPCComponents_Exception::GetInterfaces(nsTArray<nsIID>& aArray) {
+  aArray = nsTArray<nsIID>{NS_GET_IID(nsIXPCComponents_Exception),
+                           NS_GET_IID(nsIXPCScriptable)};
   return NS_OK;
 }
 
@@ -1027,13 +1007,9 @@ class nsXPCComponents_Constructor final : public nsIXPCComponents_Constructor,
 
 /***************************************************************************/
 NS_IMETHODIMP
-nsXPCComponents_Constructor::GetInterfaces(uint32_t* aCount, nsIID*** aArray) {
-  *aCount = 2;
-  nsIID** array = static_cast<nsIID**>(moz_xmalloc(2 * sizeof(nsIID*)));
-  *aArray = array;
-
-  array[0] = NS_GET_IID(nsIXPCComponents_Constructor).Clone();
-  array[1] = NS_GET_IID(nsIXPCScriptable).Clone();
+nsXPCComponents_Constructor::GetInterfaces(nsTArray<nsIID>& aArray) {
+  aArray = nsTArray<nsIID>{NS_GET_IID(nsIXPCComponents_Constructor),
+                           NS_GET_IID(nsIXPCScriptable)};
   return NS_OK;
 }
 
@@ -1529,7 +1505,8 @@ nsXPCComponents_Utils::GetSandboxMetadata(HandleValue sandboxVal, JSContext* cx,
   }
 
   RootedObject sandbox(cx, &sandboxVal.toObject());
-  sandbox = js::CheckedUnwrap(sandbox);
+  // We only care about sandboxes here, so CheckedUnwrapStatic is fine.
+  sandbox = js::CheckedUnwrapStatic(sandbox);
   if (!sandbox || !xpc::IsSandbox(sandbox)) {
     return NS_ERROR_INVALID_ARG;
   }
@@ -1546,7 +1523,8 @@ nsXPCComponents_Utils::SetSandboxMetadata(HandleValue sandboxVal,
   }
 
   RootedObject sandbox(cx, &sandboxVal.toObject());
-  sandbox = js::CheckedUnwrap(sandbox);
+  // We only care about sandboxes here, so CheckedUnwrapStatic is fine.
+  sandbox = js::CheckedUnwrapStatic(sandbox);
   if (!sandbox || !xpc::IsSandbox(sandbox)) {
     return NS_ERROR_INVALID_ARG;
   }
@@ -1589,12 +1567,17 @@ nsXPCComponents_Utils::Unload(const nsACString& registryLocation) {
 NS_IMETHODIMP
 nsXPCComponents_Utils::ImportGlobalProperties(HandleValue aPropertyList,
                                               JSContext* cx) {
-  RootedObject global(cx, CurrentGlobalOrNull(cx));
+  // Ensure we're working in the scripted caller's realm. This is not guaranteed
+  // to be the current realm because we switch realms when calling cross-realm
+  // functions.
+  RootedObject global(cx, JS::GetScriptedCallerGlobal(cx));
   MOZ_ASSERT(global);
+  js::AssertSameCompartment(cx, global);
+  JSAutoRealm ar(cx, global);
 
-  // Don't allow doing this if the global is a Window
+  // Don't allow doing this if the global is a Window.
   nsGlobalWindowInner* win;
-  if (NS_SUCCEEDED(UNWRAP_OBJECT(Window, &global, win))) {
+  if (NS_SUCCEEDED(UNWRAP_NON_WRAPPER_OBJECT(Window, global, win))) {
     return NS_ERROR_NOT_AVAILABLE;
   }
 
@@ -1632,7 +1615,7 @@ NS_IMETHODIMP
 nsXPCComponents_Utils::ForceGC() {
   JSContext* cx = XPCJSContext::Get()->Context();
   PrepareForFullGC(cx);
-  NonIncrementalGC(cx, GC_NORMAL, gcreason::COMPONENT_UTILS);
+  NonIncrementalGC(cx, GC_NORMAL, GCReason::COMPONENT_UTILS);
   return NS_OK;
 }
 
@@ -1678,7 +1661,7 @@ NS_IMETHODIMP
 nsXPCComponents_Utils::ForceShrinkingGC() {
   JSContext* cx = dom::danger::GetJSContext();
   PrepareForFullGC(cx);
-  NonIncrementalGC(cx, GC_SHRINK, gcreason::COMPONENT_UTILS);
+  NonIncrementalGC(cx, GC_SHRINK, GCReason::COMPONENT_UTILS);
   return NS_OK;
 }
 
@@ -1691,7 +1674,7 @@ class PreciseGCRunnable : public Runnable {
 
   NS_IMETHOD Run() override {
     nsJSContext::GarbageCollectNow(
-        gcreason::COMPONENT_UTILS, nsJSContext::NonIncrementalGC,
+        GCReason::COMPONENT_UTILS, nsJSContext::NonIncrementalGC,
         mShrinking ? nsJSContext::ShrinkingGC : nsJSContext::NonShrinkingGC);
 
     mCallback->Callback();
@@ -1728,6 +1711,24 @@ nsXPCComponents_Utils::UnlinkGhostWindows() {
     }
   }
 
+  return NS_OK;
+#else
+  return NS_ERROR_NOT_IMPLEMENTED;
+#endif
+}
+
+#ifdef NS_FREE_PERMANENT_DATA
+struct IntentionallyLeakedObject {
+  IntentionallyLeakedObject() { MOZ_COUNT_CTOR(IntentionallyLeakedObject); }
+
+  ~IntentionallyLeakedObject() { MOZ_COUNT_DTOR(IntentionallyLeakedObject); }
+};
+#endif
+
+NS_IMETHODIMP
+nsXPCComponents_Utils::IntentionallyLeak() {
+#ifdef NS_FREE_PERMANENT_DATA
+  Unused << new IntentionallyLeakedObject();
   return NS_OK;
 #else
   return NS_ERROR_NOT_IMPLEMENTED;
@@ -1815,7 +1816,10 @@ nsXPCComponents_Utils::IsProxy(HandleValue vobj, JSContext* cx, bool* rval) {
   }
 
   RootedObject obj(cx, &vobj.toObject());
-  obj = js::CheckedUnwrap(obj, /* stopAtWindowProxy = */ false);
+  // We need to do a dynamic unwrap, because we apparently want to treat
+  // "failure to unwrap" differently from "not a proxy" (throw for the former,
+  // return false for the latter).
+  obj = js::CheckedUnwrapDynamic(obj, cx, /* stopAtWindowProxy = */ false);
   NS_ENSURE_TRUE(obj, NS_ERROR_FAILURE);
 
   *rval = js::IsScriptedProxy(obj);
@@ -1938,10 +1942,13 @@ nsXPCComponents_Utils::PermitCPOWsInScope(HandleValue obj) {
   }
 
   JSObject* scopeObj = js::UncheckedUnwrap(&obj.toObject());
-  MOZ_DIAGNOSTIC_ASSERT(
-      !mozJSComponentLoader::Get()->IsLoaderGlobal(scopeObj),
-      "Don't call Cu.PermitCPOWsInScope() in a JSM that shares its global");
-  CompartmentPrivate::Get(scopeObj)->allowCPOWs = true;
+  JS::Compartment* scopeComp = js::GetObjectCompartment(scopeObj);
+  JS::Compartment* systemComp =
+      js::GetObjectCompartment(xpc::PrivilegedJunkScope());
+  MOZ_RELEASE_ASSERT(scopeComp != systemComp,
+                     "Don't call Cu.PermitCPOWsInScope() on scopes in the "
+                     "shared system compartment");
+  CompartmentPrivate::Get(scopeComp)->allowCPOWs = true;
   return NS_OK;
 }
 
@@ -1973,9 +1980,8 @@ nsXPCComponents_Utils::SetWantXrays(HandleValue vscope, JSContext* cx) {
     return NS_ERROR_INVALID_ARG;
   }
   JSObject* scopeObj = js::UncheckedUnwrap(&vscope.toObject());
-  MOZ_DIAGNOSTIC_ASSERT(
-      !mozJSComponentLoader::Get()->IsLoaderGlobal(scopeObj),
-      "Don't call Cu.setWantXrays() in a JSM that shares its global");
+  MOZ_RELEASE_ASSERT(!AccessCheck::isChrome(scopeObj),
+                     "Don't call setWantXrays on system-principal scopes");
   JS::Compartment* compartment = js::GetObjectCompartment(scopeObj);
   CompartmentPrivate::Get(scopeObj)->wantXrays = true;
   bool ok = js::RecomputeWrappers(cx, js::SingleCompartment(compartment),
@@ -1987,11 +1993,12 @@ nsXPCComponents_Utils::SetWantXrays(HandleValue vscope, JSContext* cx) {
 NS_IMETHODIMP
 nsXPCComponents_Utils::ForcePermissiveCOWs(JSContext* cx) {
   xpc::CrashIfNotInAutomation();
-  JSObject* currentGlobal = CurrentGlobalOrNull(cx);
+  RootedObject global(cx, GetScriptedCallerGlobal(cx));
+  MOZ_ASSERT(global);
   MOZ_DIAGNOSTIC_ASSERT(
-      !mozJSComponentLoader::Get()->IsLoaderGlobal(currentGlobal),
+      !mozJSComponentLoader::Get()->IsLoaderGlobal(global),
       "Don't call Cu.forcePermissiveCOWs() in a JSM that shares its global");
-  CompartmentPrivate::Get(currentGlobal)->forcePermissiveCOWs = true;
+  RealmPrivate::Get(global)->forcePermissiveCOWs = true;
   return NS_OK;
 }
 
@@ -2077,7 +2084,7 @@ nsXPCComponents_Utils::NukeSandbox(HandleValue obj, JSContext* cx) {
   RootedObject sb(cx, UncheckedUnwrap(wrapper));
   NS_ENSURE_TRUE(IsSandbox(sb), NS_ERROR_INVALID_ARG);
 
-  xpc::NukeAllWrappersForCompartment(cx, GetObjectCompartment(sb));
+  xpc::NukeAllWrappersForRealm(cx, GetNonCCWObjectRealm(sb));
 
   return NS_OK;
 }
@@ -2291,7 +2298,8 @@ bool xpc::CloneInto(JSContext* aCx, HandleValue aValue, HandleValue aScope,
   }
 
   RootedObject scope(aCx, &aScope.toObject());
-  scope = js::CheckedUnwrap(scope);
+  // The scope could be a Window, so we need to CheckedUnwrapDynamic.
+  scope = js::CheckedUnwrapDynamic(scope, aCx);
   if (!scope) {
     JS_ReportErrorASCII(aCx, "Permission denied to clone object into scope");
     return false;
@@ -2352,7 +2360,9 @@ nsXPCComponents_Utils::GetObjectPrincipal(HandleValue val, JSContext* cx,
     return NS_ERROR_INVALID_ARG;
   }
   RootedObject obj(cx, &val.toObject());
-  obj = js::CheckedUnwrap(obj);
+  // We need to be able to unwrap to WindowProxy or Location here, so
+  // use CheckedUnwrapDynamic.
+  obj = js::CheckedUnwrapDynamic(obj, cx);
   MOZ_ASSERT(obj);
 
   nsCOMPtr<nsIPrincipal> prin = nsContentUtils::ObjectPrincipal(obj);
@@ -2367,7 +2377,9 @@ nsXPCComponents_Utils::GetRealmLocation(HandleValue val, JSContext* cx,
     return NS_ERROR_INVALID_ARG;
   }
   RootedObject obj(cx, &val.toObject());
-  obj = js::CheckedUnwrap(obj);
+  // We need to be able to unwrap to WindowProxy or Location here, so
+  // use CheckedUnwrapDynamic.
+  obj = js::CheckedUnwrapDynamic(obj, cx);
   MOZ_ASSERT(obj);
 
   result = xpc::RealmPrivate::Get(obj)->GetLocation();
@@ -2394,19 +2406,6 @@ NS_IMETHODIMP
 nsXPCComponents_Utils::Now(double* aRetval) {
   TimeStamp start = TimeStamp::ProcessCreation();
   *aRetval = (TimeStamp::Now() - start).ToMilliseconds();
-  return NS_OK;
-}
-
-NS_IMETHODIMP
-nsXPCComponents_Utils::BlockThreadedExecution(
-    nsIBlockThreadedExecutionCallback* aCallback) {
-  Scheduler::BlockThreadedExecution(aCallback);
-  return NS_OK;
-}
-
-NS_IMETHODIMP
-nsXPCComponents_Utils::UnblockThreadedExecution() {
-  Scheduler::UnblockThreadedExecution();
   return NS_OK;
 }
 
@@ -2671,6 +2670,6 @@ ComponentsSH::PreCreate(nsISupports* nativeObj, JSContext* cx,
         "mScope must not be null when nsXPCComponents::PreCreate is called");
     return NS_ERROR_FAILURE;
   }
-  *parentObj = self->GetScope()->GetGlobalJSObject();
+  *parentObj = self->GetScope()->GetGlobalForWrappedNatives();
   return NS_OK;
 }

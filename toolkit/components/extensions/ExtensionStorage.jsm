@@ -7,8 +7,8 @@
 
 var EXPORTED_SYMBOLS = ["ExtensionStorage"];
 
-ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
-ChromeUtils.import("resource://gre/modules/Services.jsm");
+const {XPCOMUtils} = ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
+const {Services} = ChromeUtils.import("resource://gre/modules/Services.jsm");
 
 ChromeUtils.defineModuleGetter(this, "ExtensionUtils",
                                "resource://gre/modules/ExtensionUtils.jsm");
@@ -419,7 +419,7 @@ var ExtensionStorage = {
     for (let [key, value] of Object.entries(items)) {
       if (value && typeof value === "object" &&
           Cu.getClassName(value, true) === "StructuredCloneHolder") {
-        value = value.deserialize(context.cloneScope);
+        value = value.deserialize(context.cloneScope, true);
       } else {
         value = Cu.cloneInto(value, context.cloneScope);
       }

@@ -24,7 +24,7 @@ function expectCommandUpdate(count, testWindow = window) {
         }
 
         if (!--count) {
-          testWindow.gURLBar.controllers.removeControllerAt(0, overrideController);
+          testWindow.gURLBar.inputField.controllers.removeControllerAt(0, overrideController);
           testWindow.gBrowser.selectedBrowser.controllers.removeControllerAt(0, overrideController);
           resolve(true);
         }
@@ -33,13 +33,13 @@ function expectCommandUpdate(count, testWindow = window) {
 
     if (!count) {
       SimpleTest.executeSoon(() => {
-        testWindow.gURLBar.controllers.removeControllerAt(0, overrideController);
+        testWindow.gURLBar.inputField.controllers.removeControllerAt(0, overrideController);
         testWindow.gBrowser.selectedBrowser.controllers.removeControllerAt(0, overrideController);
         resolve(false);
       });
     }
 
-    testWindow.gURLBar.controllers.insertControllerAt(0, overrideController);
+    testWindow.gURLBar.inputField.controllers.insertControllerAt(0, overrideController);
     testWindow.gBrowser.selectedBrowser.controllers.insertControllerAt(0, overrideController);
   });
 }
@@ -59,6 +59,7 @@ add_task(async function test_init() {
 // Test updating when the panel is open with the edit-controls on the panel.
 // Updates should occur.
 add_task(async function test_panelui_opened() {
+  document.commandDispatcher.unlock();
   gURLBar.focus();
   gURLBar.value = "test";
 

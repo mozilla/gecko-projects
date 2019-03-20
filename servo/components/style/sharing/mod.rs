@@ -1,6 +1,6 @@
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
- * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 //! Code related to the style sharing cache, an optimization that allows similar
 //! nodes to share style without having to run selector matching twice.
@@ -64,7 +64,6 @@
 //! selectors are effectively stripped off, so that matching them all against
 //! elements makes sense.
 
-use atomic_refcell::{AtomicRefCell, AtomicRefMut};
 use crate::applicable_declarations::ApplicableDeclarationBlock;
 use crate::bloom::StyleBloom;
 use crate::context::{SelectorFlagsMap, SharedStyleContext, StyleContext};
@@ -75,6 +74,7 @@ use crate::rule_tree::StrongRuleNode;
 use crate::style_resolver::{PrimaryStyle, ResolvedElementStyles};
 use crate::stylist::Stylist;
 use crate::Atom;
+use atomic_refcell::{AtomicRefCell, AtomicRefMut};
 use owning_ref::OwningHandle;
 use selectors::matching::{ElementSelectorFlags, VisitedHandlingMode};
 use selectors::NthIndexCache;
@@ -763,6 +763,11 @@ impl<E: TElement> StyleSharingCache<E> {
 
         if target.element.shadow_root().is_some() {
             trace!("Miss: Shadow host");
+            return None;
+        }
+
+        if target.element.has_animations() {
+            trace!("Miss: Has Animations");
             return None;
         }
 

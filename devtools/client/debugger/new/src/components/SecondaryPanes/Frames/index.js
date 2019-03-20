@@ -5,7 +5,7 @@
 // @flow
 
 import React, { Component } from "react";
-import { connect } from "react-redux";
+import { connect } from "../../../utils/connect";
 import PropTypes from "prop-types";
 
 import type { Frame, Why } from "../../../types";
@@ -22,12 +22,10 @@ import { copyToTheClipboard } from "../../../utils/clipboard";
 import {
   getFrameworkGroupingState,
   getSelectedFrame,
-  isPaused as getIsPaused,
   getCallStackFrames,
-  getPauseReason
+  getPauseReason,
+  getCurrentThread
 } from "../../../selectors";
-
-import type { LocalFrame } from "./types";
 
 import "./Frames.css";
 
@@ -44,7 +42,8 @@ type Props = {
   disableFrameTruncate: boolean,
   disableContextMenu: boolean,
   displayFullUrl: boolean,
-  getFrameTitle?: string => string
+  getFrameTitle?: string => string,
+  selectable?: boolean
 };
 
 type State = {
@@ -113,7 +112,7 @@ class Frames extends Component<Props, State> {
     toggleFrameworkGrouping(!frameworkGroupingOn);
   };
 
-  renderFrames(frames: LocalFrame[]) {
+  renderFrames(frames: Frame[]) {
     const {
       selectFrame,
       selectedFrame,
@@ -121,19 +120,23 @@ class Frames extends Component<Props, State> {
       frameworkGroupingOn,
       displayFullUrl,
       getFrameTitle,
-      disableContextMenu
+      disableContextMenu,
+      selectable = false
     } = this.props;
 
     const framesOrGroups = this.truncateFrames(this.collapseFrames(frames));
-    type FrameOrGroup = LocalFrame | LocalFrame[];
+    type FrameOrGroup = Frame | Frame[];
 
+    // We're not using a <ul> because it adds new lines before and after when
+    // the user copies the trace. Needed for the console which has several
+    // places where we don't want to have those new lines.
     return (
-      <ul>
+      <div role="list">
         {framesOrGroups.map(
           (frameOrGroup: FrameOrGroup) =>
             frameOrGroup.id ? (
               <FrameComponent
-                frame={frameOrGroup}
+                frame={(frameOrGroup: any)}
                 toggleFrameworkGrouping={this.toggleFrameworkGrouping}
                 copyStackTrace={this.copyStackTrace}
                 frameworkGroupingOn={frameworkGroupingOn}
@@ -144,10 +147,11 @@ class Frames extends Component<Props, State> {
                 displayFullUrl={displayFullUrl}
                 getFrameTitle={getFrameTitle}
                 disableContextMenu={disableContextMenu}
+                selectable={selectable}
               />
             ) : (
               <Group
-                group={frameOrGroup}
+                group={(frameOrGroup: any)}
                 toggleFrameworkGrouping={this.toggleFrameworkGrouping}
                 copyStackTrace={this.copyStackTrace}
                 frameworkGroupingOn={frameworkGroupingOn}
@@ -158,20 +162,21 @@ class Frames extends Component<Props, State> {
                 displayFullUrl={displayFullUrl}
                 getFrameTitle={getFrameTitle}
                 disableContextMenu={disableContextMenu}
+                selectable={selectable}
               />
             )
         )}
-      </ul>
+      </div>
     );
   }
 
-  renderToggleButton(frames: LocalFrame[]) {
+  renderToggleButton(frames: Frame[]) {
     const { l10n } = this.context;
     const buttonMessage = this.state.showAllFrames
       ? l10n.getStr("callStack.collapse")
       : l10n.getStr("callStack.expand");
 
-    frames = this.collapseFrames(frames);
+    frames = (this.collapseFrames(frames): any);
     if (frames.length <= NUM_FRAMES_SHOWN) {
       return null;
     }
@@ -212,10 +217,9 @@ Frames.contextTypes = { l10n: PropTypes.object };
 
 const mapStateToProps = state => ({
   frames: getCallStackFrames(state),
-  why: getPauseReason(state),
+  why: getPauseReason(state, getCurrentThread(state)),
   frameworkGroupingOn: getFrameworkGroupingState(state),
-  selectedFrame: getSelectedFrame(state),
-  pause: getIsPaused(state)
+  selectedFrame: getSelectedFrame(state, getCurrentThread(state))
 });
 
 export default connect(

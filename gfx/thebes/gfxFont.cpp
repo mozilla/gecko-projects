@@ -48,8 +48,8 @@
 
 #include "cairo.h"
 #ifdef XP_WIN
-#include "cairo-win32.h"
-#include "gfxWindowsPlatform.h"
+#  include "cairo-win32.h"
+#  include "gfxWindowsPlatform.h"
 #endif
 
 #include "harfbuzz/hb.h"
@@ -67,7 +67,7 @@ using mozilla::services::GetObserverService;
 gfxFontCache* gfxFontCache::gGlobalCache = nullptr;
 
 #ifdef DEBUG_roc
-#define DEBUG_TEXT_RUN_STORAGE_METRICS
+#  define DEBUG_TEXT_RUN_STORAGE_METRICS
 #endif
 
 #ifdef DEBUG_TEXT_RUN_STORAGE_METRICS
@@ -411,7 +411,8 @@ static void LookupAlternateValues(gfxFontFeatureValueSet* featureLookup,
   }
 }
 
-/* static */ void gfxFontShaper::MergeFontFeatures(
+/* static */
+void gfxFontShaper::MergeFontFeatures(
     const gfxFontStyle* aStyle, const nsTArray<gfxFontFeature>& aFontFeatures,
     bool aDisableLigatures, const nsACString& aFamilyName, bool aAddSmallCaps,
     void (*aHandleFeature)(const uint32_t&, uint32_t&, void*),
@@ -885,7 +886,7 @@ gfxFloat gfxFont::GetGlyphHAdvance(DrawTarget* aDrawTarget, uint16_t aGID) {
     return 0;
   }
   if (ProvidesGlyphWidths()) {
-    return GetGlyphWidth(*aDrawTarget, aGID) / 65536.0;
+    return GetGlyphWidth(aGID) / 65536.0;
   }
   if (mFUnitsConvFactor < 0.0f) {
     GetMetrics(eHorizontal);
@@ -1143,12 +1144,14 @@ void gfxFont::CheckForFeaturesInvolvingSpace() {
                                int(Script::NUM_SCRIPT_CODES)));
       for (Script s = Script::ARABIC; s < scriptCount;
            s = Script(static_cast<int>(s) + 1)) {
-        hb_script_t scriptTag = hb_script_t(GetScriptTagForCode(s));
-        hb_tag_t s1, s2;
-        hb_ot_tags_from_script(scriptTag, &s1, &s2);
-        sScriptTagToCode->Put(s1, s);
-        if (s2 != HB_OT_TAG_DEFAULT_SCRIPT) {
-          sScriptTagToCode->Put(s2, s);
+        hb_script_t script = hb_script_t(GetScriptTagForCode(s));
+        unsigned int scriptCount = 4;
+        hb_tag_t scriptTags[4];
+        hb_ot_tags_from_script_and_language(script, HB_LANGUAGE_INVALID,
+                                            &scriptCount, scriptTags, nullptr,
+                                            nullptr);
+        for (unsigned int i = 0; i < scriptCount; i++) {
+          sScriptTagToCode->Put(scriptTags[i], s);
         }
       }
 
@@ -1955,12 +1958,12 @@ bool gfxFont::DrawMissingGlyph(const TextRunDrawParams& aRunParams,
     if (textDrawer) {
       // Generate an orientation matrix for the current writing mode
       wr::FontInstanceFlags flags = textDrawer->GetWRGlyphFlags();
-      if (flags.bits & wr::FontInstanceFlags::TRANSPOSE) {
+      if (flags & wr::FontInstanceFlags_TRANSPOSE) {
         std::swap(mat._11, mat._12);
         std::swap(mat._21, mat._22);
       }
-      mat.PostScale(flags.bits & wr::FontInstanceFlags::FLIP_X ? -1.0f : 1.0f,
-                    flags.bits & wr::FontInstanceFlags::FLIP_Y ? -1.0f : 1.0f);
+      mat.PostScale(flags & wr::FontInstanceFlags_FLIP_X ? -1.0f : 1.0f,
+                    flags & wr::FontInstanceFlags_FLIP_Y ? -1.0f : 1.0f);
       matPtr = &mat;
     }
 
@@ -2135,11 +2138,11 @@ void gfxFont::Draw(const gfxTextRun* aTextRun, uint32_t aStart, uint32_t aEnd,
       // X and Y, while left rotation flips the resulting Y axis, and right
       // rotation flips the resulting X axis.
       textDrawer->SetWRGlyphFlags(
-          textDrawer->GetWRGlyphFlags() | wr::FontInstanceFlags::TRANSPOSE |
+          textDrawer->GetWRGlyphFlags() | wr::FontInstanceFlags_TRANSPOSE |
           (aOrientation ==
                    gfx::ShapedTextFlags::TEXT_ORIENT_VERTICAL_SIDEWAYS_LEFT
-               ? wr::FontInstanceFlags::FLIP_Y
-               : wr::FontInstanceFlags::FLIP_X));
+               ? wr::FontInstanceFlags_FLIP_Y
+               : wr::FontInstanceFlags_FLIP_X));
     } else {
       // For non-WebRender targets, just push a rotation transform.
       matrixRestore.SetContext(aRunParams.context);
@@ -2614,9 +2617,9 @@ static char16_t IsBoundarySpace(char16_t aChar, char16_t aNextChar) {
 }
 
 #ifdef __GNUC__
-#define GFX_MAYBE_UNUSED __attribute__((unused))
+#  define GFX_MAYBE_UNUSED __attribute__((unused))
 #else
-#define GFX_MAYBE_UNUSED
+#  define GFX_MAYBE_UNUSED
 #endif
 
 template <typename T>
@@ -2904,9 +2907,9 @@ bool gfxFont::ShapeTextWithoutWordCache(DrawTarget* aDrawTarget, const T* aText,
 }
 
 #ifndef RELEASE_OR_BETA
-#define TEXT_PERF_INCR(tp, m) (tp ? (tp)->current.m++ : 0)
+#  define TEXT_PERF_INCR(tp, m) (tp ? (tp)->current.m++ : 0)
 #else
-#define TEXT_PERF_INCR(tp, m)
+#  define TEXT_PERF_INCR(tp, m)
 #endif
 
 inline static bool IsChar8Bit(uint8_t /*aCh*/) { return true; }
@@ -3059,6 +3062,9 @@ bool gfxFont::SplitAndInitTextRun(
             flags | gfx::ShapedTextFlags::TEXT_IS_8BIT, rounding, tp);
         if (sw) {
           aTextRun->CopyGlyphDataFrom(sw, aRunStart + i);
+          if (boundary == ' ') {
+            aTextRun->GetCharacterGlyphs()[aRunStart + i].SetIsSpace();
+          }
         } else {
           return false;
         }
@@ -3303,7 +3309,8 @@ static void DestroyRefCairo(void* aData) {
   cairo_destroy(refCairo);
 }
 
-/* static */ cairo_t* gfxFont::RefCairo(DrawTarget* aDT) {
+/* static */
+cairo_t* gfxFont::RefCairo(DrawTarget* aDT) {
   // DrawTargets that don't use a Cairo backend can be given a 1x1 "reference"
   // |cairo_t*|, stored in the DrawTarget's user data, for doing font-related
   // operations.
@@ -3985,10 +3992,10 @@ bool gfxFont::TryGetMathTable() {
   return !!mMathTable;
 }
 
-/* static */ void SharedFontList::Initialize() {
-  sEmpty = new SharedFontList();
-}
+/* static */
+void SharedFontList::Initialize() { sEmpty = new SharedFontList(); }
 
-/* static */ void SharedFontList::Shutdown() { sEmpty = nullptr; }
+/* static */
+void SharedFontList::Shutdown() { sEmpty = nullptr; }
 
 StaticRefPtr<SharedFontList> SharedFontList::sEmpty;

@@ -47,7 +47,7 @@ class nsDisplayColumnRule : public nsDisplayItem {
       mozilla::wr::DisplayListBuilder& aBuilder,
       mozilla::wr::IpcResourceUpdateQueue& aResources,
       const StackingContextHelper& aSc,
-      mozilla::layers::WebRenderLayerManager* aManager,
+      mozilla::layers::RenderRootStateManager* aManager,
       nsDisplayListBuilder* aDisplayListBuilder) override;
   virtual void Paint(nsDisplayListBuilder* aBuilder, gfxContext* aCtx) override;
 
@@ -72,7 +72,7 @@ bool nsDisplayColumnRule::CreateWebRenderCommands(
     mozilla::wr::DisplayListBuilder& aBuilder,
     mozilla::wr::IpcResourceUpdateQueue& aResources,
     const StackingContextHelper& aSc,
-    mozilla::layers::WebRenderLayerManager* aManager,
+    mozilla::layers::RenderRootStateManager* aManager,
     nsDisplayListBuilder* aDisplayListBuilder) {
   RefPtr<gfxContext> screenRefCtx = gfxContext::CreateOrNull(
       gfxPlatform::GetPlatform()->ScreenReferenceDrawTarget().get());
@@ -102,15 +102,18 @@ bool nsDisplayColumnRule::CreateWebRenderCommands(
 nsContainerFrame* NS_NewColumnSetFrame(nsIPresShell* aPresShell,
                                        ComputedStyle* aStyle,
                                        nsFrameState aStateFlags) {
-  nsColumnSetFrame* it = new (aPresShell) nsColumnSetFrame(aStyle);
+  nsColumnSetFrame* it =
+      new (aPresShell) nsColumnSetFrame(aStyle, aPresShell->GetPresContext());
   it->AddStateBits(aStateFlags);
   return it;
 }
 
 NS_IMPL_FRAMEARENA_HELPERS(nsColumnSetFrame)
 
-nsColumnSetFrame::nsColumnSetFrame(ComputedStyle* aStyle)
-    : nsContainerFrame(aStyle, kClassID), mLastBalanceBSize(NS_INTRINSICSIZE) {}
+nsColumnSetFrame::nsColumnSetFrame(ComputedStyle* aStyle,
+                                   nsPresContext* aPresContext)
+    : nsContainerFrame(aStyle, aPresContext, kClassID),
+      mLastBalanceBSize(NS_INTRINSICSIZE) {}
 
 void nsColumnSetFrame::ForEachColumnRule(
     const std::function<void(const nsRect& lineRect)>& aSetLineRect,
@@ -190,7 +193,6 @@ void nsColumnSetFrame::CreateBorderRenderers(
   else
     ruleStyle = colStyle->mColumnRuleStyle;
 
-  nsPresContext* presContext = PresContext();
   nscoord ruleWidth = colStyle->GetComputedColumnRuleWidth();
   if (!ruleWidth) return;
 
@@ -198,12 +200,13 @@ void nsColumnSetFrame::CreateBorderRenderers(
   nscolor ruleColor =
       GetVisitedDependentColor(&nsStyleColumn::mColumnRuleColor);
 
+  nsPresContext* presContext = PresContext();
   // In order to re-use a large amount of code, we treat the column rule as a
   // border. We create a new border style object and fill in all the details of
   // the column rule as the left border. PaintBorder() does all the rendering
   // for us, so we not only save an enormous amount of code but we'll support
   // all the line styles that we support on borders!
-  nsStyleBorder border(presContext);
+  nsStyleBorder border(*presContext->Document());
   Sides skipSides;
   if (isVertical) {
     border.SetBorderWidth(eSideTop, ruleWidth);
@@ -280,7 +283,8 @@ static nscoord GetColumnGap(nsColumnSetFrame* aFrame,
   return nsLayoutUtils::ResolveGapToLength(columnGap, aPercentageBasis);
 }
 
-/* static */ nscoord nsColumnSetFrame::ClampUsedColumnWidth(
+/* static */
+nscoord nsColumnSetFrame::ClampUsedColumnWidth(
     const nsStyleCoord& aColumnWidth) {
   MOZ_ASSERT(aColumnWidth.GetUnit() == eStyleUnit_Coord,
              "This should only be called when column-width is a <length>!");
@@ -574,13 +578,15 @@ bool nsColumnSetFrame::ReflowChildren(ReflowOutput& aDesiredSize,
   if (colBSizeChanged) {
     mLastBalanceBSize = aConfig.mColMaxBSize;
     // XXX Seems like this could fire if incremental reflow pushed the column
-    // set down so we reflow incrementally with a different available height. We
-    // need a way to do an incremental reflow and be sure availableHeight
+    // set down so we reflow incrementally with a different available height.
+    // We need a way to do an incremental reflow and be sure availableHeight
     // changes are taken account of! Right now I think block frames with
     // absolute children might exit early.
-    // NS_ASSERTION(aKidReason != eReflowReason_Incremental,
-    //             "incremental reflow should not have changed the balance
-    //             height");
+    /*
+    NS_ASSERTION(
+        aKidReason != eReflowReason_Incremental,
+        "incremental reflow should not have changed the balance height");
+    */
   }
 
   // get our border and padding
@@ -1223,7 +1229,7 @@ void nsColumnSetFrame::BuildDisplayList(nsDisplayListBuilder* aBuilder,
                                         const nsDisplayListSet& aLists) {
   DisplayBorderBackgroundOutline(aBuilder, aLists);
 
-  if (IsVisibleForPainting(aBuilder)) {
+  if (IsVisibleForPainting()) {
     aLists.BorderBackground()->AppendToTop(
         MakeDisplayItem<nsDisplayColumnRule>(aBuilder, this));
   }
@@ -1244,7 +1250,7 @@ void nsColumnSetFrame::AppendDirectlyOwnedAnonBoxes(
     return;
   }
 
-  MOZ_ASSERT(column->Style()->GetPseudo() == nsCSSAnonBoxes::columnContent(),
+  MOZ_ASSERT(column->Style()->GetPseudoType() == PseudoStyleType::columnContent,
              "What sort of child is this?");
   aResult.AppendElement(OwnedAnonBox(column));
 }

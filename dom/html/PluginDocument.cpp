@@ -10,7 +10,7 @@
 #include "nsIPresShell.h"
 #include "nsIObjectFrame.h"
 #include "nsNPAPIPluginInstance.h"
-#include "nsIDocumentInlines.h"
+#include "DocumentInlines.h"
 #include "nsIDocShellTreeItem.h"
 #include "nsNodeInfoManager.h"
 #include "nsContentCreatorFunctions.h"
@@ -71,14 +71,14 @@ class PluginStreamListener : public MediaDocumentStreamListener {
  public:
   explicit PluginStreamListener(PluginDocument* aDoc)
       : MediaDocumentStreamListener(aDoc), mPluginDoc(aDoc) {}
-  NS_IMETHOD OnStartRequest(nsIRequest* request, nsISupports* ctxt) override;
+  NS_IMETHOD OnStartRequest(nsIRequest* request) override;
 
  private:
   RefPtr<PluginDocument> mPluginDoc;
 };
 
 NS_IMETHODIMP
-PluginStreamListener::OnStartRequest(nsIRequest* request, nsISupports* ctxt) {
+PluginStreamListener::OnStartRequest(nsIRequest* request) {
   AUTO_PROFILER_LABEL("PluginStreamListener::OnStartRequest", NETWORK);
 
   nsCOMPtr<nsIContent> embed = mPluginDoc->GetPluginContent();
@@ -104,7 +104,7 @@ PluginStreamListener::OnStartRequest(nsIRequest* request, nsISupports* ctxt) {
 
   // Note that because we're now hooked up to a plugin listener, this will
   // likely spawn a plugin, which may re-enter.
-  return MediaDocumentStreamListener::OnStartRequest(request, ctxt);
+  return MediaDocumentStreamListener::OnStartRequest(request);
 }
 
 PluginDocument::PluginDocument() {}
@@ -262,7 +262,7 @@ PluginDocument::Print() {
 }  // namespace dom
 }  // namespace mozilla
 
-nsresult NS_NewPluginDocument(nsIDocument** aResult) {
+nsresult NS_NewPluginDocument(mozilla::dom::Document** aResult) {
   auto* doc = new mozilla::dom::PluginDocument();
 
   NS_ADDREF(doc);

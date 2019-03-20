@@ -14,6 +14,8 @@
 namespace mozilla {
 namespace dom {
 
+class DataTransfer;
+
 class InputEvent : public UIEvent {
  public:
   InputEvent(EventTarget* aOwner, nsPresContext* aPresContext,
@@ -31,10 +33,17 @@ class InputEvent : public UIEvent {
     return InputEvent_Binding::Wrap(aCx, this, aGivenProto);
   }
 
+  void GetInputType(nsAString& aInputType);
+  void GetData(nsAString& aData);
+  DataTransfer* GetDataTransfer();
   bool IsComposing();
 
  protected:
   ~InputEvent() {}
+
+  // mInputTypeValue stores inputType attribute value if the instance is
+  // created by script and not initialized with known inputType value.
+  nsString mInputTypeValue;
 };
 
 }  // namespace dom

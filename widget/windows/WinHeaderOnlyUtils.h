@@ -34,12 +34,12 @@ typedef struct _FILE_ID_INFO {
   FILE_ID_128 FileId;
 } FILE_ID_INFO;
 
-#define FileIdInfo ((FILE_INFO_BY_HANDLE_CLASS)18)
+#  define FileIdInfo ((FILE_INFO_BY_HANDLE_CLASS)18)
 
 #endif  // _WIN32_WINNT < _WIN32_WINNT_WIN8
 
 #if !defined(STATUS_SUCCESS)
-#define STATUS_SUCCESS ((NTSTATUS)0x00000000L)
+#  define STATUS_SUCCESS ((NTSTATUS)0x00000000L)
 #endif  // !defined(STATUS_SUCCESS)
 
 namespace mozilla {
@@ -147,6 +147,14 @@ class WindowsError final {
     }
 
     return Nothing();
+  }
+
+  bool operator==(const WindowsError& aOther) const {
+    return mHResult == aOther.mHResult;
+  }
+
+  bool operator!=(const WindowsError& aOther) const {
+    return mHResult != aOther.mHResult;
   }
 
   static DWORD NtStatusToWin32Error(NTSTATUS aNtStatus) {
@@ -352,6 +360,47 @@ inline WindowsErrorResult<bool> DoPathsPointToIdenticalFile(
 
   return id1 == id2;
 }
+
+class MOZ_RAII AutoVirtualProtect final {
+ public:
+  AutoVirtualProtect(void* aAddress, size_t aLength, DWORD aProtFlags,
+                     HANDLE aTargetProcess = nullptr)
+      : mAddress(aAddress),
+        mLength(aLength),
+        mTargetProcess(aTargetProcess),
+        mPrevProt(0),
+        mError(WindowsError::CreateSuccess()) {
+    if (!::VirtualProtectEx(aTargetProcess, aAddress, aLength, aProtFlags,
+                            &mPrevProt)) {
+      mError = WindowsError::FromLastError();
+    }
+  }
+
+  ~AutoVirtualProtect() {
+    if (mError.IsFailure()) {
+      return;
+    }
+
+    ::VirtualProtectEx(mTargetProcess, mAddress, mLength, mPrevProt,
+                       &mPrevProt);
+  }
+
+  explicit operator bool() const { return mError.IsSuccess(); }
+
+  WindowsError GetError() const { return mError; }
+
+  AutoVirtualProtect(const AutoVirtualProtect&) = delete;
+  AutoVirtualProtect(AutoVirtualProtect&&) = delete;
+  AutoVirtualProtect& operator=(const AutoVirtualProtect&) = delete;
+  AutoVirtualProtect& operator=(AutoVirtualProtect&&) = delete;
+
+ private:
+  void* mAddress;
+  size_t mLength;
+  HANDLE mTargetProcess;
+  DWORD mPrevProt;
+  WindowsError mError;
+};
 
 }  // namespace mozilla
 

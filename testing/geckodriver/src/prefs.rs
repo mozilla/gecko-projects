@@ -21,14 +21,12 @@ lazy_static! {
         ("app.update.checkInstallTime", Pref::new(false)),
 
         // Disable automatically upgrading Firefox
-        // Bug 1508726: "disabledForTesting" has no effect in Marionette yet.
-        // As such automatically downloading updates, and installing those
-        // needs to be prevented. Sadly "app.update.auto" will not be enough
-        // anymore, because Windows has changed in how it handles updates. But
-        // at least we can workaround the problem on other platforms.
         //
-        // DISCLAIMER: Don't remove or change this line until bug 1508726 has
-        // been fixed.
+        // Note: Possible update tests could reset or flip the value to allow
+        // updates to be downloaded and applied.
+        ("app.update.disabledForTesting", Pref::new(true)),
+        // !!! For backward compatibility up to Firefox 64. Only remove
+        // when this Firefox version is no longer supported by geckodriver !!!
         ("app.update.auto", Pref::new(false)),
 
         // Enable the dump function, which sends messages to the system
@@ -48,11 +46,6 @@ lazy_static! {
 
         // Skip check for default browser on startup
         ("browser.shell.checkDefaultBrowser", Pref::new(false)),
-
-        // Disable Android snippets
-        ("browser.snippets.enabled", Pref::new(false)),
-        ("browser.snippets.syncPromo.enabled", Pref::new(false)),
-        ("browser.snippets.firstrunHomepage.enabled", Pref::new(false)),
 
         // Do not redirect user when a milestone upgrade of Firefox
         // is detected
@@ -147,6 +140,9 @@ lazy_static! {
         // causing problems when quitting Firefox from geckodriver,
         // c.f. https://github.com/mozilla/geckodriver/issues/225.
         ("plugin.state.flash", Pref::new(0)),
+
+        // Don't do network connections for mitm priming
+        ("security.certerrors.mitm.priming.enabled", Pref::new(false)),
 
         // Ensure blocklist updates don't hit the network
         ("services.settings.server", Pref::new("http://%(server)s/dummy/blocklist/")),

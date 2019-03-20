@@ -36,9 +36,8 @@ nsLineBox::nsLineBox(nsIFrame* aFrame, int32_t aCount, bool aIsBlock)
     : mFirstChild(aFrame),
       mWritingMode(),
       mContainerSize(-1, -1),
-      mBounds(WritingMode())  // mBounds will be initialized with the correct
-                              // writing mode when it is set
-      ,
+      mBounds(WritingMode()),  // mBounds will be initialized with the correct
+                               // writing mode when it is set
       mFrames(),
       mAscent(),
       mAllFlags(0),
@@ -556,7 +555,8 @@ nsLineIterator::~nsLineIterator() {
   }
 }
 
-/* virtual */ void nsLineIterator::DisposeLineIterator() { delete this; }
+/* virtual */
+void nsLineIterator::DisposeLineIterator() { delete this; }
 
 nsresult nsLineIterator::Init(nsLineList& aLines, bool aRightToLeft) {
   mRightToLeft = aRightToLeft;

@@ -127,7 +127,7 @@ void XPCWrappedNative::NoteTearoffs(nsCycleCollectionTraversalCallback& cb) {
 #ifdef XPC_CHECK_CLASSINFO_CLAIMS
 static void DEBUG_CheckClassInfoClaims(XPCWrappedNative* wrapper);
 #else
-#define DEBUG_CheckClassInfoClaims(wrapper) ((void)0)
+#  define DEBUG_CheckClassInfoClaims(wrapper) ((void)0)
 #endif
 
 /***************************************************************************/
@@ -183,7 +183,7 @@ nsresult XPCWrappedNative::WrapNewGlobal(xpcObjectHelper& nativeHelper,
   if (!global) {
     return NS_ERROR_FAILURE;
   }
-  XPCWrappedNativeScope* scope = RealmPrivate::Get(global)->scope;
+  XPCWrappedNativeScope* scope = ObjectScope(global);
 
   // Immediately enter the global's realm, so that everything else we
   // create ends up there.
@@ -342,7 +342,7 @@ nsresult XPCWrappedNative::GetNewOrUsed(xpcObjectHelper& helper,
                      getter_AddRefs(scrWrapper));
   }
 
-  RootedObject parent(cx, Scope->GetGlobalJSObject());
+  RootedObject parent(cx, Scope->GetGlobalForWrappedNatives());
 
   mozilla::Maybe<JSAutoRealm> ar;
 
@@ -979,9 +979,6 @@ nsresult XPCWrappedNative::InitTearOff(XPCWrappedNativeTearOff* aTearOff,
   // into an infinite loop.
   // see: http://bugzilla.mozilla.org/show_bug.cgi?id=96725
 
-  // The code in this block also does a check for the double wrapped
-  // nsIPropertyBag case.
-
   nsCOMPtr<nsIXPConnectWrappedJS> wrappedJS(do_QueryInterface(qiResult));
   if (wrappedJS) {
     RootedObject jso(cx, wrappedJS->GetJSObject());
@@ -1000,32 +997,6 @@ nsresult XPCWrappedNative::InitTearOff(XPCWrappedNativeTearOff* aTearOff,
 
       aTearOff->SetInterface(nullptr);
       return NS_OK;
-    }
-
-    // Decide whether or not to expose nsIPropertyBag to calling
-    // JS code in the double wrapped case.
-    //
-    // Our rule here is that when JSObjects are double wrapped and
-    // exposed to other JSObjects then the nsIPropertyBag interface
-    // is only exposed on an 'opt-in' basis; i.e. if the underlying
-    // JSObject wants other JSObjects to be able to see this interface
-    // then it must implement QueryInterface and not throw an exception
-    // when asked for nsIPropertyBag. It need not actually *implement*
-    // nsIPropertyBag - xpconnect will do that work.
-
-    if (iid->Equals(NS_GET_IID(nsIPropertyBag)) && jso) {
-      RootedObject jsoGlobal(cx, wrappedJS->GetJSObjectGlobal());
-      RefPtr<nsXPCWrappedJSClass> clasp =
-          nsXPCWrappedJSClass::GetNewOrUsed(cx, *iid);
-      if (clasp) {
-        RootedObject answer(
-            cx, clasp->CallQueryInterfaceOnJSObject(cx, jso, jsoGlobal, *iid));
-
-        if (!answer) {
-          aTearOff->SetInterface(nullptr);
-          return NS_ERROR_NO_INTERFACE;
-        }
-      }
     }
   }
 
@@ -1283,13 +1254,23 @@ bool CallMethodHelper::GetInterfaceTypeFromParam(const nsXPTType& type,
 
     *result = inner.GetInterface()->IID();
   } else if (inner.Tag() == nsXPTType::T_INTERFACE_IS) {
-    nsID* id = (nsID*)GetDispatchParam(inner.ArgNum())->val.p;
-    if (!id) {
+    const nsXPTCVariant* param = GetDispatchParam(inner.ArgNum());
+    if (param->type.Tag() != nsXPTType::T_NSID &&
+        param->type.Tag() != nsXPTType::T_NSIDPTR) {
+      return Throw(NS_ERROR_UNEXPECTED, mCallContext);
+    }
+
+    const void* ptr = &param->val;
+    if (param->type.Tag() == nsXPTType::T_NSIDPTR) {
+      ptr = *static_cast<nsID* const*>(ptr);
+    }
+
+    if (!ptr) {
       return ThrowBadParam(NS_ERROR_XPC_CANT_GET_PARAM_IFACE_INFO,
                            inner.ArgNum(), mCallContext);
     }
 
-    *result = *id;
+    *result = *static_cast<const nsID*>(ptr);
   }
   return true;
 }
@@ -1520,9 +1501,9 @@ bool CallMethodHelper::ConvertIndependentParam(uint8_t i) {
   // the default value if IsOptional is true.
   if (i >= mArgc) {
     MOZ_ASSERT(paramInfo.IsOptional(), "missing non-optional argument!");
-    if (type.Tag() == nsXPTType::T_IID) {
-      // NOTE: 'const nsIID&' is supported, so it must be allocated.
-      dp->val.p = new nsIID();
+    if (type.Tag() == nsXPTType::T_NSID) {
+      // Use a default value of the null ID for optional NSID objects.
+      dp->ext.nsid.Clear();
       return true;
     }
   }
@@ -1735,13 +1716,13 @@ NS_IMETHODIMP XPCWrappedNative::DebugDump(int16_t depth) {
 char* XPCWrappedNative::ToString(
     XPCWrappedNativeTearOff* to /* = nullptr */) const {
 #ifdef DEBUG
-#define FMT_ADDR " @ 0x%p"
-#define FMT_STR(str) str
-#define PARAM_ADDR(w) , w
+#  define FMT_ADDR " @ 0x%p"
+#  define FMT_STR(str) str
+#  define PARAM_ADDR(w) , w
 #else
-#define FMT_ADDR ""
-#define FMT_STR(str)
-#define PARAM_ADDR(w)
+#  define FMT_ADDR ""
+#  define FMT_STR(str)
+#  define PARAM_ADDR(w)
 #endif
 
   UniqueChars sz;

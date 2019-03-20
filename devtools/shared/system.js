@@ -35,7 +35,7 @@ const APP_MAP = {
 
 var CACHED_INFO = null;
 
-async function getSystemInfo() {
+function getSystemInfo() {
   if (CACHED_INFO) {
     return CACHED_INFO;
   }
@@ -180,13 +180,14 @@ function getDeviceName() {
 function getProfileLocation() {
   // In child processes, we cannot access the profile location.
   try {
+    // For some reason this line must come first or in xpcshell tests
+    // nsXREDirProvider never gets initialised and so the profile service
+    // crashes on initialisation.
     const profd = Services.dirsvc.get("ProfD", Ci.nsIFile);
     const profservice = Cc["@mozilla.org/toolkit/profile-service;1"]
                         .getService(Ci.nsIToolkitProfileService);
-    for (const profile of profservice.profiles) {
-      if (profile.rootDir.path == profd.path) {
-        return profile.name;
-      }
+    if (profservice.currentProfile) {
+      return profservice.currentProfile.name;
     }
 
     return profd.leafName;

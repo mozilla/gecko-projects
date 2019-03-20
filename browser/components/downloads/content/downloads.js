@@ -58,7 +58,8 @@
 
 "use strict";
 
-ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
+var {XPCOMUtils} = ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
+var {Services} = ChromeUtils.import("resource://gre/modules/Services.jsm");
 
 ChromeUtils.defineModuleGetter(this, "DownloadsViewUI",
                                "resource:///modules/DownloadsViewUI.jsm");
@@ -70,8 +71,6 @@ ChromeUtils.defineModuleGetter(this, "NetUtil",
                                "resource://gre/modules/NetUtil.jsm");
 ChromeUtils.defineModuleGetter(this, "PlacesUtils",
                                "resource://gre/modules/PlacesUtils.jsm");
-ChromeUtils.defineModuleGetter(this, "Services",
-                               "resource://gre/modules/Services.jsm");
 
 // DownloadsPanel
 
@@ -824,30 +823,35 @@ var DownloadsView = {
    * Mouse listeners to handle selection on hover.
    */
   onDownloadMouseOver(aEvent) {
-    if (aEvent.originalTarget.classList.contains("downloadButton")) {
-      aEvent.target.classList.add("downloadHoveringButton");
+    let item = aEvent.target.closest("richlistitem,richlistbox");
+    if (item.localName != "richlistitem") {
+      return;
     }
-    if (!(this.contextMenuOpen || this.subViewOpen) &&
-        aEvent.target.parentNode == this.richListBox) {
-      this.richListBox.selectedItem = aEvent.target;
+
+    if (aEvent.target.classList.contains("downloadButton")) {
+      item.classList.add("downloadHoveringButton");
+    }
+
+    if (!this.contextMenuOpen && !this.subViewOpen) {
+      this.richListBox.selectedItem = item;
     }
   },
 
   onDownloadMouseOut(aEvent) {
-    if (aEvent.originalTarget.classList.contains("downloadButton")) {
-      aEvent.target.classList.remove("downloadHoveringButton");
+    let item = aEvent.target.closest("richlistitem,richlistbox");
+    if (item.localName != "richlistitem") {
+      return;
     }
-    if (!(this.contextMenuOpen || this.subViewOpen) &&
-        aEvent.target.parentNode == this.richListBox) {
-      // If the destination element is outside of the richlistitem, clear the
-      // selection.
-      let element = aEvent.relatedTarget;
-      while (element && element != aEvent.target) {
-        element = element.parentNode;
-      }
-      if (!element) {
-        this.richListBox.selectedIndex = -1;
-      }
+
+    if (aEvent.target.classList.contains("downloadButton")) {
+      item.classList.remove("downloadHoveringButton");
+    }
+
+    // If the destination element is outside of the richlistitem, clear the
+    // selection.
+    if (!this.contextMenuOpen && !this.subViewOpen &&
+        !item.contains(aEvent.relatedTarget)) {
+      this.richListBox.selectedIndex = -1;
     }
   },
 

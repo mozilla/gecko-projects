@@ -2,33 +2,39 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
 
+// @flow
+
 import React, { Component } from "react";
-import { connect } from "react-redux";
 
 import ColumnBreakpoint from "./ColumnBreakpoint";
 import "./ColumnBreakpoints.css";
 
 import { getSelectedSource, visibleColumnBreakpoints } from "../../selectors";
-import { makeLocationId } from "../../utils/breakpoint";
-import actions from "../../actions";
+import { connect } from "../../utils/connect";
+import { makeBreakpointId } from "../../utils/breakpoint";
+import { breakpointItemActions } from "./menus/breakpoints";
+import type { BreakpointItemActions } from "./menus/breakpoints";
 
 import type { Source } from "../../types";
 // eslint-disable-next-line max-len
 import type { ColumnBreakpoint as ColumnBreakpointType } from "../../selectors/visibleColumnBreakpoints";
 
-class ColumnBreakpoints extends Component {
-  props: {
-    editor: Object,
-    selectedSource: Source,
-    columnBreakpoints: ColumnBreakpointType[]
-  };
+type Props = {
+  editor: Object,
+  selectedSource: Source,
+  columnBreakpoints: ColumnBreakpointType[],
+  breakpointActions: BreakpointItemActions
+};
+
+class ColumnBreakpoints extends Component<Props> {
+  props: Props;
 
   render() {
     const {
       editor,
       columnBreakpoints,
       selectedSource,
-      toggleBreakpoint
+      breakpointActions
     } = this.props;
 
     if (!selectedSource || selectedSource.isBlackBoxed) {
@@ -39,11 +45,11 @@ class ColumnBreakpoints extends Component {
     editor.codeMirror.operation(() => {
       breakpoints = columnBreakpoints.map(breakpoint => (
         <ColumnBreakpoint
-          key={makeLocationId(breakpoint.location)}
+          key={makeBreakpointId(breakpoint.location)}
           columnBreakpoint={breakpoint}
           editor={editor}
           source={selectedSource}
-          toggleBreakpoint={toggleBreakpoint}
+          breakpointActions={breakpointActions}
         />
       ));
     });
@@ -58,10 +64,7 @@ const mapStateToProps = state => {
   };
 };
 
-const { toggleBreakpoint } = actions;
-const mapDispatchToProps = { toggleBreakpoint };
-
 export default connect(
   mapStateToProps,
-  mapDispatchToProps
+  dispatch => ({ breakpointActions: breakpointItemActions(dispatch) })
 )(ColumnBreakpoints);

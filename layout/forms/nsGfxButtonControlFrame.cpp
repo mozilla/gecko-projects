@@ -13,12 +13,14 @@
 
 using namespace mozilla;
 
-nsGfxButtonControlFrame::nsGfxButtonControlFrame(ComputedStyle* aStyle)
-    : nsHTMLButtonControlFrame(aStyle, kClassID) {}
+nsGfxButtonControlFrame::nsGfxButtonControlFrame(ComputedStyle* aStyle,
+                                                 nsPresContext* aPresContext)
+    : nsHTMLButtonControlFrame(aStyle, aPresContext, kClassID) {}
 
 nsContainerFrame* NS_NewGfxButtonControlFrame(nsIPresShell* aPresShell,
                                               ComputedStyle* aStyle) {
-  return new (aPresShell) nsGfxButtonControlFrame(aStyle);
+  return new (aPresShell)
+      nsGfxButtonControlFrame(aStyle, aPresShell->GetPresContext());
 }
 
 NS_IMPL_FRAMEARENA_HELPERS(nsGfxButtonControlFrame)
@@ -61,7 +63,7 @@ void nsGfxButtonControlFrame::AppendAnonymousContentTo(
 }
 
 NS_QUERYFRAME_HEAD(nsGfxButtonControlFrame)
-NS_QUERYFRAME_ENTRY(nsIAnonymousContentCreator)
+  NS_QUERYFRAME_ENTRY(nsIAnonymousContentCreator)
 NS_QUERYFRAME_TAIL_INHERITING(nsHTMLButtonControlFrame)
 
 // Initially we hardcoded the default strings here.

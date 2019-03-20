@@ -4,9 +4,9 @@
 
 var EXPORTED_SYMBOLS = ["CommonUtils"];
 
-ChromeUtils.import("resource://gre/modules/Services.jsm");
-ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
-ChromeUtils.import("resource://gre/modules/Log.jsm");
+const {Services} = ChromeUtils.import("resource://gre/modules/Services.jsm");
+const {XPCOMUtils} = ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
+const {Log} = ChromeUtils.import("resource://gre/modules/Log.jsm");
 ChromeUtils.defineModuleGetter(this, "OS",
                                "resource://gre/modules/osfile.jsm");
 
@@ -197,6 +197,28 @@ var CommonUtils = {
     return Array.prototype.slice.call(bytesString).map(c => c.charCodeAt(0));
   },
 
+  // A lot of Util methods work with byte strings instead of ArrayBuffers.
+  // A patch should address this problem, but in the meantime let's provide
+  // helpers method to convert byte strings to Uint8Array.
+  byteStringToArrayBuffer(byteString) {
+    if (byteString === undefined) {
+      return new Uint8Array();
+    }
+    const bytes = new Uint8Array(byteString.length);
+    for (let i = 0; i < byteString.length; ++i) {
+      bytes[i] = byteString.charCodeAt(i) & 0xff;
+    }
+    return bytes;
+  },
+
+  arrayBufferToByteString(buffer) {
+    return CommonUtils.byteArrayToString([...buffer]);
+  },
+
+  bufferToHex(buffer) {
+    return Array.prototype.map.call(buffer, (x) => ("00" + x.toString(16)).slice(-2)).join("");
+  },
+
   bytesAsHex: function bytesAsHex(bytes) {
     let s = "";
     for (let i = 0, len = bytes.length; i < len; i++) {
@@ -223,6 +245,11 @@ var CommonUtils = {
       bytes.push(parseInt(str.substr(i, 2), 16));
     }
     return String.fromCharCode.apply(String, bytes);
+  },
+
+  hexToArrayBuffer(str) {
+    const octString = CommonUtils.hexToBytes(str);
+    return CommonUtils.byteStringToArrayBuffer(octString);
   },
 
   hexAsString: function hexAsString(hex) {
@@ -534,7 +561,6 @@ var CommonUtils = {
    */
   getDatePref: function getDatePref(branch, pref, def = 0, log = null,
                                     oldestYear = 2010) {
-
     let valueInt = this.getEpochPref(branch, pref, def, log);
     let date = new Date(valueInt);
 
@@ -620,7 +646,7 @@ var CommonUtils = {
     let converter = this._converterService.asyncConvertData(source, dest,
                                                             listener, null);
     converter.onStartRequest(null, null);
-    converter.onDataAvailable(null, null, is, 0, s.length);
+    converter.onDataAvailable(null, is, 0, s.length);
     converter.onStopRequest(null, null, null);
 
     return result;

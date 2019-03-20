@@ -24,7 +24,7 @@
 
 class nsAtom;
 class nsIContent;
-class nsIDocument;
+
 class nsXBLAttributeEntry;
 class nsXBLBinding;
 class nsXBLProtoImplField;
@@ -173,7 +173,7 @@ class nsXBLPrototypeBinding final
 
  private:
   nsresult Read(nsIObjectInputStream* aStream, nsXBLDocumentInfo* aDocInfo,
-                nsIDocument* aDocument, uint8_t aFlags);
+                mozilla::dom::Document* aDocument, uint8_t aFlags);
 
   /**
    * Read a new binding from the stream aStream into the xbl document aDocument.
@@ -181,15 +181,14 @@ class nsXBLPrototypeBinding final
    * aFlags can contain XBLBinding_Serialize_InheritStyle to indicate that
    * mInheritStyle flag should be set, and XBLBinding_Serialize_IsFirstBinding
    * to indicate the first binding in a document.
-   * XBLBinding_Serialize_ChromeOnlyContent indicates that
-   * nsXBLPrototypeBinding::mChromeOnlyContent should be true.
    * XBLBinding_Serialize_BindToUntrustedContent indicates that
    * nsXBLPrototypeBinding::mBindToUntrustedContent should be true.
    */
  public:
   static nsresult ReadNewBinding(nsIObjectInputStream* aStream,
                                  nsXBLDocumentInfo* aDocInfo,
-                                 nsIDocument* aDocument, uint8_t aFlags);
+                                 mozilla::dom::Document* aDocument,
+                                 uint8_t aFlags);
 
   /**
    * Write this binding to the stream.
@@ -202,8 +201,8 @@ class nsXBLPrototypeBinding final
    * the child will be inserted into.
    */
   nsresult ReadContentNode(nsIObjectInputStream* aStream,
-                           nsIDocument* aDocument, nsNodeInfoManager* aNim,
-                           nsIContent** aChild);
+                           mozilla::dom::Document* aDocument,
+                           nsNodeInfoManager* aNim, nsIContent** aChild);
 
   /**
    * Write the content node aNode to aStream.
@@ -273,7 +272,6 @@ class nsXBLPrototypeBinding final
                                         nsIContent* aCopyRoot,
                                         mozilla::dom::Element* aTemplChild);
 
-  bool ChromeOnlyContent() const { return mChromeOnlyContent; }
   bool SimpleScopeChain() const { return mSimpleScopeChain; }
   bool BindToUntrustedContent() const { return mBindToUntrustedContent; }
 
@@ -313,13 +311,15 @@ class nsXBLPrototypeBinding final
 
   // Weak.  The docinfo will own our base binding.
   mozilla::WeakPtr<nsXBLPrototypeBinding> mBaseBinding;
+  // FIXME(emilio): This is dead code now.
   bool mInheritStyle;
   bool mCheckedBaseProto;
   bool mKeyHandlersRegistered;
-  bool mChromeOnlyContent;
+  // FIXME(emilio): This is dead code now.
   bool mBindToUntrustedContent;
   // True if constructors, handlers, etc for this binding would skip the scope
   // chain for parent elements and go directly to the document.
+  // FIXME(emilio): This is dead code now.
   bool mSimpleScopeChain;
 
   nsAutoPtr<nsXBLPrototypeResources>
@@ -361,10 +361,6 @@ class nsXBLPrototypeBinding final
   };
   nsInterfaceHashtable<IIDHashKey, nsIContent>
       mInterfaceTable;  // A table of cached interfaces that we support.
-
-  int32_t mBaseNameSpaceID;  // If we extend a tagname/namespace, then that
-                             // information will
-  RefPtr<nsAtom> mBaseTag;   // be stored in here.
 
   nsCOMArray<nsXBLKeyEventHandler> mKeyHandlers;
 };

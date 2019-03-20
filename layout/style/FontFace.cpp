@@ -19,7 +19,7 @@
 #include "mozilla/ServoStyleSet.h"
 #include "mozilla/ServoUtils.h"
 #include "mozilla/StaticPrefs.h"
-#include "nsIDocument.h"
+#include "mozilla/dom/Document.h"
 #include "nsStyleUtil.h"
 #include "mozilla/net/ReferrerPolicy.h"
 
@@ -159,7 +159,7 @@ already_AddRefed<FontFace> FontFace::Constructor(
     const FontFaceDescriptors& aDescriptors, ErrorResult& aRv) {
   nsISupports* global = aGlobal.GetAsSupports();
   nsCOMPtr<nsPIDOMWindowInner> window = do_QueryInterface(global);
-  nsIDocument* doc = window->GetDoc();
+  Document* doc = window->GetDoc();
   if (!doc) {
     aRv.Throw(NS_ERROR_FAILURE);
     return nullptr;
@@ -741,7 +741,8 @@ gfxCharacterMap* FontFace::GetUnicodeRangeAsCharacterMap() {
 
 // -- FontFace::Entry --------------------------------------------------------
 
-/* virtual */ void FontFace::Entry::SetLoadState(UserFontLoadState aLoadState) {
+/* virtual */
+void FontFace::Entry::SetLoadState(UserFontLoadState aLoadState) {
   gfxUserFontEntry::SetLoadState(aLoadState);
 
   for (size_t i = 0; i < mFontFaces.Length(); i++) {
@@ -749,8 +750,8 @@ gfxCharacterMap* FontFace::GetUnicodeRangeAsCharacterMap() {
   }
 }
 
-/* virtual */ void FontFace::Entry::GetUserFontSets(
-    nsTArray<gfxUserFontSet*>& aResult) {
+/* virtual */
+void FontFace::Entry::GetUserFontSets(nsTArray<gfxUserFontSet*>& aResult) {
   aResult.Clear();
 
   for (FontFace* f : mFontFaces) {

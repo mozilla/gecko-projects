@@ -50,6 +50,38 @@ function run_child_test() {
   allLinear.add(10);
   let allChildLinear = Telemetry.getHistogramById("TELEMETRY_TEST_ALL_CHILD_PROCESSES");
   allChildLinear.add(10);
+
+  // Test snapshot APIs.
+  // Should be forbidden in content processes.
+  Assert.throws(() => Telemetry.getHistogramById("TELEMETRY_TEST_COUNT").snapshot(),
+    /Histograms can only be snapshotted in the parent process/,
+    "Snapshotting should be forbidden in the content process"
+  );
+
+  Assert.throws(() => Telemetry.getKeyedHistogramById("TELEMETRY_TEST_KEYED_COUNT").snapshot(),
+    /Keyed histograms can only be snapshotted in the parent process/,
+    "Snapshotting should be forbidden in the content process"
+  );
+
+  Assert.throws(() => Telemetry.getHistogramById("TELEMETRY_TEST_COUNT").clear(),
+    /Histograms can only be cleared in the parent process/,
+    "Clearing should be forbidden in the content process"
+  );
+
+  Assert.throws(() => Telemetry.getKeyedHistogramById("TELEMETRY_TEST_KEYED_COUNT").clear(),
+    /Keyed histograms can only be cleared in the parent process/,
+    "Clearing should be forbidden in the content process"
+  );
+
+  Assert.throws(() => Telemetry.getSnapshotForHistograms(),
+    /NS_ERROR_FAILURE/,
+    "Snapshotting should be forbidden in the content process"
+  );
+
+  Assert.throws(() => Telemetry.getSnapshotForKeyedHistograms(),
+    /NS_ERROR_FAILURE/,
+    "Snapshotting should be forbidden in the content process"
+  );
 }
 
 function check_histogram_values(payload) {
@@ -90,6 +122,7 @@ add_task(async function() {
   do_get_profile(true);
   loadAddonManager(APP_ID, APP_NAME, APP_VERSION, PLATFORM_VERSION);
   finishAddonManagerStartup();
+  fakeIntlReady();
   await TelemetryController.testSetup();
   if (runningInParent) {
     // Make sure we don't generate unexpected pings due to pref changes.

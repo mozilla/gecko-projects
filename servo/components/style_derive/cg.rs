@@ -1,15 +1,80 @@
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
- * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 use darling::{FromDeriveInput, FromField, FromVariant};
-use quote::Tokens;
+use proc_macro2::{Span, TokenStream};
+use quote::TokenStreamExt;
 use syn::{self, AngleBracketedGenericArguments, Binding, DeriveInput, Field};
 use syn::{GenericArgument, GenericParam, Ident, Path};
 use syn::{PathArguments, PathSegment, QSelf, Type, TypeArray};
 use syn::{TypeParam, TypeParen, TypePath, TypeSlice, TypeTuple};
 use syn::{Variant, WherePredicate};
 use synstructure::{self, BindStyle, BindingInfo, VariantAst, VariantInfo};
+
+/// Given an input type which has some where clauses already, like:
+///
+/// struct InputType<T>
+/// where
+///     T: Zero,
+/// {
+///     ...
+/// }
+///
+/// Add the necessary `where` clauses so that the output type of a trait
+/// fulfils them.
+///
+/// For example:
+///
+///     <T as ToComputedValue>::ComputedValue: Zero,
+///
+/// This needs to run before adding other bounds to the type parameters.
+pub fn propagate_clauses_to_output_type(
+    where_clause: &mut Option<syn::WhereClause>,
+    generics: &syn::Generics,
+    trait_path: Path,
+    trait_output: Ident,
+) {
+    let where_clause = match *where_clause {
+        Some(ref mut clause) => clause,
+        None => return,
+    };
+    let mut extra_bounds = vec![];
+    for pred in &where_clause.predicates {
+        let ty = match *pred {
+            syn::WherePredicate::Type(ref ty) => ty,
+            ref predicate => panic!("Unhanded complex where predicate: {:?}", predicate),
+        };
+
+        let path = match ty.bounded_ty {
+            syn::Type::Path(ref p) => &p.path,
+            ref ty => panic!("Unhanded complex where type: {:?}", ty),
+        };
+
+        assert!(
+            ty.lifetimes.is_none(),
+            "Unhanded complex lifetime bound: {:?}",
+            ty,
+        );
+
+        let ident = match path_to_ident(path) {
+            Some(i) => i,
+            None => panic!("Unhanded complex where type path: {:?}", path),
+        };
+
+        if generics.type_params().any(|param| param.ident == *ident) {
+            extra_bounds.push(ty.clone());
+        }
+    }
+
+    for bound in extra_bounds {
+        let ty = bound.bounded_ty;
+        let bounds = bound.bounds;
+        where_clause
+            .predicates
+            .push(parse_quote!(<#ty as #trait_path>::#trait_output: #bounds))
+    }
+}
 
 pub fn add_predicate(where_clause: &mut Option<syn::WhereClause>, pred: WherePredicate) {
     where_clause
@@ -18,9 +83,9 @@ pub fn add_predicate(where_clause: &mut Option<syn::WhereClause>, pred: WherePre
         .push(pred);
 }
 
-pub fn fmap_match<F>(input: &DeriveInput, bind_style: BindStyle, mut f: F) -> Tokens
+pub fn fmap_match<F>(input: &DeriveInput, bind_style: BindStyle, mut f: F) -> TokenStream
 where
-    F: FnMut(BindingInfo) -> Tokens,
+    F: FnMut(BindingInfo) -> TokenStream,
 {
     let mut s = synstructure::Structure::new(input);
     s.variants_mut().iter_mut().for_each(|v| {
@@ -28,7 +93,7 @@ where
     });
     s.each_variant(|variant| {
         let (mapped, mapped_fields) = value(variant, "mapped");
-        let fields_pairs = variant.bindings().into_iter().zip(mapped_fields);
+        let fields_pairs = variant.bindings().iter().zip(mapped_fields);
         let mut computations = quote!();
         computations.append_all(fields_pairs.map(|(field, mapped_field)| {
             let expr = f(field.clone());
@@ -52,7 +117,7 @@ pub fn fmap_trait_output(input: &DeriveInput, trait_path: &Path, trait_output: I
                         GenericArgument::Lifetime(data.lifetime.clone())
                     },
                     &GenericParam::Type(ref data) => {
-                        let ident = data.ident;
+                        let ident = &data.ident;
                         GenericArgument::Type(parse_quote!(<#ident as #trait_path>::#trait_output))
                     },
                     ref arg => panic!("arguments {:?} cannot be mapped yet", arg),
@@ -96,7 +161,7 @@ where
             ref path,
         }) => {
             if let Some(ident) = path_to_ident(path) {
-                if params.iter().any(|param| param.ident == ident) {
+                if params.iter().any(|ref param| &param.ident == ident) {
                     return f(ident);
                 }
             }
@@ -171,9 +236,7 @@ fn path_to_ident(path: &Path) -> Option<&Ident> {
         Path {
             leading_colon: None,
             ref segments,
-        }
-            if segments.len() == 1 =>
-        {
+        } if segments.len() == 1 => {
             if segments[0].arguments.is_empty() {
                 Some(&segments[0].ident)
             } else {
@@ -209,7 +272,7 @@ where
     A: FromVariant,
 {
     let v = Variant {
-        ident: *variant.ident,
+        ident: variant.ident.clone(),
         attrs: variant.attrs.to_vec(),
         fields: variant.fields.clone(),
         discriminant: variant.discriminant.clone(),
@@ -227,22 +290,25 @@ where
     }
 }
 
-pub fn ref_pattern<'a>(variant: &'a VariantInfo, prefix: &str) -> (Tokens, Vec<BindingInfo<'a>>) {
+pub fn ref_pattern<'a>(
+    variant: &'a VariantInfo,
+    prefix: &str,
+) -> (TokenStream, Vec<BindingInfo<'a>>) {
     let mut v = variant.clone();
     v.bind_with(|_| BindStyle::Ref);
-    v.bindings_mut()
-        .iter_mut()
-        .for_each(|b| b.binding = Ident::from(format!("{}_{}", b.binding, prefix)));
-    (v.pat(), v.bindings().iter().cloned().collect())
+    v.bindings_mut().iter_mut().for_each(|b| {
+        b.binding = Ident::new(&format!("{}_{}", b.binding, prefix), Span::call_site())
+    });
+    (v.pat(), v.bindings().to_vec())
 }
 
-pub fn value<'a>(variant: &'a VariantInfo, prefix: &str) -> (Tokens, Vec<BindingInfo<'a>>) {
+pub fn value<'a>(variant: &'a VariantInfo, prefix: &str) -> (TokenStream, Vec<BindingInfo<'a>>) {
     let mut v = variant.clone();
-    v.bindings_mut()
-        .iter_mut()
-        .for_each(|b| b.binding = Ident::from(format!("{}_{}", b.binding, prefix)));
+    v.bindings_mut().iter_mut().for_each(|b| {
+        b.binding = Ident::new(&format!("{}_{}", b.binding, prefix), Span::call_site())
+    });
     v.bind_with(|_| BindStyle::Move);
-    (v.pat(), v.bindings().iter().cloned().collect())
+    (v.pat(), v.bindings().to_vec())
 }
 
 /// Transforms "FooBar" to "foo-bar".
@@ -250,7 +316,7 @@ pub fn value<'a>(variant: &'a VariantInfo, prefix: &str) -> (Tokens, Vec<Binding
 /// If the first Camel segment is "Moz", "Webkit", or "Servo", the result string
 /// is prepended with "-".
 pub fn to_css_identifier(mut camel_case: &str) -> String {
-    camel_case = camel_case.trim_right_matches('_');
+    camel_case = camel_case.trim_end_matches('_');
     let mut first = true;
     let mut result = String::with_capacity(camel_case.len());
     while let Some(segment) = split_camel_segment(&mut camel_case) {

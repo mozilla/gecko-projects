@@ -5,6 +5,7 @@
 // @flow
 
 import {
+  getCurrentThread,
   getSelectedSource,
   getSelectedFrame,
   getCanRewind
@@ -14,10 +15,11 @@ import { resume, rewind } from "./commands";
 
 import type { ThunkArgs } from "../types";
 
-export function continueToHere(line: number) {
+export function continueToHere(line: number, column?: number) {
   return async function({ dispatch, getState }: ThunkArgs) {
+    const thread = getCurrentThread(getState());
     const selectedSource = getSelectedSource(getState());
-    const selectedFrame = getSelectedFrame(getState());
+    const selectedFrame = getSelectedFrame(getState(), thread);
 
     if (!selectedFrame || !selectedSource) {
       return;
@@ -34,7 +36,7 @@ export function continueToHere(line: number) {
     await dispatch(
       addHiddenBreakpoint({
         line,
-        column: undefined,
+        column: column,
         sourceId: selectedSource.id
       })
     );

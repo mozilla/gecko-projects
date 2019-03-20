@@ -22,6 +22,7 @@ const {
   getComputedStyle,
 } = require("./utils/markup");
 const {
+  getAbsoluteScrollOffsetsForNode,
   getCurrentZoom,
   getDisplayPixelRatio,
   getUntransformedQuad,
@@ -59,13 +60,10 @@ const JUSTIFY_CONTENT = "justify-content";
  * The FlexboxHighlighter is the class that overlays a visual canvas on top of
  * display: [inline-]flex elements.
  *
- * Available Options:
- * - color(colorValue)
- *     @param  {String} colorValue
- *     The color that should be used to draw the highlighter for this flexbox.
- * - showAlignment(isShown)
- *     @param  {Boolean} isShown
- *     Shows the alignment in the flexbox highlighter.
+ * @param {String} options.color
+ *        The color that should be used to draw the highlighter for this flexbox.
+ * @param {Boolean} options.noCountainerOutline
+ *        Prevent drawing an outline around the flex container.
  *
  * Structure:
  * <div class="highlighter-container">
@@ -113,7 +111,7 @@ class FlexboxHighlighter extends AutoRefreshHighlighter {
   _buildMarkup() {
     const container = createNode(this.win, {
       attributes: {
-        "class": "highlighter-container",
+        "class": "highlighter-container flexbox",
       },
     });
 
@@ -191,6 +189,10 @@ class FlexboxHighlighter extends AutoRefreshHighlighter {
     return this.options.color || DEFAULT_COLOR;
   }
 
+  get container() {
+    return this.currentNode;
+  }
+
   get ctx() {
     return this.canvas.getCanvasContext("2d");
   }
@@ -260,8 +262,8 @@ class FlexboxHighlighter extends AutoRefreshHighlighter {
       flexboxPatternMap = new Map();
     }
 
-    if (gCachedFlexboxPattern.has(JUSTIFY_CONTENT)) {
-      return gCachedFlexboxPattern.get(JUSTIFY_CONTENT);
+    if (flexboxPatternMap.has(JUSTIFY_CONTENT)) {
+      return flexboxPatternMap.get(JUSTIFY_CONTENT);
     }
 
     // Create the inversed diagonal lines pattern
@@ -302,10 +304,10 @@ class FlexboxHighlighter extends AutoRefreshHighlighter {
     const hasMoved = AutoRefreshHighlighter.prototype._hasMoved.call(this);
 
     if (!this.computedStyle) {
-      this.computedStyle = getComputedStyle(this.currentNode);
+      this.computedStyle = getComputedStyle(this.container);
     }
 
-    const flex = this.currentNode.getAsFlexContainer();
+    const flex = this.container.getAsFlexContainer();
 
     const oldCrossAxisDirection = this.crossAxisDirection;
     this.crossAxisDirection = flex ? flex.crossAxisDirection : null;
@@ -319,7 +321,7 @@ class FlexboxHighlighter extends AutoRefreshHighlighter {
     this.axes = `${this.mainAxisDirection} ${this.crossAxisDirection}`;
 
     const oldFlexData = this.flexData;
-    this.flexData = getFlexData(this.currentNode);
+    this.flexData = getFlexData(this.container);
     const hasFlexDataChanged = compareFlexData(oldFlexData, this.flexData);
 
     const oldAlignItems = this.alignItemsValue;
@@ -415,128 +417,23 @@ class FlexboxHighlighter extends AutoRefreshHighlighter {
     }
   }
 
-  renderAlignItemLine() {
-    if (!this.options.showAlignment || !this.flexData ||
-        !this.currentQuads.content || !this.currentQuads.content[0]) {
-      return;
-    }
-
-    const { devicePixelRatio } = this.win;
-    const lineWidth = getDisplayPixelRatio(this.win);
-    const offset = (lineWidth / 2) % 1;
-    const zoom = getCurrentZoom(this.win);
-    const canvasX = Math.round(this._canvasPosition.x * devicePixelRatio * zoom);
-    const canvasY = Math.round(this._canvasPosition.y * devicePixelRatio * zoom);
-
-    this.ctx.save();
-    this.ctx.translate(offset - canvasX, offset - canvasY);
-    this.ctx.setLineDash(FLEXBOX_LINES_PROPERTIES.alignItems.lineDash);
-    this.ctx.lineWidth = lineWidth * 3;
-    this.ctx.strokeStyle = this.color;
-
-    const { bounds } = this.currentQuads.content[0];
-    const isColumn = this.flexDirection.startsWith("column");
-    const options = { matrix: this.currentMatrix };
-
-    for (const flexLine of this.flexData.lines) {
-      const { crossStart, crossSize } = flexLine;
-
-      switch (this.alignItemsValue) {
-        case "baseline":
-        case "first baseline":
-          const { firstBaselineOffset } = flexLine;
-
-          if (firstBaselineOffset < 0) {
-            break;
-          }
-
-          if (isColumn) {
-            drawLine(this.ctx, crossStart + firstBaselineOffset, 0,
-              crossStart + firstBaselineOffset, bounds.height, options);
-          } else {
-            drawLine(this.ctx, 0, crossStart + firstBaselineOffset, bounds.width,
-              crossStart + firstBaselineOffset, options);
-          }
-
-          this.ctx.stroke();
-          break;
-        case "center":
-          if (isColumn) {
-            drawLine(this.ctx, crossStart + crossSize / 2, 0, crossStart + crossSize / 2,
-              bounds.height, options);
-          } else {
-            drawLine(this.ctx, 0, crossStart + crossSize / 2, bounds.width,
-              crossStart + crossSize / 2, options);
-          }
-
-          this.ctx.stroke();
-          break;
-        case "flex-start":
-        case "start":
-          if (isColumn) {
-            drawLine(this.ctx, crossStart, 0, crossStart, bounds.height, options);
-          } else {
-            drawLine(this.ctx, 0, crossStart, bounds.width, crossStart, options);
-          }
-
-          this.ctx.stroke();
-          break;
-        case "flex-end":
-        case "end":
-          if (isColumn) {
-            drawLine(this.ctx, crossStart + crossSize, 0, crossStart + crossSize,
-              bounds.height, options);
-          } else {
-            drawLine(this.ctx, 0, crossStart + crossSize, bounds.width,
-              crossStart + crossSize, options);
-          }
-
-          this.ctx.stroke();
-          break;
-        case "stretch":
-          if (isColumn) {
-            drawLine(this.ctx, crossStart, 0, crossStart, bounds.height, options);
-            this.ctx.stroke();
-            drawLine(this.ctx, crossStart + crossSize, 0, crossStart + crossSize,
-              bounds.height, options);
-            this.ctx.stroke();
-          } else {
-            drawLine(this.ctx, 0, crossStart, bounds.width, crossStart, options);
-            this.ctx.stroke();
-            drawLine(this.ctx, 0, crossStart + crossSize, bounds.width,
-              crossStart + crossSize, options);
-            this.ctx.stroke();
-          }
-
-          break;
-        default:
-          break;
-      }
-    }
-
-    this.ctx.restore();
-  }
-
   renderFlexContainer() {
     if (!this.currentQuads.content || !this.currentQuads.content[0]) {
       return;
     }
 
     const { devicePixelRatio } = this.win;
-    const lineWidth = getDisplayPixelRatio(this.win);
-    const offset = (lineWidth / 2) % 1;
-    const zoom = getCurrentZoom(this.win);
-    const canvasX = Math.round(this._canvasPosition.x * devicePixelRatio * zoom);
-    const canvasY = Math.round(this._canvasPosition.y * devicePixelRatio * zoom);
-    const containerQuad = getUntransformedQuad(this.currentNode, "content");
+    const containerQuad = getUntransformedQuad(this.container, "content");
     const { width, height } = containerQuad.getBounds();
 
-    this.ctx.save();
-    this.ctx.translate(offset - canvasX, offset - canvasY);
-    this.ctx.setLineDash(FLEXBOX_LINES_PROPERTIES.edge.lineDash);
-    this.ctx.lineWidth = lineWidth * 2;
-    this.ctx.strokeStyle = this.color;
+    this.setupCanvas({
+      lineDash: FLEXBOX_LINES_PROPERTIES.alignItems.lineDash,
+      lineWidthMultiplier: 2,
+    });
+
     this.ctx.fillStyle = this.getFlexContainerPattern(devicePixelRatio);
+    this.ctx.strokeStyle =
+      this.options.noContainerOutline ? "transparent" : this.color;
 
     drawRect(this.ctx, 0, 0, width, height, this.currentMatrix);
 
@@ -557,18 +454,9 @@ class FlexboxHighlighter extends AutoRefreshHighlighter {
       return;
     }
 
-    const { devicePixelRatio } = this.win;
-    const lineWidth = getDisplayPixelRatio(this.win);
-    const offset = (lineWidth / 2) % 1;
-    const zoom = getCurrentZoom(this.win);
-    const canvasX = Math.round(this._canvasPosition.x * devicePixelRatio * zoom);
-    const canvasY = Math.round(this._canvasPosition.y * devicePixelRatio * zoom);
-
-    this.ctx.save();
-    this.ctx.translate(offset - canvasX, offset - canvasY);
-    this.ctx.setLineDash(FLEXBOX_LINES_PROPERTIES.item.lineDash);
-    this.ctx.lineWidth = lineWidth;
-    this.ctx.strokeStyle = this.color;
+    this.setupCanvas({
+      lineDash: FLEXBOX_LINES_PROPERTIES.item.lineDash,
+    });
 
     for (const flexLine of this.flexData.lines) {
       for (const flexItem of flexLine.items) {
@@ -588,20 +476,14 @@ class FlexboxHighlighter extends AutoRefreshHighlighter {
       return;
     }
 
-    const { devicePixelRatio } = this.win;
     const lineWidth = getDisplayPixelRatio(this.win);
-    const offset = (lineWidth / 2) % 1;
-    const zoom = getCurrentZoom(this.win);
-    const canvasX = Math.round(this._canvasPosition.x * devicePixelRatio * zoom);
-    const canvasY = Math.round(this._canvasPosition.y * devicePixelRatio * zoom);
-    const containerQuad = getUntransformedQuad(this.currentNode, "content");
-    const { width, height } = containerQuad.getBounds();
     const options = { matrix: this.currentMatrix };
+    const { width: containerWidth, height: containerHeight } =
+      getUntransformedQuad(this.container, "content").getBounds();
 
-    this.ctx.save();
-    this.ctx.translate(offset - canvasX, offset - canvasY);
-    this.ctx.lineWidth = lineWidth;
-    this.ctx.strokeStyle = this.color;
+    this.setupCanvas({
+      useContainerScrollOffsets: true,
+    });
 
     for (const flexLine of this.flexData.lines) {
       const { crossStart, crossSize } = flexLine;
@@ -611,56 +493,56 @@ class FlexboxHighlighter extends AutoRefreshHighlighter {
         case "horizontal-lr vertical-bt":
         case "horizontal-rl vertical-tb":
         case "horizontal-rl vertical-bt":
-          clearRect(this.ctx, 0, crossStart, width, crossStart + crossSize,
+          clearRect(this.ctx, 0, crossStart, containerWidth, crossStart + crossSize,
             this.currentMatrix);
 
           // Avoid drawing the start flex line when they overlap with the flex container.
           if (crossStart != 0) {
-            drawLine(this.ctx, 0, crossStart, width, crossStart, options);
+            drawLine(this.ctx, 0, crossStart, containerWidth, crossStart, options);
             this.ctx.stroke();
           }
 
           // Avoid drawing the end flex line when they overlap with the flex container.
-          if (crossStart + crossSize < height - lineWidth * 2) {
-            drawLine(this.ctx, 0, crossStart + crossSize, width,
+          if (crossStart + crossSize < containerHeight - lineWidth * 2) {
+            drawLine(this.ctx, 0, crossStart + crossSize, containerWidth,
               crossStart + crossSize, options);
             this.ctx.stroke();
           }
           break;
         case "vertical-tb horizontal-lr":
         case "vertical-bt horizontal-rl":
-          clearRect(this.ctx, crossStart, 0, crossStart + crossSize, height,
+          clearRect(this.ctx, crossStart, 0, crossStart + crossSize, containerHeight,
             this.currentMatrix);
 
           // Avoid drawing the start flex line when they overlap with the flex container.
           if (crossStart != 0) {
-            drawLine(this.ctx, crossStart, 0, crossStart, height, options);
+            drawLine(this.ctx, crossStart, 0, crossStart, containerHeight, options);
             this.ctx.stroke();
           }
 
           // Avoid drawing the end flex line when they overlap with the flex container.
-          if (crossStart + crossSize < width - lineWidth * 2) {
+          if (crossStart + crossSize < containerWidth - lineWidth * 2) {
             drawLine(this.ctx, crossStart + crossSize, 0, crossStart + crossSize,
-              height, options);
+              containerHeight, options);
             this.ctx.stroke();
           }
           break;
         case "vertical-bt horizontal-lr":
         case "vertical-tb horizontal-rl":
-          clearRect(this.ctx, width - crossStart, 0, width - crossStart - crossSize,
-            height, this.currentMatrix);
+          clearRect(this.ctx, containerWidth - crossStart, 0,
+            containerWidth - crossStart - crossSize, containerHeight, this.currentMatrix);
 
           // Avoid drawing the start flex line when they overlap with the flex container.
           if (crossStart != 0) {
-            drawLine(this.ctx, width - crossStart, 0, width - crossStart, height,
-              options);
+            drawLine(this.ctx, containerWidth - crossStart, 0,
+              containerWidth - crossStart, containerHeight, options);
             this.ctx.stroke();
           }
 
           // Avoid drawing the end flex line when they overlap with the flex container.
-          if (crossStart + crossSize < width - lineWidth * 2) {
-            drawLine(this.ctx, width - crossStart - crossSize, 0,
-              width - crossStart - crossSize, height, options);
+          if (crossStart + crossSize < containerWidth - lineWidth * 2) {
+            drawLine(this.ctx, containerWidth - crossStart - crossSize, 0,
+              containerWidth - crossStart - crossSize, containerHeight, options);
             this.ctx.stroke();
           }
           break;
@@ -678,17 +560,15 @@ class FlexboxHighlighter extends AutoRefreshHighlighter {
       return;
     }
 
-    const containerQuad = getUntransformedQuad(this.currentNode, "content");
-    const containerBounds = containerQuad.getBounds();
-    const { width: containerWidth, height: containerHeight } = containerBounds;
+    const { width: containerWidth, height: containerHeight } =
+      getUntransformedQuad(this.container, "content").getBounds();
 
-    const offset = (getDisplayPixelRatio(this.win) / 2) % 1;
-    const zoom = getCurrentZoom(this.win);
-    const canvasX = Math.round(this._canvasPosition.x * this.win.devicePixelRatio * zoom);
-    const canvasY = Math.round(this._canvasPosition.y * this.win.devicePixelRatio * zoom);
-
-    this.ctx.save();
-    this.ctx.translate(offset - canvasX, offset - canvasY);
+    this.setupCanvas({
+      lineDash: FLEXBOX_LINES_PROPERTIES.alignItems.lineDash,
+      offset: (getDisplayPixelRatio(this.win) / 2) % 1,
+      skipLineAndStroke: true,
+      useContainerScrollOffsets: true,
+    });
 
     for (const flexLine of this.flexData.lines) {
       const { crossStart, crossSize } = flexLine;
@@ -756,19 +636,77 @@ class FlexboxHighlighter extends AutoRefreshHighlighter {
     this.ctx.restore();
   }
 
+  /**
+   * Set up the canvas with the given options prior to drawing.
+   *
+   * @param {String} [options.lineDash = null]
+   *        An Array of numbers that specify distances to alternately draw a
+   *        line and a gap (in coordinate space units). If the number of
+   *        elements in the array is odd, the elements of the array get copied
+   *        and concatenated. For example, [5, 15, 25] will become
+   *        [5, 15, 25, 5, 15, 25]. If the array is empty, the line dash list is
+   *        cleared and line strokes return to being solid.
+   *
+   *        We use the following constants here:
+   *          FLEXBOX_LINES_PROPERTIES.edge.lineDash,
+   *          FLEXBOX_LINES_PROPERTIES.item.lineDash
+   *          FLEXBOX_LINES_PROPERTIES.alignItems.lineDash
+   * @param {Number} [options.lineWidthMultiplier = 1]
+   *        The width of the line.
+   * @param {Number} [options.offset = `(displayPixelRatio / 2) % 1`]
+   *        The single line width used to obtain a crisp line.
+   * @param {Boolean} [options.skipLineAndStroke = false]
+   *        Skip the setting of lineWidth and strokeStyle.
+   * @param {Boolean} [options.useContainerScrollOffsets = false]
+   *        Take the flexbox container's scroll and zoom offsets into account.
+   *        This is needed for drawing flex lines and justify content when the
+   *        flexbox container itself is display:scroll.
+   */
+  setupCanvas({
+      lineDash = null,
+      lineWidthMultiplier = 1,
+      offset = (getDisplayPixelRatio(this.win) / 2) % 1,
+      skipLineAndStroke = false,
+      useContainerScrollOffsets = false }) {
+    const { devicePixelRatio } = this.win;
+    const lineWidth = getDisplayPixelRatio(this.win);
+    const zoom = getCurrentZoom(this.win);
+    const style = getComputedStyle(this.container);
+    const position = style.position;
+    let offsetX = this._canvasPosition.x;
+    let offsetY = this._canvasPosition.y;
+
+    if (useContainerScrollOffsets) {
+      offsetX += this.container.scrollLeft / zoom;
+      offsetY += this.container.scrollTop / zoom;
+    }
+
+    // If the flexbox container is position:fixed we need to subtract the scroll
+    // positions of all ancestral elements.
+    if (position === "fixed") {
+      const { scrollLeft, scrollTop } =
+        getAbsoluteScrollOffsetsForNode(this.container);
+      offsetX -= scrollLeft / zoom;
+      offsetY -= scrollTop / zoom;
+    }
+
+    const canvasX = Math.round(offsetX * devicePixelRatio * zoom);
+    const canvasY = Math.round(offsetY * devicePixelRatio * zoom);
+
+    this.ctx.save();
+    this.ctx.translate(offset - canvasX, offset - canvasY);
+
+    if (lineDash) {
+      this.ctx.setLineDash(lineDash);
+    }
+
+    if (!skipLineAndStroke) {
+      this.ctx.lineWidth = lineWidth * lineWidthMultiplier;
+      this.ctx.strokeStyle = this.color;
+    }
+  }
+
   _update() {
-    // If this.currentNode is not a flex container we have nothing to highlight.
-    // We can't simply use getAsFlexContainer() here because this fails for
-    // text fields. This will be removed by https://bugzil.la/1509460.
-    if (!this.computedStyle) {
-      this.computedStyle = getComputedStyle(this.currentNode);
-    }
-
-    if (this.computedStyle.display !== "flex" &&
-        this.computedStyle.display !== "inline-flex") {
-      return false;
-    }
-
     setIgnoreLayoutChanges(true);
 
     const root = this.getElement("root");
@@ -786,7 +724,7 @@ class FlexboxHighlighter extends AutoRefreshHighlighter {
 
     // Update the current matrix used in our canvas' rendering
     const { currentMatrix, hasNodeTransformations } =
-      getCurrentMatrix(this.currentNode, this.win, {
+      getCurrentMatrix(this.container, this.win, {
         ignoreWritingModeAndTextDirection: true,
       });
     this.currentMatrix = currentMatrix;
@@ -796,7 +734,6 @@ class FlexboxHighlighter extends AutoRefreshHighlighter {
     this.renderFlexLines();
     this.renderJustifyContent();
     this.renderFlexItems();
-    this.renderAlignItemLine();
 
     this._showFlexbox();
 
@@ -867,9 +804,16 @@ function getRectFromFlexItemValues(item, container) {
   const borderTopWidth = parseInt(style.borderTopWidth, 10) || 0;
   const paddingLeft = parseInt(style.paddingLeft, 10) || 0;
   const paddingTop = parseInt(style.paddingTop, 10) || 0;
+  const scrollX = container.scrollLeft || 0;
+  const scrollY = container.scrollTop || 0;
 
-  domRect.x -= borderLeftWidth + paddingLeft;
-  domRect.y -= borderTopWidth + paddingTop;
+  domRect.x -= paddingLeft + scrollX;
+  domRect.y -= paddingTop + scrollY;
+
+  if (style.overflow === "visible" || style.overflow === "-moz-hidden-unscrollable") {
+    domRect.x -= borderLeftWidth;
+    domRect.y -= borderTopWidth;
+  }
 
   return domRect;
 }

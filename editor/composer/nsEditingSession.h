@@ -13,11 +13,11 @@
 #include "nscore.h"                 // for nsresult
 
 #ifndef __gen_nsIWebProgressListener_h__
-#include "nsIWebProgressListener.h"
+#  include "nsIWebProgressListener.h"
 #endif
 
 #ifndef __gen_nsIEditingSession_h__
-#include "nsIEditingSession.h"  // for NS_DECL_NSIEDITINGSESSION, etc
+#  include "nsIEditingSession.h"  // for NS_DECL_NSIEDITINGSESSION, etc
 #endif
 
 #include "nsString.h"  // for nsCString
@@ -85,6 +85,17 @@ class nsEditingSession final : public nsIEditingSession,
   void RestoreAnimationMode(nsPIDOMWindowOuter* aWindow);
   void RemoveListenersAndControllers(nsPIDOMWindowOuter* aWindow,
                                      mozilla::HTMLEditor* aHTMLEditor);
+
+  /**
+   * Disable scripts and plugins in aDocShell.
+   */
+  nsresult DisableJSAndPlugins(nsIDocShell& aDocShell);
+
+  /**
+   * Restore JS and plugins (enable/disable them) according to the state they
+   * were before the last call to disableJSAndPlugins.
+   */
+  nsresult RestoreJSAndPlugins(nsPIDOMWindowOuter* aWindow);
 
  protected:
   bool mDoneSetup;  // have we prepared for editing yet?

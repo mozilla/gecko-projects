@@ -10,7 +10,7 @@
 #include "nsFrame.h"
 #include "nsGkAtoms.h"
 #include "SVGObserverUtils.h"
-#include "nsSVGFilters.h"
+#include "SVGFilters.h"
 
 using namespace mozilla;
 
@@ -23,7 +23,8 @@ class SVGFELeafFrame final : public nsFrame {
                                         ComputedStyle* aStyle);
 
  protected:
-  explicit SVGFELeafFrame(ComputedStyle* aStyle) : nsFrame(aStyle, kClassID) {
+  explicit SVGFELeafFrame(ComputedStyle* aStyle, nsPresContext* aPresContext)
+      : nsFrame(aStyle, aPresContext, kClassID) {
     AddStateBits(NS_FRAME_SVG_LAYOUT | NS_FRAME_IS_NONDISPLAY);
   }
 
@@ -60,7 +61,7 @@ class SVGFELeafFrame final : public nsFrame {
 
 nsIFrame* NS_NewSVGFELeafFrame(nsIPresShell* aPresShell,
                                ComputedStyle* aStyle) {
-  return new (aPresShell) SVGFELeafFrame(aStyle);
+  return new (aPresShell) SVGFELeafFrame(aStyle, aPresShell->GetPresContext());
 }
 
 NS_IMPL_FRAMEARENA_HELPERS(SVGFELeafFrame)
@@ -79,7 +80,7 @@ void SVGFELeafFrame::Init(nsIContent* aContent, nsContainerFrame* aParent,
 nsresult SVGFELeafFrame::AttributeChanged(int32_t aNameSpaceID,
                                           nsAtom* aAttribute,
                                           int32_t aModType) {
-  nsSVGFE* element = static_cast<nsSVGFE*>(GetContent());
+  SVGFE* element = static_cast<SVGFE*>(GetContent());
   if (element->AttributeAffectsRendering(aNameSpaceID, aAttribute)) {
     MOZ_ASSERT(
         GetParent()->IsSVGFilterFrame(),

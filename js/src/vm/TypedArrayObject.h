@@ -17,11 +17,16 @@
 #include "vm/JSObject.h"
 #include "vm/SharedArrayObject.h"
 
-#define JS_FOR_EACH_TYPED_ARRAY(macro)                                      \
-  macro(int8_t, Int8) macro(uint8_t, Uint8) macro(int16_t, Int16)           \
-      macro(uint16_t, Uint16) macro(int32_t, Int32) macro(uint32_t, Uint32) \
-          macro(float, Float32) macro(double, Float64)                      \
-              macro(uint8_clamped, Uint8Clamped)
+#define JS_FOR_EACH_TYPED_ARRAY(MACRO) \
+  MACRO(int8_t, Int8)                  \
+  MACRO(uint8_t, Uint8)                \
+  MACRO(int16_t, Int16)                \
+  MACRO(uint16_t, Uint16)              \
+  MACRO(int32_t, Int32)                \
+  MACRO(uint32_t, Uint32)              \
+  MACRO(float, Float32)                \
+  MACRO(double, Float64)               \
+  MACRO(uint8_clamped, Uint8Clamped)
 
 namespace js {
 
@@ -35,8 +40,15 @@ namespace js {
 
 class TypedArrayObject : public ArrayBufferViewObject {
  public:
-  static int lengthOffset();
-  static int dataOffset();
+  static constexpr int lengthOffset() {
+    return NativeObject::getFixedSlotOffset(LENGTH_SLOT);
+  }
+  static constexpr int byteOffsetOffset() {
+    return NativeObject::getFixedSlotOffset(BYTEOFFSET_SLOT);
+  }
+  static constexpr int dataOffset() {
+    return NativeObject::getPrivateDataOffset(DATA_SLOT);
+  }
 
   static_assert(js::detail::TypedArrayLengthSlot == LENGTH_SLOT,
                 "bad inlined constant in jsfriendapi.h");
@@ -70,11 +82,11 @@ class TypedArrayObject : public ArrayBufferViewObject {
     return &protoClasses[type];
   }
 
-  static const size_t FIXED_DATA_START = DATA_SLOT + 1;
+  static constexpr size_t FIXED_DATA_START = DATA_SLOT + 1;
 
   // For typed arrays which can store their data inline, the array buffer
   // object is created lazily.
-  static const uint32_t INLINE_BUFFER_LIMIT =
+  static constexpr uint32_t INLINE_BUFFER_LIMIT =
       (NativeObject::MAX_FIXED_SLOTS - FIXED_DATA_START) * sizeof(Value);
 
   static inline gc::AllocKind AllocKindForLazyBuffer(size_t nbytes);
@@ -127,16 +139,19 @@ class TypedArrayObject : public ArrayBufferViewObject {
   void getElements(Value* vp);
 
   static bool GetTemplateObjectForNative(JSContext* cx, Native native,
-                                         uint32_t len, MutableHandleObject res);
+                                         const CallArgs& args,
+                                         MutableHandleObject res);
 
   /*
-   * Byte length above which created typed arrays will have singleton types
-   * regardless of the context in which they are created. This only applies to
-   * typed arrays created with an existing ArrayBuffer.
+   * Byte length above which created typed arrays will have singleton types.
+   * This only applies to typed arrays created with an existing ArrayBuffer and
+   * when not inlined from Ion.
    */
-  static const uint32_t SINGLETON_BYTE_LENGTH = 1024 * 1024 * 10;
+  static constexpr uint32_t SINGLETON_BYTE_LENGTH = 1024 * 1024 * 10;
 
   static bool isOriginalLengthGetter(Native native);
+
+  static bool isOriginalByteOffsetGetter(Native native);
 
   static void finalize(FreeOp* fop, JSObject* obj);
   static size_t objectMoved(JSObject* obj, JSObject* old);
@@ -178,9 +193,15 @@ class TypedArrayObject : public ArrayBufferViewObject {
 MOZ_MUST_USE bool TypedArray_bufferGetter(JSContext* cx, unsigned argc,
                                           Value* vp);
 
-extern TypedArrayObject* TypedArrayCreateWithTemplate(JSContext* cx,
-                                                      HandleObject templateObj,
-                                                      int32_t len);
+extern TypedArrayObject* NewTypedArrayWithTemplateAndLength(
+    JSContext* cx, HandleObject templateObj, int32_t len);
+
+extern TypedArrayObject* NewTypedArrayWithTemplateAndArray(
+    JSContext* cx, HandleObject templateObj, HandleObject array);
+
+extern TypedArrayObject* NewTypedArrayWithTemplateAndBuffer(
+    JSContext* cx, HandleObject templateObj, HandleObject arrayBuffer,
+    HandleValue byteOffset, HandleValue length);
 
 inline bool IsTypedArrayClass(const Class* clasp) {
   return &TypedArrayObject::classes[0] <= clasp &&
@@ -191,6 +212,8 @@ inline Scalar::Type GetTypedArrayClassType(const Class* clasp) {
   MOZ_ASSERT(IsTypedArrayClass(clasp));
   return static_cast<Scalar::Type>(clasp - &TypedArrayObject::classes[0]);
 }
+
+bool IsTypedArrayConstructor(const JSObject* obj);
 
 bool IsTypedArrayConstructor(HandleValue v, uint32_t type);
 
@@ -252,7 +275,7 @@ bool DefineTypedArrayElement(JSContext* cx, HandleObject arr, uint64_t index,
                              Handle<PropertyDescriptor> desc,
                              ObjectOpResult& result);
 
-static inline unsigned TypedArrayShift(Scalar::Type viewType) {
+static inline constexpr unsigned TypedArrayShift(Scalar::Type viewType) {
   switch (viewType) {
     case Scalar::Int8:
     case Scalar::Uint8:
@@ -268,9 +291,9 @@ static inline unsigned TypedArrayShift(Scalar::Type viewType) {
     case Scalar::Int64:
     case Scalar::Float64:
       return 3;
-    default:;
+    default:
+      MOZ_CRASH("Unexpected array type");
   }
-  MOZ_CRASH("Unexpected array type");
 }
 
 static inline unsigned TypedArrayElemSize(Scalar::Type viewType) {

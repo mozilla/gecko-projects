@@ -22,7 +22,7 @@ function start() {
   client = new DebuggerClient(transport);
 
   client.connect((type, traits) => {
-    // Now the client is conected to the server.
+    // Now the client is connected to the server.
     debugTab();
   });
 }
@@ -50,7 +50,7 @@ async function startClient() {
   client = new DebuggerClient(transport);
 
   client.connect((type, traits) => {
-    // Now the client is conected to the server.
+    // Now the client is connected to the server.
     debugTab();
   });
 }
@@ -73,16 +73,12 @@ Attaching to a browser tab requires enumerating the available tabs and attaching
 ```javascript
 function attachToTab() {
   // Get the list of tabs to find the one to attach to.
-  client.listTabs().then((response) => {
+  client.mainRoot.listTabs().then(tabs => {
     // Find the active tab.
-    let tab = response.tabs[response.selected];
+    let targetFront = tabs.find(tab => tab.selected);
 
     // Attach to the tab.
-    client.attachTarget(tab).then(([response, targetFront]) => {
-      if (!targetFront) {
-        return;
-      }
-
+    targetFront.attach().then(() => {
       // Now the targetFront is ready and can be used.
 
       // Attach listeners for client events.
@@ -103,7 +99,7 @@ async function onTab() {
   // Detach from the previous thread.
   await client.activeThread.detach();
   // Detach from the previous tab.
-  await targetFront.activeTab.detach();
+  await targetFront.detach();
   // Start debugging the new tab.
   start();
 }
@@ -126,10 +122,6 @@ client.attachThread(response.threadActor).then(function([response, threadClient]
   threadClient.addListener("paused", onPause);
   threadClient.addListener("resumed", fooListener);
   threadClient.addListener("detached", fooListener);
-  threadClient.addListener("framesadded", onFrames);
-  threadClient.addListener("framescleared", fooListener);
-  threadClient.addListener("scriptsadded", onScripts);
-  threadClient.addListener("scriptscleared", fooListener);
 
   // Resume the thread.
   threadClient.resume();
@@ -168,7 +160,7 @@ function startDebugger() {
   // Start the client.
   client = new DebuggerClient(transport);
   client.connect((type, traits) => {
-    // Now the client is conected to the server.
+    // Now the client is connected to the server.
     debugTab();
   });
 }
@@ -182,30 +174,17 @@ function shutdownDebugger() {
  */
 function debugTab() {
   // Get the list of tabs to find the one to attach to.
-  client.listTabs().then(response => {
+  client.mainRoot.listTabs().then(tabs => {
     // Find the active tab.
-    let tab = response.tabs[response.selected];
+    let targetFront = tabs.find(tab => tab.selected);
     // Attach to the tab.
-    client.attachTarget(tab).then(([response, targetFront]) => {
-      if (!targetFront) {
-        return;
-      }
-
+    targetFront.attach().then(() => {
       // Attach to the thread (context).
-      client.attachThread(response.threadActor, (response, thread) => {
-        if (!thread) {
-          return;
-        }
-
-        threadClient = thread;
+      targetFront.attachThread().then(([response, threadClient]) => {
         // Attach listeners for thread events.
         threadClient.addListener("paused", onPause);
         threadClient.addListener("resumed", fooListener);
         threadClient.addListener("detached", fooListener);
-        threadClient.addListener("framesadded", onFrames);
-        threadClient.addListener("framescleared", fooListener);
-        threadClient.addListener("scriptsadded", onScripts);
-        threadClient.addListener("scriptscleared", fooListener);
 
         // Resume the thread.
         threadClient.resume();
@@ -222,51 +201,11 @@ function onTab() {
   // Detach from the previous thread.
   client.activeThread.detach(() => {
     // Detach from the previous tab.
-    client.activeTab.detach(() => {
+    client.detach(() => {
       // Start debugging the new tab.
       debugTab();
     });
   });
-}
-
-/**
- * Handler for entering pause state.
- */
-function onPause() {
-  // Get the top 20 frames in the server's frame stack cache.
-  client.activeThread.fillFrames(20);
-  // Get the scripts loaded in the server's source script cache.
-  client.activeThread.fillScripts();
-}
-
-/**
- * Handler for framesadded events.
- */
-function onFrames() {
-  // Get the list of frames in the server.
-  for (let frame of client.activeThread.cachedFrames) {
-    // frame is a Debugger.Frame grip.
-    dump("frame: " + frame.toSource() + "\n");
-    inspectFrame(frame);
-  }
-}
-
-/**
- * Handler for scriptsadded events.
- */
-function onScripts() {
-  // Get the list of scripts in the server.
-  for (let script of client.activeThread.cachedScripts) {
-    // script is a Debugger.Script grip.
-    dump("script: " + script.toSource() + "\n");
-  }
-
-  // Resume execution, since this is the last thing going on in the paused
-  // state and there is no UI in this program. Wait a bit so that object
-  // inspection has a chance to finish.
-  setTimeout(() => {
-    threadClient.resume();
-  }, 1000);
 }
 
 /**

@@ -46,17 +46,15 @@ const emptySearchResults = Object.freeze({
   count: 0
 });
 
-export const createFileSearchState = makeRecord(
-  ({
-    query: "",
-    searchResults: emptySearchResults,
-    modifiers: makeRecord({
-      caseSensitive: prefs.fileSearchCaseSensitive,
-      wholeWord: prefs.fileSearchWholeWord,
-      regexMatch: prefs.fileSearchRegexMatch
-    })()
-  }: FileSearchState)
-);
+export const createFileSearchState: () => Record<FileSearchState> = makeRecord({
+  query: "",
+  searchResults: emptySearchResults,
+  modifiers: makeRecord({
+    caseSensitive: prefs.fileSearchCaseSensitive,
+    wholeWord: prefs.fileSearchWholeWord,
+    regexMatch: prefs.fileSearchRegexMatch
+  })()
+});
 
 function update(
   state: Record<FileSearchState> = createFileSearchState(),
@@ -100,7 +98,7 @@ function update(
 }
 
 // NOTE: we'd like to have the app state fully typed
-// https://github.com/devtools-html/debugger.html/blob/master/src/reducers/sources.js#L179-L185
+// https://github.com/firefox-devtools/debugger/blob/master/src/reducers/sources.js#L179-L185
 type OuterState = { fileSearch: Record<FileSearchState> };
 
 export function getFileSearchQuery(state: OuterState): string {

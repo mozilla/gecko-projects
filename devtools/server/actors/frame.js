@@ -11,6 +11,15 @@ const { createValueGrip } = require("devtools/server/actors/object/utils");
 const { ActorClassWithSpec } = require("devtools/shared/protocol");
 const { frameSpec } = require("devtools/shared/specs/frame");
 
+function formatDisplayName(frame) {
+  if (frame.type === "call") {
+    const callee = frame.callee;
+    return callee.name || callee.userDisplayName || callee.displayName;
+  }
+
+  return `(${frame.type})`;
+}
+
 /**
  * An actor for a specified stack frame.
  */
@@ -76,10 +85,6 @@ const FrameActor = ActorClassWithSpec(frameSpec, {
     const threadActor = this.threadActor;
     const form = { actor: this.actorID,
                    type: this.frame.type };
-    if (this.frame.type === "call") {
-      form.callee = createValueGrip(this.frame.callee, threadActor._pausePool,
-        threadActor.objectGrip);
-    }
 
     // NOTE: ignoreFrameEnvironment lets the client explicitly avoid
     // populating form environments on pause.
@@ -95,11 +100,12 @@ const FrameActor = ActorClassWithSpec(frameSpec, {
         threadActor.objectGrip);
     }
 
+    form.displayName = formatDisplayName(this.frame);
     form.arguments = this._args();
     if (this.frame.script) {
       const generatedLocation = this.threadActor.sources.getFrameLocation(this.frame);
       form.where = {
-        source: generatedLocation.generatedSourceActor.form(),
+        actor: generatedLocation.generatedSourceActor.actorID,
         line: generatedLocation.generatedLine,
         column: generatedLocation.generatedColumn,
       };

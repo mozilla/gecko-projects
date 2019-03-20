@@ -77,7 +77,13 @@ PersistentBufferProviderBasic::Create(gfx::IntSize aSize,
       gfxPlatform::GetPlatform()->CreateDrawTargetForBackend(aBackend, aSize,
                                                              aFormat);
 
-  if (!dt) {
+  if (dt) {
+    // This is simply to ensure the DrawTarget gets initialized, and will detect
+    // a device reset, even if we're on the main thread.
+    dt->ClearRect(Rect(0, 0, 0, 0));
+  }
+
+  if (!dt || !dt->IsValid()) {
     return nullptr;
   }
 
@@ -298,7 +304,7 @@ PersistentBufferProviderShared::BorrowDrawTarget(
       }
 
       if (!tex) {
-        gfxCriticalError() << "Unexpected BufferProvider over-production.";
+        gfxCriticalNote << "Unexpected BufferProvider over-production.";
         // It would be pretty bad to keep piling textures up at this point so we
         // call NotifyInactive to remove some of our textures.
         NotifyInactive();
@@ -338,6 +344,16 @@ PersistentBufferProviderShared::BorrowDrawTarget(
   }
 
   mDrawTarget = tex->BorrowDrawTarget();
+
+  if (mDrawTarget) {
+    // This is simply to ensure the DrawTarget gets initialized, and will detect
+    // a device reset, even if we're on the main thread.
+    mDrawTarget->ClearRect(Rect(0, 0, 0, 0));
+
+    if (!mDrawTarget->IsValid()) {
+      mDrawTarget = nullptr;
+    }
+  }
 
   RefPtr<gfx::DrawTarget> dt(mDrawTarget);
   return dt.forget();

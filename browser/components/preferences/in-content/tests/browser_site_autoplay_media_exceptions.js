@@ -1,21 +1,15 @@
 "use strict";
 
-ChromeUtils.import("resource:///modules/SitePermissions.jsm");
-
 const URL = "http://www.example.com";
 const PRINCIPAL = Services.scriptSecurityManager
   .createCodebasePrincipal(Services.io.newURI(URL), {});
 
 const PERMISSIONS_URL = "chrome://browser/content/preferences/permissions.xul";
 const AUTOPLAY_ENABLED_KEY = "media.autoplay.default";
-const GESTURES_NEEDED_KEY = "media.autoplay.enabled.user-gestures-needed";
-const ASK_PERMISSIONS_KEY = "media.autoplay.enabled.ask-permissions";
 
 var exceptionsDialog;
 
 Services.prefs.setIntPref(AUTOPLAY_ENABLED_KEY, Ci.nsIAutoplay.ALLOWED);
-Services.prefs.setBoolPref(GESTURES_NEEDED_KEY, false);
-Services.prefs.setBoolPref(ASK_PERMISSIONS_KEY, true);
 
 async function openExceptionsDialog() {
   let dialogOpened = promiseLoadSubDialog(PERMISSIONS_URL);
@@ -26,25 +20,19 @@ async function openExceptionsDialog() {
   exceptionsDialog = await dialogOpened;
 }
 
-add_task(async function ensureCheckboxHidden() {
-
+add_task(async function ensureCheckboxVisible() {
   registerCleanupFunction(async function() {
     Services.prefs.clearUserPref(AUTOPLAY_ENABLED_KEY);
-    Services.prefs.clearUserPref(GESTURES_NEEDED_KEY);
-    Services.prefs.clearUserPref(ASK_PERMISSIONS_KEY);
     gBrowser.removeCurrentTab();
   });
 
   await openPreferencesViaOpenPreferencesAPI("privacy", {leaveOpen: true});
   let win = gBrowser.selectedBrowser.contentWindow;
-  is_element_hidden(win.document.getElementById("autoplayMediaPolicy"),
-                    "Ensure checkbox is hidden when preffed off");
+  is_element_visible(win.document.getElementById("autoplayMediaCheckbox"),
+                    "Ensure checkbox is visible");
 });
 
 add_task(async function enableBlockingAutoplay() {
-
-  Services.prefs.setBoolPref(GESTURES_NEEDED_KEY, true);
-
   await ContentTask.spawn(gBrowser.selectedBrowser, null, function() {
     let doc = content.document;
     let autoplayCheckBox = doc.getElementById("autoplayMediaCheckbox");

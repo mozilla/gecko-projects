@@ -20,7 +20,7 @@
 
 "use strict";
 
-ChromeUtils.import("resource://gre/modules/NetUtil.jsm");
+const {NetUtil} = ChromeUtils.import("resource://gre/modules/NetUtil.jsm");
 
 var ios = Cc["@mozilla.org/network/io-service;1"]
             .getService(Ci.nsIIOService);
@@ -54,10 +54,7 @@ TestProtocolHandler.prototype = {
              .setSpec(spec)
              .finalize();
   },
-  newChannel2: function(uri, aLoadInfo) {
-    throw Cr.NS_ERROR_NOT_IMPLEMENTED;
-  },
-  newChannel: function(uri) {
+  newChannel: function(uri, aLoadInfo) {
     throw Cr.NS_ERROR_NOT_IMPLEMENTED;
   },
   allowPort: function(port, scheme) {
@@ -600,6 +597,56 @@ function run_pac4_test() {
 
   prefs.setIntPref("network.proxy.type", 2);
   prefs.setCharPref("network.proxy.autoconfig_url", pac);
+  var req = pps.asyncResolve(channel, 0, new TestResolveCallback("http", run_utf8_pac_test));
+}
+
+function run_utf8_pac_test() {
+  var pac = 'data:text/plain;charset=UTF-8,' +
+            'function FindProxyForURL(url, host) {' +
+            '  /*' +
+            '   U+00A9 COPYRIGHT SIGN: %C2%A9,' +
+            '   U+0B87 TAMIL LETTER I: %E0%AE%87,' +
+            '   U+10398 UGARITIC LETTER THANNA: %F0%90%8E%98 ' +
+            '  */' +
+            '  var multiBytes = "%C2%A9 %E0%AE%87 %F0%90%8E%98"; ' +
+            '  /* 6 UTF-16 units above if PAC script run as UTF-8; 11 units if run as Latin-1 */ ' +
+            '  return multiBytes.length === 6 ' +
+            '         ? "PROXY foopy:8080; DIRECT" ' +
+            '         : "PROXY epicfail-utf8:12345; DIRECT";' +
+            '}';
+
+  var channel = NetUtil.newChannel({
+    uri: "http://www.mozilla.org/",
+    loadUsingSystemPrincipal: true
+  });
+
+  // Configure PAC
+  prefs.setIntPref("network.proxy.type", 2);
+  prefs.setCharPref("network.proxy.autoconfig_url", pac);
+
+  var req = pps.asyncResolve(channel, 0, new TestResolveCallback("http", run_latin1_pac_test));
+}
+
+function run_latin1_pac_test() {
+  var pac = 'data:text/plain,' +
+            'function FindProxyForURL(url, host) {' +
+            '  /* A too-long encoding of U+0000, so not valid UTF-8 */ ' +
+            '  var multiBytes = "%C0%80"; ' +
+            '  /* 2 UTF-16 units because interpreted as Latin-1 */ ' +
+            '  return multiBytes.length === 2 ' +
+            '         ? "PROXY foopy:8080; DIRECT" ' +
+            '         : "PROXY epicfail-latin1:12345; DIRECT";' +
+            '}';
+
+  var channel = NetUtil.newChannel({
+    uri: "http://www.mozilla.org/",
+    loadUsingSystemPrincipal: true
+  });
+
+  // Configure PAC
+  prefs.setIntPref("network.proxy.type", 2);
+  prefs.setCharPref("network.proxy.autoconfig_url", pac);
+
   var req = pps.asyncResolve(channel, 0, new TestResolveCallback("http", finish_pac_test));
 }
 
@@ -889,16 +936,16 @@ function failed_script_callback(pi)
     uri: "http://127.0.0.1:7247",
     loadUsingSystemPrincipal: true
   });
-  chan.asyncOpen2(directFilterListener);
+  chan.asyncOpen(directFilterListener);
 }
 
 var directFilterListener = {
   onModifyRequestCalled : false,
 
-  onStartRequest: function test_onStart(request, ctx) {  },
+  onStartRequest: function test_onStart(request) {  },
   onDataAvailable: function test_OnData() { },
 
-  onStopRequest: function test_onStop(request, ctx, status) {
+  onStopRequest: function test_onStop(request, status) {
     // check on the PI from the channel itself
     request.QueryInterface(Ci.nsIProxiedChannel);
     check_proxy(request.proxyInfo, "http", "127.0.0.1", 7246, 0, 0, false);
@@ -953,9 +1000,40 @@ function isresolvable_callback(pi)
   Assert.equal(pi.port, 1234);
   Assert.equal(pi.host, "127.0.0.1");
 
+  run_localhost_pac();
+}
+
+function run_localhost_pac()
+{
+  // test localhost in the pac file
+
+  var pac = 'data:text/plain,' +
+            'function FindProxyForURL(url, host) {' +
+            ' return "PROXY totallycrazy:1234";' +
+            '}';
+
+  // Use default filter list string for "no_proxies_on" ("localhost, 127.0.0.1")
+  prefs.clearUserPref("network.proxy.no_proxies_on");
+  var channel = NetUtil.newChannel({
+    uri: "http://localhost/",
+    loadUsingSystemPrincipal: true
+  });
+  prefs.setIntPref("network.proxy.type", 2);
+  prefs.setCharPref("network.proxy.autoconfig_url", pac);
+
+  var cb = new resolveCallback();
+  cb.nextFunction = localhost_callback;
+  var req = pps.asyncResolve(channel, 0, cb);
+}
+
+function localhost_callback(pi)
+{
+  Assert.equal(pi, null); // no proxy!
+
   prefs.setIntPref("network.proxy.type", 0);
   do_test_finished();
 }
+
 
 function run_test() {
   register_test_protocol_handler();

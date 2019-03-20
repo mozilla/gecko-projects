@@ -7,6 +7,7 @@ loader: taskgraph.loader.transform:loader
 transforms:
   - taskgraph.transforms.try_job:transforms
   - taskgraph.transforms.job:transforms
+  - taskgraph.transforms.cached_tasks:transforms
   - taskgraph.transforms.task:transforms
 
 job-defaults:
@@ -23,6 +24,17 @@ job-defaults:
     snapshot: 20171210T214726Z
 
 jobs:
+  deb7-sqlite3:
+    description: "SQLite backport for Debian wheezy"
+    treeherder:
+      symbol: Deb7(sqlite3)
+    run:
+      using: debian-package
+      dsc:
+        url: http://snapshot.debian.org/archive/debian/20171003T220520Z/pool/main/s/sqlite3/sqlite3_3.16.2-5.dsc
+        sha256: 21a2d432ace9ecf50ca5d64580af78d4414a0cfcc8b8a4f15222e11cf105da09
+      patch: sqlite3-wheezy.diff
+
   deb7-python:
     description: "Python backport for Debian wheezy"
     treeherder:
@@ -112,8 +124,8 @@ jobs:
     run:
       using: debian-package
       tarball:
-        url: https://www.mercurial-scm.org/release/mercurial-4.7.1.tar.gz
-        sha256: 8503383c1c31842576516b803d07564216470887ca6388719e4c4089663b410c
+        url: https://www.mercurial-scm.org/release/mercurial-4.8.1.tar.gz
+        sha256: 48a45f5cde9104fbc2daf310d710d4ebf286d879b89fa327d24b005434b0fa21
       pre-build-command: >-
         cp -r contrib/packaging/debian debian &&
         sed -i -e "s/__VERSION__/$(awk -F\" '$2 {print $2}' mercurial/__version__.py)-1.deb7moz1/" \
@@ -128,8 +140,8 @@ jobs:
       using: debian-package
       dist: stretch
       tarball:
-        url: https://www.mercurial-scm.org/release/mercurial-4.7.1.tar.gz
-        sha256: 8503383c1c31842576516b803d07564216470887ca6388719e4c4089663b410c
+        url: https://www.mercurial-scm.org/release/mercurial-4.8.1.tar.gz
+        sha256: 48a45f5cde9104fbc2daf310d710d4ebf286d879b89fa327d24b005434b0fa21
       pre-build-command: >-
         cp -r contrib/packaging/debian debian &&
         sed -i -e "s/__VERSION__/$(awk -F\" '$2 {print $2}' mercurial/__version__.py)-1.deb9moz1/" \
@@ -264,16 +276,6 @@ jobs:
       tarball:
         url: https://github.com/indygreg/python-zstandard/releases/download/0.9.1/python-zstandard-0.9.1.tar.gz
         sha256: 59c7d6f1f85cebb5124abb50d8ec281c5311e0812e18785e28b197cf1515dd3b
-
-  deb7-nasm:
-    description: "nasm for Debian wheezy"
-    treeherder:
-      symbol: Deb7(nasm)
-    run:
-      using: debian-package
-      dsc:
-        url: http://snapshot.debian.org/archive/debian/20160426T155816Z/pool/main/n/nasm/nasm_2.12.01-1.dsc
-        sha256: 70b0478243ca8b36e163af15fb8a0a9be504b3321a9fb7d67ba0767dbfcc32ec
 
   deb7-pcre3:
     description: "pcre3 8.31 for Debian Wheezy"

@@ -31,28 +31,28 @@ include svg-integration/reftest.list
 
 == baseline-middle-01.svg pass.svg
 
-skip-if(Android) pref(layout.css.mix-blend-mode.enabled,true) == blend-color-burn.svg blend-color-burn-ref.svg
-skip-if(Android) pref(layout.css.mix-blend-mode.enabled,true) == blend-color-dodge.svg blend-color-dodge-ref.svg
-# pref(layout.css.mix-blend-mode.enabled,true) == blend-color.svg blend-color-ref.svg
-skip-if(Android) pref(layout.css.mix-blend-mode.enabled,true) == blend-darken.svg blend-darken-ref.svg
-skip-if(Android) pref(layout.css.mix-blend-mode.enabled,true) == blend-difference.svg blend-difference-ref.svg
-skip-if(Android) fuzzy-if(skiaContent,0-1,0-1600) pref(layout.css.mix-blend-mode.enabled,true) == blend-exclusion.svg blend-exclusion-ref.svg
-# pref(layout.css.mix-blend-mode.enabled,true) == blend-hard-light.svg blend-hard-light-ref.svg
-# pref(layout.css.mix-blend-mode.enabled,true) == blend-hue.svg blend-hue-ref.svg
-skip-if(Android) pref(layout.css.mix-blend-mode.enabled,true) == blend-layer-blend.svg blend-layer-blend-ref.svg
-skip-if(Android) pref(layout.css.mix-blend-mode.enabled,true) == blend-layer-filter.svg blend-layer-filter-ref.svg
-skip-if(Android) pref(layout.css.mix-blend-mode.enabled,true) == blend-layer-mask.svg blend-layer-mask-ref.svg
-skip-if(Android) pref(layout.css.mix-blend-mode.enabled,true) == blend-layer-opacity.svg blend-layer-opacity-ref.svg
-skip-if(Android) pref(layout.css.mix-blend-mode.enabled,true) == blend-lighten.svg blend-lighten-ref.svg
-# pref(layout.css.mix-blend-mode.enabled,true) == blend-luminosity.svg blend-luminosity-ref.svg
-#skip-if(Android) pref(layout.css.mix-blend-mode.enabled,true) == blend-multiply-alpha.svg blend-multiply-alpha-ref.svg
-skip-if(Android) pref(layout.css.mix-blend-mode.enabled,true) == blend-multiply.svg blend-multiply-ref.svg
-pref(layout.css.mix-blend-mode.enabled,true) == blend-normal.svg blend-normal-ref.svg
-#skip-if(Android) pref(layout.css.mix-blend-mode.enabled,true) == blend-overlay.svg blend-overlay-ref.svg
-#skip-if(Android)  pref(layout.css.mix-blend-mode.enabled,true) == blend-saturation.svg blend-saturation-ref.svg
-#skip-if(Android) pref(layout.css.mix-blend-mode.enabled,true) == blend-screen.svg blend-screen-ref.svg
-#skip-if(Android) pref(layout.css.mix-blend-mode.enabled,true) == blend-soft-light.svg blend-soft-light-ref.svg
-skip pref(layout.css.mix-blend-mode.enabled,true) == blend-difference-stacking.html blend-difference-stacking-ref.html # bug 1458353
+skip-if(Android) == blend-color-burn.svg blend-color-burn-ref.svg
+skip-if(Android) == blend-color-dodge.svg blend-color-dodge-ref.svg
+# == blend-color.svg blend-color-ref.svg
+skip-if(Android) == blend-darken.svg blend-darken-ref.svg
+skip-if(Android) == blend-difference.svg blend-difference-ref.svg
+skip-if(Android) fuzzy-if(skiaContent,0-1,0-1600) == blend-exclusion.svg blend-exclusion-ref.svg
+# == blend-hard-light.svg blend-hard-light-ref.svg
+# == blend-hue.svg blend-hue-ref.svg
+skip-if(Android) == blend-layer-blend.svg blend-layer-blend-ref.svg
+skip-if(Android) == blend-layer-filter.svg blend-layer-filter-ref.svg
+skip-if(Android) == blend-layer-mask.svg blend-layer-mask-ref.svg
+skip-if(Android) == blend-layer-opacity.svg blend-layer-opacity-ref.svg
+skip-if(Android) == blend-lighten.svg blend-lighten-ref.svg
+# == blend-luminosity.svg blend-luminosity-ref.svg
+#skip-if(Android) == blend-multiply-alpha.svg blend-multiply-alpha-ref.svg
+skip-if(Android) == blend-multiply.svg blend-multiply-ref.svg
+== blend-normal.svg blend-normal-ref.svg
+#skip-if(Android) == blend-overlay.svg blend-overlay-ref.svg
+#skip-if(Android)  == blend-saturation.svg blend-saturation-ref.svg
+#skip-if(Android) == blend-screen.svg blend-screen-ref.svg
+#skip-if(Android) == blend-soft-light.svg blend-soft-light-ref.svg
+skip == blend-difference-stacking.html blend-difference-stacking-ref.html # bug 1458353
 
 fuzzy(0-11,0-7155) == blur-inside-clipPath.svg blur-inside-clipPath-ref.svg
 
@@ -269,6 +269,7 @@ fuzzy-if(skiaContent,0-1,0-100) == marker-orientation-01.svg marker-orientation-
 fuzzy-if(skiaContent,0-1,0-5) == marker-orientation-02.svg marker-orientation-02-ref.svg
 == marker-orientation-03.svg pass.svg
 == marker-orientation-04.svg pass.svg
+== marker-orientation-05.svg pass.svg
 
 fuzzy(0-28,0-28) == mask-and-clipPath.html mask-and-clipPath-ref.html
 == mask-and-clipPath-2.svg pass.svg
@@ -325,7 +326,7 @@ fuzzy-if(/^Windows\x20NT\x2010\.0/.test(http.oscpu)||skiaContent,0-1,0-10000) ==
 
 fuzzy-if(Android,0-8,0-200) == outer-svg-border-and-padding-01.svg outer-svg-border-and-padding-01-ref.svg
 
-fuzzy-if(skiaContent,0-7,0-175) fuzzy-if(webrender,54-54,124-124) random-if(/^Windows\x20NT\x206\.1/.test(http.oscpu)) skip-if(gtkWidget) skip-if(cocoaWidget&&isDebugBuild) == outline.html outline-ref.html # Bug 1392106, Bug 1503525
+fuzzy(0-16,0-193) fuzzy-if(skiaContent,0-7,0-193) fuzzy-if(webrender,54-54,124-124) == outline.html outline-ref.html # Bug 1392106, Bug 1503525
 
 == overflow-on-outer-svg-01.svg overflow-on-outer-svg-01-ref.svg
 == overflow-on-outer-svg-02a.xhtml overflow-on-outer-svg-02-ref.xhtml

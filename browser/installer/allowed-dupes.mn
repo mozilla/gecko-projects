@@ -95,7 +95,7 @@ chrome/toolkit/skin/classic/global/global.css
 chrome/toolkit/skin/classic/global/icons/close-win7.png
 chrome/toolkit/skin/classic/global/menu.css
 chrome/toolkit/skin/classic/global/menulist.css
-chrome/toolkit/skin/classic/global/numberbox.css
+chrome/toolkit/skin/classic/global/numberinput.css
 chrome/toolkit/skin/classic/global/popup.css
 chrome/toolkit/skin/classic/global/preferences.css
 chrome/toolkit/skin/classic/global/radio.css
@@ -152,3 +152,7 @@ browser/defaults/settings/main/example.json
 # Bug 1463748 - Fork and pref-off the new error pages
 browser/chrome/browser/content/browser/aboutNetError-new.xhtml
 browser/chrome/browser/content/browser/aboutNetError.xhtml
+#ifdef MOZ_EME_WIN32_ARTIFACT
+gmp-clearkey/0.1/manifest.json
+i686/gmp-clearkey/0.1/manifest.json
+#endif

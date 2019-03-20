@@ -268,8 +268,10 @@ var BrowserPageActions = {
    * @param  panelNode (DOM node, optional)
    *         The panel to use.  This method takes a hands-off approach with
    *         regard to your panel in terms of attributes, styling, etc.
+   * @param  event (DOM event, optional)
+   *         The event which triggered this panel.
    */
-  togglePanelForAction(action, panelNode = null) {
+  togglePanelForAction(action, panelNode = null, event = null) {
     let aaPanelNode = this.activatedActionPanelNode;
     if (panelNode) {
       // Note that this particular code path will not prevent the panel from
@@ -298,8 +300,10 @@ var BrowserPageActions = {
       anchorNode.removeAttribute("open");
     }, { once: true });
 
-    PanelMultiView.openPopup(panelNode, anchorNode, "bottomcenter topright")
-                  .catch(Cu.reportError);
+    PanelMultiView.openPopup(panelNode, anchorNode, {
+      position: "bottomcenter topright",
+      triggerEvent: event,
+    }).catch(Cu.reportError);
   },
 
   _makeActivatedActionPanelForAction(action) {
@@ -460,9 +464,11 @@ var BrowserPageActions = {
     buttonNode.classList.add("urlbar-icon", "urlbar-page-action");
     buttonNode.setAttribute("actionid", action.id);
     buttonNode.setAttribute("role", "button");
-    buttonNode.addEventListener("click", event => {
+    let commandHandler = event => {
       this.doCommandForAction(action, event, buttonNode);
-    });
+    };
+    buttonNode.addEventListener("click", commandHandler);
+    buttonNode.addEventListener("keypress", commandHandler);
     return buttonNode;
   },
 
@@ -628,6 +634,12 @@ var BrowserPageActions = {
     if (event && event.type == "click" && event.button != 0) {
       return;
     }
+    if (event && event.type == "keypress") {
+      if (event.key != " " && event.key != "Enter") {
+        return;
+      }
+      event.stopPropagation();
+    }
     PageActions.logTelemetry("used", action, buttonNode);
     // If we're in the panel, open a subview inside the panel:
     // Note that we can't use this.panelNode.contains(buttonNode) here
@@ -649,7 +661,7 @@ var BrowserPageActions = {
       action.onCommand(event, buttonNode);
     }
     if (action.getWantsSubview(window) || action.wantsIframe) {
-      this.togglePanelForAction(action);
+      this.togglePanelForAction(action, null, event);
     }
   },
 
@@ -863,6 +875,11 @@ var BrowserPageActions = {
     this._contextAction = null;
 
     PageActions.logTelemetry("managed", action);
+    AMTelemetry.recordActionEvent({
+      object: "pageAction",
+      action: "manage",
+      extra: {addonId: action.extensionID},
+    });
 
     let viewID = "addons://detail/" + encodeURIComponent(action.extensionID);
     window.BrowserOpenAddonsMgr(viewID);
@@ -961,6 +978,36 @@ BrowserPageActions.bookmark = {
   },
 };
 
+// pin tab
+BrowserPageActions.pinTab = {
+  updateState() {
+    let action = PageActions.actionForID("pinTab");
+    let { pinned } = gBrowser.selectedTab;
+    if (pinned) {
+      action.setTitle(BrowserPageActions.panelNode.getAttribute("unpinTab-title"));
+    } else {
+      action.setTitle(BrowserPageActions.panelNode.getAttribute("pinTab-title"));
+    }
+
+    let panelButton = BrowserPageActions.panelButtonNodeForActionID(action.id);
+    if (panelButton) {
+      panelButton.toggleAttribute("pinned", pinned);
+    }
+    let urlbarButton = BrowserPageActions.urlbarButtonNodeForActionID(action.id);
+    if (urlbarButton) {
+      urlbarButton.toggleAttribute("pinned", pinned);
+    }
+  },
+
+  onCommand(event, buttonNode) {
+    if (gBrowser.selectedTab.pinned) {
+      gBrowser.unpinTab(gBrowser.selectedTab);
+    } else {
+      gBrowser.pinTab(gBrowser.selectedTab);
+    }
+  },
+};
+
 // copy URL
 BrowserPageActions.copyURL = {
   onBeforePlacedInWindow(browserWindow) {
@@ -1036,56 +1083,7 @@ BrowserPageActions.sendToDevice = {
   },
 
   onShowingSubview(panelViewNode) {
-    let bodyNode = panelViewNode.querySelector(".panel-subview-body");
-    let panelNode = panelViewNode.closest("panel");
-    let browser = gBrowser.selectedBrowser;
-    let url = browser.currentURI.spec;
-    let title = browser.contentTitle;
-    let multiselected = gBrowser.selectedTab.multiselected;
-
-    // This is on top because it also clears the device list between state
-    // changes.
-    gSync.populateSendTabToDevicesMenu(bodyNode, url, title, multiselected, (clientId, name, clientType, lastModified) => {
-      if (!name) {
-        return document.createXULElement("toolbarseparator");
-      }
-      let item = document.createXULElement("toolbarbutton");
-      item.classList.add("pageAction-sendToDevice-device", "subviewbutton");
-      if (clientId) {
-        item.classList.add("subviewbutton-iconic");
-        item.setAttribute("tooltiptext", gSync.formatLastSyncDate(lastModified));
-      }
-
-      item.addEventListener("command", event => {
-        if (panelNode) {
-          PanelMultiView.hidePopup(panelNode);
-        }
-        // There are items in the subview that don't represent devices: "Sign
-        // in", "Learn about Sync", etc.  Device items will be .sendtab-target.
-        if (event.target.classList.contains("sendtab-target")) {
-          let action = PageActions.actionForID("sendToDevice");
-          let messageId = gSync.offline && "sendToDeviceOffline";
-          showBrowserPageActionFeedback(action, event, messageId);
-        }
-      });
-      return item;
-    });
-
-    bodyNode.removeAttribute("state");
-    // In the first ~10 sec after startup, Sync may not be loaded and the list
-    // of devices will be empty.
-    if (gSync.syncConfiguredAndLoading) {
-      bodyNode.setAttribute("state", "notready");
-      // Force a background Sync
-      Services.tm.dispatchToMainThread(async () => {
-        await Weave.Service.sync({why: "pageactions", engines: []}); // [] = clients engine only
-        // There's no way Sync is still syncing at this point, but we check
-        // anyway to avoid infinite looping.
-        if (!window.closed && !gSync.syncConfiguredAndLoading) {
-          this.onShowingSubview(panelViewNode);
-        }
-      });
-    }
+    gSync.populateSendTabToDevicesView(panelViewNode, this.onShowingSubview.bind(this));
   },
 };
 
@@ -1175,12 +1173,12 @@ BrowserPageActions.addSearchEngine = {
   },
 
   _installEngine(uri, image) {
-    Services.search.addEngine(uri, image, false, {
-      onSuccess: engine => {
+    Services.search.addEngine(uri, image, false).then(
+      engine => {
         showBrowserPageActionFeedback(this.action);
       },
-      onError(errorCode) {
-        if (errorCode != Ci.nsISearchInstallCallback.ERROR_DUPLICATE_ENGINE) {
+      errorCode => {
+        if (errorCode != Ci.nsISearchService.ERROR_DUPLICATE_ENGINE) {
           // Download error is shown by the search service
           return;
         }
@@ -1196,8 +1194,8 @@ BrowserPageActions.addSearchEngine = {
         prompt.QueryInterface(Ci.nsIWritablePropertyBag2);
         prompt.setPropertyAsBool("allowTabModal", true);
         prompt.alert(title, text);
-      },
-    });
+      }
+    );
   },
 };
 

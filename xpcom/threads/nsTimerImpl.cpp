@@ -18,17 +18,17 @@
 #include "mozilla/Mutex.h"
 #include "mozilla/ResultExtensions.h"
 #ifdef MOZ_TASK_TRACER
-#include "GeckoTaskTracerImpl.h"
+#  include "GeckoTaskTracerImpl.h"
 using namespace mozilla::tasktracer;
 #endif
 
 #ifdef XP_WIN
-#include <process.h>
-#ifndef getpid
-#define getpid _getpid
-#endif
+#  include <process.h>
+#  ifndef getpid
+#    define getpid _getpid
+#  endif
 #else
-#include <unistd.h>
+#  include <unistd.h>
 #endif
 
 using mozilla::Atomic;
@@ -193,7 +193,7 @@ nsresult NS_NewTimerWithFuncCallback(nsITimer** aTimer,
 //
 static mozilla::LazyLogModule sTimerFiringsLog("TimerFirings");
 
-mozilla::LogModule* GetTimerFiringsLog() { return sTimerFiringsLog; }
+static mozilla::LogModule* GetTimerFiringsLog() { return sTimerFiringsLog; }
 
 #include <math.h>
 
@@ -296,7 +296,7 @@ nsresult nsTimerImpl::InitCommon(const TimeDuration& aDelay, uint32_t aType,
                                  Callback&& newCallback) {
   mMutex.AssertCurrentThreadOwns();
 
-  if (NS_WARN_IF(!gThread)) {
+  if (!gThread) {
     return NS_ERROR_NOT_INITIALIZED;
   }
 
@@ -591,12 +591,12 @@ void nsTimerImpl::Fire(int32_t aGeneration) {
 }
 
 #if defined(HAVE_DLADDR) && defined(HAVE___CXA_DEMANGLE)
-#define USE_DLADDR 1
+#  define USE_DLADDR 1
 #endif
 
 #ifdef USE_DLADDR
-#include <cxxabi.h>
-#include <dlfcn.h>
+#  include <cxxabi.h>
+#  include <dlfcn.h>
 #endif
 
 // See the big comment above GetTimerFiringsLog() to understand this code.
@@ -766,15 +766,17 @@ size_t nsTimer::SizeOfIncludingThis(mozilla::MallocSizeOf aMallocSizeOf) const {
   return aMallocSizeOf(this);
 }
 
-/* static */ RefPtr<nsTimer> nsTimer::WithEventTarget(nsIEventTarget* aTarget) {
+/* static */
+RefPtr<nsTimer> nsTimer::WithEventTarget(nsIEventTarget* aTarget) {
   if (!aTarget) {
     aTarget = mozilla::GetCurrentThreadEventTarget();
   }
   return do_AddRef(new nsTimer(aTarget));
 }
 
-/* static */ nsresult nsTimer::XPCOMConstructor(nsISupports* aOuter,
-                                                REFNSIID aIID, void** aResult) {
+/* static */
+nsresult nsTimer::XPCOMConstructor(nsISupports* aOuter, REFNSIID aIID,
+                                   void** aResult) {
   *aResult = nullptr;
   if (aOuter != nullptr) {
     return NS_ERROR_NO_AGGREGATION;

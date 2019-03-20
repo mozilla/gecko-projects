@@ -1,6 +1,6 @@
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
- * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 // Disable this entire crate on Windows when Gecko symbols are not available
 // as linking would fail:
@@ -22,6 +22,7 @@ extern crate malloc_size_of;
 extern crate num_traits;
 extern crate selectors;
 extern crate smallvec;
+#[cfg(target_pointer_width = "64")]
 #[macro_use]
 extern crate size_of_test;
 #[macro_use]

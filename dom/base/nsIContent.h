@@ -7,6 +7,7 @@
 #define nsIContent_h___
 
 #include "mozilla/Attributes.h"
+#include "mozilla/FlushType.h"
 #include "mozilla/dom/BorrowedAttrInfo.h"
 #include "nsCaseTreatment.h"  // for enum, cannot be forward-declared
 #include "nsINode.h"
@@ -107,7 +108,7 @@ class nsIContent : public nsINode {
    * TODO(emilio): Should we move to nsIContent::BindToTree most of the
    * FragmentOrElement / CharacterData duplicated code?
    */
-  virtual nsresult BindToTree(nsIDocument* aDocument, nsIContent* aParent,
+  virtual nsresult BindToTree(Document* aDocument, nsIContent* aParent,
                               nsIContent* aBindingParent) = 0;
 
   /**
@@ -636,6 +637,15 @@ class nsIContent : public nsINode {
   nsIFrame* GetPrimaryFrame() const {
     return (IsInUncomposedDoc() || IsInShadowTree()) ? mPrimaryFrame : nullptr;
   }
+
+  /**
+   * Get the primary frame for this content with flushing
+   *
+   * @param aType the kind of flush to do, typically FlushType::Frames or
+   *              FlushType::Layout
+   * @return the primary frame
+   */
+  nsIFrame* GetPrimaryFrame(mozilla::FlushType aType);
 
   // Defined in nsIContentInlines.h because it needs nsIFrame.
   inline void SetPrimaryFrame(nsIFrame* aFrame);

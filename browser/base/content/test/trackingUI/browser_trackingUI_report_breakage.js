@@ -11,9 +11,9 @@ const TP_PREF = "privacy.trackingprotection.enabled";
 const PREF_REPORT_BREAKAGE_ENABLED = "browser.contentblocking.reportBreakage.enabled";
 const PREF_REPORT_BREAKAGE_URL = "browser.contentblocking.reportBreakage.url";
 
-let {HttpServer} = ChromeUtils.import("resource://testing-common/httpd.js", {});
-let {CommonUtils} = ChromeUtils.import("resource://services-common/utils.js", {});
-let {Preferences} = ChromeUtils.import("resource://gre/modules/Preferences.jsm", {});
+let {HttpServer} = ChromeUtils.import("resource://testing-common/httpd.js");
+let {CommonUtils} = ChromeUtils.import("resource://services-common/utils.js");
+let {Preferences} = ChromeUtils.import("resource://gre/modules/Preferences.jsm");
 
 add_task(async function setup() {
   await UrlClassifierTestUtils.addTestTrackers();
@@ -25,13 +25,6 @@ add_task(async function setup() {
     Services.telemetry.canRecordExtended = oldCanRecord;
   });
 });
-
-function openIdentityPopup() {
-  let mainView = document.getElementById("identity-popup-mainView");
-  let viewShown = BrowserTestUtils.waitForEvent(mainView, "ViewShown");
-  gIdentityHandler._identityBox.click();
-  return viewShown;
-}
 
 add_task(async function testReportBreakageVisibility() {
   let scenarios = [
@@ -165,7 +158,7 @@ add_task(async function testReportBreakage() {
     await viewShown;
 
     let submitButton = document.getElementById("identity-popup-breakageReportView-submit");
-    let reportURL = document.getElementById("identity-popup-breakageReportView-collection-url").textContent;
+    let reportURL = document.getElementById("identity-popup-breakageReportView-collection-url").value;
 
     is(reportURL, TRACKING_PAGE, "Shows the correct URL in the report UI.");
 
@@ -186,11 +179,9 @@ add_task(async function testReportBreakage() {
         let prefs = [
           "privacy.trackingprotection.enabled",
           "privacy.trackingprotection.pbmode.enabled",
-          "browser.contentblocking.trackingprotection.control-center.ui.enabled",
           "urlclassifier.trackingTable",
           "network.http.referer.defaultPolicy",
           "network.http.referer.defaultPolicy.pbmode",
-          "browser.contentblocking.rejecttrackers.control-center.ui.enabled",
           "network.cookie.cookieBehavior",
           "network.cookie.lifetimePolicy",
           "privacy.restrict3rdpartystorage.expiration",

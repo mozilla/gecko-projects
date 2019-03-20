@@ -129,8 +129,8 @@ locales = [
     l10n = "{l}browser/extensions/formautofill/**"
 
 [[paths]]
-    reference = "browser/extensions/onboarding/locales/en-US/**"
-    l10n = "{l}browser/extensions/onboarding/**"
+    reference = "browser/extensions/fxmonitor/locales/en-US/**"
+    l10n = "{l}browser/extensions/fxmonitor/**"
 
 [[paths]]
     reference = "browser/extensions/webcompat-reporter/locales/en-US/**"

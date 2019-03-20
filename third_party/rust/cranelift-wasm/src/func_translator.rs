@@ -4,13 +4,14 @@
 //! function to Cranelift IR guided by a `FuncEnvironment` which provides information about the
 //! WebAssembly module and the runtime environment.
 
-use code_translator::translate_operator;
+use crate::code_translator::translate_operator;
+use crate::environ::{FuncEnvironment, ReturnMode, WasmResult};
+use crate::state::TranslationState;
 use cranelift_codegen::entity::EntityRef;
 use cranelift_codegen::ir::{self, Ebb, InstBuilder};
 use cranelift_codegen::timing;
 use cranelift_frontend::{FunctionBuilder, FunctionBuilderContext, Variable};
-use environ::{FuncEnvironment, ReturnMode, WasmResult};
-use state::TranslationState;
+use log::info;
 use wasmparser::{self, BinaryReader};
 
 /// WebAssembly to Cranelift IR function translator.
@@ -53,10 +54,15 @@ impl FuncTranslator {
     pub fn translate<FE: FuncEnvironment + ?Sized>(
         &mut self,
         code: &[u8],
+        code_offset: usize,
         func: &mut ir::Function,
         environ: &mut FE,
     ) -> WasmResult<()> {
-        self.translate_from_reader(BinaryReader::new(code), func, environ)
+        self.translate_from_reader(
+            BinaryReader::new_with_offset(code, code_offset),
+            func,
+            environ,
+        )
     }
 
     /// Translate a binary WebAssembly function from a `BinaryReader`.
@@ -221,19 +227,18 @@ fn parse_function_body<FE: FuncEnvironment + ?Sized>(
 
 /// Get the current source location from a reader.
 fn cur_srcloc(reader: &BinaryReader) -> ir::SourceLoc {
-    // We record source locations as byte code offsets relative to the beginning of the function.
-    // This will wrap around of a single function's byte code is larger than 4 GB, but a) the
-    // WebAssembly format doesn't allow for that, and b) that would hit other Cranelift
-    // implementation limits anyway.
-    ir::SourceLoc::new(reader.current_position() as u32)
+    // We record source locations as byte code offsets relative to the beginning of the file.
+    // This will wrap around if byte code is larger than 4 GB.
+    ir::SourceLoc::new(reader.original_position() as u32)
 }
 
 #[cfg(test)]
 mod tests {
     use super::{FuncTranslator, ReturnMode};
+    use crate::environ::DummyEnvironment;
     use cranelift_codegen::ir::types::I32;
     use cranelift_codegen::{ir, isa, settings, Context};
-    use environ::DummyEnvironment;
+    use log::debug;
     use target_lexicon::PointerWidth;
 
     #[test]
@@ -268,7 +273,7 @@ mod tests {
         ctx.func.signature.returns.push(ir::AbiParam::new(I32));
 
         trans
-            .translate(&BODY, &mut ctx.func, &mut runtime.func_env())
+            .translate(&BODY, 0, &mut ctx.func, &mut runtime.func_env())
             .unwrap();
         debug!("{}", ctx.func.display(None));
         ctx.verify(&flags).unwrap();
@@ -306,7 +311,7 @@ mod tests {
         ctx.func.signature.returns.push(ir::AbiParam::new(I32));
 
         trans
-            .translate(&BODY, &mut ctx.func, &mut runtime.func_env())
+            .translate(&BODY, 0, &mut ctx.func, &mut runtime.func_env())
             .unwrap();
         debug!("{}", ctx.func.display(None));
         ctx.verify(&flags).unwrap();
@@ -352,7 +357,7 @@ mod tests {
         ctx.func.signature.returns.push(ir::AbiParam::new(I32));
 
         trans
-            .translate(&BODY, &mut ctx.func, &mut runtime.func_env())
+            .translate(&BODY, 0, &mut ctx.func, &mut runtime.func_env())
             .unwrap();
         debug!("{}", ctx.func.display(None));
         ctx.verify(&flags).unwrap();

@@ -6,12 +6,12 @@
     "filename": "mozmake.exe"
   },
   {
-    "version": "Visual Studio 15.9 preview release 5",
-    "size": 621847510,
+    "version": "Visual Studio 2017 15.9.6 / SDK 10.0.17134.0",
+    "size": 490015895,
     "visibility": "internal",
-    "digest": "eba775d85c32d3d0acab72804ba82f0d0180b419c6f01774bc520b7b5f74efd384a2569cb255866053d30e71c94363afee2042f1fad510c02525d5b282cbb3cf",
+    "digest": "91d08703a8ce39f6f53ccecc7c7b6f57e1b571ddb5d1eb4dd9260e52580566c35a4bed39ad366fd60ca60ebf5c06f0f00561bba5cd631826511f2872a3d2dcd5",
     "algorithm": "sha512",
-    "filename": "vs2017_15.9.0p5.zip",
+    "filename": "vs2017_15.9.6.zip",
     "unpack": true
   },
   {
@@ -24,9 +24,9 @@
     "size": 297118
   },
   {
-    "size": 1516544,
+    "size": 1701376,
     "visibility": "public",
-    "digest": "cf84f9592059f1e0756370f44e0ad289b71569c235d2ec8c5958695cc57352d3b99b584fd119e73fc9593d1c4cca414985e71f567f777162471b6040ebc59d13",
+    "digest": "2bc729f9cedfba59b5c7a088f00d00fc078af3bd08e88ee41bbb1ea092038466f46589cef036e0d928249f6037fb22828f62e6d82a32d018f66ca92a834393c8",
     "algorithm": "sha512",
     "filename": "win32-minidump_stackwalk.exe"
   }

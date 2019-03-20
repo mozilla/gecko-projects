@@ -22,14 +22,16 @@ using namespace mozilla;
 
 nsContainerFrame* NS_NewHTMLButtonControlFrame(nsIPresShell* aPresShell,
                                                ComputedStyle* aStyle) {
-  return new (aPresShell) nsHTMLButtonControlFrame(aStyle);
+  return new (aPresShell)
+      nsHTMLButtonControlFrame(aStyle, aPresShell->GetPresContext());
 }
 
 NS_IMPL_FRAMEARENA_HELPERS(nsHTMLButtonControlFrame)
 
 nsHTMLButtonControlFrame::nsHTMLButtonControlFrame(ComputedStyle* aStyle,
+                                                   nsPresContext* aPresContext,
                                                    nsIFrame::ClassID aID)
-    : nsContainerFrame(aStyle, aID) {}
+    : nsContainerFrame(aStyle, aPresContext, aID) {}
 
 nsHTMLButtonControlFrame::~nsHTMLButtonControlFrame() {}
 
@@ -47,7 +49,7 @@ void nsHTMLButtonControlFrame::Init(nsIContent* aContent,
 }
 
 NS_QUERYFRAME_HEAD(nsHTMLButtonControlFrame)
-NS_QUERYFRAME_ENTRY(nsIFormControlFrame)
+  NS_QUERYFRAME_ENTRY(nsIFormControlFrame)
 NS_QUERYFRAME_TAIL_INHERITING(nsContainerFrame)
 
 #ifdef ACCESSIBILITY
@@ -72,32 +74,30 @@ nsresult nsHTMLButtonControlFrame::HandleEvent(nsPresContext* aPresContext,
 }
 
 bool nsHTMLButtonControlFrame::ShouldClipPaintingToBorderBox() {
-  return IsInput() || StyleDisplay()->mOverflowX != NS_STYLE_OVERFLOW_VISIBLE;
+  return IsInput() || StyleDisplay()->mOverflowX != StyleOverflow::Visible;
 }
 
 void nsHTMLButtonControlFrame::BuildDisplayList(
     nsDisplayListBuilder* aBuilder, const nsDisplayListSet& aLists) {
-  // Clip to our border area for event hit testing.
-  Maybe<DisplayListClipState::AutoSaveRestore> eventClipState;
-  const bool isForEventDelivery = aBuilder->IsForEventDelivery();
-  if (isForEventDelivery) {
-    eventClipState.emplace(aBuilder);
-    nsRect rect(aBuilder->ToReferenceFrame(this), GetSize());
-    nscoord radii[8];
-    bool hasRadii = GetBorderRadii(radii);
-    eventClipState->ClipContainingBlockDescendants(rect,
-                                                   hasRadii ? radii : nullptr);
-  }
-
   nsDisplayList onTop;
-  if (IsVisibleForPainting(aBuilder)) {
+  if (IsVisibleForPainting()) {
+    // Clip the button itself to its border area for event hit testing.
+    Maybe<DisplayListClipState::AutoSaveRestore> eventClipState;
+    if (aBuilder->IsForEventDelivery()) {
+      eventClipState.emplace(aBuilder);
+      nsRect rect(aBuilder->ToReferenceFrame(this), GetSize());
+      nscoord radii[8];
+      bool hasRadii = GetBorderRadii(radii);
+      eventClipState->ClipContainingBlockDescendants(
+          rect, hasRadii ? radii : nullptr);
+    }
+
     mRenderer.DisplayButton(aBuilder, aLists.BorderBackground(), &onTop);
   }
 
   nsDisplayListCollection set(aBuilder);
 
-  // Do not allow the child subtree to receive events.
-  if (!isForEventDelivery || aBuilder->HitTestIsForVisibility()) {
+  {
     DisplayListClipState::AutoSaveRestore clipState(aBuilder);
 
     if (ShouldClipPaintingToBorderBox()) {
@@ -112,7 +112,6 @@ void nsHTMLButtonControlFrame::BuildDisplayList(
 
     BuildDisplayListForChild(aBuilder, mFrames.FirstChild(), set,
                              DISPLAY_CHILD_FORCE_PSEUDO_STACKING_CONTEXT);
-    // That should put the display items in set.Content()
   }
 
   // Put the foreground outline and focus rects on top of the children
@@ -170,8 +169,9 @@ void nsHTMLButtonControlFrame::Reflow(nsPresContext* aPresContext,
   MOZ_ASSERT(firstKid, "Button should have a child frame for its contents");
   MOZ_ASSERT(!firstKid->GetNextSibling(),
              "Button should have exactly one child frame");
-  MOZ_ASSERT(firstKid->Style()->GetPseudo() == nsCSSAnonBoxes::buttonContent(),
-             "Button's child frame has unexpected pseudo type!");
+  MOZ_ASSERT(
+      firstKid->Style()->GetPseudoType() == PseudoStyleType::buttonContent,
+      "Button's child frame has unexpected pseudo type!");
 
   // XXXbz Eventually we may want to check-and-bail if
   // !aReflowInput.ShouldReflowAllKids() &&

@@ -3,23 +3,25 @@
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
-#ifndef include_dom_ipc_VideoDecoderParent_h
-#define include_dom_ipc_VideoDecoderParent_h
+#ifndef include_ipc_VideoDecoderParent_h
+#define include_ipc_VideoDecoderParent_h
 
 #include "ImageContainer.h"
 #include "MediaData.h"
 #include "PlatformDecoderModule.h"
 #include "VideoDecoderManagerParent.h"
 #include "mozilla/MozPromise.h"
-#include "mozilla/dom/PVideoDecoderParent.h"
+#include "mozilla/PVideoDecoderParent.h"
 #include "mozilla/layers/TextureForwarder.h"
 
 namespace mozilla {
-namespace dom {
 
 class KnowsCompositorVideo;
+using mozilla::ipc::IPCResult;
 
 class VideoDecoderParent final : public PVideoDecoderParent {
+  friend class PVideoDecoderParent;
+
  public:
   // We refcount this class since the task queue can have runnables
   // that reference us.
@@ -35,12 +37,12 @@ class VideoDecoderParent final : public PVideoDecoderParent {
   void Destroy();
 
   // PVideoDecoderParent
-  mozilla::ipc::IPCResult RecvInit() override;
-  mozilla::ipc::IPCResult RecvInput(const MediaRawDataIPDL& aData) override;
-  mozilla::ipc::IPCResult RecvFlush() override;
-  mozilla::ipc::IPCResult RecvDrain() override;
-  mozilla::ipc::IPCResult RecvShutdown() override;
-  mozilla::ipc::IPCResult RecvSetSeekThreshold(const int64_t& aTime) override;
+  IPCResult RecvInit();
+  IPCResult RecvInput(const MediaRawDataIPDL& aData);
+  IPCResult RecvFlush();
+  IPCResult RecvDrain();
+  IPCResult RecvShutdown();
+  IPCResult RecvSetSeekThreshold(const media::TimeUnit& aTime);
 
   void ActorDestroy(ActorDestroyReason aWhy) override;
 
@@ -62,7 +64,6 @@ class VideoDecoderParent final : public PVideoDecoderParent {
   bool mDestroyed;
 };
 
-}  // namespace dom
 }  // namespace mozilla
 
-#endif  // include_dom_ipc_VideoDecoderParent_h
+#endif  // include_ipc_VideoDecoderParent_h

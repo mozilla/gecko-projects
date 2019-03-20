@@ -54,10 +54,12 @@ var suppressed_toggles = [
   "-moz-windows-default-theme",
   "-moz-windows-glass",
   "-moz-gtk-csd-available",
+  "-moz-gtk-csd-hide-titlebar-by-default",
   "-moz-gtk-csd-transparent-background",
   "-moz-gtk-csd-minimize-button",
   "-moz-gtk-csd-maximize-button",
   "-moz-gtk-csd-close-button",
+  "-moz-gtk-csd-reversed-placement",
 ];
 
 var toggles_enabled_in_content = [
@@ -231,11 +233,7 @@ var generateCSSLines = function (resisting) {
 
 // __green__.
 // Returns the computed color style corresponding to green.
-var green = (function () {
-  let temp = document.createElement("span");
-  temp.style.backgroundColor = "green";
-  return getComputedStyle(temp).backgroundColor;
-})();
+var green = "rgb(0, 128, 0)";
 
 // __testCSS(resisting)__.
 // Creates a series of divs and CSS using media queries to set their
@@ -257,7 +255,9 @@ var testCSS = function (resisting) {
 var testOSXFontSmoothing = function (resisting) {
   let div = document.createElement("div");
   div.style.MozOsxFontSmoothing = "unset";
+  document.documentElement.appendChild(div);
   let readBack = window.getComputedStyle(div).MozOsxFontSmoothing;
+  div.remove();
   let smoothingPref = SpecialPowers.getBoolPref("layout.css.osx-font-smoothing.enabled", false);
   is(readBack, resisting ? "" : (smoothingPref ? "auto" : ""),
                "-moz-osx-font-smoothing");

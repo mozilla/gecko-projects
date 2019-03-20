@@ -25,14 +25,15 @@ add_task(async function() {
 });
 
 async function performTests() {
-  const { jsterm } = await openNewTabAndConsole(TEST_URI);
+  const hud = await openNewTabAndConsole(TEST_URI);
+  const { jsterm } = hud;
   const { autocompletePopup: popup } = jsterm;
 
   const checkInput = (expected, assertionInfo) =>
-    checkJsTermValueAndCursor(jsterm, expected, assertionInfo);
+    checkInputValueAndCursorPosition(hud, expected, assertionInfo);
 
   let onPopUpOpen = popup.once("popup-opened");
-  jsterm.setInputValue("window.foo");
+  setInputValue(hud, "window.foo");
   EventUtils.sendString(".");
   await onPopUpOpen;
 
@@ -40,7 +41,7 @@ async function performTests() {
   // checkInput is asserting the cursor position with the "|" char.
   checkInput("window.foo.|");
   is(popup.isOpen, true, "popup is open");
-  checkJsTermCompletionValue(jsterm, "           aa", "completeNode has expected value");
+  checkInputCompletionValue(hud, "           aa", "completeNode has expected value");
 
   info("Test that arrow left closes the popup and clears complete node");
   let onPopUpClose = popup.once("popup-closed");
@@ -48,17 +49,17 @@ async function performTests() {
   await onPopUpClose;
   checkInput("window.foo|.");
   is(popup.isOpen, false, "popup is closed");
-  checkJsTermCompletionValue(jsterm, "", "completeNode is empty");
+  checkInputCompletionValue(hud, "", "completeNode is empty");
 
   info("Trigger autocomplete popup opening again");
   onPopUpOpen = popup.once("popup-opened");
-  jsterm.setInputValue("window.foo");
+  setInputValue(hud, "window.foo");
   EventUtils.sendString(".");
   await onPopUpOpen;
 
   checkInput("window.foo.|");
   is(popup.isOpen, true, "popup is open");
-  checkJsTermCompletionValue(jsterm, "           aa", "completeNode has expected value");
+  checkInputCompletionValue(hud, "           aa", "completeNode has expected value");
 
   info("Test that arrow right selects selected autocomplete item");
   onPopUpClose = popup.once("popup-closed");
@@ -66,16 +67,32 @@ async function performTests() {
   await onPopUpClose;
   checkInput("window.foo.aa|");
   is(popup.isOpen, false, "popup is closed");
-  checkJsTermCompletionValue(jsterm, "", "completeNode is empty");
+  checkInputCompletionValue(hud, "", "completeNode is empty");
 
-  await setInputValueForAutocompletion(jsterm, "window.foo.a");
-  const prefix = jsterm.getInputValue().replace(/[\S]/g, " ");
-  checkJsTermCompletionValue(jsterm, prefix + "a", "completeNode has expected value");
+  info("Test that Ctrl/Cmd + Left removes complete node");
+  await setInputValueForAutocompletion(hud, "window.foo.a");
+  const prefix = getInputValue(hud).replace(/[\S]/g, " ");
+  checkInputCompletionValue(hud, prefix + "a", "completeNode has expected value");
 
   const isOSX = Services.appinfo.OS == "Darwin";
   EventUtils.synthesizeKey("KEY_ArrowLeft", {
     [isOSX ? "metaKey" : "ctrlKey"]: true,
   });
-  checkJsTermCompletionValue(jsterm, "",
+  checkInputCompletionValue(hud, "",
     "completeNode was cleared after Ctrl/Cmd + left");
+
+  info("Test that Ctrl/Cmd + Right closes the popup if there's text after cursor");
+  setInputValue(hud, ".");
+  EventUtils.synthesizeKey("KEY_ArrowLeft");
+  onPopUpOpen = popup.once("popup-opened");
+  EventUtils.sendString("win");
+  await onPopUpOpen;
+  ok(popup.isOpen, "popup is open");
+
+  onPopUpClose = popup.once("popup-closed");
+  EventUtils.synthesizeKey("KEY_ArrowRight", {
+    [isOSX ? "metaKey" : "ctrlKey"]: true,
+  });
+  await onPopUpClose;
+  is(getInputValue(hud), "win.", "input value wasn't modified");
 }

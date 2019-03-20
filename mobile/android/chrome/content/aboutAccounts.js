@@ -24,10 +24,10 @@
 
 "use strict";
 
-ChromeUtils.import("resource://gre/modules/Accounts.jsm");
-ChromeUtils.import("resource://gre/modules/PromiseUtils.jsm");
-ChromeUtils.import("resource://gre/modules/Services.jsm");
-ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
+const {Accounts} = ChromeUtils.import("resource://gre/modules/Accounts.jsm");
+const {PromiseUtils} = ChromeUtils.import("resource://gre/modules/PromiseUtils.jsm");
+const {Services} = ChromeUtils.import("resource://gre/modules/Services.jsm");
+const {XPCOMUtils} = ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
 
 const ACTION_URL_PARAM = "action";
 
@@ -101,14 +101,22 @@ var wrapper = {
     // Set the iframe's location with loadURI/LOAD_FLAGS_BYPASS_HISTORY to
     // avoid having a new history entry being added.
     let webNav = iframe.frameLoader.docShell.QueryInterface(Ci.nsIWebNavigation);
-    webNav.loadURI(url, Ci.nsIWebNavigation.LOAD_FLAGS_BYPASS_HISTORY, null, null, null);
+    let loadURIOptions = {
+      triggeringPrincipal: Services.scriptSecurityManager.getSystemPrincipal(),
+      loadFlags: Ci.nsIWebNavigation.LOAD_FLAGS_BYPASS_HISTORY,
+    };
+    webNav.loadURI(url, loadURIOptions);
   },
 
   retry: function() {
     deferTransitionToRemoteAfterLoaded();
 
     let webNav = this.iframe.frameLoader.docShell.QueryInterface(Ci.nsIWebNavigation);
-    webNav.loadURI(this.url, Ci.nsIWebNavigation.LOAD_FLAGS_BYPASS_HISTORY, null, null, null);
+    let loadURIOptions = {
+      triggeringPrincipal: Services.scriptSecurityManager.getSystemPrincipal(),
+      loadFlags: Ci.nsIWebNavigation.LOAD_FLAGS_BYPASS_HISTORY,
+    };
+    webNav.loadURI(this.url, loadURIOptions);
   },
 
   iframeListener: {

@@ -252,9 +252,13 @@ class ShadowLayerForwarder final : public LayersIPCActor,
   bool EndTransaction(const nsIntRegion& aRegionToClear, TransactionId aId,
                       bool aScheduleComposite, uint32_t aPaintSequenceNumber,
                       bool aIsRepeatTransaction,
+                      const mozilla::VsyncId& aVsyncId,
+                      const mozilla::TimeStamp& aVsyncTime,
                       const mozilla::TimeStamp& aRefreshStart,
                       const mozilla::TimeStamp& aTransactionStart,
-                      const nsCString& aURL, bool* aSent);
+                      bool aContainsSVG, const nsCString& aURL, bool* aSent,
+                      const InfallibleTArray<CompositionPayload>& aPayload =
+                          InfallibleTArray<CompositionPayload>());
 
   /**
    * Set an actor through which layer updates will be pushed.
@@ -334,6 +338,7 @@ class ShadowLayerForwarder final : public LayersIPCActor,
    * Flag the next paint as the first for a document.
    */
   void SetIsFirstPaint() { mIsFirstPaint = true; }
+  bool GetIsFirstPaint() const { return mIsFirstPaint; }
 
   /**
    * Set the current focus target to be sent with the next paint.

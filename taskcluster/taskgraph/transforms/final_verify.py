@@ -9,7 +9,6 @@ from __future__ import absolute_import, print_function, unicode_literals
 
 from taskgraph.transforms.base import TransformSequence
 from taskgraph.util.schema import resolve_keyed_by
-from taskgraph.util.taskcluster import get_taskcluster_artifact_prefix
 
 transforms = TransformSequence()
 
@@ -24,19 +23,17 @@ def add_command(config, tasks):
         for upstream in task.get("dependencies", {}).keys():
             if 'update-verify-config' in upstream:
                 final_verify_configs.append(
-                    "{}update-verify.cfg".format(
-                        get_taskcluster_artifact_prefix(task, "<{}>".format(upstream))
-                    )
+                    "<{}/public/build/update-verify.cfg>".format(upstream),
                 )
-        task["worker"]["command"] = [
-            "/bin/bash",
-            "-c",
-            {
-                "task-reference": "hg clone $BUILD_TOOLS_REPO tools && cd tools/release && " +
-                                  "./final-verification.sh " +
-                                  " ".join(final_verify_configs)
-            }
-        ]
+        task['run'] = {
+            'using': 'run-task',
+            'command': {
+                'artifact-reference': 'cd /builds/worker/checkouts/gecko && '
+                                      'tools/update-verify/release/final-verification.sh '
+                                      + ' '.join(final_verify_configs),
+            },
+            'sparse-profile': 'update-verify',
+        }
         for thing in ("BUILD_TOOLS_REPO",):
             thing = "worker.env.{}".format(thing)
             resolve_keyed_by(task, thing, thing, **config.params)

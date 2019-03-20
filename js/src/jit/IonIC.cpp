@@ -115,11 +115,10 @@ void IonIC::trace(JSTracer* trc) {
   MOZ_ASSERT(nextCodeRaw == fallbackLabel_.raw());
 }
 
-/* static */ bool IonGetPropertyIC::update(JSContext* cx,
-                                           HandleScript outerScript,
-                                           IonGetPropertyIC* ic,
-                                           HandleValue val, HandleValue idVal,
-                                           MutableHandleValue res) {
+/* static */
+bool IonGetPropertyIC::update(JSContext* cx, HandleScript outerScript,
+                              IonGetPropertyIC* ic, HandleValue val,
+                              HandleValue idVal, MutableHandleValue res) {
   // Override the return value if we are invalidated (bug 728188).
   IonScript* ionScript = outerScript->ionScript();
   AutoDetectInvalidation adi(cx, res, ionScript);
@@ -199,10 +198,11 @@ void IonIC::trace(JSTracer* trc) {
   return true;
 }
 
-/* static */ bool IonGetPropSuperIC::update(
-    JSContext* cx, HandleScript outerScript, IonGetPropSuperIC* ic,
-    HandleObject obj, HandleValue receiver, HandleValue idVal,
-    MutableHandleValue res) {
+/* static */
+bool IonGetPropSuperIC::update(JSContext* cx, HandleScript outerScript,
+                               IonGetPropSuperIC* ic, HandleObject obj,
+                               HandleValue receiver, HandleValue idVal,
+                               MutableHandleValue res) {
   // Override the return value if we are invalidated (bug 728188).
   IonScript* ionScript = outerScript->ionScript();
   AutoDetectInvalidation adi(cx, res, ionScript);
@@ -242,17 +242,17 @@ void IonIC::trace(JSTracer* trc) {
   return true;
 }
 
-/* static */ bool IonSetPropertyIC::update(JSContext* cx,
-                                           HandleScript outerScript,
-                                           IonSetPropertyIC* ic,
-                                           HandleObject obj, HandleValue idVal,
-                                           HandleValue rhs) {
+/* static */
+bool IonSetPropertyIC::update(JSContext* cx, HandleScript outerScript,
+                              IonSetPropertyIC* ic, HandleObject obj,
+                              HandleValue idVal, HandleValue rhs) {
   RootedShape oldShape(cx);
   RootedObjectGroup oldGroup(cx);
   IonScript* ionScript = outerScript->ionScript();
 
   bool attached = false;
   bool isTemporarilyUnoptimizable = false;
+  bool canAddSlot = false;
 
   if (ic->state().maybeTransition()) {
     ic->discardStubs(cx->zone());
@@ -276,8 +276,9 @@ void IonIC::trace(JSTracer* trc) {
     RootedScript script(cx, ic->script());
     jsbytecode* pc = ic->pc();
     SetPropIRGenerator gen(cx, script, pc, ic->kind(), ic->state().mode(),
-                           &isTemporarilyUnoptimizable, objv, idVal, rhs,
-                           ic->needsTypeBarrier(), ic->guardHoles());
+                           &isTemporarilyUnoptimizable, &canAddSlot, objv,
+                           idVal, rhs, ic->needsTypeBarrier(),
+                           ic->guardHoles());
     if (gen.tryAttachStub()) {
       ic->attachCacheIRStub(cx, gen.writerRef(), gen.cacheKind(), ionScript,
                             &attached, gen.typeCheckInfo());
@@ -340,9 +341,10 @@ void IonIC::trace(JSTracer* trc) {
     RootedScript script(cx, ic->script());
     jsbytecode* pc = ic->pc();
     SetPropIRGenerator gen(cx, script, pc, ic->kind(), ic->state().mode(),
-                           &isTemporarilyUnoptimizable, objv, idVal, rhs,
-                           ic->needsTypeBarrier(), ic->guardHoles());
-    if (gen.tryAttachAddSlotStub(oldGroup, oldShape)) {
+                           &isTemporarilyUnoptimizable, &canAddSlot, objv,
+                           idVal, rhs, ic->needsTypeBarrier(),
+                           ic->guardHoles());
+    if (canAddSlot && gen.tryAttachAddSlotStub(oldGroup, oldShape)) {
       ic->attachCacheIRStub(cx, gen.writerRef(), gen.cacheKind(), ionScript,
                             &attached, gen.typeCheckInfo());
     } else {
@@ -381,9 +383,10 @@ static void TryAttachIonStub(JSContext* cx, IC* ic, IonScript* ionScript,
   }
 }
 
-/* static */ bool IonGetNameIC::update(JSContext* cx, HandleScript outerScript,
-                                       IonGetNameIC* ic, HandleObject envChain,
-                                       MutableHandleValue res) {
+/* static */
+bool IonGetNameIC::update(JSContext* cx, HandleScript outerScript,
+                          IonGetNameIC* ic, HandleObject envChain,
+                          MutableHandleValue res) {
   IonScript* ionScript = outerScript->ionScript();
   jsbytecode* pc = ic->pc();
   RootedPropertyName name(cx, ic->script()->getName(pc));
@@ -414,10 +417,9 @@ static void TryAttachIonStub(JSContext* cx, IC* ic, IonScript* ionScript,
   return true;
 }
 
-/* static */ JSObject* IonBindNameIC::update(JSContext* cx,
-                                             HandleScript outerScript,
-                                             IonBindNameIC* ic,
-                                             HandleObject envChain) {
+/* static */
+JSObject* IonBindNameIC::update(JSContext* cx, HandleScript outerScript,
+                                IonBindNameIC* ic, HandleObject envChain) {
   IonScript* ionScript = outerScript->ionScript();
   jsbytecode* pc = ic->pc();
   RootedPropertyName name(cx, ic->script()->getName(pc));
@@ -433,10 +435,9 @@ static void TryAttachIonStub(JSContext* cx, IC* ic, IonScript* ionScript,
   return holder;
 }
 
-/* static */ JSObject* IonGetIteratorIC::update(JSContext* cx,
-                                                HandleScript outerScript,
-                                                IonGetIteratorIC* ic,
-                                                HandleValue value) {
+/* static */
+JSObject* IonGetIteratorIC::update(JSContext* cx, HandleScript outerScript,
+                                   IonGetIteratorIC* ic, HandleValue value) {
   IonScript* ionScript = outerScript->ionScript();
 
   TryAttachIonStub<GetIteratorIRGenerator, IonGetIteratorIC>(cx, ic, ionScript,
@@ -445,9 +446,10 @@ static void TryAttachIonStub(JSContext* cx, IC* ic, IonScript* ionScript,
   return ValueToIterator(cx, value);
 }
 
-/* static */ bool IonHasOwnIC::update(JSContext* cx, HandleScript outerScript,
-                                      IonHasOwnIC* ic, HandleValue val,
-                                      HandleValue idVal, int32_t* res) {
+/* static */
+bool IonHasOwnIC::update(JSContext* cx, HandleScript outerScript,
+                         IonHasOwnIC* ic, HandleValue val, HandleValue idVal,
+                         int32_t* res) {
   IonScript* ionScript = outerScript->ionScript();
 
   TryAttachIonStub<HasPropIRGenerator, IonHasOwnIC>(
@@ -462,9 +464,9 @@ static void TryAttachIonStub(JSContext* cx, IC* ic, IonScript* ionScript,
   return true;
 }
 
-/* static */ bool IonInIC::update(JSContext* cx, HandleScript outerScript,
-                                  IonInIC* ic, HandleValue key,
-                                  HandleObject obj, bool* res) {
+/* static */
+bool IonInIC::update(JSContext* cx, HandleScript outerScript, IonInIC* ic,
+                     HandleValue key, HandleObject obj, bool* res) {
   IonScript* ionScript = outerScript->ionScript();
   RootedValue objV(cx, ObjectValue(*obj));
 
@@ -473,10 +475,10 @@ static void TryAttachIonStub(JSContext* cx, IC* ic, IonScript* ionScript,
 
   return OperatorIn(cx, key, obj, res);
 }
-/* static */ bool IonInstanceOfIC::update(JSContext* cx,
-                                          HandleScript outerScript,
-                                          IonInstanceOfIC* ic, HandleValue lhs,
-                                          HandleObject rhs, bool* res) {
+/* static */
+bool IonInstanceOfIC::update(JSContext* cx, HandleScript outerScript,
+                             IonInstanceOfIC* ic, HandleValue lhs,
+                             HandleObject rhs, bool* res) {
   IonScript* ionScript = outerScript->ionScript();
 
   TryAttachIonStub<InstanceOfIRGenerator, IonInstanceOfIC>(cx, ic, ionScript,
@@ -485,27 +487,39 @@ static void TryAttachIonStub(JSContext* cx, IC* ic, IonScript* ionScript,
   return HasInstance(cx, rhs, lhs, res);
 }
 
-/*  static */ bool IonUnaryArithIC::update(JSContext* cx,
-                                           HandleScript outerScript,
-                                           IonUnaryArithIC* ic, HandleValue val,
-                                           MutableHandleValue res) {
+/*  static */
+bool IonUnaryArithIC::update(JSContext* cx, HandleScript outerScript,
+                             IonUnaryArithIC* ic, HandleValue val,
+                             MutableHandleValue res) {
   IonScript* ionScript = outerScript->ionScript();
   RootedScript script(cx, ic->script());
   jsbytecode* pc = ic->pc();
   JSOp op = JSOp(*pc);
 
+  // The unary operations take a copied val because the original value is needed
+  // below.
+  RootedValue valCopy(cx, val);
   switch (op) {
     case JSOP_BITNOT: {
-      RootedValue valCopy(cx, val);
       if (!BitNot(cx, &valCopy, res)) {
         return false;
       }
       break;
     }
     case JSOP_NEG: {
-      // We copy val here because the original value is needed below.
-      RootedValue valCopy(cx, val);
       if (!NegOperation(cx, &valCopy, res)) {
+        return false;
+      }
+      break;
+    }
+    case JSOP_INC: {
+      if (!IncOperation(cx, &valCopy, res)) {
+        return false;
+      }
+      break;
+    }
+    case JSOP_DEC: {
+      if (!DecOperation(cx, &valCopy, res)) {
         return false;
       }
       break;
@@ -520,11 +534,10 @@ static void TryAttachIonStub(JSContext* cx, IC* ic, IonScript* ionScript,
   return true;
 }
 
-/* static */ bool IonBinaryArithIC::update(JSContext* cx,
-                                           HandleScript outerScript,
-                                           IonBinaryArithIC* ic,
-                                           HandleValue lhs, HandleValue rhs,
-                                           MutableHandleValue ret) {
+/* static */
+bool IonBinaryArithIC::update(JSContext* cx, HandleScript outerScript,
+                              IonBinaryArithIC* ic, HandleValue lhs,
+                              HandleValue rhs, MutableHandleValue ret) {
   IonScript* ionScript = outerScript->ionScript();
   RootedScript script(cx, ic->script());
   jsbytecode* pc = ic->pc();
@@ -591,9 +604,10 @@ static void TryAttachIonStub(JSContext* cx, IC* ic, IonScript* ionScript,
   return true;
 }
 
-/* static */ bool IonCompareIC::update(JSContext* cx, HandleScript outerScript,
-                                       IonCompareIC* ic, HandleValue lhs,
-                                       HandleValue rhs, bool* res) {
+/* static */
+bool IonCompareIC::update(JSContext* cx, HandleScript outerScript,
+                          IonCompareIC* ic, HandleValue lhs, HandleValue rhs,
+                          bool* res) {
   IonScript* ionScript = outerScript->ionScript();
   RootedScript script(cx, ic->script());
   jsbytecode* pc = ic->pc();

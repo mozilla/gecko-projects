@@ -28,14 +28,17 @@ class AudioInputProcessing;
 class MediaEngineWebRTCMicrophoneSource : public MediaEngineSource {
  public:
   MediaEngineWebRTCMicrophoneSource(RefPtr<AudioDeviceInfo> aInfo,
-                                    const nsString& name, const nsCString& uuid,
-                                    uint32_t maxChannelCount,
+                                    const nsString& aName,
+                                    const nsCString& aUuid,
+                                    const nsString& aGroupId,
+                                    uint32_t aMaxChannelCount,
                                     bool aDelayAgnostic, bool aExtendedFilter);
 
   bool RequiresSharing() const override { return false; }
 
   nsString GetName() const override;
   nsCString GetUUID() const override;
+  nsString GetGroupId() const override;
 
   nsresult Allocate(const dom::MediaTrackConstraints& aConstraints,
                     const MediaEnginePrefs& aPrefs, const nsString& aDeviceId,
@@ -43,9 +46,9 @@ class MediaEngineWebRTCMicrophoneSource : public MediaEngineSource {
                     AllocationHandle** aOutHandle,
                     const char** aOutBadConstraint) override;
   nsresult Deallocate(const RefPtr<const AllocationHandle>& aHandle) override;
-  nsresult SetTrack(const RefPtr<const AllocationHandle>& aHandle,
-                    const RefPtr<SourceMediaStream>& aStream, TrackID aTrackID,
-                    const PrincipalHandle& aPrincipal) override;
+  void SetTrack(const RefPtr<const AllocationHandle>& aHandle,
+                const RefPtr<SourceMediaStream>& aStream, TrackID aTrackID,
+                const PrincipalHandle& aPrincipal) override;
   nsresult Start(const RefPtr<const AllocationHandle>& aHandle) override;
   nsresult Stop(const RefPtr<const AllocationHandle>& aHandle) override;
   nsresult Reconfigure(const RefPtr<AllocationHandle>& aHandle,
@@ -117,6 +120,7 @@ class MediaEngineWebRTCMicrophoneSource : public MediaEngineSource {
   const bool mExtendedFilter;
   const nsString mDeviceName;
   const nsCString mDeviceUUID;
+  const nsString mDeviceGroup;
 
   // The maximum number of channels that this device supports.
   const uint32_t mDeviceMaxChannelCount;
@@ -255,6 +259,7 @@ class MediaEngineWebRTCAudioCaptureSource : public MediaEngineSource {
   explicit MediaEngineWebRTCAudioCaptureSource(const char* aUuid) {}
   nsString GetName() const override;
   nsCString GetUUID() const override;
+  nsString GetGroupId() const override;
   nsresult Allocate(const dom::MediaTrackConstraints& aConstraints,
                     const MediaEnginePrefs& aPrefs, const nsString& aDeviceId,
                     const ipc::PrincipalInfo& aPrincipalInfo,
@@ -269,9 +274,9 @@ class MediaEngineWebRTCAudioCaptureSource : public MediaEngineSource {
     MOZ_ASSERT(!aHandle);
     return NS_OK;
   }
-  nsresult SetTrack(const RefPtr<const AllocationHandle>& aHandle,
-                    const RefPtr<SourceMediaStream>& aStream, TrackID aTrackID,
-                    const PrincipalHandle& aPrincipal) override;
+  void SetTrack(const RefPtr<const AllocationHandle>& aHandle,
+                const RefPtr<SourceMediaStream>& aStream, TrackID aTrackID,
+                const PrincipalHandle& aPrincipal) override;
   nsresult Start(const RefPtr<const AllocationHandle>& aHandle) override;
   nsresult Stop(const RefPtr<const AllocationHandle>& aHandle) override;
   nsresult Reconfigure(const RefPtr<AllocationHandle>& aHandle,

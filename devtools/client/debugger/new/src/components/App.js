@@ -4,9 +4,10 @@
 
 // @flow
 import React, { Component } from "react";
-import { connect } from "react-redux";
 import PropTypes from "prop-types";
+import classnames from "classnames";
 
+import { connect } from "../utils/connect";
 import { prefs, features } from "../utils/prefs";
 import actions from "../actions";
 import A11yIntention from "./A11yIntention";
@@ -17,7 +18,8 @@ import {
   getPaneCollapse,
   getActiveSearch,
   getQuickOpenEnabled,
-  getOrientation
+  getOrientation,
+  getCanRewind
 } from "../selectors";
 
 import type { OrientationType } from "../reducers/types";
@@ -33,7 +35,7 @@ const isMacOS = appinfo.OS === "Darwin";
 
 const horizontalLayoutBreakpoint = window.matchMedia("(min-width: 800px)");
 const verticalLayoutBreakpoint = window.matchMedia(
-  "(min-width: 10px) and (max-width: 800px)"
+  "(min-width: 10px) and (max-width: 799px)"
 );
 
 import "./variables.css";
@@ -41,6 +43,8 @@ import "./App.css";
 
 // $FlowIgnore
 import "devtools-launchpad/src/components/Root.css";
+
+import type { ActiveSearchType } from "../selectors";
 
 import "./shared/menu.css";
 import "./shared/reps.css";
@@ -59,14 +63,15 @@ type Props = {
   orientation: OrientationType,
   startPanelCollapsed: boolean,
   endPanelCollapsed: boolean,
-  activeSearch: string,
+  activeSearch: ActiveSearchType,
   quickOpenEnabled: boolean,
-  setActiveSearch: string => void,
-  closeActiveSearch: () => void,
-  closeProjectSearch: () => void,
-  openQuickOpen: (query?: string) => void,
-  closeQuickOpen: () => void,
-  setOrientation: OrientationType => void
+  canRewind: boolean,
+  setActiveSearch: typeof actions.setActiveSearch,
+  closeActiveSearch: typeof actions.closeActiveSearch,
+  closeProjectSearch: typeof actions.closeProjectSearch,
+  openQuickOpen: typeof actions.openQuickOpen,
+  closeQuickOpen: typeof actions.closeQuickOpen,
+  setOrientation: typeof actions.setOrientation
 };
 
 type State = {
@@ -186,7 +191,6 @@ class App extends Component<Props, State> {
       return;
     }
     openQuickOpen();
-    return;
   };
 
   onLayoutChange = () => {
@@ -267,6 +271,7 @@ class App extends Component<Props, State> {
         vert={horizontal}
         onResizeEnd={num => {
           prefs.endPanelSize = num;
+          this.triggerEditorPaneResize();
         }}
         startPanel={
           <SplitBox
@@ -291,7 +296,6 @@ class App extends Component<Props, State> {
           />
         }
         endPanelCollapsed={endPanelCollapsed}
-        onResizeEnd={this.triggerEditorPaneResize}
       />
     );
   };
@@ -313,9 +317,9 @@ class App extends Component<Props, State> {
   }
 
   render() {
-    const { quickOpenEnabled } = this.props;
+    const { quickOpenEnabled, canRewind } = this.props;
     return (
-      <div className="debugger">
+      <div className={classnames("debugger", { "can-rewind": canRewind })}>
         <A11yIntention>
           {this.renderLayout()}
           {quickOpenEnabled === true && (
@@ -337,6 +341,7 @@ App.childContextTypes = {
 };
 
 const mapStateToProps = state => ({
+  canRewind: getCanRewind(state),
   selectedSource: getSelectedSource(state),
   startPanelCollapsed: getPaneCollapse(state, "start"),
   endPanelCollapsed: getPaneCollapse(state, "end"),

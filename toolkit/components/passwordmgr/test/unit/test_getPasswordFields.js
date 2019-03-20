@@ -4,8 +4,9 @@
 
 "use strict";
 
-const LMCBackstagePass = ChromeUtils.import("resource://gre/modules/LoginManagerContent.jsm", {});
-const { LoginManagerContent, LoginFormFactory } = LMCBackstagePass;
+const {LoginFormFactory} = ChromeUtils.import("resource://gre/modules/LoginFormFactory.jsm");
+const LMCBackstagePass = ChromeUtils.import("resource://gre/modules/LoginManagerContent.jsm", null);
+const { LoginManagerContent } = LMCBackstagePass;
 const TESTCASES = [
   {
     description: "Empty document",
@@ -110,6 +111,15 @@ const TESTCASES = [
       notPasswordSelector: "#pw1",
     },
   },
+  {
+    beforeGetFunction(doc) {
+      doc.getElementById("pw1").remove();
+    },
+    description: "1 password field outside of a <form> which gets removed/disconnected",
+    document: `<input id="pw1" type=password>`,
+    returnedFieldIDsByFormLike: [[]],
+    skipEmptyFields: undefined,
+  },
 ];
 
 for (let tc of TESTCASES) {
@@ -134,6 +144,10 @@ for (let tc of TESTCASES) {
         // If the formLike is already present, ensure that the properties are the same.
         info("Checking if the new FormLike for the same root has the same properties");
         formLikeEqual(formLike, existingFormLike);
+      }
+
+      if (testcase.beforeGetFunction) {
+        await testcase.beforeGetFunction(document);
       }
 
       Assert.strictEqual(mapRootElementToFormLike.size, testcase.returnedFieldIDsByFormLike.length,

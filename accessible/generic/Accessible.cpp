@@ -37,7 +37,7 @@
 #include "nsINodeList.h"
 #include "nsPIDOMWindow.h"
 
-#include "nsIDocument.h"
+#include "mozilla/dom/Document.h"
 #include "nsIContent.h"
 #include "nsIForm.h"
 #include "nsIFormControl.h"
@@ -265,7 +265,7 @@ KeyBinding Accessible::AccessKey() const {
   }
 
   // Determine the access modifier used in this context.
-  nsIDocument* document = mContent->GetUncomposedDoc();
+  dom::Document* document = mContent->GetUncomposedDoc();
   if (!document) return KeyBinding();
 
   nsCOMPtr<nsIDocShellTreeItem> treeItem(document->GetDocShell());
@@ -335,8 +335,15 @@ uint64_t Accessible::VisibilityState() const {
     nsIFrame* parentFrame = curFrame->GetParent();
     nsDeckFrame* deckFrame = do_QueryFrame(parentFrame);
     if (deckFrame && deckFrame->GetSelectedBox() != curFrame) {
+#if defined(ANDROID)
+      // In Fennec instead of a <tabpanels> container there is a <deck>
+      // with direct <browser> children.
+      if (curFrame->GetContent()->IsXULElement(nsGkAtoms::browser))
+        return states::OFFSCREEN;
+#else
       if (deckFrame->GetContent()->IsXULElement(nsGkAtoms::tabpanels))
         return states::OFFSCREEN;
+#endif
 
       MOZ_ASSERT_UNREACHABLE(
           "Children of not selected deck panel are not accessible.");
@@ -734,13 +741,15 @@ void Accessible::XULElmName(DocAccessible* aDocument, nsIContent* aElm,
    */
 
   // CASE #1 (via label attribute) -- great majority of the cases
-  nsCOMPtr<nsIDOMXULSelectControlItemElement> itemEl = do_QueryInterface(aElm);
+  nsCOMPtr<nsIDOMXULSelectControlItemElement> itemEl =
+      aElm->AsElement()->AsXULSelectControlItem();
   if (itemEl) {
     itemEl->GetLabel(aName);
   } else {
     // Use @label if this is not a select control element, which uses label
     // attribute to indicate, which option is selected.
-    nsCOMPtr<nsIDOMXULSelectControlElement> select = do_QueryInterface(aElm);
+    nsCOMPtr<nsIDOMXULSelectControlElement> select =
+        aElm->AsElement()->AsXULSelectControl();
     if (!select) {
       aElm->AsElement()->GetAttr(kNameSpaceID_None, nsGkAtoms::label, aName);
     }
@@ -802,7 +811,7 @@ nsresult Accessible::HandleAccEvent(AccEvent* aEvent) {
     nsAutoCString strMarker;
     strMarker.AppendLiteral("A11y Event - ");
     strMarker.Append(strEventType);
-    profiler_add_marker(strMarker.get());
+    profiler_add_marker(strMarker.get(), JS::ProfilingCategoryPair::OTHER);
   }
 #endif
 
@@ -844,10 +853,23 @@ nsresult Accessible::HandleAccEvent(AccEvent* aEvent) {
         case nsIAccessibleEvent::EVENT_TEXT_INSERTED:
         case nsIAccessibleEvent::EVENT_TEXT_REMOVED: {
           AccTextChangeEvent* event = downcast_accEvent(aEvent);
-          ipcDoc->SendTextChangeEvent(
-              id, event->ModifiedText(), event->GetStartOffset(),
-              event->GetLength(), event->IsTextInserted(),
-              event->IsFromUserInput());
+          const nsString& text = event->ModifiedText();
+#if defined(XP_WIN)
+          // On Windows, events for live region updates containing embedded
+          // objects require us to dispatch synchronous events.
+          bool sync = text.Contains(L'\xfffc') &&
+                      nsAccUtils::IsARIALive(aEvent->GetAccessible());
+#endif
+          ipcDoc->SendTextChangeEvent(id, text, event->GetStartOffset(),
+                                      event->GetLength(),
+                                      event->IsTextInserted(),
+                                      event->IsFromUserInput()
+#if defined(XP_WIN)
+                                      // This parameter only exists on Windows.
+                                      ,
+                                      sync
+#endif
+          );
           break;
         }
         case nsIAccessibleEvent::EVENT_SELECTION:
@@ -891,6 +913,14 @@ nsresult Accessible::HandleAccEvent(AccEvent* aEvent) {
               scrollingEvent->MaxScrollY());
           break;
         }
+#if !defined(XP_WIN)
+        case nsIAccessibleEvent::EVENT_ANNOUNCEMENT: {
+          AccAnnouncementEvent* announcementEvent = downcast_accEvent(aEvent);
+          ipcDoc->SendAnnouncementEvent(id, announcementEvent->Announcement(),
+                                        announcementEvent->Priority());
+          break;
+        }
+#endif
         default:
           ipcDoc->SendEvent(id, aEvent->GetEventType());
       }
@@ -1010,7 +1040,7 @@ already_AddRefed<nsIPersistentProperties> Accessible::NativeAttributes() {
   // override properties on a widget they used in an iframe.
   nsIContent* startContent = mContent;
   while (startContent) {
-    nsIDocument* doc = startContent->GetComposedDoc();
+    dom::Document* doc = startContent->GetComposedDoc();
     if (!doc) break;
 
     nsAccUtils::SetLiveContainerAttributes(attributes, startContent,
@@ -1024,7 +1054,7 @@ already_AddRefed<nsIPersistentProperties> Accessible::NativeAttributes() {
     docShellTreeItem->GetSameTypeParent(getter_AddRefs(sameTypeParent));
     if (!sameTypeParent || sameTypeParent == docShellTreeItem) break;
 
-    nsIDocument* parentDoc = doc->GetParentDocument();
+    dom::Document* parentDoc = doc->GetParentDocument();
     if (!parentDoc) break;
 
     startContent = parentDoc->FindContentForSubDocument(doc);
@@ -1672,8 +1702,8 @@ Relation Accessible::RelationByType(RelationType aType) const {
         }
       } else {
         // In XUL, use first <button default="true" .../> in the document
-        nsIDocument* doc = mContent->OwnerDoc();
-        nsCOMPtr<nsIDOMXULButtonElement> buttonEl;
+        dom::Document* doc = mContent->OwnerDoc();
+        nsIContent* buttonEl = nullptr;
         if (doc->IsXULDocument()) {
           dom::XULDocument* xulDoc = doc->AsXULDocument();
           nsCOMPtr<nsIHTMLCollection> possibleDefaultButtons =
@@ -1683,7 +1713,13 @@ Relation Accessible::RelationByType(RelationType aType) const {
             uint32_t length = possibleDefaultButtons->Length();
             // Check for button in list of default="true" elements
             for (uint32_t count = 0; count < length && !buttonEl; count++) {
-              buttonEl = do_QueryInterface(possibleDefaultButtons->Item(count));
+              nsIContent* item = possibleDefaultButtons->Item(count);
+              RefPtr<nsIDOMXULButtonElement> button =
+                  item->IsElement() ? item->AsElement()->AsXULButton()
+                                    : nullptr;
+              if (button) {
+                buttonEl = item;
+              }
             }
           }
           if (!buttonEl) {  // Check for anonymous accept button in <dialog>
@@ -1692,11 +1728,16 @@ Relation Accessible::RelationByType(RelationType aType) const {
               nsIContent* possibleButtonEl =
                   rootElm->OwnerDoc()->GetAnonymousElementByAttribute(
                       rootElm, nsGkAtoms::_default, NS_LITERAL_STRING("true"));
-              buttonEl = do_QueryInterface(possibleButtonEl);
+              if (possibleButtonEl && possibleButtonEl->IsElement()) {
+                RefPtr<nsIDOMXULButtonElement> button =
+                    possibleButtonEl->AsElement()->AsXULButton();
+                if (button) {
+                  buttonEl = possibleButtonEl;
+                }
+              }
             }
           }
-          nsCOMPtr<nsIContent> relatedContent(do_QueryInterface(buttonEl));
-          return Relation(mDoc, relatedContent);
+          return Relation(mDoc, buttonEl);
         }
       }
       return Relation();
@@ -2124,8 +2165,11 @@ void Accessible::MoveChild(uint32_t aNewIndex, Accessible* aChild) {
 
   for (uint32_t idx = startIdx; idx <= endIdx; idx++) {
     mChildren[idx]->mIndexInParent = idx;
-    mChildren[idx]->mStateFlags |= eGroupInfoDirty;
     mChildren[idx]->mInt.mIndexOfEmbeddedChild = -1;
+  }
+
+  for (uint32_t idx = 0; idx < mChildren.Length(); idx++) {
+    mChildren[idx]->mStateFlags |= eGroupInfoDirty;
   }
 
   RefPtr<AccShowEvent> showEvent = new AccShowEvent(aChild);
@@ -2367,9 +2411,15 @@ Accessible* Accessible::CurrentItem() const {
   if (HasOwnContent() && mContent->IsElement() &&
       mContent->AsElement()->GetAttr(kNameSpaceID_None,
                                      nsGkAtoms::aria_activedescendant, id)) {
-    nsIDocument* DOMDoc = mContent->OwnerDoc();
+    dom::Document* DOMDoc = mContent->OwnerDoc();
     dom::Element* activeDescendantElm = DOMDoc->GetElementById(id);
     if (activeDescendantElm) {
+      if (nsContentUtils::ContentIsDescendantOf(mContent,
+                                                activeDescendantElm)) {
+        // Don't want a cyclical descendant relationship. That would be bad.
+        return nullptr;
+      }
+
       DocAccessible* document = Document();
       if (document) return document->GetAccessible(activeDescendantElm);
     }
@@ -2402,6 +2452,12 @@ Accessible* Accessible::ContainerWidget() const {
     }
   }
   return nullptr;
+}
+
+void Accessible::Announce(const nsAString& aAnnouncement, uint16_t aPriority) {
+  RefPtr<AccAnnouncementEvent> event =
+      new AccAnnouncementEvent(this, aAnnouncement, aPriority);
+  nsEventShell::FireEvent(event);
 }
 
 ////////////////////////////////////////////////////////////////////////////////

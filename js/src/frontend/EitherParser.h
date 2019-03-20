@@ -64,25 +64,24 @@ struct GetParser {
 
 template <class Parser>
 struct GetTokenStream {
-  static auto get(Parser* parser) -> decltype(&parser->tokenStream) {
-    return &parser->tokenStream;
-  }
+  static auto get(Parser* parser) { return &parser->tokenStream; }
 };
 
 // Member function-computing templates.
 
 template <class Parser>
 struct ParserOptions {
-  static constexpr auto get() -> decltype(&Parser::options) {
-    return &Parser::options;
-  }
+  static constexpr auto get() { return &Parser::options; }
 };
 
 template <class Parser>
 struct ParserNewObjectBox {
-  static constexpr auto get() -> decltype(&Parser::newObjectBox) {
-    return &Parser::newObjectBox;
-  }
+  static constexpr auto get() { return &Parser::newObjectBox; }
+};
+
+template <class TokenStream>
+struct TokenStreamComputeLineAndColumn {
+  static constexpr auto get() { return &TokenStream::computeLineAndColumn; }
 };
 
 // Generic matchers.
@@ -90,21 +89,14 @@ struct ParserNewObjectBox {
 struct ParseHandlerMatcher {
   template <class Parser>
   frontend::FullParseHandler& match(Parser* parser) {
-    return parser->handler;
+    return parser->handler_;
   }
 };
 
-struct AnyCharsMatcher {
+struct ParserSharedBaseMatcher {
   template <class Parser>
-  frontend::TokenStreamAnyChars& match(Parser* parser) {
-    return parser->anyChars;
-  }
-};
-
-struct ParserBaseMatcher {
-  template <class Parser>
-  frontend::ParserBase& match(Parser* parser) {
-    return *static_cast<frontend::ParserBase*>(parser);
+  frontend::ParserSharedBase& match(Parser* parser) {
+    return *static_cast<frontend::ParserSharedBase*>(parser);
   }
 };
 
@@ -162,13 +154,13 @@ class EitherParser : public BCEParserHandle {
     return parser.match(std::move(matcher));
   }
 
-  const TokenStreamAnyChars& anyChars() const {
-    return parser.match(detail::AnyCharsMatcher());
-  }
-
   void computeLineAndColumn(uint32_t offset, uint32_t* line,
                             uint32_t* column) const {
-    return anyChars().lineAndColumnAt(offset, line, column);
+    InvokeMemberFunction<detail::GetTokenStream,
+                         detail::TokenStreamComputeLineAndColumn, uint32_t,
+                         uint32_t*, uint32_t*>
+        matcher{offset, line, column};
+    return parser.match(std::move(matcher));
   }
 };
 

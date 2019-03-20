@@ -82,9 +82,16 @@ PrintProgressDialogChild::OnStatusChange(nsIWebProgress* aProgress,
 }
 
 NS_IMETHODIMP
-PrintProgressDialogChild::OnSecurityChange(
-    nsIWebProgress* aProgress, nsIRequest* aRequest, uint32_t aOldState,
-    uint32_t aState, const nsAString& aContentBlockingLogJSON) {
+PrintProgressDialogChild::OnSecurityChange(nsIWebProgress* aProgress,
+                                           nsIRequest* aRequest,
+                                           uint32_t aState) {
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+PrintProgressDialogChild::OnContentBlockingEvent(nsIWebProgress* aProgress,
+                                                 nsIRequest* aRequest,
+                                                 uint32_t aEvent) {
   return NS_OK;
 }
 

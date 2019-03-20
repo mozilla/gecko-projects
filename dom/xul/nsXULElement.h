@@ -31,7 +31,6 @@
 #include "mozilla/dom/DOMString.h"
 #include "mozilla/dom/FromParser.h"
 
-class nsIDocument;
 class nsXULPrototypeDocument;
 
 class nsIObjectInputStream;
@@ -49,6 +48,7 @@ class StyleRule;
 namespace dom {
 class BoxObject;
 class HTMLIFrameElement;
+class PrototypeDocumentContentSink;
 enum class CallerType : uint32_t;
 }  // namespace dom
 }  // namespace mozilla
@@ -56,10 +56,10 @@ enum class CallerType : uint32_t;
 ////////////////////////////////////////////////////////////////////////
 
 #ifdef XUL_PROTOTYPE_ATTRIBUTE_METERING
-#define XUL_PROTOTYPE_ATTRIBUTE_METER(counter) \
-  (nsXULPrototypeAttribute::counter++)
+#  define XUL_PROTOTYPE_ATTRIBUTE_METER(counter) \
+    (nsXULPrototypeAttribute::counter++)
 #else
-#define XUL_PROTOTYPE_ATTRIBUTE_METER(counter) ((void)0)
+#  define XUL_PROTOTYPE_ATTRIBUTE_METER(counter) ((void)0)
 #endif
 
 /**
@@ -206,7 +206,7 @@ class nsXULPrototypeScript : public nsXULPrototypeNode {
 
   nsresult Compile(const char16_t* aText, size_t aTextLength,
                    JS::SourceOwnership aOwnership, nsIURI* aURI,
-                   uint32_t aLineNo, nsIDocument* aDocument,
+                   uint32_t aLineNo, mozilla::dom::Document* aDocument,
                    nsIOffThreadScriptReceiver* aOffThreadReceiver = nullptr);
 
   void UnlinkJSObjects();
@@ -234,7 +234,8 @@ class nsXULPrototypeScript : public nsXULPrototypeNode {
   uint32_t mLineNo;
   bool mSrcLoading;
   bool mOutOfLine;
-  mozilla::dom::XULDocument* mSrcLoadWaiters;  // [OWNER] but not COMPtr
+  mozilla::dom::PrototypeDocumentContentSink*
+      mSrcLoadWaiters;  // [OWNER] but not COMPtr
  private:
   JS::Heap<JSScript*> mScriptObject;
 };
@@ -297,6 +298,8 @@ ASSERT_NODE_FLAGS_SPACE(ELEMENT_TYPE_SPECIFIC_BITS_OFFSET + 2);
 
 class nsXULElement : public nsStyledElement {
  protected:
+  typedef mozilla::dom::Document Document;
+
   // Use Construct to construct elements instead of this constructor.
   explicit nsXULElement(already_AddRefed<mozilla::dom::NodeInfo>&& aNodeInfo);
 
@@ -305,8 +308,8 @@ class nsXULElement : public nsStyledElement {
   using Element::Focus;
 
   static nsresult CreateFromPrototype(nsXULPrototypeElement* aPrototype,
-                                      nsIDocument* aDocument,
-                                      bool aIsScriptable, bool aIsRoot,
+                                      Document* aDocument, bool aIsScriptable,
+                                      bool aIsRoot,
                                       mozilla::dom::Element** aResult);
 
   // This is the constructor for nsXULElements.
@@ -324,16 +327,20 @@ class nsXULElement : public nsStyledElement {
   virtual nsresult PreHandleEvent(
       mozilla::EventChainVisitor& aVisitor) override;
   // nsIContent
-  virtual nsresult BindToTree(nsIDocument* aDocument, nsIContent* aParent,
+  virtual nsresult BindToTree(Document* aDocument, nsIContent* aParent,
                               nsIContent* aBindingParent) override;
   virtual void UnbindFromTree(bool aDeep, bool aNullParent) override;
   virtual void DestroyContent() override;
+  virtual void DoneAddingChildren(bool aHaveNotified) override;
 
 #ifdef DEBUG
   virtual void List(FILE* out, int32_t aIndent) const override;
   virtual void DumpContent(FILE* out, int32_t aIndent,
                            bool aDumpAll) const override {}
 #endif
+
+  MOZ_CAN_RUN_SCRIPT int32_t ScreenX();
+  MOZ_CAN_RUN_SCRIPT int32_t ScreenY();
 
   bool HasMenu();
   MOZ_CAN_RUN_SCRIPT void OpenMenu(bool aOpenFlag);
@@ -517,6 +524,8 @@ class nsXULElement : public nsStyledElement {
     return parent ? parent : nsStyledElement::GetScopeChainParent();
   }
 
+  bool IsInteractiveHTMLContent(bool aIgnoreTabindex) const override;
+
  protected:
   ~nsXULElement();
 
@@ -573,7 +582,7 @@ class nsXULElement : public nsStyledElement {
 
   void SetDrawsInTitlebar(bool aState);
   void SetDrawsTitle(bool aState);
-  void UpdateBrightTitlebarForeground(nsIDocument* aDocument);
+  void UpdateBrightTitlebarForeground(Document* aDocument);
 
  protected:
   void AddTooltipSupport();

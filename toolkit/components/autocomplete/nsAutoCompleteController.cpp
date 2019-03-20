@@ -9,14 +9,12 @@
 #include "nsAutoPtr.h"
 #include "nsNetCID.h"
 #include "nsIIOService.h"
-#include "nsToolkitCompsCID.h"
 #include "nsIServiceManager.h"
 #include "nsReadableUtils.h"
 #include "nsUnicharUtils.h"
 #include "nsIScriptSecurityManager.h"
 #include "nsIObserverService.h"
 #include "mozilla/Services.h"
-#include "mozilla/ModuleUtils.h"
 #include "mozilla/Unused.h"
 #include "mozilla/dom/KeyboardEventBinding.h"
 #include "mozilla/dom/Event.h"
@@ -99,8 +97,8 @@ nsAutoCompleteController::SetInitiallySelectedIndex(int32_t aSelectedIndex) {
   // First forward to the popup.
   nsCOMPtr<nsIAutoCompleteInput> input(mInput);
   NS_ENSURE_STATE(input);
-  nsCOMPtr<nsIAutoCompletePopup> popup;
-  input->GetPopup(getter_AddRefs(popup));
+
+  nsCOMPtr<nsIAutoCompletePopup> popup(GetPopup());
   NS_ENSURE_STATE(popup);
   popup->SetSelectedIndex(aSelectedIndex);
 
@@ -266,8 +264,12 @@ nsAutoCompleteController::HandleText(bool *_retval) {
 
   SetSearchStringInternal(newValue);
 
+  bool noRollupOnEmptySearch;
+  nsresult rv = input->GetNoRollupOnEmptySearch(&noRollupOnEmptySearch);
+  NS_ENSURE_SUCCESS(rv, rv);
+
   // Don't search if the value is empty
-  if (newValue.Length() == 0) {
+  if (newValue.Length() == 0 && !noRollupOnEmptySearch) {
     // If autocomplete popup was closed by compositionstart event handler,
     // we should reopen it forcibly even if the value is empty.
     if (popupClosedByCompositionStart && handlingCompositionCommit) {
@@ -296,9 +298,7 @@ nsAutoCompleteController::HandleEnter(bool aIsPopupSelection,
   // allow the event through unless there is something selected in the popup
   input->GetPopupOpen(_retval);
   if (*_retval) {
-    nsCOMPtr<nsIAutoCompletePopup> popup;
-    input->GetPopup(getter_AddRefs(popup));
-
+    nsCOMPtr<nsIAutoCompletePopup> popup(GetPopup());
     if (popup) {
       int32_t selectedIndex;
       popup->GetSelectedIndex(&selectedIndex);
@@ -405,8 +405,7 @@ nsAutoCompleteController::HandleKeyNavigation(uint32_t aKey, bool *_retval) {
   }
 
   nsCOMPtr<nsIAutoCompleteInput> input(mInput);
-  nsCOMPtr<nsIAutoCompletePopup> popup;
-  input->GetPopup(getter_AddRefs(popup));
+  nsCOMPtr<nsIAutoCompletePopup> popup(GetPopup());
   NS_ENSURE_TRUE(popup != nullptr, NS_ERROR_FAILURE);
 
   bool disabled;
@@ -646,8 +645,8 @@ nsAutoCompleteController::HandleDelete(bool *_retval) {
     return NS_OK;
   }
 
-  nsCOMPtr<nsIAutoCompletePopup> popup;
-  input->GetPopup(getter_AddRefs(popup));
+  nsCOMPtr<nsIAutoCompletePopup> popup(GetPopup());
+  NS_ENSURE_TRUE(popup, NS_ERROR_FAILURE);
 
   int32_t index, searchIndex, matchIndex;
   popup->GetSelectedIndex(&index);
@@ -876,8 +875,7 @@ nsresult nsAutoCompleteController::ClosePopup() {
   input->GetPopupOpen(&isOpen);
   if (!isOpen) return NS_OK;
 
-  nsCOMPtr<nsIAutoCompletePopup> popup;
-  input->GetPopup(getter_AddRefs(popup));
+  nsCOMPtr<nsIAutoCompletePopup> popup(GetPopup());
   NS_ENSURE_TRUE(popup != nullptr, NS_ERROR_FAILURE);
   MOZ_ALWAYS_SUCCEEDS(input->SetPopupOpen(false));
   return popup->SetSelectedIndex(-1);
@@ -1140,8 +1138,7 @@ nsresult nsAutoCompleteController::ClearSearchTimer() {
 nsresult nsAutoCompleteController::EnterMatch(bool aIsPopupSelection,
                                               dom::Event *aEvent) {
   nsCOMPtr<nsIAutoCompleteInput> input(mInput);
-  nsCOMPtr<nsIAutoCompletePopup> popup;
-  input->GetPopup(getter_AddRefs(popup));
+  nsCOMPtr<nsIAutoCompletePopup> popup(GetPopup());
   NS_ENSURE_TRUE(popup != nullptr, NS_ERROR_FAILURE);
 
   bool forceComplete;
@@ -1381,8 +1378,7 @@ nsresult nsAutoCompleteController::ProcessResult(
   CompleteDefaultIndex(aSearchIndex);
 
   // Refresh the popup view to display the new search results
-  nsCOMPtr<nsIAutoCompletePopup> popup;
-  input->GetPopup(getter_AddRefs(popup));
+  nsCOMPtr<nsIAutoCompletePopup> popup(GetPopup());
   NS_ENSURE_TRUE(popup != nullptr, NS_ERROR_FAILURE);
   popup->Invalidate(nsIAutoCompletePopup::INVALIDATE_REASON_NEW_RESULT);
 
@@ -1431,8 +1427,7 @@ nsresult nsAutoCompleteController::ClearResults(bool aIsSearching) {
   mResults.Clear();
   if (oldMatchCount != 0) {
     if (mInput) {
-      nsCOMPtr<nsIAutoCompletePopup> popup;
-      mInput->GetPopup(getter_AddRefs(popup));
+      nsCOMPtr<nsIAutoCompletePopup> popup(GetPopup());
       NS_ENSURE_TRUE(popup != nullptr, NS_ERROR_FAILURE);
       // Clear the selection.
       popup->SetSelectedIndex(-1);
@@ -1758,26 +1753,3 @@ nsresult nsAutoCompleteController::MatchIndexToSearch(int32_t aMatchIndex,
 
   return NS_OK;
 }
-
-NS_GENERIC_FACTORY_CONSTRUCTOR(nsAutoCompleteController)
-NS_GENERIC_FACTORY_CONSTRUCTOR(nsAutoCompleteSimpleResult)
-
-NS_DEFINE_NAMED_CID(NS_AUTOCOMPLETECONTROLLER_CID);
-NS_DEFINE_NAMED_CID(NS_AUTOCOMPLETESIMPLERESULT_CID);
-
-static const mozilla::Module::CIDEntry kAutoCompleteCIDs[] = {
-    {&kNS_AUTOCOMPLETECONTROLLER_CID, false, nullptr,
-     nsAutoCompleteControllerConstructor},
-    {&kNS_AUTOCOMPLETESIMPLERESULT_CID, false, nullptr,
-     nsAutoCompleteSimpleResultConstructor},
-    {nullptr}};
-
-static const mozilla::Module::ContractIDEntry kAutoCompleteContracts[] = {
-    {NS_AUTOCOMPLETECONTROLLER_CONTRACTID, &kNS_AUTOCOMPLETECONTROLLER_CID},
-    {NS_AUTOCOMPLETESIMPLERESULT_CONTRACTID, &kNS_AUTOCOMPLETESIMPLERESULT_CID},
-    {nullptr}};
-
-static const mozilla::Module kAutoCompleteModule = {
-    mozilla::Module::kVersion, kAutoCompleteCIDs, kAutoCompleteContracts};
-
-NSMODULE_DEFN(tkAutoCompleteModule) = &kAutoCompleteModule;

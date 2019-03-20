@@ -6,9 +6,9 @@
 
 var EXPORTED_SYMBOLS = ["GeckoViewProgress"];
 
-ChromeUtils.import("resource://gre/modules/GeckoViewModule.jsm");
-ChromeUtils.import("resource://gre/modules/Services.jsm");
-ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
+const {GeckoViewModule} = ChromeUtils.import("resource://gre/modules/GeckoViewModule.jsm");
+const {Services} = ChromeUtils.import("resource://gre/modules/Services.jsm");
+const {XPCOMUtils} = ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
 
 XPCOMUtils.defineLazyServiceGetter(this, "OverrideService",
   "@mozilla.org/security/certoverride;1", "nsICertOverrideService");
@@ -38,29 +38,6 @@ var IdentityHandler = {
 
   // Loaded active mixed content.
   MIXED_MODE_CONTENT_LOADED: 2,
-
-  // The following tracking content modes are only used if tracking protection
-  // is enabled. Our Java frontend coalesces them into one indicator.
-
-  // No tracking content information. No tracking content icon is shown.
-  TRACKING_MODE_UNKNOWN: 0,
-
-  // Blocked active tracking content. Shield icon is shown, with a popup option to load content.
-  TRACKING_MODE_CONTENT_BLOCKED: 1,
-
-  // Loaded active tracking content. Yellow triangle icon is shown.
-  TRACKING_MODE_CONTENT_LOADED: 2,
-
-  _useTrackingProtection: false,
-  _usePrivateMode: false,
-
-  setUseTrackingProtection: function(aUse) {
-    this._useTrackingProtection = aUse;
-  },
-
-  setUsePrivateMode: function(aUse) {
-    this._usePrivateMode = aUse;
-  },
 
   /**
    * Determines the identity mode corresponding to the icon we show in the urlbar.
@@ -103,19 +80,6 @@ var IdentityHandler = {
     return this.MIXED_MODE_UNKNOWN;
   },
 
-  getTrackingMode: function getTrackingMode(aState) {
-    if (aState & Ci.nsIWebProgressListener.STATE_BLOCKED_TRACKING_CONTENT) {
-      return this.TRACKING_MODE_CONTENT_BLOCKED;
-    }
-
-    // Only show an indicator for loaded tracking content if the pref to block it is enabled
-    if ((aState & Ci.nsIWebProgressListener.STATE_LOADED_TRACKING_CONTENT) && this._useTrackingProtection) {
-      return this.TRACKING_MODE_CONTENT_LOADED;
-    }
-
-    return this.TRACKING_MODE_UNKNOWN;
-  },
-
   /**
    * Determine the identity of the page being displayed by examining its SSL cert
    * (if available). Return the data needed to update the UI.
@@ -124,13 +88,11 @@ var IdentityHandler = {
     let identityMode = this.getIdentityMode(aState);
     let mixedDisplay = this.getMixedDisplayMode(aState);
     let mixedActive = this.getMixedActiveMode(aState);
-    let trackingMode = this.getTrackingMode(aState);
     let result = {
       mode: {
         identity: identityMode,
         mixed_display: mixedDisplay,
         mixed_active: mixedActive,
-        tracking: trackingMode,
       },
     };
 
@@ -210,9 +172,6 @@ class GeckoViewProgress extends GeckoViewModule {
   onSettingsUpdate() {
     const settings = this.settings;
     debug `onSettingsUpdate: ${settings}`;
-
-    IdentityHandler.setUseTrackingProtection(!!settings.useTrackingProtection);
-    IdentityHandler.setUsePrivateMode(!!settings.usePrivateMode);
   }
 
   onStateChange(aWebProgress, aRequest, aStateFlags, aStatus) {
@@ -253,8 +212,7 @@ class GeckoViewProgress extends GeckoViewModule {
     }
   }
 
-  onSecurityChange(aWebProgress, aRequest, aOldState, aState,
-                   aContentBlockingLogJSON) {
+  onSecurityChange(aWebProgress, aRequest, aState) {
     debug `onSecurityChange`;
 
     // Don't need to do anything if the data we use to update the UI hasn't changed
@@ -301,3 +259,5 @@ class GeckoViewProgress extends GeckoViewModule {
     }
   }
 }
+
+const {debug, warn} = GeckoViewProgress.initLogging("GeckoViewProgress"); // eslint-disable-line no-unused-vars

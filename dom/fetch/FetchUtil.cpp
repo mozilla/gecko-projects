@@ -8,7 +8,7 @@
 
 #include "nsError.h"
 #include "nsString.h"
-#include "nsIDocument.h"
+#include "mozilla/dom/Document.h"
 
 #include "mozilla/dom/InternalRequest.h"
 #include "mozilla/dom/WorkerRef.h"
@@ -109,8 +109,7 @@ bool FetchUtil::ExtractHeader(nsACString::const_iterator& aStart,
 }
 
 // static
-nsresult FetchUtil::SetRequestReferrer(nsIPrincipal* aPrincipal,
-                                       nsIDocument* aDoc,
+nsresult FetchUtil::SetRequestReferrer(nsIPrincipal* aPrincipal, Document* aDoc,
                                        nsIHttpChannel* aChannel,
                                        InternalRequest* aRequest) {
   MOZ_ASSERT(NS_IsMainThread());
@@ -490,7 +489,7 @@ bool FetchUtil::StreamResponseToJS(JSContext* aCx, JS::HandleObject aObj,
   const char* requiredMimeType = nullptr;
   switch (aMimeType) {
     case JS::MimeType::Wasm:
-      requiredMimeType = "application/wasm";
+      requiredMimeType = WASM_CONTENT_TYPE;
       break;
   }
 

@@ -22,6 +22,12 @@ ContentProcessController::ContentProcessController(
   MOZ_ASSERT(mBrowser);
 }
 
+void ContentProcessController::NotifyLayerTransforms(
+    const nsTArray<MatrixMessage>& aTransforms) {
+  // This should never get called
+  MOZ_ASSERT(false);
+}
+
 void ContentProcessController::RequestContentRepaint(
     const RepaintRequest& aRequest) {
   if (mBrowser) {
@@ -62,7 +68,7 @@ void ContentProcessController::NotifyMozMouseScrollEvent(
 void ContentProcessController::NotifyFlushComplete() {
   if (mBrowser) {
     nsCOMPtr<nsIPresShell> shell;
-    if (nsCOMPtr<nsIDocument> doc = mBrowser->GetDocument()) {
+    if (nsCOMPtr<dom::Document> doc = mBrowser->GetDocument()) {
       shell = doc->GetShell();
     }
     APZCCallbackHelper::NotifyFlushComplete(shell.get());

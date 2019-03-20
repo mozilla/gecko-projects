@@ -55,7 +55,11 @@ body {
   width: 100%;
 }
 
-tr:hover td {
+tbody tr {
+  transition: background cubic-bezier(.07, .95, 0, 1) 250ms;
+}
+
+tbody tr:hover {
   background-color: #d7d7db;
 }
 
@@ -72,7 +76,6 @@ th {
 
 td {
   padding: 1rem;
-  transition: background cubic-bezier(.07, .95, 0, 1) 250ms;
 }
 
 /*
@@ -86,6 +89,12 @@ td {
 .errors tr:nth-child(odd),
 tbody:nth-child(4n + 1) {
   background-color: #ededf0;
+}
+
+.active-policies tr.odd:hover,
+.errors tr:nth-child(odd):hover,
+tbody:nth-child(4n + 1):hover {
+  background-color: #d7d7db;
 }
 
 .arr_sep.odd:not(:last-child) td:not(:first-child) {
@@ -137,4 +146,25 @@ tbody.collapsible td {
   font-family: monospace;
   white-space: pre;
   direction: ltr;
+}
+
+/*
+ * The Active tab has two messages: one for when the policy service
+ * is inactive and another for when the there are no specified
+ * policies. The three classes below control which message to display
+ * or to show the policy table.
+ */
+.no-specified-policies > table,
+.inactive-service > table {
+  display: none;
+}
+
+:not(.no-specified-policies) > .no-specified-policies-message,
+:not(.inactive-service) > .inactive-service-message {
+  display: none;
+}
+
+.no-specified-policies-message,
+.inactive-service-message {
+  padding: 1rem;
 }

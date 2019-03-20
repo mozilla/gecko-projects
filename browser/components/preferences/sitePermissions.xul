@@ -11,6 +11,7 @@
 <window id="SitePermissionsDialog"
         windowtype="Browser:SitePermissions"
         xmlns="http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul"
+        xmlns:html="http://www.w3.org/1999/xhtml"
         data-l10n-id="permissions-window"
         data-l10n-attrs="title, style"
         onload="gSitePermissionsManager.onLoad();"
@@ -19,8 +20,8 @@
         onkeypress="gSitePermissionsManager.onWindowKeyPress(event);">
 
   <linkset>
-    <link rel="localization" href="browser/preferences/preferences.ftl"/>
-    <link rel="localization" href="browser/preferences/permissions.ftl"/>
+    <html:link rel="localization" href="browser/preferences/preferences.ftl"/>
+    <html:link rel="localization" href="browser/preferences/permissions.ftl"/>
   </linkset>
 
   <script src="chrome://browser/content/preferences/sitePermissions.js"/>
@@ -38,17 +39,16 @@
                type="search" oncommand="gSitePermissionsManager.buildPermissionsList();"/>
     </hbox>
     <separator class="thin"/>
+    <listheader>
+      <treecol id="siteCol" data-l10n-id="permissions-site-name" flex="3" width="50"
+               onclick="gSitePermissionsManager.buildPermissionsList(event.target)"/>
+      <treecol id="statusCol" data-l10n-id="permissions-status" flex="1" width="50"
+               data-isCurrentSortCol="true"
+               onclick="gSitePermissionsManager.buildPermissionsList(event.target);"/>
+    </listheader>
     <richlistbox id="permissionsBox" flex="1" selected="false"
                  onkeypress="gSitePermissionsManager.onPermissionKeyPress(event);"
-                 onselect="gSitePermissionsManager.onPermissionSelect();">
-      <listheader>
-        <treecol id="siteCol" data-l10n-id="permissions-site-name" flex="3" width="50"
-                 onclick="gSitePermissionsManager.buildPermissionsList(event.target)"/>
-        <treecol id="statusCol" data-l10n-id="permissions-status" flex="1" width="50"
-                 data-isCurrentSortCol="true"
-                 onclick="gSitePermissionsManager.buildPermissionsList(event.target);"/>
-      </listheader>
-    </richlistbox>
+                 onselect="gSitePermissionsManager.onPermissionSelect();"/>
   </vbox>
 
   <hbox class="actionButtons" align="left" flex="1">

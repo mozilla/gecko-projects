@@ -10,7 +10,7 @@
 // narrow-character strings.
 
 #ifndef XP_WIN
-#error This file only makes sense on Windows.
+#  error This file only makes sense on Windows.
 #endif
 
 #include "mozilla/Char16.h"
@@ -24,7 +24,7 @@
    startup routines.  Workaround is to implement something like
    it ourselves.  See bug 411826 */
 
-#include <shellapi.h>
+#  include <shellapi.h>
 
 int wmain(int argc, WCHAR **argv);
 
@@ -98,8 +98,10 @@ int wmain(int argc, WCHAR **argv) {
   // Only run this code if LauncherProcessWin.h was included beforehand, thus
   // signalling that the hosting process should support launcher mode.
 #if defined(mozilla_LauncherProcessWin_h)
-  if (mozilla::RunAsLauncherProcess(argc, argv)) {
-    return mozilla::LauncherMain(argc, argv);
+  mozilla::Maybe<int> launcherResult =
+      mozilla::LauncherMain(argc, argv, sAppData);
+  if (launcherResult) {
+    return launcherResult.value();
   }
 #endif  // defined(mozilla_LauncherProcessWin_h)
 

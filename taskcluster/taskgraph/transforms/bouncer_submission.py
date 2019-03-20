@@ -28,6 +28,7 @@ FTP_PLATFORMS_PER_BOUNCER_PLATFORM = {
     'osx': 'mac',
     'win': 'win32',
     'win64': 'win64',
+    'win64-aarch64': 'win64-aarch64'
 }
 
 # :lang is interpolated by bouncer at runtime
@@ -74,6 +75,7 @@ CONFIG_PER_BOUNCER_PRODUCT = {
             'osx': '{pretty_product}%20{version}.dmg',
             'win': '{pretty_product}%20Setup%20{version}.exe',
             'win64': '{pretty_product}%20Setup%20{version}.exe',
+            'win64-aarch64': '{pretty_product}%20Setup%20{version}.exe',
         },
     },
     'partial-mar': {
@@ -96,14 +98,15 @@ CONFIG_PER_BOUNCER_PRODUCT = {
         'file_names': {
             'win': '{pretty_product}%20Installer.exe',
             'win64': '{pretty_product}%20Installer.exe',
+            'win64-aarch64': '{pretty_product}%20Installer.exe',
         },
     },
     'msi': {
         'name_postfix': '-msi-SSL',
         'path_template': RELEASES_PATH_TEMPLATE,
         'file_names': {
-            'win': '{pretty_product}%20Installer.msi',
-            'win64': '{pretty_product}%20Installer.msi',
+            'win': '{pretty_product}%20Setup%20{version}.msi',
+            'win64': '{pretty_product}%20Setup%20{version}.msi',
         }
     }
 }

@@ -682,8 +682,14 @@ class WellKnownChecker {
                        nsILoadInfo *loadInfo) {
     uint64_t channelId;
     nsLoadFlags flags;
+
+    nsContentPolicyType contentPolicyType =
+        loadInfo ? loadInfo->GetExternalContentPolicyType()
+                 : nsIContentPolicy::TYPE_OTHER;
+
     if (NS_FAILED(gHttpHandler->NewChannelId(channelId)) ||
-        NS_FAILED(chan->Init(uri, caps, nullptr, 0, nullptr, channelId)) ||
+        NS_FAILED(chan->Init(uri, caps, nullptr, 0, nullptr, channelId,
+                             contentPolicyType)) ||
         NS_FAILED(chan->SetAllowAltSvc(false)) ||
         NS_FAILED(chan->SetRedirectMode(
             nsIHttpChannelInternal::REDIRECT_MODE_ERROR)) ||
@@ -697,7 +703,7 @@ class WellKnownChecker {
     }
     chan->SetTransactionObserver(obs);
     chan->SetConnectionInfo(ci);
-    return chan->AsyncOpen2(obs);
+    return chan->AsyncOpen(obs);
   }
 
   RefPtr<TransactionObserver> mTransactionAlternate;
@@ -734,7 +740,7 @@ void TransactionObserver::Complete(nsHttpTransaction *aTrans, nsresult reason) {
   }
   mRanOnce = true;
 
-  RefPtr<nsAHttpConnection> conn = aTrans->GetConnectionReference();
+  RefPtr<nsAHttpConnection> conn = aTrans->Connection();
   LOG(("TransactionObserver::Complete %p aTrans %p reason %" PRIx32
        " conn %p\n",
        this, aTrans, static_cast<uint32_t>(reason), conn.get()));
@@ -762,8 +768,7 @@ void TransactionObserver::Complete(nsHttpTransaction *aTrans, nsresult reason) {
 #define MAX_WK 32768
 
 NS_IMETHODIMP
-TransactionObserver::OnStartRequest(nsIRequest *aRequest,
-                                    nsISupports *aContext) {
+TransactionObserver::OnStartRequest(nsIRequest *aRequest) {
   MOZ_ASSERT(NS_IsMainThread());
   // only consider the first 32KB.. because really.
   mWKResponse.SetCapacity(MAX_WK);
@@ -772,7 +777,6 @@ TransactionObserver::OnStartRequest(nsIRequest *aRequest,
 
 NS_IMETHODIMP
 TransactionObserver::OnDataAvailable(nsIRequest *aRequest,
-                                     nsISupports *aContext,
                                      nsIInputStream *aStream, uint64_t aOffset,
                                      uint32_t aCount) {
   MOZ_ASSERT(NS_IsMainThread());
@@ -799,8 +803,7 @@ TransactionObserver::OnDataAvailable(nsIRequest *aRequest,
 }
 
 NS_IMETHODIMP
-TransactionObserver::OnStopRequest(nsIRequest *aRequest, nsISupports *aContext,
-                                   nsresult code) {
+TransactionObserver::OnStopRequest(nsIRequest *aRequest, nsresult code) {
   MOZ_ASSERT(NS_IsMainThread());
   LOG(("TransactionObserver onStopRequest %p code %" PRIx32 "\n", this,
        static_cast<uint32_t>(code)));

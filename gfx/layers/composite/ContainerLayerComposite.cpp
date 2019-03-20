@@ -25,10 +25,11 @@
 #include "mozilla/layers/TextureHost.h"      // for CompositingRenderTarget
 #include "mozilla/layers/AsyncCompositionManager.h"  // for ViewTransform
 #include "mozilla/layers/LayerMetricsWrapper.h"      // for LayerMetricsWrapper
-#include "mozilla/mozalloc.h"                        // for operator delete, etc
-#include "mozilla/RefPtr.h"                          // for nsRefPtr
-#include "nsDebug.h"                                 // for NS_ASSERTION
-#include "nsISupportsImpl.h"                         // for MOZ_COUNT_CTOR, etc
+#include "mozilla/layers/LayersHelpers.h"
+#include "mozilla/mozalloc.h"  // for operator delete, etc
+#include "mozilla/RefPtr.h"    // for nsRefPtr
+#include "nsDebug.h"           // for NS_ASSERTION
+#include "nsISupportsImpl.h"   // for MOZ_COUNT_CTOR, etc
 #include "nsISupportsUtils.h"  // for NS_ADDREF, NS_RELEASE
 #include "nsRegion.h"          // for nsIntRegion
 #include "nsTArray.h"          // for AutoTArray
@@ -38,7 +39,7 @@
 #include "GeckoProfiler.h"  // for GeckoProfiler
 
 #ifdef MOZ_GECKO_PROFILER
-#include "ProfilerMarkerPayload.h"  // for LayerTranslationMarkerPayload
+#  include "ProfilerMarkerPayload.h"  // for LayerTranslationMarkerPayload
 #endif
 
 #define CULLING_LOG(...)
@@ -100,7 +101,7 @@ static void PrintUniformityInfo(Layer* aLayer) {
   }
 
   Point translation = transform.As2D().GetTranslation();
-  profiler_add_marker("LayerTranslation",
+  profiler_add_marker("LayerTranslation", JS::ProfilingCategoryPair::GRAPHICS,
                       MakeUnique<LayerTranslationMarkerPayload>(
                           aLayer, translation, TimeStamp::Now()));
 #endif
@@ -564,7 +565,7 @@ RefPtr<CompositingRenderTarget> CreateTemporaryTargetAndCopyFromBackground(
              !gfx::ThebesMatrix(transform2d).HasNonIntegerTranslation());
   sourcePoint += gfx::IntPoint::Truncate(transform._41, transform._42);
 
-  sourcePoint -= compositor->GetCurrentRenderTarget()->GetOrigin();
+  sourcePoint -= previousTarget->GetOrigin();
 
   return compositor->CreateRenderTargetFromSource(surfaceRect, previousTarget,
                                                   sourcePoint);

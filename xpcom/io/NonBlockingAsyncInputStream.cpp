@@ -29,6 +29,11 @@ class NonBlockingAsyncInputStream::AsyncWaitRunnable final
     mStream->RunAsyncWaitCallback(this, mCallback.forget());
     return NS_OK;
   }
+
+  nsresult Cancel() override {
+    mStream = nullptr;
+    return NS_OK;
+  }
 };
 
 NS_IMPL_ADDREF(NonBlockingAsyncInputStream);
@@ -52,7 +57,8 @@ NS_INTERFACE_MAP_BEGIN(NonBlockingAsyncInputStream)
   NS_INTERFACE_MAP_ENTRY_AMBIGUOUS(nsISupports, nsIInputStream)
 NS_INTERFACE_MAP_END
 
-/* static */ nsresult NonBlockingAsyncInputStream::Create(
+/* static */
+nsresult NonBlockingAsyncInputStream::Create(
     already_AddRefed<nsIInputStream> aInputStream,
     nsIAsyncInputStream** aResult) {
   MOZ_DIAGNOSTIC_ASSERT(aResult);
@@ -168,7 +174,8 @@ NonBlockingAsyncInputStream::Close() {
 NS_IMETHODIMP
 NonBlockingAsyncInputStream::Available(uint64_t* aLength) {
   nsresult rv = mInputStream->Available(aLength);
-  if (NS_WARN_IF(NS_FAILED(rv))) {
+  // Don't issue warnings for legal condition NS_BASE_STREAM_CLOSED.
+  if (rv == NS_BASE_STREAM_CLOSED || NS_WARN_IF(NS_FAILED(rv))) {
     return rv;
   }
 
@@ -312,10 +319,49 @@ NonBlockingAsyncInputStream::AsyncWait(nsIInputStreamCallback* aCallback,
 
 void NonBlockingAsyncInputStream::Serialize(
     mozilla::ipc::InputStreamParams& aParams,
-    FileDescriptorArray& aFileDescriptors) {
+    FileDescriptorArray& aFileDescriptors, bool aDelayedStart,
+    uint32_t aMaxSize, uint32_t* aSizeUsed,
+    mozilla::dom::ContentChild* aManager) {
+  SerializeInternal(aParams, aFileDescriptors, aDelayedStart, aMaxSize,
+                    aSizeUsed, aManager);
+}
+
+void NonBlockingAsyncInputStream::Serialize(
+    mozilla::ipc::InputStreamParams& aParams,
+    FileDescriptorArray& aFileDescriptors, bool aDelayedStart,
+    uint32_t aMaxSize, uint32_t* aSizeUsed,
+    mozilla::ipc::PBackgroundChild* aManager) {
+  SerializeInternal(aParams, aFileDescriptors, aDelayedStart, aMaxSize,
+                    aSizeUsed, aManager);
+}
+
+void NonBlockingAsyncInputStream::Serialize(
+    mozilla::ipc::InputStreamParams& aParams,
+    FileDescriptorArray& aFileDescriptors, bool aDelayedStart,
+    uint32_t aMaxSize, uint32_t* aSizeUsed,
+    mozilla::dom::ContentParent* aManager) {
+  SerializeInternal(aParams, aFileDescriptors, aDelayedStart, aMaxSize,
+                    aSizeUsed, aManager);
+}
+
+void NonBlockingAsyncInputStream::Serialize(
+    mozilla::ipc::InputStreamParams& aParams,
+    FileDescriptorArray& aFileDescriptors, bool aDelayedStart,
+    uint32_t aMaxSize, uint32_t* aSizeUsed,
+    mozilla::ipc::PBackgroundParent* aManager) {
+  SerializeInternal(aParams, aFileDescriptors, aDelayedStart, aMaxSize,
+                    aSizeUsed, aManager);
+}
+
+template <typename M>
+void NonBlockingAsyncInputStream::SerializeInternal(
+    mozilla::ipc::InputStreamParams& aParams,
+    FileDescriptorArray& aFileDescriptors, bool aDelayedStart,
+    uint32_t aMaxSize, uint32_t* aSizeUsed, M* aManager) {
   MOZ_ASSERT(mWeakIPCSerializableInputStream);
   InputStreamHelper::SerializeInputStream(mInputStream, aParams,
-                                          aFileDescriptors);
+                                          aFileDescriptors, aDelayedStart,
+                                          aMaxSize, aSizeUsed, aManager);
 }
 
 bool NonBlockingAsyncInputStream::Deserialize(
@@ -323,11 +369,6 @@ bool NonBlockingAsyncInputStream::Deserialize(
     const FileDescriptorArray& aFileDescriptors) {
   MOZ_CRASH("NonBlockingAsyncInputStream cannot be deserialized!");
   return true;
-}
-
-Maybe<uint64_t> NonBlockingAsyncInputStream::ExpectedSerializedLength() {
-  NS_ENSURE_TRUE(mWeakIPCSerializableInputStream, Nothing());
-  return mWeakIPCSerializableInputStream->ExpectedSerializedLength();
 }
 
 // nsISeekableStream

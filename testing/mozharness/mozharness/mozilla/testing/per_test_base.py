@@ -146,7 +146,6 @@ class SingleTestMixin(FetchesMixin):
                 ('browser-chrome', 'screenshots'): 'browser-chrome-screenshots',
                 ('plain', 'media'): 'mochitest-media',
                 # below should be on test-verify-gpu job
-                ('browser-chrome', 'gpu'): 'browser-chrome-gpu',
                 ('chrome', 'gpu'): 'chrome-gpu',
                 ('plain', 'gpu'): 'plain-gpu',
                 ('plain', 'webgl1-core'): 'mochitest-webgl1-core',
@@ -241,7 +240,8 @@ class SingleTestMixin(FetchesMixin):
         changed_files = set()
         if os.environ.get('MOZHARNESS_TEST_PATHS', None) is not None:
             suite_to_paths = json.loads(os.environ['MOZHARNESS_TEST_PATHS'])
-            changed_files |= itertools.chain.from_iterable(suite_to_paths.values())
+            specified_files = itertools.chain.from_iterable(suite_to_paths.values())
+            changed_files.update(specified_files)
             self.info("Per-test run found explicit request in MOZHARNESS_TEST_PATHS:")
             self.info(str(changed_files))
         else:

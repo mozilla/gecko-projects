@@ -9,11 +9,9 @@
 
 #include "nsIBaseWindow.h"
 #include "nsIDocShellTreeOwner.h"
-#include "nsIDocument.h"
+#include "mozilla/dom/Document.h"
 #include "nsRange.h"
-#include "nsIBoxObject.h"
 #include "nsXULElement.h"
-#include "mozilla/dom/BoxObject.h"
 #include "nsIDocShell.h"
 #include "nsIObserverService.h"
 #include "nsIPresShell.h"
@@ -32,7 +30,7 @@
 
 #include "nsComponentManagerUtils.h"
 
-#include "nsITreeBoxObject.h"
+#include "XULTreeElement.h"
 #include "nsTreeColumns.h"
 #include "mozilla/dom/Element.h"
 #include "mozilla/dom/HTMLLabelElement.h"
@@ -63,36 +61,32 @@ bool nsCoreUtils::HasClickListener(nsIContent *aContent) {
           listenerManager->HasListenersFor(nsGkAtoms::onmouseup));
 }
 
-void nsCoreUtils::DispatchClickEvent(nsITreeBoxObject *aTreeBoxObj,
-                                     int32_t aRowIndex, nsTreeColumn *aColumn,
+void nsCoreUtils::DispatchClickEvent(XULTreeElement *aTree, int32_t aRowIndex,
+                                     nsTreeColumn *aColumn,
                                      const nsAString &aPseudoElt) {
-  RefPtr<dom::Element> tcElm;
-  aTreeBoxObj->GetTreeBody(getter_AddRefs(tcElm));
+  RefPtr<dom::Element> tcElm = aTree->GetTreeBody();
   if (!tcElm) return;
 
-  nsIDocument *document = tcElm->GetUncomposedDoc();
+  Document *document = tcElm->GetUncomposedDoc();
   if (!document) return;
 
   nsCOMPtr<nsIPresShell> presShell = document->GetShell();
   if (!presShell) return;
 
   // Ensure row is visible.
-  aTreeBoxObj->EnsureRowIsVisible(aRowIndex);
+  aTree->EnsureRowIsVisible(aRowIndex);
 
   // Calculate x and y coordinates.
-  int32_t x = 0, y = 0, width = 0, height = 0;
-  nsresult rv = aTreeBoxObj->GetCoordsForCellItem(
-      aRowIndex, aColumn, aPseudoElt, &x, &y, &width, &height);
-  if (NS_FAILED(rv)) return;
+  nsresult rv;
+  nsIntRect rect =
+      aTree->GetCoordsForCellItem(aRowIndex, aColumn, aPseudoElt, rv);
+  if (NS_FAILED(rv)) {
+    return;
+  }
 
-  nsCOMPtr<nsIBoxObject> tcBoxObj =
-      nsXULElement::FromNode(tcElm)->GetBoxObject(IgnoreErrors());
-
-  int32_t tcX = 0;
-  tcBoxObj->GetX(&tcX);
-
-  int32_t tcY = 0;
-  tcBoxObj->GetY(&tcY);
+  RefPtr<DOMRect> treeBodyRect = tcElm->GetBoundingClientRect();
+  int32_t tcX = (int32_t)treeBodyRect->X();
+  int32_t tcY = (int32_t)treeBodyRect->Y();
 
   // Dispatch mouse events.
   AutoWeakFrame tcFrame = tcElm->GetPrimaryFrame();
@@ -103,9 +97,9 @@ void nsCoreUtils::DispatchClickEvent(nsITreeBoxObject *aTreeBoxObj,
 
   RefPtr<nsPresContext> presContext = presShell->GetPresContext();
 
-  int32_t cnvdX = presContext->CSSPixelsToDevPixels(tcX + x + 1) +
+  int32_t cnvdX = presContext->CSSPixelsToDevPixels(tcX + int32_t(rect.x) + 1) +
                   presContext->AppUnitsToDevPixels(offset.x);
-  int32_t cnvdY = presContext->CSSPixelsToDevPixels(tcY + y + 1) +
+  int32_t cnvdY = presContext->CSSPixelsToDevPixels(tcY + int32_t(rect.y) + 1) +
                   presContext->AppUnitsToDevPixels(offset.y);
 
   // XUL is just desktop, so there is no real reason for senfing touch events.
@@ -340,7 +334,7 @@ already_AddRefed<nsIDocShell> nsCoreUtils::GetDocShellFor(nsINode *aNode) {
   return docShell.forget();
 }
 
-bool nsCoreUtils::IsRootDocument(nsIDocument *aDocument) {
+bool nsCoreUtils::IsRootDocument(Document *aDocument) {
   nsCOMPtr<nsIDocShellTreeItem> docShellTreeItem = aDocument->GetDocShell();
   NS_ASSERTION(docShellTreeItem, "No document shell for document!");
 
@@ -350,14 +344,14 @@ bool nsCoreUtils::IsRootDocument(nsIDocument *aDocument) {
   return !parentTreeItem;
 }
 
-bool nsCoreUtils::IsContentDocument(nsIDocument *aDocument) {
+bool nsCoreUtils::IsContentDocument(Document *aDocument) {
   nsCOMPtr<nsIDocShellTreeItem> docShellTreeItem = aDocument->GetDocShell();
   NS_ASSERTION(docShellTreeItem, "No document shell tree item for document!");
 
   return (docShellTreeItem->ItemType() == nsIDocShellTreeItem::typeContent);
 }
 
-bool nsCoreUtils::IsTabDocument(nsIDocument *aDocumentNode) {
+bool nsCoreUtils::IsTabDocument(Document *aDocumentNode) {
   nsCOMPtr<nsIDocShellTreeItem> treeItem(aDocumentNode->GetDocShell());
 
   nsCOMPtr<nsIDocShellTreeItem> parentTreeItem;
@@ -373,7 +367,7 @@ bool nsCoreUtils::IsTabDocument(nsIDocument *aDocumentNode) {
   return parentTreeItem == rootTreeItem;
 }
 
-bool nsCoreUtils::IsErrorPage(nsIDocument *aDocument) {
+bool nsCoreUtils::IsErrorPage(Document *aDocument) {
   nsIURI *uri = aDocument->GetDocumentURI();
   bool isAboutScheme = false;
   uri->SchemeIs("about", &isAboutScheme);
@@ -424,27 +418,12 @@ void nsCoreUtils::GetLanguageFor(nsIContent *aContent, nsIContent *aRootContent,
     walkUp = walkUp->GetParent();
 }
 
-already_AddRefed<nsIBoxObject> nsCoreUtils::GetTreeBodyBoxObject(
-    nsITreeBoxObject *aTreeBoxObj) {
-  RefPtr<dom::Element> tcElm;
-  aTreeBoxObj->GetTreeBody(getter_AddRefs(tcElm));
-  RefPtr<nsXULElement> tcXULElm = nsXULElement::FromNodeOrNull(tcElm);
-  if (!tcXULElm) return nullptr;
-
-  return tcXULElm->GetBoxObject(IgnoreErrors());
-}
-
-already_AddRefed<nsITreeBoxObject> nsCoreUtils::GetTreeBoxObject(
-    nsIContent *aContent) {
+XULTreeElement *nsCoreUtils::GetTree(nsIContent *aContent) {
   // Find DOMNode's parents recursively until reach the <tree> tag
   nsIContent *currentContent = aContent;
   while (currentContent) {
     if (currentContent->NodeInfo()->Equals(nsGkAtoms::tree, kNameSpaceID_XUL)) {
-      // We will get the nsITreeBoxObject from the tree node
-      RefPtr<nsXULElement> xulElement = nsXULElement::FromNode(currentContent);
-      nsCOMPtr<nsIBoxObject> box = xulElement->GetBoxObject(IgnoreErrors());
-      nsCOMPtr<nsITreeBoxObject> treeBox(do_QueryInterface(box));
-      if (treeBox) return treeBox.forget();
+      return XULTreeElement::FromNode(currentContent);
     }
     currentContent = currentContent->GetFlattenedTreeParent();
   }
@@ -453,9 +432,8 @@ already_AddRefed<nsITreeBoxObject> nsCoreUtils::GetTreeBoxObject(
 }
 
 already_AddRefed<nsTreeColumn> nsCoreUtils::GetFirstSensibleColumn(
-    nsITreeBoxObject *aTree) {
-  RefPtr<nsTreeColumns> cols;
-  aTree->GetColumns(getter_AddRefs(cols));
+    XULTreeElement *aTree) {
+  RefPtr<nsTreeColumns> cols = aTree->GetColumns();
   if (!cols) return nullptr;
 
   RefPtr<nsTreeColumn> column = cols->GetFirstColumn();
@@ -464,11 +442,10 @@ already_AddRefed<nsTreeColumn> nsCoreUtils::GetFirstSensibleColumn(
   return column.forget();
 }
 
-uint32_t nsCoreUtils::GetSensibleColumnCount(nsITreeBoxObject *aTree) {
+uint32_t nsCoreUtils::GetSensibleColumnCount(XULTreeElement *aTree) {
   uint32_t count = 0;
 
-  RefPtr<nsTreeColumns> cols;
-  aTree->GetColumns(getter_AddRefs(cols));
+  RefPtr<nsTreeColumns> cols = aTree->GetColumns();
   if (!cols) return count;
 
   nsTreeColumn *column = cols->GetFirstColumn();
@@ -483,7 +460,7 @@ uint32_t nsCoreUtils::GetSensibleColumnCount(nsITreeBoxObject *aTree) {
 }
 
 already_AddRefed<nsTreeColumn> nsCoreUtils::GetSensibleColumnAt(
-    nsITreeBoxObject *aTree, uint32_t aIndex) {
+    XULTreeElement *aTree, uint32_t aIndex) {
   uint32_t idx = aIndex;
 
   nsCOMPtr<nsTreeColumn> column = GetFirstSensibleColumn(aTree);

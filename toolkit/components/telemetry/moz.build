@@ -45,6 +45,7 @@ BROWSER_CHROME_MANIFESTS += ['tests/browser/browser.ini']
 
 XPIDL_SOURCES += [
     'core/nsITelemetry.idl',
+    'other/GCTelemetry.idl',
 ]
 
 XPIDL_MODULE = 'telemetry'
@@ -92,9 +93,9 @@ if CONFIG['MOZ_GECKO_PROFILER']:
       'other/KeyedStackCapturer.cpp'
     ]
 
-EXTRA_COMPONENTS += [
-    'TelemetryStartup.js',
-    'TelemetryStartup.manifest'
+XPCOM_MANIFESTS += [
+    'components.conf',
+    'core/components.conf',
 ]
 
 EXTRA_JS_MODULES += [
@@ -107,7 +108,6 @@ EXTRA_JS_MODULES += [
     'app/TelemetryTimestamps.jsm',
     'app/TelemetryUtils.jsm',
     'other/GCTelemetry.jsm',
-    'other/MemoryTelemetry.jsm',
     'other/UITelemetry.jsm',
     'pings/CoveragePing.jsm',
     'pings/EventPing.jsm',
@@ -116,6 +116,7 @@ EXTRA_JS_MODULES += [
     'pings/TelemetrySession.jsm',
     'pings/UntrustedModulesPing.jsm',
     'pings/UpdatePing.jsm',
+    'TelemetryStartup.jsm',
 ]
 
 TESTING_JS_MODULES += [

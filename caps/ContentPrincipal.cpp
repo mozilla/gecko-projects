@@ -81,11 +81,24 @@ nsresult ContentPrincipal::Init(nsIURI* aCodebase,
   return NS_OK;
 }
 
+nsresult ContentPrincipal::Init(ContentPrincipal* aOther,
+                                const OriginAttributes& aOriginAttributes) {
+  NS_ENSURE_ARG(aOther);
+
+  mCodebase = aOther->mCodebase;
+  FinishInit(aOther, aOriginAttributes);
+
+  mDomain = aOther->mDomain;
+  mAddon = aOther->mAddon;
+  return NS_OK;
+}
+
 nsresult ContentPrincipal::GetScriptLocation(nsACString& aStr) {
   return mCodebase->GetSpec(aStr);
 }
 
-/* static */ nsresult ContentPrincipal::GenerateOriginNoSuffixFromURI(
+/* static */
+nsresult ContentPrincipal::GenerateOriginNoSuffixFromURI(
     nsIURI* aURI, nsACString& aOriginNoSuffix) {
   if (!aURI) {
     return NS_ERROR_FAILURE;
@@ -139,8 +152,8 @@ nsresult ContentPrincipal::GetScriptLocation(nsACString& aStr) {
        // about:blank is special since it can be generated from different
        // sources. We check for moz-safe-about:blank since origin is an
        // innermost URI.
-       !origin->GetSpecOrDefault().EqualsLiteral("moz-safe-about:blank")) ||
-      (NS_SUCCEEDED(origin->SchemeIs("indexeddb", &isBehaved)) && isBehaved)) {
+       !StringBeginsWith(origin->GetSpecOrDefault(),
+                         NS_LITERAL_CSTRING("moz-safe-about:blank")))) {
     rv = origin->GetAsciiSpec(aOriginNoSuffix);
     NS_ENSURE_SUCCESS(rv, rv);
 
@@ -348,26 +361,15 @@ ContentPrincipal::SetDomain(nsIURI* aDomain) {
   mDomain = aDomain;
   SetHasExplicitDomain();
 
-  // Recompute all wrappers between compartments using this principal and other
-  // non-chrome compartments.
-  AutoSafeJSContext cx;
-  JSPrincipals* principals =
-      nsJSPrincipals::get(static_cast<nsIPrincipal*>(this));
-  bool success =
-      js::RecomputeWrappers(cx, js::ContentCompartmentsOnly(),
-                            js::CompartmentsWithPrincipals(principals));
-  NS_ENSURE_TRUE(success, NS_ERROR_FAILURE);
-  success =
-      js::RecomputeWrappers(cx, js::CompartmentsWithPrincipals(principals),
-                            js::ContentCompartmentsOnly());
-  NS_ENSURE_TRUE(success, NS_ERROR_FAILURE);
-
   // Set the changed-document-domain flag on compartments containing realms
   // using this principal.
   auto cb = [](JSContext*, void*, JS::Handle<JS::Realm*> aRealm) {
     JS::Compartment* comp = JS::GetCompartmentForRealm(aRealm);
     xpc::SetCompartmentChangedDocumentDomain(comp);
   };
+  JSPrincipals* principals =
+      nsJSPrincipals::get(static_cast<nsIPrincipal*>(this));
+  AutoSafeJSContext cx;
   JS::IterateRealmsWithPrincipals(cx, principals, nullptr, cb);
 
   return NS_OK;
@@ -404,6 +406,12 @@ static nsresult GetSpecialBaseDomain(const nsCOMPtr<nsIURI>& aCodebase,
   }
 
   if (hasNoRelativeFlag) {
+    *aHandled = true;
+    return aCodebase->GetSpec(aBaseDomain);
+  }
+
+  bool isBehaved;
+  if (NS_SUCCEEDED(aCodebase->SchemeIs("indexeddb", &isBehaved)) && isBehaved) {
     *aHandled = true;
     return aCodebase->GetSpec(aBaseDomain);
   }

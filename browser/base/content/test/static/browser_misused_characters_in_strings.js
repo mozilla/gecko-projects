@@ -49,6 +49,18 @@ let gWhitelist = [{
     key: "clockSkewError.longDesc",
     type: "single-quote",
   }, {
+    file: "netError.dtd",
+    key: "certerror.mitm.longDesc",
+    type: "single-quote",
+  }, {
+    file: "netError.dtd",
+    key: "certerror.mitm.whatCanYouDoAboutIt3",
+    type: "single-quote",
+  }, {
+    file: "netError.dtd",
+    key: "certerror.mitm.sts.whatCanYouDoAboutIt3",
+    type: "single-quote",
+  }, {
     file: "phishing-afterload-warning-message.dtd",
     key: "safeb.palm.advisory.desc2",
     type: "single-quote",
@@ -131,14 +143,6 @@ let gWhitelist = [{
   }, {
     file: "dom.properties",
     key: "PatternAttributeCompileFailure",
-    type: "single-quote",
-  }, {
-    file: "aboutSupport.dtd",
-    key: "aboutSupport.pageSubtitle",
-    type: "single-quote",
-  }, {
-    file: "aboutSupport.dtd",
-    key: "aboutSupport.userJSDescription",
     type: "single-quote",
   }, {
     file: "netError.dtd",
@@ -256,6 +260,43 @@ add_task(async function checkAllTheDTDs() {
   let dtdLocation = gTestPath.replace(/\/[^\/]*$/i, "/bug1262648_string_with_newlines.dtd");
   await checkDTD(dtdLocation);
 });
+
+add_task(async function checkAllTheFluents() {
+  let uris = await getAllTheFiles(".ftl");
+  let {FluentResource} = ChromeUtils.import("resource://gre/modules/Fluent.jsm", {});
+  let domParser = new DOMParser();
+  for (let uri of uris) {
+    let rawContents = await fetchFile(uri.spec);
+    let resource = FluentResource.fromString(rawContents);
+    if (!resource) {
+      return;
+    }
+
+    for (let [key, val] of resource) {
+      CheckError(domParser, uri, key, val);
+    }
+  }
+});
+
+/**
+ * A recursive function which can check if a value is valid
+ *
+ * @param domParser The DOMParser object
+ * @param uri The URI of the locale file
+ * @param key The key of the entity that is being checked
+ * @param val The value of the entity that is being checked
+ */
+function CheckError(domParser, uri, key, val) {
+  if (typeof val === "string") {
+    let stripped_val = domParser.parseFromString(val, "text/html").documentElement.textContent;
+    testForErrors(uri.spec, key, stripped_val);
+  } else if (typeof val === "object" && val) {
+    let new_vals = Object.values(val);
+    for (let new_val of new_vals) {
+      CheckError(domParser, uri, key, new_val);
+    }
+  }
+}
 
 add_task(async function ensureWhiteListIsEmpty() {
   is(gWhitelist.length, 0, "No remaining whitelist entries exist");

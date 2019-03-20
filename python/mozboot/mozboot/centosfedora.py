@@ -7,10 +7,10 @@ from __future__ import absolute_import
 import platform
 
 from mozboot.base import BaseBootstrapper
-from mozboot.linux_common import NodeInstall, StyloInstall, ClangStaticAnalysisInstall
+from mozboot.linux_common import NasmInstall, NodeInstall, StyloInstall, ClangStaticAnalysisInstall
 
 
-class CentOSFedoraBootstrapper(NodeInstall, StyloInstall,
+class CentOSFedoraBootstrapper(NasmInstall, NodeInstall, StyloInstall,
                                ClangStaticAnalysisInstall, BaseBootstrapper):
     def __init__(self, distro, version, dist_id, **kwargs):
         BaseBootstrapper.__init__(self, **kwargs)
@@ -121,6 +121,7 @@ class CentOSFedoraBootstrapper(NodeInstall, StyloInstall,
         # Install Android specific packages.
         self.dnf_install(*self.mobile_android_packages)
 
+        self.ensure_java()
         from mozboot import android
         android.ensure_android('linux', artifact_mode=artifact_mode,
                                no_interactive=self.no_interactive)

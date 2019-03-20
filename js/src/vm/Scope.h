@@ -176,8 +176,8 @@ class TrailingNamesArray {
 
   explicit TrailingNamesArray(size_t nameCount) {
     if (nameCount) {
-      JS_POISON(&data_, 0xCC, sizeof(BindingName) * nameCount,
-                MemCheckKind::MakeUndefined);
+      AlwaysPoison(&data_, 0xCC, sizeof(BindingName) * nameCount,
+                   MemCheckKind::MakeUndefined);
     }
   }
 
@@ -773,6 +773,10 @@ class WithScope : public Scope {
 
  public:
   static WithScope* create(JSContext* cx, HandleScope enclosing);
+
+  template <XDRMode mode>
+  static XDRResult XDR(XDRState<mode>* xdr, HandleScope enclosing,
+                       MutableHandleScope scope);
 };
 
 //
@@ -1318,6 +1322,7 @@ class PositionalFormalParameterIter : public BindingIter {
   }
 
  public:
+  explicit PositionalFormalParameterIter(Scope* scope);
   explicit PositionalFormalParameterIter(JSScript* script);
 
   void operator++(int) {

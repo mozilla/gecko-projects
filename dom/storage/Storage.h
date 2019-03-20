@@ -134,12 +134,6 @@ class Storage : public nsISupports, public nsWrapperCache {
   virtual ~Storage();
 
   // The method checks whether the caller can use a storage.
-  // CanUseStorage is called before any DOM initiated operation
-  // on a storage is about to happen and ensures that the storage's
-  // session-only flag is properly set according the current settings.
-  // It is an optimization since the privileges check and session only
-  // state determination are complex and share the code (comes hand in
-  // hand together).
   bool CanUseStorage(nsIPrincipal& aSubjectPrincipal);
 
   virtual void LastRelease() {}

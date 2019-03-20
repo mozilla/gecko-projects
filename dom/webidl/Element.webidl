@@ -148,13 +148,6 @@ interface Element : Node {
   Attr? setAttributeNodeNS(Attr newAttr);
 
   [ChromeOnly]
-  /**
-   * Scrolls the element by (dx, dy) CSS pixels without doing any
-   * layout flushing.
-   */
-  boolean scrollByNoFlush(long dx, long dy);
-
-  [ChromeOnly]
   DOMMatrixReadOnly getTransformToAncestor(Element ancestor);
   [ChromeOnly]
   DOMMatrixReadOnly getTransformToParent();
@@ -211,10 +204,10 @@ partial interface Element {
 
 // http://domparsing.spec.whatwg.org/#extensions-to-the-element-interface
 partial interface Element {
-  [CEReactions, SetterNeedsSubjectPrincipal=NonSystem, Pure, SetterThrows, GetterCanOOM, TreatNullAs=EmptyString]
-  attribute DOMString innerHTML;
-  [CEReactions, Pure,SetterThrows,TreatNullAs=EmptyString]
-  attribute DOMString outerHTML;
+  [CEReactions, SetterNeedsSubjectPrincipal=NonSystem, Pure, SetterThrows, GetterCanOOM]
+  attribute [TreatNullAs=EmptyString] DOMString innerHTML;
+  [CEReactions, Pure, SetterThrows]
+  attribute [TreatNullAs=EmptyString] DOMString outerHTML;
   [CEReactions, Throws]
   void insertAdjacentHTML(DOMString position, DOMString text);
 };
@@ -240,7 +233,7 @@ partial interface Element {
   [BinaryName="shadowRootByMode"]
   readonly attribute ShadowRoot? shadowRoot;
 
-  [Func="nsDocument::IsCallerChromeOrAddon", BinaryName="shadowRoot"]
+  [Func="Document::IsCallerChromeOrAddon", BinaryName="shadowRoot"]
   readonly attribute ShadowRoot? openOrClosedShadowRoot;
 
   [BinaryName="assignedSlotByMode"]
@@ -261,15 +254,15 @@ Element implements GeometryUtils;
 
 // https://fullscreen.spec.whatwg.org/#api
 partial interface Element {
-  [Throws, Func="nsDocument::IsUnprefixedFullscreenEnabled", NeedsCallerType]
+  [Throws, Func="Document::IsUnprefixedFullscreenEnabled", NeedsCallerType]
   Promise<void> requestFullscreen();
   [Throws, BinaryName="requestFullscreen", NeedsCallerType, Deprecated="MozRequestFullScreenDeprecatedPrefix"]
   Promise<void> mozRequestFullScreen();
 
   // Events handlers
-  [Func="nsDocument::IsUnprefixedFullscreenEnabled"]
+  [Func="Document::IsUnprefixedFullscreenEnabled"]
   attribute EventHandler onfullscreenchange;
-  [Func="nsDocument::IsUnprefixedFullscreenEnabled"]
+  [Func="Document::IsUnprefixedFullscreenEnabled"]
   attribute EventHandler onfullscreenerror;
 };
 

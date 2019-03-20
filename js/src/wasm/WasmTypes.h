@@ -22,6 +22,7 @@
 #include "mozilla/Alignment.h"
 #include "mozilla/ArrayUtils.h"
 #include "mozilla/Atomics.h"
+#include "mozilla/BinarySearch.h"
 #include "mozilla/EnumeratedArray.h"
 #include "mozilla/HashFunctions.h"
 #include "mozilla/Maybe.h"
@@ -137,18 +138,6 @@ typedef Vector<UniqueChars, 0, SystemAllocPolicy> UniqueCharsVector;
   const uint8_t* deserialize(const uint8_t* cursor); \
   size_t sizeOfExcludingThis(mozilla::MallocSizeOf mallocSizeOf) const;
 
-#define WASM_DECLARE_SERIALIZABLE_VIRTUAL(Type)              \
-  virtual size_t serializedSize() const;                     \
-  virtual uint8_t* serialize(uint8_t* cursor) const;         \
-  virtual const uint8_t* deserialize(const uint8_t* cursor); \
-  virtual size_t sizeOfExcludingThis(mozilla::MallocSizeOf mallocSizeOf) const;
-
-#define WASM_DECLARE_SERIALIZABLE_OVERRIDE(Type)              \
-  size_t serializedSize() const override;                     \
-  uint8_t* serialize(uint8_t* cursor) const override;         \
-  const uint8_t* deserialize(const uint8_t* cursor) override; \
-  size_t sizeOfExcludingThis(mozilla::MallocSizeOf mallocSizeOf) const override;
-
 template <class T>
 struct SerializableRefPtr : RefPtr<T> {
   using RefPtr<T>::operator=;
@@ -234,6 +223,7 @@ static inline PackedTypeCode PackTypeCode(TypeCode tc, uint32_t refTypeIndex) {
   MOZ_ASSERT(uint32_t(tc) <= 0xFF);
   MOZ_ASSERT_IF(tc != TypeCode::Ref, refTypeIndex == NoRefTypeIndex);
   MOZ_ASSERT_IF(tc == TypeCode::Ref, refTypeIndex <= MaxTypes);
+  static_assert(MaxTypes < (1 << (32 - 8)), "enough bits");
   return PackedTypeCode((refTypeIndex << 8) | uint32_t(tc));
 }
 
@@ -406,6 +396,25 @@ class ValType {
 
   explicit ValType(PackedTypeCode ptc) : tc_(ptc) { MOZ_ASSERT(isValidCode()); }
 
+  explicit ValType(jit::MIRType mty) {
+    switch (mty) {
+      case jit::MIRType::Int32:
+        tc_ = PackTypeCode(TypeCode::I32);
+        break;
+      case jit::MIRType::Int64:
+        tc_ = PackTypeCode(TypeCode::I64);
+        break;
+      case jit::MIRType::Float32:
+        tc_ = PackTypeCode(TypeCode::F32);
+        break;
+      case jit::MIRType::Double:
+        tc_ = PackTypeCode(TypeCode::F64);
+        break;
+      default:
+        MOZ_CRASH("ValType(MIRType): unexpected type");
+    }
+  }
+
   static ValType fromBitsUnsafe(uint32_t bits) {
     return ValType(PackedTypeCodeFromBits(bits));
   }
@@ -471,11 +480,9 @@ static inline jit::MIRType ToMIRType(ValType vt) {
     case ValType::F64:
       return jit::MIRType::Double;
     case ValType::Ref:
-      return jit::MIRType::Pointer;
     case ValType::AnyRef:
-      return jit::MIRType::Pointer;
     case ValType::NullRef:
-      return jit::MIRType::Pointer;
+      return jit::MIRType::RefOrNull;
   }
   MOZ_MAKE_COMPILER_ASSUME_IS_UNREACHABLE("bad type");
 }
@@ -524,6 +531,88 @@ static inline const char* ToCString(ValType type) {
   return ToCString(ExprType(type));
 }
 
+// An AnyRef is a boxed value that can represent any wasm reference type and any
+// host type that the host system allows to flow into and out of wasm
+// transparently.  It is a pointer-sized datum that has the same representation
+// as all its subtypes (funcref, eqref, (ref T), et al) due to the non-coercive
+// subtyping of the wasm type system.  Its current representation is a plain
+// JSObject*, and the private JSObject subtype WasmValueBox is used to box
+// non-object JS values.
+//
+// The C++/wasm boundary always uses a 'void*' type to express AnyRef values, to
+// emphasize the pointer-ness of the value.  The C++ code must transform the
+// void* into an AnyRef by calling AnyRef::fromCompiledCode(), and transform an
+// AnyRef into a void* by calling AnyRef::toCompiledCode().  Once in C++, we use
+// AnyRef everywhere.  A JS Value is transformed into an AnyRef by calling
+// AnyRef::box(), and the AnyRef is transformed into a JS Value by calling
+// AnyRef::unbox().
+//
+// NOTE that AnyRef values may point to GC'd storage and as such need to be
+// rooted if they are kept live in boxed form across code that may cause GC!
+// Use RootedAnyRef / HandleAnyRef / MutableHandleAnyRef where necessary.
+//
+// The lowest bits of the pointer value are used for tagging, to allow for some
+// representation optimizations and to distinguish various types.
+
+// For version 0, we simply equate AnyRef and JSObject* (this means that there
+// are technically no tags at all yet).  We use a simple boxing scheme that
+// wraps a JS value that is not already JSObject in a distinguishable JSObject
+// that holds the value, see WasmTypes.cpp for details.
+
+class AnyRef {
+  JSObject* value_;
+
+  explicit AnyRef(JSObject* p) : value_(p) {
+    MOZ_ASSERT(((uintptr_t)p & 0x03) == 0);
+  }
+
+ public:
+  // Given a void* that comes from compiled wasm code, turn it into AnyRef.
+  static AnyRef fromCompiledCode(void* p) { return AnyRef((JSObject*)p); }
+
+  // Given a JSObject* that comes from JS, turn it into AnyRef.
+  static AnyRef fromJSObject(JSObject* p) { return AnyRef(p); }
+
+  // Generate an AnyRef null pointer.
+  static AnyRef null() { return AnyRef(nullptr); }
+
+  bool isNull() { return value_ == nullptr; }
+
+  void* forCompiledCode() const { return value_; }
+
+  JSObject* asJSObject() { return value_; }
+
+  JSObject** asJSObjectAddress() { return &value_; }
+
+  void trace(JSTracer* trc);
+
+  // Tags (to be developed further)
+  static constexpr uintptr_t AnyRefTagMask = 1;
+  static constexpr uintptr_t AnyRefObjTag = 0;
+};
+
+typedef Rooted<AnyRef> RootedAnyRef;
+typedef Handle<AnyRef> HandleAnyRef;
+typedef MutableHandle<AnyRef> MutableHandleAnyRef;
+
+// TODO/AnyRef-boxing: With boxed immediates and strings, these will be defined
+// as MOZ_CRASH or similar so that we can find all locations that need to be
+// fixed.
+
+#define ASSERT_ANYREF_IS_JSOBJECT (void)(0)
+#define STATIC_ASSERT_ANYREF_IS_JSOBJECT static_assert(1, "AnyRef is JSObject")
+
+// Given any JS value, box it as an AnyRef and store it in *result.  Returns
+// false on OOM.
+
+bool BoxAnyRef(JSContext* cx, HandleValue val, MutableHandleAnyRef result);
+
+// Given any AnyRef, unbox it as a JS Value.  If it is a reference to a wasm
+// object it will be reflected as a JSObject* representing some TypedObject
+// instance.
+
+Value UnboxAnyRef(AnyRef val);
+
 // Code can be compiled either with the Baseline compiler or the Ion compiler,
 // and tier-variant data are tagged with the Tier value.
 //
@@ -554,6 +643,11 @@ enum class CompileMode { Once, Tier1, Tier2 };
 
 enum class DebugEnabled { False, True };
 
+// A wasm module can either use no memory, a unshared memory (ArrayBuffer) or
+// shared memory (SharedArrayBuffer).
+
+enum class MemoryUsage { None = false, Unshared = 1, Shared = 2 };
+
 // Iterator over tiers present in a tiered data structure.
 
 class Tiers {
@@ -583,8 +677,6 @@ enum ModuleKind { Wasm, AsmJS };
 
 enum class Shareable { False, True };
 
-enum class HasGcTypes { False, True };
-
 // The LitVal class represents a single WebAssembly value of a given value
 // type, mostly for the purpose of numeric literals and initializers. A LitVal
 // does not directly map to a JS value since there is not (currently) a precise
@@ -596,11 +688,13 @@ class LitVal {
  protected:
   ValType type_;
   union U {
+    U() : i32_(0) {}
     uint32_t i32_;
     uint64_t i64_;
     float f32_;
     double f64_;
-    JSObject* ptr_;
+    JSObject* ref_;  // Note, this breaks an abstraction boundary
+    AnyRef anyref_;
   } u;
 
  public:
@@ -612,12 +706,17 @@ class LitVal {
   explicit LitVal(float f32) : type_(ValType::F32) { u.f32_ = f32; }
   explicit LitVal(double f64) : type_(ValType::F64) { u.f64_ = f64; }
 
-  explicit LitVal(ValType refType, JSObject* ptr) : type_(refType) {
-    MOZ_ASSERT(refType.isReference());
-    MOZ_ASSERT(refType != ValType::NullRef);
-    MOZ_ASSERT(ptr == nullptr,
+  explicit LitVal(AnyRef any) : type_(ValType::AnyRef) {
+    MOZ_ASSERT(any.isNull(),
                "use Val for non-nullptr ref types to get tracing");
-    u.ptr_ = ptr;
+    u.anyref_ = any;
+  }
+
+  explicit LitVal(ValType refType, JSObject* ref) : type_(refType) {
+    MOZ_ASSERT(refType.isRef());
+    MOZ_ASSERT(ref == nullptr,
+               "use Val for non-nullptr ref types to get tracing");
+    u.ref_ = ref;
   }
 
   ValType type() const { return type_; }
@@ -639,13 +738,15 @@ class LitVal {
     MOZ_ASSERT(type_ == ValType::F64);
     return u.f64_;
   }
-  JSObject* ptr() const {
-    MOZ_ASSERT(type_.isReference());
-    return u.ptr_;
+  JSObject* ref() const {
+    MOZ_ASSERT(type_.isRef());
+    return u.ref_;
+  }
+  AnyRef anyref() const {
+    MOZ_ASSERT(type_ == ValType::AnyRef);
+    return u.anyref_;
   }
 };
-
-typedef Vector<LitVal, 0, SystemAllocPolicy> LitValVector;
 
 // A Val is a LitVal that can contain pointers to JSObjects, thanks to their
 // trace implementation. Since a Val is able to store a pointer to a JSObject,
@@ -661,10 +762,10 @@ class MOZ_NON_PARAM Val : public LitVal {
   explicit Val(uint64_t i64) : LitVal(i64) {}
   explicit Val(float f32) : LitVal(f32) {}
   explicit Val(double f64) : LitVal(f64) {}
-  explicit Val(ValType type, JSObject* obj) : LitVal(type, nullptr) {
-    u.ptr_ = obj;
+  explicit Val(AnyRef val) : LitVal(AnyRef::null()) { u.anyref_ = val; }
+  explicit Val(ValType type, JSObject* obj) : LitVal(type, (JSObject*)nullptr) {
+    u.ref_ = obj;
   }
-  void writePayload(uint8_t* dst) const;
   void trace(JSTracer* trc);
 };
 
@@ -1060,13 +1161,13 @@ typedef Vector<GlobalDesc, 0, SystemAllocPolicy> GlobalDescVector;
 
 // When a ElemSegment is "passive" it is shared between a wasm::Module and its
 // wasm::Instances. To allow each segment to be released as soon as the last
-// Instance table.drops it and the Module is destroyed, each ElemSegment is
+// Instance elem.drops it and the Module is destroyed, each ElemSegment is
 // individually atomically ref-counted.
 
 struct ElemSegment : AtomicRefCounted<ElemSegment> {
   uint32_t tableIndex;
   Maybe<InitExpr> offsetIfActive;
-  Uint32Vector elemFuncIndices;
+  Uint32Vector elemFuncIndices;  // Element may be NullFuncIndex
 
   bool active() const { return !!offsetIfActive; }
 
@@ -1076,6 +1177,11 @@ struct ElemSegment : AtomicRefCounted<ElemSegment> {
 
   WASM_DECLARE_SERIALIZABLE(ElemSegment)
 };
+
+// NullFuncIndex represents the case when an element segment (of type funcref)
+// contains a null element.
+constexpr uint32_t NullFuncIndex = UINT32_MAX;
+static_assert(NullFuncIndex > MaxFuncs, "Invariant");
 
 typedef RefPtr<ElemSegment> MutableElemSegment;
 typedef SerializableRefPtr<const ElemSegment> SharedElemSegment;
@@ -1749,7 +1855,7 @@ enum class SymbolicAddress {
   CallImport_I32,
   CallImport_I64,
   CallImport_F64,
-  CallImport_Ref,
+  CallImport_AnyRef,
   CoerceInPlace_ToInt32,
   CoerceInPlace_ToNumber,
   CoerceInPlace_JitEntry,
@@ -1765,30 +1871,72 @@ enum class SymbolicAddress {
   Uint64ToDouble,
   Int64ToFloat32,
   Int64ToDouble,
-  GrowMemory,
-  CurrentMemory,
+  MemoryGrow,
+  MemorySize,
   WaitI32,
   WaitI64,
   Wake,
   MemCopy,
-  MemDrop,
+  DataDrop,
   MemFill,
   MemInit,
   TableCopy,
-  TableDrop,
+  ElemDrop,
   TableGet,
   TableGrow,
   TableInit,
   TableSet,
   TableSize,
   PostBarrier,
+  PostBarrierFiltering,
   StructNew,
   StructNarrow,
 #if defined(JS_CODEGEN_MIPS32)
   js_jit_gAtomic64Lock,
 #endif
+#ifdef WASM_CODEGEN_DEBUG
+  PrintI32,
+  PrintPtr,
+  PrintF32,
+  PrintF64,
+  PrintText,
+#endif
   Limit
 };
+
+// SymbolicAddressSignature carries type information for a function referred
+// to by a SymbolicAddress.  In order that |argTypes| can be written out as a
+// static initialiser, it has to have fixed length.  At present
+// SymbolicAddressType is used to describe functions with at most 6 arguments,
+// so |argTypes| has 7 entries in order to allow the last value to be
+// MIRType::None, in the hope of catching any accidental overruns of the
+// defined section of the array.
+
+static constexpr size_t SymbolicAddressSignatureMaxArgs = 6;
+
+struct SymbolicAddressSignature {
+  // The SymbolicAddress that is described.
+  const SymbolicAddress identity;
+  // The return type, or MIRType::None to denote 'void'.
+  const jit::MIRType retType;
+  // The number of arguments, 0 .. SymbolicAddressSignatureMaxArgs only.
+  const uint8_t numArgs;
+  // The argument types; SymbolicAddressSignatureMaxArgs + 1 guard, which
+  // should be MIRType::None.
+  const jit::MIRType argTypes[SymbolicAddressSignatureMaxArgs + 1];
+};
+
+// The 16 in this assertion is derived as follows: SymbolicAddress is probably
+// size-4 aligned-4, but it's at the start of the struct, so there's no
+// alignment hole before it.  All other components (MIRType and uint8_t) are
+// size-1 aligned-1, and there are 8 in total, so it is reasonable to assume
+// that they also don't create any alignment holes.  Hence it is also
+// reasonable to assume that the actual size is 1 * 4 + 8 * 1 == 12.  The
+// worst-plausible-case rounding will take that up to 16.  Hence, the
+// assertion uses 16.
+
+static_assert(sizeof(SymbolicAddressSignature) <= 16,
+              "SymbolicAddressSignature unexpectedly large");
 
 bool IsRoundingFunction(SymbolicAddress callee, jit::RoundingMode* mode);
 
@@ -2204,6 +2352,7 @@ class DebugFrame {
     int32_t resultI32_;
     int64_t resultI64_;
     intptr_t resultRef_;
+    AnyRef resultAnyRef_;
     float resultF32_;
     double resultF64_;
   };
@@ -2246,6 +2395,7 @@ class DebugFrame {
   uint32_t funcIndex() const { return funcIndex_; }
   Instance* instance() const { return frame_.instance(); }
   GlobalObject* global() const;
+  bool hasGlobal(const GlobalObject* global) const;
   JSObject* environmentChain() const;
   bool getLocal(uint32_t localIndex, MutableHandleValue vp);
 
@@ -2253,6 +2403,7 @@ class DebugFrame {
   // results union into cachedReturnJSValue_ by updateReturnJSValue() before
   // returnValue() can return a Handle to it.
 
+  bool hasCachedReturnJSValue() const { return hasCachedReturnJSValue_; }
   void updateReturnJSValue();
   HandleValue returnValue() const;
   void clearReturnJSValue();
@@ -2291,6 +2442,9 @@ class DebugFrame {
   static constexpr size_t offsetOfResults() {
     return offsetof(DebugFrame, resultI32_);
   }
+  static constexpr size_t offsetOfCachedReturnJSValue() {
+    return offsetof(DebugFrame, cachedReturnJSValue_);
+  }
   static constexpr size_t offsetOfFlagsWord() {
     return offsetof(DebugFrame, flagsWord_);
   }
@@ -2307,6 +2461,24 @@ class DebugFrame {
   static const unsigned Alignment = 8;
   static void alignmentStaticAsserts();
 };
+
+// Verbose logging support.
+
+extern void Log(JSContext* cx, const char* fmt, ...) MOZ_FORMAT_PRINTF(2, 3);
+
+// Codegen debug support.
+
+enum class DebugChannel {
+  Function,
+  Import,
+};
+
+#ifdef WASM_CODEGEN_DEBUG
+bool IsCodegenDebugEnabled(DebugChannel channel);
+#endif
+
+void DebugCodegen(DebugChannel channel, const char* fmt, ...)
+    MOZ_FORMAT_PRINTF(2, 3);
 
 }  // namespace wasm
 }  // namespace js

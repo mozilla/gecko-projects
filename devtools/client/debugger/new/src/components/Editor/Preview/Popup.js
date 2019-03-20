@@ -5,7 +5,7 @@
 // @flow
 
 import React, { Component } from "react";
-import { connect } from "react-redux";
+import { connect } from "../../../utils/connect";
 
 import Reps from "devtools-reps";
 const {
@@ -17,17 +17,19 @@ const {
 const { ObjectInspector, utils } = objectInspector;
 
 const {
-  node: { createNode, getChildren, getValue, nodeIsPrimitive, NODE_TYPES },
+  node: { createNode, getChildren, getValue, nodeIsPrimitive },
   loadProperties: { loadItemProperties }
 } = utils;
 
 import actions from "../../../actions";
-import { getAllPopupObjectProperties } from "../../../selectors";
+import {
+  getAllPopupObjectProperties,
+  getCurrentThread
+} from "../../../selectors";
 import Popover from "../../shared/Popover";
 import PreviewFunction from "../../shared/PreviewFunction";
-import { isReactComponent, isImmutablePreview } from "../../../utils/preview";
 
-import Svg from "../../shared/Svg";
+import AccessibleImage from "../../shared/AccessibleImage";
 import { createObjectClient } from "../../../client/firefox";
 
 import "./Popup.css";
@@ -37,8 +39,6 @@ import type { Coords } from "../../shared/Popover";
 
 type PopupValue = Object | null;
 type Props = {
-  setPopupObjectProperties: (Object, Object) => void,
-  addExpression: (string, ?Object) => void,
   popupObjectProperties: Object,
   popoverPos: Object,
   value: PopupValue,
@@ -47,9 +47,11 @@ type Props = {
   range: EditorRange,
   editor: any,
   editorRef: ?HTMLDivElement,
-  selectSourceURL: (string, Object) => void,
-  openLink: string => void,
-  extra: Object
+  setPopupObjectProperties: typeof actions.setPopupObjectProperties,
+  addExpression: typeof actions.addExpression,
+  selectSourceURL: typeof actions.selectSourceURL,
+  openLink: typeof actions.openLink,
+  openElementInInspector: typeof actions.openElementInInspectorCommand
 };
 
 type State = {
@@ -128,17 +130,12 @@ export class Popup extends Component<Props, State> {
   };
 
   getRoot() {
-    const { expression, value, extra } = this.props;
-
-    let rootValue = value;
-    if (extra.immutable) {
-      rootValue = extra.immutable.entries;
-    }
+    const { expression, value } = this.props;
 
     return createNode({
       name: expression,
       path: expression,
-      contents: { value: rootValue }
+      contents: { value }
     });
   }
 
@@ -204,43 +201,22 @@ export class Popup extends Component<Props, State> {
 
     return (
       <div className="header-container">
-        <Svg name="react" className="logo" />
+        <AccessibleImage className="logo react" />
         <h3>{reactHeader}</h3>
       </div>
     );
   }
 
-  renderImmutable(immutable: Object) {
-    const immutableHeader = immutable.type || "Immutable";
-
-    return (
-      <div className="header-container">
-        <Svg name="immutable" className="logo" />
-        <h3>{immutableHeader}</h3>
-      </div>
-    );
-  }
-
   renderObjectPreview() {
-    const { extra, value } = this.props;
     const root = this.getRoot();
 
     if (nodeIsPrimitive(root)) {
       return null;
     }
 
-    let roots = this.getChildren();
+    const roots = this.getChildren();
     if (!Array.isArray(roots) || roots.length === 0) {
       return null;
-    }
-
-    let header = null;
-    if (extra.immutable && isImmutablePreview(value)) {
-      header = this.renderImmutable(extra.immutable);
-      roots = roots.filter(r => r.type != NODE_TYPES.PROTOTYPE);
-    } else if (extra.react && isReactComponent(this.getObjectProperties())) {
-      header = this.renderReact(extra.react);
-      roots = roots.filter(r => ["state", "props"].includes(r.name));
     }
 
     return (
@@ -248,7 +224,6 @@ export class Popup extends Component<Props, State> {
         className="preview-popup"
         style={{ maxHeight: this.calculateMaxHeight() }}
       >
-        {header}
         {this.renderObjectInspector(roots)}
       </div>
     );
@@ -268,7 +243,7 @@ export class Popup extends Component<Props, State> {
   }
 
   renderObjectInspector(roots: Array<Object>) {
-    const { openLink } = this.props;
+    const { openLink, openElementInInspector } = this.props;
 
     return (
       <ObjectInspector
@@ -278,6 +253,8 @@ export class Popup extends Component<Props, State> {
         focusable={false}
         openLink={openLink}
         createObjectClient={grip => createObjectClient(grip)}
+        onDOMNodeClick={grip => openElementInInspector(grip)}
+        onInspectIconClick={grip => openElementInInspector(grip)}
       />
     );
   }
@@ -344,23 +321,26 @@ export class Popup extends Component<Props, State> {
 }
 
 const mapStateToProps = state => ({
-  popupObjectProperties: getAllPopupObjectProperties(state)
+  popupObjectProperties: getAllPopupObjectProperties(
+    state,
+    getCurrentThread(state)
+  )
 });
 
 const {
   addExpression,
   selectSourceURL,
-  selectLocation,
   setPopupObjectProperties,
-  openLink
+  openLink,
+  openElementInInspectorCommand
 } = actions;
 
 const mapDispatchToProps = {
   addExpression,
   selectSourceURL,
-  selectLocation,
   setPopupObjectProperties,
-  openLink
+  openLink,
+  openElementInInspector: openElementInInspectorCommand
 };
 
 export default connect(

@@ -8,7 +8,7 @@ from six.moves import input
 wpt_root = os.path.abspath(os.path.join(os.path.dirname(__file__), os.pardir, os.pardir))
 sys.path.insert(0, os.path.abspath(os.path.join(wpt_root, "tools")))
 
-from . import browser, install, utils, virtualenv
+from . import browser, install, testfiles, utils, virtualenv
 from ..serve import serve
 
 logger = None
@@ -45,6 +45,8 @@ def create_parser():
     parser = argparse.ArgumentParser(add_help=False)
     parser.add_argument("product", action="store",
                         help="Browser to run tests in")
+    parser.add_argument("--affected", action="store", default=None,
+                        help="Run affected tests since revish")
     parser.add_argument("--yes", "-y", dest="prompt", action="store_false", default=True,
                         help="Don't prompt before installing components")
     parser.add_argument("--install-browser", action="store_true",
@@ -63,9 +65,12 @@ def create_parser():
     return parser
 
 
-def exit(msg):
-    logger.error(msg)
-    sys.exit(1)
+def exit(msg=None):
+    if msg:
+        logger.error(msg)
+        sys.exit(1)
+    else:
+        sys.exit(0)
 
 
 def args_general(kwargs):
@@ -146,7 +151,7 @@ class BrowserSetup(object):
     browser_cls = None
 
     def __init__(self, venv, prompt=True, sub_product=None):
-        self.browser = self.browser_cls()
+        self.browser = self.browser_cls(logger)
         self.venv = venv
         self.prompt = prompt
         self.sub_product = sub_product
@@ -166,7 +171,8 @@ class BrowserSetup(object):
             return self.browser.install(venv.path, channel)
 
     def install_requirements(self):
-        self.venv.install_requirements(os.path.join(wpt_root, "tools", "wptrunner", self.browser.requirements))
+        if not self.venv.skip_virtualenv_setup:
+            self.venv.install_requirements(os.path.join(wpt_root, "tools", "wptrunner", self.browser.requirements))
 
     def setup(self, kwargs):
         self.setup_kwargs(kwargs)
@@ -391,11 +397,6 @@ class Safari(BrowserSetup):
             kwargs["webdriver_binary"] = webdriver_binary
 
 
-class SafariWebDriver(Safari):
-    name = "safari_webdriver"
-    browser_cls = browser.SafariWebDriver
-
-
 class Sauce(BrowserSetup):
     name = "sauce"
     browser_cls = browser.Sauce
@@ -422,7 +423,7 @@ class Servo(BrowserSetup):
             binary = self.browser.find_binary(self.venv.path, None)
 
             if binary is None:
-                raise WptrunError("Unable to find servo binary on the PATH")
+                raise WptrunError("Unable to find servo binary in PATH")
             kwargs["binary"] = binary
 
 
@@ -442,6 +443,29 @@ class WebKit(BrowserSetup):
         pass
 
 
+class Epiphany(BrowserSetup):
+    name = "epiphany"
+    browser_cls = browser.Epiphany
+
+    def install(self, venv, channel=None):
+        raise NotImplementedError
+
+    def setup_kwargs(self, kwargs):
+        if kwargs["binary"] is None:
+            binary = self.browser.find_binary()
+
+            if binary is None:
+                raise WptrunError("Unable to find epiphany in PATH")
+            kwargs["binary"] = binary
+
+        if kwargs["webdriver_binary"] is None:
+            webdriver_binary = self.browser.find_webdriver()
+
+            if webdriver_binary is None:
+                raise WptrunError("Unable to find WebKitWebDriver in PATH")
+            kwargs["webdriver_binary"] = webdriver_binary
+
+
 product_setup = {
     "fennec": Fennec,
     "firefox": Firefox,
@@ -451,28 +475,31 @@ product_setup = {
     "edge_webdriver": EdgeWebDriver,
     "ie": InternetExplorer,
     "safari": Safari,
-    "safari_webdriver": SafariWebDriver,
     "servo": Servo,
     "servodriver": ServoWebDriver,
     "sauce": Sauce,
     "opera": Opera,
     "webkit": WebKit,
+    "epiphany": Epiphany,
 }
 
 
-def setup_logging(kwargs):
+def setup_logging(kwargs, default_config=None):
     import mozlog
     from wptrunner import wptrunner
 
     global logger
 
     # Use the grouped formatter by default where mozlog 3.9+ is installed
-    if hasattr(mozlog.formatters, "GroupingFormatter"):
-        default_formatter = "grouped"
-    else:
-        default_formatter = "mach"
-    wptrunner.setup_logging(kwargs, {default_formatter: sys.stdout})
+    if default_config is None:
+        if hasattr(mozlog.formatters, "GroupingFormatter"):
+            default_formatter = "grouped"
+        else:
+            default_formatter = "mach"
+        default_config = {default_formatter: sys.stdout}
+    wptrunner.setup_logging(kwargs, default_config)
     logger = wptrunner.logger
+    return logger
 
 
 def setup_wptrunner(venv, prompt=True, install_browser=False, **kwargs):
@@ -492,6 +519,25 @@ def setup_wptrunner(venv, prompt=True, install_browser=False, **kwargs):
 
     setup_cls = product_setup[kwargs["product"]](venv, prompt, sub_product)
     setup_cls.install_requirements()
+
+    affected_revish = kwargs.pop("affected", None)
+    if affected_revish is not None:
+        # TODO: Consolidate with `./wpt tests-affected --ignore-rules`:
+        # https://github.com/web-platform-tests/wpt/issues/14560
+        files_changed, _ = testfiles.files_changed(
+            affected_revish,
+            ignore_rules=["resources/testharness*"],
+            include_uncommitted=True, include_new=True)
+        # TODO: Perhaps use wptrunner.testloader.ManifestLoader here
+        # and remove the manifest-related code from testfiles.
+        # https://github.com/web-platform-tests/wpt/issues/14421
+        tests_changed, tests_affected = testfiles.affected_testfiles(
+            files_changed, manifest_path=kwargs.get("manifest_path"), manifest_update=kwargs["manifest_update"])
+        test_list = tests_changed | tests_affected
+        logger.info("Identified %s affected tests" % len(test_list))
+        test_list = [os.path.relpath(item, wpt_root) for item in test_list]
+        kwargs["test_list"] += test_list
+        kwargs["default_exclude"] = True
 
     if install_browser and not kwargs["channel"]:
         logger.info("--install-browser is given but --channel is not set, default to nightly channel")
@@ -518,7 +564,8 @@ def setup_wptrunner(venv, prompt=True, install_browser=False, **kwargs):
 
     wptrunner_path = os.path.join(wpt_root, "tools", "wptrunner")
 
-    venv.install_requirements(os.path.join(wptrunner_path, "requirements.txt"))
+    if not venv.skip_virtualenv_setup:
+        venv.install_requirements(os.path.join(wptrunner_path, "requirements.txt"))
 
     kwargs['browser_version'] = setup_cls.browser.version(binary=kwargs.get("binary"),
                                                           webdriver_binary=kwargs.get("webdriver_binary"))

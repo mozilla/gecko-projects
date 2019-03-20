@@ -2,8 +2,8 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
-ChromeUtils.import("resource://gre/modules/Services.jsm");
+const {XPCOMUtils} = ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
+const {Services} = ChromeUtils.import("resource://gre/modules/Services.jsm");
 
 ChromeUtils.defineModuleGetter(this, "LoginHelper",
                                "resource://gre/modules/LoginHelper.jsm");
@@ -19,9 +19,10 @@ LoginManagerCrypto_SDR.prototype = {
 
   __decoderRing: null,  // nsSecretDecoderRing service
   get _decoderRing() {
-    if (!this.__decoderRing)
+    if (!this.__decoderRing) {
       this.__decoderRing = Cc["@mozilla.org/security/sdr;1"].
                            getService(Ci.nsISecretDecoderRing);
+    }
     return this.__decoderRing;
   },
 
@@ -88,10 +89,11 @@ LoginManagerCrypto_SDR.prototype = {
     } finally {
       this._uiBusy = false;
       // If we triggered a master password prompt, notify observers.
-      if (!wasLoggedIn && this.isLoggedIn)
+      if (!wasLoggedIn && this.isLoggedIn) {
         this._notifyObservers("passwordmgr-crypto-login");
-      else if (canceledMP)
+      } else if (canceledMP) {
         this._notifyObservers("passwordmgr-crypto-loginCanceled");
+      }
     }
     return cipherText;
   },
@@ -181,10 +183,11 @@ LoginManagerCrypto_SDR.prototype = {
     } finally {
       this._uiBusy = false;
       // If we triggered a master password prompt, notify observers.
-      if (!wasLoggedIn && this.isLoggedIn)
+      if (!wasLoggedIn && this.isLoggedIn) {
         this._notifyObservers("passwordmgr-crypto-login");
-      else if (canceledMP)
+      } else if (canceledMP) {
         this._notifyObservers("passwordmgr-crypto-loginCanceled");
+      }
     }
 
     return plainText;
@@ -232,5 +235,4 @@ XPCOMUtils.defineLazyGetter(this.LoginManagerCrypto_SDR.prototype, "log", () => 
   return logger.log.bind(logger);
 });
 
-var component = [LoginManagerCrypto_SDR];
-this.NSGetFactory = XPCOMUtils.generateNSGetFactory(component);
+var EXPORTED_SYMBOLS = ["LoginManagerCrypto_SDR"];

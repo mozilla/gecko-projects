@@ -29,12 +29,12 @@ add_task(async function testUpdatePingReady() {
       notificationId: "update-available",
       button: "button",
       beforeClick() {
-        checkWhatsNewLink("update-available-whats-new");
+        checkWhatsNewLink(window, "update-available-whats-new");
       },
     },
     {
       notificationId: "update-restart",
-      button: "secondarybutton",
+      button: "secondaryButton",
       cleanup() {
         AppMenuNotifications.removeNotification(/.*/);
       },

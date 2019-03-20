@@ -11,6 +11,7 @@ const NCB_PREF = "network.cookie.cookieBehavior";
 const BENIGN_PAGE = "http://tracking.example.org/browser/browser/base/content/test/trackingUI/benignPage.html";
 const TRACKING_PAGE = "http://tracking.example.org/browser/browser/base/content/test/trackingUI/trackingPage.html";
 const COOKIE_PAGE = "http://tracking.example.org/browser/browser/base/content/test/trackingUI/cookiePage.html";
+const DTSCBN_PREF = "dom.testing.sync-content-blocking-notifications";
 
 requestLongerTimeout(2);
 
@@ -19,27 +20,13 @@ registerCleanupFunction(function() {
   Services.prefs.clearUserPref(TP_PREF);
   Services.prefs.clearUserPref(TP_PB_PREF);
   Services.prefs.clearUserPref(NCB_PREF);
+  Services.prefs.clearUserPref(DTSCBN_PREF);
   Services.prefs.clearUserPref(ContentBlocking.prefIntroCount);
 });
 
-function waitForSecurityChange(tabbrowser, numChanges = 1) {
-  return new Promise(resolve => {
-    let n = 0;
-    let listener = {
-      onSecurityChange() {
-        n = n + 1;
-        info("Received onSecurityChange event " + n + " of " + numChanges);
-        if (n >= numChanges) {
-          tabbrowser.removeProgressListener(listener);
-          resolve(n);
-        }
-      },
-    };
-    tabbrowser.addProgressListener(listener);
-  });
-}
-
 async function testTrackingProtectionAnimation(tabbrowser) {
+  Services.prefs.setBoolPref(DTSCBN_PREF, true);
+
   info("Load a test page not containing tracking elements");
   let benignTab = await BrowserTestUtils.openNewForegroundTab(tabbrowser, BENIGN_PAGE);
   let ContentBlocking = tabbrowser.ownerGlobal.ContentBlocking;
@@ -62,7 +49,7 @@ async function testTrackingProtectionAnimation(tabbrowser) {
   await BrowserTestUtils.waitForEvent(ContentBlocking.animatedIcon, "animationend");
 
   info("Switch from tracking cookie -> benign tab");
-  let securityChanged = waitForSecurityChange(tabbrowser);
+  let securityChanged = waitForSecurityChange(1, tabbrowser.ownerGlobal);
   tabbrowser.selectedTab = benignTab;
   await securityChanged;
 
@@ -70,7 +57,7 @@ async function testTrackingProtectionAnimation(tabbrowser) {
   ok(!ContentBlocking.iconBox.hasAttribute("animate"), "iconBox not animating");
 
   info("Switch from benign -> tracking tab");
-  securityChanged = waitForSecurityChange(tabbrowser);
+  securityChanged = waitForSecurityChange(1, tabbrowser.ownerGlobal);
   tabbrowser.selectedTab = trackingTab;
   await securityChanged;
 
@@ -78,7 +65,7 @@ async function testTrackingProtectionAnimation(tabbrowser) {
   ok(!ContentBlocking.iconBox.hasAttribute("animate"), "iconBox not animating");
 
   info("Switch from tracking -> tracking cookies tab");
-  securityChanged = waitForSecurityChange(tabbrowser);
+  securityChanged = waitForSecurityChange(1, tabbrowser.ownerGlobal);
   tabbrowser.selectedTab = trackingCookiesTab;
   await securityChanged;
 
@@ -86,26 +73,28 @@ async function testTrackingProtectionAnimation(tabbrowser) {
   ok(!ContentBlocking.iconBox.hasAttribute("animate"), "iconBox not animating");
 
   info("Reload tracking cookies tab");
-  securityChanged = waitForSecurityChange(tabbrowser, 3);
+  securityChanged = waitForSecurityChange(1, tabbrowser.ownerGlobal);
+  let contentBlockingEvent = waitForContentBlockingEvent(2, tabbrowser.ownerGlobal);
   tabbrowser.reload();
-  await securityChanged;
+  await Promise.all([securityChanged, contentBlockingEvent]);
 
   ok(ContentBlocking.iconBox.hasAttribute("active"), "iconBox active");
   ok(ContentBlocking.iconBox.hasAttribute("animate"), "iconBox animating");
   await BrowserTestUtils.waitForEvent(ContentBlocking.animatedIcon, "animationend");
 
   info("Reload tracking tab");
-  securityChanged = waitForSecurityChange(tabbrowser, 4);
+  securityChanged = waitForSecurityChange(2, tabbrowser.ownerGlobal);
+  contentBlockingEvent = waitForContentBlockingEvent(3, tabbrowser.ownerGlobal);
   tabbrowser.selectedTab = trackingTab;
   tabbrowser.reload();
-  await securityChanged;
+  await Promise.all([securityChanged, contentBlockingEvent]);
 
   ok(ContentBlocking.iconBox.hasAttribute("active"), "iconBox active");
   ok(ContentBlocking.iconBox.hasAttribute("animate"), "iconBox animating");
   await BrowserTestUtils.waitForEvent(ContentBlocking.animatedIcon, "animationend");
 
   info("Inject tracking cookie inside tracking tab");
-  securityChanged = waitForSecurityChange(tabbrowser);
+  securityChanged = waitForSecurityChange(1, tabbrowser.ownerGlobal);
   let timeoutPromise = new Promise(resolve => setTimeout(resolve, 500));
   await ContentTask.spawn(tabbrowser.selectedBrowser, {},
                           function() {
@@ -118,7 +107,7 @@ async function testTrackingProtectionAnimation(tabbrowser) {
   ok(!ContentBlocking.iconBox.hasAttribute("animate"), "iconBox not animating");
 
   info("Inject tracking element inside tracking tab");
-  securityChanged = waitForSecurityChange(tabbrowser);
+  securityChanged = waitForSecurityChange(1, tabbrowser.ownerGlobal);
   timeoutPromise = new Promise(resolve => setTimeout(resolve, 500));
   await ContentTask.spawn(tabbrowser.selectedBrowser, {},
                           function() {
@@ -133,7 +122,7 @@ async function testTrackingProtectionAnimation(tabbrowser) {
   tabbrowser.selectedTab = trackingCookiesTab;
 
   info("Inject tracking cookie inside tracking cookies tab");
-  securityChanged = waitForSecurityChange(tabbrowser);
+  securityChanged = waitForSecurityChange(1, tabbrowser.ownerGlobal);
   timeoutPromise = new Promise(resolve => setTimeout(resolve, 500));
   await ContentTask.spawn(tabbrowser.selectedBrowser, {},
                           function() {
@@ -146,7 +135,7 @@ async function testTrackingProtectionAnimation(tabbrowser) {
   ok(!ContentBlocking.iconBox.hasAttribute("animate"), "iconBox not animating");
 
   info("Inject tracking element inside tracking cookies tab");
-  securityChanged = waitForSecurityChange(tabbrowser);
+  securityChanged = waitForSecurityChange(1, tabbrowser.ownerGlobal);
   timeoutPromise = new Promise(resolve => setTimeout(resolve, 500));
   await ContentTask.spawn(tabbrowser.selectedBrowser, {},
                           function() {

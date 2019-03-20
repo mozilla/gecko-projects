@@ -12,10 +12,12 @@ import org.mozilla.gecko.InputMethods;
 import org.mozilla.gecko.util.ActivityUtils;
 import org.mozilla.gecko.util.ThreadUtils;
 
+import android.annotation.SuppressLint;
 import android.annotation.TargetApi;
 import android.app.Activity;
 import android.content.Context;
 import android.content.res.Configuration;
+import android.graphics.Bitmap;
 import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.Rect;
@@ -24,8 +26,9 @@ import android.os.Build;
 import android.os.Handler;
 import android.os.Parcel;
 import android.os.Parcelable;
-import android.support.annotation.Nullable;
+import android.support.annotation.AnyThread;
 import android.support.annotation.NonNull;
+import android.support.annotation.Nullable;
 import android.support.annotation.UiThread;
 import android.util.AttributeSet;
 import android.util.DisplayMetrics;
@@ -44,6 +47,7 @@ import android.view.inputmethod.InputConnection;
 import android.view.inputmethod.InputMethodManager;
 import android.widget.FrameLayout;
 
+@UiThread
 public class GeckoView extends FrameLayout {
     private static final String LOGTAG = "GeckoView";
     private static final boolean DEBUG = false;
@@ -163,6 +167,22 @@ public class GeckoView extends FrameLayout {
         public boolean shouldPinOnScreen() {
             return mDisplay != null ? mDisplay.shouldPinOnScreen() : false;
         }
+
+        /**
+         * Request a {@link Bitmap} of the visible portion of the web page currently being
+         * rendered.
+         *
+         * @return A {@link GeckoResult} that completes with a {@link Bitmap} containing
+         * the pixels and size information of the currently visible rendered web page.
+         */
+        @UiThread
+        @NonNull GeckoResult<Bitmap> capturePixels() {
+            if (mDisplay == null) {
+                return GeckoResult.fromException(new IllegalStateException("Display must be created before pixels can be captured"));
+            }
+
+            return mDisplay.capturePixels();
+        }
     }
 
     public GeckoView(final Context context) {
@@ -210,7 +230,6 @@ public class GeckoView extends FrameLayout {
      *
      * @param color Cover color.
      */
-    @UiThread
     public void coverUntilFirstPaint(final int color) {
         ThreadUtils.assertOnUiThread();
 
@@ -228,7 +247,6 @@ public class GeckoView extends FrameLayout {
      *
      * @return True if view should be pinned on the screen.
      */
-    @UiThread
     public boolean shouldPinOnScreen() {
         ThreadUtils.assertOnUiThread();
 
@@ -241,8 +259,15 @@ public class GeckoView extends FrameLayout {
         }
     }
 
+    /**
+     * Unsets the current session from this instance and returns it, if any. You must call
+     * this before {@link #setSession(GeckoSession)} if there is already an open session
+     * set for this instance.
+     *
+     * @return The {@link GeckoSession} that was set for this instance. May be null.
+     */
     @UiThread
-    public GeckoSession releaseSession() {
+    public @Nullable GeckoSession releaseSession() {
         ThreadUtils.assertOnUiThread();
 
         if (mSession == null) {
@@ -279,12 +304,17 @@ public class GeckoView extends FrameLayout {
 
     /**
      * Attach a session to this view. The session should be opened before
-     * attaching.
+     * attaching. If this instance already has an open session, you must use
+     * {@link #releaseSession()} first, otherwise {@link IllegalStateException}
+     * will be thrown. This is to avoid potentially leaking the currently opened session.
      *
      * @param session The session to be attached.
+     * @throws IllegalArgumentException if an existing open session is already set.
      */
     @UiThread
     public void setSession(@NonNull final GeckoSession session) {
+        ThreadUtils.assertOnUiThread();
+
         if (!session.isOpen()) {
             throw new IllegalArgumentException("Session must be open before attaching");
         }
@@ -295,9 +325,13 @@ public class GeckoView extends FrameLayout {
     /**
      * Attach a session to this view. The session should be opened before
      * attaching or a runtime needs to be provided for automatic opening.
+     * If this instance already has an open session, you must use
+     * {@link #releaseSession()} first, otherwise {@link IllegalStateException}
+     * will be thrown. This is to avoid potentially leaking the currently opened session.
      *
      * @param session The session to be attached.
      * @param runtime The runtime to be used for opening the session.
+     * @throws IllegalArgumentException if an existing open session is already set.
      */
     @UiThread
     public void setSession(@NonNull final GeckoSession session,
@@ -370,22 +404,22 @@ public class GeckoView extends FrameLayout {
         }
     }
 
-    public GeckoSession getSession() {
+    @AnyThread
+    public @Nullable GeckoSession getSession() {
         return mSession;
     }
 
-    public EventDispatcher getEventDispatcher() {
+    @AnyThread
+    public @NonNull EventDispatcher getEventDispatcher() {
         return mSession.getEventDispatcher();
     }
 
-    @UiThread
-    public PanZoomController getPanZoomController() {
+    public @NonNull PanZoomController getPanZoomController() {
         ThreadUtils.assertOnUiThread();
         return mSession.getPanZoomController();
     }
 
-    @UiThread
-    public DynamicToolbarAnimator getDynamicToolbarAnimator() {
+    public @NonNull DynamicToolbarAnimator getDynamicToolbarAnimator() {
         ThreadUtils.assertOnUiThread();
         return mSession.getDynamicToolbarAnimator();
     }
@@ -412,14 +446,18 @@ public class GeckoView extends FrameLayout {
             return;
         }
 
+        // Release the display before we detach from the window.
+        mSession.releaseDisplay(mDisplay.release());
+
         // If we saved state earlier, we don't want to close the window.
         if (!mStateSaved && mSession.isOpen()) {
             mSession.close();
         }
+
     }
 
     @Override
-    protected void onConfigurationChanged(Configuration newConfig) {
+    protected void onConfigurationChanged(final Configuration newConfig) {
         super.onConfigurationChanged(newConfig);
 
         if (mRuntime != null) {
@@ -493,7 +531,7 @@ public class GeckoView extends FrameLayout {
     }
 
     @Override
-    public void onWindowFocusChanged(boolean hasWindowFocus) {
+    public void onWindowFocusChanged(final boolean hasWindowFocus) {
         super.onWindowFocusChanged(hasWindowFocus);
 
         // Only call setFocus(true) when the window gains focus. Any focus loss could be temporary
@@ -505,7 +543,7 @@ public class GeckoView extends FrameLayout {
     }
 
     @Override
-    protected void onWindowVisibilityChanged(int visibility) {
+    protected void onWindowVisibilityChanged(final int visibility) {
         super.onWindowVisibilityChanged(visibility);
 
         // We can be reasonably sure that the focus loss is not temporary, so call setFocus(false).
@@ -515,7 +553,8 @@ public class GeckoView extends FrameLayout {
     }
 
     @Override
-    protected void onFocusChanged(boolean gainFocus, int direction, Rect previouslyFocusedRect) {
+    protected void onFocusChanged(final boolean gainFocus, final int direction,
+                                  final Rect previouslyFocusedRect) {
         super.onFocusChanged(gainFocus, direction, previouslyFocusedRect);
 
         if (mIsResettingFocus) {
@@ -581,7 +620,7 @@ public class GeckoView extends FrameLayout {
     }
 
     @Override
-    public boolean onKeyPreIme(int keyCode, KeyEvent event) {
+    public boolean onKeyPreIme(final int keyCode, final KeyEvent event) {
         if (super.onKeyPreIme(keyCode, event)) {
             return true;
         }
@@ -590,7 +629,7 @@ public class GeckoView extends FrameLayout {
     }
 
     @Override
-    public boolean onKeyUp(int keyCode, KeyEvent event) {
+    public boolean onKeyUp(final int keyCode, final KeyEvent event) {
         if (super.onKeyUp(keyCode, event)) {
             return true;
         }
@@ -599,7 +638,7 @@ public class GeckoView extends FrameLayout {
     }
 
     @Override
-    public boolean onKeyDown(int keyCode, KeyEvent event) {
+    public boolean onKeyDown(final int keyCode, final KeyEvent event) {
         if (super.onKeyDown(keyCode, event)) {
             return true;
         }
@@ -608,7 +647,7 @@ public class GeckoView extends FrameLayout {
     }
 
     @Override
-    public boolean onKeyLongPress(int keyCode, KeyEvent event) {
+    public boolean onKeyLongPress(final int keyCode, final KeyEvent event) {
         if (super.onKeyLongPress(keyCode, event)) {
             return true;
         }
@@ -617,7 +656,7 @@ public class GeckoView extends FrameLayout {
     }
 
     @Override
-    public boolean onKeyMultiple(int keyCode, int repeatCount, KeyEvent event) {
+    public boolean onKeyMultiple(final int keyCode, final int repeatCount, final KeyEvent event) {
         if (super.onKeyMultiple(keyCode, repeatCount, event)) {
             return true;
         }
@@ -634,6 +673,7 @@ public class GeckoView extends FrameLayout {
         }
     }
 
+    @SuppressLint("ClickableViewAccessibility")
     @Override
     public boolean onTouchEvent(final MotionEvent event) {
         if (event.getActionMasked() == MotionEvent.ACTION_DOWN) {
@@ -661,7 +701,8 @@ public class GeckoView extends FrameLayout {
     }
 
     @Override
-    public void onProvideAutofillVirtualStructure(final ViewStructure structure, int flags) {
+    public void onProvideAutofillVirtualStructure(final ViewStructure structure,
+                                                  final int flags) {
         super.onProvideAutofillVirtualStructure(structure, flags);
 
         if (mSession != null) {
@@ -686,5 +727,19 @@ public class GeckoView extends FrameLayout {
             }
         }
         mSession.getTextInput().autofill(strValues);
+    }
+
+    /**
+     * Request a {@link Bitmap} of the visible portion of the web page currently being
+     * rendered.
+     *
+     * See {@link GeckoDisplay#capturePixels} for more details.
+     *
+     * @return A {@link GeckoResult} that completes with a {@link Bitmap} containing
+     * the pixels and size information of the currently visible rendered web page.
+     */
+    @UiThread
+    public @NonNull GeckoResult<Bitmap> capturePixels() {
+        return mDisplay.capturePixels();
     }
 }

@@ -20,11 +20,15 @@ AntiTracking.runTest("IndexedDB in workers",
 
     await new Promise((resolve, reject) => {
       worker.onmessage = function(e) {
-        if (e) {
+        if (e.data) {
           resolve();
         } else {
           reject();
         }
+      };
+
+      worker.onerror = function(e) {
+        reject();
       };
     });
   },
@@ -45,11 +49,15 @@ AntiTracking.runTest("IndexedDB in workers",
 
     await new Promise((resolve, reject) => {
       worker.onmessage = function(e) {
-        if (e) {
+        if (e.data) {
           resolve();
         } else {
           reject();
         }
+      };
+
+      worker.onerror = function(e) {
+        reject();
       };
     });
   },
@@ -88,18 +96,26 @@ AntiTracking.runTest("IndexedDB in workers and Storage Access API",
 
     await new Promise((resolve, reject) => {
       worker.onmessage = function(e) {
-        if (e) {
+        if (e.data) {
           resolve();
         } else {
           reject();
         }
+      };
+
+      worker.onerror = function(e) {
+        reject();
       };
     });
 
     /* import-globals-from storageAccessAPIHelpers.js */
     await callRequestStorageAccess();
 
-    blob = new Blob([nonBlockCode.toString() + "; nonBlockCode();"]);
+    if (SpecialPowers.Services.prefs.getIntPref("network.cookie.cookieBehavior") == SpecialPowers.Ci.nsICookieService.BEHAVIOR_REJECT) {
+      blob = new Blob([blockCode.toString() + "; blockCode();"]);
+    } else {
+      blob = new Blob([nonBlockCode.toString() + "; nonBlockCode();"]);
+    }
     ok(blob, "Blob has been created");
 
     blobURL = URL.createObjectURL(blob);
@@ -110,11 +126,15 @@ AntiTracking.runTest("IndexedDB in workers and Storage Access API",
 
     await new Promise((resolve, reject) => {
       worker.onmessage = function(e) {
-        if (e) {
+        if (e.data) {
           resolve();
         } else {
           reject();
         }
+      };
+
+      worker.onerror = function(e) {
+        reject();
       };
     });
   },
@@ -125,7 +145,11 @@ AntiTracking.runTest("IndexedDB in workers and Storage Access API",
     }
 
     /* import-globals-from storageAccessAPIHelpers.js */
-    await noStorageAccessInitially();
+    if (allowListed) {
+      await hasStorageAccessInitially();
+    } else {
+      await noStorageAccessInitially();
+    }
 
     let blob = new Blob([nonBlockCode.toString() + "; nonBlockCode();"]);
     ok(blob, "Blob has been created");
@@ -138,11 +162,15 @@ AntiTracking.runTest("IndexedDB in workers and Storage Access API",
 
     await new Promise((resolve, reject) => {
       worker.onmessage = function(e) {
-        if (e) {
+        if (e.data) {
           resolve();
         } else {
           reject();
         }
+      };
+
+      worker.onerror = function(e) {
+        reject();
       };
     });
 
@@ -156,11 +184,15 @@ AntiTracking.runTest("IndexedDB in workers and Storage Access API",
 
     await new Promise((resolve, reject) => {
       worker.onmessage = function(e) {
-        if (e) {
+        if (e.data) {
           resolve();
         } else {
           reject();
         }
+      };
+
+      worker.onerror = function(e) {
+        reject();
       };
     });
   },

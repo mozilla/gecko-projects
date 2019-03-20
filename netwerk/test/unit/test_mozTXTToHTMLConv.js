@@ -16,15 +16,27 @@ function run_test() {
       input: "RFC1738: <URL:http://mozilla.org> then",
       url: "http://mozilla.org"
     },
+    {
+      input: "RFC1738: <URL:mailto:john.doe+test@mozilla.org> then",
+      url: "mailto:john.doe+test@mozilla.org"
+    },
     // -- RFC2396E
     {
       input: "RFC2396E: <http://mozilla.org/> then",
       url: "http://mozilla.org/"
     },
+    {
+      input: "RFC2396E: <john.doe+test@mozilla.org> then",
+      url: "mailto:john.doe+test@mozilla.org"
+    },
     // -- abbreviated
     {
       input: "see www.mozilla.org maybe",
       url: "http://www.mozilla.org"
+    },
+    {
+      input: "mail john.doe+test@mozilla.org maybe",
+      url: "mailto:john.doe+test@mozilla.org"
     },
     // -- delimiters
     {
@@ -86,12 +98,24 @@ function run_test() {
       url: "http://localhost/"
     },
     {
+      input: "bracket: john.doe+test@mozilla.org[1] etc.",
+      url: "mailto:john.doe+test@mozilla.org"
+    },
+    {
       input: "parenthesis: (http://localhost/) etc.",
       url: "http://localhost/"
     },
     {
+      input: "parenthesis: (john.doe+test@mozilla.org) etc.",
+      url: "mailto:john.doe+test@mozilla.org"
+    },
+    {
       input: "(thunderbird)http://mozilla.org/thunderbird",
       url: "http://mozilla.org/thunderbird"
+    },
+    {
+      input: "(mail)john.doe+test@mozilla.org",
+      url: "mailto:john.doe+test@mozilla.org"
     },
     {
       input: "()http://mozilla.org",
@@ -124,6 +148,16 @@ function run_test() {
     {
       input: "test http://www.map.com/map.php?t=Nova_Scotia&markers=//Not_a_survey||description=plm2 test",
       url: "http://www.map.com/map.php?t=Nova_Scotia&amp;markers=//Not_a_survey||description=plm2"
+    },
+    {
+      input: "bug#1509493 (john@mozilla.org)john@mozilla.org test",
+      url: "mailto:john@mozilla.org",
+      text: "john@mozilla.org"
+    },
+    {
+      input: "bug#1509493 {john@mozilla.org}john@mozilla.org test",
+      url: "mailto:john@mozilla.org",
+      text: "john@mozilla.org"
     }
   ];
 
@@ -155,6 +189,8 @@ function run_test() {
   const scanTXTstrings = [
     "underline",                                  // ASCII
     "äöüßáéíóúî",                                 // Latin-1
+    "a\u0301c\u0327c\u030Ce\u0309n\u0303t\u0326e\u0308d\u0323",
+                                                  // áçčẻñțëḍ Latin
     "\u016B\u00F1\u0257\u0119\u0211\u0142\u00ED\u00F1\u0119",
                                                   // Pseudo-ese ūñɗęȑłíñę
     "\u01DDu\u0131\u0283\u0279\u01DDpun",         // Upside down ǝuıʃɹǝpun
@@ -162,7 +198,11 @@ function run_test() {
                                                   // Greek υπογράμμιση
     "\u0441\u0438\u043B\u044C\u043D\u0443\u044E", // Russian сильную
     "\u0C2C\u0C32\u0C2E\u0C46\u0C56\u0C28",       // Telugu బలమైన
-    "\u508D\u7DDA\u3059\u308B"                    // Japanese 傍線する
+    "\u508D\u7DDA\u3059\u308B",                   // Japanese 傍線する
+    "\uD841\uDF0E\uD841\uDF31\uD841\uDF79\uD843\uDC53\uD843\uDC78",
+                                                  // Chinese (supplementary plane)
+    "\uD801\uDC14\uD801\uDC2F\uD801\uDC45\uD801\uDC28\uD801\uDC49\uD801\uDC2F\uD801\uDC3B"
+                                                  // Deseret 𐐔𐐯𐑅𐐨𐑉𐐯𐐻
   ];
 
   const scanTXTstructs = [
@@ -247,13 +287,23 @@ function run_test() {
     return ' href="' + url + '"';
   }
 
+  function linkText(plaintext) {
+    return '>' + plaintext + '</a>';
+  }
+
   for (let i = 0; i < scanTXTtests.length; i++) {
     let t = scanTXTtests[i];
     let output = converter.scanTXT(t.input, Ci.mozITXTToHTMLConv.kURLs);
     let link = hrefLink(t.url);
+    let text;
+    if (t.text)
+      text = linkText(t.text);
     if (!output.includes(link))
       do_throw("Unexpected conversion by scanTXT: input=" + t.input +
                ", output=" + output + ", link=" + link);
+    if (text && !output.includes(text))
+      do_throw("Unexpected conversion by scanTXT: input=" + t.input +
+               ", output=" + output + ", text=" + text);
   }
 
   for (let i = 0; i < scanTXTglyph.length; i++) {

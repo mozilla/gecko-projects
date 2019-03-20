@@ -26,6 +26,10 @@ const enforceNoTemporaryAddon = extensionId => {
 const managedStorage = new WeakMap();
 
 const lookupManagedStorage = async (extensionId, context) => {
+  let extensionPolicy = Services.policies.getExtensionPolicy(extensionId);
+  if (extensionPolicy) {
+    return ExtensionStorage._serializableMap(extensionPolicy);
+  }
   let info = await NativeManifests.lookupManifest("storage", extensionId, context);
   if (info) {
     return ExtensionStorage._serializableMap(info.manifest.data);
@@ -74,7 +78,7 @@ this.storage = class extends ExtensionAPI {
             }
 
             const persisted = extension.hasPermission("unlimitedStorage");
-            const db = await ExtensionStorageIDB.open(res.storagePrincipal.deserialize(this), persisted);
+            const db = await ExtensionStorageIDB.open(res.storagePrincipal.deserialize(this, true), persisted);
             const changes = await db[method](...args);
             if (changes) {
               ExtensionStorageIDB.notifyListeners(extension.id, changes);
