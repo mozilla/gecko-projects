@@ -4,6 +4,7 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 include protocol PContent;
+include protocol PSHEntry;
 include protocol PWebBrowserPersistResources;
 include protocol PWebBrowserPersistSerialize;
 include protocol PFileDescriptorSet;
@@ -28,7 +29,7 @@ struct WebBrowserPersistDocumentAttrs {
   nsString title;
   nsString referrer;
   nsString contentDisposition;
-  uint32_t cacheKey;
+  nullable PSHEntry sessionHistoryEntry;
   uint32_t persistFlags;
   PrincipalInfo principal;
 };

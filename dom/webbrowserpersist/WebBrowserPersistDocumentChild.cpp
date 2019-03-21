@@ -13,6 +13,7 @@
 #include "WebBrowserPersistLocalDocument.h"
 #include "WebBrowserPersistResourcesChild.h"
 #include "WebBrowserPersistSerializeChild.h"
+#include "SHEntryChild.h"
 
 namespace mozilla {
 
@@ -55,7 +56,13 @@ void WebBrowserPersistDocumentChild::Start(
   ENSURE(aDocument->GetTitle(attrs.title()));
   ENSURE(aDocument->GetReferrer(attrs.referrer()));
   ENSURE(aDocument->GetContentDisposition(attrs.contentDisposition()));
-  ENSURE(aDocument->GetCacheKey(&(attrs.cacheKey())));
+
+  RefPtr<dom::SHEntryChild> shEntryChild =
+      aDocument->GetHistory().downcast<dom::SHEntryChild>();
+  if (shEntryChild) {
+    attrs.sessionHistoryEntryChild() = shEntryChild.get();
+  }
+
   ENSURE(aDocument->GetPersistFlags(&(attrs.persistFlags())));
 
   ENSURE(aDocument->GetPrincipal(getter_AddRefs(principal)));
