@@ -36,12 +36,12 @@ default: &default
   destinations:  # locale_prefix is appended
     by-locale:
       en-US:
+        - ${year}/${month}/${upload_date}-${branch}
         - latest-${branch}
         - latest-${branch}-l10n
-        - ${year}/${month}/${upload_date}-${branch}
       default:
-        - latest-${branch}-l10n
         - ${year}/${month}/${upload_date}-${branch}-l10n
+        - latest-${branch}-l10n
 
 # Configuration for individual files. Extends 'default', above.
 mapping:

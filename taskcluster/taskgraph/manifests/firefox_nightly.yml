@@ -77,11 +77,11 @@ default: &default
   destinations:
     by-locale:
       en-US:
-        - latest-${branch}
         - ${year}/${month}/${upload_date}-${branch}
+        - latest-${branch}
       default:
-        - latest-${branch}-l10n
         - ${year}/${month}/${upload_date}-${branch}-l10n
+        - latest-${branch}-l10n
 
 mapping:
   buildhub.json:
@@ -92,12 +92,12 @@ mapping:
     destinations:
       by-locale:
         en-US:
-          - latest-${branch}
           - ${year}/${month}/${upload_date}-${branch}
+          - latest-${branch}
           - latest-${branch}-l10n
         default:
-          - latest-${branch}-l10n
           - ${year}/${month}/${upload_date}-${branch}-l10n
+          - latest-${branch}-l10n
   target.common.tests.tar.gz:
     <<: *default
     description: "Mixture of reftests, mochitests, UI and others, commonly bundled together in a test suite"
@@ -205,11 +205,11 @@ mapping:
     destinations:
       by-locale:
         en-US:
-          - latest-${branch}
           - ${year}/${month}/${upload_date}-${branch}
+          - latest-${branch}
         default:
-          - latest-${branch}-l10n/${filename_platform}/xpi
           - ${year}/${month}/${upload_date}-${branch}-l10n/${filename_platform}/xpi
+          - latest-${branch}-l10n/${filename_platform}/xpi
   mar:
     <<: *default
     description: "Alongside `mbsdiff`, a tool used to generate partials"
@@ -222,8 +222,8 @@ mapping:
       - win64-aarch64-nightly
       - win64-asan-reporter-nightly
     destinations:
-      - latest-${branch}/mar-tools/${stage_platform}
       - ${year}/${month}/${upload_date}-${branch}/mar-tools/${stage_platform}
+      - latest-${branch}/mar-tools/${stage_platform}
   mbsdiff:
     <<: *default
     description: "Alongside `mar`, a tool used to generate partials"
@@ -236,8 +236,8 @@ mapping:
       - win64-aarch64-nightly
       - win64-asan-reporter-nightly
     destinations:
-      - latest-${branch}/mar-tools/${stage_platform}
       - ${year}/${month}/${upload_date}-${branch}/mar-tools/${stage_platform}
+      - latest-${branch}/mar-tools/${stage_platform}
   mar.exe:
     <<: *default
     description: "Alongside `mbsdiff.exe`, a tool used to generate partials for Windows platforms"
@@ -250,8 +250,8 @@ mapping:
       - win64-aarch64-nightly
       - win64-asan-reporter-nightly
     destinations:
-      - latest-${branch}/mar-tools/${stage_platform}
       - ${year}/${month}/${upload_date}-${branch}/mar-tools/${stage_platform}
+      - latest-${branch}/mar-tools/${stage_platform}
   mbsdiff.exe:
     <<: *default
     description: "Alongside `mar.exe`, a tool used to generate partials for Windows platforms"
@@ -264,8 +264,8 @@ mapping:
       - win64-aarch64-nightly
       - win64-asan-reporter-nightly
     destinations:
-      - latest-${branch}/mar-tools/${stage_platform}
       - ${year}/${month}/${upload_date}-${branch}/mar-tools/${stage_platform}
+      - latest-${branch}/mar-tools/${stage_platform}
   target.tar.bz2:
     <<: *default
     description: "Main installer for Linux platforms"
@@ -281,12 +281,12 @@ mapping:
     destinations:
       by-locale:
         en-US:
-          - latest-${branch}
           - ${year}/${month}/${upload_date}-${branch}
+          - latest-${branch}
           - latest-${branch}-l10n
         default:
-          - latest-${branch}-l10n
           - ${year}/${month}/${upload_date}-${branch}-l10n
+          - latest-${branch}-l10n
   target.tar.bz2.asc:
     <<: *default
     description: "Detached signature for the checksums file"
@@ -302,12 +302,12 @@ mapping:
     destinations:
       by-locale:
         en-US:
-          - latest-${branch}
           - ${year}/${month}/${upload_date}-${branch}
+          - latest-${branch}
           - latest-${branch}-l10n
         default:
-          - latest-${branch}-l10n
           - ${year}/${month}/${upload_date}-${branch}-l10n
+          - latest-${branch}-l10n
   target.dmg:
     <<: *default
     description: "Main package installer for Mac OS X platforms"
@@ -321,12 +321,12 @@ mapping:
     destinations:
       by-locale:
         en-US:
-          - latest-${branch}
           - ${year}/${month}/${upload_date}-${branch}
+          - latest-${branch}
           - latest-${branch}-l10n
         default:
-          - latest-${branch}-l10n
           - ${year}/${month}/${upload_date}-${branch}-l10n
+          - latest-${branch}-l10n
   target.zip:
     <<: *default
     description: "Main package installer for Windows platforms"
@@ -356,12 +356,12 @@ mapping:
     destinations:
       by-locale:
         en-US:
-          - latest-${branch}
           - ${year}/${month}/${upload_date}-${branch}
+          - latest-${branch}
           - latest-${branch}-l10n
         default:
-          - latest-${branch}-l10n
           - ${year}/${month}/${upload_date}-${branch}-l10n
+          - latest-${branch}-l10n
   target.stub-installer.exe:
     <<: *default
     description: "Stub installer for Win32 platforms"
@@ -375,12 +375,12 @@ mapping:
     destinations:
       by-locale:
         en-US:
-          - latest-${branch}
           - ${year}/${month}/${upload_date}-${branch}
+          - latest-${branch}
           - latest-${branch}-l10n
         default:
-          - latest-${branch}-l10n
           - ${year}/${month}/${upload_date}-${branch}-l10n
+          - latest-${branch}-l10n
   target.installer.msi:
     <<: *default
     description: "Windows installer for MSI platform"
@@ -395,12 +395,12 @@ mapping:
     destinations:
       by-locale:
         en-US:
-          - latest-${branch}
           - ${year}/${month}/${upload_date}-${branch}
+          - latest-${branch}
           - latest-${branch}-l10n
         default:
-          - latest-${branch}-l10n
           - ${year}/${month}/${upload_date}-${branch}-l10n
+          - latest-${branch}-l10n
   target.complete.mar:
     <<: *default
     description: "The main installer we ship our mobile products baked within"
@@ -413,12 +413,12 @@ mapping:
     destinations:
       by-locale:
         en-US:
-          - latest-${branch}
           - ${year}/${month}/${upload_date}-${branch}
+          - latest-${branch}
           - latest-${branch}-l10n
         default:
-          - latest-${branch}-l10n
           - ${year}/${month}/${upload_date}-${branch}-l10n
+          - latest-${branch}-l10n
   ${partial}:
     <<: *default
     description: "Partials MAR files to serve as updates"

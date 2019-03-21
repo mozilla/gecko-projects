@@ -42,14 +42,14 @@ default: &default
   destinations:  # locale_prefix is appended
     by-locale:
       multi:
-        - latest-${branch}-${path_platform}
         - ${year}/${month}/${upload_date}-${branch}-${path_platform}
+        - latest-${branch}-${path_platform}
       en-US:
-        - latest-${branch}-${path_platform}
         - ${year}/${month}/${upload_date}-${branch}-${path_platform}
+        - latest-${branch}-${path_platform}
       default:
-        - latest-${branch}-${path_platform}-l10n
         - ${year}/${month}/${upload_date}-${branch}-${path_platform}-l10n
+        - latest-${branch}-${path_platform}-l10n
 
 # Configuration for individual files. Extends 'default', above.
 mapping:
