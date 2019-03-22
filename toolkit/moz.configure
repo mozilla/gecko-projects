@@ -1254,27 +1254,6 @@ set_config('MOZ_MAINTENANCE_SERVICE',
            depends_if('--enable-maintenance-service',
                       when=target_is_windows)(lambda _: True))
 
-# BITS download (Windows only)
-# ==============================================================
-
-@depends(target)
-def bits_download_default(target):
-    return target.os == 'WINNT'
-
-option('--enable-bits-download', default=bits_download_default,
-       help='{Enable|Disable} building BITS download support')
-
-@depends('--enable-bits-download', target)
-def bits_download(value, target):
-    enabled = bool(value)
-    if enabled and target.os != 'WINNT':
-        die('Cannot enable BITS download on %s', target.os)
-    if enabled:
-        return True
-
-set_config('MOZ_BITS_DOWNLOAD', bits_download)
-set_define('MOZ_BITS_DOWNLOAD', bits_download)
-
 # Bundled fonts on desktop platform
 # ==============================================================
 

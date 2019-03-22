@@ -35,8 +35,6 @@ extern crate cosec;
 extern crate rsdparsa_capi;
 #[cfg(feature = "spidermonkey_rust")]
 extern crate jsrust_shared;
-#[cfg(feature = "bitsdownload")]
-extern crate bitsdownload;
 
 extern crate arrayvec;
 
