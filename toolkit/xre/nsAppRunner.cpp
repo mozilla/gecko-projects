@@ -631,9 +631,10 @@ SYNC_ENUMS(GPU, GPU)
 SYNC_ENUMS(VR, VR)
 SYNC_ENUMS(RDD, RDD)
 SYNC_ENUMS(SOCKET, Socket)
+SYNC_ENUMS(SANDBOX_BROKER, RemoteSandboxBroker)
 
 // .. and ensure that that is all of them:
-static_assert(GeckoProcessType_Socket + 1 == GeckoProcessType_End,
+static_assert(GeckoProcessType_RemoteSandboxBroker + 1 == GeckoProcessType_End,
               "Did not find the final GeckoProcessType");
 
 NS_IMETHODIMP
@@ -871,18 +872,23 @@ nsXULAppInfo::GetRestartedByOS(bool* aResult) {
   return NS_OK;
 }
 
+#if defined(XP_WIN) && defined(MOZ_LAUNCHER_PROCESS)
+// Forward declaration
+void SetupLauncherProcessPref();
+
+static Maybe<LauncherRegistryInfo::EnabledState> gLauncherProcessState;
+#endif  // defined(XP_WIN) && defined(MOZ_LAUNCHER_PROCESS)
+
 NS_IMETHODIMP
 nsXULAppInfo::GetLauncherProcessState(uint32_t* aResult) {
 #if defined(XP_WIN) && defined(MOZ_LAUNCHER_PROCESS)
-  LauncherRegistryInfo launcherInfo;
+  SetupLauncherProcessPref();
 
-  LauncherResult<LauncherRegistryInfo::EnabledState> state =
-      launcherInfo.IsEnabled();
-  if (state.isErr()) {
+  if (!gLauncherProcessState) {
     return NS_ERROR_UNEXPECTED;
   }
 
-  *aResult = static_cast<uint32_t>(state.unwrap());
+  *aResult = static_cast<uint32_t>(gLauncherProcessState.value());
   return NS_OK;
 #else
   return NS_ERROR_NOT_AVAILABLE;
@@ -1528,8 +1534,16 @@ static void RegisterApplicationRestartChanged(const char* aPref, void* aData) {
 static const char kShieldPrefName[] = "app.shield.optoutstudies.enabled";
 
 static void OnLauncherPrefChanged(const char* aPref, void* aData) {
+  const bool kLauncherPrefDefaultValue =
+#    if defined(NIGHTLY_BUILD) || (MOZ_UPDATE_CHANNEL == beta)
+      true
+#    else
+      false
+#    endif  // defined(NIGHTLY_BUILD) || (MOZ_UPDATE_CHANNEL == beta)
+      ;
   bool prefVal = Preferences::GetBool(kShieldPrefName, false) &&
-                 Preferences::GetBool(PREF_WIN_LAUNCHER_PROCESS_ENABLED, false);
+                 Preferences::GetBool(PREF_WIN_LAUNCHER_PROCESS_ENABLED,
+                                      kLauncherPrefDefaultValue);
 
   mozilla::LauncherRegistryInfo launcherRegInfo;
   mozilla::LauncherVoidResult reflectResult =
@@ -1541,12 +1555,10 @@ static void SetupLauncherProcessPref() {
   // In addition to the launcher pref itself, we also tie the launcher process
   // state to the SHIELD opt-out pref.
 
-#    if defined(NIGHTLY_BUILD)
-  // On Nightly, fire the callback immediately to ensure the pref is reflected
-  // to the registry and we get immediate enablement of the launcher process
-  // for all users.
-  Preferences::RegisterCallbackAndCall(&OnLauncherPrefChanged, kShieldPrefName);
-#    endif  // defined(NIGHTLY_BUILD)
+  if (gLauncherProcessState) {
+    // We've already successfully run
+    return;
+  }
 
   mozilla::LauncherRegistryInfo launcherRegInfo;
 
@@ -1554,23 +1566,34 @@ static void SetupLauncherProcessPref() {
       enabledState = launcherRegInfo.IsEnabled();
 
   if (enabledState.isOk()) {
-    Preferences::SetBool(
-        PREF_WIN_LAUNCHER_PROCESS_ENABLED,
-        enabledState.unwrap() !=
-            mozilla::LauncherRegistryInfo::EnabledState::ForceDisabled);
+    gLauncherProcessState = Some(enabledState.unwrap());
 
     CrashReporter::AnnotateCrashReport(
         CrashReporter::Annotation::LauncherProcessState,
         static_cast<uint32_t>(enabledState.unwrap()));
+
+#    if defined(NIGHTLY_BUILD) || (MOZ_UPDATE_CHANNEL == beta)
+    // Reflect the pref states into the registry by calling
+    // OnLauncherPrefChanged.
+    OnLauncherPrefChanged(PREF_WIN_LAUNCHER_PROCESS_ENABLED, nullptr);
+
+    // Now obtain the revised state of the launcher process for reflection
+    // into prefs
+    enabledState = launcherRegInfo.IsEnabled();
+#    endif  // defined(NIGHTLY_BUILD) || (MOZ_UPDATE_CHANNEL == beta)
   }
 
+  if (enabledState.isOk()) {
+    // Reflect the launcher process registry state into user prefs
+    Preferences::SetBool(
+        PREF_WIN_LAUNCHER_PROCESS_ENABLED,
+        enabledState.unwrap() !=
+            mozilla::LauncherRegistryInfo::EnabledState::ForceDisabled);
+  }
+
+  Preferences::RegisterCallback(&OnLauncherPrefChanged, kShieldPrefName);
   Preferences::RegisterCallback(&OnLauncherPrefChanged,
                                 PREF_WIN_LAUNCHER_PROCESS_ENABLED);
-#    if !defined(NIGHTLY_BUILD)
-  // We register for SHIELD notifications, but we don't fire the callback
-  // immediately in the non-Nightly case.
-  Preferences::RegisterCallback(&OnLauncherPrefChanged, kShieldPrefName);
-#    endif  // !defined(NIGHTLY_BUILD)
 }
 
 #  endif  // defined(MOZ_LAUNCHER_PROCESS)
@@ -1582,8 +1605,6 @@ static void SetupLauncherProcessPref() {
 // it was initially started with.
 static nsresult LaunchChild(nsINativeAppSupport* aNative,
                             bool aBlankCommandLine = false) {
-  aNative->Quit();  // destroy message window
-
   // Restart this process by exec'ing it into the current process
   // if supported by the platform.  Otherwise, use NSPR.
 
@@ -3880,58 +3901,6 @@ int XREMain::XRE_mainStartup(bool* aExitFlag) {
     return 0;
   }
 
-#if defined(MOZ_UPDATER) && !defined(MOZ_WIDGET_ANDROID)
-  // Check for and process any available updates
-  nsCOMPtr<nsIFile> updRoot;
-  bool persistent;
-  rv = mDirProvider.GetFile(XRE_UPDATE_ROOT_DIR, &persistent,
-                            getter_AddRefs(updRoot));
-  // XRE_UPDATE_ROOT_DIR may fail. Fallback to appDir if failed
-  if (NS_FAILED(rv)) updRoot = mDirProvider.GetAppDir();
-
-  // If the MOZ_TEST_PROCESS_UPDATES environment variable already exists, then
-  // we are being called from the callback application.
-  if (EnvHasValue("MOZ_TEST_PROCESS_UPDATES")) {
-    // If the caller has asked us to log our arguments, do so.  This is used
-    // to make sure that the maintenance service successfully launches the
-    // callback application.
-    const char* logFile = nullptr;
-    if (ARG_FOUND == CheckArg("dump-args", &logFile)) {
-      FILE* logFP = fopen(logFile, "wb");
-      if (logFP) {
-        for (int i = 1; i < gRestartArgc; ++i) {
-          fprintf(logFP, "%s\n", gRestartArgv[i]);
-        }
-        fclose(logFP);
-      }
-    }
-    *aExitFlag = true;
-    return 0;
-  }
-
-  // Support for processing an update and exiting. The MOZ_TEST_PROCESS_UPDATES
-  // environment variable will be part of the updater's environment and the
-  // application that is relaunched by the updater. When the application is
-  // relaunched by the updater it will be removed below and the application
-  // will exit.
-  if (CheckArg("test-process-updates")) {
-    SaveToEnv("MOZ_TEST_PROCESS_UPDATES=1");
-  }
-  nsCOMPtr<nsIFile> exeFile, exeDir;
-  rv = mDirProvider.GetFile(XRE_EXECUTABLE_FILE, &persistent,
-                            getter_AddRefs(exeFile));
-  NS_ENSURE_SUCCESS(rv, 1);
-  rv = exeFile->GetParent(getter_AddRefs(exeDir));
-  NS_ENSURE_SUCCESS(rv, 1);
-  ProcessUpdates(mDirProvider.GetGREDir(), exeDir, updRoot, gRestartArgc,
-                 gRestartArgv, mAppData->version);
-  if (EnvHasValue("MOZ_TEST_PROCESS_UPDATES")) {
-    SaveToEnv("MOZ_TEST_PROCESS_UPDATES=");
-    *aExitFlag = true;
-    return 0;
-  }
-#endif
-
   rv = NS_NewToolkitProfileService(getter_AddRefs(mProfileSvc));
   if (rv == NS_ERROR_FILE_ACCESS_DENIED) {
     PR_fprintf(PR_STDERR,
@@ -3989,6 +3958,60 @@ int XREMain::XRE_mainStartup(bool* aExitFlag) {
     if (rr == REMOTE_ARG_BAD) {
       return 1;
     }
+  }
+#endif
+
+#if defined(MOZ_UPDATER) && !defined(MOZ_WIDGET_ANDROID)
+  // Check for and process any available updates
+  nsCOMPtr<nsIFile> updRoot;
+  bool persistent;
+  rv = mDirProvider.GetFile(XRE_UPDATE_ROOT_DIR, &persistent,
+                            getter_AddRefs(updRoot));
+  // XRE_UPDATE_ROOT_DIR may fail. Fallback to appDir if failed
+  if (NS_FAILED(rv)) {
+    updRoot = mDirProvider.GetAppDir();
+  }
+
+  // If the MOZ_TEST_PROCESS_UPDATES environment variable already exists, then
+  // we are being called from the callback application.
+  if (EnvHasValue("MOZ_TEST_PROCESS_UPDATES")) {
+    // If the caller has asked us to log our arguments, do so.  This is used
+    // to make sure that the maintenance service successfully launches the
+    // callback application.
+    const char* logFile = nullptr;
+    if (ARG_FOUND == CheckArg("dump-args", &logFile)) {
+      FILE* logFP = fopen(logFile, "wb");
+      if (logFP) {
+        for (int i = 1; i < gRestartArgc; ++i) {
+          fprintf(logFP, "%s\n", gRestartArgv[i]);
+        }
+        fclose(logFP);
+      }
+    }
+    *aExitFlag = true;
+    return 0;
+  }
+
+  // Support for processing an update and exiting. The MOZ_TEST_PROCESS_UPDATES
+  // environment variable will be part of the updater's environment and the
+  // application that is relaunched by the updater. When the application is
+  // relaunched by the updater it will be removed below and the application
+  // will exit.
+  if (CheckArg("test-process-updates")) {
+    SaveToEnv("MOZ_TEST_PROCESS_UPDATES=1");
+  }
+  nsCOMPtr<nsIFile> exeFile, exeDir;
+  rv = mDirProvider.GetFile(XRE_EXECUTABLE_FILE, &persistent,
+                            getter_AddRefs(exeFile));
+  NS_ENSURE_SUCCESS(rv, 1);
+  rv = exeFile->GetParent(getter_AddRefs(exeDir));
+  NS_ENSURE_SUCCESS(rv, 1);
+  ProcessUpdates(mDirProvider.GetGREDir(), exeDir, updRoot, gRestartArgc,
+                 gRestartArgv, mAppData->version);
+  if (EnvHasValue("MOZ_TEST_PROCESS_UPDATES")) {
+    SaveToEnv("MOZ_TEST_PROCESS_UPDATES=");
+    *aExitFlag = true;
+    return 0;
   }
 #endif
 
@@ -4693,14 +4716,14 @@ int XREMain::XRE_main(int argc, char* argv[], const BootstrapConfig& aConfig) {
     gShutdownChecks = SCM_NOTHING;
   }
 
-  if (!mShuttingDown) {
 #if defined(MOZ_HAS_REMOTE)
-    // shut down the x remote proxy window
-    if (mRemoteService) {
-      mRemoteService->ShutdownServer();
-    }
-#endif /* MOZ_WIDGET_GTK */
+  // Shut down the remote service. We must do this before calling LaunchChild
+  // if we're restarting because otherwise the new instance will attempt to
+  // remote to this instance.
+  if (mRemoteService) {
+    mRemoteService->ShutdownServer();
   }
+#endif /* MOZ_WIDGET_GTK */
 
   mScopedXPCOM = nullptr;
 

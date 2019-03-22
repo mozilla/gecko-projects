@@ -886,15 +886,14 @@ public class BrowserApp extends GeckoApp
      * @return True if the intent could be handled
      */
     private boolean handleSearchWidgetIntent(Intent intent) {
-        SearchWidgetProvider.InputType input = (SearchWidgetProvider.InputType) (intent == null ?
-                safeStartingIntent.getUnsafe().getSerializableExtra(INPUT_TYPE_KEY) :
-                intent.getSerializableExtra(INPUT_TYPE_KEY));
+        SearchWidgetProvider.InputType input = getWidgetInputType(intent);
 
         if (input == null) {
             return false;
         }
 
         MmaDelegate.track(INTERACT_WITH_SEARCH_WIDGET_URL_AREA);
+        Telemetry.sendUIEvent(TelemetryContract.Event.SEARCH, TelemetryContract.Method.WIDGET);
 
         switch (input) {
             case TEXT:

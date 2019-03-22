@@ -558,6 +558,7 @@ HttpBaseChannel::SetOwner(nsISupports* aOwner) {
 
 NS_IMETHODIMP
 HttpBaseChannel::SetLoadInfo(nsILoadInfo* aLoadInfo) {
+  MOZ_RELEASE_ASSERT(aLoadInfo, "loadinfo can't be null");
   mLoadInfo = aLoadInfo;
   return NS_OK;
 }
@@ -1163,11 +1164,9 @@ class InterceptFailedOnStop : public nsIStreamListener {
     return mNext->OnStopRequest(aRequest, aStatusCode);
   }
 
-  NS_IMETHOD OnDataAvailable(nsIRequest* aRequest,
-                             nsIInputStream* aInputStream, uint64_t aOffset,
-                             uint32_t aCount) override {
-    return mNext->OnDataAvailable(aRequest, aInputStream, aOffset,
-                                  aCount);
+  NS_IMETHOD OnDataAvailable(nsIRequest* aRequest, nsIInputStream* aInputStream,
+                             uint64_t aOffset, uint32_t aCount) override {
+    return mNext->OnDataAvailable(aRequest, aInputStream, aOffset, aCount);
   }
 };
 

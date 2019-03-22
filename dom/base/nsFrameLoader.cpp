@@ -82,6 +82,7 @@
 #include "mozilla/dom/ChromeMessageSender.h"
 #include "mozilla/dom/Element.h"
 #include "mozilla/dom/FrameLoaderBinding.h"
+#include "mozilla/dom/MozFrameLoaderOwnerBinding.h"
 #include "mozilla/gfx/CrossProcessPaint.h"
 #include "mozilla/jsipc/CrossProcessObjectWrappers.h"
 #include "mozilla/layout/RenderFrame.h"
@@ -179,11 +180,44 @@ nsFrameLoader::nsFrameLoader(Element* aOwner, nsPIDOMWindowOuter* aOpener,
       mNetworkCreated(aNetworkCreated),
       mLoadingOriginalSrc(false),
       mRemoteBrowserShown(false),
-      mRemoteFrame(false),
+      mIsRemoteFrame(false),
       mObservingOwnerContent(false) {
-  mRemoteFrame = ShouldUseRemoteProcess();
-  MOZ_ASSERT(!mRemoteFrame || !aOpener,
+  mIsRemoteFrame = ShouldUseRemoteProcess();
+  MOZ_ASSERT(!mIsRemoteFrame || !aOpener,
              "Cannot pass aOpener for a remote frame!");
+}
+
+nsFrameLoader::nsFrameLoader(Element* aOwner,
+                             const mozilla::dom::RemotenessOptions& aOptions)
+    : mOwnerContent(aOwner),
+      mDetachedSubdocFrame(nullptr),
+      mOpener(nullptr),
+      mRemoteBrowser(nullptr),
+      mChildID(0),
+      mDepthTooGreat(false),
+      mIsTopLevelContent(false),
+      mDestroyCalled(false),
+      mNeedsAsyncDestroy(false),
+      mInSwap(false),
+      mInShow(false),
+      mHideCalled(false),
+      mNetworkCreated(false),
+      mLoadingOriginalSrc(false),
+      mRemoteBrowserShown(false),
+      mIsRemoteFrame(false),
+      mObservingOwnerContent(false) {
+  if (aOptions.mRemoteType.WasPassed() &&
+      (!aOptions.mRemoteType.Value().IsVoid())) {
+    mIsRemoteFrame = true;
+  }
+  bool hasOpener =
+      aOptions.mOpener.WasPassed() && !aOptions.mOpener.Value().IsNull();
+  MOZ_ASSERT(!mIsRemoteFrame || !hasOpener,
+             "Cannot pass aOpener for a remote frame!");
+  if (hasOpener) {
+    // This seems slightly unwieldy.
+    mOpener = aOptions.mOpener.Value().Value().get()->GetDOMWindow();
+  }
 }
 
 nsFrameLoader::~nsFrameLoader() {
@@ -193,6 +227,7 @@ nsFrameLoader::~nsFrameLoader() {
   MOZ_RELEASE_ASSERT(mDestroyCalled);
 }
 
+/* static */
 nsFrameLoader* nsFrameLoader::Create(Element* aOwner,
                                      nsPIDOMWindowOuter* aOpener,
                                      bool aNetworkCreated) {
@@ -227,6 +262,16 @@ nsFrameLoader* nsFrameLoader::Create(Element* aOwner,
   return new nsFrameLoader(aOwner, aOpener, aNetworkCreated);
 }
 
+/* static */
+nsFrameLoader* nsFrameLoader::Create(
+    mozilla::dom::Element* aOwner,
+    const mozilla::dom::RemotenessOptions& aOptions) {
+  NS_ENSURE_TRUE(aOwner, nullptr);
+  // This version of Create is only called for Remoteness updates, so we can
+  // assume we need a FrameLoader here and skip the check in the other Create.
+  return new nsFrameLoader(aOwner, aOptions);
+}
+
 void nsFrameLoader::LoadFrame(bool aOriginalSrc) {
   if (NS_WARN_IF(!mOwnerContent)) {
     return;
@@ -234,14 +279,19 @@ void nsFrameLoader::LoadFrame(bool aOriginalSrc) {
 
   nsAutoString src;
   nsCOMPtr<nsIPrincipal> principal;
+  nsCOMPtr<nsIContentSecurityPolicy> csp;
 
   bool isSrcdoc = mOwnerContent->IsHTMLElement(nsGkAtoms::iframe) &&
                   mOwnerContent->HasAttr(kNameSpaceID_None, nsGkAtoms::srcdoc);
   if (isSrcdoc) {
     src.AssignLiteral("about:srcdoc");
     principal = mOwnerContent->NodePrincipal();
+    // Currently the NodePrincipal holds the CSP for a document. After
+    // Bug 965637 we can query the CSP from mOwnerContent->OwnerDoc()
+    // instead of mOwnerContent->NodePrincipal().
+    mOwnerContent->NodePrincipal()->GetCsp(getter_AddRefs(csp));
   } else {
-    GetURL(src, getter_AddRefs(principal));
+    GetURL(src, getter_AddRefs(principal), getter_AddRefs(csp));
 
     src.Trim(" \t\n\r");
 
@@ -256,6 +306,10 @@ void nsFrameLoader::LoadFrame(bool aOriginalSrc) {
       }
       src.AssignLiteral("about:blank");
       principal = mOwnerContent->NodePrincipal();
+      // Currently the NodePrincipal holds the CSP for a document. After
+      // Bug 965637 we can query the CSP from mOwnerContent->OwnerDoc()
+      // instead of mOwnerContent->NodePrincipal().
+      mOwnerContent->NodePrincipal()->GetCsp(getter_AddRefs(csp));
     }
   }
 
@@ -282,7 +336,7 @@ void nsFrameLoader::LoadFrame(bool aOriginalSrc) {
   }
 
   if (NS_SUCCEEDED(rv)) {
-    rv = LoadURI(uri, principal, aOriginalSrc);
+    rv = LoadURI(uri, principal, csp, aOriginalSrc);
   }
 
   if (NS_FAILED(rv)) {
@@ -303,6 +357,7 @@ void nsFrameLoader::FireErrorEvent() {
 
 nsresult nsFrameLoader::LoadURI(nsIURI* aURI,
                                 nsIPrincipal* aTriggeringPrincipal,
+                                nsIContentSecurityPolicy* aCsp,
                                 bool aOriginalSrc) {
   if (!aURI) return NS_ERROR_INVALID_POINTER;
   NS_ENSURE_STATE(!mDestroyCalled && mOwnerContent);
@@ -320,10 +375,12 @@ nsresult nsFrameLoader::LoadURI(nsIURI* aURI,
 
   mURIToLoad = aURI;
   mTriggeringPrincipal = aTriggeringPrincipal;
+  mCsp = aCsp;
   rv = doc->InitializeFrameLoader(this);
   if (NS_FAILED(rv)) {
     mURIToLoad = nullptr;
     mTriggeringPrincipal = nullptr;
+    mCsp = nullptr;
   }
   return rv;
 }
@@ -395,22 +452,21 @@ nsresult nsFrameLoader::ReallyStartLoadingInternal() {
     loadState->SetTriggeringPrincipal(mOwnerContent->NodePrincipal());
   }
 
-  // Expanded Principals override the CSP of the document, hence we first check
-  // if the triggeringPrincipal overrides the document's principal. If so, let's
-  // query the CSP from that Principal, otherwise we use the document's CSP.
-  // Note that even after Bug 965637, Expanded Principals will hold their own
-  // CSP.
-  nsCOMPtr<nsIContentSecurityPolicy> csp;
-  if (BasePrincipal::Cast(loadState->TriggeringPrincipal())
-          ->OverridesCSP(mOwnerContent->NodePrincipal())) {
-    loadState->TriggeringPrincipal()->GetCsp(getter_AddRefs(csp));
-  } else {
+  // If we have an explicit CSP, we set it. If not, we only query it from
+  // the NodePrincipal in case there was no explicit triggeringPrincipal.
+  // Otherwise it's possible that the original triggeringPrincipal did not
+  // have a CSP which causes the CSP on the Principal and explicit CSP
+  // to be out of sync.
+  if (mCsp) {
+    loadState->SetCsp(mCsp);
+  } else if (!mTriggeringPrincipal) {
     // Currently the NodePrincipal holds the CSP for a document. After
     // Bug 965637 we can query the CSP from mOwnerContent->OwnerDoc()
     // instead of mOwnerContent->NodePrincipal().
+    nsCOMPtr<nsIContentSecurityPolicy> csp;
     mOwnerContent->NodePrincipal()->GetCsp(getter_AddRefs(csp));
+    loadState->SetCsp(csp);
   }
-  loadState->SetCsp(csp);
 
   nsCOMPtr<nsIURI> referrer;
 
@@ -793,11 +849,12 @@ void nsFrameLoader::MarginsChanged(uint32_t aMarginWidth,
 
   // Trigger a restyle if there's a prescontext
   // FIXME: This could do something much less expensive.
-  RefPtr<nsPresContext> presContext = mDocShell->GetPresContext();
-  if (presContext)
+  if (nsPresContext* presContext = mDocShell->GetPresContext()) {
     // rebuild, because now the same nsMappedAttributes* will produce
     // a different style
-    presContext->RebuildAllStyleData(nsChangeHint(0), eRestyle_Subtree);
+    presContext->RebuildAllStyleData(nsChangeHint(0),
+                                     RestyleHint::RestyleSubtree());
+  }
 }
 
 bool nsFrameLoader::ShowRemoteFrame(const ScreenIntSize& size,
@@ -2147,25 +2204,36 @@ nsresult nsFrameLoader::MaybeCreateDocShell() {
   return NS_OK;
 }
 
-void nsFrameLoader::GetURL(nsString& aURI,
-                           nsIPrincipal** aTriggeringPrincipal) {
+void nsFrameLoader::GetURL(nsString& aURI, nsIPrincipal** aTriggeringPrincipal,
+                           nsIContentSecurityPolicy** aCsp) {
   aURI.Truncate();
+  // Within this function we default to using the NodePrincipal as the
+  // triggeringPrincipal and the CSP of the document, currently stored
+  // on the NodePrincipal. After Bug 965637 we can query the CSP from
+  // mOwnerContent->OwnerDoc() instead of mOwnerContent->NodePrincipal().
+  // Expanded Principals however override the CSP of the document, hence
+  // if frame->GetSrcTriggeringPrincipal() returns a valid principal, we
+  // have to query the CSP from that Principal. Note that even after
+  // Bug 965637, Expanded Principals will hold their own CSP.
+  nsCOMPtr<nsIPrincipal> triggeringPrincipal = mOwnerContent->NodePrincipal();
+  nsCOMPtr<nsIContentSecurityPolicy> csp;
+  mOwnerContent->NodePrincipal()->GetCsp(getter_AddRefs(csp));
 
   if (mOwnerContent->IsHTMLElement(nsGkAtoms::object)) {
     mOwnerContent->GetAttr(kNameSpaceID_None, nsGkAtoms::data, aURI);
-    nsCOMPtr<nsIPrincipal> prin = mOwnerContent->NodePrincipal();
-    prin.forget(aTriggeringPrincipal);
   } else {
     mOwnerContent->GetAttr(kNameSpaceID_None, nsGkAtoms::src, aURI);
     if (RefPtr<nsGenericHTMLFrameElement> frame =
             do_QueryObject(mOwnerContent)) {
-      nsCOMPtr<nsIPrincipal> prin = frame->GetSrcTriggeringPrincipal();
-      prin.forget(aTriggeringPrincipal);
-    } else {
-      nsCOMPtr<nsIPrincipal> prin = mOwnerContent->NodePrincipal();
-      prin.forget(aTriggeringPrincipal);
+      nsCOMPtr<nsIPrincipal> srcPrincipal = frame->GetSrcTriggeringPrincipal();
+      if (srcPrincipal) {
+        triggeringPrincipal = srcPrincipal;
+        triggeringPrincipal->GetCsp(getter_AddRefs(csp));
+      }
     }
   }
+  triggeringPrincipal.forget(aTriggeringPrincipal);
+  csp.forget(aCsp);
 }
 
 nsresult nsFrameLoader::CheckForRecursiveLoad(nsIURI* aURI) {
@@ -2575,7 +2643,7 @@ bool nsFrameLoader::TryRemoteBrowser() {
 }
 
 bool nsFrameLoader::IsRemoteFrame() {
-  if (mRemoteFrame) {
+  if (mIsRemoteFrame) {
     MOZ_ASSERT(!mDocShell, "Found a remote frame with a DocShell");
     return true;
   }
@@ -2591,7 +2659,7 @@ mozilla::dom::BrowserBridgeChild* nsFrameLoader::GetBrowserBridgeChild() const {
 }
 
 mozilla::layers::LayersId nsFrameLoader::GetLayersId() const {
-  MOZ_ASSERT(mRemoteFrame);
+  MOZ_ASSERT(mIsRemoteFrame);
   if (mRemoteBrowser) {
     return mRemoteBrowser->GetRenderFrame()->GetLayersId();
   }
@@ -2831,7 +2899,7 @@ already_AddRefed<Element> nsFrameLoader::GetOwnerElement() {
 
 void nsFrameLoader::SetRemoteBrowser(nsITabParent* aTabParent) {
   MOZ_ASSERT(!mRemoteBrowser);
-  mRemoteFrame = true;
+  mIsRemoteFrame = true;
   mRemoteBrowser = TabParent::GetFrom(aTabParent);
   mChildID = mRemoteBrowser ? mRemoteBrowser->Manager()->ChildID() : 0;
   MaybeUpdatePrimaryTabParent(eTabParentChanged);

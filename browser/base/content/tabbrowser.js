@@ -59,6 +59,10 @@ window._gBrowser = {
     messageManager.addMessageListener("Findbar:Keypress", this);
     this._setFindbarData();
 
+    XPCOMUtils.defineLazyModuleGetters(this, {
+      E10SUtils: "resource://gre/modules/E10SUtils.jsm",
+    });
+
     XPCOMUtils.defineLazyPreferenceGetter(this, "animationsEnabled",
       "toolkit.cosmeticAnimations.enabled");
 
@@ -1487,6 +1491,7 @@ window._gBrowser = {
     triggeringPrincipal,
     csp,
     userContextId,
+    fromExternal,
   } = {}) {
     if (!aURIs.length) {
       return;
@@ -1538,6 +1543,9 @@ window._gBrowser = {
       if (!allowInheritPrincipal) {
         flags |= Ci.nsIWebNavigation.LOAD_FLAGS_DISALLOW_INHERIT_PRINCIPAL;
       }
+      if (fromExternal) {
+        flags |= Ci.nsIWebNavigation.LOAD_FLAGS_FROM_EXTERNAL;
+      }
       try {
         browser.loadURI(aURIs[0], {
           flags,
@@ -1560,6 +1568,7 @@ window._gBrowser = {
         triggeringPrincipal,
         bulkOrderedOpen: multiple,
         csp,
+        fromExternal,
       };
       if (newIndex > -1) {
         params.index = newIndex;
@@ -1581,6 +1590,7 @@ window._gBrowser = {
         triggeringPrincipal,
         bulkOrderedOpen: true,
         csp,
+        fromExternal,
       };
       if (targetTabIndex > -1) {
         params.index = ++tabNum;
@@ -1593,7 +1603,7 @@ window._gBrowser = {
     }
   },
 
-  updateBrowserRemoteness(aBrowser, aShouldBeRemote, {
+  updateBrowserRemoteness(aBrowser, {
     newFrameloader,
     opener,
     remoteType,
@@ -1602,21 +1612,25 @@ window._gBrowser = {
   } = {}) {
     let isRemote = aBrowser.getAttribute("remote") == "true";
 
-    if (!gMultiProcessBrowser && aShouldBeRemote) {
-      throw new Error("Cannot switch to remote browser in a window " +
-        "without the remote tabs load context.");
+    // We have to be careful with this here, as the "no remote type" is null,
+    // not a string. Make sure to check only for undefined, since null is
+    // allowed.
+    if (remoteType === undefined) {
+      throw new Error("Remote type must be set!");
     }
 
-    // Default values for remoteType
-    if (!remoteType) {
-      remoteType = aShouldBeRemote ? E10SUtils.DEFAULT_REMOTE_TYPE : E10SUtils.NOT_REMOTE;
+    let shouldBeRemote = remoteType !== E10SUtils.NOT_REMOTE;
+
+    if (!gMultiProcessBrowser && shouldBeRemote) {
+      throw new Error("Cannot switch to remote browser in a window " +
+        "without the remote tabs load context.");
     }
 
     // If we are passed an opener, we must be making the browser non-remote, and
     // if the browser is _currently_ non-remote, we need the openers to match,
     // because it is already too late to change it.
     if (opener) {
-      if (aShouldBeRemote) {
+      if (shouldBeRemote) {
         throw new Error("Cannot set an opener on a browser which should be remote!");
       }
       if (!isRemote && aBrowser.contentWindow.opener != opener) {
@@ -1626,7 +1640,7 @@ window._gBrowser = {
 
     // Abort if we're not going to change anything
     let oldRemoteType = aBrowser.remoteType;
-    if (isRemote == aShouldBeRemote && !newFrameloader &&
+    if (isRemote == shouldBeRemote && !newFrameloader &&
         (!isRemote || oldRemoteType == remoteType)) {
       return false;
     }
@@ -1657,19 +1671,15 @@ window._gBrowser = {
     let oldSameProcessAsFrameLoader = aBrowser.sameProcessAsFrameLoader;
     let oldUserTypedValue = aBrowser.userTypedValue;
     let hadStartedLoad = aBrowser.didStartLoadSinceLastUserTyping();
+    let parent = aBrowser.parentNode;
+
+    // Change the "remote" attribute.
 
     // Make sure the browser is destroyed so it unregisters from observer notifications
     aBrowser.destroy();
-
-    // Change the "remote" attribute.
-    let parent = aBrowser.parentNode;
-    aBrowser.remove();
-    if (aShouldBeRemote) {
-      aBrowser.setAttribute("remote", "true");
-      aBrowser.setAttribute("remoteType", remoteType);
-    } else {
-      aBrowser.setAttribute("remote", "false");
-      aBrowser.removeAttribute("remoteType");
+    // Only remove the node if we're not rebuilding the frameloader via nsFrameLoaderOwner.
+    if (!Services.prefs.getBoolPref("fission.rebuild_frameloaders_on_remoteness_change", false)) {
+      aBrowser.remove();
     }
 
     if (recordExecution) {
@@ -1687,7 +1697,7 @@ window._gBrowser = {
     if (sameProcessAsFrameLoader) {
       // Always set sameProcessAsFrameLoader when passed in explicitly.
       aBrowser.sameProcessAsFrameLoader = sameProcessAsFrameLoader;
-    } else if (!aShouldBeRemote || oldRemoteType == remoteType) {
+    } else if (!shouldBeRemote || oldRemoteType == remoteType) {
       // Only copy existing sameProcessAsFrameLoader when not switching
       // remote type otherwise it would stop the switch.
       aBrowser.sameProcessAsFrameLoader = oldSameProcessAsFrameLoader;
@@ -1699,7 +1709,30 @@ window._gBrowser = {
       aBrowser.presetOpenerWindow(opener);
     }
 
-    parent.appendChild(aBrowser);
+    // Note that this block is also affected by the
+    // rebuild_frameloaders_on_remoteness_change pref. If the pref is set to
+    // false, this attribute change is observed by browser-custom-element,
+    // causing browser destroy()/construct() to be run. If the pref is true,
+    // then we update the attributes, we run the construct() call ourselves
+    // after the new frameloader has been created.
+    if (shouldBeRemote) {
+      aBrowser.setAttribute("remote", "true");
+      aBrowser.setAttribute("remoteType", remoteType);
+    } else {
+      aBrowser.setAttribute("remote", "false");
+      aBrowser.removeAttribute("remoteType");
+    }
+
+    if (!Services.prefs.getBoolPref("fission.rebuild_frameloaders_on_remoteness_change", false)) {
+      parent.appendChild(aBrowser);
+    } else {
+      // This call actually switches out our frameloaders. Do this as late as
+      // possible before rebuilding the browser, as we'll need the new browser
+      // state set up completely first.
+      aBrowser.changeRemoteness({ remoteType });
+      // Once we have new frameloaders, this call sets the browser back up.
+      aBrowser.construct();
+    }
 
     aBrowser.userTypedValue = oldUserTypedValue;
     if (hadStartedLoad) {
@@ -1738,7 +1771,7 @@ window._gBrowser = {
                                 [aBrowser.webProgress, null, event, true],
                                 true, false);
 
-    if (aShouldBeRemote) {
+    if (shouldBeRemote) {
       // Switching the browser to be remote will connect to a new child
       // process so the browser can no longer be considered to be
       // crashed.
@@ -1770,8 +1803,9 @@ window._gBrowser = {
   },
 
   updateBrowserRemotenessByURL(aBrowser, aURL, aOptions = {}) {
-    if (!gMultiProcessBrowser)
-      return this.updateBrowserRemoteness(aBrowser, false);
+    if (!gMultiProcessBrowser) {
+      return this.updateBrowserRemoteness(aBrowser, { remoteType: E10SUtils.NOT_REMOTE });
+    }
 
     let oldRemoteType = aBrowser.remoteType;
 
@@ -1785,8 +1819,7 @@ window._gBrowser = {
     // correct type.
     if (oldRemoteType != aOptions.remoteType ||
         aOptions.newFrameloader) {
-      let remote = aOptions.remoteType != E10SUtils.NOT_REMOTE;
-      return this.updateBrowserRemoteness(aBrowser, remote, aOptions);
+      return this.updateBrowserRemoteness(aBrowser, aOptions);
     }
 
     return false;
@@ -4227,35 +4260,30 @@ window._gBrowser = {
       return;
     }
 
-    if (aEvent.altKey)
+    // Skip this only if something has explicitly cancelled it.
+    if (aEvent.defaultCancelled) {
       return;
+    }
 
     // Don't check if the event was already consumed because tab
     // navigation should always work for better user experience.
 
-    if (aEvent.ctrlKey && aEvent.shiftKey && !aEvent.metaKey) {
-      switch (aEvent.keyCode) {
-        case aEvent.DOM_VK_PAGE_UP:
-          this.moveTabBackward();
-          aEvent.preventDefault();
-          return;
-        case aEvent.DOM_VK_PAGE_DOWN:
-          this.moveTabForward();
-          aEvent.preventDefault();
-          return;
-      }
-    }
-
-    if (AppConstants.platform != "macosx") {
-      if (aEvent.ctrlKey && !aEvent.shiftKey && !aEvent.metaKey &&
-          aEvent.keyCode == KeyEvent.DOM_VK_F4) {
+    switch (ShortcutUtils.getSystemActionForEvent(aEvent)) {
+      case ShortcutUtils.MOVE_TAB_BACKWARD:
+        this.moveTabBackward();
+        aEvent.preventDefault();
+        return;
+      case ShortcutUtils.MOVE_TAB_FORWARD:
+        this.moveTabForward();
+        aEvent.preventDefault();
+        return;
+      case ShortcutUtils.CLOSE_TAB:
         if (gBrowser.multiSelectedTabsCount) {
           gBrowser.removeMultiSelectedTabs();
         } else if (!this.selectedTab.pinned) {
           this.removeCurrentTab({ animate: true });
         }
         aEvent.preventDefault();
-      }
     }
   },
 
@@ -4265,22 +4293,21 @@ window._gBrowser = {
       return;
     }
 
-    if (aEvent.altKey)
+    // Skip this only if something has explicitly cancelled it.
+    if (aEvent.defaultCancelled) {
       return;
+    }
 
     if (AppConstants.platform == "macosx") {
-      if (!aEvent.metaKey)
-        return;
-
-      var offset = 1;
-      switch (aEvent.charCode) {
-        case "}".charCodeAt(0):
-          offset = -1;
-        case "{".charCodeAt(0):
-          if (!RTL_UI)
-            offset *= -1;
-          this.tabContainer.advanceSelectedTab(offset, true);
+      switch (ShortcutUtils.getSystemActionForEvent(aEvent, {rtl: RTL_UI})) {
+        case ShortcutUtils.NEXT_TAB:
+          this.tabContainer.advanceSelectedTab(1, true);
           aEvent.preventDefault();
+          break;
+        case ShortcutUtils.PREVIOUS_TAB:
+          this.tabContainer.advanceSelectedTab(-1, true);
+          aEvent.preventDefault();
+          break;
       }
     }
   },
@@ -4707,7 +4734,7 @@ window._gBrowser = {
       if (this.selectedBrowser == browser) {
         TabCrashHandler.onSelectedBrowserCrash(browser, false);
       } else {
-        this.updateBrowserRemoteness(browser, false);
+        this.updateBrowserRemoteness(browser, { remoteType: E10SUtils.NOT_REMOTE });
         SessionStore.reviveCrashedTab(tab);
       }
 
