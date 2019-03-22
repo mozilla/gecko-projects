@@ -28,7 +28,7 @@
 #include "mozilla/layers/APZCCallbackHelper.h"
 #include "ClientLayerManager.h"
 #include "nsQueryObject.h"
-#include "CubebUtils.h"
+#include "CubebDeviceEnumerator.h"
 
 #include "nsIScrollableFrame.h"
 
@@ -435,10 +435,18 @@ nsDOMWindowUtils::SetDisplayPortForElement(float aXPx, float aYPx,
     return NS_ERROR_INVALID_ARG;
   }
 
-  DisplayPortPropertyData* currentData = static_cast<DisplayPortPropertyData*>(
-      aElement->GetProperty(nsGkAtoms::DisplayPort));
-  if (currentData && currentData->mPriority > aPriority) {
-    return NS_OK;
+  bool hadDisplayPort = false;
+  nsRect oldDisplayPort;
+  {
+    DisplayPortPropertyData* currentData = static_cast<DisplayPortPropertyData*>(
+        aElement->GetProperty(nsGkAtoms::DisplayPort));
+    if (currentData) {
+      if (currentData->mPriority > aPriority) {
+        return NS_OK;
+      }
+      hadDisplayPort = true;
+      oldDisplayPort = currentData->mRect;
+    }
   }
 
   nsRect displayport(nsPresContext::CSSPixelsToAppUnits(aXPx),
@@ -461,8 +469,7 @@ nsDOMWindowUtils::SetDisplayPortForElement(float aXPx, float aYPx,
   }
 
   nsLayoutUtils::InvalidateForDisplayPortChange(
-      aElement, !!currentData, currentData ? currentData->mRect : nsRect(),
-      displayport);
+      aElement, hadDisplayPort, oldDisplayPort, displayport);
 
   nsIFrame* rootFrame = presShell->GetRootFrame();
   if (rootFrame) {
@@ -2142,10 +2149,14 @@ nsDOMWindowUtils::AudioDevices(uint16_t aSide, nsIArray** aDevices) {
       do_CreateInstance(NS_ARRAY_CONTRACTID, &rv);
   NS_ENSURE_SUCCESS(rv, rv);
 
+  RefPtr<CubebDeviceEnumerator> enumerator = Enumerator::GetInstance();
   nsTArray<RefPtr<AudioDeviceInfo>> collection;
-  CubebUtils::GetDeviceCollection(collection, aSide == AUDIO_INPUT
-                                                  ? CubebUtils::Side::Input
-                                                  : CubebUtils::Side::Output);
+  if (aSide == AUDIO_INPUT) {
+    enumerator->EnumerateAudioInputDevices(collection);
+  } else {
+    enumerator->EnumerateAudioOutputDevices(collection);
+  }
+
   for (auto device : collection) {
     devices->AppendElement(device);
   }
@@ -3405,7 +3416,10 @@ nsDOMWindowUtils::GetOMTAStyle(Element* aElement, const nsAString& aProperty,
         cssValue = new nsROCSSPrimitiveValue;
         cssValue->SetNumber(value.get_float());
       }
-    } else if (aProperty.EqualsLiteral("transform")) {
+    } else if (aProperty.EqualsLiteral("transform") ||
+               aProperty.EqualsLiteral("translate") ||
+               aProperty.EqualsLiteral("rotate") ||
+               aProperty.EqualsLiteral("scale")) {
       OMTAValue value = GetOMTAValue(frame, DisplayItemType::TYPE_TRANSFORM,
                                      GetWebRenderBridge());
       if (value.type() == OMTAValue::TMatrix4x4) {

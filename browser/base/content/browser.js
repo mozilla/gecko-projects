@@ -13,6 +13,7 @@ ChromeUtils.import("resource://gre/modules/NotificationDB.jsm");
 XPCOMUtils.defineLazyModuleGetters(this, {
   AddonManager: "resource://gre/modules/AddonManager.jsm",
   AMTelemetry: "resource://gre/modules/AddonManager.jsm",
+  NewTabPagePreloading: "resource:///modules/NewTabPagePreloading.jsm",
   BrowserUsageTelemetry: "resource:///modules/BrowserUsageTelemetry.jsm",
   BrowserUtils: "resource://gre/modules/BrowserUtils.jsm",
   BrowserWindowTracker: "resource:///modules/BrowserWindowTracker.jsm",
@@ -265,6 +266,11 @@ XPCOMUtils.defineLazyPreferenceGetter(gURLBarHandler, "quantumbar",
                                       "browser.urlbar.quantumbar", false,
                                       gURLBarHandler.handlePrefChange.bind(gURLBarHandler));
 
+XPCOMUtils.defineLazyGetter(this, "ReferrerInfo", () =>
+  Components.Constructor("@mozilla.org/referrer-info;1",
+                         "nsIReferrerInfo",
+                         "init"));
+
 // High priority notification bars shown at the top of the window.
 XPCOMUtils.defineLazyGetter(this, "gHighPriorityNotificationBox", () => {
   return new MozElements.NotificationBox(element => {
@@ -354,6 +360,16 @@ XPCOMUtils.defineLazyPreferenceGetter(this, "gToolbarKeyNavEnabled",
     } else {
       ToolbarKeyboardNavigator.uninit();
     }
+  });
+
+XPCOMUtils.defineLazyPreferenceGetter(this, "gFxaToolbarEnabled",
+  "identity.fxaccounts.toolbar.enabled", false, (aPref, aOldVal, aNewVal) => {
+    showFxaToolbarMenu(aNewVal);
+  });
+
+XPCOMUtils.defineLazyPreferenceGetter(this, "gFxaToolbarAccessed",
+  "identity.fxaccounts.toolbar.accessed", false, (aPref, aOldVal, aNewVal) => {
+    showFxaToolbarMenu(gFxaToolbarEnabled);
   });
 
 customElements.setElementCreationCallback("translation-notification", () => {
@@ -454,6 +470,34 @@ var gNavigatorBundle = {
     return gBrowserBundle.formatStringFromName(key, array, array.length);
   },
 };
+
+function showFxaToolbarMenu(enable) {
+  // We only show the Firefox Account toolbar menu if the feature is enabled and
+  // if sync is enabled.
+  const syncEnabled = Services.prefs.getBoolPref("identity.fxaccounts.enabled", false);
+  const mainWindowEl = document.documentElement;
+  const fxaPanelEl = document.getElementById("PanelUI-fxa");
+  if (enable && syncEnabled) {
+    fxaPanelEl.addEventListener("ViewShowing", gSync.updateSendToDeviceTitle);
+
+    mainWindowEl.setAttribute("fxastatus", "not_configured");
+    // We have to manually update the sync state UI when toggling the FxA toolbar
+    // because it could show an invalid icon if the user is logged in and no sync
+    // event was performed yet.
+    gSync.maybeUpdateUIState();
+
+    // We set an attribute here so that we can toggle the custom
+    // badge depending on whether the FxA menu was ever accessed.
+    if (!gFxaToolbarAccessed) {
+      mainWindowEl.setAttribute("fxa_avatar_badged", "badged");
+    } else {
+      mainWindowEl.removeAttribute("fxa_avatar_badged");
+    }
+  } else {
+    mainWindowEl.removeAttribute("fxastatus");
+    fxaPanelEl.removeEventListener("ViewShowing", gSync.updateSendToDeviceTitle);
+  }
+}
 
 function UpdateBackForwardCommands(aWebNavigation) {
   var backCommand = document.getElementById("Browser:Back");
@@ -1397,6 +1441,8 @@ var gBrowserInit = {
     });
 
     this._setInitialFocus();
+
+    showFxaToolbarMenu(gFxaToolbarEnabled);
   },
 
   onLoad() {
@@ -1740,7 +1786,7 @@ var gBrowserInit = {
   _handleURIToLoad() {
     this._callWithURIToLoad(uriToLoad => {
       if (!uriToLoad) {
-        // We don't check whether window.arguments[6] (userContextId) is set
+        // We don't check whether window.arguments[5] (userContextId) is set
         // because tabbrowser.js takes care of that for the initial tab.
         return;
       }
@@ -1755,44 +1801,33 @@ var gBrowserInit = {
             inBackground: false,
             replace: true,
             // See below for the semantics of window.arguments. Only the minimum is supported.
-            userContextId: window.arguments[6],
-            triggeringPrincipal: window.arguments[8] || Services.scriptSecurityManager.getSystemPrincipal(),
-            allowInheritPrincipal: window.arguments[9],
-            csp: window.arguments[10],
+            userContextId: window.arguments[5],
+            triggeringPrincipal: window.arguments[7] || Services.scriptSecurityManager.getSystemPrincipal(),
+            allowInheritPrincipal: window.arguments[8],
+            csp: window.arguments[9],
             fromExternal: true,
           });
         } catch (e) {}
       } else if (window.arguments.length >= 3) {
         // window.arguments[1]: unused (bug 871161)
-        //                 [2]: referrer (nsIURI | string)
+        //                 [2]: referrerInfo (nsIReferrerInfo)
         //                 [3]: postData (nsIInputStream)
         //                 [4]: allowThirdPartyFixup (bool)
-        //                 [5]: referrerPolicy (int)
-        //                 [6]: userContextId (int)
-        //                 [7]: originPrincipal (nsIPrincipal)
-        //                 [8]: triggeringPrincipal (nsIPrincipal)
-        //                 [9]: allowInheritPrincipal (bool)
-        //                [10]: csp (nsIContentSecurityPolicy)
-        let referrerURI = window.arguments[2];
-        if (typeof(referrerURI) == "string") {
-          try {
-            referrerURI = makeURI(referrerURI);
-          } catch (e) {
-            referrerURI = null;
-          }
-        }
-        let referrerPolicy = (window.arguments[5] != undefined ?
-            window.arguments[5] : Ci.nsIHttpChannel.REFERRER_POLICY_UNSET);
-        let userContextId = (window.arguments[6] != undefined ?
-            window.arguments[6] : Ci.nsIScriptSecurityManager.DEFAULT_USER_CONTEXT_ID);
-        loadURI(uriToLoad, referrerURI, window.arguments[3] || null,
-                window.arguments[4] || false, referrerPolicy, userContextId,
+        //                 [5]: userContextId (int)
+        //                 [6]: originPrincipal (nsIPrincipal)
+        //                 [7]: triggeringPrincipal (nsIPrincipal)
+        //                 [8]: allowInheritPrincipal (bool)
+        //                 [9]: csp (nsIContentSecurityPolicy)
+        let userContextId = (window.arguments[5] != undefined ?
+            window.arguments[5] : Ci.nsIScriptSecurityManager.DEFAULT_USER_CONTEXT_ID);
+        loadURI(uriToLoad, window.arguments[2] || null, window.arguments[3] || null,
+                window.arguments[4] || false, userContextId,
                 // pass the origin principal (if any) and force its use to create
                 // an initial about:blank viewer if present:
-                window.arguments[7], !!window.arguments[7], window.arguments[8],
+                window.arguments[6], !!window.arguments[6], window.arguments[7],
                 // TODO fix allowInheritPrincipal to default to false.
                 // Default to true unless explicitly set to false because of bug 1475201.
-                window.arguments[9] !== false, window.arguments[10]);
+                window.arguments[8] !== false, window.arguments[9]);
         window.focus();
       } else {
         // Note: loadOneOrMoreURIs *must not* be called if window.arguments.length >= 3.
@@ -1894,6 +1929,10 @@ var gBrowserInit = {
           `${browserBounds.width}x${browserBounds.height}`,
           1);
       }, 300 * 1000);
+    });
+
+    scheduleIdleTask(async () => {
+      NewTabPagePreloading.maybeCreatePreloadedBrowser(window);
     });
 
     // This should always go last, since the idle tasks (except for the ones with
@@ -2022,6 +2061,8 @@ var gBrowserInit = {
     }
 
     BrowserSearch.uninit();
+
+    NewTabPagePreloading.removePreloadedBrowser(window);
 
     // Now either cancel delayedStartup, or clean up the services initialized from
     // it.
@@ -2509,7 +2550,7 @@ function BrowserTryToCloseWindow() {
     window.close(); // WindowIsClosing does all the necessary checks
 }
 
-function loadURI(uri, referrer, postData, allowThirdPartyFixup, referrerPolicy,
+function loadURI(uri, referrerInfo, postData, allowThirdPartyFixup,
                  userContextId, originPrincipal, forceAboutBlankViewerInCurrent,
                  triggeringPrincipal, allowInheritPrincipal = false, csp = null) {
   if (!triggeringPrincipal) {
@@ -2518,8 +2559,7 @@ function loadURI(uri, referrer, postData, allowThirdPartyFixup, referrerPolicy,
 
   try {
     openLinkIn(uri, "current",
-               { referrerURI: referrer,
-                 referrerPolicy,
+               { referrerInfo,
                  postData,
                  allowThirdPartyFixup,
                  userContextId,
@@ -2647,6 +2687,8 @@ async function BrowserViewSourceOfDocument(aArgsOrDocument) {
     tabBrowser = browserWindow.gBrowser;
   }
 
+  const inNewWindow = !Services.prefs.getBoolPref("view_source.tab");
+
   // `viewSourceInBrowser` will load the source content from the page
   // descriptor for the tab (when possible) or fallback to the network if
   // that fails.  Either way, the view source module will manage the tab's
@@ -2654,13 +2696,19 @@ async function BrowserViewSourceOfDocument(aArgsOrDocument) {
   // requests.
   let tab = tabBrowser.loadOneTab("about:blank", {
     relatedToCurrent: true,
-    inBackground: false,
+    inBackground: inNewWindow,
+    skipAnimation: inNewWindow,
     preferredRemoteType,
     sameProcessAsFrameLoader: args.browser ? args.browser.frameLoader : null,
     triggeringPrincipal: Services.scriptSecurityManager.getSystemPrincipal(),
   });
   args.viewSourceBrowser = tabBrowser.getBrowserForTab(tab);
   top.gViewSourceUtils.viewSourceInBrowser(args);
+
+  if (inNewWindow) {
+    tabBrowser.hideTab(tab);
+    tabBrowser.replaceTabWithWindow(tab);
+  }
 }
 
 /**
@@ -3178,7 +3226,6 @@ var BrowserOnClick = {
         break;
 
       case "advancedButton":
-      case "moreInformationButton":
         securityInfo = getSecurityInfo(securityInfoAsString);
         let errorInfo = getDetailedCertErrorInfo(location,
                                                  securityInfo);
@@ -5094,10 +5141,13 @@ var XULBrowserWindow = {
     this._lastLocationForEvent = spec;
 
     if (typeof(aIsSimulated) != "boolean" && typeof(aIsSimulated) != "undefined") {
-      throw "onContentBlockingEvent: aIsSimulated receieved an unexpected type";
+      throw new Error("onContentBlockingEvent: aIsSimulated receieved an unexpected type");
     }
 
     ContentBlocking.onContentBlockingEvent(this._event, aWebProgress, aIsSimulated);
+    // Because this function will only receive content blocking event updates
+    // for the currently selected tab, we handle updates to background tabs in
+    // TabsProgressListener.onContentBlockingEvent.
     gBrowser.selectedBrowser.updateSecurityUIForContentBlockingEvent(aEvent);
   },
 
@@ -5468,6 +5518,14 @@ const AccessibilityRefreshBlocker = {
 };
 
 var TabsProgressListener = {
+  onContentBlockingEvent(aBrowser, aWebProgress, aRequest, aEvent) {
+    // Handle content blocking events for background (=non-selected) tabs.
+    // This event is processed for the selected tab in XULBrowserWindow.onContentBlockingEvent.
+    if (aBrowser != gBrowser.selectedBrowser) {
+      aBrowser.updateSecurityUIForContentBlockingEvent(aEvent);
+    }
+  },
+
   onStateChange(aBrowser, aWebProgress, aRequest, aStateFlags, aStatus) {
     // Collect telemetry data about tab load times.
     if (aWebProgress.isTopLevel && (!aRequest.originalURI || aRequest.originalURI.scheme != "about")) {
@@ -5524,6 +5582,8 @@ var TabsProgressListener = {
     gBrowser.getNotificationBox(aBrowser).removeTransientNotifications();
 
     FullZoom.onLocationChange(aLocationURI, false, aBrowser);
+
+    ContentBlocking.onLocationChange();
   },
 
   onLinkIconAvailable(browser, dataURI, iconURI) {
@@ -5543,7 +5603,7 @@ function nsBrowserAccess() { }
 nsBrowserAccess.prototype = {
   QueryInterface: ChromeUtils.generateQI([Ci.nsIBrowserDOMWindow]),
 
-  _openURIInNewTab(aURI, aReferrer, aReferrerPolicy, aIsPrivate,
+  _openURIInNewTab(aURI, aReferrerInfo, aIsPrivate,
                    aIsExternal, aForceNotRemote = false,
                    aUserContextId = Ci.nsIScriptSecurityManager.DEFAULT_USER_CONTEXT_ID,
                    aOpenerWindow = null, aOpenerBrowser = null,
@@ -5573,8 +5633,7 @@ nsBrowserAccess.prototype = {
 
     let tab = win.gBrowser.loadOneTab(aURI ? aURI.spec : "about:blank", {
                                       triggeringPrincipal: aTriggeringPrincipal,
-                                      referrerURI: aReferrer,
-                                      referrerPolicy: aReferrerPolicy,
+                                      referrerInfo: aReferrerInfo,
                                       userContextId: aUserContextId,
                                       fromExternal: aIsExternal,
                                       inBackground: loadInBackground,
@@ -5638,10 +5697,10 @@ nsBrowserAccess.prototype = {
         aWhere = Services.prefs.getIntPref("browser.link.open_newwindow");
     }
 
-    let referrer = aOpener ? makeURI(aOpener.location.href) : null;
-    let referrerPolicy = Ci.nsIHttpChannel.REFERRER_POLICY_UNSET;
+    let referrerInfo = new ReferrerInfo(Ci.nsIHttpChannel.REFERRER_POLICY_UNSET, true,
+      aOpener ? makeURI(aOpener.location.href) : null);
     if (aOpener && aOpener.document) {
-      referrerPolicy = aOpener.document.referrerPolicy;
+      referrerInfo.referrerPolicy = aOpener.document.referrerPolicy;
     }
     // Bug 965637, query the CSP from the doc instead of the Principal
     let csp = aTriggeringPrincipal.csp;
@@ -5663,7 +5722,7 @@ nsBrowserAccess.prototype = {
         try {
           newWindow = openDialog(AppConstants.BROWSER_CHROME_URL, "_blank", features,
                       // window.arguments
-                      url, null, null, null, null, null, null, null, aTriggeringPrincipal);
+                      url, null, null, null, null, null, null, aTriggeringPrincipal);
         } catch (ex) {
           Cu.reportError(ex);
         }
@@ -5680,7 +5739,7 @@ nsBrowserAccess.prototype = {
                               ? aOpener.document.nodePrincipal.originAttributes.userContextId
                               : Ci.nsIScriptSecurityManager.DEFAULT_USER_CONTEXT_ID;
         let openerWindow = (aFlags & Ci.nsIBrowserDOMWindow.OPEN_NO_OPENER) ? null : aOpener;
-        let browser = this._openURIInNewTab(aURI, referrer, referrerPolicy,
+        let browser = this._openURIInNewTab(aURI, referrerInfo,
                                             isPrivate, isExternal,
                                             forceNotRemote, userContextId,
                                             openerWindow, null, aTriggeringPrincipal,
@@ -5698,8 +5757,7 @@ nsBrowserAccess.prototype = {
             triggeringPrincipal: aTriggeringPrincipal,
             csp,
             flags: loadflags,
-            referrerURI: referrer,
-            referrerPolicy,
+            referrerInfo,
           });
         }
         if (!Services.prefs.getBoolPref("browser.tabs.loadDivertedInBackground"))
@@ -5737,9 +5795,8 @@ nsBrowserAccess.prototype = {
                           ? aParams.openerOriginAttributes.userContextId
                           : Ci.nsIScriptSecurityManager.DEFAULT_USER_CONTEXT_ID;
 
-    let referrer = aParams.referrer ? makeURI(aParams.referrer) : null;
-    return this._openURIInNewTab(aURI, referrer,
-                                 aParams.referrerPolicy,
+    return this._openURIInNewTab(aURI,
+                                 aParams.referrerInfo,
                                  aParams.isPrivate,
                                  isExternal, false,
                                  userContextId, null, aParams.openerBrowser,
@@ -6295,6 +6352,10 @@ function handleLinkClick(event, href, linkNode) {
   }
 
   let frameOuterWindowID = WebNavigationFrames.getFrameId(doc.defaultView);
+  let referrerInfo = new ReferrerInfo(
+    referrerPolicy,
+    !BrowserUtils.linkHasNoReferrer(linkNode),
+    referrerURI);
 
   // Bug 965637, query the CSP from the doc instead of the Principal
   let csp = doc.nodePrincipal.csp;
@@ -6303,9 +6364,7 @@ function handleLinkClick(event, href, linkNode) {
   let params = {
     charset: doc.characterSet,
     allowMixedContent: persistAllowMixedContentInChildTab,
-    referrerURI,
-    referrerPolicy,
-    noReferrer: BrowserUtils.linkHasNoReferrer(linkNode),
+    referrerInfo,
     originPrincipal: doc.nodePrincipal,
     triggeringPrincipal: doc.nodePrincipal,
     csp,
@@ -6463,6 +6522,20 @@ function UpdateCurrentCharset(target) {
   }
 }
 
+function promptRemoveExtension(addon) {
+  let {name} = addon;
+  let brand = document.getElementById("bundle_brand").getString("brandShorterName");
+  let {getFormattedString, getString} = gNavigatorBundle;
+  let title = getFormattedString("webext.remove.confirmation.title", [name]);
+  let message = getFormattedString("webext.remove.confirmation.message", [name, brand]);
+  let btnTitle = getString("webext.remove.confirmation.button");
+  let {BUTTON_TITLE_IS_STRING: titleString, BUTTON_TITLE_CANCEL: titleCancel,
+        BUTTON_POS_0, BUTTON_POS_1, confirmEx} = Services.prompt;
+  let btnFlags = BUTTON_POS_0 * titleString + BUTTON_POS_1 * titleCancel;
+  return confirmEx(null, title, message, btnFlags, btnTitle, null, null, null,
+                    {value: 0});
+}
+
 var ToolbarContextMenu = {
   updateDownloadsAutoHide(popup) {
     let checkbox = document.getElementById("toolbar-context-autohide-downloads-button");
@@ -6512,17 +6585,7 @@ var ToolbarContextMenu = {
     if (!addon || !(addon.permissions & AddonManager.PERM_CAN_UNINSTALL)) {
       return;
     }
-    let {name} = addon;
-    let brand = document.getElementById("bundle_brand").getString("brandShorterName");
-    let {getFormattedString, getString} = gNavigatorBundle;
-    let title = getFormattedString("webext.remove.confirmation.title", [name]);
-    let message = getFormattedString("webext.remove.confirmation.message", [name, brand]);
-    let btnTitle = getString("webext.remove.confirmation.button");
-    let {BUTTON_TITLE_IS_STRING: titleString, BUTTON_TITLE_CANCEL: titleCancel,
-         BUTTON_POS_0, BUTTON_POS_1, confirmEx} = Services.prompt;
-    let btnFlags = BUTTON_POS_0 * titleString + BUTTON_POS_1 * titleCancel;
-    let response = confirmEx(null, title, message, btnFlags, btnTitle, null, null, null,
-                             {value: 0});
+    let response = promptRemoveExtension(addon);
     AMTelemetry.recordActionEvent({
       object: "browserAction",
       action: "uninstall",
@@ -8330,7 +8393,7 @@ TabModalPromptBox.prototype = {
   get browser() {
     let browser = this._weakBrowserRef.get();
     if (!browser) {
-      throw "Stale promptbox! The associated browser is gone.";
+      throw new Error("Stale promptbox! The associated browser is gone.");
     }
     return browser;
   },

@@ -22,11 +22,12 @@ add_task(async function() {
   const AboutDebugging = window.AboutDebugging;
   await selectThisFirefoxPage(document, AboutDebugging.store);
 
-  const connectSidebarItem = findSidebarItemByText("Connect", document);
+  const connectSidebarItem = findSidebarItemByText("Setup", document);
   const connectLink = connectSidebarItem.querySelector(".js-sidebar-link");
   ok(connectSidebarItem, "Found the Connect sidebar item");
 
-  const thisFirefoxSidebarItem = findSidebarItemByText("This Firefox", document);
+  const thisFirefoxString = getThisFirefoxString(window);
+  const thisFirefoxSidebarItem = findSidebarItemByText(thisFirefoxString, document);
   const thisFirefoxLink = thisFirefoxSidebarItem.querySelector(".js-sidebar-link");
   ok(thisFirefoxSidebarItem, "Found the ThisFirefox sidebar item");
   ok(isSidebarItemSelected(thisFirefoxSidebarItem),

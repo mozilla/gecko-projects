@@ -1205,7 +1205,7 @@ Document::Document(const char* aContentType)
       mStyledLinksCleared(false),
 #endif
       mBidiEnabled(false),
-      mFontGroupCacheDirty(true),
+      mMayNeedFontPrefsUpdate(true),
       mMathMLEnabled(false),
       mIsInitialDocumentInWindow(false),
       mIgnoreDocGroupMismatches(false),
@@ -1340,7 +1340,8 @@ Document::Document(const char* aContentType)
       mSavedResolution(1.0f),
       mPendingInitialTranslation(false),
       mGeneration(0),
-      mCachedTabSizeGeneration(0) {
+      mCachedTabSizeGeneration(0),
+      mInRDMPane(false) {
   MOZ_LOG(gDocumentLeakPRLog, LogLevel::Debug, ("DOCUMENT %p created", this));
 
   SetIsInDocument();
@@ -3518,7 +3519,7 @@ void Document::SetHeaderData(nsAtom* aHeaderField, const nsAString& aData) {
 
   if (aHeaderField == nsGkAtoms::headerContentLanguage) {
     CopyUTF16toUTF8(aData, mContentLanguage);
-    ResetLangPrefs();
+    mMayNeedFontPrefsUpdate = true;
     if (auto* presContext = GetPresContext()) {
       presContext->ContentLanguageChanged();
     }
@@ -6514,6 +6515,8 @@ nsINode* Document::AdoptNode(nsINode& aAdoptedNode, ErrorResult& rv) {
   return adoptedNode;
 }
 
+bool Document::UseWidthDeviceWidthFallbackViewport() const { return false; }
+
 void Document::ParseWidthAndHeightInMetaViewport(
     const nsAString& aWidthString, const nsAString& aHeightString,
     const nsAString& aScaleString) {
@@ -6553,6 +6556,9 @@ void Document::ParseWidthAndHeightInMetaViewport(
       mMinWidth = nsViewportInfo::ExtendToZoom;
       mMaxWidth = nsViewportInfo::ExtendToZoom;
     }
+  } else if (aHeightString.IsEmpty() && UseWidthDeviceWidthFallbackViewport()) {
+    mMinWidth = nsViewportInfo::ExtendToZoom;
+    mMaxWidth = nsViewportInfo::DeviceSize;
   }
 
   mMinHeight = nsViewportInfo::Auto;
@@ -6766,10 +6772,9 @@ nsViewportInfo Document::GetViewportInfo(const ScreenIntSize& aDisplaySize) {
       CSSCoord maxHeight = mMaxHeight;
 
       // aDisplaySize is in screen pixels; convert them to CSS pixels for the
-      // viewport size.
-      CSSToScreenScale defaultPixelScale =
-          layoutDeviceScale * LayoutDeviceToScreenScale(1.0f);
-      CSSSize displaySize = ScreenSize(aDisplaySize) / defaultPixelScale;
+      // viewport size. We need to use this scaled size for any clamping of
+      // width or height.
+      CSSSize displaySize = ScreenSize(aDisplaySize) / defaultScale;
 
       // Resolve device-width and device-height first.
       if (maxWidth == nsViewportInfo::DeviceSize) {
@@ -6846,7 +6851,7 @@ nsViewportInfo Document::GetViewportInfo(const ScreenIntSize& aDisplaySize) {
       // https://drafts.csswg.org/css-device-adapt/#resolve-height
       if (height == nsViewportInfo::Auto) {
         if (aDisplaySize.width == 0) {
-          height = aDisplaySize.height;
+          height = displaySize.height;
         } else {
           height = width * aDisplaySize.height / aDisplaySize.width;
         }
@@ -6889,8 +6894,8 @@ nsViewportInfo Document::GetViewportInfo(const ScreenIntSize& aDisplaySize) {
       // Also recalculate the default zoom, if it wasn't specified in the
       // metadata, and the width is specified.
       if (mScaleStrEmpty && !mWidthStrEmpty) {
-        CSSToScreenScale defaultScale(float(aDisplaySize.width) / size.width);
-        scaleFloat = (scaleFloat > defaultScale) ? scaleFloat : defaultScale;
+        CSSToScreenScale bestFitScale(float(aDisplaySize.width) / size.width);
+        scaleFloat = (scaleFloat > bestFitScale) ? scaleFloat : bestFitScale;
       }
 
       size.height = clamped(size.height, effectiveMinSize.height,
@@ -11825,7 +11830,7 @@ DocumentAutoplayPolicy Document::AutoplayPolicy() const {
 }
 
 void Document::MaybeAllowStorageForOpenerAfterUserInteraction() {
-  if (mCookieSettings->GetCookieBehavior() !=
+  if (CookieSettings()->GetCookieBehavior() !=
       nsICookieService::BEHAVIOR_REJECT_TRACKER) {
     return;
   }
@@ -12347,7 +12352,7 @@ already_AddRefed<mozilla::dom::Promise> Document::RequestStorageAccess(
   }
 
   // Only enforce third-party checks when there is a reason to enforce them.
-  if (mCookieSettings->GetCookieBehavior() !=
+  if (CookieSettings()->GetCookieBehavior() !=
       nsICookieService::BEHAVIOR_REJECT_TRACKER) {
     // Step 3. If the document's frame is the main frame, resolve.
     if (IsTopLevelContentDocument()) {
@@ -12400,7 +12405,7 @@ already_AddRefed<mozilla::dom::Promise> Document::RequestStorageAccess(
     return promise.forget();
   }
 
-  if (mCookieSettings->GetCookieBehavior() ==
+  if (CookieSettings()->GetCookieBehavior() ==
           nsICookieService::BEHAVIOR_REJECT_TRACKER &&
       inner) {
     // Only do something special for third-party tracking content.
@@ -12626,21 +12631,21 @@ already_AddRefed<nsAtom> Document::GetLanguageForStyle() const {
 const LangGroupFontPrefs* Document::GetFontPrefsForLang(
     nsAtom* aLanguage, bool* aNeedsToCache) const {
   nsAtom* lang = aLanguage ? aLanguage : mLanguageFromCharset.get();
-  return StaticPresData::Get()->GetFontPrefsForLangHelper(
-      lang, &mLangGroupFontPrefs, aNeedsToCache);
+  return StaticPresData::Get()->GetFontPrefsForLang(lang, aNeedsToCache);
 }
 
 void Document::DoCacheAllKnownLangPrefs() {
-  MOZ_ASSERT(mFontGroupCacheDirty);
+  MOZ_ASSERT(mMayNeedFontPrefsUpdate);
   RefPtr<nsAtom> lang = GetLanguageForStyle();
-  GetFontPrefsForLang(lang.get());
-  GetFontPrefsForLang(nsGkAtoms::x_math);
+  StaticPresData* data = StaticPresData::Get();
+  data->GetFontPrefsForLang(lang ? lang.get() : mLanguageFromCharset.get());
+  data->GetFontPrefsForLang(nsGkAtoms::x_math);
   // https://bugzilla.mozilla.org/show_bug.cgi?id=1362599#c12
-  GetFontPrefsForLang(nsGkAtoms::Unicode);
+  data->GetFontPrefsForLang(nsGkAtoms::Unicode);
   for (auto iter = mLanguagesUsed.Iter(); !iter.Done(); iter.Next()) {
-    GetFontPrefsForLang(iter.Get()->GetKey());
+    data->GetFontPrefsForLang(iter.Get()->GetKey());
   }
-  mFontGroupCacheDirty = false;
+  mMayNeedFontPrefsUpdate = false;
 }
 
 void Document::RecomputeLanguageFromCharset() {
@@ -12654,7 +12659,7 @@ void Document::RecomputeLanguageFromCharset() {
     return;
   }
 
-  ResetLangPrefs();
+  mMayNeedFontPrefsUpdate = true;
   mLanguageFromCharset = language.forget();
 }
 

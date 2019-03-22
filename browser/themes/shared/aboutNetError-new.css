@@ -103,15 +103,11 @@ body:not(.clockSkewError) #advancedPanelErrorTryAgain {
   display: none;
 }
 
-body:not(:-moz-any(.clockSkewError,.badStsCert)) #moreInformationButton {
-  display: none;
-}
-
 #openPortalLoginPageButton {
   margin-inline-start: 0;
 }
 
-body:not(:-moz-any(.clockSkewError,.badStsCert,.neterror)) #advancedButton {
+body:not(.neterror) #advancedButton {
   display: block;
 }
 
@@ -194,6 +190,8 @@ body:not(:-moz-any(.clockSkewError,.badStsCert,.neterror)) #advancedButton {
   font-family: monospace;
   white-space: pre-wrap;
   padding: 1em 0;
+  display: flex;
+  flex-wrap: wrap;
 }
 
 #cert_domain_link:not([href]) {
@@ -241,8 +239,7 @@ body:not(:-moz-any(.clockSkewError,.badStsCert,.neterror)) #advancedButton {
 }
 
 .clockSkewError #advancedPanelErrorTryAgain,
-.clockSkewError #errorTryAgain,
-.clockSkewError #moreInformationButton {
+.clockSkewError #errorTryAgain {
   display: block;
   margin-top: 0.3em;
 }

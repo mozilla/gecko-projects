@@ -8082,9 +8082,6 @@ class MArraySlice : public MTernaryInstruction,
 
   gc::InitialHeap initialHeap() const { return initialHeap_; }
 
-  AliasSet getAliasSet() const override {
-    return AliasSet::Store(AliasSet::Element | AliasSet::ObjectFields);
-  }
   bool possiblyCalls() const override { return true; }
   bool appendRoots(MRootList& roots) const override {
     return roots.append(templateObj_);
@@ -9665,7 +9662,8 @@ class MCallGetProperty : public MUnaryInstruction,
     if (!idempotent_) {
       return AliasSet::Store(AliasSet::Any);
     }
-    return AliasSet::None();
+    return AliasSet::Load(AliasSet::ObjectFields | AliasSet::FixedSlot |
+                          AliasSet::DynamicSlot);
   }
   bool possiblyCalls() const override { return true; }
   bool appendRoots(MRootList& roots) const override {
@@ -11932,11 +11930,14 @@ class MWasmDerivedPointer : public MUnaryInstruction,
 class MWasmLoadRef : public MUnaryInstruction, public NoTypePolicy::Data {
   AliasSet::Flag aliasSet_;
 
-  explicit MWasmLoadRef(MDefinition* valueAddr, AliasSet::Flag aliasSet)
+  explicit MWasmLoadRef(MDefinition* valueAddr, AliasSet::Flag aliasSet,
+                        bool isMovable = true)
       : MUnaryInstruction(classOpcode, valueAddr), aliasSet_(aliasSet) {
     MOZ_ASSERT(valueAddr->type() == MIRType::Pointer);
     setResultType(MIRType::RefOrNull);
-    setMovable();
+    if (isMovable) {
+      setMovable();
+    }
   }
 
  public:

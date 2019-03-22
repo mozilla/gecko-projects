@@ -38,6 +38,7 @@
 #include "nsRefPtrHashtable.h"
 #include "PermissionMessageUtils.h"
 #include "DriverCrashGuard.h"
+#include "nsIReferrerInfo.h"
 
 #define CHILD_PROCESS_SHUTDOWN_MESSAGE \
   NS_LITERAL_STRING("child-process-shutdown")
@@ -66,7 +67,7 @@ class nsIWidget;
 namespace mozilla {
 class PRemoteSpellcheckEngineParent;
 
-#if defined(XP_LINUX) && defined(MOZ_CONTENT_SANDBOX)
+#if defined(XP_LINUX) && defined(MOZ_SANDBOX)
 class SandboxBroker;
 class SandboxBrokerPolicyFactory;
 #endif
@@ -513,19 +514,17 @@ class ContentParent final : public PContentParent,
       const uint32_t& aChromeFlags, const bool& aCalledFromJS,
       const bool& aPositionSpecified, const bool& aSizeSpecified,
       const Maybe<URIParams>& aURIToLoad, const nsCString& aFeatures,
-      const nsCString& aBaseURI, const float& aFullZoom,
-      const IPC::Principal& aTriggeringPrincipal,
-      nsIContentSecurityPolicy* aCsp, const uint32_t& aReferrerPolicy,
+      const float& aFullZoom, const IPC::Principal& aTriggeringPrincipal,
+      nsIContentSecurityPolicy* aCsp, nsIReferrerInfo* aReferrerInfo,
       CreateWindowResolver&& aResolve);
 
   mozilla::ipc::IPCResult RecvCreateWindowInDifferentProcess(
       PBrowserParent* aThisTab, const uint32_t& aChromeFlags,
       const bool& aCalledFromJS, const bool& aPositionSpecified,
       const bool& aSizeSpecified, const Maybe<URIParams>& aURIToLoad,
-      const nsCString& aFeatures, const nsCString& aBaseURI,
-      const float& aFullZoom, const nsString& aName,
+      const nsCString& aFeatures, const float& aFullZoom, const nsString& aName,
       const IPC::Principal& aTriggeringPrincipal,
-      nsIContentSecurityPolicy* aCsp, const uint32_t& aReferrerPolicy);
+      nsIContentSecurityPolicy* aCsp, nsIReferrerInfo* aReferrerInfo);
 
   static void BroadcastBlobURLRegistration(
       const nsACString& aURI, BlobImpl* aBlobImpl, nsIPrincipal* aPrincipal,
@@ -610,14 +609,10 @@ class ContentParent final : public PContentParent,
   static bool IsInputEventQueueSupported();
 
   mozilla::ipc::IPCResult RecvAttachBrowsingContext(
-      BrowsingContext* aParentContext, BrowsingContext* aOpener,
-      BrowsingContextId aContextId, const nsString& aName);
+      BrowsingContext::IPCInitializer&& aInit);
 
   mozilla::ipc::IPCResult RecvDetachBrowsingContext(BrowsingContext* aContext,
                                                     bool aMoveToBFCache);
-
-  mozilla::ipc::IPCResult RecvSetOpenerBrowsingContext(
-      BrowsingContext* aContext, BrowsingContext* aOpener);
 
   mozilla::ipc::IPCResult RecvWindowClose(BrowsingContext* aContext,
                                           bool aTrustedCaller);
@@ -626,9 +621,6 @@ class ContentParent final : public PContentParent,
   mozilla::ipc::IPCResult RecvWindowPostMessage(
       BrowsingContext* aContext, const ClonedMessageData& aMessage,
       const PostMessageData& aData);
-
-  mozilla::ipc::IPCResult RecvSetUserGestureActivation(
-      BrowsingContext* aContext, bool aNewValue);
 
   FORWARD_SHMEM_ALLOCATOR_TO(PContentParent)
 
@@ -658,7 +650,7 @@ class ContentParent final : public PContentParent,
       sJSPluginContentParents;
   static StaticAutoPtr<LinkedList<ContentParent>> sContentParents;
 
-#if defined(XP_MACOSX) && defined(MOZ_CONTENT_SANDBOX)
+#if defined(XP_MACOSX) && defined(MOZ_SANDBOX)
   // Cached Mac sandbox params used when launching content processes.
   static StaticAutoPtr<std::vector<std::string>> sMacSandboxParams;
 #endif
@@ -670,12 +662,12 @@ class ContentParent final : public PContentParent,
       PBrowserParent* aThisTab, bool aSetOpener, const uint32_t& aChromeFlags,
       const bool& aCalledFromJS, const bool& aPositionSpecified,
       const bool& aSizeSpecified, nsIURI* aURIToLoad,
-      const nsCString& aFeatures, const nsCString& aBaseURI,
-      const float& aFullZoom, uint64_t aNextTabParentId, const nsString& aName,
-      nsresult& aResult, nsCOMPtr<nsITabParent>& aNewTabParent,
-      bool* aWindowIsNew, int32_t& aOpenLocation,
-      nsIPrincipal* aTriggeringPrincipal, uint32_t aReferrerPolicy,
-      bool aLoadUri, nsIContentSecurityPolicy* aCsp);
+      const nsCString& aFeatures, const float& aFullZoom,
+      uint64_t aNextTabParentId, const nsString& aName, nsresult& aResult,
+      nsCOMPtr<nsITabParent>& aNewTabParent, bool* aWindowIsNew,
+      int32_t& aOpenLocation, nsIPrincipal* aTriggeringPrincipal,
+      nsIReferrerInfo* aReferrerInfo, bool aLoadUri,
+      nsIContentSecurityPolicy* aCsp);
 
   enum RecordReplayState { eNotRecordingOrReplaying, eRecording, eReplaying };
 
@@ -822,6 +814,7 @@ class ContentParent final : public PContentParent,
                                       const IPCTabContext& aContext,
                                       const uint32_t& aChromeFlags,
                                       const ContentParentId& aCpId,
+                                      BrowsingContext* aBrowsingContext,
                                       const bool& aIsForBrowser);
 
   bool DeallocPBrowserParent(PBrowserParent* frame);
@@ -829,7 +822,8 @@ class ContentParent final : public PContentParent,
   virtual mozilla::ipc::IPCResult RecvPBrowserConstructor(
       PBrowserParent* actor, const TabId& tabId, const TabId& sameTabGroupAs,
       const IPCTabContext& context, const uint32_t& chromeFlags,
-      const ContentParentId& cpId, const bool& isForBrowser) override;
+      const ContentParentId& cpId, BrowsingContext* aBrowsingContext,
+      const bool& isForBrowser) override;
 
   PIPCBlobInputStreamParent* AllocPIPCBlobInputStreamParent(
       const nsID& aID, const uint64_t& aSize);
@@ -995,10 +989,16 @@ class ContentParent final : public PContentParent,
                                            const IPC::Principal& aPrincipal,
                                            const ClonedMessageData& aData);
 
+  // MOZ_CAN_RUN_SCRIPT_BOUNDARY because we don't have MOZ_CAN_RUN_SCRIPT bits
+  // in IPC code yet.
+  MOZ_CAN_RUN_SCRIPT_BOUNDARY
   mozilla::ipc::IPCResult RecvAddGeolocationListener(
       const IPC::Principal& aPrincipal, const bool& aHighAccuracy);
   mozilla::ipc::IPCResult RecvRemoveGeolocationListener();
 
+  // MOZ_CAN_RUN_SCRIPT_BOUNDARY because we don't have MOZ_CAN_RUN_SCRIPT bits
+  // in IPC code yet.
+  MOZ_CAN_RUN_SCRIPT_BOUNDARY
   mozilla::ipc::IPCResult RecvSetGeolocationHigherAccuracy(const bool& aEnable);
 
   mozilla::ipc::IPCResult RecvConsoleMessage(const nsString& aMessage);
@@ -1157,7 +1157,7 @@ class ContentParent final : public PContentParent,
   // initializing.
   void MaybeEnableRemoteInputEventQueue();
 
-#if defined(XP_MACOSX) && defined(MOZ_CONTENT_SANDBOX)
+#if defined(XP_MACOSX) && defined(MOZ_SANDBOX)
   void AppendSandboxParams(std::vector<std::string>& aArgs);
   void AppendDynamicSandboxParams(std::vector<std::string>& aArgs);
 #endif
@@ -1281,7 +1281,7 @@ class ContentParent final : public PContentParent,
   UniquePtr<gfx::DriverCrashGuard> mDriverCrashGuard;
   UniquePtr<MemoryReportRequestHost> mMemoryReportRequest;
 
-#if defined(XP_LINUX) && defined(MOZ_CONTENT_SANDBOX)
+#if defined(XP_LINUX) && defined(MOZ_SANDBOX)
   mozilla::UniquePtr<SandboxBroker> mSandboxBroker;
   static mozilla::UniquePtr<SandboxBrokerPolicyFactory>
       sSandboxBrokerPolicyFactory;
@@ -1311,7 +1311,7 @@ class ContentParent final : public PContentParent,
   static uint64_t sNextTabParentId;
   static nsDataHashtable<nsUint64HashKey, TabParent*> sNextTabParents;
 
-#if defined(XP_MACOSX) && defined(MOZ_CONTENT_SANDBOX)
+#if defined(XP_MACOSX) && defined(MOZ_SANDBOX)
   // When set to true, indicates that content processes should
   // initialize their sandbox during startup instead of waiting
   // for the SetProcessSandbox IPDL message.

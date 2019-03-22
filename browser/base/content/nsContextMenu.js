@@ -45,6 +45,17 @@ function openContextMenu(aMessage) {
   let documentURIObject = makeURI(data.docLocation,
                                   data.charSet,
                                   makeURI(data.baseURI));
+  let ReferrerInfo = Components.Constructor("@mozilla.org/referrer-info;1",
+                                        "nsIReferrerInfo",
+                                        "init");
+  let referrerInfo = new ReferrerInfo(
+    data.referrerPolicy,
+    !data.context.linkHasNoReferrer,
+    documentURIObject);
+  let frameReferrerInfo = new ReferrerInfo(
+    data.referrerPolicy,
+    !data.context.linkHasNoReferrer,
+    data.referrer ? makeURI(data.referrer) : null);
   gContextMenuContentData = { context: data.context,
                               isRemote: data.isRemote,
                               popupNodeSelectors: data.popupNodeSelectors,
@@ -56,8 +67,8 @@ function openContextMenu(aMessage) {
                               documentURIObject,
                               docLocation: data.docLocation,
                               charSet: data.charSet,
-                              referrer: data.referrer,
-                              referrerPolicy: data.referrerPolicy,
+                              referrerInfo,
+                              frameReferrerInfo,
                               contentType: data.contentType,
                               contentDisposition: data.contentDisposition,
                               frameOuterWindowID: data.frameOuterWindowID,
@@ -194,7 +205,6 @@ nsContextMenu.prototype = {
 
     this.link                = context.link;
     this.linkDownload        = context.linkDownload;
-    this.linkHasNoReferrer   = context.linkHasNoReferrer;
     this.linkProtocol        = context.linkProtocol;
     this.linkTextStr         = context.linkTextStr;
     this.linkURL             = context.linkURL;
@@ -205,6 +215,7 @@ nsContextMenu.prototype = {
     this.onCompletedImage    = context.onCompletedImage;
     this.onCTPPlugin         = context.onCTPPlugin;
     this.onDRMMedia          = context.onDRMMedia;
+    this.onPiPVideo          = context.onPiPVideo;
     this.onEditable          = context.onEditable;
     this.onImage             = context.onImage;
     this.onKeywordField      = context.onKeywordField;
@@ -668,7 +679,7 @@ nsContextMenu.prototype = {
     this.showItem("context-media-showcontrols", onMedia && !this.target.controls);
     this.showItem("context-media-hidecontrols", this.target.controls && (this.onVideo || (this.onAudio && !this.inSyntheticDoc)));
     this.showItem("context-video-fullscreen", this.onVideo && !this.target.ownerDocument.fullscreen);
-    if (AppConstants.NIGHTLY_BUILD) {
+    {
       let shouldDisplay = Services.prefs.getBoolPref("media.videocontrols.picture-in-picture.enabled") &&
                           this.onVideo &&
                           !this.target.ownerDocument.fullscreen;
@@ -703,6 +714,7 @@ nsContextMenu.prototype = {
         let canSaveSnapshot = !this.onDRMMedia && this.target.readyState >= this.target.HAVE_CURRENT_DATA;
         this.setItemAttr("context-video-saveimage", "disabled", !canSaveSnapshot);
         this.setItemAttr("context-video-fullscreen", "disabled", hasError);
+        this.setItemAttr("context-video-pictureinpicture", "checked", this.onPiPVideo);
       }
     }
     this.showItem("context-media-sep-commands", onMedia);
@@ -781,10 +793,7 @@ nsContextMenu.prototype = {
                    originPrincipal: this.principal,
                    triggeringPrincipal: this.principal,
                    csp: this.csp,
-                   referrerURI: gContextMenuContentData.documentURIObject,
-                   referrerPolicy: gContextMenuContentData.referrerPolicy,
-                   frameOuterWindowID: gContextMenuContentData.frameOuterWindowID,
-                   noReferrer: this.linkHasNoReferrer || this.onPlainTextLink };
+                   frameOuterWindowID: gContextMenuContentData.frameOuterWindowID};
     for (let p in extra) {
       params[p] = extra[p];
     }
@@ -795,13 +804,16 @@ nsContextMenu.prototype = {
       params.frameOuterWindowID = this.frameOuterWindowID;
     }
 
+    let referrerInfo = gContextMenuContentData.referrerInfo;
     // If we want to change userContextId, we must be sure that we don't
     // propagate the referrer.
-    if ("userContextId" in params &&
-        params.userContextId != gContextMenuContentData.userContextId) {
-      params.noReferrer = true;
+    if (("userContextId" in params &&
+        params.userContextId != gContextMenuContentData.userContextId) ||
+      this.onPlainTextLink) {
+      referrerInfo.sendReferrer = false;
     }
 
+    params.referrerInfo = referrerInfo;
     return params;
   },
 
@@ -850,11 +862,10 @@ nsContextMenu.prototype = {
 
   // Open frame in a new tab.
   openFrameInTab() {
-    let referrer = gContextMenuContentData.referrer;
     openLinkIn(gContextMenuContentData.docLocation, "tab",
                { charset: gContextMenuContentData.charSet,
                  triggeringPrincipal: this.browser.contentPrincipal,
-                 referrerURI: referrer ? makeURI(referrer) : null });
+                 referrerInfo: gContextMenuContentData.frameReferrerInfo });
   },
 
   // Reload clicked-in frame.
@@ -866,11 +877,10 @@ nsContextMenu.prototype = {
 
   // Open clicked-in frame in its own window.
   openFrame() {
-    let referrer = gContextMenuContentData.referrer;
     openLinkIn(gContextMenuContentData.docLocation, "window",
                { charset: gContextMenuContentData.charSet,
                  triggeringPrincipal: this.browser.contentPrincipal,
-                 referrerURI: referrer ? makeURI(referrer) : null });
+                 referrerInfo: gContextMenuContentData.frameReferrerInfo });
   },
 
   // Open clicked-in frame in the same window.
@@ -878,9 +888,8 @@ nsContextMenu.prototype = {
     urlSecurityCheck(gContextMenuContentData.docLocation,
                      this.browser.contentPrincipal,
                      Ci.nsIScriptSecurityManager.DISALLOW_SCRIPT);
-    let referrer = gContextMenuContentData.referrer;
     openWebLinkIn(gContextMenuContentData.docLocation, "current", {
-      referrerURI: referrer ? makeURI(referrer) : null,
+      referrerInfo: gContextMenuContentData.frameReferrerInfo,
       triggeringPrincipal: this.browser.contentPrincipal,
     });
   },
@@ -890,6 +899,7 @@ nsContextMenu.prototype = {
     let {browser} = this;
     let openSelectionFn = function() {
       let tabBrowser = gBrowser;
+      const inNewWindow = !Services.prefs.getBoolPref("view_source.tab");
       // In the case of popups, we need to find a non-popup browser window.
       // We might also not have a tabBrowser reference (if this isn't in a
       // a tabbrowser scope) or might have a fake/stub tabbrowser reference
@@ -902,10 +912,16 @@ nsContextMenu.prototype = {
       let relatedToCurrent = gBrowser && gBrowser.selectedBrowser == browser;
       let tab = tabBrowser.loadOneTab("about:blank", {
         relatedToCurrent,
-        inBackground: false,
+        inBackground: inNewWindow,
+        skipAnimation: inNewWindow,
         triggeringPrincipal: Services.scriptSecurityManager.getSystemPrincipal(),
       });
-      return tabBrowser.getBrowserForTab(tab);
+      const viewSourceBrowser = tabBrowser.getBrowserForTab(tab);
+      if (inNewWindow) {
+        tabBrowser.hideTab(tab);
+        tabBrowser.replaceTabsWithWindow(tab);
+      }
+      return viewSourceBrowser;
     };
 
     top.gViewSourceUtils.viewPartialSourceInBrowser(browser, openSelectionFn);
@@ -933,7 +949,7 @@ nsContextMenu.prototype = {
     urlSecurityCheck(this.imageDescURL,
                      this.principal,
                      Ci.nsIScriptSecurityManager.DISALLOW_SCRIPT);
-    openUILink(this.imageDescURL, e, { referrerURI: gContextMenuContentData.documentURIObject,
+    openUILink(this.imageDescURL, e, { referrerInfo: gContextMenuContentData.referrerInfo,
                                        triggeringPrincipal: this.principal,
     });
   },
@@ -967,18 +983,18 @@ nsContextMenu.prototype = {
 
   // Change current window to the URL of the image, video, or audio.
   viewMedia(e) {
-    let referrerURI = gContextMenuContentData.documentURIObject;
+    let referrerInfo = gContextMenuContentData.referrerInfo;
     let systemPrincipal = Services.scriptSecurityManager.getSystemPrincipal();
     if (this.onCanvas) {
       this._canvasToBlobURL(this.target).then(function(blobURL) {
-        openUILink(blobURL, e, { referrerURI,
+        openUILink(blobURL, e, { referrerInfo,
                                  triggeringPrincipal: systemPrincipal});
       }, Cu.reportError);
     } else {
       urlSecurityCheck(this.mediaURL,
                        this.principal,
                        Ci.nsIScriptSecurityManager.DISALLOW_SCRIPT);
-      openUILink(this.mediaURL, e, { referrerURI,
+      openUILink(this.mediaURL, e, { referrerInfo,
                                      forceAllowDataURI: true,
                                      triggeringPrincipal: this.principal,
       });
@@ -1035,7 +1051,7 @@ nsContextMenu.prototype = {
                      this.principal,
                      Ci.nsIScriptSecurityManager.DISALLOW_SCRIPT);
 
-    openUILink(this.bgImageURL, e, { referrerURI: gContextMenuContentData.documentURIObject,
+    openUILink(this.bgImageURL, e, { referrerInfo: gContextMenuContentData.referrerInfo,
                                      triggeringPrincipal: this.principal,
     });
   },

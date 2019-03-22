@@ -120,8 +120,23 @@ def delete(path):
             pass
 
 
-def install_libgcc(gcc_dir, clang_dir):
-    out = subprocess.check_output([os.path.join(gcc_dir, "bin", "gcc"),
+def install_libgcc(gcc_dir, clang_dir, is_final_stage):
+    gcc_bin_dir = os.path.join(gcc_dir, 'bin')
+
+    # Copy over gcc toolchain bits that clang looks for, to ensure that
+    # clang is using a consistent version of ld, since the system ld may
+    # be incompatible with the output clang produces.  But copy it to a
+    # target-specific directory so a cross-compiler to Mac doesn't pick
+    # up the (Linux-specific) ld with disastrous results.
+    #
+    # Only install this for the bootstrap process; we expect any consumers of
+    # the newly-built toolchain to provide an appropriate ld themselves.
+    if not is_final_stage:
+        x64_bin_dir = os.path.join(clang_dir, 'x86_64-unknown-linux-gnu', 'bin')
+        mkdir_p(x64_bin_dir)
+        shutil.copy2(os.path.join(gcc_bin_dir, 'ld'), x64_bin_dir)
+
+    out = subprocess.check_output([os.path.join(gcc_bin_dir, "gcc"),
                                    '-print-libgcc-file-name'])
 
     libgcc_dir = os.path.dirname(out.rstrip())
@@ -274,9 +289,12 @@ def build_one_stage(cc, cxx, asm, ld, ar, ranlib, libtool,
             android_flags = ["-isystem %s" % d for d in android_include_dirs]
             android_flags += ["--gcc-toolchain=%s" % android_gcc_dir]
             android_flags += ["-D__ANDROID_API__=%s" % api_level]
-            rt_c_flags = " ".join(android_flags + cc[1:])
-            rt_cxx_flags = " ".join(android_flags + cxx[1:])
-            rt_asm_flags = " ".join(android_flags + asm[1:])
+
+            # Our flags go last to override any --gcc-toolchain that may have
+            # been set earlier.
+            rt_c_flags = " ".join(cc[1:] + android_flags)
+            rt_cxx_flags = " ".join(cxx[1:] + android_flags)
+            rt_asm_flags = " ".join(asm[1:] + android_flags)
 
             cmake_args += [
                 "-DBUILTINS_%s_ANDROID=1" % target,
@@ -286,6 +304,7 @@ def build_one_stage(cc, cxx, asm, ld, ar, ranlib, libtool,
                 "-DBUILTINS_%s_CMAKE_EXE_LINKER_FLAGS=%s" % (target, android_link_flags),
                 "-DBUILTINS_%s_CMAKE_SHARED_LINKER_FLAGS=%s" % (target, android_link_flags),
                 "-DBUILTINS_%s_CMAKE_SYSROOT=%s" % (target, sysroot_dir),
+                "-DRUNTIMES_%s_ANDROID=1" % target,
                 "-DRUNTIMES_%s_CMAKE_ASM_FLAGS=%s" % (target, rt_asm_flags),
                 "-DRUNTIMES_%s_CMAKE_CXX_FLAGS=%s" % (target, rt_cxx_flags),
                 "-DRUNTIMES_%s_CMAKE_C_FLAGS=%s" % (target, rt_c_flags),
@@ -293,7 +312,8 @@ def build_one_stage(cc, cxx, asm, ld, ar, ranlib, libtool,
                 "-DRUNTIMES_%s_CMAKE_SHARED_LINKER_FLAGS=%s" % (target, android_link_flags),
                 "-DRUNTIMES_%s_CMAKE_SYSROOT=%s" % (target, sysroot_dir),
                 "-DRUNTIMES_%s_COMPILER_RT_BUILD_PROFILE=ON" % target,
-                "-DRUNTIMES_%s_COMPILER_RT_BUILD_SANITIZERS=OFF" % target,
+                "-DRUNTIMES_%s_COMPILER_RT_BUILD_SANITIZERS=ON" % target,
+                "-DRUNTIMES_%s_SANITIZER_ALLOW_CXXABI=OFF" % target,
                 "-DRUNTIMES_%s_COMPILER_RT_BUILD_LIBFUZZER=OFF" % target,
                 "-DRUNTIMES_%s_COMPILER_RT_INCLUDE_TESTS=OFF" % target,
                 "-DRUNTIMES_%s_LLVM_ENABLE_PER_TARGET_RUNTIME_DIR=OFF" % target,
@@ -309,7 +329,7 @@ def build_one_stage(cc, cxx, asm, ld, ar, ranlib, libtool,
     build_package(build_dir, cmake_args)
 
     if is_linux():
-        install_libgcc(gcc_dir, inst_dir)
+        install_libgcc(gcc_dir, inst_dir, is_final_stage)
     # For some reasons the import library clang.lib of clang.exe is not
     # installed, so we copy it by ourselves.
     if is_windows():
@@ -405,7 +425,9 @@ def get_tool(config, key):
 #       run-clang-tidy.py
 def prune_final_dir_for_clang_tidy(final_dir, osx_cross_compile):
     # Make sure we only have what we expect.
-    dirs = ("bin", "include", "lib", "lib32", "libexec", "msbuild-bin", "share", "tools")
+    dirs = ["bin", "include", "lib", "lib32", "libexec", "msbuild-bin", "share", "tools"]
+    if is_linux():
+        dirs.append("x86_64-unknown-linux-gnu")
     for f in glob.glob("%s/*" % final_dir):
         if os.path.basename(f) not in dirs:
             raise Exception("Found unknown file %s in the final directory" % f)
@@ -421,6 +443,10 @@ def prune_final_dir_for_clang_tidy(final_dir, osx_cross_compile):
             delete(f)
 
     # Keep include/ intact.
+
+    # Remove the target-specific files.
+    if is_linux():
+        shutil.rmtree(os.path.join(final_dir, "x86_64-unknown-linux-gnu"))
 
     # In lib/, only keep lib/clang/N.M.O/include and the LLVM shared library.
     re_ver_num = re.compile(r"^\d+\.\d+\.\d+$", re.I)
@@ -676,9 +702,13 @@ if __name__ == "__main__":
     elif is_linux():
         extra_cflags = []
         extra_cxxflags = []
-        extra_cflags2 = ["-fPIC"]
+        # When building stage2 and stage3, we want the newly-built clang to pick
+        # up whatever headers were installed from the gcc we used to build stage1,
+        # always, rather than the system headers.  Providing -gcc-toolchain
+        # encourages clang to do that.
+        extra_cflags2 = ["-fPIC", '-gcc-toolchain', stage1_inst_dir]
         # Silence clang's warnings about arguments not being used in compilation.
-        extra_cxxflags2 = ["-fPIC", '-Qunused-arguments']
+        extra_cxxflags2 = ["-fPIC", '-Qunused-arguments', '-gcc-toolchain', stage1_inst_dir]
         extra_asmflags = []
         # Avoid libLLVM internal function calls going through the PLT.
         extra_ldflags = ['-Wl,-Bsymbolic-functions']

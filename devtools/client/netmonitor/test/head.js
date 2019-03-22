@@ -30,16 +30,19 @@ const {
 } = require("devtools/client/shared/unicode-url");
 const {
   getFormattedProtocol,
-  getUrlBaseName,
   getUrlHost,
-  getUrlQuery,
   getUrlScheme,
 } = require("devtools/client/netmonitor/src/utils/request-utils");
 const { EVENTS } = require("devtools/client/netmonitor/src/constants");
+const { L10N } = require("devtools/client/netmonitor/src/utils/l10n");
 
 /* eslint-disable no-unused-vars, max-len */
 const EXAMPLE_URL = "http://example.com/browser/devtools/client/netmonitor/test/";
 const HTTPS_EXAMPLE_URL = "https://example.com/browser/devtools/client/netmonitor/test/";
+/* Since the test server will proxy `ws://example.com` to websocket server on 9988,
+so we must sepecify the port explicitly */
+const WS_URL = "ws://127.0.0.1:8888/browser/devtools/client/netmonitor/test/";
+const WS_HTTP_URL = "http://127.0.0.1:8888/browser/devtools/client/netmonitor/test/";
 
 const API_CALLS_URL = EXAMPLE_URL + "html_api-calls-test-page.html";
 const SIMPLE_URL = EXAMPLE_URL + "html_simple-test-page.html";
@@ -78,6 +81,7 @@ const OPEN_REQUEST_IN_TAB_URL = EXAMPLE_URL + "html_open-request-in-tab.html";
 const SIMPLE_SJS = EXAMPLE_URL + "sjs_simple-test-server.sjs";
 const SIMPLE_UNSORTED_COOKIES_SJS = EXAMPLE_URL + "sjs_simple-unsorted-cookies-test-server.sjs";
 const CONTENT_TYPE_SJS = EXAMPLE_URL + "sjs_content-type-test-server.sjs";
+const WS_CONTENT_TYPE_SJS = WS_HTTP_URL + "sjs_content-type-test-server.sjs";
 const HTTPS_CONTENT_TYPE_SJS = HTTPS_EXAMPLE_URL + "sjs_content-type-test-server.sjs";
 const STATUS_CODES_SJS = EXAMPLE_URL + "sjs_status-codes-test-server.sjs";
 const SORTING_SJS = EXAMPLE_URL + "sjs_sorting-test-server.sjs";
@@ -435,8 +439,12 @@ function verifyRequestItemTarget(document, requestList, requestItem, method,
   const target = document.querySelectorAll(".request-list-item")[visibleIndex];
   // Bug 1414981 - Request URL should not show #hash
   const unicodeUrl = getUnicodeUrl(url.split("#")[0]);
-  const name = getUrlBaseName(url);
-  const query = getUrlQuery(url);
+  const ORIGINAL_FILE_URL = L10N.getFormatStr("netRequest.originalFileURL.tooltip",
+    url);
+  const DECODED_FILE_URL = L10N.getFormatStr("netRequest.decodedFileURL.tooltip",
+    unicodeUrl);
+  const fileToolTip = url === unicodeUrl ?
+    url : ORIGINAL_FILE_URL + "\n\n" + DECODED_FILE_URL;
   const host = getUnicodeHostname(getUrlHost(url));
   const scheme = getUrlScheme(url);
   const {
@@ -464,16 +472,16 @@ function verifyRequestItemTarget(document, requestList, requestItem, method,
 
   if (fuzzyUrl) {
     ok(target.querySelector(".requests-list-file").textContent.startsWith(
-      name + (query ? "?" + query : "")), "The displayed file is correct.");
+      url), "The displayed file is correct.");
     ok(target.querySelector(".requests-list-file").getAttribute("title")
-                                                  .startsWith(unicodeUrl),
+                                                  .startsWith(fileToolTip),
       "The tooltip file is correct.");
   } else {
     is(target.querySelector(".requests-list-file").textContent,
-      decodeURIComponent(name + (query ? "?" + query : "")),
+      url,
       "The displayed file is correct.");
     is(target.querySelector(".requests-list-file").getAttribute("title"),
-      unicodeUrl, "The tooltip file is correct.");
+      fileToolTip, "The tooltip file is correct.");
   }
 
   is(target.querySelector(".requests-list-protocol").textContent,

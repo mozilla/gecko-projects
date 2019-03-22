@@ -48,8 +48,9 @@ function groupBreakpoints(breakpoints, selectedSource) {
   if (!breakpoints) {
     return {};
   }
+
   const map: any = groupBy(
-    breakpoints,
+    breakpoints.filter(breakpoint => !breakpoint.options.hidden),
     breakpoint => getSelectedLocation(breakpoint, selectedSource).line
   );
 
@@ -171,21 +172,5 @@ export function getFirstBreakpointPosition(
 
   return positions.find(
     position => getSelectedLocation(position, source).line == line
-  );
-}
-
-export function getFirstVisibleBreakpointPosition(
-  state: State,
-  { line }: SourceLocation
-) {
-  const positions = getVisibleBreakpointPositions(state);
-  const selectedSource = getSelectedSource(state);
-
-  if (!selectedSource || !positions) {
-    return;
-  }
-
-  return positions.find(
-    position => getSelectedLocation(position, selectedSource).line == line
   );
 }

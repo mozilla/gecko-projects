@@ -25,7 +25,6 @@ class nsIFrame;
 class nsPresContext;
 enum class DisplayItemType : uint32_t;
 struct RawServoAnimationValueMap;
-typedef RawServoAnimationValueMap* RawServoAnimationValueMapBorrowedMut;
 
 namespace mozilla {
 
@@ -118,13 +117,13 @@ class EffectCompositor {
 
   // Get animation rule for stylo. This is an equivalent of GetAnimationRule
   // and will be called from servo side.
-  // The animation rule is stored in |RawServoAnimationValueMapBorrowed|.
+  // The animation rule is stored in |RawServoAnimationValueMap|.
   // We need to be careful while doing any modification because it may cause
   // some thread-safe issues.
-  bool GetServoAnimationRule(
-      const dom::Element* aElement, PseudoStyleType aPseudoType,
-      CascadeLevel aCascadeLevel,
-      RawServoAnimationValueMapBorrowedMut aAnimationValues);
+  bool GetServoAnimationRule(const dom::Element* aElement,
+                             PseudoStyleType aPseudoType,
+                             CascadeLevel aCascadeLevel,
+                             RawServoAnimationValueMap* aAnimationValues);
 
   bool HasPendingStyleUpdates() const;
 
@@ -169,16 +168,23 @@ class EffectCompositor {
   // element on which we store the animations (i.e. the EffectSet and/or
   // AnimationCollection), *not* the generated content.
   //
+  // For display:table content, which maintains a distinction between primary
+  // frame (table wrapper frame) and style frame (inner table frame), animations
+  // are stored on the content associated with the _style_ frame even though
+  // some (particularly transform-like animations) may be applied to the
+  // _primary_ frame. As a result, callers will typically want to pass the style
+  // frame to this function.
+  //
   // Returns an empty result when a suitable element cannot be found including
   // when the frame represents a pseudo-element on which we do not support
   // animations.
   static Maybe<NonOwningAnimationTarget> GetAnimationElementAndPseudoForFrame(
       const nsIFrame* aFrame);
 
-  // Associates a performance warning with effects on |aFrame| that animates
-  // |aProperty|.
+  // Associates a performance warning with effects on |aFrame| that animate
+  // properties in |aPropertySet|.
   static void SetPerformanceWarning(
-      const nsIFrame* aFrame, nsCSSPropertyID aProperty,
+      const nsIFrame* aFrame, const nsCSSPropertyIDSet& aPropertySet,
       const AnimationPerformanceWarning& aWarning);
 
   // Do a bunch of stuff that we should avoid doing during the parallel

@@ -543,17 +543,51 @@ nsresult nsHttpChannel::OnBeforeConnect() {
   // At this point it is no longer possible to call
   // HttpBaseChannel::UpgradeToSecure.
   mUpgradableToSecure = false;
+  bool shouldUpgrade = mUpgradeToSecure;
   if (isHttp) {
-    bool shouldUpgrade = mUpgradeToSecure;
     if (!shouldUpgrade) {
+      RefPtr<nsHttpChannel> self = this;
+      auto resultCallback = [self{std::move(self)}](bool aResult,
+                                                    nsresult aStatus) {
+        nsresult rv = self->ContinueOnBeforeConnect(aResult, aStatus);
+        if (NS_FAILED(rv)) {
+          self->CloseCacheEntry(false);
+          Unused << self->AsyncAbort(rv);
+        }
+      };
+
+      bool willCallback = false;
       rv = NS_ShouldSecureUpgrade(mURI, mLoadInfo, resultPrincipal,
                                   mPrivateBrowsing, mAllowSTS, originAttributes,
-                                  shouldUpgrade);
-      NS_ENSURE_SUCCESS(rv, rv);
+                                  shouldUpgrade, std::move(resultCallback),
+                                  willCallback);
+      LOG(
+          ("nsHttpChannel::OnBeforeConnect "
+           "[this=%p willCallback=%d rv=%" PRIx32 "]\n",
+           this, willCallback, static_cast<uint32_t>(rv)));
+
+      if (NS_FAILED(rv) || MOZ_UNLIKELY(willCallback)) {
+        return rv;
+      }
     }
-    if (shouldUpgrade) {
-      return AsyncCall(&nsHttpChannel::HandleAsyncRedirectChannelToHttps);
-    }
+  }
+
+  return ContinueOnBeforeConnect(shouldUpgrade, NS_OK);
+}
+
+nsresult nsHttpChannel::ContinueOnBeforeConnect(bool aShouldUpgrade,
+                                                nsresult aStatus) {
+  LOG(
+      ("nsHttpChannel::ContinueOnBeforeConnect "
+       "[this=%p aShouldUpgrade=%d rv=%" PRIx32 "]\n",
+       this, aShouldUpgrade, static_cast<uint32_t>(aStatus)));
+
+  if (NS_FAILED(aStatus)) {
+    return aStatus;
+  }
+
+  if (aShouldUpgrade) {
+    return AsyncCall(&nsHttpChannel::HandleAsyncRedirectChannelToHttps);
   }
 
   // ensure that we are using a valid hostname
@@ -650,7 +684,7 @@ nsresult nsHttpChannel::Connect() {
     return RedirectToInterceptedChannel();
   }
 
-  bool isTrackingResource = mIsThirdPartyTrackingResource;  // is atomic
+  bool isTrackingResource = IsThirdPartyTrackingResource();
   LOG(("nsHttpChannel %p tracking resource=%d, cos=%u", this,
        isTrackingResource, mClassOfService));
 
@@ -2350,7 +2384,7 @@ nsresult nsHttpChannel::ProcessResponse() {
     nsCOMPtr<nsILoadContextInfo> lci = GetLoadContextInfo(this);
     mozilla::net::Predictor::UpdateCacheability(
         referrer, mURI, httpStatus, mRequestHead, mResponseHead, lci,
-        mIsThirdPartyTrackingResource);
+        IsThirdPartyTrackingResource());
   }
 
   // Only allow 407 (authentication required) to continue
@@ -3908,7 +3942,7 @@ nsresult nsHttpChannel::OpenCacheEntryInternal(
     extension.Append("TRR");
   }
 
-  if (mIsThirdPartyTrackingResource &&
+  if (IsThirdPartyTrackingResource() &&
       !AntiTrackingCommon::IsFirstPartyStorageAccessGrantedFor(this, mURI,
                                                                nullptr)) {
     nsCOMPtr<nsIURI> topWindowURI;
@@ -7367,7 +7401,7 @@ nsresult nsHttpChannel::ProcessCrossOriginHeader() {
     return NS_OK;
   }
 
-  nsILoadInfo::CrossOriginPolicy documentPolicy = ctx->CrossOriginPolicy();
+  nsILoadInfo::CrossOriginPolicy documentPolicy = ctx->GetCrossOriginPolicy();
   nsILoadInfo::CrossOriginPolicy resultPolicy =
       nsILoadInfo::CROSS_ORIGIN_POLICY_NULL;
   rv = GetResponseCrossOriginPolicy(&resultPolicy);
@@ -8027,6 +8061,9 @@ nsresult nsHttpChannel::ContinueOnStopRequest(nsresult aStatus, bool aIsFromNet,
     mListener->OnStopRequest(this, aStatus);
     mOnStopRequestCalled = true;
   }
+
+  // The prefetch needs to be released on the main thread
+  mDNSPrefetch = nullptr;
 
   // notify "http-on-stop-connect" observers
   gHttpHandler->OnStopRequest(this);

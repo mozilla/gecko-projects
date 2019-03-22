@@ -155,7 +155,7 @@ g = (function() {
 
 try {
 	// This works if eval is allowed (see CSP)
-	g = g || Function("return this")() || (1, eval)("this");
+	g = g || new Function("return this")();
 } catch (e) {
 	// This works if the window reference is available
 	if (typeof window === "object") g = window;
@@ -7237,6 +7237,7 @@ function enableASRouterContent(store, asrouterContent) {
 /***/ (function(module, __webpack_exports__, __webpack_require__) {
 
 "use strict";
+__webpack_require__.r(__webpack_exports__);
 
 // EXTERNAL MODULE: ./common/Actions.jsm
 var Actions = __webpack_require__(2);
@@ -7296,9 +7297,9 @@ class DSLinkMenu_DSLinkMenu extends external_React_default.a.PureComponent {
   render() {
     const { index, dispatch } = this.props;
     const isContextMenuOpen = this.state.showContextMenu && this.state.activeCard === index;
-    const TOP_STORIES_SOURCE = "TOP_STORIES";
-    const TOP_STORIES_CONTEXT_MENU_OPTIONS = ["OpenInNewWindow", "OpenInPrivateWindow"];
+    const TOP_STORIES_CONTEXT_MENU_OPTIONS = ["OpenInNewWindow", "OpenInPrivateWindow", "Separator", "BlockUrl"];
     const title = this.props.title || this.props.source;
+    const type = this.props.type || "DISCOVERY_STREAM";
 
     return external_React_default.a.createElement(
       "div",
@@ -7318,15 +7319,17 @@ class DSLinkMenu_DSLinkMenu extends external_React_default.a.PureComponent {
       isContextMenuOpen && external_React_default.a.createElement(LinkMenu["LinkMenu"], {
         dispatch: dispatch,
         index: index,
-        source: TOP_STORIES_SOURCE,
+        source: type.toUpperCase(),
         onUpdate: this.onMenuUpdate,
         onShow: this.onMenuShow,
         options: TOP_STORIES_CONTEXT_MENU_OPTIONS,
+        shouldSendImpressionStats: true,
         site: {
           referrer: "https://getpocket.com/recommendations",
           title: this.props.title,
           type: this.props.type,
-          url: this.props.url
+          url: this.props.url,
+          guid: this.props.id
         } })
     );
   }
@@ -7483,7 +7486,8 @@ class DSCard_DSCard extends external_React_default.a.PureComponent {
           source: this.props.type })
       ),
       external_React_default.a.createElement(DSLinkMenu, {
-        index: this.props.index,
+        id: this.props.id,
+        index: this.props.pos,
         dispatch: this.props.dispatch,
         intl: this.props.intl,
         url: this.props.url,
@@ -7670,7 +7674,8 @@ class List_ListItem extends external_React_default.a.PureComponent {
           source: this.props.type })
       ),
       external_React_default.a.createElement(DSLinkMenu, {
-        index: this.props.index,
+        id: this.props.id,
+        index: this.props.pos,
         dispatch: this.props.dispatch,
         intl: this.props.intl,
         url: this.props.url,
@@ -7764,7 +7769,7 @@ class Hero_Hero extends external_React_default.a.PureComponent {
     const { data } = this.props;
 
     // Handle a render before feed has been fetched by displaying nothing
-    if (!data || !data.recommendations) {
+    if (!data || !data.recommendations || !data.recommendations.length) {
       return external_React_default.a.createElement("div", null);
     }
 
@@ -7852,7 +7857,8 @@ class Hero_Hero extends external_React_default.a.PureComponent {
               source: this.props.type })
           ),
           external_React_default.a.createElement(DSLinkMenu, {
-            index: this.props.index,
+            id: heroRec.id,
+            index: heroRec.pos,
             dispatch: this.props.dispatch,
             intl: this.props.intl,
             url: heroRec.url,
@@ -8373,6 +8379,7 @@ const DiscoveryStreamBase = Object(external_ReactRedux_["connect"])(transform)(D
 /***/ (function(module, __webpack_exports__, __webpack_require__) {
 
 "use strict";
+__webpack_require__.r(__webpack_exports__);
 
 // EXTERNAL MODULE: external "React"
 var external_React_ = __webpack_require__(10);
@@ -9215,6 +9222,7 @@ const SnippetsTemplates = {
 /***/ (function(module, __webpack_exports__, __webpack_require__) {
 
 "use strict";
+__webpack_require__.r(__webpack_exports__);
 
 // CONCATENATED MODULE: ./node_modules/fluent/src/parser.js
 /*  eslint no-magic-numbers: [0]  */
@@ -11316,6 +11324,7 @@ function ftl(strings) {
 /***/ (function(module, __webpack_exports__, __webpack_require__) {
 
 "use strict";
+__webpack_require__.r(__webpack_exports__);
 
 // EXTERNAL MODULE: external "React"
 var external_React_ = __webpack_require__(10);
@@ -11831,6 +11840,7 @@ localized_Localized.propTypes = {
 /***/ (function(module, __webpack_exports__, __webpack_require__) {
 
 "use strict";
+__webpack_require__.r(__webpack_exports__);
 
 // EXTERNAL MODULE: ./common/Actions.jsm
 var Actions = __webpack_require__(2);
@@ -12357,6 +12367,30 @@ function DiscoveryStream(prevState = INITIAL_STATE.DiscoveryStream, action) {
           spocs_endpoint: action.data || INITIAL_STATE.DiscoveryStream.spocs.spocs_endpoint
         })
       });
+    case Actions["actionTypes"].PLACES_LINK_BLOCKED:
+      // Return if action data is empty, or spocs or feeds data is not loaded
+      if (!action.data || !prevState.spocs.loaded || !prevState.feeds.loaded) {
+        return prevState;
+      }
+      // Filter spocs and recommendations data inside feeds by removing action.data.url
+      // received on PLACES_LINK_BLOCKED triggered by dismiss link menu option
+      return Object.assign({}, prevState, {
+        spocs: Object.assign({}, prevState.spocs, {
+          data: prevState.spocs.data.spocs ? {
+            spocs: prevState.spocs.data.spocs.filter(s => s.url !== action.data.url)
+          } : {}
+        }),
+        feeds: Object.assign({}, prevState.feeds, {
+          data: Object.keys(prevState.feeds.data).reduce((accumulator, feed_url) => {
+            accumulator[feed_url] = {
+              data: Object.assign({}, prevState.feeds.data[feed_url].data, {
+                recommendations: prevState.feeds.data[feed_url].data.recommendations.filter(r => r.url !== action.data.url)
+              })
+            };
+            return accumulator;
+          }, {})
+        })
+      });
     case Actions["actionTypes"].DISCOVERY_STREAM_SPOCS_UPDATE:
       if (action.data) {
         return Object.assign({}, prevState, {
@@ -12404,6 +12438,7 @@ var reducers = {
 /***/ (function(module, __webpack_exports__, __webpack_require__) {
 
 "use strict";
+__webpack_require__.r(__webpack_exports__);
 
 // EXTERNAL MODULE: ./common/Actions.jsm
 var Actions = __webpack_require__(2);
@@ -12768,6 +12803,7 @@ const PlaceholderCard = props => external_React_default.a.createElement(Card, { 
 /***/ (function(module, __webpack_exports__, __webpack_require__) {
 
 "use strict";
+__webpack_require__.r(__webpack_exports__);
 
 // EXTERNAL MODULE: ./common/Actions.jsm
 var Actions = __webpack_require__(2);

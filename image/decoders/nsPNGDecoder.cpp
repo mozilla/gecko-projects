@@ -117,6 +117,7 @@ nsPNGDecoder::nsPNGDecoder(RasterImage* aImage)
       mPass(0),
       mFrameIsHidden(false),
       mDisablePremultipliedAlpha(false),
+      mGotInfoCallback(false),
       mNumFrames(0) {}
 
 nsPNGDecoder::~nsPNGDecoder() {
@@ -194,7 +195,7 @@ nsresult nsPNGDecoder::CreateFrame(const FrameInfo& aFrameInfo) {
 
   Maybe<AnimationParams> animParams;
 #ifdef PNG_APNG_SUPPORTED
-  if (png_get_valid(mPNG, mInfo, PNG_INFO_acTL)) {
+  if (!IsFirstFrameDecode() && png_get_valid(mPNG, mInfo, PNG_INFO_acTL)) {
     mAnimInfo = AnimFrameInfo(mPNG, mInfo);
 
     if (mAnimInfo.mDispose == DisposalMethod::CLEAR) {
@@ -219,10 +220,6 @@ nsresult nsPNGDecoder::CreateFrame(const FrameInfo& aFrameInfo) {
   if (mNumFrames == 0) {
     // The first frame may be displayed progressively.
     pipeFlags |= SurfacePipeFlags::PROGRESSIVE_DISPLAY;
-  }
-
-  if (ShouldBlendAnimation()) {
-    pipeFlags |= SurfacePipeFlags::BLEND_ANIMATION;
   }
 
   Maybe<SurfacePipe> pipe = SurfacePipeFactory::CreateSurfacePipe(
@@ -536,6 +533,14 @@ void nsPNGDecoder::info_callback(png_structp png_ptr, png_infop info_ptr) {
 
   nsPNGDecoder* decoder =
       static_cast<nsPNGDecoder*>(png_get_progressive_ptr(png_ptr));
+
+  if (decoder->mGotInfoCallback) {
+    MOZ_LOG(sPNGLog, LogLevel::Warning,
+            ("libpng called info_callback more than once\n"));
+    return;
+  }
+
+  decoder->mGotInfoCallback = true;
 
   // Always decode to 24-bit RGB or 32-bit RGBA
   png_get_IHDR(png_ptr, info_ptr, &width, &height, &bit_depth, &color_type,

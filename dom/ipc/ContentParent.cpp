@@ -261,7 +261,7 @@
 #  include "mozilla/dom/SpeechSynthesisParent.h"
 #endif
 
-#if defined(MOZ_CONTENT_SANDBOX)
+#if defined(MOZ_SANDBOX)
 #  include "mozilla/SandboxSettings.h"
 #  if defined(XP_LINUX)
 #    include "mozilla/SandboxInfo.h"
@@ -565,13 +565,13 @@ nsDataHashtable<nsUint32HashKey, ContentParent*>*
     ContentParent::sJSPluginContentParents;
 nsTArray<ContentParent*>* ContentParent::sPrivateContent;
 StaticAutoPtr<LinkedList<ContentParent>> ContentParent::sContentParents;
-#if defined(XP_LINUX) && defined(MOZ_CONTENT_SANDBOX)
+#if defined(XP_LINUX) && defined(MOZ_SANDBOX)
 UniquePtr<SandboxBrokerPolicyFactory>
     ContentParent::sSandboxBrokerPolicyFactory;
 #endif
 uint64_t ContentParent::sNextTabParentId = 0;
 nsDataHashtable<nsUint64HashKey, TabParent*> ContentParent::sNextTabParents;
-#if defined(XP_MACOSX) && defined(MOZ_CONTENT_SANDBOX)
+#if defined(XP_MACOSX) && defined(MOZ_SANDBOX)
 StaticAutoPtr<std::vector<std::string>> ContentParent::sMacSandboxParams;
 #endif
 
@@ -613,7 +613,7 @@ static const char* sObserverTopics[] = {
     "clear-site-data-reload-needed",
 };
 
-#if defined(XP_MACOSX) && defined(MOZ_CONTENT_SANDBOX)
+#if defined(XP_MACOSX) && defined(MOZ_SANDBOX)
 bool ContentParent::sEarlySandboxInit = false;
 #endif
 
@@ -648,11 +648,11 @@ void ContentParent::StartUp() {
 
   sDisableUnsafeCPOWWarnings = PR_GetEnv("DISABLE_UNSAFE_CPOW_WARNINGS");
 
-#if defined(XP_LINUX) && defined(MOZ_CONTENT_SANDBOX)
+#if defined(XP_LINUX) && defined(MOZ_SANDBOX)
   sSandboxBrokerPolicyFactory = MakeUnique<SandboxBrokerPolicyFactory>();
 #endif
 
-#if defined(XP_MACOSX) && defined(MOZ_CONTENT_SANDBOX)
+#if defined(XP_MACOSX) && defined(MOZ_SANDBOX)
   sMacSandboxParams = new std::vector<std::string>;
 #endif
 }
@@ -663,11 +663,11 @@ void ContentParent::ShutDown() {
   // ClearOnShutdown() to clean up our state.
   sCanLaunchSubprocesses = false;
 
-#if defined(XP_LINUX) && defined(MOZ_CONTENT_SANDBOX)
+#if defined(XP_LINUX) && defined(MOZ_SANDBOX)
   sSandboxBrokerPolicyFactory = nullptr;
 #endif
 
-#if defined(XP_MACOSX) && defined(MOZ_CONTENT_SANDBOX)
+#if defined(XP_MACOSX) && defined(MOZ_SANDBOX)
   sMacSandboxParams = nullptr;
 #endif
 }
@@ -1142,6 +1142,18 @@ TabParent* ContentParent::CreateBrowser(const TabContext& aContext,
       return nullptr;
     }
   }
+
+  // FIXME: This BrowsingContext should be provided by the nsFrameLoader.
+  // (bug 1523636)
+  RefPtr<CanonicalBrowsingContext> browsingContext =
+      BrowsingContext::Create(nullptr, nullptr, EmptyString(),
+                              BrowsingContext::Type::Content)
+          .downcast<CanonicalBrowsingContext>();
+
+  // Ensure that our content process is subscribed to our newly created
+  // BrowsingContextGroup.
+  browsingContext->Group()->EnsureSubscribed(constructorSender);
+
   ContentProcessManager* cpm = ContentProcessManager::GetSingleton();
   cpm->RegisterRemoteFrame(tabId, ContentParentId(0), openerTabId,
                            aContext.AsIPCTabContext(),
@@ -1172,15 +1184,17 @@ TabParent* ContentParent::CreateBrowser(const TabContext& aContext,
     if (tabId == 0) {
       return nullptr;
     }
-    RefPtr<TabParent> tp(
-        new TabParent(constructorSender, tabId, aContext, chromeFlags));
+    RefPtr<TabParent> tp = new TabParent(constructorSender, tabId, aContext,
+                                         browsingContext, chromeFlags);
+
+    browsingContext->SetOwnerProcessId(constructorSender->ChildID());
 
     PBrowserParent* browser = constructorSender->SendPBrowserConstructor(
         // DeallocPBrowserParent() releases this ref.
         tp.forget().take(), tabId,
         aSameTabGroupAs ? aSameTabGroupAs->GetTabId() : TabId(0),
         aContext.AsIPCTabContext(), chromeFlags, constructorSender->ChildID(),
-        constructorSender->IsForBrowser());
+        browsingContext, constructorSender->IsForBrowser());
 
     if (remoteType.EqualsLiteral(LARGE_ALLOCATION_REMOTE_TYPE)) {
       // Tell the TabChild object that it was created due to a Large-Allocation
@@ -1651,7 +1665,7 @@ void ContentParent::ActorDestroy(ActorDestroyReason why) {
 
   mBlobURLs.Clear();
 
-#if defined(XP_WIN32) && defined(ACCESSIBILITY)
+#if defined(XP_WIN) && defined(ACCESSIBILITY)
   a11y::AccessibleWrap::ReleaseContentProcessIdFor(ChildID());
 #endif
 
@@ -1876,7 +1890,7 @@ TestShellParent* ContentParent::GetTestShellSingleton() {
   return static_cast<TestShellParent*>(p);
 }
 
-#if defined(XP_MACOSX) && defined(MOZ_CONTENT_SANDBOX)
+#if defined(XP_MACOSX) && defined(MOZ_SANDBOX)
 // Append the sandbox command line parameters that are not static. i.e.,
 // parameters that can be different for different child processes.
 void ContentParent::AppendDynamicSandboxParams(
@@ -2012,7 +2026,7 @@ void ContentParent::AppendSandboxParams(std::vector<std::string>& aArgs) {
   // Append remaining arguments.
   AppendDynamicSandboxParams(aArgs);
 }
-#endif  // XP_MACOSX && MOZ_CONTENT_SANDBOX
+#endif  // XP_MACOSX && MOZ_SANDBOX
 
 void ContentParent::LaunchSubprocessInternal(
     ProcessPriority aInitialPriority,
@@ -2102,7 +2116,7 @@ void ContentParent::LaunchSubprocessInternal(
     extraArgs.push_back("-safeMode");
   }
 
-#if defined(XP_MACOSX) && defined(MOZ_CONTENT_SANDBOX)
+#if defined(XP_MACOSX) && defined(MOZ_SANDBOX)
   // If we're launching a middleman process for a
   // recording or replay, start the sandbox later.
   if (sEarlySandboxInit && IsContentSandboxEnabled() &&
@@ -2254,6 +2268,7 @@ ContentParent::ContentParent(ContentParent* aOpener,
       mRemoteWorkerActors(0),
       mNumDestroyingTabs(0),
       mLifecycleState(LifecycleState::LAUNCHING),
+      mShuttingDown(false),
       mIsForBrowser(!mRemoteType.IsEmpty()),
       mRecordReplayState(aRecordReplayState),
       mRecordingFile(aRecordingFile),
@@ -2292,7 +2307,7 @@ ContentParent::ContentParent(ContentParent* aOpener,
   bool isFile = mRemoteType.EqualsLiteral(FILE_REMOTE_TYPE);
   mSubprocess = new GeckoChildProcessHost(GeckoProcessType_Content, isFile);
 
-#if defined(XP_MACOSX) && defined(MOZ_CONTENT_SANDBOX)
+#if defined(XP_MACOSX) && defined(MOZ_SANDBOX)
   // sEarlySandboxInit is statically initialized to false.
   // Once we've set it to true due to the pref, avoid checking the
   // pref on subsequent calls. As a result, changing the earlyinit
@@ -2567,7 +2582,7 @@ void ContentParent::InitInternal(ProcessPriority aInitialPriority) {
   }
 #endif
 
-#ifdef MOZ_CONTENT_SANDBOX
+#ifdef MOZ_SANDBOX
   bool shouldSandbox = true;
   Maybe<FileDescriptor> brokerFd;
   // XXX: Checking the pref here makes it possible to enable/disable sandboxing
@@ -2994,7 +3009,7 @@ ContentParent::Observe(nsISupports* aSubject, const char* aTopic,
     // We know prefs are ASCII here.
     NS_LossyConvertUTF16toASCII strData(aData);
 
-    Pref pref(strData, /* isLocked */ false, null_t(), null_t());
+    Pref pref(strData, /* isLocked */ false, Nothing(), Nothing());
     Preferences::GetPreference(&pref);
     if (IsAlive()) {
       MOZ_ASSERT(mQueuedPrefs.IsEmpty());
@@ -3223,7 +3238,8 @@ bool ContentParent::CanOpenBrowser(const IPCTabContext& aContext) {
 PBrowserParent* ContentParent::AllocPBrowserParent(
     const TabId& aTabId, const TabId& aSameTabGroupAs,
     const IPCTabContext& aContext, const uint32_t& aChromeFlags,
-    const ContentParentId& aCpId, const bool& aIsForBrowser) {
+    const ContentParentId& aCpId, BrowsingContext* aBrowsingContext,
+    const bool& aIsForBrowser) {
   MOZ_ASSERT(!aSameTabGroupAs);
 
   Unused << aCpId;
@@ -3281,10 +3297,17 @@ PBrowserParent* ContentParent::AllocPBrowserParent(
   // window is remote.
   chromeFlags |= nsIWebBrowserChrome::CHROME_REMOTE_WINDOW;
 
+  CanonicalBrowsingContext* browsingContext =
+      CanonicalBrowsingContext::Cast(aBrowsingContext);
+  if (NS_WARN_IF(!browsingContext->IsOwnedByProcess(ChildID()))) {
+    MOZ_ASSERT(false, "BrowsingContext not owned by the correct process!");
+    return nullptr;
+  }
+
   MaybeInvalidTabContext tc(aContext);
   MOZ_ASSERT(tc.IsValid());
-  TabParent* parent = new TabParent(static_cast<ContentParent*>(this), aTabId,
-                                    tc.GetTabContext(), chromeFlags);
+  TabParent* parent = new TabParent(this, aTabId, tc.GetTabContext(),
+                                    browsingContext, chromeFlags);
 
   // We release this ref in DeallocPBrowserParent()
   NS_ADDREF(parent);
@@ -3300,7 +3323,8 @@ bool ContentParent::DeallocPBrowserParent(PBrowserParent* frame) {
 mozilla::ipc::IPCResult ContentParent::RecvPBrowserConstructor(
     PBrowserParent* actor, const TabId& tabId, const TabId& sameTabGroupAs,
     const IPCTabContext& context, const uint32_t& chromeFlags,
-    const ContentParentId& cpId, const bool& isForBrowser) {
+    const ContentParentId& cpId, BrowsingContext* aBrowsingContext,
+    const bool& isForBrowser) {
   TabParent* parent = TabParent::GetFrom(actor);
   // When enabling input event prioritization, input events may preempt other
   // normal priority IPC messages. To prevent the input events preempt
@@ -3977,6 +4001,7 @@ mozilla::ipc::IPCResult ContentParent::RecvAsyncMessage(
   return IPC_OK();
 }
 
+MOZ_CAN_RUN_SCRIPT
 static int32_t AddGeolocationListener(
     nsIDOMGeoPositionCallback* watcher,
     nsIDOMGeoPositionErrorCallback* errorCallBack, bool highAccuracy) {
@@ -4671,11 +4696,11 @@ mozilla::ipc::IPCResult ContentParent::CommonCreateWindow(
     PBrowserParent* aThisTab, bool aSetOpener, const uint32_t& aChromeFlags,
     const bool& aCalledFromJS, const bool& aPositionSpecified,
     const bool& aSizeSpecified, nsIURI* aURIToLoad, const nsCString& aFeatures,
-    const nsCString& aBaseURI, const float& aFullZoom,
-    uint64_t aNextTabParentId, const nsString& aName, nsresult& aResult,
-    nsCOMPtr<nsITabParent>& aNewTabParent, bool* aWindowIsNew,
-    int32_t& aOpenLocation, nsIPrincipal* aTriggeringPrincipal,
-    uint32_t aReferrerPolicy, bool aLoadURI, nsIContentSecurityPolicy* aCsp)
+    const float& aFullZoom, uint64_t aNextTabParentId, const nsString& aName,
+    nsresult& aResult, nsCOMPtr<nsITabParent>& aNewTabParent,
+    bool* aWindowIsNew, int32_t& aOpenLocation,
+    nsIPrincipal* aTriggeringPrincipal, nsIReferrerInfo* aReferrerInfo,
+    bool aLoadURI, nsIContentSecurityPolicy* aCsp)
 
 {
   // The content process should never be in charge of computing whether or
@@ -4755,10 +4780,9 @@ mozilla::ipc::IPCResult ContentParent::CommonCreateWindow(
 
     nsCOMPtr<nsIOpenURIInFrameParams> params =
         new nsOpenURIInFrameParams(openerOriginAttributes, openerElement);
-    params->SetReferrer(NS_ConvertUTF8toUTF16(aBaseURI));
+    params->SetReferrerInfo(aReferrerInfo);
     MOZ_ASSERT(aTriggeringPrincipal, "need a valid triggeringPrincipal");
     params->SetTriggeringPrincipal(aTriggeringPrincipal);
-    params->SetReferrerPolicy(aReferrerPolicy);
     params->SetCsp(aCsp);
 
     RefPtr<Element> el;
@@ -4875,9 +4899,9 @@ mozilla::ipc::IPCResult ContentParent::RecvCreateWindow(
     const uint32_t& aChromeFlags, const bool& aCalledFromJS,
     const bool& aPositionSpecified, const bool& aSizeSpecified,
     const Maybe<URIParams>& aURIToLoad, const nsCString& aFeatures,
-    const nsCString& aBaseURI, const float& aFullZoom,
-    const IPC::Principal& aTriggeringPrincipal, nsIContentSecurityPolicy* aCsp,
-    const uint32_t& aReferrerPolicy, CreateWindowResolver&& aResolve) {
+    const float& aFullZoom, const IPC::Principal& aTriggeringPrincipal,
+    nsIContentSecurityPolicy* aCsp, nsIReferrerInfo* aReferrerInfo,
+    CreateWindowResolver&& aResolve) {
   nsresult rv = NS_OK;
   CreatedWindowInfo cwi;
 
@@ -4920,9 +4944,9 @@ mozilla::ipc::IPCResult ContentParent::RecvCreateWindow(
   int32_t openLocation = nsIBrowserDOMWindow::OPEN_NEWWINDOW;
   mozilla::ipc::IPCResult ipcResult = CommonCreateWindow(
       aThisTab, /* aSetOpener = */ true, aChromeFlags, aCalledFromJS,
-      aPositionSpecified, aSizeSpecified, uriToLoad, aFeatures, aBaseURI,
-      aFullZoom, nextTabParentId, VoidString(), rv, newRemoteTab,
-      &cwi.windowOpened(), openLocation, aTriggeringPrincipal, aReferrerPolicy,
+      aPositionSpecified, aSizeSpecified, uriToLoad, aFeatures, aFullZoom,
+      nextTabParentId, VoidString(), rv, newRemoteTab, &cwi.windowOpened(),
+      openLocation, aTriggeringPrincipal, aReferrerInfo,
       /* aLoadUri = */ false, aCsp);
   if (!ipcResult) {
     return ipcResult;
@@ -4955,10 +4979,9 @@ mozilla::ipc::IPCResult ContentParent::RecvCreateWindowInDifferentProcess(
     PBrowserParent* aThisTab, const uint32_t& aChromeFlags,
     const bool& aCalledFromJS, const bool& aPositionSpecified,
     const bool& aSizeSpecified, const Maybe<URIParams>& aURIToLoad,
-    const nsCString& aFeatures, const nsCString& aBaseURI,
-    const float& aFullZoom, const nsString& aName,
+    const nsCString& aFeatures, const float& aFullZoom, const nsString& aName,
     const IPC::Principal& aTriggeringPrincipal, nsIContentSecurityPolicy* aCsp,
-    const uint32_t& aReferrerPolicy) {
+    nsIReferrerInfo* aReferrerInfo) {
   nsCOMPtr<nsITabParent> newRemoteTab;
   bool windowIsNew;
   nsCOMPtr<nsIURI> uriToLoad = DeserializeURI(aURIToLoad);
@@ -4967,10 +4990,9 @@ mozilla::ipc::IPCResult ContentParent::RecvCreateWindowInDifferentProcess(
   nsresult rv;
   mozilla::ipc::IPCResult ipcResult = CommonCreateWindow(
       aThisTab, /* aSetOpener = */ false, aChromeFlags, aCalledFromJS,
-      aPositionSpecified, aSizeSpecified, uriToLoad, aFeatures, aBaseURI,
-      aFullZoom,
+      aPositionSpecified, aSizeSpecified, uriToLoad, aFeatures, aFullZoom,
       /* aNextTabParentId = */ 0, aName, rv, newRemoteTab, &windowIsNew,
-      openLocation, aTriggeringPrincipal, aReferrerPolicy,
+      openLocation, aTriggeringPrincipal, aReferrerInfo,
       /* aLoadUri = */ true, aCsp);
   if (!ipcResult) {
     return ipcResult;
@@ -5175,7 +5197,7 @@ ContentParent::RecvUnstoreAndBroadcastBlobURLUnregistration(
 
 mozilla::ipc::IPCResult ContentParent::RecvGetA11yContentId(
     uint32_t* aContentId) {
-#if defined(XP_WIN32) && defined(ACCESSIBILITY)
+#if defined(XP_WIN) && defined(ACCESSIBILITY)
   *aContentId = a11y::AccessibleWrap::GetContentProcessIdFor(ChildID());
   MOZ_ASSERT(*aContentId);
   return IPC_OK();
@@ -5186,7 +5208,7 @@ mozilla::ipc::IPCResult ContentParent::RecvGetA11yContentId(
 
 mozilla::ipc::IPCResult ContentParent::RecvA11yHandlerControl(
     const uint32_t& aPid, const IHandlerControlHolder& aHandlerControl) {
-#if defined(XP_WIN32) && defined(ACCESSIBILITY)
+#if defined(XP_WIN) && defined(ACCESSIBILITY)
   MOZ_ASSERT(!aHandlerControl.IsNull());
   RefPtr<IHandlerControl> proxy(aHandlerControl.Get());
   a11y::AccessibleWrap::SetHandlerControl(aPid, std::move(proxy));
@@ -5672,9 +5694,14 @@ mozilla::ipc::IPCResult ContentParent::RecvStoreUserInteractionAsPermission(
 }
 
 mozilla::ipc::IPCResult ContentParent::RecvAttachBrowsingContext(
-    BrowsingContext* aParent, BrowsingContext* aOpener,
-    BrowsingContextId aChildId, const nsString& aName) {
-  if (aParent && !aParent->Canonical()->IsOwnedByProcess(ChildID())) {
+    BrowsingContext::IPCInitializer&& aInit) {
+  RefPtr<CanonicalBrowsingContext> parent;
+  if (aInit.mParentId != 0) {
+    parent = CanonicalBrowsingContext::Get(aInit.mParentId);
+    MOZ_RELEASE_ASSERT(parent, "Parent doesn't exist in parent process");
+  }
+
+  if (parent && !parent->IsOwnedByProcess(ChildID())) {
     // Where trying attach a child BrowsingContext to a parent
     // BrowsingContext in another process. This is illegal since the
     // only thing that could create that child BrowsingContext is a
@@ -5689,11 +5716,11 @@ mozilla::ipc::IPCResult ContentParent::RecvAttachBrowsingContext(
     MOZ_LOG(BrowsingContext::GetLog(), LogLevel::Warning,
             ("ParentIPC: Trying to attach to out of process parent context "
              "0x%08" PRIx64,
-             aParent->Id()));
+             aInit.mParentId));
     return IPC_OK();
   }
 
-  RefPtr<BrowsingContext> child = BrowsingContext::Get(aChildId);
+  RefPtr<BrowsingContext> child = BrowsingContext::Get(aInit.mId);
   if (child && !child->IsCached()) {
     // This is highly suspicious. BrowsingContexts should only be
     // attached at most once, but finding one indicates that someone
@@ -5704,14 +5731,17 @@ mozilla::ipc::IPCResult ContentParent::RecvAttachBrowsingContext(
     MOZ_LOG(BrowsingContext::GetLog(), LogLevel::Warning,
             ("ParentIPC: Trying to attach already attached 0x%08" PRIx64
              " to 0x%08" PRIx64,
-             child->Id(), aParent ? aParent->Id() : 0));
+             aInit.mId, aInit.mParentId));
     return IPC_OK();
   }
 
   if (!child) {
-    child = BrowsingContext::CreateFromIPC(aParent, aOpener, aName,
-                                           (uint64_t)aChildId, this);
+    RefPtr<BrowsingContextGroup> group =
+        BrowsingContextGroup::Select(aInit.mParentId, aInit.mOpenerId);
+    child = BrowsingContext::CreateFromIPC(std::move(aInit), group, this);
   }
+
+  child->Attach(/* aFromIPC */ true);
 
   return IPC_OK();
 }
@@ -5739,51 +5769,11 @@ mozilla::ipc::IPCResult ContentParent::RecvDetachBrowsingContext(
   }
 
   if (aMoveToBFCache) {
-    aContext->CacheChildren();
+    aContext->CacheChildren(/* aFromIPC */ true);
   } else {
-    aContext->Detach();
+    aContext->Detach(/* aFromIPC */ true);
   }
 
-  return IPC_OK();
-}
-
-mozilla::ipc::IPCResult ContentParent::RecvSetOpenerBrowsingContext(
-    BrowsingContext* aContext, BrowsingContext* aOpener) {
-  if (!aContext) {
-    MOZ_LOG(BrowsingContext::GetLog(), LogLevel::Debug,
-            ("ParentIPC: Trying to set opener already detached"));
-    return IPC_OK();
-  }
-
-  if (!aContext->Canonical()->IsOwnedByProcess(ChildID())) {
-    // Where trying to set opener on a child BrowsingContext in
-    // another child process. This is illegal since the owner of the
-    // BrowsingContext is the proccess with the in-process docshell,
-    // which is tracked by OwnerProcessId.
-
-    // TODO(farre): To crash or not to crash. Same reasoning as in
-    // above TODO. [Bug 1471598]
-    MOZ_LOG(BrowsingContext::GetLog(), LogLevel::Warning,
-            ("ParentIPC: Trying to set opener on out of process context "
-             "0x%08" PRIx64,
-             aContext->Id()));
-    return IPC_OK();
-  }
-
-  aContext->SetOpener(aOpener);
-
-  return IPC_OK();
-}
-
-mozilla::ipc::IPCResult ContentParent::RecvSetUserGestureActivation(
-    BrowsingContext* aContext, bool aNewValue) {
-  if (!aContext) {
-    MOZ_LOG(BrowsingContext::GetLog(), LogLevel::Debug,
-            ("ParentIPC: Trying to activate wrong context"));
-    return IPC_OK();
-  }
-
-  aContext->Canonical()->NotifySetUserGestureActivationFromIPC(aNewValue);
   return IPC_OK();
 }
 
@@ -5903,6 +5893,13 @@ mozilla::ipc::IPCResult ContentParent::RecvCommitBrowsingContextTransaction(
     return IPC_OK();
   }
 
+  // Check if the transaction is valid.
+  if (!aContext->Canonical()->ValidateTransaction(aTransaction, this)) {
+    MOZ_LOG(BrowsingContext::GetLog(), LogLevel::Error,
+            ("ParentIPC: Trying to run invalid transaction."));
+    return IPC_FAIL_NO_REASON(this);
+  }
+
   for (auto iter = aContext->Group()->ContentParentsIter(); !iter.Done();
        iter.Next()) {
     auto* entry = iter.Get();
@@ -5913,7 +5910,7 @@ mozilla::ipc::IPCResult ContentParent::RecvCommitBrowsingContextTransaction(
     }
   }
 
-  aTransaction.Apply(aContext);
+  aTransaction.Apply(aContext, this);
 
   return IPC_OK();
 }

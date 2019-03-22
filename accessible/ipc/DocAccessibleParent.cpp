@@ -442,8 +442,9 @@ mozilla::ipc::IPCResult DocAccessibleParent::RecvAnnouncementEvent(
     return IPC_OK();
   }
 
-  // XXX: A future patch will add platform support for this event type.
-  // Right now, we just need to support XPC for testing.
+#  if defined(ANDROID)
+  ProxyAnnouncementEvent(target, aAnnouncement, aPriority);
+#  endif
 
   if (!nsCoreUtils::AccEventObserversExist()) {
     return IPC_OK();
@@ -731,9 +732,9 @@ void DocAccessibleParent::SendParentCOMProxy() {
     return;
   }
 
-#  if defined(MOZ_CONTENT_SANDBOX)
+#  if defined(MOZ_SANDBOX)
   mParentProxyStream = holder.GetPreservedStream();
-#  endif  // defined(MOZ_CONTENT_SANDBOX)
+#  endif  // defined(MOZ_SANDBOX)
 }
 
 void DocAccessibleParent::SetEmulatedWindowHandle(HWND aWindowHandle) {
@@ -745,7 +746,7 @@ void DocAccessibleParent::SetEmulatedWindowHandle(HWND aWindowHandle) {
 
 mozilla::ipc::IPCResult DocAccessibleParent::RecvGetWindowedPluginIAccessible(
     const WindowsHandle& aHwnd, IAccessibleHolder* aPluginCOMProxy) {
-#  if defined(MOZ_CONTENT_SANDBOX)
+#  if defined(MOZ_SANDBOX)
   // We don't actually want the accessible object for aHwnd, but rather the
   // one that belongs to its child (see HTMLWin32ObjectAccessible).
   HWND childWnd = ::GetWindow(reinterpret_cast<HWND>(aHwnd), GW_CHILD);

@@ -54,6 +54,8 @@ class UrlbarInput {
     // In the future this may be moved to the view, so it can customize
     // the container element.
     let MozXULElement = this.window.MozXULElement;
+    // TODO Bug 1535659: urlbarView-body-inner possibly doesn't need the
+    // role="combobox" once bug 1513337 is fixed.
     this.document.getElementById("mainPopupSet").appendChild(
       MozXULElement.parseXULToFragment(`
         <panel id="urlbar-results"
@@ -65,7 +67,8 @@ class UrlbarInput {
                norolluponanchor="true"
                level="parent">
           <html:div class="urlbarView-body-outer">
-            <html:div class="urlbarView-body-inner">
+            <html:div class="urlbarView-body-inner"
+                      role="combobox">
               <html:div id="urlbarView-results"
                         role="listbox"/>
             </html:div>
@@ -88,6 +91,8 @@ class UrlbarInput {
     this.isPrivate = PrivateBrowsingUtils.isWindowPrivate(this.window);
     this.lastQueryContextPromise = Promise.resolve();
     this._actionOverrideKeyCount = 0;
+    this._autofillPlaceholder = "";
+    this._lastSearchString = "";
     this._resultForCurrentValue = null;
     this._suppressStartQuery = false;
     this._untrimmedValue = "";
@@ -253,7 +258,7 @@ class UrlbarInput {
 
   /**
    * Handles an event which would cause a url or text to be opened.
-   * XXX the name is currently handleCommand which is compatible with
+   * TODO Bug 1536816 the name is currently handleCommand which is compatible with
    * urlbarBindings. However, it is no longer called automatically by autocomplete,
    * See _on_keydown.
    *
@@ -340,7 +345,7 @@ class UrlbarInput {
             browser.lastLocationChange == lastLocationChange) {
           openParams.postData = data.postData;
           openParams.allowInheritPrincipal = data.mayInheritPrincipal;
-          this._loadURL(data.url, where, openParams, browser);
+          this._loadURL(data.url, where, openParams, null, browser);
         }
       });
       return;
@@ -371,7 +376,9 @@ class UrlbarInput {
       allowInheritPrincipal: false,
     };
 
-    this.view.close();
+    if (!result.payload.isKeywordOffer) {
+      this.view.close();
+    }
     this.controller.recordSelectedResult(event, resultIndex);
 
     if (isCanonized) {
@@ -438,7 +445,10 @@ class UrlbarInput {
     if (!url) {
       throw new Error(`Invalid url for result ${JSON.stringify(result)}`);
     }
-    this._loadURL(url, where, openParams);
+    this._loadURL(url, where, openParams, {
+      source: result.source,
+      type: result.type,
+    });
   }
 
   /**
@@ -463,12 +473,10 @@ class UrlbarInput {
                        this._lastSearchString : this.textValue);
       if (canonizedUrl) {
         this.value = canonizedUrl;
+      } else if (result.autofill) {
+        this._autofillValue(result.autofill);
       } else {
         this.value = this._getValueFromResult(result);
-        if (result.autofill) {
-          this.selectionStart = result.autofill.selectionStart;
-          this.selectionEnd = result.autofill.selectionEnd;
-        }
       }
     }
     this._resultForCurrentValue = result;
@@ -492,37 +500,53 @@ class UrlbarInput {
   }
 
   /**
-   * Starts a query based on the user input.
+   * Starts a query based on the current input value.
    *
+   * @param {boolean} [options.allowAutofill]
+   *   Whether or not to allow providers to include autofill results.
    * @param {number} [options.lastKey]
    *   The last key the user entered (as a key code).
+   * @param {string} [options.searchString]
+   *   The search string.  If not given, the current input value is used.
+   *   Otherwise, the current input value must start with this value.  The
+   *   intended use for this parameter is related to the autofill placeholder.
+   *   When the placeholder is autofilled before the new search starts, the
+   *   current input value will be the entire autofilled placeholder, not the
+   *   value the user typed, which is the value we should search with.
+   * @param {boolean} [resetSearchState]
+   *   If this is the first search of a user interaction with the input, set
+   *   this to true (the default) so that search-related state from the previous
+   *   interaction doesn't interfere with the new interaction.  Otherwise set it
+   *   to false so that state is maintained during a single interaction.  The
+   *   intended use for this parameter is that it should be set to false when
+   *   this method is called due to input events.
    */
   startQuery({
+    allowAutofill = true,
     lastKey = null,
+    searchString = null,
+    resetSearchState = true,
   } = {}) {
     if (this._suppressStartQuery) {
       return;
     }
 
-    let searchString = this.textValue;
+    if (resetSearchState) {
+      this._resetSearchState();
+    }
 
-    // We should autofill only when all of the following are true:
-    // * The pref is enabled.
-    // * The end of the selection is at the end of the input.
-    // * The user hasn't deleted text at the end of the input since the last
-    //   query.  Do a simple prefix comparison to guess whether that happened.
-    let enableAutofill =
-      UrlbarPrefs.get("autoFill") &&
-      this.selectionEnd == searchString.length &&
-      (!this._lastSearchString ||
-       !this._lastSearchString.startsWith(searchString));
+    if (!searchString) {
+      searchString = this.textValue;
+    } else if (!this.textValue.startsWith(searchString)) {
+      throw new Error("The current value doesn't start with the search string");
+    }
     this._lastSearchString = searchString;
 
     // TODO (Bug 1522902): This promise is necessary for tests, because some
     // tests are not listening for completion when starting a query through
     // other methods than startQuery (input events for example).
     this.lastQueryContextPromise = this.controller.startQuery(new UrlbarQueryContext({
-      enableAutofill,
+      allowAutofill,
       isPrivate: this.isPrivate,
       lastKey,
       maxResults: UrlbarPrefs.get("maxRichResults"),
@@ -552,6 +576,13 @@ class UrlbarInput {
     // Avoid selecting the text if this method is called twice in a row.
     this.selectionStart = -1;
 
+    // Note: proper IME Composition handling depends on the fact this generates
+    // an input event, rather than directly invoking the controller; everything
+    // goes through _on_input, that will properly skip the search until the
+    // composition is committed. _on_input also skips the search when it's the
+    // same as the previous search, but we want to allow consecutive searches
+    // with the same string. So clear _lastSearchString first.
+    this._lastSearchString = "";
     let event = this.document.createEvent("UIEvents");
     event.initUIEvent("input", true, false, this.window, 0);
     this.inputField.dispatchEvent(event);
@@ -594,6 +625,12 @@ class UrlbarInput {
   }
 
   set value(val) {
+    return this._setValue(val, true);
+  }
+
+  // Private methods below.
+
+  _setValue(val, allowTrim) {
     this._untrimmedValue = val;
 
     let originalUrl = ReaderMode.getOriginalUrlObjectForDisplay(val);
@@ -601,7 +638,7 @@ class UrlbarInput {
       val = originalUrl.displaySpec;
     }
 
-    val = this.trimValue(val);
+    val = allowTrim ? this.trimValue(val) : val;
 
     this.valueIsTyped = false;
     this._resultForCurrentValue = null;
@@ -617,13 +654,7 @@ class UrlbarInput {
     return val;
   }
 
-  // Private methods below.
-
   _getValueFromResult(result) {
-    if (result.autofill) {
-      return result.autofill.value;
-    }
-
     switch (result.type) {
       case UrlbarUtils.RESULT_TYPE.KEYWORD:
         return result.payload.input;
@@ -642,6 +673,56 @@ class UrlbarInput {
     } catch (ex) {}
 
     return "";
+  }
+
+  /**
+   * Resets some state so that searches from the user's previous interaction
+   * with the input don't interfere with searches from a new interaction.
+   */
+  _resetSearchState() {
+    this._lastSearchString = this.textValue;
+    this._autofillPlaceholder = "";
+  }
+
+  /**
+   * Autofills the autofill placeholder string if appropriate, and determines
+   * whether autofill should be allowed for the new search started by an input
+   * event.
+   *
+   * @param {string} value
+   *   The new search string.
+   * @param {boolean} deletedAutofilledSubstring
+   *   Whether the user deleted the previously autofilled substring.
+   * @returns {boolean}
+   *   Whether autofill should be allowed in the new search.
+   */
+  _maybeAutofillOnInput(value, deletedAutofilledSubstring) {
+    // Determine whether autofill should be allowed for the new search triggered
+    // by the input event.
+    let lastSearchStartsWithNewSearch =
+      value.length < this._lastSearchString.length &&
+      this._lastSearchString.startsWith(value);
+    let allowAutofill =
+      !lastSearchStartsWithNewSearch &&
+      !deletedAutofilledSubstring &&
+      this.selectionEnd == value.length;
+
+    // The autofill placeholder is a string that we autofill now, before we
+    // start waiting on the new search's first result, in order to prevent a
+    // flicker in the input caused by the previous autofilled substring
+    // disappearing and reappearing when the new first result arrives.  Of
+    // course we can only autofill the placeholder if it starts with the new
+    // search string.
+    if (!allowAutofill ||
+        this._autofillPlaceholder.length <= value.length ||
+        !this._autofillPlaceholder.startsWith(value)) {
+      this._autofillPlaceholder = "";
+    }
+    if (this._autofillPlaceholder) {
+      this._autofillValueOnInput(this._autofillPlaceholder);
+    }
+
+    return allowAutofill;
   }
 
   _updateTextOverflow() {
@@ -850,6 +931,49 @@ class UrlbarInput {
   }
 
   /**
+   * Autofills a value into the input in response to the user's typing.  The
+   * autofill value must start with the value that's already in the input.  If
+   * it doesn't, this method doesn't do anything.  If it does, this method will
+   * autofill and set the selection automatically.
+   *
+   * @param {string} value
+   *   The value to autofill.
+   */
+  _autofillValueOnInput(value) {
+    // Don't ever autofill on input if the caret/selection isn't at the end, or
+    // if the value doesn't start with what the user typed.
+    if (this.selectionEnd != this.value.length ||
+        !value.startsWith(this._lastSearchString)) {
+      return;
+    }
+    this._autofillValue({
+      value,
+      selectionStart: this._lastSearchString.length,
+      selectionEnd: value.length,
+    });
+  }
+
+  /**
+   * Autofills a value into the input.  The value will be autofilled regardless
+   * of the input's current value.
+   *
+   * @param {string} options.value
+   *   The value to autofill.
+   * @param {integer} options.selectionStart
+   *   The new selectionStart.
+   * @param {integer} options.selectionEnd
+   *   The new selectionEnd.
+   */
+  _autofillValue({ value, selectionStart, selectionEnd } = {}) {
+    // The autofilled value may be a URL that includes a scheme at the
+    // beginning.  Do not allow it to be trimmed.
+    this._setValue(value, false);
+    this.selectionStart = selectionStart;
+    this.selectionEnd = selectionEnd;
+    this._autofillPlaceholder = value;
+  }
+
+  /**
    * Loads the url in the appropriate place.
    *
    * @param {string} url
@@ -865,9 +989,15 @@ class UrlbarInput {
    *   The POST data associated with a search submission.
    * @param {boolean} [params.allowInheritPrincipal]
    *   If the principal may be inherited
+   * @param {object} [result]
+   *   Details of the selected result, if any
+   * @param {UrlbarUtils.RESULT_TYPE} [result.type]
+   *   Details of the result type, if any.
+   * @param {UrlbarUtils.RESULT_SOURCE} [result.source]
+   *   Details of the result source, if any.
    * @param {object} browser [optional] the browser to use for the load.
    */
-  _loadURL(url, openUILinkWhere, params,
+  _loadURL(url, openUILinkWhere, params, result = {},
            browser = this.window.gBrowser.selectedBrowser) {
     this.value = url;
     browser.userTypedValue = url;
@@ -910,6 +1040,9 @@ class UrlbarInput {
     if (openUILinkWhere != "current") {
       this.handleRevert();
     }
+
+    // Notify about the start of navigation.
+    this._notifyStartNavigation(result);
 
     try {
       this.window.openTrustedLinkIn(url, openUILinkWhere, params);
@@ -1010,6 +1143,20 @@ class UrlbarInput {
     insertLocation.insertAdjacentElement("afterend", pasteAndGo);
   }
 
+  /**
+   * This notifies observers that the user has entered or selected something in
+   * the URL bar which will cause navigation.
+   *
+   * We use the observer service, so that we don't need to load extra facilities
+   * if they aren't being used, e.g. WebNavigation.
+   *
+   * @param {UrlbarResult} [result]
+   *   The result that was selected, if any.
+   */
+  _notifyStartNavigation(result) {
+    Services.obs.notifyObservers({result}, "urlbar-user-start-navigation");
+  }
+
   // Event handlers below.
 
   _on_blur(event) {
@@ -1023,6 +1170,7 @@ class UrlbarInput {
     if (this.getAttribute("pageproxystate") != "valid") {
       this.window.UpdatePopupNotificationsVisibility();
     }
+    this._resetSearchState();
   }
 
   _on_focus(event) {
@@ -1088,18 +1236,40 @@ class UrlbarInput {
       return;
     }
 
-    if (this._compositionState == UrlbarUtils.COMPOSITION.COMMIT) {
+    let handlingCompositionCommit =
+      this._compositionState == UrlbarUtils.COMPOSITION.COMMIT;
+    if (handlingCompositionCommit) {
       this._compositionState = UrlbarUtils.COMPOSITION.NONE;
     }
 
-    // Note: if in the future we should re-implement the legacy optimization
-    // where we didn't search again when the string is the same, skip it if we
-    // are committing a composition; since the search was canceled on
-    // composition start, we should restart it.
+    let sameSearchStrings = value == this._lastSearchString;
 
-    // XXX Fill in lastKey, and add anything else we need.
+    // TODO (bug 1524550): Properly detect autofill removal, rather than
+    // guessing based on string prefixes.
+    let deletedAutofilledSubstring =
+      sameSearchStrings &&
+      value.length < this._autofillPlaceholder.length &&
+      this._autofillPlaceholder.startsWith(value);
+
+    // Don't search again when the new search would produce the same results.
+    // If we're handling a composition commit, we must continue the search
+    // because we canceled the previous search on composition start.
+    if (sameSearchStrings &&
+        !deletedAutofilledSubstring &&
+        !handlingCompositionCommit &&
+        value.length > 0) {
+      return;
+    }
+
+    let allowAutofill =
+      this._maybeAutofillOnInput(value, deletedAutofilledSubstring);
+
+    // TODO Bug 1524550: Fill in lastKey, and add anything else we need.
     this.startQuery({
+      searchString: value,
+      allowAutofill,
       lastKey: null,
+      resetSearchState: false,
     });
   }
 
@@ -1183,6 +1353,7 @@ class UrlbarInput {
   }
 
   _on_TabSelect(event) {
+    this._resetSearchState();
     this.controller.viewContextChanged();
   }
 

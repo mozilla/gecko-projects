@@ -56,9 +56,8 @@ struct PrimitiveHeader {
     float z;
     int specific_prim_address;
     int render_task_index;
-    int clip_task_index;
     int transform_id;
-    ivec3 user_data;
+    ivec4 user_data;
 };
 
 PrimitiveHeader fetch_prim_header(int index) {
@@ -76,9 +75,8 @@ PrimitiveHeader fetch_prim_header(int index) {
     ph.z = float(data0.x);
     ph.render_task_index = data0.y;
     ph.specific_prim_address = data0.z;
-    ph.clip_task_index = data0.w;
-    ph.transform_id = data1.x;
-    ph.user_data = data1.yzw;
+    ph.transform_id = data0.w;
+    ph.user_data = data1;
 
     return ph;
 }
@@ -286,7 +284,7 @@ vec4 dither(vec4 color) {
 }
 #endif //WR_FEATURE_DITHERING
 
-vec4 sample_gradient(int address, float offset, float gradient_repeat) {
+vec4 sample_gradient(HIGHP_FS_ADDRESS int address, float offset, float gradient_repeat) {
     // Modulo the offset if the gradient repeats.
     float x = mix(offset, fract(offset), gradient_repeat);
 

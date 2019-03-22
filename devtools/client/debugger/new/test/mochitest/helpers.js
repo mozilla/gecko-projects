@@ -1,3 +1,4 @@
+/* eslint-disable no-unused-vars */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
@@ -41,40 +42,17 @@ async function waitFor(condition) {
 }
 
 // Wait until an action of `type` is dispatched. This is different
-// then `_afterDispatchDone` because it doesn't wait for async actions
+// then `waitForDispatch` because it doesn't wait for async actions
 // to be done/errored. Use this if you want to listen for the "start"
 // action of an async operation (somewhat rare).
-function waitForNextDispatch(store, type) {
+function waitForNextDispatch(store, actionType) {
   return new Promise(resolve => {
     store.dispatch({
       // Normally we would use `services.WAIT_UNTIL`, but use the
       // internal name here so tests aren't forced to always pass it
       // in
       type: "@@service/waitUntil",
-      predicate: action => action.type === type,
-      run: (dispatch, getState, action) => {
-        resolve(action);
-      }
-    });
-  });
-}
-
-// Wait until an action of `type` is dispatched. If it's part of an
-// async operation, wait until the `status` field is "done" or "error"
-function _afterDispatchDone(store, type) {
-  return new Promise(resolve => {
-    store.dispatch({
-      // Normally we would use `services.WAIT_UNTIL`, but use the
-      // internal name here so tests aren't forced to always pass it
-      // in
-      type: "@@service/waitUntil",
-      predicate: action => {
-        if (action.type === type) {
-          return action.status
-            ? action.status === "done" || action.status === "error"
-            : true;
-        }
-      },
+      predicate: action => action.type === actionType,
       run: (dispatch, getState, action) => {
         resolve(action);
       }
@@ -93,16 +71,28 @@ function _afterDispatchDone(store, type) {
  * @return {Promise}
  * @static
  */
-function waitForDispatch(dbg, type, eventRepeat = 1) {
+function waitForDispatch(dbg, actionType, eventRepeat = 1) {
   let count = 0;
+  return new Promise(resolve => {
+    dbg.store.dispatch({
+      // Normally we would use `services.WAIT_UNTIL`, but use the
+      // internal name here so tests aren't forced to always pass it
+      // in
+      type: "@@service/waitUntil",
+      predicate: action => {
+        const isDone =
+          !action.status ||
+          action.status === "done" ||
+          action.status === "error";
 
-  return Task.spawn(function*() {
-    info(`Waiting for ${type} to dispatch ${eventRepeat} time(s)`);
-    while (count < eventRepeat) {
-      yield _afterDispatchDone(dbg.store, type);
-      count++;
-      info(`${type} dispatched ${count} time(s)`);
-    }
+        if (action.type === actionType && isDone && ++count == eventRepeat) {
+          return true;
+        }
+      },
+      run: (dispatch, getState, action) => {
+        resolve(action);
+      }
+    });
   });
 }
 
@@ -737,10 +727,13 @@ async function navigate(dbg, url, ...sources) {
   return waitForSources(dbg, ...sources);
 }
 
-function getFirstBreakpointColumn(dbg, {line, sourceId}) {
-  const {getSource, getFirstBreakpointPosition} = dbg.selectors;
-  const source = getSource(dbg.getState(), sourceId)
-  const position = getFirstBreakpointPosition(dbg.getState(), { line, sourceId });
+function getFirstBreakpointColumn(dbg, { line, sourceId }) {
+  const { getSource, getFirstBreakpointPosition } = dbg.selectors;
+  const source = getSource(dbg.getState(), sourceId);
+  const position = getFirstBreakpointPosition(dbg.getState(), {
+    line,
+    sourceId
+  });
 
   return getSelectedLocation(position, source).column;
 }
@@ -759,15 +752,19 @@ function getFirstBreakpointColumn(dbg, {line, sourceId}) {
 async function addBreakpoint(dbg, source, line, column, options) {
   source = findSource(dbg, source);
   const sourceId = source.id;
-  column = column || getFirstBreakpointColumn(dbg, {line, sourceId: source.id});
   const bpCount = dbg.selectors.getBreakpointCount(dbg.getState());
   dbg.actions.addBreakpoint({ sourceId, line, column }, options);
   await waitForDispatch(dbg, "ADD_BREAKPOINT");
-  is(dbg.selectors.getBreakpointCount(dbg.getState()), bpCount + 1, "a new breakpoint was created");
+  is(
+    dbg.selectors.getBreakpointCount(dbg.getState()),
+    bpCount + 1,
+    "a new breakpoint was created"
+  );
 }
 
 function disableBreakpoint(dbg, source, line, column) {
-  column = column || getFirstBreakpointColumn(dbg, {line, sourceId: source.id});
+  column =
+    column || getFirstBreakpointColumn(dbg, { line, sourceId: source.id });
   const location = { sourceId: source.id, sourceUrl: source.url, line, column };
   const bp = dbg.selectors.getBreakpointForLocation(dbg.getState(), location);
   dbg.actions.disableBreakpoint(bp);
@@ -861,6 +858,11 @@ async function invokeWithBreakpoint(
 
   // If the invoke errored later somehow, capture here so the error is reported nicely.
   await invokeResult;
+}
+
+function prettyPrint(dbg) {
+  const sourceId = dbg.selectors.getSelectedSourceId(dbg.store.getState());
+  return dbg.actions.togglePrettyPrint(sourceId);
 }
 
 async function expandAllScopes(dbg) {
@@ -963,7 +965,7 @@ function invokeInTab(fnc, ...args) {
     fnc,
     args
   }) {
-    return content.wrappedJSObject[fnc](...args); // eslint-disable-line mozilla/no-cpows-in-tests, max-len
+    return content.wrappedJSObject[fnc](...args); // max-len
   });
 }
 
@@ -1086,6 +1088,22 @@ function isVisible(outerEl, innerEl) {
 
   const visible = verticallyVisible && horizontallyVisible;
   return visible;
+}
+
+function getEditorLineEl(dbg, line) {
+  const lines = dbg.win.document.querySelectorAll(".CodeMirror-code > div");
+  return lines[line - 1];
+}
+
+function assertEditorBreakpoint(dbg, line, shouldExist) {
+  const exists = !!getEditorLineEl(dbg, line).querySelector(".new-breakpoint");
+  ok(
+    exists === shouldExist,
+    "Breakpoint " +
+      (shouldExist ? "exists" : "does not exist") +
+      " on line " +
+      line
+  );
 }
 
 const selectors = {
@@ -1234,10 +1252,7 @@ async function clickElement(dbg, elementName, ...args) {
 }
 
 function clickElementWithSelector(dbg, selector) {
-  clickDOMElement(
-    dbg,
-    findElementWithSelector(dbg, selector)
-  );
+  clickDOMElement(dbg, findElementWithSelector(dbg, selector));
 }
 
 function clickDOMElement(dbg, element) {
@@ -1613,4 +1628,27 @@ async function evaluateInTopFrame(target, text) {
 async function checkEvaluateInTopFrame(target, text, expected) {
   const rval = await evaluateInTopFrame(target, text);
   ok(rval == expected, `Eval returned ${expected}`);
+}
+
+async function findConsoleMessage(dbg, query) {
+  const [message,] = await findConsoleMessages(dbg, query);
+  const value = message.querySelector(".message-body").innerText;
+  const link = message.querySelector(".frame-link-source-inner").innerText;
+  return { value, link };
+}
+
+async function findConsoleMessages(dbg, query) {
+  const webConsole = await dbg.toolbox.getPanel("webconsole");
+  const win = webConsole._frameWindow;
+  return Array.prototype.filter.call(
+    win.document.querySelectorAll(".message"),
+    e => e.innerText.includes(query)
+  );
+}
+
+async function hasConsoleMessage(dbg, msg) {
+  return waitFor(async () => {
+    const messages = await findConsoleMessages(dbg, msg);
+    return messages.length > 0;
+  })
 }

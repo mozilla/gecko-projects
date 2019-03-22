@@ -1169,6 +1169,9 @@ nsEventStatus AsyncPanZoomController::HandleInputEvent(
       break;
     }
     case PINCHGESTURE_INPUT: {
+      // The APZCTreeManager should take care of ensuring that only root-content
+      // APZCs get pinch inputs.
+      MOZ_ASSERT(IsRootContent());
       PinchGestureInput pinchInput = aEvent.AsPinchGestureInput();
       if (!pinchInput.TransformToLocal(aTransformToApzc)) {
         return rv;
@@ -1204,6 +1207,18 @@ nsEventStatus AsyncPanZoomController::HandleGestureEvent(
 
   switch (aEvent.mInputType) {
     case PINCHGESTURE_INPUT: {
+      // This may be invoked via a one-touch-pinch gesture from
+      // GestureEventListener. In that case we want redirect it to the enclosing
+      // root-content APZC.
+      if (!IsRootContent()) {
+        if (APZCTreeManager* treeManagerLocal = GetApzcTreeManager()) {
+          if (RefPtr<AsyncPanZoomController> root =
+                  treeManagerLocal->FindZoomableApzc(this)) {
+            rv = root->HandleGestureEvent(aEvent);
+          }
+        }
+        break;
+      }
       PinchGestureInput pinchGestureInput = aEvent.AsPinchGestureInput();
       pinchGestureInput.TransformToLocal(GetTransformToThis());
       switch (pinchGestureInput.mType) {
@@ -1510,6 +1525,8 @@ nsEventStatus AsyncPanZoomController::OnScaleBegin(
 
   // For platforms that don't support APZ zooming, dispatch a message to the
   // content controller, it may want to do something else with this gesture.
+  // FIXME: bug 1525793 -- this may need to handle zooming or not on a
+  // per-document basis.
   if (!gfxPrefs::APZAllowZooming()) {
     if (RefPtr<GeckoContentController> controller =
             GetGeckoContentController()) {
@@ -1554,6 +1571,8 @@ nsEventStatus AsyncPanZoomController::OnScale(const PinchGestureInput& aEvent) {
     mY.UpdateWithTouchAtDevicePoint(aEvent.mLocalFocusPoint.y, aEvent.mTime);
   }
 
+  // FIXME: bug 1525793 -- this may need to handle zooming or not on a
+  // per-document basis.
   if (!gfxPrefs::APZAllowZooming()) {
     if (RefPtr<GeckoContentController> controller =
             GetGeckoContentController()) {
@@ -1687,6 +1706,8 @@ nsEventStatus AsyncPanZoomController::OnScaleEnd(
     return nsEventStatus_eIgnore;
   }
 
+  // FIXME: bug 1525793 -- this may need to handle zooming or not on a
+  // per-document basis.
   if (!gfxPrefs::APZAllowZooming()) {
     if (RefPtr<GeckoContentController> controller =
             GetGeckoContentController()) {
@@ -4059,6 +4080,8 @@ AsyncPanZoomController::GetCurrentAsyncTransformForFixedAdjustment(
   // Use the layout viewport to adjust fixed position elements if and only if
   // it's larger than the visual viewport (assuming we're scrolling the RCD-RSF
   // with apz.allow_zooming enabled).
+  // FIXME: bug 1525793 -- this may need to handle zooming or not on a
+  // per-document basis.
   return (gfxPrefs::APZAllowZooming() && Metrics().IsRootContent() &&
           Metrics().GetVisualViewport().Size() <=
               Metrics().GetLayoutViewport().Size())
@@ -4625,7 +4648,17 @@ void AsyncPanZoomController::NotifyLayersUpdated(
     if (!mAnimation || !mAnimation->HandleScrollOffsetUpdate(Nothing())) {
       CancelAnimation();
     }
+    // The main thread did not actually paint a displayport at the target
+    // visual offset, so we need to ask it to repaint. We need to set the
+    // contentRepaintType to something other than eNone, otherwise the main
+    // thread will short-circuit the repaint request.
+    // Don't do this for eRestore visual updates as a repaint coming from APZ
+    // breaks the scroll offset restoration mechanism.
     needContentRepaint = true;
+    if (aLayerMetrics.GetVisualScrollUpdateType() ==
+        FrameMetrics::eMainThread) {
+      contentRepaintType = RepaintUpdateType::eVisualUpdate;
+    }
     ScheduleComposite();
   }
 

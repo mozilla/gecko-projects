@@ -706,14 +706,21 @@ pref("plugins.testmode", false);
 // Should plugins that are hidden show the infobar UI?
 pref("plugins.show_infobar", false);
 
+#if defined(_ARM64_) && defined(XP_WIN)
+pref("plugin.default.state", 0);
+#else
 pref("plugin.default.state", 1);
+#endif
 
 // Plugins bundled in XPIs are enabled by default.
 pref("plugin.defaultXpi.state", 2);
 
-
-// Flash is Click-to-Activate by default on all channels.
+// Flash is Click-to-Activate by default on all channels. Disabled for ARM builds.
+#if defined(_ARM64_) && defined(XP_WIN)
+pref("plugin.state.flash", 0);
+#else
 pref("plugin.state.flash", 1);
+#endif
 
 // Enables the download and use of the flash blocklists.
 pref("plugins.flashBlock.enabled", true);
@@ -1018,7 +1025,6 @@ pref("dom.ipc.plugins.sandbox-level.flash", 3);
 pref("dom.ipc.plugins.sandbox-level.flash", 0);
 #endif
 
-#if defined(MOZ_CONTENT_SANDBOX)
 // This controls the strength of the Windows content process sandbox for testing
 // purposes. This will require a restart.
 // On windows these levels are:
@@ -1031,7 +1037,6 @@ pref("security.sandbox.content.level", 5);
 // process because the only other sandbox (for GMP) has too strict a policy to
 // allow stack tracing.  This does not require a restart to take effect.
 pref("security.sandbox.windows.log.stackTraceDepth", 0);
-#endif
 
 // This controls the strength of the Windows GPU process sandbox.  Changes
 // will require restart.
@@ -1052,9 +1057,7 @@ pref("security.sandbox.gmp.win32k-disable", false);
 // Start the Mac sandbox early during child process startup instead
 // of when messaged by the parent after the message loop is running.
 pref("security.sandbox.content.mac.earlyinit", true);
-#endif
 
-#if defined(XP_MACOSX) && defined(MOZ_SANDBOX) && defined(MOZ_CONTENT_SANDBOX)
 // This pref is discussed in bug 1083344, the naming is inspired from its
 // Windows counterpart, but on Mac it's an integer which means:
 // 0 -> "no sandbox" (nightly only)
@@ -1070,9 +1073,7 @@ pref("security.sandbox.content.mac.earlyinit", true);
 // process is killed when all windows are closed, so a change will take effect
 // when the 1st window is opened.
 pref("security.sandbox.content.level", 3);
-#endif
 
-#if defined(XP_MACOSX) && defined(MOZ_SANDBOX)
 // Prefs for controlling whether and how the Mac NPAPI Flash plugin process is
 // sandboxed. On Mac these levels are:
 // 0 - "no sandbox"
@@ -1092,7 +1093,7 @@ pref("dom.ipc.plugins.sandbox-level.flash.max-legacy-os-minor", 10);
 pref("dom.ipc.plugins.sandbox-level.default", 1);
 #endif
 
-#if defined(XP_LINUX) && defined(MOZ_SANDBOX) && defined(MOZ_CONTENT_SANDBOX)
+#if defined(XP_LINUX) && defined(MOZ_SANDBOX)
 // This pref is introduced as part of bug 742434, the naming is inspired from
 // its Windows/Mac counterpart, but on Linux it's an integer which means:
 // 0 -> "no sandbox"
@@ -1115,23 +1116,17 @@ pref("security.sandbox.content.syscall_whitelist", "");
 // default pledge strings for the main & content processes, cf bug 1457092
 // broad list for now, has to be refined over time
 pref("security.sandbox.pledge.main", "stdio rpath wpath cpath inet proc exec prot_exec flock ps sendfd recvfd dns vminfo tty drm unix fattr getpw mcast");
-#if defined(MOZ_CONTENT_SANDBOX)
 pref("security.sandbox.content.level", 1);
 pref("security.sandbox.pledge.content", "stdio rpath wpath cpath inet recvfd sendfd prot_exec unix drm ps");
 #endif
-#endif
 
 #if defined(MOZ_SANDBOX)
-#if defined(MOZ_CONTENT_SANDBOX)
 // ID (a UUID when set by gecko) that is used to form the name of a
 // sandbox-writable temporary directory to be used by content processes
 // when a temporary writable file is required in a level 1 sandbox.
 pref("security.sandbox.content.tempDirSuffix", "");
-#endif
 pref("security.sandbox.plugin.tempDirSuffix", "");
-#endif
 
-#if defined(MOZ_SANDBOX)
 // This pref determines if messages relevant to sandbox violations are
 // logged.
 #if defined(XP_WIN) || defined(XP_MACOSX)
@@ -1247,7 +1242,9 @@ pref("services.sync.prefs.sync.privacy.fuzzyfox.clockgrainus", false);
 pref("services.sync.prefs.sync.privacy.sanitize.sanitizeOnShutdown", true);
 pref("services.sync.prefs.sync.privacy.trackingprotection.enabled", true);
 pref("services.sync.prefs.sync.privacy.trackingprotection.cryptomining.enabled", true);
+pref("services.sync.prefs.sync.privacy.trackingprotection.cryptomining.annotate.enabled", true);
 pref("services.sync.prefs.sync.privacy.trackingprotection.fingerprinting.enabled", true);
+pref("services.sync.prefs.sync.privacy.trackingprotection.fingerprinting.annotate.enabled", true);
 pref("services.sync.prefs.sync.privacy.trackingprotection.pbmode.enabled", true);
 pref("services.sync.prefs.sync.privacy.resistFingerprinting", true);
 pref("services.sync.prefs.sync.privacy.reduceTimerPrecision", true);
@@ -1515,10 +1512,6 @@ pref("media.autoplay.block-webaudio", true);
 pref("media.autoplay.block-webaudio", false);
 #endif
 
-#ifdef NIGHTLY_BUILD
-pref("media.videocontrols.picture-in-picture.enabled", false);
-#endif
-
 // Play with different values of the decay time and get telemetry,
 // 0 means to randomize (and persist) the experiment value in users' profiles,
 // -1 means no experiment is run and we use the preferred value for frecency (6h)
@@ -1672,6 +1665,8 @@ pref("reader.parse-node-limit", 0);
 // and because (normally) these errors are not persisted anywhere.
 pref("reader.errors.includeURLs", true);
 
+pref("view_source.tab", true);
+
 pref("dom.serviceWorkers.enabled", true);
 
 // Enable Push API.
@@ -1706,6 +1701,7 @@ pref("extensions.pocket.site", "getpocket.com");
 
 pref("signon.schemeUpgrades", true);
 pref("signon.privateBrowsingCapture.enabled", true);
+pref("signon.showAutoCompleteFooter", true);
 
 // Enable the "Simplify Page" feature in Print Preview. This feature
 // is disabled by default in toolkit.
@@ -1842,4 +1838,11 @@ pref("browser.engagement.recent_visited_origins.expiry", 86400); // 24 * 60 * 60
 
 pref("browser.aboutConfig.showWarning", true);
 
-pref("browser.toolbars.keyboard_navigation", false);
+pref("browser.toolbars.keyboard_navigation", true);
+
+// Prefs to control the Firefox Account toolbar menu.
+// This pref will surface existing Firefox Account information
+// as a button next to the hamburger menu. It allows
+// quick access to sign-in and manage your Firefox Account.
+pref("identity.fxaccounts.toolbar.enabled", true);
+pref("identity.fxaccounts.toolbar.accessed", false);

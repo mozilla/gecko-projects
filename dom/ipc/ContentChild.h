@@ -25,7 +25,7 @@
 
 #include "nsIWindowProvider.h"
 
-#if defined(XP_MACOSX) && defined(MOZ_CONTENT_SANDBOX)
+#if defined(XP_MACOSX) && defined(MOZ_SANDBOX)
 #  include "nsIFile.h"
 #endif
 
@@ -139,7 +139,7 @@ class ContentChild final : public PContentChild,
 
   void LaunchRDDProcess();
 
-#if defined(XP_MACOSX) && defined(MOZ_CONTENT_SANDBOX)
+#if defined(XP_MACOSX) && defined(MOZ_SANDBOX)
   void GetProfileDir(nsIFile** aProfileDir) const {
     *aProfileDir = mProfileDir;
     NS_IF_ADDREF(*aProfileDir);
@@ -198,6 +198,7 @@ class ContentChild final : public PContentChild,
                                     const IPCTabContext& aContext,
                                     const uint32_t& aChromeFlags,
                                     const ContentParentId& aCpID,
+                                    BrowsingContext* aBrowsingContext,
                                     const bool& aIsForBrowser);
 
   bool DeallocPBrowserChild(PBrowserChild*);
@@ -375,6 +376,9 @@ class ContentChild final : public PContentChild,
 
   mozilla::ipc::IPCResult RecvGeolocationUpdate(nsIDOMGeoPosition* aPosition);
 
+  // MOZ_CAN_RUN_SCRIPT_BOUNDARY because we don't have MOZ_CAN_RUN_SCRIPT bits
+  // in IPC code yet.
+  MOZ_CAN_RUN_SCRIPT_BOUNDARY
   mozilla::ipc::IPCResult RecvGeolocationError(const uint16_t& errorCode);
 
   mozilla::ipc::IPCResult RecvUpdateDictionaryList(
@@ -515,12 +519,14 @@ class ContentChild final : public PContentChild,
                                const IPCTabContext& context,
                                const uint32_t& chromeFlags,
                                const ContentParentId& aCpID,
+                               BrowsingContext* aBrowsingContext,
                                const bool& aIsForBrowser);
 
   virtual mozilla::ipc::IPCResult RecvPBrowserConstructor(
       PBrowserChild* aCctor, const TabId& aTabId, const TabId& aSameTabGroupAs,
       const IPCTabContext& aContext, const uint32_t& aChromeFlags,
-      const ContentParentId& aCpID, const bool& aIsForBrowser) override;
+      const ContentParentId& aCpID, BrowsingContext* aBrowsingContext,
+      const bool& aIsForBrowser) override;
 
   FORWARD_SHMEM_ALLOCATOR_TO(PContentChild)
 
@@ -681,6 +687,9 @@ class ContentChild final : public PContentChild,
       const Maybe<LoadInfoArgs>& aLoadInfoForwarder, const uint64_t& aChannelId,
       nsIURI* aOriginalURI, const uint64_t& aIdentifier);
 
+  mozilla::ipc::IPCResult RecvStartDelayedAutoplayMediaComponents(
+      BrowsingContext* aContext);
+
 #ifdef NIGHTLY_BUILD
   // Fetch the current number of pending input events.
   //
@@ -709,6 +718,15 @@ class ContentChild final : public PContentChild,
       const Message& aMsg) override;
 
   virtual void OnChannelReceivedMessage(const Message& aMsg) override;
+
+  mozilla::ipc::IPCResult RecvAttachBrowsingContext(
+      BrowsingContext::IPCInitializer&& aInit);
+
+  mozilla::ipc::IPCResult RecvDetachBrowsingContext(BrowsingContext* aContext,
+                                                    bool aMoveToBFCache);
+
+  mozilla::ipc::IPCResult RecvRegisterBrowsingContextGroup(
+      nsTArray<BrowsingContext::IPCInitializer>&& aInits);
 
   mozilla::ipc::IPCResult RecvWindowClose(BrowsingContext* aContext,
                                           bool aTrustedCaller);
@@ -787,7 +805,7 @@ class ContentChild final : public PContentChild,
   RefPtr<ChildProfilerController> mProfilerController;
 #endif
 
-#if defined(XP_MACOSX) && defined(MOZ_CONTENT_SANDBOX)
+#if defined(XP_MACOSX) && defined(MOZ_SANDBOX)
   nsCOMPtr<nsIFile> mProfileDir;
 #endif
 

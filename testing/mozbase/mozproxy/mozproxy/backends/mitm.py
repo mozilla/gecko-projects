@@ -9,6 +9,7 @@ import os
 import subprocess
 import sys
 import time
+import socket
 
 import mozinfo
 from mozprocess import ProcessHandler
@@ -40,9 +41,6 @@ except Exception:
 # On Windows, deal with mozilla-build having forward slashes in $HOME:
 if os.name == "nt" and "/" in DEFAULT_CERT_PATH:
     DEFAULT_CERT_PATH = DEFAULT_CERT_PATH.replace("/", "\\")
-
-# sleep in seconds after issuing a `mitmdump` command
-MITMDUMP_SLEEP = 10
 
 # to install mitmproxy certificate into Firefox and turn on/off proxy
 POLICIES_CONTENT_ON = """{
@@ -107,9 +105,7 @@ class Mitmproxy(Playback):
 
         # mitmproxy must be started before setup, so that the CA cert is available
         self.mitmdump_path = os.path.join(self.mozproxy_dir, "mitmdump")
-        self.mitmproxy_proc = self.start_mitmproxy_playback(
-            self.mitmdump_path, self.browser_path
-        )
+        self.start_mitmproxy_playback(self.mitmdump_path, self.browser_path)
 
         # In case the setup fails, we want to stop the process before raising.
         try:
@@ -117,6 +113,11 @@ class Mitmproxy(Playback):
         except Exception:
             self.stop()
             raise
+
+    @property
+    def mitmdump_sleep_seconds(self):
+        """Time to sleep, in seconds, after issuing a `mitmdump` command."""
+        return 10 if not self.config['run_local'] else 1
 
     def download(self):
         """Download and unpack mitmproxy binary and pageset using tooltool"""
@@ -134,7 +135,9 @@ class Mitmproxy(Playback):
             # we use one pageset for all platforms
             LOG.info("downloading mitmproxy pageset")
             _manifest = self.config["playback_pageset_manifest"]
-            transformed_manifest = transform_platform(_manifest, self.config["platform"])
+            transformed_manifest = transform_platform(
+                _manifest, self.config["platform"]
+            )
             tooltool_download(
                 transformed_manifest, self.config["run_local"], self.mozproxy_dir
             )
@@ -152,13 +155,10 @@ class Mitmproxy(Playback):
     def stop(self):
         self.stop_mitmproxy_playback()
 
-    def start_mitmproxy_playback(
-        self,
-        mitmdump_path,
-        browser_path,
-    ):
+    def start_mitmproxy_playback(self, mitmdump_path, browser_path):
         """Startup mitmproxy and replay the specified flow file"""
-
+        if self.mitmproxy_proc is not None:
+            raise Exception("Proxy already started.")
         LOG.info("mitmdump path: %s" % mitmdump_path)
         LOG.info("browser path: %s" % browser_path)
 
@@ -174,45 +174,58 @@ class Mitmproxy(Playback):
         LOG.info("Starting mitmproxy playback using command: %s" % " ".join(command))
         # to turn off mitmproxy log output, use these params for Popen:
         # Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env)
-        mitmproxy_proc = ProcessHandler(command,
-                                        logfile=os.path.join(self.upload_dir,
-                                                             "mitmproxy.log"),
-                                        env=env)
-        mitmproxy_proc.run()
-
-        # XXX replace the code below with a loop with a connection attempt
-        # Bug 1532557
-        time.sleep(MITMDUMP_SLEEP)
-        data = mitmproxy_proc.poll()
-        if data is None:  # None value indicates process hasn't terminated
-            LOG.info(
-                "Mitmproxy playback successfully started as pid %d" % mitmproxy_proc.pid
-            )
-            return mitmproxy_proc
+        self.mitmproxy_proc = ProcessHandler(command,
+                                             logfile=os.path.join(self.upload_dir,
+                                                                  "mitmproxy.log"),
+                                             env=env)
+        self.mitmproxy_proc.run()
+        max_wait = time.time() + self.mitmdump_sleep_seconds
+        ready = False
+        while time.time() < max_wait:
+            ready = self.check_proxy()
+            if ready:
+                LOG.info(
+                    "Mitmproxy playback successfully started as pid %d"
+                    % self.mitmproxy_proc.pid
+                )
+                return
+            time.sleep(1)
         # cannot continue as we won't be able to playback the pages
-        LOG.error(
-            "Aborting: mitmproxy playback process failed to start, poll returned: %s"
-            % data
-        )
-        # XXX here we might end up with a ghost mitmproxy
-        sys.exit()
+        LOG.error("Aborting: mitmproxy playback process failed to work")
+        self.stop_mitmproxy_playback()
+        sys.exit()  # XXX why do we need to do that? a raise is not enough?
 
     def stop_mitmproxy_playback(self):
         """Stop the mitproxy server playback"""
-        mitmproxy_proc = self.mitmproxy_proc
-        LOG.info("Stopping mitmproxy playback, killing process %d" % mitmproxy_proc.pid)
-        mitmproxy_proc.kill()
+        if self.mitmproxy_proc is None or self.mitmproxy_proc.poll() is not None:
+            return
+        LOG.info(
+            "Stopping mitmproxy playback, killing process %d" % self.mitmproxy_proc.pid
+        )
 
-        time.sleep(MITMDUMP_SLEEP)
-        status = mitmproxy_proc.poll()
-        if status is None:  # None value indicates process hasn't terminated
+        exit_code = self.mitmproxy_proc.kill()
+        if exit_code != 0:
             # I *think* we can still continue, as process will be automatically
             # killed anyway when mozharness is done (?) if not, we won't be able
             # to startup mitmxproy next time if it is already running
-            LOG.error("Failed to kill the mitmproxy playback process")
-            LOG.info(str(status))
+            if exit_code is None:
+                LOG.error("Failed to kill the mitmproxy playback process")
+            else:
+                LOG.error("Mitmproxy exited with error code %d" % exit_code)
         else:
             LOG.info("Successfully killed the mitmproxy playback process")
+
+        self.mitmproxy_proc = None
+
+    def check_proxy(self, host="localhost", port=8080):
+        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        try:
+            s.connect((host, port))
+            s.shutdown(socket.SHUT_RDWR)
+            s.close()
+            return True
+        except socket.error:
+            return False
 
 
 class MitmproxyDesktop(Mitmproxy):
@@ -230,9 +243,9 @@ class MitmproxyDesktop(Mitmproxy):
         if not self.config["app"] == "firefox":
             return
         # install the generated CA certificate into Firefox desktop
-        self.install_mitmproxy_cert(self.mitmproxy_proc, self.browser_path)
+        self.install_mitmproxy_cert(self.browser_path)
 
-    def install_mitmproxy_cert(self, mitmproxy_proc, browser_path):
+    def install_mitmproxy_cert(self, browser_path):
         """Install the CA certificate generated by mitmproxy, into Firefox
         1. Create a dir called 'distribution' in the same directory as the Firefox executable
         2. Create the policies.json file inside that folder; which points to the certificate
@@ -329,13 +342,18 @@ class MitmproxyAndroid(Mitmproxy):
         Mitmproxy.__init__(self, config)
         self.android_device = android_device
 
+    @property
+    def certutil_sleep_seconds(self):
+        """Time to sleep, in seconds, after issuing a `certutil` command."""
+        return 10 if not self.config['run_local'] else 1
+
     def setup(self):
         """For geckoview we need to install the generated mitmproxy CA cert"""
         if self.config["app"] in ["geckoview", "refbrow", "fenix"]:
             # install the generated CA certificate into android geckoview
-            self.install_mitmproxy_cert(self.mitmproxy_proc, self.browser_path)
+            self.install_mitmproxy_cert(self.browser_path)
 
-    def install_mitmproxy_cert(self, mitmproxy_proc, browser_path):
+    def install_mitmproxy_cert(self, browser_path):
         """Install the CA certificate generated by mitmproxy, into geckoview android
         If running locally:
         1. Will use the `certutil` tool from the local Firefox desktop build
@@ -351,10 +369,13 @@ class MitmproxyAndroid(Mitmproxy):
         2. Import the mitmproxy certificate into the database, i.e.:
            `certutil -A -d sql:<path to profile> -n "some nickname" -t TC,, -a -i <path to CA.pem>`
         """
-        self.CERTUTIL_SLEEP = 10
         if self.config['run_local']:
             # when running locally, it is found in the Firefox desktop build (..obj../dist/bin)
-            self.certutil = os.path.join(self.config['obj_path'], 'dist', 'bin')
+            self.certutil = os.path.join(os.environ['MOZ_HOST_BIN'], 'certutil')
+            if not (os.path.isfile(self.certutil) and os.access(self.certutil, os.X_OK)):
+                LOG.critical("Abort: unable to execute certutil: {}".format(self.certutil))
+                raise
+            self.certutil = os.environ['MOZ_HOST_BIN']
             os.environ['LD_LIBRARY_PATH'] = self.certutil
         else:
             # must download certutil inside hostutils via tooltool; use this manifest:
@@ -367,40 +388,44 @@ class MitmproxyAndroid(Mitmproxy):
             # mozharness/configs/raptor/android_hw_config.py, to the path i.e.
             # mozilla-central/testing/config/tooltool-manifests/linux64/hostutils.manifest
             # the bitbar container is always linux64
-            if os.environ.get('GECKO_HEAD_REPOSITORY', None) is None:
-                LOG.critical('Abort: unable to get GECKO_HEAD_REPOSITORY')
+            if os.environ.get("GECKO_HEAD_REPOSITORY", None) is None:
+                LOG.critical("Abort: unable to get GECKO_HEAD_REPOSITORY")
                 raise
 
-            if os.environ.get('GECKO_HEAD_REV', None) is None:
-                LOG.critical('Abort: unable to get GECKO_HEAD_REV')
+            if os.environ.get("GECKO_HEAD_REV", None) is None:
+                LOG.critical("Abort: unable to get GECKO_HEAD_REV")
                 raise
 
-            if os.environ.get('HOSTUTILS_MANIFEST_PATH', None) is not None:
-                manifest_url = os.path.join(os.environ['GECKO_HEAD_REPOSITORY'],
-                                            "raw-file",
-                                            os.environ['GECKO_HEAD_REV'],
-                                            os.environ['HOSTUTILS_MANIFEST_PATH'])
+            if os.environ.get("HOSTUTILS_MANIFEST_PATH", None) is not None:
+                manifest_url = os.path.join(
+                    os.environ["GECKO_HEAD_REPOSITORY"],
+                    "raw-file",
+                    os.environ["GECKO_HEAD_REV"],
+                    os.environ["HOSTUTILS_MANIFEST_PATH"],
+                )
             else:
                 LOG.critical("Abort: unable to get HOSTUTILS_MANIFEST_PATH!")
                 raise
 
             # first need to download the hostutils tooltool manifest file itself
-            _dest = os.path.join(self.mozproxy_dir, 'hostutils.manifest')
+            _dest = os.path.join(self.mozproxy_dir, "hostutils.manifest")
             have_manifest = download_file_from_url(manifest_url, _dest)
             if not have_manifest:
-                LOG.critical('failed to download the hostutils tooltool manifest')
+                LOG.critical("failed to download the hostutils tooltool manifest")
                 raise
 
             # now use the manifest to download hostutils so we can get certutil
-            tooltool_download(_dest, self.config['run_local'], self.mozproxy_dir)
+            tooltool_download(_dest, self.config["run_local"], self.mozproxy_dir)
 
             # the production bitbar container host is always linux
-            self.certutil = glob.glob(os.path.join(self.mozproxy_dir, 'host-utils*[!z]'))[0]
+            self.certutil = glob.glob(
+                os.path.join(self.mozproxy_dir, "host-utils*[!z]")
+            )[0]
 
             # must add hostutils/certutil to the path
-            os.environ['LD_LIBRARY_PATH'] = self.certutil
+            os.environ["LD_LIBRARY_PATH"] = self.certutil
 
-        bin_suffix = mozinfo.info.get('bin_suffix', '')
+        bin_suffix = mozinfo.info.get("bin_suffix", "")
         self.certutil = os.path.join(self.certutil, "certutil" + bin_suffix)
 
         if os.path.isfile(self.certutil):
@@ -430,7 +455,7 @@ class MitmproxyAndroid(Mitmproxy):
             cert_db_exists = False
 
         # try a forced pause between certutil cmds; possibly reduce later
-        time.sleep(self.CERTUTIL_SLEEP)
+        time.sleep(self.certutil_sleep_seconds)
 
         if not cert_db_exists:
             # create cert db if it doesn't already exist; it may exist already
@@ -440,7 +465,7 @@ class MitmproxyAndroid(Mitmproxy):
 
             LOG.info("creating nss cert database using command: %s" % " ".join(command))
             cmd_proc = subprocess.Popen(command, env=os.environ.copy())
-            time.sleep(self.CERTUTIL_SLEEP)
+            time.sleep(self.certutil_sleep_seconds)
             cmd_terminated = cmd_proc.poll()
             if cmd_terminated is None:  # None value indicates process hasn't terminated
                 LOG.critical("nss cert db creation command failed to complete")
@@ -465,7 +490,7 @@ class MitmproxyAndroid(Mitmproxy):
             "importing mitmproxy cert into db using command: %s" % " ".join(command)
         )
         cmd_proc = subprocess.Popen(command, env=os.environ.copy())
-        time.sleep(self.CERTUTIL_SLEEP)
+        time.sleep(self.certutil_sleep_seconds)
         cmd_terminated = cmd_proc.poll()
         if cmd_terminated is None:  # None value indicates process hasn't terminated
             LOG.critical(
@@ -498,7 +523,7 @@ class MitmproxyAndroid(Mitmproxy):
             raise
 
         # check output from the certutil command, see if 'mitmproxy-cert' is listed
-        time.sleep(self.CERTUTIL_SLEEP)
+        time.sleep(self.certutil_sleep_seconds)
         LOG.info(cmd_output)
         if "mitmproxy-cert" in cmd_output:
             LOG.info(

@@ -1654,12 +1654,17 @@ class nsIPresShell : public nsStubDocumentObserver {
   static void ClearMouseCapture(nsIFrame* aFrame);
 
   void SetVisualViewportSize(nscoord aWidth, nscoord aHeight);
+  void ResetVisualViewportSize();
   bool IsVisualViewportSizeSet() { return mVisualViewportSizeSet; }
   nsSize GetVisualViewportSize() {
     NS_ASSERTION(mVisualViewportSizeSet,
                  "asking for visual viewport size when its not set?");
     return mVisualViewportSize;
   }
+
+  // This function handles all the work after VisualViewportSize is set
+  // or reset.
+  void CompleteChangeToVisualViewportSize();
 
   /**
    * The return value indicates whether the offset actually changed.
@@ -1689,13 +1694,14 @@ class nsIPresShell : public nsStubDocumentObserver {
   // Use this sparingly, as it will clobber JS-driven scrolling that happens
   // in the same frame. This is mostly intended to be used in special
   // situations like "first paint" or session restore.
+  // If scrolling "far away", i.e. not just within the existing layout
+  // viewport, it's recommended to use both nsIScrollableFrame.ScrollTo*()
+  // (via window.scrollTo if calling from JS) *and* this function; otherwise,
+  // temporary checkerboarding may result.
   // Please request APZ review if adding a new call site.
   void SetPendingVisualScrollUpdate(
       const nsPoint& aVisualViewportOffset,
-      FrameMetrics::ScrollOffsetUpdateType aUpdateType) {
-    mPendingVisualScrollUpdate =
-        mozilla::Some(VisualScrollUpdate{aVisualViewportOffset, aUpdateType});
-  }
+      FrameMetrics::ScrollOffsetUpdateType aUpdateType);
   void ClearPendingVisualScrollUpdate() {
     mPendingVisualScrollUpdate = mozilla::Nothing();
   }

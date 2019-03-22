@@ -2923,8 +2923,8 @@ nsStyleDisplay::nsStyleDisplay(const Document& aDocument)
       mOrient(StyleOrient::Inline),
       mIsolation(NS_STYLE_ISOLATION_AUTO),
       mTopLayer(NS_STYLE_TOP_LAYER_NONE),
-      mWillChangeBitField(0),
-      mTouchAction(NS_STYLE_TOUCH_ACTION_AUTO),
+      mWillChangeBitField({0}),
+      mTouchAction(StyleTouchAction_AUTO),
       mScrollBehavior(NS_STYLE_SCROLL_BEHAVIOR_AUTO),
       mOverscrollBehaviorX(StyleOverscrollBehavior::Auto),
       mOverscrollBehaviorY(StyleOverscrollBehavior::Auto),
@@ -3280,20 +3280,23 @@ nsChangeHint nsStyleDisplay::CalcDifference(
   }
 
   // Note that the HasTransformStyle() != aNewData.HasTransformStyle()
-  // test above handles relevant changes in the
-  // NS_STYLE_WILL_CHANGE_TRANSFORM bit, which in turn handles frame
-  // reconstruction for changes in the containing block of
-  // fixed-positioned elements.
-  uint8_t willChangeBitsChanged =
-      mWillChangeBitField ^ aNewData.mWillChangeBitField;
+  // test above handles relevant changes in the StyleWillChangeBit_TRANSFORM
+  // bit, which in turn handles frame reconstruction for changes in the
+  // containing block of fixed-positioned elements.
+  //
+  // TODO(emilio): Should add xor to the generated cbindgen type.
+  auto willChangeBitsChanged =
+      StyleWillChangeBits{static_cast<decltype(StyleWillChangeBits::bits)>(
+          mWillChangeBitField.bits ^ aNewData.mWillChangeBitField.bits)};
+
   if (willChangeBitsChanged &
-      (NS_STYLE_WILL_CHANGE_STACKING_CONTEXT | NS_STYLE_WILL_CHANGE_SCROLL |
-       NS_STYLE_WILL_CHANGE_OPACITY)) {
+      (StyleWillChangeBits_STACKING_CONTEXT | StyleWillChangeBits_SCROLL |
+       StyleWillChangeBits_OPACITY)) {
     hint |= nsChangeHint_RepaintFrame;
   }
 
   if (willChangeBitsChanged &
-      (NS_STYLE_WILL_CHANGE_FIXPOS_CB | NS_STYLE_WILL_CHANGE_ABSPOS_CB)) {
+      (StyleWillChangeBits_FIXPOS_CB | StyleWillChangeBits_ABSPOS_CB)) {
     hint |= nsChangeHint_UpdateContainingBlock;
   }
 
@@ -3359,34 +3362,38 @@ bool nsStyleDisplay::TransformChanged(const nsStyleDisplay& aNewData) const {
                               aNewData.mSpecifiedTransform);
 }
 
-void nsStyleDisplay::GenerateCombinedIndividualTransform() {
-  MOZ_ASSERT(!mIndividualTransform);
-
+/* static */
+already_AddRefed<nsCSSValueSharedList>
+nsStyleDisplay::GenerateCombinedIndividualTransform(
+    nsCSSValueSharedList* aTranslate, nsCSSValueSharedList* aRotate,
+    nsCSSValueSharedList* aScale) {
   // Follow the order defined in the spec to append transform functions.
   // https://drafts.csswg.org/css-transforms-2/#ctm
   AutoTArray<nsCSSValueSharedList*, 3> shareLists;
-  if (mSpecifiedTranslate) {
-    shareLists.AppendElement(mSpecifiedTranslate.get());
-  }
-  if (mSpecifiedRotate) {
-    shareLists.AppendElement(mSpecifiedRotate.get());
-  }
-  if (mSpecifiedScale) {
-    shareLists.AppendElement(mSpecifiedScale.get());
+  if (aTranslate) {
+    shareLists.AppendElement(aTranslate);
   }
 
-  if (shareLists.Length() == 0) {
-    return;
+  if (aRotate) {
+    shareLists.AppendElement(aRotate);
   }
+
+  if (aScale) {
+    shareLists.AppendElement(aScale);
+  }
+
+  if (shareLists.IsEmpty()) {
+    return nullptr;
+  }
+
   if (shareLists.Length() == 1) {
-    mIndividualTransform = shareLists[0];
-    return;
+    return RefPtr<nsCSSValueSharedList>(shareLists[0]).forget();
   }
 
   // In common, we may have 3 transform functions:
-  // 1. one rotate function in mSpecifiedRotate,
-  // 2. one translate function in mSpecifiedTranslate,
-  // 3. one scale function in mSpecifiedScale.
+  // 1. one rotate function in aRotate,
+  // 2. one translate function in aTranslate,
+  // 3. one scale function in aScale.
   AutoTArray<nsCSSValueList*, 3> valueLists;
   for (auto list : shareLists) {
     if (list) {
@@ -3396,13 +3403,20 @@ void nsStyleDisplay::GenerateCombinedIndividualTransform() {
 
   // Check we have at least one list or else valueLists.Length() - 1 below will
   // underflow.
-  MOZ_ASSERT(valueLists.Length());
+  MOZ_ASSERT(!valueLists.IsEmpty());
 
   for (uint32_t i = 0; i < valueLists.Length() - 1; i++) {
     valueLists[i]->mNext = valueLists[i + 1];
   }
 
-  mIndividualTransform = new nsCSSValueSharedList(valueLists[0]);
+  RefPtr<nsCSSValueSharedList> list = new nsCSSValueSharedList(valueLists[0]);
+  return list.forget();
+}
+
+void nsStyleDisplay::GenerateCombinedIndividualTransform() {
+  MOZ_ASSERT(!mIndividualTransform);
+  mIndividualTransform = GenerateCombinedIndividualTransform(
+      mSpecifiedTranslate, mSpecifiedRotate, mSpecifiedScale);
 }
 
 // --------------------
@@ -3618,7 +3632,7 @@ nsChangeHint nsStyleContent::CalcDifference(
 
 nsStyleTextReset::nsStyleTextReset(const Document& aDocument)
     : mTextOverflow(),
-      mTextDecorationLine(NS_STYLE_TEXT_DECORATION_LINE_NONE),
+      mTextDecorationLine(StyleTextDecorationLine_NONE),
       mTextDecorationStyle(NS_STYLE_TEXT_DECORATION_STYLE_SOLID),
       mUnicodeBidi(NS_STYLE_UNICODE_BIDI_NORMAL),
       mInitialLetterSink(0),

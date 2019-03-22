@@ -276,31 +276,31 @@ union PrefValue {
   }
 
   static char* Deserialize(PrefType aType, char* aStr,
-                           dom::MaybePrefValue* aDomValue) {
+                           Maybe<dom::PrefValue>* aDomValue) {
     char* p = aStr;
 
     switch (aType) {
       case PrefType::Bool:
         if (*p == 'T') {
-          *aDomValue = true;
+          *aDomValue = Some(true);
         } else if (*p == 'F') {
-          *aDomValue = false;
+          *aDomValue = Some(false);
         } else {
-          *aDomValue = false;
+          *aDomValue = Some(false);
           NS_ERROR("bad bool pref value");
         }
         p++;
         return p;
 
       case PrefType::Int: {
-        *aDomValue = int32_t(strtol(p, &p, 10));
+        *aDomValue = Some(int32_t(strtol(p, &p, 10)));
         return p;
       }
 
       case PrefType::String: {
         nsCString str;
         p = DeserializeString(p, str);
-        *aDomValue = str;
+        *aDomValue = Some(str);
         return p;
       }
 
@@ -533,25 +533,23 @@ class Pref {
     aDomPref->isLocked() = mIsLocked;
 
     if (mHasDefaultValue) {
-      aDomPref->defaultValue() = dom::PrefValue();
-      mDefaultValue.ToDomPrefValue(Type(),
-                                   &aDomPref->defaultValue().get_PrefValue());
+      aDomPref->defaultValue() = Some(dom::PrefValue());
+      mDefaultValue.ToDomPrefValue(Type(), &aDomPref->defaultValue().ref());
     } else {
-      aDomPref->defaultValue() = null_t();
+      aDomPref->defaultValue() = Nothing();
     }
 
     if (mHasUserValue) {
-      aDomPref->userValue() = dom::PrefValue();
-      mUserValue.ToDomPrefValue(Type(), &aDomPref->userValue().get_PrefValue());
+      aDomPref->userValue() = Some(dom::PrefValue());
+      mUserValue.ToDomPrefValue(Type(), &aDomPref->userValue().ref());
     } else {
-      aDomPref->userValue() = null_t();
+      aDomPref->userValue() = Nothing();
     }
 
-    MOZ_ASSERT(aDomPref->defaultValue().type() ==
-                   dom::MaybePrefValue::Tnull_t ||
-               aDomPref->userValue().type() == dom::MaybePrefValue::Tnull_t ||
-               (aDomPref->defaultValue().get_PrefValue().type() ==
-                aDomPref->userValue().get_PrefValue().type()));
+    MOZ_ASSERT(aDomPref->defaultValue().isNothing() ||
+               aDomPref->userValue().isNothing() ||
+               (aDomPref->defaultValue().ref().type() ==
+                aDomPref->userValue().ref().type()));
   }
 
   void FromDomPref(const dom::Pref& aDomPref, bool* aValueChanged) {
@@ -560,11 +558,11 @@ class Pref {
 
     mIsLocked = aDomPref.isLocked();
 
-    const dom::MaybePrefValue& defaultValue = aDomPref.defaultValue();
+    const Maybe<dom::PrefValue>& defaultValue = aDomPref.defaultValue();
     bool defaultValueChanged = false;
-    if (defaultValue.type() == dom::MaybePrefValue::TPrefValue) {
+    if (defaultValue.isSome()) {
       PrefValue value;
-      PrefType type = value.FromDomPrefValue(defaultValue.get_PrefValue());
+      PrefType type = value.FromDomPrefValue(defaultValue.ref());
       if (!ValueMatches(PrefValueKind::Default, type, value)) {
         // Type() is PrefType::None if it's a newly added pref. This is ok.
         mDefaultValue.Replace(mHasDefaultValue, Type(), type, value);
@@ -575,11 +573,11 @@ class Pref {
     }
     // Note: we never clear a default value.
 
-    const dom::MaybePrefValue& userValue = aDomPref.userValue();
+    const Maybe<dom::PrefValue>& userValue = aDomPref.userValue();
     bool userValueChanged = false;
-    if (userValue.type() == dom::MaybePrefValue::TPrefValue) {
+    if (userValue.isSome()) {
       PrefValue value;
-      PrefType type = value.FromDomPrefValue(userValue.get_PrefValue());
+      PrefType type = value.FromDomPrefValue(userValue.ref());
       if (!ValueMatches(PrefValueKind::User, type, value)) {
         // Type() is PrefType::None if it's a newly added pref. This is ok.
         mUserValue.Replace(mHasUserValue, Type(), type, value);
@@ -831,7 +829,7 @@ class Pref {
     MOZ_ASSERT(*p == ':');
     p++;  // move past the ':' preceding the default value
 
-    dom::MaybePrefValue maybeDefaultValue;
+    Maybe<dom::PrefValue> maybeDefaultValue;
     if (*p != ':') {
       dom::PrefValue defaultValue;
       p = PrefValue::Deserialize(type, p, &maybeDefaultValue);
@@ -840,7 +838,7 @@ class Pref {
     MOZ_ASSERT(*p == ':');
     p++;  // move past the ':' between the default and user values
 
-    dom::MaybePrefValue maybeUserValue;
+    Maybe<dom::PrefValue> maybeUserValue;
     if (*p != '\n') {
       dom::PrefValue userValue;
       p = PrefValue::Deserialize(type, p, &maybeUserValue);
@@ -4418,7 +4416,7 @@ float MOZ_MAYBE_UNUSED GetPref<float>(const char* aName, float aDefaultValue) {
   // Thus, in the omni.jar case, we always load app-specific default
   // preferences from omni.jar, whether or not `$app == $gre`.
 
-  nsresult rv;
+  nsresult rv = NS_ERROR_FAILURE;
   nsZipFind* findPtr;
   nsAutoPtr<nsZipFind> find;
   nsTArray<nsCString> prefEntries;
@@ -4428,8 +4426,24 @@ float MOZ_MAYBE_UNUSED GetPref<float>(const char* aName, float aDefaultValue) {
   RefPtr<nsZipArchive> jarReader =
       mozilla::Omnijar::GetReader(mozilla::Omnijar::GRE);
   if (jarReader) {
+#ifdef MOZ_WIDGET_ANDROID
+    // Try to load an architecture-specific greprefs.js first. This will be
+    // present in FAT AAR builds of GeckoView on Android.
+    const char* abi = getenv("MOZ_ANDROID_CPU_ABI");
+    if (abi) {
+      nsAutoCString path;
+      path.AppendPrintf("%s/greprefs.js", abi);
+      rv = pref_ReadPrefFromJar(jarReader, path.get());
+    }
+
+    if (NS_FAILED(rv)) {
+      // Fallback to toplevel greprefs.js if arch-specific load fails.
+      rv = pref_ReadPrefFromJar(jarReader, "greprefs.js");
+    }
+#else
     // Load jar:$gre/omni.jar!/greprefs.js.
     rv = pref_ReadPrefFromJar(jarReader, "greprefs.js");
+#endif
     NS_ENSURE_SUCCESS(rv, Err("pref_ReadPrefFromJar() failed"));
 
     // Load jar:$gre/omni.jar!/defaults/pref/*.js.

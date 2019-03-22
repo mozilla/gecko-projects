@@ -610,6 +610,13 @@ class APZCTreeManager : public IAPZCTreeManager, public APZInputBridge {
                                      uint32_t aEndTimestampMs,
                                      ScreenCoord aDeltaY);
 
+  /**
+   * Find the zoomable APZC in the same layer subtree (i.e. with the same
+   * layers id) as the given APZC.
+   */
+  already_AddRefed<AsyncPanZoomController> FindZoomableApzc(
+      AsyncPanZoomController* aStart) const;
+
  private:
   typedef bool (*GuidComparator)(const ScrollableLayerGuid&,
                                  const ScrollableLayerGuid&);
@@ -643,7 +650,7 @@ class APZCTreeManager : public IAPZCTreeManager, public APZInputBridge {
   AsyncPanZoomController* FindRootContentApzcForLayersId(
       LayersId aLayersId) const;
   AsyncPanZoomController* FindRootContentOrRootApzc() const;
-  already_AddRefed<AsyncPanZoomController> GetMultitouchTarget(
+  already_AddRefed<AsyncPanZoomController> GetZoomableTarget(
       AsyncPanZoomController* aApzc1, AsyncPanZoomController* aApzc2) const;
   already_AddRefed<AsyncPanZoomController> CommonAncestor(
       AsyncPanZoomController* aApzc1, AsyncPanZoomController* aApzc2) const;
@@ -877,7 +884,7 @@ class APZCTreeManager : public IAPZCTreeManager, public APZInputBridge {
   ScreenPoint mCurrentMousePosition;
   /* For logging the APZC tree for debugging (enabled by the apz.printtree
    * pref). */
-  gfx::TreeLog mApzcTreeLog;
+  gfx::TreeLog<gfx::LOG_DEFAULT> mApzcTreeLog;
 
   class CheckerboardFlushObserver;
   friend class CheckerboardFlushObserver;

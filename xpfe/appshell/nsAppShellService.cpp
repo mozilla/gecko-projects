@@ -26,8 +26,10 @@
 #include "nsIRequestObserver.h"
 #include "nsIEmbeddingSiteWindow.h"
 
+#include "nsAppDirectoryServiceDefs.h"
 #include "nsAppShellService.h"
 #include "nsContentUtils.h"
+#include "nsDirectoryServiceUtils.h"
 #include "nsThreadUtils.h"
 #include "nsISupportsPrimitives.h"
 #include "nsILoadContext.h"
@@ -52,6 +54,7 @@
 #endif
 
 using namespace mozilla;
+using mozilla::dom::BrowsingContext;
 using mozilla::intl::LocaleService;
 
 // Default URL for the hidden window, can be overridden by a pref on Mac
@@ -106,6 +109,18 @@ void nsAppShellService::EnsurePrivateHiddenWindow() {
 nsresult nsAppShellService::CreateHiddenWindowHelper(bool aIsPrivate) {
   if (!XRE_IsParentProcess()) {
     return NS_ERROR_NOT_IMPLEMENTED;
+  }
+
+  if (mXPCOMShuttingDown) {
+    return NS_ERROR_FAILURE;
+  }
+
+  nsCOMPtr<nsIFile> profileDir;
+  NS_GetSpecialDirectory(NS_APP_USER_PROFILE_50_DIR,
+                         getter_AddRefs(profileDir));
+  if (!profileDir) {
+    // This is too early on startup to create the hidden window
+    return NS_ERROR_FAILURE;
   }
 
   nsresult rv;
@@ -470,13 +485,17 @@ nsAppShellService::CreateWindowlessBrowser(bool aIsChrome,
       widget->Create(nullptr, 0, LayoutDeviceIntRect(0, 0, 0, 0), nullptr);
   NS_ENSURE_SUCCESS(rv, rv);
 
+  // Create a BrowsingContext for our windowless browser.
+  RefPtr<BrowsingContext> browsingContext =
+      BrowsingContext::Create(nullptr, nullptr, EmptyString(),
+                              aIsChrome ? BrowsingContext::Type::Chrome
+                                        : BrowsingContext::Type::Content);
+
   /* Next, we create an instance of nsWebBrowser. Instances of this class have
    * an associated doc shell, which is what we're interested in.
    */
   nsCOMPtr<nsIWebBrowser> browser =
-      nsWebBrowser::Create(stub, widget, OriginAttributes(), nullptr,
-                           aIsChrome ? nsIDocShellTreeItem::typeChromeWrapper
-                                     : nsIDocShellTreeItem::typeContentWrapper);
+      nsWebBrowser::Create(stub, widget, OriginAttributes(), browsingContext);
 
   if (NS_WARN_IF(!browser)) {
     NS_ERROR("Couldn't create instance of nsWebBrowser!");

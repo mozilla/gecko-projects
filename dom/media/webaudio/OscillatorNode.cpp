@@ -390,18 +390,9 @@ OscillatorNode::OscillatorNode(AudioContext* aContext)
 already_AddRefed<OscillatorNode> OscillatorNode::Create(
     AudioContext& aAudioContext, const OscillatorOptions& aOptions,
     ErrorResult& aRv) {
-  if (aAudioContext.CheckClosed(aRv)) {
-    return nullptr;
-  }
-
   RefPtr<OscillatorNode> audioNode = new OscillatorNode(&aAudioContext);
 
   audioNode->Initialize(aOptions, aRv);
-  if (NS_WARN_IF(aRv.Failed())) {
-    return nullptr;
-  }
-
-  audioNode->SetType(aOptions.mType, aRv);
   if (NS_WARN_IF(aRv.Failed())) {
     return nullptr;
   }
@@ -411,6 +402,11 @@ already_AddRefed<OscillatorNode> OscillatorNode::Create(
 
   if (aOptions.mPeriodicWave.WasPassed()) {
     audioNode->SetPeriodicWave(aOptions.mPeriodicWave.Value());
+  } else {
+    audioNode->SetType(aOptions.mType, aRv);
+    if (NS_WARN_IF(aRv.Failed())) {
+      return nullptr;
+    }
   }
 
   return audioNode.forget();

@@ -3661,11 +3661,6 @@ AbortReasonOr<Ok> IonBuilder::arithTryBinaryStub(bool* emitted, JSOp op,
   MOZ_ASSERT(*emitted == false);
   JSOp actualOp = JSOp(*pc);
 
-  // Try to emit a binary arith stub cache.
-  if (JitOptions.disableCacheIRBinaryArith) {
-    return Ok();
-  }
-
   // The actual jsop 'jsop_pos' is not supported yet.
   // There's no IC support for JSOP_POW either.
   if (actualOp == JSOP_POS || actualOp == JSOP_POW) {
@@ -5681,7 +5676,7 @@ AbortReasonOr<Ok> IonBuilder::jsop_optimize_spreadcall() {
   // TODO: Investigate dynamic checks.
   bool result = false;
   do {
-    // Inline with a constant if the conditions described in
+    // Inline with MIsPackedArray if the conditions described in
     // js::OptimizeSpreadCall() are all met or can be expressed through
     // compiler constraints.
 
@@ -5727,7 +5722,13 @@ AbortReasonOr<Ok> IonBuilder::jsop_optimize_spreadcall() {
     result = true;
   } while (false);
 
-  pushConstant(BooleanValue(result));
+  if (result) {
+    auto* ins = MIsPackedArray::New(alloc(), arr);
+    current->add(ins);
+    current->push(ins);
+  } else {
+    pushConstant(BooleanValue(false));
+  }
   return Ok();
 }
 

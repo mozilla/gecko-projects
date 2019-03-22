@@ -821,8 +821,12 @@ var ContentBlocking = {
 
     get appMenuTooltip() {
       delete this.appMenuTooltip;
+      if (AppConstants.platform == "win") {
+        return this.appMenuTooltip =
+          gNavigatorBundle.getString("contentBlocking.tooltipWin");
+      }
       return this.appMenuTooltip =
-        gNavigatorBundle.getString("contentBlocking.tooltip");
+        gNavigatorBundle.getString("contentBlocking.tooltipOther");
     },
 
     get activeTooltipText() {
@@ -1044,7 +1048,15 @@ var ContentBlocking = {
     Services.telemetry.getHistogramById("TRACKING_PROTECTION_SHIELD").add(value);
   },
 
-  onContentBlockingEvent(event, webProgress, isSimulated) {
+  cryptominersHistogramAdd(value) {
+    Services.telemetry.getHistogramById("CRYPTOMINERS_BLOCKED_COUNT").add(value);
+  },
+
+  fingerprintersHistogramAdd(value) {
+    Services.telemetry.getHistogramById("FINGERPRINTERS_BLOCKED_COUNT").add(value);
+  },
+
+  onLocationChange() {
     let baseURI = this._baseURIForChannelClassifier;
 
     // Don't deal with about:, file: etc.
@@ -1052,6 +1064,19 @@ var ContentBlocking = {
       this.iconBox.removeAttribute("animate");
       this.iconBox.removeAttribute("active");
       this.iconBox.removeAttribute("hasException");
+      return;
+    }
+    // Add to telemetry per page load as a baseline measurement.
+    this.fingerprintersHistogramAdd("pageLoad");
+    this.cryptominersHistogramAdd("pageLoad");
+  },
+
+  onContentBlockingEvent(event, webProgress, isSimulated) {
+    let previousState = gBrowser.securityUI.contentBlockingEvent;
+    let baseURI = this._baseURIForChannelClassifier;
+
+    // Don't deal with about:, file: etc.
+    if (!baseURI) {
       return;
     }
 
@@ -1129,6 +1154,25 @@ var ContentBlocking = {
     } else {
       this.iconBox.removeAttribute("tooltiptext");
       this.shieldHistogramAdd(0);
+    }
+
+    // We report up to one instance of fingerprinting and cryptomining
+    // blocking and/or allowing per page load.
+    let fingerprintingBlocking = Fingerprinting.isBlocking(event) && !Fingerprinting.isBlocking(previousState);
+    let fingerprintingAllowing = Fingerprinting.isAllowing(event) && !Fingerprinting.isAllowing(previousState);
+    let cryptominingBlocking = Cryptomining.isBlocking(event) && !Cryptomining.isBlocking(previousState);
+    let cryptominingAllowing = Cryptomining.isAllowing(event) && !Cryptomining.isAllowing(previousState);
+
+    if (fingerprintingBlocking) {
+      this.fingerprintersHistogramAdd("blocked");
+    } else if (fingerprintingAllowing) {
+      this.fingerprintersHistogramAdd("allowed");
+    }
+
+    if (cryptominingBlocking) {
+      this.cryptominersHistogramAdd("blocked");
+    } else if (cryptominingAllowing) {
+      this.cryptominersHistogramAdd("allowed");
     }
   },
 

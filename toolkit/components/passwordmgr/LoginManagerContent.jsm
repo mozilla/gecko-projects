@@ -69,6 +69,14 @@ var observer = {
   },
 
   onStateChange(aWebProgress, aRequest, aState, aStatus) {
+    if ((aState & Ci.nsIWebProgressListener.STATE_RESTORING) &&
+        (aState & Ci.nsIWebProgressListener.STATE_STOP)) {
+      // Re-fill a document restored from bfcache since password field values
+      // aren't persisted there.
+      LoginManagerContent._onDocumentRestored(aWebProgress.DOMWindow.document);
+      return;
+    }
+
     if (!(aState & Ci.nsIWebProgressListener.STATE_START)) {
       return;
     }
@@ -104,6 +112,14 @@ var observer = {
     }
 
     switch (aEvent.type) {
+      case "keydown": {
+        if (aEvent.keyCode == aEvent.DOM_VK_TAB ||
+            aEvent.keyCode == aEvent.DOM_VK_RETURN) {
+          LoginManagerContent.onUsernameInput(aEvent);
+        }
+        break;
+      }
+
       // Only used for username fields.
       case "focus": {
         LoginManagerContent._onUsernameFocus(aEvent);
@@ -452,6 +468,8 @@ var LoginManagerContent = {
       return;
     }
 
+    this.setupProgressListener(topWindow);
+
     let pwField = event.originalTarget;
     if (pwField.form) {
       // Fill is handled by onDOMFormHasPassword which is already throttled.
@@ -471,9 +489,6 @@ var LoginManagerContent = {
 
   _processDOMInputPasswordAddedEvent(event, topWindow) {
     let pwField = event.originalTarget;
-    // Only setup the listener for formless inputs.
-    // Capture within a <form> but without a submit event is bug 1287202.
-    this.setupProgressListener(topWindow);
 
     let formLike = LoginFormFactory.createFromField(pwField);
     log(" _processDOMInputPasswordAddedEvent:", pwField, formLike);
@@ -717,6 +732,8 @@ var LoginManagerContent = {
 
     if (LoginHelper.isUsernameFieldType(acInputField)) {
       this.onUsernameInput(event);
+    } else if (acInputField.hasBeenTypePassword) {
+      this._highlightFilledField(event.target);
     }
   },
 
@@ -972,7 +989,29 @@ var LoginManagerContent = {
   },
 
   /**
-   * Trigger capture on any relevant LoginForms due to a navigation alone (not
+   * Fill a page that was restored from bfcache since we wouldn't receive
+   * DOMInputPasswordAdded or DOMFormHasPassword events for it.
+   * @param {Document} aDocument that was restored from bfcache.
+   */
+  _onDocumentRestored(aDocument) {
+    let rootElsWeakSet = LoginFormFactory.getRootElementsWeakSetForDocument(aDocument);
+    let weakLoginFormRootElements = ChromeUtils.nondeterministicGetWeakSetKeys(rootElsWeakSet);
+
+    log("_onDocumentRestored: loginFormRootElements approx size:", weakLoginFormRootElements.length,
+        "document:", aDocument);
+
+    for (let formRoot of weakLoginFormRootElements) {
+      if (!formRoot.isConnected) {
+        continue;
+      }
+
+      let formLike = LoginFormFactory.getForRootElement(formRoot);
+      this._fetchLoginsFromParentAndFillForm(formLike);
+    }
+  },
+
+  /**
+   * Trigger capture on any relevant FormLikes due to a navigation alone (not
    * necessarily due to an actual form submission). This method is used to
    * capture logins for cases where form submit events are not used.
    *
@@ -994,14 +1033,6 @@ var LoginManagerContent = {
         continue;
       }
 
-      if (ChromeUtils.getClassName(formRoot) === "HTMLFormElement") {
-        // For now only perform capture upon navigation for LoginForm's without
-        // a <form> to avoid capture from both a DOMFormBeforeSubmit event and
-        // navigation for the same "form".
-        log("Ignoring navigation for the form root to avoid multiple prompts " +
-            "since it was for a real <form>");
-        continue;
-      }
       let formLike = LoginFormFactory.getForRootElement(formRoot);
       this._onFormSubmit(formLike);
     }
@@ -1247,6 +1278,7 @@ var LoginManagerContent = {
       // warning, regardless of saved login.
       if (usernameField) {
         this._formFillService.markAsLoginManagerField(usernameField);
+        usernameField.addEventListener("keydown", observer);
       }
 
       // Nothing to do if we have no matching logins available.

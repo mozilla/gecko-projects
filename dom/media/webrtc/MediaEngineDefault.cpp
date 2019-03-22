@@ -37,14 +37,18 @@ static nsString DefaultVideoName() {
   // by pref.
   nsAutoString cameraNameFromPref;
   nsresult rv;
-  NS_DispatchToMainThread(
-      NS_NewRunnableFunction(__func__,
-                             [&]() {
-                               rv = Preferences::GetString(
-                                   "media.getusermedia.fake-camera-name",
-                                   cameraNameFromPref);
-                             }),
-      NS_DISPATCH_SYNC);
+  // Here it is preferred a "hard" block, provided by the combination of Await &
+  // InvokeAsync, instead of "soft" block, provided by sync dispatch which
+  // allows the waiting thread to spin its event loop. The latter would allow
+  // miltiple enumeration requests being processed out-of-order.
+  media::Await(
+      do_AddRef(SystemGroup::EventTargetFor(TaskCategory::Other)),
+      InvokeAsync(
+          SystemGroup::EventTargetFor(TaskCategory::Other), __func__, [&]() {
+            rv = Preferences::GetString("media.getusermedia.fake-camera-name",
+                                        cameraNameFromPref);
+            return GenericPromise::CreateAndResolve(true, __func__);
+          }));
 
   if (NS_SUCCEEDED(rv)) {
     return std::move(cameraNameFromPref);
@@ -58,7 +62,6 @@ static nsString DefaultVideoName() {
 
 MediaEngineDefaultVideoSource::MediaEngineDefaultVideoSource()
     : mTimer(nullptr),
-      mMutex("MediaEngineDefaultVideoSource::mMutex"),
       mName(DefaultVideoName()) {}
 
 MediaEngineDefaultVideoSource::~MediaEngineDefaultVideoSource() {}
@@ -129,7 +132,6 @@ nsresult MediaEngineDefaultVideoSource::Allocate(
   mOpts.mHeight = std::max(90, std::min(mOpts.mHeight, 2160)) & ~1;
   *aOutHandle = nullptr;
 
-  MutexAutoLock lock(mMutex);
   mState = kAllocated;
   return NS_OK;
 }
@@ -142,11 +144,11 @@ nsresult MediaEngineDefaultVideoSource::Deallocate(
   MOZ_ASSERT(!mImage);
   MOZ_ASSERT(mState == kStopped || mState == kAllocated);
 
-  MutexAutoLock lock(mMutex);
   if (mStream && IsTrackIDExplicit(mTrackID)) {
     mStream->EndTrack(mTrackID);
     mStream = nullptr;
     mTrackID = TRACK_NONE;
+    mPrincipalHandle = PRINCIPAL_HANDLE_NONE;
   }
   mState = kReleased;
   mImageContainer = nullptr;
@@ -194,11 +196,9 @@ void MediaEngineDefaultVideoSource::SetTrack(
   MOZ_ASSERT(!mStream);
   MOZ_ASSERT(mTrackID == TRACK_NONE);
 
-  {
-    MutexAutoLock lock(mMutex);
-    mStream = aStream;
-    mTrackID = aTrackID;
-  }
+  mStream = aStream;
+  mTrackID = aTrackID;
+  mPrincipalHandle = aPrincipal;
   aStream->AddTrack(aTrackID, new VideoSegment(),
                     SourceMediaStream::ADDTRACK_QUEUED);
 }
@@ -240,7 +240,6 @@ nsresult MediaEngineDefaultVideoSource::Start(
       this, interval, nsITimer::TYPE_REPEATING_SLACK,
       "MediaEngineDefaultVideoSource::GenerateFrame");
 
-  MutexAutoLock lock(mMutex);
   mState = kStarted;
   return NS_OK;
 }
@@ -261,9 +260,6 @@ nsresult MediaEngineDefaultVideoSource::Stop(
   mTimer->Cancel();
   mTimer = nullptr;
 
-  MutexAutoLock lock(mMutex);
-
-  mImage = nullptr;
   mState = kStopped;
 
   return NS_OK;
@@ -326,48 +322,19 @@ void MediaEngineDefaultVideoSource::GenerateFrame() {
     return;
   }
 
-  MutexAutoLock lock(mMutex);
-  mImage = std::move(ycbcr_image);
+  VideoSegment segment;
+  segment.AppendFrame(ycbcr_image.forget(),
+                      gfx::IntSize(mOpts.mWidth, mOpts.mHeight),
+                      mPrincipalHandle);
+  ;
+  mStream->AppendToTrack(mTrackID, &segment);
 }
 
 void MediaEngineDefaultVideoSource::Pull(
     const RefPtr<const AllocationHandle>& aHandle,
     const RefPtr<SourceMediaStream>& aStream, TrackID aTrackID,
     StreamTime aEndOfAppendedData, StreamTime aDesiredTime,
-    const PrincipalHandle& aPrincipalHandle) {
-  TRACE_AUDIO_CALLBACK_COMMENT("SourceMediaStream %p track %i", aStream.get(),
-                               aTrackID);
-  // AppendFrame takes ownership of `segment`
-  VideoSegment segment;
-
-  RefPtr<layers::Image> image;
-  {
-    MutexAutoLock lock(mMutex);
-    // Started - append real image
-    // Stopped - append null
-    // Released - Track is ended, safe to ignore
-    //            Can happen because NotifyPull comes from a stream listener
-    if (mState == kReleased) {
-      return;
-    }
-    MOZ_ASSERT(mState != kAllocated);
-    if (mState == kStarted) {
-      MOZ_ASSERT(mStream == aStream);
-      MOZ_ASSERT(mTrackID == aTrackID);
-      image = mImage;
-    }
-  }
-
-  StreamTime delta = aDesiredTime - aEndOfAppendedData;
-  MOZ_ASSERT(delta > 0);
-
-  // nullptr images are allowed
-  IntSize size(mOpts.mWidth, mOpts.mHeight);
-  segment.AppendFrame(image.forget(), delta, size, aPrincipalHandle);
-  // This can fail if either a) we haven't added the track yet, or b)
-  // we've removed or finished the track.
-  aStream->AppendToTrack(aTrackID, &segment);
-}
+    const PrincipalHandle& aPrincipalHandle) {}
 
 /**
  * Default audio source.

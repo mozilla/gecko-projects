@@ -9,6 +9,9 @@ XPCOMUtils.defineLazyServiceGetter(this, "aboutNewTabService",
                                    "nsIAboutNewTabService");
 XPCOMUtils.defineLazyPreferenceGetter(this, "proxyType", PROXY_PREF);
 
+const {AddonTestUtils} = ChromeUtils.import("resource://testing-common/AddonTestUtils.jsm");
+AddonTestUtils.initMochitest(this);
+
 const TEST_DIR = gTestPath.substr(0, gTestPath.lastIndexOf("/"));
 const CHROME_URL_ROOT = TEST_DIR + "/";
 const PERMISSIONS_URL = "chrome://browser/content/preferences/sitePermissions.xul";
@@ -85,7 +88,6 @@ async function openNotificationsPermissionDialog() {
 
 add_task(async function testExtensionControlledHomepage() {
   await openPreferencesViaOpenPreferencesAPI("paneHome", {leaveOpen: true});
-  // eslint-disable-next-line mozilla/no-cpows-in-tests
   let doc = gBrowser.contentDocument;
   is(gBrowser.currentURI.spec, "about:preferences#home",
      "#home should be in the URI for about:preferences");
@@ -155,7 +157,6 @@ add_task(async function testExtensionControlledHomepage() {
 
 add_task(async function testPrefLockedHomepage() {
   await openPreferencesViaOpenPreferencesAPI("paneHome", {leaveOpen: true});
-  // eslint-disable-next-line mozilla/no-cpows-in-tests
   let doc = gBrowser.contentDocument;
   is(gBrowser.currentURI.spec, "about:preferences#home",
      "#home should be in the URI for about:preferences");
@@ -302,7 +303,6 @@ add_task(async function testPrefLockedHomepage() {
 
 add_task(async function testExtensionControlledNewTab() {
   await openPreferencesViaOpenPreferencesAPI("paneHome", {leaveOpen: true});
-  // eslint-disable-next-line mozilla/no-cpows-in-tests
   let doc = gBrowser.contentDocument;
   is(gBrowser.currentURI.spec, "about:preferences#home",
      "#home should be in the URI for about:preferences");
@@ -468,6 +468,7 @@ add_task(async function testExtensionControlledDefaultSearch() {
 
   let messageShown = waitForMessageShown("browserDefaultSearchExtensionContent");
   await originalExtension.startup();
+  await AddonTestUtils.waitForSearchProviderStartup(originalExtension);
   await messageShown;
 
   let addon = await AddonManager.getAddonByID(extensionId);
@@ -512,6 +513,7 @@ add_task(async function testExtensionControlledDefaultSearch() {
     manifest: Object.assign({}, manifest, {version: "2.0"}),
   });
   await updatedExtension.startup();
+  await AddonTestUtils.waitForSearchProviderStartup(updatedExtension);
   addon = await AddonManager.getAddonByID(extensionId);
 
   // Verify the extension is updated and search engine didn't change.
@@ -528,7 +530,6 @@ add_task(async function testExtensionControlledDefaultSearch() {
 add_task(async function testExtensionControlledHomepageUninstalledAddon() {
   async function checkHomepageEnabled() {
     await openPreferencesViaOpenPreferencesAPI("paneHome", {leaveOpen: true});
-    // eslint-disable-next-line mozilla/no-cpows-in-tests
     let doc = gBrowser.contentDocument;
     is(gBrowser.currentURI.spec, "about:preferences#home",
       "#home should be in the URI for about:preferences");

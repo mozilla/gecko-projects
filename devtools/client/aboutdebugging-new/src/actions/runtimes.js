@@ -14,7 +14,10 @@ const {
 
 const { l10n } = require("../modules/l10n");
 const { createClientForRuntime } = require("../modules/runtime-client-factory");
-const { isExtensionDebugSettingNeeded } = require("../modules/debug-target-support");
+const {
+  isExtensionDebugSettingNeeded,
+  isSupportedDebugTargetPane,
+} = require("../modules/debug-target-support");
 
 const { remoteClientManager } =
   require("devtools/client/shared/remote-debugging/remote-client-manager");
@@ -23,6 +26,7 @@ const {
   CONNECT_RUNTIME_FAILURE,
   CONNECT_RUNTIME_START,
   CONNECT_RUNTIME_SUCCESS,
+  DEBUG_TARGET_PANE,
   DISCONNECT_RUNTIME_FAILURE,
   DISCONNECT_RUNTIME_START,
   DISCONNECT_RUNTIME_SUCCESS,
@@ -148,7 +152,7 @@ function createThisFirefoxRuntime() {
   };
 }
 
-function disconnectRuntime(id) {
+function disconnectRuntime(id, shouldRedirect = false) {
   return async (dispatch, getState) => {
     dispatch({ type: DISCONNECT_RUNTIME_START });
     try {
@@ -163,8 +167,10 @@ function disconnectRuntime(id) {
       if (runtime.type !== RUNTIMES.THIS_FIREFOX) {
         clientWrapper.removeListener("closed", onRemoteDebuggerClientClosed);
       }
-
       await clientWrapper.close();
+      if (shouldRedirect) {
+        await dispatch(Actions.selectPage(PAGE_TYPES.RUNTIME, RUNTIMES.THIS_FIREFOX));
+      }
 
       dispatch({
         type: DISCONNECT_RUNTIME_SUCCESS,
@@ -258,6 +264,11 @@ function watchRuntime(id) {
       dispatch(Actions.requestExtensions());
       dispatch(Actions.requestTabs());
       dispatch(Actions.requestWorkers());
+
+      if (isSupportedDebugTargetPane(runtime.runtimeDetails.info.type,
+                                     DEBUG_TARGET_PANE.PROCESSES)) {
+        dispatch(Actions.requestProcesses());
+      }
     } catch (e) {
       dispatch({ type: WATCH_RUNTIME_FAILURE, error: e });
     }

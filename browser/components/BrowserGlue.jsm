@@ -1725,6 +1725,11 @@ BrowserGlue.prototype = {
     Services.tm.idleDispatchToMainThread(() => {
       TabUnloader.init();
     });
+
+    // Marionette needs to be initialized as very last step
+    Services.tm.idleDispatchToMainThread(() => {
+      Services.obs.notifyObservers(null, "marionette-startup-requested");
+    });
   },
 
   /**
@@ -2267,7 +2272,7 @@ BrowserGlue.prototype = {
   _migrateUI: function BG__migrateUI() {
     // Use an increasing number to keep track of the current migration state.
     // Completely unrelated to the current Firefox release number.
-    const UI_VERSION = 80;
+    const UI_VERSION = 81;
     const BROWSER_DOCURL = AppConstants.BROWSER_CHROME_URL;
 
     let currentUIVersion;
@@ -2292,73 +2297,6 @@ BrowserGlue.prototype = {
       return;
 
     let xulStore = Services.xulStore;
-
-    if (currentUIVersion < 44) {
-      // Merge the various cosmetic animation prefs into one. If any were set to
-      // disable animations, we'll disabled cosmetic animations entirely.
-      let animate = Services.prefs.getBoolPref("browser.tabs.animate", true) &&
-                    Services.prefs.getBoolPref("browser.fullscreen.animate", true) &&
-                    !Services.prefs.getBoolPref("alerts.disableSlidingEffect", false);
-
-      Services.prefs.setBoolPref("toolkit.cosmeticAnimations.enabled", animate);
-
-      Services.prefs.clearUserPref("browser.tabs.animate");
-      Services.prefs.clearUserPref("browser.fullscreen.animate");
-      Services.prefs.clearUserPref("alerts.disableSlidingEffect");
-    }
-
-    if (currentUIVersion < 45) {
-      const LEGACY_PREF = "browser.shell.skipDefaultBrowserCheck";
-      if (Services.prefs.prefHasUserValue(LEGACY_PREF)) {
-        Services.prefs.setBoolPref("browser.shell.didSkipDefaultBrowserCheckOnFirstRun",
-                                   !Services.prefs.getBoolPref(LEGACY_PREF));
-        Services.prefs.clearUserPref(LEGACY_PREF);
-      }
-    }
-
-    // Version 46 has been replaced by 47
-    if (currentUIVersion < 47) {
-      // Search suggestions are now on by default.
-      // For privacy reasons, we want to respect previously made user's choice
-      // regarding the feature, so if it's known reflect that choice into the
-      // current pref.
-      // Note that in case of downgrade/upgrade we won't guarantee anything.
-      try {
-        if (Services.prefs.prefHasUserValue("browser.urlbar.searchSuggestionsChoice")) {
-          Services.prefs.setBoolPref(
-            "browser.urlbar.suggest.searches",
-            Services.prefs.getBoolPref("browser.urlbar.searchSuggestionsChoice")
-          );
-        } else if (Services.prefs.getBoolPref("browser.urlbar.userMadeSearchSuggestionsChoice")) {
-          // If the user made a choice but searchSuggestionsChoice is not set,
-          // something went wrong in the upgrade path. For example, due to a
-          // now fixed bug, some profilespicking "no" at the opt-in bar and
-          // upgrading in the same session wouldn't mirror the pref.
-          // Users could also lack the mirrored pref due to skipping one version.
-          // In this case just fallback to the safest side and disable suggestions.
-          Services.prefs.setBoolPref("browser.urlbar.suggest.searches", false);
-        }
-      } catch (ex) {
-        // A missing pref is not a fatal error.
-      }
-    }
-
-    if (currentUIVersion < 50) {
-      try {
-        // Transform prefs related to old DevTools Console.
-        // The following prefs might be missing when the old DevTools Console
-        // front-end is removed.
-        // See also: https://bugzilla.mozilla.org/show_bug.cgi?id=1381834
-        if (Services.prefs.getBoolPref("devtools.webconsole.filter.networkinfo")) {
-          Services.prefs.setBoolPref("devtools.webconsole.filter.net", true);
-        }
-        if (Services.prefs.getBoolPref("devtools.webconsole.filter.cssparser")) {
-          Services.prefs.setBoolPref("devtools.webconsole.filter.css", true);
-        }
-      } catch (ex) {
-        // It's ok if a pref is missing.
-      }
-    }
 
     if (currentUIVersion < 51) {
       // Switch to compact UI density if the user is using a formerly compact
@@ -2390,9 +2328,6 @@ BrowserGlue.prototype = {
         }
       }
     }
-
-    // currentUIVersion < 49 and < 54 were originally used for onboarding prefs and
-    // have since then been removed and cleared in currentUIVersion < 76
 
     if (currentUIVersion < 55) {
       Services.prefs.clearUserPref("browser.customizemode.tip0.shown");
@@ -2650,6 +2585,26 @@ BrowserGlue.prototype = {
       Services.prefs.setCharPref("network.proxy.no_proxies_on", hosts);
     }
 
+    if (currentUIVersion < 81) {
+      // Reset homepage pref for users who have it set to a default from before Firefox 4:
+      //   <locale>.(start|start2|start3).mozilla.(com|org)
+      const HOMEPAGE_PREF = "browser.startup.homepage";
+      if (Services.prefs.prefHasUserValue(HOMEPAGE_PREF)) {
+        const DEFAULT = Services.prefs.getDefaultBranch(HOMEPAGE_PREF).getCharPref("");
+        let value = Services.prefs.getCharPref(HOMEPAGE_PREF);
+        let updated = value.replace(
+          /https?:\/\/([\w\-]+\.)?start\d*\.mozilla\.(org|com)[^|]*/ig, DEFAULT);
+        if (updated != value) {
+          if (updated == DEFAULT) {
+            Services.prefs.clearUserPref(HOMEPAGE_PREF);
+          } else {
+            value = updated;
+            Services.prefs.setCharPref(HOMEPAGE_PREF, value);
+          }
+        }
+      }
+    }
+
     // Update the migration version.
     Services.prefs.setIntPref("browser.migration.version", UI_VERSION);
   },
@@ -2660,8 +2615,7 @@ BrowserGlue.prototype = {
       return;
     }
 
-    let shouldCheck = AppConstants.DEBUG ? false :
-                                           ShellService.shouldCheckDefaultBrowser;
+    let shouldCheck = !AppConstants.DEBUG && ShellService.shouldCheckDefaultBrowser;
 
     const skipDefaultBrowserCheck =
       Services.prefs.getBoolPref("browser.shell.skipDefaultBrowserCheckOnFirstRun") &&

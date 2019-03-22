@@ -456,6 +456,33 @@ void RestyleManager::ContentRemoved(nsIContent* aOldChild,
   }
 }
 
+static bool StateChangeMayAffectFrame(const Element& aElement,
+                                      const nsIFrame& aFrame,
+                                      EventStates aStates) {
+  if (aFrame.IsGeneratedContentFrame()) {
+    // If it's generated content, ignore LOADING/etc state changes on it.
+    return false;
+  }
+
+  const bool brokenChanged = aStates.HasAtLeastOneOfStates(
+      NS_EVENT_STATE_BROKEN | NS_EVENT_STATE_USERDISABLED |
+      NS_EVENT_STATE_SUPPRESSED);
+  const bool loadingChanged =
+      aStates.HasAtLeastOneOfStates(NS_EVENT_STATE_LOADING);
+
+  if (!brokenChanged && !loadingChanged) {
+    return false;
+  }
+
+  if (aElement.IsHTMLElement(nsGkAtoms::img)) {
+    // Loading state doesn't affect <img>, see
+    // `nsImageFrame::ShouldCreateImageFrameFor`.
+    return brokenChanged;
+  }
+
+  return brokenChanged || loadingChanged;
+}
+
 /**
  * Calculates the change hint and the restyle hint for a given content state
  * change.
@@ -471,11 +498,7 @@ static nsChangeHint ChangeForContentStateChange(const Element& aElement,
   // need to force a reframe -- if it's needed, the HasStateDependentStyle
   // call will handle things.
   if (nsIFrame* primaryFrame = aElement.GetPrimaryFrame()) {
-    // If it's generated content, ignore LOADING/etc state changes on it.
-    if (!primaryFrame->IsGeneratedContentFrame() &&
-        aStateMask.HasAtLeastOneOfStates(
-            NS_EVENT_STATE_BROKEN | NS_EVENT_STATE_USERDISABLED |
-            NS_EVENT_STATE_SUPPRESSED | NS_EVENT_STATE_LOADING)) {
+    if (StateChangeMayAffectFrame(aElement, *primaryFrame, aStateMask)) {
       return nsChangeHint_ReconstructFrame;
     }
 
@@ -643,9 +666,10 @@ static nsIFrame* GetFrameForChildrenOnlyTransformHint(nsIFrame* aFrame) {
   return aFrame;
 }
 
-// Returns true if this function managed to successfully move a frame, and
-// false if it could not process the position change, and a reflow should
-// be performed instead.
+// This function tries to optimize a position style change by either
+// moving aFrame or ignoring the style change when it's safe to do so.
+// It returns true when that succeeds, otherwise it posts a reflow request
+// and returns false.
 static bool RecomputePosition(nsIFrame* aFrame) {
   // Don't process position changes on table frames, since we already handle
   // the dynamic position change on the table wrapper frame, and the
@@ -680,6 +704,12 @@ static bool RecomputePosition(nsIFrame* aFrame) {
                                     nsChangeHint_ReflowChangesSizeOrPosition);
       return false;
     }
+  }
+
+  // It's pointless to move around frames that have never been reflowed or
+  // are dirty (i.e. they will be reflowed).
+  if (aFrame->HasAnyStateBits(NS_FRAME_FIRST_REFLOW | NS_FRAME_IS_DIRTY)) {
+    return true;
   }
 
   aFrame->SchedulePaint();
@@ -1008,7 +1038,7 @@ static void DoApplyRenderingChangeToTree(nsIFrame* aFrame,
       aFrame->InvalidateFrameSubtree();
       if ((aChange & nsChangeHint_UpdateEffects) &&
           aFrame->IsFrameOfType(nsIFrame::eSVG) &&
-          !(aFrame->GetStateBits() & NS_STATE_IS_OUTER_SVG)) {
+          !aFrame->IsSVGOuterSVGFrame()) {
         // Need to update our overflow rects:
         nsSVGUtils::ScheduleReflowSVG(aFrame);
       }
@@ -1636,7 +1666,7 @@ void RestyleManager::ProcessRestyledFrames(nsStyleChangeList& aChangeList) {
       if ((hint & nsChangeHint_InvalidateRenderingObservers) ||
           ((hint & nsChangeHint_UpdateOpacityLayer) &&
            frame->IsFrameOfType(nsIFrame::eSVG) &&
-           !(frame->GetStateBits() & NS_STATE_IS_OUTER_SVG))) {
+           !frame->IsSVGOuterSVGFrame())) {
         SVGObserverUtils::InvalidateRenderingObservers(frame);
         frame->SchedulePaint();
       }
@@ -1832,8 +1862,8 @@ void RestyleManager::ProcessRestyledFrames(nsStyleChangeList& aChangeList) {
 }
 
 /* static */
-uint64_t RestyleManager::GetAnimationGenerationForFrame(nsIFrame* aFrame) {
-  EffectSet* effectSet = EffectSet::GetEffectSet(aFrame);
+uint64_t RestyleManager::GetAnimationGenerationForFrame(nsIFrame* aStyleFrame) {
+  EffectSet* effectSet = EffectSet::GetEffectSetForStyleFrame(aStyleFrame);
   return effectSet ? effectSet->GetAnimationGeneration() : 0;
 }
 

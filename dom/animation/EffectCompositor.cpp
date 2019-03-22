@@ -120,7 +120,7 @@ bool FindAnimationsForCompositor(
   MOZ_ASSERT(!aMatches || aMatches->IsEmpty(),
              "Matches array, if provided, should be empty");
 
-  EffectSet* effects = EffectSet::GetEffectSet(aFrame);
+  EffectSet* effects = EffectSet::GetEffectSetForFrame(aFrame, aPropertySet);
   if (!effects || effects->IsEmpty()) {
     return false;
   }
@@ -150,15 +150,8 @@ bool FindAnimationsForCompositor(
       AnimationPerformanceWarning::Type::None;
   if (!EffectCompositor::AllowCompositorAnimationsOnFrame(aFrame, warning)) {
     if (warning != AnimationPerformanceWarning::Type::None) {
-      // FIXME: Bug 1425837: We should set performance warning by a property set
-      // and write some test cases for this.
-      for (nsCSSPropertyID property : COMPOSITOR_ANIMATABLE_PROPERTY_LIST) {
-        if (!aPropertySet.HasProperty(property)) {
-          continue;
-        }
-        EffectCompositor::SetPerformanceWarning(
-            aFrame, property, AnimationPerformanceWarning(warning));
-      }
+      EffectCompositor::SetPerformanceWarning(
+          aFrame, aPropertySet, AnimationPerformanceWarning(warning));
     }
     return false;
   }
@@ -171,7 +164,8 @@ bool FindAnimationsForCompositor(
   // sure the cascade is up to date since if it *is* up to date, this is
   // basically a no-op.
   Maybe<NonOwningAnimationTarget> pseudoElement =
-      EffectCompositor::GetAnimationElementAndPseudoForFrame(aFrame);
+      EffectCompositor::GetAnimationElementAndPseudoForFrame(
+          nsLayoutUtils::GetStyleFrame(aFrame));
   MOZ_ASSERT(pseudoElement,
              "We have a valid element for the frame, if we don't we should "
              "have bailed out at above the call to EffectSet::GetEffectSet");
@@ -186,15 +180,8 @@ bool FindAnimationsForCompositor(
         effect->IsMatchForCompositor(aPropertySet, aFrame, *effects,
                                      effectWarning);
     if (effectWarning != AnimationPerformanceWarning::Type::None) {
-      // FIXME: Bug 1425837: We should set performance warning by a property set
-      // and write some test cases for this.
-      for (nsCSSPropertyID property : COMPOSITOR_ANIMATABLE_PROPERTY_LIST) {
-        if (!aPropertySet.HasProperty(property)) {
-          continue;
-        }
-        EffectCompositor::SetPerformanceWarning(
-            aFrame, property, AnimationPerformanceWarning(effectWarning));
-      }
+      EffectCompositor::SetPerformanceWarning(
+          aFrame, aPropertySet, AnimationPerformanceWarning(effectWarning));
     }
 
     if (matchResult ==
@@ -405,8 +392,7 @@ class EffectCompositeOrderComparator {
 
 bool EffectCompositor::GetServoAnimationRule(
     const dom::Element* aElement, PseudoStyleType aPseudoType,
-    CascadeLevel aCascadeLevel,
-    RawServoAnimationValueMapBorrowedMut aAnimationValues) {
+    CascadeLevel aCascadeLevel, RawServoAnimationValueMap* aAnimationValues) {
   MOZ_ASSERT(aAnimationValues);
   MOZ_ASSERT(mPresContext && mPresContext->IsDynamic(),
              "Should not be in print preview");
@@ -499,7 +485,7 @@ nsTArray<RefPtr<dom::Animation>> EffectCompositor::GetAnimationsForCompositor(
 /* static */
 void EffectCompositor::ClearIsRunningOnCompositor(const nsIFrame* aFrame,
                                                   DisplayItemType aType) {
-  EffectSet* effects = EffectSet::GetEffectSet(aFrame);
+  EffectSet* effects = EffectSet::GetEffectSetForFrame(aFrame, aType);
   if (!effects) {
     return;
   }
@@ -708,15 +694,15 @@ void EffectCompositor::UpdateCascadeResults(EffectSet& aEffectSet,
 
 /* static */
 void EffectCompositor::SetPerformanceWarning(
-    const nsIFrame* aFrame, nsCSSPropertyID aProperty,
+    const nsIFrame* aFrame, const nsCSSPropertyIDSet& aPropertySet,
     const AnimationPerformanceWarning& aWarning) {
-  EffectSet* effects = EffectSet::GetEffectSet(aFrame);
+  EffectSet* effects = EffectSet::GetEffectSetForFrame(aFrame, aPropertySet);
   if (!effects) {
     return;
   }
 
   for (KeyframeEffect* effect : *effects) {
-    effect->SetPerformanceWarning(aProperty, aWarning);
+    effect->SetPerformanceWarning(aPropertySet, aWarning);
   }
 }
 

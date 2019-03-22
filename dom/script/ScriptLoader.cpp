@@ -3340,7 +3340,7 @@ void ScriptLoader::HandleLoadError(ScriptLoadRequest* aRequest,
                                    nsresult aResult) {
   /*
    * Handle script not loading error because source was an tracking URL (or
-   * fingerprinting, cryptoming, etc).
+   * fingerprinting, cryptomining, etc).
    * We make a note of this script node by including it in a dedicated
    * array of blocked tracking nodes under its parent document.
    */
@@ -3496,7 +3496,7 @@ nsresult ScriptLoader::PrepareLoadedRequest(ScriptLoadRequest* aRequest,
       aRequest->mSourceMapURL = NS_ConvertUTF8toUTF16(sourceMapURL);
     }
 
-    if (httpChannel->GetIsThirdPartyTrackingResource()) {
+    if (httpChannel->IsThirdPartyTrackingResource()) {
       aRequest->SetIsTracking();
     }
   }

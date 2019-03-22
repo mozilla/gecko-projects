@@ -698,7 +698,7 @@ const PanelUI = {
       doorhangers.forEach(n => {
         n.dismissed = true;
         if (n.options.onDismissed) {
-          n.options.onDismissed();
+          n.options.onDismissed(window);
         }
       });
       this._hidePopup();
@@ -779,6 +779,9 @@ const PanelUI = {
       popupnotification.setAttribute("name", desc.name);
       popupnotification.setAttribute("endlabel", desc.end);
     }
+    if (notification.options.onRefresh) {
+      notification.options.onRefresh(window);
+    }
     if (notification.options.popupIconURL) {
       popupnotification.setAttribute("icon", notification.options.popupIconURL);
     }
@@ -824,10 +827,10 @@ const PanelUI = {
     let notificationEl = getNotificationFromElement(event.originalTarget);
 
     if (!notificationEl)
-      throw "PanelUI._onNotificationButtonEvent: couldn't find notification element";
+      throw new Error("PanelUI._onNotificationButtonEvent: couldn't find notification element");
 
     if (!notificationEl.notification)
-      throw "PanelUI._onNotificationButtonEvent: couldn't find notification";
+      throw new Error("PanelUI._onNotificationButtonEvent: couldn't find notification");
 
     let notification = notificationEl.notification;
 
@@ -841,7 +844,7 @@ const PanelUI = {
   _onBannerItemSelected(event) {
     let target = event.originalTarget;
     if (!target.notification)
-      throw "menucommand target has no associated action/notification";
+      throw new Error("menucommand target has no associated action/notification");
 
     event.stopPropagation();
     AppMenuNotifications.callMainAction(window, target.notification, false);

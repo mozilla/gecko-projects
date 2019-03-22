@@ -80,11 +80,16 @@
 #include "nsHttpHandler.h"
 #include "nsNSSComponent.h"
 #include "nsIRedirectHistoryEntry.h"
-#include "nsICertBlocklist.h"
+#include "nsICertStorage.h"
 #include "nsICertOverrideService.h"
 #include "nsQueryObject.h"
 #include "mozIThirdPartyUtil.h"
 #include "../mime/nsMIMEHeaderParamImpl.h"
+#include "nsStandardURL.h"
+#include "nsChromeProtocolHandler.h"
+#include "nsJSProtocolHandler.h"
+#include "nsDataHandler.h"
+#include "mozilla/dom/BlobURLProtocolHandler.h"
 
 #include <limits>
 
@@ -1674,6 +1679,133 @@ nsresult NS_NewURI(
                    ioService);
 }
 
+static nsresult NewStandardURI(const nsACString &aSpec, const char *aCharset,
+                               nsIURI *aBaseURI, int32_t aDefaultPort,
+                               nsIURI **aURI) {
+  nsCOMPtr<nsIURI> base(aBaseURI);
+  return NS_MutateURI(new nsStandardURL::Mutator())
+      .Apply(NS_MutatorMethod(&nsIStandardURLMutator::Init,
+                              nsIStandardURL::URLTYPE_AUTHORITY, aDefaultPort,
+                              nsCString(aSpec), aCharset, base, nullptr))
+      .Finalize(aURI);
+}
+
+extern MOZ_THREAD_LOCAL(uint32_t) gTlsURLRecursionCount;
+
+template <typename T>
+class TlsAutoIncrement {
+ public:
+  explicit TlsAutoIncrement(T &var) : mVar(var) {
+    mValue = mVar.get();
+    mVar.set(mValue + 1);
+  }
+  ~TlsAutoIncrement() {
+    typename T::Type value = mVar.get();
+    MOZ_ASSERT(value == mValue + 1);
+    mVar.set(value - 1);
+  }
+
+  typename T::Type value() { return mValue; }
+
+ private:
+  typename T::Type mValue;
+  T &mVar;
+};
+
+nsresult NS_NewURIOnAnyThread(nsIURI **aURI, const nsACString &aSpec,
+                              const char *aCharset /* = nullptr */,
+                              nsIURI *aBaseURI /* = nullptr */,
+                              nsIIOService *aIOService /* = nullptr */) {
+  TlsAutoIncrement<decltype(gTlsURLRecursionCount)> inc(gTlsURLRecursionCount);
+  if (inc.value() >= MAX_RECURSION_COUNT) {
+    return NS_ERROR_MALFORMED_URI;
+  }
+
+  nsAutoCString scheme;
+  nsresult rv = net_ExtractURLScheme(aSpec, scheme);
+  if (NS_FAILED(rv)) {
+    // then aSpec is relative
+    if (!aBaseURI) {
+      return NS_ERROR_MALFORMED_URI;
+    }
+
+    if (!aSpec.IsEmpty() && aSpec[0] == '#') {
+      // Looks like a reference instead of a fully-specified URI.
+      // --> initialize |uri| as a clone of |aBaseURI|, with ref appended.
+      return NS_GetURIWithNewRef(aBaseURI, aSpec, aURI);
+    }
+
+    rv = aBaseURI->GetScheme(scheme);
+    if (NS_FAILED(rv)) return rv;
+  }
+
+  if (scheme.EqualsLiteral("http") || scheme.EqualsLiteral("ws")) {
+    return NewStandardURI(aSpec, aCharset, aBaseURI, NS_HTTP_DEFAULT_PORT,
+                          aURI);
+  }
+  if (scheme.EqualsLiteral("https") || scheme.EqualsLiteral("wss")) {
+    return NewStandardURI(aSpec, aCharset, aBaseURI, NS_HTTPS_DEFAULT_PORT,
+                          aURI);
+  }
+  if (scheme.EqualsLiteral("ftp")) {
+    return NewStandardURI(aSpec, aCharset, aBaseURI, 21, aURI);
+  }
+
+  if (scheme.EqualsLiteral("file")) {
+    nsAutoCString buf(aSpec);
+#if defined(XP_WIN)
+    buf.Truncate();
+    if (!net_NormalizeFileURL(aSpec, buf)) {
+      buf = aSpec;
+    }
+#endif
+
+    nsCOMPtr<nsIURI> base(aBaseURI);
+    return NS_MutateURI(new nsStandardURL::Mutator())
+        .Apply(NS_MutatorMethod(&nsIFileURLMutator::MarkFileURL))
+        .Apply(NS_MutatorMethod(&nsIStandardURLMutator::Init,
+                                nsIStandardURL::URLTYPE_NO_AUTHORITY, -1, buf,
+                                aCharset, base, nullptr))
+        .Finalize(aURI);
+  }
+
+  if (scheme.EqualsLiteral("data")) {
+    return nsDataHandler::CreateNewURI(aSpec, aCharset, aBaseURI, aURI);
+  }
+
+  if (scheme.EqualsLiteral("moz-safe-about") ||
+      scheme.EqualsLiteral("page-icon") || scheme.EqualsLiteral("moz") ||
+      scheme.EqualsLiteral("moz-anno") ||
+      scheme.EqualsLiteral("moz-page-thumb") ||
+      scheme.EqualsLiteral("moz-fonttable")) {
+    return NS_MutateURI(new nsSimpleURI::Mutator())
+        .SetSpec(aSpec)
+        .Finalize(aURI);
+  }
+
+  if (scheme.EqualsLiteral("chrome")) {
+    return nsChromeProtocolHandler::CreateNewURI(aSpec, aCharset, aBaseURI,
+                                                 aURI);
+  }
+
+  if (scheme.EqualsLiteral("javascript")) {
+    return nsJSProtocolHandler::CreateNewURI(aSpec, aCharset, aBaseURI, aURI);
+  }
+
+  if (scheme.EqualsLiteral("blob")) {
+    return BlobURLProtocolHandler::CreateNewURI(aSpec, aCharset, aBaseURI,
+                                                aURI);
+  }
+
+  if (NS_IsMainThread()) {
+    // XXX (valentin): this fallback should be removed once we get rid of
+    // nsIProtocolHandler.newURI
+    return NS_NewURI(aURI, aSpec, aCharset, aBaseURI, aIOService);
+  }
+
+  return NS_ERROR_UNKNOWN_PROTOCOL;
+}
+
 nsresult NS_GetSanitizedURIStringFromURI(nsIURI *aUri,
                                          nsAString &aSanitizedSpec) {
   aSanitizedSpec.Truncate();
@@ -2440,7 +2572,7 @@ void net_EnsurePSMInit() {
   MOZ_ASSERT(NS_SUCCEEDED(rv));
 
   nsCOMPtr<nsISupports> sss = do_GetService(NS_SSSERVICE_CONTRACTID);
-  nsCOMPtr<nsISupports> cbl = do_GetService(NS_CERTBLOCKLIST_CONTRACTID);
+  nsCOMPtr<nsISupports> cbl = do_GetService(NS_CERTSTORAGE_CONTRACTID);
   nsCOMPtr<nsISupports> cos = do_GetService(NS_CERTOVERRIDE_CONTRACTID);
 }
 
@@ -2530,11 +2662,14 @@ bool NS_IsSrcdocChannel(nsIChannel *aChannel) {
   return false;
 }
 
-nsresult NS_ShouldSecureUpgrade(nsIURI *aURI, nsILoadInfo *aLoadInfo,
-                                nsIPrincipal *aChannelResultPrincipal,
-                                bool aPrivateBrowsing, bool aAllowSTS,
-                                const OriginAttributes &aOriginAttributes,
-                                bool &aShouldUpgrade) {
+nsresult NS_ShouldSecureUpgrade(
+    nsIURI *aURI, nsILoadInfo *aLoadInfo, nsIPrincipal *aChannelResultPrincipal,
+    bool aPrivateBrowsing, bool aAllowSTS,
+    const OriginAttributes &aOriginAttributes, bool &aShouldUpgrade,
+    std::function<void(bool, nsresult)> &&aResultCallback,
+    bool &aWillCallback) {
+  aWillCallback = false;
+
   // Even if we're in private browsing mode, we still enforce existing STS
   // data (it is read-only).
   // if the connection is not using SSL and either the exact host matches or
@@ -2611,6 +2746,74 @@ nsresult NS_ShouldSecureUpgrade(nsIURI *aURI, nsILoadInfo *aLoadInfo,
     uint32_t hstsSource = 0;
     uint32_t flags =
         aPrivateBrowsing ? nsISocketProvider::NO_PERMANENT_STORAGE : 0;
+
+    auto handleResultFunc = [aAllowSTS](bool aIsStsHost, uint32_t aHstsSource) {
+      if (aIsStsHost) {
+        LOG(("nsHttpChannel::Connect() STS permissions found\n"));
+        if (aAllowSTS) {
+          Telemetry::AccumulateCategorical(
+              Telemetry::LABELS_HTTP_SCHEME_UPGRADE_TYPE::STS);
+          switch (aHstsSource) {
+            case nsISiteSecurityService::SOURCE_PRELOAD_LIST:
+              Telemetry::Accumulate(Telemetry::HSTS_UPGRADE_SOURCE, 0);
+              break;
+            case nsISiteSecurityService::SOURCE_ORGANIC_REQUEST:
+              Telemetry::Accumulate(Telemetry::HSTS_UPGRADE_SOURCE, 1);
+              break;
+            case nsISiteSecurityService::SOURCE_UNKNOWN:
+            default:
+              // record this as an organic request
+              Telemetry::Accumulate(Telemetry::HSTS_UPGRADE_SOURCE, 1);
+              break;
+          }
+          return true;
+        }
+        Telemetry::AccumulateCategorical(
+            Telemetry::LABELS_HTTP_SCHEME_UPGRADE_TYPE::PrefBlockedSTS);
+      } else {
+        Telemetry::AccumulateCategorical(
+            Telemetry::LABELS_HTTP_SCHEME_UPGRADE_TYPE::NoReasonToUpgrade);
+      }
+      return false;
+    };
+
+    // Calling |IsSecureURI| before the storage is ready to read will
+    // block the main thread. Once the storage is ready, we can call it
+    // from main thread.
+    static Atomic<bool, Relaxed> storageReady(false);
+    if (!storageReady && gSocketTransportService && aResultCallback) {
+      nsCOMPtr<nsIURI> uri = aURI;
+      nsCOMPtr<nsISiteSecurityService> service = sss;
+      rv = gSocketTransportService->Dispatch(
+          NS_NewRunnableFunction(
+              "net::NS_ShouldSecureUpgrade",
+              [service{std::move(service)}, uri{std::move(uri)}, flags(flags),
+               originAttributes(aOriginAttributes),
+               handleResultFunc{std::move(handleResultFunc)},
+               resultCallback{std::move(aResultCallback)}]() {
+                uint32_t hstsSource = 0;
+                bool isStsHost = false;
+                nsresult rv = service->IsSecureURI(
+                    nsISiteSecurityService::HEADER_HSTS, uri, flags,
+                    originAttributes, nullptr, &hstsSource, &isStsHost);
+
+                // Successfully get the result from |IsSecureURI| implies that
+                // the storage is ready to read.
+                storageReady = NS_SUCCEEDED(rv);
+                bool shouldUpgrade = handleResultFunc(isStsHost, hstsSource);
+
+                NS_DispatchToMainThread(NS_NewRunnableFunction(
+                    "net::NS_ShouldSecureUpgrade::ResultCallback",
+                    [rv, shouldUpgrade,
+                     resultCallback{std::move(resultCallback)}]() {
+                      resultCallback(shouldUpgrade, rv);
+                    }));
+              }),
+          NS_DISPATCH_NORMAL);
+      aWillCallback = NS_SUCCEEDED(rv);
+      return rv;
+    }
+
     rv = sss->IsSecureURI(nsISiteSecurityService::HEADER_HSTS, aURI, flags,
                           aOriginAttributes, nullptr, &hstsSource, &isStsHost);
 
@@ -2619,37 +2822,12 @@ nsresult NS_ShouldSecureUpgrade(nsIURI *aURI, nsILoadInfo *aLoadInfo,
     // should be reported.
     NS_ENSURE_SUCCESS(rv, rv);
 
-    if (isStsHost) {
-      LOG(("nsHttpChannel::Connect() STS permissions found\n"));
-      if (aAllowSTS) {
-        Telemetry::AccumulateCategorical(
-            Telemetry::LABELS_HTTP_SCHEME_UPGRADE_TYPE::STS);
-        aShouldUpgrade = true;
-        switch (hstsSource) {
-          case nsISiteSecurityService::SOURCE_PRELOAD_LIST:
-            Telemetry::Accumulate(Telemetry::HSTS_UPGRADE_SOURCE, 0);
-            break;
-          case nsISiteSecurityService::SOURCE_ORGANIC_REQUEST:
-            Telemetry::Accumulate(Telemetry::HSTS_UPGRADE_SOURCE, 1);
-            break;
-          case nsISiteSecurityService::SOURCE_UNKNOWN:
-          default:
-            // record this as an organic request
-            Telemetry::Accumulate(Telemetry::HSTS_UPGRADE_SOURCE, 1);
-            break;
-        }
-        return NS_OK;
-      }
-      Telemetry::AccumulateCategorical(
-          Telemetry::LABELS_HTTP_SCHEME_UPGRADE_TYPE::PrefBlockedSTS);
-    } else {
-      Telemetry::AccumulateCategorical(
-          Telemetry::LABELS_HTTP_SCHEME_UPGRADE_TYPE::NoReasonToUpgrade);
-    }
-  } else {
-    Telemetry::AccumulateCategorical(
-        Telemetry::LABELS_HTTP_SCHEME_UPGRADE_TYPE::AlreadyHTTPS);
+    aShouldUpgrade = handleResultFunc(isStsHost, hstsSource);
+    return NS_OK;
   }
+
+  Telemetry::AccumulateCategorical(
+      Telemetry::LABELS_HTTP_SCHEME_UPGRADE_TYPE::AlreadyHTTPS);
   aShouldUpgrade = false;
   return NS_OK;
 }

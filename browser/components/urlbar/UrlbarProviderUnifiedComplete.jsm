@@ -114,7 +114,7 @@ class ProviderUnifiedComplete extends UrlbarProvider {
     if (queryContext.userContextId) {
       params.push(`user-context-id:${queryContext.userContextId}}`);
     }
-    if (!queryContext.enableAutofill) {
+    if (!queryContext.allowAutofill) {
       params.push("prohibit-autofill");
     }
 
@@ -248,7 +248,7 @@ function makeUrlbarResult(tokens, info) {
             isKeywordOffer: [
               action.params.alias &&
                 !action.params.searchQuery.trim() &&
-                !info.style.includes("heuristic"),
+                action.params.alias.startsWith("@"),
               false,
             ],
           })

@@ -165,6 +165,11 @@ nsAutoCompleteController::ResetInternalState() {
 
 NS_IMETHODIMP
 nsAutoCompleteController::StartSearch(const nsAString &aSearchString) {
+  // If composition is ongoing don't start searching yet, until it is committed.
+  if (mCompositionState == eCompositionState_Composing) {
+    return NS_OK;
+  }
+
   SetSearchStringInternal(aSearchString);
   StartSearches();
   return NS_OK;
@@ -264,8 +269,12 @@ nsAutoCompleteController::HandleText(bool *_retval) {
 
   SetSearchStringInternal(newValue);
 
+  bool noRollupOnEmptySearch;
+  nsresult rv = input->GetNoRollupOnEmptySearch(&noRollupOnEmptySearch);
+  NS_ENSURE_SUCCESS(rv, rv);
+
   // Don't search if the value is empty
-  if (newValue.Length() == 0) {
+  if (newValue.Length() == 0 && !noRollupOnEmptySearch) {
     // If autocomplete popup was closed by compositionstart event handler,
     // we should reopen it forcibly even if the value is empty.
     if (popupClosedByCompositionStart && handlingCompositionCommit) {
@@ -1140,6 +1149,9 @@ nsresult nsAutoCompleteController::EnterMatch(bool aIsPopupSelection,
   bool forceComplete;
   input->GetForceComplete(&forceComplete);
 
+  int32_t selectedIndex;
+  popup->GetSelectedIndex(&selectedIndex);
+
   // Ask the popup if it wants to enter a special value into the textbox
   nsAutoString value;
   popup->GetOverrideValue(value);
@@ -1149,8 +1161,6 @@ nsresult nsAutoCompleteController::EnterMatch(bool aIsPopupSelection,
     bool completeSelection;
     input->GetCompleteSelectedIndex(&completeSelection);
 
-    int32_t selectedIndex;
-    popup->GetSelectedIndex(&selectedIndex);
     if (selectedIndex >= 0) {
       nsAutoString inputValue;
       input->GetTextValue(inputValue);
@@ -1259,7 +1269,8 @@ nsresult nsAutoCompleteController::EnterMatch(bool aIsPopupSelection,
   ClosePopup();
 
   bool cancel;
-  input->OnTextEntered(aEvent, &cancel);
+  bool itemWasSelected = selectedIndex >= 0;
+  input->OnTextEntered(aEvent, itemWasSelected, &cancel);
 
   return NS_OK;
 }

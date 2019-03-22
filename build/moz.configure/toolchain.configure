@@ -1183,6 +1183,7 @@ def msvs_version(info):
 set_config('MSVS_VERSION', msvs_version)
 
 include('compile-checks.configure')
+include('arm.configure', when=depends(target.cpu)(lambda cpu: cpu == 'arm'))
 
 
 @depends(have_64_bit,
@@ -1198,7 +1199,8 @@ def check_have_64_bit(have_64_bit, compiler_have_64_bit):
 def default_debug_flags(compiler_info, target):
     # Debug info is ON by default.
     if compiler_info.type == 'clang-cl':
-        return '-Z7'
+        # -fno-limit-debug-info works around https://llvm.org/pr38944
+        return '-Z7 -fno-limit-debug-info'
     elif target.kernel == 'WINNT' and compiler_info.type == 'clang':
         return '-g -gcodeview'
     return '-g'
@@ -1617,6 +1619,9 @@ def security_hardening_cflags(hardening_flag, asan, optimize, c_compiler, target
             # mingw-clang cross-compile toolchain has bugs with stack protector
             if target.os != 'WINNT' or c_compiler == 'gcc':
                 flags.append("-fstack-protector-strong")
+                ldflags.append("-fstack-protector-strong")
+                js_flags.append("-fstack-protector-strong")
+                js_ldflags.append("-fstack-protector-strong")
 
         # ASLR ------------------------------------------------
         # ASLR (dynamicbase) is enabled by default in clang-cl; but the

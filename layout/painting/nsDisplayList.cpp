@@ -181,6 +181,108 @@ static inline CSSAngle MakeCSSAngle(const nsCSSValue& aValue) {
   return CSSAngle(aValue.GetAngleValue(), aValue.GetUnit());
 }
 
+static Rotate GetRotate(const nsCSSValue& aValue) {
+  Rotate result = null_t();
+  if (aValue.GetUnit() == eCSSUnit_None) {
+    return result;
+  }
+
+  const nsCSSValue::Array* array = aValue.GetArrayValue();
+  switch (nsStyleTransformMatrix::TransformFunctionOf(array)) {
+    case eCSSKeyword_rotate:
+      result = Rotate(Rotation(MakeCSSAngle(array->Item(1))));
+      break;
+    case eCSSKeyword_rotate3d:
+      result = Rotate(Rotation3D(
+          array->Item(1).GetFloatValue(), array->Item(2).GetFloatValue(),
+          array->Item(3).GetFloatValue(), MakeCSSAngle(array->Item(4))));
+      break;
+    default:
+      MOZ_ASSERT_UNREACHABLE("Unsupported rotate");
+  }
+  return result;
+}
+
+static Scale GetScale(const nsCSSValue& aValue) {
+  Scale result(1., 1., 1.);
+  if (aValue.GetUnit() == eCSSUnit_None) {
+    // Use (1, 1, 1) to replace the none case.
+    return result;
+  }
+
+  const nsCSSValue::Array* array = aValue.GetArrayValue();
+  switch (nsStyleTransformMatrix::TransformFunctionOf(array)) {
+    case eCSSKeyword_scalex:
+      result.x() = array->Item(1).GetFloatValue();
+      break;
+    case eCSSKeyword_scaley:
+      result.y() = array->Item(1).GetFloatValue();
+      break;
+    case eCSSKeyword_scalez:
+      result.z() = array->Item(1).GetFloatValue();
+      break;
+    case eCSSKeyword_scale:
+      result.x() = array->Item(1).GetFloatValue();
+      // scale(x) is shorthand for scale(x, x);
+      result.y() =
+          array->Count() == 2 ? result.x() : array->Item(2).GetFloatValue();
+      break;
+    case eCSSKeyword_scale3d:
+      result.x() = array->Item(1).GetFloatValue();
+      result.y() = array->Item(2).GetFloatValue();
+      result.z() = array->Item(3).GetFloatValue();
+      break;
+    default:
+      MOZ_ASSERT_UNREACHABLE("Unsupported scale");
+  }
+  return result;
+}
+
+static Translation GetTranslate(const nsCSSValue& aValue,
+                                TransformReferenceBox& aRefBox) {
+  Translation result(0, 0, 0);
+  if (aValue.GetUnit() == eCSSUnit_None) {
+    // Use (0, 0, 0) to replace the none case.
+    return result;
+  }
+
+  const nsCSSValue::Array* array = aValue.GetArrayValue();
+  switch (nsStyleTransformMatrix::TransformFunctionOf(array)) {
+    case eCSSKeyword_translatex:
+      result.x() = nsStyleTransformMatrix::ProcessTranslatePart(
+          array->Item(1), &aRefBox, &TransformReferenceBox::Width);
+      break;
+    case eCSSKeyword_translatey:
+      result.y() = nsStyleTransformMatrix::ProcessTranslatePart(
+          array->Item(1), &aRefBox, &TransformReferenceBox::Height);
+      break;
+    case eCSSKeyword_translatez:
+      result.z() =
+          nsStyleTransformMatrix::ProcessTranslatePart(array->Item(1), nullptr);
+      break;
+    case eCSSKeyword_translate:
+      result.x() = nsStyleTransformMatrix::ProcessTranslatePart(
+          array->Item(1), &aRefBox, &TransformReferenceBox::Width);
+      // translate(x) is shorthand for translate(x, 0)
+      if (array->Count() == 3) {
+        result.y() = nsStyleTransformMatrix::ProcessTranslatePart(
+            array->Item(2), &aRefBox, &TransformReferenceBox::Height);
+      }
+      break;
+    case eCSSKeyword_translate3d:
+      result.x() = nsStyleTransformMatrix::ProcessTranslatePart(
+          array->Item(1), &aRefBox, &TransformReferenceBox::Width);
+      result.y() = nsStyleTransformMatrix::ProcessTranslatePart(
+          array->Item(2), &aRefBox, &TransformReferenceBox::Height);
+      result.z() =
+          nsStyleTransformMatrix::ProcessTranslatePart(array->Item(3), nullptr);
+      break;
+    default:
+      MOZ_ASSERT_UNREACHABLE("Unsupported translate");
+  }
+  return result;
+}
+
 static void AddTransformFunctions(
     const nsCSSValueList* aList, mozilla::ComputedStyle* aStyle,
     nsPresContext* aPresContext, TransformReferenceBox& aRefBox,
@@ -210,89 +312,26 @@ static void AddTransformFunctions(
         aFunctions.AppendElement(RotationZ(theta));
         break;
       }
-      case eCSSKeyword_rotate: {
-        CSSAngle theta = MakeCSSAngle(array->Item(1));
-        aFunctions.AppendElement(Rotation(theta));
+      case eCSSKeyword_rotate:
+        aFunctions.AppendElement(GetRotate(currElem).get_Rotation());
         break;
-      }
-      case eCSSKeyword_rotate3d: {
-        double x = array->Item(1).GetFloatValue();
-        double y = array->Item(2).GetFloatValue();
-        double z = array->Item(3).GetFloatValue();
-        CSSAngle theta = MakeCSSAngle(array->Item(4));
-        aFunctions.AppendElement(Rotation3D(x, y, z, theta));
+      case eCSSKeyword_rotate3d:
+        aFunctions.AppendElement(GetRotate(currElem).get_Rotation3D());
         break;
-      }
-      case eCSSKeyword_scalex: {
-        double x = array->Item(1).GetFloatValue();
-        aFunctions.AppendElement(Scale(x, 1, 1));
+      case eCSSKeyword_scalex:
+      case eCSSKeyword_scaley:
+      case eCSSKeyword_scalez:
+      case eCSSKeyword_scale:
+      case eCSSKeyword_scale3d:
+        aFunctions.AppendElement(GetScale(currElem));
         break;
-      }
-      case eCSSKeyword_scaley: {
-        double y = array->Item(1).GetFloatValue();
-        aFunctions.AppendElement(Scale(1, y, 1));
+      case eCSSKeyword_translatex:
+      case eCSSKeyword_translatey:
+      case eCSSKeyword_translatez:
+      case eCSSKeyword_translate:
+      case eCSSKeyword_translate3d:
+        aFunctions.AppendElement(GetTranslate(currElem, aRefBox));
         break;
-      }
-      case eCSSKeyword_scalez: {
-        double z = array->Item(1).GetFloatValue();
-        aFunctions.AppendElement(Scale(1, 1, z));
-        break;
-      }
-      case eCSSKeyword_scale: {
-        double x = array->Item(1).GetFloatValue();
-        // scale(x) is shorthand for scale(x, x);
-        double y = array->Count() == 2 ? x : array->Item(2).GetFloatValue();
-        aFunctions.AppendElement(Scale(x, y, 1));
-        break;
-      }
-      case eCSSKeyword_scale3d: {
-        double x = array->Item(1).GetFloatValue();
-        double y = array->Item(2).GetFloatValue();
-        double z = array->Item(3).GetFloatValue();
-        aFunctions.AppendElement(Scale(x, y, z));
-        break;
-      }
-      case eCSSKeyword_translatex: {
-        double x = nsStyleTransformMatrix::ProcessTranslatePart(
-            array->Item(1), &aRefBox, &TransformReferenceBox::Width);
-        aFunctions.AppendElement(Translation(x, 0, 0));
-        break;
-      }
-      case eCSSKeyword_translatey: {
-        double y = nsStyleTransformMatrix::ProcessTranslatePart(
-            array->Item(1), &aRefBox, &TransformReferenceBox::Height);
-        aFunctions.AppendElement(Translation(0, y, 0));
-        break;
-      }
-      case eCSSKeyword_translatez: {
-        double z = nsStyleTransformMatrix::ProcessTranslatePart(array->Item(1),
-                                                                nullptr);
-        aFunctions.AppendElement(Translation(0, 0, z));
-        break;
-      }
-      case eCSSKeyword_translate: {
-        double x = nsStyleTransformMatrix::ProcessTranslatePart(
-            array->Item(1), &aRefBox, &TransformReferenceBox::Width);
-        // translate(x) is shorthand for translate(x, 0)
-        double y = 0;
-        if (array->Count() == 3) {
-          y = nsStyleTransformMatrix::ProcessTranslatePart(
-              array->Item(2), &aRefBox, &TransformReferenceBox::Height);
-        }
-        aFunctions.AppendElement(Translation(x, y, 0));
-        break;
-      }
-      case eCSSKeyword_translate3d: {
-        double x = nsStyleTransformMatrix::ProcessTranslatePart(
-            array->Item(1), &aRefBox, &TransformReferenceBox::Width);
-        double y = nsStyleTransformMatrix::ProcessTranslatePart(
-            array->Item(2), &aRefBox, &TransformReferenceBox::Height);
-        double z = nsStyleTransformMatrix::ProcessTranslatePart(array->Item(3),
-                                                                nullptr);
-
-        aFunctions.AppendElement(Translation(x, y, z));
-        break;
-      }
       case eCSSKeyword_skewx: {
         CSSAngle x = MakeCSSAngle(array->Item(1));
         aFunctions.AppendElement(SkewX(x));
@@ -439,11 +478,34 @@ static void SetAnimatable(nsCSSPropertyID aProperty,
     case eCSSProperty_opacity:
       aAnimatable = aAnimationValue.GetOpacity();
       break;
+    case eCSSProperty_rotate: {
+      RefPtr<const nsCSSValueSharedList> list =
+          aAnimationValue.GetTransformList();
+      MOZ_ASSERT(list && list->mHead && !list->mHead->mNext,
+                 "should have only one nsCSSValueList for rotate");
+      aAnimatable = GetRotate(list->mHead->mValue);
+      break;
+    }
+    case eCSSProperty_scale: {
+      RefPtr<const nsCSSValueSharedList> list =
+          aAnimationValue.GetTransformList();
+      MOZ_ASSERT(list && list->mHead && !list->mHead->mNext,
+                 "should have only one nsCSSValueList for scale");
+      aAnimatable = GetScale(list->mHead->mValue);
+      break;
+    }
+    case eCSSProperty_translate: {
+      RefPtr<const nsCSSValueSharedList> list =
+          aAnimationValue.GetTransformList();
+      MOZ_ASSERT(list && list->mHead && !list->mHead->mNext,
+                 "should have only one nsCSSValueList for translate");
+      aAnimatable = GetTranslate(list->mHead->mValue, aRefBox);
+      break;
+    }
     case eCSSProperty_transform: {
       aAnimatable = InfallibleTArray<TransformFunction>();
-      MOZ_ASSERT(aAnimationValue.mServo);
-      RefPtr<nsCSSValueSharedList> list;
-      Servo_AnimationValue_GetTransform(aAnimationValue.mServo, &list);
+      RefPtr<const nsCSSValueSharedList> list =
+          aAnimationValue.GetTransformList();
       AddTransformFunctions(list, aFrame, aRefBox, aAnimatable);
       break;
     }
@@ -736,28 +798,21 @@ static void AddAnimationsForDisplayItem(nsIFrame* aFrame,
     aAnimationInfo.ClearAnimations();
   }
 
-  nsIFrame* styleFrame = nsLayoutUtils::GetStyleFrame(aFrame);
-  if (!styleFrame) {
-    return;
-  }
-
   // Update the animation generation on the layer. We need to do this before
   // any early returns since even if we don't add any animations to the
   // layer, we still need to mark it as up-to-date with regards to animations.
   // Otherwise, in RestyleManager we'll notice the discrepancy between the
   // animation generation numbers and update the layer indefinitely.
-  // Note that EffectSet::GetEffectSet expects to work with the style frame
-  // instead of the primary frame.
-  EffectSet* effects = EffectSet::GetEffectSet(styleFrame);
+  EffectSet* effects = EffectSet::GetEffectSetForFrame(aFrame, aType);
   uint64_t animationGeneration =
       effects ? effects->GetAnimationGeneration() : 0;
   aAnimationInfo.SetAnimationGeneration(animationGeneration);
 
-  EffectCompositor::ClearIsRunningOnCompositor(styleFrame, aType);
+  EffectCompositor::ClearIsRunningOnCompositor(aFrame, aType);
   const nsCSSPropertyIDSet& propertySet =
       LayerAnimationInfo::GetCSSPropertiesFor(aType);
   const nsTArray<RefPtr<dom::Animation>> matchedAnimations =
-      EffectCompositor::GetAnimationsForCompositor(styleFrame, propertySet);
+      EffectCompositor::GetAnimationsForCompositor(aFrame, propertySet);
   if (matchedAnimations.IsEmpty()) {
     return;
   }
@@ -819,6 +874,8 @@ static bool GenerateAndPushTextMask(nsIFrame* aFrame, gfxContext* aContext,
   if (aBuilder->IsForGenerateGlyphMask()) {
     return false;
   }
+
+  SVGObserverUtils::GetAndObserveBackgroundClip(aFrame);
 
   // The main function of enabling background-clip:text property value.
   // When a nsDisplayBackgroundImage detects "text" bg-clip style, it will call
@@ -1268,7 +1325,8 @@ AnimatedGeometryRoot* nsDisplayListBuilder::FindAnimatedGeometryRootFor(
 }
 
 void nsDisplayListBuilder::UpdateShouldBuildAsyncZoomContainer() {
-  mBuildAsyncZoomContainer = gfxPrefs::APZAllowZooming() &&
+  Document* document = mReferenceFrame->PresContext()->Document();
+  mBuildAsyncZoomContainer = nsLayoutUtils::AllowZoomingForDocument(document) &&
                              !gfxPrefs::LayoutUseContainersForRootFrames();
 }
 
@@ -7685,13 +7743,14 @@ Matrix4x4 nsDisplayTransform::GetResultingTransformMatrixInternal(
 }
 
 bool nsDisplayOpacity::CanUseAsyncAnimations(nsDisplayListBuilder* aBuilder) {
-  if (ActiveLayerTracker::IsStyleAnimated(
-          aBuilder, mFrame, nsCSSPropertyIDSet::OpacityProperties())) {
+  static constexpr nsCSSPropertyIDSet opacitySet =
+      nsCSSPropertyIDSet::OpacityProperties();
+  if (ActiveLayerTracker::IsStyleAnimated(aBuilder, mFrame, opacitySet)) {
     return true;
   }
 
   EffectCompositor::SetPerformanceWarning(
-      mFrame, eCSSProperty_opacity,
+      mFrame, opacitySet,
       AnimationPerformanceWarning(
           AnimationPerformanceWarning::Type::OpacityFrameInactive));
 
@@ -7717,11 +7776,13 @@ auto nsDisplayTransform::ShouldPrerenderTransformedContent(
   // have a compositor-animated transform, can be prerendered. An element
   // might have only just had its transform animated in which case
   // the ActiveLayerManager may not have been notified yet.
+  static constexpr nsCSSPropertyIDSet transformSet =
+      nsCSSPropertyIDSet::TransformLikeProperties();
   if (!ActiveLayerTracker::IsTransformMaybeAnimated(aFrame) &&
       !EffectCompositor::HasAnimationsForCompositor(
           aFrame, DisplayItemType::TYPE_TRANSFORM)) {
     EffectCompositor::SetPerformanceWarning(
-        aFrame, eCSSProperty_transform,
+        aFrame, transformSet,
         AnimationPerformanceWarning(
             AnimationPerformanceWarning::Type::TransformFrameInactive));
 
@@ -7809,7 +7870,7 @@ auto nsDisplayTransform::ShouldPrerenderTransformedContent(
   if (frameArea > maxLimitArea) {
     uint64_t appUnitsPerPixel = AppUnitsPerCSSPixel();
     EffectCompositor::SetPerformanceWarning(
-        aFrame, eCSSProperty_transform,
+        aFrame, transformSet,
         AnimationPerformanceWarning(
             AnimationPerformanceWarning::Type::ContentTooLargeArea,
             {
@@ -7818,7 +7879,7 @@ auto nsDisplayTransform::ShouldPrerenderTransformedContent(
             }));
   } else {
     EffectCompositor::SetPerformanceWarning(
-        aFrame, eCSSProperty_transform,
+        aFrame, transformSet,
         AnimationPerformanceWarning(
             AnimationPerformanceWarning::Type::ContentTooLarge,
             {

@@ -291,6 +291,7 @@ function spoofTheme(aId, aName, aDesc) {
 function spoofGfxAdapter() {
   try {
     let gfxInfo = Cc["@mozilla.org/gfx/info;1"].getService(Ci.nsIGfxInfoDebug);
+    gfxInfo.fireTestProcess();
     gfxInfo.spoofVendorID(GFX_VENDOR_ID);
     gfxInfo.spoofDeviceID(GFX_DEVICE_ID);
   } catch (x) {
@@ -631,7 +632,6 @@ function checkSystemSection(data) {
   let gfxData = data.system.gfx;
   Assert.ok("D2DEnabled" in gfxData);
   Assert.ok("DWriteEnabled" in gfxData);
-  Assert.equal(typeof gfxData.LowEndMachine, "boolean");
   // DWriteVersion is disabled due to main thread jank and will be enabled
   // again as part of bug 1154500.
   // Assert.ok("DWriteVersion" in gfxData);

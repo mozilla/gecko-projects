@@ -155,7 +155,7 @@ void CookieServiceChild::TrackCookieLoad(nsIChannel *aChannel) {
   }
   nsCOMPtr<nsIHttpChannel> httpChannel = do_QueryInterface(aChannel);
   if (httpChannel) {
-    isTrackingResource = httpChannel->GetIsTrackingResource();
+    isTrackingResource = httpChannel->IsTrackingResource();
     // Check first-party storage access even for non-tracking resources, since
     // we will need the result when computing the access rights for the reject
     // foreign cookie behavior mode.
@@ -406,6 +406,10 @@ void CookieServiceChild::SetCookieInternal(
 }
 
 bool CookieServiceChild::RequireThirdPartyCheck(nsILoadInfo *aLoadInfo) {
+  if (!aLoadInfo) {
+    return false;
+  }
+
   nsCOMPtr<nsICookieSettings> cookieSettings;
   nsresult rv = aLoadInfo->GetCookieSettings(getter_AddRefs(cookieSettings));
   if (NS_WARN_IF(NS_FAILED(rv))) {
@@ -484,7 +488,7 @@ nsresult CookieServiceChild::GetCookieStringInternal(nsIURI *aHostURI,
   bool firstPartyStorageAccessGranted = false;
   nsCOMPtr<nsIHttpChannel> httpChannel = do_QueryInterface(aChannel);
   if (httpChannel) {
-    isTrackingResource = httpChannel->GetIsTrackingResource();
+    isTrackingResource = httpChannel->IsTrackingResource();
     // Check first-party storage access even for non-tracking resources, since
     // we will need the result when computing the access rights for the reject
     // foreign cookie behavior mode.
@@ -532,7 +536,7 @@ nsresult CookieServiceChild::SetCookieStringInternal(nsIURI *aHostURI,
   bool firstPartyStorageAccessGranted = false;
   nsCOMPtr<nsIHttpChannel> httpChannel = do_QueryInterface(aChannel);
   if (httpChannel) {
-    isTrackingResource = httpChannel->GetIsTrackingResource();
+    isTrackingResource = httpChannel->IsTrackingResource();
     // Check first-party storage access even for non-tracking resources, since
     // we will need the result when computing the access rights for the reject
     // foreign cookie behavior mode.

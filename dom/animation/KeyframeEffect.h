@@ -98,6 +98,9 @@ struct AnimationProperty {
   bool operator!=(const AnimationProperty& aOther) const {
     return !(*this == aOther);
   }
+
+  void SetPerformanceWarning(const AnimationPerformanceWarning& aWarning,
+                             const Element* aElement);
 };
 
 struct ElementPropertyTransition;
@@ -192,8 +195,9 @@ class KeyframeEffect : public AnimationEffect {
   // this function is typically called for all KeyframeEffects on an element
   // so that we can avoid multiple calls of EffectSet::GetEffect().
   //
-  // NOTE: We don't currently check for !important rules for properties that
-  // can't run on the compositor.
+  // NOTE: Unlike HasEffectiveAnimationOfPropertySet below, this function does
+  // not check for the effect of !important rules on animations of related
+  // transform properties.
   bool HasEffectiveAnimationOfProperty(nsCSSPropertyID aProperty,
                                        const EffectSet& aEffect) const {
     return GetEffectiveAnimationOfProperty(aProperty, aEffect) != nullptr;
@@ -201,12 +205,24 @@ class KeyframeEffect : public AnimationEffect {
   const AnimationProperty* GetEffectiveAnimationOfProperty(
       nsCSSPropertyID aProperty, const EffectSet& aEffect) const;
 
-  // This is a similar version as the above function, but for a
-  // nsCSSPropertyIDSet, and this returns true if this keyframe effect has
-  // properties in |aPropertySet| and if the properties are not overridden by
-  // !important rule or transition level.
+  // Similar to HasEffectiveAnimationOfProperty, above, but for
+  // an nsCSSPropertyIDSet. Returns true if this keyframe effect has at least
+  // one property in |aPropertySet| that is not overridden by an !important
+  // rule.
+  //
+  // Unlike HasEffectiveAnimationOfProperty, however, when |aPropertySet|
+  // includes transform-like properties (transform, rotate etc.) this function
+  // returns true if and only if all the transform-like properties that are
+  // present are effective.
+  //
+  // That is because the transform-like properties, unlike other properties, are
+  // combined on the compositor and if !important rules affect any of the
+  // individual properties we will not be able to correctly compose the result
+  // on the compositor so we should run the animations on the main thread
+  // instead.
   bool HasEffectiveAnimationOfPropertySet(
-      const nsCSSPropertyIDSet& aPropertySet, const EffectSet& aEffect) const;
+      const nsCSSPropertyIDSet& aPropertySet,
+      const EffectSet& aEffectSet) const;
 
   // Returns all the effective animated CSS properties that can be animated on
   // the compositor and are not overridden by a higher cascade level.
@@ -269,11 +285,11 @@ class KeyframeEffect : public AnimationEffect {
   Document* GetRenderedDocument() const;
   nsIPresShell* GetPresShell() const;
 
-  // Associates a warning with the animated property on the specified frame
+  // Associates a warning with the animated property set on the specified frame
   // indicating why, for example, the property could not be animated on the
   // compositor. |aParams| and |aParamsLength| are optional parameters which
   // will be used to generate a localized message for devtools.
-  void SetPerformanceWarning(nsCSSPropertyID aProperty,
+  void SetPerformanceWarning(const nsCSSPropertyIDSet& aPropertySet,
                              const AnimationPerformanceWarning& aWarning);
 
   // Cumulative change hint on each segment for each property.

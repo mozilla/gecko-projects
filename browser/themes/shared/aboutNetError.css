@@ -59,10 +59,6 @@ body:not(.neterror) #netErrorButtonContainer {
   display: none;
 }
 
-#moreInformationButton {
-  display: none;
-}
-
 #errorTryAgain {
   margin-top: 1.2em;
 }
@@ -159,6 +155,8 @@ span#hostname {
   font-family: monospace;
   white-space: pre-wrap;
   padding: 1em 0;
+  display: flex;
+  flex-wrap: wrap;
 }
 
 #cert_domain_link:not([href]) {

@@ -8,6 +8,12 @@
 
 #include "mozilla/dom/BrowsingContextGroup.h"
 #include "mozilla/dom/WindowGlobalParent.h"
+#include "mozilla/dom/ContentProcessManager.h"
+
+extern mozilla::LazyLogModule gAutoplayPermissionLog;
+
+#define AUTOPLAY_LOG(msg, ...) \
+  MOZ_LOG(gAutoplayPermissionLog, LogLevel::Debug, (msg, ##__VA_ARGS__))
 
 namespace mozilla {
 namespace dom {
@@ -18,12 +24,11 @@ extern mozilla::LazyLogModule gUserInteractionPRLog;
   MOZ_LOG(gUserInteractionPRLog, LogLevel::Debug, (msg, ##__VA_ARGS__))
 
 CanonicalBrowsingContext::CanonicalBrowsingContext(BrowsingContext* aParent,
-                                                   BrowsingContext* aOpener,
-                                                   const nsAString& aName,
+                                                   BrowsingContextGroup* aGroup,
                                                    uint64_t aBrowsingContextId,
                                                    uint64_t aProcessId,
                                                    BrowsingContext::Type aType)
-    : BrowsingContext(aParent, aOpener, aName, aBrowsingContextId, aType),
+    : BrowsingContext(aParent, aGroup, aBrowsingContextId, aType),
       mProcessId(aProcessId) {
   // You are only ever allowed to create CanonicalBrowsingContexts in the
   // parent process.
@@ -44,10 +49,20 @@ CanonicalBrowsingContext* CanonicalBrowsingContext::Cast(
   return static_cast<CanonicalBrowsingContext*>(aContext);
 }
 
-/* static */ const CanonicalBrowsingContext* CanonicalBrowsingContext::Cast(
+/* static */
+const CanonicalBrowsingContext* CanonicalBrowsingContext::Cast(
     const BrowsingContext* aContext) {
   MOZ_RELEASE_ASSERT(XRE_IsParentProcess());
   return static_cast<const CanonicalBrowsingContext*>(aContext);
+}
+
+ContentParent* CanonicalBrowsingContext::GetContentParent() const {
+  if (mProcessId == 0) {
+    return nullptr;
+  }
+
+  ContentProcessManager* cpm = ContentProcessManager::GetSingleton();
+  return cpm->GetContentProcessById(ContentParentId(mProcessId));
 }
 
 void CanonicalBrowsingContext::GetWindowGlobals(
@@ -84,30 +99,18 @@ void CanonicalBrowsingContext::SetCurrentWindowGlobal(
   mCurrentWindowGlobal = aGlobal;
 }
 
+bool CanonicalBrowsingContext::ValidateTransaction(
+    const Transaction& aTransaction, ContentParent* aProcess) {
+  if (NS_WARN_IF(aProcess && mProcessId != aProcess->ChildID())) {
+    return false;
+  }
+
+  return true;
+}
+
 JSObject* CanonicalBrowsingContext::WrapObject(
     JSContext* aCx, JS::Handle<JSObject*> aGivenProto) {
   return CanonicalBrowsingContext_Binding::Wrap(aCx, this, aGivenProto);
-}
-
-void CanonicalBrowsingContext::NotifySetUserGestureActivationFromIPC(
-    bool aIsUserGestureActivation) {
-  if (!mCurrentWindowGlobal) {
-    return;
-  }
-
-  if (aIsUserGestureActivation) {
-    SetUserGestureActivation();
-  } else {
-    ResetUserGestureActivation();
-  }
-
-  USER_ACTIVATION_LOG("Chrome browsing context 0x%08" PRIx64
-                      " would notify other browsing contexts for updating "
-                      "user gesture activation flag.",
-                      Id());
-  // XXX(alwu) : we need to sync the flag to other browsing contexts which are
-  // not in the same child process where the flag was set. Will implement that
-  // in bug1519229.
 }
 
 void CanonicalBrowsingContext::Traverse(
@@ -119,6 +122,26 @@ void CanonicalBrowsingContext::Traverse(
 void CanonicalBrowsingContext::Unlink() {
   CanonicalBrowsingContext* tmp = this;
   NS_IMPL_CYCLE_COLLECTION_UNLINK(mWindowGlobals);
+}
+
+void CanonicalBrowsingContext::NotifyStartDelayedAutoplayMedia() {
+  if (!mCurrentWindowGlobal) {
+    return;
+  }
+
+  // As this function would only be called when user click the play icon on the
+  // tab bar. That's clear user intent to play, so gesture activate the browsing
+  // context so that the block-autoplay logic allows the media to autoplay.
+  NotifyUserGestureActivation();
+  AUTOPLAY_LOG("NotifyStartDelayedAutoplayMedia for chrome bc 0x%08" PRIx64,
+               Id());
+  StartDelayedAutoplayMediaComponents();
+  // Notfiy all content browsing contexts which are related with the canonical
+  // browsing content tree to start delayed autoplay media.
+  for (auto iter = Group()->ContentParentsIter(); !iter.Done(); iter.Next()) {
+    auto entry = iter.Get();
+    Unused << entry->GetKey()->SendStartDelayedAutoplayMediaComponents(this);
+  }
 }
 
 }  // namespace dom

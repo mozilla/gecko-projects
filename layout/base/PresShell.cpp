@@ -1839,8 +1839,10 @@ nsresult PresShell::ResizeReflow(nscoord aWidth, nscoord aHeight,
   if (mMobileViewportManager) {
     // If we have a mobile viewport manager, request a reflow from it. It can
     // recompute the final CSS viewport and trigger a call to
-    // ResizeReflowIgnoreOverride if it changed.
-    mMobileViewportManager->RequestReflow();
+    // ResizeReflowIgnoreOverride if it changed. We don't force adjusting
+    // of resolution, because that is only necessary when we are destroying
+    // the MVM.
+    mMobileViewportManager->RequestReflow(false);
     return NS_OK;
   }
 
@@ -6522,9 +6524,9 @@ nsresult PresShell::EventHandler::HandleEvent(nsIFrame* aFrameForPresShell,
   // we don't want the focus to be out of sync.
   if (!aFrameForPresShell) {
     if (!NS_EVENT_NEEDS_FRAME(aGUIEvent)) {
-      mPresShell->mCurrentEventFrame = nullptr;
-      // XXX Shouldn't we create AutoCurrentEventInfoSetter instance for this
-      //     call even if we set the target to nullptr.
+      // Push nullptr for both current event target content and frame since
+      // there is no frame but the event does not require a frame.
+      AutoCurrentEventInfoSetter eventInfoSetter(*this);
       return HandleEventWithCurrentEventInfo(aGUIEvent, aEventStatus, true,
                                              nullptr);
     }
@@ -8178,9 +8180,9 @@ nsresult PresShell::EventHandler::DispatchEventToDOM(
     }
 
     if (aEvent->mClass == eCompositionEventClass) {
-      IMEStateManager::DispatchCompositionEvent(eventTarget, GetPresContext(),
-                                                aEvent->AsCompositionEvent(),
-                                                aEventStatus, eventCBPtr);
+      IMEStateManager::DispatchCompositionEvent(
+          eventTarget, GetPresContext(), TabParent::GetFocused(),
+          aEvent->AsCompositionEvent(), aEventStatus, eventCBPtr);
     } else {
       EventDispatcher::Dispatch(eventTarget, GetPresContext(), aEvent, nullptr,
                                 aEventStatus, eventCBPtr);
@@ -10502,9 +10504,10 @@ nsresult PresShell::SetIsActive(bool aIsActive) {
 }
 
 void PresShell::UpdateViewportOverridden(bool aAfterInitialization) {
-  // Determine if we require a MobileViewportManager.
-  bool needMVM = nsLayoutUtils::ShouldHandleMetaViewport(mDocument) ||
-                 gfxPrefs::APZAllowZooming();
+  // Determine if we require a MobileViewportManager. This logic is
+  // equivalent to ShouldHandleMetaViewport, which will check gfxPrefs if
+  // there are not meta viewport overrides.
+  bool needMVM = nsLayoutUtils::ShouldHandleMetaViewport(mDocument);
 
   if (needMVM == !!mMobileViewportManager) {
     // Either we've need one and we've already got it, or we don't need one
@@ -10526,8 +10529,19 @@ void PresShell::UpdateViewportOverridden(bool aAfterInitialization) {
 
   MOZ_ASSERT(mMobileViewportManager,
              "Shouldn't reach this without a MobileViewportManager.");
-  mMobileViewportManager->Destroy();
-  mMobileViewportManager = nullptr;
+  // Before we get rid of our MVM, ask it to update the viewport while
+  // forcing resolution, which will undo any scaling it might have imposed.
+  // To do this correctly, we need to first null out mMobileViewportManager,
+  // because during reflow we will check PresShell::GetIsViewportOverriden(),
+  // which uses that value as a signifier.
+  RefPtr<MobileViewportManager> oldMVM;
+  mMobileViewportManager.swap(oldMVM);
+
+  oldMVM->RequestReflow(true);
+  ResetVisualViewportSize();
+
+  oldMVM->Destroy();
+  oldMVM = nullptr;
 
   if (aAfterInitialization) {
     // Force a reflow to our correct size by going back to the docShell
@@ -10626,6 +10640,22 @@ void nsIPresShell::MarkFixedFramesForReflow(IntrinsicDirty aIntrinsicDirty) {
   }
 }
 
+void nsIPresShell::CompleteChangeToVisualViewportSize() {
+  if (nsIScrollableFrame* rootScrollFrame = GetRootScrollFrameAsScrollable()) {
+    rootScrollFrame->MarkScrollbarsDirtyForReflow();
+  }
+  MarkFixedFramesForReflow(nsIPresShell::eResize);
+
+  if (auto* window = nsGlobalWindowInner::Cast(mDocument->GetInnerWindow())) {
+    window->VisualViewport()->PostResizeEvent();
+  }
+
+  if (nsIScrollableFrame* rootScrollFrame = GetRootScrollFrameAsScrollable()) {
+    ScrollAnchorContainer* container = rootScrollFrame->Anchor();
+    container->UserScrolled();
+  }
+}
+
 void nsIPresShell::SetVisualViewportSize(nscoord aWidth, nscoord aHeight) {
   if (!mVisualViewportSizeSet || mVisualViewportSize.width != aWidth ||
       mVisualViewportSize.height != aHeight) {
@@ -10633,21 +10663,17 @@ void nsIPresShell::SetVisualViewportSize(nscoord aWidth, nscoord aHeight) {
     mVisualViewportSize.width = aWidth;
     mVisualViewportSize.height = aHeight;
 
-    if (nsIScrollableFrame* rootScrollFrame =
-            GetRootScrollFrameAsScrollable()) {
-      rootScrollFrame->MarkScrollbarsDirtyForReflow();
-    }
-    MarkFixedFramesForReflow(nsIPresShell::eResize);
+    CompleteChangeToVisualViewportSize();
+  }
+}
 
-    if (auto* window = nsGlobalWindowInner::Cast(mDocument->GetInnerWindow())) {
-      window->VisualViewport()->PostResizeEvent();
-    }
+void nsIPresShell::ResetVisualViewportSize() {
+  if (mVisualViewportSizeSet) {
+    mVisualViewportSizeSet = false;
+    mVisualViewportSize.width = 0;
+    mVisualViewportSize.height = 0;
 
-    if (nsIScrollableFrame* rootScrollFrame =
-            GetRootScrollFrameAsScrollable()) {
-      ScrollAnchorContainer* container = rootScrollFrame->Anchor();
-      container->UserScrolled();
-    }
+    CompleteChangeToVisualViewportSize();
   }
 }
 
@@ -10671,6 +10697,19 @@ bool nsIPresShell::SetVisualViewportOffset(
     }
   }
   return didChange;
+}
+
+void nsIPresShell::SetPendingVisualScrollUpdate(
+    const nsPoint& aVisualViewportOffset,
+    FrameMetrics::ScrollOffsetUpdateType aUpdateType) {
+  mPendingVisualScrollUpdate =
+      mozilla::Some(VisualScrollUpdate{aVisualViewportOffset, aUpdateType});
+
+  // The pending update is picked up during the next paint.
+  // Schedule a paint to make sure one will happen.
+  if (nsIFrame* rootFrame = GetRootFrame()) {
+    rootFrame->SchedulePaint();
+  }
 }
 
 nsPoint nsIPresShell::GetVisualViewportOffsetRelativeToLayoutViewport() const {

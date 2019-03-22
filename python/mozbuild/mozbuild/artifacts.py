@@ -163,7 +163,9 @@ class ArtifactJob(object):
         self._log = log
         self._substs = substs
         self._symbols_archive_suffix = None
-        if download_symbols:
+        if download_symbols == 'full':
+            self._symbols_archive_suffix = 'crashreporter-symbols-full.zip'
+        elif download_symbols:
             self._symbols_archive_suffix = 'crashreporter-symbols.zip'
 
     def log(self, *args, **kwargs):
@@ -1040,6 +1042,12 @@ class Artifacts(object):
                 num=NUM_REVISIONS_TO_QUERY)
         ], cwd=self._topsrcdir).splitlines()
 
+        if len(last_revs) == 0:
+            raise Exception("""\
+There are no public revisions.
+This can happen if the repository is created from bundle file and never pulled
+from remote.  Please run `hg pull` and build again.
+see https://developer.mozilla.org/en-US/docs/Mozilla/Developer_guide/Source_Code/Mercurial/Bundles""")
 
         self.log(logging.INFO, 'artifact',
             {'len': len(last_revs)},
