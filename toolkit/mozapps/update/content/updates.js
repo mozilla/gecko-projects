@@ -693,7 +693,7 @@ var gDownloadingPage = {
   /**
    * Initialize
    */
-  async onPageShow() {
+  onPageShow() {
     this._downloadStatus = document.getElementById("downloadStatus");
     this._downloadProgress = document.getElementById("downloadProgress");
     this._pauseButton = document.getElementById("pauseButton");
@@ -739,7 +739,15 @@ var gDownloadingPage = {
     this._startTime = Date.now();
 
     try {
-      let state = await gAUS.ensureForegroundDownload(gUpdates.update);
+      // Say that this was a foreground download, not a background download,
+      // since the user cared enough to look in on this process.
+      gUpdates.update.QueryInterface(Ci.nsIWritablePropertyBag);
+      gUpdates.update.setProperty("foregroundDownload", "true");
+
+      // Pause any active background download and restart it as a foreground
+      // download.
+      gAUS.pauseDownload();
+      var state = gAUS.downloadUpdate(gUpdates.update, false);
       if (state == "failed") {
         // We've tried as hard as we could to download a valid update -
         // we fell back from a partial patch to a complete patch and even
@@ -862,7 +870,7 @@ var gDownloadingPage = {
       var patch = gUpdates.update.selectedPatch;
       patch.QueryInterface(Ci.nsIWritablePropertyBag);
       patch.setProperty("status", this._pausedStatus);
-      gAUS.stopDownload();
+      gAUS.pauseDownload();
     }
     this._paused = !this._paused;
 
