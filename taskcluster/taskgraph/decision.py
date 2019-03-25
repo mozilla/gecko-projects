@@ -50,6 +50,7 @@ PER_PROJECT_PARAMETERS = {
     },
 
     'birch': {
+        'target_tasks_method': 'nightly_desktop',
         'release_type': 'nightly-birch',
     },
     'oak': {
