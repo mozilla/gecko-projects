@@ -220,14 +220,14 @@ pref("dom.keyboardevent.keypress.dispatch_non_printable_keys_only_system_group_i
 // can limit the path.  E.g., "example.com/foo" means "example.com/foo*".  So,
 // if you need to limit under a directory, the path should end with "/" like
 // "example.com/foo/".  Note that this cannot limit port number for now.
-pref("dom.keyboardevent.keypress.hack.dispatch_non_printable_keys", "");
+pref("dom.keyboardevent.keypress.hack.dispatch_non_printable_keys", "www.icloud.com");
 
 // Blacklist of domains of web apps which handle keyCode and charCode of
 // keypress events with a path only for Firefox (i.e., broken if we set
 // non-zero keyCode or charCode value to the other).  The format is exactly
 // same as "dom.keyboardevent.keypress.hack.dispatch_non_printable_keys". So,
 // check its explanation for the detail.
-pref("dom.keyboardevent.keypress.hack.use_legacy_keycode_and_charcode", "powerpoint.officeapps.live.com");
+pref("dom.keyboardevent.keypress.hack.use_legacy_keycode_and_charcode", "*.collabserv.com,*.gov.online.office365.us,*.officeapps-df.live.com.,*.officeapps.live.com,*.online.office.de,*.partner.officewebapps.cn,*.scniris.com");
 
 // Whether InputEvent.data is enabled.
 pref("dom.inputevent.data.enabled", true);
@@ -427,6 +427,7 @@ pref("media.decoder-doctor.verbose", false);
 pref("media.decoder-doctor.new-issue-endpoint", "https://webcompat.com/issues/new");
 
 #ifdef MOZ_WEBRTC
+pref("media.navigator.enabled", true);
 pref("media.navigator.video.enabled", true);
 pref("media.navigator.video.default_fps",30);
 pref("media.navigator.video.use_remb", true);
@@ -453,6 +454,7 @@ pref("media.webrtc.debug.aec_dump_max_size", 4194304); // 4MB
 
 pref("media.navigator.video.default_width",0);  // adaptive default
 pref("media.navigator.video.default_height",0); // adaptive default
+pref("media.peerconnection.enabled", true);
 pref("media.peerconnection.video.enabled", true);
 pref("media.navigator.video.max_fs", 12288); // Enough for 2048x1536
 pref("media.navigator.video.max_fr", 60);
@@ -663,7 +665,7 @@ pref("media.av1.use-dav1d", true);
 #elif defined(XP_MACOSX)
 pref("media.av1.enabled", true);
 pref("media.av1.use-dav1d", true);
-#elif defined(XP_LINUX) && !defined(MOZ_WIDGET_ANDROID)
+#elif defined(XP_UNIX) && !defined(MOZ_WIDGET_ANDROID)
 pref("media.av1.enabled", true);
 pref("media.av1.use-dav1d", true);
 #else
@@ -974,6 +976,7 @@ pref("gfx.webrender.debug.small-screen", false);
 pref("gfx.webrender.dl.dump-parent", false);
 pref("gfx.webrender.dl.dump-content", false);
 pref("gfx.webrender.picture-caching", true);
+pref("gfx.webrender.split-render-roots", false);
 
 pref("accessibility.browsewithcaret", false);
 pref("accessibility.warn_on_browsewithcaret", true);
@@ -1110,6 +1113,8 @@ pref("toolkit.asyncshutdown.crash_timeout", 180000); // 3 minutes
 #endif // MOZ_ASAN
 // Extra logging for AsyncShutdown barriers and phases
 pref("toolkit.asyncshutdown.log", false);
+
+pref("toolkit.content-background-hang-monitor.disabled", false);
 
 // Enable JS dump() function.
 // IMPORTANT: Keep this in condition in sync with StaticPrefList.h. The value
@@ -1593,9 +1598,15 @@ pref("javascript.options.spectre.jit_to_C++_calls", true);
 pref("javascript.options.streams", true);
 
 // BigInt API
+#ifdef NIGHTLY_BUILD
+pref("javascript.options.bigint", true);
+#else
 pref("javascript.options.bigint", false);
+#endif
 
 pref("javascript.options.experimental.fields", false);
+
+pref("javascript.options.experimental.await_fix", false);
 
 // Dynamic module import.
 pref("javascript.options.dynamicImport", true);
@@ -1760,7 +1771,12 @@ pref("network.http.referer.defaultPolicy", 3);
 // default cookie policy is set to reject third-party trackers;
 // to be used unless overriden by the site;
 // values are identical to defaultPolicy above
+#ifdef NIGHTLY_BUILD
+// On Nightly, trim referrers from trackers to origins.
+pref("network.http.referer.defaultPolicy.trackers", 2);
+#else
 pref("network.http.referer.defaultPolicy.trackers", 3);
+#endif
 // Set the Private Browsing Default Referrer Policy;
 // to be used unless overriden by the site;
 // values are identical to defaultPolicy above
@@ -1770,6 +1786,8 @@ pref("network.http.referer.defaultPolicy.pbmode", 2);
 // trackers;
 // to be used unless overriden by the site;
 // values are identical to defaultPolicy above
+// No need to change this pref for Nightly only since in private windows we
+// already trim all referrers to origin only.
 pref("network.http.referer.defaultPolicy.trackers.pbmode", 2);
 // false=real referer, true=spoof referer (use target URI as referer)
 pref("network.http.referer.spoofSource", false);

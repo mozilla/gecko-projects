@@ -31,10 +31,16 @@ var UrlbarTokenizer = {
   REGEXP_USERINFO_INVALID_CHARS: /[^\w.~%!$&'()*+,;=:-]/,
   REGEXP_HOSTPORT_INVALID_CHARS: /[^\[\]A-Z0-9.:-]/i,
   REGEXP_HOSTPORT_IP_LIKE: /^[a-f0-9\.\[\]:]+$/i,
-  REGEXP_HOSTPORT_INVALID_IP: /\.{2,}|\d{5,}|\d{4,}(?![:\]])|^\.|\.$|^(\d+\.){4,}\d+$|^\d+$/,
+  // This accepts partial IPv4.
+  REGEXP_HOSTPORT_INVALID_IP: /\.{2,}|\d{5,}|\d{4,}(?![:\]])|^\.|^(\d+\.){4,}\d+$|^\d{4,}$/,
+  // This only accepts complete IPv4.
   REGEXP_HOSTPORT_IPV4: /^(\d{1,3}\.){3,}\d{1,3}(:\d+)?$/,
-  REGEXP_HOSTPORT_IPV6: /^[0-9A-F:\[\]]{1,4}$/i,
+  // This accepts partial IPv6.
+  REGEXP_HOSTPORT_IPV6: /^\[([0-9a-f]{0,4}:){0,7}[0-9a-f]{0,4}\]?$/i,
   REGEXP_COMMON_EMAIL: /^[\w!#$%&'*+\/=?^`{|}~-]+@[\[\]A-Z0-9.-]+$/i,
+
+  // Regex matching a percent encoded char at the beginning of a string.
+  REGEXP_PERCENT_ENCODED_START: /^(%[0-9a-f]{2}){2,}/i,
 
   TYPE: {
     TEXT: 1,
@@ -214,22 +220,27 @@ function splitString(searchString) {
   let hasRestrictionToken = tokens.some(t => CHAR_TO_TYPE_MAP.has(t));
   let chars = Array.from(CHAR_TO_TYPE_MAP.keys()).join("");
   logger.debug("Restriction chars", chars);
-  for (let token of tokens) {
-    // It's possible we have to split a token, if there's no separate restriction
-    // character and a token starts or ends with a restriction character, and it's
-    // not confusable (for example # at the end of an url.
-    // If the token looks like a url, certain characters may appear at the end
-    // of the path or the query string, thus ignore those.
-    if (!hasRestrictionToken &&
-        token.length > 1 &&
-        !UrlbarTokenizer.looksLikeUrl(token, {requirePath: true})) {
-      // Check for a restriction char at the beginning.
-      if (chars.includes(token[0])) {
+  for (let i = 0; i < tokens.length; ++i) {
+    // If there is no separate restriction token, it's possible we have to split
+    // a token, if it's the first one and it includes a leading restriction char
+    // or it's the last one and it includes a trailing restriction char.
+    // This allows to not require the user to add artificial whitespaces to
+    // enforce restrictions, for example typing questions would restrict to
+    // search results.
+    let token = tokens[i];
+    if (!hasRestrictionToken && token.length > 1) {
+      // Check for an unambiguous restriction char at the beginning of the
+      // first token, or at the end of the last token.
+      if (i == 0 &&
+          chars.includes(token[0]) &&
+          !UrlbarTokenizer.REGEXP_PERCENT_ENCODED_START.test(token)) {
         hasRestrictionToken = true;
         accumulator.push(token[0]);
         accumulator.push(token.slice(1));
         continue;
-      } else if (chars.includes(token[token.length - 1])) {
+      } else if (i == tokens.length - 1 &&
+                 chars.includes(token[token.length - 1]) &&
+                 !UrlbarTokenizer.looksLikeUrl(token, {requirePath: true})) {
         hasRestrictionToken = true;
         accumulator.push(token.slice(0, token.length - 1));
         accumulator.push(token[token.length - 1]);

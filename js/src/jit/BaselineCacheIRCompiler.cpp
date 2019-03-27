@@ -730,20 +730,6 @@ bool BaselineCacheIRCompiler::emitCallNativeGetElementResult() {
   return true;
 }
 
-bool BaselineCacheIRCompiler::emitLoadUnboxedPropertyResult() {
-  JitSpew(JitSpew_Codegen, __FUNCTION__);
-  AutoOutputRegister output(*this);
-  Register obj = allocator.useRegister(masm, reader.objOperandId());
-  AutoScratchRegisterMaybeOutput scratch(allocator, masm, output);
-
-  JSValueType fieldType = reader.jsValueType();
-  Address fieldOffset(stubAddress(reader.stubOffset()));
-  masm.load32(fieldOffset, scratch);
-  masm.loadUnboxedProperty(BaseIndex(obj, scratch, TimesOne), fieldType,
-                           output);
-  return true;
-}
-
 bool BaselineCacheIRCompiler::emitGuardFrameHasNoArgumentsObject() {
   JitSpew(JitSpew_Codegen, __FUNCTION__);
   FailurePath* failure;
@@ -937,14 +923,27 @@ bool BaselineCacheIRCompiler::emitCompareStringResult() {
     AutoStubFrame stubFrame(*this);
     stubFrame.enter(masm, scratch);
 
-    masm.Push(right);
-    masm.Push(left);
+    // Push the operands in reverse order for JSOP_LE and JSOP_GT:
+    // - |left <= right| is implemented as |right >= left|.
+    // - |left > right| is implemented as |right < left|.
+    if (op == JSOP_LE || op == JSOP_GT) {
+      masm.Push(left);
+      masm.Push(right);
+    } else {
+      masm.Push(right);
+      masm.Push(left);
+    }
 
     using Fn = bool (*)(JSContext*, HandleString, HandleString, bool*);
     if (op == JSOP_EQ || op == JSOP_STRICTEQ) {
-      callVM<Fn, jit::StringsEqual<true>>(masm);
+      callVM<Fn, jit::StringsEqual<EqualityKind::Equal>>(masm);
+    } else if (op == JSOP_NE || op == JSOP_STRICTNE) {
+      callVM<Fn, jit::StringsEqual<EqualityKind::NotEqual>>(masm);
+    } else if (op == JSOP_LT || op == JSOP_GT) {
+      callVM<Fn, jit::StringsCompare<ComparisonKind::LessThan>>(masm);
     } else {
-      callVM<Fn, jit::StringsEqual<false>>(masm);
+      MOZ_ASSERT(op == JSOP_LE || op == JSOP_GE);
+      callVM<Fn, jit::StringsCompare<ComparisonKind::GreaterThanOrEqual>>(masm);
     }
 
     stubFrame.leave(masm);
@@ -1178,46 +1177,6 @@ bool BaselineCacheIRCompiler::emitAddAndStoreDynamicSlot() {
 bool BaselineCacheIRCompiler::emitAllocateAndStoreDynamicSlot() {
   JitSpew(JitSpew_Codegen, __FUNCTION__);
   return emitAddAndStoreSlotShared(CacheOp::AllocateAndStoreDynamicSlot);
-}
-
-bool BaselineCacheIRCompiler::emitStoreUnboxedProperty() {
-  JitSpew(JitSpew_Codegen, __FUNCTION__);
-  ObjOperandId objId = reader.objOperandId();
-  JSValueType fieldType = reader.jsValueType();
-  Address offsetAddr = stubAddress(reader.stubOffset());
-
-  // Allocate the fixed registers first. These need to be fixed for
-  // callTypeUpdateIC.
-  AutoScratchRegister scratch(allocator, masm, R1.scratchReg());
-  ValueOperand val =
-      allocator.useFixedValueRegister(masm, reader.valOperandId(), R0);
-
-  Register obj = allocator.useRegister(masm, objId);
-
-  // We only need the type update IC if we are storing an object.
-  if (fieldType == JSVAL_TYPE_OBJECT) {
-    LiveGeneralRegisterSet saveRegs;
-    saveRegs.add(obj);
-    saveRegs.add(val);
-    if (!callTypeUpdateIC(obj, val, scratch, saveRegs)) {
-      return false;
-    }
-  }
-
-  masm.load32(offsetAddr, scratch);
-  BaseIndex fieldAddr(obj, scratch, TimesOne);
-
-  // Note that the storeUnboxedProperty call here is infallible, as the
-  // IR emitter is responsible for guarding on |val|'s type.
-  EmitICUnboxedPreBarrier(masm, fieldAddr, fieldType);
-  masm.storeUnboxedProperty(fieldAddr, fieldType,
-                            ConstantOrRegister(TypedOrValueRegister(val)),
-                            /* failure = */ nullptr);
-
-  if (UnboxedTypeNeedsPostBarrier(fieldType)) {
-    emitPostBarrierSlot(obj, val, scratch);
-  }
-  return true;
 }
 
 bool BaselineCacheIRCompiler::emitStoreTypedObjectReferenceProperty() {

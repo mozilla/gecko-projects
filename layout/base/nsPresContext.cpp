@@ -163,6 +163,7 @@ nsPresContext::nsPresContext(dom::Document* aDocument, nsPresContextType aType)
       // mImageAnimationMode is initialised below, in constructor body
       mImageAnimationModePref(imgIContainer::kNormalAnimMode),
       mInterruptChecksToSkip(0),
+      mNextFrameRateMultiplier(0),
       mElementsRestyled(0),
       mFramesConstructed(0),
       mFramesReflowed(0),
@@ -408,6 +409,8 @@ void nsPresContext::InvalidatePaintedLayers() {
 }
 
 void nsPresContext::AppUnitsPerDevPixelChanged() {
+  int32_t oldAppUnitsPerDevPixel = mCurAppUnitsPerDevPixel;
+
   InvalidatePaintedLayers();
 
   if (mDeviceContext) {
@@ -419,6 +422,27 @@ void nsPresContext::AppUnitsPerDevPixelChanged() {
                              MediaFeatureChangeReason::ResolutionChange});
 
   mCurAppUnitsPerDevPixel = mDeviceContext->AppUnitsPerDevPixel();
+
+  // nsSubDocumentFrame uses a AppUnitsPerDevPixel difference between parent and
+  // child document to determine if it needs to build a nsDisplayZoom item. So
+  // if we that changes then we need to invalidate the subdoc frame so that
+  // item gets created/removed.
+  if (mShell) {
+    if (nsIFrame* frame = mShell->GetRootFrame()) {
+      frame = nsLayoutUtils::GetCrossDocParentFrame(frame);
+      if (frame) {
+        int32_t parentAPD = frame->PresContext()->AppUnitsPerDevPixel();
+        if ((parentAPD == oldAppUnitsPerDevPixel) !=
+            (parentAPD == mCurAppUnitsPerDevPixel)) {
+          frame->InvalidateFrame();
+        }
+      }
+    }
+  }
+
+  // We would also have to look at all of our child subdocuments but the
+  // InvalidatePaintedLayers call above calls InvalidateFrameSubtree which
+  // would invalidate all subdocument frames already.
 }
 
 void nsPresContext::PreferenceChanged(const char* aPrefName) {

@@ -14,6 +14,7 @@ import { isEqual } from "lodash";
 
 import { makeBreakpointId, findPosition } from "../utils/breakpoint";
 import { findEmptyLines } from "../utils/empty-lines";
+import { getTextAtPosition, isInlineScript } from "../utils/source";
 
 // eslint-disable-next-line max-len
 import { getBreakpointsList as getBreakpointsListSelector } from "../selectors/breakpoints";
@@ -23,6 +24,7 @@ import type {
   Breakpoint,
   BreakpointId,
   MappedLocation,
+  Source,
   SourceLocation,
   BreakpointPositions
 } from "../types";
@@ -57,6 +59,30 @@ function update(
   action: Action
 ): BreakpointsState {
   switch (action.type) {
+    case "UPDATE_BREAKPOINT_TEXT": {
+      return updateBreakpointText(state, action.source);
+    }
+
+    case "ADD_SOURCES": {
+      const { sources } = action;
+
+      const scriptSources = sources.filter(source => isInlineScript(source));
+
+      if (scriptSources.length > 0) {
+        const { ...breakpointPositions } = state.breakpointPositions;
+
+        // If new HTML sources are being added, we need to clear the breakpoint
+        // positions since the new source is a <script> with new breakpoints.
+        for (const source of scriptSources) {
+          delete breakpointPositions[source.id];
+        }
+
+        state = { ...state, breakpointPositions };
+      }
+
+      return state;
+    }
+
     case "ADD_BREAKPOINT": {
       return addBreakpoint(state, action);
     }
@@ -133,6 +159,53 @@ function update(
         }
       };
     }
+  }
+
+  return state;
+}
+
+function updateBreakpointText(
+  state: BreakpointsState,
+  source: Source
+): BreakpointsState {
+  const updates = [];
+  for (const id of Object.keys(state.breakpoints)) {
+    const breakpoint = state.breakpoints[id];
+    const { location, generatedLocation } = breakpoint;
+    let { text, originalText } = breakpoint;
+    let needsUpdate = false;
+
+    if (location.sourceId === source.id) {
+      const result = getTextAtPosition(source, location);
+      if (result !== originalText) {
+        originalText = result;
+        needsUpdate = true;
+      }
+    }
+    if (generatedLocation.sourceId === source.id) {
+      const result = getTextAtPosition(source, generatedLocation);
+      if (result !== text) {
+        text = result;
+        needsUpdate = true;
+      }
+    }
+
+    if (needsUpdate) {
+      updates.push({ id, text, originalText });
+    }
+  }
+
+  if (updates.length > 0) {
+    const { ...breakpoints } = state.breakpoints;
+
+    for (const { id, text, originalText } of updates) {
+      breakpoints[id] = { ...breakpoints[id], text, originalText };
+    }
+
+    state = {
+      ...state,
+      breakpoints
+    };
   }
 
   return state;
@@ -315,12 +388,6 @@ export function getBreakpoint(
 export function getBreakpointsDisabled(state: OuterState): boolean {
   const breakpoints = getBreakpointsList(state);
   return breakpoints.every(breakpoint => breakpoint.disabled);
-}
-
-export function getBreakpointsLoading(state: OuterState): boolean {
-  const breakpoints = getBreakpointsList(state);
-  const isLoading = breakpoints.some(breakpoint => breakpoint.loading);
-  return breakpoints.length > 0 && isLoading;
 }
 
 export function getBreakpointsForSource(

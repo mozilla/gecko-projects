@@ -316,7 +316,6 @@ nsDocShell::nsDocShell(BrowsingContext* aBrowsingContext)
       mForcedCharset(nullptr),
       mParentCharset(nullptr),
       mTreeOwner(nullptr),
-      mChromeEventHandler(nullptr),
       mDefaultScrollbarPref(Scrollbar_Auto, Scrollbar_Auto),
       mCharsetReloadState(eCharsetReloadInit),
       mOrientationLock(hal::eScreenOrientation_None),
@@ -541,7 +540,7 @@ void nsDocShell::DestroyChildren() {
 NS_IMPL_CYCLE_COLLECTION_INHERITED(nsDocShell, nsDocLoader,
                                    mSessionStorageManager, mScriptGlobal,
                                    mInitialClientSource, mSessionHistory,
-                                   mBrowsingContext)
+                                   mBrowsingContext, mChromeEventHandler)
 
 NS_IMPL_ADDREF_INHERITED(nsDocShell, nsDocLoader)
 NS_IMPL_RELEASE_INHERITED(nsDocShell, nsDocLoader)
@@ -1141,7 +1140,6 @@ nsDocShell::GetOuterWindowID(uint64_t* aWindowID) {
 
 NS_IMETHODIMP
 nsDocShell::SetChromeEventHandler(EventTarget* aChromeEventHandler) {
-  // Weak reference. Don't addref.
   mChromeEventHandler = aChromeEventHandler;
 
   if (mScriptGlobal) {
@@ -1154,7 +1152,7 @@ nsDocShell::SetChromeEventHandler(EventTarget* aChromeEventHandler) {
 NS_IMETHODIMP
 nsDocShell::GetChromeEventHandler(EventTarget** aChromeEventHandler) {
   NS_ENSURE_ARG_POINTER(aChromeEventHandler);
-  nsCOMPtr<EventTarget> handler = mChromeEventHandler;
+  RefPtr<EventTarget> handler = mChromeEventHandler;
   handler.forget(aChromeEventHandler);
   return NS_OK;
 }
@@ -4199,7 +4197,7 @@ nsDocShell::DisplayLoadError(nsresult aError, nsIURI* aURI,
     errorPage.AssignLiteral("tabcrashed");
     error = "tabcrashed";
 
-    nsCOMPtr<EventTarget> handler = mChromeEventHandler;
+    RefPtr<EventTarget> handler = mChromeEventHandler;
     if (handler) {
       nsCOMPtr<Element> element = do_QueryInterface(handler);
       element->GetAttribute(NS_LITERAL_STRING("crashedPageTitle"), messageStr);
@@ -4993,6 +4991,8 @@ nsDocShell::Destroy() {
 
   mTabChild = nullptr;
 
+  mChromeEventHandler = nullptr;
+
   mOnePermittedSandboxedNavigator = nullptr;
 
   // required to break ref cycle
@@ -5657,11 +5657,10 @@ nsresult nsDocShell::SetCurScrollPosEx(int32_t aCurHorizontalPos,
     return NS_OK;
   }
 
-  // TODO: If scrollMode == SMOOTH_MSD, this will effectively override that
-  // and jump to the target position instantly. A proper solution here would
-  // involve giving nsIScrollableFrame a visual viewport smooth scrolling API.
-  shell->SetPendingVisualScrollUpdate(targetPos,
-                                      layers::FrameMetrics::eMainThread);
+  shell->ScrollToVisual(targetPos, layers::FrameMetrics::eMainThread,
+                        scrollMode == nsIScrollableFrame::INSTANT
+                            ? nsIPresShell::ScrollMode::eInstant
+                            : nsIPresShell::ScrollMode::eSmooth);
 
   return NS_OK;
 }
@@ -10363,8 +10362,8 @@ nsresult nsDocShell::DoChannelLoad(nsIChannel* aChannel,
       break;
   }
 
-  if (!aBypassClassifier) {
-    loadFlags |= nsIChannel::LOAD_CLASSIFY_URI;
+  if (aBypassClassifier) {
+    loadFlags |= nsIChannel::LOAD_BYPASS_URL_CLASSIFIER;
   }
 
   // If the user pressed shift-reload, then do not allow ServiceWorker

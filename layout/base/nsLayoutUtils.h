@@ -349,6 +349,17 @@ class nsLayoutUtils {
   static nsIFrame* GetAfterFrame(const nsIContent* aContent);
 
   /**
+   * Returns the ::marker pseudo-element for aContent, if any.
+   */
+  static mozilla::dom::Element* GetMarkerPseudo(const nsIContent* aContent);
+
+  /**
+   * Returns the frame corresponding to the ::marker pseudo-element for
+   * aContent, if any.
+   */
+  static nsIFrame* GetMarkerFrame(const nsIContent* aContent);
+
+  /**
    * Given a frame, search up the frame tree until we find an
    * ancestor that (or the frame itself) is of type aFrameType, if any.
    *
@@ -2976,13 +2987,6 @@ class nsLayoutUtils {
   static already_AddRefed<nsFontMetrics> GetMetricsFor(
       nsPresContext* aPresContext, bool aIsVertical,
       const nsStyleFont* aStyleFont, nscoord aFontSize, bool aUseUserFontSet);
-
-  /**
-   * Appropriately add the correct font if we are using DocumentFonts or
-   * overriding for XUL
-   */
-  static void FixupNoneGeneric(nsFont* aFont, uint8_t aGenericFontID,
-                               const nsFont* aDefaultVariableFont);
 
   static void ComputeSystemFont(nsFont* aSystemFont,
                                 mozilla::LookAndFeel::FontID aFontID,

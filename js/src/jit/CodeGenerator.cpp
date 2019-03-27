@@ -3938,22 +3938,11 @@ void CodeGenerator::visitStoreSlotV(LStoreSlotV* lir) {
 }
 
 static void GuardReceiver(MacroAssembler& masm, const ReceiverGuard& guard,
-                          Register obj, Register expandoScratch,
-                          Register scratch, Label* miss,
-                          bool checkNullExpando) {
+                          Register obj,
+                          Register scratch, Label* miss) {
   if (guard.group) {
     masm.branchTestObjGroup(Assembler::NotEqual, obj, guard.group, scratch, obj,
                             miss);
-
-    Address expandoAddress(obj, UnboxedPlainObject::offsetOfExpando());
-    if (guard.shape) {
-      masm.loadPtr(expandoAddress, expandoScratch);
-      masm.branchPtr(Assembler::Equal, expandoScratch, ImmWord(0), miss);
-      masm.branchTestObjShape(Assembler::NotEqual, expandoScratch, guard.shape,
-                              scratch, expandoScratch, miss);
-    } else if (checkNullExpando) {
-      masm.branchPtr(Assembler::NotEqual, expandoAddress, ImmWord(0), miss);
-    }
   } else {
     masm.branchTestObjShape(Assembler::NotEqual, obj, guard.shape, scratch, obj,
                             miss);
@@ -3961,7 +3950,7 @@ static void GuardReceiver(MacroAssembler& masm, const ReceiverGuard& guard,
 }
 
 void CodeGenerator::emitGetPropertyPolymorphic(
-    LInstruction* ins, Register obj, Register expandoScratch, Register scratch,
+    LInstruction* ins, Register obj, Register scratch,
     const TypedOrValueRegister& output) {
   MGetPropertyPolymorphic* mir = ins->mirRaw()->toGetPropertyPolymorphic();
 
@@ -3972,14 +3961,11 @@ void CodeGenerator::emitGetPropertyPolymorphic(
 
     Label next;
     masm.comment("GuardReceiver");
-    GuardReceiver(masm, receiver, obj, expandoScratch, scratch, &next,
-                  /* checkNullExpando = */ false);
+    GuardReceiver(masm, receiver, obj, scratch, &next);
 
     if (receiver.shape) {
       masm.comment("loadTypedOrValue");
-      // If this is an unboxed expando access, GuardReceiver loaded the
-      // expando object into expandoScratch.
-      Register target = receiver.group ? expandoScratch : obj;
+      Register target = obj;
 
       Shape* shape = mir->shape(i);
       if (shape->slot() < shape->numFixedSlots()) {
@@ -3994,15 +3980,6 @@ void CodeGenerator::emitGetPropertyPolymorphic(
         masm.loadPtr(Address(target, NativeObject::offsetOfSlots()), scratch);
         masm.loadTypedOrValue(Address(scratch, offset), output);
       }
-    } else {
-      masm.comment("loadUnboxedProperty");
-      const UnboxedLayout::Property* property =
-          receiver.group->unboxedLayoutDontCheckGeneration().lookup(
-              mir->name());
-      Address propertyAddr(
-          obj, UnboxedPlainObject::offsetOfData() + property->offset);
-
-      masm.loadUnboxedProperty(propertyAddr, property->type, output);
     }
 
     if (i == mir->numReceivers() - 1) {
@@ -4021,17 +3998,15 @@ void CodeGenerator::visitGetPropertyPolymorphicV(
   Register obj = ToRegister(ins->obj());
   ValueOperand output = ToOutValue(ins);
   Register temp = ToRegister(ins->temp());
-  emitGetPropertyPolymorphic(ins, obj, output.scratchReg(), temp, output);
+  emitGetPropertyPolymorphic(ins, obj, temp, output);
 }
 
 void CodeGenerator::visitGetPropertyPolymorphicT(
     LGetPropertyPolymorphicT* ins) {
   Register obj = ToRegister(ins->obj());
   TypedOrValueRegister output(ins->mir()->type(), ToAnyRegister(ins->output()));
-  Register temp1 = ToRegister(ins->temp1());
-  Register temp2 = (output.type() == MIRType::Double) ? ToRegister(ins->temp2())
-                                                      : output.typedReg().gpr();
-  emitGetPropertyPolymorphic(ins, obj, temp1, temp2, output);
+  Register temp = ToRegister(ins->temp());
+  emitGetPropertyPolymorphic(ins, obj, temp, output);
 }
 
 template <typename T>
@@ -4041,13 +4016,11 @@ static void EmitUnboxedPreBarrier(MacroAssembler& masm, T address,
     masm.guardedCallPreBarrier(address, MIRType::Object);
   } else if (type == JSVAL_TYPE_STRING) {
     masm.guardedCallPreBarrier(address, MIRType::String);
-  } else {
-    MOZ_ASSERT(!UnboxedTypeNeedsPreBarrier(type));
   }
 }
 
 void CodeGenerator::emitSetPropertyPolymorphic(
-    LInstruction* ins, Register obj, Register expandoScratch, Register scratch,
+    LInstruction* ins, Register obj, Register scratch,
     const ConstantOrRegister& value) {
   MSetPropertyPolymorphic* mir = ins->mirRaw()->toSetPropertyPolymorphic();
 
@@ -4056,13 +4029,10 @@ void CodeGenerator::emitSetPropertyPolymorphic(
     ReceiverGuard receiver = mir->receiver(i);
 
     Label next;
-    GuardReceiver(masm, receiver, obj, expandoScratch, scratch, &next,
-                  /* checkNullExpando = */ false);
+    GuardReceiver(masm, receiver, obj, scratch, &next);
 
     if (receiver.shape) {
-      // If this is an unboxed expando access, GuardReceiver loaded the
-      // expando object into expandoScratch.
-      Register target = receiver.group ? expandoScratch : obj;
+      Register target = obj;
 
       Shape* shape = mir->shape(i);
       if (shape->slot() < shape->numFixedSlots()) {
@@ -4082,15 +4052,6 @@ void CodeGenerator::emitSetPropertyPolymorphic(
         }
         masm.storeConstantOrRegister(value, addr);
       }
-    } else {
-      const UnboxedLayout::Property* property =
-          receiver.group->unboxedLayoutDontCheckGeneration().lookup(
-              mir->name());
-      Address propertyAddr(
-          obj, UnboxedPlainObject::offsetOfData() + property->offset);
-
-      EmitUnboxedPreBarrier(masm, propertyAddr, property->type);
-      masm.storeUnboxedProperty(propertyAddr, property->type, value, nullptr);
     }
 
     if (i == mir->numReceivers() - 1) {
@@ -4107,18 +4068,16 @@ void CodeGenerator::emitSetPropertyPolymorphic(
 void CodeGenerator::visitSetPropertyPolymorphicV(
     LSetPropertyPolymorphicV* ins) {
   Register obj = ToRegister(ins->obj());
-  Register temp1 = ToRegister(ins->temp1());
-  Register temp2 = ToRegister(ins->temp2());
+  Register temp1 = ToRegister(ins->temp());
   ValueOperand value = ToValue(ins, LSetPropertyPolymorphicV::Value);
-  emitSetPropertyPolymorphic(ins, obj, temp1, temp2,
+  emitSetPropertyPolymorphic(ins, obj, temp1,
                              TypedOrValueRegister(value));
 }
 
 void CodeGenerator::visitSetPropertyPolymorphicT(
     LSetPropertyPolymorphicT* ins) {
   Register obj = ToRegister(ins->obj());
-  Register temp1 = ToRegister(ins->temp1());
-  Register temp2 = ToRegister(ins->temp2());
+  Register temp1 = ToRegister(ins->temp());
 
   mozilla::Maybe<ConstantOrRegister> value;
   if (ins->mir()->value()->isConstant()) {
@@ -4129,7 +4088,7 @@ void CodeGenerator::visitSetPropertyPolymorphicT(
                                        ToAnyRegister(ins->value())));
   }
 
-  emitSetPropertyPolymorphic(ins, obj, temp1, temp2, value.ref());
+  emitSetPropertyPolymorphic(ins, obj, temp1, value.ref());
 }
 
 void CodeGenerator::visitElements(LElements* lir) {
@@ -4278,8 +4237,7 @@ void CodeGenerator::visitGuardReceiverPolymorphic(
     LGuardReceiverPolymorphic* lir) {
   const MGuardReceiverPolymorphic* mir = lir->mir();
   Register obj = ToRegister(lir->object());
-  Register temp1 = ToRegister(lir->temp1());
-  Register temp2 = ToRegister(lir->temp2());
+  Register temp = ToRegister(lir->temp());
 
   Label done;
 
@@ -4287,8 +4245,7 @@ void CodeGenerator::visitGuardReceiverPolymorphic(
     const ReceiverGuard& receiver = mir->receiver(i);
 
     Label next;
-    GuardReceiver(masm, receiver, obj, temp1, temp2, &next,
-                  /* checkNullExpando = */ true);
+    GuardReceiver(masm, receiver, obj, temp, &next);
 
     if (i == mir->numReceivers() - 1) {
       bailoutFrom(&next, lir->snapshot());
@@ -4299,24 +4256,6 @@ void CodeGenerator::visitGuardReceiverPolymorphic(
   }
 
   masm.bind(&done);
-}
-
-void CodeGenerator::visitGuardUnboxedExpando(LGuardUnboxedExpando* lir) {
-  Label miss;
-
-  Register obj = ToRegister(lir->object());
-  masm.branchPtr(
-      lir->mir()->requireExpando() ? Assembler::Equal : Assembler::NotEqual,
-      Address(obj, UnboxedPlainObject::offsetOfExpando()), ImmWord(0), &miss);
-
-  bailoutFrom(&miss, lir->snapshot());
-}
-
-void CodeGenerator::visitLoadUnboxedExpando(LLoadUnboxedExpando* lir) {
-  Register obj = ToRegister(lir->object());
-  Register result = ToRegister(lir->getDef(0));
-
-  masm.loadPtr(Address(obj, UnboxedPlainObject::offsetOfExpando()), result);
 }
 
 void CodeGenerator::visitToNumeric(LToNumeric* lir) {
@@ -8104,12 +8043,30 @@ void CodeGenerator::emitCompareS(LInstruction* lir, JSOp op, Register left,
 
   using Fn = bool (*)(JSContext*, HandleString, HandleString, bool*);
   if (op == JSOP_EQ || op == JSOP_STRICTEQ) {
-    ool = oolCallVM<Fn, jit::StringsEqual<true>>(lir, ArgList(left, right),
-                                                 StoreRegisterTo(output));
+    ool = oolCallVM<Fn, jit::StringsEqual<EqualityKind::Equal>>(
+        lir, ArgList(left, right), StoreRegisterTo(output));
+  } else if (op == JSOP_NE || op == JSOP_STRICTNE) {
+    ool = oolCallVM<Fn, jit::StringsEqual<EqualityKind::NotEqual>>(
+        lir, ArgList(left, right), StoreRegisterTo(output));
+  } else if (op == JSOP_LT) {
+    ool = oolCallVM<Fn, jit::StringsCompare<ComparisonKind::LessThan>>(
+        lir, ArgList(left, right), StoreRegisterTo(output));
+  } else if (op == JSOP_LE) {
+    // Push the operands in reverse order for JSOP_LE:
+    // - |left <= right| is implemented as |right >= left|.
+    ool =
+        oolCallVM<Fn, jit::StringsCompare<ComparisonKind::GreaterThanOrEqual>>(
+            lir, ArgList(right, left), StoreRegisterTo(output));
+  } else if (op == JSOP_GT) {
+    // Push the operands in reverse order for JSOP_GT:
+    // - |left > right| is implemented as |right < left|.
+    ool = oolCallVM<Fn, jit::StringsCompare<ComparisonKind::LessThan>>(
+        lir, ArgList(right, left), StoreRegisterTo(output));
   } else {
-    MOZ_ASSERT(op == JSOP_NE || op == JSOP_STRICTNE);
-    ool = oolCallVM<Fn, jit::StringsEqual<false>>(lir, ArgList(left, right),
-                                                  StoreRegisterTo(output));
+    MOZ_ASSERT(op == JSOP_GE);
+    ool =
+        oolCallVM<Fn, jit::StringsCompare<ComparisonKind::GreaterThanOrEqual>>(
+            lir, ArgList(left, right), StoreRegisterTo(output));
   }
 
   masm.compareStrings(op, left, right, output, ool->entry());
@@ -8160,19 +8117,19 @@ void CodeGenerator::visitCompareVM(LCompareVM* lir) {
       bool (*)(JSContext*, MutableHandleValue, MutableHandleValue, bool*);
   switch (lir->mir()->jsop()) {
     case JSOP_EQ:
-      callVM<Fn, jit::LooselyEqual<true>>(lir);
+      callVM<Fn, jit::LooselyEqual<EqualityKind::Equal>>(lir);
       break;
 
     case JSOP_NE:
-      callVM<Fn, jit::LooselyEqual<false>>(lir);
+      callVM<Fn, jit::LooselyEqual<EqualityKind::NotEqual>>(lir);
       break;
 
     case JSOP_STRICTEQ:
-      callVM<Fn, jit::StrictlyEqual<true>>(lir);
+      callVM<Fn, jit::StrictlyEqual<EqualityKind::Equal>>(lir);
       break;
 
     case JSOP_STRICTNE:
-      callVM<Fn, jit::StrictlyEqual<false>>(lir);
+      callVM<Fn, jit::StrictlyEqual<EqualityKind::NotEqual>>(lir);
       break;
 
     case JSOP_LT:
@@ -9878,21 +9835,6 @@ void CodeGenerator::visitStoreUnboxedPointer(LStoreUnboxedPointer* lir) {
                       offsetAdjustment);
     StoreUnboxedPointer(masm, address, type, value, preBarrier);
   }
-}
-
-void CodeGenerator::visitConvertUnboxedObjectToNative(
-    LConvertUnboxedObjectToNative* lir) {
-  Register object = ToRegister(lir->getOperand(0));
-  Register temp = ToTempRegisterOrInvalid(lir->temp());
-
-  // The call will return the same object so StoreRegisterTo(object) is safe.
-  using Fn = NativeObject* (*)(JSContext*, JSObject*);
-  OutOfLineCode* ool = oolCallVM<Fn, UnboxedPlainObject::convertToNative>(
-      lir, ArgList(object), StoreRegisterTo(object));
-
-  masm.branchTestObjGroup(Assembler::Equal, object, lir->mir()->group(), temp,
-                          object, ool->entry());
-  masm.bind(ool->rejoin());
 }
 
 void CodeGenerator::emitArrayPopShift(LInstruction* lir,

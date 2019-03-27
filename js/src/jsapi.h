@@ -131,7 +131,7 @@ class HandleValueArray {
   explicit HandleValueArray(HandleValue value)
       : length_(1), elements_(value.address()) {}
 
-  MOZ_IMPLICIT HandleValueArray(const AutoValueVector& values)
+  MOZ_IMPLICIT HandleValueArray(const RootedValueVector& values)
       : length_(values.length()), elements_(values.begin()) {}
 
   template <size_t N>
@@ -1883,7 +1883,7 @@ extern JS_PUBLIC_API JSObject* CloneFunctionObject(JSContext* cx,
  * objects that should end up on the clone's scope chain.
  */
 extern JS_PUBLIC_API JSObject* CloneFunctionObject(
-    JSContext* cx, HandleObject funobj, AutoObjectVector& scopeChain);
+    JSContext* cx, HandleObject funobj, HandleObjectVector scopeChain);
 
 }  // namespace JS
 
@@ -2147,6 +2147,9 @@ namespace JS {
  * as when it is later consumed.
  */
 
+using OptimizedEncodingBytes = js::Vector<uint8_t, 0, js::SystemAllocPolicy>;
+using UniqueOptimizedEncodingBytes = js::UniquePtr<OptimizedEncodingBytes>;
+
 class OptimizedEncodingListener {
  protected:
   virtual ~OptimizedEncodingListener() {}
@@ -2159,7 +2162,7 @@ class OptimizedEncodingListener {
 
   // SpiderMonkey may optionally call storeOptimizedEncoding() after it has
   // finished processing a streamed resource.
-  virtual void storeOptimizedEncoding(const uint8_t* bytes, size_t length) = 0;
+  virtual void storeOptimizedEncoding(UniqueOptimizedEncodingBytes bytes) = 0;
 };
 
 class JS_PUBLIC_API StreamConsumer {
@@ -2817,62 +2820,6 @@ extern JS_PUBLIC_API bool SetForEach(JSContext* cx, HandleObject obj,
 
 /************************************************************************/
 
-/*
- * Regular Expressions.
- */
-#define JSREG_FOLD 0x01u      /* fold uppercase to lowercase */
-#define JSREG_GLOB 0x02u      /* global exec, creates array of matches */
-#define JSREG_MULTILINE 0x04u /* treat ^ and $ as begin and end of line */
-#define JSREG_STICKY 0x08u    /* only match starting at lastIndex */
-#define JSREG_UNICODE 0x10u   /* unicode */
-
-extern JS_PUBLIC_API JSObject* JS_NewRegExpObject(JSContext* cx,
-                                                  const char* bytes,
-                                                  size_t length,
-                                                  unsigned flags);
-
-extern JS_PUBLIC_API JSObject* JS_NewUCRegExpObject(JSContext* cx,
-                                                    const char16_t* chars,
-                                                    size_t length,
-                                                    unsigned flags);
-
-extern JS_PUBLIC_API bool JS_SetRegExpInput(JSContext* cx, JS::HandleObject obj,
-                                            JS::HandleString input);
-
-extern JS_PUBLIC_API bool JS_ClearRegExpStatics(JSContext* cx,
-                                                JS::HandleObject obj);
-
-extern JS_PUBLIC_API bool JS_ExecuteRegExp(JSContext* cx, JS::HandleObject obj,
-                                           JS::HandleObject reobj,
-                                           char16_t* chars, size_t length,
-                                           size_t* indexp, bool test,
-                                           JS::MutableHandleValue rval);
-
-/* RegExp interface for clients without a global object. */
-
-extern JS_PUBLIC_API bool JS_ExecuteRegExpNoStatics(
-    JSContext* cx, JS::HandleObject reobj, char16_t* chars, size_t length,
-    size_t* indexp, bool test, JS::MutableHandleValue rval);
-
-/**
- * On success, returns true, setting |*isRegExp| to true if |obj| is a RegExp
- * object or a wrapper around one, or to false if not.  Returns false on
- * failure.
- *
- * This method returns true with |*isRegExp == false| when passed an ES6 proxy
- * whose target is a RegExp, or when passed a revoked proxy.
- */
-extern JS_PUBLIC_API bool JS_ObjectIsRegExp(JSContext* cx, JS::HandleObject obj,
-                                            bool* isRegExp);
-
-extern JS_PUBLIC_API unsigned JS_GetRegExpFlags(JSContext* cx,
-                                                JS::HandleObject obj);
-
-extern JS_PUBLIC_API JSString* JS_GetRegExpSource(JSContext* cx,
-                                                  JS::HandleObject obj);
-
-/************************************************************************/
-
 extern JS_PUBLIC_API bool JS_IsExceptionPending(JSContext* cx);
 
 extern JS_PUBLIC_API bool JS_GetPendingException(JSContext* cx,
@@ -3217,93 +3164,6 @@ extern JS_PUBLIC_API RefPtr<WasmModule> GetWasmModule(HandleObject obj);
 
 extern JS_PUBLIC_API RefPtr<WasmModule> DeserializeWasmModule(
     PRFileDesc* bytecode, JS::UniqueChars filename, unsigned line);
-
-/**
- * Convenience class for imitating a JS level for-of loop. Typical usage:
- *
- *     ForOfIterator it(cx);
- *     if (!it.init(iterable)) {
- *       return false;
- *     }
- *     RootedValue val(cx);
- *     while (true) {
- *       bool done;
- *       if (!it.next(&val, &done)) {
- *         return false;
- *       }
- *       if (done) {
- *         break;
- *       }
- *       if (!DoStuff(cx, val)) {
- *         return false;
- *       }
- *     }
- */
-class MOZ_STACK_CLASS JS_PUBLIC_API ForOfIterator {
- protected:
-  JSContext* cx_;
-  /*
-   * Use the ForOfPIC on the global object (see vm/GlobalObject.h) to try
-   * to optimize iteration across arrays.
-   *
-   *  Case 1: Regular Iteration
-   *      iterator - pointer to the iterator object.
-   *      nextMethod - value of |iterator|.next.
-   *      index - fixed to NOT_ARRAY (== UINT32_MAX)
-   *
-   *  Case 2: Optimized Array Iteration
-   *      iterator - pointer to the array object.
-   *      nextMethod - the undefined value.
-   *      index - current position in array.
-   *
-   * The cases are distinguished by whether or not |index| is equal to
-   * NOT_ARRAY.
-   */
-  JS::RootedObject iterator;
-  JS::RootedValue nextMethod;
-  uint32_t index;
-
-  static const uint32_t NOT_ARRAY = UINT32_MAX;
-
-  ForOfIterator(const ForOfIterator&) = delete;
-  ForOfIterator& operator=(const ForOfIterator&) = delete;
-
- public:
-  explicit ForOfIterator(JSContext* cx)
-      : cx_(cx), iterator(cx_), nextMethod(cx), index(NOT_ARRAY) {}
-
-  enum NonIterableBehavior { ThrowOnNonIterable, AllowNonIterable };
-
-  /**
-   * Initialize the iterator.  If AllowNonIterable is passed then if getting
-   * the @@iterator property from iterable returns undefined init() will just
-   * return true instead of throwing.  Callers must then check
-   * valueIsIterable() before continuing with the iteration.
-   */
-  bool init(JS::HandleValue iterable,
-            NonIterableBehavior nonIterableBehavior = ThrowOnNonIterable);
-
-  /**
-   * Get the next value from the iterator.  If false *done is true
-   * after this call, do not examine val.
-   */
-  bool next(JS::MutableHandleValue val, bool* done);
-
-  /**
-   * Close the iterator.
-   * For the case that completion type is throw.
-   */
-  void closeThrow();
-
-  /**
-   * If initialized with throwOnNonCallable = false, check whether
-   * the value is iterable.
-   */
-  bool valueIsIterable() const { return iterator; }
-
- private:
-  inline bool nextFromOptimizedArray(MutableHandleValue val, bool* done);
-};
 
 /**
  * If a large allocation fails when calling pod_{calloc,realloc}CanGC, the JS

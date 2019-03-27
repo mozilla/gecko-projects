@@ -40,8 +40,8 @@ class Breakpoint extends PureComponent<Props> {
   }
 
   componentWillUnmount() {
-    const { breakpoint, selectedSource } = this.props;
-    if (!selectedSource || breakpoint.loading) {
+    const { selectedSource } = this.props;
+    if (!selectedSource) {
       return;
     }
 
@@ -97,6 +97,13 @@ class Breakpoint extends PureComponent<Props> {
     }
 
     if (event.shiftKey) {
+      if (features.columnBreakpoints) {
+        return breakpointActions.toggleBreakpointsAtLine(
+          !breakpoint.disabled,
+          this.selectedLocation.line
+        );
+      }
+
       return breakpointActions.toggleDisabledBreakpoint(breakpoint);
     }
 
@@ -121,9 +128,7 @@ class Breakpoint extends PureComponent<Props> {
       return;
     }
 
-    // NOTE: we need to wait for the breakpoint to be loaded
-    // to get the generated location
-    if (!selectedSource || breakpoint.loading) {
+    if (!selectedSource) {
       return;
     }
 

@@ -37,7 +37,6 @@
 #include "builtin/JSON.h"
 #include "builtin/MapObject.h"
 #include "builtin/Promise.h"
-#include "builtin/RegExp.h"
 #include "builtin/Stream.h"
 #include "builtin/String.h"
 #include "builtin/Symbol.h"
@@ -88,7 +87,6 @@
 #include "vm/JSFunction.h"
 #include "vm/JSObject.h"
 #include "vm/JSScript.h"
-#include "vm/RegExpStatics.h"
 #include "vm/Runtime.h"
 #include "vm/SavedStacks.h"
 #include "vm/SelfHosting.h"
@@ -1275,7 +1273,7 @@ JS_PUBLIC_API void JS_SetGCParametersBasedOnAvailableMemory(JSContext* cx,
       {JSGC_HIGH_FREQUENCY_TIME_LIMIT, 1500},
       {JSGC_HIGH_FREQUENCY_TIME_LIMIT, 1500},
       {JSGC_ALLOCATION_THRESHOLD, 1},
-      {JSGC_MODE, JSGC_MODE_INCREMENTAL}};
+      {JSGC_MODE, JSGC_MODE_ZONE_INCREMENTAL}};
 
   static const JSGCConfig nominal[] = {
       {JSGC_MAX_MALLOC_BYTES, 6 * 1024 * 1024},
@@ -3310,7 +3308,7 @@ JS_PUBLIC_API JSObject* JS::CloneFunctionObject(JSContext* cx,
 }
 
 extern JS_PUBLIC_API JSObject* JS::CloneFunctionObject(
-    JSContext* cx, HandleObject funobj, AutoObjectVector& envChain) {
+    JSContext* cx, HandleObject funobj, HandleObjectVector envChain) {
   RootedObject env(cx);
   RootedScope scope(cx);
   if (!CreateNonSyntacticEnvironmentChain(cx, envChain, &env, &scope)) {
@@ -4137,7 +4135,7 @@ JS_PUBLIC_API bool JS::SetPromiseUserInputEventHandlingState(
  * Asserts that the array is dense and all entries are Promise objects.
  */
 JS_PUBLIC_API JSObject* JS::GetWaitForAllPromise(
-    JSContext* cx, const JS::AutoObjectVector& promises) {
+    JSContext* cx, JS::HandleObjectVector promises) {
   AssertHeapIsIdle();
   CHECK_THREAD(cx);
 
@@ -4983,139 +4981,6 @@ JS_PUBLIC_API JS::WarningReporter JS::SetWarningReporter(
 
 /************************************************************************/
 
-/*
- * Regular Expressions.
- */
-JS_PUBLIC_API JSObject* JS_NewRegExpObject(JSContext* cx, const char* bytes,
-                                           size_t length, unsigned flags) {
-  AssertHeapIsIdle();
-  CHECK_THREAD(cx);
-
-  UniqueTwoByteChars chars(InflateString(cx, bytes, length));
-  if (!chars) {
-    return nullptr;
-  }
-
-  return RegExpObject::create(cx, chars.get(), length, RegExpFlag(flags),
-                              GenericObject);
-}
-
-JS_PUBLIC_API JSObject* JS_NewUCRegExpObject(JSContext* cx,
-                                             const char16_t* chars,
-                                             size_t length, unsigned flags) {
-  AssertHeapIsIdle();
-  CHECK_THREAD(cx);
-
-  return RegExpObject::create(cx, chars, length, RegExpFlag(flags),
-                              GenericObject);
-}
-
-JS_PUBLIC_API bool JS_SetRegExpInput(JSContext* cx, HandleObject obj,
-                                     HandleString input) {
-  AssertHeapIsIdle();
-  CHECK_THREAD(cx);
-  cx->check(input);
-
-  Handle<GlobalObject*> global = obj.as<GlobalObject>();
-  RegExpStatics* res = GlobalObject::getRegExpStatics(cx, global);
-  if (!res) {
-    return false;
-  }
-
-  res->reset(input);
-  return true;
-}
-
-JS_PUBLIC_API bool JS_ClearRegExpStatics(JSContext* cx, HandleObject obj) {
-  AssertHeapIsIdle();
-  CHECK_THREAD(cx);
-  MOZ_ASSERT(obj);
-
-  Handle<GlobalObject*> global = obj.as<GlobalObject>();
-  RegExpStatics* res = GlobalObject::getRegExpStatics(cx, global);
-  if (!res) {
-    return false;
-  }
-
-  res->clear();
-  return true;
-}
-
-JS_PUBLIC_API bool JS_ExecuteRegExp(JSContext* cx, HandleObject obj,
-                                    HandleObject reobj, char16_t* chars,
-                                    size_t length, size_t* indexp, bool test,
-                                    MutableHandleValue rval) {
-  AssertHeapIsIdle();
-  CHECK_THREAD(cx);
-
-  Handle<GlobalObject*> global = obj.as<GlobalObject>();
-  RegExpStatics* res = GlobalObject::getRegExpStatics(cx, global);
-  if (!res) {
-    return false;
-  }
-
-  RootedLinearString input(cx, NewStringCopyN<CanGC>(cx, chars, length));
-  if (!input) {
-    return false;
-  }
-
-  return ExecuteRegExpLegacy(cx, res, reobj.as<RegExpObject>(), input, indexp,
-                             test, rval);
-}
-
-JS_PUBLIC_API bool JS_ExecuteRegExpNoStatics(JSContext* cx, HandleObject obj,
-                                             char16_t* chars, size_t length,
-                                             size_t* indexp, bool test,
-                                             MutableHandleValue rval) {
-  AssertHeapIsIdle();
-  CHECK_THREAD(cx);
-
-  RootedLinearString input(cx, NewStringCopyN<CanGC>(cx, chars, length));
-  if (!input) {
-    return false;
-  }
-
-  return ExecuteRegExpLegacy(cx, nullptr, obj.as<RegExpObject>(), input, indexp,
-                             test, rval);
-}
-
-JS_PUBLIC_API bool JS_ObjectIsRegExp(JSContext* cx, HandleObject obj,
-                                     bool* isRegExp) {
-  cx->check(obj);
-
-  ESClass cls;
-  if (!GetBuiltinClass(cx, obj, &cls)) {
-    return false;
-  }
-
-  *isRegExp = cls == ESClass::RegExp;
-  return true;
-}
-
-JS_PUBLIC_API unsigned JS_GetRegExpFlags(JSContext* cx, HandleObject obj) {
-  AssertHeapIsIdle();
-  CHECK_THREAD(cx);
-
-  RegExpShared* shared = RegExpToShared(cx, obj);
-  if (!shared) {
-    return false;
-  }
-  return shared->getFlags();
-}
-
-JS_PUBLIC_API JSString* JS_GetRegExpSource(JSContext* cx, HandleObject obj) {
-  AssertHeapIsIdle();
-  CHECK_THREAD(cx);
-
-  RegExpShared* shared = RegExpToShared(cx, obj);
-  if (!shared) {
-    return nullptr;
-  }
-  return shared->getSource();
-}
-
-/************************************************************************/
-
 JS_PUBLIC_API bool JS_SetDefaultLocale(JSRuntime* rt, const char* locale) {
   AssertHeapIsIdle();
   return rt->setDefaultLocale(locale);
@@ -5481,9 +5346,6 @@ JS_PUBLIC_API void JS_SetGlobalJitCompilerOption(JSContext* cx,
         break;
       }
       jit::JitOptions.setCompilerWarmUpThreshold(value);
-      if (value == 0) {
-        jit::JitOptions.setEagerCompilation();
-      }
       break;
     case JSJITCOMPILER_ION_GVN_ENABLE:
       if (value == 0) {
@@ -5562,9 +5424,6 @@ JS_PUBLIC_API void JS_SetGlobalJitCompilerOption(JSContext* cx,
     case JSJITCOMPILER_TRACK_OPTIMIZATIONS:
       jit::JitOptions.disableOptimizationTracking = !value;
       break;
-    case JSJITCOMPILER_UNBOXED_OBJECTS:
-      jit::JitOptions.disableUnboxedObjects = !value;
-      break;
     case JSJITCOMPILER_SPECTRE_INDEX_MASKING:
       jit::JitOptions.spectreIndexMasking = !!value;
       break;
@@ -5610,8 +5469,7 @@ JS_PUBLIC_API bool JS_GetGlobalJitCompilerOption(JSContext* cx,
       *valueOut = jit::JitOptions.baselineWarmUpThreshold;
       break;
     case JSJITCOMPILER_ION_WARMUP_TRIGGER:
-      *valueOut = jit::JitOptions.forcedDefaultIonWarmUpThreshold.valueOr(
-          jit::OptimizationInfo::CompilerWarmupThreshold);
+      *valueOut = jit::JitOptions.normalIonWarmUpThreshold;
       break;
     case JSJITCOMPILER_ION_FORCE_IC:
       *valueOut = jit::JitOptions.forceInlineCaches;

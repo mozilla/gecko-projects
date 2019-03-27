@@ -104,9 +104,10 @@ static bool DepthFirstSearchUse(MIRGenerator* mir,
       }
 
       if (cphi->isInWorklist() || cphi == producer) {
-        // We are already iterating over the uses of this Phi
-        // instruction. Skip it.
-        continue;
+        // We are already iterating over the uses of this Phi instruction which
+        // are part of a loop, instead of trying to handle loops, conservatively
+        // mark them as used.
+        return push(producer, use);
       }
 
       if (cphi->getUsageAnalysis() == PhiUsage::Unused) {
@@ -2360,8 +2361,7 @@ static bool CanCompareRegExp(MCompare* compare, MDefinition* def) {
 
   if (op != JSOP_EQ && op != JSOP_NE) {
     // Relational comparison always invoke @@toPrimitive.
-    MOZ_ASSERT(op == JSOP_GT || op == JSOP_GE || op == JSOP_LT ||
-               op == JSOP_LE);
+    MOZ_ASSERT(IsRelationalOp(op));
     return false;
   }
 
@@ -3870,13 +3870,6 @@ static inline MDefinition* PassthroughOperand(MDefinition* def) {
   }
   if (def->isMaybeCopyElementsForWrite()) {
     return def->toMaybeCopyElementsForWrite()->object();
-  }
-  if (!JitOptions.spectreObjectMitigationsMisc) {
-    // If Spectre mitigations are enabled, LConvertUnboxedObjectToNative
-    // needs to have its own def.
-    if (def->isConvertUnboxedObjectToNative()) {
-      return def->toConvertUnboxedObjectToNative()->object();
-    }
   }
   return nullptr;
 }

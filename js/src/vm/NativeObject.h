@@ -28,7 +28,6 @@ namespace js {
 
 class Shape;
 class TenuringTracer;
-class UnboxedPlainObject;
 
 /*
  * To really poison a set of values, using 'magic' or 'undefined' isn't good
@@ -545,11 +544,6 @@ class NativeObject : public ShapedObject {
   // that are (temporarily) inconsistent.
   void setLastPropertyMakeNonNative(Shape* shape);
 
-  // As for setLastProperty(), but changes the class associated with the
-  // object to a native one. The object's type has already been changed, and
-  // this brings the shape into sync with it.
-  void setLastPropertyMakeNative(JSContext* cx, Shape* shape);
-
   // Newly-created TypedArrays that map a SharedArrayBuffer are
   // marked as shared by giving them an ObjectElements that has the
   // ObjectElements::SHARED_MEMORY flag set.
@@ -944,7 +938,7 @@ class NativeObject : public ShapedObject {
 
   static MOZ_MUST_USE bool fillInAfterSwap(JSContext* cx,
                                            HandleNativeObject obj,
-                                           const AutoValueVector& values,
+                                           HandleValueVector values,
                                            void* priv);
 
  public:
@@ -1588,7 +1582,7 @@ inline bool NativeGetProperty(JSContext* cx, HandleNativeObject obj,
 }
 
 extern bool NativeGetElement(JSContext* cx, HandleNativeObject obj,
-                             HandleValue reciever, int32_t index,
+                             HandleValue receiver, int32_t index,
                              MutableHandleValue vp);
 
 bool GetSparseElementHelper(JSContext* cx, HandleArrayObject obj,
@@ -1672,11 +1666,6 @@ extern void AddPropertyTypesAfterProtoChange(JSContext* cx, NativeObject* obj,
 // Specializations of 7.3.23 CopyDataProperties(...) for NativeObjects.
 extern bool CopyDataPropertiesNative(JSContext* cx, HandlePlainObject target,
                                      HandleNativeObject from,
-                                     HandlePlainObject excludedItems,
-                                     bool* optimized);
-
-extern bool CopyDataPropertiesNative(JSContext* cx, HandlePlainObject target,
-                                     Handle<UnboxedPlainObject*> from,
                                      HandlePlainObject excludedItems,
                                      bool* optimized);
 

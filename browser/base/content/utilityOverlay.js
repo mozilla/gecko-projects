@@ -245,7 +245,7 @@ function openWebLinkIn(url, where, params) {
   if (!params.triggeringPrincipal) {
     params.triggeringPrincipal = Services.scriptSecurityManager.createNullPrincipal({});
   }
-  if (Services.scriptSecurityManager.isSystemPrincipal(params.triggeringPrincipal)) {
+  if (params.triggeringPrincipal.isSystemPrincipal) {
     throw new Error("System principal should never be passed into openWebLinkIn()");
   }
 
@@ -1021,34 +1021,6 @@ function openHelpLink(aHelpTopic, aCalledFromModal, aWhere) {
 function openPrefsHelp(aEvent) {
   let helpTopic = aEvent.target.getAttribute("helpTopic");
   openHelpLink(helpTopic);
-}
-
-function trimURL(aURL) {
-  // This function must not modify the given URL such that calling
-  // nsIURIFixup::createFixupURI with the result will produce a different URI.
-
-  // remove single trailing slash for http/https/ftp URLs
-  let url = aURL.replace(/^((?:http|https|ftp):\/\/[^/]+)\/$/, "$1");
-
-  // remove http://
-  if (!url.startsWith("http://")) {
-    return url;
-  }
-  let urlWithoutProtocol = url.substring(7);
-
-  let flags = Services.uriFixup.FIXUP_FLAG_ALLOW_KEYWORD_LOOKUP |
-              Services.uriFixup.FIXUP_FLAG_FIX_SCHEME_TYPOS;
-  let fixedUpURL, expectedURLSpec;
-  try {
-    fixedUpURL = Services.uriFixup.createFixupURI(urlWithoutProtocol, flags);
-    expectedURLSpec = makeURI(aURL).displaySpec;
-  } catch (ex) {
-    return url;
-  }
-  if (fixedUpURL.displaySpec == expectedURLSpec) {
-    return urlWithoutProtocol;
-  }
-  return url;
 }
 
 /**

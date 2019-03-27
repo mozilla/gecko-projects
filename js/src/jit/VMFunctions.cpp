@@ -30,7 +30,6 @@
 #include "vm/NativeObject-inl.h"
 #include "vm/StringObject-inl.h"
 #include "vm/TypeInference-inl.h"
-#include "vm/UnboxedObject-inl.h"
 
 using namespace js;
 using namespace js::jit;
@@ -344,39 +343,47 @@ bool MutatePrototype(JSContext* cx, HandlePlainObject obj, HandleValue value) {
   return SetPrototype(cx, obj, newProto);
 }
 
-template <bool Equal>
+template <EqualityKind Kind>
 bool LooselyEqual(JSContext* cx, MutableHandleValue lhs, MutableHandleValue rhs,
                   bool* res) {
   if (!js::LooselyEqual(cx, lhs, rhs, res)) {
     return false;
   }
-  if (!Equal) {
+  if (Kind != EqualityKind::Equal) {
     *res = !*res;
   }
   return true;
 }
 
-template bool LooselyEqual<true>(JSContext* cx, MutableHandleValue lhs,
-                                 MutableHandleValue rhs, bool* res);
-template bool LooselyEqual<false>(JSContext* cx, MutableHandleValue lhs,
-                                  MutableHandleValue rhs, bool* res);
+template bool LooselyEqual<EqualityKind::Equal>(JSContext* cx,
+                                                MutableHandleValue lhs,
+                                                MutableHandleValue rhs,
+                                                bool* res);
+template bool LooselyEqual<EqualityKind::NotEqual>(JSContext* cx,
+                                                   MutableHandleValue lhs,
+                                                   MutableHandleValue rhs,
+                                                   bool* res);
 
-template <bool Equal>
+template <EqualityKind Kind>
 bool StrictlyEqual(JSContext* cx, MutableHandleValue lhs,
                    MutableHandleValue rhs, bool* res) {
   if (!js::StrictlyEqual(cx, lhs, rhs, res)) {
     return false;
   }
-  if (!Equal) {
+  if (Kind != EqualityKind::Equal) {
     *res = !*res;
   }
   return true;
 }
 
-template bool StrictlyEqual<true>(JSContext* cx, MutableHandleValue lhs,
-                                  MutableHandleValue rhs, bool* res);
-template bool StrictlyEqual<false>(JSContext* cx, MutableHandleValue lhs,
-                                   MutableHandleValue rhs, bool* res);
+template bool StrictlyEqual<EqualityKind::Equal>(JSContext* cx,
+                                                 MutableHandleValue lhs,
+                                                 MutableHandleValue rhs,
+                                                 bool* res);
+template bool StrictlyEqual<EqualityKind::NotEqual>(JSContext* cx,
+                                                    MutableHandleValue lhs,
+                                                    MutableHandleValue rhs,
+                                                    bool* res);
 
 bool LessThan(JSContext* cx, MutableHandleValue lhs, MutableHandleValue rhs,
               bool* res) {
@@ -398,22 +405,45 @@ bool GreaterThanOrEqual(JSContext* cx, MutableHandleValue lhs,
   return GreaterThanOrEqualOperation(cx, lhs, rhs, res);
 }
 
-template <bool Equal>
+template <EqualityKind Kind>
 bool StringsEqual(JSContext* cx, HandleString lhs, HandleString rhs,
                   bool* res) {
   if (!js::EqualStrings(cx, lhs, rhs, res)) {
     return false;
   }
-  if (!Equal) {
+  if (Kind != EqualityKind::Equal) {
     *res = !*res;
   }
   return true;
 }
 
-template bool StringsEqual<true>(JSContext* cx, HandleString lhs,
-                                 HandleString rhs, bool* res);
-template bool StringsEqual<false>(JSContext* cx, HandleString lhs,
-                                  HandleString rhs, bool* res);
+template bool StringsEqual<EqualityKind::Equal>(JSContext* cx, HandleString lhs,
+                                                HandleString rhs, bool* res);
+template bool StringsEqual<EqualityKind::NotEqual>(JSContext* cx,
+                                                   HandleString lhs,
+                                                   HandleString rhs, bool* res);
+
+template <ComparisonKind Kind>
+bool StringsCompare(JSContext* cx, HandleString lhs, HandleString rhs,
+                    bool* res) {
+  int32_t result;
+  if (!js::CompareStrings(cx, lhs, rhs, &result)) {
+    return false;
+  }
+  if (Kind == ComparisonKind::LessThan) {
+    *res = result < 0;
+  } else {
+    *res = result >= 0;
+  }
+  return true;
+}
+
+template bool StringsCompare<ComparisonKind::LessThan>(JSContext* cx,
+                                                       HandleString lhs,
+                                                       HandleString rhs,
+                                                       bool* res);
+template bool StringsCompare<ComparisonKind::GreaterThanOrEqual>(
+    JSContext* cx, HandleString lhs, HandleString rhs, bool* res);
 
 bool StringSplitHelper(JSContext* cx, HandleString str, HandleString sep,
                        HandleObjectGroup group, uint32_t limit,
@@ -938,7 +968,7 @@ bool NormalSuspend(JSContext* cx, HandleObject obj, BaselineFrame* frame,
   // The expression stack slots are stored on the stack in reverse order, so
   // we copy them to a Vector and pass a pointer to that instead. We use
   // stackDepth - 1 because we don't want to include the return value.
-  AutoValueVector exprStack(cx);
+  RootedValueVector exprStack(cx);
   if (!exprStack.reserve(stackDepth - 1)) {
     return false;
   }
@@ -1763,12 +1793,6 @@ bool HasNativeDataPropertyPure(JSContext* cx, JSObject* obj, Value* vp) {
       if (MOZ_UNLIKELY(
               ClassMayResolveId(cx->names(), obj->getClass(), id, obj))) {
         return false;
-      }
-    } else if (obj->is<UnboxedPlainObject>()) {
-      if (obj->as<UnboxedPlainObject>().containsUnboxedOrExpandoProperty(cx,
-                                                                         id)) {
-        vp[1].setBoolean(true);
-        return true;
       }
     } else if (obj->is<TypedObject>()) {
       if (obj->as<TypedObject>().typeDescr().hasProperty(cx->names(), id)) {

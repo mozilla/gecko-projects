@@ -52,7 +52,6 @@ bool CompiledCode::swap(MacroAssembler& masm) {
   callSites.swap(masm.callSites());
   callSiteTargets.swap(masm.callSiteTargets());
   trapSites.swap(masm.trapSites());
-  callFarJumps.swap(masm.callFarJumps());
   symbolicAccesses.swap(masm.symbolicAccesses());
   codeLabels.swap(masm.codeLabels());
   return true;
@@ -78,7 +77,7 @@ ModuleGenerator::ModuleGenerator(const CompileArgs& args,
       taskState_(mutexid::WasmCompileTaskState),
       lifo_(GENERATOR_LIFO_DEFAULT_CHUNK_SIZE),
       masmAlloc_(&lifo_),
-      masm_(masmAlloc_),
+      masm_(masmAlloc_, /* limitedSize= */ false),
       debugTrapCodeOffset_(),
       lastPatchedCallSite_(0),
       startOfUnpatchedCallsites_(0),
@@ -618,6 +617,17 @@ static bool AppendForEach(Vec* dstVec, const Vec& srcVec, Op op) {
 }
 
 bool ModuleGenerator::linkCompiledCode(CompiledCode& code) {
+  // Before merging in new code, if calls in a prior code range might go out of
+  // range, insert far jumps to extend the range.
+
+  if (!InRange(startOfUnpatchedCallsites_,
+               masm_.size() + code.bytes.length())) {
+    startOfUnpatchedCallsites_ = masm_.size();
+    if (!linkCallSites()) {
+      return false;
+    }
+  }
+
   // All code offsets in 'code' must be incremented by their position in the
   // overall module when the code was appended.
 
@@ -655,13 +665,6 @@ bool ModuleGenerator::linkCompiledCode(CompiledCode& code) {
                        trapSiteOp)) {
       return false;
     }
-  }
-
-  auto callFarJumpOp = [=](uint32_t, CallFarJump* cfj) {
-    cfj->offsetBy(offsetInModule);
-  };
-  if (!AppendForEach(&callFarJumps_, code.callFarJumps, callFarJumpOp)) {
-    return false;
   }
 
   for (const SymbolicAccess& access : code.symbolicAccesses) {
@@ -766,16 +769,6 @@ bool ModuleGenerator::locallyCompileCurrentTask() {
 bool ModuleGenerator::finishTask(CompileTask* task) {
   masm_.haltingAlign(CodeAlignment);
 
-  // Before merging in the new function's code, if calls in a prior code range
-  // might go out of range, insert far jumps to extend the range.
-  if (!InRange(startOfUnpatchedCallsites_,
-               masm_.size() + task->output.bytes.length())) {
-    startOfUnpatchedCallsites_ = masm_.size();
-    if (!linkCallSites()) {
-      return false;
-    }
-  }
-
   if (!linkCompiledCode(task->output)) {
     return false;
   }
@@ -843,21 +836,6 @@ bool ModuleGenerator::compileFuncDef(uint32_t funcIndex,
   MOZ_ASSERT(!finishedFuncDefs_);
   MOZ_ASSERT(funcIndex < env_->numFuncs());
 
-  if (!currentTask_) {
-    if (freeTasks_.empty() && !finishOutstandingTask()) {
-      return false;
-    }
-    currentTask_ = freeTasks_.popCopy();
-  }
-
-  uint32_t funcBytecodeLength = end - begin;
-
-  FuncCompileInputVector& inputs = currentTask_->inputs;
-  if (!inputs.emplaceBack(funcIndex, lineOrBytecode, begin, end,
-                          std::move(lineNums))) {
-    return false;
-  }
-
   uint32_t threshold;
   switch (tier()) {
     case Tier::Baseline:
@@ -871,9 +849,36 @@ bool ModuleGenerator::compileFuncDef(uint32_t funcIndex,
       break;
   }
 
+  uint32_t funcBytecodeLength = end - begin;
+
+  // Do not go over the threshold if we can avoid it: spin off the compilation
+  // before appending the function if we would go over.  (Very large single
+  // functions may still exceed the threshold but this is fine; it'll be very
+  // uncommon and is in any case safely handled by the MacroAssembler's buffer
+  // limit logic.)
+
+  if (currentTask_ && currentTask_->inputs.length() &&
+      batchedBytecode_ + funcBytecodeLength > threshold) {
+    if (!launchBatchCompile()) {
+      return false;
+    }
+  }
+
+  if (!currentTask_) {
+    if (freeTasks_.empty() && !finishOutstandingTask()) {
+      return false;
+    }
+    currentTask_ = freeTasks_.popCopy();
+  }
+
+  if (!currentTask_->inputs.emplaceBack(funcIndex, lineOrBytecode, begin, end,
+                                        std::move(lineNums))) {
+    return false;
+  }
+
   batchedBytecode_ += funcBytecodeLength;
   MOZ_ASSERT(batchedBytecode_ <= MaxCodeSectionBytes);
-  return batchedBytecode_ <= threshold || launchBatchCompile();
+  return true;
 }
 
 bool ModuleGenerator::finishFuncDefs() {
@@ -910,7 +915,6 @@ bool ModuleGenerator::finishCodegen() {
   MOZ_ASSERT(masm_.callSites().empty());
   MOZ_ASSERT(masm_.callSiteTargets().empty());
   MOZ_ASSERT(masm_.trapSites().empty());
-  MOZ_ASSERT(masm_.callFarJumps().empty());
   MOZ_ASSERT(masm_.symbolicAccesses().empty());
   MOZ_ASSERT(masm_.codeLabels().empty());
 
@@ -1249,7 +1253,6 @@ size_t CompiledCode::sizeOfExcludingThis(
          codeRanges.sizeOfExcludingThis(mallocSizeOf) +
          callSites.sizeOfExcludingThis(mallocSizeOf) +
          callSiteTargets.sizeOfExcludingThis(mallocSizeOf) + trapSitesSize +
-         callFarJumps.sizeOfExcludingThis(mallocSizeOf) +
          symbolicAccesses.sizeOfExcludingThis(mallocSizeOf) +
          codeLabels.sizeOfExcludingThis(mallocSizeOf);
 }

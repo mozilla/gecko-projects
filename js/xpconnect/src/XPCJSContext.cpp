@@ -761,13 +761,15 @@ static mozilla::Atomic<bool> sSharedMemoryEnabled(false);
 static mozilla::Atomic<bool> sStreamsEnabled(false);
 static mozilla::Atomic<bool> sBigIntEnabled(false);
 static mozilla::Atomic<bool> sFieldsEnabled(false);
+static mozilla::Atomic<bool> sAwaitFixEnabled(false);
 
 void xpc::SetPrefableRealmOptions(JS::RealmOptions& options) {
   options.creationOptions()
       .setSharedMemoryAndAtomicsEnabled(sSharedMemoryEnabled)
       .setBigIntEnabled(sBigIntEnabled)
       .setStreamsEnabled(sStreamsEnabled)
-      .setFieldsEnabled(sFieldsEnabled);
+      .setFieldsEnabled(sFieldsEnabled)
+      .setAwaitFixEnabled(sAwaitFixEnabled);
 }
 
 static void ReloadPrefsCallback(const char* pref, XPCJSContext* xpccx) {
@@ -843,14 +845,13 @@ static void ReloadPrefsCallback(const char* pref, XPCJSContext* xpccx) {
   bool spectreJitToCxxCalls =
       Preferences::GetBool(JS_OPTIONS_DOT_STR "spectre.jit_to_C++_calls");
 
-  bool unboxedObjects =
-      Preferences::GetBool(JS_OPTIONS_DOT_STR "unboxed_objects");
-
   sSharedMemoryEnabled =
       Preferences::GetBool(JS_OPTIONS_DOT_STR "shared_memory");
   sStreamsEnabled = Preferences::GetBool(JS_OPTIONS_DOT_STR "streams");
   sFieldsEnabled =
       Preferences::GetBool(JS_OPTIONS_DOT_STR "experimental.fields");
+  sAwaitFixEnabled =
+      Preferences::GetBool(JS_OPTIONS_DOT_STR "experimental.await_fix");
 
 #ifdef DEBUG
   sExtraWarningsForSystemJS =
@@ -933,9 +934,6 @@ static void ReloadPrefsCallback(const char* pref, XPCJSContext* xpccx) {
                                 spectreValueMasking);
   JS_SetGlobalJitCompilerOption(cx, JSJITCOMPILER_SPECTRE_JIT_TO_CXX_CALLS,
                                 spectreJitToCxxCalls);
-
-  JS_SetGlobalJitCompilerOption(cx, JSJITCOMPILER_UNBOXED_OBJECTS,
-                                unboxedObjects);
 }
 
 XPCJSContext::~XPCJSContext() {

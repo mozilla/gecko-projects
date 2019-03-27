@@ -1421,7 +1421,7 @@ pref("identity.fxaccounts.remote.profile.uri", "https://profile.accounts.firefox
 pref("identity.fxaccounts.remote.oauth.uri", "https://oauth.accounts.firefox.com/v1");
 
 // Whether FxA pairing using QR codes is enabled.
-pref("identity.fxaccounts.pairing.enabled", false);
+pref("identity.fxaccounts.pairing.enabled", true);
 
 // The remote URI of the FxA pairing server
 pref("identity.fxaccounts.remote.pairing.uri", "wss://channelserver.services.mozilla.com");
@@ -1541,6 +1541,12 @@ pref("toolkit.telemetry.updatePing.enabled", true);
 pref("toolkit.telemetry.bhrPing.enabled", true);
 // Enables using Hybrid Content Telemetry from Mozilla privileged pages.
 pref("toolkit.telemetry.hybridContent.enabled", true);
+// Whether to enable Ecosystem Telemetry, requires a restart.
+#ifdef NIGHTLY_BUILD
+pref("toolkit.telemetry.ecosystemtelemetry.enabled", true);
+#else
+pref("toolkit.telemetry.ecosystemtelemetry.enabled", false);
+#endif
 
 // Ping Centre Telemetry settings.
 pref("browser.ping-centre.telemetry", true);

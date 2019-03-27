@@ -102,6 +102,7 @@ JitContext::JitContext(CompileRuntime* rt, CompileRealm* realm,
       realm_(realm),
 #ifdef DEBUG
       isCompilingWasm_(!realm),
+      oom_(false),
 #endif
       assemblerCount_(0) {
   SetJitContext(this);
@@ -115,6 +116,7 @@ JitContext::JitContext(JSContext* cx, TempAllocator* temp)
       realm_(CompileRealm::get(cx->realm())),
 #ifdef DEBUG
       isCompilingWasm_(false),
+      oom_(false),
 #endif
       assemblerCount_(0) {
   SetJitContext(this);
@@ -2352,7 +2354,7 @@ MethodStatus jit::CanEnterIon(JSContext* cx, RunState& state) {
 
   // If --ion-eager is used, compile with Baseline first, so that we
   // can directly enter IonMonkey.
-  if (JitOptions.eagerCompilation && !script->hasBaselineScript()) {
+  if (JitOptions.eagerIonCompilation() && !script->hasBaselineScript()) {
     MethodStatus status = CanEnterBaselineMethod(cx, state);
     if (status != Method_Compiled) {
       return status;

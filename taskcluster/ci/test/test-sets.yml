@@ -196,6 +196,10 @@ linux-qr-tests:
     - reftest
     - xpcshell
 
+linux-qr-smoketests:
+    - crashtest
+    - reftest
+
 linux-talos-flex:
     - talos-flex
 
@@ -435,6 +439,7 @@ android-hw-aarch64-raptor:
     - raptor-tp6m-7-geckoview
     - raptor-tp6m-8-geckoview
     - raptor-tp6m-9-geckoview
+    - raptor-tp6m-1-geckoview-cold
 
 android-hw-arm7-raptor-power:
     - raptor-speedometer-geckoview-power

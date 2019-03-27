@@ -196,7 +196,7 @@ class UrlbarInput {
    *   The trimmed string
    */
   trimValue(val) {
-    return UrlbarPrefs.get("trimURLs") ? this.window.trimURL(val) : val;
+    return UrlbarPrefs.get("trimURLs") ? BrowserUtils.trimURL(val) : val;
   }
 
   /**
@@ -474,7 +474,8 @@ class UrlbarInput {
       if (canonizedUrl) {
         this.value = canonizedUrl;
       } else if (result.autofill) {
-        this._autofillValue(result.autofill);
+        let { value, selectionStart, selectionEnd } = result.autofill;
+        this._autofillValue(value, selectionStart, selectionEnd);
       } else {
         this.value = this._getValueFromResult(result);
       }
@@ -553,6 +554,7 @@ class UrlbarInput {
       muxer: "UnifiedComplete",
       providers: ["UnifiedComplete"],
       searchString,
+      userContextId: this.window.gBrowser.selectedBrowser.getAttribute("usercontextid"),
     }));
   }
 
@@ -707,19 +709,23 @@ class UrlbarInput {
       !deletedAutofilledSubstring &&
       this.selectionEnd == value.length;
 
-    // The autofill placeholder is a string that we autofill now, before we
-    // start waiting on the new search's first result, in order to prevent a
-    // flicker in the input caused by the previous autofilled substring
-    // disappearing and reappearing when the new first result arrives.  Of
-    // course we can only autofill the placeholder if it starts with the new
-    // search string.
+    // Determine whether we can autofill the placeholder.  The placeholder is a
+    // value that we autofill now, when the search starts and before we wait on
+    // its first result, in order to prevent a flicker in the input caused by
+    // the previous autofilled substring disappearing and reappearing when the
+    // first result arrives.  Of course we can only autofill the placeholder if
+    // it starts with the new search string, and we shouldn't autofill anything
+    // if the caret isn't at the end of the input.
     if (!allowAutofill ||
         this._autofillPlaceholder.length <= value.length ||
-        !this._autofillPlaceholder.startsWith(value)) {
+        !this._autofillPlaceholder.toLocaleLowerCase()
+          .startsWith(value.toLocaleLowerCase())) {
       this._autofillPlaceholder = "";
-    }
-    if (this._autofillPlaceholder) {
-      this._autofillValueOnInput(this._autofillPlaceholder);
+    } else if (this._autofillPlaceholder &&
+               this.selectionEnd == this.value.length) {
+      let autofillValue =
+        value + this._autofillPlaceholder.substring(value.length);
+      this._autofillValue(autofillValue, value.length, autofillValue.length);
     }
 
     return allowAutofill;
@@ -848,10 +854,15 @@ class UrlbarInput {
         this.view.panel.setAttribute("actionoverride", "true");
       } else if (this._actionOverrideKeyCount &&
                  --this._actionOverrideKeyCount == 0) {
-        this.removeAttribute("actionoverride");
-        this.view.panel.removeAttribute("actionoverride");
+        this._clearActionOverride();
       }
     }
+  }
+
+  _clearActionOverride() {
+    this._actionOverrideKeyCount = 0;
+    this.removeAttribute("actionoverride");
+    this.view.panel.removeAttribute("actionoverride");
   }
 
   /**
@@ -931,40 +942,17 @@ class UrlbarInput {
   }
 
   /**
-   * Autofills a value into the input in response to the user's typing.  The
-   * autofill value must start with the value that's already in the input.  If
-   * it doesn't, this method doesn't do anything.  If it does, this method will
-   * autofill and set the selection automatically.
-   *
-   * @param {string} value
-   *   The value to autofill.
-   */
-  _autofillValueOnInput(value) {
-    // Don't ever autofill on input if the caret/selection isn't at the end, or
-    // if the value doesn't start with what the user typed.
-    if (this.selectionEnd != this.value.length ||
-        !value.startsWith(this._lastSearchString)) {
-      return;
-    }
-    this._autofillValue({
-      value,
-      selectionStart: this._lastSearchString.length,
-      selectionEnd: value.length,
-    });
-  }
-
-  /**
    * Autofills a value into the input.  The value will be autofilled regardless
    * of the input's current value.
    *
-   * @param {string} options.value
+   * @param {string} value
    *   The value to autofill.
-   * @param {integer} options.selectionStart
+   * @param {integer} selectionStart
    *   The new selectionStart.
-   * @param {integer} options.selectionEnd
+   * @param {integer} selectionEnd
    *   The new selectionEnd.
    */
-  _autofillValue({ value, selectionStart, selectionEnd } = {}) {
+  _autofillValue(value, selectionStart, selectionEnd) {
     // The autofilled value may be a URL that includes a scheme at the
     // beginning.  Do not allow it to be trimmed.
     this._setValue(value, false);
@@ -999,12 +987,18 @@ class UrlbarInput {
    */
   _loadURL(url, openUILinkWhere, params, result = {},
            browser = this.window.gBrowser.selectedBrowser) {
-    this.value = url;
-    browser.userTypedValue = url;
+    // No point in setting these because we'll handleRevert() a few rows below.
+    if (openUILinkWhere == "current") {
+      this.value = url;
+      browser.userTypedValue = url;
+    }
 
-    if (this.window.gInitialPages.includes(url)) {
+    // No point in setting this if we are loading in a new window.
+    if (openUILinkWhere != "window" &&
+        this.window.gInitialPages.includes(url)) {
       browser.initialPageLoadedFromUserAction = url;
     }
+
     try {
       UrlbarUtils.addToUrlbarHistory(url, this.window);
     } catch (ex) {
@@ -1160,6 +1154,10 @@ class UrlbarInput {
   // Event handlers below.
 
   _on_blur(event) {
+    // In certain cases, like holding an override key and confirming an entry,
+    // we don't key a keyup event for the override key, thus we make this
+    // additional cleanup on blur.
+    this._clearActionOverride();
     this.formatValue();
     // Respect the autohide preference for easier inspecting/debugging via
     // the browser toolbox.
@@ -1224,6 +1222,8 @@ class UrlbarInput {
       this.view.close();
       return;
     }
+
+    this.view.removeAccessibleFocus();
 
     // During composition with an IME, the following events happen in order:
     // 1. a compositionstart event

@@ -2964,15 +2964,21 @@ void nsIFrame::BuildDisplayListForStackingContext(
   }
 
   bool hasOverrideDirtyRect = false;
-  // If we have an override dirty region, and neither us nor our ancestors are
-  // modified, then use it.
-  if (HasOverrideDirtyRegion() && !aBuilder->InInvalidSubtree() &&
-      !IsFrameModified()) {
-    nsDisplayListBuilder::DisplayListBuildingData* data =
-        GetProperty(nsDisplayListBuilder::DisplayListBuildingRect());
-    if (data) {
-      dirtyRect = data->mDirtyRect.Intersect(visibleRect);
-      hasOverrideDirtyRect = true;
+  // If we're doing a partial build, we're not invalid and we're capable
+  // of having an override building rect (stacking context and fixed pos
+  // containing block), then we should assume we have one.
+  // Either we have an explicit one, or nothing in our subtree changed and
+  // we have an implicit empty rect.
+  if (aBuilder->IsPartialUpdate() && !aBuilder->InInvalidSubtree() &&
+      !IsFrameModified() && IsFixedPosContainingBlock()) {
+    dirtyRect = nsRect();
+    if (HasOverrideDirtyRegion()) {
+      nsDisplayListBuilder::DisplayListBuildingData* data =
+          GetProperty(nsDisplayListBuilder::DisplayListBuildingRect());
+      if (data) {
+        dirtyRect = data->mDirtyRect.Intersect(visibleRect);
+        hasOverrideDirtyRect = true;
+      }
     }
   }
 
@@ -7102,7 +7108,7 @@ Layer* nsIFrame::InvalidateLayer(DisplayItemType aDisplayItemKey,
   Layer* layer = FrameLayerBuilder::GetDedicatedLayer(this, aDisplayItemKey);
 
   nsIFrame* displayRoot = nsLayoutUtils::GetDisplayRootFrame(this);
-  InvalidateRenderingObservers(displayRoot, this);
+  InvalidateRenderingObservers(displayRoot, this, false);
 
   // Check if frame supports WebRender's async update
   if ((aFlags & UPDATE_IS_ASYNC) &&
@@ -10551,8 +10557,19 @@ void nsIFrame::SetParent(nsContainerFrame* aParent) {
 void nsIFrame::CreateOwnLayerIfNeeded(nsDisplayListBuilder* aBuilder,
                                       nsDisplayList* aList,
                                       bool* aCreatedContainerItem) {
-  if (GetContent() && GetContent()->IsXULElement() &&
-      GetContent()->AsElement()->HasAttr(kNameSpaceID_None, nsGkAtoms::layer)) {
+  wr::RenderRoot renderRoot = gfxUtils::GetRenderRootForFrame(this)
+      .valueOr(wr::RenderRoot::Default);
+
+  if (renderRoot != wr::RenderRoot::Default) {
+    aList->AppendToTop(MakeDisplayItem<nsDisplayRenderRoot>(
+        aBuilder, this, aList, aBuilder->CurrentActiveScrolledRoot(),
+        renderRoot));
+    if (aCreatedContainerItem) {
+      *aCreatedContainerItem = true;
+    }
+  } else if (GetContent() && GetContent()->IsXULElement() &&
+             GetContent()->AsElement()->HasAttr(kNameSpaceID_None,
+                                                nsGkAtoms::layer)) {
     aList->AppendToTop(MakeDisplayItem<nsDisplayOwnLayer>(
         aBuilder, this, aList, aBuilder->CurrentActiveScrolledRoot()));
     if (aCreatedContainerItem) {

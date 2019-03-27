@@ -1213,17 +1213,6 @@ bool IonCacheIRCompiler::emitCallNativeGetElementResult() {
   return true;
 }
 
-bool IonCacheIRCompiler::emitLoadUnboxedPropertyResult() {
-  JitSpew(JitSpew_Codegen, __FUNCTION__);
-  AutoOutputRegister output(*this);
-  Register obj = allocator.useRegister(masm, reader.objOperandId());
-
-  JSValueType fieldType = reader.jsValueType();
-  int32_t fieldOffset = int32StubField(reader.stubOffset());
-  masm.loadUnboxedProperty(Address(obj, fieldOffset), fieldType, output);
-  return true;
-}
-
 bool IonCacheIRCompiler::emitGuardFrameHasNoArgumentsObject() {
   MOZ_CRASH("Baseline-specific op");
 }
@@ -1333,14 +1322,28 @@ bool IonCacheIRCompiler::emitCompareStringResult() {
   masm.bind(&slow);
 
   prepareVMCall(masm, save);
-  masm.Push(right);
-  masm.Push(left);
+
+  // Push the operands in reverse order for JSOP_LE and JSOP_GT:
+  // - |left <= right| is implemented as |right >= left|.
+  // - |left > right| is implemented as |right < left|.
+  if (op == JSOP_LE || op == JSOP_GT) {
+    masm.Push(left);
+    masm.Push(right);
+  } else {
+    masm.Push(right);
+    masm.Push(left);
+  }
 
   using Fn = bool (*)(JSContext*, HandleString, HandleString, bool*);
   if (op == JSOP_EQ || op == JSOP_STRICTEQ) {
-    callVM<Fn, jit::StringsEqual<true>>(masm);
+    callVM<Fn, jit::StringsEqual<EqualityKind::Equal>>(masm);
+  } else if (op == JSOP_NE || op == JSOP_STRICTNE) {
+    callVM<Fn, jit::StringsEqual<EqualityKind::NotEqual>>(masm);
+  } else if (op == JSOP_LT || op == JSOP_GT) {
+    callVM<Fn, jit::StringsCompare<ComparisonKind::LessThan>>(masm);
   } else {
-    callVM<Fn, jit::StringsEqual<false>>(masm);
+    MOZ_ASSERT(op == JSOP_LE || op == JSOP_GE);
+    callVM<Fn, jit::StringsCompare<ComparisonKind::GreaterThanOrEqual>>(masm);
   }
 
   masm.storeCallBoolResult(output.typedReg().gpr());
@@ -1674,38 +1677,6 @@ bool IonCacheIRCompiler::emitAllocateAndStoreDynamicSlot() {
   return emitAddAndStoreSlotShared(CacheOp::AllocateAndStoreDynamicSlot);
 }
 
-bool IonCacheIRCompiler::emitStoreUnboxedProperty() {
-  JitSpew(JitSpew_Codegen, __FUNCTION__);
-  Register obj = allocator.useRegister(masm, reader.objOperandId());
-  JSValueType fieldType = reader.jsValueType();
-  int32_t offset = int32StubField(reader.stubOffset());
-  ConstantOrRegister val =
-      allocator.useConstantOrRegister(masm, reader.valOperandId());
-
-  Maybe<AutoScratchRegister> scratch;
-  if (needsPostBarrier() && UnboxedTypeNeedsPostBarrier(fieldType)) {
-    scratch.emplace(allocator, masm);
-  }
-
-  if (fieldType == JSVAL_TYPE_OBJECT && typeCheckInfo_->isSet()) {
-    FailurePath* failure;
-    if (!addFailurePath(&failure)) {
-      return false;
-    }
-    EmitCheckPropertyTypes(masm, typeCheckInfo_, obj, val, *liveRegs_,
-                           failure->label());
-  }
-
-  // Note that the storeUnboxedProperty call here is infallible, as the
-  // IR emitter is responsible for guarding on |val|'s type.
-  Address fieldAddr(obj, offset);
-  EmitICUnboxedPreBarrier(masm, fieldAddr, fieldType);
-  masm.storeUnboxedProperty(fieldAddr, fieldType, val, /* failure = */ nullptr);
-  if (needsPostBarrier() && UnboxedTypeNeedsPostBarrier(fieldType)) {
-    emitPostBarrierSlot(obj, val, scratch.ref());
-  }
-  return true;
-}
 
 bool IonCacheIRCompiler::emitStoreTypedObjectReferenceProperty() {
   JitSpew(JitSpew_Codegen, __FUNCTION__);

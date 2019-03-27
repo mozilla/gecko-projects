@@ -5251,6 +5251,21 @@ void PresShell::SetRenderingState(const RenderingState& aState) {
     }
   }
 
+  // nsSubDocumentFrame uses a resolution different from 1.0 to determine if it
+  // needs to build a nsDisplayResolution item. So if we are going from or
+  // to 1.0 then we need to invalidate the subdoc frame so that item gets
+  // created/removed.
+  if (mResolution.valueOr(1.0) != aState.mResolution.valueOr(1.0) &&
+      (mResolution.valueOr(1.0) == 1.0 ||
+       aState.mResolution.valueOr(1.0) == 1.0)) {
+    if (nsIFrame* frame = GetRootFrame()) {
+      frame = nsLayoutUtils::GetCrossDocParentFrame(frame);
+      if (frame) {
+        frame->InvalidateFrame();
+      }
+    }
+  }
+
   mRenderFlags = aState.mRenderFlags;
   mResolution = aState.mResolution;
 }
@@ -6452,6 +6467,8 @@ nsresult PresShell::EventHandler::HandleEvent(nsIFrame* aFrameForPresShell,
                                               WidgetGUIEvent* aGUIEvent,
                                               bool aDontRetargetEvents,
                                               nsEventStatus* aEventStatus) {
+  MOZ_ASSERT(aGUIEvent);
+  MOZ_DIAGNOSTIC_ASSERT(aGUIEvent->IsTrusted());
   MOZ_ASSERT(aEventStatus);
 
 #ifdef MOZ_TASK_TRACER
@@ -7613,6 +7630,9 @@ nsresult PresShell::EventHandler::HandleEventWithTarget(
     WidgetEvent* aEvent, nsIFrame* aNewEventFrame, nsIContent* aNewEventContent,
     nsEventStatus* aEventStatus, bool aIsHandlingNativeEvent,
     nsIContent** aTargetContent, nsIContent* aOverrideClickTarget) {
+  MOZ_ASSERT(aEvent);
+  MOZ_DIAGNOSTIC_ASSERT(aEvent->IsTrusted());
+
 #if DEBUG
   MOZ_ASSERT(!aNewEventFrame ||
                  aNewEventFrame->PresContext()->GetPresShell() == mPresShell,
@@ -7661,27 +7681,16 @@ nsresult PresShell::EventHandler::HandleEventWithCurrentEventInfo(
     }
   }
 
-  bool isHandlingUserInput = PrepareToDispatchEvent(aEvent);
-
-  // If we cannot open context menu even though eContextMenu is fired, we
-  // should stop dispatching it into the DOM.
-  if (aEvent->mMessage == eContextMenu &&
-      !PrepareToDispatchContextMenuEvent(aEvent)) {
+  bool isHandlingUserInput = false;
+  bool touchIsNew = false;
+  if (!PrepareToDispatchEvent(aEvent, aEventStatus, &isHandlingUserInput,
+                              &touchIsNew)) {
     return NS_OK;
   }
 
   // We finished preparing to dispatch the event.  So, let's record the
   // performance.
   RecordEventPreparationPerformance(aEvent);
-
-  // XXX Why don't we measure the performance of TouchManager::PreHandleEvent()
-  //     with RecordEventPreparationPerformance()?
-  bool touchIsNew = false;
-  if (!mPresShell->mTouchManager.PreHandleEvent(
-          aEvent, aEventStatus, touchIsNew, isHandlingUserInput,
-          mPresShell->mCurrentEventContent)) {
-    return NS_OK;
-  }
 
   AutoHandlingUserInputStatePusher userInpStatePusher(isHandlingUserInput,
                                                       aEvent, GetDocument());
@@ -7792,11 +7801,15 @@ nsresult PresShell::EventHandler::DispatchEvent(
       aOverrideClickTarget);
 }
 
-bool PresShell::EventHandler::PrepareToDispatchEvent(WidgetEvent* aEvent) {
-  if (!aEvent->IsTrusted()) {
-    return false;
-  }
+bool PresShell::EventHandler::PrepareToDispatchEvent(
+    WidgetEvent* aEvent, nsEventStatus* aEventStatus, bool* aIsUserInteraction,
+    bool* aTouchIsNew) {
+  MOZ_ASSERT(aEvent->IsTrusted());
+  MOZ_ASSERT(aEventStatus);
+  MOZ_ASSERT(aIsUserInteraction);
+  MOZ_ASSERT(aTouchIsNew);
 
+  *aTouchIsNew = false;
   if (aEvent->IsUserAction()) {
     mPresShell->mHasHandledUserInput = true;
   }
@@ -7810,12 +7823,14 @@ bool PresShell::EventHandler::PrepareToDispatchEvent(WidgetEvent* aEvent) {
       // Not all keyboard events are treated as user input, so that popups
       // can't be opened, fullscreen mode can't be started, etc at unexpected
       // time.
-      return keyboardEvent->CanTreatAsUserInput();
+      *aIsUserInteraction = keyboardEvent->CanTreatAsUserInput();
+      return true;
     }
     case eMouseDown:
     case eMouseUp:
     case ePointerDown:
     case ePointerUp:
+      *aIsUserInteraction = true;
       return true;
 
     case eMouseMove: {
@@ -7824,7 +7839,8 @@ bool PresShell::EventHandler::PrepareToDispatchEvent(WidgetEvent* aEvent) {
                           GetPresContext()->EventStateManager() ==
                               EventStateManager::GetActiveEventStateManager();
       nsIPresShell::AllowMouseCapture(allowCapture);
-      return false;
+      *aIsUserInteraction = false;
+      return true;
     }
     case eDrop: {
       nsCOMPtr<nsIDragSession> session = nsContentUtils::GetDragSession();
@@ -7835,11 +7851,41 @@ bool PresShell::EventHandler::PrepareToDispatchEvent(WidgetEvent* aEvent) {
           aEvent->mFlags.mOnlyChromeDispatch = true;
         }
       }
-      return false;
+      *aIsUserInteraction = false;
+      return true;
     }
+    case eContextMenu: {
+      *aIsUserInteraction = false;
 
+      // If we cannot open context menu even though eContextMenu is fired, we
+      // should stop dispatching it into the DOM.
+      WidgetMouseEvent* mouseEvent = aEvent->AsMouseEvent();
+      if (mouseEvent->IsContextMenuKeyEvent() &&
+          !AdjustContextMenuKeyEvent(mouseEvent)) {
+        return false;
+      }
+
+      // If "Shift" state is active, context menu should be forcibly opened even
+      // if web apps want to prevent it since we respect our users' intention.
+      // In this case, we don't fire "contextmenu" event on web content because
+      // of not cancelable.
+      if (mouseEvent->IsShift()) {
+        aEvent->mFlags.mOnlyChromeDispatch = true;
+        aEvent->mFlags.mRetargetToNonNativeAnonymous = true;
+      }
+      return true;
+    }
+    case eTouchStart:
+    case eTouchMove:
+    case eTouchEnd:
+    case eTouchCancel:
+    case eTouchPointerCancel:
+      return mPresShell->mTouchManager.PreHandleEvent(
+          aEvent, aEventStatus, *aTouchIsNew, *aIsUserInteraction,
+          mPresShell->mCurrentEventContent);
     default:
-      return false;
+      *aIsUserInteraction = false;
+      return true;
   }
 }
 
@@ -7890,30 +7936,6 @@ void PresShell::EventHandler::FinalizeHandlingEvent(WidgetEvent* aEvent) {
     default:
       return;
   }
-}
-
-bool PresShell::EventHandler::PrepareToDispatchContextMenuEvent(
-    WidgetEvent* aEvent) {
-  MOZ_ASSERT(aEvent);
-  MOZ_ASSERT(aEvent->mMessage == eContextMenu);
-
-  // XXX Why do we treat untrusted eContextMenu here?
-
-  WidgetMouseEvent* mouseEvent = aEvent->AsMouseEvent();
-  if (mouseEvent->IsContextMenuKeyEvent() &&
-      !AdjustContextMenuKeyEvent(mouseEvent)) {
-    return false;
-  }
-
-  // If "Shift" state is active, context menu should be forcibly opened even
-  // if web apps want to prevent it since we respect our users' intention.
-  // In this case, we don't fire "contextmenu" event on web content because
-  // of not cancelable.
-  if (mouseEvent->IsShift()) {
-    aEvent->mFlags.mOnlyChromeDispatch = true;
-    aEvent->mFlags.mRetargetToNonNativeAnonymous = true;
-  }
-  return true;
 }
 
 void PresShell::EventHandler::MaybeHandleKeyboardEventBeforeDispatch(
@@ -7973,10 +7995,6 @@ void PresShell::EventHandler::RecordEventPreparationPerformance(
     const WidgetEvent* aEvent) {
   MOZ_ASSERT(aEvent);
 
-  if (!aEvent->IsTrusted()) {
-    return;
-  }
-
   switch (aEvent->mMessage) {
     case eKeyPress:
     case eKeyDown:
@@ -8035,9 +8053,6 @@ void PresShell::EventHandler::RecordEventPreparationPerformance(
 
 void PresShell::EventHandler::RecordEventHandlingResponsePerformance(
     const WidgetEvent* aEvent) {
-  // XXX Why we include the peformance of untrusted events only here?
-  //     We don't include it at recoding the preparation performance.
-
   if (!Telemetry::CanRecordBase() || aEvent->mTimeStamp.IsNull() ||
       aEvent->mTimeStamp <= mPresShell->mLastOSWake ||
       !aEvent->AsInputEvent()) {
@@ -8230,8 +8245,8 @@ void PresShell::EventHandler::DispatchTouchEventToDOM(
       content = capturingContent;
     }
     // copy the event
-    WidgetTouchEvent newEvent(touchEvent->IsTrusted(), touchEvent->mMessage,
-                              touchEvent->mWidget);
+    MOZ_ASSERT(touchEvent->IsTrusted());
+    WidgetTouchEvent newEvent(true, touchEvent->mMessage, touchEvent->mWidget);
     newEvent.AssignTouchEventData(*touchEvent, false);
     newEvent.mTarget = targetPtr;
     newEvent.mFlags.mHandledByAPZ = touchEvent->mFlags.mHandledByAPZ;
@@ -9578,17 +9593,19 @@ void PresShell::DelayedInputEvent::Dispatch() {
 
 PresShell::DelayedMouseEvent::DelayedMouseEvent(WidgetMouseEvent* aEvent)
     : DelayedInputEvent() {
-  WidgetMouseEvent* mouseEvent = new WidgetMouseEvent(
-      aEvent->IsTrusted(), aEvent->mMessage, aEvent->mWidget, aEvent->mReason,
-      aEvent->mContextMenuTrigger);
+  MOZ_DIAGNOSTIC_ASSERT(aEvent->IsTrusted());
+  WidgetMouseEvent* mouseEvent =
+      new WidgetMouseEvent(true, aEvent->mMessage, aEvent->mWidget,
+                           aEvent->mReason, aEvent->mContextMenuTrigger);
   mouseEvent->AssignMouseEventData(*aEvent, false);
   mEvent = mouseEvent;
 }
 
 PresShell::DelayedKeyEvent::DelayedKeyEvent(WidgetKeyboardEvent* aEvent)
     : DelayedInputEvent() {
-  WidgetKeyboardEvent* keyEvent = new WidgetKeyboardEvent(
-      aEvent->IsTrusted(), aEvent->mMessage, aEvent->mWidget);
+  MOZ_DIAGNOSTIC_ASSERT(aEvent->IsTrusted());
+  WidgetKeyboardEvent* keyEvent =
+      new WidgetKeyboardEvent(true, aEvent->mMessage, aEvent->mWidget);
   keyEvent->AssignKeyEventData(*aEvent, false);
   keyEvent->mFlags.mIsSynthesizedForTests =
       aEvent->mFlags.mIsSynthesizedForTests;
@@ -10699,6 +10716,22 @@ bool nsIPresShell::SetVisualViewportOffset(
   return didChange;
 }
 
+void nsIPresShell::ScrollToVisual(
+    const nsPoint& aVisualViewportOffset,
+    FrameMetrics::ScrollOffsetUpdateType aUpdateType, ScrollMode aMode) {
+  if (aMode == ScrollMode::eSmooth) {
+    if (nsIScrollableFrame* sf = GetRootScrollFrameAsScrollable()) {
+      if (sf->SmoothScrollVisual(aVisualViewportOffset, aUpdateType)) {
+        return;
+      }
+    }
+  }
+
+  // If the caller asked for instant scroll, or if we failed
+  // to do a smooth scroll, do an instant scroll.
+  SetPendingVisualScrollUpdate(aVisualViewportOffset, aUpdateType);
+}
+
 void nsIPresShell::SetPendingVisualScrollUpdate(
     const nsPoint& aVisualViewportOffset,
     FrameMetrics::ScrollOffsetUpdateType aUpdateType) {
@@ -11076,11 +11109,11 @@ PresShell::EventHandler::HandlingTimeAccumulator::HandlingTimeAccumulator(
       mEvent(aEvent),
       mHandlingStartTime(TimeStamp::Now()) {
   MOZ_ASSERT(mEvent);
+  MOZ_ASSERT(mEvent->IsTrusted());
 }
 
 PresShell::EventHandler::HandlingTimeAccumulator::~HandlingTimeAccumulator() {
-  if (!mEvent->IsTrusted() ||
-      mEvent->mTimeStamp <= mEventHandler.mPresShell->mLastOSWake) {
+  if (mEvent->mTimeStamp <= mEventHandler.mPresShell->mLastOSWake) {
     return;
   }
 

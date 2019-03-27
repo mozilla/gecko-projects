@@ -91,6 +91,7 @@
 #include "nsAuthInformationHolder.h"
 #include "nsICancelable.h"
 #include "gfxPrefs.h"
+#include "gfxUtils.h"
 #include "nsILoginManagerPrompter.h"
 #include "nsPIWindowRoot.h"
 #include "nsIAuthPrompt2.h"
@@ -969,42 +970,35 @@ bool TabParent::DeallocPFilePickerParent(PFilePickerParent* actor) {
   return true;
 }
 
-auto TabParent::AllocPIndexedDBPermissionRequestParent(
-    const Principal& aPrincipal) -> PIndexedDBPermissionRequestParent* {
+IPCResult TabParent::RecvIndexedDBPermissionRequest(
+    const Principal& aPrincipal,
+    IndexedDBPermissionRequestResolver&& aResolve) {
   MOZ_ASSERT(NS_IsMainThread());
 
   nsCOMPtr<nsIPrincipal> principal(aPrincipal);
   if (!principal) {
-    return nullptr;
+    return IPC_FAIL_NO_REASON(this);
   }
 
   if (NS_WARN_IF(!mFrameElement)) {
-    return nullptr;
-  }
-
-  return mozilla::dom::indexedDB::AllocPIndexedDBPermissionRequestParent(
-      mFrameElement, principal);
-}
-
-mozilla::ipc::IPCResult TabParent::RecvPIndexedDBPermissionRequestConstructor(
-    PIndexedDBPermissionRequestParent* aActor, const Principal& aPrincipal) {
-  MOZ_ASSERT(NS_IsMainThread());
-  MOZ_ASSERT(aActor);
-
-  if (!mozilla::dom::indexedDB::RecvPIndexedDBPermissionRequestConstructor(
-          aActor)) {
     return IPC_FAIL_NO_REASON(this);
   }
+
+  RefPtr<indexedDB::PermissionRequestHelper> actor =
+      new indexedDB::PermissionRequestHelper(mFrameElement, principal,
+                                             aResolve);
+
+  indexedDB::PermissionRequestBase::PermissionValue permission;
+  nsresult rv = actor->PromptIfNeeded(&permission);
+  if (NS_FAILED(rv)) {
+    return IPC_FAIL_NO_REASON(this);
+  }
+
+  if (permission != indexedDB::PermissionRequestBase::kPermissionPrompt) {
+    aResolve(permission);
+  }
+
   return IPC_OK();
-}
-
-bool TabParent::DeallocPIndexedDBPermissionRequestParent(
-    PIndexedDBPermissionRequestParent* aActor) {
-  MOZ_ASSERT(NS_IsMainThread());
-  MOZ_ASSERT(aActor);
-
-  return mozilla::dom::indexedDB::DeallocPIndexedDBPermissionRequestParent(
-      aActor);
 }
 
 IPCResult TabParent::RecvPWindowGlobalConstructor(
@@ -3439,7 +3433,8 @@ TabParent::StartApzAutoscroll(float aAnchorX, float aAnchorY,
   if (mRenderFrame.IsInitialized()) {
     layers::LayersId layersId = mRenderFrame.GetLayersId();
     if (nsCOMPtr<nsIWidget> widget = GetWidget()) {
-      ScrollableLayerGuid guid{layersId, aPresShellId, aScrollId};
+      SLGuidAndRenderRoot guid(layersId, aPresShellId, aScrollId,
+                               gfxUtils::GetContentRenderRoot());
 
       // The anchor coordinates that are passed in are relative to the origin
       // of the screen, but we are sending them to APZ which only knows about
@@ -3468,7 +3463,9 @@ TabParent::StopApzAutoscroll(nsViewID aScrollId, uint32_t aPresShellId) {
   if (mRenderFrame.IsInitialized()) {
     layers::LayersId layersId = mRenderFrame.GetLayersId();
     if (nsCOMPtr<nsIWidget> widget = GetWidget()) {
-      ScrollableLayerGuid guid{layersId, aPresShellId, aScrollId};
+      SLGuidAndRenderRoot guid(layersId, aPresShellId, aScrollId,
+                               gfxUtils::GetContentRenderRoot());
+
       widget->StopAsyncAutoscroll(guid);
     }
   }

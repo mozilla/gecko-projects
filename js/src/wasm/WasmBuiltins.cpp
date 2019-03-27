@@ -1149,9 +1149,7 @@ bool wasm::EnsureBuiltinThunksInitialized() {
 
   MOZ_ASSERT(masm.callSites().empty());
   MOZ_ASSERT(masm.callSiteTargets().empty());
-  MOZ_ASSERT(masm.callFarJumps().empty());
   MOZ_ASSERT(masm.trapSites().empty());
-  MOZ_ASSERT(masm.callFarJumps().empty());
 
   ExecutableAllocator::cacheFlush(thunks->codeBase, thunks->codeSize);
   if (!ExecutableAllocator::makeExecutable(thunks->codeBase,
@@ -1223,7 +1221,7 @@ static Maybe<ABIFunctionType> ToBuiltinABIFunctionType(
   return Some(ABIFunctionType(abiType));
 }
 
-void* wasm::MaybeGetBuiltinThunk(HandleFunction f, const FuncType& funcType) {
+void* wasm::MaybeGetBuiltinThunk(JSFunction* f, const FuncType& funcType) {
   MOZ_ASSERT(builtinThunks);
 
   if (!f->isNative() || !f->hasJitInfo() ||

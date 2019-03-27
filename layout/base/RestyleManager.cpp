@@ -1983,6 +1983,7 @@ void RestyleManager::AnimationsWithDestroyedFrame ::
   StopAnimationsWithoutFrame(mContents, PseudoStyleType::NotPseudo);
   StopAnimationsWithoutFrame(mBeforeContents, PseudoStyleType::before);
   StopAnimationsWithoutFrame(mAfterContents, PseudoStyleType::after);
+  StopAnimationsWithoutFrame(mAfterContents, PseudoStyleType::marker);
 }
 
 void RestyleManager::AnimationsWithDestroyedFrame ::StopAnimationsWithoutFrame(
@@ -2002,6 +2003,10 @@ void RestyleManager::AnimationsWithDestroyedFrame ::StopAnimationsWithoutFrame(
       }
     } else if (aPseudoType == PseudoStyleType::after) {
       if (nsLayoutUtils::GetAfterFrame(content)) {
+        continue;
+      }
+    } else if (aPseudoType == PseudoStyleType::marker) {
+      if (nsLayoutUtils::GetMarkerFrame(content)) {
         continue;
       }
     }
@@ -2048,10 +2053,6 @@ static const nsIFrame* ExpectedOwnerForChild(const nsIFrame* aFrame) {
     }
     return parent->IsViewportFrame() ? nullptr
                                      : FirstContinuationOrPartOfIBSplit(parent);
-  }
-
-  if (aFrame->IsBulletFrame()) {
-    return FirstContinuationOrPartOfIBSplit(parent);
   }
 
   if (aFrame->IsLineFrame()) {
@@ -2565,7 +2566,8 @@ static void UpdateOneAdditionalComputedStyle(nsIFrame* aFrame, uint32_t aIndex,
   uint32_t equalStructs;  // Not used, actually.
   nsChangeHint childHint =
       aOldContext.CalcStyleDifference(*newStyle, &equalStructs);
-  if (!aFrame->HasAnyStateBits(NS_FRAME_OUT_OF_FLOW)) {
+  if (!aFrame->HasAnyStateBits(NS_FRAME_OUT_OF_FLOW) &&
+      !aFrame->IsColumnSpanInMulticolSubtree()) {
     childHint = NS_RemoveSubsumedHints(childHint,
                                        aRestyleState.ChangesHandledFor(aFrame));
   }
@@ -2742,6 +2744,20 @@ bool RestyleManager::ProcessPostTraversal(Element* aElement,
         maybeAnonBoxChild->ParentIsWrapperAnonBox()) {
       aRestyleState.AddPendingWrapperRestyle(
           ServoRestyleState::TableAwareParentFor(maybeAnonBoxChild));
+    }
+
+    // If we don't have a ::marker pseudo-element, but need it, then
+    // reconstruct the frame.  (The opposite situation implies 'display'
+    // changes so doesn't need to be handled explicitly here.)
+    if (styleFrame->StyleDisplay()->mDisplay == StyleDisplay::ListItem &&
+        styleFrame->IsBlockFrameOrSubclass() &&
+        !nsLayoutUtils::GetMarkerPseudo(aElement)) {
+      RefPtr<ComputedStyle> pseudoStyle =
+          aRestyleState.StyleSet().ProbePseudoElementStyle(
+              *aElement, PseudoStyleType::marker, styleFrame->Style());
+      if (pseudoStyle) {
+        changeHint |= nsChangeHint_ReconstructFrame;
+      }
     }
   }
 

@@ -443,11 +443,7 @@ def av1(value):
 
 @depends(target, nasm_version, when=av1 & compile_environment)
 def dav1d_asm(target, nasm_version):
-    if (
-            target.os == 'GNU' and target.kernel == 'Linux' and target.cpu in ('x86', 'x86_64') or
-            target.os == 'WINNT' and target.cpu in ('x86', 'x86_64') or
-            target.os == 'OSX' and target.kernel == 'Darwin' and target.cpu == 'x86_64'
-       ):
+    if target.os != 'Android' and target.cpu in ('x86', 'x86_64'):
         if nasm_version < '2.13':
             die('nasm 2.13 or greater is required for AV1 support. '
                 'Either install nasm or add --disable-av1 to your configure options.')
@@ -720,14 +716,11 @@ set_config('MOZ_ENABLE_WEBRENDER', webrender.enable)
 option('--enable-rust-simd', env='MOZ_RUST_SIMD',
        help='Enable explicit SIMD in Rust code.')
 
-@depends('--enable-rust-simd', target, rustc_info)
-def rust_simd(value, target, rustc_info):
-    # As of 2018-06-05, the simd crate only works on aarch64,
-    # armv7, x86 and x86_64.
+@depends('--enable-rust-simd', target)
+def rust_simd(value, target):
+    # As of 2019-03-04, the simd-accel feature of encoding_rs has not
+    # been properly set up outside aarch64, armv7, x86 and x86_64.
     if target.cpu in ('aarch64', 'arm', 'x86', 'x86_64') and value:
-        if rustc_info and rustc_info.version >= Version('1.33.0'):
-            die('--enable-rust-simd does not work with Rust 1.33 or later. '
-                'See https://bugzilla.mozilla.org/show_bug.cgi?id=1521249 .')
         return True
 
 set_config('MOZ_RUST_SIMD', rust_simd)
@@ -1170,8 +1163,12 @@ def midl_flags(c_compiler, target, toolchain_search_path):
             'aarch64': 'arm64',
         }[target.cpu]
         flags = ['-env', env]
-        # Ideally, we'd use ['-cpp_cmd', c_compiler.compiler], but clang-cl
-        # currently doesn't work as a preprocessor for midl, so we need to
+
+        if c_compiler.version >= '8':
+            return flags + ['-cpp_cmd', c_compiler.compiler]
+
+        # clang-cl didn't work as a preprocessor for midl before version 8
+        # so we need to find cl if we use an older version.
         # find cl. https://bugs.llvm.org/show_bug.cgi?id=40140
         cl = find_program('cl', paths=toolchain_search_path)
         if not cl:

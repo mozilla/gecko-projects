@@ -60,6 +60,7 @@ EXPORTS.mozilla += [
     'core/Telemetry.h',
     'other/CombinedStacks.h',
     'other/ProcessedStack.h',
+    'TelemetryOriginEnums.h',
 ]
 
 EXPORTS.mozilla.telemetry += [
@@ -74,6 +75,7 @@ SOURCES += [
     'core/TelemetryCommon.cpp',
     'core/TelemetryEvent.cpp',
     'core/TelemetryHistogram.cpp',
+    'core/TelemetryOrigin.cpp',
     'core/TelemetryScalar.cpp',
     'geckoview/TelemetryGeckoViewPersistence.cpp',
     'other/CombinedStacks.cpp',
@@ -110,6 +112,7 @@ EXTRA_JS_MODULES += [
     'other/GCTelemetry.jsm',
     'other/UITelemetry.jsm',
     'pings/CoveragePing.jsm',
+    'pings/EcosystemTelemetry.jsm',
     'pings/EventPing.jsm',
     'pings/HealthPing.jsm',
     'pings/ModulesPing.jsm',

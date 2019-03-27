@@ -350,6 +350,9 @@ class nsCSSFrameConstructor final : public nsFrameManager {
 
   void AddSizeOfIncludingThis(nsWindowSizes& aSizes) const;
 
+  // temporary - please don't add external uses outside of nsBulletFrame
+  nsCounterManager* CounterManager() { return &mCounterManager; }
+
  private:
   struct FrameConstructionItem;
   class FrameConstructionItemList;
@@ -684,23 +687,18 @@ class nsCSSFrameConstructor final : public nsFrameManager {
      an SVG text frame. */
 #define FCDATA_IS_SVG_TEXT 0x80000
   /**
-   * When FCDATA_CREATE_BLOCK_WRAPPER_FOR_ALL_KIDS is set, this bit says
-   * if we should create a grid/flex/columnset container instead of
-   * a block wrapper when the styles says so.
+   * If FCDATA_ALLOW_GRID_FLEX_COLUMN is set, then we should create a
+   * grid/flex/column container instead of a block wrapper when the styles says
+   * so. This bit is meaningful only if FCDATA_CREATE_BLOCK_WRAPPER_FOR_ALL_KIDS
+   * is also set.
    */
-#define FCDATA_ALLOW_GRID_FLEX_COLUMNSET 0x200000
+#define FCDATA_ALLOW_GRID_FLEX_COLUMN 0x200000
   /**
    * Whether the kids of this FrameConstructionData should be flagged as having
    * a wrapper anon box parent.  This should only be set if
    * FCDATA_USE_CHILD_ITEMS is set.
    */
 #define FCDATA_IS_WRAPPER_ANON_BOX 0x400000
-  /**
-   * If FCDATA_MAY_NEED_BULLET is set, then the frame will be checked
-   * whether an nsBulletFrame needs to be created for it or not. Only the
-   * frames inherited from nsBlockFrame should have this bit set.
-   */
-#define FCDATA_MAY_NEED_BULLET 0x800000
 
   /* Structure representing information about how a frame should be
      constructed.  */
@@ -1774,22 +1772,6 @@ class nsCSSFrameConstructor final : public nsFrameManager {
                                    bool* aHaveFirstLetterStyle,
                                    bool* aHaveFirstLineStyle);
 
-  // Initialize aBlockFrame, and wrap it in a ColumnSetFrame if needed.
-  //
-  // If a ColumnSetFrame needs to be created, then this function will create
-  // one, and set aBlockFrame as its child (with an updated "columnContent"
-  // ComputedStyle() pointer), and initialize both frames. Otherwise, it
-  // initializes aBlockFrame.
-  //
-  // @return the new ColumnSetFrame if needed; otherwise aBlockFrame.
-  //
-  // FIXME (Bug 1489295): Callers using this function to create multi-column
-  // hierarchy should be revised to support column-span.
-  nsContainerFrame* InitAndWrapInColumnSetFrameIfNeeded(
-      nsFrameConstructorState& aState, nsIContent* aContent,
-      nsContainerFrame* aParentFrame, nsContainerFrame* aBlockFrame,
-      ComputedStyle* aComputedStyle);
-
   // |aContentParentFrame| should be null if it's really the same as
   // |aParentFrame|.
   // @param aFrameItems where we want to put the block in case it's in-flow.
@@ -1813,8 +1795,6 @@ class nsCSSFrameConstructor final : public nsFrameManager {
                       nsContainerFrame** aNewFrame, nsFrameItems& aFrameItems,
                       nsIFrame* aPositionedFrameForAbsPosContainer,
                       PendingBinding* aPendingBinding);
-
-  void CreateBulletFrameForListItemIfNeeded(nsBlockFrame* aBlockFrame);
 
   // Build the initial column hierarchy around aColumnContent. This function
   // should be called before constructing aColumnContent's children.

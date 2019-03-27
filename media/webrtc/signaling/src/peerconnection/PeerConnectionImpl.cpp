@@ -1563,15 +1563,12 @@ class RTCStatsReportInternalConstruct : public RTCStatsReportInternal {
                                   DOMHighResTimeStamp now) {
     mPcid = pcid;
     mRtpContributingSourceStats.Construct();
-    mInboundRTPStreamStats.Construct();
-    mOutboundRTPStreamStats.Construct();
-    mMediaStreamTrackStats.Construct();
-    mMediaStreamStats.Construct();
-    mTransportStats.Construct();
-    mIceComponentStats.Construct();
+    mInboundRtpStreamStats.Construct();
+    mOutboundRtpStreamStats.Construct();
+    mRemoteInboundRtpStreamStats.Construct();
+    mRemoteOutboundRtpStreamStats.Construct();
     mIceCandidatePairStats.Construct();
     mIceCandidateStats.Construct();
-    mCodecStats.Construct();
     mTimestamp.Construct(now);
     mTrickledIceCandidateStats.Construct();
     mRawLocalCandidates.Construct();
@@ -2827,7 +2824,7 @@ RefPtr<RTCStatsQueryPromise> PeerConnectionImpl::ExecuteStatsQuery_s(
                                                   &bytesReceived, &packetsLost,
                                                   &rtt)) {
             remoteId = NS_LITERAL_STRING("outbound_rtcp_") + idstr;
-            RTCInboundRTPStreamStats s;
+            RTCRemoteInboundRtpStreamStats s;
             // TODO Bug 1496533 - use reception time not query time
             s.mTimestamp.Construct(query->now);
             s.mId.Construct(remoteId);
@@ -2844,13 +2841,13 @@ RefPtr<RTCStatsQueryPromise> PeerConnectionImpl::ExecuteStatsQuery_s(
             if (rtt > 0) {  // RTT is not reported when it is zero
               s.mRoundTripTime.Construct(static_cast<double>(rtt) / 1000);
             }
-            query->report->mInboundRTPStreamStats.Value().AppendElement(
+            query->report->mRemoteInboundRtpStreamStats.Value().AppendElement(
                 s, fallible);
           }
         }
         // Then, fill in local side (with cross-link to remote only if present)
         {
-          RTCOutboundRTPStreamStats s;
+          RTCOutboundRtpStreamStats s;
           // TODO Bug 1496533 - use reception time not query time
           s.mTimestamp.Construct(query->now);
           s.mId.Construct(localId);
@@ -2894,7 +2891,7 @@ RefPtr<RTCStatsQueryPromise> PeerConnectionImpl::ExecuteStatsQuery_s(
               qpSum.apply([&s](uint64_t aQp) { s.mQpSum.Construct(aQp); });
             }
           });
-          query->report->mOutboundRTPStreamStats.Value().AppendElement(
+          query->report->mOutboundRtpStreamStats.Value().AppendElement(
               s, fallible);
         }
         break;
@@ -2913,7 +2910,7 @@ RefPtr<RTCStatsQueryPromise> PeerConnectionImpl::ExecuteStatsQuery_s(
           uint64_t bytesSent;
           if (mp.Conduit()->GetRTCPSenderReport(&packetsSent, &bytesSent)) {
             remoteId = NS_LITERAL_STRING("inbound_rtcp_") + idstr;
-            RTCOutboundRTPStreamStats s;
+            RTCRemoteOutboundRtpStreamStats s;
             // TODO Bug 1496533 - use reception time not query time
             s.mTimestamp.Construct(query->now);
             s.mId.Construct(remoteId);
@@ -2925,12 +2922,12 @@ RefPtr<RTCStatsQueryPromise> PeerConnectionImpl::ExecuteStatsQuery_s(
             s.mLocalId.Construct(localId);
             s.mPacketsSent.Construct(packetsSent);
             s.mBytesSent.Construct(bytesSent);
-            query->report->mOutboundRTPStreamStats.Value().AppendElement(
+            query->report->mRemoteOutboundRtpStreamStats.Value().AppendElement(
                 s, fallible);
           }
         }
         // Then, fill in local side (with cross-link to remote only if present)
-        RTCInboundRTPStreamStats s;
+        RTCInboundRtpStreamStats s;
         s.mTimestamp.Construct(query->now);
         s.mId.Construct(localId);
         s.mType.Construct(RTCStatsType::Inbound_rtp);
@@ -2977,7 +2974,7 @@ RefPtr<RTCStatsQueryPromise> PeerConnectionImpl::ExecuteStatsQuery_s(
             s.mFramesDecoded.Construct(framesDecoded);
           }
         });
-        query->report->mInboundRTPStreamStats.Value().AppendElement(s,
+        query->report->mInboundRtpStreamStats.Value().AppendElement(s,
                                                                     fallible);
         // Fill in Contributing Source statistics
         mp.GetContributingSourceStats(

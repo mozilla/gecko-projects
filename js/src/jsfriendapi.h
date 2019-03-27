@@ -170,7 +170,6 @@ enum {
   JS_TELEMETRY_GC_MARK_RATE,
   JS_TELEMETRY_PRIVILEGED_PARSER_COMPILE_LAZY_AFTER_MS,
   JS_TELEMETRY_WEB_PARSER_COMPILE_LAZY_AFTER_MS,
-  JS_TELEMETRY_DEPRECATED_STRING_GENERICS,
   JS_TELEMETRY_END
 };
 
@@ -2461,7 +2460,7 @@ extern JS_FRIEND_API bool ExecuteInJSMEnvironment(JSContext* cx,
 // See also: JS::CloneAndExecuteScript(...)
 extern JS_FRIEND_API bool ExecuteInJSMEnvironment(
     JSContext* cx, JS::HandleScript script, JS::HandleObject jsmEnv,
-    JS::AutoObjectVector& targetObj);
+    JS::HandleObjectVector targetObj);
 
 // Used by native methods to determine the JSMEnvironment of caller if possible
 // by looking at stack frames. Returns nullptr if top frame isn't a scripted

@@ -1381,7 +1381,8 @@ FrameChildListID nsLayoutUtils::GetChildListNameFor(nsIFrame* aChildFrame) {
 
 static Element* GetPseudo(const nsIContent* aContent, nsAtom* aPseudoProperty) {
   MOZ_ASSERT(aPseudoProperty == nsGkAtoms::beforePseudoProperty ||
-             aPseudoProperty == nsGkAtoms::afterPseudoProperty);
+             aPseudoProperty == nsGkAtoms::afterPseudoProperty ||
+             aPseudoProperty == nsGkAtoms::markerPseudoProperty);
   if (!aContent->MayHaveAnonymousChildren()) {
     return nullptr;
   }
@@ -1407,6 +1408,17 @@ Element* nsLayoutUtils::GetAfterPseudo(const nsIContent* aContent) {
 /*static*/
 nsIFrame* nsLayoutUtils::GetAfterFrame(const nsIContent* aContent) {
   Element* pseudo = GetAfterPseudo(aContent);
+  return pseudo ? pseudo->GetPrimaryFrame() : nullptr;
+}
+
+/*static*/
+Element* nsLayoutUtils::GetMarkerPseudo(const nsIContent* aContent) {
+  return GetPseudo(aContent, nsGkAtoms::markerPseudoProperty);
+}
+
+/*static*/
+nsIFrame* nsLayoutUtils::GetMarkerFrame(const nsIContent* aContent) {
+  Element* pseudo = GetMarkerPseudo(aContent);
   return pseudo ? pseudo->GetPrimaryFrame() : nullptr;
 }
 
@@ -1555,6 +1567,8 @@ bool nsLayoutUtils::IsProperAncestorFrame(const nsIFrame* aAncestorFrame,
 int32_t nsLayoutUtils::DoCompareTreePosition(
     nsIContent* aContent1, nsIContent* aContent2, int32_t aIf1Ancestor,
     int32_t aIf2Ancestor, const nsIContent* aCommonAncestor) {
+  MOZ_ASSERT(aIf1Ancestor == -1 || aIf1Ancestor == 0 || aIf1Ancestor == 1);
+  MOZ_ASSERT(aIf2Ancestor == -1 || aIf2Ancestor == 0 || aIf2Ancestor == 1);
   MOZ_ASSERT(aContent1, "aContent1 must not be null");
   MOZ_ASSERT(aContent2, "aContent2 must not be null");
 
@@ -1688,6 +1702,8 @@ int32_t nsLayoutUtils::DoCompareTreePosition(nsIFrame* aFrame1,
                                              int32_t aIf1Ancestor,
                                              int32_t aIf2Ancestor,
                                              nsIFrame* aCommonAncestor) {
+  MOZ_ASSERT(aIf1Ancestor == -1 || aIf1Ancestor == 0 || aIf1Ancestor == 1);
+  MOZ_ASSERT(aIf2Ancestor == -1 || aIf2Ancestor == 0 || aIf2Ancestor == 1);
   MOZ_ASSERT(aFrame1, "aFrame1 must not be null");
   MOZ_ASSERT(aFrame2, "aFrame2 must not be null");
 
@@ -1704,6 +1720,8 @@ int32_t nsLayoutUtils::DoCompareTreePosition(nsIFrame* aFrame1,
 int32_t nsLayoutUtils::DoCompareTreePosition(
     nsIFrame* aFrame1, nsIFrame* aFrame2, nsTArray<nsIFrame*>& aFrame2Ancestors,
     int32_t aIf1Ancestor, int32_t aIf2Ancestor, nsIFrame* aCommonAncestor) {
+  MOZ_ASSERT(aIf1Ancestor == -1 || aIf1Ancestor == 0 || aIf1Ancestor == 1);
+  MOZ_ASSERT(aIf2Ancestor == -1 || aIf2Ancestor == 0 || aIf2Ancestor == 1);
   MOZ_ASSERT(aFrame1, "aFrame1 must not be null");
   MOZ_ASSERT(aFrame2, "aFrame2 must not be null");
 
@@ -8810,8 +8828,9 @@ ScrollMetadata nsLayoutUtils::ComputeScrollMetadata(
           presShell->IsVisualViewportOffsetSet()) {
         // Restore the visual viewport offset to the copy stored on the
         // main thread.
-        presShell->SetPendingVisualScrollUpdate(
-            presShell->GetVisualViewportOffset(), FrameMetrics::eRestore);
+        presShell->ScrollToVisual(presShell->GetVisualViewportOffset(),
+                                  FrameMetrics::eRestore,
+                                  nsIPresShell::ScrollMode::eInstant);
       }
 
       if (const Maybe<nsIPresShell::VisualScrollUpdate>& visualUpdate =
@@ -9576,8 +9595,7 @@ static nsRect ComputeSVGReferenceRect(nsIFrame* aFrame,
         //    system established by the `viewBox` attribute.
         // 2. The dimension of the reference box is set to the width and height
         //    values of the `viewBox` attribute.
-        SVGViewBox* viewBox = svgElement->GetViewBox();
-        const SVGViewBoxRect& value = viewBox->GetAnimValue();
+        const SVGViewBoxRect& value = svgElement->GetViewBox()->GetAnimValue();
         r = nsRect(nsPresContext::CSSPixelsToAppUnits(value.x),
                    nsPresContext::CSSPixelsToAppUnits(value.y),
                    nsPresContext::CSSPixelsToAppUnits(value.width),
@@ -9719,34 +9737,6 @@ already_AddRefed<nsFontMetrics> nsLayoutUtils::GetMetricsFor(
   params.textPerf = aPresContext->GetTextPerfMetrics();
   params.featureValueLookup = aPresContext->GetFontFeatureValuesLookup();
   return aPresContext->DeviceContext()->GetMetricsFor(font, params);
-}
-
-/* static */
-void nsLayoutUtils::FixupNoneGeneric(nsFont* aFont, uint8_t aGenericFontID,
-                                     const nsFont* aDefaultVariableFont) {
-  bool useDocumentFonts = StaticPrefs::browser_display_use_document_fonts();
-  if (aGenericFontID == kGenericFont_NONE ||
-      (!useDocumentFonts && (aGenericFontID == kGenericFont_cursive ||
-                             aGenericFontID == kGenericFont_fantasy))) {
-    FontFamilyType defaultGeneric =
-        aDefaultVariableFont->fontlist.GetDefaultFontType();
-    MOZ_ASSERT(aDefaultVariableFont->fontlist.IsEmpty() &&
-               (defaultGeneric == eFamily_serif ||
-                defaultGeneric == eFamily_sans_serif));
-    if (defaultGeneric != eFamily_none) {
-      if (useDocumentFonts) {
-        aFont->fontlist.SetDefaultFontType(defaultGeneric);
-      } else {
-        // Either prioritize the first generic in the list,
-        // or (if there isn't one) prepend the default variable font.
-        if (!aFont->fontlist.PrioritizeFirstGeneric()) {
-          aFont->fontlist.PrependGeneric(defaultGeneric);
-        }
-      }
-    }
-  } else {
-    aFont->fontlist.SetDefaultFontType(eFamily_none);
-  }
 }
 
 /* static */
