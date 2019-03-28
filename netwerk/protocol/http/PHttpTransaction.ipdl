@@ -44,7 +44,8 @@ parent:
                       bool responseIsComplete,
                       int64_t transferSize,
                       TimingStruct timings,
-                      nsHttpHeaderArray responseTrailers);
+                      nsHttpHeaderArray responseTrailers,
+                      bool hasStickyConn);
 
 child:
   async __delete__();
@@ -67,7 +68,8 @@ child:
   async ResumePump();
 
   async SetDNSWasRefreshed();
-
+  async DontReuseConnection();
+  async SetH2WSConnRefTaken();
 };
 
 } // namespace net

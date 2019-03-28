@@ -105,8 +105,6 @@ class nsHttpTransaction final : public nsAHttpTransaction,
 
   void SetSecurityCallbacks(nsIInterfaceRequestor* aCallbacks);
 
-  void SetH2WSConnRefTaken();
-
   // Called to set/find out if the transaction generated a complete response.
   void SetResponseIsComplete() { mResponseIsComplete = true; }
 
@@ -403,8 +401,6 @@ class nsHttpTransaction final : public nsAHttpTransaction,
   // This examins classification of this transaction whether the Throttleable
   // class has been set while Leader, Unblocked, DontThrottle has not.
   bool EligibleForThrottling() const;
-
-  void DontReuseConnection();
 
  private:
   bool mSubmittedRatePacing;

@@ -2027,9 +2027,8 @@ nsresult nsHttpChannel::ProcessFailedProxyConnect(uint32_t httpStatus) {
 
   // Make sure the connection is thrown away as it can be in a bad state
   // and the proxy may just hang on the next request.
-  // TODO: Bug 1497247 fix this in connection stickness bug.
-  // MOZ_ASSERT(mTransaction);
-  // mTransaction->DontReuseConnection();
+  MOZ_ASSERT(mTransaction);
+  mTransaction->DontReuseConnection();
 
   Cancel(rv);
   {
@@ -6111,13 +6110,12 @@ NS_IMETHODIMP nsHttpChannel::CloseStickyConnection() {
   }
 
   if (!(mCaps & NS_HTTP_STICKY_CONNECTION ||
-        mTransaction->IsStickyConnection())) {
+        mTransaction->HasStickyConnection())) {
     LOG(("  not sticky"));
     return NS_OK;
   }
 
-  // TODO: Bug 1497247 fix this in connection stickness bug.
-  // mTransaction->DontReuseConnection();
+  mTransaction->DontReuseConnection();
   return NS_OK;
 }
 
@@ -7989,10 +7987,9 @@ nsHttpChannel::OnStopRequest(nsIRequest* request, nsresult status) {
       }
     }
 
-    // TODO: Bug 1497247 fix this in connection stickness bug
-    // if (mCaps & NS_HTTP_STICKY_CONNECTION) {
-    //   mTransaction->SetH2WSConnRefTaken();
-    // }
+    if (mCaps & NS_HTTP_STICKY_CONNECTION) {
+      mTransaction->SetH2WSConnRefTaken();
+    }
 
     mTransferSize = mTransaction->GetTransferSize();
 

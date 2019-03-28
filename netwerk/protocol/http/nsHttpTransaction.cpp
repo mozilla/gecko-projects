@@ -1015,7 +1015,7 @@ nsresult nsHttpTransaction::WriteSegments(nsAHttpSegmentWriter* writer,
   return rv;
 }
 
-bool nsHttpTransaction::IsStickyConnection() {
+bool nsHttpTransaction::HasStickyConnection() {
   return mCaps & NS_HTTP_STICKY_CONNECTION;
 }
 

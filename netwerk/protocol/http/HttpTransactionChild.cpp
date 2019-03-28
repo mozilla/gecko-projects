@@ -214,6 +214,22 @@ mozilla::ipc::IPCResult HttpTransactionChild::RecvSetDNSWasRefreshed() {
   return IPC_OK();
 }
 
+mozilla::ipc::IPCResult HttpTransactionChild::RecvDontReuseConnection() {
+  LOG(("HttpTransactionChild::RecvDontReuseConnection [this=%p]\n", this));
+  if (mTransaction) {
+    mTransaction->DontReuseConnection();
+  }
+  return IPC_OK();
+}
+
+mozilla::ipc::IPCResult HttpTransactionChild::RecvSetH2WSConnRefTaken() {
+  LOG(("HttpTransactionChild::RecvSetH2WSConnRefTaken [this=%p]\n", this));
+  if (mTransaction) {
+    mTransaction->SetH2WSConnRefTaken();
+  }
+  return IPC_OK();
+}
+
 //-----------------------------------------------------------------------------
 // HttpTransactionChild <nsIStreamListener>
 //-----------------------------------------------------------------------------
@@ -313,7 +329,8 @@ HttpTransactionChild::OnStopRequest(nsIRequest* aRequest, nsresult aStatus) {
   Unused << SendOnStopRequest(
       aStatus, mTransaction->ResponseIsComplete(),
       mTransaction->GetTransferSize(), mTransaction->Timings(),
-      responseTrailer ? *responseTrailer : nsHttpHeaderArray());
+      responseTrailer ? *responseTrailer : nsHttpHeaderArray(),
+      mTransaction->HasStickyConnection());
   mTransaction = nullptr;
   mTransactionPump = nullptr;
   return NS_OK;

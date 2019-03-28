@@ -26,7 +26,8 @@ NS_IMPL_ISUPPORTS(HttpTransactionParent, nsIRequest,
 HttpTransactionParent::HttpTransactionParent()
     : mIPCOpen(false),
       mResponseHeadTaken(false),
-      mResponseTrailersTaken(false) {
+      mResponseTrailersTaken(false),
+      mHasStickyConnection(false) {
   LOG(("Creating HttpTransactionParent @%p\n", this));
 
   this->mSelfAddr.inet = {};
@@ -199,8 +200,9 @@ void HttpTransactionParent::GetNetworkAddresses(NetAddr& self, NetAddr& peer) {
   peer = mPeerAddr;
 }
 
-// TODO: propogate the sticky information from socket process
-bool HttpTransactionParent::IsStickyConnection() { return false; }
+bool HttpTransactionParent::HasStickyConnection() {
+  return mHasStickyConnection;
+}
 
 mozilla::TimeStamp HttpTransactionParent::GetDomainLookupStart() {
   return mTimings.domainLookupStart;
@@ -333,7 +335,7 @@ mozilla::ipc::IPCResult HttpTransactionParent::RecvOnDataAvailable(
 mozilla::ipc::IPCResult HttpTransactionParent::RecvOnStopRequest(
     const nsresult& aStatus, const bool& aResponseIsComplete,
     const int64_t& aTransferSize, const TimingStruct& aTimings,
-    const nsHttpHeaderArray& responseTrailers) {
+    const nsHttpHeaderArray& aResponseTrailers, const bool& aHasStickyConn) {
   LOG(("HttpTransactionParent::RecvOnStopRequest [this=%p status=%" PRIx32
        "]\n",
        this, static_cast<uint32_t>(aStatus)));
@@ -347,7 +349,8 @@ mozilla::ipc::IPCResult HttpTransactionParent::RecvOnStopRequest(
   mResponseIsComplete = aResponseIsComplete;
   mTransferSize = aTransferSize;
   mTimings = aTimings;
-  mResponseTrailers = new nsHttpHeaderArray(responseTrailers);
+  mResponseTrailers = new nsHttpHeaderArray(aResponseTrailers);
+  mHasStickyConnection = aHasStickyConn;
 
   nsCOMPtr<nsIStreamListener> chan = mChannel;
   Unused << chan->OnStopRequest(this, aStatus);
@@ -432,6 +435,16 @@ void HttpTransactionParent::ActorDestroy(ActorDestroyReason aWhy) {
   LOG(("HttpTransactionParent::ActorDestroy [this=%p]\n", this));
   mIPCOpen = false;
   // TODO: we (probably?) have to notify OnStopReq on the channel
+}
+
+void HttpTransactionParent::DontReuseConnection() {
+  MOZ_ASSERT(NS_IsMainThread());
+  Unused << SendDontReuseConnection();
+}
+
+void HttpTransactionParent::SetH2WSConnRefTaken() {
+  MOZ_ASSERT(NS_IsMainThread());
+  Unused << SendSetH2WSConnRefTaken();
 }
 
 }  // namespace net

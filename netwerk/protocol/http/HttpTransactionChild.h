@@ -51,6 +51,8 @@ class HttpTransactionChild final : public PHttpTransactionChild,
   mozilla::ipc::IPCResult RecvSuspendPump();
   mozilla::ipc::IPCResult RecvResumePump();
   mozilla::ipc::IPCResult RecvSetDNSWasRefreshed();
+  mozilla::ipc::IPCResult RecvDontReuseConnection();
+  mozilla::ipc::IPCResult RecvSetH2WSConnRefTaken();
 
  private:
   virtual ~HttpTransactionChild();

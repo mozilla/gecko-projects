@@ -52,7 +52,7 @@ class HttpTransactionParent final : public PHttpTransactionParent,
   mozilla::ipc::IPCResult RecvOnStopRequest(
       const nsresult& aStatus, const bool& aResponseIsComplete,
       const int64_t& aTransferSize, const TimingStruct& aTimings,
-      const nsHttpHeaderArray& responseTrailers);
+      const nsHttpHeaderArray& responseTrailers, const bool& aHasStickyConn);
 
  private:
   virtual ~HttpTransactionParent();
@@ -85,6 +85,7 @@ class HttpTransactionParent final : public PHttpTransactionParent,
   bool mIPCOpen;
   bool mResponseHeadTaken;
   bool mResponseTrailersTaken;
+  bool mHasStickyConnection;
 };
 
 }  // namespace net

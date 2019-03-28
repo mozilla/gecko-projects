@@ -100,7 +100,7 @@ class nsAHttpTransactionShell : public nsISupports {
   virtual mozilla::TimeStamp GetResponseStart() = 0;
   virtual mozilla::TimeStamp GetResponseEnd() = 0;
 
-  virtual bool IsStickyConnection() = 0;
+  virtual bool HasStickyConnection() = 0;
 
   // Called to set/find out if the transaction generated a complete response.
   virtual bool ResponseIsComplete() = 0;
@@ -113,6 +113,9 @@ class nsAHttpTransactionShell : public nsISupports {
   // Called to take ownership of the trailer headers.
   // Returning null if there is no trailer.
   virtual nsHttpHeaderArray *TakeResponseTrailers() = 0;
+
+  virtual void DontReuseConnection() = 0;
+  virtual void SetH2WSConnRefTaken() = 0;
 };
 
 NS_DEFINE_STATIC_IID_ACCESSOR(nsAHttpTransactionShell,
@@ -145,13 +148,14 @@ NS_DEFINE_STATIC_IID_ACCESSOR(nsAHttpTransactionShell,
   virtual mozilla::TimeStamp GetRequestStart() override;                       \
   virtual mozilla::TimeStamp GetResponseStart() override;                      \
   virtual mozilla::TimeStamp GetResponseEnd() override;                        \
-  virtual bool IsStickyConnection() override;                                  \
+  virtual bool HasStickyConnection() override;                                 \
   virtual bool ResponseIsComplete() override;                                  \
   virtual bool DataAlreadySent() override;                                     \
   virtual int64_t GetTransferSize() override;                                  \
   virtual void SetDNSWasRefreshed() override;                                  \
-  virtual nsHttpHeaderArray *TakeResponseTrailers() override;
-
+  virtual nsHttpHeaderArray *TakeResponseTrailers() override;                  \
+  virtual void DontReuseConnection() override;                                 \
+  virtual void SetH2WSConnRefTaken() override;
 }  // namespace net
 }  // namespace mozilla
 
