@@ -444,13 +444,10 @@ nsresult nsHttpTransaction::Init(
 }
 
 nsresult nsHttpTransaction::AsyncRead(nsIStreamListener *listener,
-                                      int32_t priority, nsIRequest **pump) {
+                                      nsIRequest **pump) {
   RefPtr<nsInputStreamPump> transactionPump;
   nsresult rv =
       nsInputStreamPump::Create(getter_AddRefs(transactionPump), mPipeIn);
-  NS_ENSURE_SUCCESS(rv, rv);
-
-  rv = gHttpHandler->InitiateTransaction(this, priority);
   NS_ENSURE_SUCCESS(rv, rv);
 
   rv = transactionPump->AsyncRead(listener, nullptr);
@@ -538,6 +535,12 @@ nsresult nsHttpTransaction::TakeSubTransactions(
     nsTArray<RefPtr<nsAHttpTransaction> >& outTransactions) {
   return NS_ERROR_NOT_IMPLEMENTED;
 }
+
+HttpTransactionParent *nsHttpTransaction::AsHttpTransactionParent() {
+  return nullptr;
+}
+
+nsHttpTransaction *nsHttpTransaction::AsHttpTransaction() { return this; }
 
 //----------------------------------------------------------------------------
 // nsHttpTransaction::nsAHttpTransaction

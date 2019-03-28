@@ -79,6 +79,7 @@
 #include "mozilla/dom/network/Connection.h"
 
 #include "AltServiceChild.h"
+#include "HttpTransactionParent.h"
 #include "nsNSSComponent.h"
 
 #if defined(XP_UNIX)
@@ -2713,6 +2714,46 @@ HttpTrafficAnalyzer* nsHttpHandler::GetHttpTrafficAnalyzer() {
   }
 
   return &mHttpTrafficAnalyzer;
+}
+
+nsresult nsHttpHandler::InitiateTransaction(nsAHttpTransactionShell *aTrans,
+                                            int32_t aPriority) {
+  if (gIOService->UseSocketProcess() && gIOService->SocketProcessReady()) {
+    HttpTransactionParent *trans = aTrans->AsHttpTransactionParent();
+    MOZ_ASSERT(trans);
+
+    if (!trans) {
+      return NS_ERROR_UNEXPECTED;
+    }
+    Unused << SocketProcessParent::GetSingleton()->SendInitiateTransaction(
+        trans, aPriority);
+    return NS_OK;
+  }
+
+  return mConnMgr->AddTransaction(aTrans->AsHttpTransaction(), aPriority);
+}
+nsresult nsHttpHandler::InitiateTransactionWithStickyConn(
+    nsAHttpTransactionShell *aTrans, int32_t aPriority,
+    nsAHttpTransactionShell *aTransWithStickyConn) {
+  if (gIOService->UseSocketProcess() && gIOService->SocketProcessReady()) {
+    HttpTransactionParent *trans = aTrans->AsHttpTransactionParent();
+    MOZ_ASSERT(trans);
+    HttpTransactionParent *transWithStickyConn =
+        aTransWithStickyConn->AsHttpTransactionParent();
+    MOZ_ASSERT(transWithStickyConn);
+
+    if (!trans || !transWithStickyConn) {
+      return NS_ERROR_UNEXPECTED;
+    }
+    Unused << SocketProcessParent::GetSingleton()
+                  ->SendInitiateTransactionWithStickyConn(trans, aPriority,
+                                                          transWithStickyConn);
+    return NS_OK;
+  }
+
+  return mConnMgr->AddTransactionWithStickyConn(
+      aTrans->AsHttpTransaction(), aPriority,
+      aTransWithStickyConn->AsHttpTransaction());
 }
 
 }  // namespace net

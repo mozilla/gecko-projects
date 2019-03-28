@@ -427,18 +427,18 @@ class nsHttpChannel final : public HttpBaseChannel,
   MOZ_MUST_USE nsresult OnDoneReadingPartialCacheEntry(bool* streamDone);
 
   MOZ_MUST_USE nsresult
-  DoAuthRetry(nsHttpTransaction* aTransWithStickyConn,
+  DoAuthRetry(nsAHttpTransactionShell* aTransWithStickyConn,
               const std::function<nsresult(nsHttpChannel*, nsresult)>&
                   aContinueOnStopRequestFunc);
   MOZ_MUST_USE nsresult
-  ContinueDoAuthRetry(nsHttpTransaction* aTransWithStickyConn,
+  ContinueDoAuthRetry(nsAHttpTransactionShell* aTransWithStickyConn,
                       const std::function<nsresult(nsHttpChannel*, nsresult)>&
                           aContinueOnStopRequestFunc);
   MOZ_MUST_USE nsresult
-  DoConnect(nsHttpTransaction* aTransWithStickyConn = nullptr);
+  DoConnect(nsAHttpTransactionShell* aTransWithStickyConn = nullptr);
   MOZ_MUST_USE nsresult ContinueOnStopRequestAfterAuthRetry(
       nsresult aStatus, bool aAuthRetry, bool aIsFromNet, bool aContentComplete,
-      nsHttpTransaction* aTransWithStickyConn);
+      nsAHttpTransactionShell* aTransWithStickyConn);
   MOZ_MUST_USE nsresult ContinueOnStopRequest(nsresult status, bool aIsFromNet,
                                               bool aContentComplete);
 

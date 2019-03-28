@@ -19,7 +19,6 @@
 #include "nsHttpChannel.h"
 #include "nsHttpChannelAuthProvider.h"
 #include "nsHttpHandler.h"
-#include "nsHttpTransaction.h"
 #include "HttpTransactionParent.h"
 #include "nsIApplicationCacheService.h"
 #include "nsIApplicationCacheContainer.h"
@@ -844,7 +843,8 @@ nsresult nsHttpChannel::ContinueConnect() {
   return DoConnect();
 }
 
-nsresult nsHttpChannel::DoConnect(nsHttpTransaction* aTransWithStickyConn) {
+nsresult nsHttpChannel::DoConnect(
+    nsAHttpTransactionShell* aTransWithStickyConn) {
   LOG(("nsHttpChannel::DoConnect [this=%p, aTransWithStickyConn=%p]\n", this,
        aTransWithStickyConn));
 
@@ -853,17 +853,14 @@ nsresult nsHttpChannel::DoConnect(nsHttpTransaction* aTransWithStickyConn) {
     return rv;
   }
 
-  // TODO: Bug 1485355, now move to HttpTransaction::Child
-  // if (aTransWithStickyConn) {
-  //   rv = gHttpHandler->InitiateTransactionWithStickyConn(
-  //       mTransaction, mPriority, aTransWithStickyConn);
-  // } else {
-  //   rv =
-  //   gHttpHandler->InitiateTransaction(mTransaction, mPriority);
-  // }
+  if (aTransWithStickyConn) {
+    rv = gHttpHandler->InitiateTransactionWithStickyConn(
+        mTransaction, mPriority, aTransWithStickyConn);
+  } else {
+    rv = gHttpHandler->InitiateTransaction(mTransaction, mPriority);
+  }
 
-  rv = mTransaction->AsyncRead(this, mPriority,
-                               getter_AddRefs(mTransactionPump));
+  rv = mTransaction->AsyncRead(this, getter_AddRefs(mTransactionPump));
   if (NS_FAILED(rv)) {
     return rv;
   }
@@ -1316,10 +1313,11 @@ nsresult nsHttpChannel::SetupTransaction() {
   HttpTrafficCategory category = CreateTrafficCategory();
 
   nsCOMPtr<nsIAsyncInputStream> responseStream;
-  rv = mTransaction->Init(
-      mCaps, mConnectionInfo, &mRequestHead, mUploadStream, mReqContentLength,
-      mUploadStreamHasHeaders, GetCurrentThreadEventTarget(), callbacks, this,
-      mTopLevelOuterContentWindowId, category, mRequestContext, mClassOfService);
+  rv = mTransaction->Init(mCaps, mConnectionInfo, &mRequestHead, mUploadStream,
+                          mReqContentLength, mUploadStreamHasHeaders,
+                          GetCurrentThreadEventTarget(), callbacks, this,
+                          mTopLevelOuterContentWindowId, category,
+                          mRequestContext, mClassOfService);
   if (NS_FAILED(rv)) {
     mTransaction = nullptr;
     return rv;
@@ -7953,14 +7951,13 @@ nsHttpChannel::OnStopRequest(nsIRequest* request, nsresult status) {
     // In the case we need to retry an authentication request, we need to
     // reuse the connection of |transactionWithStickyConn|.
 
-    // TODO: Bug 1497247 fix this in connection stickness bug
-    RefPtr<nsHttpTransaction> transactionWithStickyConn;
-    // if (mCaps & NS_HTTP_STICKY_CONNECTION ||
-    //     mTransaction->Caps() & NS_HTTP_STICKY_CONNECTION) {
-    //   transactionWithStickyConn = mTransaction;
-    //   LOG(("  transaction %p has sticky connection",
-    //        transactionWithStickyConn.get()));
-    // }
+    RefPtr<nsAHttpTransactionShell> transactionWithStickyConn;
+    if (mCaps & NS_HTTP_STICKY_CONNECTION ||
+        mTransaction->HasStickyConnection()) {
+      transactionWithStickyConn = mTransaction;
+      LOG(("  transaction %p has sticky connection",
+           transactionWithStickyConn.get()));
+    }
 
     // this code relies on the code in nsHttpTransaction::Close, which
     // tests for NS_HTTP_STICKY_CONNECTION to determine whether or not to
@@ -8051,7 +8048,7 @@ nsHttpChannel::OnStopRequest(nsIRequest* request, nsresult status) {
 
 nsresult nsHttpChannel::ContinueOnStopRequestAfterAuthRetry(
     nsresult aStatus, bool aAuthRetry, bool aIsFromNet, bool aContentComplete,
-    nsHttpTransaction* aTransWithStickyConn) {
+    nsAHttpTransactionShell* aTransWithStickyConn) {
   LOG(
       ("nsHttpChannel::ContinueOnStopRequestAfterAuthRetry "
        "[this=%p, aStatus=%" PRIx32
@@ -8090,22 +8087,22 @@ nsresult nsHttpChannel::ContinueOnStopRequestAfterAuthRetry(
     mFirstResponseSource = RESPONSE_PENDING;
     return NS_OK;
   }
-
   // TODO: fix this in bug 1497249
-  /* bool upgradeWebsocket = mUpgradeProtocolCallback && aStickyConn &&
+  /*
+  bool upgradeWebsocket = mUpgradeProtocolCallback && aTransWithStickyConn &&
                           mResponseHead &&
                           ((mResponseHead->Status() == 101 &&
                             mResponseHead->Version() == HttpVersion::v1_1) ||
                            (mResponseHead->Status() == 200 &&
                             mResponseHead->Version() == HttpVersion::v2_0));
 
-  bool upgradeConnect = mUpgradeProtocolCallback && aStickyConn &&
+  bool upgradeConnect = mUpgradeProtocolCallback && aTransWithStickyConn &&
                         (mCaps & NS_HTTP_CONNECT_ONLY) && mResponseHead &&
                         mResponseHead->Status() == 200;
 
   if (upgradeWebsocket || upgradeConnect) {
     nsresult rv = gHttpHandler->ConnMgr()->CompleteUpgrade(
-        aStickyConn, mUpgradeProtocolCallback);
+        aTransWithStickyConn, mUpgradeProtocolCallback);
     if (NS_FAILED(rv)) {
       LOG(("  CompleteUpgrade failed with %" PRIx32,
            static_cast<uint32_t>(rv)));
@@ -8931,7 +8928,7 @@ nsHttpChannel::ResumeAt(uint64_t aStartPos, const nsACString& aEntityID) {
 }
 
 nsresult nsHttpChannel::DoAuthRetry(
-    nsHttpTransaction* aTransWithStickyConn,
+    nsAHttpTransactionShell* aTransWithStickyConn,
     const std::function<nsresult(nsHttpChannel*, nsresult)>&
         aContinueOnStopRequestFunc) {
   LOG(("nsHttpChannel::DoAuthRetry [this=%p, aTransWithStickyConn=%p]\n", this,
@@ -8958,7 +8955,7 @@ nsresult nsHttpChannel::DoAuthRetry(
   // notify "http-on-modify-request" observers
   CallOnModifyRequestObservers();
 
-  RefPtr<nsHttpTransaction> trans(aTransWithStickyConn);
+  RefPtr<nsAHttpTransactionShell> trans(aTransWithStickyConn);
   return CallOrWaitForResume(
       [trans{std::move(trans)}, aContinueOnStopRequestFunc](auto* self) {
         return self->ContinueDoAuthRetry(trans, aContinueOnStopRequestFunc);
@@ -8966,7 +8963,7 @@ nsresult nsHttpChannel::DoAuthRetry(
 }
 
 nsresult nsHttpChannel::ContinueDoAuthRetry(
-    nsHttpTransaction* aTransWithStickyConn,
+    nsAHttpTransactionShell* aTransWithStickyConn,
     const std::function<nsresult(nsHttpChannel*, nsresult)>&
         aContinueOnStopRequestFunc) {
   LOG(("nsHttpChannel::ContinueDoAuthRetry [this=%p]\n", this));
@@ -8999,7 +8996,7 @@ nsresult nsHttpChannel::ContinueDoAuthRetry(
   // notify "http-on-before-connect" observers
   gHttpHandler->OnBeforeConnect(this);
 
-  RefPtr<nsHttpTransaction> trans(aTransWithStickyConn);
+  RefPtr<nsAHttpTransactionShell> trans(aTransWithStickyConn);
   return CallOrWaitForResume(
       [trans{std::move(trans)}, aContinueOnStopRequestFunc](auto* self) {
         nsresult rv = self->DoConnect(trans);

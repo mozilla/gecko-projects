@@ -418,5 +418,29 @@ mozilla::ipc::IPCResult SocketProcessChild::RecvDoShiftReloadConnectionCleanup(
   return IPC_OK();
 }
 
+
+static nsHttpTransaction* ToHttpTransaction(
+    PHttpTransactionChild* aTransChild) {
+  HttpTransactionChild* trans = static_cast<HttpTransactionChild*>(aTransChild);
+  return trans->GetTransaction();
+}
+
+mozilla::ipc::IPCResult SocketProcessChild::RecvInitiateTransaction(
+    PHttpTransactionChild* aTrans, const int32_t& aPriority) {
+  Unused << gHttpHandler->InitiateTransaction(ToHttpTransaction(aTrans),
+                                              aPriority);
+  return IPC_OK();
+}
+
+mozilla::ipc::IPCResult
+SocketProcessChild::RecvInitiateTransactionWithStickyConn(
+    PHttpTransactionChild* aTrans, const int32_t& aPriority,
+    PHttpTransactionChild* aTransWithStickyConn) {
+  Unused << gHttpHandler->InitiateTransactionWithStickyConn(
+      ToHttpTransaction(aTrans), aPriority,
+      ToHttpTransaction(aTransWithStickyConn));
+  return IPC_OK();
+}
+
 }  // namespace net
 }  // namespace mozilla

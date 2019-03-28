@@ -42,7 +42,7 @@ class HttpTransactionChild final : public PHttpTransactionChild,
       const bool& aReqBodyIncludesHeaders,
       const uint64_t& aTopLevelOuterContentWindowId,
       const uint64_t& aRequestContextID, const uint32_t& aClassOfService);
-  mozilla::ipc::IPCResult RecvRead(const int32_t& priority);
+  mozilla::ipc::IPCResult RecvRead();
   mozilla::ipc::IPCResult RecvReschedule(const int32_t& priority);
   mozilla::ipc::IPCResult RecvUpdateClassOfService(
       const uint32_t& classOfService);
@@ -53,6 +53,8 @@ class HttpTransactionChild final : public PHttpTransactionChild,
   mozilla::ipc::IPCResult RecvSetDNSWasRefreshed();
   mozilla::ipc::IPCResult RecvDontReuseConnection();
   mozilla::ipc::IPCResult RecvSetH2WSConnRefTaken();
+
+  nsHttpTransaction* GetTransaction();
 
  private:
   virtual ~HttpTransactionChild();

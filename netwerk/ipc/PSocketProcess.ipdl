@@ -77,6 +77,8 @@ child:
     returns (HttpRetParams[] params);
   async DoShiftReloadConnectionCleanup(nsCString hashKey);
   async ClearDNSCache(bool trrToo);
+  async InitiateTransaction(PHttpTransaction trans, int32_t priority);
+  async InitiateTransactionWithStickyConn(PHttpTransaction trans, int32_t priority, PHttpTransaction transWithStickyConn);
 
   // test-only
   async SocketProcessTelemetryPing();

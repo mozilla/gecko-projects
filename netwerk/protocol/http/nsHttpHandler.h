@@ -269,20 +269,15 @@ class nsHttpHandler final : public nsIHttpProtocolHandler,
   // Called to kick-off a new transaction, by default the transaction
   // will be put on the pending transaction queue if it cannot be
   // initiated at this time.  Callable from any thread.
-  MOZ_MUST_USE nsresult InitiateTransaction(nsHttpTransaction* trans,
-                                            int32_t priority) {
-    return mConnMgr->AddTransaction(trans, priority);
-  }
+  MOZ_MUST_USE nsresult InitiateTransaction(nsAHttpTransactionShell* trans,
+                                            int32_t priority);
 
   // This function is also called to kick-off a new transaction. But the new
   // transaction will take a sticky connection from |transWithStickyConn|
   // and reuse it.
-  MOZ_MUST_USE nsresult
-  InitiateTransactionWithStickyConn(nsHttpTransaction* trans, int32_t priority,
-                                    nsHttpTransaction* transWithStickyConn) {
-    return mConnMgr->AddTransactionWithStickyConn(trans, priority,
-                                                  transWithStickyConn);
-  }
+  MOZ_MUST_USE nsresult InitiateTransactionWithStickyConn(
+      nsAHttpTransactionShell* trans, int32_t priority,
+      nsAHttpTransactionShell* transWithStickyConn);
 
   // Called to change the priority of an existing transaction that has
   // already been initiated.

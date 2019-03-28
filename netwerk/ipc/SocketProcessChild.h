@@ -84,6 +84,13 @@ class SocketProcessChild final : public PSocketProcessChild {
       const nsCString& hashKey);
   mozilla::ipc::IPCResult RecvClearDNSCache(const bool& aTrrToo);
 
+  mozilla::ipc::IPCResult RecvInitiateTransaction(PHttpTransactionChild* aTrans,
+                                                  const int32_t& aPriority);
+
+  mozilla::ipc::IPCResult RecvInitiateTransactionWithStickyConn(
+      PHttpTransactionChild* aTrans, const int32_t& aPriority,
+      PHttpTransactionChild* aTransWithStickyConn);
+
   void CleanUp();
   void DestroySocketProcessBridgeParent(ProcessId aId);
 

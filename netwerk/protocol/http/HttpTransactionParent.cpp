@@ -132,10 +132,10 @@ nsresult HttpTransactionParent::Init(
 }
 
 nsresult HttpTransactionParent::AsyncRead(nsIStreamListener* listener,
-                                          int32_t priority, nsIRequest** pump) {
+                                          nsIRequest** pump) {
   MOZ_ASSERT(pump);
 
-  if (!SendRead(priority)) {
+  if (!SendRead()) {
     return NS_ERROR_FAILURE;
   }
 
@@ -445,6 +445,14 @@ void HttpTransactionParent::DontReuseConnection() {
 void HttpTransactionParent::SetH2WSConnRefTaken() {
   MOZ_ASSERT(NS_IsMainThread());
   Unused << SendSetH2WSConnRefTaken();
+}
+
+HttpTransactionParent* HttpTransactionParent::AsHttpTransactionParent() {
+  return this;
+}
+
+nsHttpTransaction* HttpTransactionParent::AsHttpTransaction() {
+  return nullptr;
 }
 
 }  // namespace net

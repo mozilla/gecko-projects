@@ -18,9 +18,11 @@ enum HttpTrafficCategory : uint8_t;
 namespace mozilla {
 namespace net {
 
+class HttpTransactionParent;
 class nsHttpConnectionInfo;
 class nsHttpHeaderArray;
 class nsHttpRequestHead;
+class nsHttpTransaction;
 
 //----------------------------------------------------------------------------
 // Abstract base class for a HTTP transaction in the chrome process
@@ -74,7 +76,7 @@ class nsAHttpTransactionShell : public nsISupports {
   //        the pump that will contain the response data. async wait on this
   //        input stream for data. On first notification, headers should be
   //        available (check transaction status).
-  virtual nsresult AsyncRead(nsIStreamListener *listener, int32_t priority,
+  virtual nsresult AsyncRead(nsIStreamListener *listener,
                              nsIRequest **pump) = 0;
   virtual nsresult AsyncReschedule(int32_t priority) = 0;
   virtual void AsyncUpdateClassOfService(uint32_t classOfService) = 0;
@@ -116,6 +118,9 @@ class nsAHttpTransactionShell : public nsISupports {
 
   virtual void DontReuseConnection() = 0;
   virtual void SetH2WSConnRefTaken() = 0;
+
+  virtual HttpTransactionParent *AsHttpTransactionParent() = 0;
+  virtual nsHttpTransaction *AsHttpTransaction() = 0;
 };
 
 NS_DEFINE_STATIC_IID_ACCESSOR(nsAHttpTransactionShell,
@@ -130,8 +135,8 @@ NS_DEFINE_STATIC_IID_ACCESSOR(nsAHttpTransactionShell,
       nsITransportEventSink *eventsink, uint64_t topLevelOuterContentWindowId, \
       HttpTrafficCategory trafficCategory, nsIRequestContext *requestContext,  \
       uint32_t classOfService) override;                                       \
-  virtual nsresult AsyncRead(nsIStreamListener *listener, int32_t priority,    \
-                             nsIRequest **pump) override;                      \
+  virtual nsresult AsyncRead(nsIStreamListener *listener, nsIRequest **pump)   \
+      override;                                                                \
   virtual nsresult AsyncReschedule(int32_t priority) override;                 \
   virtual void AsyncUpdateClassOfService(uint32_t classOfService) override;    \
   virtual nsresult AsyncCancel(nsresult reason) override;                      \
@@ -155,7 +160,9 @@ NS_DEFINE_STATIC_IID_ACCESSOR(nsAHttpTransactionShell,
   virtual void SetDNSWasRefreshed() override;                                  \
   virtual nsHttpHeaderArray *TakeResponseTrailers() override;                  \
   virtual void DontReuseConnection() override;                                 \
-  virtual void SetH2WSConnRefTaken() override;
+  virtual void SetH2WSConnRefTaken() override;                                 \
+  virtual HttpTransactionParent *AsHttpTransactionParent() override;           \
+  virtual nsHttpTransaction *AsHttpTransaction() override;
 }  // namespace net
 }  // namespace mozilla
 

@@ -169,13 +169,11 @@ mozilla::ipc::IPCResult HttpTransactionChild::RecvInit(
   return IPC_OK();
 }
 
-mozilla::ipc::IPCResult HttpTransactionChild::RecvRead(
-    const int32_t& priority) {
+mozilla::ipc::IPCResult HttpTransactionChild::RecvRead() {
   LOG(("HttpTransactionChild::RecvRead start [this=%p]\n", this));
   MOZ_ASSERT(mTransaction, "should SentInit first");
   if (mTransaction) {
-    Unused << mTransaction->AsyncRead(this, priority,
-                                      getter_AddRefs(mTransactionPump));
+    Unused << mTransaction->AsyncRead(this, getter_AddRefs(mTransactionPump));
   }
   return IPC_OK();
 }
@@ -228,6 +226,10 @@ mozilla::ipc::IPCResult HttpTransactionChild::RecvSetH2WSConnRefTaken() {
     mTransaction->SetH2WSConnRefTaken();
   }
   return IPC_OK();
+}
+
+nsHttpTransaction* HttpTransactionChild::GetTransaction() {
+  return mTransaction.get();
 }
 
 //-----------------------------------------------------------------------------
