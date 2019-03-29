@@ -61,6 +61,9 @@ nsDocShellLoadState::nsDocShellLoadState(DocShellLoadStateInit& aLoadState) {
   mTriggeringPrincipal = aLoadState.TriggeringPrincipal();
   mPrincipalToInherit = aLoadState.PrincipalToInherit();
   mCsp = aLoadState.Csp();
+  mSrcdocData = aLoadState.SrcdocData();
+  mPostDataStream = aLoadState.PostDataStream();
+  mResultPrincipalURI = aLoadState.ResultPrincipalURI();
 }
 
 nsDocShellLoadState::~nsDocShellLoadState() {}
@@ -466,5 +469,8 @@ DocShellLoadStateInit nsDocShellLoadState::Serialize() {
   loadState.PrincipalToInherit() = mPrincipalToInherit;
   loadState.Csp() = mCsp;
   loadState.ReferrerInfo() = mReferrerInfo;
+  loadState.SrcdocData() = mSrcdocData;
+  loadState.PostDataStream() = mPostDataStream;
+  loadState.ResultPrincipalURI() = mResultPrincipalURI;
   return loadState;
 }

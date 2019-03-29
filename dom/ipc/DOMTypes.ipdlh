@@ -10,6 +10,7 @@ include "mozilla/layers/LayersMessageUtils.h";
 include IPCBlob;
 include IPCStream;
 include ProtocolTypes;
+include protocol PSHEntry;
 
 using struct mozilla::void_t
   from "ipc/IPCMessageUtils.h";
@@ -31,6 +32,8 @@ using refcounted class mozilla::dom::BrowsingContext from "mozilla/dom/BrowsingC
 using refcounted class nsIURI from "mozilla/ipc/URIUtils.h";
 using refcounted class nsIContentSecurityPolicy from "mozilla/dom/CSPMessageUtils.h";
 using refcounted class nsIReferrerInfo from "mozilla/dom/ReferrerInfoUtils.h";
+using refcounted class nsIInputStream from "mozilla/ipc/IPCStreamUtils.h";
+using refcounted class nsISHEntry from "nsISHEntry.h";
 
 namespace mozilla {
 namespace dom {
@@ -227,12 +230,12 @@ struct DocShellLoadStateInit
   // also the CSP that will be applied to the load in case the load
   // encounters a server side redirect.
   nsIContentSecurityPolicy Csp;
+  nsString SrcdocData; // useless without sourcedocshell 
+  nsIInputStream PostDataStream; // will be used after IPC transaction
   // Fields missing due to lack of need or serialization
   // nsCOMPtr<nsISHEntry> mSHEntry;
   // nsCOMPtr<nsIDocShell> mSourceDocShell;
   // bool mIsSrcDocLoad; // useless without sourcedocshell
-  // nsString mSrcdocData; // useless without sourcedocshell
-  // nsIInputStream PostDataStream; // will be used after IPC transaction
   // nsIInputStream HeadersStream; // will be used after IPC transaction
   // nsIChannel pendingRedirectedChannel; // sent through other mechanism
 };

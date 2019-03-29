@@ -523,5 +523,11 @@ bool SHEntryParent::RecvClearEntry(const uint64_t& aNewSharedID) {
   return true;
 }
 
+bool SHEntryParent::RecvCreateLoadInfo(
+    RefPtr<nsDocShellLoadState>* aLoadState) {
+  mEntry->CreateLoadInfo(getter_AddRefs(*aLoadState));
+  return true;
+}
+
 }  // namespace dom
 }  // namespace mozilla
