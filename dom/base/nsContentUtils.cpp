@@ -2739,7 +2739,7 @@ static inline void KeyAppendString(const nsACString& aString,
 static inline void KeyAppendInt(int32_t aInt, nsACString& aKey) {
   KeyAppendSep(aKey);
 
-  aKey.Append(nsPrintfCString("%d", aInt));
+  aKey.AppendInt(aInt);
 }
 
 static inline bool IsAutocompleteOff(const nsIContent* aContent) {
@@ -4151,7 +4151,9 @@ nsresult nsContentUtils::DispatchInputEvent(Element* aEventTargetElement,
   HTMLInputElement* inputElement =
       HTMLInputElement::FromNode(aEventTargetElement);
   if (inputElement) {
-    inputElement->MaybeUpdateAllValidityStates();
+    MOZ_KnownLive(inputElement)->MaybeUpdateAllValidityStates(true);
+    // XXX Should we stop dispatching "input" event if the target is removed
+    //     from the DOM tree?
   }
 
   if (!useInputEvent) {

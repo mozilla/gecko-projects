@@ -261,6 +261,17 @@ WebRenderBridgeChild* nsDOMWindowUtils::GetWebRenderBridge() {
   return nullptr;
 }
 
+CompositorBridgeChild* nsDOMWindowUtils::GetCompositorBridge() {
+  if (nsIWidget* widget = GetWidget()) {
+    if (LayerManager* lm = widget->GetLayerManager()) {
+      if (CompositorBridgeChild* cbc = lm->GetCompositorBridgeChild()) {
+        return cbc;
+      }
+    }
+  }
+  return nullptr;
+}
+
 NS_IMETHODIMP
 nsDOMWindowUtils::SyncFlushCompositor() {
   if (nsIWidget* widget = GetWidget()) {
@@ -1422,13 +1433,13 @@ nsDOMWindowUtils::ScrollToVisual(float aOffsetX, float aOffsetY,
       return NS_ERROR_INVALID_ARG;
   }
 
-  nsIPresShell::ScrollMode scrollMode;
+  ScrollMode scrollMode;
   switch (aScrollMode) {
     case SCROLL_MODE_INSTANT:
-      scrollMode = nsIPresShell::ScrollMode::eInstant;
+      scrollMode = ScrollMode::eInstant;
       break;
     case SCROLL_MODE_SMOOTH:
-      scrollMode = nsIPresShell::ScrollMode::eSmooth;
+      scrollMode = ScrollMode::eSmoothMsd;
       break;
     default:
       return NS_ERROR_INVALID_ARG;
@@ -3500,14 +3511,14 @@ nsDOMWindowUtils::GetOMTCTransform(Element* aElement,
     return NS_OK;
   }
 
-  MaybeTransform transform;
+  Maybe<Matrix4x4> transform;
   forwarder->GetShadowManager()->SendGetTransform(
       layer->AsShadowableLayer()->GetShadow(), &transform);
-  if (transform.type() != MaybeTransform::TMatrix4x4) {
+  if (transform.isNothing()) {
     return NS_OK;
   }
 
-  Matrix4x4 matrix = transform.get_Matrix4x4();
+  Matrix4x4 matrix = transform.value();
   RefPtr<nsROCSSPrimitiveValue> cssValue =
       nsComputedDOMStyle::MatrixToCSSValue(matrix);
   if (!cssValue) {
@@ -3758,7 +3769,7 @@ nsDOMWindowUtils::GetFrameUniformityTestData(
 }
 
 NS_IMETHODIMP
-nsDOMWindowUtils::XpconnectArgument(nsIDOMWindowUtils* aThis) {
+nsDOMWindowUtils::XpconnectArgument(nsISupports* aObj) {
   // Do nothing.
   return NS_OK;
 }
@@ -4095,6 +4106,18 @@ NS_IMETHODIMP
 nsDOMWindowUtils::WrCapture() {
   if (WebRenderBridgeChild* wrbc = GetWebRenderBridge()) {
     wrbc->Capture();
+  }
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+nsDOMWindowUtils::SetCompositionRecording(bool aValue) {
+  if (CompositorBridgeChild* cbc = GetCompositorBridge()) {
+    if (aValue) {
+      cbc->SendBeginRecording(TimeStamp::Now());
+    } else {
+      cbc->SendEndRecording();
+    }
   }
   return NS_OK;
 }

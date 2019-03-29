@@ -1663,7 +1663,7 @@ VARCACHE_PREF(
 # define PREF_VALUE true
 #elif defined(XP_MACOSX)
 # define PREF_VALUE true
-#elif defined(XP_UNIX)
+#elif defined(XP_UNIX) && !defined(Android)
 # define PREF_VALUE true
 #else
 # define PREF_VALUE false
@@ -1674,10 +1674,19 @@ VARCACHE_PREF(
   RelaxedAtomicBool, PREF_VALUE
 )
 #undef PREF_VALUE
+
 VARCACHE_PREF(
   "media.av1.use-dav1d",
    MediaAv1UseDav1d,
+#if defined(XP_WIN) && !defined(_ARM64_)
+  RelaxedAtomicBool, true
+#elif defined(XP_MACOSX)
+  RelaxedAtomicBool, true
+#elif defined(XP_UNIX) && !defined(Android)
+  RelaxedAtomicBool, true
+#else
   RelaxedAtomicBool, false
+#endif
 )
 
 VARCACHE_PREF(
@@ -2038,6 +2047,20 @@ VARCACHE_PREF(
    browser_contentblocking_originlog_length,
   uint32_t, 32
 )
+
+// Annotate trackers using the strict list. If set to false, the basic list will
+// be used instead.
+#ifdef EARLY_BETA_OR_EARLIER
+#define PREF_VALUE true
+#else
+#define PREF_VALUE false
+#endif
+VARCACHE_PREF(
+  "privacy.annotate_channels.strict_list.enabled",
+   privacy_annotate_channels_strict_list_enabled,
+  bool, PREF_VALUE
+)
+#undef PREF_VALUE
 
 // Annotate channels based on the tracking protection list in all modes
 VARCACHE_PREF(

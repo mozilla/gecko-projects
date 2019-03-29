@@ -4129,7 +4129,7 @@ static bool ShapeOf(JSContext* cx, unsigned argc, JS::Value* vp) {
     return false;
   }
   JSObject* obj = &args[0].toObject();
-  args.rval().set(JS_NumberValue(double(uintptr_t(obj->maybeShape()) >> 3)));
+  args.rval().set(JS_NumberValue(double(uintptr_t(obj->shape()) >> 3)));
   return true;
 }
 
@@ -4159,13 +4159,7 @@ static bool UnwrappedObjectsHaveSameShape(JSContext* cx, unsigned argc,
   RootedObject obj1(cx, UncheckedUnwrap(&args[0].toObject()));
   RootedObject obj2(cx, UncheckedUnwrap(&args[1].toObject()));
 
-  if (!obj1->is<ShapedObject>() || !obj2->is<ShapedObject>()) {
-    JS_ReportErrorASCII(cx, "object does not have a Shape");
-    return false;
-  }
-
-  args.rval().setBoolean(obj1->as<ShapedObject>().shape() ==
-                         obj2->as<ShapedObject>().shape());
+  args.rval().setBoolean(obj1->shape() == obj2->shape());
   return true;
 }
 
@@ -8148,9 +8142,11 @@ static bool TransplantObject(JSContext* cx, unsigned argc, Value* vp) {
   // 1. Check the recursion depth using CheckRecursionLimitConservative.
   // 2. Enter the target compartment.
   // 3. Clone the source object using JS_CloneObject.
-  // 4. Copy all properties from source to a temporary holder object.
-  // 5. Actually transplant the object.
-  // 6. And finally copy the properties back to the source object.
+  // 4. Check if new wrappers can be created if source and target are in
+  //    different compartments.
+  // 5. Copy all properties from source to a temporary holder object.
+  // 6. Actually transplant the object.
+  // 7. And finally copy the properties back to the source object.
   //
   // As an extension to the algorithm in UpdateReflectorGlobal, we also allow
   // to transplant an object into the same compartment as the source object to
@@ -8181,6 +8177,12 @@ static bool TransplantObject(JSContext* cx, unsigned argc, Value* vp) {
 
   RootedObject target(cx, JS_CloneObject(cx, source, proto));
   if (!target) {
+    return false;
+  }
+
+  if (GetObjectCompartment(source) != GetObjectCompartment(target) &&
+      !AllowNewWrapper(GetObjectCompartment(source), target)) {
+    JS_ReportErrorASCII(cx, "Cannot transplant into nuked compartment");
     return false;
   }
 
@@ -10354,7 +10356,12 @@ static bool SetContextOptions(JSContext* cx, const OptionParser& op) {
 
   int32_t warmUpThreshold = op.getIntOption("ion-warmup-threshold");
   if (warmUpThreshold >= 0) {
-    jit::JitOptions.setCompilerWarmUpThreshold(warmUpThreshold);
+    jit::JitOptions.setNormalIonWarmUpThreshold(warmUpThreshold);
+  }
+
+  warmUpThreshold = op.getIntOption("ion-full-warmup-threshold");
+  if (warmUpThreshold >= 0) {
+    jit::JitOptions.setFullIonWarmUpThreshold(warmUpThreshold);
   }
 
   warmUpThreshold = op.getIntOption("baseline-warmup-threshold");
@@ -10946,7 +10953,11 @@ int main(int argc, char** argv, char** envp) {
           "Don't compile very large scripts (default: on, off to disable)") ||
       !op.addIntOption('\0', "ion-warmup-threshold", "COUNT",
                        "Wait for COUNT calls or iterations before compiling "
-                       "(default: 1000)",
+                       "at the normal optimization level (default: 1000)",
+                       -1) ||
+      !op.addIntOption('\0', "ion-full-warmup-threshold", "COUNT",
+                       "Wait for COUNT calls or iterations before compiling "
+                       "at the 'full' optimization level (default: 100,000)",
                        -1) ||
       !op.addStringOption(
           '\0', "ion-regalloc", "[mode]",

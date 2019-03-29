@@ -22,6 +22,21 @@ exclude: true
 
 [68.3]: ../ContentBlocking.html#AT_CRYPTOMINING
 
+- Added [`ContentBlocking#AT_DEFAULT`][68.4], [`ContentBlocking#AT_STRICT`][68.5],
+  [`ContentBlocking#CB_DEFAULT`][68.6] and [`ContentBlocking#CB_STRICT`][68.7]
+  for clearer app default selections.
+
+[68.4]: ../ContentBlocking.html$AT_DEFAULT
+[68.5]: ../ContentBlocking.html$AT_STRICT
+[68.6]: ../ContentBlocking.html$CB_DEFAULT
+[68.7]: ../ContentBlocking.html$CB_STRICT
+
+- Added [`GeckoSession.SessionState.fromString`][. This can be used to deserialize a
+  `GeckoSession.SessionState` instance previously serialized to a `String` vai
+  `GeckoSession.SessionState.toString`.
+
+[68.4]: ../GeckoSession.SessionState.html#fromString-java.lang.String-
+
 ## v67
 - Added [`setAutomaticFontSizeAdjustment`][67.2] to
   [`GeckoRuntimeSettings`][67.3] for automatically adjusting font size settings
@@ -228,4 +243,4 @@ exclude: true
 [65.24]: ../CrashReporter.html#sendCrashReport-android.content.Context-android.os.Bundle-java.lang.String-
 [65.25]: ../GeckoResult.html
 
-[api-version]: e48935ac13c3a907d46d50bb2b00f5e84d30ef4b
+[api-version]: d35c31c60693caf8467b98a196b382707c3bd044

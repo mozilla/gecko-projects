@@ -1324,6 +1324,27 @@ bool IonRecompile(JSContext* cx) {
   return RecompileImpl(cx, /* force = */ false);
 }
 
+bool IonForcedInvalidation(JSContext* cx) {
+  MOZ_ASSERT(cx->currentlyRunningInJit());
+  JitActivationIterator activations(cx);
+  JSJitFrameIter frame(activations->asJit());
+
+  MOZ_ASSERT(frame.type() == FrameType::Exit);
+  ++frame;
+
+  RootedScript script(cx, frame.script());
+  MOZ_ASSERT(script->hasIonScript());
+
+  if (script->baselineScript()->hasPendingIonBuilder()) {
+    LinkIonScript(cx, script);
+    return true;
+  }
+
+  Invalidate(cx, script, /* resetUses = */ false,
+             /* cancelOffThread = */ false);
+  return true;
+}
+
 bool SetDenseElement(JSContext* cx, HandleNativeObject obj, int32_t index,
                      HandleValue value, bool strict) {
   // This function is called from Ion code for StoreElementHole's OOL path.
@@ -1353,8 +1374,8 @@ void AssertValidObjectPtr(JSContext* cx, JSObject* obj) {
   MOZ_ASSERT(obj->zoneFromAnyThread() == cx->zone());
   MOZ_ASSERT(obj->runtimeFromMainThread() == cx->runtime());
 
-  MOZ_ASSERT_IF(!obj->hasLazyGroup() && obj->maybeShape(),
-                obj->group()->clasp() == obj->maybeShape()->getObjectClass());
+  MOZ_ASSERT_IF(!obj->hasLazyGroup(),
+                obj->group()->clasp() == obj->shape()->getObjectClass());
 
   if (obj->isTenured()) {
     MOZ_ASSERT(obj->isAligned());
