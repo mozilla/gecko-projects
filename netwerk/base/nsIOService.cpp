@@ -1416,10 +1416,7 @@ nsIOService::Observe(nsISupports* subject, const char* topic,
       SetOffline(false);
     }
   } else if (!strcmp(topic, kProfileDoChange)) {
-    if (!data) {
-      return NS_OK;
-    }
-    if (NS_LITERAL_STRING("startup").Equals(data)) {
+    if (data && NS_LITERAL_STRING("startup").Equals(data)) {
       // Lazy initialization of network link service (see bug 620472)
       InitializeNetworkLinkService();
       // Set up the initilization flag regardless the actuall result.
@@ -1434,9 +1431,6 @@ nsIOService::Observe(nsISupports* subject, const char* topic,
       // before something calls into the cookie service.
       nsCOMPtr<nsISupports> cookieServ =
           do_GetService(NS_COOKIESERVICE_CONTRACTID);
-    } else if (NS_LITERAL_STRING("xpcshell-do-get-profile").Equals(data)) {
-      // xpcshell doesn't read user profile.
-      LaunchSocketProcess();
     }
   } else if (!strcmp(topic, NS_XPCOM_SHUTDOWN_OBSERVER_ID)) {
     // Remember we passed XPCOM shutdown notification to prevent any

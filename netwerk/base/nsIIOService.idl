@@ -242,6 +242,14 @@ interface nsIIOService : nsISupports
                                                in nsIPrincipal aTriggeringPrincipal,
                                                in unsigned long aSecurityFlags,
                                                in unsigned long aContentPolicyType);
+
+    /**
+     * Starts a separate socket process.
+     *
+     * @throws NS_ERROR_FAILURE if sockeet process is not launched before and
+     * fail to launch socket process.
+     */
+    void launchSocketProcess();
 };
 
 %{C++

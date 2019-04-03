@@ -182,7 +182,6 @@ class nsIOService final : public nsIIOService,
                                       nsIInterfaceRequestor* aCallbacks,
                                       bool aAnonymous);
 
-  nsresult LaunchSocketProcess();
   void DestroySocketProcess();
 
  private:
