@@ -16,7 +16,6 @@ import {
   createSource,
   sourceThreadClient
 } from "../../tests/helpers/threadClient.js";
-import { addBreakpoint } from "../../breakpoints/addBreakpoint";
 import { getBreakpointsList } from "../../../selectors";
 
 describe("loadSourceText", () => {
@@ -26,7 +25,7 @@ describe("loadSourceText", () => {
 
     const foo1Source = makeSource("foo1");
     await dispatch(actions.newSource(foo1Source));
-    await dispatch(actions.loadSourceText(foo1Source));
+    await dispatch(actions.loadSourceText({ source: foo1Source }));
     const fooSource = selectors.getSource(getState(), "foo1");
 
     if (!fooSource || typeof fooSource.text != "string") {
@@ -36,7 +35,7 @@ describe("loadSourceText", () => {
 
     const baseFoo2Source = makeSource("foo2");
     await dispatch(actions.newSource(baseFoo2Source));
-    await dispatch(actions.loadSourceText(baseFoo2Source));
+    await dispatch(actions.loadSourceText({ source: baseFoo2Source }));
     const foo2Source = selectors.getSource(getState(), "foo2");
 
     if (!foo2Source || typeof foo2Source.text != "string") {
@@ -79,24 +78,18 @@ describe("loadSourceText", () => {
     await dispatch(actions.newSource(fooOrigSource));
     await dispatch(actions.newSource(fooGenSource));
 
-    const breakpoint = await dispatch(
-      addBreakpoint({
-        sourceId: fooOrigSource.id,
-        line: 1,
-        column: 0
-      })
-    );
-
-    expect(breakpoint.text).toBe("");
-    expect(breakpoint.originalText).toBe("");
-
-    await dispatch(actions.loadSourceText(fooOrigSource));
+    const location = {
+      sourceId: fooOrigSource.id,
+      line: 1,
+      column: 0
+    };
+    await dispatch(actions.addBreakpoint(location, {}));
 
     const breakpoint1 = getBreakpointsList(getState())[0];
-    expect(breakpoint1.text).toBe("");
+    expect(breakpoint1.text).toBe("var fooGen = 42;");
     expect(breakpoint1.originalText).toBe("var fooOrig = 42;");
 
-    await dispatch(actions.loadSourceText(fooGenSource));
+    await dispatch(actions.loadSourceText({ source: fooGenSource }));
 
     const breakpoint2 = getBreakpointsList(getState())[0];
     expect(breakpoint2.text).toBe("var fooGen = 42;");
@@ -119,11 +112,11 @@ describe("loadSourceText", () => {
 
     await dispatch(actions.newSource(baseSource));
 
-    let source = selectors.getSource(getState(), id);
-    dispatch(actions.loadSourceText(source));
+    let source = selectors.getSourceFromId(getState(), id);
+    dispatch(actions.loadSourceText({ source }));
 
-    source = selectors.getSource(getState(), id);
-    const loading = dispatch(actions.loadSourceText(source));
+    source = selectors.getSourceFromId(getState(), id);
+    const loading = dispatch(actions.loadSourceText({ source }));
 
     if (!resolve) {
       throw new Error("no resolve");
@@ -151,8 +144,8 @@ describe("loadSourceText", () => {
     const baseSource = makeSource(id, { loadedState: "unloaded" });
 
     await dispatch(actions.newSource(baseSource));
-    let source = selectors.getSource(getState(), id);
-    const loading = dispatch(actions.loadSourceText(source));
+    let source = selectors.getSourceFromId(getState(), id);
+    const loading = dispatch(actions.loadSourceText({ source }));
 
     if (!resolve) {
       throw new Error("no resolve");
@@ -160,8 +153,8 @@ describe("loadSourceText", () => {
     resolve({ source: "yay", contentType: "text/javascript" });
     await loading;
 
-    source = selectors.getSource(getState(), id);
-    await dispatch(actions.loadSourceText(source));
+    source = selectors.getSourceFromId(getState(), id);
+    await dispatch(actions.loadSourceText({ source }));
     expect(count).toEqual(1);
 
     source = selectors.getSource(getState(), id);
@@ -172,10 +165,11 @@ describe("loadSourceText", () => {
     const { dispatch, getState } = createStore(sourceThreadClient);
 
     const source = makeSource("foo1");
-    await dispatch(actions.loadSourceText(source));
-    const prevSource = selectors.getSource(getState(), "foo1");
+    dispatch(actions.newSource(source));
+    await dispatch(actions.loadSourceText({ source }));
+    const prevSource = selectors.getSourceFromId(getState(), "foo1");
 
-    await dispatch(actions.loadSourceText(prevSource));
+    await dispatch(actions.loadSourceText({ source: prevSource }));
     const curSource = selectors.getSource(getState(), "foo1");
 
     expect(prevSource === curSource).toBeTruthy();
@@ -193,7 +187,7 @@ describe("loadSourceText", () => {
       return fooSource && fooSource.loadedState === "loading";
     });
 
-    await dispatch(actions.loadSourceText(source));
+    await dispatch(actions.loadSourceText({ source }));
 
     expect(wasLoading()).toBe(true);
   });
@@ -203,7 +197,7 @@ describe("loadSourceText", () => {
 
     const source = makeSource("bad-id");
     await dispatch(actions.newSource(source));
-    await dispatch(actions.loadSourceText(source));
+    await dispatch(actions.loadSourceText({ source }));
     const badSource = selectors.getSource(getState(), "bad-id");
 
     if (!badSource || !badSource.error) {

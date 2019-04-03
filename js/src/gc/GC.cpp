@@ -1806,6 +1806,7 @@ void GCRuntime::removeBlackRootsTracer(JSTraceDataOp traceOp, void* data) {
     Callback<JSTraceDataOp>* e = &blackRootTracers.ref()[i];
     if (e->op == traceOp && e->data == data) {
       blackRootTracers.ref().erase(e);
+      break;
     }
   }
 }
@@ -8690,8 +8691,15 @@ JS_PUBLIC_API void JS::IncrementalPreWriteBarrier(JSObject* obj) {
     return;
   }
 
-  MOZ_ASSERT(!JS::RuntimeHeapIsMajorCollecting());
   JSObject::writeBarrierPre(obj);
+}
+
+JS_PUBLIC_API void JS::IncrementalPreWriteBarrier(GCCellPtr thing) {
+  if (!thing) {
+    return;
+  }
+
+  TenuredCell::writeBarrierPre(&thing.asCell()->asTenured());
 }
 
 JS_PUBLIC_API void JS::IncrementalReadBarrier(GCCellPtr thing) {

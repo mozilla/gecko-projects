@@ -714,12 +714,12 @@ class ScriptSource {
  private:
   struct UncompressedDataMatcher {
     template <typename Unit>
-    const void* match(const Uncompressed<Unit>& u) {
+    const void* operator()(const Uncompressed<Unit>& u) {
       return u.units();
     }
 
     template <typename T>
-    const void* match(const T&) {
+    const void* operator()(const T&) {
       MOZ_CRASH(
           "attempting to access uncompressed data in a "
           "ScriptSource not containing it");
@@ -736,12 +736,12 @@ class ScriptSource {
  private:
   struct CompressedDataMatcher {
     template <typename Unit>
-    char* match(const Compressed<Unit>& c) {
+    char* operator()(const Compressed<Unit>& c) {
       return const_cast<char*>(c.raw.chars());
     }
 
     template <typename T>
-    char* match(const T&) {
+    char* operator()(const T&) {
       MOZ_CRASH(
           "attempting to access compressed data in a ScriptSource "
           "not containing it");
@@ -757,12 +757,14 @@ class ScriptSource {
 
  private:
   struct BinASTDataMatcher {
-    void* match(const BinAST& b) { return const_cast<char*>(b.string.chars()); }
+    void* operator()(const BinAST& b) {
+      return const_cast<char*>(b.string.chars());
+    }
 
     void notBinAST() { MOZ_CRASH("ScriptSource isn't backed by BinAST data"); }
 
     template <typename T>
-    void* match(const T&) {
+    void* operator()(const T&) {
       notBinAST();
       return nullptr;
     }
@@ -774,18 +776,18 @@ class ScriptSource {
  private:
   struct HasUncompressedSource {
     template <typename Unit>
-    bool match(const Uncompressed<Unit>&) {
+    bool operator()(const Uncompressed<Unit>&) {
       return true;
     }
 
     template <typename Unit>
-    bool match(const Compressed<Unit>&) {
+    bool operator()(const Compressed<Unit>&) {
       return false;
     }
 
-    bool match(const BinAST&) { return false; }
+    bool operator()(const BinAST&) { return false; }
 
-    bool match(const Missing&) { return false; }
+    bool operator()(const Missing&) { return false; }
   };
 
  public:
@@ -802,18 +804,18 @@ class ScriptSource {
  private:
   struct HasCompressedSource {
     template <typename Unit>
-    bool match(const Compressed<Unit>&) {
+    bool operator()(const Compressed<Unit>&) {
       return true;
     }
 
     template <typename Unit>
-    bool match(const Uncompressed<Unit>&) {
+    bool operator()(const Uncompressed<Unit>&) {
       return false;
     }
 
-    bool match(const BinAST&) { return false; }
+    bool operator()(const BinAST&) { return false; }
 
-    bool match(const Missing&) { return false; }
+    bool operator()(const Missing&) { return false; }
   };
 
  public:
@@ -829,21 +831,21 @@ class ScriptSource {
   template <typename Unit>
   struct SourceTypeMatcher {
     template <template <typename C> class Data>
-    bool match(const Data<Unit>&) {
+    bool operator()(const Data<Unit>&) {
       return true;
     }
 
     template <template <typename C> class Data, typename NotUnit>
-    bool match(const Data<NotUnit>&) {
+    bool operator()(const Data<NotUnit>&) {
       return false;
     }
 
-    bool match(const BinAST&) {
+    bool operator()(const BinAST&) {
       MOZ_CRASH("doesn't make sense to ask source type of BinAST data");
       return false;
     }
 
-    bool match(const Missing&) {
+    bool operator()(const Missing&) {
       MOZ_CRASH("doesn't make sense to ask source type when missing");
       return false;
     }
@@ -858,19 +860,19 @@ class ScriptSource {
  private:
   struct SourceCharSizeMatcher {
     template <template <typename C> class Data, typename Unit>
-    uint8_t match(const Data<Unit>& data) {
+    uint8_t operator()(const Data<Unit>& data) {
       static_assert(std::is_same<Unit, mozilla::Utf8Unit>::value ||
                         std::is_same<Unit, char16_t>::value,
                     "should only have UTF-8 or UTF-16 source char");
       return sizeof(Unit);
     }
 
-    uint8_t match(const BinAST&) {
+    uint8_t operator()(const BinAST&) {
       MOZ_CRASH("BinAST source has no source-char size");
       return 0;
     }
 
-    uint8_t match(const Missing&) {
+    uint8_t operator()(const Missing&) {
       MOZ_CRASH("missing source has no source-char size");
       return 0;
     }
@@ -882,18 +884,18 @@ class ScriptSource {
  private:
   struct UncompressedLengthMatcher {
     template <typename Unit>
-    size_t match(const Uncompressed<Unit>& u) {
+    size_t operator()(const Uncompressed<Unit>& u) {
       return u.length();
     }
 
     template <typename Unit>
-    size_t match(const Compressed<Unit>& u) {
+    size_t operator()(const Compressed<Unit>& u) {
       return u.uncompressedLength;
     }
 
-    size_t match(const BinAST& b) { return b.string.length(); }
+    size_t operator()(const BinAST& b) { return b.string.length(); }
 
-    size_t match(const Missing& m) {
+    size_t operator()(const Missing& m) {
       MOZ_CRASH("ScriptSource::length on a missing source");
       return 0;
     }
@@ -908,21 +910,21 @@ class ScriptSource {
  private:
   struct CompressedLengthOrZeroMatcher {
     template <typename Unit>
-    size_t match(const Uncompressed<Unit>&) {
+    size_t operator()(const Uncompressed<Unit>&) {
       return 0;
     }
 
     template <typename Unit>
-    size_t match(const Compressed<Unit>& c) {
+    size_t operator()(const Compressed<Unit>& c) {
       return c.raw.length();
     }
 
-    size_t match(const BinAST&) {
+    size_t operator()(const BinAST&) {
       MOZ_CRASH("trying to get compressed length for BinAST data");
       return 0;
     }
 
-    size_t match(const Missing&) {
+    size_t operator()(const Missing&) {
       MOZ_CRASH("missing source data");
       return 0;
     }
@@ -998,26 +1000,26 @@ class ScriptSource {
         : source_(source), compressed_(compressed) {}
 
     template <typename Unit>
-    void match(const Uncompressed<Unit>&) {
+    void operator()(const Uncompressed<Unit>&) {
       source_->setCompressedSource<Unit>(std::move(compressed_),
                                          source_->length());
     }
 
     template <typename Unit>
-    void match(const Compressed<Unit>&) {
+    void operator()(const Compressed<Unit>&) {
       MOZ_CRASH(
           "can't set compressed source when source is already "
           "compressed -- ScriptSource::tryCompressOffThread "
           "shouldn't have queued up this task?");
     }
 
-    void match(const BinAST&) {
+    void operator()(const BinAST&) {
       MOZ_CRASH(
           "doesn't make sense to set compressed source for BinAST "
           "data");
     }
 
-    void match(const Missing&) {
+    void operator()(const Missing&) {
       MOZ_CRASH(
           "doesn't make sense to set compressed source for "
           "missing source -- ScriptSource::tryCompressOffThread "
@@ -1769,6 +1771,12 @@ class JSScript : public js::gc::TenuredCell {
 
     // Whether this function needs a call object or named lambda environment.
     NeedsFunctionEnvironmentObjects = 1 << 24,
+
+    // LazyScript flags
+    ShouldDeclareArguments = 1 << 25,
+    IsBinAST = 1 << 26,
+    HasDebuggerStatement = 1 << 27,
+    HasDirectEval = 1 << 28,
   };
 
  private:
@@ -2878,6 +2886,47 @@ struct FieldInitializers {
   }
 };
 
+// Variable-length data for LazyScripts. Contains vector of inner functions and
+// vector of captured property ids.
+class alignas(uintptr_t) LazyScriptData final {
+ private:
+  uint32_t numClosedOverBindings_ = 0;
+  uint32_t numInnerFunctions_ = 0;
+
+  FieldInitializers fieldInitializers_ = FieldInitializers::Invalid();
+
+  // Size to allocate
+  static size_t AllocationSize(uint32_t numClosedOverBindings,
+                               uint32_t numInnerFunctions);
+
+  // Translate an offset into a concrete pointer.
+  template <typename T>
+  T* offsetToPointer(size_t offset) {
+    uintptr_t base = reinterpret_cast<uintptr_t>(this);
+    return reinterpret_cast<T*>(base + offset);
+  }
+
+  template <typename T>
+  void initElements(size_t offset, size_t length);
+
+  LazyScriptData(uint32_t numClosedOverBindings, uint32_t numInnerFunctions);
+
+ public:
+  static LazyScriptData* new_(JSContext* cx, uint32_t numClosedOverBindings,
+                              uint32_t numInnerFunctions);
+
+  friend class LazyScript;
+
+  mozilla::Span<GCPtrAtom> closedOverBindings();
+  mozilla::Span<GCPtrFunction> innerFunctions();
+
+  void trace(JSTracer* trc);
+
+  // LazyScriptData has trailing data so isn't copyable or movable.
+  LazyScriptData(const LazyScriptData&) = delete;
+  LazyScriptData& operator=(const LazyScriptData&) = delete;
+};
+
 // Information about a script which may be (or has been) lazily compiled to
 // bytecode from its source.
 class LazyScript : public gc::TenuredCell {
@@ -2970,49 +3019,30 @@ class LazyScript : public gc::TenuredCell {
   // bytecode for our immediate parent.
   GCPtr<ScriptSourceObject*> sourceObject_;
 
-  // Heap allocated table with any free variables or inner functions.
-  void* table_;
+  // Heap allocated table with any free variables, inner functions, or class
+  // fields. This will be nullptr if none exist.
+  LazyScriptData* lazyData_;
 
   static const uint32_t NumClosedOverBindingsBits = 20;
   static const uint32_t NumInnerFunctionsBits = 20;
 
-  struct PackedView {
-    uint32_t shouldDeclareArguments : 1;
-    uint32_t hasThisBinding : 1;
-    uint32_t isAsync : 1;
-    uint32_t isBinAST : 1;
+  // See: JSScript::ImmutableFlags / MutableFlags.
+  // NOTE: Lazy script only defines and uses a subset of these flags.
+  using ImmutableFlags = JSScript::ImmutableFlags;
+  using MutableFlags = JSScript::MutableFlags;
 
-    uint32_t numClosedOverBindings : NumClosedOverBindingsBits;
+  uint32_t immutableFlags_;
+  uint32_t mutableFlags_;
 
-    // -- 32bit boundary --
+  MOZ_MUST_USE bool hasFlag(MutableFlags flag) const {
+    return mutableFlags_ & uint32_t(flag);
+  }
+  void setFlag(MutableFlags flag) { mutableFlags_ |= uint32_t(flag); }
 
-    uint32_t numInnerFunctions : NumInnerFunctionsBits;
-
-    // N.B. These are booleans but need to be uint32_t to pack correctly on
-    // MSVC. If you add another boolean here, make sure to initialize it in
-    // LazyScript::Create().
-    uint32_t isGenerator : 1;
-    uint32_t strict : 1;
-    uint32_t bindingsAccessedDynamically : 1;
-    uint32_t hasDebuggerStatement : 1;
-    uint32_t hasDirectEval : 1;
-    uint32_t isLikelyConstructorWrapper : 1;
-    uint32_t treatAsRunOnce : 1;
-    uint32_t isDerivedClassConstructor : 1;
-    uint32_t needsHomeObject : 1;
-    uint32_t hasRest : 1;
-    uint32_t parseGoal : 1;
-
-    // Runtime flags
-    uint32_t hasBeenCloned : 1;
-  };
-
-  union {
-    PackedView p_;
-    uint64_t packedFields_;
-  };
-
-  FieldInitializers fieldInitializers_;
+  MOZ_MUST_USE bool hasFlag(ImmutableFlags flag) const {
+    return immutableFlags_ & uint32_t(flag);
+  }
+  void setFlag(ImmutableFlags flag) { immutableFlags_ |= uint32_t(flag); }
 
   // Source location for the script.
   // See the comment in JSScript for the details
@@ -3025,17 +3055,19 @@ class LazyScript : public gc::TenuredCell {
   uint32_t lineno_;
   uint32_t column_;
 
-  LazyScript(JSFunction* fun, ScriptSourceObject& sourceObject, void* table,
-             uint64_t packedFields, uint32_t begin, uint32_t end,
-             uint32_t toStringStart, uint32_t lineno, uint32_t column);
+  LazyScript(JSFunction* fun, ScriptSourceObject& sourceObject,
+             LazyScriptData* data, uint32_t immutableFlags,
+             uint32_t sourceStart, uint32_t sourceEnd, uint32_t toStringStart,
+             uint32_t lineno, uint32_t column);
 
   // Create a LazyScript without initializing the closedOverBindings and the
   // innerFunctions. To be GC-safe, the caller must initialize both vectors
   // with valid atoms and functions.
-  static LazyScript* CreateRaw(JSContext* cx, HandleFunction fun,
+  static LazyScript* CreateRaw(JSContext* cx, uint32_t numClosedOverBindings,
+                               uint32_t numInnerFunctions, HandleFunction fun,
                                HandleScriptSourceObject sourceObject,
-                               uint64_t packedData, uint32_t begin,
-                               uint32_t end, uint32_t toStringStart,
+                               uint32_t immutableFlags, uint32_t sourceStart,
+                               uint32_t sourceEnd, uint32_t toStringStart,
                                uint32_t lineno, uint32_t column);
 
  public:
@@ -3049,7 +3081,7 @@ class LazyScript : public gc::TenuredCell {
                             HandleScriptSourceObject sourceObject,
                             const frontend::AtomVector& closedOverBindings,
                             Handle<GCVector<JSFunction*, 8>> innerFunctions,
-                            uint32_t begin, uint32_t end,
+                            uint32_t sourceStart, uint32_t sourceEnd,
                             uint32_t toStringStart, uint32_t lineno,
                             uint32_t column, frontend::ParseGoal parseGoal);
 
@@ -3062,13 +3094,12 @@ class LazyScript : public gc::TenuredCell {
   //
   // The sourceObject and enclosingScope arguments may be null if the
   // enclosing function is also lazy.
-  static LazyScript* CreateForXDR(JSContext* cx, HandleFunction fun,
-                                  HandleScript script,
-                                  HandleScope enclosingScope,
-                                  HandleScriptSourceObject sourceObject,
-                                  uint64_t packedData, uint32_t begin,
-                                  uint32_t end, uint32_t toStringStart,
-                                  uint32_t lineno, uint32_t column);
+  static LazyScript* CreateForXDR(
+      JSContext* cx, uint32_t numClosedOverBindings, uint32_t numInnerFunctions,
+      HandleFunction fun, HandleScript script, HandleScope enclosingScope,
+      HandleScriptSourceObject sourceObject, uint32_t immutableFlags,
+      uint32_t sourceStart, uint32_t sourceEnd, uint32_t toStringStart,
+      uint32_t toStringEnd, uint32_t lineno, uint32_t column);
 
   static inline JSFunction* functionDelazifying(JSContext* cx,
                                                 Handle<LazyScript*>);
@@ -3116,17 +3147,25 @@ class LazyScript : public gc::TenuredCell {
   ScriptSource* maybeForwardedScriptSource() const;
   bool mutedErrors() const { return scriptSource()->mutedErrors(); }
 
-  uint32_t numClosedOverBindings() const { return p_.numClosedOverBindings; }
-  JSAtom** closedOverBindings() { return (JSAtom**)table_; }
+  mozilla::Span<GCPtrAtom> closedOverBindings() {
+    return lazyData_ ? lazyData_->closedOverBindings()
+                     : mozilla::Span<GCPtrAtom>();
+  }
+  uint32_t numClosedOverBindings() const {
+    return lazyData_ ? lazyData_->closedOverBindings().size() : 0;
+  };
 
-  uint32_t numInnerFunctions() const { return p_.numInnerFunctions; }
-  GCPtrFunction* innerFunctions() {
-    return (GCPtrFunction*)&closedOverBindings()[numClosedOverBindings()];
+  mozilla::Span<GCPtrFunction> innerFunctions() {
+    return lazyData_ ? lazyData_->innerFunctions()
+                     : mozilla::Span<GCPtrFunction>();
+  }
+  uint32_t numInnerFunctions() const {
+    return lazyData_ ? lazyData_->innerFunctions().size() : 0;
   }
 
   GeneratorKind generatorKind() const {
-    return p_.isGenerator ? GeneratorKind::Generator
-                          : GeneratorKind::NotGenerator;
+    return hasFlag(ImmutableFlags::IsGenerator) ? GeneratorKind::Generator
+                                                : GeneratorKind::NotGenerator;
   }
 
   bool isGenerator() const {
@@ -3137,75 +3176,104 @@ class LazyScript : public gc::TenuredCell {
     // A script only gets its generator kind set as part of initialization,
     // so it can only transition from NotGenerator.
     MOZ_ASSERT(!isGenerator());
-    p_.isGenerator = kind == GeneratorKind::Generator;
+    if (kind == GeneratorKind::Generator) {
+      setFlag(ImmutableFlags::IsGenerator);
+    }
   }
 
+  bool isAsync() const { return hasFlag(ImmutableFlags::IsAsync); }
   FunctionAsyncKind asyncKind() const {
-    return p_.isAsync ? FunctionAsyncKind::AsyncFunction
-                      : FunctionAsyncKind::SyncFunction;
+    return isAsync() ? FunctionAsyncKind::AsyncFunction
+                     : FunctionAsyncKind::SyncFunction;
   }
-  bool isAsync() const { return p_.isAsync; }
 
   void setAsyncKind(FunctionAsyncKind kind) {
-    p_.isAsync = kind == FunctionAsyncKind::AsyncFunction;
+    if (kind == FunctionAsyncKind::AsyncFunction) {
+      setFlag(ImmutableFlags::IsAsync);
+    }
   }
 
-  bool hasRest() const { return p_.hasRest; }
-  void setHasRest() { p_.hasRest = true; }
+  bool hasRest() const { return hasFlag(ImmutableFlags::HasRest); }
+  void setHasRest() { setFlag(ImmutableFlags::HasRest); }
 
   frontend::ParseGoal parseGoal() const {
-    return frontend::ParseGoal(p_.parseGoal);
+    if (hasFlag(ImmutableFlags::IsModule)) {
+      return frontend::ParseGoal::Module;
+    }
+    return frontend::ParseGoal::Script;
   }
 
-  bool isBinAST() const { return p_.isBinAST; }
-  void setIsBinAST() { p_.isBinAST = true; }
+  bool isBinAST() const { return hasFlag(ImmutableFlags::IsBinAST); }
+  void setIsBinAST() { setFlag(ImmutableFlags::IsBinAST); }
 
-  bool strict() const { return p_.strict; }
-  void setStrict() { p_.strict = true; }
+  bool strict() const { return hasFlag(ImmutableFlags::Strict); }
+  void setStrict() { setFlag(ImmutableFlags::Strict); }
 
   bool bindingsAccessedDynamically() const {
-    return p_.bindingsAccessedDynamically;
+    return hasFlag(ImmutableFlags::BindingsAccessedDynamically);
   }
   void setBindingsAccessedDynamically() {
-    p_.bindingsAccessedDynamically = true;
+    setFlag(ImmutableFlags::BindingsAccessedDynamically);
   }
 
-  bool hasDebuggerStatement() const { return p_.hasDebuggerStatement; }
-  void setHasDebuggerStatement() { p_.hasDebuggerStatement = true; }
+  bool hasDebuggerStatement() const {
+    return hasFlag(ImmutableFlags::HasDebuggerStatement);
+  }
+  void setHasDebuggerStatement() {
+    setFlag(ImmutableFlags::HasDebuggerStatement);
+  }
 
-  bool hasDirectEval() const { return p_.hasDirectEval; }
-  void setHasDirectEval() { p_.hasDirectEval = true; }
+  bool hasDirectEval() const { return hasFlag(ImmutableFlags::HasDirectEval); }
+  void setHasDirectEval() { setFlag(ImmutableFlags::HasDirectEval); }
 
   bool isLikelyConstructorWrapper() const {
-    return p_.isLikelyConstructorWrapper;
+    return hasFlag(ImmutableFlags::IsLikelyConstructorWrapper);
   }
-  void setLikelyConstructorWrapper() { p_.isLikelyConstructorWrapper = true; }
+  void setLikelyConstructorWrapper() {
+    setFlag(ImmutableFlags::IsLikelyConstructorWrapper);
+  }
 
-  bool hasBeenCloned() const { return p_.hasBeenCloned; }
-  void setHasBeenCloned() { p_.hasBeenCloned = true; }
+  bool hasBeenCloned() const { return hasFlag(MutableFlags::HasBeenCloned); }
+  void setHasBeenCloned() { setFlag(MutableFlags::HasBeenCloned); }
 
-  bool treatAsRunOnce() const { return p_.treatAsRunOnce; }
-  void setTreatAsRunOnce() { p_.treatAsRunOnce = true; }
+  bool treatAsRunOnce() const {
+    return hasFlag(ImmutableFlags::TreatAsRunOnce);
+  }
+  void setTreatAsRunOnce() { setFlag(ImmutableFlags::TreatAsRunOnce); }
 
   bool isDerivedClassConstructor() const {
-    return p_.isDerivedClassConstructor;
+    return hasFlag(ImmutableFlags::IsDerivedClassConstructor);
   }
-  void setIsDerivedClassConstructor() { p_.isDerivedClassConstructor = true; }
+  void setIsDerivedClassConstructor() {
+    setFlag(ImmutableFlags::IsDerivedClassConstructor);
+  }
 
-  bool needsHomeObject() const { return p_.needsHomeObject; }
-  void setNeedsHomeObject() { p_.needsHomeObject = true; }
+  bool needsHomeObject() const {
+    return hasFlag(ImmutableFlags::NeedsHomeObject);
+  }
+  void setNeedsHomeObject() { setFlag(ImmutableFlags::NeedsHomeObject); }
 
-  bool shouldDeclareArguments() const { return p_.shouldDeclareArguments; }
-  void setShouldDeclareArguments() { p_.shouldDeclareArguments = true; }
+  bool shouldDeclareArguments() const {
+    return hasFlag(ImmutableFlags::ShouldDeclareArguments);
+  }
+  void setShouldDeclareArguments() {
+    setFlag(ImmutableFlags::ShouldDeclareArguments);
+  }
 
-  bool hasThisBinding() const { return p_.hasThisBinding; }
-  void setHasThisBinding() { p_.hasThisBinding = true; }
+  bool hasThisBinding() const {
+    return hasFlag(ImmutableFlags::FunctionHasThisBinding);
+  }
+  void setHasThisBinding() { setFlag(ImmutableFlags::FunctionHasThisBinding); }
 
   void setFieldInitializers(FieldInitializers fieldInitializers) {
-    fieldInitializers_ = fieldInitializers;
+    MOZ_ASSERT(lazyData_);
+    lazyData_->fieldInitializers_ = fieldInitializers;
   }
 
-  FieldInitializers getFieldInitializers() const { return fieldInitializers_; }
+  FieldInitializers getFieldInitializers() const {
+    return lazyData_ ? lazyData_->fieldInitializers_
+                     : FieldInitializers::Invalid();
+  }
 
   const char* filename() const { return scriptSource()->filename(); }
   uint32_t sourceStart() const { return sourceStart_; }
@@ -3239,10 +3307,10 @@ class LazyScript : public gc::TenuredCell {
   static const JS::TraceKind TraceKind = JS::TraceKind::LazyScript;
 
   size_t sizeOfExcludingThis(mozilla::MallocSizeOf mallocSizeOf) {
-    return mallocSizeOf(table_);
+    return mallocSizeOf(lazyData_);
   }
 
-  uint64_t packedFieldsForXDR() const;
+  uint32_t immutableFlags() const { return immutableFlags_; }
 };
 
 /* If this fails, add/remove padding within LazyScript. */

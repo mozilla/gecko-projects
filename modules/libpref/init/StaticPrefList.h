@@ -209,6 +209,15 @@ VARCACHE_PREF(
 )
 #undef PREF_VALUE
 
+// If this is true, it's allowed to fire "cut", "copy" and "paste" events.
+// Additionally, "input" events may expose clipboard content when inputType
+// is "insertFromPaste" or something.
+VARCACHE_PREF(
+  "dom.event.clipboardevents.enabled",
+   dom_event_clipboardevents_enabled,
+  bool, true
+)
+
 // If this is true, "keypress" event's keyCode value and charCode value always
 // become same if the event is not created/initialized by JS.
 VARCACHE_PREF(
@@ -330,11 +339,17 @@ VARCACHE_PREF(
   RelaxedAtomicBool, false
 )
 
+#ifdef NIGHTLY_BUILD
+# define PREF_VALUE  true
+#else
+# define PREF_VALUE  false
+#endif
 VARCACHE_PREF(
   "dom.webnotifications.requireuserinteraction",
    dom_webnotifications_requireuserinteraction,
-  RelaxedAtomicBool, false
+  RelaxedAtomicBool, PREF_VALUE
 )
+#undef PREF_VALUE
 
 VARCACHE_PREF(
   "dom.webnotifications.serviceworker.enabled",
@@ -987,6 +1002,13 @@ VARCACHE_PREF(
   bool, false
 )
 
+// Pref to control whether line-height: -moz-block-height is exposed to content.
+VARCACHE_PREF(
+  "layout.css.line-height-moz-block-height.content.enabled",
+   layout_css_line_height_moz_block_height_content_enabled,
+  bool, false
+)
+
 // Is support for variation fonts enabled?
 VARCACHE_PREF(
   "layout.css.font-variations.enabled",
@@ -1073,6 +1095,13 @@ VARCACHE_PREF(
   "layout.css.scroll-snap-v1.enabled",
    layout_css_scroll_snap_v1_enabled,
   RelaxedAtomicBool, false
+)
+
+// Are shared memory User Agent style sheets enabled?
+VARCACHE_PREF(
+  "layout.css.shared-memory-ua-sheets.enabled",
+   layout_css_shared_memory_ua_sheets_enabled,
+  bool, false
 )
 
 //---------------------------------------------------------------------------
@@ -2095,6 +2124,13 @@ VARCACHE_PREF(
   "privacy.trackingprotection.cryptomining.annotate.enabled",
    privacy_trackingprotection_cryptomining_annotate_enabled,
   bool, false
+)
+
+// Spoof user locale to English
+VARCACHE_PREF(
+  "privacy.spoof_english",
+   privacy_spoof_english,
+  RelaxedAtomicUint32, 0
 )
 
 // Lower the priority of network loads for resources on the tracking protection

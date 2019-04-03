@@ -74,10 +74,10 @@ struct DefaultJitOptions {
 #ifdef JS_TRACE_LOGGING
   bool enableTraceLogger;
 #endif
-#ifdef WASM_CODEGEN_DEBUG
   bool enableWasmJitExit;
   bool enableWasmJitEntry;
   bool enableWasmIonFastCalls;
+#ifdef WASM_CODEGEN_DEBUG
   bool enableWasmImportCallSpew;
   bool enableWasmFuncCallSpew;
 #endif
@@ -118,9 +118,7 @@ struct DefaultJitOptions {
   void resetFullIonWarmUpThreshold();
   void enableGvn(bool val);
 
-  bool eagerIonCompilation() const {
-    return normalIonWarmUpThreshold == 0;
-  }
+  bool eagerIonCompilation() const { return normalIonWarmUpThreshold == 0; }
 };
 
 extern DefaultJitOptions JitOptions;

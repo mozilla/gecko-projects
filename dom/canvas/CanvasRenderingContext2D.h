@@ -12,7 +12,6 @@
 #include "nsColor.h"
 #include "mozilla/dom/HTMLCanvasElement.h"
 #include "mozilla/dom/HTMLVideoElement.h"
-#include "gfxTextRun.h"
 #include "mozilla/ErrorResult.h"
 #include "mozilla/dom/BasicRenderingContext2D.h"
 #include "mozilla/dom/CanvasGradient.h"
@@ -20,6 +19,7 @@
 #include "mozilla/dom/CanvasPattern.h"
 #include "mozilla/gfx/Rect.h"
 #include "mozilla/gfx/2D.h"
+#include "mozilla/PresShell.h"
 #include "mozilla/UniquePtr.h"
 #include "gfx2DGlue.h"
 #include "imgIEncoder.h"
@@ -30,6 +30,7 @@
 #include "Layers.h"
 #include "nsBidi.h"
 
+class gfxFontGroup;
 class nsGlobalWindowInner;
 class nsXULElement;
 
@@ -392,7 +393,7 @@ class CanvasRenderingContext2D final : public nsICanvasRenderingContextInternal,
    */
   nsIPresShell* GetPresShell() final {
     if (mCanvasElement) {
-      return mCanvasElement->OwnerDoc()->GetShell();
+      return mCanvasElement->OwnerDoc()->GetPresShell();
     }
     if (mDocShell) {
       return mDocShell->GetPresShell();
@@ -896,55 +897,9 @@ class CanvasRenderingContext2D final : public nsICanvasRenderingContextInternal,
   // state stack handling
   class ContextState {
    public:
-    ContextState()
-        : textAlign(TextAlign::START),
-          textBaseline(TextBaseline::ALPHABETIC),
-          shadowColor(0),
-          lineWidth(1.0f),
-          miterLimit(10.0f),
-          globalAlpha(1.0f),
-          shadowBlur(0.0),
-          dashOffset(0.0f),
-          op(mozilla::gfx::CompositionOp::OP_OVER),
-          fillRule(mozilla::gfx::FillRule::FILL_WINDING),
-          lineCap(mozilla::gfx::CapStyle::BUTT),
-          lineJoin(mozilla::gfx::JoinStyle::MITER_OR_BEVEL),
-          filterString(u"none"),
-          filterSourceGraphicTainted(false),
-          imageSmoothingEnabled(true),
-          fontExplicitLanguage(false) {}
-
-    ContextState(const ContextState& aOther)
-        : fontGroup(aOther.fontGroup),
-          fontLanguage(aOther.fontLanguage),
-          fontFont(aOther.fontFont),
-          gradientStyles(aOther.gradientStyles),
-          patternStyles(aOther.patternStyles),
-          colorStyles(aOther.colorStyles),
-          font(aOther.font),
-          textAlign(aOther.textAlign),
-          textBaseline(aOther.textBaseline),
-          shadowColor(aOther.shadowColor),
-          transform(aOther.transform),
-          shadowOffset(aOther.shadowOffset),
-          lineWidth(aOther.lineWidth),
-          miterLimit(aOther.miterLimit),
-          globalAlpha(aOther.globalAlpha),
-          shadowBlur(aOther.shadowBlur),
-          dash(aOther.dash),
-          dashOffset(aOther.dashOffset),
-          op(aOther.op),
-          fillRule(aOther.fillRule),
-          lineCap(aOther.lineCap),
-          lineJoin(aOther.lineJoin),
-          filterString(aOther.filterString),
-          filterChain(aOther.filterChain),
-          autoSVGFiltersObserver(aOther.autoSVGFiltersObserver),
-          filter(aOther.filter),
-          filterAdditionalImages(aOther.filterAdditionalImages),
-          filterSourceGraphicTainted(aOther.filterSourceGraphicTainted),
-          imageSmoothingEnabled(aOther.imageSmoothingEnabled),
-          fontExplicitLanguage(aOther.fontExplicitLanguage) {}
+    ContextState();
+    ContextState(const ContextState& aOther);
+    ~ContextState();
 
     void SetColorStyle(Style aWhichStyle, nscolor aColor) {
       colorStyles[aWhichStyle] = aColor;
@@ -990,26 +945,27 @@ class CanvasRenderingContext2D final : public nsICanvasRenderingContextInternal,
     EnumeratedArray<Style, Style::MAX, nscolor> colorStyles;
 
     nsString font;
-    TextAlign textAlign;
-    TextBaseline textBaseline;
+    TextAlign textAlign = TextAlign::START;
+    TextBaseline textBaseline = TextBaseline::ALPHABETIC;
 
-    nscolor shadowColor;
+    nscolor shadowColor = 0;
 
     mozilla::gfx::Matrix transform;
     mozilla::gfx::Point shadowOffset;
-    mozilla::gfx::Float lineWidth;
-    mozilla::gfx::Float miterLimit;
-    mozilla::gfx::Float globalAlpha;
-    mozilla::gfx::Float shadowBlur;
+    mozilla::gfx::Float lineWidth = 1.0f;
+    mozilla::gfx::Float miterLimit = 10.0f;
+    mozilla::gfx::Float globalAlpha = 1.0f;
+    mozilla::gfx::Float shadowBlur = 0.0f;
+
     nsTArray<mozilla::gfx::Float> dash;
-    mozilla::gfx::Float dashOffset;
+    mozilla::gfx::Float dashOffset = 0.0f;
 
-    mozilla::gfx::CompositionOp op;
-    mozilla::gfx::FillRule fillRule;
-    mozilla::gfx::CapStyle lineCap;
-    mozilla::gfx::JoinStyle lineJoin;
+    mozilla::gfx::CompositionOp op = mozilla::gfx::CompositionOp::OP_OVER;
+    mozilla::gfx::FillRule fillRule = mozilla::gfx::FillRule::FILL_WINDING;
+    mozilla::gfx::CapStyle lineCap = mozilla::gfx::CapStyle::BUTT;
+    mozilla::gfx::JoinStyle lineJoin = mozilla::gfx::JoinStyle::MITER_OR_BEVEL;
 
-    nsString filterString;
+    nsString filterString = nsString(u"none");
     nsTArray<nsStyleFilter> filterChain;
     // RAII object that we obtain when we start to observer SVG filter elements
     // for rendering changes.  When released we stop observing the SVG elements.
@@ -1028,10 +984,10 @@ class CanvasRenderingContext2D final : public nsICanvasRenderingContextInternal,
     //
     // We keep track of this to ensure that if this gets out of sync with the
     // tainted state of the canvas itself, we update our filters accordingly.
-    bool filterSourceGraphicTainted;
+    bool filterSourceGraphicTainted = false;
 
-    bool imageSmoothingEnabled;
-    bool fontExplicitLanguage;
+    bool imageSmoothingEnabled = true;
+    bool fontExplicitLanguage = false;
   };
 
   AutoTArray<ContextState, 3> mStyleStack;

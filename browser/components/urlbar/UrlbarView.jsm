@@ -36,8 +36,8 @@ class UrlbarView {
     this._mainContainer = this.panel.querySelector(".urlbarView-body-inner");
     this._rows = this.panel.querySelector("#urlbarView-results");
 
-    this._rows.addEventListener("mouseup", this);
     this._rows.addEventListener("mousedown", this);
+    this._rows.addEventListener("mouseup", this);
 
     // For the horizontal fade-out effect, set the overflow attribute on result
     // rows when they overflow.
@@ -139,6 +139,9 @@ class UrlbarView {
     if (!this.isOpen) {
       throw new Error("UrlbarView: Cannot select an item if the view isn't open.");
     }
+
+    // Freeze results as the user is interacting with them.
+    this.controller.cancelQuery();
 
     let row = this._selected;
 
@@ -338,12 +341,6 @@ class UrlbarView {
     this.panel.removeAttribute("hidden");
     this.panel.removeAttribute("actionoverride");
 
-    this._alignPanel();
-
-    this.panel.openPopup(this.input.textbox.closest("toolbar"), "after_end");
-  }
-
-  _alignPanel() {
     // Make the panel span the width of the window.
     let documentRect =
       this._getBoundsWithoutFlushing(this.document.documentElement);
@@ -387,6 +384,16 @@ class UrlbarView {
       this.panel.style.removeProperty("--item-padding-end");
     }
     this.panel.style.setProperty("--item-content-width", Math.round(contentWidth) + "px");
+
+    // Align the panel with the input's parent toolbar.
+    let toolbarRect =
+      this._getBoundsWithoutFlushing(this.input.textbox.closest("toolbar"));
+    let offsetX = Math.round(this.window.RTL_UI ?
+      inputRect.right - documentRect.right :
+      documentRect.left - inputRect.left);
+    let offsetY = Math.round(inputRect.top - toolbarRect.top);
+
+    this.panel.openPopup(this.input.textbox, "after_start", offsetX, offsetY);
   }
 
   _createRow() {
@@ -413,7 +420,7 @@ class UrlbarView {
     content.appendChild(title);
     item._elements.set("title", title);
 
-    let tagsContainer = this._createElement("div");
+    let tagsContainer = this._createElement("span");
     tagsContainer.className = "urlbarView-tags";
     content.appendChild(tagsContainer);
     item._elements.set("tagsContainer", tagsContainer);
@@ -465,6 +472,7 @@ class UrlbarView {
       item._elements.get("title"), result.title, result.titleHighlights);
 
     let tagsContainer = item._elements.get("tagsContainer");
+    tagsContainer.textContent = "";
     if (result.payload.tags && result.payload.tags.length > 0) {
       tagsContainer.append(...result.payload.tags.map((tag, i) => {
         const element = this._createElement("span");
@@ -473,8 +481,6 @@ class UrlbarView {
           element, tag, result.payloadHighlights.tags[i]);
         return element;
       }));
-    } else {
-      tagsContainer.textContent = "";
     }
 
     let action = "";

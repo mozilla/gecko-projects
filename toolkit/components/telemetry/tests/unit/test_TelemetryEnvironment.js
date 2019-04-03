@@ -253,7 +253,7 @@ function createMockAddonProvider(aName) {
     },
 
     async getAddonsByTypes(aTypes) {
-      return this._addons.map(a => new MockAddonWrapper(a));
+      return this._addons.filter(a => !aTypes || aTypes.includes(a.type)).map(a => new MockAddonWrapper(a));
     },
 
     shutdown() {
@@ -548,6 +548,8 @@ function checkSystemSection(data) {
     if (gIsWindows) {
       Assert.equal(typeof data.system.isWow64, "boolean",
              "isWow64 must be available on Windows and have the correct type.");
+      Assert.equal(typeof data.system.isWowARM64, "boolean",
+             "isWowARM64 must be available on Windows and have the correct type.");
       Assert.ok("virtualMaxMB" in data.system, "virtualMaxMB must be available.");
       Assert.ok(Number.isFinite(data.system.virtualMaxMB),
                 "virtualMaxMB must be a number.");
@@ -1447,6 +1449,7 @@ add_task(async function test_collectionWithbrokenAddonData() {
     origin: "https://telemetry-test2.example.com",
     version: 1, // This is intentionally not a string.
     signedState: AddonManager.SIGNEDSTATE_SIGNED,
+    type: "extension",
   };
 
   const ADDON_INSTALL_URL = gDataRoot + "restartless.xpi";

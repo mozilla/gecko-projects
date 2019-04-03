@@ -53,13 +53,12 @@ nsSimplePageSequenceFrame::nsSimplePageSequenceFrame(
   nscoord halfInch = PresContext()->CSSTwipsToAppUnits(NS_INCHES_TO_TWIPS(0.5));
   mMargin.SizeTo(halfInch, halfInch, halfInch, halfInch);
 
-  // XXX Unsafe to assume successful allocation
   mPageData = new nsSharedPageData();
   mPageData->mHeadFootFont =
       *PresContext()
            ->Document()
            ->GetFontPrefsForLang(aStyle->StyleFont()->mLanguage)
-           ->GetDefaultFont(kGenericFont_serif);
+           ->GetDefaultFont(StyleGenericFontFamily::Serif);
   mPageData->mHeadFootFont.size = nsPresContext::CSSPointsToAppUnits(10);
 
   // Doing this here so we only have to go get these formats once
@@ -724,9 +723,9 @@ void nsSimplePageSequenceFrame::BuildDisplayList(
     }
   }
 
-  content.AppendToTop(MakeDisplayItem<nsDisplayTransform>(
-      aBuilder, this, &content, content.GetBuildingRect(), 0,
-      ::ComputePageSequenceTransform));
+  content.AppendNewToTop<nsDisplayTransform>(aBuilder, this, &content,
+                                             content.GetBuildingRect(), 0,
+                                             ::ComputePageSequenceTransform);
 
   aLists.Content()->AppendToTop(&content);
   aBuilder->SetInPageSequence(false);

@@ -314,6 +314,11 @@ void nsTableFrame::SetInitialChildList(ChildListID aListID,
 
   MOZ_ASSERT(mFrames.IsEmpty() && mColGroups.IsEmpty(),
              "unexpected second call to SetInitialChildList");
+#ifdef DEBUG
+  for (nsIFrame* f : aChildList) {
+    MOZ_ASSERT(f->GetParent() == this, "Unexpected parent");
+  }
+#endif
 
   // XXXbz the below code is an icky cesspit that's only needed in its current
   // form for two reasons:
@@ -1404,8 +1409,8 @@ void nsTableFrame::DisplayGenericTablePart(
 
     // Paint the outset box-shadows for the table frames
     if (aFrame->StyleEffects()->mBoxShadow) {
-      aLists.BorderBackground()->AppendToTop(
-          MakeDisplayItem<nsDisplayBoxShadowOuter>(aBuilder, aFrame));
+      aLists.BorderBackground()->AppendNewToTop<nsDisplayBoxShadowOuter>(
+          aBuilder, aFrame);
     }
   }
 
@@ -1477,8 +1482,8 @@ void nsTableFrame::DisplayGenericTablePart(
 
     // Paint the inset box-shadows for the table frames
     if (aFrame->StyleEffects()->mBoxShadow) {
-      aLists.BorderBackground()->AppendToTop(
-          MakeDisplayItem<nsDisplayBoxShadowInner>(aBuilder, aFrame));
+      aLists.BorderBackground()->AppendNewToTop<nsDisplayBoxShadowInner>(
+          aBuilder, aFrame);
     }
   }
 
@@ -1492,14 +1497,14 @@ void nsTableFrame::DisplayGenericTablePart(
       // In the collapsed border model, overlay all collapsed borders.
       if (table->IsBorderCollapse()) {
         if (table->HasBCBorders()) {
-          aLists.BorderBackground()->AppendToTop(
-              MakeDisplayItem<nsDisplayTableBorderCollapse>(aBuilder, table));
+          aLists.BorderBackground()
+              ->AppendNewToTop<nsDisplayTableBorderCollapse>(aBuilder, table);
         }
       } else {
         const nsStyleBorder* borderStyle = aFrame->StyleBorder();
         if (borderStyle->HasBorder()) {
-          aLists.BorderBackground()->AppendToTop(
-              MakeDisplayItem<nsDisplayBorder>(aBuilder, table));
+          aLists.BorderBackground()->AppendNewToTop<nsDisplayBorder>(aBuilder,
+                                                                     table);
         }
       }
     }

@@ -98,7 +98,7 @@ class FontPropertyValue {
     MOZ_ASSERT(aValue >= kMin && aValue <= kMax);
   }
   explicit constexpr FontPropertyValue(int aValue)
-      : mValue(aValue * kScale) {
+      : mValue(static_cast<InternalType>(aValue * kScale)) {
     MOZ_ASSERT(aValue >= Min && aValue <= Max);
   }
 

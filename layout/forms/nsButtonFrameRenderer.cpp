@@ -6,6 +6,7 @@
 #include "nsButtonFrameRenderer.h"
 #include "nsCSSRendering.h"
 #include "nsPresContext.h"
+#include "nsPresContextInlines.h"
 #include "nsGkAtoms.h"
 #include "nsCSSPseudoElements.h"
 #include "nsNameSpaceManager.h"
@@ -385,8 +386,7 @@ nsresult nsButtonFrameRenderer::DisplayButton(nsDisplayListBuilder* aBuilder,
                                               nsDisplayList* aBackground,
                                               nsDisplayList* aForeground) {
   if (mFrame->StyleEffects()->mBoxShadow) {
-    aBackground->AppendToTop(
-        MakeDisplayItem<nsDisplayButtonBoxShadowOuter>(aBuilder, this));
+    aBackground->AppendNewToTop<nsDisplayButtonBoxShadowOuter>(aBuilder, this);
   }
 
   nsRect buttonRect = mFrame->GetRectRelativeToSelf();
@@ -394,14 +394,12 @@ nsresult nsButtonFrameRenderer::DisplayButton(nsDisplayListBuilder* aBuilder,
   nsDisplayBackgroundImage::AppendBackgroundItemsToTop(aBuilder, mFrame,
                                                        buttonRect, aBackground);
 
-  aBackground->AppendToTop(
-      MakeDisplayItem<nsDisplayButtonBorder>(aBuilder, this));
+  aBackground->AppendNewToTop<nsDisplayButtonBorder>(aBuilder, this);
 
   // Only display focus rings if we actually have them. Since at most one
   // button would normally display a focus ring, most buttons won't have them.
   if (mInnerFocusStyle && mInnerFocusStyle->StyleBorder()->HasBorder()) {
-    aForeground->AppendToTop(
-        MakeDisplayItem<nsDisplayButtonForeground>(aBuilder, this));
+    aForeground->AppendNewToTop<nsDisplayButtonForeground>(aBuilder, this);
   }
   return NS_OK;
 }

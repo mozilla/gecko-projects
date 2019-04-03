@@ -967,23 +967,21 @@ class RTCPeerConnection {
   }
 
   async _validateIdentity(sdp, origin) {
-    let expectedIdentity;
-
     // Only run a single identity verification at a time.  We have to do this to
     // avoid problems with the fact that identity validation doesn't block the
     // resolution of setRemoteDescription().
     let p = (async () => {
+      // Should never throw
+      await this._lastIdentityValidation;
       try {
-        await this._lastIdentityValidation;
-        let msg = await this._remoteIdp.verifyIdentityFromSDP(sdp, origin);
-        expectedIdentity = this._impl.peerIdentity;
+        const msg = await this._remoteIdp.verifyIdentityFromSDP(sdp, origin);
         // If this pc has an identity already, then the identity in sdp must match
-        if (expectedIdentity && (!msg || msg.identity !== expectedIdentity)) {
-          this.close();
+        if (this._impl.peerIdentity && (!msg || msg.identity !== this._impl.peerIdentity)) {
           throw new this._win.DOMException(
-            "Peer Identity mismatch, expected: " + expectedIdentity,
+            "Peer Identity mismatch, expected: " + this._impl.peerIdentity,
             "IncompatibleSessionDescriptionError");
         }
+
         if (msg) {
           // Set new identity and generate an event.
           this._impl.peerIdentity = msg.identity;
@@ -1006,7 +1004,7 @@ class RTCPeerConnection {
     this._lastIdentityValidation = p.catch(() => {});
 
     // Only wait for IdP validation if we need identity matching
-    if (expectedIdentity) {
+    if (this._impl.peerIdentity) {
       await p;
     }
   }
@@ -1055,6 +1053,7 @@ class RTCPeerConnection {
   setIdentityProvider(provider,
                       {protocol, usernameHint, peerIdentity} = {}) {
     this._checkClosed();
+    peerIdentity = peerIdentity || this._impl.peerIdentity;
     this._localIdp.setIdentityProvider(provider,
                                        protocol, usernameHint, peerIdentity);
   }
@@ -1630,23 +1629,7 @@ class PeerConnectionObserver {
     this._dompc = dompc._innerObject;
   }
 
-  newError(message, code) {
-    // These strings must match those defined in the WebRTC spec.
-    const reasonName = [
-      "",
-      "InternalError",
-      "InternalError",
-      "InvalidParameterError",
-      "InvalidStateError",
-      "InvalidSessionDescriptionError",
-      "IncompatibleSessionDescriptionError",
-      "InternalError",
-      "IncompatibleMediaStreamTrackError",
-      "InternalError",
-      "TypeError",
-      "OperationError",
-    ];
-    let name = reasonName[Math.min(code, reasonName.length - 1)];
+  newError({message, name}) {
     return new this._dompc._win.DOMException(message, name);
   }
 
@@ -1658,16 +1641,16 @@ class PeerConnectionObserver {
     this._dompc._onCreateOfferSuccess(sdp);
   }
 
-  onCreateOfferError(code, message) {
-    this._dompc._onCreateOfferFailure(this.newError(message, code));
+  onCreateOfferError(error) {
+    this._dompc._onCreateOfferFailure(this.newError(error));
   }
 
   onCreateAnswerSuccess(sdp) {
     this._dompc._onCreateAnswerSuccess(sdp);
   }
 
-  onCreateAnswerError(code, message) {
-    this._dompc._onCreateAnswerFailure(this.newError(message, code));
+  onCreateAnswerError(error) {
+    this._dompc._onCreateAnswerFailure(this.newError(error));
   }
 
   onSetLocalDescriptionSuccess() {
@@ -1681,20 +1664,20 @@ class PeerConnectionObserver {
     this._dompc._onSetRemoteDescriptionSuccess();
   }
 
-  onSetLocalDescriptionError(code, message) {
-    this._dompc._onSetLocalDescriptionFailure(this.newError(message, code));
+  onSetLocalDescriptionError(error) {
+    this._dompc._onSetLocalDescriptionFailure(this.newError(error));
   }
 
-  onSetRemoteDescriptionError(code, message) {
-    this._dompc._onSetRemoteDescriptionFailure(this.newError(message, code));
+  onSetRemoteDescriptionError(error) {
+    this._dompc._onSetRemoteDescriptionFailure(this.newError(error));
   }
 
   onAddIceCandidateSuccess() {
     this._dompc._onAddIceCandidateSuccess();
   }
 
-  onAddIceCandidateError(code, message) {
-    this._dompc._onAddIceCandidateError(this.newError(message, code));
+  onAddIceCandidateError(error) {
+    this._dompc._onAddIceCandidateError(this.newError(error));
   }
 
   onIceCandidate(sdpMLineIndex, sdpMid, candidate, usernameFragment) {
@@ -1837,8 +1820,8 @@ class PeerConnectionObserver {
     pc._onGetStatsSuccess(webidlobj);
   }
 
-  onGetStatsError(code, message) {
-    this._dompc._onGetStatsFailure(this.newError(message, code));
+  onGetStatsError(message) {
+    this._dompc._onGetStatsFailure(this.newError({name: "OperationError", message}));
   }
 
   _getTransceiverWithRecvTrack(webrtcTrackId) {

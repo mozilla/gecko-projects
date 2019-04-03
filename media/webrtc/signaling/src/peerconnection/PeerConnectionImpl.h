@@ -173,19 +173,6 @@ class PeerConnectionImpl final
   explicit PeerConnectionImpl(
       const mozilla::dom::GlobalObject* aGlobal = nullptr);
 
-  enum Error {
-    kNoError = 0,
-    kInvalidCandidate = 2,
-    kInvalidMediastreamTrack = 3,
-    kInvalidState = 4,
-    kInvalidSessionDescription = 5,
-    kIncompatibleSessionDescription = 6,
-    kIncompatibleMediaStreamTrack = 8,
-    kInternalError = 9,
-    kTypeError = 10,
-    kOperationError = 11
-  };
-
   NS_DECL_THREADSAFE_ISUPPORTS
 
   bool WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto,
@@ -390,6 +377,7 @@ class PeerConnectionImpl final
   void GetPeerIdentity(nsAString& peerIdentity) {
     if (mPeerIdentity) {
       peerIdentity = mPeerIdentity->ToString();
+      return;
     }
 
     peerIdentity.SetIsVoid(true);

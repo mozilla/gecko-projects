@@ -10,6 +10,7 @@
 
 // Most WebIDL typedefs are identical to their OpenGL counterparts.
 #include "GLTypes.h"
+#include "mozilla/Casting.h"
 
 // Manual reflection of WebIDL typedefs that are different from their
 // OpenGL counterparts.
@@ -25,20 +26,22 @@ class GLContext;  // This is going to be needed a lot.
 }  // namespace gl
 
 // -
-// Prevent implicit conversions into calloc and malloc. (mozilla namespace only!)
+// Prevent implicit conversions into calloc and malloc. (mozilla namespace
+// only!)
 
-template<typename DestT>
-class ForbidNarrowing final
-{
+template <typename DestT>
+class ForbidNarrowing final {
   DestT mVal;
 
-public:
-  template<typename SrcT>
+ public:
+  template <typename SrcT>
   MOZ_IMPLICIT ForbidNarrowing(SrcT val) : mVal(val) {
-    static_assert(std::numeric_limits<SrcT>::min() >= std::numeric_limits<DestT>::min(),
-                  "SrcT must be narrower than DestT.");
-    static_assert(std::numeric_limits<SrcT>::max() <= std::numeric_limits<DestT>::max(),
-                  "SrcT must be narrower than DestT.");
+    static_assert(
+        std::numeric_limits<SrcT>::min() >= std::numeric_limits<DestT>::min(),
+        "SrcT must be narrower than DestT.");
+    static_assert(
+        std::numeric_limits<SrcT>::max() <= std::numeric_limits<DestT>::max(),
+        "SrcT must be narrower than DestT.");
   }
 
   explicit operator DestT() const { return mVal; }
@@ -48,8 +51,33 @@ inline void* malloc(const ForbidNarrowing<size_t> s) {
   return ::malloc(size_t(s));
 }
 
-inline void* calloc(const ForbidNarrowing<size_t> n, const ForbidNarrowing<size_t> size) {
+inline void* calloc(const ForbidNarrowing<size_t> n,
+                    const ForbidNarrowing<size_t> size) {
   return ::calloc(size_t(n), size_t(size));
+}
+
+// -
+
+namespace detail {
+
+template<typename From>
+class AutoAssertCastT final {
+  const From mVal;
+
+public:
+  explicit AutoAssertCastT(const From val) : mVal(val) { }
+
+  template<typename To>
+  operator To() const {
+    return AssertedCast<To>(mVal);
+  }
+};
+
+}  // namespace detail
+
+template<typename From>
+inline auto AutoAssertCast(const From val) {
+  return detail::AutoAssertCastT<From>(val);
 }
 
 /*

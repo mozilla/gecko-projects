@@ -17,12 +17,11 @@ import {
 
 import readFixture from "./helpers/readFixture";
 const {
-  getSource,
   getSymbols,
   getOutOfScopeLocations,
-  getSourceMetaData,
   getInScopeLines,
-  isSymbolsLoading
+  isSymbolsLoading,
+  getFramework
 } = selectors;
 
 import { prefs } from "../../utils/prefs";
@@ -63,41 +62,6 @@ const evaluationResult = {
 };
 
 describe("ast", () => {
-  describe("setSourceMetaData", () => {
-    it("should detect react components", async () => {
-      const store = createStore(threadClient, {}, sourceMaps);
-      const { dispatch, getState } = store;
-      const source = makeOriginalSource("reactComponent.js");
-
-      await dispatch(actions.newSource(makeSource("reactComponent.js")));
-
-      await dispatch(actions.newSource(source));
-
-      await dispatch(actions.loadSourceText(getSource(getState(), source.id)));
-      await dispatch(actions.setSourceMetaData(source.id));
-
-      await waitForState(store, state => {
-        const metaData = getSourceMetaData(state, source.id);
-        return metaData && metaData.framework;
-      });
-
-      const sourceMetaData = getSourceMetaData(getState(), source.id);
-      expect(sourceMetaData.framework).toBe("React");
-    });
-
-    it("should not give false positive on non react components", async () => {
-      const store = createStore(threadClient);
-      const { dispatch, getState } = store;
-      const base = makeSource("base.js");
-      await dispatch(actions.newSource(base));
-      await dispatch(actions.loadSourceText(base));
-      await dispatch(actions.setSourceMetaData("base.js"));
-
-      const sourceMetaData = getSourceMetaData(getState(), base.id);
-      expect(sourceMetaData.framework).toBe(undefined);
-    });
-  });
-
   describe("setSymbols", () => {
     describe("when the source is loaded", () => {
       it("should be able to set symbols", async () => {
@@ -105,8 +69,10 @@ describe("ast", () => {
         const { dispatch, getState } = store;
         const base = makeSource("base.js");
         await dispatch(actions.newSource(base));
-        await dispatch(actions.loadSourceText(base));
-        await dispatch(actions.setSymbols("base.js"));
+        await dispatch(actions.loadSourceText({ source: base }));
+
+        const loadedSource = selectors.getSourceFromId(getState(), base.id);
+        await dispatch(actions.setSymbols({ source: loadedSource }));
         await waitForState(store, state => !isSymbolsLoading(state, base));
 
         const baseSymbols = getSymbols(getState(), base);
@@ -130,6 +96,35 @@ describe("ast", () => {
         const { getState } = createStore(threadClient);
         const baseSymbols = getSymbols(getState());
         expect(baseSymbols).toEqual(null);
+      });
+    });
+
+    describe("frameworks", () => {
+      it("should detect react components", async () => {
+        const store = createStore(threadClient, {}, sourceMaps);
+        const { dispatch, getState } = store;
+        const source = makeOriginalSource("reactComponent.js");
+
+        await dispatch(actions.newSource(makeSource("reactComponent.js")));
+
+        await dispatch(actions.newSource(source));
+
+        await dispatch(actions.loadSourceText({ source }));
+        const loadedSource = selectors.getSourceFromId(getState(), source.id);
+        await dispatch(actions.setSymbols({ source: loadedSource }));
+
+        expect(getFramework(getState(), source)).toBe("React");
+      });
+
+      it("should not give false positive on non react components", async () => {
+        const store = createStore(threadClient);
+        const { dispatch, getState } = store;
+        const base = makeSource("base.js");
+        await dispatch(actions.newSource(base));
+        await dispatch(actions.loadSourceText({ source: base }));
+        await dispatch(actions.setSymbols({ source: base }));
+
+        expect(getFramework(getState(), base)).toBe(undefined);
       });
     });
   });

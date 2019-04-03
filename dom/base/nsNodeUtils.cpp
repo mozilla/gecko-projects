@@ -11,6 +11,7 @@
 #include "nsIContent.h"
 #include "nsIContentInlines.h"
 #include "mozilla/dom/Document.h"
+#include "mozilla/dom/DocumentInlines.h"
 #include "mozilla/dom/Element.h"
 #include "nsIMutationObserver.h"
 #include "mozilla/EventListenerManager.h"
@@ -30,6 +31,7 @@
 #include "mozilla/dom/HTMLImageElement.h"
 #include "mozilla/dom/HTMLMediaElement.h"
 #include "mozilla/dom/KeyframeEffect.h"
+#include "mozilla/PresShell.h"
 #include "nsWrapperCacheInlines.h"
 #include "nsObjectLoadingContent.h"
 #include "nsDOMMutationObserver.h"
@@ -66,8 +68,8 @@ enum class IsRemoveNotification {
   COMPOSED_DOC_DECL                                                           \
   NS_ASSERTION(node->OwnerDoc() == doc, "Bogus document");                    \
   if (remove_ == IsRemoveNotification::Yes && node->GetComposedDoc()) {       \
-    if (nsIPresShell* shell = doc->GetObservingShell()) {                     \
-      shell->func_ params_;                                                   \
+    if (PresShell* presShell = doc->GetObservingPresShell()) {                \
+      presShell->func_ params_;                                               \
     }                                                                         \
   }                                                                           \
   doc->BindingManager()->func_ params_;                                       \
@@ -92,8 +94,8 @@ enum class IsRemoveNotification {
              (remove_ == IsRemoveNotification::Yes &&                         \
               !strcmp(#func_, "NativeAnonymousChildListChange")));            \
   if (remove_ == IsRemoveNotification::No && last == doc) {                   \
-    if (nsIPresShell* shell = doc->GetObservingShell()) {                     \
-      shell->func_ params_;                                                   \
+    if (PresShell* presShell = doc->GetObservingPresShell()) {                \
+      presShell->func_ params_;                                               \
     }                                                                         \
   }                                                                           \
   if (needsEnterLeave) {                                                      \
@@ -497,6 +499,16 @@ already_AddRefed<nsINode> nsNodeUtils::CloneAndAdopt(
         nsObjectLoadingContent* olc =
             static_cast<nsObjectLoadingContent*>(objectLoadingContent.get());
         olc->NotifyOwnerDocumentActivityChanged();
+      } else {
+        // HTMLImageElement::FromNode is insufficient since we need this for
+        // <svg:image> as well.
+        nsCOMPtr<nsIImageLoadingContent> imageLoadingContent(
+            do_QueryInterface(aNode));
+        if (imageLoadingContent) {
+          auto ilc =
+              static_cast<nsImageLoadingContent*>(imageLoadingContent.get());
+          ilc->NotifyOwnerDocumentActivityChanged();
+        }
       }
     }
 

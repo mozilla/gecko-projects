@@ -16,7 +16,9 @@ import type { Action, DonePromiseAction } from "../actions/types";
 
 type EmptyLinesType = number[];
 
-export type Symbols = SymbolDeclarations | {| loading: true |};
+export type LoadedSymbols = SymbolDeclarations;
+export type Symbols = LoadedSymbols | {| loading: true |};
+
 export type EmptyLinesMap = { [k: string]: EmptyLinesType };
 export type SymbolsMap = { [k: string]: Symbols };
 
@@ -43,8 +45,7 @@ export type ASTState = {
   +emptyLines: EmptyLinesMap,
   +outOfScopeLocations: ?Array<AstLocation>,
   +inScopeLines: ?Array<number>,
-  +preview: Preview,
-  +sourceMetaData: SourceMetaDataMap
+  +preview: Preview
 };
 
 export function initialASTState(): ASTState {
@@ -53,8 +54,7 @@ export function initialASTState(): ASTState {
     emptyLines: {},
     outOfScopeLocations: null,
     inScopeLines: null,
-    preview: null,
-    sourceMetaData: {}
+    preview: null
   };
 }
 
@@ -113,14 +113,6 @@ function update(state: ASTState = initialASTState(), action: Action): ASTState {
       return initialASTState();
     }
 
-    case "SET_SOURCE_METADATA": {
-      const { sourceId, sourceMetaData } = action;
-      return {
-        ...state,
-        sourceMetaData: { ...state.sourceMetaData, [sourceId]: sourceMetaData }
-      };
-    }
-
     default: {
       return state;
     }
@@ -149,6 +141,13 @@ export function hasSymbols(state: OuterState, source: Source): boolean {
   return !symbols.loading;
 }
 
+export function getFramework(state: OuterState, source: Source): ?string {
+  const symbols = getSymbols(state, source);
+  if (symbols && !symbols.loading) {
+    return symbols.framework;
+  }
+}
+
 export function isSymbolsLoading(state: OuterState, source: ?Source): boolean {
   const symbols = getSymbols(state, source);
   if (!symbols) {
@@ -164,15 +163,6 @@ export function getOutOfScopeLocations(state: OuterState) {
 
 export function getPreview(state: OuterState) {
   return state.ast.preview;
-}
-
-const emptySourceMetaData = {};
-export function getSourceMetaData(state: OuterState, sourceId: string) {
-  return state.ast.sourceMetaData[sourceId] || emptySourceMetaData;
-}
-
-export function hasSourceMetaData(state: OuterState, sourceId: string) {
-  return state.ast.sourceMetaData[sourceId];
 }
 
 export function getInScopeLines(state: OuterState) {

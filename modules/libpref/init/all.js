@@ -528,19 +528,8 @@ pref("media.getusermedia.aec_extended_filter", true);
 pref("media.getusermedia.noise", 1); // kModerate
 pref("media.getusermedia.agc_enabled", true);
 pref("media.getusermedia.agc", 1); // kAdaptiveDigital
-// capture_delay: Adjustments for OS-specific input delay (lower bound)
-// playout_delay: Adjustments for OS-specific AudioStream+cubeb+output delay (lower bound)
 // full_duplex: enable cubeb full-duplex capture/playback
 pref("media.navigator.audio.full_duplex", true);
-#if defined(XP_MACOSX)
-pref("media.peerconnection.capture_delay", 50);
-#elif defined(XP_WIN)
-pref("media.peerconnection.capture_delay", 50);
-#elif defined(ANDROID)
-pref("media.peerconnection.capture_delay", 100);
-#else
-pref("media.peerconnection.capture_delay", 70);
-#endif
 #endif
 
 pref("dom.webaudio.enabled", true);
@@ -1452,7 +1441,6 @@ pref("privacy.resistFingerprinting.reduceTimerPrecision.microseconds", 1000);
 pref("privacy.resistFingerprinting.reduceTimerPrecision.jitter", true);
 
 pref("dom.event.contextmenu.enabled",       true);
-pref("dom.event.clipboardevents.enabled",   true);
 pref("dom.event.coalesce_mouse_move",       true);
 
 pref("javascript.enabled",                  true);
@@ -2708,7 +2696,7 @@ pref("csp.overrule_about_uris_without_csp_whitelist", false);
 pref("csp.skip_about_page_has_csp_assert", false);
 // assertion flag will be set to false after fixing Bug 1473549
 pref("security.allow_eval_with_system_principal", false);
-pref("security.uris_using_eval_with_system_principal", "autocomplete.xml,redux.js,react-redux.js,content-task.js,content-task.js,tree.xml,dialog.xml,preferencesbindings.js,wizard.xml,lodash.js,jszip.js,sinon-7.2.7.js,ajv-4.1.1.js,updates.js,setup,jsol.js,parent_utils.js,chrometask_chromescript");
+pref("security.uris_using_eval_with_system_principal", "autocomplete.xml,redux.js,react-redux.js,content-task.js,content-task.js,tree.xml,dialog.xml,preferencesbindings.js,lodash.js,jszip.js,sinon-7.2.7.js,ajv-4.1.1.js,updates.js,setup,jsol.js,parent_utils.js,chrometask_chromescript");
 #endif
 
 // Default Content Security Policy to apply to signed contents.
@@ -3217,8 +3205,7 @@ pref("layout.display-list.dump-parent", false);
 pref("layout.display-list.retain", true);
 pref("layout.display-list.retain.chrome", false);
 #else
-pref("layout.display-list.retain", true);
-pref("layout.display-list.retain.chrome", true);
+pref("layout.display-list.retain", false);
 #endif
 
 // Set the maximum amount of modified frames allowed before doing a full
@@ -3455,149 +3442,149 @@ pref("svg.context-properties.content.enabled", false);
 pref("font.default.ar", "sans-serif");
 pref("font.minimum-size.ar", 0);
 pref("font.size.variable.ar", 16);
-pref("font.size.fixed.ar", 13);
+pref("font.size.monospace.ar", 13);
 
 pref("font.default.el", "serif");
 pref("font.minimum-size.el", 0);
 pref("font.size.variable.el", 16);
-pref("font.size.fixed.el", 13);
+pref("font.size.monospace.el", 13);
 
 pref("font.default.he", "sans-serif");
 pref("font.minimum-size.he", 0);
 pref("font.size.variable.he", 16);
-pref("font.size.fixed.he", 13);
+pref("font.size.monospace.he", 13);
 
 pref("font.default.ja", "sans-serif");
 pref("font.minimum-size.ja", 0);
 pref("font.size.variable.ja", 16);
-pref("font.size.fixed.ja", 16);
+pref("font.size.monospace.ja", 16);
 
 pref("font.default.ko", "sans-serif");
 pref("font.minimum-size.ko", 0);
 pref("font.size.variable.ko", 16);
-pref("font.size.fixed.ko", 16);
+pref("font.size.monospace.ko", 16);
 
 pref("font.default.th", "sans-serif");
 pref("font.minimum-size.th", 0);
 pref("font.size.variable.th", 16);
-pref("font.size.fixed.th", 13);
+pref("font.size.monospace.th", 13);
 
 pref("font.default.x-cyrillic", "serif");
 pref("font.minimum-size.x-cyrillic", 0);
 pref("font.size.variable.x-cyrillic", 16);
-pref("font.size.fixed.x-cyrillic", 13);
+pref("font.size.monospace.x-cyrillic", 13);
 
 pref("font.default.x-devanagari", "serif");
 pref("font.minimum-size.x-devanagari", 0);
 pref("font.size.variable.x-devanagari", 16);
-pref("font.size.fixed.x-devanagari", 13);
+pref("font.size.monospace.x-devanagari", 13);
 
 pref("font.default.x-tamil", "serif");
 pref("font.minimum-size.x-tamil", 0);
 pref("font.size.variable.x-tamil", 16);
-pref("font.size.fixed.x-tamil", 13);
+pref("font.size.monospace.x-tamil", 13);
 
 pref("font.default.x-armn", "serif");
 pref("font.minimum-size.x-armn", 0);
 pref("font.size.variable.x-armn", 16);
-pref("font.size.fixed.x-armn", 13);
+pref("font.size.monospace.x-armn", 13);
 
 pref("font.default.x-beng", "serif");
 pref("font.minimum-size.x-beng", 0);
 pref("font.size.variable.x-beng", 16);
-pref("font.size.fixed.x-beng", 13);
+pref("font.size.monospace.x-beng", 13);
 
 pref("font.default.x-cans", "serif");
 pref("font.minimum-size.x-cans", 0);
 pref("font.size.variable.x-cans", 16);
-pref("font.size.fixed.x-cans", 13);
+pref("font.size.monospace.x-cans", 13);
 
 pref("font.default.x-ethi", "serif");
 pref("font.minimum-size.x-ethi", 0);
 pref("font.size.variable.x-ethi", 16);
-pref("font.size.fixed.x-ethi", 13);
+pref("font.size.monospace.x-ethi", 13);
 
 pref("font.default.x-geor", "serif");
 pref("font.minimum-size.x-geor", 0);
 pref("font.size.variable.x-geor", 16);
-pref("font.size.fixed.x-geor", 13);
+pref("font.size.monospace.x-geor", 13);
 
 pref("font.default.x-gujr", "serif");
 pref("font.minimum-size.x-gujr", 0);
 pref("font.size.variable.x-gujr", 16);
-pref("font.size.fixed.x-gujr", 13);
+pref("font.size.monospace.x-gujr", 13);
 
 pref("font.default.x-guru", "serif");
 pref("font.minimum-size.x-guru", 0);
 pref("font.size.variable.x-guru", 16);
-pref("font.size.fixed.x-guru", 13);
+pref("font.size.monospace.x-guru", 13);
 
 pref("font.default.x-khmr", "serif");
 pref("font.minimum-size.x-khmr", 0);
 pref("font.size.variable.x-khmr", 16);
-pref("font.size.fixed.x-khmr", 13);
+pref("font.size.monospace.x-khmr", 13);
 
 pref("font.default.x-mlym", "serif");
 pref("font.minimum-size.x-mlym", 0);
 pref("font.size.variable.x-mlym", 16);
-pref("font.size.fixed.x-mlym", 13);
+pref("font.size.monospace.x-mlym", 13);
 
 pref("font.default.x-orya", "serif");
 pref("font.minimum-size.x-orya", 0);
 pref("font.size.variable.x-orya", 16);
-pref("font.size.fixed.x-orya", 13);
+pref("font.size.monospace.x-orya", 13);
 
 pref("font.default.x-telu", "serif");
 pref("font.minimum-size.x-telu", 0);
 pref("font.size.variable.x-telu", 16);
-pref("font.size.fixed.x-telu", 13);
+pref("font.size.monospace.x-telu", 13);
 
 pref("font.default.x-knda", "serif");
 pref("font.minimum-size.x-knda", 0);
 pref("font.size.variable.x-knda", 16);
-pref("font.size.fixed.x-knda", 13);
+pref("font.size.monospace.x-knda", 13);
 
 pref("font.default.x-sinh", "serif");
 pref("font.minimum-size.x-sinh", 0);
 pref("font.size.variable.x-sinh", 16);
-pref("font.size.fixed.x-sinh", 13);
+pref("font.size.monospace.x-sinh", 13);
 
 pref("font.default.x-tibt", "serif");
 pref("font.minimum-size.x-tibt", 0);
 pref("font.size.variable.x-tibt", 16);
-pref("font.size.fixed.x-tibt", 13);
+pref("font.size.monospace.x-tibt", 13);
 
 pref("font.default.x-unicode", "serif");
 pref("font.minimum-size.x-unicode", 0);
 pref("font.size.variable.x-unicode", 16);
-pref("font.size.fixed.x-unicode", 13);
+pref("font.size.monospace.x-unicode", 13);
 
 pref("font.default.x-western", "serif");
 pref("font.minimum-size.x-western", 0);
 pref("font.size.variable.x-western", 16);
-pref("font.size.fixed.x-western", 13);
+pref("font.size.monospace.x-western", 13);
 
 pref("font.default.zh-CN", "sans-serif");
 pref("font.minimum-size.zh-CN", 0);
 pref("font.size.variable.zh-CN", 16);
-pref("font.size.fixed.zh-CN", 16);
+pref("font.size.monospace.zh-CN", 16);
 
 pref("font.default.zh-HK", "sans-serif");
 pref("font.minimum-size.zh-HK", 0);
 pref("font.size.variable.zh-HK", 16);
-pref("font.size.fixed.zh-HK", 16);
+pref("font.size.monospace.zh-HK", 16);
 
 pref("font.default.zh-TW", "sans-serif");
 pref("font.minimum-size.zh-TW", 0);
 pref("font.size.variable.zh-TW", 16);
-pref("font.size.fixed.zh-TW", 16);
+pref("font.size.monospace.zh-TW", 16);
 
 // mathml.css sets font-size to "inherit" and font-family to "serif" so only
 // font.name.*.x-math and font.minimum-size.x-math are really relevant.
 pref("font.default.x-math", "serif");
 pref("font.minimum-size.x-math", 0);
 pref("font.size.variable.x-math", 16);
-pref("font.size.fixed.x-math", 13);
+pref("font.size.monospace.x-math", 13);
 
 /*
  * A value greater than zero enables font size inflation for
@@ -4435,19 +4422,19 @@ pref("font.name-list.serif.ar", "serif");
 pref("font.name-list.sans-serif.ar", "sans-serif");
 pref("font.name-list.monospace.ar", "monospace");
 pref("font.name-list.cursive.ar", "cursive");
-pref("font.size.fixed.ar", 12);
+pref("font.size.monospace.ar", 12);
 
 pref("font.name-list.serif.el", "serif");
 pref("font.name-list.sans-serif.el", "sans-serif");
 pref("font.name-list.monospace.el", "monospace");
 pref("font.name-list.cursive.el", "cursive");
-pref("font.size.fixed.el", 12);
+pref("font.size.monospace.el", 12);
 
 pref("font.name-list.serif.he", "serif");
 pref("font.name-list.sans-serif.he", "sans-serif");
 pref("font.name-list.monospace.he", "monospace");
 pref("font.name-list.cursive.he", "cursive");
-pref("font.size.fixed.he", 12);
+pref("font.size.monospace.he", 12);
 
 pref("font.name-list.serif.ja", "serif");
 pref("font.name-list.sans-serif.ja", "sans-serif");
@@ -4484,7 +4471,7 @@ pref("font.name-list.serif.x-cyrillic", "serif");
 pref("font.name-list.sans-serif.x-cyrillic", "sans-serif");
 pref("font.name-list.monospace.x-cyrillic", "monospace");
 pref("font.name-list.cursive.x-cyrillic", "cursive");
-pref("font.size.fixed.x-cyrillic", 12);
+pref("font.size.monospace.x-cyrillic", 12);
 
 pref("font.name-list.serif.x-devanagari", "serif");
 pref("font.name-list.sans-serif.x-devanagari", "sans-serif");
@@ -4555,13 +4542,13 @@ pref("font.name-list.serif.x-unicode", "serif");
 pref("font.name-list.sans-serif.x-unicode", "sans-serif");
 pref("font.name-list.monospace.x-unicode", "monospace");
 pref("font.name-list.cursive.x-unicode", "cursive");
-pref("font.size.fixed.x-unicode", 12);
+pref("font.size.monospace.x-unicode", 12);
 
 pref("font.name-list.serif.x-western", "serif");
 pref("font.name-list.sans-serif.x-western", "sans-serif");
 pref("font.name-list.monospace.x-western", "monospace");
 pref("font.name-list.cursive.x-western", "cursive");
-pref("font.size.fixed.x-western", 12);
+pref("font.size.monospace.x-western", 12);
 
 pref("font.name-list.serif.zh-CN", "serif");
 pref("font.name-list.sans-serif.zh-CN", "sans-serif");
@@ -4615,21 +4602,21 @@ pref("gfx.font_rendering.fontconfig.max_generic_substitutions", 3);
 
 #if defined(ANDROID)
 
-pref("font.size.fixed.ar", 12);
+pref("font.size.monospace.ar", 12);
 
 pref("font.default.el", "sans-serif");
-pref("font.size.fixed.el", 12);
+pref("font.size.monospace.el", 12);
 
-pref("font.size.fixed.he", 12);
+pref("font.size.monospace.he", 12);
 
 pref("font.default.x-cyrillic", "sans-serif");
-pref("font.size.fixed.x-cyrillic", 12);
+pref("font.size.monospace.x-cyrillic", 12);
 
 pref("font.default.x-unicode", "sans-serif");
-pref("font.size.fixed.x-unicode", 12);
+pref("font.size.monospace.x-unicode", 12);
 
 pref("font.default.x-western", "sans-serif");
-pref("font.size.fixed.x-western", 12);
+pref("font.size.monospace.x-western", 12);
 
 # ANDROID
 #endif
@@ -5203,7 +5190,7 @@ pref("extensions.webextensions.keepStorageOnUninstall", false);
 pref("extensions.webextensions.keepUuidOnUninstall", false);
 // Redirect basedomain used by identity api
 pref("extensions.webextensions.identity.redirectDomain", "extensions.allizom.org");
-pref("extensions.webextensions.restrictedDomains", "accounts-static.cdn.mozilla.net,accounts.firefox.com,addons.cdn.mozilla.net,addons.mozilla.org,api.accounts.firefox.com,content.cdn.mozilla.net,discovery.addons.mozilla.org,input.mozilla.org,install.mozilla.org,oauth.accounts.firefox.com,profile.accounts.firefox.com,support.mozilla.org,sync.services.mozilla.com");
+pref("extensions.webextensions.restrictedDomains", "accounts-static.cdn.mozilla.net,accounts.firefox.com,addons.cdn.mozilla.net,addons.mozilla.org,api.accounts.firefox.com,content.cdn.mozilla.net,discovery.addons.mozilla.org,install.mozilla.org,oauth.accounts.firefox.com,profile.accounts.firefox.com,support.mozilla.org,sync.services.mozilla.com");
 // Whether or not webextension icon theming is supported.
 pref("extensions.webextensions.themes.icons.enabled", false);
 pref("extensions.webextensions.remote", false);
