@@ -346,25 +346,9 @@ interface nsIApplicationUpdateService : nsISupports
   nsIFile getUpdatesDirectory();
 
   /**
-   * Stop the active update download process. This is the equivilant of
-   * calling nsIRequest::Cancel on the download's nsIRequest. When downloading
-   * with nsIIncrementalDownload, this will leave the partial download in place.
-   * When downloading with BITS, any partial download progress will be lost.
+   * Pauses the active update download process
    */
-  void stopDownload();
-
-  /**
-   * If the update passed is already being downloaded, the in-progress download
-   * is switched from a background download to a foreground download.
-   * If a download of a different update is in progress, it is canceled and the
-   * new download is started.
-   * If no download is in progress, calling this has the same effect as calling
-   * downloadUpdate() with background=false.
-   *
-   * @param update The update to download and install.
-   * @returns A Promise that resolves with the download status.
-   */
-  Promise ensureForegroundDownload(in nsIUpdate update);
+  void pauseDownload();
 
   /**
    * Whether or not there is an download happening at the moment.
