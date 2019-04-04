@@ -97,7 +97,6 @@
 
 class nsAtom;
 class nsPresContext;
-class nsIPresShell;
 class nsView;
 class nsIWidget;
 class nsISelectionController;
@@ -130,6 +129,7 @@ namespace mozilla {
 
 enum class PseudoStyleType : uint8_t;
 class EventStates;
+class PresShell;
 struct ReflowInput;
 class ReflowOutput;
 class ServoRestyleState;
@@ -850,7 +850,8 @@ class nsIFrame : public nsQueryFrame {
   virtual void SetAdditionalComputedStyle(int32_t aIndex,
                                           ComputedStyle* aComputedStyle) = 0;
 
-  already_AddRefed<ComputedStyle> ComputeSelectionStyle() const;
+  already_AddRefed<ComputedStyle> ComputeSelectionStyle(
+      int16_t aSelectionStatus) const;
 
   /**
    * Accessor functions for geometric parent.

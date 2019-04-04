@@ -369,8 +369,9 @@ Loader::Loader()
 Loader::Loader(DocGroup* aDocGroup) : Loader() { mDocGroup = aDocGroup; }
 
 Loader::Loader(Document* aDocument) : Loader() {
+  MOZ_ASSERT(aDocument, "We should get a valid document from the caller!");
   mDocument = aDocument;
-  MOZ_ASSERT(mDocument, "We should get a valid document from the caller!");
+  mCompatMode = aDocument->GetCompatibilityMode();
 }
 
 Loader::~Loader() {
@@ -1075,13 +1076,7 @@ static Loader::MediaMatched MediaListMatches(const MediaList* aMediaList,
     return Loader::MediaMatched::Yes;
   }
 
-  nsPresContext* pc = aDocument->GetPresContext();
-  if (!pc) {
-    // Conservatively assume a match.
-    return Loader::MediaMatched::Yes;
-  }
-
-  if (aMediaList->Matches(pc)) {
+  if (aMediaList->Matches(*aDocument)) {
     return Loader::MediaMatched::Yes;
   }
 

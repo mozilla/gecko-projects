@@ -44,6 +44,7 @@
 #include "nsTableWrapperFrame.h"
 #include "nsView.h"
 #include "nsViewManager.h"
+#include "nsIPresShellInlines.h"
 #include "nsIScrollableFrame.h"
 #include "nsPresContext.h"
 #include "nsPresContextInlines.h"
@@ -444,10 +445,10 @@ void AutoWeakFrame::Init(nsIFrame* aFrame) {
   Clear(mFrame ? mFrame->PresContext()->GetPresShell() : nullptr);
   mFrame = aFrame;
   if (mFrame) {
-    nsIPresShell* shell = mFrame->PresContext()->GetPresShell();
-    NS_WARNING_ASSERTION(shell, "Null PresShell in AutoWeakFrame!");
-    if (shell) {
-      shell->AddAutoWeakFrame(this);
+    mozilla::PresShell* presShell = mFrame->PresContext()->GetPresShell();
+    NS_WARNING_ASSERTION(presShell, "Null PresShell in AutoWeakFrame!");
+    if (presShell) {
+      presShell->AddAutoWeakFrame(this);
     } else {
       mFrame = nullptr;
     }
@@ -458,10 +459,10 @@ void WeakFrame::Init(nsIFrame* aFrame) {
   Clear(mFrame ? mFrame->PresContext()->GetPresShell() : nullptr);
   mFrame = aFrame;
   if (mFrame) {
-    nsIPresShell* shell = mFrame->PresContext()->GetPresShell();
-    MOZ_ASSERT(shell, "Null PresShell in WeakFrame!");
-    if (shell) {
-      shell->AddWeakFrame(this);
+    mozilla::PresShell* presShell = mFrame->PresContext()->GetPresShell();
+    MOZ_ASSERT(presShell, "Null PresShell in WeakFrame!");
+    if (presShell) {
+      presShell->AddWeakFrame(this);
     } else {
       mFrame = nullptr;
     }
@@ -2218,10 +2219,11 @@ Color nsDisplaySelectionOverlay::ComputeColorFromSelectionStyle(
 
 Color nsDisplaySelectionOverlay::ComputeColor() const {
   LookAndFeel::ColorID colorID;
+  if (RefPtr<ComputedStyle> style =
+          mFrame->ComputeSelectionStyle(mSelectionValue)) {
+    return ComputeColorFromSelectionStyle(*style);
+  }
   if (mSelectionValue == nsISelectionController::SELECTION_ON) {
-    if (RefPtr<ComputedStyle> style = mFrame->ComputeSelectionStyle()) {
-      return ComputeColorFromSelectionStyle(*style);
-    }
     colorID = LookAndFeel::eColorID_TextSelectBackground;
   } else if (mSelectionValue == nsISelectionController::SELECTION_ATTENTION) {
     colorID = LookAndFeel::eColorID_TextSelectBackgroundAttention;
@@ -2273,7 +2275,13 @@ static Element* FindElementAncestorForMozSelection(nsIContent* aContent) {
   return aContent ? aContent->AsElement() : nullptr;
 }
 
-already_AddRefed<ComputedStyle> nsIFrame::ComputeSelectionStyle() const {
+already_AddRefed<ComputedStyle> nsIFrame::ComputeSelectionStyle(
+    int16_t aSelectionStatus) const {
+  // Just bail out if not a selection-status that ::selection applies to.
+  if (aSelectionStatus != nsISelectionController::SELECTION_ON &&
+      aSelectionStatus != nsISelectionController::SELECTION_DISABLED) {
+    return nullptr;
+  }
   Element* element = FindElementAncestorForMozSelection(GetContent());
   if (!element) {
     return nullptr;
@@ -4207,13 +4215,15 @@ nsFrame::HandlePress(nsPresContext* aPresContext, WidgetGUIEvent* aEvent,
   // Check with the ESM to see if we should process this one
   if (!aPresContext->EventStateManager()->EventStatusOK(aEvent)) return NS_OK;
 
-  nsIPresShell* shell = aPresContext->GetPresShell();
-  if (!shell) return NS_ERROR_FAILURE;
+  mozilla::PresShell* presShell = aPresContext->GetPresShell();
+  if (!presShell) {
+    return NS_ERROR_FAILURE;
+  }
 
   // if we are in Navigator and the click is in a draggable node, we don't want
   // to start selection because we don't want to interfere with a potential
   // drag of said node and steal all its glory.
-  int16_t isEditor = shell->GetSelectionFlags();
+  int16_t isEditor = presShell->GetSelectionFlags();
   // weaaak. only the editor can display frame selection not just text and
   // images
   isEditor = isEditor == nsISelectionDisplay::DISPLAY_ALL;
@@ -4267,7 +4277,7 @@ nsFrame::HandlePress(nsPresContext* aPresContext, WidgetGUIEvent* aEvent,
   if (useFrameSelection)
     frameselection = GetConstFrameSelection();
   else
-    frameselection = shell->ConstFrameSelection();
+    frameselection = presShell->ConstFrameSelection();
 
   if (!frameselection || frameselection->GetDisplaySelection() ==
                              nsISelectionController::SELECTION_OFF)
@@ -4300,7 +4310,7 @@ nsFrame::HandlePress(nsPresContext* aPresContext, WidgetGUIEvent* aEvent,
   int32_t contentOffset;
   TableSelection target;
   nsresult rv;
-  rv = GetDataForTableSelection(frameselection, shell, mouseEvent,
+  rv = GetDataForTableSelection(frameselection, presShell, mouseEvent,
                                 getter_AddRefs(parentContent), &contentOffset,
                                 &target);
   if (NS_SUCCEEDED(rv) && parentContent) {
@@ -4551,7 +4561,7 @@ NS_IMETHODIMP nsFrame::HandleDrag(nsPresContext* aPresContext,
   int32_t contentOffset;
   TableSelection target;
   WidgetMouseEvent* mouseEvent = aEvent->AsMouseEvent();
-  nsCOMPtr<nsIPresShell> presShell = aPresContext->PresShell();
+  mozilla::PresShell* presShell = aPresContext->PresShell();
   nsresult result;
   result = GetDataForTableSelection(frameselection, presShell, mouseEvent,
                                     getter_AddRefs(parentContent),
@@ -4709,8 +4719,7 @@ NS_IMETHODIMP nsFrame::HandleRelease(nsPresContext* aPresContext,
     if (doc) {
       mozilla::PresShell* capturingPresShell = doc->GetPresShell();
       if (capturingPresShell &&
-          capturingPresShell !=
-              static_cast<mozilla::PresShell*>(PresContext()->GetPresShell())) {
+          capturingPresShell != PresContext()->GetPresShell()) {
         frameSelection = capturingPresShell->FrameSelection();
       }
     }
@@ -7638,9 +7647,8 @@ void nsIFrame::RootFrameList(nsPresContext* aPresContext, FILE* out,
                              const char* aPrefix) {
   if (!aPresContext || !out) return;
 
-  nsIPresShell* shell = aPresContext->GetPresShell();
-  if (shell) {
-    nsIFrame* frame = shell->GetRootFrame();
+  if (mozilla::PresShell* presShell = aPresContext->GetPresShell()) {
+    nsIFrame* frame = presShell->GetRootFrame();
     if (frame) {
       frame->List(out, aPrefix);
     }
@@ -7679,7 +7687,8 @@ nsresult nsFrame::GetSelectionController(nsPresContext* aPresContext,
     frame = frame->GetParent();
   }
 
-  return CallQueryInterface(aPresContext->GetPresShell(), aSelCon);
+  *aSelCon = do_AddRef(aPresContext->PresShell()).take();
+  return NS_OK;
 }
 
 already_AddRefed<nsFrameSelection> nsIFrame::GetFrameSelection() {
@@ -7912,9 +7921,11 @@ nsresult nsFrame::GetNextPrevLineFromeBlockFrame(nsPresContext* aPresContext,
         // special check. if we allow non-text selection then we can allow a hit
         // location to fall before a table. otherwise there is no way to get and
         // click signal to fall before a table (it being a line iterator itself)
-        nsIPresShell* shell = aPresContext->GetPresShell();
-        if (!shell) return NS_ERROR_FAILURE;
-        int16_t isEditor = shell->GetSelectionFlags();
+        mozilla::PresShell* presShell = aPresContext->GetPresShell();
+        if (!presShell) {
+          return NS_ERROR_FAILURE;
+        }
+        int16_t isEditor = presShell->GetSelectionFlags();
         isEditor = isEditor == nsISelectionDisplay::DISPLAY_ALL;
         if (isEditor) {
           if (resultFrame->IsTableWrapperFrame()) {

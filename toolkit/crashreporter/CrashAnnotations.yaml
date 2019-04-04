@@ -154,9 +154,9 @@ Bug_1086977:
     loading a facebook plugin.
   type: string
 
-Bug_1537883:
+Bug_1541161:
   description: >
-    Dump JS Stack in case aPrincipal is null within SpeculativeConnect().
+    Dump JS Stack in case loadinfo is null within NewChannelFromURIWithProxyFlagsInternal().
   type: string
 
 BuildID:
@@ -499,6 +499,15 @@ LauncherProcessState:
     match with one of the values in the
     mozilla::LauncherRegistryInfo::EnableState enum
   type: integer
+
+LocalStorageShutdownTimeout:
+  description: >
+    This annotation is present if LocalStorage shutdown was not finished in time
+    and the browser was crashed instead of waiting for LocalStorage shutdown to
+    finish. The condition that caused the hang is contained in the annotation.
+  type: string
+  content: false
+  ping: true
 
 LowCommitSpaceEvents:
   description: >
