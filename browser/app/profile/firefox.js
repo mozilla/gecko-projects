@@ -170,7 +170,7 @@ pref("app.update.service.enabled", true);
 
 #ifdef XP_WIN
 // This pref prevents BITS from being used by Firefox to download updates.
-pref("app.update.BITS.enabled", true);
+pref("app.update.BITS.enabled", false);
 #endif
 
 // Symmetric (can be overridden by individual extensions) update preferences.
