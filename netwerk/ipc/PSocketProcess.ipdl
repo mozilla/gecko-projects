@@ -12,6 +12,7 @@ include protocol PSocketProcessBridge;
 include protocol PProfiler;
 include protocol PAltService;
 include protocol PWebrtcTCPSocket;
+include protocol PBackground;
 
 include MemoryReportTypes;
 include PBrowserOrId;
@@ -58,6 +59,7 @@ parent:
 
   /* tabId is only required for web-proxy support, which isn't always needed */
   async PWebrtcTCPSocket(TabId? tabId);
+  async InitBackground(Endpoint<PBackgroundParent> aEndpoint);
 
 child:
   async PreferenceUpdate(Pref pref);

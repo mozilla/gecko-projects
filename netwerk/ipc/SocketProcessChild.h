@@ -24,8 +24,9 @@ class BackgroundDataBridgeParent;
 // This is allocated and kept alive by SocketProcessImpl.
 class SocketProcessChild final : public PSocketProcessChild {
  public:
+  NS_INLINE_DECL_THREADSAFE_REFCOUNTING(SocketProcessChild)
+
   SocketProcessChild();
-  ~SocketProcessChild();
 
   static SocketProcessChild* GetSingleton();
 
@@ -115,7 +116,13 @@ class SocketProcessChild final : public PSocketProcessChild {
     mBackgroundThread = NS_GetCurrentThread();
   }
 
+  bool IsShuttingDown() { return mShuttingDown; }
+
   nsCOMPtr<nsIThread> mBackgroundThread;
+
+ protected:
+  friend class SocketProcessImpl;
+  ~SocketProcessChild();
 
  private:
   // Mapping of content process id and the SocketProcessBridgeParent.
@@ -130,6 +137,8 @@ class SocketProcessChild final : public PSocketProcessChild {
 #ifdef MOZ_GECKO_PROFILER
   RefPtr<ChildProfilerController> mProfilerController;
 #endif
+
+  bool mShuttingDown;
 };
 
 }  // namespace net

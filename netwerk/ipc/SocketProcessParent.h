@@ -9,6 +9,7 @@
 #include "mozilla/UniquePtr.h"
 #include "mozilla/ipc/CrashReporterHelper.h"
 #include "mozilla/net/PSocketProcessParent.h"
+#include "mozilla/ipc/BackgroundParent.h"
 
 namespace mozilla {
 
@@ -85,6 +86,9 @@ class SocketProcessParent final
   bool DeallocPParentToChildStreamParent(PParentToChildStreamParent* aActor);
   PAltServiceParent* AllocPAltServiceParent();
   bool DeallocPAltServiceParent(PAltServiceParent* aActor);
+
+  mozilla::ipc::IPCResult RecvInitBackground(
+      Endpoint<PBackgroundParent>&& aEndpoint);
 
  private:
   SocketProcessHost* mHost;
