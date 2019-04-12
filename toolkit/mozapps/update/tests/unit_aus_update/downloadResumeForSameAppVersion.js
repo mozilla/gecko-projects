@@ -24,8 +24,8 @@ function run_test() {
                "the update manager activeUpdate state attribute" +
                MSG_SHOULD_EQUAL);
 
-  // Cancel the download early to prevent it writing the update xml files during
+  // Pause the download early to prevent it writing the update xml files during
   // shutdown.
-  gAUS.stopDownload();
+  gAUS.pauseDownload();
   executeSoon(doTestFinish);
 }
