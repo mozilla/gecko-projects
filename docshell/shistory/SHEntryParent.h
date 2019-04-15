@@ -172,6 +172,8 @@ class SHEntryParent final : public PSHEntryParent {
                     nsresult* aResult);
   bool RecvRemoveChild(PSHEntryParent* aChild, nsresult* aResult);
   bool RecvGetChildAt(const int32_t& aIndex, MaybeNewPSHEntry* aChild);
+  bool RecvGetChildSHEntryIfHasNoDynamicallyAddedChild(
+      const int32_t& aChildOffset, MaybeNewPSHEntry* aChild);
   bool RecvReplaceChild(PSHEntryParent* aNewChild, nsresult* aResult);
   bool RecvClearEntry(const uint64_t& aNewSharedID);
 
