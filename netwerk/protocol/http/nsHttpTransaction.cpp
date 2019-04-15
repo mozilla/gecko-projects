@@ -50,6 +50,7 @@
 #include "TunnelUtils.h"
 #include "sslerr.h"
 #include <algorithm>
+#include "Http2PushStreamManager.h"
 
 //-----------------------------------------------------------------------------
 
@@ -68,6 +69,7 @@ namespace net {
 
 nsHttpTransaction::nsHttpTransaction()
     : mLock("transaction lock"),
+      mChannelId(0),
       mRequestSize(0),
       mRequestHead(nullptr),
       mResponseHead(nullptr),
@@ -243,12 +245,13 @@ nsHttpTransaction::~nsHttpTransaction() {
 }
 
 nsresult nsHttpTransaction::Init(
-    uint32_t caps, nsHttpConnectionInfo *cinfo, nsHttpRequestHead *requestHead,
-    nsIInputStream *requestBody, uint64_t requestContentLength,
-    bool requestBodyHasHeaders, nsIEventTarget *target,
-    nsIInterfaceRequestor *callbacks, nsITransportEventSink *eventsink,
+    uint32_t caps, nsHttpConnectionInfo* cinfo, nsHttpRequestHead* requestHead,
+    nsIInputStream* requestBody, uint64_t requestContentLength,
+    bool requestBodyHasHeaders, nsIEventTarget* target,
+    nsIInterfaceRequestor* callbacks, nsITransportEventSink* eventsink,
     uint64_t topLevelOuterContentWindowId, HttpTrafficCategory trafficCategory,
-    nsIRequestContext *requestContext, uint32_t classOfService) {
+    nsIRequestContext* requestContext, uint32_t classOfService,
+    uint32_t pushedStreamId, uint64_t aChannelId) {
   nsresult rv;
 
   LOG1(("nsHttpTransaction::Init [this=%p caps=%x]\n", this, caps));
@@ -258,6 +261,7 @@ nsresult nsHttpTransaction::Init(
   MOZ_ASSERT(target);
   MOZ_ASSERT(NS_IsMainThread());
 
+  mChannelId = aChannelId;
   mTopLevelOuterContentWindowId = topLevelOuterContentWindowId;
   LOG(("  window-id = %" PRIx64, mTopLevelOuterContentWindowId));
 
@@ -440,11 +444,14 @@ nsresult nsHttpTransaction::Init(
                    nsIOService::gDefaultSegmentCount);
   if (NS_FAILED(rv)) return rv;
 
+  if (pushedStreamId) {
+    SetPushedStreamFromId(pushedStreamId);
+  }
   return NS_OK;
 }
 
-nsresult nsHttpTransaction::AsyncRead(nsIStreamListener *listener,
-                                      nsIRequest **pump) {
+nsresult nsHttpTransaction::AsyncRead(nsIStreamListener* listener,
+                                      nsIRequest** pump) {
   RefPtr<nsInputStreamPump> transactionPump;
   nsresult rv =
       nsInputStreamPump::Create(getter_AddRefs(transactionPump), mPipeIn);
@@ -453,7 +460,7 @@ nsresult nsHttpTransaction::AsyncRead(nsIStreamListener *listener,
   rv = transactionPump->AsyncRead(listener, nullptr);
   NS_ENSURE_SUCCESS(rv, rv);
 
-  nsCOMPtr<nsIRequest> tmp = static_cast<nsIRequest *>(transactionPump);
+  nsCOMPtr<nsIRequest> tmp = static_cast<nsIRequest*>(transactionPump);
   tmp.forget(pump);
 
   return NS_OK;
@@ -469,6 +476,16 @@ void nsHttpTransaction::AsyncUpdateClassOfService(uint32_t classOfService) {
 
 nsresult nsHttpTransaction::AsyncCancel(nsresult reason) {
   return gHttpHandler->CancelTransaction(this, reason);
+}
+
+void nsHttpTransaction::SetPushedStreamFromId(uint32_t aStreamId) {
+  Http2PushedStream* pushStream =
+      Http2PushStreamManager::GetSingleton()->GetStreamById(aStreamId);
+  mPushedStream = new Http2PushedStreamWrapper(pushStream);
+  LOG(
+      ("nsHttpTransaction::SetPushedStreamFromId %p mPushedStream=%p, "
+       "aStreamId=%d\n",
+       this, mPushedStream.get(), aStreamId));
 }
 
 // This method should only be used on the socket thread
@@ -536,11 +553,11 @@ nsresult nsHttpTransaction::TakeSubTransactions(
   return NS_ERROR_NOT_IMPLEMENTED;
 }
 
-HttpTransactionParent *nsHttpTransaction::AsHttpTransactionParent() {
+HttpTransactionParent* nsHttpTransaction::AsHttpTransactionParent() {
   return nullptr;
 }
 
-nsHttpTransaction *nsHttpTransaction::AsHttpTransaction() { return this; }
+nsHttpTransaction* nsHttpTransaction::AsHttpTransaction() { return this; }
 
 //----------------------------------------------------------------------------
 // nsHttpTransaction::nsAHttpTransaction
@@ -1026,7 +1043,7 @@ int64_t nsHttpTransaction::GetTransferSize() { return mTransferSize; }
 
 bool nsHttpTransaction::DataAlreadySent() { return false; }
 
-nsISupports *nsHttpTransaction::SecurityInfo() { return mSecurityInfo; }
+nsISupports* nsHttpTransaction::SecurityInfo() { return mSecurityInfo; }
 
 bool nsHttpTransaction::ProxyConnectFailed() { return mProxyConnectFailed; }
 

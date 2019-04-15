@@ -73,6 +73,7 @@ class Http2PushedStream final : public Http2Stream {
   virtual void TopLevelOuterContentWindowIdChanged(uint64_t) override;
 
   nsCString& GetRequestString() { return mRequestString; }
+  const nsCString &GetResourceUrl() const { return mResourceUrl; }
 
  private:
   Http2Stream*
@@ -102,6 +103,7 @@ class Http2PushedStream final : public Http2Stream {
   nsCString mRequestString;
 
   uint32_t mDefaultPriorityDependency;
+  nsCString mResourceUrl;
 };
 
 class Http2PushTransactionBuffer final : public nsAHttpTransaction {

@@ -138,6 +138,7 @@
 #include "mozilla/dom/WindowGlobalParent.h"
 #include "js/Conversions.h"
 #include "mozilla/net/SocketProcessParent.h"
+#include "Http2PushStreamManager.h"
 
 #ifdef MOZ_TASK_TRACER
 #  include "GeckoTaskTracer.h"
@@ -350,7 +351,7 @@ nsHttpChannel::nsHttpChannel()
       mHasBeenIsolatedChecked(0),
       mIsIsolated(0),
       mTopWindowOriginComputed(0),
-      mPushedStream(nullptr),
+      mPushedStreamId(0),
       mLocalBlocklist(false),
       mOnTailUnblock(nullptr),
       mWarningReporter(nullptr),
@@ -1316,11 +1317,26 @@ nsresult nsHttpChannel::SetupTransaction() {
   rv = mTransaction->Init(mCaps, mConnectionInfo, &mRequestHead, mUploadStream,
                           mReqContentLength, mUploadStreamHasHeaders,
                           GetCurrentThreadEventTarget(), callbacks, this,
-                          mTopLevelOuterContentWindowId, category,
-                          mRequestContext, mClassOfService);
+                          mTopLevelOuterContentWindowId, category, mRequestContext,
+                          mClassOfService, mPushedStreamId, mChannelId);
   if (NS_FAILED(rv)) {
     mTransaction = nullptr;
     return rv;
+  }
+
+  if (mCaps & NS_HTTP_ONPUSH_LISTENER) {
+    nsWeakPtr weakPtrThis(
+        do_GetWeakReference(static_cast<nsIHttpChannel*>(this)));
+    Http2PushStreamManager::GetSingleton()->RegisterOnPushCallback(
+        mChannelId, [weakPtrThis](uint32_t aStreamId, const nsACString &aUrl,
+                                  const nsACString &aRequestString) {
+          if (nsCOMPtr<nsIHttpChannel> channel =
+                  do_QueryReferent(weakPtrThis)) {
+            return static_cast<nsHttpChannel*>(channel.get())
+                ->OnPush(aUrl, aRequestString, aStreamId);
+          }
+          return NS_ERROR_NOT_AVAILABLE;
+        });
   }
 
   // TODO: this line is added for security callback workaround
@@ -9388,14 +9404,17 @@ bool nsHttpChannel::AwaitingCacheCallbacks() {
   return mCacheEntriesToWaitFor != 0;
 }
 
-void nsHttpChannel::SetPushedStream(Http2PushedStreamWrapper* stream) {
-  MOZ_ASSERT(stream);
-  MOZ_ASSERT(!mPushedStream);
-  mPushedStream = stream;
+void nsHttpChannel::SetPushedStreamId(uint32_t aStreamId) {
+  MOZ_ASSERT(!mPushedStreamId);
+  LOG(("nsHttpChannel::SetPushedStreamId [this=%p] aStreamId=%d", this,
+       aStreamId));
+
+  mPushedStreamId = aStreamId;
 }
 
-nsresult nsHttpChannel::OnPush(const nsACString& url,
-                               Http2PushedStreamWrapper* pushedStream) {
+nsresult nsHttpChannel::OnPush(const nsACString& aUrl,
+                               const nsACString& aRequestString,
+                               uint32_t aPushedStreamId) {
   MOZ_ASSERT(NS_IsMainThread());
   LOG(("nsHttpChannel::OnPush [this=%p]\n", this));
 
@@ -9417,7 +9436,7 @@ nsresult nsHttpChannel::OnPush(const nsACString& url,
   nsresult rv;
 
   // Create a Channel for the Push Resource
-  rv = NS_NewURI(getter_AddRefs(pushResource), url);
+  rv = NS_NewURI(getter_AddRefs(pushResource), aUrl);
   if (NS_FAILED(rv)) {
     return NS_ERROR_FAILURE;
   }
@@ -9449,15 +9468,15 @@ nsresult nsHttpChannel::OnPush(const nsACString& url,
   }
 
   // new channel needs mrqeuesthead and headers from pushedStream
-  channel->mRequestHead.ParseHeaderSet(
-      pushedStream->GetRequestString().BeginWriting());
+  nsCString requestString(aRequestString);
+  channel->mRequestHead.ParseHeaderSet(requestString.BeginWriting());
 
   channel->mLoadGroup = mLoadGroup;
   channel->mLoadInfo = mLoadInfo;
   channel->mCallbacks = mCallbacks;
 
   // Link the pushed stream with the new channel and call listener
-  channel->SetPushedStream(pushedStream);
+  channel->SetPushedStreamId(aPushedStreamId);
   rv = pushListener->OnPush(this, pushHttpChannel);
   return rv;
 }

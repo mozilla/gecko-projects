@@ -65,6 +65,10 @@ class SocketProcessParent final
       const OriginAttributes& aOriginAttributes,
       const uint32_t& flags) override;
   bool DeallocPDNSRequestParent(PDNSRequestParent*);
+  mozilla::ipc::IPCResult RecvOnPushStream(uint64_t aChannelId,
+                                           uint32_t aStreamId,
+                                           const nsCString& aResourceUrl,
+                                           const nsCString& aRequestString);
 
   void ActorDestroy(ActorDestroyReason aWhy) override;
   bool SendRequestMemoryReport(const uint32_t& aGeneration,

@@ -6,6 +6,7 @@
 #include "SocketProcessParent.h"
 
 #include "AltServiceParent.h"
+#include "Http2PushStreamManager.h"
 #include "HttpTransactionParent.h"
 #include "mozilla/ipc/FileDescriptorSetParent.h"
 #include "SocketProcessHost.h"
@@ -231,6 +232,14 @@ mozilla::ipc::IPCResult SocketProcessParent::RecvInitBackground(
     return IPC_FAIL(this, "BackgroundParent::Alloc failed");
   }
 
+  return IPC_OK();
+}
+
+mozilla::ipc::IPCResult SocketProcessParent::RecvOnPushStream(
+    uint64_t aChannelId, uint32_t aStreamId, const nsCString& aResourceUrl,
+    const nsCString& aRequestString) {
+  Unused << Http2PushStreamManager::GetSingleton()->CallOnPushCallback(
+      aChannelId, aStreamId, aResourceUrl, aRequestString);
   return IPC_OK();
 }
 

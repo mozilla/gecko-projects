@@ -7,8 +7,13 @@
 #include "ClassifierDummyChannelChild.h"
 #include "mozilla/ipc/BackgroundUtils.h"
 #include "mozilla/ipc/URIUtils.h"
+#include "mozilla/net/HttpBaseChannel.h"
+#include "mozilla/net/NeckoChild.h"
 #include "nsIChannel.h"
+#include "nsIHttpChannel.h"
+#include "nsIHttpChannelInternal.h"
 #include "nsIURI.h"
+#include "nsQueryObject.h"
 
 namespace mozilla {
 namespace net {

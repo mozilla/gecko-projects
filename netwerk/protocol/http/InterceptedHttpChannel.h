@@ -10,9 +10,12 @@
 #include "HttpBaseChannel.h"
 #include "nsINetworkInterceptController.h"
 #include "nsIInputStream.h"
+#include "nsInputStreamPump.h"
+#include "nsIAsyncVerifyRedirectCallback.h"
 #include "nsICacheInfoChannel.h"
 #include "nsIChannelWithDivertableParentListener.h"
 #include "nsIThreadRetargetableRequest.h"
+#include "nsIThreadRetargetableStreamListener.h"
 
 namespace mozilla {
 namespace net {

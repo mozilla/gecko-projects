@@ -137,8 +137,9 @@ class nsHttpChannel final : public HttpBaseChannel,
        uint32_t aProxyResolveFlags, nsIURI* aProxyURI, uint64_t aChannelId,
        nsContentPolicyType aContentPolicyType) override;
 
-  MOZ_MUST_USE nsresult OnPush(const nsACString& uri,
-                               Http2PushedStreamWrapper* pushedStream);
+  MOZ_MUST_USE nsresult OnPush(const nsACString& aUrl,
+                               const nsACString& aRequestString,
+                               uint32_t aPushedStreamId);
 
   static bool IsRedirectStatus(uint32_t status);
   static bool WillRedirect(nsHttpResponseHead* response);
@@ -533,7 +534,7 @@ class nsHttpChannel final : public HttpBaseChannel,
                                              bool startBuffering,
                                              bool checkingAppCacheEntry);
 
-  void SetPushedStream(Http2PushedStreamWrapper* stream);
+  void SetPushedStreamId(uint32_t aStreamId);
 
   void MaybeWarnAboutAppCache();
 
@@ -747,7 +748,7 @@ class nsHttpChannel final : public HttpBaseChannel,
   // Needed for accurate DNS timing
   RefPtr<nsDNSPrefetch> mDNSPrefetch;
 
-  RefPtr<Http2PushedStreamWrapper> mPushedStream;
+  uint32_t mPushedStreamId;
   // True if the channel's principal was found on a phishing, malware, or
   // tracking (if tracking protection is enabled) blocklist
   bool mLocalBlocklist;

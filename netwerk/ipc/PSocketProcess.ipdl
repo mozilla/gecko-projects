@@ -55,11 +55,16 @@ parent:
   async UpdateChildKeyedScalars(KeyedScalarAction[] actions);
   async RecordChildEvents(ChildEventData[] events);
   async RecordDiscardedData(DiscardedData data);
+
   async PAltService();
 
   /* tabId is only required for web-proxy support, which isn't always needed */
   async PWebrtcTCPSocket(TabId? tabId);
   async InitBackground(Endpoint<PBackgroundParent> aEndpoint);
+  async OnPushStream(uint64_t channelId,
+                     uint32_t streamId,
+                     nsCString resourceUrl,
+                     nsCString requestString);
 
 child:
   async PreferenceUpdate(Pref pref);

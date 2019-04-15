@@ -89,6 +89,7 @@ UNIFIED_SOURCES += [
     'DelayHttpChannelQueue.cpp',
     'Http2Compression.cpp',
     'Http2Push.cpp',
+    'Http2PushStreamManager.cpp',
     'Http2Session.cpp',
     'Http2Stream.cpp',
     'HttpAuthUtils.cpp',

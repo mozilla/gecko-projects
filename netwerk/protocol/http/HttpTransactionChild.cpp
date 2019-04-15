@@ -9,6 +9,7 @@
 
 #include "HttpTransactionChild.h"
 
+#include "Http2PushStreamManager.h"
 #include "mozilla/ipc/IPCStreamUtils.h"
 #include "mozilla/net/SocketProcessChild.h"
 #include "nsHttpHandler.h"
@@ -65,7 +66,8 @@ nsresult HttpTransactionChild::InitInternal(
     nsHttpRequestHead* requestHead, nsIInputStream* requestBody,
     uint64_t requestContentLength, bool requestBodyHasHeaders,
     nsIEventTarget* target, uint64_t topLevelOuterContentWindowId,
-    uint64_t requestContextID, uint32_t classOfService) {
+    uint64_t requestContextID, uint32_t classOfService,
+    uint32_t pushedStreamId) {
   LOG(("HttpTransactionChild::InitInternal [this=%p caps=%x]\n", this, caps));
 
   nsProxyInfo *pi = nullptr, *first = nullptr, *last = nullptr;
@@ -107,13 +109,24 @@ nsresult HttpTransactionChild::InitInternal(
   nsCOMPtr<nsIRequestContext> rc = CreateRequestContext(requestContextID);
   LOG(("  CreateRequestContext this=%p id=%" PRIx64, this, requestContextID));
 
-  nsresult rv = mTransaction->Init(
-      caps, cinfo, requestHead, requestBody, requestContentLength,
-      requestBodyHasHeaders, target, nullptr,  // TODO: security callback
-      this, topLevelOuterContentWindowId, HttpTrafficCategory::eInvalid, rc,
-      classOfService);
+  nsresult rv = mTransaction->Init(caps, cinfo, requestHead, requestBody,
+                                   requestContentLength, requestBodyHasHeaders,
+                                   target, nullptr,  // TODO: security callback
+                                   this, topLevelOuterContentWindowId, HttpTrafficCategory::eInvalid, rc,
+                                   classOfService, pushedStreamId, mChannelId);
   if (NS_WARN_IF(NS_FAILED(rv))) {
     mTransaction = nullptr;
+  }
+
+  if (caps & NS_HTTP_ONPUSH_LISTENER) {
+    Http2PushStreamManager::GetSingleton()->RegisterOnPushCallback(
+        mChannelId,
+        [channelId(mChannelId)](uint32_t aStreamId, const nsACString& aUrl,
+                                const nsACString& aRequestString) {
+          Unused << SocketProcessChild::GetSingleton()->SendOnPushStream(
+              channelId, aStreamId, nsCString(aUrl), nsCString(aRequestString));
+          return NS_OK;
+        });
   }
 
   return rv;
@@ -153,16 +166,18 @@ mozilla::ipc::IPCResult HttpTransactionChild::RecvInit(
     const nsHttpRequestHead& aReqHeaders, const Maybe<IPCStream>& aRequestBody,
     const uint64_t& aReqContentLength, const bool& aReqBodyIncludesHeaders,
     const uint64_t& aTopLevelOuterContentWindowId,
-    const uint64_t& aRequestContextID, const uint32_t& aClassOfService) {
+    const uint64_t& aRequestContextID, const uint32_t& aClassOfService,
+    const uint32_t& aPushedStreamId) {
   mRequestHead = aReqHeaders;
   if (aRequestBody) {
     mUploadStream = mozilla::ipc::DeserializeIPCStream(aRequestBody);
   }
   // TODO: let parent process know about the failure
-  if (NS_FAILED(InitInternal(
-          aCaps, aArgs, &mRequestHead, mUploadStream, aReqContentLength,
-          aReqBodyIncludesHeaders, GetCurrentThreadEventTarget(),
-          aTopLevelOuterContentWindowId, aRequestContextID, aClassOfService))) {
+  if (NS_FAILED(InitInternal(aCaps, aArgs, &mRequestHead, mUploadStream,
+                             aReqContentLength, aReqBodyIncludesHeaders,
+                             GetCurrentThreadEventTarget(),
+                             aTopLevelOuterContentWindowId, aRequestContextID,
+                             aClassOfService, aPushedStreamId))) {
     LOG(("HttpTransactionChild::RecvInit: [this=%p] InitInternal failed!\n",
          this));
   }

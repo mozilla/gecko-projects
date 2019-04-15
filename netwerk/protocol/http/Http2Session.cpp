@@ -18,6 +18,7 @@
 #include "Http2Session.h"
 #include "Http2Stream.h"
 #include "Http2Push.h"
+#include "Http2PushStreamManager.h"
 
 #include "mozilla/EndianUtils.h"
 #include "mozilla/Telemetry.h"
@@ -1219,6 +1220,7 @@ void Http2Session::CleanupStream(Http2Stream* aStream, nsresult aResult,
   if (id > 0) {
     mStreamIDHash.Remove(id);
     if (!(id & 1)) {
+      Http2PushStreamManager::GetSingleton()->RemoveStreamById(id);
       mPushedStreams.RemoveElement(aStream);
       Http2PushedStream* pushStream = static_cast<Http2PushedStream*>(aStream);
       nsAutoCString hashKey;

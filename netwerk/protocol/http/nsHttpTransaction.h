@@ -83,15 +83,15 @@ class nsHttpTransaction final : public nsAHttpTransaction,
   //        wait on this input stream for data.  on first notification,
   //        headers should be available (check transaction status).
   //
-  MOZ_MUST_USE nsresult Init(uint32_t caps, nsHttpConnectionInfo *connInfo,
-                             nsHttpRequestHead *reqHeaders,
-                             nsIInputStream *reqBody, uint64_t reqContentLength,
+  MOZ_MUST_USE nsresult Init(uint32_t caps, nsHttpConnectionInfo* connInfo,
+                             nsHttpRequestHead* reqHeaders,
+                             nsIInputStream* reqBody, uint64_t reqContentLength,
                              bool reqBodyIncludesHeaders,
-                             nsIEventTarget *consumerTarget,
-                             nsIInterfaceRequestor *callbacks,
-                             nsITransportEventSink *eventsink,
+                             nsIEventTarget* consumerTarget,
+                             nsIInterfaceRequestor* callbacks,
+                             nsITransportEventSink* eventsink,
                              uint64_t topLevelOuterContentWindowId,
-                             nsIAsyncInputStream **responseBody);
+                             nsIAsyncInputStream** responseBody);
 
   void OnActivated() override;
 
@@ -102,6 +102,7 @@ class nsHttpTransaction final : public nsAHttpTransaction,
 
   nsIEventTarget* ConsumerTarget() { return mConsumerTarget; }
   nsISupports* HttpChannel() { return mChannel; }
+  uint64_t HttpChannelId() { return mChannelId; }
 
   void SetSecurityCallbacks(nsIInterfaceRequestor* aCallbacks);
 
@@ -140,8 +141,7 @@ class nsHttpTransaction final : public nsAHttpTransaction,
   already_AddRefed<Http2PushedStreamWrapper> TakePushedStream() {
     return mPushedStream.forget();
   }
-
-  void SetPushedStream(Http2PushedStreamWrapper* push) { mPushedStream = push; }
+  void SetPushedStreamFromId(uint32_t aStreamId);
   uint32_t InitialRwin() const { return mInitialRwin; };
   bool ChannelPipeFull() { return mWaitingOnPipeOut; }
 
@@ -255,6 +255,7 @@ class nsHttpTransaction final : public nsAHttpTransaction,
   nsCOMPtr<nsIRequestContext> mRequestContext;
 
   nsCOMPtr<nsISupports> mChannel;
+  uint64_t mChannelId;
   nsCOMPtr<nsIHttpActivityObserver> mActivityDistributor;
 
   nsCString mReqHeaderBuf;  // flattened request headers
@@ -439,7 +440,7 @@ class nsHttpTransaction final : public nsAHttpTransaction,
   RefPtr<TransactionObserver> mTransactionObserver;
 
  public:
-   bool ResolvedByTRR() { return mResolvedByTRR; }
+  bool ResolvedByTRR() { return mResolvedByTRR; }
 
  private:
   NetAddr mSelfAddr;
