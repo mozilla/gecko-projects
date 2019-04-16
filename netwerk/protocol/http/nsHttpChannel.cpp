@@ -1259,7 +1259,7 @@ nsresult nsHttpChannel::SetupTransaction() {
     RefPtr<HttpTransactionParent> transParent = new HttpTransactionParent();
     mUsingSocketProcess = true;
     LOG(("nsHttpChannel %p created HttpTransactionParent %p\n", this,
-         mTransaction.get()));
+         transParent.get()));
 
     SocketProcessParent* socketProcess = SocketProcessParent::GetSingleton();
     if (socketProcess) {
