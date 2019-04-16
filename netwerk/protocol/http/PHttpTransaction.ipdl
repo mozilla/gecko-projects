@@ -67,7 +67,9 @@ child:
              uint64_t requestContextID,
              uint32_t classOfService,
              uint32_t pushedStreamId,
-             bool httpActivityDistributorActivated);
+             bool httpActivityDistributorActivated,
+             bool responseTimeoutEnabled,
+             uint32_t initialRwin);
   async Read();
   async Reschedule(int32_t priority);
   async UpdateClassOfService(uint32_t classOfService);

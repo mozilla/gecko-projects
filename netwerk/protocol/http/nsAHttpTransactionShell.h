@@ -69,8 +69,10 @@ class nsAHttpTransactionShell : public nsISupports {
       uint64_t reqContentLength, bool reqBodyIncludesHeaders,
       nsIEventTarget *consumerTarget, nsIInterfaceRequestor *callbacks,
       nsITransportEventSink *eventsink, uint64_t topLevelOuterContentWindowId,
-      HttpTrafficCategory trafficCategory, nsIRequestContext *requestContext,
-      uint32_t classOfService, uint32_t pushedStreamId, uint64_t channelId) = 0;
+      HttpTrafficCategory trafficCategory,
+      nsIRequestContext *requestContext, uint32_t classOfService,
+      uint32_t pushedStreamId, uint64_t channelId,
+      bool responseTimeoutEnabled, uint32_t initialRwin) = 0;
 
   // @param aListener
   //        receives notifications.
@@ -138,9 +140,10 @@ NS_DEFINE_STATIC_IID_ACCESSOR(nsAHttpTransactionShell,
       uint64_t reqContentLength, bool reqBodyIncludesHeaders,                  \
       nsIEventTarget *consumerTarget, nsIInterfaceRequestor *callbacks,        \
       nsITransportEventSink *eventsink, uint64_t topLevelOuterContentWindowId, \
-      HttpTrafficCategory trafficCategory, nsIRequestContext *requestContext,  \
-      uint32_t classOfService, uint32_t pushedStreamId, uint64_t channelId)    \
-      override;                                                                \
+      HttpTrafficCategory trafficCategory,                                     \
+      nsIRequestContext *requestContext, uint32_t classOfService,              \
+      uint32_t pushedStreamId, uint64_t channelId,                             \
+      bool responseTimeoutEnabled, uint32_t initialRwin) override;             \
   virtual nsresult AsyncRead(nsIStreamListener *listener, nsIRequest **pump)   \
       override;                                                                \
   virtual nsresult AsyncReschedule(int32_t priority) override;                 \

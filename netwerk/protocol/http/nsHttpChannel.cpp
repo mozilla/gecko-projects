@@ -1322,7 +1322,8 @@ nsresult nsHttpChannel::SetupTransaction() {
                           mReqContentLength, mUploadStreamHasHeaders,
                           GetCurrentThreadEventTarget(), callbacks, this,
                           mTopLevelOuterContentWindowId, category, mRequestContext,
-                          mClassOfService, mPushedStreamId, mChannelId);
+                          mClassOfService, mPushedStreamId, mChannelId,
+                          mResponseTimeoutEnabled, mInitialRwin);
   if (NS_FAILED(rv)) {
     mTransaction = nullptr;
     return rv;

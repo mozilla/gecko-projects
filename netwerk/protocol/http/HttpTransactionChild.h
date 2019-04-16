@@ -44,7 +44,8 @@ class HttpTransactionChild final : public PHttpTransactionChild,
       const uint64_t& aTopLevelOuterContentWindowId,
       const uint64_t& aRequestContextID, const uint32_t& aClassOfService,
       const uint32_t& aPushedStreamId,
-      const bool& aHttpActivityDistributorActivated);
+      const bool& aHttpActivityDistributorActivated,
+      const bool& aResponseTimeoutEnabled, const uint32_t& aInitialRwin);
   mozilla::ipc::IPCResult RecvRead();
   mozilla::ipc::IPCResult RecvReschedule(const int32_t& priority);
   mozilla::ipc::IPCResult RecvUpdateClassOfService(
@@ -74,7 +75,8 @@ class HttpTransactionChild final : public PHttpTransactionChild,
       uint64_t reqContentLength, bool reqBodyIncludesHeaders,
       nsIEventTarget* consumerTarget,  // Will remove
       uint64_t topLevelOuterContentWindowId, uint64_t requestContextID,
-      uint32_t classOfService, uint32_t pushedStreamId);
+      uint32_t classOfService, uint32_t pushedStreamId,
+      bool responseTimeoutEnabled, uint32_t initialRwin);
 
   nsHttpRequestHead mRequestHead;
   nsCOMPtr<nsIInputStream> mUploadStream;

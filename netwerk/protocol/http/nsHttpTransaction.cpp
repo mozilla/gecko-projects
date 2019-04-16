@@ -250,7 +250,8 @@ nsresult nsHttpTransaction::Init(
     nsIInterfaceRequestor* callbacks, nsITransportEventSink* eventsink,
     uint64_t topLevelOuterContentWindowId, HttpTrafficCategory trafficCategory,
     nsIRequestContext* requestContext, uint32_t classOfService,
-    uint32_t pushedStreamId, uint64_t aChannelId) {
+    uint32_t pushedStreamId, uint64_t aChannelId,
+    bool responseTimeoutEnabled, uint32_t initialRwin) {
   nsresult rv;
 
   LOG1(("nsHttpTransaction::Init [this=%p caps=%x]\n", this, caps));
@@ -261,6 +262,8 @@ nsresult nsHttpTransaction::Init(
   MOZ_ASSERT(NS_IsMainThread());
 
   mChannelId = aChannelId;
+  mResponseTimeoutEnabled = responseTimeoutEnabled;
+  mInitialRwin = initialRwin;
   mTopLevelOuterContentWindowId = topLevelOuterContentWindowId;
   LOG(("  window-id = %" PRIx64, mTopLevelOuterContentWindowId));
 

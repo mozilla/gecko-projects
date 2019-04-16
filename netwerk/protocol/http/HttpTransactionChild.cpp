@@ -73,7 +73,8 @@ nsresult HttpTransactionChild::InitInternal(
     uint64_t requestContentLength, bool requestBodyHasHeaders,
     nsIEventTarget* target, uint64_t topLevelOuterContentWindowId,
     uint64_t requestContextID, uint32_t classOfService,
-    uint32_t pushedStreamId) {
+    uint32_t pushedStreamId, bool responseTimeoutEnabled,
+    uint32_t initialRwin) {
   LOG(("HttpTransactionChild::InitInternal [this=%p caps=%x]\n", this, caps));
 
   nsProxyInfo *pi = nullptr, *first = nullptr, *last = nullptr;
@@ -119,7 +120,8 @@ nsresult HttpTransactionChild::InitInternal(
                                    requestContentLength, requestBodyHasHeaders,
                                    target, nullptr,  // TODO: security callback
                                    this, topLevelOuterContentWindowId, HttpTrafficCategory::eInvalid, rc,
-                                   classOfService, pushedStreamId, mChannelId);
+                                   classOfService, pushedStreamId, mChannelId,
+                                   responseTimeoutEnabled, initialRwin);
   if (NS_WARN_IF(NS_FAILED(rv))) {
     mTransaction = nullptr;
   }
@@ -184,7 +186,8 @@ mozilla::ipc::IPCResult HttpTransactionChild::RecvInit(
     const uint64_t& aTopLevelOuterContentWindowId,
     const uint64_t& aRequestContextID, const uint32_t& aClassOfService,
     const uint32_t& aPushedStreamId,
-    const bool& aHttpActivityDistributorActivated) {
+    const bool& aHttpActivityDistributorActivated,
+    const bool& aResponseTimeoutEnabled, const uint32_t& aInitialRwin) {
   mRequestHead = aReqHeaders;
   if (aRequestBody) {
     mUploadStream = mozilla::ipc::DeserializeIPCStream(aRequestBody);
@@ -200,7 +203,8 @@ mozilla::ipc::IPCResult HttpTransactionChild::RecvInit(
                              aReqContentLength, aReqBodyIncludesHeaders,
                              GetCurrentThreadEventTarget(),
                              aTopLevelOuterContentWindowId, aRequestContextID,
-                             aClassOfService, aPushedStreamId))) {
+                             aClassOfService, aPushedStreamId,
+                             aResponseTimeoutEnabled, aInitialRwin))) {
     LOG(("HttpTransactionChild::RecvInit: [this=%p] InitInternal failed!\n",
          this));
   }
