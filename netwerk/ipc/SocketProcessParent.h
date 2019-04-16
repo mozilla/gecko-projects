@@ -98,6 +98,11 @@ class SocketProcessParent final
       const uint32_t& aActivitySubtype, const PRTime& aTimestamp,
       const uint64_t& aExtraSizeData, const nsCString& aExtraStringData);
 
+  PInputChannelThrottleQueueParent* AllocPInputChannelThrottleQueueParent(
+      const uint32_t& aMeanBytesPerSecond, const uint32_t& aMaxBytesPerSecond);
+  bool DeallocPInputChannelThrottleQueueParent(
+      PInputChannelThrottleQueueParent* aActor);
+
  private:
   SocketProcessHost* mHost;
   UniquePtr<dom::MemoryReportRequestHost> mMemoryReportRequest;

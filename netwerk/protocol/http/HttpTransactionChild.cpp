@@ -11,6 +11,7 @@
 
 #include "Http2PushStreamManager.h"
 #include "mozilla/ipc/IPCStreamUtils.h"
+#include "mozilla/net/InputChannelThrottleQueueChild.h"
 #include "mozilla/net/SocketProcessChild.h"
 #include "nsIHttpActivityObserver.h"
 #include "nsHttpHandler.h"
@@ -26,7 +27,7 @@ namespace mozilla {
 namespace net {
 
 NS_IMPL_ISUPPORTS(HttpTransactionChild, nsIRequestObserver, nsIStreamListener,
-                  nsITransportEventSink);
+                  nsITransportEventSink, nsIThrottledInputChannel);
 
 //-----------------------------------------------------------------------------
 // HttpTransactionChild <public>
@@ -72,9 +73,8 @@ nsresult HttpTransactionChild::InitInternal(
     nsHttpRequestHead* requestHead, nsIInputStream* requestBody,
     uint64_t requestContentLength, bool requestBodyHasHeaders,
     nsIEventTarget* target, uint64_t topLevelOuterContentWindowId,
-    uint64_t requestContextID, uint32_t classOfService,
-    uint32_t pushedStreamId, bool responseTimeoutEnabled,
-    uint32_t initialRwin) {
+    uint64_t requestContextID, uint32_t classOfService, uint32_t pushedStreamId,
+    bool responseTimeoutEnabled, uint32_t initialRwin) {
   LOG(("HttpTransactionChild::InitInternal [this=%p caps=%x]\n", this, caps));
 
   nsProxyInfo *pi = nullptr, *first = nullptr, *last = nullptr;
@@ -187,7 +187,8 @@ mozilla::ipc::IPCResult HttpTransactionChild::RecvInit(
     const uint64_t& aRequestContextID, const uint32_t& aClassOfService,
     const uint32_t& aPushedStreamId,
     const bool& aHttpActivityDistributorActivated,
-    const bool& aResponseTimeoutEnabled, const uint32_t& aInitialRwin) {
+    const bool& aResponseTimeoutEnabled, const uint32_t& aInitialRwin,
+    const mozilla::Maybe<PInputChannelThrottleQueueChild*>& aThrottleQueue) {
   mRequestHead = aReqHeaders;
   if (aRequestBody) {
     mUploadStream = mozilla::ipc::DeserializeIPCStream(aRequestBody);
@@ -198,13 +199,17 @@ mozilla::ipc::IPCResult HttpTransactionChild::RecvInit(
     distributor->SetIsActive(aHttpActivityDistributorActivated);
   }
 
+  if (aThrottleQueue.isSome()) {
+    mThrottleQueue =
+        static_cast<InputChannelThrottleQueueChild*>(aThrottleQueue.ref());
+  }
+
   // TODO: let parent process know about the failure
-  if (NS_FAILED(InitInternal(aCaps, aArgs, &mRequestHead, mUploadStream,
-                             aReqContentLength, aReqBodyIncludesHeaders,
-                             GetCurrentThreadEventTarget(),
-                             aTopLevelOuterContentWindowId, aRequestContextID,
-                             aClassOfService, aPushedStreamId,
-                             aResponseTimeoutEnabled, aInitialRwin))) {
+  if (NS_FAILED(InitInternal(
+          aCaps, aArgs, &mRequestHead, mUploadStream, aReqContentLength,
+          aReqBodyIncludesHeaders, GetCurrentThreadEventTarget(),
+          aTopLevelOuterContentWindowId, aRequestContextID, aClassOfService,
+          aPushedStreamId, aResponseTimeoutEnabled, aInitialRwin))) {
     LOG(("HttpTransactionChild::RecvInit: [this=%p] InitInternal failed!\n",
          this));
   }
@@ -386,6 +391,10 @@ HttpTransactionChild::OnStopRequest(nsIRequest* aRequest, nsresult aStatus) {
       responseTrailer ? *responseTrailer : nsHttpHeaderArray(),
       mTransaction->HasStickyConnection(), result);
 
+  if (mThrottleQueue) {
+    mThrottleQueue->Send__delete__(mThrottleQueue);
+    mThrottleQueue = nullptr;
+  }
   mTransaction = nullptr;
   mTransactionPump = nullptr;
   return NS_OK;
@@ -416,6 +425,21 @@ HttpTransactionChild::OnTransportStatus(nsITransport* aTransport,
   }
 
   Unused << SendOnTransportStatus(aStatus, aProgress, aProgressMax);
+  return NS_OK;
+}
+
+//-----------------------------------------------------------------------------
+// HttpBaseChannel::nsIThrottledInputChannel
+//-----------------------------------------------------------------------------
+
+NS_IMETHODIMP
+HttpTransactionChild::SetThrottleQueue(nsIInputChannelThrottleQueue* aQueue) {
+  return NS_ERROR_NOT_IMPLEMENTED;
+}
+
+NS_IMETHODIMP
+HttpTransactionChild::GetThrottleQueue(nsIInputChannelThrottleQueue** aQueue) {
+  *aQueue = mThrottleQueue;
   return NS_OK;
 }
 

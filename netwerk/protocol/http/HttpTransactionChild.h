@@ -14,11 +14,13 @@
 #include "TimingStruct.h"
 #include "nsIRequest.h"
 #include "nsIStreamListener.h"
+#include "nsIThrottledInputChannel.h"
 #include "nsITransport.h"
 
 namespace mozilla {
 namespace net {
 
+class InputChannelThrottleQueueChild;
 class nsHttpTransaction;
 
 //-----------------------------------------------------------------------------
@@ -27,12 +29,14 @@ class nsHttpTransaction;
 //-----------------------------------------------------------------------------
 class HttpTransactionChild final : public PHttpTransactionChild,
                                    public nsIStreamListener,
-                                   public nsITransportEventSink {
+                                   public nsITransportEventSink,
+                                   public nsIThrottledInputChannel {
  public:
   NS_DECL_THREADSAFE_ISUPPORTS
   NS_DECL_NSIREQUESTOBSERVER
   NS_DECL_NSISTREAMLISTENER
   NS_DECL_NSITRANSPORTEVENTSINK
+  NS_DECL_NSITHROTTLEDINPUTCHANNEL
 
   explicit HttpTransactionChild(const uint64_t& aChannelId);
 
@@ -45,7 +49,8 @@ class HttpTransactionChild final : public PHttpTransactionChild,
       const uint64_t& aRequestContextID, const uint32_t& aClassOfService,
       const uint32_t& aPushedStreamId,
       const bool& aHttpActivityDistributorActivated,
-      const bool& aResponseTimeoutEnabled, const uint32_t& aInitialRwin);
+      const bool& aResponseTimeoutEnabled, const uint32_t& aInitialRwin,
+      const mozilla::Maybe<PInputChannelThrottleQueueChild*>& aThrottleQueue);
   mozilla::ipc::IPCResult RecvRead();
   mozilla::ipc::IPCResult RecvReschedule(const int32_t& priority);
   mozilla::ipc::IPCResult RecvUpdateClassOfService(
@@ -88,6 +93,7 @@ class HttpTransactionChild final : public PHttpTransactionChild,
 
   uint64_t mChannelId;
   bool mIPCOpen;
+  RefPtr<InputChannelThrottleQueueChild> mThrottleQueue;
 
   // These values can be accessed from sts thread.
   Atomic<bool> mVersionOk;

@@ -13,6 +13,7 @@ include protocol PProfiler;
 include protocol PAltService;
 include protocol PWebrtcTCPSocket;
 include protocol PBackground;
+include protocol PInputChannelThrottleQueue;
 
 include MemoryReportTypes;
 include PBrowserOrId;
@@ -42,6 +43,7 @@ protocol PSocketProcess
   manages PDNSRequest;
   manages PWebrtcTCPSocket;
   manages PAltService;
+  manages PInputChannelThrottleQueue;
 
 parent:
   async InitCrashReporter(Shmem shmem, NativeThreadId threadId);
@@ -93,6 +95,7 @@ child:
   async ClearDNSCache(bool trrToo);
   async InitiateTransaction(PHttpTransaction trans, int32_t priority);
   async InitiateTransactionWithStickyConn(PHttpTransaction trans, int32_t priority, PHttpTransaction transWithStickyConn);
+  async PInputChannelThrottleQueue(uint32_t meanBytesPerSecond, uint32_t maxBytesPerSecond);
 
   // test-only
   async SocketProcessTelemetryPing();

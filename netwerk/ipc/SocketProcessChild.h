@@ -92,6 +92,15 @@ class SocketProcessChild final : public PSocketProcessChild {
       PHttpTransactionChild* aTrans, const int32_t& aPriority,
       PHttpTransactionChild* aTransWithStickyConn);
 
+  PInputChannelThrottleQueueChild* AllocPInputChannelThrottleQueueChild(
+      const uint32_t& aMeanBytesPerSecond, const uint32_t& aMaxBytesPerSecond);
+  mozilla::ipc::IPCResult RecvPInputChannelThrottleQueueConstructor(
+      PInputChannelThrottleQueueChild* actor,
+      const uint32_t& aMeanBytesPerSecond,
+      const uint32_t& aMaxBytesPerSecond) override;
+  bool DeallocPInputChannelThrottleQueueChild(
+      PInputChannelThrottleQueueChild* aActor);
+
   void CleanUp();
   void DestroySocketProcessBridgeParent(ProcessId aId);
 

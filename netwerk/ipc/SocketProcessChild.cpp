@@ -8,6 +8,7 @@
 
 #include "base/task.h"
 #include "AltServiceChild.h"
+#include "InputChannelThrottleQueueChild.h"
 #include "HttpInfo.h"
 #include "HttpTransactionChild.h"
 #include "mozilla/Assertions.h"
@@ -444,6 +445,30 @@ SocketProcessChild::RecvInitiateTransactionWithStickyConn(
       ToHttpTransaction(aTrans), aPriority,
       ToHttpTransaction(aTransWithStickyConn));
   return IPC_OK();
+}
+
+PInputChannelThrottleQueueChild*
+SocketProcessChild::AllocPInputChannelThrottleQueueChild(
+    const uint32_t& aMeanBytesPerSecond, const uint32_t& aMaxBytesPerSecond) {
+  InputChannelThrottleQueueChild* p = new InputChannelThrottleQueueChild();
+  p->AddRef();
+  p->Init(aMeanBytesPerSecond, aMaxBytesPerSecond);
+  return p;
+}
+
+mozilla::ipc::IPCResult
+SocketProcessChild::RecvPInputChannelThrottleQueueConstructor(
+    PInputChannelThrottleQueueChild* actor, const uint32_t& aMeanBytesPerSecond,
+    const uint32_t& aMaxBytesPerSecond) {
+  return IPC_OK();
+}
+
+bool SocketProcessChild::DeallocPInputChannelThrottleQueueChild(
+    PInputChannelThrottleQueueChild* aActor) {
+  InputChannelThrottleQueueChild* p =
+      static_cast<InputChannelThrottleQueueChild*>(aActor);
+  p->Release();
+  return true;
 }
 
 }  // namespace net

@@ -9,6 +9,7 @@
 
 #include "HttpTransactionParent.h"
 #include "mozilla/ipc/IPCStreamUtils.h"
+#include "mozilla/net/InputChannelThrottleQueueParent.h"
 #include "mozilla/net/SocketProcessParent.h"
 #include "nsHttpHandler.h"
 #include "nsIHttpActivityObserver.h"
@@ -110,6 +111,35 @@ nsresult HttpTransactionParent::Init(
   }
 
   mEventsink = eventsink;
+  mTargetThread = GetCurrentThreadEventTarget();
+  mChannelId = aChannelId;
+
+  nsCOMPtr<nsIThrottledInputChannel> throttled = do_QueryInterface(mEventsink);
+  nsIInputChannelThrottleQueue* queue;
+  Maybe<PInputChannelThrottleQueueParent*> throttleQueue;
+  if (throttled) {
+    nsresult rv = throttled->GetThrottleQueue(&queue);
+    // In case of failure, just carry on without throttling.
+    if (NS_SUCCEEDED(rv) && queue) {
+      LOG(("HttpTransactionParent::Init %p using throttle queue %p\n", this,
+           queue));
+      uint32_t meanBytesPerSecond = 0;
+      uint32_t maxBytesPerSecond = 0;
+      Unused << queue->GetMaxBytesPerSecond(&maxBytesPerSecond);
+      Unused << queue->GetMeanBytesPerSecond(&meanBytesPerSecond);
+      InputChannelThrottleQueueParent* tqParent =
+          queue->ToInputChannelThrottleQueueParent();
+      MOZ_RELEASE_ASSERT(tqParent);
+
+      Unused << SocketProcessParent::GetSingleton()
+                    ->SendPInputChannelThrottleQueueConstructor(
+                        tqParent, meanBytesPerSecond, maxBytesPerSecond);
+
+      // The Release() is called by IPDL when the actor is deleted.
+      tqParent->AddRef();
+      throttleQueue = Some(tqParent);
+    }
+  }
 
   HttpConnectionInfoCloneArgs infoArgs;
   GetStructFromInfo(cinfo, infoArgs);
@@ -133,12 +163,10 @@ nsresult HttpTransactionParent::Init(
                 requestContentLength, requestBodyHasHeaders,
                 topLevelOuterContentWindowId, requestContextID, classOfService,
                 pushedStreamId, activityDistributorActivated,
-                responseTimeoutEnabled, initialRwin)) {
+                responseTimeoutEnabled, initialRwin, throttleQueue)) {
     return NS_ERROR_FAILURE;
   }
 
-  mTargetThread = GetCurrentThreadEventTarget();
-  mChannelId = aChannelId;
   return NS_OK;
 }
 

@@ -6,6 +6,7 @@
 #include "SocketProcessParent.h"
 
 #include "AltServiceParent.h"
+#include "InputChannelThrottleQueueParent.h"
 #include "Http2PushStreamManager.h"
 #include "HttpTransactionParent.h"
 #include "mozilla/ipc/FileDescriptorSetParent.h"
@@ -256,6 +257,23 @@ mozilla::ipc::IPCResult SocketProcessParent::RecvObserveActivity(
       aChannelId, aActivityType, aActivitySubtype, aTimestamp, aExtraSizeData,
       aExtraStringData);
   return IPC_OK();
+}
+
+PInputChannelThrottleQueueParent*
+SocketProcessParent::AllocPInputChannelThrottleQueueParent(
+    const uint32_t& aMeanBytesPerSecond, const uint32_t& aMaxBytesPerSecond) {
+  MOZ_ASSERT_UNREACHABLE(
+      "AllocPInputChannelThrottleQueueParent should not be called on "
+      "parent");
+  return nullptr;
+}
+
+bool SocketProcessParent::DeallocPInputChannelThrottleQueueParent(
+    PInputChannelThrottleQueueParent* aActor) {
+  InputChannelThrottleQueueParent* p =
+      static_cast<InputChannelThrottleQueueParent*>(aActor);
+  p->Release();
+  return true;
 }
 
 // To ensure that IPDL is finished before SocketParent gets deleted.

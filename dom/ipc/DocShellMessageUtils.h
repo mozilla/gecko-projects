@@ -8,6 +8,7 @@
 #define mozilla_dom_docshell_message_utils_h__
 
 #include "ipc/IPCMessageUtils.h"
+#include "mozilla/ipc/IPDLParamTraits.h"
 #include "nsCOMPtr.h"
 #include "nsDocShellLoadState.h"
 
