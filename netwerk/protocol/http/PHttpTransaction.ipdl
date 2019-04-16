@@ -21,6 +21,13 @@ using struct mozilla::net::TimingStruct from "mozilla/net/TimingStruct.h";
 namespace mozilla {
 namespace net {
 
+struct TransactionObserverResult
+{
+  bool versionOk;
+  bool authOk;
+  nsresult closeReason;
+};
+
 protocol PHttpTransaction
 {
   manager PSocketProcess;
@@ -45,7 +52,8 @@ parent:
                       int64_t transferSize,
                       TimingStruct timings,
                       nsHttpHeaderArray responseTrailers,
-                      bool hasStickyConn);
+                      bool hasStickyConn,
+                      TransactionObserverResult result);
 
 child:
   async __delete__();

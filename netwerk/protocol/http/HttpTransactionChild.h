@@ -6,6 +6,7 @@
 #ifndef HttpTransactionChild_h__
 #define HttpTransactionChild_h__
 
+#include "mozilla/Atomics.h"
 #include "mozilla/net/NeckoChannelParams.h"
 #include "mozilla/net/PHttpTransactionChild.h"
 #include "nsHttp.h"
@@ -54,6 +55,9 @@ class HttpTransactionChild final : public PHttpTransactionChild,
   mozilla::ipc::IPCResult RecvSetDNSWasRefreshed();
   mozilla::ipc::IPCResult RecvDontReuseConnection();
   mozilla::ipc::IPCResult RecvSetH2WSConnRefTaken();
+  void ActorDestroy(ActorDestroyReason aWhy) override;
+
+  bool IPCOpen() const { return mIPCOpen; }
 
   nsHttpTransaction* GetTransaction();
 
@@ -80,9 +84,19 @@ class HttpTransactionChild final : public PHttpTransactionChild,
   bool mStatusCodeIs200;
 
   uint64_t mChannelId;
+  bool mIPCOpen;
+
+  // These values can be accessed from sts thread.
+  Atomic<bool> mVersionOk;
+  Atomic<bool> mAuthOK;
+  Atomic<nsresult> mTransactionCloseReason;
 };
 
 }  // namespace net
 }  // namespace mozilla
+
+inline nsISupports* ToSupports(mozilla::net::HttpTransactionChild* p) {
+  return static_cast<nsIStreamListener*>(p);
+}
 
 #endif  // nsHttpTransactionChild_h__

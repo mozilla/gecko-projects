@@ -403,6 +403,9 @@ class nsHttpTransaction final : public nsAHttpTransaction,
   // class has been set while Leader, Unblocked, DontThrottle has not.
   bool EligibleForThrottling() const;
 
+  // Let transaction observer know that the transaction is closed.
+  void NotifyTransactionObserver(nsresult reason);
+
  private:
   bool mSubmittedRatePacing;
   bool mPassedRatePacing;
@@ -430,14 +433,7 @@ class nsHttpTransaction final : public nsAHttpTransaction,
 
  private:
   RefPtr<ASpdySession> mTunnelProvider;
-
- public:
-  void SetTransactionObserver(TransactionObserver* arg) {
-    mTransactionObserver = arg;
-  }
-
- private:
-  RefPtr<TransactionObserver> mTransactionObserver;
+  TransactionObserver mTransactionObserver;
 
  public:
   bool ResolvedByTRR() { return mResolvedByTRR; }

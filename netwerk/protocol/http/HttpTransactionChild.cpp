@@ -16,6 +16,7 @@
 #include "nsProxyInfo.h"
 #include "mozilla/ipc/BackgroundParent.h"
 #include "mozilla/net/BackgroundDataBridgeParent.h"
+#include "nsProxyRelease.h"
 
 using namespace mozilla::net;
 using mozilla::ipc::BackgroundParent;
@@ -38,6 +39,10 @@ HttpTransactionChild::HttpTransactionChild(const uint64_t& aChannelId) {
 
   mChannelId = aChannelId;
   mStatusCodeIs200 = false;
+  mIPCOpen = true;
+  mVersionOk = false;
+  mAuthOK = false;
+  mTransactionCloseReason = NS_OK;
 }
 
 HttpTransactionChild::~HttpTransactionChild() {
@@ -128,6 +133,16 @@ nsresult HttpTransactionChild::InitInternal(
           return NS_OK;
         });
   }
+
+  nsMainThreadPtrHandle<HttpTransactionChild> handle(
+      new nsMainThreadPtrHolder<HttpTransactionChild>("HttpTransactionChild",
+                                                      this, false));
+  mTransaction->SetTransactionObserver(
+      [handle](bool aVersionOK, bool aAuthOK, nsresult aReason) {
+        handle->mVersionOk = aVersionOK;
+        handle->mAuthOK = aAuthOK;
+        handle->mTransactionCloseReason = aReason;
+      });
 
   return rv;
 }
@@ -243,6 +258,11 @@ mozilla::ipc::IPCResult HttpTransactionChild::RecvSetH2WSConnRefTaken() {
   return IPC_OK();
 }
 
+void HttpTransactionChild::ActorDestroy(ActorDestroyReason aWhy) {
+  LOG(("HttpTransactionChild::ActorDestroy [this=%p]\n", this));
+  mIPCOpen = false;
+}
+
 nsHttpTransaction* HttpTransactionChild::GetTransaction() {
   return mTransaction.get();
 }
@@ -343,11 +363,17 @@ HttpTransactionChild::OnStopRequest(nsIRequest* aRequest, nsresult aStatus) {
   nsAutoPtr<nsHttpHeaderArray> responseTrailer(
       mTransaction->TakeResponseTrailers());
 
+  TransactionObserverResult result;
+  result.versionOk() = mVersionOk;
+  result.authOk() = mAuthOK;
+  result.closeReason() = mTransactionCloseReason;
+
   Unused << SendOnStopRequest(
       aStatus, mTransaction->ResponseIsComplete(),
       mTransaction->GetTransferSize(), mTransaction->Timings(),
       responseTrailer ? *responseTrailer : nsHttpHeaderArray(),
-      mTransaction->HasStickyConnection());
+      mTransaction->HasStickyConnection(), result);
+
   mTransaction = nullptr;
   mTransactionPump = nullptr;
   return NS_OK;

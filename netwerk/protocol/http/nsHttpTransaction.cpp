@@ -46,6 +46,7 @@
 #include "nsIRequestContext.h"
 #include "nsIHttpAuthenticator.h"
 #include "nsInputStreamPump.h"
+#include "nsISSLSocketControl.h"
 #include "NSSErrorsService.h"
 #include "TunnelUtils.h"
 #include "sslerr.h"
@@ -216,9 +217,7 @@ class ReleaseH2WSTrans final : public Runnable {
 
 nsHttpTransaction::~nsHttpTransaction() {
   LOG(("Destroying nsHttpTransaction @%p\n", this));
-  if (mTransactionObserver) {
-    mTransactionObserver->Complete(this, NS_OK);
-  }
+
   if (mPushedStream) {
     mPushedStream->OnPushFailed();
     mPushedStream = nullptr;
@@ -1069,10 +1068,7 @@ void nsHttpTransaction::Close(nsresult reason) {
     return;
   }
 
-  if (mTransactionObserver) {
-    mTransactionObserver->Complete(this, reason);
-    mTransactionObserver = nullptr;
-  }
+  NotifyTransactionObserver(reason);
 
   if (mTokenBucketCancel) {
     mTokenBucketCancel->Cancel(reason);
@@ -2479,6 +2475,46 @@ void nsHttpTransaction::SetH2WSTransaction(
   MOZ_ASSERT(OnSocketThread());
 
   mH2WSTransaction = aH2WSTransaction;
+}
+
+void nsHttpTransaction::SetTransactionObserver(TransactionObserver &&obs) {
+  mTransactionObserver = std::move(obs);
+}
+
+void nsHttpTransaction::NotifyTransactionObserver(nsresult reason) {
+  MOZ_ASSERT(OnSocketThread());
+
+  if (!mTransactionObserver) {
+    return;
+  }
+
+  bool versionOK = false;
+  bool authOK = false;
+
+  LOG(("nsHttpTransaction::NotifyTransactionObserver %p reason %" PRIx32
+       " conn %p\n",
+       this, static_cast<uint32_t>(reason), mConnection.get()));
+
+  if (mConnection) {
+    HttpVersion version = mConnection->Version();
+    versionOK = (((reason == NS_BASE_STREAM_CLOSED) || (reason == NS_OK)) &&
+                 version == HttpVersion::v2_0);
+
+    nsCOMPtr<nsISupports> secInfo;
+    mConnection->GetSecurityInfo(getter_AddRefs(secInfo));
+    nsCOMPtr<nsISSLSocketControl> socketControl = do_QueryInterface(secInfo);
+    LOG(
+        ("nsHttpTransaction::NotifyTransactionObserver"
+         " version %u socketControl %p\n",
+         static_cast<int32_t>(version), socketControl.get()));
+    if (socketControl) {
+      authOK = !socketControl->GetFailedVerification();
+    }
+  }
+
+  TransactionObserver obs = nullptr;
+  std::swap(obs, mTransactionObserver);
+  obs(versionOK, authOK, reason);
 }
 
 }  // namespace net

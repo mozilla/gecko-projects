@@ -5,6 +5,8 @@
 #ifndef nsAHttpTransactionShell_h__
 #define nsAHttpTransactionShell_h__
 
+#include <functional>
+
 #include "nsISupports.h"
 
 class nsIEventTraget;
@@ -121,6 +123,9 @@ class nsAHttpTransactionShell : public nsISupports {
 
   virtual HttpTransactionParent *AsHttpTransactionParent() = 0;
   virtual nsHttpTransaction *AsHttpTransaction() = 0;
+
+  using TransactionObserver = std::function<void(bool, bool, nsresult)>;
+  virtual void SetTransactionObserver(TransactionObserver &&obs) = 0;
 };
 
 NS_DEFINE_STATIC_IID_ACCESSOR(nsAHttpTransactionShell,
@@ -163,7 +168,8 @@ NS_DEFINE_STATIC_IID_ACCESSOR(nsAHttpTransactionShell,
   virtual void DontReuseConnection() override;                                 \
   virtual void SetH2WSConnRefTaken() override;                                 \
   virtual HttpTransactionParent *AsHttpTransactionParent() override;           \
-  virtual nsHttpTransaction *AsHttpTransaction() override;
+  virtual nsHttpTransaction *AsHttpTransaction() override;                     \
+  virtual void SetTransactionObserver(TransactionObserver &&obs) override;
 }  // namespace net
 }  // namespace mozilla
 

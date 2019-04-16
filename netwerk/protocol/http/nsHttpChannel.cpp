@@ -1275,9 +1275,13 @@ nsresult nsHttpChannel::SetupTransaction() {
          mTransaction.get()));
   }
 
-  // TODO: make transaction overserver work again
-  // mTransaction->SetTransactionObserver(mTransactionObserver);
-  // mTransactionObserver = nullptr;
+  if (mTransactionObserver) {
+    mTransaction->SetTransactionObserver(
+        [observer{std::move(mTransactionObserver)}](
+            bool aVersionOK, bool aAuthOK, nsresult aReason) {
+          observer->Complete(aVersionOK, aAuthOK, aReason);
+        });
+  }
 
   // See bug #466080. Transfer LOAD_ANONYMOUS flag to socket-layer.
   if (mLoadFlags & LOAD_ANONYMOUS) mCaps |= NS_HTTP_LOAD_ANONYMOUS;

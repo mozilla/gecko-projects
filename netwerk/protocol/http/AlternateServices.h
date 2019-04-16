@@ -159,8 +159,8 @@ class TransactionObserver final : public nsIStreamListener {
   NS_DECL_NSISTREAMLISTENER
   NS_DECL_NSIREQUESTOBSERVER
 
-  TransactionObserver(nsHttpChannel* channel, WellKnownChecker* checker);
-  void Complete(nsHttpTransaction*, nsresult);
+  TransactionObserver(nsHttpChannel *channel, WellKnownChecker *checker);
+  void Complete(bool versionOK, bool authOK, nsresult reason);
 
  private:
   friend class WellKnownChecker;

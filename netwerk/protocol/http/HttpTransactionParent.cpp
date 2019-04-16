@@ -255,6 +255,10 @@ void HttpTransactionParent::AddIPDLReference() {
   AddRef();
 }
 
+void HttpTransactionParent::SetTransactionObserver(TransactionObserver&& obs) {
+  mTransactionObserver = std::move(obs);
+}
+
 mozilla::ipc::IPCResult HttpTransactionParent::RecvOnStartRequest(
     const nsresult& aStatus, const Maybe<nsHttpResponseHead>& aResponseHead,
     const nsCString& aSecurityInfoSerialization, const NetAddr& aSelfAddr,
@@ -354,7 +358,8 @@ mozilla::ipc::IPCResult HttpTransactionParent::RecvOnDataAvailable(
 mozilla::ipc::IPCResult HttpTransactionParent::RecvOnStopRequest(
     const nsresult& aStatus, const bool& aResponseIsComplete,
     const int64_t& aTransferSize, const TimingStruct& aTimings,
-    const nsHttpHeaderArray& aResponseTrailers, const bool& aHasStickyConn) {
+    const nsHttpHeaderArray& aResponseTrailers, const bool& aHasStickyConn,
+    const TransactionObserverResult& aResult) {
   LOG(("HttpTransactionParent::RecvOnStopRequest [this=%p status=%" PRIx32
        "]\n",
        this, static_cast<uint32_t>(aStatus)));
@@ -370,6 +375,12 @@ mozilla::ipc::IPCResult HttpTransactionParent::RecvOnStopRequest(
   mTimings = aTimings;
   mResponseTrailers = new nsHttpHeaderArray(aResponseTrailers);
   mHasStickyConnection = aHasStickyConn;
+
+  if (mTransactionObserver) {
+    mTransactionObserver(aResult.versionOk(), aResult.authOk(),
+                         aResult.closeReason());
+    mTransactionObserver = nullptr;
+  }
 
   nsCOMPtr<nsIStreamListener> chan = mChannel;
   RefPtr<HttpTransactionParent> self(this);

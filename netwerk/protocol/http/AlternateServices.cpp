@@ -752,37 +752,30 @@ TransactionObserver::TransactionObserver(nsHttpChannel* channel,
   mChannelRef = do_QueryInterface((nsIHttpChannel*)channel);
 }
 
-void TransactionObserver::Complete(nsHttpTransaction* aTrans, nsresult reason) {
-  // socket thread
-  MOZ_ASSERT(!NS_IsMainThread());
+void TransactionObserver::Complete(bool versionOK, bool authOK,
+                                   nsresult reason) {
+  if (!NS_IsMainThread()) {
+    RefPtr<TransactionObserver> self = this;
+    NS_DispatchToMainThread(NS_NewRunnableFunction(
+        "TransactionObserver::Complete",
+        [self{std::move(self)}, versionOK, authOK, reason]() {
+          self->Complete(versionOK, authOK, reason);
+        }));
+    return;
+  }
+
   if (mRanOnce) {
     return;
   }
   mRanOnce = true;
 
-  RefPtr<nsAHttpConnection> conn = aTrans->Connection();
-  LOG(("TransactionObserver::Complete %p aTrans %p reason %" PRIx32
-       " conn %p\n",
-       this, aTrans, static_cast<uint32_t>(reason), conn.get()));
-  if (!conn) {
-    return;
-  }
-  HttpVersion version = conn->Version();
-  mVersionOK = (((reason == NS_BASE_STREAM_CLOSED) || (reason == NS_OK)) &&
-                conn->Version() == HttpVersion::v2_0);
+  mVersionOK = versionOK;
+  mAuthOK = authOK;
 
-  nsCOMPtr<nsISupports> secInfo;
-  conn->GetSecurityInfo(getter_AddRefs(secInfo));
-  nsCOMPtr<nsISSLSocketControl> socketControl = do_QueryInterface(secInfo);
-  LOG(("TransactionObserver::Complete version %u socketControl %p\n",
-       static_cast<int32_t>(version), socketControl.get()));
-  if (!socketControl) {
-    return;
-  }
-
-  mAuthOK = !socketControl->GetFailedVerification();
-  LOG(("TransactionObserve::Complete %p trans %p authOK %d versionOK %d\n",
-       this, aTrans, mAuthOK, mVersionOK));
+  LOG(
+      ("TransactionObserve::Complete %p authOK %d versionOK %d"
+       " reason %" PRIx32,
+       this, mAuthOK, mVersionOK, static_cast<uint32_t>(reason)));
 }
 
 #define MAX_WK 32768
