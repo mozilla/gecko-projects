@@ -283,10 +283,19 @@ mozilla::ipc::IPCResult HttpTransactionParent::RecvOnStartRequest(
 
   nsCOMPtr<nsIStreamListener> chan = mChannel;
 
-  nsresult rv = chan->OnStartRequest(this);
-  if (NS_FAILED(rv)) {
-    Cancel(rv);
+  RefPtr<HttpTransactionParent> self(this);
+  auto call = [self{std::move(self)}, chan{std::move(chan)}]() {
+    nsresult rv = chan->OnStartRequest(self);
+    if (NS_FAILED(rv)) {
+      self->Cancel(rv);
+    }
+  };
+  if (mSuspendCount > 0) {
+    mSuspendQueue.emplace(std::move(call));
+  } else {
+    call();
   }
+
   return IPC_OK();
 }
 
@@ -324,9 +333,19 @@ mozilla::ipc::IPCResult HttpTransactionParent::RecvOnDataAvailable(
   }
 
   mDataAlreadySent = dataSentToChildProcess;
-  rv = chan->OnDataAvailable(this, stringStream, aOffset, aCount);
-  if (NS_FAILED(rv)) {
-    Cancel(rv);
+  RefPtr<HttpTransactionParent> self(this);
+  auto call = [self{std::move(self)}, chan{std::move(chan)},
+               stringStream{std::move(stringStream)}, aOffset, aCount]() {
+    nsresult rv = chan->OnDataAvailable(self, stringStream, aOffset, aCount);
+    if (NS_FAILED(rv)) {
+      self->Cancel(rv);
+    }
+  };
+
+  if (mSuspendCount > 0) {
+    mSuspendQueue.emplace(std::move(call));
+  } else {
+    call();
   }
 
   return IPC_OK();
@@ -353,12 +372,21 @@ mozilla::ipc::IPCResult HttpTransactionParent::RecvOnStopRequest(
   mHasStickyConnection = aHasStickyConn;
 
   nsCOMPtr<nsIStreamListener> chan = mChannel;
-  Unused << chan->OnStopRequest(this, aStatus);
+  RefPtr<HttpTransactionParent> self(this);
+  auto call = [self{std::move(self)}, chan{std::move(chan)}]() {
+    Unused << chan->OnStopRequest(self, self->mStatus);
 
-  // We are done with this transaction after OnStopRequest.
-  if (mIPCOpen) {
-    Unused << Send__delete__(this);
+    // We are done with this transaction after OnStopRequest.
+    if (self->mIPCOpen) {
+      Unused << Send__delete__(self);
+    }
+  };
+  if (mSuspendCount > 0) {
+    mSuspendQueue.emplace(std::move(call));
+  } else {
+    call();
   }
+
   return IPC_OK();
 }
 
@@ -399,13 +427,38 @@ HttpTransactionParent::Cancel(nsresult aStatus) {
 
 NS_IMETHODIMP
 HttpTransactionParent::Suspend(void) {
+  ++mSuspendCount;
+
   Unused << SendSuspendPump();
   return NS_OK;
 }
 
 NS_IMETHODIMP
 HttpTransactionParent::Resume(void) {
+  MOZ_ASSERT(mSuspendCount, "Resume called more than Suspend");
+
   Unused << SendResumePump();
+  if (mSuspendCount && !--mSuspendCount && !mSuspendQueue.empty()) {
+    RefPtr<HttpTransactionParent> self(this);
+    nsCOMPtr<nsIRunnable> dequeue(NS_NewRunnableFunction(
+        "HttpTransactionParent::Resume", [self{std::move(self)}]() {
+          while (!self->mSuspendQueue.empty()) {
+            auto call = self->mSuspendQueue.front();
+            self->mSuspendQueue.pop();
+            call();
+            if (self->mSuspendCount) {
+              break;
+            }
+            // Note that we don't need to call OnStopRequest
+            // from here artifically when the channel is cancelled
+            // from one of the callbacks.  We bypass calling stream
+            // listener when cancelled, channel cancels us.
+          }
+        }));
+
+    Unused << NS_DispatchToMainThread(dequeue);
+  }
+
   return NS_OK;
 }
 

@@ -16,6 +16,8 @@
 #include "nsIRequest.h"
 #include "TimingStruct.h"
 
+#include <queue>
+
 namespace mozilla {
 namespace net {
 
@@ -77,6 +79,8 @@ class HttpTransactionParent final : public PHttpTransactionParent,
   bool mCanceled = false;
   nsresult mStatus = NS_OK;
   bool mDataAlreadySent = false;
+  int32_t mSuspendCount = 0;
+  std::queue<std::function<void()>> mSuspendQueue;
 
   NetAddr mSelfAddr;
   NetAddr mPeerAddr;
