@@ -90,6 +90,26 @@ interface nsIHttpActivityObserver : nsISupports
      *  and aActivitySubtype is ACTIVITY_SUBTYPE_RESPONSE_COMPLETE
      *  aExtraSizeData will contain the count of total bytes received
      */
+
+    /**
+     * This function is for internal use only. Every time a http transaction
+     * is created in socket process, we use this function to set the value of
+     * |isActive|. We need this since the real value of |isActive| is
+     * available in parent process.
+     */
+    [noscript] void setIsActive(in boolean aActived);
+
+    /**
+     * This function behaves like |observeActivity|, but the difference is
+     * using the id of http channel instead.
+     */
+    [noscript, must_use]
+    void observeActivityWithChannelId(in uint64_t aChannelId,
+                                      in uint32_t aActivityType,
+                                      in uint32_t aActivitySubtype,
+                                      in PRTime   aTimestamp,
+                                      in uint64_t aExtraSizeData,
+                                      in ACString aExtraStringData);
 };
 
 %{C++

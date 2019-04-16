@@ -13,6 +13,7 @@
 #include "mozilla/net/DNSRequestParent.h"
 #include "mozilla/Telemetry.h"
 #include "mozilla/TelemetryIPC.h"
+#include "nsIHttpActivityObserver.h"
 #ifdef MOZ_WEBRTC
 #  include "mozilla/dom/ContentProcessManager.h"
 #  include "mozilla/dom/BrowserParent.h"
@@ -240,6 +241,20 @@ mozilla::ipc::IPCResult SocketProcessParent::RecvOnPushStream(
     const nsCString& aRequestString) {
   Unused << Http2PushStreamManager::GetSingleton()->CallOnPushCallback(
       aChannelId, aStreamId, aResourceUrl, aRequestString);
+  return IPC_OK();
+}
+
+mozilla::ipc::IPCResult SocketProcessParent::RecvObserveActivity(
+    const uint64_t& aChannelId, const uint32_t& aActivityType,
+    const uint32_t& aActivitySubtype, const PRTime& aTimestamp,
+    const uint64_t& aExtraSizeData, const nsCString& aExtraStringData) {
+  nsCOMPtr<nsIHttpActivityDistributor> activityDistributor =
+      services::GetActivityDistributor();
+  MOZ_ASSERT(activityDistributor);
+
+  Unused << activityDistributor->ObserveActivityWithChannelId(
+      aChannelId, aActivityType, aActivitySubtype, aTimestamp, aExtraSizeData,
+      aExtraStringData);
   return IPC_OK();
 }
 

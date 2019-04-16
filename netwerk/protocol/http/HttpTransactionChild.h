@@ -43,7 +43,8 @@ class HttpTransactionChild final : public PHttpTransactionChild,
       const bool& aReqBodyIncludesHeaders,
       const uint64_t& aTopLevelOuterContentWindowId,
       const uint64_t& aRequestContextID, const uint32_t& aClassOfService,
-      const uint32_t& aPushedStreamId);
+      const uint32_t& aPushedStreamId,
+      const bool& aHttpActivityDistributorActivated);
   mozilla::ipc::IPCResult RecvRead();
   mozilla::ipc::IPCResult RecvReschedule(const int32_t& priority);
   mozilla::ipc::IPCResult RecvUpdateClassOfService(

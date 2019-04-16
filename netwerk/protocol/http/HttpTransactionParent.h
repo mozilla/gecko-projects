@@ -92,6 +92,7 @@ class HttpTransactionParent final : public PHttpTransactionParent,
   bool mResponseTrailersTaken;
   bool mHasStickyConnection;
   TransactionObserver mTransactionObserver;
+  uint64_t mChannelId;
 };
 
 }  // namespace net

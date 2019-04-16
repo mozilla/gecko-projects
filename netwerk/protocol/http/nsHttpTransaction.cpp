@@ -363,8 +363,8 @@ nsresult nsHttpTransaction::Init(
 
   // report the request header
   if (mActivityDistributor) {
-    rv = mActivityDistributor->ObserveActivity(
-        mChannel, NS_HTTP_ACTIVITY_TYPE_HTTP_TRANSACTION,
+    rv = mActivityDistributor->ObserveActivityWithChannelId(
+        mChannelId, NS_HTTP_ACTIVITY_TYPE_HTTP_TRANSACTION,
         NS_HTTP_ACTIVITY_SUBTYPE_REQUEST_HEADER, PR_Now(), 0, mReqHeaderBuf);
     if (NS_FAILED(rv)) {
       LOG3(("ObserveActivity failed (%08x)", static_cast<uint32_t>(rv)));
@@ -690,8 +690,8 @@ void nsHttpTransaction::OnTransportStatus(nsITransport* transport,
   if (mActivityDistributor) {
     // upon STATUS_WAITING_FOR; report request body sent
     if ((mHasRequestBody) && (status == NS_NET_STATUS_WAITING_FOR)) {
-      nsresult rv = mActivityDistributor->ObserveActivity(
-          mChannel, NS_HTTP_ACTIVITY_TYPE_HTTP_TRANSACTION,
+      nsresult rv = mActivityDistributor->ObserveActivityWithChannelId(
+          mChannelId, NS_HTTP_ACTIVITY_TYPE_HTTP_TRANSACTION,
           NS_HTTP_ACTIVITY_SUBTYPE_REQUEST_BODY_SENT, PR_Now(), 0,
           EmptyCString());
       if (NS_FAILED(rv)) {
@@ -700,8 +700,8 @@ void nsHttpTransaction::OnTransportStatus(nsITransport* transport,
     }
 
     // report the status and progress
-    nsresult rv = mActivityDistributor->ObserveActivity(
-        mChannel, NS_HTTP_ACTIVITY_TYPE_SOCKET_TRANSPORT,
+    nsresult rv = mActivityDistributor->ObserveActivityWithChannelId(
+        mChannelId, NS_HTTP_ACTIVITY_TYPE_SOCKET_TRANSPORT,
         static_cast<uint32_t>(status), PR_Now(), progress, EmptyCString());
     if (NS_FAILED(rv)) {
       LOG3(("ObserveActivity failed (%08x)", static_cast<uint32_t>(rv)));
@@ -1078,8 +1078,8 @@ void nsHttpTransaction::Close(nsresult reason) {
   if (mActivityDistributor) {
     // report the reponse is complete if not already reported
     if (!mResponseIsComplete) {
-      nsresult rv = mActivityDistributor->ObserveActivity(
-          mChannel, NS_HTTP_ACTIVITY_TYPE_HTTP_TRANSACTION,
+      nsresult rv = mActivityDistributor->ObserveActivityWithChannelId(
+          mChannelId, NS_HTTP_ACTIVITY_TYPE_HTTP_TRANSACTION,
           NS_HTTP_ACTIVITY_SUBTYPE_RESPONSE_COMPLETE, PR_Now(),
           static_cast<uint64_t>(mContentRead), EmptyCString());
       if (NS_FAILED(rv)) {
@@ -1088,8 +1088,8 @@ void nsHttpTransaction::Close(nsresult reason) {
     }
 
     // report that this transaction is closing
-    nsresult rv = mActivityDistributor->ObserveActivity(
-        mChannel, NS_HTTP_ACTIVITY_TYPE_HTTP_TRANSACTION,
+    nsresult rv = mActivityDistributor->ObserveActivityWithChannelId(
+        mChannelId, NS_HTTP_ACTIVITY_TYPE_HTTP_TRANSACTION,
         NS_HTTP_ACTIVITY_SUBTYPE_TRANSACTION_CLOSE, PR_Now(), 0,
         EmptyCString());
     if (NS_FAILED(rv)) {
@@ -1515,8 +1515,8 @@ nsresult nsHttpTransaction::ParseHead(char* buf, uint32_t count,
     // report that we have a least some of the response
     if (mActivityDistributor && !mReportedStart) {
       mReportedStart = true;
-      rv = mActivityDistributor->ObserveActivity(
-          mChannel, NS_HTTP_ACTIVITY_TYPE_HTTP_TRANSACTION,
+      rv = mActivityDistributor->ObserveActivityWithChannelId(
+          mChannelId, NS_HTTP_ACTIVITY_TYPE_HTTP_TRANSACTION,
           NS_HTTP_ACTIVITY_SUBTYPE_RESPONSE_START, PR_Now(), 0, EmptyCString());
       if (NS_FAILED(rv)) {
         LOG3(("ObserveActivity failed (%08x)", static_cast<uint32_t>(rv)));
@@ -1861,8 +1861,8 @@ nsresult nsHttpTransaction::HandleContent(char* buf, uint32_t count,
 
     // report the entire response has arrived
     if (mActivityDistributor) {
-      rv = mActivityDistributor->ObserveActivity(
-          mChannel, NS_HTTP_ACTIVITY_TYPE_HTTP_TRANSACTION,
+      rv = mActivityDistributor->ObserveActivityWithChannelId(
+          mChannelId, NS_HTTP_ACTIVITY_TYPE_HTTP_TRANSACTION,
           NS_HTTP_ACTIVITY_SUBTYPE_RESPONSE_COMPLETE, PR_Now(),
           static_cast<uint64_t>(mContentRead), EmptyCString());
       if (NS_FAILED(rv)) {
@@ -1915,8 +1915,8 @@ nsresult nsHttpTransaction::ProcessData(char* buf, uint32_t count,
       nsAutoCString completeResponseHeaders;
       mResponseHead->Flatten(completeResponseHeaders, false);
       completeResponseHeaders.AppendLiteral("\r\n");
-      rv = mActivityDistributor->ObserveActivity(
-          mChannel, NS_HTTP_ACTIVITY_TYPE_HTTP_TRANSACTION,
+      rv = mActivityDistributor->ObserveActivityWithChannelId(
+          mChannelId, NS_HTTP_ACTIVITY_TYPE_HTTP_TRANSACTION,
           NS_HTTP_ACTIVITY_SUBTYPE_RESPONSE_HEADER, PR_Now(), 0,
           completeResponseHeaders);
       if (NS_FAILED(rv)) {

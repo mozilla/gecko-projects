@@ -12,6 +12,7 @@
 #include "Http2PushStreamManager.h"
 #include "mozilla/ipc/IPCStreamUtils.h"
 #include "mozilla/net/SocketProcessChild.h"
+#include "nsIHttpActivityObserver.h"
 #include "nsHttpHandler.h"
 #include "nsProxyInfo.h"
 #include "mozilla/ipc/BackgroundParent.h"
@@ -182,11 +183,18 @@ mozilla::ipc::IPCResult HttpTransactionChild::RecvInit(
     const uint64_t& aReqContentLength, const bool& aReqBodyIncludesHeaders,
     const uint64_t& aTopLevelOuterContentWindowId,
     const uint64_t& aRequestContextID, const uint32_t& aClassOfService,
-    const uint32_t& aPushedStreamId) {
+    const uint32_t& aPushedStreamId,
+    const bool& aHttpActivityDistributorActivated) {
   mRequestHead = aReqHeaders;
   if (aRequestBody) {
     mUploadStream = mozilla::ipc::DeserializeIPCStream(aRequestBody);
   }
+
+  if (nsCOMPtr<nsIHttpActivityObserver> distributor =
+          services::GetActivityDistributor()) {
+    distributor->SetIsActive(aHttpActivityDistributorActivated);
+  }
+
   // TODO: let parent process know about the failure
   if (NS_FAILED(InitInternal(aCaps, aArgs, &mRequestHead, mUploadStream,
                              aReqContentLength, aReqBodyIncludesHeaders,

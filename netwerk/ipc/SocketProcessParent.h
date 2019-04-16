@@ -93,6 +93,10 @@ class SocketProcessParent final
 
   mozilla::ipc::IPCResult RecvInitBackground(
       Endpoint<PBackgroundParent>&& aEndpoint);
+  mozilla::ipc::IPCResult RecvObserveActivity(
+      const uint64_t& aChannelId, const uint32_t& aActivityType,
+      const uint32_t& aActivitySubtype, const PRTime& aTimestamp,
+      const uint64_t& aExtraSizeData, const nsCString& aExtraStringData);
 
  private:
   SocketProcessHost* mHost;

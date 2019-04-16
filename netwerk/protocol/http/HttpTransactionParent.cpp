@@ -10,6 +10,8 @@
 #include "HttpTransactionParent.h"
 #include "mozilla/ipc/IPCStreamUtils.h"
 #include "mozilla/net/SocketProcessParent.h"
+#include "nsHttpHandler.h"
+#include "nsIHttpActivityObserver.h"
 
 using namespace mozilla::net;
 
@@ -27,7 +29,8 @@ HttpTransactionParent::HttpTransactionParent()
     : mIPCOpen(false),
       mResponseHeadTaken(false),
       mResponseTrailersTaken(false),
-      mHasStickyConnection(false) {
+      mHasStickyConnection(false),
+      mChannelId(0) {
   LOG(("Creating HttpTransactionParent @%p\n", this));
 
   this->mSelfAddr.inet = {};
@@ -117,17 +120,23 @@ nsresult HttpTransactionParent::Init(
   }
 
   uint64_t requestContextID = requestContext ? requestContext->GetID() : 0;
+  bool activityDistributorActivated = false;
+  if (nsCOMPtr<nsIHttpActivityObserver> distributor =
+          services::GetActivityDistributor()) {
+    Unused << distributor->GetIsActive(&activityDistributorActivated);
+  }
 
   // TODO: handle |target| later
   if (!SendInit(caps, infoArgs, *requestHead,
                 requestBody ? Some(autoStream.TakeValue()) : Nothing(),
                 requestContentLength, requestBodyHasHeaders,
                 topLevelOuterContentWindowId, requestContextID, classOfService,
-                pushedStreamId)) {
+                pushedStreamId, activityDistributorActivated)) {
     return NS_ERROR_FAILURE;
   }
 
   mTargetThread = GetCurrentThreadEventTarget();
+  mChannelId = aChannelId;
   return NS_OK;
 }
 
@@ -141,6 +150,7 @@ nsresult HttpTransactionParent::AsyncRead(nsIStreamListener* listener,
 
   NS_ADDREF(*pump = this);
   mChannel = listener;
+  gHttpHandler->AddHttpChannel(mChannelId, mChannel);
   return NS_OK;
 }
 
@@ -391,6 +401,7 @@ mozilla::ipc::IPCResult HttpTransactionParent::RecvOnStopRequest(
     if (self->mIPCOpen) {
       Unused << Send__delete__(self);
     }
+    gHttpHandler->RemoveHttpChannel(self->mChannelId);
   };
   if (mSuspendCount > 0) {
     mSuspendQueue.emplace(std::move(call));

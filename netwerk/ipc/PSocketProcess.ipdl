@@ -28,6 +28,7 @@ using mozilla::Telemetry::DiscardedData from "mozilla/TelemetryComms.h";
 using base::ProcessId from "base/process.h";
 using mozilla::OriginAttributes from "mozilla/ipc/BackgroundUtils.h";
 using mozilla::net::HttpRetParams from "mozilla/net/DashboardTypes.h";
+using PRTime from "prtime.h";
 
 namespace mozilla {
 namespace net {
@@ -65,6 +66,12 @@ parent:
                      uint32_t streamId,
                      nsCString resourceUrl,
                      nsCString requestString);
+  async ObserveActivity(uint64_t aChannelId,
+                        uint32_t aActivityType,
+                        uint32_t aActivitySubtype,
+                        PRTime   aTimestamp,
+                        uint64_t aExtraSizeData,
+                        nsCString aExtraStringData);
 
 child:
   async PreferenceUpdate(Pref pref);

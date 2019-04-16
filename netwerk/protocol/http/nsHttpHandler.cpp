@@ -2756,5 +2756,29 @@ nsresult nsHttpHandler::InitiateTransactionWithStickyConn(
       aTransWithStickyConn->AsHttpTransaction());
 }
 
+void nsHttpHandler::AddHttpChannel(uint64_t aId, nsISupports *aChannel) {
+  MOZ_ASSERT(XRE_IsParentProcess());
+  MOZ_ASSERT(NS_IsMainThread());
+  MOZ_ASSERT(!mIDToHttpChannelMap.Lookup(aId));
+
+  nsWeakPtr channel(do_GetWeakReference(aChannel));
+  mIDToHttpChannelMap.Put(aId, std::move(channel));
+}
+
+void nsHttpHandler::RemoveHttpChannel(uint64_t aId) {
+  MOZ_ASSERT(XRE_IsParentProcess());
+  MOZ_ASSERT(NS_IsMainThread());
+  MOZ_ASSERT(mIDToHttpChannelMap.Lookup(aId));
+
+  mIDToHttpChannelMap.Remove(aId);
+}
+
+nsWeakPtr nsHttpHandler::GetWeakHttpChannel(uint64_t aId) {
+  MOZ_ASSERT(XRE_IsParentProcess());
+  MOZ_ASSERT(NS_IsMainThread());
+
+  return mIDToHttpChannelMap.Get(aId);
+}
+
 }  // namespace net
 }  // namespace mozilla
