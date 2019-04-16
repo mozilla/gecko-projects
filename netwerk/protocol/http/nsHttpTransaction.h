@@ -100,8 +100,7 @@ class nsHttpTransaction final : public nsAHttpTransaction,
     return mHaveAllHeaders ? mResponseHead : nullptr;
   }
 
-  nsIEventTarget* ConsumerTarget() { return mConsumerTarget; }
-  nsISupports* HttpChannel() { return mChannel; }
+  nsIEventTarget *ConsumerTarget() { return mConsumerTarget; }
   uint64_t HttpChannelId() { return mChannelId; }
 
   void SetSecurityCallbacks(nsIInterfaceRequestor* aCallbacks);

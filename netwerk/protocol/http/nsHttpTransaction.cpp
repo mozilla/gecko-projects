@@ -294,7 +294,6 @@ nsresult nsHttpTransaction::Init(
     activityDistributorActive = false;
     mActivityDistributor = nullptr;
   }
-  mChannel = do_QueryInterface(eventsink);
 
   nsCOMPtr<nsIHttpChannelInternal> httpChannelInternal =
       do_QueryInterface(eventsink);
@@ -414,7 +413,7 @@ nsresult nsHttpTransaction::Init(
     mRequestStream = headers;
   }
 
-  nsCOMPtr<nsIThrottledInputChannel> throttled = do_QueryInterface(mChannel);
+  nsCOMPtr<nsIThrottledInputChannel> throttled = do_QueryInterface(eventsink);
   nsIInputChannelThrottleQueue* queue;
   if (throttled) {
     rv = throttled->GetThrottleQueue(&queue);
