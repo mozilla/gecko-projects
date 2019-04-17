@@ -118,7 +118,7 @@ bool HttpBackgroundChannelChild::IsWaitingOnStartRequest() {
   MOZ_ASSERT(OnSocketThread());
   // Need to wait for OnStartRequest if it is sent by
   // parent process but not received by content process.
-  return !mStartReceived;
+  return (mStartSent && !mStartReceived);
 }
 
 // PHttpBackgroundChannelChild
@@ -141,7 +141,11 @@ IPCResult HttpBackgroundChannelChild::RecvOnTransportAndData(
     return IPC_OK();
   }
 
-  if (IsWaitingOnStartRequest()) {
+  // |OnDataAvailable| should be strictly after OnStartRequest as garanteed.
+  // We can't use |IsWaitingOnStartRequeest| since |mStartSent| only works for
+  // IPCs from parent to child. However, this IPC is from either parent process
+  // or socket process.
+  if (!mStartReceived) {
     LOG(("  > pending until OnStartRequest [offset=%" PRIu64 " count=%" PRIu32
          "]\n",
          aOffset, aCount));
