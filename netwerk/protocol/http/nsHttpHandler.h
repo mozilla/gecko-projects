@@ -320,12 +320,7 @@ class nsHttpHandler final : public nsIHttpProtocolHandler,
 
   MOZ_MUST_USE nsresult SpeculativeConnect(nsHttpConnectionInfo* ci,
                                            nsIInterfaceRequestor* callbacks,
-                                           uint32_t caps = 0) {
-    // TODO: fix this in bug 1527384.
-    // TickleWifi(callbacks);
-    // return mConnMgr->SpeculativeConnect(ci, callbacks, caps);
-    return NS_OK;
-  }
+                                           uint32_t caps = 0);
 
   // Alternate Services Maps are main thread only
   void UpdateAltServiceMapping(AltSvcMapping* map, nsProxyInfo* proxyInfo,

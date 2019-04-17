@@ -2143,8 +2143,8 @@ nsHttpHandler::GetAltSvcCacheKeys(nsTArray<nsCString>& value) {
 // nsHttpHandler::nsIObserver
 //-----------------------------------------------------------------------------
 
-static void NotifySocketProcessObservers(const char *topic,
-                                         const char16_t *data) {
+static void NotifySocketProcessObservers(const char* topic,
+                                         const char16_t* data) {
   if (gIOService->UseSocketProcess() && gIOService->SocketProcessReady()) {
     Unused << SocketProcessParent::GetSingleton()
                   ->SendNotifySocketProcessObservers(nsCString(topic),
@@ -2386,6 +2386,19 @@ void nsHttpHandler::MaybeEnableSpeculativeConnect() {
         gHttpHandler->mSpeculativeConnectEnabled =
             CanEnableSpeculativeConnect();
       }));
+}
+
+nsresult nsHttpHandler::SpeculativeConnect(nsHttpConnectionInfo* ci,
+                                           nsIInterfaceRequestor* callbacks,
+                                           uint32_t caps) {
+  // TODO: fix this in bug 1527384.
+  if (gIOService->UseSocketProcess()) {
+    return NS_OK;
+  }
+
+  TickleWifi(callbacks);
+  RefPtr<nsHttpConnectionInfo> clone = ci->Clone();
+  return mConnMgr->SpeculativeConnect(clone, callbacks, caps);
 }
 
 nsresult nsHttpHandler::SpeculativeConnectInternal(
@@ -2716,10 +2729,10 @@ HttpTrafficAnalyzer* nsHttpHandler::GetHttpTrafficAnalyzer() {
   return &mHttpTrafficAnalyzer;
 }
 
-nsresult nsHttpHandler::InitiateTransaction(nsAHttpTransactionShell *aTrans,
+nsresult nsHttpHandler::InitiateTransaction(nsAHttpTransactionShell* aTrans,
                                             int32_t aPriority) {
   if (gIOService->UseSocketProcess() && gIOService->SocketProcessReady()) {
-    HttpTransactionParent *trans = aTrans->AsHttpTransactionParent();
+    HttpTransactionParent* trans = aTrans->AsHttpTransactionParent();
     MOZ_ASSERT(trans);
 
     if (!trans) {
@@ -2733,12 +2746,12 @@ nsresult nsHttpHandler::InitiateTransaction(nsAHttpTransactionShell *aTrans,
   return mConnMgr->AddTransaction(aTrans->AsHttpTransaction(), aPriority);
 }
 nsresult nsHttpHandler::InitiateTransactionWithStickyConn(
-    nsAHttpTransactionShell *aTrans, int32_t aPriority,
-    nsAHttpTransactionShell *aTransWithStickyConn) {
+    nsAHttpTransactionShell* aTrans, int32_t aPriority,
+    nsAHttpTransactionShell* aTransWithStickyConn) {
   if (gIOService->UseSocketProcess() && gIOService->SocketProcessReady()) {
-    HttpTransactionParent *trans = aTrans->AsHttpTransactionParent();
+    HttpTransactionParent* trans = aTrans->AsHttpTransactionParent();
     MOZ_ASSERT(trans);
-    HttpTransactionParent *transWithStickyConn =
+    HttpTransactionParent* transWithStickyConn =
         aTransWithStickyConn->AsHttpTransactionParent();
     MOZ_ASSERT(transWithStickyConn);
 
@@ -2756,7 +2769,7 @@ nsresult nsHttpHandler::InitiateTransactionWithStickyConn(
       aTransWithStickyConn->AsHttpTransaction());
 }
 
-void nsHttpHandler::AddHttpChannel(uint64_t aId, nsISupports *aChannel) {
+void nsHttpHandler::AddHttpChannel(uint64_t aId, nsISupports* aChannel) {
   MOZ_ASSERT(XRE_IsParentProcess());
   MOZ_ASSERT(NS_IsMainThread());
 

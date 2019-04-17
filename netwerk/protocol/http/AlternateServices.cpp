@@ -13,6 +13,7 @@
 #include "nsHttpConnectionInfo.h"
 #include "nsHttpChannel.h"
 #include "nsHttpHandler.h"
+#include "nsIOService.h"
 #include "nsThreadUtils.h"
 #include "nsHttpTransaction.h"
 #include "NullHttpTransaction.h"
@@ -955,18 +956,28 @@ void AltSvcCache::UpdateAltServiceMapping(
         ("AltSvcCache::UpdateAltServiceMapping %p validation via "
          "speculative connect started\n",
          this));
-    // for https resources we only establish a connection
 
     // TODO: fix this in bug 1527384.
-    /*nsCOMPtr<nsIInterfaceRequestor> callbacks = new
-    AltSvcOverride(aCallbacks); RefPtr<AltSvcTransaction> nullTransaction = new
-    AltSvcTransaction(map, ci, aCallbacks, caps); nsresult rv =
-    gHttpHandler->ConnMgr()->SpeculativeConnect( ci, callbacks, caps,
-    nullTransaction); if (NS_FAILED(rv)) { LOG(
+    if (NS_WARN_IF(gIOService->UseSocketProcess())) {
+      LOG(
+          ("AltSvcCache::UpdateAltServiceMapping %p "
+           "speculative connect not supported in socket process",
+           this));
+      return;
+    }
+
+    // for https resources we only establish a connection
+    nsCOMPtr<nsIInterfaceRequestor> callbacks = new AltSvcOverride(aCallbacks);
+    RefPtr<AltSvcTransaction> nullTransaction =
+        new AltSvcTransaction(map, ci, aCallbacks, caps);
+    nsresult rv = gHttpHandler->ConnMgr()->SpeculativeConnect(
+        ci, callbacks, caps, nullTransaction);
+    if (NS_FAILED(rv)) {
+      LOG(
           ("AltSvcCache::UpdateAltServiceMapping %p "
            "speculative connect failed with code %08x\n",
            this, static_cast<uint32_t>(rv)));
-    }*/
+    }
   } else {
     // for http:// resources we fetch .well-known too
     nsAutoCString origin(NS_LITERAL_CSTRING("http://"));
