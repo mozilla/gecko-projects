@@ -50,8 +50,6 @@ service('ThirdPartyUtil', 'mozIThirdPartyUtil',
         "@mozilla.org/thirdpartyutil;1")
 service('URIFixup', 'nsIURIFixup',
         "@mozilla.org/docshell/urifixup;1")
-service('Bits', 'nsIBits',
-        "@mozilla.org/bits;1")
 
 # The definition file needs access to the definitions of the particular
 # interfaces. If you add a new interface here, make sure the necessary includes
@@ -84,7 +82,6 @@ CPP_INCLUDES = """
 #include "nsIUUIDGenerator.h"
 #include "nsIGfxInfo.h"
 #include "nsIURIFixup.h"
-#include "nsIBits.h"
 """
 
 #####

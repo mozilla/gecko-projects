@@ -21,7 +21,6 @@ DIRS += [
     'apppicker',
     'asyncshutdown',
     'backgroundhangmonitor',
-    'bitsdownload',
     'browser',
     'cleardata',
     'clearsitedata',
