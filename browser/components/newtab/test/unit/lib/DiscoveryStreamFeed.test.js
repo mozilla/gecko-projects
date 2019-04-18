@@ -1,7 +1,7 @@
 import {actionCreators as ac, actionTypes as at, actionUtils as au} from "common/Actions.jsm";
 import {combineReducers, createStore} from "redux";
-import {DiscoveryStreamFeed} from "lib/DiscoveryStreamFeed.jsm";
 import {GlobalOverrider} from "test/unit/utils";
+import injector from "inject!lib/DiscoveryStreamFeed.jsm";
 import {reducers} from "common/Reducers.jsm";
 
 const CONFIG_PREF_NAME = "discoverystream.config";
@@ -13,6 +13,7 @@ const THIRTY_MINUTES = 30 * 60 * 1000;
 const ONE_WEEK = 7 * 24 * 60 * 60 * 1000; // 1 week
 
 describe("DiscoveryStreamFeed", () => {
+  let DiscoveryStreamFeed;
   let feed;
   let sandbox;
   let fetchStub;
@@ -35,11 +36,32 @@ describe("DiscoveryStreamFeed", () => {
   beforeEach(() => {
     sandbox = sinon.createSandbox();
 
+    class FakeUserDomainAffinityProvider {
+      constructor(timeSegments, parameterSets, maxHistoryQueryResults, version, scores) {
+        this.timeSegments = timeSegments;
+        this.parameterSets = parameterSets;
+        this.maxHistoryQueryResults = maxHistoryQueryResults;
+        this.version = version;
+        this.scores = scores;
+      }
+
+      getAffinities() {
+        return {};
+      }
+    }
+
     // Fetch
     fetchStub = sandbox.stub(global, "fetch");
 
     // Time
     clock = sinon.useFakeTimers();
+
+    // Injector
+    ({
+      DiscoveryStreamFeed,
+    } = injector({
+      "lib/UserDomainAffinityProvider.jsm": {UserDomainAffinityProvider: FakeUserDomainAffinityProvider},
+    }));
 
     // Feed
     feed = new DiscoveryStreamFeed();
@@ -51,6 +73,7 @@ describe("DiscoveryStreamFeed", () => {
         },
       },
     });
+    global.fetch.resetHistory();
 
     sandbox.stub(feed, "_maybeUpdateCachedData").resolves();
 
@@ -485,19 +508,21 @@ describe("DiscoveryStreamFeed", () => {
     });
   });
 
-  describe("#clearCache", () => {
-    it("should set .layout, .feeds and .spocs to {}", async () => {
+  describe("#resetCache", () => {
+    it("should set .layout, .feeds .spocs and .affinities to {", async () => {
       sandbox.stub(feed.cache, "set").returns(Promise.resolve());
 
-      await feed.clearCache();
+      await feed.resetCache();
 
-      assert.calledThrice(feed.cache.set);
-      const {firstCall} = feed.cache.set;
-      const {secondCall} = feed.cache.set;
-      const {thirdCall} = feed.cache.set;
+      assert.callCount(feed.cache.set, 4);
+      const firstCall = feed.cache.set.getCall(0);
+      const secondCall = feed.cache.set.getCall(1);
+      const thirdCall = feed.cache.set.getCall(2);
+      const fourthCall = feed.cache.set.getCall(3);
       assert.deepEqual(firstCall.args, ["layout", {}]);
       assert.deepEqual(secondCall.args, ["feeds", {}]);
       assert.deepEqual(thirdCall.args, ["spocs", {}]);
+      assert.deepEqual(fourthCall.args, ["affinities", {}]);
     });
   });
 
@@ -998,7 +1023,7 @@ describe("DiscoveryStreamFeed", () => {
 
       await feed.onAction({type: at.DISCOVERY_STREAM_SPOC_IMPRESSION, data: {campaign_id: "seen"}});
 
-      assert.deepEqual(feed.store.dispatch.firstCall.args[0].data.spocs, result);
+      assert.deepEqual(feed.store.dispatch.secondCall.args[0].data.spocs, result);
     });
   });
 
@@ -1063,12 +1088,12 @@ describe("DiscoveryStreamFeed", () => {
       feed._prefCache = {};
       setPref(CONFIG_PREF_NAME, {enabled: true});
 
-      sandbox.stub(feed, "clearCache").returns(Promise.resolve());
+      sandbox.stub(feed, "resetCache").returns(Promise.resolve());
       sandbox.stub(feed, "loadLayout").returns(Promise.resolve());
       await feed.onAction({type: at.DISCOVERY_STREAM_CONFIG_CHANGE});
 
       assert.calledOnce(feed.loadLayout);
-      assert.calledOnce(feed.clearCache);
+      assert.calledOnce(feed.resetCache);
       assert.isTrue(feed.loaded);
     });
     it("should clear the cache if a config change happens and config.enabled is true", async () => {
@@ -1077,10 +1102,23 @@ describe("DiscoveryStreamFeed", () => {
       feed._prefCache = {};
       setPref(CONFIG_PREF_NAME, {enabled: true});
 
-      sandbox.stub(feed, "clearCache").returns(Promise.resolve());
+      sandbox.stub(feed, "resetCache").returns(Promise.resolve());
       await feed.onAction({type: at.DISCOVERY_STREAM_CONFIG_CHANGE});
 
-      assert.calledOnce(feed.clearCache);
+      assert.calledOnce(feed.resetCache);
+    });
+    it("should dispatch DISCOVERY_STREAM_LAYOUT_RESET from DISCOVERY_STREAM_CONFIG_CHANGE", async () => {
+      sandbox.stub(feed, "resetImpressionPrefs");
+      sandbox.stub(feed, "resetCache").resolves();
+      sandbox.stub(feed, "enable").resolves();
+      setPref(CONFIG_PREF_NAME, {enabled: true});
+      sandbox.spy(feed.store, "dispatch");
+
+      await feed.onAction({type: at.DISCOVERY_STREAM_CONFIG_CHANGE});
+
+      assert.calledWithMatch(feed.store.dispatch, {
+        type: at.DISCOVERY_STREAM_LAYOUT_RESET,
+      });
     });
     it("should not call this.loadLayout if config.enabled changes to false", async () => {
       sandbox.stub(feed.cache, "set").returns(Promise.resolve());
@@ -1093,12 +1131,12 @@ describe("DiscoveryStreamFeed", () => {
 
       feed._prefCache = {};
       setPref(CONFIG_PREF_NAME, {enabled: false});
-      sandbox.stub(feed, "clearCache").returns(Promise.resolve());
+      sandbox.stub(feed, "resetCache").returns(Promise.resolve());
       sandbox.stub(feed, "loadLayout").returns(Promise.resolve());
       await feed.onAction({type: at.DISCOVERY_STREAM_CONFIG_CHANGE});
 
       assert.notCalled(feed.loadLayout);
-      assert.calledOnce(feed.clearCache);
+      assert.calledOnce(feed.resetCache);
       assert.isFalse(feed.loaded);
     });
   });
@@ -1339,7 +1377,7 @@ describe("DiscoveryStreamFeed", () => {
       feed.loadComponentFeeds.rejects("loadComponentFeeds error");
       feed.loadSpocs.rejects("loadSpocs error");
 
-      await feed.refreshAll();
+      await feed.enable();
 
       assert.isTrue(feed.loaded);
     });
@@ -1496,6 +1534,81 @@ describe("DiscoveryStreamFeed", () => {
       assert.equal(action.data.event, "DS_FEED_TOTAL_REQUEST_TIME");
       assert.equal(action.data.value, 5000);
       feed.loaded = true;
+    });
+  });
+
+  describe("#loadAffinityScoresCache", () => {
+    it("should create an affinity provider from cached affinities", async () => {
+      feed._prefCache.config = {
+        personalized: true,
+      };
+      const fakeCache = {
+        affinities: {
+          scores: 123,
+          _timestamp: 456,
+        },
+      };
+      sandbox.stub(feed.cache, "get").returns(Promise.resolve(fakeCache));
+
+      await feed.loadAffinityScoresCache();
+
+      assert.equal(feed.domainAffinitiesLastUpdated, 456);
+    });
+  });
+
+  describe("#updateDomainAffinityScores", () => {
+    it("should update affinity provider on idle daily", async () => {
+      feed._prefCache.config = {
+        personalized: true,
+      };
+      feed.affinities = {
+        parameterSets: {
+          default: {},
+        },
+        maxHistoryQueryResults: 1000,
+        timeSegments: [],
+        version: "123",
+      };
+
+      feed.observe(null, "idle-daily");
+
+      assert.equal(feed.affinityProvider.version, "123");
+    });
+    it("should not update affinity provider on idle daily", async () => {
+      feed._prefCache.config = {
+        personalized: false,
+      };
+
+      feed.observe(null, "idle-daily");
+
+      assert.isTrue(!feed.affinityProvider);
+    });
+  });
+
+  describe("#scoreItems", () => {
+    it("should use personalized score with affinity provider", () => {
+      const item = {};
+      feed._prefCache.config = {
+        personalized: true,
+      };
+      feed.affinityProvider = {
+        calculateItemRelevanceScore: () => 0.5,
+      };
+      const result = feed.scoreItems(item);
+      assert.equal(result.score, 0.5);
+    });
+    it("should use item_score score without affinity provider score", () => {
+      const item = {
+        item_score: 0.6,
+      };
+      feed._prefCache.config = {
+        personalized: true,
+      };
+      feed.affinityProvider = {
+        calculateItemRelevanceScore: () => {},
+      };
+      const result = feed.scoreItems(item);
+      assert.equal(result.score, 0.6);
     });
   });
 });

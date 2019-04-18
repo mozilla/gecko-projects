@@ -20,6 +20,7 @@
 #include "SVGContentUtils.h"
 #include "SVGGeometryFrame.h"
 #include "SVGImageContext.h"
+#include "mozilla/PresShell.h"
 #include "mozilla/dom/MutationEventBinding.h"
 #include "mozilla/dom/SVGImageElement.h"
 #include "nsIReflowCallback.h"
@@ -36,7 +37,7 @@ NS_QUERYFRAME_HEAD(nsSVGImageFrame)
   NS_QUERYFRAME_ENTRY(nsSVGImageFrame)
 NS_QUERYFRAME_TAIL_INHERITING(SVGGeometryFrame)
 
-nsIFrame* NS_NewSVGImageFrame(nsIPresShell* aPresShell, ComputedStyle* aStyle) {
+nsIFrame* NS_NewSVGImageFrame(PresShell* aPresShell, ComputedStyle* aStyle) {
   return new (aPresShell) nsSVGImageFrame(aStyle, aPresShell->GetPresContext());
 }
 
@@ -417,9 +418,8 @@ void nsSVGImageFrame::ReflowSVG() {
     SVGObserverUtils::UpdateEffects(this);
 
     if (!mReflowCallbackPosted) {
-      nsIPresShell* shell = PresShell();
       mReflowCallbackPosted = true;
-      shell->PostReflowCallback(this);
+      PresShell()->PostReflowCallback(this);
     }
   }
 

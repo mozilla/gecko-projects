@@ -19,12 +19,13 @@ class CompositorController {
   NS_INLINE_DECL_PURE_VIRTUAL_REFCOUNTING
 
   virtual void ScheduleRenderOnCompositorThread(
-      const Maybe<wr::RenderRoot>& aRenderRootid = Nothing()) = 0;
+      const nsTArray<wr::RenderRoot>& aRenderRoots =
+          nsTArray<wr::RenderRoot>()) = 0;
   virtual void ScheduleHideAllPluginWindows() = 0;
   virtual void ScheduleShowAllPluginWindows() = 0;
 
  protected:
-  virtual ~CompositorController() {}
+  virtual ~CompositorController() = default;
 };
 
 }  // namespace layers

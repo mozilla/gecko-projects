@@ -24,7 +24,7 @@
 using namespace mozilla;
 using namespace mozilla::layout;
 
-nsFirstLetterFrame* NS_NewFirstLetterFrame(nsIPresShell* aPresShell,
+nsFirstLetterFrame* NS_NewFirstLetterFrame(PresShell* aPresShell,
                                            ComputedStyle* aStyle) {
   return new (aPresShell)
       nsFirstLetterFrame(aStyle, aPresShell->GetPresContext());
@@ -153,7 +153,7 @@ void nsFirstLetterFrame::Reflow(nsPresContext* aPresContext,
 
   nsIFrame* kid = mFrames.FirstChild();
 
-  // Setup reflow state for our child
+  // Setup reflow input for our child
   WritingMode wm = aReflowInput.GetWritingMode();
   LogicalSize availSize = aReflowInput.AvailableSize();
   const LogicalMargin& bp = aReflowInput.ComputedLogicalBorderPadding();

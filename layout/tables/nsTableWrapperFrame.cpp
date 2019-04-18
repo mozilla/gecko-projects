@@ -5,10 +5,11 @@
 
 #include "nsTableWrapperFrame.h"
 
+#include "mozilla/ComputedStyle.h"
+#include "mozilla/PresShell.h"
 #include "nsFrameManager.h"
 #include "nsTableFrame.h"
 #include "nsTableCellFrame.h"
-#include "mozilla/ComputedStyle.h"
 #include "nsStyleConsts.h"
 #include "nsPresContext.h"
 #include "nsCSSRendering.h"
@@ -16,7 +17,6 @@
 #include "prinrval.h"
 #include "nsGkAtoms.h"
 #include "nsHTMLParts.h"
-#include "nsIPresShell.h"
 #include "nsIServiceManager.h"
 #include "nsDisplayList.h"
 #include "nsLayoutUtils.h"
@@ -262,11 +262,11 @@ void nsTableWrapperFrame::GetChildMargin(nsPresContext* aPresContext,
   NS_ASSERTION(!aChildFrame->IsTableCaption(),
                "didn't expect caption frame; writing-mode may be wrong!");
 
-  // construct a reflow state to compute margin and padding. Auto margins
+  // construct a reflow input to compute margin and padding. Auto margins
   // will not be computed at this time.
 
-  // create and init the child reflow state
-  // XXX We really shouldn't construct a reflow state to do this.
+  // create and init the child reflow input
+  // XXX We really shouldn't construct a reflow input to do this.
   WritingMode wm = aOuterRI.GetWritingMode();
   LogicalSize availSize(wm, aAvailISize, aOuterRI.AvailableSize(wm).BSize(wm));
   ReflowInput childRI(aPresContext, aOuterRI, aChildFrame, availSize, nullptr,
@@ -733,7 +733,7 @@ void nsTableWrapperFrame::OuterBeginReflowChild(nsPresContext* aPresContext,
     }
   }
   LogicalSize availSize(wm, aAvailISize, availBSize);
-  // create and init the child reflow state, using passed-in Maybe<>,
+  // create and init the child reflow input, using passed-in Maybe<>,
   // so that caller can use it after we return.
   aChildRI.emplace(aPresContext, aOuterRI, aChildFrame, availSize, nullptr,
                    ReflowInput::CALLER_WILL_INIT);
@@ -1008,7 +1008,7 @@ nsIContent* nsTableWrapperFrame::GetCellAt(uint32_t aRowIdx,
   return cell->GetContent();
 }
 
-nsTableWrapperFrame* NS_NewTableWrapperFrame(nsIPresShell* aPresShell,
+nsTableWrapperFrame* NS_NewTableWrapperFrame(PresShell* aPresShell,
                                              ComputedStyle* aStyle) {
   return new (aPresShell)
       nsTableWrapperFrame(aStyle, aPresShell->GetPresContext());

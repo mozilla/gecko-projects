@@ -202,13 +202,25 @@ nsStyleMargin::nsStyleMargin(const nsStyleMargin& aSrc)
 
 nsChangeHint nsStyleMargin::CalcDifference(
     const nsStyleMargin& aNewData) const {
-  if (mMargin == aNewData.mMargin) {
+  if (mMargin == aNewData.mMargin && mScrollMargin == aNewData.mScrollMargin) {
     return nsChangeHint(0);
   }
-  // Margin differences can't affect descendant intrinsic sizes and
-  // don't need to force children to reflow.
-  return nsChangeHint_NeedReflow | nsChangeHint_ReflowChangesSizeOrPosition |
-         nsChangeHint_ClearAncestorIntrinsics;
+
+  nsChangeHint hint = nsChangeHint(0);
+
+  if (mMargin != aNewData.mMargin) {
+    // Margin differences can't affect descendant intrinsic sizes and
+    // don't need to force children to reflow.
+    hint |= nsChangeHint_NeedReflow | nsChangeHint_ReflowChangesSizeOrPosition |
+            nsChangeHint_ClearAncestorIntrinsics;
+  }
+
+  if (mScrollMargin != aNewData.mScrollMargin) {
+    // FIXME: Bug 1530253 Support re-snapping when scroll-margin changes.
+    hint |= nsChangeHint_NeutralChange;
+  }
+
+  return hint;
 }
 
 nsStylePadding::nsStylePadding(const Document& aDocument)
@@ -224,18 +236,31 @@ nsStylePadding::nsStylePadding(const nsStylePadding& aSrc)
 
 nsChangeHint nsStylePadding::CalcDifference(
     const nsStylePadding& aNewData) const {
-  if (mPadding == aNewData.mPadding) {
+  if (mPadding == aNewData.mPadding &&
+      mScrollPadding == aNewData.mScrollPadding) {
     return nsChangeHint(0);
   }
-  // Padding differences can't affect descendant intrinsic sizes, but do need
-  // to force children to reflow so that we can reposition them, since their
-  // offsets are from our frame bounds but our content rect's position within
-  // those bounds is moving.
-  // FIXME: It would be good to return a weaker hint here that doesn't
-  // force reflow of all descendants, but the hint would need to force
-  // reflow of the frame's children (see how
-  // ReflowInput::InitResizeFlags initializes the inline-resize flag).
-  return NS_STYLE_HINT_REFLOW & ~nsChangeHint_ClearDescendantIntrinsics;
+
+  nsChangeHint hint = nsChangeHint(0);
+
+  if (mPadding != aNewData.mPadding) {
+    // Padding differences can't affect descendant intrinsic sizes, but do need
+    // to force children to reflow so that we can reposition them, since their
+    // offsets are from our frame bounds but our content rect's position within
+    // those bounds is moving.
+    // FIXME: It would be good to return a weaker hint here that doesn't
+    // force reflow of all descendants, but the hint would need to force
+    // reflow of the frame's children (see how
+    // ReflowInput::InitResizeFlags initializes the inline-resize flag).
+    hint |= NS_STYLE_HINT_REFLOW & ~nsChangeHint_ClearDescendantIntrinsics;
+  }
+
+  if (mScrollPadding != aNewData.mScrollPadding) {
+    // FIXME: Bug 1530253 Support re-snapping when scroll-padding changes.
+    hint |= nsChangeHint_NeutralChange;
+  }
+
+  return hint;
 }
 
 static nscoord TwipsPerPixel(const Document& aDocument) {
@@ -259,10 +284,10 @@ nsStyleBorder::nsStyleBorder(const Document& aDocument)
       mBorderImageRepeatV(StyleBorderImageRepeat::Stretch),
       mFloatEdge(StyleFloatEdge::ContentBox),
       mBoxDecorationBreak(StyleBoxDecorationBreak::Slice),
-      mBorderTopColor(StyleComplexColor::CurrentColor()),
-      mBorderRightColor(StyleComplexColor::CurrentColor()),
-      mBorderBottomColor(StyleComplexColor::CurrentColor()),
-      mBorderLeftColor(StyleComplexColor::CurrentColor()),
+      mBorderTopColor(StyleColor::CurrentColor()),
+      mBorderRightColor(StyleColor::CurrentColor()),
+      mBorderBottomColor(StyleColor::CurrentColor()),
+      mBorderLeftColor(StyleColor::CurrentColor()),
       mComputedBorder(0, 0, 0, 0),
       mTwipsPerPixel(TwipsPerPixel(aDocument)) {
   MOZ_COUNT_CTOR(nsStyleBorder);
@@ -405,8 +430,8 @@ nsChangeHint nsStyleBorder::CalcDifference(
 nsStyleOutline::nsStyleOutline(const Document& aDocument)
     : mOutlineRadius(ZeroBorderRadius()),
       mOutlineWidth(kMediumBorderWidth),
-      mOutlineOffset(0),
-      mOutlineColor(StyleComplexColor::CurrentColor()),
+      mOutlineOffset({0.0f}),
+      mOutlineColor(StyleColor::CurrentColor()),
       mOutlineStyle(StyleOutlineStyle::BorderStyle(StyleBorderStyle::None)),
       mActualOutlineWidth(0),
       mTwipsPerPixel(TwipsPerPixel(aDocument)) {
@@ -588,8 +613,8 @@ nsChangeHint nsStyleXUL::CalcDifference(const nsStyleXUL& aNewData) const {
 /* static */ const uint32_t nsStyleColumn::kColumnCountAuto;
 
 nsStyleColumn::nsStyleColumn(const Document& aDocument)
-    : mColumnWidth(eStyleUnit_Auto),
-      mColumnRuleColor(StyleComplexColor::CurrentColor()),
+    : mColumnWidth(LengthOrAuto::Auto()),
+      mColumnRuleColor(StyleColor::CurrentColor()),
       mColumnRuleStyle(StyleBorderStyle::None),
       mColumnRuleWidth(kMediumBorderWidth),
       mTwipsPerPixel(TwipsPerPixel(aDocument)) {
@@ -612,8 +637,7 @@ nsStyleColumn::nsStyleColumn(const nsStyleColumn& aSource)
 
 nsChangeHint nsStyleColumn::CalcDifference(
     const nsStyleColumn& aNewData) const {
-  if ((mColumnWidth.GetUnit() == eStyleUnit_Auto) !=
-          (aNewData.mColumnWidth.GetUnit() == eStyleUnit_Auto) ||
+  if (mColumnWidth.IsAuto() != aNewData.mColumnWidth.IsAuto() ||
       mColumnCount != aNewData.mColumnCount ||
       mColumnSpan != aNewData.mColumnSpan) {
     // We force column count changes to do a reframe, because it's tricky to
@@ -1067,9 +1091,9 @@ void nsStyleFilter::SetDropShadow(nsCSSShadowArray* aDropShadow) {
 //
 nsStyleSVGReset::nsStyleSVGReset(const Document& aDocument)
     : mMask(nsStyleImageLayers::LayerType::Mask),
-      mStopColor(StyleComplexColor::Black()),
-      mFloodColor(StyleComplexColor::Black()),
-      mLightingColor(StyleComplexColor::White()),
+      mStopColor(StyleColor::Black()),
+      mFloodColor(StyleColor::Black()),
+      mLightingColor(StyleColor::White()),
       mStopOpacity(1.0f),
       mFloodOpacity(1.0f),
       mDominantBaseline(NS_STYLE_DOMINANT_BASELINE_AUTO),
@@ -1176,10 +1200,10 @@ bool nsStyleSVGReset::HasMask() const {
 
 // nsStyleSVGPaint implementation
 nsStyleSVGPaint::nsStyleSVGPaint(nsStyleSVGPaintType aType)
-    : mPaint(StyleComplexColor::Black()),
+    : mPaint(StyleColor::Black()),
       mType(aType),
       mFallbackType(eStyleSVGFallbackType_NotSet),
-      mFallbackColor(StyleComplexColor::Black()) {
+      mFallbackColor(StyleColor::Black()) {
   MOZ_ASSERT(aType == nsStyleSVGPaintType(0) ||
              aType == eStyleSVGPaintType_None ||
              aType == eStyleSVGPaintType_Color);
@@ -1197,7 +1221,7 @@ void nsStyleSVGPaint::Reset() {
     case eStyleSVGPaintType_None:
       break;
     case eStyleSVGPaintType_Color:
-      mPaint.mColor = StyleComplexColor::Black();
+      mPaint.mColor = StyleColor::Black();
       break;
     case eStyleSVGPaintType_Server:
       mPaint.mPaintServer->Release();
@@ -1206,7 +1230,7 @@ void nsStyleSVGPaint::Reset() {
     case eStyleSVGPaintType_ContextFill:
     case eStyleSVGPaintType_ContextStroke:
       mFallbackType = eStyleSVGFallbackType_NotSet;
-      mFallbackColor = StyleComplexColor::Black();
+      mFallbackColor = StyleColor::Black();
       break;
   }
   mType = nsStyleSVGPaintType(0);
@@ -1249,7 +1273,7 @@ void nsStyleSVGPaint::SetNone() {
 
 void nsStyleSVGPaint::SetContextValue(nsStyleSVGPaintType aType,
                                       nsStyleSVGFallbackType aFallbackType,
-                                      StyleComplexColor aFallbackColor) {
+                                      StyleColor aFallbackColor) {
   MOZ_ASSERT(aType == eStyleSVGPaintType_ContextFill ||
              aType == eStyleSVGPaintType_ContextStroke);
   Reset();
@@ -1258,7 +1282,7 @@ void nsStyleSVGPaint::SetContextValue(nsStyleSVGPaintType aType,
   mFallbackColor = aFallbackColor;
 }
 
-void nsStyleSVGPaint::SetColor(StyleComplexColor aColor) {
+void nsStyleSVGPaint::SetColor(StyleColor aColor) {
   Reset();
   mType = eStyleSVGPaintType_Color;
   mPaint.mColor = aColor;
@@ -1266,7 +1290,7 @@ void nsStyleSVGPaint::SetColor(StyleComplexColor aColor) {
 
 void nsStyleSVGPaint::SetPaintServer(css::URLValue* aPaintServer,
                                      nsStyleSVGFallbackType aFallbackType,
-                                     StyleComplexColor aFallbackColor) {
+                                     StyleColor aFallbackColor) {
   MOZ_ASSERT(aPaintServer);
   Reset();
   mType = eStyleSVGPaintType_Server;
@@ -1331,8 +1355,8 @@ nsStylePosition::nsStylePosition(const Document& aDocument)
       mFlexGrow(0.0f),
       mFlexShrink(1.0f),
       mZIndex(StyleZIndex::Auto()),
-      mColumnGap(eStyleUnit_Normal),
-      mRowGap(eStyleUnit_Normal) {
+      mColumnGap(NonNegativeLengthPercentageOrNormal::Normal()),
+      mRowGap(NonNegativeLengthPercentageOrNormal::Normal()) {
   MOZ_COUNT_CTOR(nsStylePosition);
 
   // The initial value of grid-auto-columns and grid-auto-rows is 'auto',
@@ -1673,8 +1697,9 @@ nsChangeHint nsStyleTableBorder::CalcDifference(
 // nsStyleColor
 //
 
-static nscolor DefaultColor(const Document& aDocument) {
-  return PreferenceSheet::PrefsFor(aDocument).mDefaultColor;
+static StyleRGBA DefaultColor(const Document& aDocument) {
+  return StyleRGBA::FromColor(
+      PreferenceSheet::PrefsFor(aDocument).mDefaultColor);
 }
 
 nsStyleColor::nsStyleColor(const Document& aDocument)
@@ -2801,7 +2826,7 @@ nsChangeHint nsStyleImageLayers::Layer::CalcDifference(
 
 nsStyleBackground::nsStyleBackground(const Document& aDocument)
     : mImage(nsStyleImageLayers::LayerType::Background),
-      mBackgroundColor(StyleComplexColor::Transparent()) {
+      mBackgroundColor(StyleColor::Transparent()) {
   MOZ_COUNT_CTOR(nsStyleBackground);
 }
 
@@ -2846,9 +2871,8 @@ nscolor nsStyleBackground::BackgroundColor(const nsIFrame* aFrame) const {
   return mBackgroundColor.CalcColor(aFrame);
 }
 
-nscolor nsStyleBackground::BackgroundColor(
-    mozilla::ComputedStyle* aStyle) const {
-  return mBackgroundColor.CalcColor(aStyle);
+nscolor nsStyleBackground::BackgroundColor(ComputedStyle* aStyle) const {
+  return mBackgroundColor.CalcColor(*aStyle);
 }
 
 bool nsStyleBackground::IsTransparent(const nsIFrame* aFrame) const {
@@ -2940,8 +2964,8 @@ nsStyleDisplay::nsStyleDisplay(const Document& aDocument)
       mOverscrollBehaviorX(StyleOverscrollBehavior::Auto),
       mOverscrollBehaviorY(StyleOverscrollBehavior::Auto),
       mOverflowAnchor(StyleOverflowAnchor::Auto),
-      mScrollSnapTypeX(StyleScrollSnapType::None),
-      mScrollSnapTypeY(StyleScrollSnapType::None),
+      mScrollSnapType(
+          {StyleScrollSnapAxis::Both, StyleScrollSnapStrictness::None}),
       mScrollSnapPointsX(eStyleUnit_None),
       mScrollSnapPointsY(eStyleUnit_None),
       mScrollSnapDestination(
@@ -3005,8 +3029,7 @@ nsStyleDisplay::nsStyleDisplay(const nsStyleDisplay& aSource)
       mScrollBehavior(aSource.mScrollBehavior),
       mOverscrollBehaviorX(aSource.mOverscrollBehaviorX),
       mOverscrollBehaviorY(aSource.mOverscrollBehaviorY),
-      mScrollSnapTypeX(aSource.mScrollSnapTypeX),
-      mScrollSnapTypeY(aSource.mScrollSnapTypeY),
+      mScrollSnapType(aSource.mScrollSnapType),
       mScrollSnapPointsX(aSource.mScrollSnapPointsX),
       mScrollSnapPointsY(aSource.mScrollSnapPointsY),
       mScrollSnapDestination(aSource.mScrollSnapDestination),
@@ -3146,8 +3169,7 @@ nsChangeHint nsStyleDisplay::CalcDifference(
       mContain != aNewData.mContain ||
       (mFloat == StyleFloat::None) != (aNewData.mFloat == StyleFloat::None) ||
       mScrollBehavior != aNewData.mScrollBehavior ||
-      mScrollSnapTypeX != aNewData.mScrollSnapTypeX ||
-      mScrollSnapTypeY != aNewData.mScrollSnapTypeY ||
+      mScrollSnapType != aNewData.mScrollSnapType ||
       mScrollSnapPointsX != aNewData.mScrollSnapPointsX ||
       mScrollSnapPointsY != aNewData.mScrollSnapPointsY ||
       mScrollSnapDestination != aNewData.mScrollSnapDestination ||
@@ -3166,6 +3188,11 @@ nsChangeHint nsStyleDisplay::CalcDifference(
     // nsTextControlFrame instead of nsNumberControlFrame if the author
     // specifies 'textfield'.
     return nsChangeHint_ReconstructFrame;
+  }
+
+  if (mScrollSnapAlign != aNewData.mScrollSnapAlign) {
+    // FIXME: Bug 1530253 Support re-snapping when scroll-snap-align changes.
+    hint |= nsChangeHint_NeutralChange;
   }
 
   if (mOverflowX != aNewData.mOverflowX || mOverflowY != aNewData.mOverflowY) {
@@ -3648,7 +3675,7 @@ nsStyleTextReset::nsStyleTextReset(const Document& aDocument)
       mUnicodeBidi(NS_STYLE_UNICODE_BIDI_NORMAL),
       mInitialLetterSink(0),
       mInitialLetterSize(0.0f),
-      mTextDecorationColor(StyleComplexColor::CurrentColor()) {
+      mTextDecorationColor(StyleColor::CurrentColor()) {
   MOZ_COUNT_CTOR(nsStyleTextReset);
 }
 
@@ -3717,10 +3744,10 @@ static bool AreShadowArraysEqual(nsCSSShadowArray* lhs, nsCSSShadowArray* rhs) {
 //
 
 nsStyleText::nsStyleText(const Document& aDocument)
-    : mTextAlign(NS_STYLE_TEXT_ALIGN_START),
+    : mTextTransform(StyleTextTransform::None()),
+      mTextAlign(NS_STYLE_TEXT_ALIGN_START),
       mTextAlignLast(NS_STYLE_TEXT_ALIGN_AUTO),
       mTextJustify(StyleTextJustify::Auto),
-      mTextTransform(NS_STYLE_TEXT_TRANSFORM_NONE),
       mWhiteSpace(StyleWhiteSpace::Normal),
       mHyphens(StyleHyphens::Manual),
       mRubyAlign(NS_STYLE_RUBY_ALIGN_SPACE_AROUND),
@@ -3731,9 +3758,9 @@ nsStyleText::nsStyleText(const Document& aDocument)
           nsLayoutUtils::ControlCharVisibilityDefault()),
       mTextEmphasisStyle(NS_STYLE_TEXT_EMPHASIS_STYLE_NONE),
       mTextRendering(StyleTextRendering::Auto),
-      mTextEmphasisColor(StyleComplexColor::CurrentColor()),
-      mWebkitTextFillColor(StyleComplexColor::CurrentColor()),
-      mWebkitTextStrokeColor(StyleComplexColor::CurrentColor()),
+      mTextEmphasisColor(StyleColor::CurrentColor()),
+      mWebkitTextFillColor(StyleColor::CurrentColor()),
+      mWebkitTextStrokeColor(StyleColor::CurrentColor()),
       mMozTabSize(
           StyleNonNegativeLengthOrNumber::Number(NS_STYLE_TABSIZE_INITIAL)),
       mWordSpacing(LengthPercentage::Zero()),
@@ -3751,10 +3778,10 @@ nsStyleText::nsStyleText(const Document& aDocument)
 }
 
 nsStyleText::nsStyleText(const nsStyleText& aSource)
-    : mTextAlign(aSource.mTextAlign),
+    : mTextTransform(aSource.mTextTransform),
+      mTextAlign(aSource.mTextAlign),
       mTextAlignLast(aSource.mTextAlignLast),
       mTextJustify(aSource.mTextJustify),
-      mTextTransform(aSource.mTextTransform),
       mWhiteSpace(aSource.mWhiteSpace),
       mWordBreak(aSource.mWordBreak),
       mOverflowWrap(aSource.mOverflowWrap),
@@ -3918,9 +3945,8 @@ nsStyleUI::nsStyleUI(const Document& aDocument)
       mUserFocus(StyleUserFocus::None),
       mPointerEvents(NS_STYLE_POINTER_EVENTS_AUTO),
       mCursor(StyleCursorKind::Auto),
-      mCaretColor(StyleComplexColor::Auto()),
-      mScrollbarFaceColor(StyleComplexColor::Auto()),
-      mScrollbarTrackColor(StyleComplexColor::Auto()) {
+      mCaretColor(StyleColorOrAuto::Auto()),
+      mScrollbarColor(StyleScrollbarColor::Auto()) {
   MOZ_COUNT_CTOR(nsStyleUI);
 }
 
@@ -3932,8 +3958,7 @@ nsStyleUI::nsStyleUI(const nsStyleUI& aSource)
       mCursor(aSource.mCursor),
       mCursorImages(aSource.mCursorImages),
       mCaretColor(aSource.mCaretColor),
-      mScrollbarFaceColor(aSource.mScrollbarFaceColor),
-      mScrollbarTrackColor(aSource.mScrollbarTrackColor) {
+      mScrollbarColor(aSource.mScrollbarColor) {
   MOZ_COUNT_CTOR(nsStyleUI);
 }
 
@@ -3995,8 +4020,7 @@ nsChangeHint nsStyleUI::CalcDifference(const nsStyleUI& aNewData) const {
   }
 
   if (mCaretColor != aNewData.mCaretColor ||
-      mScrollbarFaceColor != aNewData.mScrollbarFaceColor ||
-      mScrollbarTrackColor != aNewData.mScrollbarTrackColor) {
+      mScrollbarColor != aNewData.mScrollbarColor) {
     hint |= nsChangeHint_RepaintFrame;
   }
 

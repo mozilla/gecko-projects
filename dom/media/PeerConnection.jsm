@@ -36,8 +36,6 @@ const PC_TRANSCEIVER_CID = Components.ID("{09475754-103a-41f5-a2d0-e1f27eb0b537}
 const PC_COREQUEST_CID = Components.ID("{74b2122d-65a8-4824-aa9e-3d664cb75dc2}");
 const PC_DTMF_SENDER_CID = Components.ID("{3610C242-654E-11E6-8EC0-6D1BE389A607}");
 
-const TELEMETRY_PC_CONNECTED = "webrtc.peerconnection.connected";
-const TELEMETRY_PC_PROMISE_GETSTATS = "webrtc.peerconnection.promise_stats_used";
 function logMsg(msg, file, line, flag, winID) {
   let scriptErrorClass = Cc["@mozilla.org/scripterror;1"];
   let scriptError = scriptErrorClass.createInstance(Ci.nsIScriptError);
@@ -313,17 +311,54 @@ setupPrototype(RTCStatsReport, {
   QueryInterface: ChromeUtils.generateQI([]),
 });
 
-// This is its own class so that it does not need to be exposed to the client.
+// Records PC related telemetry
 class PeerConnectionTelemetry {
   // Record which style(s) of invocation for getStats are used
   recordGetStats() {
-    Services.telemetry.scalarAdd(TELEMETRY_PC_PROMISE_GETSTATS, 1);
+    Services.telemetry.scalarAdd("webrtc.peerconnection.promise_stats_used",
+                                 1);
     this.recordGetStats = () => {};
   }
   // ICE connection state enters connected or completed.
   recordConnected() {
-    Services.telemetry.scalarAdd(TELEMETRY_PC_CONNECTED, 1);
+    Services.telemetry.scalarAdd("webrtc.peerconnection.connected", 1);
     this.recordConnected = () => {};
+  }
+  // DataChannel is created
+  _recordDataChannelCreated() {
+    Services.telemetry.scalarAdd("webrtc.peerconnection.datachannel_created",
+                                 1);
+    this._recordDataChannelCreated = () => {};
+  }
+  // DataChannel initialized with maxRetransmitTime
+  _recordMaxRetransmitTime(maxRetransmitTime) {
+    if (maxRetransmitTime === undefined) {
+      return false;
+    }
+    Services.telemetry.scalarAdd(
+      "webrtc.peerconnection.datachannel_max_retx_used", 1);
+    this._recordMaxRetransmitTime = () => true;
+    return true;
+  }
+  // DataChannel initialized with maxPacketLifeTime
+  _recordMaxPacketLifeTime(maxPacketLifeTime) {
+    if (maxPacketLifeTime === undefined) {
+      return false;
+    }
+    Services.telemetry.scalarAdd(
+      "webrtc.peerconnection.datachannel_max_life_used", 1);
+    this._recordMaxPacketLifeTime = () => true;
+    return true;
+  }
+  // DataChannel initialized
+  recordDataChannelInit(maxRetransmitTime, maxPacketLifeTime) {
+    const retxUsed = this._recordMaxRetransmitTime(maxRetransmitTime);
+    if (this._recordMaxPacketLifeTime(maxPacketLifeTime) && retxUsed) {
+      Services.telemetry.scalarAdd(
+        "webrtc.peerconnection.datachannel_max_retx_and_life_used", 1);
+      this.recordDataChannelInit = () => {};
+    }
+    this._recordDataChannelCreated();
   }
 }
 
@@ -1173,7 +1208,8 @@ class RTCPeerConnection {
     sender.checkWasCreatedByPc(this.__DOM_IMPL__);
 
     let transceiver =
-      this._transceivers.find(transceiver => transceiver.sender == sender);
+      this._transceivers.find(transceiver =>
+        !transceiver.stopped && transceiver.sender == sender);
 
     // If the transceiver was removed due to rollback, let it slide.
     if (!transceiver || !sender.track) {
@@ -1569,19 +1605,34 @@ class RTCPeerConnection {
   }
 
   createDataChannel(label, {
-                      maxRetransmits, ordered, negotiated, id = 0xFFFF,
-                      maxRetransmitTime, maxPacketLifeTime = maxRetransmitTime,
+                      maxRetransmits, ordered, negotiated, id = null,
+                      maxRetransmitTime, maxPacketLifeTime,
                       protocol,
                     } = {}) {
     this._checkClosed();
+    this._pcTelemetry.recordDataChannelInit(maxRetransmitTime, maxPacketLifeTime);
+
+    if (maxPacketLifeTime === undefined) {
+      maxPacketLifeTime = maxRetransmitTime;
+    }
 
     if (maxRetransmitTime !== undefined) {
       this.logWarning("Use maxPacketLifeTime instead of deprecated maxRetransmitTime which will stop working soon in createDataChannel!");
+    }
+    if (!negotiated) {
+      id = null;
+    } else if (id === null) {
+      throw new this._win.DOMException(
+          "id is required when negotiated is true", "TypeError");
     }
     if (maxPacketLifeTime !== undefined && maxRetransmits !== undefined) {
       throw new this._win.DOMException(
           "Both maxPacketLifeTime and maxRetransmits cannot be provided",
           "InvalidParameterError");
+    }
+    if (id == 65535) {
+      throw new this._win.DOMException(
+          "id cannot be 65535", "TypeError");
     }
     // Must determine the type where we still know if entries are undefined.
     let type;

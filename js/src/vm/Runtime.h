@@ -41,6 +41,7 @@
 #include "js/UniquePtr.h"
 #include "js/Utility.h"
 #include "js/Vector.h"
+#include "js/Warnings.h"  // JS::WarningReporter
 #include "threading/Thread.h"
 #include "vm/Caches.h"
 #include "vm/CodeCoverage.h"
@@ -643,7 +644,7 @@ struct JSRuntime : public js::MallocProvider<JSRuntime> {
   js::WriteOnceData<js::PropertyName*> emptyString;
 
  private:
-  js::WriteOnceData<js::FreeOp*> defaultFreeOp_;
+  js::MainThreadData<js::FreeOp*> defaultFreeOp_;
 
  public:
   js::FreeOp* defaultFreeOp() {

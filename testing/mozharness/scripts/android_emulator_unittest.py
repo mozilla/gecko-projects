@@ -81,11 +81,25 @@ class AndroidEmulatorTest(TestingMixin, BaseScript, MozbaseMixin, CodeCoverageMi
          "help": "Set log level (debug|info|warning|error|critical|fatal)",
          }
     ], [
-        ['--e10s', ],
-        {"action": "store_true",
+        ['--disable-e10s', ],
+        {"action": "store_false",
          "dest": "e10s",
+         "default": True,
+         "help": "Run tests without multiple processes (e10s).",
+         }
+    ], [
+        ['--enable-webrender'],
+        {"action": "store_true",
+         "dest": "enable_webrender",
          "default": False,
-         "help": "Run tests with multiple processes.",
+         "help": "Run with WebRender enabled.",
+         }
+    ], [
+        ['--disable-webrender'],
+        {"action": "store_true",
+         "dest": "disable_webrender",
+         "default": False,
+         "help": "Run with WebRender force-disabled.",
          }
     ]] + copy.deepcopy(testing_config_options) + \
         copy.deepcopy(code_coverage_config_options)
@@ -134,6 +148,12 @@ class AndroidEmulatorTest(TestingMixin, BaseScript, MozbaseMixin, CodeCoverageMi
         self.log_raw_level = c.get('log_raw_level')
         self.log_tbpl_level = c.get('log_tbpl_level')
         self.e10s = c.get('e10s')
+        self.enable_webrender = c.get('enable_webrender')
+        self.disable_webrender = c.get('disable_webrender')
+        if self.enable_webrender:
+            # AndroidMixin uses this when launching the emulator. We only want
+            # GLES3 if we're running WebRender
+            self.use_gles3 = True
 
     def query_abs_dirs(self):
         if self.abs_dirs:
@@ -176,6 +196,13 @@ class AndroidEmulatorTest(TestingMixin, BaseScript, MozbaseMixin, CodeCoverageMi
         except Exception:
             test_dir = test_suite
         return os.path.join(dirs['abs_test_install_dir'], test_dir)
+
+    def _get_mozharness_test_paths(self, suite):
+        test_paths = os.environ.get('MOZHARNESS_TEST_PATHS')
+        if not test_paths:
+            return
+
+        return json.loads(test_paths).get(suite)
 
     def _build_command(self):
         c = self.config
@@ -225,9 +252,11 @@ class AndroidEmulatorTest(TestingMixin, BaseScript, MozbaseMixin, CodeCoverageMi
                 dirs['abs_marionette_tests_dir'],
                 self.config.get('marionette_test_manifest', '')
             ),
+            'gtest_dir': os.path.join(dirs['abs_test_install_dir'], 'gtest',
+                                      'gtest_bin', 'gtest'),
         }
 
-        user_paths = json.loads(os.environ.get('MOZHARNESS_TEST_PATHS', '""'))
+        user_paths = self._get_mozharness_test_paths(self.test_suite)
 
         for option in self.config["suite_definitions"][self.test_suite]["options"]:
             opt = option.split('=')[0]
@@ -258,13 +287,17 @@ class AndroidEmulatorTest(TestingMixin, BaseScript, MozbaseMixin, CodeCoverageMi
 
         if not (self.verify_enabled or self.per_test_coverage):
             if user_paths:
-                if self.test_suite in user_paths:
-                    cmd.extend(user_paths[self.test_suite])
+                cmd.extend(user_paths)
             elif not (self.verify_enabled or self.per_test_coverage):
                 if self.this_chunk is not None:
                     cmd.extend(['--this-chunk', self.this_chunk])
                 if self.total_chunks is not None:
                     cmd.extend(['--total-chunks', self.total_chunks])
+
+        if self.disable_webrender:
+            cmd.extend(['--setenv', 'MOZ_WEBRENDER=0'])
+        elif self.enable_webrender:
+            cmd.extend(['--setenv', 'MOZ_WEBRENDER=1'])
 
         try_options, try_tests = self.try_args(self.test_suite)
         cmd.extend(try_options)

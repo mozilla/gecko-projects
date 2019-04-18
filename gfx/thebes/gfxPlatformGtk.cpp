@@ -329,9 +329,7 @@ uint32_t gfxPlatformGtk::MaxGenericSubstitions() {
   return uint32_t(mMaxGenericSubstitutions);
 }
 
-bool gfxPlatformGtk::AccelerateLayersByDefault() {
-  return gfxPrefs::WebRenderAll();
-}
+bool gfxPlatformGtk::AccelerateLayersByDefault() { return true; }
 
 void gfxPlatformGtk::GetPlatformCMSOutputProfile(void*& mem, size_t& size) {
   mem = nullptr;
@@ -619,7 +617,7 @@ class GtkVsyncSource final : public VsyncSource {
     }
 
    private:
-    virtual ~GLXDisplay() {}
+    virtual ~GLXDisplay() = default;
 
     void RunVsync() {
       MOZ_ASSERT(!NS_IsMainThread());

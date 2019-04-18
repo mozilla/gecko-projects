@@ -27,6 +27,8 @@ pref("devtools.webconsole.jsterm.codeMirror", true);
 pref("devtools.webconsole.groupWarningMessages", false);
 pref("devtools.webconsole.input.editor", false);
 pref("devtools.webconsole.input.autocomplete", true);
+pref("devtools.browserconsole.contentMessages", true);
+pref("devtools.browserconsole.filterContentMessages", false);
 
 global.loader = {
   lazyServiceGetter: () => {},
@@ -120,6 +122,8 @@ requireHacker.global_hook("default", (path, module) => {
       return "{}";
     case "devtools/server/actors/reflow":
       return "{}";
+    case "devtools/shared/layout/utils":
+      return "{getCurrentZoom = () => {}}";
   }
 
   // We need to rewrite all the modules assuming the root is mozilla-central and give them

@@ -134,8 +134,8 @@ bool HttpChannelParent::Init(const HttpChannelCreationArgs& aArgs) {
       const HttpChannelOpenArgs& a = aArgs.get_HttpChannelOpenArgs();
       return DoAsyncOpen(
           a.uri(), a.original(), a.doc(), a.originalReferrer(),
-          a.referrerPolicy(), a.apiRedirectTo(), a.topWindowURI(),
-          a.topWindowPrincipal(), a.loadFlags(), a.requestHeaders(),
+          a.originalReferrerPolicy(), a.referrerPolicy(), a.apiRedirectTo(),
+          a.topWindowURI(), a.loadFlags(), a.requestHeaders(),
           a.requestMethod(), a.uploadStream(), a.uploadStreamHasHeaders(),
           a.priority(), a.classOfService(), a.redirectionLimit(), a.allowSTS(),
           a.thirdPartyFlags(), a.resumeAt(), a.startPos(), a.entityID(),
@@ -385,14 +385,15 @@ bool HttpChannelParent::DoAsyncOpen(
     const URIParams& aURI, const Maybe<URIParams>& aOriginalURI,
     const Maybe<URIParams>& aDocURI,
     const Maybe<URIParams>& aOriginalReferrerURI,
-    const uint32_t& aReferrerPolicy, const Maybe<URIParams>& aAPIRedirectToURI,
-    const Maybe<URIParams>& aTopWindowURI, nsIPrincipal* aTopWindowPrincipal,
-    const uint32_t& aLoadFlags, const RequestHeaderTuples& requestHeaders,
-    const nsCString& requestMethod, const Maybe<IPCStream>& uploadStream,
-    const bool& uploadStreamHasHeaders, const int16_t& priority,
-    const uint32_t& classOfService, const uint8_t& redirectionLimit,
-    const bool& allowSTS, const uint32_t& thirdPartyFlags,
-    const bool& doResumeAt, const uint64_t& startPos, const nsCString& entityID,
+    const uint32_t& aOriginalReferrerPolicy, const uint32_t& aReferrerPolicy,
+    const Maybe<URIParams>& aAPIRedirectToURI,
+    const Maybe<URIParams>& aTopWindowURI, const uint32_t& aLoadFlags,
+    const RequestHeaderTuples& requestHeaders, const nsCString& requestMethod,
+    const Maybe<IPCStream>& uploadStream, const bool& uploadStreamHasHeaders,
+    const int16_t& priority, const uint32_t& classOfService,
+    const uint8_t& redirectionLimit, const bool& allowSTS,
+    const uint32_t& thirdPartyFlags, const bool& doResumeAt,
+    const uint64_t& startPos, const nsCString& entityID,
     const bool& chooseApplicationCache, const nsCString& appCacheClientID,
     const bool& allowSpdy, const bool& allowAltSvc, const bool& beConservative,
     const uint32_t& tlsFlags, const Maybe<LoadInfoArgs>& aLoadInfoArgs,
@@ -483,8 +484,8 @@ bool HttpChannelParent::DoAsyncOpen(
   if (originalUri) httpChannel->SetOriginalURI(originalUri);
   if (docUri) httpChannel->SetDocumentURI(docUri);
   if (referrerUri) {
-    rv = httpChannel->SetReferrerWithPolicyInternal(referrerUri,
-                                                    aReferrerPolicy);
+    rv = httpChannel->SetReferrerWithPolicyInternal(
+        referrerUri, aOriginalReferrerPolicy, aReferrerPolicy);
     MOZ_ASSERT(NS_SUCCEEDED(rv));
   }
   if (apiRedirectToUri) httpChannel->RedirectTo(apiRedirectToUri);
@@ -492,8 +493,6 @@ bool HttpChannelParent::DoAsyncOpen(
     rv = httpChannel->SetTopWindowURI(topWindowUri);
     MOZ_ASSERT(NS_SUCCEEDED(rv));
   }
-
-  httpChannel->SetTopWindowPrincipal(aTopWindowPrincipal);
 
   if (aLoadFlags != nsIRequest::LOAD_NORMAL)
     httpChannel->SetLoadFlags(aLoadFlags);
@@ -659,15 +658,16 @@ bool HttpChannelParent::DoAsyncOpen(
   ++mAsyncOpenBarrier;
   RefPtr<HttpChannelParent> self = this;
   WaitForBgParent()
-      ->Then(GetMainThreadSerialEventTarget(), __func__,
-             [self]() {
-               self->mRequest.Complete();
-               self->TryInvokeAsyncOpen(NS_OK);
-             },
-             [self](nsresult aStatus) {
-               self->mRequest.Complete();
-               self->TryInvokeAsyncOpen(aStatus);
-             })
+      ->Then(
+          GetMainThreadSerialEventTarget(), __func__,
+          [self]() {
+            self->mRequest.Complete();
+            self->TryInvokeAsyncOpen(NS_OK);
+          },
+          [self](nsresult aStatus) {
+            self->mRequest.Complete();
+            self->TryInvokeAsyncOpen(aStatus);
+          })
       ->Track(mRequest);
 
   // The stream, received from the child process, must be cloneable and seekable
@@ -751,12 +751,13 @@ bool HttpChannelParent::ConnectChannel(const uint32_t& registrarId,
   // Waiting for background channel
   RefPtr<HttpChannelParent> self = this;
   WaitForBgParent()
-      ->Then(GetMainThreadSerialEventTarget(), __func__,
-             [self]() { self->mRequest.Complete(); },
-             [self](const nsresult& aResult) {
-               NS_ERROR("failed to establish the background channel");
-               self->mRequest.Complete();
-             })
+      ->Then(
+          GetMainThreadSerialEventTarget(), __func__,
+          [self]() { self->mRequest.Complete(); },
+          [self](const nsresult& aResult) {
+            NS_ERROR("failed to establish the background channel");
+            self->mRequest.Complete();
+          })
       ->Track(mRequest);
   return true;
 }
@@ -806,6 +807,12 @@ mozilla::ipc::IPCResult HttpChannelParent::RecvResume() {
 
 mozilla::ipc::IPCResult HttpChannelParent::RecvCancel(const nsresult& status) {
   LOG(("HttpChannelParent::RecvCancel [this=%p]\n", this));
+
+  // Don't cancel our channel if we're doing a CrossProcessRedirect.
+  if (mDoingCrossProcessRedirect) {
+    LOG(("Child was cancelled for cross-process redirect. Skip Cancel()."));
+    return IPC_OK();
+  }
 
   // May receive cancel before channel has been constructed!
   if (mChannel) {

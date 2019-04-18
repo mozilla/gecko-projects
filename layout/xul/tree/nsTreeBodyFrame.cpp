@@ -96,7 +96,7 @@ void nsTreeBodyFrame::CancelImageRequests() {
 //
 // Creates a new tree frame
 //
-nsIFrame* NS_NewTreeBodyFrame(nsIPresShell* aPresShell, ComputedStyle* aStyle) {
+nsIFrame* NS_NewTreeBodyFrame(PresShell* aPresShell, ComputedStyle* aStyle) {
   return new (aPresShell) nsTreeBodyFrame(aStyle, aPresShell->GetPresContext());
 }
 
@@ -2997,7 +2997,7 @@ ImgDrawResult nsTreeBodyFrame::PaintCell(
 
       const nsStyleBorder* borderStyle = lineContext->StyleBorder();
       // Resolve currentcolor values against the treeline context
-      nscolor color = borderStyle->mBorderLeftColor.CalcColor(lineContext);
+      nscolor color = borderStyle->mBorderLeftColor.CalcColor(*lineContext);
       ColorPattern colorPatt(ToDeviceColor(color));
 
       StyleBorderStyle style = borderStyle->GetBorderStyle(eSideLeft);
@@ -3485,7 +3485,7 @@ ImgDrawResult nsTreeBodyFrame::PaintText(
   }
 
   aRenderingContext.SetColor(
-      Color::FromABGR(textContext->StyleColor()->mColor));
+      Color::FromABGR(textContext->StyleColor()->mColor.ToColor()));
   nsLayoutUtils::DrawString(
       this, *fontMet, &aRenderingContext, text.get(), text.Length(),
       textRect.TopLeft() + nsPoint(0, baseline), cellContext);

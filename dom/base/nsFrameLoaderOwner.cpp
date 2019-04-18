@@ -7,6 +7,7 @@
 #include "nsFrameLoaderOwner.h"
 #include "nsFrameLoader.h"
 #include "mozilla/dom/FrameLoaderBinding.h"
+#include "mozilla/dom/BrowsingContext.h"
 
 already_AddRefed<nsFrameLoader> nsFrameLoaderOwner::GetFrameLoader() {
   return do_AddRef(mFrameLoader);
@@ -14,6 +15,14 @@ already_AddRefed<nsFrameLoader> nsFrameLoaderOwner::GetFrameLoader() {
 
 void nsFrameLoaderOwner::SetFrameLoader(nsFrameLoader* aNewFrameLoader) {
   mFrameLoader = aNewFrameLoader;
+}
+
+already_AddRefed<mozilla::dom::BrowsingContext>
+nsFrameLoaderOwner::GetBrowsingContext() {
+  if (mFrameLoader) {
+    return mFrameLoader->GetBrowsingContext();
+  }
+  return nullptr;
 }
 
 void nsFrameLoaderOwner::ChangeRemoteness(
@@ -30,17 +39,23 @@ void nsFrameLoaderOwner::ChangeRemoteness(
   RefPtr<Element> owner = do_QueryObject(this);
   MOZ_ASSERT(owner);
   mFrameLoader = nsFrameLoader::Create(owner, aOptions);
-  mFrameLoader->LoadFrame(false);
+  if (NS_WARN_IF(!mFrameLoader)) {
+    return;
+  }
+
+  if (aOptions.mPendingSwitchID.WasPassed()) {
+    mFrameLoader->ResumeLoad(aOptions.mPendingSwitchID.Value());
+  } else {
+    mFrameLoader->LoadFrame(false);
+  }
 
   // Now that we've got a new FrameLoader, we need to reset our
-  // nsSubDocumentFrame use the new FrameLoader. We just unset the frameloader
-  // here, and expect that the subdocument frame will pick up the new
-  // frameloader lazily.
+  // nsSubDocumentFrame to use the new FrameLoader.
   nsIFrame* ourFrame = owner->GetPrimaryFrame();
   if (ourFrame) {
     nsSubDocumentFrame* ourFrameFrame = do_QueryFrame(ourFrame);
     if (ourFrameFrame) {
-      ourFrameFrame->UnsetFrameLoader();
+      ourFrameFrame->ResetFrameLoader();
     }
   }
 

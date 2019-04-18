@@ -11,6 +11,7 @@
 #include "mozilla/EventForwards.h"
 #include "mozilla/MiscEvents.h"
 #include "mozilla/MouseEvents.h"
+#include "mozilla/PresShell.h"
 #include "mozilla/RefPtr.h"
 #include "mozilla/TextEvents.h"
 #include "mozilla/TimeStamp.h"
@@ -32,7 +33,6 @@
 #include "nsIWidgetListener.h"
 #include "nsIScreenManager.h"
 #include "SystemTimeConverter.h"
-#include "nsIPresShell.h"
 #include "nsViewManager.h"
 
 #include "nsGtkKeyUtils.h"
@@ -72,7 +72,6 @@
 #include "mozilla/Likely.h"
 #include "mozilla/Preferences.h"
 #include "nsIPrefService.h"
-#include "nsIGConfService.h"
 #include "nsIServiceManager.h"
 #include "nsGfxCIID.h"
 #include "nsGtkUtils.h"
@@ -3041,8 +3040,7 @@ void nsWindow::ThemeChanged() {
 
 void nsWindow::OnDPIChanged() {
   if (mWidgetListener) {
-    nsIPresShell *presShell = mWidgetListener->GetPresShell();
-    if (presShell) {
+    if (PresShell *presShell = mWidgetListener->GetPresShell()) {
       presShell->BackingScaleFactorChanged();
       // Update menu's font size etc
       presShell->ThemeChanged();
@@ -3055,8 +3053,7 @@ void nsWindow::OnCheckResize() { mPendingConfigures++; }
 
 void nsWindow::OnCompositedChanged() {
   if (mWidgetListener) {
-    nsIPresShell *presShell = mWidgetListener->GetPresShell();
-    if (presShell) {
+    if (PresShell *presShell = mWidgetListener->GetPresShell()) {
       // Update CSD after the change in alpha visibility
       presShell->ThemeChanged();
     }
@@ -6797,9 +6794,7 @@ static nsIFrame *FindTitlebarFrame(nsIFrame *aFrame) {
 void nsWindow::ForceTitlebarRedraw(void) {
   MOZ_ASSERT(mDrawInTitlebar, "We should not redraw invisible titlebar.");
 
-  nsIPresShell *shell =
-      mWidgetListener ? mWidgetListener->GetPresShell() : nullptr;
-  if (!shell) {
+  if (!mWidgetListener || !mWidgetListener->GetPresShell()) {
     return;
   }
   nsView *view = nsView::GetViewFor(this);

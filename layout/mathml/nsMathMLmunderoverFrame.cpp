@@ -12,6 +12,7 @@
 #include "gfxContext.h"
 #include "gfxMathTable.h"
 #include "gfxTextRun.h"
+#include "mozilla/PresShell.h"
 
 using namespace mozilla;
 
@@ -22,7 +23,7 @@ using namespace mozilla;
 // <munder> -- attach an underscript to a base - implementation
 //
 
-nsIFrame* NS_NewMathMLmunderoverFrame(nsIPresShell* aPresShell,
+nsIFrame* NS_NewMathMLmunderoverFrame(PresShell* aPresShell,
                                       ComputedStyle* aStyle) {
   return new (aPresShell)
       nsMathMLmunderoverFrame(aStyle, aPresShell->GetPresContext());

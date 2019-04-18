@@ -215,6 +215,7 @@ MSG_DEF(JSMSG_BAD_SWITCH,              0, JSEXN_SYNTAXERR, "invalid switch state
 MSG_DEF(JSMSG_BAD_SUPER,               0, JSEXN_SYNTAXERR, "invalid use of keyword 'super'")
 MSG_DEF(JSMSG_BAD_SUPERPROP,           1, JSEXN_SYNTAXERR, "use of super {0} accesses only valid within methods or eval code within methods")
 MSG_DEF(JSMSG_BAD_SUPERCALL,           0, JSEXN_SYNTAXERR, "super() is only valid in derived class constructors")
+MSG_DEF(JSMSG_BAD_ARGUMENTS,           0, JSEXN_SYNTAXERR, "arguments is not valid in fields")
 MSG_DEF(JSMSG_BRACKET_AFTER_LIST,      0, JSEXN_SYNTAXERR, "missing ] after element list")
 MSG_DEF(JSMSG_BRACKET_IN_INDEX,        0, JSEXN_SYNTAXERR, "missing ] in index expression")
 MSG_DEF(JSMSG_BRACKET_OPENED,          2, JSEXN_NOTE, "[ opened at line {0}, column {1}")
@@ -352,7 +353,6 @@ MSG_DEF(JSMSG_COMPUTED_NAME_IN_PATTERN,0, JSEXN_SYNTAXERR, "computed property na
 MSG_DEF(JSMSG_DEFAULT_IN_PATTERN,      0, JSEXN_SYNTAXERR, "destructuring defaults aren't supported in this destructuring declaration")
 MSG_DEF(JSMSG_BAD_NEWTARGET,           0, JSEXN_SYNTAXERR, "new.target only allowed within functions")
 MSG_DEF(JSMSG_ESCAPED_KEYWORD,         0, JSEXN_SYNTAXERR, "keywords must be written literally, without embedded escapes")
-MSG_DEF(JSMSG_MISSING_SEMI_FIELD,      0, JSEXN_SYNTAXERR, "missing ; after field definition")
 MSG_DEF(JSMSG_FIELDS_NOT_SUPPORTED,    0, JSEXN_SYNTAXERR, "fields are not currently supported")
 
 // UTF-8 source text encoding errors
@@ -487,6 +487,7 @@ MSG_DEF(JSMSG_DEBUG_PROTO,             2, JSEXN_TYPEERR, "{0}.prototype is not a
 MSG_DEF(JSMSG_DEBUG_WRONG_OWNER,       1, JSEXN_TYPEERR, "{0} belongs to a different Debugger")
 MSG_DEF(JSMSG_DEBUG_OPTIMIZED_OUT,     1, JSEXN_ERR, "variable `{0}' has been optimized out")
 MSG_DEF(JSMSG_DEBUG_OPTIMIZED_OUT_FUN, 0, JSEXN_ERR, "function is optimized out")
+MSG_DEF(JSMSG_DEBUG_FORCED_RETURN_DISALLOWED, 0, JSEXN_TYPEERR, "can't force return from a generator before the initial yield")
 MSG_DEF(JSMSG_DEBUG_RESUMPTION_VALUE_DISALLOWED, 0, JSEXN_TYPEERR, "resumption values are disallowed in this hook")
 MSG_DEF(JSMSG_DEBUG_VARIABLE_NOT_FOUND,0, JSEXN_TYPEERR, "variable not found in environment")
 MSG_DEF(JSMSG_DEBUG_WRAPPER_IN_WAY,    3, JSEXN_TYPEERR, "{0} is {1}{2}a global object, but a direct reference is required")

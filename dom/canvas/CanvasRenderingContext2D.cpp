@@ -70,6 +70,7 @@
 #include "jsfriendapi.h"
 #include "js/Conversions.h"
 #include "js/HeapAPI.h"
+#include "js/Warnings.h"  // JS::WarnASCII
 
 #include "mozilla/Alignment.h"
 #include "mozilla/Assertions.h"
@@ -110,7 +111,6 @@
 #include "nsGlobalWindow.h"
 #include "nsIScreenManager.h"
 #include "nsFilterInstance.h"
-#include "nsSVGLength2.h"
 #include "nsDeviceContext.h"
 #include "nsFontMetrics.h"
 #include "Units.h"
@@ -699,8 +699,8 @@ void CanvasGradient::AddColorStop(float aOffset, const nsAString& aColorstr,
     return;
   }
 
-  nsIPresShell* shell = mContext ? mContext->GetPresShell() : nullptr;
-  ServoStyleSet* styleSet = shell ? shell->StyleSet() : nullptr;
+  PresShell* presShell = mContext ? mContext->GetPresShell() : nullptr;
+  ServoStyleSet* styleSet = presShell ? presShell->StyleSet() : nullptr;
 
   nscolor color;
   bool ok = ServoCSSParser::ComputeColor(styleSet, NS_RGB(0, 0, 0), aColorstr,
@@ -893,7 +893,7 @@ NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(CanvasRenderingContext2D)
   NS_INTERFACE_MAP_ENTRY(nsISupports)
 NS_INTERFACE_MAP_END
 
-CanvasRenderingContext2D::ContextState::ContextState() =  default;
+CanvasRenderingContext2D::ContextState::ContextState() = default;
 
 CanvasRenderingContext2D::ContextState::ContextState(const ContextState& aOther)
     : fontGroup(aOther.fontGroup),
@@ -985,7 +985,7 @@ bool CanvasRenderingContext2D::ParseColor(const nsAString& aString,
   Document* document = mCanvasElement ? mCanvasElement->OwnerDoc() : nullptr;
   css::Loader* loader = document ? document->CSSLoader() : nullptr;
 
-  nsIPresShell* presShell = GetPresShell();
+  PresShell* presShell = GetPresShell();
   ServoStyleSet* set = presShell ? presShell->StyleSet() : nullptr;
 
   // First, try computing the color without handling currentcolor.
@@ -1001,7 +1001,7 @@ bool CanvasRenderingContext2D::ParseColor(const nsAString& aString,
     RefPtr<ComputedStyle> canvasStyle =
         nsComputedDOMStyle::GetComputedStyle(mCanvasElement, nullptr);
     if (canvasStyle) {
-      *aColor = canvasStyle->StyleColor()->mColor;
+      *aColor = canvasStyle->StyleColor()->mColor.ToColor();
     }
     // Beware that the presShell could be gone here.
   }
@@ -1647,7 +1647,7 @@ nsString CanvasRenderingContext2D::GetHitRegion(
 
 NS_IMETHODIMP
 CanvasRenderingContext2D::GetInputStream(const char* aMimeType,
-                                         const char16_t* aEncoderOptions,
+                                         const nsAString& aEncoderOptions,
                                          nsIInputStream** aStream) {
   nsCString enccid("@mozilla.org/image/encoder;2?type=");
   enccid += aMimeType;
@@ -1931,7 +1931,11 @@ void CanvasRenderingContext2D::SetStyleFromUnion(
   }
 
   if (aValue.IsCanvasPattern()) {
-    SetStyleFromPattern(aValue.GetAsCanvasPattern(), aWhichStyle);
+    CanvasPattern& pattern = aValue.GetAsCanvasPattern();
+    SetStyleFromPattern(pattern, aWhichStyle);
+    if (pattern.mForceWriteOnly) {
+      SetWriteOnly();
+    }
     return;
   }
 
@@ -2023,9 +2027,9 @@ already_AddRefed<CanvasPattern> CanvasRenderingContext2D::CreatePattern(
       if (!srcSurf) {
         JSContext* context = nsContentUtils::GetCurrentJSContext();
         if (context) {
-          JS_ReportWarningASCII(context,
-                                "CanvasRenderingContext2D.createPattern()"
-                                " failed to snapshot source canvas.");
+          JS::WarnASCII(context,
+                        "CanvasRenderingContext2D.createPattern() failed to "
+                        "snapshot source canvas.");
         }
         aError.Throw(NS_ERROR_DOM_INVALID_STATE_ERR);
         return nullptr;
@@ -2070,9 +2074,9 @@ already_AddRefed<CanvasPattern> CanvasRenderingContext2D::CreatePattern(
     if (!srcSurf) {
       JSContext* context = nsContentUtils::GetCurrentJSContext();
       if (context) {
-        JS_ReportWarningASCII(context,
-                              "CanvasRenderingContext2D.createPattern()"
-                              " failed to prepare source ImageBitmap.");
+        JS::WarnASCII(context,
+                      "CanvasRenderingContext2D.createPattern() failed to "
+                      "prepare source ImageBitmap.");
       }
       aError.Throw(NS_ERROR_DOM_INVALID_STATE_ERR);
       return nullptr;
@@ -2099,13 +2103,14 @@ already_AddRefed<CanvasPattern> CanvasRenderingContext2D::CreatePattern(
       nsLayoutUtils::SurfaceFromElement(
           element, nsLayoutUtils::SFE_WANT_FIRST_FRAME_IF_IMAGE, mTarget);
 
-  if (!res.GetSourceSurface()) {
+  RefPtr<SourceSurface> surface = res.GetSourceSurface();
+  if (!surface) {
     return nullptr;
   }
 
   RefPtr<CanvasPattern> pat =
-      new CanvasPattern(this, res.GetSourceSurface(), repeatMode,
-                        res.mPrincipal, res.mIsWriteOnly, res.mCORSUsed);
+      new CanvasPattern(this, surface, repeatMode, res.mPrincipal,
+                        res.mIsWriteOnly, res.mCORSUsed);
   return pat.forget();
 }
 
@@ -2161,7 +2166,7 @@ static already_AddRefed<RawServoDeclarationBlock> CreateFontDeclarationForServo(
 }
 
 static already_AddRefed<ComputedStyle> GetFontStyleForServo(
-    Element* aElement, const nsAString& aFont, nsIPresShell* aPresShell,
+    Element* aElement, const nsAString& aFont, PresShell* aPresShell,
     nsAString& aOutUsedFont, ErrorResult& aError) {
   RefPtr<RawServoDeclarationBlock> declarations =
       CreateFontDeclarationForServo(aFont, aPresShell->GetDocument());
@@ -2225,7 +2230,7 @@ CreateFilterDeclarationForServo(const nsAString& aFilter, Document* aDocument) {
 
 static already_AddRefed<ComputedStyle> ResolveFilterStyleForServo(
     const nsAString& aFilterString, const ComputedStyle* aParentStyle,
-    nsIPresShell* aPresShell, ErrorResult& aError) {
+    PresShell* aPresShell, ErrorResult& aError) {
   RefPtr<RawServoDeclarationBlock> declarations =
       CreateFilterDeclarationForServo(aFilterString, aPresShell->GetDocument());
   if (!declarations) {
@@ -2257,7 +2262,7 @@ bool CanvasRenderingContext2D::ParseFilter(
     return false;
   }
 
-  nsCOMPtr<nsIPresShell> presShell = GetPresShell();
+  RefPtr<PresShell> presShell = GetPresShell();
   if (!presShell) {
     aError.Throw(NS_ERROR_FAILURE);
     return false;
@@ -2334,7 +2339,7 @@ class CanvasUserSpaceMetrics : public UserSpaceMetricsWithSize {
 };
 
 void CanvasRenderingContext2D::UpdateFilter() {
-  nsCOMPtr<nsIPresShell> presShell = GetPresShell();
+  RefPtr<PresShell> presShell = GetPresShell();
   if (!presShell || presShell->IsDestroying()) {
     // Ensure we set an empty filter and update the state to
     // reflect the current "taint" status of the canvas
@@ -3124,7 +3129,7 @@ bool CanvasRenderingContext2D::SetFontInternal(const nsAString& aFont,
     return false;
   }
 
-  nsCOMPtr<nsIPresShell> presShell = GetPresShell();
+  RefPtr<PresShell> presShell = GetPresShell();
   if (!presShell) {
     aError.Throw(NS_ERROR_FAILURE);
     return false;
@@ -3647,8 +3652,10 @@ nsresult CanvasRenderingContext2D::DrawOrMeasureText(
     return NS_ERROR_FAILURE;
   }
 
-  nsCOMPtr<nsIPresShell> presShell = GetPresShell();
-  if (!presShell) return NS_ERROR_FAILURE;
+  RefPtr<PresShell> presShell = GetPresShell();
+  if (!presShell) {
+    return NS_ERROR_FAILURE;
+  }
 
   Document* document = presShell->GetDocument();
 
@@ -3882,7 +3889,7 @@ gfxFontGroup* CanvasRenderingContext2D::GetCurrentFontStyle() {
     ErrorResult err;
     NS_NAMED_LITERAL_STRING(kDefaultFontStyle, "10px sans-serif");
     static float kDefaultFontSize = 10.0;
-    nsCOMPtr<nsIPresShell> presShell = GetPresShell();
+    RefPtr<PresShell> presShell = GetPresShell();
     bool fontUpdated = SetFontInternal(kDefaultFontStyle, err);
     if (err.Failed() || !fontUpdated) {
       err.SuppressException();
@@ -4228,8 +4235,8 @@ CanvasRenderingContext2D::CachedSurfaceFromElement(Element* aElement) {
 
   res.mSize = res.mSourceSurface->GetSize();
   res.mPrincipal = principal.forget();
-  res.mIsWriteOnly = false;
   res.mImageRequest = imgRequest.forget();
+  res.mIsWriteOnly = CheckWriteOnlySecurity(res.mCORSUsed, res.mPrincipal);
 
   return res;
 }
@@ -4626,7 +4633,7 @@ void CanvasRenderingContext2D::DrawWindow(nsGlobalWindowInner& aWindow,
 
   // Flush layout updates
   if (!(aFlags & CanvasRenderingContext2D_Binding::DRAWWINDOW_DO_NOT_FLUSH)) {
-    nsContentUtils::FlushLayoutForTree(aWindow.AsInner()->GetOuterWindow());
+    nsContentUtils::FlushLayoutForTree(aWindow.GetOuterWindow());
   }
 
   CompositionOp op = UsedOperation();

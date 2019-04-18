@@ -40,9 +40,7 @@ window.gActivityStreamStrings = {
   "section_disclaimer_topstories_buttontext": "Ok, ¡ya caché!",
   "prefs_home_header": "Contenido de la página de inicio de Firefox",
   "prefs_home_description": "Elige qué contenido quieres en tu pantalla de inicio de Firefox.",
-  "prefs_content_discovery_header": "Inicio de Firefox",
   "prefs_content_discovery_description": "El Descubrimiento de contenido en el Inicio de Firefox te permite descubrir artículos relevantes de alta calidad provenientes de toda la web.",
-  "prefs_content_discovery_button": "Desactivar Descubrimiento de contenido",
   "prefs_section_rows_option": "{num} fila;{num} filas",
   "prefs_search_header": "Búsqueda web",
   "prefs_topsites_description": "Los sitios que más visitas",
@@ -110,6 +108,5 @@ window.gActivityStreamStrings = {
   "firstrun_privacy_notice": "Política de privacidad",
   "firstrun_continue_to_login": "Continuar",
   "firstrun_skip_login": "Saltar este paso",
-  "context_menu_title": "Abrir menú",
-  "pocket_learn_more": "Saber más"
+  "context_menu_title": "Abrir menú"
 };

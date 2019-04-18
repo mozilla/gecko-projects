@@ -467,11 +467,9 @@ ImgDrawResult nsImageRenderer::Draw(nsPresContext* aPresContext,
 
   switch (mType) {
     case eStyleImageType_Image: {
-      CSSIntSize imageSize(nsPresContext::AppUnitsToIntCSSPixels(mSize.width),
-                           nsPresContext::AppUnitsToIntCSSPixels(mSize.height));
       result = nsLayoutUtils::DrawBackgroundImage(
-          *ctx, mForFrame, aPresContext, mImageContainer, imageSize,
-          samplingFilter, aDest, aFill, aRepeatSize, aAnchor, aDirtyRect,
+          *ctx, mForFrame, aPresContext, mImageContainer, samplingFilter, aDest,
+          aFill, aRepeatSize, aAnchor, aDirtyRect,
           ConvertImageRendererToDrawFlags(mFlags), mExtendMode, aOpacity);
       break;
     }
@@ -572,9 +570,12 @@ ImgDrawResult nsImageRenderer::BuildWebRenderDisplayItems(
         containerFlags |= imgIContainer::FLAG_SYNC_DECODE;
       }
 
-      CSSIntSize imageSize(nsPresContext::AppUnitsToIntCSSPixels(mSize.width),
-                           nsPresContext::AppUnitsToIntCSSPixels(mSize.height));
-      Maybe<SVGImageContext> svgContext(Some(SVGImageContext(Some(imageSize))));
+      CSSIntSize destCSSSize{
+          nsPresContext::AppUnitsToIntCSSPixels(aDest.width),
+          nsPresContext::AppUnitsToIntCSSPixels(aDest.height)};
+
+      Maybe<SVGImageContext> svgContext(
+          Some(SVGImageContext(Some(destCSSSize))));
 
       const int32_t appUnitsPerDevPixel =
           mForFrame->PresContext()->AppUnitsPerDevPixel();
@@ -923,12 +924,11 @@ ImgDrawResult nsImageRenderer::DrawBorderImageComponent(
     nsSize repeatSize;
     nsRect fillRect(aFill);
     nsRect tile = ComputeTile(fillRect, aHFill, aVFill, aUnitSize, repeatSize);
-    CSSIntSize imageSize(srcRect.width, srcRect.height);
 
     ImgDrawResult result = nsLayoutUtils::DrawBackgroundImage(
-        aRenderingContext, mForFrame, aPresContext, subImage, imageSize,
-        samplingFilter, tile, fillRect, repeatSize, tile.TopLeft(), aDirtyRect,
-        drawFlags, ExtendMode::CLAMP, 1.0);
+        aRenderingContext, mForFrame, aPresContext, subImage, samplingFilter,
+        tile, fillRect, repeatSize, tile.TopLeft(), aDirtyRect, drawFlags,
+        ExtendMode::CLAMP, 1.0);
 
     if (!mImage->IsComplete()) {
       result &= ImgDrawResult::SUCCESS_NOT_COMPLETE;

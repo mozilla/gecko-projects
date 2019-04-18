@@ -685,6 +685,7 @@ pub struct BoundPBO<'a> {
 impl<'a> Drop for BoundPBO<'a> {
     fn drop(&mut self) {
         self.device.gl.unmap_buffer(gl::PIXEL_PACK_BUFFER);
+        self.device.gl.bind_buffer(gl::PIXEL_PACK_BUFFER, 0);
     }
 }
 
@@ -2407,6 +2408,8 @@ impl Device {
     }
 
     pub fn map_pbo_for_readback<'a>(&'a mut self, pbo: &'a PBO) -> Option<BoundPBO<'a>> {
+        self.gl.bind_buffer(gl::PIXEL_PACK_BUFFER, pbo.id);
+
         let buf_ptr = match self.gl.get_type() {
             gl::GlType::Gl => {
                 self.gl.map_buffer(gl::PIXEL_PACK_BUFFER, gl::READ_ONLY)
@@ -3146,6 +3149,11 @@ impl Device {
                 external: gl::RG,
                 pixel_type: gl::UNSIGNED_BYTE,
             },
+            ImageFormat::RG16 => FormatDesc {
+                internal: gl::RG16,
+                external: gl::RG,
+                pixel_type: gl::UNSIGNED_SHORT,
+            },
         }
     }
 
@@ -3158,6 +3166,7 @@ impl Device {
             ImageFormat::BGRA8 => gl::RGBA8,
             ImageFormat::RGBAF32 => gl::RGBA32F,
             ImageFormat::RG8 => gl::RG8,
+            ImageFormat::RG16 => gl::RG16,
             ImageFormat::RGBAI32 => gl::RGBA32I,
             ImageFormat::RGBA8 => gl::RGBA8,
         }
@@ -3361,6 +3370,7 @@ impl<'a> UploadTarget<'a> {
             ImageFormat::BGRA8 => (self.bgra_format, 4, gl::UNSIGNED_BYTE),
             ImageFormat::RGBA8 => (gl::RGBA, 4, gl::UNSIGNED_BYTE),
             ImageFormat::RG8 => (gl::RG, 2, gl::UNSIGNED_BYTE),
+            ImageFormat::RG16 => (gl::RG, 4, gl::UNSIGNED_SHORT),
             ImageFormat::RGBAF32 => (gl::RGBA, 16, gl::FLOAT),
             ImageFormat::RGBAI32 => (gl::RGBA_INTEGER, 16, gl::INT),
         };

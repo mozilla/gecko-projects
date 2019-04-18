@@ -27,7 +27,7 @@ TEST_F(TelemetryTestFixture, RecordOrigin) {
 
   Unused << mTelemetry->ClearOrigins();
 
-  const nsLiteralCString doubleclick("doubleclick.de");
+  const nsLiteralCString doubleclick("doubleclick.net");
   const nsLiteralCString telemetryTest1("telemetry.test_test1");
 
   Telemetry::RecordOrigin(OriginMetricID::TelemetryTest_Test1, doubleclick);
@@ -36,18 +36,18 @@ TEST_F(TelemetryTestFixture, RecordOrigin) {
   GetOriginSnapshot(aCx, &originSnapshot);
 
   ASSERT_FALSE(originSnapshot.isNullOrUndefined())
-      << "Origin snapshot must not be null/undefined.";
+  << "Origin snapshot must not be null/undefined.";
 
   JS::RootedValue origins(aCx);
   JS::RootedObject snapshotObj(aCx, &originSnapshot.toObject());
   ASSERT_TRUE(JS_GetProperty(aCx, snapshotObj, telemetryTest1.get(), &origins))
-      << "telemetry.test_test1 must be in the snapshot.";
+  << "telemetry.test_test1 must be in the snapshot.";
 
   JS::RootedObject originsObj(aCx, &origins.toObject());
   JS::RootedValue count(aCx);
   ASSERT_TRUE(JS_GetProperty(aCx, originsObj, doubleclick.get(), &count));
   ASSERT_TRUE(count.isInt32() && count.toInt32() == 1)
-      << "Must have recorded the origin exactly once.";
+  << "Must have recorded the origin exactly once.";
 
   // Now test that the snapshot didn't clear things out.
   GetOriginSnapshot(aCx, &originSnapshot);
@@ -64,7 +64,7 @@ TEST_F(TelemetryTestFixture, RecordOriginTwiceAndClear) {
 
   Unused << mTelemetry->ClearOrigins();
 
-  const nsLiteralCString doubleclick("doubleclick.de");
+  const nsLiteralCString doubleclick("doubleclick.net");
   const nsLiteralCString telemetryTest1("telemetry.test_test1");
 
   Telemetry::RecordOrigin(OriginMetricID::TelemetryTest_Test1, doubleclick);
@@ -74,18 +74,18 @@ TEST_F(TelemetryTestFixture, RecordOriginTwiceAndClear) {
   GetOriginSnapshot(aCx, &originSnapshot, true /* aClear */);
 
   ASSERT_FALSE(originSnapshot.isNullOrUndefined())
-      << "Origin snapshot must not be null/undefined.";
+  << "Origin snapshot must not be null/undefined.";
 
   JS::RootedValue origins(aCx);
   JS::RootedObject snapshotObj(aCx, &originSnapshot.toObject());
   ASSERT_TRUE(JS_GetProperty(aCx, snapshotObj, telemetryTest1.get(), &origins))
-      << "telemetry.test_test1 must be in the snapshot.";
+  << "telemetry.test_test1 must be in the snapshot.";
 
   JS::RootedObject originsObj(aCx, &origins.toObject());
   JS::RootedValue count(aCx);
   ASSERT_TRUE(JS_GetProperty(aCx, originsObj, doubleclick.get(), &count));
   ASSERT_TRUE(count.isInt32() && count.toInt32() == 2)
-      << "Must have recorded the origin exactly twice.";
+  << "Must have recorded the origin exactly twice.";
 
   // Now check that snapshotting with clear actually cleared it.
   GetOriginSnapshot(aCx, &originSnapshot);
@@ -112,18 +112,18 @@ TEST_F(TelemetryTestFixture, RecordUnknownOrigin) {
   GetOriginSnapshot(aCx, &originSnapshot);
 
   ASSERT_FALSE(originSnapshot.isNullOrUndefined())
-      << "Origin snapshot must not be null/undefined.";
+  << "Origin snapshot must not be null/undefined.";
 
   JS::RootedValue origins(aCx);
   JS::RootedObject snapshotObj(aCx, &originSnapshot.toObject());
   ASSERT_TRUE(JS_GetProperty(aCx, snapshotObj, telemetryTest1.get(), &origins))
-      << "telemetry.test_test1 must be in the snapshot.";
+  << "telemetry.test_test1 must be in the snapshot.";
 
   JS::RootedObject originsObj(aCx, &origins.toObject());
   JS::RootedValue count(aCx);
   ASSERT_TRUE(JS_GetProperty(aCx, originsObj, "__UNKNOWN__", &count));
   ASSERT_TRUE(count.isInt32() && count.toInt32() == 1)
-      << "Must have recorded the unknown origin exactly once.";
+  << "Must have recorded the unknown origin exactly once.";
 
   // Record a second, different unknown origin and ensure only one is stored.
   Telemetry::RecordOrigin(OriginMetricID::TelemetryTest_Test1, unknown2);
@@ -131,17 +131,17 @@ TEST_F(TelemetryTestFixture, RecordUnknownOrigin) {
   GetOriginSnapshot(aCx, &originSnapshot);
 
   ASSERT_FALSE(originSnapshot.isNullOrUndefined())
-      << "Origin snapshot must not be null/undefined.";
+  << "Origin snapshot must not be null/undefined.";
 
   JS::RootedObject snapshotObj2(aCx, &originSnapshot.toObject());
   ASSERT_TRUE(JS_GetProperty(aCx, snapshotObj2, telemetryTest1.get(), &origins))
-      << "telemetry.test_test1 must be in the snapshot.";
+  << "telemetry.test_test1 must be in the snapshot.";
 
   JS::RootedObject originsObj2(aCx, &origins.toObject());
   JS::RootedValue count2(aCx);
   ASSERT_TRUE(JS_GetProperty(aCx, originsObj2, "__UNKNOWN__", &count2));
   ASSERT_TRUE(count2.isInt32() && count2.toInt32() == 1)
-      << "Must have recorded the unknown origin exactly once.";
+  << "Must have recorded the unknown origin exactly once.";
 }
 
 TEST_F(TelemetryTestFixture, EncodedSnapshot) {
@@ -150,7 +150,7 @@ TEST_F(TelemetryTestFixture, EncodedSnapshot) {
 
   Unused << mTelemetry->ClearOrigins();
 
-  const nsLiteralCString doubleclick("doubleclick.de");
+  const nsLiteralCString doubleclick("doubleclick.net");
   const nsLiteralCString telemetryTest1("telemetry.test_test1");
 
   Telemetry::RecordOrigin(OriginMetricID::TelemetryTest_Test1, doubleclick);
@@ -164,25 +164,33 @@ TEST_F(TelemetryTestFixture, EncodedSnapshot) {
   Preferences::SetCString("prio.publicKeyA", prioKeyA);
   Preferences::SetCString("prio.publicKeyB", prioKeyB);
 
-  nsAutoJSString aStr;
-  nsAutoJSString bStr;
-  GetEncodedOriginStrings(aCx, telemetryTest1 + NS_LITERAL_CSTRING("-0"), aStr,
-                          bStr);
+  nsTArray<Tuple<nsCString, nsCString>> firstStrings;
+  GetEncodedOriginStrings(aCx, telemetryTest1 + NS_LITERAL_CSTRING("-%u"),
+                          firstStrings);
 
   // Now snapshot a second time and ensure the encoded payloads change.
-  nsAutoJSString secondAStr;
-  nsAutoJSString secondBStr;
-  GetEncodedOriginStrings(aCx, telemetryTest1 + NS_LITERAL_CSTRING("-0"),
-                          secondAStr, secondBStr);
+  nsTArray<Tuple<nsCString, nsCString>> secondStrings;
+  GetEncodedOriginStrings(aCx, telemetryTest1 + NS_LITERAL_CSTRING("-%u"),
+                          secondStrings);
 
-  ASSERT_TRUE(aStr != secondAStr)
-      << "aStr (" << NS_ConvertUTF16toUTF8(aStr).get()
-      << ") must not equal secondAStr ("
-      << NS_ConvertUTF16toUTF8(secondAStr).get() << ")";
-  ASSERT_TRUE(bStr != secondBStr)
-      << "bStr (" << NS_ConvertUTF16toUTF8(bStr).get()
-      << ") must not equal secondBStr ("
-      << NS_ConvertUTF16toUTF8(secondBStr).get() << ")";
+  const auto sizeOfPrioDatasPerMetric =
+      TelemetryOrigin::SizeOfPrioDatasPerMetric();
+  ASSERT_EQ(sizeOfPrioDatasPerMetric, firstStrings.Length());
+  ASSERT_EQ(sizeOfPrioDatasPerMetric, secondStrings.Length());
+
+  for (size_t i = 0; i < sizeOfPrioDatasPerMetric; ++i) {
+    auto& aStr = Get<0>(firstStrings[i]);
+    auto& bStr = Get<1>(firstStrings[i]);
+    auto& secondAStr = Get<0>(secondStrings[i]);
+    auto& secondBStr = Get<1>(secondStrings[i]);
+
+    ASSERT_TRUE(aStr != secondAStr)
+    << "aStr (" << aStr.get() << ") must not equal secondAStr ("
+    << secondAStr.get() << ")";
+    ASSERT_TRUE(bStr != secondBStr)
+    << "bStr (" << bStr.get() << ") must not equal secondBStr ("
+    << secondBStr.get() << ")";
+  }
 }
 
 class MockObserver final : public nsIObserver {
@@ -208,7 +216,7 @@ TEST_F(TelemetryTestFixture, OriginTelemetryNotifiesTopic) {
   Unused << mTelemetry->ClearOrigins();
 
   const char* kTopic = "origin-telemetry-storage-limit-reached";
-  NS_NAMED_LITERAL_CSTRING(doubleclick, "doubleclick.de");
+  NS_NAMED_LITERAL_CSTRING(doubleclick, "doubleclick.net");
   NS_NAMED_LITERAL_CSTRING(fb, "fb.com");
 
   MockObserver* mo = new MockObserver();
@@ -219,8 +227,9 @@ TEST_F(TelemetryTestFixture, OriginTelemetryNotifiesTopic) {
   ASSERT_TRUE(os);
   os->AddObserver(nsMo, kTopic, false);
 
-  for (int i = 0; i < 10; ++i) {
-    if (i < 9) {
+  const size_t size = ceil(10.0 / TelemetryOrigin::SizeOfPrioDatasPerMetric());
+  for (size_t i = 0; i < size; ++i) {
+    if (i < size - 1) {
       // Let's ensure we only notify the once.
       Telemetry::RecordOrigin(OriginMetricID::TelemetryTest_Test1, fb);
     }

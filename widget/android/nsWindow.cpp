@@ -357,18 +357,18 @@ class nsWindow::GeckoViewSupport final
  * it separate from GeckoViewSupport.
  */
 class nsWindow::NPZCSupport final
-    : public PanZoomController::Natives<NPZCSupport> {
+    : public PanZoomController::NativeProvider::Natives<NPZCSupport> {
   using LockedWindowPtr = WindowPtr<NPZCSupport>::Locked;
 
   static bool sNegateWheelScroll;
 
   WindowPtr<NPZCSupport> mWindow;
-  PanZoomController::WeakRef mNPZC;
+  PanZoomController::NativeProvider::WeakRef mNPZC;
   int mPreviousButtons;
 
   template <typename Lambda>
   class InputEvent final : public nsAppShell::Event {
-    PanZoomController::GlobalRef mNPZC;
+    PanZoomController::NativeProvider::GlobalRef mNPZC;
     Lambda mLambda;
 
    public:
@@ -380,7 +380,7 @@ class nsWindow::NPZCSupport final
 
       JNIEnv* const env = jni::GetGeckoThreadEnv();
       NPZCSupport* npzcSupport =
-          GetNative(PanZoomController::LocalRef(env, mNPZC));
+          GetNative(PanZoomController::NativeProvider::LocalRef(env, mNPZC));
 
       if (!npzcSupport || !npzcSupport->mWindow) {
         // We already shut down.
@@ -404,10 +404,10 @@ class nsWindow::NPZCSupport final
   }
 
  public:
-  typedef PanZoomController::Natives<NPZCSupport> Base;
+  typedef PanZoomController::NativeProvider::Natives<NPZCSupport> Base;
 
   NPZCSupport(NativePtr<NPZCSupport>* aPtr, nsWindow* aWindow,
-              const PanZoomController::LocalRef& aNPZC)
+              const PanZoomController::NativeProvider::LocalRef& aNPZC)
       : mWindow(aPtr, aWindow), mNPZC(aNPZC), mPreviousButtons(0) {
     MOZ_ASSERT(mWindow);
 
@@ -458,7 +458,7 @@ class nsWindow::NPZCSupport final
     // the race condition.
 
     if (RefPtr<nsThread> uiThread = GetAndroidUiThread()) {
-      auto npzc = PanZoomController::GlobalRef(mNPZC);
+      auto npzc = PanZoomController::NativeProvider::GlobalRef(mNPZC);
       if (!npzc) {
         return;
       }
@@ -472,7 +472,9 @@ class nsWindow::NPZCSupport final
     }
   }
 
-  const PanZoomController::Ref& GetJavaNPZC() const { return mNPZC; }
+  const PanZoomController::NativeProvider::Ref& GetJavaNPZC() const {
+    return mNPZC;
+  }
 
  public:
   void SetIsLongpressEnabled(bool aIsLongpressEnabled) {
@@ -651,15 +653,13 @@ class nsWindow::NPZCSupport final
     return true;
   }
 
-  bool HandleMotionEvent(const PanZoomController::LocalRef& aInstance,
-                         int32_t aAction, int32_t aActionIndex, int64_t aTime,
-                         int32_t aMetaState, float aScreenX, float aScreenY,
-                         jni::IntArray::Param aPointerId,
-                         jni::FloatArray::Param aX, jni::FloatArray::Param aY,
-                         jni::FloatArray::Param aOrientation,
-                         jni::FloatArray::Param aPressure,
-                         jni::FloatArray::Param aToolMajor,
-                         jni::FloatArray::Param aToolMinor) {
+  bool HandleMotionEvent(
+      const PanZoomController::NativeProvider::LocalRef& aInstance,
+      int32_t aAction, int32_t aActionIndex, int64_t aTime, int32_t aMetaState,
+      float aScreenX, float aScreenY, jni::IntArray::Param aPointerId,
+      jni::FloatArray::Param aX, jni::FloatArray::Param aY,
+      jni::FloatArray::Param aOrientation, jni::FloatArray::Param aPressure,
+      jni::FloatArray::Param aToolMajor, jni::FloatArray::Param aToolMinor) {
     MOZ_ASSERT(AndroidBridge::IsJavaUiThread());
 
     RefPtr<IAPZCTreeManager> controller;
@@ -938,14 +938,14 @@ class nsWindow::LayerViewSupport final
       mWindow->mNPZCSupport.Detach(mWindow->mNPZCSupport->GetJavaNPZC());
     }
 
-    auto npzc = PanZoomController::LocalRef(
-        jni::GetGeckoThreadEnv(), PanZoomController::Ref::From(aNPZC));
+    auto npzc = PanZoomController::NativeProvider::LocalRef(
+        jni::GetGeckoThreadEnv(),
+        PanZoomController::NativeProvider::Ref::From(aNPZC));
     mWindow->mNPZCSupport.Attach(npzc, mWindow, npzc);
 
     DispatchToUiThread("LayerViewSupport::AttachNPZC",
-                       [npzc = PanZoomController::GlobalRef(npzc)] {
-                         npzc->SetAttached(true);
-                       });
+                       [npzc = PanZoomController::NativeProvider::GlobalRef(
+                            npzc)] { npzc->SetAttached(true); });
   }
 
   void OnBoundsChanged(int32_t aLeft, int32_t aTop, int32_t aWidth,
@@ -2104,8 +2104,8 @@ nsresult nsWindow::SynthesizeNativeTouchPoint(uint32_t aPointerId,
 
   DispatchToUiThread(
       "nsWindow::SynthesizeNativeTouchPoint",
-      [npzc = PanZoomController::GlobalRef(npzc), aPointerId, eventType, aPoint,
-       aPointerPressure, aPointerOrientation] {
+      [npzc = PanZoomController::NativeProvider::GlobalRef(npzc), aPointerId,
+       eventType, aPoint, aPointerPressure, aPointerOrientation] {
         npzc->SynthesizeNativeTouchPoint(aPointerId, eventType, aPoint.x,
                                          aPoint.y, aPointerPressure,
                                          aPointerOrientation);
@@ -2125,11 +2125,12 @@ nsresult nsWindow::SynthesizeNativeMouseEvent(LayoutDeviceIntPoint aPoint,
   aPoint.x -= bounds.x;
   aPoint.y -= bounds.y;
 
-  DispatchToUiThread(
-      "nsWindow::SynthesizeNativeMouseEvent",
-      [npzc = PanZoomController::GlobalRef(npzc), aNativeMessage, aPoint] {
-        npzc->SynthesizeNativeMouseEvent(aNativeMessage, aPoint.x, aPoint.y);
-      });
+  DispatchToUiThread("nsWindow::SynthesizeNativeMouseEvent",
+                     [npzc = PanZoomController::NativeProvider::GlobalRef(npzc),
+                      aNativeMessage, aPoint] {
+                       npzc->SynthesizeNativeMouseEvent(aNativeMessage,
+                                                        aPoint.x, aPoint.y);
+                     });
   return NS_OK;
 }
 
@@ -2143,12 +2144,12 @@ nsresult nsWindow::SynthesizeNativeMouseMove(LayoutDeviceIntPoint aPoint,
   aPoint.x -= bounds.x;
   aPoint.y -= bounds.y;
 
-  DispatchToUiThread("nsWindow::SynthesizeNativeMouseMove",
-                     [npzc = PanZoomController::GlobalRef(npzc), aPoint] {
-                       npzc->SynthesizeNativeMouseEvent(
-                           sdk::MotionEvent::ACTION_HOVER_MOVE, aPoint.x,
-                           aPoint.y);
-                     });
+  DispatchToUiThread(
+      "nsWindow::SynthesizeNativeMouseMove",
+      [npzc = PanZoomController::NativeProvider::GlobalRef(npzc), aPoint] {
+        npzc->SynthesizeNativeMouseEvent(sdk::MotionEvent::ACTION_HOVER_MOVE,
+                                         aPoint.x, aPoint.y);
+      });
   return NS_OK;
 }
 

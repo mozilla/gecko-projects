@@ -9,6 +9,8 @@
 #include "nsCounterManager.h"
 
 #include "mozilla/Likely.h"
+#include "mozilla/IntegerRange.h"
+#include "mozilla/PresShell.h"
 #include "mozilla/WritingModes.h"
 #include "nsBulletFrame.h"  // legacy location for list style type to text code
 #include "nsContentUtils.h"
@@ -196,32 +198,59 @@ void nsCounterList::RecalcAll() {
   }
 }
 
+static bool HasCounters(const nsStyleContent& aStyle) {
+  return aStyle.CounterIncrementCount() || aStyle.CounterResetCount() ||
+         aStyle.CounterSetCount();
+}
+
 bool nsCounterManager::AddCounterChanges(nsIFrame* aFrame) {
+  // For elements with 'display:list-item' we add a default
+  // 'counter-increment:list-item' unless 'counter-increment' already has a
+  // value for 'list-item'.
+  //
+  // https://drafts.csswg.org/css-lists-3/#declaring-a-list-item
+  //
+  // We inherit `display` for some anonymous boxes, but we don't want them to
+  // increment the list-item counter.
+  const bool requiresListItemIncrement =
+      aFrame->StyleDisplay()->mDisplay == StyleDisplay::ListItem &&
+      !aFrame->Style()->IsAnonBox();
+
   const nsStyleContent* styleContent = aFrame->StyleContent();
-  if (!styleContent->CounterIncrementCount() &&
-      !styleContent->CounterResetCount() && !styleContent->CounterSetCount()) {
+
+  if (!requiresListItemIncrement && !HasCounters(*styleContent)) {
     MOZ_ASSERT(!aFrame->HasAnyStateBits(NS_FRAME_HAS_CSS_COUNTER_STYLE));
     return false;
   }
 
   aFrame->AddStateBits(NS_FRAME_HAS_CSS_COUNTER_STYLE);
 
+  bool dirty = false;
   // Add in order, resets first, so all the comparisons will be optimized
   // for addition at the end of the list.
-  int32_t i, i_end;
-  bool dirty = false;
-  for (i = 0, i_end = styleContent->CounterResetCount(); i != i_end; ++i) {
+  for (int32_t i : IntegerRange(styleContent->CounterResetCount())) {
     dirty |= AddCounterChangeNode(aFrame, i, styleContent->CounterResetAt(i),
                                   nsCounterChangeNode::RESET);
   }
-  for (i = 0, i_end = styleContent->CounterSetCount(); i != i_end; ++i) {
+  bool hasListItemIncrement = false;
+  for (int32_t i : IntegerRange(styleContent->CounterIncrementCount())) {
+    const nsStyleCounterData& increment = styleContent->CounterIncrementAt(i);
+    hasListItemIncrement |= increment.mCounter == nsGkAtoms::list_item;
+    dirty |= AddCounterChangeNode(aFrame, i, increment,
+                                  nsCounterChangeNode::INCREMENT);
+  }
+  if (requiresListItemIncrement && !hasListItemIncrement) {
+    bool reversed =
+        aFrame->StyleList()->mMozListReversed == StyleMozListReversed::True;
+    nsStyleCounterData listItemIncrement{nsGkAtoms::list_item,
+                                         reversed ? -1 : 1};
+    dirty |=
+        AddCounterChangeNode(aFrame, styleContent->CounterIncrementCount() + 1,
+                             listItemIncrement, nsCounterChangeNode::INCREMENT);
+  }
+  for (int32_t i : IntegerRange(styleContent->CounterSetCount())) {
     dirty |= AddCounterChangeNode(aFrame, i, styleContent->CounterSetAt(i),
                                   nsCounterChangeNode::SET);
-  }
-  for (i = 0, i_end = styleContent->CounterIncrementCount(); i != i_end; ++i) {
-    dirty |=
-        AddCounterChangeNode(aFrame, i, styleContent->CounterIncrementAt(i),
-                             nsCounterChangeNode::INCREMENT);
   }
   return dirty;
 }
@@ -249,7 +278,8 @@ bool nsCounterManager::AddCounterChangeNode(
   return false;
 }
 
-nsCounterList* nsCounterManager::CounterListFor(const nsAString& aCounterName) {
+nsCounterList* nsCounterManager::CounterListFor(nsAtom* aCounterName) {
+  MOZ_ASSERT(aCounterName);
   return mNames.LookupForAdd(aCounterName).OrInsert([]() {
     return new nsCounterList();
   });
@@ -288,7 +318,7 @@ bool nsCounterManager::DestroyNodesFor(nsIFrame* aFrame) {
 void nsCounterManager::Dump() {
   printf("\n\nCounter Manager Lists:\n");
   for (auto iter = mNames.Iter(); !iter.Done(); iter.Next()) {
-    printf("Counter named \"%s\":\n", NS_ConvertUTF16toUTF8(iter.Key()).get());
+    printf("Counter named \"%s\":\n", nsAtomCString(iter.Key()).get());
 
     nsCounterList* list = iter.UserData();
     int32_t i = 0;

@@ -28,6 +28,7 @@
 class nsDisplayListBuilder;
 
 namespace mozilla {
+class PresShell;
 namespace layers {
 class CanvasLayer;
 class CanvasRenderer;
@@ -57,7 +58,7 @@ class nsICanvasRenderingContextInternal : public nsISupports,
     AddPostRefreshObserverIfNecessary();
   }
 
-  virtual nsIPresShell* GetPresShell() {
+  virtual mozilla::PresShell* GetPresShell() {
     if (mCanvasElement) {
       return mCanvasElement->OwnerDoc()->GetPresShell();
     }
@@ -112,7 +113,7 @@ class nsICanvasRenderingContextInternal : public nsISupports,
   // is false, alpha will be discarded and the result will be the image
   // composited on black.
   NS_IMETHOD GetInputStream(const char* mimeType,
-                            const char16_t* encoderOptions,
+                            const nsAString& encoderOptions,
                             nsIInputStream** stream) = 0;
 
   // This gets an Azure SourceSurface for the canvas, this will be a snapshot

@@ -558,9 +558,53 @@ skip script test262/intl402/Intl/getCanonicalLocales/non-iana-canon.js
 # https://bugzilla.mozilla.org/show_bug.cgi?id=1508684
 skip script test262/language/expressions/import.meta/syntax/invalid-assignment-target-update-expr.js
 
-# https://github.com/tc39/test262/pull/1995 seemingly needs SpiderMonkey changes
-# before we can run the updated test -- bug 1531091.
-skip script test262/intl402/Collator/missing-unicode-ext-value-defaults-to-true.js
+# https://bugzilla.mozilla.org/show_bug.cgi?id=1542406
+skip script test262/language/expressions/class/elements/derived-cls-direct-eval-err-contains-supercall-1.js
+skip script test262/language/expressions/class/elements/derived-cls-direct-eval-err-contains-supercall-2.js
+skip script test262/language/expressions/class/elements/derived-cls-direct-eval-err-contains-supercall.js
+skip script test262/language/expressions/class/elements/derived-cls-direct-eval-err-contains-superproperty-1.js
+skip script test262/language/expressions/class/elements/derived-cls-direct-eval-err-contains-superproperty-2.js
+skip script test262/language/expressions/class/elements/derived-cls-indirect-eval-err-contains-supercall-1.js
+skip script test262/language/expressions/class/elements/derived-cls-indirect-eval-err-contains-supercall-2.js
+skip script test262/language/expressions/class/elements/derived-cls-indirect-eval-err-contains-supercall.js
+skip script test262/language/expressions/class/elements/derived-cls-indirect-eval-err-contains-superproperty-1.js
+skip script test262/language/expressions/class/elements/derived-cls-indirect-eval-err-contains-superproperty-2.js
+skip script test262/language/expressions/class/elements/direct-eval-err-contains-arguments.js
+skip script test262/language/expressions/class/elements/private-derived-cls-direct-eval-err-contains-supercall-1.js
+skip script test262/language/expressions/class/elements/private-derived-cls-direct-eval-err-contains-supercall-2.js
+skip script test262/language/expressions/class/elements/private-derived-cls-direct-eval-err-contains-supercall.js
+skip script test262/language/expressions/class/elements/private-derived-cls-indirect-eval-err-contains-supercall-1.js
+skip script test262/language/expressions/class/elements/private-derived-cls-indirect-eval-err-contains-supercall-2.js
+skip script test262/language/expressions/class/elements/private-derived-cls-indirect-eval-err-contains-supercall.js
+skip script test262/language/statements/class/elements/derived-cls-direct-eval-err-contains-supercall-1.js
+skip script test262/language/statements/class/elements/derived-cls-direct-eval-err-contains-supercall-2.js
+skip script test262/language/statements/class/elements/derived-cls-direct-eval-err-contains-supercall.js
+skip script test262/language/statements/class/elements/derived-cls-direct-eval-err-contains-superproperty-1.js
+skip script test262/language/statements/class/elements/derived-cls-direct-eval-err-contains-superproperty-2.js
+skip script test262/language/statements/class/elements/derived-cls-indirect-eval-err-contains-supercall-1.js
+skip script test262/language/statements/class/elements/derived-cls-indirect-eval-err-contains-supercall-2.js
+skip script test262/language/statements/class/elements/derived-cls-indirect-eval-err-contains-supercall.js
+skip script test262/language/statements/class/elements/derived-cls-indirect-eval-err-contains-superproperty-1.js
+skip script test262/language/statements/class/elements/derived-cls-indirect-eval-err-contains-superproperty-2.js
+skip script test262/language/statements/class/elements/direct-eval-err-contains-arguments.js
+skip script test262/language/statements/class/elements/private-derived-cls-direct-eval-err-contains-supercall-1.js
+skip script test262/language/statements/class/elements/private-derived-cls-direct-eval-err-contains-supercall-2.js
+skip script test262/language/statements/class/elements/private-derived-cls-direct-eval-err-contains-supercall.js
+skip script test262/language/statements/class/elements/private-derived-cls-indirect-eval-err-contains-supercall-1.js
+skip script test262/language/statements/class/elements/private-derived-cls-indirect-eval-err-contains-supercall-2.js
+skip script test262/language/statements/class/elements/private-derived-cls-indirect-eval-err-contains-supercall.js
+
+# https://bugzilla.mozilla.org/show_bug.cgi?id=1541641
+skip script test262/language/expressions/class/elements/evaluation-error/computed-name-toprimitive-err.js
+skip script test262/language/expressions/class/elements/evaluation-error/computed-name-toprimitive-returns-noncallable.js
+skip script test262/language/expressions/class/elements/evaluation-error/computed-name-toprimitive-returns-nonobject.js
+skip script test262/language/expressions/class/elements/evaluation-error/computed-name-tostring-err.js
+skip script test262/language/expressions/class/elements/evaluation-error/computed-name-valueof-err.js
+skip script test262/language/statements/class/elements/evaluation-error/computed-name-toprimitive-err.js
+skip script test262/language/statements/class/elements/evaluation-error/computed-name-toprimitive-returns-noncallable.js
+skip script test262/language/statements/class/elements/evaluation-error/computed-name-toprimitive-returns-nonobject.js
+skip script test262/language/statements/class/elements/evaluation-error/computed-name-tostring-err.js
+skip script test262/language/statements/class/elements/evaluation-error/computed-name-valueof-err.js
 
 
 ###########################################################
@@ -580,3 +624,19 @@ skip script test262/harness/detachArrayBuffer.js
 # shouldn't require that zh-Hans is explicitly supported without a fallback to
 # zh.
 skip script test262/intl402/fallback-locales-are-supported.js
+
+# https://github.com/tc39/test262/pull/2097
+#
+# "zh-hak-CN" no longer allowed, because it contains an extlang subtag.
+skip script test262/intl402/language-tags-canonicalized.js
+skip script test262/intl402/Intl/getCanonicalLocales/canonicalized-tags.js
+
+# Irregular grandfathered tags no longer allowed: "i-klingon"
+skip script test262/intl402/language-tags-valid.js
+
+# Irregular grandfathered tags no longer allowed: "en-GB-oed"
+skip script test262/intl402/Intl/getCanonicalLocales/preferred-grandfathered.js
+skip script test262/intl402/RelativeTimeFormat/constructor/constructor/locales-valid.js
+
+# Privateuse-only tags no longer allowed: "x-u-foo"
+skip script test262/intl402/Intl/getCanonicalLocales/weird-cases.js

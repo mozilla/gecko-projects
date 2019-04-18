@@ -137,17 +137,18 @@ void js::SetGeneratorClosed(JSContext* cx, AbstractFramePtr frame) {
 
 bool js::GeneratorThrowOrReturn(JSContext* cx, AbstractFramePtr frame,
                                 Handle<AbstractGeneratorObject*> genObj,
-                                HandleValue arg, uint32_t resumeKind) {
-  if (resumeKind == AbstractGeneratorObject::THROW) {
-    cx->setPendingException(arg);
+                                HandleValue arg,
+                                GeneratorResumeKind resumeKind) {
+  if (resumeKind == GeneratorResumeKind::Throw) {
+    cx->setPendingExceptionAndCaptureStack(arg);
   } else {
-    MOZ_ASSERT(resumeKind == AbstractGeneratorObject::RETURN);
+    MOZ_ASSERT(resumeKind == GeneratorResumeKind::Return);
 
     MOZ_ASSERT_IF(genObj->is<GeneratorObject>(), arg.isObject());
     frame.setReturnValue(arg);
 
     RootedValue closing(cx, MagicValue(JS_GENERATOR_CLOSING));
-    cx->setPendingException(closing);
+    cx->setPendingException(closing, nullptr);
     genObj->setClosing();
   }
   return false;
@@ -315,7 +316,7 @@ bool AbstractGeneratorObject::isAfterYieldOrAwait(JSOp op) {
   JSScript* script = callee().nonLazyScript();
   jsbytecode* code = script->code();
   uint32_t nextOffset = script->resumeOffsets()[resumeIndex()];
-  if (code[nextOffset] != JSOP_DEBUGAFTERYIELD) {
+  if (code[nextOffset] != JSOP_AFTERYIELD) {
     return false;
   }
 

@@ -15,6 +15,7 @@
 #include "gfxUtils.h"
 #include "mozilla/dom/ElementInlines.h"
 #include "mozilla/gfx/2D.h"
+#include "mozilla/PresShell.h"
 #include "mozilla/ServoStyleSetInlines.h"
 #include "nsCSSFrameConstructor.h"
 #include "nsDisplayList.h"
@@ -27,7 +28,7 @@
 using namespace mozilla;
 using namespace mozilla::gfx;
 
-nsPlaceholderFrame* NS_NewPlaceholderFrame(nsIPresShell* aPresShell,
+nsPlaceholderFrame* NS_NewPlaceholderFrame(PresShell* aPresShell,
                                            ComputedStyle* aStyle,
                                            nsFrameState aTypeBits) {
   return new (aPresShell)

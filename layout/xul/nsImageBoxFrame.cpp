@@ -24,7 +24,6 @@
 #include "nsHTMLParts.h"
 #include "nsString.h"
 #include "nsLeafFrame.h"
-#include "nsIPresShell.h"
 #include "mozilla/dom/Document.h"
 #include "mozilla/dom/DocumentInlines.h"
 #include "nsImageMap.h"
@@ -51,6 +50,7 @@
 #include "mozilla/BasicEvents.h"
 #include "mozilla/EventDispatcher.h"
 #include "mozilla/Maybe.h"
+#include "mozilla/PresShell.h"
 #include "SVGImageContext.h"
 #include "Units.h"
 #include "mozilla/layers/RenderRootStateManager.h"
@@ -120,7 +120,7 @@ static void FireImageDOMEvent(nsIContent* aContent, EventMessage aMessage) {
 //
 // Creates a new image frame and returns it
 //
-nsIFrame* NS_NewImageBoxFrame(nsIPresShell* aPresShell, ComputedStyle* aStyle) {
+nsIFrame* NS_NewImageBoxFrame(PresShell* aPresShell, ComputedStyle* aStyle) {
   return new (aPresShell) nsImageBoxFrame(aStyle, aPresShell->GetPresContext());
 }
 

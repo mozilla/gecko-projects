@@ -2132,14 +2132,19 @@ class nsContentUtils {
    * suitable for, for example, header values. The UTF versions return strings
    * containing international characters.
    *
+   * The thread-safe versions return NS_ERROR_UNKNOWN_PROTOCOL if the
+   * operation cannot be completed on the current thread.
+   *
    * @pre aPrincipal/aOrigin must not be null.
    *
    * @note this should be used for HTML5 origin determination.
    */
   static nsresult GetASCIIOrigin(nsIPrincipal* aPrincipal, nsACString& aOrigin);
   static nsresult GetASCIIOrigin(nsIURI* aURI, nsACString& aOrigin);
+  static nsresult GetThreadSafeASCIIOrigin(nsIURI* aURI, nsACString& aOrigin);
   static nsresult GetUTFOrigin(nsIPrincipal* aPrincipal, nsAString& aOrigin);
   static nsresult GetUTFOrigin(nsIURI* aURI, nsAString& aOrigin);
+  static nsresult GetThreadSafeUTFOrigin(nsIURI* aURI, nsAString& aOrigin);
 
   /**
    * This method creates and dispatches "command" event, which implements
@@ -2889,11 +2894,11 @@ class nsContentUtils {
    */
   MOZ_CAN_RUN_SCRIPT
   static nsresult SendMouseEvent(
-      const nsCOMPtr<nsIPresShell>& aPresShell, const nsAString& aType,
-      float aX, float aY, int32_t aButton, int32_t aButtons,
-      int32_t aClickCount, int32_t aModifiers, bool aIgnoreRootScrollFrame,
-      float aPressure, unsigned short aInputSourceArg, uint32_t aIdentifier,
-      bool aToWindow, bool* aPreventDefault, bool aIsDOMEventSynthesized,
+      mozilla::PresShell* aPresShell, const nsAString& aType, float aX,
+      float aY, int32_t aButton, int32_t aButtons, int32_t aClickCount,
+      int32_t aModifiers, bool aIgnoreRootScrollFrame, float aPressure,
+      unsigned short aInputSourceArg, uint32_t aIdentifier, bool aToWindow,
+      bool* aPreventDefault, bool aIsDOMEventSynthesized,
       bool aIsWidgetEventSynthesized);
 
   static void FirePageShowEvent(nsIDocShellTreeItem* aItem,
@@ -2990,7 +2995,7 @@ class nsContentUtils {
    * the window's extant document has not been set yet.  The code in
    * StorageAllowedForWindow(), however, will not work in these cases.
    */
-  static StorageAccess StorageAllowedForDocument(Document* aDoc);
+  static StorageAccess StorageAllowedForDocument(const Document* aDoc);
 
   /*
    * Checks if storage should be allowed for a new window with the given
@@ -3106,8 +3111,12 @@ class nsContentUtils {
   /**
    * Creates a new XUL or XHTML element applying any appropriate custom element
    * definition.
+   *
+   * If aFromParser != FROM_PARSER_FRAGMENT, a nested event loop permits
+   * arbitrary changes to the world before this function returns.  This should
+   * probably just be MOZ_CAN_RUN_SCRIPT - bug 1543259.
    */
-  static nsresult NewXULOrHTMLElement(
+  MOZ_CAN_RUN_SCRIPT_BOUNDARY static nsresult NewXULOrHTMLElement(
       Element** aResult, mozilla::dom::NodeInfo* aNodeInfo,
       mozilla::dom::FromParser aFromParser, nsAtom* aIsAtom,
       mozilla::dom::CustomElementDefinition* aDefinition);
@@ -3286,6 +3295,12 @@ class nsContentUtils {
   // Alternate data MIME type used by the ScriptLoader to register and read
   // bytecode out of the nsCacheInfoChannel.
   static nsCString& JSBytecodeMimeType() { return *sJSBytecodeMimeType; }
+
+  /**
+   * Checks if the passed-in name is one of the special names: "_blank", "_top",
+   * "_parent" or "_self".
+   */
+  static bool IsSpecialName(const nsAString& aName);
 
   /**
    * Checks if the passed-in name should override an existing name on the

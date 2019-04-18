@@ -31,7 +31,7 @@ using namespace mozilla::image;
 //----------------------------------------------------------------------
 // Implementation
 
-nsContainerFrame* NS_NewSVGForeignObjectFrame(nsIPresShell* aPresShell,
+nsContainerFrame* NS_NewSVGForeignObjectFrame(PresShell* aPresShell,
                                               ComputedStyle* aStyle) {
   return new (aPresShell)
       nsSVGForeignObjectFrame(aStyle, aPresShell->GetPresContext());
@@ -253,7 +253,7 @@ void nsSVGForeignObjectFrame::PaintSVG(gfxContext& aContext,
   // SVG paints in CSS px, but normally frames paint in dev pixels. Here we
   // multiply a CSS-px-to-dev-pixel factor onto aTransform so our children
   // paint correctly.
-  float cssPxPerDevPx = PresContext()->AppUnitsToFloatCSSPixels(
+  float cssPxPerDevPx = nsPresContext::AppUnitsToFloatCSSPixels(
       PresContext()->AppUnitsPerDevPixel());
   gfxMatrix canvasTMForChildren = aTransform;
   canvasTMForChildren.PreScale(cssPxPerDevPx, cssPxPerDevPx);
@@ -523,7 +523,7 @@ void nsSVGForeignObjectFrame::DoReflow() {
       "style system should ensure that :-moz-svg-foreign-content "
       "does not get styled");
   NS_ASSERTION(reflowInput.ComputedISize() == ISize(wm),
-               "reflow state made child wrong size");
+               "reflow input made child wrong size");
   reflowInput.SetComputedBSize(BSize(wm));
 
   ReflowChild(kid, presContext, desiredSize, reflowInput, 0, 0,

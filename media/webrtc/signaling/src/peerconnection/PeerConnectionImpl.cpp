@@ -229,8 +229,11 @@ const nsIID
 
 namespace mozilla {
 
-RTCStatsQuery::RTCStatsQuery(bool internal)
-    : internalStats(internal), grabAllLevels(false), now(0.0) {}
+RTCStatsQuery::RTCStatsQuery(bool aInternal, bool aRecordTelemetry)
+    : internalStats(aInternal),
+      recordTelemetry(aRecordTelemetry),
+      grabAllLevels(false),
+      now(0.0) {}
 
 RTCStatsQuery::~RTCStatsQuery() {}
 
@@ -423,7 +426,7 @@ nsresult PeerConnectionImpl::Initialize(PeerConnectionObserver& aObserver,
   // Currently no standalone unit tests for DataChannel,
   // which is the user of mWindow
   MOZ_ASSERT(aWindow);
-  mWindow = aWindow->AsInner();
+  mWindow = aWindow;
   NS_ENSURE_STATE(mWindow);
 
   PRTime timestamp = PR_Now();
@@ -1552,16 +1555,17 @@ NS_IMETHODIMP
 PeerConnectionImpl::GetStats(MediaStreamTrack* aSelector) {
   PC_AUTO_ENTER_API_CALL(true);
 
-  GetStats(aSelector, false)
-      ->Then(GetMainThreadSerialEventTarget(), __func__,
-             [handle = mHandle](UniquePtr<RTCStatsQuery>&& aQuery) {
-               DeliverStatsReportToPCObserver_m(
-                   handle, NS_OK, nsAutoPtr<RTCStatsQuery>(aQuery.release()));
-             },
-             [handle = mHandle](nsresult aError) {
-               DeliverStatsReportToPCObserver_m(handle, aError,
-                                                nsAutoPtr<RTCStatsQuery>());
-             });
+  GetStats(aSelector, false, false)
+      ->Then(
+          GetMainThreadSerialEventTarget(), __func__,
+          [handle = mHandle](UniquePtr<RTCStatsQuery>&& aQuery) {
+            DeliverStatsReportToPCObserver_m(
+                handle, NS_OK, nsAutoPtr<RTCStatsQuery>(aQuery.release()));
+          },
+          [handle = mHandle](nsresult aError) {
+            DeliverStatsReportToPCObserver_m(handle, aError,
+                                             nsAutoPtr<RTCStatsQuery>());
+          });
 
   return NS_OK;
 }
@@ -2654,8 +2658,10 @@ void PeerConnectionImpl::UpdateDefaultCandidate(
 }
 
 RefPtr<RTCStatsQueryPromise> PeerConnectionImpl::GetStats(
-    dom::MediaStreamTrack* aSelector, bool aInternalStats) {
-  UniquePtr<RTCStatsQuery> query(new RTCStatsQuery(aInternalStats));
+    dom::MediaStreamTrack* aSelector, bool aInternalStats,
+    bool aRecordTelemetry) {
+  UniquePtr<RTCStatsQuery> query(
+      new RTCStatsQuery(aInternalStats, aRecordTelemetry));
   nsresult rv = BuildStatsQuery_m(aSelector, query.get());
   if (NS_FAILED(rv)) {
     return RTCStatsQueryPromise::CreateAndReject(rv, __func__);
@@ -2746,6 +2752,11 @@ RefPtr<RTCStatsQueryPromise> PeerConnectionImpl::ExecuteStatsQuery_s(
     }
     const MediaPipeline& mp = *aPipelines[p];
     auto asVideo = mp.Conduit()->AsVideoSessionConduit();
+
+    if (query->recordTelemetry && asVideo) {
+      asVideo.value()->RecordTelemetry();
+    }
+
     nsString kind = asVideo.isNothing() ? NS_LITERAL_STRING("audio")
                                         : NS_LITERAL_STRING("video");
     nsString idstr = kind + NS_LITERAL_STRING("_");
@@ -2771,7 +2782,7 @@ RefPtr<RTCStatsQueryPromise> PeerConnectionImpl::ExecuteStatsQuery_s(
           uint32_t packetsReceived;
           uint64_t bytesReceived;
           uint32_t packetsLost;
-          int32_t rtt;
+          Maybe<double> rtt;
           if (mp.Conduit()->GetRTCPReceiverReport(&jitterMs, &packetsReceived,
                                                   &bytesReceived, &packetsLost,
                                                   &rtt)) {
@@ -2790,9 +2801,7 @@ RefPtr<RTCStatsQueryPromise> PeerConnectionImpl::ExecuteStatsQuery_s(
             s.mPacketsReceived.Construct(packetsReceived);
             s.mBytesReceived.Construct(bytesReceived);
             s.mPacketsLost.Construct(packetsLost);
-            if (rtt > 0) {  // RTT is not reported when it is zero
-              s.mRoundTripTime.Construct(static_cast<double>(rtt) / 1000);
-            }
+            rtt.apply([&s](auto r) { s.mRoundTripTime.Construct(r); });
             query->report->mRemoteInboundRtpStreamStats.Value().AppendElement(
                 s, fallible);
           }

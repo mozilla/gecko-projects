@@ -18,6 +18,7 @@
 #include "mozilla/layers/PLayerTransactionChild.h"
 #include "mozilla/layers/WebRenderLayerManager.h"
 #include "mozilla/Preferences.h"
+#include "mozilla/PresShell.h"
 #include "mozilla/TextComposition.h"
 #include "mozilla/TextEventDispatcher.h"
 #include "mozilla/TextEvents.h"
@@ -286,6 +287,15 @@ void PuppetWidget::Invalidate(const LayoutDeviceIntRect& aRect) {
   }
 }
 
+mozilla::LayoutDeviceToLayoutDeviceMatrix4x4
+PuppetWidget::WidgetToTopLevelWidgetTransform() {
+  if (!GetOwningTabChild()) {
+    NS_WARNING("PuppetWidget without Tab does not have transform information.");
+    return mozilla::LayoutDeviceToLayoutDeviceMatrix4x4();
+  }
+  return GetOwningTabChild()->GetChildToParentConversionMatrix();
+}
+
 void PuppetWidget::InitEvent(WidgetGUIEvent& aEvent,
                              LayoutDeviceIntPoint* aPoint) {
   if (nullptr == aPoint) {
@@ -394,7 +404,7 @@ nsEventStatus PuppetWidget::DispatchInputEvent(WidgetInputEvent* aEvent) {
     return nsEventStatus_eIgnore;
   }
 
-  if (nsCOMPtr<nsIPresShell> presShell = mTabChild->GetPresShell()) {
+  if (PresShell* presShell = mTabChild->GetTopLevelPresShell()) {
     // Because the root resolution is conceptually at the parent/child process
     // boundary, we need to apply that resolution here because we're sending
     // the event from the child to the parent process.
@@ -772,13 +782,14 @@ nsresult PuppetWidget::NotifyIMEOfFocusChange(
       IMENotificationRequests(IMENotificationRequests::NOTIFY_ALL);
   RefPtr<PuppetWidget> self = this;
   mTabChild->SendNotifyIMEFocus(mContentCache, aIMENotification)
-      ->Then(mTabChild->TabGroup()->EventTargetFor(TaskCategory::UI), __func__,
-             [self](IMENotificationRequests&& aRequests) {
-               self->mIMENotificationRequestsOfParent = aRequests;
-             },
-             [self](mozilla::ipc::ResponseRejectReason&& aReason) {
-               NS_WARNING("SendNotifyIMEFocus got rejected.");
-             });
+      ->Then(
+          mTabChild->TabGroup()->EventTargetFor(TaskCategory::UI), __func__,
+          [self](IMENotificationRequests&& aRequests) {
+            self->mIMENotificationRequestsOfParent = aRequests;
+          },
+          [self](mozilla::ipc::ResponseRejectReason&& aReason) {
+            NS_WARNING("SendNotifyIMEFocus got rejected.");
+          });
 
   return NS_OK;
 }

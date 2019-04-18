@@ -22,6 +22,8 @@ def getAppVersionWithoutMilestone() {
 // We take something like 58.1.2a1 and come out with 5800102
 // This gives us 3 digits for the major number, and 2 digits
 // each for the minor and build number. Beta and Release
+//
+// This must be synchronized with _compute_gecko_version(...) in /taskcluster/taskgraph/transforms/task.py
 def computeVersionCode() {
     String appVersion = getAppVersionWithoutMilestone()
 
@@ -309,7 +311,9 @@ android.libraryVariants.all { variant ->
 }
 
 android.libraryVariants.all { variant ->
-    configureLibraryVariantWithJNIWrappers(variant, "Generated")
+    if (variant.name == mozconfig.substs.GRADLE_ANDROID_GECKOVIEW_VARIANT_NAME) {
+        configureLibraryVariantWithJNIWrappers(variant, "Generated")
+    }
 }
 
 apply plugin: 'maven-publish'
@@ -457,4 +461,10 @@ apiLint {
     changelogFileName = 'src/main/java/org/mozilla/geckoview/doc-files/CHANGELOG.md'
     skipClassesRegex = ['^org.mozilla.geckoview.BuildConfig$']
     lintFilters = ['GV']
+    allowedPackages = [
+        'java',
+        'android',
+        'org.json',
+        'org.mozilla.geckoview',
+    ]
 }

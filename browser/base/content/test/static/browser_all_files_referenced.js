@@ -43,8 +43,8 @@ var gExceptionPaths = [
   // paths will be concatenated in FormAutofillUtils.jsm based on different country/region.
   "resource://formautofill/addressmetadata/",
 
-  // Exclude all search-plugins because they aren't referenced by filename
-  "resource://search-plugins/",
+  // Exclude all search-extensions because they aren't referenced by filename
+  "resource://search-extensions/",
 ];
 
 // These are not part of the omni.ja file, so we find them only when running
@@ -125,6 +125,10 @@ var whitelist = [
   {file: "resource://app/modules/translation/BingTranslator.jsm"},
   {file: "resource://app/modules/translation/GoogleTranslator.jsm"},
   {file: "resource://app/modules/translation/YandexTranslator.jsm"},
+
+  // Used in Firefox Monitor, which is an extension - we don't check
+  // files inside the XPI.
+  {file: "resource://app/modules/EveryWindow.jsm"},
 
   // Starting from here, files in the whitelist are bugs that need fixing.
   // Bug 1339424 (wontfix?)
@@ -337,6 +341,11 @@ async function parseJsonManifest(uri) {
         gReferencesFromCode.set(script, null);
       }
     }
+  }
+
+  if (data.theme_experiment && data.theme_experiment.stylesheet) {
+    let stylesheet = uri.resolve(data.theme_experiment.stylesheet);
+    gReferencesFromCode.set(stylesheet, null);
   }
 
   return null;

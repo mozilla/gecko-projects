@@ -54,6 +54,7 @@
 #include "mozilla/dom/ContentBlockingLog.h"
 #include "mozilla/dom/DispatcherTrait.h"
 #include "mozilla/dom/DocumentOrShadowRoot.h"
+#include "mozilla/HashTable.h"
 #include "mozilla/LinkedList.h"
 #include "mozilla/NotNull.h"
 #include "mozilla/SegmentedVector.h"
@@ -522,8 +523,14 @@ class Document : public nsINode,
     return DocumentOrShadowRoot::SetValueMissingState(aName, aValue);
   }
 
+  nsIPrincipal* EffectiveStoragePrincipal() const;
+
   // nsIScriptObjectPrincipal
   nsIPrincipal* GetPrincipal() final { return NodePrincipal(); }
+
+  nsIPrincipal* GetEffectiveStoragePrincipal() final {
+    return EffectiveStoragePrincipal();
+  }
 
   // EventTarget
   void GetEventTargetParent(EventChainPreVisitor& aVisitor) override;
@@ -724,10 +731,10 @@ class Document : public nsINode,
   void SetReferrer(const nsACString& aReferrer) { mReferrer = aReferrer; }
 
   /**
-   * Set the principal responsible for this document.  Chances are,
-   * you do not want to be using this.
+   * Set the principals responsible for this document.  Chances are, you do not
+   * want to be using this.
    */
-  void SetPrincipal(nsIPrincipal* aPrincipal);
+  void SetPrincipals(nsIPrincipal* aPrincipal, nsIPrincipal* aStoragePrincipal);
 
   /**
    * Get the list of ancestor principals for a document.  This is the same as
@@ -774,8 +781,8 @@ class Document : public nsINode,
    * Return the referrer from document URI as defined in the Referrer Policy
    * specification.
    * https://w3c.github.io/webappsec-referrer-policy/#determine-requests-referrer
-   * While document is an iframe srcdoc document, let document be document’s
-   * browsing context’s browsing context container’s node document.
+   * While document is an iframe srcdoc document, let document be document???s
+   * browsing context???s browsing context container???s node document.
    * Then referrer should be document's URL
    */
 
@@ -1105,11 +1112,12 @@ class Document : public nsINode,
   /**
    * Set the tracking cookies blocked flag for this document.
    */
-  void SetHasTrackingCookiesBlocked(bool aHasTrackingCookiesBlocked,
-                                    const nsACString& aOriginBlocked) {
+  void SetHasTrackingCookiesBlocked(
+      bool aHasTrackingCookiesBlocked, const nsACString& aOriginBlocked,
+      const Maybe<AntiTrackingCommon::StorageAccessGrantedReason>& aReason) {
     RecordContentBlockingLog(
         aOriginBlocked, nsIWebProgressListener::STATE_COOKIES_BLOCKED_TRACKER,
-        aHasTrackingCookiesBlocked);
+        aHasTrackingCookiesBlocked, aReason);
   }
 
   /**
@@ -1347,17 +1355,6 @@ class Document : public nsINode,
    * will return viewport information that specifies default information.
    */
   nsViewportInfo GetViewportInfo(const ScreenIntSize& aDisplaySize);
-
-  /**
-   * It updates the viewport overflow type with the given two widths
-   * and the viewport setting of the document.
-   * This should only be called when there is out-of-reach overflow
-   * happens on the viewport, i.e. the viewport should be using
-   * `overflow: hidden`. And it should only be called on a top level
-   * content document.
-   */
-  void UpdateViewportOverflowType(nscoord aScrolledWidth,
-                                  nscoord aScrollportWidth);
 
   void UpdateForScrollAnchorAdjustment(nscoord aLength);
 
@@ -1633,6 +1630,14 @@ class Document : public nsINode,
   ServoStyleSet* StyleSetForPresShellOrMediaQueryEvaluation() const {
     return mStyleSet.get();
   }
+
+  // ShadowRoot has APIs that can change styles. This notifies the shell that
+  // stlyes applicable in the shadow tree have potentially changed.
+  void RecordShadowStyleChange(ShadowRoot&);
+
+  // Needs to be called any time the applicable style can has changed, in order
+  // to schedule a style flush and setup all the relevant state.
+  void ApplicableStylesChanged();
 
   // Whether we filled the style set with any style sheet. Only meant to be used
   // from DocumentOrShadowRoot::Traverse.
@@ -2041,6 +2046,7 @@ class Document : public nsINode,
    * or not.
    * If in doublt, use the above FlushPendingNotifications.
    */
+  MOZ_CAN_RUN_SCRIPT_BOUNDARY
   void FlushPendingNotifications(ChangesToFlush aFlush);
 
   /**
@@ -2077,12 +2083,13 @@ class Document : public nsINode,
   virtual void Reset(nsIChannel* aChannel, nsILoadGroup* aLoadGroup);
 
   /**
-   * Reset this document to aURI, aLoadGroup, and aPrincipal.  aURI must not be
-   * null.  If aPrincipal is null, a codebase principal based on aURI will be
-   * used.
+   * Reset this document to aURI, aLoadGroup, aPrincipal and aStoragePrincipal.
+   * aURI must not be null.  If aPrincipal is null, a codebase principal based
+   * on aURI will be used.
    */
   virtual void ResetToURI(nsIURI* aURI, nsILoadGroup* aLoadGroup,
-                          nsIPrincipal* aPrincipal);
+                          nsIPrincipal* aPrincipal,
+                          nsIPrincipal* aStoragePrincipal);
 
   /**
    * Set the container (docshell) for this document. Virtual so that
@@ -2141,6 +2148,11 @@ class Document : public nsINode,
   }
 
   bool IsScriptEnabled();
+
+  /**
+   * Returns true if this document was created from a nsXULPrototypeDocument.
+   */
+  bool LoadedFromPrototype() const { return mPrototypeDocument; }
 
   bool IsTopLevelContentDocument() const { return mIsTopLevelContentDocument; }
   void SetIsTopLevelContentDocument(bool aIsTopLevelContentDocument) {
@@ -2950,16 +2962,34 @@ class Document : public nsINode,
 
   SVGSVGElement* GetSVGRootElement() const;
 
+  struct FrameRequest {
+    FrameRequest(FrameRequestCallback& aCallback, int32_t aHandle);
+
+    // Comparator operators to allow RemoveElementSorted with an
+    // integer argument on arrays of FrameRequest
+    bool operator==(int32_t aHandle) const { return mHandle == aHandle; }
+    bool operator<(int32_t aHandle) const { return mHandle < aHandle; }
+
+    RefPtr<FrameRequestCallback> mCallback;
+    int32_t mHandle;
+  };
+
   nsresult ScheduleFrameRequestCallback(FrameRequestCallback& aCallback,
                                         int32_t* aHandle);
   void CancelFrameRequestCallback(int32_t aHandle);
 
-  typedef nsTArray<RefPtr<FrameRequestCallback>> FrameRequestCallbackList;
+  /**
+   * Returns true if the handle refers to a callback that was canceled that
+   * we did not find in our list of callbacks (e.g. because it is one of those
+   * in the set of callbacks currently queued to be run).
+   */
+  bool IsCanceledFrameRequestCallback(int32_t aHandle) const;
+
   /**
    * Put this document's frame request callbacks into the provided
    * list, and forget about them.
    */
-  void TakeFrameRequestCallbacks(FrameRequestCallbackList& aCallbacks);
+  void TakeFrameRequestCallbacks(nsTArray<FrameRequest>& aCallbacks);
 
   /**
    * @return true if this document's frame request callbacks should be
@@ -3813,9 +3843,11 @@ class Document : public nsINode,
                                        bool aUpdateCSSLoader);
 
  private:
-  void RecordContentBlockingLog(const nsACString& aOrigin, uint32_t aType,
-                                bool aBlocked) {
-    mContentBlockingLog.RecordLog(aOrigin, aType, aBlocked);
+  void RecordContentBlockingLog(
+      const nsACString& aOrigin, uint32_t aType, bool aBlocked,
+      const Maybe<AntiTrackingCommon::StorageAccessGrantedReason>& aReason =
+          Nothing()) {
+    mContentBlockingLog.RecordLog(aOrigin, aType, aBlocked, aReason);
   }
 
   mutable std::bitset<eDeprecatedOperationCount> mDeprecationWarnedAbout;
@@ -4417,9 +4449,11 @@ class Document : public nsINode,
 
   nsCOMPtr<nsIDocumentEncoder> mCachedEncoder;
 
-  struct FrameRequest;
-
   nsTArray<FrameRequest> mFrameRequestCallbacks;
+
+  // The set of frame request callbacks that were canceled but which we failed
+  // to find in mFrameRequestCallbacks.
+  HashSet<int32_t> mCanceledFrameRequestCallbacks;
 
   // This object allows us to evict ourself from the back/forward cache.  The
   // pointer is non-null iff we're currently in the bfcache.
@@ -4505,30 +4539,6 @@ class Document : public nsINode,
   enum ViewportType : uint8_t { DisplayWidthHeight, Specified, Unknown, Empty };
 
   ViewportType mViewportType;
-
-  // Enum for how content in this document overflows viewport causing
-  // out-of-reach issue. Currently it only takes horizontal overflow
-  // into consideration. This enum and the corresponding field is only
-  // set and read on a top level content document.
-  enum class ViewportOverflowType : uint8_t {
-    // Viewport doesn't have out-of-reach overflow content, either
-    // because the content doesn't overflow, or the viewport doesn't
-    // have "overflow: hidden".
-    NoOverflow,
-
-    // All following items indicates that the content overflows the
-    // scroll port which causing out-of-reach content.
-
-    // Meta viewport is disabled or the document is in desktop mode.
-    Desktop,
-    // The content does not overflow the minimum-scale size. When there
-    // is no minimum scale specified, the default value used by Blink,
-    // 0.25, is used for this matter.
-    ButNotMinScaleSize,
-    // The content overflows the minimum-scale size.
-    MinScaleSize,
-  };
-  ViewportOverflowType mViewportOverflowType;
 
   PLDHashTable* mSubDocuments;
 
@@ -4704,6 +4714,9 @@ class Document : public nsINode,
   nsTabSizes mCachedTabSizes;
 
   bool mInRDMPane;
+
+  // The principal to use for the storage area of this document.
+  nsCOMPtr<nsIPrincipal> mIntrinsicStoragePrincipal;
 
  public:
   // Needs to be public because the bindings code pokes at it.

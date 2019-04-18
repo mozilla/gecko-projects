@@ -1932,13 +1932,15 @@ void WorkerPrivate::SetBaseURI(nsIURI* aBaseURI) {
   nsContentUtils::GetUTFOrigin(aBaseURI, mLocationInfo.mOrigin);
 }
 
-nsresult WorkerPrivate::SetPrincipalOnMainThread(nsIPrincipal* aPrincipal,
-                                                 nsILoadGroup* aLoadGroup) {
-  return mLoadInfo.SetPrincipalOnMainThread(aPrincipal, aLoadGroup);
+nsresult WorkerPrivate::SetPrincipalsOnMainThread(
+    nsIPrincipal* aPrincipal, nsIPrincipal* aStoragePrincipal,
+    nsILoadGroup* aLoadGroup) {
+  return mLoadInfo.SetPrincipalsOnMainThread(aPrincipal, aStoragePrincipal,
+                                             aLoadGroup);
 }
 
-nsresult WorkerPrivate::SetPrincipalFromChannel(nsIChannel* aChannel) {
-  return mLoadInfo.SetPrincipalFromChannel(aChannel);
+nsresult WorkerPrivate::SetPrincipalsFromChannel(nsIChannel* aChannel) {
+  return mLoadInfo.SetPrincipalsFromChannel(aChannel);
 }
 
 bool WorkerPrivate::FinalChannelPrincipalIsValid(nsIChannel* aChannel) {
@@ -2355,7 +2357,7 @@ nsresult WorkerPrivate::GetLoadInfo(JSContext* aCx, nsPIDOMWindowInner* aWindow,
     loadInfo.mDomain = aParent->Domain();
     loadInfo.mFromWindow = aParent->IsFromWindow();
     loadInfo.mWindowID = aParent->WindowID();
-    loadInfo.mStorageAllowed = aParent->IsStorageAllowed();
+    loadInfo.mStorageAccess = aParent->StorageAccess();
     loadInfo.mOriginAttributes = aParent->GetOriginAttributes();
     loadInfo.mServiceWorkersTestingInWindow =
         aParent->ServiceWorkersTestingInWindow();
@@ -2482,9 +2484,8 @@ nsresult WorkerPrivate::GetLoadInfo(JSContext* aCx, nsPIDOMWindowInner* aWindow,
 
       loadInfo.mFromWindow = true;
       loadInfo.mWindowID = globalWindow->WindowID();
-      nsContentUtils::StorageAccess access =
+      loadInfo.mStorageAccess =
           nsContentUtils::StorageAllowedForWindow(globalWindow);
-      loadInfo.mStorageAllowed = access > nsContentUtils::StorageAccess::eDeny;
       loadInfo.mCookieSettings = document->CookieSettings();
       loadInfo.mOriginAttributes =
           nsContentUtils::GetOriginAttributes(document);
@@ -2530,7 +2531,7 @@ nsresult WorkerPrivate::GetLoadInfo(JSContext* aCx, nsPIDOMWindowInner* aWindow,
       loadInfo.mXHRParamsAllowed = true;
       loadInfo.mFromWindow = false;
       loadInfo.mWindowID = UINT64_MAX;
-      loadInfo.mStorageAllowed = true;
+      loadInfo.mStorageAccess = nsContentUtils::StorageAccess::eAllow;
       loadInfo.mCookieSettings = mozilla::net::CookieSettings::Create();
       MOZ_ASSERT(loadInfo.mCookieSettings);
 
@@ -2563,7 +2564,7 @@ nsresult WorkerPrivate::GetLoadInfo(JSContext* aCx, nsPIDOMWindowInner* aWindow,
                                getter_AddRefs(loadInfo.mResolvedScriptURI));
     NS_ENSURE_SUCCESS(rv, rv);
 
-    rv = loadInfo.SetPrincipalFromChannel(loadInfo.mChannel);
+    rv = loadInfo.SetPrincipalsFromChannel(loadInfo.mChannel);
     NS_ENSURE_SUCCESS(rv, rv);
   }
 
@@ -3359,6 +3360,11 @@ void WorkerPrivate::PropagateFirstPartyStorageAccessGrantedInternal() {
 
   mLoadInfo.mFirstPartyStorageAccessGranted = true;
 
+  WorkerGlobalScope* globalScope = GlobalScope();
+  if (globalScope) {
+    globalScope->FirstPartyStorageAccessGranted();
+  }
+
   for (uint32_t index = 0; index < data->mChildWorkers.Length(); index++) {
     data->mChildWorkers[index]->PropagateFirstPartyStorageAccessGranted();
   }
@@ -4042,18 +4048,27 @@ void WorkerPrivate::ReportError(JSContext* aCx,
     // for lack of anything better.
     exn.setNull();
   }
+  JS::RootedObject exnStack(aCx, JS::GetPendingExceptionStack(aCx));
   JS_ClearPendingException(aCx);
 
-  WorkerErrorReport report;
+  UniquePtr<WorkerErrorReport> report = MakeUnique<WorkerErrorReport>(this);
   if (aReport) {
-    report.AssignErrorReport(aReport);
+    report->AssignErrorReport(aReport);
   } else {
-    report.mFlags = nsIScriptError::errorFlag | nsIScriptError::exceptionFlag;
+    report->mFlags = nsIScriptError::errorFlag | nsIScriptError::exceptionFlag;
   }
 
-  if (report.mMessage.IsEmpty() && aToStringResult) {
+  JS::RootedObject stack(aCx), stackGlobal(aCx);
+  xpc::FindExceptionStackForConsoleReport(nullptr, exn, exnStack, &stack, &stackGlobal);
+
+  if (stack) {
+    JS::RootedValue stackValue(aCx, JS::ObjectValue(*stack));
+    report->Write(aCx, stackValue, IgnoreErrors());
+  }
+
+  if (report->mMessage.IsEmpty() && aToStringResult) {
     nsDependentCString toStringResult(aToStringResult.c_str());
-    if (!AppendUTF8toUTF16(toStringResult, report.mMessage,
+    if (!AppendUTF8toUTF16(toStringResult, report->mMessage,
                            mozilla::fallible)) {
       // Try again, with only a 1 KB string. Do this infallibly this time.
       // If the user doesn't have 1 KB to spare we're done anyways.
@@ -4064,7 +4079,7 @@ void WorkerPrivate::ReportError(JSContext* aCx,
 
       nsDependentCString truncatedToStringResult(aToStringResult.c_str(),
                                                  index);
-      AppendUTF8toUTF16(truncatedToStringResult, report.mMessage);
+      AppendUTF8toUTF16(truncatedToStringResult, report->mMessage);
     }
   }
 
@@ -4073,11 +4088,11 @@ void WorkerPrivate::ReportError(JSContext* aCx,
   // Don't want to run the scope's error handler if this is a recursive error or
   // if we ran out of memory.
   bool fireAtScope = data->mErrorHandlerRecursionCount == 1 &&
-                     report.mErrorNumber != JSMSG_OUT_OF_MEMORY &&
+                     report->mErrorNumber != JSMSG_OUT_OF_MEMORY &&
                      JS::CurrentGlobalOrNull(aCx);
 
-  WorkerErrorReport::ReportError(aCx, this, fireAtScope, nullptr, report, 0,
-                                 exn);
+  WorkerErrorReport::ReportError(aCx, this, fireAtScope,
+                                 nullptr, std::move(report), 0, exn);
 
   data->mErrorHandlerRecursionCount--;
 }

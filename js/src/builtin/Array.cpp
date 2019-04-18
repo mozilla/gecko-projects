@@ -227,7 +227,7 @@ static bool StringIsArrayIndexHelper(const CharT* s, uint32_t length,
   }
 
   uint32_t c = 0, previous = 0;
-  uint32_t index = JS7_UNDEC(*s++);
+  uint32_t index = AsciiDigitToNumber(*s++);
 
   /* Don't allow leading zeros. */
   if (index == 0 && s != end) {
@@ -240,7 +240,7 @@ static bool StringIsArrayIndexHelper(const CharT* s, uint32_t length,
     }
 
     previous = index;
-    c = JS7_UNDEC(*s);
+    c = AsciiDigitToNumber(*s);
     index = 10 * index + c;
   }
 
@@ -882,7 +882,7 @@ bool js::ArraySetLength(JSContext* cx, Handle<ArrayObject*> arr, HandleId id,
 
       Vector<uint32_t> indexes(cx);
       {
-        AutoIdVector props(cx);
+        RootedIdVector props(cx);
         if (!GetPropertyKeys(cx, arr, JSITER_OWNONLY | JSITER_HIDDEN, &props)) {
           return false;
         }
@@ -1188,7 +1188,7 @@ static bool array_toSource(JSContext* cx, unsigned argc, Value* vp) {
     return false;
   }
 
-  StringBuffer sb(cx);
+  JSStringBuilder sb(cx);
 
   if (detector.foundCycle()) {
     if (!sb.append("[]")) {
@@ -1448,7 +1448,7 @@ bool js::array_join(JSContext* cx, unsigned argc, Value* vp) {
   }
 
   // Step 5.
-  StringBuffer sb(cx);
+  JSStringBuilder sb(cx);
   if (sepstr->hasTwoByteChars() && !sb.ensureTwoByteChars()) {
     return false;
   }

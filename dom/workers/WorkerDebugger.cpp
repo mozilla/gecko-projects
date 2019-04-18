@@ -437,10 +437,16 @@ void WorkerDebugger::ReportErrorToDebuggerOnMainThread(
     listeners[index]->OnError(aFilename, aLineno, aMessage);
   }
 
-  WorkerErrorReport report;
+  // We need a JSContext to be able to read any stack associated with the error.
+  // This will not run any scripts.
+  AutoJSAPI jsapi;
+  DebugOnly<bool> ok = jsapi.Init(xpc::UnprivilegedJunkScope());
+  MOZ_ASSERT(ok, "UnprivilegedJunkScope should exist");
+
+  WorkerErrorReport report(nullptr);
   report.mMessage = aMessage;
   report.mFilename = aFilename;
-  WorkerErrorReport::LogErrorToConsole(report, 0);
+  WorkerErrorReport::LogErrorToConsole(jsapi.cx(), report, 0);
 }
 
 RefPtr<PerformanceInfoPromise> WorkerDebugger::ReportPerformanceInfo() {
@@ -517,18 +523,19 @@ RefPtr<PerformanceInfoPromise> WorkerDebugger::ReportPerformanceInfo() {
       SystemGroup::AbstractMainThreadFor(TaskCategory::Performance);
 
   return CollectMemoryInfo(top, mainThread)
-      ->Then(mainThread, __func__,
-             [workerRef, url, pid, perfId, windowID, duration, isTopLevel,
-              items](const PerformanceMemoryInfo& aMemoryInfo) {
-               return PerformanceInfoPromise::CreateAndResolve(
-                   PerformanceInfo(url, pid, windowID, duration, perfId, true,
-                                   isTopLevel, aMemoryInfo, items),
-                   __func__);
-             },
-             [workerRef]() {
-               return PerformanceInfoPromise::CreateAndReject(NS_ERROR_FAILURE,
-                                                              __func__);
-             });
+      ->Then(
+          mainThread, __func__,
+          [workerRef, url, pid, perfId, windowID, duration, isTopLevel,
+           items](const PerformanceMemoryInfo& aMemoryInfo) {
+            return PerformanceInfoPromise::CreateAndResolve(
+                PerformanceInfo(url, pid, windowID, duration, perfId, true,
+                                isTopLevel, aMemoryInfo, items),
+                __func__);
+          },
+          [workerRef]() {
+            return PerformanceInfoPromise::CreateAndReject(NS_ERROR_FAILURE,
+                                                           __func__);
+          });
 }
 
 }  // namespace dom

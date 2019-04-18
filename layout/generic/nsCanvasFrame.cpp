@@ -42,8 +42,7 @@ using namespace mozilla::layout;
 using namespace mozilla::gfx;
 using namespace mozilla::layers;
 
-nsCanvasFrame* NS_NewCanvasFrame(nsIPresShell* aPresShell,
-                                 ComputedStyle* aStyle) {
+nsCanvasFrame* NS_NewCanvasFrame(PresShell* aPresShell, ComputedStyle* aStyle) {
   return new (aPresShell) nsCanvasFrame(aStyle, aPresShell->GetPresContext());
 }
 
@@ -635,13 +634,8 @@ void nsCanvasFrame::PaintFocus(DrawTarget* aDrawTarget, nsPoint aPt) {
   // for HTML documents?
   nsIFrame* root = mFrames.FirstChild();
   const nsStyleColor* color = root ? root->StyleColor() : StyleColor();
-  if (!color) {
-    NS_ERROR("current color cannot be found");
-    return;
-  }
-
   nsCSSRendering::PaintFocus(PresContext(), aDrawTarget, focusRect,
-                             color->mColor);
+                             color->mColor.ToColor());
 }
 
 /* virtual */

@@ -44,6 +44,7 @@ enum class LineReflowStatus {
 class nsBlockInFlowLineIterator;
 namespace mozilla {
 class BlockReflowInput;
+class PresShell;
 class ServoRestyleState;
 class ServoStyleSet;
 }  // namespace mozilla
@@ -101,7 +102,7 @@ class nsBlockFrame : public nsContainerFrame {
     return mLines.rbegin(aList);
   }
 
-  friend nsBlockFrame* NS_NewBlockFrame(nsIPresShell* aPresShell,
+  friend nsBlockFrame* NS_NewBlockFrame(mozilla::PresShell* aPresShell,
                                         ComputedStyle* aStyle);
 
   // nsQueryFrame
@@ -234,10 +235,12 @@ class nsBlockFrame : public nsContainerFrame {
   // not 'none', and no 'content'?
   bool MarkerIsEmpty() const;
 
+#ifdef ACCESSIBILITY
   /**
-   * Return the ::marker text equivalent.
+   * Return the ::marker text equivalent, without flushing.
    */
   void GetSpokenMarkerText(nsAString& aText) const;
+#endif
 
   /**
    * Return true if this frame has a ::marker frame.
@@ -671,7 +674,7 @@ class nsBlockFrame : public nsContainerFrame {
    * Reflow a line.
    *
    * @param aState
-   *   the current reflow state
+   *   the current reflow input
    * @param aLine
    *   the line to reflow.  can contain a single block frame or contain 1 or
    *   more inline frames.
@@ -762,7 +765,7 @@ class nsBlockFrame : public nsContainerFrame {
   /**
    * Create a next-in-flow, if necessary, for aFrame. If a new frame is
    * created, place it in aLine if aLine is not null.
-   * @param aState the block reflow state
+   * @param aState the block reflow input
    * @param aLine where to put a new frame
    * @param aFrame the frame
    * @return true if a new frame was created, false if not

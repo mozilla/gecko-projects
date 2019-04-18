@@ -247,6 +247,8 @@ class nsGlobalWindowOuter final : public mozilla::dom::EventTarget,
   // nsIScriptObjectPrincipal
   virtual nsIPrincipal* GetPrincipal() override;
 
+  virtual nsIPrincipal* GetEffectiveStoragePrincipal() override;
+
   // nsIDOMWindow
   NS_DECL_NSIDOMWINDOW
 
@@ -410,8 +412,6 @@ class nsGlobalWindowOuter final : public mozilla::dom::EventTarget,
 
   nsIScriptContext* GetContextInternal();
 
-  nsGlobalWindowOuter* GetOuterWindowInternal();
-
   nsGlobalWindowInner* GetCurrentInnerWindowInternal() const;
 
   nsGlobalWindowInner* EnsureInnerWindowInternal();
@@ -457,9 +457,11 @@ class nsGlobalWindowOuter final : public mozilla::dom::EventTarget,
       Document* aDoc, nsIURI* aPopupURI, const nsAString& aPopupWindowName,
       const nsAString& aPopupWindowFeatures) override;
 
-  virtual void NotifyContentBlockingEvent(unsigned aEvent, nsIChannel* aChannel,
-                                          bool aBlocked,
-                                          nsIURI* aURIHint) override;
+  virtual void NotifyContentBlockingEvent(
+      unsigned aEvent, nsIChannel* aChannel, bool aBlocked, nsIURI* aURIHint,
+      const mozilla::Maybe<
+          mozilla::AntiTrackingCommon::StorageAccessGrantedReason>& aReason)
+      override;
 
   void AddSizeOfIncludingThis(nsWindowSizes& aWindowSizes) const;
 
@@ -598,6 +600,7 @@ class nsGlobalWindowOuter final : public mozilla::dom::EventTarget,
   double GetScrollXOuter();
   double GetScrollYOuter();
 
+  MOZ_CAN_RUN_SCRIPT_BOUNDARY
   void SizeToContentOuter(mozilla::dom::CallerType aCallerType,
                           mozilla::ErrorResult& aError);
   nsIControllers* GetControllersOuter(mozilla::ErrorResult& aError);
@@ -848,6 +851,7 @@ class nsGlobalWindowOuter final : public mozilla::dom::EventTarget,
   // Arguments to this function should have values in app units
   void SetCSSViewportWidthAndHeight(nscoord width, nscoord height);
   // Arguments to this function should have values in device pixels
+  MOZ_CAN_RUN_SCRIPT_BOUNDARY
   nsresult SetDocShellWidthAndHeight(int32_t width, int32_t height);
 
   static bool CanSetProperty(const char* aPrefName);
@@ -1098,6 +1102,7 @@ class nsGlobalWindowOuter final : public mozilla::dom::EventTarget,
   RefPtr<mozilla::dom::Storage> mLocalStorage;
 
   nsCOMPtr<nsIPrincipal> mDocumentPrincipal;
+  nsCOMPtr<nsIPrincipal> mDocumentStoragePrincipal;
 
 #ifdef DEBUG
   uint32_t mSerial;
@@ -1182,22 +1187,18 @@ inline nsIScriptContext* nsGlobalWindowOuter::GetContextInternal() {
   return mContext;
 }
 
-inline nsGlobalWindowOuter* nsGlobalWindowOuter::GetOuterWindowInternal() {
-  return nsGlobalWindowOuter::Cast(GetOuterWindow());
-}
-
 inline nsGlobalWindowInner* nsGlobalWindowOuter::GetCurrentInnerWindowInternal()
     const {
   return nsGlobalWindowInner::Cast(mInnerWindow);
 }
 
 inline nsGlobalWindowInner* nsGlobalWindowOuter::EnsureInnerWindowInternal() {
-  return nsGlobalWindowInner::Cast(AsOuter()->EnsureInnerWindow());
+  return nsGlobalWindowInner::Cast(EnsureInnerWindow());
 }
 
 inline bool nsGlobalWindowOuter::IsTopLevelWindow() {
   nsPIDOMWindowOuter* parentWindow = GetScriptableTop();
-  return parentWindow == this->AsOuter();
+  return parentWindow == this;
 }
 
 inline bool nsGlobalWindowOuter::IsPopupSpamWindow() { return mIsPopupSpam; }
@@ -1208,7 +1209,7 @@ inline bool nsGlobalWindowOuter::IsFrame() {
 
 inline void nsGlobalWindowOuter::MaybeClearInnerWindow(
     nsGlobalWindowInner* aExpectedInner) {
-  if (mInnerWindow == aExpectedInner->AsInner()) {
+  if (mInnerWindow == aExpectedInner) {
     mInnerWindow = nullptr;
   }
 }

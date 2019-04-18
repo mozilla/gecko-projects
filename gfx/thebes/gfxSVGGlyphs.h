@@ -47,7 +47,7 @@ class gfxSVGGlyphsDocument final : public nsAPostRefreshObserver {
 
   ~gfxSVGGlyphsDocument();
 
-  virtual void DidRefresh() override;
+  void DidRefresh() override;
 
   size_t SizeOfIncludingThis(mozilla::MallocSizeOf aMallocSizeOf) const;
 
@@ -64,7 +64,7 @@ class gfxSVGGlyphsDocument final : public nsAPostRefreshObserver {
   gfxSVGGlyphs *mOwner;
   RefPtr<mozilla::dom::Document> mDocument;
   nsCOMPtr<nsIContentViewer> mViewer;
-  nsCOMPtr<nsIPresShell> mPresShell;
+  RefPtr<mozilla::PresShell> mPresShell;
 
   nsBaseHashtable<nsUint32HashKey, Element *, Element *> mGlyphIdMap;
 

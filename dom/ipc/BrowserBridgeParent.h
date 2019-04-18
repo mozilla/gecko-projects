@@ -21,7 +21,8 @@ class BrowserBridgeParent : public PBrowserBridgeParent {
 
   // Initialize this actor after performing startup.
   nsresult Init(const nsString& aPresentationURL, const nsString& aRemoteType,
-                CanonicalBrowsingContext* aBrowsingContext);
+                CanonicalBrowsingContext* aBrowsingContext,
+                const uint32_t& aChromeFlags);
 
   TabParent* GetTabParent() { return mTabParent; }
 
@@ -35,6 +36,9 @@ class BrowserBridgeParent : public PBrowserBridgeParent {
     return static_cast<TabParent*>(PBrowserBridgeParent::Manager());
   }
 
+  // Tear down this BrowserBridgeParent.
+  void Destroy();
+
  protected:
   friend class PBrowserBridgeParent;
 
@@ -42,6 +46,7 @@ class BrowserBridgeParent : public PBrowserBridgeParent {
                                    const bool& aParentIsActive,
                                    const nsSizeMode& aSizeMode);
   mozilla::ipc::IPCResult RecvLoadURL(const nsCString& aUrl);
+  mozilla::ipc::IPCResult RecvResumeLoad(uint64_t aPendingSwitchID);
   mozilla::ipc::IPCResult RecvUpdateDimensions(
       const DimensionInfo& aDimensions);
   mozilla::ipc::IPCResult RecvRenderLayers(const bool& aEnabled,

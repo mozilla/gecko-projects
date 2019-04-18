@@ -12,10 +12,10 @@
 #include "mozilla/FloatingPoint.h"
 #include "mozilla/PodOperations.h"
 #include "mozilla/Range.h"
+#include "mozilla/TextUtils.h"
 #include "mozilla/TypeTraits.h"
 #include "mozilla/Unused.h"
 
-#include <ctype.h>
 #include <limits>
 #include <string.h>
 
@@ -66,7 +66,9 @@ using namespace js;
 using JS::Symbol;
 using JS::SymbolCode;
 
+using mozilla::AsciiAlphanumericToNumber;
 using mozilla::CheckedInt;
+using mozilla::IsAsciiHexDigit;
 using mozilla::IsNaN;
 using mozilla::IsSame;
 using mozilla::PodCopy;
@@ -226,28 +228,31 @@ static bool str_escape(JSContext* cx, unsigned argc, Value* vp) {
 template <typename CharT>
 static inline bool Unhex4(const RangedPtr<const CharT> chars,
                           char16_t* result) {
-  char16_t a = chars[0], b = chars[1], c = chars[2], d = chars[3];
+  CharT a = chars[0], b = chars[1], c = chars[2], d = chars[3];
 
-  if (!(JS7_ISHEX(a) && JS7_ISHEX(b) && JS7_ISHEX(c) && JS7_ISHEX(d))) {
+  if (!(IsAsciiHexDigit(a) && IsAsciiHexDigit(b) && IsAsciiHexDigit(c) &&
+        IsAsciiHexDigit(d))) {
     return false;
   }
 
-  *result =
-      (((((JS7_UNHEX(a) << 4) + JS7_UNHEX(b)) << 4) + JS7_UNHEX(c)) << 4) +
-      JS7_UNHEX(d);
+  char16_t unhex = AsciiAlphanumericToNumber(a);
+  unhex = (unhex << 4) + AsciiAlphanumericToNumber(b);
+  unhex = (unhex << 4) + AsciiAlphanumericToNumber(c);
+  unhex = (unhex << 4) + AsciiAlphanumericToNumber(d);
+  *result = unhex;
   return true;
 }
 
 template <typename CharT>
 static inline bool Unhex2(const RangedPtr<const CharT> chars,
                           char16_t* result) {
-  char16_t a = chars[0], b = chars[1];
+  CharT a = chars[0], b = chars[1];
 
-  if (!(JS7_ISHEX(a) && JS7_ISHEX(b))) {
+  if (!(IsAsciiHexDigit(a) && IsAsciiHexDigit(b))) {
     return false;
   }
 
-  *result = (JS7_UNHEX(a) << 4) + JS7_UNHEX(b);
+  *result = (AsciiAlphanumericToNumber(a) << 4) + AsciiAlphanumericToNumber(b);
   return true;
 }
 
@@ -324,7 +329,7 @@ static bool str_unescape(JSContext* cx, unsigned argc, Value* vp) {
   }
 
   // Step 3.
-  StringBuffer sb(cx);
+  JSStringBuilder sb(cx);
   if (str->hasTwoByteChars() && !sb.ensureTwoByteChars()) {
     return false;
   }
@@ -498,7 +503,7 @@ MOZ_ALWAYS_INLINE bool str_toSource_impl(JSContext* cx, const CallArgs& args) {
     return false;
   }
 
-  StringBuffer sb(cx);
+  JSStringBuilder sb(cx);
   if (!sb.append("(new String(") ||
       !sb.append(quoted.get(), strlen(quoted.get())) || !sb.append("))")) {
     return false;
@@ -1576,19 +1581,19 @@ bool js::str_normalize(JSContext* cx, unsigned argc, Value* vp) {
     PodCopy(chars.begin(), srcChars.begin().get(), spanLength);
   }
 
-  int32_t size =
-      intl::CallICU(cx,
-                    [normalizer, &srcChars, spanLength](
-                        UChar* chars, uint32_t size, UErrorCode* status) {
-                      mozilla::RangedPtr<const char16_t> remainingStart =
-                          srcChars.begin() + spanLength;
-                      size_t remainingLength = srcChars.length() - spanLength;
+  int32_t size = intl::CallICU(
+      cx,
+      [normalizer, &srcChars, spanLength](UChar* chars, uint32_t size,
+                                          UErrorCode* status) {
+        mozilla::RangedPtr<const char16_t> remainingStart =
+            srcChars.begin() + spanLength;
+        size_t remainingLength = srcChars.length() - spanLength;
 
-                      return unorm2_normalizeSecondAndAppend(
-                          normalizer, chars, spanLength, size,
-                          remainingStart.get(), remainingLength, status);
-                    },
-                    chars);
+        return unorm2_normalizeSecondAndAppend(normalizer, chars, spanLength,
+                                               size, remainingStart.get(),
+                                               remainingLength, status);
+      },
+      chars);
   if (size < 0) {
     return false;
   }
@@ -2816,7 +2821,7 @@ static JSLinearString* InterpretDollarReplacement(
    *
    * Note that dollar vars _could_ make the resulting text smaller than this.
    */
-  StringBuffer newReplaceChars(cx);
+  JSStringBuilder newReplaceChars(cx);
   if (repstr->hasTwoByteChars() && !newReplaceChars.ensureTwoByteChars()) {
     return nullptr;
   }
@@ -2936,7 +2941,7 @@ JSString* js::StringFlatReplaceString(JSContext* cx, HandleString string,
     return nullptr;
   }
 
-  StringBuffer sb(cx);
+  JSStringBuilder sb(cx);
   if (linearStr->hasTwoByteChars()) {
     if (!sb.ensureTwoByteChars()) {
       return nullptr;
@@ -3801,7 +3806,7 @@ static const bool js_isUriUnescaped[] = {
 
 #undef ____
 
-static inline bool TransferBufferToString(StringBuffer& sb, JSString* str,
+static inline bool TransferBufferToString(JSStringBuilder& sb, JSString* str,
                                           MutableHandleValue rval) {
   if (!sb.empty()) {
     str = sb.finishString();
@@ -3929,7 +3934,7 @@ static MOZ_ALWAYS_INLINE bool Encode(JSContext* cx, HandleLinearString str,
     return true;
   }
 
-  StringBuffer sb(cx);
+  JSStringBuilder sb(cx);
 
   EncodeResult res;
   if (str->hasLatin1Chars()) {
@@ -3976,11 +3981,12 @@ static DecodeResult Decode(StringBuffer& sb, const CharT* chars, size_t length,
         return Decode_BadUri;
       }
 
-      if (!JS7_ISHEX(chars[k + 1]) || !JS7_ISHEX(chars[k + 2])) {
+      if (!IsAsciiHexDigit(chars[k + 1]) || !IsAsciiHexDigit(chars[k + 2])) {
         return Decode_BadUri;
       }
 
-      uint32_t B = JS7_UNHEX(chars[k + 1]) * 16 + JS7_UNHEX(chars[k + 2]);
+      uint32_t B = AsciiAlphanumericToNumber(chars[k + 1]) * 16 +
+                   AsciiAlphanumericToNumber(chars[k + 2]);
       k += 2;
       if (B < 128) {
         Latin1Char ch = Latin1Char(B);
@@ -4016,11 +4022,13 @@ static DecodeResult Decode(StringBuffer& sb, const CharT* chars, size_t length,
             return Decode_BadUri;
           }
 
-          if (!JS7_ISHEX(chars[k + 1]) || !JS7_ISHEX(chars[k + 2])) {
+          if (!IsAsciiHexDigit(chars[k + 1]) ||
+              !IsAsciiHexDigit(chars[k + 2])) {
             return Decode_BadUri;
           }
 
-          B = JS7_UNHEX(chars[k + 1]) * 16 + JS7_UNHEX(chars[k + 2]);
+          B = AsciiAlphanumericToNumber(chars[k + 1]) * 16 +
+              AsciiAlphanumericToNumber(chars[k + 2]);
           if ((B & 0xC0) != 0x80) {
             return Decode_BadUri;
           }
@@ -4074,7 +4082,7 @@ static bool Decode(JSContext* cx, HandleLinearString str,
     return true;
   }
 
-  StringBuffer sb(cx);
+  JSStringBuilder sb(cx);
 
   DecodeResult res;
   if (str->hasLatin1Chars()) {
@@ -4139,7 +4147,7 @@ static bool str_encodeURI_Component(JSContext* cx, unsigned argc, Value* vp) {
 }
 
 JSString* js::EncodeURI(JSContext* cx, const char* chars, size_t length) {
-  StringBuffer sb(cx);
+  JSStringBuilder sb(cx);
   EncodeResult result = Encode(sb, reinterpret_cast<const Latin1Char*>(chars),
                                length, js_isUriReservedPlusPound);
   if (result == EncodeResult::Encode_Failure) {

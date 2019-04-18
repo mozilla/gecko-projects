@@ -194,13 +194,16 @@ XPCOMUtils.defineLazyGetter(this, "gURLBar", () => gURLBarHandler.urlbar);
  * customization or when the quantumbar pref changes.
  */
 var gURLBarHandler = {
+  toggleQuantumBarAttribute() {
+    this.textbox = document.getElementById("urlbar");
+    this.textbox.setAttribute("quantumbar", this.quantumbar);
+  },
+
   /**
    * The urlbar binding or object.
    */
   get urlbar() {
     if (!this._urlbar) {
-      this.textbox = document.getElementById("urlbar");
-      this._updateBinding();
       if (this.quantumbar) {
         this._urlbar = new UrlbarInput({textbox: this.textbox});
         if (this._lastValue) {
@@ -213,6 +216,18 @@ var gURLBarHandler = {
       gBrowser.tabContainer.addEventListener("TabSelect", this._urlbar);
     }
     return this._urlbar;
+  },
+
+  /**
+   * Forwards to gURLBar.formatValue(), if the binding has been applied already.
+   * This is necessary until the Quantum Bar is not the default and we allow
+   * to dynamically switch between it and the legacy implementation, because the
+   * binding is only applied before the initial xul layout.
+   */
+  formatValue() {
+    if (typeof this.textbox.formatValue == "function") {
+      this.textbox.formatValue();
+    }
   },
 
   /**
@@ -484,6 +499,9 @@ function showFxaToolbarMenu(enable) {
     // event was performed yet.
     gSync.maybeUpdateUIState();
 
+    // Enabled FxA toolbar telemetry
+    Services.telemetry.setEventRecordingEnabled("fxa_avatar_menu", true);
+
     // We set an attribute here so that we can toggle the custom
     // badge depending on whether the FxA menu was ever accessed.
     if (!gFxaToolbarAccessed) {
@@ -730,7 +748,7 @@ const gStoragePressureObserver = {
         callback(notificationBar, button) {
           // The advanced subpanes are only supported in the old organization, which will
           // be removed by bug 1349689.
-          openPreferences("privacy-sitedata", { origin: "storagePressure" });
+          openPreferences("privacy-sitedata");
         },
       });
     }
@@ -1346,6 +1364,9 @@ var gBrowserInit = {
   },
 
   onBeforeInitialXULLayout() {
+    // Dynamically switch on-off the Quantum Bar based on prefs.
+    gURLBarHandler.toggleQuantumBarAttribute();
+
     // Set a sane starting width/height for all resolutions on new profiles.
     if (Services.prefs.getBoolPref("privacy.resistFingerprinting")) {
       // When the fingerprinting resistance is enabled, making sure that we don't
@@ -1373,7 +1394,6 @@ var gBrowserInit = {
     TabsInTitlebar.init();
 
     new LightweightThemeConsumer(document);
-    CompactTheme.init();
 
     if (AppConstants.platform == "win") {
       if (window.matchMedia("(-moz-os-version: windows-win8)").matches &&
@@ -2000,8 +2020,6 @@ var gBrowserInit = {
     TabsInTitlebar.uninit();
 
     ToolbarIconColor.uninit();
-
-    CompactTheme.uninit();
 
     // In certain scenarios it's possible for unload to be fired before onload,
     // (e.g. if the window is being closed after browser.js loads but before the
@@ -3193,8 +3211,7 @@ var BrowserOnClick = {
           flags |= overrideService.ERROR_TIME;
         }
         let uri = Services.uriFixup.createFixupURI(location, 0);
-        let permanentOverride =
-          Services.prefs.getBoolPref("security.certerrors.permanentOverride");
+        let permanentOverride = !PrivateBrowsingUtils.isBrowserPrivate(browser) && Services.prefs.getBoolPref("security.certerrors.permanentOverride");
         cert = securityInfo.serverCert;
         overrideService.rememberValidityOverride(
           uri.asciiHost, uri.port,
@@ -3998,7 +4015,7 @@ const BrowserSearch = {
       // browser's offered engines.
       this._removeMaybeOfferedEngine(engineName);
       break;
-    case "engine-current":
+    case "engine-default":
       if (this._searchInitComplete) {
         this._updateURLBarPlaceholder(engineName);
       }
@@ -4524,6 +4541,9 @@ function toOpenWindowByType(inType, uri, features) {
  *          remote:  A boolean indicating if the window should run
  *                   remote browser tabs or not. If omitted, the window
  *                   will choose the profile default state.
+ *          fission: A boolean indicating if the window should run
+ *                   with fission enabled or not. If omitted, the window
+ *                   will choose the profile default state.
  *        }
  * @return a reference to the new window.
  */
@@ -4551,6 +4571,12 @@ function OpenBrowserWindow(options) {
     extraFeatures += ",remote";
   } else if (options && options.remote === false) {
     extraFeatures += ",non-remote";
+  }
+
+  if (options && options.fission) {
+    extraFeatures += ",fission";
+  } else if (options && options.fission === false) {
+    extraFeatures += ",non-fission";
   }
 
   // If the window is maximized, we want to skip the animation, since we're
@@ -4709,29 +4735,44 @@ function updateFileMenuUserContextUIVisibility(id) {
  * Updates the User Context UI indicators if the browser is in a non-default context
  */
 function updateUserContextUIIndicator() {
+  function replaceContainerClass(classType, element, value) {
+    let prefix = "identity-" + classType + "-";
+    if (value && element.classList.contains(prefix + value)) {
+      return;
+    }
+    for (let className of element.classList) {
+      if (className.startsWith(prefix)) {
+        element.classList.remove(className);
+      }
+    }
+    if (value) {
+      element.classList.add(prefix + value);
+    }
+  }
+
   let hbox = document.getElementById("userContext-icons");
 
   let userContextId = gBrowser.selectedBrowser.getAttribute("usercontextid");
   if (!userContextId) {
-    hbox.setAttribute("data-identity-color", "");
+    replaceContainerClass("color", hbox, "");
     hbox.hidden = true;
     return;
   }
 
   let identity = ContextualIdentityService.getPublicIdentityFromId(userContextId);
   if (!identity) {
-    hbox.setAttribute("data-identity-color", "");
+    replaceContainerClass("color", hbox, "");
     hbox.hidden = true;
     return;
   }
 
-  hbox.setAttribute("data-identity-color", identity.color);
+  replaceContainerClass("color", hbox, identity.color);
 
   let label = document.getElementById("userContext-label");
   label.setAttribute("value", ContextualIdentityService.getUserContextLabel(userContextId));
 
   let indicator = document.getElementById("userContext-indicator");
-  indicator.setAttribute("data-identity-icon", identity.icon);
+  replaceContainerClass("icon", indicator, identity.icon);
 
   hbox.hidden = false;
 }
@@ -5169,7 +5210,7 @@ var XULBrowserWindow = {
 
     // Make sure the "https" part of the URL is striked out or not,
     // depending on the current mixed active content blocking state.
-    gURLBar.formatValue();
+    gURLBarHandler.formatValue();
 
     try {
       uri = Services.uriFixup.createExposableURI(uri);
@@ -6950,7 +6991,7 @@ var OfflineApps = {
   },
 
   manage() {
-    openPreferences("panePrivacy", { origin: "offlineApps" });
+    openPreferences("panePrivacy");
   },
 
   receiveMessage(msg) {

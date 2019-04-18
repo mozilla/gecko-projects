@@ -31,11 +31,33 @@ const LAYOUT_VARIANTS = {
   "dev-test-all": "A little bit of everything. Good layout for testing all components",
   "dev-test-feeds": "Stress testing for slow feeds",
 };
-class DiscoveryStreamAdmin extends React.PureComponent {
+
+export class ToggleSpocButton extends React.PureComponent {
+  constructor(props) {
+    super(props);
+    this.handleClick = this.handleClick.bind(this);
+  }
+
+  handleClick() {
+    this.props.onClick(this.props.spoc);
+  }
+
+  render() {
+    return (
+      <button onClick={this.handleClick}>collapse/open</button>
+    );
+  }
+}
+
+export class DiscoveryStreamAdmin extends React.PureComponent {
   constructor(props) {
     super(props);
     this.onEnableToggle = this.onEnableToggle.bind(this);
     this.changeEndpointVariant = this.changeEndpointVariant.bind(this);
+    this.onSpocToggle = this.onSpocToggle.bind(this);
+    this.state = {
+      toggledSpocs: {},
+    };
   }
 
   get isOptedOut() {
@@ -79,6 +101,63 @@ class DiscoveryStreamAdmin extends React.PureComponent {
     return isMatch;
   }
 
+  renderSpocs() {
+    const {spocs} = this.props.state;
+    let spocsData = [];
+    if (spocs.data && spocs.data.spocs && spocs.data.spocs.length) {
+      spocsData = spocs.data.spocs;
+    }
+
+    return (
+      <React.Fragment>
+        <table><tbody>
+          <Row>
+            <td className="min">spocs_endpoint</td>
+            <td>{spocs.spocs_endpoint}</td>
+          </Row>
+          <Row>
+            <td className="min">Data last fetched</td>
+            <td>{relativeTime(spocs.lastUpdated)}</td>
+          </Row>
+        </tbody></table>
+        <h4>Spoc data</h4>
+        <table><tbody>
+          {spocsData.map(spoc => this.renderSpocData(spoc))}
+        </tbody></table>
+        <h4>Spoc frequency caps</h4>
+        <table><tbody>
+          {spocs.frequency_caps.map(spoc => this.renderSpocData(spoc))}
+        </tbody></table>
+      </React.Fragment>
+    );
+  }
+
+  onSpocToggle(spoc) {
+    const {toggledSpocs} = this.state;
+    this.setState({
+      toggledSpocs: {
+        ...toggledSpocs,
+        [spoc.id]: !toggledSpocs[spoc.id],
+      },
+    });
+  }
+
+  renderSpocData(spoc) {
+    let spocData = "";
+    if (this.state.toggledSpocs[spoc.id]) {
+      spocData = JSON.stringify(spoc, null, 2);
+    }
+    return (<tr className="message-item" key={spoc.id}>
+      <td className="message-id">
+        <span>{spoc.id} <br /></span>
+        <ToggleSpocButton spoc={spoc} onClick={this.onSpocToggle} />
+      </td>
+      <td className="message-summary">
+        <pre>{spocData}</pre>
+      </td>
+    </tr>);
+  }
+
   renderFeed(feed) {
     const {feeds} = this.props.state;
     if (!feed.url) {
@@ -100,7 +179,6 @@ class DiscoveryStreamAdmin extends React.PureComponent {
 
   render() {
     const {isOptedOut} = this;
-
     const {config, lastUpdated, layout} = this.props.state;
     return (<div>
 
@@ -133,6 +211,9 @@ class DiscoveryStreamAdmin extends React.PureComponent {
           ))}
         </div>
       ))}
+
+      <h3>Spocs</h3>
+      {this.renderSpocs()}
     </div>);
   }
 }
@@ -562,6 +643,37 @@ export class ASRouterAdminInner extends React.PureComponent {
       </div>);
   }
 
+  renderErrorMessage({id, errors}) {
+    const providerId = <td rowSpan={errors.length}>{id}</td>;
+    // .reverse() so that the last error (most recent) is first
+    return errors.map(({error, timestamp}, cellKey) => (<tr key={cellKey}>
+      {cellKey === errors.length - 1 ? providerId : null}
+      <td>{error.message}</td>
+      <td>{relativeTime(timestamp)}</td>
+      </tr>)
+    ).reverse();
+  }
+
+  renderErrors() {
+    const providersWithErrors = this.state.providers && this.state.providers
+      .filter(p => p.errors && p.errors.length);
+
+    if (providersWithErrors && providersWithErrors.length) {
+      return (<table className="errorReporting">
+        <thead>
+          <tr>
+            <th>Provider ID</th>
+            <th>Message</th>
+            <th>Timestamp</th>
+          </tr>
+        </thead>
+        <tbody>{providersWithErrors.map(this.renderErrorMessage)}</tbody>
+        </table>);
+    }
+
+    return <p>No errors</p>;
+  }
+
   getSection() {
     const [section] = this.props.location.routes;
     switch (section) {
@@ -582,6 +694,12 @@ export class ASRouterAdminInner extends React.PureComponent {
           <h2>Discovery Stream</h2>
           <DiscoveryStreamAdmin state={this.props.DiscoveryStream} otherPrefs={this.props.Prefs.values} dispatch={this.props.dispatch} />
         </React.Fragment>);
+      case "errors":
+        return (<React.Fragment>
+          <h2>ASRouter Errors</h2>
+          {this.renderErrors()}
+          </React.Fragment>
+        );
       default:
         return (<React.Fragment>
           <h2>Message Providers <button title="Restore all provider settings that ship with Firefox" className="button" onClick={this.resetPref}>Restore default prefs</button></h2>
@@ -602,6 +720,7 @@ export class ASRouterAdminInner extends React.PureComponent {
           <li><a href="#devtools-targeting">Targeting</a></li>
           <li><a href="#devtools-pocket">Pocket</a></li>
           <li><a href="#devtools-ds">Discovery Stream</a></li>
+          <li><a href="#devtools-errors">Errors</a></li>
         </ul>
       </aside>
       <main className="main-panel">

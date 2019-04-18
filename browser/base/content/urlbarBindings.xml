@@ -582,7 +582,10 @@ file, You can obtain one at http://mozilla.org/MPL/2.0/.
       -->
       <method name="formatValue">
         <body><![CDATA[
-          this.valueFormatter.update();
+          // The editor may not exist if the toolbar is not visible.
+          if (this.editor) {
+            this.valueFormatter.update();
+          }
         ]]></body>
       </method>
 
@@ -1881,7 +1884,7 @@ file, You can obtain one at http://mozilla.org/MPL/2.0/.
                      value="&urlbar.searchSuggestionsNotification.changeSettingsUnix;"
                      accesskey="&urlbar.searchSuggestionsNotification.changeSettingsUnix.accesskey;"
 #endif
-                     onclick="openPreferences('paneSearch', {origin: 'searchChangeSettings'});"
+                     onclick="openPreferences('paneSearch');"
                      control="search-suggestions-change-settings"/>
         </xul:hbox>
       </xul:deck>

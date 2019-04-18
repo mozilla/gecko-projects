@@ -19,9 +19,10 @@ namespace mozilla {
 template <class T>
 class LinkedList;
 class LogicalPoint;
+class PresShell;
 }  // namespace mozilla
 
-nsContainerFrame* NS_NewFlexContainerFrame(nsIPresShell* aPresShell,
+nsContainerFrame* NS_NewFlexContainerFrame(mozilla::PresShell* aPresShell,
                                            mozilla::ComputedStyle* aStyle);
 
 /**
@@ -98,8 +99,8 @@ class nsFlexContainerFrame final : public nsContainerFrame {
   NS_DECL_QUERYFRAME
 
   // Factory method:
-  friend nsContainerFrame* NS_NewFlexContainerFrame(nsIPresShell* aPresShell,
-                                                    ComputedStyle* aStyle);
+  friend nsContainerFrame* NS_NewFlexContainerFrame(
+      mozilla::PresShell* aPresShell, ComputedStyle* aStyle);
 
   // Forward-decls of helper classes
   class FlexItem;
@@ -197,6 +198,7 @@ class nsFlexContainerFrame final : public nsContainerFrame {
    *         as its content insertion frame.
    * @note this might destroy layout/style data since it may flush layout.
    */
+  MOZ_CAN_RUN_SCRIPT_BOUNDARY
   static nsFlexContainerFrame* GetFlexFrameWithComputedInfo(nsIFrame* aFrame);
 
   /**
@@ -381,7 +383,7 @@ class nsFlexContainerFrame final : public nsContainerFrame {
    * for the flex item at the correct size, and hence can skip its final reflow
    * (but still need to move it to the right final position).
    *
-   * @param aReflowInput    The flex container's reflow state.
+   * @param aReflowInput    The flex container's reflow input.
    * @param aItem           The flex item whose frame should be moved.
    * @param aFramePos       The position where the flex item's frame should
    *                        be placed. (pre-relative positioning)
@@ -398,7 +400,7 @@ class nsFlexContainerFrame final : public nsContainerFrame {
    *
    * @param aPresContext    The presentation context being used in reflow.
    * @param aAxisTracker    A FlexboxAxisTracker with the flex container's axes.
-   * @param aReflowInput    The flex container's reflow state.
+   * @param aReflowInput    The flex container's reflow input.
    * @param aItem           The flex item to be reflowed.
    * @param aFramePos       The position where the flex item's frame should
    *                        be placed. (pre-relative positioning)

@@ -4692,20 +4692,20 @@ Tab.prototype = {
     Services.obs.notifyObservers(this.browser, "Content:HistoryChange");
   },
 
-  OnHistoryReload: function(reloadURI, reloadFlags) {
+  OnHistoryReload: function() {
     Services.obs.notifyObservers(this.browser, "Content:HistoryChange");
     return true;
   },
 
-  OnHistoryGotoIndex: function(index, gotoURI) {
+  OnHistoryGotoIndex: function() {
     Services.obs.notifyObservers(this.browser, "Content:HistoryChange");
   },
 
-  OnHistoryPurge: function(numEntries) {
+  OnHistoryPurge: function() {
     Services.obs.notifyObservers(this.browser, "Content:HistoryChange");
   },
 
-  OnHistoryReplaceEntry: function(index) {
+  OnHistoryReplaceEntry: function() {
     Services.obs.notifyObservers(this.browser, "Content:HistoryChange");
   },
 
@@ -5663,7 +5663,7 @@ var IdentityHandler = {
       return this.IDENTITY_MODE_IDENTIFIED;
     }
 
-    let whitelist = /^about:(about|accounts|addons|buildconfig|cache|config|crashes|devices|downloads|experiments|fennec|firefox|feedback|home|license|logins|logo|memory|mozilla|networking|privatebrowsing|rights|serviceworkers|support|telemetry|webrtc)($|\?)/i;
+    let whitelist = /^about:(about|accounts|addons|buildconfig|cache|compat|config|crashes|devices|downloads|experiments|fennec|firefox|feedback|home|license|logins|logo|memory|mozilla|networking|privatebrowsing|rights|serviceworkers|support|telemetry|webrtc)($|\?)/i;
     if (uri.schemeIs("about") && whitelist.test(uri.spec)) {
         return this.IDENTITY_MODE_CHROMEUI;
     }

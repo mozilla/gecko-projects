@@ -507,7 +507,9 @@ stateloop:
               silentLineFeed();
               MOZ_FALLTHROUGH;
             }
-            default: { continue; }
+            default: {
+              continue;
+            }
           }
         }
       dataloop_end:;
@@ -1436,11 +1438,15 @@ stateloop:
             }
             case '\r': {
               appendStrBufCarriageReturn();
+              state = P::transition(mViewSource, nsHtml5Tokenizer::COMMENT,
+                                    reconsume, pos);
               NS_HTML5_BREAK(stateloop);
             }
             case '\n': {
               appendStrBufLineFeed();
-              continue;
+              state = P::transition(mViewSource, nsHtml5Tokenizer::COMMENT,
+                                    reconsume, pos);
+              NS_HTML5_CONTINUE(stateloop);
             }
             case '\0': {
               c = 0xfffd;
@@ -1560,7 +1566,9 @@ stateloop:
               silentLineFeed();
               MOZ_FALLTHROUGH;
             }
-            default: { continue; }
+            default: {
+              continue;
+            }
           }
         }
       cdatasectionloop_end:;
@@ -2097,7 +2105,9 @@ stateloop:
               silentLineFeed();
               MOZ_FALLTHROUGH;
             }
-            default: { continue; }
+            default: {
+              continue;
+            }
           }
         }
       }
@@ -2210,7 +2220,9 @@ stateloop:
               silentLineFeed();
               MOZ_FALLTHROUGH;
             }
-            default: { continue; }
+            default: {
+              continue;
+            }
           }
         }
       }
@@ -2245,7 +2257,9 @@ stateloop:
               silentLineFeed();
               MOZ_FALLTHROUGH;
             }
-            default: { continue; }
+            default: {
+              continue;
+            }
           }
         }
       rawtextloop_end:;
@@ -2477,7 +2491,9 @@ stateloop:
               silentLineFeed();
               MOZ_FALLTHROUGH;
             }
-            default: { continue; }
+            default: {
+              continue;
+            }
           }
         }
       scriptdataloop_end:;
@@ -2656,7 +2672,9 @@ stateloop:
               silentLineFeed();
               MOZ_FALLTHROUGH;
             }
-            default: { continue; }
+            default: {
+              continue;
+            }
           }
         }
       scriptdataescapedloop_end:;
@@ -2846,7 +2864,9 @@ stateloop:
               silentLineFeed();
               MOZ_FALLTHROUGH;
             }
-            default: { continue; }
+            default: {
+              continue;
+            }
           }
         }
       scriptdatadoubleescapedloop_end:;
@@ -3706,7 +3726,9 @@ stateloop:
               silentLineFeed();
               MOZ_FALLTHROUGH;
             }
-            default: { continue; }
+            default: {
+              continue;
+            }
           }
         }
       }
@@ -3977,7 +3999,9 @@ stateloop:
                   reconsume, pos);
               NS_HTML5_BREAK(processinginstructionloop);
             }
-            default: { continue; }
+            default: {
+              continue;
+            }
           }
         }
       processinginstructionloop_end:;
@@ -4390,7 +4414,9 @@ eofloop:
         NS_HTML5_BREAK(eofloop);
       }
       case DATA:
-      default: { NS_HTML5_BREAK(eofloop); }
+      default: {
+        NS_HTML5_BREAK(eofloop);
+      }
     }
   }
 eofloop_end:;

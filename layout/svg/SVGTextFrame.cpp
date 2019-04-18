@@ -557,13 +557,10 @@ struct TextRenderedRun {
    * GetTransformFromRunUserSpaceToUserSpace should be used.
    *
    * @param aContext The context to use for unit conversions.
-   * @param aItem The nsCharClipDisplayItem that holds the amount of clipping
-   *   from the left and right edges of the text frame for this rendered run.
-   *   An appropriate nsCharClipDisplayItem can be obtained by constructing an
-   *   SVGCharClipDisplayItem for the TextRenderedRun.
    */
   gfxMatrix GetTransformFromUserSpaceForPainting(
-      nsPresContext* aContext, const nsCharClipDisplayItem& aItem) const;
+      nsPresContext* aContext, const nscoord aVisIStartEdge,
+      const nscoord aVisIEndEdge) const;
 
   /**
    * Returns the transform that converts from "run user space" to a <text>
@@ -745,7 +742,8 @@ struct TextRenderedRun {
 };
 
 gfxMatrix TextRenderedRun::GetTransformFromUserSpaceForPainting(
-    nsPresContext* aContext, const nsCharClipDisplayItem& aItem) const {
+    nsPresContext* aContext, const nscoord aVisIStartEdge,
+    const nscoord aVisIEndEdge) const {
   // We transform to device pixels positioned such that painting the text frame
   // at (0,0) with aItem will result in the text being in the right place.
 
@@ -770,13 +768,14 @@ gfxMatrix TextRenderedRun::GetTransformFromUserSpaceForPainting(
 
   // Translation to get the text frame in the right place.
   nsPoint t;
+
   if (IsVertical()) {
     t = nsPoint(-mBaseline, IsRightToLeft()
-                                ? -mFrame->GetRect().height + aItem.mVisIEndEdge
-                                : -aItem.mVisIStartEdge);
+                                ? -mFrame->GetRect().height + aVisIEndEdge
+                                : -aVisIStartEdge);
   } else {
-    t = nsPoint(IsRightToLeft() ? -mFrame->GetRect().width + aItem.mVisIEndEdge
-                                : -aItem.mVisIStartEdge,
+    t = nsPoint(IsRightToLeft() ? -mFrame->GetRect().width + aVisIEndEdge
+                                : -aVisIStartEdge,
                 -mBaseline);
   }
   m.PreTranslate(AppUnitsToGfxUnits(t, aContext));
@@ -2514,23 +2513,6 @@ bool CharIterator::MatchesFilter() const {
 }
 
 // -----------------------------------------------------------------------------
-// nsCharClipDisplayItem
-
-/**
- * An nsCharClipDisplayItem that obtains its left and right clip edges from a
- * TextRenderedRun object.
- */
-class SVGCharClipDisplayItem final : public nsCharClipDisplayItem {
- public:
-  explicit SVGCharClipDisplayItem(const TextRenderedRun& aRun)
-      : nsCharClipDisplayItem(aRun.mFrame) {
-    aRun.GetClipEdges(mVisIStartEdge, mVisIEndEdge);
-  }
-
-  NS_DISPLAY_DECL_NAME("SVGCharClip", TYPE_SVG_CHAR_CLIP)
-};
-
-// -----------------------------------------------------------------------------
 // SVGTextDrawPathCallbacks
 
 /**
@@ -2910,7 +2892,7 @@ NS_QUERYFRAME_TAIL_INHERITING(nsSVGDisplayContainerFrame)
 // ---------------------------------------------------------------------
 // Implementation
 
-nsIFrame* NS_NewSVGTextFrame(nsIPresShell* aPresShell, ComputedStyle* aStyle) {
+nsIFrame* NS_NewSVGTextFrame(PresShell* aPresShell, ComputedStyle* aStyle) {
   return new (aPresShell) SVGTextFrame(aStyle, aPresShell->GetPresContext());
 }
 
@@ -3355,10 +3337,6 @@ void SVGTextFrame::PaintSVG(gfxContext& aContext, const gfxMatrix& aTransform,
   while (run.mFrame) {
     nsTextFrame* frame = run.mFrame;
 
-    // Determine how much of the left and right edges of the text frame we
-    // need to ignore.
-    SVGCharClipDisplayItem item(run);
-
     RefPtr<SVGContextPaintImpl> contextPaint = new SVGContextPaintImpl();
     DrawMode drawMode = contextPaint->Init(&aDrawTarget, initialMatrix, frame,
                                            outerContextPaint, aImgParams);
@@ -3369,11 +3347,14 @@ void SVGTextFrame::PaintSVG(gfxContext& aContext, const gfxMatrix& aTransform,
       nsSVGUtils::SetupStrokeGeometry(frame, &aContext, outerContextPaint);
     }
 
+    nscoord startEdge, endEdge;
+    run.GetClipEdges(startEdge, endEdge);
+
     // Set up the transform for painting the text frame for the substring
     // indicated by the run.
-    gfxMatrix runTransform =
-        run.GetTransformFromUserSpaceForPainting(presContext, item) *
-        currentMatrix;
+    gfxMatrix runTransform = run.GetTransformFromUserSpaceForPainting(
+                                 presContext, startEdge, endEdge) *
+                             currentMatrix;
     aContext.SetMatrixDouble(runTransform);
 
     if (drawMode != DrawMode(0)) {
@@ -3383,14 +3364,17 @@ void SVGTextFrame::PaintSVG(gfxContext& aContext, const gfxMatrix& aTransform,
       params.dirtyRect = LayoutDevicePixel::FromAppUnits(
           frame->GetVisualOverflowRect(), auPerDevPx);
       params.contextPaint = contextPaint;
+
+      const bool isSelected = frame->IsSelected();
+
       if (ShouldRenderAsPath(frame, paintSVGGlyphs)) {
         SVGTextDrawPathCallbacks callbacks(this, aContext, frame,
                                            matrixForPaintServers, aImgParams,
                                            paintSVGGlyphs);
         params.callbacks = &callbacks;
-        frame->PaintText(params, item);
+        frame->PaintText(params, startEdge, endEdge, nsPoint(), isSelected);
       } else {
-        frame->PaintText(params, item);
+        frame->PaintText(params, startEdge, endEdge, nsPoint(), isSelected);
       }
     }
 
@@ -3693,7 +3677,7 @@ uint32_t SVGTextFrame::GetNumberOfChars(nsIContent* aContent) {
 float SVGTextFrame::GetComputedTextLength(nsIContent* aContent) {
   UpdateGlyphPositioning();
 
-  float cssPxPerDevPx = PresContext()->AppUnitsToFloatCSSPixels(
+  float cssPxPerDevPx = nsPresContext::AppUnitsToFloatCSSPixels(
       PresContext()->AppUnitsPerDevPixel());
 
   nscoord length = 0;
@@ -3872,7 +3856,8 @@ nsresult SVGTextFrame::GetSubStringLengthSlowFallback(nsIContent* aContent,
   // but we would still need to resort to full reflow for percentage
   // positioning attributes.  For now we just do a full reflow regardless since
   // the cases that would cause us to be called are relatively uncommon.
-  PresShell()->FlushPendingNotifications(FlushType::Layout);
+  RefPtr<mozilla::PresShell> presShell = PresShell();
+  presShell->FlushPendingNotifications(FlushType::Layout);
 
   UpdateGlyphPositioning();
 
@@ -4669,7 +4654,7 @@ gfxFloat SVGTextFrame::GetOffsetScale(nsIFrame* aTextPathFrame) {
 gfxFloat SVGTextFrame::GetStartOffset(nsIFrame* aTextPathFrame) {
   SVGTextPathElement* tp =
       static_cast<SVGTextPathElement*>(aTextPathFrame->GetContent());
-  nsSVGLength2* length =
+  SVGAnimatedLength* length =
       &tp->mLengthAttributes[SVGTextPathElement::STARTOFFSET];
 
   if (length->IsPercentage()) {
@@ -4846,7 +4831,7 @@ void SVGTextFrame::DoGlyphPositioning() {
   // to record that a new run starts with each glyph.
   SVGTextContentElement* element =
       static_cast<SVGTextContentElement*>(GetContent());
-  nsSVGLength2* textLengthAttr =
+  SVGAnimatedLength* textLengthAttr =
       element->GetAnimatedLength(nsGkAtoms::textLength);
   uint16_t lengthAdjust =
       element->EnumAttributes()[SVGTextContentElement::LENGTHADJUST]
@@ -5365,10 +5350,8 @@ gfxRect SVGTextFrame::TransformFrameRectFromTextChild(
     if (rectInFrameUserSpace.IntersectRect(
             rectInFrameUserSpace,
             run.GetFrameUserSpaceRect(presContext, flags).ToThebesRect())) {
-      // Transform it up to user space of the <text>, also taking into
-      // account the font size scale.
+      // Transform it up to user space of the <text>
       gfxMatrix m = run.GetTransformFromRunUserSpaceToUserSpace(presContext);
-      m.PreScale(mFontSizeScaleFactor, mFontSizeScaleFactor);
       gfxRect rectInUserSpace = m.TransformRect(rectInFrameUserSpace);
 
       // Union it into the result.

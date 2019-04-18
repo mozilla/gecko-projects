@@ -10,6 +10,7 @@ extern crate nserror;
 extern crate nsstring;
 extern crate rkv;
 extern crate sha2;
+extern crate thin_vec;
 extern crate time;
 #[macro_use]
 extern crate xpcom;
@@ -36,6 +37,7 @@ use std::slice;
 use std::str;
 use std::sync::{Arc, Mutex, RwLock};
 use std::time::{Duration, SystemTime};
+use thin_vec::ThinVec;
 use xpcom::interfaces::{
     nsICertStorage, nsICertStorageCallback, nsIFile, nsIObserver, nsIPrefBranch, nsISupports,
     nsIThread,
@@ -82,7 +84,7 @@ struct EnvAndStore {
 struct SecurityState {
     profile_path: PathBuf,
     env_and_store: Option<EnvAndStore>,
-    int_prefs: HashMap<String, i32>,
+    int_prefs: HashMap<String, u32>,
 }
 
 impl SecurityState {
@@ -406,7 +408,7 @@ impl SecurityState {
         )
     }
 
-    pub fn pref_seen(&mut self, name: &str, value: i32) {
+    pub fn pref_seen(&mut self, name: &str, value: u32) {
         self.int_prefs.insert(name.to_owned(), value);
     }
 }
@@ -456,7 +458,8 @@ fn get_path_from_directory_service(key: &str) -> Result<PathBuf, SecurityStateEr
 }
 
 fn get_profile_path() -> Result<PathBuf, SecurityStateError> {
-    Ok(get_path_from_directory_service("ProfD").or_else(|_| get_path_from_directory_service("TmpD"))?)
+    Ok(get_path_from_directory_service("ProfD")
+        .or_else(|_| get_path_from_directory_service("TmpD"))?)
 }
 
 fn get_store_path(profile_path: &PathBuf) -> Result<PathBuf, SecurityStateError> {
@@ -491,7 +494,7 @@ fn do_construct_cert_storage(
     };
 }
 
-fn read_int_pref(name: &str) -> Result<i32, SecurityStateError> {
+fn read_int_pref(name: &str) -> Result<u32, SecurityStateError> {
     let pref_service = match xpcom::services::get_PreferencesService() {
         Some(ps) => ps,
         _ => {
@@ -510,16 +513,20 @@ fn read_int_pref(name: &str) -> Result<i32, SecurityStateError> {
         _ => return Err(SecurityStateError::from("could not build pref name string")),
     };
 
-    let mut pref_value: i32 = -1;
-
+    let mut pref_value: i32 = 0;
     // We can't use GetIntPrefWithDefault because optional_argc is not
     // supported. No matter, we can just check for failure and ignore
     // any NS_ERROR_UNEXPECTED result.
     let res = unsafe { (*prefs).GetIntPref((&pref_name).as_ptr(), (&mut pref_value) as *mut i32) };
-    match res {
-        NS_OK => Ok(pref_value),
-        NS_ERROR_UNEXPECTED => Ok(pref_value),
-        _ => Err(SecurityStateError::from("could not read pref")),
+    let pref_value = match res {
+        NS_OK => pref_value,
+        NS_ERROR_UNEXPECTED => 0,
+        _ => return Err(SecurityStateError::from("could not read pref")),
+    };
+    if pref_value < 0 {
+        Ok(0)
+    } else {
+        Ok(pref_value as u32)
     }
 }
 
@@ -739,7 +746,7 @@ impl CertStorage {
         let runnable = try_ns!(TaskRunnable::new("SetRevocationBySubjectAndPubKey", task));
         try_ns!(runnable.dispatch(&*thread));
         NS_OK
-   }
+    }
 
     unsafe fn SetEnrollment(
         &self,
@@ -799,24 +806,17 @@ impl CertStorage {
 
     unsafe fn GetRevocationState(
         &self,
-        issuer: *const nsACString,
-        serial: *const nsACString,
-        subject: *const nsACString,
-        pub_key_base64: *const nsACString,
+        issuer: *const ThinVec<u8>,
+        serial: *const ThinVec<u8>,
+        subject: *const ThinVec<u8>,
+        pub_key: *const ThinVec<u8>,
         state: *mut i16,
     ) -> nserror::nsresult {
         // TODO (bug 1541212): We really want to restrict this to non-main-threads only, but we
         // can't do so until bug 1406854 and bug 1534600 are fixed.
-        if issuer.is_null() || serial.is_null() || subject.is_null() || pub_key_base64.is_null() {
+        if issuer.is_null() || serial.is_null() || subject.is_null() || pub_key.is_null() {
             return NS_ERROR_FAILURE;
         }
-        // TODO (bug 1535752): If we're calling this function when we already have binary data (e.g.
-        // in a TrustDomain::GetCertTrust callback), we should be able to pass in the binary data
-        // directly. See also bug 1535486.
-        let issuer_decoded = try_ns!(base64::decode(&*issuer));
-        let serial_decoded = try_ns!(base64::decode(&*serial));
-        let subject_decoded = try_ns!(base64::decode(&*subject));
-        let pub_key_decoded = try_ns!(base64::decode(&*pub_key_base64));
         *state = nsICertStorage::STATE_UNSET as i16;
         // The following is a way to ensure the DB has been opened while minimizing lock
         // acquisitions in the common (read-only) case. First we acquire a read lock and see if we
@@ -838,12 +838,7 @@ impl CertStorage {
                 try_ns!(self.security_state.read())
             }
         };
-        match ss.get_revocation_state(
-            &issuer_decoded,
-            &serial_decoded,
-            &subject_decoded,
-            &pub_key_decoded,
-        ) {
+        match ss.get_revocation_state(&*issuer, &*serial, &*subject, &*pub_key) {
             Ok(st) => {
                 *state = st;
                 NS_OK
@@ -970,8 +965,6 @@ impl CertStorage {
     ) -> nserror::nsresult {
         match CStr::from_ptr(topic).to_str() {
             Ok("nsPref:changed") => {
-                let mut pref_value: i32 = 0;
-
                 let prefs: RefPtr<nsIPrefBranch> = match (*subject).query_interface() {
                     Some(pb) => pb,
                     _ => return NS_ERROR_FAILURE,
@@ -992,11 +985,12 @@ impl CertStorage {
                     _ => return NS_ERROR_FAILURE,
                 };
 
+                let mut pref_value: i32 = 0;
                 let res = prefs.GetIntPref((&pref_name).as_ptr(), (&mut pref_value) as *mut i32);
-
                 if !res.succeeded() {
                     return res;
                 }
+                let pref_value = if pref_value < 0 { 0 } else { pref_value as u32 };
 
                 let mut ss = try_ns!(self.security_state.write());
                 // This doesn't use the db -> don't need to make sure it's open.

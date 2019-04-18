@@ -6026,6 +6026,62 @@
     "description": "Update: the update action was initiated from the PanelUI application update menu item.",
     "labels": ["restart", "available", "manual"]
   },
+  "UPDATE_CAN_USE_BITS_EXTERNAL": {
+    "record_in_processes": ["main"],
+    "alert_emails": ["application-update-telemetry-alerts@mozilla.com", "rstrong@mozilla.com"],
+    "expires_in_version": "never",
+    "kind": "categorical",
+    "labels": [
+      "CanUseBits",
+      "NoBits_NotWindows",
+      "NoBits_FeatureOff",
+      "NoBits_Pref",
+      "NoBits_Proxy",
+      "NoBits_OtherUser"
+    ],
+    "releaseChannelCollection": "opt-out",
+    "bug_numbers": [1343669, 1540193, 1520321],
+    "description": "Update: Whether BITS could be used to download updates (externally initiated)"
+  },
+  "UPDATE_CAN_USE_BITS_NOTIFY": {
+    "record_in_processes": ["main"],
+    "alert_emails": ["application-update-telemetry-alerts@mozilla.com", "rstrong@mozilla.com"],
+    "expires_in_version": "never",
+    "kind": "categorical",
+    "labels": [
+      "CanUseBits",
+      "NoBits_NotWindows",
+      "NoBits_FeatureOff",
+      "NoBits_Pref",
+      "NoBits_Proxy",
+      "NoBits_OtherUser"
+    ],
+    "releaseChannelCollection": "opt-out",
+    "bug_numbers": [1343669, 1540193, 1520321],
+    "description": "Update: Whether BITS could be used to download updates (timer initiated)"
+  },
+  "UPDATE_BITS_RESULT_COMPLETE": {
+    "record_in_processes": ["main"],
+    "alert_emails": ["application-update-telemetry-alerts@mozilla.com", "rstrong@mozilla.com"],
+    "expires_in_version": "never",
+    "kind": "enumerated",
+    "n_values": 99,
+    "releaseChannelCollection": "opt-out",
+    "bug_numbers": [1343669, 1540193, 1520321],
+    "description": "Update: Result code from downloading a complete update via BITS",
+    "operating_systems": ["windows"]
+  },
+  "UPDATE_BITS_RESULT_PARTIAL": {
+    "record_in_processes": ["main"],
+    "alert_emails": ["application-update-telemetry-alerts@mozilla.com", "rstrong@mozilla.com"],
+    "expires_in_version": "never",
+    "kind": "enumerated",
+    "n_values": 99,
+    "releaseChannelCollection": "opt-out",
+    "bug_numbers": [1343669, 1540193, 1520321],
+    "description": "Update: Result code from downloading a partial update via BITS",
+    "operating_systems": ["windows"]
+  },
   "THUNDERBIRD_GLODA_SIZE_MB": {
     "record_in_processes": ["main", "content"],
     "expires_in_version": "never",
@@ -6503,16 +6559,6 @@
     "kind": "boolean",
     "releaseChannelCollection": "opt-out",
     "description": "Whether the browser we migrated from was the browser with the most recent data. Keyed by that browser's identifier (e.g. 'ie', 'edge', 'safari', etc.)."
-  },
-  "FX_PREFERENCES_OPENED_VIA": {
-    "record_in_processes": ["main", "content"],
-    "bug_numbers": [1330315, 1420062, 1427973],
-    "alert_emails": ["jaws@mozilla.com"],
-    "expires_in_version": "63",
-    "kind": "categorical",
-    "labels": ["aboutHome", "aboutTelemetry", "browserMedia", "commandLine", "commandLineLegacy", "ContainersCommand", "contentSearch", "dataReporting", "doorhanger", "devDisconnectedAlert", "experimentsOpenPref", "fxa", "fxaSignedin", "fxaError", "offlineApps", "prefserviceDefaults", "preferencesButton", "paneSync", "storagePressure", "translationInfobar", "UITour", "menubar", "notifOpenSettings", "other", "autofillFooter", "autofillDoorhanger", "mozscreenshots", "searchChangeSettings"],
-    "releaseChannelCollection": "opt-out",
-    "description":"Count how the Preferences are opened."
   },
   "FX_PAGE_ACTION_ADDED": {
     "record_in_processes": ["main"],
@@ -7412,22 +7458,6 @@
     "kind": "count",
     "description": "Count of exceptions in TelemetrySession.getSessionPayload()."
   },
-  "TELEMETRY_SCHEDULER_TICK_EXCEPTION": {
-    "record_in_processes": ["main"],
-    "alert_emails": ["telemetry-client-dev@mozilla.com"],
-    "bug_numbers": [1250640],
-    "expires_in_version": "53",
-    "kind": "count",
-    "description": "Count of exceptions during executing the TelemetrySession scheduler tick logic."
-  },
-  "TELEMETRY_SCHEDULER_WAKEUP": {
-    "record_in_processes": ["main"],
-    "alert_emails": ["telemetry-client-dev@mozilla.com"],
-    "bug_numbers": [1250640],
-    "expires_in_version": "53",
-    "kind": "count",
-    "description": "Count of TelemetrySession scheduler ticks that were delayed long enough to suspect sleep."
-  },
   "TELEMETRY_EVENT_PING_SENT": {
     "record_in_processes": ["main"],
     "alert_emails": ["telemetry-client-dev@mozilla.com", "chutten@mozilla.com"],
@@ -7542,6 +7572,21 @@
       "Label8"
     ],
     "description": "a testing histogram; not meant to be touched"
+  },
+  "TELEMETRY_TEST_CATEGORICAL_WIN_ONLY": {
+    "record_in_processes": ["main", "content"],
+    "alert_emails": ["telemetry-client-dev@mozilla.com"],
+    "bug_numbers": [1539907],
+    "expires_in_version": "never",
+    "kind": "categorical",
+    "n_values": 70,
+    "labels": [
+      "CommonLabel",
+      "Label7",
+      "Label8"
+    ],
+    "description": "a testing histogram used as a compile-time check; not meant to be touched",
+    "operating_systems": ["windows"]
   },
   "TELEMETRY_TEST_KEYED_COUNT_INIT_NO_RECORD": {
     "record_in_processes": ["main", "content"],
@@ -13105,7 +13150,7 @@
     "description": "Time spent in the paint pipeline for content in milliseconds."
   },
   "CONTENT_FULL_PAINT_TIME": {
-    "record_in_processes": ["main", "content"],
+    "record_in_processes": ["main", "content", "gpu"],
     "alert_emails": ["gfx-telemetry-alerts@mozilla.com", "jmuizelaar@mozilla.com", "dbolter@mozilla.com"],
     "bug_numbers": [1505858],
     "expires_in_version": "never",
@@ -14271,16 +14316,6 @@
     "labels": ["FullStandards", "AlmostStandards", "NavQuirks"],
     "description": "HTML document compat mode (quirks mode)"
   },
-  "HIDDEN_VIEWPORT_OVERFLOW_TYPE": {
-    "record_in_processes": ["main", "content"],
-    "alert_emails": ["mozilla-telemetry@upsuper.org", "botond@mozilla.com"],
-    "bug_numbers": [1423013, 1423017, 1513089],
-    "expires_in_version": "70",
-    "kind": "categorical",
-    "releaseChannelCollection": "opt-out",
-    "labels": ["NoOverflow", "Desktop", "ButNotMinScaleSize", "MinScaleSize"],
-    "description": "How common are different types of out-of-reach viewport overflow?"
-  },
   "WR_SCENEBUILD_TIME": {
     "record_in_processes": ["main", "gpu"],
     "alert_emails": ["kgupta@mozilla.com"],
@@ -14563,5 +14598,19 @@
       ],
       "keyed": true,
       "description": "Getting the number of errors in QuotaManager initialization."
+  },
+  "HTTP_TRAFFIC_ANALYSIS": {
+    "record_in_processes": ["main"],
+    "alert_emails": ["gachen@mozilla.com"],
+    "bug_numbers": [1533363],
+    "expires_in_version": "73",
+    "kind": "categorical",
+    "n_values": 8,
+    "labels": [
+      "Connection",
+      "Transaction"
+    ],
+    "keyed": true,
+    "description": "Numbers of HTTP transactions and connections by type. There are some categories separated by keys based on 4 parameters: 1. normal browsing or private browsing 2. first party or third party 3. class of service 4. tracking classification. Available keys are: ['Y=0|NormalFirstParty', 'Y=1|NormalThirdPartyOther', 'Y=2|NormalThirdPartyContentLeader', 'Y=3|NormalThirdPartyContentBackground', 'Y=4|NormalThirdPartyContentOther', 'Y=5|NormalThirdPartyBasicLeader', 'Y=6|NormalThirdPartyBasicBackground', 'Y=7|NormalThirdPartyBasicOther', 'Y=8|NormalThirdPartyFingerprintingLeader', 'Y=9|NormalThirdPartyFingerprintingBackground', 'Y=10|NormalThirdPartyFingerprintingOther', 'Y=11|PrivateFirstParty', 'Y=12|PrivateThirdPartyOther', 'Y=13|PrivateThirdPartyContentLeader', 'Y=14|PrivateThirdPartyContentBackground', 'Y=15|PrivateThirdPartyContentOther', 'Y=16|PrivateThirdPartyBasicLeader', 'Y=17|PrivateThirdPartyBasicBackground', 'Y=18|PrivateThirdPartyBasicOther', 'Y=19|PrivateThirdPartyFingerprintingLeader', 'Y=20|PrivateThirdPartyFingerprintingBackground', 'Y=21|PrivateThirdPartyFingerprintingOther']."
   }
 }

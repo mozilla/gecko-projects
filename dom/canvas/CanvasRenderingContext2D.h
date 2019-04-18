@@ -391,7 +391,7 @@ class CanvasRenderingContext2D final : public nsICanvasRenderingContextInternal,
   /**
    * Gets the pres shell from either the canvas element or the doc shell
    */
-  nsIPresShell* GetPresShell() final {
+  PresShell* GetPresShell() final {
     if (mCanvasElement) {
       return mCanvasElement->OwnerDoc()->GetPresShell();
     }
@@ -405,7 +405,7 @@ class CanvasRenderingContext2D final : public nsICanvasRenderingContextInternal,
       nsIDocShell* aShell, NotNull<gfx::DrawTarget*> aTarget) override;
 
   NS_IMETHOD GetInputStream(const char* aMimeType,
-                            const char16_t* aEncoderOptions,
+                            const nsAString& aEncoderOptions,
                             nsIInputStream** aStream) override;
 
   already_AddRefed<mozilla::gfx::SourceSurface> GetSurfaceSnapshot(
@@ -507,7 +507,7 @@ class CanvasRenderingContext2D final : public nsICanvasRenderingContextInternal,
    * CurrentState().filterChain.
    * Flushes the PresShell, so the world can change if you call this function.
    */
-  void UpdateFilter();
+  MOZ_CAN_RUN_SCRIPT_BOUNDARY void UpdateFilter();
 
  protected:
   nsresult GetImageDataArray(JSContext* aCx, int32_t aX, int32_t aY,

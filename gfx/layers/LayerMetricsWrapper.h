@@ -120,7 +120,7 @@ namespace layers {
  * alternative of making mIndex a int32_t that can store -1, but then having
  * to cast to uint32_t all over the place.
  */
-class MOZ_STACK_CLASS LayerMetricsWrapper {
+class MOZ_STACK_CLASS LayerMetricsWrapper final {
  public:
   enum StartAt {
     TOP,
@@ -280,6 +280,12 @@ class MOZ_STACK_CLASS LayerMetricsWrapper {
       return mLayer->GetTransformIsPerspective();
     }
     return false;
+  }
+
+  bool Combines3DTransformWithAncestors() const {
+    MOZ_ASSERT(IsValid());
+
+    return mLayer->Combines3DTransformWithAncestors();
   }
 
   EventRegions GetEventRegions() const {

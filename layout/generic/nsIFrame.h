@@ -612,7 +612,7 @@ class nsIFrame : public nsQueryFrame {
 
   nsPresContext* PresContext() const { return mPresContext; }
 
-  nsIPresShell* PresShell() const { return PresContext()->PresShell(); }
+  mozilla::PresShell* PresShell() const { return PresContext()->PresShell(); }
 
   /**
    * Called to initialize the frame. This is called immediately after creating
@@ -3807,8 +3807,8 @@ class nsIFrame : public nsQueryFrame {
    * Flag a child PresShell as painted so that it will get its paint count
    * incremented during empty transactions.
    */
-  void AddPaintedPresShell(nsIPresShell* shell) {
-    PaintedPresShellList()->AppendElement(do_GetWeakReference(shell));
+  void AddPaintedPresShell(mozilla::PresShell* aPresShell) {
+    PaintedPresShellList()->AppendElement(do_GetWeakReference(aPresShell));
   }
 
   /**
@@ -3825,9 +3825,9 @@ class nsIFrame : public nsQueryFrame {
   }
 
   /**
-   * @return true if we painted @aShell during the last repaint.
+   * @return true if we painted @aPresShell during the last repaint.
    */
-  bool DidPaintPresShell(nsIPresShell* aShell) {
+  bool DidPaintPresShell(mozilla::PresShell* aShell) {
     for (nsWeakPtr& item : *PaintedPresShellList()) {
       nsCOMPtr<nsIPresShell> shell = do_QueryReferent(item);
       if (shell == aShell) {
@@ -4648,9 +4648,9 @@ class MOZ_NONHEAP_CLASS AutoWeakFrame {
 
   operator nsIFrame*() { return mFrame; }
 
-  void Clear(nsIPresShell* aShell) {
-    if (aShell) {
-      aShell->RemoveAutoWeakFrame(this);
+  void Clear(mozilla::PresShell* aPresShell) {
+    if (aPresShell) {
+      aPresShell->RemoveAutoWeakFrame(this);
     }
     mFrame = nullptr;
     mPrev = nullptr;
@@ -4720,9 +4720,9 @@ class MOZ_HEAP_CLASS WeakFrame {
   nsIFrame* operator->() { return mFrame; }
   operator nsIFrame*() { return mFrame; }
 
-  void Clear(nsIPresShell* aShell) {
-    if (aShell) {
-      aShell->RemoveWeakFrame(this);
+  void Clear(mozilla::PresShell* aPresShell) {
+    if (aPresShell) {
+      aPresShell->RemoveWeakFrame(this);
     }
     mFrame = nullptr;
   }

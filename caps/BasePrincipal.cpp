@@ -438,21 +438,35 @@ already_AddRefed<BasePrincipal> BasePrincipal::CreateCodebasePrincipal(
   return BasePrincipal::CreateCodebasePrincipal(uri, attrs);
 }
 
-already_AddRefed<BasePrincipal>
-BasePrincipal::CloneStrippingUserContextIdAndFirstPartyDomain() {
+already_AddRefed<BasePrincipal> BasePrincipal::CloneForcingFirstPartyDomain(
+    nsIURI* aURI) {
+  if (NS_WARN_IF(!IsCodebasePrincipal())) {
+    return nullptr;
+  }
+
   OriginAttributes attrs = OriginAttributesRef();
-  attrs.StripAttributes(OriginAttributes::STRIP_USER_CONTEXT_ID |
-                        OriginAttributes::STRIP_FIRST_PARTY_DOMAIN);
+  // XXX this is slow. Maybe we should consider to make it faster.
+  attrs.SetFirstPartyDomain(false, aURI, true /* aForced */);
+
+  return CloneForcingOriginAttributes(attrs);
+}
+
+already_AddRefed<BasePrincipal> BasePrincipal::CloneForcingOriginAttributes(
+    const OriginAttributes& aOriginAttributes) {
+  if (NS_WARN_IF(!IsCodebasePrincipal())) {
+    return nullptr;
+  }
 
   nsAutoCString originNoSuffix;
   nsresult rv = GetOriginNoSuffix(originNoSuffix);
   NS_ENSURE_SUCCESS(rv, nullptr);
 
-  nsCOMPtr<nsIURI> uri;
-  rv = NS_NewURI(getter_AddRefs(uri), originNoSuffix);
+  nsIURI* uri = static_cast<ContentPrincipal*>(this)->mCodebase;
+  RefPtr<ContentPrincipal> copy = new ContentPrincipal();
+  rv = copy->Init(uri, aOriginAttributes, originNoSuffix);
   NS_ENSURE_SUCCESS(rv, nullptr);
 
-  return BasePrincipal::CreateCodebasePrincipal(uri, attrs);
+  return copy.forget();
 }
 
 extensions::WebExtensionPolicy* BasePrincipal::ContentScriptAddonPolicy() {

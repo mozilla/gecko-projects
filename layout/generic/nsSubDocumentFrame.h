@@ -14,6 +14,7 @@
 #include "Units.h"
 
 namespace mozilla {
+class PresShell;
 namespace layout {
 class RenderFrame;
 }
@@ -94,7 +95,7 @@ class nsSubDocumentFrame final : public nsAtomicContainerFrame,
   nsView* EnsureInnerView();
   nsIFrame* GetSubdocumentRootFrame();
   enum { IGNORE_PAINT_SUPPRESSION = 0x1 };
-  nsIPresShell* GetSubdocumentPresShellForPainting(uint32_t aFlags);
+  mozilla::PresShell* GetSubdocumentPresShellForPainting(uint32_t aFlags);
   mozilla::ScreenIntSize GetSubdocumentSize();
 
   // nsIReflowCallback
@@ -113,8 +114,8 @@ class nsSubDocumentFrame final : public nsAtomicContainerFrame,
     }
   }
 
-  void UnsetFrameLoader() { mFrameLoader = nullptr; }
   nsFrameLoader* FrameLoader() const;
+  void ResetFrameLoader();
 
  protected:
   friend class AsyncFrameInit;

@@ -20,6 +20,7 @@ use style_traits::{CssWriter, ToCss};
     SpecifiedValueInfo,
     ToComputedValue,
     ToCss,
+    ToResolvedValue,
     ToShmem,
 )]
 pub enum BorderImageSideWidth<LengthPercentage, Number> {
@@ -41,6 +42,7 @@ pub enum BorderImageSideWidth<LengthPercentage, Number> {
     SpecifiedValueInfo,
     ToComputedValue,
     ToCss,
+    ToResolvedValue,
     ToShmem,
 )]
 #[repr(C)]
@@ -69,10 +71,15 @@ pub use self::GenericBorderImageSlice as BorderImageSlice;
     ToAnimatedZero,
     ToComputedValue,
     ToCss,
+    ToResolvedValue,
     ToShmem,
 )]
 #[repr(C)]
-pub struct GenericBorderCornerRadius<L>(#[css(field_bound)] #[shmem(field_bound)] pub Size2D<L>);
+pub struct GenericBorderCornerRadius<L>(
+    #[css(field_bound)]
+    #[shmem(field_bound)]
+    pub Size2D<L>,
+);
 
 pub use self::GenericBorderCornerRadius as BorderCornerRadius;
 
@@ -107,10 +114,15 @@ impl<L: Zero> Zero for BorderCornerRadius<L> {
     ToAnimatedZero,
     ToComputedValue,
     ToCss,
+    ToResolvedValue,
     ToShmem,
 )]
 #[repr(transparent)]
-pub struct BorderSpacing<L>(#[css(field_bound)] #[shmem(field_bound)] pub Size2D<L>);
+pub struct BorderSpacing<L>(
+    #[css(field_bound)]
+    #[shmem(field_bound)]
+    pub Size2D<L>,
+);
 
 impl<L> BorderSpacing<L> {
     /// Trivially create a `BorderCornerRadius`.
@@ -133,6 +145,7 @@ impl<L> BorderSpacing<L> {
     SpecifiedValueInfo,
     ToAnimatedValue,
     ToComputedValue,
+    ToResolvedValue,
     ToShmem,
 )]
 #[repr(C)]

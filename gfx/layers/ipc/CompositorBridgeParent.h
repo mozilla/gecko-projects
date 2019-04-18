@@ -198,7 +198,7 @@ class CompositorBridgeParentBase : public PCompositorBridgeParent,
   virtual void AccumulateMemoryReport(wr::MemoryReport*) {}
 
  protected:
-  ~CompositorBridgeParentBase() override;
+  virtual ~CompositorBridgeParentBase();
 
   virtual PAPZParent* AllocPAPZParent(const LayersId& layersId) = 0;
   virtual bool DeallocPAPZParent(PAPZParent* aActor) = 0;
@@ -351,8 +351,8 @@ class CompositorBridgeParent final : public CompositorBridgeParentBase,
       const TimeStamp& aRecordingStart) override;
   mozilla::ipc::IPCResult RecvEndRecording() override;
 
-  virtual void NotifyMemoryPressure() override;
-  virtual void AccumulateMemoryReport(wr::MemoryReport*) override;
+  void NotifyMemoryPressure() override;
+  void AccumulateMemoryReport(wr::MemoryReport*) override;
 
   void ActorDestroy(ActorDestroyReason why) override;
 
@@ -391,7 +391,6 @@ class CompositorBridgeParent final : public CompositorBridgeParentBase,
 
   bool IsSameProcess() const override;
 
-  void NotifyWebRenderError(wr::WebRenderError aError);
   void NotifyWebRenderContextPurge();
   void NotifyPipelineRendered(const wr::PipelineId& aPipelineId,
                               const wr::Epoch& aEpoch,
@@ -399,7 +398,7 @@ class CompositorBridgeParent final : public CompositorBridgeParentBase,
                               TimeStamp& aCompositeStart,
                               TimeStamp& aRenderStart, TimeStamp& aCompositeEnd,
                               wr::RendererStats* aStats = nullptr);
-  void NotifyDidSceneBuild(wr::RenderRoot aRenderRoot,
+  void NotifyDidSceneBuild(const nsTArray<wr::RenderRoot>& aRenderRoots,
                            RefPtr<wr::WebRenderPipelineInfo> aInfo);
   RefPtr<AsyncImagePipelineManager> GetAsyncImagePipelineManager() const;
 
@@ -427,7 +426,8 @@ class CompositorBridgeParent final : public CompositorBridgeParentBase,
 
   // Can be called from any thread
   void ScheduleRenderOnCompositorThread(
-      const Maybe<wr::RenderRoot>& aRenderRoot = Nothing()) override;
+      const nsTArray<wr::RenderRoot>& aRenderRoots =
+          nsTArray<wr::RenderRoot>()) override;
   void SchedulePauseOnCompositorThread();
   void InvalidateOnCompositorThread();
   /**
@@ -437,8 +437,9 @@ class CompositorBridgeParent final : public CompositorBridgeParentBase,
   bool ScheduleResumeOnCompositorThread();
   bool ScheduleResumeOnCompositorThread(int x, int y, int width, int height);
 
-  void ScheduleComposition(
-      const Maybe<wr::RenderRoot>& aRenderRoot = Nothing());
+  void ScheduleComposition(const nsTArray<wr::RenderRoot>& aRenderRoots =
+                               nsTArray<wr::RenderRoot>());
+
   void NotifyShadowTreeTransaction(LayersId aId, bool aIsFirstPaint,
                                    const FocusTarget& aFocusTarget,
                                    bool aScheduleComposite,

@@ -29,6 +29,7 @@
 
 #include "mozilla/AnimationEventDispatcher.h"
 #include "mozilla/ArrayUtils.h"
+#include "mozilla/Assertions.h"
 #include "mozilla/AutoRestore.h"
 #include "mozilla/DebugOnly.h"
 #include "mozilla/IntegerRange.h"
@@ -74,6 +75,10 @@
 #include "nsAnimationManager.h"
 #include "nsDisplayList.h"
 #include "nsTransitionManager.h"
+
+#if defined(MOZ_WIDGET_ANDROID)
+#  include "VRManager.h"
+#endif    // defined(MOZ_WIDGET_ANDROID)
 
 #ifdef MOZ_XUL
 #  include "nsXULPopupManager.h"
@@ -1496,15 +1501,15 @@ struct DocumentFrameCallbacks {
   explicit DocumentFrameCallbacks(Document* aDocument) : mDocument(aDocument) {}
 
   RefPtr<Document> mDocument;
-  Document::FrameRequestCallbackList mCallbacks;
+  nsTArray<Document::FrameRequest> mCallbacks;
 };
 
 static nsDocShell* GetDocShell(nsPresContext* aPresContext) {
   return static_cast<nsDocShell*>(aPresContext->GetDocShell());
 }
 
-static bool HasPendingAnimations(nsIPresShell* aShell) {
-  Document* doc = aShell->GetDocument();
+static bool HasPendingAnimations(PresShell* aPresShell) {
+  Document* doc = aPresShell->GetDocument();
   if (!doc) {
     return false;
   }
@@ -1688,7 +1693,14 @@ void nsRefreshDriver::RunFrameRequestCallbacks(TimeStamp aNowTime) {
         // else window is partially torn down already
       }
       for (auto& callback : docCallbacks.mCallbacks) {
-        callback->Call(timeStamp);
+        if (docCallbacks.mDocument->IsCanceledFrameRequestCallback(
+                callback.mHandle)) {
+          continue;
+        }
+        // MOZ_KnownLive is OK, because the stack array frameRequestCallbacks
+        // keeps callback alive and the mCallback strong reference can't be
+        // mutated by the call.
+        MOZ_KnownLive(callback.mCallback)->Call(timeStamp);
       }
     }
   }
@@ -1701,10 +1713,16 @@ struct RunnableWithDelay {
 
 static AutoTArray<RunnableWithDelay, 8>* sPendingIdleRunnables = nullptr;
 
-void nsRefreshDriver::DispatchIdleRunnableAfterTick(nsIRunnable* aRunnable,
-                                                    uint32_t aDelay) {
+void nsRefreshDriver::DispatchIdleRunnableAfterTickUnlessExists(
+    nsIRunnable* aRunnable, uint32_t aDelay) {
   if (!sPendingIdleRunnables) {
     sPendingIdleRunnables = new AutoTArray<RunnableWithDelay, 8>();
+  } else {
+    for (uint32_t i = 0; i < sPendingIdleRunnables->Length(); ++i) {
+      if ((*sPendingIdleRunnables)[i].mRunnable == aRunnable) {
+        return;
+      }
+    }
   }
 
   RunnableWithDelay rwd = {aRunnable, aDelay};
@@ -1738,6 +1756,14 @@ void nsRefreshDriver::Tick(VsyncId aId, TimeStamp aNowTime) {
     // Try to survive this by just ignoring the refresh tick.
     return;
   }
+
+#if defined(MOZ_WIDGET_ANDROID)
+  gfx::VRManager* vm = gfx::VRManager::Get();
+  if (vm->IsPresenting()) {
+    RunFrameRequestCallbacks(aNowTime);
+    return;
+  }
+#endif    // defined(MOZ_WIDGET_ANDROID)
 
   AUTO_PROFILER_LABEL("nsRefreshDriver::Tick", LAYOUT);
 
@@ -1835,9 +1861,9 @@ void nsRefreshDriver::Tick(VsyncId aId, TimeStamp aNowTime) {
 
   // Resize events should be fired before layout flushes or
   // calling animation frame callbacks.
-  AutoTArray<nsIPresShell*, 16> observers;
+  AutoTArray<PresShell*, 16> observers;
   observers.AppendElements(mResizeEventFlushObservers);
-  for (nsIPresShell* shell : Reversed(observers)) {
+  for (PresShell* shell : Reversed(observers)) {
     if (!mPresContext || !mPresContext->GetPresShell()) {
       StopTimer();
       return;
@@ -1879,47 +1905,49 @@ void nsRefreshDriver::Tick(VsyncId aId, TimeStamp aNowTime) {
       RunFrameRequestCallbacks(aNowTime);
 
       if (mPresContext && mPresContext->GetPresShell()) {
-        AutoTArray<nsIPresShell*, 16> observers;
+        AutoTArray<PresShell*, 16> observers;
         observers.AppendElements(mStyleFlushObservers);
         for (uint32_t j = observers.Length();
              j && mPresContext && mPresContext->GetPresShell(); --j) {
           // Make sure to not process observers which might have been removed
           // during previous iterations.
-          nsIPresShell* shell = observers[j - 1];
-          if (!mStyleFlushObservers.RemoveElement(shell)) continue;
-
-          nsCOMPtr<nsIPresShell> shellKungFuDeathGrip(shell);
-          shell->mObservingStyleFlushes = false;
-          shell->FlushPendingNotifications(
+          PresShell* rawPresShell = observers[j - 1];
+          if (!mStyleFlushObservers.RemoveElement(rawPresShell)) {
+            continue;
+          }
+          RefPtr<PresShell> presShell = rawPresShell;
+          presShell->mObservingStyleFlushes = false;
+          presShell->FlushPendingNotifications(
               ChangesToFlush(FlushType::Style, false));
           // Inform the FontFaceSet that we ticked, so that it can resolve its
           // ready promise if it needs to (though it might still be waiting on
           // a layout flush).
-          shell->NotifyFontFaceSetOnRefresh();
+          presShell->NotifyFontFaceSetOnRefresh();
           mNeedToRecomputeVisibility = true;
         }
       }
     } else if (i == 2) {
       // This is the FlushType::Layout case.
-      AutoTArray<nsIPresShell*, 16> observers;
+      AutoTArray<PresShell*, 16> observers;
       observers.AppendElements(mLayoutFlushObservers);
       for (uint32_t j = observers.Length();
            j && mPresContext && mPresContext->GetPresShell(); --j) {
         // Make sure to not process observers which might have been removed
         // during previous iterations.
-        nsIPresShell* shell = observers[j - 1];
-        if (!mLayoutFlushObservers.RemoveElement(shell)) continue;
-
-        nsCOMPtr<nsIPresShell> shellKungFuDeathGrip(shell);
-        shell->mObservingLayoutFlushes = false;
-        shell->mWasLastReflowInterrupted = false;
-        FlushType flushType = HasPendingAnimations(shell)
+        PresShell* rawPresShell = observers[j - 1];
+        if (!mLayoutFlushObservers.RemoveElement(rawPresShell)) {
+          continue;
+        }
+        RefPtr<PresShell> presShell = rawPresShell;
+        presShell->mObservingLayoutFlushes = false;
+        presShell->mWasLastReflowInterrupted = false;
+        FlushType flushType = HasPendingAnimations(presShell)
                                   ? FlushType::Layout
                                   : FlushType::InterruptibleLayout;
-        shell->FlushPendingNotifications(ChangesToFlush(flushType, false));
+        presShell->FlushPendingNotifications(ChangesToFlush(flushType, false));
         // Inform the FontFaceSet that we ticked, so that it can resolve its
         // ready promise if it needs to.
-        shell->NotifyFontFaceSetOnRefresh();
+        presShell->NotifyFontFaceSetOnRefresh();
         mNeedToRecomputeVisibility = true;
       }
     }

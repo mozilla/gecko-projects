@@ -369,7 +369,7 @@ class WebGLContext : public nsICanvasRenderingContextInternal,
 
   virtual UniquePtr<uint8_t[]> GetImageBuffer(int32_t* out_format) override;
   NS_IMETHOD GetInputStream(const char* mimeType,
-                            const char16_t* encoderOptions,
+                            const nsAString& encoderOptions,
                             nsIInputStream** out_stream) override;
 
   virtual already_AddRefed<mozilla::gfx::SourceSurface> GetSurfaceSnapshot(
@@ -958,7 +958,7 @@ class WebGLContext : public nsICanvasRenderingContextInternal,
                        WebGLintptr offset, WebGLsizeiptr size);
 
  private:
-  void BufferDataImpl(GLenum target, size_t dataLen, const uint8_t* data,
+  void BufferDataImpl(GLenum target, uint64_t dataLen, const uint8_t* data,
                       GLenum usage);
 
  public:
@@ -972,7 +972,7 @@ class WebGLContext : public nsICanvasRenderingContextInternal,
 
  private:
   void BufferSubDataImpl(GLenum target, WebGLsizeiptr dstByteOffset,
-                         size_t srcDataLen, const uint8_t* srcData);
+                         uint64_t srcDataLen, const uint8_t* srcData);
 
  public:
   void BufferSubData(GLenum target, WebGLsizeiptr dstByteOffset,

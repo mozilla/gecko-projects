@@ -36,6 +36,8 @@ class CanonicalBrowsingContext final : public BrowsingContext {
   uint64_t OwnerProcessId() const { return mProcessId; }
   ContentParent* GetContentParent() const;
 
+  void GetCurrentRemoteType(nsAString& aRemoteType, ErrorResult& aRv) const;
+
   void SetOwnerProcessId(uint64_t aProcessId) { mProcessId = aProcessId; }
 
   void GetWindowGlobals(nsTArray<RefPtr<WindowGlobalParent>>& aWindows);
@@ -49,6 +51,11 @@ class CanonicalBrowsingContext final : public BrowsingContext {
     return mCurrentWindowGlobal;
   }
   void SetCurrentWindowGlobal(WindowGlobalParent* aGlobal);
+
+  WindowGlobalParent* GetEmbedderWindowGlobal() const {
+    return mEmbedderWindowGlobal;
+  }
+  void SetEmbedderWindowGlobal(WindowGlobalParent* aGlobal);
 
   JSObject* WrapObject(JSContext* aCx,
                        JS::Handle<JSObject*> aGivenProto) override;
@@ -95,6 +102,7 @@ class CanonicalBrowsingContext final : public BrowsingContext {
   // All live window globals within this browsing context.
   nsTHashtable<nsRefPtrHashKey<WindowGlobalParent>> mWindowGlobals;
   RefPtr<WindowGlobalParent> mCurrentWindowGlobal;
+  RefPtr<WindowGlobalParent> mEmbedderWindowGlobal;
 
   // Generation information for each content process which has interacted with
   // this CanonicalBrowsingContext, by ChildID.

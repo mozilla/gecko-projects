@@ -168,6 +168,11 @@ pref("app.update.idletime", 60);
 pref("app.update.service.enabled", true);
 #endif
 
+#ifdef XP_WIN
+// This pref prevents BITS from being used by Firefox to download updates.
+pref("app.update.BITS.enabled", false);
+#endif
+
 // Symmetric (can be overridden by individual extensions) update preferences.
 // e.g.
 //  extensions.{GUID}.update.enabled
@@ -405,6 +410,14 @@ pref("permissions.default.microphone", 0);
 pref("permissions.default.geo", 0);
 pref("permissions.default.desktop-notification", 0);
 pref("permissions.default.shortcuts", 0);
+
+#ifdef NIGHTLY_BUILD
+pref("permissions.desktop-notification.postPrompt.enabled", true);
+#else
+pref("permissions.desktop-notification.postPrompt.enabled", false);
+#endif
+
+pref("permissions.postPrompt.animate", true);
 
 // handle links targeting new windows
 // 1=current window/tab, 2=new window, 3=new tab in most recent window
@@ -995,6 +1008,13 @@ pref("browser.flash-protected-mode-flip.enable", false);
 // Whether we've already flipped protected mode automatically
 pref("browser.flash-protected-mode-flip.done", false);
 
+// Dark in-content pages
+#ifdef NIGHTLY_BUILD
+pref("browser.in-content.dark-mode", true);
+#else
+pref("browser.in-content.dark-mode", false);
+#endif
+
 pref("dom.ipc.shims.enabledWarnings", false);
 
 #if defined(XP_WIN) && defined(MOZ_SANDBOX)
@@ -1050,7 +1070,7 @@ pref("security.sandbox.gmp.win32k-disable", false);
 // of when messaged by the parent after the message loop is running.
 pref("security.sandbox.content.mac.earlyinit", true);
 // Remove this pref once RDD early init is stable on Release.
-pref("security.sandbox.rdd.mac.earlyinit", false);
+pref("security.sandbox.rdd.mac.earlyinit", true);
 
 // This pref is discussed in bug 1083344, the naming is inspired from its
 // Windows counterpart, but on Mac it's an integer which means:
@@ -1163,6 +1183,8 @@ pref("services.sync.prefs.sync.addons.ignoreUserEnabledChanges", true);
 // source, and this would propagate automatically to other,
 // uncompromised Sync-connected devices.
 pref("services.sync.prefs.sync.browser.contentblocking.category", true);
+pref("services.sync.prefs.sync.browser.contentblocking.features.standard", true);
+pref("services.sync.prefs.sync.browser.contentblocking.features.strict", true);
 pref("services.sync.prefs.sync.browser.contentblocking.introCount", true);
 pref("services.sync.prefs.sync.browser.crashReports.unsubmittedCheck.autoSubmit2", true);
 pref("services.sync.prefs.sync.browser.ctrlTab.recentlyUsedOrder", true);
@@ -1286,7 +1308,7 @@ pref("browser.newtabpage.activity-stream.fxaccounts.endpoint", "https://accounts
 pref("browser.newtabpage.activity-stream.improvesearch.topSiteSearchShortcuts", true);
 
 // ASRouter provider configuration
-pref("browser.newtabpage.activity-stream.asrouter.providers.cfr", "{\"id\":\"cfr\",\"enabled\":true,\"type\":\"local\",\"localProvider\":\"CFRMessageProvider\",\"frequency\":{\"custom\":[{\"period\":\"daily\",\"cap\":1}]},\"categories\":[\"cfrAddons\",\"cfrFeatures\"]}");
+pref("browser.newtabpage.activity-stream.asrouter.providers.cfr", "{\"id\":\"cfr\",\"enabled\":true,\"type\":\"remote-settings\",\"bucket\":\"cfr\",\"frequency\":{\"custom\":[{\"period\":\"daily\",\"cap\":1}]},\"categories\":[\"cfrAddons\",\"cfrFeatures\"],\"updateCycleInMs\":3600000}");
 pref("browser.newtabpage.activity-stream.asrouter.providers.snippets", "{\"id\":\"snippets\",\"enabled\":true,\"type\":\"remote\",\"url\":\"https://snippets.cdn.mozilla.net/%STARTPAGE_VERSION%/%NAME%/%VERSION%/%APPBUILDID%/%BUILD_TARGET%/%LOCALE%/%CHANNEL%/%OS_VERSION%/%DISTRIBUTION%/%DISTRIBUTION_VERSION%/\",\"updateCycleInMs\":14400000}");
 
 // The pref controls if search hand-off is enabled for Activity Stream.
@@ -1468,26 +1490,13 @@ pref("media.gmp-widevinecdm.visible", true);
 pref("media.gmp-widevinecdm.enabled", true);
 #endif
 
-#if defined(_ARM64_) && defined(XP_WIN)
-// Windows on ARM64, OpenH264 not available yet.
-pref("media.gmp-gmpopenh264.visible", false);
-pref("media.gmp-gmpopenh264.enabled", false);
-#else
-// Not Windows on ARM64
 pref("media.gmp-gmpopenh264.visible", true);
 pref("media.gmp-gmpopenh264.enabled", true);
-#endif
+
 // Switch block autoplay logic to v2, and enable UI.
 pref("media.autoplay.enabled.user-gestures-needed", true);
-
-#ifdef NIGHTLY_BUILD
 // Set Firefox to block autoplay, asking for permission by default.
 pref("media.autoplay.default", 1); // 0=Allowed, 1=Blocked
-#else
-// Set Firefox to block autoplay, asking for permission by default.
-pref("media.autoplay.default", 0); // 0=Allowed, 1=Blocked
-#endif
-
 
 #ifdef NIGHTLY_BUILD
 // Block WebAudio from playing automatically.
@@ -1541,10 +1550,14 @@ pref("browser.ping-centre.production.endpoint", "https://tiles.services.mozilla.
 // Enable GMP support in the addon manager.
 pref("media.gmp-provider.enabled", true);
 
+#ifdef EARLY_BETA_OR_EARLIER
 // Enable blocking access to storage from tracking resources only in nightly
 // and early beta. By default the value is 0: BEHAVIOR_ACCEPT
-#ifdef EARLY_BETA_OR_EARLIER
 pref("network.cookie.cookieBehavior", 4 /* BEHAVIOR_REJECT_TRACKER */);
+// Enable fingerprinting blocking by default only in nightly and early beta.
+pref("privacy.trackingprotection.fingerprinting.enabled", true);
+// Enable cryptomining blocking by default only in nightly and early beta.
+pref("privacy.trackingprotection.cryptomining.enabled", true);
 #endif
 
 pref("browser.contentblocking.allowlist.storage.enabled", true);
@@ -1564,6 +1577,37 @@ pref("browser.contentblocking.control-center.ui.showAllowedLabels", false);
 pref("browser.contentblocking.cryptomining.preferences.ui.enabled", true);
 pref("browser.contentblocking.fingerprinting.preferences.ui.enabled", true);
 
+// Possible values for browser.contentblocking.features.* prefs:
+//   Tracking Protection:
+//     "tp": tracking protection enabled
+//     "-tp": tracking protection disabled
+//   Tracking Protection in private windows:
+//     "tpPrivate": tracking protection in private windows enabled
+//     "-tpPrivate": tracking protection in private windows disabled
+//   Fingerprinting:
+//     "fp": fingerprinting blocking enabled
+//     "-fp": fingerprinting blocking disabled
+//   Cryptomining:
+//     "cm": cryptomining blocking enabled
+//     "-cm": cryptomining blocking disabled
+//   Cookie behavior:
+//     "cookieBehavior0": cookie behaviour BEHAVIOR_ACCEPT
+//     "cookieBehavior1": cookie behaviour BEHAVIOR_REJECT_FOREIGN
+//     "cookieBehavior2": cookie behaviour BEHAVIOR_REJECT
+//     "cookieBehavior3": cookie behaviour BEHAVIOR_LIMIT_FOREIGN
+//     "cookieBehavior4": cookie behaviour BEHAVIOR_REJECT_TRACKER
+// One value from each section must be included in each browser.contentblocking.features.* pref.
+pref("browser.contentblocking.features.strict", "tp,tpPrivate,cookieBehavior4,cm,fp");
+// Enable blocking access to storage from tracking resources only in nightly
+// and early beta. By default the value is "cookieBehavior0": BEHAVIOR_ACCEPT
+// Enable cryptomining blocking in standard in nightly and early beta.
+// Enable fingerprinting blocking in standard in nightly and early beta.
+#ifdef EARLY_BETA_OR_EARLIER
+pref("browser.contentblocking.features.standard", "-tp,tpPrivate,cookieBehavior4,cm,fp");
+#else
+pref("browser.contentblocking.features.standard", "-tp,tpPrivate,cookieBehavior0,-cm,-fp");
+#endif
+
 // Enable the Report Breakage UI on Nightly and Beta but not on Release yet.
 #ifdef EARLY_BETA_OR_EARLIER
 pref("browser.contentblocking.reportBreakage.enabled", true);
@@ -1577,10 +1621,9 @@ pref("browser.contentblocking.reportBreakage.url", "https://tracking-protection-
 
 pref("browser.contentblocking.introCount", 0);
 
-pref("privacy.trackingprotection.introURL", "https://www.mozilla.org/%LOCALE%/firefox/%VERSION%/content-blocking/start/");
+pref("browser.contentblocking.maxIntroCount", 5);
 
-// Workaround for Google Recaptcha
-pref("urlclassifier.trackingAnnotationSkipURLs", "google.com/recaptcha/,*.google.com/recaptcha/");
+pref("privacy.trackingprotection.introURL", "https://www.mozilla.org/%LOCALE%/firefox/%VERSION%/content-blocking/start/");
 
 // Always enable newtab segregation using containers
 pref("privacy.usercontext.about_newtab_segregation.enabled", true);
@@ -1814,10 +1857,6 @@ pref("prio.publicKeyB", "26E6674E65425B823F1F1D5F96E3BB3EF9E406EC7FBA7DEF8B08A35
 // Coverage ping is disabled by default.
 pref("toolkit.coverage.enabled", false);
 pref("toolkit.coverage.endpoint.base", "https://coverage.mozilla.org");
-// Whether or not Prio-encoded Telemetry will be sent along with the main ping.
-#if defined(NIGHTLY_BUILD)
-pref("prio.enabled", true);
-#endif
 // Whether Prio-encoded Telemetry will be sent in the prio ping.
 #if defined(NIGHTLY_BUILD)
 pref("toolkit.telemetry.prioping.enabled", true);

@@ -103,11 +103,14 @@
 #include "mozilla/EventDispatcher.h"
 #include "mozilla/IMEStateManager.h"
 #include "mozilla/dom/HTMLVideoElement.h"
+#include "ThirdPartyUtil.h"
 #include "TouchManager.h"
 #include "DecoderDoctorLogger.h"
 #include "MediaDecoder.h"
 #include "mozilla/ClearSiteData.h"
+#include "mozilla/EditorController.h"
 #include "mozilla/Fuzzyfox.h"
+#include "mozilla/HTMLEditorController.h"
 #include "mozilla/ServoBindings.h"
 #include "mozilla/StaticPresData.h"
 #include "mozilla/dom/WebIDLGlobalNameHash.h"
@@ -256,7 +259,8 @@ nsresult nsLayoutStatics::Initialize() {
 
   ProcessPriorityManager::Init();
 
-  nsPermissionManager::ClearOriginDataObserverInit();
+  nsPermissionManager::Startup();
+
   nsCookieService::AppClearDataObserverInit();
   nsApplicationCacheService::AppClearDataObserverInit();
 
@@ -342,6 +346,8 @@ void nsLayoutStatics::Shutdown() {
   Attr::Shutdown();
   PopupBlocker::Shutdown();
   IMEStateManager::Shutdown();
+  EditorController::Shutdown();
+  HTMLEditorController::Shutdown();
   nsMediaFeatures::Shutdown();
   nsHTMLDNSPrefetch::Shutdown();
   nsCSSRendering::Shutdown();

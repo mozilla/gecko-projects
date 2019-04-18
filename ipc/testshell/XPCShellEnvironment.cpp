@@ -17,14 +17,15 @@
 
 #include "jsapi.h"
 #include "js/CharacterEncoding.h"
-#include "js/CompilationAndEvaluation.h"
+#include "js/CompilationAndEvaluation.h"  // JS::Compile{,Utf8File}
 #include "js/PropertySpec.h"
-#include "js/SourceText.h"
+#include "js/SourceText.h"  // JS::Source{Ownership,Text}
 
 #include "xpcpublic.h"
 
 #include "XPCShellEnvironment.h"
 
+#include "mozilla/Utf8.h"  // mozilla::Utf8Unit
 #include "mozilla/XPCOM.h"
 
 #include "nsIChannel.h"
@@ -139,10 +140,9 @@ static bool Load(JSContext *cx, unsigned argc, JS::Value *vp) {
     JS::CompileOptions options(cx);
     options.setFileAndLine(filename.get(), 1);
 
-    JS::Rooted<JSScript *> script(cx);
-    bool ok = JS::CompileUtf8File(cx, options, file, &script);
+    JS::Rooted<JSScript *> script(cx, JS::CompileUtf8File(cx, options, file));
     fclose(file);
-    if (!ok) return false;
+    if (!script) return false;
 
     if (!JS_ExecuteScript(cx, script)) {
       return false;
@@ -251,9 +251,10 @@ void XPCShellEnvironment::ProcessFile(JSContext *cx, const char *filename,
     JS::CompileOptions options(cx);
     options.setFileAndLine(filename, 1);
 
-    JS::Rooted<JSScript *> script(cx);
-    if (JS::CompileUtf8File(cx, options, file, &script))
+    JS::Rooted<JSScript *> script(cx, JS::CompileUtf8File(cx, options, file));
+    if (script) {
       (void)JS_ExecuteScript(cx, script, &result);
+    }
 
     return;
   }
@@ -288,8 +289,12 @@ void XPCShellEnvironment::ProcessFile(JSContext *cx, const char *filename,
     JS::CompileOptions options(cx);
     options.setFileAndLine("typein", startline);
 
+    JS::SourceText<mozilla::Utf8Unit> srcBuf;
     JS::Rooted<JSScript *> script(cx);
-    if (JS::CompileUtf8(cx, options, buffer, strlen(buffer), &script)) {
+
+    if (srcBuf.init(cx, buffer, strlen(buffer),
+                    JS::SourceOwnership::Borrowed) &&
+        (script = JS::CompileDontInflate(cx, options, srcBuf))) {
       ok = JS_ExecuteScript(cx, script, &result);
       if (ok && !result.isUndefined()) {
         /* Suppress warnings from JS::ToString(). */
@@ -327,16 +332,10 @@ XPCShellEnvironment::~XPCShellEnvironment() {
     if (!jsapi.Init(GetGlobalObject())) {
       return;
     }
-    JSContext *cx = jsapi.cx();
-    Rooted<JSObject *> global(cx, GetGlobalObject());
-
-    {
-      JSAutoRealm ar(cx, global);
-      JS_SetAllNonReservedSlotsToUndefined(cx, global);
-    }
+    JS_SetAllNonReservedSlotsToUndefined(mGlobalHolder);
     mGlobalHolder.reset();
 
-    JS_GC(cx);
+    JS_GC(jsapi.cx());
   }
 }
 
@@ -431,8 +430,8 @@ bool XPCShellEnvironment::EvaluateString(const nsString &aString,
     return false;
   }
 
-  JS::Rooted<JSScript *> script(cx);
-  if (!JS::Compile(cx, options, srcBuf, &script)) {
+  JS::Rooted<JSScript *> script(cx, JS::Compile(cx, options, srcBuf));
+  if (!script) {
     return false;
   }
 

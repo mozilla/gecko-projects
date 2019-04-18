@@ -654,7 +654,7 @@ bool HTMLInputElement::IsPopupBlocked() const {
 
   // Check if page can open a popup without abuse regardless of allowed events
   if (PopupBlocker::GetPopupControlState() <= PopupBlocker::openBlocked) {
-    return !PopupBlocker::TryUsePopupOpeningToken();
+    return !PopupBlocker::TryUsePopupOpeningToken(OwnerDoc()->NodePrincipal());
   }
 
   return !PopupBlocker::CanShowPopupByPermission(OwnerDoc()->NodePrincipal());
@@ -1530,7 +1530,7 @@ void HTMLInputElement::SetValue(const nsAString& aValue, CallerType aCallerType,
       if (aCallerType != CallerType::System) {
         // setting the value of a "FILE" input widget requires
         // chrome privilege
-        aRv.Throw(NS_ERROR_DOM_SECURITY_ERR);
+        aRv.Throw(NS_ERROR_DOM_INVALID_STATE_ERR);
         return;
       }
       Sequence<nsString> list;
@@ -2941,7 +2941,8 @@ void HTMLInputElement::Blur(ErrorResult& aError) {
   nsGenericHTMLElement::Blur(aError);
 }
 
-void HTMLInputElement::Focus(ErrorResult& aError) {
+void HTMLInputElement::Focus(const FocusOptions& aOptions,
+                             ErrorResult& aError) {
   if (mType == NS_FORM_INPUT_NUMBER) {
     // Focus our anonymous text control, if we have one.
     nsNumberControlFrame* numberControlFrame = do_QueryFrame(GetPrimaryFrame());
@@ -2949,7 +2950,7 @@ void HTMLInputElement::Focus(ErrorResult& aError) {
       RefPtr<HTMLInputElement> textControl =
           numberControlFrame->GetAnonTextControl();
       if (textControl) {
-        textControl->Focus(aError);
+        textControl->Focus(aOptions, aError);
         return;
       }
     }
@@ -2966,30 +2967,7 @@ void HTMLInputElement::Focus(ErrorResult& aError) {
     }
   }
 
-  if (mType != NS_FORM_INPUT_FILE) {
-    nsGenericHTMLElement::Focus(aError);
-    return;
-  }
-
-  // For file inputs, focus the first button instead. In the case of there
-  // being two buttons (when the picker is a directory picker) the user can
-  // tab to the next one.
-  nsIFrame* frame = GetPrimaryFrame();
-  if (frame) {
-    for (nsIFrame* childFrame : frame->PrincipalChildList()) {
-      // See if the child is a button control.
-      nsCOMPtr<nsIFormControl> formCtrl =
-          do_QueryInterface(childFrame->GetContent());
-      if (formCtrl && formCtrl->ControlType() == NS_FORM_BUTTON_BUTTON) {
-        nsCOMPtr<Element> element = do_QueryInterface(formCtrl);
-        nsIFocusManager* fm = nsFocusManager::GetFocusManager();
-        if (fm && element) {
-          fm->SetFocus(element, 0);
-        }
-        break;
-      }
-    }
-  }
+  nsGenericHTMLElement::Focus(aOptions, aError);
 }
 
 #if !defined(ANDROID) && !defined(XP_MACOSX)
@@ -3651,8 +3629,7 @@ bool HTMLInputElement::ShouldPreventDOMActivateDispatch(
 
   return target->GetParent() == this &&
          target->IsRootOfNativeAnonymousSubtree() &&
-         target->AttrValueIs(kNameSpaceID_None, nsGkAtoms::type,
-                             nsGkAtoms::button, eCaseMatters);
+         target->IsHTMLElement(nsGkAtoms::button);
 }
 
 nsresult HTMLInputElement::MaybeInitPickers(EventChainPostVisitor& aVisitor) {
@@ -3910,6 +3887,7 @@ nsresult HTMLInputElement::PostHandleEvent(EventChainPostVisitor& aVisitor) {
               case NS_FORM_INPUT_BUTTON:
               case NS_FORM_INPUT_RESET:
               case NS_FORM_INPUT_SUBMIT:
+              case NS_FORM_INPUT_FILE:
               case NS_FORM_INPUT_IMAGE:  // Bug 34418
               case NS_FORM_INPUT_COLOR: {
                 DispatchSimulatedClick(this, aVisitor.mEvent->IsTrusted(),
@@ -3939,8 +3917,10 @@ nsresult HTMLInputElement::PostHandleEvent(EventChainPostVisitor& aVisitor) {
                       name, isMovingBack, this,
                       getter_AddRefs(selectedRadioButton));
                   if (selectedRadioButton) {
+                    FocusOptions options;
                     ErrorResult error;
-                    selectedRadioButton->Focus(error);
+
+                    selectedRadioButton->Focus(options, error);
                     rv = error.StealNSResult();
                     if (NS_SUCCEEDED(rv)) {
                       rv = DispatchSimulatedClick(selectedRadioButton,
@@ -4401,6 +4381,45 @@ void HTMLInputElement::UnbindFromTree(bool aDeep, bool aNullParent) {
   UpdateState(false);
 }
 
+namespace {
+class TypeChangeSelectionRangeFlagDeterminer {
+ public:
+  // @param aOldType InputElementTypes
+  // @param aNewType InputElementTypes
+  TypeChangeSelectionRangeFlagDeterminer(uint8_t aOldType, uint8_t aNewType)
+      : mOldType(aOldType), mNewType(aNewType) {}
+
+  // @return nsTextEditorState::SetValueFlags
+  uint32_t GetFlag() const {
+    const bool previouslySelectable = DoesSetRangeTextApply(mOldType);
+    const bool nowSelectable = DoesSetRangeTextApply(mNewType);
+    const bool moveCursorToBeginAndSetDirectionForward =
+        !previouslySelectable && nowSelectable;
+    const uint32_t flag =
+        moveCursorToBeginAndSetDirectionForward
+            ? nsTextEditorState::
+                  eSetValue_MoveCursorToBeginSetSelectionDirectionForward
+            : 0;
+    return flag;
+  }
+
+ private:
+  /**
+   * @param aType InputElementTypes
+   * @return true, iff SetRangeText applies to aType as specified at
+   * https://html.spec.whatwg.org/multipage/input.html#concept-input-apply.
+   */
+  static bool DoesSetRangeTextApply(uint8_t aType) {
+    return aType == NS_FORM_INPUT_TEXT || aType == NS_FORM_INPUT_SEARCH ||
+           aType == NS_FORM_INPUT_URL || aType == NS_FORM_INPUT_TEL ||
+           aType == NS_FORM_INPUT_PASSWORD;
+  }
+
+  const uint8_t mOldType;
+  const uint8_t mNewType;
+};
+}  // anonymous namespace
+
 void HTMLInputElement::HandleTypeChange(uint8_t aNewType, bool aNotify) {
   uint8_t oldType = mType;
   MOZ_ASSERT(oldType != aNewType);
@@ -4484,10 +4503,16 @@ void HTMLInputElement::HandleTypeChange(uint8_t aNewType, bool aNotify) {
         } else {
           value = aOldValue;
         }
+
+        const TypeChangeSelectionRangeFlagDeterminer flagDeterminer(oldType,
+                                                                    mType);
+        const uint32_t selectionRangeFlag = flagDeterminer.GetFlag();
+
         // TODO: What should we do if SetValueInternal fails?  (The allocation
         // may potentially be big, but most likely we've failed to allocate
         // before the type change.)
-        SetValueInternal(value, nsTextEditorState::eSetValue_Internal);
+        SetValueInternal(
+            value, nsTextEditorState::eSetValue_Internal | selectionRangeFlag);
       }
       break;
     case VALUE_MODE_FILENAME:
@@ -6279,18 +6304,13 @@ bool HTMLInputElement::IsHTMLFocusable(bool aWithMouse, bool* aIsFocusable,
   const bool defaultFocusable = true;
 #endif
 
-  if (mType == NS_FORM_INPUT_FILE || mType == NS_FORM_INPUT_NUMBER ||
-      mType == NS_FORM_INPUT_TIME || mType == NS_FORM_INPUT_DATE) {
+  if (mType == NS_FORM_INPUT_NUMBER || mType == NS_FORM_INPUT_TIME ||
+      mType == NS_FORM_INPUT_DATE) {
     if (aTabIndex) {
       // We only want our native anonymous child to be tabable to, not ourself.
       *aTabIndex = -1;
     }
-    if (mType == NS_FORM_INPUT_NUMBER || mType == NS_FORM_INPUT_TIME ||
-        mType == NS_FORM_INPUT_DATE) {
-      *aIsFocusable = true;
-    } else {
-      *aIsFocusable = defaultFocusable;
-    }
+    *aIsFocusable = true;
     return true;
   }
 

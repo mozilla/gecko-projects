@@ -763,7 +763,7 @@ bool js::gc::CheckWeakMapEntryMarking(const WeakMapBase* map, Cell* key,
                                       Cell* value) {
   bool ok = true;
 
-  DebugOnly<Zone*> zone = map->zone();
+  Zone* zone = map->zone();
   MOZ_ASSERT(CurrentThreadCanAccessZone(zone));
   MOZ_ASSERT(zone->isGCMarking());
 
@@ -789,8 +789,14 @@ bool js::gc::CheckWeakMapEntryMarking(const WeakMapBase* map, Cell* key,
   }
 
   CellColor keyColor = GetCellColor(key);
-  CellColor valueColor =
-      valueZone->isGCMarking() ? GetCellColor(value) : CellColor::Black;
+
+  // Values belonging to other runtimes or in uncollected zones are treated as
+  // black.
+  CellColor valueColor = CellColor::Black;
+  if (value->runtimeFromAnyThread() == zone->runtimeFromAnyThread() &&
+      valueZone->isGCMarking()) {
+    valueColor = GetCellColor(value);
+  }
 
   if (valueColor < Min(mapColor, keyColor)) {
     fprintf(stderr, "WeakMap value is less marked than map and key\n");

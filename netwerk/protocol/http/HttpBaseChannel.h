@@ -301,7 +301,6 @@ class HttpBaseChannel : public nsHashPropertyBag,
   NS_IMETHOD SetFetchCacheMode(uint32_t aFetchCacheMode) override;
   NS_IMETHOD GetTopWindowURI(nsIURI **aTopWindowURI) override;
   NS_IMETHOD SetTopWindowURIIfUnknown(nsIURI *aTopWindowURI) override;
-  NS_IMETHOD SetTopWindowPrincipal(nsIPrincipal *aTopWindowPrincipal) override;
   NS_IMETHOD GetProxyURI(nsIURI **proxyURI) override;
   virtual void SetCorsPreflightParameters(
       const nsTArray<nsCString> &unsafeHeaders) override;
@@ -314,9 +313,11 @@ class HttpBaseChannel : public nsHashPropertyBag,
   NS_IMETHOD SetLastRedirectFlags(uint32_t aValue) override;
   NS_IMETHOD GetNavigationStartTimeStamp(TimeStamp *aTimeStamp) override;
   NS_IMETHOD SetNavigationStartTimeStamp(TimeStamp aTimeStamp) override;
-  NS_IMETHOD CancelByChannelClassifier(nsresult aErrorCode) override;
+  NS_IMETHOD CancelByURLClassifier(nsresult aErrorCode) override;
   virtual void SetIPv4Disabled(void) override;
   virtual void SetIPv6Disabled(void) override;
+  NS_IMETHOD GetCrossOriginOpenerPolicy(
+      nsILoadInfo::CrossOriginOpenerPolicy *aPolicy) override;
 
   inline void CleanRedirectCacheChainIfNecessary() {
     mRedirectedCachekeys = nullptr;
@@ -443,8 +444,9 @@ class HttpBaseChannel : public nsHashPropertyBag,
     mUploadStreamHasHeaders = hasHeaders;
   }
 
-  MOZ_MUST_USE nsresult SetReferrerWithPolicyInternal(nsIURI *referrer,
-                                                      uint32_t referrerPolicy) {
+  MOZ_MUST_USE nsresult SetReferrerWithPolicyInternal(
+      nsIURI *referrer, uint32_t originalReferrerPolicy,
+      uint32_t referrerPolicy) {
     nsAutoCString spec;
     nsresult rv = referrer->GetAsciiSpec(spec);
     if (NS_FAILED(rv)) {
@@ -452,6 +454,7 @@ class HttpBaseChannel : public nsHashPropertyBag,
     }
     mOriginalReferrer = referrer;
     mReferrer = referrer;
+    mOriginalReferrerPolicy = originalReferrerPolicy;
     mReferrerPolicy = referrerPolicy;
     rv = mRequestHead.SetHeader(nsHttp::Referer, spec);
     return rv;
@@ -464,7 +467,6 @@ class HttpBaseChannel : public nsHashPropertyBag,
 
  protected:
   nsresult GetTopWindowURI(nsIURI *aURIBeingLoaded, nsIURI **aTopWindowURI);
-  nsresult GetTopWindowPrincipal(nsIPrincipal **aTopWindowPrincipal);
 
   // Handle notifying listener, removing from loadgroup if request failed.
   void DoNotifyListener();
@@ -565,7 +567,6 @@ class HttpBaseChannel : public nsHashPropertyBag,
   nsCOMPtr<nsIURI> mProxyURI;
   nsCOMPtr<nsIPrincipal> mPrincipal;
   nsCOMPtr<nsIURI> mTopWindowURI;
-  nsCOMPtr<nsIPrincipal> mTopWindowPrincipal;
   nsCOMPtr<nsIStreamListener> mListener;
   // An instance of nsHTTPCompressConv
   nsCOMPtr<nsIStreamListener> mCompressListener;
@@ -748,6 +749,7 @@ class HttpBaseChannel : public nsHashPropertyBag,
   uint32_t mProxyResolveFlags;
 
   uint32_t mContentDispositionHint;
+  uint32_t mOriginalReferrerPolicy;
   uint32_t mReferrerPolicy;
 
   uint32_t mCorsMode;

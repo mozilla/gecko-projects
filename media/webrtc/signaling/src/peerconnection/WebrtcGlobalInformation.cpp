@@ -318,31 +318,33 @@ static void RunStatsQuery(
         aPcIdFilter.EqualsASCII(pc.GetIdAsAscii().c_str())) {
       if (pc.HasMedia()) {
         promises.AppendElement(
-            pc.GetStats(nullptr, true)
-                ->Then(GetMainThreadSerialEventTarget(), __func__,
-                       [=](UniquePtr<RTCStatsQuery>&& aQuery) {
-                         return RTCStatsQueryPromise::CreateAndResolve(
-                             std::move(aQuery), __func__);
-                       },
-                       [=](nsresult aError) {
-                         // Ignore errors! Just resolve with a nullptr.
-                         return RTCStatsQueryPromise::CreateAndResolve(
-                             UniquePtr<RTCStatsQuery>(), __func__);
-                       }));
+            pc.GetStats(nullptr, true, false)
+                ->Then(
+                    GetMainThreadSerialEventTarget(), __func__,
+                    [=](UniquePtr<RTCStatsQuery>&& aQuery) {
+                      return RTCStatsQueryPromise::CreateAndResolve(
+                          std::move(aQuery), __func__);
+                    },
+                    [=](nsresult aError) {
+                      // Ignore errors! Just resolve with a nullptr.
+                      return RTCStatsQueryPromise::CreateAndResolve(
+                          UniquePtr<RTCStatsQuery>(), __func__);
+                    }));
       }
     }
   }
 
   RTCStatsQueryPromise::All(GetMainThreadSerialEventTarget(), promises)
-      ->Then(GetMainThreadSerialEventTarget(), __func__,
-             // MOZ_CAN_RUN_SCRIPT_BOUNDARY because we're going to run that
-             // function async anyway.
-             [aThisChild,
-              aRequestId](nsTArray<UniquePtr<RTCStatsQuery>>&& aQueries)
-                 MOZ_CAN_RUN_SCRIPT_BOUNDARY {
-                   OnStatsReport_m(aThisChild, aRequestId, std::move(aQueries));
-                 },
-             [=](nsresult) { MOZ_CRASH(); });
+      ->Then(
+          GetMainThreadSerialEventTarget(), __func__,
+          // MOZ_CAN_RUN_SCRIPT_BOUNDARY because we're going to run that
+          // function async anyway.
+          [aThisChild,
+           aRequestId](nsTArray<UniquePtr<RTCStatsQuery>>&& aQueries)
+              MOZ_CAN_RUN_SCRIPT_BOUNDARY {
+                OnStatsReport_m(aThisChild, aRequestId, std::move(aQueries));
+              },
+          [=](nsresult) { MOZ_CRASH(); });
 }
 
 void ClearClosedStats() {
@@ -458,19 +460,20 @@ static nsresult RunLogQuery(const nsCString& aPattern,
               [transportHandler, aPattern]() {
                 return transportHandler->GetIceLog(aPattern);
               })
-      ->Then(GetMainThreadSerialEventTarget(), __func__,
-             // MOZ_CAN_RUN_SCRIPT_BOUNDARY because we're going to run that
-             // function async anyway.
-             [aRequestId, aThisChild](Sequence<nsString>&& aLogLines)
-                 MOZ_CAN_RUN_SCRIPT_BOUNDARY {
-                   OnGetLogging_m(aThisChild, aRequestId, std::move(aLogLines));
-                 },
-             // MOZ_CAN_RUN_SCRIPT_BOUNDARY because we're going to run that
-             // function async anyway.
-             [aRequestId, aThisChild](nsresult aError)
-                 MOZ_CAN_RUN_SCRIPT_BOUNDARY {
-                   OnGetLogging_m(aThisChild, aRequestId, Sequence<nsString>());
-                 });
+      ->Then(
+          GetMainThreadSerialEventTarget(), __func__,
+          // MOZ_CAN_RUN_SCRIPT_BOUNDARY because we're going to run that
+          // function async anyway.
+          [aRequestId, aThisChild](Sequence<nsString>&& aLogLines)
+              MOZ_CAN_RUN_SCRIPT_BOUNDARY {
+                OnGetLogging_m(aThisChild, aRequestId, std::move(aLogLines));
+              },
+          // MOZ_CAN_RUN_SCRIPT_BOUNDARY because we're going to run that
+          // function async anyway.
+          [aRequestId, aThisChild](nsresult aError)
+              MOZ_CAN_RUN_SCRIPT_BOUNDARY {
+                OnGetLogging_m(aThisChild, aRequestId, Sequence<nsString>());
+              });
 
   return NS_OK;
 }
@@ -1047,14 +1050,15 @@ void WebrtcGlobalInformation::StoreLongTermICEStatistics(
     return;
   }
 
-  aPc.GetStats(nullptr, true)
-      ->Then(GetMainThreadSerialEventTarget(), __func__,
-             [=](UniquePtr<RTCStatsQuery>&& aQuery) {
-               StoreLongTermICEStatisticsImpl_m(NS_OK, aQuery.get());
-             },
-             [=](nsresult aError) {
-               StoreLongTermICEStatisticsImpl_m(aError, nullptr);
-             });
+  aPc.GetStats(nullptr, true, false)
+      ->Then(
+          GetMainThreadSerialEventTarget(), __func__,
+          [=](UniquePtr<RTCStatsQuery>&& aQuery) {
+            StoreLongTermICEStatisticsImpl_m(NS_OK, aQuery.get());
+          },
+          [=](nsresult aError) {
+            StoreLongTermICEStatisticsImpl_m(aError, nullptr);
+          });
 }
 
 }  // namespace dom

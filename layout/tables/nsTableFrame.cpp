@@ -70,7 +70,7 @@ using mozilla::gfx::ToDeviceColor;
 namespace mozilla {
 
 struct TableReflowInput {
-  // the real reflow state
+  // the real reflow input
   const ReflowInput& reflowInput;
 
   // The table's available size (in reflowInput's writing mode)
@@ -409,12 +409,13 @@ int32_t nsTableFrame::GetIndexOfLastRealCol() {
 }
 
 nsTableColFrame* nsTableFrame::GetColFrame(int32_t aColIndex) const {
-  NS_ASSERTION(!GetPrevInFlow(), "GetColFrame called on next in flow");
+  MOZ_ASSERT(!GetPrevInFlow(), "GetColFrame called on next in flow");
   int32_t numCols = mColFrames.Length();
   if ((aColIndex >= 0) && (aColIndex < numCols)) {
+    MOZ_ASSERT(mColFrames.ElementAt(aColIndex));
     return mColFrames.ElementAt(aColIndex);
   } else {
-    NS_ERROR("invalid col index");
+    MOZ_ASSERT_UNREACHABLE("invalid col index");
     return nullptr;
   }
 }
@@ -689,7 +690,7 @@ void nsTableFrame::AppendAnonymousColFrames(
   MOZ_ASSERT(aColType != eColAnonymousCol, "Shouldn't happen");
   MOZ_ASSERT(aNumColsToAdd > 0, "We should be adding _something_.");
 
-  nsIPresShell* shell = PresShell();
+  mozilla::PresShell* presShell = PresShell();
 
   // Get the last col frame
   nsFrameList newColFrames;
@@ -702,13 +703,13 @@ void nsTableFrame::AppendAnonymousColFrames(
     // col group
     nsIContent* iContent = aColGroupFrame->GetContent();
     RefPtr<ComputedStyle> computedStyle =
-        shell->StyleSet()->ResolveNonInheritingAnonymousBoxStyle(
+        presShell->StyleSet()->ResolveNonInheritingAnonymousBoxStyle(
             PseudoStyleType::tableCol);
     // ASSERTION to check for bug 54454 sneaking back in...
     NS_ASSERTION(iContent, "null content in CreateAnonymousColFrames");
 
     // create the new col frame
-    nsIFrame* colFrame = NS_NewTableColFrame(shell, computedStyle);
+    nsIFrame* colFrame = NS_NewTableColFrame(presShell, computedStyle);
     ((nsTableColFrame*)colFrame)->SetColType(aColType);
     colFrame->Init(iContent, aColGroupFrame, nullptr);
 
@@ -1861,7 +1862,7 @@ void nsTableFrame::RequestSpecialBSizeReflow(const ReflowInput& aReflowInput) {
  *    ancestors until it reaches the containing table and calls
  *    SetNeedToInitiateSpecialReflow() on it. For percent bsize frames inside
  *    cells, during DidReflow(), the cell's NotifyPercentBSize() is called
- *    (the cell is the reflow state's mPercentBSizeObserver in this case).
+ *    (the cell is the reflow input's mPercentBSizeObserver in this case).
  *    NotifyPercentBSize() calls RequestSpecialBSizeReflow().
  *
  * XXX (jfkthame) This comment appears to be out of date; it refers to
@@ -1869,7 +1870,7 @@ void nsTableFrame::RequestSpecialBSizeReflow(const ReflowInput& aReflowInput) {
  *
  * 2) After the pass 2 reflow, if the table's NeedToInitiateSpecialReflow(true)
  *    was called, it will do the special bsize reflow, setting the reflow
- *    state's mFlags.mSpecialBSizeReflow to true and mSpecialHeightInitiator to
+ *    input's mFlags.mSpecialBSizeReflow to true and mSpecialHeightInitiator to
  *    itself. It won't do this if IsPrematureSpecialHeightReflow() returns true
  *    because in that case another special bsize reflow will be coming along
  *    with the containing table as the mSpecialHeightInitiator. It is only
@@ -2035,7 +2036,7 @@ void nsTableFrame::Reflow(nsPresContext* aPresContext,
 
     // XXXldb Are all these conditions correct?
     if (needToInitiateSpecialReflow && aStatus.IsComplete()) {
-      // XXXldb Do we need to set the IsBResize flag on any reflow states?
+      // XXXldb Do we need to set the IsBResize flag on any reflow inputs?
 
       ReflowInput& mutable_rs = const_cast<ReflowInput&>(aReflowInput);
 
@@ -2142,16 +2143,16 @@ void nsTableFrame::FixupPositionedTableParts(nsPresContext* aPresContext,
     desiredSize.mOverflowAreas =
         positionedPart->GetOverflowAreasRelativeToSelf();
 
-    // Construct a dummy reflow state and reflow status.
-    // XXX(seth): Note that the dummy reflow state doesn't have a correct
-    // chain of parent reflow states. It also doesn't necessarily have a
+    // Construct a dummy reflow input and reflow status.
+    // XXX(seth): Note that the dummy reflow input doesn't have a correct
+    // chain of parent reflow inputs. It also doesn't necessarily have a
     // correct containing block.
     WritingMode wm = positionedPart->GetWritingMode();
     LogicalSize availSize(wm, size);
     availSize.BSize(wm) = NS_UNCONSTRAINEDSIZE;
     ReflowInput reflowInput(aPresContext, positionedPart,
                             aReflowInput.mRenderingContext, availSize,
-                            ReflowInput::DUMMY_PARENT_REFLOW_STATE);
+                            ReflowInput::DUMMY_PARENT_REFLOW_INPUT);
     nsReflowStatus reflowStatus;
 
     // Reflow absolutely-positioned descendants of the positioned part.
@@ -2696,7 +2697,7 @@ void nsTableFrame::RemoveFrame(ChildListID aListID, nsIFrame* aOldFrame) {
       aListID == kColGroupList || mozilla::StyleDisplay::TableColumnGroup !=
                                       aOldFrame->StyleDisplay()->mDisplay,
       "Wrong list name; use kColGroupList iff colgroup");
-  nsIPresShell* shell = PresShell();
+  mozilla::PresShell* presShell = PresShell();
   nsTableFrame* lastParent = nullptr;
   while (aOldFrame) {
     nsIFrame* oldFrameNextContinuation = aOldFrame->GetNextContinuation();
@@ -2713,8 +2714,8 @@ void nsTableFrame::RemoveFrame(ChildListID aListID, nsIFrame* aOldFrame) {
         parent->SetFullBCDamageArea();
       }
       parent->SetGeometryDirty();
-      shell->FrameNeedsReflow(parent, nsIPresShell::eTreeChange,
-                              NS_FRAME_HAS_DIRTY_CHILDREN);
+      presShell->FrameNeedsReflow(parent, nsIPresShell::eTreeChange,
+                                  NS_FRAME_HAS_DIRTY_CHILDREN);
       lastParent = parent;
     }
   }
@@ -2810,7 +2811,7 @@ LogicalMargin nsTableFrame::GetExcludedOuterBCBorder(
 static LogicalMargin GetSeparateModelBorderPadding(
     const WritingMode aWM, const ReflowInput* aReflowInput,
     ComputedStyle* aComputedStyle) {
-  // XXXbz Either we _do_ have a reflow state and then we can use its
+  // XXXbz Either we _do_ have a reflow input and then we can use its
   // mComputedBorderPadding or we don't and then we get the padding
   // wrong!
   const nsStyleBorder* border = aComputedStyle->StyleBorder();
@@ -2851,7 +2852,7 @@ void nsTableFrame::InitChildReflowInput(ReflowInput& aReflowInput) {
   }
 }
 
-// Position and size aKidFrame and update our reflow state. The origin of
+// Position and size aKidFrame and update our reflow input. The origin of
 // aKidRect is relative to the upper-left origin of our frame
 void nsTableFrame::PlaceChild(TableReflowInput& aReflowInput,
                               nsIFrame* aKidFrame, nsPoint aKidPosition,
@@ -3366,7 +3367,7 @@ void nsTableFrame::ReflowColGroups(gfxContext* aRenderingContext) {
     nsPresContext* presContext = PresContext();
     for (nsIFrame* kidFrame : mColGroups) {
       if (NS_SUBTREE_DIRTY(kidFrame)) {
-        // The column groups don't care about dimensions or reflow states.
+        // The column groups don't care about dimensions or reflow inputs.
         ReflowInput kidReflowInput(presContext, kidFrame, aRenderingContext,
                                    LogicalSize(kidFrame->GetWritingMode()));
         nsReflowStatus cgStatus;
@@ -3867,8 +3868,7 @@ bool nsTableFrame::GetNaturalBaselineBOffset(
 
 /* ----- global methods ----- */
 
-nsTableFrame* NS_NewTableFrame(nsIPresShell* aPresShell,
-                               ComputedStyle* aStyle) {
+nsTableFrame* NS_NewTableFrame(PresShell* aPresShell, ComputedStyle* aStyle) {
   return new (aPresShell) nsTableFrame(aStyle, aPresShell->GetPresContext());
 }
 
@@ -4262,6 +4262,7 @@ struct BCMapCellInfo {
 
   // storage of table information
   nsTableFrame* mTableFrame;
+  nsTableFrame* mTableFirstInFlow;
   int32_t mNumTableRows;
   int32_t mNumTableCols;
   BCPropertyData* mTableBCData;
@@ -4304,6 +4305,7 @@ struct BCMapCellInfo {
 
 BCMapCellInfo::BCMapCellInfo(nsTableFrame* aTableFrame)
     : mTableFrame(aTableFrame),
+      mTableFirstInFlow(static_cast<nsTableFrame*>(aTableFrame->FirstInFlow())),
       mNumTableRows(aTableFrame->GetRowCount()),
       mNumTableCols(aTableFrame->GetColCount()),
       mTableBCData(mTableFrame->GetProperty(TableBCProperty())),
@@ -4477,13 +4479,13 @@ void BCMapCellInfo::SetInfo(nsTableRowFrame* aNewRow, int32_t aColIndex,
   mRgAtEnd = rgEnd == rowIndex + mRowSpan - 1;
 
   // col frame info
-  mStartCol = mTableFrame->GetColFrame(aColIndex);
+  mStartCol = mTableFirstInFlow->GetColFrame(aColIndex);
   if (!mStartCol) ABORT0();
 
   mEndCol = mStartCol;
   if (mColSpan > 1) {
     nsTableColFrame* colFrame =
-        mTableFrame->GetColFrame(aColIndex + mColSpan - 1);
+        mTableFirstInFlow->GetColFrame(aColIndex + mColSpan - 1);
     if (!colFrame) ABORT0();
     mEndCol = colFrame;
   }
@@ -5488,10 +5490,7 @@ void BCMapCellInfo::SetTableBEndBorderWidth(BCPixelSize aWidth) {
 }
 
 void BCMapCellInfo::SetColumn(int32_t aColX) {
-  mCurrentColFrame = mTableFrame->GetColFrame(aColX);
-  if (!mCurrentColFrame) {
-    NS_ERROR("null mCurrentColFrame");
-  }
+  mCurrentColFrame = mTableFirstInFlow->GetColFrame(aColX);
   mCurrentColGroupFrame =
       static_cast<nsTableColGroupFrame*>(mCurrentColFrame->GetParent());
   if (!mCurrentColGroupFrame) {

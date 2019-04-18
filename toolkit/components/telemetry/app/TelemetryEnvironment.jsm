@@ -269,8 +269,6 @@ const DEFAULT_ENVIRONMENT_PREFS = new Map([
   ["privacy.donottrackheader.enabled", {what: RECORD_PREF_VALUE}],
   ["security.mixed_content.block_active_content", {what: RECORD_PREF_VALUE}],
   ["security.mixed_content.block_display_content", {what: RECORD_PREF_VALUE}],
-  ["toolkit.telemetry.testing.overridePreRelease", {what: RECORD_PREF_VALUE}],
-  ["toolkit.telemetry.overrideUpdateChannel", {what: RECORD_PREF_STATE}],
   ["xpinstall.signatures.required", {what: RECORD_PREF_VALUE}],
 ]);
 
@@ -518,7 +516,7 @@ function getWindowsVersionInfo() {
     winVer.dwOSVersionInfoSize = OSVERSIONINFOEXW.size;
 
     if (0 === GetVersionEx(winVer.address())) {
-      throw ("Failure in GetVersionEx (returned 0)");
+      throw new Error("Failure in GetVersionEx (returned 0)");
     }
 
     return {
@@ -598,23 +596,26 @@ EnvironmentAddonBuilder.prototype = {
   },
 
   // AddonListener
-  onEnabled() {
-    this._onAddonChange();
+  onEnabled(addon) {
+    this._onAddonChange(addon);
   },
-  onDisabled() {
-    this._onAddonChange();
+  onDisabled(addon) {
+    this._onAddonChange(addon);
   },
-  onInstalled() {
-    this._onAddonChange();
+  onInstalled(addon) {
+    this._onAddonChange(addon);
   },
-  onUninstalling() {
-    this._onAddonChange();
+  onUninstalling(addon) {
+    this._onAddonChange(addon);
   },
-  onUninstalled() {
-    this._onAddonChange();
+  onUninstalled(addon) {
+    this._onAddonChange(addon);
   },
 
-  _onAddonChange() {
+  _onAddonChange(addon) {
+    if (addon && addon.isBuiltin && !addon.isSystem) {
+      return;
+    }
     this._environment._log.trace("_onAddonChange");
     this._checkForChanges("addons-changed");
   },
@@ -721,6 +722,10 @@ EnvironmentAddonBuilder.prototype = {
     this._environment._addonsAreFull = fullData;
     let activeAddons = {};
     for (let addon of allAddons) {
+      // Don't collect any information about the new built-in search webextensions
+      if (addon.isBuiltin && !addon.isSystem) {
+        continue;
+      }
       // Weird addon data in the wild can lead to exceptions while collecting
       // the data.
       try {
@@ -1217,7 +1222,7 @@ EnvironmentCache.prototype = {
     this._log.trace("observe - aTopic: " + aTopic + ", aData: " + aData);
     switch (aTopic) {
       case SEARCH_ENGINE_MODIFIED_TOPIC:
-        if (aData != "engine-current") {
+        if (aData != "engine-default") {
           return;
         }
         // Record the new default search choice and send the change notification.

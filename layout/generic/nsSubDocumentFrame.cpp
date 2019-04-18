@@ -56,8 +56,8 @@ static Document* GetDocumentFromView(nsView* aView) {
   MOZ_ASSERT(aView, "null view");
 
   nsViewManager* vm = aView->GetViewManager();
-  nsIPresShell* ps = vm ? vm->GetPresShell() : nullptr;
-  return ps ? ps->GetDocument() : nullptr;
+  PresShell* presShell = vm ? vm->GetPresShell() : nullptr;
+  return presShell ? presShell->GetDocument() : nullptr;
 }
 
 nsSubDocumentFrame::nsSubDocumentFrame(ComputedStyle* aStyle,
@@ -180,6 +180,10 @@ void nsSubDocumentFrame::ShowViewer() {
       }
       mCallingShow = false;
       mDidCreateDoc = didCreateDoc;
+
+      if (!(GetStateBits() & NS_FRAME_FIRST_REFLOW)) {
+        frameloader->UpdatePositionAndSize(this);
+      }
     }
   }
 }
@@ -190,14 +194,14 @@ nsIFrame* nsSubDocumentFrame::GetSubdocumentRootFrame() {
   return subdocView ? subdocView->GetFrame() : nullptr;
 }
 
-nsIPresShell* nsSubDocumentFrame::GetSubdocumentPresShellForPainting(
+mozilla::PresShell* nsSubDocumentFrame::GetSubdocumentPresShellForPainting(
     uint32_t aFlags) {
   if (!mInnerView) return nullptr;
 
   nsView* subdocView = mInnerView->GetFirstChild();
   if (!subdocView) return nullptr;
 
-  nsIPresShell* presShell = nullptr;
+  mozilla::PresShell* presShell = nullptr;
 
   nsIFrame* subdocRootFrame = subdocView->GetFrame();
   if (subdocRootFrame) {
@@ -217,12 +221,13 @@ nsIPresShell* nsSubDocumentFrame::GetSubdocumentPresShellForPainting(
       frame = nextView->GetFrame();
     }
     if (frame) {
-      nsIPresShell* ps = frame->PresShell();
-      if (!presShell ||
-          (ps && !ps->IsPaintingSuppressed() && sShowPreviousPage)) {
+      mozilla::PresShell* presShellForNextView = frame->PresShell();
+      if (!presShell || (presShellForNextView &&
+                         !presShellForNextView->IsPaintingSuppressed() &&
+                         sShowPreviousPage)) {
         subdocView = nextView;
         subdocRootFrame = frame;
-        presShell = ps;
+        presShell = presShellForNextView;
       }
     }
     if (!presShell) {
@@ -348,7 +353,7 @@ void nsSubDocumentFrame::BuildDisplayList(nsDisplayListBuilder* aBuilder,
     return;
   }
 
-  nsCOMPtr<nsIPresShell> presShell = GetSubdocumentPresShellForPainting(
+  RefPtr<mozilla::PresShell> presShell = GetSubdocumentPresShellForPainting(
       aBuilder->IsIgnoringPaintSuppression() ? IGNORE_PAINT_SUPPRESSION : 0);
 
   if (!presShell) {
@@ -877,8 +882,7 @@ nsresult nsSubDocumentFrame::AttributeChanged(int32_t aNameSpaceID,
   return NS_OK;
 }
 
-nsIFrame* NS_NewSubDocumentFrame(nsIPresShell* aPresShell,
-                                 ComputedStyle* aStyle) {
+nsIFrame* NS_NewSubDocumentFrame(PresShell* aPresShell, ComputedStyle* aStyle) {
   return new (aPresShell)
       nsSubDocumentFrame(aStyle, aPresShell->GetPresContext());
 }
@@ -888,7 +892,7 @@ NS_IMPL_FRAMEARENA_HELPERS(nsSubDocumentFrame)
 class nsHideViewer : public Runnable {
  public:
   nsHideViewer(nsIContent* aFrameElement, nsFrameLoader* aFrameLoader,
-               nsIPresShell* aPresShell, bool aHideViewerIfFrameless)
+               PresShell* aPresShell, bool aHideViewerIfFrameless)
       : mozilla::Runnable("nsHideViewer"),
         mFrameElement(aFrameElement),
         mFrameLoader(aFrameLoader),
@@ -899,7 +903,7 @@ class nsHideViewer : public Runnable {
     NS_ASSERTION(mPresShell, "Must have a presshell");
   }
 
-  NS_IMETHOD Run() override {
+  MOZ_CAN_RUN_SCRIPT_BOUNDARY NS_IMETHOD Run() override {
     // Flush frames, to ensure any pending display:none changes are made.
     // Note it can be unsafe to flush if we've destroyed the presentation
     // for some other reason, like if we're shutting down.
@@ -913,7 +917,7 @@ class nsHideViewer : public Runnable {
     //
     // We should find some way to avoid that!
     if (!mPresShell->IsDestroying() && mFrameElement->IsInComposedDoc()) {
-      mPresShell->FlushPendingNotifications(FlushType::Frames);
+      MOZ_KnownLive(mPresShell)->FlushPendingNotifications(FlushType::Frames);
     }
 
     // Either the frame has been constructed by now, or it never will be,
@@ -932,7 +936,7 @@ class nsHideViewer : public Runnable {
  private:
   nsCOMPtr<nsIContent> mFrameElement;
   RefPtr<nsFrameLoader> mFrameLoader;
-  nsCOMPtr<nsIPresShell> mPresShell;
+  RefPtr<PresShell> mPresShell;
   bool mHideViewerIfFrameless;
 };
 
@@ -998,6 +1002,11 @@ nsFrameLoader* nsSubDocumentFrame::FrameLoader() const {
     }
   }
   return mFrameLoader;
+}
+
+void nsSubDocumentFrame::ResetFrameLoader() {
+  mFrameLoader = nullptr;
+  nsContentUtils::AddScriptRunner(new AsyncFrameInit(this));
 }
 
 // XXX this should be called ObtainDocShell or something like that,
@@ -1236,10 +1245,8 @@ nsIFrame* nsSubDocumentFrame::ObtainIntrinsicSizeFrame() {
     // Try to get an nsIFrame for our sub-document's document element
     nsIFrame* subDocRoot = nullptr;
 
-    nsIDocShell* docShell = GetDocShell();
-    if (docShell) {
-      nsCOMPtr<nsIPresShell> presShell = docShell->GetPresShell();
-      if (presShell) {
+    if (nsIDocShell* docShell = GetDocShell()) {
+      if (mozilla::PresShell* presShell = docShell->GetPresShell()) {
         nsIScrollableFrame* scrollable =
             presShell->GetRootScrollFrameAsScrollable();
         if (scrollable) {

@@ -114,18 +114,6 @@ nsPresContext* ServoStyleSet::GetPresContext() {
   return mDocument->GetPresContext();
 }
 
-void ServoStyleSet::ShellAttachedToDocument() {
-  // We may have Shadow DOM style changes that we weren't notified about because
-  // the document didn't have a shell, if the ShadowRoot was created in a
-  // display: none iframe.
-  //
-  // Now that we got a shell, we may need to get them up-to-date.
-  //
-  // TODO(emilio, bug 1418159): This wouldn't be needed if the StyleSet was
-  // owned by the document.
-  SetStylistXBLStyleSheetsDirty();
-}
-
 template <typename Functor>
 void EnumerateShadowRoots(const Document& aDoc, const Functor& aCb) {
   const Document::ShadowRootSet& shadowRoots = aDoc.ComposedShadowRoots();
@@ -140,6 +128,9 @@ void EnumerateShadowRoots(const Document& aDoc, const Functor& aCb) {
 void ServoStyleSet::ShellDetachedFromDocument() {
   // Make sure we drop our cached styles before the presshell arena starts going
   // away.
+  //
+  // TODO(emilio): The presshell arena comment is no longer relevant. We could
+  // avoid doing this if we wanted to.
   ClearNonInheritingComputedStyles();
   mStyleRuleMap = nullptr;
 }
@@ -321,15 +312,6 @@ void ServoStyleSet::SetAuthorStyleDisabled(bool aStyleDisabled) {
   SetStylistStyleSheetsDirty();
 }
 
-already_AddRefed<ComputedStyle> ServoStyleSet::ResolveStyleFor(
-    Element* aElement, LazyComputeBehavior aMayCompute) {
-  if (aMayCompute == LazyComputeBehavior::Allow) {
-    return ResolveStyleLazily(aElement, PseudoStyleType::NotPseudo);
-  }
-
-  return ResolveServoStyle(*aElement);
-}
-
 const ServoElementSnapshotTable& ServoStyleSet::Snapshots() {
   MOZ_ASSERT(GetPresContext(), "Styling a document without a shell?");
   return GetPresContext()->RestyleManager()->Snapshots();
@@ -505,13 +487,6 @@ already_AddRefed<ComputedStyle> ServoStyleSet::ResolvePseudoElementStyle(
 
   MOZ_ASSERT(computedValues);
   return computedValues.forget();
-}
-
-already_AddRefed<ComputedStyle> ServoStyleSet::ResolveStyleLazily(
-    Element* aElement, PseudoStyleType aPseudoType,
-    StyleRuleInclusion aRuleInclusion) {
-  PreTraverseSync();
-  return ResolveStyleLazilyInternal(aElement, aPseudoType, aRuleInclusion);
 }
 
 already_AddRefed<ComputedStyle>
@@ -920,10 +895,10 @@ void ServoStyleSet::StyleNewSubtree(Element* aRoot) {
   // update the styles and clear the animation bits.
   if (GetPresContext()->EffectCompositor()->PreTraverseInSubtree(flags,
                                                                  aRoot)) {
-    postTraversalRequired = Servo_TraverseSubtree(
-        aRoot, mRawSet.get(), &snapshots,
-        ServoTraversalFlags::AnimationOnly | ServoTraversalFlags::Forgetful |
-            ServoTraversalFlags::ClearAnimationOnlyDirtyDescendants);
+    postTraversalRequired =
+        Servo_TraverseSubtree(aRoot, mRawSet.get(), &snapshots,
+                              ServoTraversalFlags::AnimationOnly |
+                                  ServoTraversalFlags::FinalAnimationTraversal);
     MOZ_ASSERT(!postTraversalRequired);
   }
 }
@@ -1154,12 +1129,12 @@ void ServoStyleSet::ClearNonInheritingComputedStyles() {
   }
 }
 
-already_AddRefed<ComputedStyle> ServoStyleSet::ResolveStyleLazilyInternal(
-    Element* aElement, PseudoStyleType aPseudoType,
+already_AddRefed<ComputedStyle> ServoStyleSet::ResolveStyleLazily(
+    Element& aElement, PseudoStyleType aPseudoType,
     StyleRuleInclusion aRuleInclusion) {
+  PreTraverseSync();
   MOZ_ASSERT(GetPresContext(),
              "For now, no style resolution without a pres context");
-  GetPresContext()->EffectCompositor()->PreTraverse(aElement, aPseudoType);
   MOZ_ASSERT(!StylistNeedsUpdate());
 
   AutoSetInServoTraversal guard(this);
@@ -1175,49 +1150,36 @@ already_AddRefed<ComputedStyle> ServoStyleSet::ResolveStyleLazilyInternal(
    * getComputedStyle, the only API where this can be observed, to look at the
    * style of the pseudo-element if it exists instead.
    */
-  Element* elementForStyleResolution = aElement;
+  Element* elementForStyleResolution = &aElement;
   PseudoStyleType pseudoTypeForStyleResolution = aPseudoType;
   if (aPseudoType == PseudoStyleType::before) {
-    if (Element* pseudo = nsLayoutUtils::GetBeforePseudo(aElement)) {
+    if (Element* pseudo = nsLayoutUtils::GetBeforePseudo(&aElement)) {
       elementForStyleResolution = pseudo;
       pseudoTypeForStyleResolution = PseudoStyleType::NotPseudo;
     }
   } else if (aPseudoType == PseudoStyleType::after) {
-    if (Element* pseudo = nsLayoutUtils::GetAfterPseudo(aElement)) {
+    if (Element* pseudo = nsLayoutUtils::GetAfterPseudo(&aElement)) {
       elementForStyleResolution = pseudo;
       pseudoTypeForStyleResolution = PseudoStyleType::NotPseudo;
     }
   } else if (aPseudoType == PseudoStyleType::marker) {
-    if (Element* pseudo = nsLayoutUtils::GetMarkerPseudo(aElement)) {
+    if (Element* pseudo = nsLayoutUtils::GetMarkerPseudo(&aElement)) {
       elementForStyleResolution = pseudo;
       pseudoTypeForStyleResolution = PseudoStyleType::NotPseudo;
     }
   }
 
-  RefPtr<ComputedStyle> computedValues =
-      Servo_ResolveStyleLazily(elementForStyleResolution,
-                               pseudoTypeForStyleResolution, aRuleInclusion,
-                               &Snapshots(), mRawSet.get())
-          .Consume();
-
-  if (GetPresContext()->EffectCompositor()->PreTraverse(aElement,
-                                                        aPseudoType)) {
-    computedValues =
-        Servo_ResolveStyleLazily(elementForStyleResolution,
-                                 pseudoTypeForStyleResolution, aRuleInclusion,
-                                 &Snapshots(), mRawSet.get())
-            .Consume();
-  }
-
-  return computedValues.forget();
+  return Servo_ResolveStyleLazily(elementForStyleResolution,
+                                  pseudoTypeForStyleResolution, aRuleInclusion,
+                                  &Snapshots(), mRawSet.get())
+      .Consume();
 }
 
-bool ServoStyleSet::AppendFontFaceRules(
+void ServoStyleSet::AppendFontFaceRules(
     nsTArray<nsFontFaceRuleContainer>& aArray) {
   // TODO(emilio): Can we make this so this asserts instead?
   UpdateStylistIfNeeded();
   Servo_StyleSet_GetFontFaceRules(mRawSet.get(), &aArray);
-  return true;
 }
 
 const RawServoCounterStyleRule* ServoStyleSet::CounterStyleRuleForName(
@@ -1259,8 +1221,6 @@ void ServoStyleSet::UpdateStylist() {
   }
 
   if (MOZ_UNLIKELY(mStylistState & StylistState::XBLStyleSheetsDirty)) {
-    MOZ_ASSERT(GetPresContext(), "How did they get dirty?");
-
     EnumerateShadowRoots(*mDocument, [&](ShadowRoot& aShadowRoot) {
       if (auto* authorStyles = aShadowRoot.GetServoStyles()) {
         Servo_AuthorStyles_Flush(authorStyles, mRawSet.get());

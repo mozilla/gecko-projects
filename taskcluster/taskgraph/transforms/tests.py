@@ -449,12 +449,9 @@ test_description_schema = Schema({
     ),
 
     # A list of artifacts to install from 'fetch' tasks.
-    Optional('fetches'): optionally_keyed_by(
-        'test-platform',
-        {
-            basestring: [basestring]
-        }
-    ),
+    Optional('fetches'): {
+        basestring: optionally_keyed_by('test-platform', [basestring])
+    },
 }, required=True)
 
 
@@ -474,10 +471,6 @@ def set_defaults(config, tests):
             # all Android test tasks download internal objects from tooltool
             test['mozharness']['tooltool-downloads'] = 'internal'
             test['mozharness']['actions'] = ['get-secrets']
-
-            if not any(app in test['test-name'] for app in ('geckoview', 'refbrow')):
-                # Fennec is non-e10s
-                test['e10s'] = False
 
             # loopback-video is always true for Android, but false for other
             # platform phyla
@@ -790,7 +783,8 @@ def handle_keyed_by(config, tests):
         'workdir',
         'worker-type',
         'virtualization',
-        'fetches',
+        'fetches.fetch',
+        'fetches.toolchain',
     ]
     for test in tests:
         for field in fields:
@@ -828,6 +822,43 @@ def handle_suite_category(config, tests):
             if not any(arg.startswith(category_arg) for arg in extra):
                 extra.append('{}={}'.format(category_arg, flavor))
 
+        yield test
+
+
+def get_mobile_project(test):
+    """Returns the mobile project of the specified task or None."""
+
+    if not test['build-platform'].startswith('android'):
+        return
+
+    mobile_projects = (
+        'fennec',
+        'geckoview',
+        'refbrow',
+    )
+
+    for name in mobile_projects:
+        if name in test['test-name']:
+            return name
+
+    target = test.get('target')
+    if target:
+        if isinstance(target, dict):
+            target = target['name']
+
+        for name in mobile_projects:
+            if name in target:
+                return name
+
+    return 'fennec'
+
+
+@transforms.add
+def disable_fennec_e10s(config, tests):
+    for test in tests:
+        if get_mobile_project(test) == 'fennec':
+            # Fennec is non-e10s
+            test['e10s'] = False
         yield test
 
 
@@ -946,28 +977,24 @@ def split_e10s(config, tests):
     for test in tests:
         e10s = test['e10s']
 
-        test['e10s'] = False
-        test['attributes']['e10s'] = False
-
-        if e10s == 'both':
-            yield copy.deepcopy(test)
-            e10s = True
         if e10s:
-            test['test-name'] += '-e10s'
-            test['try-name'] += '-e10s'
-            test['e10s'] = True
-            test['attributes']['e10s'] = True
+            test_copy = copy.deepcopy(test)
+            test_copy['test-name'] += '-e10s'
+            test_copy['e10s'] = True
+            test_copy['attributes']['e10s'] = True
+            yield test_copy
+
+        if not e10s or e10s == 'both':
+            test['test-name'] += '-1proc'
+            test['try-name'] += '-1proc'
+            test['e10s'] = False
+            test['attributes']['e10s'] = False
             group, symbol = split_symbol(test['treeherder-symbol'])
             if group != '?':
-                group += '-e10s'
+                group += '-1proc'
             test['treeherder-symbol'] = join_symbol(group, symbol)
-            if test['suite'] == 'talos' or test['suite'] == 'raptor':
-                for i, option in enumerate(test['mozharness']['extra-options']):
-                    if option.startswith('--suite='):
-                        test['mozharness']['extra-options'][i] += '-e10s'
-            else:
-                test['mozharness']['extra-options'].append('--e10s')
-        yield test
+            test['mozharness']['extra-options'].append('--disable-e10s')
+            yield test
 
 
 @transforms.add
@@ -1166,18 +1193,18 @@ def set_worker_type(config, tests):
             test['worker-type'] = win_worker_type_platform[test['virtualization']]
         elif test_platform.startswith('android-hw-g5'):
             if test['suite'] != 'raptor':
-                test['worker-type'] = 'proj-autophone/gecko-t-ap-unit-g5'
+                test['worker-type'] = 't-bitbar-gw-unit-g5'
             elif '--power-test' in test['mozharness']['extra-options']:
-                test['worker-type'] = 'proj-autophone/gecko-t-ap-batt-g5'
+                test['worker-type'] = 't-bitbar-gw-batt-g5'
             else:
-                test['worker-type'] = 'proj-autophone/gecko-t-ap-perf-g5'
+                test['worker-type'] = 't-bitbar-gw-perf-g5'
         elif test_platform.startswith('android-hw-p2'):
             if test['suite'] != 'raptor':
-                test['worker-type'] = 'proj-autophone/gecko-t-ap-unit-p2'
+                test['worker-type'] = 't-bitbar-gw-unit-p2'
             elif '--power-test' in test['mozharness']['extra-options']:
-                test['worker-type'] = 'proj-autophone/gecko-t-ap-batt-p2'
+                test['worker-type'] = 't-bitbar-gw-batt-p2'
             else:
-                test['worker-type'] = 'proj-autophone/gecko-t-ap-perf-p2'
+                test['worker-type'] = 't-bitbar-gw-perf-p2'
         elif test_platform.startswith('android-em-7.0-x86'):
             test['worker-type'] = 'terraform-packet/gecko-t-linux'
         elif test_platform.startswith('linux') or test_platform.startswith('android'):

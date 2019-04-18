@@ -11,6 +11,7 @@
 #include "Compositor.h"                     // for Compositor
 #include "DragTracker.h"                    // for DragTracker
 #include "gfxPrefs.h"                       // for gfxPrefs
+#include "GenericFlingAnimation.h"          // for FLING_LOG
 #include "HitTestingTreeNode.h"             // for HitTestingTreeNode
 #include "InputBlockState.h"                // for InputBlockState
 #include "InputData.h"                      // for InputData, etc
@@ -1626,7 +1627,10 @@ static TouchBehaviorFlags ConvertToTouchBehavior(
   TouchBehaviorFlags result = AllowedTouchBehavior::UNKNOWN;
   if (info == CompositorHitTestInvisibleToHit) {
     result = AllowedTouchBehavior::NONE;
-  } else if (info.contains(CompositorHitTestFlags::eDispatchToContent)) {
+  } else if (info.contains(CompositorHitTestFlags::eIrregularArea)) {
+    // Note that eApzAwareListeners and eInactiveScrollframe are similar
+    // to eIrregularArea in some respects, but are not relevant for the
+    // purposes of this function, which deals specifically with touch-action.
     result = AllowedTouchBehavior::UNKNOWN;
   } else {
     result = AllowedTouchBehavior::VERTICAL_PAN |
@@ -2374,6 +2378,7 @@ ParentLayerPoint APZCTreeManager::DispatchFling(
   // single APZC that's scrolled by the input block that triggered this fling.
   if (aHandoffState.mIsHandoff && !gfxPrefs::APZAllowImmediateHandoff() &&
       aHandoffState.mScrolledApzc == aPrev) {
+    FLING_LOG("APZCTM dropping handoff due to disallowed immediate handoff\n");
     return aHandoffState.mVelocity;
   }
 

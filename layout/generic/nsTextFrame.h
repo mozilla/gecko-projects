@@ -33,9 +33,6 @@ class PropertyProvider;
 struct SelectionDetails;
 class nsTextFragment;
 
-class nsDisplayTextGeometry;
-class nsDisplayText;
-
 namespace mozilla {
 class SVGContextPaint;
 };
@@ -63,8 +60,6 @@ class nsTextFrame : public nsFrame {
   NS_DECL_FRAMEARENA_HELPERS(nsTextFrame)
 
   friend class nsContinuingTextFrame;
-  friend class nsDisplayTextGeometry;
-  friend class nsDisplayText;
 
   // nsQueryFrame
   NS_DECL_QUERYFRAME
@@ -275,7 +270,8 @@ class nsTextFrame : public nsFrame {
       TrailingWhitespace aTrimTrailingWhitespace =
           TrailingWhitespace::TRIM_TRAILING_WHITESPACE) final;
 
-  nsOverflowAreas RecomputeOverflow(nsIFrame* aBlockFrame);
+  nsOverflowAreas RecomputeOverflow(nsIFrame* aBlockFrame,
+                                    bool aIncludeShadows = true);
 
   enum TextRunType {
     // Anything in reflow (but not intrinsic width calculation) or
@@ -446,7 +442,7 @@ class nsTextFrame : public nsFrame {
     mozilla::gfx::Point framePt;
     LayoutDeviceRect dirtyRect;
     const nsTextPaintStyle* textStyle = nullptr;
-    const nsCharClipDisplayItem::ClipEdges* clipEdges = nullptr;
+    const nsDisplayText::ClipEdges* clipEdges = nullptr;
     const nscolor* decorationOverrideColor = nullptr;
     explicit DrawTextParams(gfxContext* aContext)
         : DrawTextRunParams(aContext) {}
@@ -456,14 +452,14 @@ class nsTextFrame : public nsFrame {
   // to generate paths rather than paint the frame's text by passing a callback
   // object.  The private DrawText() is what applies the text to a graphics
   // context.
-  void PaintText(const PaintTextParams& aParams,
-                 const nsCharClipDisplayItem& aItem, float aOpacity = 1.0f);
+  void PaintText(const PaintTextParams& aParams, const nscoord aVisIStartEdge,
+                 const nscoord aVisIEndEdge, const nsPoint& aToReferenceFrame,
+                 const bool aIsSelected, float aOpacity = 1.0f);
   // helper: paint text frame when we're impacted by at least one selection.
   // Return false if the text was not painted and we should continue with
   // the fast path.
-  bool PaintTextWithSelection(
-      const PaintTextSelectionParams& aParams,
-      const nsCharClipDisplayItem::ClipEdges& aClipEdges);
+  bool PaintTextWithSelection(const PaintTextSelectionParams& aParams,
+                              const nsDisplayText::ClipEdges& aClipEdges);
   // helper: paint text with foreground and background colors determined
   // by selection(s). Also computes a mask of all selection types applying to
   // our text, returned in aAllSelectionTypeMask.
@@ -473,7 +469,7 @@ class nsTextFrame : public nsFrame {
       const PaintTextSelectionParams& aParams,
       const mozilla::UniquePtr<SelectionDetails>& aDetails,
       SelectionTypeMask* aAllSelectionTypeMask,
-      const nsCharClipDisplayItem::ClipEdges& aClipEdges);
+      const nsDisplayText::ClipEdges& aClipEdges);
   // helper: paint text decorations for text selected by aSelectionType
   void PaintTextSelectionDecorations(
       const PaintTextSelectionParams& aParams,
@@ -594,6 +590,8 @@ class nsTextFrame : public nsFrame {
   bool IsInitialLetterChild() const;
 
   bool ComputeCustomOverflow(nsOverflowAreas& aOverflowAreas) final;
+  bool ComputeCustomOverflowInternal(nsOverflowAreas& aOverflowAreas,
+                                     bool aIncludeShadows);
 
   void AssignJustificationGaps(const mozilla::JustificationAssignment& aAssign);
   mozilla::JustificationAssignment GetJustificationAssignment() const;
@@ -614,8 +612,13 @@ class nsTextFrame : public nsFrame {
   }
   nsFontMetrics* InflatedFontMetrics() const { return mFontMetrics; }
 
+  nsRect WebRenderBounds();
+
  protected:
   virtual ~nsTextFrame();
+
+  friend class nsDisplayTextGeometry;
+  friend class nsDisplayText;
 
   RefPtr<nsFontMetrics> mFontMetrics;
   RefPtr<gfxTextRun> mTextRun;
@@ -648,7 +651,8 @@ class nsTextFrame : public nsFrame {
   void UnionAdditionalOverflow(nsPresContext* aPresContext, nsIFrame* aBlock,
                                PropertyProvider& aProvider,
                                nsRect* aVisualOverflowRect,
-                               bool aIncludeTextDecorations);
+                               bool aIncludeTextDecorations,
+                               bool aIncludeShadows);
 
   // Update information of emphasis marks, and return the visial
   // overflow rect of the emphasis marks.
@@ -662,7 +666,7 @@ class nsTextFrame : public nsFrame {
     mozilla::gfx::Point textBaselinePt;
     gfxContext* context;
     nscolor foregroundColor = NS_RGBA(0, 0, 0, 0);
-    const nsCharClipDisplayItem::ClipEdges* clipEdges = nullptr;
+    const nsDisplayText::ClipEdges* clipEdges = nullptr;
     PropertyProvider* provider = nullptr;
     nscoord leftSideOffset = 0;
     explicit PaintShadowParams(const PaintTextParams& aParams)
@@ -796,6 +800,8 @@ class nsTextFrame : public nsFrame {
 
   ContentOffsets GetCharacterOffsetAtFramePointInternal(
       const nsPoint& aPoint, bool aForInsertionPoint);
+
+  static float GetTextCombineScaleFactor(nsTextFrame* aFrame);
 
   void ClearFrameOffsetCache();
 

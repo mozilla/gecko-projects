@@ -26,6 +26,7 @@
 #include "mozilla/dom/TabChild.h"
 #include "mozilla/Components.h"
 #include "mozilla/Logging.h"
+#include "xpcpublic.h"
 
 NS_IMPL_ISUPPORTS(nsContentSecurityManager, nsIContentSecurityManager,
                   nsIChannelEventSink)
@@ -100,7 +101,8 @@ bool nsContentSecurityManager::AllowTopLevelNavigationToDataURI(
   nsCOMPtr<nsITabChild> tabChild = do_QueryInterface(context);
   nsCOMPtr<Document> doc;
   if (tabChild) {
-    doc = static_cast<mozilla::dom::TabChild*>(tabChild.get())->GetDocument();
+    doc = static_cast<mozilla::dom::TabChild*>(tabChild.get())
+              ->GetTopLevelDocument();
   }
   NS_ConvertUTF8toUTF16 specUTF16(NS_UnescapeURL(dataSpec));
   const char16_t* params[] = {specUTF16.get()};
@@ -750,6 +752,70 @@ static void DebugDoContentSecurityCheck(nsIChannel* aChannel,
   }
 }
 
+#if defined(DEBUG) || defined(FUZZING)
+// Assert that we never use the SystemPrincipal to load remote documents
+// i.e., HTTP, HTTPS, FTP URLs
+static void AssertSystemPrincipalMustNotLoadRemoteDocuments(
+    nsIChannel* aChannel) {
+  nsCOMPtr<nsILoadInfo> loadInfo = aChannel->LoadInfo();
+
+  // bail out, if we're not loading with a SystemPrincipal
+  if (!nsContentUtils::IsSystemPrincipal(loadInfo->LoadingPrincipal())) {
+    return;
+  }
+  nsContentPolicyType contentPolicyType =
+      loadInfo->GetExternalContentPolicyType();
+  if ((contentPolicyType != nsIContentPolicy::TYPE_DOCUMENT) &&
+      (contentPolicyType != nsIContentPolicy::TYPE_SUBDOCUMENT)) {
+    return;
+  }
+  nsCOMPtr<nsIURI> finalURI;
+  NS_GetFinalChannelURI(aChannel, getter_AddRefs(finalURI));
+  // bail out, if URL isn't pointing to remote resource
+  if (!nsContentUtils::SchemeIs(finalURI, "http") &&
+      !nsContentUtils::SchemeIs(finalURI, "https") &&
+      !nsContentUtils::SchemeIs(finalURI, "ftp")) {
+    return;
+  }
+
+  // FIXME The discovery feature in about:addons uses the SystemPrincpal.
+  // We should remove this exception with bug 1544011.
+  static nsAutoCString sDiscoveryPrePath;
+  static bool recvdPrefValue = false;
+  if (!recvdPrefValue) {
+    nsAutoCString discoveryURLString;
+    Preferences::GetCString("extensions.webservice.discoverURL",
+                            discoveryURLString);
+    // discoverURL is by default suffixed with parameters in path like
+    // /%LOCALE%/ so, we use the prePath for comparison
+    nsCOMPtr<nsIURI> discoveryURL;
+    NS_NewURI(getter_AddRefs(discoveryURL), discoveryURLString);
+    if (discoveryURL) {
+      discoveryURL->GetPrePath(sDiscoveryPrePath);
+    }
+    recvdPrefValue = true;
+  }
+  nsAutoCString requestedPrePath;
+  finalURI->GetPrePath(requestedPrePath);
+  if (requestedPrePath.Equals(sDiscoveryPrePath)) {
+    return;
+  }
+
+  if (xpc::AreNonLocalConnectionsDisabled()) {
+    bool disallowSystemPrincipalRemoteDocuments = Preferences::GetBool(
+        "security.disallow_non_local_systemprincipal_in_tests");
+    if (disallowSystemPrincipalRemoteDocuments) {
+      // our own mochitest needs NS_ASSERTION instead of MOZ_ASSERT
+      NS_ASSERTION(false, "SystemPrincipal must not load remote documents.");
+      return;
+    }
+    // but other mochitest are exempt from this
+    return;
+  }
+  MOZ_ASSERT(false, "SystemPrincipal must not load remote documents.");
+}
+#endif
+
 /*
  * Based on the security flags provided in the loadInfo of the channel,
  * doContentSecurityCheck() performs the following content security checks
@@ -775,6 +841,10 @@ nsresult nsContentSecurityManager::doContentSecurityCheck(
   if (MOZ_UNLIKELY(MOZ_LOG_TEST(sCSMLog, LogLevel::Debug))) {
     DebugDoContentSecurityCheck(aChannel, loadInfo);
   }
+
+#if defined(DEBUG) || defined(FUZZING)
+  AssertSystemPrincipalMustNotLoadRemoteDocuments(aChannel);
+#endif
 
   // if dealing with a redirected channel then we have already installed
   // streamlistener and redirect proxies and so we are done.

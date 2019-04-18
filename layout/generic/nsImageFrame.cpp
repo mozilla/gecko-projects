@@ -20,6 +20,7 @@
 #include "mozilla/gfx/Helpers.h"
 #include "mozilla/gfx/PathHelpers.h"
 #include "mozilla/dom/GeneratedImageContent.h"
+#include "mozilla/dom/HTMLAreaElement.h"
 #include "mozilla/dom/HTMLImageElement.h"
 #include "mozilla/dom/ResponsiveImageSelector.h"
 #include "mozilla/layers/RenderRootStateManager.h"
@@ -113,7 +114,7 @@ nsIIOService* nsImageFrame::sIOService;
 // This is used by nsImageFrame::ShouldCreateImageFrameFor and should
 // not be used for layout decisions.
 static bool HaveSpecifiedSize(const nsStylePosition* aStylePosition) {
-  // check the width and height values in the reflow state's style struct
+  // check the width and height values in the reflow input's style struct
   // - if width and height are specified as either coord or percentage, then
   //   the size of the image frame is constrained
   return aStylePosition->mWidth.IsLengthPercentage() &&
@@ -132,18 +133,18 @@ static bool HaveFixedSize(const ReflowInput& aReflowInput) {
          aReflowInput.mStylePosition->mWidth.ConvertsToLength();
 }
 
-nsIFrame* NS_NewImageFrame(nsIPresShell* aPresShell, ComputedStyle* aStyle) {
+nsIFrame* NS_NewImageFrame(PresShell* aPresShell, ComputedStyle* aStyle) {
   return new (aPresShell) nsImageFrame(aStyle, aPresShell->GetPresContext(),
                                        nsImageFrame::Kind::ImageElement);
 }
 
-nsIFrame* NS_NewImageFrameForContentProperty(nsIPresShell* aPresShell,
+nsIFrame* NS_NewImageFrameForContentProperty(PresShell* aPresShell,
                                              ComputedStyle* aStyle) {
   return new (aPresShell) nsImageFrame(aStyle, aPresShell->GetPresContext(),
                                        nsImageFrame::Kind::ContentProperty);
 }
 
-nsIFrame* NS_NewImageFrameForGeneratedContentIndex(nsIPresShell* aPresShell,
+nsIFrame* NS_NewImageFrameForGeneratedContentIndex(PresShell* aPresShell,
                                                    ComputedStyle* aStyle) {
   return new (aPresShell)
       nsImageFrame(aStyle, aPresShell->GetPresContext(),
@@ -171,8 +172,8 @@ bool nsImageFrame::ShouldShowBrokenImageIcon() const {
   return loader->GetImageBlockingStatus() != nsIContentPolicy::ACCEPT;
 }
 
-nsImageFrame* nsImageFrame::CreateContinuingFrame(nsIPresShell* aPresShell,
-                                                  ComputedStyle* aStyle) const {
+nsImageFrame* nsImageFrame::CreateContinuingFrame(
+    mozilla::PresShell* aPresShell, ComputedStyle* aStyle) const {
   return new (aPresShell)
       nsImageFrame(aStyle, aPresShell->GetPresContext(), mKind);
 }
@@ -1059,9 +1060,8 @@ void nsImageFrame::Reflow(nsPresContext* aPresContext, ReflowOutput& aMetrics,
   FinishAndStoreOverflow(&aMetrics, aReflowInput.mStyleDisplay);
 
   if ((GetStateBits() & NS_FRAME_FIRST_REFLOW) && !mReflowCallbackPosted) {
-    nsIPresShell* shell = PresShell();
     mReflowCallbackPosted = true;
-    shell->PostReflowCallback(this);
+    PresShell()->PostReflowCallback(this);
   }
 
   NS_FRAME_TRACE(NS_FRAME_TRACE_CALLS, ("exit nsImageFrame::Reflow: size=%d,%d",
@@ -1157,7 +1157,7 @@ void nsImageFrame::DisplayAltText(nsPresContext* aPresContext,
                                   const nsString& aAltText,
                                   const nsRect& aRect) {
   // Set font and color
-  aRenderingContext.SetColor(Color::FromABGR(StyleColor()->mColor));
+  aRenderingContext.SetColor(Color::FromABGR(StyleColor()->mColor.ToColor()));
   RefPtr<nsFontMetrics> fm =
       nsLayoutUtils::GetInflatedFontMetricsForFrame(this);
 
@@ -1262,7 +1262,7 @@ struct nsRecessedBorder : public nsStyleBorder {
   nsRecessedBorder(nscoord aBorderWidth, nsPresContext* aPresContext)
       : nsStyleBorder(*aPresContext->Document()) {
     NS_FOR_CSS_SIDES(side) {
-      BorderColorFor(side) = StyleComplexColor::Black();
+      BorderColorFor(side) = StyleColor::Black();
       mBorder.Side(side) = aBorderWidth;
       // Note: use SetBorderStyle here because we want to affect
       // mComputedBorder
@@ -2299,14 +2299,14 @@ Maybe<nsIFrame::Cursor> nsImageFrame::GetCursor(const nsPoint& aPoint) {
   }
   nsIntPoint p;
   TranslateEventCoords(aPoint, p);
-  nsCOMPtr<nsIContent> area = map->GetArea(p.x, p.y);
+  HTMLAreaElement* area = map->GetArea(p.x, p.y);
   if (!area) {
     return nsFrame::GetCursor(aPoint);
   }
 
   // Use the cursor from the style of the *area* element.
-  RefPtr<ComputedStyle> areaStyle = PresShell()->StyleSet()->ResolveStyleFor(
-      area->AsElement(), LazyComputeBehavior::Allow);
+  RefPtr<ComputedStyle> areaStyle =
+      PresShell()->StyleSet()->ResolveStyleLazily(*area);
   StyleCursorKind kind = areaStyle->StyleUI()->mCursor;
   if (kind == StyleCursorKind::Auto) {
     kind = StyleCursorKind::Default;

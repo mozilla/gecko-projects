@@ -182,7 +182,7 @@ class ScheduleObserveLayersUpdate : public wr::NotificationHandler {
         mObserverEpoch(aEpoch),
         mIsActive(aIsActive) {}
 
-  virtual void Notify(wr::Checkpoint) override {
+  void Notify(wr::Checkpoint) override {
     CompositorThreadHolder::Loop()->PostTask(
         NewRunnableMethod<LayersId, LayersObserverEpoch, int>(
             "ObserveLayersUpdate", mBridge,
@@ -199,11 +199,11 @@ class ScheduleObserveLayersUpdate : public wr::NotificationHandler {
 
 class SceneBuiltNotification : public wr::NotificationHandler {
  public:
-  explicit SceneBuiltNotification(WebRenderBridgeParent* aParent,
-                                  wr::Epoch aEpoch, TimeStamp aTxnStartTime)
+  SceneBuiltNotification(WebRenderBridgeParent* aParent, wr::Epoch aEpoch,
+                         TimeStamp aTxnStartTime)
       : mParent(aParent), mEpoch(aEpoch), mTxnStartTime(aTxnStartTime) {}
 
-  virtual void Notify(wr::Checkpoint) override {
+  void Notify(wr::Checkpoint) override {
     auto startTime = this->mTxnStartTime;
     RefPtr<WebRenderBridgeParent> parent = mParent;
     wr::Epoch epoch = mEpoch;
@@ -217,9 +217,9 @@ class SceneBuiltNotification : public wr::NotificationHandler {
               ContentFullPaintPayload(const mozilla::TimeStamp& aStartTime,
                                       const mozilla::TimeStamp& aEndTime)
                   : ProfilerMarkerPayload(aStartTime, aEndTime) {}
-              virtual void StreamPayload(SpliceableJSONWriter& aWriter,
-                                         const TimeStamp& aProcessStartTime,
-                                         UniqueStacks& aUniqueStacks) override {
+              void StreamPayload(SpliceableJSONWriter& aWriter,
+                                 const TimeStamp& aProcessStartTime,
+                                 UniqueStacks& aUniqueStacks) override {
                 StreamCommonProps("CONTENT_FULL_PAINT_TIME", aWriter,
                                   aProcessStartTime, aUniqueStacks);
               }
@@ -267,7 +267,7 @@ class WebRenderBridgeParent::ScheduleSharedSurfaceRelease final
   nsTArray<wr::ExternalImageKeyPair> mSurfaces;
 };
 
-class MOZ_STACK_CLASS AutoWebRenderBridgeParentAsyncMessageSender {
+class MOZ_STACK_CLASS AutoWebRenderBridgeParentAsyncMessageSender final {
  public:
   explicit AutoWebRenderBridgeParentAsyncMessageSender(
       WebRenderBridgeParent* aWebRenderBridgeParent,
@@ -303,7 +303,6 @@ WebRenderBridgeParent::WebRenderBridgeParent(
     : mCompositorBridge(aCompositorBridge),
       mPipelineId(aPipelineId),
       mWidget(aWidget),
-      mApis(aApis),
       mAsyncImageManager(aImageMgr),
       mCompositorScheduler(aScheduler),
       mAnimStorage(aAnimStorage),
@@ -330,6 +329,11 @@ WebRenderBridgeParent::WebRenderBridgeParent(
   if (!IsRootWebRenderBridgeParent() && gfxPrefs::WebRenderSplitRenderRoots()) {
     mRenderRoot = wr::RenderRoot::Content;
   }
+
+  for (auto& api : aApis) {
+    MOZ_ASSERT(api);
+    mApis[api->GetRenderRoot()] = api;
+  }
 }
 
 WebRenderBridgeParent::WebRenderBridgeParent(const wr::PipelineId& aPipelineId)
@@ -352,8 +356,6 @@ WebRenderBridgeParent* WebRenderBridgeParent::CreateDestroyed(
     const wr::PipelineId& aPipelineId) {
   return new WebRenderBridgeParent(aPipelineId);
 }
-
-WebRenderBridgeParent::~WebRenderBridgeParent() {}
 
 mozilla::ipc::IPCResult WebRenderBridgeParent::RecvEnsureConnected(
     TextureFactoryIdentifier* aTextureFactoryIdentifier,
@@ -742,7 +744,7 @@ mozilla::ipc::IPCResult WebRenderBridgeParent::RecvUpdateResources(
     return IPC_OK();
   }
 
-  MOZ_RELEASE_ASSERT((size_t)aRenderRoot < mApis.Length());
+  MOZ_RELEASE_ASSERT(aRenderRoot <= wr::kHighestRenderRoot);
 
   wr::TransactionBuilder txn;
   txn.SetLowPriority(!IsRootWebRenderBridgeParent());
@@ -970,10 +972,7 @@ mozilla::ipc::IPCResult WebRenderBridgeParent::RecvSetDisplayList(
   // Guard against malicious content processes
   MOZ_RELEASE_ASSERT(aDisplayLists.Length() > 0);
   for (auto& displayList : aDisplayLists) {
-    // mApis.Length() should be the lowest possible length of things that we
-    // will be indexing via a RenderRoot, so it should be sufficient to check
-    // just that.
-    MOZ_RELEASE_ASSERT((size_t)displayList.mRenderRoot < mApis.Length());
+    MOZ_RELEASE_ASSERT(displayList.mRenderRoot <= wr::kHighestRenderRoot);
   }
 
   if (!IsRootWebRenderBridgeParent()) {
@@ -1106,10 +1105,7 @@ mozilla::ipc::IPCResult WebRenderBridgeParent::RecvEmptyTransaction(
 
   // Guard against malicious content processes
   for (auto& update : aRenderRootUpdates) {
-    // mApis.Length() should be the lowest possible length of things that we
-    // will be indexing via a RenderRoot, so it should be sufficient to check
-    // just that.
-    MOZ_RELEASE_ASSERT((size_t)update.mRenderRoot < mApis.Length());
+    MOZ_RELEASE_ASSERT(update.mRenderRoot <= wr::kHighestRenderRoot);
   }
 
   if (!IsRootWebRenderBridgeParent()) {
@@ -1661,7 +1657,9 @@ wr::Epoch WebRenderBridgeParent::UpdateWebRender(
   ClearResources();
   mCompositorBridge = cBridge;
   mCompositorScheduler = aScheduler;
-  mApis = aApis;
+  for (auto& api : aApis) {
+    mApis[api->GetRenderRoot()] = api;
+  }
   mAsyncImageManager = aImageMgr;
   mAnimStorage = aAnimStorage;
 
@@ -1851,12 +1849,12 @@ bool WebRenderBridgeParent::SampleAnimations(
       wr::RenderRoot renderRoot = mAnimStorage->AnimationRenderRoot(iter.Key());
       auto& transformArray = aTransformArrays[renderRoot];
       auto& opacityArray = aOpacityArrays[renderRoot];
-      if (value->mType == AnimatedValue::TRANSFORM) {
+      if (value->Is<AnimationTransform>()) {
         transformArray.AppendElement(wr::ToWrTransformProperty(
-            iter.Key(), value->mTransform.mTransformInDevSpace));
-      } else if (value->mType == AnimatedValue::OPACITY) {
+            iter.Key(), value->Transform().mTransformInDevSpace));
+      } else if (value->Is<float>()) {
         opacityArray.AppendElement(
-            wr::ToWrOpacityProperty(iter.Key(), value->mOpacity));
+            wr::ToWrOpacityProperty(iter.Key(), value->Opacity()));
       }
     }
   }
@@ -1929,6 +1927,9 @@ void WebRenderBridgeParent::MaybeGenerateFrame(VsyncId aId,
   wr::RenderRootArray<Maybe<wr::TransactionBuilder>> sceneBuilderTxns;
   wr::RenderRootArray<Maybe<wr::AutoTransactionSender>> senders;
   for (auto& api : mApis) {
+    if (!api) {
+      continue;
+    }
     auto renderRoot = api->GetRenderRoot();
     // Ensure GenerateFrame is handled on the render backend thread rather
     // than going through the scene builder thread. That way we continue
@@ -1953,6 +1954,9 @@ void WebRenderBridgeParent::MaybeGenerateFrame(VsyncId aId,
   uint8_t framesGenerated = 0;
   wr::RenderRootArray<bool> generateFrame;
   for (auto& api : mApis) {
+    if (!api) {
+      continue;
+    }
     auto renderRoot = api->GetRenderRoot();
     generateFrame[renderRoot] =
         mAsyncImageManager->GetAndResetWillGenerateFrame(renderRoot) ||
@@ -1979,6 +1983,9 @@ void WebRenderBridgeParent::MaybeGenerateFrame(VsyncId aId,
   // We do this even if the arrays are empty, because it will clear out any
   // previous properties store on the WR side, which is desirable.
   for (auto& api : mApis) {
+    if (!api) {
+      continue;
+    }
     auto renderRoot = api->GetRenderRoot();
     fastTxns[renderRoot]->UpdateDynamicProperties(opacityArrays[renderRoot],
                                                   transformArrays[renderRoot]);
@@ -1995,13 +2002,19 @@ void WebRenderBridgeParent::MaybeGenerateFrame(VsyncId aId,
 #endif
 
   MOZ_ASSERT(framesGenerated > 0);
+  wr::RenderRootArray<wr::TransactionBuilder*> generateFrameTxns;
   for (auto& api : mApis) {
+    if (!api) {
+      continue;
+    }
     auto renderRoot = api->GetRenderRoot();
     if (generateFrame[renderRoot]) {
       fastTxns[renderRoot]->GenerateFrame();
-      mApis[(size_t)renderRoot]->SendTransaction(*fastTxns[renderRoot]);
+      generateFrameTxns[renderRoot] = fastTxns[renderRoot].ptr();
     }
   }
+  wr::WebRenderAPI::SendTransactions(mApis, generateFrameTxns);
+
   mMostRecentComposite = TimeStamp::Now();
 }
 
@@ -2049,13 +2062,16 @@ void WebRenderBridgeParent::NotifySceneBuiltForEpoch(
 }
 
 void WebRenderBridgeParent::NotifyDidSceneBuild(
-    wr::RenderRoot aRenderRoot, RefPtr<wr::WebRenderPipelineInfo> aInfo) {
+    const nsTArray<wr::RenderRoot>& aRenderRoots,
+    RefPtr<wr::WebRenderPipelineInfo> aInfo) {
   MOZ_ASSERT(IsRootWebRenderBridgeParent());
   if (!mCompositorScheduler) {
     return;
   }
 
-  mAsyncImageManager->SetWillGenerateFrame(aRenderRoot);
+  for (auto renderRoot : aRenderRoots) {
+    mAsyncImageManager->SetWillGenerateFrame(renderRoot);
+  }
 
   // If the scheduler has a composite more recent than our last composite (which
   // we missed), and we're within the threshold ms of the last vsync, then
@@ -2186,6 +2202,19 @@ void WebRenderBridgeParent::ScheduleGenerateFrame(
   }
 }
 
+void WebRenderBridgeParent::ScheduleGenerateFrame(
+    const nsTArray<wr::RenderRoot>& aRenderRoots) {
+  if (mCompositorScheduler) {
+    if (aRenderRoots.IsEmpty()) {
+      mAsyncImageManager->SetWillGenerateFrameAllRenderRoots();
+    }
+    for (auto renderRoot : aRenderRoots) {
+      mAsyncImageManager->SetWillGenerateFrame(renderRoot);
+    }
+    mCompositorScheduler->ScheduleComposition();
+  }
+}
+
 void WebRenderBridgeParent::FlushRendering(bool aWaitForPresent) {
   if (mDestroyed) {
     return;
@@ -2228,7 +2257,7 @@ bool WebRenderBridgeParent::Resume() {
 }
 
 void WebRenderBridgeParent::ClearResources() {
-  if (mApis.IsEmpty()) {
+  if (!mApis[wr::RenderRoot::Default]) {
     return;
   }
 
@@ -2255,6 +2284,9 @@ void WebRenderBridgeParent::ClearResources() {
   mAsyncImageManager->RemovePipeline(mPipelineId, wrEpoch);
 
   for (auto& api : mApis) {
+    if (!api) {
+      continue;
+    }
     wr::TransactionBuilder txn;
     txn.SetLowPriority(true);
     txn.ClearDisplayList(wrEpoch, mPipelineId);
@@ -2286,7 +2318,9 @@ void WebRenderBridgeParent::ClearResources() {
   mAnimStorage = nullptr;
   mCompositorScheduler = nullptr;
   mAsyncImageManager = nullptr;
-  mApis.Clear();
+  for (auto& api : mApis) {
+    api = nullptr;
+  }
   mCompositorBridge = nullptr;
 }
 
@@ -2348,7 +2382,7 @@ mozilla::ipc::IPCResult WebRenderBridgeParent::RecvReleaseCompositable(
 }
 
 TextureFactoryIdentifier WebRenderBridgeParent::GetTextureFactoryIdentifier() {
-  MOZ_ASSERT(!mApis.IsEmpty());
+  MOZ_ASSERT(!!mApis[wr::RenderRoot::Default]);
 
   return TextureFactoryIdentifier(
       LayersBackend::LAYERS_WR, XRE_GetProcessType(),

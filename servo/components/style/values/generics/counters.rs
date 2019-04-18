@@ -15,7 +15,15 @@ use std::ops::Deref;
 
 /// A name / value pair for counters.
 #[derive(
-    Clone, Debug, MallocSizeOf, PartialEq, SpecifiedValueInfo, ToComputedValue, ToCss, ToShmem,
+    Clone,
+    Debug,
+    MallocSizeOf,
+    PartialEq,
+    SpecifiedValueInfo,
+    ToComputedValue,
+    ToCss,
+    ToResolvedValue,
+    ToShmem,
 )]
 pub struct CounterPair<Integer> {
     /// The name of the counter.
@@ -34,9 +42,10 @@ pub struct CounterPair<Integer> {
     SpecifiedValueInfo,
     ToComputedValue,
     ToCss,
+    ToResolvedValue,
     ToShmem,
 )]
-pub struct CounterIncrement<I>(Counters<I>);
+pub struct CounterIncrement<I>(pub Counters<I>);
 
 impl<I> CounterIncrement<I> {
     /// Returns a new value for `counter-increment`.
@@ -65,9 +74,10 @@ impl<I> Deref for CounterIncrement<I> {
     SpecifiedValueInfo,
     ToComputedValue,
     ToCss,
+    ToResolvedValue,
     ToShmem,
 )]
-pub struct CounterSetOrReset<I>(Counters<I>);
+pub struct CounterSetOrReset<I>(pub Counters<I>);
 
 impl<I> CounterSetOrReset<I> {
     /// Returns a new value for `counter-set` / `counter-reset`.
@@ -90,14 +100,26 @@ impl<I> Deref for CounterSetOrReset<I> {
 ///
 /// Keyword `none` is represented by an empty vector.
 #[derive(
-    Clone, Debug, MallocSizeOf, PartialEq, SpecifiedValueInfo, ToComputedValue, ToCss, ToShmem,
+    Clone,
+    Debug,
+    Default,
+    MallocSizeOf,
+    PartialEq,
+    SpecifiedValueInfo,
+    ToComputedValue,
+    ToCss,
+    ToResolvedValue,
+    ToShmem,
 )]
 pub struct Counters<I>(#[css(iterable, if_empty = "none")] Box<[CounterPair<I>]>);
 
-impl<I> Default for Counters<I> {
+impl<I> Counters<I> {
+    /// Move out the Box into a vector. This could just return the Box<>, but
+    /// Vec<> is a bit more convenient because Box<[T]> doesn't implement
+    /// IntoIter: https://github.com/rust-lang/rust/issues/59878
     #[inline]
-    fn default() -> Self {
-        Counters(vec![].into_boxed_slice())
+    pub fn into_vec(self) -> Vec<CounterPair<I>> {
+        self.0.into_vec()
     }
 }
 
@@ -123,7 +145,16 @@ fn is_decimal(counter_type: &CounterStyleType) -> bool {
 ///
 /// https://drafts.csswg.org/css-content/#propdef-content
 #[derive(
-    Clone, Debug, Eq, MallocSizeOf, PartialEq, SpecifiedValueInfo, ToComputedValue, ToCss, ToShmem,
+    Clone,
+    Debug,
+    Eq,
+    MallocSizeOf,
+    PartialEq,
+    SpecifiedValueInfo,
+    ToComputedValue,
+    ToCss,
+    ToResolvedValue,
+    ToShmem,
 )]
 pub enum Content<ImageUrl> {
     /// `normal` reserved keyword.
@@ -147,7 +178,16 @@ impl<ImageUrl> Content<ImageUrl> {
 
 /// Items for the `content` property.
 #[derive(
-    Clone, Debug, Eq, MallocSizeOf, PartialEq, SpecifiedValueInfo, ToComputedValue, ToCss, ToShmem,
+    Clone,
+    Debug,
+    Eq,
+    MallocSizeOf,
+    PartialEq,
+    SpecifiedValueInfo,
+    ToComputedValue,
+    ToCss,
+    ToResolvedValue,
+    ToShmem,
 )]
 pub enum ContentItem<ImageUrl> {
     /// Literal string content.

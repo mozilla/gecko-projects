@@ -277,6 +277,7 @@ MethodStatus BaselineCompiler::compile() {
       script->hasResumeOffsets() ? script->resumeOffsets().size() : 0;
   UniquePtr<BaselineScript> baselineScript(
       BaselineScript::New(script, bailoutPrologueOffset_.offset(),
+                          warmUpCheckPrologueOffset_.offset(),
                           debugOsrPrologueOffset_.offset(),
                           debugOsrEpilogueOffset_.offset(),
                           profilerEnterFrameToggleOffset_.offset(),
@@ -325,7 +326,9 @@ MethodStatus BaselineCompiler::compile() {
 
 #ifdef JS_TRACE_LOGGING
   // Initialize the tracelogger instrumentation.
-  baselineScript->initTraceLogger(script, traceLoggerToggleOffsets_);
+  if (JS::TraceLoggerSupported()) {
+    baselineScript->initTraceLogger(script, traceLoggerToggleOffsets_);
+  }
 #endif
 
   // Compute yield/await native resume addresses.
@@ -405,6 +408,14 @@ static void LoadUint24Operand(MacroAssembler& masm, Register pc, size_t offset,
   // Load the opcode and operand, then left shift to discard the opcode.
   masm.load32(Address(pc, offset), dest);
   masm.rshift32(Imm32(8), dest);
+}
+
+static void LoadInlineValueOperand(MacroAssembler& masm, Register pc,
+                                   ValueOperand dest) {
+  // Note: the Value might be unaligned but as above we rely on all our
+  // platforms having appropriate support for unaligned accesses (except for
+  // floating point instructions on ARM).
+  masm.loadValue(Address(pc, sizeof(jsbytecode)), dest);
 }
 
 template <>
@@ -531,13 +542,14 @@ bool BaselineCompilerCodeGen::emitNextIC() {
   } while (entry->pcOffset() < pcOffset);
 
   MOZ_RELEASE_ASSERT(entry->pcOffset() == pcOffset);
-  MOZ_ASSERT_IF(entry->isForOp(), BytecodeOpHasIC(JSOp(*handler.pc())));
+  MOZ_ASSERT_IF(!entry->isForPrologue(), BytecodeOpHasIC(JSOp(*handler.pc())));
 
   CodeOffset callOffset;
   EmitCallIC(masm, entry, &callOffset);
 
-  RetAddrEntry::Kind kind =
-      entry->isForOp() ? RetAddrEntry::Kind::IC : RetAddrEntry::Kind::NonOpIC;
+  RetAddrEntry::Kind kind = entry->isForPrologue()
+                                ? RetAddrEntry::Kind::PrologueIC
+                                : RetAddrEntry::Kind::IC;
 
   if (!handler.retAddrEntries().emplaceBack(pcOffset, kind, callOffset)) {
     ReportOutOfMemory(cx);
@@ -781,13 +793,8 @@ void BaselineCompilerCodeGen::loadGlobalLexicalEnvironment(Register dest) {
 
 template <>
 void BaselineInterpreterCodeGen::loadGlobalLexicalEnvironment(Register dest) {
-  // TODO(bug 1522394): consider storing a pointer to the global lexical in
-  // Realm to eliminate some dependent loads and unboxing.
   masm.loadPtr(AbsoluteAddress(cx->addressOfRealm()), dest);
-  masm.loadPtr(Address(dest, Realm::offsetOfActiveGlobal()), dest);
-  masm.loadPtr(Address(dest, NativeObject::offsetOfSlots()), dest);
-  Address lexicalSlot(dest, GlobalObject::offsetOfLexicalEnvironmentSlot());
-  masm.unboxObject(lexicalSlot, dest);
+  masm.loadPtr(Address(dest, Realm::offsetOfActiveLexicalEnvironment()), dest);
 }
 
 template <>
@@ -998,18 +1005,89 @@ void BaselineCompilerCodeGen::emitPreInitEnvironmentChain(
 template <>
 void BaselineInterpreterCodeGen::emitPreInitEnvironmentChain(
     Register nonFunctionEnv) {
-  MOZ_CRASH("NYI: interpreter emitPreInitEnvironmentChain");
+  Label notFunction, done;
+  masm.branchTestPtr(Assembler::NonZero, frame.addressOfCalleeToken(),
+                     Imm32(CalleeTokenScriptBit), &notFunction);
+  {
+    masm.storePtr(ImmPtr(nullptr), frame.addressOfEnvironmentChain());
+    masm.jump(&done);
+  }
+  masm.bind(&notFunction);
+  { masm.storePtr(nonFunctionEnv, frame.addressOfEnvironmentChain()); }
+  masm.bind(&done);
 }
 
 template <>
-bool BaselineCompilerCodeGen::initEnvironmentChain() {
+void BaselineCompilerCodeGen::emitInitFrameFields() {
+  masm.store32(Imm32(0), frame.addressOfFlags());
+}
+
+template <>
+void BaselineInterpreterCodeGen::emitInitFrameFields() {
+  MOZ_CRASH("NYI: interpreter emitInitFrameFields");
+}
+
+template <>
+template <typename F1, typename F2>
+bool BaselineCompilerCodeGen::initEnvironmentChainHelper(
+    const F1& initFunctionEnv, const F2& initGlobalOrEvalEnv,
+    Register scratch) {
+  if (handler.function()) {
+    return initFunctionEnv();
+  }
+  if (handler.module()) {
+    return true;
+  }
+  return initGlobalOrEvalEnv();
+}
+
+template <>
+template <typename F1, typename F2>
+bool BaselineInterpreterCodeGen::initEnvironmentChainHelper(
+    const F1& initFunctionEnv, const F2& initGlobalOrEvalEnv,
+    Register scratch) {
+  // There are three cases:
+  //
+  // 1) Function script: use code emitted by initFunctionEnv.
+  // 2) Module script: no-op.
+  // 3) Global or eval script: use code emitted by initGlobalOrEvalEnv.
+
+  Label notFunction, done;
+  masm.loadPtr(frame.addressOfCalleeToken(), scratch);
+  masm.branchTestPtr(Assembler::NonZero, scratch, Imm32(CalleeTokenScriptBit),
+                     &notFunction);
+  {
+    if (!initFunctionEnv()) {
+      return false;
+    }
+    masm.jump(&done);
+  }
+  masm.bind(&notFunction);
+  {
+    masm.andPtr(Imm32(uint32_t(CalleeTokenMask)), scratch);
+    masm.branchTest32(Assembler::NonZero,
+                      Address(scratch, JSScript::offsetOfImmutableFlags()),
+                      Imm32(uint32_t(JSScript::ImmutableFlags::IsModule)),
+                      &done);
+    {
+      if (!initGlobalOrEvalEnv()) {
+        return false;
+      }
+    }
+  }
+
+  masm.bind(&done);
+  return true;
+}
+
+template <typename Handler>
+bool BaselineCodeGen<Handler>::initEnvironmentChain() {
   CallVMPhase phase = POST_INITIALIZE;
   if (handler.needsEarlyStackCheck()) {
     phase = CHECK_OVER_RECURSED;
   }
 
-  RootedFunction fun(cx, handler.function());
-  if (fun) {
+  auto initFunctionEnv = [this, phase]() {
     // Use callee->environment as env chain. Note that we do this also
     // for needsSomeEnvironmentObject functions, so that the env chain
     // slot is properly initialized if the call triggers GC.
@@ -1019,7 +1097,7 @@ bool BaselineCompilerCodeGen::initEnvironmentChain() {
     masm.loadPtr(Address(callee, JSFunction::offsetOfEnvironment()), scope);
     masm.storePtr(scope, frame.addressOfEnvironmentChain());
 
-    if (fun->needsFunctionEnvironmentObjects()) {
+    auto initEnv = [this, phase]() {
       // Call into the VM to create the proper environment objects.
       prepareVMCall();
 
@@ -1027,11 +1105,14 @@ bool BaselineCompilerCodeGen::initEnvironmentChain() {
       pushArg(R0.scratchReg());
 
       using Fn = bool (*)(JSContext*, BaselineFrame*);
-      if (!callVMNonOp<Fn, jit::InitFunctionEnvironmentObjects>(phase)) {
-        return false;
-      }
-    }
-  } else if (!handler.module()) {
+      return callVMNonOp<Fn, jit::InitFunctionEnvironmentObjects>(phase);
+    };
+    return emitTestScriptFlag(
+        JSScript::ImmutableFlags::NeedsFunctionEnvironmentObjects, true,
+        initEnv, R2.scratchReg());
+  };
+
+  auto initGlobalOrEvalEnv = [this, phase]() {
     // EnvironmentChain pointer in BaselineFrame has already been initialized
     // in prologue, but we need to check for redeclaration errors in global and
     // eval scripts.
@@ -1043,17 +1124,11 @@ bool BaselineCompilerCodeGen::initEnvironmentChain() {
     pushArg(R0.scratchReg());
 
     using Fn = bool (*)(JSContext*, HandleObject, HandleScript);
-    if (!callVMNonOp<Fn, js::CheckGlobalOrEvalDeclarationConflicts>(phase)) {
-      return false;
-    }
-  }
+    return callVMNonOp<Fn, js::CheckGlobalOrEvalDeclarationConflicts>(phase);
+  };
 
-  return true;
-}
-
-template <>
-bool BaselineInterpreterCodeGen::initEnvironmentChain() {
-  MOZ_CRASH("NYI: interpreter initEnvironmentChain");
+  return initEnvironmentChainHelper(initFunctionEnv, initGlobalOrEvalEnv,
+                                    R2.scratchReg());
 }
 
 template <typename Handler>
@@ -2168,18 +2243,26 @@ bool BaselineCodeGen<Handler>::emit_JSOP_RESUMEINDEX() {
 
 template <>
 bool BaselineCompilerCodeGen::emit_JSOP_DOUBLE() {
-  frame.push(handler.script()->getConst(GET_UINT32_INDEX(handler.pc())));
+  frame.push(GET_INLINE_VALUE(handler.pc()));
   return true;
 }
 
 template <>
 bool BaselineInterpreterCodeGen::emit_JSOP_DOUBLE() {
-  MOZ_CRASH("NYI: interpreter JSOP_DOUBLE");
+  LoadInlineValueOperand(masm, PCRegAtStart, R0);
+  frame.push(R0);
+  return true;
 }
 
-template <typename Handler>
-bool BaselineCodeGen<Handler>::emit_JSOP_BIGINT() {
-  return emit_JSOP_DOUBLE();
+template <>
+bool BaselineCompilerCodeGen::emit_JSOP_BIGINT() {
+  frame.push(handler.script()->getConst(GET_UINT32_INDEX(handler.pc())));
+  return true;
+}
+
+template <>
+bool BaselineInterpreterCodeGen::emit_JSOP_BIGINT() {
+  MOZ_CRASH("NYI: interpreter JSOP_BIGINT");
 }
 
 template <>
@@ -5439,7 +5522,11 @@ bool BaselineCodeGen<Handler>::emit_JSOP_AWAIT() {
 }
 
 template <typename Handler>
-bool BaselineCodeGen<Handler>::emit_JSOP_DEBUGAFTERYIELD() {
+bool BaselineCodeGen<Handler>::emit_JSOP_AFTERYIELD() {
+  if (!emit_JSOP_JUMPTARGET()) {
+    return false;
+  }
+
   auto ifDebuggee = [this]() {
     frame.assertSyncedStack();
     masm.loadBaselineFramePtr(BaselineFrameReg, R0.scratchReg());
@@ -5516,7 +5603,7 @@ bool BaselineCompilerCodeGen::emit_JSOP_RESUME() {
                  ImmPtr(BASELINE_DISABLED_SCRIPT), &interpret);
 
 #ifdef JS_TRACE_LOGGING
-  if (!emitTraceLoggerResume(scratch1, regs)) {
+  if (JS::TraceLoggerSupported() && !emitTraceLoggerResume(scratch1, regs)) {
     return false;
   }
 #endif
@@ -5656,7 +5743,7 @@ bool BaselineCompilerCodeGen::emit_JSOP_RESUME() {
 
   masm.switchToObjectRealm(genObj, scratch2);
 
-  if (resumeKind == AbstractGeneratorObject::NEXT) {
+  if (resumeKind == GeneratorResumeKind::Next) {
     // Determine the resume address based on the resumeIndex and the
     // resumeIndex -> native table in the BaselineScript.
     masm.load32(
@@ -5676,8 +5763,8 @@ bool BaselineCompilerCodeGen::emit_JSOP_RESUME() {
         Address(genObj, AbstractGeneratorObject::offsetOfResumeIndexSlot()));
     masm.jump(scratch1);
   } else {
-    MOZ_ASSERT(resumeKind == AbstractGeneratorObject::THROW ||
-               resumeKind == AbstractGeneratorObject::RETURN);
+    MOZ_ASSERT(resumeKind == GeneratorResumeKind::Throw ||
+               resumeKind == GeneratorResumeKind::Return);
 
     // Update the frame's frameSize field.
     masm.computeEffectiveAddress(
@@ -5689,7 +5776,7 @@ bool BaselineCompilerCodeGen::emit_JSOP_RESUME() {
     masm.loadBaselineFramePtr(BaselineFrameReg, scratch2);
 
     prepareVMCall();
-    pushArg(Imm32(resumeKind));
+    pushArg(Imm32(int32_t(resumeKind)));
     pushArg(retVal);
     pushArg(genObj);
     pushArg(scratch2);
@@ -5734,12 +5821,12 @@ bool BaselineCompilerCodeGen::emit_JSOP_RESUME() {
   masm.bind(&interpret);
 
   prepareVMCall();
-  if (resumeKind == AbstractGeneratorObject::NEXT) {
+  if (resumeKind == GeneratorResumeKind::Next) {
     pushArg(ImmGCPtr(cx->names().next));
-  } else if (resumeKind == AbstractGeneratorObject::THROW) {
+  } else if (resumeKind == GeneratorResumeKind::Throw) {
     pushArg(ImmGCPtr(cx->names().throw_));
   } else {
-    MOZ_ASSERT(resumeKind == AbstractGeneratorObject::RETURN);
+    MOZ_ASSERT(resumeKind == GeneratorResumeKind::Return);
     pushArg(ImmGCPtr(cx->names().return_));
   }
 
@@ -6036,8 +6123,8 @@ bool BaselineCodeGen<Handler>::emitPrologue() {
   // Initialize BaselineFrame. For eval scripts, the env chain
   // is passed in R1, so we have to be careful not to clobber it.
 
-  // Initialize BaselineFrame::flags.
-  masm.store32(Imm32(0), frame.addressOfFlags());
+  // Initialize BaselineFrame::flags and interpreter fields.
+  emitInitFrameFields();
 
   // Handle env chain pre-initialization (in case GC gets run
   // during stack check).  For global and eval scripts, the env
@@ -6098,7 +6185,7 @@ bool BaselineCodeGen<Handler>::emitPrologue() {
   }
 
 #ifdef JS_TRACE_LOGGING
-  if (!emitTraceLoggerEnter()) {
+  if (JS::TraceLoggerSupported() && !emitTraceLoggerEnter()) {
     return false;
   }
 #endif
@@ -6135,6 +6222,8 @@ bool BaselineCodeGen<Handler>::emitPrologue() {
     return false;
   }
 
+  warmUpCheckPrologueOffset_ = CodeOffset(masm.currentOffset());
+
   if (!emitArgumentTypeChecks()) {
     return false;
   }
@@ -6151,7 +6240,7 @@ bool BaselineCodeGen<Handler>::emitEpilogue() {
   masm.bind(&return_);
 
 #ifdef JS_TRACE_LOGGING
-  if (!emitTraceLoggerExit()) {
+  if (JS::TraceLoggerSupported() && !emitTraceLoggerExit()) {
     return false;
   }
 #endif

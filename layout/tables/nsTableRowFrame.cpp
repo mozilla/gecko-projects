@@ -3,11 +3,11 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "mozilla/Maybe.h"
-
 #include "nsTableRowFrame.h"
+
+#include "mozilla/Maybe.h"
+#include "mozilla/PresShell.h"
 #include "nsTableRowGroupFrame.h"
-#include "nsIPresShell.h"
 #include "nsPresContext.h"
 #include "mozilla/ComputedStyle.h"
 #include "nsStyleConsts.h"
@@ -1370,7 +1370,7 @@ void nsTableRowFrame::InvalidateFrameWithRect(const nsRect& aRect,
 
 /* ----- global methods ----- */
 
-nsTableRowFrame* NS_NewTableRowFrame(nsIPresShell* aPresShell,
+nsTableRowFrame* NS_NewTableRowFrame(PresShell* aPresShell,
                                      ComputedStyle* aStyle) {
   return new (aPresShell) nsTableRowFrame(aStyle, aPresShell->GetPresContext());
 }

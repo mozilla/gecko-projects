@@ -866,21 +866,21 @@ bool Debugger::hasAnyLiveHooks(JSRuntime* rt) const {
 ResumeMode Debugger::slowPathOnEnterFrame(JSContext* cx,
                                           AbstractFramePtr frame) {
   RootedValue rval(cx);
-  ResumeMode resumeMode = dispatchHook(cx,
-                                       [frame](Debugger* dbg) -> bool {
-                                         return dbg->observesFrame(frame) &&
-                                                dbg->observesEnterFrame();
-                                       },
-                                       [&](Debugger* dbg) -> ResumeMode {
-                                         return dbg->fireEnterFrame(cx, &rval);
-                                       });
+  ResumeMode resumeMode = dispatchHook(
+      cx,
+      [frame](Debugger* dbg) -> bool {
+        return dbg->observesFrame(frame) && dbg->observesEnterFrame();
+      },
+      [&](Debugger* dbg) -> ResumeMode {
+        return dbg->fireEnterFrame(cx, &rval);
+      });
 
   switch (resumeMode) {
     case ResumeMode::Continue:
       break;
 
     case ResumeMode::Throw:
-      cx->setPendingException(rval);
+      cx->setPendingExceptionAndCaptureStack(rval);
       break;
 
     case ResumeMode::Terminate:
@@ -963,7 +963,8 @@ class MOZ_RAII AutoSetGeneratorRunning {
         asyncGenState_(static_cast<AsyncGeneratorObject::State>(0)),
         genObj_(cx, genObj) {
     if (genObj) {
-      if (!genObj->isClosed() && genObj->isSuspended()) {
+      if (!genObj->isClosed() && !genObj->isBeforeInitialYield() &&
+          genObj->isSuspended()) {
         // Yielding or awaiting.
         resumeIndex_ = genObj->resumeIndex();
         genObj->setRunning();
@@ -1109,7 +1110,7 @@ bool Debugger::slowPathOnLeaveFrame(JSContext* cx, AbstractFramePtr frame,
       return true;
 
     case ResumeMode::Throw:
-      cx->setPendingException(value);
+      cx->setPendingExceptionAndCaptureStack(value);
       return false;
 
     case ResumeMode::Terminate:
@@ -1170,7 +1171,7 @@ ResumeMode Debugger::slowPathOnDebuggerStatement(JSContext* cx,
       break;
 
     case ResumeMode::Throw:
-      cx->setPendingException(rval);
+      cx->setPendingExceptionAndCaptureStack(rval);
       break;
 
     default:
@@ -1206,7 +1207,7 @@ ResumeMode Debugger::slowPathOnExceptionUnwind(JSContext* cx,
       break;
 
     case ResumeMode::Throw:
-      cx->setPendingException(rval);
+      cx->setPendingExceptionAndCaptureStack(rval);
       break;
 
     case ResumeMode::Terminate:
@@ -1577,6 +1578,7 @@ static bool CheckResumptionValue(JSContext* cx, AbstractFramePtr frame,
   if (maybeThisv.isSome()) {
     const HandleValue& thisv = maybeThisv.ref();
     if (resumeMode == ResumeMode::Return && vp.isPrimitive()) {
+      // Forcing return from a class constructor. There are rules.
       if (vp.isUndefined()) {
         if (thisv.isMagic(JS_UNINITIALIZED_LEXICAL)) {
           return ThrowUninitializedThis(cx, frame);
@@ -1590,9 +1592,34 @@ static bool CheckResumptionValue(JSContext* cx, AbstractFramePtr frame,
       }
     }
   }
+
+  // Check for forcing return from a generator before the initial yield. This
+  // is not supported because some engine-internal code assumes a call to a
+  // generator will return a GeneratorObject; see bug 1477084.
+  if (resumeMode == ResumeMode::Return && frame && frame.isFunctionFrame() &&
+      frame.callee()->isGenerator()) {
+    Rooted<AbstractGeneratorObject*> genObj(cx);
+    {
+      AutoRealm ar(cx, frame.callee());
+      genObj = GetGeneratorObjectForFrame(cx, frame);
+    }
+
+    if (!genObj || genObj->isBeforeInitialYield()) {
+      JS_ReportErrorNumberASCII(cx, GetErrorMessage, nullptr,
+                                JSMSG_DEBUG_FORCED_RETURN_DISALLOWED);
+      return false;
+    }
+  }
+
   return true;
 }
 
+// Last-minute sanity adjustments to resumption.
+//
+// This is called last, as we leave the debugger. It must happen outside the
+// control of the uncaughtExceptionHook, because this code assumes we won't
+// change our minds and continue execution--we must not close the generator
+// object unless we're really going to force-return.
 static void AdjustGeneratorResumptionValue(JSContext* cx,
                                            AbstractFramePtr frame,
                                            ResumeMode& resumeMode,
@@ -1612,10 +1639,11 @@ static void AdjustGeneratorResumptionValue(JSContext* cx,
   };
 
   // Treat `{return: <value>}` like a `return` statement. Simulate what the
-  // debuggee would do for an ordinary `return` statement--using a few bytecode
-  // instructions--and it's simpler to do the work manually than to count on
-  // that bytecode sequence existing in the debuggee, somehow jump to it, and
-  // then avoid re-entering the debugger from it.
+  // debuggee would do for an ordinary `return` statement, using a few bytecode
+  // instructions. It's simpler to do the work manually than to count on that
+  // bytecode sequence existing in the debuggee, somehow jump to it, and then
+  // avoid re-entering the debugger from it.
+  //
   // Similarly treat `{throw: <value>}` like a `throw` statement.
   if (frame.callee()->isGenerator()) {
     // Throw doesn't require any special processing for (async) generators.
@@ -1623,30 +1651,34 @@ static void AdjustGeneratorResumptionValue(JSContext* cx,
       return;
     }
 
-    // For (async) generators, that means doing the work below.
+    // Forcing return from a (possibly async) generator.
     Rooted<AbstractGeneratorObject*> genObj(
         cx, GetGeneratorObjectForFrame(cx, frame));
-    if (genObj) {
-      // 1.  `return <value>` creates and returns a new object in non-async
-      //     generators, `{value: <value>, done: true}`.
-      if (!frame.callee()->isAsync() && !genObj->isBeforeInitialYield()) {
-        JSObject* pair = CreateIterResultObject(cx, vp, true);
-        if (!pair) {
-          getAndClearExceptionThenThrow();
-          return;
-        }
-        vp.setObject(*pair);
-      }
 
-      // 2.  The generator must be closed.
-      genObj->setClosed();
-    } else {
-      // We're before the initial yield. Carry on with the forced return.
-      // The debuggee will see a call to a generator returning the
-      // non-generator value *vp.
+    // We already went through CheckResumptionValue, which would have replaced
+    // this invalid resumption value with an error if we were trying to force
+    // return before the initial yield.
+    MOZ_RELEASE_ASSERT(genObj && !genObj->isBeforeInitialYield());
+
+    // 1.  `return <value>` creates and returns a new object,
+    //     `{value: <value>, done: true}`.
+    //
+    // For non-async generators, the iterator result object is created in
+    // bytecode, so we have to simulate that here. For async generators, our
+    // C++ implementation of AsyncGeneratorResolve will do this. So don't do it
+    // twice:
+    if (!frame.callee()->isAsync()) {
+      JSObject* pair = CreateIterResultObject(cx, vp, true);
+      if (!pair) {
+        getAndClearExceptionThenThrow();
+        return;
+      }
+      vp.setObject(*pair);
     }
+
+    // 2.  The generator must be closed.
+    genObj->setClosed();
   } else if (frame.callee()->isAsync()) {
-    // For async functions, that means doing the work below.
     if (AbstractGeneratorObject* genObj =
             GetGeneratorObjectForFrame(cx, frame)) {
       // Throw doesn't require any special processing for async functions when
@@ -1987,6 +2019,7 @@ ResumeMode Debugger::fireExceptionUnwind(JSContext* cx, MutableHandleValue vp) {
   MOZ_ASSERT(hook->isCallable());
 
   RootedValue exc(cx);
+  RootedSavedFrame stack(cx, cx->getPendingExceptionStack());
   if (!cx->getPendingException(&exc)) {
     return ResumeMode::Terminate;
   }
@@ -2010,7 +2043,7 @@ ResumeMode Debugger::fireExceptionUnwind(JSContext* cx, MutableHandleValue vp) {
   ResumeMode resumeMode =
       processHandlerResult(ar, ok, rv, iter.abstractFramePtr(), iter.pc(), vp);
   if (resumeMode == ResumeMode::Continue) {
-    cx->setPendingException(exc);
+    cx->setPendingException(exc, stack);
   }
   return resumeMode;
 }
@@ -2026,7 +2059,7 @@ ResumeMode Debugger::fireEnterFrame(JSContext* cx, MutableHandleValue vp) {
 
 #if DEBUG
   // Assert that the hook won't be able to re-enter the generator.
-  if (iter.hasScript() && *iter.pc() == JSOP_DEBUGAFTERYIELD) {
+  if (iter.hasScript() && *iter.pc() == JSOP_AFTERYIELD) {
     auto* genObj = GetGeneratorObjectForFrame(cx, iter.abstractFramePtr());
     MOZ_ASSERT(genObj->isRunning() || genObj->isClosing());
   }
@@ -5497,6 +5530,14 @@ bool Debugger::findAllGlobals(JSContext* cx, unsigned argc, Value* vp) {
         continue;
       }
 
+      if (!r->hasLiveGlobal()) {
+        continue;
+      }
+
+      if (JS::RealmBehaviorsRef(r).isNonLive()) {
+        continue;
+      }
+
       r->compartment()->gcState.scheduledForDestruction = false;
 
       GlobalObject* global = r->maybeGlobal();
@@ -5505,14 +5546,12 @@ bool Debugger::findAllGlobals(JSContext* cx, unsigned argc, Value* vp) {
         continue;
       }
 
-      if (global) {
-        // We pulled |global| out of nowhere, so it's possible that it was
-        // marked gray by XPConnect. Since we're now exposing it to JS code,
-        // we need to mark it black.
-        JS::ExposeObjectToActiveJS(global);
-        if (!globals.append(global)) {
-          return false;
-        }
+      // We pulled |global| out of nowhere, so it's possible that it was
+      // marked gray by XPConnect. Since we're now exposing it to JS code,
+      // we need to mark it black.
+      JS::ExposeObjectToActiveJS(global);
+      if (!globals.append(global)) {
+        return false;
       }
     }
   }
@@ -9316,7 +9355,7 @@ static bool DebuggerGenericEval(JSContext* cx,
 
   // Gather keys and values of bindings, if any. This must be done in the
   // debugger compartment, since that is where any exceptions must be thrown.
-  AutoIdVector keys(cx);
+  RootedIdVector keys(cx);
   RootedValueVector values(cx);
   if (bindings) {
     if (!GetPropertyKeys(cx, bindings, JSITER_OWNONLY, &keys) ||
@@ -10947,7 +10986,7 @@ bool DebuggerObject::definePropertiesMethod(JSContext* cx, unsigned argc,
   if (!props) {
     return false;
   }
-  AutoIdVector ids(cx);
+  RootedIdVector ids(cx);
   Rooted<PropertyDescriptorVector> descs(cx, PropertyDescriptorVector(cx));
   if (!ReadPropertyDescriptors(cx, props, false, &ids, &descs)) {
     return false;
@@ -11793,7 +11832,7 @@ bool DebuggerObject::getOwnPropertyNames(JSContext* cx,
                                          MutableHandle<IdVector> result) {
   RootedObject referent(cx, object->referent());
 
-  AutoIdVector ids(cx);
+  RootedIdVector ids(cx);
   {
     Maybe<AutoRealm> ar;
     EnterDebuggeeObjectRealm(cx, ar, referent);
@@ -11817,7 +11856,7 @@ bool DebuggerObject::getOwnPropertySymbols(JSContext* cx,
                                            MutableHandle<IdVector> result) {
   RootedObject referent(cx, object->referent());
 
-  AutoIdVector ids(cx);
+  RootedIdVector ids(cx);
   {
     Maybe<AutoRealm> ar;
     EnterDebuggeeObjectRealm(cx, ar, referent);
@@ -12783,7 +12822,7 @@ bool DebuggerEnvironment::getNames(JSContext* cx,
 
   Rooted<Env*> referent(cx, environment->referent());
 
-  AutoIdVector ids(cx);
+  RootedIdVector ids(cx);
   {
     Maybe<AutoRealm> ar;
     ar.emplace(cx, referent);

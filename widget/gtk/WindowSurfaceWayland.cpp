@@ -413,16 +413,6 @@ WindowSurfaceWayland::~WindowSurfaceWayland() {
       delete mBackupBuffer[i];
     }
   }
-
-  if (!mIsMainThread) {
-    // We can be destroyed from main thread even though we was created/used
-    // in compositor thread. We have to unref/delete WaylandDisplay in
-    // compositor thread then and we can't use MessageLoop::current() here.
-    mDisplayThreadMessageLoop->PostTask(NewRunnableFunction(
-        "WaylandDisplayRelease", &WaylandDisplayRelease, mWaylandDisplay));
-  } else {
-    WaylandDisplayRelease(mWaylandDisplay);
-  }
 }
 
 WindowBackBuffer* WindowSurfaceWayland::GetWaylandBufferToDraw(int aWidth,
@@ -639,6 +629,24 @@ static void WaylandBufferDelayCommitHandler(WindowSurfaceWayland** aSurface) {
   }
 }
 
+void WindowSurfaceWayland::CalcRectScale(LayoutDeviceIntRect& aRect,
+                                         int aScale) {
+  if (aRect.x & 0x1) {
+    aRect.width += 1;
+  }
+  aRect.x = aRect.x / aScale;
+
+  if (aRect.y & 0x1) {
+    aRect.height += 1;
+  }
+  aRect.y = aRect.y / aScale;
+
+  aRect.width =
+      (aRect.width & 0x1) ? aRect.width / aScale + 1 : aRect.width / aScale;
+  aRect.height =
+      (aRect.height & 0x1) ? aRect.height / aScale + 1 : aRect.height / aScale;
+}
+
 void WindowSurfaceWayland::CommitWaylandBuffer() {
   MOZ_ASSERT(mPendingCommit, "Committing empty surface!");
 
@@ -694,11 +702,13 @@ void WindowSurfaceWayland::CommitWaylandBuffer() {
     gint scaleFactor = mWindow->GdkScaleFactor();
     for (auto iter = mWaylandBufferDamage.RectIter(); !iter.Done();
          iter.Next()) {
-      const mozilla::LayoutDeviceIntRect& r = iter.Get();
+      mozilla::LayoutDeviceIntRect r = iter.Get();
       // We need to remove the scale factor because the wl_surface_damage
       // also multiplies by current  scale factor.
-      wl_surface_damage(waylandSurface, r.x / scaleFactor, r.y / scaleFactor,
-                        r.width / scaleFactor, r.height / scaleFactor);
+      if (scaleFactor > 1) {
+        CalcRectScale(r, scaleFactor);
+      }
+      wl_surface_damage(waylandSurface, r.x, r.y, r.width, r.height);
     }
   }
 

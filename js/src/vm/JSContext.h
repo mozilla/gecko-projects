@@ -12,6 +12,7 @@
 #include "mozilla/MemoryReporting.h"
 
 #include "ds/TraceableFifo.h"
+#include "gc/Memory.h"
 #include "js/CharacterEncoding.h"
 #include "js/ContextOptions.h"  // JS::ContextOptions
 #include "js/GCVector.h"
@@ -173,6 +174,8 @@ struct JSContext : public JS::RootingContext,
   // Free lists for parallel allocation in the atoms zone on helper threads.
   js::ThreadData<js::gc::FreeLists*> atomsZoneFreeLists_;
 
+  js::ThreadData<js::FreeOp> defaultFreeOp_;
+
  public:
   // This is used by helper threads to change the runtime their context is
   // currently operating on.
@@ -268,7 +271,7 @@ struct JSContext : public JS::RootingContext,
     return *runtime_->wellKnownSymbols;
   }
   js::PropertyName* emptyString() { return runtime_->emptyString; }
-  js::FreeOp* defaultFreeOp() { return runtime_->defaultFreeOp(); }
+  js::FreeOp* defaultFreeOp() { return &defaultFreeOp_.ref(); }
   void* stackLimitAddress(JS::StackKind kind) {
     return &nativeStackLimit[kind];
   }
@@ -662,12 +665,21 @@ struct JSContext : public JS::RootingContext,
   js::ThreadData<bool> throwing; /* is there a pending exception? */
   js::ThreadData<JS::PersistentRooted<JS::Value>>
       unwrappedException_; /* most-recently-thrown exception */
+  js::ThreadData<JS::PersistentRooted<js::SavedFrame*>>
+      unwrappedExceptionStack_; /* stack when the exception was thrown */
 
   JS::Value& unwrappedException() {
     if (!unwrappedException_.ref().initialized()) {
       unwrappedException_.ref().init(this);
     }
     return unwrappedException_.ref().get();
+  }
+
+  js::SavedFrame*& unwrappedExceptionStack() {
+    if (!unwrappedExceptionStack_.ref().initialized()) {
+      unwrappedExceptionStack_.ref().init(this);
+    }
+    return unwrappedExceptionStack_.ref().get();
   }
 
   // True if the exception currently being thrown is by result of
@@ -781,16 +793,20 @@ struct JSContext : public JS::RootingContext,
   MOZ_MUST_USE
   bool getPendingException(JS::MutableHandleValue rval);
 
+  js::SavedFrame* getPendingExceptionStack();
+
   bool isThrowingOutOfMemory();
   bool isThrowingDebuggeeWouldRun();
   bool isClosingGenerator();
 
-  void setPendingException(JS::HandleValue v);
+  void setPendingException(JS::HandleValue v, js::HandleSavedFrame stack);
+  void setPendingExceptionAndCaptureStack(JS::HandleValue v);
 
   void clearPendingException() {
     throwing = false;
     overRecursed_ = false;
     unwrappedException().setUndefined();
+    unwrappedExceptionStack() = nullptr;
   }
 
   bool isThrowingOverRecursed() const { return throwing && overRecursed_; }

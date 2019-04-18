@@ -13,6 +13,7 @@ XPCOMUtils.defineLazyModuleGetters(this, {
   E10SUtils: "resource://gre/modules/sessionstore/Utils.jsm",
   LoadURIDelegate: "resource://gre/modules/LoadURIDelegate.jsm",
   Services: "resource://gre/modules/Services.jsm",
+  PrivateBrowsingUtils: "resource://gre/modules/PrivateBrowsingUtils.jsm",
 });
 
 // Handles navigation requests between Gecko and a GeckoView.
@@ -32,15 +33,28 @@ class GeckoViewNavigation extends GeckoViewModule {
   }
 
   onInit() {
+    debug `onInit`;
+
     this.registerListener([
       "GeckoView:GoBack",
       "GeckoView:GoForward",
+      "GeckoView:GotoHistoryIndex",
       "GeckoView:LoadUri",
       "GeckoView:Reload",
       "GeckoView:Stop",
     ]);
 
     this.messageManager.addMessageListener("Browser:LoadURI", this);
+
+    debug `sessionContextId=${this.settings.sessionContextId}`;
+
+    if (this.settings.sessionContextId !== null) {
+      this.browser.webNavigation.setOriginAttributesBeforeLoading({
+        geckoViewSessionContextId: this.settings.sessionContextId,
+        privateBrowsingId:
+          PrivateBrowsingUtils.isBrowserPrivate(this.browser) ? 1 : 0,
+      });
+    }
   }
 
   // Bundle event handler.
@@ -53,6 +67,9 @@ class GeckoViewNavigation extends GeckoViewModule {
         break;
       case "GeckoView:GoForward":
         this.browser.goForward();
+        break;
+      case "GeckoView:GotoHistoryIndex":
+        this.browser.gotoIndex(aData.index);
         break;
       case "GeckoView:LoadUri":
         const { uri, referrer, flags } = aData;
@@ -87,12 +104,12 @@ class GeckoViewNavigation extends GeckoViewModule {
         let parsedUri;
         let triggeringPrincipal;
         try {
-            parsedUri = Services.io.newURI(uri);
-            if (parsedUri.schemeIs("about") || parsedUri.schemeIs("data") ||
-                parsedUri.schemeIs("file") || parsedUri.schemeIs("resource")) {
-              // Only allow privileged loading for certain URIs.
-              triggeringPrincipal = Services.scriptSecurityManager.getSystemPrincipal();
-            }
+          parsedUri = Services.io.newURI(uri);
+          if (parsedUri.schemeIs("about") || parsedUri.schemeIs("data") ||
+              parsedUri.schemeIs("file") || parsedUri.schemeIs("resource")) {
+            // Only allow privileged loading for certain URIs.
+            triggeringPrincipal = Services.scriptSecurityManager.getSystemPrincipal();
+          }
         } catch (ignored) {
         }
         if (!triggeringPrincipal) {
@@ -195,7 +212,7 @@ class GeckoViewNavigation extends GeckoViewModule {
 
     // Wait indefinitely for app to respond with a browser or null
     Services.tm.spinEventLoopUntil(() =>
-        this.window.closed || browser !== undefined);
+      this.window.closed || browser !== undefined);
     return browser || null;
   }
 

@@ -287,12 +287,6 @@ class nsIPresShell : public nsStubDocumentObserver {
   bool GetAuthorStyleDisabled() const;
 
   /**
-   * Needs to be called any time the applicable style can has changed, in order
-   * to schedule a style flush and setup all the relevant state.
-   */
-  void ApplicableStylesChanged();
-
-  /**
    * Update the style set somehow to take into account changed prefs which
    * affect document styling.
    */
@@ -347,7 +341,7 @@ class nsIPresShell : public nsStubDocumentObserver {
    * Reflow the frame model into a new width and height.  The
    * coordinates for aWidth and aHeight must be in standard nscoord's.
    */
-  virtual nsresult ResizeReflow(
+  MOZ_CAN_RUN_SCRIPT virtual nsresult ResizeReflow(
       nscoord aWidth, nscoord aHeight, nscoord aOldWidth = 0,
       nscoord aOldHeight = 0,
       ResizeReflowOptions aOptions = ResizeReflowOptions::eBSizeExact) = 0;
@@ -355,7 +349,7 @@ class nsIPresShell : public nsStubDocumentObserver {
    * Do the same thing as ResizeReflow but even if ResizeReflowOverride was
    * called previously.
    */
-  virtual nsresult ResizeReflowIgnoreOverride(
+  MOZ_CAN_RUN_SCRIPT virtual nsresult ResizeReflowIgnoreOverride(
       nscoord aWidth, nscoord aHeight, nscoord aOldWidth, nscoord aOldHeight,
       ResizeReflowOptions aOptions = ResizeReflowOptions::eBSizeExact) = 0;
 
@@ -535,10 +529,6 @@ class nsIPresShell : public nsStubDocumentObserver {
   void PostRecreateFramesFor(mozilla::dom::Element*);
   void RestyleForAnimation(mozilla::dom::Element*, mozilla::RestyleHint);
 
-  // ShadowRoot has APIs that can change styles. This notifies the shell that
-  // stlyes applicable in the shadow tree have potentially changed.
-  void RecordShadowStyleChange(mozilla::dom::ShadowRoot& aShadowRoot);
-
   /**
    * Determine if it is safe to flush all pending notifications.
    */
@@ -565,6 +555,7 @@ class nsIPresShell : public nsStubDocumentObserver {
    *
    * @param aType the type of notifications to flush
    */
+  MOZ_CAN_RUN_SCRIPT
   void FlushPendingNotifications(mozilla::FlushType aType) {
     if (!NeedFlush(aType)) {
       return;
@@ -573,6 +564,7 @@ class nsIPresShell : public nsStubDocumentObserver {
     DoFlushPendingNotifications(aType);
   }
 
+  MOZ_CAN_RUN_SCRIPT
   void FlushPendingNotifications(mozilla::ChangesToFlush aType) {
     if (!NeedFlush(aType.mFlushType)) {
       return;
@@ -585,7 +577,9 @@ class nsIPresShell : public nsStubDocumentObserver {
   /**
    * Implementation methods for FlushPendingNotifications.
    */
+  MOZ_CAN_RUN_SCRIPT
   virtual void DoFlushPendingNotifications(mozilla::FlushType aType) = 0;
+  MOZ_CAN_RUN_SCRIPT
   virtual void DoFlushPendingNotifications(mozilla::ChangesToFlush aType) = 0;
 
  public:
@@ -653,8 +647,6 @@ class nsIPresShell : public nsStubDocumentObserver {
    */
   nsresult PostReflowCallback(nsIReflowCallback* aCallback);
   void CancelReflowCallback(nsIReflowCallback* aCallback);
-
-  void HandlePostedReflowCallbacks(bool aInterruptible);
 
   void ScheduleBeforeFirstPaint();
   void UnsuppressAndInvalidate();
@@ -788,7 +780,9 @@ class nsIPresShell : public nsStubDocumentObserver {
     SCROLL_OVERFLOW_HIDDEN = 0x02,
     SCROLL_NO_PARENT_FRAMES = 0x04,
     SCROLL_SMOOTH = 0x08,
-    SCROLL_SMOOTH_AUTO = 0x10
+    SCROLL_SMOOTH_AUTO = 0x10,
+    SCROLL_SNAP = 0x20,
+    SCROLL_IGNORE_SCROLL_MARGIN_AND_PADDING = 0x40
   };
   /**
    * Scrolls the view of the document so that the given area of a frame
@@ -807,6 +801,10 @@ class nsIPresShell : public nsStubDocumentObserver {
    * If SCROLL_NO_PARENT_FRAMES is set then we only scroll
    * nodes in this document, not in any parent documents which
    * contain this document in a iframe or the like.
+   * If SCROLL_IGNORE_SCROLL_MARGIN_AND_PADDING is set we ignore scroll-margin
+   * value specified for |aFrame| and scroll-padding value for the scroll
+   * container. This option is typically used to locate poped-up frames into
+   * view.
    * @return true if any scrolling happened, false if no scrolling happened
    */
   bool ScrollFrameRectIntoView(nsIFrame* aFrame, const nsRect& aRect,
@@ -1463,14 +1461,6 @@ class nsIPresShell : public nsStubDocumentObserver {
                                nsEventStatus* aEventStatus) = 0;
   virtual bool ShouldIgnoreInvalidation() = 0;
   /**
-   * Notify that we're going to call Paint with PAINT_LAYERS
-   * on the pres shell for a widget (which might not be this one, since
-   * WillPaint is called on all presshells in the same toplevel window as the
-   * painted widget). This is issued at a time when it's safe to modify
-   * widget geometry.
-   */
-  virtual void WillPaint() = 0;
-  /**
    * Notify that we're going to call Paint with PAINT_COMPOSITE.
    * Fires on the presshell for the painted widget.
    * This is issued at a time when it's safe to modify widget geometry.
@@ -1778,8 +1768,8 @@ class nsIPresShell : public nsStubDocumentObserver {
       FrameMetrics::ScrollOffsetUpdateType aUpdateType);
 
 #ifdef DEBUG
-  bool VerifyIncrementalReflow();
-  void DoVerifyReflow();
+  MOZ_CAN_RUN_SCRIPT_BOUNDARY bool VerifyIncrementalReflow();
+  MOZ_CAN_RUN_SCRIPT_BOUNDARY void DoVerifyReflow();
   void VerifyHasDirtyRootAncestor(nsIFrame* aFrame);
   void ShowEventTargetDebug();
 
@@ -1820,15 +1810,6 @@ class nsIPresShell : public nsStubDocumentObserver {
 
   DOMHighResTimeStamp GetPerformanceNowUnclamped();
 
-  /**
-   * Callback handler for whether reflow happened.
-   *
-   * @param aInterruptible Whether or not reflow interruption is allowed.
-   */
-  void DidDoReflow(bool aInterruptible);
-  // ProcessReflowCommands returns whether we processed all our dirty roots
-  // without interruptions.
-  bool ProcessReflowCommands(bool aInterruptible);
   // The callback for the mReflowContinueTimer timer.
   static void sReflowContinueCallback(nsITimer* aTimer, void* aPresShell);
   bool ScheduleReflowOffTimer();

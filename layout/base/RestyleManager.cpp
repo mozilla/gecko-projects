@@ -772,15 +772,15 @@ static bool RecomputePosition(nsIFrame* aFrame) {
     return true;
   }
 
-  // For the absolute positioning case, set up a fake HTML reflow state for
+  // For the absolute positioning case, set up a fake HTML reflow input for
   // the frame, and then get the offsets and size from it. If the frame's size
   // doesn't need to change, we can simply update the frame position. Otherwise
   // we fall back to a reflow.
   RefPtr<gfxContext> rc =
       aFrame->PresShell()->CreateReferenceRenderingContext();
 
-  // Construct a bogus parent reflow state so that there's a usable
-  // containing block reflow state.
+  // Construct a bogus parent reflow input so that there's a usable
+  // containing block reflow input.
   nsIFrame* parentFrame = aFrame->GetParent();
   WritingMode parentWM = parentFrame->GetWritingMode();
   WritingMode frameWM = aFrame->GetWritingMode();
@@ -1188,8 +1188,8 @@ static bool IsPrimaryFrameOfRootOrBodyElement(nsIFrame* aFrame) {
   return false;
 }
 
-static void ApplyRenderingChangeToTree(nsIPresShell* aPresShell,
-                                       nsIFrame* aFrame, nsChangeHint aChange) {
+static void ApplyRenderingChangeToTree(PresShell* aPresShell, nsIFrame* aFrame,
+                                       nsChangeHint aChange) {
   // We check StyleDisplay()->HasTransformStyle() in addition to checking
   // IsTransformed() since we can get here for some frames that don't support
   // CSS transforms.

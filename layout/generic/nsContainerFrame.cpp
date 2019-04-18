@@ -150,7 +150,7 @@ void nsContainerFrame::RemoveFrame(ChildListID aListID, nsIFrame* aOldFrame) {
     }
   }
 
-  nsIPresShell* shell = PresShell();
+  mozilla::PresShell* presShell = PresShell();
   nsContainerFrame* lastParent = nullptr;
 
   // Loop and destroy aOldFrame and all of its continuations.
@@ -167,8 +167,8 @@ void nsContainerFrame::RemoveFrame(ChildListID aListID, nsIFrame* aOldFrame) {
     parent->StealFrame(continuation);
     continuation->Destroy();
     if (generateReflowCommand && parent != lastParent) {
-      shell->FrameNeedsReflow(parent, nsIPresShell::eTreeChange,
-                              NS_FRAME_HAS_DIRTY_CHILDREN);
+      presShell->FrameNeedsReflow(parent, nsIPresShell::eTreeChange,
+                                  NS_FRAME_HAS_DIRTY_CHILDREN);
       lastParent = parent;
     }
   }
@@ -185,7 +185,7 @@ void nsContainerFrame::DestroyAbsoluteFrames(
 
 void nsContainerFrame::SafelyDestroyFrameListProp(
     nsIFrame* aDestructRoot, PostDestroyData& aPostDestroyData,
-    nsIPresShell* aPresShell, FrameListPropertyDescriptor aProp) {
+    mozilla::PresShell* aPresShell, FrameListPropertyDescriptor aProp) {
   // Note that the last frame can be removed through another route and thus
   // delete the property -- that's why we fetch the property again before
   // removing each frame rather than fetching it once and iterating the list.
@@ -870,7 +870,7 @@ void nsContainerFrame::ReflowChild(
     const WritingMode& aWM, const LogicalPoint& aPos,
     const nsSize& aContainerSize, uint32_t aFlags, nsReflowStatus& aStatus,
     nsOverflowContinuationTracker* aTracker) {
-  MOZ_ASSERT(aReflowInput.mFrame == aKidFrame, "bad reflow state");
+  MOZ_ASSERT(aReflowInput.mFrame == aKidFrame, "bad reflow input");
   if (aWM.IsVerticalRL() || (!aWM.IsVertical() && !aWM.IsBidiLTR())) {
     NS_ASSERTION(aContainerSize.width != NS_UNCONSTRAINEDSIZE,
                  "ReflowChild with unconstrained container width!");
@@ -916,7 +916,7 @@ void nsContainerFrame::ReflowChild(nsIFrame* aKidFrame,
                                    nscoord aY, uint32_t aFlags,
                                    nsReflowStatus& aStatus,
                                    nsOverflowContinuationTracker* aTracker) {
-  MOZ_ASSERT(aReflowInput.mFrame == aKidFrame, "bad reflow state");
+  MOZ_ASSERT(aReflowInput.mFrame == aKidFrame, "bad reflow input");
 
   // Position the child frame and its view if requested.
   if (NS_FRAME_NO_MOVE_FRAME != (aFlags & NS_FRAME_NO_MOVE_FRAME)) {

@@ -9,7 +9,6 @@
 #ifndef mozilla_PresShell_h
 #define mozilla_PresShell_h
 
-#include "MobileViewportManager.h"
 #include "mozilla/Attributes.h"
 #include "mozilla/EventForwards.h"
 #include "mozilla/dom/HTMLDocumentBinding.h"
@@ -40,6 +39,7 @@ struct RangePaintInfo;
 
 class nsPresShellEventCB;
 class AutoPointerEventTargetUpdater;
+class MobileViewportManager;
 
 namespace mozilla {
 
@@ -49,6 +49,7 @@ class Selection;
 }  // namespace dom
 
 class EventDispatchingCallback;
+class GeckoMVMContext;
 class OverflowChangedTracker;
 
 // A set type for tracking visible frames, for use by the visibility code in
@@ -95,15 +96,17 @@ class PresShell final : public nsIPresShell,
   NS_IMETHOD RepaintSelection(RawSelectionType aRawSelectionType) override;
 
   nsresult Initialize() override;
-  nsresult ResizeReflow(
+  MOZ_CAN_RUN_SCRIPT nsresult ResizeReflow(
       nscoord aWidth, nscoord aHeight, nscoord aOldWidth = 0,
       nscoord aOldHeight = 0,
       ResizeReflowOptions aOptions = ResizeReflowOptions::eBSizeExact) override;
-  nsresult ResizeReflowIgnoreOverride(
+  MOZ_CAN_RUN_SCRIPT nsresult ResizeReflowIgnoreOverride(
       nscoord aWidth, nscoord aHeight, nscoord aOldWidth, nscoord aOldHeight,
       ResizeReflowOptions aOptions = ResizeReflowOptions::eBSizeExact) override;
 
+  MOZ_CAN_RUN_SCRIPT
   void DoFlushPendingNotifications(FlushType aType) override;
+  MOZ_CAN_RUN_SCRIPT
   void DoFlushPendingNotifications(ChangesToFlush aType) override;
 
   nsRectVisibility GetRectVisibility(nsIFrame* aFrame, const nsRect& aRect,
@@ -181,6 +184,11 @@ class PresShell final : public nsIPresShell,
 
   void SynthesizeMouseMove(bool aFromScroll) override;
 
+  Document* GetPrimaryContentDocument() override;
+
+  void PausePainting() override;
+  void ResumePainting() override;
+
   // nsIViewObserver interface
 
   void Paint(nsView* aViewToPaint, const nsRegion& aDirtyRegion,
@@ -196,7 +204,14 @@ class PresShell final : public nsIPresShell,
                                     dom::Event* aEvent,
                                     nsEventStatus* aStatus) override;
   bool ShouldIgnoreInvalidation() override;
-  void WillPaint() override;
+  /**
+   * Notify that we're going to call Paint with PAINT_LAYERS
+   * on the pres shell for a widget (which might not be this one, since
+   * WillPaint is called on all presshells in the same toplevel window as the
+   * painted widget). This is issued at a time when it's safe to modify
+   * widget geometry.
+   */
+  MOZ_CAN_RUN_SCRIPT void WillPaint();
   void WillPaintWindow() override;
   void DidPaintWindow() override;
   void ScheduleViewManagerFlush(PaintType aType = PAINT_DEFAULT) override;
@@ -295,9 +310,7 @@ class PresShell final : public nsIPresShell,
     return (mMobileViewportManager != nullptr);
   }
 
-  RefPtr<MobileViewportManager> GetMobileViewportManager() const override {
-    return mMobileViewportManager;
-  }
+  RefPtr<MobileViewportManager> GetMobileViewportManager() const override;
 
   void UpdateViewportOverridden(bool aAfterInitialization) override;
 
@@ -349,6 +362,19 @@ class PresShell final : public nsIPresShell,
   ~PresShell();
 
   friend class ::AutoPointerEventTargetUpdater;
+
+  // ProcessReflowCommands returns whether we processed all our dirty roots
+  // without interruptions.
+  MOZ_CAN_RUN_SCRIPT bool ProcessReflowCommands(bool aInterruptible);
+
+  /**
+   * Callback handler for whether reflow happened.
+   *
+   * @param aInterruptible Whether or not reflow interruption is allowed.
+   */
+  MOZ_CAN_RUN_SCRIPT void DidDoReflow(bool aInterruptible);
+
+  MOZ_CAN_RUN_SCRIPT void HandlePostedReflowCallbacks(bool aInterruptible);
 
   /**
    * Initialize cached font inflation preference values and do an initial
@@ -500,7 +526,7 @@ class PresShell final : public nsIPresShell,
   void QueryIsActive();
   nsresult UpdateImageLockingState();
 
-  already_AddRefed<nsIPresShell> GetParentPresShellForEventHandling();
+  already_AddRefed<PresShell> GetParentPresShellForEventHandling();
 
   /**
    * EventHandler is implementation of nsIPresShell::HandleEvent().
@@ -578,8 +604,7 @@ class PresShell final : public nsIPresShell,
 
    private:
     static bool InZombieDocument(nsIContent* aContent);
-    static nsIFrame* GetNearestFrameContainingPresShell(
-        nsIPresShell* aPresShell);
+    static nsIFrame* GetNearestFrameContainingPresShell(PresShell* aPresShell);
     static already_AddRefed<nsIURI> GetDocumentURIToCompareWithBlacklist(
         PresShell& aPresShell);
 
@@ -1272,7 +1297,7 @@ class PresShell final : public nsIPresShell,
     already_AddRefed<nsPIDOMWindowOuter> GetFocusedDOMWindowInOurWindow() {
       return mPresShell->GetFocusedDOMWindowInOurWindow();
     }
-    already_AddRefed<nsIPresShell> GetParentPresShellForEventHandling() {
+    already_AddRefed<PresShell> GetParentPresShellForEventHandling() {
       return mPresShell->GetParentPresShellForEventHandling();
     }
     void PushDelayedEventIntoQueue(UniquePtr<DelayedEvent>&& aDelayedEvent) {
@@ -1292,11 +1317,6 @@ class PresShell final : public nsIPresShell,
 
   // The callback for the mPaintSuppressionTimer timer.
   static void sPaintSuppressionCallback(nsITimer* aTimer, void* aPresShell);
-
-  Document* GetPrimaryContentDocument() override;
-
-  void PausePainting() override;
-  void ResumePainting() override;
 
   //////////////////////////////////////////////////////////////////////////////
   // Approximate frame visibility tracking implementation.
@@ -1350,6 +1370,7 @@ class PresShell final : public nsIPresShell,
   TouchManager mTouchManager;
 
   RefPtr<ZoomConstraintsClient> mZoomConstraintsClient;
+  RefPtr<GeckoMVMContext> mMVMContext;
   RefPtr<MobileViewportManager> mMobileViewportManager;
 
   // This timer controls painting suppression.  Until it fires

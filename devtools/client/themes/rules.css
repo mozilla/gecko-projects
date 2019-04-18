@@ -567,6 +567,7 @@
   border-left: 3px solid transparent;
   clear: both;
   padding-left: 28px;
+  overflow-wrap: break-word;
 }
 
 .ruleview-propertycontainer  > * {
@@ -651,6 +652,10 @@
 
 #class-panel-toggle::before {
   content: ".cls";
+}
+
+#print-simulation-toggle::before {
+  background-image: url("chrome://devtools/skin/images/rules-view-print-simulation.svg");
 }
 
 .flash-out {

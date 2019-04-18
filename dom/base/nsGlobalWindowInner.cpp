@@ -73,6 +73,7 @@
 // Helper Classes
 #include "nsJSUtils.h"
 #include "jsapi.h"
+#include "js/Warnings.h"  // JS::WarnASCII
 #include "js/Wrapper.h"
 #include "nsCharSeparatedTokenizer.h"
 #include "nsReadableUtils.h"
@@ -585,7 +586,7 @@ void IdleRequestExecutor::MaybeDispatch(TimeStamp aDelayUntil) {
   mDispatched = true;
 
   nsPIDOMWindowOuter* outer = mWindow->GetOuterWindow();
-  if (outer && outer->AsOuter()->IsBackground()) {
+  if (outer && outer->IsBackground()) {
     // Set a timeout handler with a timeout of 0 ms to throttle idle
     // callback requests coming from a backround window using
     // background timeout throttling.
@@ -836,7 +837,7 @@ class PromiseDocumentFlushedResolver final {
 //*****************************************************************************
 
 nsGlobalWindowInner::nsGlobalWindowInner(nsGlobalWindowOuter* aOuterWindow)
-    : nsPIDOMWindowInner(aOuterWindow->AsOuter()),
+    : nsPIDOMWindowInner(aOuterWindow),
       mozilla::webgpu::InstanceProvider(this),
       mWasOffline(false),
       mHasHadSlowScript(false),
@@ -1127,6 +1128,7 @@ void nsGlobalWindowInner::FreeInnerObjects() {
   if (mDoc) {
     // Remember the document's principal and URI.
     mDocumentPrincipal = mDoc->NodePrincipal();
+    mDocumentStoragePrincipal = mDoc->EffectiveStoragePrincipal();
     mDocumentURI = mDoc->GetDocumentURI();
     mDocBaseURI = mDoc->GetDocBaseURI();
 
@@ -1356,6 +1358,7 @@ NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN_INTERNAL(nsGlobalWindowInner)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mApplicationCache)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mIndexedDB)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mDocumentPrincipal)
+  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mDocumentStoragePrincipal)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mTabChild)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mDoc)
 
@@ -1409,6 +1412,13 @@ NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN_INTERNAL(nsGlobalWindowInner)
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
 
 NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(nsGlobalWindowInner)
+  JSObject* wrapper = tmp->GetWrapperPreserveColor();
+  if (wrapper) {
+    // Mark our realm as dead, so the JS engine won't hand out our
+    // global after this point.
+    JS::RealmBehaviorsRef(js::GetNonCCWObjectRealm(wrapper)).setNonLive();
+  }
+
   tmp->CleanupCachedXBLHandlers();
 
   NS_IMPL_CYCLE_COLLECTION_UNLINK(mNavigator)
@@ -1452,6 +1462,7 @@ NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(nsGlobalWindowInner)
     NS_IMPL_CYCLE_COLLECTION_UNLINK(mIndexedDB)
   }
   NS_IMPL_CYCLE_COLLECTION_UNLINK(mDocumentPrincipal)
+  NS_IMPL_CYCLE_COLLECTION_UNLINK(mDocumentStoragePrincipal)
   NS_IMPL_CYCLE_COLLECTION_UNLINK(mTabChild)
   NS_IMPL_CYCLE_COLLECTION_UNLINK(mDoc)
 
@@ -1804,7 +1815,7 @@ nsresult nsGlobalWindowInner::ExecutionReady() {
   nsresult rv = EnsureClientSource();
   NS_ENSURE_SUCCESS(rv, rv);
 
-  rv = mClientSource->WindowExecutionReady(AsInner());
+  rv = mClientSource->WindowExecutionReady(this);
   NS_ENSURE_SUCCESS(rv, rv);
 
   return NS_OK;
@@ -1827,7 +1838,7 @@ void nsGlobalWindowInner::UpdateParentTarget() {
   if (!eventTarget) {
     nsGlobalWindowOuter* topWin = GetScriptableTopInternal();
     if (topWin) {
-      frameElement = topWin->AsOuter()->GetFrameElementInternal();
+      frameElement = topWin->GetFrameElementInternal();
       eventTarget = nsContentUtils::TryGetTabChildGlobal(frameElement);
     }
   }
@@ -2035,6 +2046,29 @@ nsIPrincipal* nsGlobalWindowInner::GetPrincipal() {
 
   if (objPrincipal) {
     return objPrincipal->GetPrincipal();
+  }
+
+  return nullptr;
+}
+
+nsIPrincipal* nsGlobalWindowInner::GetEffectiveStoragePrincipal() {
+  if (mDoc) {
+    // If we have a document, get the principal from the document
+    return mDoc->EffectiveStoragePrincipal();
+  }
+
+  if (mDocumentStoragePrincipal) {
+    return mDocumentStoragePrincipal;
+  }
+
+  // If we don't have a storage principal and we don't have a document we ask
+  // the parent window for the storage principal.
+
+  nsCOMPtr<nsIScriptObjectPrincipal> objPrincipal =
+      do_QueryInterface(GetParentInternal());
+
+  if (objPrincipal) {
+    return objPrincipal->GetEffectiveStoragePrincipal();
   }
 
   return nullptr;
@@ -2787,10 +2821,9 @@ bool nsGlobalWindowInner::MayResolve(jsid aId) {
   return WebIDLGlobalNameHash::MayResolve(aId);
 }
 
-void nsGlobalWindowInner::GetOwnPropertyNames(JSContext* aCx,
-                                              JS::AutoIdVector& aNames,
-                                              bool aEnumerableOnly,
-                                              ErrorResult& aRv) {
+void nsGlobalWindowInner::GetOwnPropertyNames(
+    JSContext* aCx, JS::MutableHandleVector<jsid> aNames, bool aEnumerableOnly,
+    ErrorResult& aRv) {
   if (aEnumerableOnly) {
     // The names we would return from here get defined on the window via one of
     // two codepaths.  The ones coming from the WebIDLGlobalNameHash will end up
@@ -4197,8 +4230,10 @@ void nsGlobalWindowInner::UpdateCanvasFocus(bool aFocusChanged,
   docShell->GetEditable(&editable);
   if (editable) return;
 
-  nsCOMPtr<nsIPresShell> presShell = docShell->GetPresShell();
-  if (!presShell || !mDoc) return;
+  PresShell* presShell = docShell->GetPresShell();
+  if (!presShell || !mDoc) {
+    return;
+  }
 
   Element* rootElement = mDoc->GetRootElement();
   if (rootElement) {
@@ -4537,9 +4572,9 @@ void nsGlobalWindowInner::FireOfflineStatusEventIfChanged() {
 }
 
 nsGlobalWindowInner::SlowScriptResponse
-nsGlobalWindowInner::ShowSlowScriptDialog(const nsString& aAddonId) {
+nsGlobalWindowInner::ShowSlowScriptDialog(JSContext* aCx,
+                                          const nsString& aAddonId) {
   nsresult rv;
-  AutoJSContext cx;
 
   if (Preferences::GetBool("dom.always_stop_slow_scripts")) {
     return KillSlowScript;
@@ -4549,7 +4584,7 @@ nsGlobalWindowInner::ShowSlowScriptDialog(const nsString& aAddonId) {
   // (since that spins the event loop). In that (rare) case, we just kill the
   // script and report a warning.
   if (!nsContentUtils::IsSafeToRunScript()) {
-    JS_ReportWarningASCII(cx, "A long running script was terminated");
+    JS::WarnASCII(aCx, "A long running script was terminated");
     return KillSlowScript;
   }
 
@@ -4568,7 +4603,7 @@ nsGlobalWindowInner::ShowSlowScriptDialog(const nsString& aAddonId) {
   // minified scripts which is more common in Web content that is loaded in the
   // content process.
   unsigned* linenop = XRE_IsParentProcess() ? &lineno : nullptr;
-  bool hasFrame = JS::DescribeScriptedCaller(cx, &filename, linenop);
+  bool hasFrame = JS::DescribeScriptedCaller(aCx, &filename, linenop);
 
   // Record the slow script event if we haven't done so already for this inner
   // window (which represents a particular page to the user).
@@ -4737,7 +4772,7 @@ nsGlobalWindowInner::ShowSlowScriptDialog(const nsString& aAddonId) {
   int32_t buttonPressed = 0;  // In case the user exits dialog by clicking X.
   {
     // Null out the operation callback while we're re-entering JS here.
-    AutoDisableJSInterruptCallback disabler(cx);
+    AutoDisableJSInterruptCallback disabler(aCx);
 
     // Open the dialog.
     rv = prompt->ConfirmEx(
@@ -4758,7 +4793,7 @@ nsGlobalWindowInner::ShowSlowScriptDialog(const nsString& aAddonId) {
     return NS_SUCCEEDED(rv) ? ContinueSlowScript : KillSlowScript;
   }
 
-  JS_ClearPendingException(cx);
+  JS_ClearPendingException(aCx);
 
   if (checkboxValue && isAddonScript) return KillScriptGlobal;
   return KillSlowScript;
@@ -6864,6 +6899,9 @@ void nsGlobalWindowInner::StorageAccessGranted() {
       object->EnsureObserver();
     }
   }
+
+  // Reset the IndexedDB factory.
+  mIndexedDB = nullptr;
 }
 
 mozilla::dom::TabGroup* nsPIDOMWindowInner::TabGroup() {

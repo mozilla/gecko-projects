@@ -28,12 +28,12 @@
 #include "mozilla/layout/ScrollAnchorContainer.h"
 
 class nsPresContext;
-class nsIPresShell;
 class nsIContent;
 class nsAtom;
 class nsIScrollPositionListener;
 
 namespace mozilla {
+class PresShell;
 struct ScrollReflowInput;
 namespace layers {
 class Layer;
@@ -233,7 +233,7 @@ class ScrollFrameHelper : public nsIReflowCallback {
     return pt;
   }
   nsPoint GetApzScrollPosition() const { return mApzScrollPos; }
-  nsRect GetScrollRange() const;
+  nsRect GetLayoutScrollRange() const;
   // Get the scroll range assuming the viewport has size (aWidth, aHeight).
   nsRect GetScrollRange(nscoord aWidth, nscoord aHeight) const;
   nsSize GetVisualViewportSize() const;
@@ -265,7 +265,7 @@ class ScrollFrameHelper : public nsIReflowCallback {
                   ScrollMode aMode = ScrollMode::eSmoothMsd);
 
  protected:
-  nsRect GetScrollRangeForClamping() const;
+  nsRect GetVisualScrollRange() const;
 
  public:
   static void AsyncScrollCallback(ScrollFrameHelper* aInstance,
@@ -287,6 +287,8 @@ class ScrollFrameHelper : public nsIReflowCallback {
    */
   void ScrollToCSSPixels(const CSSIntPoint& aScrollPosition,
                          ScrollMode aMode = ScrollMode::eInstant,
+                         nsIScrollbarMediator::ScrollSnapMode aSnap =
+                             nsIScrollbarMediator::DEFAULT,
                          nsAtom* aOrigin = nullptr);
   /**
    * @note This method might destroy the frame, pres shell and other objects.
@@ -313,7 +315,9 @@ class ScrollFrameHelper : public nsIReflowCallback {
                     nsIScrollbarMediator::DISABLE_SNAP);
   void ScrollByCSSPixels(const CSSIntPoint& aDelta,
                          ScrollMode aMode = ScrollMode::eInstant,
-                         nsAtom* aOrigin = nullptr);
+                         nsAtom* aOrigin = nullptr,
+                         nsIScrollbarMediator::ScrollSnapMode aSnap =
+                             nsIScrollbarMediator::DEFAULT);
   /**
    * @note This method might destroy the frame, pres shell and other objects.
    */
@@ -333,6 +337,8 @@ class ScrollFrameHelper : public nsIReflowCallback {
    */
   bool GetSnapPointForDestination(nsIScrollableFrame::ScrollUnit aUnit,
                                   nsPoint aStartPos, nsPoint& aDestination);
+
+  nsMargin GetScrollPadding() const;
 
   nsSize GetLineScrollAmount() const;
   nsSize GetPageScrollAmount() const;
@@ -405,6 +411,9 @@ class ScrollFrameHelper : public nsIReflowCallback {
   nsIFrame* GetFrameForDir() const;  // helper for Is{Physical,Bidi}LTR to find
                                      // the frame whose directionality we use
 
+  ScrollSnapInfo ComputeScrollSnapInfo(
+      const Maybe<nsPoint>& aDestination) const;
+
  public:
   bool IsScrollbarOnRight() const;
   bool IsScrollingActive(nsDisplayListBuilder* aBuilder) const;
@@ -467,7 +476,11 @@ class ScrollFrameHelper : public nsIReflowCallback {
 
   bool UsesContainerScrolling() const;
 
-  ScrollSnapInfo GetScrollSnapInfo() const;
+  // In the case where |aDestination| is given, elements which are entirely out
+  // of view when the scroll position is moved to |aDestination| are not going
+  // to be used for snap positions.
+  ScrollSnapInfo GetScrollSnapInfo(
+      const mozilla::Maybe<nsPoint>& aDestination) const;
 
   bool DecideScrollableLayer(nsDisplayListBuilder* aBuilder,
                              nsRect* aVisibleRect, nsRect* aDirtyRect,
@@ -795,9 +808,8 @@ class nsHTMLScrollFrame : public nsContainerFrame,
   typedef mozilla::CSSIntPoint CSSIntPoint;
   typedef mozilla::ScrollReflowInput ScrollReflowInput;
   typedef mozilla::layout::ScrollAnchorContainer ScrollAnchorContainer;
-  friend nsHTMLScrollFrame* NS_NewHTMLScrollFrame(nsIPresShell* aPresShell,
-                                                  ComputedStyle* aStyle,
-                                                  bool aIsRoot);
+  friend nsHTMLScrollFrame* NS_NewHTMLScrollFrame(
+      mozilla::PresShell* aPresShell, ComputedStyle* aStyle, bool aIsRoot);
 
   NS_DECL_QUERYFRAME
   NS_DECL_FRAMEARENA_HELPERS(nsHTMLScrollFrame)
@@ -934,7 +946,7 @@ class nsHTMLScrollFrame : public nsContainerFrame,
     return mHelper.GetApzScrollPosition();
   }
   virtual nsRect GetScrollRange() const override {
-    return mHelper.GetScrollRange();
+    return mHelper.GetLayoutScrollRange();
   }
   virtual nsSize GetVisualViewportSize() const override {
     return mHelper.GetVisualViewportSize();
@@ -947,6 +959,9 @@ class nsHTMLScrollFrame : public nsContainerFrame,
   }
   virtual nsSize GetPageScrollAmount() const override {
     return mHelper.GetPageScrollAmount();
+  }
+  virtual nsMargin GetScrollPadding() const override {
+    return mHelper.GetScrollPadding();
   }
   /**
    * @note This method might destroy the frame, pres shell and other objects.
@@ -962,8 +977,10 @@ class nsHTMLScrollFrame : public nsContainerFrame,
    */
   virtual void ScrollToCSSPixels(const CSSIntPoint& aScrollPosition,
                                  ScrollMode aMode = ScrollMode::eInstant,
+                                 nsIScrollbarMediator::ScrollSnapMode aSnap =
+                                     nsIScrollbarMediator::DEFAULT,
                                  nsAtom* aOrigin = nullptr) override {
-    mHelper.ScrollToCSSPixels(aScrollPosition, aMode, aOrigin);
+    mHelper.ScrollToCSSPixels(aScrollPosition, aMode, aSnap, aOrigin);
   }
   virtual void ScrollToCSSPixelsApproximate(
       const mozilla::CSSPoint& aScrollPosition,
@@ -990,8 +1007,10 @@ class nsHTMLScrollFrame : public nsContainerFrame,
   }
   virtual void ScrollByCSSPixels(const CSSIntPoint& aDelta,
                                  ScrollMode aMode = ScrollMode::eInstant,
-                                 nsAtom* aOrigin = nullptr) override {
-    mHelper.ScrollByCSSPixels(aDelta, aMode, aOrigin);
+                                 nsAtom* aOrigin = nullptr,
+                                 nsIScrollbarMediator::ScrollSnapMode aSnap =
+                                     nsIScrollbarMediator::DEFAULT) override {
+    mHelper.ScrollByCSSPixels(aDelta, aMode, aOrigin, aSnap);
   }
   virtual void ScrollSnap() override { mHelper.ScrollSnap(); }
   /**
@@ -1172,7 +1191,7 @@ class nsHTMLScrollFrame : public nsContainerFrame,
   }
 
   ScrollSnapInfo GetScrollSnapInfo() const override {
-    return mHelper.GetScrollSnapInfo();
+    return mHelper.GetScrollSnapInfo(Nothing());
   }
 
   virtual bool DragScroll(mozilla::WidgetEvent* aEvent) override {
@@ -1274,7 +1293,7 @@ class nsXULScrollFrame final : public nsBoxFrame,
   NS_DECL_QUERYFRAME
   NS_DECL_FRAMEARENA_HELPERS(nsXULScrollFrame)
 
-  friend nsXULScrollFrame* NS_NewXULScrollFrame(nsIPresShell* aPresShell,
+  friend nsXULScrollFrame* NS_NewXULScrollFrame(mozilla::PresShell* aPresShell,
                                                 ComputedStyle* aStyle,
                                                 bool aIsRoot,
                                                 bool aClipAllDescendants);
@@ -1413,7 +1432,7 @@ class nsXULScrollFrame final : public nsBoxFrame,
     return mHelper.GetApzScrollPosition();
   }
   virtual nsRect GetScrollRange() const override {
-    return mHelper.GetScrollRange();
+    return mHelper.GetLayoutScrollRange();
   }
   virtual nsSize GetVisualViewportSize() const override {
     return mHelper.GetVisualViewportSize();
@@ -1426,6 +1445,9 @@ class nsXULScrollFrame final : public nsBoxFrame,
   }
   virtual nsSize GetPageScrollAmount() const override {
     return mHelper.GetPageScrollAmount();
+  }
+  virtual nsMargin GetScrollPadding() const override {
+    return mHelper.GetScrollPadding();
   }
   /**
    * @note This method might destroy the frame, pres shell and other objects.
@@ -1440,8 +1462,10 @@ class nsXULScrollFrame final : public nsBoxFrame,
    */
   virtual void ScrollToCSSPixels(const CSSIntPoint& aScrollPosition,
                                  ScrollMode aMode = ScrollMode::eInstant,
+                                 nsIScrollbarMediator::ScrollSnapMode aSnap =
+                                     nsIScrollbarMediator::DISABLE_SNAP,
                                  nsAtom* aOrigin = nullptr) override {
-    mHelper.ScrollToCSSPixels(aScrollPosition, aMode, aOrigin);
+    mHelper.ScrollToCSSPixels(aScrollPosition, aMode, aSnap, aOrigin);
   }
   virtual void ScrollToCSSPixelsApproximate(
       const mozilla::CSSPoint& aScrollPosition,
@@ -1465,8 +1489,10 @@ class nsXULScrollFrame final : public nsBoxFrame,
   }
   virtual void ScrollByCSSPixels(const CSSIntPoint& aDelta,
                                  ScrollMode aMode = ScrollMode::eInstant,
-                                 nsAtom* aOrigin = nullptr) override {
-    mHelper.ScrollByCSSPixels(aDelta, aMode, aOrigin);
+                                 nsAtom* aOrigin = nullptr,
+                                 nsIScrollbarMediator::ScrollSnapMode aSnap =
+                                     nsIScrollbarMediator::DEFAULT) override {
+    mHelper.ScrollByCSSPixels(aDelta, aMode, aOrigin, aSnap);
   }
   virtual void ScrollSnap() override { mHelper.ScrollSnap(); }
   /**
@@ -1654,7 +1680,7 @@ class nsXULScrollFrame final : public nsBoxFrame,
   }
 
   ScrollSnapInfo GetScrollSnapInfo() const override {
-    return mHelper.GetScrollSnapInfo();
+    return mHelper.GetScrollSnapInfo(Nothing());
   }
 
   virtual bool DragScroll(mozilla::WidgetEvent* aEvent) override {

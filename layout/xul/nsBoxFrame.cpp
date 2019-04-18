@@ -49,6 +49,7 @@
 #include "mozilla/dom/Touch.h"
 #include "mozilla/Move.h"
 #include "mozilla/ComputedStyle.h"
+#include "mozilla/PresShell.h"
 #include "nsPlaceholderFrame.h"
 #include "nsPresContext.h"
 #include "nsCOMPtr.h"
@@ -58,7 +59,6 @@
 #include "nsHTMLParts.h"
 #include "nsViewManager.h"
 #include "nsView.h"
-#include "nsIPresShell.h"
 #include "nsCSSRendering.h"
 #include "nsIServiceManager.h"
 #include "nsBoxLayout.h"
@@ -87,14 +87,14 @@ using namespace mozilla;
 using namespace mozilla::dom;
 using namespace mozilla::gfx;
 
-nsIFrame* NS_NewBoxFrame(nsIPresShell* aPresShell, ComputedStyle* aStyle,
+nsIFrame* NS_NewBoxFrame(PresShell* aPresShell, ComputedStyle* aStyle,
                          bool aIsRoot, nsBoxLayout* aLayoutManager) {
   return new (aPresShell)
       nsBoxFrame(aStyle, aPresShell->GetPresContext(), nsBoxFrame::kClassID,
                  aIsRoot, aLayoutManager);
 }
 
-nsIFrame* NS_NewBoxFrame(nsIPresShell* aPresShell, ComputedStyle* aStyle) {
+nsIFrame* NS_NewBoxFrame(PresShell* aPresShell, ComputedStyle* aStyle) {
   return new (aPresShell) nsBoxFrame(aStyle, aPresShell->GetPresContext());
 }
 
@@ -522,7 +522,7 @@ nscoord nsBoxFrame::GetMinISize(gfxContext* aRenderingContext) {
   nsSize minSize = GetXULMinSize(state);
 
   // GetXULMinSize returns border-box width, and we want to return content
-  // width.  Since Reflow uses the reflow state's border and padding, we
+  // width.  Since Reflow uses the reflow input's border and padding, we
   // actually just want to subtract what GetXULMinSize added, which is the
   // result of GetXULBorderAndPadding.
   nsMargin bp;
@@ -543,7 +543,7 @@ nscoord nsBoxFrame::GetPrefISize(gfxContext* aRenderingContext) {
   nsSize prefSize = GetXULPrefSize(state);
 
   // GetXULPrefSize returns border-box width, and we want to return content
-  // width.  Since Reflow uses the reflow state's border and padding, we
+  // width.  Since Reflow uses the reflow input's border and padding, we
   // actually just want to subtract what GetXULPrefSize added, which is the
   // result of GetXULBorderAndPadding.
   nsMargin bp;

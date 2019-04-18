@@ -48,6 +48,20 @@
   table {
     border-collapse: collapse;
     width: 100%;
+
+    &.errorReporting {
+      tr {
+        border: 1px solid var(--newtab-textbox-background-color);
+      }
+
+      td {
+        padding: 4px;
+
+        &[rowspan] {
+          border: 1px solid var(--newtab-textbox-background-color);
+        }
+      }
+    }
   }
 
   .sourceLabel {
@@ -92,7 +106,7 @@
         background: $yellow-50;
         padding: 2px 5px;
 
-        [lwt-newtab-brighttext]:not(.force-light-theme) & {
+        [lwt-newtab-brighttext] & {
           color: $black;
         }
       }

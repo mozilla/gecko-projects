@@ -745,7 +745,7 @@ var ThirdPartyCookies = {
 
 var ContentBlocking = {
   // If the user ignores the doorhanger, we stop showing it after some time.
-  MAX_INTROS: 20,
+  MAX_INTROS: Services.prefs.getIntPref("browser.contentblocking.maxIntroCount"),
   PREF_ANIMATIONS_ENABLED: "toolkit.cosmeticAnimations.enabled",
   PREF_REPORT_BREAKAGE_ENABLED: "browser.contentblocking.reportBreakage.enabled",
   PREF_REPORT_BREAKAGE_URL: "browser.contentblocking.reportBreakage.url",
@@ -1016,6 +1016,19 @@ var ContentBlocking = {
     }).catch(Cu.reportError);
   },
 
+  toggleReportBreakageButton() {
+    // For release (due to the large volume) we only want to receive reports
+    // for breakage that is directly related to third party cookie blocking.
+    if (this.reportBreakageEnabled ||
+        (ThirdPartyCookies.reportBreakageEnabled &&
+         ThirdPartyCookies.activated &&
+         !TrackingProtection.activated)) {
+      this.reportBreakageButton.removeAttribute("hidden");
+    } else {
+      this.reportBreakageButton.setAttribute("hidden", "true");
+    }
+  },
+
   showReportBreakageSubview() {
     // Save this URI to make sure that the user really only submits the location
     // they see in the report breakage dialog.
@@ -1068,9 +1081,6 @@ var ContentBlocking = {
 
     // Don't deal with about:, file: etc.
     if (!baseURI) {
-      this.iconBox.removeAttribute("animate");
-      this.iconBox.removeAttribute("active");
-      this.iconBox.removeAttribute("hasException");
       return;
     }
     // Add to telemetry per page load as a baseline measurement.
@@ -1085,6 +1095,9 @@ var ContentBlocking = {
 
     // Don't deal with about:, file: etc.
     if (!baseURI) {
+      this.iconBox.removeAttribute("animate");
+      this.iconBox.removeAttribute("active");
+      this.iconBox.removeAttribute("hasException");
       return;
     }
 
@@ -1141,17 +1154,6 @@ var ContentBlocking = {
 
     this.iconBox.toggleAttribute("active", anyBlocking);
     this.iconBox.toggleAttribute("hasException", hasException);
-
-    // For release (due to the large volume) we only want to receive reports
-    // for breakage that is directly related to third party cookie blocking.
-    if (this.reportBreakageEnabled ||
-        (ThirdPartyCookies.reportBreakageEnabled &&
-         ThirdPartyCookies.activated &&
-         !TrackingProtection.activated)) {
-      this.reportBreakageButton.removeAttribute("hidden");
-    } else {
-      this.reportBreakageButton.setAttribute("hidden", "true");
-    }
 
     if (hasException) {
       this.iconBox.setAttribute("tooltiptext", this.strings.disabledTooltipText);

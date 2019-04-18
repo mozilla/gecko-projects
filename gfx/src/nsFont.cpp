@@ -26,8 +26,6 @@ nsFont::nsFont(StyleGenericFontFamily aGenericType, nscoord aSize)
 
 nsFont::nsFont(const nsFont& aOther) = default;
 
-nsFont::nsFont() {}
-
 nsFont::~nsFont() {}
 
 bool nsFont::Equals(const nsFont& aOther) const {
@@ -256,7 +254,7 @@ void nsFont::AddFontFeaturesToStyle(gfxFontStyle* aStyle,
     aStyle->useGrayscaleAntialiasing = true;
   }
 
-  aStyle->fontSmoothingBackgroundColor = fontSmoothingBackgroundColor;
+  aStyle->fontSmoothingBackgroundColor = fontSmoothingBackgroundColor.ToColor();
 }
 
 void nsFont::AddFontVariationsToStyle(gfxFontStyle* aStyle) const {

@@ -54,7 +54,7 @@ class NewRenderer : public RendererEvent {
 
   ~NewRenderer() { MOZ_COUNT_DTOR(NewRenderer); }
 
-  virtual void Run(RenderThread& aRenderThread, WindowId aWindowId) override {
+  void Run(RenderThread& aRenderThread, WindowId aWindowId) override {
     layers::AutoCompleteTask complete(mTask);
 
     UniquePtr<RenderCompositor> compositor =
@@ -130,9 +130,9 @@ class RemoveRenderer : public RendererEvent {
     MOZ_COUNT_CTOR(RemoveRenderer);
   }
 
-  ~RemoveRenderer() { MOZ_COUNT_DTOR(RemoveRenderer); }
+  virtual ~RemoveRenderer() { MOZ_COUNT_DTOR(RemoveRenderer); }
 
-  virtual void Run(RenderThread& aRenderThread, WindowId aWindowId) override {
+  void Run(RenderThread& aRenderThread, WindowId aWindowId) override {
     aRenderThread.RemoveRenderer(aWindowId);
     layers::AutoCompleteTask complete(mTask);
   }
@@ -366,6 +366,39 @@ void WebRenderAPI::SendTransaction(TransactionBuilder& aTxn) {
   wr_api_send_transaction(mDocHandle, aTxn.Raw(), aTxn.UseSceneBuilderThread());
 }
 
+/* static */
+void WebRenderAPI::SendTransactions(
+    const RenderRootArray<RefPtr<WebRenderAPI>>& aApis,
+    RenderRootArray<TransactionBuilder*>& aTxns) {
+  if (!aApis[RenderRoot::Default]) {
+    return;
+  }
+
+  aApis[RenderRoot::Default]->UpdateDebugFlags(gfx::gfxVars::WebRenderDebugFlags());
+  AutoTArray<DocumentHandle*, kRenderRootCount> documentHandles;
+  AutoTArray<Transaction*, kRenderRootCount> txns;
+  Maybe<bool> useSceneBuilderThread;
+  for (auto& api : aApis) {
+    if (!api) {
+      continue;
+    }
+    auto& txn = aTxns[api->GetRenderRoot()];
+    if (txn) {
+      documentHandles.AppendElement(api->mDocHandle);
+      txns.AppendElement(txn->Raw());
+      if (useSceneBuilderThread.isSome()) {
+        MOZ_ASSERT(txn->UseSceneBuilderThread() == *useSceneBuilderThread);
+      } else {
+        useSceneBuilderThread.emplace(txn->UseSceneBuilderThread());
+      }
+    }
+  }
+  if (!txns.IsEmpty()) {
+    wr_api_send_transactions(documentHandles.Elements(), txns.Elements(),
+                             txns.Length(), *useSceneBuilderThread);
+  }
+}
+
 bool WebRenderAPI::HitTest(const wr::WorldPoint& aPoint,
                            wr::WrPipelineId& aOutPipelineId,
                            layers::ScrollableLayerGuid::ViewID& aOutScrollId,
@@ -394,9 +427,9 @@ void WebRenderAPI::Readback(const TimeStamp& aStartTime, gfx::IntSize size,
       MOZ_COUNT_CTOR(Readback);
     }
 
-    ~Readback() { MOZ_COUNT_DTOR(Readback); }
+    virtual ~Readback() { MOZ_COUNT_DTOR(Readback); }
 
-    virtual void Run(RenderThread& aRenderThread, WindowId aWindowId) override {
+    void Run(RenderThread& aRenderThread, WindowId aWindowId) override {
       aRenderThread.UpdateAndRender(aWindowId, VsyncId(), mStartTime,
                                     /* aRender */ true, Some(mSize),
                                     Some(mBuffer), false);
@@ -434,9 +467,9 @@ void WebRenderAPI::Pause() {
       MOZ_COUNT_CTOR(PauseEvent);
     }
 
-    ~PauseEvent() { MOZ_COUNT_DTOR(PauseEvent); }
+    virtual ~PauseEvent() { MOZ_COUNT_DTOR(PauseEvent); }
 
-    virtual void Run(RenderThread& aRenderThread, WindowId aWindowId) override {
+    void Run(RenderThread& aRenderThread, WindowId aWindowId) override {
       aRenderThread.Pause(aWindowId);
       layers::AutoCompleteTask complete(mTask);
     }
@@ -462,9 +495,9 @@ bool WebRenderAPI::Resume() {
       MOZ_COUNT_CTOR(ResumeEvent);
     }
 
-    ~ResumeEvent() { MOZ_COUNT_DTOR(ResumeEvent); }
+    virtual ~ResumeEvent() { MOZ_COUNT_DTOR(ResumeEvent); }
 
-    virtual void Run(RenderThread& aRenderThread, WindowId aWindowId) override {
+    void Run(RenderThread& aRenderThread, WindowId aWindowId) override {
       *mResult = aRenderThread.Resume(aWindowId);
       layers::AutoCompleteTask complete(mTask);
     }
@@ -506,9 +539,9 @@ void WebRenderAPI::WaitFlushed() {
       MOZ_COUNT_CTOR(WaitFlushedEvent);
     }
 
-    ~WaitFlushedEvent() { MOZ_COUNT_DTOR(WaitFlushedEvent); }
+    virtual ~WaitFlushedEvent() { MOZ_COUNT_DTOR(WaitFlushedEvent); }
 
-    virtual void Run(RenderThread& aRenderThread, WindowId aWindowId) override {
+    void Run(RenderThread& aRenderThread, WindowId aWindowId) override {
       layers::AutoCompleteTask complete(mTask);
     }
 
@@ -643,9 +676,9 @@ class FrameStartTime : public RendererEvent {
     MOZ_COUNT_CTOR(FrameStartTime);
   }
 
-  ~FrameStartTime() { MOZ_COUNT_DTOR(FrameStartTime); }
+  virtual ~FrameStartTime() { MOZ_COUNT_DTOR(FrameStartTime); }
 
-  virtual void Run(RenderThread& aRenderThread, WindowId aWindowId) override {
+  void Run(RenderThread& aRenderThread, WindowId aWindowId) override {
     auto renderer = aRenderThread.GetRenderer(aWindowId);
     if (renderer) {
       renderer->SetFrameStartTime(mTime);
@@ -1094,11 +1127,48 @@ void DisplayListBuilder::PushShadow(const wr::LayoutRect& aRect,
                                     const wr::LayoutRect& aClip,
                                     bool aIsBackfaceVisible,
                                     const wr::Shadow& aShadow) {
-  wr_dp_push_shadow(mWrState, aRect, MergeClipLeaf(aClip), aIsBackfaceVisible,
+  // Local clip_rects are translated inside of shadows, as they are assumed to
+  // be part of the element drawing itself, and not a parent frame clipping it.
+  // As such, it is not sound to apply the MergeClipLeaf optimization inside of
+  // shadows. So we disable the optimization when we encounter a shadow.
+  // Shadows don't span frames, so we don't have to worry about MergeClipLeaf
+  // being re-enabled mid-shadow. The optimization is restored in PopAllShadows.
+  SuspendClipLeafMerging();
+  wr_dp_push_shadow(mWrState, aRect, aClip, aIsBackfaceVisible,
                     &mCurrentSpaceAndClipChain, aShadow);
 }
 
-void DisplayListBuilder::PopAllShadows() { wr_dp_pop_all_shadows(mWrState); }
+void DisplayListBuilder::PopAllShadows() {
+  wr_dp_pop_all_shadows(mWrState);
+  ResumeClipLeafMerging();
+}
+
+void DisplayListBuilder::SuspendClipLeafMerging() {
+  if (mClipChainLeaf) {
+    // No one should reinitialize mClipChainLeaf while we're suspended
+    MOZ_ASSERT(!mSuspendedClipChainLeaf);
+
+    mSuspendedClipChainLeaf = mClipChainLeaf;
+    mSuspendedSpaceAndClipChain = Some(mCurrentSpaceAndClipChain);
+
+    // Clip is implicitly parented by mCurrentSpaceAndClipChain
+    auto clipId = DefineClip(Nothing(), *mClipChainLeaf);
+    auto clipChainId = DefineClipChain({ clipId });
+
+    mCurrentSpaceAndClipChain.clip_chain = clipChainId.id;
+    mClipChainLeaf = Nothing();
+  }
+}
+
+void DisplayListBuilder::ResumeClipLeafMerging() {
+  if (mSuspendedClipChainLeaf) {
+    mCurrentSpaceAndClipChain = *mSuspendedSpaceAndClipChain;
+    mClipChainLeaf = mSuspendedClipChainLeaf;
+
+    mSuspendedClipChainLeaf = Nothing();
+    mSuspendedSpaceAndClipChain = Nothing();
+  }
+}
 
 void DisplayListBuilder::PushBoxShadow(
     const wr::LayoutRect& aRect, const wr::LayoutRect& aClip,

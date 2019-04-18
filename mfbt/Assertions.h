@@ -304,7 +304,7 @@ MOZ_NoReturn(int aLine) {
  * to crash-stats and are publicly visible. Firefox data stewards must do data
  * review on usages of this macro.
  */
-static MOZ_ALWAYS_INLINE MOZ_COLD MOZ_NORETURN void MOZ_Crash(
+static MOZ_ALWAYS_INLINE_EVEN_DEBUG MOZ_COLD MOZ_NORETURN void MOZ_Crash(
     const char* aFilename, int aLine, const char* aReason) {
 #ifdef DEBUG
   MOZ_ReportCrash(aReason, aFilename, aLine);
@@ -688,6 +688,31 @@ struct AssertionConditionType {
       if ((expr).isErr()) {         \
         /* Silence MOZ_MUST_USE. */ \
       }                             \
+    } while (false)
+#endif
+
+/*
+ * MOZ_DIAGNOSTIC_ALWAYS_TRUE is like MOZ_ALWAYS_TRUE, but using
+ * MOZ_DIAGNOSTIC_ASSERT as the underlying assert.
+ *
+ * See the block comment for MOZ_DIAGNOSTIC_ASSERT above for more details on how
+ * diagnostic assertions work and how to use them.
+ */
+#ifdef MOZ_DIAGNOSTIC_ASSERT_ENABLED
+#  define MOZ_DIAGNOSTIC_ALWAYS_TRUE(expr)   \
+    do {                                     \
+      if ((expr)) {                          \
+        /* Do nothing. */                    \
+      } else {                               \
+        MOZ_DIAGNOSTIC_ASSERT(false, #expr); \
+      }                                      \
+    } while (false)
+#else
+#  define MOZ_DIAGNOSTIC_ALWAYS_TRUE(expr) \
+    do {                                   \
+      if ((expr)) {                        \
+        /* Silence MOZ_MUST_USE. */        \
+      }                                    \
     } while (false)
 #endif
 

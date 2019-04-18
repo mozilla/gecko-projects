@@ -6,11 +6,7 @@
 // Test that the highlighter works when the debugger is paused.
 
 function debuggerIsPaused(dbg) {
-  const {
-    selectors: { getIsPaused, getCurrentThread },
-    getState,
-  } = dbg;
-  return !!getIsPaused(getState(), getCurrentThread(getState()));
+  return !!dbg.selectors.getIsPaused(dbg.selectors.getCurrentThread());
 }
 
 function waitForPaused(dbg) {
@@ -27,23 +23,6 @@ function waitForPaused(dbg) {
       }
     });
   });
-}
-
-function createDebuggerContext(toolbox) {
-  const panel = toolbox.getPanel("jsdebugger");
-  const win = panel.panelWin;
-  const { store, client, selectors, actions } = panel.getVarsForTests();
-
-  return {
-    actions: actions,
-    selectors: selectors,
-    getState: store.getState,
-    store: store,
-    client: client,
-    toolbox: toolbox,
-    win: win,
-    panel: panel,
-  };
 }
 
 const IFRAME_SRC = "<style>" +
@@ -76,7 +55,7 @@ add_task(async function() {
 
   const target = await TargetFactory.forTab(gBrowser.selectedTab);
   await gDevTools.showToolbox(target, "jsdebugger");
-  const dbg = createDebuggerContext(toolbox);
+  const dbg = await createDebuggerContext(toolbox);
 
   await waitForPaused(dbg);
 

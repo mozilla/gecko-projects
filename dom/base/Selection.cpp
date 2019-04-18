@@ -531,8 +531,7 @@ nsresult Selection::GetTableCellLocationFromRange(
 
   // GetCellLayout depends on current frame, we need flush frame to get
   // nsITableCellLayout
-  RefPtr<PresShell> presShell = mFrameSelection->GetPresShell();
-  if (presShell) {
+  if (RefPtr<PresShell> presShell = mFrameSelection->GetPresShell()) {
     presShell->FlushPendingNotifications(FlushType::Frames);
 
     // Since calling FlushPendingNotifications, so check whether disconnected.
@@ -1879,7 +1878,8 @@ nsresult Selection::DoAutoScroll(nsIFrame* aFrame, nsPoint aPoint) {
   while (true) {
     didScroll = presShell->ScrollFrameRectIntoView(
         aFrame, nsRect(aPoint, nsSize(0, 0)), nsIPresShell::ScrollAxis(),
-        nsIPresShell::ScrollAxis(), 0);
+        nsIPresShell::ScrollAxis(),
+        nsIPresShell::SCROLL_IGNORE_SCROLL_MARGIN_AND_PADDING);
     if (!weakFrame || !weakRootFrame) {
       return NS_OK;
     }
@@ -3089,7 +3089,7 @@ nsresult Selection::ScrollIntoView(SelectionRegion aRegion,
   // vertical scrollbar or the scroll range is at least one device pixel)
   aVertical.mOnlyIfPerceivedScrollableDirection = true;
 
-  uint32_t flags = 0;
+  uint32_t flags = nsIPresShell::SCROLL_IGNORE_SCROLL_MARGIN_AND_PADDING;
   if (aFlags & Selection::SCROLL_FIRST_ANCESTOR_ONLY) {
     flags |= nsIPresShell::SCROLL_FIRST_ANCESTOR_ONLY;
   }

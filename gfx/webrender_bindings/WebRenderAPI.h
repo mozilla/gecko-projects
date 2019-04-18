@@ -73,7 +73,7 @@ class NotificationHandler {
   virtual ~NotificationHandler() = default;
 };
 
-class TransactionBuilder {
+class TransactionBuilder final {
  public:
   explicit TransactionBuilder(bool aUseSceneBuilderThread = true);
 
@@ -183,7 +183,7 @@ class TransactionBuilder {
   Transaction* mTxn;
 };
 
-class TransactionWrapper {
+class TransactionWrapper final {
  public:
   explicit TransactionWrapper(Transaction* aTxn);
 
@@ -199,7 +199,7 @@ class TransactionWrapper {
   Transaction* mTxn;
 };
 
-class WebRenderAPI {
+class WebRenderAPI final {
   NS_INLINE_DECL_THREADSAFE_REFCOUNTING(WebRenderAPI);
 
  public:
@@ -208,6 +208,9 @@ class WebRenderAPI {
       layers::CompositorBridgeParent* aBridge,
       RefPtr<widget::CompositorWidget>&& aWidget,
       const wr::WrWindowId& aWindowId, LayoutDeviceIntSize aSize);
+
+  static void SendTransactions(const RenderRootArray<RefPtr<WebRenderAPI>>& aApis,
+                               RenderRootArray<TransactionBuilder*>& aTxns);
 
   already_AddRefed<WebRenderAPI> CreateDocument(LayoutDeviceIntSize aSize,
                                                 int8_t aLayerIndex,
@@ -346,12 +349,11 @@ struct MOZ_STACK_CLASS StackingContextParams : public WrStackingContextParams {
 /// This is a simple C++ wrapper around WrState defined in the rust bindings.
 /// We may want to turn this into a direct wrapper on top of
 /// WebRenderFrameBuilder instead, so the interface may change a bit.
-class DisplayListBuilder {
+class DisplayListBuilder final {
  public:
-  explicit DisplayListBuilder(wr::PipelineId aId,
-                              const wr::LayoutSize& aContentSize,
-                              size_t aCapacity = 0,
-                              RenderRoot aRenderRoot = RenderRoot::Default);
+  DisplayListBuilder(wr::PipelineId aId, const wr::LayoutSize& aContentSize,
+                     size_t aCapacity = 0,
+                     RenderRoot aRenderRoot = RenderRoot::Default);
   DisplayListBuilder(DisplayListBuilder&&) = default;
 
   ~DisplayListBuilder();
@@ -568,7 +570,7 @@ class DisplayListBuilder {
   // A chain of RAII objects, each holding a (ASR, ViewID) tuple of data. The
   // topmost object is pointed to by the mActiveFixedPosTracker pointer in
   // the wr::DisplayListBuilder.
-  class MOZ_RAII FixedPosScrollTargetTracker {
+  class MOZ_RAII FixedPosScrollTargetTracker final {
    public:
     FixedPosScrollTargetTracker(DisplayListBuilder& aBuilder,
                                 const ActiveScrolledRoot* aAsr,
@@ -592,6 +594,10 @@ class DisplayListBuilder {
     return aClip;
   }
 
+  // See the implementation of PushShadow for details on these methods.
+  void SuspendClipLeafMerging();
+  void ResumeClipLeafMerging();
+
   wr::WrState* mWrState;
 
   // Track each scroll id that we encountered. We use this structure to
@@ -606,6 +612,11 @@ class DisplayListBuilder {
   // display item's clip rect when pushing an item. May be set to Nothing() if
   // there is no clip rect to merge with.
   Maybe<wr::LayoutRect> mClipChainLeaf;
+
+  // Versions of the above that are on hold while SuspendClipLeafMerging is on
+  // (see the implementation of PushShadow for details).
+  Maybe<wr::WrSpaceAndClipChain> mSuspendedSpaceAndClipChain;
+  Maybe<wr::LayoutRect> mSuspendedClipChainLeaf;
 
   RefPtr<layout::TextDrawTarget> mCachedTextDT;
   RefPtr<gfxContext> mCachedContext;
@@ -625,7 +636,7 @@ class DisplayListBuilder {
 
 // This is a RAII class that overrides the current Wr's SpatialId and
 // ClipChainId.
-class MOZ_RAII SpaceAndClipChainHelper {
+class MOZ_RAII SpaceAndClipChainHelper final {
  public:
   SpaceAndClipChainHelper(DisplayListBuilder& aBuilder,
                           wr::WrSpaceAndClipChain aSpaceAndClipChain
@@ -641,6 +652,14 @@ class MOZ_RAII SpaceAndClipChainHelper {
       : mBuilder(aBuilder),
         mOldSpaceAndClipChain(aBuilder.mCurrentSpaceAndClipChain) {
     aBuilder.mCurrentSpaceAndClipChain.space = aSpatialId;
+    MOZ_GUARD_OBJECT_NOTIFIER_INIT;
+  }
+  SpaceAndClipChainHelper(DisplayListBuilder& aBuilder,
+                          wr::WrClipChainId aClipChainId
+                              MOZ_GUARD_OBJECT_NOTIFIER_PARAM)
+      : mBuilder(aBuilder),
+        mOldSpaceAndClipChain(aBuilder.mCurrentSpaceAndClipChain) {
+    aBuilder.mCurrentSpaceAndClipChain.clip_chain = aClipChainId.id;
     MOZ_GUARD_OBJECT_NOTIFIER_INIT;
   }
 

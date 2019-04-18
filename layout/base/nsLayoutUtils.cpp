@@ -8,6 +8,7 @@
 
 #include "mozilla/ArrayUtils.h"
 #include "mozilla/BasicEvents.h"
+#include "mozilla/dom/CanvasUtils.h"
 #include "mozilla/ClearOnShutdown.h"
 #include "mozilla/EffectCompositor.h"
 #include "mozilla/EffectSet.h"
@@ -357,19 +358,47 @@ static float GetSuitableScale(float aMaxScale, float aMinScale,
   return std::max(std::min(aMaxScale, displayVisibleRatio), aMinScale);
 }
 
+// The first value in this pair is the min scale, and the second one is the max
+// scale.
+using MinAndMaxScale = Pair<Size, Size>;
+
 static inline void UpdateMinMaxScale(const nsIFrame* aFrame,
                                      const AnimationValue& aValue,
-                                     Size& aMinScale, Size& aMaxScale) {
+                                     MinAndMaxScale& aMinAndMaxScale) {
   Size size = aValue.GetScaleValue(aFrame);
-  aMaxScale.width = std::max<float>(aMaxScale.width, size.width);
-  aMaxScale.height = std::max<float>(aMaxScale.height, size.height);
-  aMinScale.width = std::min<float>(aMinScale.width, size.width);
-  aMinScale.height = std::min<float>(aMinScale.height, size.height);
+  Size& minScale = aMinAndMaxScale.first();
+  Size& maxScale = aMinAndMaxScale.second();
+
+  minScale = Min(minScale, size);
+  maxScale = Max(maxScale, size);
 }
 
-static void GetMinAndMaxScaleForAnimationProperty(
-    const nsIFrame* aFrame, nsTArray<RefPtr<dom::Animation>>& aAnimations,
-    Size& aMaxScale, Size& aMinScale) {
+// The final transform matrix is calculated by merging the final results of each
+// transform-like properties, so do the scale factors. In other words, the
+// potential min/max scales could be gotten by multiplying the max/min scales of
+// each properties.
+//
+// For example, there is an animation:
+//   from { "transform: scale(1, 1)", "scale: 3, 3" };
+//   to   { "transform: scale(2, 2)", "scale: 1, 1" };
+//
+// the min scale is (1, 1) * (1, 1) = (1, 1), and
+// The max scale is (2, 2) * (3, 3) = (6, 6).
+// This means we multiply the min/max scale factor of transform property and the
+// min/max scale factor of scale property to get the final max/min scale factor.
+static Array<MinAndMaxScale, 2> GetMinAndMaxScaleForAnimationProperty(
+    const nsIFrame* aFrame,
+    const nsTArray<RefPtr<dom::Animation>>& aAnimations) {
+  // We use a fixed array to store the min/max scales for each property.
+  // The first element in the array is for eCSSProperty_transform, and the
+  // second one is for eCSSProperty_scale.
+  const MinAndMaxScale defaultValue =
+      MakePair(Size(std::numeric_limits<float>::max(),
+                    std::numeric_limits<float>::max()),
+               Size(std::numeric_limits<float>::min(),
+                    std::numeric_limits<float>::min()));
+  Array<MinAndMaxScale, 2> minAndMaxScales(defaultValue, defaultValue);
+
   for (dom::Animation* anim : aAnimations) {
     // This method is only expected to be passed animations that are running on
     // the compositor and we only pass playing animations to the compositor,
@@ -377,54 +406,101 @@ static void GetMinAndMaxScaleForAnimationProperty(
     // not yet finished or which are filling forwards).
     MOZ_ASSERT(anim->IsRelevant());
 
-    dom::KeyframeEffect* effect =
+    const dom::KeyframeEffect* effect =
         anim->GetEffect() ? anim->GetEffect()->AsKeyframeEffect() : nullptr;
     MOZ_ASSERT(effect, "A playing animation should have a keyframe effect");
-    for (size_t propIdx = effect->Properties().Length(); propIdx-- != 0;) {
-      const AnimationProperty& prop = effect->Properties()[propIdx];
-      // FIXME: Bug 1526847: Make this accept rotate and scale.
-      if (prop.mProperty != eCSSProperty_transform) {
+    for (const AnimationProperty& prop : effect->Properties()) {
+      if (prop.mProperty != eCSSProperty_transform &&
+          prop.mProperty != eCSSProperty_scale) {
         continue;
       }
 
+      // 0: eCSSProperty_transform.
+      // 1: eCSSProperty_scale.
+      MinAndMaxScale& scales =
+          minAndMaxScales[prop.mProperty == eCSSProperty_transform ? 0 : 1];
+
       // We need to factor in the scale of the base style if the base style
       // will be used on the compositor.
-      AnimationValue baseStyle = effect->BaseStyle(prop.mProperty);
+      const AnimationValue& baseStyle = effect->BaseStyle(prop.mProperty);
       if (!baseStyle.IsNull()) {
-        UpdateMinMaxScale(aFrame, baseStyle, aMinScale, aMaxScale);
+        UpdateMinMaxScale(aFrame, baseStyle, scales);
       }
 
       for (const AnimationPropertySegment& segment : prop.mSegments) {
         // In case of add or accumulate composite, StyleAnimationValue does
         // not have a valid value.
         if (segment.HasReplaceableFromValue()) {
-          UpdateMinMaxScale(aFrame, segment.mFromValue, aMinScale, aMaxScale);
+          UpdateMinMaxScale(aFrame, segment.mFromValue, scales);
         }
+
         if (segment.HasReplaceableToValue()) {
-          UpdateMinMaxScale(aFrame, segment.mToValue, aMinScale, aMaxScale);
+          UpdateMinMaxScale(aFrame, segment.mToValue, scales);
         }
       }
     }
   }
+
+  return minAndMaxScales;
 }
 
 Size nsLayoutUtils::ComputeSuitableScaleForAnimation(
     const nsIFrame* aFrame, const nsSize& aVisibleSize,
     const nsSize& aDisplaySize) {
+  const nsTArray<RefPtr<dom::Animation>> compositorAnimations =
+      EffectCompositor::GetAnimationsForCompositor(
+          aFrame,
+          nsCSSPropertyIDSet{eCSSProperty_transform, eCSSProperty_scale});
+
+  if (compositorAnimations.IsEmpty()) {
+    return Size(1.0, 1.0);
+  }
+
+  const Array<MinAndMaxScale, 2> minAndMaxScales =
+      GetMinAndMaxScaleForAnimationProperty(aFrame, compositorAnimations);
+
+  // This might cause an issue if users use std::numeric_limits<float>::min()
+  // (or max()) as the scale value. However, in this case, we may render an
+  // extreme small (or large) element, so this may not be a problem. If so,
+  // please fix this.
   Size maxScale(std::numeric_limits<float>::min(),
                 std::numeric_limits<float>::min());
   Size minScale(std::numeric_limits<float>::max(),
                 std::numeric_limits<float>::max());
 
-  // FIXME: Bug 1526847: Add rotate and scale into this set.
-  nsTArray<RefPtr<dom::Animation>> compositorAnimations =
-      EffectCompositor::GetAnimationsForCompositor(
-          aFrame, nsCSSPropertyIDSet{eCSSProperty_transform});
-  GetMinAndMaxScaleForAnimationProperty(aFrame, compositorAnimations, maxScale,
-                                        minScale);
+  auto isUnset = [](const Size& aMax, const Size& aMin) {
+    return aMax.width == std::numeric_limits<float>::min() &&
+           aMax.height == std::numeric_limits<float>::min() &&
+           aMin.width == std::numeric_limits<float>::max() &&
+           aMin.height == std::numeric_limits<float>::max();
+  };
 
-  if (maxScale.width == std::numeric_limits<float>::min()) {
-    // We didn't encounter a transform
+  // Iterate the slots to get the final scale value.
+  for (const auto& pair : minAndMaxScales) {
+    const Size& currMinScale = pair.first();
+    const Size& currMaxScale = pair.second();
+
+    if (isUnset(currMaxScale, currMinScale)) {
+      // We don't have this animation property, so skip.
+      continue;
+    }
+
+    if (isUnset(maxScale, minScale)) {
+      // Initialize maxScale and minScale.
+      maxScale = currMaxScale;
+      minScale = currMinScale;
+    } else {
+      // The scale factors of each transform-like property should be multiplied
+      // by others because we merge their sampled values as a final matrix by
+      // matrix multiplication, so here we multiply the scale factors by the
+      // previous one to get the possible max and min scale factors.
+      maxScale = maxScale * currMaxScale;
+      minScale = minScale * currMinScale;
+    }
+  }
+
+  if (isUnset(maxScale, minScale)) {
+    // We didn't encounter any transform-like property.
     return Size(1.0, 1.0);
   }
 
@@ -596,7 +672,7 @@ nsIContent* nsLayoutUtils::FindContentFor(ViewID aId) {
 static nsIFrame* GetScrollFrameFromContent(nsIContent* aContent) {
   nsIFrame* frame = aContent->GetPrimaryFrame();
   if (aContent->OwnerDoc()->GetRootElement() == aContent) {
-    nsIPresShell* presShell = frame ? frame->PresShell() : nullptr;
+    PresShell* presShell = frame ? frame->PresShell() : nullptr;
     if (!presShell) {
       presShell = aContent->OwnerDoc()->GetPresShell();
     }
@@ -684,8 +760,8 @@ bool nsLayoutUtils::AllowZoomingForDocument(
           nsLayoutUtils::ShouldHandleMetaViewport(aDocument));
 }
 
-float nsLayoutUtils::GetCurrentAPZResolutionScale(nsIPresShell* aShell) {
-  return aShell ? aShell->GetCumulativeNonRootScaleResolution() : 1.0;
+float nsLayoutUtils::GetCurrentAPZResolutionScale(PresShell* aPresShell) {
+  return aPresShell ? aPresShell->GetCumulativeNonRootScaleResolution() : 1.0;
 }
 
 // Return the maximum displayport size, based on the LayerManager's maximum
@@ -948,13 +1024,13 @@ bool nsLayoutUtils::ShouldDisableApzForElement(nsIContent* aContent) {
   }
 
   Document* doc = aContent->GetComposedDoc();
-  nsIPresShell* rootShell =
-      APZCCallbackHelper::GetRootContentDocumentPresShellForContent(aContent);
-  if (rootShell) {
-    if (Document* rootDoc = rootShell->GetDocument()) {
+  if (PresShell* rootPresShell =
+          APZCCallbackHelper::GetRootContentDocumentPresShellForContent(
+              aContent)) {
+    if (Document* rootDoc = rootPresShell->GetDocument()) {
       nsIContent* rootContent =
-          rootShell->GetRootScrollFrame()
-              ? rootShell->GetRootScrollFrame()->GetContent()
+          rootPresShell->GetRootScrollFrame()
+              ? rootPresShell->GetRootScrollFrame()->GetContent()
               : rootDoc->GetDocumentElement();
       // For the AccessibleCaret: disable APZ on any scrollable subframes that
       // are not the root scrollframe of a document, if the document has any
@@ -1186,7 +1262,7 @@ void nsLayoutUtils::InvalidateForDisplayPortChange(
 }
 
 bool nsLayoutUtils::SetDisplayPortMargins(nsIContent* aContent,
-                                          nsIPresShell* aPresShell,
+                                          PresShell* aPresShell,
                                           const ScreenMargin& aMargins,
                                           uint32_t aPriority,
                                           RepaintMode aRepaintMode) {
@@ -1967,9 +2043,9 @@ nsIScrollableFrame* nsLayoutUtils::GetNearestScrollableFrame(nsIFrame* aFrame,
         }
       }
       if (aFlags & SCROLLABLE_ALWAYS_MATCH_ROOT) {
-        nsIPresShell* ps = f->PresShell();
-        if (ps->GetRootScrollFrame() == f && ps->GetDocument() &&
-            ps->GetDocument()->IsRootDisplayDocument()) {
+        PresShell* presShell = f->PresShell();
+        if (presShell->GetRootScrollFrame() == f && presShell->GetDocument() &&
+            presShell->GetDocument()->IsRootDisplayDocument()) {
           return scrollableFrame;
         }
       }
@@ -2152,12 +2228,12 @@ nsPoint nsLayoutUtils::GetEventCoordinatesRelativeTo(
   int32_t rootAPD = rootFrame->PresContext()->AppUnitsPerDevPixel();
   int32_t localAPD = aFrame->PresContext()->AppUnitsPerDevPixel();
   widgetToView = widgetToView.ScaleToOtherAppUnits(rootAPD, localAPD);
-  nsIPresShell* shell = aFrame->PresShell();
+  PresShell* presShell = aFrame->PresShell();
 
   // XXX Bug 1224748 - Update nsLayoutUtils functions to correctly handle
   // nsPresShell resolution
   widgetToView =
-      widgetToView.RemoveResolution(GetCurrentAPZResolutionScale(shell));
+      widgetToView.RemoveResolution(GetCurrentAPZResolutionScale(presShell));
 
   /* If we encountered a transform, we can't do simple arithmetic to figure
    * out how to convert back to aFrame's coordinates and must use the CTM.
@@ -2195,7 +2271,7 @@ nsIFrame* nsLayoutUtils::GetPopupFrameForEventCoordinates(
   return nullptr;
 }
 
-void nsLayoutUtils::GetContainerAndOffsetAtEvent(nsIPresShell* aPresShell,
+void nsLayoutUtils::GetContainerAndOffsetAtEvent(PresShell* aPresShell,
                                                  const WidgetEvent* aEvent,
                                                  nsIContent** aContainer,
                                                  int32_t* aOffset) {
@@ -2926,6 +3002,13 @@ nsRect nsLayoutUtils::TransformFrameRectToAncestor(
 
   if (text) {
     result = ToRect(text->TransformFrameRectFromTextChild(aRect, aFrame));
+
+    // |result| from TransformFrameRectFromTextChild() is in user space (css
+    // pixel), should convert to device pixel
+    float devPixelPerCSSPixel =
+        float(AppUnitsPerCSSPixel()) / srcAppUnitsPerDevPixel;
+    result.Scale(devPixelPerCSSPixel);
+
     result = TransformGfxRectToAncestor(
         text, result, aAncestor, nullptr, aMatrixCache,
         aStopAtStackingContextAndDisplayPortAndOOFFrame, aOutAncestor);
@@ -3296,8 +3379,8 @@ bool nsLayoutUtils::MaybeCreateDisplayPortInFirstScrollFrameEncountered(
     }
   }
   if (aFrame->IsSubDocumentFrame()) {
-    nsIPresShell* presShell = static_cast<nsSubDocumentFrame*>(aFrame)
-                                  ->GetSubdocumentPresShellForPainting(0);
+    PresShell* presShell = static_cast<nsSubDocumentFrame*>(aFrame)
+                               ->GetSubdocumentPresShellForPainting(0);
     nsIFrame* root = presShell ? presShell->GetRootFrame() : nullptr;
     if (root) {
       if (MaybeCreateDisplayPortInFirstScrollFrameEncountered(root, aBuilder)) {
@@ -4753,7 +4836,7 @@ static bool GetPercentBSize(const LengthPercentage& aStyle, nsIFrame* aFrame,
              "GetAbsoluteCoord should have handled this");
 
   // During reflow, nsHTMLScrollFrame::ReflowScrolledFrame uses
-  // SetComputedHeight on the reflow state for its child to propagate its
+  // SetComputedHeight on the reflow input for its child to propagate its
   // computed height to the scrolled content. So here we skip to the scroll
   // frame that contains this scrolled content in order to get the same
   // behavior as layout when computing percentage heights.
@@ -6902,14 +6985,17 @@ nsPoint nsLayoutUtils::GetBackgroundFirstTilePos(const nsPoint& aDest,
 /* static */
 ImgDrawResult nsLayoutUtils::DrawBackgroundImage(
     gfxContext& aContext, nsIFrame* aForFrame, nsPresContext* aPresContext,
-    imgIContainer* aImage, const CSSIntSize& aImageSize,
-    SamplingFilter aSamplingFilter, const nsRect& aDest, const nsRect& aFill,
-    const nsSize& aRepeatSize, const nsPoint& aAnchor, const nsRect& aDirty,
-    uint32_t aImageFlags, ExtendMode aExtendMode, float aOpacity) {
+    imgIContainer* aImage, SamplingFilter aSamplingFilter, const nsRect& aDest,
+    const nsRect& aFill, const nsSize& aRepeatSize, const nsPoint& aAnchor,
+    const nsRect& aDirty, uint32_t aImageFlags, ExtendMode aExtendMode,
+    float aOpacity) {
   AUTO_PROFILER_LABEL("nsLayoutUtils::DrawBackgroundImage",
                       GRAPHICS_Rasterization);
 
-  Maybe<SVGImageContext> svgContext(Some(SVGImageContext(Some(aImageSize))));
+  CSSIntSize destCSSSize{nsPresContext::AppUnitsToIntCSSPixels(aDest.width),
+                         nsPresContext::AppUnitsToIntCSSPixels(aDest.height)};
+
+  Maybe<SVGImageContext> svgContext(Some(SVGImageContext(Some(destCSSSize))));
   SVGImageContext::MaybeStoreContextPaint(svgContext, aForFrame, aImage);
 
   /* Fast path when there is no need for image spacing */
@@ -7428,9 +7514,10 @@ nsLayoutUtils::SurfaceFromElementResult nsLayoutUtils::SurfaceFromElement(
   }
 
   result.mPrincipal = principal.forget();
-  // no images, including SVG images, can load content from another domain.
-  result.mIsWriteOnly = false;
   result.mImageRequest = imgRequest.forget();
+  result.mIsWriteOnly =
+      CanvasUtils::CheckWriteOnlySecurity(result.mCORSUsed, result.mPrincipal);
+
   return result;
 }
 
@@ -7523,7 +7610,8 @@ nsLayoutUtils::SurfaceFromElementResult nsLayoutUtils::SurfaceFromElement(
   result.mHasSize = true;
   result.mSize = result.mLayersImage->GetSize();
   result.mPrincipal = principal.forget();
-  result.mIsWriteOnly = false;
+  result.mIsWriteOnly =
+      CanvasUtils::CheckWriteOnlySecurity(result.mCORSUsed, result.mPrincipal);
 
   return result;
 }
@@ -8683,8 +8771,8 @@ void nsLayoutUtils::SetBSizeFromFontMetrics(const nsIFrame* aFrame,
 
 /* static */
 bool nsLayoutUtils::HasDocumentLevelListenersForApzAwareEvents(
-    nsIPresShell* aShell) {
-  if (Document* doc = aShell->GetDocument()) {
+    PresShell* aPresShell) {
+  if (Document* doc = aPresShell->GetDocument()) {
     WidgetEvent event(true, eVoidEvent);
     nsTArray<EventTarget*> targets;
     nsresult rv = EventDispatcher::Dispatch(
@@ -8723,12 +8811,11 @@ static void MaybeReflowForInflationScreenSizeChange(
           cv->AppendSubtree(array);
           for (uint32_t i = 0, iEnd = array.Length(); i < iEnd; ++i) {
             nsCOMPtr<nsIContentViewer> cv = array[i];
-            nsCOMPtr<nsIPresShell> shell = cv->GetPresShell();
-            if (shell) {
-              nsIFrame* rootFrame = shell->GetRootFrame();
+            if (RefPtr<PresShell> descendantPresShell = cv->GetPresShell()) {
+              nsIFrame* rootFrame = descendantPresShell->GetRootFrame();
               if (rootFrame) {
-                shell->FrameNeedsReflow(rootFrame, nsIPresShell::eStyleChange,
-                                        NS_FRAME_IS_DIRTY);
+                descendantPresShell->FrameNeedsReflow(
+                    rootFrame, nsIPresShell::eStyleChange, NS_FRAME_IS_DIRTY);
               }
             }
           }
@@ -8739,7 +8826,7 @@ static void MaybeReflowForInflationScreenSizeChange(
 }
 
 /* static */
-void nsLayoutUtils::SetVisualViewportSize(nsIPresShell* aPresShell,
+void nsLayoutUtils::SetVisualViewportSize(PresShell* aPresShell,
                                           CSSSize aSize) {
   MOZ_ASSERT(aSize.width >= 0.0 && aSize.height >= 0.0);
 
@@ -9354,12 +9441,11 @@ CSSRect nsLayoutUtils::GetBoundingContentRect(
   return result;
 }
 
-static already_AddRefed<nsIPresShell> GetPresShell(const nsIContent* aContent) {
-  nsCOMPtr<nsIPresShell> result;
+static PresShell* GetPresShell(const nsIContent* aContent) {
   if (Document* doc = aContent->GetComposedDoc()) {
-    result = doc->GetPresShell();
+    return doc->GetPresShell();
   }
-  return result.forget();
+  return nullptr;
 }
 
 static void UpdateDisplayPortMarginsForPendingMetrics(
@@ -9369,15 +9455,15 @@ static void UpdateDisplayPortMarginsForPendingMetrics(
     return;
   }
 
-  nsCOMPtr<nsIPresShell> shell = GetPresShell(content);
-  if (!shell) {
+  RefPtr<PresShell> presShell = GetPresShell(content);
+  if (!presShell) {
     return;
   }
 
-  if (nsLayoutUtils::AllowZoomingForDocument(shell->GetDocument()) &&
+  if (nsLayoutUtils::AllowZoomingForDocument(presShell->GetDocument()) &&
       aMetrics.IsRootContent()) {
     // See APZCCallbackHelper::UpdateRootFrame for details.
-    float presShellResolution = shell->GetResolution();
+    float presShellResolution = presShell->GetResolution();
     if (presShellResolution != aMetrics.GetPresShellResolution()) {
       return;
     }
@@ -9410,7 +9496,8 @@ static void UpdateDisplayPortMarginsForPendingMetrics(
       APZCCallbackHelper::AdjustDisplayPortForScrollDelta(aMetrics,
                                                           frameScrollOffset);
 
-  nsLayoutUtils::SetDisplayPortMargins(content, shell, displayPortMargins, 0);
+  nsLayoutUtils::SetDisplayPortMargins(content, presShell, displayPortMargins,
+                                       0);
 }
 
 /* static */
@@ -9589,14 +9676,15 @@ static nsRect ComputeSVGReferenceRect(nsIFrame* aFrame,
       SVGViewportElement* svgElement = element->GetCtx();
       MOZ_ASSERT(svgElement);
 
-      if (svgElement && svgElement->HasViewBoxRect()) {
+      if (svgElement && svgElement->HasViewBox()) {
         // If a `viewBox` attribute is specified for the SVG viewport creating
         // element:
         // 1. The reference box is positioned at the origin of the coordinate
         //    system established by the `viewBox` attribute.
         // 2. The dimension of the reference box is set to the width and height
         //    values of the `viewBox` attribute.
-        const SVGViewBoxRect& value = svgElement->GetViewBox()->GetAnimValue();
+        const SVGViewBox& value =
+            svgElement->GetAnimatedViewBox()->GetAnimValue();
         r = nsRect(nsPresContext::CSSPixelsToAppUnits(value.x),
                    nsPresContext::CSSPixelsToAppUnits(value.y),
                    nsPresContext::CSSPixelsToAppUnits(value.width),

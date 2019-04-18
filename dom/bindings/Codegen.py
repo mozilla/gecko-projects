@@ -4575,6 +4575,22 @@ def recordKeyDeclType(recordType):
     return CGGeneric(recordKeyType(recordType))
 
 
+def initializerForType(type):
+    """
+    Get the right initializer for the given type for a data location where we
+    plan to then initialize it from a JS::Value.  Some types need to always be
+    initialized even before we start the JS::Value-to-IDL-value conversion.
+
+    Returns a string or None if no initialization is needed.
+    """
+    if type.isObject():
+        return "nullptr"
+    # We could probably return CGDictionary.getNonInitializingCtorArg() for the
+    # dictionary case, but code outside DictionaryBase subclasses can't use
+    # that, so we can't do it across the board.
+    return None
+
+
 # If this function is modified, modify CGNativeMember.getArg and
 # CGNativeMember.getRetvalInfo accordingly.  The latter cares about the decltype
 # and holdertype we end up using, because it needs to be able to return the code
@@ -4882,6 +4898,12 @@ def getJSToNativeConversionInfo(type, descriptorProvider, failureCode=None,
             "passedToJSImpl": "${passedToJSImpl}"
         })
 
+        elementInitializer = initializerForType(elementType)
+        if elementInitializer is None:
+            elementInitializer = ""
+        else:
+            elementInitializer = elementInitializer + ", "
+
         # NOTE: Keep this in sync with variadic conversions as needed
         templateBody = fill(
             """
@@ -4902,7 +4924,7 @@ def getJSToNativeConversionInfo(type, descriptorProvider, failureCode=None,
               if (done${nestingLevel}) {
                 break;
               }
-              ${elementType}* slotPtr${nestingLevel} = arr${nestingLevel}.AppendElement(mozilla::fallible);
+              ${elementType}* slotPtr${nestingLevel} = arr${nestingLevel}.AppendElement(${elementInitializer}mozilla::fallible);
               if (!slotPtr${nestingLevel}) {
                 JS_ReportOutOfMemory(cx);
                 $*{exceptionCode}
@@ -4917,6 +4939,7 @@ def getJSToNativeConversionInfo(type, descriptorProvider, failureCode=None,
             arrayRef=arrayRef,
             elementType=elementInfo.declType.define(),
             elementConversion=elementConversion,
+            elementInitializer=elementInitializer,
             nestingLevel=str(nestingLevel))
 
         templateBody = wrapObjectTemplate(templateBody, type,
@@ -5009,7 +5032,7 @@ def getJSToNativeConversionInfo(type, descriptorProvider, failureCode=None,
             auto& recordEntries = ${recordRef}.Entries();
 
             JS::Rooted<JSObject*> recordObj(cx, &$${val}.toObject());
-            JS::AutoIdVector ids(cx);
+            JS::RootedVector<jsid> ids(cx);
             if (!js::GetPropertyKeys(cx, recordObj,
                                      JSITER_OWNONLY | JSITER_HIDDEN | JSITER_SYMBOLS, &ids)) {
               $*{exceptionCode}
@@ -5673,7 +5696,11 @@ def getJSToNativeConversionInfo(type, descriptorProvider, failureCode=None,
 
         templateBody = ""
         if forceOwningType:
-            templateBody += 'static_assert(IsRefcounted<%s>::value, "We can only store refcounted classes.");' % typeName
+            templateBody += fill(
+                """
+                static_assert(IsRefcounted<${typeName}>::value, "We can only store refcounted classes.");
+                """,
+                typeName=typeName)
 
         if (not descriptor.interface.isConsequential() and
             not descriptor.interface.isExternal()):
@@ -6489,6 +6516,8 @@ class CGArgumentConverter(CGThing):
             rooterDecl = ""
         replacer["elemType"] = typeConversion.declType.define()
 
+        replacer["elementInitializer"] = initializerForType(self.argument.type) or ""
+
         # NOTE: Keep this in sync with sequence conversions as needed
         variadicConversion = string.Template(
             "${seqType} ${declName};\n" +
@@ -6500,7 +6529,8 @@ class CGArgumentConverter(CGThing):
                     return false;
                   }
                   for (uint32_t variadicArg = ${index}; variadicArg < ${argc}; ++variadicArg) {
-                    ${elemType}& slot = *${declName}.AppendElement(mozilla::fallible);
+                    // OK to do infallible append here, since we ensured capacity already.
+                    ${elemType}& slot = *${declName}.AppendElement(${elementInitializer});
                 """)
         ).substitute(replacer)
 
@@ -9010,7 +9040,7 @@ class CGEnumerateHook(CGAbstractBindingMethod):
 
         args = [Argument('JSContext*', 'cx'),
                 Argument('JS::Handle<JSObject*>', 'obj'),
-                Argument('JS::AutoIdVector&', 'properties'),
+                Argument('JS::MutableHandleVector<jsid>', 'properties'),
                 Argument('bool', 'enumerableOnly')]
         # Our "self" is actually the "obj" argument in this case, not the thisval.
         CGAbstractBindingMethod.__init__(
@@ -11225,7 +11255,7 @@ class CGEnumerateOwnProperties(CGAbstractStaticMethod):
         args = [Argument('JSContext*', 'cx'),
                 Argument('JS::Handle<JSObject*>', 'wrapper'),
                 Argument('JS::Handle<JSObject*>', 'obj'),
-                Argument('JS::AutoIdVector&', 'props')]
+                Argument('JS::MutableHandleVector<jsid>', 'props')]
         CGAbstractStaticMethod.__init__(self, descriptor,
                                         "EnumerateOwnProperties", "bool", args)
 
@@ -11242,7 +11272,7 @@ class CGEnumerateOwnPropertiesViaGetOwnPropertyNames(CGAbstractBindingMethod):
         args = [Argument('JSContext*', 'cx'),
                 Argument('JS::Handle<JSObject*>', 'wrapper'),
                 Argument('JS::Handle<JSObject*>', 'obj'),
-                Argument('JS::AutoIdVector&', 'props')]
+                Argument('JS::MutableHandleVector<jsid>', 'props')]
         CGAbstractBindingMethod.__init__(self, descriptor,
                                          "EnumerateOwnPropertiesViaGetOwnPropertyNames",
                                          args, getThisObj="",
@@ -12048,7 +12078,7 @@ class CGDOMJSProxyHandler_ownPropNames(ClassMethod):
         args = [Argument('JSContext*', 'cx'),
                 Argument('JS::Handle<JSObject*>', 'proxy'),
                 Argument('unsigned', 'flags'),
-                Argument('JS::AutoIdVector&', 'props')]
+                Argument('JS::MutableHandleVector<jsid>', 'props')]
         ClassMethod.__init__(self, "ownPropNames", "bool", args,
                              virtual=True, override=True, const=True)
         self.descriptor = descriptor
@@ -12069,7 +12099,7 @@ class CGDOMJSProxyHandler_ownPropNames(ClassMethod):
                     return false;
                   }
 
-                  if (!js::GetPropertyKeys(cx, holder, flags, &props)) {
+                  if (!js::GetPropertyKeys(cx, holder, flags, props)) {
                     return false;
                   }
 
@@ -12135,7 +12165,7 @@ class CGDOMJSProxyHandler_ownPropNames(ClassMethod):
             """
             JS::Rooted<JSObject*> expando(cx);
             if (${xrayCheck}(expando = DOMProxyHandler::GetExpandoObject(proxy)) &&
-                !js::GetPropertyKeys(cx, expando, flags, &props)) {
+                !js::GetPropertyKeys(cx, expando, flags, props)) {
               return false;
             }
             """,
@@ -14026,8 +14056,9 @@ class CGDictionary(CGThing):
     def getMemberInitializer(self, memberInfo):
         """
         Get the right initializer for the member.  Most members don't need one,
-        but we need to pre-initialize 'any' and 'object' that have a default
-        value, so they're safe to trace at all times.
+        but we need to pre-initialize 'object' that have a default value or are
+        required (and hence are not inside Optional), so they're safe to trace
+        at all times.  And we can optimize a bit for dictionary-typed members.
         """
         member, _ = memberInfo
         if member.canHaveMissingValue():
@@ -14036,17 +14067,13 @@ class CGDictionary(CGThing):
             # up.
             return None
         type = member.type
-        if type.isAny():
-            return "JS::UndefinedValue()"
-        if type.isObject():
-            return "nullptr"
         if type.isDictionary():
             # When we construct ourselves, we don't want to init our member
             # dictionaries.  Either we're being constructed-but-not-initialized
             # ourselves (and then we don't want to init them) or we're about to
             # init ourselves and then we'll init them anyway.
             return CGDictionary.getNonInitializingCtorArg()
-        return None
+        return initializerForType(type)
 
     def getMemberSourceDescription(self, member):
         return ("'%s' member of %s" %
@@ -16272,9 +16299,12 @@ class CGCallback(CGClass):
 class CGCallbackFunction(CGCallback):
     def __init__(self, callback, descriptorProvider):
         self.callback = callback
+        if callback.isConstructor():
+            methods=[ConstructCallback(callback, descriptorProvider)]
+        else:
+            methods=[CallCallback(callback, descriptorProvider)]
         CGCallback.__init__(self, callback, descriptorProvider,
-                            "CallbackFunction",
-                            methods=[CallCallback(callback, descriptorProvider)])
+                            "CallbackFunction", methods)
 
     def getConstructors(self):
         return CGCallback.getConstructors(self) + [
@@ -16479,7 +16509,7 @@ class CallbackMember(CGNativeMember):
 
         return setupCall + declRval + argvDecl + convertArgs + doCall + returnResult
 
-    def getResultConversion(self):
+    def getResultConversion(self, isDefinitelyObject=False):
         replacements = {
             "val": "rval",
             "holderName": "rvalHolder",
@@ -16499,6 +16529,7 @@ class CallbackMember(CGNativeMember):
         convertType = instantiateJSToNativeConversion(
             getJSToNativeConversionInfo(self.retvalType,
                                         self.descriptorProvider,
+                                        isDefinitelyObject=isDefinitelyObject,
                                         exceptionCode=self.exceptionCode,
                                         isCallbackReturnValue=isCallbackReturnValue,
                                         # Allow returning a callback type that
@@ -16668,6 +16699,45 @@ class CallbackMember(CGNativeMember):
                                idlObject.location))
 
 
+class ConstructCallback(CallbackMember):
+    def __init__(self, callback, descriptorProvider):
+        self.callback = callback
+        CallbackMember.__init__(self, callback.signatures()[0], "Construct",
+                                descriptorProvider, needThisHandling=False,
+                                canRunScript=True)
+
+    def getRvalDecl(self):
+        # Box constructedObj for getJSToNativeConversionInfo().
+        return "JS::Rooted<JS::Value> rval(cx);\n"
+
+    def getCall(self):
+        if self.argCount > 0:
+            args = "JS::HandleValueArray::subarray(argv, 0, argc)"
+        else:
+            args = "JS::HandleValueArray::empty()"
+
+        return fill(
+            """
+            JS::Rooted<JS::Value> constructor(cx, JS::ObjectValue(*mCallback));
+            JS::Rooted<JSObject*> constructedObj(cx);
+            if (!JS::Construct(cx, constructor,
+                          ${args}, &constructedObj)) {
+              aRv.NoteJSContextException(cx);
+              return${errorReturn};
+            }
+            rval.setObject(*constructedObj);
+            """,
+            args=args,
+            errorReturn=self.getDefaultRetval())
+
+    def getResultConversion(self):
+        return CallbackMember.getResultConversion(self,
+                                                  isDefinitelyObject=True);
+
+    def getPrettyName(self):
+        return self.callback.identifier.name
+
+
 class CallbackMethod(CallbackMember):
     def __init__(self, sig, name, descriptorProvider, needThisHandling,
                  rethrowContentException=False,
@@ -16679,7 +16749,7 @@ class CallbackMethod(CallbackMember):
                                 canRunScript=canRunScript)
 
     def getRvalDecl(self):
-        return "JS::Rooted<JS::Value> rval(cx, JS::UndefinedValue());\n"
+        return "JS::Rooted<JS::Value> rval(cx);\n"
 
     def getCall(self):
         if self.argCount > 0:
@@ -16836,7 +16906,7 @@ class CallbackGetter(CallbackAccessor):
                                   spiderMonkeyInterfacesAreStructs)
 
     def getRvalDecl(self):
-        return "JS::Rooted<JS::Value> rval(cx, JS::UndefinedValue());\n"
+        return "JS::Rooted<JS::Value> rval(cx);\n"
 
     def getCall(self):
         return fill(

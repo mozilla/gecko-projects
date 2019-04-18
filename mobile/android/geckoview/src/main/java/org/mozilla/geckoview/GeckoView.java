@@ -32,6 +32,7 @@ import android.support.annotation.Nullable;
 import android.support.annotation.UiThread;
 import android.util.AttributeSet;
 import android.util.DisplayMetrics;
+import android.util.Log;
 import android.util.SparseArray;
 import android.util.TypedValue;
 import android.view.KeyEvent;
@@ -52,12 +53,12 @@ public class GeckoView extends FrameLayout {
     private static final String LOGTAG = "GeckoView";
     private static final boolean DEBUG = false;
 
-    protected final Display mDisplay = new Display();
-    protected GeckoSession mSession;
-    protected GeckoRuntime mRuntime;
+    protected final @NonNull Display mDisplay = new Display();
+    protected @Nullable GeckoSession mSession;
+    protected @Nullable GeckoRuntime mRuntime;
     private boolean mStateSaved;
 
-    protected SurfaceView mSurfaceView;
+    protected @Nullable SurfaceView mSurfaceView;
 
     private boolean mIsResettingFocus;
 
@@ -264,6 +265,9 @@ public class GeckoView extends FrameLayout {
      * this before {@link #setSession(GeckoSession)} if there is already an open session
      * set for this instance.
      *
+     * Note: this method does not close the session and the session remains active. The
+     * caller is responsible for calling {@link GeckoSession#close()} when appropriate.
+     *
      * @return The {@link GeckoSession} that was set for this instance. May be null.
      */
     @UiThread
@@ -410,7 +414,7 @@ public class GeckoView extends FrameLayout {
     }
 
     @AnyThread
-    public @NonNull EventDispatcher getEventDispatcher() {
+    /* package */ @NonNull EventDispatcher getEventDispatcher() {
         return mSession.getEventDispatcher();
     }
 
@@ -427,7 +431,8 @@ public class GeckoView extends FrameLayout {
     @Override
     public void onAttachedToWindow() {
         if (mSession == null) {
-            setSession(new GeckoSession(), GeckoRuntime.getDefault(getContext()));
+            Log.w(LOGTAG, "No GeckoSession attached to this GeckoView instance. Call setSession to attach a GeckoSession to this instance.");
+            return;
         }
 
         if (!mSession.isOpen()) {

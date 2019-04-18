@@ -11,11 +11,12 @@
 #include "AutoReferenceChainGuard.h"
 #include "gfx2DGlue.h"
 #include "gfxContext.h"
-#include "mozilla/gfx/2D.h"
+#include "mozilla/PresShell.h"
 #include "mozilla/RefPtr.h"
-#include "SVGObserverUtils.h"
 #include "mozilla/dom/SVGMaskElement.h"
 #include "mozilla/dom/SVGUnitTypesBinding.h"
+#include "mozilla/gfx/2D.h"
+#include "SVGObserverUtils.h"
 
 using namespace mozilla;
 using namespace mozilla::dom;
@@ -36,7 +37,7 @@ static LuminanceType GetLuminanceType(uint8_t aNSMaskType) {
   }
 }
 
-nsIFrame* NS_NewSVGMaskFrame(nsIPresShell* aPresShell, ComputedStyle* aStyle) {
+nsIFrame* NS_NewSVGMaskFrame(PresShell* aPresShell, ComputedStyle* aStyle) {
   return new (aPresShell) nsSVGMaskFrame(aStyle, aPresShell->GetPresContext());
 }
 
@@ -208,7 +209,7 @@ gfxMatrix nsSVGMaskFrame::GetCanvasTM() { return mMatrixForChildren; }
 gfxMatrix nsSVGMaskFrame::GetMaskTransform(nsIFrame* aMaskedFrame) {
   SVGMaskElement* content = static_cast<SVGMaskElement*>(GetContent());
 
-  SVGEnum* maskContentUnits =
+  SVGAnimatedEnumeration* maskContentUnits =
       &content->mEnumAttributes[SVGMaskElement::MASKCONTENTUNITS];
 
   uint32_t flags = nsSVGUtils::eBBoxIncludeFillGeometry |

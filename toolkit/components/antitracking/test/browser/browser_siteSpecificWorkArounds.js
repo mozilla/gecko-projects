@@ -1,3 +1,5 @@
+/* import-globals-from antitracking_head.js */
+
 AntiTracking.runTest("localStorage with a tracker that is whitelisted via a pref",
   async _ => {
     let shouldThrow = SpecialPowers.Services.prefs.getIntPref("network.cookie.cookieBehavior") == SpecialPowers.Ci.nsICookieService.BEHAVIOR_REJECT;
@@ -21,7 +23,7 @@ AntiTracking.runTest("localStorage with a tracker that is whitelisted via a pref
       Services.clearData.deleteData(Ci.nsIClearDataService.CLEAR_ALL, value => resolve());
     });
   },
-  [["urlclassifier.trackingAnnotationSkipURLs", "tracking.example.org"]],
+  [["urlclassifier.trackingAnnotationSkipURLs", "TRACKING.EXAMPLE.ORG"]],
   false, // run the window.open() test
   false, // run the user interaction test
   0, // don't expect blocking notifications

@@ -469,7 +469,7 @@ void WeakFrame::Init(nsIFrame* aFrame) {
   }
 }
 
-nsIFrame* NS_NewEmptyFrame(nsIPresShell* aPresShell, ComputedStyle* aStyle) {
+nsIFrame* NS_NewEmptyFrame(PresShell* aPresShell, ComputedStyle* aStyle) {
   return new (aPresShell) nsFrame(aStyle, aPresShell->GetPresContext());
 }
 
@@ -767,7 +767,7 @@ void nsFrame::DestroyFrom(nsIFrame* aDestructRoot,
   }
 
   nsPresContext* presContext = PresContext();
-  nsIPresShell* shell = presContext->GetPresShell();
+  mozilla::PresShell* presShell = presContext->GetPresShell();
   if (mState & NS_FRAME_OUT_OF_FLOW) {
     nsPlaceholderFrame* placeholder = GetPlaceholderFrame();
     NS_ASSERTION(
@@ -817,10 +817,10 @@ void nsFrame::DestroyFrom(nsIFrame* aDestructRoot,
   // Ensure that we're not in the approximately visible list anymore.
   PresContext()->GetPresShell()->RemoveFrameFromApproximatelyVisibleList(this);
 
-  shell->NotifyDestroyingFrame(this);
+  presShell->NotifyDestroyingFrame(this);
 
   if (mState & NS_FRAME_EXTERNAL_REFERENCE) {
-    shell->ClearFrameRefs(this);
+    presShell->ClearFrameRefs(this);
   }
 
   nsView* view = GetView();
@@ -858,7 +858,7 @@ void nsFrame::DestroyFrom(nsIFrame* aDestructRoot,
 
 #ifdef DEBUG
   {
-    nsIFrame* rootFrame = shell->GetRootFrame();
+    nsIFrame* rootFrame = presShell->GetRootFrame();
     MOZ_ASSERT(rootFrame);
     if (this != rootFrame) {
       const RetainedDisplayListData* data =
@@ -876,7 +876,7 @@ void nsFrame::DestroyFrom(nsIFrame* aDestructRoot,
 
   // Now that we're totally cleaned out, we need to add ourselves to
   // the presshell's recycler.
-  shell->FreeFrame(id, this);
+  presShell->FreeFrame(id, this);
 }
 
 nsresult nsFrame::GetOffsets(int32_t& aStart, int32_t& aEnd) const {
@@ -1979,7 +1979,7 @@ Visibility nsIFrame::GetVisibility() const {
 }
 
 void nsIFrame::UpdateVisibilitySynchronously() {
-  nsIPresShell* presShell = PresShell();
+  mozilla::PresShell* presShell = PresShell();
   if (!presShell) {
     return;
   }
@@ -2046,7 +2046,7 @@ void nsIFrame::EnableVisibilityTracking() {
   AddStateBits(NS_FRAME_VISIBILITY_IS_TRACKED);
   SetProperty(VisibilityStateProperty(), 0);
 
-  nsIPresShell* presShell = PresShell();
+  mozilla::PresShell* presShell = PresShell();
   if (!presShell) {
     return;
   }
@@ -2347,6 +2347,14 @@ void nsFrame::DisplaySelectionOverlay(nsDisplayListBuilder* aBuilder,
 void nsFrame::DisplayOutlineUnconditional(nsDisplayListBuilder* aBuilder,
                                           const nsDisplayListSet& aLists) {
   if (!StyleOutline()->ShouldPaintOutline()) {
+    return;
+  }
+
+  if (IsTableColGroupFrame() || IsTableColFrame()) {
+    // Per https://drafts.csswg.org/css-tables-3/#global-style-overrides:
+    // "All css properties of table-column and table-column-group boxes are
+    // ignored, except when explicitly specified by this specification."
+    // CSS outlines fall into this category, so we skip them on these boxes.
     return;
   }
 
@@ -4029,7 +4037,7 @@ nsresult nsFrame::HandleEvent(nsPresContext* aPresContext,
 }
 
 nsresult nsFrame::GetDataForTableSelection(
-    const nsFrameSelection* aFrameSelection, nsIPresShell* aPresShell,
+    const nsFrameSelection* aFrameSelection, mozilla::PresShell* aPresShell,
     WidgetMouseEvent* aMouseEvent, nsIContent** aParentContent,
     int32_t* aContentOffset, TableSelection* aTarget) {
   if (!aFrameSelection || !aPresShell || !aMouseEvent || !aParentContent ||
@@ -5034,9 +5042,7 @@ static FrameTarget GetSelectionClosestFrame(nsIFrame* aFrame,
     if (!target.IsNull()) return target;
   }
 
-  nsIFrame* kid = aFrame->PrincipalChildList().FirstChild();
-
-  if (kid) {
+  if (nsIFrame* kid = aFrame->PrincipalChildList().FirstChild()) {
     // Go through all the child frames to find the closest one
     nsIFrame::FrameWithDistance closest = {nullptr, nscoord_MAX, nscoord_MAX};
     for (; kid; kid = kid->GetNextSibling()) {
@@ -5050,7 +5056,12 @@ static FrameTarget GetSelectionClosestFrame(nsIFrame* aFrame,
       return GetSelectionClosestFrameForChild(closest.mFrame, aPoint, aFlags);
     }
   }
-  return FrameTarget(aFrame, false, false);
+
+  // Use frame edge for grid, flex and tables, but not replaced frames like
+  // images.
+  bool useFrameEdge = !aFrame->StyleDisplay()->IsInlineInsideStyle() &&
+                      !aFrame->IsFrameOfType(nsIFrame::eReplaced);
+  return FrameTarget(aFrame, useFrameEdge, false);
 }
 
 static nsIFrame::ContentOffsets OffsetsForSingleFrame(nsIFrame* aFrame,
@@ -9086,7 +9097,7 @@ static void ComputeAndIncludeOutlineArea(nsIFrame* aFrame,
   // Keep this code in sync with GetOutlineInnerRect in nsCSSRendering.cpp.
   SetOrUpdateRectValuedProperty(aFrame, nsIFrame::OutlineInnerRectProperty(),
                                 innerRect);
-  const nscoord offset = outline->mOutlineOffset;
+  const nscoord offset = outline->mOutlineOffset.ToAppUnits();
   nsRect outerRect(innerRect);
   bool useOutlineAuto = false;
   if (nsLayoutUtils::IsOutlineStyleAutoEnabled()) {
@@ -10080,7 +10091,7 @@ nsresult nsFrame::DoXULLayout(nsBoxLayoutState& aState) {
     ReflowInput reflowInput(aState.PresContext(), this,
                             aState.GetRenderingContext(),
                             LogicalSize(ourWM, ISize(), NS_UNCONSTRAINEDSIZE),
-                            ReflowInput::DUMMY_PARENT_REFLOW_STATE);
+                            ReflowInput::DUMMY_PARENT_REFLOW_INPUT);
 
     AddStateBits(NS_FRAME_IN_REFLOW);
     // Set up a |reflowStatus| to pass into ReflowAbsoluteFrames
@@ -10167,10 +10178,10 @@ void nsFrame::BoxReflow(nsBoxLayoutState& aState, nsPresContext* aPresContext,
   if (needsReflow) {
     aDesiredSize.ClearSize();
 
-    // create a reflow state to tell our child to flow at the given size.
+    // create a reflow input to tell our child to flow at the given size.
 
-    // Construct a bogus parent reflow state so that there's a usable
-    // containing block reflow state.
+    // Construct a bogus parent reflow input so that there's a usable
+    // containing block reflow input.
     nsMargin margin(0, 0, 0, 0);
     GetXULMargin(margin);
 
@@ -10184,7 +10195,7 @@ void nsFrame::BoxReflow(nsBoxLayoutState& aState, nsPresContext* aPresContext,
     WritingMode parentWM = parentFrame->GetWritingMode();
     ReflowInput parentReflowInput(aPresContext, parentFrame, aRenderingContext,
                                   LogicalSize(parentWM, parentSize),
-                                  ReflowInput::DUMMY_PARENT_REFLOW_STATE);
+                                  ReflowInput::DUMMY_PARENT_REFLOW_INPUT);
 
     // This may not do very much useful, but it's probably worth trying.
     if (parentSize.width != NS_INTRINSICSIZE)
@@ -10208,7 +10219,7 @@ void nsFrame::BoxReflow(nsBoxLayoutState& aState, nsPresContext* aPresContext,
     if (outerReflowInput && outerReflowInput->mFrame == parentFrame) {
       // We're a frame (such as a text control frame) that jumps into
       // box reflow and then straight out of it on the child frame.
-      // This means we actually have a real parent reflow state.
+      // This means we actually have a real parent reflow input.
       // nsLayoutUtils::InflationMinFontSizeFor used to need this to be
       // linked up correctly for text control frames, so do so here).
       parentRI = outerReflowInput;
@@ -10216,13 +10227,13 @@ void nsFrame::BoxReflow(nsBoxLayoutState& aState, nsPresContext* aPresContext,
       parentRI = &parentReflowInput;
     }
 
-    // XXX Is it OK that this reflow state has only one ancestor?
+    // XXX Is it OK that this reflow input has only one ancestor?
     // (It used to have a bogus parent, skipping all the boxes).
     WritingMode wm = GetWritingMode();
     LogicalSize logicalSize(wm, nsSize(aWidth, aHeight));
     logicalSize.BSize(wm) = NS_INTRINSICSIZE;
     ReflowInput reflowInput(aPresContext, *parentRI, this, logicalSize, nullptr,
-                            ReflowInput::DUMMY_PARENT_REFLOW_STATE);
+                            ReflowInput::DUMMY_PARENT_REFLOW_INPUT);
 
     // XXX_jwir3: This is somewhat fishy. If this is actually changing the value
     //            here (which it might be), then we should make sure that it's
@@ -10893,21 +10904,31 @@ CompositorHitTestInfo nsIFrame::GetCompositorHitTestInfo(
 
   // Anything that didn't match the above conditions is visible to hit-testing.
   result = CompositorHitTestFlags::eVisibleToHitTest;
+  if (nsSVGIntegrationUtils::UsingMaskOrClipPathForFrame(this)) {
+    // If WebRender is enabled, simple clip-paths can be converted into WR
+    // clips that WR knows how to hit-test against, so we don't need to mark
+    // it as an irregular area.
+    if (!gfxVars::UseWebRender() ||
+        !nsSVGIntegrationUtils::UsingSimpleClipPathForFrame(this)) {
+      result += CompositorHitTestFlags::eIrregularArea;
+    }
+  }
 
-  if (aBuilder->IsBuildingNonLayerizedScrollbar() ||
-      aBuilder->GetAncestorHasApzAwareEventHandler()) {
+  if (aBuilder->IsBuildingNonLayerizedScrollbar()) {
     // Scrollbars may be painted into a layer below the actual layer they will
     // scroll, and therefore wheel events may be dispatched to the outer frame
     // instead of the intended scrollframe. To address this, we force a d-t-c
     // region on scrollbar frames that won't be placed in their own layer. See
     // bug 1213324 for details.
-    result += CompositorHitTestFlags::eDispatchToContent;
+    result += CompositorHitTestFlags::eInactiveScrollframe;
+  } else if (aBuilder->GetAncestorHasApzAwareEventHandler()) {
+    result += CompositorHitTestFlags::eApzAwareListeners;
   } else if (IsObjectFrame()) {
     // If the frame is a plugin frame and wants to handle wheel events as
     // default action, we should add the frame to dispatch-to-content region.
     nsPluginFrame* pluginFrame = do_QueryFrame(this);
     if (pluginFrame && pluginFrame->WantsToHandleWheelEventAsDefaultAction()) {
-      result += CompositorHitTestFlags::eDispatchToContent;
+      result += CompositorHitTestFlags::eApzAwareListeners;
     }
   }
 
@@ -10974,7 +10995,7 @@ CompositorHitTestInfo nsIFrame::GetCompositorHitTestInfo(
       if (thumbGetsLayer) {
         result += CompositorHitTestFlags::eScrollbarThumb;
       } else {
-        result += CompositorHitTestFlags::eDispatchToContent;
+        result += CompositorHitTestFlags::eInactiveScrollframe;
       }
     }
 
@@ -11703,7 +11724,7 @@ void DR_State::FindMatchingRule(DR_FrameTreeNode& aNode) {
 
 DR_FrameTreeNode* DR_State::CreateTreeNode(nsIFrame* aFrame,
                                            const ReflowInput* aReflowInput) {
-  // find the frame of the parent reflow state (usually just the parent of
+  // find the frame of the parent reflow input (usually just the parent of
   // aFrame)
   nsIFrame* parentFrame;
   if (aReflowInput) {

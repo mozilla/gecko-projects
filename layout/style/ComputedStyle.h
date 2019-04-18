@@ -18,14 +18,13 @@
 #include "mozilla/ServoComputedData.h"
 #include "mozilla/ServoTypes.h"
 #include "mozilla/ServoUtils.h"
-#include "mozilla/StyleComplexColor.h"
 #include "nsCSSAnonBoxes.h"
 #include "nsCSSPseudoElements.h"
+#include "nsColor.h"
 
 #include "nsStyleStructFwd.h"
 
 enum nsChangeHint : uint32_t;
-class nsIPresShell;
 class nsPresContext;
 class nsWindowSizes;
 

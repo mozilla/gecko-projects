@@ -467,8 +467,9 @@ typedef enum {
  * Dump the complete object graph of heap-allocated things.
  * fp is the file for the dump output.
  */
-extern JS_FRIEND_API void DumpHeap(JSContext* cx, FILE* fp,
-                                   DumpHeapNurseryBehaviour nurseryBehaviour);
+extern JS_FRIEND_API void DumpHeap(
+    JSContext* cx, FILE* fp, DumpHeapNurseryBehaviour nurseryBehaviour,
+    mozilla::MallocSizeOf mallocSizeOf = nullptr);
 
 #ifdef JS_OLD_GETTER_SETTER_METHODS
 JS_FRIEND_API bool obj_defineGetter(JSContext* cx, unsigned argc,
@@ -667,6 +668,9 @@ inline JSProtoKey InheritanceProtoKeyForStandardClass(JSProtoKey key) {
   // Otherwise, we inherit [Object].
   return JSProto_Object;
 }
+
+JS_FRIEND_API bool ShouldIgnorePropertyDefinition(JSContext* cx, JSProtoKey key,
+                                                  jsid id);
 
 JS_FRIEND_API bool IsFunctionObject(JSObject* obj);
 
@@ -956,10 +960,11 @@ inline void CopyFlatStringChars(char16_t* dest, JSFlatString* s, size_t len) {
  * results that match the output of Reflect.ownKeys.
  */
 JS_FRIEND_API bool GetPropertyKeys(JSContext* cx, JS::HandleObject obj,
-                                   unsigned flags, JS::AutoIdVector* props);
+                                   unsigned flags,
+                                   JS::MutableHandleIdVector props);
 
-JS_FRIEND_API bool AppendUnique(JSContext* cx, JS::AutoIdVector& base,
-                                JS::AutoIdVector& others);
+JS_FRIEND_API bool AppendUnique(JSContext* cx, JS::MutableHandleIdVector base,
+                                JS::HandleIdVector others);
 
 /**
  * Determine whether the given string is an array index in the sense of

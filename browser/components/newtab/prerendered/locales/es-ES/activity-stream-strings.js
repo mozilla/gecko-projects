@@ -40,9 +40,7 @@ window.gActivityStreamStrings = {
   "section_disclaimer_topstories_buttontext": "Ok, entendido",
   "prefs_home_header": "Contenido de la página de inicio de Firefox",
   "prefs_home_description": "Seleccione el contenido que desea en la pantalla de inicio de Firefox.",
-  "prefs_content_discovery_header": "Página de inicio de Firefox",
   "prefs_content_discovery_description": "Content Discovery en la página de inicio de Firefox le permite descubrir artículos de alta calidad y relevantes de toda la web.",
-  "prefs_content_discovery_button": "Desactivar Content Discovery",
   "prefs_section_rows_option": "{num} fila;{num} filas",
   "prefs_search_header": "Búsqueda web",
   "prefs_topsites_description": "Los sitios que más visita",
@@ -58,7 +56,7 @@ window.gActivityStreamStrings = {
   "settings_pane_topsites_header": "Sitios populares",
   "settings_pane_highlights_header": "Destacados",
   "settings_pane_highlights_options_bookmarks": "Marcadores",
-  "settings_pane_snippets_header": "Fragmentos de código",
+  "settings_pane_snippets_header": "Mensajes interactivos",
   "edit_topsites_button_text": "Editar",
   "edit_topsites_edit_button": "Editar este sitio",
   "topsites_form_add_header": "Nuevo sitio popular",
@@ -110,6 +108,5 @@ window.gActivityStreamStrings = {
   "firstrun_privacy_notice": "Aviso de privacidad",
   "firstrun_continue_to_login": "Continuar",
   "firstrun_skip_login": "Saltar este paso",
-  "context_menu_title": "Abrir menú",
-  "pocket_learn_more": "Saber más"
+  "context_menu_title": "Abrir menú"
 };

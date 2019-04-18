@@ -10,6 +10,10 @@
 #include "mozilla/Casting.h"
 #include "mozilla/DebugOnly.h"
 #include "mozilla/Maybe.h"
+#include "mozilla/Utf8.h"  // mozilla::Utf8Unit
+
+#include <algorithm>
+#include <iterator>
 
 #include "jsdate.h"
 #include "jsfriendapi.h"
@@ -40,7 +44,9 @@
 #include "js/CompilationAndEvaluation.h"
 #include "js/Date.h"
 #include "js/PropertySpec.h"
+#include "js/SourceText.h"  // JS::SourceText
 #include "js/StableStringChars.h"
+#include "js/Warnings.h"  // JS::{,Set}WarningReporter
 #include "js/Wrapper.h"
 #include "util/StringBuffer.h"
 #include "vm/ArgumentsObject.h"
@@ -1962,11 +1968,22 @@ bool js::ReportIncompatibleSelfHostedMethod(JSContext* cx,
   // called function instead.
 
   // Lookup the selfhosted method that was invoked.  But skip over
-  // IsTypedArrayEnsuringArrayBuffer frames, because those are never the
+  // internal self-hosted function frames, because those are never the
   // actual self-hosted callee from external code.  We can't just skip
   // self-hosted things until we find a non-self-hosted one because of cases
   // like array.sort(somethingSelfHosted), where we want to report the error
   // in the somethingSelfHosted, not in the sort() call.
+
+  static const char* const internalNames[] = {
+      "IsTypedArrayEnsuringArrayBuffer",
+      "UnwrapAndCallRegExpBuiltinExec",
+      "RegExpBuiltinExec",
+      "RegExpExec",
+      "RegExpSearchSlowPath",
+      "RegExpReplaceSlowPath",
+      "RegExpMatchSlowPath",
+  };
+
   ScriptFrameIter iter(cx);
   MOZ_ASSERT(iter.isFunctionFrame());
 
@@ -1979,7 +1996,9 @@ bool js::ReportIncompatibleSelfHostedMethod(JSContext* cx,
     if (!funName) {
       return false;
     }
-    if (strcmp(funName, "IsTypedArrayEnsuringArrayBuffer") != 0) {
+    if (std::all_of(
+            std::begin(internalNames), std::end(internalNames),
+            [funName](auto* name) { return strcmp(funName, name) != 0; })) {
       JS_ReportErrorNumberUTF8(cx, GetErrorMessage, nullptr,
                                JSMSG_INCOMPATIBLE_METHOD, funName, "method",
                                InformalValueTypeName(args.thisv()));
@@ -3063,8 +3082,13 @@ bool JSRuntime::initSelfHosting(JSContext* cx) {
   CompileOptions options(cx);
   FillSelfHostingCompileOptions(options);
 
+  JS::SourceText<mozilla::Utf8Unit> srcBuf;
+  if (!srcBuf.init(cx, std::move(src), srcLen)) {
+    return false;
+  }
+
   RootedValue rv(cx);
-  if (!EvaluateUtf8(cx, options, src.get(), srcLen, &rv)) {
+  if (!Evaluate(cx, options, srcBuf, &rv)) {
     return false;
   }
 
@@ -3120,7 +3144,7 @@ static bool GetUnclonedValue(JSContext* cx, HandleNativeObject selfHostedObject,
 
 static bool CloneProperties(JSContext* cx, HandleNativeObject selfHostedObject,
                             HandleObject clone) {
-  AutoIdVector ids(cx);
+  RootedIdVector ids(cx);
   Vector<uint8_t, 16> attrs(cx);
 
   for (size_t i = 0; i < selfHostedObject->getDenseInitializedLength(); i++) {

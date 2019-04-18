@@ -143,8 +143,12 @@ using ProcessSelector = Module::ProcessSelector;
 // Module.h.
 bool ProcessSelectorMatches(ProcessSelector aSelector) {
   GeckoProcessType type = XRE_GetProcessType();
-  if (type == GeckoProcessType_GPU || type == GeckoProcessType_RDD) {
+  if (type == GeckoProcessType_GPU) {
     return !!(aSelector & Module::ALLOW_IN_GPU_PROCESS);
+  }
+
+  if (type == GeckoProcessType_RDD) {
+    return !!(aSelector & Module::ALLOW_IN_RDD_PROCESS);
   }
 
   if (type == GeckoProcessType_Socket) {
@@ -346,87 +350,21 @@ nsComponentManagerImpl::nsComponentManagerImpl()
       mLock("nsComponentManagerImpl.mLock"),
       mStatus(NOT_INITIALIZED) {}
 
-static nsTArray<const mozilla::Module*>* sExtraStaticModules;
-
-/* NSMODULE_DEFN places NSModules in specific sections, as per Module.h.
- * The linker will group them all together, and we use tricks below to
- * find the start and end of the grouped list of NSModules.
- *
- * On Windows, all the symbols in the .kPStaticModules* sections are
- * grouped together, by lexical order of the section names. The NSModules
- * themselves are in .kPStaticModules$M. We use the section name
- * .kPStaticModules$A to add an empty entry that will be the first,
- * and the section name .kPStaticModules$Z for another empty entry that
- * will be the last. We make both null pointers, and skip them in the
- * AllStaticModules range-iterator.
- *
- * On ELF (Linux, BSDs, ...), as well as Mingw builds, the linker itself
- * provides symbols for the beginning and end of the consolidated section,
- * but it only does so for sections that can be represented as C identifiers,
- * so the section is named `kPStaticModules` rather than `.kPStaticModules`.
- *
- * We also use a linker script with BFD ld so that the sections end up
- * folded into the .data.rel.ro section, but that actually breaks the above
- * described behavior, so the linker script contains an additional trick
- * to still provide the __start and __stop symbols (the linker script
- * doesn't work with gold or lld).
- *
- * On Darwin, a similar setup is available through the use of some
- * synthesized symbols (section$...).
- *
- * On all platforms, the __stop_kPStaticModules symbol is past all NSModule
- * pointers.
- * On Windows, the __start_kPStaticModules symbol points to an empty pointer
- * preceding the first NSModule pointer. On other platforms, it points to the
- * first NSModule pointer.
- */
-
-// Dummy class to define a range-iterator for the static modules.
-class AllStaticModules {};
-
-#if defined(_MSC_VER) || (defined(__clang__) && defined(__MINGW32__))
-
-#  pragma section(".kPStaticModules$A", read)
-NSMODULE_ASAN_BLACKLIST __declspec(allocate(".kPStaticModules$A"),
-                                   dllexport) extern mozilla::Module
-    const* const __start_kPStaticModules = nullptr;
-
-mozilla::Module const* const* begin(AllStaticModules& _) {
-  return &__start_kPStaticModules + 1;
-}
-
-#  pragma section(".kPStaticModules$Z", read)
-NSMODULE_ASAN_BLACKLIST __declspec(allocate(".kPStaticModules$Z"),
-                                   dllexport) extern mozilla::Module
-    const* const __stop_kPStaticModules = nullptr;
-
-#else
-
-#  if defined(__ELF__) || (defined(_WIN32) && defined(__GNUC__))
-
-extern "C" mozilla::Module const* const __start_kPStaticModules;
-extern "C" mozilla::Module const* const __stop_kPStaticModules;
-
-#  elif defined(__MACH__)
-
-extern mozilla::Module const* const __start_kPStaticModules __asm(
-    "section$start$__DATA$.kPStaticModules");
-extern mozilla::Module const* const __stop_kPStaticModules __asm(
-    "section$end$__DATA$.kPStaticModules");
-
-#  else
-#    error Do not know how to find NSModules.
-#  endif
-
-static mozilla::Module const* const* begin(AllStaticModules& _) {
-  return &__start_kPStaticModules;
-}
-
+extern const mozilla::Module kNeckoModule;
+extern const mozilla::Module kPowerManagerModule;
+extern const mozilla::Module kContentProcessWidgetModule;
+#if defined(MOZ_WIDGET_COCOA) || defined(MOZ_WIDGET_UIKIT)
+extern const mozilla::Module kWidgetModule;
+#endif
+extern const mozilla::Module kLayoutModule;
+extern const mozilla::Module kKeyValueModule;
+extern const mozilla::Module kXREModule;
+extern const mozilla::Module kEmbeddingModule;
+#if defined(MOZ_WIDGET_ANDROID)
+extern const mozilla::Module kBrowserModule;
 #endif
 
-static mozilla::Module const* const* end(AllStaticModules& _) {
-  return &__stop_kPStaticModules;
-}
+static nsTArray<const mozilla::Module*>* sExtraStaticModules;
 
 /* static */
 void nsComponentManagerImpl::InitializeStaticModules() {
@@ -463,6 +401,8 @@ nsresult nsComponentManagerImpl::Init() {
         ProcessSelectorMatches(ProcessSelector::ALLOW_IN_VR_PROCESS);
     gProcessMatchTable[size_t(ProcessSelector::ALLOW_IN_SOCKET_PROCESS)] =
         ProcessSelectorMatches(ProcessSelector::ALLOW_IN_SOCKET_PROCESS);
+    gProcessMatchTable[size_t(ProcessSelector::ALLOW_IN_RDD_PROCESS)] =
+        ProcessSelectorMatches(ProcessSelector::ALLOW_IN_RDD_PROCESS);
     gProcessMatchTable[size_t(ProcessSelector::ALLOW_IN_GPU_AND_VR_PROCESS)] =
         ProcessSelectorMatches(ProcessSelector::ALLOW_IN_GPU_AND_VR_PROCESS);
     gProcessMatchTable[size_t(
@@ -473,6 +413,18 @@ nsresult nsComponentManagerImpl::Init() {
         ProcessSelector::ALLOW_IN_GPU_VR_AND_SOCKET_PROCESS)] =
         ProcessSelectorMatches(
             ProcessSelector::ALLOW_IN_GPU_VR_AND_SOCKET_PROCESS);
+    gProcessMatchTable[size_t(
+        ProcessSelector::ALLOW_IN_RDD_AND_SOCKET_PROCESS)] =
+        ProcessSelectorMatches(
+            ProcessSelector::ALLOW_IN_RDD_AND_SOCKET_PROCESS);
+    gProcessMatchTable[size_t(
+        ProcessSelector::ALLOW_IN_GPU_RDD_AND_SOCKET_PROCESS)] =
+        ProcessSelectorMatches(
+            ProcessSelector::ALLOW_IN_GPU_RDD_AND_SOCKET_PROCESS);
+    gProcessMatchTable[size_t(
+        ProcessSelector::ALLOW_IN_GPU_RDD_VR_AND_SOCKET_PROCESS)] =
+        ProcessSelectorMatches(
+            ProcessSelector::ALLOW_IN_GPU_RDD_VR_AND_SOCKET_PROCESS);
   }
 
   MOZ_ASSERT(NOT_INITIALIZED == mStatus);
@@ -486,13 +438,19 @@ nsresult nsComponentManagerImpl::Init() {
   nsCategoryManager::GetSingleton()->SuppressNotifications(true);
 
   RegisterModule(&kXPCOMModule);
-
-  for (auto module : AllStaticModules()) {
-    if (module) {  // On local Windows builds, the list may contain null
-                   // pointers from padding.
-      RegisterModule(module);
-    }
-  }
+  RegisterModule(&kNeckoModule);
+  RegisterModule(&kPowerManagerModule);
+  RegisterModule(&kContentProcessWidgetModule);
+#if defined(MOZ_WIDGET_COCOA) || defined(MOZ_WIDGET_UIKIT)
+  RegisterModule(&kWidgetModule);
+#endif
+  RegisterModule(&kLayoutModule);
+  RegisterModule(&kKeyValueModule);
+  RegisterModule(&kXREModule);
+  RegisterModule(&kEmbeddingModule);
+#if defined(MOZ_WIDGET_ANDROID)
+  RegisterModule(&kBrowserModule);
+#endif
 
   for (uint32_t i = 0; i < sExtraStaticModules->Length(); ++i) {
     RegisterModule((*sExtraStaticModules)[i]);
@@ -714,6 +672,19 @@ void nsComponentManagerImpl::RegisterCIDEntryLocked(
     return;
   }
 
+#ifdef DEBUG
+  // If we're still in the static initialization phase, check that we're not
+  // registering something that was already registered.
+  if (mStatus != NORMAL) {
+    if (StaticComponents::LookupByCID(*aEntry->cid)) {
+      MOZ_CRASH_UNSAFE_PRINTF(
+          "While registering XPCOM module %s, trying to re-register CID '%s' "
+          "already registered by a static component.",
+          aModule->Description().get(), AutoIDString(*aEntry->cid).get());
+    }
+  }
+#endif
+
   if (auto entry = mFactories.LookupForAdd(aEntry->cid)) {
     nsFactoryEntry* f = entry.Data();
     NS_WARNING("Re-registering a CID?");
@@ -743,6 +714,21 @@ void nsComponentManagerImpl::RegisterContractIDLocked(
   if (!ProcessSelectorMatches(aEntry->processSelector)) {
     return;
   }
+
+#ifdef DEBUG
+  // If we're still in the static initialization phase, check that we're not
+  // registering something that was already registered.
+  if (mStatus != NORMAL) {
+    if (const StaticModule* module = StaticComponents::LookupByContractID(
+            nsAutoCString(aEntry->contractid))) {
+      MOZ_CRASH_UNSAFE_PRINTF(
+          "Could not map contract ID '%s' to CID %s because it is already "
+          "mapped to CID %s.",
+          aEntry->contractid, AutoIDString(*aEntry->cid).get(),
+          AutoIDString(module->CID()).get());
+    }
+  }
+#endif
 
   nsFactoryEntry* f = mFactories.Get(aEntry->cid);
   if (!f) {

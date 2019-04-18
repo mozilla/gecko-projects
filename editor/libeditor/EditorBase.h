@@ -867,6 +867,14 @@ class EditorBase : public nsIEditor,
   }
 
   /**
+   * GetCompositionStartPoint() and GetCompositionEndPoint() returns start and
+   * end point of composition string if there is.  Otherwise, returns non-set
+   * DOM point.
+   */
+  EditorRawDOMPoint GetCompositionStartPoint() const;
+  EditorRawDOMPoint GetCompositionEndPoint() const;
+
+  /**
    * InsertTextWithTransaction() inserts aStringToInsert to aPointToInsert or
    * better insertion point around it.  If aPointToInsert isn't in a text node,
    * this method looks for the nearest point in a text node with
@@ -1340,6 +1348,7 @@ class EditorBase : public nsIEditor,
    *                            node if necessary), returns no error.
    *                            Otherwise, an error.
    */
+  MOZ_CAN_RUN_SCRIPT_BOUNDARY
   void DoSplitNode(const EditorDOMPoint& aStartOfRightNode,
                    nsIContent& aNewLeftNode, ErrorResult& aError);
 
@@ -1712,12 +1721,6 @@ class EditorBase : public nsIEditor,
    * editor was focused when the DOM window was active.
    */
   virtual bool IsActiveInDOMWindow();
-
-  /**
-   * GetIMESelectionStartOffsetIn() returns the start offset of IME selection in
-   * the aTextNode.  If there is no IME selection, returns -1.
-   */
-  int32_t GetIMESelectionStartOffsetIn(nsINode* aTextNode);
 
   /**
    * FindBetterInsertionPoint() tries to look for better insertion point which

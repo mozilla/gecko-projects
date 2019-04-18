@@ -62,6 +62,7 @@ struct nsOverflowAreas;
 
 namespace mozilla {
 class ComputedStyle;
+class PresShell;
 enum class PseudoStyleType : uint8_t;
 class EventListenerManager;
 enum class LayoutFrameType : uint8_t;
@@ -179,6 +180,7 @@ class nsLayoutUtils {
   typedef mozilla::ScreenMargin ScreenMargin;
   typedef mozilla::LayoutDeviceIntSize LayoutDeviceIntSize;
   typedef mozilla::LayoutDeviceRect LayoutDeviceRect;
+  typedef mozilla::PresShell PresShell;
   typedef mozilla::StyleGeometryBox StyleGeometryBox;
   typedef mozilla::SVGImageContext SVGImageContext;
   typedef mozilla::LogicalSize LogicalSize;
@@ -283,9 +285,8 @@ class nsLayoutUtils {
    * @return true if the new margins were applied.
    */
   static bool SetDisplayPortMargins(
-      nsIContent* aContent, nsIPresShell* aPresShell,
-      const ScreenMargin& aMargins, uint32_t aPriority = 0,
-      RepaintMode aRepaintMode = RepaintMode::Repaint);
+      nsIContent* aContent, PresShell* aPresShell, const ScreenMargin& aMargins,
+      uint32_t aPriority = 0, RepaintMode aRepaintMode = RepaintMode::Repaint);
 
   /**
    * Set the display port base rect for given element to be used with display
@@ -796,7 +797,7 @@ class nsLayoutUtils {
    *                        Set nullptr if you don't need this.
    */
   MOZ_CAN_RUN_SCRIPT
-  static void GetContainerAndOffsetAtEvent(nsIPresShell* aPresShell,
+  static void GetContainerAndOffsetAtEvent(PresShell* aPresShell,
                                            const mozilla::WidgetEvent* aEvent,
                                            nsIContent** aContainer,
                                            int32_t* aOffset);
@@ -901,8 +902,10 @@ class nsLayoutUtils {
 
   /**
    * Gets the transform for aFrame relative to aAncestor. Pass null for
-   * aAncestor to go up to the root frame. aInCSSUnits set to true will
-   * return CSS units, set to false (the default) will return App units.
+   * aAncestor to go up to the root frame. Including nsIFrame::IN_CSS_UNITS
+   * flag in aFlags will return CSS pixels, by default it returns device
+   * pixels.
+   * More info can be found in nsIFrame::GetTransformMatrix.
    */
   static Matrix4x4Flagged GetTransformToAncestor(
       const nsIFrame* aFrame, const nsIFrame* aAncestor, uint32_t aFlags = 0,
@@ -1133,7 +1136,7 @@ class nsLayoutUtils {
    * If PAINT_DOCUMENT_RELATIVE is used, the visible region is interpreted
    * as being relative to the document (normally it's relative to the CSS
    * viewport) and the document is painted as if no scrolling has occured.
-   * Only considered if nsIPresShell::IgnoringViewportScrolling is true.
+   * Only considered if PresShell::IgnoringViewportScrolling is true.
    * PAINT_TO_WINDOW sets painting to window to true on the display list
    * builder even if we can't tell that we are painting to the window.
    * If PAINT_EXISTING_TRANSACTION is set, then BeginTransaction() has already
@@ -1777,10 +1780,6 @@ class nsLayoutUtils {
    *   The nsIFrame that we're drawing this image for.
    * @param aImage
    *   The image.
-   * @param aImageSize
-   *  The unscaled size of the image being drawn. (This might be the image's
-   *  size if no scaling occurs, or it might be the image's size if the image is
-   *  a vector image being rendered at that size.)
    * @param aDest
    *  The position and scaled area where one copy of the image should be drawn.
    *  This area represents the image itself in its correct position as defined
@@ -1801,10 +1800,10 @@ class nsLayoutUtils {
    */
   static ImgDrawResult DrawBackgroundImage(
       gfxContext& aContext, nsIFrame* aForFrame, nsPresContext* aPresContext,
-      imgIContainer* aImage, const CSSIntSize& aImageSize,
-      SamplingFilter aSamplingFilter, const nsRect& aDest, const nsRect& aFill,
-      const nsSize& aRepeatSize, const nsPoint& aAnchor, const nsRect& aDirty,
-      uint32_t aImageFlags, ExtendMode aExtendMode, float aOpacity);
+      imgIContainer* aImage, SamplingFilter aSamplingFilter,
+      const nsRect& aDest, const nsRect& aFill, const nsSize& aRepeatSize,
+      const nsPoint& aAnchor, const nsRect& aDirty, uint32_t aImageFlags,
+      ExtendMode aExtendMode, float aOpacity);
 
   /**
    * Draw an image.
@@ -2712,7 +2711,7 @@ class nsLayoutUtils {
    * Returns the current APZ Resolution Scale. When Java Pan/Zoom is
    * enabled in Fennec it will always return 1.0.
    */
-  static float GetCurrentAPZResolutionScale(nsIPresShell* aShell);
+  static float GetCurrentAPZResolutionScale(PresShell* aPresShell);
 
   /**
    * Returns true if aDocument should be allowed to use resolution
@@ -2762,7 +2761,7 @@ class nsLayoutUtils {
    *
    * Note that for the RCD-RSF, the scroll offset returned is the layout
    * viewport offset; if you need the visual viewport offset, that needs to
-   * be queried independently via nsIPresShell::GetVisualViewportOffset().
+   * be queried independently via PresShell::GetVisualViewportOffset().
    *
    * By contrast, ComputeFrameMetrics() computes all the fields, but requires
    * extra inputs and can only be called during frame layer building.
@@ -2818,14 +2817,14 @@ class nsLayoutUtils {
       const mozilla::LogicalMargin& aFramePadding, mozilla::WritingMode aLineWM,
       mozilla::WritingMode aFrameWM);
 
-  static bool HasDocumentLevelListenersForApzAwareEvents(nsIPresShell* aShell);
+  static bool HasDocumentLevelListenersForApzAwareEvents(PresShell* aPresShell);
 
   /**
    * Set the viewport size for the purpose of clamping the scroll position
    * for the root scroll frame of this document
    * (see nsIDOMWindowUtils.setVisualViewportSize).
    */
-  static void SetVisualViewportSize(nsIPresShell* aPresShell, CSSSize aSize);
+  static void SetVisualViewportSize(PresShell* aPresShell, CSSSize aSize);
 
   /**
    * Returns true if the given scroll origin is "higher priority" than APZ.
@@ -3020,57 +3019,17 @@ class nsLayoutUtils {
   }
 
   /**
-   * Resolve a CSS <length-percentage> value to a definite size.
-   */
-  template <bool clampNegativeResultToZero>
-  static nscoord ResolveToLength(const nsStyleCoord& aCoord,
-                                 nscoord aPercentageBasis) {
-    NS_WARNING_ASSERTION(aPercentageBasis >= nscoord(0), "nscoord overflow?");
-
-    switch (aCoord.GetUnit()) {
-      case eStyleUnit_Coord:
-        MOZ_ASSERT(!clampNegativeResultToZero || aCoord.GetCoordValue() >= 0,
-                   "This value should have been rejected by the style system");
-        return aCoord.GetCoordValue();
-      case eStyleUnit_Percent:
-        if (aPercentageBasis == NS_UNCONSTRAINEDSIZE) {
-          return nscoord(0);
-        }
-        MOZ_ASSERT(!clampNegativeResultToZero || aCoord.GetPercentValue() >= 0,
-                   "This value should have been rejected by the style system");
-        return NSToCoordFloorClamped(aPercentageBasis *
-                                     aCoord.GetPercentValue());
-      case eStyleUnit_Calc: {
-        nsStyleCoord::Calc* calc = aCoord.GetCalcValue();
-        nscoord result;
-        if (aPercentageBasis == NS_UNCONSTRAINEDSIZE) {
-          result = calc->mLength;
-        } else {
-          result = calc->mLength +
-                   NSToCoordFloorClamped(aPercentageBasis * calc->mPercent);
-        }
-        if (clampNegativeResultToZero && result < 0) {
-          return nscoord(0);
-        }
-        return result;
-      }
-      default:
-        MOZ_ASSERT_UNREACHABLE("Unexpected unit!");
-        return nscoord(0);
-    }
-  }
-
-  /**
    * Resolve a column-gap/row-gap to a definite size.
    * @note This method resolves 'normal' to zero.
    *   Callers who want different behavior should handle 'normal' on their own.
    */
-  static nscoord ResolveGapToLength(const nsStyleCoord& aGap,
-                                    nscoord aPercentageBasis) {
-    if (aGap.GetUnit() == eStyleUnit_Normal) {
+  static nscoord ResolveGapToLength(
+      const mozilla::NonNegativeLengthPercentageOrNormal& aGap,
+      nscoord aPercentageBasis) {
+    if (aGap.IsNormal()) {
       return nscoord(0);
     }
-    return ResolveToLength<true>(aGap, aPercentageBasis);
+    return ResolveToLength<true>(aGap.AsLengthPercentage(), aPercentageBasis);
   }
 
   /**

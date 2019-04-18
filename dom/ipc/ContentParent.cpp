@@ -1087,6 +1087,7 @@ mozilla::ipc::IPCResult ContentParent::RecvLaunchRDDProcess(
 /*static*/
 TabParent* ContentParent::CreateBrowser(const TabContext& aContext,
                                         Element* aFrameElement,
+                                        BrowsingContext* aBrowsingContext,
                                         ContentParent* aOpenerContentParent,
                                         TabParent* aSameTabGroupAs,
                                         uint64_t aNextTabParentId) {
@@ -1147,16 +1148,11 @@ TabParent* ContentParent::CreateBrowser(const TabContext& aContext,
     }
   }
 
-  // FIXME: This BrowsingContext should be provided by the nsFrameLoader.
-  // (bug 1523636)
-  RefPtr<CanonicalBrowsingContext> browsingContext =
-      BrowsingContext::Create(nullptr, nullptr, EmptyString(),
-                              BrowsingContext::Type::Content)
-          .downcast<CanonicalBrowsingContext>();
+  aBrowsingContext->SetEmbedderElement(aFrameElement);
 
   // Ensure that our content process is subscribed to our newly created
   // BrowsingContextGroup.
-  browsingContext->Group()->EnsureSubscribed(constructorSender);
+  aBrowsingContext->Group()->EnsureSubscribed(constructorSender);
 
   ContentProcessManager* cpm = ContentProcessManager::GetSingleton();
   cpm->RegisterRemoteFrame(tabId, ContentParentId(0), openerTabId,
@@ -1188,29 +1184,39 @@ TabParent* ContentParent::CreateBrowser(const TabContext& aContext,
     if (tabId == 0) {
       return nullptr;
     }
-    RefPtr<TabParent> tp = new TabParent(constructorSender, tabId, aContext,
-                                         browsingContext, chromeFlags);
 
-    browsingContext->SetOwnerProcessId(constructorSender->ChildID());
+    aBrowsingContext->Canonical()->SetOwnerProcessId(
+        constructorSender->ChildID());
 
-    PBrowserParent* browser = constructorSender->SendPBrowserConstructor(
-        // DeallocPBrowserParent() releases this ref.
-        tp.forget().take(), tabId,
+    RefPtr<TabParent> tabParent = new TabParent(
+        constructorSender, tabId, aContext, aBrowsingContext->Canonical(), chromeFlags);
+
+    // Open a remote endpoint for our PBrowser actor. DeallocPBrowserParent
+    // releases the ref taken.
+    ManagedEndpoint<PBrowserChild> childEp =
+        constructorSender->OpenPBrowserEndpoint(do_AddRef(tabParent).take());
+    if (NS_WARN_IF(!childEp.IsValid())) {
+      return nullptr;
+    }
+
+    // Tell the content process to set up its PBrowserChild.
+    bool ok = constructorSender->SendConstructBrowser(
+        std::move(childEp), tabId,
         aSameTabGroupAs ? aSameTabGroupAs->GetTabId() : TabId(0),
-        aContext.AsIPCTabContext(), chromeFlags, constructorSender->ChildID(),
-        browsingContext, constructorSender->IsForBrowser());
+        aContext.AsIPCTabContext(), aBrowsingContext, chromeFlags,
+        constructorSender->ChildID(), constructorSender->IsForBrowser());
+    if (NS_WARN_IF(!ok)) {
+      return nullptr;
+    }
 
     if (remoteType.EqualsLiteral(LARGE_ALLOCATION_REMOTE_TYPE)) {
       // Tell the TabChild object that it was created due to a Large-Allocation
       // request.
-      Unused << browser->SendAwaitLargeAlloc();
+      Unused << tabParent->SendAwaitLargeAlloc();
     }
 
-    if (browser) {
-      RefPtr<TabParent> constructedTabParent = TabParent::GetFrom(browser);
-      constructedTabParent->SetOwnerElement(aFrameElement);
-      return constructedTabParent;
-    }
+    tabParent->SetOwnerElement(aFrameElement);
+    return tabParent;
   }
   return nullptr;
 }
@@ -1381,8 +1387,8 @@ void ContentParent::ShutDownProcess(ShutDownMethod aMethod) {
 
   using mozilla::dom::quota::QuotaManagerService;
 
-  if (QuotaManagerService* quotaManagerService = QuotaManagerService::Get()) {
-    quotaManagerService->AbortOperationsForProcess(mChildID);
+  if (QuotaManagerService* qms = QuotaManagerService::GetOrCreate()) {
+    qms->AbortOperationsForProcess(mChildID);
   }
 
   // If Close() fails with an error, we'll end up back in this function, but
@@ -2060,49 +2066,13 @@ void ContentParent::LaunchSubprocessInternal(
     earlyReject();
     return;
   }
+  prefSerializer.AddSharedPrefCmdLineArgs(*mSubprocess, extraArgs);
 
   // Register ContentParent as an observer for changes to any pref
   // whose prefix matches the empty string, i.e. all of them.  The
   // observation starts here in order to capture pref updates that
   // happen during async launch.
   Preferences::AddStrongObserver(this, "");
-
-  // Formats a pointer or pointer-sized-integer as a string suitable for passing
-  // in an arguments list.
-  auto formatPtrArg = [](auto arg) {
-    return nsPrintfCString("%zu", uintptr_t(arg));
-  };
-
-#if defined(XP_WIN)
-  // Record the handle as to-be-shared, and pass it via a command flag. This
-  // works because Windows handles are system-wide.
-  HANDLE prefsHandle = prefSerializer.GetSharedMemoryHandle();
-  mSubprocess->AddHandleToShare(prefsHandle);
-  mSubprocess->AddHandleToShare(prefSerializer.GetPrefMapHandle().get());
-  extraArgs.push_back("-prefsHandle");
-  extraArgs.push_back(formatPtrArg(prefsHandle).get());
-  extraArgs.push_back("-prefMapHandle");
-  extraArgs.push_back(
-      formatPtrArg(prefSerializer.GetPrefMapHandle().get()).get());
-#else
-  // In contrast, Unix fds are per-process. So remap the fd to a fixed one that
-  // will be used in the child.
-  // XXX: bug 1440207 is about improving how fixed fds are used.
-  //
-  // Note: on Android, AddFdToRemap() sets up the fd to be passed via a Parcel,
-  // and the fixed fd isn't used. However, we still need to mark it for
-  // remapping so it doesn't get closed in the child.
-  mSubprocess->AddFdToRemap(prefSerializer.GetSharedMemoryHandle().fd,
-                            kPrefsFileDescriptor);
-  mSubprocess->AddFdToRemap(prefSerializer.GetPrefMapHandle().get(),
-                            kPrefMapFileDescriptor);
-#endif
-
-  // Pass the lengths via command line flags.
-  extraArgs.push_back("-prefsLen");
-  extraArgs.push_back(formatPtrArg(prefSerializer.GetPrefLength()).get());
-  extraArgs.push_back("-prefMapSize");
-  extraArgs.push_back(formatPtrArg(prefSerializer.GetPrefMapSize()).get());
 
   if (gSafeMode) {
     extraArgs.push_back("-safeMode");
@@ -3239,18 +3209,18 @@ bool ContentParent::CanOpenBrowser(const IPCTabContext& aContext) {
   return true;
 }
 
-PBrowserParent* ContentParent::AllocPBrowserParent(
-    const TabId& aTabId, const TabId& aSameTabGroupAs,
-    const IPCTabContext& aContext, const uint32_t& aChromeFlags,
-    const ContentParentId& aCpId, BrowsingContext* aBrowsingContext,
-    const bool& aIsForBrowser) {
-  MOZ_ASSERT(!aSameTabGroupAs);
+bool ContentParent::DeallocPBrowserParent(PBrowserParent* frame) {
+  TabParent* parent = TabParent::GetFrom(frame);
+  NS_RELEASE(parent);
+  return true;
+}
 
-  Unused << aCpId;
-  Unused << aIsForBrowser;
-
+mozilla::ipc::IPCResult ContentParent::RecvConstructPopupBrowser(
+    ManagedEndpoint<PBrowserParent>&& aBrowserEp, const TabId& aTabId,
+    const IPCTabContext& aContext, BrowsingContext* aBrowsingContext,
+    const uint32_t& aChromeFlags) {
   if (!CanOpenBrowser(aContext)) {
-    return nullptr;
+    return IPC_FAIL(this, "CanOpenBrowser Failed");
   }
 
   uint32_t chromeFlags = aChromeFlags;
@@ -3270,7 +3240,7 @@ PBrowserParent* ContentParent::AllocPBrowserParent(
     // match those of the opener.
     nsCOMPtr<nsILoadContext> loadContext = opener->GetLoadContext();
     if (!loadContext) {
-      return nullptr;
+      return IPC_FAIL(this, "Missing Opener LoadContext");
     }
 
     bool isPrivate;
@@ -3284,7 +3254,7 @@ PBrowserParent* ContentParent::AllocPBrowserParent(
       aContext.type() == IPCTabContext::TUnsafeIPCTabContext) {
     MOZ_ASSERT(XRE_IsParentProcess());
     if (!XRE_IsParentProcess()) {
-      return nullptr;
+      return IPC_FAIL(this, "Not in Parent Process");
     }
 
     // The creation of PBrowser was triggered from content process through
@@ -3292,8 +3262,8 @@ PBrowserParent* ContentParent::AllocPBrowserParent(
     // We need to register remote frame with the child generated tab id.
     ContentProcessManager* cpm = ContentProcessManager::GetSingleton();
     if (!cpm->RegisterRemoteFrame(aTabId, openerCpId, openerTabId, aContext,
-                                  aCpId)) {
-      return nullptr;
+                                  ChildID())) {
+      return IPC_FAIL(this, "RegisterRemoteFrame Failed");
     }
   }
 
@@ -3304,32 +3274,21 @@ PBrowserParent* ContentParent::AllocPBrowserParent(
   CanonicalBrowsingContext* browsingContext =
       CanonicalBrowsingContext::Cast(aBrowsingContext);
   if (NS_WARN_IF(!browsingContext->IsOwnedByProcess(ChildID()))) {
-    MOZ_ASSERT(false, "BrowsingContext not owned by the correct process!");
-    return nullptr;
+    return IPC_FAIL(this, "BrowsingContext Owned by Incorrect Process!");
   }
 
   MaybeInvalidTabContext tc(aContext);
   MOZ_ASSERT(tc.IsValid());
-  TabParent* parent = new TabParent(this, aTabId, tc.GetTabContext(),
-                                    browsingContext, chromeFlags);
+  RefPtr<TabParent> parent = new TabParent(this, aTabId, tc.GetTabContext(),
+                                           browsingContext, chromeFlags);
 
-  // We release this ref in DeallocPBrowserParent()
-  NS_ADDREF(parent);
-  return parent;
-}
+  // Bind the created TabParent to IPC to actually link the actor. The ref here
+  // is released in DeallocPBrowserParent.
+  if (NS_WARN_IF(!BindPBrowserEndpoint(std::move(aBrowserEp),
+                                       do_AddRef(parent).take()))) {
+    return IPC_FAIL(this, "BindPBrowserEndpoint failed");
+  }
 
-bool ContentParent::DeallocPBrowserParent(PBrowserParent* frame) {
-  TabParent* parent = TabParent::GetFrom(frame);
-  NS_RELEASE(parent);
-  return true;
-}
-
-mozilla::ipc::IPCResult ContentParent::RecvPBrowserConstructor(
-    PBrowserParent* actor, const TabId& tabId, const TabId& sameTabGroupAs,
-    const IPCTabContext& context, const uint32_t& chromeFlags,
-    const ContentParentId& cpId, BrowsingContext* aBrowsingContext,
-    const bool& isForBrowser) {
-  TabParent* parent = TabParent::GetFrom(actor);
   // When enabling input event prioritization, input events may preempt other
   // normal priority IPC messages. To prevent the input events preempt
   // PBrowserConstructor, we use an IPC 'RemoteIsReadyToHandleInputEvents' to
@@ -4988,6 +4947,8 @@ mozilla::ipc::IPCResult ContentParent::RecvCreateWindowInDifferentProcess(
     const nsCString& aFeatures, const float& aFullZoom, const nsString& aName,
     const IPC::Principal& aTriggeringPrincipal, nsIContentSecurityPolicy* aCsp,
     nsIReferrerInfo* aReferrerInfo) {
+  MOZ_DIAGNOSTIC_ASSERT(!nsContentUtils::IsSpecialName(aName));
+
   nsCOMPtr<nsITabParent> newRemoteTab;
   bool windowIsNew;
   nsCOMPtr<nsIURI> uriToLoad = DeserializeURI(aURIToLoad);
@@ -5712,13 +5673,9 @@ mozilla::ipc::IPCResult ContentParent::RecvAttachBrowsingContext(
     // BrowsingContext in another process. This is illegal since the
     // only thing that could create that child BrowsingContext is a
     // parent docshell in the same process as that BrowsingContext.
+    MOZ_DIAGNOSTIC_ASSERT(false,
+                          "Trying to attach to out of process parent context");
 
-    // TODO(farre): We're doing nothing now, but is that exactly what
-    // we want? Maybe we want to crash the child currently calling
-    // SendAttachBrowsingContext and/or the child that originally
-    // called SendAttachBrowsingContext or possibly all children that
-    // has a BrowsingContext connected to the child that currently
-    // called SendAttachBrowsingContext? [Bug 1471598]
     MOZ_LOG(BrowsingContext::GetLog(), LogLevel::Warning,
             ("ParentIPC: Trying to attach to out of process parent context "
              "0x%08" PRIx64,
@@ -5731,9 +5688,9 @@ mozilla::ipc::IPCResult ContentParent::RecvAttachBrowsingContext(
     // This is highly suspicious. BrowsingContexts should only be
     // attached at most once, but finding one indicates that someone
     // is doing something they shouldn't.
+    MOZ_DIAGNOSTIC_ASSERT(false,
+                          "Trying to attach already attached browsing context");
 
-    // TODO(farre): To crash or not to crash. Same reasoning as in
-    // above TODO. [Bug 1471598]
     MOZ_LOG(BrowsingContext::GetLog(), LogLevel::Warning,
             ("ParentIPC: Trying to attach already attached 0x%08" PRIx64
              " to 0x%08" PRIx64,
@@ -5748,6 +5705,17 @@ mozilla::ipc::IPCResult ContentParent::RecvAttachBrowsingContext(
   }
 
   child->Attach(/* aFromIPC */ true);
+
+  for (auto iter = child->Group()->ContentParentsIter(); !iter.Done();
+       iter.Next()) {
+    nsRefPtrHashKey<ContentParent>* entry = iter.Get();
+    if (entry->GetKey() == this) {
+      continue;
+    }
+
+    Unused << entry->GetKey()->SendAttachBrowsingContext(
+      child->GetIPCInitializer());
+  }
 
   return IPC_OK();
 }
@@ -5765,9 +5733,8 @@ mozilla::ipc::IPCResult ContentParent::RecvDetachBrowsingContext(
     // process. This is illegal since the owner of the BrowsingContext
     // is the proccess with the in-process docshell, which is tracked
     // by OwnerProcessId.
+    MOZ_DIAGNOSTIC_ASSERT(false, "Trying to detach out of process context");
 
-    // TODO(farre): To crash or not to crash. Same reasoning as in
-    // above TODO. [Bug 1471598]
     MOZ_LOG(BrowsingContext::GetLog(), LogLevel::Warning,
             ("ParentIPC: Trying to detach out of process context 0x%08" PRIx64,
              aContext->Id()));

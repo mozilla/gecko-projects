@@ -168,11 +168,11 @@ class gfxUtils {
   static void ClearThebesSurface(gfxASurface* aSurface);
 
   static const float* YuvToRgbMatrix4x3RowMajor(
-      mozilla::YUVColorSpace aYUVColorSpace);
+      mozilla::gfx::YUVColorSpace aYUVColorSpace);
   static const float* YuvToRgbMatrix3x3ColumnMajor(
-      mozilla::YUVColorSpace aYUVColorSpace);
+      mozilla::gfx::YUVColorSpace aYUVColorSpace);
   static const float* YuvToRgbMatrix4x4ColumnMajor(
-      mozilla::YUVColorSpace aYUVColorSpace);
+      mozilla::gfx::YUVColorSpace aYUVColorSpace);
 
   /**
    * Creates a copy of aSurface, but having the SurfaceFormat aFormat.
@@ -295,7 +295,7 @@ class gfxUtils {
   static nsresult GetInputStream(DataSourceSurface* aSurface,
                                  bool aIsAlphaPremultiplied,
                                  const char* aMimeType,
-                                 const char16_t* aEncoderOptions,
+                                 const nsAString& aEncoderOptions,
                                  nsIInputStream** outStream);
 
   static nsresult ThreadSafeGetFeatureStatus(
@@ -327,6 +327,9 @@ class gfxUtils {
 };
 
 namespace mozilla {
+
+struct StyleRGBA;
+
 namespace gfx {
 
 /**
@@ -337,6 +340,7 @@ namespace gfx {
  * applicable).
  */
 Color ToDeviceColor(Color aColor);
+Color ToDeviceColor(const StyleRGBA& aColor);
 Color ToDeviceColor(nscolor aColor);
 
 /**

@@ -3,16 +3,17 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 #include "nsTableColGroupFrame.h"
+
+#include "mozilla/ComputedStyle.h"
+#include "mozilla/PresShell.h"
 #include "nsTableColFrame.h"
 #include "nsTableFrame.h"
-#include "mozilla/ComputedStyle.h"
 #include "nsStyleConsts.h"
 #include "nsPresContext.h"
 #include "nsHTMLParts.h"
 #include "nsGkAtoms.h"
 #include "nsCOMPtr.h"
 #include "nsCSSRendering.h"
-#include "nsIPresShell.h"
 
 using namespace mozilla;
 
@@ -405,7 +406,7 @@ void nsTableColGroupFrame::GetContinuousBCBorderWidth(WritingMode aWM,
 
 /* ----- global methods ----- */
 
-nsTableColGroupFrame* NS_NewTableColGroupFrame(nsIPresShell* aPresShell,
+nsTableColGroupFrame* NS_NewTableColGroupFrame(PresShell* aPresShell,
                                                ComputedStyle* aStyle) {
   return new (aPresShell)
       nsTableColGroupFrame(aStyle, aPresShell->GetPresContext());

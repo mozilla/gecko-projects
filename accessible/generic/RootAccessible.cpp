@@ -6,6 +6,7 @@
 #include "RootAccessible.h"
 
 #include "mozilla/ArrayUtils.h"
+#include "mozilla/PresShell.h"  // for nsAccUtils::GetDocAccessibleFor()
 
 #define CreateEvent CreateEventA
 
@@ -58,7 +59,7 @@ NS_IMPL_ISUPPORTS_INHERITED(RootAccessible, DocAccessible, nsIDOMEventListener)
 ////////////////////////////////////////////////////////////////////////////////
 // Constructor/destructor
 
-RootAccessible::RootAccessible(Document* aDocument, nsIPresShell* aPresShell)
+RootAccessible::RootAccessible(Document* aDocument, PresShell* aPresShell)
     : DocAccessibleWrap(aDocument, aPresShell) {
   mType = eRootType;
 }
@@ -150,8 +151,8 @@ const char* const kEventTypes[] = {
     // add ourself as a CheckboxStateChange listener (custom event fired in
     // HTMLInputElement.cpp)
     "CheckboxStateChange",
-    // add ourself as a RadioStateChange Listener ( custom event fired in in
-    // HTMLInputElement.cpp  & radio.xml)
+    // add ourself as a RadioStateChange Listener (custom event fired in in
+    // HTMLInputElement.cpp & radio.js)
     "RadioStateChange", "popupshown", "popuphiding", "DOMMenuInactive",
     "DOMMenuItemActive", "DOMMenuItemInactive", "DOMMenuBarActive",
     "DOMMenuBarInactive"};
@@ -443,8 +444,9 @@ void RootAccessible::ProcessDOMEvent(Event* aDOMEvent, nsINode* aTarget) {
 
 void RootAccessible::Shutdown() {
   // Called manually or by Accessible::LastRelease()
-  if (!PresShell()) return;  // Already shutdown
-
+  if (HasShutdown()) {
+    return;
+  }
   DocAccessibleWrap::Shutdown();
 }
 

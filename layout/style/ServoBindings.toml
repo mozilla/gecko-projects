@@ -95,7 +95,6 @@ rusty-enums = [
     "mozilla::StyleClear",
     "mozilla::StyleColumnFill",
     "mozilla::StyleColumnSpan",
-    "mozilla::StyleComplexColor_Tag",
     "mozilla::StyleFloat",
     "mozilla::StyleImageOrientation",
     "mozilla::StyleUserModify",
@@ -349,7 +348,12 @@ opaque-types = [
     "RefPtr_Proxy_member_function",
     "nsAutoPtr_Proxy",
     "nsAutoPtr_Proxy_member_function",
+    "mozilla::detail::HashTable", # <- We should be able to remove this and
+                                  # HashSet below once
+                                  # https://github.com/rust-lang/rust-bindgen/pull/1515
+                                  # is available
     "mozilla::detail::PointerType",
+    "mozilla::HashSet",
     "mozilla::Pair",
     "mozilla::Pair_Base",
     "mozilla::SeenPtrs",
@@ -409,6 +413,7 @@ cbindgen-types = [
     { gecko = "StyleBorderStyle", servo = "values::computed::BorderStyle" },
     { gecko = "StyleOutlineStyle", servo = "values::computed::OutlineStyle" },
     { gecko = "StyleScrollSnapAlign", servo = "values::computed::ScrollSnapAlign" },
+    { gecko = "StyleScrollSnapStrictness", servo = "values::computed::ScrollSnapStrictness" },
     { gecko = "StyleScrollSnapType", servo = "values::computed::ScrollSnapType" },
     { gecko = "StyleResize", servo = "values::computed::Resize" },
     { gecko = "StyleOverflowClipBox", servo = "values::computed::OverflowClipBox" },
@@ -421,6 +426,7 @@ cbindgen-types = [
     { gecko = "StyleLengthPercentage", servo = "values::computed::LengthPercentage" },
     { gecko = "StyleNonNegativeLengthPercentage", servo = "values::computed::NonNegativeLengthPercentage" },
     { gecko = "StyleGenericLengthPercentageOrAuto", servo = "values::generics::length::LengthPercentageOrAuto" },
+    { gecko = "StyleGenericLengthPercentageOrNormal", servo = "values::generics::length::LengthPercentageOrNormal" },
     { gecko = "StyleLengthPercentageOrAuto", servo = "values::computed::LengthPercentageOrAuto" },
     { gecko = "StyleNonNegativeLengthPercentageOrAuto", servo = "values::computed::NonNegativeLengthPercentageOrAuto" },
     { gecko = "StyleRect", servo = "values::generics::rect::Rect" },
@@ -453,12 +459,17 @@ cbindgen-types = [
     { gecko = "StyleTouchAction", servo = "values::computed::TouchAction" },
     { gecko = "StyleWillChangeBits", servo = "values::specified::box_::WillChangeBits" },
     { gecko = "StyleTextDecorationLine", servo = "values::computed::TextDecorationLine" },
+    { gecko = "StyleTextTransform", servo = "values::computed::TextTransform" },
     { gecko = "StyleMozListReversed", servo = "values::computed::MozListReversed" },
     { gecko = "StyleOwned", servo = "gecko_bindings::sugar::ownership::Owned" },
     { gecko = "StyleOwnedOrNull", servo = "gecko_bindings::sugar::ownership::OwnedOrNull" },
     { gecko = "StyleStrong", servo = "gecko_bindings::sugar::ownership::Strong" },
     { gecko = "StyleGenericFontFamily", servo = "values::computed::font::GenericFontFamily" },
     { gecko = "StyleFontFamilyNameSyntax", servo = "values::computed::font::FontFamilyNameSyntax" },
+    { gecko = "StyleGenericColor", servo = "values::generics::color::Color" },
+    { gecko = "StyleGenericColorOrAuto", servo = "values::generics::color::ColorOrAuto" },
+    { gecko = "StyleGenericScrollbarColor", servo = "values::generics::ui::ScrollbarColor" },
+    { gecko = "StyleRGBA", servo = "cssparser::RGBA" },
 ]
 
 mapped-generic-types = [

@@ -1,12 +1,19 @@
 /* import-globals-from ../../../common/tests/unit/head_helpers.js */
 
-const {AppConstants} = ChromeUtils.import("resource://gre/modules/AppConstants.jsm");
-const {Services} = ChromeUtils.import("resource://gre/modules/Services.jsm");
+const { AppConstants } = ChromeUtils.import("resource://gre/modules/AppConstants.jsm");
+const { Services } = ChromeUtils.import("resource://gre/modules/Services.jsm");
+const { setTimeout } = ChromeUtils.import("resource://gre/modules/Timer.jsm");
 
 const { UptakeTelemetry } = ChromeUtils.import("resource://services-common/uptake-telemetry.js");
-const { RemoteSettings } = ChromeUtils.import("resource://services-settings/remote-settings.js");
 const { Kinto } = ChromeUtils.import("resource://services-common/kinto-offline-client.js");
-const { setTimeout } = ChromeUtils.import("resource://gre/modules/Timer.jsm");
+const { pushBroadcastService } = ChromeUtils.import("resource://gre/modules/PushBroadcastService.jsm");
+const {
+  RemoteSettings,
+  remoteSettingsBroadcastHandler,
+  BROADCAST_ID,
+} = ChromeUtils.import("resource://services-settings/remote-settings.js");
+const { TelemetryTestUtils } = ChromeUtils.import("resource://testing-common/TelemetryTestUtils.jsm");
+
 
 const IS_ANDROID = AppConstants.platform == "android";
 
@@ -33,6 +40,9 @@ async function clear_state() {
   Services.prefs.setIntPref(PREF_LAST_UPDATE, 0);
   Services.prefs.setIntPref(PREF_CLOCK_SKEW_SECONDS, 0);
   Services.prefs.clearUserPref(PREF_LAST_ETAG);
+
+  // Clear events snapshot.
+  TelemetryTestUtils.assertEvents([], {}, {process: "dummy"});
 }
 
 function serveChangesEntries(serverTime, entries) {
@@ -300,18 +310,15 @@ add_task(async function test_age_of_data_is_reported_in_uptake_status() {
     bucket: "main",
     collection: "some-entry",
   }]));
-  const backup = UptakeTelemetry.report;
-  let reportedAge;
-  UptakeTelemetry.report = (component, status, { age }) => {
-    if (age) {
-      reportedAge = age;
-    }
-  };
 
   await RemoteSettings.pollChanges();
 
-  Assert.equal(reportedAge, 3600);
-  UptakeTelemetry.report = backup;
+  TelemetryTestUtils.assertEvents([
+    ["uptake.remotecontent.result", "uptake", "remotesettings", UptakeTelemetry.STATUS.SUCCESS,
+      { source: TELEMETRY_HISTOGRAM_POLL_KEY, age: "3600", trigger: "manual" }],
+    ["uptake.remotecontent.result", "uptake", "remotesettings", UptakeTelemetry.STATUS.SUCCESS,
+      { source: TELEMETRY_HISTOGRAM_SYNC_KEY, duration: () => true, trigger: "manual" }],
+  ]);
 });
 add_task(clear_state);
 
@@ -328,19 +335,14 @@ add_task(async function test_synchronization_duration_is_reported_in_uptake_stat
   // eslint-disable-next-line mozilla/no-arbitrary-setTimeout
   c.maybeSync = () => new Promise(resolve => setTimeout(resolve, 1000));
 
-  const backup = UptakeTelemetry.report;
-  let reportedStatus;
-  let reportedDuration = -1;
-  UptakeTelemetry.report = (component, status, { duration }) => {
-    reportedStatus = status;
-    reportedDuration = duration;
-  };
-
   await RemoteSettings.pollChanges();
 
-  UptakeTelemetry.report = backup;
-  Assert.ok(reportedDuration >= 1000);
-  Assert.equal(reportedStatus, "success");
+  TelemetryTestUtils.assertEvents([
+    ["uptake.remotecontent.result", "uptake", "remotesettings", "success",
+      { source: TELEMETRY_HISTOGRAM_POLL_KEY, age: () => true, trigger: "manual" }],
+    ["uptake.remotecontent.result", "uptake", "remotesettings", "success",
+      { source: TELEMETRY_HISTOGRAM_SYNC_KEY, duration: (v) => v >= 1000, trigger: "manual" }],
+  ]);
 });
 add_task(clear_state);
 
@@ -760,7 +762,7 @@ add_task(async function test_syncs_clients_with_local_dump() {
 add_task(clear_state);
 
 
-add_task(async function test_adding_client_resets_last_etag() {
+add_task(async function test_adding_client_resets_polling() {
   function serve200or304(request, response) {
     const entries = [{
       id: "aa71e6cc-9f37-447a-b6e0-c025e8eabd03",
@@ -800,4 +802,60 @@ add_task(async function test_adding_client_resets_last_etag() {
 
   // The new client was called, even if the server data didn't change.
   Assert.ok(maybeSyncCalled);
+
+  // Poll again. This time maybeSync() won't be called.
+  maybeSyncCalled = false;
+  await RemoteSettings.pollChanges();
+  Assert.ok(!maybeSyncCalled);
 });
+add_task(clear_state);
+
+
+add_task(async function test_broadcast_handler_passes_version_and_trigger_values() {
+  // The polling will use the broadcast version as cache busting query param.
+  let passedQueryString;
+  function serveCacheBusted(request, response) {
+    passedQueryString = request.queryString;
+    const entries = [{
+      id: "b6ba7fab-a40a-4d03-a4af-6b627f3c5b36",
+      last_modified: 42,
+      host: "localhost",
+      bucket: "main",
+      collection: "from-broadcast",
+    }];
+    response.write(JSON.stringify({
+      data: entries,
+    }));
+    response.setHeader("ETag", '"42"');
+    response.setStatusLine(null, 200, "OK");
+    response.setHeader("Content-Type", "application/json; charset=UTF-8");
+    response.setHeader("Date", (new Date()).toUTCString());
+  }
+  server.registerPathHandler(CHANGES_PATH, serveCacheBusted);
+
+  let passedTrigger;
+  const c = RemoteSettings("from-broadcast");
+  c.maybeSync = (last_modified, { trigger }) => {
+    passedTrigger = trigger;
+  };
+
+  const version = "1337";
+
+  let context = { phase: pushBroadcastService.PHASES.HELLO };
+  await remoteSettingsBroadcastHandler.receivedBroadcastMessage(version, BROADCAST_ID, context);
+  Assert.equal(passedTrigger, "startup");
+  Assert.equal(passedQueryString, `_expected=${version}`);
+
+  clear_state();
+
+  context = { phase: pushBroadcastService.PHASES.REGISTER };
+  await remoteSettingsBroadcastHandler.receivedBroadcastMessage(version, BROADCAST_ID, context);
+  Assert.equal(passedTrigger, "startup");
+
+  clear_state();
+
+  context = { phase: pushBroadcastService.PHASES.BROADCAST };
+  await remoteSettingsBroadcastHandler.receivedBroadcastMessage(version, BROADCAST_ID, context);
+  Assert.equal(passedTrigger, "broadcast");
+});
+add_task(clear_state);

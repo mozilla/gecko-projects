@@ -415,6 +415,17 @@ void PrototypeDocumentContentSink::CloseElement(Element* aElement) {
 }
 
 nsresult PrototypeDocumentContentSink::ResumeWalk() {
+  nsresult rv = ResumeWalkInternal();
+  if (NS_FAILED(rv)) {
+    nsContentUtils::ReportToConsoleNonLocalized(
+        NS_LITERAL_STRING("Failed to load document from prototype document."),
+        nsIScriptError::errorFlag, NS_LITERAL_CSTRING("Prototype Document"),
+        mDocument, mDocumentURI);
+  }
+  return rv;
+}
+
+nsresult PrototypeDocumentContentSink::ResumeWalkInternal() {
   MOZ_ASSERT(mStillWalking);
   // Walk the prototype and build the delegate content model. The
   // walk is performed in a top-down, left-to-right fashion. That
@@ -439,6 +450,7 @@ nsresult PrototypeDocumentContentSink::ResumeWalk() {
       // inserted to the actual document.
       nsXULPrototypeElement* proto;
       nsCOMPtr<nsIContent> element;
+      nsCOMPtr<nsIContent> nodeToPushTo;
       int32_t indx;  // all children of proto before indx (not
                      // inclusive) have already been constructed
       rv = mContextStack.Peek(&proto, getter_AddRefs(element), &indx);
@@ -467,6 +479,15 @@ nsresult PrototypeDocumentContentSink::ResumeWalk() {
         continue;
       }
 
+      nodeToPushTo = element;
+      // For template elements append the content to the template's document
+      // fragment.
+      if (element->IsHTMLElement(nsGkAtoms::_template)) {
+        HTMLTemplateElement* templateElement =
+            static_cast<HTMLTemplateElement*>(element.get());
+        nodeToPushTo = templateElement->Content();
+      }
+
       // Grab the next child, and advance the current context stack
       // to the next sibling to our right.
       nsXULPrototypeNode* childproto = proto->mChildren[indx];
@@ -487,7 +508,7 @@ nsresult PrototypeDocumentContentSink::ResumeWalk() {
           if (NS_FAILED(rv)) return rv;
 
           // ...and append it to the content model.
-          rv = element->AppendChildTo(child, false);
+          rv = nodeToPushTo->AppendChildTo(child, false);
           if (NS_FAILED(rv)) return rv;
 
           // If it has children, push the element onto the context
@@ -532,7 +553,7 @@ nsresult PrototypeDocumentContentSink::ResumeWalk() {
               static_cast<nsXULPrototypeText*>(childproto);
           text->SetText(textproto->mValue, false);
 
-          rv = element->AppendChildTo(text, false);
+          rv = nodeToPushTo->AppendChildTo(text, false);
           NS_ENSURE_SUCCESS(rv, rv);
         } break;
 
@@ -1024,6 +1045,15 @@ nsresult PrototypeDocumentContentSink::CreateElementFromPrototype(
 
     rv = AddAttributes(aPrototype, result);
     if (NS_FAILED(rv)) return rv;
+
+    if (xtfNi->Equals(nsGkAtoms::script, kNameSpaceID_XHTML) ||
+        xtfNi->Equals(nsGkAtoms::script, kNameSpaceID_SVG)) {
+      nsCOMPtr<nsIScriptElement> sele = do_QueryInterface(result);
+      MOZ_ASSERT(sele, "Node didn't QI to script.");
+      // Script loading is handled by the this content sink, so prevent the
+      // script from loading when it is bound to the document.
+      sele->PreventExecution();
+    }
   }
 
   result.forget(aResult);

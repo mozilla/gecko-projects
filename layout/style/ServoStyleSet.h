@@ -98,7 +98,6 @@ class ServoStyleSet {
   explicit ServoStyleSet(dom::Document&);
   ~ServoStyleSet();
 
-  void ShellAttachedToDocument();
   void ShellDetachedFromDocument();
 
   // Called when a rules in a stylesheet in this set, or a child sheet of that,
@@ -130,10 +129,6 @@ class ServoStyleSet {
   bool GetAuthorStyleDisabled() const { return mAuthorStyleDisabled; }
 
   void SetAuthorStyleDisabled(bool aStyleDisabled);
-
-  // FIXME(emilio): All the callers pass Allow here
-  already_AddRefed<ComputedStyle> ResolveStyleFor(
-      dom::Element* aElement, LazyComputeBehavior aMayCompute);
 
   // Get a CopmutedStyle for a text node (which no rules will match).
   //
@@ -180,11 +175,13 @@ class ServoStyleSet {
 
   // Resolves style for a (possibly-pseudo) Element without assuming that the
   // style has been resolved. If the element was unstyled and a new style
-  // context was resolved, it is not stored in the DOM. (That is, the element
-  // remains unstyled.)
+  // was resolved, it is not stored in the DOM. (That is, the element remains
+  // unstyled.)
+  //
+  // TODO(emilio): Element argument should be `const`.
   already_AddRefed<ComputedStyle> ResolveStyleLazily(
-      dom::Element* aElement, PseudoStyleType,
-      StyleRuleInclusion aRules = StyleRuleInclusion::All);
+      dom::Element&, PseudoStyleType = PseudoStyleType::NotPseudo,
+      StyleRuleInclusion = StyleRuleInclusion::All);
 
   // Get a ComputedStyle for an anonymous box. The pseudo type must be an
   // inheriting anon box.
@@ -322,7 +319,7 @@ class ServoStyleSet {
       const mozilla::ComputedStyle* aStyle,
       nsTArray<RefPtr<RawServoAnimationValue>>& aAnimationValues);
 
-  bool AppendFontFaceRules(nsTArray<nsFontFaceRuleContainer>& aArray);
+  void AppendFontFaceRules(nsTArray<nsFontFaceRuleContainer>& aArray);
 
   const RawServoCounterStyleRule* CounterStyleRuleForName(nsAtom* aName);
 
@@ -488,10 +485,6 @@ class ServoStyleSet {
    * This should only be called if StylistNeedsUpdate returns true.
    */
   void UpdateStylist();
-
-  already_AddRefed<ComputedStyle> ResolveStyleLazilyInternal(
-      dom::Element* aElement, PseudoStyleType aPseudoType,
-      StyleRuleInclusion aRules = StyleRuleInclusion::All);
 
   void RunPostTraversalTasks();
 

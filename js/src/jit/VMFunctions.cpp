@@ -1009,7 +1009,7 @@ bool DebugAfterYield(JSContext* cx, BaselineFrame* frame, jsbytecode* pc,
   // The BaselineFrame has just been constructed by JSOP_RESUME in the
   // caller. We need to set its debuggee flag as necessary.
   //
-  // If a breakpoint is set on JSOP_DEBUGAFTERYIELD, or stepping is enabled,
+  // If a breakpoint is set on JSOP_AFTERYIELD, or stepping is enabled,
   // we may already have done this work. Don't fire onEnterFrame again.
   if (frame->script()->isDebuggee() && !frame->isDebuggee()) {
     frame->setIsDebuggee();
@@ -1023,7 +1023,7 @@ bool DebugAfterYield(JSContext* cx, BaselineFrame* frame, jsbytecode* pc,
 
 bool GeneratorThrowOrReturn(JSContext* cx, BaselineFrame* frame,
                             Handle<AbstractGeneratorObject*> genObj,
-                            HandleValue arg, uint32_t resumeKind) {
+                            HandleValue arg, uint32_t resumeKindArg) {
   // Set the frame's pc to the current resume pc, so that frame iterators
   // work. This function always returns false, so we're guaranteed to enter
   // the exception handler where we will clear the pc.
@@ -1040,8 +1040,10 @@ bool GeneratorThrowOrReturn(JSContext* cx, BaselineFrame* frame,
   if (!DebugAfterYield(cx, frame, pc, &mustReturn)) {
     return false;
   }
+
+  GeneratorResumeKind resumeKind = GeneratorResumeKind(resumeKindArg);
   if (mustReturn) {
-    resumeKind = AbstractGeneratorObject::RETURN;
+    resumeKind = GeneratorResumeKind::Return;
   }
 
   MOZ_ALWAYS_FALSE(
@@ -1124,8 +1126,8 @@ bool HandleDebugTrap(JSContext* cx, BaselineFrame* frame, uint8_t* retAddr,
       script->baselineScript()->retAddrEntryFromReturnAddress(retAddr).pc(
           script);
 
-  if (*pc == JSOP_DEBUGAFTERYIELD) {
-    // JSOP_DEBUGAFTERYIELD will set the frame's debuggee flag and call the
+  if (*pc == JSOP_AFTERYIELD) {
+    // JSOP_AFTERYIELD will set the frame's debuggee flag and call the
     // onEnterFrame handler, but if we set a breakpoint there we have to do
     // it now.
     MOZ_ASSERT(!frame->isDebuggee());
@@ -1165,7 +1167,7 @@ bool HandleDebugTrap(JSContext* cx, BaselineFrame* frame, uint8_t* retAddr,
       return jit::DebugEpilogue(cx, frame, pc, true);
 
     case ResumeMode::Throw:
-      cx->setPendingException(rval);
+      cx->setPendingExceptionAndCaptureStack(rval);
       return false;
 
     default:

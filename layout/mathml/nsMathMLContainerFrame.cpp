@@ -8,18 +8,18 @@
 
 #include "gfxContext.h"
 #include "gfxUtils.h"
+#include "mozilla/Likely.h"
+#include "mozilla/PresShell.h"
+#include "mozilla/dom/MutationEventBinding.h"
 #include "mozilla/gfx/2D.h"
 #include "nsLayoutUtils.h"
 #include "nsPresContext.h"
-#include "nsIPresShell.h"
 #include "nsNameSpaceManager.h"
 #include "nsGkAtoms.h"
 #include "nsDisplayList.h"
-#include "mozilla/Likely.h"
 #include "nsIScriptError.h"
 #include "nsContentUtils.h"
 #include "nsMathMLElement.h"
-#include "mozilla/dom/MutationEventBinding.h"
 
 using namespace mozilla;
 using namespace mozilla::gfx;
@@ -1460,7 +1460,7 @@ nsresult nsMathMLContainerFrame::ReportInvalidChildError(nsAtom* aChildTag) {
 
 //==========================
 
-nsContainerFrame* NS_NewMathMLmathBlockFrame(nsIPresShell* aPresShell,
+nsContainerFrame* NS_NewMathMLmathBlockFrame(PresShell* aPresShell,
                                              ComputedStyle* aStyle) {
   auto newFrame = new (aPresShell)
       nsMathMLmathBlockFrame(aStyle, aPresShell->GetPresContext());
@@ -1474,7 +1474,7 @@ NS_QUERYFRAME_HEAD(nsMathMLmathBlockFrame)
   NS_QUERYFRAME_ENTRY(nsMathMLmathBlockFrame)
 NS_QUERYFRAME_TAIL_INHERITING(nsBlockFrame)
 
-nsContainerFrame* NS_NewMathMLmathInlineFrame(nsIPresShell* aPresShell,
+nsContainerFrame* NS_NewMathMLmathInlineFrame(PresShell* aPresShell,
                                               ComputedStyle* aStyle) {
   return new (aPresShell)
       nsMathMLmathInlineFrame(aStyle, aPresShell->GetPresContext());

@@ -589,6 +589,14 @@ VARCACHE_PREF(
 )
 #undef PREF_VALUE
 
+// This pref should be set to true only in case of regression related to the
+// changes applied in Bug 152591 (to be removed as part of Bug 1537753).
+VARCACHE_PREF(
+  "extensions.cookiesBehavior.overrideOnTopLevel",
+   extensions_cookiesBehavior_overrideOnTopLevel,
+  bool, false
+)
+
 //---------------------------------------------------------------------------
 // Full-screen prefs
 //---------------------------------------------------------------------------
@@ -1090,12 +1098,25 @@ VARCACHE_PREF(
   bool, false
 )
 
+#ifdef NIGHTLY_BUILD
+# define PREF_VALUE  true
+#else
+# define PREF_VALUE  false
+#endif
 // Is the CSS Scroll Snap Module Level 1 enabled?
 VARCACHE_PREF(
   "layout.css.scroll-snap-v1.enabled",
    layout_css_scroll_snap_v1_enabled,
-  RelaxedAtomicBool, false
+  RelaxedAtomicBool, PREF_VALUE
 )
+
+// Is support for scroll-snap enabled?
+VARCACHE_PREF(
+  "layout.css.scroll-snap.enabled",
+   layout_css_scroll_snap_enabled,
+  bool, !PREF_VALUE
+)
+#undef PREF_VALUE
 
 // Are shared memory User Agent style sheets enabled?
 VARCACHE_PREF(
@@ -1900,6 +1921,7 @@ VARCACHE_PREF(
 // 0-Accept, 1-dontAcceptForeign, 2-dontAcceptAny, 3-limitForeign,
 // 4-rejectTracker
 // Keep the old default of accepting all cookies
+// In Firefox Desktop this pref is set by browser.contentblocking.features.[standard, strict] see firefox.js for details.
 VARCACHE_PREF(
   "network.cookie.cookieBehavior",
   network_cookie_cookieBehavior,
@@ -2036,6 +2058,26 @@ VARCACHE_PREF(
   bool, false
 )
 
+// Telemetry of traffic categories
+VARCACHE_PREF(
+  "network.traffic_analyzer.enabled",
+  network_traffic_analyzer_enabled,
+  RelaxedAtomicBool, false
+)
+
+VARCACHE_PREF(
+  "network.delay.tracking.load",
+   network_delay_tracking_load,
+   uint32_t, 0
+)
+
+// Max time to shutdown the resolver threads
+VARCACHE_PREF(
+  "network.dns.resolver_shutdown_timeout_ms",
+   network_dns_resolver_shutdown_timeout_ms,
+   uint32_t, 2000
+)
+
 //---------------------------------------------------------------------------
 // ContentSessionStore prefs
 //---------------------------------------------------------------------------
@@ -2099,6 +2141,7 @@ VARCACHE_PREF(
 )
 
 // Block 3rd party fingerprinting resources.
+// In Firefox Desktop this pref is set by browser.contentblocking.features.[standard, strict] see firefox.js for details.
 VARCACHE_PREF(
   "privacy.trackingprotection.fingerprinting.enabled",
    privacy_trackingprotection_fingerprinting_enabled,
@@ -2113,6 +2156,7 @@ VARCACHE_PREF(
 )
 
 // Block 3rd party cryptomining resources.
+// In Firefox Desktop this pref is set by browser.contentblocking.features.[standard, strict] see firefox.js for details.
 VARCACHE_PREF(
   "privacy.trackingprotection.cryptomining.enabled",
    privacy_trackingprotection_cryptomining_enabled,
@@ -2171,11 +2215,17 @@ VARCACHE_PREF(
 )
 
 // Maximum client-side cookie life-time cap
+#ifdef NIGHTLY_BUILD
+# define PREF_VALUE 604800 // 7 days
+#else
+# define PREF_VALUE 0
+#endif
 VARCACHE_PREF(
   "privacy.documentCookies.maxage",
    privacy_documentCookies_maxage,
-  uint32_t, 0 // Disabled (in seconds, set to 0 to disable)
+  uint32_t, PREF_VALUE // (in seconds, set to 0 to disable)
 )
+#undef PREF_VALUE
 
 // Anti-fingerprinting, disabled by default
 VARCACHE_PREF(
@@ -2187,6 +2237,12 @@ VARCACHE_PREF(
 VARCACHE_PREF(
   "privacy.resistFingerprinting.autoDeclineNoUserInputCanvasPrompts",
    privacy_resistFingerprinting_autoDeclineNoUserInputCanvasPrompts,
+  RelaxedAtomicBool, false
+)
+
+VARCACHE_PREF(
+  "privacy.storagePrincipal.enabledForTrackers",
+   privacy_storagePrincipal_enabledForTrackers,
   RelaxedAtomicBool, false
 )
 
@@ -2445,6 +2501,24 @@ VARCACHE_PREF(
   "security.fileuri.strict_origin_policy",
    security_fileuri_strict_origin_policy,
   RelaxedAtomicBool, true
+)
+
+// Whether origin telemetry should be enabled
+// NOTE: if telemetry.origin_telemetry_test_mode.enabled is enabled, this pref
+//       won't have any effect.
+VARCACHE_PREF(
+  "privacy.trackingprotection.origin_telemetry.enabled",
+   privacy_trackingprotection_origin_telemetry_enabled,
+  RelaxedAtomicBool, false
+)
+
+// Enable origin telemetry test mode or not
+// NOTE: turning this on will override the
+//       privacy.trackingprotection.origin_telemetry.enabled pref.
+VARCACHE_PREF(
+  "telemetry.origin_telemetry_test_mode.enabled",
+   telemetry_origin_telemetry_test_mode_enabled,
+  RelaxedAtomicBool, false
 )
 
 //---------------------------------------------------------------------------

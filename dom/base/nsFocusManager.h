@@ -29,6 +29,7 @@ class nsPIDOMWindowOuter;
 namespace mozilla {
 namespace dom {
 class Element;
+struct FocusOptions;
 class TabParent;
 }  // namespace dom
 }  // namespace mozilla
@@ -151,6 +152,26 @@ class nsFocusManager final : public nsIFocusManager,
       nsPIDOMWindowOuter** aFocusedWindow);
 
   /**
+   * Helper function for MoveFocus which determines the next element
+   * to move the focus to and returns it in aNextContent.
+   *
+   * aWindow is the window to adjust the focus within, and aStart is
+   * the element to start navigation from. For tab key navigation,
+   * this should be the currently focused element.
+   *
+   * aType is the type passed to MoveFocus. If aNoParentTraversal is set,
+   * navigation is not done to parent documents and iteration returns to the
+   * beginning (or end) of the starting document.
+   */
+  nsresult DetermineElementToMoveFocus(nsPIDOMWindowOuter* aWindow,
+                                       nsIContent* aStart, int32_t aType,
+                                       bool aNoParentTraversal,
+                                       nsIContent** aNextContent);
+
+  static uint32_t FocusOptionsToFocusManagerFlags(
+      const mozilla::dom::FocusOptions& aOptions);
+
+  /**
    * Returns the content node that focus will be redirected to if aContent was
    * focused. This is used for the special case of certain XUL elements such
    * as textboxes or input number which redirect focus to an anonymous child.
@@ -237,19 +258,21 @@ class nsFocusManager final : public nsIFocusManager,
   bool IsNonFocusableRoot(nsIContent* aContent);
 
   /**
-   * Checks and returns aContent if it may be focused, another content node if
+   * First flushes the pending notifications to ensure the PresShell and frames
+   * are updated.
+   * Checks and returns aElement if it may be focused, another element node if
    * the focus should be retargeted at another node, or null if the node
    * cannot be focused. aFlags are the flags passed to SetFocus and similar
    * methods.
    *
    * An element is focusable if it is in a document, the document isn't in
    * print preview mode and the element has an nsIFrame where the
-   * CheckIfFocusable method returns true. For <area> elements, there is no
+   * IsFocusable method returns true. For <area> elements, there is no
    * frame, so only the IsFocusable method on the content node must be
    * true.
    */
-  mozilla::dom::Element* CheckIfFocusable(mozilla::dom::Element* aContent,
-                                          uint32_t aFlags);
+  mozilla::dom::Element* FlushAndCheckIfFocusable(
+      mozilla::dom::Element* aElement, uint32_t aFlags);
 
   /**
    * Blurs the currently focused element. Returns false if another element was
@@ -402,23 +425,6 @@ class nsFocusManager final : public nsIFocusManager,
   nsresult GetSelectionLocation(Document* aDocument, nsIPresShell* aPresShell,
                                 nsIContent** aStartContent,
                                 nsIContent** aEndContent);
-
-  /**
-   * Helper function for MoveFocus which determines the next element
-   * to move the focus to and returns it in aNextContent.
-   *
-   * aWindow is the window to adjust the focus within, and aStart is
-   * the element to start navigation from. For tab key navigation,
-   * this should be the currently focused element.
-   *
-   * aType is the type passed to MoveFocus. If aNoParentTraversal is set,
-   * navigation is not done to parent documents and iteration returns to the
-   * beginning (or end) of the starting document.
-   */
-  nsresult DetermineElementToMoveFocus(nsPIDOMWindowOuter* aWindow,
-                                       nsIContent* aStart, int32_t aType,
-                                       bool aNoParentTraversal,
-                                       nsIContent** aNextContent);
 
   /**
    * Retrieve the next tabbable element in scope owned by aOwner, using

@@ -110,6 +110,9 @@ var UrlbarUtils = {
     SEARCH_GLASS: "chrome://browser/skin/search-glass.svg",
   },
 
+  // The number of results by which Page Up/Down move the selection.
+  PAGE_UP_DOWN_DELTA: 5,
+
   // IME composition states.
   COMPOSITION: {
     NONE: 1,
@@ -123,6 +126,10 @@ var UrlbarUtils = {
     // 1 is intentionally left in case we want a none/undefined/other later.
     BLUR: 2,
   },
+
+  // Limit the length of titles and URLs we display so layout doesn't spend too
+  // much time building text runs.
+  MAX_TEXT_LENGTH: 255,
 
   /**
    * Adds a url to history as long as it isn't in a private browsing window,

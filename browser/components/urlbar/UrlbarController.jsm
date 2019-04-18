@@ -146,9 +146,9 @@ class UrlbarController {
       TelemetryStopwatch.finish(TELEMETRY_6_FIRST_RESULTS, queryContext);
     }
 
-    if (queryContext.lastResultCount == 0) {
-      if (queryContext.results.length && queryContext.results[0].autofill) {
-        this.input.setValueFromResult(queryContext.results[0]);
+    if (queryContext.lastResultCount == 0 && queryContext.results.length) {
+      if (queryContext.results[0].autofill) {
+        this.input.autofillFirstResult(queryContext.results[0]);
       }
       // The first time we receive results try to connect to the heuristic
       // result.
@@ -308,7 +308,7 @@ class UrlbarController {
             this.view.selectBy(
               event.keyCode == KeyEvent.DOM_VK_PAGE_DOWN ||
               event.keyCode == KeyEvent.DOM_VK_PAGE_UP ?
-                5 : 1,
+              UrlbarUtils.PAGE_UP_DOWN_DELTA : 1,
               { reverse: event.keyCode == KeyEvent.DOM_VK_UP ||
                         event.keyCode == KeyEvent.DOM_VK_PAGE_UP });
           }
@@ -317,10 +317,16 @@ class UrlbarController {
             break;
           }
           if (executeAction) {
-            this.input.startQuery();
+            this.input.startQuery({ searchString: this.input.textValue });
           }
         }
         event.preventDefault();
+        break;
+      case KeyEvent.DOM_VK_LEFT:
+      case KeyEvent.DOM_VK_RIGHT:
+      case KeyEvent.DOM_VK_HOME:
+      case KeyEvent.DOM_VK_END:
+        this.view.removeAccessibleFocus();
         break;
       case KeyEvent.DOM_VK_DELETE:
       case KeyEvent.DOM_VK_BACK_SPACE:

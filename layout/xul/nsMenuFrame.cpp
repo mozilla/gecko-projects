@@ -11,7 +11,6 @@
 #include "nsIContent.h"
 #include "nsAtom.h"
 #include "nsPresContext.h"
-#include "nsIPresShell.h"
 #include "mozilla/ComputedStyle.h"
 #include "nsCSSRendering.h"
 #include "nsNameSpaceManager.h"
@@ -40,6 +39,7 @@
 #include "mozilla/LookAndFeel.h"
 #include "mozilla/MouseEvents.h"
 #include "mozilla/Preferences.h"
+#include "mozilla/PresShell.h"
 #include "mozilla/Services.h"
 #include "mozilla/TextEvents.h"
 #include "mozilla/dom/Element.h"
@@ -141,14 +141,14 @@ class nsMenuAttributeChangedEvent : public Runnable {
 //
 // Wrappers for creating a new menu popup container
 //
-nsIFrame* NS_NewMenuFrame(nsIPresShell* aPresShell, ComputedStyle* aStyle) {
+nsIFrame* NS_NewMenuFrame(PresShell* aPresShell, ComputedStyle* aStyle) {
   nsMenuFrame* it =
       new (aPresShell) nsMenuFrame(aStyle, aPresShell->GetPresContext());
   it->SetIsMenu(true);
   return it;
 }
 
-nsIFrame* NS_NewMenuItemFrame(nsIPresShell* aPresShell, ComputedStyle* aStyle) {
+nsIFrame* NS_NewMenuItemFrame(PresShell* aPresShell, ComputedStyle* aStyle) {
   nsMenuFrame* it =
       new (aPresShell) nsMenuFrame(aStyle, aPresShell->GetPresContext());
   it->SetIsMenu(false);

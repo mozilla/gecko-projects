@@ -204,9 +204,7 @@ LayersBackend LayerManagerMLGPU::GetBackendType() {
 
 void LayerManagerMLGPU::SetRoot(Layer* aLayer) { mRoot = aLayer; }
 
-bool LayerManagerMLGPU::BeginTransaction(const nsCString& aURL) {
-  return true;
-}
+bool LayerManagerMLGPU::BeginTransaction(const nsCString& aURL) { return true; }
 
 void LayerManagerMLGPU::BeginTransactionWithDrawTarget(
     gfx::DrawTarget* aTarget, const gfx::IntRect& aRect) {
@@ -218,7 +216,7 @@ void LayerManagerMLGPU::BeginTransactionWithDrawTarget(
 }
 
 // Helper class for making sure textures are unlocked.
-class MOZ_STACK_CLASS AutoUnlockAllTextures {
+class MOZ_STACK_CLASS AutoUnlockAllTextures final {
  public:
   explicit AutoUnlockAllTextures(MLGDevice* aDevice) : mDevice(aDevice) {}
   ~AutoUnlockAllTextures() { mDevice->UnlockAllTextures(); }

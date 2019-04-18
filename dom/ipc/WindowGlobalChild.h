@@ -9,6 +9,7 @@
 
 #include "mozilla/RefPtr.h"
 #include "mozilla/dom/PWindowGlobalChild.h"
+#include "nsRefPtrHashtable.h"
 #include "nsWrapperCache.h"
 
 class nsGlobalWindowInner;
@@ -87,6 +88,10 @@ class WindowGlobalChild : public nsWrapperCache, public PWindowGlobalChild {
   mozilla::ipc::IPCResult RecvAsyncMessage(const nsString& aActorName,
                                            const nsString& aMessage,
                                            const ClonedMessageData& aData);
+
+  mozilla::ipc::IPCResult RecvChangeFrameRemoteness(
+      dom::BrowsingContext* aBc, const nsString& aRemoteType,
+      uint64_t aPendingSwitchId, ChangeFrameRemotenessResolver&& aResolver);
 
   virtual void ActorDestroy(ActorDestroyReason aWhy) override;
 

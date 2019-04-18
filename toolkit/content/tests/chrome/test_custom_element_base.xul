@@ -6,8 +6,8 @@
   onload="runTests();"
   xmlns="http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul">
 
-  <script type="application/javascript" src="chrome://mochikit/content/tests/SimpleTest/SimpleTest.js"></script>
-  <script type="application/javascript" src="chrome://mochikit/content/tests/SimpleTest/EventUtils.js"></script>
+  <script src="chrome://mochikit/content/tests/SimpleTest/SimpleTest.js"></script>
+  <script src="chrome://mochikit/content/tests/SimpleTest/EventUtils.js"></script>
 
   <!-- test results are displayed in the html:body -->
   <body xmlns="http://www.w3.org/1999/xhtml" style="height: 300px; overflow: auto;"/>
@@ -19,7 +19,33 @@
   <inherited-element-declarative foo="fuagra"></inherited-element-declarative>
   <inherited-element-shadowdom-declarative foo="fuagra"></inherited-element-shadowdom-declarative>
   <inherited-element-imperative foo="fuagra"></inherited-element-imperative>
+  <inherited-element-beforedomloaded foo="fuagra"></inherited-element-beforedomloaded>
 
+  <!-- test code running before page load goes here -->
+  <script type="application/javascript"><![CDATA[
+    class InheritAttrsChangeBeforDOMLoaded extends MozXULElement {
+      static get inheritedAttributes() {
+        return {
+          "label": "foo",
+        };
+      }
+      connectedCallback() {
+        this.append(MozXULElement.parseXULToFragment(`<label />`));
+        this.label = this.querySelector("label");
+
+        this.initializeAttributeInheritance();
+        is(this.label.getAttribute("foo"), "fuagra",
+           "InheritAttrsChangeBeforDOMLoaded: attribute should be propagated #1");
+
+        this.setAttribute("foo", "chuk&gek");
+        is(this.label.getAttribute("foo"), "chuk&gek",
+           "InheritAttrsChangeBeforDOMLoaded: attribute should be propagated #2");
+      }
+    }
+    customElements.define("inherited-element-beforedomloaded",
+                          InheritAttrsChangeBeforDOMLoaded);
+  ]]>
+  </script>
 
   <!-- test code goes here -->
   <script type="application/javascript"><![CDATA[

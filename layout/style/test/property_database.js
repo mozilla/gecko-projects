@@ -4843,8 +4843,10 @@ var gCSSProperties = {
     applies_to_first_line: true,
     applies_to_placeholder: true,
     initial_values: [ "none" ],
-    other_values: [ "capitalize", "uppercase", "lowercase", "full-width", "full-size-kana" ],
-    invalid_values: []
+    other_values: [ "capitalize", "uppercase", "lowercase", "full-width", "full-size-kana",
+                    "uppercase full-width", "full-size-kana capitalize", "full-width lowercase full-size-kana" ],
+    invalid_values: [ "none none", "none uppercase", "full-width none", "uppercase lowercase",
+                      "full-width capitalize full-width", "uppercase full-width lowercase" ]
   },
   "top": {
     domProp: "top",
@@ -7635,7 +7637,8 @@ if (IsCSSPropertyPrefEnabled("layout.css.overscroll-behavior.enabled")) {
   };
 }
 
-if (IsCSSPropertyPrefEnabled("layout.css.scroll-snap.enabled")) {
+if (IsCSSPropertyPrefEnabled("layout.css.scroll-snap.enabled") &&
+    !IsCSSPropertyPrefEnabled("layout.css.scroll-snap-v1.enabled")) {
   gCSSProperties["scroll-snap-coordinate"] = {
     domProp: "scrollSnapCoordinate",
     inherited: false,
@@ -7690,31 +7693,26 @@ if (IsCSSPropertyPrefEnabled("layout.css.scroll-snap.enabled")) {
   gCSSProperties["scroll-snap-type"] = {
     domProp: "scrollSnapType",
     inherited: false,
-    type: CSS_TYPE_TRUE_SHORTHAND,
-    subproperties: [ "scroll-snap-type-x", "scroll-snap-type-y" ],
-    initial_values: [ "none" ],
-    other_values: [ "mandatory", "proximity" ],
-    invalid_values: [ "auto",  "1px" ]
-  };
-  gCSSProperties["scroll-snap-type-x"] = {
-    domProp: "scrollSnapTypeX",
-    inherited: false,
     type: CSS_TYPE_LONGHAND,
     initial_values: [ "none" ],
-    other_values: ["mandatory", "proximity"],
-    invalid_values: [ "auto",  "1px" ]
-  };
-  gCSSProperties["scroll-snap-type-y"] = {
-    domProp: "scrollSnapTypeY",
-    inherited: false,
-    type: CSS_TYPE_LONGHAND,
-    initial_values: [ "none" ],
-    other_values: ["mandatory", "proximity"],
+    other_values: [ "both mandatory", "both" ],
     invalid_values: [ "auto",  "1px" ]
   };
 }
 
 if (IsCSSPropertyPrefEnabled("layout.css.scroll-snap-v1.enabled")) {
+  gCSSProperties["scroll-snap-type"] = {
+    domProp: "scrollSnapType",
+    inherited: false,
+    type: CSS_TYPE_LONGHAND,
+    initial_values: [ "none" ],
+    other_values: [ "both mandatory", "y mandatory", "inline proximity",
+                    "both", "x", "y", "block", "inline" ],
+    invalid_values: [ "auto",  "1px", "x y", "block mandatory inline",
+                      "mandatory", "proximity", "mandatory inline",
+                      "proximity both", "mandatory x", "proximity y",
+                      "mandatory block", "proximity mandatory" ],
+  };
   gCSSProperties["scroll-snap-align"] = {
     domProp: "scrollSnapAlign",
     inherited: false,

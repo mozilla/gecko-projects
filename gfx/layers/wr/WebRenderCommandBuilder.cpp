@@ -245,7 +245,9 @@ static bool IsContainerLayerItem(nsDisplayItem* aItem) {
     case DisplayItemType::TYPE_PERSPECTIVE: {
       return true;
     }
-    default: { return false; }
+    default: {
+      return false;
+    }
   }
 }
 
@@ -749,9 +751,10 @@ struct DIGroup {
         LINEAR;  // nsLayoutUtils::GetSamplingFilterForFrame(aItem->Frame());
     bool backfaceHidden = false;
 
-    // Emit a dispatch-to-content hit test region covering this area
+    // We don't really know the exact shape of this blob because it may contain
+    // SVG shapes so generate an irregular-area hit-test region for it.
     CompositorHitTestInfo hitInfo(CompositorHitTestFlags::eVisibleToHitTest,
-                                  CompositorHitTestFlags::eDispatchToContent);
+                                  CompositorHitTestFlags::eIrregularArea);
 
     // XXX - clipping the item against the paint rect breaks some content.
     // cf. Bug 1455422.
@@ -1068,12 +1071,11 @@ void WebRenderScrollDataCollection::AppendScrollData(
 
 class WebRenderGroupData : public WebRenderUserData {
  public:
-  explicit WebRenderGroupData(RenderRootStateManager* aWRManager,
-                              nsDisplayItem* aItem);
+  WebRenderGroupData(RenderRootStateManager* aWRManager, nsDisplayItem* aItem);
   virtual ~WebRenderGroupData();
 
-  virtual WebRenderGroupData* AsGroupData() override { return this; }
-  virtual UserDataType GetType() override { return UserDataType::eGroup; }
+  WebRenderGroupData* AsGroupData() override { return this; }
+  UserDataType GetType() override { return UserDataType::eGroup; }
   static UserDataType Type() { return UserDataType::eGroup; }
 
   DIGroup mSubGroup;
@@ -1081,12 +1083,13 @@ class WebRenderGroupData : public WebRenderUserData {
 };
 
 static bool IsItemProbablyActive(nsDisplayItem* aItem,
-                                 nsDisplayListBuilder* aDisplayListBuilder);
+                                 nsDisplayListBuilder* aDisplayListBuilder,
+                                 bool aParentActive = true);
 
 static bool HasActiveChildren(const nsDisplayList& aList,
                               nsDisplayListBuilder* aDisplayListBuilder) {
   for (nsDisplayItem* i = aList.GetBottom(); i; i = i->GetAbove()) {
-    if (IsItemProbablyActive(i, aDisplayListBuilder)) {
+    if (IsItemProbablyActive(i, aDisplayListBuilder, false)) {
       return true;
     }
   }
@@ -1101,7 +1104,8 @@ static bool HasActiveChildren(const nsDisplayList& aList,
 // We can't easily use GetLayerState because it wants a bunch of layers related
 // information.
 static bool IsItemProbablyActive(nsDisplayItem* aItem,
-                                 nsDisplayListBuilder* aDisplayListBuilder) {
+                                 nsDisplayListBuilder* aDisplayListBuilder,
+                                 bool aParentActive) {
   switch (aItem->GetType()) {
     case DisplayItemType::TYPE_TRANSFORM: {
       nsDisplayTransform* transformItem =
@@ -1125,6 +1129,13 @@ static bool IsItemProbablyActive(nsDisplayItem* aItem,
     }
     case DisplayItemType::TYPE_FOREIGN_OBJECT: {
       return true;
+    }
+    case DisplayItemType::TYPE_BLEND_MODE: {
+      /* BLEND_MODE needs to be active if it might have a previous sibling
+       * that is active. We use the activeness of the parent as a rough
+       * proxy for this situation. */
+      return aParentActive ||
+             HasActiveChildren(*aItem->GetChildren(), aDisplayListBuilder);
     }
     case DisplayItemType::TYPE_WRAP_LIST:
     case DisplayItemType::TYPE_PERSPECTIVE: {
@@ -2328,7 +2339,7 @@ class WebRenderMaskData : public WebRenderUserData {
     mBlobKey.reset();
   }
 
-  virtual UserDataType GetType() override { return UserDataType::eMask; }
+  UserDataType GetType() override { return UserDataType::eMask; }
   static UserDataType Type() { return UserDataType::eMask; }
 
   Maybe<wr::BlobImageKey> mBlobKey;

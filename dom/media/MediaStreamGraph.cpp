@@ -368,8 +368,8 @@ void MediaStreamGraphImpl::UpdateStreamOrder() {
       !CurrentDriver()->AsAudioCallbackDriver() && !switching) {
     MonitorAutoLock mon(mMonitor);
     if (LifecycleStateRef() == LIFECYCLE_RUNNING) {
-      AudioCallbackDriver* driver =
-          new AudioCallbackDriver(this, AudioInputChannelCount());
+      AudioCallbackDriver* driver = new AudioCallbackDriver(
+          this, AudioInputChannelCount(), AudioInputDevicePreference());
       CurrentDriver()->SwitchAtNextIteration(driver);
     }
   }
@@ -612,8 +612,8 @@ void MediaStreamGraphImpl::CreateOrDestroyAudioStreams(MediaStream* aStream) {
       if (!CurrentDriver()->AsAudioCallbackDriver() && !switching) {
         MonitorAutoLock mon(mMonitor);
         if (LifecycleStateRef() == LIFECYCLE_RUNNING) {
-          AudioCallbackDriver* driver =
-              new AudioCallbackDriver(this, AudioInputChannelCount());
+          AudioCallbackDriver* driver = new AudioCallbackDriver(
+              this, AudioInputChannelCount(), AudioInputDevicePreference());
           CurrentDriver()->SwitchAtNextIteration(driver);
         }
       }
@@ -746,8 +746,8 @@ void MediaStreamGraphImpl::OpenAudioInputImpl(CubebUtils::AudioDeviceID aID,
     // Switch Drivers since we're adding input (to input-only or full-duplex)
     MonitorAutoLock mon(mMonitor);
     if (LifecycleStateRef() == LIFECYCLE_RUNNING) {
-      AudioCallbackDriver* driver =
-          new AudioCallbackDriver(this, AudioInputChannelCount());
+      AudioCallbackDriver* driver = new AudioCallbackDriver(
+          this, AudioInputChannelCount(), AudioInputDevicePreference());
       LOG(LogLevel::Debug,
           ("%p OpenAudioInput: starting new AudioCallbackDriver(input) %p",
            this, driver));
@@ -830,7 +830,8 @@ void MediaStreamGraphImpl::CloseAudioInputImpl(
       LOG(LogLevel::Debug,
           ("%p: CloseInput: output present (AudioCallback)", this));
 
-      driver = new AudioCallbackDriver(this, AudioInputChannelCount());
+      driver = new AudioCallbackDriver(this, AudioInputChannelCount(),
+                                       AudioInputDevicePreference());
       CurrentDriver()->SwitchAtNextIteration(driver);
     } else if (CurrentDriver()->AsAudioCallbackDriver()) {
       LOG(LogLevel::Debug,
@@ -981,6 +982,10 @@ void MediaStreamGraphImpl::ReevaluateInputDevice() {
     if (audioCallbackDriver->InputChannelCount() != AudioInputChannelCount()) {
       needToSwitch = true;
     }
+    if (audioCallbackDriver->InputDevicePreference() !=
+        AudioInputDevicePreference()) {
+      needToSwitch = true;
+    }
   } else {
     // We're already in the process of switching to a audio callback driver,
     // which will happen at the next iteration.
@@ -993,8 +998,8 @@ void MediaStreamGraphImpl::ReevaluateInputDevice() {
     needToSwitch = true;
   }
   if (needToSwitch) {
-    AudioCallbackDriver* newDriver =
-        new AudioCallbackDriver(this, AudioInputChannelCount());
+    AudioCallbackDriver* newDriver = new AudioCallbackDriver(
+        this, AudioInputChannelCount(), AudioInputDevicePreference());
     {
       MonitorAutoLock lock(mMonitor);
       CurrentDriver()->SwitchAtNextIteration(newDriver);
@@ -3119,6 +3124,7 @@ void ProcessedMediaStream::DestroyImpl() {
 MediaStreamGraphImpl::MediaStreamGraphImpl(GraphDriverType aDriverRequested,
                                            GraphRunType aRunTypeRequested,
                                            TrackRate aSampleRate,
+                                           uint32_t aChannelCount,
                                            AbstractThread* aMainThread)
     : MediaStreamGraph(aSampleRate),
       mGraphRunner(aRunTypeRequested == SINGLE_THREAD ? new GraphRunner(this)
@@ -3142,7 +3148,7 @@ MediaStreamGraphImpl::MediaStreamGraphImpl(GraphDriverType aDriverRequested,
       mStreamOrderDirty(false),
       mAbstractMainThread(aMainThread),
       mSelfRef(this),
-      mOutputChannels(std::min<uint32_t>(8, CubebUtils::MaxNumberOfChannels())),
+      mOutputChannels(aChannelCount),
       mGlobalVolume(CubebUtils::GetVolumeScale())
 #ifdef DEBUG
       ,
@@ -3152,8 +3158,9 @@ MediaStreamGraphImpl::MediaStreamGraphImpl(GraphDriverType aDriverRequested,
       mMainThreadGraphTime(0, "MediaStreamGraphImpl::mMainThreadGraphTime") {
   if (mRealtime) {
     if (aDriverRequested == AUDIO_THREAD_DRIVER) {
-      // Always start with zero input channels.
-      mDriver = new AudioCallbackDriver(this, 0);
+      // Always start with zero input channels, and no particular preferences
+      // for the input channel.
+      mDriver = new AudioCallbackDriver(this, 0, AudioInputType::Unknown);
     } else {
       mDriver = new SystemClockDriver(this);
     }
@@ -3271,8 +3278,14 @@ MediaStreamGraph* MediaStreamGraph::GetInstance(
         Preferences::GetBool("dom.audioworklet.enabled", false)) {
       runType = SINGLE_THREAD;
     }
+
+    // In a real time graph, the number of output channels is determined by
+    // the underlying number of channel of the default audio output device, and
+    // capped to 8.
+    uint32_t channelCount =
+        std::min<uint32_t>(8, CubebUtils::MaxNumberOfChannels());
     graph = new MediaStreamGraphImpl(aGraphDriverRequested, runType, sampleRate,
-                                     mainThread);
+                                     channelCount, mainThread);
 
     uint32_t hashkey = WindowToHash(aWindow, sampleRate);
     gGraphs.Put(hashkey, graph);
@@ -3288,9 +3301,18 @@ MediaStreamGraph* MediaStreamGraph::CreateNonRealtimeInstance(
     TrackRate aSampleRate, nsPIDOMWindowInner* aWindow) {
   MOZ_ASSERT(NS_IsMainThread(), "Main thread only");
 
+  AbstractThread* mainThread = AbstractThread::MainThread();
+  // aWindow can be null when the document is being unlinked, so this works when
+  // with a generic main thread if that's the case.
+  if (aWindow) {
+    mainThread =
+        aWindow->AsGlobal()->AbstractMainThreadFor(TaskCategory::Other);
+  }
+
+  // Offline graphs have 0 output channel count: they write the output to a
+  // buffer, not an audio output stream.
   MediaStreamGraphImpl* graph = new MediaStreamGraphImpl(
-      OFFLINE_THREAD_DRIVER, DIRECT_DRIVER, aSampleRate,
-      aWindow->AsGlobal()->AbstractMainThreadFor(TaskCategory::Other));
+      OFFLINE_THREAD_DRIVER, DIRECT_DRIVER, aSampleRate, 0, mainThread);
 
   LOG(LogLevel::Debug, ("Starting up Offline MediaStreamGraph %p", graph));
 
@@ -3629,7 +3651,8 @@ void MediaStreamGraphImpl::ApplyAudioContextOperationImpl(
         MOZ_ASSERT(nextDriver->AsAudioCallbackDriver());
         driver = nextDriver->AsAudioCallbackDriver();
       } else {
-        driver = new AudioCallbackDriver(this, AudioInputChannelCount());
+        driver = new AudioCallbackDriver(this, AudioInputChannelCount(),
+                                         AudioInputDevicePreference());
         MonitorAutoLock lock(mMonitor);
         CurrentDriver()->SwitchAtNextIteration(driver);
       }

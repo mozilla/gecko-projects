@@ -873,8 +873,8 @@ struct nsGridContainerFrame::TrackSizingFunctions {
    * Initialize the number of auto-fill/fit tracks to use and return that.
    * (zero if no auto-fill/fit track was specified)
    */
-  uint32_t InitRepeatTracks(const nsStyleCoord& aGridGap, nscoord aMinSize,
-                            nscoord aSize, nscoord aMaxSize) {
+  uint32_t InitRepeatTracks(const NonNegativeLengthPercentageOrNormal& aGridGap,
+                            nscoord aMinSize, nscoord aSize, nscoord aMaxSize) {
     uint32_t repeatTracks =
         CalculateRepeatFillCount(aGridGap, aMinSize, aSize, aMaxSize);
     SetNumRepeatTracks(repeatTracks);
@@ -886,9 +886,9 @@ struct nsGridContainerFrame::TrackSizingFunctions {
     return repeatTracks;
   }
 
-  uint32_t CalculateRepeatFillCount(const nsStyleCoord& aGridGap,
-                                    nscoord aMinSize, nscoord aSize,
-                                    nscoord aMaxSize) const {
+  uint32_t CalculateRepeatFillCount(
+      const NonNegativeLengthPercentageOrNormal& aGridGap, nscoord aMinSize,
+      nscoord aSize, nscoord aMaxSize) const {
     if (!mHasRepeatAuto) {
       return 0;
     }
@@ -1041,8 +1041,8 @@ struct nsGridContainerFrame::Tracks {
   }
 
   void Initialize(const TrackSizingFunctions& aFunctions,
-                  const nsStyleCoord& aGridGap, uint32_t aNumTracks,
-                  nscoord aContentBoxSize);
+                  const NonNegativeLengthPercentageOrNormal& aGridGap,
+                  uint32_t aNumTracks, nscoord aContentBoxSize);
 
   /**
    * Return the union of the state bits for the tracks in aRange.
@@ -1700,7 +1700,7 @@ struct nsGridContainerFrame::Tracks {
  * to grow a row.  mOriginalRowData is setup by the first-in-flow and
  * not modified after that.  It's used for undoing the changes to mRows.
  * mCols, mGridItems, mAbsPosItems are used for initializing the grid
- * reflow state for continuations, see GridReflowInput::Initialize below.
+ * reflow input for continuations, see GridReflowInput::Initialize below.
  */
 struct nsGridContainerFrame::SharedGridData {
   SharedGridData()
@@ -1889,7 +1889,7 @@ struct MOZ_STACK_CLASS nsGridContainerFrame::GridReflowInput {
 
   /**
    * @note mReflowInput may be null when using the 2nd ctor above. In this case
-   * we'll construct a dummy parent reflow state if we need it to calculate
+   * we'll construct a dummy parent reflow input if we need it to calculate
    * min/max-content contributions when sizing tracks.
    */
   const ReflowInput* const mReflowInput;
@@ -2491,7 +2491,7 @@ NS_QUERYFRAME_TAIL_INHERITING(nsContainerFrame)
 
 NS_IMPL_FRAMEARENA_HELPERS(nsGridContainerFrame)
 
-nsContainerFrame* NS_NewGridContainerFrame(nsIPresShell* aPresShell,
+nsContainerFrame* NS_NewGridContainerFrame(PresShell* aPresShell,
                                            ComputedStyle* aStyle) {
   return new (aPresShell)
       nsGridContainerFrame(aStyle, aPresShell->GetPresContext());
@@ -3335,8 +3335,9 @@ void nsGridContainerFrame::Grid::PlaceGridItems(
 }
 
 void nsGridContainerFrame::Tracks::Initialize(
-    const TrackSizingFunctions& aFunctions, const nsStyleCoord& aGridGap,
-    uint32_t aNumTracks, nscoord aContentBoxSize) {
+    const TrackSizingFunctions& aFunctions,
+    const NonNegativeLengthPercentageOrNormal& aGridGap, uint32_t aNumTracks,
+    nscoord aContentBoxSize) {
   MOZ_ASSERT(aNumTracks >=
              aFunctions.mExplicitGridOffset + aFunctions.NumExplicitTracks());
   mSizes.SetLength(aNumTracks);
@@ -3368,7 +3369,7 @@ static nscoord MeasuringReflow(nsIFrame* aChild,
     dummyParentState.emplace(
         pc, parent, aRC,
         LogicalSize(parent->GetWritingMode(), 0, NS_UNCONSTRAINEDSIZE),
-        ReflowInput::DUMMY_PARENT_REFLOW_STATE);
+        ReflowInput::DUMMY_PARENT_REFLOW_INPUT);
     rs = dummyParentState.ptr();
   }
 #ifdef DEBUG
@@ -4661,7 +4662,7 @@ LogicalRect nsGridContainerFrame::GridReflowInput::ContainingBlockForAbsPos(
 
 /**
  * Return a Fragmentainer object if we have a fragmentainer frame in our
- * ancestor chain of containing block (CB) reflow states.  We'll only
+ * ancestor chain of containing block (CB) reflow inputs.  We'll only
  * continue traversing the ancestor chain as long as the CBs have
  * the same writing-mode and have overflow:visible.
  */
@@ -5204,7 +5205,7 @@ nscoord nsGridContainerFrame::ReflowRowsInFragmentainer(
       }
     }
 
-    // aFragmentainer.mIsTopOfPage is propagated to the child reflow state.
+    // aFragmentainer.mIsTopOfPage is propagated to the child reflow input.
     // When it's false the child may request InlineBreak::Before.  We set it
     // to false when the row is growable (as determined in the CSS Grid
     // Fragmentation spec) and there is a non-zero space between it and the
@@ -5794,7 +5795,9 @@ void nsGridContainerFrame::Reflow(nsPresContext* aPresContext,
                           bSize);
 
   if (!prevInFlow) {
-    if (computedBSize == NS_AUTOHEIGHT && stylePos->mRowGap.HasPercent()) {
+    if (computedBSize == NS_AUTOHEIGHT &&
+        stylePos->mRowGap.IsLengthPercentage() &&
+        stylePos->mRowGap.AsLengthPercentage().HasPercent()) {
       // Re-resolve the row-gap now that we know our intrinsic block-size.
       gridReflowInput.mRows.mGridGap =
           nsLayoutUtils::ResolveGapToLength(stylePos->mRowGap, bSize);
@@ -6511,12 +6514,13 @@ void nsGridContainerFrame::NoteNewChildren(ChildListID aListID,
   MOZ_ASSERT(supportedLists.contains(aListID), "unexpected child list");
 #endif
 
-  nsIPresShell* shell = PresShell();
+  mozilla::PresShell* presShell = PresShell();
   for (auto pif = GetPrevInFlow(); pif; pif = pif->GetPrevInFlow()) {
     if (aListID == kPrincipalList) {
       pif->AddStateBits(NS_STATE_GRID_DID_PUSH_ITEMS);
     }
-    shell->FrameNeedsReflow(pif, nsIPresShell::eTreeChange, NS_FRAME_IS_DIRTY);
+    presShell->FrameNeedsReflow(pif, nsIPresShell::eTreeChange,
+                                NS_FRAME_IS_DIRTY);
   }
 }
 
@@ -6739,11 +6743,11 @@ nsGridContainerFrame* nsGridContainerFrame::GetGridFrameWithComputedInfo(
       // Hold onto aFrame while we do this, in case reflow destroys it.
       AutoWeakFrame weakFrameRef(aFrame);
 
-      nsIPresShell* shell = gridFrame->PresShell();
+      RefPtr<mozilla::PresShell> presShell = gridFrame->PresShell();
       gridFrame->AddStateBits(NS_STATE_GRID_GENERATE_COMPUTED_VALUES);
-      shell->FrameNeedsReflow(gridFrame, nsIPresShell::eResize,
-                              NS_FRAME_IS_DIRTY);
-      shell->FlushPendingNotifications(FlushType::Layout);
+      presShell->FrameNeedsReflow(gridFrame, nsIPresShell::eResize,
+                                  NS_FRAME_IS_DIRTY);
+      presShell->FlushPendingNotifications(FlushType::Layout);
 
       // Since the reflow may have side effects, get the grid frame
       // again. But if the weakFrameRef is no longer valid, then we

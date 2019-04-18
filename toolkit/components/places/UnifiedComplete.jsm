@@ -1324,6 +1324,9 @@ Search.prototype = {
       // but isn't in the whitelist.
       let matched = await this._matchUnknownUrl();
       if (matched) {
+        // Because we think this may be a URL, we won't be fetching search
+        // suggestions for it.
+        this._prohibitSearchSuggestions = true;
         // Since we can't tell if this is a real URL and
         // whether the user wants to visit or search for it,
         // we always provide an alternative searchengine match.
@@ -2228,10 +2231,11 @@ Search.prototype = {
     // Always prefer the bookmark title unless it is empty
     let title = bookmarkTitle || historyTitle;
 
-    // We will always prefer to show tags if we have them.
-    let showTags = !!tags;
+    // Return tags as part of the title, unless the match has an action, like
+    // switch-to-tab, that doesn't care about them.
+    let showTags = !!tags && !action;
 
-    // However, we'll act as if a page is not bookmarked if the user wants
+    // We'll act as if the page is not bookmarked when the user wants
     // only history and not bookmarks and there are no tags.
     if (this.hasBehavior("history") && !this.hasBehavior("bookmark") &&
         !showTags) {

@@ -40,9 +40,9 @@ pub use self::box_::{AnimationIterationCount, AnimationName, Contain, Display};
 pub use self::box_::{Appearance, BreakBetween, BreakWithin};
 pub use self::box_::{Clear, Float, Overflow, OverflowAnchor};
 pub use self::box_::{OverflowClipBox, OverscrollBehavior, Perspective, Resize};
-pub use self::box_::{ScrollSnapAlign, ScrollSnapType};
+pub use self::box_::{ScrollSnapAlign, ScrollSnapAxis, ScrollSnapStrictness, ScrollSnapType};
 pub use self::box_::{TouchAction, TransitionProperty, VerticalAlign, WillChange};
-pub use self::color::{Color, ColorOrAuto, ColorPropertyValue, RGBAColor};
+pub use self::color::{Color, ColorOrAuto, ColorPropertyValue};
 pub use self::column::ColumnCount;
 pub use self::counters::{Content, ContentItem, CounterIncrement, CounterSetOrReset};
 pub use self::easing::TimingFunction;
@@ -83,6 +83,7 @@ pub use self::table::XSpan;
 pub use self::text::{InitialLetter, LetterSpacing, LineHeight, TextAlign};
 pub use self::text::{OverflowWrap, TextEmphasisPosition, TextEmphasisStyle, WordBreak};
 pub use self::text::{TextAlignKeyword, TextDecorationLine, TextOverflow, WordSpacing};
+pub use self::text::TextTransform;
 pub use self::time::Time;
 pub use self::transform::{Rotate, Scale, Transform};
 pub use self::transform::{TransformOrigin, TransformStyle, Translate};
@@ -709,7 +710,15 @@ impl AllowQuirks {
 ///
 /// `[namespace? `|`]? ident`
 #[derive(
-    Clone, Debug, Eq, MallocSizeOf, PartialEq, SpecifiedValueInfo, ToComputedValue, ToShmem,
+    Clone,
+    Debug,
+    Eq,
+    MallocSizeOf,
+    PartialEq,
+    SpecifiedValueInfo,
+    ToComputedValue,
+    ToResolvedValue,
+    ToShmem,
 )]
 #[css(function)]
 pub struct Attr {
