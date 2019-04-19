@@ -44,7 +44,7 @@ class HttpTransactionParent final : public PHttpTransactionParent,
       const nsresult& aStatus, const Maybe<nsHttpResponseHead>& aResponseHead,
       const nsCString& aSecurityInfoSerialization, const NetAddr& aSelfAddr,
       const NetAddr& aPeerAddr, const bool& aProxyConnectFailed,
-      const TimingStruct& aTimings);
+      const TimingStruct& aTimings, nsTArray<uint8_t>&& aDataForSniffer);
   mozilla::ipc::IPCResult RecvOnTransportStatus(const nsresult& aStatus,
                                                 const int64_t& aProgress,
                                                 const int64_t& aProgressMax);
@@ -91,6 +91,7 @@ class HttpTransactionParent final : public PHttpTransactionParent,
   NetAddr mPeerAddr;
 
   TimingStruct mTimings;
+  nsTArray<uint8_t> mDataForSniffer;
   bool mIPCOpen;
   bool mResponseHeadTaken;
   bool mResponseTrailersTaken;

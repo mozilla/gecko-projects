@@ -250,6 +250,17 @@ nsHttpHeaderArray* HttpTransactionParent::TakeResponseTrailers() {
   return mResponseTrailers.forget();
 }
 
+nsresult HttpTransactionParent::SetSniffedTypeToChannel(
+    nsIRequest* aPump, nsIChannel* aChannel,
+    nsInputStreamPump::PeekSegmentFun aCallTypeSniffers) {
+  Unused << aPump;
+  if (!mDataForSniffer.IsEmpty()) {
+    aCallTypeSniffers(aChannel, mDataForSniffer.Elements(),
+                      mDataForSniffer.Length());
+  }
+  return NS_OK;
+}
+
 NS_IMETHODIMP
 HttpTransactionParent::GetDeliveryTarget(nsIEventTarget** aNewTarget) {
   nsCOMPtr<nsIEventTarget> target = mTargetThread;
@@ -335,7 +346,7 @@ mozilla::ipc::IPCResult HttpTransactionParent::RecvOnStartRequest(
     const nsresult& aStatus, const Maybe<nsHttpResponseHead>& aResponseHead,
     const nsCString& aSecurityInfoSerialization, const NetAddr& aSelfAddr,
     const NetAddr& aPeerAddr, const bool& aProxyConnectFailed,
-    const TimingStruct& aTimings) {
+    const TimingStruct& aTimings, nsTArray<uint8_t>&& aDataForSniffer) {
   LOG(("HttpTransactionParent::RecvOnStartRequest [this=%p aStatus=%" PRIx32
        "]\n",
        this, static_cast<uint32_t>(aStatus)));
@@ -358,6 +369,8 @@ mozilla::ipc::IPCResult HttpTransactionParent::RecvOnStartRequest(
   mTimings = aTimings;
 
   nsCOMPtr<nsIStreamListener> chan = mChannel;
+
+  mDataForSniffer = std::move(aDataForSniffer);
 
   RefPtr<HttpTransactionParent> self(this);
   auto call = [self{std::move(self)}, chan{std::move(chan)}]() {

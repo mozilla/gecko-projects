@@ -40,7 +40,8 @@ parent:
                        NetAddr                    selfAddr,
                        NetAddr                    peerAddr,
                        bool                       proxyConnectFailed,
-                       TimingStruct               timings);
+                       TimingStruct               timings,
+                       uint8_t[]                  dataForSniffer);
   async OnTransportStatus(nsresult status,
                           int64_t progress,
                           int64_t progressMax);

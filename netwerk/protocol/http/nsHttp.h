@@ -127,6 +127,9 @@ enum class SpdyVersion {
 // The connection should not use IPv6
 #define NS_HTTP_DISABLE_IPV6 (1 << 18)
 
+// The connection could bring the peeked data for sniffing
+#define NS_HTTP_CALL_CONTENT_SNIFFER (1 << 19)
+
 //-----------------------------------------------------------------------------
 // some default values
 //-----------------------------------------------------------------------------

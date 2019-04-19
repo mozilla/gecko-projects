@@ -8,6 +8,7 @@
 #include <functional>
 
 #include "nsISupports.h"
+#include "nsInputStreamPump.h"
 
 class nsIEventTraget;
 class nsIInputStream;
@@ -123,6 +124,10 @@ class nsAHttpTransactionShell : public nsISupports {
   virtual void DontReuseConnection() = 0;
   virtual void SetH2WSConnRefTaken() = 0;
 
+  virtual nsresult SetSniffedTypeToChannel(
+      nsIRequest *aPump, nsIChannel *aChannel,
+      nsInputStreamPump::PeekSegmentFun aCallTypeSniffers) = 0;
+
   virtual HttpTransactionParent *AsHttpTransactionParent() = 0;
   virtual nsHttpTransaction *AsHttpTransaction() = 0;
 
@@ -170,6 +175,9 @@ NS_DEFINE_STATIC_IID_ACCESSOR(nsAHttpTransactionShell,
   virtual nsHttpHeaderArray *TakeResponseTrailers() override;                  \
   virtual void DontReuseConnection() override;                                 \
   virtual void SetH2WSConnRefTaken() override;                                 \
+  virtual nsresult SetSniffedTypeToChannel(                                    \
+      nsIRequest *aPump, nsIChannel *aChannel,                                 \
+      nsInputStreamPump::PeekSegmentFun aCallTypeSniffers) override;           \
   virtual HttpTransactionParent *AsHttpTransactionParent() override;           \
   virtual nsHttpTransaction *AsHttpTransaction() override;                     \
   virtual void SetTransactionObserver(TransactionObserver &&obs) override;

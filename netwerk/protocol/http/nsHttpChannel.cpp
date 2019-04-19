@@ -1286,6 +1286,10 @@ nsresult nsHttpChannel::SetupTransaction() {
   // See bug #466080. Transfer LOAD_ANONYMOUS flag to socket-layer.
   if (mLoadFlags & LOAD_ANONYMOUS) mCaps |= NS_HTTP_LOAD_ANONYMOUS;
 
+  if (mLoadInfo->GetSkipContentSniffing()) {
+    mCaps |= NS_HTTP_CALL_CONTENT_SNIFFER;
+  }
+
   if (mTimingEnabled) mCaps |= NS_HTTP_TIMING_ENABLED;
 
   if (mUpgradeProtocolCallback) {
@@ -1297,12 +1301,6 @@ nsresult nsHttpChannel::SetupTransaction() {
     mCaps |= NS_HTTP_STICKY_CONNECTION;
     mCaps &= ~NS_HTTP_ALLOW_KEEPALIVE;
   }
-
-  // TODO: enable h2 push
-  // if (mPushedStream) {
-  //     mTransaction->SetPushedStream(mPushedStream);
-  //     mPushedStream = nullptr;
-  // }
 
   nsCOMPtr<nsIHttpPushListener> pushListener;
   NS_QueryNotificationCallbacks(mCallbacks, mLoadGroup,
@@ -1852,11 +1850,10 @@ nsresult nsHttpChannel::CallOnStartRequest() {
           NS_SUCCEEDED(mCachePump->PeekStream(CallTypeSniffers, thisChannel));
     }
 
-    Unused << typeSniffersCalled;
-    // TODO: enable PeekStream (possible?)
-    // if (!typeSniffersCalled && mTransactionPump) {
-    //   mTransactionPump->PeekStream(CallTypeSniffers, thisChannel);
-    // }
+    if (!typeSniffersCalled && mTransaction && mTransactionPump) {
+      mTransaction->SetSniffedTypeToChannel(mTransactionPump, thisChannel,
+                                            CallTypeSniffers);
+    }
   }
 
   bool unknownDecoderStarted = false;

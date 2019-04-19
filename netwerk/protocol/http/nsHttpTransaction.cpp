@@ -543,6 +543,15 @@ nsHttpHeaderArray* nsHttpTransaction::TakeResponseTrailers() {
   return mForTakeResponseTrailers.forget();
 }
 
+nsresult nsHttpTransaction::SetSniffedTypeToChannel(
+    nsIRequest *aPump, nsIChannel *aChannel,
+    nsInputStreamPump::PeekSegmentFun aCallTypeSniffers) {
+  RefPtr<nsInputStreamPump> transactionPump =
+      static_cast<nsInputStreamPump *>(aPump);
+
+  return transactionPump->PeekStream(aCallTypeSniffers, aChannel);
+}
+
 void nsHttpTransaction::SetProxyConnectFailed() { mProxyConnectFailed = true; }
 
 nsHttpRequestHead* nsHttpTransaction::RequestHead() { return mRequestHead; }

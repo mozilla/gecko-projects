@@ -83,6 +83,8 @@ class HttpTransactionChild final : public PHttpTransactionChild,
       uint32_t classOfService, uint32_t pushedStreamId,
       bool responseTimeoutEnabled, uint32_t initialRwin);
 
+  bool IsNoSniff(nsHttpResponseHead* aResponseHead);
+
   nsHttpRequestHead mRequestHead;
   nsCOMPtr<nsIInputStream> mUploadStream;
   RefPtr<nsHttpTransaction> mTransaction;

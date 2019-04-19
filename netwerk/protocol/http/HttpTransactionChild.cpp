@@ -344,6 +344,39 @@ HttpTransactionChild::OnDataAvailable(nsIRequest* aRequest,
   return NS_OK;
 }
 
+// Check ProcessXCTO in nsHttpChannel.cpp for details
+bool HttpTransactionChild::IsNoSniff(nsHttpResponseHead* aResponseHead) {
+  if (!aResponseHead) {
+    return false;
+  }
+
+  nsAutoCString contentTypeOptionsHeader;
+  Unused << aResponseHead->GetHeader(nsHttp::X_Content_Type_Options,
+                                     contentTypeOptionsHeader);
+  if (contentTypeOptionsHeader.IsEmpty()) {
+    return false;
+  }
+
+  int32_t idx = contentTypeOptionsHeader.Find(",");
+  if (idx > 0) {
+    contentTypeOptionsHeader = Substring(contentTypeOptionsHeader, 0, idx);
+  }
+
+  nsHttp::TrimHTTPWhitespace(contentTypeOptionsHeader,
+                             contentTypeOptionsHeader);
+
+  return contentTypeOptionsHeader.EqualsIgnoreCase("nosniff");
+}
+
+// The maximum number of bytes to consider when attempting to sniff.
+static const uint32_t MAX_BYTES_SNIFFED = 1445;
+
+static void GetDataForSniffer(void* aClosure, const uint8_t* aData,
+                              uint32_t aCount) {
+  nsTArray<uint8_t>* outData = static_cast<nsTArray<uint8_t>*>(aClosure);
+  outData->AppendElements(aData, std::min(aCount, MAX_BYTES_SNIFFED));
+}
+
 NS_IMETHODIMP
 HttpTransactionChild::OnStartRequest(nsIRequest* aRequest) {
   LOG(("HttpTransactionChild::OnStartRequest start [this=%p]\n", this));
@@ -367,9 +400,18 @@ HttpTransactionChild::OnStartRequest(nsIRequest* aRequest) {
     mStatusCodeIs200 = head->Status() == 200;
     optionalHead = Some(*head);
   }
-  Unused << SendOnStartRequest(
-      status, optionalHead, serializedSecurityInfoOut, mSelfAddr, mPeerAddr,
-      mTransaction->ProxyConnectFailed(), mTransaction->Timings());
+
+  nsTArray<uint8_t> dataForSniffer;
+  if (mTransaction->Caps() & NS_HTTP_CALL_CONTENT_SNIFFER && !IsNoSniff(head)) {
+    RefPtr<nsInputStreamPump> pump =
+        static_cast<nsInputStreamPump*>(mTransactionPump.get());
+    pump->PeekStream(GetDataForSniffer, &dataForSniffer);
+  }
+
+  Unused << SendOnStartRequest(status, optionalHead, serializedSecurityInfoOut,
+                               mSelfAddr, mPeerAddr,
+                               mTransaction->ProxyConnectFailed(),
+                               mTransaction->Timings(), dataForSniffer);
   LOG(("HttpTransactionChild::OnStartRequest end [this=%p]\n", this));
   return NS_OK;
 }
