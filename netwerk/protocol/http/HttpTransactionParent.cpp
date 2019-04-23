@@ -13,6 +13,7 @@
 #include "mozilla/net/SocketProcessParent.h"
 #include "nsHttpHandler.h"
 #include "nsIHttpActivityObserver.h"
+#include "nsStreamUtils.h"
 
 using namespace mozilla::net;
 
@@ -365,7 +366,6 @@ mozilla::ipc::IPCResult HttpTransactionParent::RecvOnDataAvailable(
 
   // TODO: need to determine how to send the input stream, we use nsCString for
   // now
-  nsCOMPtr<nsIStreamListener> chan = mChannel;
   nsCOMPtr<nsIInputStream> stringStream;
   nsresult rv = NS_NewByteInputStream(getter_AddRefs(stringStream),
                                       MakeSpan(aData.get(), aCount),
@@ -377,10 +377,27 @@ mozilla::ipc::IPCResult HttpTransactionParent::RecvOnDataAvailable(
   }
 
   mDataAlreadySent = dataSentToChildProcess;
+
+  if (!mSuspendCount) {
+    mChannel->OnDataAvailable(this, stringStream, aOffset, aCount);
+    return IPC_OK();
+  }
+
+  // We have to clone |stringStream|, since |stringStream| is created with flag
+  // |NS_ASSIGNMENT_DEPEND|. The |aData| will be released when this function
+  // ends.
+  nsCOMPtr<nsIInputStream> clonedStream;
+  rv = NS_CloneInputStream(stringStream, getter_AddRefs(clonedStream));
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    Cancel(rv);
+    return IPC_OK();
+  }
+
+  nsCOMPtr<nsIStreamListener> chan = mChannel;
   RefPtr<HttpTransactionParent> self(this);
   auto call = [self{std::move(self)}, chan{std::move(chan)},
-               stringStream{std::move(stringStream)}, aOffset, aCount]() {
-    nsresult rv = chan->OnDataAvailable(self, stringStream, aOffset, aCount);
+               clonedStream{std::move(clonedStream)}, aOffset, aCount]() {
+    nsresult rv = chan->OnDataAvailable(self, clonedStream, aOffset, aCount);
     if (NS_FAILED(rv)) {
       self->Cancel(rv);
     }
