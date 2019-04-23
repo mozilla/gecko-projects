@@ -2372,6 +2372,7 @@ before this struct.  Some types generate multiple kinds.'''
             return
         self.visited.add(s)
         self.maybeTypedef('mozilla::ipc::Endpoint', 'Endpoint', ['FooSide'])
+        self.visitActorType(s.actor)
 
     def visitManagedEndpointType(self, s):
         if s in self.visited:
@@ -2379,6 +2380,7 @@ before this struct.  Some types generate multiple kinds.'''
         self.visited.add(s)
         self.maybeTypedef('mozilla::ipc::ManagedEndpoint', 'ManagedEndpoint',
                           ['FooSide'])
+        self.visitActorType(s.actor)
 
     def visitUniquePtrType(self, s):
         if s in self.visited:
