@@ -35,8 +35,14 @@ nsHttpRequestHead::nsHttpRequestHead(const nsHttpRequestHead &aRequestHead)
   RecursiveMutexAutoLock monitor(other.mRecursiveMutex);
 
   mHeaders = other.mHeaders;
+  mMethod = other.mMethod;
   mVersion = other.mVersion;
   mRequestURI = other.mRequestURI;
+  mPath = other.mPath;
+  mOrigin = other.mOrigin;
+  mParsedMethod = other.mParsedMethod;
+  mHTTPS = other.mHTTPS;
+  mInVisitHeaders = false;
 }
 
 nsHttpRequestHead &nsHttpRequestHead::operator=(
@@ -46,8 +52,14 @@ nsHttpRequestHead &nsHttpRequestHead::operator=(
   RecursiveMutexAutoLock monitor(mRecursiveMutex);
 
   mHeaders = other.mHeaders;
+  mMethod = other.mMethod;
   mVersion = other.mVersion;
   mRequestURI = other.mRequestURI;
+  mPath = other.mPath;
+  mOrigin = other.mOrigin;
+  mParsedMethod = other.mParsedMethod;
+  mHTTPS = other.mHTTPS;
+  mInVisitHeaders = false;
   return *this;
 }
 
