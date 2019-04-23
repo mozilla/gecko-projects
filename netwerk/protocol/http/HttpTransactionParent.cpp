@@ -20,8 +20,39 @@ using namespace mozilla::net;
 namespace mozilla {
 namespace net {
 
-NS_IMPL_ISUPPORTS(HttpTransactionParent, nsIRequest,
-                  nsIThreadRetargetableRequest);
+NS_IMPL_ADDREF(HttpTransactionParent)
+NS_IMPL_QUERY_INTERFACE(HttpTransactionParent, nsIRequest,
+                        nsIThreadRetargetableRequest)
+
+NS_IMETHODIMP_(MozExternalRefCountType) HttpTransactionParent::Release(void) {
+  MOZ_ASSERT(int32_t(mRefCnt) > 0, "dup release");
+
+  if (!nsAutoRefCnt::isThreadSafe) {
+    NS_ASSERT_OWNINGTHREAD(HttpTransactionParent);
+  }
+
+  nsrefcnt count = --mRefCnt;
+  NS_LOG_RELEASE(this, count, "HttpTransactionParent");
+
+  if (count == 0) {
+    if (!nsAutoRefCnt::isThreadSafe) {
+      NS_ASSERT_OWNINGTHREAD(HttpTransactionParent);
+    }
+
+    mRefCnt = 1; /* stabilize */
+    delete (this);
+    return 0;
+  }
+
+  // When ref count goes down to 1 (held internally by IPDL), it means that
+  // we are done with this transaction. We should send a delete message
+  // to delete the transaction child in socket process.
+  if (count == 1 && mIPCOpen) {
+    mozilla::Unused << Send__delete__(this);
+    return 1;
+  }
+  return count;
+}
 
 //-----------------------------------------------------------------------------
 // HttpTransactionParent <public>
@@ -443,11 +474,6 @@ mozilla::ipc::IPCResult HttpTransactionParent::RecvOnStopRequest(
   RefPtr<HttpTransactionParent> self(this);
   auto call = [self{std::move(self)}, chan{std::move(chan)}]() {
     Unused << chan->OnStopRequest(self, self->mStatus);
-
-    // We are done with this transaction after OnStopRequest.
-    if (self->mIPCOpen) {
-      Unused << Send__delete__(self);
-    }
     gHttpHandler->RemoveHttpChannel(self->mChannelId);
   };
   if (mSuspendCount > 0) {

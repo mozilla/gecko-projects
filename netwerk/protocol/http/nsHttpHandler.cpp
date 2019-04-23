@@ -2759,7 +2759,10 @@ nsresult nsHttpHandler::InitiateTransactionWithStickyConn(
 void nsHttpHandler::AddHttpChannel(uint64_t aId, nsISupports *aChannel) {
   MOZ_ASSERT(XRE_IsParentProcess());
   MOZ_ASSERT(NS_IsMainThread());
-  MOZ_ASSERT(!mIDToHttpChannelMap.Lookup(aId));
+
+  if (mIDToHttpChannelMap.Lookup(aId)) {
+    return;
+  }
 
   nsWeakPtr channel(do_GetWeakReference(aChannel));
   mIDToHttpChannelMap.Put(aId, std::move(channel));
@@ -2768,7 +2771,6 @@ void nsHttpHandler::AddHttpChannel(uint64_t aId, nsISupports *aChannel) {
 void nsHttpHandler::RemoveHttpChannel(uint64_t aId) {
   MOZ_ASSERT(XRE_IsParentProcess());
   MOZ_ASSERT(NS_IsMainThread());
-  MOZ_ASSERT(mIDToHttpChannelMap.Lookup(aId));
 
   mIDToHttpChannelMap.Remove(aId);
 }

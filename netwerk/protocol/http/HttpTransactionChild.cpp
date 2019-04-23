@@ -278,6 +278,8 @@ mozilla::ipc::IPCResult HttpTransactionChild::RecvSetH2WSConnRefTaken() {
 void HttpTransactionChild::ActorDestroy(ActorDestroyReason aWhy) {
   LOG(("HttpTransactionChild::ActorDestroy [this=%p]\n", this));
   mIPCOpen = false;
+  mTransaction = nullptr;
+  mTransactionPump = nullptr;
 }
 
 nsHttpTransaction* HttpTransactionChild::GetTransaction() {
@@ -395,8 +397,6 @@ HttpTransactionChild::OnStopRequest(nsIRequest* aRequest, nsresult aStatus) {
     mThrottleQueue->Send__delete__(mThrottleQueue);
     mThrottleQueue = nullptr;
   }
-  mTransaction = nullptr;
-  mTransactionPump = nullptr;
   return NS_OK;
 }
 
