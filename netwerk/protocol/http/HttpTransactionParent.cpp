@@ -362,8 +362,22 @@ mozilla::ipc::IPCResult HttpTransactionParent::RecvOnStartRequest(
   RefPtr<HttpTransactionParent> self(this);
   auto call = [self{std::move(self)}, chan{std::move(chan)}]() {
     nsresult rv = chan->OnStartRequest(self);
+    // The OnStartRequest listeners could spin the event loop on the current
+    // thread, so we need |mOnStartRequestFinished| to make sure that
+    // |OnStartRequest| is really finished.
+    self->mOnStartRequestFinished = true;
+
     if (NS_FAILED(rv)) {
       self->Cancel(rv);
+    }
+
+    if (!self->mQueuedRunnables.IsEmpty()) {
+      nsTArray<nsCOMPtr<nsIRunnable>> runnables;
+      runnables.SwapElements(self->mQueuedRunnables);
+
+      for (const auto& event : runnables) {
+        event->Run();
+      }
     }
   };
   if (mSuspendCount > 0) {
@@ -392,6 +406,21 @@ mozilla::ipc::IPCResult HttpTransactionParent::RecvOnDataAvailable(
        this, aOffset, aCount, dataSentToChildProcess));
 
   if (mCanceled) {
+    return IPC_OK();
+  }
+
+  if (!mOnStartRequestFinished) {
+    LOG(("  > pending until OnStartRequest finished [offset=%" PRIu64
+         " count=%" PRIu32 "]\n",
+         aOffset, aCount));
+
+    mQueuedRunnables.AppendElement(
+        NewRunnableMethod<const nsCString, const uint64_t, const uint32_t,
+                          const bool>(
+            "HttpTransactionParent::RecvOnDataAvailable", this,
+            &HttpTransactionParent::RecvOnDataAvailable, aData, aOffset, aCount,
+            dataSentToChildProcess));
+
     return IPC_OK();
   }
 
@@ -451,6 +480,22 @@ mozilla::ipc::IPCResult HttpTransactionParent::RecvOnStopRequest(
   LOG(("HttpTransactionParent::RecvOnStopRequest [this=%p status=%" PRIx32
        "]\n",
        this, static_cast<uint32_t>(aStatus)));
+
+  if (!mOnStartRequestFinished) {
+    LOG(("  > pending until OnStartRequest finished [status=%" PRIx32 "]\n",
+         static_cast<uint32_t>(aStatus)));
+
+    mQueuedRunnables.AppendElement(
+        NewRunnableMethod<const nsresult, const bool, const int64_t,
+                          const TimingStruct, const nsHttpHeaderArray,
+                          const bool, const TransactionObserverResult>(
+            "HttpTransactionParent::RecvOnStopRequest", this,
+            &HttpTransactionParent::RecvOnStopRequest, aStatus,
+            aResponseIsComplete, aTransferSize, aTimings, aResponseTrailers,
+            aHasStickyConn, aResult));
+
+    return IPC_OK();
+  }
 
   if (!mCanceled && NS_SUCCEEDED(mStatus)) {
     mStatus = aStatus;
@@ -582,6 +627,7 @@ HttpTransactionParent::SetLoadFlags(nsLoadFlags aLoadFlags) {
 void HttpTransactionParent::ActorDestroy(ActorDestroyReason aWhy) {
   LOG(("HttpTransactionParent::ActorDestroy [this=%p]\n", this));
   mIPCOpen = false;
+  mQueuedRunnables.Clear();
   // TODO: we (probably?) have to notify OnStopReq on the channel
 }
 

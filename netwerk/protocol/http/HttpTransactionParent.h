@@ -82,6 +82,10 @@ class HttpTransactionParent final : public PHttpTransactionParent,
   bool mDataAlreadySent = false;
   int32_t mSuspendCount = 0;
   std::queue<std::function<void()>> mSuspendQueue;
+  // Store pending messages that require to be handled after OnStartRequest is
+  // finished. Should be flushed after OnStartRequest is done.
+  nsTArray<nsCOMPtr<nsIRunnable>> mQueuedRunnables;
+  bool mOnStartRequestFinished = false;
 
   NetAddr mSelfAddr;
   NetAddr mPeerAddr;
