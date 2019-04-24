@@ -410,6 +410,10 @@ HttpTransactionChild::OnTransportStatus(nsITransport* aTransport,
                                         int64_t aProgressMax) {
   LOG(("HttpTransactionChild::OnTransportStatus [this=%p]\n", this));
 
+  if (!mIPCOpen) {
+    return NS_OK;
+  }
+
   if (aStatus == NS_NET_STATUS_CONNECTED_TO ||
       aStatus == NS_NET_STATUS_WAITING_FOR) {
     if (mTransaction) {
