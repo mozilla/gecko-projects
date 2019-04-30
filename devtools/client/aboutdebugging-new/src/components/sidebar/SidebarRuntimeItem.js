@@ -31,6 +31,7 @@ class SidebarRuntimeItem extends PureComponent {
       isConnecting: PropTypes.bool.isRequired,
       isConnectionFailed: PropTypes.bool.isRequired,
       isConnectionNotResponding: PropTypes.bool.isRequired,
+      isConnectionTimeout: PropTypes.bool.isRequired,
       isSelected: PropTypes.bool.isRequired,
       isUnavailable: PropTypes.bool.isRequired,
       isUnplugged: PropTypes.bool.isRequired,
@@ -62,46 +63,16 @@ class SidebarRuntimeItem extends PureComponent {
     );
   }
 
-  renderConnectionError() {
-    const { isConnectionFailed } = this.props;
-
-    if (!isConnectionFailed) {
+  renderMessage(flag, level, localizationId, className) {
+    if (!flag) {
       return null;
     }
 
-    const localizationId =
-      "about-debugging-sidebar-item-connect-button-connection-failed";
-
     return Message(
       {
-        level: MESSAGE_LEVEL.ERROR,
-        key: "connection-error",
-        className: "qa-connection-error",
-      },
-      Localized(
-        {
-          id: localizationId,
-        },
-        dom.p({ className: "word-wrap-anywhere" }, localizationId)
-      )
-    );
-  }
-
-  renderConnectionNotResponding() {
-    const { isConnectionNotResponding } = this.props;
-
-    if (!isConnectionNotResponding) {
-      return null;
-    }
-
-    const localizationId =
-      "about-debugging-sidebar-item-connect-button-connection-not-responding";
-
-    return Message(
-      {
-        level: MESSAGE_LEVEL.WARNING,
-        key: "connection-not-responding",
-        className: "qa-connection-not-responding",
+        level,
+        className: `${className} sidebar-runtime-item__message`,
+        isCloseable: true,
       },
       Localized(
         {
@@ -176,6 +147,9 @@ class SidebarRuntimeItem extends PureComponent {
       getString,
       icon,
       isConnected,
+      isConnectionFailed,
+      isConnectionTimeout,
+      isConnectionNotResponding,
       isSelected,
       isUnavailable,
       runtimeId,
@@ -185,33 +159,45 @@ class SidebarRuntimeItem extends PureComponent {
       getString("aboutdebugging-sidebar-runtime-connection-status-connected") :
       getString("aboutdebugging-sidebar-runtime-connection-status-disconnected");
 
-    return [
-      SidebarItem(
+    return SidebarItem(
+      {
+        isSelected,
+        to: isConnected ? `/runtime/${encodeURIComponent(runtimeId)}` : null,
+      },
+      dom.section(
         {
-          className: "sidebar-item--tall",
-          key: "sidebar-item",
-          isSelected,
-          to: isConnected ? `/runtime/${encodeURIComponent(runtimeId)}` : null,
+          className: "sidebar-runtime-item__container",
         },
-        dom.section(
+        dom.img(
           {
-            className: "sidebar-runtime-item__container",
-          },
-          dom.img(
-            {
-              className: "sidebar-runtime-item__icon ",
-              src: icon,
-              alt: connectionStatus,
-              title: connectionStatus,
-            }
-          ),
-          this.renderName(),
-          !isUnavailable && !isConnected ? this.renderConnectButton() : null
+            className: "sidebar-runtime-item__icon ",
+            src: icon,
+            alt: connectionStatus,
+            title: connectionStatus,
+          }
         ),
+        this.renderName(),
+        !isUnavailable && !isConnected ? this.renderConnectButton() : null
       ),
-      this.renderConnectionError(),
-      this.renderConnectionNotResponding(),
-    ];
+      this.renderMessage(
+        isConnectionFailed,
+        MESSAGE_LEVEL.ERROR,
+        "about-debugging-sidebar-item-connect-button-connection-failed",
+        "qa-connection-error"
+      ),
+      this.renderMessage(
+        isConnectionTimeout,
+        MESSAGE_LEVEL.ERROR,
+        "about-debugging-sidebar-item-connect-button-connection-timeout",
+        "qa-connection-timeout"
+      ),
+      this.renderMessage(
+        isConnectionNotResponding,
+        MESSAGE_LEVEL.WARNING,
+        "about-debugging-sidebar-item-connect-button-connection-not-responding",
+        "qa-connection-not-responding"
+      ),
+    );
   }
 }
 

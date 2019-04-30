@@ -47,6 +47,7 @@
 #include "vm/JSObject.h"
 #include "vm/JSScript.h"
 #include "vm/Opcodes.h"
+#include "vm/PIC.h"
 #include "vm/Scope.h"
 #include "vm/Shape.h"
 #include "vm/StringType.h"
@@ -1966,7 +1967,14 @@ static MOZ_NEVER_INLINE JS_HAZ_JSNATIVE_CALLER bool Interpret(JSContext* cx,
       COUNT_COVERAGE();
       // Attempt on-stack replacement with Baseline code.
       if (jit::IsBaselineEnabled(cx)) {
-        jit::MethodStatus status = jit::CanEnterBaselineAtBranch(cx, REGS.fp());
+        script->incWarmUpCounter();
+
+        using Tier = jit::BaselineTier;
+        jit::MethodStatus status =
+            jit::JitOptions.baselineInterpreter
+                ? jit::CanEnterBaselineAtBranch<Tier::Interpreter>(cx,
+                                                                   REGS.fp())
+                : jit::CanEnterBaselineAtBranch<Tier::Compiler>(cx, REGS.fp());
         if (status == jit::Method_Error) {
           goto error;
         }

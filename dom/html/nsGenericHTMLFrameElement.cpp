@@ -133,11 +133,11 @@ void nsGenericHTMLFrameElement::EnsureFrameLoader() {
 }
 
 nsresult nsGenericHTMLFrameElement::CreateRemoteFrameLoader(
-    nsITabParent* aTabParent) {
+    nsIRemoteTab* aBrowserParent) {
   MOZ_ASSERT(!mFrameLoader);
   EnsureFrameLoader();
   NS_ENSURE_STATE(mFrameLoader);
-  mFrameLoader->SetRemoteBrowser(aTabParent);
+  mFrameLoader->SetRemoteBrowser(aBrowserParent);
 
   if (nsSubDocumentFrame* subdocFrame = do_QueryFrame(GetPrimaryFrame())) {
     // The reflow for this element already happened while we were waiting
@@ -173,6 +173,11 @@ void nsGenericHTMLFrameElement::SwapFrameLoaders(
 
 void nsGenericHTMLFrameElement::SwapFrameLoaders(
     nsFrameLoaderOwner* aOtherLoaderOwner, mozilla::ErrorResult& rv) {
+  if (RefPtr<Document> doc = GetComposedDoc()) {
+    // SwapWithOtherLoader relies on frames being up-to-date.
+    doc->FlushPendingNotifications(FlushType::Frames);
+  }
+
   RefPtr<nsFrameLoader> loader = GetFrameLoader();
   RefPtr<nsFrameLoader> otherLoader = aOtherLoaderOwner->GetFrameLoader();
   if (!loader || !otherLoader) {
@@ -296,7 +301,7 @@ nsresult nsGenericHTMLFrameElement::AfterSetAttr(
                 presShell ? presShell->GetRootScrollFrame() : nullptr;
             if (rootScroll) {
               presShell->FrameNeedsReflow(
-                  rootScroll, nsIPresShell::eStyleChange, NS_FRAME_IS_DIRTY);
+                  rootScroll, IntrinsicDirty::StyleChange, NS_FRAME_IS_DIRTY);
             }
           }
         }

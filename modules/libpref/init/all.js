@@ -229,6 +229,12 @@ pref("dom.keyboardevent.keypress.hack.dispatch_non_printable_keys", "www.icloud.
 // check its explanation for the detail.
 pref("dom.keyboardevent.keypress.hack.use_legacy_keycode_and_charcode", "*.collabserv.com,*.gov.online.office365.us,*.officeapps-df.live.com,*.officeapps.live.com,*.online.office.de,*.partner.officewebapps.cn,*.scniris.com");
 
+// Blacklist of domains of web apps which listen for non-primary click events
+// on window global or document. The format is exactly same as
+// "dom.keyboardevent.keypress.hack.dispatch_non_printable_keys". So, check its
+// explanation for the detail.
+pref("dom.mouseevent.click.hack.use_legacy_non-primary_dispatch", "");
+
 // Whether InputEvent.data is enabled.
 pref("dom.inputevent.data.enabled", true);
 
@@ -426,6 +432,16 @@ pref("media.decoder-doctor.verbose", false);
 // URL to report decode issues
 pref("media.decoder-doctor.new-issue-endpoint", "https://webcompat.com/issues/new");
 
+#if defined(NIGHTLY_BUILD) && defined(XP_WIN)
+pref("media.videocontrols.picture-in-picture.enabled", true);
+pref("media.videocontrols.picture-in-picture.video-toggle.enabled", true);
+#else
+pref("media.videocontrols.picture-in-picture.enabled", false);
+pref("media.videocontrols.picture-in-picture.video-toggle.enabled", false);
+#endif
+pref("media.videocontrols.picture-in-picture.video-toggle.flyout-enabled", false);
+pref("media.videocontrols.picture-in-picture.video-toggle.flyout-wait-ms", 5000);
+
 #ifdef MOZ_WEBRTC
 pref("media.navigator.enabled", true);
 pref("media.navigator.video.enabled", true);
@@ -444,11 +460,6 @@ pref("media.peerconnection.sdp.rust.compare", true);
 pref("media.peerconnection.sdp.rust.enabled", false);
 pref("media.peerconnection.sdp.rust.compare", false);
 #endif
-
-pref("media.videocontrols.picture-in-picture.enabled", false);
-pref("media.videocontrols.picture-in-picture.video-toggle.enabled", false);
-pref("media.videocontrols.picture-in-picture.video-toggle.flyout-enabled", false);
-pref("media.videocontrols.picture-in-picture.video-toggle.flyout-wait-ms", 5000);
 
 pref("media.webrtc.debug.trace_mask", 0);
 pref("media.webrtc.debug.multi_log", false);
@@ -718,6 +729,9 @@ pref("apz.danger_zone_y", 100);
 pref("apz.disable_for_scroll_linked_effects", false);
 pref("apz.displayport_expiry_ms", 15000);
 pref("apz.enlarge_displayport_when_clipped", false);
+pref("apz.fixed-margin-override.enabled", false);  // test only
+pref("apz.fixed-margin-override.bottom", 0);       // test only
+pref("apz.fixed-margin-override.top", 0);          // test only
 pref("apz.fling_accel_base_mult", "1.0");
 pref("apz.fling_accel_interval_ms", 500);
 pref("apz.fling_accel_min_velocity", "1.5");
@@ -934,6 +948,9 @@ pref("gfx.webrender.force-disabled", false);
 pref("gfx.webrender.force-angle", true);
 pref("gfx.webrender.dcomp-win.enabled", true);
 pref("gfx.webrender.dcomp-win-triple-buffering.enabled", true);
+#endif
+
+#if defined(XP_WIN) || defined(MOZ_WIDGET_ANDROID)
 pref("gfx.webrender.program-binary-disk", true);
 #endif
 
@@ -970,6 +987,11 @@ pref("gfx.webrender.dl.dump-parent", false);
 pref("gfx.webrender.dl.dump-content", false);
 pref("gfx.webrender.picture-caching", true);
 pref("gfx.webrender.split-render-roots", false);
+#ifdef NIGHTLY_BUILD
+// Keep this pref hidden on non-nightly builds to avoid people accidentally
+// turning it on
+pref("gfx.webrender.start-debug-server", false);
+#endif
 
 pref("accessibility.browsewithcaret", false);
 pref("accessibility.warn_on_browsewithcaret", true);
@@ -1287,7 +1309,7 @@ pref("dom.allow_scripts_to_close_windows",          false);
 pref("dom.require_user_interaction_for_beforeunload", true);
 
 pref("dom.popup_maximum",                           20);
-pref("dom.popup_allowed_events", "change click dblclick mouseup pointerup notificationclick reset submit touchend contextmenu");
+pref("dom.popup_allowed_events", "change click dblclick auxclick mouseup pointerup notificationclick reset submit touchend contextmenu");
 
 pref("dom.disable_open_click_delay", 1000);
 pref("dom.serviceWorkers.disable_open_click_delay", 1000);
@@ -2387,13 +2409,6 @@ pref("network.cookie.thirdparty.sessionOnly", false);
 pref("network.cookie.thirdparty.nonsecureSessionOnly", false);
 pref("network.cookie.same-site.enabled",    true); // Honor the SameSite cookie attribute
 
-// Cookie lifetime policy. Possible values:
-// 0 - accept all cookies
-// 1 - deprecated. don't use it.
-// 2 - accept as session cookies
-// 3 - deprecated. don't use it.
-pref("network.cookie.lifetimePolicy",       0);
-
 // The interval in seconds to move the cookies in the child process.
 // Set to 0 to disable moving the cookies.
 pref("network.cookie.move.interval_sec",    10);
@@ -2701,16 +2716,13 @@ pref("csp.overrule_about_uris_without_csp_whitelist", false);
 pref("csp.skip_about_page_has_csp_assert", false);
 // assertion flag will be set to false after fixing Bug 1473549
 pref("security.allow_eval_with_system_principal", false);
-pref("security.uris_using_eval_with_system_principal", "autocomplete.xml,redux.js,react-redux.js,content-task.js,preferencesbindings.js,lodash.js,jszip.js,sinon-7.2.7.js,ajv-4.1.1.js,setup,jsol.js,parent_utils.js,chrometask_chromescript");
+pref("security.uris_using_eval_with_system_principal", "autocomplete.xml,redux.js,react-redux.js,content-task.js,preferencesbindings.js,lodash.js,jszip.js,sinon-7.2.7.js,ajv-4.1.1.js,setup,jsol.js,chrometask_chromescript,simpletest/simpletest.js");
 #endif
 
 #if defined(DEBUG) || defined(FUZZING)
 // Disallow web documents loaded with the SystemPrincipal
 pref("security.disallow_non_local_systemprincipal_in_tests", false);
 #endif
-
-// Default Content Security Policy to apply to signed contents.
-pref("security.signed_content.CSP.default", "script-src 'self'; style-src 'self'");
 
 // Mixed content blocking
 pref("security.mixed_content.block_active_content", false);
@@ -2769,6 +2781,12 @@ pref("services.settings.default_signer", "remote-settings.content-signature.mozi
 // other channels always report events.
 pref("services.common.uptake.sampleRate", 1);   // 1%
 
+// Security state OneCRL.
+pref("services.settings.security.onecrl.bucket", "security-state");
+pref("services.settings.security.onecrl.collection", "onecrl");
+pref("services.settings.security.onecrl.signer", "onecrl.content-signature.mozilla.org");
+pref("services.settings.security.onecrl.checked", 0);
+
 // Blocklist preferences
 pref("extensions.blocklist.enabled", true);
 // OneCRL freshness checking depends on this value, so if you change it,
@@ -2785,9 +2803,6 @@ pref("extensions.blocklist.itemURL", "https://blocked.cdn.mozilla.net/%blockID%.
 pref("extensions.blocklist.level", 2);
 // Blocklist via settings server (Kinto)
 pref("services.blocklist.bucket", "blocklists");
-pref("services.blocklist.onecrl.collection", "certificates");
-pref("services.blocklist.onecrl.checked", 0);
-pref("services.blocklist.onecrl.signer", "onecrl.content-signature.mozilla.org");
 pref("services.blocklist.addons.collection", "addons");
 pref("services.blocklist.addons.checked", 0);
 pref("services.blocklist.addons.signer", "remote-settings.content-signature.mozilla.org");
@@ -4815,9 +4830,9 @@ pref("image.animated.resume-from-last-displayed", true);
 // same data at different sizes.
 pref("image.cache.factor2.threshold-surfaces", 4);
 
-// Maximum number of pixels in either dimension that we are willing to upscale
-// an SVG to when we are in "factor of 2" mode.
-pref("image.cache.max-rasterized-svg-threshold-kb", 92160);
+// Maximum size of a surface in KB we are willing to produce when rasterizing
+// an SVG.
+pref("image.cache.max-rasterized-svg-threshold-kb", 204800);
 
 // The maximum size, in bytes, of the decoded images we cache
 pref("image.cache.size", 5242880);
@@ -5431,7 +5446,7 @@ pref("dom.vr.autoactivate.enabled", false);
 // The threshold value of trigger inputs for VR controllers
 pref("dom.vr.controller_trigger_threshold", "0.1");
 // Enable external XR API integrations
-#if defined(XP_WIN) && defined(NIGHTLY_BUILD)
+#if defined(XP_WIN)
 pref("dom.vr.external.enabled", true);
 #else
 pref("dom.vr.external.enabled", false);
@@ -5495,11 +5510,7 @@ pref("dom.vr.openvr.enabled", true);
 // See Bug 1310663 (Linux).  On Android, this pref is irrelevant.
 pref("dom.vr.openvr.enabled", false);
 #endif
-#ifdef RELEASE_OR_BETA
-pref("dom.vr.openvr.action_input", false);
-#else
 pref("dom.vr.openvr.action_input", true);
-#endif
 // Minimum number of milliseconds that the browser will wait before
 // attempting to poll again for connected VR controllers.  The browser
 // will not attempt to poll for VR controllers until it needs to use them.
@@ -5524,8 +5535,10 @@ pref("dom.vr.poseprediction.enabled", true);
 // tests or in a headless kiosk system.
 pref("dom.vr.require-gesture", true);
 // Enable a separate process for VR module.
-#if defined(XP_WIN) && defined(NIGHTLY_BUILD)
+#if defined(XP_WIN)
 pref("dom.vr.process.enabled", true);
+#else
+pref("dom.vr.process.enabled", false);
 #endif
 // Puppet device, used for simulating VR hardware within tests and dev tools
 pref("dom.vr.puppet.enabled", false);
@@ -6072,9 +6085,6 @@ pref("dom.datatransfer.mozAtAPIs", false);
 #else
 pref("dom.datatransfer.mozAtAPIs", true);
 #endif
-
-// Whether or not the Prio Ping is supported on this platform.
-pref("toolkit.telemetry.prioping.enabled", false);
 
 // External.AddSearchProvider is deprecated and it will be removed in the next
 // cycles.

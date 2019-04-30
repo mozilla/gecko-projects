@@ -243,6 +243,8 @@ namespace dom {
 
 class Document;
 class DOMStyleSheetSetList;
+class ResizeObserver;
+class ResizeObserverController;
 
 // Document states
 
@@ -1239,6 +1241,12 @@ class Document : public nsINode,
   void EnableEncodingMenu() { mEncodingMenuDisabled = false; }
 
   /**
+   * Called to disable client access to cookies through the document.cookie API
+   * from user JavaScript code.
+   */
+  void DisableCookieAccess() { mDisableCookieAccess = true; }
+
+  /**
    * Access HTTP header data (this may also get set from other
    * sources, like HTML META tags).
    */
@@ -1655,17 +1663,6 @@ class Document : public nsINode,
   void InsertSheetAt(size_t aIndex, StyleSheet&);
 
   /**
-   * Replace the stylesheets in aOldSheets with the stylesheets in
-   * aNewSheets. The two lists must have equal length, and the sheet
-   * at positon J in the first list will be replaced by the sheet at
-   * position J in the second list.  Some sheets in the second list
-   * may be null; if so the corresponding sheets in the first list
-   * will simply be removed.
-   */
-  void UpdateStyleSheets(nsTArray<RefPtr<StyleSheet>>& aOldSheets,
-                         nsTArray<RefPtr<StyleSheet>>& aNewSheets);
-
-  /**
    * Add a stylesheet to the document
    *
    * TODO(emilio): This is only used by parts of editor that are no longer in
@@ -1705,17 +1702,10 @@ class Document : public nsINode,
   }
 
   /**
-   * Assuming that aDocSheets is an array of document-level style
-   * sheets for this document, returns the index that aSheet should
-   * be inserted at to maintain document ordering.
-   *
-   * Type T has to cast to StyleSheet*.
-   *
-   * Defined in DocumentInlines.h.
+   * Returns the index that aSheet should be inserted at to maintain document
+   * ordering.
    */
-  template <typename T>
-  size_t FindDocStyleSheetInsertionPoint(const nsTArray<T>& aDocSheets,
-                                         const StyleSheet& aSheet);
+  size_t FindDocStyleSheetInsertionPoint(const StyleSheet& aSheet);
 
   /**
    * Get this document's CSSLoader.  This is guaranteed to not return null.
@@ -2021,10 +2011,12 @@ class Document : public nsINode,
   // a scriptblocker but NOT within a begin/end update.
   void ContentStateChanged(nsIContent* aContent, EventStates aStateMask);
 
-  // Notify that a document state has changed.
+  // Update a set of document states that may have changed.
   // This should only be called by callers whose state is also reflected in the
   // implementation of Document::GetDocumentState.
-  void DocumentStatesChanged(EventStates aStateMask);
+  //
+  // aNotify controls whether we notify our DocumentStatesChanged observers.
+  void UpdateDocumentStates(EventStates aStateMask, bool aNotify);
 
   void ResetDocumentDirection();
 
@@ -2413,11 +2405,6 @@ class Document : public nsINode,
   Element* GetAnonymousElementByAttribute(nsIContent* aElement,
                                           nsAtom* aAttrName,
                                           const nsAString& aAttrValue) const;
-
-  /**
-   * See FlushSkinBindings on nsBindingManager
-   */
-  void FlushSkinBindings();
 
   /**
    * To batch DOMSubtreeModified, document needs to be informed when
@@ -2852,9 +2839,8 @@ class Document : public nsINode,
   void ForgetImagePreload(nsIURI* aURI);
 
   /**
-   * Called by nsParser to preload style sheets.  Can also be merged into the
-   * parser if and when the parser is merged with libgklayout.  aCrossOriginAttr
-   * should be a void string if the attr is not present.
+   * Called by nsParser to preload style sheets.  aCrossOriginAttr should be a
+   * void string if the attr is not present.
    */
   void PreloadStyle(nsIURI* aURI, const Encoding* aEncoding,
                     const nsAString& aCrossOriginAttr,
@@ -2862,15 +2848,11 @@ class Document : public nsINode,
                     const nsAString& aIntegrity);
 
   /**
-   * Called by the chrome registry to load style sheets.  Can be put
-   * back there if and when when that module is merged with libgklayout.
+   * Called by the chrome registry to load style sheets.
    *
-   * This always does a synchronous load.  If aIsAgentSheet is true,
-   * it also uses the system principal and enables unsafe rules.
-   * DO NOT USE FOR UNTRUSTED CONTENT.
+   * This always does a synchronous load, and parses as a normal document sheet.
    */
-  nsresult LoadChromeSheetSync(nsIURI* aURI, bool aIsAgentSheet,
-                               RefPtr<StyleSheet>* aSheet);
+  RefPtr<StyleSheet> LoadChromeSheetSync(nsIURI* aURI);
 
   /**
    * Returns true if the locale used for the document specifies a direction of
@@ -2943,7 +2925,7 @@ class Document : public nsINode,
   void TriggerAutoFocus();
 
   void SetScrollToRef(nsIURI* aDocumentURI);
-  void ScrollToRef();
+  MOZ_CAN_RUN_SCRIPT void ScrollToRef();
   void ResetScrolledToRefAlready() { mScrolledToRefAlready = false; }
 
   void SetChangeScrollPosWhenScrollingToRef(bool aValue) {
@@ -3239,6 +3221,8 @@ class Document : public nsINode,
                                            ErrorResult& rv);
   void GetInputEncoding(nsAString& aInputEncoding) const;
   already_AddRefed<Location> GetLocation() const;
+  void GetCookie(nsAString& aCookie, mozilla::ErrorResult& rv);
+  void SetCookie(const nsAString& aCookie, mozilla::ErrorResult& rv);
   void GetReferrer(nsAString& aReferrer) const;
   void GetLastModified(nsAString& aLastModified) const;
   void GetReadyState(nsAString& aReadyState) const;
@@ -3552,6 +3536,10 @@ class Document : public nsINode,
   // toolkit/components/url-classifier/flash-block-lists.rst
   FlashClassification DocumentFlashClassification();
 
+  // ResizeObserver usage.
+  void AddResizeObserver(ResizeObserver* aResizeObserver);
+  void ScheduleResizeObserversNotification() const;
+
   /**
    * Localization
    *
@@ -3817,11 +3805,9 @@ class Document : public nsINode,
     return mChildDocumentUseCounters[aUseCounter];
   }
 
-  void UpdateDocumentStates(EventStates);
-
   void RemoveDocStyleSheetsFromStyleSets();
   void RemoveStyleSheetsFromStyleSets(
-      const nsTArray<RefPtr<StyleSheet>>& aSheets, SheetType aType);
+      const nsTArray<RefPtr<StyleSheet>>& aSheets, StyleOrigin);
   void ResetStylesheetsToURI(nsIURI* aURI);
   void FillStyleSet();
   void FillStyleSetUserAndUASheets();
@@ -3829,8 +3815,11 @@ class Document : public nsINode,
   void CompatibilityModeChanged();
   bool NeedsQuirksSheet() const {
     // SVG documents never load quirk.css.
+    // FIXME(emilio): Can SVG documents be in quirks mode anyway?
     return mCompatMode == eCompatibility_NavQuirks && !IsSVGDocument();
   }
+  void AddContentEditableStyleSheetsToStyleSet(bool aDesignMode);
+  void RemoveContentEditableStyleSheets();
   void AddStyleSheetToStyleSets(StyleSheet* aSheet);
   void RemoveStyleSheetFromStyleSets(StyleSheet* aSheet);
   void NotifyStyleSheetAdded(StyleSheet* aSheet, bool aDocumentSheet);
@@ -3919,6 +3908,10 @@ class Document : public nsINode,
   static void* UseExistingNameString(nsINode* aRootNode, const nsString* aName);
 
   void MaybeResolveReadyForIdle();
+
+  // This should *ONLY* be used in GetCookie/SetCookie.
+  already_AddRefed<nsIChannel> CreateDummyChannelForCookies(
+      nsIURI* aCodebaseURI);
 
   nsCString mReferrer;
   nsString mLastModified;
@@ -4035,6 +4028,8 @@ class Document : public nsINode,
   RefPtr<Promise> mReadyForIdle;
 
   RefPtr<FeaturePolicy> mFeaturePolicy;
+
+  UniquePtr<ResizeObserverController> mResizeObserverController;
 
   // True if BIDI is enabled.
   bool mBidiEnabled : 1;
@@ -4220,6 +4215,12 @@ class Document : public nsINode,
   // Whether we have a quirks mode stylesheet in the style set.
   bool mQuirkSheetAdded : 1;
 
+  // Whether we have a contenteditable.css stylesheet in the style set.
+  bool mContentEditableSheetAdded : 1;
+
+  // Whether we have a designmode.css stylesheet in the style set.
+  bool mDesignModeSheetAdded : 1;
+
   // Keeps track of whether we have a pending
   // 'style-sheet-applicable-state-changed' notification.
   bool mSSApplicableStateNotificationPending : 1;
@@ -4296,6 +4297,9 @@ class Document : public nsINode,
   // flag is only relevant for HTML documents, but lives here for reasons that
   // are documented above on SkipLoadEventAfterClose().
   bool mSkipLoadEventAfterClose : 1;
+
+  // When false, the .cookies property is completely disabled
+  bool mDisableCookieAccess : 1;
 
   uint8_t mPendingFullscreenRequests;
 

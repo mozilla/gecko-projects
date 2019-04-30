@@ -43,15 +43,6 @@ class SVGLength {
     NS_ASSERTION(IsValid(), "Constructed an invalid length");
   }
 
-  SVGLength(const SVGLength &aOther)
-      : mValue(aOther.mValue), mUnit(aOther.mUnit) {}
-
-  SVGLength &operator=(const SVGLength &rhs) {
-    mValue = rhs.mValue;
-    mUnit = rhs.mUnit;
-    return *this;
-  }
-
   bool operator==(const SVGLength &rhs) const {
     return mValue == rhs.mValue && mUnit == rhs.mUnit;
   }
@@ -62,7 +53,7 @@ class SVGLength {
    * This method returns true, unless there was a parse failure, in which
    * case it returns false (and the length is left unchanged).
    */
-  bool SetValueFromString(const nsAString &aValue);
+  bool SetValueFromString(const nsAString &aString);
 
   /**
    * This will usually return a valid, finite number. There is one exception

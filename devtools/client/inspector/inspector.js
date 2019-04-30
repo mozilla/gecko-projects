@@ -427,6 +427,8 @@ Inspector.prototype = {
   setupSearchBox: function() {
     this.searchBox = this.panelDoc.getElementById("inspector-searchbox");
     this.searchClearButton = this.panelDoc.getElementById("inspector-searchinput-clear");
+    this.searchResultsContainer =
+      this.panelDoc.getElementById("inspector-searchlabel-container");
     this.searchResultsLabel = this.panelDoc.getElementById("inspector-searchlabel");
 
     this.searchBox.addEventListener("focus", () => {
@@ -434,11 +436,19 @@ Inspector.prototype = {
       this.search.on("search-result", this._updateSearchResultsLabel);
     }, { once: true });
 
-    const shortcuts = new KeyShortcuts({
+    this.createSearchBoxShortcuts();
+  },
+
+  createSearchBoxShortcuts() {
+    this.searchboxShortcuts = new KeyShortcuts({
       window: this.panelDoc.defaultView,
+      // The inspector search shortcuts need to be available from everywhere in the
+      // inspector, and the inspector uses iframes (markupview, sidepanel webextensions).
+      // Use the chromeEventHandler as the target to catch events from all frames.
+      target: this.toolbox.getChromeEventHandler(),
     });
     const key = INSPECTOR_L10N.getStr("inspector.searchHTML.key");
-    shortcuts.on(key, event => {
+    this.searchboxShortcuts.on(key, event => {
       // Prevent overriding same shortcut from the computed/rule views
       if (event.target.closest("#sidebar-panel-ruleview") ||
           event.target.closest("#sidebar-panel-computedview")) {
@@ -466,6 +476,10 @@ Inspector.prototype = {
       } else {
         str = INSPECTOR_L10N.getStr("inspector.searchResultsNone");
       }
+
+      this.searchResultsContainer.hidden = false;
+    } else {
+      this.searchResultsContainer.hidden = true;
     }
 
     this.searchResultsLabel.textContent = str;
@@ -1262,6 +1276,11 @@ Inspector.prototype = {
       return;
     }
 
+    // When changing hosts, the toolbox chromeEventHandler might change, for instance when
+    // switching from docked to window hosts. Recreate the searchbox shortcuts.
+    this.searchboxShortcuts.destroy();
+    this.createSearchBoxShortcuts();
+
     this.setSidebarSplitBoxState();
   },
 
@@ -1405,6 +1424,7 @@ Inspector.prototype = {
     this.breadcrumbs.destroy();
     this.reflowTracker.destroy();
     this.styleChangeTracker.destroy();
+    this.searchboxShortcuts.destroy();
 
     this._is3PaneModeChromeEnabled = null;
     this._is3PaneModeEnabled = null;

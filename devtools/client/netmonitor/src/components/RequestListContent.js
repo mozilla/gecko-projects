@@ -18,6 +18,9 @@ const {
   getWaterfallScale,
 } = require("../selectors/index");
 
+loader.lazyRequireGetter(this, "openRequestInTab",
+  "devtools/client/netmonitor/src/utils/firefox/open-request-in-tab",
+  true);
 loader.lazyGetter(this, "setImageTooltip", function() {
   return require("devtools/client/shared/widgets/tooltip/ImageTooltipHelper")
     .setImageTooltip;
@@ -47,6 +50,7 @@ const MAX_SCROLL_HEIGHT = 2147483647;
 class RequestListContent extends Component {
   static get propTypes() {
     return {
+      blockSelectedRequestURL: PropTypes.func.isRequired,
       connector: PropTypes.object.isRequired,
       columns: PropTypes.object.isRequired,
       networkDetailsOpen: PropTypes.bool.isRequired,
@@ -65,6 +69,7 @@ class RequestListContent extends Component {
       openStatistics: PropTypes.func.isRequired,
       scale: PropTypes.number,
       selectedRequest: PropTypes.object,
+      unblockSelectedRequestURL: PropTypes.func.isRequired,
       requestFilterTypes: PropTypes.object.isRequired,
     };
   }
@@ -76,6 +81,8 @@ class RequestListContent extends Component {
     this.onScroll = this.onScroll.bind(this);
     this.onResize = this.onResize.bind(this);
     this.onKeyDown = this.onKeyDown.bind(this);
+    this.openRequestInTab = this.openRequestInTab.bind(this);
+    this.onDoubleClick = this.onDoubleClick.bind(this);
     this.onContextMenu = this.onContextMenu.bind(this);
     this.onFocusedNodeChange = this.onFocusedNodeChange.bind(this);
   }
@@ -237,22 +244,44 @@ class RequestListContent extends Component {
     }
   }
 
+  /**
+   * Opens selected item in a new tab.
+   */
+  async openRequestInTab(id, url, requestHeaders, requestPostData) {
+    requestHeaders = requestHeaders ||
+      await this.props.connector.requestData(id, "requestHeaders");
+
+    requestPostData = requestPostData ||
+      await this.props.connector.requestData(id, "requestPostData");
+
+    openRequestInTab(url, requestHeaders, requestPostData);
+  }
+
+  onDoubleClick({ id, url, requestHeaders, requestPostData }) {
+    this.openRequestInTab(id, url, requestHeaders, requestPostData);
+  }
+
   onContextMenu(evt) {
     evt.preventDefault();
     const { selectedRequest, displayedRequests } = this.props;
 
     if (!this.contextMenu) {
       const {
+        blockSelectedRequestURL,
         connector,
         cloneSelectedRequest,
         sendCustomRequest,
         openStatistics,
+        unblockSelectedRequestURL,
       } = this.props;
       this.contextMenu = new RequestListContextMenu({
+        blockSelectedRequestURL,
         connector,
         cloneSelectedRequest,
         sendCustomRequest,
         openStatistics,
+        openRequestInTab: this.openRequestInTab,
+        unblockSelectedRequestURL,
       });
     }
 
@@ -299,6 +328,7 @@ class RequestListContent extends Component {
             style: { "--timings-scale": scale, "--timings-rev-scale": 1 / scale },
           },
             displayedRequests.map((item, index) => RequestListItem({
+              blocked: !!item.blockedReason,
               firstRequestStartedMillis,
               fromCache: item.status === "304" || item.fromCache,
               connector,
@@ -309,6 +339,7 @@ class RequestListContent extends Component {
               key: item.id,
               onContextMenu: this.onContextMenu,
               onFocusedNodeChange: this.onFocusedNodeChange,
+              onDoubleClick: () => this.onDoubleClick(item),
               onMouseDown: () => onItemMouseDown(item.id),
               onCauseBadgeMouseDown: () => onCauseBadgeMouseDown(item.cause),
               onSecurityIconMouseDown: () => onSecurityIconMouseDown(item.securityState),
@@ -335,9 +366,15 @@ module.exports = connect(
     requestFilterTypes: state.filters.requestFilterTypes,
   }),
   (dispatch, props) => ({
+    blockSelectedRequestURL: () => {
+      dispatch(Actions.blockSelectedRequestURL(props.connector));
+    },
     cloneSelectedRequest: () => dispatch(Actions.cloneSelectedRequest()),
     sendCustomRequest: () => dispatch(Actions.sendCustomRequest(props.connector)),
     openStatistics: (open) => dispatch(Actions.openStatistics(props.connector, open)),
+    unblockSelectedRequestURL: () => {
+      dispatch(Actions.unblockSelectedRequestURL(props.connector));
+    },
     /**
      * A handler that opens the stack trace tab when a stack trace is available
      */

@@ -65,13 +65,13 @@ void InspectorUtils::GetAllStyleSheets(GlobalObject& aGlobalObject,
     ServoStyleSet* styleSet = presShell->StyleSet();
 
     if (!aDocumentOnly) {
-      SheetType sheetType = SheetType::Agent;
-      for (int32_t i = 0; i < styleSet->SheetCount(sheetType); i++) {
-        aResult.AppendElement(styleSet->StyleSheetAt(sheetType, i));
-      }
-      sheetType = SheetType::User;
-      for (int32_t i = 0; i < styleSet->SheetCount(sheetType); i++) {
-        aResult.AppendElement(styleSet->StyleSheetAt(sheetType, i));
+      const StyleOrigin kOrigins[] = {StyleOrigin::UserAgent,
+                                      StyleOrigin::User};
+      for (const auto origin : kOrigins) {
+        for (size_t i = 0, count = styleSet->SheetCount(origin); i < count;
+             i++) {
+          aResult.AppendElement(styleSet->SheetAt(origin, i));
+        }
       }
     }
 
@@ -182,22 +182,6 @@ void InspectorUtils::GetCSSStyleRules(
     ServoStyleSet* styleSet = presShell->StyleSet();
     ServoStyleRuleMap* map = styleSet->StyleRuleMap();
     maps.AppendElement(map);
-  }
-
-  // Collect style rule maps for bindings.
-  for (nsIContent* bindingContent = &aElement; bindingContent;
-       bindingContent = bindingContent->GetBindingParent()) {
-    for (nsXBLBinding* binding = bindingContent->GetXBLBinding(); binding;
-         binding = binding->GetBaseBinding()) {
-      if (auto* map = binding->PrototypeBinding()->GetServoStyleRuleMap()) {
-        maps.AppendElement(map);
-      }
-    }
-    // Note that we intentionally don't cut off here, unlike when we
-    // do styling, because even if style rules from parent binding
-    // do not apply to the element directly in those cases, their
-    // rules may still show up in the list we get above due to the
-    // inheritance in cascading.
   }
 
   // Now shadow DOM stuff...
@@ -352,8 +336,8 @@ void InspectorUtils::GetCSSPropertyNames(GlobalObject& aGlobalObject,
                                          const PropertyNamesOptions& aOptions,
                                          nsTArray<nsString>& aResult) {
   CSSEnabledState enabledState = aOptions.mIncludeExperimentals
-                                     ? CSSEnabledState::eIgnoreEnabledState
-                                     : CSSEnabledState::eForAllContent;
+                                     ? CSSEnabledState::IgnoreEnabledState
+                                     : CSSEnabledState::ForAllContent;
 
   auto appendProperty = [enabledState, &aResult](uint32_t prop) {
     nsCSSPropertyID cssProp = nsCSSPropertyID(prop);
@@ -642,7 +626,7 @@ void InspectorUtils::GetCSSPseudoElementNames(GlobalObject& aGlobalObject,
       static_cast<size_t>(PseudoStyleType::CSSPseudoElementsEnd);
   for (size_t i = 0; i < kPseudoCount; ++i) {
     PseudoStyleType type = static_cast<PseudoStyleType>(i);
-    if (nsCSSPseudoElements::IsEnabled(type, CSSEnabledState::eForAllContent)) {
+    if (nsCSSPseudoElements::IsEnabled(type, CSSEnabledState::ForAllContent)) {
       nsAtom* atom = nsCSSPseudoElements::GetPseudoAtom(type);
       aResult.AppendElement(nsDependentAtomString(atom));
     }

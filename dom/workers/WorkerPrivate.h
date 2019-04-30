@@ -133,8 +133,6 @@ class WorkerPrivate : public RelativeTimeline {
 
   bool Cancel() { return Notify(Canceling); }
 
-  bool Kill() { return Notify(Killing); }
-
   bool Close();
 
   // The passed principal must be the Worker principal in case of a
@@ -685,6 +683,14 @@ class WorkerPrivate : public RelativeTimeline {
     return *mLoadInfo.mPrincipalInfo;
   }
 
+  // The CSPInfo returned is the same CSP as stored inside the Principal
+  // returned from GetPrincipalInfo. Please note that after Bug 965637
+  // we do not have a a CSP stored inside the Principal anymore which
+  // allows us to clean that part up.
+  const nsTArray<mozilla::ipc::ContentSecurityPolicy>& GetCSPInfos() const {
+    return mLoadInfo.mCSPInfos;
+  }
+
   const mozilla::ipc::PrincipalInfo& GetEffectiveStoragePrincipalInfo() const {
     return *mLoadInfo.mStoragePrincipalInfo;
   }
@@ -853,6 +859,8 @@ class WorkerPrivate : public RelativeTimeline {
 #endif
 
   void StartCancelingTimer();
+
+  nsAString& Id();
 
  private:
   WorkerPrivate(WorkerPrivate* aParent, const nsAString& aScriptURL,
@@ -1135,6 +1143,8 @@ class WorkerPrivate : public RelativeTimeline {
   // This pointer will be null if dom.performance.enable_scheduler_timing is
   // false (default value)
   RefPtr<mozilla::PerformanceCounter> mPerformanceCounter;
+
+  nsString mID;
 };
 
 class AutoSyncLoopHolder {

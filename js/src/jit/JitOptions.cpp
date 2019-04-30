@@ -140,6 +140,9 @@ DefaultJitOptions::DefaultJitOptions() {
   // disabled.
   SET_DEFAULT(disableOptimizationLevels, false);
 
+  // Whether the Baseline Interpreter is enabled.
+  SET_DEFAULT(baselineInterpreter, false);
+
   // Whether IonBuilder should prefer IC generation above specialized MIR.
   SET_DEFAULT(forceInlineCaches, false);
 
@@ -151,6 +154,10 @@ DefaultJitOptions::DefaultJitOptions() {
 
   // Whether to enable extra code to perform dynamic validations.
   SET_DEFAULT(runExtraChecks, false);
+
+  // How many invocations or loop iterations are needed before functions
+  // enter the Baseline Interpreter.
+  SET_DEFAULT(baselineInterpreterWarmUpThreshold, 10);
 
   // How many invocations or loop iterations are needed before functions
   // are compiled with the baseline compiler.
@@ -204,6 +211,14 @@ DefaultJitOptions::DefaultJitOptions() {
   SET_DEFAULT(branchPruningBlockSpanFactor, 100);
   SET_DEFAULT(branchPruningEffectfulInstFactor, 3500);
   SET_DEFAULT(branchPruningThreshold, 4000);
+
+  // Limits on bytecode length and number of locals/arguments for Ion
+  // compilation. There are different (lower) limits for when off-thread Ion
+  // compilation isn't available.
+  SET_DEFAULT(ionMaxScriptSize, 100 * 1000);
+  SET_DEFAULT(ionMaxScriptSizeMainThread, 2 * 1000);
+  SET_DEFAULT(ionMaxLocalsAndArgs, 10 * 1000);
+  SET_DEFAULT(ionMaxLocalsAndArgsMainThread, 256);
 
   // Force the used register allocator instead of letting the optimization
   // pass decide.

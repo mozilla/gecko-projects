@@ -31,6 +31,7 @@ struct DtoaState;
 namespace js {
 
 class AutoAllocInAtomsZone;
+class AutoMaybeLeaveAtomsZone;
 class AutoRealm;
 
 namespace jit {
@@ -286,7 +287,6 @@ struct JSContext : public JS::RootingContext,
     return runtime_->jitSupportsUnalignedAccesses;
   }
   bool jitSupportsSimd() const { return runtime_->jitSupportsSimd; }
-  bool lcovEnabled() const { return runtime_->lcovOutput().isEnabled(); }
 
   /*
    * "Entering" a realm changes cx->realm (which changes cx->global). Note
@@ -312,6 +312,7 @@ struct JSContext : public JS::RootingContext,
   inline void setZone(js::Zone* zone, IsAtomsZone isAtomsZone);
 
   friend class js::AutoAllocInAtomsZone;
+  friend class js::AutoMaybeLeaveAtomsZone;
   friend class js::AutoRealm;
 
  public:

@@ -228,9 +228,10 @@ var UrlbarUtils = {
   },
 
   /**
-   * Returns a list of all the token substring matches in a string.  Each match
-   * in the list is a tuple: [matchIndex, matchLength].  matchIndex is the index
-   * in the string of the match, and matchLength is the length of the match.
+   * Returns a list of all the token substring matches in a string.  Matching is
+   * case insensitive.  Each match in the returned list is a tuple: [matchIndex,
+   * matchLength].  matchIndex is the index in the string of the match, and
+   * matchLength is the length of the match.
    *
    * @param {array} tokens The tokens to search for.
    * @param {string} str The string to match against.
@@ -243,14 +244,15 @@ var UrlbarUtils = {
    *          The array is sorted by match indexes ascending.
    */
   getTokenMatches(tokens, str) {
+    str = str.toLocaleLowerCase();
     // To generate non-overlapping ranges, we start from a 0-filled array with
     // the same length of the string, and use it as a collision marker, setting
     // 1 where a token matches.
     let hits = new Array(str.length).fill(0);
-    for (let token of tokens) {
+    for (let { lowerCaseValue } of tokens) {
       // Ideally we should never hit the empty token case, but just in case
-      // the value check protects us from an infinite loop.
-      for (let index = 0, needle = token.value; index >= 0 && needle;) {
+      // the `needle` check protects us from an infinite loop.
+      for (let index = 0, needle = lowerCaseValue; index >= 0 && needle;) {
         index = str.indexOf(needle, index);
         if (index >= 0) {
           hits.fill(1, index, index + needle.length);
@@ -394,9 +396,6 @@ class UrlbarQueryContext {
    * @param {string} options.searchString
    *   The string the user entered in autocomplete. Could be the empty string
    *   in the case of the user opening the popup via the mouse.
-   * @param {number} options.lastKey
-   *   The last key the user entered (as a key code). Could be null if the search
-   *   was started via the mouse.
    * @param {boolean} options.isPrivate
    *   Set to true if this query was started from a private browsing window.
    * @param {number} options.maxResults
@@ -410,7 +409,6 @@ class UrlbarQueryContext {
     this._checkRequiredOptions(options, [
       "allowAutofill",
       "isPrivate",
-      "lastKey",
       "maxResults",
       "searchString",
     ]);

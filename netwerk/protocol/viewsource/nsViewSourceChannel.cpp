@@ -747,15 +747,6 @@ nsViewSourceChannel::GetFlashPluginState(
 }
 
 NS_IMETHODIMP
-nsViewSourceChannel::OverrideTrackingFlagsForDocumentCookieAccessor(
-    nsIHttpChannel *aDocumentChannel) {
-  return !mHttpChannel
-             ? NS_ERROR_NULL_POINTER
-             : mHttpChannel->OverrideTrackingFlagsForDocumentCookieAccessor(
-                   aDocumentChannel);
-}
-
-NS_IMETHODIMP
 nsViewSourceChannel::GetRequestMethod(nsACString &aRequestMethod) {
   return !mHttpChannel ? NS_ERROR_NULL_POINTER
                        : mHttpChannel->GetRequestMethod(aRequestMethod);
@@ -968,10 +959,11 @@ nsViewSourceChannel::RedirectTo(nsIURI *uri) {
 }
 
 NS_IMETHODIMP
-nsViewSourceChannel::SwitchProcessTo(mozilla::dom::Promise *aTabParent,
+nsViewSourceChannel::SwitchProcessTo(mozilla::dom::Promise *aBrowserParent,
                                      uint64_t aIdentifier) {
-  return !mHttpChannel ? NS_ERROR_NULL_POINTER
-                       : mHttpChannel->SwitchProcessTo(aTabParent, aIdentifier);
+  return !mHttpChannel
+             ? NS_ERROR_NULL_POINTER
+             : mHttpChannel->SwitchProcessTo(aBrowserParent, aIdentifier);
 }
 
 NS_IMETHODIMP

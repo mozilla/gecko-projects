@@ -646,7 +646,7 @@ void nsDisplayBullet::Paint(nsDisplayListBuilder* aBuilder, gfxContext* aCtx) {
   }
 
   ImgDrawResult result = static_cast<nsBulletFrame*>(mFrame)->PaintBullet(
-      *aCtx, ToReferenceFrame(), GetPaintRect(), flags, mDisableSubpixelAA);
+      *aCtx, ToReferenceFrame(), GetPaintRect(), flags, IsSubpixelAADisabled());
 
   nsDisplayBulletGeometry::UpdateDrawResult(this, result);
 }
@@ -1157,7 +1157,7 @@ nsresult nsBulletFrame::OnSizeAvailable(imgIRequest* aRequest,
     // a reflow of the bullet frame.
     mozilla::PresShell* presShell = presContext->GetPresShell();
     if (presShell) {
-      presShell->FrameNeedsReflow(this, nsIPresShell::eStyleChange,
+      presShell->FrameNeedsReflow(this, IntrinsicDirty::StyleChange,
                                   NS_FRAME_IS_DIRTY);
     }
   }
@@ -1261,6 +1261,19 @@ nscoord nsBulletFrame::GetLogicalBaseline(WritingMode aWritingMode) const {
     ascent = GetListStyleAscent();
   }
   return ascent + GetLogicalUsedMargin(aWritingMode).BStart(aWritingMode);
+}
+
+bool nsBulletFrame::GetNaturalBaselineBOffset(WritingMode aWM,
+                                              BaselineSharingGroup,
+                                              nscoord* aBaseline) const {
+  nscoord ascent = 0;
+  if (GetStateBits() & BULLET_FRAME_IMAGE_LOADING) {
+    ascent = BSize(aWM);
+  } else {
+    ascent = GetListStyleAscent();
+  }
+  *aBaseline = ascent;
+  return true;
 }
 
 #ifdef ACCESSIBILITY

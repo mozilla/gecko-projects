@@ -20,6 +20,7 @@ var isDevtools = SimpleTest.harnessParameters.subsuite == "devtools";
 var gExceptionPaths = [
   "chrome://browser/content/defaultthemes/",
   "resource://app/defaults/settings/blocklists/",
+  "resource://app/defaults/settings/security-state/",
   "resource://app/defaults/settings/main/",
   "resource://app/defaults/settings/pinning/",
   "resource://app/defaults/preferences/",
@@ -126,10 +127,6 @@ var whitelist = [
   {file: "resource://app/modules/translation/GoogleTranslator.jsm"},
   {file: "resource://app/modules/translation/YandexTranslator.jsm"},
 
-  // Used in Firefox Monitor, which is an extension - we don't check
-  // files inside the XPI.
-  {file: "resource://app/modules/EveryWindow.jsm"},
-
   // Starting from here, files in the whitelist are bugs that need fixing.
   // Bug 1339424 (wontfix?)
   {file: "chrome://browser/locale/taskbar.properties",
@@ -173,9 +170,6 @@ var whitelist = [
   {file: "chrome://devtools/skin/images/aboutdebugging-firefox-release.svg",
    isFromDevTools: true},
   {file: "chrome://devtools/skin/images/next.svg", isFromDevTools: true},
-  // kvstore.jsm wraps the API in nsIKeyValue.idl in a more ergonomic API
-  // It landed in bug 1490496, and we expect to start using it shortly.
-  {file: "resource://gre/modules/kvstore.jsm"},
   // Bug 1526672
   {file: "resource://app/localization/en-US/browser/touchbar/touchbar.ftl",
    platforms: ["linux", "win"]},
@@ -282,8 +276,8 @@ function parseManifest(manifestUri) {
         // the addon is preffed-off, and since it's a hack until we
         // get bz1425104 landed, we'll just skip it for now.
         // Same issue with fxmonitor, which is also pref'd off.
-        if (chromeUri === "chrome://webcompat-reporter/locale/") {
-          gChromeMap.set("chrome://webcompat-reporter/locale/", true);
+        if (chromeUri === "chrome://report-site-issue/locale/") {
+          gChromeMap.set("chrome://report-site-issue/locale/", true);
         } else if (chromeUri === "chrome://fxmonitor/locale/") {
           gChromeMap.set("chrome://fxmonitor/locale/", true);
         } else {

@@ -45,6 +45,7 @@
 #include "js/CharacterEncoding.h"
 #include "js/CompilationAndEvaluation.h"
 #include "js/CompileOptions.h"
+#include "js/Date.h"
 #include "js/Debug.h"
 #include "js/HashTable.h"
 #include "js/LocaleSensitive.h"
@@ -486,10 +487,19 @@ static bool MinorGC(JSContext* cx, unsigned argc, Value* vp) {
   _("dynamicHeapGrowth", JSGC_DYNAMIC_HEAP_GROWTH, true)                     \
   _("dynamicMarkSlice", JSGC_DYNAMIC_MARK_SLICE, true)                       \
   _("allocationThreshold", JSGC_ALLOCATION_THRESHOLD, true)                  \
+  _("allocationThresholdFactor", JSGC_ALLOCATION_THRESHOLD_FACTOR, true)     \
+  _("allocationThresholdFactorAvoidInterrupt",                               \
+    JSGC_ALLOCATION_THRESHOLD_FACTOR_AVOID_INTERRUPT, true)                  \
   _("minEmptyChunkCount", JSGC_MIN_EMPTY_CHUNK_COUNT, true)                  \
   _("maxEmptyChunkCount", JSGC_MAX_EMPTY_CHUNK_COUNT, true)                  \
   _("compactingEnabled", JSGC_COMPACTING_ENABLED, true)                      \
-  _("minLastDitchGCPeriod", JSGC_MIN_LAST_DITCH_GC_PERIOD, true)
+  _("minLastDitchGCPeriod", JSGC_MIN_LAST_DITCH_GC_PERIOD, true)             \
+  _("nurseryFreeThresholdForIdleCollection",                                 \
+    JSGC_NURSERY_FREE_THRESHOLD_FOR_IDLE_COLLECTION, true)                   \
+  _("nurseryFreeThresholdForIdleCollectionPercent",                          \
+    JSGC_NURSERY_FREE_THRESHOLD_FOR_IDLE_COLLECTION_PERCENT, true)           \
+  _("pretenureThreshold", JSGC_PRETENURE_THRESHOLD, true)                    \
+  _("pretenureGroupThreshold", JSGC_PRETENURE_GROUP_THRESHOLD, true)
 
 static const struct ParamInfo {
   const char* name;
@@ -2486,7 +2496,7 @@ static bool ReadGeckoProfilingStack(JSContext* cx, unsigned argc, Value* vp) {
       }
 
       UniqueChars label =
-          DuplicateStringToArena(js::MallocArena, cx, frames[i].label);
+          DuplicateStringToArena(js::StringBufferArena, cx, frames[i].label);
       if (!label) {
         return false;
       }
@@ -3549,7 +3559,7 @@ struct FindPathHandler {
     // Record how we reached this node. This is the last edge on a
     // shortest path to this node.
     EdgeName edgeName =
-        DuplicateStringToArena(js::MallocArena, cx, edge.name.get());
+        DuplicateStringToArena(js::StringBufferArena, cx, edge.name.get());
     if (!edgeName) {
       return false;
     }

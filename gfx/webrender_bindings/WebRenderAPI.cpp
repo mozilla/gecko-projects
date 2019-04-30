@@ -16,6 +16,7 @@
 #include "mozilla/widget/CompositorWidget.h"
 #include "mozilla/layers/SynchronousTask.h"
 #include "TextDrawTarget.h"
+#include "malloc_decls.h"
 
 // clang-format off
 #define WRDL_LOG(...)
@@ -77,7 +78,7 @@ class NewRenderer : public RendererEvent {
             aWindowId, mSize.width, mSize.height,
             supportLowPriorityTransactions,
             gfxPrefs::WebRenderPictureCaching() && supportPictureCaching,
-            compositor->gl(),
+            gfxPrefs::WebRenderStartDebugServer(), compositor->gl(),
             aRenderThread.GetProgramCache()
                 ? aRenderThread.GetProgramCache()->Raw()
                 : nullptr,
@@ -209,12 +210,10 @@ bool TransactionBuilder::IsRenderedFrameInvalidated() const {
 }
 
 void TransactionBuilder::SetDocumentView(
-    const LayoutDeviceIntRect& aDocumentRect,
-    const LayoutDeviceIntSize& aWidgetSize) {
-  wr::FramebufferIntRect wrDocRect;
+    const LayoutDeviceIntRect& aDocumentRect) {
+  wr::DeviceIntRect wrDocRect;
   wrDocRect.origin.x = aDocumentRect.x;
-  wrDocRect.origin.y =
-      aWidgetSize.height - aDocumentRect.y - aDocumentRect.height;
+  wrDocRect.origin.y = aDocumentRect.y;
   wrDocRect.size.width = aDocumentRect.width;
   wrDocRect.size.height = aDocumentRect.height;
   wr_transaction_set_document_view(mTxn, &wrDocRect);
@@ -301,7 +300,7 @@ already_AddRefed<WebRenderAPI> WebRenderAPI::Clone() {
 
 already_AddRefed<WebRenderAPI> WebRenderAPI::CreateDocument(
     LayoutDeviceIntSize aSize, int8_t aLayerIndex, wr::RenderRoot aRenderRoot) {
-  wr::FramebufferIntSize wrSize;
+  wr::DeviceIntSize wrSize;
   wrSize.width = aSize.width;
   wrSize.height = aSize.height;
   wr::DocumentHandle* newDoc;
@@ -374,7 +373,8 @@ void WebRenderAPI::SendTransactions(
     return;
   }
 
-  aApis[RenderRoot::Default]->UpdateDebugFlags(gfx::gfxVars::WebRenderDebugFlags());
+  aApis[RenderRoot::Default]->UpdateDebugFlags(
+      gfx::gfxVars::WebRenderDebugFlags());
   AutoTArray<DocumentHandle*, kRenderRootCount> documentHandles;
   AutoTArray<Transaction*, kRenderRootCount> txns;
   Maybe<bool> useSceneBuilderThread;
@@ -802,9 +802,13 @@ void DisplayListBuilder::PopStackingContext(bool aIsReferenceFrame) {
 }
 
 wr::WrClipChainId DisplayListBuilder::DefineClipChain(
-    const nsTArray<wr::WrClipId>& aClips) {
+    const nsTArray<wr::WrClipId>& aClips, const wr::WrClipChainId* aParent) {
+  const uint64_t* parent = nullptr;
+  if (aParent && aParent->id != wr::ROOT_CLIP_CHAIN) {
+    parent = &aParent->id;
+  }
   uint64_t clipchainId = wr_dp_define_clipchain(
-      mWrState, nullptr, aClips.Elements(), aClips.Length());
+      mWrState, parent, aClips.Elements(), aClips.Length());
   WRDL_LOG("DefineClipChain id=%" PRIu64 " clips=%zu\n", mWrState, clipchainId,
            aClips.Length());
   return wr::WrClipChainId{clipchainId};
@@ -930,6 +934,16 @@ void DisplayListBuilder::PushRoundedRect(const wr::LayoutRect& aBounds,
 
   wr_dp_push_rect_with_parent_clip(mWrState, aBounds, clip, aIsBackfaceVisible,
                                    &spaceAndClip, aColor);
+}
+
+void DisplayListBuilder::PushHitTest(const wr::LayoutRect& aBounds,
+                                     const wr::LayoutRect& aClip,
+                                     bool aIsBackfaceVisible) {
+  wr::LayoutRect clip = MergeClipLeaf(aClip);
+  WRDL_LOG("PushHitTest b=%s cl=%s\n", mWrState, Stringify(aBounds).c_str(),
+           Stringify(clip).c_str());
+  wr_dp_push_hit_test(mWrState, aBounds, clip, aIsBackfaceVisible,
+                      &mCurrentSpaceAndClipChain);
 }
 
 void DisplayListBuilder::PushClearRect(const wr::LayoutRect& aBounds) {
@@ -1151,9 +1165,9 @@ void DisplayListBuilder::SuspendClipLeafMerging() {
     mSuspendedClipChainLeaf = mClipChainLeaf;
     mSuspendedSpaceAndClipChain = Some(mCurrentSpaceAndClipChain);
 
-    // Clip is implicitly parented by mCurrentSpaceAndClipChain
+    wr::WrClipChainId currentClipChainId{mCurrentSpaceAndClipChain.clip_chain};
     auto clipId = DefineClip(Nothing(), *mClipChainLeaf);
-    auto clipChainId = DefineClipChain({ clipId });
+    auto clipChainId = DefineClipChain({clipId}, &currentClipChainId);
 
     mCurrentSpaceAndClipChain.clip_chain = clipChainId.id;
     mClipChainLeaf = Nothing();
@@ -1256,6 +1270,12 @@ void wr_transaction_notification_notified(uintptr_t aHandler,
   // TODO: it would be better to get a callback when the object is destroyed on
   // the rust side and delete then.
   delete handler;
+}
+
+void wr_register_thread_local_arena() {
+#ifdef MOZ_MEMORY
+  jemalloc_thread_local_arena(true);
+#endif
 }
 
 }  // extern C

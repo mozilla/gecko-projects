@@ -127,16 +127,15 @@ namespace dom {
 // First bits are needed for the control type.
 #define NS_OUTER_ACTIVATE_EVENT (1 << 9)
 #define NS_ORIGINAL_CHECKED_VALUE (1 << 10)
-#define NS_NO_CONTENT_DISPATCH (1 << 11)
+// (1 << 11 is unused)
 #define NS_ORIGINAL_INDETERMINATE_VALUE (1 << 12)
 #define NS_PRE_HANDLE_BLUR_EVENT (1 << 13)
 #define NS_PRE_HANDLE_INPUT_EVENT (1 << 14)
 #define NS_IN_SUBMIT_CLICK (1 << 15)
-#define NS_CONTROL_TYPE(bits)                                            \
-  ((bits) & ~(NS_OUTER_ACTIVATE_EVENT | NS_ORIGINAL_CHECKED_VALUE |      \
-              NS_NO_CONTENT_DISPATCH | NS_ORIGINAL_INDETERMINATE_VALUE | \
-              NS_PRE_HANDLE_BLUR_EVENT | NS_PRE_HANDLE_INPUT_EVENT |     \
-              NS_IN_SUBMIT_CLICK))
+#define NS_CONTROL_TYPE(bits)                                              \
+  ((bits) & ~(NS_OUTER_ACTIVATE_EVENT | NS_ORIGINAL_CHECKED_VALUE |        \
+              NS_ORIGINAL_INDETERMINATE_VALUE | NS_PRE_HANDLE_BLUR_EVENT | \
+              NS_PRE_HANDLE_INPUT_EVENT | NS_IN_SUBMIT_CLICK))
 
 // whether textfields should be selected once focused:
 //  -1: no, 1: yes, 0: uninitialized
@@ -3202,19 +3201,6 @@ void HTMLInputElement::GetEventTargetParent(EventChainPreVisitor& aVisitor) {
     aVisitor.mItemFlags |= NS_ORIGINAL_CHECKED_VALUE;
   }
 
-  // If mNoContentDispatch is true we will not allow content to handle
-  // this event.  But to allow middle mouse button paste to work we must allow
-  // middle clicks to go to text fields anyway.
-  if (aVisitor.mEvent->mFlags.mNoContentDispatch) {
-    aVisitor.mItemFlags |= NS_NO_CONTENT_DISPATCH;
-  }
-  if (IsSingleLineTextControl(false) &&
-      aVisitor.mEvent->mMessage == eMouseClick &&
-      aVisitor.mEvent->AsMouseEvent()->button ==
-          WidgetMouseEvent::eMiddleButton) {
-    aVisitor.mEvent->mFlags.mNoContentDispatch = false;
-  }
-
   // We must cache type because mType may change during JS event (bug 2369)
   aVisitor.mItemFlags |= mType;
 
@@ -3424,9 +3410,9 @@ nsresult HTMLInputElement::PreHandleEvent(EventChainVisitor& aVisitor) {
 void HTMLInputElement::StartRangeThumbDrag(WidgetGUIEvent* aEvent) {
   mIsDraggingRange = true;
   mRangeThumbDragStartValue = GetValueAsDecimal();
-  // Don't use CAPTURE_RETARGETTOELEMENT, as that breaks pseudo-class styling
-  // of the thumb.
-  nsIPresShell::SetCapturingContent(this, CAPTURE_IGNOREALLOWED);
+  // Don't use CaptureFlags::RetargetToElement, as that breaks pseudo-class
+  // styling of the thumb.
+  PresShell::SetCapturingContent(this, CaptureFlags::IgnoreAllowedState);
   nsRangeFrame* rangeFrame = do_QueryFrame(GetPrimaryFrame());
 
   // Before we change the value, record the current value so that we'll
@@ -3443,7 +3429,7 @@ void HTMLInputElement::FinishRangeThumbDrag(WidgetGUIEvent* aEvent) {
   MOZ_ASSERT(mIsDraggingRange);
 
   if (nsIPresShell::GetCapturingContent() == this) {
-    nsIPresShell::SetCapturingContent(nullptr, 0);  // cancel capture
+    PresShell::ReleaseCapturingContent();
   }
   if (aEvent) {
     nsRangeFrame* rangeFrame = do_QueryFrame(GetPrimaryFrame());
@@ -3458,7 +3444,7 @@ void HTMLInputElement::CancelRangeThumbDrag(bool aIsForUserEvent) {
 
   mIsDraggingRange = false;
   if (nsIPresShell::GetCapturingContent() == this) {
-    nsIPresShell::SetCapturingContent(nullptr, 0);  // cancel capture
+    PresShell::ReleaseCapturingContent();
   }
   if (aIsForUserEvent) {
     SetValueOfRangeForUserEvent(mRangeThumbDragStartValue);
@@ -3516,7 +3502,7 @@ void HTMLInputElement::StartNumberControlSpinnerSpin() {
 
   // Capture the mouse so that we can tell if the pointer moves from one
   // spin button to the other, or to some other element:
-  nsIPresShell::SetCapturingContent(this, CAPTURE_IGNOREALLOWED);
+  PresShell::SetCapturingContent(this, CaptureFlags::IgnoreAllowedState);
 
   nsNumberControlFrame* numberControlFrame = do_QueryFrame(GetPrimaryFrame());
   if (numberControlFrame) {
@@ -3527,7 +3513,7 @@ void HTMLInputElement::StartNumberControlSpinnerSpin() {
 void HTMLInputElement::StopNumberControlSpinnerSpin(SpinnerStopState aState) {
   if (mNumberControlSpinnerIsSpinning) {
     if (nsIPresShell::GetCapturingContent() == this) {
-      nsIPresShell::SetCapturingContent(nullptr, 0);  // cancel capture
+      PresShell::ReleaseCapturingContent();
     }
 
     nsRepeatService::GetInstance()->Stop(HandleNumberControlSpin, this);
@@ -3705,7 +3691,6 @@ nsresult HTMLInputElement::PostHandleEvent(EventChainPostVisitor& aVisitor) {
   bool outerActivateEvent = !!(aVisitor.mItemFlags & NS_OUTER_ACTIVATE_EVENT);
   bool originalCheckedValue =
       !!(aVisitor.mItemFlags & NS_ORIGINAL_CHECKED_VALUE);
-  bool noContentDispatch = !!(aVisitor.mItemFlags & NS_NO_CONTENT_DISPATCH);
   uint8_t oldType = NS_CONTROL_TYPE(aVisitor.mItemFlags);
 
   // Ideally we would make the default action for click and space just dispatch
@@ -3755,9 +3740,6 @@ nsresult HTMLInputElement::PostHandleEvent(EventChainPostVisitor& aVisitor) {
         break;
     }
   }
-
-  // Reset the flag for other content besides this text field
-  aVisitor.mEvent->mFlags.mNoContentDispatch = noContentDispatch;
 
   // now check to see if the event was "cancelled"
   if (mCheckedIsToggled && outerActivateEvent) {
@@ -4030,8 +4012,8 @@ nsresult HTMLInputElement::PostHandleEvent(EventChainPostVisitor& aVisitor) {
           // cancel all of these events for buttons
           // XXXsmaug Why?
           WidgetMouseEvent* mouseEvent = aVisitor.mEvent->AsMouseEvent();
-          if (mouseEvent->button == WidgetMouseEvent::eMiddleButton ||
-              mouseEvent->button == WidgetMouseEvent::eRightButton) {
+          if (mouseEvent->mButton == MouseButton::eMiddle ||
+              mouseEvent->mButton == MouseButton::eRight) {
             if (mType == NS_FORM_INPUT_BUTTON || mType == NS_FORM_INPUT_RESET ||
                 mType == NS_FORM_INPUT_SUBMIT) {
               if (aVisitor.mDOMEvent) {
@@ -4042,7 +4024,7 @@ nsresult HTMLInputElement::PostHandleEvent(EventChainPostVisitor& aVisitor) {
             }
           }
           if (mType == NS_FORM_INPUT_NUMBER && aVisitor.mEvent->IsTrusted()) {
-            if (mouseEvent->button == WidgetMouseEvent::eLeftButton &&
+            if (mouseEvent->mButton == MouseButton::eLeft &&
                 !IgnoreInputEventWithModifier(mouseEvent, false)) {
               nsNumberControlFrame* numberControlFrame =
                   do_QueryFrame(GetPrimaryFrame());
@@ -4209,8 +4191,8 @@ void HTMLInputElement::PostHandleEventForRangeThumb(
         break;  // ignore
       }
       if (aVisitor.mEvent->mMessage == eMouseDown) {
-        if (aVisitor.mEvent->AsMouseEvent()->buttons ==
-            WidgetMouseEvent::eLeftButtonFlag) {
+        if (aVisitor.mEvent->AsMouseEvent()->mButtons ==
+            MouseButtonsFlag::eLeftFlag) {
           StartRangeThumbDrag(inputEvent);
         } else if (mIsDraggingRange) {
           CancelRangeThumbDrag();

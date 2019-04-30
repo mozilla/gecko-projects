@@ -133,8 +133,6 @@ SVGSVGElement::SVGSVGElement(
                                   aFromParser == FROM_PARSER_XSLT),
       mImageNeedsTransformInvalidation(false) {}
 
-SVGSVGElement::~SVGSVGElement() {}
-
 //----------------------------------------------------------------------
 // nsINode methods
 
@@ -219,9 +217,8 @@ float SVGSVGElement::GetCurrentTimeAsFloat() {
   if (root) {
     double fCurrentTimeMs = double(root->GetCurrentTimeAsSMILTime());
     return (float)(fCurrentTimeMs / PR_MSEC_PER_SEC);
-  } else {
-    return 0.f;
   }
+  return 0.f;
 }
 
 void SVGSVGElement::SetCurrentTime(float seconds) {
@@ -643,7 +640,8 @@ const SVGAnimatedViewBox& SVGSVGElement::GetViewBoxInternal() const {
 
   if (viewElement && viewElement->mViewBox.HasRect()) {
     return viewElement->mViewBox;
-  } else if (mSVGView && mSVGView->mViewBox.HasRect()) {
+  }
+  if (mSVGView && mSVGView->mViewBox.HasRect()) {
     return mSVGView->mViewBox;
   }
 

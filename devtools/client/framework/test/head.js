@@ -367,7 +367,7 @@ function getElementByToolIdOrExtensionIdOrSelector(toolbox, idOrSelector) {
 }
 
 function getWindow(toolbox) {
-  return toolbox.win.parent;
+  return toolbox.topWindow;
 }
 
 async function resizeWindow(toolbox, width, height) {
@@ -406,4 +406,24 @@ async function openAboutToolbox(params) {
     tab,
     document: browser.contentDocument,
   };
+}
+
+/**
+ * Enable temporary preferences useful to run browser toolbox process tests.
+ * Returns a promise that will resolve when the preferences are set.
+ */
+function setupPreferencesForBrowserToolbox() {
+  const options = {"set": [
+    ["devtools.debugger.prompt-connection", false],
+    ["devtools.debugger.remote-enabled", true],
+    ["devtools.chrome.enabled", true],
+    // Test-only pref to allow passing `testScript` argument to the browser
+    // toolbox
+    ["devtools.browser-toolbox.allow-unsafe-script", true],
+    // On debug test runner, it takes more than the default time (20s)
+    // to get a initialized console
+    ["devtools.debugger.remote-timeout", 120000],
+  ]};
+
+  return SpecialPowers.pushPrefEnv(options);
 }

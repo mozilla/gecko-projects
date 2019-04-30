@@ -462,15 +462,15 @@ void nsBlockFrame::InvalidateFrameWithRect(const nsRect& aRect,
 }
 
 nscoord nsBlockFrame::GetLogicalBaseline(WritingMode aWM) const {
-  auto lastBaseline = BaselineBOffset(aWM, BaselineSharingGroup::eLast,
-                                      AlignmentContext::eInline);
+  auto lastBaseline = BaselineBOffset(aWM, BaselineSharingGroup::Last,
+                                      AlignmentContext::Inline);
   return BSize(aWM) - lastBaseline;
 }
 
 bool nsBlockFrame::GetNaturalBaselineBOffset(
     mozilla::WritingMode aWM, BaselineSharingGroup aBaselineGroup,
     nscoord* aBaseline) const {
-  if (aBaselineGroup == BaselineSharingGroup::eFirst) {
+  if (aBaselineGroup == BaselineSharingGroup::First) {
     return nsLayoutUtils::GetFirstLineBaseline(aWM, this, aBaseline);
   }
 
@@ -1283,7 +1283,16 @@ void nsBlockFrame::Reflow(nsPresContext* aPresContext, ReflowOutput& aMetrics,
       // Tall ::markers won't look particularly nice here...
       LogicalRect bbox =
           marker->GetLogicalRect(wm, reflowOutput.PhysicalSize());
-      bbox.BStart(wm) = position.mBaseline - reflowOutput.BlockStartAscent();
+      const auto baselineGroup = BaselineSharingGroup::First;
+      nscoord markerBaseline;
+      if (MOZ_UNLIKELY(wm.IsOrthogonalTo(marker->GetWritingMode()) ||
+                       !marker->GetNaturalBaselineBOffset(wm, baselineGroup,
+                                                          &markerBaseline))) {
+        // ::marker has no baseline in this axis: align with its margin-box end.
+        markerBaseline =
+            bbox.BSize(wm) + marker->GetLogicalUsedMargin(wm).BEnd(wm);
+      }
+      bbox.BStart(wm) = position.mBaseline - markerBaseline;
       marker->SetRect(wm, bbox, reflowOutput.PhysicalSize());
     }
     // Otherwise just leave the ::marker where it is, up against our
@@ -1411,12 +1420,12 @@ void nsBlockFrame::Reflow(nsPresContext* aPresContext, ReflowOutput& aMetrics,
 
       nsRect containingBlock(nsPoint(0, 0),
                              containingBlockSize.GetPhysicalSize(parentWM));
-      AbsPosReflowFlags flags = AbsPosReflowFlags::eConstrainHeight;
+      AbsPosReflowFlags flags = AbsPosReflowFlags::ConstrainHeight;
       if (cbWidthChanged) {
-        flags |= AbsPosReflowFlags::eCBWidthChanged;
+        flags |= AbsPosReflowFlags::CBWidthChanged;
       }
       if (cbHeightChanged) {
-        flags |= AbsPosReflowFlags::eCBHeightChanged;
+        flags |= AbsPosReflowFlags::CBHeightChanged;
       }
       // Setup the line cursor here to optimize line searching for
       // calculating hypothetical position of absolutely-positioned
@@ -3338,9 +3347,27 @@ void nsBlockFrame::ReflowBlockFrame(BlockReflowInput& aState,
 
     // Construct the reflow input for the block.
     Maybe<ReflowInput> blockReflowInput;
+    Maybe<LogicalSize> cbSize;
+    if (Style()->GetPseudoType() == PseudoStyleType::columnContent) {
+      // Calculate the multicol containing block's block size so that the
+      // children with percentage block size get correct percentage basis.
+      const ReflowInput* cbReflowInput =
+          StaticPrefs::layout_css_column_span_enabled()
+              ? aState.mReflowInput.mParentReflowInput->mCBReflowInput
+              : aState.mReflowInput.mCBReflowInput;
+      MOZ_ASSERT(cbReflowInput->mFrame->StyleColumn()->IsColumnContainerStyle(),
+                 "Get unexpected reflow input of multicol containing block!");
+
+      // Use column-width as the containing block's inline-size, i.e. the column
+      // content's computed inline-size.
+      cbSize.emplace(LogicalSize(wm, aState.mReflowInput.ComputedISize(),
+                                 cbReflowInput->ComputedBSize())
+                         .ConvertTo(frame->GetWritingMode(), wm));
+    }
+
     blockReflowInput.emplace(
         aState.mPresContext, aState.mReflowInput, frame,
-        availSpace.Size(wm).ConvertTo(frame->GetWritingMode(), wm));
+        availSpace.Size(wm).ConvertTo(frame->GetWritingMode(), wm), cbSize);
 
     nsFloatManager::SavedState floatManagerState;
     nsReflowStatus frameReflowStatus;
@@ -4730,18 +4757,24 @@ bool nsBlockFrame::DrainOverflowLines() {
       // Make the overflow out-of-flow frames mine too.
       nsAutoOOFFrameList oofs(prevBlock);
       if (oofs.mList.NotEmpty()) {
-        // In case we own a next-in-flow of any of the drained frames, then
-        // those are now not PUSHED_FLOATs anymore.
+        // In case we own any next-in-flows of any of the drained frames, then
+        // move those to the PushedFloat list.
+        nsFrameList pushedFloats;
         for (nsFrameList::Enumerator e(oofs.mList); !e.AtEnd(); e.Next()) {
           nsIFrame* nif = e.get()->GetNextInFlow();
           for (; nif && nif->GetParent() == this; nif = nif->GetNextInFlow()) {
-            MOZ_ASSERT(mFloats.ContainsFrame(nif));
-            nif->RemoveStateBits(NS_FRAME_IS_PUSHED_FLOAT);
+            MOZ_ASSERT(nif->HasAnyStateBits(NS_FRAME_IS_PUSHED_FLOAT));
+            RemoveFloat(nif);
+            pushedFloats.AppendFrame(nullptr, nif);
           }
         }
         ReparentFrames(oofs.mList, prevBlock, this,
                        ReparentingDirection::Forwards);
         mFloats.InsertFrames(nullptr, nullptr, oofs.mList);
+        if (!pushedFloats.IsEmpty()) {
+          nsFrameList* pf = EnsurePushedFloats();
+          pf->InsertFrames(nullptr, nullptr, pushedFloats);
+        }
       }
 
       if (!mLines.empty()) {
@@ -5086,7 +5119,7 @@ void nsBlockFrame::AppendFrames(ChildListID aListID, nsFrameList& aFrameList) {
   AddFrames(aFrameList, lastKid);
   if (aListID != kNoReflowPrincipalList) {
     PresShell()->FrameNeedsReflow(
-        this, nsIPresShell::eTreeChange,
+        this, IntrinsicDirty::TreeChange,
         NS_FRAME_HAS_DIRTY_CHILDREN);  // XXX sufficient?
   }
 }
@@ -5121,7 +5154,7 @@ void nsBlockFrame::InsertFrames(ChildListID aListID, nsIFrame* aPrevFrame,
   AddFrames(aFrameList, aPrevFrame);
   if (aListID != kNoReflowPrincipalList) {
     PresShell()->FrameNeedsReflow(
-        this, nsIPresShell::eTreeChange,
+        this, IntrinsicDirty::TreeChange,
         NS_FRAME_HAS_DIRTY_CHILDREN);  // XXX sufficient?
   }
 }
@@ -5162,7 +5195,7 @@ void nsBlockFrame::RemoveFrame(ChildListID aListID, nsIFrame* aOldFrame) {
   }
 
   PresShell()->FrameNeedsReflow(
-      this, nsIPresShell::eTreeChange,
+      this, IntrinsicDirty::TreeChange,
       NS_FRAME_HAS_DIRTY_CHILDREN);  // XXX sufficient?
 }
 
@@ -6836,7 +6869,7 @@ void nsBlockFrame::ReflowOutsideMarker(nsIFrame* aMarkerFrame,
   availSize.BSize(markerWM) = NS_UNCONSTRAINEDSIZE;
 
   ReflowInput reflowInput(aState.mPresContext, ri, aMarkerFrame, availSize,
-                          nullptr, ReflowInput::COMPUTE_SIZE_SHRINK_WRAP);
+                          Nothing(), ReflowInput::COMPUTE_SIZE_SHRINK_WRAP);
   nsReflowStatus status;
   aMarkerFrame->Reflow(aState.mPresContext, aMetrics, reflowInput, status);
 

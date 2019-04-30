@@ -325,6 +325,11 @@ class nsHttpHandler final : public nsIHttpProtocolHandler,
   uint32_t Get32BitsOfPseudoRandom();
 
   // Called by the channel synchronously during asyncOpen
+  void OnFailedOpeningRequest(nsIHttpChannel *chan) {
+    NotifyObservers(chan, NS_HTTP_ON_FAILED_OPENING_REQUEST_TOPIC);
+  }
+
+  // Called by the channel synchronously during asyncOpen
   void OnOpeningRequest(nsIHttpChannel *chan) {
     NotifyObservers(chan, NS_HTTP_ON_OPENING_REQUEST_TOPIC);
   }
@@ -421,6 +426,8 @@ class nsHttpHandler final : public nsIHttpProtocolHandler,
   bool DumpHpackTables() { return mDumpHpackTables; }
 
   HttpTrafficAnalyzer *GetHttpTrafficAnalyzer();
+
+  bool GetThroughCaptivePortal() { return mThroughCaptivePortal; }
 
  private:
   nsHttpHandler();
@@ -735,8 +742,14 @@ class nsHttpHandler final : public nsIHttpProtocolHandler,
   void BlacklistSpdy(const nsHttpConnectionInfo *ci);
   MOZ_MUST_USE bool IsSpdyBlacklisted(const nsHttpConnectionInfo *ci);
 
+  virtual nsresult EnsureHSTSDataReadyNative(
+      already_AddRefed<mozilla::net::HSTSDataCallbackWrapper> aCallback)
+      override;
+
  private:
   nsTHashtable<nsCStringHashKey> mBlacklistedSpdyOrigins;
+
+  bool mThroughCaptivePortal;
 };
 
 extern StaticRefPtr<nsHttpHandler> gHttpHandler;
@@ -764,6 +777,11 @@ class nsHttpsHandler : public nsIHttpProtocolHandler,
   nsHttpsHandler() = default;
 
   MOZ_MUST_USE nsresult Init();
+  virtual nsresult EnsureHSTSDataReadyNative(
+      already_AddRefed<mozilla::net::HSTSDataCallbackWrapper> aCallback)
+      override {
+    return gHttpHandler->EnsureHSTSDataReadyNative(std::move(aCallback));
+  }
 };
 
 //-----------------------------------------------------------------------------

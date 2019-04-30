@@ -12,6 +12,11 @@ interface JSWindowActor {
   void sendAsyncMessage(DOMString messageName,
                         optional any obj,
                         optional any transfers);
+
+  [Throws]
+  Promise<any> sendQuery(DOMString messageName,
+                         optional any obj,
+                         optional any transfers);
 };
 
 [ChromeOnly, ChromeConstructor]
@@ -23,6 +28,18 @@ JSWindowActorParent implements JSWindowActor;
 [ChromeOnly, ChromeConstructor]
 interface JSWindowActorChild {
   readonly attribute WindowGlobalChild manager;
+
+  [Throws]
+  readonly attribute Document? document;
+
+  [Throws]
+  readonly attribute BrowsingContext? browsingContext;
+
+  // NOTE: As this returns a window proxy, it may not be currently referencing
+  // the document associated with this JSWindowActor. Generally prefer using
+  // `document`.
+  [Throws]
+  readonly attribute WindowProxy? contentWindow;
 };
 JSWindowActorChild implements JSWindowActor;
 

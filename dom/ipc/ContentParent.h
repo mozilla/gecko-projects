@@ -59,7 +59,7 @@ class nsConsoleService;
 class nsIContentProcessInfo;
 class nsICycleCollectorLogSink;
 class nsIDumpGCAndCCLogsCallback;
-class nsITabParent;
+class nsIRemoteTab;
 class nsITimer;
 class ParentIdleListener;
 class nsIWidget;
@@ -103,7 +103,7 @@ namespace dom {
 
 class BrowsingContextGroup;
 class Element;
-class TabParent;
+class BrowserParent;
 class ClonedMessageData;
 class MemoryReport;
 class TabContext;
@@ -206,18 +206,20 @@ class ContentParent final : public PContentParent,
    * should be the frame/iframe element with which this process will
    * associated.
    */
-  static TabParent* CreateBrowser(const TabContext& aContext,
-                                  Element* aFrameElement,
-                                  BrowsingContext* aBrowsingContext,
-                                  ContentParent* aOpenerContentParent,
-                                  TabParent* aSameTabGroupAs,
-                                  uint64_t aNextTabParentId);
+  static BrowserParent* CreateBrowser(const TabContext& aContext,
+                                      Element* aFrameElement,
+                                      BrowsingContext* aBrowsingContext,
+                                      ContentParent* aOpenerContentParent,
+                                      BrowserParent* aSameTabGroupAs,
+                                      uint64_t aNextRemoteTabId);
 
   static void GetAll(nsTArray<ContentParent*>& aArray);
 
   static void GetAllEvenIfDead(nsTArray<ContentParent*>& aArray);
 
   static void BroadcastStringBundle(const StringBundleDescriptor&);
+
+  static void BroadcastFontListChanged();
 
   const nsAString& GetRemoteType() const;
 
@@ -277,6 +279,7 @@ class ContentParent final : public PContentParent,
   static void NotifyUpdatedDictionaries();
 
   static void NotifyUpdatedFonts();
+  static void NotifyRebuildFontList();
 
 #if defined(XP_WIN)
   /**
@@ -495,13 +498,14 @@ class ContentParent final : public PContentParent,
 
   mozilla::ipc::IPCResult RecvFinishShutdown();
 
-  void MaybeInvokeDragSession(TabParent* aParent);
+  void MaybeInvokeDragSession(BrowserParent* aParent);
 
   PContentPermissionRequestParent* AllocPContentPermissionRequestParent(
       const InfallibleTArray<PermissionRequest>& aRequests,
       const IPC::Principal& aPrincipal,
-      const IPC::Principal& aTopLevelPrincipal, const bool& aIsTrusted,
-      const TabId& aTabId);
+      const IPC::Principal& aTopLevelPrincipal,
+      const bool& aIsHandlingUserInput, const bool& aDocumentHasUserInput,
+      const DOMTimeStamp& aPageLoadTimestamp, const TabId& aTabId);
 
   bool DeallocPContentPermissionRequestParent(
       PContentPermissionRequestParent* actor);
@@ -511,7 +515,7 @@ class ContentParent final : public PContentParent,
   void ForkNewProcess(bool aBlocking);
 
   mozilla::ipc::IPCResult RecvCreateWindow(
-      PBrowserParent* aThisTabParent, PBrowserParent* aNewTab,
+      PBrowserParent* aThisBrowserParent, PBrowserParent* aNewTab,
       const uint32_t& aChromeFlags, const bool& aCalledFromJS,
       const bool& aPositionSpecified, const bool& aSizeSpecified,
       const Maybe<URIParams>& aURIToLoad, const nsCString& aFeatures,
@@ -583,7 +587,8 @@ class ContentParent final : public PContentParent,
   bool DeallocPURLClassifierParent(PURLClassifierParent* aActor);
 
   // Use the PHangMonitor channel to ask the child to repaint a tab.
-  void PaintTabWhileInterruptingJS(TabParent* aTabParent, bool aForceRepaint,
+  void PaintTabWhileInterruptingJS(BrowserParent* aBrowserParent,
+                                   bool aForceRepaint,
                                    const layers::LayersObserverEpoch& aEpoch);
 
   // This function is called when we are about to load a document from an
@@ -612,8 +617,13 @@ class ContentParent final : public PContentParent,
   mozilla::ipc::IPCResult RecvAttachBrowsingContext(
       BrowsingContext::IPCInitializer&& aInit);
 
-  mozilla::ipc::IPCResult RecvDetachBrowsingContext(BrowsingContext* aContext,
-                                                    bool aMoveToBFCache);
+  mozilla::ipc::IPCResult RecvDetachBrowsingContext(BrowsingContext* aContext);
+
+  mozilla::ipc::IPCResult RecvCacheBrowsingContextChildren(
+      BrowsingContext* aContext);
+
+  mozilla::ipc::IPCResult RecvRestoreBrowsingContextChildren(
+      BrowsingContext* aContext, nsTArray<BrowsingContextId>&& aChildren);
 
   mozilla::ipc::IPCResult RecvWindowClose(BrowsingContext* aContext,
                                           bool aTrustedCaller);
@@ -664,8 +674,8 @@ class ContentParent final : public PContentParent,
       const bool& aCalledFromJS, const bool& aPositionSpecified,
       const bool& aSizeSpecified, nsIURI* aURIToLoad,
       const nsCString& aFeatures, const float& aFullZoom,
-      uint64_t aNextTabParentId, const nsString& aName, nsresult& aResult,
-      nsCOMPtr<nsITabParent>& aNewTabParent, bool* aWindowIsNew,
+      uint64_t aNextRemoteTabId, const nsString& aName, nsresult& aResult,
+      nsCOMPtr<nsIRemoteTab>& aNewBrowserParent, bool* aWindowIsNew,
       int32_t& aOpenLocation, nsIPrincipal* aTriggeringPrincipal,
       nsIReferrerInfo* aReferrerInfo, bool aLoadUri,
       nsIContentSecurityPolicy* aCsp);
@@ -1098,6 +1108,25 @@ class ContentParent final : public PContentParent,
   mozilla::ipc::IPCResult RecvGetGraphicsDeviceInitData(
       ContentDeviceData* aOut);
 
+  mozilla::ipc::IPCResult RecvGetFontListShmBlock(
+      const uint32_t& aGeneration, const uint32_t& aIndex,
+      mozilla::ipc::SharedMemoryBasic::Handle* aOut);
+
+  mozilla::ipc::IPCResult RecvInitializeFamily(const uint32_t& aGeneration,
+                                               const uint32_t& aFamilyIndex);
+
+  mozilla::ipc::IPCResult RecvSetCharacterMap(
+      const uint32_t& aGeneration, const mozilla::fontlist::Pointer& aFacePtr,
+      const gfxSparseBitSet& aMap);
+
+  mozilla::ipc::IPCResult RecvInitOtherFamilyNames(const uint32_t& aGeneration,
+                                                   const bool& aDefer,
+                                                   bool* aLoaded);
+
+  mozilla::ipc::IPCResult RecvSetupFamilyCharMap(
+      const uint32_t& aGeneration,
+      const mozilla::fontlist::Pointer& aFamilyPtr);
+
   mozilla::ipc::IPCResult RecvNotifyBenchmarkResult(const nsString& aCodecName,
                                                     const uint32_t& aDecodeFPS);
 
@@ -1125,12 +1154,6 @@ class ContentParent final : public PContentParent,
                                               const bool& aRecursiveFlag);
 
   mozilla::ipc::IPCResult RecvDeleteGetFilesRequest(const nsID& aID);
-
-  mozilla::ipc::IPCResult RecvFileCreationRequest(
-      const nsID& aID, const nsString& aFullPath, const nsString& aType,
-      const nsString& aName, const bool& aLastModifiedPassed,
-      const int64_t& aLastModified, const bool& aExistenceCheck,
-      const bool& aIsFromNsIFile);
 
   mozilla::ipc::IPCResult RecvAccumulateChildHistograms(
       InfallibleTArray<HistogramAccumulation>&& aAccumulations);
@@ -1221,7 +1244,7 @@ class ContentParent final : public PContentParent,
   Atomic<uint32_t> mRemoteWorkerActors;
 
   // How many tabs we're waiting to finish their destruction
-  // sequence.  Precisely, how many TabParents have called
+  // sequence.  Precisely, how many BrowserParents have called
   // NotifyTabDestroying() but not called NotifyTabDestroyed().
   int32_t mNumDestroyingTabs;
 
@@ -1310,8 +1333,8 @@ class ContentParent final : public PContentParent,
 
   RefPtr<mozilla::dom::ProcessMessageManager> mMessageManager;
 
-  static uint64_t sNextTabParentId;
-  static nsDataHashtable<nsUint64HashKey, TabParent*> sNextTabParents;
+  static uint64_t sNextRemoteTabId;
+  static nsDataHashtable<nsUint64HashKey, BrowserParent*> sNextBrowserParents;
 
 #if defined(XP_MACOSX) && defined(MOZ_SANDBOX)
   // When set to true, indicates that content processes should

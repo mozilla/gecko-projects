@@ -381,8 +381,8 @@ uint64_t Accessible::VisibilityState() const {
   if (frame->IsTextFrame() && !(frame->GetStateBits() & NS_FRAME_OUT_OF_FLOW) &&
       frame->GetRect().IsEmpty()) {
     nsIFrame::RenderedText text = frame->GetRenderedText(
-        0, UINT32_MAX, nsIFrame::TextOffsetType::OFFSETS_IN_CONTENT_TEXT,
-        nsIFrame::TrailingWhitespace::DONT_TRIM_TRAILING_WHITESPACE);
+        0, UINT32_MAX, nsIFrame::TextOffsetType::OffsetsInContentText,
+        nsIFrame::TrailingWhitespace::DontTrim);
     if (text.mString.IsEmpty()) {
       return states::INVISIBLE;
     }
@@ -1277,6 +1277,18 @@ void Accessible::ApplyARIAState(uint64_t* aState) const {
         break;
       }
     }
+  } else {
+    // Sometimes, we use aria-activedescendant targeting something which isn't
+    // actually a descendant. This is technically a spec violation, but it's a
+    // useful hack which makes certain things much easier. For example, we use
+    // this for "fake focus" for multi select browser tabs and Quantumbar
+    // autocomplete suggestions.
+    // In these cases, the aria-activedescendant code above won't make the
+    // active item focusable. It doesn't make sense for something to have
+    // focus when it isn't focusable, so fix that here.
+    if (FocusMgr()->IsActiveItem(this)) {
+      *aState |= states::FOCUSABLE;
+    }
   }
 
   // special case: A native button element whose role got transformed by ARIA to
@@ -1834,7 +1846,7 @@ void Accessible::DispatchClickEvent(nsIContent* aContent,
   // Scroll into view.
   presShell->ScrollContentIntoView(aContent, nsIPresShell::ScrollAxis(),
                                    nsIPresShell::ScrollAxis(),
-                                   nsIPresShell::SCROLL_OVERFLOW_HIDDEN);
+                                   ScrollFlags::ScrollOverflowHidden);
 
   AutoWeakFrame frame = aContent->GetPrimaryFrame();
   if (!frame) return;

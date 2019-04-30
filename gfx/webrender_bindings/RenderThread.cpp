@@ -682,6 +682,20 @@ void RenderThread::UpdateRenderTextureHost(uint64_t aSrcExternalImageId,
   wrapper->UpdateRenderTextureHost(wrapped->second);
 }
 
+void RenderThread::NofityForUse(uint64_t aExternalImageId) {
+  MOZ_ASSERT(RenderThread::IsInRenderThread());
+
+  MutexAutoLock lock(mRenderTextureMapLock);
+  if (mHasShutdown) {
+    return;
+  }
+  auto it = mRenderTextures.find(aExternalImageId);
+  if (it == mRenderTextures.end()) {
+    return;
+  }
+  it->second->NofityForUse();
+}
+
 void RenderThread::UnregisterExternalImageDuringShutdown(
     uint64_t aExternalImageId) {
   MOZ_ASSERT(IsInRenderThread());
@@ -898,7 +912,7 @@ static already_AddRefed<gl::GLContext> CreateGLContext() {
 #endif
 
 #if defined(MOZ_WIDGET_ANDROID)
-    return CreateGLContextEGL();
+  return CreateGLContextEGL();
 #elif defined(MOZ_WAYLAND)
   if (!GDK_IS_X11_DISPLAY(gdk_display_get_default())) {
     return CreateGLContextEGL();
@@ -946,10 +960,9 @@ void wr_schedule_render(mozilla::wr::WrWindowId aWindowId,
   RefPtr<mozilla::layers::CompositorBridgeParent> cbp = mozilla::layers::
       CompositorBridgeParent::GetCompositorBridgeParentFromWindowId(aWindowId);
   if (cbp) {
-    InfallibleTArray<wr::RenderRoot> renderRoots;
-    renderRoots.SetLength(aDocumentIdsCount);
+    wr::RenderRootSet renderRoots;
     for (size_t i = 0; i < aDocumentIdsCount; ++i) {
-      renderRoots[i] = wr::RenderRootFromId(aDocumentIds[i]);
+      renderRoots += wr::RenderRootFromId(aDocumentIds[i]);
     }
     cbp->ScheduleRenderOnCompositorThread(renderRoots);
   }

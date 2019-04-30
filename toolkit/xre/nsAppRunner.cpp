@@ -1331,12 +1331,6 @@ nsresult ScopedXPCOMStartup::SetWindowCreator(nsINativeAppSupport* native) {
 
   NS_IF_ADDREF(gNativeAppSupport = native);
 
-  // Inform the chrome registry about OS accessibility
-  nsCOMPtr<nsIToolkitChromeRegistry> cr =
-      mozilla::services::GetToolkitChromeRegistryService();
-
-  if (cr) cr->CheckForOSAccessibility();
-
   nsCOMPtr<nsIWindowCreator> creator(components::AppStartup::Service());
   if (!creator) return NS_ERROR_UNEXPECTED;
 
@@ -1838,6 +1832,7 @@ static ReturnAbortOnError ShowProfileManager(
 
   nsCOMPtr<nsIFile> profD, profLD;
   bool offline = false;
+  int32_t dialogReturn;
 
   {
     ScopedXPCOMStartup xpcom;
@@ -1879,11 +1874,10 @@ static ReturnAbortOnError ShowProfileManager(
 
       NS_ENSURE_SUCCESS_LOG(rv, rv);
 
-      aProfileSvc->Flush();
-
-      int32_t dialogConfirmed;
-      rv = ioParamBlock->GetInt(0, &dialogConfirmed);
-      if (NS_FAILED(rv) || dialogConfirmed == 0) return NS_ERROR_ABORT;
+      rv = ioParamBlock->GetInt(0, &dialogReturn);
+      if (NS_FAILED(rv) || dialogReturn == nsIToolkitProfileService::exit) {
+        return NS_ERROR_ABORT;
+      }
 
       int32_t startOffline;
       rv = ioParamBlock->GetInt(1, &startOffline);
@@ -1899,13 +1893,21 @@ static ReturnAbortOnError ShowProfileManager(
     }
   }
 
-  SaveFileToEnv("XRE_PROFILE_PATH", profD);
-  SaveFileToEnv("XRE_PROFILE_LOCAL_PATH", profLD);
-  SaveToEnv("XRE_RESTARTED_BY_PROFILE_MANAGER=1");
-
   if (offline) {
     SaveToEnv("XRE_START_OFFLINE=1");
   }
+
+  // User requested that we restart back into the profile manager.
+  if (dialogReturn == nsIToolkitProfileService::restart) {
+    SaveToEnv("XRE_RESTART_TO_PROFILE_MANAGER=1");
+    SaveToEnv("XRE_RESTARTED_BY_PROFILE_MANAGER=1");
+  } else {
+    MOZ_ASSERT(dialogReturn == nsIToolkitProfileService::launchWithProfile);
+    SaveFileToEnv("XRE_PROFILE_PATH", profD);
+    SaveFileToEnv("XRE_PROFILE_LOCAL_PATH", profLD);
+    SaveToEnv("XRE_RESTARTED_BY_PROFILE_MANAGER=1");
+  }
+
   if (gRestartedByOS) {
     // Re-add this argument when actually starting the application.
     char** newArgv =
@@ -2009,6 +2011,10 @@ static nsresult SelectProfile(nsToolkitProfileService* aProfileSvc,
   }
   if (ar == ARG_FOUND) {
     gDoMigration = true;
+  }
+
+  if (EnvHasValue("XRE_RESTART_TO_PROFILE_MANAGER")) {
+    return ShowProfileManager(aProfileSvc, aNative);
   }
 
   // Ask the profile manager to select the profile directories to use.
@@ -3393,30 +3399,6 @@ int XREMain::XRE_mainInit(bool* aExitFlag) {
   rv = XRE_InitCommandLine(gArgc, gArgv);
   NS_ENSURE_SUCCESS(rv, 1);
 
-  // Check for --register, which registers chrome and then exits immediately.
-  ar = CheckArg("register", nullptr,
-                CheckArgFlag::CheckOSInt | CheckArgFlag::RemoveArg);
-  if (ar == ARG_BAD) {
-    PR_fprintf(PR_STDERR,
-               "Error: argument --register is invalid when argument --osint is "
-               "specified\n");
-    return 1;
-  }
-  if (ar == ARG_FOUND) {
-    ScopedXPCOMStartup xpcom;
-    rv = xpcom.Initialize();
-    NS_ENSURE_SUCCESS(rv, 1);
-    {
-      nsCOMPtr<nsIChromeRegistry> chromeReg =
-          mozilla::services::GetChromeRegistryService();
-      NS_ENSURE_TRUE(chromeReg, 1);
-
-      chromeReg->CheckForNewChrome();
-    }
-    *aExitFlag = true;
-    return 0;
-  }
-
   return 0;
 }
 
@@ -4361,8 +4343,9 @@ nsresult XREMain::XRE_mainRun() {
     if (gDoProfileReset) {
       nsresult backupCreated =
           ProfileResetCleanup(mProfileSvc, gResetOldProfile);
-      if (NS_FAILED(backupCreated))
+      if (NS_FAILED(backupCreated)) {
         NS_WARNING("Could not cleanup the profile that was reset");
+      }
     }
   }
 

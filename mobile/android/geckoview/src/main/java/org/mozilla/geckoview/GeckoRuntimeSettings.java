@@ -78,6 +78,19 @@ public final class GeckoRuntimeSettings extends RuntimeSettings {
         }
 
         /**
+         * Path to configuration file from which GeckoView will read configuration options such as
+         * Gecko process arguments, environment variables, and preferences.
+         *
+         * @param configFilePath Configuration file path to read from, or <code>null</code> to use
+         *                       default location <code>/data/local/tmp/$PACKAGE-geckoview-config.yaml</code>.
+         * @return This Builder instance.
+         */
+        public @NonNull Builder configFilePath(final @Nullable String configFilePath) {
+            getSettings().mConfigFilePath = configFilePath;
+            return this;
+        }
+
+        /**
          * Set whether JavaScript support should be enabled.
          *
          * @param flag A flag determining whether JavaScript should be enabled.
@@ -324,12 +337,46 @@ public final class GeckoRuntimeSettings extends RuntimeSettings {
             getSettings().mPreferredColorScheme.set(scheme);
             return this;
         }
+
+        /**
+         * Set whether auto-zoom to editable fields should be enabled.
+         *
+         * @param flag True if auto-zoom should be enabled, false otherwise.
+         * @return This Builder instance.
+         */
+        public @NonNull Builder inputAutoZoomEnabled(final boolean flag) {
+            getSettings().mInputAutoZoom.set(flag);
+            return this;
+        }
+
+        /**
+         * Set whether double tap zooming should be enabled.
+         *
+         * @param flag True if double tap zooming should be enabled, false otherwise.
+         * @return This Builder instance.
+         */
+        public @NonNull Builder doubleTapZoomingEnabled(final boolean flag) {
+            getSettings().mDoubleTapZooming.set(flag);
+            return this;
+        }
+
+        /**
+         * Sets the WebGL MSAA level.
+         *
+         * @param level number of MSAA samples, 0 if MSAA should be disabled.
+         * @return This GeckoRuntimeSettings instance.
+         */
+        public @NonNull Builder glMsaaLevel(final int level) {
+            getSettings().mGlMsaaLevel.set(level);
+            return this;
+        }
     }
 
     private GeckoRuntime mRuntime;
     /* package */ boolean mUseContentProcess;
     /* package */ String[] mArgs;
     /* package */ Bundle mExtras;
+    /* package */ String mConfigFilePath;
 
     /* package */ ContentBlocking.Settings mContentBlocking;
 
@@ -353,6 +400,12 @@ public final class GeckoRuntimeSettings extends RuntimeSettings {
         "font.size.inflation.minTwips", 0);
     /* package */ final Pref<Integer> mPreferredColorScheme = new Pref<>(
         "ui.systemUsesDarkTheme", -1);
+    /* package */ final Pref<Boolean> mInputAutoZoom = new Pref<>(
+            "formhelper.autozoom", true);
+    /* package */ final Pref<Boolean> mDoubleTapZooming = new Pref<>(
+            "apz.allow_double_tap_zooming", true);
+    /* package */ final Pref<Integer> mGlMsaaLevel = new Pref<>(
+            "gl.msaa-level", 0);
 
     /* package */ boolean mDebugPause;
     /* package */ boolean mUseMaxScreenDepth;
@@ -412,6 +465,7 @@ public final class GeckoRuntimeSettings extends RuntimeSettings {
         mScreenHeightOverride = settings.mScreenHeightOverride;
         mCrashHandler = settings.mCrashHandler;
         mRequestedLocales = settings.mRequestedLocales;
+        mConfigFilePath = settings.mConfigFilePath;
     }
 
     /* package */ void commit() {
@@ -444,6 +498,18 @@ public final class GeckoRuntimeSettings extends RuntimeSettings {
      */
     public @NonNull Bundle getExtras() {
         return mExtras;
+    }
+
+    /**
+     * Path to configuration file from which GeckoView will read configuration options such as
+     * Gecko process arguments, environment variables, and preferences.
+     *
+     * @return Path to configuration file from which GeckoView will read configuration options,
+     * or <code>null</code> for default location
+     * <code>/data/local/tmp/$PACKAGE-geckoview-config.yaml</code>.
+     */
+    public @Nullable String getConfigFilePath() {
+        return mConfigFilePath;
     }
 
     /**
@@ -807,6 +873,66 @@ public final class GeckoRuntimeSettings extends RuntimeSettings {
         return this;
     }
 
+    /**
+     * Gets whether auto-zoom to editable fields is enabled.
+     *
+     * @return True if auto-zoom is enabled, false otherwise.
+     */
+    public boolean getInputAutoZoomEnabled() {
+        return mInputAutoZoom.get();
+    }
+
+    /**
+     * Set whether auto-zoom to editable fields should be enabled.
+     *
+     * @param flag True if auto-zoom should be enabled, false otherwise.
+     * @return This GeckoRuntimeSettings instance.
+     */
+    public @NonNull GeckoRuntimeSettings setInputAutoZoomEnabled(final boolean flag) {
+        mInputAutoZoom.commit(flag);
+        return this;
+    }
+
+    /**
+     * Gets whether double-tap zooming is enabled.
+     *
+     * @return True if double-tap zooming is enabled, false otherwise.
+     */
+    public boolean getDoubleTapZoomingEnabled() {
+        return mDoubleTapZooming.get();
+    }
+
+    /**
+     * Sets whether double tap zooming is enabled.
+     *
+     * @param flag true if double tap zooming should be enabled, false otherwise.
+     * @return This GeckoRuntimeSettings instance.
+     */
+    public @NonNull GeckoRuntimeSettings setDoubleTapZoomingEnabled(final boolean flag) {
+        mDoubleTapZooming.commit(flag);
+        return this;
+    }
+
+    /**
+     * Gets the current WebGL MSAA level.
+     *
+     * @return number of MSAA samples, 0 if MSAA is disabled.
+     */
+    public int getGlMsaaLevel() {
+        return mGlMsaaLevel.get();
+    }
+
+    /**
+     * Sets the WebGL MSAA level.
+     *
+     * @param level number of MSAA samples, 0 if MSAA should be disabled.
+     * @return This GeckoRuntimeSettings instance.
+     */
+    public @NonNull GeckoRuntimeSettings setGlMsaaLevel(final int level) {
+        mGlMsaaLevel.commit(level);
+        return this;
+    }
+
     @Override // Parcelable
     public void writeToParcel(final Parcel out, final int flags) {
         super.writeToParcel(out, flags);
@@ -822,6 +948,7 @@ public final class GeckoRuntimeSettings extends RuntimeSettings {
         out.writeInt(mScreenHeightOverride);
         out.writeString(mCrashHandler != null ? mCrashHandler.getName() : null);
         out.writeStringArray(mRequestedLocales);
+        out.writeString(mConfigFilePath);
     }
 
     // AIDL code may call readFromParcel even though it's not part of Parcelable.
@@ -851,6 +978,7 @@ public final class GeckoRuntimeSettings extends RuntimeSettings {
         }
 
         mRequestedLocales = source.createStringArray();
+        mConfigFilePath = source.readString();
     }
 
     public static final Parcelable.Creator<GeckoRuntimeSettings> CREATOR

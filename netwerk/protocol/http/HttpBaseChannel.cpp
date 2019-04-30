@@ -1533,27 +1533,6 @@ HttpBaseChannel::GetFlashPluginState(nsIHttpChannel::FlashPluginState* aState) {
 }
 
 NS_IMETHODIMP
-HttpBaseChannel::OverrideTrackingFlagsForDocumentCookieAccessor(
-    nsIHttpChannel* aDocumentChannel) {
-  LOG(("HttpBaseChannel::OverrideTrackingFlagsForDocumentCookieAccessor() %p",
-       this));
-
-  // The semantics we'd like to achieve here are that document.cookie
-  // should follow the same rules that the document is subject to with
-  // regards to content blocking. Therefore we need to propagate the
-  // same flags from the document channel to the fake channel here.
-
-  mThirdPartyClassificationFlags =
-      aDocumentChannel->GetThirdPartyClassificationFlags();
-  mFirstPartyClassificationFlags =
-      aDocumentChannel->GetFirstPartyClassificationFlags();
-
-  MOZ_ASSERT(
-      !(mFirstPartyClassificationFlags && mThirdPartyClassificationFlags));
-  return NS_OK;
-}
-
-NS_IMETHODIMP
 HttpBaseChannel::GetTransferSize(uint64_t* aTransferSize) {
   *aTransferSize = mTransferSize;
   return NS_OK;
@@ -2226,7 +2205,7 @@ HttpBaseChannel::RedirectTo(nsIURI* targetURI) {
 }
 
 NS_IMETHODIMP
-HttpBaseChannel::SwitchProcessTo(mozilla::dom::Promise* aTabParent,
+HttpBaseChannel::SwitchProcessTo(mozilla::dom::Promise* aBrowserParent,
                                  uint64_t aIdentifier) {
   return NS_ERROR_NOT_AVAILABLE;
 }
@@ -2566,8 +2545,7 @@ nsresult HttpBaseChannel::AddSecurityMessage(
     return NS_ERROR_FAILURE;
   }
 
-  nsCOMPtr<nsILoadInfo> loadInfo;
-  GetLoadInfo(getter_AddRefs(loadInfo));
+  nsCOMPtr<nsILoadInfo> loadInfo = LoadInfo();
 
   auto innerWindowID = loadInfo->GetInnerWindowID();
 
@@ -3208,9 +3186,10 @@ already_AddRefed<nsILoadInfo> HttpBaseChannel::CloneLoadInfoForRedirect(
     MOZ_ASSERT(
         docShellAttrs.mPrivateBrowsingId == attrs.mPrivateBrowsingId,
         "docshell and necko should have the same privateBrowsingId attribute.");
-    MOZ_ASSERT(
-        docShellAttrs.mGeckoViewSessionContextId == attrs.mGeckoViewSessionContextId,
-        "docshell and necko should have the same geckoViewSessionContextId attribute");
+    MOZ_ASSERT(docShellAttrs.mGeckoViewSessionContextId ==
+                   attrs.mGeckoViewSessionContextId,
+               "docshell and necko should have the same "
+               "geckoViewSessionContextId attribute");
 
     attrs = docShellAttrs;
     attrs.SetFirstPartyDomain(true, newURI);
@@ -3715,12 +3694,11 @@ nsresult HttpBaseChannel::SetupReplacementChannel(nsIURI* newURI,
 
     // Execute the timing allow check to determine whether
     // to report the redirect timing info
-    nsCOMPtr<nsILoadInfo> loadInfo;
-    GetLoadInfo(getter_AddRefs(loadInfo));
+    nsCOMPtr<nsILoadInfo> loadInfo = LoadInfo();
     // TYPE_DOCUMENT loads don't have a loadingPrincipal, so we can't set
     // AllRedirectsPassTimingAllowCheck on them.
-    if (loadInfo && loadInfo->GetExternalContentPolicyType() !=
-                        nsIContentPolicy::TYPE_DOCUMENT) {
+    if (loadInfo->GetExternalContentPolicyType() !=
+        nsIContentPolicy::TYPE_DOCUMENT) {
       nsCOMPtr<nsIPrincipal> principal = loadInfo->LoadingPrincipal();
       newTimedChannel->SetAllRedirectsPassTimingAllowCheck(
           mAllRedirectsPassTimingAllowCheck &&

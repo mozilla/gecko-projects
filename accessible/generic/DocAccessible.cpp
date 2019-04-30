@@ -44,7 +44,7 @@
 #include "mozilla/HTMLEditor.h"
 #include "mozilla/PresShell.h"
 #include "mozilla/TextEditor.h"
-#include "mozilla/dom/TabChild.h"
+#include "mozilla/dom/BrowserChild.h"
 #include "mozilla/dom/DocumentType.h"
 #include "mozilla/dom/Element.h"
 #include "mozilla/dom/MutationEventBinding.h"
@@ -1062,9 +1062,6 @@ void DocAccessible::ContentStateChanged(dom::Document* aDocument,
   }
 }
 
-void DocAccessible::DocumentStatesChanged(dom::Document* aDocument,
-                                          EventStates aStateMask) {}
-
 void DocAccessible::CharacterDataWillChange(nsIContent* aContent,
                                             const CharacterDataChangeInfo&) {}
 
@@ -1362,10 +1359,11 @@ void DocAccessible::DoInitialUpdate() {
     mDocFlags |= eTabDocument;
     if (IPCAccessibilityActive()) {
       nsIDocShell* docShell = mDocumentNode->GetDocShell();
-      if (RefPtr<dom::TabChild> tabChild = dom::TabChild::GetFrom(docShell)) {
+      if (RefPtr<dom::BrowserChild> browserChild =
+              dom::BrowserChild::GetFrom(docShell)) {
         DocAccessibleChild* ipcDoc = IPCDoc();
         if (!ipcDoc) {
-          ipcDoc = new DocAccessibleChild(this, tabChild);
+          ipcDoc = new DocAccessibleChild(this, browserChild);
           SetIPCDoc(ipcDoc);
 
 #if defined(XP_WIN)
@@ -1376,12 +1374,12 @@ void DocAccessible::DoInitialUpdate() {
 #else
           int32_t holder = 0, childID = 0;
 #endif
-          tabChild->SendPDocAccessibleConstructor(ipcDoc, nullptr, 0, childID,
-                                                  holder);
+          browserChild->SendPDocAccessibleConstructor(ipcDoc, nullptr, 0,
+                                                      childID, holder);
         }
 
         if (IsRoot()) {
-          tabChild->SetTopLevelDocAccessibleChild(ipcDoc);
+          browserChild->SetTopLevelDocAccessibleChild(ipcDoc);
         }
       }
     }
@@ -2093,8 +2091,11 @@ bool DocAccessible::MoveChild(Accessible* aChild, Accessible* aNewParent,
                               int32_t aIdxInParent) {
   MOZ_ASSERT(aChild, "No child");
   MOZ_ASSERT(aChild->Parent(), "No parent");
-  MOZ_ASSERT(aIdxInParent <= static_cast<int32_t>(aNewParent->ChildCount()),
-             "Wrong insertion point for a moving child");
+  // We can't guarantee MoveChild works correctly for accessibilities storing
+  // children outside mChildren.
+  MOZ_ASSERT(
+      aIdxInParent <= static_cast<int32_t>(aNewParent->mChildren.Length()),
+      "Wrong insertion point for a moving child");
 
   Accessible* curParent = aChild->Parent();
 
@@ -2132,14 +2133,11 @@ bool DocAccessible::MoveChild(Accessible* aChild, Accessible* aNewParent,
     return true;
   }
 
-  MOZ_ASSERT(aIdxInParent <= static_cast<int32_t>(aNewParent->ChildCount()),
-             "Wrong insertion point for a moving child");
-
   // If the child cannot be re-inserted into the tree, then make sure to remove
   // it from its present parent and then shutdown it.
   bool hasInsertionPoint =
-      (aIdxInParent != -1) ||
-      (aIdxInParent <= static_cast<int32_t>(aNewParent->ChildCount()));
+      (aIdxInParent >= 0) &&
+      (aIdxInParent <= static_cast<int32_t>(aNewParent->mChildren.Length()));
 
   TreeMutation rmut(curParent);
   rmut.BeforeRemoval(aChild, hasInsertionPoint && TreeMutation::kNoShutdown);
@@ -2180,7 +2178,7 @@ void DocAccessible::CacheChildrenInSubtree(Accessible* aRoot,
     TreeWalker walker(root);
     while (Accessible* child = walker.Next()) {
       if (child->IsBoundToParent()) {
-        MoveChild(child, root, root->ChildCount());
+        MoveChild(child, root, root->mChildren.Length());
         continue;
       }
 

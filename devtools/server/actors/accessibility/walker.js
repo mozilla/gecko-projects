@@ -22,6 +22,7 @@ loader.lazyRequireGetter(this, "isXUL", "devtools/server/actors/highlighters/uti
 loader.lazyRequireGetter(this, "loadSheet", "devtools/shared/layout/utils", true);
 loader.lazyRequireGetter(this, "register", "devtools/server/actors/highlighters", true);
 loader.lazyRequireGetter(this, "removeSheet", "devtools/shared/layout/utils", true);
+loader.lazyRequireGetter(this, "accessibility", "devtools/shared/constants", true);
 
 const kStateHover = 0x00000004; // NS_EVENT_STATE_HOVER
 
@@ -156,6 +157,7 @@ const AccessibleWalkerActor = ActorClassWithSpec(accessibleWalkerSpec, {
     Actor.prototype.initialize.call(this, conn);
     this.targetActor = targetActor;
     this.refMap = new Map();
+    this._loadedSheets = new WeakMap();
     this.setA11yServiceGetter();
     this.onPick = this.onPick.bind(this);
     this.onHovered = this.onHovered.bind(this);
@@ -404,7 +406,10 @@ const AccessibleWalkerActor = ActorClassWithSpec(accessibleWalkerSpec, {
 
     const ancestries = [];
     for (const [acc, audit] of report.entries()) {
-      if (audit && Object.values(audit).filter(check => check != null).length > 0) {
+      // Filter out audits that have no failing checks.
+      if (audit &&
+          Object.values(audit).some(check => check != null && !check.error &&
+            check.score === accessibility.SCORES.FAIL)) {
         ancestries.push(this.getAncestry(acc));
       }
     }
@@ -527,7 +532,9 @@ const AccessibleWalkerActor = ActorClassWithSpec(accessibleWalkerSpec, {
    *         Window where highlighting happens.
    */
   clearStyles(win) {
-    if (this._sheetLoaded) {
+    const requests = this._loadedSheets.get(win);
+    if (requests != null) {
+      this._loadedSheets.set(win, requests + 1);
       return;
     }
 
@@ -536,7 +543,7 @@ const AccessibleWalkerActor = ActorClassWithSpec(accessibleWalkerSpec, {
     // there are transitions that affect them, there might be unexpected side effects when
     // taking a snapshot for contrast measurement).
     loadSheet(win, HIGHLIGHTER_STYLES_SHEET);
-    this._sheetLoaded = true;
+    this._loadedSheets.set(win, 1);
     this.hideHighlighter();
   },
 
@@ -549,13 +556,19 @@ const AccessibleWalkerActor = ActorClassWithSpec(accessibleWalkerSpec, {
    *         Window where highlighting was happenning.
    */
   restoreStyles(win) {
-    if (!this._sheetLoaded) {
+    const requests = this._loadedSheets.get(win);
+    if (!requests) {
+      return;
+    }
+
+    if (requests > 1) {
+      this._loadedSheets.set(win, requests - 1);
       return;
     }
 
     this.showHighlighter();
     removeSheet(win, HIGHLIGHTER_STYLES_SHEET);
-    this._sheetLoaded = false;
+    this._loadedSheets.delete(win);
   },
 
   hideHighlighter() {

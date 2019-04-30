@@ -30,9 +30,7 @@ pub struct CoordinateSystemId(pub u32);
 #[derive(Debug)]
 pub struct CoordinateSystem {
     pub transform: LayoutTransform,
-    /// True if the Z component of the resulting transform, when ascending
-    /// from children to a parent, needs to be flattened upon passing this system.
-    pub is_flatten_root: bool,
+    pub transform_style: TransformStyle,
     pub parent: Option<CoordinateSystemId>,
 }
 
@@ -40,7 +38,7 @@ impl CoordinateSystem {
     fn root() -> Self {
         CoordinateSystem {
             transform: LayoutTransform::identity(),
-            is_flatten_root: true,
+            transform_style: TransformStyle::Flat,
             parent: None,
         }
     }
@@ -72,7 +70,7 @@ impl CoordinateSystemId {
     }
 }
 
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Copy, Clone, PartialEq)]
 pub enum VisibleFace {
     Front,
     Back,
@@ -161,6 +159,35 @@ impl ClipScrollTree {
         }
     }
 
+    /// Calculate the accumulated external scroll offset for
+    /// a given spatial node.
+    pub fn external_scroll_offset(&self, node_index: SpatialNodeIndex) -> LayoutVector2D {
+        let mut offset = LayoutVector2D::zero();
+        let mut current_node = Some(node_index);
+
+        while let Some(node_index) = current_node {
+            let node = &self.spatial_nodes[node_index.0 as usize];
+
+            match node.node_type {
+                SpatialNodeType::ScrollFrame(ref scrolling) => {
+                    offset += scrolling.external_scroll_offset;
+                }
+                SpatialNodeType::StickyFrame(..) => {
+                    // Doesn't provide any external scroll offset
+                }
+                SpatialNodeType::ReferenceFrame(..) => {
+                    // External scroll offsets are not propagated across
+                    // reference frames.
+                    break;
+                }
+            }
+
+            current_node = node.parent;
+        }
+
+        offset
+    }
+
     /// Calculate the relative transform from `child_index` to `parent_index`.
     /// This method will panic if the nodes are not connected!
     pub fn get_relative_transform(
@@ -172,36 +199,57 @@ impl ClipScrollTree {
         let child = &self.spatial_nodes[child_index.0 as usize];
         let parent = &self.spatial_nodes[parent_index.0 as usize];
 
-        let mut coordinate_system_id = child.coordinate_system_id;
-        let mut transform = child.coordinate_system_relative_scale_offset.to_transform();
         let mut visible_face = VisibleFace::Front;
         let mut is_perspective = false;
 
-        while coordinate_system_id != parent.coordinate_system_id {
-            let coord_system = &self.coord_systems[coordinate_system_id.0 as usize];
-            coordinate_system_id = coord_system.parent.expect("invalid parent!");
-            transform = transform.post_mul(&coord_system.transform);
-            // we need to update the associated parameters of a transform in two cases:
-            // 1) when the flattening happens, so that we don't lose that original 3D aspects
-            // 2) when we reach the end of iteration, so that our result is up to date
-            if coord_system.is_flatten_root || coordinate_system_id == parent.coordinate_system_id {
-                visible_face = if transform.is_backface_visible() {
-                    VisibleFace::Back
-                } else {
-                    VisibleFace::Front
-                };
-                is_perspective = transform.has_perspective_component();
-            }
-            if coord_system.is_flatten_root {
-                //Note: this function makes the transform to ignore the Z coordinate of inputs
-                // *even* for computing the X and Y coordinates of the output.
-                //transform = transform.project_to_2d();
-                transform.m13 = 0.0;
-                transform.m23 = 0.0;
-                transform.m33 = 0.0;
-                transform.m43 = 0.0;
+        if child.coordinate_system_id == parent.coordinate_system_id {
+            return RelativeTransform {
+                flattened: parent.coordinate_system_relative_scale_offset
+                    .inverse()
+                    .accumulate(&child.coordinate_system_relative_scale_offset)
+                    .to_transform(),
+                visible_face,
+                is_perspective,
             }
         }
+
+        let mut coordinate_system_id = child.coordinate_system_id;
+        let mut transform = child.coordinate_system_relative_scale_offset.to_transform();
+        let mut transform_style = child.transform_style();
+
+        // we need to update the associated parameters of a transform in two cases:
+        // 1) when the flattening happens, so that we don't lose that original 3D aspects
+        // 2) when we reach the end of iteration, so that our result is up to date
+
+        while coordinate_system_id != parent.coordinate_system_id {
+            let coord_system = &self.coord_systems[coordinate_system_id.0 as usize];
+            let transform_style_changed = coord_system.transform_style != transform_style;
+
+            if coord_system.transform_style == TransformStyle::Flat {
+                is_perspective |= transform.has_perspective_component();
+                if transform_style_changed {
+                    //Note: this function makes the transform to ignore the Z coordinate of inputs
+                    // *even* for computing the X and Y coordinates of the output.
+                    //transform = transform.project_to_2d();
+                    transform.m13 = 0.0;
+                    transform.m23 = 0.0;
+                    transform.m33 = 0.0;
+                    transform.m43 = 0.0;
+                }
+            }
+
+            coordinate_system_id = coord_system.parent.expect("invalid parent!");
+            transform = transform.post_mul(&coord_system.transform);
+            transform_style = coord_system.transform_style;
+        }
+
+        visible_face = if transform.is_backface_visible() {
+            VisibleFace::Back
+        } else {
+            VisibleFace::Front
+        };
+
+        is_perspective |= transform.has_perspective_component();
 
         transform = transform.post_mul(
             &parent.coordinate_system_relative_scale_offset
@@ -271,7 +319,10 @@ impl ClipScrollTree {
         for node in &self.spatial_nodes {
             if let SpatialNodeType::ScrollFrame(info) = node.node_type {
                 if let Some(id) = info.external_id {
-                    result.push(ScrollNodeState { id, scroll_offset: info.offset })
+                    result.push(ScrollNodeState {
+                        id,
+                        scroll_offset: info.offset - info.external_scroll_offset,
+                    })
                 }
             }
         }
@@ -505,6 +556,7 @@ impl ClipScrollTree {
                 pt.add_item(format!("viewport: {:?}", scrolling_info.viewport_rect));
                 pt.add_item(format!("scrollable_size: {:?}", scrolling_info.scrollable_size));
                 pt.add_item(format!("scroll offset: {:?}", scrolling_info.offset));
+                pt.add_item(format!("external_scroll_offset: {:?}", scrolling_info.external_scroll_offset));
             }
             SpatialNodeType::ReferenceFrame(ref _info) => {
                 pt.new_level(format!("ReferenceFrame"));
@@ -521,6 +573,17 @@ impl ClipScrollTree {
         }
 
         pt.end_level();
+    }
+
+    /// Get the visible face of the transfrom from the specified node to its parent.
+    pub fn get_local_visible_face(&self, node_index: SpatialNodeIndex) -> VisibleFace {
+        let node = &self.spatial_nodes[node_index.0 as usize];
+        let parent_index = match node.parent {
+            Some(index) => index,
+            None => return VisibleFace::Front
+        };
+        self.get_relative_transform(node_index, parent_index)
+            .visible_face
     }
 
     #[allow(dead_code)]

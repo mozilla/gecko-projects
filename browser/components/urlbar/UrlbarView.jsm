@@ -108,9 +108,7 @@ class UrlbarView {
     if (!this.isOpen || !this._selected) {
       return null;
     }
-
-    let resultIndex = this._selected.getAttribute("resultIndex");
-    return this._queryContext.results[resultIndex];
+    return this._selected.result;
   }
 
   /**
@@ -193,33 +191,22 @@ class UrlbarView {
 
   // UrlbarController listener methods.
   onQueryStarted(queryContext) {
-    this._rows.style.minHeight = this._getBoundsWithoutFlushing(this._rows).height + "px";
+    this._startRemoveStaleRowsTimer();
   }
 
   onQueryCancelled(queryContext) {
-    // Nothing.
+    this._cancelRemoveStaleRowsTimer();
   }
 
   onQueryFinished(queryContext) {
-    this._rows.style.minHeight = "";
+    this._cancelRemoveStaleRowsTimer();
+    this._removeStaleRows();
   }
 
   onQueryResults(queryContext) {
     this._queryContext = queryContext;
 
-    while (this._rows.children.length > queryContext.results.length) {
-      this._rows.lastElementChild.remove();
-    }
-    let resultIndex = 0;
-    for (let row of this._rows.children) {
-      this._updateRow(row, resultIndex);
-      resultIndex++;
-    }
-    for (; resultIndex < queryContext.results.length; resultIndex++) {
-      let row = this._createRow();
-      this._updateRow(row, resultIndex);
-      this._rows.appendChild(row);
-    }
+    this._updateResults(queryContext);
 
     let isFirstPreselectedResult = false;
     if (queryContext.lastResultCount == 0) {
@@ -353,7 +340,6 @@ class UrlbarView {
     // icon if it's not too far from the edge of the window.  We define
     // "too far" as "more than 30% of the window's width AND more than
     // 250px".
-    let contentWidth = width;
     let boundToCheck = this.window.RTL_UI ? "right" : "left";
     let inputRect = this._getBoundsWithoutFlushing(this.input.textbox);
     let startOffset = Math.abs(inputRect[boundToCheck] - documentRect[boundToCheck]);
@@ -377,12 +363,10 @@ class UrlbarView {
 
       this.panel.style.setProperty("--item-padding-start", px(start));
       this.panel.style.setProperty("--item-padding-end", px(endOffset));
-      contentWidth -= start + endOffset;
     } else {
       this.panel.style.removeProperty("--item-padding-start");
       this.panel.style.removeProperty("--item-padding-end");
     }
-    this.panel.style.setProperty("--item-content-width", px(contentWidth));
 
     // Align the panel with the input's parent toolbar.
     let toolbarRect =
@@ -393,6 +377,24 @@ class UrlbarView {
     this.panel.style.marginTop = px(inputRect.top - toolbarRect.top);
 
     this.panel.openPopup(this.input.textbox, "after_start");
+  }
+
+  _updateResults(queryContext) {
+    let results = queryContext.results;
+    let i = 0;
+    for (let row of this._rows.children) {
+      if (i < results.length) {
+        this._updateRow(row, results[i]);
+      } else {
+        row.setAttribute("stale", "true");
+      }
+      i++;
+    }
+    for (; i < results.length; i++) {
+      let row = this._createRow();
+      this._updateRow(row, results[i]);
+      this._rows.appendChild(row);
+    }
   }
 
   _createRow() {
@@ -441,8 +443,10 @@ class UrlbarView {
     return item;
   }
 
-  _updateRow(item, resultIndex) {
-    let result = this._queryContext.results[resultIndex];
+  _updateRow(item, result) {
+    let resultIndex = this._queryContext.results.indexOf(result);
+    item.result = result;
+    item.removeAttribute("stale");
     item.id = "urlbarView-row-" + resultIndex;
     item.setAttribute("resultIndex", resultIndex);
 
@@ -523,6 +527,31 @@ class UrlbarView {
     item._elements.get("action").textContent = action;
   }
 
+  _removeStaleRows() {
+    let row = this._rows.lastElementChild;
+    while (row) {
+      let next = row.previousElementSibling;
+      if (row.hasAttribute("stale")) {
+        row.remove();
+      }
+      row = next;
+    }
+  }
+
+  _startRemoveStaleRowsTimer() {
+    this._removeStaleRowsTimer = this.window.setTimeout(() => {
+      this._removeStaleRowsTimer = null;
+      this._removeStaleRows();
+    }, 200);
+  }
+
+  _cancelRemoveStaleRowsTimer() {
+    if (this._removeStaleRowsTimer) {
+      this.window.clearTimeout(this._removeStaleRowsTimer);
+      this._removeStaleRowsTimer = null;
+    }
+  }
+
   _selectItem(item, {
     updateInput = true,
     setAccessibleFocus = true,
@@ -539,12 +568,7 @@ class UrlbarView {
     this._selected = item;
 
     if (updateInput) {
-      let result = null;
-      if (item) {
-        let resultIndex = item.getAttribute("resultIndex");
-        result = this._queryContext.results[resultIndex];
-      }
-      this.input.setValueFromResult(result);
+      this.input.setValueFromResult(item && item.result);
     }
   }
 
@@ -683,13 +707,15 @@ class UrlbarView {
   }
 
   _on_overflow(event) {
-    if (event.target.classList.contains("urlbarView-row-inner")) {
+    if (event.target.classList.contains("urlbarView-url") ||
+        event.target.classList.contains("urlbarView-title")) {
       event.target.toggleAttribute("overflow", true);
     }
   }
 
   _on_underflow(event) {
-    if (event.target.classList.contains("urlbarView-row-inner")) {
+    if (event.target.classList.contains("urlbarView-url") ||
+        event.target.classList.contains("urlbarView-title")) {
       event.target.toggleAttribute("overflow", false);
     }
   }

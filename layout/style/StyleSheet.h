@@ -32,7 +32,6 @@ namespace mozilla {
 
 class ServoCSSRuleList;
 class ServoStyleSet;
-enum class OriginFlags : uint8_t;
 
 typedef MozPromise</* Dummy */ bool,
                    /* Dummy */ bool,
@@ -140,8 +139,8 @@ class StyleSheet final : public nsICSSLoaderObserver, public nsWrapperCache {
   // completeness check.
   ServoCSSRuleList* GetCssRulesInternal();
 
-  // Returns the stylesheet's Servo origin as an OriginFlags value.
-  mozilla::OriginFlags GetOrigin();
+  // Returns the stylesheet's Servo origin as a StyleOrigin value.
+  mozilla::StyleOrigin GetOrigin() const;
 
   /**
    * The different changes that a stylesheet may go through.
@@ -388,6 +387,11 @@ class StyleSheet final : public nsICSSLoaderObserver, public nsWrapperCache {
   // as previously returned by a ToShared() call.
   void SetSharedContents(nsLayoutStylesheetCacheShm* aSharedMemory,
                          const ServoCssRules* aSharedRules);
+
+  // Whether this style sheet should not allow any modifications.
+  //
+  // This is true for any User Agent sheets once they are complete.
+  bool IsReadOnly() const;
 
  private:
   dom::ShadowRoot* GetContainingShadow() const;

@@ -117,12 +117,6 @@ NullHttpChannel::GetThirdPartyClassificationFlags(
 }
 
 NS_IMETHODIMP
-NullHttpChannel::OverrideTrackingFlagsForDocumentCookieAccessor(
-    nsIHttpChannel *aDocumentChannel) {
-  return NS_ERROR_NOT_IMPLEMENTED;
-}
-
-NS_IMETHODIMP
 NullHttpChannel::GetTransferSize(uint64_t *aTransferSize) {
   return NS_ERROR_NOT_IMPLEMENTED;
 }
@@ -286,7 +280,7 @@ NullHttpChannel::RedirectTo(nsIURI *aNewURI) {
 }
 
 NS_IMETHODIMP
-NullHttpChannel::SwitchProcessTo(mozilla::dom::Promise *aTabParent,
+NullHttpChannel::SwitchProcessTo(mozilla::dom::Promise *aBrowserParent,
                                  uint64_t aIdentifier) {
   return NS_ERROR_NOT_AVAILABLE;
 }

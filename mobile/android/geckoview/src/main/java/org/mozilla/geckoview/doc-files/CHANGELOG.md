@@ -71,6 +71,43 @@ exclude: true
 [68.14]: ../GeckoSessionSettings.Builder.html#contextId-
 [68.15]: ../StorageController.html#clearSessionContextData-java.lang.String-
 
+- Added [`GeckoRuntimeSettings.Builder#configFilePath`][68.16] to set
+  a path to a configuration file from which GeckoView will read
+  configuration options such as Gecko process arguments, environment
+  variables, and preferences.
+
+[68.16]: ../GeckoRuntimeSettings.Builder.html#configFilePath-java.lang.String-
+
+- Added [`unregisterWebExtension`][68.17] to unregister a web extension.
+
+[68.17]: ../GeckoRuntime.html#unregisterWebExtension-org.mozilla.geckoview.WebExtension-
+
+- Added messaging support for WebExtension. [`setMessageDelegate`][68.18]
+  allows embedders to listen to messages coming from a WebExtension.
+  [`Port`][68.19] allows bidirectional communication between the embedder and
+  the WebExtension.
+
+[68.18]: ./WebExtension.html#setMessageDelegate-org.mozilla.geckoview.WebExtension.MessageDelegate-java.lang.String-
+[68.19]: ./WebExtension.Port.html
+
+- Expose the following prefs in [`GeckoRuntimeSettings`][67.3]:
+  [`setAutoZoomEnabled`][68.20], [`setDoubleTapZoomingEnabled`][68.21],
+  [`setGlMsaaLevel`][68.22].
+
+[68.20]: ./GeckoRuntimeSettings.html#setAutoZoomEnabled-boolean-
+[68.21]: ./GeckoRuntimeSettings.html#setDoubleTapZoomingEnabled-boolean-
+[68.22]: ./GeckoRuntimeSettings.html#setGlMsaaLevel-int-
+
+- Added new constant for requesting external storage Android permissions, [`PERMISSION_PERSISTENT_STORAGE`][68.23]
+
+[68.23]: ../GeckoSession.PermissionDelegate.html#PERMISSION_PERSISTENT_STORAGE
+
+- Added [`setVerticalClipping`][68.23] to [`GeckoDisplay`][68.24] and
+  [`GeckoView`][68.23] to tell Gecko how much of its vertical space is clipped.
+
+[68.23]: ./GeckoView.html#setVerticalClipping-int-
+[68.24]: ./GeckoDisplay.html#setVerticalClipping-int-
+
 ## v67
 - Added [`setAutomaticFontSizeAdjustment`][67.2] to
   [`GeckoRuntimeSettings`][67.3] for automatically adjusting font size settings
@@ -277,4 +314,4 @@ exclude: true
 [65.24]: ../CrashReporter.html#sendCrashReport-android.content.Context-android.os.Bundle-java.lang.String-
 [65.25]: ../GeckoResult.html
 
-[api-version]: fa2863734daac0ec5cb0671b030139de3aac5029
+[api-version]: 9fe3ccad7809f393e67b5186b56a90adf82eed60

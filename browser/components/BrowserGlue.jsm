@@ -77,6 +77,7 @@ let ACTORS = {
       module: "resource:///actors/ClickHandlerChild.jsm",
       events: {
         "click": {capture: true, mozSystemGroup: true},
+        "auxclick": {capture: true, mozSystemGroup: true},
       },
     },
   },
@@ -390,6 +391,7 @@ XPCOMUtils.defineLazyModuleGetters(this, {
   BrowserUsageTelemetry: "resource:///modules/BrowserUsageTelemetry.jsm",
   BrowserWindowTracker: "resource:///modules/BrowserWindowTracker.jsm",
   ContextualIdentityService: "resource://gre/modules/ContextualIdentityService.jsm",
+  Corroborate: "resource://gre/modules/Corroborate.jsm",
   DateTimePickerParent: "resource://gre/modules/DateTimePickerParent.jsm",
   Discovery: "resource:///modules/Discovery.jsm",
   ExtensionsUI: "resource:///modules/ExtensionsUI.jsm",
@@ -995,6 +997,7 @@ BrowserGlue.prototype = {
     os.removeObserver(this, "sync-ui-state:update");
     os.removeObserver(this, "shield-init-complete");
 
+    Services.prefs.removeObserver("permissions.eventTelemetry.enabled", this._togglePermissionPromptTelemetry);
     Services.prefs.removeObserver("privacy.trackingprotection", this._matchCBCategory);
     Services.prefs.removeObserver("network.cookie.cookieBehavior", this._matchCBCategory);
     Services.prefs.removeObserver(ContentBlockingCategoriesPrefs.PREF_CB_CATEGORY, this._updateCBCategory);
@@ -1251,6 +1254,24 @@ BrowserGlue.prototype = {
     } catch (ex) {}
   },
 
+  _collectStartupConditionsTelemetry() {
+    let nowSeconds = Math.round(Date.now() / 1000);
+    // Don't include cases where we don't have the pref. This rules out the first install
+    // as well as the first run of a build since this was introduced. These could by some
+    // definitions be referred to as "cold" startups, but probably not since we likely
+    // just wrote many of the files we use to disk. This way we should approximate a lower
+    // bound to the number of cold startups rather than an upper bound.
+    let lastCheckSeconds = Services.prefs.getIntPref("browser.startup.lastColdStartupCheck", nowSeconds);
+    Services.prefs.setIntPref("browser.startup.lastColdStartupCheck", nowSeconds);
+    try {
+      let secondsSinceLastOSRestart = Services.startup.secondsSinceLastOSRestart;
+      let isColdStartup = nowSeconds - secondsSinceLastOSRestart > lastCheckSeconds;
+      Services.telemetry.scalarSet("startup.is_cold", isColdStartup);
+    } catch (ex) {
+      Cu.reportError(ex);
+    }
+  },
+
   // the first browser window has finished initializing
   _onFirstWindowLoaded: function BG__onFirstWindowLoaded(aWindow) {
     TabCrashHandler.init();
@@ -1326,6 +1347,8 @@ BrowserGlue.prototype = {
     this._firstWindowTelemetry(aWindow);
     this._firstWindowLoaded();
 
+    this._collectStartupConditionsTelemetry();
+
     // Set the default favicon size for UI views that use the page-icon protocol.
     PlacesUtils.favicons.setDefaultIconURIPreferredSize(16 * aWindow.devicePixelRatio);
     this._setPrefExpectations();
@@ -1356,6 +1379,20 @@ BrowserGlue.prototype = {
 
   _updateCBCategory() {
     ContentBlockingCategoriesPrefs.updateCBCategory();
+  },
+
+  _togglePermissionPromptTelemetry() {
+    let enablePermissionPromptTelemetry =
+      Services.prefs.getBoolPref("permissions.eventTelemetry.enabled", false);
+
+    Services.telemetry.setEventRecordingEnabled("security.ui.permissionprompt",
+      enablePermissionPromptTelemetry);
+
+    if (!enablePermissionPromptTelemetry) {
+      // Remove the saved unique identifier to reduce the (remote) chance
+      // of leaking it to our servers in the future.
+      Services.prefs.clearUserPref("permissions.eventTelemetry.uuid");
+    }
   },
 
   _recordContentBlockingTelemetry() {
@@ -1558,6 +1595,10 @@ BrowserGlue.prototype = {
     this._monitorScreenshotsPref();
     this._monitorWebcompatReporterPref();
 
+    if (Services.prefs.getBoolPref("corroborator.enabled", true)) {
+      Corroborate.init().catch(Cu.reportError);
+    }
+
     let pService = Cc["@mozilla.org/toolkit/profile-service;1"].
                   getService(Ci.nsIToolkitProfileService);
     if (pService.createdAlternateProfile) {
@@ -1596,6 +1637,11 @@ BrowserGlue.prototype = {
         Services.prefs.getBoolPref("security.certerrors.recordEventTelemetry", false);
       Services.telemetry.setEventRecordingEnabled("security.ui.certerror",
         enableCertErrorUITelemetry);
+    });
+
+    Services.tm.idleDispatchToMainThread(() => {
+      Services.prefs.addObserver("permissions.eventTelemetry.enabled", this._togglePermissionPromptTelemetry);
+      this._togglePermissionPromptTelemetry();
     });
 
     Services.tm.idleDispatchToMainThread(() => {
@@ -2517,18 +2563,17 @@ BrowserGlue.prototype = {
     if (currentUIVersion < 81) {
       // Reset homepage pref for users who have it set to a default from before Firefox 4:
       //   <locale>.(start|start2|start3).mozilla.(com|org)
-      const HOMEPAGE_PREF = "browser.startup.homepage";
-      if (Services.prefs.prefHasUserValue(HOMEPAGE_PREF)) {
-        const DEFAULT = Services.prefs.getDefaultBranch(HOMEPAGE_PREF).getCharPref("");
-        let value = Services.prefs.getCharPref(HOMEPAGE_PREF);
+      if (HomePage.overridden) {
+        const DEFAULT = HomePage.getDefault();
+        let value = HomePage.get();
         let updated = value.replace(
           /https?:\/\/([\w\-]+\.)?start\d*\.mozilla\.(org|com)[^|]*/ig, DEFAULT);
         if (updated != value) {
           if (updated == DEFAULT) {
-            Services.prefs.clearUserPref(HOMEPAGE_PREF);
+            HomePage.reset();
           } else {
             value = updated;
-            Services.prefs.setCharPref(HOMEPAGE_PREF, value);
+            HomePage.set(value);
           }
         }
       }

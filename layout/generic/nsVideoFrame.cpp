@@ -191,9 +191,7 @@ already_AddRefed<Layer> nsVideoFrame::BuildLayer(
   // can pass to ComputeObjectRenderRect.
   nsSize aspectRatio(nsPresContext::CSSPixelsToAppUnits(videoSizeInPx.width),
                      nsPresContext::CSSPixelsToAppUnits(videoSizeInPx.height));
-  IntrinsicSize intrinsicSize;
-  intrinsicSize.width.SetCoordValue(aspectRatio.width);
-  intrinsicSize.height.SetCoordValue(aspectRatio.height);
+  IntrinsicSize intrinsicSize(aspectRatio.width, aspectRatio.height);
 
   nsRect dest = nsLayoutUtils::ComputeObjectDestRect(
       area, intrinsicSize, aspectRatio, StylePosition());
@@ -302,7 +300,7 @@ void nsVideoFrame::Reflow(nsPresContext* aPresContext, ReflowOutput& aMetrics,
       LogicalSize cbSize = aMetrics.Size(aMetrics.GetWritingMode())
                                .ConvertTo(wm, aMetrics.GetWritingMode());
       ReflowInput kidReflowInput(aPresContext, aReflowInput, imageFrame,
-                                 availableSize, &cbSize);
+                                 availableSize, Some(cbSize));
 
       nsRect posterRenderRect;
       if (ShouldDisplayPoster()) {
@@ -340,9 +338,15 @@ void nsVideoFrame::Reflow(nsPresContext* aPresContext, ReflowOutput& aMetrics,
                  "so it should be complete!");
 
       if (child->GetContent() == videoControlsDiv && isBSizeShrinkWrapping) {
-        // Resolve our own BSize based on the controls' size in the same axis.
-        contentBoxBSize = myWM.IsOrthogonalTo(wm) ? kidDesiredSize.ISize(wm)
-                                                  : kidDesiredSize.BSize(wm);
+        // Resolve our own BSize based on the controls' size in the
+        // same axis. Unless we're size-contained, in which case we
+        // have to behave as if we have an intrinsic size of 0.
+        if (aReflowInput.mStyleDisplay->IsContainSize()) {
+          contentBoxBSize = 0;
+        } else {
+          contentBoxBSize = myWM.IsOrthogonalTo(wm) ? kidDesiredSize.ISize(wm)
+                                                    : kidDesiredSize.BSize(wm);
+        }
       }
 
       FinishReflowChild(child, aPresContext, kidDesiredSize, &kidReflowInput,
@@ -355,10 +359,7 @@ void nsVideoFrame::Reflow(nsPresContext* aPresContext, ReflowOutput& aMetrics,
         nsContentUtils::AddScriptRunner(event);
       }
     } else {
-      MOZ_ASSERT_UNREACHABLE(
-          "Extra child frame found in nsVideoFrame. "
-          "Possibly from stray whitespace around the videocontrols container "
-          "element.");
+      NS_ERROR("Unexpected extra child frame in nsVideoFrame; skipping");
     }
   }
 
@@ -436,9 +437,7 @@ class nsDisplayVideo : public nsDisplayItem {
     nsSize aspectRatio(
         nsPresContext::CSSPixelsToAppUnits(videoSizeInPx.width),
         nsPresContext::CSSPixelsToAppUnits(videoSizeInPx.height));
-    IntrinsicSize intrinsicSize;
-    intrinsicSize.width.SetCoordValue(aspectRatio.width);
-    intrinsicSize.height.SetCoordValue(aspectRatio.height);
+    IntrinsicSize intrinsicSize(aspectRatio.width, aspectRatio.height);
 
     nsRect dest = nsLayoutUtils::ComputeObjectDestRect(
         area, intrinsicSize, aspectRatio, Frame()->StylePosition());
@@ -473,17 +472,8 @@ class nsDisplayVideo : public nsDisplayItem {
     return true;
   }
 
-  nsRegion GetOpaqueRegion(nsDisplayListBuilder* aBuilder,
-                           bool* aSnap) const override {
-    *aSnap = false;
-
-    HTMLVideoElement* element =
-        static_cast<HTMLVideoElement*>(Frame()->GetContent());
-    if (element->HasAlpha()) {
-      return nsRegion();
-    }
-    return GetBounds(aBuilder, aSnap);
-  }
+  // For opaque videos, we will want to override GetOpaqueRegion here.
+  // This is tracked by bug 1545498.
 
   virtual nsRect GetBounds(nsDisplayListBuilder* aBuilder,
                            bool* aSnap) const override {
@@ -583,10 +573,7 @@ LogicalSize nsVideoFrame::ComputeSize(
   }
 
   nsSize size = GetVideoIntrinsicSize(aRenderingContext);
-
-  IntrinsicSize intrinsicSize;
-  intrinsicSize.width.SetCoordValue(size.width);
-  intrinsicSize.height.SetCoordValue(size.height);
+  IntrinsicSize intrinsicSize(size.width, size.height);
 
   // Only video elements have an intrinsic ratio.
   nsSize intrinsicRatio = HasVideoElement() ? size : nsSize(0, 0);
@@ -607,7 +594,7 @@ nscoord nsVideoFrame::GetMinISize(gfxContext* aRenderingContext) {
     // We expect last and only child of audio elements to be control if
     // "controls" attribute is present.
     nsIFrame* kid = mFrames.LastChild();
-    if (kid) {
+    if (!StyleDisplay()->IsContainSize() && kid) {
       result = nsLayoutUtils::IntrinsicForContainer(aRenderingContext, kid,
                                                     nsLayoutUtils::MIN_ISIZE);
     } else {
@@ -629,7 +616,7 @@ nscoord nsVideoFrame::GetPrefISize(gfxContext* aRenderingContext) {
     // We expect last and only child of audio elements to be control if
     // "controls" attribute is present.
     nsIFrame* kid = mFrames.LastChild();
-    if (kid) {
+    if (!StyleDisplay()->IsContainSize() && kid) {
       result = nsLayoutUtils::IntrinsicForContainer(aRenderingContext, kid,
                                                     nsLayoutUtils::PREF_ISIZE);
     } else {
@@ -673,6 +660,11 @@ bool nsVideoFrame::ShouldDisplayPoster() {
 }
 
 nsSize nsVideoFrame::GetVideoIntrinsicSize(gfxContext* aRenderingContext) {
+  // 'contain:size' replaced elements have intrinsic size 0,0.
+  if (StyleDisplay()->IsContainSize()) {
+    return nsSize(0, 0);
+  }
+
   // Defaulting size to 300x150 if no size given.
   nsIntSize size(300, 150);
 

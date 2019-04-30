@@ -2158,16 +2158,21 @@ static bool ScriptIsTooLarge(JSContext* cx, JSScript* script) {
     return false;
   }
 
-  uint32_t numLocalsAndArgs = NumLocalsAndArgs(script);
+  size_t numLocalsAndArgs = NumLocalsAndArgs(script);
 
-  if (script->length() > MAX_MAIN_THREAD_SCRIPT_SIZE ||
-      numLocalsAndArgs > MAX_MAIN_THREAD_LOCALS_AND_ARGS) {
-    if (!OffThreadCompilationAvailable(cx)) {
-      JitSpew(JitSpew_IonAbort, "Script too large (%zu bytes) (%u locals/args)",
-              script->length(), numLocalsAndArgs);
-      TrackIonAbort(cx, script, script->code(), "too large");
-      return true;
-    }
+  bool canCompileOffThread = OffThreadCompilationAvailable(cx);
+  size_t maxScriptSize = canCompileOffThread
+                             ? JitOptions.ionMaxScriptSize
+                             : JitOptions.ionMaxScriptSizeMainThread;
+  size_t maxLocalsAndArgs = canCompileOffThread
+                                ? JitOptions.ionMaxLocalsAndArgs
+                                : JitOptions.ionMaxLocalsAndArgsMainThread;
+
+  if (script->length() > maxScriptSize || numLocalsAndArgs > maxLocalsAndArgs) {
+    JitSpew(JitSpew_IonAbort, "Script too large (%zu bytes) (%zu locals/args)",
+            script->length(), numLocalsAndArgs);
+    TrackIonAbort(cx, script, script->code(), "too large");
+    return true;
   }
 
   return false;
@@ -2216,7 +2221,9 @@ static MethodStatus Compile(JSContext* cx, HandleScript script,
   MOZ_ASSERT(jit::IsIonEnabled(cx));
   MOZ_ASSERT(jit::IsBaselineEnabled(cx));
   MOZ_ASSERT_IF(osrPc != nullptr, LoopEntryCanIonOsr(osrPc));
-  AutoGeckoProfilerEntry pseudoFrame(cx, "Ion script compilation");
+  AutoGeckoProfilerEntry pseudoFrame(
+      cx, "Ion script compilation",
+      JS::ProfilingCategoryPair::JS_IonCompilation);
 
   if (!script->hasBaselineScript()) {
     return Method_Skipped;
@@ -2353,7 +2360,8 @@ MethodStatus jit::CanEnterIon(JSContext* cx, RunState& state) {
   // If --ion-eager is used, compile with Baseline first, so that we
   // can directly enter IonMonkey.
   if (JitOptions.eagerIonCompilation() && !script->hasBaselineScript()) {
-    MethodStatus status = CanEnterBaselineMethod(cx, state);
+    MethodStatus status =
+        CanEnterBaselineMethod<BaselineTier::Compiler>(cx, state);
     if (status != Method_Compiled) {
       return status;
     }

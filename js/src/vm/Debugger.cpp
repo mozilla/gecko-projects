@@ -3034,14 +3034,14 @@ bool Debugger::ensureExecutionObservabilityOfScript(JSContext* cx,
 }
 
 /* static */
-bool Debugger::ensureExecutionObservabilityOfOsrFrame(JSContext* cx,
-                                                      InterpreterFrame* frame) {
-  MOZ_ASSERT(frame->isDebuggee());
-  if (frame->script()->hasBaselineScript() &&
-      frame->script()->baselineScript()->hasDebugInstrumentation()) {
+bool Debugger::ensureExecutionObservabilityOfOsrFrame(
+    JSContext* cx, AbstractFramePtr osrSourceFrame) {
+  MOZ_ASSERT(osrSourceFrame.isDebuggee());
+  if (osrSourceFrame.script()->hasBaselineScript() &&
+      osrSourceFrame.script()->baselineScript()->hasDebugInstrumentation()) {
     return true;
   }
-  ExecutionObservableFrame obs(frame);
+  ExecutionObservableFrame obs(osrSourceFrame);
   return updateExecutionObservabilityOfFrames(cx, obs, Observing);
 }
 
@@ -8411,9 +8411,8 @@ class DebuggerSourceGetTextMatcher {
 
   ReturnType match(HandleScriptSourceObject sourceObject) {
     ScriptSource* ss = sourceObject->source();
-    bool hasSourceText = ss->hasSourceText();
-    if (!ss->hasSourceText() &&
-        !JSScript::loadSource(cx_, ss, &hasSourceText)) {
+    bool hasSourceText;
+    if (!ScriptSource::loadSource(cx_, ss, &hasSourceText)) {
       return nullptr;
     }
     if (!hasSourceText) {

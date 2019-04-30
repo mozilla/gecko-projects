@@ -87,7 +87,7 @@ class ByteBufferStream final : public nsIInputStream {
         std::min(uint64_t(mBuffer->Capacity() - mPosition), uint64_t(aCount)));
 
     if (*aCountRead > 0) {
-      memcpy(aBuf, (char*)mBuffer->Address(), *aCountRead);
+      memcpy(aBuf, (char*)mBuffer->Address() + mPosition, *aCountRead);
       mPosition += *aCountRead;
     }
 
@@ -292,9 +292,7 @@ class LoaderListener final : public nsIStreamListener,
     NS_ENSURE_SUCCESS(rv, rv);
 
     // Redirected
-    nsCOMPtr<nsILoadInfo> loadInfo;
-    rv = channel->GetLoadInfo(getter_AddRefs(loadInfo));
-    NS_ENSURE_SUCCESS(rv, rv);
+    nsCOMPtr<nsILoadInfo> loadInfo = channel->LoadInfo();
 
     builder->Redirected(!loadInfo->RedirectChain().IsEmpty());
 

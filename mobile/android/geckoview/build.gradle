@@ -218,6 +218,10 @@ tasks.withType(Javadoc) {
 dependencies {
     implementation "com.android.support:support-v4:$support_library_version"
     implementation "com.android.support:palette-v7:$support_library_version"
+    implementation "org.yaml:snakeyaml:1.24:android"
+
+    implementation "android.arch.lifecycle:extensions:$lifecycle_library_version"
+    implementation "android.arch.lifecycle:common-java8:$lifecycle_library_version"
 
     testImplementation "org.jetbrains.kotlin:kotlin-stdlib:$kotlin_version"
     testImplementation 'junit:junit:4.12'

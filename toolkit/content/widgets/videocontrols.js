@@ -241,6 +241,13 @@ this.VideoControlsImplWidget = class {
         // fullscreen.
         this.updateOrientationState(this.isVideoInFullScreen);
 
+        // The video itself might not be fullscreen, but part of the
+        // document might be, in which case we set this attribute to
+        // apply any styles for the DOM fullscreen case.
+        if (this.document.fullscreenElement) {
+          this.videocontrols.setAttribute("inDOMFullscreen", true);
+        }
+
         if (this.isAudioOnly) {
           this.startFadeOut(this.clickToPlay, true);
         }
@@ -270,7 +277,9 @@ this.VideoControlsImplWidget = class {
           this.setShowPictureInPictureMessage(true);
         }
 
-        if (!this.pipToggleEnabled || this.isShowingPictureInPictureMessage) {
+        if (!this.pipToggleEnabled ||
+            this.isShowingPictureInPictureMessage ||
+            this.isAudioOnly) {
           this.pictureInPictureToggleButton.setAttribute("hidden", true);
         }
 
@@ -1368,6 +1377,12 @@ this.VideoControlsImplWidget = class {
       },
 
       onFullscreenChange() {
+        if (this.document.fullscreenElement) {
+          this.videocontrols.setAttribute("inDOMFullscreen", true);
+        } else {
+          this.videocontrols.removeAttribute("inDOMFullscreen");
+        }
+
         this.updateOrientationState(this.isVideoInFullScreen);
 
         if (this.isVideoInFullScreen) {
@@ -2255,17 +2270,17 @@ this.VideoControlsImplWidget = class {
         <div id="controlsContainer" class="controlsContainer" role="none">
           <div id="statusOverlay" class="statusOverlay stackItem" hidden="true">
             <div id="statusIcon" class="statusIcon"></div>
-            <span class="statusLabel" id="errorAborted">&error.aborted;</span>
-            <span class="statusLabel" id="errorNetwork">&error.network;</span>
-            <span class="statusLabel" id="errorDecode">&error.decode;</span>
-            <span class="statusLabel" id="errorSrcNotSupported">&error.srcNotSupported;</span>
-            <span class="statusLabel" id="errorNoSource">&error.noSource2;</span>
-            <span class="statusLabel" id="errorGeneric">&error.generic;</span>
+            <bdi class="statusLabel" id="errorAborted">&error.aborted;</bdi>
+            <bdi class="statusLabel" id="errorNetwork">&error.network;</bdi>
+            <bdi class="statusLabel" id="errorDecode">&error.decode;</bdi>
+            <bdi class="statusLabel" id="errorSrcNotSupported">&error.srcNotSupported;</bdi>
+            <bdi class="statusLabel" id="errorNoSource">&error.noSource2;</bdi>
+            <bdi class="statusLabel" id="errorGeneric">&error.generic;</bdi>
           </div>
 
           <div id="pictureInPictureOverlay" class="pictureInPictureOverlay stackItem" status="pictureInPicture" hidden="true">
             <div class="statusIcon" type="pictureInPicture"></div>
-            <span class="statusLabel" id="pictureInPicture">&status.pictureInPicture;</span>
+            <bdi class="statusLabel" id="pictureInPicture">&status.pictureInPicture;</bdi>
           </div>
 
           <div id="controlsOverlay" class="controlsOverlay stackItem" role="none">
@@ -2276,6 +2291,7 @@ this.VideoControlsImplWidget = class {
 
             <button id="pictureInPictureToggleButton" class="pictureInPictureToggleButton">
               <div id="pictureInPictureToggleIcon" class="pictureInPictureToggleIcon"></div>
+              <span class="pictureInPictureToggleLabel">&pictureInPicture.label;</span>
             </button>
 
             <div id="controlBar" class="controlBar" role="none" hidden="true">
@@ -2293,11 +2309,11 @@ this.VideoControlsImplWidget = class {
                 </div>
                 <input type="range" id="scrubber" class="scrubber" tabindex="-1"/>
               </div>
-              <span id="positionLabel" class="positionLabel" role="presentation"></span>
-              <span id="durationLabel" class="durationLabel" role="presentation"></span>
-              <span id="positionDurationBox" class="positionDurationBox" aria-hidden="true">
+              <bdi id="positionLabel" class="positionLabel" role="presentation"></bdi>
+              <bdi id="durationLabel" class="durationLabel" role="presentation"></bdi>
+              <bdi id="positionDurationBox" class="positionDurationBox" aria-hidden="true">
                 &positionAndDuration.nameFormat;
-              </span>
+              </bdi>
               <div id="controlBarSpacer" class="controlBarSpacer" hidden="true" role="none"></div>
               <button id="muteButton"
                       class="button muteButton"
@@ -2527,7 +2543,7 @@ this.NoControlsPictureInPictureImplWidget = class {
         <div id="controlsContainer" class="controlsContainer" role="none">
           <div class="pictureInPictureOverlay stackItem" status="pictureInPicture">
             <div id="statusIcon" class="statusIcon" type="pictureInPicture"></div>
-            <span class="statusLabel" id="pictureInPicture">&status.pictureInPicture;</span>
+            <bdi class="statusLabel" id="pictureInPicture">&status.pictureInPicture;</bdi>
           </div>
           <div class="controlsOverlay stackItem"></div>
         </div>
@@ -2549,6 +2565,19 @@ this.NoControlsDesktopImplWidget = class {
     this.generateContent();
 
     this.Utils = {
+      handleEvent(event) {
+        switch (event.type) {
+          case "fullscreenchange": {
+            if (this.document.fullscreenElement) {
+              this.videocontrols.setAttribute("inDOMFullscreen", true);
+            } else {
+              this.videocontrols.removeAttribute("inDOMFullscreen");
+            }
+            break;
+          }
+        }
+      },
+
       init(shadowRoot, prefs) {
         this.shadowRoot = shadowRoot;
         this.prefs = prefs;
@@ -2561,9 +2590,23 @@ this.NoControlsDesktopImplWidget = class {
         this.pictureInPictureToggleButton =
           this.shadowRoot.getElementById("pictureInPictureToggleButton");
 
+        if (this.document.fullscreenElement) {
+          this.videocontrols.setAttribute("inDOMFullscreen", true);
+        }
+
         if (!this.pipToggleEnabled) {
           this.pictureInPictureToggleButton.setAttribute("hidden", true);
         }
+
+        this.document.addEventListener("fullscreenchange", this, {
+          capture: true,
+        });
+      },
+
+      terminate() {
+        this.document.removeEventListener("fullscreenchange", this, {
+          capture: true,
+        });
       },
 
       get pipToggleEnabled() {
@@ -2578,6 +2621,7 @@ this.NoControlsDesktopImplWidget = class {
   }
 
   destructor() {
+    this.Utils.terminate();
   }
 
   generateContent() {
@@ -2596,6 +2640,7 @@ this.NoControlsDesktopImplWidget = class {
           <div class="controlsOverlay stackItem">
             <button id="pictureInPictureToggleButton" class="pictureInPictureToggleButton">
               <div id="pictureInPictureToggleIcon" class="pictureInPictureToggleIcon"></div>
+              <span class="pictureInPictureToggleLabel">&pictureInPicture.label;</span>
             </button>
           </div>
         </div>

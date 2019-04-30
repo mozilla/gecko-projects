@@ -1,12 +1,14 @@
 job-defaults:
+    suite:
+        category: reftest
     target:
         by-test-platform:
             android-em-7.*: geckoview-androidTest.apk
             default: null
-    serviceworker-e10s:
+    variants:
         by-test-platform:
-            linux64/debug: both
-            default: false
+            linux64/debug: ['serviceworker']
+            default: []
     run-on-projects:
         by-test-platform:
             android-em-4.3-arm7-api-16/opt: ['try']
@@ -35,7 +37,6 @@ job-defaults:
 
 crashtest:
     description: "Crashtest run"
-    suite: reftest/crashtest
     treeherder-symbol: R(C)
     instance-size:
         by-test-platform:
@@ -67,8 +68,7 @@ crashtest:
 
 jsreftest:
     description: "JS Reftest run"
-    suite: reftest/jsreftest
-    schedules-component: jsreftest  # scheduling for this reftest is different from the others..
+    schedules-component: jsreftest
     treeherder-symbol: R(J)
     instance-size:
         by-test-platform:
@@ -102,7 +102,6 @@ jsreftest:
 
 reftest:
     description: "Reftest run"
-    suite: reftest/reftest
     treeherder-symbol: R(R)
     instance-size:
         by-test-platform:
@@ -146,7 +145,6 @@ reftest:
 
 reftest-gpu:
     description: "Reftest GPU run"
-    suite: reftest/reftest-gpu
     treeherder-symbol: R(Rg)
     chunks:
         by-test-platform:
@@ -165,7 +163,6 @@ reftest-gpu:
 
 reftest-no-accel:
     description: "Reftest not accelerated run"
-    suite: reftest/reftest-no-accel
     treeherder-symbol: R(Ru)
     virtualization: virtual-with-gpu
     run-on-projects:

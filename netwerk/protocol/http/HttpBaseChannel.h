@@ -218,7 +218,7 @@ class HttpBaseChannel : public nsHashPropertyBag,
   NS_IMETHOD GetResponseStatusText(nsACString &aValue) override;
   NS_IMETHOD GetRequestSucceeded(bool *aValue) override;
   NS_IMETHOD RedirectTo(nsIURI *newURI) override;
-  NS_IMETHOD SwitchProcessTo(mozilla::dom::Promise *aTabParent,
+  NS_IMETHOD SwitchProcessTo(mozilla::dom::Promise *aBrowserParent,
                              uint64_t aIdentifier) override;
   NS_IMETHOD HasCrossOriginOpenerPolicyMismatch(bool *aMismatch) override;
   NS_IMETHOD UpgradeToSecure() override;
@@ -243,8 +243,6 @@ class HttpBaseChannel : public nsHashPropertyBag,
       uint32_t *aIsClassificationFlags) override;
   NS_IMETHOD GetThirdPartyClassificationFlags(
       uint32_t *aIsClassificationFlags) override;
-  NS_IMETHOD OverrideTrackingFlagsForDocumentCookieAccessor(
-      nsIHttpChannel *aDocumentChannel) override;
   NS_IMETHOD GetFlashPluginState(
       nsIHttpChannel::FlashPluginState *aState) override;
 

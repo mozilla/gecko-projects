@@ -571,6 +571,13 @@ static void WebRenderDebugPrefChangeCallback(const char* aPrefName, void*) {
   // Bit 18 is for the zoom display, which requires the mouse position and thus
   // currently only works in wrench.
   GFX_WEBRENDER_DEBUG(".small-screen", wr::DebugFlags_SMALL_SCREEN)
+  GFX_WEBRENDER_DEBUG(".disable-opaque-pass",
+                      wr::DebugFlags_DISABLE_OPAQUE_PASS)
+  GFX_WEBRENDER_DEBUG(".disable-alpha-pass", wr::DebugFlags_DISABLE_ALPHA_PASS)
+  GFX_WEBRENDER_DEBUG(".disable-clip-masks", wr::DebugFlags_DISABLE_CLIP_MASKS)
+  GFX_WEBRENDER_DEBUG(".disable-text-prims", wr::DebugFlags_DISABLE_TEXT_PRIMS)
+  GFX_WEBRENDER_DEBUG(".disable-gradient-prims",
+                      wr::DebugFlags_DISABLE_GRADIENT_PRIMS)
 #undef GFX_WEBRENDER_DEBUG
 
   gfx::gfxVars::SetWebRenderDebugFlags(flags.bits);
@@ -855,6 +862,19 @@ void gfxPlatform::Init() {
 
   if (XRE_IsParentProcess()) {
     WrRolloutPrefShutdownSaver::AddShutdownObserver();
+
+    nsCOMPtr<nsIFile> profDir;
+    nsresult rv = NS_GetSpecialDirectory(NS_APP_PROFILE_DIR_STARTUP,
+                                         getter_AddRefs(profDir));
+    if (NS_FAILED(rv)) {
+      gfxVars::SetProfDirectory(nsString());
+    } else {
+      nsAutoString path;
+      profDir->GetPath(path);
+      gfxVars::SetProfDirectory(nsString(path));
+    }
+
+    gfxUtils::RemoveShaderCacheFromDiskIfNecessary();
   }
 
   // Drop a note in the crash report if we end up forcing an option that could
@@ -1048,19 +1068,6 @@ void gfxPlatform::Init() {
       Preferences::SetBool(FONT_VARIATIONS_PREF, false);
       Preferences::Lock(FONT_VARIATIONS_PREF);
     }
-
-    nsCOMPtr<nsIFile> profDir;
-    rv = NS_GetSpecialDirectory(NS_APP_PROFILE_DIR_STARTUP,
-                                getter_AddRefs(profDir));
-    if (NS_FAILED(rv)) {
-      gfxVars::SetProfDirectory(nsString());
-    } else {
-      nsAutoString path;
-      profDir->GetPath(path);
-      gfxVars::SetProfDirectory(nsString(path));
-    }
-
-    gfxUtils::RemoveShaderCacheFromDiskIfNecessary();
   }
 
   nsCOMPtr<nsIObserverService> obs = services::GetObserverService();
@@ -1708,11 +1715,17 @@ nsAutoCString gfxPlatform::GetDefaultFontName(
   // this one variable:
   nsAutoCString result;
 
-  gfxFontFamily* fontFamily =
+  FamilyAndGeneric fam =
       gfxPlatformFontList::PlatformFontList()->GetDefaultFontFamily(
           aLangGroup, aGenericFamily);
-  if (fontFamily) {
-    fontFamily->LocalizedName(result);
+  if (fam.mFamily.mIsShared) {
+    if (fam.mFamily.mShared) {
+      fontlist::FontList* fontList =
+          gfxPlatformFontList::PlatformFontList()->SharedFontList();
+      result = fam.mFamily.mShared->DisplayName().AsString(fontList);
+    }
+  } else if (fam.mFamily.mUnshared) {
+    fam.mFamily.mUnshared->LocalizedName(result);
   }  // (else, leave 'result' empty)
 
   return result;
@@ -2576,11 +2589,55 @@ static FeatureState& WebRenderHardwareQualificationStatus(
         } else if (adapterVendorID == u"0x8086" ||
                    adapterVendorID == u"mesa/i965") {  // Intel
           const uint16_t supportedDevices[] = {
-              0x191d,  // HD Graphics P530
-              0x192d,  // Iris Pro Graphics P555
-              0x1912,  // HD Graphics 530
-              0x5912,  // HD Graphics 630
-              0x3e92,  // UHD Graphics 630
+              // skylake gt2+
+              0x1912,
+              0x1913,
+              0x1915,
+              0x1916,
+              0x1917,
+              0x191a,
+              0x191b,
+              0x191d,
+              0x191e,
+              0x1921,
+              0x1923,
+              0x1926,
+              0x1927,
+              0x192b,
+              0x1932,
+              0x193b,
+              0x193d,
+
+              // kabylake gt2+
+              0x5912,
+              0x5916,
+              0x591a,
+              0x591b,
+              0x591c,
+              0x591d,
+              0x591e,
+              0x5921,
+              0x5926,
+              0x5923,
+              0x5927,
+              0x593b,
+
+              // coffeelake gt2+
+              0x3e91,
+              0x3e92,
+              0x3e96,
+              0x3e98,
+              0x3e9a,
+              0x3e9b,
+              0x3e94,
+              0x3ea0,
+              0x3ea9,
+              0x3ea2,
+              0x3ea6,
+              0x3ea7,
+              0x3ea8,
+              0x3ea5,
+
               // HD Graphics 4600
               0x0412,
               0x0416,
@@ -2759,7 +2816,7 @@ void gfxPlatform::InitWebRenderConfig() {
           WebRenderDebugPrefChangeCallback, WR_DEBUG_PREF);
     }
   }
-#if defined(XP_LINUX) && !defined(MOZ_WIDGET_ANDROID)
+#if defined(MOZ_WIDGET_GTK)
   else if (gfxConfig::IsEnabled(Feature::HW_COMPOSITING)) {
     // Hardware compositing should be disabled by default if we aren't using
     // WebRender. We had to check if it is enabled at all, because it may

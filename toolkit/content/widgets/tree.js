@@ -490,10 +490,10 @@
 
       // Set resizeafter="farthest" on the splitters if nothing else has been
       // specified.
-      Array.forEach(this.getElementsByTagName("splitter"), function(splitter) {
+      for (let splitter of this.getElementsByTagName("splitter")) {
         if (!splitter.hasAttribute("resizeafter"))
           splitter.setAttribute("resizeafter", "farthest");
-      });
+      }
     }
   }
 
@@ -1147,7 +1147,8 @@
       this._editingRow = -1;
       this._editingColumn = null;
 
-      if (accept) {
+      // `this.view` could be null if the tree was hidden before we were called.
+      if (accept && this.view) {
         var value = input.value;
         this.view.setCellText(editingRow, editingColumn, value);
       }

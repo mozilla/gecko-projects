@@ -449,7 +449,7 @@ interface nsIHttpChannel : nsIChannel
      * this can only be used on channels that have not yet called their
      * listener's OnStartRequest().
      *
-     * @param aTabPromise   a promise which resolves to a nsITabParent object
+     * @param aTabPromise   a promise which resolves to a nsIRemotTab object
      *                      which the load will proceed in.
      * @param aIdentifier   a 64-bit ID which will be provided to the
      *                      ChildProcessChannelListener.
@@ -630,21 +630,6 @@ interface nsIHttpChannel : nsIChannel
       FlashPluginLastValue = 3,
     };
     [infallible] readonly attribute nsIHttpChannel_FlashPluginState flashPluginState;
-
-    /**
-     * This method is used by the document.cookie call site in order
-     * to override the tracking status of an HTTP channel. This should
-     * only be called by Gecko under certain circumstances when Gecko
-     * can guarantee that the channel classifier service will not be
-     * determining the tracking status of the channel.
-     *
-     * @param aDocumentChannel
-     *        The document channel from which to copy the tracking flags
-     *
-     * Please avoid calling this API if you're unsure whether you
-     * should be using it.
-     */
-    [noscript] void overrideTrackingFlagsForDocumentCookieAccessor(in nsIHttpChannel aDocumentChannel);
 
     /**
      * ID of the top-level outer content window. Identifies this channel's

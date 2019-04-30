@@ -14,6 +14,7 @@
 
 #include "jsutil.h"
 
+#include "builtin/MapObject.h"
 #include "gc/FreeOp.h"
 #include "gc/GCInternals.h"
 #include "gc/Memory.h"
@@ -813,6 +814,7 @@ void js::Nursery::collect(JS::GCReason reason) {
     for (auto& entry : tenureCounts.entries) {
       if (entry.count >= tunables().pretenureGroupThreshold()) {
         ObjectGroup* group = entry.group;
+        AutoMaybeLeaveAtomsZone leaveAtomsZone(cx);
         AutoRealm ar(cx, group);
         AutoSweepObjectGroup sweep(group);
         if (group->canPreTenure(sweep)) {
@@ -883,8 +885,9 @@ void js::Nursery::collect(JS::GCReason reason) {
   if (enableProfiling_ && totalTime >= profileThreshold_) {
     stats().maybePrintProfileHeaders();
 
-    fprintf(stderr, "MinorGC: %20s %5.1f%% %4u        ",
-            JS::ExplainGCReason(reason), promotionRate * 100, maxChunkCount());
+    fprintf(stderr, "MinorGC: %20s %5.1f%% %5zu       ",
+            JS::ExplainGCReason(reason), promotionRate * 100,
+            capacity() / 1024);
     printProfileDurations(profileDurations_);
 
     if (reportTenurings_) {

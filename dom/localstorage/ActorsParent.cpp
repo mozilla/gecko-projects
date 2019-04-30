@@ -2645,8 +2645,8 @@ class QuotaClient final : public mozilla::dom::quota::Client {
 
   nsresult InitOrigin(PersistenceType aPersistenceType,
                       const nsACString& aGroup, const nsACString& aOrigin,
-                      const AtomicBool& aCanceled,
-                      UsageInfo* aUsageInfo) override;
+                      const AtomicBool& aCanceled, UsageInfo* aUsageInfo,
+                      bool aForGetUsage) override;
 
   nsresult GetUsageForOrigin(PersistenceType aPersistenceType,
                              const nsACString& aGroup,
@@ -5151,8 +5151,14 @@ void Database::RequestAllowToClose() {
   // child actor. Except the case when the actor was already destroyed.
   if (mActorDestroyed) {
     MOZ_ASSERT(mAllowedToClose);
-  } else if (NS_WARN_IF(!SendRequestAllowToClose())) {
-    // Allow to close immediately if sending failed.
+    return;
+  }
+
+  if (NS_WARN_IF(!SendRequestAllowToClose()) && !mSnapshot) {
+    // This is not necessary, because there should be a runnable scheduled that
+    // will call ActorDestroy which calls AllowToClose. However we can speedup
+    // the shutdown a bit if we do it here directly, but only if there's no
+    // registered snapshot.
     AllowToClose();
   }
 }
@@ -5161,6 +5167,7 @@ void Database::AllowToClose() {
   AssertIsOnBackgroundThread();
   MOZ_ASSERT(!mAllowedToClose);
   MOZ_ASSERT(mDatastore);
+  MOZ_ASSERT(!mSnapshot);
 
   mAllowedToClose = true;
 
@@ -5388,7 +5395,7 @@ mozilla::ipc::IPCResult Snapshot::RecvCheckpoint(
     nsTArray<LSWriteInfo>&& aWriteInfos) {
   AssertIsOnBackgroundThread();
   MOZ_ASSERT(mUsage >= 0);
-  MOZ_ASSERT(mPeakUsage >= mUsage);
+  MOZ_DIAGNOSTIC_ASSERT(mPeakUsage >= mUsage);
 
   if (NS_WARN_IF(aWriteInfos.IsEmpty())) {
     ASSERT_UNLESS_FUZZING();
@@ -7524,7 +7531,7 @@ nsresult QuotaClient::InitOrigin(PersistenceType aPersistenceType,
                                  const nsACString& aGroup,
                                  const nsACString& aOrigin,
                                  const AtomicBool& aCanceled,
-                                 UsageInfo* aUsageInfo) {
+                                 UsageInfo* aUsageInfo, bool aForGetUsage) {
   AssertIsOnIOThread();
   MOZ_ASSERT(aPersistenceType == PERSISTENCE_TYPE_DEFAULT);
 
@@ -7687,9 +7694,11 @@ nsresult QuotaClient::InitOrigin(PersistenceType aPersistenceType,
       }
     }
 
-    MOZ_ASSERT(usage >= 0);
+    MOZ_DIAGNOSTIC_ASSERT(usage >= 0);
 
-    InitUsageForOrigin(aOrigin, usage);
+    if (!aForGetUsage) {
+      InitUsageForOrigin(aOrigin, usage);
+    }
 
     aUsageInfo->AppendToDatabaseUsage(uint64_t(usage));
   } else if (usageFileExists) {

@@ -27,8 +27,7 @@ function defineNoReturnMethod(fn) {
   return function method() {
     if (!this._domRequestReady) {
       // Remote browser haven't been created, we just queue the API call.
-      let args = Array.slice(arguments);
-      args.unshift(this);
+      let args = [this, ...arguments];
       this._pendingAPICalls.push(method.bind.apply(fn, args));
       return;
     }
@@ -497,7 +496,7 @@ BrowserElementParent.prototype = {
   sendMouseEvent: defineNoReturnMethod(function(type, x, y, button, clickCount, modifiers) {
     // This method used to attempt to transform from the parent
     // coordinate space to the child coordinate space, but the
-    // transform was always a no-op, because this._frameLoader.tabParent
+    // transform was always a no-op, because this._frameLoader.remoteTab
     // was null.
     this._sendAsyncMsg("send-mouse-event", {
       "type": type,

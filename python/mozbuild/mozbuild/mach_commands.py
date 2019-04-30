@@ -597,6 +597,25 @@ class GTestCommands(MachCommandBase):
     @CommandArgument('--shuffle', '-s', action='store_true',
         help='Randomize the execution order of tests.')
 
+    @CommandArgument('--package',
+        default='org.mozilla.geckoview.test',
+        help='(Android only) Package name of test app.')
+    @CommandArgument('--adbpath',
+        dest='adb_path',
+        help='(Android only) Path to adb binary.')
+    @CommandArgument('--deviceSerial',
+        dest='device_serial',
+        help="(Android only) adb serial number of remote device. "
+             "Required when more than one device is connected to the host. "
+             "Use 'adb devices' to see connected devices.")
+    @CommandArgument('--remoteTestRoot',
+        dest='remote_test_root',
+        help='(Android only) Remote directory to use as test root '
+             '(eg. /mnt/sdcard/tests or /data/local/tests).')
+    @CommandArgument('--libxul',
+        dest='libxul_path',
+        help='(Android only) Path to gtest libxul.so.')
+
     @CommandArgumentGroup('debugging')
     @CommandArgument('--debug', action='store_true', group='debugging',
         help='Enable the debugger. Not specifying a --debugger option will result in the default debugger being used.')
@@ -606,8 +625,9 @@ class GTestCommands(MachCommandBase):
         group='debugging',
         help='Command-line arguments to pass to the debugger itself; split as the Bourne shell would.')
 
-    def gtest(self, shuffle, jobs, gtest_filter, tbpl_parser, debug, debugger,
-              debugger_args):
+    def gtest(self, shuffle, jobs, gtest_filter, tbpl_parser,
+              package, adb_path, device_serial, remote_test_root, libxul_path,
+              debug, debugger, debugger_args):
 
         # We lazy build gtest because it's slow to link
         try:
@@ -631,6 +651,17 @@ class GTestCommands(MachCommandBase):
         if self.substs.get('MOZ_WIDGET_TOOLKIT') == 'cocoa':
             self._run_make(directory='browser/app', target='repackage',
                            ensure_exit_code=True)
+
+        if conditions.is_android(self):
+            if jobs != 1:
+                print("--jobs is not supported on Android and will be ignored")
+            if debug or debugger or debugger_args:
+                print("--debug options are not supported on Android and will be ignored")
+            return self.android_gtest(shuffle, gtest_filter,
+                                      package, adb_path, device_serial, remote_test_root, libxul_path)
+
+        if package or adb_path or device_serial or remote_test_root or libxul_path:
+            print("One or more Android-only options will be ignored")
 
         app_path = self.get_binary_path('app')
         args = [app_path, '-unittest', '--gtest_death_test_style=threadsafe'];
@@ -707,6 +738,36 @@ class GTestCommands(MachCommandBase):
             exit_code = 255
 
         return exit_code
+
+    def android_gtest(self, shuffle, gtest_filter,
+                      package, adb_path, device_serial, remote_test_root, libxul_path):
+        # setup logging for mozrunner
+        from mozlog.commandline import setup_logging
+        format_args = {'level': self._mach_context.settings['test']['level']}
+        default_format = self._mach_context.settings['test']['format']
+        log = setup_logging('mach-gtest', {}, {default_format: sys.stdout}, format_args)
+
+        # ensure that a device is available and test app is installed
+        from mozrunner.devices.android_device import (verify_android_device, get_adb_path)
+        verify_android_device(self, install=True, app=package, device_serial=device_serial)
+
+        if not adb_path:
+            adb_path = get_adb_path(self)
+        if not libxul_path:
+            libxul_path = os.path.join(self.topobjdir, "dist", "bin", "gtest", "libxul.so")
+
+        # run gtest via remotegtests.py
+        import imp
+        path = os.path.join('testing', 'gtest', 'remotegtests.py')
+        with open(path, 'r') as fh:
+            imp.load_module('remotegtests', fh, path,
+                            ('.py', 'r', imp.PY_SOURCE))
+        import remotegtests
+        tester = remotegtests.RemoteGTests()
+        tester.run_gtest(shuffle, gtest_filter, package, adb_path, device_serial,
+                         remote_test_root, libxul_path, None)
+
+        return 0
 
     def prepend_debugger_args(self, args, debugger, debugger_args):
         '''
@@ -1615,11 +1676,18 @@ class StaticAnalysisSubCommand(SubCommand):
 
 
 class StaticAnalysisMonitor(object):
-    def __init__(self, srcdir, objdir, total):
+    def __init__(self, srcdir, objdir, clang_tidy_config, total):
         self._total = total
         self._processed = 0
         self._current = None
         self._srcdir = srcdir
+
+        self._clang_tidy_config = clang_tidy_config['clang_checkers']
+        # Transform the configuration to support Regex
+        for item in self._clang_tidy_config:
+            if item['name'] == '-*':
+                continue
+            item['name'].replace('*', '.*')
 
         from mozbuild.compilation.warnings import (
             WarningsCollector,
@@ -1665,6 +1733,24 @@ class StaticAnalysisMonitor(object):
                 self._current = None
             self._processed = self._processed + 1
             return (warning, False)
+        if warning is not None:
+            def get_reliability(checker_name):
+                # get the matcher from self._clang_tidy_config that is the 'name' field
+                reliability = None
+                for item in self._clang_tidy_config:
+                    if item['name'] == checker_name:
+                        reliability = item.get('reliability', 'low')
+                        break
+                    else:
+                        # We are using a regex in order to also match 'mozilla-.* like checkers'
+                        matcher = re.match(item['name'], checker_name)
+                        if matcher is not None and matcher.group(0) == checker_name:
+                            reliability = item.get('reliability', 'low')
+                            break
+                return reliability
+            reliability = get_reliability(warning['flag'])
+            if reliability is not None:
+                warning['reliability'] = reliability
         return (warning, True)
 
 
@@ -1678,6 +1764,7 @@ class StaticAnalysis(MachCommandBase):
     _format_ignore_file = '.clang-format-ignore'
 
     _clang_tidy_config = None
+    _cov_config = None
 
     @Command('static-analysis', category='testing',
              description='Run C++ static analysis checks')
@@ -1759,6 +1846,9 @@ class StaticAnalysis(MachCommandBase):
                     total = total + 1
 
         if not total:
+            self.log(logging.INFO, 'static-analysis', {},
+                "There are no files eligible for analysis. Please note that 'header' files "
+                "cannot be used for analysis since they do not consist compilation units.")
             return 0
 
         cwd = self.topobjdir
@@ -1768,7 +1858,7 @@ class StaticAnalysis(MachCommandBase):
         args = self._get_clang_tidy_command(
             checks=checks, header_filter=header_filter, sources=source, jobs=jobs, fix=fix)
 
-        monitor = StaticAnalysisMonitor(self.topsrcdir, self.topobjdir, total)
+        monitor = StaticAnalysisMonitor(self.topsrcdir, self.topobjdir, self._clang_tidy_config, total)
 
         footer = StaticAnalysisFooter(self.log_manager.terminal, monitor)
         with StaticAnalysisOutputManager(self.log_manager, monitor, footer) as output_manager:
@@ -1794,7 +1884,7 @@ class StaticAnalysis(MachCommandBase):
                               'Run coverity static-analysis tool on the given files. '
                               'Can only be run by automation! '
                               'It\'s result is stored as an json file on the artifacts server.')
-    @CommandArgument('source', nargs='*', default=['.*'],
+    @CommandArgument('source', nargs='*', default=[],
                      help='Source files to be analyzed by Coverity Static Analysis Tool. '
                           'This is ran only in automation.')
     @CommandArgument('--output', '-o', default=None,
@@ -1805,7 +1895,7 @@ class StaticAnalysis(MachCommandBase):
                      '~./mozbuild/coverity is used.')
     @CommandArgument('--outgoing', default=False, action='store_true',
                      help='Run coverity on outgoing files from mercurial or git repository')
-    def check_coverity(self, source=None, output=None, coverity_output_path=None, outgoing=False, verbose=False):
+    def check_coverity(self, source=[], output=None, coverity_output_path=None, outgoing=False, verbose=False):
         self._set_log_level(verbose)
         self.log_manager.enable_all_structured_loggers()
 
@@ -1819,6 +1909,10 @@ class StaticAnalysis(MachCommandBase):
             files = repo.get_outgoing_files()
             source = map(os.path.abspath, files)
 
+        if len(source) == 0:
+            self.log(logging.ERROR, 'static-analysis', {}, 'There are no files that coverity can use to scan.')
+            return 0
+
         rc = self._build_compile_db(verbose=verbose)
         rc = rc or self._build_export(jobs=2, verbose=verbose)
 
@@ -1826,10 +1920,14 @@ class StaticAnalysis(MachCommandBase):
             return rc
 
         commands_list = self.get_files_with_commands(source)
-
         if len(commands_list) == 0:
             self.log(logging.INFO, 'static-analysis', {}, 'There are no files that need to be analyzed.')
             return 0
+
+        # Load the configuration file for coverity static-analysis
+        # For the moment we store only the reliability index for each checker
+        # as the rest is managed on the https://github.com/mozilla/release-services side.
+        self._cov_config = self._get_cov_config()
 
         rc = self.setup_coverity()
         if rc != 0:
@@ -1870,17 +1968,39 @@ class StaticAnalysis(MachCommandBase):
             cov_result = mozpath.join(coverity_output_path, 'cov-results.json')
 
         # Once the capture is performed we need to do the actual Coverity Desktop analysis
-        cmd = [self.cov_run_desktop, '--json-output-v6', cov_result, '--strip-path', self.topsrcdir]
-        cmd += [element['file'] for element in commands_list]
+        cmd = [self.cov_run_desktop, '--json-output-v6', cov_result, '--analyze-captured-source']
         self.log(logging.INFO, 'static-analysis', {}, 'Running Coverity Analysis for {}'.format(cmd))
         rc = self.run_process(cmd, cwd=self.cov_state_path, pass_thru=True)
         if rc != 0:
             self.log(logging.ERROR, 'static-analysis', {}, 'Coverity Analysis failed!')
 
         if output is not None:
-            self.dump_cov_artifact(cov_result, output)
+            self.dump_cov_artifact(cov_result, source, output)
 
-    def dump_cov_artifact(self, cov_results, output):
+    def get_reliability_index_for_cov_checker(self, checker_name):
+        if self._cov_config is None:
+            self.log(logging.INFO, 'static-analysis', {}, 'Coverity config file not found, '
+                'using default-value \'reliablity\' = medium. for checker {}'.format(checker_name))
+            return 'medium'
+
+        checkers = self._cov_config['coverity_checkers']
+        if checker_name not in checkers:
+            self.log(logging.INFO, 'static-analysis', {},
+                'Coverity checker {} not found to determine reliability index. '
+                'For the moment we shall use the default \'reliablity\' = medium.'.format(checker_name))
+            return 'medium'
+
+        if 'reliability' not in checkers[checker_name]:
+            # This checker doesn't have a reliability index
+            self.log(logging.INFO, 'static-analysis', {},
+                'Coverity checker {} doesn\'t have a reliability index set, '
+                'field \'reliability is missing\', please cosinder adding it. '
+                'For the moment we shall use the default \'reliablity\' = medium.'.format(checker_name))
+            return 'medium'
+
+        return checkers[checker_name]['reliability']
+
+    def dump_cov_artifact(self, cov_results, source, output):
         # Parse Coverity json into structured issues
         with open(cov_results) as f:
             result = json.load(f)
@@ -1898,6 +2018,7 @@ class StaticAnalysis(MachCommandBase):
                     'line': issue['mainEventLineNumber'],
                     'flag': issue['checkerName'],
                     'message': event_path['eventDescription'],
+                    'reliability': self.get_reliability_index_for_cov_checker(issue['checkerName']),
                     'extra': {
                         'category': issue['checkerProperties']['category'],
                         'stateOnServer': issue['stateOnServer'],
@@ -1915,7 +2036,12 @@ class StaticAnalysis(MachCommandBase):
                 return dict_issue
 
             for issue in result['issues']:
-                path = issue['strippedMainEventFilePathname'].strip('/')
+                path = self.cov_is_file_in_source(issue['strippedMainEventFilePathname'], source)
+                if path is None:
+                    # Since we skip a result we should log it
+                    self.log(logging.INFO, 'static-analysis', {}, 'Skipping CID: {0} from file: {1} since it\'s not related with the current patch.'.format(
+                        issue['stateOnServer']['cid'], issue['strippedMainEventFilePathname']))
+                    continue
                 if path in files_list:
                     files_list[path]['warnings'].append(build_element(issue))
                 else:
@@ -2030,6 +2156,17 @@ class StaticAnalysis(MachCommandBase):
             return 1
 
         return 0
+
+    def cov_is_file_in_source(self, abs_path, source):
+        # We have as an input an absolute path for whom we verify if it's a symlink,
+        # if so, we follow that symlink and we match it with elements from source.
+        # If the match is done we return abs_path, otherwise None
+        assert isinstance(source, list)
+        if os.path.islink(abs_path):
+            abs_path = os.path.realpath(abs_path)
+        if abs_path in source:
+            return abs_path
+        return None
 
     def get_files_with_commands(self, source):
         '''
@@ -2209,8 +2346,20 @@ class StaticAnalysis(MachCommandBase):
             file_handler = open(mozpath.join(self.topsrcdir, "tools", "clang-tidy", "config.yaml"))
             config = yaml.safe_load(file_handler)
         except Exception:
-            print('Looks like config.yaml is not valid, we are going to use default'
-                  ' values for the rest of the analysis.')
+            self.log(logging.ERROR, 'static-analysis', {},
+                    'Looks like config.yaml is not valid, we are going to use default'
+                    ' values for the rest of the analysis for clang-tidy.')
+            return None
+        return config
+
+    def _get_cov_config(self):
+        try:
+            file_handler = open(mozpath.join(self.topsrcdir, "tools", "coverity", "config.yaml"))
+            config = yaml.safe_load(file_handler)
+        except Exception:
+            self.log(logging.ERROR, 'static-analysis', {},
+                    'Looks like config.yaml is not valid, we are going to use default'
+                    ' values for the rest of the analysis for coverity.')
             return None
         return config
 
@@ -2512,6 +2661,10 @@ class StaticAnalysis(MachCommandBase):
             test_file_path_json = mozpath.join(self._clang_tidy_base_path, "test", checker) + '.json'
             # Read the pre-determined issues
             baseline_issues = self._get_autotest_stored_issues(test_file_path_json)
+
+            # We also stored the 'reliability' index so strip that from the baseline_issues
+            baseline_issues[:] = [item for item in baseline_issues if 'reliability' not in item]
+
             found = all([element_base in issues for element_base in baseline_issues])
 
             if not found:
@@ -2851,6 +3004,9 @@ class StaticAnalysis(MachCommandBase):
             checker_error['info1'] = clang_output
             checkers_results.append(checker_error)
             return self.TOOLS_CHECKER_RETURNED_NO_ISSUES
+
+        # Also store the 'reliability' index for this checker
+        issues.append({'reliability': item['reliability']})
 
         if self._dump_results:
             self._build_autotest_result(test_file_path_json, json.dumps(issues))

@@ -47,8 +47,9 @@ class SVGViewportElement : public SVGGraphicsElement {
   friend class ::nsSVGViewportFrame;
 
  protected:
-  SVGViewportElement(already_AddRefed<mozilla::dom::NodeInfo>&& aNodeInfo);
-  ~SVGViewportElement();
+  explicit SVGViewportElement(
+      already_AddRefed<mozilla::dom::NodeInfo>&& aNodeInfo);
+  ~SVGViewportElement() = default;
 
  public:
   // nsIContent interface
@@ -63,7 +64,7 @@ class SVGViewportElement : public SVGGraphicsElement {
 
   // SVGViewportElement methods:
 
-  float GetLength(uint8_t mCtxType);
+  float GetLength(uint8_t aCtxType);
 
   // public helpers:
 

@@ -362,7 +362,7 @@ void nsPageFrame::DrawHeaderFooter(gfxContext& aRenderingContext,
     aRenderingContext.SetColor(Color(0.f, 0.f, 0.f));
     nsLayoutUtils::DrawString(this, aFontMetrics, &aRenderingContext, str.get(),
                               str.Length(), nsPoint(x, y + aAscent), nullptr,
-                              DrawStringFlags::eForceHorizontal);
+                              DrawStringFlags::ForceHorizontal);
     aRenderingContext.Restore();
   }
 }
@@ -457,7 +457,7 @@ class nsDisplayHeaderFooter final : public nsDisplayItem {
     MOZ_ASSERT(pageFrame, "We should have an nsPageFrame");
 #endif
     static_cast<nsPageFrame*>(mFrame)->PaintHeaderFooter(
-        *aCtx, ToReferenceFrame(), mDisableSubpixelAA);
+        *aCtx, ToReferenceFrame(), IsSubpixelAADisabled());
   }
   NS_DISPLAY_DECL_NAME("HeaderFooter", TYPE_HEADER_FOOTER)
 

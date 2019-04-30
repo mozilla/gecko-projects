@@ -22,6 +22,7 @@ from __future__ import absolute_import, print_function, unicode_literals
 from taskgraph.transforms.base import TransformSequence
 from taskgraph.util.attributes import match_run_on_projects
 from taskgraph.util.schema import resolve_keyed_by, OptimizationSchema
+from taskgraph.util.templates import merge
 from taskgraph.util.treeherder import split_symbol, join_symbol, add_suffix
 from taskgraph.util.platforms import platform_family
 from taskgraph.util.schema import (
@@ -147,6 +148,39 @@ MACOSX_WORKER_TYPES = {
     'macosx64': 'releng-hardware/gecko-t-osx-1010',
 }
 
+
+def runs_on_central(test):
+    return match_run_on_projects('mozilla-central', test['run-on-projects'])
+
+
+TEST_VARIANTS = {
+    'serviceworker': {
+        'description': "{description} with serviceworker-e10s redesign enabled",
+        'filterfn': runs_on_central,
+        'suffix': 'sw',
+        'config': {
+            'run-on-projects': ['mozilla-central'],
+            'tier': 2,
+            'mozharness': {
+                'extra-options': ['--setpref="dom.serviceWorkers.parent_intercept=true"'],
+            },
+        }
+    },
+    'socketprocess': {
+        'description': "{description} with socket process enabled",
+        'suffix': 'spi',
+        'config': {
+            'mozharness': {
+                'extra-options': [
+                    '--setpref="media.peerconnection.mtransport_process=true"',
+                    '--setpref="network.process.enabled=true"',
+                ],
+            }
+        }
+    }
+}
+
+
 logger = logging.getLogger(__name__)
 
 transforms = TransformSequence()
@@ -164,10 +198,11 @@ test_description_schema = Schema({
     # description of the suite, for the task metadata
     'description': basestring,
 
-    # test suite name, or <suite>/<flavor>
-    Required('suite'): optionally_keyed_by(
-        'test-platform',
-        basestring),
+    # test suite category and name
+    Optional('suite'): Any(
+        basestring,
+        {Optional('category'): basestring, Optional('name'): basestring},
+    ),
 
     # base work directory used to set up the task.
     Optional('workdir'): optionally_keyed_by(
@@ -225,27 +260,17 @@ test_description_schema = Schema({
     # the branch (see below)
     Optional('expires-after'): basestring,
 
-    # Whether to run this task with the serviceworker e10s redesign enabled
-    # (desktop-test only).  If 'both', run one task with and one task without.
-    # Tasks with this enabled have have "-sw" appended to the test name and
-    # treeherder group.
-    Optional('serviceworker-e10s'): optionally_keyed_by(
+    # The different configurations that should be run against this task, defined
+    # in the TEST_VARIANTS object.
+    Optional('variants'): optionally_keyed_by(
         'test-platform', 'project',
-        Any(bool, 'both')),
+        Any(TEST_VARIANTS.keys())),
 
     # Whether to run this task with e10s.  If false, run
     # without e10s; if true, run with e10s; if 'both', run one task with and
     # one task without e10s.  E10s tasks have "-e10s" appended to the test name
     # and treeherder group.
     Required('e10s'): optionally_keyed_by(
-        'test-platform', 'project',
-        Any(bool, 'both')),
-
-    # Whether to run this task with the socket process enabled (desktop-test
-    # only).  If 'both', run one task with and one task without.  Tasks with
-    # this enabled have have "-spi" appended to the test name and treeherder
-    # group.
-    Optional('socketprocess-e10s'): optionally_keyed_by(
         'test-platform', 'project',
         Any(bool, 'both')),
 
@@ -458,8 +483,17 @@ test_description_schema = Schema({
 @transforms.add
 def handle_keyed_by_mozharness(config, tests):
     """Resolve a mozharness field if it is keyed by something"""
+    fields = [
+        'mozharness',
+        'mozharness.chunked',
+        'mozharness.config',
+        'mozharness.extra-options',
+        'mozharness.requires-signed-builds',
+        'mozharness.script',
+    ]
     for test in tests:
-        resolve_keyed_by(test, 'mozharness', item_name=test['test-name'])
+        for field in fields:
+            resolve_keyed_by(test, field, item_name=test['test-name'])
         yield test
 
 
@@ -508,9 +542,8 @@ def set_defaults(config, tests):
         test.setdefault('loopback-video', False)
         test.setdefault('docker-image', {'in-tree': 'desktop1604-test'})
         test.setdefault('checkout', False)
-        test.setdefault('serviceworker-e10s', False)
-        test.setdefault('socketprocess-e10s', False)
         test.setdefault('require-signed-extensions', False)
+        test.setdefault('variants', [])
 
         test['mozharness'].setdefault('extra-options', [])
         test['mozharness'].setdefault('requires-signed-builds', False)
@@ -534,6 +567,41 @@ def resolve_keys(config, tests):
                 'release-type': config.params['release_type'],
             }
         )
+        yield test
+
+
+@transforms.add
+def handle_suite_category(config, tests):
+    for test in tests:
+        test.setdefault('suite', {})
+
+        if isinstance(test['suite'], basestring):
+            test['suite'] = {'name': test['suite']}
+
+        suite = test['suite'].setdefault('name', test['test-name'])
+        category = test['suite'].setdefault('category', suite)
+
+        test.setdefault('attributes', {})
+        test['attributes']['unittest_suite'] = suite
+        test['attributes']['unittest_category'] = category
+
+        script = test['mozharness']['script']
+        category_arg = None
+        if suite.startswith('test-verify') or suite.startswith('test-coverage'):
+            pass
+        elif script in ('android_emulator_unittest.py', 'android_hardware_unittest.py'):
+            category_arg = '--test-suite'
+        elif script == 'desktop_unittest.py':
+            category_arg = '--{}-suite'.format(category)
+
+        if category_arg:
+            test['mozharness'].setdefault('extra-options', [])
+            extra = test['mozharness']['extra-options']
+            if not any(arg.startswith(category_arg) for arg in extra):
+                extra.append('{}={}'.format(category_arg, suite))
+
+        # From here on out we only use the suite name.
+        test['suite'] = suite
         yield test
 
 
@@ -768,18 +836,12 @@ def handle_keyed_by(config, tests):
         'docker-image',
         'max-run-time',
         'chunks',
-        'serviceworker-e10s',
+        'variants',
         'e10s',
-        'socketprocess-e10s',
         'suite',
         'run-on-projects',
         'os-groups',
         'run-as-administrator',
-        'mozharness.chunked',
-        'mozharness.config',
-        'mozharness.extra-options',
-        'mozharness.requires-signed-builds',
-        'mozharness.script',
         'workdir',
         'worker-type',
         'virtualization',
@@ -793,38 +855,6 @@ def handle_keyed_by(config, tests):
         yield test
 
 
-@transforms.add
-def handle_suite_category(config, tests):
-    for test in tests:
-        if '/' in test['suite']:
-            suite, flavor = test['suite'].split('/', 1)
-        else:
-            suite = flavor = test['suite']
-
-        test.setdefault('attributes', {})
-        test['attributes']['unittest_suite'] = suite
-        test['attributes']['unittest_flavor'] = flavor
-
-        script = test['mozharness']['script']
-        category_arg = None
-        if suite.startswith('test-verify') or suite.startswith('test-coverage'):
-            pass
-        elif script == 'android_emulator_unittest.py':
-            category_arg = '--test-suite'
-        elif script == 'android_hardware_unittest.py':
-            category_arg = '--test-suite'
-        elif script == 'desktop_unittest.py':
-            category_arg = '--{}-suite'.format(suite)
-
-        if category_arg:
-            test['mozharness'].setdefault('extra-options', [])
-            extra = test['mozharness']['extra-options']
-            if not any(arg.startswith(category_arg) for arg in extra):
-                extra.append('{}={}'.format(category_arg, flavor))
-
-        yield test
-
-
 def get_mobile_project(test):
     """Returns the mobile project of the specified task or None."""
 
@@ -832,6 +862,7 @@ def get_mobile_project(test):
         return
 
     mobile_projects = (
+        'fenix',
         'fennec',
         'geckoview',
         'refbrow',
@@ -937,39 +968,34 @@ def handle_run_on_projects(config, tests):
 
 
 @transforms.add
-def split_serviceworker_e10s(config, tests):
+def split_variants(config, tests):
     for test in tests:
-        if test['attributes'].get('socketprocess_e10s'):
-            yield test
-            continue
+        variants = test.pop('variants')
 
-        sw = test.pop('serviceworker-e10s')
+        yield copy.deepcopy(test)
 
-        test['serviceworker-e10s'] = False
-        test['attributes']['serviceworker_e10s'] = False
+        for name in variants:
+            testv = copy.deepcopy(test)
+            variant = TEST_VARIANTS[name]
 
-        if sw == 'both':
-            yield copy.deepcopy(test)
-            sw = True
-        if sw:
-            if not match_run_on_projects('mozilla-central', test['run-on-projects']):
+            if 'filterfn' in variant and not variant['filterfn'](testv):
                 continue
 
-            test['description'] += " with serviceworker-e10s redesign enabled"
-            test['run-on-projects'] = ['mozilla-central']
-            test['test-name'] += '-sw'
-            test['try-name'] += '-sw'
-            test['attributes']['serviceworker_e10s'] = True
-            group, symbol = split_symbol(test['treeherder-symbol'])
+            testv['attributes']['unittest_variant'] = name
+            testv['description'] = variant['description'].format(**testv)
+
+            suffix = '-' + variant['suffix']
+            testv['test-name'] += suffix
+            testv['try-name'] += suffix
+
+            group, symbol = split_symbol(testv['treeherder-symbol'])
             if group != '?':
-                group += '-sw'
+                group += suffix
             else:
-                symbol += '-sw'
-            test['treeherder-symbol'] = join_symbol(group, symbol)
-            test['mozharness']['extra-options'].append(
-                '--setpref="dom.serviceWorkers.parent_intercept=true"')
-            test['tier'] = 2
-        yield test
+                symbol += suffix
+            testv['treeherder-symbol'] = join_symbol(group, symbol)
+
+            yield merge(testv, variant['config'])
 
 
 @transforms.add
@@ -995,39 +1021,6 @@ def split_e10s(config, tests):
             test['treeherder-symbol'] = join_symbol(group, symbol)
             test['mozharness']['extra-options'].append('--disable-e10s')
             yield test
-
-
-@transforms.add
-def split_socketprocess_e10s(config, tests):
-    for test in tests:
-        if test['attributes'].get('serviceworker_e10s'):
-            yield test
-            continue
-
-        sw = test.pop('socketprocess-e10s')
-
-        test['socketprocess-e10s'] = False
-        test['attributes']['socketprocess_e10s'] = False
-
-        if sw == 'both':
-            yield copy.deepcopy(test)
-            sw = True
-        if sw:
-            test['description'] += " with socket process enabled"
-            test['test-name'] += '-spi'
-            test['try-name'] += '-spi'
-            test['attributes']['socketprocess_e10s'] = True
-            group, symbol = split_symbol(test['treeherder-symbol'])
-            if group != '?':
-                group += '-spi'
-            else:
-                symbol += '-spi'
-            test['treeherder-symbol'] = join_symbol(group, symbol)
-            test['mozharness']['extra-options'].append(
-                '--setpref="media.peerconnection.mtransport_process=true"')
-            test['mozharness']['extra-options'].append(
-                '--setpref="network.process.enabled=true"')
-        yield test
 
 
 @transforms.add
@@ -1275,10 +1268,7 @@ def make_job_description(config, tests):
                 'current': test['this-chunk'],
                 'total': test['chunks'],
             },
-            'suite': {
-                'name': attributes['unittest_suite'],
-                'flavor': attributes['unittest_flavor'],
-            },
+            'suite': attributes['unittest_suite'],
         }
         jobdesc['treeherder'] = {
             'symbol': test['treeherder-symbol'],
@@ -1287,20 +1277,20 @@ def make_job_description(config, tests):
             'platform': test.get('treeherder-machine-platform', test['build-platform']),
         }
 
-        suite = test.get('schedules-component', attributes['unittest_suite'])
-        if suite in INCLUSIVE_COMPONENTS:
+        category = test.get('schedules-component', attributes['unittest_category'])
+        if category in INCLUSIVE_COMPONENTS:
             # if this is an "inclusive" test, then all files which might
             # cause it to run are annotated with SCHEDULES in moz.build,
             # so do not include the platform or any other components here
-            schedules = [suite]
+            schedules = [category]
         else:
-            schedules = [suite, platform_family(test['build-platform'])]
+            schedules = [category, platform_family(test['build-platform'])]
 
         if test.get('when'):
             jobdesc['when'] = test['when']
         elif 'optimization' in test:
             jobdesc['optimization'] = test['optimization']
-        elif not config.params.is_try() and suite not in INCLUSIVE_COMPONENTS:
+        elif not config.params.is_try() and category not in INCLUSIVE_COMPONENTS:
             # for non-try branches and non-inclusive suites, include SETA
             jobdesc['optimization'] = {'skip-unless-schedules-or-seta': schedules}
         else:

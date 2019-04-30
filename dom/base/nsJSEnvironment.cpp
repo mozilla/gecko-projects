@@ -168,6 +168,8 @@ static TimeStamp sLastCCEndTime;
 
 static TimeStamp sLastForgetSkippableCycleEndTime;
 
+static TimeStamp sCurrentGCStartTime;
+
 static bool sCCLockedOut;
 static PRTime sCCLockedOutTime;
 
@@ -1769,12 +1771,11 @@ bool InterSliceGCRunnerFired(TimeStamp aDeadline, void* aData) {
     Telemetry::Accumulate(Telemetry::GC_SLICE_DURING_IDLE, percent);
   }
 
-  // If we didn't use the whole budget, we're past the foreground sweeping slice
-  // and will need to wait for the background tasks to finish, or we're at the
-  // last slice. Return value on the latter case doesn't matter, and on the
-  // former we want to wait a bit before polling again.
-  // Returning false makes IdleTaskRunner postpone the next call a bit.
-  return int64_t(sliceDuration.ToMilliseconds()) >= budget;
+  // If the GC doesn't have any more work to do on the foreground thread (and
+  // e.g. is waiting for background sweeping to finish) then return false to
+  // make IdleTaskRunner postpone the next call a bit.
+  JSContext* cx = danger::GetJSContext();
+  return JS::IncrementalGCHasForegroundWork(cx);
 }
 
 // static
@@ -2174,6 +2175,7 @@ static void DOMGCSliceCallback(JSContext* aCx, JS::GCProgress aProgress,
     case JS::GC_CYCLE_BEGIN: {
       // Prevent cycle collections and shrinking during incremental GC.
       sCCLockedOut = true;
+      sCurrentGCStartTime = TimeStamp::Now();
       break;
     }
 
@@ -2240,6 +2242,8 @@ static void DOMGCSliceCallback(JSContext* aCx, JS::GCProgress aProgress,
         sNeedsFullGC = false;
       }
 
+      Telemetry::Accumulate(Telemetry::GC_IN_PROGRESS_MS,
+                            TimeBetween(sCurrentGCStartTime, TimeStamp::Now()));
       break;
     }
 

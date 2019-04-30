@@ -435,7 +435,7 @@ void nsSubDocumentFrame::BuildDisplayList(nsDisplayListBuilder* aBuilder,
     needsOwnLayer = true;
   }
 
-  if (aBuilder->IsRetainingDisplayList()) {
+  if (subdocRootFrame && aBuilder->IsRetainingDisplayList()) {
     // Caret frame changed, rebuild the entire subdoc.
     // We could just invalidate the old and new frame
     // areas and save some work here. RetainedDisplayListBuilder
@@ -443,6 +443,7 @@ void nsSubDocumentFrame::BuildDisplayList(nsDisplayListBuilder* aBuilder,
     // subdocs in advance.
     if (mPreviousCaret != aBuilder->GetCaretFrame()) {
       dirty = visible;
+      aBuilder->MarkFrameModifiedDuringBuilding(subdocRootFrame);
       aBuilder->RebuildAllItemsInCurrentSubtree();
       // Mark the old caret frame as invalid so that we remove the
       // old nsDisplayCaret. We don't mark the current frame as invalid
@@ -518,8 +519,9 @@ void nsSubDocumentFrame::BuildDisplayList(nsDisplayListBuilder* aBuilder,
         // happens after we've built the list so that
         // AddCanvasBackgroundColorItem can monkey with the contents if
         // necessary.
-        uint32_t flags =
-            nsIPresShell::FORCE_DRAW | nsIPresShell::ADD_FOR_SUBDOC;
+        AddCanvasBackgroundColorFlags flags =
+            AddCanvasBackgroundColorFlags::ForceDraw |
+            AddCanvasBackgroundColorFlags::AddForSubDocument;
         presShell->AddCanvasBackgroundColorItem(
             *aBuilder, childItems, frame, bounds, NS_RGBA(0, 0, 0, 0), flags);
       }
@@ -538,7 +540,7 @@ void nsSubDocumentFrame::BuildDisplayList(nsDisplayListBuilder* aBuilder,
   // is created, we don't need to create a separate nsDisplaySubDocument.
 
   nsDisplayOwnLayerFlags flags =
-      nsDisplayOwnLayerFlags::eGenerateSubdocInvalidations;
+      nsDisplayOwnLayerFlags::GenerateSubdocInvalidations;
   // If ignoreViewportScrolling is true then the top most layer we create here
   // is going to become the scrollable layer for the root scroll frame, so we
   // want to add nsDisplayOwnLayer::GENERATE_SCROLLABLE_LAYER to whatever layer
@@ -546,7 +548,7 @@ void nsSubDocumentFrame::BuildDisplayList(nsDisplayListBuilder* aBuilder,
   if (constructZoomItem) {
     nsDisplayOwnLayerFlags zoomFlags = flags;
     if (ignoreViewportScrolling && !constructResolutionItem) {
-      zoomFlags |= nsDisplayOwnLayerFlags::eGenerateScrollableLayer;
+      zoomFlags |= nsDisplayOwnLayerFlags::GenerateScrollableLayer;
     }
     childItems.AppendNewToTop<nsDisplayZoom>(aBuilder, subdocRootFrame, this,
                                              &childItems, subdocAPD, parentAPD,
@@ -558,7 +560,7 @@ void nsSubDocumentFrame::BuildDisplayList(nsDisplayListBuilder* aBuilder,
   // the resolution scale applied on top of the app units per dev pixel
   // conversion.
   if (ignoreViewportScrolling) {
-    flags |= nsDisplayOwnLayerFlags::eGenerateScrollableLayer;
+    flags |= nsDisplayOwnLayerFlags::GenerateScrollableLayer;
   }
   if (constructResolutionItem) {
     childItems.AppendNewToTop<nsDisplayResolution>(aBuilder, subdocRootFrame,
@@ -594,8 +596,9 @@ void nsSubDocumentFrame::BuildDisplayList(nsDisplayListBuilder* aBuilder,
     // Add the canvas background color to the bottom of the list. This
     // happens after we've built the list so that AddCanvasBackgroundColorItem
     // can monkey with the contents if necessary.
-    uint32_t flags =
-        nsIPresShell::FORCE_DRAW | nsIPresShell::APPEND_UNSCROLLED_ONLY;
+    AddCanvasBackgroundColorFlags flags =
+        AddCanvasBackgroundColorFlags::ForceDraw |
+        AddCanvasBackgroundColorFlags::AppendUnscrolledOnly;
     presShell->AddCanvasBackgroundColorItem(*aBuilder, childItems, this, bounds,
                                             NS_RGBA(0, 0, 0, 0), flags);
   }
@@ -611,6 +614,10 @@ void nsSubDocumentFrame::BuildDisplayList(nsDisplayListBuilder* aBuilder,
 }
 
 nscoord nsSubDocumentFrame::GetIntrinsicISize() {
+  if (StyleDisplay()->IsContainSize()) {
+    return 0;  // Intrinsic size of 'contain:size' replaced elements is 0,0.
+  }
+
   if (!IsInline()) {
     return 0;  // HTML <frame> has no useful intrinsic isize
   }
@@ -631,6 +638,10 @@ nscoord nsSubDocumentFrame::GetIntrinsicISize() {
 nscoord nsSubDocumentFrame::GetIntrinsicBSize() {
   // <frame> processing does not use this routine, only <iframe>
   NS_ASSERTION(IsInline(), "Shouldn't have been called");
+
+  if (StyleDisplay()->IsContainSize()) {
+    return 0;  // Intrinsic size of 'contain:size' replaced elements is 0,0.
+  }
 
   if (mContent->IsXULElement()) {
     return 0;
@@ -699,6 +710,11 @@ nscoord nsSubDocumentFrame::GetPrefISize(gfxContext* aRenderingContext) {
 
 /* virtual */
 IntrinsicSize nsSubDocumentFrame::GetIntrinsicSize() {
+  if (StyleDisplay()->IsContainSize()) {
+    // Intrinsic size of 'contain:size' replaced elements is 0,0.
+    return IntrinsicSize(0, 0);
+  }
+
   nsIFrame* subDocRoot = ObtainIntrinsicSizeFrame();
   if (subDocRoot) {
     return subDocRoot->GetIntrinsicSize();
@@ -866,8 +882,8 @@ nsresult nsSubDocumentFrame::AttributeChanged(int32_t aNameSpaceID,
   } else if (aAttribute == nsGkAtoms::showresizer) {
     nsIFrame* rootFrame = GetSubdocumentRootFrame();
     if (rootFrame) {
-      rootFrame->PresShell()->FrameNeedsReflow(rootFrame, nsIPresShell::eResize,
-                                               NS_FRAME_IS_DIRTY);
+      rootFrame->PresShell()->FrameNeedsReflow(
+          rootFrame, IntrinsicDirty::Resize, NS_FRAME_IS_DIRTY);
     }
   } else if (aAttribute == nsGkAtoms::marginwidth ||
              aAttribute == nsGkAtoms::marginheight) {
@@ -1182,12 +1198,12 @@ void nsSubDocumentFrame::EndSwapDocShells(nsIFrame* aOther) {
   // And repaint them, for good measure, in case there's nothing
   // interesting that happens during reflow.
   if (weakThis.IsAlive()) {
-    PresShell()->FrameNeedsReflow(this, nsIPresShell::eTreeChange,
+    PresShell()->FrameNeedsReflow(this, IntrinsicDirty::TreeChange,
                                   NS_FRAME_IS_DIRTY);
     InvalidateFrameSubtree();
   }
   if (weakOther.IsAlive()) {
-    other->PresShell()->FrameNeedsReflow(other, nsIPresShell::eTreeChange,
+    other->PresShell()->FrameNeedsReflow(other, IntrinsicDirty::TreeChange,
                                          NS_FRAME_IS_DIRTY);
     other->InvalidateFrameSubtree();
   }
@@ -1206,10 +1222,11 @@ void nsSubDocumentFrame::ClearDisplayItems() {
       displayRoot->GetProperty(RetainedDisplayListBuilder::Cached());
   MOZ_ASSERT(retainedBuilder);
 
-  for (nsDisplayItem* i : *items) {
+  for (nsDisplayItemBase* i : *items) {
     if (i->GetType() == DisplayItemType::TYPE_SUBDOCUMENT) {
-      i->GetChildren()->DeleteAll(retainedBuilder->Builder());
-      static_cast<nsDisplaySubDocument*>(i)->Disown();
+      auto* item = static_cast<nsDisplaySubDocument*>(i);
+      item->GetChildren()->DeleteAll(retainedBuilder->Builder());
+      item->Disown();
       break;
     }
   }
@@ -1238,6 +1255,12 @@ nsView* nsSubDocumentFrame::EnsureInnerView() {
 }
 
 nsIFrame* nsSubDocumentFrame::ObtainIntrinsicSizeFrame() {
+  if (StyleDisplay()->IsContainSize()) {
+    // Intrinsic size of 'contain:size' replaced elements is 0,0. So, don't use
+    // internal frames to provide intrinsic size at all.
+    return nullptr;
+  }
+
   nsCOMPtr<nsIObjectLoadingContent> olc = do_QueryInterface(GetContent());
   if (olc) {
     // We are an HTML <object> or <embed> (a replaced element).

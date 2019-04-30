@@ -48,7 +48,6 @@
 #include "nsChannelClassifier.h"
 #include "nsIRedirectResultListener.h"
 #include "mozIThirdPartyUtil.h"
-#include "mozilla/dom/ContentVerifier.h"
 #include "mozilla/TimeStamp.h"
 #include "nsError.h"
 #include "nsPrintfCString.h"
@@ -117,6 +116,7 @@
 #include "nsIMIMEInputStream.h"
 #include "nsIMultiplexInputStream.h"
 #include "../../cache2/CacheFileUtils.h"
+#include "../../cache2/CacheHashUtils.h"
 #include "nsINetworkLinkService.h"
 #include "mozilla/dom/PromiseNativeHandler.h"
 #include "mozilla/dom/Promise.h"
@@ -334,6 +334,9 @@ nsHttpChannel::nsHttpChannel()
       mAuthConnectionRestartable(0),
       mChannelClassifierCancellationPending(0),
       mAsyncResumePending(0),
+      mHasBeenIsolatedChecked(0),
+      mIsIsolated(0),
+      mTopWindowOriginComputed(0),
       mPushedStream(nullptr),
       mLocalBlocklist(false),
       mOnTailUnblock(nullptr),
@@ -628,6 +631,7 @@ nsresult nsHttpChannel::ContinueOnBeforeConnect(bool aShouldUpgrade,
   // Finalize ConnectionInfo flags before SpeculativeConnect
   mConnectionInfo->SetAnonymous((mLoadFlags & LOAD_ANONYMOUS) != 0);
   mConnectionInfo->SetPrivate(mPrivateBrowsing);
+  mConnectionInfo->SetIsolated(IsIsolated());
   mConnectionInfo->SetNoSpdy(mCaps & NS_HTTP_DISALLOW_SPDY);
   mConnectionInfo->SetBeConservative((mCaps & NS_HTTP_BE_CONSERVATIVE) ||
                                      mBeConservative);
@@ -1328,7 +1332,8 @@ HttpTrafficCategory nsHttpChannel::CreateTrafficCategory() {
     }
   }
 
-  bool isThirdParty = !!mThirdPartyClassificationFlags;
+  bool isThirdParty =
+      nsContentUtils::IsThirdPartyWindowOrChannel(nullptr, this, mURI);
   HttpTrafficAnalyzer::TrackingClassification tc;
   {
     uint32_t flags = isThirdParty ? mThirdPartyClassificationFlags
@@ -1715,6 +1720,33 @@ void nsHttpChannel::SetCachedContentType() {
   mCacheEntry->SetContentType(contentType);
 }
 
+void nsHttpChannel::StoreSiteAccessToCacheEntry() {
+  nsresult rv;
+
+  nsCOMPtr<nsIURI> topWindowURI;
+  rv = GetTopWindowURI(getter_AddRefs(topWindowURI));
+  if (NS_FAILED(rv)) {
+    return;
+  }
+
+  nsCOMPtr<nsIEffectiveTLDService> eTLDService =
+      do_GetService(NS_EFFECTIVETLDSERVICE_CONTRACTID, &rv);
+  if (NS_FAILED(rv)) {
+    return;
+  }
+
+  nsAutoCString baseDomain;
+  rv = eTLDService->GetBaseDomain(topWindowURI, 0, baseDomain);
+  if (NS_FAILED(rv)) {
+    return;
+  }
+
+  RefPtr<CacheHash> hash = new CacheHash();
+  hash->Update(baseDomain.get(), baseDomain.Length());
+
+  Unused << mCacheEntry->AddBaseDomainAccess(hash->GetHash());
+}
+
 nsresult nsHttpChannel::CallOnStartRequest() {
   LOG(("nsHttpChannel::CallOnStartRequest [this=%p]", this));
 
@@ -1815,6 +1847,10 @@ nsresult nsHttpChannel::CallOnStartRequest() {
     SetCachedContentType();
   }
 
+  if (mCacheEntry) {
+    StoreSiteAccessToCacheEntry();
+  }
+
   LOG(("  calling mListener->OnStartRequest [this=%p, listener=%p]\n", this,
        mListener.get()));
 
@@ -1880,24 +1916,6 @@ nsresult nsHttpChannel::CallOnStartRequest() {
     } else if (mApplicationCacheForWrite) {
       LOG(("offline cache is up to date, not updating"));
       CloseOfflineCacheEntry();
-    }
-  }
-
-  // Check for a Content-Signature header and inject mediator if the header is
-  // requested and available.
-  // If requested (mLoadInfo->GetVerifySignedContent), but not present, or
-  // present but not valid, fail this channel and return
-  // NS_ERROR_INVALID_SIGNATURE to indicate a signature error and trigger a
-  // fallback load in nsDocShell.
-  // Note that OnStartRequest has already been called on the target stream
-  // listener at this point. We have to add the listener here that late to
-  // ensure that it's the last listener and can thus block the load in
-  // OnStopRequest.
-  if (!mCanceled) {
-    rv = ProcessContentSignatureHeader(mResponseHead);
-    if (NS_FAILED(rv)) {
-      LOG(("Content-signature verification failed.\n"));
-      return rv;
     }
   }
 
@@ -2186,51 +2204,6 @@ nsresult nsHttpChannel::ProcessSecurityHeaders() {
   return NS_OK;
 }
 
-nsresult nsHttpChannel::ProcessContentSignatureHeader(
-    nsHttpResponseHead *aResponseHead) {
-  nsresult rv = NS_OK;
-
-  // we only do this if we require it in loadInfo
-  if (!mLoadInfo || !mLoadInfo->GetVerifySignedContent()) {
-    return NS_OK;
-  }
-
-  NS_ENSURE_TRUE(aResponseHead, NS_ERROR_ABORT);
-  nsAutoCString contentSignatureHeader;
-  nsHttpAtom atom = nsHttp::ResolveAtom("Content-Signature");
-  rv = aResponseHead->GetHeader(atom, contentSignatureHeader);
-  if (NS_FAILED(rv)) {
-    LOG(("Content-Signature header is missing but expected."));
-    DoInvalidateCacheEntry(mURI);
-    return NS_ERROR_INVALID_SIGNATURE;
-  }
-
-  // if we require a signature but it is empty, fail
-  if (contentSignatureHeader.IsEmpty()) {
-    DoInvalidateCacheEntry(mURI);
-    LOG(("An expected content-signature header is missing.\n"));
-    return NS_ERROR_INVALID_SIGNATURE;
-  }
-
-  // we ensure a content type here to avoid running into problems with
-  // content sniffing, which might sniff parts of the content before we can
-  // verify the signature
-  if (!aResponseHead->HasContentType()) {
-    NS_WARNING(
-        "Empty content type can get us in trouble when verifying "
-        "content signatures");
-    return NS_ERROR_INVALID_SIGNATURE;
-  }
-  // create a new listener that meadiates the content
-  RefPtr<ContentVerifier> contentVerifyingMediator =
-      new ContentVerifier(mListener, nullptr);
-  rv = contentVerifyingMediator->Init(contentSignatureHeader, this, nullptr);
-  NS_ENSURE_SUCCESS(rv, NS_ERROR_INVALID_SIGNATURE);
-  mListener = contentVerifyingMediator;
-
-  return NS_OK;
-}
-
 /**
  * Decide whether or not to send a security report and, if so, give the
  * SecurityReporter the information required to send such a report.
@@ -2395,9 +2368,10 @@ void nsHttpChannel::ProcessAltService() {
   OriginAttributes originAttributes;
   NS_GetOriginAttributes(this, originAttributes);
 
-  AltSvcMapping::ProcessHeader(
-      altSvc, scheme, originHost, originPort, mUsername, mPrivateBrowsing,
-      callbacks, proxyInfo, mCaps & NS_HTTP_DISALLOW_SPDY, originAttributes);
+  AltSvcMapping::ProcessHeader(altSvc, scheme, originHost, originPort,
+                               mUsername, GetTopWindowOrigin(),
+                               mPrivateBrowsing, callbacks, proxyInfo,
+                               mCaps & NS_HTTP_DISALLOW_SPDY, originAttributes);
 }
 
 nsresult nsHttpChannel::ProcessResponse() {
@@ -3922,6 +3896,42 @@ nsresult nsHttpChannel::OpenCacheEntry(bool isHttps) {
   return OpenCacheEntryInternal(isHttps, mApplicationCache, true);
 }
 
+bool nsHttpChannel::IsIsolated() {
+  if (mHasBeenIsolatedChecked) {
+    return mIsIsolated;
+  }
+  mIsIsolated = IsThirdPartyTrackingResource() &&
+                !AntiTrackingCommon::IsFirstPartyStorageAccessGrantedFor(
+                    this, mURI, nullptr);
+  mHasBeenIsolatedChecked = true;
+  return mIsIsolated;
+}
+
+const nsCString &nsHttpChannel::GetTopWindowOrigin() {
+  if (mTopWindowOriginComputed) {
+    return mTopWindowOrigin;
+  }
+
+  nsCOMPtr<nsIURI> topWindowURI;
+  nsresult rv = GetTopWindowURI(getter_AddRefs(topWindowURI));
+  bool isDocument = false;
+  if (NS_FAILED(rv) && NS_SUCCEEDED(GetIsMainDocumentChannel(&isDocument)) &&
+      isDocument) {
+    // For top-level documents, use the document channel's origin to compute
+    // the unique storage space identifier instead of the top Window URI.
+    rv = NS_GetFinalChannelURI(this, getter_AddRefs(topWindowURI));
+    NS_ENSURE_SUCCESS(rv, mTopWindowOrigin);
+  }
+
+  rv = nsContentUtils::GetASCIIOrigin(topWindowURI ? topWindowURI : mURI,
+                                      mTopWindowOrigin);
+  NS_ENSURE_SUCCESS(rv, mTopWindowOrigin);
+
+  mTopWindowOriginComputed = true;
+
+  return mTopWindowOrigin;
+}
+
 nsresult nsHttpChannel::OpenCacheEntryInternal(
     bool isHttps, nsIApplicationCache *applicationCache,
     bool allowApplicationCache) {
@@ -4041,27 +4051,14 @@ nsresult nsHttpChannel::OpenCacheEntryInternal(
     extension.Append("TRR");
   }
 
-  if (IsThirdPartyTrackingResource() &&
-      !AntiTrackingCommon::IsFirstPartyStorageAccessGrantedFor(this, mURI,
-                                                               nullptr)) {
-    nsCOMPtr<nsIURI> topWindowURI;
-    rv = GetTopWindowURI(getter_AddRefs(topWindowURI));
-    bool isDocument = false;
-    if (NS_FAILED(rv) && NS_SUCCEEDED(GetIsMainDocumentChannel(&isDocument)) &&
-        isDocument) {
-      // For top-level documents, use the document channel's origin to compute
-      // the unique storage space identifier instead of the top Window URI.
-      rv = NS_GetFinalChannelURI(this, getter_AddRefs(topWindowURI));
-      NS_ENSURE_SUCCESS(rv, rv);
+  if (IsIsolated()) {
+    auto &topWindowOrigin = GetTopWindowOrigin();
+    if (topWindowOrigin.IsEmpty()) {
+      return NS_ERROR_FAILURE;
     }
 
-    nsAutoString topWindowOrigin;
-    rv = nsContentUtils::GetUTFOrigin(topWindowURI ? topWindowURI : mURI,
-                                      topWindowOrigin);
-    NS_ENSURE_SUCCESS(rv, rv);
-
     extension.Append("-unique:");
-    extension.Append(NS_ConvertUTF16toUTF8(topWindowOrigin));
+    extension.Append(topWindowOrigin);
   }
 
   mCacheOpenWithPriority = cacheEntryOpenFlags & nsICacheStorage::OPEN_PRIORITY;
@@ -4383,12 +4380,6 @@ nsHttpChannel::OnCacheEntryCheck(nsICacheEntry *entry,
         isForcedValid, mCachedResponseHead, mLoadFlags, mAllowStaleCacheContent,
         isImmutable, mCustomConditionalRequest, mRequestHead, entry,
         cacheControlRequest, fromPreviousSession, &doBackgroundValidation);
-  }
-
-  // If a content signature is expected to be valid in this load,
-  // set doValidation to force a signature check.
-  if (!doValidation && mLoadInfo && mLoadInfo->GetVerifySignedContent()) {
-    doValidation = true;
   }
 
   nsAutoCString requestedETag;
@@ -6143,10 +6134,9 @@ nsHttpChannel::Cancel(nsresult status) {
   MOZ_ASSERT_IF(mPreflightChannel, !mCachePump);
 #ifdef DEBUG
   if (UrlClassifierFeatureFactory::IsClassifierBlockingErrorCode(status)) {
-    MOZ_CRASH_UNSAFE_PRINTF(
-        "Blocking classifier error %" PRIx32
-        " need to be handled by CancelByURLClassifier()",
-        static_cast<uint32_t>(status));
+    MOZ_CRASH_UNSAFE_PRINTF("Blocking classifier error %" PRIx32
+                            " need to be handled by CancelByURLClassifier()",
+                            static_cast<uint32_t>(status));
   }
 #endif
 
@@ -6228,8 +6218,7 @@ void nsHttpChannel::ContinueCancellingByURLClassifier(nsresult aErrorCode) {
   // We should never have a pump open while a CORS preflight is in progress.
   MOZ_ASSERT_IF(mPreflightChannel, !mCachePump);
 
-  LOG(("nsHttpChannel::ContinueCancellingByURLClassifier [this=%p]\n",
-       this));
+  LOG(("nsHttpChannel::ContinueCancellingByURLClassifier [this=%p]\n", this));
   if (mCanceled) {
     LOG(("  ignoring; already canceled\n"));
     return;
@@ -6576,9 +6565,9 @@ nsresult nsHttpChannel::BeginConnect() {
   OriginAttributes originAttributes;
   NS_GetOriginAttributes(this, originAttributes);
 
-  RefPtr<nsHttpConnectionInfo> connInfo =
-      new nsHttpConnectionInfo(host, port, EmptyCString(), mUsername, proxyInfo,
-                               originAttributes, isHttps);
+  RefPtr<nsHttpConnectionInfo> connInfo = new nsHttpConnectionInfo(
+      host, port, EmptyCString(), mUsername, GetTopWindowOrigin(), proxyInfo,
+      originAttributes, isHttps);
   mAllowAltSvc = (mAllowAltSvc && !gHttpHandler->IsSpdyBlacklisted(connInfo));
 
   RefPtr<AltSvcMapping> mapping;
@@ -7267,14 +7256,15 @@ class DomPromiseListener final : dom::PromiseNativeHandler {
 
   virtual void ResolvedCallback(JSContext *aCx,
                                 JS::Handle<JS::Value> aValue) override {
-    nsCOMPtr<nsITabParent> tabParent;
+    nsCOMPtr<nsIRemoteTab> browserParent;
     JS::Rooted<JSObject *> obj(aCx, &aValue.toObject());
-    nsresult rv = UnwrapArg<nsITabParent>(aCx, obj, getter_AddRefs(tabParent));
+    nsresult rv =
+        UnwrapArg<nsIRemoteTab>(aCx, obj, getter_AddRefs(browserParent));
     if (NS_FAILED(rv)) {
       mPromiseHolder.Reject(rv, __func__);
       return;
     }
-    mPromiseHolder.Resolve(tabParent, __func__);
+    mPromiseHolder.Resolve(browserParent, __func__);
   }
 
   virtual void RejectedCallback(JSContext *aCx,
@@ -8657,6 +8647,15 @@ nsHttpChannel::GetAltDataInputStream(const nsACString &aType,
 //-----------------------------------------------------------------------------
 // nsHttpChannel::nsICachingChannel
 //-----------------------------------------------------------------------------
+
+NS_IMETHODIMP
+nsHttpChannel::IsRacing(bool *aIsRacing) {
+  if (!mAfterOnStartRequestBegun) {
+    return NS_ERROR_NOT_AVAILABLE;
+  }
+  *aIsRacing = mRaceCacheWithNetwork;
+  return NS_OK;
+}
 
 NS_IMETHODIMP
 nsHttpChannel::GetCacheToken(nsISupports **token) {
@@ -10264,13 +10263,16 @@ BackgroundRevalidatingListener::OnDataAvailable(nsIRequest *request,
                                                 uint64_t offset,
                                                 uint32_t count) {
   uint32_t bytesRead = 0;
-  input->ReadSegments(NS_DiscardSegment, nullptr, count, &bytesRead);
-  return NS_OK;
+  return input->ReadSegments(NS_DiscardSegment, nullptr, count, &bytesRead);
 }
 
 NS_IMETHODIMP
 BackgroundRevalidatingListener::OnStopRequest(nsIRequest *request,
                                               nsresult status) {
+  if (NS_FAILED(status)) {
+    return status;
+  }
+
   nsCOMPtr<nsIHttpChannel> channel(do_QueryInterface(request));
   if (gHttpHandler) {
     gHttpHandler->OnBackgroundRevalidation(channel);
@@ -10300,27 +10302,13 @@ void nsHttpChannel::PerformBackgroundCacheRevalidationNow() {
 
   nsresult rv;
 
-  nsSecurityFlags secFlags;
-  rv = mLoadInfo->GetSecurityFlags(&secFlags);
-  if (NS_FAILED(rv)) {
-    return;
-  }
-
-  secFlags |= nsILoadInfo::SEC_DONT_FOLLOW_REDIRECTS;
-
-  nsCOMPtr<nsICookieSettings> cookieSettings;
-  rv = mLoadInfo->GetCookieSettings(getter_AddRefs(cookieSettings));
-  if (NS_FAILED(rv)) {
-    return;
-  }
+  nsLoadFlags loadFlags = mLoadFlags | LOAD_ONLY_IF_MODIFIED | VALIDATE_ALWAYS |
+                          LOAD_BACKGROUND | LOAD_BYPASS_SERVICE_WORKER;
 
   nsCOMPtr<nsIChannel> validatingChannel;
-  rv = NS_NewChannel(getter_AddRefs(validatingChannel), mURI,
-                     mLoadInfo->LoadingPrincipal(), secFlags,
-                     mLoadInfo->InternalContentPolicyType(), cookieSettings,
-                     nullptr /* performance storage */, mLoadGroup, mCallbacks,
-                     LOAD_ONLY_IF_MODIFIED | VALIDATE_ALWAYS | LOAD_BACKGROUND |
-                         LOAD_BYPASS_SERVICE_WORKER);
+  rv = NS_NewChannelInternal(getter_AddRefs(validatingChannel), mURI, mLoadInfo,
+                             nullptr /* performance storage */, mLoadGroup,
+                             mCallbacks, loadFlags);
   if (NS_FAILED(rv)) {
     LOG(("  failed to created the channel, rv=0x%08x",
          static_cast<uint32_t>(rv)));

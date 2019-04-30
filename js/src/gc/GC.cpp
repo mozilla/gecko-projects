@@ -3935,7 +3935,7 @@ bool ArenaLists::checkEmptyArenaList(AllocKind kind) {
   size_t numLive = 0;
   if (!arenaLists(kind).isEmpty()) {
     isEmpty = false;
-    size_t maxCells = 20;
+    size_t maxCells = 5;
     char* env = getenv("JS_GC_MAX_LIVE_CELLS");
     if (env && *env) {
       maxCells = atol(env);
@@ -7190,6 +7190,23 @@ void GCRuntime::incrementalSlice(SliceBudget& budget, JS::GCReason reason,
   MOZ_ASSERT(marker.markColor() == MarkColor::Black);
 }
 
+bool GCRuntime::hasForegroundWork() const {
+  switch (incrementalState) {
+    case State::NotActive:
+      // Incremental GC is not running and no work is pending.
+      return false;
+    case State::Finalize:
+      // We yield in the Finalize state to wait for background sweeping.
+      return !isBackgroundSweeping();
+    case State::Decommit:
+      // We yield in the Decommit state to wait for background decommit.
+      return !decommitTask.isRunning();
+    default:
+      // In all other states there is still work to do.
+      return true;
+  }
+}
+
 gc::AbortReason gc::IsIncrementalGCUnsafe(JSRuntime* rt) {
   MOZ_ASSERT(!rt->mainContextFromOwnThread()->suppressGC);
 
@@ -8158,7 +8175,7 @@ void GCRuntime::mergeRealms(Realm* source, Realm* target) {
   atomMarking.adoptMarkedAtoms(target->zone(), source->zone());
 
   // Merge script name maps in the target realm's map.
-  if (rt->lcovOutput().isEnabled() && source->scriptNameMap) {
+  if (coverage::IsLCovEnabled() && source->scriptNameMap) {
     AutoEnterOOMUnsafeRegion oomUnsafe;
 
     if (!target->scriptNameMap) {
@@ -8562,6 +8579,12 @@ JS_PUBLIC_API void JS::StartIncrementalGC(JSContext* cx,
 JS_PUBLIC_API void JS::IncrementalGCSlice(JSContext* cx, GCReason reason,
                                           int64_t millis) {
   cx->runtime()->gc.gcSlice(reason, millis);
+}
+
+JS_PUBLIC_API bool JS::IncrementalGCHasForegroundWork(JSContext* cx) {
+  MOZ_ASSERT(!JS::RuntimeHeapIsBusy());
+  CHECK_THREAD(cx);
+  return cx->runtime()->gc.hasForegroundWork();
 }
 
 JS_PUBLIC_API void JS::FinishIncrementalGC(JSContext* cx, GCReason reason) {
