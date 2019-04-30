@@ -6101,3 +6101,6 @@ pref("dom.sidebar.enabled", true);
 
 // Turn on fission frameloader swapping
 pref("fission.rebuild_frameloaders_on_remoteness_change", true);
+
+// Move session history to parent process (child processes access it over IPC).
+pref("fission.sessionHistoryInParent", true);
