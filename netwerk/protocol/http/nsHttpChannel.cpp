@@ -8027,6 +8027,7 @@ nsHttpChannel::OnStopRequest(nsIRequest* request, nsresult status) {
     mResponseTrailers = mTransaction->TakeResponseTrailers();
 
     // at this point, we're done with the transaction
+    mTransactionTimings = mTransaction->Timings();
     mTransaction = nullptr;
     mTransactionPump = nullptr;
 

@@ -145,7 +145,6 @@ class nsHttpTransaction final : public nsAHttpTransaction,
   bool ChannelPipeFull() { return mWaitingOnPipeOut; }
 
   // Locked methods to get and set timing info
-  const TimingStruct Timings();
   void BootstrapTimings(TimingStruct times);
   void SetDomainLookupStart(mozilla::TimeStamp timeStamp,
                             bool onlyIfNull = false);

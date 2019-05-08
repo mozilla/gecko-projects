@@ -321,6 +321,8 @@ mozilla::TimeStamp HttpTransactionParent::GetResponseEnd() {
   return mTimings.responseEnd;
 }
 
+const TimingStruct HttpTransactionParent::Timings() { return mTimings; }
+
 bool HttpTransactionParent::ResponseIsComplete() { return mResponseIsComplete; }
 
 int64_t HttpTransactionParent::GetTransferSize() { return mTransferSize; }

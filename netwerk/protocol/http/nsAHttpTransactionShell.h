@@ -8,6 +8,7 @@
 #include <functional>
 
 #include "nsISupports.h"
+#include "TimingStruct.h"
 #include "nsInputStreamPump.h"
 
 class nsIEventTraget;
@@ -70,9 +71,8 @@ class nsAHttpTransactionShell : public nsISupports {
       uint64_t reqContentLength, bool reqBodyIncludesHeaders,
       nsIEventTarget *consumerTarget, nsIInterfaceRequestor *callbacks,
       nsITransportEventSink *eventsink, uint64_t topLevelOuterContentWindowId,
-      HttpTrafficCategory trafficCategory,
-      nsIRequestContext *requestContext, uint32_t classOfService,
-      uint32_t pushedStreamId, uint64_t channelId,
+      HttpTrafficCategory trafficCategory, nsIRequestContext *requestContext,
+      uint32_t classOfService, uint32_t pushedStreamId, uint64_t channelId,
       bool responseTimeoutEnabled, uint32_t initialRwin) = 0;
 
   // @param aListener
@@ -106,6 +106,8 @@ class nsAHttpTransactionShell : public nsISupports {
   virtual mozilla::TimeStamp GetRequestStart() = 0;
   virtual mozilla::TimeStamp GetResponseStart() = 0;
   virtual mozilla::TimeStamp GetResponseEnd() = 0;
+
+  virtual const TimingStruct Timings() = 0;
 
   virtual bool HasStickyConnection() = 0;
 
@@ -145,9 +147,8 @@ NS_DEFINE_STATIC_IID_ACCESSOR(nsAHttpTransactionShell,
       uint64_t reqContentLength, bool reqBodyIncludesHeaders,                  \
       nsIEventTarget *consumerTarget, nsIInterfaceRequestor *callbacks,        \
       nsITransportEventSink *eventsink, uint64_t topLevelOuterContentWindowId, \
-      HttpTrafficCategory trafficCategory,                                     \
-      nsIRequestContext *requestContext, uint32_t classOfService,              \
-      uint32_t pushedStreamId, uint64_t channelId,                             \
+      HttpTrafficCategory trafficCategory, nsIRequestContext *requestContext,  \
+      uint32_t classOfService, uint32_t pushedStreamId, uint64_t channelId,    \
       bool responseTimeoutEnabled, uint32_t initialRwin) override;             \
   virtual nsresult AsyncRead(nsIStreamListener *listener, nsIRequest **pump)   \
       override;                                                                \
@@ -167,6 +168,7 @@ NS_DEFINE_STATIC_IID_ACCESSOR(nsAHttpTransactionShell,
   virtual mozilla::TimeStamp GetRequestStart() override;                       \
   virtual mozilla::TimeStamp GetResponseStart() override;                      \
   virtual mozilla::TimeStamp GetResponseEnd() override;                        \
+  virtual const TimingStruct Timings() override;                               \
   virtual bool HasStickyConnection() override;                                 \
   virtual bool ResponseIsComplete() override;                                  \
   virtual bool DataAlreadySent() override;                                     \
