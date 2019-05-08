@@ -121,13 +121,8 @@ nsHttpActivityDistributor::ObserveActivityWithChannelId(
     }
   };
 
-  if (!NS_IsMainThread()) {
-    return NS_DispatchToMainThread(NS_NewRunnableFunction(
-        "net::nsHttpActivityDistributor::ObserveActivityWithChannelId", task));
-  }
-
-  task();
-  return NS_OK;
+  return NS_DispatchToMainThread(NS_NewRunnableFunction(
+      "net::nsHttpActivityDistributor::ObserveActivityWithChannelId", task));
 }
 
 NS_IMETHODIMP
