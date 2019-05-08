@@ -64,6 +64,7 @@
 #include "nsCORSListenerProxy.h"
 #include "nsApplicationCache.h"
 #include "ClassifierDummyChannel.h"
+#include "nsIOService.h"
 
 #ifdef MOZ_TASK_TRACER
 #  include "GeckoTaskTracer.h"
@@ -2972,17 +2973,20 @@ nsresult HttpChannelChild::ContinueAsyncOpen() {
     mBgChild = bgChild.forget();
   }
 
-  RefPtr<HttpBackgroundChannelChild> bgChild = mBgChild;
-  SocketProcessBridgeChild::GetSocketProcessBridge()->Then(
-      GetCurrentThreadSerialEventTarget(), __func__,
-      [bgChild]() {
-        gSocketTransportService->Dispatch(
-            NewRunnableMethod("HttpBackgroundChannelChild::CreateDataBridge",
-                              bgChild,
-                              &HttpBackgroundChannelChild::CreateDataBridge),
-            NS_DISPATCH_NORMAL);
-      },
-      []() { printf_stderr("Failed to create SocketProcessBridgeChild\n"); });
+  MOZ_ASSERT(gIOService);
+  if (gIOService->UseSocketProcess()) {
+    RefPtr<HttpBackgroundChannelChild> bgChild = mBgChild;
+    SocketProcessBridgeChild::GetSocketProcessBridge()->Then(
+        GetCurrentThreadSerialEventTarget(), __func__,
+        [bgChild]() {
+          gSocketTransportService->Dispatch(
+              NewRunnableMethod("HttpBackgroundChannelChild::CreateDataBridge",
+                                bgChild,
+                                &HttpBackgroundChannelChild::CreateDataBridge),
+              NS_DISPATCH_NORMAL);
+        },
+        []() { NS_WARNING("Failed to create SocketProcessBridgeChild"); });
+  }
 
   return NS_OK;
 }
