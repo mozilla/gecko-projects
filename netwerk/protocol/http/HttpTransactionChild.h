@@ -46,8 +46,8 @@ class HttpTransactionChild final : public PHttpTransactionChild,
       const Maybe<IPCStream>& aRequestBody, const uint64_t& aReqContentLength,
       const bool& aReqBodyIncludesHeaders,
       const uint64_t& aTopLevelOuterContentWindowId,
-      const uint64_t& aRequestContextID, const uint32_t& aClassOfService,
-      const uint32_t& aPushedStreamId,
+      const uint8_t& aHttpTrafficCategory, const uint64_t& aRequestContextID,
+      const uint32_t& aClassOfService, const uint32_t& aPushedStreamId,
       const bool& aHttpActivityDistributorActivated,
       const bool& aResponseTimeoutEnabled, const uint32_t& aInitialRwin,
       const mozilla::Maybe<PInputChannelThrottleQueueChild*>& aThrottleQueue);
@@ -79,9 +79,10 @@ class HttpTransactionChild final : public PHttpTransactionChild,
       nsIInputStream* reqBody,  // use the trick in bug 1277681
       uint64_t reqContentLength, bool reqBodyIncludesHeaders,
       nsIEventTarget* consumerTarget,  // Will remove
-      uint64_t topLevelOuterContentWindowId, uint64_t requestContextID,
-      uint32_t classOfService, uint32_t pushedStreamId,
-      bool responseTimeoutEnabled, uint32_t initialRwin);
+      uint64_t topLevelOuterContentWindowId, uint8_t httpTrafficCategory,
+      uint64_t requestContextID, uint32_t classOfService,
+      uint32_t pushedStreamId, bool responseTimeoutEnabled,
+      uint32_t initialRwin);
 
   bool IsNoSniff(nsHttpResponseHead* aResponseHead);
 

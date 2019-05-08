@@ -135,9 +135,6 @@ nsresult HttpTransactionParent::Init(
     bool responseTimeoutEnabled, uint32_t initialRwin) {
   LOG(("HttpTransactionParent::Init [this=%p caps=%x]\n", this, caps));
 
-  // TODO Bug 1547389: support HttpTrafficAnalyzer for socket process
-  Unused << trafficCategory;
-
   if (!mIPCOpen) {
     return NS_ERROR_FAILURE;
   }
@@ -193,8 +190,9 @@ nsresult HttpTransactionParent::Init(
   if (!SendInit(caps, infoArgs, *requestHead,
                 requestBody ? Some(autoStream.TakeValue()) : Nothing(),
                 requestContentLength, requestBodyHasHeaders,
-                topLevelOuterContentWindowId, requestContextID, classOfService,
-                pushedStreamId, activityDistributorActivated,
+                topLevelOuterContentWindowId,
+                static_cast<uint8_t>(trafficCategory), requestContextID,
+                classOfService, pushedStreamId, activityDistributorActivated,
                 responseTimeoutEnabled, initialRwin, throttleQueue)) {
     return NS_ERROR_FAILURE;
   }

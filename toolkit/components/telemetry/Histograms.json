@@ -15676,7 +15676,7 @@
       "description": "Getting the number of errors in QuotaManager initialization."
   },
   "HTTP_TRAFFIC_ANALYSIS_3": {
-    "record_in_processes": ["main"],
+    "record_in_processes": ["main", "socket"],
     "products": ["firefox", "fennec", "geckoview"],
     "alert_emails": ["gachen@mozilla.com"],
     "bug_numbers": [1533363, 1546796, 1546906, 1550756, 1572666],

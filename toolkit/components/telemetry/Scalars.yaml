@@ -4326,6 +4326,7 @@ networking:
       - 'geckoview'
     record_in_processes:
       - 'main'
+      - 'socket'
     release_channel_collection: opt-out
 
   data_transferred_captive_portal:
