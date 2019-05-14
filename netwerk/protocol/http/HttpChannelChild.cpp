@@ -678,6 +678,14 @@ void HttpChannelChild::DoOnStartRequest(nsIRequest* aRequest,
                                          static_cast<nsIChannel*>(this));
   }
 
+  // When we got a failed status here and |mCanceled| is false, this means the
+  // channel was canceled on parent process. We should call |Cancel| to sync
+  // the status. See bug 1547705.
+  if (!mCanceled && NS_FAILED(mStatus)) {
+    LOG(("  channel already canceled on parent process [this=%p]\n", this));
+    Cancel(mStatus);
+  }
+
   if (mListener) {
     nsCOMPtr<nsIStreamListener> listener(mListener);
     mOnStartRequestCalled = true;
