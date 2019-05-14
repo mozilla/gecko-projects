@@ -90,8 +90,6 @@ class HttpTransactionChild final : public PHttpTransactionChild,
   nsCOMPtr<nsIInputStream> mUploadStream;
   RefPtr<nsHttpTransaction> mTransaction;
   nsCOMPtr<nsIRequest> mTransactionPump;
-  NetAddr mSelfAddr;
-  NetAddr mPeerAddr;
   bool mStatusCodeIs200;
 
   uint64_t mChannelId;

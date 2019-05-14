@@ -344,8 +344,8 @@ void HttpTransactionParent::SetTransactionObserver(TransactionObserver&& obs) {
 
 mozilla::ipc::IPCResult HttpTransactionParent::RecvOnStartRequest(
     const nsresult& aStatus, const Maybe<nsHttpResponseHead>& aResponseHead,
-    const nsCString& aSecurityInfoSerialization, const NetAddr& aSelfAddr,
-    const NetAddr& aPeerAddr, const bool& aProxyConnectFailed,
+    const nsCString& aSecurityInfoSerialization,
+    const bool& aProxyConnectFailed,
     const TimingStruct& aTimings, nsTArray<uint8_t>&& aDataForSniffer) {
   LOG(("HttpTransactionParent::RecvOnStartRequest [this=%p aStatus=%" PRIx32
        "]\n",
@@ -364,8 +364,6 @@ mozilla::ipc::IPCResult HttpTransactionParent::RecvOnStartRequest(
     mResponseHead = new nsHttpResponseHead(aResponseHead.ref());
   }
   mProxyConnectFailed = aProxyConnectFailed;
-  mSelfAddr = aSelfAddr;
-  mPeerAddr = aPeerAddr;
   mTimings = aTimings;
 
   nsCOMPtr<nsIStreamListener> chan = mChannel;
@@ -540,6 +538,13 @@ mozilla::ipc::IPCResult HttpTransactionParent::RecvOnStopRequest(
     call();
   }
 
+  return IPC_OK();
+}
+
+mozilla::ipc::IPCResult HttpTransactionParent::RecvOnNetAddrUpdate(
+    const NetAddr& aSelfAddr, const NetAddr& aPeerAddr) {
+  mSelfAddr = aSelfAddr;
+  mPeerAddr = aPeerAddr;
   return IPC_OK();
 }
 

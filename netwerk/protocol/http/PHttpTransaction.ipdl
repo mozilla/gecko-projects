@@ -37,8 +37,6 @@ parent:
   async OnStartRequest(nsresult                   status,
                        nsHttpResponseHead?        responseHead,
                        nsCString                  securityInfoSerialization,
-                       NetAddr                    selfAddr,
-                       NetAddr                    peerAddr,
                        bool                       proxyConnectFailed,
                        TimingStruct               timings,
                        uint8_t[]                  dataForSniffer);
@@ -56,6 +54,7 @@ parent:
                       nsHttpHeaderArray responseTrailers,
                       bool hasStickyConn,
                       TransactionObserverResult result);
+  async OnNetAddrUpdate(NetAddr selfAddr, NetAddr peerAddr);
 
 child:
   async __delete__();

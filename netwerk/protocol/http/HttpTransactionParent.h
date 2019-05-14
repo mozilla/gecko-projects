@@ -42,8 +42,8 @@ class HttpTransactionParent final : public PHttpTransactionParent,
 
   mozilla::ipc::IPCResult RecvOnStartRequest(
       const nsresult& aStatus, const Maybe<nsHttpResponseHead>& aResponseHead,
-      const nsCString& aSecurityInfoSerialization, const NetAddr& aSelfAddr,
-      const NetAddr& aPeerAddr, const bool& aProxyConnectFailed,
+      const nsCString& aSecurityInfoSerialization,
+      const bool& aProxyConnectFailed,
       const TimingStruct& aTimings, nsTArray<uint8_t>&& aDataForSniffer);
   mozilla::ipc::IPCResult RecvOnTransportStatus(const nsresult& aStatus,
                                                 const int64_t& aProgress,
@@ -56,6 +56,8 @@ class HttpTransactionParent final : public PHttpTransactionParent,
       const int64_t& aTransferSize, const TimingStruct& aTimings,
       const nsHttpHeaderArray& responseTrailers, const bool& aHasStickyConn,
       const TransactionObserverResult& aResult);
+  mozilla::ipc::IPCResult RecvOnNetAddrUpdate(const NetAddr& aSelfAddr,
+                                              const NetAddr& aPeerAddr);
 
  private:
   virtual ~HttpTransactionParent();

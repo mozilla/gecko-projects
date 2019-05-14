@@ -36,8 +36,6 @@ NS_IMPL_ISUPPORTS(HttpTransactionChild, nsIRequestObserver, nsIStreamListener,
 HttpTransactionChild::HttpTransactionChild(const uint64_t& aChannelId) {
   LOG(("Creating HttpTransactionChild @%p\n", this));
   mTransaction = new nsHttpTransaction();
-  mSelfAddr.raw.family = PR_AF_UNSPEC;
-  mPeerAddr.raw.family = PR_AF_UNSPEC;
 
   mChannelId = aChannelId;
   mStatusCodeIs200 = false;
@@ -411,7 +409,6 @@ HttpTransactionChild::OnStartRequest(nsIRequest* aRequest) {
   }
 
   Unused << SendOnStartRequest(status, optionalHead, serializedSecurityInfoOut,
-                               mSelfAddr, mPeerAddr,
                                mTransaction->ProxyConnectFailed(),
                                mTransaction->Timings(), dataForSniffer);
   LOG(("HttpTransactionChild::OnStartRequest end [this=%p]\n", this));
@@ -460,16 +457,19 @@ HttpTransactionChild::OnTransportStatus(nsITransport* aTransport,
 
   if (aStatus == NS_NET_STATUS_CONNECTED_TO ||
       aStatus == NS_NET_STATUS_WAITING_FOR) {
+    NetAddr selfAddr;
+    NetAddr peerAddr;
     if (mTransaction) {
-      mTransaction->GetNetworkAddresses(mSelfAddr, mPeerAddr);
+      mTransaction->GetNetworkAddresses(selfAddr, peerAddr);
     } else {
       nsCOMPtr<nsISocketTransport> socketTransport =
           do_QueryInterface(aTransport);
       if (socketTransport) {
-        socketTransport->GetSelfAddr(&mSelfAddr);
-        socketTransport->GetPeerAddr(&mPeerAddr);
+        socketTransport->GetSelfAddr(&selfAddr);
+        socketTransport->GetPeerAddr(&peerAddr);
       }
     }
+    Unused << SendOnNetAddrUpdate(selfAddr, peerAddr);
   }
 
   Unused << SendOnTransportStatus(aStatus, aProgress, aProgressMax);
