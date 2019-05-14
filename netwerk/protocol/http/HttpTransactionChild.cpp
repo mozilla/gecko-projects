@@ -137,7 +137,7 @@ nsresult HttpTransactionChild::InitInternal(
   }
 
   nsMainThreadPtrHandle<HttpTransactionChild> handle(
-      new nsMainThreadPtrHolder<HttpTransactionChild>("HttpTransactionChild",
+      new nsMainThreadPtrHolder<HttpTransactionChild>("HttpTransactionChildProxy",
                                                       this, false));
   mTransaction->SetTransactionObserver(
       [handle](bool aVersionOK, bool aAuthOK, nsresult aReason) {
