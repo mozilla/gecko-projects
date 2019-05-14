@@ -210,7 +210,6 @@ nsresult HttpTransactionParent::AsyncRead(nsIStreamListener* listener,
 
   NS_ADDREF(*pump = this);
   mChannel = listener;
-  gHttpHandler->AddHttpChannel(mChannelId, mChannel);
   return NS_OK;
 }
 

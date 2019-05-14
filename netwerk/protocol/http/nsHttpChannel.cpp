@@ -1275,6 +1275,8 @@ nsresult nsHttpChannel::SetupTransaction() {
          mTransaction.get()));
   }
 
+  gHttpHandler->AddHttpChannel(mChannelId, ToSupports(this));
+
   if (mTransactionObserver) {
     mTransaction->SetTransactionObserver(
         [observer{std::move(mTransactionObserver)}](
