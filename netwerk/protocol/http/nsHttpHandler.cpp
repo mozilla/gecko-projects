@@ -573,6 +573,10 @@ nsresult nsHttpHandler::Init() {
   if (pc) {
     pc->GetParentalControlsEnabled(&mParentalControlEnabled);
   }
+
+  if (gIOService->UseSocketProcess()) {
+    gIOService->LaunchSocketProcess();
+  }
   return NS_OK;
 }
 

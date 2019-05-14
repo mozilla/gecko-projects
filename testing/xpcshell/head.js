@@ -1609,9 +1609,6 @@ try {
     let prefsFile = Cc["@mozilla.org/file/local;1"].createInstance(Ci.nsIFile);
     prefsFile.initWithPath(_PREFS_FILE);
     _Services.prefs.readUserPrefsFromFile(prefsFile);
-
-    // Launch socket process here since xpcshell doesn't read user profile
-    _Services.io.launchSocketProcess();
   }
 } catch (e) {
   do_throw(e);
