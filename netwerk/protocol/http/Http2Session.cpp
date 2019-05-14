@@ -1220,7 +1220,11 @@ void Http2Session::CleanupStream(Http2Stream* aStream, nsresult aResult,
   if (id > 0) {
     mStreamIDHash.Remove(id);
     if (!(id & 1)) {
-      Http2PushStreamManager::GetSingleton()->RemoveStreamById(id);
+      NS_DispatchToMainThread(NS_NewRunnableFunction(
+          "Http2PushStreamManager::RemoveStreamById", [id]() {
+            Http2PushStreamManager::GetSingleton()->RemoveStreamById(id);
+          }));
+
       mPushedStreams.RemoveElement(aStream);
       Http2PushedStream* pushStream = static_cast<Http2PushedStream*>(aStream);
       nsAutoCString hashKey;

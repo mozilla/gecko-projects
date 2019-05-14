@@ -75,12 +75,7 @@ Http2PushedStream* Http2PushStreamManager::GetStreamById(uint32_t aStreamId) {
 }
 
 void Http2PushStreamManager::RemoveStreamById(uint32_t aStreamId) {
-  if (!NS_IsMainThread()) {
-    NS_DispatchToMainThread(NS_NewRunnableFunction("", [aStreamId]() {
-      Http2PushStreamManager::GetSingleton()->RemoveStreamById(aStreamId);
-    }));
-    return;
-  }
+  MOZ_ASSERT(NS_IsMainThread());
 
   mIDToStreamMap.Remove(aStreamId);
 }
