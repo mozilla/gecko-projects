@@ -691,6 +691,19 @@ VARCACHE_PREF(
 )
 
 //---------------------------------------------------------------------------
+// Prefs starting with "docshell."
+//---------------------------------------------------------------------------
+
+// Used to indicate whether session history listeners should be notified
+// about content viewer eviction. Used only for testing.
+VARCACHE_PREF(
+  Live,
+  "docshell.shistory.testing.bfevict",
+   docshell_shistory_testing_bfevict,
+  bool, false
+)
+
+//---------------------------------------------------------------------------
 // Prefs starting with "browser."
 //---------------------------------------------------------------------------
 

@@ -173,6 +173,7 @@ void nsSHistory::EvictContentViewerForEntry(nsISHEntry* aEntry) {
 
     // Drop the presentation state before destroying the viewer, so that
     // document teardown is able to correctly persist the state.
+    NotifyListenersContentViewerEvicted(1);
     aEntry->SetContentViewer(nullptr);
     aEntry->SyncPresentationState();
     viewer->Destroy();
@@ -739,6 +740,10 @@ nsSHistory::AddSHistoryListener(nsISHistoryListener* aListener) {
 
   mListeners.AppendElementUnlessExists(listener);
   return NS_OK;
+}
+
+void nsSHistory::NotifyListenersContentViewerEvicted(uint32_t aNumEvicted) {
+  NOTIFY_LISTENERS(OnContentViewerEvicted, (aNumEvicted));
 }
 
 NS_IMETHODIMP
