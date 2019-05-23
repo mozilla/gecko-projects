@@ -148,7 +148,11 @@ already_AddRefed<BrowsingContext> BrowsingContext::CreateFromIPC(
   MOZ_DIAGNOSTIC_ASSERT(aOriginProcess || XRE_IsContentProcess());
   MOZ_DIAGNOSTIC_ASSERT(aGroup);
 
-  uint64_t originId = aOriginProcess ? aOriginProcess->ChildID() : 0;
+  uint64_t originId = 0;
+  if (aOriginProcess) {
+    originId = aOriginProcess->ChildID();
+    aGroup->EnsureSubscribed(aOriginProcess);
+  }
 
   MOZ_LOG(GetLog(), LogLevel::Debug,
           ("Creating 0x%08" PRIx64 " from IPC (origin=0x%08" PRIx64 ")",
@@ -281,7 +285,7 @@ void BrowsingContext::Detach(bool aFromIPC) {
 
   RefPtr<BrowsingContext> kungFuDeathGrip(this);
 
-  if (!Group()->EvictCachedContext(this)) {
+  if (Group() && !Group()->EvictCachedContext(this)) {
     Children* children = nullptr;
     if (mParent) {
       children = &mParent->mChildren;
@@ -337,21 +341,19 @@ void BrowsingContext::RestoreChildren(Children&& aChildren, bool aFromIPC) {
           ("%s: Restoring children of 0x%08" PRIx64 "",
            XRE_IsParentProcess() ? "Parent" : "Child", Id()));
 
-  MOZ_DIAGNOSTIC_ASSERT(mChildren.IsEmpty());
-
   for (BrowsingContext* child : aChildren) {
     MOZ_DIAGNOSTIC_ASSERT(child->GetParent() == this);
     Unused << Group()->EvictCachedContext(child);
   }
 
-  mChildren.SwapElements(aChildren);
+  mChildren.AppendElements(aChildren);
 
   if (!aFromIPC && XRE_IsContentProcess()) {
     auto cc = ContentChild::GetSingleton();
     MOZ_DIAGNOSTIC_ASSERT(cc);
 
-    nsTArray<BrowsingContextId> contexts(mChildren.Length());
-    for (BrowsingContext* child : mChildren) {
+    nsTArray<BrowsingContextId> contexts(aChildren.Length());
+    for (BrowsingContext* child : aChildren) {
       contexts.AppendElement(child->Id());
     }
     cc->SendRestoreBrowsingContextChildren(this, contexts);
@@ -813,6 +815,21 @@ void BrowsingContext::Transaction::Apply(BrowsingContext* aBrowsingContext,
 #include "mozilla/dom/BrowsingContextFieldList.h"
 }
 
+BrowsingContext::IPCInitializer BrowsingContext::GetIPCInitializer() {
+  MOZ_ASSERT(
+      !mozilla::Preferences::GetBool("fission.preserve_browsing_contexts", false) ||
+      IsContent());
+
+  IPCInitializer init;
+  init.mId = Id();
+  init.mParentId = mParent ? mParent->Id() : 0;
+  init.mCached = IsCached();
+
+#define MOZ_BC_FIELD(name, type) init.m##name = m##name;
+#include "mozilla/dom/BrowsingContextFieldList.h"
+  return init;
+}
+
 already_AddRefed<BrowsingContext> BrowsingContext::IPCInitializer::GetParent() {
   RefPtr<BrowsingContext> parent;
   if (mParentId != 0) {
@@ -874,7 +891,7 @@ void BrowsingContext::DidSetIsActivatedByUserGesture(ContentParent* aSource) {
 
 namespace ipc {
 
-void IPDLParamTraits<dom::BrowsingContext>::Write(
+void IPDLParamTraits<dom::BrowsingContext*>::Write(
     IPC::Message* aMsg, IProtocol* aActor, dom::BrowsingContext* aParam) {
   uint64_t id = aParam ? aParam->Id() : 0;
   WriteIPDLParam(aMsg, aActor, id);
@@ -887,7 +904,7 @@ void IPDLParamTraits<dom::BrowsingContext>::Write(
   }
 }
 
-bool IPDLParamTraits<dom::BrowsingContext>::Read(
+bool IPDLParamTraits<dom::BrowsingContext*>::Read(
     const IPC::Message* aMsg, PickleIterator* aIter, IProtocol* aActor,
     RefPtr<dom::BrowsingContext>* aResult) {
   uint64_t id = 0;

@@ -262,6 +262,7 @@ function transformPageErrorPacket(packet) {
     private: pageError.private,
     executionPoint: pageError.executionPoint,
     chromeContext: pageError.chromeContext,
+    cssSelectors: pageError.cssSelectors,
   });
 }
 
@@ -292,6 +293,7 @@ function transformEvaluationResultPacket(packet) {
     errorMessageName,
     exceptionDocURL,
     exception,
+    exceptionStack,
     frame,
     result,
     helperResult,
@@ -327,6 +329,7 @@ function transformEvaluationResultPacket(packet) {
     parameters: [parameter],
     errorMessageName,
     exceptionDocURL,
+    stacktrace: exceptionStack,
     frame,
     timeStamp,
     notes,

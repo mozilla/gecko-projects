@@ -89,12 +89,23 @@ static inline bool DependsOnIntrinsicSize(const nsIFrame* aEmbeddingFrame) {
   return !width.ConvertsToLength() || !height.ConvertsToLength();
 }
 
+// The CSS Containment spec says that size-contained replaced elements must be
+// treated as having an intrinsic width and height of 0.  That's applicable to
+// outer SVG frames, unless they're the outermost element (in which case
+// they're not really "replaced", and there's no outer context to contain sizes
+// from leaking into). Hence, we check for a parent element before we bother
+// testing for 'contain:size'.
+static inline bool IsReplacedAndContainSize(const nsSVGOuterSVGFrame* aFrame) {
+  return aFrame->GetContent()->GetParent() &&
+         aFrame->StyleDisplay()->IsContainSize();
+}
+
 void nsSVGOuterSVGFrame::Init(nsIContent* aContent, nsContainerFrame* aParent,
                               nsIFrame* aPrevInFlow) {
   NS_ASSERTION(aContent->IsSVGElement(nsGkAtoms::svg),
                "Content is not an SVG 'svg' element!");
 
-  AddStateBits(NS_FRAME_FONT_INFLATION_CONTAINER |
+  AddStateBits(NS_FRAME_REFLOW_ROOT | NS_FRAME_FONT_INFLATION_CONTAINER |
                NS_FRAME_FONT_INFLATION_FLOW_ROOT);
 
   // Check for conditional processing attributes here rather than in
@@ -168,7 +179,7 @@ nscoord nsSVGOuterSVGFrame::GetPrefISize(gfxContext* aRenderingContext) {
       wm.IsVertical() ? svg->mLengthAttributes[SVGSVGElement::ATTR_HEIGHT]
                       : svg->mLengthAttributes[SVGSVGElement::ATTR_WIDTH];
 
-  if (StyleDisplay()->IsContainSize()) {
+  if (IsReplacedAndContainSize(this)) {
     result = nscoord(0);
   } else if (isize.IsPercentage()) {
     // It looks like our containing block's isize may depend on our isize. In
@@ -205,7 +216,7 @@ IntrinsicSize nsSVGOuterSVGFrame::GetIntrinsicSize() {
   // XXXjwatt Note that here we want to return the CSS width/height if they're
   // specified and we're embedded inside an nsIObjectLoadingContent.
 
-  if (StyleDisplay()->IsContainSize()) {
+  if (IsReplacedAndContainSize(this)) {
     // Intrinsic size of 'contain:size' replaced elements is 0,0.
     return IntrinsicSize(0, 0);
   }
@@ -234,9 +245,9 @@ IntrinsicSize nsSVGOuterSVGFrame::GetIntrinsicSize() {
 }
 
 /* virtual */
-nsSize nsSVGOuterSVGFrame::GetIntrinsicRatio() {
-  if (StyleDisplay()->IsContainSize()) {
-    return nsSize(0, 0);
+AspectRatio nsSVGOuterSVGFrame::GetIntrinsicRatio() {
+  if (IsReplacedAndContainSize(this)) {
+    return AspectRatio();
   }
 
   // We only have an intrinsic size/ratio if our width and height attributes
@@ -253,16 +264,8 @@ nsSize nsSVGOuterSVGFrame::GetIntrinsicRatio() {
       content->mLengthAttributes[SVGSVGElement::ATTR_HEIGHT];
 
   if (!width.IsPercentage() && !height.IsPercentage()) {
-    nsSize ratio(
-        nsPresContext::CSSPixelsToAppUnits(width.GetAnimValue(content)),
-        nsPresContext::CSSPixelsToAppUnits(height.GetAnimValue(content)));
-    if (ratio.width < 0) {
-      ratio.width = 0;
-    }
-    if (ratio.height < 0) {
-      ratio.height = 0;
-    }
-    return ratio;
+    return AspectRatio::FromSize(width.GetAnimValue(content),
+                                 height.GetAnimValue(content));
   }
 
   SVGViewElement* viewElement = content->GetCurrentViewElement();
@@ -276,17 +279,7 @@ nsSize nsSVGOuterSVGFrame::GetIntrinsicRatio() {
   }
 
   if (viewbox) {
-    float viewBoxWidth = viewbox->width;
-    float viewBoxHeight = viewbox->height;
-
-    if (viewBoxWidth < 0.0f) {
-      viewBoxWidth = 0.0f;
-    }
-    if (viewBoxHeight < 0.0f) {
-      viewBoxHeight = 0.0f;
-    }
-    return nsSize(nsPresContext::CSSPixelsToAppUnits(viewBoxWidth),
-                  nsPresContext::CSSPixelsToAppUnits(viewBoxHeight));
+    return AspectRatio::FromSize(viewbox->width, viewbox->height);
   }
 
   return nsSVGDisplayContainerFrame::GetIntrinsicRatio();
@@ -545,10 +538,10 @@ void nsSVGOuterSVGFrame::UnionChildOverflow(nsOverflowAreas& aOverflowAreas) {
 /**
  * Used to paint/hit-test SVG when SVG display lists are disabled.
  */
-class nsDisplayOuterSVG final : public nsDisplayItem {
+class nsDisplayOuterSVG final : public nsPaintedDisplayItem {
  public:
   nsDisplayOuterSVG(nsDisplayListBuilder* aBuilder, nsSVGOuterSVGFrame* aFrame)
-      : nsDisplayItem(aBuilder, aFrame) {
+      : nsPaintedDisplayItem(aBuilder, aFrame) {
     MOZ_COUNT_CTOR(nsDisplayOuterSVG);
   }
 #ifdef NS_BUILD_REFCNT_LOGGING

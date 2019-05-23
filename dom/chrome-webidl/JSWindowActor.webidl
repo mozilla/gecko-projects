@@ -35,6 +35,9 @@ interface JSWindowActorChild {
   [Throws]
   readonly attribute BrowsingContext? browsingContext;
 
+  [Throws]
+  readonly attribute nsIDocShell? docShell;
+
   // NOTE: As this returns a window proxy, it may not be currently referencing
   // the document associated with this JSWindowActor. Generally prefer using
   // `document`.
@@ -50,4 +53,14 @@ JSWindowActorChild implements JSWindowActor;
 // thus cannot be conditionally exposed.
 callback interface MozObserverCallback {
   void observe(nsISupports subject, ByteString topic, DOMString? data);
+};
+
+// WebIDL callback interface calling the `willDestroy` and `didDestroy`
+// method on JSWindowActors.
+[MOZ_CAN_RUN_SCRIPT_BOUNDARY]
+callback MozActorDestroyCallback = void();
+
+dictionary MozActorDestroyCallbacks {
+  [ChromeOnly] MozActorDestroyCallback willDestroy;
+  [ChromeOnly] MozActorDestroyCallback didDestroy;
 };

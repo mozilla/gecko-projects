@@ -12,7 +12,6 @@
 
 #include "ds/InlineTable.h"
 #include "frontend/ParseNode.h"
-#include "frontend/TokenStream.h"
 #include "vm/BytecodeUtil.h"
 #include "vm/JSFunction.h"
 #include "vm/JSScript.h"
@@ -305,7 +304,7 @@ class FunctionBox : public ObjectBox, public SharedContext {
   // has expressions.
   VarScope::Data* extraVarScopeBindings_;
 
-  void initWithEnclosingScope(Scope* enclosingScope);
+  void initWithEnclosingScope(Scope* enclosingScope, JSFunction* fun);
 
  public:
   // Back pointer used by asm.js for error messages.
@@ -395,6 +394,17 @@ class FunctionBox : public ObjectBox, public SharedContext {
   // Whether this function has nested functions.
   bool hasInnerFunctions_ : 1;
 
+  // Whether this function is an arrow function
+  bool isArrow_ : 1;
+
+  bool isNamedLambda_ : 1;
+  bool isGetter_ : 1;
+  bool isSetter_ : 1;
+  bool isMethod_ : 1;
+
+  JSFunction::FunctionKind kind_;
+  JSAtom* explicitName_;
+
   FunctionBox(JSContext* cx, TraceListNode* traceListHead, JSFunction* fun,
               uint32_t toStringStart, Directives directives, bool extraWarnings,
               GeneratorKind generatorKind, FunctionAsyncKind asyncKind);
@@ -421,11 +431,11 @@ class FunctionBox : public ObjectBox, public SharedContext {
         &extraVarScopeBindings_);
   }
 
-  void initFromLazyFunction();
+  void initFromLazyFunction(JSFunction* fun);
   void initStandaloneFunction(Scope* enclosingScope);
-  void initWithEnclosingParseContext(ParseContext* enclosing,
+  void initWithEnclosingParseContext(ParseContext* enclosing, JSFunction* fun,
                                      FunctionSyntaxKind kind);
-  void initFieldInitializer(ParseContext* enclosing, HasHeritage hasHeritage);
+  void initFieldInitializer(ParseContext* enclosing, JSFunction* fun, HasHeritage hasHeritage);
 
   inline bool isLazyFunctionWithoutEnclosingScope() const {
     return function()->isInterpretedLazy() &&
@@ -498,7 +508,7 @@ class FunctionBox : public ObjectBox, public SharedContext {
   bool needsIteratorResult() const { return isGenerator() && !isAsync(); }
   bool needsPromiseResult() const { return isAsync() && !isGenerator(); }
 
-  bool isArrow() const { return function()->isArrow(); }
+  bool isArrow() const { return isArrow_; }
 
   bool hasRest() const { return hasRest_; }
   void setHasRest() { hasRest_ = true; }
@@ -516,6 +526,14 @@ class FunctionBox : public ObjectBox, public SharedContext {
   bool needsHomeObject() const { return needsHomeObject_; }
   bool isDerivedClassConstructor() const { return isDerivedClassConstructor_; }
   bool hasInnerFunctions() const { return hasInnerFunctions_; }
+  bool isNamedLambda() const { return isNamedLambda_; }
+  bool isGetter() const { return isGetter_; }
+  bool isSetter() const { return isSetter_; }
+  bool isMethod() const { return isMethod_; }
+
+  JSFunction::FunctionKind kind() { return kind_; }
+
+  JSAtom* explicitName() const { return function()->explicitName(); }
 
   void setHasExtensibleScope() { hasExtensibleScope_ = true; }
   void setHasThisBinding() { hasThisBinding_ = true; }
@@ -555,30 +573,15 @@ class FunctionBox : public ObjectBox, public SharedContext {
     startColumn = column;
   }
 
-  void setEnd(const TokenStreamAnyChars& anyChars) {
+  void setEnd(uint32_t end) {
     // For all functions except class constructors, the buffer and
     // toString ending positions are the same. Class constructors override
     // the toString ending position with the end of the class definition.
-    uint32_t offset = anyChars.currentToken().pos.end;
-    bufEnd = offset;
-    toStringEnd = offset;
+    bufEnd = toStringEnd = end;
   }
 
   void trace(JSTracer* trc) override;
 };
-
-template <typename Unit, class AnyCharsAccess>
-inline void GeneralTokenStreamChars<Unit, AnyCharsAccess>::setFunctionStart(
-    FunctionBox* funbox) const {
-  const TokenStreamAnyChars& anyChars = anyCharsAccess();
-
-  uint32_t bufStart = anyChars.currentToken().pos.begin;
-
-  uint32_t startLine, startColumn;
-  computeLineAndColumn(bufStart, &startLine, &startColumn);
-
-  funbox->setStart(bufStart, startLine, startColumn);
-}
 
 inline FunctionBox* SharedContext::asFunctionBox() {
   MOZ_ASSERT(isFunctionBox());

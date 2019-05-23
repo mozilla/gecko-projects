@@ -32,9 +32,9 @@ var ecmaGlobals =
     {name: "Array", insecureContext: true},
     {name: "ArrayBuffer", insecureContext: true},
     {name: "Atomics", insecureContext: true, disabled: true},
-    {name: "BigInt", insecureContext: true, nightly: true},
-    {name: "BigInt64Array", insecureContext: true, nightly: true},
-    {name: "BigUint64Array", insecureContext: true, nightly: true},
+    {name: "BigInt", insecureContext: true},
+    {name: "BigInt64Array", insecureContext: true},
+    {name: "BigUint64Array", insecureContext: true},
     {name: "Boolean", insecureContext: true},
     {name: "ByteLengthQueuingStrategy", insecureContext: true},
     {name: "CountQueuingStrategy", insecureContext: true},
@@ -262,7 +262,7 @@ var interfaceNamesInGlobalScope =
   ];
 // IMPORTANT: Do not change the list above without review from a DOM peer!
 
-function createInterfaceMap({ version, isNightly, isRelease, isDesktop, isAndroid, isInsecureContext, isFennec }) {
+function createInterfaceMap({ isNightly, isRelease, isDesktop, isAndroid, isInsecureContext, isFennec }) {
   var interfaceMap = {};
 
   function addInterfaces(interfaces)

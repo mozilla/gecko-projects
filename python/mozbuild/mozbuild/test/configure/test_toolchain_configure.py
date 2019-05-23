@@ -206,9 +206,9 @@ DEFAULT_CLANGXX = CLANGXX_3_6
 def CLANG_PLATFORM(gcc_platform):
     base = {
         '--target=x86_64-linux-gnu': GCC_PLATFORM_X86_64_LINUX[None],
-        '--target=x86_64-darwin11.2.0': GCC_PLATFORM_X86_64_OSX[None],
+        '--target=x86_64-apple-darwin11.2.0': GCC_PLATFORM_X86_64_OSX[None],
         '--target=i686-linux-gnu': GCC_PLATFORM_X86_LINUX[None],
-        '--target=i686-darwin11.2.0': GCC_PLATFORM_X86_OSX[None],
+        '--target=i686-apple-darwin11.2.0': GCC_PLATFORM_X86_OSX[None],
         '--target=arm-linux-gnu': GCC_PLATFORM_ARM_LINUX[None],
     }
     undo_gcc_platform = {
@@ -255,6 +255,13 @@ VS_PLATFORM_X86_64 = {
 # Note: In reality, the -std=gnu* options are only supported when preceded by
 # -Xclang.
 CLANG_CL_3_9 = (CLANG_BASE('3.9.0') + VS('18.00.00000') + DEFAULT_C11 +
+                SUPPORTS_GNU99 + SUPPORTS_GNUXX11 + SUPPORTS_CXX14) + {
+    '*.cpp': {
+        '__STDC_VERSION__': False,
+        '__cplusplus': '201103L',
+    },
+}
+CLANG_CL_8_0 = (CLANG_BASE('8.0.0') + VS('18.00.00000') + DEFAULT_C11 +
                 SUPPORTS_GNU99 + SUPPORTS_GNUXX11 + SUPPORTS_CXX14) + {
     '*.cpp': {
         '__STDC_VERSION__': False,
@@ -874,7 +881,8 @@ class WindowsToolchainTest(BaseToolchainTest):
     # real Windows paths.
     PATHS = {
         '/usr/bin/cl': VS_2017u8 + VS_PLATFORM_X86,
-        '/usr/bin/clang-cl': CLANG_CL_3_9 + CLANG_CL_PLATFORM_X86,
+        '/usr/bin/clang-cl-3.9': CLANG_CL_3_9 + CLANG_CL_PLATFORM_X86,
+        '/usr/bin/clang-cl': CLANG_CL_8_0 + CLANG_CL_PLATFORM_X86,
         '/usr/bin/gcc': DEFAULT_GCC + GCC_PLATFORM_X86_WIN,
         '/usr/bin/g++': DEFAULT_GXX + GCC_PLATFORM_X86_WIN,
         '/usr/bin/gcc-4.9': GCC_4_9 + GCC_PLATFORM_X86_WIN,
@@ -891,15 +899,17 @@ class WindowsToolchainTest(BaseToolchainTest):
         '/usr/bin/clang++-3.3': CLANGXX_3_3 + CLANG_PLATFORM_X86_WIN,
     }
 
-    CLANG_CL_3_9_RESULT = CompilerResult(
-        version='3.9.0',
+    CLANG_CL_3_9_RESULT = 'Only clang-cl 8.0 or newer is supported (found version 3.9.0)'
+    CLANG_CL_8_0_RESULT = CompilerResult(
+        version='8.0.0',
         flags=['-Xclang', '-std=gnu99'],
         type='clang-cl',
         compiler='/usr/bin/clang-cl',
         language='C',
     )
-    CLANGXX_CL_3_9_RESULT = CompilerResult(
-        version='3.9.0',
+    CLANGXX_CL_3_9_RESULT = 'Only clang-cl 8.0 or newer is supported (found version 3.9.0)'
+    CLANGXX_CL_8_0_RESULT = CompilerResult(
+        version='8.0.0',
         flags=['-Xclang', '-std=c++14'],
         type='clang-cl',
         compiler='/usr/bin/clang-cl',
@@ -925,10 +935,17 @@ class WindowsToolchainTest(BaseToolchainTest):
             'CC': '/usr/bin/cl',
         })
 
-    def test_clang_cl(self):
+    def test_unsupported_clang_cl(self):
         self.do_toolchain_test(self.PATHS, {
             'c_compiler': self.CLANG_CL_3_9_RESULT,
-            'cxx_compiler': self.CLANGXX_CL_3_9_RESULT,
+        }, environ={
+            'CC': '/usr/bin/clang-cl-3.9',
+        })
+
+    def test_clang_cl(self):
+        self.do_toolchain_test(self.PATHS, {
+            'c_compiler': self.CLANG_CL_8_0_RESULT,
+            'cxx_compiler': self.CLANGXX_CL_8_0_RESULT,
         })
 
     def test_gcc(self):
@@ -979,7 +996,8 @@ class Windows64ToolchainTest(WindowsToolchainTest):
     # real Windows paths.
     PATHS = {
         '/usr/bin/cl': VS_2017u8 + VS_PLATFORM_X86_64,
-        '/usr/bin/clang-cl': CLANG_CL_3_9 + CLANG_CL_PLATFORM_X86_64,
+        '/usr/bin/clang-cl': CLANG_CL_8_0 + CLANG_CL_PLATFORM_X86_64,
+        '/usr/bin/clang-cl-3.9': CLANG_CL_3_9 + CLANG_CL_PLATFORM_X86_64,
         '/usr/bin/gcc': DEFAULT_GCC + GCC_PLATFORM_X86_64_WIN,
         '/usr/bin/g++': DEFAULT_GXX + GCC_PLATFORM_X86_64_WIN,
         '/usr/bin/gcc-4.9': GCC_4_9 + GCC_PLATFORM_X86_64_WIN,
@@ -1314,10 +1332,10 @@ class OSXCrossToolchainTest(BaseToolchainTest):
     def test_osx_cross(self):
         self.do_toolchain_test(self.PATHS, {
             'c_compiler': self.DEFAULT_CLANG_RESULT + {
-                'flags': ['--target=i686-darwin11.2.0'],
+                'flags': ['--target=i686-apple-darwin11.2.0'],
             },
             'cxx_compiler': self.DEFAULT_CLANGXX_RESULT + {
-                'flags': ['--target=i686-darwin11.2.0'],
+                'flags': ['--target=i686-apple-darwin11.2.0'],
             },
             'host_c_compiler': self.DEFAULT_CLANG_RESULT,
             'host_cxx_compiler': self.DEFAULT_CLANGXX_RESULT,
@@ -1341,12 +1359,12 @@ class WindowsCrossToolchainTest(BaseToolchainTest):
 
     def test_clang_cl_cross(self):
         paths = {
-            '/usr/bin/clang-cl': CLANG_CL_3_9 + CLANG_CL_PLATFORM_X86_64,
+            '/usr/bin/clang-cl': CLANG_CL_8_0 + CLANG_CL_PLATFORM_X86_64,
         }
         paths.update(LinuxToolchainTest.PATHS)
         self.do_toolchain_test(paths, {
-            'c_compiler': WindowsToolchainTest.CLANG_CL_3_9_RESULT,
-            'cxx_compiler': WindowsToolchainTest.CLANGXX_CL_3_9_RESULT,
+            'c_compiler': WindowsToolchainTest.CLANG_CL_8_0_RESULT,
+            'cxx_compiler': WindowsToolchainTest.CLANGXX_CL_8_0_RESULT,
             'host_c_compiler': self.DEFAULT_CLANG_RESULT,
             'host_cxx_compiler': self.DEFAULT_CLANGXX_RESULT,
         })
@@ -1370,8 +1388,11 @@ class OpenBSDToolchainTest(BaseToolchainTest):
 
 
 @memoize
-def gen_invoke_cargo(version):
+def gen_invoke_cargo(version, rustup_wrapper=False):
     def invoke_cargo(stdin, args):
+        args = tuple(args)
+        if not rustup_wrapper and args == ('+stable',):
+            return (101, '', 'we are the real thing')
         if args == ('--version', '--verbose'):
             return 0, 'cargo %s\nrelease: %s' % (version, version), ''
         raise NotImplementedError('unsupported arguments')
@@ -1379,8 +1400,13 @@ def gen_invoke_cargo(version):
 
 
 @memoize
-def gen_invoke_rustc(version):
+def gen_invoke_rustc(version, rustup_wrapper=False):
     def invoke_rustc(stdin, args):
+        args = tuple(args)
+        # TODO: we don't have enough machinery set up to test the `rustup which`
+        # fallback yet.
+        if not rustup_wrapper and args == ('+stable',):
+            return (1, '', 'error: couldn\'t read +stable: No such file or directory')
         if args == ('--version', '--verbose'):
             return (0, 'rustc %s\nrelease: %s\nhost: x86_64-unknown-linux-gnu'
                        % (version, version), '')

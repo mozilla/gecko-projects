@@ -1185,6 +1185,7 @@ NS_QUERYFRAME_HEAD(nsHTMLScrollFrame)
   NS_QUERYFRAME_ENTRY(nsIScrollableFrame)
   NS_QUERYFRAME_ENTRY(nsIStatefulFrame)
   NS_QUERYFRAME_ENTRY(nsIScrollbarMediator)
+  NS_QUERYFRAME_ENTRY(nsHTMLScrollFrame)
 NS_QUERYFRAME_TAIL_INHERITING(nsContainerFrame)
 
 //----------nsXULScrollFrame-------------------------------------------
@@ -2683,6 +2684,20 @@ void ScrollFrameHelper::ScrollToImpl(nsPoint aPt, const nsRect& aRange,
       FrameLayerBuilder::GetPaintedLayerScaleForFrame(mScrolledFrame);
   nsPoint curPos = GetScrollPosition();
 
+  // Below, we clamp |aPt| to the layout scroll range, compare the clamped
+  // value with the current scroll position, and early exit if they are the
+  // same. The early exit bypasses the update of |mLastScrollOrigin|, which
+  // is important to avoid sending a main-thread layout scroll update to APZ,
+  // which can clobber the visual scroll offset as well.
+  // If the layout viewport has shrunk in size since the last scroll, the
+  // clamped target position can be different from the current position, so
+  // we don't take the early exit, but conceptually we still want to avoid
+  // updating |mLastScrollOrigin| and clobbering the visual scroll offset.
+  bool suppressScrollOriginChange = false;
+  if (aPt == curPos) {
+    suppressScrollOriginChange = true;
+  }
+
   nsPoint alignWithPos = mScrollPosForLayerPixelAlignment == nsPoint(-1, -1)
                              ? curPos
                              : mScrollPosForLayerPixelAlignment;
@@ -2701,6 +2716,27 @@ void ScrollFrameHelper::ScrollToImpl(nsPoint aPt, const nsRect& aRange,
                                    alignWithPos, appUnitsPerDevPixel, scale);
   if (pt == curPos) {
     return;
+  }
+
+  // If we are scrolling the RCD-RSF, and a visual scroll update is pending,
+  // cancel it; otherwise, it will clobber this scroll.
+  if (IsRootScrollFrameOfDocument() && presContext->IsRootContentDocument()) {
+    PresShell* ps = presContext->GetPresShell();
+    if (const auto& visualScrollUpdate = ps->GetPendingVisualScrollUpdate()) {
+      if (visualScrollUpdate->mVisualScrollOffset != aPt) {
+        // Only clobber if the scroll was originated by the main thread.
+        // Respect the priority of origins (an "eRestore" layout scroll should
+        // not clobber an "eMainThread" visual scroll.)
+        bool shouldClobber =
+            aOrigin == nsGkAtoms::other ||
+            (aOrigin == nsGkAtoms::restore &&
+             visualScrollUpdate->mUpdateType == FrameMetrics::eRestore);
+        if (shouldClobber) {
+          ps->AcknowledgePendingVisualScrollUpdate();
+          ps->ClearPendingVisualScrollUpdate();
+        }
+      }
+    }
   }
 
   bool needFrameVisibilityUpdate = mLastUpdateFramesPos == nsPoint(-1, -1);
@@ -2737,7 +2773,8 @@ void ScrollFrameHelper::ScrollToImpl(nsPoint aPt, const nsRect& aRange,
   // legitimate scroll offset updates because the origin has been masked by
   // a later change within the same refresh driver tick.
   allowScrollOriginChange =
-      mAllowScrollOriginDowngrade || !isScrollOriginDowngrade;
+      (mAllowScrollOriginDowngrade || !isScrollOriginDowngrade) &&
+      !suppressScrollOriginChange;
 
   if (allowScrollOriginChange) {
     mLastScrollOrigin = aOrigin;
@@ -3225,7 +3262,9 @@ static void ClipItemsExceptCaret(
       continue;
     }
 
-    if (i->GetType() != DisplayItemType::TYPE_CARET) {
+    const DisplayItemType type = i->GetType();
+    if (type != DisplayItemType::TYPE_CARET &&
+        type != DisplayItemType::TYPE_CONTAINER) {
       const DisplayItemClipChain* clip = i->GetClipChain();
       const DisplayItemClipChain* intersection = nullptr;
       if (aCache.Get(clip, &intersection)) {
@@ -3418,7 +3457,7 @@ void ScrollFrameHelper::BuildDisplayList(nsDisplayListBuilder* aBuilder,
   AppendScrollPartsTo(aBuilder, aLists, createLayersForScrollbars, false);
 
   const nsStyleDisplay* disp = mOuter->StyleDisplay();
-  if (disp->mWillChangeBitField & StyleWillChangeBits_SCROLL) {
+  if (disp->mWillChange.bits & StyleWillChangeBits_SCROLL) {
     aBuilder->AddToWillChangeBudget(mOuter, GetVisualViewportSize());
   }
 
@@ -3931,10 +3970,6 @@ bool ScrollFrameHelper::DecideScrollableLayer(
   // date if we just introduced a new animated geometry root.
   if (oldWillBuildScrollableLayer != mWillBuildScrollableLayer) {
     aBuilder->RecomputeCurrentAnimatedGeometryRoot();
-    MOZ_DIAGNOSTIC_ASSERT(!aBuilder->IsPartialUpdate() ||
-                              aBuilder->InInvalidSubtree() ||
-                              mOuter->IsFrameModified(),
-                          "Displayport changed without an invalidation");
   }
 
   mIsScrollableLayerInRootContainer =
@@ -5384,7 +5419,7 @@ bool ScrollFrameHelper::IsScrollbarOnRight() const {
 
 bool ScrollFrameHelper::IsMaybeScrollingActive() const {
   const nsStyleDisplay* disp = mOuter->StyleDisplay();
-  if (disp->mWillChangeBitField & StyleWillChangeBits_SCROLL) {
+  if (disp->mWillChange.bits & StyleWillChangeBits_SCROLL) {
     return true;
   }
 
@@ -5397,7 +5432,7 @@ bool ScrollFrameHelper::IsMaybeScrollingActive() const {
 bool ScrollFrameHelper::IsScrollingActive(
     nsDisplayListBuilder* aBuilder) const {
   const nsStyleDisplay* disp = mOuter->StyleDisplay();
-  if (disp->mWillChangeBitField & StyleWillChangeBits_SCROLL &&
+  if (disp->mWillChange.bits & StyleWillChangeBits_SCROLL &&
       aBuilder->IsInWillChangeBudget(mOuter, GetVisualViewportSize())) {
     return true;
   }
@@ -6734,45 +6769,6 @@ static void CollectScrollPositionsForSnap(
   }
 }
 
-/**
- * Collect the scroll-snap-coordinates of frames in the subtree rooted at
- * |aFrame|, relative to |aScrolledFrame|, into |aOutCoords|.
- */
-static void CollectScrollSnapCoordinates(nsIFrame* aFrame,
-                                         nsIFrame* aScrolledFrame,
-                                         nsTArray<nsPoint>& aOutCoords) {
-  MOZ_ASSERT(!StaticPrefs::layout_css_scroll_snap_v1_enabled());
-
-  nsIFrame::ChildListIterator childLists(aFrame);
-  for (; !childLists.IsDone(); childLists.Next()) {
-    nsFrameList::Enumerator childFrames(childLists.CurrentList());
-    for (; !childFrames.AtEnd(); childFrames.Next()) {
-      nsIFrame* f = childFrames.get();
-
-      const nsStyleDisplay* styleDisplay = f->StyleDisplay();
-      size_t coordCount = styleDisplay->mScrollSnapCoordinate.Length();
-
-      if (coordCount) {
-        nsRect frameRect = f->GetRect();
-        nsPoint offset = f->GetOffsetTo(aScrolledFrame);
-        nsRect edgesRect = nsRect(offset, frameRect.Size());
-        for (size_t coordNum = 0; coordNum < coordCount; coordNum++) {
-          const Position& coordPosition =
-              f->StyleDisplay()->mScrollSnapCoordinate[coordNum];
-          nsPoint coordPoint = edgesRect.TopLeft();
-          coordPoint += nsPoint(coordPosition.horizontal.Resolve(
-                                    frameRect.width, NSToCoordRoundWithClamp),
-                                coordPosition.vertical.Resolve(
-                                    frameRect.height, NSToCoordRoundWithClamp));
-          aOutCoords.AppendElement(coordPoint);
-        }
-      }
-
-      CollectScrollSnapCoordinates(f, aScrolledFrame, aOutCoords);
-    }
-  }
-}
-
 static nscoord ResolveScrollPaddingStyleValue(
     const StyleRect<mozilla::NonNegativeLengthPercentageOrAuto>&
         aScrollPaddingStyle,
@@ -6824,44 +6820,6 @@ nsMargin ScrollFrameHelper::GetScrollPadding() const {
                                    GetScrollPortRect().Size());
 }
 
-layers::ScrollSnapInfo ScrollFrameHelper::ComputeOldScrollSnapInfo() const {
-  MOZ_ASSERT(!StaticPrefs::layout_css_scroll_snap_v1_enabled());
-  ScrollSnapInfo result;
-
-  ScrollStyles styles = GetScrollStylesFromFrame();
-
-  if (styles.mScrollSnapTypeY == StyleScrollSnapStrictness::None &&
-      styles.mScrollSnapTypeX == StyleScrollSnapStrictness::None) {
-    // We won't be snapping, short-circuit the computation.
-    return result;
-  }
-
-  result.mScrollSnapTypeX = styles.mScrollSnapTypeX;
-  result.mScrollSnapTypeY = styles.mScrollSnapTypeY;
-
-  nsSize scrollPortSize = GetScrollPortRect().Size();
-
-  result.mScrollSnapDestination =
-      nsPoint(styles.mScrollSnapDestinationX.Resolve(scrollPortSize.width),
-              styles.mScrollSnapDestinationY.Resolve(scrollPortSize.height));
-
-  if (styles.mScrollSnapPointsX.GetUnit() != eStyleUnit_None) {
-    result.mScrollSnapIntervalX =
-        Some(styles.mScrollSnapPointsX.ComputeCoordPercentCalc(
-            scrollPortSize.width));
-  }
-  if (styles.mScrollSnapPointsY.GetUnit() != eStyleUnit_None) {
-    result.mScrollSnapIntervalY =
-        Some(styles.mScrollSnapPointsY.ComputeCoordPercentCalc(
-            scrollPortSize.height));
-  }
-
-  CollectScrollSnapCoordinates(mScrolledFrame, mScrolledFrame,
-                               result.mScrollSnapCoordinates);
-
-  return result;
-}
-
 layers::ScrollSnapInfo ScrollFrameHelper::ComputeScrollSnapInfo(
     const Maybe<nsPoint>& aDestination) const {
   MOZ_ASSERT(StaticPrefs::layout_css_scroll_snap_v1_enabled());
@@ -6887,12 +6845,7 @@ layers::ScrollSnapInfo ScrollFrameHelper::ComputeScrollSnapInfo(
 
   Maybe<nsRect> snapportOnDestination;
   if (aDestination) {
-    if (IsPhysicalLTR()) {
-      snapport.MoveTo(aDestination.value());
-    } else {
-      snapport.MoveTo(
-          nsPoint(aDestination->x - snapport.Size().width, aDestination->y));
-    }
+    snapport.MoveTo(aDestination.value());
     snapport.Deflate(scrollPadding);
     snapportOnDestination.emplace(snapport);
   } else {
@@ -6908,12 +6861,11 @@ layers::ScrollSnapInfo ScrollFrameHelper::ComputeScrollSnapInfo(
 
 layers::ScrollSnapInfo ScrollFrameHelper::GetScrollSnapInfo(
     const Maybe<nsPoint>& aDestination) const {
-  // TODO(botond): Should we cache it?
-  if (StaticPrefs::layout_css_scroll_snap_v1_enabled()) {
-    return ComputeScrollSnapInfo(aDestination);
+  if (!StaticPrefs::layout_css_scroll_snap_v1_enabled()) {
+    return {};
   }
-
-  return ComputeOldScrollSnapInfo();
+  // TODO(botond): Should we cache it?
+  return ComputeScrollSnapInfo(aDestination);
 }
 
 bool ScrollFrameHelper::GetSnapPointForDestination(

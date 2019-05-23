@@ -351,7 +351,7 @@ nsresult NS_NewLoadGroup(nsILoadGroup** aResult, nsIPrincipal* aPrincipal);
 
 // Determine if the given loadGroup/principal pair will produce a principal
 // with similar permissions when passed to NS_NewChannel().  This checks for
-// things like making sure the appId and browser element flags match.  Without
+// things like making sure the browser element flag matches.  Without
 // an appropriate load group these values can be lost when getting the result
 // principal back out of the channel.  Null principals are also always allowed
 // as they do not have permissions to actually use the load group.
@@ -376,8 +376,7 @@ nsresult NS_NewStreamLoaderInternal(
     nsIPrincipal* aLoadingPrincipal, nsSecurityFlags aSecurityFlags,
     nsContentPolicyType aContentPolicyType, nsILoadGroup* aLoadGroup = nullptr,
     nsIInterfaceRequestor* aCallbacks = nullptr,
-    nsLoadFlags aLoadFlags = nsIRequest::LOAD_NORMAL,
-    nsIURI* aReferrer = nullptr);
+    nsLoadFlags aLoadFlags = nsIRequest::LOAD_NORMAL);
 
 nsresult NS_NewStreamLoader(nsIStreamLoader** outStream, nsIURI* aUri,
                             nsIStreamLoaderObserver* aObserver,
@@ -386,8 +385,7 @@ nsresult NS_NewStreamLoader(nsIStreamLoader** outStream, nsIURI* aUri,
                             nsContentPolicyType aContentPolicyType,
                             nsILoadGroup* aLoadGroup = nullptr,
                             nsIInterfaceRequestor* aCallbacks = nullptr,
-                            nsLoadFlags aLoadFlags = nsIRequest::LOAD_NORMAL,
-                            nsIURI* aReferrer = nullptr);
+                            nsLoadFlags aLoadFlags = nsIRequest::LOAD_NORMAL);
 
 nsresult NS_NewStreamLoader(nsIStreamLoader** outStream, nsIURI* aUri,
                             nsIStreamLoaderObserver* aObserver,
@@ -396,8 +394,7 @@ nsresult NS_NewStreamLoader(nsIStreamLoader** outStream, nsIURI* aUri,
                             nsContentPolicyType aContentPolicyType,
                             nsILoadGroup* aLoadGroup = nullptr,
                             nsIInterfaceRequestor* aCallbacks = nullptr,
-                            nsLoadFlags aLoadFlags = nsIRequest::LOAD_NORMAL,
-                            nsIURI* aReferrer = nullptr);
+                            nsLoadFlags aLoadFlags = nsIRequest::LOAD_NORMAL);
 
 nsresult NS_NewSyncStreamListener(nsIStreamListener** result,
                                   nsIInputStream** stream);
@@ -462,9 +459,8 @@ nsresult NS_GetURLSpecFromDir(nsIFile* file, nsACString& url,
  * referrer from the property docshell.internalReferrer, and if that doesn't
  * work and the channel is an nsIHTTPChannel, we check it's referrer property.
  *
- * @returns NS_ERROR_NOT_AVAILABLE if no referrer is available.
  */
-nsresult NS_GetReferrerFromChannel(nsIChannel* channel, nsIURI** referrer);
+void NS_GetReferrerFromChannel(nsIChannel* channel, nsIURI** referrer);
 
 nsresult NS_ParseRequestContentType(const nsACString& rawContentType,
                                     nsCString& contentType,
@@ -634,11 +630,6 @@ bool NS_IsSafeTopLevelNav(nsIChannel* aChannel);
  * cross origin navigation.
  */
 bool NS_IsSameSiteForeign(nsIChannel* aChannel, nsIURI* aHostURI);
-
-// Constants duplicated from nsIScriptSecurityManager so we avoid having necko
-// know about script security manager.
-#define NECKO_NO_APP_ID 0
-#define NECKO_UNKNOWN_APP_ID UINT32_MAX
 
 // Unique first-party domain for separating the safebrowsing cookie.
 // Note if this value is changed, code in test_cookiejars_safebrowsing.js and
@@ -926,20 +917,6 @@ nsresult NS_GetSecureUpgradedURI(nsIURI* aURI, nsIURI** aUpgradedURI);
 nsresult NS_CompareLoadInfoAndLoadContext(nsIChannel* aChannel);
 
 /**
- * Return default referrer policy which is controlled by user
- * prefs:
- * network.http.referer.defaultPolicy for regular mode
- * network.http.referer.defaultPolicy.trackers for third-party trackers
- * in regular mode
- * network.http.referer.defaultPolicy.pbmode for private mode
- * network.http.referer.defaultPolicy.trackers.pbmode for third-party trackers
- * in private mode
- */
-uint32_t NS_GetDefaultReferrerPolicy(nsIHttpChannel* aChannel = nullptr,
-                                     nsIURI* aURI = nullptr,
-                                     bool privateBrowsing = false);
-
-/**
  * Return true if this channel should be classified by the URL classifier.
  */
 bool NS_ShouldClassifyChannel(nsIChannel* aChannel);
@@ -947,9 +924,9 @@ bool NS_ShouldClassifyChannel(nsIChannel* aChannel);
 /**
  * Helper to set the blocking reason on loadinfo of the channel.
  */
-nsresult NS_SetRequestBlockingReason(nsIChannel *channel, uint32_t reason);
-nsresult NS_SetRequestBlockingReason(nsILoadInfo *loadInfo, uint32_t reason);
-nsresult NS_SetRequestBlockingReasonIfNull(nsILoadInfo *loadInfo,
+nsresult NS_SetRequestBlockingReason(nsIChannel* channel, uint32_t reason);
+nsresult NS_SetRequestBlockingReason(nsILoadInfo* loadInfo, uint32_t reason);
+nsresult NS_SetRequestBlockingReasonIfNull(nsILoadInfo* loadInfo,
                                            uint32_t reason);
 
 namespace mozilla {

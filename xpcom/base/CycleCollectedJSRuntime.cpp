@@ -92,6 +92,10 @@
 #  include "ProfilerMarkerPayload.h"
 #endif
 
+#if defined(XP_MACOSX)
+# include "nsMacUtilsImpl.h"
+#endif
+
 #include "nsIException.h"
 #include "nsThread.h"
 #include "nsThreadUtils.h"
@@ -484,6 +488,12 @@ CycleCollectedJSRuntime::CycleCollectedJSRuntime(JSContext* aCx)
   MOZ_COUNT_CTOR(CycleCollectedJSRuntime);
   MOZ_ASSERT(aCx);
   MOZ_ASSERT(mJSRuntime);
+
+#if defined(XP_MACOSX)
+  if (!XRE_IsParentProcess()) {
+    nsMacUtilsImpl::EnableTCSMIfAvailable();
+  }
+#endif
 
   if (!JS_AddExtraGCRootsTracer(aCx, TraceBlackJS, this)) {
     MOZ_CRASH("JS_AddExtraGCRootsTracer failed");
@@ -1444,7 +1454,7 @@ void CycleCollectedJSRuntime::EnvironmentPreparer::invoke(
   nsIGlobalObject* nativeGlobal = xpc::NativeGlobal(global);
 
   // Not much we can do if we simply don't have a usable global here...
-  NS_ENSURE_TRUE_VOID(nativeGlobal && nativeGlobal->GetGlobalJSObject());
+  NS_ENSURE_TRUE_VOID(nativeGlobal && nativeGlobal->HasJSGlobal());
 
   AutoEntryScript aes(nativeGlobal, "JS-engine-initiated execution");
 

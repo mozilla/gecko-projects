@@ -25,7 +25,7 @@
 #include "js/RootingAPI.h"         // JS::Rooted
 #include "js/SourceText.h"         // JS::SourceText
 #include "js/TypeDecls.h"          // JS::HandleObject, JS::MutableHandleScript
-#include "js/Utility.h"            // JS::UniqueTwoByteChars
+#include "js/Utility.h"            // js::MallocArena, JS::UniqueTwoByteChars
 #include "js/Value.h"              // JS::Value
 #include "util/CompleteFile.h"     // js::FileContents, js::ReadCompleteFile
 #include "util/StringBuffer.h"     // js::StringBuffer
@@ -144,6 +144,19 @@ JSScript* JS::CompileUtf8FileDontInflate(JSContext* cx,
 JSScript* JS::CompileUtf8Path(JSContext* cx,
                               const ReadOnlyCompileOptions& optionsArg,
                               const char* filename) {
+  AutoFile file;
+  if (!file.open(cx, filename)) {
+    return nullptr;
+  }
+
+  CompileOptions options(cx, optionsArg);
+  options.setFileAndLine(filename, 1);
+  return CompileUtf8File(cx, options, file.fp());
+}
+
+JSScript* JS::CompileUtf8PathDontInflate(
+    JSContext* cx, const ReadOnlyCompileOptions& optionsArg,
+    const char* filename) {
   AutoFile file;
   if (!file.open(cx, filename)) {
     return nullptr;
@@ -514,9 +527,11 @@ JS_PUBLIC_API bool JS::CloneAndExecuteScript(JSContext* cx,
 }
 
 template <typename Unit>
-static bool Evaluate(JSContext* cx, ScopeKind scopeKind, HandleObject env,
-                     const ReadOnlyCompileOptions& optionsArg,
-                     SourceText<Unit>& srcBuf, MutableHandleValue rval) {
+static bool EvaluateSourceBuffer(JSContext* cx, ScopeKind scopeKind,
+                                 Handle<JSObject*> env,
+                                 const ReadOnlyCompileOptions& optionsArg,
+                                 SourceText<Unit>& srcBuf,
+                                 MutableHandle<Value> rval) {
   CompileOptions options(cx, optionsArg);
   MOZ_ASSERT(!cx->zone()->isAtomsZone());
   AssertHeapIsIdle();
@@ -540,13 +555,35 @@ static bool Evaluate(JSContext* cx, ScopeKind scopeKind, HandleObject env,
                  options.noScriptRval ? nullptr : rval.address());
 }
 
-extern JS_PUBLIC_API bool JS::Evaluate(JSContext* cx,
-                                       const ReadOnlyCompileOptions& options,
-                                       SourceText<Utf8Unit>& srcBuf,
-                                       MutableHandle<Value> rval) {
+JS_PUBLIC_API bool JS::Evaluate(JSContext* cx,
+                                const ReadOnlyCompileOptions& options,
+                                SourceText<Utf8Unit>& srcBuf,
+                                MutableHandle<Value> rval) {
   RootedObject globalLexical(cx, &cx->global()->lexicalEnvironment());
-  return ::Evaluate(cx, ScopeKind::Global, globalLexical, options, srcBuf,
-                    rval);
+
+  size_t length = srcBuf.length();
+  auto chars = UniqueTwoByteChars(
+      UTF8CharsToNewTwoByteCharsZ(cx, UTF8Chars(srcBuf.get(), length),
+                                  &length, js::MallocArena).get());
+  if (!chars) {
+    return false;
+  }
+
+  SourceText<char16_t> inflatedSrc;
+  if (!inflatedSrc.init(cx, std::move(chars), length)) {
+    return false;
+  }
+
+  return EvaluateSourceBuffer(cx, ScopeKind::Global, globalLexical, options,
+                              inflatedSrc, rval);
+}
+
+JS_PUBLIC_API bool JS::EvaluateDontInflate(
+    JSContext* cx, const ReadOnlyCompileOptions& options,
+    SourceText<Utf8Unit>& srcBuf, MutableHandle<Value> rval) {
+  RootedObject globalLexical(cx, &cx->global()->lexicalEnvironment());
+  return EvaluateSourceBuffer(cx, ScopeKind::Global, globalLexical, options,
+                              srcBuf, rval);
 }
 
 JS_PUBLIC_API bool JS::Evaluate(JSContext* cx,
@@ -554,8 +591,8 @@ JS_PUBLIC_API bool JS::Evaluate(JSContext* cx,
                                 SourceText<char16_t>& srcBuf,
                                 MutableHandleValue rval) {
   RootedObject globalLexical(cx, &cx->global()->lexicalEnvironment());
-  return ::Evaluate(cx, ScopeKind::Global, globalLexical, optionsArg, srcBuf,
-                    rval);
+  return EvaluateSourceBuffer(cx, ScopeKind::Global, globalLexical, optionsArg,
+                              srcBuf, rval);
 }
 
 JS_PUBLIC_API bool JS::Evaluate(JSContext* cx, HandleObjectVector envChain,
@@ -568,7 +605,7 @@ JS_PUBLIC_API bool JS::Evaluate(JSContext* cx, HandleObjectVector envChain,
     return false;
   }
 
-  return ::Evaluate(cx, scope->kind(), env, options, srcBuf, rval);
+  return EvaluateSourceBuffer(cx, scope->kind(), env, options, srcBuf, rval);
 }
 
 JS_PUBLIC_API bool JS::EvaluateUtf8Path(
@@ -594,4 +631,29 @@ JS_PUBLIC_API bool JS::EvaluateUtf8Path(
   }
 
   return Evaluate(cx, options, srcBuf, rval);
+}
+
+JS_PUBLIC_API bool JS::EvaluateUtf8PathDontInflate(
+    JSContext* cx, const ReadOnlyCompileOptions& optionsArg,
+    const char* filename, MutableHandleValue rval) {
+  FileContents buffer(cx);
+  {
+    AutoFile file;
+    if (!file.open(cx, filename) || !file.readAll(cx, buffer)) {
+      return false;
+    }
+  }
+
+  CompileOptions options(cx, optionsArg);
+  options.setFileAndLine(filename, 1);
+
+  auto contents = reinterpret_cast<const char*>(buffer.begin());
+  size_t length = buffer.length();
+
+  JS::SourceText<Utf8Unit> srcBuf;
+  if (!srcBuf.init(cx, contents, length, JS::SourceOwnership::Borrowed)) {
+    return false;
+  }
+
+  return EvaluateDontInflate(cx, options, srcBuf, rval);
 }

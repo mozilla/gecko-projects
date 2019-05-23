@@ -1022,11 +1022,7 @@ static bool CheckOverflow(ComputedStyle* aComputedStyle,
       display->mScrollBehavior == NS_STYLE_SCROLL_BEHAVIOR_AUTO &&
       display->mOverscrollBehaviorX == StyleOverscrollBehavior::Auto &&
       display->mOverscrollBehaviorY == StyleOverscrollBehavior::Auto &&
-      display->mScrollSnapType.strictness == StyleScrollSnapStrictness::None &&
-      display->mScrollSnapPointsX == nsStyleCoord(eStyleUnit_None) &&
-      display->mScrollSnapPointsY == nsStyleCoord(eStyleUnit_None) &&
-      display->mScrollSnapDestination.horizontal == LengthPercentage::Zero() &&
-      display->mScrollSnapDestination.vertical == LengthPercentage::Zero()) {
+      display->mScrollSnapType.strictness == StyleScrollSnapStrictness::None) {
     return false;
   }
 
@@ -2545,8 +2541,8 @@ void nsRootPresContext::InitApplyPluginGeometryTimer() {
   }
 
   // We'll apply the plugin geometry updates during the next compositing paint
-  // in this presContext (either from nsPresShell::WillPaintWindow or from
-  // nsPresShell::DidPaintWindow, depending on the platform).  But paints might
+  // in this presContext (either from PresShell::WillPaintWindow() or from
+  // PresShell::DidPaintWindow(), depending on the platform).  But paints might
   // get optimized away if the old plugin geometry covers the invalid region,
   // so set a backup timer to do this too.  We want to make sure this
   // won't fire before our normal paint notifications, if those would

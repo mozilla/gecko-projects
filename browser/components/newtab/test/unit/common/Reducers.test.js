@@ -684,17 +684,9 @@ describe("Reducers", () => {
       const state = DiscoveryStream(undefined, {type: at.DISCOVERY_STREAM_CONFIG_CHANGE, data: {enabled: true}});
       assert.deepEqual(state.config, {enabled: true});
     });
-    it("should load feeds with DISCOVERY_STREAM_FEEDS_UPDATE", () => {
-      const data = {
-        "https://foo.com/feed1": {lastUpdated: 123, data: [1, 2, 3]},
-      };
-
-      const state = DiscoveryStream(undefined, {type: at.DISCOVERY_STREAM_FEEDS_UPDATE, data});
-
-      assert.deepEqual(state.feeds, {
-        data,
-        loaded: true,
-      });
+    it("should set feeds as loaded with DISCOVERY_STREAM_FEEDS_UPDATE", () => {
+      const state = DiscoveryStream(undefined, {type: at.DISCOVERY_STREAM_FEEDS_UPDATE});
+      assert.isTrue(state.feeds.loaded);
     });
     it("should set spoc_endpoint with DISCOVERY_STREAM_SPOCS_ENDPOINT", () => {
       const state = DiscoveryStream(undefined, {type: at.DISCOVERY_STREAM_SPOCS_ENDPOINT, data: "foo.com"});
@@ -719,17 +711,17 @@ describe("Reducers", () => {
       const state = DiscoveryStream(undefined, {type: at.DISCOVERY_STREAM_SPOCS_UPDATE, data});
       assert.deepEqual(state.spocs, INITIAL_STATE.DiscoveryStream.spocs);
     });
-    it("should not update state for empty action.data on PLACES_LINK_BLOCKED", () => {
-      const newState = DiscoveryStream(undefined, {type: at.PLACES_LINK_BLOCKED});
+    it("should not update state for empty action.data on DISCOVERY_STREAM_LINK_BLOCKED", () => {
+      const newState = DiscoveryStream(undefined, {type: at.DISCOVERY_STREAM_LINK_BLOCKED});
       assert.equal(newState, INITIAL_STATE.DiscoveryStream);
     });
     it("should not update state if feeds are not loaded", () => {
-      const deleteAction = {type: at.PLACES_LINK_BLOCKED, data: {url: "foo.com"}};
+      const deleteAction = {type: at.DISCOVERY_STREAM_LINK_BLOCKED, data: {url: "foo.com"}};
       const newState = DiscoveryStream(undefined, deleteAction);
       assert.equal(newState, INITIAL_STATE.DiscoveryStream);
     });
     it("should not update state if spocs and feeds data is undefined", () => {
-      const deleteAction = {type: at.PLACES_LINK_BLOCKED, data: {url: "foo.com"}};
+      const deleteAction = {type: at.DISCOVERY_STREAM_LINK_BLOCKED, data: {url: "foo.com"}};
       const oldState = {
         spocs: {
           data: {},
@@ -743,8 +735,8 @@ describe("Reducers", () => {
       const newState = DiscoveryStream(oldState, deleteAction);
       assert.deepEqual(newState, oldState);
     });
-    it("should remove the site on PLACES_LINK_BLOCKED from spocs if feeds data is empty", () => {
-      const deleteAction = {type: at.PLACES_LINK_BLOCKED, data: {url: "https://foo.com"}};
+    it("should remove the site on DISCOVERY_STREAM_LINK_BLOCKED from spocs if feeds data is empty", () => {
+      const deleteAction = {type: at.DISCOVERY_STREAM_LINK_BLOCKED, data: {url: "https://foo.com"}};
       const oldState = {
         spocs: {
           data: {
@@ -763,8 +755,8 @@ describe("Reducers", () => {
       const newState = DiscoveryStream(oldState, deleteAction);
       assert.deepEqual(newState.spocs.data.spocs, [{url: "test-spoc.com"}]);
     });
-    it("should remove the site on PLACES_LINK_BLOCKED from feeds if spocs data is empty", () => {
-      const deleteAction = {type: at.PLACES_LINK_BLOCKED, data: {url: "https://foo.com"}};
+    it("should remove the site on DISCOVERY_STREAM_LINK_BLOCKED from feeds if spocs data is empty", () => {
+      const deleteAction = {type: at.DISCOVERY_STREAM_LINK_BLOCKED, data: {url: "https://foo.com"}};
       const oldState = {
         spocs: {
           data: {},
@@ -787,7 +779,7 @@ describe("Reducers", () => {
       const newState = DiscoveryStream(oldState, deleteAction);
       assert.deepEqual(newState.feeds.data["https://foo.com/feed1"].data.recommendations, [{url: "test.com"}]);
     });
-    it("should remove the site on PLACES_LINK_BLOCKED from both feeds and spocs", () => {
+    it("should remove the site on DISCOVERY_STREAM_LINK_BLOCKED from both feeds and spocs", () => {
       const oldState = {
         feeds: {
           data: {
@@ -812,7 +804,7 @@ describe("Reducers", () => {
           loaded: true,
         },
       };
-      const deleteAction = {type: at.PLACES_LINK_BLOCKED, data: {url: "https://foo.com"}};
+      const deleteAction = {type: at.DISCOVERY_STREAM_LINK_BLOCKED, data: {url: "https://foo.com"}};
       const newState = DiscoveryStream(oldState, deleteAction);
       assert.deepEqual(newState.spocs.data.spocs, [{url: "test-spoc.com"}]);
       assert.deepEqual(newState.feeds.data["https://foo.com/feed1"].data.recommendations, [{url: "test.com"}]);
@@ -1054,15 +1046,6 @@ describe("Reducers", () => {
       const nextState = Search(undefined, {type: "SHOW_SEARCH"});
       assert.propertyVal(nextState, "fakeFocus", false);
       assert.propertyVal(nextState, "hide", false);
-    });
-  });
-  describe("ASRouter", () => {
-    it("should listen for pref changes on AS_ROUTER_PREF_CHANGED", async () => {
-      const action = {data: {foo: "bar"}, type: at.AS_ROUTER_PREF_CHANGED};
-
-      const result = ASRouter({}, action);
-
-      assert.propertyVal(result, "foo", "bar");
     });
   });
   it("should set initialized to true on AS_ROUTER_INITIALIZED", () => {

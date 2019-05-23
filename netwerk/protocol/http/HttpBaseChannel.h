@@ -38,7 +38,7 @@
 #include "nsILoadInfo.h"
 #include "mozilla/net/NeckoCommon.h"
 #include "nsThreadUtils.h"
-#include "PrivateBrowsingChannel.h"
+#include "mozilla/net/PrivateBrowsingChannel.h"
 #include "mozilla/net/DNS.h"
 #include "nsITimedChannel.h"
 #include "nsIHttpChannel.h"
@@ -52,6 +52,7 @@
 #include "nsCOMPtr.h"
 #include "mozilla/IntegerPrintfMacros.h"
 #include "nsStringEnumerator.h"
+#include "mozilla/dom/ReferrerInfo.h"
 
 #define HTTP_BASE_CHANNEL_IID                        \
   {                                                  \
@@ -183,11 +184,10 @@ class HttpBaseChannel : public nsHashPropertyBag,
   // HttpBaseChannel::nsIHttpChannel
   NS_IMETHOD GetRequestMethod(nsACString& aMethod) override;
   NS_IMETHOD SetRequestMethod(const nsACString& aMethod) override;
-  NS_IMETHOD GetReferrer(nsIURI** referrer) override;
-  NS_IMETHOD SetReferrer(nsIURI* referrer) override;
-  NS_IMETHOD GetReferrerPolicy(uint32_t* referrerPolicy) override;
-  NS_IMETHOD SetReferrerWithPolicy(nsIURI* referrer,
-                                   uint32_t referrerPolicy) override;
+  NS_IMETHOD GetReferrerInfo(nsIReferrerInfo** aReferrerInfo) override;
+  NS_IMETHOD SetReferrerInfo(nsIReferrerInfo* aReferrerInfo) override;
+  NS_IMETHOD SetReferrerInfoWithoutClone(
+      nsIReferrerInfo* aReferrerInfo) override;
   NS_IMETHOD GetRequestHeader(const nsACString& aHeader,
                               nsACString& aValue) override;
   NS_IMETHOD SetRequestHeader(const nsACString& aHeader,
@@ -274,8 +274,9 @@ class HttpBaseChannel : public nsHashPropertyBag,
   NS_IMETHOD SetAllowAltSvc(bool aAllowAltSvc) override;
   NS_IMETHOD GetBeConservative(bool* aBeConservative) override;
   NS_IMETHOD SetBeConservative(bool aBeConservative) override;
-  NS_IMETHOD GetTrr(bool* aTRR) override;
-  NS_IMETHOD SetTrr(bool aTRR) override;
+  NS_IMETHOD GetIsTRRServiceChannel(bool* aTRR) override;
+  NS_IMETHOD SetIsTRRServiceChannel(bool aTRR) override;
+  NS_IMETHOD GetIsResolvedByTRR(bool* aResolvedByTRR) override;
   NS_IMETHOD GetTlsFlags(uint32_t* aTlsFlags) override;
   NS_IMETHOD SetTlsFlags(uint32_t aTlsFlags) override;
   NS_IMETHOD GetApiRedirectToURI(nsIURI** aApiRedirectToURI) override;
@@ -404,8 +405,6 @@ class HttpBaseChannel : public nsHashPropertyBag,
 
   bool IsDeliveringAltData() const { return mDeliveringAltData; }
 
-  static bool IsReferrerSchemeAllowed(nsIURI* aReferrer);
-
   static void PropagateReferenceIfNeeded(nsIURI* aURI,
                                          nsCOMPtr<nsIURI>& aRedirectURI);
 
@@ -442,26 +441,24 @@ class HttpBaseChannel : public nsHashPropertyBag,
     mUploadStreamHasHeaders = hasHeaders;
   }
 
-  MOZ_MUST_USE nsresult SetReferrerWithPolicyInternal(
-      nsIURI* referrer, uint32_t originalReferrerPolicy,
-      uint32_t referrerPolicy) {
-    nsAutoCString spec;
-    nsresult rv = referrer->GetAsciiSpec(spec);
-    if (NS_FAILED(rv)) {
-      return rv;
-    }
-    mOriginalReferrer = referrer;
-    mReferrer = referrer;
-    mOriginalReferrerPolicy = originalReferrerPolicy;
-    mReferrerPolicy = referrerPolicy;
-    rv = mRequestHead.SetHeader(nsHttp::Referer, spec);
-    return rv;
+  virtual nsresult SetReferrerHeader(const nsACString& aReferrer) {
+    ENSURE_CALLED_BEFORE_CONNECT();
+    return mRequestHead.SetHeader(nsHttp::Referer, aReferrer);
+  }
+
+  nsresult ClearReferrerHeader() {
+    ENSURE_CALLED_BEFORE_CONNECT();
+    return mRequestHead.ClearHeader(nsHttp::Referer);
   }
 
   MOZ_MUST_USE nsresult SetTopWindowURI(nsIURI* aTopWindowURI) {
     mTopWindowURI = aTopWindowURI;
     return NS_OK;
   }
+
+  // Set referrerInfo and compute the referrer header if neccessary.
+  nsresult SetReferrerInfo(nsIReferrerInfo* aReferrerInfo, bool aClone,
+                           bool aCompute);
 
  protected:
   nsresult GetTopWindowURI(nsIURI* aURIBeingLoaded, nsIURI** aTopWindowURI);
@@ -554,12 +551,7 @@ class HttpBaseChannel : public nsHashPropertyBag,
   nsCOMPtr<nsILoadInfo> mLoadInfo;
   nsCOMPtr<nsIInterfaceRequestor> mCallbacks;
   nsCOMPtr<nsIProgressEventSink> mProgressSink;
-  // When the referrer is set before calling AsyncOpen, we remember the referrer
-  // argument passed in case we need to readjust the referrer header being used
-  // depending on the active cookie policy once we have determined whether the
-  // channel is a tracking third-party resource or not.
-  nsCOMPtr<nsIURI> mOriginalReferrer;
-  nsCOMPtr<nsIURI> mReferrer;
+  nsCOMPtr<nsIReferrerInfo> mReferrerInfo;
   nsCOMPtr<nsIApplicationCache> mApplicationCache;
   nsCOMPtr<nsIURI> mAPIRedirectToURI;
   nsCOMPtr<nsIURI> mProxyURI;
@@ -572,8 +564,6 @@ class HttpBaseChannel : public nsHashPropertyBag,
  private:
   // Proxy release all members above on main thread.
   void ReleaseMainThreadOnlyReferences();
-
-  bool IsCrossOriginWithReferrer();
 
   nsresult ExplicitSetUploadStreamLength(uint64_t aContentLength,
                                          bool aStreamHasHeaders);
@@ -704,7 +694,12 @@ class HttpBaseChannel : public nsHashPropertyBag,
   // classification. If this is changed or removed, make sure we also update
   // NS_ShouldClassifyChannel accordingly !!!
   uint32_t mBeConservative : 1;
-  uint32_t mTRR : 1;
+  // If the current channel is used to as a TRR connection.
+  uint32_t mIsTRRServiceChannel : 1;
+  // If the request was performed to a TRR resolved IP address.
+  // Will be false if loading the resource does not create a connection
+  // (for example when it's loaded from the cache).
+  uint32_t mResolvedByTRR : 1;
   uint32_t mResponseTimeoutEnabled : 1;
   // A flag that should be false only if a cross-domain redirect occurred
   uint32_t mAllRedirectsSameOrigin : 1;
@@ -750,8 +745,6 @@ class HttpBaseChannel : public nsHashPropertyBag,
   uint32_t mProxyResolveFlags;
 
   uint32_t mContentDispositionHint;
-  uint32_t mOriginalReferrerPolicy;
-  uint32_t mReferrerPolicy;
 
   uint32_t mCorsMode;
   uint32_t mRedirectMode;

@@ -39,6 +39,10 @@ class RemoteAgentClass {
       throw new Error("Remote agent can only be instantiated from the parent process");
     }
 
+    if (this.server) {
+      return;
+    }
+
     this.server = new HttpServer();
     this.targets = new Targets();
 
@@ -67,7 +71,7 @@ class RemoteAgentClass {
     return !!this.server && !this.server._socketClosed;
   }
 
-  listen(address) {
+  async listen(address) {
     if (!(address instanceof Ci.nsIURI)) {
       throw new TypeError(`Expected nsIURI: ${address}`);
     }
@@ -86,13 +90,17 @@ class RemoteAgentClass {
       return;
     }
 
-    try {
-      this.server._start(port, host);
+    this.init();
 
+    await this.tabs.start();
+
+    try {
       // Immediatly instantiate the main process target in order
       // to be accessible via HTTP endpoint on startup
       const mainTarget = this.targets.getMainProcessTarget();
-      log.info(`Remote debugging agent listening on ${mainTarget.wsDebuggerURL}`);
+
+      this.server._start(port, host);
+      dump(`DevTools listening on ${mainTarget.wsDebuggerURL}\n`);
     } catch (e) {
       throw new Error(`Unable to start remote agent: ${e.message}`, e);
     }
@@ -185,7 +193,6 @@ class RemoteAgentClass {
     this.init();
 
     await Observer.once("sessionstore-windows-restored");
-    await this.tabs.start();
 
     try {
       this.listen(addr);

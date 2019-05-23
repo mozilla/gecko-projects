@@ -12,6 +12,7 @@ const { adbAddon } = require("devtools/shared/adb/adb-addon");
 const AdbDevice = require("devtools/shared/adb/adb-device");
 const { AdbRuntime } = require("devtools/shared/adb/adb-runtime");
 const { TrackDevicesCommand } = require("devtools/shared/adb/commands/track-devices");
+loader.lazyRequireGetter(this, "check", "devtools/shared/adb/adb-running-checker", true);
 
 // Duration in milliseconds of the runtime polling. We resort to polling here because we
 // have no event to know when a runtime started on an already discovered ADB device.
@@ -33,9 +34,11 @@ class Adb extends EventEmitter {
     this._updateAdbProcess = this._updateAdbProcess.bind(this);
     this._onDeviceConnected = this._onDeviceConnected.bind(this);
     this._onDeviceDisconnected = this._onDeviceDisconnected.bind(this);
+    this._onNoDevicesDetected = this._onNoDevicesDetected.bind(this);
 
     this._trackDevicesCommand.on("device-connected", this._onDeviceConnected);
     this._trackDevicesCommand.on("device-disconnected", this._onDeviceDisconnected);
+    this._trackDevicesCommand.on("no-devices-detected", this._onNoDevicesDetected);
     adbAddon.on("update", this._updateAdbProcess);
   }
 
@@ -70,6 +73,10 @@ class Adb extends EventEmitter {
 
   getDevices() {
     return [...this._devices.values()];
+  }
+
+  async isProcessStarted() {
+    return check();
   }
 
   async _startTracking() {
@@ -126,9 +133,19 @@ class Adb extends EventEmitter {
     this.updateRuntimes();
   }
 
+  _onNoDevicesDetected() {
+    this.updateRuntimes();
+  }
+
   async _getDeviceRuntimes(device) {
     const socketPaths = [...await device.getRuntimeSocketPaths()];
-    return socketPaths.map(socketPath => new AdbRuntime(device, socketPath));
+    const runtimes = [];
+    for (const socketPath of socketPaths) {
+      const runtime = new AdbRuntime(device, socketPath);
+      await runtime.init();
+      runtimes.push(runtime);
+    }
+    return runtimes;
   }
 }
 

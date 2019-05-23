@@ -1,3 +1,7 @@
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at http://mozilla.org/MPL/2.0/.
+---
 job-defaults:
     always-target: true
     attributes:
@@ -174,3 +178,18 @@ shellcheck:
     when:
         files-changed:
             - '**/*.sh'
+
+
+localization:
+    description: l10n tests for strings with errors and conflicts with cross-channel
+    platform: lint/opt
+    treeherder:
+        symbol: l1nt
+    run:
+        mach: lint -l l10n -f treeherder
+    when:
+        files-changed:
+            - '**/locales/en-US/**'
+            - '**/l10n.toml'
+            - 'third_party/python/compare-locales/**'
+            - 'third_party/python/fluent/**'

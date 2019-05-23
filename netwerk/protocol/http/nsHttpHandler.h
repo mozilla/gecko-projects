@@ -47,7 +47,36 @@ class nsHttpConnectionInfo;
 class nsHttpTransaction;
 class AltSvcMapping;
 
-enum FrameCheckLevel { FRAMECHECK_LAX, FRAMECHECK_BARELY, FRAMECHECK_STRICT };
+/*
+ * FRAMECHECK_LAX - no check
+ * FRAMECHECK_BARELY - allows:
+ *                     1) that chunk-encoding does not have the last 0-size
+ *                     chunk. So, if a chunked-encoded transfer ends on exactly
+ *                     a chunk boundary we consider that fine. This will allows
+ *                     us to accept buggy servers that do not send the last
+ *                     chunk. It will make us not detect a certain amount of
+ *                     cut-offs.
+ *                     2) When receiving a gzipped response, we consider a
+ *                     gzip stream that doesn't end fine according to the gzip
+ *                     decompressing state machine to be a partial transfer.
+ *                     If a gzipped transfer ends fine according to the
+ *                     decompressor, we do not check for size unalignments.
+ *                     This allows to allow HTTP gzipped responses where the
+ *                     Content-Length is not the same as the actual contents.
+ *                     3) When receiving HTTP that isn't
+ *                     content-encoded/compressed (like in case 2) and not
+ *                     chunked (like in case 1), perform the size comparison
+ *                     between Content-Length: and the actual size received
+ *                     and consider a mismatch to mean a
+ *                     NS_ERROR_NET_PARTIAL_TRANSFER error.
+ * FRAMECHECK_STRICT_CHUNKED - This is the same as FRAMECHECK_BARELY only we
+ *                             enforce that the last 0-size chunk is received
+ *                             in case 1).
+ * FRAMECHECK_STRICT - we also do not allow case 2) and 3) from
+ *                     FRAMECHECK_BARELY.
+ */
+enum FrameCheckLevel { FRAMECHECK_LAX, FRAMECHECK_BARELY,
+                       FRAMECHECK_STRICT_CHUNKED, FRAMECHECK_STRICT };
 
 //-----------------------------------------------------------------------------
 // nsHttpHandler - protocol handler for HTTP and HTTPS
@@ -78,14 +107,6 @@ class nsHttpHandler final : public nsIHttpProtocolHandler,
 
   enum HttpVersion HttpVersion() { return mHttpVersion; }
   enum HttpVersion ProxyHttpVersion() { return mProxyHttpVersion; }
-  uint8_t ReferrerLevel() { return mReferrerLevel; }
-  bool SpoofReferrerSource() { return mSpoofReferrerSource; }
-  bool HideOnionReferrerSource() { return mHideOnionReferrerSource; }
-  uint8_t ReferrerTrimmingPolicy() { return mReferrerTrimmingPolicy; }
-  uint8_t ReferrerXOriginTrimmingPolicy() {
-    return mReferrerXOriginTrimmingPolicy;
-  }
-  uint8_t ReferrerXOriginPolicy() { return mReferrerXOriginPolicy; }
   uint8_t RedirectionLimit() { return mRedirectionLimit; }
   PRIntervalTime IdleTimeout() { return mIdleTimeout; }
   PRIntervalTime SpdyTimeout() { return mSpdyTimeout; }
@@ -294,7 +315,8 @@ class nsHttpHandler final : public nsIHttpProtocolHandler,
                                            nsIInterfaceRequestor* callbacks,
                                            uint32_t caps = 0) {
     TickleWifi(callbacks);
-    return mConnMgr->SpeculativeConnect(ci, callbacks, caps);
+    RefPtr<nsHttpConnectionInfo> clone = ci->Clone();
+    return mConnMgr->SpeculativeConnect(clone, callbacks, caps);
   }
 
   // Alternate Services Maps are main thread only
@@ -483,12 +505,6 @@ class nsHttpHandler final : public nsIHttpProtocolHandler,
   enum HttpVersion mHttpVersion;
   enum HttpVersion mProxyHttpVersion;
   uint32_t mCapabilities;
-  uint8_t mReferrerLevel;
-  uint8_t mSpoofReferrerSource;
-  uint8_t mHideOnionReferrerSource;
-  uint8_t mReferrerTrimmingPolicy;
-  uint8_t mReferrerXOriginTrimmingPolicy;
-  uint8_t mReferrerXOriginPolicy;
 
   bool mFastFallbackToIPv4;
   PRIntervalTime mIdleTimeout;
@@ -572,9 +588,6 @@ class nsHttpHandler final : public nsIHttpProtocolHandler,
 
   // Persistent HTTPS caching flag
   bool mEnablePersistentHttpsCaching;
-
-  // For broadcasting tracking preference
-  bool mDoNotTrackEnabled;
 
   // for broadcasting safe hint;
   bool mSafeHintEnabled;

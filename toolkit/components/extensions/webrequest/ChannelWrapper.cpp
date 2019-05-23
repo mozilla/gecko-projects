@@ -521,13 +521,17 @@ bool ChannelWrapper::Matches(
     return false;
   }
 
+  nsCOMPtr<nsILoadInfo> loadInfo = GetLoadInfo();
+  bool isPrivate =
+      loadInfo && loadInfo->GetOriginAttributes().mPrivateBrowsingId > 0;
+  if (!aFilter.mIncognito.IsNull() && aFilter.mIncognito.Value() != isPrivate) {
+    return false;
+  }
+
   if (aExtension) {
     // Verify extension access to private requests
-    if (!aExtension->PrivateBrowsingAllowed()) {
-      nsCOMPtr<nsILoadInfo> loadInfo = GetLoadInfo();
-      if (loadInfo && loadInfo->GetOriginAttributes().mPrivateBrowsingId > 0) {
-        return false;
-      }
+    if (isPrivate && !aExtension->PrivateBrowsingAllowed()) {
+      return false;
     }
 
     bool isProxy =
@@ -820,6 +824,9 @@ nsresult FillProxyInfo(MozProxyInfo& aDict, nsIProxyInfo* aProxyInfo) {
   MOZ_TRY(aProxyInfo->GetPort(&aDict.mPort));
   MOZ_TRY(aProxyInfo->GetType(aDict.mType));
   MOZ_TRY(aProxyInfo->GetUsername(aDict.mUsername));
+  MOZ_TRY(
+      aProxyInfo->GetProxyAuthorizationHeader(aDict.mProxyAuthorizationHeader));
+  MOZ_TRY(aProxyInfo->GetConnectionIsolationKey(aDict.mConnectionIsolationKey));
   MOZ_TRY(aProxyInfo->GetFailoverTimeout(&aDict.mFailoverTimeout.Construct()));
 
   uint32_t flags;

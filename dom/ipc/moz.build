@@ -62,6 +62,7 @@ EXPORTS.mozilla.dom += [
     'TabMessageUtils.h',
     'URLClassifierChild.h',
     'URLClassifierParent.h',
+    'WindowGlobalActor.h',
     'WindowGlobalChild.h',
     'WindowGlobalParent.h',
 ]
@@ -106,6 +107,7 @@ UNIFIED_SOURCES += [
     'TabContext.cpp',
     'TabMessageUtils.cpp',
     'URLClassifierParent.cpp',
+    'WindowGlobalActor.cpp',
     'WindowGlobalChild.cpp',
     'WindowGlobalParent.cpp',
 ]
@@ -198,7 +200,11 @@ if CONFIG['MOZ_WIDGET_TOOLKIT'] == 'android':
 
 JAR_MANIFESTS += ['jar.mn']
 
-BROWSER_CHROME_MANIFESTS += ['tests/browser.ini']
+BROWSER_CHROME_MANIFESTS += [
+    'tests/browser.ini',
+    'tests/JSWindowActor/browser.ini',
+]
+
 MOCHITEST_CHROME_MANIFESTS += ['tests/chrome.ini']
 MOCHITEST_MANIFESTS += ['tests/mochitest.ini']
 XPCSHELL_TESTS_MANIFESTS += ['tests/xpcshell.ini']

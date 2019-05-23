@@ -408,7 +408,7 @@ class StartRequestEvent : public NeckoTargetChannelEvent<HttpChannelChild> {
       const NetAddr& aPeerAddr, const uint32_t& aCacheKey,
       const nsCString& altDataType, const int64_t& altDataLen,
       const bool& deliveringAltData, const bool& aApplyConversion,
-      const ResourceTimingStruct& aTiming)
+      const bool& aIsResolvedByTRR, const ResourceTimingStruct& aTiming)
       : NeckoTargetChannelEvent<HttpChannelChild>(aChild),
         mChannelStatus(aChannelStatus),
         mResponseHead(aResponseHead),
@@ -430,6 +430,7 @@ class StartRequestEvent : public NeckoTargetChannelEvent<HttpChannelChild> {
         mAltDataLen(altDataLen),
         mDeliveringAltData(deliveringAltData),
         mLoadInfoForwarder(loadInfoForwarder),
+        mIsResolvedByTRR(aIsResolvedByTRR),
         mTiming(aTiming) {}
 
   void Run() override {
@@ -440,7 +441,7 @@ class StartRequestEvent : public NeckoTargetChannelEvent<HttpChannelChild> {
         mCacheEntryId, mCacheFetchCount, mCacheExpirationTime, mCachedCharset,
         mSecurityInfoSerialization, mSelfAddr, mPeerAddr, mCacheKey,
         mAltDataType, mAltDataLen, mDeliveringAltData, mApplyConversion,
-        mTiming);
+        mIsResolvedByTRR, mTiming);
   }
 
  private:
@@ -464,6 +465,7 @@ class StartRequestEvent : public NeckoTargetChannelEvent<HttpChannelChild> {
   int64_t mAltDataLen;
   bool mDeliveringAltData;
   ParentLoadInfoForwarderArgs mLoadInfoForwarder;
+  bool mIsResolvedByTRR;
   ResourceTimingStruct mTiming;
 };
 
@@ -479,7 +481,7 @@ mozilla::ipc::IPCResult HttpChannelChild::RecvOnStartRequest(
     const int16_t& redirectCount, const uint32_t& cacheKey,
     const nsCString& altDataType, const int64_t& altDataLen,
     const bool& deliveringAltData, const bool& aApplyConversion,
-    const ResourceTimingStruct& aTiming) {
+    const bool& aIsResolvedByTRR, const ResourceTimingStruct& aTiming) {
   AUTO_PROFILER_LABEL("HttpChannelChild::RecvOnStartRequest", NETWORK);
   LOG(("HttpChannelChild::RecvOnStartRequest [this=%p]\n", this));
   // mFlushedForDiversion and mDivertingToParent should NEVER be set at this
@@ -498,7 +500,8 @@ mozilla::ipc::IPCResult HttpChannelChild::RecvOnStartRequest(
       loadInfoForwarder, isFromCache, isRacing, cacheEntryAvailable,
       cacheEntryId, cacheFetchCount, cacheExpirationTime, cachedCharset,
       securityInfoSerialization, selfAddr, peerAddr, cacheKey, altDataType,
-      altDataLen, deliveringAltData, aApplyConversion, aTiming));
+      altDataLen, deliveringAltData, aApplyConversion, aIsResolvedByTRR,
+      aTiming));
 
   {
     // Child's mEventQ is to control the execution order of the IPC messages
@@ -532,7 +535,7 @@ void HttpChannelChild::OnStartRequest(
     const NetAddr& selfAddr, const NetAddr& peerAddr, const uint32_t& cacheKey,
     const nsCString& altDataType, const int64_t& altDataLen,
     const bool& deliveringAltData, const bool& aApplyConversion,
-    const ResourceTimingStruct& aTiming) {
+    const bool& aIsResolvedByTRR, const ResourceTimingStruct& aTiming) {
   LOG(("HttpChannelChild::OnStartRequest [this=%p]\n", this));
 
   // mFlushedForDiversion and mDivertingToParent should NEVER be set at this
@@ -586,6 +589,7 @@ void HttpChannelChild::OnStartRequest(
   mAvailableCachedAltDataType = altDataType;
   mDeliveringAltData = deliveringAltData;
   mAltDataLength = altDataLen;
+  mResolvedByTRR = aIsResolvedByTRR;
 
   SetApplyConversion(aApplyConversion);
 
@@ -663,6 +667,8 @@ NS_IMPL_ISUPPORTS(SyntheticDiversionListener, nsIStreamListener);
 
 void HttpChannelChild::DoOnStartRequest(nsIRequest* aRequest,
                                         nsISupports* aContext) {
+  nsresult rv;
+
   LOG(("HttpChannelChild::DoOnStartRequest [this=%p]\n", this));
 
   // In theory mListener should not be null, but in practice sometimes it is.
@@ -677,8 +683,15 @@ void HttpChannelChild::DoOnStartRequest(nsIRequest* aRequest,
                                          static_cast<nsIChannel*>(this));
   }
 
-  nsresult rv = mListener->OnStartRequest(aRequest);
+  if (mListener) {
+    nsCOMPtr<nsIStreamListener> listener(mListener);
+    mOnStartRequestCalled = true;
+    rv = listener->OnStartRequest(aRequest);
+  } else {
+    rv = NS_ERROR_UNEXPECTED;
+  }
   mOnStartRequestCalled = true;
+
   if (NS_FAILED(rv)) {
     Cancel(rv);
     return;
@@ -976,9 +989,12 @@ void HttpChannelChild::DoOnDataAvailable(nsIRequest* aRequest,
   LOG(("HttpChannelChild::DoOnDataAvailable [this=%p]\n", this));
   if (mCanceled) return;
 
-  nsresult rv = mListener->OnDataAvailable(aRequest, aStream, offset, count);
-  if (NS_FAILED(rv)) {
-    CancelOnMainThread(rv);
+  if (mListener) {
+    nsCOMPtr<nsIStreamListener> listener(mListener);
+    nsresult rv = listener->OnDataAvailable(aRequest, aStream, offset, count);
+    if (NS_FAILED(rv)) {
+      CancelOnMainThread(rv);
+    }
   }
 }
 
@@ -1244,7 +1260,9 @@ void HttpChannelChild::DoOnStopRequest(nsIRequest* aRequest,
   // In theory mListener should not be null, but in practice sometimes it is.
   MOZ_ASSERT(mListener);
   if (mListener) {
-    mListener->OnStopRequest(aRequest, mStatus);
+    nsCOMPtr<nsIStreamListener> listener(mListener);
+    mOnStopRequestCalled = true;
+    listener->OnStopRequest(aRequest, mStatus);
   }
   mOnStopRequestCalled = true;
 
@@ -1385,11 +1403,13 @@ void HttpChannelChild::FailedAsyncOpen(const nsresult& status) {
   // Might be called twice in race condition in theory.
   // (one by RecvFailedAsyncOpen, another by
   // HttpBackgroundChannelChild::ActorFailed)
-  if (NS_WARN_IF(NS_FAILED(mStatus))) {
+  if (mOnStartRequestCalled) {
     return;
   }
 
-  mStatus = status;
+  if (NS_SUCCEEDED(mStatus)) {
+    mStatus = status;
+  }
 
   // We're already being called from IPDL, therefore already "async"
   HandleAsyncAbort();
@@ -1533,6 +1553,80 @@ mozilla::ipc::IPCResult HttpChannelChild::RecvFinishInterceptedRedirect() {
 }
 
 void HttpChannelChild::DeleteSelf() { Send__delete__(this); }
+
+class ContinueDoNotifyListenerEvent
+    : public NeckoTargetChannelEvent<HttpChannelChild> {
+ public:
+  explicit ContinueDoNotifyListenerEvent(HttpChannelChild* child)
+      : NeckoTargetChannelEvent<HttpChannelChild>(child) {}
+  void Run() override { mChild->ContinueDoNotifyListener(); }
+};
+
+void HttpChannelChild::DoNotifyListener() {
+  LOG(("HttpChannelChild::DoNotifyListener this=%p", this));
+  MOZ_ASSERT(NS_IsMainThread());
+
+  // In case nsHttpChannel::OnStartRequest wasn't called (e.g. due to flag
+  // LOAD_ONLY_IF_MODIFIED) we want to set mAfterOnStartRequestBegun to true
+  // before notifying listener.
+  if (!mAfterOnStartRequestBegun) {
+    mAfterOnStartRequestBegun = true;
+  }
+
+  if (mListener && !mOnStartRequestCalled) {
+    nsCOMPtr<nsIStreamListener> listener = mListener;
+    mOnStartRequestCalled = true;  // avoid reentrancy bugs by setting this now
+    listener->OnStartRequest(this);
+  }
+  mOnStartRequestCalled = true;
+
+  mEventQ->RunOrEnqueue(new ContinueDoNotifyListenerEvent(this));
+}
+
+void HttpChannelChild::ContinueDoNotifyListener() {
+  LOG(("HttpChannelChild::ContinueDoNotifyListener this=%p", this));
+  MOZ_ASSERT(NS_IsMainThread());
+
+  // Make sure mIsPending is set to false. At this moment we are done from
+  // the point of view of our consumer and we have to report our self
+  // as not-pending.
+  mIsPending = false;
+
+  if (mListener && !mOnStopRequestCalled) {
+    nsCOMPtr<nsIStreamListener> listener = mListener;
+    mOnStopRequestCalled = true;
+    listener->OnStopRequest(this, mStatus);
+  }
+  mOnStopRequestCalled = true;
+
+  // notify "http-on-stop-request" observers
+  gHttpHandler->OnStopRequest(this);
+
+  // This channel has finished its job, potentially release any tail-blocked
+  // requests with this.
+  RemoveAsNonTailRequest();
+
+  // We have to make sure to drop the references to listeners and callbacks
+  // no longer needed.
+  ReleaseListeners();
+
+  DoNotifyListenerCleanup();
+
+  // If this is a navigation, then we must let the docshell flush the reports
+  // to the console later.  The LoadDocument() is pointing at the detached
+  // document that started the navigation.  We want to show the reports on the
+  // new document.  Otherwise the console is wiped and the user never sees
+  // the information.
+  if (!IsNavigation()) {
+    if (mLoadGroup) {
+      FlushConsoleReports(mLoadGroup);
+    } else if (mLoadInfo) {
+      RefPtr<dom::Document> doc;
+      mLoadInfo->GetLoadingDocument(getter_AddRefs(doc));
+      FlushConsoleReports(doc);
+    }
+  }
+}
 
 void HttpChannelChild::FinishInterceptedRedirect() {
   nsresult rv;
@@ -2019,8 +2113,13 @@ void HttpChannelChild::CleanupRedirectingChannel(nsresult rv) {
     if (mLoadInfo) {
       nsCString remoteAddress;
       Unused << GetRemoteAddress(remoteAddress);
+      nsCOMPtr<nsIURI> referrer;
+      if (mReferrerInfo) {
+        referrer = mReferrerInfo->GetComputedReferrer();
+      }
+
       nsCOMPtr<nsIRedirectHistoryEntry> entry = new nsRedirectHistoryEntry(
-          GetURIPrincipal(), mReferrer, remoteAddress);
+          GetURIPrincipal(), referrer, remoteAddress);
 
       mLoadInfo->AppendRedirectHistoryEntry(entry, false);
     }
@@ -2185,10 +2284,6 @@ HttpChannelChild::OnRedirectVerifyCallback(nsresult result) {
   Maybe<URIParams> redirectURI;
   nsresult rv;
 
-  uint32_t referrerPolicy = REFERRER_POLICY_UNSET;
-  Maybe<URIParams> referrerURI;
-  SerializeURI(nullptr, referrerURI);
-
   nsCOMPtr<nsIHttpChannel> newHttpChannel =
       do_QueryInterface(mRedirectChannelChild);
 
@@ -2203,17 +2298,11 @@ HttpChannelChild::OnRedirectVerifyCallback(nsresult result) {
     result = NS_ERROR_DOM_BAD_URI;
   }
 
+  nsCOMPtr<nsIReferrerInfo> referrerInfo;
   if (newHttpChannel) {
     // Must not be called until after redirect observers called.
     newHttpChannel->SetOriginalURI(mOriginalURI);
-
-    rv = newHttpChannel->GetReferrerPolicy(&referrerPolicy);
-    MOZ_ASSERT(NS_SUCCEEDED(rv));
-    nsCOMPtr<nsIURI> newChannelReferrerURI;
-    rv = newHttpChannel->GetReferrer(getter_AddRefs(newChannelReferrerURI));
-    MOZ_ASSERT(NS_SUCCEEDED(rv));
-
-    SerializeURI(newChannelReferrerURI, referrerURI);
+    referrerInfo = newHttpChannel->GetReferrerInfo();
   }
 
   if (mRedirectingForSubsequentSynthesizedResponse) {
@@ -2308,8 +2397,8 @@ HttpChannelChild::OnRedirectVerifyCallback(nsresult result) {
 
   if (mIPCOpen)
     SendRedirect2Verify(result, *headerTuples, loadInfoForwarder, loadFlags,
-                        referrerPolicy, referrerURI, redirectURI,
-                        corsPreflightArgs, chooseAppcache);
+                        referrerInfo, redirectURI, corsPreflightArgs,
+                        chooseAppcache);
 
   return NS_OK;
 }
@@ -2482,7 +2571,10 @@ nsresult HttpChannelChild::AsyncOpenInternal(nsIStreamListener* aListener) {
   AssertPrivateBrowsingId();
 #endif
 
-  if (mCanceled) return mStatus;
+  if (mCanceled) {
+    ReleaseListeners();
+    return mStatus;
+  }
 
   NS_ENSURE_TRUE(gNeckoChild != nullptr, NS_ERROR_FAILURE);
   NS_ENSURE_ARG_POINTER(listener);
@@ -2551,7 +2643,8 @@ nsresult HttpChannelChild::AsyncOpenInternal(nsIStreamListener* aListener) {
     // We may have been canceled already, either by on-modify-request
     // listeners or by load group observers; in that case, don't create IPDL
     // connection. See nsHttpChannel::AsyncOpen().
-    return NS_OK;
+    ReleaseListeners();
+    return mStatus;
   }
 
   // Set user agent override from docshell
@@ -2603,7 +2696,11 @@ nsresult HttpChannelChild::AsyncOpenInternal(nsIStreamListener* aListener) {
     // Fall through
   }
 
-  return ContinueAsyncOpen();
+  rv = ContinueAsyncOpen();
+  if (NS_FAILED(rv)) {
+    ReleaseListeners();
+  }
+  return rv;
 }
 
 // Assigns an nsIEventTarget to our IPDL actor so that IPC messages are sent to
@@ -2710,14 +2807,12 @@ nsresult HttpChannelChild::ContinueAsyncOpen() {
   SerializeURI(mURI, openArgs.uri());
   SerializeURI(mOriginalURI, openArgs.original());
   SerializeURI(mDocumentURI, openArgs.doc());
-  SerializeURI(mOriginalReferrer, openArgs.originalReferrer());
-  openArgs.originalReferrerPolicy() = mOriginalReferrerPolicy;
-  openArgs.referrerPolicy() = mReferrerPolicy;
   SerializeURI(mAPIRedirectToURI, openArgs.apiRedirectTo());
   openArgs.loadFlags() = mLoadFlags;
   openArgs.requestHeaders() = mClientSetRequestHeaders;
   mRequestHead.Method(openArgs.requestMethod());
   openArgs.preferredAlternativeTypes() = mPreferredCachedAltDataTypes;
+  openArgs.referrerInfo() = mReferrerInfo;
 
   AutoIPCStream autoStream(openArgs.uploadStream());
   if (mUploadStream) {
@@ -2878,24 +2973,6 @@ nsresult HttpChannelChild::ContinueAsyncOpen() {
 // HttpChannelChild::nsIHttpChannel
 //-----------------------------------------------------------------------------
 
-NS_IMETHODIMP
-HttpChannelChild::SetReferrerWithPolicy(nsIURI* referrer,
-                                        uint32_t referrerPolicy) {
-  ENSURE_CALLED_BEFORE_CONNECT();
-
-  // remove old referrer if any, loop backwards
-  for (int i = mClientSetRequestHeaders.Length() - 1; i >= 0; --i) {
-    if (NS_LITERAL_CSTRING("Referer").Equals(
-            mClientSetRequestHeaders[i].mHeader)) {
-      mClientSetRequestHeaders.RemoveElementAt(i);
-    }
-  }
-
-  nsresult rv =
-      HttpBaseChannel::SetReferrerWithPolicy(referrer, referrerPolicy);
-  if (NS_FAILED(rv)) return rv;
-  return NS_OK;
-}
 NS_IMETHODIMP
 HttpChannelChild::SetRequestHeader(const nsACString& aHeader,
                                    const nsACString& aValue, bool aMerge) {
@@ -3654,6 +3731,23 @@ nsresult HttpChannelChild::AsyncCallImpl(
   }
 
   return rv;
+}
+
+nsresult HttpChannelChild::SetReferrerHeader(const nsACString& aReferrer) {
+  // Normally this would be ENSURE_CALLED_BEFORE_CONNECT, but since the
+  // "connect" is done in the main process, and mRequestObserversCalled is never
+  // set in the ChannelChild, before connect basically means before asyncOpen.
+  ENSURE_CALLED_BEFORE_ASYNC_OPEN();
+
+  // remove old referrer if any, loop backwards
+  for (int i = mClientSetRequestHeaders.Length() - 1; i >= 0; --i) {
+    if (NS_LITERAL_CSTRING("Referer").Equals(
+            mClientSetRequestHeaders[i].mHeader)) {
+      mClientSetRequestHeaders.RemoveElementAt(i);
+    }
+  }
+
+  return HttpBaseChannel::SetReferrerHeader(aReferrer);
 }
 
 class CancelEvent final : public NeckoTargetChannelEvent<HttpChannelChild> {

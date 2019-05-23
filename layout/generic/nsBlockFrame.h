@@ -365,7 +365,7 @@ class nsBlockFrame : public nsContainerFrame {
   /**
    * Returns the inline size that needs to be cleared past floats for
    * blocks that cannot intersect floats.  aState must already have
-   * GetAvailableSpace called on it for the block-dir position that we
+   * GetFloatAvailableSpace called on it for the block-dir position that we
    * care about (which need not be its current mBCoord)
    */
   struct ReplacedElementISizeToClear {
@@ -410,9 +410,7 @@ class nsBlockFrame : public nsContainerFrame {
  protected:
   explicit nsBlockFrame(ComputedStyle* aStyle, nsPresContext* aPresContext,
                         ClassID aID = kClassID)
-      : nsContainerFrame(aStyle, aPresContext, aID),
-        mMinWidth(NS_INTRINSIC_WIDTH_UNKNOWN),
-        mPrefWidth(NS_INTRINSIC_WIDTH_UNKNOWN) {
+      : nsContainerFrame(aStyle, aPresContext, aID) {
 #ifdef DEBUG
     InitDebugFlags();
 #endif
@@ -578,6 +576,12 @@ class nsBlockFrame : public nsContainerFrame {
 
   // @see nsIFrame::AddSizeOfExcludingThisForTree
   void AddSizeOfExcludingThisForTree(nsWindowSizes&) const override;
+
+  /**
+   * Clears any -webkit-line-clamp ellipsis on a line in this block or one
+   * of its descendants.
+   */
+  void ClearLineClampEllipsis();
 
  protected:
   /** @see DoRemoveFrame */
@@ -904,9 +908,8 @@ class nsBlockFrame : public nsContainerFrame {
   int32_t GetDepth() const;
 #endif
 
-  // FIXME The two variables should go through a renaming refactoring to reflect
-  // the fact that they mean an inline size, not a width.
-  nscoord mMinWidth, mPrefWidth;
+  nscoord mCachedMinISize = NS_INTRINSIC_ISIZE_UNKNOWN;
+  nscoord mCachedPrefISize = NS_INTRINSIC_ISIZE_UNKNOWN;
 
   nsLineList mLines;
 

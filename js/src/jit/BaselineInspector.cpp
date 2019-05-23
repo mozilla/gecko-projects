@@ -843,32 +843,6 @@ JSObject* BaselineInspector::getTemplateObjectForNative(jsbytecode* pc,
   return nullptr;
 }
 
-bool BaselineInspector::isOptimizableConstStringSplit(jsbytecode* pc,
-                                                      JSString** strOut,
-                                                      JSString** sepOut,
-                                                      ArrayObject** objOut) {
-  if (!hasICScript()) {
-    return false;
-  }
-
-  const ICEntry& entry = icEntryFromPC(pc);
-
-  // If ConstStringSplit stub is attached, must have only one stub attached.
-  if (entry.fallbackStub()->numOptimizedStubs() != 1) {
-    return false;
-  }
-
-  ICStub* stub = entry.firstStub();
-  if (stub->kind() != ICStub::Call_ConstStringSplit) {
-    return false;
-  }
-
-  *strOut = stub->toCall_ConstStringSplit()->expectedStr();
-  *sepOut = stub->toCall_ConstStringSplit()->expectedSep();
-  *objOut = stub->toCall_ConstStringSplit()->templateObject();
-  return true;
-}
-
 JSObject* BaselineInspector::getTemplateObjectForClassHook(jsbytecode* pc,
                                                            const Class* clasp) {
   if (!hasICScript()) {

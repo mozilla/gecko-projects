@@ -443,11 +443,14 @@ def av1(value):
 
 @depends(target, nasm_version, when=av1 & compile_environment)
 def dav1d_asm(target, nasm_version):
-    if target.os != 'Android' and target.cpu in ('x86', 'x86_64'):
-        if nasm_version < '2.13':
-            die('nasm 2.13 or greater is required for AV1 support. '
-                'Either install nasm or add --disable-av1 to your configure options.')
-        return True
+    if target.os != 'Android':
+        if target.cpu == 'aarch64':
+            return True
+        elif target.cpu in ('x86', 'x86_64'):
+            if nasm_version < '2.13':
+                die('nasm 2.13 or greater is required for AV1 support. '
+                    'Either install nasm or add --disable-av1 to your configure options.')
+            return True
 
 
 set_config('MOZ_DAV1D_ASM', dav1d_asm)
@@ -636,6 +639,23 @@ set_define('MOZ_ALLOW_LEGACY_EXTENSIONS', legacy_extensions)
 def check_places_and_android_history(places, android_history):
     if places and android_history:
         die('Cannot use MOZ_ANDROID_HISTORY alongside MOZ_PLACES.')
+
+
+option(env='MOZ_TELEMETRY_REPORTING', default=mozilla_official,
+       help='Enable telemetry reporting')
+
+set_define('MOZ_TELEMETRY_REPORTING', True, when='MOZ_TELEMETRY_REPORTING')
+add_old_configure_assignment(
+    'MOZ_TELEMETRY_REPORTING', True, when='MOZ_TELEMETRY_REPORTING')
+
+
+@depends('MOZ_TELEMETRY_REPORTING', milestone.is_nightly, fennec_nightly)
+def telemetry_on_by_default(reporting, is_nightly, fennec_nightly):
+    return reporting and (is_nightly or fennec_nightly)
+
+
+set_define('MOZ_TELEMETRY_ON_BY_DEFAULT', True, when=telemetry_on_by_default)
+
 
 # gpsd support
 # ==============================================================
@@ -1302,7 +1322,7 @@ def bundled_fonts_default(target):
 
 @depends(build_project)
 def allow_bundled_fonts(project):
-    return project == 'browser'
+    return project == 'browser' or project == 'comm/mail'
 
 option('--enable-bundled-fonts', default=bundled_fonts_default,
        when=allow_bundled_fonts,
@@ -1557,6 +1577,8 @@ with only_when(compile_environment):
         flags = None
         if target.kernel == 'WINNT' and target.cpu == 'x86':
             flags = ['-DPIC', '-DWIN32']
+        elif target.kernel == 'WINNT' and target.cpu == 'aarch64':
+            flags = ['-DPIC', '-DWIN64']
         elif target.cpu == 'x86_64':
             if target.kernel == 'Darwin':
                 flags = ['-D__x86_64__', '-DPIC', '-DMACHO']
@@ -1593,7 +1615,8 @@ with only_when(compile_environment | artifact_builds):
     def ffvpx(yasm_has_avx2, libav_fft, vpx_as_flags, target):
         enable = flac_only = use_yasm = False
         flags = []
-        if target.cpu in ('x86', 'x86_64'):
+        if target.cpu in ('x86', 'x86_64') or \
+                target.cpu == 'aarch64' and target.kernel == 'WINNT':
             enable = True
             if libav_fft and libav_fft.flags:
                 use_yasm = True
@@ -1602,6 +1625,8 @@ with only_when(compile_environment | artifact_builds):
                     if target.cpu == 'x86':
                         # 32-bit windows need to prefix symbols with an underscore.
                         flags.extend(('-DPREFIX', '-Pconfig_win32.asm'))
+                    elif target.cpu == 'aarch64':
+                        use_yasm = False
                     else:
                         flags.append('-Pconfig_win64.asm')
                 elif target.kernel == 'Darwin':
@@ -1726,3 +1751,27 @@ def has_remote(toolkit):
 
 set_config('MOZ_HAS_REMOTE', has_remote)
 set_define('MOZ_HAS_REMOTE', has_remote)
+
+
+# new XULStore implementation
+# ==============================================================
+
+@depends(milestone)
+def new_xulstore(milestone):
+    if milestone.is_nightly:
+        return True
+
+set_config('MOZ_NEW_XULSTORE', True, when=new_xulstore)
+set_define('MOZ_NEW_XULSTORE', True, when=new_xulstore)
+
+
+# new Notification Store implementation
+# ==============================================================
+
+@depends(milestone)
+def new_notification_store(milestone):
+    if milestone.is_nightly:
+        return True
+
+set_config('MOZ_NEW_NOTIFICATION_STORE', True, when=new_notification_store)
+set_define('MOZ_NEW_NOTIFICATION_STORE', True, when=new_notification_store)

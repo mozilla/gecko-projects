@@ -90,11 +90,11 @@ nsIFrame* nsFieldSetFrame::GetLegend() const {
   return mFrames.FirstChild();
 }
 
-class nsDisplayFieldSetBorder final : public nsDisplayItem {
+class nsDisplayFieldSetBorder final : public nsPaintedDisplayItem {
  public:
   nsDisplayFieldSetBorder(nsDisplayListBuilder* aBuilder,
                           nsFieldSetFrame* aFrame)
-      : nsDisplayItem(aBuilder, aFrame) {
+      : nsPaintedDisplayItem(aBuilder, aFrame) {
     MOZ_COUNT_CTOR(nsDisplayFieldSetBorder);
   }
 #ifdef NS_BUILD_REFCNT_LOGGING
@@ -222,14 +222,13 @@ void nsFieldSetFrame::BuildDisplayList(nsDisplayListBuilder* aBuilder,
   // empty, we need to paint the outline
   if (!(GetStateBits() & NS_FRAME_IS_OVERFLOW_CONTAINER) &&
       IsVisibleForPainting()) {
-    if (StyleEffects()->mBoxShadow) {
-      aLists.BorderBackground()->AppendNewToTop<nsDisplayBoxShadowOuter>(
-          aBuilder, this);
-    }
+    DisplayOutsetBoxShadowUnconditional(aBuilder, aLists.BorderBackground());
+
+    const nsRect rect =
+        VisualBorderRectRelativeToSelf() + aBuilder->ToReferenceFrame(this);
 
     nsDisplayBackgroundImage::AppendBackgroundItemsToTop(
-        aBuilder, this, VisualBorderRectRelativeToSelf(),
-        aLists.BorderBackground(),
+        aBuilder, this, rect, aLists.BorderBackground(),
         /* aAllowWillPaintBorderOptimization = */ false);
 
     aLists.BorderBackground()->AppendNewToTop<nsDisplayFieldSetBorder>(aBuilder,

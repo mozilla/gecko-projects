@@ -508,8 +508,7 @@ already_AddRefed<ComputedStyle> nsComputedDOMStyle::DoGetComputedStyleNoFlush(
   // set.  Using the pres shell from the content also means that any
   // content that's actually *in* a document will get the style from the
   // correct document.
-  PresShell* presShell =
-      static_cast<PresShell*>(nsContentUtils::GetPresShellForContent(aElement));
+  PresShell* presShell = nsContentUtils::GetPresShellForContent(aElement);
   bool inDocWithShell = true;
   if (!presShell) {
     inDocWithShell = false;
@@ -646,9 +645,6 @@ static void AddImageURL(const nsStyleImage& aImage, nsTArray<nsString>& aURLs) {
 static void AddImageURL(const StyleShapeSource& aShapeSource,
                         nsTArray<nsString>& aURLs) {
   switch (aShapeSource.GetType()) {
-    case StyleShapeSourceType::URL:
-      AddImageURL(aShapeSource.URL(), aURLs);
-      break;
     case StyleShapeSourceType::Image:
       AddImageURL(aShapeSource.ShapeImage(), aURLs);
       break;
@@ -1100,7 +1096,7 @@ already_AddRefed<CSSValue> nsComputedDOMStyle::DoGetPerspectiveOrigin() {
 
 already_AddRefed<CSSValue> nsComputedDOMStyle::DoGetTransform() {
   const nsStyleDisplay* display = StyleDisplay();
-  return GetTransformValue(display->mSpecifiedTransform);
+  return GetTransformValue(display->mTransform);
 }
 
 /* static */
@@ -1843,17 +1839,7 @@ already_AddRefed<CSSValue> nsComputedDOMStyle::DoGetHeight() {
     val->SetAppUnits(mInnerFrame->GetContentRect().height +
                      adjustedValues.TopBottom());
   } else {
-    const nsStylePosition* positionData = StylePosition();
-
-    nscoord minHeight =
-        StyleCoordToNSCoord(positionData->mMinHeight,
-                            &nsComputedDOMStyle::GetCBContentHeight, 0, true);
-
-    nscoord maxHeight = StyleCoordToNSCoord(
-        positionData->mMaxHeight, &nsComputedDOMStyle::GetCBContentHeight,
-        nscoord_MAX, true);
-
-    SetValueToSize(val, positionData->mHeight, minHeight, maxHeight);
+    SetValueToSize(val, StylePosition()->mHeight);
   }
 
   return val.forget();
@@ -1880,17 +1866,7 @@ already_AddRefed<CSSValue> nsComputedDOMStyle::DoGetWidth() {
     val->SetAppUnits(mInnerFrame->GetContentRect().width +
                      adjustedValues.LeftRight());
   } else {
-    const nsStylePosition* positionData = StylePosition();
-
-    nscoord minWidth =
-        StyleCoordToNSCoord(positionData->mMinWidth,
-                            &nsComputedDOMStyle::GetCBContentWidth, 0, true);
-
-    nscoord maxWidth = StyleCoordToNSCoord(
-        positionData->mMaxWidth, &nsComputedDOMStyle::GetCBContentWidth,
-        nscoord_MAX, true);
-
-    SetValueToSize(val, positionData->mWidth, minWidth, maxWidth);
+    SetValueToSize(val, StylePosition()->mWidth);
   }
 
   return val.forget();
@@ -2220,8 +2196,7 @@ void nsComputedDOMStyle::SetValueToExtremumLength(nsROCSSPrimitiveValue* aValue,
 }
 
 void nsComputedDOMStyle::SetValueToSize(nsROCSSPrimitiveValue* aValue,
-                                        const StyleSize& aSize, nscoord aMin,
-                                        nscoord aMax) {
+                                        const StyleSize& aSize) {
   if (aSize.IsAuto()) {
     return aValue->SetIdent(eCSSKeyword_auto);
   }
@@ -2229,8 +2204,7 @@ void nsComputedDOMStyle::SetValueToSize(nsROCSSPrimitiveValue* aValue,
     return SetValueToExtremumLength(aValue, aSize.AsExtremumLength());
   }
   MOZ_ASSERT(aSize.IsLengthPercentage());
-  SetValueToLengthPercentage(aValue, aSize.AsLengthPercentage(), true, aMin,
-                             aMax);
+  SetValueToLengthPercentage(aValue, aSize.AsLengthPercentage(), true);
 }
 
 void nsComputedDOMStyle::SetValueToMaxSize(nsROCSSPrimitiveValue* aValue,
@@ -2257,14 +2231,13 @@ void nsComputedDOMStyle::SetValueToLengthPercentageOrAuto(
 
 void nsComputedDOMStyle::SetValueToLengthPercentage(
     nsROCSSPrimitiveValue* aValue, const mozilla::LengthPercentage& aLength,
-    bool aClampNegativeCalc, nscoord aMin, nscoord aMax) {
+    bool aClampNegativeCalc) {
   if (aLength.ConvertsToLength()) {
     nscoord result = aLength.ToLength();
     if (aClampNegativeCalc) {
       result = std::max(result, 0);
     }
-    // TODO(emilio, bug 1527392): It's wrong to clamp here.
-    return aValue->SetAppUnits(std::max(aMin, std::min(result, aMax)));
+    return aValue->SetAppUnits(result);
   }
   if (aLength.ConvertsToPercentage()) {
     float result = aLength.ToPercentage();
@@ -2295,7 +2268,7 @@ void nsComputedDOMStyle::SetValueToLengthPercentage(
 void nsComputedDOMStyle::SetValueToCoord(
     nsROCSSPrimitiveValue* aValue, const nsStyleCoord& aCoord,
     bool aClampNegativeCalc, PercentageBaseGetter aPercentageBaseGetter,
-    const KTableEntry aTable[], nscoord aMinAppUnits, nscoord aMaxAppUnits) {
+    const KTableEntry aTable[]) {
   MOZ_ASSERT(aValue, "Must have a value to work with");
 
   switch (aCoord.GetUnit()) {
@@ -2313,8 +2286,7 @@ void nsComputedDOMStyle::SetValueToCoord(
           (this->*aPercentageBaseGetter)(percentageBase)) {
         nscoord val =
             NSCoordSaturatingMultiply(percentageBase, aCoord.GetPercentValue());
-        aValue->SetAppUnits(
-            std::max(aMinAppUnits, std::min(val, aMaxAppUnits)));
+        aValue->SetAppUnits(val);
       } else {
         aValue->SetPercent(aCoord.GetPercentValue());
       }
@@ -2326,7 +2298,7 @@ void nsComputedDOMStyle::SetValueToCoord(
 
     case eStyleUnit_Coord: {
       nscoord val = aCoord.GetCoordValue();
-      aValue->SetAppUnits(std::max(aMinAppUnits, std::min(val, aMaxAppUnits)));
+      aValue->SetAppUnits(val);
     } break;
 
     case eStyleUnit_Integer:
@@ -2351,8 +2323,7 @@ void nsComputedDOMStyle::SetValueToCoord(
           MOZ_ASSERT(aCoord.IsCalcUnit(), "parser should have rejected value");
           val = 0;
         }
-        aValue->SetAppUnits(
-            std::max(aMinAppUnits, std::min(val, aMaxAppUnits)));
+        aValue->SetAppUnits(val);
       } else if (aPercentageBaseGetter &&
                  (this->*aPercentageBaseGetter)(percentageBase)) {
         nscoord val = aCoord.ComputeCoordPercentCalc(percentageBase);
@@ -2360,8 +2331,7 @@ void nsComputedDOMStyle::SetValueToCoord(
           MOZ_ASSERT(aCoord.IsCalcUnit(), "parser should have rejected value");
           val = 0;
         }
-        aValue->SetAppUnits(
-            std::max(aMinAppUnits, std::min(val, aMaxAppUnits)));
+        aValue->SetAppUnits(val);
       } else {
         nsStyleCoord::Calc* calc = aCoord.GetCalcValue();
         SetValueToCalc(calc, aValue);
@@ -2529,14 +2499,12 @@ bool nsComputedDOMStyle::GetFrameBorderRectHeight(nscoord& aHeight) {
  * "matrix" wrapper.
  */
 already_AddRefed<CSSValue> nsComputedDOMStyle::GetTransformValue(
-    nsCSSValueSharedList* aSpecifiedTransform) {
+    const StyleTransform& aTransform) {
   /* If there are no transforms, then we should construct a single-element
    * entry and hand it back.
    */
-  if (!aSpecifiedTransform) {
+  if (aTransform.IsNone()) {
     RefPtr<nsROCSSPrimitiveValue> val = new nsROCSSPrimitiveValue;
-
-    /* Set it to "none." */
     val->SetIdent(eCSSKeyword_none);
     return val.forget();
   }
@@ -2560,144 +2528,9 @@ already_AddRefed<CSSValue> nsComputedDOMStyle::GetTransformValue(
                                                        nsSize(0, 0));
 
   gfx::Matrix4x4 matrix = nsStyleTransformMatrix::ReadTransforms(
-      aSpecifiedTransform->mHead, refBox,
-      float(mozilla::AppUnitsPerCSSPixel()));
+      aTransform, refBox, float(mozilla::AppUnitsPerCSSPixel()));
 
   return MatrixToCSSValue(matrix);
-}
-
-void nsComputedDOMStyle::BoxValuesToString(
-    nsAString& aString, const nsTArray<nsStyleCoord>& aBoxValues,
-    bool aClampNegativeCalc) {
-  MOZ_ASSERT(aBoxValues.Length() == 4, "wrong number of box values");
-  nsAutoString value1, value2, value3, value4;
-  SetCssTextToCoord(value1, aBoxValues[0], aClampNegativeCalc);
-  SetCssTextToCoord(value2, aBoxValues[1], aClampNegativeCalc);
-  SetCssTextToCoord(value3, aBoxValues[2], aClampNegativeCalc);
-  SetCssTextToCoord(value4, aBoxValues[3], aClampNegativeCalc);
-
-  // nsROCSSPrimitiveValue do not have binary comparison operators.
-  // Compare string results instead.
-  aString.Append(value1);
-  if (value1 != value2 || value1 != value3 || value1 != value4) {
-    aString.Append(' ');
-    aString.Append(value2);
-    if (value1 != value3 || value2 != value4) {
-      aString.Append(' ');
-      aString.Append(value3);
-      if (value2 != value4) {
-        aString.Append(' ');
-        aString.Append(value4);
-      }
-    }
-  }
-}
-
-void nsComputedDOMStyle::BasicShapeRadiiToString(nsAString& aCssText,
-                                                 const BorderRadius& aCorners) {
-  Servo_SerializeBorderRadius(&aCorners, &aCssText);
-}
-
-already_AddRefed<CSSValue>
-nsComputedDOMStyle::CreatePrimitiveValueForBasicShape(
-    const UniquePtr<StyleBasicShape>& aStyleBasicShape) {
-  MOZ_ASSERT(aStyleBasicShape, "Expect a valid basic shape pointer!");
-
-  StyleBasicShapeType type = aStyleBasicShape->GetShapeType();
-  // Shape function name and opening parenthesis.
-  nsAutoString shapeFunctionString;
-  AppendASCIItoUTF16(
-      nsCSSKeywords::GetStringValue(aStyleBasicShape->GetShapeTypeName()),
-      shapeFunctionString);
-  shapeFunctionString.Append('(');
-  switch (type) {
-    case StyleBasicShapeType::Polygon: {
-      bool hasEvenOdd =
-          aStyleBasicShape->GetFillRule() == StyleFillRule::Evenodd;
-      if (hasEvenOdd) {
-        shapeFunctionString.AppendLiteral("evenodd");
-      }
-      for (size_t i = 0; i < aStyleBasicShape->Coordinates().Length(); i += 2) {
-        nsAutoString coordString;
-        if (i > 0 || hasEvenOdd) {
-          shapeFunctionString.AppendLiteral(", ");
-        }
-        SetCssTextToCoord(coordString, aStyleBasicShape->Coordinates()[i],
-                          false);
-        shapeFunctionString.Append(coordString);
-        shapeFunctionString.Append(' ');
-        SetCssTextToCoord(coordString, aStyleBasicShape->Coordinates()[i + 1],
-                          false);
-        shapeFunctionString.Append(coordString);
-      }
-      break;
-    }
-    case StyleBasicShapeType::Circle:
-    case StyleBasicShapeType::Ellipse: {
-      const nsTArray<nsStyleCoord>& radii = aStyleBasicShape->Coordinates();
-      MOZ_ASSERT(
-          radii.Length() == (type == StyleBasicShapeType::Circle ? 1 : 2),
-          "wrong number of radii");
-      for (size_t i = 0; i < radii.Length(); ++i) {
-        nsAutoString radius;
-        RefPtr<nsROCSSPrimitiveValue> value = new nsROCSSPrimitiveValue;
-        bool clampNegativeCalc = true;
-        SetValueToCoord(value, radii[i], clampNegativeCalc, nullptr,
-                        nsCSSProps::kShapeRadiusKTable);
-        value->GetCssText(radius);
-        shapeFunctionString.Append(radius);
-        shapeFunctionString.Append(' ');
-      }
-      shapeFunctionString.AppendLiteral("at ");
-
-      RefPtr<nsDOMCSSValueList> position = GetROCSSValueList(false);
-      nsAutoString positionString;
-      SetValueToPosition(aStyleBasicShape->GetPosition(), position);
-      position->GetCssText(positionString);
-      shapeFunctionString.Append(positionString);
-      break;
-    }
-    case StyleBasicShapeType::Inset: {
-      BoxValuesToString(shapeFunctionString, aStyleBasicShape->Coordinates(),
-                        false);
-      if (aStyleBasicShape->HasRadius()) {
-        shapeFunctionString.AppendLiteral(" round ");
-        nsAutoString radiiString;
-        BasicShapeRadiiToString(radiiString, aStyleBasicShape->GetRadius());
-        shapeFunctionString.Append(radiiString);
-      }
-      break;
-    }
-    default:
-      MOZ_ASSERT_UNREACHABLE("unexpected type");
-  }
-  shapeFunctionString.Append(')');
-  RefPtr<nsROCSSPrimitiveValue> functionValue = new nsROCSSPrimitiveValue;
-  functionValue->SetString(shapeFunctionString);
-  return functionValue.forget();
-}
-
-template <typename ReferenceBox>
-already_AddRefed<CSSValue>
-nsComputedDOMStyle::CreatePrimitiveValueForShapeSource(
-    const UniquePtr<StyleBasicShape>& aStyleBasicShape,
-    ReferenceBox aReferenceBox, const KTableEntry aBoxKeywordTable[]) {
-  RefPtr<nsDOMCSSValueList> valueList = GetROCSSValueList(false);
-  if (aStyleBasicShape) {
-    valueList->AppendCSSValue(
-        CreatePrimitiveValueForBasicShape(aStyleBasicShape));
-  }
-
-  if (aReferenceBox == ReferenceBox::NoBox) {
-    return valueList.forget();
-  }
-
-  RefPtr<nsROCSSPrimitiveValue> val = new nsROCSSPrimitiveValue;
-  val->SetIdent(
-      nsCSSProps::ValueToKeywordEnum(aReferenceBox, aBoxKeywordTable));
-  valueList->AppendCSSValue(val.forget());
-
-  return valueList.forget();
 }
 
 void nsComputedDOMStyle::SetCssTextToCoord(nsAString& aCssText,
@@ -2725,8 +2558,7 @@ already_AddRefed<CSSValue> nsComputedDOMStyle::DoGetMask() {
       !firstLayer.mRepeat.IsInitialValue() ||
       !firstLayer.mSize.IsInitialValue() ||
       !(firstLayer.mImage.GetType() == eStyleImageType_Null ||
-        firstLayer.mImage.GetType() == eStyleImageType_Image ||
-        firstLayer.mImage.GetType() == eStyleImageType_URL)) {
+        firstLayer.mImage.GetType() == eStyleImageType_Image)) {
     return nullptr;
   }
 

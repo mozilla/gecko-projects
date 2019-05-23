@@ -6,6 +6,7 @@ export class DSImage extends React.PureComponent {
     super(props);
 
     this.onOptimizedImageError = this.onOptimizedImageError.bind(this);
+    this.onNonOptimizedImageError = this.onNonOptimizedImageError.bind(this);
 
     this.state = {
       isSeen: false,
@@ -77,10 +78,18 @@ export class DSImage extends React.PureComponent {
             this.state.containerHeight * 2
           );
 
-          img = (<img onError={this.onOptimizedImageError} src={source} srcSet={`${source2x} 2x`} />);
+          img = (<img crossOrigin="anonymous"
+            onError={this.onOptimizedImageError}
+            src={source}
+            srcSet={`${source2x} 2x`} />);
         }
+      } else if (!this.state.nonOptimizedImageFailed) {
+        img = (<img crossOrigin="anonymous"
+          onError={this.onNonOptimizedImageError}
+          src={this.props.source} />);
       } else {
-        img = (<img src={this.props.source} />);
+        // Remove the img element if both sources fail. Render a placeholder instead.
+        img = (<div className="broken-image" />);
       }
     }
 
@@ -93,6 +102,12 @@ export class DSImage extends React.PureComponent {
     // This will trigger a re-render and the unoptimized 450px image will be used as a fallback
     this.setState({
       optimizedImageFailed: true,
+    });
+  }
+
+  onNonOptimizedImageError() {
+    this.setState({
+      nonOptimizedImageFailed: true,
     });
   }
 }

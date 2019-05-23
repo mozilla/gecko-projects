@@ -246,6 +246,11 @@ extern void InstallSignalHandlers(const char* ProgramName);
 #define FILE_INVALIDATE_CACHES NS_LITERAL_CSTRING(".purgecaches")
 #define FILE_STARTUP_INCOMPLETE NS_LITERAL_STRING(".startup-incomplete")
 
+#if defined(MOZ_BLOCK_PROFILE_DOWNGRADE) || defined(MOZ_LAUNCHER_PROCESS)
+static const char kPrefHealthReportUploadEnabled[] =
+    "datareporting.healthreport.uploadEnabled";
+#endif  // defined(MOZ_BLOCK_PROFILE_DOWNGRADE) || defined(MOZ_LAUNCHER_PROCESS)
+
 int gArgc;
 char** gArgv;
 
@@ -1509,19 +1514,8 @@ static void RegisterApplicationRestartChanged(const char* aPref, void* aData) {
 
 #  if defined(MOZ_LAUNCHER_PROCESS)
 
-static const char kShieldPrefName[] = "app.shield.optoutstudies.enabled";
-
 static void OnLauncherPrefChanged(const char* aPref, void* aData) {
-  const bool kLauncherPrefDefaultValue =
-#    if defined(NIGHTLY_BUILD) || (MOZ_UPDATE_CHANNEL == beta)
-      true
-#    else
-      false
-#    endif  // defined(NIGHTLY_BUILD) || (MOZ_UPDATE_CHANNEL == beta)
-      ;
-  bool prefVal = Preferences::GetBool(kShieldPrefName, false) &&
-                 Preferences::GetBool(PREF_WIN_LAUNCHER_PROCESS_ENABLED,
-                                      kLauncherPrefDefaultValue);
+  bool prefVal = Preferences::GetBool(PREF_WIN_LAUNCHER_PROCESS_ENABLED, true);
 
   mozilla::LauncherRegistryInfo launcherRegInfo;
   mozilla::LauncherVoidResult reflectResult =
@@ -1529,10 +1523,16 @@ static void OnLauncherPrefChanged(const char* aPref, void* aData) {
   MOZ_ASSERT(reflectResult.isOk());
 }
 
-static void SetupLauncherProcessPref() {
-  // In addition to the launcher pref itself, we also tie the launcher process
-  // state to the SHIELD opt-out pref.
+static void OnLauncherTelemetryPrefChanged(const char* aPref, void* aData) {
+  bool prefVal = Preferences::GetBool(kPrefHealthReportUploadEnabled, true);
 
+  mozilla::LauncherRegistryInfo launcherRegInfo;
+  mozilla::LauncherVoidResult reflectResult =
+      launcherRegInfo.ReflectTelemetryPrefToRegistry(prefVal);
+  MOZ_ASSERT(reflectResult.isOk());
+}
+
+static void SetupLauncherProcessPref() {
   if (gLauncherProcessState) {
     // We've already successfully run
     return;
@@ -1550,18 +1550,6 @@ static void SetupLauncherProcessPref() {
         CrashReporter::Annotation::LauncherProcessState,
         static_cast<uint32_t>(enabledState.unwrap()));
 
-#    if defined(NIGHTLY_BUILD) || (MOZ_UPDATE_CHANNEL == beta)
-    // Reflect the pref states into the registry by calling
-    // OnLauncherPrefChanged.
-    OnLauncherPrefChanged(PREF_WIN_LAUNCHER_PROCESS_ENABLED, nullptr);
-
-    // Now obtain the revised state of the launcher process for reflection
-    // into prefs
-    enabledState = launcherRegInfo.IsEnabled();
-#    endif  // defined(NIGHTLY_BUILD) || (MOZ_UPDATE_CHANNEL == beta)
-  }
-
-  if (enabledState.isOk()) {
     // Reflect the launcher process registry state into user prefs
     Preferences::SetBool(
         PREF_WIN_LAUNCHER_PROCESS_ENABLED,
@@ -1569,9 +1557,15 @@ static void SetupLauncherProcessPref() {
             mozilla::LauncherRegistryInfo::EnabledState::ForceDisabled);
   }
 
-  Preferences::RegisterCallback(&OnLauncherPrefChanged, kShieldPrefName);
+  mozilla::LauncherVoidResult reflectResult =
+      launcherRegInfo.ReflectTelemetryPrefToRegistry(
+          Preferences::GetBool(kPrefHealthReportUploadEnabled, true));
+  MOZ_ASSERT(reflectResult.isOk());
+
   Preferences::RegisterCallback(&OnLauncherPrefChanged,
                                 PREF_WIN_LAUNCHER_PROCESS_ENABLED);
+  Preferences::RegisterCallback(&OnLauncherTelemetryPrefChanged,
+                                kPrefHealthReportUploadEnabled);
 }
 
 #  endif  // defined(MOZ_LAUNCHER_PROCESS)
@@ -2070,8 +2064,8 @@ static void SubmitDowngradeTelemetry(const nsCString& aLastVersion,
   NS_ENSURE_TRUE_VOID(prefBranch);
 
   bool enabled;
-  nsresult rv = prefBranch->GetBoolPref(
-      "datareporting.healthreport.uploadEnabled", &enabled);
+  nsresult rv =
+      prefBranch->GetBoolPref(kPrefHealthReportUploadEnabled, &enabled);
   NS_ENSURE_SUCCESS_VOID(rv);
   if (!enabled) {
     return;
@@ -3598,6 +3592,21 @@ static void SetShutdownChecks() {
   }
 }
 
+#if defined(MOZ_WAYLAND)
+bool IsWaylandDisabled() {
+  // Enable Wayland on Gtk+ >= 3.22 where we can expect recent enough
+  // compositor & libwayland interface.
+  bool disableWayland = (gtk_check_version(3, 22, 0) != nullptr);
+  if (!disableWayland) {
+    // Make X11 backend the default one unless MOZ_ENABLE_WAYLAND or
+    // GDK_BACKEND are specified.
+    disableWayland = (PR_GetEnv("GDK_BACKEND") == nullptr) &&
+                     (PR_GetEnv("MOZ_ENABLE_WAYLAND") == nullptr);
+  }
+  return disableWayland;
+}
+#endif
+
 namespace mozilla {
 namespace startup {
 Result<nsCOMPtr<nsIFile>, nsresult> GetIncompleteStartupFile(nsIFile* aProfLD) {
@@ -3771,15 +3780,7 @@ int XREMain::XRE_mainStartup(bool* aExitFlag) {
 
     bool disableWayland = true;
 #  if defined(MOZ_WAYLAND)
-    // Enable Wayland on Gtk+ >= 3.22 where we can expect recent enough
-    // compositor & libwayland interface.
-    disableWayland = (gtk_check_version(3, 22, 0) != nullptr);
-    if (!disableWayland) {
-      // Make X11 backend the default one unless MOZ_ENABLE_WAYLAND or
-      // GDK_BACKEND are specified.
-      disableWayland = (PR_GetEnv("GDK_BACKEND") == nullptr) &&
-                       (PR_GetEnv("MOZ_ENABLE_WAYLAND") == nullptr);
-    }
+    disableWayland = IsWaylandDisabled();
 #  endif
     // On Wayland disabled builds read X11 DISPLAY env exclusively
     // and don't care about different displays.
@@ -4913,7 +4914,7 @@ bool XRE_Win32kCallsAllowed() {
 
 // If you add anything to this enum, please update about:support to reflect it
 enum {
-  kE10sEnabledByUser = 0,
+  // kE10sEnabledByUser = 0, removed when ending non-e10s support
   kE10sEnabledByDefault = 1,
   kE10sDisabledByUser = 2,
   // kE10sDisabledInSafeMode = 3, was removed in bug 1172491.
@@ -4925,9 +4926,6 @@ enum {
   // kE10sDisabledForXPAcceleration = 9, removed in bug 1296353
   // kE10sDisabledForOperatingSystem = 10, removed due to xp-eol
 };
-
-const char* kForceEnableE10sPref = "browser.tabs.remote.force-enable";
-const char* kForceDisableE10sPref = "browser.tabs.remote.force-disable";
 
 namespace mozilla {
 
@@ -4943,25 +4941,35 @@ bool BrowserTabsRemoteAutostart() {
     return gBrowserTabsRemoteAutostart;
   }
 
-  bool optInPref = Preferences::GetBool("browser.tabs.remote.autostart", true);
+#if defined(MOZILLA_OFFICIAL) && MOZ_BUILD_APP_IS_BROWSER
+  bool allowSingleProcessOutsideAutomation = false;
+#else
+  bool allowSingleProcessOutsideAutomation = true;
+#endif
+
   int status = kE10sEnabledByDefault;
+  // We use "are non-local connections disabled" as a proxy for
+  // "are we running some kind of automated test". It would be nicer to use
+  // xpc::IsInAutomation(), but that depends on some prefs being set, which
+  // they are not in (at least) gtests (where we can't) and xpcshell.
+  // Long-term, hopefully we can make tests switch to environment variables
+  // to disable e10s and then we can get rid of this.
+  if (allowSingleProcessOutsideAutomation ||
+      xpc::AreNonLocalConnectionsDisabled()) {
+    bool optInPref =
+        Preferences::GetBool("browser.tabs.remote.autostart", true);
 
-  if (optInPref) {
-    gBrowserTabsRemoteAutostart = true;
+    if (optInPref) {
+      gBrowserTabsRemoteAutostart = true;
+    } else {
+      status = kE10sDisabledByUser;
+    }
   } else {
-    status = kE10sDisabledByUser;
-  }
-
-  // Uber override pref for manual testing purposes
-  if (Preferences::GetBool(kForceEnableE10sPref, false)) {
     gBrowserTabsRemoteAutostart = true;
-    status = kE10sEnabledByUser;
   }
 
   // Uber override pref for emergency blocking
-  if (gBrowserTabsRemoteAutostart &&
-      (Preferences::GetBool(kForceDisableE10sPref, false) ||
-       EnvHasValue("MOZ_FORCE_DISABLE_E10S"))) {
+  if (gBrowserTabsRemoteAutostart && EnvHasValue("MOZ_FORCE_DISABLE_E10S")) {
     gBrowserTabsRemoteAutostart = false;
     status = kE10sForceDisabled;
   }

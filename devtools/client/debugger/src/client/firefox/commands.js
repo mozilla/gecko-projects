@@ -16,7 +16,6 @@ import type {
   BreakpointLocation,
   BreakpointOptions,
   PendingLocation,
-  EventListenerBreakpoints,
   Frame,
   FrameId,
   GeneratedSourceData,
@@ -24,7 +23,7 @@ import type {
   SourceId,
   SourceActor,
   Worker,
-  Range
+  Range,
 } from "../../types";
 
 import type {
@@ -33,8 +32,10 @@ import type {
   Grip,
   ThreadClient,
   ObjectClient,
-  SourcesPacket
+  SourcesPacket,
 } from "./types";
+
+import type { EventListenerCategoryList } from "../../actions/types";
 
 let workerClients: Object;
 let threadClient: ThreadClient;
@@ -50,7 +51,7 @@ type Dependencies = {
   threadClient: ThreadClient,
   tabTarget: TabTarget,
   debuggerClient: DebuggerClient,
-  supportsWasm: boolean
+  supportsWasm: boolean,
 };
 
 function setupCommands(dependencies: Dependencies) {
@@ -77,7 +78,10 @@ async function loadObjectProperties(root: Node) {
     root,
     createObjectClient
   );
-  return utils.node.makeNodesForProperties(properties, root);
+  return utils.node.getChildren({
+    item: root,
+    loadedProperties: new Map([[root.path, properties]]),
+  });
 }
 
 function releaseActor(actor: String) {
@@ -125,51 +129,27 @@ function forEachWorkerThread(iteratee) {
 }
 
 function resume(thread: string): Promise<*> {
-  return new Promise(resolve => {
-    lookupThreadClient(thread).resume(resolve);
-  });
+  return lookupThreadClient(thread).resume();
 }
 
 function stepIn(thread: string): Promise<*> {
-  return new Promise(resolve => {
-    lookupThreadClient(thread).stepIn(resolve);
-  });
+  return lookupThreadClient(thread).stepIn();
 }
 
 function stepOver(thread: string): Promise<*> {
-  return new Promise(resolve => {
-    lookupThreadClient(thread).stepOver(resolve);
-  });
+  return lookupThreadClient(thread).stepOver();
 }
 
 function stepOut(thread: string): Promise<*> {
-  return new Promise(resolve => {
-    lookupThreadClient(thread).stepOut(resolve);
-  });
+  return lookupThreadClient(thread).stepOut();
 }
 
 function rewind(thread: string): Promise<*> {
-  return new Promise(resolve => {
-    lookupThreadClient(thread).rewind(resolve);
-  });
-}
-
-function reverseStepIn(thread: string): Promise<*> {
-  return new Promise(resolve => {
-    lookupThreadClient(thread).reverseStepIn(resolve);
-  });
+  return lookupThreadClient(thread).rewind();
 }
 
 function reverseStepOver(thread: string): Promise<*> {
-  return new Promise(resolve => {
-    lookupThreadClient(thread).reverseStepOver(resolve);
-  });
-}
-
-function reverseStepOut(thread: string): Promise<*> {
-  return new Promise(resolve => {
-    lookupThreadClient(thread).reverseStepOut(resolve);
-  });
+  return lookupThreadClient(thread).reverseStepOver();
 }
 
 function breakOnNext(thread: string): Promise<*> {
@@ -178,7 +158,7 @@ function breakOnNext(thread: string): Promise<*> {
 
 async function sourceContents({
   actor,
-  thread
+  thread,
 }: SourceActor): Promise<{| source: any, contentType: ?string |}> {
   const sourceThreadClient = lookupThreadClient(thread);
   const sourceFront = sourceThreadClient.source({ actor });
@@ -277,7 +257,7 @@ type EvaluateParam = { thread: string, frameId: ?FrameId };
 function evaluate(
   script: ?Script,
   { thread, frameId }: EvaluateParam = {}
-): Promise<{ result: ?Object }> {
+): Promise<{ result: Grip | null }> {
   const params = { thread, frameActor: frameId };
   if (!tabTarget || !script) {
     return Promise.resolve({ result: null });
@@ -382,8 +362,17 @@ function interrupt(thread: string): Promise<*> {
   return lookupThreadClient(thread).interrupt();
 }
 
-function setEventListenerBreakpoints(eventTypes: EventListenerBreakpoints) {
-  // TODO: Figure out what sendpoint we want to hit
+async function setEventListenerBreakpoints(ids: string[]) {
+  await threadClient.setActiveEventBreakpoints(ids);
+  await forEachWorkerThread(thread => thread.setActiveEventBreakpoints(ids));
+}
+
+// eslint-disable-next-line
+async function getEventListenerBreakpointTypes(): Promise<
+  EventListenerCategoryList
+> {
+  const { value } = await threadClient.getAvailableEventBreakpoints();
+  return value;
 }
 
 function pauseGrip(thread: string, func: Function): ObjectClient {
@@ -417,7 +406,7 @@ async function fetchWorkers(): Promise<Worker[]> {
   if (features.windowlessWorkers) {
     const options = {
       breakpoints,
-      observeAsmJS: true
+      observeAsmJS: true,
     };
 
     const newWorkerClients = await updateWorkerClients({
@@ -425,7 +414,7 @@ async function fetchWorkers(): Promise<Worker[]> {
       debuggerClient,
       threadClient,
       workerClients,
-      options
+      options,
     });
 
     // Fetch the sources and install breakpoints on any new workers.
@@ -465,9 +454,7 @@ async function getBreakpointPositions(
   for (const { thread, actor } of actors) {
     const sourceThreadClient = lookupThreadClient(thread);
     const sourceFront = sourceThreadClient.source({ actor });
-    const positions = await sourceFront.getBreakpointPositionsCompressed(
-      range
-    );
+    const positions = await sourceFront.getBreakpointPositionsCompressed(range);
 
     for (const line of Object.keys(positions)) {
       let columns = positions[line];
@@ -480,6 +467,33 @@ async function getBreakpointPositions(
     }
   }
   return sourcePositions;
+}
+
+async function getBreakableLines(actors: Array<SourceActor>) {
+  let lines = [];
+  for (const { thread, actor } of actors) {
+    const sourceThreadClient = lookupThreadClient(thread);
+    const sourceFront = sourceThreadClient.source({ actor });
+    let actorLines = [];
+    try {
+      actorLines = await sourceFront.getBreakableLines();
+    } catch (e) {
+      // Handle backward compatibility
+      if (
+        e.message &&
+        e.message.match(/does not recognize the packet type getBreakableLines/)
+      ) {
+        const pos = await sourceFront.getBreakpointPositionsCompressed();
+        actorLines = Object.keys(pos).map(line => Number(line));
+      } else if (!e.message || !e.message.match(/Connection closed/)) {
+        throw e;
+      }
+    }
+
+    lines = [...new Set([...lines, ...actorLines])];
+  }
+
+  return lines;
 }
 
 const clientCommands = {
@@ -495,13 +509,12 @@ const clientCommands = {
   stepOut,
   stepOver,
   rewind,
-  reverseStepIn,
-  reverseStepOut,
   reverseStepOver,
   breakOnNext,
   sourceContents,
   getSourceForActor,
   getBreakpointPositions,
+  getBreakableLines,
   hasBreakpoint,
   setBreakpoint,
   setXHRBreakpoint,
@@ -522,10 +535,11 @@ const clientCommands = {
   sendPacket,
   setSkipPausing,
   setEventListenerBreakpoints,
+  getEventListenerBreakpointTypes,
   waitForWorkers,
   detachWorkers,
   hasWasmSupport,
-  lookupConsoleClient
+  lookupConsoleClient,
 };
 
 export { setupCommands, clientCommands };

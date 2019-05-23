@@ -182,6 +182,11 @@ TextPropertyEditor.prototype = {
       title: l10n("rule.warning.title"),
     });
 
+    this.unusedState = createChild(this.container, "div", {
+      class: "ruleview-unused-warning",
+      hidden: "",
+    });
+
     // Filter button that filters for the current property name and is
     // displayed when the property is overridden by another rule.
     this.filterProperty = createChild(this.container, "div", {
@@ -325,10 +330,39 @@ TextPropertyEditor.prototype = {
 
       for (const gridFragment of gridFragments) {
         for (const rowLine of gridFragment.rows.lines) {
-          gridLineNames.rows = gridLineNames.rows.concat(rowLine.names);
+          // We specifically ignore implicit line names created from implicitly named
+          // areas. This is because showing implicit line names can be confusing for
+          // designers who may have used a line name with "-start" or "-end" and created
+          // an implicitly named grid area without meaning to.
+          let gridArea;
+
+          for (const name of rowLine.names) {
+            const rowLineName = name.substring(0, name.lastIndexOf("-start")) ||
+              name.substring(0, name.lastIndexOf("-end"));
+            gridArea = gridFragment.areas.find(area => area.name === rowLineName);
+
+            if (rowLine.type === "implicit" && gridArea &&
+                gridArea.type === "implicit") {
+              continue;
+            }
+            gridLineNames.rows.push(name);
+          }
         }
+
         for (const colLine of gridFragment.cols.lines) {
-          gridLineNames.cols = gridLineNames.cols.concat(colLine.names);
+          let gridArea;
+
+          for (const name of colLine.names) {
+            const colLineName = name.substring(0, name.lastIndexOf("-start")) ||
+              name.substring(0, name.lastIndexOf("-end"));
+            gridArea = gridFragment.areas.find(area => area.name === colLineName);
+
+            if (colLine.type === "implicit" && gridArea &&
+                gridArea.type === "implicit") {
+              continue;
+            }
+            gridLineNames.cols.push(name);
+          }
         }
       }
     }
@@ -596,8 +630,8 @@ TextPropertyEditor.prototype = {
   },
 
   /**
-   * Update the visibility of the enable checkbox, the warning indicator and
-   * the filter property, as well as the overridden state of the property.
+   * Update the visibility of the enable checkbox, the warning indicator, the used
+   * indicator and the filter property, as well as the overridden state of the property.
    */
   updatePropertyState: function() {
     if (this.prop.enabled) {
@@ -627,6 +661,16 @@ TextPropertyEditor.prototype = {
       this.element.classList.add("ruleview-overridden");
     } else {
       this.element.classList.remove("ruleview-overridden");
+    }
+
+    const { used } = this.prop.isUsed();
+
+    if (this.editing || this.prop.overridden || !this.prop.enabled || used) {
+      this.element.classList.remove("unused");
+      this.unusedState.hidden = true;
+    } else {
+      this.element.classList.add("unused");
+      this.unusedState.hidden = false;
     }
   },
 

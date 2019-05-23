@@ -15,7 +15,6 @@
 #include "mozilla/FloatingPoint.h"
 #include "mozilla/Maybe.h"
 #include "mozilla/PodOperations.h"
-#include "mozilla/ReverseIterator.h"
 #include "mozilla/Sprintf.h"
 #include "mozilla/Variant.h"
 
@@ -89,24 +88,6 @@ static bool ParseNodeRequiresSpecialLineNumberNotes(ParseNode* pn) {
   ParseNodeKind kind = pn->getKind();
   return kind == ParseNodeKind::WhileStmt || kind == ParseNodeKind::ForStmt ||
          kind == ParseNodeKind::Function;
-}
-
-BytecodeEmitter::BytecodeSection::BytecodeSection(JSContext* cx,
-                                                  uint32_t lineNum)
-    : code_(cx),
-      notes_(cx),
-      tryNoteList_(cx),
-      scopeNoteList_(cx),
-      resumeOffsetList_(cx),
-      currentLine_(lineNum) {}
-
-BytecodeEmitter::PerScriptData::PerScriptData(JSContext* cx)
-    : scopeList_(cx),
-      numberList_(cx),
-      atomIndices_(cx->frontendCollectionPool()) {}
-
-bool BytecodeEmitter::PerScriptData::init(JSContext* cx) {
-  return atomIndices_.acquire(cx);
 }
 
 BytecodeEmitter::BytecodeEmitter(
@@ -250,32 +231,14 @@ bool BytecodeEmitter::emitCheck(JSOp op, ptrdiff_t delta, ptrdiff_t* offset) {
   }
 
   if (BytecodeOpHasIC(op)) {
-    // Because numICEntries also includes entries for formal arguments, we have
-    // to check for overflow here.
-    if (MOZ_UNLIKELY(bytecodeSection().numICEntries() == UINT32_MAX)) {
-      reportError(nullptr, JSMSG_NEED_DIET, js_script_str);
-      return false;
-    }
-
+    // Even if every bytecode op is a JOF_IC op and the function has ARGC_LIMIT
+    // arguments, numICEntries cannot overflow.
+    static_assert(MaxBytecodeLength + 1 /* this */ + ARGC_LIMIT <= UINT32_MAX,
+                  "numICEntries must not overflow");
     bytecodeSection().incrementNumICEntries();
   }
 
   return true;
-}
-
-void BytecodeEmitter::BytecodeSection::updateDepth(ptrdiff_t target) {
-  jsbytecode* pc = code(target);
-
-  int nuses = StackUses(pc);
-  int ndefs = StackDefs(pc);
-
-  stackDepth_ -= nuses;
-  MOZ_ASSERT(stackDepth_ >= 0);
-  stackDepth_ += ndefs;
-
-  if ((uint32_t)stackDepth_ > maxStackDepth_) {
-    maxStackDepth_ = stackDepth_;
-  }
 }
 
 #ifdef DEBUG
@@ -2253,7 +2216,7 @@ bool BytecodeEmitter::isRunOnceLambda() {
 
   FunctionBox* funbox = sc->asFunctionBox();
   return !funbox->argumentsHasLocalBinding() && !funbox->isGenerator() &&
-         !funbox->isAsync() && !funbox->function()->explicitName();
+         !funbox->isAsync() && !funbox->explicitName();
 }
 
 bool BytecodeEmitter::allocateResumeIndex(ptrdiff_t offset,
@@ -2261,7 +2224,7 @@ bool BytecodeEmitter::allocateResumeIndex(ptrdiff_t offset,
   static constexpr uint32_t MaxResumeIndex = JS_BITMASK(24);
 
   static_assert(
-      MaxResumeIndex < uint32_t(AbstractGeneratorObject::RESUME_INDEX_CLOSING),
+      MaxResumeIndex < uint32_t(AbstractGeneratorObject::RESUME_INDEX_RUNNING),
       "resumeIndex should not include magic AbstractGeneratorObject "
       "resumeIndex values");
   static_assert(
@@ -2379,7 +2342,7 @@ bool BytecodeEmitter::emitSetThis(BinaryNode* setThisNode) {
     return false;
   }
 
-  if (!emitInitializeInstanceFields(IsSuperCall::Yes)) {
+  if (!emitInitializeInstanceFields()) {
     return false;
   }
 
@@ -2515,7 +2478,7 @@ bool BytecodeEmitter::emitFunctionScript(FunctionNode* funNode,
                                 parser->errorReporter(), funbox);
 
   MOZ_ASSERT((fieldInitializers_.valid) ==
-             (funbox->function()->kind() ==
+             (funbox->kind() ==
               JSFunction::FunctionKind::ClassConstructor));
 
   setScriptStartOffsetIfUnset(paramsBody->pn_pos.begin);
@@ -5669,7 +5632,7 @@ MOZ_NEVER_INLINE bool BytecodeEmitter::emitFunction(
   RootedFunction fun(cx, funbox->function());
 
   MOZ_ASSERT((classContentsIfConstructor != nullptr) ==
-             (funbox->function()->kind() ==
+             (funbox->kind() ==
               JSFunction::FunctionKind::ClassConstructor));
 
   //                [stack]
@@ -7060,12 +7023,17 @@ bool BytecodeEmitter::emitSelfHostedResumeGenerator(BinaryNode* callNode) {
 }
 
 bool BytecodeEmitter::emitSelfHostedForceInterpreter() {
+  // JSScript::hasForceInterpreterOp() relies on JSOP_FORCEINTERPRETER being the
+  // first bytecode op in the script.
+  MOZ_ASSERT(bytecodeSection().code().empty());
+
   if (!emit1(JSOP_FORCEINTERPRETER)) {
     return false;
   }
   if (!emit1(JSOP_UNDEFINED)) {
     return false;
   }
+
   return true;
 }
 
@@ -7668,11 +7636,51 @@ bool BytecodeEmitter::emitPropertyList(ListNode* obj, PropertyEmitter& pe,
                                        PropListType type) {
   //                [stack] CTOR? OBJ
 
+  size_t curFieldKeyIndex = 0;
   for (ParseNode* propdef : obj->contents()) {
     if (propdef->is<ClassField>()) {
-      // Skip over class fields and emit them at the end.  This is needed
-      // because they're all emitted into a single array, which is then stored
-      // into a local variable.
+      MOZ_ASSERT(type == ClassBody);
+      // Only handle computing field keys here: the .initializers lambda array
+      // is created elsewhere.
+      ClassField* field = &propdef->as<ClassField>();
+      if (field->name().getKind() == ParseNodeKind::ComputedName) {
+        if (!emitGetName(cx->names().dotFieldKeys)) {
+          //        [stack] CTOR? OBJ ARRAY
+          return false;
+        }
+
+        ParseNode* nameExpr = field->name().as<UnaryNode>().kid();
+
+        if (!emitTree(nameExpr)) {
+          //        [stack] CTOR? OBJ ARRAY KEY
+          return false;
+        }
+
+        if (!emit1(JSOP_TOID)) {
+          //        [stack] CTOR? OBJ ARRAY KEY
+          return false;
+        }
+
+        if (!emitUint32Operand(JSOP_INITELEM_ARRAY, curFieldKeyIndex)) {
+          //        [stack] CTOR? OBJ ARRAY
+          return false;
+        }
+
+        if (!emit1(JSOP_POP)) {
+          //        [stack] CTOR? OBJ
+          return false;
+        }
+
+        curFieldKeyIndex++;
+      }
+      continue;
+    }
+
+    if (propdef->is<LexicalScopeNode>()) {
+      // Constructors are sometimes wrapped in LexicalScopeNodes. As we already
+      // handled emitting the constructor, skip it.
+      MOZ_ASSERT(propdef->as<LexicalScopeNode>().scopeBody()->isKind(
+          ParseNodeKind::ClassMethod));
       continue;
     }
 
@@ -7929,15 +7937,6 @@ bool BytecodeEmitter::emitPropertyList(ListNode* obj, PropertyEmitter& pe,
     }
   }
 
-  if (obj->getKind() == ParseNodeKind::ClassMemberList) {
-    if (!emitCreateFieldKeys(obj)) {
-      return false;
-    }
-    if (!emitCreateFieldInitializers(obj)) {
-      return false;
-    }
-  }
-
   return true;
 }
 
@@ -7976,7 +7975,8 @@ FieldInitializers BytecodeEmitter::setupFieldInitializers(
 //   }
 // }
 //
-// BytecodeEmitter::emitCreateFieldKeys does `let .fieldKeys = [keyExpr, ...];`
+// BytecodeEmitter::emitCreateFieldKeys does `let .fieldKeys = [...];`
+// BytecodeEmitter::emitPropertyList fills in the elements of the array.
 // See GeneralParser::fieldInitializer for the `this[.fieldKeys[0]]` part.
 bool BytecodeEmitter::emitCreateFieldKeys(ListNode* obj) {
   size_t numFieldKeys = 0;
@@ -8003,34 +8003,6 @@ bool BytecodeEmitter::emitCreateFieldKeys(ListNode* obj) {
     //              [stack] ARRAY
     return false;
   }
-
-  size_t curFieldKeyIndex = 0;
-  for (ParseNode* propdef : obj->contents()) {
-    if (propdef->is<ClassField>()) {
-      ClassField* field = &propdef->as<ClassField>();
-      if (field->name().getKind() == ParseNodeKind::ComputedName) {
-        ParseNode* nameExpr = field->name().as<UnaryNode>().kid();
-
-        if (!emitTree(nameExpr)) {
-          //        [stack] ARRAY KEY
-          return false;
-        }
-
-        if (!emit1(JSOP_TOID)) {
-          //        [stack] ARRAY KEY
-          return false;
-        }
-
-        if (!emitUint32Operand(JSOP_INITELEM_ARRAY, curFieldKeyIndex)) {
-          //        [stack] ARRAY
-          return false;
-        }
-
-        curFieldKeyIndex++;
-      }
-    }
-  }
-  MOZ_ASSERT(curFieldKeyIndex == numFieldKeys);
 
   if (!noe.emitAssignment()) {
     //              [stack] ARRAY
@@ -8108,7 +8080,7 @@ const FieldInitializers& BytecodeEmitter::findFieldInitializersForCall() {
   for (BytecodeEmitter* current = this; current; current = current->parent) {
     if (current->sc->isFunctionBox()) {
       FunctionBox* box = current->sc->asFunctionBox();
-      if (box->function()->kind() ==
+      if (box->kind() ==
           JSFunction::FunctionKind::ClassConstructor) {
         const FieldInitializers& fieldInitializers =
             current->getFieldInitializers();
@@ -8135,38 +8107,7 @@ const FieldInitializers& BytecodeEmitter::findFieldInitializersForCall() {
   MOZ_CRASH("Constructor for field initializers not found.");
 }
 
-bool BytecodeEmitter::emitCopyInitializersToLocalInitializers() {
-  MOZ_ASSERT(sc->asFunctionBox()->isDerivedClassConstructor());
-  if (getFieldInitializers().numFieldInitializers == 0) {
-    return true;
-  }
-
-  NameOpEmitter noe(this, cx->names().dotLocalInitializers,
-                    NameOpEmitter::Kind::Initialize);
-  if (!noe.prepareForRhs()) {
-    //              [stack]
-    return false;
-  }
-
-  if (!emitGetName(cx->names().dotInitializers)) {
-    //              [stack] .initializers
-    return false;
-  }
-
-  if (!noe.emitAssignment()) {
-    //              [stack] .initializers
-    return false;
-  }
-
-  if (!emit1(JSOP_POP)) {
-    //              [stack]
-    return false;
-  }
-
-  return true;
-}
-
-bool BytecodeEmitter::emitInitializeInstanceFields(IsSuperCall isSuperCall) {
+bool BytecodeEmitter::emitInitializeInstanceFields() {
   const FieldInitializers& fieldInitializers = findFieldInitializersForCall();
   size_t numFields = fieldInitializers.numFieldInitializers;
 
@@ -8174,16 +8115,9 @@ bool BytecodeEmitter::emitInitializeInstanceFields(IsSuperCall isSuperCall) {
     return true;
   }
 
-  if (isSuperCall == IsSuperCall::Yes) {
-    if (!emitGetName(cx->names().dotLocalInitializers)) {
-      //            [stack] ARRAY
-      return false;
-    }
-  } else {
-    if (!emitGetName(cx->names().dotInitializers)) {
-      //            [stack] ARRAY
-      return false;
-    }
+  if (!emitGetName(cx->names().dotInitializers)) {
+    //              [stack] ARRAY
+    return false;
   }
 
   for (size_t fieldIndex = 0; fieldIndex < numFields; fieldIndex++) {
@@ -8703,21 +8637,24 @@ bool BytecodeEmitter::emitLexicalInitialization(JSAtom* name) {
   return true;
 }
 
-static MOZ_ALWAYS_INLINE FunctionNode* FindConstructor(JSContext* cx,
-                                                       ListNode* classMethods) {
-  for (ParseNode* mn : classMethods->contents()) {
-    if (mn->is<ClassMethod>()) {
-      ClassMethod& method = mn->as<ClassMethod>();
+static MOZ_ALWAYS_INLINE ParseNode* FindConstructor(JSContext* cx,
+                                                    ListNode* classMethods) {
+  for (ParseNode* classElement : classMethods->contents()) {
+    ParseNode* unwrappedElement = classElement;
+    if (unwrappedElement->is<LexicalScopeNode>()) {
+      unwrappedElement = unwrappedElement->as<LexicalScopeNode>().scopeBody();
+    }
+    if (unwrappedElement->is<ClassMethod>()) {
+      ClassMethod& method = unwrappedElement->as<ClassMethod>();
       ParseNode& methodName = method.name();
       if (!method.isStatic() &&
           (methodName.isKind(ParseNodeKind::ObjectPropertyName) ||
            methodName.isKind(ParseNodeKind::StringExpr)) &&
           methodName.as<NameNode>().atom() == cx->names().constructor) {
-        return &method.method();
+        return classElement;
       }
     }
   }
-
   return nullptr;
 }
 
@@ -8732,7 +8669,7 @@ bool BytecodeEmitter::emitClass(
 
   ParseNode* heritageExpression = classNode->heritage();
   ListNode* classMembers = classNode->memberList();
-  FunctionNode* constructor = FindConstructor(cx, classMembers);
+  ParseNode* constructor = FindConstructor(cx, classMembers);
 
   // If |nameKind != ClassNameKind::ComputedName|
   //                [stack]
@@ -8754,10 +8691,8 @@ bool BytecodeEmitter::emitClass(
     }
   }
 
-  if (!classNode->isEmptyScope()) {
-    if (!ce.emitScope(classNode->scopeBindings(),
-                      classNode->names() ? ClassEmitter::HasName::Yes
-                                         : ClassEmitter::HasName::No)) {
+  if (LexicalScopeNode* scopeBindings = classNode->scopeBindings()) {
+    if (!ce.emitScope(scopeBindings->scopeBindings())) {
       //            [stack]
       return false;
     }
@@ -8795,17 +8730,46 @@ bool BytecodeEmitter::emitClass(
   // Stack currently has HOMEOBJ followed by optional HERITAGE. When HERITAGE
   // is not used, an implicit value of %FunctionPrototype% is implied.
   if (constructor) {
-    bool needsHomeObject = constructor->funbox()->needsHomeObject();
+    FunctionNode* ctor;
+    // .fieldKeys must be declared outside the scope .initializers is declared
+    // in, hence this extra scope.
+    Maybe<LexicalScopeEmitter> lse;
+    if (constructor->is<LexicalScopeNode>()) {
+      lse.emplace(this);
+      if (!lse->emitScope(
+              ScopeKind::Lexical,
+              constructor->as<LexicalScopeNode>().scopeBindings())) {
+        return false;
+      }
+
+      // Any class with field initializers will have a constructor
+      if (!emitCreateFieldInitializers(classMembers)) {
+        return false;
+      }
+      ctor = &constructor->as<LexicalScopeNode>()
+                  .scopeBody()
+                  ->as<ClassMethod>()
+                  .method();
+    } else {
+      ctor = &constructor->as<ClassMethod>().method();
+    }
+
+    bool needsHomeObject = ctor->funbox()->needsHomeObject();
     // HERITAGE is consumed inside emitFunction.
-    if (!emitFunction(constructor, isDerived, classMembers)) {
+    if (!emitFunction(ctor, isDerived, classMembers)) {
       //            [stack] HOMEOBJ CTOR
       return false;
     }
     if (nameKind == ClassNameKind::InferredName) {
-      if (!setFunName(constructor->funbox()->function(),
-                      nameForAnonymousClass)) {
+      if (!setFunName(ctor->funbox()->function(), nameForAnonymousClass)) {
         return false;
       }
+    }
+    if (lse.isSome()) {
+      if (!lse->emitEnd()) {
+        return false;
+      }
+      lse.reset();
     }
     if (!ce.emitInitConstructor(needsHomeObject)) {
       //            [stack] CTOR HOMEOBJ
@@ -8818,10 +8782,16 @@ bool BytecodeEmitter::emitClass(
       return false;
     }
   }
+
+  if (!emitCreateFieldKeys(classMembers)) {
+    return false;
+  }
+
   if (!emitPropertyList(classMembers, ce, ClassBody)) {
     //              [stack] CTOR HOMEOBJ
     return false;
   }
+
   if (!ce.emitEnd(kind)) {
     //              [stack] # class declaration
     //              [stack]
@@ -9565,127 +9535,6 @@ void BytecodeEmitter::copySrcNotes(jssrcnote* destination, uint32_t nsrcnotes) {
   MOZ_ASSERT(nsrcnotes == count + 1);
   PodCopy(destination, bytecodeSection().notes().begin(), count);
   SN_MAKE_TERMINATOR(&destination[count]);
-}
-
-void CGNumberList::finish(mozilla::Span<GCPtrValue> array) {
-  MOZ_ASSERT(length() == array.size());
-
-  for (unsigned i = 0; i < length(); i++) {
-    array[i].init(vector[i]);
-  }
-}
-
-/*
- * Find the index of the given object for code generator.
- *
- * Since the emitter refers to each parsed object only once, for the index we
- * use the number of already indexed objects. We also add the object to a list
- * to convert the list to a fixed-size array when we complete code generation,
- * see js::CGObjectList::finish below.
- */
-unsigned CGObjectList::add(ObjectBox* objbox) {
-  MOZ_ASSERT(objbox->isObjectBox());
-  MOZ_ASSERT(!objbox->emitLink);
-  objbox->emitLink = lastbox;
-  lastbox = objbox;
-  return length++;
-}
-
-void CGObjectList::finish(mozilla::Span<GCPtrObject> array) {
-  MOZ_ASSERT(length <= INDEX_LIMIT);
-  MOZ_ASSERT(length == array.size());
-
-  ObjectBox* objbox = lastbox;
-  for (GCPtrObject& obj : mozilla::Reversed(array)) {
-    MOZ_ASSERT(obj == nullptr);
-    MOZ_ASSERT(objbox->object()->isTenured());
-    obj.init(objbox->object());
-    objbox = objbox->emitLink;
-  }
-}
-
-void CGObjectList::finishInnerFunctions() {
-  ObjectBox* objbox = lastbox;
-  while (objbox) {
-    if (objbox->isFunctionBox()) {
-      objbox->asFunctionBox()->finish();
-    }
-    objbox = objbox->emitLink;
-  }
-}
-
-void CGScopeList::finish(mozilla::Span<GCPtrScope> array) {
-  MOZ_ASSERT(length() <= INDEX_LIMIT);
-  MOZ_ASSERT(length() == array.size());
-
-  for (uint32_t i = 0; i < length(); i++) {
-    array[i].init(vector[i]);
-  }
-}
-
-bool CGTryNoteList::append(JSTryNoteKind kind, uint32_t stackDepth,
-                           size_t start, size_t end) {
-  MOZ_ASSERT(start <= end);
-  MOZ_ASSERT(size_t(uint32_t(start)) == start);
-  MOZ_ASSERT(size_t(uint32_t(end)) == end);
-
-  // Offsets are given relative to sections, but we only expect main-section
-  // to have TryNotes. In finish() we will fixup base offset.
-
-  JSTryNote note;
-  note.kind = kind;
-  note.stackDepth = stackDepth;
-  note.start = uint32_t(start);
-  note.length = uint32_t(end - start);
-
-  return list.append(note);
-}
-
-void CGTryNoteList::finish(mozilla::Span<JSTryNote> array) {
-  MOZ_ASSERT(length() == array.size());
-
-  for (unsigned i = 0; i < length(); i++) {
-    array[i] = list[i];
-  }
-}
-
-bool CGScopeNoteList::append(uint32_t scopeIndex, uint32_t offset,
-                             uint32_t parent) {
-  CGScopeNote note;
-  mozilla::PodZero(&note);
-
-  // Offsets are given relative to sections. In finish() we will fixup base
-  // offset if needed.
-
-  note.index = scopeIndex;
-  note.start = offset;
-  note.parent = parent;
-
-  return list.append(note);
-}
-
-void CGScopeNoteList::recordEnd(uint32_t index, uint32_t offset) {
-  MOZ_ASSERT(index < length());
-  MOZ_ASSERT(list[index].length == 0);
-  list[index].end = offset;
-}
-
-void CGScopeNoteList::finish(mozilla::Span<ScopeNote> array) {
-  MOZ_ASSERT(length() == array.size());
-
-  for (unsigned i = 0; i < length(); i++) {
-    MOZ_ASSERT(list[i].end >= list[i].start);
-    list[i].length = list[i].end - list[i].start;
-    array[i] = list[i];
-  }
-}
-
-void CGResumeOffsetList::finish(mozilla::Span<uint32_t> array) {
-  MOZ_ASSERT(length() == array.size());
-
-  for (unsigned i = 0; i < length(); i++) {
-    array[i] = list[i];
-  }
 }
 
 const JSSrcNoteSpec js_SrcNoteSpec[] = {

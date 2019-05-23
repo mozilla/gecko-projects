@@ -16,10 +16,12 @@
 #include "gc/FreeOp.h"
 #include "gc/Policy.h"
 #include "gc/Tracer.h"
+#include "js/Modules.h"  // JS::GetModulePrivate, JS::ModuleDynamicImportHook
 #include "js/PropertySpec.h"
 #include "vm/AsyncFunction.h"
 #include "vm/AsyncIteration.h"
 #include "vm/EqualityOperations.h"  // js::SameValue
+#include "vm/ModuleBuilder.h"       // js::ModuleBuilder
 #include "vm/SelfHosting.h"
 
 #include "vm/JSObject-inl.h"
@@ -1042,8 +1044,11 @@ bool ModuleObject::execute(JSContext* cx, HandleModuleObject self,
   RootedScript script(cx, self->script());
 
   // The top-level script if a module is only ever executed once. Clear the
-  // reference to prevent us keeping this alive unnecessarily.
-  self->setReservedSlot(ScriptSlot, UndefinedValue());
+  // reference at exit to prevent us keeping this alive unnecessarily. This is
+  // kept while executing so it is available to the debugger.
+  auto guardA = mozilla::MakeScopeExit([&] {
+      self->setReservedSlot(ScriptSlot, UndefinedValue());
+    });
 
   RootedModuleEnvironmentObject scope(cx, self->environment());
   if (!scope) {
@@ -1392,9 +1397,9 @@ bool ModuleBuilder::processExport(frontend::ParseNode* exportNode) {
     }
 
     case ParseNodeKind::Function: {
-      RootedFunction func(cx_, kid->as<FunctionNode>().funbox()->function());
-      MOZ_ASSERT(!func->isArrow());
-      RootedAtom localName(cx_, func->explicitName());
+      FunctionBox* box = kid->as<FunctionNode>().funbox();
+      MOZ_ASSERT(!box->isArrow());
+      RootedAtom localName(cx_, box->explicitName());
       RootedAtom exportName(
           cx_, isDefault ? cx_->names().default_ : localName.get());
       MOZ_ASSERT_IF(isDefault, localName);

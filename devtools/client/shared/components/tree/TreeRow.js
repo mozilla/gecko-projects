@@ -21,8 +21,6 @@ define(function(require, exports, module) {
   const TreeCell = createFactory(require("./TreeCell"));
   const LabelCell = createFactory(require("./LabelCell"));
 
-  // Scroll
-  const { scrollIntoViewIfNeeded } = require("devtools/client/shared/scroll");
   const { focusableSelector } = require("devtools/client/shared/focus");
 
   const UPDATE_ON_PROPS = [
@@ -30,6 +28,7 @@ define(function(require, exports, module) {
     "open",
     "value",
     "loading",
+    "level",
     "selected",
     "active",
     "hasChildren",
@@ -121,17 +120,6 @@ define(function(require, exports, module) {
       }
 
       return false;
-    }
-
-    componentDidUpdate() {
-      if (this.props.member.selected) {
-        const row = findDOMNode(this);
-        // Because this is called asynchronously, context window might be
-        // already gone.
-        if (row.ownerDocument.defaultView) {
-          scrollIntoViewIfNeeded(row);
-        }
-      }
     }
 
     componentWillUnmount() {
@@ -243,7 +231,7 @@ define(function(require, exports, module) {
         id: this.props.id,
         ref: this.treeRowRef,
         role: "treeitem",
-        "aria-level": member.level,
+        "aria-level": member.level + 1,
         "aria-selected": !!member.selected,
         onClick: this.props.onClick,
         onContextMenu: this.props.onContextMenu,

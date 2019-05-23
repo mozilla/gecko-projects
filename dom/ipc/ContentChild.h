@@ -388,9 +388,6 @@ class ContentChild final : public PContentChild,
   mozilla::ipc::IPCResult RecvUpdateRequestedLocales(
       nsTArray<nsCString>&& aRequestedLocales);
 
-  mozilla::ipc::IPCResult RecvClearSiteDataReloadNeeded(
-      const nsString& aOrigin);
-
   mozilla::ipc::IPCResult RecvAddPermission(const IPC::Permission& permission);
 
   mozilla::ipc::IPCResult RecvRemoveAllPermissions();
@@ -457,6 +454,7 @@ class ContentChild final : public PContentChild,
   mozilla::ipc::IPCResult RecvInvokeDragSession(
       nsTArray<IPCDataTransfer>&& aTransfers, const uint32_t& aAction);
 
+  MOZ_CAN_RUN_SCRIPT_BOUNDARY
   mozilla::ipc::IPCResult RecvEndDragSession(
       const bool& aDoneDrag, const bool& aUserCancelled,
       const mozilla::LayoutDeviceIntPoint& aEndDragPoint,
@@ -488,6 +486,9 @@ class ContentChild final : public PContentChild,
 
   mozilla::ipc::IPCResult RecvRefreshScreens(
       nsTArray<ScreenDetails>&& aScreens);
+
+  mozilla::ipc::IPCResult RecvNetworkLinkTypeChange(const uint32_t& aType);
+  uint32_t NetworkLinkType() const { return mNetworkLinkType; }
 
   // Get the directory for IndexedDB files. We query the parent for this and
   // cache the value
@@ -674,10 +675,16 @@ class ContentChild final : public PContentChild,
   mozilla::ipc::IPCResult RecvCrossProcessRedirect(
       const uint32_t& aRegistrarId, nsIURI* aURI, const uint32_t& aNewLoadFlags,
       const Maybe<LoadInfoArgs>& aLoadInfoForwarder, const uint64_t& aChannelId,
-      nsIURI* aOriginalURI, const uint64_t& aIdentifier);
+      nsIURI* aOriginalURI, const uint64_t& aIdentifier,
+      const uint32_t& aRedirectMode);
 
   mozilla::ipc::IPCResult RecvStartDelayedAutoplayMediaComponents(
       BrowsingContext* aContext);
+
+  mozilla::ipc::IPCResult RecvSetMediaMuted(BrowsingContext* aContext,
+                                            bool aMuted);
+
+  void HoldBrowsingContextGroup(BrowsingContextGroup* aBCG);
 
   mozilla::ipc::IPCResult RecvDestroySHEntrySharedState(const uint64_t& aID);
 
@@ -818,6 +825,10 @@ class ContentChild final : public PContentChild,
   // off-main-thread.
   mozilla::Atomic<uint32_t> mPendingInputEvents;
 #endif
+
+  uint32_t mNetworkLinkType = 0;
+
+  nsTArray<RefPtr<BrowsingContextGroup>> mBrowsingContextGroupHolder;
 
   DISALLOW_EVIL_CONSTRUCTORS(ContentChild);
 };

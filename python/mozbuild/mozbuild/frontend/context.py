@@ -1908,6 +1908,9 @@ VARIABLES = {
         """List of manifest files defining cram unit tests.
         """),
 
+    'TELEMETRY_TESTS_CLIENT_MANIFESTS': (ManifestparserManifestList, list,
+        """List of manifest files defining telemetry client tests.
+        """),
 
     # The following variables are used to control the target of installed files.
     'XPI_NAME': (unicode, unicode,
@@ -2178,6 +2181,14 @@ VARIABLES = {
 
         If yasm is not available on this system, or does not support the
         current target architecture, an error will be raised.
+        """),
+
+    'USE_INTEGRATED_CLANGCL_AS': (bool, bool,
+        """Use the integrated clang-cl assembler to assemble assembly files from SOURCES.
+
+        This allows using clang-cl to assemble assembly files which is useful
+        on platforms like aarch64 where the alternative is to have to run a
+        pre-processor to generate files with suitable syntax.
         """),
 }
 

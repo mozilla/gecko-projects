@@ -429,6 +429,9 @@ bool js::RunScript(JSContext* cx, RunState& state) {
 STATIC_PRECONDITION_ASSUME(ubound(args.argv_) >= argc)
 MOZ_ALWAYS_INLINE bool CallJSNative(JSContext* cx, Native native,
                                     const CallArgs& args) {
+  TraceLoggerThread* logger = TraceLoggerForCurrentThread(cx);
+  AutoTraceLog traceLog(logger, TraceLogger_Call);
+
   if (!CheckRecursionLimit(cx)) {
     return false;
   }
@@ -1970,8 +1973,10 @@ static MOZ_NEVER_INLINE JS_HAZ_JSNATIVE_CALLER bool Interpret(JSContext* cx,
         script->incWarmUpCounter();
 
         using Tier = jit::BaselineTier;
+        bool tryBaselineInterpreter = (jit::JitOptions.baselineInterpreter &&
+                                       !script->hasBaselineScript());
         jit::MethodStatus status =
-            jit::JitOptions.baselineInterpreter
+            tryBaselineInterpreter
                 ? jit::CanEnterBaselineAtBranch<Tier::Interpreter>(cx,
                                                                    REGS.fp())
                 : jit::CanEnterBaselineAtBranch<Tier::Compiler>(cx, REGS.fp());
@@ -1998,7 +2003,7 @@ static MOZ_NEVER_INLINE JS_HAZ_JSNATIVE_CALLER bool Interpret(JSContext* cx,
           // version of the function popped a copy of the frame pushed by the
           // OSR trampoline.)
           if (wasProfiler) {
-            cx->geckoProfiler().exit(script, script->functionNonDelazifying());
+            cx->geckoProfiler().exit(cx, script);
           }
 
           if (activation.entryFrame() != REGS.fp()) {

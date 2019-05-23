@@ -30,6 +30,7 @@ for (const type of [
   "ARCHIVE_FROM_POCKET",
   "AS_ROUTER_INITIALIZED",
   "AS_ROUTER_PREF_CHANGED",
+  "AS_ROUTER_TARGETING_UPDATE",
   "AS_ROUTER_TELEMETRY_USER_EVENT",
   "BLOCK_URL",
   "BOOKMARK_URL",
@@ -43,13 +44,15 @@ for (const type of [
   "DISCOVERY_STREAM_CONFIG_SETUP",
   "DISCOVERY_STREAM_CONFIG_SET_VALUE",
   "DISCOVERY_STREAM_FEEDS_UPDATE",
+  "DISCOVERY_STREAM_FEED_UPDATE",
   "DISCOVERY_STREAM_IMPRESSION_STATS",
   "DISCOVERY_STREAM_LAYOUT_RESET",
   "DISCOVERY_STREAM_LAYOUT_UPDATE",
+  "DISCOVERY_STREAM_LINK_BLOCKED",
   "DISCOVERY_STREAM_LOADED_CONTENT",
-  "DISCOVERY_STREAM_OPT_OUT",
   "DISCOVERY_STREAM_SPOCS_CAPS",
   "DISCOVERY_STREAM_SPOCS_ENDPOINT",
+  "DISCOVERY_STREAM_SPOCS_FILL",
   "DISCOVERY_STREAM_SPOCS_UPDATE",
   "DISCOVERY_STREAM_SPOC_IMPRESSION",
   "DOWNLOAD_CHANGED",
@@ -129,6 +132,7 @@ for (const type of [
   "TOP_SITES_UPDATED",
   "TOTAL_BOOKMARKS_REQUEST",
   "TOTAL_BOOKMARKS_RESPONSE",
+  "TRAILHEAD_ENROLL_EVENT",
   "UNINIT",
   "UPDATE_PINNED_SEARCH_SHORTCUTS",
   "UPDATE_SEARCH_SHORTCUTS",
@@ -292,6 +296,21 @@ function ASRouterUserEvent(data) {
 }
 
 /**
+ * DiscoveryStreamSpocsFill - A telemetry ping indicating a SPOCS Fill event.
+ *
+ * @param  {object} data Fields to include in the ping (spoc_fills, etc.)
+ * @param  {int} importContext (For testing) Override the import context for testing.
+ * @return {object} An AlsoToMain action
+ */
+function DiscoveryStreamSpocsFill(data, importContext = globalImportContext) {
+  const action = {
+    type: actionTypes.DISCOVERY_STREAM_SPOCS_FILL,
+    data,
+  };
+  return importContext === UI_CODE ? AlsoToMain(action) : action;
+}
+
+/**
  * UndesiredEvent - A telemetry ping indicating an undesired state.
  *
  * @param  {object} data Fields to include in the ping (value, etc.)
@@ -398,6 +417,7 @@ this.actionCreators = {
   WebExtEvent,
   DiscoveryStreamImpressionStats,
   DiscoveryStreamLoadedContent,
+  DiscoveryStreamSpocsFill,
 };
 
 // These are helpers to test for certain kinds of actions

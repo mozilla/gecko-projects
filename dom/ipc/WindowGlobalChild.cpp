@@ -144,6 +144,16 @@ void WindowGlobalChild::Destroy() {
   // well.
   RefPtr<BrowserChild> browserChild = GetBrowserChild();
   if (!browserChild || !browserChild->IsDestroyed()) {
+    // Make a copy so that we can avoid potential iterator invalidation when
+    // calling the user-provided Destroy() methods.
+    nsTArray<RefPtr<JSWindowActorChild>> windowActors(mWindowActors.Count());
+    for (auto iter = mWindowActors.Iter(); !iter.Done(); iter.Next()) {
+      windowActors.AppendElement(iter.UserData());
+    }
+
+    for (auto& windowActor : windowActors) {
+      windowActor->StartDestroy();
+    }
     SendDestroy();
   }
 
@@ -243,6 +253,18 @@ void WindowGlobalChild::ReceiveRawMessage(const JSWindowActorMessageMeta& aMeta,
   }
 }
 
+nsIURI* WindowGlobalChild::GetDocumentURI() {
+  return mWindowGlobal->GetDocumentURI();
+}
+
+const nsAString& WindowGlobalChild::GetRemoteType() {
+  if (XRE_IsContentProcess()) {
+    return ContentChild::GetSingleton()->GetRemoteType();
+  }
+
+  return VoidString();
+}
+
 already_AddRefed<JSWindowActorChild> WindowGlobalChild::GetActor(
     const nsAString& aName, ErrorResult& aRv) {
   if (mIPCClosed) {
@@ -255,24 +277,9 @@ already_AddRefed<JSWindowActorChild> WindowGlobalChild::GetActor(
     return do_AddRef(mWindowActors.GetWeak(aName));
   }
 
-  // Otherwise, we want to create a new instance of this actor. Call into the
-  // JSWindowActorService to trigger construction.
-  RefPtr<JSWindowActorService> actorSvc = JSWindowActorService::GetSingleton();
-  if (!actorSvc) {
-    return nullptr;
-  }
-
-  nsAutoString remoteType;
-  if (XRE_IsContentProcess()) {
-    remoteType = ContentChild::GetSingleton()->GetRemoteType();
-  } else {
-    remoteType = VoidString();
-  }
-
+  // Otherwise, we want to create a new instance of this actor.
   JS::RootedObject obj(RootingCx());
-  actorSvc->ConstructActor(aName, /* aChildSide */ false, mBrowsingContext,
-                           mWindowGlobal->GetDocumentURI(), remoteType, &obj,
-                           aRv);
+  ConstructActor(aName, &obj, aRv);
   if (aRv.Failed()) {
     return nullptr;
   }
@@ -299,12 +306,15 @@ void WindowGlobalChild::ActorDestroy(ActorDestroyReason aWhy) {
   mWindowActors.SwapElements(windowActors);
   for (auto iter = windowActors.Iter(); !iter.Done(); iter.Next()) {
     iter.Data()->RejectPendingQueries();
+    iter.Data()->AfterDestroy();
   }
+  windowActors.Clear();
 }
 
 WindowGlobalChild::~WindowGlobalChild() {
   MOZ_ASSERT(!gWindowGlobalChildById ||
              !gWindowGlobalChildById->Contains(mInnerWindowId));
+  MOZ_ASSERT(!mWindowActors.Count());
 }
 
 JSObject* WindowGlobalChild::WrapObject(JSContext* aCx,
@@ -316,11 +326,19 @@ nsISupports* WindowGlobalChild::GetParentObject() {
   return xpc::NativeGlobal(xpc::PrivilegedJunkScope());
 }
 
-NS_IMPL_CYCLE_COLLECTION_WRAPPERCACHE(WindowGlobalChild, mWindowGlobal,
-                                      mBrowsingContext, mWindowActors)
+NS_IMPL_CYCLE_COLLECTION_INHERITED(WindowGlobalChild, WindowGlobalActor,
+                                   mWindowGlobal, mBrowsingContext,
+                                   mWindowActors)
 
-NS_IMPL_CYCLE_COLLECTION_ROOT_NATIVE(WindowGlobalChild, AddRef)
-NS_IMPL_CYCLE_COLLECTION_UNROOT_NATIVE(WindowGlobalChild, Release)
+NS_IMPL_CYCLE_COLLECTION_TRACE_BEGIN_INHERITED(WindowGlobalChild,
+                                               WindowGlobalActor)
+NS_IMPL_CYCLE_COLLECTION_TRACE_END
+
+NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(WindowGlobalChild)
+NS_INTERFACE_MAP_END_INHERITING(WindowGlobalActor)
+
+NS_IMPL_ADDREF_INHERITED(WindowGlobalChild, WindowGlobalActor)
+NS_IMPL_RELEASE_INHERITED(WindowGlobalChild, WindowGlobalActor)
 
 }  // namespace dom
 }  // namespace mozilla

@@ -41,6 +41,7 @@
 #include "mozilla/dom/HTMLInputElement.h"
 #include "mozilla/dom/HTMLTextAreaElement.h"
 #include "mozilla/dom/Text.h"
+#include "mozilla/StaticPrefs.h"
 #include "nsNumberControlFrame.h"
 #include "nsFrameSelection.h"
 #include "mozilla/ErrorResult.h"
@@ -803,12 +804,9 @@ void TextInputListener::OnSelectionChange(Selection& aSelection,
   if (!collapsed && (aReason & (nsISelectionListener::MOUSEUP_REASON |
                                 nsISelectionListener::KEYPRESS_REASON |
                                 nsISelectionListener::SELECTALL_REASON))) {
-    nsIContent* content = mFrame->GetContent();
-    if (content) {
-      nsCOMPtr<Document> doc = content->GetComposedDoc();
-      if (doc) {
-        RefPtr<PresShell> presShell = doc->GetPresShell();
-        if (presShell) {
+    if (nsCOMPtr<nsIContent> content = mFrame->GetContent()) {
+      if (nsCOMPtr<Document> doc = content->GetComposedDoc()) {
+        if (RefPtr<PresShell> presShell = doc->GetPresShell()) {
           nsEventStatus status = nsEventStatus_eIgnore;
           WidgetEvent event(true, eFormSelect);
 
@@ -1236,11 +1234,11 @@ nsresult nsTextEditorState::BindToFrame(nsTextControlFrame* aFrame) {
   return NS_OK;
 }
 
-struct PreDestroyer {
+struct MOZ_STACK_CLASS PreDestroyer {
   void Init(TextEditor* aTextEditor) { mTextEditor = aTextEditor; }
-  ~PreDestroyer() {
+  MOZ_CAN_RUN_SCRIPT ~PreDestroyer() {
     if (mTextEditor) {
-      mTextEditor->PreDestroy(true);
+      MOZ_KnownLive(mTextEditor)->PreDestroy(true);
     }
   }
   void Swap(RefPtr<TextEditor>& aTextEditor) {
@@ -1919,7 +1917,8 @@ HTMLInputElement* nsTextEditorState::GetParentNumberControl(
 void nsTextEditorState::DestroyEditor() {
   // notify the editor that we are going away
   if (mEditorInitialized) {
-    mTextEditor->PreDestroy(true);
+    RefPtr<TextEditor> textEditor = mTextEditor;
+    textEditor->PreDestroy(true);
     mEditorInitialized = false;
   }
 }
@@ -1930,14 +1929,6 @@ void nsTextEditorState::UnbindFromFrame(nsTextControlFrame* aFrame) {
   // If it was, however, it should be unbounded from the same frame.
   MOZ_ASSERT(aFrame == mBoundFrame, "Unbinding from the wrong frame");
   NS_ENSURE_TRUE_VOID(!aFrame || aFrame == mBoundFrame);
-
-  // If the editor is modified but nsIEditorObserver::EditAction() hasn't been
-  // called yet, we need to notify it here because editor may be destroyed
-  // before EditAction() is called if selection listener causes flushing layout.
-  if (mTextListener && mTextEditor && mEditorInitialized &&
-      mTextEditor->IsInEditSubAction()) {
-    mTextListener->OnEditActionHandled();
-  }
 
   // We need to start storing the value outside of the editor if we're not
   // going to use it anymore, so retrieve it for now.
@@ -2431,7 +2422,7 @@ bool nsTextEditorState::SetValue(const nsAString& aValue,
     // We can't just early-return here if mValue->Equals(newValue), because
     // ValueWasChanged and OnValueChanged below still need to be called.
     if (!mValue->Equals(newValue) ||
-        !nsContentUtils::SkipCursorMoveForSameValueSet()) {
+        !StaticPrefs::dom_input_skip_cursor_move_for_same_value_set()) {
       if (!mValue->Assign(newValue, fallible)) {
         return false;
       }
@@ -2575,8 +2566,7 @@ void nsTextEditorState::UpdateOverlayTextVisibility(bool aNotify) {
   mPreviewVisibility = valueIsEmpty && !previewValue.IsEmpty();
   mPlaceholderVisibility = valueIsEmpty && previewValue.IsEmpty();
 
-  if (mPlaceholderVisibility &&
-      !nsContentUtils::ShowInputPlaceholderOnFocus()) {
+  if (mPlaceholderVisibility && !StaticPrefs::dom_placeholder_show_on_focus()) {
     nsCOMPtr<nsIContent> content = do_QueryInterface(mTextCtrlElement);
     mPlaceholderVisibility = !nsContentUtils::IsFocusedContent(content);
   }

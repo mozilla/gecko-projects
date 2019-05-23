@@ -14,7 +14,9 @@
 #include "PublicKeyPinningService.h"
 #include "cert.h"
 #include "certdb.h"
-#include "cert_storage/src/cert_storage.h"
+#ifdef MOZ_NEW_CERT_STORAGE
+#  include "cert_storage/src/cert_storage.h"
+#endif
 #include "mozilla/Assertions.h"
 #include "mozilla/Casting.h"
 #include "mozilla/Move.h"
@@ -34,6 +36,7 @@
 #include "mozpkix/Result.h"
 #include "mozpkix/pkix.h"
 #include "mozpkix/pkixnss.h"
+#include "mozpkix/pkixutil.h"
 #include "prerror.h"
 #include "secerr.h"
 
@@ -88,16 +91,66 @@ NSSCertDBTrustDomain::NSSCertDBTrustDomain(
       mBuiltChain(builtChain),
       mPinningTelemetryInfo(pinningTelemetryInfo),
       mHostname(hostname),
+#ifdef MOZ_NEW_CERT_STORAGE
       mCertStorage(do_GetService(NS_CERT_STORAGE_CID)),
+#else
+      mCertBlocklist(do_GetService(NS_CERTBLOCKLIST_CONTRACTID)),
+#endif
       mOCSPStaplingStatus(CertVerifier::OCSP_STAPLING_NEVER_CHECKED),
       mSCTListFromCertificate(),
-      mSCTListFromOCSPStapling() {}
+      mSCTListFromOCSPStapling() {
+}
+
+// A self-signed issuer certificate should never be necessary in order to build
+// a trusted certificate chain unless it is a trust anchor. This is because if
+// it were necessary, there would exist another certificate with the same
+// subject and public key that is also a valid issing certificate. Given this
+// certificate, it is possible to build another chain using just it instead of
+// it and the self-signed certificate. This is only true as long as the
+// certificate extensions we support are restrictive rather than additive in
+// terms of the rest of the chain (for example, we don't support policy mapping
+// and we ignore any SCT information in intermediates).
+bool NSSCertDBTrustDomain::ShouldSkipSelfSignedNonTrustAnchor(Input certDER) {
+  BackCert cert(certDER, EndEntityOrCA::MustBeCA, nullptr);
+  if (cert.Init() != Success) {
+    return false;  // turn any failures into "don't skip trying this cert"
+  }
+  // If subject != issuer, this isn't a self-signed cert.
+  if (!InputsAreEqual(cert.GetSubject(), cert.GetIssuer())) {
+    return false;
+  }
+  TrustLevel trust;
+  if (GetCertTrust(EndEntityOrCA::MustBeCA, CertPolicyId::anyPolicy, certDER,
+                   trust) != Success) {
+    return false;
+  }
+  // If the trust for this certificate is anything other than "inherit", we want
+  // to process it like normal.
+  if (trust != TrustLevel::InheritsTrust) {
+    return false;
+  }
+  uint8_t digestBuf[MAX_DIGEST_SIZE_IN_BYTES];
+  pkix::der::PublicKeyAlgorithm publicKeyAlg;
+  SignedDigest signature;
+  if (DigestSignedData(*this, cert.GetSignedData(), digestBuf, publicKeyAlg,
+                       signature) != Success) {
+    return false;
+  }
+  if (VerifySignedDigest(*this, publicKeyAlg, signature,
+                         cert.GetSubjectPublicKeyInfo()) != Success) {
+    return false;
+  }
+  // This is a self-signed, non-trust-anchor certificate, so we shouldn't use it
+  // for path building. See bug 1056341.
+  return true;
+}
 
 Result NSSCertDBTrustDomain::FindIssuer(Input encodedIssuerName,
                                         IssuerChecker& checker, Time) {
   Vector<Input> rootCandidates;
   Vector<Input> intermediateCandidates;
 
+#ifdef MOZ_NEW_CERT_STORAGE
   if (!mCertStorage) {
     return Result::FATAL_ERROR_LIBRARY_FAILURE;
   }
@@ -122,6 +175,7 @@ Result NSSCertDBTrustDomain::FindIssuer(Input encodedIssuerName,
       return Result::FATAL_ERROR_NO_MEMORY;
     }
   }
+#endif
 
   SECItem encodedIssuerNameItem = UnsafeMapInputToSECItem(encodedIssuerName);
 
@@ -185,6 +239,9 @@ Result NSSCertDBTrustDomain::FindIssuer(Input encodedIssuerName,
   }
 
   for (Input candidate : rootCandidates) {
+    if (ShouldSkipSelfSignedNonTrustAnchor(candidate)) {
+      continue;
+    }
     bool keepGoing;
     Result rv = checker.Check(candidate, nameConstraintsInputPtr, keepGoing);
     if (rv != Success) {
@@ -216,13 +273,18 @@ Result NSSCertDBTrustDomain::GetCertTrust(EndEntityOrCA endEntityOrCA,
   }
 
   // Check the certificate against the OneCRL cert blocklist
+#ifdef MOZ_NEW_CERT_STORAGE
   if (!mCertStorage) {
+#else
+  if (!mCertBlocklist) {
+#endif
     return Result::FATAL_ERROR_LIBRARY_FAILURE;
   }
 
   // The certificate blocklist currently only applies to TLS server
   // certificates.
   if (mCertDBTrustType == trustSSL) {
+#ifdef MOZ_NEW_CERT_STORAGE
     int16_t revocationState;
 
     nsTArray<uint8_t> issuerBytes;
@@ -232,18 +294,38 @@ Result NSSCertDBTrustDomain::GetCertTrust(EndEntityOrCA endEntityOrCA,
 
     nsresult nsrv = BuildRevocationCheckArrays(
         candidateCert, issuerBytes, serialBytes, subjectBytes, pubKeyBytes);
+#else
+    bool isCertRevoked;
+
+    nsAutoCString encIssuer;
+    nsAutoCString encSerial;
+    nsAutoCString encSubject;
+    nsAutoCString encPubKey;
+
+    nsresult nsrv = BuildRevocationCheckStrings(
+        candidateCert.get(), encIssuer, encSerial, encSubject, encPubKey);
+#endif
 
     if (NS_FAILED(nsrv)) {
       return Result::FATAL_ERROR_LIBRARY_FAILURE;
     }
 
+#ifdef MOZ_NEW_CERT_STORAGE
     nsrv = mCertStorage->GetRevocationState(
         issuerBytes, serialBytes, subjectBytes, pubKeyBytes, &revocationState);
+#else
+    nsrv = mCertBlocklist->IsCertRevoked(encIssuer, encSerial, encSubject,
+                                         encPubKey, &isCertRevoked);
+#endif
     if (NS_FAILED(nsrv)) {
       return Result::FATAL_ERROR_LIBRARY_FAILURE;
     }
 
+#ifdef MOZ_NEW_CERT_STORAGE
     if (revocationState == nsICertStorage::STATE_ENFORCE) {
+#else
+    if (isCertRevoked) {
+#endif
       MOZ_LOG(gCertVerifierLog, LogLevel::Debug,
               ("NSSCertDBTrustDomain: certificate is in blocklist"));
       return Result::ERROR_REVOKED_CERTIFICATE;
@@ -497,7 +579,11 @@ Result NSSCertDBTrustDomain::CheckRevocation(
 
   // If we have a fresh OneCRL Blocklist we can skip OCSP for CA certs
   bool blocklistIsFresh;
+#ifdef MOZ_NEW_CERT_STORAGE
   nsresult nsrv = mCertStorage->IsBlocklistFresh(&blocklistIsFresh);
+#else
+  nsresult nsrv = mCertBlocklist->IsBlocklistFresh(&blocklistIsFresh);
+#endif
   if (NS_FAILED(nsrv)) {
     return Result::FATAL_ERROR_LIBRARY_FAILURE;
   }
@@ -1273,6 +1359,7 @@ nsresult DefaultServerNicknameForCert(const CERTCertificate* cert,
   return NS_ERROR_FAILURE;
 }
 
+#ifdef MOZ_NEW_CERT_STORAGE
 nsresult BuildRevocationCheckArrays(const UniqueCERTCertificate& cert,
                                     /*out*/ nsTArray<uint8_t>& issuerBytes,
                                     /*out*/ nsTArray<uint8_t>& serialBytes,
@@ -1304,6 +1391,45 @@ nsresult BuildRevocationCheckArrays(const UniqueCERTCertificate& cert,
   }
   return NS_OK;
 }
+#else
+nsresult BuildRevocationCheckStrings(const CERTCertificate* cert,
+                                     /*out*/ nsCString& encIssuer,
+                                     /*out*/ nsCString& encSerial,
+                                     /*out*/ nsCString& encSubject,
+                                     /*out*/ nsCString& encPubKey) {
+  // Convert issuer, serial, subject and pubKey data to Base64 encoded DER
+  nsDependentCSubstring issuerString(
+      BitwiseCast<char*, uint8_t*>(cert->derIssuer.data), cert->derIssuer.len);
+  nsDependentCSubstring serialString(
+      BitwiseCast<char*, uint8_t*>(cert->serialNumber.data),
+      cert->serialNumber.len);
+  nsDependentCSubstring subjectString(
+      BitwiseCast<char*, uint8_t*>(cert->derSubject.data),
+      cert->derSubject.len);
+  nsDependentCSubstring pubKeyString(
+      BitwiseCast<char*, uint8_t*>(cert->derPublicKey.data),
+      cert->derPublicKey.len);
+
+  nsresult rv = Base64Encode(issuerString, encIssuer);
+  if (NS_FAILED(rv)) {
+    return rv;
+  }
+  rv = Base64Encode(serialString, encSerial);
+  if (NS_FAILED(rv)) {
+    return rv;
+  }
+  rv = Base64Encode(subjectString, encSubject);
+  if (NS_FAILED(rv)) {
+    return rv;
+  }
+  rv = Base64Encode(pubKeyString, encPubKey);
+  if (NS_FAILED(rv)) {
+    return rv;
+  }
+
+  return NS_OK;
+}
+#endif
 
 /**
  * Given a list of certificates representing a verified certificate path from an

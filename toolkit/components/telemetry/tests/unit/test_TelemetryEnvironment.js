@@ -114,8 +114,7 @@ PluginTag.prototype = {
 
   mimeTypes: [ PLUGIN_MIME_TYPE1, PLUGIN_MIME_TYPE2 ],
 
-  getMimeTypes(count) {
-    count.value = this.mimeTypes.length;
+  getMimeTypes() {
     return this.mimeTypes;
   },
 };
@@ -128,8 +127,7 @@ var gInstalledPlugins = [
 
 // A fake plugin host for testing plugin telemetry environment.
 var PluginHost = {
-  getPluginTags(countRef) {
-    countRef.value = gInstalledPlugins.length;
+  getPluginTags() {
     return gInstalledPlugins.map(plugin => plugin.pluginTag);
   },
 
@@ -506,6 +504,7 @@ function checkGfxAdapter(data) {
     subsysID: "string",
     RAM: "number",
     driver: "string",
+    driverVendor: "string",
     driverVersion: "string",
     driverDate: "string",
     GPUActive: "boolean",
@@ -606,6 +605,7 @@ function checkSystemSection(data) {
   for (let disk of EXPECTED_HDD_FIELDS) {
     Assert.ok(check(data.system.hdd[disk].model));
     Assert.ok(check(data.system.hdd[disk].revision));
+    Assert.ok(check(data.system.hdd[disk].type));
   }
 
   let gfxData = data.system.gfx;
@@ -631,7 +631,7 @@ function checkSystemSection(data) {
   Assert.ok(gfxData.adapters[0].GPUActive, "The first GFX adapter must be active.");
 
   Assert.ok(Array.isArray(gfxData.monitors));
-  if (gIsWindows || gIsMac) {
+  if (gIsWindows || gIsMac || gIsLinux) {
     Assert.ok(gfxData.monitors.length >= 1, "There is at least one monitor.");
     Assert.equal(typeof gfxData.monitors[0].screenWidth, "number");
     Assert.equal(typeof gfxData.monitors[0].screenHeight, "number");

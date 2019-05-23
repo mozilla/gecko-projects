@@ -160,6 +160,7 @@
 #include "nsIMemoryReporter.h"
 #include "nsIMozBrowserFrame.h"
 #include "nsIMutable.h"
+#include "nsINetworkLinkService.h"
 #include "nsIObserverService.h"
 #include "nsIParentChannel.h"
 #include "nsIRemoteWindowContext.h"
@@ -615,7 +616,7 @@ static const char* sObserverTopics[] = {
     "intl:requested-locales-changed",
     "cookie-changed",
     "private-cookie-changed",
-    "clear-site-data-reload-needed",
+    NS_NETWORK_LINK_TYPE_TOPIC,
 };
 
 #if defined(XP_MACOSX) && defined(MOZ_SANDBOX)
@@ -843,7 +844,7 @@ already_AddRefed<ContentParent> ContentParent::GetNewOrUsedBrowserProcess(
     }
   } else {
     uint32_t numberOfParents = contentParents.Length();
-    nsTArray<nsIContentProcessInfo*> infos(numberOfParents);
+    nsTArray<RefPtr<nsIContentProcessInfo>> infos(numberOfParents);
     for (auto* cp : contentParents) {
       infos.AppendElement(cp->mScriptableHelper);
     }
@@ -859,9 +860,8 @@ already_AddRefed<ContentParent> ContentParent::GetNewOrUsedBrowserProcess(
     nsIContentProcessInfo* openerInfo =
         aOpener ? aOpener->mScriptableHelper.get() : nullptr;
     int32_t index;
-    if (cpp && NS_SUCCEEDED(cpp->ProvideProcess(
-                   aRemoteType, openerInfo, infos.Elements(), infos.Length(),
-                   maxContentParents, &index))) {
+    if (cpp && NS_SUCCEEDED(cpp->ProvideProcess(aRemoteType, openerInfo, infos,
+                                                maxContentParents, &index))) {
       // If the provider returned an existing ContentParent, use that one.
       if (0 <= index && static_cast<uint32_t>(index) <= maxContentParents) {
         RefPtr<ContentParent> retval = contentParents[index];
@@ -2393,8 +2393,12 @@ void ContentParent::InitInternal(ProcessPriority aInitialPriority) {
 
   // Content processes have no permission to access profile directory, so we
   // send the file URL instead.
-  nsIURI* ucsURI = nsLayoutStylesheetCache::Singleton()->GetUserContentCSSURL();
-  SerializeURI(ucsURI, xpcomInit.userContentSheetURL());
+  StyleSheet* ucs = nsLayoutStylesheetCache::Singleton()->GetUserContentSheet();
+  if (ucs) {
+    SerializeURI(ucs->GetSheetURI(), xpcomInit.userContentSheetURL());
+  } else {
+    SerializeURI(nullptr, xpcomInit.userContentSheetURL());
+  }
 
   // 1. Build ContentDeviceData first, as it may affect some gfxVars.
   gfxPlatform::GetPlatform()->BuildContentDeviceData(
@@ -3119,11 +3123,28 @@ ContentParent::Observe(nsISupports* aSubject, const char* aTopic,
                (!nsCRT::strcmp(aData, u"changed"))) {
       cs->AddCookie(xpcCookie);
     }
-  } else if (!strcmp(aTopic, "clear-site-data-reload-needed")) {
-    // Rebroadcast "clear-site-data-reload-needed".
-    Unused << SendClearSiteDataReloadNeeded(nsString(aData));
+  } else if (!strcmp(aTopic, NS_NETWORK_LINK_TYPE_TOPIC)) {
+    UpdateNetworkLinkType();
   }
+
   return NS_OK;
+}
+
+void ContentParent::UpdateNetworkLinkType() {
+  nsresult rv;
+  nsCOMPtr<nsINetworkLinkService> nls =
+      do_GetService(NS_NETWORK_LINK_SERVICE_CONTRACTID, &rv);
+  if (NS_FAILED(rv)) {
+    return;
+  }
+
+  uint32_t linkType = nsINetworkLinkService::LINK_TYPE_UNKNOWN;
+  rv = nls->GetLinkType(&linkType);
+  if (NS_FAILED(rv)) {
+    return;
+  }
+
+  Unused << SendNetworkLinkTypeChange(linkType);
 }
 
 NS_IMETHODIMP
@@ -3475,11 +3496,6 @@ mozilla::ipc::IPCResult ContentParent::RecvFinishMemoryReport(
 
 mozilla::ipc::IPCResult ContentParent::RecvAddPerformanceMetrics(
     const nsID& aID, nsTArray<PerformanceInfo>&& aMetrics) {
-  if (!mozilla::StaticPrefs::dom_performance_enable_scheduler_timing()) {
-    // The pref is off, we should not get a performance metrics from the content
-    // child
-    return IPC_OK();
-  }
   nsresult rv = PerformanceMetricsCollector::DataReceived(aID, aMetrics);
   Unused << NS_WARN_IF(NS_FAILED(rv));
   return IPC_OK();
@@ -5457,6 +5473,13 @@ mozilla::ipc::IPCResult ContentParent::RecvRecordDiscardedData(
     const mozilla::Telemetry::DiscardedData& aDiscardedData) {
   TelemetryIPC::RecordDiscardedData(GetTelemetryProcessID(mRemoteType),
                                     aDiscardedData);
+  return IPC_OK();
+}
+
+mozilla::ipc::IPCResult ContentParent::RecvRecordOrigin(
+    const uint32_t& aMetricId, const nsCString& aOrigin) {
+  Telemetry::RecordOrigin(static_cast<Telemetry::OriginMetricID>(aMetricId),
+                          aOrigin);
   return IPC_OK();
 }
 

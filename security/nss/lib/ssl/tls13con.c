@@ -479,7 +479,7 @@ tls13_SetupClientHello(sslSocket *ss, sslClientHelloType chType)
     session_ticket = &sid->u.ssl3.locked.sessionTicket;
     PORT_Assert(session_ticket && session_ticket->ticket.data);
 
-    if (ssl_TicketTimeValid(session_ticket)) {
+    if (ssl_TicketTimeValid(ss, session_ticket)) {
         ss->statelessResume = PR_TRUE;
     }
 
@@ -2724,7 +2724,7 @@ tls13_SendServerHelloSequence(sslSocket *ss)
         }
     }
 
-    ss->ssl3.hs.serverHelloTime = ssl_TimeUsec();
+    ss->ssl3.hs.serverHelloTime = ssl_Time(ss);
     return SECSuccess;
 }
 
@@ -4981,7 +4981,7 @@ tls13_HandleNewSessionTicket(sslSocket *ss, PRUint8 *b, PRUint32 length)
         return SECFailure;
     }
 
-    ticket.received_timestamp = ssl_TimeUsec();
+    ticket.received_timestamp = ssl_Time(ss);
     rv = ssl3_ConsumeHandshakeNumber(ss, &ticket.ticket_lifetime_hint, 4, &b,
                                      &length);
     if (rv != SECSuccess) {
@@ -5542,25 +5542,45 @@ tls13_MaybeDo0RTTHandshake(sslSocket *ss)
 }
 
 PRInt32
-tls13_Read0RttData(sslSocket *ss, void *buf, PRInt32 len)
+tls13_Read0RttData(sslSocket *ss, PRUint8 *buf, PRInt32 len)
 {
-    TLS13EarlyData *msg;
-
     PORT_Assert(!PR_CLIST_IS_EMPTY(&ss->ssl3.hs.bufferedEarlyData));
-    msg = (TLS13EarlyData *)PR_NEXT_LINK(&ss->ssl3.hs.bufferedEarlyData);
+    PRInt32 offset = 0;
+    while (!PR_CLIST_IS_EMPTY(&ss->ssl3.hs.bufferedEarlyData)) {
+        TLS13EarlyData *msg =
+            (TLS13EarlyData *)PR_NEXT_LINK(&ss->ssl3.hs.bufferedEarlyData);
+        unsigned int tocpy = msg->data.len - msg->consumed;
 
-    PR_REMOVE_LINK(&msg->link);
-    if (msg->data.len > len) {
-        PORT_SetError(SSL_ERROR_ILLEGAL_PARAMETER_ALERT);
-        return SECFailure;
+        if (tocpy > (len - offset)) {
+            if (IS_DTLS(ss)) {
+                /* In DTLS, we only return entire records.
+                 * So offset and consumed are always zero. */
+                PORT_Assert(offset == 0);
+                PORT_Assert(msg->consumed == 0);
+                PORT_SetError(SSL_ERROR_RX_SHORT_DTLS_READ);
+                return -1;
+            }
+
+            tocpy = len - offset;
+        }
+
+        PORT_Memcpy(buf + offset, msg->data.data + msg->consumed, tocpy);
+        offset += tocpy;
+        msg->consumed += tocpy;
+
+        if (msg->consumed == msg->data.len) {
+            PR_REMOVE_LINK(&msg->link);
+            SECITEM_ZfreeItem(&msg->data, PR_FALSE);
+            PORT_ZFree(msg, sizeof(*msg));
+        }
+
+        /* We are done after one record for DTLS; otherwise, when the buffer fills up. */
+        if (IS_DTLS(ss) || offset == len) {
+            break;
+        }
     }
-    len = msg->data.len;
 
-    PORT_Memcpy(buf, msg->data.data, msg->data.len);
-    SECITEM_ZfreeItem(&msg->data, PR_FALSE);
-    PORT_ZFree(msg, sizeof(*msg));
-
-    return len;
+    return offset;
 }
 
 static SECStatus

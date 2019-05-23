@@ -13,8 +13,9 @@ import { setupHelper } from "../utils/dbg";
 import {
   bootstrapApp,
   bootstrapStore,
-  bootstrapWorkers
+  bootstrapWorkers,
 } from "../utils/bootstrap";
+
 import { initialBreakpointsState } from "../reducers/breakpoints";
 
 import type { Panel } from "./firefox/types";
@@ -47,19 +48,24 @@ async function loadInitialState() {
 
   const breakpoints = initialBreakpointsState(xhrBreakpoints);
 
-  return { pendingBreakpoints, tabs, breakpoints, eventListenerBreakpoints };
+  return {
+    pendingBreakpoints,
+    tabs,
+    breakpoints,
+    eventListenerBreakpoints,
+  };
 }
 
 function getClient(connection: any) {
   const {
-    tab: { clientType }
+    tab: { clientType },
   } = connection;
   return clientType == "firefox" ? firefox : chrome;
 }
 
 export async function onConnect(
   connection: Object,
-  sourceMaps: Object,
+  panelWorkers: Object,
   panel: Panel
 ) {
   // NOTE: the landing page does not connect to a JS process
@@ -73,15 +79,15 @@ export async function onConnect(
   const commands = client.clientCommands;
 
   const initialState = await loadInitialState();
+  const workers = bootstrapWorkers(panelWorkers);
 
   const { store, actions, selectors } = bootstrapStore(
     commands,
-    sourceMaps,
+    workers,
     panel,
     initialState
   );
 
-  const workers = bootstrapWorkers();
   await client.onConnect(connection, actions);
 
   await syncBreakpoints();
@@ -90,9 +96,9 @@ export async function onConnect(
     store,
     actions,
     selectors,
-    workers: { ...workers, sourceMaps },
+    workers,
     connection,
-    client: client.clientCommands
+    client: client.clientCommands,
   });
 
   bootstrapApp(store);

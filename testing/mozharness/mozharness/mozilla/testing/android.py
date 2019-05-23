@@ -250,6 +250,12 @@ class AndroidMixin(object):
         perf_path = os.path.join(dir, "android-performance.log")
         with open(perf_path, "w") as f:
 
+            f.write('\n\nHost cpufreq/scaling_governor:\n')
+            cpus = glob.glob('/sys/devices/system/cpu/cpu*/cpufreq/scaling_governor')
+            for cpu in cpus:
+                out = subprocess.check_output(['cat', cpu])
+                f.write("%s: %s" % (cpu, out))
+
             f.write('\n\nHost /proc/cpuinfo:\n')
             out = subprocess.check_output(['cat', '/proc/cpuinfo'])
             f.write(out)
@@ -286,7 +292,7 @@ class AndroidMixin(object):
         # low bogomips can be a good predictor of that condition.
         bogomips_minimum = int(self.config.get('bogomips_minimum') or 0)
         for line in cpuinfo.split('\n'):
-            m = re.match("BogoMIPS.*: (\d*)", line)
+            m = re.match("BogoMIPS.*: (\d*)", line, re.IGNORECASE)
             if m:
                 bogomips = int(m.group(1))
                 if bogomips_minimum > 0 and bogomips < bogomips_minimum:
@@ -331,11 +337,12 @@ class AndroidMixin(object):
         import mozdevice
         try:
             self.device.install_app(apk)
-        except (mozdevice.ADBError, mozdevice.ADBTimeoutError):
-            self.info('Failed to install %s on %s' %
-                      (self.installer_path, self.device_name))
+        except (mozdevice.ADBError, mozdevice.ADBTimeoutError), e:
+            self.info('Failed to install %s on %s: %s %s' %
+                      (self.installer_path, self.device_name,
+                       type(e).__name__, e))
             self.fatal('INFRA-ERROR: Failed to install %s' %
-                       self.installer_path,
+                       os.path.basename(self.installer_path),
                        EXIT_STATUS_DICT[TBPL_RETRY])
 
     def is_boot_completed(self):

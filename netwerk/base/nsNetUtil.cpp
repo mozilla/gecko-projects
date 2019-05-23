@@ -81,7 +81,11 @@
 #include "nsHttpHandler.h"
 #include "nsNSSComponent.h"
 #include "nsIRedirectHistoryEntry.h"
-#include "nsICertStorage.h"
+#ifdef MOZ_NEW_CERT_STORAGE
+#  include "nsICertStorage.h"
+#else
+#  include "nsICertBlocklist.h"
+#endif
 #include "nsICertOverrideService.h"
 #include "nsQueryObject.h"
 #include "mozIThirdPartyUtil.h"
@@ -91,6 +95,8 @@
 #include "nsJSProtocolHandler.h"
 #include "nsDataHandler.h"
 #include "mozilla/dom/BlobURLProtocolHandler.h"
+#include "nsStreamUtils.h"
+#include "nsSocketTransportService2.h"
 
 #include <limits>
 
@@ -101,15 +107,7 @@ using mozilla::dom::ClientInfo;
 using mozilla::dom::PerformanceStorage;
 using mozilla::dom::ServiceWorkerDescriptor;
 
-#define DEFAULT_RP 3
-#define DEFAULT_TRACKER_RP 3
-#define DEFAULT_PRIVATE_RP 2
-#define DEFAULT_TRACKER_PRIVATE_RP 2
-
-static uint32_t sDefaultRp = DEFAULT_RP;
-static uint32_t sDefaultTrackerRp = DEFAULT_TRACKER_RP;
-static uint32_t defaultPrivateRp = DEFAULT_PRIVATE_RP;
-static uint32_t defaultTrackerPrivateRp = DEFAULT_TRACKER_PRIVATE_RP;
+#define MAX_RECURSION_COUNT 50
 
 already_AddRefed<nsIIOService> do_GetIOService(nsresult* error /* = 0 */) {
   nsCOMPtr<nsIIOService> io = mozilla::services::GetIOService();
@@ -922,8 +920,7 @@ nsresult NS_NewStreamLoaderInternal(
     nsContentPolicyType aContentPolicyType,
     nsILoadGroup* aLoadGroup /* = nullptr */,
     nsIInterfaceRequestor* aCallbacks /* = nullptr */,
-    nsLoadFlags aLoadFlags /* = nsIRequest::LOAD_NORMAL */,
-    nsIURI* aReferrer /* = nullptr */) {
+    nsLoadFlags aLoadFlags /* = nsIRequest::LOAD_NORMAL */) {
   nsCOMPtr<nsIChannel> channel;
   nsresult rv = NS_NewChannelInternal(
       getter_AddRefs(channel), aUri, aLoadingNode, aLoadingPrincipal,
@@ -935,11 +932,6 @@ nsresult NS_NewStreamLoaderInternal(
       aLoadGroup, aCallbacks, aLoadFlags);
 
   NS_ENSURE_SUCCESS(rv, rv);
-  nsCOMPtr<nsIHttpChannel> httpChannel(do_QueryInterface(channel));
-  if (httpChannel) {
-    rv = httpChannel->SetReferrer(aReferrer);
-    MOZ_ASSERT(NS_SUCCEEDED(rv));
-  }
   rv = NS_NewStreamLoader(outStream, aObserver);
   NS_ENSURE_SUCCESS(rv, rv);
   return channel->AsyncOpen(*outStream);
@@ -951,14 +943,12 @@ nsresult NS_NewStreamLoader(
     nsSecurityFlags aSecurityFlags, nsContentPolicyType aContentPolicyType,
     nsILoadGroup* aLoadGroup /* = nullptr */,
     nsIInterfaceRequestor* aCallbacks /* = nullptr */,
-    nsLoadFlags aLoadFlags /* = nsIRequest::LOAD_NORMAL */,
-    nsIURI* aReferrer /* = nullptr */) {
+    nsLoadFlags aLoadFlags /* = nsIRequest::LOAD_NORMAL */) {
   NS_ASSERTION(aLoadingNode,
                "Can not create stream loader without a loading Node!");
   return NS_NewStreamLoaderInternal(
       outStream, aUri, aObserver, aLoadingNode, aLoadingNode->NodePrincipal(),
-      aSecurityFlags, aContentPolicyType, aLoadGroup, aCallbacks, aLoadFlags,
-      aReferrer);
+      aSecurityFlags, aContentPolicyType, aLoadGroup, aCallbacks, aLoadFlags);
 }
 
 nsresult NS_NewStreamLoader(
@@ -967,13 +957,12 @@ nsresult NS_NewStreamLoader(
     nsSecurityFlags aSecurityFlags, nsContentPolicyType aContentPolicyType,
     nsILoadGroup* aLoadGroup /* = nullptr */,
     nsIInterfaceRequestor* aCallbacks /* = nullptr */,
-    nsLoadFlags aLoadFlags /* = nsIRequest::LOAD_NORMAL */,
-    nsIURI* aReferrer /* = nullptr */) {
+    nsLoadFlags aLoadFlags /* = nsIRequest::LOAD_NORMAL */) {
   return NS_NewStreamLoaderInternal(outStream, aUri, aObserver,
                                     nullptr,  // aLoadingNode
                                     aLoadingPrincipal, aSecurityFlags,
                                     aContentPolicyType, aLoadGroup, aCallbacks,
-                                    aLoadFlags, aReferrer);
+                                    aLoadFlags);
 }
 
 nsresult NS_NewSyncStreamListener(nsIStreamListener** result,
@@ -1068,8 +1057,8 @@ nsresult NS_NewProxyInfo(const nsACString& type, const nsACString& host,
   nsCOMPtr<nsIProtocolProxyService> pps =
       do_GetService(NS_PROTOCOLPROXYSERVICE_CONTRACTID, &rv);
   if (NS_SUCCEEDED(rv))
-    rv =
-        pps->NewProxyInfo(type, host, port, flags, UINT32_MAX, nullptr, result);
+    rv = pps->NewProxyInfo(type, host, port, EmptyCString(), EmptyCString(),
+                           flags, UINT32_MAX, nullptr, result);
   return rv;
 }
 
@@ -1122,8 +1111,7 @@ nsresult NS_GetURLSpecFromDir(nsIFile* file, nsACString& url,
   return rv;
 }
 
-nsresult NS_GetReferrerFromChannel(nsIChannel* channel, nsIURI** referrer) {
-  nsresult rv = NS_ERROR_NOT_AVAILABLE;
+void NS_GetReferrerFromChannel(nsIChannel* channel, nsIURI** referrer) {
   *referrer = nullptr;
 
   nsCOMPtr<nsIPropertyBag2> props(do_QueryInterface(channel));
@@ -1131,22 +1119,29 @@ nsresult NS_GetReferrerFromChannel(nsIChannel* channel, nsIURI** referrer) {
     // We have to check for a property on a property bag because the
     // referrer may be empty for security reasons (for example, when loading
     // an http page with an https referrer).
-    rv = props->GetPropertyAsInterface(
+    nsresult rv = props->GetPropertyAsInterface(
         NS_LITERAL_STRING("docshell.internalReferrer"), NS_GET_IID(nsIURI),
         reinterpret_cast<void**>(referrer));
     if (NS_FAILED(rv)) *referrer = nullptr;
   }
 
+  if (*referrer) {
+    return;
+  }
+
   // if that didn't work, we can still try to get the referrer from the
   // nsIHttpChannel (if we can QI to it)
-  if (!(*referrer)) {
-    nsCOMPtr<nsIHttpChannel> chan(do_QueryInterface(channel));
-    if (chan) {
-      rv = chan->GetReferrer(referrer);
-      if (NS_FAILED(rv)) *referrer = nullptr;
-    }
+  nsCOMPtr<nsIHttpChannel> chan(do_QueryInterface(channel));
+  if (!chan) {
+    return;
   }
-  return rv;
+
+  nsCOMPtr<nsIReferrerInfo> referrerInfo = chan->GetReferrerInfo();
+  if (!referrerInfo) {
+    return;
+  }
+
+  referrerInfo->GetOriginalReferrer(referrer);
 }
 
 already_AddRefed<nsINetUtil> do_GetNetUtil(nsresult* error /* = 0 */) {
@@ -2578,7 +2573,11 @@ void net_EnsurePSMInit() {
   MOZ_ASSERT(NS_SUCCEEDED(rv));
 
   nsCOMPtr<nsISupports> sss = do_GetService(NS_SSSERVICE_CONTRACTID);
+#ifdef MOZ_NEW_CERT_STORAGE
   nsCOMPtr<nsISupports> cbl = do_GetService(NS_CERTSTORAGE_CONTRACTID);
+#else
+  nsCOMPtr<nsISupports> cbl = do_GetService(NS_CERTBLOCKLIST_CONTRACTID);
+#endif
   nsCOMPtr<nsISupports> cos = do_GetService(NS_CERTOVERRIDE_CONTRACTID);
 }
 
@@ -2945,81 +2944,20 @@ nsresult NS_CompareLoadInfoAndLoadContext(nsIChannel* aChannel) {
   return NS_OK;
 }
 
-uint32_t NS_GetDefaultReferrerPolicy(nsIHttpChannel* aChannel, nsIURI* aURI,
-                                     bool privateBrowsing) {
-  static bool preferencesInitialized = false;
-
-  if (!preferencesInitialized) {
-    mozilla::Preferences::AddUintVarCache(
-        &sDefaultRp, "network.http.referer.defaultPolicy", DEFAULT_RP);
-    mozilla::Preferences::AddUintVarCache(
-        &sDefaultTrackerRp, "network.http.referer.defaultPolicy.trackers",
-        DEFAULT_TRACKER_RP);
-    mozilla::Preferences::AddUintVarCache(
-        &defaultPrivateRp, "network.http.referer.defaultPolicy.pbmode",
-        DEFAULT_PRIVATE_RP);
-    mozilla::Preferences::AddUintVarCache(
-        &defaultTrackerPrivateRp,
-        "network.http.referer.defaultPolicy.trackers.pbmode",
-        DEFAULT_TRACKER_PRIVATE_RP);
-    preferencesInitialized = true;
-  }
-
-  bool thirdPartyTrackerIsolated = false;
-  if (StaticPrefs::network_cookie_cookieBehavior() ==
-      nsICookieService::BEHAVIOR_REJECT_TRACKER) {
-    if (aChannel && aURI) {
-      uint32_t rejectedReason = 0;
-      thirdPartyTrackerIsolated =
-          !AntiTrackingCommon::IsFirstPartyStorageAccessGrantedFor(
-              aChannel, aURI, &rejectedReason);
-      // Here we intentionally do not notify about the rejection reason, if any
-      // in order to avoid this check to have any visible side-effects (e.g. a
-      // web console report.)
-    }
-  }
-
-  uint32_t defaultToUse;
-  if (thirdPartyTrackerIsolated) {
-    if (privateBrowsing) {
-      defaultToUse = defaultTrackerPrivateRp;
-    } else {
-      defaultToUse = sDefaultTrackerRp;
-    }
-  } else {
-    if (privateBrowsing) {
-      defaultToUse = defaultPrivateRp;
-    } else {
-      defaultToUse = sDefaultRp;
-    }
-  }
-
-  switch (defaultToUse) {
-    case 0:
-      return nsIHttpChannel::REFERRER_POLICY_NO_REFERRER;
-    case 1:
-      return nsIHttpChannel::REFERRER_POLICY_SAME_ORIGIN;
-    case 2:
-      return nsIHttpChannel::REFERRER_POLICY_STRICT_ORIGIN_WHEN_XORIGIN;
-  }
-
-  return nsIHttpChannel::REFERRER_POLICY_NO_REFERRER_WHEN_DOWNGRADE;
-}
-
-nsresult NS_SetRequestBlockingReason(nsIChannel *channel, uint32_t reason) {
+nsresult NS_SetRequestBlockingReason(nsIChannel* channel, uint32_t reason) {
   NS_ENSURE_ARG(channel);
 
   nsCOMPtr<nsILoadInfo> loadInfo = channel->LoadInfo();
   return NS_SetRequestBlockingReason(loadInfo, reason);
 }
 
-nsresult NS_SetRequestBlockingReason(nsILoadInfo *loadInfo, uint32_t reason) {
+nsresult NS_SetRequestBlockingReason(nsILoadInfo* loadInfo, uint32_t reason) {
   NS_ENSURE_ARG(loadInfo);
 
   return loadInfo->SetRequestBlockingReason(reason);
 }
 
-nsresult NS_SetRequestBlockingReasonIfNull(nsILoadInfo *loadInfo,
+nsresult NS_SetRequestBlockingReasonIfNull(nsILoadInfo* loadInfo,
                                            uint32_t reason) {
   NS_ENSURE_ARG(loadInfo);
 

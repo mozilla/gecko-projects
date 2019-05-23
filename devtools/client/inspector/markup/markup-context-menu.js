@@ -67,9 +67,11 @@ class MarkupContextMenu {
    * This method is here for the benefit of copying links.
    */
   _copyAttributeLink(link) {
-    this.inspector.resolveRelativeURL(link, this.selection.nodeFront).then(url => {
-      clipboardHelper.copyString(url);
-    }, console.error);
+    this.inspector.inspector
+      .resolveRelativeURL(link, this.selection.nodeFront)
+      .then(url => {
+        clipboardHelper.copyString(url);
+      }, console.error);
   }
 
   /**
@@ -212,7 +214,7 @@ class MarkupContextMenu {
    * in the inspector contextual-menu.
    */
   _onCopyLink() {
-    this.copyAttributeLink(this.contextMenuTarget.dataset.link);
+    this._copyAttributeLink(this.contextMenuTarget.dataset.link);
   }
 
   /**
@@ -752,7 +754,7 @@ class MarkupContextMenu {
       menu.append(menuitem);
     }
 
-    menu.popup(screenX, screenY, this.toolbox);
+    menu.popup(screenX, screenY, this.toolbox.doc);
     return menu;
   }
 
@@ -768,7 +770,8 @@ class MarkupContextMenu {
     const hasA11YProps = await this.walker.hasAccessibilityProperties(
       this.selection.nodeFront);
     if (hasA11YProps) {
-      this.toolbox.doc.getElementById(menuItem.id).disabled = menuItem.disabled = false;
+      const menuItemEl = Menu.getMenuElementById(menuItem.id, this.toolbox.doc);
+      menuItemEl.disabled = menuItem.disabled = false;
     }
 
     this.inspector.emit("node-menu-updated");

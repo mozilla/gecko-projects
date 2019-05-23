@@ -18,7 +18,7 @@ function execOut(...args) {
   let out;
   let err;
   try {
-    out = execFileSync(...args);
+    out = execFileSync(...args, { silent: true });
   } catch (e) {
     out = e.stdout;
     err = e.stderr;
@@ -26,10 +26,9 @@ function execOut(...args) {
   return { out: out.toString(), err: err && err.toString() };
 }
 
-function logErrors(text, regexp) {
-  const errors = text.match(regexp) || [];
+function logErrors(tool, errors) {
   for (const error of errors) {
-    console.log(`TEST-UNEXPECTED-FAIL | ${error}`);
+    console.log(`TEST-UNEXPECTED-FAIL ${tool} | ${error}`);
   }
   return errors;
 }
@@ -45,7 +44,7 @@ function runFlowJson() {
   if (!results.passed) {
     for (const error of results.errors) {
       for (const message of error.message) {
-        console.log(`TEST-UNEXPECTED-FAIL | ${message.descr}`);
+        console.log(`TEST-UNEXPECTED-FAIL flow | ${message.descr}`);
       }
     }
   }
@@ -64,23 +63,37 @@ function eslint() {
   logStart("Eslint");
   const { out } = execOut("yarn", ["lint:js"]);
   console.log(out);
-  const errors = logErrors(out, / {2}error {2}(.*)/g);
+  const errors = logErrors("eslint", out.match(/ {2}error {2}(.*)/g) || []);
+
   return errors.length == 0;
 }
 
 function jest() {
   logStart("Jest");
-  const { out, err } = execOut("yarn", ["test"]);
-  console.log(err);
-  const errors = logErrors(err || "", / {4}✕(.*)/g);
-  return errors.length == 0;
+  const { out } = execOut("yarn", ["test-ci"]);
+  // Remove the non-JSON logs mixed with the JSON output by yarn.
+  const jsonOut = out.substring(out.indexOf("{"), out.lastIndexOf("}") + 1);
+  const results = JSON.parse(jsonOut);
+
+  const failed = results.numFailedTests == 0;
+
+  // The individual failing tests are in jammed into the same message string :/
+  const errors = [].concat(
+    ...results.testResults.map(r =>
+      r.message.split("\n").filter(l => l.includes("●"))
+    )
+  );
+
+  logErrors("jest", errors);
+  return failed;
 }
 
 function stylelint() {
   logStart("Stylelint");
   const { out } = execOut("yarn", ["lint:css"]);
   console.log(out);
-  const errors = logErrors(out, / {2}✖(.*)/g);
+  const errors = logErrors("stylelint", out.match(/ {2}✖(.*)/g) || []);
+
   return errors.length == 0;
 }
 
@@ -89,15 +102,18 @@ function jsxAccessibility() {
 
   const { out } = execOut("yarn", ["lint:jsx-a11y"]);
   console.log(out);
-  const errors = logErrors(out, / {2}error {2}(.*)/g);
+  const errors = logErrors(
+    "eslint (jsx accessibility)",
+    out.match(/ {2}error {2}(.*)/g) || []
+  );
   return errors.length == 0;
 }
 
 function lintMd() {
   logStart("Remark");
 
-  const { out, err } = execOut("yarn", ["lint:md"]);
-  const errors = logErrors(err || "", /warning(.+)/g);
+  const { err } = execOut("yarn", ["lint:md"]);
+  const errors = logErrors("remark", (err || "").match(/warning(.+)/g) || []);
   return errors.length == 0;
 }
 
@@ -123,7 +139,8 @@ console.log({
   jestPassed,
   styleLintPassed,
   jsxAccessibilityPassed,
-  remarkPassed
+  remarkPassed,
 });
 
 process.exitCode = success ? 0 : 1;
+console.log("CODE", process.exitCode);

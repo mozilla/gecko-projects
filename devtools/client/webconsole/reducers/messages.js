@@ -25,6 +25,7 @@ loader.lazyRequireGetter(this, "createWarningGroupMessage", "devtools/client/web
 loader.lazyRequireGetter(this, "isWarningGroup", "devtools/client/webconsole/utils/messages", true);
 loader.lazyRequireGetter(this, "getWarningGroupType", "devtools/client/webconsole/utils/messages", true);
 loader.lazyRequireGetter(this, "getParentWarningGroupMessageId", "devtools/client/webconsole/utils/messages", true);
+ChromeUtils.defineModuleGetter(this, "pointPrecedes", "resource://devtools/shared/execution-point-utils.js");
 
 const {
   UPDATE_REQUEST,
@@ -37,8 +38,9 @@ const {
 const MessageState = overrides => Object.freeze(Object.assign({
   // List of all the messages added to the console.
   messagesById: new Map(),
-  // When recording or replaying, all progress values in messagesById.
-  replayProgressMessages: new Set(),
+  // List of additional data associated with messages (populated async or on-demand at a
+  // later time after the message is received).
+  messagesPayloadById: new Map(),
   // Array of the visible messages.
   visibleMessages: [],
   // Object for the filtered messages.
@@ -67,16 +69,19 @@ const MessageState = overrides => Object.freeze(Object.assign({
   networkMessagesUpdateById: {},
   // Set of logpoint IDs that have been removed
   removedLogpointIds: new Set(),
+  // Any execution point we are currently paused at, when replaying.
   pausedExecutionPoint: null,
+  // Whether any messages with execution points have been seen.
+  hasExecutionPoints: false,
 }, overrides));
 
 function cloneState(state) {
   return {
     messagesById: new Map(state.messagesById),
-    replayProgressMessages: new Set(state.replayProgressMessages),
     visibleMessages: [...state.visibleMessages],
     filteredMessagesCount: {...state.filteredMessagesCount},
     messagesUiById: [...state.messagesUiById],
+    messagesPayloadById: new Map(state.messagesPayloadById),
     messagesTableDataById: new Map(state.messagesTableDataById),
     groupsById: new Map(state.groupsById),
     currentGroup: state.currentGroup,
@@ -85,6 +90,7 @@ function cloneState(state) {
     networkMessagesUpdateById: {...state.networkMessagesUpdateById},
     removedLogpointIds: new Set(state.removedLogpointIds),
     pausedExecutionPoint: state.pausedExecutionPoint,
+    hasExecutionPoints: state.hasExecutionPoints,
     warningGroupsById: new Map(state.warningGroupsById),
   };
 }
@@ -102,7 +108,6 @@ function cloneState(state) {
 function addMessage(newMessage, state, filtersState, prefsState, uiState) {
   const {
     messagesById,
-    replayProgressMessages,
     groupsById,
     currentGroup,
     repeatById,
@@ -111,17 +116,6 @@ function addMessage(newMessage, state, filtersState, prefsState, uiState) {
   if (newMessage.type === constants.MESSAGE_TYPE.NULL_MESSAGE) {
     // When the message has a NULL type, we don't add it.
     return state;
-  }
-
-  if (newMessage.executionPoint && !newMessage.logpointId) {
-    // When replaying old behaviors in a tab, we might see the same messages
-    // multiple times. Ignore duplicate messages with the same progress values.
-    // We don't need to do this for logpoint messages, which will only arrive once.
-    const progress = newMessage.executionPoint.progress;
-    if (replayProgressMessages.has(progress)) {
-      return state;
-    }
-    state.replayProgressMessages.add(progress);
   }
 
   // After messages with a given logpoint ID have been removed, ignore all
@@ -158,6 +152,10 @@ function addMessage(newMessage, state, filtersState, prefsState, uiState) {
   }
 
   ensureExecutionPoint(state, newMessage);
+
+  if (newMessage.executionPoint) {
+    state.hasExecutionPoints = true;
+  }
 
   // Check if the current message could be placed in a Warning Group.
   // This needs to be done before setting the new message in messagesById so we have a
@@ -262,7 +260,7 @@ function addMessage(newMessage, state, filtersState, prefsState, uiState) {
     } else {
       state.visibleMessages.push(newMessage.id);
     }
-    maybeSortVisibleMessages(state);
+    maybeSortVisibleMessages(state, false);
   } else if (DEFAULT_FILTERS.includes(cause)) {
     state.filteredMessagesCount.global++;
     state.filteredMessagesCount[cause]++;
@@ -280,6 +278,7 @@ function addMessage(newMessage, state, filtersState, prefsState, uiState) {
 function messages(state = MessageState(), action, filtersState, prefsState, uiState) {
   const {
     messagesById,
+    messagesPayloadById,
     messagesUiById,
     messagesTableDataById,
     networkMessagesUpdateById,
@@ -466,6 +465,12 @@ function messages(state = MessageState(), action, filtersState, prefsState, uiSt
         messagesTableDataById: (new Map(messagesTableDataById)).set(id, data),
       };
 
+    case constants.MESSAGE_UPDATE_PAYLOAD:
+      return {
+        ...state,
+        messagesPayloadById: (new Map(messagesPayloadById)).set(action.id, action.data),
+      };
+
     case constants.NETWORK_MESSAGE_UPDATE:
       return {
         ...state,
@@ -529,7 +534,7 @@ function messages(state = MessageState(), action, filtersState, prefsState, uiSt
         visibleMessages: messagesToShow,
         filteredMessagesCount: filtered,
       };
-      maybeSortVisibleMessages(filteredState);
+      maybeSortVisibleMessages(filteredState, true);
 
       return filteredState;
   }
@@ -763,6 +768,17 @@ function getToplevelMessageCount(state) {
 /**
  * Check if a message should be visible in the console output, and if not, what
  * causes it to be hidden.
+ * @param {Message} message: The message to check
+ * @param {Object} option: An option object of the following shape:
+ *                   - {MessageState} messagesState: The current messages state
+ *                   - {FilterState} filtersState: The current filters state
+ *                   - {PrefsState} prefsState: The current preferences state
+ *                   - {UiState} uiState: The current ui state
+ *                   - {Boolean} checkGroup: Set to false to not check if a message should
+ *                                 be visible because it is in a console.group.
+ *                   - {Boolean} checkParentWarningGroupVisibility: Set to false to not
+ *                                 check if a message should be visible because it is in a
+ *                                 warningGroup and the warningGroup is visible.
  *
  * @return {Object} An object of the following form:
  *         - visible {Boolean}: true if the message should be visible
@@ -774,6 +790,7 @@ function getMessageVisibility(message, {
     prefsState,
     uiState,
     checkGroup = true,
+    checkParentWarningGroupVisibility = true,
 }) {
   // Do not display the message if it's not from chromeContext and we don't show content
   // messages.
@@ -789,14 +806,14 @@ function getMessageVisibility(message, {
     };
   }
 
-  const warningGroupMessage =
-  messagesState.messagesById.get(getParentWarningGroupMessageId(message));
+  const warningGroupMessageId = getParentWarningGroupMessageId(message);
+  const parentWarningGroupMessage = messagesState.messagesById.get(warningGroupMessageId);
 
   // Do not display the message if it's in closed group and not in a warning group.
   if (
     checkGroup
     && !isInOpenedGroup(message, messagesState.groupsById, messagesState.messagesUiById)
-    && !shouldGroupWarningMessages(warningGroupMessage, messagesState, prefsState)
+    && !shouldGroupWarningMessages(parentWarningGroupMessage, messagesState, prefsState)
   ) {
     return {
       visible: false,
@@ -805,26 +822,84 @@ function getMessageVisibility(message, {
   }
 
   // If the message is a warningGroup, check if it should be displayed.
-  if (
-    isWarningGroup(message)
-    && !shouldGroupWarningMessages(message, messagesState, prefsState)
-  ) {
-    return {
-      visible: false,
-      cause: "warningGroupHeuristicNotMet",
-    };
+  if (isWarningGroup(message)) {
+    if (!shouldGroupWarningMessages(message, messagesState, prefsState)) {
+      return {
+        visible: false,
+        cause: "warningGroupHeuristicNotMet",
+      };
+    }
+
+    // Hide a warningGroup if the warning filter is off.
+    if (!filtersState[FILTERS.WARN]) {
+      // We don't include any cause as we don't want that message to be reflected in the
+      // message count.
+      return {
+        visible: false,
+      };
+    }
+
+    // Display a warningGroup if at least one of its message will be visible.
+    const childrenMessages = messagesState.warningGroupsById.get(message.id);
+    const hasVisibleChild = childrenMessages && childrenMessages.some(id => {
+      const child = messagesState.messagesById.get(id);
+      if (!child) {
+        return false;
+      }
+
+      const {visible, cause} = getMessageVisibility(child, {
+        messagesState,
+        filtersState,
+        prefsState,
+        uiState,
+        checkParentWarningGroupVisibility: false,
+      });
+      return visible && cause !== "visibleWarningGroup";
+    });
+
+    if (hasVisibleChild) {
+      return {
+        visible: true,
+        cause: "visibleChild",
+      };
+    }
   }
 
-  // Do not display the the message if it can be in a warningGroup, and the group is
+  // Do not display the message if it can be in a warningGroup, and the group is
   // displayed but collapsed.
-  const warningGroupMessageId = getParentWarningGroupMessageId(message);
   if (
-    messagesState.visibleMessages.includes(warningGroupMessageId)
-    && !messagesState.messagesUiById.includes(warningGroupMessageId)
+    parentWarningGroupMessage &&
+    shouldGroupWarningMessages(parentWarningGroupMessage, messagesState, prefsState) &&
+    !messagesState.messagesUiById.includes(warningGroupMessageId)
   ) {
     return {
       visible: false,
       cause: "closedWarningGroup",
+    };
+  }
+
+  // Display a message if it is in a warningGroup that is visible. We don't check the
+  // warningGroup visibility if `checkParentWarningGroupVisibility` is false, because
+  // it means we're checking the warningGroup visibility based on the visibility of its
+  // children, which would cause an infinite loop.
+  const parentVisibility = parentWarningGroupMessage && checkParentWarningGroupVisibility
+    ? getMessageVisibility(parentWarningGroupMessage, {
+        messagesState,
+        filtersState,
+        prefsState,
+        uiState,
+        checkGroup,
+        checkParentWarningGroupVisibility,
+    })
+    : null;
+  if (
+    parentVisibility &&
+    parentVisibility.visible &&
+    parentVisibility.cause !== "visibleChild"
+  ) {
+    return {
+      visible: true,
+      cause: "visibleWarningGroup",
     };
   }
 
@@ -833,13 +908,6 @@ function getMessageVisibility(message, {
   if (isUnfilterable(message)) {
     return {
       visible: true,
-    };
-  }
-
-  if (!passSearchFilters(message, filtersState)) {
-    return {
-      visible: false,
-      cause: FILTERS.TEXT,
     };
   }
 
@@ -873,6 +941,15 @@ function getMessageVisibility(message, {
     };
   }
 
+  // This should always be the last check, or we might report that a message was hidden
+  // because of text search, while it may be hidden because its category is disabled.
+  if (!passSearchFilters(message, filtersState)) {
+    return {
+      visible: false,
+      cause: FILTERS.TEXT,
+    };
+  }
+
   return {
     visible: true,
   };
@@ -884,6 +961,7 @@ function isUnfilterable(message) {
     MESSAGE_TYPE.RESULT,
     MESSAGE_TYPE.START_GROUP,
     MESSAGE_TYPE.START_GROUP_COLLAPSED,
+    MESSAGE_TYPE.NAVIGATION_MARKER,
   ].includes(message.type);
 }
 
@@ -1178,7 +1256,7 @@ function ensureExecutionPoint(state, newMessage) {
 
   // Add a lastExecutionPoint property which will place this message immediately
   // after the last visible one when sorting.
-  let point = { progress: 0 }, messageCount = 1;
+  let point = { checkpoint: 0, progress: 0 }, messageCount = 1;
   if (state.visibleMessages.length) {
     const lastId = state.visibleMessages[state.visibleMessages.length - 1];
     const lastMessage = state.messagesById.get(lastId);
@@ -1202,42 +1280,86 @@ function messageCountSinceLastExecutionPoint(state, id) {
   return message.lastExecutionPoint ? message.lastExecutionPoint.messageCount : 0;
 }
 
-function maybeSortVisibleMessages(state) {
+/**
+ * Sort state.visibleMessages if needed.
+ *
+ * @param {MessageState} state
+ * @param {Boolean} sortWarningGroupMessage: set to true to sort warningGroup
+ *                                           messages. Default to false, as in some
+ *                                           situations we already take care of putting
+ *                                           the ids at the right position.
+ */
+function maybeSortVisibleMessages(state, sortWarningGroupMessage = false) {
   // When using log points while replaying, messages can be added out of order
   // with respect to how they originally executed. Use the execution point
   // information in the messages to sort visible messages according to how
   // they originally executed. This isn't necessary if we haven't seen any
-  // messages with progress counters, as either we aren't replaying or haven't
+  // messages with execution points, as either we aren't replaying or haven't
   // seen any messages yet.
-  if (state.replayProgressMessages.size) {
+  if (state.hasExecutionPoints) {
     state.visibleMessages.sort((a, b) => {
       const pointA = messageExecutionPoint(state, a);
       const pointB = messageExecutionPoint(state, b);
-      if (pointA.progress != pointB.progress) {
-        return pointA.progress > pointB.progress;
+      if (pointPrecedes(pointB, pointA)) {
+        return true;
+      } else if (pointPrecedes(pointA, pointB)) {
+        return false;
       }
-      // Execution points without a progress counter predate execution points
-      // with one, i.e. a console.log() call (which bumps the progress value)
-      // predates the code that runs afterward.
-      if ("frameIndex" in pointA != "frameIndex" in pointB) {
-        return "frameIndex" in pointA;
-      }
-      // Deeper frames predate shallower frames, if the progress counter is the
-      // same. We bump the progress counter when pushing frames, but not when
-      // popping them.
-      if (pointA.frameIndex != pointB.frameIndex) {
-        return pointA.frameIndex < pointB.frameIndex;
-      }
-      // Earlier script locations predate later script locations.
-      if (pointA.offset != pointB.offset) {
-        return pointA.offset > pointB.offset;
-      }
-      // When messages don't have their own execution point, they can still be
+
+      // When messages have the same execution point, they can still be
       // distinguished by the number of messages since the last one which did
       // have an execution point.
       const countA = messageCountSinceLastExecutionPoint(state, a);
       const countB = messageCountSinceLastExecutionPoint(state, b);
       return countA > countB;
+    });
+  }
+
+  if (state.warningGroupsById.size > 0 && sortWarningGroupMessage) {
+    state.visibleMessages.sort((a, b) => {
+      const messageA = state.messagesById.get(a);
+      const messageB = state.messagesById.get(b);
+
+      const warningGroupIdA = getParentWarningGroupMessageId(messageA);
+      const warningGroupIdB = getParentWarningGroupMessageId(messageB);
+
+      const warningGroupA = state.messagesById.get(warningGroupIdA);
+      const warningGroupB = state.messagesById.get(warningGroupIdB);
+
+      const aFirst = -1;
+      const bFirst = 1;
+
+      // If both messages are in a warningGroup, or if both are not in warningGroups.
+      if (
+        (warningGroupA && warningGroupB) ||
+        (!warningGroupA && !warningGroupB)
+      ) {
+        return messageA.timeStamp < messageB.timeStamp ? aFirst : bFirst;
+      }
+
+      // If `a` is in a warningGroup (and `b` isn't).
+      if (warningGroupA) {
+        // If `b` is the warningGroup of `a`, `a` should be after `b`.
+        if (warningGroupIdA === messageB.id) {
+          return bFirst;
+        }
+        // `b` is a regular message, we place `a` before `b` if `b` came after `a`'s
+        // warningGroup.
+        return messageB.timeStamp > warningGroupA.timeStamp ? aFirst : bFirst;
+      }
+
+      // If `b` is in a warningGroup (and `a` isn't).
+      if (warningGroupB) {
+        // If `a` is the warningGroup of `b`, `a` should be before `b`.
+        if (warningGroupIdB === messageA.id) {
+          return aFirst;
+        }
+        // `a` is a regular message, we place `a` after `b` if `a` came after `b`'s
+        // warningGroup.
+        return messageA.timeStamp > warningGroupB.timeStamp ? bFirst : aFirst;
+      }
+
+      return 0;
     });
   }
 }

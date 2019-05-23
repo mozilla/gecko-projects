@@ -2805,6 +2805,13 @@ var gCSSProperties = {
   "-moz-user-select": {
     domProp: "MozUserSelect",
     inherited: false,
+    type: CSS_TYPE_SHORTHAND_AND_LONGHAND,
+    alias_for: "user-select",
+    subproperties: [ "user-select" ],
+  },
+  "user-select": {
+    domProp: "userSelect",
+    inherited: false,
     type: CSS_TYPE_LONGHAND,
     initial_values: [ "auto" ],
     other_values: [ "none", "text", "all", "-moz-none" ],
@@ -3988,6 +3995,14 @@ var gCSSProperties = {
       "calc(15px / 2)", "calc(15px/2)", "calc(-3px)" ],
     invalid_values: [],
     quirks_values: { "5": "5px" },
+  },
+  "line-break": {
+    domProp: "lineBreak",
+    inherited: true,
+    type: CSS_TYPE_LONGHAND,
+    initial_values: [ "auto" ],
+    other_values: [ "loose", "normal", "strict", "anywhere" ],
+    invalid_values: []
   },
   "line-height": {
     domProp: "lineHeight",
@@ -5199,6 +5214,7 @@ var gCSSProperties = {
       "url('badscheme:badurl')",
       "blur(3px) url('badscheme:badurl') grayscale(50%)",
 
+      "blur()",
       "blur(0)",
       "blur(0px)",
       "blur(0.5px)",
@@ -5210,6 +5226,7 @@ var gCSSProperties = {
       "blur(calc(5px))",
       "blur(calc(2 * 5px))",
 
+      "brightness()",
       "brightness(0)",
       "brightness(50%)",
       "brightness(1)",
@@ -5218,6 +5235,7 @@ var gCSSProperties = {
       "brightness(350%)",
       "brightness(4.567)",
 
+      "contrast()",
       "contrast(0)",
       "contrast(50%)",
       "contrast(1)",
@@ -5244,6 +5262,7 @@ var gCSSProperties = {
       "drop-shadow(calc(2px) calc(2px))",
       "drop-shadow(calc(2px) calc(2px) calc(2px))",
 
+      "grayscale()",
       "grayscale(0)",
       "grayscale(50%)",
       "grayscale(1)",
@@ -5252,6 +5271,7 @@ var gCSSProperties = {
       "grayscale(350%)",
       "grayscale(4.567)",
 
+      "hue-rotate()",
       "hue-rotate(0)",
       "hue-rotate(0deg)",
       "hue-rotate(90deg)",
@@ -5263,6 +5283,7 @@ var gCSSProperties = {
       "hue-rotate(0.5turn)",
       "hue-rotate(-2turn)",
 
+      "invert()",
       "invert(0)",
       "invert(50%)",
       "invert(1)",
@@ -5271,6 +5292,7 @@ var gCSSProperties = {
       "invert(350%)",
       "invert(4.567)",
 
+      "opacity()",
       "opacity(0)",
       "opacity(50%)",
       "opacity(1)",
@@ -5279,6 +5301,7 @@ var gCSSProperties = {
       "opacity(350%)",
       "opacity(4.567)",
 
+      "saturate()",
       "saturate(0)",
       "saturate(50%)",
       "saturate(1)",
@@ -5287,6 +5310,7 @@ var gCSSProperties = {
       "saturate(350%)",
       "saturate(4.567)",
 
+      "sepia()",
       "sepia(0)",
       "sepia(50%)",
       "sepia(1)",
@@ -5314,7 +5338,6 @@ var gCSSProperties = {
       // - Comma delimited arguments
       // - Wrong argument type
       // - Argument value out of range
-      "blur()",
       "blur(3px 5px)",
       "blur(3px,)",
       "blur(3px, 5px)",
@@ -5327,7 +5350,6 @@ var gCSSProperties = {
       "blur(calc(20px - 5%))",
       "blur(-3px)",
 
-      "brightness()",
       "brightness(0.5 0.5)",
       "brightness(0.5,)",
       "brightness(0.5, 0.5)",
@@ -5335,7 +5357,6 @@ var gCSSProperties = {
       "brightness(10px)",
       "brightness(-1)",
 
-      "contrast()",
       "contrast(0.5 0.5)",
       "contrast(0.5,)",
       "contrast(0.5, 0.5)",
@@ -5361,7 +5382,6 @@ var gCSSProperties = {
       "drop-shadow(unset, 2px 2px)",
       "drop-shadow(2px 2px, unset)",
 
-      "grayscale()",
       "grayscale(0.5 0.5)",
       "grayscale(0.5,)",
       "grayscale(0.5, 0.5)",
@@ -5369,7 +5389,6 @@ var gCSSProperties = {
       "grayscale(10px)",
       "grayscale(-1)",
 
-      "hue-rotate()",
       "hue-rotate(0.5 0.5)",
       "hue-rotate(0.5,)",
       "hue-rotate(0.5, 0.5)",
@@ -5378,7 +5397,6 @@ var gCSSProperties = {
       "hue-rotate(-1)",
       "hue-rotate(45deg,)",
 
-      "invert()",
       "invert(0.5 0.5)",
       "invert(0.5,)",
       "invert(0.5, 0.5)",
@@ -5386,7 +5404,6 @@ var gCSSProperties = {
       "invert(10px)",
       "invert(-1)",
 
-      "opacity()",
       "opacity(0.5 0.5)",
       "opacity(0.5,)",
       "opacity(0.5, 0.5)",
@@ -5394,7 +5411,6 @@ var gCSSProperties = {
       "opacity(10px)",
       "opacity(-1)",
 
-      "saturate()",
       "saturate(0.5 0.5)",
       "saturate(0.5,)",
       "saturate(0.5, 0.5)",
@@ -5402,7 +5418,6 @@ var gCSSProperties = {
       "saturate(10px)",
       "saturate(-1)",
 
-      "sepia()",
       "sepia(0.5 0.5)",
       "sepia(0.5,)",
       "sepia(0.5, 0.5)",
@@ -5631,6 +5646,62 @@ var gCSSProperties = {
     initial_values: [ "1px" ],
     other_values: [ "0", "0px", "-0em", "17px", "0.2em", "0.0002", "context-value" ],
     invalid_values: [ "-0.1px", "-3px" ]
+  },
+  "x": {
+    domProp: "x",
+    inherited: false,
+    type: CSS_TYPE_LONGHAND,
+    initial_values: [ "0px" ],
+    other_values: [ "-1em", "17px", "0.2em", "23.4%" ],
+    invalid_values: [ "auto", "context-value", "0.0002" ]
+  },
+  "y": {
+    domProp: "y",
+    inherited: false,
+    type: CSS_TYPE_LONGHAND,
+    initial_values: [ "0px" ],
+    other_values: [ "-1em", "17px", "0.2em", "23.4%" ],
+    invalid_values: [ "auto", "context-value", "0.0002" ]
+  },
+  "cx": {
+    domProp: "cx",
+    inherited: false,
+    type: CSS_TYPE_LONGHAND,
+    initial_values: [ "0px" ],
+    other_values: [ "-1em", "17px", "0.2em", "23.4%" ],
+    invalid_values: [ "auto", "context-value", "0.0002" ]
+  },
+  "cy": {
+    domProp: "cy",
+    inherited: false,
+    type: CSS_TYPE_LONGHAND,
+    initial_values: [ "0px" ],
+    other_values: [ "-1em", "17px", "0.2em", "23.4%" ],
+    invalid_values: [ "auto", "context-value", "0.0002" ]
+  },
+  "r": {
+    domProp: "r",
+    inherited: false,
+    type: CSS_TYPE_LONGHAND,
+    initial_values: [ "0px" ],
+    other_values: [ "17px", "0.2em", "23.4%" ],
+    invalid_values: [ "auto", "-1", "-1.5px", "0.0002" ]
+  },
+  "rx": {
+    domProp: "rx",
+    inherited: false,
+    type: CSS_TYPE_LONGHAND,
+    initial_values: [ "auto" ],
+    other_values: [ "17px", "0.2em", "23.4%" ],
+    invalid_values: [ "hello", "-12px", "0.0002" ]
+  },
+  "ry": {
+    domProp: "ry",
+    inherited: false,
+    type: CSS_TYPE_LONGHAND,
+    initial_values: [ "auto" ],
+    other_values: [ "17px", "0.2em", "23.4%" ],
+    invalid_values: [ "hello", "-1.3px", "0.0002" ]
   },
   "text-anchor": {
     domProp: "textAnchor",
@@ -7232,7 +7303,7 @@ gCSSProperties["grid-template"] = {
 };
 if (isGridTemplateSubgridValueEnabled) {
   gCSSProperties["grid-template"].other_values.push(
-    "subgrid",
+    "subgrid / subgrid",
     "subgrid/40px 20px",
     "subgrid [foo] [] [bar baz] / 40px 20px",
     "40px 20px/subgrid",
@@ -7241,6 +7312,7 @@ if (isGridTemplateSubgridValueEnabled) {
     "subgrid [foo] [] [bar baz]/subgrid [foo] [] [bar baz]"
   );
   gCSSProperties["grid-template"].invalid_values.push(
+    "subgrid",
     "subgrid []",
     "subgrid [] / 'fizz'",
     "subgrid / 'fizz'"
@@ -7643,69 +7715,6 @@ if (IsCSSPropertyPrefEnabled("layout.css.overscroll-behavior.enabled")) {
     initial_values: [ "auto" ],
     other_values: [ "contain", "none", "contain contain", "contain auto", "none contain" ],
     invalid_values: [ "left", "1px", "contain auto none", "contain nonsense" ]
-  };
-}
-
-if (IsCSSPropertyPrefEnabled("layout.css.scroll-snap.enabled") &&
-    !IsCSSPropertyPrefEnabled("layout.css.scroll-snap-v1.enabled")) {
-  gCSSProperties["scroll-snap-coordinate"] = {
-    domProp: "scrollSnapCoordinate",
-    inherited: false,
-    type: CSS_TYPE_LONGHAND,
-    initial_values: [ "none" ],
-    other_values: [ "25% 25%", "top", "0px 100px, 10em 50%",
-                    "top left, top right, bottom left, bottom right, center",
-                    "calc(2px)",
-                    "calc(50%)",
-                    "calc(3*25px)",
-                    "calc(3*25px) 5px",
-                    "5px calc(3*25px)",
-                    "calc(20%) calc(3*25px)",
-                    "calc(25px*3)",
-                    "calc(3*25px + 50%)",
-                    "calc(20%) calc(3*25px), center"],
-    invalid_values: [ "auto", "default" ]
-  }
-  gCSSProperties["scroll-snap-destination"] = {
-    domProp: "scrollSnapDestination",
-    inherited: false,
-    type: CSS_TYPE_LONGHAND,
-    initial_values: [ "0px 0px" ],
-    other_values: [ "25% 25%", "6px 5px", "20% 3em", "0in 1in",
-                    "top", "right", "top left", "top right", "center",
-                    "calc(2px)",
-                    "calc(50%)",
-                    "calc(3*25px)",
-                    "calc(3*25px) 5px",
-                    "5px calc(3*25px)",
-                    "calc(20%) calc(3*25px)",
-                    "calc(25px*3)",
-                    "calc(3*25px + 50%)"],
-    invalid_values: [ "auto", "none", "default" ]
-  }
-  gCSSProperties["scroll-snap-points-x"] = {
-    domProp: "scrollSnapPointsX",
-    inherited: false,
-    type: CSS_TYPE_LONGHAND,
-    initial_values: [ "none" ],
-    other_values: [ "repeat(100%)", "repeat(120px)", "repeat(calc(3*25px))" ],
-    invalid_values: [ "auto", "1px", "left", "rgb(1,2,3)" ]
-  }
-  gCSSProperties["scroll-snap-points-y"] = {
-    domProp: "scrollSnapPointsY",
-    inherited: false,
-    type: CSS_TYPE_LONGHAND,
-    initial_values: [ "none" ],
-    other_values: [ "repeat(100%)", "repeat(120px)", "repeat(calc(3*25px))" ],
-    invalid_values: [ "auto", "1px", "top", "rgb(1,2,3)" ]
-  }
-  gCSSProperties["scroll-snap-type"] = {
-    domProp: "scrollSnapType",
-    inherited: false,
-    type: CSS_TYPE_LONGHAND,
-    initial_values: [ "none" ],
-    other_values: [ "both mandatory", "both" ],
-    invalid_values: [ "auto",  "1px" ]
   };
 }
 
@@ -8382,8 +8391,8 @@ if (IsCSSPropertyPrefEnabled("layout.css.prefixes.webkit")) {
     domProp: "webkitUserSelect",
     inherited: false,
     type: CSS_TYPE_SHORTHAND_AND_LONGHAND,
-    alias_for: "-moz-user-select",
-    subproperties: [ "-moz-user-select" ],
+    alias_for: "user-select",
+    subproperties: [ "user-select" ],
   };
   gCSSProperties["-webkit-mask"] = {
     domProp: "webkitMask",
@@ -8537,6 +8546,17 @@ if (IsCSSPropertyPrefEnabled("layout.css.column-span.enabled")) {
     type: CSS_TYPE_SHORTHAND_AND_LONGHAND,
     alias_for: "column-span",
     subproperties: [ "column-span" ]
+  };
+}
+
+if (IsCSSPropertyPrefEnabled("layout.css.webkit-line-clamp.enabled")) {
+  gCSSProperties["-webkit-line-clamp"] = {
+    domProp: "webkitLineClamp",
+    inherited: false,
+    type: CSS_TYPE_LONGHAND,
+    initial_values: [ "none" ],
+    other_values: [ "1", "2" ],
+    invalid_values: [ "auto", "0", "-1" ],
   };
 }
 
@@ -8717,6 +8737,15 @@ if (IsCSSPropertyPrefEnabled("layout.css.motion-path.enabled")) {
     ],
     invalid_values: [ "path('')", "path()", "path(a)", "path('M 10 Z')" ,
                       "path('M 10-10 20')", "path('M 10 10 C 20 20 40 20')" ]
+  };
+
+  gCSSProperties["offset-distance"] = {
+    domProp: "offsetDistance",
+    inherited: false,
+    type: CSS_TYPE_LONGHAND,
+    initial_values: [ "0" ],
+    other_values: [ "10px", "10%", "190%", "-280%", "calc(30px + 40%)" ],
+    invalid_values: [ "none", "45deg" ]
   };
 }
 

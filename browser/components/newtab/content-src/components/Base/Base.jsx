@@ -72,6 +72,7 @@ export class _Base extends React.PureComponent {
       // we don't want to add them back to the Activity Stream view
       document.body.classList.contains("welcome") ? "welcome" : "",
       document.body.classList.contains("hide-main") ? "hide-main" : "",
+      document.body.classList.contains("inline-onboarding") ? "inline-onboarding" : "",
     ].filter(v => v).join(" ");
     global.document.body.className = bodyClassName;
   }
@@ -134,8 +135,14 @@ export class BaseContent extends React.PureComponent {
     const prefs = props.Prefs.values;
 
     const shouldBeFixedToTop = PrerenderData.arePrefsValid(name => prefs[name]);
-    const noSectionsEnabled = !prefs["feeds.topsites"] && props.Sections.filter(section => section.enabled).length === 0;
     const isDiscoveryStream = props.DiscoveryStream.config && props.DiscoveryStream.config.enabled;
+    let filteredSections = props.Sections;
+
+    // Filter out highlights for DS
+    if (isDiscoveryStream) {
+      filteredSections = filteredSections.filter(section => section.id !== "highlights");
+    }
+    const noSectionsEnabled = !prefs["feeds.topsites"] && filteredSections.filter(section => section.enabled).length === 0;
     const searchHandoffEnabled = prefs["improvesearch.handoffToAwesomebar"];
 
     const outerClassName = [
@@ -158,7 +165,7 @@ export class BaseContent extends React.PureComponent {
                 </ErrorBoundary>
               </div>
             }
-            <ASRouterUISurface dispatch={this.props.dispatch} />
+            <ASRouterUISurface fxaEndpoint={this.props.Prefs.values.fxa_endpoint} dispatch={this.props.dispatch} />
             <div className={`body-wrapper${(initialized ? " on" : "")}`}>
               {isDiscoveryStream ? (
                 <ErrorBoundary className="borderless-error">

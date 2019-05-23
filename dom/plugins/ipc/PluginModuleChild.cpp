@@ -313,9 +313,8 @@ bool PluginModuleChild::InitForChrome(const std::string& aPluginFilename,
 #if defined(XP_MACOSX) && defined(MOZ_SANDBOX)
   if (mFlashSandboxLevel > 0) {
     MacSandboxInfo flashSandboxInfo;
-    flashSandboxInfo.type = MacSandboxType_Plugin;
-    flashSandboxInfo.pluginInfo.type = MacSandboxPluginType_Flash;
-    flashSandboxInfo.pluginInfo.pluginBinaryPath = aPluginFilename;
+    flashSandboxInfo.type = MacSandboxType_Flash;
+    flashSandboxInfo.pluginBinaryPath = aPluginFilename;
     flashSandboxInfo.level = mFlashSandboxLevel;
     flashSandboxInfo.shouldLog = mEnableFlashSandboxLogging;
 
@@ -979,8 +978,10 @@ NPError _geturlnotify(NPP aNPP, const char* aRelativeURL, const char* aTarget,
   auto* sn = new StreamNotifyChild(url);
 
   NPError err;
-  InstCast(aNPP)->CallPStreamNotifyConstructor(sn, url, NullableString(aTarget),
-                                               false, nsCString(), false, &err);
+  if (!InstCast(aNPP)->CallPStreamNotifyConstructor(
+          sn, url, NullableString(aTarget), false, nsCString(), false, &err)) {
+    return NPERR_GENERIC_ERROR;
+  }
 
   if (NPERR_NO_ERROR == err) {
     // If NPN_PostURLNotify fails, the parent will immediately send us
@@ -1082,9 +1083,11 @@ NPError _posturlnotify(NPP aNPP, const char* aRelativeURL, const char* aTarget,
   auto* sn = new StreamNotifyChild(url);
 
   NPError err;
-  InstCast(aNPP)->CallPStreamNotifyConstructor(
-      sn, url, NullableString(aTarget), true, nsCString(aBuffer, aLength),
-      aIsFile, &err);
+  if (!InstCast(aNPP)->CallPStreamNotifyConstructor(
+          sn, url, NullableString(aTarget), true, nsCString(aBuffer, aLength),
+          aIsFile, &err)) {
+    return NPERR_GENERIC_ERROR;
+  }
 
   if (NPERR_NO_ERROR == err) {
     // If NPN_PostURLNotify fails, the parent will immediately send us

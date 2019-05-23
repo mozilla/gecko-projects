@@ -211,7 +211,7 @@ skip pref(security.fileuri.strict_origin_policy,true) == filter-extref-different
 == filter-foreignObject-01.svg pass.svg
 == filter-in-mask-01.svg pass.svg
 == filter-invalidation-01.svg pass.svg
-fuzzy(0-71,0-817) fails-if(winWidget) fuzzy-if(webrender&&cocoaWidget,67-67,887-887) == filter-on-continuation-box-01.html filter-on-continuation-box-ref.html
+fuzzy(0-71,0-821) fails-if(winWidget) fuzzy-if(webrender&&cocoaWidget,67-67,887-892) == filter-on-continuation-box-01.html filter-on-continuation-box-ref.html
 == filter-result-01.svg filter-result-01-ref.svg
 == filter-scaled-01.svg pass.svg
 fuzzy-if(skiaContent,0-1,0-500) == filter-scaled-02.html filter-scaled-02-ref.html
@@ -244,6 +244,7 @@ fuzzy-if(Android,0-18,0-600) == foreignObject-fixedpos-01.html foreignObject-dyn
 == g-transform-01.svg pass.svg
 
 == getElementById-a-element-01.svg pass.svg
+== geometry-properties-in-css.html geometry-properties-in-css-ref.html
 
 fuzzy-if(Android,0-9,0-980) fuzzy-if(skiaContent,0-3,0-32000) == gradient-live-01a.svg gradient-live-01-ref.svg
 fuzzy-if(Android,0-9,0-980) fuzzy-if(skiaContent,0-3,0-32000) == gradient-live-01b.svg gradient-live-01-ref.svg
@@ -526,6 +527,8 @@ fuzzy-if(skiaContent,0-1,0-300) == tspan-xy-05.svg tspan-xy-ref.svg
 fuzzy-if(skiaContent,0-1,0-300) == tspan-xy-06.svg tspan-xy-ref.svg
 fuzzy-if(skiaContent,0-1,0-100) == tspan-xy-anchor-middle-01.svg tspan-xy-anchor-middle-ref.svg
 fuzzy-if(skiaContent,0-1,0-100) == tspan-xy-anchor-end-01.svg tspan-xy-anchor-end-ref.svg
+
+pref(layout.css.devPixelsPerPx,"1.0") == svg-blurry-with-subpixel-position.html svg-blurry-with-subpixel-position-ref.html
 
 == use-01.svg pass.svg
 == use-01-extref.svg pass.svg

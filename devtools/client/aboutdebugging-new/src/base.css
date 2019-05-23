@@ -29,9 +29,11 @@
   /* Colors from Photon */
   --success-background: #30e60b;
   --warning-background: #fffbd6; /* from the Web Console */
+  --warning-border: rgba(164, 127, 0, 0.27); /* yellow-70(#a47f00) at 27% */
   --warning-icon: var(--yellow-65); /* from the Web Console */
   --warning-text: var(--yellow-80); /* from the Web Console */
   --error-background: #fdf2f5; /* from the Web Console */
+  --error-border: rgba(90, 0, 2, 0.16); /*  red-80(#5a0002) at 16% */
   --error-icon: var(--red-60); /* from the Web Console */
   --error-text: var(--red-70); /* from the Web Console */
   --highlight-50: #0a84ff;
@@ -155,11 +157,6 @@ p, h1 {
 /* Technical text that should use a monospace font, such as code, error messages. */
 .technical-text {
   font-family: var(--monospace-font-family);
-}
-
-/* Text that is not selectable */
-.unselectable-text {
-  -moz-user-select: none;
 }
 
 /* Links that need to look like current text */
@@ -375,13 +372,6 @@ Form controls
   background-color: var(--box-background);
 }
 
-/* Standard checkbox, from Photon */
-.default-checkbox {
-  height: calc(var(--base-unit) * 4);
-  margin-inline-end: var(--base-unit);
-  width: calc(var(--base-unit) * 4);
-}
-
 /*
 * Other UI components
 */
@@ -420,6 +410,8 @@ Form controls
   background-color: var(--white-100); /* from common.inc.css */
   border-radius: var(--card-shadow-blur-radius); /* from common.inc.css */
   box-shadow: 0 1px 4px var(--grey-90-a10); /* from common.inc.css */
+  box-sizing: border-box;
+  min-width: min-content;
   padding-block: calc(var(--base-unit) * 5);
 }
 

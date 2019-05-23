@@ -113,6 +113,7 @@ var ModuleManager = {
         this.browser.remoteType || E10SUtils.NOT_REMOTE;
     const remoteType = E10SUtils.getRemoteTypeForURI(
         aURI, this.settings.useMultiprocess,
+        /* useRemoteSubframes */ false,
         currentType, this.browser.currentURI);
 
     debug `updateRemoteType: uri=${aURI} currentType=${currentType}
@@ -377,7 +378,7 @@ class ModuleInfo {
 }
 
 function createBrowser() {
-  const browser = window.browser = document.createElement("browser");
+  const browser = window.browser = document.createXULElement("browser");
   // Identify this `<browser>` element uniquely to Marionette, devtools, etc.
   browser.permanentKey = {};
 

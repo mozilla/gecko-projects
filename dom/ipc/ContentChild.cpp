@@ -626,11 +626,15 @@ bool ContentChild::Init(MessageLoop* aIOLoop, base::ProcessId aParentPid,
   // when --display is set by the command line.
   if (!gfxPlatform::IsHeadless()) {
     const char* display_name = PR_GetEnv("MOZ_GDK_DISPLAY");
-#  ifndef MOZ_WAYLAND
     if (!display_name) {
-      display_name = PR_GetEnv("DISPLAY");
-    }
+      bool waylandDisabled = true;
+#  ifdef MOZ_WAYLAND
+      waylandDisabled = IsWaylandDisabled();
 #  endif
+      if (waylandDisabled) {
+        display_name = PR_GetEnv("DISPLAY");
+      }
+    }
     if (display_name) {
       int argc = 3;
       char option_name[] = "--display";
@@ -808,10 +812,7 @@ static nsresult GetCreateWindowParams(mozIDOMWindowProxy* aParent,
   nsCOMPtr<Document> doc = opener->GetDoc();
   NS_ADDREF(*aTriggeringPrincipal = doc->NodePrincipal());
 
-  // Currently we query the CSP from the doc->NodePrincipal(). After
-  // Bug 965637 we can query the CSP from the doc directly.
-  nsCOMPtr<nsIContentSecurityPolicy> csp;
-  doc->NodePrincipal()->GetCsp(getter_AddRefs(csp));
+  nsCOMPtr<nsIContentSecurityPolicy> csp = doc->GetCsp();
   if (csp) {
     csp.forget(aCsp);
   }
@@ -1432,7 +1433,6 @@ mozilla::ipc::IPCResult ContentChild::GetResultForRenderingInitFailure(
 
 mozilla::ipc::IPCResult ContentChild::RecvRequestPerformanceMetrics(
     const nsID& aID) {
-  MOZ_ASSERT(mozilla::StaticPrefs::dom_performance_enable_scheduler_timing());
   RefPtr<ContentChild> self = this;
   RefPtr<AbstractThread> mainThread =
       SystemGroup::AbstractMainThreadFor(TaskCategory::Performance);
@@ -2031,6 +2031,17 @@ mozilla::ipc::IPCResult ContentChild::RecvPScriptCacheConstructor(
 
 PNeckoChild* ContentChild::AllocPNeckoChild() { return new NeckoChild(); }
 
+mozilla::ipc::IPCResult ContentChild::RecvNetworkLinkTypeChange(
+    const uint32_t& aType) {
+  mNetworkLinkType = aType;
+  nsCOMPtr<nsIObserverService> obs = mozilla::services::GetObserverService();
+  if (obs) {
+    obs->NotifyObservers(nullptr, "contentchild:network-link-type-changed",
+                         nullptr);
+  }
+  return IPC_OK();
+}
+
 bool ContentChild::DeallocPNeckoChild(PNeckoChild* necko) {
   delete necko;
   return true;
@@ -2286,6 +2297,8 @@ void ContentChild::ActorDestroy(ActorDestroyReason why) {
 
   mIdleObservers.Clear();
 
+  mBrowsingContextGroupHolder.Clear();
+
   nsCOMPtr<nsIConsoleService> svc(do_GetService(NS_CONSOLESERVICE_CONTRACTID));
   if (svc) {
     svc->UnregisterListener(mConsoleListener);
@@ -2519,17 +2532,6 @@ mozilla::ipc::IPCResult ContentChild::RecvUpdateAppLocales(
 mozilla::ipc::IPCResult ContentChild::RecvUpdateRequestedLocales(
     nsTArray<nsCString>&& aRequestedLocales) {
   LocaleService::GetInstance()->AssignRequestedLocales(aRequestedLocales);
-  return IPC_OK();
-}
-
-mozilla::ipc::IPCResult ContentChild::RecvClearSiteDataReloadNeeded(
-    const nsString& aOrigin) {
-  // Rebroadcast "clear-site-data-reload-needed".
-  nsCOMPtr<nsIObserverService> obs = mozilla::services::GetObserverService();
-  if (obs) {
-    obs->NotifyObservers(nullptr, "clear-site-data-reload-needed",
-                         aOrigin.get());
-  }
   return IPC_OK();
 }
 
@@ -3591,7 +3593,8 @@ mozilla::ipc::IPCResult ContentChild::RecvSaveRecording(
 mozilla::ipc::IPCResult ContentChild::RecvCrossProcessRedirect(
     const uint32_t& aRegistrarId, nsIURI* aURI, const uint32_t& aNewLoadFlags,
     const Maybe<LoadInfoArgs>& aLoadInfo, const uint64_t& aChannelId,
-    nsIURI* aOriginalURI, const uint64_t& aIdentifier) {
+    nsIURI* aOriginalURI, const uint64_t& aIdentifier,
+    const uint32_t& aRedirectMode) {
   nsCOMPtr<nsILoadInfo> loadInfo;
   nsresult rv =
       mozilla::ipc::LoadInfoArgsToLoadInfo(aLoadInfo, getter_AddRefs(loadInfo));
@@ -3630,6 +3633,11 @@ mozilla::ipc::IPCResult ContentChild::RecvCrossProcessRedirect(
     return IPC_OK();
   }
 
+  rv = httpChild->SetRedirectMode(aRedirectMode);
+  if (NS_FAILED(rv)) {
+    return IPC_OK();
+  }
+
   // connect parent.
   rv = httpChild->ConnectParent(aRegistrarId);  // creates parent channel
   if (NS_FAILED(rv)) {
@@ -3652,6 +3660,16 @@ mozilla::ipc::IPCResult ContentChild::RecvStartDelayedAutoplayMediaComponents(
     BrowsingContext* aContext) {
   MOZ_ASSERT(aContext);
   aContext->StartDelayedAutoplayMediaComponents();
+  return IPC_OK();
+}
+
+mozilla::ipc::IPCResult ContentChild::RecvSetMediaMuted(
+    BrowsingContext* aContext, bool aMuted) {
+  MOZ_ASSERT(aContext);
+  nsCOMPtr<nsPIDOMWindowOuter> window = aContext->GetDOMWindow();
+  if (window) {
+    window->SetAudioMuted(aMuted);
+  }
   return IPC_OK();
 }
 
@@ -3831,7 +3849,6 @@ mozilla::ipc::IPCResult ContentChild::RecvRestoreBrowsingContextChildren(
 mozilla::ipc::IPCResult ContentChild::RecvRegisterBrowsingContextGroup(
     nsTArray<BrowsingContext::IPCInitializer>&& aInits) {
   RefPtr<BrowsingContextGroup> group = new BrowsingContextGroup();
-
   // Each of the initializers in aInits is sorted in pre-order, so our parent
   // should always be available before the element itself.
   for (auto& init : aInits) {
@@ -3942,6 +3959,11 @@ mozilla::ipc::IPCResult ContentChild::RecvCommitBrowsingContextTransaction(
     aTransaction.Apply(aContext, nullptr, &aEpochs);
   }
   return IPC_OK();
+}
+
+void ContentChild::HoldBrowsingContextGroup(BrowsingContextGroup* aBCG) {
+  RefPtr<BrowsingContextGroup> bcgPtr(aBCG);
+  mBrowsingContextGroupHolder.AppendElement(bcgPtr);
 }
 
 }  // namespace dom

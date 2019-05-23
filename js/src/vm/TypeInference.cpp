@@ -1569,7 +1569,7 @@ bool js::FinishCompilation(JSContext* cx, HandleScript script,
   }
 
   if (!succeeded) {
-    script->resetWarmUpCounter();
+    script->resetWarmUpCounterToDelayIonCompilation();
     *isValidOut = false;
     return true;
   }
@@ -2679,9 +2679,7 @@ void TypeZone::addPendingRecompile(JSContext* cx, JSScript* script) {
   CancelOffThreadIonCompile(script);
 
   // Let the script warm up again before attempting another compile.
-  if (jit::IsBaselineEnabled(cx)) {
-    script->resetWarmUpCounter();
-  }
+  script->resetWarmUpCounterToDelayIonCompilation();
 
   if (script->hasIonScript()) {
     addPendingRecompile(
@@ -2872,35 +2870,6 @@ void ObjectGroup::addDefiniteProperties(JSContext* cx, Shape* shape) {
 
     shape = shape->previous();
   }
-}
-
-bool ObjectGroup::matchDefiniteProperties(HandleObject obj) {
-  AutoSweepObjectGroup sweep(this);
-  unsigned count = getPropertyCount(sweep);
-  for (unsigned i = 0; i < count; i++) {
-    Property* prop = getProperty(sweep, i);
-    if (!prop) {
-      continue;
-    }
-    if (prop->types.definiteProperty()) {
-      unsigned slot = prop->types.definiteSlot();
-
-      bool found = false;
-      Shape* shape = obj->as<NativeObject>().lastProperty();
-      while (!shape->isEmptyShape()) {
-        if (shape->slot() == slot && shape->propid() == prop->id) {
-          found = true;
-          break;
-        }
-        shape = shape->previous();
-      }
-      if (!found) {
-        return false;
-      }
-    }
-  }
-
-  return true;
 }
 
 void js::AddTypePropertyId(JSContext* cx, ObjectGroup* group, JSObject* obj,
@@ -3284,6 +3253,9 @@ bool js::AddClearDefiniteGetterSetterForPrototypeChain(JSContext* cx,
    */
   RootedObject proto(cx, group->proto().toObjectOrNull());
   while (proto) {
+    if (!proto->hasStaticPrototype()) {
+      return false;
+    }
     ObjectGroup* protoGroup = JSObject::getGroup(cx, proto);
     if (!protoGroup) {
       cx->recoverFromOutOfMemory();
@@ -3519,7 +3491,22 @@ bool JSScript::makeTypes(JSContext* cx) {
   MOZ_ASSERT(!types_);
   cx->check(this);
 
+  // Scripts that will never run in the Baseline Interpreter or the JITs don't
+  // need a TypeScript.
+  MOZ_ASSERT(!hasForceInterpreterOp());
+
   AutoEnterAnalysis enter(cx);
+
+  // Run the arguments-analysis if needed. Both the Baseline Interpreter and
+  // Compiler rely on this.
+  if (!ensureHasAnalyzedArgsUsage(cx)) {
+    return false;
+  }
+
+  // If ensureHasAnalyzedArgsUsage allocated the TypeScript we're done.
+  if (types_) {
+    return true;
+  }
 
   UniquePtr<jit::ICScript> icScript(jit::ICScript::create(cx, this));
   if (!icScript) {
@@ -3550,7 +3537,12 @@ bool JSScript::makeTypes(JSContext* cx) {
 
   prepareForDestruction.release();
 
+  MOZ_ASSERT(!types_);
   types_ = new (typeScript) TypeScript(this, std::move(icScript), numTypeSets);
+
+  // We have a TypeScript so we can set the script's jitCodeRaw_ pointer to the
+  // Baseline Interpreter code.
+  updateJitCodeRaw(cx->runtime());
 
 #ifdef DEBUG
   StackTypeSet* typeArray = typeScript->typeArrayDontCheckGeneration();
@@ -3794,41 +3786,6 @@ bool TypeNewScript::make(JSContext* cx, ObjectGroup* group, JSFunction* fun) {
 
   gc::gcTracer.traceTypeNewScript(group);
   return true;
-}
-
-// Make a TypeNewScript with the same initializer list as |newScript| but with
-// a new template object.
-/* static */
-TypeNewScript* TypeNewScript::makeNativeVersion(JSContext* cx,
-                                                TypeNewScript* newScript,
-                                                PlainObject* templateObject) {
-  MOZ_RELEASE_ASSERT(cx->zone()->types.activeAnalysis);
-
-  auto nativeNewScript = cx->make_unique<TypeNewScript>();
-  if (!nativeNewScript) {
-    return nullptr;
-  }
-
-  nativeNewScript->function_ = newScript->function();
-  nativeNewScript->templateObject_ = templateObject;
-
-  TypeNewScriptInitializer* cursor = newScript->initializerList;
-  while (cursor->kind != TypeNewScriptInitializer::DONE) {
-    cursor++;
-  }
-
-  size_t initializerLength = cursor - newScript->initializerList + 1;
-
-  nativeNewScript->initializerList =
-      cx->pod_calloc<TypeNewScriptInitializer>(initializerLength);
-  if (!nativeNewScript->initializerList) {
-    return nullptr;
-  }
-
-  PodCopy(nativeNewScript->initializerList, newScript->initializerList,
-          initializerLength);
-
-  return nativeNewScript.release();
 }
 
 size_t TypeNewScript::sizeOfIncludingThis(
@@ -4582,6 +4539,7 @@ void JSScript::maybeReleaseTypes() {
 
   types_->destroy(zone());
   types_ = nullptr;
+  updateJitCodeRaw(runtimeFromMainThread());
 }
 
 void TypeScript::destroy(Zone* zone) {

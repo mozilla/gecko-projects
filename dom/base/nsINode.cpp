@@ -36,6 +36,7 @@
 #include "mozilla/dom/SVGUseElement.h"
 #include "mozilla/dom/ScriptSettings.h"
 #include "mozilla/dom/l10n/DOMOverlays.h"
+#include "mozilla/StaticPrefs.h"
 #include "nsAttrValueOrString.h"
 #include "nsBindingManager.h"
 #include "nsCCUncollectableMarker.h"
@@ -192,6 +193,10 @@ void nsINode::DeleteProperty(const nsAtom* aPropertyName) {
 void* nsINode::UnsetProperty(const nsAtom* aPropertyName, nsresult* aStatus) {
   return OwnerDoc()->PropertyTable().UnsetProperty(this, aPropertyName,
                                                    aStatus);
+}
+
+nsIContentSecurityPolicy* nsINode::GetCsp() const {
+  return OwnerDoc()->GetCsp();
 }
 
 nsINode::nsSlots* nsINode::CreateSlots() { return new nsSlots(); }
@@ -2661,7 +2666,7 @@ Element* nsINode::GetParentElementCrossingShadowRoot() const {
 
 bool nsINode::HasBoxQuadsSupport(JSContext* aCx, JSObject* /* unused */) {
   return xpc::AccessCheck::isChrome(js::GetContextCompartment(aCx)) ||
-         nsContentUtils::GetBoxQuadsEnabled();
+         StaticPrefs::layout_css_getBoxQuads_enabled();
 }
 
 nsINode* nsINode::GetScopeChainParent() const { return nullptr; }

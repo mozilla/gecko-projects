@@ -12,7 +12,7 @@ import { asyncStoreHelper } from "./asyncStoreHelper";
 // Schema version to bump when the async store format has changed incompatibly
 // and old stores should be cleared. This needs to match the prefs schema
 // version in devtools/client/preferences/debugger.js.
-const prefsSchemaVersion = "1.0.9";
+const prefsSchemaVersion = "1.0.10";
 const pref = Services.pref;
 
 if (isDevelopment()) {
@@ -104,7 +104,7 @@ export const prefs = new PrefsHelper("devtools", {
   projectDirectoryRoot: ["Char", "debugger.project-directory-root", ""],
   skipPausing: ["Bool", "debugger.skip-pausing"],
   mapScopes: ["Bool", "debugger.map-scopes-enabled"],
-  logActions: ["Bool", "debugger.log-actions"]
+  logActions: ["Bool", "debugger.log-actions"],
 });
 
 export const features = new PrefsHelper("devtools.debugger.features", {
@@ -127,14 +127,14 @@ export const features = new PrefsHelper("devtools.debugger.features", {
   xhrBreakpoints: ["Bool", "xhr-breakpoints"],
   originalBlackbox: ["Bool", "original-blackbox"],
   eventListenersBreakpoints: ["Bool", "event-listeners-breakpoints"],
-  logPoints: ["Bool", "log-points"]
+  logPoints: ["Bool", "log-points"],
 });
 
 export const asyncStore = asyncStoreHelper("debugger", {
   pendingBreakpoints: ["pending-breakpoints", {}],
   tabs: ["tabs", []],
   xhrBreakpoints: ["xhr-breakpoints", []],
-  eventListenerBreakpoints: ["event-listener-breakpoints", []]
+  eventListenerBreakpoints: ["event-listener-breakpoints", undefined],
 });
 
 export function verifyPrefSchema() {
@@ -143,6 +143,7 @@ export function verifyPrefSchema() {
     asyncStore.pendingBreakpoints = {};
     asyncStore.tabs = [];
     asyncStore.xhrBreakpoints = [];
+    asyncStore.eventListenerBreakpoints = undefined;
     prefs.debuggerPrefsSchemaVersion = prefsSchemaVersion;
   }
 }

@@ -2,15 +2,15 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-use {WindowWrapper, NotifierEvent};
-use blob;
+use crate::{WindowWrapper, NotifierEvent};
+use crate::blob;
 use euclid::{point2, size2, rect};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicIsize, Ordering};
 use std::sync::mpsc::Receiver;
 use webrender::api::*;
 use webrender::api::units::*;
-use wrench::Wrench;
+use crate::wrench::Wrench;
 
 pub struct RawtestHarness<'a> {
     wrench: &'a mut Wrench,
@@ -44,6 +44,7 @@ impl<'a> RawtestHarness<'a> {
         self.test_blur_cache();
         self.test_capture();
         self.test_zero_height_window();
+        self.test_clear_cache();
     }
 
     fn render_and_get_pixels(&mut self, window_rect: FramebufferIntRect) -> Vec<u8> {
@@ -463,7 +464,7 @@ impl<'a> RawtestHarness<'a> {
     }
 
     fn test_offscreen_blob(&mut self) {
-        println!("\toffscreen blob update.");
+        println!("\toffscreen blob update...");
 
         assert_eq!(self.wrench.device_pixel_ratio, 1.);
 
@@ -951,8 +952,8 @@ impl<'a> RawtestHarness<'a> {
                         offset: LayoutVector2D::new(1.0, 1.0),
                         blur_radius: 1.0,
                         color: ColorF::new(0.0, 0.0, 0.0, 1.0),
-                        should_inflate: true,
                     },
+                    true,
                 );
                 let info = CommonItemProperties {
                     clip_rect: rect(110., 110., 50., 2.),
@@ -1029,8 +1030,8 @@ impl<'a> RawtestHarness<'a> {
                     offset: LayoutVector2D::new(1.0, 1.0),
                     blur_radius: 1.0,
                     color: shadow_color,
-                    should_inflate: true,
                 },
+                true,
             );
             let info = self.make_common_properties(rect(110., 110., 50., 2.));
             builder.push_line(
@@ -1298,4 +1299,19 @@ impl<'a> RawtestHarness<'a> {
         test_rounded_rectangle(WorldPoint::new(200., 100.), WorldSize::new(100., 100.), (0, 5));
     }
 
+    fn test_clear_cache(&mut self) {
+        println!("\tclear cache test...");
+
+        self.wrench.api.send_message(ApiMsg::DebugCommand(DebugCommand::ClearCaches(ClearCache::all())));
+
+        let layout_size = LayoutSize::new(400., 400.);
+        let builder = DisplayListBuilder::new(self.wrench.root_pipeline_id, layout_size);
+
+        let txn = Transaction::new();
+        let mut epoch = Epoch(0);
+        self.submit_dl(&mut epoch, layout_size, builder, &txn.resource_updates);
+
+        self.rx.recv().unwrap();
+        self.wrench.render();
+    }
 }

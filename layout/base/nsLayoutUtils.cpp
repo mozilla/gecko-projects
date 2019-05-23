@@ -225,6 +225,10 @@ static ContentMap& GetContentMap() {
 template <typename TestType>
 static bool HasMatchingAnimations(EffectSet& aEffects, TestType&& aTest) {
   for (KeyframeEffect* effect : aEffects) {
+    if (!effect->GetAnimation() || !effect->GetAnimation()->IsRelevant()) {
+      continue;
+    }
+
     if (aTest(*effect, aEffects)) {
       return true;
     }
@@ -263,8 +267,7 @@ bool nsLayoutUtils::HasAnimationOfPropertySet(
   return HasMatchingAnimations(
       aFrame, aPropertySet,
       [&aPropertySet](KeyframeEffect& aEffect, const EffectSet&) {
-        return (aEffect.IsInEffect() || aEffect.IsCurrent()) &&
-               aEffect.HasAnimationOfPropertySet(aPropertySet);
+        return aEffect.HasAnimationOfPropertySet(aPropertySet);
       });
 }
 
@@ -294,8 +297,7 @@ bool nsLayoutUtils::HasAnimationOfPropertySet(
   return HasMatchingAnimations(
       *aEffectSet,
       [&aPropertySet](KeyframeEffect& aEffect, const EffectSet& aEffectSet) {
-        return (aEffect.IsInEffect() || aEffect.IsCurrent()) &&
-               aEffect.HasAnimationOfPropertySet(aPropertySet);
+        return aEffect.HasAnimationOfPropertySet(aPropertySet);
       });
 }
 
@@ -305,8 +307,7 @@ bool nsLayoutUtils::HasEffectiveAnimation(
   return HasMatchingAnimations(
       aFrame, aPropertySet,
       [&aPropertySet](KeyframeEffect& aEffect, const EffectSet& aEffectSet) {
-        return (aEffect.IsInEffect() || aEffect.IsCurrent()) &&
-               aEffect.HasEffectiveAnimationOfPropertySet(aPropertySet,
+        return aEffect.HasEffectiveAnimationOfPropertySet(aPropertySet,
                                                           aEffectSet);
       });
 }
@@ -1579,16 +1580,6 @@ bool nsLayoutUtils::IsPrimaryStyleFrame(const nsIFrame* aFrame) {
   return aFrame->IsPrimaryFrame();
 }
 
-/* static */
-nsIFrame* nsLayoutUtils::GetRealPrimaryFrameFor(const nsIContent* aContent) {
-  nsIFrame* frame = aContent->GetPrimaryFrame();
-  if (!frame) {
-    return nullptr;
-  }
-
-  return nsPlaceholderFrame::GetRealFrameFor(frame);
-}
-
 nsIFrame* nsLayoutUtils::GetFloatFromPlaceholder(nsIFrame* aFrame) {
   NS_ASSERTION(aFrame->IsPlaceholderFrame(), "Must have a placeholder here");
   if (aFrame->GetStateBits() & PLACEHOLDER_FOR_FLOAT) {
@@ -1723,42 +1714,34 @@ int32_t nsLayoutUtils::DoCompareTreePosition(
   int32_t index1 = parent->ComputeIndexOf(content1Ancestor);
   int32_t index2 = parent->ComputeIndexOf(content2Ancestor);
 
-  // If either of the nodes are anonymous, then handle the relative ordering.
-  // We consider all anonymous content to be behind regular siblings, with the
-  // exception of ::after.
-  if (index1 < 0) {
-    if (content1Ancestor->IsContent() &&
-        content1Ancestor->AsContent()->IsGeneratedContentContainerForAfter()) {
-      // If content1 is ::after, then it must be after content2.
-      MOZ_ASSERT(!content2Ancestor->IsContent() ||
-                 !content2Ancestor->AsContent()
-                      ->IsGeneratedContentContainerForAfter());
-      return 1;
-    }
-    if (index2 >= 0 || (content2Ancestor->IsContent() &&
-                        content2Ancestor->AsContent()
-                            ->IsGeneratedContentContainerForAfter())) {
-      // content1 is anonymous, so if content2 is a regular sibling or ::after,
-      // then we must be before it.
-      return -1;
-    }
-    // Both nodes are anonymous, so no relative ordering.
-    return 0;
-  }
-  if (index2 < 0) {
-    // content1 is a regular sibling, so if content2 is ::after, then
-    // content1 comes first.
-    if (content2Ancestor->IsContent() &&
-        content2Ancestor->AsContent()->IsGeneratedContentContainerForAfter()) {
-      MOZ_ASSERT(!content1Ancestor->IsContent() ||
-                 !content1Ancestor->AsContent()
-                      ->IsGeneratedContentContainerForAfter());
-      return -1;
-    }
-    return 1;
+  // None of the nodes are anonymous, just do a regular comparison.
+  if (index1 >= 0 && index2 >= 0) {
+    return index1 - index2;
   }
 
-  return index1 - index2;
+  // Otherwise handle pseudo-element and anonymous content ordering.
+  //
+  // ::marker -> ::before -> anon siblings -> regular siblings -> ::after
+  auto PseudoIndex = [](const nsINode* aNode, int32_t aNodeIndex) -> int32_t {
+    if (aNodeIndex >= 0) {
+      return 1;  // Not a pseudo.
+    }
+    if (aNode->IsContent()) {
+      if (aNode->AsContent()->IsGeneratedContentContainerForMarker()) {
+        return -2;
+      }
+      if (aNode->AsContent()->IsGeneratedContentContainerForBefore()) {
+        return -1;
+      }
+      if (aNode->AsContent()->IsGeneratedContentContainerForAfter()) {
+        return 2;
+      }
+    }
+    return 0;
+  };
+
+  return PseudoIndex(content1Ancestor, index1) -
+         PseudoIndex(content2Ancestor, index2);
 }
 
 // static
@@ -2238,7 +2221,7 @@ nsPoint nsLayoutUtils::GetEventCoordinatesRelativeTo(
   PresShell* presShell = aFrame->PresShell();
 
   // XXX Bug 1224748 - Update nsLayoutUtils functions to correctly handle
-  // nsPresShell resolution
+  // PresShell resolution
   widgetToView =
       widgetToView.RemoveResolution(GetCurrentAPZResolutionScale(presShell));
 
@@ -4375,19 +4358,23 @@ nsRect nsLayoutUtils::GetAllInFlowRectsUnion(nsIFrame* aFrame,
 nsRect nsLayoutUtils::GetTextShadowRectsUnion(
     const nsRect& aTextAndDecorationsRect, nsIFrame* aFrame, uint32_t aFlags) {
   const nsStyleText* textStyle = aFrame->StyleText();
-  if (!textStyle->HasTextShadow()) return aTextAndDecorationsRect;
+  auto shadows = textStyle->mTextShadow.AsSpan();
+  if (shadows.IsEmpty()) {
+    return aTextAndDecorationsRect;
+  }
 
   nsRect resultRect = aTextAndDecorationsRect;
   int32_t A2D = aFrame->PresContext()->AppUnitsPerDevPixel();
-  for (uint32_t i = 0; i < textStyle->mTextShadow->Length(); ++i) {
-    nsCSSShadowItem* shadow = textStyle->mTextShadow->ShadowAt(i);
-    nsMargin blur = nsContextBoxBlur::GetBlurRadiusMargin(shadow->mRadius, A2D);
+  for (auto& shadow : shadows) {
+    nsMargin blur =
+        nsContextBoxBlur::GetBlurRadiusMargin(shadow.blur.ToAppUnits(), A2D);
     if ((aFlags & EXCLUDE_BLUR_SHADOWS) && blur != nsMargin(0, 0, 0, 0))
       continue;
 
     nsRect tmpRect(aTextAndDecorationsRect);
 
-    tmpRect.MoveBy(nsPoint(shadow->mXOffset, shadow->mYOffset));
+    tmpRect.MoveBy(
+        nsPoint(shadow.horizontal.ToAppUnits(), shadow.vertical.ToAppUnits()));
     tmpRect.Inflate(blur);
 
     resultRect.UnionRect(resultRect, tmpRect);
@@ -4397,7 +4384,7 @@ nsRect nsLayoutUtils::GetTextShadowRectsUnion(
 
 enum ObjectDimensionType { eWidth, eHeight };
 static nscoord ComputeMissingDimension(
-    const nsSize& aDefaultObjectSize, const nsSize& aIntrinsicRatio,
+    const nsSize& aDefaultObjectSize, const AspectRatio& aIntrinsicRatio,
     const Maybe<nscoord>& aSpecifiedWidth,
     const Maybe<nscoord>& aSpecifiedHeight,
     ObjectDimensionType aDimensionToCompute) {
@@ -4407,18 +4394,12 @@ static nscoord ComputeMissingDimension(
   // 1. "If the object has an intrinsic aspect ratio, the missing dimension of
   //     the concrete object size is calculated using the intrinsic aspect
   //     ratio and the present dimension."
-  if (aIntrinsicRatio.width > 0 && aIntrinsicRatio.height > 0) {
+  if (aIntrinsicRatio) {
     // Fill in the missing dimension using the intrinsic aspect ratio.
-    nscoord knownDimensionSize;
-    float ratio;
     if (aDimensionToCompute == eWidth) {
-      knownDimensionSize = *aSpecifiedHeight;
-      ratio = aIntrinsicRatio.width / aIntrinsicRatio.height;
-    } else {
-      knownDimensionSize = *aSpecifiedWidth;
-      ratio = aIntrinsicRatio.height / aIntrinsicRatio.width;
+      return aIntrinsicRatio.ApplyTo(*aSpecifiedHeight);
     }
-    return NSCoordSaturatingNonnegativeMultiply(knownDimensionSize, ratio);
+    return aIntrinsicRatio.Inverted().ApplyTo(*aSpecifiedWidth);
   }
 
   // 2. "Otherwise, if the missing dimension is present in the object's
@@ -4458,7 +4439,7 @@ static nscoord ComputeMissingDimension(
  */
 static Maybe<nsSize> MaybeComputeObjectFitNoneSize(
     const nsSize& aDefaultObjectSize, const IntrinsicSize& aIntrinsicSize,
-    const nsSize& aIntrinsicRatio) {
+    const AspectRatio& aIntrinsicRatio) {
   // "If the object has an intrinsic height or width, its size is resolved as
   // if its intrinsic dimensions were given as the specified size."
   //
@@ -4496,13 +4477,12 @@ static Maybe<nsSize> MaybeComputeObjectFitNoneSize(
 // http://dev.w3.org/csswg/css-images-3/#concrete-size-resolution
 static nsSize ComputeConcreteObjectSize(const nsSize& aConstraintSize,
                                         const IntrinsicSize& aIntrinsicSize,
-                                        const nsSize& aIntrinsicRatio,
+                                        const AspectRatio& aIntrinsicRatio,
                                         uint8_t aObjectFit) {
   // Handle default behavior (filling the container) w/ fast early return.
   // (Also: if there's no valid intrinsic ratio, then we have the "fill"
   // behavior & just use the constraint size.)
-  if (MOZ_LIKELY(aObjectFit == NS_STYLE_OBJECT_FIT_FILL) ||
-      aIntrinsicRatio.width == 0 || aIntrinsicRatio.height == 0) {
+  if (MOZ_LIKELY(aObjectFit == NS_STYLE_OBJECT_FIT_FILL) || !aIntrinsicRatio) {
     return aConstraintSize;
   }
 
@@ -4580,7 +4560,7 @@ static bool HasInitialObjectFitAndPosition(const nsStylePosition* aStylePos) {
 /* static */
 nsRect nsLayoutUtils::ComputeObjectDestRect(const nsRect& aConstraintRect,
                                             const IntrinsicSize& aIntrinsicSize,
-                                            const nsSize& aIntrinsicRatio,
+                                            const AspectRatio& aIntrinsicRatio,
                                             const nsStylePosition* aStylePos,
                                             nsPoint* aAnchorPoint) {
   // Step 1: Figure out our "concrete object size"
@@ -4722,6 +4702,13 @@ nsIFrame* nsLayoutUtils::GetParentOrPlaceholderForCrossDoc(nsIFrame* aFrame) {
   nsIFrame* f = GetParentOrPlaceholderFor(aFrame);
   if (f) return f;
   return GetCrossDocParentFrame(aFrame);
+}
+
+nsIFrame* nsLayoutUtils::GetDisplayListParent(nsIFrame* aFrame) {
+  if (aFrame->GetStateBits() & NS_FRAME_IS_PUSHED_FLOAT) {
+    return aFrame->GetParent();
+  }
+  return nsLayoutUtils::GetParentOrPlaceholderForCrossDoc(aFrame);
 }
 
 nsIFrame* nsLayoutUtils::GetNextContinuationOrIBSplitSibling(nsIFrame* aFrame) {
@@ -5387,7 +5374,7 @@ nscoord nsLayoutUtils::IntrinsicForAxis(
       } else {
         // We don't have an intrinsic bsize and we need aFrame's block-dir size.
         if (aFlags & BAIL_IF_REFLOW_NEEDED) {
-          return NS_INTRINSIC_WIDTH_UNKNOWN;
+          return NS_INTRINSIC_ISIZE_UNKNOWN;
         }
         // XXX Unfortunately, we probably don't know this yet, so this is
         // wrong... but it's not clear what we should do. If aFrame's inline
@@ -5439,10 +5426,11 @@ nscoord nsLayoutUtils::IntrinsicForAxis(
         !(styleMinBSize.IsAuto() || (styleMinBSize.ConvertsToLength() &&
                                      styleMinBSize.ToLength() == 0)) ||
         !styleMaxBSize.IsNone()) {
-      nsSize ratio(aFrame->GetIntrinsicRatio());
-      nscoord ratioISize = (horizontalAxis ? ratio.width : ratio.height);
-      nscoord ratioBSize = (horizontalAxis ? ratio.height : ratio.width);
-      if (ratioBSize != 0) {
+      if (AspectRatio ratio = aFrame->GetIntrinsicRatio()) {
+        // Convert 'ratio' if necessary, so that it's storing ISize/BSize:
+        if (!horizontalAxis) {
+          ratio = ratio.Inverted();
+        }
         AddStateBitToAncestors(
             aFrame, NS_FRAME_DESCENDANT_INTRINSIC_ISIZE_DEPENDS_ON_BSIZE);
 
@@ -5459,7 +5447,7 @@ nscoord nsLayoutUtils::IntrinsicForAxis(
             (aPercentageBasis.isNothing() &&
              GetPercentBSize(styleBSize, aFrame, horizontalAxis, h))) {
           h = std::max(0, h - bSizeTakenByBoxSizing);
-          result = NSCoordMulDiv(h, ratioISize, ratioBSize);
+          result = ratio.ApplyTo(h);
         }
 
         if (GetDefiniteSize(styleMaxBSize, aFrame, !isInlineAxis,
@@ -5467,7 +5455,7 @@ nscoord nsLayoutUtils::IntrinsicForAxis(
             (aPercentageBasis.isNothing() &&
              GetPercentBSize(styleMaxBSize, aFrame, horizontalAxis, h))) {
           h = std::max(0, h - bSizeTakenByBoxSizing);
-          nscoord maxISize = NSCoordMulDiv(h, ratioISize, ratioBSize);
+          nscoord maxISize = ratio.ApplyTo(h);
           if (maxISize < result) {
             result = maxISize;
           }
@@ -5481,7 +5469,7 @@ nscoord nsLayoutUtils::IntrinsicForAxis(
             (aPercentageBasis.isNothing() &&
              GetPercentBSize(styleMinBSize, aFrame, horizontalAxis, h))) {
           h = std::max(0, h - bSizeTakenByBoxSizing);
-          nscoord minISize = NSCoordMulDiv(h, ratioISize, ratioBSize);
+          nscoord minISize = ratio.ApplyTo(h);
           if (minISize > result) {
             result = minISize;
           }
@@ -6108,15 +6096,18 @@ void nsLayoutUtils::PaintTextShadow(
     const nsRect& aDirtyRect, const nscolor& aForegroundColor,
     TextShadowCallback aCallback, void* aCallbackData) {
   const nsStyleText* textStyle = aFrame->StyleText();
-  if (!textStyle->HasTextShadow()) return;
+  auto shadows = textStyle->mTextShadow.AsSpan();
+  if (shadows.IsEmpty()) {
+    return;
+  }
 
   // Text shadow happens with the last value being painted at the back,
   // ie. it is painted first.
   gfxContext* aDestCtx = aContext;
-  for (uint32_t i = textStyle->mTextShadow->Length(); i > 0; --i) {
-    nsCSSShadowItem* shadowDetails = textStyle->mTextShadow->ShadowAt(i - 1);
-    nsPoint shadowOffset(shadowDetails->mXOffset, shadowDetails->mYOffset);
-    nscoord blurRadius = std::max(shadowDetails->mRadius, 0);
+  for (auto& shadow : Reversed(shadows)) {
+    nsPoint shadowOffset(shadow.horizontal.ToAppUnits(),
+                         shadow.vertical.ToAppUnits());
+    nscoord blurRadius = std::max(shadow.blur.ToAppUnits(), 0);
 
     nsRect shadowRect(aTextRect);
     shadowRect.MoveBy(shadowOffset);
@@ -6124,25 +6115,23 @@ void nsLayoutUtils::PaintTextShadow(
     nsPresContext* presCtx = aFrame->PresContext();
     nsContextBoxBlur contextBoxBlur;
 
-    nscolor shadowColor = shadowDetails->mColor.CalcColor(aForegroundColor);
+    nscolor shadowColor = shadow.color.CalcColor(aForegroundColor);
 
     // Webrender just needs the shadow details
     if (auto* textDrawer = aContext->GetTextDrawer()) {
       wr::Shadow wrShadow;
 
-      // Gecko already inflates the bounding rect of text shadows,
-      // so tell WR not to inflate again.
-      wrShadow.should_inflate = false;
-
       wrShadow.offset = {
-          presCtx->AppUnitsToFloatDevPixels(shadowDetails->mXOffset),
-          presCtx->AppUnitsToFloatDevPixels(shadowDetails->mYOffset)};
+          presCtx->AppUnitsToFloatDevPixels(shadow.horizontal.ToAppUnits()),
+          presCtx->AppUnitsToFloatDevPixels(shadow.vertical.ToAppUnits())};
 
-      wrShadow.blur_radius =
-          presCtx->AppUnitsToFloatDevPixels(shadowDetails->mRadius);
+      wrShadow.blur_radius = presCtx->AppUnitsToFloatDevPixels(blurRadius);
       wrShadow.color = wr::ToColorF(ToDeviceColor(shadowColor));
 
-      textDrawer->AppendShadow(wrShadow);
+      // Gecko already inflates the bounding rect of text shadows,
+      // so tell WR not to inflate again.
+      bool inflate = false;
+      textDrawer->AppendShadow(wrShadow, inflate);
       continue;
     }
 
@@ -6867,19 +6856,19 @@ ImgDrawResult nsLayoutUtils::DrawSingleImage(
 /* static */
 void nsLayoutUtils::ComputeSizeForDrawing(
     imgIContainer* aImage, /* outparam */ CSSIntSize& aImageSize,
-    /* outparam */ nsSize& aIntrinsicRatio,
+    /* outparam */ AspectRatio& aIntrinsicRatio,
     /* outparam */ bool& aGotWidth,
     /* outparam */ bool& aGotHeight) {
   aGotWidth = NS_SUCCEEDED(aImage->GetWidth(&aImageSize.width));
   aGotHeight = NS_SUCCEEDED(aImage->GetHeight(&aImageSize.height));
-  bool gotRatio = NS_SUCCEEDED(aImage->GetIntrinsicRatio(&aIntrinsicRatio));
+  Maybe<AspectRatio> intrinsicRatio = aImage->GetIntrinsicRatio();
+  aIntrinsicRatio = intrinsicRatio.valueOr(AspectRatio());
 
-  if (!(aGotWidth && aGotHeight) && !gotRatio) {
+  if (!(aGotWidth && aGotHeight) && intrinsicRatio.isNothing()) {
     // We hit an error (say, because the image failed to load or couldn't be
     // decoded) and should return zero size.
     aGotWidth = aGotHeight = true;
     aImageSize = CSSIntSize(0, 0);
-    aIntrinsicRatio = nsSize(0, 0);
   }
 }
 
@@ -6887,7 +6876,7 @@ void nsLayoutUtils::ComputeSizeForDrawing(
 CSSIntSize nsLayoutUtils::ComputeSizeForDrawingWithFallback(
     imgIContainer* aImage, const nsSize& aFallbackSize) {
   CSSIntSize imageSize;
-  nsSize imageRatio;
+  AspectRatio imageRatio;
   bool gotHeight, gotWidth;
   ComputeSizeForDrawing(aImage, imageSize, imageRatio, gotWidth, gotHeight);
 
@@ -6895,17 +6884,13 @@ CSSIntSize nsLayoutUtils::ComputeSizeForDrawingWithFallback(
   // intrinsic ratio of the image.
   if (gotWidth != gotHeight) {
     if (!gotWidth) {
-      if (imageRatio.height != 0) {
-        imageSize.width = NSCoordSaturatingNonnegativeMultiply(
-            imageSize.height,
-            float(imageRatio.width) / float(imageRatio.height));
+      if (imageRatio) {
+        imageSize.width = imageRatio.ApplyTo(imageSize.height);
         gotWidth = true;
       }
     } else {
-      if (imageRatio.width != 0) {
-        imageSize.height = NSCoordSaturatingNonnegativeMultiply(
-            imageSize.width,
-            float(imageRatio.height) / float(imageRatio.width));
+      if (imageRatio) {
+        imageSize.height = imageRatio.Inverted().ApplyTo(imageSize.width);
         gotHeight = true;
       }
     }
@@ -8305,8 +8290,8 @@ bool nsLayoutUtils::FontSizeInflationEnabled(nsPresContext* aPresContext) {
 /* static */
 nsRect nsLayoutUtils::GetBoxShadowRectForFrame(nsIFrame* aFrame,
                                                const nsSize& aFrameSize) {
-  nsCSSShadowArray* boxShadows = aFrame->StyleEffects()->mBoxShadow;
-  if (!boxShadows) {
+  auto boxShadows = aFrame->StyleEffects()->mBoxShadow.AsSpan();
+  if (boxShadows.IsEmpty()) {
     return nsRect();
   }
 
@@ -8331,17 +8316,19 @@ nsRect nsLayoutUtils::GetBoxShadowRectForFrame(nsIFrame* aFrame,
 
   nsRect shadows;
   int32_t A2D = aFrame->PresContext()->AppUnitsPerDevPixel();
-  for (uint32_t i = 0; i < boxShadows->Length(); ++i) {
+  for (auto& shadow : boxShadows) {
     nsRect tmpRect = inputRect;
-    nsCSSShadowItem* shadow = boxShadows->ShadowAt(i);
 
     // inset shadows are never painted outside the frame
-    if (shadow->mInset) continue;
+    if (shadow.inset) {
+      continue;
+    }
 
-    tmpRect.MoveBy(nsPoint(shadow->mXOffset, shadow->mYOffset));
-    tmpRect.Inflate(shadow->mSpread);
-    tmpRect.Inflate(
-        nsContextBoxBlur::GetBlurRadiusMargin(shadow->mRadius, A2D));
+    tmpRect.MoveBy(nsPoint(shadow.base.horizontal.ToAppUnits(),
+                           shadow.base.vertical.ToAppUnits()));
+    tmpRect.Inflate(shadow.spread.ToAppUnits());
+    tmpRect.Inflate(nsContextBoxBlur::GetBlurRadiusMargin(
+        shadow.base.blur.ToAppUnits(), A2D));
     shadows.UnionRect(shadows, tmpRect);
   }
   return shadows;
@@ -8935,7 +8922,7 @@ ScrollMetadata nsLayoutUtils::ComputeScrollMetadata(
                                   FrameMetrics::eRestore, ScrollMode::Instant);
       }
 
-      if (const Maybe<nsIPresShell::VisualScrollUpdate>& visualUpdate =
+      if (const Maybe<PresShell::VisualScrollUpdate>& visualUpdate =
               presShell->GetPendingVisualScrollUpdate()) {
         metrics.SetVisualViewportOffset(
             CSSPoint::FromAppUnits(visualUpdate->mVisualScrollOffset));
@@ -9960,17 +9947,15 @@ Maybe<MotionPathData> nsLayoutUtils::ResolveMotionPath(const nsIFrame* aFrame) {
   MOZ_ASSERT(aFrame);
 
   const nsStyleDisplay* display = aFrame->StyleDisplay();
-  if (!display->mMotion || !display->mMotion->HasPath()) {
+  if (display->mOffsetPath.IsNone()) {
     return Nothing();
   }
 
-  const UniquePtr<StyleMotion>& motion = display->mMotion;
-  // Bug 1429299 - Implement offset-distance for motion path. For now, we use
-  // the default value, i.e. 0%.
-  float distance = 0.0;
-  float angle = 0.0;
+  gfx::Float angle = 0.0;
   Point point;
-  if (motion->OffsetPath().GetType() == StyleShapeSourceType::Path) {
+  if (display->mOffsetPath.IsPath()) {
+    const Span<const StylePathCommand>& path =
+        display->mOffsetPath.AsPath()._0.AsSpan();
     // Build the path and compute the point and angle for creating the
     // equivalent translate and rotate.
     // Here we only need to build a valid path for motion path, so
@@ -9984,16 +9969,36 @@ Maybe<MotionPathData> nsLayoutUtils::ResolveMotionPath(const nsIFrame* aFrame) {
         gfxPlatform::GetPlatform()->ScreenReferenceDrawTarget();
     RefPtr<PathBuilder> builder =
         drawTarget->CreatePathBuilder(FillRule::FILL_WINDING);
-    RefPtr<gfx::Path> gfxPath =
-        SVGPathData::BuildPath(motion->OffsetPath().Path().Path(), builder,
-                               NS_STYLE_STROKE_LINECAP_BUTT, 0.0);
+    RefPtr<gfx::Path> gfxPath = SVGPathData::BuildPath(
+        path, builder, NS_STYLE_STROKE_LINECAP_BUTT, 0.0);
     if (!gfxPath) {
       return Nothing();
     }
-    float pathLength = gfxPath->ComputeLength();
-    float computedDistance = distance * pathLength;
+
+    // Per the spec, we have to convert offset distance to pixels, with 100%
+    // being converted to total length. So here |gfxPath| is built with CSS
+    // pixel, and we calculate |pathLength| and |computedDistance| with CSS
+    // pixel as well.
+    gfx::Float pathLength = gfxPath->ComputeLength();
+    gfx::Float usedDistance =
+        display->mOffsetDistance.ResolveToCSSPixels(CSSCoord(pathLength));
+    if (!path.empty() && path.rbegin()->IsClosePath()) {
+      // Per the spec, let used offset distance be equal to offset distance
+      // modulus the total length of the path. If the total length of the path
+      // is 0, used offset distance is also 0.
+      usedDistance = pathLength > 0.0 ? fmod(usedDistance, pathLength) : 0.0;
+      // We make sure |usedDistance| is 0.0 or a positive value.
+      // https://github.com/w3c/fxtf-drafts/issues/339
+      if (usedDistance < 0.0) {
+        usedDistance += pathLength;
+      }
+    } else {
+      // Per the spec, for unclosed interval, let used offset distance be equal
+      // to offset distance clamped by 0 and the total length of the path.
+      usedDistance = clamped(usedDistance, 0.0f, pathLength);
+    }
     Point tangent;
-    point = gfxPath->ComputePointAtLength(computedDistance, &tangent);
+    point = gfxPath->ComputePointAtLength(usedDistance, &tangent);
     // Bug 1429301 - Implement offset-rotate for motion path.
     // After implement offset-rotate, |angle| will be adjusted more.
     // For now, the default value of offset-rotate is "auto", so we use the

@@ -31,6 +31,7 @@ remote.jar:
   # domains
   content/domains/ContentProcessDomain.jsm (domains/ContentProcessDomain.jsm)
   content/domains/ContentProcessDomains.jsm (domains/ContentProcessDomains.jsm)
+  content/domains/ContextObserver.jsm (domains/ContextObserver.jsm)
   content/domains/Domain.jsm (domains/Domain.jsm)
   content/domains/Domains.jsm (domains/Domains.jsm)
   content/domains/ParentProcessDomains.jsm (domains/ParentProcessDomains.jsm)
@@ -42,6 +43,7 @@ remote.jar:
   content/domains/content/Page.jsm (domains/content/Page.jsm)
   content/domains/content/Performance.jsm (domains/content/Performance.jsm)
   content/domains/content/Runtime.jsm (domains/content/Runtime.jsm)
+  content/domains/content/runtime/ExecutionContext.jsm (domains/content/runtime/ExecutionContext.jsm)
   content/domains/content/Security.jsm (domains/content/Security.jsm)
   content/domains/parent/Browser.jsm (domains/parent/Browser.jsm)
   content/domains/parent/Target.jsm (domains/parent/Target.jsm)

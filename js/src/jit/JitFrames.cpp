@@ -215,7 +215,7 @@ static void HandleExceptionIon(JSContext* cx, const InlineFrameIterator& frame,
           // Ion can compile try-catch, but bailing out to catch
           // exceptions is slow. Reset the warm-up counter so that if we
           // catch many exceptions we won't Ion-compile the script.
-          script->resetWarmUpCounter();
+          script->resetWarmUpCounterToDelayIonCompilation();
 
           if (*hitBailoutException) {
             break;
@@ -373,24 +373,38 @@ static bool ProcessTryNotesBaseline(JSContext* cx, const JSJitFrameIter& frame,
         // Ion can compile try-catch, but bailing out to catch
         // exceptions is slow. Reset the warm-up counter so that if we
         // catch many exceptions we won't Ion-compile the script.
-        script->resetWarmUpCounter();
+        script->resetWarmUpCounterToDelayIonCompilation();
 
         // Resume at the start of the catch block.
-        PCMappingSlotInfo slotInfo;
         rfe->kind = ResumeFromException::RESUME_CATCH;
-        rfe->target =
-            script->baselineScript()->nativeCodeForPC(script, *pc, &slotInfo);
-        MOZ_ASSERT(slotInfo.isStackSynced());
+        if (frame.baselineFrame()->runningInInterpreter()) {
+          const BaselineInterpreter& interp =
+              cx->runtime()->jitRuntime()->baselineInterpreter();
+          frame.baselineFrame()->setInterpreterPC(*pc);
+          rfe->target = interp.interpretOpAddr().value;
+        } else {
+          PCMappingSlotInfo slotInfo;
+          rfe->target =
+              script->baselineScript()->nativeCodeForPC(script, *pc, &slotInfo);
+          MOZ_ASSERT(slotInfo.isStackSynced());
+        }
         return true;
       }
 
       case JSTRY_FINALLY: {
-        PCMappingSlotInfo slotInfo;
         SettleOnTryNote(cx, tn, frame, ei, rfe, pc);
         rfe->kind = ResumeFromException::RESUME_FINALLY;
-        rfe->target =
-            script->baselineScript()->nativeCodeForPC(script, *pc, &slotInfo);
-        MOZ_ASSERT(slotInfo.isStackSynced());
+        if (frame.baselineFrame()->runningInInterpreter()) {
+          const BaselineInterpreter& interp =
+              cx->runtime()->jitRuntime()->baselineInterpreter();
+          frame.baselineFrame()->setInterpreterPC(*pc);
+          rfe->target = interp.interpretOpAddr().value;
+        } else {
+          PCMappingSlotInfo slotInfo;
+          rfe->target =
+              script->baselineScript()->nativeCodeForPC(script, *pc, &slotInfo);
+          MOZ_ASSERT(slotInfo.isStackSynced());
+        }
         // Drop the exception instead of leaking cross compartment data.
         if (!cx->getPendingException(
                 MutableHandleValue::fromMarkedLocation(&rfe->exception))) {

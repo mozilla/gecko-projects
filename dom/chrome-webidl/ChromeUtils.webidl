@@ -359,7 +359,7 @@ partial namespace ChromeUtils {
   /**
    * Request performance metrics to the current process & all content processes.
    */
-  [Throws, Func="DOMPrefs::dom_performance_enable_scheduler_timing"]
+  [Throws]
   Promise<sequence<PerformanceInfoDictionary>> requestPerformanceMetrics();
 
   /**
@@ -520,14 +520,12 @@ dictionary IOActivityDataDictionary {
  * (3) Update the methods on mozilla::OriginAttributesPattern, including matching.
  */
 dictionary OriginAttributesDictionary {
-  unsigned long appId = 0;
   unsigned long userContextId = 0;
   boolean inIsolatedMozBrowser = false;
   unsigned long privateBrowsingId = 0;
   DOMString firstPartyDomain = "";
 };
 dictionary OriginAttributesPatternDictionary {
-  unsigned long appId;
   unsigned long userContextId;
   boolean inIsolatedMozBrowser;
   unsigned long privateBrowsingId;

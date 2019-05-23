@@ -44,44 +44,20 @@ function run_test() {
   // Point the blocklist clients to use this local HTTP server.
   Services.prefs.setCharPref("services.settings.server",
                              `http://localhost:${server.identity.primaryPort}/v1`);
-  // Ensure that signature verification is disabled to prevent interference
-  // with basic certificate sync tests
-  Services.prefs.setBoolPref("services.settings.verify_signature", false);
 
   client = RemoteSettings("password-fields");
+  client.verifySignature = false;
+
   clientWithDump = RemoteSettings("language-dictionaries");
+  clientWithDump.verifySignature = false;
 
-  // Setup server fake responses.
-  function handleResponse(request, response) {
-    try {
-      const sample = getSampleResponse(request, server.identity.primaryPort);
-      if (!sample) {
-        do_throw(`unexpected ${request.method} request for ${request.path}?${request.queryString}`);
-      }
-
-      response.setStatusLine(null, sample.status.status,
-                             sample.status.statusText);
-      // send the headers
-      for (let headerLine of sample.sampleHeaders) {
-        let headerElements = headerLine.split(":");
-        response.setHeader(headerElements[0], headerElements[1].trimLeft());
-      }
-      response.setHeader("Date", (new Date()).toUTCString());
-
-      const body = typeof sample.responseBody == "string" ? sample.responseBody
-                                                          : JSON.stringify(sample.responseBody);
-      response.write(body);
-      response.finish();
-    } catch (e) {
-      info(e);
-    }
-  }
-  const configPath = "/v1/";
-  const changesPath = "/v1/buckets/monitor/collections/changes/records";
-  const recordsPath  = "/v1/buckets/main/collections/password-fields/records";
-  server.registerPathHandler(configPath, handleResponse);
-  server.registerPathHandler(changesPath, handleResponse);
-  server.registerPathHandler(recordsPath, handleResponse);
+  server.registerPathHandler("/v1/", handleResponse);
+  server.registerPathHandler("/v1/buckets/monitor/collections/changes/records", handleResponse);
+  server.registerPathHandler("/v1/buckets/main/collections/password-fields", handleResponse);
+  server.registerPathHandler("/v1/buckets/main/collections/password-fields/records", handleResponse);
+  server.registerPathHandler("/v1/buckets/main/collections/language-dictionaries", handleResponse);
+  server.registerPathHandler("/v1/buckets/main/collections/language-dictionaries/records", handleResponse);
+  server.registerPathHandler("/fake-x5u", handleResponse);
 
   run_next_test();
 
@@ -98,6 +74,26 @@ add_task(async function test_records_obtained_from_server_are_stored_in_db() {
   // Our test data has a single record; it should be in the local collection
   const list = await client.get();
   equal(list.length, 1);
+});
+add_task(clear_state);
+
+add_task(async function test_records_from_dump_are_listed_as_created_in_event() {
+  if (IS_ANDROID) {
+    // Skip test: we don't ship remote settings dumps on Android (see package-manifest).
+    return;
+  }
+  let received;
+  clientWithDump.on("sync", ({ data }) => received = data);
+  // Use a timestamp superior to latest record in dump.
+  const timestamp = 5000000000000; // Fri Jun 11 2128
+
+  await clientWithDump.maybeSync(timestamp);
+
+  const list = await clientWithDump.get();
+  ok(list.length > 20, "The dump was loaded");
+  equal(received.created[received.created.length - 1].id, "xx", "Last record comes from the sync.");
+  equal(received.created.length, list.length, "The list of created records contains the dump");
+  equal(received.current.length, received.created.length);
 });
 add_task(clear_state);
 
@@ -180,6 +176,42 @@ add_task(async function test_get_ignores_synchronization_errors() {
   // The sync endpoints are not mocked, this fails internally.
   data = await RemoteSettings("no-mocked-responses").get();
   equal(data.length, 0);
+});
+add_task(clear_state);
+
+add_task(async function test_get_can_verify_signature() {
+  // No signature in metadata.
+  let error;
+  try {
+    await client.get({ verifySignature: true, syncIfEmpty: false });
+  } catch (e) {
+    error = e;
+  }
+  equal(error.message, "Missing signature (main/password-fields)");
+
+  // Populate the local DB (record and metadata)
+  await client.maybeSync(2000);
+
+  // It validates signature that was stored in local DB.
+  let calledSignature;
+  client._verifier = {
+    async asyncVerifyContentSignature(serialized, signature) {
+      calledSignature = signature;
+      return JSON.parse(serialized).data.length == 1;
+    },
+  };
+  await client.get({ verifySignature: true });
+  ok(calledSignature.endsWith("abcdef"));
+
+  // It throws when signature does not verify.
+  const col = await client.openCollection();
+  await col.delete("9d500963-d80e-3a91-6e74-66f3811b99cc");
+  try {
+    await client.get({ verifySignature: true });
+  } catch (e) {
+    error = e;
+  }
+  equal(error.message, "Invalid content signature (main/password-fields)");
 });
 add_task(clear_state);
 
@@ -448,7 +480,30 @@ add_task(async function test_inspect_changes_the_list_when_bucket_pref_is_change
 });
 add_task(clear_state);
 
-// get a response for a given request from sample data
+function handleResponse(request, response) {
+  try {
+    const sample = getSampleResponse(request, server.identity.primaryPort);
+    if (!sample) {
+      do_throw(`unexpected ${request.method} request for ${request.path}?${request.queryString}`);
+    }
+
+    response.setStatusLine(null, sample.status.status, sample.status.statusText);
+    // send the headers
+    for (let headerLine of sample.sampleHeaders) {
+      let headerElements = headerLine.split(":");
+      response.setHeader(headerElements[0], headerElements[1].trimLeft());
+    }
+    response.setHeader("Date", (new Date()).toUTCString());
+
+    const body = typeof sample.responseBody == "string" ? sample.responseBody
+      : JSON.stringify(sample.responseBody);
+    response.write(body);
+    response.finish();
+  } catch (e) {
+    info(e);
+  }
+}
+
 function getSampleResponse(req, port) {
   const responses = {
     "OPTIONS": {
@@ -519,6 +574,38 @@ function getSampleResponse(req, port) {
           "last_modified": 1000,
         }],
       },
+    },
+    "GET:/v1/buckets/main/collections/password-fields": {
+      "sampleHeaders": [
+        "Access-Control-Allow-Origin: *",
+        "Access-Control-Expose-Headers: Retry-After, Content-Length, Alert, Backoff",
+        "Content-Type: application/json; charset=UTF-8",
+        "Server: waitress",
+        "Etag: \"1234\"",
+      ],
+      "status": { status: 200, statusText: "OK" },
+      "responseBody": JSON.stringify({
+        "data": {
+          "id": "password-fields",
+          "last_modified": 1234,
+          "signature": {
+            "signature": "abcdef",
+            "x5u": `http://localhost:${port}/fake-x5u`,
+          },
+        },
+      }),
+    },
+    "GET:/fake-x5u": {
+      "sampleHeaders": [
+        "Content-Type: /octet-stream",
+      ],
+      "status": { status: 200, statusText: "OK" },
+      "responseBody": `-----BEGIN CERTIFICATE-----
+MIIGYTCCBEmgAwIBAgIBATANBgkqhkiG9w0BAQwFADB9MQswCQYDVQQGEwJVU
+ZARKjbu1TuYQHf0fs+GwID8zeLc2zJL7UzcHFwwQ6Nda9OJN4uPAuC/BKaIpxCLL
+26b24/tRam4SJjqpiq20lynhUrmTtt6hbG3E1Hpy3bmkt2DYnuMFwEx2gfXNcnbT
+wNuvFqc=
+-----END CERTIFICATE-----`,
     },
     "GET:/v1/buckets/main/collections/password-fields/records?_expected=2000&_sort=-last_modified": {
       "sampleHeaders": [
@@ -667,6 +754,43 @@ function getSampleResponse(req, port) {
           "last_modified": 3000,
           "website": "https://some-website.com",
           "selector": "#webpage[field-pwd]",
+        }],
+      },
+    },
+    "GET:/v1/buckets/main/collections/language-dictionaries": {
+      "sampleHeaders": [
+        "Access-Control-Allow-Origin: *",
+        "Access-Control-Expose-Headers: Retry-After, Content-Length, Alert, Backoff",
+        "Content-Type: application/json; charset=UTF-8",
+        "Server: waitress",
+        "Etag: \"1234\"",
+      ],
+      "status": { status: 200, statusText: "OK" },
+      "responseBody": JSON.stringify({
+        "data": {
+          "id": "language-dictionaries",
+          "last_modified": 1234,
+          "signature": {
+            "signature": "xyz",
+            "x5u": `http://localhost:${port}/fake-x5u`,
+          },
+        },
+      }),
+    },
+    "GET:/v1/buckets/main/collections/language-dictionaries/records": {
+      "sampleHeaders": [
+        "Access-Control-Allow-Origin: *",
+        "Access-Control-Expose-Headers: Retry-After, Content-Length, Alert, Backoff",
+        "Content-Type: application/json; charset=UTF-8",
+        "Server: waitress",
+        "Etag: \"5000000000000\"",
+      ],
+      "status": { status: 200, statusText: "OK" },
+      "responseBody": {
+        "data": [{
+          "id": "xx",
+          "last_modified": 5000000000000,
+          "dictionaries": ["xx-XX@dictionaries.addons.mozilla.org"],
         }],
       },
     },

@@ -69,6 +69,7 @@ class AutoKeepTypeScripts;
 class AutoSweepTypeScript;
 class BreakpointSite;
 class Debugger;
+class GCParallelTask;
 class LazyScript;
 class ModuleObject;
 class RegExpObject;
@@ -81,6 +82,10 @@ struct BytecodeEmitter;
 class FunctionBox;
 class ModuleSharedContext;
 }  // namespace frontend
+
+namespace gc {
+void SweepLazyScripts(GCParallelTask* task);
+} // namespace gc
 
 namespace detail {
 
@@ -1000,14 +1005,6 @@ class ScriptSource {
   MOZ_MUST_USE bool setBinASTSourceCopy(JSContext* cx, const uint8_t* buf,
                                         size_t len);
 
-  /*
-   * Initialize this as containing BinAST data for |buf|/|len|, using a shared,
-   * deduplicated version of |buf| if necessary.
-   */
-  MOZ_MUST_USE bool initializeBinAST(
-      JSContext* cx, UniqueChars&& buf, size_t len,
-      UniquePtr<frontend::BinASTSourceMetadata> metadata);
-
   const uint8_t* binASTSource();
 
 #endif /* JS_BUILD_BINAST */
@@ -1159,6 +1156,9 @@ class ScriptSource {
   template <XDRMode mode>
   static MOZ_MUST_USE XDRResult codeBinASTData(XDRState<mode>* const xdr,
                                                ScriptSource* const ss);
+
+  template <typename Unit, XDRMode mode>
+  static void codeRetrievableData(ScriptSource* ss);
 
   template <XDRMode mode>
   static MOZ_MUST_USE XDRResult xdrData(XDRState<mode>* const xdr,
@@ -2106,6 +2106,12 @@ class JSScript : public js::gc::TenuredCell {
     return scriptData_->code();
   }
 
+  bool hasForceInterpreterOp() const {
+    // JSOP_FORCEINTERPRETER, if present, must be the first op.
+    MOZ_ASSERT(length() >= 1);
+    return JSOp(*code()) == JSOP_FORCEINTERPRETER;
+  }
+
   js::AllBytecodesIterable allLocations() {
     return js::AllBytecodesIterable(this);
   }
@@ -2667,10 +2673,12 @@ class JSScript : public js::gc::TenuredCell {
   static size_t offsetOfWarmUpCounter() {
     return offsetof(JSScript, warmUpCount);
   }
-  void resetWarmUpCounter() {
+  void resetWarmUpCounterForGC() {
     incWarmUpResetCounter();
     warmUpCount = 0;
   }
+
+  void resetWarmUpCounterToDelayIonCompilation();
 
   unsigned getWarmUpResetCount() const {
     constexpr uint32_t MASK = uint32_t(MutableFlags::WarmupResets_MASK);
@@ -3022,6 +3030,7 @@ class LazyScript : public gc::TenuredCell {
   // pointer to the result. This is a weak pointer: after relazification, we
   // can collect the script if there are no other pointers to it.
   WeakHeapPtrScript script_;
+  friend void js::gc::SweepLazyScripts(GCParallelTask* task);
 
   // Original function with which the lazy script is associated.
   GCPtrFunction function_;

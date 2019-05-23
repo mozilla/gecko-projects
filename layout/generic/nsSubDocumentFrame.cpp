@@ -151,7 +151,32 @@ void nsSubDocumentFrame::Init(nsIContent* aContent, nsContainerFrame* aParent,
     }
   }
 
+  PropagateIsUnderHiddenEmbedderElementToSubView(
+      PresShell()->IsUnderHiddenEmbedderElement() ||
+      !StyleVisibility()->IsVisible());
+
   nsContentUtils::AddScriptRunner(new AsyncFrameInit(this));
+}
+
+void nsSubDocumentFrame::PropagateIsUnderHiddenEmbedderElementToSubView(
+    bool aIsUnderHiddenEmbedderElement) {
+  if (mFrameLoader && mFrameLoader->IsRemoteFrame()) {
+    mFrameLoader->SendIsUnderHiddenEmbedderElement(
+        aIsUnderHiddenEmbedderElement);
+    return;
+  }
+
+  if (!mInnerView) {
+    return;
+  }
+
+  nsView* subdocView = mInnerView->GetFirstChild();
+  while (subdocView) {
+    if (mozilla::PresShell* presShell = subdocView->GetPresShell()) {
+      presShell->SetIsUnderHiddenEmbedderElement(aIsUnderHiddenEmbedderElement);
+    }
+    subdocView = subdocView->GetNextSibling();
+  }
 }
 
 void nsSubDocumentFrame::ShowViewer() {
@@ -723,7 +748,7 @@ IntrinsicSize nsSubDocumentFrame::GetIntrinsicSize() {
 }
 
 /* virtual */
-nsSize nsSubDocumentFrame::GetIntrinsicRatio() {
+AspectRatio nsSubDocumentFrame::GetIntrinsicRatio() {
   nsIFrame* subDocRoot = ObtainIntrinsicSizeFrame();
   if (subDocRoot) {
     return subDocRoot->GetIntrinsicRatio();
@@ -805,7 +830,7 @@ void nsSubDocumentFrame::Reflow(nsPresContext* aPresContext,
     // Size & position the view according to 'object-fit' & 'object-position'.
     nsIFrame* subDocRoot = ObtainIntrinsicSizeFrame();
     IntrinsicSize intrinsSize;
-    nsSize intrinsRatio;
+    AspectRatio intrinsRatio;
     if (subDocRoot) {
       intrinsSize = subDocRoot->GetIntrinsicSize();
       intrinsRatio = subDocRoot->GetIntrinsicRatio();
@@ -896,6 +921,24 @@ nsresult nsSubDocumentFrame::AttributeChanged(int32_t aNameSpaceID,
   }
 
   return NS_OK;
+}
+
+void nsSubDocumentFrame::DidSetComputedStyle(ComputedStyle* aOldComputedStyle) {
+  nsAtomicContainerFrame::DidSetComputedStyle(aOldComputedStyle);
+
+  // If this presshell has invisible ancestors, we don't need to propagate the
+  // visibility style change to the subdocument since the subdocument should
+  // have already set the IsUnderHiddenEmbedderElement flag in
+  // nsSubDocumentFrame::Init.
+  if (PresShell()->IsUnderHiddenEmbedderElement()) {
+    return;
+  }
+
+  const bool isVisible = StyleVisibility()->IsVisible();
+  if (!aOldComputedStyle ||
+      isVisible != aOldComputedStyle->StyleVisibility()->IsVisible()) {
+    PropagateIsUnderHiddenEmbedderElementToSubView(!isVisible);
+  }
 }
 
 nsIFrame* NS_NewSubDocumentFrame(PresShell* aPresShell, ComputedStyle* aStyle) {
@@ -1201,11 +1244,17 @@ void nsSubDocumentFrame::EndSwapDocShells(nsIFrame* aOther) {
     PresShell()->FrameNeedsReflow(this, IntrinsicDirty::TreeChange,
                                   NS_FRAME_IS_DIRTY);
     InvalidateFrameSubtree();
+    PropagateIsUnderHiddenEmbedderElementToSubView(
+        PresShell()->IsUnderHiddenEmbedderElement() ||
+        !StyleVisibility()->IsVisible());
   }
   if (weakOther.IsAlive()) {
     other->PresShell()->FrameNeedsReflow(other, IntrinsicDirty::TreeChange,
                                          NS_FRAME_IS_DIRTY);
     other->InvalidateFrameSubtree();
+    other->PropagateIsUnderHiddenEmbedderElementToSubView(
+        other->PresShell()->IsUnderHiddenEmbedderElement() ||
+        !other->StyleVisibility()->IsVisible());
   }
 }
 

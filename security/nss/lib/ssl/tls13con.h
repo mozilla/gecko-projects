@@ -104,7 +104,7 @@ SECStatus tls13_ProtectRecord(sslSocket *ss,
                               const PRUint8 *pIn,
                               PRUint32 contentLen,
                               sslBuffer *wrBuf);
-PRInt32 tls13_Read0RttData(sslSocket *ss, void *buf, PRInt32 len);
+PRInt32 tls13_Read0RttData(sslSocket *ss, PRUint8 *buf, PRInt32 len);
 SECStatus tls13_HandleEarlyApplicationData(sslSocket *ss, sslBuffer *origBuf);
 PRBool tls13_ClientAllow0Rtt(const sslSocket *ss, const sslSessionID *sid);
 PRUint16 tls13_EncodeDraftVersion(SSL3ProtocolVersion version,
@@ -117,8 +117,8 @@ PRBool tls13_ShouldRequestClientAuth(sslSocket *ss);
 PRBool tls13_IsReplay(const sslSocket *ss, const sslSessionID *sid);
 void tls13_AntiReplayRollover(PRTime now);
 
-SECStatus SSLExp_SetupAntiReplay(PRTime window, unsigned int k,
-                                 unsigned int bits);
+SECStatus SSLExp_InitAntiReplay(PRTime now, PRTime window, unsigned int k,
+                                unsigned int bits);
 
 SECStatus SSLExp_HelloRetryRequestCallback(PRFileDesc *fd,
                                            SSLHelloRetryRequestCallback cb,

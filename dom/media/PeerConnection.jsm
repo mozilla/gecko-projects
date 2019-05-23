@@ -1641,6 +1641,27 @@ class RTCPeerConnection {
     if (maxRetransmitTime !== undefined) {
       this.logWarning("Use maxPacketLifeTime instead of deprecated maxRetransmitTime which will stop working soon in createDataChannel!");
     }
+
+    if (protocol.length > 32767) {
+      // At least 65536/2 UTF-16 characters. UTF-8 might be too long.
+      // Spec says to check how long |protocol| and |label| are in _bytes_. This
+      // is a little ambiguous. For now, examine the length of the utf-8 encoding.
+      const byteCounter = new TextEncoder("utf-8");
+
+      if (byteCounter.encode(protocol).length > 65535) {
+        throw new this._win.DOMException(
+            "protocol cannot be longer than 65535 bytes", "TypeError");
+      }
+    }
+
+    if (label.length > 32767) {
+      const byteCounter = new TextEncoder("utf-8");
+      if (byteCounter.encode(label).length > 65535) {
+        throw new this._win.DOMException(
+            "label cannot be longer than 65535 bytes", "TypeError");
+      }
+    }
+
     if (!negotiated) {
       id = null;
     } else if (id === null) {
@@ -2186,13 +2207,13 @@ class RTCRtpReceiver {
   _getRtpSourcesByType(type) {
     this._fetchRtpSources();
     // Only return the values from within the last 10 seconds as per the spec
-    let cutoffTime = this._rtpSourcesJsTimestamp - 10 * 1000;
-    let sources = [...this._rtpSources.values()].filter(
+    const cutoffTime = this._rtpSourcesJsTimestamp - 10 * 1000;
+    return [...this._rtpSources.values()].filter(
       (entry) => {
         return entry.sourceType == type &&
             (entry.timestamp + entry.sourceClockOffset) >= cutoffTime;
       }).map(e => {
-        let newEntry = {
+        const newEntry = {
           source: e.source,
           timestamp: e.timestamp + e.sourceClockOffset,
           audioLevel: e.audioLevel,
@@ -2201,8 +2222,7 @@ class RTCRtpReceiver {
           Object.assign(newEntry, {voiceActivityFlag: e.voiceActivityFlag});
         }
         return newEntry;
-      });
-      return sources;
+      }).sort((a, b) => b.timestamp - a.timestamp);
   }
 
   getContributingSources() {

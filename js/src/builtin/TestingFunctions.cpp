@@ -228,6 +228,15 @@ static bool GetBuildConfiguration(JSContext* cx, unsigned argc, Value* vp) {
     return false;
   }
 
+#ifdef ANDROID
+  value = BooleanValue(true);
+#else
+  value = BooleanValue(false);
+#endif
+  if (!JS_SetProperty(cx, info, "android", value)) {
+    return false;
+  }
+
 #ifdef JS_CODEGEN_ARM64
   value = BooleanValue(true);
 #else
@@ -243,6 +252,24 @@ static bool GetBuildConfiguration(JSContext* cx, unsigned argc, Value* vp) {
   value = BooleanValue(false);
 #endif
   if (!JS_SetProperty(cx, info, "arm64-simulator", value)) {
+    return false;
+  }
+
+#ifdef JS_CODEGEN_MIPS32
+  value = BooleanValue(true);
+#else
+  value = BooleanValue(false);
+#endif
+  if (!JS_SetProperty(cx, info, "mips32", value)) {
+    return false;
+  }
+
+#ifdef JS_CODEGEN_MIPS64
+  value = BooleanValue(true);
+#else
+  value = BooleanValue(false);
+#endif
+  if (!JS_SetProperty(cx, info, "mips64", value)) {
     return false;
   }
 
@@ -499,7 +526,8 @@ static bool MinorGC(JSContext* cx, unsigned argc, Value* vp) {
   _("nurseryFreeThresholdForIdleCollectionPercent",                          \
     JSGC_NURSERY_FREE_THRESHOLD_FOR_IDLE_COLLECTION_PERCENT, true)           \
   _("pretenureThreshold", JSGC_PRETENURE_THRESHOLD, true)                    \
-  _("pretenureGroupThreshold", JSGC_PRETENURE_GROUP_THRESHOLD, true)
+  _("pretenureGroupThreshold", JSGC_PRETENURE_GROUP_THRESHOLD, true)         \
+  _("zoneAllocDelayKB", JSGC_ZONE_ALLOC_DELAY_KB, true)
 
 static const struct ParamInfo {
   const char* name;
@@ -1359,7 +1387,7 @@ static bool NondeterministicGetWeakMapKeys(JSContext* cx, unsigned argc,
   return true;
 }
 
-class HasChildTracer : public JS::CallbackTracer {
+class HasChildTracer final : public JS::CallbackTracer {
   RootedValue child_;
   bool found_;
 

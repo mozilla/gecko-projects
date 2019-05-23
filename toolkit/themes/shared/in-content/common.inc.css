@@ -17,6 +17,7 @@
   --in-content-box-background-hover: #ededf0; /* grey 20 */
   --in-content-box-background-active: #d7d7db; /* grey 30 */
   --in-content-box-border-color: var(--grey-90-a30);
+  --in-content-box-info-background: var(--grey-20);
   --in-content-item-hover: rgba(69, 161, 255, 0.2); /* blue 40 a20 */
   --in-content-item-selected: #0a84ff;
   --in-content-border-highlight: #0a84ff;
@@ -71,12 +72,23 @@
   --grey-90-a20: rgba(12, 12, 13, 0.2);
   --grey-90-a30: rgba(12, 12, 13, 0.3);
   --grey-90-a50: rgba(12, 12, 13, 0.5);
+  --green-50: #30e60b;
+  --green-60: #12bc00;
+  --green-70: #058b00;
+  --green-80: #006504;
+  --green-90: #003706;
   --purple-70: #6200a4;
   --purple-70-a40: rgba(98, 0, 164, 0.4);
   --red-50: #ff0039;
   --red-50-a30: rgba(255, 0, 57, 0.3);
   --red-60: #d70022;
+  --red-70: #a4000f;
+  --red-80: #5a0002;
+  --red-90: #3e0200;
   --yellow-50: #ffe900;
+  --yellow-60: #d7b600;
+  --yellow-70: #a47f00;
+  --yellow-80: #715100;
   --yellow-90: #3e2800;
 
   --shadow-10: 0 1px 4px var(--grey-90-a10);
@@ -100,6 +112,7 @@
     --in-content-box-background-hover: rgba(249,249,250,0.15);
     --in-content-box-background-active: rgba(249,249,250,0.2);
     --in-content-box-background-odd: rgba(249,249,250,0.05);
+    --in-content-box-info-background: rgba(249,249,250,0.15);
 
     --in-content-border-color: rgba(249,249,250,0.2);
     --in-content-border-hover: rgba(249,249,250,0.3);
@@ -125,6 +138,8 @@
     --in-content-link-color-active: var(--blue-60);
 
     --in-content-tab-color: var(--in-content-page-color);
+
+    --card-outline-color: var(--grey-60);
 
     scrollbar-color: rgba(249,249,250,.4) rgba(20,20,25,.3);
   }
@@ -418,6 +433,7 @@ xul|menulist > xul|menupopup xul|menuseparator {
 html|input[type="email"],
 html|input[type="tel"],
 html|input[type="text"],
+html|input[type="password"],
 html|input[type="number"],
 html|textarea,
 xul|textbox {
@@ -439,6 +455,7 @@ xul|textbox {
 html|input[type="email"],
 html|input[type="tel"],
 html|input[type="text"],
+html|input[type="password"],
 html|input[type="number"],
 html|textarea {
   font-family: inherit;
@@ -449,6 +466,7 @@ html|textarea {
 html|input[type="email"]:enabled:not(:focus):hover,
 html|input[type="tel"]:enabled:not(:focus):hover,
 html|input[type="text"]:enabled:not(:focus):hover,
+html|input[type="password"]:enabled:not(:focus):hover,
 html|input[type="number"]:enabled:not(:focus):hover,
 html|textarea:enabled:not(:focus):hover,
 xul|textbox:not([disabled="true"]):not([focused]):hover {
@@ -458,6 +476,7 @@ xul|textbox:not([disabled="true"]):not([focused]):hover {
 html|input[type="email"]:focus,
 html|input[type="tel"]:focus,
 html|input[type="text"]:focus,
+html|input[type="password"]:focus,
 html|input[type="number"]:focus,
 html|textarea:focus,
 xul|textbox[focused] {
@@ -469,6 +488,7 @@ xul|textbox[focused] {
 html|input[type="email"]:-moz-ui-invalid,
 html|input[type="tel"]:-moz-ui-invalid,
 html|input[type="text"]:-moz-ui-invalid,
+html|input[type="password"]:-moz-ui-invalid,
 html|input[type="number"]:-moz-ui-invalid,
 html|textarea:-moz-ui-invalid {
   border-color: var(--in-content-border-invalid);
@@ -480,6 +500,7 @@ html|textarea:-moz-ui-invalid {
 html|input[type="email"]:-moz-ui-invalid:focus,
 html|input[type="tel"]:-moz-ui-invalid:focus,
 html|input[type="text"]:-moz-ui-invalid:focus,
+html|input[type="password"]:-moz-ui-invalid:focus,
 html|input[type="number"]:-moz-ui-invalid:focus,
 html|textarea:-moz-ui-invalid:focus {
   box-shadow: 0 0 0 3px var(--in-content-border-invalid-shadow);
@@ -488,6 +509,7 @@ html|textarea:-moz-ui-invalid:focus {
 html|input[type="email"]:disabled,
 html|input[type="tel"]:disabled,
 html|input[type="text"]:disabled,
+html|input[type="password"]:disabled,
 html|input[type="number"]:disabled,
 html|textarea:disabled,
 xul|textbox[disabled="true"] {
@@ -558,12 +580,14 @@ html|input[type="checkbox"]:checked {
   fill: #2292d0;
 }
 
-xul|checkbox[disabled="true"] {
+xul|checkbox[disabled="true"],
+xul|label[disabled="true"] {
   color: inherit;
 }
 
 xul|checkbox[disabled="true"],
-html|input[type="checkbox"]:disabled {
+html|input[type="checkbox"]:disabled,
+xul|label[disabled="true"] {
   opacity: 0.5;
 }
 
@@ -852,9 +876,8 @@ xul|treechildren::-moz-tree-image(selected) {
 
 /* Message bars */
 .message-bar {
-  background-color: var(--grey-20);
+  background-color: var(--in-content-box-info-background);
   border-radius: 4px;
-  color: var(--grey-90);
   min-height: 32px;
   -moz-box-align: center;
   padding: 4px;

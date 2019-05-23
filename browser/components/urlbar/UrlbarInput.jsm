@@ -60,6 +60,7 @@ class UrlbarInput {
       MozXULElement.parseXULToFragment(`
         <panel id="urlbar-results"
                role="group"
+               tooltip="aHTMLTooltip"
                noautofocus="true"
                hidden="true"
                flip="none"
@@ -97,13 +98,15 @@ class UrlbarInput {
     this._resultForCurrentValue = null;
     this._suppressStartQuery = false;
     this._untrimmedValue = "";
+    this._openViewOnFocus = false;
 
     // This exists only for tests.
     this._enableAutofillPlaceholder = true;
 
     // Forward textbox methods and properties.
     const METHODS = ["addEventListener", "removeEventListener",
-      "setAttribute", "hasAttribute", "removeAttribute", "getAttribute",
+      "getAttribute", "hasAttribute",
+      "setAttribute", "removeAttribute", "toggleAttribute",
       "select"];
     const READ_ONLY_PROPERTIES = ["inputField", "editor"];
     const READ_WRITE_PROPERTIES = ["placeholder", "readOnly",
@@ -166,12 +169,17 @@ class UrlbarInput {
     this.view.panel.addEventListener("popupshowing", this);
     this.view.panel.addEventListener("popuphidden", this);
 
-    this.inputField.controllers.insertControllerAt(0, new CopyCutController(this));
+    this._copyCutController = new CopyCutController(this);
+    this.inputField.controllers.insertControllerAt(0, this._copyCutController);
+
     this._initPasteAndGo();
 
     // Tracks IME composition.
     this._compositionState = UrlbarUtils.COMPOSITION.NONE;
     this._compositionClosedPopup = false;
+
+    this.editor.QueryInterface(Ci.nsIPlaintextEditor).newlineHandling =
+      Ci.nsIPlaintextEditor.eNewlinesStripSurroundingWhitespace;
   }
 
   /**
@@ -187,7 +195,20 @@ class UrlbarInput {
 
     this.view.panel.remove();
 
-    this.inputField.controllers.removeControllerAt(0);
+    // When uninit is called due to exiting the browser's customize mode,
+    // this.inputField.controllers is not the original list of controllers, and
+    // it doesn't contain CopyCutController.  That's why removeCopyCutController
+    // must be called when entering customize mode.  If uninit ends up getting
+    // called by something else though, try to remove the controller now.
+    try {
+      // If removeCopyCutController throws, then the controller isn't in the
+      // list of the input's controllers, and the consumer should have called
+      // removeCopyCutController at some earlier point, e.g., when customize
+      // mode was entered.
+      this.removeCopyCutController();
+    } catch (ex) {
+      Cu.reportError("Leaking UrlbarInput._copyCutController! You should have called removeCopyCutController!");
+    }
 
     if (Object.getOwnPropertyDescriptor(this, "valueFormatter").get) {
       this.valueFormatter.uninit();
@@ -201,6 +222,17 @@ class UrlbarInput {
     delete this.view;
     delete this.controller;
     delete this.textbox;
+  }
+
+  /**
+   * Removes the CopyCutController from the input's controllers list.  This must
+   * be called when the browser's customize mode is entered.
+   */
+  removeCopyCutController() {
+    if (this._copyCutController) {
+      this.inputField.controllers.removeController(this._copyCutController);
+      delete this._copyCutController;
+    }
   }
 
   /**
@@ -440,7 +472,7 @@ class UrlbarInput {
           // visit anything.  The user can then type a search string.  Also
           // start a new search so that the offer appears in the view by itself
           // to make it even clearer to the user what's going on.
-          this.startQuery();
+          this.startQuery({ allowEmptyInput: true });
           return;
         }
         const actionDetails = {
@@ -582,7 +614,7 @@ class UrlbarInput {
     allowAutofill = true,
     searchString = null,
     resetSearchState = true,
-    allowEmptyInput = true,
+    allowEmptyInput = false,
   } = {}) {
     if (this._suppressStartQuery) {
       return;
@@ -611,7 +643,6 @@ class UrlbarInput {
       isPrivate: this.isPrivate,
       maxResults: UrlbarPrefs.get("maxRichResults"),
       muxer: "UnifiedComplete",
-      providers: ["UnifiedComplete"],
       searchString,
       userContextId: this.window.gBrowser.selectedBrowser.getAttribute("usercontextid"),
     }));
@@ -712,6 +743,15 @@ class UrlbarInput {
 
   set value(val) {
     return this._setValue(val, true);
+  }
+
+  get openViewOnFocus() {
+    return this._openViewOnFocus;
+  }
+
+  set openViewOnFocus(val) {
+    this._openViewOnFocus = val;
+    this.toggleAttribute("hidedropmarker", val);
   }
 
   // Private methods below.
@@ -1244,10 +1284,17 @@ class UrlbarInput {
     // additional cleanup on blur.
     this._clearActionOverride();
     this.formatValue();
+
+    // The extension input sessions depends more on blur than on the fact we
+    // actually cancel a running query, so we do it here.
+    if (ExtensionSearchHandler.hasActiveInputSession()) {
+      ExtensionSearchHandler.handleInputCancelled();
+    }
+
     // Respect the autohide preference for easier inspecting/debugging via
     // the browser toolbox.
     if (!UrlbarPrefs.get("ui.popup.disable_autohide")) {
-      this.view.close(UrlbarUtils.CANCEL_REASON.BLUR);
+      this.view.close();
     }
     // We may have hidden popup notifications, show them again if necessary.
     if (this.getAttribute("pageproxystate") != "valid") {
@@ -1263,6 +1310,10 @@ class UrlbarInput {
     // Hide popup notifications, to reduce visual noise.
     if (this.getAttribute("pageproxystate") != "valid") {
       this.window.UpdatePopupNotificationsVisibility();
+    }
+
+    if (this.openViewOnFocus) {
+      this.startQuery();
     }
   }
 
@@ -1285,7 +1336,7 @@ class UrlbarInput {
       if (this.view.isOpen) {
         this.view.close();
       } else {
-        this.startQuery({ allowEmptyInput: false });
+        this.startQuery();
       }
     }
   }
@@ -1346,6 +1397,7 @@ class UrlbarInput {
     this.startQuery({
       searchString: value,
       allowAutofill,
+      allowEmptyInput: true,
       resetSearchState: false,
     });
   }
@@ -1439,6 +1491,9 @@ class UrlbarInput {
   _on_TabSelect(event) {
     this._resetSearchState();
     this.controller.viewContextChanged();
+    if (this.focused && this.openViewOnFocus) {
+      this.startQuery();
+    }
   }
 
   _on_keydown(event) {
@@ -1529,20 +1584,20 @@ class UrlbarInput {
 
   _on_drop(event) {
     let droppedItem = getDroppableData(event);
-    if (!droppedItem) {
-      return;
+    let droppedURL = droppedItem instanceof URL ? droppedItem.href : droppedItem;
+    if (droppedURL && (droppedURL !== this.window.gBrowser.currentURI.spec)) {
+      let principal = Services.droppedLinkHandler.getTriggeringPrincipal(event);
+      this.value = droppedURL;
+      this.window.SetPageProxyState("invalid");
+      this.focus();
+      this.handleCommand(null, undefined, undefined, principal);
+      // For safety reasons, in the drop case we don't want to immediately show
+      // the the dropped value, instead we want to keep showing the current page
+      // url until an onLocationChange happens.
+      // See the handling in URLBarSetURI for further details.
+      this.window.gBrowser.userTypedValue = null;
+      this.window.URLBarSetURI(null, true);
     }
-    let principal = Services.droppedLinkHandler.getTriggeringPrincipal(event);
-    this.value = droppedItem instanceof URL ? droppedItem.href : droppedItem;
-    this.window.SetPageProxyState("invalid");
-    this.focus();
-    this.handleCommand(null, undefined, undefined, principal);
-    // For safety reasons, in the drop case we don't want to immediately show
-    // the the dropped value, instead we want to keep showing the current page
-    // url until an onLocationChange happens.
-    // See the handling in URLBarSetURI for further details.
-    this.window.gBrowser.userTypedValue = null;
-    this.window.URLBarSetURI(null, true);
   }
 }
 

@@ -172,6 +172,7 @@ class nsFrame : public nsBox {
   const nsFrameList& GetChildList(ChildListID aListID) const override;
   void GetChildLists(nsTArray<ChildList>* aLists) const override;
 
+  MOZ_CAN_RUN_SCRIPT_BOUNDARY
   nsresult HandleEvent(nsPresContext* aPresContext,
                        mozilla::WidgetGUIEvent* aEvent,
                        nsEventStatus* aEventStatus) override;
@@ -273,7 +274,7 @@ class nsFrame : public nsBox {
   IntrinsicISizeOffsetData IntrinsicISizeOffsets(
       nscoord aPercentageBasis = NS_UNCONSTRAINEDSIZE) override;
   mozilla::IntrinsicSize GetIntrinsicSize() override;
-  nsSize GetIntrinsicRatio() override;
+  mozilla::AspectRatio GetIntrinsicRatio() override;
 
   mozilla::LogicalSize ComputeSize(
       gfxContext* aRenderingContext, mozilla::WritingMode aWM,
@@ -287,7 +288,8 @@ class nsFrame : public nsBox {
    */
   mozilla::LogicalSize ComputeSizeWithIntrinsicDimensions(
       gfxContext* aRenderingContext, mozilla::WritingMode aWM,
-      const mozilla::IntrinsicSize& aIntrinsicSize, nsSize aIntrinsicRatio,
+      const mozilla::IntrinsicSize& aIntrinsicSize,
+      const mozilla::AspectRatio& aIntrinsicRatio,
       const mozilla::LogicalSize& aCBSize, const mozilla::LogicalSize& aMargin,
       const mozilla::LogicalSize& aBorder, const mozilla::LogicalSize& aPadding,
       ComputeSizeFlags aFlags);
@@ -398,6 +400,7 @@ class nsFrame : public nsBox {
                                  nsEventStatus* aEventStatus,
                                  bool aControlHeld);
 
+  MOZ_CAN_RUN_SCRIPT
   NS_IMETHOD HandleDrag(nsPresContext* aPresContext,
                         mozilla::WidgetGUIEvent* aEvent,
                         nsEventStatus* aEventStatus);
@@ -526,6 +529,32 @@ class nsFrame : public nsBox {
    */
   void DisplayOutline(nsDisplayListBuilder* aBuilder,
                       const nsDisplayListSet& aLists);
+
+  /**
+   * Add a display item for CSS inset box shadows. Does not check visibility.
+   */
+  void DisplayInsetBoxShadowUnconditional(nsDisplayListBuilder* aBuilder,
+                                          nsDisplayList* aList);
+
+  /**
+   * Add a display item for CSS inset box shadow, after calling
+   * IsVisibleForPainting to confirm we are visible.
+   */
+  void DisplayInsetBoxShadow(nsDisplayListBuilder* aBuilder,
+                             nsDisplayList* aList);
+
+  /**
+   * Add a display item for CSS outset box shadows. Does not check visibility.
+   */
+  void DisplayOutsetBoxShadowUnconditional(nsDisplayListBuilder* aBuilder,
+                                           nsDisplayList* aList);
+
+  /**
+   * Add a display item for CSS outset box shadow, after calling
+   * IsVisibleForPainting to confirm we are visible.
+   */
+  void DisplayOutsetBoxShadow(nsDisplayListBuilder* aBuilder,
+                              nsDisplayList* aList);
 
   /**
    * Adjust the given parent frame to the right ComputedStyle parent frame for

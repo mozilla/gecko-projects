@@ -30,7 +30,7 @@ import { getThreadContext } from "../selectors";
 export type NavigateContext = {|
   // Counter reflecting how many times the debugger has navigated to a new page
   // and reset most of its state.
-  +navigateCounter: number
+  +navigateCounter: number,
 |};
 
 // A ThreadContext is invalidated if the target navigates, or if the current
@@ -47,16 +47,18 @@ export type ThreadContext = {|
 
   // Whether the current thread is paused. This is determined from the other
   // Context properties and is here for convenient access.
-  +isPaused: boolean
+  +isPaused: boolean,
 |};
 
 export type Context = NavigateContext | ThreadContext;
+
+export class ContextError extends Error {}
 
 export function validateNavigateContext(state: State, cx: Context) {
   const newcx = getThreadContext(state);
 
   if (newcx.navigateCounter != cx.navigateCounter) {
-    throw new Error("Page has navigated");
+    throw new ContextError("Page has navigated");
   }
 }
 
@@ -64,11 +66,11 @@ function validateThreadContext(state: State, cx: ThreadContext) {
   const newcx = getThreadContext(state);
 
   if (cx.thread != newcx.thread) {
-    throw new Error("Current thread has changed");
+    throw new ContextError("Current thread has changed");
   }
 
   if (cx.pauseCounter != newcx.pauseCounter) {
-    throw new Error("Current thread has paused or resumed");
+    throw new ContextError("Current thread has paused or resumed");
   }
 }
 

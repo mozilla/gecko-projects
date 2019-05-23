@@ -140,8 +140,10 @@ class MochitestRunner(MozbuildObject):
             # refresh the page to pick up modifications. Therefore leave the browser
             # open if only running a single mochitest-plain test. This behaviour can
             # be overridden by passing in --keep-open=false.
-            flavor = getattr(options, 'flavor', 'plain')
-            if len(tests) == 1 and options.keep_open is None and flavor == 'plain':
+            if (len(tests) == 1
+                    and options.keep_open is None
+                    and not options.headless
+                    and getattr(options, 'flavor', 'plain') == 'plain'):
                 options.keep_open = True
 
         # We need this to enable colorization of output.
@@ -574,7 +576,7 @@ class RobocopCommands(MachCommandBase):
             kwargs['adbPath'] = get_adb_path(self)
 
         mochitest = self._spawn(MochitestRunner)
-        return mochitest.run_robocop_test(self._mach_context, tests, 'robocop', **kwargs)
+        return mochitest.run_robocop_test(self._mach_context, tests, **kwargs)
 
 
 # NOTE python/mach/mach/commands/commandinfo.py references this function

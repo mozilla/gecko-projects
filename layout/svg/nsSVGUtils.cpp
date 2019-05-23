@@ -457,10 +457,10 @@ void nsSVGUtils::DetermineMaskUsage(nsIFrame* aFrame, bool aHandleOpacity,
   // XXX check return value?
   SVGObserverUtils::GetAndObserveClipPath(firstFrame, &clipPathFrame);
   MOZ_ASSERT(!clipPathFrame ||
-             svgReset->mClipPath.GetType() == StyleShapeSourceType::URL);
+             svgReset->mClipPath.GetType() == StyleShapeSourceType::Image);
 
   switch (svgReset->mClipPath.GetType()) {
-    case StyleShapeSourceType::URL:
+    case StyleShapeSourceType::Image:
       if (clipPathFrame) {
         if (clipPathFrame->IsTrivial()) {
           aUsage.shouldApplyClipPath = true;
@@ -1724,12 +1724,9 @@ gfxMatrix nsSVGUtils::GetTransformMatrixInUserSpace(const nsIFrame* aFrame) {
 
   if (properties.HasTransform()) {
     trans = nsStyleTransformMatrix::ReadTransforms(
-        properties.mIndividualTransformList
-            ? properties.mIndividualTransformList->mHead
-            : nullptr,
-        properties.mMotion,
-        properties.mTransformList ? properties.mTransformList->mHead : nullptr,
-        refBox, AppUnitsPerCSSPixel());
+        properties.mTranslate, properties.mRotate, properties.mScale,
+        properties.mMotion, properties.mTransform, refBox,
+        AppUnitsPerCSSPixel());
   } else {
     trans = Matrix4x4::From2D(svgTransform);
   }

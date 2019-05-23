@@ -1411,7 +1411,9 @@ var PanelView = class extends AssociatedToNode {
   _isNavigableWithTabOnly(element) {
     let tag = element.localName;
     return tag == "menulist" || tag == "textbox" || tag == "input"
-           || tag == "textarea";
+           || tag == "textarea"
+           // Allow tab to reach embedded documents in extension panels.
+           || tag == "browser";
   }
 
   /**
@@ -1565,6 +1567,24 @@ var PanelView = class extends AssociatedToNode {
       return;
     }
 
+    let focus = this.document.activeElement;
+    // Make sure the focus is actually inside the panel. (It might not be if
+    // the panel was opened with the mouse.) If it isn't, we don't care
+    // about it for our purposes.
+    // We use Node.compareDocumentPosition because Node.contains doesn't
+    // behave as expected for anonymous content; e.g. the input inside a
+    // textbox.
+    if (focus && !(this.node.compareDocumentPosition(focus)
+                   & Node.DOCUMENT_POSITION_CONTAINED_BY)) {
+      focus = null;
+    }
+
+    // Extension panels contain embedded documents. We can't manage
+    // keyboard navigation within those.
+    if (focus && focus.tagName == "browser") {
+      return;
+    }
+
     let stop = () => {
       event.stopPropagation();
       event.preventDefault();
@@ -1578,20 +1598,24 @@ var PanelView = class extends AssociatedToNode {
       // We use the real focus rather than this.selectedElement because focus
       // might have been moved without keyboard navigation (e.g. mouse click)
       // and this.selectedElement is only updated for keyboard navigation.
-      let focus = this.document.activeElement;
+      return focus && this._isNavigableWithTabOnly(focus);
+    };
+
+    // If a context menu is open, we must let it handle all keys.
+    // Normally, this just happens, but because we have a capturing window
+    // keydown listener, our listener takes precedence.
+    // Again, we only want to do this check on demand for performance.
+    let isContextMenuOpen = () => {
       if (!focus) {
         return false;
       }
-      // Make sure the focus is actually inside the panel.
-      // (It might not be if the panel was opened with the mouse.)
-      // We use Node.compareDocumentPosition because Node.contains doesn't
-      // behave as expected for anonymous content; e.g. the input inside a
-      // textbox.
-      if (!(this.node.compareDocumentPosition(focus)
-            & Node.DOCUMENT_POSITION_CONTAINED_BY)) {
+      let contextNode = focus.closest("[context]");
+      if (!contextNode) {
         return false;
       }
-      return this._isNavigableWithTabOnly(focus);
+      let context = contextNode.getAttribute("context");
+      let popup = this.document.getElementById(context);
+      return popup && popup.state == "open";
     };
 
     let keyCode = event.code;
@@ -1603,6 +1627,9 @@ var PanelView = class extends AssociatedToNode {
         }
         // Fall-through...
       case "Tab": {
+        if (isContextMenuOpen()) {
+          break;
+        }
         stop();
         let isDown = (keyCode == "ArrowDown") ||
                      (keyCode == "Tab" && !event.shiftKey);
@@ -1611,14 +1638,14 @@ var PanelView = class extends AssociatedToNode {
         break;
       }
       case "Home":
-        if (tabOnly()) {
+        if (tabOnly() || isContextMenuOpen()) {
           break;
         }
         stop();
         this.focusFirstNavigableElement(true);
         break;
       case "End":
-        if (tabOnly()) {
+        if (tabOnly() || isContextMenuOpen()) {
           break;
         }
         stop();
@@ -1626,7 +1653,7 @@ var PanelView = class extends AssociatedToNode {
         break;
       case "ArrowLeft":
       case "ArrowRight": {
-        if (tabOnly()) {
+        if (tabOnly() || isContextMenuOpen()) {
           break;
         }
         stop();
@@ -1646,7 +1673,7 @@ var PanelView = class extends AssociatedToNode {
       case "Space":
       case "NumpadEnter":
       case "Enter": {
-        if (tabOnly()) {
+        if (tabOnly() || isContextMenuOpen()) {
           break;
         }
         let button = this.selectedElement;
@@ -1657,12 +1684,17 @@ var PanelView = class extends AssociatedToNode {
         this._doingKeyboardActivation = true;
         // Unfortunately, 'tabindex' doesn't execute the default action, so
         // we explicitly do this here.
-        // We are sending a command event and then a click event.
-        // This is done in order to mimic a "real" mouse click event.
-        // The command event executes the action, then the click event closes the menu.
+        // We are sending a command event, a mousedown event and then a click
+        // event. This is done in order to mimic a "real" mouse click event.
+        // Normally, the command event executes the action, then the click event
+        // closes the menu. However, in some cases (e.g. the Library button),
+        // there is no command event handler and the mousedown event executes the
+        // action instead.
         button.doCommand();
-        let clickEvent = new event.target.ownerGlobal.MouseEvent("click", {"bubbles": true});
-        button.dispatchEvent(clickEvent);
+        let dispEvent = new event.target.ownerGlobal.MouseEvent("mousedown", {"bubbles": true});
+        button.dispatchEvent(dispEvent);
+        dispEvent = new event.target.ownerGlobal.MouseEvent("click", {"bubbles": true});
+        button.dispatchEvent(dispEvent);
         this._doingKeyboardActivation = false;
         break;
       }

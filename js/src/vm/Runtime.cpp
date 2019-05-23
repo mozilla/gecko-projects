@@ -122,6 +122,7 @@ JSRuntime::JSRuntime(JSRuntime* parentRuntime)
       heapState_(JS::HeapState::Idle),
       numRealms(0),
       numDebuggeeRealms_(0),
+      numDebuggeeRealmsObservingCoverage_(0),
       localeCallbacks(nullptr),
       defaultLocale(nullptr),
       profilingScripts(false),
@@ -190,6 +191,7 @@ JSRuntime::~JSRuntime() {
 
   MOZ_ASSERT(numRealms == 0);
   MOZ_ASSERT(numDebuggeeRealms_ == 0);
+  MOZ_ASSERT(numDebuggeeRealmsObservingCoverage_ == 0);
 }
 
 bool JSRuntime::init(JSContext* cx, uint32_t maxbytes,
@@ -635,9 +637,15 @@ void JSRuntime::addUnhandledRejectedPromise(JSContext* cx,
     return;
   }
 
+  bool mutedErrors = false;
+  if (JSScript* script = cx->currentScript()) {
+    mutedErrors = script->mutedErrors();
+  }
+
   void* data = cx->promiseRejectionTrackerCallbackData;
   cx->promiseRejectionTrackerCallback(
-      cx, promise, JS::PromiseRejectionHandlingState::Unhandled, data);
+      cx, mutedErrors, promise, JS::PromiseRejectionHandlingState::Unhandled,
+      data);
 }
 
 void JSRuntime::removeUnhandledRejectedPromise(JSContext* cx,
@@ -647,9 +655,15 @@ void JSRuntime::removeUnhandledRejectedPromise(JSContext* cx,
     return;
   }
 
+  bool mutedErrors = false;
+  if (JSScript* script = cx->currentScript()) {
+    mutedErrors = script->mutedErrors();
+  }
+
   void* data = cx->promiseRejectionTrackerCallbackData;
   cx->promiseRejectionTrackerCallback(
-      cx, promise, JS::PromiseRejectionHandlingState::Handled, data);
+      cx, mutedErrors, promise, JS::PromiseRejectionHandlingState::Handled,
+      data);
 }
 
 mozilla::non_crypto::XorShift128PlusRNG& JSRuntime::randomKeyGenerator() {
@@ -770,6 +784,10 @@ void JSRuntime::clearUsedByHelperThread(Zone* zone) {
 }
 
 void JSRuntime::incrementNumDebuggeeRealms() {
+  if (numDebuggeeRealms_ == 0) {
+    jitRuntime()->baselineInterpreter().toggleDebuggerInstrumentation(true);
+  }
+
   numDebuggeeRealms_++;
   MOZ_ASSERT(numDebuggeeRealms_ <= numRealms);
 }
@@ -777,6 +795,30 @@ void JSRuntime::incrementNumDebuggeeRealms() {
 void JSRuntime::decrementNumDebuggeeRealms() {
   MOZ_ASSERT(numDebuggeeRealms_ > 0);
   numDebuggeeRealms_--;
+
+  if (numDebuggeeRealms_ == 0) {
+    jitRuntime()->baselineInterpreter().toggleDebuggerInstrumentation(false);
+  }
+}
+
+void JSRuntime::incrementNumDebuggeeRealmsObservingCoverage() {
+  if (numDebuggeeRealmsObservingCoverage_ == 0) {
+    jit::BaselineInterpreter& interp = jitRuntime()->baselineInterpreter();
+    interp.toggleCodeCoverageInstrumentation(true);
+  }
+
+  numDebuggeeRealmsObservingCoverage_++;
+  MOZ_ASSERT(numDebuggeeRealmsObservingCoverage_ <= numRealms);
+}
+
+void JSRuntime::decrementNumDebuggeeRealmsObservingCoverage() {
+  MOZ_ASSERT(numDebuggeeRealmsObservingCoverage_ > 0);
+  numDebuggeeRealmsObservingCoverage_--;
+
+  if (numDebuggeeRealmsObservingCoverage_ == 0) {
+    jit::BaselineInterpreter& interp = jitRuntime()->baselineInterpreter();
+    interp.toggleCodeCoverageInstrumentation(false);
+  }
 }
 
 bool js::CurrentThreadCanAccessRuntime(const JSRuntime* rt) {

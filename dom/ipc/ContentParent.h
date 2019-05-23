@@ -1183,6 +1183,8 @@ class ContentParent final : public PContentParent,
       nsTArray<ChildEventData>&& events);
   mozilla::ipc::IPCResult RecvRecordDiscardedData(
       const DiscardedData& aDiscardedData);
+  mozilla::ipc::IPCResult RecvRecordOrigin(const uint32_t& aMetricId,
+                                           const nsCString& aOrigin);
 
   mozilla::ipc::IPCResult RecvBHRThreadHang(const HangDetails& aHangDetails);
 
@@ -1221,6 +1223,8 @@ class ContentParent final : public PContentParent,
 
   void OnBrowsingContextGroupSubscribe(BrowsingContextGroup* aGroup);
   void OnBrowsingContextGroupUnsubscribe(BrowsingContextGroup* aGroup);
+
+  void UpdateNetworkLinkType();
 
  private:
   // Released in ActorDestroy; deliberately not exposed to the CC.

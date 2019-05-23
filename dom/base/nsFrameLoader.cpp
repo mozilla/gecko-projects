@@ -73,6 +73,7 @@
 #include "BrowserParent.h"
 #include "mozilla/AsyncEventDispatcher.h"
 #include "mozilla/BasePrincipal.h"
+#include "mozilla/ExpandedPrincipal.h"
 #include "mozilla/GuardObjects.h"
 #include "mozilla/HTMLEditor.h"
 #include "mozilla/NullPrincipal.h"
@@ -84,6 +85,7 @@
 #include "mozilla/dom/Element.h"
 #include "mozilla/dom/FrameLoaderBinding.h"
 #include "mozilla/dom/MozFrameLoaderOwnerBinding.h"
+#include "mozilla/dom/SessionStoreListener.h"
 #include "mozilla/gfx/CrossProcessPaint.h"
 #include "mozilla/jsipc/CrossProcessObjectWrappers.h"
 #include "mozilla/layout/RenderFrame.h"
@@ -363,7 +365,7 @@ nsFrameLoader* nsFrameLoader::Create(Element* aOwner, BrowsingContext* aOpener,
 
 /* static */
 nsFrameLoader* nsFrameLoader::Create(
-    mozilla::dom::Element* aOwner,
+    mozilla::dom::Element* aOwner, BrowsingContext* aPreservedBrowsingContext,
     const mozilla::dom::RemotenessOptions& aOptions) {
   NS_ENSURE_TRUE(aOwner, nullptr);
   // This version of Create is only called for Remoteness updates, so we can
@@ -380,7 +382,12 @@ nsFrameLoader* nsFrameLoader::Create(
   if (hasOpener) {
     opener = aOptions.mOpener.Value().Value().get();
   }
-  RefPtr<BrowsingContext> context = CreateBrowsingContext(aOwner, opener);
+  RefPtr<BrowsingContext> context;
+  if (aPreservedBrowsingContext) {
+    context = aPreservedBrowsingContext;
+  } else {
+    context = CreateBrowsingContext(aOwner, opener);
+  }
   NS_ENSURE_TRUE(context, nullptr);
   return new nsFrameLoader(aOwner, context, aOptions);
 }
@@ -399,10 +406,7 @@ void nsFrameLoader::LoadFrame(bool aOriginalSrc) {
   if (isSrcdoc) {
     src.AssignLiteral("about:srcdoc");
     principal = mOwnerContent->NodePrincipal();
-    // Currently the NodePrincipal holds the CSP for a document. After
-    // Bug 965637 we can query the CSP from mOwnerContent->OwnerDoc()
-    // instead of mOwnerContent->NodePrincipal().
-    mOwnerContent->NodePrincipal()->GetCsp(getter_AddRefs(csp));
+    csp = mOwnerContent->GetCsp();
   } else {
     GetURL(src, getter_AddRefs(principal), getter_AddRefs(csp));
 
@@ -419,10 +423,7 @@ void nsFrameLoader::LoadFrame(bool aOriginalSrc) {
       }
       src.AssignLiteral("about:blank");
       principal = mOwnerContent->NodePrincipal();
-      // Currently the NodePrincipal holds the CSP for a document. After
-      // Bug 965637 we can query the CSP from mOwnerContent->OwnerDoc()
-      // instead of mOwnerContent->NodePrincipal().
-      mOwnerContent->NodePrincipal()->GetCsp(getter_AddRefs(csp));
+      csp = mOwnerContent->GetCsp();
     }
   }
 
@@ -514,8 +515,7 @@ void nsFrameLoader::ResumeLoad(uint64_t aPendingSwitchID) {
   mURIToLoad = nullptr;
   mPendingSwitchID = aPendingSwitchID;
   mTriggeringPrincipal = mOwnerContent->NodePrincipal();
-  // NOTE: This can be gotten off of the document after bug 965637.
-  mOwnerContent->NodePrincipal()->GetCsp(getter_AddRefs(mCsp));
+  mCsp = mOwnerContent->GetCsp();
 
   nsresult rv = doc->InitializeFrameLoader(this);
   if (NS_FAILED(rv)) {
@@ -621,18 +621,14 @@ nsresult nsFrameLoader::ReallyStartLoadingInternal() {
   }
 
   // If we have an explicit CSP, we set it. If not, we only query it from
-  // the NodePrincipal in case there was no explicit triggeringPrincipal.
+  // the document in case there was no explicit triggeringPrincipal.
   // Otherwise it's possible that the original triggeringPrincipal did not
   // have a CSP which causes the CSP on the Principal and explicit CSP
   // to be out of sync.
   if (mCsp) {
     loadState->SetCsp(mCsp);
   } else if (!mTriggeringPrincipal) {
-    // Currently the NodePrincipal holds the CSP for a document. After
-    // Bug 965637 we can query the CSP from mOwnerContent->OwnerDoc()
-    // instead of mOwnerContent->NodePrincipal().
-    nsCOMPtr<nsIContentSecurityPolicy> csp;
-    mOwnerContent->NodePrincipal()->GetCsp(getter_AddRefs(csp));
+    nsCOMPtr<nsIContentSecurityPolicy> csp = mOwnerContent->GetCsp();
     loadState->SetCsp(csp);
   }
 
@@ -1792,6 +1788,9 @@ void nsFrameLoader::StartDestroy() {
   }
   mDestroyCalled = true;
 
+  // request a tabStateFlush before tab is closed
+  RequestTabStateFlush(/*flushId*/ 0, /*isFinal*/ true);
+
   // After this point, we return an error when trying to send a message using
   // the message manager on the frame.
   if (mMessageManager) {
@@ -1925,6 +1924,11 @@ void nsFrameLoader::DestroyDocShell() {
   // Fire the "unload" event if we're in-process.
   if (mChildMessageManager) {
     mChildMessageManager->FireUnloadEvent();
+  }
+
+  if (mSessionStoreListener) {
+    mSessionStoreListener->RemoveListeners();
+    mSessionStoreListener = nullptr;
   }
 
   // Destroy the docshell.
@@ -2218,8 +2222,6 @@ nsresult nsFrameLoader::MaybeCreateDocShell() {
 
     // So far we want to make sure Inherit doesn't override any other origin
     // attribute than firstPartyDomain.
-    MOZ_ASSERT(attrs.mAppId == oa.mAppId,
-               "docshell and document should have the same appId attribute.");
     MOZ_ASSERT(
         attrs.mUserContextId == oa.mUserContextId,
         "docshell and document should have the same userContextId attribute.");
@@ -2234,7 +2236,6 @@ nsresult nsFrameLoader::MaybeCreateDocShell() {
   }
 
   if (OwnerIsMozBrowserFrame()) {
-    attrs.mAppId = nsIScriptSecurityManager::NO_APP_ID;
     attrs.mInIsolatedMozBrowser = OwnerIsIsolatedMozBrowserFrame();
     docShell->SetFrameType(nsIDocShell::FRAME_TYPE_BROWSER);
   } else {
@@ -2335,16 +2336,12 @@ void nsFrameLoader::GetURL(nsString& aURI, nsIPrincipal** aTriggeringPrincipal,
                            nsIContentSecurityPolicy** aCsp) {
   aURI.Truncate();
   // Within this function we default to using the NodePrincipal as the
-  // triggeringPrincipal and the CSP of the document, currently stored
-  // on the NodePrincipal. After Bug 965637 we can query the CSP from
-  // mOwnerContent->OwnerDoc() instead of mOwnerContent->NodePrincipal().
+  // triggeringPrincipal and the CSP of the document.
   // Expanded Principals however override the CSP of the document, hence
   // if frame->GetSrcTriggeringPrincipal() returns a valid principal, we
-  // have to query the CSP from that Principal. Note that even after
-  // Bug 965637, Expanded Principals will hold their own CSP.
+  // have to query the CSP from that Principal.
   nsCOMPtr<nsIPrincipal> triggeringPrincipal = mOwnerContent->NodePrincipal();
-  nsCOMPtr<nsIContentSecurityPolicy> csp;
-  mOwnerContent->NodePrincipal()->GetCsp(getter_AddRefs(csp));
+  nsCOMPtr<nsIContentSecurityPolicy> csp = mOwnerContent->GetCsp();
 
   if (mOwnerContent->IsHTMLElement(nsGkAtoms::object)) {
     mOwnerContent->GetAttr(kNameSpaceID_None, nsGkAtoms::data, aURI);
@@ -2355,7 +2352,11 @@ void nsFrameLoader::GetURL(nsString& aURI, nsIPrincipal** aTriggeringPrincipal,
       nsCOMPtr<nsIPrincipal> srcPrincipal = frame->GetSrcTriggeringPrincipal();
       if (srcPrincipal) {
         triggeringPrincipal = srcPrincipal;
-        triggeringPrincipal->GetCsp(getter_AddRefs(csp));
+        nsCOMPtr<nsIExpandedPrincipal> ep =
+            do_QueryInterface(triggeringPrincipal);
+        if (ep) {
+          csp = ep->GetCsp();
+        }
       }
     }
   }
@@ -2513,6 +2514,16 @@ nsresult nsFrameLoader::UpdatePositionAndSize(nsSubDocumentFrame* aIFrame) {
   }
   UpdateBaseWindowPositionAndSize(aIFrame);
   return NS_OK;
+}
+
+void nsFrameLoader::SendIsUnderHiddenEmbedderElement(
+    bool aIsUnderHiddenEmbedderElement) {
+  MOZ_ASSERT(IsRemoteFrame());
+
+  if (mBrowserBridgeChild) {
+    mBrowserBridgeChild->SetIsUnderHiddenEmbedderElement(
+        aIsUnderHiddenEmbedderElement);
+  }
 }
 
 void nsFrameLoader::UpdateBaseWindowPositionAndSize(
@@ -3011,6 +3022,13 @@ nsresult nsFrameLoader::EnsureMessageManager() {
     mChildMessageManager = InProcessBrowserChildMessageManager::Create(
         GetDocShell(), mOwnerContent, mMessageManager);
     NS_ENSURE_TRUE(mChildMessageManager, NS_ERROR_UNEXPECTED);
+
+    // Set up a TabListener for sessionStore
+    if (XRE_IsParentProcess()) {
+      mSessionStoreListener = new TabListener(GetDocShell(), mOwnerContent);
+      rv = mSessionStoreListener->Init();
+      NS_ENSURE_SUCCESS(rv, rv);
+    }
   }
   return NS_OK;
 }
@@ -3155,6 +3173,22 @@ void nsFrameLoader::RequestUpdatePosition(ErrorResult& aRv) {
       aRv.Throw(rv);
     }
   }
+}
+
+bool nsFrameLoader::RequestTabStateFlush(uint32_t aFlushId, bool aIsFinal) {
+  if (mSessionStoreListener) {
+    mSessionStoreListener->ForceFlushFromParent(aFlushId, aIsFinal);
+    // No async ipc call is involved in parent only case
+    return false;
+  }
+
+  // If remote browsing (e10s), handle this with the BrowserParent.
+  if (mBrowserParent) {
+    Unused << mBrowserParent->SendFlushTabState(aFlushId, aIsFinal);
+    return true;
+  }
+
+  return false;
 }
 
 void nsFrameLoader::Print(uint64_t aOuterWindowID,
@@ -3379,8 +3413,6 @@ nsresult nsFrameLoader::GetNewTabContext(MutableTabContext* aTabContext,
   attrs.mInIsolatedMozBrowser = OwnerIsIsolatedMozBrowserFrame();
   nsresult rv;
 
-  attrs.mAppId = nsIScriptSecurityManager::NO_APP_ID;
-
   // set the userContextId on the attrs before we pass them into
   // the tab context
   rv = PopulateUserContextIdFromAttribute(attrs);
@@ -3455,4 +3487,23 @@ JSObject* nsFrameLoader::WrapObject(JSContext* cx,
   JS::RootedObject result(cx);
   FrameLoader_Binding::Wrap(cx, this, this, aGivenProto, &result);
   return result;
+}
+
+void nsFrameLoader::SkipBrowsingContextDetach() {
+  if (IsRemoteFrame()) {
+    // OOP Browser - Go directly over Browser Parent
+    if (mBrowserParent) {
+      Unused << mBrowserParent->SendSkipBrowsingContextDetach();
+    }
+    // OOP IFrame - Through Browser Bridge Parent, set on browser child
+    else if (mBrowserBridgeChild) {
+      Unused << mBrowserBridgeChild->SendSkipBrowsingContextDetach();
+    }
+    return;
+  }
+
+  // In process
+  RefPtr<nsDocShell> docshell = GetDocShell();
+  MOZ_ASSERT(docshell);
+  docshell->SkipBrowsingContextDetach();
 }

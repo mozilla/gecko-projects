@@ -652,12 +652,17 @@ class GTestCommands(MachCommandBase):
             self._run_make(directory='browser/app', target='repackage',
                            ensure_exit_code=True)
 
+        cwd = os.path.join(self.topobjdir, '_tests', 'gtest')
+
+        if not os.path.isdir(cwd):
+            os.makedirs(cwd)
+
         if conditions.is_android(self):
             if jobs != 1:
                 print("--jobs is not supported on Android and will be ignored")
             if debug or debugger or debugger_args:
                 print("--debug options are not supported on Android and will be ignored")
-            return self.android_gtest(shuffle, gtest_filter,
+            return self.android_gtest(cwd, shuffle, gtest_filter,
                                       package, adb_path, device_serial, remote_test_root, libxul_path)
 
         if package or adb_path or device_serial or remote_test_root or libxul_path:
@@ -672,11 +677,6 @@ class GTestCommands(MachCommandBase):
 
         if debug or debugger or debugger_args:
             args = self.prepend_debugger_args(args, debugger, debugger_args)
-
-        cwd = os.path.join(self.topobjdir, '_tests', 'gtest')
-
-        if not os.path.isdir(cwd):
-            os.makedirs(cwd)
 
         # Use GTest environment variable to control test execution
         # For details see:
@@ -739,7 +739,7 @@ class GTestCommands(MachCommandBase):
 
         return exit_code
 
-    def android_gtest(self, shuffle, gtest_filter,
+    def android_gtest(self, test_dir, shuffle, gtest_filter,
                       package, adb_path, device_serial, remote_test_root, libxul_path):
         # setup logging for mozrunner
         from mozlog.commandline import setup_logging
@@ -764,8 +764,9 @@ class GTestCommands(MachCommandBase):
                             ('.py', 'r', imp.PY_SOURCE))
         import remotegtests
         tester = remotegtests.RemoteGTests()
-        tester.run_gtest(shuffle, gtest_filter, package, adb_path, device_serial,
+        tester.run_gtest(test_dir, shuffle, gtest_filter, package, adb_path, device_serial,
                          remote_test_root, libxul_path, None)
+        tester.cleanup()
 
         return 0
 
@@ -879,14 +880,13 @@ class Package(MachCommandBase):
 class Install(MachCommandBase):
     """Install a package."""
 
-    @Command('install', category='post-build',
-        description='Install the package on the machine, or on a device.')
+    @Command('install-desktop', category='post-build',
+        conditional_name='install',
+        conditions=[conditions.is_not_android],
+        description='Install the package on the machine.')
     @CommandArgument('--verbose', '-v', action='store_true',
         help='Print verbose output when installing to an Android emulator.')
     def install(self, verbose=False):
-        if conditions.is_android(self):
-            from mozrunner.devices.android_device import verify_android_device
-            verify_android_device(self, verbose=verbose)
         ret = self._run_make(directory=".", target='install', ensure_exit_code=False)
         if ret == 0:
             self.notify('Install complete')
@@ -908,7 +908,9 @@ class RunProgram(MachCommandBase):
 
     prog_group = 'the compiled program'
 
-    @Command('run', category='post-build',
+    @Command('run-desktop', category='post-build',
+        conditional_name='run',
+        conditions=[conditions.is_not_android],
         description='Run the compiled program, possibly under a debugger or DMD.')
     @CommandArgument('params', nargs='...', group=prog_group,
         help='Command-line arguments to be passed through to the program. Not specifying a --profile or -P option will result in a temporary profile being used.')
@@ -955,89 +957,76 @@ class RunProgram(MachCommandBase):
         enable_crash_reporter, setpref, temp_profile, macos_open, debug,
         debugger, debugger_args, dmd, mode, stacks, show_dump_stats):
 
-        if conditions.is_android(self):
-            # Running Firefox for Android is completely different
-            if dmd:
-                print("DMD is not supported for Firefox for Android")
+        from mozprofile import Profile, Preferences
+
+        try:
+            binpath = self.get_binary_path('app')
+        except Exception as e:
+            print("It looks like your program isn't built.",
+                "You can run |mach build| to build it.")
+            print(e)
+            return 1
+
+        args = []
+        if macos_open:
+            if debug:
+                print("The browser can not be launched in the debugger "
+                    "when using the macOS open command.")
                 return 1
-            from mozrunner.devices.android_device import verify_android_device, run_firefox_for_android
-            if not (debug or debugger or debugger_args):
-                verify_android_device(self, install=True)
-                return run_firefox_for_android(self, params)
-            verify_android_device(self, install=True, debugger=True)
-            args = ['']
-
-        else:
-            from mozprofile import Profile, Preferences
-
             try:
-                binpath = self.get_binary_path('app')
+                m = re.search(r'^.+\.app', binpath)
+                apppath = m.group(0)
+                args = ['open', apppath, '--args']
             except Exception as e:
-                print("It looks like your program isn't built.",
-                    "You can run |mach build| to build it.")
+                print("Couldn't get the .app path from the binary path. "
+                    "The macOS open option can only be used on macOS")
                 print(e)
                 return 1
+        else:
+            args = [binpath]
 
-            args = []
-            if macos_open:
-                if debug:
-                    print("The browser can not be launched in the debugger "
-                        "when using the macOS open command.")
-                    return 1
-                try:
-                    m = re.search(r'^.+\.app', binpath)
-                    apppath = m.group(0)
-                    args = ['open', apppath, '--args']
-                except Exception as e:
-                    print("Couldn't get the .app path from the binary path. "
-                        "The macOS open option can only be used on macOS")
-                    print(e)
-                    return 1
+        if params:
+            args.extend(params)
+
+        if not remote:
+            args.append('-no-remote')
+
+        if not background and sys.platform == 'darwin':
+            args.append('-foreground')
+
+        if sys.platform.startswith('win') and \
+           'MOZ_LAUNCHER_PROCESS' in self.defines:
+            args.append('-wait-for-browser')
+
+        no_profile_option_given = \
+            all(p not in params for p in ['-profile', '--profile', '-P'])
+        if no_profile_option_given and not noprofile:
+            prefs = {
+               'browser.aboutConfig.showWarning': False,
+               'browser.shell.checkDefaultBrowser': False,
+               'general.warnOnAboutConfig': False,
+            }
+            prefs.update(self._mach_context.settings.runprefs)
+            prefs.update([p.split('=', 1) for p in setpref])
+            for pref in prefs:
+                prefs[pref] = Preferences.cast(prefs[pref])
+
+            tmpdir = os.path.join(self.topobjdir, 'tmp')
+            if not os.path.exists(tmpdir):
+                os.makedirs(tmpdir)
+
+            if (temp_profile):
+                path = tempfile.mkdtemp(dir=tmpdir, prefix='profile-')
             else:
-                args = [binpath]
+                path = os.path.join(tmpdir, 'profile-default')
 
-            if params:
-                args.extend(params)
+            profile = Profile(path, preferences=prefs)
+            args.append('-profile')
+            args.append(profile.profile)
 
-            if not remote:
-                args.append('-no-remote')
-
-            if not background and sys.platform == 'darwin':
-                args.append('-foreground')
-
-            if sys.platform.startswith('win') and \
-               'MOZ_LAUNCHER_PROCESS' in self.defines:
-                args.append('-wait-for-browser')
-
-            no_profile_option_given = \
-                all(p not in params for p in ['-profile', '--profile', '-P'])
-            if no_profile_option_given and not noprofile:
-                prefs = {
-                   'browser.aboutConfig.showWarning': False,
-                   'browser.shell.checkDefaultBrowser': False,
-                   'general.warnOnAboutConfig': False,
-                }
-                prefs.update(self._mach_context.settings.runprefs)
-                prefs.update([p.split('=', 1) for p in setpref])
-                for pref in prefs:
-                    prefs[pref] = Preferences.cast(prefs[pref])
-
-                tmpdir = os.path.join(self.topobjdir, 'tmp')
-                if not os.path.exists(tmpdir):
-                    os.makedirs(tmpdir)
-
-                if (temp_profile):
-                    path = tempfile.mkdtemp(dir=tmpdir, prefix='profile-')
-                else:
-                    path = os.path.join(tmpdir, 'profile-default')
-
-                profile = Profile(path, preferences=prefs)
-                args.append('-profile')
-                args.append(profile.profile)
-
-            if not no_profile_option_given and setpref:
-                print("setpref is only supported if a profile is not specified")
-                return 1
+        if not no_profile_option_given and setpref:
+            print("setpref is only supported if a profile is not specified")
+            return 1
 
             if not no_profile_option_given:
                 # The profile name may be non-ascii, but come from the
@@ -1327,11 +1316,14 @@ class PackageFrontend(MachCommandBase):
         if conditions.is_git(self):
             git = self.substs['GIT']
 
+        # If we're building Thunderbird, we should be checking for comm-central artifacts.
+        topsrcdir = self.substs.get('commtopsrcdir', self.topsrcdir)
+
         from mozbuild.artifacts import Artifacts
         artifacts = Artifacts(tree, self.substs, self.defines, job,
                               log=self.log, cache_dir=cache_dir,
                               skip_cache=skip_cache, hg=hg, git=git,
-                              topsrcdir=self.topsrcdir,
+                              topsrcdir=topsrcdir,
                               download_tests=download_tests,
                               download_symbols=download_symbols,
                               download_host_bins=download_host_bins)
@@ -2416,7 +2408,7 @@ class StaticAnalysis(MachCommandBase):
             common_args += ['-config=%s' % yaml.dump(cfg)]
 
         if fix:
-            common_args += '-fix'
+            common_args += ['-fix']
 
         return [
             self.virtualenv_manager.python_path, self._run_clang_tidy_path, '-j',
@@ -3049,15 +3041,23 @@ class StaticAnalysis(MachCommandBase):
         if end is not None:
             clang_output = clang_output[:end.start()-1]
 
-        # Sort headers by positions
-        regex_header = re.compile(
-            r'(.+):(\d+):(\d+): (warning|error): ([^\[\]\n]+)(?: \[([\.\w-]+)\])?$', re.MULTILINE)
+        platform, _ = self.platform
+        # Starting with clang 8, for the diagnostic messages we have multiple `LF CR`
+        # in order to be compatiable with msvc compiler format, and for this
+        # we are not interested to match the end of line.
+        regex_string = r'(.+):(\d+):(\d+): (warning|error): ([^\[\]\n]+)(?: \[([\.\w-]+)\])'
 
+        # For non 'win' based platforms we also need the 'end of the line' regex
+        if platform not in ('win64', 'win32'):
+            regex_string += '?$'
+
+        regex_header = re.compile(regex_string, re.MULTILINE)
+
+        # Sort headers by positions
         headers = sorted(
             regex_header.finditer(clang_output),
             key=lambda h: h.start()
         )
-
         issues = []
         for _, header in enumerate(headers):
             header_group = header.groups()
@@ -3494,8 +3494,11 @@ class StaticAnalysis(MachCommandBase):
                         # here, we expect changes. if we are here, this means that
                         # there is a diff to show
                         if e.output:
-                            # Replace the temp path by its original path to display a valid patch
-                            patches[original_path] = e.output.replace(target_file, original_path)
+                            # Replace the temp path by the path relative to the repository to display a valid patch
+                            relative_path = os.path.relpath(original_path, self.topsrcdir)
+                            patch = e.output.replace(target_file, relative_path)
+                            patch = patch.replace(original_path, relative_path)
+                            patches[original_path] = patch
 
             if output_format == 'json':
                 output = json.dumps(patches, indent=4)

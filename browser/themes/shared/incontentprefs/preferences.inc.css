@@ -208,7 +208,8 @@ button > hbox > label {
 .androidIcon,
 .iOSIcon,
 #updateSettingCrossUserWarning,
-.extension-controlled > description {
+.extension-controlled > description,
+.info-panel > description {
   -moz-context-properties: fill;
   fill: currentColor;
 }
@@ -746,6 +747,10 @@ image.update-throbber {
   padding: 0px 8px;
   margin-inline-end: 16px;
   border-radius: 2px;
+}
+
+.policies-label {
+  margin-left: 2px;
 }
 
 .info-icon {

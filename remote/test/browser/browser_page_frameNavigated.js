@@ -3,37 +3,19 @@
 
 "use strict";
 
-/* global getCDP */
-
-const {RemoteAgent} = ChromeUtils.import("chrome://remote/content/RemoteAgent.jsm");
-const {RemoteAgentError} = ChromeUtils.import("chrome://remote/content/Error.jsm");
-
 // Test the Page navigation events
 
 const TEST_URI = "data:text/html;charset=utf-8,default-test-page";
 
-add_task(async function() {
-  try {
-    await testCDP();
-  } catch (e) {
-    // Display better error message with the server side stacktrace
-    // if an error happened on the server side:
-    if (e.response) {
-      throw RemoteAgentError.fromJSON(e.response);
-    } else {
-      throw e;
-    }
-  }
-});
+const promises = new Set();
+const resolutions = new Map();
 
-async function testCDP() {
+add_task(async function() {
   // Open a test page, to prevent debugging the random default page
   await BrowserTestUtils.openNewForegroundTab(gBrowser, TEST_URI);
 
   // Start the CDP server
-  RemoteAgent.init();
-  RemoteAgent.tabs.start();
-  RemoteAgent.listen(Services.io.newURI("http://localhost:9222"));
+  await RemoteAgent.listen(Services.io.newURI("http://localhost:9222"));
 
   // Retrieve the chrome-remote-interface library object
   const CDP = await getCDP();
@@ -53,25 +35,78 @@ async function testCDP() {
   await Page.enable();
   ok(true, "Page domain has been enabled");
 
-  const promises = [];
-  const resolutions = new Map();
+  const { frameTree } = await Page.getFrameTree();
+  ok(!!frameTree.frame, "getFrameTree exposes one frame");
+  is(frameTree.childFrames.length, 0, "getFrameTree reports no child frame");
+  ok(frameTree.frame.id, "getFrameTree's frame has an id");
+  is(frameTree.frame.url, TEST_URI, "getFrameTree's frame has the right url");
+
+  // Save the given `promise` resolution into the `promises` global Set
   function recordPromise(name, promise) {
     promise.then(event => {
       ok(true, `Received Page.${name}`);
       resolutions.set(name, event);
     });
-    promises.push(promise);
+    promises.add(promise);
   }
-  recordPromise("frameStoppedLoading", Page.frameStoppedLoading());
-  recordPromise("navigatedWithinDocument", Page.navigatedWithinDocument());
-  recordPromise("domContentEventFired", Page.domContentEventFired());
-  recordPromise("loadEventFired", Page.loadEventFired());
-  recordPromise("frameNavigated", Page.frameNavigated());
-  const url = "data:text/html;charset=utf-8,test-page";
+  // Record all Page events that we assert in this test
+  function recordPromises() {
+    recordPromise("frameStoppedLoading", Page.frameStoppedLoading());
+    recordPromise("navigatedWithinDocument", Page.navigatedWithinDocument());
+    recordPromise("domContentEventFired", Page.domContentEventFired());
+    recordPromise("loadEventFired", Page.loadEventFired());
+    recordPromise("frameNavigated", Page.frameNavigated());
+  }
+
+  info("Test Page.navigate");
+  recordPromises();
+
+  const url = "http://example.com/browser/remote/test/browser/doc_page_frameNavigated.html";
   const { frameId } = await Page.navigate({ url });
   ok(true, "A new page has been loaded");
-  ok(frameId, "Page.navigate returned a frameId");
 
+  ok(frameId, "Page.navigate returned a frameId");
+  is(frameId, frameTree.frame.id, "The Page.navigate's frameId is the same than " +
+    "getFrameTree's one");
+
+  await assertNavigationEvents({ url, frameId });
+
+  const randomId1 = await getTestTabRandomId();
+  ok(!!randomId1, "Test tab has a valid randomId");
+
+  info("Test Page.reload");
+  recordPromises();
+
+  await Page.reload();
+  ok(true, "The page has been reloaded");
+
+  await assertNavigationEvents({ url, frameId });
+
+  const randomId2 = await getTestTabRandomId();
+  ok(!!randomId2, "Test tab has a valid randomId");
+  isnot(randomId2, randomId1, "Test tab randomId has been updated after reload");
+
+  info("Test Page.navigate with the same URL still reloads the current page");
+  recordPromises();
+
+  await Page.navigate({ url });
+  ok(true, "The page has been reloaded");
+
+  await assertNavigationEvents({ url, frameId });
+
+  const randomId3 = await getTestTabRandomId();
+  ok(!!randomId3, "Test tab has a valid randomId");
+  isnot(randomId3, randomId2, "Test tab randomId has been updated after reload");
+
+  await client.close();
+  ok(true, "The client is closed");
+
+  BrowserTestUtils.removeTab(gBrowser.selectedTab);
+
+  await RemoteAgent.close();
+});
+
+async function assertNavigationEvents({ url, frameId }) {
   // Wait for all the promises to resolve
   await Promise.all(promises);
 
@@ -91,26 +126,24 @@ async function testCDP() {
   const frameNavigated = resolutions.get("frameNavigated");
   ok(!frameNavigated.frame.parentId, "frameNavigated is for the top level document and" +
     " has a null parentId");
-  is(frameNavigated.frame.id, frameId, "frameNavigated id is the same than the one " +
-    "returned by Page.navigate");
+  is(frameNavigated.frame.id, frameId, "frameNavigated id is the right one");
   is(frameNavigated.frame.name, undefined, "frameNavigated name isn't implemented yet");
-  is(frameNavigated.frame.url, url, "frameNavigated url is the same being given to " +
-    "Page.navigate");
+  is(frameNavigated.frame.url, url, "frameNavigated url is the right one");
 
   const navigatedWithinDocument = resolutions.get("navigatedWithinDocument");
   is(navigatedWithinDocument.frameId, frameId, "navigatedWithinDocument frameId is " +
-    "the same than the one returned by Page.navigate");
-  is(navigatedWithinDocument.url, url, "navigatedWithinDocument url is the same than " +
-    "the one being given to Page.navigate");
+    "the same one");
+  is(navigatedWithinDocument.url, url, "navigatedWithinDocument url is the same one");
 
   const frameStoppedLoading = resolutions.get("frameStoppedLoading");
-  is(frameStoppedLoading.frameId, frameId, "frameStoppedLoading frameId is the same " +
-    "than the one returned by Page.navigate");
+  is(frameStoppedLoading.frameId, frameId, "frameStoppedLoading frameId is the same one");
 
-  await client.close();
-  ok(true, "The client is closed");
+  promises.clear();
+  resolutions.clear();
+}
 
-  BrowserTestUtils.removeTab(gBrowser.selectedTab);
-
-  await RemoteAgent.close();
+async function getTestTabRandomId() {
+  return ContentTask.spawn(gBrowser.selectedBrowser, {}, function() {
+    return content.wrappedJSObject.randomId;
+  });
 }

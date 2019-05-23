@@ -1,3 +1,7 @@
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at http://mozilla.org/MPL/2.0/.
+---
 linux64/opt:
     description: "Linux64 Opt"
     index:
@@ -845,6 +849,8 @@ linux64-noopt/debug:
         platform: linux64-noopt/debug
         symbol: B
         tier: 2
+    attributes:
+        enable-full-crashsymbols: true
     worker-type: b-linux
     worker:
         max-run-time: 5400

@@ -102,6 +102,9 @@
 using namespace mozilla;
 using namespace mozilla::css;
 
+#define PREF_LEGACY_STYLESHEET_CUSTOMIZATION \
+  "toolkit.legacyUserProfileCustomizations.stylesheets"
+
 NS_IMPL_ISUPPORTS(nsLayoutStylesheetCache, nsIObserver, nsIMemoryReporter)
 
 nsresult nsLayoutStylesheetCache::Observe(nsISupports* aSubject,
@@ -169,16 +172,9 @@ void nsLayoutStylesheetCache::Shutdown() {
   sSharedMemory = nullptr;
 }
 
-/* static */
 void nsLayoutStylesheetCache::SetUserContentCSSURL(nsIURI* aURI) {
   MOZ_ASSERT(XRE_IsContentProcess(), "Only used in content processes.");
   gUserContentSheetURL = aURI;
-}
-
-/* static */
-nsIURI* nsLayoutStylesheetCache::GetUserContentCSSURL() {
-  MOZ_ASSERT(XRE_IsParentProcess(), "Only used in parent processes.");
-  return gUserContentSheetURL;
 }
 
 MOZ_DEFINE_MALLOC_SIZE_OF(LayoutStylesheetCacheMallocSizeOf)
@@ -242,7 +238,8 @@ nsLayoutStylesheetCache::nsLayoutStylesheetCache() : mUsedSharedMemory(0) {
     XULSheet();
   }
 
-  if (gUserContentSheetURL && XRE_IsContentProcess()) {
+  if (gUserContentSheetURL) {
+    MOZ_ASSERT(XRE_IsContentProcess(), "Only used in content processes.");
     LoadSheet(gUserContentSheetURL, &mUserContentSheet, eUserSheetFeatures,
               eLogToConsole);
     gUserContentSheetURL = nullptr;
@@ -429,30 +426,37 @@ void nsLayoutStylesheetCache::InitFromProfile() {
   nsCOMPtr<nsIFile> contentFile;
   nsCOMPtr<nsIFile> chromeFile;
 
-  NS_GetSpecialDirectory(NS_APP_USER_CHROME_DIR, getter_AddRefs(chromeFile));
-  if (!chromeFile) {
+  NS_GetSpecialDirectory(NS_APP_USER_CHROME_DIR, getter_AddRefs(contentFile));
+  if (!contentFile) {
     // if we don't have a profile yet, that's OK!
     return;
   }
 
-  chromeFile->Clone(getter_AddRefs(contentFile));
-  if (!contentFile) return;
+  contentFile->Clone(getter_AddRefs(chromeFile));
+  if (!chromeFile) return;
 
   contentFile->Append(NS_LITERAL_STRING("userContent.css"));
   chromeFile->Append(NS_LITERAL_STRING("userChrome.css"));
 
+  LoadSheetFile(contentFile, &mUserContentSheet, eUserSheetFeatures,
+                eLogToConsole);
   LoadSheetFile(chromeFile, &mUserChromeSheet, eUserSheetFeatures,
                 eLogToConsole);
 
   if (XRE_IsParentProcess()) {
-    bool exists = false;
-    contentFile->Exists(&exists);
-    if (exists) {
-      // We don't need to load this sheet in the parent process, but we do need
-      // the file URI so that we can send it down to the content processes.
-      nsCOMPtr<nsIURI> uri;
-      NS_NewFileURI(getter_AddRefs(uri), contentFile);
-      gUserContentSheetURL = uri;
+    if (mUserChromeSheet || mUserContentSheet) {
+      // Bug 1541233 aims to avoid stat'ing or loading userContent.css or
+      // userChrome.css during start-up by default. After that point,
+      // PREF_LEGACY_STYLESHEET_CUSTOMIZATION pref is how users can opt-in
+      // to continuing to use userChrome.css or userContent.css.
+      //
+      // Before bug 1541233 lands though, we'll ship a release which
+      // continues to look for those files on start-up and sets a pref.
+      // That way, in a subsequent release when loading those files is
+      // off by default, those users will still get their userChrome.css
+      // and userContent.css customizations without having to manually
+      // set the pref themselves.
+      Preferences::SetBool(PREF_LEGACY_STYLESHEET_CUSTOMIZATION, true);
     }
 
     // We're interested specifically in potential chrome customizations,

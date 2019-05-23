@@ -11,16 +11,21 @@
 #include "nsHyphenator.h"
 #include "mozilla/gfx/2D.h"
 #include "mozilla/intl/LineBreaker.h"
+#include "mozilla/intl/MozLocale.h"
 
 using mozilla::intl::LineBreaker;
+using mozilla::intl::Locale;
 
 nsLineBreaker::nsLineBreaker()
     : mCurrentWordLanguage(nullptr),
       mCurrentWordContainsMixedLang(false),
       mCurrentWordContainsComplexChar(false),
+      mScriptIsChineseOrJapanese(false),
       mAfterBreakableSpace(false),
       mBreakHere(false),
-      mWordBreak(LineBreaker::kWordBreak_Normal) {}
+      mWordBreak(LineBreaker::WordBreak::Normal),
+      mStrictness(LineBreaker::Strictness::Auto),
+      mWordContinuation(false) {}
 
 nsLineBreaker::~nsLineBreaker() {
   NS_ASSERTION(mCurrentWord.Length() == 0,
@@ -57,21 +62,28 @@ static void SetupCapitalization(const char16_t* aWord, uint32_t aLength,
 nsresult nsLineBreaker::FlushCurrentWord() {
   uint32_t length = mCurrentWord.Length();
   AutoTArray<uint8_t, 4000> breakState;
-  if (!breakState.AppendElements(length)) return NS_ERROR_OUT_OF_MEMORY;
+  if (!breakState.AppendElements(length)) {
+    return NS_ERROR_OUT_OF_MEMORY;
+  }
 
   nsTArray<bool> capitalizationState;
 
-  if (!mCurrentWordContainsComplexChar) {
+  if (mStrictness == LineBreaker::Strictness::Anywhere) {
+    memset(breakState.Elements(),
+           gfxTextRun::CompressedGlyph::FLAG_BREAK_TYPE_NORMAL,
+           length * sizeof(uint8_t));
+  } else if (!mCurrentWordContainsComplexChar) {
     // For break-strict set everything internal to "break", otherwise
     // to "no break"!
     memset(breakState.Elements(),
-           mWordBreak == LineBreaker::kWordBreak_BreakAll
+           mWordBreak == LineBreaker::WordBreak::BreakAll
                ? gfxTextRun::CompressedGlyph::FLAG_BREAK_TYPE_NORMAL
                : gfxTextRun::CompressedGlyph::FLAG_BREAK_TYPE_NONE,
            length * sizeof(uint8_t));
   } else {
     nsContentUtils::LineBreaker()->GetJISx4051Breaks(
-        mCurrentWord.Elements(), length, mWordBreak, breakState.Elements());
+        mCurrentWord.Elements(), length, mWordBreak, mStrictness,
+        mScriptIsChineseOrJapanese, breakState.Elements());
   }
 
   bool autoHyphenate = mCurrentWordLanguage && !mCurrentWordContainsMixedLang;
@@ -115,7 +127,7 @@ nsresult nsLineBreaker::FlushCurrentWord() {
       ti->mSink->SetBreaks(ti->mSinkOffset + skipSet, ti->mLength - skipSet,
                            breakState.Elements() + offset + skipSet);
 
-      if (ti->mFlags & BREAK_NEED_CAPITALIZATION) {
+      if (!mWordContinuation && (ti->mFlags & BREAK_NEED_CAPITALIZATION)) {
         if (capitalizationState.Length() == 0) {
           if (!capitalizationState.AppendElements(length))
             return NS_ERROR_OUT_OF_MEMORY;
@@ -136,6 +148,7 @@ nsresult nsLineBreaker::FlushCurrentWord() {
   mCurrentWordContainsComplexChar = false;
   mCurrentWordContainsMixedLang = false;
   mCurrentWordLanguage = nullptr;
+  mWordContinuation = false;
   return NS_OK;
 }
 
@@ -225,7 +238,8 @@ nsresult nsLineBreaker::AppendText(nsAtom* aHyphenationLanguage,
     if (aSink && !noBreaksNeeded) {
       breakState[offset] =
           mBreakHere || (mAfterBreakableSpace && !isBreakableSpace) ||
-                  (mWordBreak == LineBreaker::kWordBreak_BreakAll)
+                  mWordBreak == LineBreaker::WordBreak::BreakAll ||
+                  mStrictness == LineBreaker::Strictness::Anywhere
               ? gfxTextRun::CompressedGlyph::FLAG_BREAK_TYPE_NORMAL
               : gfxTextRun::CompressedGlyph::FLAG_BREAK_TYPE_NONE;
     }
@@ -240,8 +254,8 @@ nsresult nsLineBreaker::AppendText(nsAtom* aHyphenationLanguage,
             // set it to false
             uint8_t currentStart = breakState[wordStart];
             nsContentUtils::LineBreaker()->GetJISx4051Breaks(
-                aText + wordStart, offset - wordStart, mWordBreak,
-                breakState.Elements() + wordStart);
+                aText + wordStart, offset - wordStart, mWordBreak, mStrictness,
+                mScriptIsChineseOrJapanese, breakState.Elements() + wordStart);
             breakState[wordStart] = currentStart;
           }
           if (hyphenator) {
@@ -249,12 +263,13 @@ nsresult nsLineBreaker::AppendText(nsAtom* aHyphenationLanguage,
                                   breakState.Elements() + wordStart);
           }
         }
-        if (!noCapitalizationNeeded) {
+        if (!mWordContinuation && !noCapitalizationNeeded) {
           SetupCapitalization(aText + wordStart, offset - wordStart,
                               capitalizationState.Elements() + wordStart);
         }
       }
       wordHasComplexChar = false;
+      mWordContinuation = false;
       ++offset;
       if (offset >= aLength) break;
       wordStart = offset;
@@ -383,7 +398,8 @@ nsresult nsLineBreaker::AppendText(nsAtom* aHyphenationLanguage,
       // will be set by nsILineBreaker, we don't consider CJK at this point.
       breakState[offset] =
           mBreakHere || (mAfterBreakableSpace && !isBreakableSpace) ||
-                  (mWordBreak == LineBreaker::kWordBreak_BreakAll)
+                  mWordBreak == LineBreaker::WordBreak::BreakAll ||
+                  mStrictness == LineBreaker::Strictness::Anywhere
               ? gfxTextRun::CompressedGlyph::FLAG_BREAK_TYPE_NORMAL
               : gfxTextRun::CompressedGlyph::FLAG_BREAK_TYPE_NONE;
     }
@@ -397,8 +413,8 @@ nsresult nsLineBreaker::AppendText(nsAtom* aHyphenationLanguage,
           // set it to false
           uint8_t currentStart = breakState[wordStart];
           nsContentUtils::LineBreaker()->GetJISx4051Breaks(
-              aText + wordStart, offset - wordStart, mWordBreak,
-              breakState.Elements() + wordStart);
+              aText + wordStart, offset - wordStart, mWordBreak, mStrictness,
+              mScriptIsChineseOrJapanese, breakState.Elements() + wordStart);
           breakState[wordStart] = currentStart;
         }
         wordHasComplexChar = false;
@@ -439,7 +455,18 @@ nsresult nsLineBreaker::AppendText(nsAtom* aHyphenationLanguage,
 void nsLineBreaker::UpdateCurrentWordLanguage(nsAtom* aHyphenationLanguage) {
   if (mCurrentWordLanguage && mCurrentWordLanguage != aHyphenationLanguage) {
     mCurrentWordContainsMixedLang = true;
+    mScriptIsChineseOrJapanese = false;
   } else {
+    if (aHyphenationLanguage && !mCurrentWordLanguage) {
+      Locale loc = Locale(nsAtomCString(aHyphenationLanguage));
+      if (loc.GetScript().IsEmpty()) {
+        loc.AddLikelySubtags();
+      }
+      const nsCString& script = loc.GetScript();
+      mScriptIsChineseOrJapanese =
+          script.EqualsLiteral("Hans") || script.EqualsLiteral("Hant") ||
+          script.EqualsLiteral("Jpan") || script.EqualsLiteral("Hrkt");
+    }
     mCurrentWordLanguage = aHyphenationLanguage;
   }
 }
@@ -453,6 +480,7 @@ nsresult nsLineBreaker::AppendInvisibleWhitespace(uint32_t aFlags) {
     mBreakHere = true;
   }
   mAfterBreakableSpace = isBreakableSpace;
+  mWordContinuation = false;
   return NS_OK;
 }
 

@@ -421,8 +421,6 @@ class XPCJSContext final : public mozilla::CycleCollectedJSContext,
   inline JS::HandleId GetStringID(unsigned index) const;
   inline const char* GetStringName(unsigned index) const;
 
-  static void SetTabIdToCancelContentJS(uint64_t aTabId);
-
  private:
   XPCJSContext();
 
@@ -439,8 +437,6 @@ class XPCJSContext final : public mozilla::CycleCollectedJSContext,
   static uint32_t sInstanceCount;
   static mozilla::StaticAutoPtr<WatchdogManager> sWatchdogInstance;
   static WatchdogManager* GetWatchdogManager();
-
-  static mozilla::Atomic<uint64_t> sTabIdToCancelContentJS;
 
   // If we spend too much time running JS code in an event handler, then we
   // want to show the slow script UI. The timeout T is controlled by prefs. We
@@ -2731,7 +2727,7 @@ class CompartmentPrivate {
  private:
   JSObject2WrappedJSMap* mWrappedJSMap;
 
-  // Cache holding proxy objects for Window objects (and their Location oject)
+  // Cache holding proxy objects for Window objects (and their Location object)
   // that are loaded in a different process.
   RemoteProxyMap mRemoteProxies;
 

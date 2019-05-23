@@ -24,6 +24,7 @@
 
 #include "mozAutoDocUpdate.h"
 #include "nsLayoutStylesheetCache.h"
+#include "SheetLoadData.h"
 
 namespace mozilla {
 
@@ -431,6 +432,20 @@ void StyleSheet::DropStyleSet(ServoStyleSet* aStyleSet) {
 #endif
 }
 
+#define NOTIFY(function_, args_)                           \
+  do {                                                     \
+    StyleSheet* current = this;                            \
+    do {                                                   \
+      for (ServoStyleSet * handle : current->mStyleSets) { \
+        handle->function_ args_;                           \
+      }                                                    \
+      if (auto* shadow = current->GetContainingShadow()) { \
+        shadow->function_ args_;                           \
+      }                                                    \
+      current = current->mParent;                          \
+    } while (current);                                     \
+  } while (0)
+
 void StyleSheet::EnsureUniqueInner() {
   MOZ_ASSERT(mInner->mSheets.Length() != 0, "unexpected number of outers");
 
@@ -459,9 +474,7 @@ void StyleSheet::EnsureUniqueInner() {
   // let our containing style sets know that if we call
   // nsPresContext::EnsureSafeToHandOutCSSRules we will need to restyle the
   // document
-  for (ServoStyleSet* setHandle : mStyleSets) {
-    setHandle->SetNeedsRestyleAfterEnsureUniqueInner();
-  }
+  NOTIFY(StyleSheetCloned, (*this));
 }
 
 void StyleSheet::AppendAllChildSheets(nsTArray<StyleSheet*>& aArray) {
@@ -510,10 +523,7 @@ css::Rule* StyleSheet::GetDOMOwnerRule() const { return mOwnerRule; }
 uint32_t StyleSheet::InsertRule(const nsAString& aRule, uint32_t aIndex,
                                 nsIPrincipal& aSubjectPrincipal,
                                 ErrorResult& aRv) {
-  if (IsReadOnly()) {
-    return 0;
-  }
-  if (!AreRulesAvailable(aSubjectPrincipal, aRv)) {
+  if (IsReadOnly() || !AreRulesAvailable(aSubjectPrincipal, aRv)) {
     return 0;
   }
   return InsertRuleInternal(aRule, aIndex, aRv);
@@ -521,13 +531,34 @@ uint32_t StyleSheet::InsertRule(const nsAString& aRule, uint32_t aIndex,
 
 void StyleSheet::DeleteRule(uint32_t aIndex, nsIPrincipal& aSubjectPrincipal,
                             ErrorResult& aRv) {
-  if (IsReadOnly()) {
-    return;
-  }
-  if (!AreRulesAvailable(aSubjectPrincipal, aRv)) {
+  if (IsReadOnly() || !AreRulesAvailable(aSubjectPrincipal, aRv)) {
     return;
   }
   return DeleteRuleInternal(aIndex, aRv);
+}
+
+int32_t StyleSheet::AddRule(const nsAString& aSelector, const nsAString& aBlock,
+                            const Optional<uint32_t>& aIndex,
+                            nsIPrincipal& aSubjectPrincipal, ErrorResult& aRv) {
+  if (IsReadOnly() || !AreRulesAvailable(aSubjectPrincipal, aRv)) {
+    return -1;
+  }
+
+  nsAutoString rule;
+  rule.Append(aSelector);
+  rule.AppendLiteral(" { ");
+  if (!aBlock.IsEmpty()) {
+    rule.Append(aBlock);
+    rule.Append(' ');
+  }
+  rule.Append('}');
+
+  auto index =
+      aIndex.WasPassed() ? aIndex.Value() : GetCssRulesInternal()->Length();
+
+  InsertRuleInternal(rule, index, aRv);
+  // Always return -1.
+  return -1;
 }
 
 nsresult StyleSheet::DeleteRuleFromGroup(css::GroupRule* aGroup,
@@ -564,20 +595,6 @@ dom::ShadowRoot* StyleSheet::GetContainingShadow() const {
 
   return mOwningNode->AsContent()->GetContainingShadow();
 }
-
-#define NOTIFY(function_, args_)                           \
-  do {                                                     \
-    StyleSheet* current = this;                            \
-    do {                                                   \
-      for (ServoStyleSet * handle : current->mStyleSets) { \
-        handle->function_ args_;                           \
-      }                                                    \
-      if (auto* shadow = current->GetContainingShadow()) { \
-        shadow->function_ args_;                           \
-      }                                                    \
-      current = current->mParent;                          \
-    } while (current);                                     \
-  } while (0)
 
 void StyleSheet::RuleAdded(css::Rule& aRule) {
   mState |= State::ModifiedRules;

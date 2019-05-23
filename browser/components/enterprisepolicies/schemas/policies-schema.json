@@ -164,6 +164,10 @@
       }
     },
 
+    "DefaultDownloadDirectory": {
+      "type": "string"
+    },
+
     "DisableAppUpdate": {
       "type": "boolean"
     },
@@ -276,6 +280,10 @@
       "type": "boolean"
     },
 
+    "DownloadDirectory": {
+      "type": "string"
+    },
+
     "EnableTrackingProtection": {
       "type": "object",
       "properties": {
@@ -315,10 +323,44 @@
 
     "ExtensionSettings": {
       "type": "object",
+      "properties": {
+        "*": {
+          "type": "object",
+          "properties": {
+            "installation_mode": {
+              "type": "string",
+              "enum": ["allowed", "blocked"]
+            },
+            "allowed_types": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "enum": ["extension", "dictionary", "locale", "theme"]
+              }
+            },
+            "blocked_install_message": {
+              "type": "string"
+            },
+            "install_sources": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      },
       "patternProperties": {
         "^.*$": {
           "type": "object",
           "properties": {
+            "installation_mode": {
+              "type": "string",
+              "enum": ["allowed", "blocked", "force_installed", "normal_installed"]
+            },
+            "install_url": {
+              "type": "string"
+            },
             "blocked_install_message": {
               "type": "string"
             }
@@ -329,6 +371,30 @@
 
     "ExtensionUpdate": {
       "type": "boolean"
+    },
+
+    "FirefoxHome": {
+      "type": "object",
+      "properties": {
+        "Search": {
+          "type": "boolean"
+        },
+        "TopSites": {
+          "type": "boolean"
+        },
+        "Highlights": {
+          "type": "boolean"
+        },
+        "Pocket": {
+          "type": "boolean"
+        },
+        "Snippets": {
+          "type": "boolean"
+        },
+        "Locked": {
+          "type": "boolean"
+        }
+      }
     },
 
     "FlashPlugin": {
@@ -579,10 +645,19 @@
     "Preferences": {
       "type": "object",
       "properties": {
-        "network.IDN_show_punycode": {
+        "app.update.auto ": {
+          "type": "boolean"
+        },
+        "browser.cache.disk.enable": {
           "type": "boolean"
         },
         "browser.fixup.dns_first_for_single_words": {
+          "type": "boolean"
+        },
+        "browser.search.update": {
+          "type": "boolean"
+        },
+        "browser.tabs.warnOnClose": {
           "type": "boolean"
         },
         "browser.cache.disk.parent_directory": {
@@ -596,8 +671,48 @@
         },
         "browser.urlbar.suggest.bookmark": {
           "type": "boolean"
+        },
+        "dom.disable_window_flip": {
+          "type": "boolean"
+        },
+        "dom.disable_window_move_resize": {
+          "type": "boolean"
+        },
+        "dom.event.contextmenu.enabled": {
+          "type": "boolean"
+        },
+        "extensions.getAddons.showPane": {
+          "type": "boolean"
+        },
+        "media.gmp-gmpopenh264.enabled": {
+          "type": "boolean"
+        },
+        "media.gmp-widevinecdm.enabled": {
+          "type": "boolean"
+        },
+        "network.dns.disableIPv6": {
+          "type": "boolean"
+        },
+        "network.IDN_show_punycode": {
+          "type": "boolean"
+        },
+        "places.history.enabled": {
+          "type": "boolean"
+        },
+        "security.default_personal_cert": {
+          "type": "string"
+        },
+        "security.ssl.errorReporting.enabled": {
+          "type": "boolean"
+        },
+        "ui.key.menuAccessKeyFocuses": {
+          "type": "boolean"
         }
       }
+    },
+
+    "PromptForDownloadLocation": {
+      "type": "boolean"
     },
 
     "Proxy": {

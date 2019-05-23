@@ -192,12 +192,14 @@
             'cmd/tstclnt/tstclnt.gyp:tstclnt',
             'cmd/vfychain/vfychain.gyp:vfychain',
             'cmd/vfyserv/vfyserv.gyp:vfyserv',
+            'cmd/mpitests/mpitests.gyp:mpi_tests',
             'gtests/certhigh_gtest/certhigh_gtest.gyp:certhigh_gtest',
             'gtests/cryptohi_gtest/cryptohi_gtest.gyp:cryptohi_gtest',
             'gtests/der_gtest/der_gtest.gyp:der_gtest',
             'gtests/certdb_gtest/certdb_gtest.gyp:certdb_gtest',
             'gtests/freebl_gtest/freebl_gtest.gyp:prng_gtest',
             'gtests/freebl_gtest/freebl_gtest.gyp:blake2b_gtest',
+            'gtests/freebl_gtest/freebl_gtest.gyp:freebl_gtest',
             'gtests/mozpkix_gtest/mozpkix_gtest.gyp:mozpkix_gtest',
             'gtests/nss_bogo_shim/nss_bogo_shim.gyp:nss_bogo_shim',
             'gtests/pk11_gtest/pk11_gtest.gyp:pk11_gtest',
@@ -220,12 +222,6 @@
             [ 'disable_libpkix==0', {
               'dependencies': [
                 'cmd/pkix-errcodes/pkix-errcodes.gyp:pkix-errcodes',
-              ],
-            }],
-            [ 'test_build==1', {
-              'dependencies': [
-                'cmd/mpitests/mpitests.gyp:mpi_tests',
-                'gtests/freebl_gtest/freebl_gtest.gyp:freebl_gtest',
               ],
             }],
             [ 'disable_fips==0', {
@@ -265,6 +261,10 @@
                 ['OS!="linux"', {
                   'inputs/': [['exclude', 'freeblpriv']],
                   'outputs/': [['exclude', 'freeblpriv']]
+                }],
+                ['disable_dbm==1', {
+                  'inputs/': [['exclude', 'nssdbm3']],
+                  'outputs/': [['exclude', 'nssdbm3']]
                 }],
               ],
               'action': ['<(python)', '<(DEPTH)/coreconf/shlibsign.py', '<@(_inputs)']

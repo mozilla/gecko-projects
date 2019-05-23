@@ -226,7 +226,7 @@
         // it is not being shown.
         var currElement = currCol.element;
         if (!currElement.hasAttribute("ignoreincolumnpicker")) {
-          var popupChild = document.createElement("menuitem");
+          var popupChild = document.createXULElement("menuitem");
           popupChild.setAttribute("type", "checkbox");
           var columnName = currElement.getAttribute("display") ||
             currElement.getAttribute("label");
@@ -241,7 +241,7 @@
       }
 
       var hidden = !tree.enableColumnDrag;
-      aPopup.querySelectorAll(":not([colindex])").forEach((e) => { e.hidden = hidden; });
+      aPopup.querySelectorAll(":scope > :not([colindex])").forEach((e) => { e.hidden = hidden; });
     }
   }
 

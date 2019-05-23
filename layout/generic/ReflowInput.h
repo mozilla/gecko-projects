@@ -270,6 +270,20 @@ struct SizeComputationInput {
     // with when we set & react to these bits.
     bool mIOffsetsNeedCSSAlign : 1;
     bool mBOffsetsNeedCSSAlign : 1;
+
+    // Are we somewhere inside an element with -webkit-line-clamp set?
+    // This flag is inherited into descendant ReflowInputs, but we don't bother
+    // resetting it to false when crossing over into a block descendant that
+    // -webkit-line-clamp skips over (such as a BFC).
+    bool mInsideLineClamp : 1;
+
+    // Is this a flex item, and should we add or remove a -webkit-line-clamp
+    // ellipsis on a descendant line?  It's possible for this flag to be true
+    // when mInsideLineClamp is false if we previously had a numeric
+    // -webkit-line-clamp value, but now have 'none' and we need to find the
+    // line with the ellipsis flag and clear it.
+    // This flag is not inherited into descendant ReflowInputs.
+    bool mApplyLineClamp : 1;
   };
 
 #ifdef DEBUG
@@ -387,7 +401,7 @@ struct ReflowInput : public SizeComputationInput {
   // orthogonal limit; when it finds such a reflow input, it will use its
   // orthogonal-limit value to constrain inline-size.
   // This is initialized to NS_UNCONSTRAINEDSIZE (so it will be ignored),
-  // but reset to a suitable value for the reflow root by nsPresShell.
+  // but reset to a suitable value for the reflow root by PresShell.
   nscoord mOrthogonalLimit = NS_UNCONSTRAINEDSIZE;
 
   // Accessors for the private fields below. Forcing all callers to use these

@@ -225,7 +225,7 @@ function waitForSelectedSource(dbg, url) {
   const {
     getSelectedSourceWithContent,
     hasSymbols,
-    hasBreakpointPositions
+    getBreakableLines
   } = dbg.selectors;
 
   return waitForState(
@@ -245,7 +245,7 @@ function waitForSelectedSource(dbg, url) {
         return false;
       }
 
-      return hasSymbols(source) && hasBreakpointPositions(source.id);
+      return hasSymbols(source) && getBreakableLines(source.id);
     },
     "selected source"
   );
@@ -308,7 +308,8 @@ function assertPausedLocation(dbg) {
 function assertDebugLine(dbg, line) {
   // Check the debug line
   const lineInfo = getCM(dbg).lineInfo(line - 1);
-  const { source, content } = dbg.selectors.getSelectedSourceWithContent() || {};
+  const { source, content } =
+    dbg.selectors.getSelectedSourceWithContent() || {};
   if (source && !content) {
     const url = source.url;
     ok(
@@ -504,7 +505,8 @@ function isSelectedFrameSelected(dbg, state) {
   // Make sure the source text is completely loaded for the
   // source we are paused in.
   const sourceId = frame.location.sourceId;
-  const { source, content } = dbg.selectors.getSelectedSourceWithContent() || {};
+  const { source, content } =
+    dbg.selectors.getSelectedSourceWithContent() || {};
 
   if (!source) {
     return false;
@@ -610,7 +612,9 @@ function findSource(dbg, url, { silent } = { silent: false }) {
 function findSourceContent(dbg, url, opts) {
   const source = findSource(dbg, url, opts);
 
-  if (!source) return null;
+  if (!source) {
+    return null;
+  }
 
   const content = dbg.selectors.getSourceContent(source.id);
 
@@ -645,7 +649,9 @@ function waitForLoadedSources(dbg) {
     dbg,
     state => {
       const sources = dbg.selectors.getSourceList();
-      return sources.every(source => !!dbg.selectors.getSourceContent(source.id));
+      return sources.every(
+        source => !!dbg.selectors.getSourceContent(source.id)
+      );
     },
     "loaded source"
   );
@@ -844,8 +850,7 @@ function setBreakpointOptions(dbg, source, line, column, options) {
 
 function findBreakpoint(dbg, url, line) {
   const source = findSource(dbg, url);
-  const column = getFirstBreakpointColumn(dbg, { line, sourceId: source.id });
-  return dbg.selectors.getBreakpoint({ sourceId: source.id, line, column });
+  return dbg.selectors.getBreakpointsForSource(source.id, line)[0];
 }
 
 async function loadAndAddBreakpoint(dbg, filename, line, column) {
@@ -1055,6 +1060,10 @@ const keyMappings = {
   fileSearchPrev: { code: "g", modifiers: cmdShift },
   Enter: { code: "VK_RETURN" },
   ShiftEnter: { code: "VK_RETURN", modifiers: shiftOrAlt },
+  AltEnter: {
+    code: "VK_RETURN",
+    modifiers: { altKey: true }
+  },
   Up: { code: "VK_UP" },
   Down: { code: "VK_DOWN" },
   Right: { code: "VK_RIGHT" },
@@ -1143,6 +1152,11 @@ function isVisible(outerEl, innerEl) {
 
   const visible = verticallyVisible && horizontallyVisible;
   return visible;
+}
+
+async function getEditorLineGutter(dbg, line) {
+  const lineEl = await getEditorLineEl(dbg, line);
+  return lineEl.firstChild;
 }
 
 async function getEditorLineEl(dbg, line) {
@@ -1248,7 +1262,11 @@ const selectors = {
   outlineItem: i =>
     `.outline-list__element:nth-child(${i}) .function-signature`,
   outlineItems: ".outline-list__element",
+  conditionalPanel: ".conditional-breakpoint-panel",
   conditionalPanelInput: ".conditional-breakpoint-panel textarea",
+  conditionalBreakpointInSecPane: ".breakpoint.is-conditional",
+  logPointPanel: ".conditional-breakpoint-panel.log-point",
+  logPointInSecPane: ".breakpoint.is-log",
   searchField: ".search-field",
   blackbox: ".action.black-box",
   projectSearchCollapsed: ".project-text-search .arrow:not(.expanded)",
@@ -1367,13 +1385,13 @@ async function clickGutter(dbg, line) {
 
 function selectContextMenuItem(dbg, selector) {
   // the context menu is in the toolbox window
-  const doc = dbg.toolbox.win.document;
+  const doc = dbg.toolbox.topDoc;
 
   // there are several context menus, we want the one with the menu-api
   const popup = doc.querySelector('menupopup[menu-api="true"]');
 
   const item = popup.querySelector(selector);
-  return EventUtils.synthesizeMouseAtCenter(item, {}, dbg.toolbox.win);
+  return EventUtils.synthesizeMouseAtCenter(item, {}, dbg.toolbox.topWindow);
 }
 
 async function typeInPanel(dbg, text) {
@@ -1540,7 +1558,6 @@ async function assertPreviewTextValue(dbg, line, column, { text, expression }) {
   ok(previewEl.innerText.includes(text), "Preview text shown to user");
 
   const preview = dbg.selectors.getPreview();
-  is(preview.updating, false, "Preview.updating");
   is(preview.expression, expression, "Preview.expression");
 }
 
@@ -1551,7 +1568,6 @@ async function assertPreviewTooltip(dbg, line, column, { result, expression }) {
 
   const preview = dbg.selectors.getPreview();
   is(`${preview.result}`, result, "Preview.result");
-  is(preview.updating, false, "Preview.updating");
   is(preview.expression, expression, "Preview.expression");
 }
 
@@ -1576,7 +1592,6 @@ async function assertPreviewPopup(
   const preview = await hoverOnToken(dbg, line, column, "popup");
   is(`${getPreviewProperty(preview, field)}`, value, "Preview.result");
 
-  is(preview.updating, false, "Preview.updating");
   is(preview.expression, expression, "Preview.expression");
 }
 
@@ -1708,13 +1723,13 @@ async function openConsoleContextMenu(hud, element) {
   const onConsoleMenuOpened = hud.ui.wrapper.once("menu-open");
   synthesizeContextMenuEvent(element);
   await onConsoleMenuOpened;
-  const doc = hud.chromeWindow.document;
-  return doc.getElementById("webconsole-menu");
+  const toolbox = gDevTools.getToolbox(hud.target);
+  return toolbox.topDoc.getElementById("webconsole-menu");
 }
 
 function hideConsoleContextMenu(hud) {
-  const doc = hud.chromeWindow.document;
-  const popup = doc.getElementById("webconsole-menu");
+  const toolbox = gDevTools.getToolbox(hud.target);
+  const popup = toolbox.topDoc.getElementById("webconsole-menu");
   if (!popup) {
     return Promise.resolve();
   }

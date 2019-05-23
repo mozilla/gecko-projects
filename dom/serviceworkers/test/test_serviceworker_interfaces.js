@@ -27,9 +27,9 @@ var ecmaGlobals =
     "ArrayBuffer",
     {name: "Atomics", disabled: true},
     "Boolean",
-    {name: "BigInt", nightly: true},
-    {name: "BigInt64Array", nightly: true},
-    {name: "BigUint64Array", nightly: true},
+    "BigInt",
+    "BigInt64Array",
+    "BigUint64Array",
     {name: "ByteLengthQueuingStrategy", optional: true},
     {name: "CountQueuingStrategy", optional: true},
     "DataView",
@@ -242,7 +242,7 @@ var interfaceNamesInGlobalScope =
   ];
 // IMPORTANT: Do not change the list above without review from a DOM peer!
 
-function createInterfaceMap({ version, isNightly, isRelease, isDesktop, isAndroid, isInsecureContext, isFennec }) {
+function createInterfaceMap({ isNightly, isRelease, isDesktop, isAndroid, isInsecureContext, isFennec }) {
   var interfaceMap = {};
 
   function addInterfaces(interfaces)

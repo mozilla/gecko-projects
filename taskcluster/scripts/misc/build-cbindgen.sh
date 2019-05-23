@@ -3,7 +3,7 @@ set -x -e -v
 
 # If you update this, make sure to update the minimum version in
 # build/moz.configure/bindgen.configure as well.
-CBINDGEN_REVISION=ba02367253bcffb6f4dcfe4bc27005e9cae78edd # v0.8.3
+CBINDGEN_REVISION=23a991a5b21e89aa1dcdc70f1371be20c93ece8e # v0.8.7
 TARGET="$1"
 
 case "$(uname -s)" in
@@ -38,7 +38,7 @@ if [ "$TARGET" == "x86_64-apple-darwin" ]; then
   export PATH="$PWD/cctools/bin:$PATH"
   cat >cross-linker <<EOF
 exec $PWD/clang/bin/clang -v \
-  -fuse-ld=$PWD/cctools/bin/x86_64-darwin11-ld \
+  -fuse-ld=$PWD/cctools/bin/x86_64-apple-darwin-ld \
   -mmacosx-version-min=10.11 \
   -target $TARGET \
   -B $PWD/cctools/bin \

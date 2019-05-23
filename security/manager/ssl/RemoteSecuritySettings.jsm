@@ -6,7 +6,9 @@
 const EXPORTED_SYMBOLS = ["RemoteSecuritySettings"];
 
 const {RemoteSettings} = ChromeUtils.import("resource://services-settings/remote-settings.js");
+ChromeUtils.defineModuleGetter(this, "BlocklistClients", "resource://services-common/blocklist-clients.js");
 
+const {AppConstants} = ChromeUtils.import("resource://gre/modules/AppConstants.jsm");
 const {Services} = ChromeUtils.import("resource://gre/modules/Services.jsm");
 const {XPCOMUtils} = ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
 const {X509} = ChromeUtils.import("resource://gre/modules/psm/X509.jsm", null);
@@ -83,7 +85,29 @@ function bytesToString(bytes) {
   return String.fromCharCode.apply(null, bytes);
 }
 
+class CertInfo {
+  constructor(cert, subject) {
+    this.cert = cert;
+    this.subject = subject;
+    this.trust = Ci.nsICertStorage.TRUST_INHERIT;
+  }
+}
+CertInfo.prototype.QueryInterface = ChromeUtils.generateQI([Ci.nsICertInfo]);
+
 this.RemoteSecuritySettings = class RemoteSecuritySettings {
+    /**
+     * Initialize the clients (cheap instantiation) and setup their sync event.
+     * This static method is called from BrowserGlue.jsm soon after startup.
+     */
+    static init() {
+      // In Bug 1543598, the OneCRL and Pinning clients will be moved in this module.
+      BlocklistClients.initialize();
+
+      if (AppConstants.MOZ_NEW_CERT_STORAGE) {
+        new RemoteSecuritySettings();
+      }
+    }
+
     constructor() {
         this.client = RemoteSettings(Services.prefs.getCharPref(INTERMEDIATES_COLLECTION_PREF), {
           bucketNamePref: INTERMEDIATES_BUCKET_PREF,
@@ -115,32 +139,75 @@ this.RemoteSecuritySettings = class RemoteSecuritySettings {
         // Bug 1519256: Move this to a separate method that's on a separate timer
         // with a higher frequency (so we can attempt to download outstanding
         // certs more than once daily)
-        const current = await this.client.get();
+
+        // See if we have prior cert data (this can happen when we can't open the database and we
+        // have to re-create it (see bug 1546361)).
+        const certStorage = Cc["@mozilla.org/security/certstorage;1"].getService(Ci.nsICertStorage);
+        let hasPriorCertData = await new Promise((resolve) => {
+          certStorage.hasPriorData(Ci.nsICertStorage.DATA_TYPE_CERTIFICATE, (rv, hasPriorData) => {
+            if (rv == Cr.NS_OK) {
+              resolve(hasPriorData);
+            } else {
+              // If calling hasPriorData failed, assume we need to reload everything (even though
+              // it's unlikely doing so will succeed).
+              resolve(false);
+            }
+          });
+        });
+        const col = await this.client.openCollection();
+        // If we don't have prior data, make it so we re-load everything.
+        if (!hasPriorCertData) {
+          let { data: toUpdate } = await col.list();
+          let promises = [];
+          toUpdate.forEach((record) => {
+            record.cert_import_complete = false;
+            promises.push(col.update(record));
+          });
+          await Promise.all(promises);
+        }
+        const { data: current } = await col.list();
         const waiting = current.filter(record => !record.cert_import_complete);
 
         log.debug(`There are ${waiting.length} intermediates awaiting download.`);
 
         TelemetryStopwatch.start(INTERMEDIATES_UPDATE_MS_TELEMETRY);
 
-        const certStorage = Cc["@mozilla.org/security/certstorage;1"].getService(Ci.nsICertStorage);
-        const col = await this.client.openCollection();
+        let toDownload = waiting.slice(0, maxDownloadsPerRun);
+        let recordsCertsAndSubjects = await Promise.all(
+          toDownload.map(record => this.maybeDownloadAttachment(record)));
+        let certInfos = [];
+        let recordsToUpdate = [];
+        for (let {record, cert, subject} of recordsCertsAndSubjects) {
+          if (cert && subject) {
+            certInfos.push(new CertInfo(cert, subject));
+            recordsToUpdate.push(record);
+          }
+        }
+        let result = await new Promise((resolve) => {
+          certStorage.addCerts(certInfos, resolve);
+        }).catch((err) => err);
+        if (result != Cr.NS_OK) {
+          Cu.reportError(`certStorage.addCerts failed: ${result}`);
+          Services.telemetry.getHistogramById(INTERMEDIATES_ERRORS_TELEMETRY)
+            .add("failedToUpdateDB");
+          return;
+        }
+        await Promise.all(recordsToUpdate.map((record) => {
+          record.cert_import_complete = true;
+          return col.update(record);
+        }));
+        const { data: finalCurrent } = await col.list();
+        const finalWaiting = finalCurrent.filter(record => !record.cert_import_complete);
+        const countPreloaded = finalCurrent.length - finalWaiting.length;
 
-        Promise.all(waiting.slice(0, maxDownloadsPerRun)
-          .map(record => this.maybeDownloadAttachment(record, col, certStorage))
-        ).then(async () => {
-          const finalCurrent = await this.client.get();
-          const finalWaiting = finalCurrent.filter(record => !record.cert_import_complete);
-          const countPreloaded = finalCurrent.length - finalWaiting.length;
+        TelemetryStopwatch.finish(INTERMEDIATES_UPDATE_MS_TELEMETRY);
+        Services.telemetry.scalarSet(INTERMEDIATES_PRELOADED_TELEMETRY,
+                                     countPreloaded);
+        Services.telemetry.scalarSet(INTERMEDIATES_PENDING_TELEMETRY,
+                                     finalWaiting.length);
 
-          TelemetryStopwatch.finish(INTERMEDIATES_UPDATE_MS_TELEMETRY);
-          Services.telemetry.scalarSet(INTERMEDIATES_PRELOADED_TELEMETRY,
-                                       countPreloaded);
-          Services.telemetry.scalarSet(INTERMEDIATES_PENDING_TELEMETRY,
-                                       finalWaiting.length);
-
-          Services.obs.notifyObservers(null, "remote-security-settings:intermediates-updated",
-                                       "success");
-        });
+        Services.obs.notifyObservers(null, "remote-security-settings:intermediates-updated",
+                                     "success");
     }
 
     async onObservePollEnd(subject, topic, data) {
@@ -204,98 +271,87 @@ this.RemoteSecuritySettings = class RemoteSecuritySettings {
     /**
      * Attempts to download the attachment, assuming it's not been processed
      * already. Does not retry, and always resolves (e.g., does not reject upon
-     * failure.) Errors are reported via Cu.reportError; If you need to know
-     * success/failure, check record.cert_import_complete.
+     * failure.) Errors are reported via Cu.reportError.
      * @param  {AttachmentRecord} record defines which data to obtain
-     * @param  {KintoCollection}  col The kinto collection to update
-     * @param  {nsICertStorage}   certStorage The certificate storage to update
-     * @return {Promise}          a Promise representing the transaction
+     * @return {Promise}          a Promise that will resolve to an object with the properties
+     *                            record, cert, and subject. record is the original record.
+     *                            cert is the base64-encoded bytes of the downloaded certificate (if
+     *                            downloading was successful), and null otherwise.
+     *                            subject is the base64-encoded bytes of the subject distinguished
+     *                            name of the same.
      */
-    async maybeDownloadAttachment(record, col, certStorage) {
+    async maybeDownloadAttachment(record) {
       const {attachment: {hash, size}} = record;
+      let result = { record, cert: null, subject: null };
 
-      return this._downloadAttachmentBytes(record)
-      .then(async function(attachmentData) {
-        if (!attachmentData || attachmentData.length == 0) {
-          // Bug 1519273 - Log telemetry for these rejections
-          log.debug(`Empty attachment. Hash=${hash}`);
-
-          Services.telemetry.getHistogramById(INTERMEDIATES_ERRORS_TELEMETRY)
-            .add("emptyAttachment");
-
-          return;
-        }
-
-        // check the length
-        if (attachmentData.length !== size) {
-          log.debug(`Unexpected attachment length. Hash=${hash} Lengths ${attachmentData.length} != ${size}`);
-
-          Services.telemetry.getHistogramById(INTERMEDIATES_ERRORS_TELEMETRY)
-            .add("unexpectedLength");
-
-          return;
-        }
-
-        // check the hash
-        let dataAsString = gTextDecoder.decode(attachmentData);
-        let calculatedHash = getHash(dataAsString);
-        if (calculatedHash !== hash) {
-          log.warn(`Invalid hash. CalculatedHash=${calculatedHash}, Hash=${hash}, data=${dataAsString}`);
-
-          Services.telemetry.getHistogramById(INTERMEDIATES_ERRORS_TELEMETRY)
-            .add("unexpectedHash");
-
-          return;
-        }
-
-        let certBase64;
-        let subjectBase64;
-        try {
-          // split off the header and footer
-          certBase64 = dataAsString.split("-----")[2].replace(/\s/g, "");
-          // get an array of bytes so we can use X509.jsm
-          let certBytes = stringToBytes(atob(certBase64));
-          let cert = new X509.Certificate();
-          cert.parse(certBytes);
-          // get the DER-encoded subject and get a base64-encoded string from it
-          // TODO(bug 1542028): add getters for _der and _bytes
-          subjectBase64 = btoa(bytesToString(cert.tbsCertificate.subject._der._bytes));
-        } catch (err) {
-          Cu.reportError(`Failed to decode cert: ${err}`);
-
-          // Re-purpose the "failedToUpdateNSS" telemetry tag as "failed to
-          // decode preloaded intermediate certificate"
-          Services.telemetry.getHistogramById(INTERMEDIATES_ERRORS_TELEMETRY)
-            .add("failedToUpdateNSS");
-
-          return;
-        }
-        log.debug(`Adding cert. Hash=${hash}. Size=${size}`);
-        // We can assume that certs obtained from remote-settings are part of
-        // the root program. If they aren't, they won't be used for path-
-        // building anyway, so just add it to the DB with trust set to
-        // "inherit".
-        let result = await new Promise((resolve) => {
-          certStorage.addCertBySubject(certBase64, subjectBase64,
-                                       Ci.nsICertStorage.TRUST_INHERIT,
-                                       resolve);
-        });
-        if (result != Cr.NS_OK) {
-          Cu.reportError(`Failed to add to cert storage: ${result}`);
-          Services.telemetry.getHistogramById(INTERMEDIATES_ERRORS_TELEMETRY)
-            .add("failedToUpdateDB");
-          return;
-        }
-
-        record.cert_import_complete = true;
-        await col.update(record);
-      })
-      .catch(() => {
-        // Don't abort the outer Promise.all because of an error. Errors were
-        // sent using Cu.reportError()
+      let attachmentData;
+      try {
+        attachmentData = await this._downloadAttachmentBytes(record);
+      } catch (err) {
+        Cu.reportError(`Failed to download attachment: ${err}`);
         Services.telemetry.getHistogramById(INTERMEDIATES_ERRORS_TELEMETRY)
           .add("failedToDownloadMisc");
-      });
+        return result;
+      }
+
+      if (!attachmentData || attachmentData.length == 0) {
+        // Bug 1519273 - Log telemetry for these rejections
+        log.debug(`Empty attachment. Hash=${hash}`);
+
+        Services.telemetry.getHistogramById(INTERMEDIATES_ERRORS_TELEMETRY)
+          .add("emptyAttachment");
+
+        return result;
+      }
+
+      // check the length
+      if (attachmentData.length !== size) {
+        log.debug(`Unexpected attachment length. Hash=${hash} Lengths ${attachmentData.length} != ${size}`);
+
+        Services.telemetry.getHistogramById(INTERMEDIATES_ERRORS_TELEMETRY)
+          .add("unexpectedLength");
+
+        return result;
+      }
+
+      // check the hash
+      let dataAsString = gTextDecoder.decode(attachmentData);
+      let calculatedHash = getHash(dataAsString);
+      if (calculatedHash !== hash) {
+        log.warn(`Invalid hash. CalculatedHash=${calculatedHash}, Hash=${hash}, data=${dataAsString}`);
+
+        Services.telemetry.getHistogramById(INTERMEDIATES_ERRORS_TELEMETRY)
+          .add("unexpectedHash");
+
+        return result;
+      }
+      log.debug(`downloaded cert with hash=${hash}, size=${size}`);
+
+      let certBase64;
+      let subjectBase64;
+      try {
+        // split off the header and footer
+        certBase64 = dataAsString.split("-----")[2].replace(/\s/g, "");
+        // get an array of bytes so we can use X509.jsm
+        let certBytes = stringToBytes(atob(certBase64));
+        let cert = new X509.Certificate();
+        cert.parse(certBytes);
+        // get the DER-encoded subject and get a base64-encoded string from it
+        // TODO(bug 1542028): add getters for _der and _bytes
+        subjectBase64 = btoa(bytesToString(cert.tbsCertificate.subject._der._bytes));
+      } catch (err) {
+        Cu.reportError(`Failed to decode cert: ${err}`);
+
+        // Re-purpose the "failedToUpdateNSS" telemetry tag as "failed to
+        // decode preloaded intermediate certificate"
+        Services.telemetry.getHistogramById(INTERMEDIATES_ERRORS_TELEMETRY)
+          .add("failedToUpdateNSS");
+
+        return result;
+      }
+      result.cert = certBase64;
+      result.subject = subjectBase64;
+      return result;
     }
 
     async maybeSync(expectedTimestamp, options) {
@@ -304,19 +360,12 @@ this.RemoteSecuritySettings = class RemoteSecuritySettings {
 
     async removeCerts(recordsToRemove) {
       let certStorage = Cc["@mozilla.org/security/certstorage;1"].getService(Ci.nsICertStorage);
-      let failures = 0;
-      for (let record of recordsToRemove) {
-        let result = await new Promise((resolve) => {
-          certStorage.removeCertByHash(record.pubKeyHash, resolve);
-        });
-        if (result != Cr.NS_OK) {
-          Cu.reportError(`Failed to remove intermediate certificate Hash=${record.pubKeyHash}: ${result}`);
-          failures++;
-        }
-      }
-
-      if (failures > 0) {
-        Cu.reportError(`Failed to remove ${failures} intermediate certificates`);
+      let hashes = recordsToRemove.map(record => record.pubKeyHash);
+      let result = await new Promise((resolve) => {
+          certStorage.removeCertsByHashes(hashes, resolve);
+      }).catch((err) => err);
+      if (result != Cr.NS_OK) {
+        Cu.reportError(`Failed to remove some intermediate certificates`);
         Services.telemetry.getHistogramById(INTERMEDIATES_ERRORS_TELEMETRY)
           .add("failedToRemove");
       }

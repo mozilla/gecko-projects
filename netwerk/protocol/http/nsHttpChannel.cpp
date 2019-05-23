@@ -619,7 +619,7 @@ nsresult nsHttpChannel::ContinueOnBeforeConnect(bool aShouldUpgrade,
     }
   }
 
-  if (mTRR) {
+  if (mIsTRRServiceChannel) {
     mCaps |= NS_HTTP_LARGE_KEEPALIVE | NS_HTTP_DISABLE_TRR;
   }
 
@@ -635,7 +635,7 @@ nsresult nsHttpChannel::ContinueOnBeforeConnect(bool aShouldUpgrade,
   mConnectionInfo->SetBeConservative((mCaps & NS_HTTP_BE_CONSERVATIVE) ||
                                      mBeConservative);
   mConnectionInfo->SetTlsFlags(mTlsFlags);
-  mConnectionInfo->SetTrrUsed(mTRR);
+  mConnectionInfo->SetIsTrrServiceChannel(mIsTRRServiceChannel);
   mConnectionInfo->SetTrrDisabled(mCaps & NS_HTTP_DISABLE_TRR);
   mConnectionInfo->SetIPv4Disabled(mCaps & NS_HTTP_DISABLE_IPV4);
   mConnectionInfo->SetIPv6Disabled(mCaps & NS_HTTP_DISABLE_IPV6);
@@ -1320,7 +1320,7 @@ HttpTrafficCategory nsHttpChannel::CreateTrafficCategory() {
 
   HttpTrafficAnalyzer::ClassOfService cos;
   {
-    if (mClassOfService & nsIClassOfService::Leader &&
+    if ((mClassOfService & nsIClassOfService::Leader) &&
         mLoadInfo->GetExternalContentPolicyType() ==
             nsIContentPolicy::TYPE_SCRIPT) {
       cos = HttpTrafficAnalyzer::ClassOfService::eLeader;
@@ -1343,7 +1343,7 @@ HttpTrafficCategory nsHttpChannel::CreateTrafficCategory() {
 
     if (flags & CF::CLASSIFIED_TRACKING_CONTENT) {
       tc = TC::eContent;
-    } else if (flags & CF::CLASSIFIED_FINGERPRINTING) {
+    } else if (flags & CF::CLASSIFIED_FINGERPRINTING_CONTENT) {
       tc = TC::eFingerprinting;
     } else if (flags & CF::CLASSIFIED_ANY_BASIC_TRACKING) {
       tc = TC::eBasic;
@@ -1352,8 +1352,10 @@ HttpTrafficCategory nsHttpChannel::CreateTrafficCategory() {
     }
   }
 
-  return HttpTrafficAnalyzer::CreateTrafficCategory(NS_UsePrivateBrowsing(this),
-                                                    isThirdParty, cos, tc);
+  bool isSystemPrincipal = mLoadInfo->LoadingPrincipal() &&
+                           mLoadInfo->LoadingPrincipal()->IsSystemPrincipal();
+  return HttpTrafficAnalyzer::CreateTrafficCategory(
+      NS_UsePrivateBrowsing(this), isSystemPrincipal, isThirdParty, cos, tc);
 }
 
 enum class Report { Error, Warning };
@@ -1780,9 +1782,9 @@ nsresult nsHttpChannel::CallOnStartRequest() {
 
     if (mListener) {
       nsCOMPtr<nsIStreamListener> deleteProtector(mListener);
+      mOnStartRequestCalled = true;
       deleteProtector->OnStartRequest(this);
     }
-
     mOnStartRequestCalled = true;
   });
 
@@ -1860,8 +1862,8 @@ nsresult nsHttpChannel::CallOnStartRequest() {
     MOZ_ASSERT(!mOnStartRequestCalled,
                "We should not call OsStartRequest twice");
     nsCOMPtr<nsIStreamListener> deleteProtector(mListener);
-    rv = deleteProtector->OnStartRequest(this);
     mOnStartRequestCalled = true;
+    rv = deleteProtector->OnStartRequest(this);
     if (NS_FAILED(rv)) return rv;
   } else {
     NS_WARNING("OnStartRequest skipped because of null listener");
@@ -2442,14 +2444,12 @@ nsresult nsHttpChannel::ProcessResponse() {
   // Let the predictor know whether this was a cacheable response or not so
   // that it knows whether or not to possibly prefetch this resource in the
   // future.
-  // We use GetReferringPage because mReferrer may not be set at all, or may
-  // not be a full URI (HttpBaseChannel::SetReferrer has the gorey details).
-  // If that's null, though, we'll fall back to mReferrer just in case (this
-  // is especially useful in xpcshell tests, where we don't have an actual
-  // pageload to get a referrer from).
+  // We use GetReferringPage because mReferrerInfo may not be set at all(this is
+  // especially useful in xpcshell tests, where we don't have an actual pageload
+  // to get a referrer from).
   nsCOMPtr<nsIURI> referrer = GetReferringPage();
-  if (!referrer) {
-    referrer = mReferrer;
+  if (!referrer && mReferrerInfo) {
+    referrer = mReferrerInfo->GetOriginalReferrer();
   }
 
   if (referrer) {
@@ -4046,7 +4046,7 @@ nsresult nsHttpChannel::OpenCacheEntryInternal(
   if (mPostID) {
     extension.Append(nsPrintfCString("%d", mPostID));
   }
-  if (mTRR) {
+  if (mIsTRRServiceChannel) {
     extension.Append("TRR");
   }
 
@@ -6362,6 +6362,11 @@ nsHttpChannel::AsyncOpen(nsIStreamListener* aListener) {
   NS_ENSURE_TRUE(!mIsPending, NS_ERROR_IN_PROGRESS);
   NS_ENSURE_TRUE(!mWasOpened, NS_ERROR_ALREADY_OPENED);
 
+  if (mCanceled) {
+    ReleaseListeners();
+    return mStatus;
+  }
+
   if (MaybeWaitForUploadStreamLength(listener, nullptr)) {
     return NS_OK;
   }
@@ -7951,9 +7956,11 @@ nsresult nsHttpChannel::ContinueOnStopRequestAfterAuthRetry(
     if (mListener) {
       MOZ_ASSERT(!mOnStartRequestCalled,
                  "We should not call OnStartRequest twice.");
-      mListener->OnStartRequest(this);
+      nsCOMPtr<nsIStreamListener> listener(mListener);
       mOnStartRequestCalled = true;
+      listener->OnStartRequest(this);
     } else {
+      mOnStartRequestCalled = true;
       NS_WARNING("OnStartRequest skipped because of null listener");
     }
   }
@@ -8154,9 +8161,10 @@ nsresult nsHttpChannel::ContinueOnStopRequest(nsresult aStatus, bool aIsFromNet,
     MOZ_ASSERT(mOnStartRequestCalled,
                "OnStartRequest should be called before OnStopRequest");
     MOZ_ASSERT(!mOnStopRequestCalled, "We should not call OnStopRequest twice");
-    mListener->OnStopRequest(this, aStatus);
     mOnStopRequestCalled = true;
+    mListener->OnStopRequest(this, aStatus);
   }
+  mOnStopRequestCalled = true;
 
   // The prefetch needs to be released on the main thread
   mDNSPrefetch = nullptr;
@@ -8431,11 +8439,15 @@ nsHttpChannel::OnTransportStatus(nsITransport* trans, nsresult status,
       status == NS_NET_STATUS_WAITING_FOR) {
     if (mTransaction) {
       mTransaction->GetNetworkAddresses(mSelfAddr, mPeerAddr);
+      mResolvedByTRR = mTransaction->ResolvedByTRR();
     } else {
       nsCOMPtr<nsISocketTransport> socketTransport = do_QueryInterface(trans);
       if (socketTransport) {
         socketTransport->GetSelfAddr(&mSelfAddr);
         socketTransport->GetPeerAddr(&mPeerAddr);
+        bool isTrr = false;
+        socketTransport->ResolvedByTRR(&isTrr);
+        mResolvedByTRR = isTrr;
       }
     }
   }
@@ -9607,7 +9619,7 @@ void nsHttpChannel::SetOriginHeader() {
   mLoadInfo->TriggeringPrincipal()->GetURI(getter_AddRefs(referrer));
 
   nsAutoCString origin("null");
-  if (referrer && IsReferrerSchemeAllowed(referrer)) {
+  if (referrer && dom::ReferrerInfo::IsReferrerSchemeAllowed(referrer)) {
     nsContentUtils::GetASCIIOrigin(referrer, origin);
   }
 
@@ -9620,7 +9632,7 @@ void nsHttpChannel::SetOriginHeader() {
       // Origin header suppressed by user setting
       return;
     }
-  } else if (gHttpHandler->HideOnionReferrerSource()) {
+  } else if (dom::ReferrerInfo::HideOnionReferrerSource()) {
     nsAutoCString host;
     if (referrer && NS_SUCCEEDED(referrer->GetAsciiHost(host)) &&
         StringEndsWith(host, NS_LITERAL_CSTRING(".onion"))) {
@@ -9646,7 +9658,7 @@ void nsHttpChannel::SetDoNotTrack() {
   NS_QueryNotificationCallbacks(this, loadContext);
 
   if ((loadContext && loadContext->UseTrackingProtection()) ||
-      nsContentUtils::DoNotTrackEnabled()) {
+      StaticPrefs::privacy_donottrackheader_enabled()) {
     DebugOnly<nsresult> rv = mRequestHead.SetHeader(
         nsHttp::DoNotTrack, NS_LITERAL_CSTRING("1"), false);
     MOZ_ASSERT(NS_SUCCEEDED(rv));
@@ -10223,18 +10235,24 @@ nsresult nsHttpChannel::RedirectToInterceptedChannel() {
 void nsHttpChannel::ReEvaluateReferrerAfterTrackingStatusIsKnown() {
   if (StaticPrefs::network_cookie_cookieBehavior() ==
       nsICookieService::BEHAVIOR_REJECT_TRACKER) {
-    // If our referrer has been set before, the JS/DOM caller did not
-    // previously provide us with an explicit referrer policy value and our
-    // current referrer policy is equal to the default policy if we thought the
-    // channel wasn't a third-party tracking channel, we may need to set our
-    // referrer with referrer policy once again to ensure our defaults properly
-    // take effect now.
     bool isPrivate =
         mLoadInfo && mLoadInfo->GetOriginAttributes().mPrivateBrowsingId > 0;
-    if (mOriginalReferrer && mOriginalReferrerPolicy == REFERRER_POLICY_UNSET &&
-        mReferrerPolicy ==
-            NS_GetDefaultReferrerPolicy(nullptr, nullptr, isPrivate)) {
-      SetReferrer(mOriginalReferrer);
+    // If our referrer has been set before, and our referrer policy is unset
+    // (default policy) if we thought the channel wasn't a third-party
+    // tracking channel, we may need to set our referrer with referrer policy
+    // once again to ensure our defaults properly take effect now.
+    if (mReferrerInfo) {
+      dom::ReferrerInfo* referrerInfo =
+          static_cast<dom::ReferrerInfo*>(mReferrerInfo.get());
+
+      if (referrerInfo->IsPolicyOverrided() &&
+          referrerInfo->GetReferrerPolicy() ==
+              ReferrerInfo::GetDefaultReferrerPolicy(nullptr, nullptr,
+                                                     isPrivate)) {
+        nsCOMPtr<nsIReferrerInfo> newReferrerInfo =
+            referrerInfo->CloneWithNewPolicy(RP_Unset);
+        SetReferrerInfo(newReferrerInfo, false, true);
+      }
     }
   }
 }

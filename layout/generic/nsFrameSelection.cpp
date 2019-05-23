@@ -1189,7 +1189,8 @@ nsresult nsFrameSelection::StartAutoScrollTimer(nsIFrame* aFrame,
     return NS_ERROR_NULL_POINTER;
   }
 
-  return mDomSelections[index]->StartAutoScrollTimer(aFrame, aPoint, aDelay);
+  RefPtr<Selection> selection = mDomSelections[index];
+  return selection->StartAutoScrollTimer(aFrame, aPoint, aDelay);
 }
 
 void nsFrameSelection::StopAutoScrollTimer() {
@@ -2746,8 +2747,8 @@ nsresult nsFrameSelection::UpdateSelectionCacheOnRepaintSelection(
   nsCOMPtr<Document> aDoc = presShell->GetDocument();
 
   if (aDoc && aSel && !aSel->IsCollapsed()) {
-    return nsCopySupport::HTMLCopy(aSel, aDoc, nsIClipboard::kSelectionCache,
-                                   false);
+    return nsCopySupport::EncodeDocumentWithContextAndPutToClipboard(
+        aSel, aDoc, nsIClipboard::kSelectionCache, false);
   }
 
   return NS_OK;
@@ -2761,8 +2762,9 @@ int16_t AutoCopyListener::sClipboardID = -1;
  * What we do now:
  * On every selection change, we copy to the clipboard anew, creating a
  * HTML buffer, a transferable, an nsISupportsString and
- * a huge mess every time.  This is basically what nsPresShell::DoCopy does
- * to move the selection into the clipboard for Edit->Copy.
+ * a huge mess every time.  This is basically what
+ * nsCopySupport::EncodeDocumentWithContextAndPutToClipboard() does to move the
+ * selection into the clipboard for Edit->Copy.
  *
  * What we should do, to make our end of the deal faster:
  * Create a singleton transferable with our own magic converter.  When selection
@@ -2829,8 +2831,10 @@ void AutoCopyListener::OnSelectionChange(Document* aDocument,
     return;
   }
 
-  // Call the copy code.
   DebugOnly<nsresult> rv =
-      nsCopySupport::HTMLCopy(&aSelection, aDocument, sClipboardID, false);
-  NS_WARNING_ASSERTION(NS_SUCCEEDED(rv), "nsCopySupport::HTMLCopy() failed");
+      nsCopySupport::EncodeDocumentWithContextAndPutToClipboard(
+          &aSelection, aDocument, sClipboardID, false);
+  NS_WARNING_ASSERTION(
+      NS_SUCCEEDED(rv),
+      "nsCopySupport::EncodeDocumentWithContextAndPutToClipboard() failed");
 }

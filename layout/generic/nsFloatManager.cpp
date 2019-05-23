@@ -2281,10 +2281,6 @@ nsFloatManager::FloatInfo::FloatInfo(nsIFrame* aFrame, nscoord aLineLeft,
       // No need to create shape info.
       return;
 
-    case StyleShapeSourceType::URL:
-      MOZ_ASSERT_UNREACHABLE("shape-outside doesn't have URL source type!");
-      return;
-
     case StyleShapeSourceType::Path:
       MOZ_ASSERT_UNREACHABLE("shape-outside doesn't have Path source type!");
       return;
@@ -2503,15 +2499,15 @@ nsFloatManager::ShapeInfo::CreateBasicShape(const StyleBasicShape& aBasicShape,
                                             const LogicalRect& aMarginRect,
                                             WritingMode aWM,
                                             const nsSize& aContainerSize) {
-  switch (aBasicShape.GetShapeType()) {
-    case StyleBasicShapeType::Polygon:
+  switch (aBasicShape.tag) {
+    case StyleBasicShape::Tag::Polygon:
       return CreatePolygon(aBasicShape, aShapeMargin, aFrame, aShapeBoxRect,
                            aMarginRect, aWM, aContainerSize);
-    case StyleBasicShapeType::Circle:
-    case StyleBasicShapeType::Ellipse:
+    case StyleBasicShape::Tag::Circle:
+    case StyleBasicShape::Tag::Ellipse:
       return CreateCircleOrEllipse(aBasicShape, aShapeMargin, aFrame,
                                    aShapeBoxRect, aWM, aContainerSize);
-    case StyleBasicShapeType::Inset:
+    case StyleBasicShape::Tag::Inset:
       return CreateInset(aBasicShape, aShapeMargin, aFrame, aShapeBoxRect, aWM,
                          aContainerSize);
   }
@@ -2599,8 +2595,7 @@ nsFloatManager::ShapeInfo::CreateCircleOrEllipse(
 
   // Compute the circle or ellipse radii.
   nsSize radii;
-  StyleBasicShapeType type = aBasicShape.GetShapeType();
-  if (type == StyleBasicShapeType::Circle) {
+  if (aBasicShape.IsCircle()) {
     nscoord radius = ShapeUtils::ComputeCircleRadius(
         aBasicShape, physicalCenter, physicalShapeBoxRect);
     // Circles can use the three argument, math constructor for
@@ -2609,7 +2604,7 @@ nsFloatManager::ShapeInfo::CreateCircleOrEllipse(
     return MakeUnique<EllipseShapeInfo>(logicalCenter, radii, aShapeMargin);
   }
 
-  MOZ_ASSERT(type == StyleBasicShapeType::Ellipse);
+  MOZ_ASSERT(aBasicShape.IsEllipse());
   nsSize physicalRadii = ShapeUtils::ComputeEllipseRadii(
       aBasicShape, physicalCenter, physicalShapeBoxRect);
   LogicalSize logicalRadii(aWM, physicalRadii);

@@ -1,8 +1,15 @@
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at http://mozilla.org/MPL/2.0/.
+---
 job-defaults:
     suite:
         category: web-platform-tests
     instance-size: xlarge
-    max-run-time: 5400
+    max-run-time:
+        by-test-platform:
+            android-em-7.0-x86_64/debug: 7200
+            default: 5400
     variants:
         by-test-platform:
             linux64/debug: ['serviceworker']
@@ -28,6 +35,7 @@ job-defaults:
     target:
         by-test-platform:
             android-em-7.0-x86_64/opt: geckoview-androidTest.apk
+            android-em-7.0-x86_64/debug: geckoview-androidTest.apk
             default: null
 
 web-platform-tests:
@@ -38,21 +46,16 @@ web-platform-tests:
         by-test-platform:
             android.*: 18
             linux.*/debug: 18
-            macosx64.*/opt: 8
-            macosx64/debug: 16
+            macosx*/opt: 8
+            macosx.*/debug: 16
             windows10.*/debug: 18
             windows10-aarch64/opt: 12
-            macosx64-ccov/debug: 24
             default: 12
     max-run-time:
         by-test-platform:
-            linux64-ccov/debug: 10800
-            windows10-64-ccov/debug: 10800
+            .*-ccov/debug: 10800
             default: 7200
-    e10s:
-        by-test-platform:
-            linux32/debug: both
-            default: true
+    e10s: true
     run-on-projects:
         by-test-platform:
             android.*: ['mozilla-central', 'try']
@@ -61,7 +64,6 @@ web-platform-tests:
             default: built-projects
     tier:
         by-test-platform:
-            android-em-7.0-x86_64/opt: 3
             android.*: 2
             linux64-asan/opt: 2
             windows10-aarch64.*: 2
@@ -78,12 +80,9 @@ web-platform-tests-headless:
     treeherder-symbol: W(wptH)
     chunks:
         by-test-platform:
-            macosx64.*/opt: 8
-            macosx64/debug: 16
-    e10s:
-        by-test-platform:
-            macosx.*: true
-            default: true
+            macosx.*/opt: 8
+            macosx.*/debug: 16
+    e10s: true
     max-run-time: 7200
     run-on-projects: []  # disabled pending releng approval
     mozharness:
@@ -105,11 +104,16 @@ web-platform-tests-reftests:
         name: web-platform-tests-reftests
     schedules-component: web-platform-tests-reftests
     treeherder-symbol: W(Wr)
-    chunks: 6
-    e10s:
+    chunks:
         by-test-platform:
-            linux32/debug: both
-            default: true
+            .*-ccov/debug: 8
+            linux64(-qr|-asan)/.*: 6
+            linux64(-shippable|-devedition)?/opt: 3
+            macosx10(10|14)-64/debug: 6
+            windows.*-(32|64)(-qr)?/debug: 5
+            android.*: 6
+            default: 4
+    e10s: true
     run-on-projects:
         by-test-platform:
             android.*: ['mozilla-central', 'try']
@@ -117,7 +121,6 @@ web-platform-tests-reftests:
             default: built-projects
     tier:
         by-test-platform:
-            android-em-7.0-x86_64/opt: 3
             android.*: 2
             linux64-asan/opt: 2
             windows10-aarch64.*: 2
@@ -133,10 +136,7 @@ web-platform-tests-reftests-headless:
     schedules-component: web-platform-tests-reftests
     treeherder-symbol: W(WrH)
     chunks: 6
-    e10s:
-        by-test-platform:
-            linux32/debug: both
-            default: true
+    e10s: true
     run-on-projects: []  # disabled pending releng approval
     mozharness:
         extra-options:
@@ -157,8 +157,7 @@ web-platform-tests-wdspec:
     treeherder-symbol: W(Wd)
     chunks:
         by-test-platform:
-            linux64-ccov/debug: 4
-            windows10-64-ccov/debug: 4
+            .*-ccov/debug: 4
             default: 2
     mozharness:
         extra-options:
@@ -171,7 +170,7 @@ web-platform-tests-wdspec:
             default: built-projects
     tier:
         by-test-platform:
-            android.*: 3
+            android.*: 2
             linux64-asan/opt: 2
             .*-qr/.*: 2  # can't be tier-1 if it's not running on integration branches
             default: default
@@ -209,7 +208,7 @@ test-verify-wpt:
             .*-ccov/.*: []
             .*-asan/.*: []
             (?:windows10-64|windows7-32|linux64)(?:-qr)?/opt: ['mozilla-central', 'try']
-            macosx64(?:-qr)?/opt: ['mozilla-central', 'try']
+            macosx.*64(?:-qr)?/opt: ['mozilla-central', 'try']
             # do not run on beta or release: usually just confirms earlier results
             default: ['trunk', 'try']
     tier: 2

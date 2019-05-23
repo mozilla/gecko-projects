@@ -326,7 +326,9 @@ extern const uint32_t ArgLengths[];
   _(LoadEnvironmentDynamicSlotResult, Id, Field)                               \
   _(LoadObjectResult, Id)                                                      \
   _(CallScriptedGetterResult, Id, Field, Byte)                                 \
+  _(CallScriptedGetterByValueResult, Id, Field, Byte)                          \
   _(CallNativeGetterResult, Id, Field)                                         \
+  _(CallNativeGetterByValueResult, Id, Field)                                  \
   _(CallProxyGetResult, Id, Field)                                             \
   _(CallProxyGetByValueResult, Id, Id)                                         \
   _(CallProxyHasPropResult, Id, Id, Byte)                                      \
@@ -367,8 +369,6 @@ extern const uint32_t ArgLengths[];
   _(LoadValueResult, Field)                                                    \
   _(LoadNewObjectFromTemplateResult, Field, UInt32, UInt32)                    \
                                                                                \
-  _(CallStringSplitResult, Id, Id, Field)                                      \
-  _(CallConstStringSplitResult, Field)                                         \
   _(CallStringConcatResult, Id, Id)                                            \
   _(CallStringObjectConcatResult, Id, Id)                                      \
   _(CallIsSuspendedGeneratorResult, Id)                                        \
@@ -534,12 +534,12 @@ enum class AttachDecision {
 
 // If the input expression evaluates to an AttachDecision other than NoAction,
 // return that AttachDecision. If it is NoAction, do nothing.
-#define TRY_ATTACH(expr)                      \
-  do {                                        \
-    AttachDecision result = expr;             \
-    if (result != AttachDecision::NoAction) { \
-      return result;                          \
-    }                                         \
+#define TRY_ATTACH(expr)                                    \
+  do {                                                      \
+    AttachDecision tryAttachTempResult_ = expr;             \
+    if (tryAttachTempResult_ != AttachDecision::NoAction) { \
+      return tryAttachTempResult_;                          \
+    }                                                       \
   } while (0)
 
 // Set of arguments supported by GetIndexOfArgument.
@@ -965,9 +965,14 @@ class MOZ_RAII CacheIRWriter : public JS::CustomAutoRooter {
     writeOpWithOperandId(CacheOp::GuardSpecificObject, obj);
     return addStubField(uintptr_t(expected), StubField::Type::JSObject);
   }
-  void guardSpecificAtom(StringOperandId str, JSAtom* expected) {
+  FieldOffset guardSpecificFunction(ObjOperandId obj, JSFunction* expected) {
+    // Guard object is a specific function. This implies immutable fields on
+    // the JSFunction struct itself are unchanged.
+    return guardSpecificObject(obj, expected);
+  }
+  FieldOffset guardSpecificAtom(StringOperandId str, JSAtom* expected) {
     writeOpWithOperandId(CacheOp::GuardSpecificAtom, str);
-    addStubField(uintptr_t(expected), StubField::Type::String);
+    return addStubField(uintptr_t(expected), StubField::Type::String);
   }
   void guardSpecificSymbol(SymbolOperandId sym, JS::Symbol* expected) {
     writeOpWithOperandId(CacheOp::GuardSpecificSymbol, sym);
@@ -1429,7 +1434,6 @@ class MOZ_RAII CacheIRWriter : public JS::CustomAutoRooter {
     reuseStubField(classOffset);
     addStubField(uintptr_t(templateObject), StubField::Type::JSObject);
   }
-
   void megamorphicLoadSlotResult(ObjOperandId obj, PropertyName* name,
                                  bool handleMissing) {
     writeOpWithOperandId(CacheOp::MegamorphicLoadSlotResult, obj);
@@ -1637,8 +1641,17 @@ class MOZ_RAII CacheIRWriter : public JS::CustomAutoRooter {
     addStubField(uintptr_t(getter), StubField::Type::JSObject);
     buffer_.writeByte(cx_->realm() == getter->realm());
   }
+  void callScriptedGetterByValueResult(ValOperandId obj, JSFunction* getter) {
+    writeOpWithOperandId(CacheOp::CallScriptedGetterByValueResult, obj);
+    addStubField(uintptr_t(getter), StubField::Type::JSObject);
+    buffer_.writeByte(cx_->realm() == getter->realm());
+  }
   void callNativeGetterResult(ObjOperandId obj, JSFunction* getter) {
     writeOpWithOperandId(CacheOp::CallNativeGetterResult, obj);
+    addStubField(uintptr_t(getter), StubField::Type::JSObject);
+  }
+  void callNativeGetterByValueResult(ValOperandId obj, JSFunction* getter) {
+    writeOpWithOperandId(CacheOp::CallNativeGetterByValueResult, obj);
     addStubField(uintptr_t(getter), StubField::Type::JSObject);
   }
   void callProxyGetResult(ObjOperandId obj, jsid id) {
@@ -1719,16 +1732,6 @@ class MOZ_RAII CacheIRWriter : public JS::CustomAutoRooter {
   void callStringObjectConcatResult(ValOperandId lhs, ValOperandId rhs) {
     writeOpWithOperandId(CacheOp::CallStringObjectConcatResult, lhs);
     writeOperandId(rhs);
-  }
-  void callStringSplitResult(StringOperandId str, StringOperandId sep,
-                             ObjectGroup* group) {
-    writeOpWithOperandId(CacheOp::CallStringSplitResult, str);
-    writeOperandId(sep);
-    addStubField(uintptr_t(group), StubField::Type::ObjectGroup);
-  }
-  void callConstStringSplitResult(ArrayObject* resultTemplate) {
-    writeOp(CacheOp::CallConstStringSplitResult);
-    addStubField(uintptr_t(resultTemplate), StubField::Type::JSObject);
   }
 
   void compareStringResult(uint32_t op, StringOperandId lhs,
@@ -2367,7 +2370,6 @@ class MOZ_RAII CallIRGenerator : public IRGenerator {
   HandleValueArray args_;
   PropertyTypeCheckInfo typeCheckInfo_;
   BaselineCacheIRStubKind cacheIRStubKind_;
-  bool isFirstStub_;
 
   bool getTemplateObjectForScripted(HandleFunction calleeFunc,
                                     MutableHandleObject result,
@@ -2377,8 +2379,6 @@ class MOZ_RAII CallIRGenerator : public IRGenerator {
   bool getTemplateObjectForClassHook(HandleObject calleeObj,
                                      MutableHandleObject result);
 
-  // Regular stubs
-  AttachDecision tryAttachStringSplit();
   AttachDecision tryAttachArrayPush();
   AttachDecision tryAttachArrayJoin();
   AttachDecision tryAttachIsSuspendedGenerator();
@@ -2389,20 +2389,16 @@ class MOZ_RAII CallIRGenerator : public IRGenerator {
   AttachDecision tryAttachCallNative(HandleFunction calleeFunc);
   AttachDecision tryAttachCallHook(HandleObject calleeObj);
 
-  // Deferred stubs
-  AttachDecision tryAttachConstStringSplit(HandleValue result);
-
   void trackAttached(const char* name);
 
  public:
   CallIRGenerator(JSContext* cx, HandleScript script, jsbytecode* pc, JSOp op,
                   ICState::Mode mode, uint32_t argc, HandleValue callee,
                   HandleValue thisval, HandleValue newTarget,
-                  HandleValueArray args, bool isFirstStub);
+                  HandleValueArray args);
 
   AttachDecision tryAttachStub();
 
-  bool isOptimizableConstStringSplit();
   AttachDecision tryAttachDeferredStub(HandleValue result);
 
   BaselineCacheIRStubKind cacheIRStubKind() const { return cacheIRStubKind_; }

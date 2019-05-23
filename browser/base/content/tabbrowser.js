@@ -30,6 +30,7 @@ window._gBrowser = {
     }
     window.addEventListener("sizemodechange", this);
     window.addEventListener("occlusionstatechange", this);
+    window.addEventListener("framefocusrequested", this);
 
     this._setupInitialBrowserAndTab();
 
@@ -310,6 +311,7 @@ window._gBrowser = {
         remoteType = E10SUtils.getRemoteTypeForURI(
           uriToLoad,
           gMultiProcessBrowser,
+          gFissionBrowser,
           E10SUtils.DEFAULT_REMOTE_TYPE
         );
       } else {
@@ -1177,7 +1179,9 @@ window._gBrowser = {
     // if the tab is a blank one.
     if (newBrowser._urlbarFocused && gURLBar) {
       // Explicitly close the popup if the URL bar retains focus
-      gURLBar.closePopup();
+      if (!gURLBar.openViewOnFocus) {
+        gURLBar.closePopup();
+      }
 
       // If the user happened to type into the URL bar for this browser
       // by the time we got here, focusing will cause the text to be
@@ -1605,6 +1609,7 @@ window._gBrowser = {
     remoteType,
     sameProcessAsFrameLoader,
     recordExecution,
+    replaceBrowsingContext,
   } = {}) {
     let isRemote = aBrowser.getAttribute("remote") == "true";
 
@@ -1725,7 +1730,7 @@ window._gBrowser = {
       // This call actually switches out our frameloaders. Do this as late as
       // possible before rebuilding the browser, as we'll need the new browser
       // state set up completely first.
-      aBrowser.changeRemoteness({ remoteType });
+      aBrowser.changeRemoteness({ remoteType, replaceBrowsingContext });
       // Once we have new frameloaders, this call sets the browser back up.
       //
       // FIXME(emilio): Shouldn't we call destroy() first? What hides the
@@ -1811,6 +1816,7 @@ window._gBrowser = {
     aOptions.remoteType =
       E10SUtils.getRemoteTypeForURI(aURL,
         gMultiProcessBrowser,
+        gFissionBrowser,
         oldRemoteType,
         aBrowser.currentURI);
 
@@ -2025,6 +2031,7 @@ window._gBrowser = {
             }
             return E10SUtils.getRemoteTypeForURI(url,
                                                  gMultiProcessBrowser,
+                                                 gFissionBrowser,
                                                  undefined,
                                                  uri);
           };
@@ -2457,13 +2464,14 @@ window._gBrowser = {
           referrerInfo.originalReferrer) {
         preferredRemoteType =
           E10SUtils.getRemoteTypeForURI(referrerInfo.originalReferrer.spec,
-                                        gMultiProcessBrowser);
+                                        gMultiProcessBrowser, gFissionBrowser);
       }
 
       let remoteType =
         forceNotRemote ? E10SUtils.NOT_REMOTE :
         E10SUtils.getRemoteTypeForURI(aURI, gMultiProcessBrowser,
-          preferredRemoteType);
+                                      gFissionBrowser,
+                                      preferredRemoteType);
 
       // If we open a new tab with the newtab URL in the default
       // userContext, check if there is a preloaded browser ready.
@@ -4291,6 +4299,18 @@ window._gBrowser = {
       case "keypress":
         this._handleKeyPressEventMac(aEvent);
         break;
+      case "framefocusrequested": {
+        let tab = this.getTabForBrowser(aEvent.target);
+        if (!tab || tab == this.selectedTab) {
+          // Let the focus manager try to do its thing by not calling
+          // preventDefault(). It will still raise the window if appropriate.
+          break;
+        }
+        this.selectedTab = tab;
+        window.focus();
+        aEvent.preventDefault();
+        break;
+      }
       case "sizemodechange":
       case "occlusionstatechange":
         if (aEvent.target == window && !this._switcher) {
@@ -4501,6 +4521,7 @@ window._gBrowser = {
     }
     window.removeEventListener("sizemodechange", this);
     window.removeEventListener("occlusionstatechange", this);
+    window.removeEventListener("framefocusrequested", this);
 
     if (gMultiProcessBrowser) {
       let messageManager = window.getGroupMessageManager("browsers");

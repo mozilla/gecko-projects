@@ -9,6 +9,8 @@ ChromeUtils.defineModuleGetter(this, "FxAccounts",
   "resource://gre/modules/FxAccounts.jsm");
 ChromeUtils.defineModuleGetter(this, "Services",
   "resource://gre/modules/Services.jsm");
+ChromeUtils.defineModuleGetter(this, "PrivateBrowsingUtils",
+  "resource://gre/modules/PrivateBrowsingUtils.jsm");
 
 class _BookmarkPanelHub {
   constructor() {
@@ -16,33 +18,36 @@ class _BookmarkPanelHub {
     this._trigger = {id: "bookmark-panel"};
     this._handleMessageRequest = null;
     this._addImpression = null;
-    this._initalized = false;
+    this._dispatch = null;
+    this._initialized = false;
     this._response = null;
     this._l10n = null;
 
     this.messageRequest = this.messageRequest.bind(this);
     this.toggleRecommendation = this.toggleRecommendation.bind(this);
+    this.sendUserEventTelemetry = this.sendUserEventTelemetry.bind(this);
+    this.collapseMessage = this.collapseMessage.bind(this);
   }
 
   /**
    * @param {function} handleMessageRequest
    * @param {function} addImpression
+   * @param {function} dispatch - Used for sending user telemetry information
    */
-  init(handleMessageRequest, addImpression) {
+  init(handleMessageRequest, addImpression, dispatch) {
     this._handleMessageRequest = handleMessageRequest;
     this._addImpression = addImpression;
-    this._l10n = new DOMLocalization([
-      "browser/branding/sync-brand.ftl",
-      "browser/newtab/asrouter.ftl",
-    ]);
-    this._initalized = true;
+    this._dispatch = dispatch;
+    this._l10n = new DOMLocalization();
+    this._initialized = true;
   }
 
   uninit() {
     this._l10n = null;
-    this._initalized = false;
+    this._initialized = false;
     this._handleMessageRequest = null;
     this._addImpression = null;
+    this._dispatch = null;
     this._response = null;
   }
 
@@ -56,8 +61,13 @@ class _BookmarkPanelHub {
    * @returns {obj|null} response object or null if no messages matched
    */
   async messageRequest(target, win) {
-    if (this._response && this._response.url === target.url) {
-      return this.onResponse(this._response, target, win);
+    if (!this._initialized) {
+      return false;
+    }
+
+    if (this._response && this._response.win === win && this._response.url === target.url && this._response.content) {
+      this.showMessage(this._response.content, target, win);
+      return true;
     }
 
     const response = await this._handleMessageRequest(this._trigger);
@@ -72,14 +82,19 @@ class _BookmarkPanelHub {
   onResponse(response, target, win) {
     this._response = {
       ...response,
+      collapsed: false,
       target,
       win,
       url: target.url,
     };
 
     if (response && response.content) {
+      // Only insert localization files if we need to show a message
+      win.MozXULElement.insertFTLIfNeeded("browser/newtab/asrouter.ftl");
+      win.MozXULElement.insertFTLIfNeeded("browser/branding/sync-brand.ftl");
       this.showMessage(response.content, target, win);
       this.sendImpression();
+      this.sendUserEventTelemetry("IMPRESSION", win);
     } else {
       this.hideMessage(target);
     }
@@ -90,6 +105,11 @@ class _BookmarkPanelHub {
   }
 
   showMessage(message, target, win) {
+    if (this._response.collapsed) {
+      this.toggleRecommendation(false);
+      return;
+    }
+
     const createElement = elem => target.document.createElementNS("http://www.w3.org/1999/xhtml", elem);
 
     if (!target.container.querySelector("#cfrMessageContainer")) {
@@ -103,14 +123,20 @@ class _BookmarkPanelHub {
           triggeringPrincipal: Services.scriptSecurityManager.createNullPrincipal({}),
           csp: null,
         });
+        this.sendUserEventTelemetry("CLICK", win);
       });
       recommendation.style.color = message.color;
       recommendation.style.background = `-moz-linear-gradient(-45deg, ${message.background_color_1} 0%, ${message.background_color_2} 70%)`;
-      const close = createElement("a");
+      const close = createElement("button");
       close.setAttribute("id", "cfrClose");
       close.setAttribute("aria-label", "close");
+      close.style.color = message.color;
       this._l10n.setAttributes(close, message.close_button.tooltiptext);
-      close.addEventListener("click", target.close);
+      close.addEventListener("click", e => {
+        this.sendUserEventTelemetry("DISMISS", win);
+        this.collapseMessage();
+        target.close(e);
+      });
       const title = createElement("h1");
       title.setAttribute("id", "editBookmarkPanelRecommendationTitle");
       this._l10n.setAttributes(title, message.title);
@@ -124,7 +150,6 @@ class _BookmarkPanelHub {
       recommendation.appendChild(title);
       recommendation.appendChild(content);
       recommendation.appendChild(cta);
-      this._l10n.translateElements([...recommendation.children]);
       target.container.appendChild(recommendation);
     }
 
@@ -133,12 +158,24 @@ class _BookmarkPanelHub {
 
   toggleRecommendation(visible) {
     const {target} = this._response;
-    target.infoButton.checked = visible !== undefined ? !!visible : !target.infoButton.checked;
+    if (visible === undefined) {
+      // When called from the info button of the bookmark panel
+      target.infoButton.checked = !target.infoButton.checked;
+    } else {
+      target.infoButton.checked = visible;
+    }
     if (target.infoButton.checked) {
+      // If it was ever collapsed we need to cancel the state
+      this._response.collapsed = false;
       target.recommendationContainer.removeAttribute("disabled");
     } else {
       target.recommendationContainer.setAttribute("disabled", "disabled");
     }
+  }
+
+  collapseMessage() {
+    this._response.collapsed = true;
+    this.toggleRecommendation(false);
   }
 
   hideMessage(target) {
@@ -147,15 +184,30 @@ class _BookmarkPanelHub {
       container.remove();
     }
     this.toggleRecommendation(false);
+    this._response = null;
   }
 
   _forceShowMessage(message) {
+    this.toggleRecommendation(true);
     this.showMessage(message.content, this._response.target, this._response.win);
-    this._response.target.infoButton.disabled = false;
   }
 
   sendImpression() {
     this._addImpression(this._response);
+  }
+
+  sendUserEventTelemetry(event, win) {
+    // Only send pings for non private browsing windows
+    if (!PrivateBrowsingUtils.isBrowserPrivate(win.ownerGlobal.gBrowser.selectedBrowser)) {
+      this._sendTelemetry({message_id: this._response.id, bucket_id: this._response.id, event});
+    }
+  }
+
+  _sendTelemetry(ping) {
+    this._dispatch({
+      type: "DOORHANGER_TELEMETRY",
+      data: {action: "cfr_user_event", source: "CFR", ...ping},
+    });
   }
 }
 

@@ -13,14 +13,14 @@
 // limitations under the License.
 
 use std::{
-    collections::{HashMap, HashSet, VecDeque},
+    collections::{hash_map::Entry, HashMap, HashSet, VecDeque},
     mem,
 };
 
-use crate::driver::{DefaultDriver, Driver};
+use crate::driver::{AbortSignal, DefaultAbortSignal, DefaultDriver, Driver};
 use crate::error::{ErrorKind, Result};
 use crate::guid::{Guid, IsValidGuid};
-use crate::tree::{Content, Kind, MergeState, MergedNode, MergedRoot, Node, Tree, Validity};
+use crate::tree::{Content, MergeState, MergedNode, MergedRoot, Node, Tree, Validity};
 
 /// Structure change types, used to indicate if a node on one side is moved
 /// or deleted on the other.
@@ -96,8 +96,9 @@ enum ConflictResolution {
 /// nested hierarchies, or make conflicting changes on multiple devices
 /// simultaneously. A simpler two-way tree merge strikes a good balance between
 /// correctness and complexity.
-pub struct Merger<'t, D = DefaultDriver> {
+pub struct Merger<'t, D = DefaultDriver, A = DefaultAbortSignal> {
     driver: &'t D,
+    signal: &'t A,
     local_tree: &'t Tree,
     new_local_contents: Option<&'t HashMap<Guid, Content>>,
     remote_tree: &'t Tree,
@@ -110,11 +111,12 @@ pub struct Merger<'t, D = DefaultDriver> {
 }
 
 #[cfg(test)]
-impl<'t> Merger<'t, DefaultDriver> {
+impl<'t> Merger<'t, DefaultDriver, DefaultAbortSignal> {
     /// Creates a merger with the default merge driver.
     pub fn new(local_tree: &'t Tree, remote_tree: &'t Tree) -> Merger<'t> {
         Merger {
             driver: &DefaultDriver,
+            signal: &DefaultAbortSignal,
             local_tree,
             new_local_contents: None,
             remote_tree,
@@ -136,6 +138,7 @@ impl<'t> Merger<'t, DefaultDriver> {
     ) -> Merger<'t> {
         Merger::with_driver(
             &DefaultDriver,
+            &DefaultAbortSignal,
             local_tree,
             new_local_contents,
             remote_tree,
@@ -144,17 +147,19 @@ impl<'t> Merger<'t, DefaultDriver> {
     }
 }
 
-impl<'t, D: Driver> Merger<'t, D> {
+impl<'t, D: Driver, A: AbortSignal> Merger<'t, D, A> {
     /// Creates a merger with the given merge driver and contents.
     pub fn with_driver(
         driver: &'t D,
+        signal: &'t A,
         local_tree: &'t Tree,
         new_local_contents: &'t HashMap<Guid, Content>,
         remote_tree: &'t Tree,
         new_remote_contents: &'t HashMap<Guid, Content>,
-    ) -> Merger<'t, D> {
+    ) -> Merger<'t, D, A> {
         Merger {
             driver,
+            signal,
             local_tree,
             new_local_contents: Some(new_local_contents),
             remote_tree,
@@ -180,12 +185,14 @@ impl<'t, D: Driver> Merger<'t, D> {
         // exist locally, or the local tree has tombstones for items that
         // aren't on the server.
         for guid in self.local_tree.deletions() {
+            self.signal.err_if_aborted()?;
             if !self.mentions(guid) {
                 self.delete_remotely.insert(guid.clone());
                 self.structure_counts.merged_deletions += 1;
             }
         }
         for guid in self.remote_tree.deletions() {
+            self.signal.err_if_aborted()?;
             if !self.mentions(guid) {
                 self.delete_locally.insert(guid.clone());
                 self.structure_counts.merged_deletions += 1;
@@ -206,11 +213,11 @@ impl<'t, D: Driver> Merger<'t, D> {
 
     /// Returns an iterator for all accepted local and remote deletions.
     #[inline]
-    pub fn deletions(&self) -> impl Iterator<Item = Deletion> {
+    pub fn deletions(&self) -> impl Iterator<Item = Deletion<'_>> {
         self.local_deletions().chain(self.remote_deletions())
     }
 
-    pub(crate) fn local_deletions(&self) -> impl Iterator<Item = Deletion> {
+    pub(crate) fn local_deletions(&self) -> impl Iterator<Item = Deletion<'_>> {
         self.delete_locally.iter().filter_map(move |guid| {
             if self.delete_remotely.contains(guid) {
                 None
@@ -218,8 +225,7 @@ impl<'t, D: Driver> Merger<'t, D> {
                 let local_level = self
                     .local_tree
                     .node_for_guid(guid)
-                    .map(|node| node.level())
-                    .unwrap_or(-1);
+                    .map_or(-1, |node| node.level());
                 // Items that should be deleted locally already have tombstones
                 // on the server, so we don't need to upload tombstones for
                 // these deletions.
@@ -232,13 +238,12 @@ impl<'t, D: Driver> Merger<'t, D> {
         })
     }
 
-    pub(crate) fn remote_deletions(&self) -> impl Iterator<Item = Deletion> {
+    pub(crate) fn remote_deletions(&self) -> impl Iterator<Item = Deletion<'_>> {
         self.delete_remotely.iter().map(move |guid| {
             let local_level = self
                 .local_tree
                 .node_for_guid(guid)
-                .map(|node| node.level())
-                .unwrap_or(-1);
+                .map_or(-1, |node| node.level());
             Deletion {
                 guid,
                 local_level,
@@ -272,6 +277,7 @@ impl<'t, D: Driver> Merger<'t, D> {
                 self.driver,
                 "Generating new GUID for local node {}", local_node
             );
+            self.signal.err_if_aborted()?;
             let new_guid = self.driver.generate_new_guid(&local_node.guid)?;
             if new_guid != local_node.guid {
                 if self.merged_guids.contains(&new_guid) {
@@ -289,6 +295,7 @@ impl<'t, D: Driver> Merger<'t, D> {
             // change the merge state from local to new if any children were moved
             // or deleted.
             for local_child_node in local_node.children() {
+                self.signal.err_if_aborted()?;
                 self.merge_local_child_into_merged_node(
                     &mut merged_node,
                     local_node,
@@ -313,6 +320,7 @@ impl<'t, D: Driver> Merger<'t, D> {
                 self.driver,
                 "Generating new GUID for remote node {}", remote_node
             );
+            self.signal.err_if_aborted()?;
             let new_guid = self.driver.generate_new_guid(&remote_node.guid)?;
             if new_guid != remote_node.guid {
                 if self.merged_guids.contains(&new_guid) {
@@ -331,6 +339,7 @@ impl<'t, D: Driver> Merger<'t, D> {
             // need to merge them and update the merge state from remote to new if
             // any children were moved or deleted.
             for remote_child_node in remote_node.children() {
+                self.signal.err_if_aborted()?;
                 self.merge_remote_child_into_merged_node(
                     &mut merged_node,
                     None,
@@ -383,6 +392,7 @@ impl<'t, D: Driver> Merger<'t, D> {
                 self.driver,
                 "Generating new valid GUID for node {}", remote_node
             );
+            self.signal.err_if_aborted()?;
             let new_guid = self.driver.generate_new_guid(&remote_node.guid)?;
             if new_guid != remote_node.guid {
                 if self.merged_guids.contains(&new_guid) {
@@ -419,6 +429,7 @@ impl<'t, D: Driver> Merger<'t, D> {
         match children {
             ConflictResolution::Local => {
                 for local_child_node in local_node.children() {
+                    self.signal.err_if_aborted()?;
                     self.merge_local_child_into_merged_node(
                         &mut merged_node,
                         local_node,
@@ -427,6 +438,7 @@ impl<'t, D: Driver> Merger<'t, D> {
                     )?;
                 }
                 for remote_child_node in remote_node.children() {
+                    self.signal.err_if_aborted()?;
                     self.merge_remote_child_into_merged_node(
                         &mut merged_node,
                         Some(local_node),
@@ -438,6 +450,7 @@ impl<'t, D: Driver> Merger<'t, D> {
 
             ConflictResolution::Remote | ConflictResolution::Unchanged => {
                 for remote_child_node in remote_node.children() {
+                    self.signal.err_if_aborted()?;
                     self.merge_remote_child_into_merged_node(
                         &mut merged_node,
                         Some(local_node),
@@ -446,6 +459,7 @@ impl<'t, D: Driver> Merger<'t, D> {
                     )?;
                 }
                 for local_child_node in local_node.children() {
+                    self.signal.err_if_aborted()?;
                     self.merge_local_child_into_merged_node(
                         &mut merged_node,
                         local_node,
@@ -640,7 +654,7 @@ impl<'t, D: Driver> Merger<'t, D> {
                 local_parent_node,
                 remote_parent_node,
                 remote_child_node,
-            ) {
+            )? {
             self.two_way_merge(local_child_node_by_content, remote_child_node)
         } else {
             self.merge_remote_only_node(remote_child_node)
@@ -846,7 +860,7 @@ impl<'t, D: Driver> Merger<'t, D> {
                 local_parent_node,
                 remote_parent_node,
                 local_child_node,
-            ) {
+            )? {
             // The local child has a remote content match, so take the remote GUID
             // and merge.
             let mut merged_child_node =
@@ -1006,7 +1020,7 @@ impl<'t, D: Driver> Merger<'t, D> {
         remote_parent_node: Node<'t>,
         remote_node: Node<'t>,
     ) -> Result<StructureChange> {
-        if !remote_node_is_syncable(&remote_node) {
+        if !remote_node.is_syncable() {
             // If the remote node is known to be non-syncable, we unconditionally
             // delete it, even if it's syncable or moved locally.
             return self.delete_remote_node(merged_node, remote_node);
@@ -1110,7 +1124,7 @@ impl<'t, D: Driver> Merger<'t, D> {
 
         if !self.remote_tree.is_deleted(&local_node.guid) {
             if let Some(remote_node) = self.remote_tree.node_for_guid(&local_node.guid) {
-                if !remote_node_is_syncable(&remote_node) {
+                if !remote_node.is_syncable() {
                     // The local node is syncable, but the remote node is not.
                     // This can happen if we applied an orphaned left pane
                     // query in a previous sync, and later saw the left pane
@@ -1199,6 +1213,7 @@ impl<'t, D: Driver> Merger<'t, D> {
     ) -> Result<StructureChange> {
         self.delete_remotely.insert(remote_node.guid.clone());
         for remote_child_node in remote_node.children() {
+            self.signal.err_if_aborted()?;
             if self.merged_guids.contains(&remote_child_node.guid) {
                 trace!(
                     self.driver,
@@ -1256,6 +1271,7 @@ impl<'t, D: Driver> Merger<'t, D> {
     ) -> Result<StructureChange> {
         self.delete_locally.insert(local_node.guid.clone());
         for local_child_node in local_node.children() {
+            self.signal.err_if_aborted()?;
             if self.merged_guids.contains(&local_child_node.guid) {
                 trace!(
                     self.driver,
@@ -1326,10 +1342,11 @@ impl<'t, D: Driver> Merger<'t, D> {
         &self,
         local_parent_node: Node<'t>,
         remote_parent_node: Node<'t>,
-    ) -> MatchingDupes<'t> {
+    ) -> Result<MatchingDupes<'t>> {
         let mut dupe_key_to_local_nodes: HashMap<&Content, VecDeque<_>> = HashMap::new();
 
         for local_child_node in local_parent_node.children() {
+            self.signal.err_if_aborted()?;
             if local_child_node.is_user_content_root() {
                 continue;
             }
@@ -1376,6 +1393,7 @@ impl<'t, D: Driver> Merger<'t, D> {
         let mut remote_to_local = HashMap::new();
 
         for remote_child_node in remote_parent_node.children() {
+            self.signal.err_if_aborted()?;
             if remote_to_local.contains_key(&remote_child_node.guid) {
                 trace!(
                     self.driver,
@@ -1428,7 +1446,7 @@ impl<'t, D: Driver> Merger<'t, D> {
             }
         }
 
-        (local_to_remote, remote_to_local)
+        Ok((local_to_remote, remote_to_local))
     }
 
     /// Finds a remote node with a different GUID that matches the content of a
@@ -1441,16 +1459,18 @@ impl<'t, D: Driver> Merger<'t, D> {
         local_parent_node: Node<'t>,
         remote_parent_node: Option<Node<'t>>,
         local_child_node: Node<'t>,
-    ) -> Option<Node<'t>> {
+    ) -> Result<Option<Node<'t>>> {
         if let Some(remote_parent_node) = remote_parent_node {
             let mut matching_dupes_by_local_parent_guid = mem::replace(
                 &mut self.matching_dupes_by_local_parent_guid,
                 HashMap::new(),
             );
             let new_remote_node = {
-                let (local_to_remote, _) = matching_dupes_by_local_parent_guid
+                let (local_to_remote, _) = match matching_dupes_by_local_parent_guid
                     .entry(local_parent_node.guid.clone())
-                    .or_insert_with(|| {
+                {
+                    Entry::Occupied(entry) => entry.into_mut(),
+                    Entry::Vacant(entry) => {
                         trace!(
                             self.driver,
                             "First local child {} doesn't exist remotely; \
@@ -1459,11 +1479,13 @@ impl<'t, D: Driver> Merger<'t, D> {
                             local_parent_node,
                             remote_parent_node
                         );
-                        self.find_all_matching_dupes_in_folders(
+                        let matching_dupes = self.find_all_matching_dupes_in_folders(
                             local_parent_node,
                             remote_parent_node,
-                        )
-                    });
+                        )?;
+                        entry.insert(matching_dupes)
+                    }
+                };
                 let new_remote_node = local_to_remote.get(&local_child_node.guid);
                 new_remote_node.map(|node| {
                     self.structure_counts.dupes += 1;
@@ -1474,7 +1496,7 @@ impl<'t, D: Driver> Merger<'t, D> {
                 &mut self.matching_dupes_by_local_parent_guid,
                 matching_dupes_by_local_parent_guid,
             );
-            new_remote_node
+            Ok(new_remote_node)
         } else {
             trace!(
                 self.driver,
@@ -1482,7 +1504,7 @@ impl<'t, D: Driver> Merger<'t, D> {
                 merged_node,
                 local_child_node
             );
-            None
+            Ok(None)
         }
     }
 
@@ -1496,16 +1518,18 @@ impl<'t, D: Driver> Merger<'t, D> {
         local_parent_node: Option<Node<'t>>,
         remote_parent_node: Node<'t>,
         remote_child_node: Node<'t>,
-    ) -> Option<Node<'t>> {
+    ) -> Result<Option<Node<'t>>> {
         if let Some(local_parent_node) = local_parent_node {
             let mut matching_dupes_by_local_parent_guid = mem::replace(
                 &mut self.matching_dupes_by_local_parent_guid,
                 HashMap::new(),
             );
             let new_local_node = {
-                let (_, remote_to_local) = matching_dupes_by_local_parent_guid
+                let (_, remote_to_local) = match matching_dupes_by_local_parent_guid
                     .entry(local_parent_node.guid.clone())
-                    .or_insert_with(|| {
+                {
+                    Entry::Occupied(entry) => entry.into_mut(),
+                    Entry::Vacant(entry) => {
                         trace!(
                             self.driver,
                             "First remote child {} doesn't exist locally; \
@@ -1514,11 +1538,13 @@ impl<'t, D: Driver> Merger<'t, D> {
                             local_parent_node,
                             remote_parent_node
                         );
-                        self.find_all_matching_dupes_in_folders(
+                        let matching_dupes = self.find_all_matching_dupes_in_folders(
                             local_parent_node,
                             remote_parent_node,
-                        )
-                    });
+                        )?;
+                        entry.insert(matching_dupes)
+                    }
+                };
                 let new_local_node = remote_to_local.get(&remote_child_node.guid);
                 new_local_node.map(|node| {
                     self.structure_counts.dupes += 1;
@@ -1529,7 +1555,7 @@ impl<'t, D: Driver> Merger<'t, D> {
                 &mut self.matching_dupes_by_local_parent_guid,
                 matching_dupes_by_local_parent_guid,
             );
-            new_local_node
+            Ok(new_local_node)
         } else {
             trace!(
                 self.driver,
@@ -1537,20 +1563,7 @@ impl<'t, D: Driver> Merger<'t, D> {
                 merged_node,
                 remote_child_node
             );
-            None
+            Ok(None)
         }
-    }
-}
-
-/// Indicates if the tree in the remote node is syncable. This filters out
-/// livemarks (bug 1477671) and orphaned Places queries (bug 1433182).
-fn remote_node_is_syncable(remote_node: &Node) -> bool {
-    if !remote_node.is_syncable() {
-        return false;
-    }
-    match remote_node.kind {
-        Kind::Livemark => false,
-        Kind::Query if remote_node.diverged() => false,
-        _ => true,
     }
 }

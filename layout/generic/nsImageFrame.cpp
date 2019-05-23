@@ -209,7 +209,6 @@ nsImageFrame::nsImageFrame(ComputedStyle* aStyle, nsPresContext* aPresContext,
     : nsAtomicContainerFrame(aStyle, aPresContext, aID),
       mComputedSize(0, 0),
       mIntrinsicSize(0, 0),
-      mIntrinsicRatio(0, 0),
       mKind(aKind),
       mContentURLRequestRegistered(false),
       mDisplayingIcon(false),
@@ -483,15 +482,13 @@ bool nsImageFrame::UpdateIntrinsicRatio(imgIContainer* aImage) {
 
   if (!aImage) return false;
 
-  nsSize oldIntrinsicRatio = mIntrinsicRatio;
-
   // Set intrinsic ratio to match aImage's reported intrinsic ratio.
   // But if we have 'contain:size', or aImage hasn't loaded enough to report
   // useful ratio, we fall back to 0,0.
-  if (StyleDisplay()->IsContainSize() ||
-      NS_FAILED(aImage->GetIntrinsicRatio(&mIntrinsicRatio))) {
-    mIntrinsicRatio.SizeTo(0, 0);
-  }
+  AspectRatio oldIntrinsicRatio = mIntrinsicRatio;
+  mIntrinsicRatio = StyleDisplay()->IsContainSize()
+                        ? AspectRatio()
+                        : aImage->GetIntrinsicRatio().valueOr(AspectRatio());
 
   return mIntrinsicRatio != oldIntrinsicRatio;
 }
@@ -699,7 +696,7 @@ nsresult nsImageFrame::OnSizeAvailable(imgIRequest* aRequest,
 
     // Have to size to 0,0 so that GetDesiredSize recalculates the size.
     mIntrinsicSize = IntrinsicSize(0, 0);
-    mIntrinsicRatio.SizeTo(0, 0);
+    mIntrinsicRatio = AspectRatio();
     intrinsicSizeChanged = true;
   }
 
@@ -820,7 +817,7 @@ void nsImageFrame::NotifyNewCurrentRequest(imgIRequest* aRequest,
 
     // Have to size to 0,0 so that GetDesiredSize recalculates the size
     mIntrinsicSize = IntrinsicSize(0, 0);
-    mIntrinsicRatio.SizeTo(0, 0);
+    mIntrinsicRatio = AspectRatio();
   }
 
   if (GotInitialReflow()) {
@@ -907,7 +904,7 @@ void nsImageFrame::EnsureIntrinsicSizeAndRatio() {
     // If we have 'contain:size', then our intrinsic size and ratio are 0,0
     // regardless of what our underlying image may think.
     mIntrinsicSize = IntrinsicSize(0, 0);
-    mIntrinsicRatio.SizeTo(0, 0);
+    mIntrinsicRatio = AspectRatio();
     return;
   }
 
@@ -928,7 +925,7 @@ void nsImageFrame::EnsureIntrinsicSizeAndRatio() {
     nscoord edgeLengthToUse = nsPresContext::CSSPixelsToAppUnits(
         ICON_SIZE + (2 * (ICON_PADDING + ALT_BORDER_WIDTH)));
     mIntrinsicSize = IntrinsicSize(edgeLengthToUse, edgeLengthToUse);
-    mIntrinsicRatio.SizeTo(1, 1);
+    mIntrinsicRatio = AspectRatio(1.0f);
   }
 }
 
@@ -997,7 +994,7 @@ nscoord nsImageFrame::GetPrefISize(gfxContext* aRenderingContext) {
 IntrinsicSize nsImageFrame::GetIntrinsicSize() { return mIntrinsicSize; }
 
 /* virtual */
-nsSize nsImageFrame::GetIntrinsicRatio() { return mIntrinsicRatio; }
+AspectRatio nsImageFrame::GetIntrinsicRatio() { return mIntrinsicRatio; }
 
 void nsImageFrame::Reflow(nsPresContext* aPresContext, ReflowOutput& aMetrics,
                           const ReflowInput& aReflowInput,
@@ -1298,10 +1295,10 @@ struct nsRecessedBorder : public nsStyleBorder {
   }
 };
 
-class nsDisplayAltFeedback final : public nsDisplayItem {
+class nsDisplayAltFeedback final : public nsPaintedDisplayItem {
  public:
   nsDisplayAltFeedback(nsDisplayListBuilder* aBuilder, nsIFrame* aFrame)
-      : nsDisplayItem(aBuilder, aFrame) {}
+      : nsPaintedDisplayItem(aBuilder, aFrame) {}
 
   virtual nsDisplayItemGeometry* AllocateGeometry(
       nsDisplayListBuilder* aBuilder) override {
@@ -1818,7 +1815,7 @@ LayerState nsDisplayImage::GetLayerState(
         NS_FAILED(mImage->GetAnimated(&animated)) || !animated) {
       if (!aManager->IsCompositingCheap() ||
           !nsLayoutUtils::GPUImageScalingEnabled()) {
-        return LAYER_NONE;
+        return LayerState::LAYER_NONE;
       }
     }
 
@@ -1841,27 +1838,27 @@ LayerState nsDisplayImage::GetLayerState(
 
       // If we are not scaling at all, no point in separating this into a layer.
       if (scale.width == 1.0f && scale.height == 1.0f) {
-        return LAYER_NONE;
+        return LayerState::LAYER_NONE;
       }
 
       // If the target size is pretty small, no point in using a layer.
       if (destLayerRect.width * destLayerRect.height < 64 * 64) {
-        return LAYER_NONE;
+        return LayerState::LAYER_NONE;
       }
     }
   }
 
   if (!CanOptimizeToImageLayer(aManager, aBuilder)) {
-    return LAYER_NONE;
+    return LayerState::LAYER_NONE;
   }
 
   // Image layer doesn't support draw focus ring for image map.
   nsImageFrame* f = static_cast<nsImageFrame*>(mFrame);
   if (f->HasImageMap()) {
-    return LAYER_NONE;
+    return LayerState::LAYER_NONE;
   }
 
-  return LAYER_ACTIVE;
+  return LayerState::LAYER_ACTIVE;
 }
 
 /* virtual */

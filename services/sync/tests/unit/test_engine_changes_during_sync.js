@@ -6,6 +6,12 @@ const {FormRec} = ChromeUtils.import("resource://services-sync/engines/forms.js"
 const {LoginRec} = ChromeUtils.import("resource://services-sync/engines/passwords.js");
 const {PrefRec} = ChromeUtils.import("resource://services-sync/engines/prefs.js");
 
+// Allow eval to avoid triggering the eval()-assertion through ajv-4.1.1.js
+Services.prefs.setBoolPref("security.allow_eval_with_system_principal", true);
+registerCleanupFunction(() => {
+  Services.prefs.clearUserPref("security.allow_eval_with_system_principal");
+});
+
 const LoginInfo = Components.Constructor(
   "@mozilla.org/login-manager/loginInfo;1", Ci.nsILoginInfo, "init");
 
@@ -376,6 +382,33 @@ add_task(async function test_bookmark_change_during_sync() {
       remoteTaggedBmk.parentName = "Folder 2";
       remoteTaggedBmk.parentid   = folder2_guid;
       collection.insert(bmk4_guid, encryptPayload(remoteTaggedBmk.cleartext));
+
+      collection.insert("toolbar", encryptPayload({
+        id: "toolbar",
+        type: "folder",
+        title: "toolbar",
+        children: [folder1.guid],
+        parentName: "places",
+        parentid: "places",
+      }));
+
+      collection.insert("menu", encryptPayload({
+        id: "menu",
+        type: "folder",
+        title: "menu",
+        children: [bzBmk.guid, folder2_guid],
+        parentName: "places",
+        parentid: "places",
+      }));
+
+      collection.insert(folder1.guid, encryptPayload({
+        id: folder1.guid,
+        type: "folder",
+        title: "Folder 1",
+        children: [bmk2_guid],
+        parentName: "toolbar",
+        parentid: "toolbar",
+      }));
     }
 
     await assertChildGuids(folder1.guid, [tbBmk.guid],
@@ -416,8 +449,14 @@ add_task(async function test_bookmark_change_during_sync() {
       guid: bmk2_guid,
     });
     ok(bmk2, "Remote bookmark should be applied during first sync");
-    await assertChildGuids(folder1.guid, [tbBmk.guid, bmk2_guid, bmk3.guid],
-      "Folder 1 should have 3 children after first sync");
+    {
+      // We only check child GUIDs, and not their order, because the legacy and
+      // buffered bookmarks engines use different logic to merge children.
+      let folder1Children = await PlacesSyncUtils.bookmarks.fetchChildRecordIds(
+        folder1.guid);
+      deepEqual(folder1Children.sort(), [bmk2_guid, tbBmk.guid, bmk3.guid].sort(),
+        "Folder 1 should have 3 children after first sync");
+    }
     await assertChildGuids(folder2_guid, [bmk4_guid, tagQuery_guid],
       "Folder 2 should have 2 children after first sync");
     let taggedURIs = [];
@@ -432,9 +471,11 @@ add_task(async function test_bookmark_change_during_sync() {
 
     // First ping won't include validation data, since we've changed bookmarks
     // and `canValidate` will indicate it can't proceed.
-    let engineData = pings.map(p =>
-      p.syncs[0].engines.find(e => e.name == "bookmarks")
-    );
+    let engineData = pings.map(p => {
+      let name = bufferedBookmarksEnabled() ? "bookmarks-buffered" :
+                                              "bookmarks";
+      return p.syncs[0].engines.find(e => e.name == name);
+    });
     ok(!engineData[0].validation, "Should not validate after first sync");
     ok(engineData[1].validation, "Should validate after second sync");
   } finally {

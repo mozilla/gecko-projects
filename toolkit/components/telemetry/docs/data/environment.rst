@@ -141,14 +141,17 @@ Structure:
           profile: { // hdd where the profile folder is located
               model: <string>, // windows only or null on failure
               revision: <string>, // windows only or null on failure
+              type: <string>, // "SSD" or "HDD" windows only or null on failure
           },
           binary:  { // hdd where the application binary is located
               model: <string>, // windows only or null on failure
               revision: <string>, // windows only or null on failure
+              type: <string>, // "SSD" or "HDD" windows only or null on failure
           },
           system:  { // hdd where the system files are located
               model: <string>, // windows only or null on failure
               revision: <string>, // windows only or null on failure
+              type: <string>, // "SSD" or "HDD" windows only or null on failure
           },
         },
         gfx: {
@@ -164,6 +167,7 @@ Structure:
                 subsysID: <string>, // null on failure
                 RAM: <number>, // in MB, null on failure
                 driver: <string>, // null on failure
+                driverVendor: <string>, // null on failure
                 driverVersion: <string>, // null on failure
                 driverDate: <string>, // null on failure
                 GPUActive: <bool>, // currently always true for the first adapter
@@ -171,7 +175,7 @@ Structure:
               ...
             ],
             // Note: currently only added on Desktop. On Linux, only a single
-            // monitor is returned representing the entire virtual screen.
+            // monitor is returned for the primary screen.
             monitors: [
               {
                 screenWidth: <number>,  // screen width in pixels

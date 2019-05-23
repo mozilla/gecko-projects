@@ -104,7 +104,6 @@
 #define HTTP_PREF_PREFIX "network.http."
 #define INTL_ACCEPT_LANGUAGES "intl.accept_languages"
 #define BROWSER_PREF_PREFIX "browser.cache."
-#define DONOTTRACK_HEADER_ENABLED "privacy.donottrackheader.enabled"
 #define H2MANDATORY_SUITE "security.ssl3.ecdhe_rsa_aes_128_gcm_sha256"
 #define SAFE_HINT_HEADER_VALUE "safeHint.enabled"
 #define SECURITY_PREFIX "security."
@@ -202,13 +201,6 @@ nsHttpHandler::nsHttpHandler()
     : mHttpVersion(HttpVersion::v1_1),
       mProxyHttpVersion(HttpVersion::v1_1),
       mCapabilities(NS_HTTP_ALLOW_KEEPALIVE),
-      mReferrerLevel(0xff)  // by default we always send a referrer
-      ,
-      mSpoofReferrerSource(false),
-      mHideOnionReferrerSource(false),
-      mReferrerTrimmingPolicy(0),
-      mReferrerXOriginTrimmingPolicy(0),
-      mReferrerXOriginPolicy(0),
       mFastFallbackToIPv4(false),
       mIdleTimeout(PR_SecondsToInterval(10)),
       mSpdyTimeout(PR_SecondsToInterval(180)),
@@ -253,7 +245,6 @@ nsHttpHandler::nsHttpHandler()
       mAcceptLanguagesIsDirty(true),
       mPromptTempRedirect(true),
       mEnablePersistentHttpsCaching(false),
-      mDoNotTrackEnabled(false),
       mSafeHintEnabled(false),
       mParentalControlEnabled(false),
       mHandlerActive(false),
@@ -440,7 +431,6 @@ static const char* gCallbackPrefs[] = {
     UA_PREF_PREFIX,
     INTL_ACCEPT_LANGUAGES,
     BROWSER_PREF("disk_cache_ssl"),
-    DONOTTRACK_HEADER_ENABLED,
     H2MANDATORY_SUITE,
     HTTP_PREF("tcp_keepalive.short_lived_connections"),
     HTTP_PREF("tcp_keepalive.long_lived_connections"),
@@ -1309,38 +1299,6 @@ void nsHttpHandler::PrefsChanged(const char* pref) {
     }
   }
 
-  if (PREF_CHANGED(HTTP_PREF("sendRefererHeader"))) {
-    rv = Preferences::GetInt(HTTP_PREF("sendRefererHeader"), &val);
-    if (NS_SUCCEEDED(rv)) mReferrerLevel = (uint8_t)clamped(val, 0, 0xff);
-  }
-
-  if (PREF_CHANGED(HTTP_PREF("referer.spoofSource"))) {
-    rv = Preferences::GetBool(HTTP_PREF("referer.spoofSource"), &cVar);
-    if (NS_SUCCEEDED(rv)) mSpoofReferrerSource = cVar;
-  }
-
-  if (PREF_CHANGED(HTTP_PREF("referer.hideOnionSource"))) {
-    rv = Preferences::GetBool(HTTP_PREF("referer.hideOnionSource"), &cVar);
-    if (NS_SUCCEEDED(rv)) mHideOnionReferrerSource = cVar;
-  }
-
-  if (PREF_CHANGED(HTTP_PREF("referer.trimmingPolicy"))) {
-    rv = Preferences::GetInt(HTTP_PREF("referer.trimmingPolicy"), &val);
-    if (NS_SUCCEEDED(rv)) mReferrerTrimmingPolicy = (uint8_t)clamped(val, 0, 2);
-  }
-
-  if (PREF_CHANGED(HTTP_PREF("referer.XOriginTrimmingPolicy"))) {
-    rv = Preferences::GetInt(HTTP_PREF("referer.XOriginTrimmingPolicy"), &val);
-    if (NS_SUCCEEDED(rv))
-      mReferrerXOriginTrimmingPolicy = (uint8_t)clamped(val, 0, 2);
-  }
-
-  if (PREF_CHANGED(HTTP_PREF("referer.XOriginPolicy"))) {
-    rv = Preferences::GetInt(HTTP_PREF("referer.XOriginPolicy"), &val);
-    if (NS_SUCCEEDED(rv))
-      mReferrerXOriginPolicy = (uint8_t)clamped(val, 0, 0xff);
-  }
-
   if (PREF_CHANGED(HTTP_PREF("redirection-limit"))) {
     rv = Preferences::GetInt(HTTP_PREF("redirection-limit"), &val);
     if (NS_SUCCEEDED(rv)) mRedirectionLimit = (uint8_t)clamped(val, 0, 0xff);
@@ -1762,13 +1720,6 @@ void nsHttpHandler::PrefsChanged(const char* pref) {
   // Tracking options
   //
 
-  if (PREF_CHANGED(DONOTTRACK_HEADER_ENABLED)) {
-    cVar = false;
-    rv = Preferences::GetBool(DONOTTRACK_HEADER_ENABLED, &cVar);
-    if (NS_SUCCEEDED(rv)) {
-      mDoNotTrackEnabled = cVar;
-    }
-  }
   // Hint option
   if (PREF_CHANGED(SAFE_HINT_HEADER_VALUE)) {
     cVar = false;
@@ -1875,16 +1826,23 @@ void nsHttpHandler::PrefsChanged(const char* pref) {
   }
 
   if (PREF_CHANGED(HTTP_PREF("enforce-framing.http1")) ||
-      PREF_CHANGED(HTTP_PREF("enforce-framing.soft"))) {
+      PREF_CHANGED(HTTP_PREF("enforce-framing.soft")) ||
+      PREF_CHANGED(HTTP_PREF("enforce-framing.strict_chunked_encoding"))) {
     rv = Preferences::GetBool(HTTP_PREF("enforce-framing.http1"), &cVar);
     if (NS_SUCCEEDED(rv) && cVar) {
       mEnforceH1Framing = FRAMECHECK_STRICT;
     } else {
-      rv = Preferences::GetBool(HTTP_PREF("enforce-framing.soft"), &cVar);
+      rv = Preferences::GetBool(
+          HTTP_PREF("enforce-framing.strict_chunked_encoding"), &cVar);
       if (NS_SUCCEEDED(rv) && cVar) {
-        mEnforceH1Framing = FRAMECHECK_BARELY;
+        mEnforceH1Framing = FRAMECHECK_STRICT_CHUNKED;
       } else {
-        mEnforceH1Framing = FRAMECHECK_LAX;
+        rv = Preferences::GetBool(HTTP_PREF("enforce-framing.soft"), &cVar);
+        if (NS_SUCCEEDED(rv) && cVar) {
+          mEnforceH1Framing = FRAMECHECK_BARELY;
+        } else {
+          mEnforceH1Framing = FRAMECHECK_LAX;
+        }
       }
     }
   }
@@ -2210,7 +2168,7 @@ nsHttpHandler::Observe(nsISupports* subject, const char* topic,
     // depend on this value.
     mSessionStartTime = NowInSeconds();
 
-    if (!mDoNotTrackEnabled) {
+    if (!StaticPrefs::privacy_donottrackheader_enabled()) {
       Telemetry::Accumulate(Telemetry::DNT_USAGE, 2);
     } else {
       Telemetry::Accumulate(Telemetry::DNT_USAGE, 1);

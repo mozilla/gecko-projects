@@ -66,9 +66,10 @@ Realm::~Realm() {
     runtime_->lcovOutput().writeLCovResult(lcovOutput);
   }
 
-  // We cannot have a debuggee realm here so we don't have to call
-  // runtime->decrementNumDebuggeeRealms().
-  MOZ_ASSERT(!isDebuggee());
+  // We can have a debuggee realm here only if we are destroying the runtime and
+  // leaked GC things.
+  MOZ_ASSERT_IF(runtime_->gc.shutdownCollectedEverything(), !isDebuggee());
+  unsetIsDebuggee();
 
   MOZ_ASSERT(runtime_->numRealms > 0);
   runtime_->numRealms--;
@@ -337,12 +338,10 @@ void Realm::traceRoots(JSTracer* trc,
   // keys of the HashMap to avoid adding a strong reference to the JSScript
   // pointers.
   //
-  // If the code coverage is either enabled with the --dump-bytecode command
-  // line option, or with the PCCount JSFriend API functions, then we mark the
-  // keys of the map to hold the JSScript alive.
+  // If the --dump-bytecode command line option or the PCCount JSFriend API
+  // is used, then we mark the keys of the map to hold the JSScript alive.
   if (scriptCountsMap && trc->runtime()->profilingScripts &&
       !JS::RuntimeHeapIsMinorCollecting()) {
-    MOZ_ASSERT_IF(!trc->runtime()->isBeingDestroyed(), collectCoverage());
     for (ScriptCountsMap::Range r = scriptCountsMap->all(); !r.empty();
          r.popFront()) {
       JSScript* script = const_cast<JSScript*>(r.front().key());
@@ -794,6 +793,9 @@ void Realm::setIsDebuggee() {
 
 void Realm::unsetIsDebuggee() {
   if (isDebuggee()) {
+    if (debuggerObservesCoverage()) {
+      runtime_->decrementNumDebuggeeRealmsObservingCoverage();
+    }
     debugModeBits_ &= ~DebuggerObservesMask;
     DebugEnvironments::onRealmUnsetIsDebuggee(this);
     runtimeFromMainThread()->decrementNumDebuggeeRealms();
@@ -816,8 +818,11 @@ void Realm::updateDebuggerObservesCoverage() {
         iter->asInterpreter()->enableInterruptsUnconditionally();
       }
     }
+    runtime_->incrementNumDebuggeeRealmsObservingCoverage();
     return;
   }
+
+  runtime_->decrementNumDebuggeeRealmsObservingCoverage();
 
   // If code coverage is enabled by any other means, keep it.
   if (collectCoverage()) {

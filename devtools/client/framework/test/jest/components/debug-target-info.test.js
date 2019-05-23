@@ -32,31 +32,33 @@ const TEST_TOOLBOX = {
     name: "Test Tab Name",
     url: "http://some.target/url",
   },
+  doc: {},
 };
 
 const TEST_TOOLBOX_NO_NAME = {
   target: {
     url: "http://some.target/without/a/name",
   },
+  doc: {},
 };
 
 const USB_DEVICE_DESCRIPTION = {
-  brandName: "usbRuntimeBrandName",
-  channel: "release",
   deviceName: "usbDeviceName",
+  icon: "chrome://devtools/skin/images/aboutdebugging-firefox-release.svg",
+  name: "usbRuntimeBrandName",
   version: "1.0.0",
 };
 
 const THIS_FIREFOX_DEVICE_DESCRIPTION = {
-  brandName: "thisFirefoxRuntimeBrandName",
-  channel: "release",
+  icon: "chrome://devtools/skin/images/aboutdebugging-firefox-release.svg",
   version: "1.0.0",
+  name: "thisFirefoxRuntimeBrandName",
 };
 
 const USB_TARGET_INFO = {
   debugTargetData: {
     connectionType: CONNECTION_TYPES.USB,
-    deviceDescription: USB_DEVICE_DESCRIPTION,
+    runtimeInfo: USB_DEVICE_DESCRIPTION,
     targetType: DEBUG_TARGET_TYPES.TAB,
   },
   toolbox: TEST_TOOLBOX,
@@ -66,7 +68,7 @@ const USB_TARGET_INFO = {
 const THIS_FIREFOX_TARGET_INFO = {
   debugTargetData: {
     connectionType: CONNECTION_TYPES.THIS_FIREFOX,
-    deviceDescription: THIS_FIREFOX_DEVICE_DESCRIPTION,
+    runtimeInfo: THIS_FIREFOX_DEVICE_DESCRIPTION,
     targetType: DEBUG_TARGET_TYPES.TAB,
   },
   toolbox: TEST_TOOLBOX,
@@ -76,7 +78,7 @@ const THIS_FIREFOX_TARGET_INFO = {
 const THIS_FIREFOX_NO_NAME_TARGET_INFO = {
   debugTargetData: {
     connectionType: CONNECTION_TYPES.THIS_FIREFOX,
-    deviceDescription: THIS_FIREFOX_DEVICE_DESCRIPTION,
+    runtimeInfo: THIS_FIREFOX_DEVICE_DESCRIPTION,
     targetType: DEBUG_TARGET_TYPES.TAB,
   },
   toolbox: TEST_TOOLBOX_NO_NAME,
@@ -87,7 +89,7 @@ describe("DebugTargetInfo component", () => {
   describe("Connection info", () => {
     it("displays connection info for USB Release target", () => {
       const component = renderer.create(DebugTargetInfo(USB_TARGET_INFO));
-      expect(findByClassName(component.root, "js-connection-info").length).toEqual(1);
+      expect(findByClassName(component.root, "qa-connection-info").length).toEqual(1);
     });
 
     it("renders the expected snapshot for USB Release target", () => {
@@ -97,14 +99,14 @@ describe("DebugTargetInfo component", () => {
 
     it("hides the connection info for This Firefox target", () => {
       const component = renderer.create(DebugTargetInfo(THIS_FIREFOX_TARGET_INFO));
-      expect(findByClassName(component.root, "js-connection-info").length).toEqual(0);
+      expect(findByClassName(component.root, "qa-connection-info").length).toEqual(0);
     });
   });
 
   describe("Target title", () => {
     it("displays the target title if the target of the Toolbox has a name", () => {
       const component = renderer.create(DebugTargetInfo(THIS_FIREFOX_TARGET_INFO));
-      expect(findByClassName(component.root, "js-target-title").length).toEqual(1);
+      expect(findByClassName(component.root, "qa-target-title").length).toEqual(1);
     });
 
     it("renders the expected snapshot for This Firefox target", () => {
@@ -114,7 +116,7 @@ describe("DebugTargetInfo component", () => {
 
     it("doesn't display the target title if the target of the Toolbox has no name", () => {
       const component = renderer.create(DebugTargetInfo(THIS_FIREFOX_NO_NAME_TARGET_INFO));
-      expect(findByClassName(component.root, "js-target-title").length).toEqual(0);
+      expect(findByClassName(component.root, "qa-target-title").length).toEqual(0);
     });
 
     it("renders the expected snapshot for a Toolbox with an unnamed target", () => {

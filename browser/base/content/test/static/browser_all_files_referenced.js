@@ -157,9 +157,6 @@ var whitelist = [
   {file: "resource://gre/modules/Promise.jsm"},
   // Still used by WebIDE, which is going away but not entirely gone.
   {file: "resource://gre/modules/ZipUtils.jsm"},
-  // Bug 1483277 (temporarily unreferenced)
-  {file: AppConstants.BROWSER_CHROME_URL == "chrome://browser/content/browser.xul" ?
-    "chrome://browser/content/browser.xhtml" : "chrome://browser/content/browser.xul" },
   // Bug 1494170
   // (The references to these files are dynamically generated, so the test can't
   // find the references)
@@ -176,6 +173,12 @@ var whitelist = [
   // Referenced by the webcompat system addon for localization
   {file: "resource://gre/localization/en-US/toolkit/about/aboutCompat.ftl"},
 ];
+
+if (!AppConstants.MOZ_NEW_NOTIFICATION_STORE) {
+  // kvstore.jsm wraps the API in nsIKeyValue.idl in a more ergonomic API
+  // It landed in bug 1490496, and we expect to start using it shortly.
+  whitelist.push({file: "resource://gre/modules/kvstore.jsm"});
+}
 
 whitelist = new Set(whitelist.filter(item =>
   ("isFromDevTools" in item) == isDevtools &&

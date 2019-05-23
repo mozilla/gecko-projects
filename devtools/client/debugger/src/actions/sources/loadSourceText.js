@@ -13,18 +13,18 @@ import {
   getGeneratedSource,
   getSourcesEpoch,
   getBreakpointsForSource,
-  getSourceActorsForSource
+  getSourceActorsForSource,
 } from "../../selectors";
-import { setBreakpointPositions, addBreakpoint } from "../breakpoints";
+import { addBreakpoint } from "../breakpoints";
 
 import { prettyPrintSource } from "./prettyPrint";
+import { setBreakableLines } from "./breakableLines";
 import { isFulfilled } from "../../utils/async-value";
 
-import * as parser from "../../workers/parser";
 import { isOriginal, isPretty } from "../../utils/source";
 import {
   memoizeableAction,
-  type MemoizedAction
+  type MemoizedAction,
 } from "../../utils/memoizableAction";
 
 import { Telemetry } from "devtools-modules";
@@ -42,7 +42,7 @@ async function loadSource(
   { sourceMaps, client, getState }
 ): Promise<?{
   text: string,
-  contentType: string
+  contentType: string,
 }> {
   if (isPretty(source) && isOriginal(source)) {
     const generatedSource = getGeneratedSource(state, source);
@@ -85,21 +85,21 @@ async function loadSource(
 
   return {
     text: response.source,
-    contentType: response.contentType || "text/javascript"
+    contentType: response.contentType || "text/javascript",
   };
 }
 
 async function loadSourceTextPromise(
   cx: Context,
   source: Source,
-  { dispatch, getState, client, sourceMaps }: ThunkArgs
+  { dispatch, getState, client, sourceMaps, parser }: ThunkArgs
 ): Promise<?Source> {
   const epoch = getSourcesEpoch(getState());
   await dispatch({
     type: "LOAD_SOURCE_TEXT",
     sourceId: source.id,
     epoch,
-    [PROMISE]: loadSource(getState(), source, { sourceMaps, client, getState })
+    [PROMISE]: loadSource(getState(), source, { sourceMaps, client, getState }),
   });
 
   const newSource = getSource(getState(), source.id);
@@ -116,8 +116,8 @@ async function loadSourceTextPromise(
         ? content.value
         : { type: "text", value: "", contentType: undefined }
     );
-    dispatch(setBreakpointPositions({ cx, sourceId: newSource.id }));
 
+    await dispatch(setBreakableLines(cx, source.id));
     // Update the text in any breakpoints for this source by re-adding them.
     const breakpoints = getBreakpointsForSource(getState(), source.id);
     for (const { location, options, disabled } of breakpoints) {
@@ -152,5 +152,5 @@ export const loadSourceText: MemoizedAction<
     return `${epoch}:${source.id}`;
   },
   action: ({ cx, source }, thunkArgs) =>
-    loadSourceTextPromise(cx, source, thunkArgs)
+    loadSourceTextPromise(cx, source, thunkArgs),
 });

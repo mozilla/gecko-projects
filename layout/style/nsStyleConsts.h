@@ -168,17 +168,10 @@ enum class StyleScrollbarWidth : uint8_t {
   None,
 };
 
-// <shape-radius> for <basic-shape>
-enum class StyleShapeRadius : uint8_t {
-  ClosestSide,
-  FarthestSide,
-};
-
 // Shape source type
 enum class StyleShapeSourceType : uint8_t {
   None,
-  URL,    // clip-path only
-  Image,  // shape-outside only
+  Image,  // shape-outside / clip-path only, and clip-path only uses it for <url>s
   Shape,
   Box,
   Path,  // SVG path function
@@ -267,8 +260,7 @@ enum class StyleImageLayerRepeat : uint8_t {
 enum class StyleMaskMode : uint8_t { Alpha = 0, Luminance, MatchSource };
 
 // See nsStyleTable
-#define NS_STYLE_BORDER_COLLAPSE 0
-#define NS_STYLE_BORDER_SEPARATE 1
+enum class StyleBorderCollapse : uint8_t { Collapse, Separate };
 
 // border-image-repeat
 enum class StyleBorderImageRepeat : uint8_t { Stretch, Repeat, Round, Space };
@@ -688,12 +680,6 @@ enum class StyleWhiteSpace : uint8_t {
 #define NS_STYLE_GRADIENT_SIZE_EXPLICIT_SIZE 4
 
 // See nsStyleSVG
-
-// -moz-context-properties
-#define NS_STYLE_CONTEXT_PROPERTY_FILL (1 << 0)
-#define NS_STYLE_CONTEXT_PROPERTY_STROKE (1 << 1)
-#define NS_STYLE_CONTEXT_PROPERTY_FILL_OPACITY (1 << 2)
-#define NS_STYLE_CONTEXT_PROPERTY_STROKE_OPACITY (1 << 3)
 
 /*
  * -moz-window-shadow

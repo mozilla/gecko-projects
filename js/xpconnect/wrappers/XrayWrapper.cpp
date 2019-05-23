@@ -1652,12 +1652,11 @@ bool DOMXrayTraits::resolveOwnProperty(JSContext* cx, HandleObject wrapper,
       if (subframe) {
         subframe->EnsureInnerWindow();
         nsGlobalWindowOuter* global = nsGlobalWindowOuter::Cast(subframe);
-        JSObject* obj = global->FastGetGlobalJSObject();
+        JSObject* obj = global->GetGlobalJSObject();
         if (MOZ_UNLIKELY(!obj)) {
           // It's gone?
           return xpc::Throw(cx, NS_ERROR_FAILURE);
         }
-        ExposeObjectToActiveJS(obj);
         desc.value().setObject(*obj);
         FillPropertyDescriptor(desc, wrapper, true);
         return JS_WrapPropertyDescriptor(cx, desc);
@@ -1753,27 +1752,17 @@ bool DOMXrayTraits::call(JSContext* cx, HandleObject wrapper,
   // object, or a WebIDL instance object.  WebIDL prototype objects never have
   // a clasp->call.  WebIDL interface objects we want to invoke on the xray
   // compartment.  WebIDL instance objects either don't have a clasp->call or
-  // are using "legacycaller", which basically means plug-ins.  We want to
-  // call those on the content compartment.
-  if (clasp->flags & JSCLASS_IS_DOMIFACEANDPROTOJSCLASS) {
-    if (JSNative call = clasp->getCall()) {
-      // call it on the Xray compartment
-      if (!call(cx, args.length(), args.base())) {
-        return false;
-      }
-    } else {
-      RootedValue v(cx, ObjectValue(*wrapper));
-      js::ReportIsNotFunction(cx, v);
-      return false;
-    }
-  } else {
-    // This is only reached for WebIDL instance objects, and in practice
-    // only for plugins.  Just call them on the content compartment.
-    if (!baseInstance.call(cx, wrapper, args)) {
-      return false;
-    }
+  // are using "legacycaller".  At this time for all the legacycaller users it
+  // makes more sense to invoke on the xray compartment, so we just go ahead
+  // and do that for everything.
+  if (JSNative call = clasp->getCall()) {
+    // call it on the Xray compartment
+    return call(cx, args.length(), args.base());
   }
-  return JS_WrapValue(cx, args.rval());
+
+  RootedValue v(cx, ObjectValue(*wrapper));
+  js::ReportIsNotFunction(cx, v);
+  return false;
 }
 
 bool DOMXrayTraits::construct(JSContext* cx, HandleObject wrapper,
