@@ -52,7 +52,7 @@ class VendorRust(MozbuildObject):
             m = re.match('cargo-vendor v((\d+\.)*\d+)', l)
             if m:
                 version = m.group(1)
-                return LooseVersion(version) >= b'0.1.21'
+                return LooseVersion(version) >= b'0.1.23'
         return False
 
     def check_modified_files(self):
@@ -119,7 +119,7 @@ Please commit or stash these changes before vendoring, or re-run with `--ignore-
             self.run_process(args=[cargo, 'install', 'cargo-vendor'],
                              append_env=env)
         elif not self.check_cargo_vendor_version(cargo):
-            self.log(logging.INFO, 'cargo_vendor', {}, 'cargo-vendor >= 0.1.21 required; force-reinstalling (this may take a few minutes)...')
+            self.log(logging.INFO, 'cargo_vendor', {}, 'cargo-vendor >= 0.1.23 required; force-reinstalling (this may take a few minutes)...')
             env = self.check_openssl()
             self.run_process(args=[cargo, 'install', '--force', 'cargo-vendor'],
                              append_env=env)
@@ -165,6 +165,7 @@ Please commit or stash these changes before vendoring, or re-run with `--ignore-
             'bindgen',
             'fuchsia-zircon',
             'fuchsia-zircon-sys',
+            'fuchsia-cprng',
         ]
     }
 
@@ -172,7 +173,6 @@ Please commit or stash these changes before vendoring, or re-run with `--ignore-
     # license, but that also need to explicitly mentioned in about:license.
     RUNTIME_LICENSE_PACKAGE_WHITELIST = {
         'BSD-3-Clause': [
-            'sha1',
         ]
     }
 
@@ -187,6 +187,8 @@ Please commit or stash these changes before vendoring, or re-run with `--ignore-
     RUNTIME_LICENSE_FILE_PACKAGE_WHITELIST = {
         # MIT
         'deque': '6485b8ed310d3f0340bf1ad1f47645069ce4069dcc6bb46c7d5c6faf41de1fdb',
+        # we're whitelisting this fuchsia crate because it doesn't get built in the final product but has a license-file that needs ignoring
+        'fuchsia-cprng' : '03b114f53e6587a398931762ee11e2395bfdba252a329940e2c8c9e81813845b',
     }
 
     @staticmethod

@@ -899,10 +899,8 @@ sdb_GetAttributeValueNoLock(SDB *sdb, CK_OBJECT_HANDLE object_id,
         }
         columns = newColumns;
     }
-    if (!columns) {
-        error = CKR_OBJECT_HANDLE_INVALID;
-        goto loser;
-    }
+
+    PORT_Assert(columns);
 
     char *statement = sqlite3_mprintf("SELECT DISTINCT %s FROM %s where id=$ID LIMIT 1;",
                                       columns, table);
@@ -941,9 +939,12 @@ sdb_GetAttributeValueNoLock(SDB *sdb, CK_OBJECT_HANDLE object_id,
                 blobSize = sqlite3_column_bytes(stmt, i);
                 blobData = sqlite3_column_blob(stmt, i);
                 if (blobData == NULL) {
+                    /* PKCS 11 requires that get attributes process all the
+                     * attributes in the template, marking the attributes with
+                     * issues with -1. Mark the error but continue */
                     template[i].ulValueLen = -1;
                     error = CKR_ATTRIBUTE_TYPE_INVALID;
-                    break;
+                    continue;
                 }
                 /* If the blob equals our explicit NULL value, then the
                  * attribute is a NULL. */
@@ -954,9 +955,10 @@ sdb_GetAttributeValueNoLock(SDB *sdb, CK_OBJECT_HANDLE object_id,
                 }
                 if (template[i].pValue) {
                     if (template[i].ulValueLen < blobSize) {
+                        /* like CKR_ATTRIBUTE_TYPE_INVALID, continue processing */
                         template[i].ulValueLen = -1;
                         error = CKR_BUFFER_TOO_SMALL;
-                        break;
+                        continue;
                     }
                     PORT_Memcpy(template[i].pValue, blobData, blobSize);
                 }

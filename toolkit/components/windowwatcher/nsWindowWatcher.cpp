@@ -66,6 +66,7 @@
 #include "mozilla/dom/Storage.h"
 #include "mozilla/dom/ScriptSettings.h"
 #include "mozilla/dom/BrowserParent.h"
+#include "mozilla/dom/BrowserHost.h"
 #include "mozilla/dom/DocGroup.h"
 #include "mozilla/dom/TabGroup.h"
 #include "nsIXULWindow.h"
@@ -476,7 +477,7 @@ nsWindowWatcher::OpenWindowWithRemoteTab(
   if (aRemoteTab) {
     // We need to examine the window that aRemoteTab belongs to in
     // order to inform us of what kind of window we're going to open.
-    BrowserParent* openingTab = BrowserParent::GetFrom(aRemoteTab);
+    BrowserHost* openingTab = BrowserHost::GetFrom(aRemoteTab);
     parentWindowOuter = openingTab->GetParentWindowOuter();
 
     // Propagate the privacy & fission status of the parent window, if
@@ -1028,7 +1029,16 @@ nsresult nsWindowWatcher::OpenWindowInternal(
     // this call already happened when the window was created, but
     // SetInitialPrincipalToSubject is safe to call multiple times.
     if (newWindow) {
-      newWindow->SetInitialPrincipalToSubject();
+      nsCOMPtr<nsIContentSecurityPolicy> cspToInheritForAboutBlank;
+      nsCOMPtr<mozIDOMWindowProxy> targetOpener = newWindow->GetOpener();
+      nsCOMPtr<nsIDocShell> openerDocShell(do_GetInterface(targetOpener));
+      if (openerDocShell) {
+        RefPtr<Document> openerDoc =
+            static_cast<nsDocShell*>(openerDocShell.get())->GetDocument();
+        cspToInheritForAboutBlank = openerDoc ? openerDoc->GetCsp() : nullptr;
+      }
+      newWindow->SetInitialPrincipalToSubject(cspToInheritForAboutBlank);
+
       if (aIsPopupSpam) {
         nsGlobalWindowOuter* globalWin = nsGlobalWindowOuter::Cast(newWindow);
         MOZ_ASSERT(!globalWin->IsPopupSpamWindow(),
@@ -1102,21 +1112,11 @@ nsresult nsWindowWatcher::OpenWindowInternal(
     }
   }
 
-  // Currently we query the CSP from the principal of the inner window.
-  // After Bug 965637 we can query the CSP directly from the inner window.
-  // Further, if the JS context is null, then the subjectPrincipal falls
-  // back to being the SystemPrincipal (see above) and the SystemPrincipal
-  // can currently not hold a CSP. We use the same semantics here.
   if (loadState && cx) {
     nsGlobalWindowInner* win = xpc::CurrentWindowOrNull(cx);
     if (win) {
-      nsCOMPtr<nsIPrincipal> principal = win->GetPrincipal();
-      if (principal) {
-        nsCOMPtr<nsIContentSecurityPolicy> csp;
-        rv = principal->GetCsp(getter_AddRefs(csp));
-        NS_ENSURE_SUCCESS(rv, rv);
-        loadState->SetCsp(csp);
-      }
+      nsCOMPtr<nsIContentSecurityPolicy> csp = win->GetCsp();
+      loadState->SetCsp(csp);
     }
   }
 
@@ -1184,9 +1184,9 @@ nsresult nsWindowWatcher::OpenWindowInternal(
       RefPtr<Storage> storage;
       nsCOMPtr<nsPIDOMWindowInner> pInnerWin =
           parentWindow->GetCurrentInnerWindow();
-      parentStorageManager->GetStorage(pInnerWin, subjectPrincipal,
-                                       isPrivateBrowsingWindow,
-                                       getter_AddRefs(storage));
+      parentStorageManager->GetStorage(
+          pInnerWin, subjectPrincipal, subjectPrincipal,
+          isPrivateBrowsingWindow, getter_AddRefs(storage));
       if (storage) {
         newStorageManager->CloneStorage(storage);
       }

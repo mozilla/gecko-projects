@@ -534,6 +534,7 @@ WebConsoleActor.prototype =
    * @return object
    *         The response object which holds the startedListeners array.
    */
+  /* eslint-disable complexity */
   startListeners: async function(request) {
     const startedListeners = [];
     const window = !this.parentActor.isRootActor ? this.window : null;
@@ -692,6 +693,7 @@ WebConsoleActor.prototype =
       traits: this.traits,
     };
   },
+  /* eslint-enable complexity */
 
   /**
    * Handler for the "stopListeners" request.
@@ -985,6 +987,7 @@ WebConsoleActor.prototype =
    * @return object
    *         The evaluation response packet.
    */
+  /* eslint-disable complexity */
   evaluateJS: function(request) {
     const input = request.text;
     const timestamp = Date.now();
@@ -1010,7 +1013,7 @@ WebConsoleActor.prototype =
     const helperResult = evalInfo.helperResult;
 
     let result, errorDocURL, errorMessage, errorNotes = null, errorGrip = null,
-      frame = null, awaitResult, errorMessageName;
+      frame = null, awaitResult, errorMessageName, exceptionStack;
     if (evalResult) {
       if ("return" in evalResult) {
         result = evalResult.return;
@@ -1028,6 +1031,21 @@ WebConsoleActor.prototype =
       } else if ("throw" in evalResult) {
         const error = evalResult.throw;
         errorGrip = this.createValueGrip(error);
+
+        exceptionStack = this.prepareStackForRemote(evalResult.stack);
+
+        if (exceptionStack) {
+          // Set the frame based on the topmost stack frame for the exception.
+          const {
+            filename: source,
+            sourceId,
+            lineNumber: line,
+            columnNumber: column,
+          } = exceptionStack[0];
+          frame = { source, sourceId, line, column };
+
+          exceptionStack = WebConsoleUtils.removeFramesAboveDebuggerEval(exceptionStack);
+        }
 
         errorMessage = String(error);
         if (typeof error === "object" && error !== null) {
@@ -1132,12 +1150,14 @@ WebConsoleActor.prototype =
       exception: errorGrip,
       exceptionMessage: this._createStringGrip(errorMessage),
       exceptionDocURL: errorDocURL,
+      exceptionStack,
       errorMessageName,
       frame,
       helperResult: helperResult,
       notes: errorNotes,
     };
   },
+  /* eslint-enable complexity */
 
   /**
    * The Autocomplete request handler.
@@ -1466,6 +1486,36 @@ WebConsoleActor.prototype =
   },
 
   /**
+   * Prepare a SavedFrame stack to be sent to the client.
+   *
+   * @param SavedFrame errorStack
+   *        Stack for an error we need to send to the client.
+   * @return object
+   *         The object you can send to the remote client.
+   */
+  prepareStackForRemote(errorStack) {
+    // Convert stack objects to the JSON attributes expected by client code
+    // Bug 1348885: If the global from which this error came from has been
+    // nuked, stack is going to be a dead wrapper.
+    if (!errorStack || (Cu && Cu.isDeadWrapper(errorStack))) {
+      return null;
+    }
+    const stack = [];
+    let s = errorStack;
+    while (s) {
+      stack.push({
+        filename: s.source,
+        sourceId: this.getActorIdForInternalSourceId(s.sourceId),
+        lineNumber: s.line,
+        columnNumber: s.column,
+        functionName: s.functionDisplayName,
+      });
+      s = s.parent;
+    }
+    return stack;
+  },
+
+  /**
    * Prepare an nsIScriptError to be sent to the client.
    *
    * @param nsIScriptError pageError
@@ -1474,24 +1524,7 @@ WebConsoleActor.prototype =
    *         The object you can send to the remote client.
    */
   preparePageErrorForRemote: function(pageError) {
-    let stack = null;
-    // Convert stack objects to the JSON attributes expected by client code
-    // Bug 1348885: If the global from which this error came from has been
-    // nuked, stack is going to be a dead wrapper.
-    if (pageError.stack && !Cu.isDeadWrapper(pageError.stack)) {
-      stack = [];
-      let s = pageError.stack;
-      while (s !== null) {
-        stack.push({
-          filename: s.source,
-          sourceId: this.getActorIdForInternalSourceId(s.sourceId),
-          lineNumber: s.line,
-          columnNumber: s.column,
-          functionName: s.functionDisplayName,
-        });
-        s = s.parent;
-      }
-    }
+    const stack = this.prepareStackForRemote(pageError.stack);
     let lineText = pageError.sourceLine;
     if (lineText && lineText.length > DebuggerServer.LONG_STRING_INITIAL_LENGTH) {
       lineText = lineText.substr(0, DebuggerServer.LONG_STRING_INITIAL_LENGTH);
@@ -1552,6 +1585,7 @@ WebConsoleActor.prototype =
       notes: notesArray,
       executionPoint: pageError.executionPoint,
       chromeContext: pageError.isFromChromeContext,
+      cssSelectors: pageError.cssSelectors,
     };
   },
 

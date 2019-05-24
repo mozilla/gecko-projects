@@ -23,6 +23,7 @@
 #include "mozilla/Logging.h"
 #include "mozilla/Preferences.h"
 #include "mozilla/PresShell.h"
+#include "mozilla/PresShellInlines.h"
 #include "mozilla/ServoBindings.h"
 #include "mozilla/ServoCSSParser.h"
 #include "mozilla/ServoStyleSet.h"
@@ -43,7 +44,6 @@
 #include "mozilla/dom/Document.h"
 #include "nsILoadContext.h"
 #include "nsINetworkPredictor.h"
-#include "nsIPresShellInlines.h"
 #include "nsIPrincipal.h"
 #include "nsISupportsPriority.h"
 #include "nsIWebNavigation.h"
@@ -55,6 +55,7 @@
 #include "nsPrintfCString.h"
 #include "nsUTF8Utils.h"
 #include "nsDOMNavigationTiming.h"
+#include "ReferrerInfo.h"
 
 using namespace mozilla;
 using namespace mozilla::css;
@@ -211,8 +212,6 @@ void FontFaceSet::ParseFontShorthandForMatching(
   float stretch;
   float weight;
 
-  // FIXME(emilio): This Servo -> nsCSSValue -> Gecko conversion is stupid,
-  // Servo understands the font types.
   RefPtr<URLExtraData> url = ServoCSSParser::GetURLExtraData(mDocument);
   if (!ServoCSSParser::ParseFontShorthandForMatching(aFont, url, aFamilyList,
                                                      style, stretch, weight)) {
@@ -618,8 +617,9 @@ nsresult FontFaceSet::StartLoad(gfxUserFontEntry* aUserFontEntry,
 
   nsCOMPtr<nsIHttpChannel> httpChannel(do_QueryInterface(channel));
   if (httpChannel) {
-    rv = httpChannel->SetReferrerWithPolicy(aFontFaceSrc->mReferrer,
-                                            aFontFaceSrc->mReferrerPolicy);
+    nsCOMPtr<nsIReferrerInfo> referrerInfo = new mozilla::dom::ReferrerInfo(
+        aFontFaceSrc->mReferrer, aFontFaceSrc->mReferrerPolicy);
+    rv = httpChannel->SetReferrerInfoWithoutClone(referrerInfo);
     Unused << NS_WARN_IF(NS_FAILED(rv));
 
     nsAutoCString accept("application/font-woff;q=0.9,*/*;q=0.8");
@@ -1028,12 +1028,37 @@ FontFaceSet::FindOrCreateUserFontEntryFromFontFace(
   // set up unicode-range
   gfxCharacterMap* unicodeRanges = aFontFace->GetUnicodeRangeAsCharacterMap();
 
+  RefPtr<gfxUserFontEntry> existingEntry = aFontFace->GetUserFontEntry();
+  if (existingEntry) {
+    // aFontFace already has a user font entry, so we update its attributes
+    // rather than creating a new one.
+    existingEntry->UpdateAttributes(weight, stretch, italicStyle,
+                                    featureSettings, variationSettings,
+                                    languageOverride, unicodeRanges,
+                                    fontDisplay, rangeFlags);
+    // If the family name has changed, remove the entry from its current family
+    // and clear the mFamilyName field so it can be reset when added to a new
+    // family.
+    if (!existingEntry->mFamilyName.IsEmpty() &&
+        existingEntry->mFamilyName != aFamilyName) {
+      gfxUserFontFamily* family =
+        set->GetUserFontSet()->LookupFamily(existingEntry->mFamilyName);
+      if (family) {
+        family->RemoveFontEntry(existingEntry);
+      }
+      existingEntry->mFamilyName.Truncate(0);
+    }
+    return existingEntry.forget();
+  }
+
   // set up src array
   nsTArray<gfxFontFaceSrc> srcArray;
 
   if (aFontFace->HasFontData()) {
     gfxFontFaceSrc* face = srcArray.AppendElement();
-    if (!face) return nullptr;
+    if (!face) {
+      return nullptr;
+    }
 
     face->mSourceType = gfxFontFaceSrc::eSourceType_Buffer;
     face->mBuffer = aFontFace->CreateBufferSource();

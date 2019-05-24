@@ -107,15 +107,6 @@ label html|span.accesskey {
 
 /********** toolbarbutton **********/
 
-toolbarbutton {
-  -moz-binding: url("chrome://global/content/bindings/toolbarbutton.xml#toolbarbutton");
-}
-
-toolbarbutton.badged-button > toolbarbutton,
-toolbarbutton.badged-button {
-  -moz-binding: url("chrome://global/content/bindings/toolbarbutton.xml#toolbarbutton-badged");
-}
-
 .toolbarbutton-badge:not([value]),
 .toolbarbutton-badge[value=""] {
   display: none;
@@ -223,21 +214,6 @@ toolbarspring {
 
 menubar > menu:empty {
   visibility: collapse;
-}
-
-/********* menuitem ***********/
-
-menuitem {
-  -moz-binding: url("chrome://global/content/bindings/menu.xml#menuitem");
-}
-
-menuitem.menuitem-iconic {
-  -moz-binding: url("chrome://global/content/bindings/menu.xml#menuitem-iconic");
-}
-
-menuitem[type="checkbox"],
-menuitem[type="radio"] {
-  -moz-binding: url("chrome://global/content/bindings/menu.xml#menuitem-iconic");
 }
 
 .menu-text {
@@ -473,8 +449,8 @@ textbox {
   text-shadow: none;
 }
 
-textbox[type="search"] {
-  -moz-binding: url("chrome://global/content/bindings/textbox.xml#search-textbox");
+textbox[is="search-textbox"] {
+  -moz-binding: none;
 }
 
 /* Prefix with (xul|*):root to workaround HTML tests loading xul.css */
@@ -541,10 +517,6 @@ menulist[popuponly="true"] {
   height: 0 !important;
   min-height: 0 !important;
   border: 0 !important;
-}
-
-menulist > menupopup > menuitem {
-  -moz-binding: url("chrome://global/content/bindings/menu.xml#menuitem-iconic-noaccel");
 }
 
 menulist > menupopup > .popup-internal-box > .scrollbutton-up,

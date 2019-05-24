@@ -22,6 +22,7 @@
 #include "mozilla/dom/PopupBlocker.h"
 #include "mozilla/dom/Document.h"
 #include "mozilla/dom/DocumentInlines.h"
+#include "mozilla/dom/DocGroup.h"
 #include "nsPresContext.h"
 #include "nsIFrame.h"
 #include "nsIWritablePropertyBag2.h"
@@ -132,6 +133,8 @@ using namespace mozilla::dom;
 // LOGGING
 #include "LayoutLogging.h"
 #include "mozilla/Logging.h"
+
+extern mozilla::LazyLogModule gPageCacheLog;
 
 #ifdef NS_PRINTING
 static mozilla::LazyLogModule gPrintingLog("printing");
@@ -850,7 +853,7 @@ nsresult nsDocumentViewer::InitInternal(nsIWidget* aParentWidget,
                                         bool aNeedMakeCX /*= true*/,
                                         bool aForceSetNewDocument /* = true*/) {
   if (mIsPageMode) {
-    // XXXbz should the InitInternal in SetPageMode just pass false
+    // XXXbz should the InitInternal in SetPageModeForTesting just pass false
     // here itself?
     aForceSetNewDocument = false;
   }
@@ -883,8 +886,8 @@ nsresult nsDocumentViewer::InitInternal(nsIWidget* aParentWidget,
           mDocument->GetDisplayDocument()->GetPresShell()))) {
       // Create presentation context
       if (mIsPageMode) {
-        // Presentation context already created in SetPageMode which is calling
-        // this method
+        // Presentation context already created in SetPageModeForTesting which
+        // is calling this method
       } else {
         mPresContext = CreatePresContext(
             mDocument, nsPresContext::eContext_Galley, containerView);
@@ -1729,6 +1732,16 @@ nsDocumentViewer::Destroy() {
         if (rootView) {
           nsView* rootViewParent = rootView->GetParent();
           if (rootViewParent) {
+            nsView* subdocview = rootViewParent->GetParent();
+            if (subdocview) {
+              nsIFrame* f = subdocview->GetFrame();
+              if (f) {
+                nsSubDocumentFrame* s = do_QueryFrame(f);
+                if (s) {
+                  s->ClearDisplayItems();
+                }
+              }
+            }
             nsViewManager* parentVM = rootViewParent->GetViewManager();
             if (parentVM) {
               parentVM->RemoveChild(rootView);
@@ -1821,9 +1834,7 @@ nsDocumentViewer::Destroy() {
   if (mPrintJob) {
     RefPtr<nsPrintJob> printJob = std::move(mPrintJob);
 #  ifdef NS_PRINT_PREVIEW
-    bool doingPrintPreview;
-    printJob->GetDoingPrintPreview(&doingPrintPreview);
-    if (doingPrintPreview) {
+    if (printJob->IsDoingPrintPreview()) {
       printJob->FinishPrintPreview();
     }
 #  endif
@@ -2030,6 +2041,7 @@ nsDocumentViewer::SetBoundsWithFlags(const nsIntRect& aBounds,
                                      uint32_t aFlags) {
   NS_ENSURE_TRUE(mDocument, NS_ERROR_NOT_AVAILABLE);
 
+  bool boundsChanged = mBounds.IsEqualEdges(aBounds);
   mBounds = aBounds;
 
   if (mWindow && !mAttachedToParent) {
@@ -2045,11 +2057,32 @@ nsDocumentViewer::SetBoundsWithFlags(const nsIntRect& aBounds,
     if (mPresContext->DeviceContext()->CheckDPIChange()) {
       mPresContext->UIResolutionChanged();
     }
+
     int32_t p2a = mPresContext->AppUnitsPerDevPixel();
+    nscoord width = NSIntPixelsToAppUnits(mBounds.width, p2a);
+    nscoord height = NSIntPixelsToAppUnits(mBounds.height, p2a);
+    nsView* rootView = mViewManager->GetRootView();
+    if (boundsChanged && rootView) {
+      nsRect viewDims = rootView->GetDimensions();
+      // If the view/frame tree and prescontext visible area already has the new
+      // size but we did not, then it's likely that we got reflowed in response
+      // to a call to GetContentSize. Thus there is a disconnect between the
+      // size on the document viewer/docshell/containing widget and view
+      // tree/frame tree/prescontext visible area). SetWindowDimensions compares
+      // to the root view dimenstions to determine if it needs to do anything;
+      // if they are the same as the new size it won't do anything, but we still
+      // need to invalidate because what we want to draw to the screen has
+      // changed.
+      if (viewDims.width == width && viewDims.height == height) {
+        nsIFrame* f = rootView->GetFrame();
+        if (f) {
+          f->InvalidateFrame();
+        }
+      }
+    }
+
     mViewManager->SetWindowDimensions(
-        NSIntPixelsToAppUnits(mBounds.width, p2a),
-        NSIntPixelsToAppUnits(mBounds.height, p2a),
-        !!(aFlags & nsIContentViewer::eDelayResize));
+        width, height, !!(aFlags & nsIContentViewer::eDelayResize));
   }
 
   // If there's a previous viewer, it's the one that's actually showing,
@@ -2109,10 +2142,9 @@ nsDocumentViewer::Show(void) {
         nsCOMPtr<nsIDocShell> docShell = do_QueryInterface(treeItem);
         docShell->GetPreviousEntryIndex(&prevIndex);
         docShell->GetLoadedEntryIndex(&loadedIndex);
-#ifdef DEBUG_PAGE_CACHE
-        printf("About to evict content viewers: prev=%d, loaded=%d\n",
-               prevIndex, loadedIndex);
-#endif
+        MOZ_LOG(gPageCacheLog, LogLevel::Verbose,
+                ("About to evict content viewers: prev=%d, loaded=%d",
+                 prevIndex, loadedIndex));
         history->LegacySHistory()->EvictOutOfRangeContentViewers(loadedIndex);
       }
     }
@@ -2397,8 +2429,7 @@ nsView* nsDocumentViewer::FindContainerView() {
     return nullptr;
   }
 
-  nsIFrame* subdocFrame =
-      nsLayoutUtils::GetRealPrimaryFrameFor(containerElement);
+  nsIFrame* subdocFrame = containerElement->GetPrimaryFrame();
   if (!subdocFrame) {
     // XXX Silenced by default in bug 1175289
     LAYOUT_WARNING("Subdocument container has no frame");
@@ -3502,12 +3533,7 @@ nsDocumentViewer::Print(nsIPrintSettings* aPrintSettings,
     // callbacks have been called:
     mAutoBeforeAndAfterPrint = std::move(autoBeforeAndAfterPrint);
   }
-  dom::Element* root = mDocument->GetRootElement();
-  if (root &&
-      root->HasAttr(kNameSpaceID_None, nsGkAtoms::mozdisallowselectionprint)) {
-    printJob->SetDisallowSelectionPrint(true);
-  }
-  rv = printJob->Print(aPrintSettings, aWebProgressListener);
+  rv = printJob->Print(mDocument, aPrintSettings, aWebProgressListener);
   if (NS_FAILED(rv)) {
     OnDonePrinting();
   }
@@ -3521,7 +3547,7 @@ nsDocumentViewer::PrintPreview(nsIPrintSettings* aPrintSettings,
 #  if defined(NS_PRINTING) && defined(NS_PRINT_PREVIEW)
   MOZ_ASSERT(IsInitializedForPrintPreview(),
              "For print preview nsIWebBrowserPrint must be from "
-             "docshell.printPreview!");
+             "docshell.initOrReusePrintPreviewViewer!");
 
   NS_ENSURE_ARG_POINTER(aChildDOMWin);
   nsresult rv = NS_OK;
@@ -3587,14 +3613,7 @@ nsDocumentViewer::PrintPreview(nsIPrintSettings* aPrintSettings,
     // callbacks have been called:
     mAutoBeforeAndAfterPrint = std::move(autoBeforeAndAfterPrint);
   }
-  dom::Element* root = doc->GetRootElement();
-  if (root &&
-      root->HasAttr(kNameSpaceID_None, nsGkAtoms::mozdisallowselectionprint)) {
-    PR_PL(("PrintPreview: found mozdisallowselectionprint"));
-    printJob->SetDisallowSelectionPrint(true);
-  }
-  rv = printJob->PrintPreview(aPrintSettings, aChildDOMWin,
-                              aWebProgressListener);
+  rv = printJob->PrintPreview(doc, aPrintSettings, aWebProgressListener);
   mPrintPreviewZoomed = false;
   if (NS_FAILED(rv)) {
     OnDonePrinting();
@@ -3701,11 +3720,8 @@ NS_IMETHODIMP
 nsDocumentViewer::GetDoingPrint(bool* aDoingPrint) {
   NS_ENSURE_ARG_POINTER(aDoingPrint);
 
-  *aDoingPrint = false;
-  if (mPrintJob) {
-    // XXX shouldn't this be GetDoingPrint() ?
-    return mPrintJob->GetDoingPrintPreview(aDoingPrint);
-  }
+  // XXX shouldn't this be GetDoingPrint() ?
+  *aDoingPrint = mPrintJob ? mPrintJob->IsDoingPrintPreview() : false;
   return NS_OK;
 }
 
@@ -3714,10 +3730,7 @@ NS_IMETHODIMP
 nsDocumentViewer::GetDoingPrintPreview(bool* aDoingPrintPreview) {
   NS_ENSURE_ARG_POINTER(aDoingPrintPreview);
 
-  *aDoingPrintPreview = false;
-  if (mPrintJob) {
-    return mPrintJob->GetDoingPrintPreview(aDoingPrintPreview);
-  }
+  *aDoingPrintPreview = mPrintJob ? mPrintJob->IsDoingPrintPreview() : false;
   return NS_OK;
 }
 
@@ -3729,7 +3742,8 @@ nsDocumentViewer::GetCurrentPrintSettings(
   *aCurrentPrintSettings = nullptr;
   NS_ENSURE_TRUE(mPrintJob, NS_ERROR_FAILURE);
 
-  return mPrintJob->GetCurrentPrintSettings(aCurrentPrintSettings);
+  *aCurrentPrintSettings = mPrintJob->GetCurrentPrintSettings().take();
+  return NS_OK;
 }
 
 NS_IMETHODIMP
@@ -3771,7 +3785,8 @@ nsDocumentViewer::GetIsFramesetFrameSelected(bool* aIsFramesetFrameSelected) {
   *aIsFramesetFrameSelected = false;
   NS_ENSURE_TRUE(mPrintJob, NS_ERROR_FAILURE);
 
-  return mPrintJob->GetIsFramesetFrameSelected(aIsFramesetFrameSelected);
+  *aIsFramesetFrameSelected = mPrintJob->IsFramesetFrameSelected();
+  return NS_OK;
 #  else
   return NS_ERROR_FAILURE;
 #  endif
@@ -3783,7 +3798,8 @@ nsDocumentViewer::GetPrintPreviewNumPages(int32_t* aPrintPreviewNumPages) {
   NS_ENSURE_ARG_POINTER(aPrintPreviewNumPages);
   NS_ENSURE_TRUE(mPrintJob, NS_ERROR_FAILURE);
 
-  return mPrintJob->GetPrintPreviewNumPages(aPrintPreviewNumPages);
+  *aPrintPreviewNumPages = mPrintJob->GetPrintPreviewNumPages();
+  return *aPrintPreviewNumPages > 0 ? NS_OK : NS_ERROR_FAILURE;
 #  else
   return NS_ERROR_FAILURE;
 #  endif
@@ -3795,7 +3811,8 @@ nsDocumentViewer::GetIsFramesetDocument(bool* aIsFramesetDocument) {
   *aIsFramesetDocument = false;
   NS_ENSURE_TRUE(mPrintJob, NS_ERROR_FAILURE);
 
-  return mPrintJob->GetIsFramesetDocument(aIsFramesetDocument);
+  *aIsFramesetDocument = mPrintJob->IsFramesetDocument();
+  return NS_OK;
 #  else
   return NS_ERROR_FAILURE;
 #  endif
@@ -3807,7 +3824,8 @@ nsDocumentViewer::GetIsIFrameSelected(bool* aIsIFrameSelected) {
   *aIsIFrameSelected = false;
   NS_ENSURE_TRUE(mPrintJob, NS_ERROR_FAILURE);
 
-  return mPrintJob->GetIsIFrameSelected(aIsIFrameSelected);
+  *aIsIFrameSelected = mPrintJob->IsIFrameSelected();
+  return NS_OK;
 #  else
   return NS_ERROR_FAILURE;
 #  endif
@@ -3819,7 +3837,8 @@ nsDocumentViewer::GetIsRangeSelection(bool* aIsRangeSelection) {
   *aIsRangeSelection = false;
   NS_ENSURE_TRUE(mPrintJob, NS_ERROR_FAILURE);
 
-  return mPrintJob->GetIsRangeSelection(aIsRangeSelection);
+  *aIsRangeSelection = mPrintJob->IsRangeSelection();
+  return NS_OK;
 #  else
   return NS_ERROR_FAILURE;
 #  endif
@@ -4083,8 +4102,8 @@ void nsDocumentViewer::OnDonePrinting() {
 #endif  // NS_PRINTING && NS_PRINT_PREVIEW
 }
 
-NS_IMETHODIMP nsDocumentViewer::SetPageMode(bool aPageMode,
-                                            nsIPrintSettings* aPrintSettings) {
+NS_IMETHODIMP nsDocumentViewer::SetPageModeForTesting(
+    bool aPageMode, nsIPrintSettings* aPrintSettings) {
   // XXX Page mode is only partially working; it's currently used for
   // reftests that require a paginated context
   mIsPageMode = aPageMode;

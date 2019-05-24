@@ -231,10 +231,12 @@ class nsGlobalWindowOuter final : public mozilla::dom::EventTarget,
   }
 
   // nsIGlobalJSObjectHolder
-  virtual JSObject* GetGlobalJSObject() override;
-
-  // nsIScriptGlobalObject
-  JSObject* FastGetGlobalJSObject() const { return GetWrapperPreserveColor(); }
+  JSObject* GetGlobalJSObject() final {
+    return GetWrapper();
+  }
+  JSObject* GetGlobalJSObjectPreserveColor() const final {
+    return GetWrapperPreserveColor();
+  }
 
   virtual nsresult EnsureScriptEnvironment() override;
 
@@ -296,7 +298,8 @@ class nsGlobalWindowOuter final : public mozilla::dom::EventTarget,
       mozilla::dom::EventTarget* aChromeEventHandler) override;
 
   // Outer windows only.
-  virtual void SetInitialPrincipalToSubject() override;
+  virtual void SetInitialPrincipalToSubject(
+      nsIContentSecurityPolicy* aCSP) override;
 
   virtual already_AddRefed<nsISupports> SaveWindowState() override;
   virtual nsresult RestoreWindowState(nsISupports* aState) override;
@@ -323,7 +326,7 @@ class nsGlobalWindowOuter final : public mozilla::dom::EventTarget,
   // Outer windows only.
   virtual void EnsureSizeAndPositionUpToDate() override;
 
-  virtual void EnterModalState() override;
+  MOZ_CAN_RUN_SCRIPT_BOUNDARY virtual void EnterModalState() override;
   virtual void LeaveModalState() override;
 
   // Outer windows only.
@@ -459,6 +462,7 @@ class nsGlobalWindowOuter final : public mozilla::dom::EventTarget,
 
   virtual void NotifyContentBlockingEvent(
       unsigned aEvent, nsIChannel* aChannel, bool aBlocked, nsIURI* aURIHint,
+      nsIChannel* aTrackingChannel,
       const mozilla::Maybe<
           mozilla::AntiTrackingCommon::StorageAccessGrantedReason>& aReason)
       override;
@@ -860,6 +864,7 @@ class nsGlobalWindowOuter final : public mozilla::dom::EventTarget,
                                     nsIPrincipal* aSubjectPrincipal);
 
   // Outer windows only.
+  MOZ_CAN_RUN_SCRIPT_BOUNDARY
   bool CanMoveResizeWindows(mozilla::dom::CallerType aCallerType);
 
   // If aDoFlush is true, we'll flush our own layout; otherwise we'll try to
@@ -1140,7 +1145,7 @@ class nsGlobalWindowOuter final : public mozilla::dom::EventTarget,
   // All accesses to this field should be guarded by a check of mIsChrome.
   struct ChromeFields {
     nsCOMPtr<nsIBrowserDOMWindow> mBrowserDOMWindow;
-    // A weak pointer to the nsPresShell that we are doing fullscreen for.
+    // A weak pointer to the PresShell that we are doing fullscreen for.
     // The pointer being set indicates we've set the IsInFullscreenChange
     // flag on this pres shell.
     nsWeakPtr mFullscreenPresShell;

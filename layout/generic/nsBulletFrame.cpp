@@ -157,8 +157,8 @@ void nsBulletFrame::DidSetComputedStyle(ComputedStyle* aOldComputedStyle) {
   // Update the list bullet accessible. If old style list isn't available then
   // no need to update the accessible tree because it's not created yet.
   if (aOldComputedStyle) {
-    nsAccessibilityService* accService = nsIPresShell::AccService();
-    if (accService) {
+    if (nsAccessibilityService* accService =
+            PresShell::GetAccessibilityService()) {
       const nsStyleList* oldStyleList = aOldComputedStyle->StyleList();
       bool hadBullet = oldStyleList->GetListStyleImage() ||
                        !oldStyleList->mCounterStyle.IsNone();
@@ -174,7 +174,7 @@ void nsBulletFrame::DidSetComputedStyle(ComputedStyle* aOldComputedStyle) {
       }
     }
   }
-#endif
+#endif  // #ifdef ACCESSIBILITY
 }
 
 class nsDisplayBulletGeometry
@@ -543,10 +543,10 @@ bool BulletRenderer::CreateWebRenderCommandsForText(
   return textDrawer->Finish();
 }
 
-class nsDisplayBullet final : public nsDisplayItem {
+class nsDisplayBullet final : public nsPaintedDisplayItem {
  public:
   nsDisplayBullet(nsDisplayListBuilder* aBuilder, nsBulletFrame* aFrame)
-      : nsDisplayItem(aBuilder, aFrame) {
+      : nsPaintedDisplayItem(aBuilder, aFrame) {
     MOZ_COUNT_CTOR(nsDisplayBullet);
   }
 #ifdef NS_BUILD_REFCNT_LOGGING
@@ -604,8 +604,8 @@ class nsDisplayBullet final : public nsDisplayItem {
       aInvalidRegion->Or(*aInvalidRegion, GetBounds(aBuilder, &snap));
     }
 
-    return nsDisplayItem::ComputeInvalidationRegion(aBuilder, aGeometry,
-                                                    aInvalidRegion);
+    return nsPaintedDisplayItem::ComputeInvalidationRegion(aBuilder, aGeometry,
+                                                           aInvalidRegion);
   }
 
  protected:
@@ -822,21 +822,6 @@ ImgDrawResult nsBulletFrame::PaintBullet(gfxContext& aRenderingContext,
 
   return br->Paint(aRenderingContext, aPt, aDirtyRect, aFlags,
                    aDisableSubpixelAA, this);
-}
-
-int32_t nsBulletFrame::Ordinal(bool aDebugFromA11y) const {
-  auto* fc = PresShell()->FrameConstructor();
-  auto* cm = fc->CounterManager();
-  auto* list = cm->CounterListFor(nsGkAtoms::list_item);
-  MOZ_ASSERT(aDebugFromA11y || (list && !list->IsDirty()));
-  nsIFrame* listItem = GetParent()->GetContent()->GetPrimaryFrame();
-  int32_t value = 0;
-  for (auto* node = list->First(); node; node = list->Next(node)) {
-    if (node->mPseudoFrame == listItem) {
-      value = node->mValueAfter;
-    }
-  }
-  return value;
 }
 
 void nsBulletFrame::GetListItemText(CounterStyle* aStyle,
@@ -1282,7 +1267,7 @@ void nsBulletFrame::GetSpokenText(nsAString& aText) {
       PresContext()->CounterStyleManager()->ResolveCounterStyle(
           StyleList()->mCounterStyle);
   bool isBullet;
-  style->GetSpokenCounterText(Ordinal(true), GetWritingMode(), aText, isBullet);
+  style->GetSpokenCounterText(Ordinal(), GetWritingMode(), aText, isBullet);
   if (isBullet) {
     if (!style->IsNone()) {
       aText.Append(' ');
@@ -1329,6 +1314,17 @@ void nsBulletFrame::DeregisterAndCancelImageRequest() {
     // Cancel the image request and forget about it.
     mImageRequest->CancelAndForgetObserver(NS_ERROR_FAILURE);
     mImageRequest = nullptr;
+  }
+}
+
+void nsBulletFrame::SetOrdinal(int32_t aOrdinal, bool aNotify) {
+  if (mOrdinal == aOrdinal) {
+    return;
+  }
+  mOrdinal = aOrdinal;
+  if (aNotify) {
+    PresShell()->FrameNeedsReflow(this, IntrinsicDirty::StyleChange,
+                                  NS_FRAME_IS_DIRTY);
   }
 }
 

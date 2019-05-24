@@ -411,6 +411,9 @@ bool WebGLContext::InitAndValidateGL(FailureReason* const out_failReason) {
                                (GLint*)&mGLMaxArrayTextureLayers))
     mGLMaxArrayTextureLayers = 0;
 
+  (void)gl->GetPotentialInteger(LOCAL_GL_MAX_VIEWS_OVR,
+                                (GLint*)&mGLMaxMultiviewViews);
+
   gl->GetUIntegerv(LOCAL_GL_MAX_TEXTURE_IMAGE_UNITS,
                    &mGLMaxFragmentTextureImageUnits);
   gl->GetUIntegerv(LOCAL_GL_MAX_VERTEX_TEXTURE_IMAGE_UNITS,
@@ -582,9 +585,6 @@ bool WebGLContext::InitAndValidateGL(FailureReason* const out_failReason) {
     gl->fEnable(LOCAL_GL_TEXTURE_CUBE_MAP_SEAMLESS);
   }
 
-  // Check the shader validator pref
-  mBypassShaderValidation = gfxPrefs::WebGLBypassShaderValidator();
-
   // initialize shader translator
   if (!sh::Initialize()) {
     *out_failReason = {"FEATURE_FAILURE_WEBGL_GLSL",
@@ -679,7 +679,7 @@ bool WebGLContext::InitAndValidateGL(FailureReason* const out_failReason) {
   return true;
 }
 
-bool WebGLContext::ValidateFramebufferTarget(GLenum target) {
+bool WebGLContext::ValidateFramebufferTarget(GLenum target) const {
   bool isValid = true;
   switch (target) {
     case LOCAL_GL_FRAMEBUFFER:

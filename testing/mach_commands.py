@@ -83,7 +83,7 @@ def get_test_parser():
     return parser
 
 
-ADD_TEST_SUPPORTED_SUITES = ['mochitest-chrome', 'mochitest-plain', 'mochitest-browser',
+ADD_TEST_SUPPORTED_SUITES = ['mochitest-chrome', 'mochitest-plain', 'mochitest-browser-chrome',
                              'web-platform-tests-testharness', 'web-platform-tests-reftest',
                              'xpcshell']
 ADD_TEST_SUPPORTED_DOCS = ['js', 'html', 'xhtml', 'xul']
@@ -267,7 +267,7 @@ class AddTest(MachCommandBase):
             guessed_suite = "xpcshell"
         else:
             if filename.startswith("browser_") and has_browser_ini:
-                guessed_suite = "mochitest-browser"
+                guessed_suite = "mochitest-browser-chrome"
             elif filename.startswith("test_"):
                 if has_chrome_ini and has_plain_ini:
                     err = ("Error: directory contains both a chrome.ini and mochitest.ini. "
@@ -401,14 +401,18 @@ class MachCommands(MachCommandBase):
         else:
             manifest_path = None
 
+        utility_path = self.bindir
+
         if conditions.is_android(self):
             from mozrunner.devices.android_device import verify_android_device
             verify_android_device(self, install=False)
             return self.run_android_test(tests, symbols_path, manifest_path, log)
 
-        return self.run_desktop_test(tests, symbols_path, manifest_path, log)
+        return self.run_desktop_test(tests, symbols_path, manifest_path,
+                                     utility_path, log)
 
-    def run_desktop_test(self, tests, symbols_path, manifest_path, log):
+    def run_desktop_test(self, tests, symbols_path, manifest_path,
+                         utility_path, log):
         import runcppunittests as cppunittests
         from mozlog import commandline
 
@@ -418,6 +422,7 @@ class MachCommands(MachCommandBase):
 
         options.symbols_path = symbols_path
         options.manifest_path = manifest_path
+        options.utility_path = utility_path
         options.xre_path = self.bindir
 
         try:
@@ -1141,6 +1146,7 @@ class TestInfoCommand(MachCommandBase):
 @CommandProvider
 class RustTests(MachCommandBase):
     @Command('rusttests', category='testing',
+             conditions=[conditions.is_non_artifact_build],
              description="Run rust unit tests (via cargo test).")
     def run_rusttests(self, **kwargs):
         return self._mach_context.commands.dispatch('build', self._mach_context,

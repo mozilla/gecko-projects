@@ -4,13 +4,13 @@
 
 use super::super::shader_source::SHADERS;
 use api::{ColorF, ImageDescriptor, ImageFormat, MemoryReport};
-use api::{TextureTarget, VoidPtrToSizeFn};
+use api::{MixBlendMode, TextureTarget, VoidPtrToSizeFn};
 use api::units::*;
 use euclid::Transform3D;
 use gleam::gl;
-use internal_types::{FastHashMap, LayerIndex, RenderTargetInfo};
+use crate::internal_types::{FastHashMap, LayerIndex, RenderTargetInfo};
 use log::Level;
-use profiler;
+use crate::profiler;
 use sha2::{Digest, Sha256};
 use smallvec::SmallVec;
 use std::borrow::Cow;
@@ -151,12 +151,6 @@ fn depth_target_size_in_bytes(dimensions: &DeviceIntSize) -> usize {
     // for stencil, so we measure them as 32 bits.
     let pixels = dimensions.width * dimensions.height;
     (pixels as usize) * 4
-}
-
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub enum ReadPixelsFormat {
-    Standard(ImageFormat),
-    Rgba8,
 }
 
 pub fn get_gl_target(target: TextureTarget) -> gl::GLuint {
@@ -909,6 +903,9 @@ pub struct Capabilities {
     /// is available on some mobile GPUs. This allows fast access to
     /// the per-pixel tile memory.
     pub supports_pixel_local_storage: bool,
+    /// Whether KHR_debug is supported for getting debug messages from
+    /// the driver.
+    pub supports_khr_debug: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -1007,7 +1004,7 @@ pub struct Device {
 
 /// Contains the parameters necessary to bind a draw target.
 #[derive(Clone, Copy)]
-pub enum DrawTarget<'a> {
+pub enum DrawTarget {
     /// Use the device's default draw target, with the provided dimensions,
     /// which are used to set the viewport.
     Default {
@@ -1018,12 +1015,20 @@ pub enum DrawTarget<'a> {
     },
     /// Use the provided texture.
     Texture {
-        /// The target texture.
-        texture: &'a Texture,
-        /// The slice within the texture array to draw to.
+        /// Size of the texture in pixels
+        dimensions: DeviceIntSize,
+        /// The slice within the texture array to draw to
         layer: LayerIndex,
-        /// Whether to draw with the texture's associated depth target.
+        /// Whether to draw with the texture's associated depth target
         with_depth: bool,
+        /// Workaround buffers for devices with broken texture array copy implementation
+        blit_workaround_buffer: Option<(RBOId, FBOId)>,
+        /// FBO that corresponds to the selected layer / depth mode
+        fbo_id: FBOId,
+        /// Native GL texture ID
+        id: gl::GLuint,
+        /// Native GL texture target
+        target: gl::GLuint,
     },
     /// Use an FBO attached to an external texture.
     External {
@@ -1032,7 +1037,7 @@ pub enum DrawTarget<'a> {
     },
 }
 
-impl<'a> DrawTarget<'a> {
+impl DrawTarget {
     pub fn new_default(size: DeviceIntSize) -> Self {
         let total_size = FramebufferIntSize::from_untyped(&size.to_untyped());
         DrawTarget::Default {
@@ -1049,11 +1054,33 @@ impl<'a> DrawTarget<'a> {
         }
     }
 
+    pub fn from_texture(
+        texture: &Texture,
+        layer: usize,
+        with_depth: bool,
+    ) -> Self {
+        let fbo_id = if with_depth {
+            texture.fbos_with_depth[layer]
+        } else {
+            texture.fbos[layer]
+        };
+
+        DrawTarget::Texture {
+            dimensions: texture.get_dimensions(),
+            fbo_id,
+            with_depth,
+            layer,
+            blit_workaround_buffer: texture.blit_workaround_buffer,
+            id: texture.id,
+            target: texture.target,
+        }
+    }
+
     /// Returns the dimensions of this draw-target.
     pub fn dimensions(&self) -> DeviceIntSize {
         match *self {
             DrawTarget::Default { total_size, .. } => DeviceIntSize::from_untyped(&total_size.to_untyped()),
-            DrawTarget::Texture { texture, .. } => texture.get_dimensions(),
+            DrawTarget::Texture { dimensions, .. } => dimensions,
             DrawTarget::External { size, .. } => DeviceIntSize::from_untyped(&size.to_untyped()),
         }
     }
@@ -1104,15 +1131,13 @@ impl<'a> DrawTarget<'a> {
 
 /// Contains the parameters necessary to bind a texture-backed read target.
 #[derive(Clone, Copy)]
-pub enum ReadTarget<'a> {
+pub enum ReadTarget {
     /// Use the device's default draw target.
     Default,
     /// Use the provided texture,
     Texture {
-        /// The source texture.
-        texture: &'a Texture,
-        /// The slice within the texture array to read from.
-        layer: LayerIndex,
+        /// ID of the FBO to read from.
+        fbo_id: FBOId,
     },
     /// Use an FBO attached to an external texture.
     External {
@@ -1120,12 +1145,23 @@ pub enum ReadTarget<'a> {
     },
 }
 
-impl<'a> From<DrawTarget<'a>> for ReadTarget<'a> {
-    fn from(t: DrawTarget<'a>) -> Self {
+impl ReadTarget {
+    pub fn from_texture(
+        texture: &Texture,
+        layer: usize,
+    ) -> Self {
+        ReadTarget::Texture {
+            fbo_id: texture.fbos[layer],
+        }
+    }
+}
+
+impl From<DrawTarget> for ReadTarget {
+    fn from(t: DrawTarget) -> Self {
         match t {
             DrawTarget::Default { .. } => ReadTarget::Default,
-            DrawTarget::Texture { texture, layer, .. } =>
-                ReadTarget::Texture { texture, layer },
+            DrawTarget::Texture { fbo_id, .. } =>
+                ReadTarget::Texture { fbo_id },
             DrawTarget::External { fbo, .. } =>
                 ReadTarget::External { fbo },
         }
@@ -1140,16 +1176,6 @@ impl Device {
         cached_programs: Option<Rc<ProgramCache>>,
         allow_pixel_local_storage_support: bool,
     ) -> Device {
-        // On debug builds, assert that each GL call is error-free. We don't do
-        // this on release builds because the synchronous call can stall the
-        // pipeline.
-        if cfg!(debug_assertions) {
-            gl = gl::ErrorReactingGl::wrap(gl, |gl, name, code| {
-                Self::echo_driver_messages(gl);
-                panic!("Caught GL error {:x} at {}", code, name);
-            });
-        }
-
         let mut max_texture_size = [0];
         let mut max_texture_layers = [0];
         unsafe {
@@ -1169,6 +1195,19 @@ impl Device {
         let mut extensions = Vec::new();
         for i in 0 .. extension_count {
             extensions.push(gl.get_string_i(gl::EXTENSIONS, i));
+        }
+
+        // On debug builds, assert that each GL call is error-free. We don't do
+        // this on release builds because the synchronous call can stall the
+        // pipeline.
+        let supports_khr_debug = supports_extension(&extensions, "GL_KHR_debug");
+        if cfg!(debug_assertions) {
+            gl = gl::ErrorReactingGl::wrap(gl, move |gl, name, code| {
+                if supports_khr_debug {
+                    Self::log_driver_messages(gl);
+                }
+                panic!("Caught GL error {:x} at {}", code, name);
+            });
         }
 
         // Our common-case image data in Firefox is BGRA, so we make an effort
@@ -1291,6 +1330,7 @@ impl Device {
                 supports_copy_image_sub_data,
                 supports_blit_to_texture_array,
                 supports_pixel_local_storage,
+                supports_khr_debug,
             },
 
             bgra_format_internal,
@@ -1506,7 +1546,7 @@ impl Device {
     pub fn bind_read_target(&mut self, target: ReadTarget) {
         let fbo_id = match target {
             ReadTarget::Default => self.default_read_fbo,
-            ReadTarget::Texture { texture, layer } => texture.fbos[layer],
+            ReadTarget::Texture { fbo_id } => fbo_id,
             ReadTarget::External { fbo } => fbo,
         };
 
@@ -1540,16 +1580,12 @@ impl Device {
     ) {
         let (fbo_id, rect, depth_available) = match target {
             DrawTarget::Default { rect, .. } => (self.default_draw_fbo, rect, true),
-            DrawTarget::Texture { texture, layer, with_depth } => {
+            DrawTarget::Texture { dimensions, fbo_id, with_depth, .. } => {
                 let rect = FramebufferIntRect::new(
                     FramebufferIntPoint::zero(),
-                    FramebufferIntSize::from_untyped(&texture.get_dimensions().to_untyped()),
+                    FramebufferIntSize::from_untyped(&dimensions.to_untyped()),
                 );
-                if with_depth {
-                    (texture.fbos_with_depth[layer], rect, true)
-                } else {
-                    (texture.fbos[layer], rect, false)
-                }
+                (fbo_id, rect, with_depth)
             },
             DrawTarget::External { fbo, size } => (fbo, size.into(), false),
         };
@@ -1939,9 +1975,9 @@ impl Device {
             );
             for layer in 0..src.layer_count.min(dst.layer_count) as LayerIndex {
                 self.blit_render_target(
-                    ReadTarget::Texture { texture: src, layer },
+                    ReadTarget::from_texture(src, layer),
                     rect,
-                    DrawTarget::Texture { texture: dst, layer, with_depth: false },
+                    DrawTarget::from_texture(dst, layer, false),
                     rect,
                     TextureFilter::Linear
                 );
@@ -2138,11 +2174,11 @@ impl Device {
         self.bind_read_target(src_target);
 
         match dest_target {
-            DrawTarget::Texture { texture, layer, .. } if layer != 0 &&
+            DrawTarget::Texture { layer, blit_workaround_buffer, dimensions, id, target, .. } if layer != 0 &&
                 !self.capabilities.supports_blit_to_texture_array =>
             {
                 // This should have been initialized in create_texture().
-                let (_rbo, fbo) = texture.blit_workaround_buffer.expect("Blit workaround buffer has not been initialized.");
+                let (_rbo, fbo) = blit_workaround_buffer.expect("Blit workaround buffer has not been initialized.");
 
                 // Blit from read target to intermediate buffer.
                 self.bind_draw_target_impl(fbo);
@@ -2165,14 +2201,18 @@ impl Device {
                         dest_rect.size.width.abs(),
                         dest_rect.size.height.abs(),
                     ),
-                ).intersection(&texture.size.into()).unwrap_or(DeviceIntRect::zero());
+                ).intersection(&dimensions.into()).unwrap_or(DeviceIntRect::zero());
 
                 self.bind_read_target_impl(fbo);
-                self.bind_texture(DEFAULT_TEXTURE, texture);
+                self.bind_texture_impl(
+                    DEFAULT_TEXTURE,
+                    id,
+                    target,
+                );
 
                 // Copy from intermediate buffer to the texture layer.
                 self.gl.copy_tex_sub_image_3d(
-                    texture.target, 0,
+                    target, 0,
                     dest_bounds.origin.x, dest_bounds.origin.y,
                     layer as _,
                     dest_bounds.origin.x, dest_bounds.origin.y,
@@ -2421,7 +2461,7 @@ impl Device {
                     gl::PIXEL_PACK_BUFFER,
                     0,
                     pbo.reserved_size as _,
-                    gl::READ_ONLY)
+                    gl::MAP_READ_BIT)
             }
         };
 
@@ -2535,21 +2575,11 @@ impl Device {
     pub fn read_pixels_into(
         &mut self,
         rect: FramebufferIntRect,
-        format: ReadPixelsFormat,
+        format: ImageFormat,
         output: &mut [u8],
     ) {
-        let (bytes_per_pixel, desc) = match format {
-            ReadPixelsFormat::Standard(imf) => {
-                (imf.bytes_per_pixel(), self.gl_describe_format(imf))
-            }
-            ReadPixelsFormat::Rgba8 => {
-                (4, FormatDesc {
-                    external: gl::RGBA,
-                    internal: gl::RGBA8,
-                    pixel_type: gl::UNSIGNED_BYTE,
-                })
-            }
-        };
+        let bytes_per_pixel = format.bytes_per_pixel();
+        let desc = self.gl_describe_format(format);
         let size_in_bytes = (bytes_per_pixel * rect.size.width * rect.size.height) as usize;
         assert_eq!(output.len(), size_in_bytes);
 
@@ -3068,6 +3098,31 @@ impl Device {
         self.gl.blend_equation(gl::FUNC_ADD);
     }
 
+    pub fn set_blend_mode_advanced(&self, mode: MixBlendMode) {
+        self.gl.blend_equation(match mode {
+            MixBlendMode::Normal => {
+                // blend factor only make sense for the normal mode
+                self.gl.blend_func_separate(gl::ZERO, gl::SRC_COLOR, gl::ZERO, gl::SRC_ALPHA);
+                gl::FUNC_ADD
+            },
+            MixBlendMode::Multiply => gl::MULTIPLY_KHR,
+            MixBlendMode::Screen => gl::SCREEN_KHR,
+            MixBlendMode::Overlay => gl::OVERLAY_KHR,
+            MixBlendMode::Darken => gl::DARKEN_KHR,
+            MixBlendMode::Lighten => gl::LIGHTEN_KHR,
+            MixBlendMode::ColorDodge => gl::COLORDODGE_KHR,
+            MixBlendMode::ColorBurn => gl::COLORBURN_KHR,
+            MixBlendMode::HardLight => gl::HARDLIGHT_KHR,
+            MixBlendMode::SoftLight => gl::SOFTLIGHT_KHR,
+            MixBlendMode::Difference => gl::DIFFERENCE_KHR,
+            MixBlendMode::Exclusion => gl::EXCLUSION_KHR,
+            MixBlendMode::Hue => gl::HSL_HUE_KHR,
+            MixBlendMode::Saturation => gl::HSL_SATURATION_KHR,
+            MixBlendMode::Color => gl::HSL_COLOR_KHR,
+            MixBlendMode::Luminosity => gl::HSL_LUMINOSITY_KHR,
+        });
+    }
+
     pub fn supports_extension(&self, extension: &str) -> bool {
         supports_extension(&self.extensions, extension)
     }
@@ -3084,7 +3139,13 @@ impl Device {
         }
     }
 
-    pub fn echo_driver_messages(gl: &gl::Gl) {
+    pub fn echo_driver_messages(&self) {
+        if self.capabilities.supports_khr_debug {
+            Device::log_driver_messages(self.gl());
+        }
+    }
+
+    fn log_driver_messages(gl: &gl::Gl) {
         for msg in gl.get_debug_messages() {
             let level = match msg.severity {
                 gl::DEBUG_SEVERITY_HIGH => Level::Error,

@@ -9,7 +9,6 @@
 #include "jsapi.h"
 #include "mozilla/ContentEvents.h"
 #include "mozilla/EventDispatcher.h"
-#include "mozilla/EventStateManager.h"
 #include "mozilla/EventStates.h"
 #include "mozilla/dom/nsCSPUtils.h"
 #include "mozilla/dom/nsCSPContext.h"
@@ -54,6 +53,7 @@
 #include "nsIPrompt.h"
 #include "nsISecurityUITelemetry.h"
 #include "nsIStringBundle.h"
+#include "nsIProtocolHandler.h"
 
 // radio buttons
 #include "mozilla/dom/HTMLInputElement.h"
@@ -114,7 +114,6 @@ HTMLFormElement::HTMLFormElement(
       mDeferSubmission(false),
       mNotifiedObservers(false),
       mNotifiedObserversResult(false),
-      mSubmitInitiatedFromUserInput(false),
       mEverTriedInvalidSubmit(false) {
   // We start out valid.
   AddStatesSilently(NS_EVENT_STATE_VALID);
@@ -406,7 +405,10 @@ void HTMLFormElement::UnbindFromTree(bool aDeep, bool aNullParent) {
 
 void HTMLFormElement::GetEventTargetParent(EventChainPreVisitor& aVisitor) {
   aVisitor.mWantsWillHandleEvent = true;
-  if (aVisitor.mEvent->mOriginalTarget == static_cast<nsIContent*>(this)) {
+  // According to the UI events spec section "Trusted events", we shouldn't
+  // trigger UA default action with an untrusted event except click.
+  if (aVisitor.mEvent->mOriginalTarget == static_cast<nsIContent*>(this) &&
+      aVisitor.mEvent->IsTrusted()) {
     uint32_t msg = aVisitor.mEvent->mMessage;
     if (msg == eFormSubmit) {
       if (mGeneratingSubmit) {
@@ -443,7 +445,10 @@ void HTMLFormElement::WillHandleEvent(EventChainPostVisitor& aVisitor) {
 }
 
 nsresult HTMLFormElement::PostHandleEvent(EventChainPostVisitor& aVisitor) {
-  if (aVisitor.mEvent->mOriginalTarget == static_cast<nsIContent*>(this)) {
+  // According to the UI events spec section "Trusted events", we shouldn't
+  // trigger UA default action with an untrusted event except click.
+  if (aVisitor.mEvent->mOriginalTarget == static_cast<nsIContent*>(this) &&
+      aVisitor.mEvent->IsTrusted()) {
     EventMessage msg = aVisitor.mEvent->mMessage;
     if (msg == eFormSubmit) {
       // let the form know not to defer subsequent submissions
@@ -570,8 +575,6 @@ nsresult HTMLFormElement::DoSubmit(WidgetEvent* aEvent) {
     mSubmitPopupState = PopupBlocker::openAbused;
   }
 
-  mSubmitInitiatedFromUserInput = EventStateManager::IsHandlingUserInput();
-
   if (mDeferSubmission) {
     // we are in an event handler, JS submitted so we have to
     // defer this submission. let's remember it and return
@@ -695,7 +698,7 @@ nsresult HTMLFormElement::SubmitSubmission(
     nsAutoPopupStatePusher popupStatePusher(mSubmitPopupState);
 
     AutoHandlingUserInputStatePusher userInpStatePusher(
-        mSubmitInitiatedFromUserInput, nullptr, doc);
+        aFormSubmission->IsInitiatedFromUserInput(), nullptr, doc);
 
     nsCOMPtr<nsIInputStream> postDataStream;
     rv = aFormSubmission->GetEncodedSubmission(
@@ -707,7 +710,7 @@ nsresult HTMLFormElement::SubmitSubmission(
     rv = linkHandler->OnLinkClickSync(
         this, actionURI, target, VoidString(), postDataStream, nullptr, false,
         getter_AddRefs(docShell), getter_AddRefs(mSubmittingRequest),
-        EventStateManager::IsHandlingUserInput());
+        aFormSubmission->IsInitiatedFromUserInput());
     NS_ENSURE_SUBMIT_SUCCESS(rv);
   }
 
@@ -767,22 +770,16 @@ nsresult HTMLFormElement::DoSecureToInsecureSubmitCheck(nsIURI* aActionURL,
   if (NS_FAILED(rv)) {
     return rv;
   }
-  bool actionIsHTTPS;
-  rv = aActionURL->SchemeIs("https", &actionIsHTTPS);
-  if (NS_FAILED(rv)) {
-    return rv;
-  }
-  bool actionIsJS;
-  rv = aActionURL->SchemeIs("javascript", &actionIsJS);
-  if (NS_FAILED(rv)) {
-    return rv;
-  }
 
-  if (!formIsHTTPS || actionIsHTTPS || actionIsJS) {
+  if (!formIsHTTPS) {
     return NS_OK;
   }
 
   if (nsMixedContentBlocker::IsPotentiallyTrustworthyLoopbackURL(aActionURL)) {
+    return NS_OK;
+  }
+
+  if (nsMixedContentBlocker::URISafeToBeLoadedInSecureContext(aActionURL)) {
     return NS_OK;
   }
 

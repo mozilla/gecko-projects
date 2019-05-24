@@ -22,7 +22,7 @@
 #include "mozilla/Unused.h"
 #include "mozilla/dom/Element.h"
 #include "mozilla/dom/Event.h"
-#include "mozilla/dom/BrowserParent.h"
+#include "mozilla/dom/BrowserHost.h"
 #include "nsIContentPolicy.h"
 #include "nsIHttpChannelInternal.h"
 #include "nsIHttpHeaderVisitor.h"
@@ -140,10 +140,10 @@ already_AddRefed<ChannelWrapper> ChannelWrapper::Get(const GlobalObject& global,
 
 already_AddRefed<ChannelWrapper> ChannelWrapper::GetRegisteredChannel(
     const GlobalObject& global, uint64_t aChannelId,
-    const WebExtensionPolicy& aAddon, nsIRemoteTab* aBrowserParent) {
+    const WebExtensionPolicy& aAddon, nsIRemoteTab* aRemoteTab) {
   ContentParent* contentParent = nullptr;
-  if (BrowserParent* parent = static_cast<BrowserParent*>(aBrowserParent)) {
-    contentParent = parent->Manager();
+  if (BrowserHost* host = BrowserHost::GetFrom(aRemoteTab)) {
+    contentParent = host->GetActor()->Manager();
   }
 
   auto& webreq = WebRequestService::GetSingleton();
@@ -521,13 +521,17 @@ bool ChannelWrapper::Matches(
     return false;
   }
 
+  nsCOMPtr<nsILoadInfo> loadInfo = GetLoadInfo();
+  bool isPrivate =
+      loadInfo && loadInfo->GetOriginAttributes().mPrivateBrowsingId > 0;
+  if (!aFilter.mIncognito.IsNull() && aFilter.mIncognito.Value() != isPrivate) {
+    return false;
+  }
+
   if (aExtension) {
     // Verify extension access to private requests
-    if (!aExtension->PrivateBrowsingAllowed()) {
-      nsCOMPtr<nsILoadInfo> loadInfo = GetLoadInfo();
-      if (loadInfo && loadInfo->GetOriginAttributes().mPrivateBrowsingId > 0) {
-        return false;
-      }
+    if (isPrivate && !aExtension->PrivateBrowsingAllowed()) {
+      return false;
     }
 
     bool isProxy =
@@ -678,12 +682,12 @@ void ChannelWrapper::RegisterTraceableChannel(const WebExtensionPolicy& aAddon,
 
 already_AddRefed<nsITraceableChannel> ChannelWrapper::GetTraceableChannel(
     nsAtom* aAddonId, dom::ContentParent* aContentParent) const {
-  nsCOMPtr<nsIRemoteTab> browserParent;
-  if (mAddonEntries.Get(aAddonId, getter_AddRefs(browserParent))) {
+  nsCOMPtr<nsIRemoteTab> remoteTab;
+  if (mAddonEntries.Get(aAddonId, getter_AddRefs(remoteTab))) {
     ContentParent* contentParent = nullptr;
-    if (browserParent) {
+    if (remoteTab) {
       contentParent =
-          static_cast<BrowserParent*>(browserParent.get())->Manager();
+          BrowserHost::GetFrom(remoteTab.get())->GetActor()->Manager();
     }
 
     if (contentParent == aContentParent) {
@@ -820,6 +824,9 @@ nsresult FillProxyInfo(MozProxyInfo& aDict, nsIProxyInfo* aProxyInfo) {
   MOZ_TRY(aProxyInfo->GetPort(&aDict.mPort));
   MOZ_TRY(aProxyInfo->GetType(aDict.mType));
   MOZ_TRY(aProxyInfo->GetUsername(aDict.mUsername));
+  MOZ_TRY(
+      aProxyInfo->GetProxyAuthorizationHeader(aDict.mProxyAuthorizationHeader));
+  MOZ_TRY(aProxyInfo->GetConnectionIsolationKey(aDict.mConnectionIsolationKey));
   MOZ_TRY(aProxyInfo->GetFailoverTimeout(&aDict.mFailoverTimeout.Construct()));
 
   uint32_t flags;

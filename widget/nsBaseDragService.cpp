@@ -236,7 +236,7 @@ nsBaseDragService::InvokeDragSession(
   // capture. However, this gets in the way of determining drag
   // feedback for things like trees because the event coordinates
   // are in the wrong coord system, so turn off mouse capture.
-  nsIPresShell::ClearMouseCapture(nullptr);
+  PresShell::ClearMouseCapture(nullptr);
 
   uint32_t length = 0;
   mozilla::Unused << aTransferableArray->GetLength(&length);
@@ -521,7 +521,7 @@ nsBaseDragService::DragMoved(int32_t aX, int32_t aY) {
   return NS_OK;
 }
 
-static nsIPresShell* GetPresShellForContent(nsINode* aDOMNode) {
+static PresShell* GetPresShellForContent(nsINode* aDOMNode) {
   nsCOMPtr<nsIContent> content = do_QueryInterface(aDOMNode);
   if (!content) return nullptr;
 
@@ -552,9 +552,13 @@ nsresult nsBaseDragService::DrawDrag(nsINode* aDOMNode,
 
   // get the presshell for the node being dragged. If the drag image is not in
   // a document or has no frame, get the presshell from the source drag node
-  nsIPresShell* presShell = GetPresShellForContent(dragNode);
-  if (!presShell && mImage) presShell = GetPresShellForContent(aDOMNode);
-  if (!presShell) return NS_ERROR_FAILURE;
+  PresShell* presShell = GetPresShellForContent(dragNode);
+  if (!presShell && mImage) {
+    presShell = GetPresShellForContent(aDOMNode);
+  }
+  if (!presShell) {
+    return NS_ERROR_FAILURE;
+  }
 
   *aPresContext = presShell->GetPresContext();
 
@@ -562,9 +566,8 @@ nsresult nsBaseDragService::DrawDrag(nsINode* aDOMNode,
   if (flo) {
     RefPtr<nsFrameLoader> fl = flo->GetFrameLoader();
     if (fl) {
-      auto* tp =
-          static_cast<mozilla::dom::BrowserParent*>(fl->GetRemoteBrowser());
-      if (tp && tp->TakeDragVisualization(*aSurface, aScreenDragRect)) {
+      auto* bp = fl->GetBrowserParent();
+      if (bp && bp->TakeDragVisualization(*aSurface, aScreenDragRect)) {
         if (mImage) {
           // Just clear the surface if chrome has overridden it with an image.
           *aSurface = nullptr;

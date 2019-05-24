@@ -6,18 +6,11 @@
 
 import { clearDocuments } from "../utils/editor";
 import sourceQueue from "../utils/source-queue";
-import { getSources } from "../reducers/sources";
+import { getSourceList } from "../reducers/sources";
 import { waitForMs } from "../utils/utils";
 
 import { newGeneratedSources } from "./sources";
 import { updateWorkers } from "./debuggee";
-
-import {
-  clearASTs,
-  clearSymbols,
-  clearScopes,
-  clearSources
-} from "../workers/parser";
 
 import { clearWasmStates } from "../utils/wasm";
 import { getMainThread } from "../selectors";
@@ -33,39 +26,42 @@ import type { Action, ThunkArgs } from "./types";
  * @static
  */
 export function willNavigate(event: Object) {
-  return function({ dispatch, getState, client, sourceMaps }: ThunkArgs) {
+  return async function({
+    dispatch,
+    getState,
+    client,
+    sourceMaps,
+    parser,
+  }: ThunkArgs) {
+    sourceQueue.clear();
     sourceMaps.clearSourceMaps();
     clearWasmStates();
     clearDocuments();
-    clearSymbols();
-    clearASTs();
-    clearScopes();
-    clearSources();
+    parser.clear();
     client.detachWorkers();
-    dispatch(navigate(event.url));
-  };
-}
-
-export function navigate(url: string) {
-  return async function({ dispatch, getState }: ThunkArgs) {
-    sourceQueue.clear();
     const thread = getMainThread(getState());
 
     dispatch({
       type: "NAVIGATE",
-      mainThread: { ...thread, url }
+      mainThread: { ...thread, url: event.url },
     });
   };
 }
 
-export function connect(url: string, actor: string, canRewind: boolean) {
+export function connect(
+  url: string,
+  actor: string,
+  canRewind: boolean,
+  isWebExtension: boolean
+) {
   return async function({ dispatch }: ThunkArgs) {
     await dispatch(updateWorkers());
     dispatch(
       ({
         type: "CONNECT",
-        mainThread: { url, actor, type: -1 },
-        canRewind
+        mainThread: { url, actor, type: -1, name: "" },
+        canRewind,
+        isWebExtension,
       }: Action)
     );
   };
@@ -81,7 +77,7 @@ export function navigated() {
     // it is likely that the sources are being loaded from the bfcache,
     // and we should make an explicit request to the server to load them.
     await waitForMs(100);
-    if (Object.keys(getSources(getState())).length == 0) {
+    if (getSourceList(getState()).length == 0) {
       const sources = await client.fetchSources();
       dispatch(newGeneratedSources(sources));
     }

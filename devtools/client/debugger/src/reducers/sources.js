@@ -16,10 +16,24 @@ import {
   getRelativeUrl,
   isGenerated,
   isOriginal as isOriginalSource,
-  getPlainUrl
+  getPlainUrl,
 } from "../utils/source";
+import {
+  createInitial,
+  insertResources,
+  updateResources,
+  hasResource,
+  getResource,
+  getResourceIds,
+  makeReduceQuery,
+  makeReduceAllQuery,
+  makeMapWithArgs,
+  type Resource,
+  type ResourceState,
+  type ReduceQuery,
+  type ReduceAllQuery,
+} from "../utils/resource";
 
-import { findBreakableLines } from "../utils/breakable-lines";
 import { findPosition } from "../utils/breakpoint/breakpointPositions";
 import * as asyncValue from "../utils/async-value";
 import type { AsyncValue, SettledValue } from "../utils/async-value";
@@ -32,7 +46,7 @@ import {
   getSourceActors,
   getThreadsBySource,
   type SourceActorId,
-  type SourceActorOuterState
+  type SourceActorOuterState,
 } from "./source-actors";
 import type {
   Source,
@@ -43,28 +57,36 @@ import type {
   SourceWithContent,
   ThreadId,
   MappedLocation,
-  BreakpointPositions
+  BreakpointPositions,
 } from "../types";
 import type { PendingSelectedLocation, Selector } from "./types";
 import type { Action, DonePromiseAction, FocusItem } from "../actions/types";
 import type { LoadSourceAction } from "../actions/types/SourceAction";
+import type { DebuggeeState } from "./debuggee";
 import { uniq } from "lodash";
 
 export type SourcesMap = { [SourceId]: Source };
-type SourcesContentMap = { [SourceId]: SettledValue<SourceContent> | null };
-export type BreakpointPositionsMap = { [SourceId]: BreakpointPositions };
+type SourcesContentMap = {
+  [SourceId]: AsyncValue<SourceContent> | null,
+};
 export type SourcesMapByThread = { [ThreadId]: SourcesMap };
+
+export type BreakpointPositionsMap = { [SourceId]: BreakpointPositions };
 type SourceActorMap = { [SourceId]: Array<SourceActorId> };
 
 type UrlsMap = { [string]: SourceId[] };
-type DisplayedSources = Set<SourceId>;
 type PlainUrlsMap = { [string]: string[] };
+
+type SourceResource = Resource<{
+  ...Source,
+}>;
+export type SourceResourceState = ResourceState<SourceResource>;
 
 export type SourcesState = {
   epoch: number,
 
   // All known sources.
-  sources: SourcesMap,
+  sources: SourceResourceState,
 
   content: SourcesContentMap,
 
@@ -83,21 +105,16 @@ export type SourcesState = {
   // disambiguation.
   plainUrls: PlainUrlsMap,
 
-  // For each thread, all sources in that thread that are under the project root
-  // and should be shown in the editor's sources pane.
-  displayed: DisplayedSources,
-
   pendingSelectedLocation?: PendingSelectedLocation,
   selectedLocation: ?SourceLocation,
   projectDirectoryRoot: string,
   chromeAndExtenstionsEnabled: boolean,
-  focusedItem: ?FocusItem
+  focusedItem: ?FocusItem,
 };
 
 export function initialSourcesState(): SourcesState {
   return {
-    sources: {},
-    displayed: new Set(),
+    sources: createInitial(),
     urls: {},
     plainUrls: {},
     content: {},
@@ -109,7 +126,7 @@ export function initialSourcesState(): SourcesState {
     pendingSelectedLocation: prefs.pendingSelectedLocation,
     projectDirectoryRoot: prefs.projectDirectoryRoot,
     chromeAndExtenstionsEnabled: prefs.chromeAndExtenstionsEnabled,
-    focusedItem: null
+    focusedItem: null,
   };
 }
 
@@ -137,7 +154,7 @@ function update(
     case "SET_SELECTED_LOCATION":
       location = {
         ...action.location,
-        url: action.source.url
+        url: action.source.url,
       };
 
       if (action.source.url) {
@@ -148,9 +165,9 @@ function update(
         ...state,
         selectedLocation: {
           sourceId: action.source.id,
-          ...action.location
+          ...action.location,
         },
-        pendingSelectedLocation: location
+        pendingSelectedLocation: location,
       };
 
     case "CLEAR_SELECTED_LOCATION":
@@ -160,13 +177,13 @@ function update(
       return {
         ...state,
         selectedLocation: null,
-        pendingSelectedLocation: location
+        pendingSelectedLocation: location,
       };
 
     case "SET_PENDING_SELECTED_LOCATION":
       location = {
         url: action.url,
-        line: action.line
+        line: action.line,
       };
 
       prefs.pendingSelectedLocation = location;
@@ -187,26 +204,33 @@ function update(
     case "SET_PROJECT_DIRECTORY_ROOT":
       return updateProjectDirectoryRoot(state, action.url);
 
+    case "SET_BREAKABLE_LINES": {
+      const { breakableLines, sourceId } = action;
+      return {
+        ...state,
+        breakableLines: {
+          ...state.breakableLines,
+          [sourceId]: breakableLines,
+        },
+      };
+    }
+
     case "ADD_BREAKPOINT_POSITIONS": {
       const { source, positions } = action;
-      const breakableLines = findBreakableLines(source, positions);
+      const breakpointPositions = state.breakpointPositions[source.id];
 
       return {
         ...state,
         breakpointPositions: {
           ...state.breakpointPositions,
-          [source.id]: positions
+          [source.id]: { ...breakpointPositions, ...positions },
         },
-        breakableLines: {
-          ...state.breakableLines,
-          [source.id]: breakableLines
-        }
       };
     }
     case "NAVIGATE":
       return {
         ...initialSourcesState(),
-        epoch: state.epoch + 1
+        epoch: state.epoch + 1,
       };
 
     case "SET_FOCUSED_SOURCE_ITEM":
@@ -214,6 +238,10 @@ function update(
   }
 
   return state;
+}
+
+function resourceAsSource(r: SourceResource): Source {
+  return r;
 }
 
 /*
@@ -225,14 +253,14 @@ function addSources(state: SourcesState, sources: Source[]): SourcesState {
   state = {
     ...state,
     content: { ...state.content },
-    sources: { ...state.sources },
     urls: { ...state.urls },
-    plainUrls: { ...state.plainUrls }
+    plainUrls: { ...state.plainUrls },
   };
+
+  state.sources = insertResources(state.sources, sources);
 
   for (const source of sources) {
     // 1. Add the source to the sources map
-    state.sources[source.id] = source;
     state.content[source.id] = null;
 
     // 2. Update the source url map
@@ -260,13 +288,13 @@ function insertSourceActors(state: SourcesState, action): SourcesState {
   const { items } = action;
   state = {
     ...state,
-    actors: { ...state.actors }
+    actors: { ...state.actors },
   };
 
   for (const sourceActor of items) {
     state.actors[sourceActor.source] = [
       ...(state.actors[sourceActor.source] || []),
-      sourceActor.id
+      sourceActor.id,
     ];
   }
 
@@ -301,7 +329,7 @@ function removeSourceActors(state: SourcesState, action) {
 
   state = {
     ...state,
-    actors: { ...state.actors }
+    actors: { ...state.actors },
   };
 
   for (const source of sources) {
@@ -319,7 +347,7 @@ function updateProjectDirectoryRoot(state: SourcesState, root: string) {
 
   return updateRootRelativeValues({
     ...state,
-    projectDirectoryRoot: root
+    projectDirectoryRoot: root,
   });
 }
 
@@ -329,32 +357,23 @@ function updateRootRelativeValues(
 ) {
   const ids = sources
     ? sources.map(source => source.id)
-    : Object.keys(state.sources);
+    : getResourceIds(state.sources);
 
   state = {
     ...state,
-    sources: { ...state.sources },
-    displayed: new Set(state.displayed)
   };
 
+  const relativeURLUpdates = [];
   for (const id of ids) {
-    const source = state.sources[id];
+    const source = getResource(state.sources, id);
 
-    state.displayed.delete(source.id);
-
-    if (
-      underRoot(source, state.projectDirectoryRoot) &&
-      (!source.isExtension ||
-        getChromeAndExtenstionsEnabled({ sources: state }))
-    ) {
-      state.displayed.add(source.id);
-    }
-
-    state.sources[id] = {
-      ...source,
-      relativeUrl: getRelativeUrl(source, state.projectDirectoryRoot)
-    };
+    relativeURLUpdates.push({
+      id,
+      relativeUrl: getRelativeUrl(source, state.projectDirectoryRoot),
+    });
   }
+
+  state.sources = updateResources(state.sources, relativeURLUpdates);
 
   return state;
 }
@@ -376,19 +395,19 @@ function updateLoadedState(
 
   let content;
   if (action.status === "start") {
-    content = null;
+    content = asyncValue.pending();
   } else if (action.status === "error") {
     content = asyncValue.rejected(action.error);
   } else if (typeof action.value.text === "string") {
     content = asyncValue.fulfilled({
       type: "text",
       value: action.value.text,
-      contentType: action.value.contentType
+      contentType: action.value.contentType,
     });
   } else {
     content = asyncValue.fulfilled({
       type: "wasm",
-      value: action.value.text
+      value: action.value.text,
     });
   }
 
@@ -396,8 +415,8 @@ function updateLoadedState(
     ...state,
     content: {
       ...state.content,
-      [sourceId]: content
-    }
+      [sourceId]: content,
+    },
   };
 }
 
@@ -405,21 +424,19 @@ function clearSourceMaps(
   state: SourcesState,
   sourceId: SourceId
 ): SourcesState {
-  const existingSource = state.sources[sourceId];
-  if (existingSource) {
-    state = {
-      ...state,
-      sources: {
-        ...state.sources,
-        [sourceId]: {
-          ...existingSource,
-          sourceMapURL: ""
-        }
-      }
-    };
+  if (!hasResource(state.sources, sourceId)) {
+    return state;
   }
 
-  return state;
+  return {
+    ...state,
+    sources: updateResources(state.sources, [
+      {
+        id: sourceId,
+        sourceMapURL: "",
+      },
+    ]),
+  };
 }
 
 /*
@@ -431,25 +448,23 @@ function updateBlackboxFlag(
   sourceId: SourceId,
   isBlackBoxed: boolean
 ): SourcesState {
-  const existingSource = state.sources[sourceId];
-
   // If there is no existing version of the source, it means that we probably
   // ended up here as a result of an async action, and the sources were cleared
   // between the action starting and the source being updated.
-  if (!existingSource) {
+  if (!hasResource(state.sources, sourceId)) {
     // TODO: We may want to consider throwing here once we have a better
     // handle on async action flow control.
     return state;
   }
+
   return {
     ...state,
-    sources: {
-      ...state.sources,
-      [sourceId]: {
-        ...existingSource,
-        isBlackBoxed
-      }
-    }
+    sources: updateResources(state.sources, [
+      {
+        id: sourceId,
+        isBlackBoxed,
+      },
+    ]),
   };
 }
 
@@ -480,6 +495,7 @@ export function getBlackBoxList() {
 // pick off the piece of state we're interested in. It's impossible
 // (right now) to type those wrapped functions.
 type OuterState = { sources: SourcesState };
+type DebuggeeOuterState = { debuggee: DebuggeeState };
 
 const getSourcesState = (state: OuterState) => state.sources;
 
@@ -494,8 +510,11 @@ export function getSourceThreads(
   );
 }
 
-export function getSourceInSources(sources: SourcesMap, id: string): ?Source {
-  return sources[id];
+export function getSourceInSources(
+  sources: SourceResourceState,
+  id: string
+): ?Source {
+  return hasResource(sources, id) ? getResource(sources, id) : null;
 }
 
 export function getSource(state: OuterState, id: SourceId): ?Source {
@@ -522,14 +541,14 @@ export function getSourceByActorId(
 }
 
 export function getSourcesByURLInSources(
-  sources: SourcesMap,
+  sources: SourceResourceState,
   urls: UrlsMap,
   url: string
 ): Source[] {
   if (!url || !urls[url]) {
     return [];
   }
-  return urls[url].map(id => sources[id]);
+  return urls[url].map(id => getResource(sources, id));
 }
 
 export function getSourcesByURL(state: OuterState, url: string): Source[] {
@@ -542,7 +561,7 @@ export function getSourceByURL(state: OuterState, url: string): ?Source {
 }
 
 export function getSpecificSourceByURLInSources(
-  sources: SourcesMap,
+  sources: SourceResourceState,
   urls: UrlsMap,
   url: string,
   isOriginal: boolean
@@ -645,7 +664,12 @@ export function getHasSiblingOfSameName(state: OuterState, source: ?Source) {
   return getSourcesUrlsInSources(state, source.url).length > 1;
 }
 
-export function getSources(state: OuterState) {
+const querySourceList: ReduceAllQuery<
+  SourceResource,
+  Array<Source>
+> = makeReduceAllQuery(resourceAsSource, sources => sources.slice());
+
+export function getSources(state: OuterState): SourceResourceState {
   return state.sources.sources;
 }
 
@@ -662,11 +686,11 @@ export function getPlainUrls(state: OuterState) {
 }
 
 export function getSourceList(state: OuterState): Source[] {
-  return (Object.values(getSources(state)): any);
+  return querySourceList(getSources(state));
 }
 
 export function getDisplayedSourcesList(
-  state: OuterState & SourceActorOuterState
+  state: OuterState & SourceActorOuterState & DebuggeeOuterState
 ): Source[] {
   return ((Object.values(getDisplayedSources(state)): any).flatMap(
     Object.values
@@ -685,12 +709,15 @@ export const getSelectedLocation: Selector<?SourceLocation> = createSelector(
 export const getSelectedSource: Selector<?Source> = createSelector(
   getSelectedLocation,
   getSources,
-  (selectedLocation: ?SourceLocation, sources: SourcesMap): ?Source => {
+  (
+    selectedLocation: ?SourceLocation,
+    sources: SourceResourceState
+  ): ?Source => {
     if (!selectedLocation) {
       return;
     }
 
-    return sources[selectedLocation.sourceId];
+    return getSourceInSources(sources, selectedLocation.sourceId);
   }
 );
 
@@ -701,10 +728,12 @@ export const getSelectedSourceWithContent: GSSWC = createSelector(
   state => state.sources.content,
   (
     selectedLocation: ?SourceLocation,
-    sources: SourcesMap,
+    sources: SourceResourceState,
     content: SourcesContentMap
   ): SourceWithContent | null => {
-    const source = selectedLocation && sources[selectedLocation.sourceId];
+    const source =
+      selectedLocation &&
+      getSourceInSources(sources, selectedLocation.sourceId);
     return source
       ? getSourceWithContentInner(sources, content, source.id)
       : null;
@@ -723,32 +752,35 @@ export function getSourceWithContent(
 export function getSourceContent(
   state: OuterState,
   id: SourceId
-): AsyncValue<SourceContent> | null {
-  const source = state.sources.sources[id];
-  if (!source) {
-    throw new Error("Unknown Source ID");
+): SettledValue<SourceContent> | null {
+  // Assert the resource exists.
+  getResource(state.sources.sources, id);
+  const content = state.sources.content[id];
+
+  if (!content || content.state === "pending") {
+    return null;
   }
 
-  return state.sources.content[id] || null;
+  return content;
 }
 
 const contentLookup: WeakMap<Source, SourceWithContent> = new WeakMap();
 function getSourceWithContentInner(
-  sources: SourcesMap,
+  sources: SourceResourceState,
   content: SourcesContentMap,
   id: SourceId
 ): SourceWithContent {
-  const source = sources[id];
-  if (!source) {
-    throw new Error("Unknown Source ID");
-  }
-  const contentValue = content[source.id];
+  const source = getResource(sources, id);
+  let contentValue = content[source.id];
 
   let result = contentLookup.get(source);
   if (!result || result.content !== contentValue) {
+    if (contentValue && contentValue.state === "pending") {
+      contentValue = null;
+    }
     result = {
       source,
-      content: contentValue
+      content: contentValue,
     };
     contentLookup.set(source, result);
   }
@@ -765,16 +797,54 @@ export function getProjectDirectoryRoot(state: OuterState): string {
   return state.sources.projectDirectoryRoot;
 }
 
-function getAllDisplayedSources(state: OuterState): DisplayedSources {
-  return state.sources.displayed;
-}
+const queryAllDisplayedSources: ReduceQuery<
+  SourceResource,
+  {|
+    projectDirectoryRoot: string,
+    chromeAndExtensionsEnabled: boolean,
+    debuggeeIsWebExtension: boolean,
+  |},
+  Array<SourceId>
+> = makeReduceQuery(
+  makeMapWithArgs(
+    (
+      resource,
+      ident,
+      {
+        projectDirectoryRoot,
+        chromeAndExtensionsEnabled,
+        debuggeeIsWebExtension,
+      }
+    ) => ({
+      id: resource.id,
+      displayed:
+        underRoot(resource, projectDirectoryRoot) &&
+        (!resource.isExtension ||
+          chromeAndExtensionsEnabled ||
+          debuggeeIsWebExtension),
+    })
+  ),
+  items =>
+    items.reduce((acc, { id, displayed }) => {
+      if (displayed) {
+        acc.push(id);
+      }
+      return acc;
+    }, [])
+);
 
-function getChromeAndExtenstionsEnabled(state: OuterState) {
-  return state.sources.chromeAndExtenstionsEnabled;
+function getAllDisplayedSources(
+  state: OuterState & DebuggeeOuterState
+): Array<SourceId> {
+  return queryAllDisplayedSources(state.sources.sources, {
+    projectDirectoryRoot: state.sources.projectDirectoryRoot,
+    chromeAndExtensionsEnabled: state.sources.chromeAndExtenstionsEnabled,
+    debuggeeIsWebExtension: state.debuggee.isWebExtension,
+  });
 }
 
 type GetDisplayedSourceIDsSelector = (
-  OuterState & SourceActorOuterState
+  OuterState & SourceActorOuterState & DebuggeeOuterState
 ) => { [ThreadId]: Set<SourceId> };
 const getDisplayedSourceIDs: GetDisplayedSourceIDsSelector = createSelector(
   getThreadsBySource,
@@ -798,9 +868,10 @@ const getDisplayedSourceIDs: GetDisplayedSourceIDsSelector = createSelector(
     return sourceIDsByThread;
   }
 );
+
 type GetDisplayedSourcesSelector = (
-  OuterState & SourceActorOuterState
-) => { [ThreadId]: { [SourceId]: Source } };
+  OuterState & SourceActorOuterState & DebuggeeOuterState
+) => SourcesMapByThread;
 export const getDisplayedSources: GetDisplayedSourcesSelector = createSelector(
   state => state.sources.sources,
   getDisplayedSourceIDs,
@@ -812,24 +883,13 @@ export const getDisplayedSources: GetDisplayedSourcesSelector = createSelector(
         if (!result[thread]) {
           result[thread] = {};
         }
-        result[thread][id] = sources[id];
+        result[thread][id] = getResource(sources, id);
       }
     }
 
     return result;
   }
 );
-
-export function getDisplayedSourcesForThread(
-  state: OuterState & SourceActorOuterState,
-  thread: string
-): SourcesMap {
-  return getDisplayedSources(state)[thread] || {};
-}
-
-export function getFocusedSourceItem(state: OuterState): ?FocusItem {
-  return state.sources.focusedItem;
-}
 
 export function getSourceActorsForSource(
   state: OuterState & SourceActorOuterState,
@@ -841,6 +901,25 @@ export function getSourceActorsForSource(
   }
 
   return getSourceActors(state, actors);
+}
+
+export function canLoadSource(
+  state: OuterState & SourceActorOuterState,
+  sourceId: string
+) {
+  // Return false if we know that loadSourceText() will fail if called on this
+  // source. This is used to avoid viewing such sources in the debugger.
+  const source = getSource(state, sourceId);
+  if (!source) {
+    return false;
+  }
+
+  if (isOriginalSource(source)) {
+    return true;
+  }
+
+  const actors = getSourceActorsForSource(state, sourceId);
+  return actors.length != 0;
 }
 
 export function getBreakpointPositions(
@@ -864,6 +943,15 @@ export function hasBreakpointPositions(
   return !!getBreakpointPositionsForSource(state, sourceId);
 }
 
+export function hasBreakpointPositionsForLine(
+  state: OuterState,
+  sourceId: string,
+  line: number
+): boolean {
+  const positions = getBreakpointPositionsForSource(state, sourceId);
+  return !!(positions && positions[line]);
+}
+
 export function getBreakpointPositionsForLocation(
   state: OuterState,
   location: SourceLocation
@@ -879,6 +967,19 @@ export function getBreakableLines(state: OuterState, sourceId: string) {
   }
 
   return state.sources.breakableLines[sourceId];
+}
+
+export const getSelectedBreakableLines: Selector<Set<number>> = createSelector(
+  state => {
+    const sourceId = getSelectedSourceId(state);
+    return sourceId && state.sources.breakableLines[sourceId];
+  },
+  breakableLines => new Set(breakableLines || [])
+);
+
+export function isSourceLoadingOrLoaded(state: OuterState, sourceId: string) {
+  const content = state.sources.content[sourceId];
+  return content !== null;
 }
 
 export default update;

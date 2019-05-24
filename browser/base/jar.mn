@@ -22,15 +22,17 @@ browser.jar:
         content/browser/aboutNetError.xhtml            (content/aboutNetError.xhtml)
         content/browser/aboutNetError.js               (content/aboutNetError.js)
         content/browser/aboutRobots-icon.png          (content/aboutRobots-icon.png)
+        content/browser/aboutFrameCrashed.html        (content/aboutFrameCrashed.html)
         content/browser/aboutTabCrashed.css           (content/aboutTabCrashed.css)
         content/browser/aboutTabCrashed.js            (content/aboutTabCrashed.js)
         content/browser/aboutTabCrashed.xhtml         (content/aboutTabCrashed.xhtml)
 *       content/browser/browser.css                   (content/browser.css)
         content/browser/browser.js                    (content/browser.js)
-#ifdef MOZ_BROWSER_XHTML
+#ifdef MOZ_BROWSER_XUL
+*       content/browser/browser.xul                   (content/browser.xul)
+#else
 *       content/browser/browser.xhtml                 (content/browser.xhtml)
 #endif
-*       content/browser/browser.xul                   (content/browser.xul)
         content/browser/browser-addons.js             (content/browser-addons.js)
         content/browser/browser-allTabsMenu.js        (content/browser-allTabsMenu.js)
         content/browser/browser-captivePortal.js      (content/browser-captivePortal.js)
@@ -51,6 +53,7 @@ browser.jar:
         content/browser/browser-safebrowsing.js       (content/browser-safebrowsing.js)
         content/browser/browser-sidebar.js            (content/browser-sidebar.js)
         content/browser/browser-siteIdentity.js       (content/browser-siteIdentity.js)
+        content/browser/browser-siteProtections.js    (content/browser-siteProtections.js)
         content/browser/browser-sync.js               (content/browser-sync.js)
         content/browser/browser-tabsintitlebar.js     (content/browser-tabsintitlebar.js)
         content/browser/browser-toolbarKeyNav.js      (content/browser-toolbarKeyNav.js)
@@ -101,7 +104,7 @@ browser.jar:
         content/browser/contentTheme.js               (content/contentTheme.js)
 #ifdef XP_MACOSX
 # XXX: We should exclude this one as well (bug 71895)
-*       content/browser/hiddenWindow.xul              (content/hiddenWindow.xul)
+*       content/browser/hiddenWindowMac.xhtml         (content/hiddenWindowMac.xhtml)
         content/browser/nonbrowser-mac.js             (content/nonbrowser-mac.js)
 #endif
 #ifndef XP_MACOSX

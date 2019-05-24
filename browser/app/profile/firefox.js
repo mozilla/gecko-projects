@@ -21,7 +21,7 @@
 #endif
 #endif
 
-pref("browser.hiddenWindowChromeURL", "chrome://browser/content/hiddenWindow.xul");
+pref("browser.hiddenWindowChromeURL", "chrome://browser/content/hiddenWindowMac.xhtml");
 
 // Enables some extra Extension System Logging (can reduce performance)
 pref("extensions.logging.enabled", false);
@@ -44,6 +44,10 @@ pref("extensions.getAddons.search.browseURL", "https://addons.mozilla.org/%LOCAL
 pref("extensions.webservice.discoverURL", "https://discovery.addons.mozilla.org/%LOCALE%/firefox/discovery/pane/%VERSION%/%OS%/%COMPATIBILITY_MODE%");
 pref("extensions.getAddons.link.url", "https://addons.mozilla.org/%LOCALE%/firefox/");
 pref("extensions.getAddons.langpacks.url", "https://services.addons.mozilla.org/api/v3/addons/language-tools/?app=firefox&type=language&appversion=%VERSION%");
+pref("extensions.getAddons.discovery.api_url", "https://services.addons.mozilla.org/api/v4/discovery/?lang=%LOCALE%");
+
+// Enable the HTML-based discovery panel at about:addons.
+pref("extensions.htmlaboutaddons.discover.enabled", false);
 
 pref("extensions.update.autoUpdateDefault", true);
 
@@ -184,8 +188,6 @@ pref("extensions.update.url", "https://versioncheck.addons.mozilla.org/update/Ve
 pref("extensions.update.background.url", "https://versioncheck-bg.addons.mozilla.org/update/VersionCheck.php?reqVersion=%REQ_VERSION%&id=%ITEM_ID%&version=%ITEM_VERSION%&maxAppVersion=%ITEM_MAXAPPVERSION%&status=%ITEM_STATUS%&appID=%APP_ID%&appVersion=%APP_VERSION%&appOS=%APP_OS%&appABI=%APP_ABI%&locale=%APP_LOCALE%&currentAppVersion=%CURRENT_APP_VERSION%&updateType=%UPDATE_TYPE%&compatMode=%COMPATIBILITY_MODE%");
 pref("extensions.update.interval", 86400);  // Check for updates to Extensions and
                                             // Themes every day
-
-pref("extensions.webextensions.themes.icons.buttons", "back,forward,reload,stop,bookmark_star,bookmark_menu,downloads,home,app_menu,cut,copy,paste,new_window,new_private_window,save_page,print,history,full_screen,find,options,addons,developer,synced_tabs,open_file,sidebars,share_page,subscribe,text_encoding,email_link,forget,pocket");
 
 pref("lightweightThemes.getMoreURL", "https://addons.mozilla.org/%LOCALE%/firefox/themes");
 
@@ -336,8 +338,13 @@ pref("browser.urlbar.openintab", false);
 pref("browser.urlbar.usepreloadedtopurls.enabled", false);
 pref("browser.urlbar.usepreloadedtopurls.expire_days", 14);
 
-// Toggle the new work in progress Address Bar code.
+// Toggle the new work in progress Address Bar code. Enable it on Nightly and Beta,
+// not on Release yet.
+#ifdef EARLY_BETA_OR_EARLIER
+pref("browser.urlbar.quantumbar", true);
+#else
 pref("browser.urlbar.quantumbar", false);
+#endif
 
 pref("browser.altClickSave", false);
 
@@ -406,7 +413,7 @@ pref("permissions.default.geo", 0);
 pref("permissions.default.desktop-notification", 0);
 pref("permissions.default.shortcuts", 0);
 
-#ifdef NIGHTLY_BUILD
+#ifdef EARLY_BETA_OR_EARLIER
 pref("permissions.desktop-notification.postPrompt.enabled", true);
 #else
 pref("permissions.desktop-notification.postPrompt.enabled", false);
@@ -414,9 +421,12 @@ pref("permissions.desktop-notification.postPrompt.enabled", false);
 
 pref("permissions.postPrompt.animate", true);
 
-// This is meant to be enabled only for studies, not for
-// permanent data collection on any channel.
+// This is primarily meant to be enabled for studies.
+#ifdef NIGHTLY_BUILD
+pref("permissions.eventTelemetry.enabled", true);
+#else
 pref("permissions.eventTelemetry.enabled", false);
+#endif
 
 // handle links targeting new windows
 // 1=current window/tab, 2=new window, 3=new tab in most recent window
@@ -496,12 +506,8 @@ pref("browser.tabs.remote.separatePrivilegedContentProcess", true);
 // Turn on HTTP response process selection.
 pref("browser.tabs.remote.useHTTPResponseProcessSelection", true);
 
-// Unload tabs on low-memory on nightly and beta.
-#ifdef EARLY_BETA_OR_EARLIER
+// Unload tabs when available memory is running low
 pref("browser.tabs.unloadOnLowMemory", true);
-#else
-pref("browser.tabs.unloadOnLowMemory", false);
-#endif
 
 pref("browser.ctrlTab.recentlyUsedOrder", true);
 
@@ -984,7 +990,7 @@ pref("security.certerrors.recordEventTelemetry", true);
 pref("security.certerrors.permanentOverride", true);
 pref("security.certerrors.mitm.priming.enabled", true);
 pref("security.certerrors.mitm.priming.endpoint", "https://mitmdetection.services.mozilla.com/");
-pref("security.certerrors.mitm.auto_enable_enterprise_roots", false);
+pref("security.certerrors.mitm.auto_enable_enterprise_roots", true);
 
 // Whether to start the private browsing mode at application startup
 pref("browser.privatebrowsing.autostart", false);
@@ -1182,7 +1188,6 @@ pref("services.sync.prefs.sync.addons.ignoreUserEnabledChanges", true);
 // source, and this would propagate automatically to other,
 // uncompromised Sync-connected devices.
 pref("services.sync.prefs.sync.browser.contentblocking.category", true);
-pref("services.sync.prefs.sync.browser.contentblocking.features.standard", true);
 pref("services.sync.prefs.sync.browser.contentblocking.features.strict", true);
 pref("services.sync.prefs.sync.browser.contentblocking.introCount", true);
 pref("services.sync.prefs.sync.browser.crashReports.unsubmittedCheck.autoSubmit2", true);
@@ -1318,6 +1323,12 @@ pref("browser.newtabpage.activity-stream.asrouter.providers.snippets", "{\"id\":
 pref("browser.newtabpage.activity-stream.improvesearch.handoffToAwesomebar", true);
 #else
 pref("browser.newtabpage.activity-stream.improvesearch.handoffToAwesomebar", false);
+#endif
+
+#ifdef NIGHTLY_BUILD
+pref("trailhead.firstrun.branches", "join-privacy");
+#else
+pref("trailhead.firstrun.branches", "control");
 #endif
 
 // Enable the DOM fullscreen API.
@@ -1579,7 +1590,7 @@ pref("browser.contentblocking.control-center.ui.showAllowedLabels", false);
 pref("browser.contentblocking.cryptomining.preferences.ui.enabled", true);
 pref("browser.contentblocking.fingerprinting.preferences.ui.enabled", true);
 
-// Possible values for browser.contentblocking.features.* prefs:
+// Possible values for browser.contentblocking.features.strict pref:
 //   Tracking Protection:
 //     "tp": tracking protection enabled
 //     "-tp": tracking protection disabled
@@ -1598,17 +1609,8 @@ pref("browser.contentblocking.fingerprinting.preferences.ui.enabled", true);
 //     "cookieBehavior2": cookie behaviour BEHAVIOR_REJECT
 //     "cookieBehavior3": cookie behaviour BEHAVIOR_LIMIT_FOREIGN
 //     "cookieBehavior4": cookie behaviour BEHAVIOR_REJECT_TRACKER
-// One value from each section must be included in each browser.contentblocking.features.* pref.
+// One value from each section must be included in the browser.contentblocking.features.strict pref.
 pref("browser.contentblocking.features.strict", "tp,tpPrivate,cookieBehavior4,cm,fp");
-// Enable blocking access to storage from tracking resources only in nightly
-// and early beta. By default the value is "cookieBehavior0": BEHAVIOR_ACCEPT
-// Enable cryptomining blocking in standard in nightly and early beta.
-// Enable fingerprinting blocking in standard in nightly and early beta.
-#ifdef EARLY_BETA_OR_EARLIER
-pref("browser.contentblocking.features.standard", "-tp,tpPrivate,cookieBehavior4,cm,fp");
-#else
-pref("browser.contentblocking.features.standard", "-tp,tpPrivate,cookieBehavior0,-cm,-fp");
-#endif
 
 // Enable the Report Breakage UI on Nightly and Beta but not on Release yet.
 #ifdef EARLY_BETA_OR_EARLIER
@@ -1624,6 +1626,13 @@ pref("browser.contentblocking.reportBreakage.url", "https://tracking-protection-
 pref("browser.contentblocking.introCount", 0);
 
 pref("browser.contentblocking.maxIntroCount", 5);
+// 1800 = 30 min in seconds
+pref("browser.contentblocking.introDelaySeconds", 1800);
+
+// Enables the new Protections Panel.
+#ifdef NIGHTLY_BUILD
+pref("browser.protections_panel.enabled", true);
+#endif
 
 pref("privacy.trackingprotection.introURL", "https://www.mozilla.org/%LOCALE%/firefox/%VERSION%/content-blocking/start/");
 
@@ -1737,6 +1746,7 @@ pref("extensions.pocket.site", "getpocket.com");
 pref("signon.schemeUpgrades", true);
 pref("signon.privateBrowsingCapture.enabled", true);
 pref("signon.showAutoCompleteFooter", true);
+pref("signon.management.page.enabled", false);
 
 // Enable the "Simplify Page" feature in Print Preview. This feature
 // is disabled by default in toolkit.

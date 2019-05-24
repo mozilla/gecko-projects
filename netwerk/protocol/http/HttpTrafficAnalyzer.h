@@ -12,7 +12,7 @@ namespace net {
 #define DEFINE_CATEGORY(_name, _idx) e##_name = _idx##u,
 enum HttpTrafficCategory : uint8_t {
 #include "HttpTrafficAnalyzer.inc"
-  eInvalid = 255,
+  eInvalid,
 };
 #undef DEFINE_CATEGORY
 
@@ -32,12 +32,12 @@ class HttpTrafficAnalyzer final {
   };
 
   static HttpTrafficCategory CreateTrafficCategory(
-      bool aIsPrivateMode, bool aIsThirdParty, ClassOfService aClassOfService,
-      TrackingClassification aClassification);
+      bool aIsPrivateMode, bool aIsSystemPrincipal, bool aIsThirdParty,
+      ClassOfService aClassOfService, TrackingClassification aClassification);
 
   nsresult IncrementHttpTransaction(HttpTrafficCategory aCategory);
   nsresult IncrementHttpConnection(HttpTrafficCategory aCategory);
-  nsresult IncrementHttpConnection(nsTArray<HttpTrafficCategory> &&aCategories);
+  nsresult IncrementHttpConnection(nsTArray<HttpTrafficCategory>&& aCategories);
   nsresult AccumulateHttpTransferredSize(HttpTrafficCategory aCategory,
                                          uint64_t aBytesRead,
                                          uint64_t aBytesSent);

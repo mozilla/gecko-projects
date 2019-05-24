@@ -81,12 +81,6 @@
 #include <ostream>
 #include <sstream>
 
-#if defined(XP_WIN)
-#  include <processthreadsapi.h>  // for GetCurrentProcessId()
-#else
-#  include <unistd.h>  // for getpid()
-#endif                 // defined(XP_WIN)
-
 #ifdef MOZ_TASK_TRACER
 #  include "GeckoTaskTracer.h"
 #endif
@@ -194,6 +188,53 @@ class GeckoJavaSampler
   };
 };
 #endif
+
+// Return all features that are available on this platform.
+static uint32_t AvailableFeatures() {
+  uint32_t features = 0;
+
+#define ADD_FEATURE(n_, str_, Name_, desc_) \
+  ProfilerFeature::Set##Name_(features);
+
+  // Add all the possible features.
+  PROFILER_FOR_EACH_FEATURE(ADD_FEATURE)
+
+#undef ADD_FEATURE
+
+  // Now remove features not supported on this platform/configuration.
+#if !defined(GP_OS_android)
+  ProfilerFeature::ClearJava(features);
+#endif
+#if !defined(HAVE_NATIVE_UNWIND)
+  ProfilerFeature::ClearStackWalk(features);
+#endif
+#if !defined(MOZ_TASK_TRACER)
+  ProfilerFeature::ClearTaskTracer(features);
+#endif
+#if !(defined(MOZ_REPLACE_MALLOC) && defined(MOZ_PROFILER_MEMORY))
+  ProfilerFeature::ClearMemory(features);
+#endif
+  if (!JS::TraceLoggerSupported()) {
+    ProfilerFeature::ClearJSTracer(features);
+  }
+
+  return features;
+}
+
+// Default features common to all contexts (even if not available).
+static uint32_t DefaultFeatures() {
+  return ProfilerFeature::Java | ProfilerFeature::JS | ProfilerFeature::Leaf |
+         ProfilerFeature::StackWalk | ProfilerFeature::Threads |
+         ProfilerFeature::Responsiveness;
+}
+
+// Extra default features when MOZ_PROFILER_STARTUP is set (even if not
+// available).
+static uint32_t StartupExtraDefaultFeatures() {
+  // Enable mainthreadio by default for startup profiles as startup is heavy on
+  // I/O operations, and main thread I/O is really important to see there.
+  return ProfilerFeature::MainThreadIO | ProfilerFeature::Memory;
+}
 
 class PSMutex : public StaticMutex {};
 
@@ -315,7 +356,9 @@ class CorePS {
 
   static void AppendRegisteredPage(PSLockRef,
                                    RefPtr<PageInformation>&& aRegisteredPage) {
-#ifdef DEBUG
+    // Disabling this assertion for now until we fix the same page registration
+    // issue. See Bug 1542918.
+#if 0
     struct RegisteredPageComparator {
       PageInformation* aA;
       bool operator()(PageInformation* aB) const { return aA->Equals(aB); }
@@ -334,6 +377,10 @@ class CorePS {
     sInstance->mRegisteredPages.eraseIf([&](const RefPtr<PageInformation>& rd) {
       return rd->DocShellId().Equals(aRegisteredDocShellId);
     });
+  }
+
+  static void ClearRegisteredPages(PSLockRef) {
+    sInstance->mRegisteredPages.clear();
   }
 
   PS_GET(const Vector<BaseProfilerCount*>&, Counters)
@@ -412,7 +459,7 @@ class ActivePS {
  private:
   static uint32_t AdjustFeatures(uint32_t aFeatures, uint32_t aFilterCount) {
     // Filter out any features unavailable in this platform/configuration.
-    aFeatures &= profiler_get_available_features();
+    aFeatures &= AvailableFeatures();
 
 #if defined(GP_OS_android)
     if (!jni::IsFennec()) {
@@ -522,13 +569,7 @@ class ActivePS {
 
       // If the filter starts with pid:, check for a pid match
       if (filter.find("pid:") == 0) {
-        std::string mypid = std::to_string(
-#ifdef XP_WIN
-            GetCurrentProcessId()
-#else
-            getpid()
-#endif
-        );
+        std::string mypid = std::to_string(profiler_current_process_id());
         if (filter.compare(4, std::string::npos, mypid) == 0) {
           return true;
         }
@@ -607,7 +648,7 @@ class ActivePS {
 
   PS_GET(uint32_t, Features)
 
-#define PS_GET_FEATURE(n_, str_, Name_)                       \
+#define PS_GET_FEATURE(n_, str_, Name_, desc_)                \
   static bool Feature##Name_(PSLockRef) {                     \
     return ProfilerFeature::Has##Name_(sInstance->mFeatures); \
   }
@@ -773,6 +814,10 @@ class ActivePS {
                              "should have unregistered this page");
           return *bufferPosition < bufferRangeStart;
         });
+  }
+
+  static void ClearUnregisteredPages(PSLockRef) {
+    sInstance->mDeadProfiledPages.clear();
   }
 
 #if !defined(RELEASE_OR_BETA)
@@ -2132,6 +2177,27 @@ bool profiler_stream_json_for_this_process(SpliceableJSONWriter& aWriter,
 // END saving/streaming code
 ////////////////////////////////////////////////////////////////////////
 
+static char FeatureCategory(uint32_t aFeature) {
+  if (aFeature & DefaultFeatures()) {
+    if (aFeature & AvailableFeatures()) {
+      return 'D';
+    }
+    return 'd';
+  }
+
+  if (aFeature & StartupExtraDefaultFeatures()) {
+    if (aFeature & AvailableFeatures()) {
+      return 'S';
+    }
+    return 's';
+  }
+
+  if (aFeature & AvailableFeatures()) {
+    return '-';
+  }
+  return 'x';
+}
+
 static void PrintUsageThenExit(int aExitCode) {
   MOZ_RELEASE_ASSERT(NS_IsMainThread());
 
@@ -2151,9 +2217,12 @@ static void PrintUsageThenExit(int aExitCode) {
       "  Useful if you want profile code that runs very early.\n"
       "\n"
       "  MOZ_PROFILER_STARTUP_ENTRIES=<1..>\n"
-      "  If MOZ_PROFILER_STARTUP is set, specifies the number of entries in\n"
-      "  the profiler's circular buffer when the profiler is first started.\n"
-      "  If unset, the platform default is used.\n"
+      "  If MOZ_PROFILER_STARTUP is set, specifies the number of entries per\n"
+      "  process in the profiler's circular buffer when the profiler is first\n"
+      "  started.\n"
+      "  If unset, the platform default is used:\n"
+      "  %u entries per process, or %u when MOZ_PROFILER_STARTUP is set.\n"
+      "  (%zu bytes per entry -> %zu or %zu total bytes per process)\n"
       "\n"
       "  MOZ_PROFILER_STARTUP_DURATION=<1..>\n"
       "  If MOZ_PROFILER_STARTUP is set, specifies the maximum life time of\n"
@@ -2178,6 +2247,24 @@ static void PrintUsageThenExit(int aExitCode) {
       "  a comma-separated list of strings.\n"
       "  Ignored if  MOZ_PROFILER_STARTUP_FEATURES_BITFIELD is set.\n"
       "  If unset, the platform default is used.\n"
+      "\n"
+      "    Features: (x=unavailable, D/d=default/unavailable,\n"
+      "               S/s=MOZ_PROFILER_STARTUP extra default/unavailable)\n",
+      unsigned(PROFILER_DEFAULT_ENTRIES),
+      unsigned(PROFILER_DEFAULT_STARTUP_ENTRIES), sizeof(ProfileBufferEntry),
+      sizeof(ProfileBufferEntry) * PROFILER_DEFAULT_ENTRIES,
+      sizeof(ProfileBufferEntry) * PROFILER_DEFAULT_STARTUP_ENTRIES);
+
+#define PRINT_FEATURE(n_, str_, Name_, desc_)                                  \
+  printf("    %c %5u: \"%s\" (%s)\n", FeatureCategory(ProfilerFeature::Name_), \
+         ProfilerFeature::Name_, str_, desc_);
+
+  PROFILER_FOR_EACH_FEATURE(PRINT_FEATURE)
+
+#undef PRINT_FEATURE
+
+  printf(
+      "    -        \"default\" (All above D+S defaults)\n"
       "\n"
       "  MOZ_PROFILER_STARTUP_FILTERS=<Filters>\n"
       "  If MOZ_PROFILER_STARTUP is set, specifies the thread filters, as a\n"
@@ -2550,35 +2637,41 @@ GeckoProfilerReporter::CollectReports(nsIHandleReportCallback* aHandleReport,
 
 NS_IMPL_ISUPPORTS(GeckoProfilerReporter, nsIMemoryReporter)
 
-static bool HasFeature(const char** aFeatures, uint32_t aFeatureCount,
-                       const char* aFeature) {
-  for (size_t i = 0; i < aFeatureCount; i++) {
-    if (strcmp(aFeatures[i], aFeature) == 0) {
-      return true;
-    }
+static uint32_t ParseFeature(const char* aFeature, bool aIsStartup) {
+  if (strcmp(aFeature, "default") == 0) {
+    return (aIsStartup ? (DefaultFeatures() | StartupExtraDefaultFeatures())
+                       : DefaultFeatures()) &
+           AvailableFeatures();
   }
-  return false;
+
+#define PARSE_FEATURE_BIT(n_, str_, Name_, desc_) \
+  if (strcmp(aFeature, str_) == 0) {              \
+    return ProfilerFeature::Name_;                \
+  }
+
+  PROFILER_FOR_EACH_FEATURE(PARSE_FEATURE_BIT)
+
+#undef PARSE_FEATURE_BIT
+
+  printf("\nUnrecognized feature \"%s\".\n\n", aFeature);
+  PrintUsageThenExit(1);
+  return 0;
 }
 
 uint32_t ParseFeaturesFromStringArray(const char** aFeatures,
-                                      uint32_t aFeatureCount) {
-#define ADD_FEATURE_BIT(n_, str_, Name_)            \
-  if (HasFeature(aFeatures, aFeatureCount, str_)) { \
-    features |= ProfilerFeature::Name_;             \
-  }
-
+                                      uint32_t aFeatureCount,
+                                      bool aIsStartup /* = false */) {
   uint32_t features = 0;
-  PROFILER_FOR_EACH_FEATURE(ADD_FEATURE_BIT)
-
-#undef ADD_FEATURE_BIT
-
+  for (size_t i = 0; i < aFeatureCount; i++) {
+    features |= ParseFeature(aFeatures[i], aIsStartup);
+  }
   return features;
 }
 
 // Find the RegisteredThread for the current thread. This should only be called
 // in places where TLSRegisteredThread can't be used.
 static RegisteredThread* FindCurrentThreadRegisteredThread(PSLockRef aLock) {
-  int id = Thread::GetCurrentId();
+  int id = profiler_current_thread_id();
   const Vector<UniquePtr<RegisteredThread>>& registeredThreads =
       CorePS::RegisteredThreads(aLock);
   for (auto& registeredThread : registeredThreads) {
@@ -2604,7 +2697,7 @@ static ProfilingStack* locked_register_thread(PSLockRef aLock,
   }
 
   RefPtr<ThreadInfo> info =
-      new ThreadInfo(aName, Thread::GetCurrentId(), NS_IsMainThread());
+      new ThreadInfo(aName, profiler_current_thread_id(), NS_IsMainThread());
   UniquePtr<RegisteredThread> registeredThread = MakeUnique<RegisteredThread>(
       info, NS_GetCurrentThreadNoCreate(), aStackTop);
 
@@ -2734,15 +2827,7 @@ void profiler_init(void* aStackTop) {
 
   SharedLibraryInfo::Initialize();
 
-  uint32_t features =
-#if defined(GP_OS_android)
-      ProfilerFeature::Java |
-#endif
-      ProfilerFeature::JS | ProfilerFeature::Leaf |
-#if defined(HAVE_NATIVE_UNWIND)
-      ProfilerFeature::StackWalk |
-#endif
-      ProfilerFeature::Threads | ProfilerFeature::Responsiveness | 0;
+  uint32_t features = DefaultFeatures() & AvailableFeatures();
 
   UniquePtr<char[]> filterStorage;
 
@@ -2751,7 +2836,7 @@ void profiler_init(void* aStackTop) {
   MOZ_RELEASE_ASSERT(filters.append("Compositor"));
   MOZ_RELEASE_ASSERT(filters.append("DOM Worker"));
 
-  int capacity = PROFILER_DEFAULT_ENTRIES;
+  uint32_t capacity = PROFILER_DEFAULT_ENTRIES;
   Maybe<double> duration = Nothing();
   double interval = PROFILER_DEFAULT_INTERVAL;
 
@@ -2793,12 +2878,20 @@ void profiler_init(void* aStackTop) {
 
     LOG("- MOZ_PROFILER_STARTUP is set");
 
+    // Startup default capacity may be different.
+    capacity = PROFILER_DEFAULT_STARTUP_ENTRIES;
+
     const char* startupCapacity = getenv("MOZ_PROFILER_STARTUP_ENTRIES");
     if (startupCapacity && startupCapacity[0] != '\0') {
       errno = 0;
-      capacity = strtol(startupCapacity, nullptr, 10);
-      if (errno == 0 && capacity > 0) {
-        LOG("- MOZ_PROFILER_STARTUP_ENTRIES = %d", capacity);
+      long capacityLong = strtol(startupCapacity, nullptr, 10);
+      // `long` could be 32 or 64 bits, so we force a 64-bit comparison with
+      // the maximum 32-bit unsigned number.
+      if (errno == 0 && capacityLong > 0 &&
+          static_cast<uint64_t>(capacityLong) <=
+              static_cast<uint64_t>(UINT32_MAX)) {
+        capacity = static_cast<uint32_t>(capacityLong);
+        LOG("- MOZ_PROFILER_STARTUP_ENTRIES = %u", unsigned(capacity));
       } else {
         LOG("- MOZ_PROFILER_STARTUP_ENTRIES not a valid integer: %s",
             startupCapacity);
@@ -2835,10 +2928,7 @@ void profiler_init(void* aStackTop) {
       }
     }
 
-    // Enable mainthreadio by default for startup profiles as startup is
-    // heavy on I/O operations, and main thread I/O is really important to
-    // see there.
-    features |= ProfilerFeature::MainThreadIO;
+    features |= StartupExtraDefaultFeatures() & AvailableFeatures();
 
     const char* startupFeaturesBitfield =
         getenv("MOZ_PROFILER_STARTUP_FEATURES_BITFIELD");
@@ -2861,7 +2951,8 @@ void profiler_init(void* aStackTop) {
         Vector<const char*> featureStringArray =
             SplitAtCommas(startupFeatures, featureStringStorage);
         features = ParseFeaturesFromStringArray(featureStringArray.begin(),
-                                                featureStringArray.length());
+                                                featureStringArray.length(),
+                                                /* aIsStartup */ true);
         LOG("- MOZ_PROFILER_STARTUP_FEATURES = %d", features);
       }
     }
@@ -2875,6 +2966,14 @@ void profiler_init(void* aStackTop) {
     locked_profiler_start(lock, capacity, interval, features, filters.begin(),
                           filters.length(), duration);
   }
+
+#if defined(MOZ_REPLACE_MALLOC) && defined(MOZ_PROFILER_MEMORY)
+  if (ProfilerFeature::HasMemory(features)) {
+    // start counting memory allocations (outside of lock because this may call
+    // profiler_add_sampled_counter which would attempt to take the lock.)
+    mozilla::profiler::install_memory_counter(true);
+  }
+#endif
 
   // We do this with gPSMutex unlocked. The comment in profiler_stop() explains
   // why.
@@ -3131,31 +3230,7 @@ void profiler_save_profile_to_file(const char* aFilename) {
 
 uint32_t profiler_get_available_features() {
   MOZ_RELEASE_ASSERT(CorePS::Exists());
-
-  uint32_t features = 0;
-
-#define ADD_FEATURE(n_, str_, Name_) ProfilerFeature::Set##Name_(features);
-
-  // Add all the possible features.
-  PROFILER_FOR_EACH_FEATURE(ADD_FEATURE)
-
-#undef ADD_FEATURE
-
-  // Now remove features not supported on this platform/configuration.
-#if !defined(GP_OS_android)
-  ProfilerFeature::ClearJava(features);
-#endif
-#if !defined(HAVE_NATIVE_UNWIND)
-  ProfilerFeature::ClearStackWalk(features);
-#endif
-#if !defined(MOZ_TASK_TRACER)
-  ProfilerFeature::ClearTaskTracer(features);
-#endif
-  if (!JS::TraceLoggerSupported()) {
-    ProfilerFeature::ClearJSTracer(features);
-  }
-
-  return features;
+  return AvailableFeatures();
 }
 
 Maybe<ProfilerBufferInfo> profiler_get_buffer_info() {
@@ -3218,7 +3293,7 @@ static void locked_profiler_start(PSLockRef aLock, uint32_t aCapacity,
     LOG("- duration  = %.2f", aDuration ? *aDuration : -1);
     LOG("- interval = %.2f", aInterval);
 
-#define LOG_FEATURE(n_, str_, Name_)            \
+#define LOG_FEATURE(n_, str_, Name_, desc_)     \
   if (ProfilerFeature::Has##Name_(aFeatures)) { \
     LOG("- feature  = %s", str_);               \
   }
@@ -3251,7 +3326,7 @@ static void locked_profiler_start(PSLockRef aLock, uint32_t aCapacity,
                    duration);
 
   // Set up profiling for each registered thread, if appropriate.
-  int tid = Thread::GetCurrentId();
+  int tid = profiler_current_thread_id();
   const Vector<UniquePtr<RegisteredThread>>& registeredThreads =
       CorePS::RegisteredThreads(aLock);
   for (auto& registeredThread : registeredThreads) {
@@ -3329,8 +3404,11 @@ void profiler_start(uint32_t aCapacity, double aInterval, uint32_t aFeatures,
   }
 
 #if defined(MOZ_REPLACE_MALLOC) && defined(MOZ_PROFILER_MEMORY)
-  // start counting memory allocations (outside of lock)
-  mozilla::profiler::install_memory_counter(true);
+  if (ProfilerFeature::HasMemory(aFeatures)) {
+    // start counting memory allocations (outside of lock because this may call
+    // profiler_add_sampled_counter which would attempt to take the lock.)
+    mozilla::profiler::install_memory_counter(true);
+  }
 #endif
 
   // We do these operations with gPSMutex unlocked. The comments in
@@ -3366,6 +3444,12 @@ void profiler_ensure_started(uint32_t aCapacity, double aInterval,
                             aFilters, aFilterCount)) {
         // Stop and restart with different settings.
         samplerThread = locked_profiler_stop(lock);
+#if defined(MOZ_REPLACE_MALLOC) && defined(MOZ_PROFILER_MEMORY)
+        if (!ProfilerFeature::HasMemory(aFeatures)) {
+          // Ensure we don't record memory measurements anymore (if we were).
+          mozilla::profiler::install_memory_counter(false);
+        }
+#endif
         locked_profiler_start(lock, aCapacity, aInterval, aFeatures, aFilters,
                               aFilterCount, aDuration);
         startedProfiler = true;
@@ -3378,6 +3462,15 @@ void profiler_ensure_started(uint32_t aCapacity, double aInterval,
     }
   }
 
+#if defined(MOZ_REPLACE_MALLOC) && defined(MOZ_PROFILER_MEMORY)
+  if (startedProfiler && ProfilerFeature::HasMemory(aFeatures)) {
+    // start counting memory allocations (outside of lock because this may
+    // call profiler_add_sampled_counter which would attempt to take the
+    // lock.)
+    mozilla::profiler::install_memory_counter(true);
+  }
+#endif
+
   // We do these operations with gPSMutex unlocked. The comments in
   // profiler_stop() explain why.
   if (samplerThread) {
@@ -3385,6 +3478,7 @@ void profiler_ensure_started(uint32_t aCapacity, double aInterval,
     NotifyObservers("profiler-stopped");
     delete samplerThread;
   }
+
   if (startedProfiler) {
     NotifyProfilerStarted(aCapacity, aDuration, aInterval, aFeatures, aFilters,
                           aFilterCount);
@@ -3416,7 +3510,7 @@ static MOZ_MUST_USE SamplerThread* locked_profiler_stop(PSLockRef aLock) {
 #endif
 
   // Stop sampling live threads.
-  int tid = Thread::GetCurrentId();
+  int tid = profiler_current_thread_id();
   const Vector<LiveProfiledThreadData>& liveProfiledThreads =
       ActivePS::LiveProfiledThreads(aLock);
   for (auto& thread : liveProfiledThreads) {
@@ -3667,6 +3761,24 @@ void profiler_unregister_pages(const nsID& aRegisteredDocShellId) {
   }
 }
 
+void profiler_clear_all_pages() {
+  if (!CorePS::Exists()) {
+    // This function can be called after the main thread has already shut down.
+    return;
+  }
+
+  {
+    PSAutoLock lock(gPSMutex);
+    CorePS::ClearRegisteredPages(lock);
+    if (ActivePS::Exists(lock)) {
+      ActivePS::ClearUnregisteredPages(lock);
+    }
+  }
+
+  // gPSMutex must be unlocked when we notify, to avoid potential deadlocks.
+  ProfilerParent::ClearAllPages();
+}
+
 void profiler_thread_sleep() {
   // This function runs both on and off the main thread.
 
@@ -3743,7 +3855,7 @@ UniqueProfilerBacktrace profiler_get_backtrace() {
     return nullptr;
   }
 
-  int tid = Thread::GetCurrentId();
+  int tid = profiler_current_thread_id();
 
   TimeStamp now = TimeStamp::Now();
 
@@ -4007,8 +4119,6 @@ void profiler_clear_js_context() {
 
   registeredThread->ClearJSContext();
 }
-
-int profiler_current_thread_id() { return Thread::GetCurrentId(); }
 
 // NOTE: aCollector's methods will be called while the target thread is paused.
 // Doing things in those methods like allocating -- which may try to claim

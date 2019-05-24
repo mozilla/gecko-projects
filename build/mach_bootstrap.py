@@ -11,7 +11,10 @@ import platform
 import subprocess
 import sys
 import uuid
-import __builtin__
+if sys.version_info[0] < 3:
+    import __builtin__ as builtins
+else:
+    import builtins
 
 from types import ModuleType
 
@@ -61,6 +64,7 @@ MACH_MODULES = [
     'testing/web-platform/mach_commands.py',
     'testing/xpcshell/mach_commands.py',
     'toolkit/components/telemetry/tests/marionette/mach_commands.py',
+    'tools/browsertime/mach_commands.py',
     'tools/compare-locales/mach_commands.py',
     'tools/docs/mach_commands.py',
     'tools/lint/mach_commands.py',
@@ -433,4 +437,4 @@ class ImportHook(object):
 
 
 # Install our hook
-__builtin__.__import__ = ImportHook(__builtin__.__import__)
+builtins.__import__ = ImportHook(builtins.__import__)

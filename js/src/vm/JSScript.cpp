@@ -36,6 +36,7 @@
 #include "jit/BaselineJIT.h"
 #include "jit/Ion.h"
 #include "jit/IonCode.h"
+#include "jit/JitOptions.h"
 #include "jit/JitRealm.h"
 #include "js/CompileOptions.h"
 #include "js/MemoryMetrics.h"
@@ -1664,32 +1665,35 @@ class ScriptSource::LoadSourceMatcher {
 
   template <typename Unit>
   bool operator()(const Compressed<Unit>&) const {
-    return sourceAlreadyLoaded();
+    *loaded_ = true;
+    return true;
   }
 
   template <typename Unit>
   bool operator()(const Uncompressed<Unit>&) const {
-    return sourceAlreadyLoaded();
+    *loaded_ = true;
+    return true;
   }
 
   template <typename Unit>
   bool operator()(const Retrievable<Unit>&) {
-    // Establish the default outcome first.
-    *loaded_ = false;
-
     MOZ_ASSERT(ss_->sourceRetrievable(),
                "should be retrievable if Retrievable");
 
     if (!cx_->runtime()->sourceHook.ref()) {
+      *loaded_ = false;
       return true;
     }
 
-    // The argument here is just for overloading -- its value doesn't matter.
-    if (!tryLoadAndSetSource(Unit('0'))) {
+    size_t length;
+
+    // The first argument is just for overloading -- its value doesn't matter.
+    if (!tryLoadAndSetSource(Unit('0'), &length)) {
       return false;
     }
 
-    *loaded_ = true;
+    cx_->updateMallocCounter(length * sizeof(Unit));
+
     return true;
   }
 
@@ -1708,31 +1712,47 @@ class ScriptSource::LoadSourceMatcher {
   }
 
  private:
-  bool sourceAlreadyLoaded() const {
+  bool tryLoadAndSetSource(const Utf8Unit&, size_t* length) const {
+    char* utf8Source;
+    if (!cx_->runtime()->sourceHook->load(cx_, ss_->filename(), nullptr,
+                                          &utf8Source, length)) {
+      return false;
+    }
+
+    if (!utf8Source) {
+      *loaded_ = false;
+      return true;
+    }
+
+    if (!ss_->setRetrievedSource(
+            cx_, EntryUnits<Utf8Unit>(reinterpret_cast<Utf8Unit*>(utf8Source)),
+            *length)) {
+      return false;
+    }
+
     *loaded_ = true;
     return true;
   }
 
-  bool tryLoadAndSetSource(const Utf8Unit&) const {
-    char* utf8Source;
-    size_t length;
-    return cx_->runtime()->sourceHook->load(cx_, ss_->filename(), nullptr,
-                                            &utf8Source, &length) &&
-           utf8Source &&
-           ss_->setRetrievedSource(
-               cx_,
-               EntryUnits<Utf8Unit>(reinterpret_cast<Utf8Unit*>(utf8Source)),
-               length);
-  }
-
-  bool tryLoadAndSetSource(const char16_t&) const {
+  bool tryLoadAndSetSource(const char16_t&, size_t* length) const {
     char16_t* utf16Source;
-    size_t length;
-    return cx_->runtime()->sourceHook->load(cx_, ss_->filename(), &utf16Source,
-                                            nullptr, &length) &&
-           utf16Source &&
-           ss_->setRetrievedSource(cx_, EntryUnits<char16_t>(utf16Source),
-                                   length);
+    if (!cx_->runtime()->sourceHook->load(cx_, ss_->filename(), &utf16Source,
+                                          nullptr, length)) {
+      return false;
+    }
+
+    if (!utf16Source) {
+      *loaded_ = false;
+      return true;
+    }
+
+    if (!ss_->setRetrievedSource(cx_, EntryUnits<char16_t>(utf16Source),
+                                 *length)) {
+      return false;
+    }
+
+    *loaded_ = true;
+    return true;
   }
 };
 
@@ -2163,25 +2183,6 @@ MOZ_MUST_USE bool ScriptSource::setBinASTSourceCopy(JSContext* cx,
   }
 
   data = SourceType(BinAST(std::move(*deduped)));
-  return true;
-}
-
-MOZ_MUST_USE bool ScriptSource::initializeBinAST(
-    JSContext* cx, UniqueChars&& buf, size_t len,
-    UniquePtr<frontend::BinASTSourceMetadata> metadata) {
-  MOZ_ASSERT(data.is<Missing>(),
-             "should only be initializing a fresh ScriptSource");
-  MOZ_ASSERT(binASTMetadata_ == nullptr, "shouldn't have BinAST metadata yet");
-
-  auto& cache = cx->zone()->runtimeFromAnyThread()->sharedImmutableStrings();
-  auto deduped = cache.getOrCreate(std::move(buf), len);
-  if (!deduped) {
-    ReportOutOfMemory(cx);
-    return false;
-  }
-
-  data = SourceType(BinAST(std::move(*deduped)));
-  binASTMetadata_ = std::move(metadata);
   return true;
 }
 
@@ -2628,6 +2629,267 @@ XDRResult ScriptSource::xdrUncompressedSource<XDR_ENCODE>(
 
 }  // namespace js
 
+template <typename Unit, XDRMode mode>
+/* static */
+XDRResult ScriptSource::codeUncompressedData(XDRState<mode>* const xdr,
+                                             ScriptSource* const ss,
+                                             bool retrievable) {
+  static_assert(std::is_same<Unit, Utf8Unit>::value ||
+                    std::is_same<Unit, char16_t>::value,
+                "should handle UTF-8 and UTF-16");
+
+  if (mode == XDR_ENCODE) {
+    MOZ_ASSERT(ss->data.is<Uncompressed<Unit>>());
+  } else {
+    MOZ_ASSERT(ss->data.is<Missing>());
+  }
+
+  MOZ_ASSERT(retrievable == ss->sourceRetrievable());
+
+  if (retrievable) {
+    // It's unnecessary to code uncompressed data if it can just be retrieved
+    // using the source hook.
+    if (mode == XDR_DECODE) {
+      ss->data = SourceType(Retrievable<Unit>());
+    }
+    return Ok();
+  }
+
+  uint32_t uncompressedLength;
+  if (mode == XDR_ENCODE) {
+    uncompressedLength = ss->data.as<Uncompressed<Unit>>().length();
+  }
+  MOZ_TRY(xdr->codeUint32(&uncompressedLength));
+
+  return ss->xdrUncompressedSource(xdr, sizeof(Unit), uncompressedLength);
+}
+
+template <typename Unit, XDRMode mode>
+/* static */
+XDRResult ScriptSource::codeCompressedData(XDRState<mode>* const xdr,
+                                           ScriptSource* const ss,
+                                           bool retrievable) {
+  static_assert(std::is_same<Unit, Utf8Unit>::value ||
+                    std::is_same<Unit, char16_t>::value,
+                "should handle UTF-8 and UTF-16");
+
+  if (mode == XDR_ENCODE) {
+    MOZ_ASSERT(ss->data.is<Compressed<Unit>>());
+  } else {
+    MOZ_ASSERT(ss->data.is<Missing>());
+  }
+
+  MOZ_ASSERT(retrievable == ss->sourceRetrievable());
+
+  if (retrievable) {
+    // It's unnecessary to code compressed data if it can just be retrieved
+    // using the source hook.
+    if (mode == XDR_DECODE) {
+      ss->data = SourceType(Retrievable<Unit>());
+    }
+    return Ok();
+  }
+
+  uint32_t uncompressedLength;
+  if (mode == XDR_ENCODE) {
+    uncompressedLength = ss->data.as<Compressed<Unit>>().uncompressedLength;
+  }
+  MOZ_TRY(xdr->codeUint32(&uncompressedLength));
+
+  uint32_t compressedLength;
+  if (mode == XDR_ENCODE) {
+    compressedLength = ss->data.as<Compressed<Unit>>().raw.length();
+  }
+  MOZ_TRY(xdr->codeUint32(&compressedLength));
+
+  if (mode == XDR_DECODE) {
+    // Compressed data is always single-byte chars.
+    auto bytes = xdr->cx()->template make_pod_array<char>(compressedLength);
+    if (!bytes) {
+      return xdr->fail(JS::TranscodeResult_Throw);
+    }
+    MOZ_TRY(xdr->codeBytes(bytes.get(), compressedLength));
+
+    if (!ss->initializeWithCompressedSource<Unit>(xdr->cx(), std::move(bytes),
+                                                  compressedLength,
+                                                  uncompressedLength)) {
+      return xdr->fail(JS::TranscodeResult_Throw);
+    }
+  } else {
+    void* bytes =
+        const_cast<char*>(ss->data.as<Compressed<Unit>>().raw.chars());
+    MOZ_TRY(xdr->codeBytes(bytes, compressedLength));
+  }
+
+  return Ok();
+}
+
+template <XDRMode mode>
+/* static */
+XDRResult ScriptSource::codeBinASTData(XDRState<mode>* const xdr,
+                                       ScriptSource* const ss) {
+#if !defined(JS_BUILD_BINAST)
+  return xdr->fail(JS::TranscodeResult_Throw);
+#else
+  if (mode == XDR_ENCODE) {
+    MOZ_ASSERT(ss->data.is<BinAST>());
+  } else {
+    MOZ_ASSERT(ss->data.is<Missing>());
+  }
+
+  // XDR the length of the BinAST data.
+  uint32_t binASTLength;
+  if (mode == XDR_ENCODE) {
+    binASTLength = ss->data.as<BinAST>().string.length();
+  }
+  MOZ_TRY(xdr->codeUint32(&binASTLength));
+
+  // XDR the BinAST data.
+  Maybe<SharedImmutableString> binASTData;
+  if (mode == XDR_DECODE) {
+    auto bytes =
+        xdr->cx()->template make_pod_array<char>(Max<size_t>(binASTLength, 1));
+    if (!bytes) {
+      return xdr->fail(JS::TranscodeResult_Throw);
+    }
+    MOZ_TRY(xdr->codeBytes(bytes.get(), binASTLength));
+
+    auto& cache =
+        xdr->cx()->zone()->runtimeFromAnyThread()->sharedImmutableStrings();
+    binASTData = cache.getOrCreate(std::move(bytes), binASTLength);
+    if (!binASTData) {
+      ReportOutOfMemory(xdr->cx());
+      return xdr->fail(JS::TranscodeResult_Throw);
+    }
+  } else {
+    void* bytes = ss->binASTData();
+    MOZ_TRY(xdr->codeBytes(bytes, binASTLength));
+  }
+
+  // XDR any BinAST metadata.
+  uint8_t hasMetadata;
+  if (mode == XDR_ENCODE) {
+    hasMetadata = ss->binASTMetadata_ != nullptr;
+  }
+  MOZ_TRY(xdr->codeUint8(&hasMetadata));
+
+  Rooted<UniquePtr<frontend::BinASTSourceMetadata>> freshMetadata(xdr->cx());
+  if (hasMetadata) {
+    // If we're decoding, this is a *mutable borrowed* reference to the
+    // |UniquePtr| stored in the |Rooted| above, and the |UniquePtr| will be
+    // filled with freshly allocated metadata.
+    //
+    // If we're encoding, this is an *immutable borrowed* reference to the
+    // |UniquePtr| stored in |ss|.  (Immutable up to GCs transparently moving
+    // things around, that is.)
+    UniquePtr<frontend::BinASTSourceMetadata>& binASTMetadata =
+        mode == XDR_DECODE ? freshMetadata.get() : ss->binASTMetadata_;
+
+    uint32_t numBinASTKinds;
+    uint32_t numStrings;
+    if (mode == XDR_ENCODE) {
+      numBinASTKinds = binASTMetadata->numBinASTKinds();
+      numStrings = binASTMetadata->numStrings();
+    }
+    MOZ_TRY(xdr->codeUint32(&numBinASTKinds));
+    MOZ_TRY(xdr->codeUint32(&numStrings));
+
+    if (mode == XDR_DECODE) {
+      // Use calloc, since we're storing this immediately, and filling it
+      // might GC, to avoid marking bogus atoms.
+      void* mem = js_calloc(frontend::BinASTSourceMetadata::totalSize(
+          numBinASTKinds, numStrings));
+      if (!mem) {
+        return xdr->fail(JS::TranscodeResult_Throw);
+      }
+
+      auto metadata =
+          new (mem) frontend::BinASTSourceMetadata(numBinASTKinds, numStrings);
+      binASTMetadata.reset(metadata);
+    }
+
+    MOZ_ASSERT(binASTMetadata != nullptr);
+
+    frontend::BinASTKind* binASTKindBase = binASTMetadata->binASTKindBase();
+    for (uint32_t i = 0; i < numBinASTKinds; i++) {
+      MOZ_TRY(xdr->codeEnum32(&binASTKindBase[i]));
+    }
+
+    RootedAtom atom(xdr->cx());
+    JSAtom** atomsBase = binASTMetadata->atomsBase();
+    auto slices = binASTMetadata->sliceBase();
+    const char* sourceBase =
+        (mode == XDR_ENCODE ? ss->data.as<BinAST>().string : *binASTData)
+            .chars();
+
+    for (uint32_t i = 0; i < numStrings; i++) {
+      uint8_t isNull;
+      if (mode == XDR_ENCODE) {
+        atom = binASTMetadata->getAtom(i);
+        isNull = !atom;
+      }
+      MOZ_TRY(xdr->codeUint8(&isNull));
+      if (isNull) {
+        atom = nullptr;
+      } else {
+        MOZ_TRY(XDRAtom(xdr, &atom));
+      }
+      if (mode == XDR_DECODE) {
+        atomsBase[i] = atom;
+      }
+
+      uint64_t sliceOffset;
+      uint32_t sliceLen;
+      if (mode == XDR_ENCODE) {
+        auto& slice = binASTMetadata->getSlice(i);
+        sliceOffset = slice.begin() - sourceBase;
+        sliceLen = slice.byteLen_;
+      }
+
+      MOZ_TRY(xdr->codeUint64(&sliceOffset));
+      MOZ_TRY(xdr->codeUint32(&sliceLen));
+
+      if (mode == XDR_DECODE) {
+        new (&slices[i]) frontend::BinASTSourceMetadata::CharSlice(
+            sourceBase + sliceOffset, sliceLen);
+      }
+    }
+  }
+
+  if (mode == XDR_DECODE) {
+    MOZ_ASSERT(binASTData.isSome());
+    MOZ_ASSERT(freshMetadata != nullptr);
+
+    MOZ_ASSERT(ss->data.is<Missing>(),
+               "should only be initializing a fresh ScriptSource");
+    MOZ_ASSERT(ss->binASTMetadata_ == nullptr,
+               "shouldn't have BinAST metadata yet");
+
+    ss->data = SourceType(BinAST(std::move(*binASTData)));
+    ss->binASTMetadata_ = std::move(freshMetadata.get());
+  }
+
+  MOZ_ASSERT(binASTData.isNothing());
+  MOZ_ASSERT(freshMetadata == nullptr);
+  MOZ_ASSERT(ss->data.is<BinAST>());
+
+  return Ok();
+#endif  // !defined(JS_BUILD_BINAST)
+}
+
+template <typename Unit, XDRMode mode>
+/* static */
+void ScriptSource::codeRetrievableData(ScriptSource* ss) {
+  // There's nothing to code for retrievable data.  Just be sure to set
+  // retrievable data when decoding.
+  if (mode == XDR_ENCODE) {
+    MOZ_ASSERT(ss->data.is<Retrievable<Unit>>());
+  } else {
+    MOZ_ASSERT(ss->data.is<Missing>());
+    ss->data = SourceType(Retrievable<Unit>());
+  }
+}
+
 template <XDRMode mode>
 /* static */
 XDRResult ScriptSource::xdrData(XDRState<mode>* const xdr,
@@ -2703,231 +2965,18 @@ XDRResult ScriptSource::xdrData(XDRState<mode>* const xdr,
     tag = static_cast<DataType>(type);
   }
 
-  auto CodeCompressedData = [xdr, ss, &retrievable](auto unit) -> XDRResult {
-    using Unit = decltype(unit);
-
-    static_assert(std::is_same<Unit, Utf8Unit>::value ||
-                      std::is_same<Unit, char16_t>::value,
-                  "should handle UTF-8 and UTF-16");
-
-    if (mode == XDR_ENCODE) {
-      MOZ_ASSERT(ss->data.is<Compressed<Unit>>());
-    }
-
-    if (retrievable) {
-      // It's unnecessary to code compressed data if it can just be retrieved
-      // using the source hook.
-      if (mode == XDR_DECODE) {
-        ss->data = SourceType(Retrievable<Unit>());
-      }
-      return Ok();
-    }
-
-    uint32_t uncompressedLength = 0;
-    if (mode == XDR_ENCODE) {
-      uncompressedLength = ss->data.as<Compressed<Unit>>().uncompressedLength;
-    }
-    MOZ_TRY(xdr->codeUint32(&uncompressedLength));
-
-    uint32_t compressedLength;
-    if (mode == XDR_ENCODE) {
-      compressedLength = ss->data.as<Compressed<Unit>>().raw.length();
-    }
-    MOZ_TRY(xdr->codeUint32(&compressedLength));
-
-    if (mode == XDR_DECODE) {
-      // Compressed data is always single-byte chars.
-      auto bytes = xdr->cx()->template make_pod_array<char>(compressedLength);
-      if (!bytes) {
-        return xdr->fail(JS::TranscodeResult_Throw);
-      }
-      MOZ_TRY(xdr->codeBytes(bytes.get(), compressedLength));
-
-      if (!ss->initializeWithCompressedSource<Unit>(xdr->cx(), std::move(bytes),
-                                                    compressedLength,
-                                                    uncompressedLength)) {
-        return xdr->fail(JS::TranscodeResult_Throw);
-      }
-    } else {
-      void* bytes =
-          const_cast<char*>(ss->data.as<Compressed<Unit>>().raw.chars());
-      MOZ_TRY(xdr->codeBytes(bytes, compressedLength));
-    }
-
-    return Ok();
-  };
-
-  auto CodeUncompressedData = [xdr, ss, &retrievable](auto unit) -> XDRResult {
-    using Unit = decltype(unit);
-
-    static_assert(std::is_same<Unit, Utf8Unit>::value ||
-                      std::is_same<Unit, char16_t>::value,
-                  "should handle UTF-8 and UTF-16");
-
-    if (mode == XDR_ENCODE) {
-      MOZ_ASSERT(ss->data.is<Uncompressed<Unit>>());
-    }
-
-    if (retrievable) {
-      // It's unnecessary to code uncompressed data if it can just be retrieved
-      // using the source hook.
-      if (mode == XDR_DECODE) {
-        ss->data = SourceType(Retrievable<Unit>());
-      }
-      return Ok();
-    }
-
-    uint32_t uncompressedLength = 0;
-    if (mode == XDR_ENCODE) {
-      uncompressedLength = ss->data.as<Uncompressed<Unit>>().length();
-    }
-    MOZ_TRY(xdr->codeUint32(&uncompressedLength));
-
-    return ss->xdrUncompressedSource(xdr, sizeof(Unit), uncompressedLength);
-  };
-
-  auto CodeBinASTData = [xdr
-#if defined(JS_BUILD_BINAST)
-                         ,
-                         ss
-#endif
-  ]() -> XDRResult {
-#if !defined(JS_BUILD_BINAST)
-    return xdr->fail(JS::TranscodeResult_Throw);
-#else
-    // XDR the length of the BinAST data.
-    uint32_t binASTLength;
-    if (mode == XDR_ENCODE) {
-      binASTLength = ss->data.as<BinAST>().string.length();
-    }
-    MOZ_TRY(xdr->codeUint32(&binASTLength));
-
-    // XDR the BinAST data.
-    UniquePtr<char[], JS::FreePolicy> bytes;
-    if (mode == XDR_DECODE) {
-      bytes = xdr->cx()->template make_pod_array<char>(
-          Max<size_t>(binASTLength, 1));
-      if (!bytes) {
-        return xdr->fail(JS::TranscodeResult_Throw);
-      }
-      MOZ_TRY(xdr->codeBytes(bytes.get(), binASTLength));
-    } else {
-      void* bytes = ss->binASTData();
-      MOZ_TRY(xdr->codeBytes(bytes, binASTLength));
-    }
-
-    // XDR any BinAST metadata.
-    uint8_t hasMetadata;
-    if (mode == XDR_ENCODE) {
-      hasMetadata = ss->binASTMetadata_ != nullptr;
-    }
-    MOZ_TRY(xdr->codeUint8(&hasMetadata));
-
-    UniquePtr<frontend::BinASTSourceMetadata> freshMetadata;
-    if (hasMetadata) {
-      // If we're decoding, we decode into fresh metadata.  If we're encoding,
-      // we encode *from* the stored metadata.
-      auto& binASTMetadata =
-          mode == XDR_DECODE ? freshMetadata : ss->binASTMetadata_;
-
-      uint32_t numBinASTKinds;
-      uint32_t numStrings;
-      if (mode == XDR_ENCODE) {
-        numBinASTKinds = binASTMetadata->numBinASTKinds();
-        numStrings = binASTMetadata->numStrings();
-      }
-      MOZ_TRY(xdr->codeUint32(&numBinASTKinds));
-      MOZ_TRY(xdr->codeUint32(&numStrings));
-
-      if (mode == XDR_DECODE) {
-        // Use calloc, since we're storing this immediately, and filling it
-        // might GC, to avoid marking bogus atoms.
-        void* mem = js_calloc(frontend::BinASTSourceMetadata::totalSize(
-            numBinASTKinds, numStrings));
-        if (!mem) {
-          return xdr->fail(JS::TranscodeResult_Throw);
-        }
-
-        auto metadata = new (mem)
-            frontend::BinASTSourceMetadata(numBinASTKinds, numStrings);
-        binASTMetadata.reset(metadata);
-      }
-
-      frontend::BinASTKind* binASTKindBase = binASTMetadata->binASTKindBase();
-      for (uint32_t i = 0; i < numBinASTKinds; i++) {
-        MOZ_TRY(xdr->codeEnum32(&binASTKindBase[i]));
-      }
-
-      RootedAtom atom(xdr->cx());
-      JSAtom** atomsBase = binASTMetadata->atomsBase();
-      auto slices = binASTMetadata->sliceBase();
-      const char* sourceBase = mode == XDR_ENCODE
-                                   ? bytes.get()
-                                   : ss->data.as<BinAST>().string.chars();
-
-      for (uint32_t i = 0; i < numStrings; i++) {
-        uint8_t isNull;
-        if (mode == XDR_ENCODE) {
-          atom = binASTMetadata->getAtom(i);
-          isNull = !atom;
-        }
-        MOZ_TRY(xdr->codeUint8(&isNull));
-        if (isNull) {
-          atom = nullptr;
-        } else {
-          MOZ_TRY(XDRAtom(xdr, &atom));
-        }
-        if (mode == XDR_DECODE) {
-          atomsBase[i] = atom;
-        }
-
-        uint64_t sliceOffset;
-        uint32_t sliceLen;
-        if (mode == XDR_ENCODE) {
-          auto& slice = binASTMetadata->getSlice(i);
-          sliceOffset = slice.begin() - sourceBase;
-          sliceLen = slice.byteLen_;
-        }
-
-        MOZ_TRY(xdr->codeUint64(&sliceOffset));
-        MOZ_TRY(xdr->codeUint32(&sliceLen));
-
-        if (mode == XDR_DECODE) {
-          new (&slices[i]) frontend::BinASTSourceMetadata::CharSlice(
-              sourceBase + sliceOffset, sliceLen);
-        }
-      }
-    }
-
-    if (mode == XDR_DECODE) {
-      if (!ss->initializeBinAST(xdr->cx(), std::move(bytes), binASTLength,
-                                std::move(freshMetadata))) {
-        return xdr->fail(JS::TranscodeResult_Throw);
-      }
-    } else {
-      MOZ_ASSERT(freshMetadata == nullptr);
-    }
-
-    return Ok();
-#endif  // !defined(JS_BUILD_BINAST)
-  };
-
   switch (tag) {
     case DataType::CompressedUtf8:
-      // The argument here is just for overloading -- its value doesn't matter.
-      return CodeCompressedData(Utf8Unit('0'));
+      return ScriptSource::codeCompressedData<Utf8Unit>(xdr, ss, retrievable);
 
     case DataType::UncompressedUtf8:
-      // The argument here is just for overloading -- its value doesn't matter.
-      return CodeUncompressedData(Utf8Unit('0'));
+      return ScriptSource::codeUncompressedData<Utf8Unit>(xdr, ss, retrievable);
 
     case DataType::CompressedUtf16:
-      // The argument here is just for overloading -- its value doesn't matter.
-      return CodeCompressedData(char16_t('0'));
+      return ScriptSource::codeCompressedData<char16_t>(xdr, ss, retrievable);
 
     case DataType::UncompressedUtf16:
-      // The argument here is just for overloading -- its value doesn't matter.
-      return CodeUncompressedData(char16_t('0'));
+      return ScriptSource::codeUncompressedData<char16_t>(xdr, ss, retrievable);
 
     case DataType::Missing: {
       MOZ_ASSERT(ss->data.is<Missing>(),
@@ -2938,24 +2987,16 @@ XDRResult ScriptSource::xdrData(XDRState<mode>* const xdr,
       break;
     }
 
-    case DataType::RetrievableUtf8: {
-      if (mode == XDR_DECODE) {
-        MOZ_ASSERT(ss->data.is<Missing>());
-        ss->data = SourceType(Retrievable<Utf8Unit>());
-      }
+    case DataType::RetrievableUtf8:
+      codeRetrievableData<Utf8Unit, mode>(ss);
       return Ok();
-    }
 
-    case DataType::RetrievableUtf16: {
-      if (mode == XDR_DECODE) {
-        MOZ_ASSERT(ss->data.is<Missing>());
-        ss->data = SourceType(Retrievable<char16_t>());
-      }
+    case DataType::RetrievableUtf16:
+      codeRetrievableData<char16_t, mode>(ss);
       return Ok();
-    }
 
     case DataType::BinAST:
-      return CodeBinASTData();
+      return codeBinASTData(xdr, ss);
   }
 
   // The range-check on |type| far above ought ensure the above |switch| is
@@ -3332,7 +3373,8 @@ void js::FreeScriptData(JSRuntime* rt) {
 
 #ifdef DEBUG
   if (numLive > 0) {
-    fprintf(stderr, "ERROR: GC found %zu live SharedScriptData at shutdown\n", numLive);
+    fprintf(stderr, "ERROR: GC found %zu live SharedScriptData at shutdown\n",
+            numLive);
   }
 #endif
 
@@ -3810,7 +3852,7 @@ static bool NeedsFunctionEnvironmentObjects(frontend::BytecodeEmitter* bce) {
   js::Scope* outerScope = bce->outermostScope();
   if (outerScope->kind() == js::ScopeKind::NamedLambda ||
       outerScope->kind() == js::ScopeKind::StrictNamedLambda) {
-    MOZ_ASSERT(bce->sc->asFunctionBox()->function()->isNamedLambda());
+    MOZ_ASSERT(bce->sc->asFunctionBox()->isNamedLambda());
 
     if (outerScope->hasEnvironment()) {
       return true;
@@ -3920,7 +3962,7 @@ bool JSScript::fullyInitFromEmitter(JSContext* cx, HandleScript script,
 #ifdef JS_STRUCTURED_SPEW
   // We want this to happen after line number initialization to allow filtering
   // to work.
-  script->setSpewEnabled(StructuredSpewer::enabled(script));
+  script->setSpewEnabled(cx->spewer().enabled(script));
 #endif
 
 #ifdef DEBUG
@@ -3998,8 +4040,15 @@ size_t JSScript::sizeOfData(mozilla::MallocSizeOf mallocSizeOf) const {
   return mallocSizeOf(data_);
 }
 
-size_t JSScript::sizeOfTypeScript(mozilla::MallocSizeOf mallocSizeOf) const {
-  return types_ ? types_->sizeOfIncludingThis(mallocSizeOf) : 0;
+void JSScript::addSizeOfJitScript(mozilla::MallocSizeOf mallocSizeOf,
+                                  size_t* sizeOfJitScript,
+                                  size_t* sizeOfBaselineFallbackStubs) const {
+  if (!jitScript_) {
+    return;
+  }
+
+  jitScript_->addSizeOfIncludingThis(mallocSizeOf, sizeOfJitScript,
+                                     sizeOfBaselineFallbackStubs);
 }
 
 js::GlobalObject& JSScript::uninlinedGlobal() const { return global(); }
@@ -4020,8 +4069,8 @@ void JSScript::finalize(FreeOp* fop) {
 
   fop->runtime()->geckoProfiler().onScriptFinalized(this);
 
-  if (types_) {
-    types_->destroy(zone());
+  if (jitScript_) {
+    jitScript_->destroy(zone());
   }
 
   jit::DestroyJitScripts(fop, this);
@@ -5387,6 +5436,9 @@ void JSScript::updateJitCodeRaw(JSRuntime* rt) {
   } else if (hasBaselineScript()) {
     jitCodeRaw_ = baseline->method()->raw();
     jitCodeSkipArgCheck_ = jitCodeRaw_;
+  } else if (jitScript() && js::jit::JitOptions.baselineInterpreter) {
+    jitCodeRaw_ = rt->jitRuntime()->baselineInterpreter().codeRaw();
+    jitCodeSkipArgCheck_ = jitCodeRaw_;
   } else {
     jitCodeRaw_ = rt->jitRuntime()->interpreterStub().value;
     jitCodeSkipArgCheck_ = jitCodeRaw_;
@@ -5422,6 +5474,18 @@ bool JSScript::mayReadFrameArgsDirectly() {
   return argumentsHasVarBinding() || hasRest();
 }
 
+void JSScript::resetWarmUpCounterToDelayIonCompilation() {
+  // Reset the warm-up count only if it's greater than the BaselineCompiler
+  // threshold. We do this to ensure this has no effect on Baseline compilation
+  // because we don't want scripts to get stuck in the (Baseline) interpreter in
+  // pathological cases.
+
+  if (warmUpCount > jit::JitOptions.baselineWarmUpThreshold) {
+    incWarmUpResetCounter();
+    warmUpCount = jit::JitOptions.baselineWarmUpThreshold;
+  }
+}
+
 void JSScript::AutoDelazify::holdScript(JS::HandleFunction fun) {
   if (fun) {
     if (fun->realm()->isSelfHostingRealm()) {
@@ -5455,14 +5519,16 @@ JS::ubi::Base::Size JS::ubi::Concrete<JSScript>::size(
   Size size = gc::Arena::thingSize(get().asTenured().getAllocKind());
 
   size += get().sizeOfData(mallocSizeOf);
-  size += get().sizeOfTypeScript(mallocSizeOf);
+
+  size_t jitScriptSize = 0;
+  size_t fallbackStubSize = 0;
+  get().addSizeOfJitScript(mallocSizeOf, &jitScriptSize, &fallbackStubSize);
+  size += jitScriptSize;
+  size += fallbackStubSize;
 
   size_t baselineSize = 0;
-  size_t baselineStubsSize = 0;
-  jit::AddSizeOfBaselineData(&get(), mallocSizeOf, &baselineSize,
-                             &baselineStubsSize);
+  jit::AddSizeOfBaselineData(&get(), mallocSizeOf, &baselineSize);
   size += baselineSize;
-  size += baselineStubsSize;
 
   size += jit::SizeOfIonData(&get(), mallocSizeOf);
 

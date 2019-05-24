@@ -130,17 +130,67 @@ function isStale(accessible) {
  *        AccessibileActor to be used as the root for the audit.
  * @param {Map} report
  *        An accumulator map to be used to store audit information.
+ * @param {Object} progress
+ *        An audit project object that is used to track the progress of the
+ *        audit and send progress "audit-event" events to the client.
  */
-function getAudit(acc, report) {
+function getAudit(acc, report, progress) {
   if (acc.isDefunct) {
     return;
   }
 
   // Audit returns a promise, save the actual value in the report.
-  report.set(acc, acc.audit().then(result => report.set(acc, result)));
+  report.set(acc, acc.audit().then(result => {
+    report.set(acc, result);
+    progress.increment();
+  }));
 
   for (const child of acc.children()) {
-    getAudit(child, report);
+    getAudit(child, report, progress);
+  }
+}
+
+/**
+ * A helper class that is used to track audit progress and send progress events
+ * to the client.
+ */
+class AuditProgress {
+  constructor(walker) {
+    this.completed = 0;
+    this.percentage = 0;
+    this.walker = walker;
+  }
+
+  setTotal(size) {
+    this.size = size;
+  }
+
+  notify() {
+    this.walker.emit("audit-event", {
+      type: "progress",
+      progress: {
+        total: this.size,
+        percentage: this.percentage,
+      },
+    });
+  }
+
+  increment() {
+    this.completed++;
+    const { completed, size } = this;
+    if (!size) {
+      return;
+    }
+
+    const percentage = Math.round(completed / size * 100);
+    if (percentage > this.percentage) {
+      this.percentage = percentage;
+      this.notify();
+    }
+  }
+
+  destroy() {
+    this.walker = null;
   }
 }
 
@@ -401,7 +451,9 @@ const AccessibleWalkerActor = ActorClassWithSpec(accessibleWalkerSpec, {
   async audit() {
     const doc = await this.getDocument();
     const report = new Map();
-    getAudit(doc, report);
+    this._auditProgress = new AuditProgress(this);
+    getAudit(doc, report, this._auditProgress);
+    this._auditProgress.setTotal(report.size);
     await Promise.all(report.values());
 
     const ancestries = [];
@@ -417,6 +469,32 @@ const AccessibleWalkerActor = ActorClassWithSpec(accessibleWalkerSpec, {
     return Promise.all(ancestries);
   },
 
+  /**
+   * Start accessibility audit. The result of this function will not be an audit
+   * report. Instead, an "audit-event" event will be fired when the audit is
+   * completed or fails.
+   */
+  startAudit() {
+    // Audit is already running, wait for the "audit-event" event.
+    if (this._auditing) {
+      return;
+    }
+
+    this._auditing = this.audit()
+      // We do not want to block on audit request, instead fire "audit-event"
+      // event when internal audit is finished or failed.
+      .then(ancestries => this.emit("audit-event", {
+        type: "completed",
+        ancestries,
+      }))
+      .catch(() => this.emit("audit-event", { type: "error" }))
+      .finally(() => {
+        this._auditing = null;
+        this._auditProgress.destroy();
+        this._auditProgress = null;
+      });
+  },
+
   onHighlighterEvent: function(data) {
     this.emit("highlighter-event", data);
   },
@@ -427,6 +505,7 @@ const AccessibleWalkerActor = ActorClassWithSpec(accessibleWalkerSpec, {
    * @param {Ci.nsIAccessibleEvent} subject
    *                                      accessible event object.
    */
+  /* eslint-disable complexity */
   observe(subject) {
     const event = subject.QueryInterface(Ci.nsIAccessibleEvent);
     const rawAccessible = event.accessible;
@@ -522,6 +601,7 @@ const AccessibleWalkerActor = ActorClassWithSpec(accessibleWalkerSpec, {
         break;
     }
   },
+  /* eslint-enable complexity */
 
   /**
    * Ensure that nothing interferes with the audit for an accessible object

@@ -25,16 +25,18 @@
 // channel/OS) or one of the is* constants below (in cases when
 // exposure is affected by channel or OS in a nontrivial way).
 
-const version = SpecialPowers.Cc["@mozilla.org/xre/app-info;1"].getService(SpecialPowers.Ci.nsIXULAppInfo).version;
-const isNightly = version.endsWith("a1");
-const isEarlyBetaOrEarlier = SpecialPowers.EARLY_BETA_OR_EARLIER;
-const isRelease = !version.includes("a");
+const {AppConstants} = SpecialPowers.Cu.import("resource://gre/modules/AppConstants.jsm", {});
+
+const isNightly = AppConstants.NIGHTLY_BUILD;
+const isEarlyBetaOrEarlier = AppConstants.EARLY_BETA_OR_EARLIER;
+const isRelease = AppConstants.RELEASE_OR_BETA;
 const isDesktop = !/Mobile|Tablet/.test(navigator.userAgent);
-const isMac = /Mac OS/.test(navigator.oscpu);
-const isWindows = /Windows/.test(navigator.oscpu);
-const isAndroid = navigator.userAgent.includes("Android");
-const isLinux = /Linux/.test(navigator.oscpu) && !isAndroid;
+const isMac = AppConstants.platform == "macosx";
+const isWindows = AppConstants.platform == "win";
+const isAndroid = AppConstants.platform == "android";
+const isLinux = AppConstants.platform == "linux";
 const isInsecureContext = !window.isSecureContext;
+// Currently, MOZ_APP_NAME is always "fennec" for all mobile builds, so we can't use AppConstants for this
 const isFennec = isAndroid && SpecialPowers.Cc["@mozilla.org/android/bridge;1"].getService(SpecialPowers.Ci.nsIAndroidBridge).isFennec;
 
 // IMPORTANT: Do not change this list without review from
@@ -44,9 +46,9 @@ var ecmaGlobals =
     {name: "Array", insecureContext: true},
     {name: "ArrayBuffer", insecureContext: true},
     {name: "Atomics", insecureContext: true, disabled: true},
-    {name: "BigInt", insecureContext: true, nightly: true},
-    {name: "BigInt64Array", insecureContext: true, nightly: true},
-    {name: "BigUint64Array", insecureContext: true, nightly: true},
+    {name: "BigInt", insecureContext: true},
+    {name: "BigInt64Array", insecureContext: true},
+    {name: "BigUint64Array", insecureContext: true},
     {name: "Boolean", insecureContext: true},
     {name: "ByteLengthQueuingStrategy", insecureContext: true},
     {name: "CountQueuingStrategy", insecureContext: true},
@@ -834,7 +836,11 @@ var interfaceNamesInGlobalScope =
 // IMPORTANT: Do not change this list without review from a DOM peer!
     {name: "Request", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    {name: "ResizeObserver", insecureContext: true},
+    {name: "ResizeObserver", insecureContext: true, nightly: true},
+// IMPORTANT: Do not change this list without review from a DOM peer!
+    {name: "ResizeObserverEntry", insecureContext: true, nightly: true},
+// IMPORTANT: Do not change this list without review from a DOM peer!
+    {name: "ResizeObserverSize", insecureContext: true, nightly: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
     {name: "Response", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
@@ -916,7 +922,7 @@ var interfaceNamesInGlobalScope =
 // IMPORTANT: Do not change this list without review from a DOM peer!
     {name: "StorageEvent", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    {name: "StorageManager", android: false},
+    {name: "StorageManager", fennec: false},
 // IMPORTANT: Do not change this list without review from a DOM peer!
     {name: "StyleSheet", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
@@ -1154,7 +1160,7 @@ var interfaceNamesInGlobalScope =
 // IMPORTANT: Do not change this list without review from a DOM peer!
     {name: "TreeWalker", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    {name: "U2F", insecureContext: false},
+    {name: "U2F", insecureContext: false, android: false},
 // IMPORTANT: Do not change this list without review from a DOM peer!
     {name: "UIEvent", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
@@ -1281,6 +1287,7 @@ function createInterfaceMap() {
             (entry.linux === !isLinux) ||
             (entry.android === !isAndroid && !entry.nightlyAndroid) ||
             (entry.fennecOrDesktop === (isAndroid && !isFennec)) ||
+            (entry.fennec === !isFennec) ||
             (entry.release === !isRelease) ||
             (entry.releaseNonWindowsAndMac === !(isRelease && !isWindows && !isMac)) ||
             (entry.releaseNonWindows === !(isRelease && !isWindows)) ||

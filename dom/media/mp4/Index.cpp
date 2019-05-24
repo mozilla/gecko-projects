@@ -131,9 +131,8 @@ already_AddRefed<MediaRawData> SampleIterator::GetNext() {
   // treat it as unencrypted, even if other fragments may be encrypted.
   if (sampleDescriptionEntry->mIsEncryptedEntry) {
     if (!moofParser->mSinf.IsValid()) {
-      MOZ_ASSERT_UNREACHABLE(
-          "Sample description entry reports sample is encrypted, but no "
-          "sinf was parsed!");
+      // The sample description entry says this sample is encrypted, but we
+      // don't have a relevant sinf box, this shouldn't happen, so bail.
       return nullptr;
     }
     if (moofParser->mSinf.mDefaultEncryptionType == AtomType("cenc")) {
@@ -143,7 +142,7 @@ already_AddRefed<MediaRawData> SampleIterator::GetNext() {
     } else if (moofParser->mSinf.mDefaultEncryptionType == AtomType("cbcs")) {
       cryptoScheme = CryptoScheme::Cbcs;
       writer->mCrypto.mCryptoScheme = CryptoScheme::Cbcs;
-      writer->mCrypto.mInitDataType = NS_LITERAL_STRING("cbcs");
+      writer->mCrypto.mInitDataType = NS_LITERAL_STRING("cenc");
     } else {
       MOZ_ASSERT_UNREACHABLE(
           "Sample description entry reports sample is encrypted, but no "
@@ -194,11 +193,16 @@ already_AddRefed<MediaRawData> SampleIterator::GetNext() {
           moofParser->mSinf.mDefaultConstantIV);
     }
 
-    MOZ_ASSERT((writer->mCrypto.mIVSize == 0 &&
-                !writer->mCrypto.mConstantIV.IsEmpty()) ||
-                   !s->mCencRange.IsEmpty(),
-               "Crypto information should contain either a constant IV, or "
-               "have auxiliary information that will contain an IV");
+    if ((writer->mCrypto.mIVSize == 0 &&
+         writer->mCrypto.mConstantIV.IsEmpty()) ||
+        (writer->mCrypto.mIVSize != 0 && s->mCencRange.IsEmpty())) {
+      // If mIVSize == 0, this indicates that a constant IV is in use, thus we
+      // should have a non empty constant IV. Alternatively if IV size is non
+      // zero, we should have an IV for this sample, which we need to look up
+      // in mCencRange (which must then be non empty). If neither of these are
+      // true we have bad crypto data, so bail.
+      return nullptr;
+    }
     // Parse auxiliary information if present
     if (!s->mCencRange.IsEmpty()) {
       // The size comes from an 8 bit field
@@ -255,9 +259,7 @@ SampleDescriptionEntry* SampleIterator::GetSampleDescriptionEntry() {
   FallibleTArray<SampleDescriptionEntry>& sampleDescriptions =
       mIndex->mMoofParser->mSampleDescriptions;
   if (sampleDescriptionIndex >= sampleDescriptions.Length()) {
-    MOZ_ASSERT_UNREACHABLE(
-        "Should always be able to find the appropriate sample description! "
-        "Malformed mp4?");
+    // The sample description index is invalid, the mp4 is malformed. Bail out.
     return nullptr;
   }
   return &sampleDescriptions[sampleDescriptionIndex];

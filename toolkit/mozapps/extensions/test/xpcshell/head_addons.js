@@ -53,6 +53,8 @@ ChromeUtils.defineModuleGetter(this, "MockRegistry",
                                "resource://testing-common/MockRegistry.jsm");
 ChromeUtils.defineModuleGetter(this, "PromiseTestUtils",
                                "resource://testing-common/PromiseTestUtils.jsm");
+ChromeUtils.defineModuleGetter(this, "RemoteSettings",
+                               "resource://services-settings/remote-settings.js");
 ChromeUtils.defineModuleGetter(this, "TestUtils",
                                "resource://testing-common/TestUtils.jsm");
 
@@ -971,6 +973,32 @@ function copyBlocklistToProfile(blocklistFile) {
   dest.lastModifiedTime = Date.now();
 }
 
+async function mockGfxBlocklistItemsFromDisk(path) {
+  Cu.importGlobalProperties(["fetch"]);
+  let response = await fetch(Services.io.newFileURI(do_get_file(path)).spec);
+  let json = await response.json();
+  return mockGfxBlocklistItems(json);
+}
+
+async function mockGfxBlocklistItems(items) {
+  const { generateUUID } = Cc["@mozilla.org/uuid-generator;1"].getService(Ci.nsIUUIDGenerator);
+  let bsPass = ChromeUtils.import("resource://gre/modules/Blocklist.jsm", null);
+  const client = RemoteSettings(Services.prefs.getCharPref("services.blocklist.gfx.collection"), { bucketNamePref: "services.blocklist.bucket" });
+  const collection = await client.openCollection();
+  await collection.clear();
+  await collection.loadDump(items.map(item => {
+    if (item.id && item.last_modified) {
+      return item;
+    }
+    return Object.assign({
+      id: generateUUID().toString().replace(/[{}]/g, ""),
+      last_modified: Date.now(),
+    }, item);
+  }));
+  let rv = await bsPass.GfxBlocklistRS.checkForEntries();
+  return rv;
+}
+
 /**
  * Change the schema version of the JSON extensions database
  */
@@ -1042,8 +1070,7 @@ class MockPluginTag {
 
 function mockPluginHost(plugins) {
   let PluginHost = {
-    getPluginTags(count) {
-      count.value = plugins.length;
+    getPluginTags() {
       return plugins.map(p => p.pluginTag);
     },
 
@@ -1059,4 +1086,22 @@ async function setInitialState(addon, initialState) {
   } else if (initialState.userDisabled === false) {
     await addon.enable();
   }
+}
+
+async function installBuiltinExtension(extensionData) {
+  let xpi = await AddonTestUtils.createTempWebExtensionFile(extensionData);
+
+  // The built-in location requires a resource: URL that maps to a
+  // jar: or file: URL.  This would typically be something bundled
+  // into omni.ja but for testing we just use a temp file.
+  let base = Services.io.newURI(`jar:file:${xpi.path}!/`);
+  let resProto = Services.io.getProtocolHandler("resource")
+                         .QueryInterface(Ci.nsIResProtocolHandler);
+  resProto.setSubstitution("ext-test", base);
+
+  let id = extensionData.manifest.applications.gecko.id;
+  let wrapper = ExtensionTestUtils.expectExtension(id);
+  await AddonManager.installBuiltinAddon("resource://ext-test/");
+  await wrapper.awaitStartup();
+  return wrapper;
 }

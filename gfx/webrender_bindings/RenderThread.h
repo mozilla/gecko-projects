@@ -174,6 +174,7 @@ class RenderThread final {
   void UpdateAndRender(wr::WindowId aWindowId, const VsyncId& aStartId,
                        const TimeStamp& aStartTime, bool aRender,
                        const Maybe<gfx::IntSize>& aReadbackSize,
+                       const Maybe<wr::ImageFormat>& aReadbackFormat,
                        const Maybe<Range<uint8_t>>& aReadbackBuffer,
                        bool aHadSlowFrame);
 
@@ -216,8 +217,6 @@ class RenderThread final {
   void IncPendingFrameCount(wr::WindowId aWindowId, const VsyncId& aStartId,
                             const TimeStamp& aStartTime,
                             uint8_t aDocFrameCount);
-  /// Can be called from any thread.
-  void DecPendingFrameCount(wr::WindowId aWindowId);
   /// Can be called from any thread.
   mozilla::Pair<bool, bool> IncRenderingFrameCount(wr::WindowId aWindowId,
                                                    bool aRender);

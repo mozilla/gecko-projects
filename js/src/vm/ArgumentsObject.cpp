@@ -251,7 +251,7 @@ ArgumentsObject* Realm::maybeArgumentsTemplateObject(bool mapped) const {
 
 ArgumentsObject* Realm::getOrCreateArgumentsTemplateObject(JSContext* cx,
                                                            bool mapped) {
-  ReadBarriered<ArgumentsObject*>& obj =
+  WeakHeapPtr<ArgumentsObject*>& obj =
       mapped ? mappedArgumentsTemplate_ : unmappedArgumentsTemplate_;
 
   ArgumentsObject* templateObj = obj;
@@ -514,7 +514,7 @@ static bool MappedArgSetter(JSContext* cx, HandleObject obj, HandleId id,
     if (arg < argsobj->initialLength() && !argsobj->isElementDeleted(arg)) {
       argsobj->setElement(cx, arg, v);
       if (arg < script->functionNonDelazifying()->nargs()) {
-        TypeScript::SetArgument(cx, script, arg, v);
+        JitScript::MonitorArgType(cx, script, arg, v);
       }
       return result.succeed();
     }
@@ -730,7 +730,7 @@ bool MappedArgumentsObject::obj_defineProperty(JSContext* cx, HandleObject obj,
         }
         argsobj->setElement(cx, arg, desc.value());
         if (arg < script->functionNonDelazifying()->nargs()) {
-          TypeScript::SetArgument(cx, script, arg, desc.value());
+          JitScript::MonitorArgType(cx, script, arg, desc.value());
         }
       }
       if (desc.hasWritable() && !desc.writable()) {

@@ -23,7 +23,7 @@ use gleam::gl;
 use webrender::{
     api::*, api::units::*, ApiRecordingReceiver, AsyncPropertySampler, AsyncScreenshotHandle,
     BinaryRecorder, DebugFlags, Device, ExternalImage, ExternalImageHandler, ExternalImageSource,
-    PipelineInfo, ProfilerHooks, ReadPixelsFormat, Renderer, RendererOptions, RendererStats,
+    PipelineInfo, ProfilerHooks, Renderer, RendererOptions, RendererStats,
     SceneBuilderHooks, ShaderPrecacheFlags, Shaders, ThreadListener, UploadMethod, VertexUsageHint,
     WrShaders, set_profiler_hooks,
 };
@@ -736,14 +736,14 @@ pub extern "C" fn wr_renderer_release_profiler_structures(renderer: &mut Rendere
 pub unsafe extern "C" fn wr_renderer_readback(renderer: &mut Renderer,
                                               width: i32,
                                               height: i32,
+                                              format: ImageFormat,
                                               dst_buffer: *mut u8,
                                               buffer_size: usize) {
     assert!(is_in_render_thread());
 
     let mut slice = make_slice_mut(dst_buffer, buffer_size);
     renderer.read_pixels_into(FramebufferIntSize::new(width, height).into(),
-                              ReadPixelsFormat::Standard(ImageFormat::BGRA8),
-                              &mut slice);
+                              format, &mut slice);
 }
 
 /// cbindgen:postfix=WR_DESTRUCTOR_SAFE_FUNC
@@ -1564,6 +1564,15 @@ pub extern "C" fn wr_transaction_pinch_zoom(
     pinch_zoom: f32
 ) {
     txn.set_pinch_zoom(ZoomFactor::new(pinch_zoom));
+}
+
+#[no_mangle]
+pub extern "C" fn wr_transaction_set_is_transform_pinch_zooming(
+    txn: &mut Transaction,
+    animation_id: u64,
+    is_zooming: bool
+) {
+    txn.set_is_transform_pinch_zooming(is_zooming, PropertyBindingId::new(animation_id));
 }
 
 #[no_mangle]
@@ -2662,12 +2671,14 @@ pub extern "C" fn wr_dp_push_shadow(state: &mut WrState,
                                     _clip: LayoutRect,
                                     _is_backface_visible: bool,
                                     parent: &WrSpaceAndClipChain,
-                                    shadow: Shadow) {
+                                    shadow: Shadow,
+                                    should_inflate: bool) {
     debug_assert!(unsafe { is_in_main_thread() });
 
     state.frame_builder.dl_builder.push_shadow(
         &parent.to_webrender(state.pipeline_id),
         shadow.into(),
+        should_inflate,
     );
 }
 

@@ -38,7 +38,7 @@
 #include "js/CharacterEncoding.h"
 #include "js/MemoryMetrics.h"
 #include "js/PropertyDescriptor.h"  // JS::FromPropertyDescriptor
-#include "js/PropertySpec.h"
+#include "js/PropertySpec.h"        // JSPropertySpec
 #include "js/Proxy.h"
 #include "js/UbiNode.h"
 #include "js/UniquePtr.h"
@@ -1156,7 +1156,7 @@ JSObject* js::CreateThisForFunctionWithProto(
     if (!script) {
       return nullptr;
     }
-    TypeScript::SetThis(cx, script, TypeSet::ObjectType(res));
+    JitScript::MonitorThisType(cx, script, TypeSet::ObjectType(res));
   }
 
   return res;
@@ -1225,7 +1225,7 @@ JSObject* js::CreateThisForFunction(JSContext* cx, HandleFunction callee,
     NativeObject::clear(cx, nobj);
 
     JSScript* calleeScript = callee->nonLazyScript();
-    TypeScript::SetThis(cx, calleeScript, TypeSet::ObjectType(nobj));
+    JitScript::MonitorThisType(cx, calleeScript, TypeSet::ObjectType(nobj));
 
     return nobj;
   }
@@ -3014,7 +3014,7 @@ bool js::GetPropertyDescriptor(JSContext* cx, HandleObject obj, HandleId id,
 
 /* * */
 
-extern bool PropertySpecNameToId(JSContext* cx, const char* name,
+extern bool PropertySpecNameToId(JSContext* cx, JSPropertySpec::Name name,
                                  MutableHandleId id,
                                  js::PinningBehavior pin = js::DoNotPinAtom);
 

@@ -347,16 +347,7 @@ class BrowsingContext : public nsWrapperCache,
   };
 
   // Create an IPCInitializer object for this BrowsingContext.
-  IPCInitializer GetIPCInitializer() {
-    IPCInitializer init;
-    init.mId = Id();
-    init.mParentId = mParent ? mParent->Id() : 0;
-    init.mCached = IsCached();
-
-#define MOZ_BC_FIELD(name, type) init.m##name = m##name;
-#include "mozilla/dom/BrowsingContextFieldList.h"
-    return init;
-  }
+  IPCInitializer GetIPCInitializer();
 
   // Create a BrowsingContext object from over IPC.
   static already_AddRefed<BrowsingContext> CreateFromIPC(
@@ -490,7 +481,7 @@ typedef BrowsingContext::Children BrowsingContextChildren;
 // Allow sending BrowsingContext objects over IPC.
 namespace ipc {
 template <>
-struct IPDLParamTraits<dom::BrowsingContext> {
+struct IPDLParamTraits<dom::BrowsingContext*> {
   static void Write(IPC::Message* aMsg, IProtocol* aActor,
                     dom::BrowsingContext* aParam);
   static bool Read(const IPC::Message* aMsg, PickleIterator* aIter,

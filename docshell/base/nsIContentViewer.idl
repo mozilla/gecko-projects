@@ -100,7 +100,7 @@ interface nsIContentViewer : nsISupports
 
   /**
    * All users of a content viewer are responsible for calling both
-   * close() and destroy(), in that order. 
+   * close() and destroy(), in that order.
    *
    * close() should be called when the load of a new page for the next
    * content viewer begins, and destroy() should be called when the next
@@ -190,7 +190,8 @@ interface nsIContentViewer : nsISupports
    * Change the layout to view the document with page layout (like print preview), but
    * dynamic and editable (like Galley layout).
    */
-  void setPageMode(in boolean aPageMode, in nsIPrintSettings aPrintSettings);
+  void setPageModeForTesting(in boolean aPageMode,
+                             in nsIPrintSettings aPrintSettings);
 
   /**
    * Get the history entry that this viewer will save itself into when

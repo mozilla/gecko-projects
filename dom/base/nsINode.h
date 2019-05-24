@@ -40,12 +40,12 @@ class nsAttrChildContentList;
 class nsDOMAttributeMap;
 class nsIAnimationObserver;
 class nsIContent;
+class nsIContentSecurityPolicy;
 class nsIFrame;
 class nsIHTMLCollection;
 class nsIMutationObserver;
 class nsINode;
 class nsINodeList;
-class nsIPresShell;
 class nsIPrincipal;
 class nsIURI;
 class nsNodeSupportsWeakRefTearoff;
@@ -56,6 +56,7 @@ struct RawServoSelectorList;
 
 namespace mozilla {
 class EventListenerManager;
+class PresShell;
 class TextEditor;
 namespace dom {
 /**
@@ -466,7 +467,7 @@ class nsINode : public mozilla::dom::EventTarget {
   MOZ_CAN_RUN_SCRIPT mozilla::dom::Element* GetParentFlexElement();
 
   /**
-   * Return whether the node is an Element node
+   * Return whether the node is an Element node. Faster than using `NodeType()`.
    */
   bool IsElement() const { return GetBoolFlag(NodeIsElement); }
 
@@ -855,6 +856,11 @@ class nsINode : public mozilla::dom::EventTarget {
   }
 
   /**
+   * Return the CSP of this node's document, if any.
+   */
+  nsIContentSecurityPolicy* GetCsp() const;
+
+  /**
    * Get the parent nsIContent for this node.
    * @return the parent, or null if no parent or the parent is not an nsIContent
    */
@@ -1180,7 +1186,7 @@ class nsINode : public mozilla::dom::EventTarget {
    * node. Be aware that if this node and the computed selection limiter are
    * not in same subtree, this returns the root content of the closeset subtree.
    */
-  nsIContent* GetSelectionRootContent(nsIPresShell* aPresShell);
+  nsIContent* GetSelectionRootContent(mozilla::PresShell* aPresShell);
 
   nsINodeList* ChildNodes();
 

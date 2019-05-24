@@ -26,7 +26,7 @@ class DomainPolicyClone;
 [ptr] native JSObjectPtr(JSObject);
 [ptr] native DomainPolicyClonePtr(mozilla::dom::DomainPolicyClone);
 
-[scriptable, uuid(51daad87-3a0c-44cc-b620-7356801c9022)]
+[scriptable, builtinclass, uuid(51daad87-3a0c-44cc-b620-7356801c9022)]
 interface nsIScriptSecurityManager : nsISupports
 {
     /**
@@ -245,9 +245,6 @@ interface nsIScriptSecurityManager : nsISupports
      * aChannel must not be null.
      */
     nsIPrincipal getChannelURIPrincipal(in nsIChannel aChannel);
-
-    const unsigned long NO_APP_ID = 0;
-    const unsigned long UNKNOWN_APP_ID = 4294967295; // UINT32_MAX
 
     const unsigned long DEFAULT_USER_CONTEXT_ID = 0;
 

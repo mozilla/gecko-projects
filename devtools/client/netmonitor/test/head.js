@@ -55,6 +55,7 @@ const POST_DATA_URL = EXAMPLE_URL + "html_post-data-test-page.html";
 const POST_ARRAY_DATA_URL = EXAMPLE_URL + "html_post-array-data-test-page.html";
 const POST_JSON_URL = EXAMPLE_URL + "html_post-json-test-page.html";
 const POST_RAW_URL = EXAMPLE_URL + "html_post-raw-test-page.html";
+const POST_RAW_URL_WITH_HASH = EXAMPLE_URL + "html_header-test-page.html";
 const POST_RAW_WITH_HEADERS_URL = EXAMPLE_URL + "html_post-raw-with-headers-test-page.html";
 const PARAMS_URL = EXAMPLE_URL + "html_params-test-page.html";
 const JSONP_URL = EXAMPLE_URL + "html_jsonp-test-page.html";
@@ -117,7 +118,7 @@ const gDefaultFilters = Services.prefs.getCharPref("devtools.netmonitor.filters"
 Services.prefs.setCharPref(
   "devtools.netmonitor.visibleColumns",
   "[\"cause\",\"contentSize\",\"cookies\",\"domain\",\"duration\"," +
-  "\"endTime\",\"file\",\"latency\",\"method\",\"protocol\"," +
+  "\"endTime\",\"file\",\"url\",\"latency\",\"method\",\"protocol\"," +
   "\"remoteip\",\"responseTime\",\"scheme\",\"setCookies\"," +
   "\"startTime\",\"status\",\"transferred\",\"type\",\"waterfall\"]"
 );
@@ -127,6 +128,7 @@ Services.prefs.setCharPref("devtools.netmonitor.columnsData",
   '{"name":"method","minWidth":30,"width":5},' +
   '{"name":"domain","minWidth":30,"width":10},' +
   '{"name":"file","minWidth":30,"width":25},' +
+  '{"name":"url","minWidth":30,"width":25},' +
   '{"name":"cause","minWidth":30,"width":10},' +
   '{"name":"type","minWidth":30,"width":5},' +
   '{"name":"transferred","minWidth":30,"width":10},' +
@@ -730,14 +732,14 @@ function testColumnsAlignment(headers, requestList) {
 }
 
 async function hideColumn(monitor, column) {
-  const { document, parent } = monitor.panelWin;
+  const { document } = monitor.panelWin;
 
   info(`Clicking context-menu item for ${column}`);
   EventUtils.sendMouseEvent({ type: "contextmenu" },
     document.querySelector(".requests-list-headers"));
 
   const onHeaderRemoved = waitForDOM(document, `#requests-list-${column}-button`, 0);
-  parent.document.querySelector(`#request-list-header-${column}-toggle`).click();
+  getContextMenuItem(monitor, `request-list-header-${column}-toggle`).click();
   await onHeaderRemoved;
 
   ok(!document.querySelector(`#requests-list-${column}-button`),
@@ -745,14 +747,14 @@ async function hideColumn(monitor, column) {
 }
 
 async function showColumn(monitor, column) {
-  const { document, parent } = monitor.panelWin;
+  const { document } = monitor.panelWin;
 
   info(`Clicking context-menu item for ${column}`);
   EventUtils.sendMouseEvent({ type: "contextmenu" },
     document.querySelector(".requests-list-headers"));
 
   const onHeaderAdded = waitForDOM(document, `#requests-list-${column}-button`, 1);
-  parent.document.querySelector(`#request-list-header-${column}-toggle`).click();
+  getContextMenuItem(monitor, `request-list-header-${column}-toggle`).click();
   await onHeaderAdded;
 
   ok(document.querySelector(`#requests-list-${column}-button`),
@@ -866,4 +868,60 @@ function queryTelemetryEvents(query) {
 
   // Return the `extra` field (which is event[5]e).
   return filtersChangedEvents.map(event => event[5]);
+}
+
+function validateRequests(requests, monitor) {
+  const { document, store, windowRequire } = monitor.panelWin;
+
+  const {
+    getDisplayedRequests,
+  } = windowRequire("devtools/client/netmonitor/src/selectors/index");
+
+  requests.forEach((spec, i) => {
+    const { method, url, causeType, causeUri, stack } = spec;
+
+    const requestItem = getSortedRequests(store.getState()).get(i);
+    verifyRequestItemTarget(
+      document,
+      getDisplayedRequests(store.getState()),
+      requestItem,
+      method,
+      url,
+      { cause: { type: causeType, loadingDocumentUri: causeUri } }
+    );
+
+    const stacktrace = requestItem.stacktrace;
+    const stackLen = stacktrace ? stacktrace.length : 0;
+
+    if (stack) {
+      ok(stacktrace, `Request #${i} has a stacktrace`);
+      ok(stackLen > 0,
+        `Request #${i} (${causeType}) has a stacktrace with ${stackLen} items`);
+
+      // if "stack" is array, check the details about the top stack frames
+      if (Array.isArray(stack)) {
+        stack.forEach((frame, j) => {
+          is(stacktrace[j].functionName, frame.fn,
+            `Request #${i} has the correct function on JS stack frame #${j}`);
+          is(stacktrace[j].filename.split("/").pop(), frame.file,
+            `Request #${i} has the correct file on JS stack frame #${j}`);
+          is(stacktrace[j].lineNumber, frame.line,
+            `Request #${i} has the correct line number on JS stack frame #${j}`);
+          is(stacktrace[j].asyncCause, frame.asyncCause,
+            `Request #${i} has the correct async cause on JS stack frame #${j}`);
+        });
+      }
+    } else {
+      is(stackLen, 0, `Request #${i} (${causeType}) has an empty stacktrace`);
+    }
+  });
+}
+
+/**
+ * Retrieve the context menu element corresponding to the provided id, for the provided
+ * netmonitor instance.
+ */
+function getContextMenuItem(monitor, id) {
+  const Menu = require("devtools/client/framework/menu");
+  return Menu.getMenuElementById(id, monitor.panelWin.document);
 }

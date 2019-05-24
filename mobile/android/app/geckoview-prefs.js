@@ -32,8 +32,11 @@ pref("dom.push.enabled", false);
 // enable external storage API
 pref("dom.storageManager.enabled", true);
 
+// enable Visual Viewport API
+pref("dom.visualviewport.enabled", true);
+
 // Use containerless scrolling.
-pref("layout.scroll.root-frame-containers", 0);
+pref("layout.scroll.root-frame-containers", false);
 
 // Inherit locale from the OS, used for multi-locale builds
 pref("intl.locale.requested", "");
@@ -50,3 +53,6 @@ pref("browser.safebrowsing.features.trackingProtection.update", true);
 pref("browser.safebrowsing.features.cryptomining.update", true);
 // Enable fingerprinting protection blocklist updates
 pref("browser.safebrowsing.features.fingerprinting.update", true);
+
+// Treat mouse as touch only on TV-ish devices
+pref("ui.android.mouse_as_touch", 2);

@@ -9,7 +9,7 @@ import {
   selectors,
   actions,
   makeSource,
-  getTelemetryEvents
+  getTelemetryEvents,
 } from "../../../utils/test-head";
 
 import { simpleMockThreadClient } from "../../tests/helpers/threadClient.js";
@@ -17,7 +17,8 @@ import { simpleMockThreadClient } from "../../tests/helpers/threadClient.js";
 function mockClient(positionsResponse = {}) {
   return {
     ...simpleMockThreadClient,
-    getBreakpointPositions: async () => positionsResponse
+    getBreakpointPositions: async () => positionsResponse,
+    getBreakableLines: async () => [],
   };
 }
 
@@ -28,7 +29,7 @@ describe("breakpoints", () => {
       sourceId: "a",
       line: 2,
       column: 1,
-      sourceUrl: "http://localhost:8000/examples/a"
+      sourceUrl: "http://localhost:8000/examples/a",
     };
 
     const source = await dispatch(actions.newGeneratedSource(makeSource("a")));
@@ -37,7 +38,7 @@ describe("breakpoints", () => {
       actions.setSelectedLocation(cx, source, {
         line: 1,
         column: 1,
-        sourceId: source.id
+        sourceId: source.id,
       })
     );
 
@@ -58,7 +59,7 @@ describe("breakpoints", () => {
       sourceId: "a",
       line: 5,
       column: 1,
-      sourceUrl: "http://localhost:8000/examples/a"
+      sourceUrl: "http://localhost:8000/examples/a",
     };
     const source = await dispatch(actions.newGeneratedSource(makeSource("a")));
     await dispatch(actions.loadSourceText({ cx, source }));
@@ -66,7 +67,7 @@ describe("breakpoints", () => {
       actions.setSelectedLocation(cx, source, {
         line: 1,
         column: 1,
-        sourceId: source.id
+        sourceId: source.id,
       })
     );
 
@@ -84,7 +85,7 @@ describe("breakpoints", () => {
       sourceId: "a",
       line: 5,
       column: 1,
-      sourceUrl: "http://localhost:8000/examples/a"
+      sourceUrl: "http://localhost:8000/examples/a",
     };
     const source = await dispatch(actions.newGeneratedSource(makeSource("a")));
     await dispatch(actions.loadSourceText({ cx, source }));
@@ -92,7 +93,7 @@ describe("breakpoints", () => {
       actions.setSelectedLocation(cx, source, {
         line: 1,
         column: 1,
-        sourceId: source.id
+        sourceId: source.id,
       })
     );
 
@@ -116,7 +117,7 @@ describe("breakpoints", () => {
       sourceId: "a",
       line: 5,
       column: 1,
-      sourceUrl: "http://localhost:8000/examples/a"
+      sourceUrl: "http://localhost:8000/examples/a",
     };
 
     const source = await dispatch(actions.newGeneratedSource(makeSource("a")));
@@ -125,7 +126,7 @@ describe("breakpoints", () => {
       actions.setSelectedLocation(cx, source, {
         line: 1,
         column: 1,
-        sourceId: source.id
+        sourceId: source.id,
       })
     );
 
@@ -147,14 +148,14 @@ describe("breakpoints", () => {
       sourceId: "a",
       line: 5,
       column: 1,
-      sourceUrl: "http://localhost:8000/examples/a"
+      sourceUrl: "http://localhost:8000/examples/a",
     };
 
     const loc2 = {
       sourceId: "b",
       line: 6,
       column: 2,
-      sourceUrl: "http://localhost:8000/examples/b"
+      sourceUrl: "http://localhost:8000/examples/b",
     };
 
     const aSource = await dispatch(actions.newGeneratedSource(makeSource("a")));
@@ -167,7 +168,7 @@ describe("breakpoints", () => {
       actions.setSelectedLocation(cx, aSource, {
         line: 1,
         column: 1,
-        sourceId: aSource.id
+        sourceId: aSource.id,
       })
     );
 
@@ -192,14 +193,14 @@ describe("breakpoints", () => {
       sourceId: "a",
       line: 5,
       column: 1,
-      sourceUrl: "http://localhost:8000/examples/a"
+      sourceUrl: "http://localhost:8000/examples/a",
     };
 
     const loc2 = {
       sourceId: "b",
       line: 6,
       column: 2,
-      sourceUrl: "http://localhost:8000/examples/b"
+      sourceUrl: "http://localhost:8000/examples/b",
     };
 
     const aSource = await dispatch(actions.newGeneratedSource(makeSource("a")));
@@ -230,7 +231,7 @@ describe("breakpoints", () => {
       sourceId: "a",
       line: 5,
       column: 1,
-      sourceUrl: "http://localhost:8000/examples/a"
+      sourceUrl: "http://localhost:8000/examples/a",
     };
 
     const aSource = await dispatch(actions.newGeneratedSource(makeSource("a")));
@@ -266,14 +267,14 @@ describe("breakpoints", () => {
       sourceId: "a",
       line: 5,
       column: 1,
-      sourceUrl: "http://localhost:8000/examples/a"
+      sourceUrl: "http://localhost:8000/examples/a",
     };
 
     const loc2 = {
       sourceId: "b",
       line: 6,
       column: 2,
-      sourceUrl: "http://localhost:8000/examples/b"
+      sourceUrl: "http://localhost:8000/examples/b",
     };
 
     const aSource = await dispatch(actions.newGeneratedSource(makeSource("a")));
@@ -354,7 +355,7 @@ describe("breakpoints", () => {
       sourceId: "a",
       line: 5,
       column: 1,
-      sourceUrl: "http://localhost:8000/examples/a"
+      sourceUrl: "http://localhost:8000/examples/a",
     };
 
     const source = await dispatch(actions.newGeneratedSource(makeSource("a")));
@@ -368,7 +369,7 @@ describe("breakpoints", () => {
     await dispatch(
       actions.setBreakpointOptions(cx, loc, {
         condition: "const foo = 0",
-        getTextForLine: () => {}
+        getTextForLine: () => {},
       })
     );
 
@@ -383,7 +384,7 @@ describe("breakpoints", () => {
       sourceId: "a",
       line: 5,
       column: 1,
-      sourceUrl: "http://localhost:8000/examples/a"
+      sourceUrl: "http://localhost:8000/examples/a",
     };
 
     const source = await dispatch(actions.newGeneratedSource(makeSource("a")));
@@ -403,7 +404,7 @@ describe("breakpoints", () => {
     await dispatch(
       actions.setBreakpointOptions(cx, loc, {
         condition: "const foo = 0",
-        getTextForLine: () => {}
+        getTextForLine: () => {},
       })
     );
     const newBreakpoint = selectors.getBreakpoint(getState(), loc);
@@ -420,7 +421,7 @@ describe("breakpoints", () => {
       sourceId: "a.js",
       line: 1,
       column: 0,
-      sourceUrl: "http://localhost:8000/examples/a.js"
+      sourceUrl: "http://localhost:8000/examples/a.js",
     };
 
     const source = await dispatch(

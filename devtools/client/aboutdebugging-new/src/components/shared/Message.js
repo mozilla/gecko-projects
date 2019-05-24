@@ -14,8 +14,7 @@ const Localized = createFactory(FluentReact.Localized);
 const { MESSAGE_LEVEL } = require("../../constants");
 
 const ICONS = {
-  // Reuse the warning icon for errors. Waiting for the proper icon in Bug 1520191.
-  [MESSAGE_LEVEL.ERROR]: "chrome://global/skin/icons/warning.svg",
+  [MESSAGE_LEVEL.ERROR]: "chrome://devtools/skin/images/aboutdebugging-error.svg",
   [MESSAGE_LEVEL.INFO]: "chrome://devtools/skin/images/aboutdebugging-information.svg",
   [MESSAGE_LEVEL.WARNING]: "chrome://global/skin/icons/warning.svg",
 };
@@ -48,25 +47,27 @@ class Message extends PureComponent {
   }
 
   renderButton(level) {
-    return dom.button({
-            className: `ghost-button message__button message__button--${level}`,
-    },
-        Localized(
-          {
-            id: "about-debugging-message-close-icon",
-            attrs: {
-              alt: true,
-            },
+    return dom.button(
+      {
+        className: `ghost-button message__button message__button--${level} ` +
+          `qa-message-button-close-button`,
+        onClick: () => this.closeMessage(),
+      },
+      Localized(
+        {
+          id: "about-debugging-message-close-icon",
+          attrs: {
+            alt: true,
           },
-          dom.img(
-            {
-              className: "qa-message-button-close",
-              src: CLOSE_ICON_SRC,
-              onClick: () => this.closeMessage(),
-            },
-          ),
+        },
+        dom.img(
+          {
+            className: "qa-message-button-close-icon",
+            src: CLOSE_ICON_SRC,
+          },
         ),
-      );
+      ),
+    );
   }
 
   render() {
@@ -79,7 +80,7 @@ class Message extends PureComponent {
 
     return dom.aside(
       {
-        className: `message message--level-${level}  js-message` +
+        className: `message message--level-${level}  qa-message` +
                    (className ? ` ${ className }` : ""),
       },
       dom.img(

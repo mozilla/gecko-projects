@@ -400,11 +400,12 @@ nsresult nsTreeBodyFrame::SetView(nsITreeView* aView) {
   RefPtr<XULTreeElement> treeContent = GetBaseElement();
   if (treeContent) {
 #ifdef ACCESSIBILITY
-    nsAccessibilityService* accService = nsIPresShell::AccService();
-    if (accService)
+    if (nsAccessibilityService* accService =
+            PresShell::GetAccessibilityService()) {
       accService->TreeViewChanged(PresContext()->GetPresShell(), treeContent,
                                   mView);
-#endif
+    }
+#endif  // #ifdef ACCESSIBILITY
     FireDOMEvent(NS_LITERAL_STRING("TreeViewChanged"), treeContent);
   }
 
@@ -522,9 +523,10 @@ nsresult nsTreeBodyFrame::InvalidateColumn(nsTreeColumn* aCol) {
   if (!aCol) return NS_ERROR_INVALID_ARG;
 
 #ifdef ACCESSIBILITY
-  if (nsIPresShell::IsAccessibilityActive())
+  if (PresShell::IsAccessibilityActive()) {
     FireInvalidateEvent(-1, -1, aCol, aCol);
-#endif
+  }
+#endif  // #ifdef ACCESSIBILITY
 
   nsRect columnRect;
   nsresult rv = aCol->GetRect(this, mInnerBox.y, mInnerBox.height, &columnRect);
@@ -541,9 +543,10 @@ nsresult nsTreeBodyFrame::InvalidateRow(int32_t aIndex) {
   if (mUpdateBatchNest) return NS_OK;
 
 #ifdef ACCESSIBILITY
-  if (nsIPresShell::IsAccessibilityActive())
+  if (PresShell::IsAccessibilityActive()) {
     FireInvalidateEvent(aIndex, aIndex, nullptr, nullptr);
-#endif
+  }
+#endif  // #ifdef ACCESSIBILITY
 
   aIndex -= mTopRowIndex;
   if (aIndex < 0 || aIndex > mPageLength) return NS_OK;
@@ -559,9 +562,10 @@ nsresult nsTreeBodyFrame::InvalidateCell(int32_t aIndex, nsTreeColumn* aCol) {
   if (mUpdateBatchNest) return NS_OK;
 
 #ifdef ACCESSIBILITY
-  if (nsIPresShell::IsAccessibilityActive())
+  if (PresShell::IsAccessibilityActive()) {
     FireInvalidateEvent(aIndex, aIndex, aCol, aCol);
-#endif
+  }
+#endif  // #ifdef ACCESSIBILITY
 
   aIndex -= mTopRowIndex;
   if (aIndex < 0 || aIndex > mPageLength) return NS_OK;
@@ -591,12 +595,12 @@ nsresult nsTreeBodyFrame::InvalidateRange(int32_t aStart, int32_t aEnd) {
   if (aEnd > last) aEnd = last;
 
 #ifdef ACCESSIBILITY
-  if (nsIPresShell::IsAccessibilityActive()) {
+  if (PresShell::IsAccessibilityActive()) {
     int32_t end =
         mRowCount > 0 ? ((mRowCount <= aEnd) ? mRowCount - 1 : aEnd) : 0;
     FireInvalidateEvent(aStart, end, nullptr, nullptr);
   }
-#endif
+#endif  // #ifdef ACCESSIBILITY
 
   nsRect rangeRect(mInnerBox.x,
                    mInnerBox.y + mRowHeight * (aStart - mTopRowIndex),
@@ -1585,9 +1589,10 @@ nsresult nsTreeBodyFrame::RowCountChanged(int32_t aIndex, int32_t aCount) {
   if (aCount == 0 || !mView) return NS_OK;  // Nothing to do.
 
 #ifdef ACCESSIBILITY
-  if (nsIPresShell::IsAccessibilityActive())
+  if (PresShell::IsAccessibilityActive()) {
     FireRowCountChangedEvent(aIndex, aCount);
-#endif
+  }
+#endif  // #ifdef ACCESSIBILITY
 
   // Adjust our selection.
   nsCOMPtr<nsITreeSelection> sel;
@@ -2458,10 +2463,10 @@ nsresult nsTreeBodyFrame::HandleEvent(nsPresContext* aPresContext,
   return NS_OK;
 }
 
-class nsDisplayTreeBody final : public nsDisplayItem {
+class nsDisplayTreeBody final : public nsPaintedDisplayItem {
  public:
   nsDisplayTreeBody(nsDisplayListBuilder* aBuilder, nsFrame* aFrame)
-      : nsDisplayItem(aBuilder, aFrame) {
+      : nsPaintedDisplayItem(aBuilder, aFrame) {
     MOZ_COUNT_CTOR(nsDisplayTreeBody);
   }
 #ifdef NS_BUILD_REFCNT_LOGGING
@@ -2475,7 +2480,7 @@ class nsDisplayTreeBody final : public nsDisplayItem {
 
   void Destroy(nsDisplayListBuilder* aBuilder) override {
     aBuilder->UnregisterThemeGeometry(this);
-    nsDisplayItem::Destroy(aBuilder);
+    nsPaintedDisplayItem::Destroy(aBuilder);
   }
 
   void ComputeInvalidationRegion(nsDisplayListBuilder* aBuilder,
@@ -2490,8 +2495,8 @@ class nsDisplayTreeBody final : public nsDisplayItem {
       aInvalidRegion->Or(*aInvalidRegion, GetBounds(aBuilder, &snap));
     }
 
-    nsDisplayItem::ComputeInvalidationRegion(aBuilder, aGeometry,
-                                             aInvalidRegion);
+    nsPaintedDisplayItem::ComputeInvalidationRegion(aBuilder, aGeometry,
+                                                    aInvalidRegion);
   }
 
   virtual void Paint(nsDisplayListBuilder* aBuilder,

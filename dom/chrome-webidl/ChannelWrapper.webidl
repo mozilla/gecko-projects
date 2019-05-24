@@ -417,6 +417,18 @@ dictionary MozProxyInfo {
    * next candidate proxy server if it has not received a response.
    */
   unsigned long failoverTimeout;
+
+  /**
+   * Any non-empty value will be passed directly as Proxy-Authorization header
+   * value for the CONNECT request attempt.  However, this header set on the
+   * resource request itself takes precedence.
+   */
+  ByteString? proxyAuthorizationHeader = null;
+
+  /**
+   * An optional key used for additional isolation of this proxy connection.
+   */
+  ByteString? connectionIsolationKey = null;
 };
 
 /**
@@ -462,6 +474,12 @@ dictionary MozRequestFilter {
    * match pattern set.
    */
   MatchPatternSet? urls = null;
+
+  /**
+   * If present, the request only matches if the loadInfo privateBrowsingId matches
+   * against the given incognito value.
+   */
+  boolean? incognito = null;
 };
 
 dictionary MozRequestMatchOptions {

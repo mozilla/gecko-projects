@@ -20,18 +20,13 @@ import { startSourceMapWorker, stopSourceMapWorker } from "devtools-source-map";
 
 import {
   start as startPrettyPrintWorker,
-  stop as stopPrettyPrintWorker
+  stop as stopPrettyPrintWorker,
 } from "../workers/pretty-print";
 
-import {
-  start as startParserWorker,
-  stop as stopParserWorker,
-  clearSymbols,
-  clearASTs
-} from "../workers/parser";
+import { ParserDispatcher } from "../workers/parser";
 import {
   start as startSearchWorker,
-  stop as stopSearchWorker
+  stop as stopSearchWorker,
 } from "../workers/search";
 import { clearDocuments } from "../utils/editor";
 import { clearHistory } from "./utils/history";
@@ -68,6 +63,9 @@ function formatException(reason, p) {
   console && console.log("Unhandled Rejection at:", p, "reason:", reason);
 }
 
+export const parserWorker = new ParserDispatcher();
+export const evaluationsParser = new ParserDispatcher();
+
 beforeAll(() => {
   startSourceMapWorker(
     path.join(rootPath, "node_modules/devtools-source-map/src/worker.js"),
@@ -76,7 +74,8 @@ beforeAll(() => {
   startPrettyPrintWorker(
     path.join(rootPath, "src/workers/pretty-print/worker.js")
   );
-  startParserWorker(path.join(rootPath, "src/workers/parser/worker.js"));
+  parserWorker.start(path.join(rootPath, "src/workers/parser/worker.js"));
+  evaluationsParser.start(path.join(rootPath, "src/workers/parser/worker.js"));
   startSearchWorker(path.join(rootPath, "src/workers/search/worker.js"));
   process.on("unhandledRejection", formatException);
 });
@@ -84,7 +83,8 @@ beforeAll(() => {
 afterAll(() => {
   stopSourceMapWorker();
   stopPrettyPrintWorker();
-  stopParserWorker();
+  parserWorker.stop();
+  evaluationsParser.stop();
   stopSearchWorker();
   process.removeListener("unhandledRejection", formatException);
 });
@@ -92,8 +92,8 @@ afterAll(() => {
 afterEach(() => {});
 
 beforeEach(async () => {
-  clearASTs();
-  await clearSymbols();
+  parserWorker.clear();
+  evaluationsParser.clear();
   clearHistory();
   clearDocuments();
   prefs.projectDirectoryRoot = "";
@@ -109,14 +109,14 @@ function mockIndexeddDB() {
     getItem: async key => store[key],
     setItem: async (key, value) => {
       store[key] = value;
-    }
+    },
   };
 }
 
 // NOTE: We polyfill finally because TRY uses node 8
 if (!global.Promise.prototype.finally) {
   global.Promise.prototype.finally = function finallyPolyfill(callback) {
-    var constructor = this.constructor;
+    const constructor = this.constructor;
 
     return this.then(
       function(value) {

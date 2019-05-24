@@ -30,6 +30,7 @@
 #include "nsAttrValueOrString.h"
 #include "nsCSSProps.h"
 #include "nsContentUtils.h"
+#include "nsDOMCSSAttrDeclaration.h"
 #include "nsICSSDeclaration.h"
 #include "nsIContentInlines.h"
 #include "mozilla/dom/Document.h"
@@ -53,6 +54,7 @@
 #include "SVGAnimatedOrient.h"
 #include "SVGAnimatedString.h"
 #include "SVGAnimatedViewBox.h"
+#include "SVGGeometryProperty.h"
 #include "SVGMotionSMILAttr.h"
 #include <stdarg.h>
 
@@ -1020,6 +1022,41 @@ already_AddRefed<DOMSVGAnimatedString> SVGElement::ClassName() {
   return mClassAttribute.ToDOMAnimatedString(this);
 }
 
+/* static */
+bool SVGElement::UpdateDeclarationBlockFromLength(
+    DeclarationBlock& aBlock, nsCSSPropertyID aPropId,
+    const SVGAnimatedLength& aLength, ValToUse aValToUse) {
+  aBlock.AssertMutable();
+
+  float value;
+  if (aValToUse == ValToUse::Anim) {
+    value = aLength.GetAnimValInSpecifiedUnits();
+  } else {
+    MOZ_ASSERT(aValToUse == ValToUse::Base);
+    value = aLength.GetBaseValInSpecifiedUnits();
+  }
+
+  // SVG parser doesn't check non-negativity of some parsed value,
+  // we should not pass those to CSS side.
+  if (value < 0 &&
+      SVGGeometryProperty::IsNonNegativeGeometryProperty(aPropId)) {
+    return false;
+  }
+
+  nsCSSUnit cssUnit = SVGGeometryProperty::SpecifiedUnitTypeToCSSUnit(
+      aLength.GetSpecifiedUnitType());
+
+  if (cssUnit == eCSSUnit_Percent) {
+    Servo_DeclarationBlock_SetPercentValue(aBlock.Raw(), aPropId,
+                                           value / 100.f);
+  } else {
+    Servo_DeclarationBlock_SetLengthValue(aBlock.Raw(), aPropId, value,
+                                          cssUnit);
+  }
+
+  return true;
+}
+
 //------------------------------------------------------------------------
 // Helper class: MappedAttrParser, for parsing values of mapped attributes
 
@@ -1034,6 +1071,9 @@ class MOZ_STACK_CLASS MappedAttrParser {
   // Parses a mapped attribute value.
   void ParseMappedAttrValue(nsAtom* aMappedAttrName,
                             const nsAString& aMappedAttrValue);
+
+  void TellStyleAlreadyParsedResult(nsAtom const* aAtom,
+                                    SVGAnimatedLength const& aLength);
 
   // If we've parsed any values for mapped attributes, this method returns the
   // already_AddRefed css::Declaration that incorporates the parsed
@@ -1122,6 +1162,18 @@ void MappedAttrParser::ParseMappedAttrValue(nsAtom* aMappedAttrName,
   }
 }
 
+void MappedAttrParser::TellStyleAlreadyParsedResult(
+    nsAtom const* aAtom, SVGAnimatedLength const& aLength) {
+  if (!mDecl) {
+    mDecl = new DeclarationBlock();
+  }
+  nsCSSPropertyID propertyID =
+      nsCSSProps::LookupProperty(nsDependentAtomString(aAtom));
+
+  SVGElement::UpdateDeclarationBlockFromLength(*mDecl, propertyID, aLength,
+                                               SVGElement::ValToUse::Base);
+}
+
 already_AddRefed<DeclarationBlock> MappedAttrParser::GetDeclarationBlock() {
   return mDecl.forget();
 }
@@ -1145,6 +1197,9 @@ void SVGElement::UpdateContentDeclarationBlock() {
   MappedAttrParser mappedAttrParser(doc->CSSLoader(), doc->GetDocumentURI(),
                                     GetBaseURI(), this);
 
+  bool lengthAffectsStyle =
+      SVGGeometryProperty::ElementMapsLengthsToStyle(this);
+
   for (uint32_t i = 0; i < attrCount; ++i) {
     const nsAttrName* attrName = mAttrs.AttrNameAt(i);
     if (!attrName->IsAtom() || !IsAttributeMapped(attrName->Atom())) continue;
@@ -1159,20 +1214,16 @@ void SVGElement::UpdateContentDeclarationBlock() {
       continue;  // xml:lang has precedence
     }
 
-    if (IsSVGElement(nsGkAtoms::svg)) {
-      // Special case: we don't want <svg> 'width'/'height' mapped into style
-      // if the attribute value isn't a valid <length> according to SVG (which
-      // only supports a subset of the CSS <length> values). We don't enforce
-      // this by checking the attribute value in SVGSVGElement::
-      // IsAttributeMapped since we don't want that method to depend on the
-      // value of the attribute that is being checked. Rather we just prevent
-      // the actual mapping here, as necessary.
-      if (attrName->Atom() == nsGkAtoms::width &&
-          !GetAnimatedLength(nsGkAtoms::width)->HasBaseVal()) {
-        continue;
-      }
-      if (attrName->Atom() == nsGkAtoms::height &&
-          !GetAnimatedLength(nsGkAtoms::height)->HasBaseVal()) {
+    if (lengthAffectsStyle) {
+      auto const* length = GetAnimatedLength(attrName->Atom());
+
+      if (length && length->HasBaseVal()) {
+        // This is an element with geometry property set via SVG attribute,
+        // and the attribute is already successfully parsed. We want to go
+        // through the optimized path to tell the style system the result
+        // directly, rather than let it parse the same thing again.
+        mappedAttrParser.TellStyleAlreadyParsedResult(attrName->Atom(),
+                                                      *length);
         continue;
       }
     }
@@ -1391,6 +1442,15 @@ void SVGElement::DidChangeLength(uint8_t aAttrEnum,
 }
 
 void SVGElement::DidAnimateLength(uint8_t aAttrEnum) {
+  if (SVGGeometryProperty::ElementMapsLengthsToStyle(this)) {
+    nsCSSPropertyID propId =
+        SVGGeometryProperty::AttrEnumToCSSPropId(this, aAttrEnum);
+
+    SMILOverrideStyle()->SetSMILValue(propId,
+                                      GetLengthInfo().mLengths[aAttrEnum]);
+    return;
+  }
+
   ClearAnyCachedPath();
 
   nsIFrame* frame = GetPrimaryFrame();
@@ -1411,7 +1471,6 @@ SVGAnimatedLength* SVGElement::GetAnimatedLength(const nsAtom* aAttrName) {
       return &lengthInfo.mLengths[i];
     }
   }
-  MOZ_ASSERT(false, "no matching length found");
   return nullptr;
 }
 

@@ -54,19 +54,18 @@ describe("FilterBar component:", () => {
 
     // Text filter
     const textInput = toolbar.children().eq(2);
-    expect(textInput.attr("class")).toBe("devtools-searchbox has-clear-btn");
+    expect(textInput.attr("class")).toBe("devtools-searchbox");
 
     // Text filter input
     const textFilter = textInput.children().eq(0);
-    expect(textFilter.attr("class")).toBe("devtools-plaininput text-filter");
+    expect(textFilter.attr("class")).toBe("devtools-searchinput");
     expect(textFilter.attr("placeholder")).toBe("Filter output");
     expect(textFilter.attr("type")).toBe("search");
     expect(textFilter.attr("value")).toBe("");
 
     // Text filter input clear button
     const textFilterClearButton = textInput.children().eq(1);
-    expect(textFilterClearButton.attr("class"))
-      .toBe("devtools-searchinput-clear clear-button");
+    expect(textFilterClearButton.attr("class")).toBe("devtools-searchinput-clear");
 
     // "Persist logs" checkbox
     expect(wrapper.find(".filter-checkbox input").length).toBe(1);
@@ -139,11 +138,6 @@ describe("FilterBar component:", () => {
       "console.error('error message');",
     ]);
 
-    store.dispatch(actions.filterToggle(FILTERS.ERROR));
-    store.dispatch(actions.filterToggle(FILTERS.WARN));
-    store.dispatch(actions.filterToggle(FILTERS.LOG));
-    store.dispatch(actions.filterToggle(FILTERS.INFO));
-    store.dispatch(actions.filterToggle(FILTERS.DEBUG));
     store.dispatch(actions.filterTextSet("qwerty"));
 
     const wrapper = mount(Provider({store}, getFilterBar()));
@@ -257,7 +251,8 @@ describe("FilterBar component:", () => {
     const store = setupStore();
 
     const wrapper = mount(Provider({store}, getFilterBar()));
-    wrapper.find(".devtools-plaininput").simulate("input", { target: { value: "a" } });
+    const input = wrapper.find(".devtools-searchinput");
+    input.simulate("change", { target: { value: "a" } });
     expect(store.getState().filters.text).toBe("a");
   });
 

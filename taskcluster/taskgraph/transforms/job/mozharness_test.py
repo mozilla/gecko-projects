@@ -107,10 +107,34 @@ def mozharness_test_on_docker(config, job, taskdesc):
         'MOZILLA_BUILD_URL': {'task-reference': installer_url},
         'NEED_PULSEAUDIO': 'true',
         'NEED_WINDOW_MANAGER': 'true',
+        'NEED_COMPIZ': 'true',
         'ENABLE_E10S': str(bool(test.get('e10s'))).lower(),
         'MOZ_AUTOMATION': '1',
         'WORKING_DIR': '/builds/worker',
     })
+
+    # by default, require compiz unless proven otherwise, hence a whitelist.
+    # See https://bugzilla.mozilla.org/show_bug.cgi?id=1552563
+    # if using regex this list can be shortened greatly.
+    suites_not_need_compiz = [
+        'mochitest-webgl1-core',
+        'mochitest-webgl1-ext',
+        'mochitest-plain-gpu',
+        'mochitest-browser-chrome-screenshots',
+        'gtest',
+        'cppunittest',
+        'jsreftest',
+        'crashtest',
+        'reftest',
+        'reftest-no-accel',
+        'web-platform-tests',
+        'web-platform-tests-reftests',
+        'xpcshell'
+    ]
+    if job['run']['test']['suite'] in suites_not_need_compiz or (
+            job['run']['test']['suite'] == 'mochitest-plain-chunked' and
+            job['run']['test']['try-name'] == 'mochitest-plain-headless'):
+        env['NEED_COMPIZ'] = 'false'
 
     if mozharness.get('mochitest-flavor'):
         env['MOCHITEST_FLAVOR'] = mozharness['mochitest-flavor']
@@ -247,7 +271,7 @@ def mozharness_test_on_generic_worker(config, job, taskdesc):
     # See https://docs.microsoft.com/en-us/windows/desktop/secauthz/user-account-control
     # for more information about UAC.
     if test.get('run-as-administrator', False):
-        if job['worker-type'].startswith('aws-provisioner-v1/gecko-t-win10-64'):
+        if job['worker-type'].startswith('t-win10-64'):
             worker['run-as-administrator'] = True
         else:
             raise Exception('run-as-administrator not supported on {}'.format(job['worker-type']))
@@ -311,6 +335,12 @@ def mozharness_test_on_generic_worker(config, job, taskdesc):
             bitbar_wrapper,
             'bash',
             "./{}".format(bitbar_script)
+        ]
+    elif is_macosx and 'macosx1014-64' in test['test-platform']:
+        mh_command = [
+            '/usr/local/bin/python2',
+            '-u',
+            'mozharness/scripts/' + mozharness['script']
         ]
     else:
         # is_linux or is_macosx

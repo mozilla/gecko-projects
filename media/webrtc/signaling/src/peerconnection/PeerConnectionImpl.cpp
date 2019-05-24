@@ -364,8 +364,6 @@ PeerConnectionImpl::~PeerConnectionImpl() {
   CSFLogInfo(LOGTAG, "%s: PeerConnectionImpl destructor invoked for %s",
              __FUNCTION__, mHandle.c_str());
 
-  Close();
-
   // Since this and Initialize() occur on MainThread, they can't both be
   // running at once
 
@@ -856,15 +854,16 @@ PeerConnectionImpl::EnsureDataConnection(uint16_t aLocalPort,
 
   nsCOMPtr<nsIEventTarget> target =
       mWindow ? mWindow->EventTargetFor(TaskCategory::Other) : nullptr;
-  mDataConnection = new DataChannelConnection(this, target, mTransportHandler);
-  if (!mDataConnection->Init(aLocalPort, aNumstreams, aMMSSet,
-                             aMaxMessageSize)) {
-    CSFLogError(LOGTAG, "%s DataConnection Init Failed", __FUNCTION__);
-    return NS_ERROR_FAILURE;
+  Maybe<uint64_t> mms = aMMSSet ? Some(aMaxMessageSize) : Nothing();
+  if (auto res = DataChannelConnection::Create(this, target, mTransportHandler,
+                                               aLocalPort, aNumstreams, mms)) {
+    mDataConnection = res.value();
+    CSFLogDebug(LOGTAG, "%s DataChannelConnection %p attached to %s",
+                __FUNCTION__, (void*)mDataConnection.get(), mHandle.c_str());
+    return NS_OK;
   }
-  CSFLogDebug(LOGTAG, "%s DataChannelConnection %p attached to %s",
-              __FUNCTION__, (void*)mDataConnection.get(), mHandle.c_str());
-  return NS_OK;
+  CSFLogError(LOGTAG, "%s DataConnection Create Failed", __FUNCTION__);
+  return NS_ERROR_FAILURE;
 }
 
 nsresult PeerConnectionImpl::GetDatachannelParameters(
@@ -1422,8 +1421,8 @@ PeerConnectionImpl::SetRemoteDescription(int32_t action, const char* aSDP) {
       }
 
       const JsepTrack& receiving(jsepTransceiver->mRecvTrack);
-      CSFLogInfo(LOGTAG, "%s: pc = %s, asking JS to create transceiver for %s",
-                 __FUNCTION__, mHandle.c_str(), receiving.GetTrackId().c_str());
+      CSFLogInfo(LOGTAG, "%s: pc = %s, asking JS to create transceiver",
+                 __FUNCTION__, mHandle.c_str());
       switch (receiving.GetMediaType()) {
         case SdpMediaSection::MediaType::kAudio:
           mPCObserver->OnTransceiverNeeded(NS_ConvertASCIItoUTF16("audio"),
@@ -1555,7 +1554,8 @@ PeerConnectionImpl::AddIceCandidate(
     // We do not bother PCMedia about this before offer/answer concludes.
     // Once offer/answer concludes, PCMedia will extract these candidates from
     // the remote SDP.
-    if (mSignalingState == PCImplSignalingState::SignalingStable) {
+    if (mSignalingState == PCImplSignalingState::SignalingStable &&
+        !transportId.empty()) {
       mMedia->AddIceCandidate(aCandidate, transportId, aUfrag);
       mRawTrickledCandidates.push_back(aCandidate);
     }
@@ -2251,8 +2251,7 @@ void PeerConnectionImpl::ShutdownMedia() {
 void PeerConnectionImpl::SetSignalingState_m(
     PCImplSignalingState aSignalingState, bool rollback) {
   PC_AUTO_ENTER_API_CALL_NO_CHECK();
-  if (mSignalingState == aSignalingState ||
-      mSignalingState == PCImplSignalingState::SignalingClosed) {
+  if (mSignalingState == PCImplSignalingState::SignalingClosed) {
     return;
   }
 
@@ -2261,6 +2260,10 @@ void PeerConnectionImpl::SetSignalingState_m(
        mSignalingState == PCImplSignalingState::SignalingHaveRemoteOffer &&
        !rollback)) {
     mMedia->EnsureTransports(*mJsepSession);
+  }
+
+  if (mSignalingState == aSignalingState) {
+    return;
   }
 
   mSignalingState = aSignalingState;
@@ -2936,6 +2939,10 @@ void PeerConnectionImpl::startCallTelem() {
 
 nsresult PeerConnectionImpl::DTMFState::Notify(nsITimer* timer) {
   MOZ_ASSERT(NS_IsMainThread());
+  if (!mTransceiver->IsSending()) {
+    mSendTimer->Cancel();
+    return NS_OK;
+  }
 
   nsString eventTone;
   if (!mTones.IsEmpty()) {

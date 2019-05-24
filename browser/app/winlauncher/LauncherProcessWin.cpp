@@ -60,6 +60,11 @@ static mozilla::LauncherVoidResult PostCreationSetup(
     (0x00000001ULL << 60)
 #endif  // !defined(PROCESS_CREATION_MITIGATION_POLICY_IMAGE_LOAD_PREFER_SYSTEM32_ALWAYS_ON)
 
+#if !defined(PROCESS_CREATION_MITIGATION_POLICY_CONTROL_FLOW_GUARD_ALWAYS_OFF)
+#  define PROCESS_CREATION_MITIGATION_POLICY_CONTROL_FLOW_GUARD_ALWAYS_OFF \
+    (0x00000002ULL << 40)
+#endif  // !defined(PROCESS_CREATION_MITIGATION_POLICY_CONTROL_FLOW_GUARD_ALWAYS_OFF)
+
 #if (_WIN32_WINNT < 0x0602)
 BOOL WINAPI
 SetProcessMitigationPolicy(PROCESS_MITIGATION_POLICY aMitigationPolicy,
@@ -76,6 +81,14 @@ static void SetMitigationPolicies(mozilla::ProcThreadAttributes& aAttrs,
     aAttrs.AddMitigationPolicy(
         PROCESS_CREATION_MITIGATION_POLICY_IMAGE_LOAD_PREFER_SYSTEM32_ALWAYS_ON);
   }
+
+#if defined(_M_ARM64)
+  // Disable CFG on older versions of ARM64 Windows to avoid a crash in COM.
+  if (!mozilla::IsWin10Sep2018UpdateOrLater()) {
+    aAttrs.AddMitigationPolicy(
+        PROCESS_CREATION_MITIGATION_POLICY_CONTROL_FLOW_GUARD_ALWAYS_OFF);
+  }
+#endif  // defined(_M_ARM64)
 }
 
 static mozilla::LauncherFlags ProcessCmdLine(int& aArgc, wchar_t* aArgv[]) {
@@ -163,12 +176,23 @@ static mozilla::Maybe<bool> RunAsLauncherProcess(int& argc, wchar_t** argv) {
   bool runAsLauncher = DoLauncherProcessChecks(argc, argv);
 
 #if defined(MOZ_LAUNCHER_PROCESS)
+  bool forceLauncher = runAsLauncher &&
+                       mozilla::CheckArg(argc, argv, L"force-launcher",
+                                         static_cast<const wchar_t**>(nullptr),
+                                         mozilla::CheckArgFlag::RemoveArg) ==
+                       mozilla::ARG_FOUND;
+
   mozilla::LauncherRegistryInfo::ProcessType desiredType =
       runAsLauncher ? mozilla::LauncherRegistryInfo::ProcessType::Launcher
                     : mozilla::LauncherRegistryInfo::ProcessType::Browser;
+
+  mozilla::LauncherRegistryInfo::CheckOption checkOption =
+      forceLauncher ? mozilla::LauncherRegistryInfo::CheckOption::Force
+                    : mozilla::LauncherRegistryInfo::CheckOption::Default;
+
   mozilla::LauncherRegistryInfo regInfo;
   mozilla::LauncherResult<mozilla::LauncherRegistryInfo::ProcessType>
-      runAsType = regInfo.Check(desiredType);
+      runAsType = regInfo.Check(desiredType, checkOption);
 
   if (runAsType.isErr()) {
     mozilla::HandleLauncherError(runAsType);
@@ -178,12 +202,6 @@ static mozilla::Maybe<bool> RunAsLauncherProcess(int& argc, wchar_t** argv) {
   runAsLauncher = runAsType.unwrap() ==
                   mozilla::LauncherRegistryInfo::ProcessType::Launcher;
 #endif  // defined(MOZ_LAUNCHER_PROCESS)
-
-  // We must check for force-launcher *after* we do LauncherRegistryInfo checks
-  runAsLauncher |=
-      mozilla::CheckArg(argc, argv, L"force-launcher",
-                        static_cast<const wchar_t**>(nullptr),
-                        mozilla::CheckArgFlag::RemoveArg) == mozilla::ARG_FOUND;
 
   if (!runAsLauncher) {
     // In this case, we will be proceeding to run as the browser.

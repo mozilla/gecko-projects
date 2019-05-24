@@ -776,6 +776,8 @@ class MacroAssembler : public MacroAssemblerSpecific {
 
   inline void load32SignExtendToPtr(const Address& src, Register dest) PER_ARCH;
 
+  inline void loadAbiReturnAddress(Register dest) PER_SHARED_ARCH;
+
  public:
   // ===============================================================
   // Logical instructions
@@ -1634,11 +1636,11 @@ class MacroAssembler : public MacroAssemblerSpecific {
 
   inline void cmp32Load32(Condition cond, Register lhs, const Address& rhs,
                           const Address& src, Register dest)
-      DEFINED_ON(arm, arm64, x86_shared);
+      DEFINED_ON(arm, arm64, mips_shared, x86_shared);
 
   inline void cmp32Load32(Condition cond, Register lhs, Register rhs,
                           const Address& src, Register dest)
-      DEFINED_ON(arm, arm64, x86_shared);
+      DEFINED_ON(arm, arm64, mips_shared, x86_shared);
 
   inline void cmp32MovePtr(Condition cond, Register lhs, Imm32 rhs,
                            Register src, Register dest)
@@ -1925,7 +1927,8 @@ class MacroAssembler : public MacroAssemblerSpecific {
   // (TLS & pinned regs are non-volatile registers in the system ABI).
   CodeOffset wasmCallBuiltinInstanceMethod(const wasm::CallSiteDesc& desc,
                                            const ABIArg& instanceArg,
-                                           wasm::SymbolicAddress builtin);
+                                           wasm::SymbolicAddress builtin,
+                                           wasm::FailureMode failureMode);
 
   // As enterFakeExitFrame(), but using register conventions appropriate for
   // wasm stubs.
@@ -2808,7 +2811,6 @@ class MacroAssembler : public MacroAssemblerSpecific {
                    const NativeTemplateObject& templateObj, bool initContents);
 
  public:
-  void callMallocStub(size_t nbytes, Register result, Label* fail);
   void callFreeStub(Register slots);
   void createGCObject(Register result, Register temp,
                       const TemplateObject& templateObj,
@@ -3175,8 +3177,8 @@ class MacroAssembler : public MacroAssemblerSpecific {
   // Align the stack pointer based on the number of arguments which are pushed
   // on the stack, such that the JitFrameLayout would be correctly aligned on
   // the JitStackAlignment.
-  void alignJitStackBasedOnNArgs(Register nargs);
-  void alignJitStackBasedOnNArgs(uint32_t nargs);
+  void alignJitStackBasedOnNArgs(Register nargs, bool countIncludesThis);
+  void alignJitStackBasedOnNArgs(uint32_t argc);
 
   inline void assertStackAlignment(uint32_t alignment, int32_t offset = 0);
 

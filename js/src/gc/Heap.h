@@ -82,7 +82,7 @@ const size_t ArenaBitmapWords =
  */
 class FreeSpan {
   friend class Arena;
-  friend class ArenaCellIterImpl;
+  friend class ArenaCellIter;
   friend class ArenaFreeCellIter;
 
   uint16_t first;
@@ -275,7 +275,11 @@ class Arena {
   // previously allocated for some zone, use release() instead.
   void setAsNotAllocated() {
     firstFreeSpan.initAsEmpty();
-    zone = nullptr;
+
+    // Poison zone pointer to highlight UAF on released arenas in crash data.
+    AlwaysPoison(&zone, JS_FREED_ARENA_PATTERN, sizeof(zone),
+                 MemCheckKind::MakeUndefined);
+
     allocKind = size_t(AllocKind::LIMIT);
     onDelayedMarkingList_ = 0;
     hasDelayedBlackMarking_ = 0;

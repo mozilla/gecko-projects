@@ -10,11 +10,32 @@ const {GeckoViewModule} = ChromeUtils.import("resource://gre/modules/GeckoViewMo
 const {XPCOMUtils} = ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
 
 XPCOMUtils.defineLazyModuleGetters(this, {
-  E10SUtils: "resource://gre/modules/sessionstore/Utils.jsm",
+  E10SUtils: "resource://gre/modules/E10SUtils.jsm",
   LoadURIDelegate: "resource://gre/modules/LoadURIDelegate.jsm",
   Services: "resource://gre/modules/Services.jsm",
-  PrivateBrowsingUtils: "resource://gre/modules/PrivateBrowsingUtils.jsm",
 });
+
+XPCOMUtils.defineLazyGetter(this, "ReferrerInfo", () =>
+  Components.Constructor(
+    "@mozilla.org/referrer-info;1",
+    "nsIReferrerInfo",
+    "init"));
+
+// Create default ReferrerInfo instance for the given referrer URI string.
+const createReferrerInfo = aReferrer => {
+  let referrerUri;
+  try {
+    referrerUri = Services.io.newURI(aReferrer);
+  } catch (ignored) {
+  }
+
+  return new ReferrerInfo(
+    Ci.nsIHttpChannel.REFERRER_POLICY_UNSET,
+    true,
+    referrerUri
+  );
+};
+
 
 // Handles navigation requests between Gecko and a GeckoView.
 // Handles GeckoView:GoBack and :GoForward requests dispatched by
@@ -33,8 +54,6 @@ class GeckoViewNavigation extends GeckoViewModule {
   }
 
   onInit() {
-    debug `onInit`;
-
     this.registerListener([
       "GeckoView:GoBack",
       "GeckoView:GoForward",
@@ -45,16 +64,6 @@ class GeckoViewNavigation extends GeckoViewModule {
     ]);
 
     this.messageManager.addMessageListener("Browser:LoadURI", this);
-
-    debug `sessionContextId=${this.settings.sessionContextId}`;
-
-    if (this.settings.sessionContextId !== null) {
-      this.browser.webNavigation.setOriginAttributesBeforeLoading({
-        geckoViewSessionContextId: this.settings.sessionContextId,
-        privateBrowsingId:
-          PrivateBrowsingUtils.isBrowserPrivate(this.browser) ? 1 : 0,
-      });
-    }
   }
 
   // Bundle event handler.
@@ -106,9 +115,11 @@ class GeckoViewNavigation extends GeckoViewModule {
         try {
           parsedUri = Services.io.newURI(uri);
           if (parsedUri.schemeIs("about") || parsedUri.schemeIs("data") ||
-              parsedUri.schemeIs("file") || parsedUri.schemeIs("resource")) {
+              parsedUri.schemeIs("file") || parsedUri.schemeIs("resource") ||
+              parsedUri.schemeIs("moz-extension")) {
             // Only allow privileged loading for certain URIs.
-            triggeringPrincipal = Services.scriptSecurityManager.getSystemPrincipal();
+            triggeringPrincipal = Services.scriptSecurityManager
+                .createCodebasePrincipal(parsedUri, {});
           }
         } catch (ignored) {
         }
@@ -118,7 +129,7 @@ class GeckoViewNavigation extends GeckoViewModule {
 
         this.browser.loadURI(parsedUri ? parsedUri.spec : uri, {
           flags: navFlags,
-          referrerURI: referrer,
+          referrerInfo: createReferrerInfo(referrer),
           triggeringPrincipal,
         });
         break;
@@ -146,7 +157,7 @@ class GeckoViewNavigation extends GeckoViewModule {
 
         this.browser.loadURI(uri, {
           flags,
-          referrerURI: referrer,
+          referrerInfo: createReferrerInfo(referrer),
           triggeringPrincipal: E10SUtils.deserializePrincipal(triggeringPrincipal),
         });
         break;
@@ -285,7 +296,11 @@ class GeckoViewNavigation extends GeckoViewModule {
       // Should we throw?
       return null;
     }
-    browser.loadURI(aUri.spec, null, null, null, null, aTriggeringPrincipal, aCsp);
+
+    browser.loadURI(aUri.spec, {
+      triggeringPrincipal: aTriggeringPrincipal,
+      csp: aCsp,
+    });
     return browser;
   }
 

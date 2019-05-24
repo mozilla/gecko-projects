@@ -16,6 +16,7 @@ use std::{
     borrow::Cow,
     cmp::Ordering,
     collections::{HashMap, HashSet},
+    convert::{TryFrom, TryInto},
     fmt, mem,
     ops::Deref,
     ptr,
@@ -23,17 +24,11 @@ use std::{
 
 use smallbitvec::SmallBitVec;
 
-use crate::error::{ErrorKind, Result};
+use crate::error::{Error, ErrorKind, Result};
 use crate::guid::Guid;
 
 /// The type for entry indices in the tree.
 type Index = usize;
-
-/// Anything that can be turned into a tree.
-pub trait IntoTree {
-    /// Performs the conversion.
-    fn into_tree(self) -> Result<Tree>;
-}
 
 /// A complete, rooted bookmark tree with tombstones.
 ///
@@ -69,7 +64,7 @@ impl Tree {
 
     /// Returns the root node.
     #[inline]
-    pub fn root(&self) -> Node {
+    pub fn root(&self) -> Node<'_> {
         Node(self, &self.entries[0])
     }
 
@@ -104,7 +99,7 @@ impl Tree {
 
     /// Returns the node for a given `guid`, or `None` if a node with the `guid`
     /// doesn't exist in the tree, or was deleted.
-    pub fn node_for_guid(&self, guid: &Guid) -> Option<Node> {
+    pub fn node_for_guid(&self, guid: &Guid) -> Option<Node<'_>> {
         assert_eq!(self.entries.len(), self.entry_index_by_guid.len());
         self.entry_index_by_guid
             .get(guid)
@@ -118,15 +113,8 @@ impl Tree {
     }
 }
 
-impl IntoTree for Tree {
-    #[inline]
-    fn into_tree(self) -> Result<Tree> {
-        Ok(self)
-    }
-}
-
 impl fmt::Display for Tree {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let root = self.root();
         f.write_str(&root.to_ascii_string())?;
         if !self.deleted_guids.is_empty() {
@@ -224,8 +212,8 @@ impl PartialEq for Tree {
 ///
 /// # Resolving divergences
 ///
-/// Building a tree using `Builder::into_tree` resolves divergences using
-/// these rules:
+/// Building a tree using `std::convert::TryInto<Tree>::try_into` resolves
+/// divergences using these rules:
 ///
 /// 1. User content roots should always be children of the Places root. If
 ///    they appear in other parents, we move them.
@@ -261,7 +249,7 @@ impl Builder {
 
     /// Inserts an `item` into the tree. Returns an error if the item already
     /// exists.
-    pub fn item(&mut self, item: Item) -> Result<ParentBuilder> {
+    pub fn item(&mut self, item: Item) -> Result<ParentBuilder<'_>> {
         assert_eq!(self.entries.len(), self.entry_index_by_guid.len());
         if self.entry_index_by_guid.contains_key(&item.guid) {
             return Err(ErrorKind::DuplicateItem(item.guid.clone()).into());
@@ -279,7 +267,7 @@ impl Builder {
 
     /// Sets parents for a `child_guid`. Depending on where the parent comes
     /// from, `child_guid` may not need to exist in the tree.
-    pub fn parent_for(&mut self, child_guid: &Guid) -> ParentBuilder {
+    pub fn parent_for(&mut self, child_guid: &Guid) -> ParentBuilder<'_> {
         assert_eq!(self.entries.len(), self.entry_index_by_guid.len());
         let entry_child = match self.entry_index_by_guid.get(child_guid) {
             Some(&child_index) => BuilderEntryChild::Exists(child_index),
@@ -287,28 +275,37 @@ impl Builder {
         };
         ParentBuilder(self, entry_child)
     }
+
+    /// Equivalent to using our implementation of`TryInto<Tree>::try_into`, but
+    /// provided both for convenience when updating from previous versions of
+    /// `dogear`, and for cases where a type hint would otherwise be needed to
+    /// clarify the target type of the conversion.
+    pub fn into_tree(self) -> Result<Tree> {
+        self.try_into()
+    }
 }
 
-impl IntoTree for Builder {
+impl TryFrom<Builder> for Tree {
+    type Error = Error;
     /// Builds a tree from all stored items and parent-child associations,
     /// resolving inconsistencies like orphans, multiple parents, and
     /// parent-child disagreements.
-    fn into_tree(self) -> Result<Tree> {
+    fn try_from(builder: Builder) -> Result<Tree> {
         let mut problems = Problems::default();
 
         // First, resolve parents for all entries, and build a lookup table for
         // items without a position.
-        let mut parents = Vec::with_capacity(self.entries.len());
+        let mut parents = Vec::with_capacity(builder.entries.len());
         let mut reparented_child_indices_by_parent: HashMap<Index, Vec<Index>> = HashMap::new();
-        for (entry_index, entry) in self.entries.iter().enumerate() {
-            let r = ResolveParent::new(&self, entry, &mut problems);
+        for (entry_index, entry) in builder.entries.iter().enumerate() {
+            let r = ResolveParent::new(&builder, entry, &mut problems);
             let resolved_parent = r.resolve();
             if let ResolvedParent::ByParentGuid(parent_index) = &resolved_parent {
                 // Reparented items are special: since they aren't mentioned in
                 // that parent's `children`, we don't know their positions. Note
                 // them for when we resolve children. We also clone the GUID,
                 // since we use it for sorting, but can't access it by
-                // reference once we call `self.entries.into_iter()` below.
+                // reference once we call `builder.entries.into_iter()` below.
                 let reparented_child_indices = reparented_child_indices_by_parent
                     .entry(*parent_index)
                     .or_default();
@@ -320,12 +317,12 @@ impl IntoTree for Builder {
         // If any parents form cycles, abort. We haven't seen cyclic trees in
         // the wild, and breaking cycles would add complexity.
         if let Some(index) = detect_cycles(&parents) {
-            return Err(ErrorKind::Cycle(self.entries[index].item.guid.clone()).into());
+            return Err(ErrorKind::Cycle(builder.entries[index].item.guid.clone()).into());
         }
 
         // Then, resolve children, and build a slab of entries for the tree.
-        let mut entries = Vec::with_capacity(self.entries.len());
-        for (entry_index, entry) in self.entries.into_iter().enumerate() {
+        let mut entries = Vec::with_capacity(builder.entries.len());
+        for (entry_index, entry) in builder.entries.into_iter().enumerate() {
             // Each entry is consistent, until proven otherwise!
             let mut divergence = Divergence::Consistent;
 
@@ -417,7 +414,7 @@ impl IntoTree for Builder {
 
         // Now we have a consistent tree.
         Ok(Tree {
-            entry_index_by_guid: self.entry_index_by_guid,
+            entry_index_by_guid: builder.entry_index_by_guid,
             entries,
             deleted_guids: HashSet::new(),
             problems,
@@ -472,7 +469,7 @@ impl<'b> ParentBuilder<'b> {
     /// Records a `parent_guid` from a valid tree structure. This is for
     /// callers who already know their structure is consistent, like
     /// `Store::fetch_local_tree()` on Desktop, and
-    /// `{MergedNode, Node}::into_tree()` in the tests.
+    /// `std::convert::TryInto<Tree>` in the tests.
     ///
     /// Both the item and `parent_guid` must exist, and the `parent_guid` must
     /// refer to a folder.
@@ -802,7 +799,10 @@ impl<'a> ResolveParent<'a> {
                 self.problems.note(
                     &self.entry.item.guid,
                     Problem::DivergedParents(
-                        possible_parents.iter().map(|p| p.summarize()).collect(),
+                        possible_parents
+                            .iter()
+                            .map(PossibleParent::summarize)
+                            .collect(),
                     ),
                 );
                 possible_parents
@@ -889,7 +889,7 @@ impl<'a> Ord for PossibleParent<'a> {
     /// (`Ordering::Less`). Prefers parents from `children` over `parentid`
     /// (rule 2), and `parentid`s that reference folders over non-folders
     /// (rule 4).
-    fn cmp(&self, other: &PossibleParent) -> Ordering {
+    fn cmp(&self, other: &PossibleParent<'_>) -> Ordering {
         let (index, other_index) = match (&self.parent_by, &other.parent_by) {
             (BuilderParentBy::Children(index), BuilderParentBy::Children(other_index)) => {
                 // Both `self` and `other` mention the item in their `children`.
@@ -936,13 +936,13 @@ impl<'a> Ord for PossibleParent<'a> {
 }
 
 impl<'a> PartialOrd for PossibleParent<'a> {
-    fn partial_cmp(&self, other: &PossibleParent) -> Option<Ordering> {
+    fn partial_cmp(&self, other: &PossibleParent<'_>) -> Option<Ordering> {
         Some(self.cmp(other))
     }
 }
 
 impl<'a> PartialEq for PossibleParent<'a> {
-    fn eq(&self, other: &PossibleParent) -> bool {
+    fn eq(&self, other: &PossibleParent<'_>) -> bool {
         self.cmp(other) == Ordering::Equal
     }
 }
@@ -1056,7 +1056,7 @@ impl From<DivergedParentGuid> for DivergedParent {
 }
 
 impl fmt::Display for DivergedParent {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             DivergedParent::ByChildren(parent_guid) => {
                 write!(f, "is in children of {}", parent_guid)
@@ -1102,7 +1102,7 @@ impl Problems {
     }
 
     /// Returns an iterator for all problems.
-    pub fn summarize(&self) -> impl Iterator<Item = ProblemSummary> {
+    pub fn summarize(&self) -> impl Iterator<Item = ProblemSummary<'_>> {
         self.0.iter().flat_map(|(guid, problems)| {
             problems
                 .iter()
@@ -1128,7 +1128,7 @@ impl<'a> ProblemSummary<'a> {
 }
 
 impl<'a> fmt::Display for ProblemSummary<'a> {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let parents = match self.problem() {
             Problem::Orphan => return write!(f, "{} is an orphan", self.guid()),
             Problem::MisparentedRoot(parents) => {
@@ -1185,7 +1185,7 @@ impl<'t> Node<'t> {
 
     /// Returns the resolved parent of this node, or `None` if this is the
     /// root node.
-    pub fn parent(&self) -> Option<Node> {
+    pub fn parent(&self) -> Option<Node<'_>> {
         self.1
             .parent_index
             .as_ref()
@@ -1197,7 +1197,7 @@ impl<'t> Node<'t> {
         if self.is_root() {
             return 0;
         }
-        self.parent().map(|parent| parent.level() + 1).unwrap_or(-1)
+        self.parent().map_or(-1, |parent| parent.level() + 1)
     }
 
     /// Indicates if this node is for a syncable item.
@@ -1221,13 +1221,13 @@ impl<'t> Node<'t> {
         if self.is_user_content_root() {
             return true;
         }
-        if self.kind == Kind::Query && self.diverged() {
-            // TODO(lina): Flag queries reparented specifically to `unfiled`.
-            return false;
+        match self.kind {
+            // Exclude livemarks (bug 1477671).
+            Kind::Livemark => false,
+            // Exclude orphaned Places queries (bug 1433182).
+            Kind::Query if self.diverged() => false,
+            _ => self.parent().map_or(false, |parent| parent.is_syncable()),
         }
-        self.parent()
-            .map(|parent| parent.is_syncable())
-            .unwrap_or(false)
     }
 
     /// Indicates if this node's structure diverged because it
@@ -1304,14 +1304,14 @@ impl<'t> Deref for Node<'t> {
 }
 
 impl<'t> fmt::Display for Node<'t> {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         self.1.item.fmt(f)
     }
 }
 
 #[cfg(test)]
 impl<'t> PartialEq for Node<'t> {
-    fn eq(&self, other: &Node) -> bool {
+    fn eq(&self, other: &Node<'_>) -> bool {
         match (self.parent(), other.parent()) {
             (Some(parent), Some(other_parent)) => {
                 if parent.1.item != other_parent.1.item {
@@ -1373,7 +1373,7 @@ impl Item {
 }
 
 impl fmt::Display for Item {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let kind = match self.validity {
             Validity::Valid => format!("{}", self.kind),
             Validity::Reupload | Validity::Replace => format!("{} ({})", self.kind, self.validity),
@@ -1398,7 +1398,7 @@ pub enum Kind {
 }
 
 impl fmt::Display for Kind {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         fmt::Debug::fmt(self, f)
     }
 }
@@ -1420,7 +1420,7 @@ pub enum Validity {
 }
 
 impl fmt::Display for Validity {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         fmt::Debug::fmt(self, f)
     }
 }
@@ -1436,18 +1436,18 @@ impl<'t> MergedRoot<'t> {
     /// Returns a merged root for the given node. `size_hint` indicates the
     /// size of the tree, excluding the root, and is used to avoid extra
     /// allocations for the descendants.
-    pub(crate) fn with_size(node: MergedNode<'t>, size_hint: usize) -> MergedRoot {
+    pub(crate) fn with_size(node: MergedNode<'t>, size_hint: usize) -> MergedRoot<'_> {
         MergedRoot { node, size_hint }
     }
 
     /// Returns the root node.
-    pub fn node(&self) -> &MergedNode {
+    pub fn node(&self) -> &MergedNode<'_> {
         &self.node
     }
 
     /// Returns a flattened `Vec` of the root node's descendants, excluding the
     /// root node itself.
-    pub fn descendants(&self) -> Vec<MergedDescendant> {
+    pub fn descendants(&self) -> Vec<MergedDescendant<'_>> {
         fn accumulate<'t>(
             results: &mut Vec<MergedDescendant<'t>>,
             merged_node: &'t MergedNode<'t>,
@@ -1474,12 +1474,19 @@ impl<'t> MergedRoot<'t> {
     pub fn to_ascii_string(&self) -> String {
         self.node.to_ascii_fragment("")
     }
+
+    /// Lets us avoid needing to specify the target type in tests.
+    #[cfg(test)]
+    pub(crate) fn into_tree(self) -> Result<Tree> {
+        self.try_into()
+    }
 }
 
 #[cfg(test)]
-impl<'t> IntoTree for MergedRoot<'t> {
-    fn into_tree(self) -> Result<Tree> {
-        fn to_item(merged_node: &MergedNode) -> Item {
+impl<'t> TryFrom<MergedRoot<'t>> for Tree {
+    type Error = Error;
+    fn try_from(merged_root: MergedRoot<'t>) -> Result<Tree> {
+        fn to_item(merged_node: &MergedNode<'_>) -> Item {
             let node = merged_node.merge_state.node();
             let mut item = Item::new(merged_node.guid.clone(), node.kind);
             item.age = node.age;
@@ -1487,17 +1494,17 @@ impl<'t> IntoTree for MergedRoot<'t> {
             item
         }
 
-        let mut b = Tree::with_root(to_item(&self.node));
+        let mut b = Tree::with_root(to_item(&merged_root.node));
         for MergedDescendant {
             merged_parent_node,
             merged_node,
             ..
-        } in self.descendants()
+        } in merged_root.descendants()
         {
             b.item(to_item(merged_node))?
                 .by_structure(&merged_parent_node.guid)?;
         }
-        b.into_tree()
+        b.try_into()
     }
 }
 
@@ -1526,8 +1533,7 @@ impl<'t> MergedNode<'t> {
     pub(crate) fn remote_guid_changed(&self) -> bool {
         self.merge_state
             .remote_node()
-            .map(|remote_node| remote_node.guid != self.guid)
-            .unwrap_or(false)
+            .map_or(false, |remote_node| remote_node.guid != self.guid)
     }
 
     fn to_ascii_fragment(&self, prefix: &str) -> String {
@@ -1551,7 +1557,7 @@ impl<'t> MergedNode<'t> {
 }
 
 impl<'t> fmt::Display for MergedNode<'t> {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{} {}", self.guid, self.merge_state)
     }
 }
@@ -1749,7 +1755,7 @@ impl<'t> MergeState<'t> {
 
     /// Returns the node from the preferred side. Unlike `local_node()` and
     /// `remote_node()`, this doesn't indicate which side, so it's only used
-    /// for logging and `into_tree()`.
+    /// for logging and `try_from()`.
     fn node(&self) -> &Node<'t> {
         match self {
             MergeState::LocalOnly(local_node) | MergeState::Local { local_node, .. } => local_node,
@@ -1765,7 +1771,7 @@ impl<'t> MergeState<'t> {
 }
 
 impl<'t> fmt::Display for MergeState<'t> {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(match self {
             MergeState::LocalOnly(_) | MergeState::Local { .. } => "(Local, Local)",
 

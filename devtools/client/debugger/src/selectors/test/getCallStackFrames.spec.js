@@ -6,6 +6,7 @@
 
 import { getCallStackFrames } from "../getCallStackFrames";
 import { pullAt } from "lodash";
+import { insertResources, createInitial } from "../../utils/resource";
 
 describe("getCallStackFrames selector", () => {
   describe("library annotation", () => {
@@ -14,19 +15,19 @@ describe("getCallStackFrames selector", () => {
         frames: [
           { location: { sourceId: "source1" } },
           { location: { sourceId: "source2" } },
-          { location: { sourceId: "source2" } }
+          { location: { sourceId: "source2" } },
         ],
-        sources: {
-          source1: { id: "source1", url: "webpack:///src/App.js" },
-          source2: {
+        sources: insertResources(createInitial(), [
+          { id: "source1", url: "webpack:///src/App.js" },
+          {
             id: "source2",
             url:
-              "webpack:///foo/node_modules/react-dom/lib/ReactCompositeComponent.js"
-          }
-        },
+              "webpack:///foo/node_modules/react-dom/lib/ReactCompositeComponent.js",
+          },
+        ]),
         selectedSource: {
-          id: "sourceId-originalSource"
-        }
+          id: "sourceId-originalSource",
+        },
       };
 
       const frames = getCallStackFrames.resultFunc(
@@ -50,102 +51,102 @@ describe("getCallStackFrames selector", () => {
       const preAwaitGroup = [
         {
           displayName: "asyncAppFunction",
-          location: { sourceId: "bundle" }
+          location: { sourceId: "bundle" },
         },
         {
           displayName: "tryCatch",
-          location: { sourceId: "regenerator" }
+          location: { sourceId: "regenerator" },
         },
         {
           displayName: "invoke",
-          location: { sourceId: "regenerator" }
+          location: { sourceId: "regenerator" },
         },
         {
           displayName: "defineIteratorMethods/</prototype[method]",
-          location: { sourceId: "regenerator" }
+          location: { sourceId: "regenerator" },
         },
         {
           displayName: "step",
-          location: { sourceId: "bundle" }
+          location: { sourceId: "bundle" },
         },
         {
           displayName: "_asyncToGenerator/</<",
-          location: { sourceId: "bundle" }
+          location: { sourceId: "bundle" },
         },
         {
           displayName: "Promise",
-          location: { sourceId: "promise" }
+          location: { sourceId: "promise" },
         },
         {
           displayName: "_asyncToGenerator/<",
-          location: { sourceId: "bundle" }
+          location: { sourceId: "bundle" },
         },
         {
           displayName: "asyncAppFunction",
-          location: { sourceId: "app" }
-        }
+          location: { sourceId: "app" },
+        },
       ];
 
       const postAwaitGroup = [
         {
           displayName: "asyncAppFunction",
-          location: { sourceId: "bundle" }
+          location: { sourceId: "bundle" },
         },
         {
           displayName: "tryCatch",
-          location: { sourceId: "regenerator" }
+          location: { sourceId: "regenerator" },
         },
         {
           displayName: "invoke",
-          location: { sourceId: "regenerator" }
+          location: { sourceId: "regenerator" },
         },
         {
           displayName: "defineIteratorMethods/</prototype[method]",
-          location: { sourceId: "regenerator" }
+          location: { sourceId: "regenerator" },
         },
         {
           displayName: "step",
-          location: { sourceId: "bundle" }
+          location: { sourceId: "bundle" },
         },
         {
           displayName: "step/<",
-          location: { sourceId: "bundle" }
+          location: { sourceId: "bundle" },
         },
         {
           displayName: "run",
-          location: { sourceId: "bundle" }
+          location: { sourceId: "bundle" },
         },
         {
           displayName: "notify/<",
-          location: { sourceId: "bundle" }
+          location: { sourceId: "bundle" },
         },
         {
           displayName: "flush",
-          location: { sourceId: "microtask" }
-        }
+          location: { sourceId: "microtask" },
+        },
       ];
 
       const state = {
         frames: [...preAwaitGroup, ...postAwaitGroup],
-        sources: {
-          app: { id: "app", url: "webpack///app.js" },
-          bundle: { id: "bundle", url: "https://foo.com/bundle.js" },
-          regenerator: {
+        sources: insertResources(createInitial(), [
+          { id: "app", url: "webpack///app.js" },
+          { id: "bundle", url: "https://foo.com/bundle.js" },
+          {
             id: "regenerator",
-            url: "webpack:///foo/node_modules/regenerator-runtime/runtime.js"
+            url: "webpack:///foo/node_modules/regenerator-runtime/runtime.js",
           },
-          microtask: {
+          {
             id: "microtask",
-            url: "webpack:///foo/node_modules/core-js/modules/_microtask.js"
+            url: "webpack:///foo/node_modules/core-js/modules/_microtask.js",
           },
-          promise: {
+          {
             id: "promise",
-            url: "webpack///foo/node_modules/core-js/modules/es6.promise.js"
-          }
-        },
+            url: "webpack///foo/node_modules/core-js/modules/es6.promise.js",
+          },
+        ]),
         selectedSource: {
-          id: "sourceId-originalSource"
-        }
+          id: "sourceId-originalSource",
+        },
       };
 
       const frames = getCallStackFrames.resultFunc(
@@ -170,7 +171,7 @@ describe("getCallStackFrames selector", () => {
         14,
         15,
         16,
-        17
+        17,
       ]);
       const otherFrames = frames;
 

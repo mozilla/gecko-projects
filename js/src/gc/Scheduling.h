@@ -308,9 +308,29 @@
 #define gc_Scheduling_h
 
 #include "mozilla/Atomics.h"
+#include "mozilla/DebugOnly.h"
+
+#include "js/HashTable.h"
 
 namespace js {
+
+#define JS_FOR_EACH_INTERNAL_MEMORY_USE(_)      \
+  _(ArrayBufferContents)                        \
+  _(StringContents)
+
+#define JS_FOR_EACH_MEMORY_USE(_)               \
+  JS_FOR_EACH_PUBLIC_MEMORY_USE(_)              \
+  JS_FOR_EACH_INTERNAL_MEMORY_USE(_)
+
+enum class MemoryUse : uint8_t {
+#define DEFINE_MEMORY_USE(Name) Name,
+  JS_FOR_EACH_MEMORY_USE(DEFINE_MEMORY_USE)
+#undef DEFINE_MEMORY_USE
+};
+
 namespace gc {
+
+struct Cell;
 
 enum TriggerKind { NoTrigger = 0, IncrementalTrigger, NonIncrementalTrigger };
 
@@ -638,6 +658,75 @@ class ZoneHeapThreshold {
                                         JSGCInvocationKind gckind,
                                         const GCSchedulingTunables& tunables,
                                         const AutoLockGC& lock);
+};
+
+// Counts memory associated with GC things in a zone.
+//
+// In debug builds, this records details of the cell the memory allocations is
+// associated with to check the correctness of the information provided. In opt
+// builds it's just a counter.
+class MemoryTracker {
+ public:
+#ifdef DEBUG
+  MemoryTracker();
+  ~MemoryTracker();
+  void fixupAfterMovingGC();
+#endif
+
+  void addMemory(Cell* cell, size_t nbytes, MemoryUse use) {
+    MOZ_ASSERT(cell);
+    MOZ_ASSERT(nbytes);
+    mozilla::DebugOnly<size_t> initialBytes(bytes_);
+    MOZ_ASSERT(initialBytes + nbytes > initialBytes);
+
+    bytes_ += nbytes;
+
+#ifdef DEBUG
+    trackMemory(cell, nbytes, use);
+#endif
+  }
+  void removeMemory(Cell* cell, size_t nbytes, MemoryUse use) {
+    MOZ_ASSERT(cell);
+    MOZ_ASSERT(nbytes);
+    MOZ_ASSERT(bytes_ >= nbytes);
+
+    bytes_ -= nbytes;
+
+#ifdef DEBUG
+    untrackMemory(cell, nbytes, use);
+#endif
+  }
+
+  size_t bytes() const { return bytes_; }
+
+  void adopt(MemoryTracker& other);
+
+ private:
+  mozilla::Atomic<size_t, mozilla::Relaxed,
+                  mozilla::recordreplay::Behavior::DontPreserve>
+      bytes_;
+
+#ifdef DEBUG
+  void trackMemory(Cell* cell, size_t nbytes, MemoryUse use);
+  void untrackMemory(Cell* cell, size_t nbytes, MemoryUse use);
+
+  struct Key {
+    Cell* cell;
+    MemoryUse use;
+  };
+
+  struct Hasher {
+    using Lookup = Key;
+    static HashNumber hash(const Lookup& l);
+    static bool match(const Key& key, const Lookup& l);
+    static void rekey(Key& k, const Key& newKey);
+  };
+
+  Mutex mutex;
+
+  using Map = HashMap<Key, size_t, Hasher, SystemAllocPolicy>;
+  Map map;
+#endif
 };
 
 }  // namespace gc

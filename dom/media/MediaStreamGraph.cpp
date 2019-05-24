@@ -3293,8 +3293,7 @@ MediaStreamGraph* MediaStreamGraph::GetInstance(
       };
 
       gMediaStreamGraphShutdownBlocker = new Blocker();
-      nsCOMPtr<nsIAsyncShutdownClient> barrier = media::GetShutdownBarrier();
-      nsresult rv = barrier->AddBlocker(
+      nsresult rv = media::GetShutdownBarrier()->AddBlocker(
           gMediaStreamGraphShutdownBlocker, NS_LITERAL_STRING(__FILE__),
           __LINE__, NS_LITERAL_STRING("MediaStreamGraph shutdown"));
       MOZ_RELEASE_ASSERT(NS_SUCCEEDED(rv));
@@ -3311,7 +3310,9 @@ MediaStreamGraph* MediaStreamGraph::GetInstance(
 
     GraphRunType runType = DIRECT_DRIVER;
     if (aGraphDriverRequested != OFFLINE_THREAD_DRIVER &&
-        Preferences::GetBool("dom.audioworklet.enabled", false)) {
+        (Preferences::GetBool("dom.audioworklet.enabled", false) ||
+         Preferences::GetBool("media.audiograph.single_thread.enabled",
+                              false))) {
       runType = SINGLE_THREAD;
     }
 

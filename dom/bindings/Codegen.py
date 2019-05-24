@@ -1730,7 +1730,7 @@ class CGAddPropertyHook(CGAbstractClassHook):
 
 
 def finalizeHook(descriptor, hookName, freeOp, obj):
-    finalize = ""
+    finalize = "js::SetReservedSlot(%s, DOM_OBJECT_SLOT, JS::UndefinedValue());\n" % obj
     if descriptor.interface.getExtendedAttribute('OverrideBuiltins'):
         finalize += fill(
             """
@@ -1757,6 +1757,14 @@ def finalizeHook(descriptor, hookName, freeOp, obj):
         finalize += "ClearWrapper(self, self, %s);\n" % obj
     if descriptor.isGlobal():
         finalize += "mozilla::dom::FinalizeGlobal(CastToJSFreeOp(%s), %s);\n" % (freeOp, obj)
+    finalize += fill(
+        """
+        if (size_t mallocBytes = BindingJSObjectMallocBytes(self)) {
+          JS::RemoveAssociatedMemory(${obj}, mallocBytes,
+                                     JS::MemoryUse::DOMBinding);
+        }
+        """,
+        obj=obj)
     finalize += ("AddForDeferredFinalization<%s>(self);\n" %
                  descriptor.nativeType)
     return CGIfWrapper(CGGeneric(finalize), "self")
@@ -3847,6 +3855,11 @@ class CGWrapWithCacheMethod(CGAbstractMethod):
             return false;
             """)
 
+        if self.descriptor.proxy:
+            finalize = "DOMProxyHandler::getInstance()->finalize"
+        else:
+            finalize = FINALIZE_HOOK_NAME
+
         return fill(
             """
             static_assert(!IsBaseOf<NonRefcountedDOMObject, ${nativeType}>::value,
@@ -3859,6 +3872,17 @@ class CGWrapWithCacheMethod(CGAbstractMethod):
 
             MOZ_ASSERT(ToSupportsIsOnPrimaryInheritanceChain(aObject, aCache),
                        "nsISupports must be on our primary inheritance chain");
+
+            // If the wrapper cache contains a dead reflector then finalize that
+            // now, ensuring that the finalizer for the old reflector always
+            // runs before the new reflector is created and attached. This
+            // avoids the awkward situation where there are multiple reflector
+            // objects that contain pointers to the same native.
+
+            if (JSObject* oldReflector = aCache->GetWrapperMaybeDead()) {
+              ${finalize}(nullptr /* unused */, oldReflector);
+              MOZ_ASSERT(!aCache->GetWrapperMaybeDead());
+            }
 
             JS::Rooted<JSObject*> global(aCx, FindAssociatedGlobal(aCx, aObject->GetParentObject()));
             if (!global) {
@@ -3907,7 +3931,8 @@ class CGWrapWithCacheMethod(CGAbstractMethod):
             createObject=CreateBindingJSObject(self.descriptor, self.properties),
             unforgeable=CopyUnforgeablePropertiesToInstance(self.descriptor,
                                                             failureCode),
-            slots=InitMemberSlots(self.descriptor, failureCode))
+            slots=InitMemberSlots(self.descriptor, failureCode),
+            finalize=finalize)
 
 
 class CGWrapMethod(CGAbstractMethod):
@@ -7953,7 +7978,13 @@ class CGPerSignatureCall(CGThing):
                 self.getArguments(), argsPre, returnType,
                 self.extendedAttributes, descriptor,
                 nativeMethodName,
-                static, argsPost=argsPost, resultVar=resultVar))
+                static,
+                # We know our "self" must be being kept alive; otherwise we have
+                # a serious problem.  In common cases it's just an argument and
+                # we're MOZ_CAN_RUN_SCRIPT, but in some cases it's on the stack
+                # and being kept alive via references from JS.
+                object="MOZ_KnownLive(self)",
+                argsPost=argsPost, resultVar=resultVar))
 
         if useCounterName:
             # Generate a telemetry call for when [UseCounter] is used.
@@ -8727,7 +8758,8 @@ class CGAbstractBindingMethod(CGAbstractStaticMethod):
     """
     def __init__(self, descriptor, name, args, getThisObj,
                  callArgs="JS::CallArgs args = JS::CallArgsFromVp(argc, vp);\n"):
-        CGAbstractStaticMethod.__init__(self, descriptor, name, "bool", args)
+        CGAbstractStaticMethod.__init__(self, descriptor, name, "bool", args,
+                                        canRunScript=True)
 
         self.unwrapFailureCode = 'return ThrowErrorMessage(cx, MSG_THIS_DOES_NOT_IMPLEMENT_INTERFACE, "Value", "%s");\n' % descriptor.interface.identifier.name
 
@@ -12869,14 +12901,14 @@ class CGDOMJSProxyHandler_set(ClassMethod):
             }
 
             JS_MarkCrossZoneId(cx, id);
-            
+
             return dom::DOMProxyHandler::set(cx, proxy, id, wrappedValue, wrappedReceiver, result);
             """)
 
 
 class CGDOMJSProxyHandler_EnsureHolder(ClassMethod):
     """
-    Implementation of set().  We only use this for cross-origin objects. 
+    Implementation of set().  We only use this for cross-origin objects.
     """
     def __init__(self, descriptor):
         args = [Argument('JSContext*', 'cx'),

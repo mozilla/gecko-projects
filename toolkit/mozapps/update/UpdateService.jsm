@@ -120,6 +120,8 @@ const SERVICE_COULD_NOT_LOCK_UPDATER       = 32;
 const SERVICE_INSTALLDIR_ERROR             = 33;
 const WRITE_ERROR_ACCESS_DENIED            = 35;
 const WRITE_ERROR_CALLBACK_APP             = 37;
+const UNEXPECTED_STAGING_ERROR             = 43;
+const DELETE_ERROR_STAGING_LOCK_FILE       = 44;
 const SERVICE_COULD_NOT_COPY_UPDATER       = 49;
 const SERVICE_STILL_APPLYING_TERMINATED    = 50;
 const SERVICE_STILL_APPLYING_NO_EXIT_CODE  = 51;
@@ -1956,6 +1958,7 @@ UpdateService.prototype = {
           if (!this._downloader.usingBits) {
             this.stopDownload();
           } else {
+            this._downloader.cleanup();
             // The BITS downloader isn't stopped on exit so the
             // active-update.xml needs to be saved for the values sent to
             // telemetry to be saved to disk.
@@ -2617,7 +2620,7 @@ UpdateService.prototype = {
         this._showPrompt(update);
       }
 
-      Services.obs.notifyObservers(null, "update-available", "unsupported");
+      Services.obs.notifyObservers(update, "update-available", "unsupported");
       AUSTLMY.pingCheckCode(this._pingSuffix, AUSTLMY.CHK_UNSUPPORTED);
       return;
     }
@@ -3224,7 +3227,10 @@ UpdateManager.prototype = {
     cleanUpUpdatesDir(false);
 
     if (update.state == STATE_FAILED && parts[1]) {
-      if (!handleUpdateFailure(update, parts[1])) {
+      if (parts[1] == DELETE_ERROR_STAGING_LOCK_FILE ||
+          parts[1] == UNEXPECTED_STAGING_ERROR) {
+        writeStatusFile(getUpdatesDir(), update.state = STATE_PENDING);
+      } else if (!handleUpdateFailure(update, parts[1])) {
         handleFallbackToCompleteUpdate(update, true);
       }
 
@@ -3239,6 +3245,14 @@ UpdateManager.prototype = {
 
     if (update.state == STATE_FAILED) {
       AUSTLMY.pingUpdatePhases(update, false);
+    }
+
+    if (update.state == STATE_APPLIED ||
+        update.state == STATE_APPLIED_SERVICE ||
+        update.state == STATE_PENDING ||
+        update.state == STATE_PENDING_SERVICE ||
+        update.state == STATE_PENDING_ELEVATE) {
+      patch.setProperty("applyStart", Math.floor(Date.now() / 1000));
     }
 
     // Now that the active update's properties have been updated write the
@@ -3264,7 +3278,6 @@ UpdateManager.prototype = {
         update.state == STATE_PENDING ||
         update.state == STATE_PENDING_SERVICE ||
         update.state == STATE_PENDING_ELEVATE) {
-      patch.setProperty("applyStart", Math.floor(Date.now() / 1000));
       // Notify the user that an update has been staged and is ready for
       // installation (i.e. that they should restart the application).
       let prompter = Cc["@mozilla.org/updates/update-prompt;1"].
@@ -3680,6 +3693,16 @@ Downloader.prototype = {
   _pendingRequest: null,
 
   /**
+   * When using BITS, cancel actions happen asynchronously. This variable
+   * keeps track of any cancel action that is in-progress.
+   * If the cancel action fails, this will be set back to null so that the
+   * action can be attempted again. But if the cancel action succeeds, the
+   * resolved promise will remain stored in this variable to prevent cancel
+   * from being called twice (which, for BITS, is an error).
+   */
+  _cancelPromise: null,
+
+  /**
    * BITS receives progress notifications slowly, unless a user is watching.
    * This tracks what frequency notifications are happening at.
    *
@@ -3717,6 +3740,13 @@ Downloader.prototype = {
       cancelError = Cr.NS_BINDING_ABORTED;
     }
     if (this.usingBits) {
+      // If a cancel action is already in progress, just return when that
+      // promise resolved. Trying to cancel the same request twice is an error.
+      if (this._cancelPromise) {
+        await this._cancelPromise;
+        return;
+      }
+
       if (this._pendingRequest) {
         await this._pendingRequest;
       }
@@ -3725,7 +3755,17 @@ Downloader.prototype = {
         // cancelled.
         this._patch.deleteProperty("bitsId");
       }
-      await this._request.cancelAsync(cancelError);
+      try {
+        this._cancelPromise = this._request.cancelAsync(cancelError);
+        await this._cancelPromise;
+      } catch (e) {
+        // On success, we will not set the cancel promise to null because
+        // we want to prevent two cancellations of the same request. But
+        // retrying after a failed cancel is not an error, so we will set the
+        // cancel promise to null in the failure case.
+        this._cancelPromise = null;
+        throw e;
+      }
     } else if (this._request && this._request instanceof Ci.nsIRequest) {
       this._request.cancel(cancelError);
     }
@@ -3999,6 +4039,8 @@ Downloader.prototype = {
       if (!Bits.initialized) {
         Bits.init(jobName, updatePath, monitorTimeout);
       }
+
+      this._cancelPromise = null;
 
       let bitsId = this._patch.getProperty("bitsId");
       if (bitsId) {
@@ -4319,7 +4361,7 @@ Downloader.prototype = {
         // BITS jobs that failed to complete should still have cancel called on
         // them to remove the job.
         try {
-          await request.cancelAsync();
+          await this.cancel();
         } catch (e) {
           // This will fail if the job stopped because it was cancelled.
           // Even if this is a "real" error, there isn't really anything to do
@@ -4612,6 +4654,7 @@ Downloader.prototype = {
         }
       } else {
         this._patch.setProperty("applyStart", Math.floor(Date.now() / 1000));
+        um.saveUpdates();
       }
     }
 
@@ -4642,6 +4685,20 @@ Downloader.prototype = {
     } else {
       // Prevent leaking the update object (bug 454964)
       this._update = null;
+    }
+  },
+
+  /**
+   * This function should be called when shutting down so that resources get
+   * freed properly.
+   */
+  cleanup: function Downloader_cleanup() {
+    if (this.usingBits) {
+      if (this._pendingRequest) {
+        this._pendingRequest.then(() => this._request.shutdown());
+      } else {
+        this._request.shutdown();
+      }
     }
   },
 

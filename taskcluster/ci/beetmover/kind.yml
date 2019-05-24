@@ -1,7 +1,7 @@
 # This Source Code Form is subject to the terms of the Mozilla Public
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
-
+---
 loader: taskgraph.loader.single_dep:loader
 
 transforms:
@@ -41,7 +41,6 @@ job-template:
     shipping-phase: promote
     attributes:
         artifact_map:
-            by-project:
-                mozilla-release: taskcluster/taskgraph/manifests/fennec_candidates.yml
-                mozilla-beta: taskcluster/taskgraph/manifests/fennec_candidates.yml
+            by-release-type:
+                beta|release.*|esr.*: taskcluster/taskgraph/manifests/fennec_candidates.yml
                 default: taskcluster/taskgraph/manifests/fennec_nightly.yml

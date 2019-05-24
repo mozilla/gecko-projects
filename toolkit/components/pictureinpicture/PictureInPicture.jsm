@@ -52,25 +52,39 @@ var PictureInPicture = {
     }
   },
 
-  focusTabAndClosePip() {
+  async focusTabAndClosePip() {
     let gBrowser = this.browser.ownerGlobal.gBrowser;
     let tab = gBrowser.getTabForBrowser(this.browser);
     gBrowser.selectedTab = tab;
-    this.unload();
-    this.closePipWindow();
+    await this.closePipWindow();
+  },
+
+  /**
+   * Remove attribute which enables pip icon in tab
+   */
+  clearPipTabIcon() {
+    let win = this.browser.ownerGlobal;
+    let tab = win.gBrowser.getTabForBrowser(this.browser);
+    if (tab) {
+      tab.removeAttribute("pictureinpicture");
+    }
   },
 
   /**
    * Find and close any pre-existing Picture in Picture windows.
    */
-  closePipWindow() {
+  async closePipWindow() {
     // This uses an enumerator, but there really should only be one of
     // these things.
     for (let win of Services.wm.getEnumerator(WINDOW_TYPE)) {
       if (win.closed) {
         continue;
       }
+      let closedPromise = new Promise(resolve => {
+        win.addEventListener("unload", resolve, {once: true});
+      });
       win.close();
+      await closedPromise;
     }
   },
 
@@ -95,15 +109,20 @@ var PictureInPicture = {
    *   the player component inside it has finished loading.
    */
   async handlePictureInPictureRequest(browser, videoData) {
-    this.browser = browser;
+    // If there's a pre-existing PiP window, close it first.
+    await this.closePipWindow();
+
     let parentWin = browser.ownerGlobal;
-    this.closePipWindow();
+    this.browser = browser;
     let win = await this.openPipWindow(parentWin, videoData);
     let controls = win.document.getElementById("controls");
     this.weakPipControls = Cu.getWeakReference(controls);
     if (videoData.playing) {
       controls.classList.add("playing");
     }
+    // set attribute which shows pip icon in tab
+    let tab = parentWin.gBrowser.getTabForBrowser(browser);
+    tab.setAttribute("pictureinpicture", true);
     win.setupPlayer(browser, videoData);
   },
 
@@ -112,6 +131,7 @@ var PictureInPicture = {
    * browser object.
    */
   unload() {
+    this.clearPipTabIcon();
     delete this.weakPipControls;
     delete this.browser;
   },

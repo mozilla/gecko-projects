@@ -340,6 +340,36 @@ XPIPackage = class XPIPackage extends Package {
 };
 
 /**
+ * Return an object that implements enough of the Package interface
+ * to allow loadManifest() to work for a built-in addon (ie, one loaded
+ * from a resource: url)
+ *
+ * @param {nsIURL} baseURL The URL for the root of the add-on.
+ * @returns {object}
+ */
+function builtinPackage(baseURL) {
+  return {
+    rootURI: baseURL,
+    filePath: baseURL.spec,
+    file: null,
+    verifySignedState() {
+      return {
+        signedState: AddonManager.SIGNEDSTATE_NOT_REQUIRED,
+        cert: null,
+      };
+    },
+    async hasResource(path) {
+      try {
+        let response = await fetch(this.rootURI.resolve(path));
+        return response.ok;
+      } catch (e) {
+        return false;
+      }
+    },
+  };
+}
+
+/**
  * Determine the reason to pass to an extension's bootstrap methods when
  * switch between versions.
  *
@@ -610,8 +640,23 @@ var loadManifestFromFile = async function(aFile, aLocation, aOldAddon) {
  * A synchronous method for loading an add-on's manifest. Do not use
  * this.
  */
-function syncLoadManifestFromFile(aFile, aLocation, aOldAddon) {
-  return XPIInternal.awaitPromise(loadManifestFromFile(aFile, aLocation, aOldAddon));
+function syncLoadManifest(state, location, oldAddon) {
+  if (location.name == "app-builtin") {
+    let pkg = builtinPackage(Services.io.newURI(state.rootURI));
+    return XPIInternal.awaitPromise(loadManifest(pkg, location, oldAddon));
+  }
+
+  let file = new nsIFile(state.path);
+  let pkg = Package.get(file);
+  return XPIInternal.awaitPromise((async () => {
+    try {
+      let addon = await loadManifest(pkg, location, oldAddon);
+      addon.rootURI = getURIForResourceInFile(file, "").spec;
+      return addon;
+    } finally {
+      pkg.close();
+    }
+  })());
 }
 
 /**
@@ -1055,6 +1100,8 @@ class AddonInstall {
    *        included in the addon manager telemetry events.
    * @param {boolean} [options.isUserRequestedUpdate]
    *        An optional boolean, true if the install object is related to a user triggered update.
+   * @param {nsIURL} [options.releaseNotesURI]
+   *        An optional nsIURL that release notes where release notes can be retrieved.
    * @param {function(string) : Promise<void>} [options.promptHandler]
    *        A callback to prompt the user before installing.
    */
@@ -1073,7 +1120,7 @@ class AddonInstall {
     this.hash = this.originalHash;
     this.existingAddon = options.existingAddon || null;
     this.promptHandler = options.promptHandler || (() => Promise.resolve());
-    this.releaseNotesURI = null;
+    this.releaseNotesURI = options.releaseNotesURI || null;
 
     this._startupPromise = null;
 
@@ -2241,18 +2288,19 @@ function createUpdate(aCallback, aAddon, aUpdate, isUserRequested) {
       isUserRequestedUpdate: isUserRequested,
     };
 
+    try {
+      if (aUpdate.updateInfoURL)
+        opts.releaseNotesURI = Services.io.newURI(escapeAddonURI(aAddon, aUpdate.updateInfoURL));
+    } catch (e) {
+      // If the releaseNotesURI cannot be parsed then just ignore it.
+    }
+
     let install;
     if (url instanceof Ci.nsIFileURL) {
       install = new LocalAddonInstall(aAddon.location, url, opts);
       await install.init();
     } else {
       install = new DownloadAddonInstall(aAddon.location, url, opts);
-    }
-    try {
-      if (aUpdate.updateInfoURL)
-        install.releaseNotesURI = Services.io.newURI(escapeAddonURI(aAddon, aUpdate.updateInfoURL));
-    } catch (e) {
-      // If the releaseNotesURI cannot be parsed then just ignore it.
     }
 
     aCallback(install);
@@ -3226,7 +3274,7 @@ var XPIInstall = {
   flushJarCache,
   newVersionReason,
   recursiveRemove,
-  syncLoadManifestFromFile,
+  syncLoadManifest,
 
   // Keep track of in-progress operations that support cancel()
   _inProgress: [],
@@ -3263,10 +3311,13 @@ var XPIInstall = {
    *        The XPI file to install the add-on from.
    * @param {XPIStateLocation} location
    *        The install location to install the add-on to.
+   * @param {string?} [oldAppVersion]
+   *        The version of the application last run with this profile or null
+   *        if it is a new profile or the version is unknown
    * @returns {AddonInternal}
    *        The installed Addon object, upon success.
    */
-  async installDistributionAddon(id, file, location) {
+  async installDistributionAddon(id, file, location, oldAppVersion) {
     let addon = await loadManifestFromFile(file, location);
     addon.installTelemetryInfo = {source: "distribution"};
 
@@ -3287,6 +3338,10 @@ var XPIInstall = {
         logger.warn("Profile contains an add-on with a bad or missing install " +
                     `manifest at ${state.path}, overwriting`, e);
       }
+    } else if (addon.type === "locale" && oldAppVersion && Services.vc.compare(oldAppVersion, "67") < 0) {
+        /* Distribution language packs didn't get installed due to the signing
+           issues so we need to force them to be reinstalled. */
+      Services.prefs.clearUserPref(PREF_BRANCH_INSTALLED_ADDON + id);
     } else if (Services.prefs.getBoolPref(PREF_BRANCH_INSTALLED_ADDON + id, false)) {
       return null;
     }
@@ -3695,27 +3750,7 @@ var XPIInstall = {
       throw new Error("Built-in addons must use resource: URLS");
     }
 
-    // Enough of the Package interface to allow loadManifest() to work.
-    let pkg = {
-      rootURI: baseURL,
-      filePath: baseURL.spec,
-      file: null,
-      verifySignedState() {
-        return {
-          signedState: AddonManager.SIGNEDSTATE_NOT_REQUIRED,
-          cert: null,
-        };
-      },
-      async hasResource(path) {
-        try {
-          let response = await fetch(this.rootURI.resolve(path));
-          return response.ok;
-        } catch (e) {
-          return false;
-        }
-      },
-    };
-
+    let pkg = builtinPackage(baseURL);
     let addon = await loadManifest(pkg, XPIInternal.BuiltInLocation);
     addon.rootURI = base;
 
@@ -3962,14 +3997,13 @@ var XPIInstall = {
 
     Services.prefs.setBoolPref(PREF_PENDING_OPERATIONS, true);
 
-    // TODO hide hidden add-ons (bug 557710)
-    let wrapper = aAddon.wrapper;
-    AddonManagerPrivate.callAddonListeners("onOperationCancelled", wrapper);
-
     if (!aAddon.disabled) {
       XPIInternal.BootstrapScope.get(aAddon).startup(BOOTSTRAP_REASONS.ADDON_INSTALL);
       XPIDatabase.updateAddonActive(aAddon, true);
     }
+
+    let wrapper = aAddon.wrapper;
+    AddonManagerPrivate.callAddonListeners("onOperationCancelled", wrapper);
 
     // Notify any other providers that this theme is now enabled again.
     if (aAddon.type === "theme" && aAddon.active)

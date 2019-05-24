@@ -11,7 +11,24 @@ const {XPCOMUtils} = ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm")
 
 XPCOMUtils.defineLazyGlobalGetters(this, ["fetch"]);
 
+// Create a new instance of the ConsoleAPI so we can control the maxLogLevel with a pref.
+// See LOG_LEVELS in Console.jsm. Common examples: "all", "debug", "info", "warn", "error".
+XPCOMUtils.defineLazyGetter(this, "log", () => {
+  const { ConsoleAPI } = ChromeUtils.import("resource://gre/modules/Console.jsm", {});
+  return new ConsoleAPI({
+    maxLogLevel: "info",
+    maxLogLevelPref: "services.settings.loglevel",
+    prefix: "services.settings",
+  });
+});
+
 var Utils = {
+  CHANGES_PATH: "/buckets/monitor/collections/changes/records",
+
+  /**
+   * Logger instance.
+   */
+  log,
 
   /**
    * Check if local data exist for the specified client.
@@ -43,7 +60,7 @@ var Utils = {
 
   /**
    * Fetch the list of remote collections and their timestamp.
-   * @param {String} url               The poll URL (eg. `http://${server}{pollingEndpoint}`)
+   * @param {String} serverUrl         The server URL (eg. `https://server.org/v1`)
    * @param {int}    expectedTimestamp The timestamp that the server is supposed to return.
    *                                   We obtained it from the Megaphone notification payload,
    *                                   and we use it only for cache busting (Bug 1497159).
@@ -51,8 +68,9 @@ var Utils = {
    *                                   by the server (eg. `"123456789"`).
    * @param {Object} filters
    */
-  async fetchLatestChanges(url, options = {}) {
+  async fetchLatestChanges(serverUrl, options = {}) {
     const { expectedTimestamp, lastEtag = "", filters = {} } = options;
+
     //
     // Fetch the list of changes objects from the server that looks like:
     // {"data":[
@@ -62,6 +80,8 @@ var Utils = {
     //     "bucket":"blocklists",
     //     "collection":"certificates"
     //    }]}
+
+    let url = serverUrl + Utils.CHANGES_PATH;
 
     // Use ETag to obtain a `304 Not modified` when no change occurred,
     // and `?_since` parameter to only keep entries that weren't processed yet.

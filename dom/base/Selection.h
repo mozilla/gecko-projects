@@ -11,7 +11,7 @@
 
 #include "mozilla/AccessibleCaretEventHub.h"
 #include "mozilla/AutoRestore.h"
-#include "mozilla/PresShell.h"  // For ScrollAxis
+#include "mozilla/PresShell.h"
 #include "mozilla/RangeBoundary.h"
 #include "mozilla/SelectionChangeEventDispatcher.h"
 #include "mozilla/TextRange.h"
@@ -136,9 +136,10 @@ class Selection final : public nsSupportsWeakReference,
   nsIFrame* GetSelectionEndPointGeometry(SelectionRegion aRegion,
                                          nsRect* aRect);
 
-  nsresult PostScrollSelectionIntoViewEvent(
-      SelectionRegion aRegion, int32_t aFlags,
-      nsIPresShell::ScrollAxis aVertical, nsIPresShell::ScrollAxis aHorizontal);
+  nsresult PostScrollSelectionIntoViewEvent(SelectionRegion aRegion,
+                                            int32_t aFlags,
+                                            ScrollAxis aVertical,
+                                            ScrollAxis aHorizontal);
   enum {
     SCROLL_SYNCHRONOUS = 1 << 1,
     SCROLL_FIRST_ANCESTOR_ONLY = 1 << 2,
@@ -152,11 +153,11 @@ class Selection final : public nsSupportsWeakReference,
   // Otherwise, if SCROLL_DO_FLUSH is also in aFlags, then this method will
   // flush layout and you MUST hold a strong ref on 'this' for the duration
   // of this call.  This might destroy arbitrary layout objects.
-  nsresult ScrollIntoView(
-      SelectionRegion aRegion,
-      nsIPresShell::ScrollAxis aVertical = nsIPresShell::ScrollAxis(),
-      nsIPresShell::ScrollAxis aHorizontal = nsIPresShell::ScrollAxis(),
-      int32_t aFlags = 0);
+  MOZ_CAN_RUN_SCRIPT_BOUNDARY
+  nsresult ScrollIntoView(SelectionRegion aRegion,
+                          ScrollAxis aVertical = ScrollAxis(),
+                          ScrollAxis aHorizontal = ScrollAxis(),
+                          int32_t aFlags = 0);
   nsresult SubtractRange(RangeData* aRange, nsRange* aSubtract,
                          nsTArray<RangeData>* aOutput);
   /**
@@ -209,7 +210,7 @@ class Selection final : public nsSupportsWeakReference,
 
   NS_IMETHOD Repaint(nsPresContext* aPresContext);
 
-  // Note: StartAutoScrollTimer might destroy arbitrary frames etc.
+  MOZ_CAN_RUN_SCRIPT
   nsresult StartAutoScrollTimer(nsIFrame* aFrame, const nsPoint& aPoint,
                                 uint32_t aDelay);
 
@@ -377,7 +378,7 @@ class Selection final : public nsSupportsWeakReference,
                             bool aAllowAdjacent,
                             nsTArray<RefPtr<nsRange>>& aReturn,
                             mozilla::ErrorResult& aRv);
-
+  MOZ_CAN_RUN_SCRIPT_BOUNDARY
   void ScrollIntoView(int16_t aRegion, bool aIsSynchronous,
                       WhereToScroll aVPercent, WhereToScroll aHPercent,
                       mozilla::ErrorResult& aRv);
@@ -587,8 +588,7 @@ class Selection final : public nsSupportsWeakReference,
  private:
   friend class ::nsAutoScrollTimer;
 
-  // Note: DoAutoScroll might destroy arbitrary frames etc.
-  nsresult DoAutoScroll(nsIFrame* aFrame, nsPoint aPoint);
+  MOZ_CAN_RUN_SCRIPT nsresult DoAutoScroll(nsIFrame* aFrame, nsPoint aPoint);
 
   // We are not allowed to be in nodes whose root is not our document
   bool HasSameRoot(nsINode& aNode);
@@ -664,8 +664,7 @@ class Selection final : public nsSupportsWeakReference,
    public:
     NS_DECL_NSIRUNNABLE
     ScrollSelectionIntoViewEvent(Selection* aSelection, SelectionRegion aRegion,
-                                 nsIPresShell::ScrollAxis aVertical,
-                                 nsIPresShell::ScrollAxis aHorizontal,
+                                 ScrollAxis aVertical, ScrollAxis aHorizontal,
                                  int32_t aFlags)
         : Runnable("dom::Selection::ScrollSelectionIntoViewEvent"),
           mSelection(aSelection),
@@ -680,8 +679,8 @@ class Selection final : public nsSupportsWeakReference,
    private:
     Selection* mSelection;
     SelectionRegion mRegion;
-    nsIPresShell::ScrollAxis mVerticalScroll;
-    nsIPresShell::ScrollAxis mHorizontalScroll;
+    ScrollAxis mVerticalScroll;
+    ScrollAxis mHorizontalScroll;
     int32_t mFlags;
   };
 

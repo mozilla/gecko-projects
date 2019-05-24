@@ -59,6 +59,7 @@ class PhaseKind():
     def __init__(self, name, descr, bucket, children=[]):
         self.name = name
         self.descr = descr
+        # For telemetry
         self.bucket = bucket
         self.children = children
 
@@ -128,6 +129,7 @@ PhaseKindGraphRoots = [
             PhaseKind("SWEEP_BREAKPOINT", "Sweep Breakpoints", 27),
             PhaseKind("SWEEP_REGEXP", "Sweep Regexps", 28),
             PhaseKind("SWEEP_COMPRESSION", "Sweep Compression Tasks", 62),
+            PhaseKind("SWEEP_LAZYSCRIPTS", "Sweep LazyScripts", 71),
             PhaseKind("SWEEP_WEAKMAPS", "Sweep WeakMaps", 63),
             PhaseKind("SWEEP_UNIQUEIDS", "Sweep Unique IDs", 64),
             PhaseKind("SWEEP_JIT_DATA", "Sweep JIT Data", 65),
@@ -157,6 +159,7 @@ PhaseKindGraphRoots = [
             JoinParallelTasksPhaseKind
         ]),
     ]),
+    PhaseKind("DECOMMIT", "Decommit", 72),
     PhaseKind("GC_END", "End Callback", 44),
     PhaseKind("MINOR_GC", "All Minor GCs", 45, [
         MarkRootsPhaseKind,
@@ -253,8 +256,10 @@ for phaseKind in AllPhaseKinds:
             phase.name = "%s_%d" % (phaseKind.name, index + 1)
 
 # Find the maximum phase nesting.
-
 MaxPhaseNesting = max(phase.depth for phase in AllPhases) + 1
+
+# And the maximum bucket number.
+MaxBucket = max(kind.bucket for kind in AllPhaseKinds)
 
 # Generate code.
 
@@ -336,3 +341,10 @@ def generateCpp(out):
                    phaseKind.descr,
                    phase.path))
     out.write("};\n")
+
+    #
+    # Print in a comment the next available phase kind number.
+    #
+    out.write("// The next available phase kind number is: %d\n" %
+            (MaxBucket + 1))
+

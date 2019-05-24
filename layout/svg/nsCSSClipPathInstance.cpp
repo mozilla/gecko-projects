@@ -54,7 +54,7 @@ bool nsCSSClipPathInstance::HitTestBasicShapeOrPathClip(
   MOZ_ASSERT(type != StyleShapeSourceType::None, "unexpected none value");
   // In the future nsCSSClipPathInstance may handle <clipPath> references as
   // well. For the time being return early.
-  if (type == StyleShapeSourceType::URL) {
+  if (type == StyleShapeSourceType::Image) {
     return false;
   }
 
@@ -116,14 +116,14 @@ already_AddRefed<Path> nsCSSClipPathInstance::CreateClipPath(
   r = ToAppUnits(r.ToNearestPixels(appUnitsPerDevPixel), appUnitsPerDevPixel);
 
   const auto& basicShape = mClipPathStyle.BasicShape();
-  switch (basicShape.GetShapeType()) {
-    case StyleBasicShapeType::Circle:
+  switch (basicShape.tag) {
+    case StyleBasicShape::Tag::Circle:
       return CreateClipPathCircle(aDrawTarget, r);
-    case StyleBasicShapeType::Ellipse:
+    case StyleBasicShape::Tag::Ellipse:
       return CreateClipPathEllipse(aDrawTarget, r);
-    case StyleBasicShapeType::Polygon:
+    case StyleBasicShape::Tag::Polygon:
       return CreateClipPathPolygon(aDrawTarget, r);
-    case StyleBasicShapeType::Inset:
+    case StyleBasicShape::Tag::Inset:
       return CreateClipPathInset(aDrawTarget, r);
       break;
     default:
@@ -172,7 +172,7 @@ already_AddRefed<Path> nsCSSClipPathInstance::CreateClipPathEllipse(
 already_AddRefed<Path> nsCSSClipPathInstance::CreateClipPathPolygon(
     DrawTarget* aDrawTarget, const nsRect& aRefBox) {
   const auto& basicShape = mClipPathStyle.BasicShape();
-  auto fillRule = basicShape.GetFillRule() == StyleFillRule::Nonzero
+  auto fillRule = basicShape.AsPolygon().fill == StyleFillRule::Nonzero
                       ? FillRule::FILL_WINDING
                       : FillRule::FILL_EVEN_ODD;
   RefPtr<PathBuilder> builder = aDrawTarget->CreatePathBuilder(fillRule);

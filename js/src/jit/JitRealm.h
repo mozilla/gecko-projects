@@ -16,6 +16,7 @@
 
 #include "builtin/TypedObject.h"
 #include "jit/BaselineICList.h"
+#include "jit/BaselineJIT.h"
 #include "jit/CompileInfo.h"
 #include "jit/ICStubSpace.h"
 #include "jit/IonCode.h"
@@ -118,6 +119,8 @@ class BaselineICFallbackCode {
   }
 };
 
+enum class DebugTrapHandlerKind { Interpreter, Compiler, Count };
+
 typedef void (*EnterJitCode)(void* code, unsigned argc, Value* argv,
                              InterpreterFrame* fp, CalleeToken calleeToken,
                              JSObject* envChain, size_t numStackValues,
@@ -175,7 +178,6 @@ class JitRuntime {
   WriteOnceData<uint32_t> objectGroupPreBarrierOffset_;
 
   // Thunk to call malloc/free.
-  WriteOnceData<uint32_t> mallocStubOffset_;
   WriteOnceData<uint32_t> freeStubOffset_;
 
   // Thunk called to finish compilation of an IonScript.
@@ -189,11 +191,16 @@ class JitRuntime {
   WriteOnceData<uint32_t> doubleToInt32ValueStubOffset_;
 
   // Thunk used by the debugger for breakpoint and step mode.
-  WriteOnceData<JitCode*> debugTrapHandler_;
+  mozilla::EnumeratedArray<DebugTrapHandlerKind, DebugTrapHandlerKind::Count,
+                           WriteOnceData<JitCode*>>
+      debugTrapHandlers_;
 
   // Thunk used to fix up on-stack recompile of baseline scripts.
   WriteOnceData<JitCode*> baselineDebugModeOSRHandler_;
   WriteOnceData<void*> baselineDebugModeOSRHandlerNoFrameRegPopAddr_;
+
+  // BaselineInterpreter state.
+  BaselineInterpreter baselineInterpreter_;
 
   // Code for trampolines and VMFunction wrappers.
   WriteOnceData<JitCode*> trampolineCode_;
@@ -258,9 +265,8 @@ class JitRuntime {
   void generateInvalidator(MacroAssembler& masm, Label* bailoutTail);
   uint32_t generatePreBarrier(JSContext* cx, MacroAssembler& masm,
                               MIRType type);
-  void generateMallocStub(MacroAssembler& masm);
   void generateFreeStub(MacroAssembler& masm);
-  JitCode* generateDebugTrapHandler(JSContext* cx);
+  JitCode* generateDebugTrapHandler(JSContext* cx, DebugTrapHandlerKind kind);
   JitCode* generateBaselineDebugModeOSRHandler(
       JSContext* cx, uint32_t* noFrameRegPopOffsetOut);
 
@@ -322,9 +328,11 @@ class JitRuntime {
     return trampolineCode(tailCallFunctionWrapperOffsets_[size_t(funId)]);
   }
 
-  JitCode* debugTrapHandler(JSContext* cx);
+  JitCode* debugTrapHandler(JSContext* cx, DebugTrapHandlerKind kind);
   JitCode* getBaselineDebugModeOSRHandler(JSContext* cx);
   void* getBaselineDebugModeOSRHandlerAddress(JSContext* cx, bool popFrameReg);
+
+  BaselineInterpreter& baselineInterpreter() { return baselineInterpreter_; }
 
   TrampolinePtr getGenericBailoutHandler() const {
     return trampolineCode(bailoutHandlerOffset_);
@@ -378,8 +386,6 @@ class JitRuntime {
         MOZ_CRASH();
     }
   }
-
-  TrampolinePtr mallocStub() const { return trampolineCode(mallocStubOffset_); }
 
   TrampolinePtr freeStub() const { return trampolineCode(freeStubOffset_); }
 
@@ -472,7 +478,7 @@ struct CacheIRStubKey : public DefaultHasher<CacheIRStubKey> {
 
 template <typename Key>
 struct IcStubCodeMapGCPolicy {
-  static bool needsSweep(Key*, ReadBarrieredJitCode* value) {
+  static bool needsSweep(Key*, WeakHeapPtrJitCode* value) {
     return IsAboutToBeFinalized(value);
   }
 };
@@ -490,7 +496,7 @@ class JitZone {
 
   // Map CacheIRStubKey to shared JitCode objects.
   using BaselineCacheIRStubCodeMap =
-      GCHashMap<CacheIRStubKey, ReadBarrieredJitCode, CacheIRStubKey,
+      GCHashMap<CacheIRStubKey, WeakHeapPtrJitCode, CacheIRStubKey,
                 SystemAllocPolicy, IcStubCodeMapGCPolicy<CacheIRStubKey>>;
   BaselineCacheIRStubCodeMap baselineCacheIRStubCodes_;
 
@@ -541,7 +547,7 @@ class JitRealm {
 
   // Map ICStub keys to ICStub shared code objects.
   using ICStubCodeMap =
-      GCHashMap<uint32_t, ReadBarrieredJitCode, DefaultHasher<uint32_t>,
+      GCHashMap<uint32_t, WeakHeapPtrJitCode, DefaultHasher<uint32_t>,
                 ZoneAllocPolicy, IcStubCodeMapGCPolicy<uint32_t>>;
   ICStubCodeMap* stubCodes_;
 
@@ -563,7 +569,7 @@ class JitRealm {
     Count
   };
 
-  mozilla::EnumeratedArray<StubIndex, StubIndex::Count, ReadBarrieredJitCode>
+  mozilla::EnumeratedArray<StubIndex, StubIndex::Count, WeakHeapPtrJitCode>
       stubs_;
 
   bool stringsCanBeInNursery;
@@ -615,13 +621,13 @@ class JitRealm {
   void sweep(JS::Realm* realm);
 
   void discardStubs() {
-    for (ReadBarrieredJitCode& stubRef : stubs_) {
+    for (WeakHeapPtrJitCode& stubRef : stubs_) {
       stubRef = nullptr;
     }
   }
 
   bool hasStubs() const {
-    for (const ReadBarrieredJitCode& stubRef : stubs_) {
+    for (const WeakHeapPtrJitCode& stubRef : stubs_) {
       if (stubRef) {
         return true;
       }

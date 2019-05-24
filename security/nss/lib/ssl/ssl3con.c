@@ -2683,7 +2683,12 @@ ssl3_HandleNoCertificate(sslSocket *ss)
         PRFileDesc *lower;
 
         ssl_UncacheSessionID(ss);
-        SSL3_SendAlert(ss, alert_fatal, bad_certificate);
+
+        if (ss->version >= SSL_LIBRARY_VERSION_TLS_1_3) {
+            SSL3_SendAlert(ss, alert_fatal, certificate_required);
+        } else {
+            SSL3_SendAlert(ss, alert_fatal, bad_certificate);
+        }
 
         lower = ss->fd->lower;
 #ifdef _WIN32
@@ -2918,6 +2923,9 @@ ssl3_HandleAlert(sslSocket *ss, sslBuffer *buf)
             break;
         case no_certificate:
             error = SSL_ERROR_NO_CERTIFICATE;
+            break;
+        case certificate_required:
+            error = SSL_ERROR_RX_CERTIFICATE_REQUIRED_ALERT;
             break;
         case bad_certificate:
             error = SSL_ERROR_BAD_CERT_ALERT;
@@ -3719,6 +3727,10 @@ ssl3_RestartHandshakeHashes(sslSocket *ss)
         PK11_DestroyContext(ss->ssl3.hs.sha, PR_TRUE);
         ss->ssl3.hs.sha = NULL;
     }
+    if (ss->ssl3.hs.shaPostHandshake) {
+        PK11_DestroyContext(ss->ssl3.hs.shaPostHandshake, PR_TRUE);
+        ss->ssl3.hs.shaPostHandshake = NULL;
+    }
 }
 
 /*
@@ -3774,6 +3786,24 @@ ssl3_UpdateHandshakeHashes(sslSocket *ss, const unsigned char *b, unsigned int l
             ssl_MapLowLevelError(SSL_ERROR_SHA_DIGEST_FAILURE);
             return rv;
         }
+    }
+    return rv;
+}
+
+SECStatus
+ssl3_UpdatePostHandshakeHashes(sslSocket *ss, const unsigned char *b, unsigned int l)
+{
+    SECStatus rv = SECSuccess;
+
+    PORT_Assert(ss->opt.noLocks || ssl_HaveSSL3HandshakeLock(ss));
+
+    PRINT_BUF(90, (ss, "post handshake hash input:", b, l));
+
+    PORT_Assert(ss->ssl3.hs.hashType == handshake_hash_single);
+    PORT_Assert(ss->version >= SSL_LIBRARY_VERSION_TLS_1_3);
+    rv = PK11_DigestOp(ss->ssl3.hs.shaPostHandshake, b, l);
+    if (rv != SECSuccess) {
+        PORT_SetError(SSL_ERROR_DIGEST_FAILURE);
     }
     return rv;
 }
@@ -4811,7 +4841,8 @@ ssl3_SendClientHello(sslSocket *ss, sslClientHelloType type)
          * XXX If we've been called from ssl_BeginClientHandshake, then
          * this lookup is duplicative and wasteful.
          */
-        sid = ssl_LookupSID(&ss->sec.ci.peer, ss->sec.ci.port, ss->peerID, ss->url);
+        sid = ssl_LookupSID(ssl_Time(ss), &ss->sec.ci.peer,
+                            ss->sec.ci.port, ss->peerID, ss->url);
     } else {
         sid = NULL;
     }
@@ -8548,8 +8579,8 @@ ssl3_HandleClientHello(sslSocket *ss, PRUint8 *b, PRUint32 length)
                         ss->sec.ci.peer.pr_s6_addr32[2],
                         ss->sec.ci.peer.pr_s6_addr32[3]));
             if (ssl_sid_lookup) {
-                sid = (*ssl_sid_lookup)(&ss->sec.ci.peer, sidBytes.data,
-                                        sidBytes.len, ss->dbHandle);
+                sid = (*ssl_sid_lookup)(ssl_Time(ss), &ss->sec.ci.peer,
+                                        sidBytes.data, sidBytes.len, ss->dbHandle);
             } else {
                 errCode = SSL_ERROR_SERVER_CACHE_NOT_CONFIGURED;
                 goto loser;
@@ -10246,7 +10277,7 @@ ssl3_HandleNewSessionTicket(sslSocket *ss, PRUint8 *b, PRUint32 length)
      * until it has verified the server's Finished message." See the comment in
      * ssl3_FinishHandshake for more details.
      */
-    ss->ssl3.hs.newSessionTicket.received_timestamp = ssl_TimeUsec();
+    ss->ssl3.hs.newSessionTicket.received_timestamp = ssl_Time(ss);
     if (length < 4) {
         (void)SSL3_SendAlert(ss, alert_fatal, decode_error);
         PORT_SetError(SSL_ERROR_RX_MALFORMED_NEW_SESSION_TICKET);
@@ -11554,8 +11585,8 @@ ssl3_FillInCachedSID(sslSocket *ss, sslSessionID *sid, PK11SymKey *secret)
         sid->keaGroup = ssl_grp_none;
     }
     sid->sigScheme = ss->sec.signatureScheme;
-    sid->lastAccessTime = sid->creationTime = ssl_TimeUsec();
-    sid->expirationTime = sid->creationTime + ssl3_sid_timeout * PR_USEC_PER_SEC;
+    sid->lastAccessTime = sid->creationTime = ssl_Time(ss);
+    sid->expirationTime = sid->creationTime + (ssl_ticket_lifetime * PR_USEC_PER_SEC);
     sid->localCert = CERT_DupCertificate(ss->sec.localCert);
     if (ss->sec.isServer) {
         sid->namedCurve = ss->sec.serverCert->namedCurve;
@@ -11623,7 +11654,8 @@ ssl3_FinishHandshake(sslSocket *ss)
 SECStatus
 ssl_HashHandshakeMessageInt(sslSocket *ss, SSLHandshakeType ct,
                             PRUint32 dtlsSeq,
-                            const PRUint8 *b, PRUint32 length)
+                            const PRUint8 *b, PRUint32 length,
+                            sslUpdateHandshakeHashes updateHashes)
 {
     PRUint8 hdr[4];
     PRUint8 dtlsData[8];
@@ -11636,7 +11668,7 @@ ssl_HashHandshakeMessageInt(sslSocket *ss, SSLHandshakeType ct,
     hdr[2] = (PRUint8)(length >> 8);
     hdr[3] = (PRUint8)(length);
 
-    rv = ssl3_UpdateHandshakeHashes(ss, (unsigned char *)hdr, 4);
+    rv = updateHashes(ss, (unsigned char *)hdr, 4);
     if (rv != SECSuccess)
         return rv; /* err code already set. */
 
@@ -11656,14 +11688,13 @@ ssl_HashHandshakeMessageInt(sslSocket *ss, SSLHandshakeType ct,
         dtlsData[6] = (PRUint8)(length >> 8);
         dtlsData[7] = (PRUint8)(length);
 
-        rv = ssl3_UpdateHandshakeHashes(ss, (unsigned char *)dtlsData,
-                                        sizeof(dtlsData));
+        rv = updateHashes(ss, (unsigned char *)dtlsData, sizeof(dtlsData));
         if (rv != SECSuccess)
             return rv; /* err code already set. */
     }
 
     /* The message body */
-    rv = ssl3_UpdateHandshakeHashes(ss, b, length);
+    rv = updateHashes(ss, b, length);
     if (rv != SECSuccess)
         return rv; /* err code already set. */
 
@@ -11675,7 +11706,15 @@ ssl_HashHandshakeMessage(sslSocket *ss, SSLHandshakeType ct,
                          const PRUint8 *b, PRUint32 length)
 {
     return ssl_HashHandshakeMessageInt(ss, ct, ss->ssl3.hs.recvMessageSeq,
-                                       b, length);
+                                       b, length, ssl3_UpdateHandshakeHashes);
+}
+
+SECStatus
+ssl_HashPostHandshakeMessage(sslSocket *ss, SSLHandshakeType ct,
+                             const PRUint8 *b, PRUint32 length)
+{
+    return ssl_HashHandshakeMessageInt(ss, ct, ss->ssl3.hs.recvMessageSeq,
+                                       b, length, ssl3_UpdatePostHandshakeHashes);
 }
 
 /* Called from ssl3_HandleHandshake() when it has gathered a complete ssl3
@@ -11714,9 +11753,11 @@ ssl3_HandleHandshakeMessage(sslSocket *ss, PRUint8 *b, PRUint32 length,
             break;
 
         default:
-            rv = ssl_HashHandshakeMessage(ss, ss->ssl3.hs.msg_type, b, length);
-            if (rv != SECSuccess) {
-                return SECFailure;
+            if (!tls13_IsPostHandshake(ss)) {
+                rv = ssl_HashHandshakeMessage(ss, ss->ssl3.hs.msg_type, b, length);
+                if (rv != SECSuccess) {
+                    return SECFailure;
+                }
             }
     }
 
@@ -13128,6 +13169,9 @@ ssl3_DestroySSL3Info(sslSocket *ss)
     }
     if (ss->ssl3.hs.sha) {
         PK11_DestroyContext(ss->ssl3.hs.sha, PR_TRUE);
+    }
+    if (ss->ssl3.hs.shaPostHandshake) {
+        PK11_DestroyContext(ss->ssl3.hs.shaPostHandshake, PR_TRUE);
     }
     if (ss->ssl3.hs.messages.buf) {
         sslBuffer_Clear(&ss->ssl3.hs.messages);

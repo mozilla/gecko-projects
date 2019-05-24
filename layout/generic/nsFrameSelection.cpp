@@ -446,7 +446,7 @@ nsresult nsFrameSelection::ConstrainFrameAndPointToAnchorSubtree(
     if (anchorRoot == contentRoot) {
       // If the aFrame's content isn't the capturing content, it should be
       // a descendant.  At this time, we can return simply.
-      nsIContent* capturedContent = nsIPresShell::GetCapturingContent();
+      nsIContent* capturedContent = PresShell::GetCapturingContent();
       if (capturedContent != content) {
         return NS_OK;
       }
@@ -702,8 +702,7 @@ nsresult nsFrameSelection::MoveCaret(nsDirection aDirection,
       sel->Collapse(node, offset);
     }
     sel->ScrollIntoView(nsISelectionController::SELECTION_FOCUS_REGION,
-                        nsIPresShell::ScrollAxis(), nsIPresShell::ScrollAxis(),
-                        scrollFlags);
+                        ScrollAxis(), ScrollAxis(), scrollFlags);
     return NS_OK;
   }
 
@@ -832,8 +831,8 @@ nsresult nsFrameSelection::MoveCaret(nsDirection aDirection,
   }
   if (NS_SUCCEEDED(result)) {
     result = mDomSelections[index]->ScrollIntoView(
-        nsISelectionController::SELECTION_FOCUS_REGION,
-        nsIPresShell::ScrollAxis(), nsIPresShell::ScrollAxis(), scrollFlags);
+        nsISelectionController::SELECTION_FOCUS_REGION, ScrollAxis(),
+        ScrollAxis(), scrollFlags);
   }
 
   return result;
@@ -1190,7 +1189,8 @@ nsresult nsFrameSelection::StartAutoScrollTimer(nsIFrame* aFrame,
     return NS_ERROR_NULL_POINTER;
   }
 
-  return mDomSelections[index]->StartAutoScrollTimer(aFrame, aPoint, aDelay);
+  RefPtr<Selection> selection = mDomSelections[index];
+  return selection->StartAutoScrollTimer(aFrame, aPoint, aDelay);
 }
 
 void nsFrameSelection::StopAutoScrollTimer() {
@@ -1389,7 +1389,7 @@ nsresult nsFrameSelection::ScrollSelectionIntoView(SelectionType aSelectionType,
 
   if (!mDomSelections[index]) return NS_ERROR_NULL_POINTER;
 
-  nsIPresShell::ScrollAxis verticalScroll = nsIPresShell::ScrollAxis();
+  ScrollAxis verticalScroll = ScrollAxis();
   int32_t flags = Selection::SCROLL_DO_FLUSH;
   if (aFlags & nsISelectionController::SCROLL_SYNCHRONOUS) {
     flags |= Selection::SCROLL_SYNCHRONOUS;
@@ -1400,8 +1400,8 @@ nsresult nsFrameSelection::ScrollSelectionIntoView(SelectionType aSelectionType,
     flags |= Selection::SCROLL_OVERFLOW_HIDDEN;
   }
   if (aFlags & nsISelectionController::SCROLL_CENTER_VERTICALLY) {
-    verticalScroll = nsIPresShell::ScrollAxis(kScrollToCenter,
-                                              WhenToScroll::IfNotFullyVisible);
+    verticalScroll =
+        ScrollAxis(kScrollToCenter, WhenToScroll::IfNotFullyVisible);
   }
   if (aFlags & nsISelectionController::SCROLL_FOR_CARET_MOVE) {
     flags |= Selection::SCROLL_FOR_CARET_MOVE;
@@ -1410,8 +1410,7 @@ nsresult nsFrameSelection::ScrollSelectionIntoView(SelectionType aSelectionType,
   // After ScrollSelectionIntoView(), the pending notifications might be
   // flushed and PresShell/PresContext/Frames may be dead. See bug 418470.
   RefPtr<Selection> sel = mDomSelections[index];
-  return sel->ScrollIntoView(aRegion, verticalScroll,
-                             nsIPresShell::ScrollAxis(), flags);
+  return sel->ScrollIntoView(aRegion, verticalScroll, ScrollAxis(), flags);
 }
 
 nsresult nsFrameSelection::RepaintSelection(SelectionType aSelectionType) {
@@ -2748,8 +2747,8 @@ nsresult nsFrameSelection::UpdateSelectionCacheOnRepaintSelection(
   nsCOMPtr<Document> aDoc = presShell->GetDocument();
 
   if (aDoc && aSel && !aSel->IsCollapsed()) {
-    return nsCopySupport::HTMLCopy(aSel, aDoc, nsIClipboard::kSelectionCache,
-                                   false);
+    return nsCopySupport::EncodeDocumentWithContextAndPutToClipboard(
+        aSel, aDoc, nsIClipboard::kSelectionCache, false);
   }
 
   return NS_OK;
@@ -2763,8 +2762,9 @@ int16_t AutoCopyListener::sClipboardID = -1;
  * What we do now:
  * On every selection change, we copy to the clipboard anew, creating a
  * HTML buffer, a transferable, an nsISupportsString and
- * a huge mess every time.  This is basically what nsPresShell::DoCopy does
- * to move the selection into the clipboard for Edit->Copy.
+ * a huge mess every time.  This is basically what
+ * nsCopySupport::EncodeDocumentWithContextAndPutToClipboard() does to move the
+ * selection into the clipboard for Edit->Copy.
  *
  * What we should do, to make our end of the deal faster:
  * Create a singleton transferable with our own magic converter.  When selection
@@ -2831,8 +2831,10 @@ void AutoCopyListener::OnSelectionChange(Document* aDocument,
     return;
   }
 
-  // Call the copy code.
   DebugOnly<nsresult> rv =
-      nsCopySupport::HTMLCopy(&aSelection, aDocument, sClipboardID, false);
-  NS_WARNING_ASSERTION(NS_SUCCEEDED(rv), "nsCopySupport::HTMLCopy() failed");
+      nsCopySupport::EncodeDocumentWithContextAndPutToClipboard(
+          &aSelection, aDocument, sClipboardID, false);
+  NS_WARNING_ASSERTION(
+      NS_SUCCEEDED(rv),
+      "nsCopySupport::EncodeDocumentWithContextAndPutToClipboard() failed");
 }

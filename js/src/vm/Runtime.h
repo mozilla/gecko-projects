@@ -31,8 +31,10 @@
 #include "irregexp/RegExpStack.h"
 #include "js/BuildId.h"  // JS::BuildIdOp
 #include "js/Debug.h"
+#include "js/experimental/SourceHook.h"  // js::SourceHook
 #include "js/GCVector.h"
 #include "js/HashTable.h"
+#include "js/Modules.h"  // JS::Module{DynamicImport,Metadata,Resolve}Hook
 #ifdef DEBUG
 #  include "js/Proxy.h"  // For AutoEnterPolicy
 #endif
@@ -521,6 +523,24 @@ struct JSRuntime : public js::MallocProvider<JSRuntime> {
   // off-thread context realms, so it isn't necessarily equal to the
   // number of realms visited by RealmsIter.
   js::MainThreadData<size_t> numRealms;
+
+ private:
+  // Number of debuggee realms in the runtime.
+  js::MainThreadData<size_t> numDebuggeeRealms_;
+
+  // Number of debuggee realms in the runtime observing code coverage.
+  js::MainThreadData<size_t> numDebuggeeRealmsObservingCoverage_;
+
+ public:
+  void incrementNumDebuggeeRealms();
+  void decrementNumDebuggeeRealms();
+
+  size_t numDebuggeeRealms() const {
+    return numDebuggeeRealms_;
+  }
+
+  void incrementNumDebuggeeRealmsObservingCoverage();
+  void decrementNumDebuggeeRealmsObservingCoverage();
 
   /* Locale-specific callbacks for string conversion. */
   js::MainThreadData<const JSLocaleCallbacks*> localeCallbacks;

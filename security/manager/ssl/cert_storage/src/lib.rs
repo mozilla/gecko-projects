@@ -3,6 +3,7 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 extern crate base64;
+extern crate byteorder;
 extern crate crossbeam_utils;
 extern crate lmdb;
 #[macro_use]
@@ -16,16 +17,19 @@ extern crate thin_vec;
 extern crate time;
 #[macro_use]
 extern crate xpcom;
+extern crate storage_variant;
 extern crate style;
 
+use byteorder::{NetworkEndian, ReadBytesExt, WriteBytesExt};
 use crossbeam_utils::atomic::AtomicCell;
 use lmdb::EnvironmentFlags;
 use moz_task::{create_thread, is_main_thread, Task, TaskRunnable};
 use nserror::{
     nsresult, NS_ERROR_FAILURE, NS_ERROR_NOT_SAME_THREAD, NS_ERROR_NO_AGGREGATION,
-    NS_ERROR_UNEXPECTED, NS_OK,
+    NS_ERROR_NULL_POINTER, NS_ERROR_UNEXPECTED, NS_OK,
 };
 use nsstring::{nsACString, nsAString, nsCStr, nsCString, nsString};
+use rkv::error::StoreError;
 use rkv::{Rkv, SingleStore, StoreOptions, Value};
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
@@ -33,30 +37,36 @@ use std::ffi::{CStr, CString};
 use std::fmt::Display;
 use std::fs::{create_dir_all, remove_file, File};
 use std::io::{BufRead, BufReader};
+use std::mem::size_of;
 use std::os::raw::c_char;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::slice;
 use std::str;
 use std::sync::{Arc, Mutex, RwLock};
 use std::time::{Duration, SystemTime};
+use storage_variant::VariantType;
 use thin_vec::ThinVec;
 use xpcom::interfaces::{
-    nsICertStorage, nsICertStorageCallback, nsIFile, nsIIssuerAndSerialRevocationState,
-    nsIObserver, nsIPrefBranch, nsIRevocationState, nsISubjectAndPubKeyRevocationState,
-    nsISupports, nsIThread,
+    nsICertInfo, nsICertStorage, nsICertStorageCallback, nsIFile,
+    nsIIssuerAndSerialRevocationState, nsIObserver, nsIPrefBranch, nsIRevocationState,
+    nsISubjectAndPubKeyRevocationState, nsISupports, nsIThread,
 };
 use xpcom::{nsIID, GetterAddrefs, RefPtr, ThreadBoundRefPtr, XpCom};
 
 const PREFIX_REV_IS: &str = "is";
 const PREFIX_REV_SPK: &str = "spk";
-const PREFIX_CRLITE: &str = "crlite";
-const PREFIX_WL: &str = "wl";
+const PREFIX_SUBJECT: &str = "subject";
+const PREFIX_CERT: &str = "cert";
+const PREFIX_DATA_TYPE: &str = "datatype";
 
-fn make_key(prefix: &str, part_a: &[u8], part_b: &[u8]) -> Vec<u8> {
-    let mut key = prefix.as_bytes().to_owned();
-    key.extend_from_slice(part_a);
-    key.extend_from_slice(part_b);
-    key
+macro_rules! make_key {
+    ( $prefix:expr, $( $part:expr ),+ ) => {
+        {
+            let mut key = $prefix.as_bytes().to_owned();
+            $( key.extend_from_slice($part); )+
+            key
+        }
+    }
 }
 
 #[allow(non_camel_case_types, non_snake_case)]
@@ -114,7 +124,13 @@ impl SecurityState {
 
         // Open the store in read-write mode initially to create it (if needed)
         // and migrate data from the old store (if any).
-        let env = Rkv::new(store_path.as_path())?;
+        // If opening initially fails, try to remove and recreate the database.
+        // Consumers will repopulate the database as necessary if this happens.
+        // (See bug 1546361.)
+        let env = make_env(store_path.as_path()).or_else(|_| {
+            remove_db(store_path.as_path())?;
+            make_env(store_path.as_path())
+        })?;
         let store = env.open_single("cert_storage", StoreOptions::create())?;
 
         // if the profile has a revocations.txt, migrate it and remove the file
@@ -183,13 +199,13 @@ impl SecurityState {
                 if leading_char == '\t' {
                     let _ = store.put(
                         &mut writer,
-                        &make_key(PREFIX_REV_SPK, name, &l_sans_prefix),
+                        &make_key!(PREFIX_REV_SPK, name, &l_sans_prefix),
                         &value,
                     );
                 } else {
                     let _ = store.put(
                         &mut writer,
-                        &make_key(PREFIX_REV_IS, name, &l_sans_prefix),
+                        &make_key!(PREFIX_REV_IS, name, &l_sans_prefix),
                         &value,
                     );
                 }
@@ -207,7 +223,7 @@ impl SecurityState {
         // two LMDB environments open at the same time.
         drop(self.env_and_store.take());
 
-        let env = Rkv::new(store_path.as_path())?;
+        let env = make_env(store_path.as_path())?;
         let store = env.open_single("cert_storage", StoreOptions::create())?;
         self.env_and_store.replace(EnvAndStore { env, store });
         Ok(())
@@ -230,23 +246,6 @@ impl SecurityState {
         Ok(())
     }
 
-    fn write_entry(&mut self, key: &[u8], value: i16) -> Result<(), SecurityStateError> {
-        self.reopen_store_read_write()?;
-        {
-            let env_and_store = match self.env_and_store.as_mut() {
-                Some(env_and_store) => env_and_store,
-                None => return Err(SecurityStateError::from("env and store not initialized?")),
-            };
-            let mut writer = env_and_store.env.write()?;
-            env_and_store
-                .store
-                .put(&mut writer, key, &Value::I64(value as i64))?;
-            writer.commit()?;
-        }
-        self.reopen_store_read_only()?;
-        Ok(())
-    }
-
     fn read_entry(&self, key: &[u8]) -> Result<Option<i16>, SecurityStateError> {
         let env_and_store = match self.env_and_store.as_ref() {
             Some(env_and_store) => env_and_store,
@@ -260,7 +259,31 @@ impl SecurityState {
                 Ok(Some(i as i16))
             }
             Ok(None) => Ok(None),
-            _ => Err(SecurityStateError::from(
+            Ok(_) => Err(SecurityStateError::from(
+                "Unexpected type when trying to get a Value::I64",
+            )),
+            Err(_) => Err(SecurityStateError::from(
+                "There was a problem getting the value",
+            )),
+        }
+    }
+
+    pub fn get_has_prior_data(&self, data_type: u8) -> Result<bool, SecurityStateError> {
+        let env_and_store = match self.env_and_store.as_ref() {
+            Some(env_and_store) => env_and_store,
+            None => return Err(SecurityStateError::from("env and store not initialized?")),
+        };
+        let reader = env_and_store.env.read()?;
+        match env_and_store
+            .store
+            .get(&reader, &make_key!(PREFIX_DATA_TYPE, &[data_type]))
+        {
+            Ok(Some(Value::Bool(true))) => Ok(true),
+            Ok(None) => Ok(false),
+            Ok(_) => Err(SecurityStateError::from(
+                "Unexpected type when trying to get a Value::Bool",
+            )),
+            Err(_) => Err(SecurityStateError::from(
                 "There was a problem getting the value",
             )),
         }
@@ -277,6 +300,15 @@ impl SecurityState {
                 None => return Err(SecurityStateError::from("env and store not initialized?")),
             };
             let mut writer = env_and_store.env.write()?;
+            // Make a note that we have prior revocation data now.
+            env_and_store.store.put(
+                &mut writer,
+                &make_key!(
+                    PREFIX_DATA_TYPE,
+                    &[nsICertStorage::DATA_TYPE_REVOCATION as u8]
+                ),
+                &Value::Bool(true),
+            )?;
 
             for entry in entries {
                 env_and_store
@@ -290,24 +322,6 @@ impl SecurityState {
         Ok(())
     }
 
-    pub fn set_enrollment(
-        &mut self,
-        issuer: &[u8],
-        serial: &[u8],
-        state: i16,
-    ) -> Result<(), SecurityStateError> {
-        self.write_entry(&make_key(PREFIX_CRLITE, issuer, serial), state)
-    }
-
-    pub fn set_whitelist(
-        &mut self,
-        issuer: &[u8],
-        serial: &[u8],
-        state: i16,
-    ) -> Result<(), SecurityStateError> {
-        self.write_entry(&make_key(PREFIX_WL, issuer, serial), state)
-    }
-
     pub fn get_revocation_state(
         &self,
         issuer: &[u8],
@@ -319,8 +333,8 @@ impl SecurityState {
         digest.input(pub_key);
         let pub_key_hash = digest.result();
 
-        let subject_pubkey = make_key(PREFIX_REV_SPK, subject, &pub_key_hash);
-        let issuer_serial = make_key(PREFIX_REV_IS, issuer, serial);
+        let subject_pubkey = make_key!(PREFIX_REV_SPK, subject, &pub_key_hash);
+        let issuer_serial = make_key!(PREFIX_REV_IS, issuer, serial);
 
         let st: i16 = match self.read_entry(&issuer_serial) {
             Ok(Some(value)) => value,
@@ -344,32 +358,6 @@ impl SecurityState {
                     "problem reading revocation state (from subject / pubkey)",
                 ));
             }
-        }
-    }
-
-    pub fn get_enrollment_state(
-        &self,
-        issuer: &[u8],
-        serial: &[u8],
-    ) -> Result<i16, SecurityStateError> {
-        let issuer_serial = make_key(PREFIX_CRLITE, issuer, serial);
-        match self.read_entry(&issuer_serial) {
-            Ok(Some(value)) => Ok(value),
-            Ok(None) => Ok(nsICertStorage::STATE_UNSET as i16),
-            Err(_) => return Err(SecurityStateError::from("problem reading enrollment state")),
-        }
-    }
-
-    pub fn get_whitelist_state(
-        &self,
-        issuer: &[u8],
-        serial: &[u8],
-    ) -> Result<i16, SecurityStateError> {
-        let issuer_serial = make_key(PREFIX_WL, issuer, serial);
-        match self.read_entry(&issuer_serial) {
-            Ok(Some(value)) => Ok(value),
-            Ok(None) => Ok(nsICertStorage::STATE_UNSET as i16),
-            Err(_) => Err(SecurityStateError::from("problem reading whitelist state")),
         }
     }
 
@@ -403,22 +391,324 @@ impl SecurityState {
         )
     }
 
-    pub fn is_whitelist_fresh(&self) -> Result<bool, SecurityStateError> {
-        self.is_data_fresh(
-            "services.blocklist.intermediates.checked",
-            "security.onecrl.maximum_staleness_in_seconds",
-        )
-    }
-
-    pub fn is_enrollment_fresh(&self) -> Result<bool, SecurityStateError> {
-        self.is_data_fresh(
-            "services.blocklist.crlite.checked",
-            "security.onecrl.maximum_staleness_in_seconds",
-        )
-    }
-
     pub fn pref_seen(&mut self, name: &str, value: u32) {
         self.int_prefs.insert(name.to_owned(), value);
+    }
+
+    // To store certificates, we create a Cert out of each given cert, subject, and trust tuple. We
+    // hash each certificate with sha-256 to obtain a unique* key for that certificate, and we store
+    // the Cert in the database. We also look up or create a CertHashList for the given subject and
+    // add the new certificate's hash if it isn't present in the list. If it wasn't present, we
+    // write out the updated CertHashList.
+    // *By the pigeon-hole principle, there exist collisions for sha-256, so this key is not
+    // actually unique. We rely on the assumption that sha-256 is a cryptographically strong hash.
+    // If an adversary can find two different certificates with the same sha-256 hash, they can
+    // probably forge a sha-256-based signature, so assuming the keys we create here are unique is
+    // not a security issue.
+    pub fn add_certs(
+        &mut self,
+        certs: &[(Vec<u8>, Vec<u8>, i16)],
+    ) -> Result<(), SecurityStateError> {
+        self.reopen_store_read_write()?;
+        {
+            let env_and_store = match self.env_and_store.as_mut() {
+                Some(env_and_store) => env_and_store,
+                None => return Err(SecurityStateError::from("env and store not initialized?")),
+            };
+            let mut writer = env_and_store.env.write()?;
+            // Make a note that we have prior cert data now.
+            env_and_store.store.put(
+                &mut writer,
+                &make_key!(
+                    PREFIX_DATA_TYPE,
+                    &[nsICertStorage::DATA_TYPE_CERTIFICATE as u8]
+                ),
+                &Value::Bool(true),
+            )?;
+
+            for (cert_der, subject, trust) in certs {
+                let mut digest = Sha256::default();
+                digest.input(cert_der);
+                let cert_hash = digest.result();
+                let cert_key = make_key!(PREFIX_CERT, &cert_hash);
+                let cert = Cert::new(cert_der, subject, *trust)?;
+                env_and_store
+                    .store
+                    .put(&mut writer, &cert_key, &Value::Blob(&cert.to_bytes()?))?;
+                let subject_key = make_key!(PREFIX_SUBJECT, subject);
+                let empty_vec = Vec::new();
+                let old_cert_hash_list = match env_and_store.store.get(&writer, &subject_key)? {
+                    Some(Value::Blob(hashes)) => hashes.to_owned(),
+                    Some(_) => empty_vec,
+                    None => empty_vec,
+                };
+                let new_cert_hash_list = CertHashList::add(&old_cert_hash_list, &cert_hash)?;
+                if new_cert_hash_list.len() != old_cert_hash_list.len() {
+                    env_and_store.store.put(
+                        &mut writer,
+                        &subject_key,
+                        &Value::Blob(&new_cert_hash_list),
+                    )?;
+                }
+            }
+
+            writer.commit()?;
+        }
+        self.reopen_store_read_only()?;
+        Ok(())
+    }
+
+    // Given a list of certificate sha-256 hashes, we can look up each Cert entry in the database.
+    // We use this to find the corresponding subject so we can look up the CertHashList it should
+    // appear in. If that list contains the given hash, we remove it and update the CertHashList.
+    // Finally we delete the Cert entry.
+    pub fn remove_certs_by_hashes(&mut self, hashes: &[Vec<u8>]) -> Result<(), SecurityStateError> {
+        self.reopen_store_read_write()?;
+        {
+            let env_and_store = match self.env_and_store.as_mut() {
+                Some(env_and_store) => env_and_store,
+                None => return Err(SecurityStateError::from("env and store not initialized?")),
+            };
+            let mut writer = env_and_store.env.write()?;
+            let reader = env_and_store.env.read()?;
+
+            for hash in hashes {
+                let cert_key = make_key!(PREFIX_CERT, hash);
+                if let Some(Value::Blob(cert_bytes)) =
+                    env_and_store.store.get(&reader, &cert_key)?
+                {
+                    if let Ok(cert) = Cert::from_bytes(cert_bytes) {
+                        let subject_key = make_key!(PREFIX_SUBJECT, &cert.subject);
+                        let empty_vec = Vec::new();
+                        // We have to use the writer here to make sure we have an up-to-date view of
+                        // the cert hash list.
+                        let old_cert_hash_list =
+                            match env_and_store.store.get(&writer, &subject_key)? {
+                                Some(Value::Blob(hashes)) => hashes.to_owned(),
+                                Some(_) => empty_vec,
+                                None => empty_vec,
+                            };
+                        let new_cert_hash_list = CertHashList::remove(&old_cert_hash_list, hash)?;
+                        if new_cert_hash_list.len() != old_cert_hash_list.len() {
+                            env_and_store.store.put(
+                                &mut writer,
+                                &subject_key,
+                                &Value::Blob(&new_cert_hash_list),
+                            )?;
+                        }
+                    }
+                }
+                match env_and_store.store.delete(&mut writer, &cert_key) {
+                    Ok(()) => {}
+                    Err(StoreError::LmdbError(lmdb::Error::NotFound)) => {}
+                    Err(e) => return Err(SecurityStateError::from(e)),
+                };
+            }
+            writer.commit()?;
+        }
+        self.reopen_store_read_only()?;
+        Ok(())
+    }
+
+    // Given a certificate's subject, we look up the corresponding CertHashList. In theory, each
+    // hash in that list corresponds to a certificate with the given subject, so we look up each of
+    // these (assuming the database is consistent and contains them) and add them to the given list.
+    // If we encounter an inconsistency, we continue looking as best we can.
+    pub fn find_certs_by_subject(
+        &self,
+        subject: &[u8],
+        certs: &mut ThinVec<ThinVec<u8>>,
+    ) -> Result<(), SecurityStateError> {
+        let env_and_store = match self.env_and_store.as_ref() {
+            Some(env_and_store) => env_and_store,
+            None => return Err(SecurityStateError::from("env and store not initialized?")),
+        };
+        let reader = env_and_store.env.read()?;
+        certs.clear();
+        let subject_key = make_key!(PREFIX_SUBJECT, subject);
+        let empty_vec = Vec::new();
+        let cert_hash_list_bytes = match env_and_store.store.get(&reader, &subject_key)? {
+            Some(Value::Blob(hashes)) => hashes,
+            Some(_) => &empty_vec,
+            None => &empty_vec,
+        };
+        let cert_hash_list = CertHashList::new(cert_hash_list_bytes)?;
+        for cert_hash in cert_hash_list.into_iter() {
+            let cert_key = make_key!(PREFIX_CERT, cert_hash);
+            // If there's some inconsistency, we don't want to fail the whole operation - just go
+            // for best effort and find as many certificates as we can.
+            if let Some(Value::Blob(cert_bytes)) = env_and_store.store.get(&reader, &cert_key)? {
+                if let Ok(cert) = Cert::from_bytes(cert_bytes) {
+                    let mut thin_vec_cert = ThinVec::with_capacity(cert.der.len());
+                    thin_vec_cert.extend_from_slice(&cert.der);
+                    certs.push(thin_vec_cert);
+                }
+            }
+        }
+        Ok(())
+    }
+}
+
+const CERT_SERIALIZATION_VERSION_1: u8 = 1;
+
+// A Cert consists of its DER encoding, its DER-encoded subject, and its trust (currently
+// nsICertStorage::TRUST_INHERIT, but in the future nsICertStorage::TRUST_ANCHOR may also be used).
+// The length of each encoding must be representable by a u16 (so 65535 bytes is the longest a
+// certificate can be).
+struct Cert<'a> {
+    der: &'a [u8],
+    subject: &'a [u8],
+    trust: i16,
+}
+
+impl<'a> Cert<'a> {
+    fn new(der: &'a [u8], subject: &'a [u8], trust: i16) -> Result<Cert<'a>, SecurityStateError> {
+        if der.len() > u16::max as usize {
+            return Err(SecurityStateError::from("certificate is too long"));
+        }
+        if subject.len() > u16::max as usize {
+            return Err(SecurityStateError::from("subject is too long"));
+        }
+        Ok(Cert {
+            der,
+            subject,
+            trust,
+        })
+    }
+
+    fn from_bytes(encoded: &'a [u8]) -> Result<Cert<'a>, SecurityStateError> {
+        if encoded.len() < size_of::<u8>() {
+            return Err(SecurityStateError::from("invalid Cert: no version?"));
+        }
+        let (mut version, rest) = encoded.split_at(size_of::<u8>());
+        let version = version.read_u8()?;
+        if version != CERT_SERIALIZATION_VERSION_1 {
+            return Err(SecurityStateError::from("invalid Cert: unexpected version"));
+        }
+
+        if rest.len() < size_of::<u16>() {
+            return Err(SecurityStateError::from("invalid Cert: no der len?"));
+        }
+        let (mut der_len, rest) = rest.split_at(size_of::<u16>());
+        let der_len = der_len.read_u16::<NetworkEndian>()? as usize;
+        if rest.len() < der_len {
+            return Err(SecurityStateError::from("invalid Cert: no der?"));
+        }
+        let (der, rest) = rest.split_at(der_len);
+
+        if rest.len() < size_of::<u16>() {
+            return Err(SecurityStateError::from("invalid Cert: no subject len?"));
+        }
+        let (mut subject_len, rest) = rest.split_at(size_of::<u16>());
+        let subject_len = subject_len.read_u16::<NetworkEndian>()? as usize;
+        if rest.len() < subject_len {
+            return Err(SecurityStateError::from("invalid Cert: no subject?"));
+        }
+        let (subject, mut rest) = rest.split_at(subject_len);
+
+        if rest.len() < size_of::<i16>() {
+            return Err(SecurityStateError::from("invalid Cert: no trust?"));
+        }
+        let trust = rest.read_i16::<NetworkEndian>()?;
+        if rest.len() > 0 {
+            return Err(SecurityStateError::from("invalid Cert: trailing data?"));
+        }
+
+        Ok(Cert {
+            der,
+            subject,
+            trust,
+        })
+    }
+
+    fn to_bytes(&self) -> Result<Vec<u8>, SecurityStateError> {
+        let mut bytes = Vec::with_capacity(
+            size_of::<u8>()
+                + size_of::<u16>()
+                + self.der.len()
+                + size_of::<u16>()
+                + self.subject.len()
+                + size_of::<i16>(),
+        );
+        bytes.write_u8(CERT_SERIALIZATION_VERSION_1)?;
+        if self.der.len() > u16::max as usize {
+            return Err(SecurityStateError::from("certificate is too long"));
+        }
+        bytes.write_u16::<NetworkEndian>(self.der.len() as u16)?;
+        bytes.extend_from_slice(&self.der);
+        if self.subject.len() > u16::max as usize {
+            return Err(SecurityStateError::from("subject is too long"));
+        }
+        bytes.write_u16::<NetworkEndian>(self.subject.len() as u16)?;
+        bytes.extend_from_slice(&self.subject);
+        bytes.write_i16::<NetworkEndian>(self.trust)?;
+        Ok(bytes)
+    }
+}
+
+// A CertHashList is a list of sha-256 hashes of DER-encoded certificates.
+struct CertHashList<'a> {
+    hashes: Vec<&'a [u8]>,
+}
+
+impl<'a> CertHashList<'a> {
+    fn new(hashes_bytes: &'a [u8]) -> Result<CertHashList<'a>, SecurityStateError> {
+        if hashes_bytes.len() % Sha256::output_size() != 0 {
+            return Err(SecurityStateError::from(
+                "unexpected length for cert hash list",
+            ));
+        }
+        let mut hashes = Vec::with_capacity(hashes_bytes.len() / Sha256::output_size());
+        for hash in hashes_bytes.chunks_exact(Sha256::output_size()) {
+            hashes.push(hash);
+        }
+        Ok(CertHashList { hashes })
+    }
+
+    fn add(hashes_bytes: &[u8], new_hash: &[u8]) -> Result<Vec<u8>, SecurityStateError> {
+        if hashes_bytes.len() % Sha256::output_size() != 0 {
+            return Err(SecurityStateError::from(
+                "unexpected length for cert hash list",
+            ));
+        }
+        if new_hash.len() != Sha256::output_size() {
+            return Err(SecurityStateError::from("unexpected cert hash length"));
+        }
+        for hash in hashes_bytes.chunks_exact(Sha256::output_size()) {
+            if hash == new_hash {
+                return Ok(hashes_bytes.to_owned());
+            }
+        }
+        let mut combined = hashes_bytes.to_owned();
+        combined.extend_from_slice(new_hash);
+        Ok(combined)
+    }
+
+    fn remove(hashes_bytes: &[u8], cert_hash: &[u8]) -> Result<Vec<u8>, SecurityStateError> {
+        if hashes_bytes.len() % Sha256::output_size() != 0 {
+            return Err(SecurityStateError::from(
+                "unexpected length for cert hash list",
+            ));
+        }
+        if cert_hash.len() != Sha256::output_size() {
+            return Err(SecurityStateError::from("unexpected cert hash length"));
+        }
+        let mut result = Vec::with_capacity(hashes_bytes.len());
+        for hash in hashes_bytes.chunks_exact(Sha256::output_size()) {
+            if hash != cert_hash {
+                result.extend_from_slice(hash);
+            }
+        }
+        Ok(result)
+    }
+}
+
+impl<'a> IntoIterator for CertHashList<'a> {
+    type Item = &'a [u8];
+    type IntoIter = std::vec::IntoIter<&'a [u8]>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.hashes.into_iter()
     }
 }
 
@@ -476,6 +766,31 @@ fn get_store_path(profile_path: &PathBuf) -> Result<PathBuf, SecurityStateError>
     store_path.push("security_state");
     create_dir_all(store_path.as_path())?;
     Ok(store_path)
+}
+
+fn make_env(path: &Path) -> Result<Rkv, SecurityStateError> {
+    let mut builder = Rkv::environment_builder();
+    builder.set_max_dbs(2);
+    builder.set_map_size(16777216); // 16MB
+    Rkv::from_env(path, builder).map_err(SecurityStateError::from)
+}
+
+fn unconditionally_remove_file(path: &Path) -> Result<(), SecurityStateError> {
+    match remove_file(path) {
+        Ok(()) => Ok(()),
+        Err(e) => match e.kind() {
+            std::io::ErrorKind::NotFound => Ok(()),
+            _ => Err(SecurityStateError::from(e)),
+        },
+    }
+}
+
+fn remove_db(path: &Path) -> Result<(), SecurityStateError> {
+    let db = path.join("data.mdb");
+    unconditionally_remove_file(&db)?;
+    let lock = path.join("lock.mdb");
+    unconditionally_remove_file(&lock)?;
+    Ok(())
 }
 
 fn do_construct_cert_storage(
@@ -539,132 +854,60 @@ fn read_int_pref(name: &str) -> Result<u32, SecurityStateError> {
     }
 }
 
-// This is a helper for defining a task that will perform a specific action on a background thread.
-// Its arguments are the name of the task and the name of the function in SecurityState to call.
-macro_rules! security_state_task {
-    ($task_name:ident, $security_state_function_name:ident) => {
-        struct $task_name {
-            callback: AtomicCell<Option<ThreadBoundRefPtr<nsICertStorageCallback>>>,
-            security_state: Arc<RwLock<SecurityState>>,
-            argument_a: Vec<u8>,
-            argument_b: Vec<u8>,
-            state: i16,
-            result: AtomicCell<Option<nserror::nsresult>>,
-        }
-        impl $task_name {
-            fn new(
-                callback: &nsICertStorageCallback,
-                security_state: &Arc<RwLock<SecurityState>>,
-                argument_a: Vec<u8>,
-                argument_b: Vec<u8>,
-                state: i16,
-            ) -> $task_name {
-                $task_name {
-                    callback: AtomicCell::new(Some(ThreadBoundRefPtr::new(RefPtr::new(callback)))),
-                    security_state: Arc::clone(security_state),
-                    argument_a,
-                    argument_b,
-                    state,
-                    result: AtomicCell::new(None),
-                }
-            }
-        }
-        impl Task for $task_name {
-            fn run(&self) {
-                let mut ss = match self.security_state.write() {
-                    Ok(ss) => ss,
-                    Err(_) => {
-                        self.result.store(Some(NS_ERROR_FAILURE));
-                        return;
-                    }
-                };
-                // this is a no-op if the DB is already open
-                match ss.open_db() {
-                    Ok(()) => {}
-                    Err(_) => {
-                        self.result.store(Some(NS_ERROR_FAILURE));
-                        return;
-                    }
-                };
-                match ss.$security_state_function_name(
-                    &self.argument_a,
-                    &self.argument_b,
-                    self.state,
-                ) {
-                    Ok(_) => self.result.store(Some(NS_OK)),
-                    Err(_) => self.result.store(Some(NS_ERROR_FAILURE)),
-                };
-            }
-
-            fn done(&self) -> Result<(), nsresult> {
-                let threadbound = self.callback.swap(None).ok_or(NS_ERROR_FAILURE)?;
-                let callback = threadbound.get_ref().ok_or(NS_ERROR_FAILURE)?;
-                let nsrv = match self.result.swap(None) {
-                    Some(result) => unsafe { callback.Done(result) },
-                    None => unsafe { callback.Done(NS_ERROR_FAILURE) },
-                };
-                match nsrv {
-                    NS_OK => Ok(()),
-                    e => Err(e),
-                }
-            }
-        }
-    };
-}
-
-security_state_task!(SetEnrollmentTask, set_enrollment);
-security_state_task!(SetWhitelistTask, set_whitelist);
-
-struct SetRevocationsTask {
+// This is a helper for creating a task that will perform a specific action on a background thread.
+struct SecurityStateTask<
+    T: Default + VariantType,
+    F: FnOnce(&mut SecurityState) -> Result<T, SecurityStateError>,
+> {
     callback: AtomicCell<Option<ThreadBoundRefPtr<nsICertStorageCallback>>>,
     security_state: Arc<RwLock<SecurityState>>,
-    entries: Vec<(Vec<u8>, i16)>,
-    result: AtomicCell<Option<nserror::nsresult>>,
+    result: AtomicCell<(nserror::nsresult, T)>,
+    task_action: AtomicCell<Option<F>>,
 }
-impl SetRevocationsTask {
+
+impl<T: Default + VariantType, F: FnOnce(&mut SecurityState) -> Result<T, SecurityStateError>>
+    SecurityStateTask<T, F>
+{
     fn new(
         callback: &nsICertStorageCallback,
         security_state: &Arc<RwLock<SecurityState>>,
-        entries: Vec<(Vec<u8>, i16)>,
-    ) -> SetRevocationsTask {
-        SetRevocationsTask {
+        task_action: F,
+    ) -> SecurityStateTask<T, F> {
+        SecurityStateTask {
             callback: AtomicCell::new(Some(ThreadBoundRefPtr::new(RefPtr::new(callback)))),
             security_state: Arc::clone(security_state),
-            entries,
-            result: AtomicCell::new(None),
+            result: AtomicCell::new((NS_ERROR_FAILURE, T::default())),
+            task_action: AtomicCell::new(Some(task_action)),
         }
     }
 }
-impl Task for SetRevocationsTask {
+
+impl<T: Default + VariantType, F: FnOnce(&mut SecurityState) -> Result<T, SecurityStateError>> Task
+    for SecurityStateTask<T, F>
+{
     fn run(&self) {
         let mut ss = match self.security_state.write() {
             Ok(ss) => ss,
-            Err(_) => {
-                self.result.store(Some(NS_ERROR_FAILURE));
-                return;
-            }
+            Err(_) => return,
         };
         // this is a no-op if the DB is already open
-        match ss.open_db() {
-            Ok(()) => {}
-            Err(_) => {
-                self.result.store(Some(NS_ERROR_FAILURE));
-                return;
-            }
-        };
-        match ss.set_revocations(&self.entries) {
-            Ok(_) => self.result.store(Some(NS_OK)),
-            Err(_) => self.result.store(Some(NS_ERROR_FAILURE)),
-        };
+        if ss.open_db().is_err() {
+            return;
+        }
+        if let Some(task_action) = self.task_action.swap(None) {
+            let rv = task_action(&mut ss)
+                .and_then(|v| Ok((NS_OK, v)))
+                .unwrap_or((NS_ERROR_FAILURE, T::default()));
+            self.result.store(rv);
+        }
     }
 
     fn done(&self) -> Result<(), nsresult> {
         let threadbound = self.callback.swap(None).ok_or(NS_ERROR_FAILURE)?;
         let callback = threadbound.get_ref().ok_or(NS_ERROR_FAILURE)?;
-        let nsrv = match self.result.swap(None) {
-            Some(result) => unsafe { callback.Done(result) },
-            None => unsafe { callback.Done(NS_ERROR_FAILURE) },
-        };
+        let result = self.result.swap((NS_ERROR_FAILURE, T::default()));
+        let variant = result.1.into_variant();
+        let nsrv = unsafe { callback.Done(result.0, &*variant) };
         match nsrv {
             NS_OK => Ok(()),
             e => Err(e),
@@ -709,6 +952,29 @@ macro_rules! try_ns {
     };
 }
 
+// This macro is a way to ensure the DB has been opened while minimizing lock acquisitions in the
+// common (read-only) case. First we acquire a read lock and see if we even need to open the DB. If
+// not, we can continue with the read lock we already have. Otherwise, we drop the read lock,
+// acquire the write lock, open the DB, drop the write lock, and re-acquire the read lock. While it
+// is possible for two or more threads to all come to the conclusion that they need to open the DB,
+// this isn't ultimately an issue - `open_db` will exit early if another thread has already done the
+// work.
+macro_rules! get_security_state {
+    ($self:expr) => {{
+        let ss_read_only = try_ns!($self.security_state.read());
+        if !ss_read_only.db_needs_opening() {
+            ss_read_only
+        } else {
+            drop(ss_read_only);
+            {
+                let mut ss_write = try_ns!($self.security_state.write());
+                try_ns!(ss_write.open_db());
+            }
+            try_ns!($self.security_state.read())
+        }
+    }};
+}
+
 #[derive(xpcom)]
 #[xpimplements(nsICertStorage, nsIObserver)]
 #[refcnt = "atomic"]
@@ -729,8 +995,6 @@ impl CertStorage {
     unsafe fn setup_prefs(&self) -> Result<(), SecurityStateError> {
         let int_prefs = [
             "services.settings.security.onecrl.checked",
-            "services.blocklist.intermediates.checked",
-            "services.blocklist.crlite.checked",
             "security.onecrl.maximum_staleness_in_seconds",
         ];
 
@@ -759,6 +1023,28 @@ impl CertStorage {
         Ok(())
     }
 
+    unsafe fn HasPriorData(
+        &self,
+        data_type: u8,
+        callback: *const nsICertStorageCallback,
+    ) -> nserror::nsresult {
+        if !is_main_thread() {
+            return NS_ERROR_NOT_SAME_THREAD;
+        }
+        if callback.is_null() {
+            return NS_ERROR_NULL_POINTER;
+        }
+        let task = Box::new(SecurityStateTask::new(
+            &*callback,
+            &self.security_state,
+            move |ss| ss.get_has_prior_data(data_type),
+        ));
+        let thread = try_ns!(self.thread.lock());
+        let runnable = try_ns!(TaskRunnable::new("HasPriorData", task));
+        try_ns!(runnable.dispatch(&*thread));
+        NS_OK
+    }
+
     unsafe fn SetRevocations(
         &self,
         revocations: *const ThinVec<RefPtr<nsIRevocationState>>,
@@ -768,7 +1054,7 @@ impl CertStorage {
             return NS_ERROR_NOT_SAME_THREAD;
         }
         if revocations.is_null() || callback.is_null() {
-            return NS_ERROR_FAILURE;
+            return NS_ERROR_NULL_POINTER;
         }
 
         let revocations = &*revocations;
@@ -794,7 +1080,7 @@ impl CertStorage {
                 try_ns!(revocation.GetSerial(&mut *serial).to_result(), or continue);
                 let serial = try_ns!(base64::decode(&serial), or continue);
 
-                entries.push((make_key(PREFIX_REV_IS, &issuer, &serial), state));
+                entries.push((make_key!(PREFIX_REV_IS, &issuer, &serial), state));
             } else if let Some(revocation) =
                 (*revocation).query_interface::<nsISubjectAndPubKeyRevocationState>()
             {
@@ -806,73 +1092,17 @@ impl CertStorage {
                 try_ns!(revocation.GetPubKey(&mut *pub_key_hash).to_result(), or continue);
                 let pub_key_hash = try_ns!(base64::decode(&pub_key_hash), or continue);
 
-                entries.push((make_key(PREFIX_REV_SPK, &subject, &pub_key_hash), state));
+                entries.push((make_key!(PREFIX_REV_SPK, &subject, &pub_key_hash), state));
             }
         }
 
-        let task = Box::new(SetRevocationsTask::new(
+        let task = Box::new(SecurityStateTask::new(
             &*callback,
             &self.security_state,
-            entries,
+            move |ss| ss.set_revocations(&entries),
         ));
         let thread = try_ns!(self.thread.lock());
         let runnable = try_ns!(TaskRunnable::new("SetRevocations", task));
-        try_ns!(runnable.dispatch(&*thread));
-        NS_OK
-    }
-
-    unsafe fn SetEnrollment(
-        &self,
-        issuer: *const nsACString,
-        serial: *const nsACString,
-        state: i16,
-        callback: *const nsICertStorageCallback,
-    ) -> nserror::nsresult {
-        if !is_main_thread() {
-            return NS_ERROR_NOT_SAME_THREAD;
-        }
-        if issuer.is_null() || serial.is_null() || callback.is_null() {
-            return NS_ERROR_FAILURE;
-        }
-        let issuer_decoded = try_ns!(base64::decode(&*issuer));
-        let serial_decoded = try_ns!(base64::decode(&*serial));
-        let task = Box::new(SetEnrollmentTask::new(
-            &*callback,
-            &self.security_state,
-            issuer_decoded,
-            serial_decoded,
-            state,
-        ));
-        let thread = try_ns!(self.thread.lock());
-        let runnable = try_ns!(TaskRunnable::new("SetEnrollment", task));
-        try_ns!(runnable.dispatch(&*thread));
-        NS_OK
-    }
-
-    unsafe fn SetWhitelist(
-        &self,
-        issuer: *const nsACString,
-        serial: *const nsACString,
-        state: i16,
-        callback: *const nsICertStorageCallback,
-    ) -> nserror::nsresult {
-        if !is_main_thread() {
-            return NS_ERROR_NOT_SAME_THREAD;
-        }
-        if issuer.is_null() || serial.is_null() || callback.is_null() {
-            return NS_ERROR_FAILURE;
-        }
-        let issuer_decoded = try_ns!(base64::decode(&*issuer));
-        let serial_decoded = try_ns!(base64::decode(&*serial));
-        let task = Box::new(SetWhitelistTask::new(
-            &*callback,
-            &self.security_state,
-            issuer_decoded,
-            serial_decoded,
-            state,
-        ));
-        let thread = try_ns!(self.thread.lock());
-        let runnable = try_ns!(TaskRunnable::new("SetWhitelist", task));
         try_ns!(runnable.dispatch(&*thread));
         NS_OK
     }
@@ -888,104 +1118,11 @@ impl CertStorage {
         // TODO (bug 1541212): We really want to restrict this to non-main-threads only, but we
         // can't do so until bug 1406854 and bug 1534600 are fixed.
         if issuer.is_null() || serial.is_null() || subject.is_null() || pub_key.is_null() {
-            return NS_ERROR_FAILURE;
+            return NS_ERROR_NULL_POINTER;
         }
         *state = nsICertStorage::STATE_UNSET as i16;
-        // The following is a way to ensure the DB has been opened while minimizing lock
-        // acquisitions in the common (read-only) case. First we acquire a read lock and see if we
-        // even need to open the DB. If not, we can continue with the read lock we already have.
-        // Otherwise, we drop the read lock, acquire the write lock, open the DB, drop the write
-        // lock, and re-acquire the read lock. While it is possible for two or more threads to all
-        // come to the conclusion that they need to open the DB, this isn't ultimately an issue -
-        // `open_db` will exit early if another thread has already done the work.
-        let ss = {
-            let ss_read_only = try_ns!(self.security_state.read());
-            if !ss_read_only.db_needs_opening() {
-                ss_read_only
-            } else {
-                drop(ss_read_only);
-                {
-                    let mut ss_write = try_ns!(self.security_state.write());
-                    try_ns!(ss_write.open_db());
-                }
-                try_ns!(self.security_state.read())
-            }
-        };
+        let ss = get_security_state!(self);
         match ss.get_revocation_state(&*issuer, &*serial, &*subject, &*pub_key) {
-            Ok(st) => {
-                *state = st;
-                NS_OK
-            }
-            _ => NS_ERROR_FAILURE,
-        }
-    }
-
-    unsafe fn GetEnrollmentState(
-        &self,
-        issuer: *const nsACString,
-        serial: *const nsACString,
-        state: *mut i16,
-    ) -> nserror::nsresult {
-        if is_main_thread() {
-            return NS_ERROR_NOT_SAME_THREAD;
-        }
-        if issuer.is_null() || serial.is_null() {
-            return NS_ERROR_FAILURE;
-        }
-        let issuer_decoded = try_ns!(base64::decode(&*issuer));
-        let serial_decoded = try_ns!(base64::decode(&*serial));
-        *state = nsICertStorage::STATE_UNSET as i16;
-        let ss = {
-            let ss_read_only = try_ns!(self.security_state.read());
-            if !ss_read_only.db_needs_opening() {
-                ss_read_only
-            } else {
-                drop(ss_read_only);
-                {
-                    let mut ss_write = try_ns!(self.security_state.write());
-                    try_ns!(ss_write.open_db());
-                }
-                try_ns!(self.security_state.read())
-            }
-        };
-        match ss.get_enrollment_state(&issuer_decoded, &serial_decoded) {
-            Ok(st) => {
-                *state = st;
-                NS_OK
-            }
-            _ => NS_ERROR_FAILURE,
-        }
-    }
-
-    unsafe fn GetWhitelistState(
-        &self,
-        issuer: *const nsACString,
-        serial: *const nsACString,
-        state: *mut i16,
-    ) -> nserror::nsresult {
-        if is_main_thread() {
-            return NS_ERROR_NOT_SAME_THREAD;
-        }
-        if issuer.is_null() || serial.is_null() {
-            return NS_ERROR_FAILURE;
-        }
-        let issuer_decoded = try_ns!(base64::decode(&*issuer));
-        let serial_decoded = try_ns!(base64::decode(&*serial));
-        *state = nsICertStorage::STATE_UNSET as i16;
-        let ss = {
-            let ss_read_only = try_ns!(self.security_state.read());
-            if !ss_read_only.db_needs_opening() {
-                ss_read_only
-            } else {
-                drop(ss_read_only);
-                {
-                    let mut ss_write = try_ns!(self.security_state.write());
-                    try_ns!(ss_write.open_db());
-                }
-                try_ns!(self.security_state.read())
-            }
-        };
-        match ss.get_whitelist_state(&issuer_decoded, &serial_decoded) {
             Ok(st) => {
                 *state = st;
                 NS_OK
@@ -1006,28 +1143,84 @@ impl CertStorage {
         NS_OK
     }
 
-    unsafe fn IsWhitelistFresh(&self, fresh: *mut bool) -> nserror::nsresult {
-        *fresh = false;
-        let ss = try_ns!(self.security_state.read());
-        // This doesn't use the db -> don't need to make sure it's open.
-        *fresh = match ss.is_whitelist_fresh() {
-            Ok(is_fresh) => is_fresh,
-            Err(_) => false,
-        };
-
+    unsafe fn AddCerts(
+        &self,
+        certs: *const ThinVec<RefPtr<nsICertInfo>>,
+        callback: *const nsICertStorageCallback,
+    ) -> nserror::nsresult {
+        if !is_main_thread() {
+            return NS_ERROR_NOT_SAME_THREAD;
+        }
+        if certs.is_null() || callback.is_null() {
+            return NS_ERROR_NULL_POINTER;
+        }
+        let certs = &*certs;
+        let mut cert_entries = Vec::with_capacity(certs.len());
+        for cert in certs {
+            let mut der = nsCString::new();
+            try_ns!((*cert).GetCert(&mut *der).to_result(), or continue);
+            let der = try_ns!(base64::decode(&der), or continue);
+            let mut subject = nsCString::new();
+            try_ns!((*cert).GetSubject(&mut *subject).to_result(), or continue);
+            let subject = try_ns!(base64::decode(&subject), or continue);
+            let mut trust: i16 = 0;
+            try_ns!((*cert).GetTrust(&mut trust).to_result(), or continue);
+            cert_entries.push((der, subject, trust));
+        }
+        let task = Box::new(SecurityStateTask::new(
+            &*callback,
+            &self.security_state,
+            move |ss| ss.add_certs(&cert_entries),
+        ));
+        let thread = try_ns!(self.thread.lock());
+        let runnable = try_ns!(TaskRunnable::new("AddCerts", task));
+        try_ns!(runnable.dispatch(&*thread));
         NS_OK
     }
 
-    unsafe fn IsEnrollmentFresh(&self, fresh: *mut bool) -> nserror::nsresult {
-        *fresh = false;
-        let ss = try_ns!(self.security_state.read());
-        // This doesn't use the db -> don't need to make sure it's open.
-        *fresh = match ss.is_enrollment_fresh() {
-            Ok(is_fresh) => is_fresh,
-            Err(_) => false,
-        };
-
+    unsafe fn RemoveCertsByHashes(
+        &self,
+        hashes: *const ThinVec<nsCString>,
+        callback: *const nsICertStorageCallback,
+    ) -> nserror::nsresult {
+        if !is_main_thread() {
+            return NS_ERROR_NOT_SAME_THREAD;
+        }
+        if hashes.is_null() || callback.is_null() {
+            return NS_ERROR_NULL_POINTER;
+        }
+        let hashes = &*hashes;
+        let mut hash_entries = Vec::with_capacity(hashes.len());
+        for hash in hashes {
+            let hash_decoded = try_ns!(base64::decode(&*hash), or continue);
+            hash_entries.push(hash_decoded);
+        }
+        let task = Box::new(SecurityStateTask::new(
+            &*callback,
+            &self.security_state,
+            move |ss| ss.remove_certs_by_hashes(&hash_entries),
+        ));
+        let thread = try_ns!(self.thread.lock());
+        let runnable = try_ns!(TaskRunnable::new("RemoveCertsByHashes", task));
+        try_ns!(runnable.dispatch(&*thread));
         NS_OK
+    }
+
+    unsafe fn FindCertsBySubject(
+        &self,
+        subject: *const ThinVec<u8>,
+        certs: *mut ThinVec<ThinVec<u8>>,
+    ) -> nserror::nsresult {
+        // TODO (bug 1541212): We really want to restrict this to non-main-threads only, but we
+        // can't do so until bug 1406854 and bug 1534600 are fixed.
+        if subject.is_null() || certs.is_null() {
+            return NS_ERROR_NULL_POINTER;
+        }
+        let ss = get_security_state!(self);
+        match ss.find_certs_by_subject(&*subject, &mut *certs) {
+            Ok(()) => NS_OK,
+            Err(_) => NS_ERROR_FAILURE,
+        }
     }
 
     unsafe fn Observe(

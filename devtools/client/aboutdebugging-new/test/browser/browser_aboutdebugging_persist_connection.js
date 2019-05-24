@@ -56,7 +56,13 @@ async function testRemoteClientPersistConnection(mocks,
   info("Wait until the remote runtime appears as connected");
   await waitUntil(() => {
     const sidebarItem = findSidebarItemByText(sidebarName, document);
-    return sidebarItem && !sidebarItem.querySelector(".js-connect-button");
+    return sidebarItem && !sidebarItem.querySelector(".qa-connect-button");
+  });
+
+  info("Wait until the remote runtime page is selected");
+  await waitUntil(() => {
+    const runtimeInfo = document.querySelector(".qa-runtime-name");
+    return runtimeInfo && runtimeInfo.textContent.includes(runtimeName);
   });
 
   // Remove the runtime without emitting an update.

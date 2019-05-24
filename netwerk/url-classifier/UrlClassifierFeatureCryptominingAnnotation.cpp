@@ -124,7 +124,7 @@ UrlClassifierFeatureCryptominingAnnotation::GetIfNameMatches(
 NS_IMETHODIMP
 UrlClassifierFeatureCryptominingAnnotation::ProcessChannel(
     nsIChannel* aChannel, const nsTArray<nsCString>& aList,
-    bool* aShouldContinue) {
+    const nsTArray<nsCString>& aHashes, bool* aShouldContinue) {
   NS_ENSURE_ARG_POINTER(aChannel);
   NS_ENSURE_ARG_POINTER(aShouldContinue);
 
@@ -146,6 +146,8 @@ UrlClassifierFeatureCryptominingAnnotation::ProcessChannel(
   uint32_t flags = UrlClassifierCommon::TablesToClassificationFlags(
       aList, sClassificationData,
       nsIHttpChannel::ClassificationFlags::CLASSIFIED_CRYPTOMINING);
+
+  UrlClassifierCommon::SetTrackingInfo(aChannel, aList, aHashes);
 
   UrlClassifierCommon::AnnotateChannel(
       aChannel, AntiTrackingCommon::eCryptomining, flags,

@@ -17,6 +17,7 @@
   MACRO(anonymous, anonymous, "anonymous")                                     \
   MACRO(Any, Any, "Any")                                                       \
   MACRO(apply, apply, "apply")                                                 \
+  MACRO(args, args, "args")                                                    \
   MACRO(arguments, arguments, "arguments")                                     \
   MACRO(ArrayBufferSpecies, ArrayBufferSpecies, "ArrayBufferSpecies")          \
   MACRO(ArrayIterator, ArrayIterator, "Array Iterator")                        \
@@ -121,7 +122,6 @@
   MACRO(dotGenerator, dotGenerator, ".generator")                              \
   MACRO(dotThis, dotThis, ".this")                                             \
   MACRO(dotInitializers, dotInitializers, ".initializers")                     \
-  MACRO(dotLocalInitializers, dotLocalInitializers, ".localInitializers")      \
   MACRO(dotFieldKeys, dotFieldKeys, ".fieldKeys")                              \
   MACRO(each, each, "each")                                                    \
   MACRO(elementType, elementType, "elementType")                               \
@@ -389,6 +389,7 @@
   MACRO(sticky, sticky, "sticky")                                              \
   MACRO(StringIterator, StringIterator, "String Iterator")                     \
   MACRO(strings, strings, "strings")                                           \
+  MACRO(String_split, String_split, "String_split")                            \
   MACRO(StructType, StructType, "StructType")                                  \
   MACRO(style, style, "style")                                                 \
   MACRO(super, super, "super")                                                 \

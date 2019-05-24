@@ -42,7 +42,6 @@ JS::Zone::Zone(JSRuntime* rt)
       gcWeakMapList_(this),
       compartments_(),
       gcGrayRoots_(this),
-      gcWeakRefs_(this),
       weakCaches_(this),
       gcWeakKeys_(this, SystemAllocPolicy(), rt->randomHashCodeScrambler()),
       typeDescrObjects_(this, this),
@@ -208,16 +207,16 @@ void Zone::discardJitCode(FreeOp* fop,
 
   if (discardBaselineCode || releaseTypes) {
 #ifdef DEBUG
-    // Assert no TypeScripts are marked as active.
+    // Assert no JitScripts are marked as active.
     for (auto script = cellIter<JSScript>(); !script.done(); script.next()) {
-      if (TypeScript* types = script->types()) {
-        MOZ_ASSERT(!types->active());
+      if (JitScript* jitScript = script.unbarrieredGet()->jitScript()) {
+        MOZ_ASSERT(!jitScript->active());
       }
     }
 #endif
 
-    // Mark TypeScripts on the stack as active.
-    jit::MarkActiveTypeScripts(this);
+    // Mark JitScripts on the stack as active.
+    jit::MarkActiveJitScripts(this);
   }
 
   // Invalidate all Ion code in this zone.
@@ -229,7 +228,7 @@ void Zone::discardJitCode(FreeOp* fop,
 
     // Discard baseline script if it's not marked as active.
     if (discardBaselineCode && script->hasBaselineScript()) {
-      if (script->types()->active()) {
+      if (script->jitScript()->active()) {
         // ICs will be purged so the script will need to warm back up before it
         // can be inlined during Ion compilation.
         script->baselineScript()->clearIonCompiledOrInlined();
@@ -241,7 +240,7 @@ void Zone::discardJitCode(FreeOp* fop,
     // Warm-up counter for scripts are reset on GC. After discarding code we
     // need to let it warm back up to get information such as which
     // opcodes are setting array holes or accessing getter properties.
-    script->resetWarmUpCounter();
+    script->resetWarmUpCounterForGC();
 
     // Clear the BaselineScript's control flow graph. The LifoAlloc is purged
     // below.
@@ -249,24 +248,22 @@ void Zone::discardJitCode(FreeOp* fop,
       script->baselineScript()->setControlFlowGraph(nullptr);
     }
 
-    // Try to release the script's TypeScript. This should happen after
+    // Try to release the script's JitScript. This should happen after
     // releasing JIT code because we can't do this when the script still has
     // JIT code.
     if (releaseTypes) {
-      script->maybeReleaseTypes();
+      script->maybeReleaseJitScript();
     }
 
-    // The optimizedStubSpace will be purged below so make sure ICScript
-    // doesn't point into it. We do this after (potentially) releasing types
-    // because TypeScript contains the ICScript* and there's no need to
-    // purge stubs if we just destroyed the Typescript.
-    if (discardBaselineCode && script->hasICScript()) {
-      script->icScript()->purgeOptimizedStubs(script);
-    }
+    if (JitScript* jitScript = script->jitScript()) {
+      // If we did not release the JitScript, we need to purge optimized IC
+      // stubs because the optimizedStubSpace will be purged below.
+      if (discardBaselineCode) {
+        jitScript->purgeOptimizedStubs(script);
+      }
 
-    // Finally, reset the active flag.
-    if (TypeScript* types = script->types()) {
-      types->resetActive();
+      // Finally, reset the active flag.
+      jitScript->resetActive();
     }
   }
 
@@ -387,7 +384,12 @@ void Zone::clearTables() {
   initialShapes().clear();
 }
 
-void Zone::fixupAfterMovingGC() { fixupInitialShapeTable(); }
+void Zone::fixupAfterMovingGC() {
+#ifdef DEBUG
+  gcMallocSize.fixupAfterMovingGC();
+#endif
+  fixupInitialShapeTable();
+}
 
 bool Zone::addTypeDescrObject(JSContext* cx, HandleObject obj) {
   // Type descriptor objects are always tenured so we don't need post barriers
@@ -465,9 +467,9 @@ void Zone::purgeAtomCache() {
 void Zone::traceAtomCache(JSTracer* trc) {
   MOZ_ASSERT(hasKeptAtoms());
   for (auto r = atomCache().all(); !r.empty(); r.popFront()) {
-    JSAtom* atom = r.front().asPtrUnbarriered();
+    JSAtom* atom = r.front().unbarrieredGet();
     TraceRoot(trc, &atom, "kept atom");
-    MOZ_ASSERT(r.front().asPtrUnbarriered() == atom);
+    MOZ_ASSERT(r.front().unbarrieredGet() == atom);
   }
 }
 
@@ -502,6 +504,124 @@ void JS::Zone::maybeTriggerGCForTooMuchMalloc(js::gc::MemoryCounter& counter,
 
   counter.recordTrigger(trigger);
 }
+
+void MemoryTracker::adopt(MemoryTracker& other) {
+  bytes_ += other.bytes_;
+  other.bytes_ = 0;
+
+#ifdef DEBUG
+  LockGuard<Mutex> lock(mutex);
+  AutoEnterOOMUnsafeRegion oomUnsafe;
+  for (auto r = other.map.all(); !r.empty(); r.popFront()) {
+    if (!map.put(r.front().key(), r.front().value())) {
+      oomUnsafe.crash("MemoryTracker::adopt");
+    }
+  }
+  other.map.clear();
+#endif
+}
+
+#ifdef DEBUG
+
+static const char* MemoryUseName(MemoryUse use) {
+  switch (use) {
+#  define DEFINE_CASE(Name) \
+    case MemoryUse::Name:   \
+      return #Name;
+    JS_FOR_EACH_MEMORY_USE(DEFINE_CASE)
+#  undef DEFINE_CASE
+  }
+
+  MOZ_CRASH("Unknown memory use");
+}
+
+MemoryTracker::MemoryTracker() : mutex(mutexid::MemoryTracker) {}
+
+MemoryTracker::~MemoryTracker() {
+  if (!TlsContext.get()->runtime()->gc.shutdownCollectedEverything()) {
+    // Memory leak, suppress crashes.
+    return;
+  }
+
+  if (map.empty()) {
+    MOZ_ASSERT(bytes() == 0);
+    return;
+  }
+
+  fprintf(stderr, "Missing calls to JS::RemoveAssociatedMemory:\n");
+  for (auto r = map.all(); !r.empty(); r.popFront()) {
+    fprintf(stderr, "  %p 0x%zx %s\n", r.front().key().cell, r.front().value(),
+            MemoryUseName(r.front().key().use));
+  }
+
+  MOZ_CRASH();
+}
+
+void MemoryTracker::trackMemory(Cell* cell, size_t nbytes, MemoryUse use) {
+  MOZ_ASSERT(cell->isTenured());
+
+  LockGuard<Mutex> lock(mutex);
+
+  Key key{cell, use};
+  AutoEnterOOMUnsafeRegion oomUnsafe;
+  auto ptr = map.lookupForAdd(key);
+  if (ptr) {
+    MOZ_CRASH_UNSAFE_PRINTF("Association already present: %p 0x%zx %s", cell,
+                            nbytes, MemoryUseName(use));
+  }
+
+  if (!map.add(ptr, key, nbytes)) {
+    oomUnsafe.crash("MemoryTracker::noteExternalAlloc");
+  }
+}
+
+void MemoryTracker::untrackMemory(Cell* cell, size_t nbytes, MemoryUse use) {
+  MOZ_ASSERT(cell->isTenured());
+
+  LockGuard<Mutex> lock(mutex);
+
+  Key key{cell, use};
+  auto ptr = map.lookup(key);
+  if (!ptr) {
+    MOZ_CRASH_UNSAFE_PRINTF("Association not found: %p 0x%x %s", cell,
+                            unsigned(nbytes), MemoryUseName(use));
+  }
+  if (ptr->value() != nbytes) {
+    MOZ_CRASH_UNSAFE_PRINTF(
+        "Association for %p %s has different size: "
+        "expected 0x%zx but got 0x%zx",
+        cell, MemoryUseName(use), ptr->value(), nbytes);
+  }
+  map.remove(ptr);
+}
+
+void MemoryTracker::fixupAfterMovingGC() {
+  // Update the table after we move GC things. We don't use MovableCellHasher
+  // because that would create a difference between debug and release builds.
+  for (Map::Enum e(map); !e.empty(); e.popFront()) {
+    const Key& key = e.front().key();
+    Cell* cell = key.cell;
+    if (cell->isForwarded()) {
+      cell = gc::RelocationOverlay::fromCell(cell)->forwardingAddress();
+      e.rekeyFront(Key{cell, key.use});
+    }
+  }
+}
+
+inline HashNumber MemoryTracker::Hasher::hash(const Lookup& l) {
+  return mozilla::HashGeneric(DefaultHasher<Cell*>::hash(l.cell),
+                              DefaultHasher<unsigned>::hash(unsigned(l.use)));
+}
+
+inline bool MemoryTracker::Hasher::match(const Key& k, const Lookup& l) {
+  return k.cell == l.cell && k.use == l.use;
+}
+
+inline void MemoryTracker::Hasher::rekey(Key& k, const Key& newKey) {
+  k = newKey;
+}
+
+#endif  // DEBUG
 
 ZoneList::ZoneList() : head(nullptr), tail(nullptr) {}
 

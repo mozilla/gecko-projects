@@ -13,6 +13,8 @@ const Localized = createFactory(FluentReact.Localized);
 
 const Actions = require("../../actions/index");
 const Types = require("../../types/index");
+
+const DetailsLog = createFactory(require("../shared/DetailsLog"));
 const Message = createFactory(require("../shared/Message"));
 const { MESSAGE_LEVEL } = require("../../constants");
 
@@ -50,7 +52,17 @@ class TemporaryExtensionAdditionalActions extends PureComponent {
         level: MESSAGE_LEVEL.ERROR,
         key: "reload-error",
       },
-      dom.p({ className: "technical-text" }, reloadError),
+      DetailsLog(
+        {
+          type: MESSAGE_LEVEL.ERROR,
+        },
+        dom.p(
+          {
+            className: "technical-text",
+          },
+          reloadError
+        ),
+      )
     );
   }
 
@@ -68,7 +80,7 @@ class TemporaryExtensionAdditionalActions extends PureComponent {
           dom.button(
             {
               className: "default-button default-button--micro " +
-                         "js-temporary-extension-reload-button",
+                         "qa-temporary-extension-reload-button",
               onClick: e => this.reload(),
             },
             "Reload",
@@ -81,7 +93,7 @@ class TemporaryExtensionAdditionalActions extends PureComponent {
           dom.button(
             {
               className: "default-button default-button--micro " +
-                         "js-temporary-extension-remove-button",
+                         "qa-temporary-extension-remove-button",
               onClick: e => this.remove(),
             },
             "Remove",

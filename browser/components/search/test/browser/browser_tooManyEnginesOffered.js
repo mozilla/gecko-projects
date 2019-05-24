@@ -9,6 +9,8 @@ const oneOffsContainer = searchPopup.searchOneOffsContainer;
 
 add_task(async function test_setup() {
   await gCUITestUtils.addSearchBar();
+
+  await Services.search.init();
   registerCleanupFunction(() => {
     gCUITestUtils.removeSearchBar();
   });
@@ -35,7 +37,7 @@ add_task(async function test() {
   Assert.equal(menuButton.type, "menu", "A menu button");
 
   // Mouse over the menu button to open it.
-  let buttonPopup = menuButton.firstElementChild;
+  let buttonPopup = menuButton.menupopup;
   promise = promiseEvent(buttonPopup, "popupshown");
   EventUtils.synthesizeMouse(menuButton, 5, 5, { type: "mousemove" });
   await promise;

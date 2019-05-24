@@ -2,11 +2,11 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-use batch::{BatchKey, BatchKind, BrushBatchKind};
-use device::{Device, Program, ShaderError};
+use crate::batch::{BatchKey, BatchKind, BrushBatchKind};
+use crate::device::{Device, Program, ShaderError};
 use euclid::{Transform3D};
-use glyph_rasterizer::GlyphFormat;
-use renderer::{
+use crate::glyph_rasterizer::GlyphFormat;
+use crate::renderer::{
     desc,
     MAX_VERTEX_TEXTURE_WIDTH,
     BlendMode, DebugFlags, ImageBufferKind, RendererError, RendererOptions,
@@ -341,7 +341,8 @@ impl BrushShader {
             BlendMode::PremultipliedAlpha |
             BlendMode::PremultipliedDestOut |
             BlendMode::SubpixelConstantTextColor(..) |
-            BlendMode::SubpixelWithBgColor => &mut self.alpha,
+            BlendMode::SubpixelWithBgColor |
+            BlendMode::Advanced(_) => &mut self.alpha,
             BlendMode::SubpixelDualSource => {
                 self.dual_source
                     .as_mut()
@@ -681,10 +682,10 @@ impl Shaders {
             options.precache_flags,
         )?;
 
-        let dual_source_precache_flags = if options.disable_dual_source_blending {
-            ShaderPrecacheFlags::empty()
-        } else {
+        let dual_source_precache_flags = if options.allow_dual_source_blending {
             options.precache_flags
+        } else {
+            ShaderPrecacheFlags::empty()
         };
 
         let ps_text_run_dual_source = TextShader::new("ps_text_run",
@@ -719,7 +720,7 @@ impl Shaders {
                     device,
                     &image_features,
                     options.precache_flags,
-                    !options.disable_dual_source_blending,
+                    options.allow_dual_source_blending,
                     use_pixel_local_storage,
                 )?);
             }

@@ -37,7 +37,7 @@ export function getSelectedFrame(state: State, thread: ThreadId) {
 
 export const getVisibleSelectedFrame: Selector<?{
   id: string,
-  location: SourceLocation
+  location: SourceLocation,
 }> = createSelector(
   getSelectedLocation,
   getSelectedFrames,
@@ -48,11 +48,12 @@ export const getVisibleSelectedFrame: Selector<?{
       return null;
     }
 
-    const { id } = selectedFrame;
+    const { id, displayName } = selectedFrame;
 
     return {
       id,
-      location: _getSelectedLocation(selectedFrame, selectedLocation)
+      displayName,
+      location: _getSelectedLocation(selectedFrame, selectedLocation),
     };
   }
 );

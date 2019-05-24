@@ -26,6 +26,7 @@
 #include "mozilla/CycleCollectedJSContext.h"
 #include "mozilla/Logging.h"
 #include "nsIObserverService.h"
+#include "mozilla/IntegerTypeTraits.h"
 #include "mozilla/IOInterposer.h"
 #include "mozilla/ipc/MessageChannel.h"
 #include "mozilla/ipc/BackgroundChild.h"
@@ -592,7 +593,7 @@ nsThread::nsThread(NotNull<SynchronizedEventQueue*> aQueue,
       mThread(nullptr),
       mStackSize(aStackSize),
       mNestedEventLoopDepth(0),
-      mCurrentEventLoopDepth(-1),
+      mCurrentEventLoopDepth(MaxValue<uint32_t>::value),
       mShutdownRequired(false),
       mPriority(PRIORITY_NORMAL),
       mIsMainThread(uint8_t(aMainThread)),
@@ -612,7 +613,7 @@ nsThread::nsThread()
       mThread(nullptr),
       mStackSize(0),
       mNestedEventLoopDepth(0),
-      mCurrentEventLoopDepth(-1),
+      mCurrentEventLoopDepth(MaxValue<uint32_t>::value),
       mShutdownRequired(false),
       mPriority(PRIORITY_NORMAL),
       mIsMainThread(NOT_MAIN_THREAD),
@@ -1120,10 +1121,7 @@ nsThread::ProcessNextEvent(bool aMayWait, bool* aResult) {
         BackgroundHangMonitor().NotifyActivity();
       }
 
-      bool schedulerLoggingEnabled =
-          mozilla::StaticPrefs::dom_performance_enable_scheduler_timing();
-      if (schedulerLoggingEnabled &&
-          mNestedEventLoopDepth > mCurrentEventLoopDepth &&
+      if (mNestedEventLoopDepth > mCurrentEventLoopDepth &&
           mCurrentPerformanceCounter) {
         // This is a recursive call, we're saving the time
         // spent in the parent event if the runnable is linked to a DocGroup.
@@ -1170,12 +1168,10 @@ nsThread::ProcessNextEvent(bool aMayWait, bool* aResult) {
         mCurrentEventStart = mozilla::TimeStamp::Now();
       }
       RefPtr<mozilla::PerformanceCounter> currentPerformanceCounter;
-      if (schedulerLoggingEnabled) {
-        mCurrentEventStart = mozilla::TimeStamp::Now();
-        mCurrentEvent = event;
-        mCurrentPerformanceCounter = GetPerformanceCounter(event);
-        currentPerformanceCounter = mCurrentPerformanceCounter;
-      }
+      mCurrentEventStart = mozilla::TimeStamp::Now();
+      mCurrentEvent = event;
+      mCurrentPerformanceCounter = GetPerformanceCounter(event);
+      currentPerformanceCounter = mCurrentPerformanceCounter;
 
       event->Run();
 
@@ -1203,24 +1199,22 @@ nsThread::ProcessNextEvent(bool aMayWait, bool* aResult) {
       }
 
       // End of execution, we can send the duration for the group
-      if (schedulerLoggingEnabled) {
-        if (recursiveEvent) {
-          // If we're in a recursive call, reset the timer,
-          // so the parent gets its remaining execution time right.
-          mCurrentEventStart = mozilla::TimeStamp::Now();
-          mCurrentPerformanceCounter = currentPerformanceCounter;
-        } else {
-          // We're done with this dispatch
-          if (currentPerformanceCounter) {
-            mozilla::TimeDuration duration =
-                TimeStamp::Now() - mCurrentEventStart;
-            currentPerformanceCounter->IncrementExecutionDuration(
-                duration.ToMicroseconds());
-          }
-          mCurrentEvent = nullptr;
-          mCurrentEventLoopDepth = -1;
-          mCurrentPerformanceCounter = nullptr;
+      if (recursiveEvent) {
+        // If we're in a recursive call, reset the timer,
+        // so the parent gets its remaining execution time right.
+        mCurrentEventStart = mozilla::TimeStamp::Now();
+        mCurrentPerformanceCounter = currentPerformanceCounter;
+      } else {
+        // We're done with this dispatch
+        if (currentPerformanceCounter) {
+          mozilla::TimeDuration duration =
+              TimeStamp::Now() - mCurrentEventStart;
+          currentPerformanceCounter->IncrementExecutionDuration(
+              duration.ToMicroseconds());
         }
+        mCurrentEvent = nullptr;
+        mCurrentEventLoopDepth = MaxValue<uint32_t>::value;
+        mCurrentPerformanceCounter = nullptr;
       }
     } else if (aMayWait) {
       MOZ_ASSERT(ShuttingDown(), "This should only happen when shutting down");

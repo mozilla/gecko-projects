@@ -531,8 +531,10 @@ NetworkObserver.prototype = {
     event.fromCache = fromCache;
     event.fromServiceWorker = fromServiceWorker;
     event.isThirdPartyTrackingResource = channel.isThirdPartyTrackingResource();
+    const referrerInfo = channel.referrerInfo;
     event.referrerPolicy =
-      Services.netUtils.getReferrerPolicyString(channel.referrerPolicy);
+      Services.netUtils.getReferrerPolicyString(referrerInfo ?
+          referrerInfo.referrerPolicy : Ci.nsIHttpChannel.REFERRER_POLICY_UNSET);
     httpActivity.fromServiceWorker = fromServiceWorker;
 
     if (extraStringData) {
@@ -884,6 +886,7 @@ NetworkObserver.prototype = {
    *         - total - the total time for all of the request and response.
    *         - timings - the HAR timings object.
    */
+  /* eslint-disable complexity */
   _setupHarTimings: function(httpActivity, fromCache) {
     if (fromCache) {
       // If it came from the browser cache, we have no timing
@@ -1095,6 +1098,7 @@ NetworkObserver.prototype = {
       offsets: ot.offsets,
     };
   },
+  /* eslint-enable complexity */
 
   _calculateOffsetAndTotalTime: function(harTimings,
                                           secureConnectionStartTime,

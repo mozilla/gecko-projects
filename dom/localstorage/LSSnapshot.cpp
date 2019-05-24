@@ -59,7 +59,8 @@ void LSSnapshot::SetActor(LSSnapshotChild* aActor) {
   mActor = aActor;
 }
 
-nsresult LSSnapshot::Init(const LSSnapshotInitInfo& aInitInfo, bool aExplicit) {
+nsresult LSSnapshot::Init(const nsAString& aKey,
+                          const LSSnapshotInitInfo& aInitInfo, bool aExplicit) {
   AssertIsOnOwningThread();
   MOZ_ASSERT(!mSelfRef);
   MOZ_ASSERT(mActor);
@@ -75,16 +76,19 @@ nsresult LSSnapshot::Init(const LSSnapshotInitInfo& aInitInfo, bool aExplicit) {
   for (uint32_t i = 0; i < itemInfos.Length(); i++) {
     const LSItemInfo& itemInfo = itemInfos[i];
 
-    const nsString& value = itemInfo.value();
+    const LSValue& value = itemInfo.value();
 
     if (loadState != LoadState::AllOrderedItems && !value.IsVoid()) {
       mLoadedItems.PutEntry(itemInfo.key());
     }
 
-    mValues.Put(itemInfo.key(), value);
+    mValues.Put(itemInfo.key(), value.AsString());
   }
 
   if (loadState == LoadState::Partial) {
+    if (aInitInfo.addKeyToUnknownItems()) {
+      mUnknownItems.PutEntry(aKey);
+    }
     mInitLength = aInitInfo.totalLength();
     mLength = mInitLength;
   } else if (loadState == LoadState::AllOrderedKeys) {
@@ -239,8 +243,8 @@ nsresult LSSnapshot::SetItem(const nsAString& aKey, const nsAString& aValue,
 
     LSSetItemInfo setItemInfo;
     setItemInfo.key() = aKey;
-    setItemInfo.oldValue() = oldValue;
-    setItemInfo.value() = aValue;
+    setItemInfo.oldValue() = LSValue(oldValue);
+    setItemInfo.value() = LSValue(aValue);
 
     mWriteInfos.AppendElement(std::move(setItemInfo));
   }
@@ -285,7 +289,7 @@ nsresult LSSnapshot::RemoveItem(const nsAString& aKey,
 
     LSRemoveItemInfo removeItemInfo;
     removeItemInfo.key() = aKey;
-    removeItemInfo.oldValue() = oldValue;
+    removeItemInfo.oldValue() = LSValue(oldValue);
 
     mWriteInfos.AppendElement(std::move(removeItemInfo));
   }
@@ -432,9 +436,14 @@ nsresult LSSnapshot::GetItemInternal(const nsAString& aKey,
       } else if (mLoadedItems.GetEntry(aKey) || mUnknownItems.GetEntry(aKey)) {
         result.SetIsVoid(true);
       } else {
-        if (NS_WARN_IF(!mActor->SendLoadItem(nsString(aKey), &result))) {
+        LSValue value;
+        nsTArray<LSItemInfo> itemInfos;
+        if (NS_WARN_IF(!mActor->SendLoadValueAndMoreItems(
+                nsString(aKey), &value, &itemInfos))) {
           return NS_ERROR_FAILURE;
         }
+
+        result = value.AsString();
 
         if (result.IsVoid()) {
           mUnknownItems.PutEntry(aKey);
@@ -442,12 +451,21 @@ nsresult LSSnapshot::GetItemInternal(const nsAString& aKey,
           mLoadedItems.PutEntry(aKey);
           mValues.Put(aKey, result);
 
-          if (mLoadedItems.Count() == mInitLength) {
-            mLoadedItems.Clear();
-            mUnknownItems.Clear();
-            mLength = 0;
-            mLoadState = LoadState::AllUnorderedItems;
-          }
+          // mLoadedItems.Count()==mInitLength is checked below.
+        }
+
+        for (uint32_t i = 0; i < itemInfos.Length(); i++) {
+          const LSItemInfo& itemInfo = itemInfos[i];
+
+          mLoadedItems.PutEntry(itemInfo.key());
+          mValues.Put(itemInfo.key(), itemInfo.value().AsString());
+        }
+
+        if (mLoadedItems.Count() == mInitLength) {
+          mLoadedItems.Clear();
+          mUnknownItems.Clear();
+          mLength = 0;
+          mLoadState = LoadState::AllUnorderedItems;
         }
       }
 
@@ -466,14 +484,28 @@ nsresult LSSnapshot::GetItemInternal(const nsAString& aKey,
     case LoadState::AllOrderedKeys: {
       if (mValues.Get(aKey, &result)) {
         if (result.IsVoid()) {
-          if (NS_WARN_IF(!mActor->SendLoadItem(nsString(aKey), &result))) {
+          LSValue value;
+          nsTArray<LSItemInfo> itemInfos;
+          if (NS_WARN_IF(!mActor->SendLoadValueAndMoreItems(
+                  nsString(aKey), &value, &itemInfos))) {
             return NS_ERROR_FAILURE;
           }
+
+          result = value.AsString();
 
           MOZ_ASSERT(!result.IsVoid());
 
           mLoadedItems.PutEntry(aKey);
           mValues.Put(aKey, result);
+
+          // mLoadedItems.Count()==mInitLength is checked below.
+
+          for (uint32_t i = 0; i < itemInfos.Length(); i++) {
+            const LSItemInfo& itemInfo = itemInfos[i];
+
+            mLoadedItems.PutEntry(itemInfo.key());
+            mValues.Put(itemInfo.key(), itemInfo.value().AsString());
+          }
 
           if (mLoadedItems.Count() == mInitLength) {
             mLoadedItems.Clear();

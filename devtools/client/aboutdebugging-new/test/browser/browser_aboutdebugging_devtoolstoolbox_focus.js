@@ -53,15 +53,14 @@ add_task(async function() {
   const onToolboxDestroyed = gDevTools.once("toolbox-destroyed");
   newNavigator.close();
   await onToolboxDestroyed;
-  await waitUntil(() =>
-    !findDebugTargetByText("about:devtools-toolbox?", document));
+  await waitUntil(() => !findDebugTargetByText("Toolbox - ", document));
 
   await removeTab(tab);
 });
 
 function clickInspectButton(inspectionTarget, doc) {
   const target = findDebugTargetByText(inspectionTarget, doc);
-  const button = target.querySelector(".js-debug-target-inspect-button");
+  const button = target.querySelector(".qa-debug-target-inspect-button");
   button.click();
 }
 

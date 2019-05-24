@@ -4,7 +4,7 @@
 
 extern crate serde_bytes;
 
-use channel::{self, MsgSender, Payload, PayloadSender, PayloadSenderHelperMethods};
+use crate::channel::{self, MsgSender, Payload, PayloadSender, PayloadSenderHelperMethods};
 use std::cell::Cell;
 use std::fmt;
 use std::marker::PhantomData;
@@ -13,11 +13,11 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::u32;
 // local imports
-use {display_item as di, font};
-use color::{ColorU, ColorF};
-use display_list::{BuiltDisplayList, BuiltDisplayListDescriptor};
-use image::{BlobImageData, BlobImageKey, ImageData, ImageDescriptor, ImageKey};
-use units::*;
+use crate::{display_item as di, font};
+use crate::color::{ColorU, ColorF};
+use crate::display_list::{BuiltDisplayList, BuiltDisplayListDescriptor};
+use crate::image::{BlobImageData, BlobImageKey, ImageData, ImageDescriptor, ImageKey};
+use crate::units::*;
 
 
 pub type TileSize = u16;
@@ -242,6 +242,10 @@ impl Transaction {
 
     pub fn set_pinch_zoom(&mut self, pinch_zoom: ZoomFactor) {
         self.frame_ops.push(FrameMsg::SetPinchZoom(pinch_zoom));
+    }
+
+    pub fn set_is_transform_pinch_zooming(&mut self, is_zooming: bool, animation_id: PropertyBindingId) {
+        self.frame_ops.push(FrameMsg::SetIsTransformPinchZooming(is_zooming, animation_id));
     }
 
     pub fn set_pan(&mut self, pan: DeviceIntPoint) {
@@ -617,6 +621,7 @@ pub enum FrameMsg {
     UpdateDynamicProperties(DynamicProperties),
     AppendDynamicProperties(DynamicProperties),
     SetPinchZoom(ZoomFactor),
+    SetIsTransformPinchZooming(bool, PropertyBindingId),
 }
 
 impl fmt::Debug for SceneMsg {
@@ -645,6 +650,7 @@ impl fmt::Debug for FrameMsg {
             FrameMsg::UpdateDynamicProperties(..) => "FrameMsg::UpdateDynamicProperties",
             FrameMsg::AppendDynamicProperties(..) => "FrameMsg::AppendDynamicProperties",
             FrameMsg::SetPinchZoom(..) => "FrameMsg::SetPinchZoom",
+            FrameMsg::SetIsTransformPinchZooming(..) => "FrameMsg::SetIsTransformPinchZooming",
         })
     }
 }
@@ -1483,7 +1489,7 @@ pub struct DynamicProperties {
 pub trait RenderNotifier: Send {
     fn clone(&self) -> Box<RenderNotifier>;
     fn wake_up(&self);
-    fn new_frame_ready(&self, DocumentId, scrolled: bool, composite_needed: bool, render_time_ns: Option<u64>);
+    fn new_frame_ready(&self, _: DocumentId, scrolled: bool, composite_needed: bool, render_time_ns: Option<u64>);
     fn external_event(&self, _evt: ExternalEvent) {
         unimplemented!()
     }

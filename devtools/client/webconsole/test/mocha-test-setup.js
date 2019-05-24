@@ -67,8 +67,15 @@ if (!global.URLSearchParams) {
   global.URLSearchParams = require("url").URLSearchParams;
 }
 
+// Mock ChromeUtils.
+global.ChromeUtils = {
+  import: () => {},
+  defineModuleGetter: () => {},
+};
+
 // Point to vendored-in files and mocks when needed.
 const requireHacker = require("require-hacker");
+/* eslint-disable complexity */
 requireHacker.global_hook("default", (path, module) => {
   switch (path) {
     // For Enzyme
@@ -86,8 +93,6 @@ requireHacker.global_hook("default", (path, module) => {
       return getModule("devtools/client/shared/vendor/react-dev");
     case "chrome":
       return `module.exports = { Cc: {}, Ci: {}, Cu: {} }`;
-    case "ChromeUtils":
-      return `module.exports = { import: () => {} }`;
   }
 
   // Some modules depend on Chrome APIs which don't work in mocha. When such a module
@@ -134,6 +139,7 @@ requireHacker.global_hook("default", (path, module) => {
 
   return undefined;
 });
+/* eslint-enable complexity */
 
 // Configure enzyme with React 16 adapter. This needs to be done after we set the
 // requireHack hook so `require()` calls in Enzyme are handled as well.

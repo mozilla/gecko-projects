@@ -29,6 +29,7 @@
 #include "mozilla/dom/UIEvent.h"
 #include "mozilla/dom/UIEventBinding.h"
 #include "mozilla/dom/WheelEventBinding.h"
+#include "mozilla/StaticPrefs.h"
 
 #include "ContentEventHandler.h"
 #include "IMEContentObserver.h"
@@ -193,10 +194,10 @@ NS_INTERFACE_MAP_END
 
 static uint32_t sESMInstanceCount = 0;
 
-uint64_t EventStateManager::sUserInputCounter = 0;
 int32_t EventStateManager::sUserInputEventDepth = 0;
 int32_t EventStateManager::sUserKeyboardEventDepth = 0;
 bool EventStateManager::sNormalLMouseEventInProcess = false;
+int16_t EventStateManager::sCurrentMouseBtn = MouseButton::eNotPressed;
 EventStateManager* EventStateManager::sActiveESM = nullptr;
 Document* EventStateManager::sMouseOverDocument = nullptr;
 AutoWeakFrame EventStateManager::sLastDragOverFrame = nullptr;
@@ -1096,9 +1097,7 @@ static bool HandleAccessKeyInRemoteChild(BrowserParent* aBrowserParent,
   AccessKeyInfo* accessKeyInfo = static_cast<AccessKeyInfo*>(aArg);
 
   // Only forward accesskeys for the active tab.
-  bool active;
-  aBrowserParent->GetDocShellIsActive(&active);
-  if (active) {
+  if (aBrowserParent->GetDocShellIsActive()) {
     // Even if there is no target for the accesskey in this process,
     // the event may match with a content accesskey.  If so, the keyboard
     // event should be handled with reply event for preventing double action.
@@ -1757,7 +1756,7 @@ void EventStateManager::GenerateDragGesture(nsPresContext* aPresContext,
     }
 
     // If non-native code is capturing the mouse don't start a drag.
-    if (nsIPresShell::IsMouseCapturePreventingDrag()) {
+    if (PresShell::IsMouseCapturePreventingDrag()) {
       StopTrackingDragGesture();
       return;
     }
@@ -1996,7 +1995,7 @@ bool EventStateManager::DoDefaultDragStart(nsPresContext* aPresContext,
 
   // get any custom drag image that was set
   int32_t imageX, imageY;
-  Element* dragImage = aDataTransfer->GetDragImage(&imageX, &imageY);
+  RefPtr<Element> dragImage = aDataTransfer->GetDragImage(&imageX, &imageY);
 
   nsCOMPtr<nsIArray> transArray = aDataTransfer->GetTransferables(dragTarget);
   if (!transArray) return false;
@@ -3035,7 +3034,7 @@ nsresult EventStateManager::PostHandleEvent(nsPresContext* aPresContext,
       // mousemove/mouseup events will continue to be dispatched to this element
       // and therefore forwarded to the child.
       if (aEvent->HasBeenPostedToRemoteProcess() &&
-          !nsIPresShell::GetCapturingContent()) {
+          !PresShell::GetCapturingContent()) {
         if (nsIContent* content =
                 mCurrentTarget ? mCurrentTarget->GetContent() : nullptr) {
           PresShell::SetCapturingContent(content, CaptureFlags::None);
@@ -3850,7 +3849,7 @@ void EventStateManager::UpdateCursor(nsPresContext* aPresContext,
     hotspot = Some(customCursor.mHotspot);
   }
 
-  if (nsContentUtils::UseActivityCursor()) {
+  if (StaticPrefs::ui_use_activity_cursor()) {
     // Check whether or not to show the busy cursor
     nsCOMPtr<nsIDocShell> docShell(aPresContext->GetDocShell());
     if (!docShell) return;
@@ -4033,7 +4032,8 @@ class MOZ_STACK_CLASS ESMEventCB : public EventDispatchingCallback {
     if (aVisitor.mPresContext) {
       nsIFrame* frame = aVisitor.mPresContext->GetPrimaryFrameFor(mTarget);
       if (frame) {
-        frame->HandleEvent(aVisitor.mPresContext, aVisitor.mEvent->AsGUIEvent(),
+        frame->HandleEvent(MOZ_KnownLive(aVisitor.mPresContext),
+                           aVisitor.mEvent->AsGUIEvent(),
                            &aVisitor.mEventStatus);
       }
     }
@@ -4055,7 +4055,6 @@ bool EventStateManager::IsHandlingKeyboardInput() {
 /*static*/
 void EventStateManager::StartHandlingUserInput(EventMessage aMessage) {
   ++sUserInputEventDepth;
-  ++sUserInputCounter;
   if (sUserInputEventDepth == 1) {
     sLatestUserInputStart = sHandlingInputStart = TimeStamp::Now();
   }
@@ -4735,7 +4734,9 @@ void EventStateManager::FireDragEnterOrExit(nsPresContext* aPresContext,
   }
 
   // Finally dispatch the event to the frame
-  if (aTargetFrame) aTargetFrame->HandleEvent(aPresContext, &event, &status);
+  if (aTargetFrame) {
+    aTargetFrame->HandleEvent(aPresContext, &event, &status);
+  }
 }
 
 void EventStateManager::UpdateDragDataTransfer(WidgetDragEvent* dragEvent) {
@@ -4852,9 +4853,9 @@ bool EventStateManager::EventCausesClickEvents(
 
 nsresult EventStateManager::InitAndDispatchClickEvent(
     WidgetMouseEvent* aMouseUpEvent, nsEventStatus* aStatus,
-    EventMessage aMessage, nsIPresShell* aPresShell,
-    nsIContent* aMouseUpContent, AutoWeakFrame aCurrentTarget,
-    bool aNoContentDispatch, nsIContent* aOverrideClickTarget) {
+    EventMessage aMessage, PresShell* aPresShell, nsIContent* aMouseUpContent,
+    AutoWeakFrame aCurrentTarget, bool aNoContentDispatch,
+    nsIContent* aOverrideClickTarget) {
   MOZ_ASSERT(aMouseUpEvent);
   MOZ_ASSERT(EventCausesClickEvents(*aMouseUpEvent));
   MOZ_ASSERT(aMouseUpContent || aCurrentTarget || aOverrideClickTarget);
@@ -4889,8 +4890,8 @@ nsresult EventStateManager::InitAndDispatchClickEvent(
   // cleared by EventStateManager::PreHandleEvent().  Therefore, dispatching
   // an event means that previous event status will be ignored.
   nsEventStatus status = nsEventStatus_eIgnore;
-  nsresult rv =
-      aPresShell->HandleEventWithTarget(&event, targetFrame, target, &status);
+  nsresult rv = aPresShell->HandleEventWithTarget(
+      &event, targetFrame, MOZ_KnownLive(target), &status);
   // Copy mMultipleActionsPrevented flag from a click event to the mouseup
   // event only when it's set to true.  It may be set to true if an editor has
   // already handled it.  This is important to avoid two or more default
@@ -4974,7 +4975,7 @@ nsresult EventStateManager::PostHandleMouseUp(
 }
 
 nsresult EventStateManager::DispatchClickEvents(
-    nsIPresShell* aPresShell, WidgetMouseEvent* aMouseUpEvent,
+    PresShell* aPresShell, WidgetMouseEvent* aMouseUpEvent,
     nsEventStatus* aStatus, nsIContent* aClickTarget,
     nsIContent* aOverrideClickTarget) {
   MOZ_ASSERT(aPresShell);
@@ -5021,7 +5022,7 @@ nsresult EventStateManager::DispatchClickEvents(
 }
 
 nsresult EventStateManager::HandleMiddleClickPaste(
-    nsIPresShell* aPresShell, WidgetMouseEvent* aMouseEvent,
+    PresShell* aPresShell, WidgetMouseEvent* aMouseEvent,
     nsEventStatus* aStatus, TextEditor* aTextEditor) {
   MOZ_ASSERT(aPresShell);
   MOZ_ASSERT(aMouseEvent);
@@ -5060,8 +5061,7 @@ nsresult EventStateManager::HandleMiddleClickPaste(
   nsCOMPtr<nsIContent> container;
   int32_t offset;
   nsLayoutUtils::GetContainerAndOffsetAtEvent(
-      static_cast<PresShell*>(aPresShell), aMouseEvent,
-      getter_AddRefs(container), &offset);
+      aPresShell, aMouseEvent, getter_AddRefs(container), &offset);
   if (container) {
     // XXX If readonly or disabled <input> or <textarea> in contenteditable
     //     designMode editor is clicked, the point is in the editor.
@@ -5087,8 +5087,7 @@ nsresult EventStateManager::HandleMiddleClickPaste(
   // Fire ePaste event by ourselves since we need to dispatch "paste" event
   // even if the middle click event was consumed for compatibility with
   // Chromium.
-  if (!nsCopySupport::FireClipboardEvent(ePaste, clipboardType,
-                                         static_cast<PresShell*>(aPresShell),
+  if (!nsCopySupport::FireClipboardEvent(ePaste, clipboardType, aPresShell,
                                          selection)) {
     *aStatus = nsEventStatus_eConsumeNoDefault;
     return NS_OK;
@@ -6282,6 +6281,12 @@ AutoHandlingUserInputStatePusher::AutoHandlingUserInputStatePusher(
     mMouseButtonEventHandlingDocument =
         fm->SetMouseButtonHandlingDocument(aDocument);
   }
+  if (NeedsToUpdateCurrentMouseBtnState()) {
+    WidgetMouseEvent* mouseEvent = aEvent->AsMouseEvent();
+    if (mouseEvent) {
+      EventStateManager::sCurrentMouseBtn = mouseEvent->mButton;
+    }
+  }
 }
 
 AutoHandlingUserInputStatePusher::~AutoHandlingUserInputStatePusher() {
@@ -6290,13 +6295,16 @@ AutoHandlingUserInputStatePusher::~AutoHandlingUserInputStatePusher() {
   }
   EventStateManager::StopHandlingUserInput(mMessage);
   if (mMessage == eMouseDown) {
-    nsIPresShell::AllowMouseCapture(false);
+    PresShell::AllowMouseCapture(false);
   }
   if (NeedsToResetFocusManagerMouseButtonHandlingState()) {
     nsFocusManager* fm = nsFocusManager::GetFocusManager();
     NS_ENSURE_TRUE_VOID(fm);
     nsCOMPtr<Document> handlingDocument =
         fm->SetMouseButtonHandlingDocument(mMouseButtonEventHandlingDocument);
+  }
+  if (NeedsToUpdateCurrentMouseBtnState()) {
+    EventStateManager::sCurrentMouseBtn = MouseButton::eNotPressed;
   }
 }
 

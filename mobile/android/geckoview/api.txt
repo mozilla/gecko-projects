@@ -267,6 +267,7 @@ package org.mozilla.geckoview {
   }
 
   public final class GeckoRuntime implements Parcelable {
+    ctor public GeckoRuntime();
     method @UiThread public void attachTo(@NonNull Context);
     method @UiThread public void configurationChanged(@NonNull Configuration);
     method @UiThread @NonNull public static GeckoRuntime create(@NonNull Context);
@@ -275,7 +276,7 @@ package org.mozilla.geckoview {
     method @UiThread @Nullable public GeckoRuntime.Delegate getDelegate();
     method @UiThread @Nullable public File getProfileDir();
     method @AnyThread @NonNull public GeckoRuntimeSettings getSettings();
-    method @AnyThread @NonNull public StorageController getStorageController();
+    method @UiThread @NonNull public StorageController getStorageController();
     method @UiThread @NonNull public RuntimeTelemetry getTelemetry();
     method @UiThread public void orientationChanged();
     method @UiThread public void orientationChanged(int);
@@ -768,7 +769,6 @@ package org.mozilla.geckoview {
     ctor public GeckoSessionSettings(@NonNull GeckoSessionSettings);
     method public boolean getAllowJavascript();
     method @Nullable public String getChromeUri();
-    method @Nullable public String getContextId();
     method public int getDisplayMode();
     method public boolean getFullAccessibilityTree();
     method public int getScreenId();
@@ -806,7 +806,6 @@ package org.mozilla.geckoview {
     method @NonNull public GeckoSessionSettings.Builder allowJavascript(boolean);
     method @NonNull public GeckoSessionSettings build();
     method @NonNull public GeckoSessionSettings.Builder chromeUri(@NonNull String);
-    method @NonNull public GeckoSessionSettings.Builder contextId(@Nullable String);
     method @NonNull public GeckoSessionSettings.Builder displayMode(int);
     method @NonNull public GeckoSessionSettings.Builder fullAccessibilityTree(boolean);
     method @NonNull public GeckoSessionSettings.Builder screenId(int);
@@ -1017,8 +1016,22 @@ package org.mozilla.geckoview {
 
   public final class StorageController {
     ctor public StorageController();
-    method @AnyThread public void clearAllSessionContextData();
-    method @AnyThread public void clearSessionContextData(@NonNull String);
+    method @AnyThread @NonNull public GeckoResult<Void> clearData(long);
+    method @AnyThread @NonNull public GeckoResult<Void> clearDataFromHost(@NonNull String, long);
+  }
+
+  public static class StorageController.ClearFlags {
+    ctor public ClearFlags();
+    field public static final long ALL = 512L;
+    field public static final long ALL_CACHES = 6L;
+    field public static final long AUTH_SESSIONS = 32L;
+    field public static final long COOKIES = 1L;
+    field public static final long DOM_STORAGES = 16L;
+    field public static final long IMAGE_CACHE = 4L;
+    field public static final long NETWORK_CACHE = 2L;
+    field public static final long PERMISSIONS = 64L;
+    field public static final long SITE_DATA = 471L;
+    field public static final long SITE_SETTINGS = 192L;
   }
 
   public class WebExtension {

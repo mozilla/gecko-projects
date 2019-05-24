@@ -215,6 +215,7 @@ ReflowInput::ReflowInput(nsPresContext* aPresContext,
   mFlags.mIClampMarginBoxMinSize = !!(aFlags & I_CLAMP_MARGIN_BOX_MIN_SIZE);
   mFlags.mBClampMarginBoxMinSize = !!(aFlags & B_CLAMP_MARGIN_BOX_MIN_SIZE);
   mFlags.mApplyAutoMinSize = !!(aFlags & I_APPLY_AUTO_MIN_SIZE);
+  mFlags.mApplyLineClamp = false;
 
   if ((aFlags & DUMMY_PARENT_REFLOW_INPUT) ||
       (mParentReflowInput->mFlags.mDummyParentReflowInput &&
@@ -853,6 +854,17 @@ void ReflowInput::InitDynamicReflowRoot() {
   // can collapse through us, we can't be a dynamic reflow root.
   if (canBeDynamicReflowRoot && mFrame->IsBlockFrameOrSubclass() &&
       !mFrame->HasAllStateBits(NS_BLOCK_FLOAT_MGR | NS_BLOCK_MARGIN_ROOT)) {
+    canBeDynamicReflowRoot = false;
+  }
+
+  // Subgrids are never reflow roots, but 'contain:layout/paint' prevents
+  // creating a subgrid in the first place.
+  if (canBeDynamicReflowRoot &&
+      (mStylePosition->GridTemplateColumns().mIsSubgrid ||
+       mStylePosition->GridTemplateRows().mIsSubgrid) &&
+      !(mStyleDisplay->IsContainLayout() || mStyleDisplay->IsContainPaint())) {
+    // NOTE: we could check that 'display' of our content's primary frame is
+    // '[inline-]grid' here but that's probably not worth it in practice.
     canBeDynamicReflowRoot = false;
   }
 

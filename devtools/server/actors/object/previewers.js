@@ -288,13 +288,15 @@ const previewers = {
   }],
 
   Proxy: [function({obj, hooks}, grip, rawObj) {
+    // Only preview top-level proxies, avoiding recursion. Otherwise, since both the
+    // target and handler can also be proxies, we could get an exponential behavior.
+    if (hooks.getGripDepth() > 1) {
+      return true;
+    }
+
     // The `isProxy` getter of the debuggee object only detects proxies without
     // security wrappers. If false, the target and handler are not available.
     const hasTargetAndHandler = obj.isProxy;
-    if (hasTargetAndHandler) {
-      grip.proxyTarget = hooks.createValueGrip(obj.proxyTarget);
-      grip.proxyHandler = hooks.createValueGrip(obj.proxyHandler);
-    }
 
     grip.preview = {
       kind: "Object",
@@ -302,13 +304,11 @@ const previewers = {
       ownPropertiesLength: 2 * hasTargetAndHandler,
     };
 
-    if (hooks.getGripDepth() > 1) {
-      return true;
-    }
-
     if (hasTargetAndHandler) {
-      grip.preview.ownProperties["<target>"] = {value: grip.proxyTarget};
-      grip.preview.ownProperties["<handler>"] = {value: grip.proxyHandler};
+      Object.assign(grip.preview.ownProperties, {
+        "<target>": {value: hooks.createValueGrip(obj.proxyTarget)},
+        "<handler>": {value: hooks.createValueGrip(obj.proxyHandler)},
+      });
     }
 
     return true;
@@ -355,6 +355,7 @@ function wrappedPrimitivePreviewer(className, classObj, objectActor, grip, rawOb
   return true;
 }
 
+/* eslint-disable complexity */
 function GenericObject(objectActor, grip, rawObj, specialStringBehavior = false) {
   const {obj, hooks} = objectActor;
   if (grip.preview || grip.displayString || hooks.getGripDepth() > 1) {
@@ -377,6 +378,10 @@ function GenericObject(objectActor, grip, rawObj, specialStringBehavior = false)
       for (let j = 0; j < rawObj.length; j++) {
         names.push(rawObj.key(j));
       }
+    } else if (isReplaying) {
+      // When replaying we can access a batch of properties for use in generating
+      // the preview. This avoids needing to enumerate all properties.
+      names = obj.getEnumerableOwnPropertyNamesForPreview();
     } else {
       names = obj.getOwnPropertyNames();
     }
@@ -438,6 +443,7 @@ function GenericObject(objectActor, grip, rawObj, specialStringBehavior = false)
 
   return true;
 }
+/* eslint-enable complexity */
 
 // Preview functions that do not rely on the object class.
 previewers.Object = [
@@ -668,6 +674,7 @@ previewers.Object = [
     return true;
   },
 
+  /* eslint-disable complexity */
   function DOMEvent({obj, hooks}, grip, rawObj) {
     if (isWorker || !rawObj || !Event.isInstance(rawObj)) {
       return false;
@@ -754,6 +761,7 @@ previewers.Object = [
 
     return true;
   },
+  /* eslint-enable complexity */
 
   function DOMException({obj, hooks}, grip, rawObj) {
     if (isWorker || !rawObj || obj.class !== "DOMException") {
@@ -780,6 +788,12 @@ previewers.Object = [
     // - At least it has the "0" array index.
     // - The array indices are consecutive.
     // - The value of "length", if present, is the number of array indices.
+
+    // Don't generate pseudo array previews when replaying. We don't want to
+    // have to enumerate all the properties in order to determine this.
+    if (isReplaying) {
+      return false;
+    }
 
     let keys;
     try {

@@ -8,6 +8,8 @@
 #include "HttpLog.h"
 
 #include "HttpChannelParentListener.h"
+#include "mozilla/dom/ContentParent.h"
+#include "mozilla/dom/ContentProcessManager.h"
 #include "mozilla/dom/ServiceWorkerInterceptController.h"
 #include "mozilla/dom/ServiceWorkerUtils.h"
 #include "mozilla/net/HttpChannelParent.h"
@@ -158,13 +160,14 @@ nsresult HttpChannelParentListener::TriggerCrossProcessRedirect(
 
   nsCOMPtr<nsIChannel> channel = aChannel;
   RefPtr<nsHttpChannel> httpChannel = do_QueryObject(channel);
-  RefPtr<nsHttpChannel::TabPromise> p = httpChannel->TakeRedirectTabPromise();
+  RefPtr<nsHttpChannel::ContentProcessIdPromise> p =
+      httpChannel->TakeRedirectContentProcessIdPromise();
   nsCOMPtr<nsILoadInfo> loadInfo = aLoadInfo;
 
   RefPtr<HttpChannelParentListener> self = this;
   p->Then(
       GetMainThreadSerialEventTarget(), __func__,
-      [=](nsCOMPtr<nsIRemoteTab> tp) {
+      [=](uint64_t cpId) {
         nsresult rv;
 
         // Register the new channel and obtain id for it
@@ -192,10 +195,22 @@ nsresult HttpChannelParentListener::TriggerCrossProcessRedirect(
         uint64_t channelId;
         MOZ_ALWAYS_SUCCEEDS(httpChannel->GetChannelId(&channelId));
 
-        dom::BrowserParent* browserParent = dom::BrowserParent::GetFrom(tp);
-        auto result = browserParent->Manager()->SendCrossProcessRedirect(
+        uint32_t redirectMode = nsIHttpChannelInternal::REDIRECT_MODE_FOLLOW;
+        nsCOMPtr<nsIHttpChannelInternal> internalChannel =
+            do_QueryInterface(channel);
+        if (internalChannel) {
+          MOZ_ALWAYS_SUCCEEDS(internalChannel->GetRedirectMode(&redirectMode));
+        }
+
+        dom::ContentParent* cp =
+            dom::ContentProcessManager::GetSingleton()->GetContentProcessById(
+                ContentParentId{cpId});
+        if (!cp) {
+          return NS_ERROR_UNEXPECTED;
+        }
+        auto result = cp->SendCrossProcessRedirect(
             self->mRedirectChannelId, uri, newLoadFlags, loadInfoArgs,
-            channelId, originalURI, aIdentifier);
+            channelId, originalURI, aIdentifier, redirectMode);
 
         MOZ_ASSERT(result, "SendCrossProcessRedirect failed");
 

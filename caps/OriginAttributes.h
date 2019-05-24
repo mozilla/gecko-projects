@@ -17,8 +17,7 @@ class OriginAttributes : public dom::OriginAttributesDictionary {
  public:
   OriginAttributes() {}
 
-  OriginAttributes(uint32_t aAppId, bool aInIsolatedMozBrowser) {
-    mAppId = aAppId;
+  explicit OriginAttributes(bool aInIsolatedMozBrowser) {
     mInIsolatedMozBrowser = aInIsolatedMozBrowser;
   }
 
@@ -46,12 +45,10 @@ class OriginAttributes : public dom::OriginAttributesDictionary {
   }
 
   bool operator==(const OriginAttributes& aOther) const {
-    return mAppId == aOther.mAppId &&
-           mInIsolatedMozBrowser == aOther.mInIsolatedMozBrowser &&
+    return mInIsolatedMozBrowser == aOther.mInIsolatedMozBrowser &&
            mUserContextId == aOther.mUserContextId &&
            mPrivateBrowsingId == aOther.mPrivateBrowsingId &&
-           mFirstPartyDomain == aOther.mFirstPartyDomain &&
-           mGeckoViewSessionContextId == aOther.mGeckoViewSessionContextId;
+           mFirstPartyDomain == aOther.mFirstPartyDomain;
   }
 
   bool operator!=(const OriginAttributes& aOther) const {
@@ -59,11 +56,9 @@ class OriginAttributes : public dom::OriginAttributesDictionary {
   }
 
   MOZ_MUST_USE bool EqualsIgnoringFPD(const OriginAttributes& aOther) const {
-    return mAppId == aOther.mAppId &&
-           mInIsolatedMozBrowser == aOther.mInIsolatedMozBrowser &&
+    return mInIsolatedMozBrowser == aOther.mInIsolatedMozBrowser &&
            mUserContextId == aOther.mUserContextId &&
-           mPrivateBrowsingId == aOther.mPrivateBrowsingId &&
-           mGeckoViewSessionContextId == aOther.mGeckoViewSessionContextId;
+           mPrivateBrowsingId == aOther.mPrivateBrowsingId;
   }
 
   // Serializes/Deserializes non-default values into the suffix format, i.e.
@@ -131,10 +126,6 @@ class OriginAttributesPattern : public dom::OriginAttributesPatternDictionary {
 
   // Performs a match of |aAttrs| against this pattern.
   bool Matches(const OriginAttributes& aAttrs) const {
-    if (mAppId.WasPassed() && mAppId.Value() != aAttrs.mAppId) {
-      return false;
-    }
-
     if (mInIsolatedMozBrowser.WasPassed() &&
         mInIsolatedMozBrowser.Value() != aAttrs.mInIsolatedMozBrowser) {
       return false;
@@ -155,21 +146,10 @@ class OriginAttributesPattern : public dom::OriginAttributesPatternDictionary {
       return false;
     }
 
-    if (mGeckoViewSessionContextId.WasPassed() &&
-        mGeckoViewSessionContextId.Value() !=
-            aAttrs.mGeckoViewSessionContextId) {
-      return false;
-    }
-
     return true;
   }
 
   bool Overlaps(const OriginAttributesPattern& aOther) const {
-    if (mAppId.WasPassed() && aOther.mAppId.WasPassed() &&
-        mAppId.Value() != aOther.mAppId.Value()) {
-      return false;
-    }
-
     if (mInIsolatedMozBrowser.WasPassed() &&
         aOther.mInIsolatedMozBrowser.WasPassed() &&
         mInIsolatedMozBrowser.Value() != aOther.mInIsolatedMozBrowser.Value()) {
@@ -189,13 +169,6 @@ class OriginAttributesPattern : public dom::OriginAttributesPatternDictionary {
 
     if (mFirstPartyDomain.WasPassed() && aOther.mFirstPartyDomain.WasPassed() &&
         mFirstPartyDomain.Value() != aOther.mFirstPartyDomain.Value()) {
-      return false;
-    }
-
-    if (mGeckoViewSessionContextId.WasPassed() &&
-        aOther.mGeckoViewSessionContextId.WasPassed() &&
-        mGeckoViewSessionContextId.Value() !=
-            aOther.mGeckoViewSessionContextId.Value()) {
       return false;
     }
 

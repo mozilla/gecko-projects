@@ -445,10 +445,7 @@ NS_IMETHODIMP nsPluginInstanceOwner::GetURL(
         NullPrincipal::CreateWithInheritedAttributes(content->NodePrincipal());
   }
 
-  // Currently we query the CSP from the NodePrincipal. After Bug 965637
-  // we can query the CSP from the doc directly (content->OwerDoc()).
-  nsCOMPtr<nsIContentSecurityPolicy> csp;
-  content->NodePrincipal()->GetCsp(getter_AddRefs(csp));
+  nsCOMPtr<nsIContentSecurityPolicy> csp = content->GetCsp();
 
   rv = lh->OnLinkClick(content, uri, unitarget, VoidString(), aPostStream,
                        headersDataStream,
@@ -1809,7 +1806,7 @@ static NPCocoaEventType CocoaEventTypeForEvent(const WidgetGUIEvent& anEvent,
       // We don't know via information on events from the widget code whether or
       // not we're dragging. The widget code just generates mouse move events
       // from native drag events. If anybody is capturing, this is a drag event.
-      if (nsIPresShell::GetCapturingContent()) {
+      if (PresShell::GetCapturingContent()) {
         return NPCocoaEventMouseDragged;
       }
 
@@ -3137,7 +3134,7 @@ nsPluginInstanceOwner::GetContentsScaleFactor(double* result) {
   // pixels.
 #if defined(XP_MACOSX) || defined(XP_WIN)
   nsCOMPtr<nsIContent> content = do_QueryReferent(mContent);
-  nsIPresShell* presShell =
+  PresShell* presShell =
       nsContentUtils::FindPresShellForDocument(content->OwnerDoc());
   if (presShell) {
     scaleFactor = double(AppUnitsPerCSSPixel()) /
@@ -3152,7 +3149,7 @@ nsPluginInstanceOwner::GetContentsScaleFactor(double* result) {
 
 void nsPluginInstanceOwner::GetCSSZoomFactor(float* result) {
   nsCOMPtr<nsIContent> content = do_QueryReferent(mContent);
-  nsIPresShell* presShell =
+  PresShell* presShell =
       nsContentUtils::FindPresShellForDocument(content->OwnerDoc());
   if (presShell) {
     *result = presShell->GetPresContext()->DeviceContext()->GetFullZoom();

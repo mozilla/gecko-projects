@@ -32,8 +32,7 @@ class SearchBox extends PureComponent {
       onFocus: PropTypes.func,
       onKeyDown: PropTypes.func,
       placeholder: PropTypes.string.isRequired,
-      plainStyle: PropTypes.bool,
-      type: PropTypes.string.isRequired,
+      type: PropTypes.string,
     };
   }
 
@@ -80,16 +79,16 @@ class SearchBox extends PureComponent {
     }
   }
 
-  onChange() {
-    if (this.state.value !== this.inputRef.current.value) {
+  onChange(inputValue = "") {
+    if (this.state.value !== inputValue) {
       this.setState({
         focused: true,
-        value: this.inputRef.current.value,
+        value: inputValue,
       });
     }
 
     if (!this.props.delay) {
-      this.props.onChange(this.state.value);
+      this.props.onChange(inputValue);
       return;
     }
 
@@ -107,8 +106,7 @@ class SearchBox extends PureComponent {
   }
 
   onClearButtonClick() {
-    this.setState({ value: "" });
-    this.onChange();
+    this.onChange("");
   }
 
   onFocus() {
@@ -169,54 +167,45 @@ class SearchBox extends PureComponent {
   }
 
   render() {
-    let {
+    const {
       autocompleteProvider,
       learnMoreTitle,
       learnMoreUrl,
       placeholder,
-      plainStyle,
       type = "search",
     } = this.props;
     const { value } = this.state;
     const showAutocomplete = autocompleteProvider && this.state.focused && value !== "";
+    const showLearnMoreLink = learnMoreUrl && value === "";
 
     const inputClassList = [`devtools-${type}input`];
-    if (plainStyle) {
-      inputClassList.push("devtools-plaininput");
-    }
-    if (value !== "") {
-      inputClassList.push("filled");
-      learnMoreUrl = false;
-    }
 
     return dom.div(
-      { className: "devtools-searchbox has-clear-btn" },
+      { className: "devtools-searchbox" },
       dom.input({
         className: inputClassList.join(" "),
         onBlur: this.onBlur,
-        onChange: this.onChange,
+        onChange: e => this.onChange(e.target.value),
         onFocus: this.onFocus,
         onKeyDown: this.onKeyDown,
         placeholder,
         ref: this.inputRef,
         value,
+        type,
+      }),
+      showLearnMoreLink && MDNLink({
+        title: learnMoreTitle,
+        url: learnMoreUrl,
       }),
       dom.button({
         className: "devtools-searchinput-clear",
         hidden: value === "",
         onClick: this.onClearButtonClick,
       }),
-      learnMoreUrl && MDNLink({
-        title: learnMoreTitle,
-        url: learnMoreUrl,
-      }),
       showAutocomplete && AutocompletePopup({
         autocompleteProvider,
         filter: value,
-        onItemSelected: (itemValue) => {
-          this.setState({ value: itemValue });
-          this.onChange();
-        },
+        onItemSelected: itemValue => this.onChange(itemValue),
         ref: this.autocompleteRef,
       })
     );

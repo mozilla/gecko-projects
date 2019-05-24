@@ -164,6 +164,7 @@
 
 #include "nsISpeculativeConnect.h"
 #include "nsIIOService.h"
+#include "nsBlockFrame.h"
 
 #include "DOMMatrix.h"
 
@@ -783,10 +784,8 @@ void Element::ScrollIntoView(const ScrollIntoViewOptions& aOptions) {
   }
 
   presShell->ScrollContentIntoView(
-      this,
-      nsIPresShell::ScrollAxis(whereToScrollVertically, WhenToScroll::Always),
-      nsIPresShell::ScrollAxis(whereToScrollHorizontally, WhenToScroll::Always),
-      scrollFlags);
+      this, ScrollAxis(whereToScrollVertically, WhenToScroll::Always),
+      ScrollAxis(whereToScrollHorizontally, WhenToScroll::Always), scrollFlags);
 }
 
 void Element::Scroll(const CSSIntPoint& aScroll,
@@ -2597,7 +2596,7 @@ bool Element::ParseAttribute(int32_t aNamespaceID, nsAtom* aAttribute,
   }
 
   if (aNamespaceID == kNameSpaceID_None) {
-    if (aAttribute == nsGkAtoms::_class) {
+    if (aAttribute == nsGkAtoms::_class || aAttribute == nsGkAtoms::part) {
       aResult.ParseAtomArray(aValue);
       return true;
     }
@@ -3158,8 +3157,8 @@ nsresult Element::PostHandleEventForLinks(EventChainPostVisitor& aVisitor) {
       WidgetKeyboardEvent* keyEvent = aVisitor.mEvent->AsKeyboardEvent();
       if (keyEvent && keyEvent->mKeyCode == NS_VK_RETURN) {
         nsEventStatus status = nsEventStatus_eIgnore;
-        rv = DispatchClickEvent(aVisitor.mPresContext, keyEvent, this, false,
-                                nullptr, &status);
+        rv = DispatchClickEvent(MOZ_KnownLive(aVisitor.mPresContext), keyEvent,
+                                this, false, nullptr, &status);
         if (NS_SUCCEEDED(rv)) {
           aVisitor.mEventStatus = nsEventStatus_eConsumeNoDefault;
         }
@@ -3292,11 +3291,7 @@ CORSMode Element::AttrValueToCORSMode(const nsAttrValue* aValue) {
 }
 
 static const char* GetFullscreenError(CallerType aCallerType) {
-  if (!nsContentUtils::IsRequestFullscreenAllowed(aCallerType)) {
-    return "FullscreenDeniedNotInputDriven";
-  }
-
-  return nullptr;
+  return nsContentUtils::CheckRequestFullscreenAllowed(aCallerType);
 }
 
 already_AddRefed<Promise> Element::RequestFullscreen(CallerType aCallerType,
@@ -3454,11 +3449,7 @@ already_AddRefed<Animation> Element::Animate(
 
   // Animation constructor follows the standard Xray calling convention and
   // needs to be called in the target element's realm.
-  Maybe<JSAutoRealm> ar;
-  if (js::GetContextCompartment(aContext) !=
-      js::GetObjectCompartment(ownerGlobal->GetGlobalJSObject())) {
-    ar.emplace(aContext, ownerGlobal->GetGlobalJSObject());
-  }
+  JSAutoRealm ar(aContext, global.Get());
 
   AnimationTimeline* timeline = referenceElement->OwnerDoc()->Timeline();
   RefPtr<Animation> animation = Animation::Constructor(
@@ -3479,7 +3470,7 @@ already_AddRefed<Animation> Element::Animate(
   return animation.forget();
 }
 
-void Element::GetAnimations(const AnimationFilter& filter,
+void Element::GetAnimations(const GetAnimationsOptions& aOptions,
                             nsTArray<RefPtr<Animation>>& aAnimations) {
   Document* doc = GetComposedDoc();
   if (doc) {
@@ -3510,7 +3501,7 @@ void Element::GetAnimations(const AnimationFilter& filter,
     return;
   }
 
-  if (!filter.mSubtree || pseudoType == PseudoStyleType::before ||
+  if (!aOptions.mSubtree || pseudoType == PseudoStyleType::before ||
       pseudoType == PseudoStyleType::after ||
       pseudoType == PseudoStyleType::marker) {
     GetAnimationsUnsorted(elem, pseudoType, aAnimations);
@@ -4404,6 +4395,18 @@ void Element::NoteDescendantsNeedFramesForServo() {
   // needs processing).
   NoteDirtyElement(this, NODE_DESCENDANTS_NEED_FRAMES);
   SetFlags(NODE_DESCENDANTS_NEED_FRAMES);
+}
+
+double Element::FirstLineBoxBSize() const {
+  const nsBlockFrame* frame = do_QueryFrame(GetPrimaryFrame());
+  if (!frame) {
+    return 0.0;
+  }
+  nsBlockFrame::ConstLineIterator line = frame->LinesBegin();
+  nsBlockFrame::ConstLineIterator lineEnd = frame->LinesEnd();
+  return line != lineEnd
+             ? nsPresContext::AppUnitsToDoubleCSSPixels(line->BSize())
+             : 0.0;
 }
 
 }  // namespace dom

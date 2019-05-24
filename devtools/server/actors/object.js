@@ -138,6 +138,10 @@ const proto = {
       g.ownPropertyLength = getArrayLength(this.obj);
     } else if (isStorage(g)) {
       g.ownPropertyLength = getStorageLength(this.obj);
+    } else if (isReplaying) {
+      // When replaying we can get the number of properties directly, to avoid
+      // needing to enumerate all of them.
+      g.ownPropertyLength = this.obj.getOwnPropertyNamesCount();
     } else {
       try {
         g.ownPropertyLength = this.obj.getOwnPropertyNames().length;
@@ -325,6 +329,7 @@ const proto = {
    *         An object that maps property names to safe getter descriptors as
    *         defined by the remote debugging protocol.
    */
+  /* eslint-disable complexity */
   _findSafeGetterValues: function(ownProperties, limit = 0) {
     const safeGetterValues = Object.create(null);
     let obj = this.obj;
@@ -332,6 +337,13 @@ const proto = {
 
     // Do not search safe getters in unsafe objects.
     if (!DevToolsUtils.isSafeDebuggerObject(obj)) {
+      return safeGetterValues;
+    }
+
+    // Do not search for safe getters while replaying. While this would be nice
+    // to support, it involves a lot of back-and-forth between processes and
+    // would be better to do entirely in the replaying process.
+    if (isReplaying) {
       return safeGetterValues;
     }
 
@@ -421,6 +433,7 @@ const proto = {
 
     return safeGetterValues;
   },
+  /* eslint-enable complexity */
 
   /**
    * Find the safe getters for a given Debugger.Object. Safe getters are native
@@ -851,6 +864,24 @@ const proto = {
       line: stack.line,
       column: stack.column,
       functionDisplayName: stack.functionDisplayName,
+    };
+  },
+
+  /**
+   * Handle a protocol request to get the target and handler internal slots of a proxy.
+   */
+  proxySlots: function() {
+    // There could be transparent security wrappers, unwrap to check if it's a proxy.
+    // However, retrieve proxyTarget and proxyHandler from `this.obj` to avoid exposing
+    // the unwrapped target and handler.
+    const unwrapped = DevToolsUtils.unwrap(this.obj);
+    if (!unwrapped || !unwrapped.isProxy) {
+      return this.throwError("objectNotProxy",
+        "'proxySlots' request is only valid for grips with a 'Proxy' class.");
+    }
+    return {
+      proxyTarget: this.hooks.createValueGrip(this.obj.proxyTarget),
+      proxyHandler: this.hooks.createValueGrip(this.obj.proxyHandler),
     };
   },
 

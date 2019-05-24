@@ -4,7 +4,7 @@
 
 "use strict";
 
-const { AUDIT, AUDITING, FILTER_TOGGLE } = require("../constants");
+const { AUDIT, AUDIT_PROGRESS, AUDITING, FILTER_TOGGLE } = require("../constants");
 
 exports.filterToggle = filter =>
   dispatch => dispatch({ filter, type: FILTER_TOGGLE });
@@ -13,6 +13,27 @@ exports.auditing = filter =>
   dispatch => dispatch({ auditing: filter, type: AUDITING });
 
 exports.audit = (walker, filter) =>
-  dispatch => walker.audit()
-    .then(response => dispatch({ type: AUDIT, response }))
-    .catch(error => dispatch({ type: AUDIT, error }));
+  dispatch => new Promise(resolve => {
+    const auditEventHandler = ({ type, ancestries, progress }) => {
+      switch (type) {
+        case "error":
+          walker.off("audit-event", auditEventHandler);
+          dispatch({ type: AUDIT, error: true });
+          resolve();
+          break;
+        case "completed":
+          walker.off("audit-event", auditEventHandler);
+          dispatch({ type: AUDIT, response: ancestries });
+          resolve();
+          break;
+        case "progress":
+          dispatch({ type: AUDIT_PROGRESS, progress });
+          break;
+        default:
+          break;
+      }
+    };
+
+    walker.on("audit-event", auditEventHandler);
+    walker.startAudit();
+  });

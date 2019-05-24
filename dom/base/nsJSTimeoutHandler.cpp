@@ -18,7 +18,6 @@
 #include "nsContentUtils.h"
 #include "nsError.h"
 #include "nsGlobalWindow.h"
-#include "nsIContentSecurityPolicy.h"
 #include "mozilla/dom/Document.h"
 #include "nsIScriptTimeoutHandler.h"
 #include "nsIXPConnect.h"
@@ -173,7 +172,7 @@ nsJSScriptTimeoutHandler::nsJSScriptTimeoutHandler(
     JSContext* aCx, nsGlobalWindowInner* aWindow, Function& aFunction,
     nsTArray<JS::Heap<JS::Value>>&& aArguments, ErrorResult& aError)
     : mLineNo(0), mColumn(0), mFunction(&aFunction) {
-  if (!aWindow->GetContextInternal() || !aWindow->FastGetGlobalJSObject()) {
+  if (!aWindow->GetContextInternal() || !aWindow->HasJSGlobal()) {
     // This window was already closed, or never properly initialized,
     // don't let a timer be scheduled on such a window.
     aError.Throw(NS_ERROR_NOT_INITIALIZED);
@@ -191,7 +190,7 @@ nsJSScriptTimeoutHandler::nsJSScriptTimeoutHandler(
       mColumn(0),
       mExpr(aExpression),
       mInitiatingScript(aInitiatingScript) {
-  if (!aWindow->GetContextInternal() || !aWindow->FastGetGlobalJSObject()) {
+  if (!aWindow->GetContextInternal() || !aWindow->HasJSGlobal()) {
     // This window was already closed, or never properly initialized,
     // don't let a timer be scheduled on such a window.
     aError.Throw(NS_ERROR_NOT_INITIALIZED);

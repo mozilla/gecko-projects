@@ -51,11 +51,6 @@ if (AppConstants.MOZ_CRASHREPORTER) {
   });
 }
 
-XPCOMUtils.defineLazyGetter(Services, "xulStore", () => {
-  const {XULStore} = ChromeUtils.import("resource://gre/modules/XULStore.jsm");
-  return XULStore;
-});
-
 XPCOMUtils.defineLazyGetter(Services, "io", () => {
   return Cc["@mozilla.org/network/io-service;1"]
            .getService(Ci.nsIIOService)
@@ -113,8 +108,17 @@ if (AppConstants.platform == "android") {
 if (AppConstants.MOZ_GECKO_PROFILER) {
   initTable.profiler = ["@mozilla.org/tools/profiler;1", "nsIProfiler"];
 }
-if ("@mozilla.org/browser/enterprisepolicies;1" in Cc) {
-  initTable.policies = ["@mozilla.org/browser/enterprisepolicies;1", "nsIEnterprisePolicies"];
+if ("@mozilla.org/enterprisepolicies;1" in Cc) {
+  initTable.policies = ["@mozilla.org/enterprisepolicies;1", "nsIEnterprisePolicies"];
+}
+
+if (AppConstants.MOZ_NEW_XULSTORE) {
+  XPCOMUtils.defineLazyGetter(Services, "xulStore", () => {
+    const {XULStore} = ChromeUtils.import("resource://gre/modules/XULStore.jsm");
+    return XULStore;
+  });
+} else {
+  initTable.xulStore = ["@mozilla.org/xul/xulstore;1", "nsIXULStore"];
 }
 
 XPCOMUtils.defineLazyServiceGetters(Services, initTable);

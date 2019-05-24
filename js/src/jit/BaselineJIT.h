@@ -575,7 +575,7 @@ bool BaselineCompileFromBaselineInterpreter(JSContext* cx, BaselineFrame* frame,
 void FinishDiscardBaselineScript(FreeOp* fop, JSScript* script);
 
 void AddSizeOfBaselineData(JSScript* script, mozilla::MallocSizeOf mallocSizeOf,
-                           size_t* data, size_t* fallbackStubs);
+                           size_t* data);
 
 void ToggleBaselineProfiling(JSRuntime* runtime, bool enable);
 
@@ -638,9 +638,9 @@ MOZ_MUST_USE bool BailoutIonToBaseline(
     bool invalidate, BaselineBailoutInfo** bailoutInfo,
     const ExceptionBailoutInfo* exceptionInfo);
 
-// Mark TypeScripts on the stack as active, so that they are not discarded
+// Mark JitScripts on the stack as active, so that they are not discarded
 // during GC.
-void MarkActiveTypeScripts(Zone* zone);
+void MarkActiveJitScripts(Zone* zone);
 
 MethodStatus BaselineCompile(JSContext* cx, JSScript* script,
                              bool forceDebugInstrumentation = false);
@@ -650,6 +650,58 @@ void JitSpewBaselineICStats(JSScript* script, const char* dumpReason);
 #endif
 
 static const unsigned BASELINE_MAX_ARGS_LENGTH = 20000;
+
+// Class storing the generated Baseline Interpreter code for the runtime.
+class BaselineInterpreter {
+  // The interpreter code.
+  JitCode* code_ = nullptr;
+
+  // Offset of the code to start interpreting a bytecode op.
+  uint32_t interpretOpOffset_ = 0;
+
+  // The offsets for the toggledJump instructions for profiler instrumentation.
+  uint32_t profilerEnterToggleOffset_ = 0;
+  uint32_t profilerExitToggleOffset_ = 0;
+
+  // The offset for the toggledJump instruction for the debugger's
+  // IsDebuggeeCheck code in the prologue.
+  uint32_t debuggeeCheckOffset_ = 0;
+
+  // Offsets of toggled calls to the DebugTrapHandler trampoline (for
+  // breakpoints and stepping).
+  using CodeOffsetVector = Vector<uint32_t, 0, SystemAllocPolicy>;
+  CodeOffsetVector debugTrapOffsets_;
+
+  // Offsets of toggled jumps for code coverage.
+  CodeOffsetVector codeCoverageOffsets_;
+
+ public:
+  BaselineInterpreter() = default;
+
+  BaselineInterpreter(const BaselineInterpreter&) = delete;
+  void operator=(const BaselineInterpreter&) = delete;
+
+  void init(JitCode* code, uint32_t interpretOpOffset,
+            uint32_t profilerEnterToggleOffset,
+            uint32_t profilerExitToggleOffset, uint32_t debuggeeCheckOffset,
+            CodeOffsetVector&& debugTrapOffsets,
+            CodeOffsetVector&& codeCoverageOffsets);
+
+  uint8_t* codeRaw() const { return code_->raw(); }
+
+  TrampolinePtr interpretOpAddr() const {
+    return TrampolinePtr(codeRaw() + interpretOpOffset_);
+  }
+
+  void toggleProfilerInstrumentation(bool enable);
+  void toggleDebuggerInstrumentation(bool enable);
+
+  void toggleCodeCoverageInstrumentationUnchecked(bool enable);
+  void toggleCodeCoverageInstrumentation(bool enable);
+};
+
+MOZ_MUST_USE bool GenerateBaselineInterpreter(JSContext* cx,
+                                              BaselineInterpreter& interpreter);
 
 }  // namespace jit
 }  // namespace js

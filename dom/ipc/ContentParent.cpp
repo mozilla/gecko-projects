@@ -40,6 +40,7 @@
 #include "mozilla/docshell/OfflineCacheUpdateParent.h"
 #include "mozilla/dom/BrowsingContext.h"
 #include "mozilla/dom/BrowsingContextGroup.h"
+#include "mozilla/dom/CancelContentJSOptionsBinding.h"
 #include "mozilla/dom/CanonicalBrowsingContext.h"
 #include "mozilla/dom/ClientManager.h"
 #include "mozilla/dom/ClientOpenWindowOpActors.h"
@@ -103,6 +104,7 @@
 #include "mozilla/net/PCookieServiceParent.h"
 #include "mozilla/plugins/PluginBridge.h"
 #include "mozilla/Preferences.h"
+#include "mozilla/PresShell.h"
 #include "mozilla/ProcessHangMonitor.h"
 #include "mozilla/ProcessHangMonitorIPC.h"
 #include "mozilla/RDDProcessManager.h"
@@ -156,9 +158,9 @@
 #include "nsIMemoryReporter.h"
 #include "nsIMozBrowserFrame.h"
 #include "nsIMutable.h"
+#include "nsINetworkLinkService.h"
 #include "nsIObserverService.h"
 #include "nsIParentChannel.h"
-#include "nsIPresShell.h"
 #include "nsIRemoteWindowContext.h"
 #include "nsIScriptError.h"
 #include "nsIScriptSecurityManager.h"
@@ -612,7 +614,7 @@ static const char* sObserverTopics[] = {
     "intl:requested-locales-changed",
     "cookie-changed",
     "private-cookie-changed",
-    "clear-site-data-reload-needed",
+    NS_NETWORK_LINK_TYPE_TOPIC,
 };
 
 #if defined(XP_MACOSX) && defined(MOZ_SANDBOX)
@@ -840,7 +842,7 @@ already_AddRefed<ContentParent> ContentParent::GetNewOrUsedBrowserProcess(
     }
   } else {
     uint32_t numberOfParents = contentParents.Length();
-    nsTArray<nsIContentProcessInfo*> infos(numberOfParents);
+    nsTArray<RefPtr<nsIContentProcessInfo>> infos(numberOfParents);
     for (auto* cp : contentParents) {
       infos.AppendElement(cp->mScriptableHelper);
     }
@@ -856,9 +858,8 @@ already_AddRefed<ContentParent> ContentParent::GetNewOrUsedBrowserProcess(
     nsIContentProcessInfo* openerInfo =
         aOpener ? aOpener->mScriptableHelper.get() : nullptr;
     int32_t index;
-    if (cpp && NS_SUCCEEDED(cpp->ProvideProcess(
-                   aRemoteType, openerInfo, infos.Elements(), infos.Length(),
-                   maxContentParents, &index))) {
+    if (cpp && NS_SUCCEEDED(cpp->ProvideProcess(aRemoteType, openerInfo, infos,
+                                                maxContentParents, &index))) {
       // If the provider returned an existing ContentParent, use that one.
       if (0 <= index && static_cast<uint32_t>(index) <= maxContentParents) {
         RefPtr<ContentParent> retval = contentParents[index];
@@ -1082,12 +1083,10 @@ mozilla::ipc::IPCResult ContentParent::RecvLaunchRDDProcess(
 }
 
 /*static*/
-BrowserParent* ContentParent::CreateBrowser(const TabContext& aContext,
-                                            Element* aFrameElement,
-                                            BrowsingContext* aBrowsingContext,
-                                            ContentParent* aOpenerContentParent,
-                                            BrowserParent* aSameTabGroupAs,
-                                            uint64_t aNextRemoteTabId) {
+already_AddRefed<RemoteBrowser> ContentParent::CreateBrowser(
+    const TabContext& aContext, Element* aFrameElement,
+    BrowsingContext* aBrowsingContext, ContentParent* aOpenerContentParent,
+    BrowserParent* aSameTabGroupAs, uint64_t aNextRemoteTabId) {
   AUTO_PROFILER_LABEL("ContentParent::CreateBrowser", OTHER);
 
   if (!sCanLaunchSubprocesses) {
@@ -1104,10 +1103,11 @@ BrowserParent* ContentParent::CreateBrowser(const TabContext& aContext,
     if (BrowserParent* parent =
             sNextBrowserParents.GetAndRemove(aNextRemoteTabId)
                 .valueOr(nullptr)) {
+      RefPtr<BrowserHost> browserHost = new BrowserHost(parent);
       MOZ_ASSERT(!parent->GetOwnerElement(),
                  "Shouldn't have an owner elemnt before");
       parent->SetOwnerElement(aFrameElement);
-      return parent;
+      return browserHost.forget();
     }
   }
 
@@ -1215,8 +1215,9 @@ BrowserParent* ContentParent::CreateBrowser(const TabContext& aContext,
       Unused << browserParent->SendAwaitLargeAlloc();
     }
 
+    RefPtr<BrowserHost> browserHost = new BrowserHost(browserParent);
     browserParent->SetOwnerElement(aFrameElement);
-    return browserParent;
+    return browserHost.forget();
   }
   return nullptr;
 }
@@ -1281,7 +1282,7 @@ void ContentParent::Init() {
 #ifdef ACCESSIBILITY
   // If accessibility is running in chrome process then start it in content
   // process.
-  if (nsIPresShell::IsAccessibilityActive()) {
+  if (PresShell::IsAccessibilityActive()) {
 #  if defined(XP_WIN)
     // Don't init content a11y if we detect an incompat version of JAWS in use.
     if (!mozilla::a11y::Compatibility::IsOldJAWS()) {
@@ -1293,7 +1294,7 @@ void ContentParent::Init() {
     Unused << SendActivateA11y(0, 0);
 #  endif
   }
-#endif
+#endif  // #ifdef ACCESSIBILITY
 
 #ifdef MOZ_GECKO_PROFILER
   Unused << SendInitProfiler(ProfilerParent::CreateForProcess(OtherPid()));
@@ -3120,11 +3121,28 @@ ContentParent::Observe(nsISupports* aSubject, const char* aTopic,
                (!nsCRT::strcmp(aData, u"changed"))) {
       cs->AddCookie(xpcCookie);
     }
-  } else if (!strcmp(aTopic, "clear-site-data-reload-needed")) {
-    // Rebroadcast "clear-site-data-reload-needed".
-    Unused << SendClearSiteDataReloadNeeded(nsString(aData));
+  } else if (!strcmp(aTopic, NS_NETWORK_LINK_TYPE_TOPIC)) {
+    UpdateNetworkLinkType();
   }
+
   return NS_OK;
+}
+
+void ContentParent::UpdateNetworkLinkType() {
+  nsresult rv;
+  nsCOMPtr<nsINetworkLinkService> nls =
+      do_GetService(NS_NETWORK_LINK_SERVICE_CONTRACTID, &rv);
+  if (NS_FAILED(rv)) {
+    return;
+  }
+
+  uint32_t linkType = nsINetworkLinkService::LINK_TYPE_UNKNOWN;
+  rv = nls->GetLinkType(&linkType);
+  if (NS_FAILED(rv)) {
+    return;
+  }
+
+  Unused << SendNetworkLinkTypeChange(linkType);
 }
 
 NS_IMETHODIMP
@@ -3476,11 +3494,6 @@ mozilla::ipc::IPCResult ContentParent::RecvFinishMemoryReport(
 
 mozilla::ipc::IPCResult ContentParent::RecvAddPerformanceMetrics(
     const nsID& aID, nsTArray<PerformanceInfo>&& aMetrics) {
-  if (!mozilla::StaticPrefs::dom_performance_enable_scheduler_timing()) {
-    // The pref is off, we should not get a performance metrics from the content
-    // child
-    return IPC_OK();
-  }
   nsresult rv = PerformanceMetricsCollector::DataReceived(aID, aMetrics);
   Unused << NS_WARN_IF(NS_FAILED(rv));
   return IPC_OK();
@@ -4670,7 +4683,7 @@ mozilla::ipc::IPCResult ContentParent::CommonCreateWindow(
     const bool& aCalledFromJS, const bool& aPositionSpecified,
     const bool& aSizeSpecified, nsIURI* aURIToLoad, const nsCString& aFeatures,
     const float& aFullZoom, uint64_t aNextRemoteTabId, const nsString& aName,
-    nsresult& aResult, nsCOMPtr<nsIRemoteTab>& aNewBrowserParent,
+    nsresult& aResult, nsCOMPtr<nsIRemoteTab>& aNewRemoteTab,
     bool* aWindowIsNew, int32_t& aOpenLocation,
     nsIPrincipal* aTriggeringPrincipal, nsIReferrerInfo* aReferrerInfo,
     bool aLoadURI, nsIContentSecurityPolicy* aCsp)
@@ -4687,6 +4700,9 @@ mozilla::ipc::IPCResult ContentParent::CommonCreateWindow(
   }
 
   BrowserParent* thisBrowserParent = BrowserParent::GetFrom(aThisTab);
+  BrowserHost* thisBrowserHost =
+      thisBrowserParent ? thisBrowserParent->GetBrowserHost() : nullptr;
+  MOZ_ASSERT(!thisBrowserParent == !thisBrowserHost);
   nsCOMPtr<nsIContent> frame;
   if (thisBrowserParent) {
     frame = thisBrowserParent->GetOwnerElement();
@@ -4736,8 +4752,8 @@ mozilla::ipc::IPCResult ContentParent::CommonCreateWindow(
 
   // Read the origin attributes for the tab from the opener browserParent.
   OriginAttributes openerOriginAttributes;
-  if (thisBrowserParent) {
-    nsCOMPtr<nsILoadContext> loadContext = thisBrowserParent->GetLoadContext();
+  if (thisBrowserHost) {
+    nsCOMPtr<nsILoadContext> loadContext = thisBrowserHost->GetLoadContext();
     loadContext->GetOriginAttributes(openerOriginAttributes);
   } else if (Preferences::GetBool("browser.privatebrowsing.autostart")) {
     openerOriginAttributes.mPrivateBrowsingId = 1;
@@ -4773,7 +4789,7 @@ mozilla::ipc::IPCResult ContentParent::CommonCreateWindow(
     if (NS_SUCCEEDED(aResult) && frameLoaderOwner) {
       RefPtr<nsFrameLoader> frameLoader = frameLoaderOwner->GetFrameLoader();
       if (frameLoader) {
-        aNewBrowserParent = frameLoader->GetRemoteTab();
+        aNewRemoteTab = frameLoader->GetRemoteTab();
         // At this point, it's possible the inserted frameloader hasn't gone
         // through layout yet. To ensure that the dimensions that we send down
         // when telling the frameloader to display will be correct (instead of
@@ -4803,13 +4819,15 @@ mozilla::ipc::IPCResult ContentParent::CommonCreateWindow(
   }
 
   aResult = pwwatch->OpenWindowWithRemoteTab(
-      thisBrowserParent, aFeatures, aCalledFromJS, aFullZoom, aNextRemoteTabId,
-      !aSetOpener, getter_AddRefs(aNewBrowserParent));
+      thisBrowserHost, aFeatures, aCalledFromJS, aFullZoom, aNextRemoteTabId,
+      !aSetOpener, getter_AddRefs(aNewRemoteTab));
   if (NS_WARN_IF(NS_FAILED(aResult))) {
     return IPC_OK();
   }
 
-  MOZ_ASSERT(aNewBrowserParent);
+  MOZ_ASSERT(aNewRemoteTab);
+  BrowserHost* newBrowserHost = BrowserHost::GetFrom(aNewRemoteTab.get());
+  BrowserParent* newBrowserParent = newBrowserHost->GetActor();
 
   // At this point, it's possible the inserted frameloader hasn't gone through
   // layout yet. To ensure that the dimensions that we send down when telling
@@ -4820,8 +4838,7 @@ mozilla::ipc::IPCResult ContentParent::CommonCreateWindow(
   // This involves doing a bit of gymnastics in order to get at the FrameLoader,
   // so we scope this to avoid polluting the main function scope.
   {
-    nsCOMPtr<Element> frameElement =
-        BrowserParent::GetFrom(aNewBrowserParent)->GetOwnerElement();
+    nsCOMPtr<Element> frameElement = newBrowserHost->GetOwnerElement();
     MOZ_ASSERT(frameElement);
     RefPtr<nsFrameLoaderOwner> frameLoaderOwner = do_QueryObject(frameElement);
     MOZ_ASSERT(frameLoaderOwner);
@@ -4833,8 +4850,7 @@ mozilla::ipc::IPCResult ContentParent::CommonCreateWindow(
   // If we were passed a name for the window which would override the default,
   // we should send it down to the new tab.
   if (nsContentUtils::IsOverridingWindowName(aName)) {
-    Unused
-        << BrowserParent::GetFrom(aNewBrowserParent)->SendSetWindowName(aName);
+    Unused << newBrowserParent->SendSetWindowName(aName);
   }
 
   // Don't send down the OriginAttributes if the content process is handling
@@ -4843,8 +4859,7 @@ mozilla::ipc::IPCResult ContentParent::CommonCreateWindow(
   // If we send it down in the non-async case, then we might set the
   // OriginAttributes after the document has already navigated.
   if (!aSetOpener) {
-    Unused << BrowserParent::GetFrom(aNewBrowserParent)
-                  ->SendSetOriginAttributes(openerOriginAttributes);
+    Unused << newBrowserParent->SendSetOriginAttributes(openerOriginAttributes);
   }
 
   if (aURIToLoad && aLoadURI) {
@@ -4853,7 +4868,7 @@ mozilla::ipc::IPCResult ContentParent::CommonCreateWindow(
       openerWindow = thisBrowserParent->GetParentWindowOuter();
     }
     nsCOMPtr<nsIBrowserDOMWindow> newBrowserDOMWin =
-        BrowserParent::GetFrom(aNewBrowserParent)->GetBrowserDOMWindow();
+        newBrowserParent->GetBrowserDOMWindow();
     if (NS_WARN_IF(!newBrowserDOMWin)) {
       aResult = NS_ERROR_ABORT;
       return IPC_OK();
@@ -4933,7 +4948,8 @@ mozilla::ipc::IPCResult ContentParent::RecvCreateWindow(
   if (sNextBrowserParents.GetAndRemove(nextRemoteTabId).valueOr(nullptr)) {
     cwi.windowOpened() = false;
   }
-  MOZ_ASSERT(BrowserParent::GetFrom(newRemoteTab) == newTab);
+  MOZ_ASSERT(BrowserHost::GetFrom(newRemoteTab.get()) ==
+             newTab->GetBrowserHost());
 
   newTab->SwapFrameScriptsFrom(cwi.frameScripts());
   newTab->MaybeShowFrame();
@@ -5029,8 +5045,7 @@ mozilla::ipc::IPCResult ContentParent::RecvInitOtherFamilyNames(
 }
 
 mozilla::ipc::IPCResult ContentParent::RecvSetupFamilyCharMap(
-    const uint32_t& aGeneration,
-    const mozilla::fontlist::Pointer& aFamilyPtr) {
+    const uint32_t& aGeneration, const mozilla::fontlist::Pointer& aFamilyPtr) {
   gfxPlatformFontList::PlatformFontList()->SetupFamilyCharMap(aGeneration,
                                                               aFamilyPtr);
   return IPC_OK();
@@ -5300,6 +5315,17 @@ void ContentParent::PaintTabWhileInterruptingJS(
       mHangMonitorActor, aBrowserParent, aForceRepaint, aEpoch);
 }
 
+void ContentParent::CancelContentJSExecutionIfRunning(
+    BrowserParent* aBrowserParent, nsIRemoteTab::NavigationType aNavigationType,
+    const CancelContentJSOptions& aCancelContentJSOptions) {
+  if (!mHangMonitorActor) {
+    return;
+  }
+  ProcessHangMonitor::CancelContentJSExecutionIfRunning(
+      mHangMonitorActor, aBrowserParent, aNavigationType,
+      aCancelContentJSOptions);
+}
+
 void ContentParent::UpdateCookieStatus(nsIChannel* aChannel) {
   PNeckoParent* neckoParent = LoneManagedOrNullAsserts(ManagedPNeckoParent());
   PCookieServiceParent* csParent =
@@ -5448,6 +5474,13 @@ mozilla::ipc::IPCResult ContentParent::RecvRecordDiscardedData(
     const mozilla::Telemetry::DiscardedData& aDiscardedData) {
   TelemetryIPC::RecordDiscardedData(GetTelemetryProcessID(mRemoteType),
                                     aDiscardedData);
+  return IPC_OK();
+}
+
+mozilla::ipc::IPCResult ContentParent::RecvRecordOrigin(
+    const uint32_t& aMetricId, const nsCString& aOrigin) {
+  Telemetry::RecordOrigin(static_cast<Telemetry::OriginMetricID>(aMetricId),
+                          aOrigin);
   return IPC_OK();
 }
 
@@ -5711,16 +5744,9 @@ mozilla::ipc::IPCResult ContentParent::RecvAttachBrowsingContext(
 
   child->Attach(/* aFromIPC */ true);
 
-  for (auto iter = child->Group()->ContentParentsIter(); !iter.Done();
-       iter.Next()) {
-    nsRefPtrHashKey<ContentParent>* entry = iter.Get();
-    if (entry->GetKey() == this) {
-      continue;
-    }
-
-    Unused << entry->GetKey()->SendAttachBrowsingContext(
-        child->GetIPCInitializer());
-  }
+  child->Group()->EachOtherParent(this, [&](ContentParent* aParent) {
+    Unused << aParent->SendAttachBrowsingContext(child->GetIPCInitializer());
+  });
 
   return IPC_OK();
 }
@@ -5748,15 +5774,9 @@ mozilla::ipc::IPCResult ContentParent::RecvDetachBrowsingContext(
 
   aContext->Detach(/* aFromIPC */ true);
 
-  for (auto iter = aContext->Group()->ContentParentsIter(); !iter.Done();
-       iter.Next()) {
-    nsRefPtrHashKey<ContentParent>* entry = iter.Get();
-    if (entry->GetKey() == this) {
-      continue;
-    }
-
-    Unused << entry->GetKey()->SendDetachBrowsingContext(aContext);
-  }
+  aContext->Group()->EachOtherParent(this, [&](ContentParent* aParent) {
+    Unused << aParent->SendDetachBrowsingContext(aContext);
+  });
 
   return IPC_OK();
 }
@@ -5784,15 +5804,9 @@ mozilla::ipc::IPCResult ContentParent::RecvCacheBrowsingContextChildren(
 
   aContext->CacheChildren(/* aFromIPC */ true);
 
-  for (auto iter = aContext->Group()->ContentParentsIter(); !iter.Done();
-       iter.Next()) {
-    nsRefPtrHashKey<ContentParent>* entry = iter.Get();
-    if (entry->GetKey() == this) {
-      continue;
-    }
-
-    Unused << entry->GetKey()->SendCacheBrowsingContextChildren(aContext);
-  }
+  aContext->Group()->EachOtherParent(this, [&](ContentParent* aParent) {
+    Unused << aParent->SendCacheBrowsingContextChildren(aContext);
+  });
 
   return IPC_OK();
 }
@@ -5827,16 +5841,9 @@ mozilla::ipc::IPCResult ContentParent::RecvRestoreBrowsingContextChildren(
 
   aContext->RestoreChildren(std::move(children), /* aFromIPC */ true);
 
-  for (auto iter = aContext->Group()->ContentParentsIter(); !iter.Done();
-       iter.Next()) {
-    nsRefPtrHashKey<ContentParent>* entry = iter.Get();
-    if (entry->GetKey() == this) {
-      continue;
-    }
-
-    Unused << entry->GetKey()->SendRestoreBrowsingContextChildren(aContext,
-                                                                  aChildren);
-  }
+  aContext->Group()->EachOtherParent(this, [&](ContentParent* aParent) {
+    Unused << aParent->SendRestoreBrowsingContextChildren(aContext, aChildren);
+  });
 
   return IPC_OK();
 }
@@ -5965,16 +5972,11 @@ mozilla::ipc::IPCResult ContentParent::RecvCommitBrowsingContextTransaction(
     return IPC_FAIL_NO_REASON(this);
   }
 
-  for (auto iter = aContext->Group()->ContentParentsIter(); !iter.Done();
-       iter.Next()) {
-    auto* entry = iter.Get();
-    ContentParent* parent = entry->GetKey();
-    if (parent != this) {
-      Unused << parent->SendCommitBrowsingContextTransaction(
-          aContext, aTransaction,
-          aContext->Canonical()->GetFieldEpochsForChild(parent));
-    }
-  }
+  aContext->Group()->EachOtherParent(this, [&](ContentParent* aParent) {
+    Unused << aParent->SendCommitBrowsingContextTransaction(
+        aContext, aTransaction,
+        aContext->Canonical()->GetFieldEpochsForChild(aParent));
+  });
 
   aTransaction.Apply(aContext, this);
   aContext->Canonical()->SetFieldEpochsForChild(this, aEpochs);

@@ -6,6 +6,7 @@
 
 #include "mozilla/dom/JSWindowActorBinding.h"
 #include "mozilla/dom/JSWindowActorChild.h"
+#include "mozilla/dom/ContentChild.h"
 #include "mozilla/dom/WindowGlobalChild.h"
 #include "mozilla/dom/WindowGlobalParent.h"
 #include "mozilla/dom/MessageManagerBinding.h"
@@ -14,6 +15,8 @@
 
 namespace mozilla {
 namespace dom {
+
+JSWindowActorChild::~JSWindowActorChild() { MOZ_ASSERT(!mManager); }
 
 JSObject* JSWindowActorChild::WrapObject(JSContext* aCx,
                                          JS::Handle<JSObject*> aGivenProto) {
@@ -58,7 +61,7 @@ class AsyncMessageToParent : public Runnable {
 void JSWindowActorChild::SendRawMessage(const JSWindowActorMessageMeta& aMeta,
                                         ipc::StructuredCloneData&& aData,
                                         ErrorResult& aRv) {
-  if (NS_WARN_IF(!mManager || mManager->IsClosed())) {
+  if (NS_WARN_IF(!mCanSend || !mManager || mManager->IsClosed())) {
     aRv.Throw(NS_ERROR_DOM_INVALID_STATE_ERR);
     return;
   }
@@ -104,12 +107,30 @@ BrowsingContext* JSWindowActorChild::GetBrowsingContext(ErrorResult& aRv) {
   return mManager->BrowsingContext();
 }
 
+nsIDocShell* JSWindowActorChild::GetDocShell(ErrorResult& aRv) {
+  if (BrowsingContext* bc = GetBrowsingContext(aRv)) {
+    return bc->GetDocShell();
+  }
+
+  return nullptr;
+}
+
 Nullable<WindowProxyHolder> JSWindowActorChild::GetContentWindow(
     ErrorResult& aRv) {
   if (BrowsingContext* bc = GetBrowsingContext(aRv)) {
     return WindowProxyHolder(bc);
   }
   return nullptr;
+}
+
+void JSWindowActorChild::StartDestroy() {
+  JSWindowActor::StartDestroy();
+  mCanSend = false;
+}
+
+void JSWindowActorChild::AfterDestroy() {
+  JSWindowActor::AfterDestroy();
+  mManager = nullptr;
 }
 
 NS_IMPL_CYCLE_COLLECTION_INHERITED(JSWindowActorChild, JSWindowActor, mManager)

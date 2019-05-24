@@ -102,13 +102,14 @@ MOZ_MUST_USE bool DeserializeModule(JSContext* cx, const Bytes& serialized,
 // functions for extracting the instance and func-index of a wasm function
 // can be used for both wasm and asm.js, however.
 
-extern bool IsWasmExportedFunction(JSFunction* fun);
+bool IsWasmExportedFunction(JSFunction* fun);
+bool CheckFuncRefValue(JSContext* cx, HandleValue v, MutableHandleFunction fun);
 
-extern Instance& ExportedFunctionToInstance(JSFunction* fun);
-extern WasmInstanceObject* ExportedFunctionToInstanceObject(JSFunction* fun);
-extern uint32_t ExportedFunctionToFuncIndex(JSFunction* fun);
+Instance& ExportedFunctionToInstance(JSFunction* fun);
+WasmInstanceObject* ExportedFunctionToInstanceObject(JSFunction* fun);
+uint32_t ExportedFunctionToFuncIndex(JSFunction* fun);
 
-extern bool IsSharedWasmMemoryObject(JSObject* obj);
+bool IsSharedWasmMemoryObject(JSObject* obj);
 
 }  // namespace wasm
 
@@ -176,8 +177,7 @@ class WasmGlobalObject : public NativeObject {
     int64_t i64;
     float f32;
     double f64;
-    JSObject* ref;  // Note, this breaks an abstraction boundary
-    wasm::AnyRef anyref;
+    wasm::AnyRef ref;
     Cell() : i64(0) {}
     ~Cell() {}
   };
@@ -232,7 +232,7 @@ class WasmInstanceObject : public NativeObject {
   // to avoid holding scope objects alive. The scopes are normally created
   // during debugging.
   using ScopeMap =
-      JS::WeakCache<GCHashMap<uint32_t, ReadBarriered<WasmFunctionScope*>,
+      JS::WeakCache<GCHashMap<uint32_t, WeakHeapPtr<WasmFunctionScope*>,
                               DefaultHasher<uint32_t>, SystemAllocPolicy>>;
   ScopeMap& scopes() const;
 
@@ -293,8 +293,8 @@ class WasmMemoryObject : public NativeObject {
   static uint32_t growShared(HandleWasmMemoryObject memory, uint32_t delta);
 
   using InstanceSet = JS::WeakCache<GCHashSet<
-      ReadBarrieredWasmInstanceObject,
-      MovableCellHasher<ReadBarrieredWasmInstanceObject>, SystemAllocPolicy>>;
+      WeakHeapPtrWasmInstanceObject,
+      MovableCellHasher<WeakHeapPtrWasmInstanceObject>, SystemAllocPolicy>>;
   bool hasObservers() const;
   InstanceSet& observers() const;
   InstanceSet* getOrCreateObservers(JSContext* cx);

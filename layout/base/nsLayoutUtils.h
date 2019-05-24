@@ -62,6 +62,7 @@ struct nsStyleFont;
 struct nsOverflowAreas;
 
 namespace mozilla {
+struct AspectRatio;
 class ComputedStyle;
 class PresShell;
 enum class PseudoStyleType : uint8_t;
@@ -146,6 +147,7 @@ enum class ReparentingDirection {
  * is not to define multiple copies of the same static helper.
  */
 class nsLayoutUtils {
+  typedef mozilla::AspectRatio AspectRatio;
   typedef mozilla::ComputedStyle ComputedStyle;
   typedef mozilla::LengthPercentage LengthPercentage;
   typedef mozilla::LengthPercentageOrAuto LengthPercentageOrAuto;
@@ -431,15 +433,6 @@ class nsLayoutUtils {
    * for the inner table frame rather than for its wrapper frame.
    */
   static bool IsPrimaryStyleFrame(const nsIFrame* aFrame);
-
-  /**
-   * Gets the real primary frame associated with the content object.
-   *
-   * In the case of absolutely positioned elements and floated elements,
-   * the real primary frame is the frame that is out of the flow and not the
-   * placeholder frame.
-   */
-  static nsIFrame* GetRealPrimaryFrameFor(const nsIContent* aContent);
 
 #ifdef DEBUG
   // TODO: remove, see bug 598468.
@@ -1326,7 +1319,7 @@ class nsLayoutUtils {
    */
   static nsRect ComputeObjectDestRect(const nsRect& aConstraintRect,
                                       const IntrinsicSize& aIntrinsicSize,
-                                      const nsSize& aIntrinsicRatio,
+                                      const AspectRatio& aIntrinsicRatio,
                                       const nsStylePosition* aStylePos,
                                       nsPoint* aAnchorPoint = nullptr);
 
@@ -1404,6 +1397,15 @@ class nsLayoutUtils {
   static nsIFrame* GetParentOrPlaceholderForCrossDoc(nsIFrame* aFrame);
 
   /**
+   * Returns the frame that would act as the parent of aFrame when
+   * descending through the frame tree in display list building.
+   * Usually the same as GetParentOrPlaceholderForCrossDoc, except
+   * that pushed floats are treated as children of their containing
+   * block.
+   */
+  static nsIFrame* GetDisplayListParent(nsIFrame* aFrame);
+
+  /**
    * Get a frame's next-in-flow, or, if it doesn't have one, its
    * block-in-inline-split sibling.
    */
@@ -1456,7 +1458,7 @@ class nsLayoutUtils {
   static const auto PREF_ISIZE = IntrinsicISizeType::PrefISize;
   enum {
     IGNORE_PADDING = 0x01,
-    BAIL_IF_REFLOW_NEEDED = 0x02,  // returns NS_INTRINSIC_WIDTH_UNKNOWN if so
+    BAIL_IF_REFLOW_NEEDED = 0x02,  // returns NS_INTRINSIC_ISIZE_UNKNOWN if so
     MIN_INTRINSIC_ISIZE = 0x04,  // use min-width/height instead of width/height
   };
   static nscoord IntrinsicForAxis(
@@ -1926,8 +1928,8 @@ class nsLayoutUtils {
    */
   static void ComputeSizeForDrawing(imgIContainer* aImage,
                                     CSSIntSize& aImageSize,
-                                    nsSize& aIntrinsicRatio, bool& aGotWidth,
-                                    bool& aGotHeight);
+                                    AspectRatio& aIntrinsicRatio,
+                                    bool& aGotWidth, bool& aGotHeight);
 
   /**
    * Given an imgIContainer, this method attempts to obtain an intrinsic
@@ -2830,7 +2832,7 @@ class nsLayoutUtils {
    * are async scrollable.
    */
   static void SetZeroMarginDisplayPortOnAsyncScrollableAncestors(
-      nsIFrame* aFrame, RepaintMode aRepaintMode);
+      nsIFrame* aFrame);
   /**
    * Finds the closest ancestor async scrollable frame from aFrame that has a
    * displayport and attempts to trigger the displayport expiry on that
@@ -3019,18 +3021,11 @@ class nsLayoutUtils {
                                 mozilla::LookAndFeel::FontID aFontID,
                                 const nsFont* aDefaultVariableFont);
 
-  static void ComputeFontFeatures(const nsCSSValuePairList* aFeaturesList,
-                                  nsTArray<gfxFontFeature>& aFeatureSettings);
-
-  static void ComputeFontVariations(
-      const nsCSSValuePairList* aVariationsList,
-      nsTArray<gfxFontVariation>& aVariationSettings);
-
   static uint32_t ParseFontLanguageOverride(const nsAString& aLangTag);
 
   /**
    * Returns true if there are any preferences or overrides that indicate a
-   * need to create a MobileViewportManager.
+   * need to handle <meta name="viewport"> tags.
    */
   static bool ShouldHandleMetaViewport(const mozilla::dom::Document*);
 

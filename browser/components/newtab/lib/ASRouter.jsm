@@ -13,15 +13,19 @@ XPCOMUtils.defineLazyModuleGetters(this, {
   AppConstants: "resource://gre/modules/AppConstants.jsm",
   OS: "resource://gre/modules/osfile.jsm",
   BookmarkPanelHub: "resource://activity-stream/lib/BookmarkPanelHub.jsm",
+  SnippetsTestMessageProvider: "resource://activity-stream/lib/SnippetsTestMessageProvider.jsm",
+  PanelTestProvider: "resource://activity-stream/lib/PanelTestProvider.jsm",
 });
 const {ASRouterActions: ra, actionTypes: at, actionCreators: ac} = ChromeUtils.import("resource://activity-stream/common/Actions.jsm");
 const {CFRMessageProvider} = ChromeUtils.import("resource://activity-stream/lib/CFRMessageProvider.jsm");
 const {OnboardingMessageProvider} = ChromeUtils.import("resource://activity-stream/lib/OnboardingMessageProvider.jsm");
-const {SnippetsTestMessageProvider} = ChromeUtils.import("resource://activity-stream/lib/SnippetsTestMessageProvider.jsm");
 const {RemoteSettings} = ChromeUtils.import("resource://services-settings/remote-settings.js");
 const {CFRPageActions} = ChromeUtils.import("resource://activity-stream/lib/CFRPageActions.jsm");
+const {AttributionCode} = ChromeUtils.import("resource:///modules/AttributionCode.jsm");
 
 ChromeUtils.defineModuleGetter(this, "ASRouterPreferences",
+  "resource://activity-stream/lib/ASRouterPreferences.jsm");
+ChromeUtils.defineModuleGetter(this, "TARGETING_PREFERENCES",
   "resource://activity-stream/lib/ASRouterPreferences.jsm");
 ChromeUtils.defineModuleGetter(this, "ASRouterTargeting",
   "resource://activity-stream/lib/ASRouterTargeting.jsm");
@@ -29,7 +33,40 @@ ChromeUtils.defineModuleGetter(this, "QueryCache",
   "resource://activity-stream/lib/ASRouterTargeting.jsm");
 ChromeUtils.defineModuleGetter(this, "ASRouterTriggerListeners",
   "resource://activity-stream/lib/ASRouterTriggerListeners.jsm");
-const {AttributionCode} = ChromeUtils.import("resource:///modules/AttributionCode.jsm");
+ChromeUtils.defineModuleGetter(this, "TelemetryEnvironment",
+  "resource://gre/modules/TelemetryEnvironment.jsm");
+ChromeUtils.defineModuleGetter(this, "ClientEnvironment",
+  "resource://normandy/lib/ClientEnvironment.jsm");
+ChromeUtils.defineModuleGetter(this, "Sampling",
+  "resource://gre/modules/components-utils/Sampling.jsm");
+
+const TRAILHEAD_CONFIG = {
+  OVERRIDE_PREF: "trailhead.firstrun.branches",
+  DID_SEE_ABOUT_WELCOME_PREF: "trailhead.firstrun.didSeeAboutWelcome",
+  INTERRUPTS_EXPERIMENT_PREF: "trailhead.firstrun.interruptsExperiment",
+  TRIPLETS_ENROLLED_PREF: "trailhead.firstrun.tripletsEnrolled",
+  BRANCHES: {
+    interrupts: [
+      ["control"],
+      ["join"],
+      ["sync"],
+      ["nofirstrun"],
+      ["cards"],
+    ],
+    triplets: [
+      ["supercharge"],
+      ["payoff"],
+      ["multidevice"],
+      ["privacy"],
+    ],
+  },
+  LOCALES: ["en-US", "en-GB", "en-CA", "de", "de-DE", "fr", "fr-FR"],
+  EXPERIMENT_RATIOS: [
+    ["", 0],
+    ["interrupts", 1],
+    ["triplets", 3],
+  ],
+};
 
 const INCOMING_MESSAGE_NAME = "ASRouter:child-to-parent";
 const OUTGOING_MESSAGE_NAME = "ASRouter:parent-to-child";
@@ -44,8 +81,19 @@ const SNIPPETS_ENDPOINT_WHITELIST = "browser.newtab.activity-stream.asrouter.whi
 // Max possible impressions cap for any message
 const MAX_MESSAGE_LIFETIME_CAP = 100;
 
-const LOCAL_MESSAGE_PROVIDERS = {OnboardingMessageProvider, CFRMessageProvider, SnippetsTestMessageProvider};
+const LOCAL_MESSAGE_PROVIDERS = {OnboardingMessageProvider, CFRMessageProvider};
 const STARTPAGE_VERSION = "6";
+
+/**
+ * chooseBranch<T> -  Choose an item from a list of "branches" pseudorandomly using a seed / ratio configuration
+ * @param seed {string} A unique seed for the randomizer
+ * @param branches {Array<[T, number?]>} A list of branches, where branch[0] is any item and branch[1] is the ratio
+ * @returns {T} An randomly chosen item in a branch
+ */
+async function chooseBranch(seed, branches) {
+  const ratios = branches.map(([item, ratio]) => ((typeof ratio !== "undefined") ? ratio : 1));
+  return branches[await Sampling.ratioSample(seed, ratios)][0];
+}
 
 const MessageLoaderUtils = {
   STARTPAGE_VERSION,
@@ -344,21 +392,41 @@ class _ASRouter {
       providerBlockList: [],
       messageImpressions: {},
       providerImpressions: {},
+      trailheadInitialized: false,
+      trailheadInterrupt: "",
+      trailheadTriplet: "",
       messages: [],
       errors: [],
     };
     this._triggerHandler = this._triggerHandler.bind(this);
     this._localProviders = localProviders;
     this.onMessage = this.onMessage.bind(this);
+    this.handleMessageRequest = this.handleMessageRequest.bind(this);
+    this.addImpression = this.addImpression.bind(this);
     this._handleTargetingError = this._handleTargetingError.bind(this);
     this.onPrefChange = this.onPrefChange.bind(this);
   }
 
-  // Update message providers and fetch new messages on pref change
-  async onPrefChange() {
-    this._updateMessageProviders();
-    await this.loadMessagesFromAllProviders();
-    this.dispatchToAS(ac.BroadcastToContent({type: at.AS_ROUTER_PREF_CHANGED, data: ASRouterPreferences.specialConditions}));
+  async onPrefChange(prefName) {
+    if (TARGETING_PREFERENCES.includes(prefName)) {
+      // Notify all tabs of messages that have become invalid after pref change
+      const invalidMessages = [];
+      for (const msg of this._getUnblockedMessages()) {
+        if (!msg.targeting) {
+          continue;
+        }
+        const isMatch = await ASRouterTargeting.isMatch(msg.targeting);
+        if (!isMatch) {
+          invalidMessages.push(msg.id);
+        }
+      }
+      this.messageChannel.sendAsyncMessage(OUTGOING_MESSAGE_NAME, {type: at.AS_ROUTER_TARGETING_UPDATE, data: invalidMessages});
+    } else {
+      // Update message providers and fetch new messages on pref change
+      this._loadLocalProviders();
+      this._updateMessageProviders();
+      await this.loadMessagesFromAllProviders();
+    }
   }
 
   // Replace all frequency time period aliases with their millisecond values
@@ -520,7 +588,12 @@ class _ASRouter {
 
     ASRouterPreferences.init();
     ASRouterPreferences.addListener(this.onPrefChange);
-    BookmarkPanelHub.init(this.dispatch);
+    BookmarkPanelHub.init(this.handleMessageRequest, this.addImpression, this.dispatch);
+
+    this._loadLocalProviders();
+
+    // We need to check whether to set up telemetry for trailhead
+    await this.setupTrailhead();
 
     const messageBlockList = await this._storage.get("messageBlockList") || [];
     const providerBlockList = await this._storage.get("providerBlockList") || [];
@@ -579,6 +652,17 @@ class _ASRouter {
     }
   }
 
+  _loadLocalProviders() {
+    // If we're in ASR debug mode add the local test providers
+    if (ASRouterPreferences.devtoolsEnabled) {
+      this._localProviders = {
+        ...this._localProviders,
+        SnippetsTestMessageProvider,
+        PanelTestProvider,
+      };
+    }
+  }
+
   /**
    * Used by ASRouter Admin returns all ASRouterTargeting.Environment
    * and ASRouter._getMessagesContext parameters and values
@@ -621,12 +705,117 @@ class _ASRouter {
     }
   }
 
+  async _hasAddonAttributionData() {
+    try {
+      const data = await AttributionCode.getAttrDataAsync() || {};
+      return data.source === "addons.mozilla.org";
+    } catch (e) {
+      return false;
+    }
+  }
+
+  /**
+   * _generateTrailheadBranches - Generates and returns Trailhead configuration and chooses an experiment
+   *                             based on clientID and locale.
+   * @returns {{experiment: string, interrupt: string, triplet: string}}
+   */
+  async _generateTrailheadBranches() {
+    let experiment = "";
+    let interrupt;
+    let triplet;
+
+    // If a value is set in TRAILHEAD_OVERRIDE_PREF, it will be returned and no experiment will be set.
+    const overrideValue = Services.prefs.getStringPref(TRAILHEAD_CONFIG.OVERRIDE_PREF, "");
+    if (overrideValue) {
+      [interrupt, triplet] = overrideValue.split("-");
+      return {experiment, interrupt, triplet: triplet || ""};
+    }
+
+    const locale = Services.locale.appLocaleAsLangTag;
+
+    if (TRAILHEAD_CONFIG.LOCALES.includes(locale) && !(await this._hasAddonAttributionData())) {
+      const {userId} = ClientEnvironment;
+      experiment = await chooseBranch(`${userId}-trailhead-experiments`, TRAILHEAD_CONFIG.EXPERIMENT_RATIOS);
+
+      // For the interrupts experiment,
+      // we randomly assign an interrupt and always use the "supercharge" triplet.
+      if (experiment === "interrupts") {
+        interrupt =  await chooseBranch(`${userId}-interrupts-branch`, TRAILHEAD_CONFIG.BRANCHES.interrupts);
+        if (["join", "sync", "cards"].includes(interrupt)) {
+          triplet = "supercharge";
+        }
+
+      // For the triplets experiment or non-experiment experience,
+      // we randomly assign a triplet and always use the "join" interrupt.
+      } else {
+        interrupt = "join";
+        triplet = await chooseBranch(`${userId}-triplets-branch`, TRAILHEAD_CONFIG.BRANCHES.triplets);
+      }
+    } else {
+      // If the user is not in a trailhead-compabtible locale, return the control experience and no experiment.
+      interrupt = "control";
+    }
+
+    return {experiment, interrupt, triplet};
+  }
+
+  // Dispatch a TRAILHEAD_ENROLL_EVENT action
+  _sendTrailheadEnrollEvent(data) {
+    this.dispatchToAS({
+      type: at.TRAILHEAD_ENROLL_EVENT,
+      data,
+    });
+  }
+
+  async setupTrailhead() {
+    // Don't initialize
+    if (this.state.trailheadInitialized || !Services.prefs.getBoolPref(TRAILHEAD_CONFIG.DID_SEE_ABOUT_WELCOME_PREF, false)) {
+      return;
+    }
+
+    const {experiment, interrupt, triplet} = await this._generateTrailheadBranches();
+    await this.setState({trailheadInitialized: true, trailheadInterrupt: interrupt, trailheadTriplet: triplet});
+
+    if (experiment) {
+      // In order for ping centre to pick this up, it MUST contain a substring activity-stream
+      const experimentName = `activity-stream-firstrun-trailhead-${experiment}`;
+
+      TelemetryEnvironment.setExperimentActive(
+        experimentName,
+        experiment === "interrupts" ? interrupt : triplet,
+        {type: "as-firstrun"}
+      );
+
+      // On the first time setting the interrupts experiment, expose the branch
+      // for normandy to target for survey study, and send out the enrollment ping.
+      if (experiment === "interrupts" &&
+          !Services.prefs.prefHasUserValue(TRAILHEAD_CONFIG.INTERRUPTS_EXPERIMENT_PREF)) {
+        Services.prefs.setStringPref(TRAILHEAD_CONFIG.INTERRUPTS_EXPERIMENT_PREF, interrupt);
+        this._sendTrailheadEnrollEvent({experiment: experimentName, type: "as-firstrun", branch: interrupt});
+      }
+
+      // On the first time setting the triplets experiment, send out the enrollment ping.
+      if (experiment === "triplets" &&
+          !Services.prefs.getBoolPref(TRAILHEAD_CONFIG.TRIPLETS_ENROLLED_PREF, false)) {
+        Services.prefs.setBoolPref(TRAILHEAD_CONFIG.TRIPLETS_ENROLLED_PREF, true);
+        this._sendTrailheadEnrollEvent({experiment: experimentName, type: "as-firstrun", branch: triplet});
+      }
+    }
+  }
+
   // Return an object containing targeting parameters used to select messages
   _getMessagesContext() {
-    const {previousSessionEnd} = this.state;
+    const {previousSessionEnd, trailheadInterrupt, trailheadTriplet} = this.state;
+
     return {
       get previousSessionEnd() {
         return previousSessionEnd;
+      },
+      get trailheadInterrupt() {
+        return trailheadInterrupt;
+      },
+      get trailheadTriplet() {
+        return trailheadTriplet;
       },
     };
   }
@@ -693,18 +882,34 @@ class _ASRouter {
   }
 
   async _getBundledMessages(originalMessage, target, trigger, force = false) {
-    let result = [{content: originalMessage.content, id: originalMessage.id, order: originalMessage.order || 0}];
+    let result = [];
+    let bundleLength;
+    let bundleTemplate;
+    let originalId;
+
+    if (originalMessage.includeBundle) {
+      // The original message is not part of the bundle, so don't include it
+      bundleLength = originalMessage.includeBundle.length;
+      bundleTemplate =  originalMessage.includeBundle.template;
+    } else {
+      // The original message is part of the bundle
+      bundleLength = originalMessage.bundled;
+      bundleTemplate =  originalMessage.template;
+      originalId = originalMessage.id;
+      // Add in a copy of the first message
+      result.push({content: originalMessage.content, id: originalMessage.id, order: originalMessage.order || 0});
+    }
 
     // First, find all messages of same template. These are potential matching targeting candidates
     let bundledMessagesOfSameTemplate = this._getUnblockedMessages()
-                                          .filter(msg => msg.bundled && msg.template === originalMessage.template && msg.id !== originalMessage.id);
+      .filter(msg => msg.bundled && msg.template === bundleTemplate && msg.id !== originalId);
 
     if (force) {
       // Forcefully show the messages without targeting matching - this is for about:newtab#asrouter to show the messages
       for (const message of bundledMessagesOfSameTemplate) {
         result.push({content: message.content, id: message.id});
         // Stop once we have enough messages to fill a bundle
-        if (result.length === originalMessage.bundled) {
+        if (result.length === bundleLength) {
           break;
         }
       }
@@ -721,14 +926,14 @@ class _ASRouter {
         result.push({content: message.content, id: message.id, order: message.order || 0});
         bundledMessagesOfSameTemplate.splice(bundledMessagesOfSameTemplate.findIndex(msg => msg.id === message.id), 1);
         // Stop once we have enough messages to fill a bundle
-        if (result.length === originalMessage.bundled) {
+        if (result.length === bundleLength) {
           break;
         }
       }
     }
 
     // If we did not find enough messages to fill the bundle, do not send the bundle down
-    if (result.length < originalMessage.bundled) {
+    if (result.length < bundleLength) {
       return null;
     }
 
@@ -737,7 +942,12 @@ class _ASRouter {
     // handle finding these strings on its own. See bug 1488973
     const extraTemplateStrings = await this._extraTemplateStrings(originalMessage);
 
-    return {bundle: this._orderBundle(result), ...(extraTemplateStrings && {extraTemplateStrings}), provider: originalMessage.provider, template: originalMessage.template};
+    return {
+      bundle: this._orderBundle(result),
+      ...(extraTemplateStrings && {extraTemplateStrings}),
+      provider: originalMessage.provider,
+      template: originalMessage.template,
+    };
   }
 
   async _extraTemplateStrings(originalMessage) {
@@ -763,6 +973,29 @@ class _ASRouter {
     );
   }
 
+  /**
+   * Route messages based on template to the correct module that can display them
+   */
+  routeMessageToTarget(message, target, trigger, force = false) {
+    switch (message.template) {
+      case "cfr_doorhanger":
+        if (force) {
+          CFRPageActions.forceRecommendation(target, message, this.dispatch);
+        } else {
+          CFRPageActions.addRecommendation(target, trigger.param.host, message, this.dispatch);
+        }
+        break;
+      case "fxa_bookmark_panel":
+        if (force) {
+          BookmarkPanelHub._forceShowMessage(message);
+        }
+        break;
+      default:
+        target.sendAsyncMessage(OUTGOING_MESSAGE_NAME, {type: "SET_MESSAGE", data: message});
+        break;
+    }
+  }
+
   async _sendMessageToTarget(message, target, trigger, force = false) {
     // No message is available, so send CLEAR_ALL.
     if (!message) {
@@ -774,19 +1007,20 @@ class _ASRouter {
     } else if (message.bundled) {
       const bundledMessages = await this._getBundledMessages(message, target, trigger, force);
       const action = bundledMessages ? {type: "SET_BUNDLED_MESSAGES", data: bundledMessages} : {type: "CLEAR_ALL"};
-      target.sendAsyncMessage(OUTGOING_MESSAGE_NAME, action);
+      try {
+        target.sendAsyncMessage(OUTGOING_MESSAGE_NAME, action);
+      } catch (e) {}
 
-    // CFR doorhanger
-    } else if (message.template === "cfr_doorhanger") {
-      if (force) {
-        CFRPageActions.forceRecommendation(target, message, this.dispatch);
-      } else {
-        CFRPageActions.addRecommendation(target, trigger.param.host, message, this.dispatch);
-      }
-
-    // New tab single messages
+    // For nested bundled messages, look for the desired bundle
+    } else if (message.includeBundle) {
+      const bundledMessages = await this._getBundledMessages(message, target, message.includeBundle.trigger, force);
+      try {
+        target.sendAsyncMessage(OUTGOING_MESSAGE_NAME, {type: "SET_MESSAGE", data: {...message, bundle: bundledMessages && bundledMessages.bundle}});
+      } catch (e) {}
     } else {
-      target.sendAsyncMessage(OUTGOING_MESSAGE_NAME, {type: "SET_MESSAGE", data: message});
+      try {
+        this.routeMessageToTarget(message, target, trigger, force);
+      } catch (e) {}
     }
   }
 
@@ -904,12 +1138,9 @@ class _ASRouter {
     await this._sendMessageToTarget(message, target, trigger);
   }
 
-  async handleMessageRequest(trigger, target) {
+  handleMessageRequest(trigger) {
     const msgs = this._getUnblockedMessages();
-    const message = await this._findMessage(
-      msgs.filter(m => m.trigger && m.trigger.id === trigger.id),
-      trigger);
-    target.sendMessage({message});
+    return this._findMessage(msgs.filter(m => m.trigger && m.trigger.id === trigger.id), trigger);
   }
 
   async setMessageById(id, target, force = true, action = {}) {
@@ -1110,18 +1341,9 @@ class _ASRouter {
         target.browser.ownerGlobal.ConfirmationHint.show(tab, "pinTab", {showDescription: true});
         break;
       case ra.SHOW_FIREFOX_ACCOUNTS:
-        let url;
-        const entrypoint = action.entrypoint || "snippets";
-        switch (action.method) {
-          case "emailFirst":
-            url = await FxAccounts.config.promiseEmailFirstURI(entrypoint);
-            break;
-          default:
-            url = await FxAccounts.config.promiseSignUpURI(entrypoint);
-            break;
-        }
-        const where = action.where || "current";
-        target.browser.ownerGlobal.openLinkIn(url, where, {
+        const url = await FxAccounts.config.promiseSignUpURI("snippets");
+        // We want to replace the current tab.
+        target.browser.ownerGlobal.openLinkIn(url, "current", {
           private: false,
           triggeringPrincipal: Services.scriptSecurityManager.createNullPrincipal({}),
           csp: null,
@@ -1134,6 +1356,7 @@ class _ASRouter {
     this.onMessage({data: action, target});
   }
 
+  /* eslint-disable complexity */
   async onMessage({data: action, target}) {
     switch (action.type) {
       case "USER_ACTION":
@@ -1148,6 +1371,13 @@ class _ASRouter {
         if (action.data && action.data.endpoint) {
           await this._addPreviewEndpoint(action.data.endpoint.url, target.portID);
         }
+
+        // Special experiment intialization for trailhead
+        if (action.data && action.data.trigger && action.data.trigger.id === "firstRun") {
+          Services.prefs.setBoolPref(TRAILHEAD_CONFIG.DID_SEE_ABOUT_WELCOME_PREF, true);
+          await this.setupTrailhead();
+        }
+
         // Check if any updates are needed first
         await this.loadMessagesFromAllProviders();
         await this.sendNextMessage(target, (action.data && action.data.trigger) || {});
@@ -1243,9 +1473,6 @@ class _ASRouter {
       case "FORCE_ATTRIBUTION":
         this.forceAttribution(action.data);
         break;
-      case "MESSAGE_REQUEST":
-        this.handleMessageRequest(action.data.trigger, target);
-        break;
       default:
         Cu.reportError("Unknown message received");
         break;
@@ -1253,6 +1480,8 @@ class _ASRouter {
   }
 }
 this._ASRouter = _ASRouter;
+this.chooseBranch = chooseBranch;
+this.TRAILHEAD_CONFIG = TRAILHEAD_CONFIG;
 
 /**
  * ASRouter - singleton instance of _ASRouter that controls all messages
@@ -1260,4 +1489,4 @@ this._ASRouter = _ASRouter;
  */
 this.ASRouter = new _ASRouter();
 
-const EXPORTED_SYMBOLS = ["_ASRouter", "ASRouter", "MessageLoaderUtils"];
+const EXPORTED_SYMBOLS = ["_ASRouter", "ASRouter", "MessageLoaderUtils", "chooseBranch", "TRAILHEAD_CONFIG"];

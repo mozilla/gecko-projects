@@ -369,6 +369,10 @@ var SessionStore = {
     return SessionStoreInternal.navigateAndRestore(tab, loadArguments, historyIndex);
   },
 
+  updateSessionStoreFromTablistener(aBrowser, aData) {
+    return SessionStoreInternal.updateSessionStoreFromTablistener(aBrowser, aData);
+  },
+
   getSessionHistory(tab, updatedCallback) {
     return SessionStoreInternal.getSessionHistory(tab, updatedCallback);
   },
@@ -643,7 +647,7 @@ var SessionStoreInternal = {
     let state;
     let ss = SessionStartup;
 
-    if (ss.doRestore() ||
+    if (ss.willRestore() ||
         ss.sessionType == ss.DEFER_SESSION) {
       state = ss.state;
     }
@@ -674,7 +678,7 @@ var SessionStoreInternal = {
           // restore it
           LastSession.setState(state.lastSessionState);
 
-          if (ss.previousSessionCrashed) {
+          if (ss.willRestoreAsCrashed()) {
             this._recentCrashes = (state.session &&
                                    state.session.recentCrashes || 0) + 1;
 
@@ -815,6 +819,23 @@ var SessionStoreInternal = {
       case "http-on-may-change-process":
         this.onMayChangeProcess(aSubject);
         break;
+    }
+  },
+
+  updateSessionStoreFromTablistener(aBrowser, aData) {
+    if (aBrowser.permanentKey == undefined) {
+      return;
+    }
+
+    TabState.update(aBrowser, aData);
+    let win = aBrowser.ownerGlobal;
+    this.saveStateDelayed(win);
+
+    if (aData.flushID) {
+      // This is an update kicked off by an async flush request. Notify the
+      // TabStateFlusher so that it can finish the request and notify its
+      // consumer that's waiting for the flush to be done.
+      TabStateFlusher.resolve(aBrowser, aData.flushID);
     }
   },
 
@@ -1044,7 +1065,9 @@ var SessionStoreInternal = {
         this.saveStateDelayed(win);
         break;
       case "oop-browser-crashed":
-        this.onBrowserCrashed(target);
+        if (aEvent.isTopFrame) {
+          this.onBrowserCrashed(target);
+        }
         break;
       case "XULFrameLoaderCreated":
         if (target.namespaceURI == NS_XUL &&
@@ -1222,7 +1245,7 @@ var SessionStoreInternal = {
 
       if (closedWindowState) {
         let newWindowState;
-        if (AppConstants.platform == "macosx" || !this._doResumeSession()) {
+        if (AppConstants.platform == "macosx" || !SessionStartup.willRestore()) {
           // We want to split the window up into pinned tabs and unpinned tabs.
           // Pinned tabs should be restored. If there are any remaining tabs,
           // they should be added back to _closedWindows.
@@ -2276,7 +2299,7 @@ var SessionStoreInternal = {
     }
   },
 
-  async _doTabProcessSwitch(aBrowser, aRemoteType, aChannel, aSwitchId) {
+  async _doTabProcessSwitch(aBrowser, aRemoteType, aChannel, aSwitchId, aReplaceBrowsingContext) {
     debug(`[process-switch]: performing switch from ${aBrowser.remoteType} to ${aRemoteType}`);
 
     // Don't try to switch tabs before delayed startup is completed.
@@ -2290,6 +2313,10 @@ var SessionStoreInternal = {
 
       // Information about which channel should be performing the load.
       redirectLoadSwitchId: aSwitchId,
+
+      // True if this is a process switch due to a policy mismatch, means we
+      // shouldn't preserve our browsing context.
+      replaceBrowsingContext: aReplaceBrowsingContext,
     };
 
     await SessionStore.navigateAndRestore(tab, loadArguments, -1);
@@ -2304,7 +2331,7 @@ var SessionStoreInternal = {
     // Tell our caller to redirect the load into this newly created process.
     let remoteTab = aBrowser.frameLoader.remoteTab;
     debug(`[process-switch]: new tabID: ${remoteTab.tabId}`);
-    return remoteTab;
+    return remoteTab.contentProcessId;
   },
 
   /**
@@ -2312,7 +2339,7 @@ var SessionStoreInternal = {
    * This method is asynchronous, as it requires multiple calls into content
    * processes.
    */
-  async _doProcessSwitch(aBrowsingContext, aRemoteType, aChannel, aSwitchId) {
+  async _doProcessSwitch(aBrowsingContext, aRemoteType, aChannel, aSwitchId, aReplaceBrowsingContext) {
     // There are two relevant cases when performing a process switch for a
     // browsing context: in-process and out-of-process embedders.
 
@@ -2321,7 +2348,7 @@ var SessionStoreInternal = {
     // traditional mechanism.
     if (aBrowsingContext.embedderElement) {
       return this._doTabProcessSwitch(aBrowsingContext.embedderElement,
-                                      aRemoteType, aChannel, aSwitchId);
+                                      aRemoteType, aChannel, aSwitchId, aReplaceBrowsingContext);
     }
 
     let wg = aBrowsingContext.embedderWindowGlobal;
@@ -2347,24 +2374,25 @@ var SessionStoreInternal = {
       browsingContext = aChannel.loadInfo.browsingContext;
     } else {
       browsingContext = aChannel.loadInfo.frameBrowsingContext;
-
-      let top = browsingContext.top;
-      if (!top.embedderElement) {
-        debug(`[process-switch]: no embedder for top - ignoring`);
-        return;
-      }
-
-      let docShell = top.embedderElement.ownerGlobal.docShell;
-      let loadContext = docShell.QueryInterface(Ci.nsILoadContext);
-
-      if (!loadContext.useRemoteSubframes) {
-        debug(`[process-switch]: remote subframes disabled - ignoring`);
-        return;
-      }
     }
 
     if (!browsingContext) {
       debug(`[process-switch]: no BrowsingContext - ignoring`);
+      return;
+    }
+
+    // Determine if remote subframes should be used for this load.
+    let topBC = browsingContext.top;
+    if (!topBC.embedderElement) {
+      debug(`[process-switch]: no embedder for top - ignoring`);
+      return;
+    }
+
+    let topDocShell = topBC.embedderElement.ownerGlobal.docShell;
+    let useRemoteSubframes = topDocShell.QueryInterface(Ci.nsILoadContext)
+                                        .useRemoteSubframes;
+    if (!useRemoteSubframes && cp != Ci.nsIContentPolicy.TYPE_DOCUMENT) {
+      debug(`[process-switch]: remote subframes disabled - ignoring`);
       return;
     }
 
@@ -2406,6 +2434,7 @@ var SessionStoreInternal = {
       Services.scriptSecurityManager.getChannelResultPrincipal(aChannel);
     let remoteType = E10SUtils.getRemoteTypeForPrincipal(resultPrincipal,
                                                          true,
+                                                         useRemoteSubframes,
                                                          currentRemoteType,
                                                          currentPrincipal);
     if (currentRemoteType == remoteType &&
@@ -2421,13 +2450,17 @@ var SessionStoreInternal = {
       return;
     }
 
+    const isCOOPSwitch = E10SUtils.useCrossOriginOpenerPolicy() &&
+          aChannel.hasCrossOriginOpenerPolicyMismatch();
+
     // ------------------------------------------------------------------------
     // DANGER ZONE: Perform a process switch into the new process. This is
     // destructive.
     // ------------------------------------------------------------------------
     let identifier = ++this._switchIdMonotonic;
     let tabPromise = this._doProcessSwitch(browsingContext, remoteType,
-                                           aChannel, identifier);
+                                           aChannel, identifier,
+                                           isCOOPSwitch);
     aChannel.switchProcessTo(tabPromise, identifier);
   },
 
@@ -3274,6 +3307,7 @@ var SessionStoreInternal = {
       // the loadArguments.
       newFrameloader: loadArguments.newFrameloader,
       remoteType: loadArguments.remoteType,
+      replaceBrowsingContext: loadArguments.replaceBrowsingContext,
       // Make sure that SessionStore knows that this restoration is due
       // to a navigation, as opposed to us restoring a closed window or tab.
       restoreContentReason: RESTORE_TAB_CONTENT_REASON.NAVIGATE_AND_RESTORE,
@@ -4236,18 +4270,21 @@ var SessionStoreInternal = {
     this.markTabAsRestoring(aTab);
 
     let newFrameloader = aOptions.newFrameloader;
-
+    let replaceBrowsingContext = aOptions.replaceBrowsingContext;
     let isRemotenessUpdate;
     if (aOptions.remoteType !== undefined) {
       // We already have a selected remote type so we update to that.
       isRemotenessUpdate =
         tabbrowser.updateBrowserRemoteness(browser,
                                            { remoteType: aOptions.remoteType,
-                                             newFrameloader });
+                                             newFrameloader,
+                                             replaceBrowsingContext,
+                                           });
     } else {
       isRemotenessUpdate =
         tabbrowser.updateBrowserRemotenessByURL(browser, uri, {
           newFrameloader,
+          replaceBrowsingContext,
         });
     }
 
@@ -4276,8 +4313,7 @@ var SessionStoreInternal = {
     browser.messageManager.sendAsyncMessage("SessionStore:restoreTabContent",
       {loadArguments, isRemotenessUpdate,
        reason: aOptions.restoreContentReason ||
-               RESTORE_TAB_CONTENT_REASON.SET_STATE,
-       requestTime: Services.telemetry.msSystemNow()});
+               RESTORE_TAB_CONTENT_REASON.SET_STATE});
 
     // Focus the tab's content area.
     if (aTab.selected && !window.isBlankPageURL(uri)) {
@@ -4663,15 +4699,6 @@ var SessionStoreInternal = {
     WINDOW_SHOWING_PROMISES.set(window, PromiseUtils.defer());
 
     return window;
-  },
-
-  /**
-   * Whether or not to resume session, if not recovering from a crash.
-   * @returns bool
-   */
-  _doResumeSession: function ssi_doResumeSession() {
-    return this._prefBranch.getIntPref("startup.page") == 3 ||
-           this._prefBranch.getBoolPref("sessionstore.resume_session_once");
   },
 
   /**

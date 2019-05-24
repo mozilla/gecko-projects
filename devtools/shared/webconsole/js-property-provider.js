@@ -60,6 +60,7 @@ function hasArrayIndex(str) {
  *                               element access (e.g. `x["match`).
  *            }
  */
+/* eslint-disable complexity */
 function analyzeInputString(str) {
   const bodyStack = [];
 
@@ -195,6 +196,7 @@ function analyzeInputString(str) {
 
   return buildReturnObject();
 }
+/* eslint-enable complexity */
 
 /**
  * Provides a list of properties, that are possible matches based on the passed
@@ -247,6 +249,7 @@ function analyzeInputString(str) {
  *                               access (e.g. `window["addEvent`).
  *            }
  */
+/* eslint-disable complexity */
 function JSPropertyProvider({
   dbgObject,
   environment,
@@ -506,6 +509,7 @@ function JSPropertyProvider({
 
   return prepareReturnedObject(getMatchedPropsInDbgObject(obj, search));
 }
+/* eslint-enable complexity */
 
 /**
  * For a given environment and constructor name, returns its Debugger.Object wrapped

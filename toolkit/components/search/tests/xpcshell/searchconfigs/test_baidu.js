@@ -5,6 +5,7 @@
 
 const test = new SearchConfigTest({
   identifier: "baidu",
+  aliases: ["@\u767E\u5EA6", "@baidu"],
   default: {
     included: [{
       regions: [
@@ -15,6 +16,17 @@ const test = new SearchConfigTest({
       },
     }],
   },
+  available: {
+    included: [{
+      locales: {
+        matches: ["zh-CN"],
+      },
+    }],
+  },
+  details: [{
+    included: [{}],
+    domain: "baidu.com",
+  }],
 });
 
 add_task(async function setup() {

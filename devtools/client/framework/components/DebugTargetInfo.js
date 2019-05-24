@@ -18,10 +18,10 @@ class DebugTargetInfo extends PureComponent {
     return {
       debugTargetData: PropTypes.shape({
         connectionType: PropTypes.oneOf(Object.values(CONNECTION_TYPES)).isRequired,
-        deviceDescription: PropTypes.shape({
-          brandName: PropTypes.string.isRequired,
-          channel: PropTypes.string.isRequired,
+        runtimeInfo: PropTypes.shape({
           deviceName: PropTypes.string,
+          icon: PropTypes.string.isRequired,
+          name: PropTypes.string.isRequired,
           version: PropTypes.string.isRequired,
         }).isRequired,
         targetType: PropTypes.oneOf(Object.values(DEBUG_TARGET_TYPES)).isRequired,
@@ -31,14 +31,39 @@ class DebugTargetInfo extends PureComponent {
     };
   }
 
+  componentDidMount() {
+    this.updateTitle();
+  }
+
+  updateTitle() {
+    const { L10N, debugTargetData, toolbox } = this.props;
+    const title = toolbox.target.name;
+    const targetTypeStr = L10N.getStr(this.getAssetsForDebugTargetType().l10nId);
+
+    const { connectionType } = debugTargetData;
+    if (connectionType === CONNECTION_TYPES.THIS_FIREFOX) {
+      toolbox.doc.title = L10N.getFormatStr("toolbox.debugTargetInfo.tabTitleLocal",
+        targetTypeStr,
+        title
+      );
+    } else {
+      const connectionTypeStr = L10N.getStr(this.getAssetsForConnectionType().l10nId);
+      toolbox.doc.title = L10N.getFormatStr("toolbox.debugTargetInfo.tabTitleRemote",
+        connectionTypeStr,
+        targetTypeStr,
+        title
+      );
+    }
+  }
+
   getRuntimeText() {
     const { debugTargetData, L10N } = this.props;
-    const { brandName, version } = debugTargetData.deviceDescription;
+    const { name, version } = debugTargetData.runtimeInfo;
     const { connectionType } = debugTargetData;
 
     return (connectionType === CONNECTION_TYPES.THIS_FIREFOX)
       ? L10N.getFormatStr("toolbox.debugTargetInfo.runtimeLabel.thisFirefox", version)
-      : L10N.getFormatStr("toolbox.debugTargetInfo.runtimeLabel", brandName, version);
+      : L10N.getFormatStr("toolbox.debugTargetInfo.runtimeLabel", name, version);
   }
 
   getAssetsForConnectionType() {
@@ -55,6 +80,8 @@ class DebugTargetInfo extends PureComponent {
           image: "chrome://devtools/skin/images/aboutdebugging-globe-icon.svg",
           l10nId: "toolbox.debugTargetInfo.connection.network",
         };
+      default:
+        return {};
     }
   }
 
@@ -87,6 +114,8 @@ class DebugTargetInfo extends PureComponent {
           image: "chrome://devtools/skin/images/debugging-workers.svg",
           l10nId: "toolbox.debugTargetInfo.targetType.worker",
         };
+      default:
+        return {};
     }
   }
 
@@ -106,7 +135,7 @@ class DebugTargetInfo extends PureComponent {
 
     return dom.span(
       {
-        className: "iconized-label js-connection-info",
+        className: "iconized-label qa-connection-info",
       },
       dom.img({ src: image, alt: `${connectionType} icon`}),
       this.props.L10N.getStr(l10nId),
@@ -114,18 +143,20 @@ class DebugTargetInfo extends PureComponent {
   }
 
   renderRuntime() {
-    const { channel, deviceName } = this.props.debugTargetData.deviceDescription;
+    if (!this.props.debugTargetData.runtimeInfo) {
+      // Skip the runtime render if no runtimeInfo is available.
+      // Runtime info is retrieved from the remote-client-manager, which might not be
+      // setup if about:devtools-toolbox was not opened from about:debugging.
+      return null;
+    }
 
-    const channelIcon =
-      (channel === "release" || channel === "beta" || channel === "aurora") ?
-      `chrome://devtools/skin/images/aboutdebugging-firefox-${ channel }.svg` :
-      "chrome://devtools/skin/images/aboutdebugging-firefox-nightly.svg";
+    const { icon, deviceName } = this.props.debugTargetData.runtimeInfo;
 
     return dom.span(
       {
-        className: "iconized-label",
+        className: "iconized-label qa-runtime-info",
       },
-      dom.img({ src: channelIcon, className: "channel-icon" }),
+      dom.img({ src: icon, className: "channel-icon qa-runtime-icon" }),
       dom.b({ className: "devtools-ellipsis-text" }, this.getRuntimeText()),
       dom.span({ className: "devtools-ellipsis-text" }, deviceName),
     );
@@ -142,7 +173,7 @@ class DebugTargetInfo extends PureComponent {
         className: "iconized-label",
       },
       dom.img({ src: image, alt: this.props.L10N.getStr(l10nId)}),
-      title ? dom.b({ className: "devtools-ellipsis-text js-target-title"}, title) : null,
+      title ? dom.b({ className: "devtools-ellipsis-text qa-target-title"}, title) : null,
       dom.span({ className: "devtools-ellipsis-text" }, url),
     );
   }
@@ -150,7 +181,7 @@ class DebugTargetInfo extends PureComponent {
   render() {
     return dom.header(
       {
-        className: "debug-target-info js-debug-target-info",
+        className: "debug-target-info qa-debug-target-info",
       },
       this.shallRenderConnection() ? this.renderConnection() : null,
       this.renderRuntime(),

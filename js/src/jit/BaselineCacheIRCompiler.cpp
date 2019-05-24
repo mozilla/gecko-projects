@@ -72,8 +72,11 @@ class MOZ_RAII BaselineCacheIRCompiler : public CacheIRCompiler {
   bool updateArgc(CallFlags flags, Register argcReg, Register scratch);
   void loadStackObject(ArgumentKind kind, CallFlags flags, size_t stackPushed,
                        Register argcReg, Register dest);
-  void pushCallArguments(Register argcReg, Register scratch, Register scratch2,
-                         bool isJitCall, bool isConstructing);
+  void pushArguments(Register argcReg, Register calleeReg, Register scratch,
+                     Register scratch2, CallFlags flags, bool isJitCall);
+  void pushStandardArguments(Register argcReg, Register scratch,
+                             Register scratch2, bool isJitCall,
+                             bool isConstructing);
   void pushArrayArguments(Register argcReg, Register scratch, Register scratch2,
                           bool isJitCall, bool isConstructing);
   void pushFunCallArguments(Register argcReg, Register calleeReg,
@@ -81,14 +84,19 @@ class MOZ_RAII BaselineCacheIRCompiler : public CacheIRCompiler {
                             bool isJitCall);
   void pushFunApplyArgs(Register argcReg, Register calleeReg, Register scratch,
                         Register scratch2, bool isJitCall);
-  void pushFunApplyArray(Register argcReg, Register scratch, Register scratch2,
-                         bool isJitCall);
   void createThis(Register argcReg, Register calleeReg, Register scratch,
                   CallFlags flags);
   void updateReturnValue();
 
   enum class NativeCallType { Native, ClassHook };
   bool emitCallNativeShared(NativeCallType callType);
+
+  MOZ_MUST_USE bool emitCallScriptedGetterResultShared(
+      TypedOrValueRegister receiver);
+
+  template <typename T, typename CallVM>
+  MOZ_MUST_USE bool emitCallNativeGetterResultShared(T receiver,
+                                                     const CallVM& emitCallVM);
 
  public:
   friend class AutoStubFrame;
@@ -552,9 +560,8 @@ bool BaselineCacheIRCompiler::emitGuardHasGetterSetter() {
   return true;
 }
 
-bool BaselineCacheIRCompiler::emitCallScriptedGetterResult() {
-  JitSpew(JitSpew_Codegen, __FUNCTION__);
-  Register obj = allocator.useRegister(masm, reader.objOperandId());
+bool BaselineCacheIRCompiler::emitCallScriptedGetterResultShared(
+    TypedOrValueRegister receiver) {
   Address getterAddr(stubAddress(reader.stubOffset()));
   bool isSameRealm = reader.readBool();
 
@@ -588,10 +595,10 @@ bool BaselineCacheIRCompiler::emitCallScriptedGetterResult() {
   // JitStackAlignment.
   masm.alignJitStackBasedOnNArgs(0);
 
-  // Getter is called with 0 arguments, just |obj| as thisv.
+  // Getter is called with 0 arguments, just |receiver| as thisv.
   // Note that we use Push, not push, so that callJit will align the stack
   // properly on ARM.
-  masm.Push(TypedOrValueRegister(MIRType::Object, AnyRegister(obj)));
+  masm.Push(receiver);
 
   EmitBaselineCreateStubFrameDescriptor(masm, scratch, JitFrameLayout::Size());
   masm.Push(Imm32(0));  // ActualArgc is 0
@@ -621,9 +628,24 @@ bool BaselineCacheIRCompiler::emitCallScriptedGetterResult() {
   return true;
 }
 
-bool BaselineCacheIRCompiler::emitCallNativeGetterResult() {
+bool BaselineCacheIRCompiler::emitCallScriptedGetterResult() {
   JitSpew(JitSpew_Codegen, __FUNCTION__);
   Register obj = allocator.useRegister(masm, reader.objOperandId());
+
+  return emitCallScriptedGetterResultShared(
+      TypedOrValueRegister(MIRType::Object, AnyRegister(obj)));
+}
+
+bool BaselineCacheIRCompiler::emitCallScriptedGetterByValueResult() {
+  JitSpew(JitSpew_Codegen, __FUNCTION__);
+  ValueOperand val = allocator.useValueRegister(masm, reader.valOperandId());
+
+  return emitCallScriptedGetterResultShared(val);
+}
+
+template <typename T, typename CallVM>
+bool BaselineCacheIRCompiler::emitCallNativeGetterResultShared(
+    T receiver, const CallVM& emitCallVM) {
   Address getterAddr(stubAddress(reader.stubOffset()));
 
   AutoScratchRegister scratch(allocator, masm);
@@ -636,15 +658,35 @@ bool BaselineCacheIRCompiler::emitCallNativeGetterResult() {
   // Load the callee in the scratch register.
   masm.loadPtr(getterAddr, scratch);
 
-  masm.Push(obj);
+  masm.Push(receiver);
   masm.Push(scratch);
 
-  using Fn =
-      bool (*)(JSContext*, HandleFunction, HandleObject, MutableHandleValue);
-  callVM<Fn, CallNativeGetter>(masm);
+  emitCallVM();
 
   stubFrame.leave(masm);
   return true;
+}
+
+bool BaselineCacheIRCompiler::emitCallNativeGetterResult() {
+  JitSpew(JitSpew_Codegen, __FUNCTION__);
+  Register obj = allocator.useRegister(masm, reader.objOperandId());
+
+  return emitCallNativeGetterResultShared(obj, [this]() {
+    using Fn =
+        bool (*)(JSContext*, HandleFunction, HandleObject, MutableHandleValue);
+    callVM<Fn, CallNativeGetter>(masm);
+  });
+}
+
+bool BaselineCacheIRCompiler::emitCallNativeGetterByValueResult() {
+  JitSpew(JitSpew_Codegen, __FUNCTION__);
+  ValueOperand val = allocator.useValueRegister(masm, reader.valOperandId());
+
+  return emitCallNativeGetterResultShared(val, [this]() {
+    using Fn =
+        bool (*)(JSContext*, HandleFunction, HandleValue, MutableHandleValue);
+    callVM<Fn, CallNativeGetterByValue>(masm);
+  });
 }
 
 bool BaselineCacheIRCompiler::emitCallProxyGetResult() {
@@ -884,55 +926,6 @@ bool BaselineCacheIRCompiler::emitLoadStringResult() {
 
   masm.loadPtr(stubAddress(reader.stubOffset()), scratch);
   masm.tagValue(JSVAL_TYPE_STRING, scratch, output.valueReg());
-  return true;
-}
-
-bool BaselineCacheIRCompiler::emitCallStringSplitResult() {
-  JitSpew(JitSpew_Codegen, __FUNCTION__);
-  Register str = allocator.useRegister(masm, reader.stringOperandId());
-  Register sep = allocator.useRegister(masm, reader.stringOperandId());
-  Address groupAddr(stubAddress(reader.stubOffset()));
-
-  AutoScratchRegister scratch(allocator, masm);
-  allocator.discardStack(masm);
-
-  AutoStubFrame stubFrame(*this);
-  stubFrame.enter(masm, scratch);
-
-  // Load the group in the scratch register.
-  masm.loadPtr(groupAddr, scratch);
-
-  masm.Push(Imm32(INT32_MAX));
-  masm.Push(scratch);
-  masm.Push(sep);
-  masm.Push(str);
-
-  using Fn = bool (*)(JSContext*, HandleString, HandleString, HandleObjectGroup,
-                      uint32_t limit, MutableHandleValue);
-  callVM<Fn, StringSplitHelper>(masm);
-
-  stubFrame.leave(masm);
-  return true;
-}
-
-bool BaselineCacheIRCompiler::emitCallConstStringSplitResult() {
-  JitSpew(JitSpew_Codegen, __FUNCTION__);
-  Address resultTemplateAddr(stubAddress(reader.stubOffset()));
-
-  AutoScratchRegister scratch(allocator, masm);
-  allocator.discardStack(masm);
-
-  AutoStubFrame stubFrame(*this);
-  stubFrame.enter(masm, scratch);
-
-  // Push argument
-  masm.loadPtr(resultTemplateAddr, scratch);
-  masm.Push(scratch);
-
-  using Fn = bool (*)(JSContext*, HandleArrayObject, MutableHandleValue);
-  callVM<Fn, CopyStringSplitArray>(masm);
-
-  stubFrame.leave(masm);
   return true;
 }
 
@@ -2330,7 +2323,7 @@ ICStub* js::jit::AttachBaselineCacheIRStub(
       *attached = true;
     } else {
       JitSpew(JitSpew_BaselineICFallback,
-              "Tried attaching identical stub for (%s:%u%u)",
+              "Tried attaching identical stub for (%s:%u:%u)",
               outerScript->filename(), outerScript->lineno(),
               outerScript->column());
     }
@@ -2606,23 +2599,52 @@ bool BaselineCacheIRCompiler::emitGuardFunApply() {
   return true;
 }
 
-void BaselineCacheIRCompiler::pushCallArguments(Register argcReg,
-                                                Register scratch,
-                                                Register scratch2,
-                                                bool isJitCall,
-                                                bool isConstructing) {
+void BaselineCacheIRCompiler::pushArguments(Register argcReg,
+                                            Register calleeReg,
+                                            Register scratch, Register scratch2,
+                                            CallFlags flags, bool isJitCall) {
+  switch (flags.getArgFormat()) {
+    case CallFlags::Standard:
+      pushStandardArguments(argcReg, scratch, scratch2, isJitCall,
+                            flags.isConstructing());
+      break;
+    case CallFlags::Spread:
+      pushArrayArguments(argcReg, scratch, scratch2, isJitCall,
+                         flags.isConstructing());
+      break;
+    case CallFlags::FunCall:
+      pushFunCallArguments(argcReg, calleeReg, scratch, scratch2, isJitCall);
+      break;
+    case CallFlags::FunApplyArgs:
+      pushFunApplyArgs(argcReg, calleeReg, scratch, scratch2, isJitCall);
+      break;
+    case CallFlags::FunApplyArray:
+      pushArrayArguments(argcReg, scratch, scratch2, isJitCall,
+                         /*isConstructing =*/false);
+      break;
+    default:
+      MOZ_CRASH("Invalid arg format");
+  }
+}
+
+void BaselineCacheIRCompiler::pushStandardArguments(Register argcReg,
+                                                    Register scratch,
+                                                    Register scratch2,
+                                                    bool isJitCall,
+                                                    bool isConstructing) {
   // The arguments to the call IC are pushed on the stack left-to-right.
   // Our calling conventions want them right-to-left in the callee, so
   // we duplicate them on the stack in reverse order.
-  // |this| and callee are pushed last.
 
   // countReg contains the total number of arguments to copy.
-  // In addition to the actual arguments, we have to copy the callee and |this|.
-  // If we are constructing, we also have to copy newTarget.
+  // In addition to the actual arguments, we have to copy hidden arguments.
+  // We always have to copy |this|.
+  // If we are constructing, we have to copy |newTarget|.
+  // If we are not a jit call, we have to copy |callee|.
   // We use a scratch register to avoid clobbering argc, which is an input reg.
   Register countReg = scratch;
   masm.move32(argcReg, countReg);
-  masm.add32(Imm32(2 + isConstructing), countReg);
+  masm.add32(Imm32(1 + !isJitCall + isConstructing), countReg);
 
   // argPtr initially points to the last argument. Skip the stub frame.
   Register argPtr = scratch2;
@@ -2632,7 +2654,7 @@ void BaselineCacheIRCompiler::pushCallArguments(Register argcReg,
   // Align the stack such that the JitFrameLayout is aligned on the
   // JitStackAlignment.
   if (isJitCall) {
-    masm.alignJitStackBasedOnNArgs(countReg);
+    masm.alignJitStackBasedOnNArgs(countReg, /*countIncludesThis = */ true);
   }
 
   // Push all values, starting at the last one.
@@ -2670,7 +2692,7 @@ void BaselineCacheIRCompiler::pushArrayArguments(Register argcReg,
       alignReg = scratch2;
       masm.computeEffectiveAddress(Address(argcReg, 1), alignReg);
     }
-    masm.alignJitStackBasedOnNArgs(alignReg);
+    masm.alignJitStackBasedOnNArgs(alignReg, /*countIncludesThis =*/false);
   }
 
   // Push newTarget, if necessary
@@ -2693,13 +2715,17 @@ void BaselineCacheIRCompiler::pushArrayArguments(Register argcReg,
   masm.jump(&copyStart);
   masm.bind(&copyDone);
 
-  // Push the callee and |this|.
+  // Push |this|.
   masm.pushValue(
       Address(BaselineFrameReg,
               STUB_FRAME_SIZE + (1 + isConstructing) * sizeof(Value)));
-  masm.pushValue(
-      Address(BaselineFrameReg,
-              STUB_FRAME_SIZE + (2 + isConstructing) * sizeof(Value)));
+
+  // Push |callee| if needed.
+  if (!isJitCall) {
+    masm.pushValue(
+        Address(BaselineFrameReg,
+                STUB_FRAME_SIZE + (2 + isConstructing) * sizeof(Value)));
+  }
 }
 
 void BaselineCacheIRCompiler::pushFunCallArguments(Register argcReg,
@@ -2722,13 +2748,13 @@ void BaselineCacheIRCompiler::pushFunCallArguments(Register argcReg,
   // argN (argN-1 of target)  -----> arg1
   //
   // As demonstrated in the right column, this is exactly what we need
-  // the stack to look like when calling pushCallArguments for target,
+  // the stack to look like when calling pushStandardArguments for target,
   // except with one more argument. If we subtract 1 from argc,
   // everything works out correctly.
   masm.sub32(Imm32(1), argcReg);
 
-  pushCallArguments(argcReg, scratch, scratch2, isJitCall,
-                    /*isConstructing =*/false);
+  pushStandardArguments(argcReg, scratch, scratch2, isJitCall,
+                        /*isConstructing =*/false);
 
   masm.jump(&done);
   masm.bind(&zeroArgs);
@@ -2750,8 +2776,10 @@ void BaselineCacheIRCompiler::pushFunCallArguments(Register argcReg,
   // Store the new |this|.
   masm.pushValue(UndefinedValue());
 
-  // Store |callee|.
-  masm.Push(TypedOrValueRegister(MIRType::Object, AnyRegister(calleeReg)));
+  // Store |callee| if needed.
+  if (!isJitCall) {
+    masm.Push(TypedOrValueRegister(MIRType::Object, AnyRegister(calleeReg)));
+  }
 
   masm.bind(&done);
 }
@@ -2769,7 +2797,7 @@ void BaselineCacheIRCompiler::pushFunApplyArgs(Register argcReg,
   masm.addPtr(Imm32(BaselineFrame::offsetOfArg(0)), startReg);
 
   if (isJitCall) {
-    masm.alignJitStackBasedOnNArgs(argcReg);
+    masm.alignJitStackBasedOnNArgs(argcReg, /*countIncludesThis =*/false);
   }
 
   Register endReg = scratch2;
@@ -2789,19 +2817,10 @@ void BaselineCacheIRCompiler::pushFunApplyArgs(Register argcReg,
   // Push arg0 as |this| for call
   masm.pushValue(Address(BaselineFrameReg, STUB_FRAME_SIZE + sizeof(Value)));
 
-  // Push |callee|.
-  masm.Push(TypedOrValueRegister(MIRType::Object, AnyRegister(calleeReg)));
-}
-
-void BaselineCacheIRCompiler::pushFunApplyArray(Register argcReg,
-                                                Register scratch,
-                                                Register scratch2,
-                                                bool isJitCall) {
-  // Push the contents of the array onto the stack.
-  // We have already ensured that the array is packed and has no holes.
-
-  pushArrayArguments(argcReg, scratch, scratch2, isJitCall,
-                     /*isConstructing =*/false);
+  // Push |callee| if needed.
+  if (!isJitCall) {
+    masm.Push(TypedOrValueRegister(MIRType::Object, AnyRegister(calleeReg)));
+  }
 }
 
 bool BaselineCacheIRCompiler::emitCallNativeShared(NativeCallType callType) {
@@ -2831,29 +2850,8 @@ bool BaselineCacheIRCompiler::emitCallNativeShared(NativeCallType callType) {
     masm.switchToObjectRealm(calleeReg, scratch);
   }
 
-  switch (flags.getArgFormat()) {
-    case CallFlags::Standard:
-      pushCallArguments(argcReg, scratch, scratch2, /*isJitCall =*/false,
-                        isConstructing);
-      break;
-    case CallFlags::Spread:
-      pushArrayArguments(argcReg, scratch, scratch2, /*isJitCall =*/false,
-                         isConstructing);
-      break;
-    case CallFlags::FunCall:
-      pushFunCallArguments(argcReg, calleeReg, scratch, scratch2,
-                           /*isJitCall = */ false);
-      break;
-    case CallFlags::FunApplyArgs:
-      pushFunApplyArgs(argcReg, calleeReg, scratch, scratch2,
-                       /*isJitCall = */ false);
-      break;
-    case CallFlags::FunApplyArray:
-      pushFunApplyArray(argcReg, scratch, scratch2, /*isJitCall = */ false);
-      break;
-    default:
-      MOZ_CRASH("Invalid arg format");
-  }
+  pushArguments(argcReg, calleeReg, scratch, scratch2, flags,
+                /*isJitCall =*/false);
 
   // Native functions have the signature:
   //
@@ -3095,37 +3093,8 @@ bool BaselineCacheIRCompiler::emitCallScriptedFunction() {
     createThis(argcReg, calleeReg, scratch, flags);
   }
 
-  switch (flags.getArgFormat()) {
-    case CallFlags::Standard:
-      pushCallArguments(argcReg, scratch, scratch2, /*isJitCall = */ true,
-                        isConstructing);
-      break;
-    case CallFlags::Spread:
-      pushArrayArguments(argcReg, scratch, scratch2, /*isJitCall = */ true,
-                         isConstructing);
-      break;
-    case CallFlags::FunCall:
-      pushFunCallArguments(argcReg, calleeReg, scratch, scratch2,
-                           /*isJitCall = */ true);
-      break;
-    case CallFlags::FunApplyArgs:
-      pushFunApplyArgs(argcReg, calleeReg, scratch, scratch2,
-                       /*isJitCall = */ true);
-      break;
-    case CallFlags::FunApplyArray:
-      pushFunApplyArray(argcReg, scratch, scratch2, /*isJitCall = */ true);
-      break;
-    default:
-      MOZ_CRASH("Invalid arg format");
-  }
-
-  // TODO: The callee is currently on top of the stack.  The old
-  // implementation popped it at this point, but I'm not sure why,
-  // because it is still in a register along both paths. For now we
-  // just free that stack slot to make things line up. This should
-  // probably be rewritten to avoid pushing callee at all if we don't
-  // have to.
-  masm.freeStack(sizeof(Value));
+  pushArguments(argcReg, calleeReg, scratch, scratch2, flags,
+                /*isJitCall =*/true);
 
   // Load the start of the target JitCode.
   Register code = scratch2;

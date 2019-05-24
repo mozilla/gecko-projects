@@ -90,11 +90,11 @@ nsIFrame* nsFieldSetFrame::GetLegend() const {
   return mFrames.FirstChild();
 }
 
-class nsDisplayFieldSetBorder final : public nsDisplayItem {
+class nsDisplayFieldSetBorder final : public nsPaintedDisplayItem {
  public:
   nsDisplayFieldSetBorder(nsDisplayListBuilder* aBuilder,
                           nsFieldSetFrame* aFrame)
-      : nsDisplayItem(aBuilder, aFrame) {
+      : nsPaintedDisplayItem(aBuilder, aFrame) {
     MOZ_COUNT_CTOR(nsDisplayFieldSetBorder);
   }
 #ifdef NS_BUILD_REFCNT_LOGGING
@@ -196,7 +196,7 @@ bool nsDisplayFieldSetBorder::CreateWebRenderCommands(
       nsTArray<mozilla::wr::ComplexClipRegion> array{region};
 
       auto clip = aBuilder.DefineClip(Nothing(), layoutRect, &array, nullptr);
-      auto clipChain = aBuilder.DefineClipChain({clip});
+      auto clipChain = aBuilder.DefineClipChain({clip}, true);
       clipOut.emplace(aBuilder, clipChain);
     }
   } else {
@@ -222,14 +222,13 @@ void nsFieldSetFrame::BuildDisplayList(nsDisplayListBuilder* aBuilder,
   // empty, we need to paint the outline
   if (!(GetStateBits() & NS_FRAME_IS_OVERFLOW_CONTAINER) &&
       IsVisibleForPainting()) {
-    if (StyleEffects()->mBoxShadow) {
-      aLists.BorderBackground()->AppendNewToTop<nsDisplayBoxShadowOuter>(
-          aBuilder, this);
-    }
+    DisplayOutsetBoxShadowUnconditional(aBuilder, aLists.BorderBackground());
+
+    const nsRect rect =
+        VisualBorderRectRelativeToSelf() + aBuilder->ToReferenceFrame(this);
 
     nsDisplayBackgroundImage::AppendBackgroundItemsToTop(
-        aBuilder, this, VisualBorderRectRelativeToSelf(),
-        aLists.BorderBackground(),
+        aBuilder, this, rect, aLists.BorderBackground(),
         /* aAllowWillPaintBorderOptimization = */ false);
 
     aLists.BorderBackground()->AppendNewToTop<nsDisplayFieldSetBorder>(aBuilder,
@@ -571,7 +570,7 @@ void nsFieldSetFrame::Reflow(nsPresContext* aPresContext,
     // If the inner content rect is larger than the legend, we can align the
     // legend.
     if (innerContentRect.ISize(wm) > mLegendRect.ISize(wm)) {
-      // NOTE legend @align values are: left/right/center/top/bottom.
+      // NOTE legend @align values are: left/right/center
       // GetLogicalAlign converts left/right to start/end for the given WM.
       // @see HTMLLegendElement::ParseAttribute, nsLegendFrame::GetLogicalAlign
       int32_t align =
@@ -589,8 +588,6 @@ void nsFieldSetFrame::Reflow(nsPresContext* aPresContext,
               (innerContentRect.ISize(wm) - mLegendRect.ISize(wm)) / 2;
           break;
         case NS_STYLE_TEXT_ALIGN_START:
-        case NS_STYLE_VERTICAL_ALIGN_TOP:
-        case NS_STYLE_VERTICAL_ALIGN_BOTTOM:
           mLegendRect.IStart(wm) = innerContentRect.IStart(wm);
           break;
         default:

@@ -15,6 +15,8 @@ raptor_ini = os.path.join(here, 'raptor.ini')
 tests_dir = os.path.join(here, 'tests')
 LOG = get_proxy_logger(component="raptor-manifest")
 
+LIVE_SITE_TIMEOUT_MULTIPLIER = 1.2
+
 required_settings = [
     'alert_threshold',
     'apps',
@@ -22,6 +24,7 @@ required_settings = [
     'measure',
     'page_cycles',
     'test_url',
+    'scenario_time',
     'type',
     'unit',
 ]
@@ -29,6 +32,10 @@ required_settings = [
 playback_settings = [
     'playback_pageset_manifest',
     'playback_recordings',
+]
+
+whitelist_live_site_tests = [
+    "raptor-youtube-playback",
 ]
 
 
@@ -47,8 +54,15 @@ def filter_live_sites(tests, values):
             if values["run_local"] is True:
                 yield test
             # can run with live sites if running on try
-            if "hg.mozilla.org/try" in os.environ.get('GECKO_HEAD_REPOSITORY', 'n/a'):
+            elif "hg.mozilla.org/try" in os.environ.get('GECKO_HEAD_REPOSITORY', 'n/a'):
                 yield test
+
+            # can run with live sites when white-listed
+            elif filter(lambda name: test['name'].startswith(name), whitelist_live_site_tests):
+                yield test
+
+            else:
+                LOG.warning('%s is not allowed to run with use_live_sites' % test['name'])
         else:
             # not using live-sites so go ahead
             yield test
@@ -71,6 +85,8 @@ def validate_test_ini(test_details):
     for setting in required_settings:
         # measure setting not required for benchmark type tests
         if setting == 'measure' and test_details['type'] == 'benchmark':
+            continue
+        if setting == 'scenario_time' and test_details['type'] != 'scenario':
             continue
         if test_details.get(setting) is None:
             # if page-cycles is not specified, it's ok as long as browser-cycles is there
@@ -161,27 +177,40 @@ def write_test_settings_json(args, test_details, oskey):
         test_settings['raptor-options']['subtest_lower_is_better'] = bool_from_str(
             subtest_lower_is_better)
 
+    if test_details.get("alert_change_type", None) is not None:
+        test_settings['raptor-options']['alert_change_type'] = test_details['alert_change_type']
+
     if test_details.get("alert_threshold", None) is not None:
         test_settings['raptor-options']['alert_threshold'] = float(test_details['alert_threshold'])
 
     if test_details.get("screen_capture", None) is not None:
         test_settings['raptor-options']['screen_capture'] = test_details.get("screen_capture")
 
-    # if gecko profiling is enabled, write profiling settings for webext
+    # if Gecko profiling is enabled, write profiling settings for webext
     if test_details.get("gecko_profile", False):
-        test_settings['raptor-options']['gecko_profile'] = True
-        # when profiling, if webRender is enabled we need to set that, so
-        # the runner can add the web render threads to gecko profiling
-        test_settings['raptor-options']['gecko_profile_interval'] = \
-            float(test_details.get("gecko_profile_interval", 0))
-        test_settings['raptor-options']['gecko_profile_entries'] = \
-            float(test_details.get("gecko_profile_entries", 0))
-        if str(os.getenv('MOZ_WEBRENDER')) == '1':
-            test_settings['raptor-options']['webrender_enabled'] = True
+        threads = ['GeckoMain', 'Compositor']
+
+        # With WebRender enabled profile some extra threads
+        if os.getenv('MOZ_WEBRENDER') == '1':
+            threads.extend(['Renderer', 'WR'])
+
+        if test_details.get('gecko_profile_threads'):
+            test_threads = filter(None, test_details['gecko_profile_threads'].split(','))
+            threads.extend(test_threads)
+
+        test_settings['raptor-options'].update({
+            'gecko_profile': True,
+            'gecko_profile_entries': int(test_details.get('gecko_profile_entries')),
+            'gecko_profile_interval': int(test_details.get('gecko_profile_interval')),
+            'gecko_profile_threads': ','.join(set(threads)),
+        })
 
     if test_details.get("newtab_per_cycle", None) is not None:
         test_settings['raptor-options']['newtab_per_cycle'] = \
             bool(test_details['newtab_per_cycle'])
+
+    if test_details['type'] == "scenario":
+        test_settings['raptor-options']['scenario_time'] = test_details['scenario_time']
 
     settings_file = os.path.join(tests_dir, test_details['name'] + '.json')
     try:
@@ -241,14 +270,37 @@ def get_raptor_test_list(args, oskey):
     for next_test in tests_to_run:
         LOG.info("configuring settings for test %s" % next_test['name'])
         max_page_cycles = next_test.get('page_cycles', 1)
+
         if args.gecko_profile is True:
             next_test['gecko_profile'] = True
-            LOG.info("gecko-profiling enabled")
+            LOG.info('gecko-profiling enabled')
             max_page_cycles = 3
+
+            if 'gecko_profile_entries' in args and args.gecko_profile_entries is not None:
+                next_test['gecko_profile_entries'] = str(args.gecko_profile_entries)
+                LOG.info('gecko-profiling entries set to %s' % args.gecko_profile_entries)
+
+            if 'gecko_profile_interval' in args and args.gecko_profile_interval is not None:
+                next_test['gecko_profile_interval'] = str(args.gecko_profile_interval)
+                LOG.info('gecko-profiling interval set to %s' % args.gecko_profile_interval)
+
+            if 'gecko_profile_threads' in args and args.gecko_profile_threads is not None:
+                threads = filter(None, next_test.get('gecko_profile_threads', '').split(','))
+                threads.extend(args.gecko_profile_threads)
+                next_test['gecko_profile_threads'] = ','.join(threads)
+                LOG.info('gecko-profiling extra threads %s' % args.gecko_profile_threads)
+
+        else:
+            # if the gecko profiler is not enabled, ignore all of it's settings
+            next_test.pop('gecko_profile_entries', None)
+            next_test.pop('gecko_profile_interval', None)
+            next_test.pop('gecko_profile_threads', None)
+
         if args.debug_mode is True:
             next_test['debug_mode'] = True
             LOG.info("debug-mode enabled")
             max_page_cycles = 2
+
         if args.page_cycles is not None:
             next_test['page_cycles'] = args.page_cycles
             LOG.info("set page-cycles to %d as specified on cmd line" % args.page_cycles)
@@ -256,10 +308,12 @@ def get_raptor_test_list(args, oskey):
             if int(next_test.get('page_cycles', 1)) > max_page_cycles:
                 next_test['page_cycles'] = max_page_cycles
                 LOG.info("page-cycles set to %d" % next_test['page_cycles'])
+
         # if --page-timeout was provided on the command line, use that instead of INI
         if args.page_timeout is not None:
             LOG.info("setting page-timeout to %d as specified on cmd line" % args.page_timeout)
             next_test['page_timeout'] = args.page_timeout
+
         # if --browser-cycles was provided on the command line, use that instead of INI
         if args.browser_cycles is not None:
             LOG.info("setting browser-cycles to %d as specified on cmd line" % args.browser_cycles)
@@ -289,8 +343,10 @@ def get_raptor_test_list(args, oskey):
             next_test['playback'] = None
             LOG.info("using live sites so appending '-live' to the test name")
             next_test['name'] = next_test['name'] + "-live"
-            # we also want to increase the page timeout since may be longer live
-            next_test['page_timeout'] = 180000
+            # allow a slightly higher page timeout due to remote page loads
+            next_test['page_timeout'] = int(
+                next_test['page_timeout']) * LIVE_SITE_TIMEOUT_MULTIPLIER
+            LOG.info("using live sites so using page timeout of %dms" % next_test['page_timeout'])
 
         # convert 'measure =' test INI line to list
         if next_test.get('measure') is not None:

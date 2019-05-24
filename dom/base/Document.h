@@ -98,6 +98,7 @@ class nsAtom;
 class nsIBFCacheEntry;
 class nsIChannel;
 class nsIContent;
+class nsIContentSecurityPolicy;
 class nsIContentSink;
 class nsIDocShell;
 class nsIDocShellTreeItem;
@@ -220,6 +221,20 @@ template <typename, typename>
 class CallbackObjectHolder;
 
 enum class CallerType : uint32_t;
+
+enum BFCacheStatus {
+  NOT_ALLOWED = 1 << 0,                  // Status 0
+  EVENT_HANDLING_SUPPRESSED = 1 << 1,    // Status 1
+  SUSPENDED = 1 << 2,                    // Status 2
+  UNLOAD_LISTENER = 1 << 3,              // Status 3
+  REQUEST = 1 << 4,                      // Status 4
+  ACTIVE_GET_USER_MEDIA = 1 << 5,        // Status 5
+  ACTIVE_PEER_CONNECTION = 1 << 6,       // Status 6
+  CONTAINS_EME_CONTENT = 1 << 7,         // Status 7
+  CONTAINS_MSE_CONTENT = 1 << 8,         // Status 8
+  HAS_ACTIVE_SPEECH_SYNTHESIS = 1 << 9,  // Status 9
+  HAS_USED_VR = 1 << 10,                 // Status 10
+};
 
 }  // namespace dom
 }  // namespace mozilla
@@ -683,6 +698,24 @@ class Document : public nsINode,
   void SetChromeXHRDocBaseURI(nsIURI* aURI) { mChromeXHRDocBaseURI = aURI; }
 
   /**
+   * The CSP in general is stored in the ClientInfo, but we also cache
+   * the CSP on the document so subresources loaded within a document
+   * can query that cached CSP instead of having to deserialize the CSP
+   * from the Client.
+   *
+   * Please note that at the time of CSP parsing the Client is not
+   * available yet, hence we sync CSP of document and Client when the
+   * Client becomes available within nsGlobalWindowInner::EnsureClientSource().
+   */
+  nsIContentSecurityPolicy* GetCsp() const;
+  void SetCsp(nsIContentSecurityPolicy* aCSP);
+
+  nsIContentSecurityPolicy* GetPreloadCsp() const;
+  void SetPreloadCsp(nsIContentSecurityPolicy* aPreloadCSP);
+
+  void GetCspJSON(nsString& aJSON);
+
+  /**
    * Set referrer policy and upgrade-insecure-requests flags
    */
   void ApplySettingsFromCSP(bool aSpeculative);
@@ -1116,10 +1149,11 @@ class Document : public nsINode,
    */
   void SetHasTrackingCookiesBlocked(
       bool aHasTrackingCookiesBlocked, const nsACString& aOriginBlocked,
-      const Maybe<AntiTrackingCommon::StorageAccessGrantedReason>& aReason) {
+      const Maybe<AntiTrackingCommon::StorageAccessGrantedReason>& aReason,
+      const nsTArray<nsCString>& aTrackingFullHashes) {
     RecordContentBlockingLog(
         aOriginBlocked, nsIWebProgressListener::STATE_COOKIES_BLOCKED_TRACKER,
-        aHasTrackingCookiesBlocked, aReason);
+        aHasTrackingCookiesBlocked, aReason, aTrackingFullHashes);
   }
 
   /**
@@ -1939,8 +1973,9 @@ class Document : public nsINode,
   static bool HandlePendingFullscreenRequests(Document* aDocument);
 
   void RequestPointerLock(Element* aElement, CallerType);
-  bool SetPointerLock(Element* aElement, StyleCursorKind);
+  MOZ_CAN_RUN_SCRIPT bool SetPointerLock(Element* aElement, StyleCursorKind);
 
+  MOZ_CAN_RUN_SCRIPT_BOUNDARY
   static void UnlockPointer(Document* aDoc = nullptr);
 
   // ScreenOrientation related APIs
@@ -1957,6 +1992,12 @@ class Document : public nsINode,
   void SetOrientationPendingPromise(Promise* aPromise);
   Promise* GetOrientationPendingPromise() const {
     return mOrientationPendingPromise;
+  }
+
+  void SetRDMPaneOrientation(OrientationType aType, uint16_t aAngle) {
+    if (mInRDMPane) {
+      SetCurrentOrientation(aType, aAngle);
+    }
   }
 
   //----------------------------------------------------------------------
@@ -2250,8 +2291,12 @@ class Document : public nsINode,
    * replace this document in the docshell.  The new document's request
    * will be ignored when checking for active requests.  If there is no
    * request associated with the new document, this parameter may be null.
+   *
+   * |aBFCacheCombo| is used as a bitmask to indicate what the status
+   * combination is when we try to BFCache aNewRequest
    */
-  virtual bool CanSavePresentation(nsIRequest* aNewRequest);
+  virtual bool CanSavePresentation(nsIRequest* aNewRequest,
+                                   uint16_t& aBFCacheCombo);
 
   virtual nsresult Init();
 
@@ -3496,7 +3541,30 @@ class Document : public nsINode,
   void ReportHasScrollLinkedEffect();
   bool HasScrollLinkedEffect() const { return mHasScrollLinkedEffect; }
 
-  DocGroup* GetDocGroup() const;
+#ifdef DEBUG
+  void AssertDocGroupMatchesKey() const;
+#endif
+
+  DocGroup* GetDocGroup() const {
+#ifdef DEBUG
+    AssertDocGroupMatchesKey();
+#endif
+    return mDocGroup;
+  }
+
+  /**
+   * If we're a sub-document, the parent document's layout can affect our style
+   * and layout (due to the viewport size, viewport units, media queries...).
+   *
+   * This function returns true if our parent document and our child document
+   * can observe each other. If they cannot, then we don't need to synchronously
+   * update the parent document layout every time the child document may need
+   * up-to-date layout information.
+   */
+  bool StyleOrLayoutObservablyDependsOnParentDocumentLayout() const {
+    return GetParentDocument() &&
+           GetDocGroup() == GetParentDocument()->GetDocGroup();
+  }
 
   void AddIntersectionObserver(DOMIntersectionObserver* aObserver) {
     MOZ_ASSERT(!mIntersectionObservers.Contains(aObserver),
@@ -3619,7 +3687,15 @@ class Document : public nsINode,
 
   void ParseWidthAndHeightInMetaViewport(const nsAString& aWidthString,
                                          const nsAString& aHeightString,
-                                         const nsAString& aScaleString);
+                                         bool aIsAutoScale);
+
+  // Parse scale values in viewport meta tag for a given |aHeaderField| which
+  // represents the scale property and returns the scale value if it's valid.
+  Maybe<LayoutDeviceToScreenScale> ParseScaleInHeader(nsAtom* aHeaderField);
+
+  // Parse scale values in viewport meta tag and set the values in
+  // mScaleMinFloat, mScaleMaxFloat and mScaleFloat respectively.
+  void ParseScalesInMetaViewport();
 
   FlashClassification DocumentFlashClassificationInternal();
 
@@ -3835,8 +3911,10 @@ class Document : public nsINode,
   void RecordContentBlockingLog(
       const nsACString& aOrigin, uint32_t aType, bool aBlocked,
       const Maybe<AntiTrackingCommon::StorageAccessGrantedReason>& aReason =
-          Nothing()) {
-    mContentBlockingLog.RecordLog(aOrigin, aType, aBlocked, aReason);
+          Nothing(),
+      const nsTArray<nsCString>& aTrackingFullHashes = nsTArray<nsCString>()) {
+    mContentBlockingLog.RecordLog(aOrigin, aType, aBlocked, aReason,
+                                  aTrackingFullHashes);
   }
 
   mutable std::bitset<eDeprecatedOperationCount> mDeprecationWarnedAbout;
@@ -4251,8 +4329,8 @@ class Document : public nsINode,
   // have to recalculate it each time.
   bool mAllowZoom : 1;
   bool mValidScaleFloat : 1;
+  bool mValidMinScale : 1;
   bool mValidMaxScale : 1;
-  bool mScaleStrEmpty : 1;
   bool mWidthStrEmpty : 1;
 
   // Parser aborted. True if the parser of this document was forcibly
@@ -4364,14 +4442,16 @@ class Document : public nsINode,
   // The channel that got passed to Document::StartDocumentLoad(), if any.
   nsCOMPtr<nsIChannel> mChannel;
 
+  // The CSP for every load lives in the Client within the LoadInfo. For all
+  // document-initiated subresource loads we can use that cached version of the
+  // CSP so we do not have to deserialize the CSP from the Client all the time.
+  nsCOMPtr<nsIContentSecurityPolicy> mCSP;
+  nsCOMPtr<nsIContentSecurityPolicy> mPreloadCSP;
+
  private:
   nsCString mContentType;
 
  protected:
-  // For document.write() we may need a different content type than
-  // mContentType.
-  nsCString mContentTypeForWriteCalls;
-
   // The document's security info
   nsCOMPtr<nsISupports> mSecurityInfo;
 

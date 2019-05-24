@@ -325,6 +325,7 @@ CssComputedView.prototype = {
    * - value {Object} Depends on the type of the node
    * returns null if the node isn't anything we care about
    */
+  /* eslint-disable complexity */
   getNodeInfo: function(node) {
     if (!node) {
       return null;
@@ -428,6 +429,7 @@ CssComputedView.prototype = {
       value,
     };
   },
+  /* eslint-enable complexity */
 
   _createPropertyViews: function() {
     if (this._createViewsPromise) {
@@ -527,14 +529,11 @@ CssComputedView.prototype = {
               this._refreshProcess = null;
               this.noResults.hidden = this.numVisibleProperties > 0;
 
-              if (this.searchField.value.length > 0 &&
-                  !this.numVisibleProperties) {
-                this.searchField.classList
-                                .add("devtools-style-searchbox-no-match");
-              } else {
-                this.searchField.classList
-                                .remove("devtools-style-searchbox-no-match");
-              }
+              const searchBox = this.searchField.parentNode;
+              searchBox.classList.toggle(
+                "devtools-searchbox-no-match",
+                this.searchField.value.length > 0 && !this.numVisibleProperties,
+              );
 
               this.inspector.emit("computed-view-refreshed");
               resolve(undefined);
@@ -589,12 +588,6 @@ CssComputedView.prototype = {
     this.searchClearButton.hidden = this.searchField.value.length === 0;
 
     this._filterChangedTimeout = setTimeout(() => {
-      if (this.searchField.value.length > 0) {
-        this.searchField.setAttribute("filled", true);
-      } else {
-        this.searchField.removeAttribute("filled");
-      }
-
       this.refreshPanel();
       this._filterChangeTimeout = null;
     }, filterTimeout);

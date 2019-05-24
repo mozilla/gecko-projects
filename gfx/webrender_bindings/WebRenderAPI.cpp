@@ -246,6 +246,11 @@ void TransactionWrapper::UpdatePinchZoom(float aZoom) {
   wr_transaction_pinch_zoom(mTxn, aZoom);
 }
 
+void TransactionWrapper::UpdateIsTransformPinchZooming(uint64_t aAnimationId,
+                                                       bool aIsZooming) {
+  wr_transaction_set_is_transform_pinch_zooming(mTxn, aAnimationId, aIsZooming);
+}
+
 /*static*/
 already_AddRefed<WebRenderAPI> WebRenderAPI::Create(
     layers::CompositorBridgeParent* aBridge,
@@ -418,12 +423,15 @@ bool WebRenderAPI::HitTest(const wr::WorldPoint& aPoint,
 }
 
 void WebRenderAPI::Readback(const TimeStamp& aStartTime, gfx::IntSize size,
+                            const gfx::SurfaceFormat& aFormat,
                             const Range<uint8_t>& buffer) {
   class Readback : public RendererEvent {
    public:
     explicit Readback(layers::SynchronousTask* aTask, TimeStamp aStartTime,
-                      gfx::IntSize aSize, const Range<uint8_t>& aBuffer)
-        : mTask(aTask), mStartTime(aStartTime), mSize(aSize), mBuffer(aBuffer) {
+                      gfx::IntSize aSize, const gfx::SurfaceFormat& aFormat,
+                      const Range<uint8_t>& aBuffer)
+        : mTask(aTask), mStartTime(aStartTime), mSize(aSize), mFormat(aFormat),
+          mBuffer(aBuffer) {
       MOZ_COUNT_CTOR(Readback);
     }
 
@@ -432,6 +440,7 @@ void WebRenderAPI::Readback(const TimeStamp& aStartTime, gfx::IntSize size,
     void Run(RenderThread& aRenderThread, WindowId aWindowId) override {
       aRenderThread.UpdateAndRender(aWindowId, VsyncId(), mStartTime,
                                     /* aRender */ true, Some(mSize),
+                                    wr::SurfaceFormatToImageFormat(mFormat),
                                     Some(mBuffer), false);
       layers::AutoCompleteTask complete(mTask);
     }
@@ -439,6 +448,7 @@ void WebRenderAPI::Readback(const TimeStamp& aStartTime, gfx::IntSize size,
     layers::SynchronousTask* mTask;
     TimeStamp mStartTime;
     gfx::IntSize mSize;
+    gfx::SurfaceFormat mFormat;
     const Range<uint8_t>& mBuffer;
   };
 
@@ -446,7 +456,7 @@ void WebRenderAPI::Readback(const TimeStamp& aStartTime, gfx::IntSize size,
   UpdateDebugFlags(0);
 
   layers::SynchronousTask task("Readback");
-  auto event = MakeUnique<Readback>(&task, aStartTime, size, buffer);
+  auto event = MakeUnique<Readback>(&task, aStartTime, size, aFormat, buffer);
   // This event will be passed from wr_backend thread to renderer thread. That
   // implies that all frame data have been processed when the renderer runs this
   // read-back event. Then, we could make sure this read-back event gets the
@@ -802,10 +812,11 @@ void DisplayListBuilder::PopStackingContext(bool aIsReferenceFrame) {
 }
 
 wr::WrClipChainId DisplayListBuilder::DefineClipChain(
-    const nsTArray<wr::WrClipId>& aClips, const wr::WrClipChainId* aParent) {
+    const nsTArray<wr::WrClipId>& aClips, bool aParentWithCurrentChain) {
   const uint64_t* parent = nullptr;
-  if (aParent && aParent->id != wr::ROOT_CLIP_CHAIN) {
-    parent = &aParent->id;
+  if (aParentWithCurrentChain &&
+      mCurrentSpaceAndClipChain.clip_chain != wr::ROOT_CLIP_CHAIN) {
+    parent = &mCurrentSpaceAndClipChain.clip_chain;
   }
   uint64_t clipchainId = wr_dp_define_clipchain(
       mWrState, parent, aClips.Elements(), aClips.Length());
@@ -1140,7 +1151,8 @@ void DisplayListBuilder::PushLine(const wr::LayoutRect& aClip,
 void DisplayListBuilder::PushShadow(const wr::LayoutRect& aRect,
                                     const wr::LayoutRect& aClip,
                                     bool aIsBackfaceVisible,
-                                    const wr::Shadow& aShadow) {
+                                    const wr::Shadow& aShadow,
+                                    bool aShouldInflate) {
   // Local clip_rects are translated inside of shadows, as they are assumed to
   // be part of the element drawing itself, and not a parent frame clipping it.
   // As such, it is not sound to apply the MergeClipLeaf optimization inside of
@@ -1149,7 +1161,8 @@ void DisplayListBuilder::PushShadow(const wr::LayoutRect& aRect,
   // being re-enabled mid-shadow. The optimization is restored in PopAllShadows.
   SuspendClipLeafMerging();
   wr_dp_push_shadow(mWrState, aRect, aClip, aIsBackfaceVisible,
-                    &mCurrentSpaceAndClipChain, aShadow);
+                    &mCurrentSpaceAndClipChain, aShadow,
+                    aShouldInflate);
 }
 
 void DisplayListBuilder::PopAllShadows() {
@@ -1165,9 +1178,8 @@ void DisplayListBuilder::SuspendClipLeafMerging() {
     mSuspendedClipChainLeaf = mClipChainLeaf;
     mSuspendedSpaceAndClipChain = Some(mCurrentSpaceAndClipChain);
 
-    wr::WrClipChainId currentClipChainId{mCurrentSpaceAndClipChain.clip_chain};
     auto clipId = DefineClip(Nothing(), *mClipChainLeaf);
-    auto clipChainId = DefineClipChain({clipId}, &currentClipChainId);
+    auto clipChainId = DefineClipChain({clipId}, true);
 
     mCurrentSpaceAndClipChain.clip_chain = clipChainId.id;
     mClipChainLeaf = Nothing();

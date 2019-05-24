@@ -61,6 +61,7 @@
   grid-row-end: inherit;
   order: inherit;
   column-span: inherit; /* needed if <table> has "column-span:all" */
+  contain: inherit; /* needed if table has 'contain:layout' or 'paint' */
 }
 
 *|*::-moz-table-row {
@@ -217,6 +218,7 @@
   -moz-box-direction: inherit;
   -moz-box-pack: inherit;
   -moz-box-align: inherit;
+  -webkit-line-clamp: inherit;
   /* Grid container */
   grid-auto-columns: inherit;
   grid-auto-rows: inherit;

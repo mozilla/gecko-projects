@@ -133,11 +133,6 @@ void OriginAttributes::CreateSuffix(nsACString& aStr) const {
   // naming.
   //
 
-  if (mAppId != nsIScriptSecurityManager::NO_APP_ID) {
-    value.AppendInt(mAppId);
-    params.Set(NS_LITERAL_STRING("appId"), value);
-  }
-
   if (mInIsolatedMozBrowser) {
     params.Set(NS_LITERAL_STRING("inBrowser"), NS_LITERAL_STRING("1"));
   }
@@ -161,15 +156,6 @@ void OriginAttributes::CreateSuffix(nsACString& aStr) const {
 
     params.Set(NS_LITERAL_STRING("firstPartyDomain"),
                sanitizedFirstPartyDomain);
-  }
-
-  if (!mGeckoViewSessionContextId.IsEmpty()) {
-    nsAutoString sanitizedGeckoViewUserContextId(mGeckoViewSessionContextId);
-    sanitizedGeckoViewUserContextId.ReplaceChar(
-        dom::quota::QuotaManager::kReplaceChars, '+');
-
-    params.Set(NS_LITERAL_STRING("geckoViewUserContextId"),
-               sanitizedGeckoViewUserContextId);
   }
 
   aStr.Truncate();
@@ -216,16 +202,6 @@ class MOZ_STACK_CLASS PopulateFromSuffixIterator final
 
   bool URLParamsIterator(const nsAString& aName,
                          const nsAString& aValue) override {
-    if (aName.EqualsLiteral("appId")) {
-      nsresult rv;
-      int64_t val = aValue.ToInteger64(&rv);
-      NS_ENSURE_SUCCESS(rv, false);
-      NS_ENSURE_TRUE(val <= UINT32_MAX, false);
-      mOriginAttributes->mAppId = static_cast<uint32_t>(val);
-
-      return true;
-    }
-
     if (aName.EqualsLiteral("inBrowser")) {
       if (!aValue.EqualsLiteral("1")) {
         return false;
@@ -235,7 +211,7 @@ class MOZ_STACK_CLASS PopulateFromSuffixIterator final
       return true;
     }
 
-    if (aName.EqualsLiteral("addonId")) {
+    if (aName.EqualsLiteral("addonId") || aName.EqualsLiteral("appId")) {
       // No longer supported. Silently ignore so that legacy origin strings
       // don't cause failures.
       return true;
@@ -264,13 +240,6 @@ class MOZ_STACK_CLASS PopulateFromSuffixIterator final
     if (aName.EqualsLiteral("firstPartyDomain")) {
       MOZ_RELEASE_ASSERT(mOriginAttributes->mFirstPartyDomain.IsEmpty());
       mOriginAttributes->mFirstPartyDomain.Assign(aValue);
-      return true;
-    }
-
-    if (aName.EqualsLiteral("geckoViewUserContextId")) {
-      MOZ_RELEASE_ASSERT(
-          mOriginAttributes->mGeckoViewSessionContextId.IsEmpty());
-      mOriginAttributes->mGeckoViewSessionContextId.Assign(aValue);
       return true;
     }
 

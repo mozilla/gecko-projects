@@ -10,7 +10,7 @@ import {
   assertPendingBreakpoint,
   findFunctionByName,
   findPosition,
-  makeBreakpointLocation
+  makeBreakpointLocation,
 } from "../../utils/breakpoint";
 
 import { comparePosition, createLocation } from "../../utils/location";
@@ -28,7 +28,7 @@ import type {
   PendingBreakpoint,
   SourceId,
   BreakpointPositions,
-  Context
+  Context,
 } from "../../types";
 
 async function findBreakpointPosition(
@@ -36,8 +36,9 @@ async function findBreakpointPosition(
   { getState, dispatch },
   location: SourceLocation
 ) {
+  const { sourceId, line } = location;
   const positions: BreakpointPositions = await dispatch(
-    setBreakpointPositions({ cx, sourceId: location.sourceId })
+    setBreakpointPositions({ cx, sourceId, line })
   );
 
   const position = findPosition(positions, location);
@@ -66,7 +67,7 @@ async function findNewLocation(
     line,
     column: location.column,
     sourceUrl: source.url,
-    sourceId: source.id
+    sourceId: source.id,
   };
 }
 
@@ -111,7 +112,7 @@ export function syncBreakpoint(
     const { location, generatedLocation, astLocation } = pendingBreakpoint;
     const sourceGeneratedLocation = createLocation({
       ...generatedLocation,
-      sourceId: generatedSourceId
+      sourceId: generatedSourceId,
     });
 
     if (

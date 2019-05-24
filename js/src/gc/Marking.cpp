@@ -404,10 +404,6 @@ template <typename T>
 void DoMarking(GCMarker* gcmarker, T* thing);
 template <typename T>
 void DoMarking(GCMarker* gcmarker, const T& thing);
-template <typename T>
-void NoteWeakEdge(GCMarker* gcmarker, T** thingp);
-template <typename T>
-void NoteWeakEdge(GCMarker* gcmarker, T* thingp);
 
 template <typename T>
 JS_PUBLIC_API void js::gc::TraceExternalEdge(JSTracer* trc, T* thingp,
@@ -447,7 +443,6 @@ namespace gc {
 
 #define INSTANTIATE_INTERNAL_TRACE_FUNCTIONS(type)                          \
   template void TraceEdgeInternal<type>(JSTracer*, type*, const char*);     \
-  template void TraceWeakEdgeInternal<type>(JSTracer*, type*, const char*); \
   template void TraceRangeInternal<type>(JSTracer*, size_t len, type*,      \
                                          const char*);
 
@@ -479,7 +474,7 @@ template void js::TraceManuallyBarrieredCrossCompartmentEdge<LazyScript*>(
     JSTracer*, JSObject*, LazyScript**, const char*);
 
 void js::TraceCrossCompartmentEdge(JSTracer* trc, JSObject* src,
-                                   WriteBarrieredBase<Value>* dst,
+                                   WriteBarriered<Value>* dst,
                                    const char* name) {
   if (ShouldTraceCrossCompartment(trc, src, dst->get())) {
     TraceEdgeInternal(trc, dst->unsafeUnbarrieredForTracing(), name);
@@ -566,19 +561,6 @@ void js::gc::TraceEdgeInternal(JSTracer* trc, T* thingp, const char* name) {
   }
   MOZ_ASSERT(trc->isCallbackTracer());
   DoCallback(trc->asCallbackTracer(), thingp, name);
-}
-
-template <typename T>
-void js::gc::TraceWeakEdgeInternal(JSTracer* trc, T* thingp, const char* name) {
-  if (!trc->isMarkingTracer()) {
-    // Non-marking tracers can select whether or not they see weak edges.
-    if (trc->traceWeakEdges()) {
-      TraceEdgeInternal(trc, thingp, name);
-    }
-    return;
-  }
-
-  NoteWeakEdge(GCMarker::fromTracer(trc), thingp);
 }
 
 template <typename T>
@@ -738,42 +720,28 @@ void DoMarking(GCMarker* gcmarker, const T& thing) {
   ApplyGCThingTyped(thing, [gcmarker](auto t) { DoMarking(gcmarker, t); });
 }
 
-template <typename T>
-void NoteWeakEdge(GCMarker* gcmarker, T** thingp) {
-  // Do per-type marking precondition checks.
-  if (!ShouldMark(gcmarker, *thingp)) {
-    return;
-  }
+JS_PUBLIC_API void js::gc::PerformIncrementalReadBarrier(JS::GCCellPtr thing) {
+  // Optimized marking for read barriers. This is called from
+  // ExposeGCThingToActiveJS which has already checked the prerequisites for
+  // performing a read barrier. This means we can skip a bunch of checks and
+  // call info the tracer directly.
 
-  CheckTracedThing(gcmarker, *thingp);
+  MOZ_ASSERT(thing);
+  MOZ_ASSERT(!JS::RuntimeHeapIsMajorCollecting());
 
-  // If the target is already marked, there's no need to store the edge.
-  if (IsMarkedUnbarriered(gcmarker->runtime(), thingp)) {
-    return;
-  }
+  TenuredCell* cell = &thing.asCell()->asTenured();
+  Zone* zone = cell->zone();
+  MOZ_ASSERT(zone->needsIncrementalBarrier());
 
-  gcmarker->noteWeakEdge(thingp);
-}
+  // Skip disptaching on known tracer type.
+  GCMarker* gcmarker = GCMarker::fromTracer(zone->barrierTracer());
 
-template <typename T>
-void NoteWeakEdge(GCMarker* gcmarker, T* thingp) {
-  MOZ_CRASH("the gc does not support tagged pointers as weak edges");
-}
-
-template <typename T>
-void js::GCMarker::noteWeakEdge(T* edge) {
-  static_assert(IsBaseOf<Cell, typename mozilla::RemovePointer<T>::Type>::value,
-                "edge must point to a GC pointer");
-  MOZ_ASSERT((*edge)->isTenured());
-
-  // Note: we really want the *source* Zone here. The edge may start in a
-  // non-gc heap location, however, so we use the fact that cross-zone weak
-  // references are not allowed and use the *target's* zone.
-  JS::Zone::WeakEdges& weakRefs = (*edge)->asTenured().zone()->gcWeakRefs();
-  AutoEnterOOMUnsafeRegion oomUnsafe;
-  if (!weakRefs.append(reinterpret_cast<TenuredCell**>(edge))) {
-    oomUnsafe.crash("Failed to record a weak edge for sweeping.");
-  }
+  // Mark the argument, as DoMarking above.
+  ApplyGCThingTyped(thing, [gcmarker](auto thing) {
+                             MOZ_ASSERT(ShouldMark(gcmarker, thing));
+                             CheckTracedThing(gcmarker, thing);
+                             gcmarker->traverse(thing);
+                           });
 }
 
 // The simplest traversal calls out to the fully generic traceChildren function
@@ -967,8 +935,8 @@ bool js::GCMarker::mark(T* thing) {
 // traversing equivalent subgraphs.
 
 void LazyScript::traceChildren(JSTracer* trc) {
-  if (script_) {
-    TraceWeakEdge(trc, &script_, "script");
+  if (trc->traceWeakEdges()) {
+    TraceNullableEdge(trc, &script_, "script");
   }
 
   if (function_) {
@@ -1005,9 +973,7 @@ void LazyScript::traceChildren(JSTracer* trc) {
   }
 }
 inline void js::GCMarker::eagerlyMarkChildren(LazyScript* thing) {
-  if (thing->script_) {
-    noteWeakEdge(thing->script_.unsafeUnbarrieredForTracing());
-  }
+  // script_ is weak so is not traced here.
 
   if (thing->function_) {
     traverseEdge(thing, static_cast<JSObject*>(thing->function_));
@@ -1524,6 +1490,7 @@ bool GCMarker::markUntilBudgetExhausted(SliceBudget& budget) {
     if (hasGrayEntries()) {
       AutoSetMarkColor autoSetGray(*this, MarkColor::Gray);
       do {
+        MOZ_ASSERT(!hasBlackEntries());
         processMarkStackTop(budget);
         if (budget.isOverBudget()) {
           return false;
@@ -3136,6 +3103,11 @@ size_t js::TenuringTracer::moveStringToTenured(JSString* dst, JSString* src,
     }
   }
 
+  if (dst->isFlat() && !dst->isInline()) {
+    AddCellMemory(dst, dst->asFlat().allocSize(),
+                  MemoryUse::StringContents);
+  }
+
   return size;
 }
 
@@ -3371,7 +3343,7 @@ FOR_EACH_PUBLIC_TAGGED_GC_POINTER_TYPE(INSTANTIATE_INTERNAL_MARKING_FUNCTIONS)
  */
 
 #ifdef DEBUG
-struct AssertNonGrayTracer : public JS::CallbackTracer {
+struct AssertNonGrayTracer final : public JS::CallbackTracer {
   explicit AssertNonGrayTracer(JSRuntime* rt) : JS::CallbackTracer(rt) {}
   void onChild(const JS::GCCellPtr& thing) override {
     MOZ_ASSERT(!thing.asCell()->isMarkedGray());
@@ -3379,7 +3351,7 @@ struct AssertNonGrayTracer : public JS::CallbackTracer {
 };
 #endif
 
-class UnmarkGrayTracer : public JS::CallbackTracer {
+class UnmarkGrayTracer final : public JS::CallbackTracer {
  public:
   // We set weakMapAction to DoNotTraceWeakMaps because the cycle collector
   // will fix up any color mismatches involving weakmaps when it runs.

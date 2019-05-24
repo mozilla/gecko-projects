@@ -6,14 +6,14 @@
 
 import { connect } from "../../utils/connect";
 import { Component } from "react";
-import { getSelectedSource, getBreakableLines } from "../../selectors";
+import { getSelectedSource, getSelectedBreakableLines } from "../../selectors";
 import type { Source } from "../../types";
 import { fromEditorLine } from "../../utils/editor";
 
 type Props = {
   selectedSource: Source,
   editor: Object,
-  breakableLines: Set<number>
+  breakableLines: Set<number>,
 };
 
 class EmptyLines extends Component<Props> {
@@ -64,13 +64,11 @@ const mapStateToProps = state => {
   if (!selectedSource) {
     throw new Error("no selectedSource");
   }
-  const breakableLines = new Set(
-    getBreakableLines(state, selectedSource.id) || []
-  );
+  const breakableLines = getSelectedBreakableLines(state);
 
   return {
     selectedSource,
-    breakableLines
+    breakableLines,
   };
 };
 

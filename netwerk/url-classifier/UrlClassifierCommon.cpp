@@ -89,7 +89,8 @@ void UrlClassifierCommon::NotifyChannelBlocked(nsIChannel* aChannel,
 
   nsCOMPtr<nsIURI> uri;
   aChannel->GetURI(getter_AddRefs(uri));
-  pwin->NotifyContentBlockingEvent(aBlockedReason, aChannel, true, uri);
+  pwin->NotifyContentBlockingEvent(aBlockedReason, aChannel, true, uri,
+                                   aChannel);
 }
 
 /* static */
@@ -137,6 +138,38 @@ bool UrlClassifierCommon::ShouldEnableClassifier(nsIChannel* aChannel) {
   }
 
   return true;
+}
+
+/* static */
+nsresult UrlClassifierCommon::SetTrackingInfo(
+    nsIChannel* aChannel, const nsTArray<nsCString>& aLists,
+    const nsTArray<nsCString>& aFullHashes) {
+  NS_ENSURE_ARG(!aLists.IsEmpty());
+
+  // Can be called in EITHER the parent or child process.
+  nsCOMPtr<nsIParentChannel> parentChannel;
+  NS_QueryNotificationCallbacks(aChannel, parentChannel);
+  if (parentChannel) {
+    // This channel is a parent-process proxy for a child process request.
+    // Tell the child process channel to do this instead.
+    nsAutoCString strLists, strHashes;
+    TablesToString(aLists, strLists);
+    TablesToString(aFullHashes, strHashes);
+
+    parentChannel->SetClassifierMatchedTrackingInfo(strLists, strHashes);
+    return NS_OK;
+  }
+
+  nsresult rv;
+  nsCOMPtr<nsIClassifiedChannel> classifiedChannel =
+      do_QueryInterface(aChannel, &rv);
+  NS_ENSURE_SUCCESS(rv, rv);
+
+  if (classifiedChannel) {
+    classifiedChannel->SetMatchedTrackingInfo(aLists, aFullHashes);
+  }
+
+  return NS_OK;
 }
 
 /* static */
@@ -313,7 +346,7 @@ void LowerPriorityHelper(nsIChannel* aChannel) {
 
   nsCOMPtr<nsIClassOfService> cos(do_QueryInterface(aChannel));
   if (cos) {
-    if (nsContentUtils::IsTailingEnabled()) {
+    if (StaticPrefs::network_http_tailing_enabled()) {
       uint32_t cosFlags = 0;
       cos->GetClassFlags(&cosFlags);
       isBlockingResource =

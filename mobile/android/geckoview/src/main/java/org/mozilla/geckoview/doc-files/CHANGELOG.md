@@ -63,14 +63,6 @@ exclude: true
 - [`GeckoView`][65.5] will not create a [`GeckoSession`][65.9] anymore when
   attached to a window without a session.
 
-- Added API for session context assignment
-  [`GeckoSessionSettings.Builder.contextId`][68.14] and deletion of data
-  related to a session context
-  [`StorageController.clearSessionContextData`][68.15].
-
-[68.14]: ../GeckoSessionSettings.Builder.html#contextId-
-[68.15]: ../StorageController.html#clearSessionContextData-java.lang.String-
-
 - Added [`GeckoRuntimeSettings.Builder#configFilePath`][68.16] to set
   a path to a configuration file from which GeckoView will read
   configuration options such as Gecko process arguments, environment
@@ -107,6 +99,10 @@ exclude: true
 
 [68.23]: ./GeckoView.html#setVerticalClipping-int-
 [68.24]: ./GeckoDisplay.html#setVerticalClipping-int-
+
+- Added [`StorageController`][68.25] API for clearing data.
+
+[68.25]: ../StorageController.html
 
 ## v67
 - Added [`setAutomaticFontSizeAdjustment`][67.2] to
@@ -314,4 +310,4 @@ exclude: true
 [65.24]: ../CrashReporter.html#sendCrashReport-android.content.Context-android.os.Bundle-java.lang.String-
 [65.25]: ../GeckoResult.html
 
-[api-version]: 9fe3ccad7809f393e67b5186b56a90adf82eed60
+[api-version]: 6078967e45c80550c5d17189856d3d3206b8540f

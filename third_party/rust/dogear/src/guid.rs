@@ -37,7 +37,7 @@ pub trait IsValidGuid {
 #[derive(Clone)]
 enum Repr {
     Valid([u8; 12]),
-    Invalid(String),
+    Invalid(Box<str>),
 }
 
 /// The Places root GUID, used to root all items in a bookmark tree.
@@ -95,7 +95,7 @@ impl Guid {
             Repr::Valid(bytes)
         } else {
             match String::from_utf16(b) {
-                Ok(s) => Repr::Invalid(s),
+                Ok(s) => Repr::Invalid(s.into()),
                 Err(err) => return Err(err.into()),
             }
         };
@@ -107,7 +107,7 @@ impl Guid {
     pub fn as_bytes(&self) -> &[u8] {
         match self.0 {
             Repr::Valid(ref bytes) => bytes,
-            Repr::Invalid(ref s) => s.as_ref(),
+            Repr::Invalid(ref s) => s.as_bytes(),
         }
     }
 
@@ -147,12 +147,9 @@ impl<T: Copy + Into<usize>> IsValidGuid for [T] {
     #[inline]
     fn is_valid_guid(&self) -> bool {
         self.len() == 12
-            && self.iter().all(|&byte| {
-                VALID_GUID_BYTES
-                    .get(byte.into())
-                    .map(|&b| b == 1)
-                    .unwrap_or(false)
-            })
+            && self
+                .iter()
+                .all(|&byte| VALID_GUID_BYTES.get(byte.into()).map_or(false, |&b| b == 1))
     }
 }
 
@@ -217,7 +214,7 @@ impl PartialOrd for Guid {
 impl PartialEq<str> for Guid {
     #[inline]
     fn eq(&self, other: &str) -> bool {
-        self.as_str() == other
+        self.as_bytes() == other.as_bytes()
     }
 }
 
@@ -252,13 +249,13 @@ impl Hash for Guid {
 
 // The default Debug impl is pretty unhelpful here.
 impl fmt::Debug for Guid {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "Guid({:?})", self.as_str())
     }
 }
 
 impl fmt::Display for Guid {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(self.as_str())
     }
 }

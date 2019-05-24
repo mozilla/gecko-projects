@@ -9,7 +9,6 @@
 #include "EnterpriseRoots.h"
 #include "ExtendedValidation.h"
 #include "NSSCertDBTrustDomain.h"
-#include "PKCS11ModuleDB.h"
 #include "ScopedNSSTypes.h"
 #include "SharedSSLState.h"
 #include "cert.h"
@@ -1576,6 +1575,12 @@ static nsresult InitializeNSSWithFallbacks(const nsACString& profilePath,
     MOZ_LOG(gPIPNSSLog, LogLevel::Debug,
             ("nocertdb mode or empty profile path -> NSS_NoDB_Init"));
     SECStatus srv = NSS_NoDB_Init(nullptr);
+#ifdef MOZ_DIAGNOSTIC_ASSERT_ENABLED
+    if (srv != SECSuccess) {
+      MOZ_CRASH_UNSAFE_PRINTF("InitializeNSSWithFallbacks failed: %d",
+                              PR_GetError());
+    }
+#endif
     return srv == SECSuccess ? NS_OK : NS_ERROR_FAILURE;
   }
 
@@ -1629,6 +1634,10 @@ static nsresult InitializeNSSWithFallbacks(const nsACString& profilePath,
       // Unload NSS so we can attempt to fix this situation for the user.
       srv = NSS_Shutdown();
       if (srv != SECSuccess) {
+#  ifdef MOZ_DIAGNOSTIC_ASSERT_ENABLED
+        MOZ_CRASH_UNSAFE_PRINTF("InitializeNSSWithFallbacks failed: %d",
+                                PR_GetError());
+#  endif
         return NS_ERROR_FAILURE;
       }
       MOZ_LOG(gPIPNSSLog, LogLevel::Debug, ("trying to rename module db"));
@@ -1637,6 +1646,12 @@ static nsresult InitializeNSSWithFallbacks(const nsACString& profilePath,
       // fall back to NSS_NoDB_Init, which is the behavior we want.
       nsresult rv = AttemptToRenameBothPKCS11ModuleDBVersions(profilePath);
       if (NS_FAILED(rv)) {
+#  ifdef MOZ_DIAGNOSTIC_ASSERT_ENABLED
+        // An nsresult is a uint32_t, but at least one of our compilers doesn't
+        // like this format string unless we include the cast. <shruggie emoji>
+        MOZ_CRASH_UNSAFE_PRINTF("InitializeNSSWithFallbacks failed: %u",
+                                (uint32_t)rv);
+#  endif
         return rv;
       }
       srv = ::mozilla::psm::InitializeNSS(profilePath, false, true);
@@ -1655,6 +1670,12 @@ static nsresult InitializeNSSWithFallbacks(const nsACString& profilePath,
 
   MOZ_LOG(gPIPNSSLog, LogLevel::Debug, ("last-resort NSS_NoDB_Init"));
   srv = NSS_NoDB_Init(nullptr);
+#ifdef MOZ_DIAGNOSTIC_ASSERT_ENABLED
+  if (srv != SECSuccess) {
+    MOZ_CRASH_UNSAFE_PRINTF("InitializeNSSWithFallbacks failed: %d",
+                            PR_GetError());
+  }
+#endif
   return srv == SECSuccess ? NS_OK : NS_ERROR_FAILURE;
 }
 
@@ -1769,28 +1790,6 @@ nsresult nsNSSComponent::InitializeNSS() {
 
   if (PK11_IsFIPS()) {
     Telemetry::Accumulate(Telemetry::FIPS_ENABLED, true);
-  }
-
-  // Gather telemetry on any PKCS#11 modules we have loaded. Note that because
-  // we load the built-in root module asynchronously after this, the telemetry
-  // will not include it.
-  {  // Introduce scope for the AutoSECMODListReadLock.
-    AutoSECMODListReadLock lock;
-    for (SECMODModuleList* list = SECMOD_GetDefaultModuleList(); list;
-         list = list->next) {
-      nsAutoString scalarKey;
-      GetModuleNameForTelemetry(list->module, scalarKey);
-      // Scalar keys must be between 0 and 70 characters (exclusive).
-      // GetModuleNameForTelemetry takes care of keys that are too long. If for
-      // some reason it couldn't come up with an appropriate name and returned
-      // an empty result, however, we need to not attempt to record this (it
-      // wouldn't give us anything useful anyway).
-      if (scalarKey.Length() > 0) {
-        Telemetry::ScalarSet(
-            Telemetry::ScalarID::SECURITY_PKCS11_MODULES_LOADED, scalarKey,
-            true);
-      }
-    }
   }
 
   MOZ_LOG(gPIPNSSLog, LogLevel::Debug, ("NSS Initialization done\n"));

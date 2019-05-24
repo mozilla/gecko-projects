@@ -5,6 +5,7 @@
 
 const test = new SearchConfigTest({
   identifier: "google",
+  aliases: ["@google"],
   default: {
     // Included everywhere apart from the exclusions below. These are basically
     // just excluding what Yandex and Baidu include.
@@ -14,7 +15,8 @@ const test = new SearchConfigTest({
       ],
       locales: {
         matches: ["ru", "tr", "be", "kk"],
-        startsWith: ["en"],
+        // We don't currently enforce this.
+        // startsWith: ["en"],
       },
     }, {
       regions: ["cn"],
@@ -23,6 +25,21 @@ const test = new SearchConfigTest({
       },
     }],
   },
+  available: {
+    excluded: [
+      // Should be available everywhere.
+    ],
+  },
+  details: [{
+    included: [{regions: ["us"]}],
+    domain: "google.com",
+    codes: "client=firefox-b-1-d",
+  }, {
+    excluded: [{regions: ["us"]}],
+    included: [],
+    domain: "google.com",
+    codes: "client=firefox-b-d",
+  }],
 });
 
 add_task(async function setup() {

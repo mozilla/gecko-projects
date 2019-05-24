@@ -359,7 +359,7 @@ bool JSObject::setNewGroupUnknown(JSContext* cx, ObjectGroupRealm& realm,
  * (though there are only a few of these per realm).
  */
 struct ObjectGroupRealm::NewEntry {
-  ReadBarrieredObjectGroup group;
+  WeakHeapPtrObjectGroup group;
 
   // Note: This pointer is only used for equality and does not need a read
   // barrier.
@@ -1062,8 +1062,8 @@ struct ObjectGroupRealm::PlainObjectKey {
 };
 
 struct ObjectGroupRealm::PlainObjectEntry {
-  ReadBarrieredObjectGroup group;
-  ReadBarrieredShape shape;
+  WeakHeapPtrObjectGroup group;
+  WeakHeapPtrShape shape;
   TypeSet::Type* types;
 
   bool needsSweep(unsigned nproperties) {
@@ -1312,12 +1312,12 @@ JSObject* ObjectGroup::newPlainObject(JSContext* cx, IdValuePair* properties,
 
 struct ObjectGroupRealm::AllocationSiteKey
     : public DefaultHasher<AllocationSiteKey> {
-  ReadBarrieredScript script;
+  WeakHeapPtrScript script;
 
   uint32_t offset : 24;
   JSProtoKey kind : 8;
 
-  ReadBarrieredObject proto;
+  WeakHeapPtrObject proto;
 
   static const uint32_t OFFSET_LIMIT = (1 << 23);
 
@@ -1381,9 +1381,9 @@ struct ObjectGroupRealm::AllocationSiteKey
 
 class ObjectGroupRealm::AllocationSiteTable
     : public JS::WeakCache<
-          js::GCHashMap<AllocationSiteKey, ReadBarrieredObjectGroup,
+          js::GCHashMap<AllocationSiteKey, WeakHeapPtrObjectGroup,
                         AllocationSiteKey, SystemAllocPolicy>> {
-  using Table = js::GCHashMap<AllocationSiteKey, ReadBarrieredObjectGroup,
+  using Table = js::GCHashMap<AllocationSiteKey, WeakHeapPtrObjectGroup,
                               AllocationSiteKey, SystemAllocPolicy>;
   using Base = JS::WeakCache<Table>;
 
@@ -1523,7 +1523,7 @@ bool ObjectGroup::setAllocationSiteObjectGroup(JSContext* cx,
      * objects, as these may not be created until after the script
      * has been analyzed.
      */
-    TypeScript::Monitor(cx, script, pc, ObjectValue(*obj));
+    JitScript::MonitorBytecodeType(cx, script, pc, ObjectValue(*obj));
   } else {
     ObjectGroup* group = allocationSiteGroup(cx, script, pc, key);
     if (!group) {
@@ -1788,7 +1788,7 @@ void ObjectGroupRealm::sweep() {
     plainObjectTable->sweep();
   }
   if (stringSplitStringGroup) {
-    if (JS::GCPolicy<ReadBarrieredObjectGroup>::needsSweep(
+    if (JS::GCPolicy<WeakHeapPtrObjectGroup>::needsSweep(
             &stringSplitStringGroup)) {
       stringSplitStringGroup = nullptr;
     }

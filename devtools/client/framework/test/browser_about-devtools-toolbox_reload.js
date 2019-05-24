@@ -13,7 +13,7 @@ add_task(async function() {
   info("Preload a local DebuggerClient as this-firefox in the remoteClientManager");
   const { remoteClientManager } =
     require("devtools/client/shared/remote-debugging/remote-client-manager");
-  remoteClientManager.setClient("this-firefox", "this-firefox", debuggerClient);
+  remoteClientManager.setClient("this-firefox", "this-firefox", debuggerClient, {});
   registerCleanupFunction(() => {
     remoteClientManager.removeAllClients();
   });
@@ -37,7 +37,9 @@ add_task(async function() {
   ok(refreshedDoc.querySelector(".debug-target-info"),
      "about:devtools-toolbox header is correctly displayed");
 
+  const onToolboxDestroy = gDevTools.once("toolbox-destroyed");
   await removeTab(tab);
+  await onToolboxDestroy;
   await removeTab(targetTab);
 });
 

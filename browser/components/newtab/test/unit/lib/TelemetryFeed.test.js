@@ -6,6 +6,7 @@ import {
   ImpressionStatsPing,
   PerfPing,
   SessionPing,
+  SpocsFillPing,
   UndesiredPing,
   UserEventPing,
 } from "test/schemas/pings";
@@ -28,7 +29,12 @@ describe("TelemetryFeed", () => {
   let fakeHomePage;
   let fakeExtensionSettingsStore;
   class PingCentre {sendPing() {} uninit() {} sendStructuredIngestionPing() {}}
-  class UTEventReporting {sendUserEvent() {} sendSessionEndEvent() {} uninit() {}}
+  class UTEventReporting {
+    sendUserEvent() {}
+    sendSessionEndEvent() {}
+    sendTrailheadEnrollEvent() {}
+    uninit() {}
+  }
   class PerfService {
     getMostRecentAbsMarkStartByName() { return 1234; }
     mark() {}
@@ -402,13 +408,14 @@ describe("TelemetryFeed", () => {
       assert.ok(Number.isInteger(session.session_duration),
         "session_duration should be an integer");
     });
-    it("shouldn't add session_duration if there's no visibility_event_rcvd_ts", () => {
+    it("shouldn't send session ping if there's no visibility_event_rcvd_ts", () => {
       sandbox.stub(instance, "sendEvent");
-      const session = instance.addSession("foo");
+      instance.addSession("foo");
 
       instance.endSession("foo");
 
-      assert.notProperty(session, "session_duration");
+      assert.notCalled(instance.sendEvent);
+      assert.isFalse(instance.sessions.has("foo"));
     });
     it("should remove the session from .sessions", () => {
       sandbox.stub(instance, "sendEvent");
@@ -427,6 +434,7 @@ describe("TelemetryFeed", () => {
       sandbox.stub(instance, "createSessionEndEvent");
       sandbox.stub(instance.utEvents, "sendSessionEndEvent");
       const session = instance.addSession("foo");
+      session.perf.visibility_event_rcvd_ts = 444.4732;
 
       instance.endSession("foo");
 
@@ -630,6 +638,20 @@ describe("TelemetryFeed", () => {
       assert.validate(ping, ImpressionStatsPing);
       assert.propertyVal(ping, "pocket", 0);
       assert.propertyVal(ping, "tiles", tiles);
+    });
+  });
+  describe("#createSpocsFillPing", () => {
+    it("should create a valid SPOCS Fill ping", async () => {
+      const spocFills = [
+        {id: 10001, displayed: 0, reason: "frequency_cap", full_recalc: 1},
+        {id: 10002, displayed: 0, reason: "blocked_by_user", full_recalc: 1},
+        {id: 10003, displayed: 1, reason: "n/a", full_recalc: 1},
+      ];
+      const action = ac.DiscoveryStreamSpocsFill({spoc_fills: spocFills});
+      const ping = await instance.createSpocsFillPing(action.data);
+
+      assert.validate(ping, SpocsFillPing);
+      assert.propertyVal(ping, "spoc_fills", spocFills);
     });
   });
   describe("#applyCFRPolicy", () => {
@@ -1100,6 +1122,30 @@ describe("TelemetryFeed", () => {
 
       assert.calledWith(instance.handleDiscoveryStreamLoadedContent, "port123", data);
     });
+    it("should send an event on a DISCOVERY_STREAM_SPOCS_FILL action", () => {
+      const sendEvent = sandbox.stub(instance, "sendStructuredIngestionEvent");
+      const eventCreator = sandbox.stub(instance, "createSpocsFillPing");
+      const spocFills = [
+        {id: 10001, displayed: 0, reason: "frequency_cap", full_recalc: 1},
+        {id: 10002, displayed: 0, reason: "blocked_by_user", full_recalc: 1},
+        {id: 10003, displayed: 1, reason: "n/a", full_recalc: 1},
+      ];
+      const action = ac.DiscoveryStreamSpocsFill({spoc_fills: spocFills});
+
+      instance.onAction(action);
+
+      assert.calledWith(eventCreator, action.data);
+      assert.calledWith(sendEvent, eventCreator.returnValue);
+    });
+    it("should call .handleTrailheadEnrollEvent on a TRAILHEAD_ENROLL_EVENT action", () => {
+      const data = {experiment: "foo", type: "bar", branch: "baz"};
+      const action = {type: at.TRAILHEAD_ENROLL_EVENT, data};
+      sandbox.spy(instance, "handleTrailheadEnrollEvent");
+
+      instance.onAction(action);
+
+      assert.calledWith(instance.handleTrailheadEnrollEvent, action);
+    });
   });
   describe("#handlePagePrerendered", () => {
     it("should not throw if there is no session for the given port ID", () => {
@@ -1329,6 +1375,28 @@ describe("TelemetryFeed", () => {
       const url = feed._generateStructuredIngestionEndpoint("testPingType", "1");
 
       assert.equal(url, `${fakeEndpoint}/testPingType/1/${fakeUUIDWithoutBraces}`);
+    });
+  });
+  describe("#handleTrailheadEnrollEvent", () => {
+    it("should send a TRAILHEAD_ENROLL_EVENT if the telemetry is enabled", () => {
+      FakePrefs.prototype.prefs[TELEMETRY_PREF] = true;
+      const data = {experiment: "foo", type: "bar", branch: "baz"};
+      instance = new TelemetryFeed();
+      sandbox.stub(instance.utEvents, "sendTrailheadEnrollEvent");
+
+      instance.handleTrailheadEnrollEvent({data});
+
+      assert.calledWith(instance.utEvents.sendTrailheadEnrollEvent, data);
+    });
+    it("should not send TRAILHEAD_ENROLL_EVENT if the telemetry is disabled", () => {
+      FakePrefs.prototype.prefs[TELEMETRY_PREF] = false;
+      const data = {experiment: "foo", type: "bar", branch: "baz"};
+      instance = new TelemetryFeed();
+      sandbox.stub(instance.utEvents, "sendTrailheadEnrollEvent");
+
+      instance.handleTrailheadEnrollEvent({data});
+
+      assert.notCalled(instance.utEvents.sendTrailheadEnrollEvent);
     });
   });
 });

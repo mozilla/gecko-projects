@@ -55,7 +55,6 @@ namespace js {
 
 namespace jit {
 struct BaselineScript;
-class ICScript;
 struct IonScriptCounts;
 }  // namespace jit
 
@@ -65,22 +64,27 @@ struct IonScriptCounts;
 
 #define BASELINE_DISABLED_SCRIPT ((js::jit::BaselineScript*)0x1)
 
-class AutoKeepTypeScripts;
-class AutoSweepTypeScript;
+class AutoKeepJitScripts;
+class AutoSweepJitScript;
 class BreakpointSite;
 class Debugger;
+class GCParallelTask;
 class LazyScript;
 class ModuleObject;
 class RegExpObject;
 class SourceCompressionTask;
 class Shape;
-class TypeScript;
+class JitScript;
 
 namespace frontend {
 struct BytecodeEmitter;
 class FunctionBox;
 class ModuleSharedContext;
 }  // namespace frontend
+
+namespace gc {
+void SweepLazyScripts(GCParallelTask* task);
+} // namespace gc
 
 namespace detail {
 
@@ -1000,14 +1004,6 @@ class ScriptSource {
   MOZ_MUST_USE bool setBinASTSourceCopy(JSContext* cx, const uint8_t* buf,
                                         size_t len);
 
-  /*
-   * Initialize this as containing BinAST data for |buf|/|len|, using a shared,
-   * deduplicated version of |buf| if necessary.
-   */
-  MOZ_MUST_USE bool initializeBinAST(
-      JSContext* cx, UniqueChars&& buf, size_t len,
-      UniquePtr<frontend::BinASTSourceMetadata> metadata);
-
   const uint8_t* binASTSource();
 
 #endif /* JS_BUILD_BINAST */
@@ -1146,6 +1142,23 @@ class ScriptSource {
   }
 
  private:
+  template <typename Unit, XDRMode mode>
+  static MOZ_MUST_USE XDRResult codeUncompressedData(XDRState<mode>* const xdr,
+                                                     ScriptSource* const ss,
+                                                     bool retrievable);
+
+  template <typename Unit, XDRMode mode>
+  static MOZ_MUST_USE XDRResult codeCompressedData(XDRState<mode>* const xdr,
+                                                   ScriptSource* const ss,
+                                                   bool retrievable);
+
+  template <XDRMode mode>
+  static MOZ_MUST_USE XDRResult codeBinASTData(XDRState<mode>* const xdr,
+                                               ScriptSource* const ss);
+
+  template <typename Unit, XDRMode mode>
+  static void codeRetrievableData(ScriptSource* ss);
+
   template <XDRMode mode>
   static MOZ_MUST_USE XDRResult xdrData(XDRState<mode>* const xdr,
                                         ScriptSource* const ss);
@@ -1554,7 +1567,7 @@ class alignas(uintptr_t) SharedScriptData final {
   // Index into the scopes array of the body scope.
   uint32_t bodyScopeIndex = 0;
 
-  // Number of IC entries to allocate in ICScript for Baseline ICs.
+  // Number of IC entries to allocate in JitScript for Baseline ICs.
   uint32_t numICEntries = 0;
 
   // ES6 function length.
@@ -1727,8 +1740,8 @@ class JSScript : public js::gc::TenuredCell {
   JS::Realm* realm_ = nullptr;
 
  private:
-  /* Persistent type information retained across GCs. */
-  js::TypeScript* types_ = nullptr;
+  // JIT and type inference data for this script. May be purged on GC.
+  js::JitScript* jitScript_ = nullptr;
 
   // This script's ScriptSourceObject.
   js::GCPtr<js::ScriptSourceObject*> sourceObject_ = {};
@@ -2092,6 +2105,12 @@ class JSScript : public js::gc::TenuredCell {
     return scriptData_->code();
   }
 
+  bool hasForceInterpreterOp() const {
+    // JSOP_FORCEINTERPRETER, if present, must be the first op.
+    MOZ_ASSERT(length() >= 1);
+    return JSOp(*code()) == JSOP_FORCEINTERPRETER;
+  }
+
   js::AllBytecodesIterable allLocations() {
     return js::AllBytecodesIterable(this);
   }
@@ -2409,7 +2428,9 @@ class JSScript : public js::gc::TenuredCell {
   static constexpr size_t offsetOfScriptData() {
     return offsetof(JSScript, scriptData_);
   }
-  static constexpr size_t offsetOfTypes() { return offsetof(JSScript, types_); }
+  static constexpr size_t offsetOfJitScript() {
+    return offsetof(JSScript, jitScript_);
+  }
 
   bool hasAnyIonScript() const { return hasIonScript(); }
 
@@ -2445,14 +2466,6 @@ class JSScript : public js::gc::TenuredCell {
   inline void setBaselineScript(JSRuntime* rt,
                                 js::jit::BaselineScript* baselineScript);
 
-  inline js::jit::ICScript* icScript() const;
-
-  bool hasICScript() const {
-    // ICScript is stored in TypeScript so we have an ICScript iff we have a
-    // TypeScript.
-    return !!types_;
-  }
-
   void updateJitCodeRaw(JSRuntime* rt);
 
   static size_t offsetOfBaselineScript() {
@@ -2467,7 +2480,7 @@ class JSScript : public js::gc::TenuredCell {
   }
   uint8_t* jitCodeRaw() const { return jitCodeRaw_; }
 
-  // We don't relazify functions with a TypeScript or JIT code, but some
+  // We don't relazify functions with a JitScript or JIT code, but some
   // callers (XDR, testing functions) want to know whether this script is
   // relazifiable ignoring (or after) discarding JIT code.
   bool isRelazifiableIgnoringJitCode() const {
@@ -2476,8 +2489,8 @@ class JSScript : public js::gc::TenuredCell {
            !hasFlag(MutableFlags::DoNotRelazify);
   }
   bool isRelazifiable() const {
-    MOZ_ASSERT_IF(hasBaselineScript() || hasIonScript(), types_);
-    return isRelazifiableIgnoringJitCode() && !types_;
+    MOZ_ASSERT_IF(hasBaselineScript() || hasIonScript(), jitScript_);
+    return isRelazifiableIgnoringJitCode() && !jitScript_;
   }
   void setLazyScript(js::LazyScript* lazy) { lazyScript = lazy; }
   js::LazyScript* maybeLazyScript() { return lazyScript; }
@@ -2579,12 +2592,13 @@ class JSScript : public js::gc::TenuredCell {
    */
   bool isTopLevel() { return code() && !functionNonDelazifying(); }
 
-  /* Ensure the script has a TypeScript. */
-  inline bool ensureHasTypes(JSContext* cx, js::AutoKeepTypeScripts&);
+  /* Ensure the script has a JitScript. */
+  inline bool ensureHasJitScript(JSContext* cx, js::AutoKeepJitScripts&);
 
-  js::TypeScript* types() { return types_; }
+  bool hasJitScript() const { return jitScript_ != nullptr; }
+  js::JitScript* jitScript() { return jitScript_; }
 
-  void maybeReleaseTypes();
+  void maybeReleaseJitScript();
 
   inline js::GlobalObject& global() const;
   inline bool hasGlobal(const js::GlobalObject* global) const;
@@ -2635,7 +2649,7 @@ class JSScript : public js::gc::TenuredCell {
   js::Scope* enclosingScope() const { return outermostScope()->enclosing(); }
 
  private:
-  bool makeTypes(JSContext* cx);
+  bool createJitScript(JSContext* cx);
 
   bool createSharedScriptData(JSContext* cx, uint32_t codeLength,
                               uint32_t noteLength, uint32_t natoms);
@@ -2653,10 +2667,12 @@ class JSScript : public js::gc::TenuredCell {
   static size_t offsetOfWarmUpCounter() {
     return offsetof(JSScript, warmUpCount);
   }
-  void resetWarmUpCounter() {
+  void resetWarmUpCounterForGC() {
     incWarmUpResetCounter();
     warmUpCount = 0;
   }
+
+  void resetWarmUpCounterToDelayIonCompilation();
 
   unsigned getWarmUpResetCount() const {
     constexpr uint32_t MASK = uint32_t(MutableFlags::WarmupResets_MASK);
@@ -2710,7 +2726,10 @@ class JSScript : public js::gc::TenuredCell {
    */
   size_t computedSizeOfData() const;
   size_t sizeOfData(mozilla::MallocSizeOf mallocSizeOf) const;
-  size_t sizeOfTypeScript(mozilla::MallocSizeOf mallocSizeOf) const;
+
+  void addSizeOfJitScript(mozilla::MallocSizeOf mallocSizeOf,
+                          size_t* sizeOfJitScript,
+                          size_t* sizeOfBaselineFallbackStubs) const;
 
   size_t dataSize() const { return dataSize_; }
 
@@ -3007,7 +3026,8 @@ class LazyScript : public gc::TenuredCell {
   // If non-nullptr, the script has been compiled and this is a forwarding
   // pointer to the result. This is a weak pointer: after relazification, we
   // can collect the script if there are no other pointers to it.
-  WeakRef<JSScript*> script_;
+  WeakHeapPtrScript script_;
+  friend void js::gc::SweepLazyScripts(GCParallelTask* task);
 
   // Original function with which the lazy script is associated.
   GCPtrFunction function_;

@@ -339,7 +339,16 @@ AsyncPanZoomController* APZCTreeManager::NewAPZCInstance(
       AsyncPanZoomController::USE_GESTURE_DETECTOR);
 }
 
-TimeStamp APZCTreeManager::GetFrameTime() { return TimeStamp::Now(); }
+void APZCTreeManager::SetTestSampleTime(const Maybe<TimeStamp>& aTime) {
+  mTestSampleTime = aTime;
+}
+
+TimeStamp APZCTreeManager::GetFrameTime() {
+  if (mTestSampleTime) {
+    return *mTestSampleTime;
+  }
+  return TimeStamp::Now();
+}
 
 void APZCTreeManager::SetAllowedTouchBehavior(
     uint64_t aInputBlockId, const nsTArray<TouchBehaviorFlags>& aValues) {
@@ -646,11 +655,14 @@ void APZCTreeManager::SampleForWebRender(wr::TransactionWrapper& aTxn,
     LayoutDeviceToParentLayerScale zoom;
     if (Maybe<uint64_t> zoomAnimationId = apzc->GetZoomAnimationId()) {
       // for now we only support zooming on root content APZCs
-      MOZ_ASSERT(apzc->Metrics().IsRootContent());
+      MOZ_ASSERT(apzc->IsRootContent());
       zoom = apzc->GetCurrentPinchZoomScale(
           AsyncPanZoomController::eForCompositing);
       transforms.AppendElement(wr::ToWrTransformProperty(
           *zoomAnimationId, Matrix4x4::Scaling(zoom.scale, zoom.scale, 1.0f)));
+
+      aTxn.UpdateIsTransformPinchZooming(*zoomAnimationId,
+                                         apzc->IsPinchZooming());
     }
 
     // The positive translation means the painted content is supposed to
@@ -3237,12 +3249,6 @@ void APZCTreeManager::CollectTransformsForChromeMainThread(
   RefPtr<GeckoContentController> controller =
       GetContentController(aRootLayerTreeId);
   if (!controller) {
-    return;
-  }
-  if (controller->IsRemote() && !gfxPrefs::FissionApzMatricesWithGpuProcess()) {
-    // Avoid IPC errors in the GPU process case until
-    // https://bugzilla.mozilla.org/show_bug.cgi?id=1533673
-    // is resolved.
     return;
   }
   nsTArray<MatrixMessage> messages;

@@ -457,6 +457,8 @@ class MOZ_STACK_CLASS ParserBase : public ParserSharedBase,
   JSAtom* prefixAccessorName(PropertyType propType, HandleAtom propAtom);
 
   MOZ_MUST_USE bool setSourceMapInfo();
+
+  void setFunctionEndFromCurrentToken(FunctionBox* funbox) const;
 };
 
 enum FunctionCallBehavior {
@@ -824,6 +826,7 @@ class MOZ_STACK_CLASS GeneralParser : public PerHandlerParser<ParseHandler> {
   using Base::prefixAccessorName;
   using Base::processExport;
   using Base::processExportFrom;
+  using Base::setFunctionEndFromCurrentToken;
 
  private:
   inline FinalParser* asFinalParser();
@@ -1055,6 +1058,8 @@ class MOZ_STACK_CLASS GeneralParser : public PerHandlerParser<ParseHandler> {
                                     uint32_t toStringStart,
                                     FunctionSyntaxKind kind, bool tryAnnexB);
 
+  void setFunctionStartAtCurrentToken(FunctionBox* funbox) const;
+
  public:
   /* Public entry points for parsing. */
   Node statementListItem(YieldHandling yieldHandling,
@@ -1120,7 +1125,7 @@ class MOZ_STACK_CLASS GeneralParser : public PerHandlerParser<ParseHandler> {
       YieldHandling yieldHandling, ParseContext::Scope& catchParamScope);
   DebuggerStatementType debuggerStatement();
 
-  Node variableStatement(YieldHandling yieldHandling);
+  ListNodeType variableStatement(YieldHandling yieldHandling);
 
   LabeledStatementType labeledStatement(YieldHandling yieldHandling);
   Node labeledItem(YieldHandling yieldHandling);
@@ -1202,12 +1207,12 @@ class MOZ_STACK_CLASS GeneralParser : public PerHandlerParser<ParseHandler> {
   // from its initializer, parse and bind that initializer -- and possibly
   // consume trailing in/of and subsequent expression, if so directed by
   // |forHeadKind|.
-  Node initializerInNameDeclaration(NameNodeType binding,
-                                    DeclarationKind declKind,
-                                    bool initialDeclaration,
-                                    YieldHandling yieldHandling,
-                                    ParseNodeKind* forHeadKind,
-                                    Node* forInOrOfExpression);
+  AssignmentNodeType initializerInNameDeclaration(NameNodeType binding,
+                                                  DeclarationKind declKind,
+                                                  bool initialDeclaration,
+                                                  YieldHandling yieldHandling,
+                                                  ParseNodeKind* forHeadKind,
+                                                  Node* forInOrOfExpression);
 
   Node expr(InHandling inHandling, YieldHandling yieldHandling,
             TripledotHandling tripledotHandling,

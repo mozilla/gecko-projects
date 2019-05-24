@@ -205,6 +205,15 @@ class MiddlemanProtocol : public ipc::IToplevelProtocol {
     MOZ_CRASH("MiddlemanProtocol::RemoveManagee");
   }
 
+  virtual void DeallocManagee(int32_t, IProtocol*) override {
+    MOZ_CRASH("MiddlemanProtocol::DeallocManagee");
+  }
+
+  virtual void AllManagedActors(
+      nsTArray<RefPtr<ipc::ActorLifecycleProxy>>& aActors) const override {
+    aActors.Clear();
+  }
+
   static void ForwardMessageAsync(MiddlemanProtocol* aProtocol,
                                   Message* aMessage) {
     if (ActiveChildIsRecording() || AlwaysForwardMessage(*aMessage)) {
@@ -275,8 +284,7 @@ class MiddlemanProtocol : public ipc::IToplevelProtocol {
     if (mSide == ipc::ChildSide) {
       AutoMarkMainThreadWaitingForIPDLReply blocked;
       while (!aReply) {
-        GetActiveChild()->WaitUntilPaused();
-        GetActiveChild()->SendMessage(ResumeMessage(/* aForward = */ true));
+        MOZ_CRASH("NYI");
       }
     } else {
       MonitorAutoLock lock(*gMonitor);
@@ -319,8 +327,7 @@ class MiddlemanProtocol : public ipc::IToplevelProtocol {
     if (mSide == ipc::ChildSide) {
       AutoMarkMainThreadWaitingForIPDLReply blocked;
       while (!aReply) {
-        GetActiveChild()->WaitUntilPaused();
-        GetActiveChild()->SendMessage(ResumeMessage(/* aForward = */ true));
+        MOZ_CRASH("NYI");
       }
     } else {
       MonitorAutoLock lock(*gMonitor);

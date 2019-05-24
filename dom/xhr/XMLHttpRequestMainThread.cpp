@@ -26,6 +26,7 @@
 #include "mozilla/dom/URLSearchParams.h"
 #include "mozilla/dom/Promise.h"
 #include "mozilla/dom/PromiseNativeHandler.h"
+#include "mozilla/dom/WorkerError.h"
 #include "mozilla/Encoding.h"
 #include "mozilla/EventDispatcher.h"
 #include "mozilla/EventListenerManager.h"
@@ -230,12 +231,15 @@ XMLHttpRequestMainThread::XMLHttpRequestMainThread()
       mIsMappedArrayBuffer(false),
       mXPCOMifier(nullptr),
       mEventDispatchingSuspended(false),
-      mEofDecoded(false) {
+      mEofDecoded(false),
+      mDelayedDoneNotifier(nullptr) {
   mozilla::HoldJSObjects(this);
 }
 
 XMLHttpRequestMainThread::~XMLHttpRequestMainThread() {
-  DisconnectDoneNotifier();
+  MOZ_ASSERT(
+      !mDelayedDoneNotifier,
+      "How can we have mDelayedDoneNotifier, which owns us, in destructor?");
 
   mFlagDeleted = true;
 
@@ -2233,6 +2237,8 @@ void XMLHttpRequestMainThread::MatchCharsetAndDecoderToResponseDocument() {
 }
 void XMLHttpRequestMainThread::DisconnectDoneNotifier() {
   if (mDelayedDoneNotifier) {
+    // Disconnect may release the last reference to 'this'.
+    RefPtr<XMLHttpRequestMainThread> kungfuDeathGrip = this;
     mDelayedDoneNotifier->Disconnect();
     mDelayedDoneNotifier = nullptr;
   }
@@ -2428,7 +2434,7 @@ void XMLHttpRequestMainThread::MaybeLowerChannelPriority() {
     return;
   }
 
-  if (nsContentUtils::IsTailingEnabled()) {
+  if (StaticPrefs::network_http_tailing_enabled()) {
     nsCOMPtr<nsIClassOfService> cos = do_QueryInterface(mChannel);
     if (cos) {
       // Adding TailAllowed to overrule the Unblocked flag, but to preserve
@@ -2632,6 +2638,9 @@ nsresult XMLHttpRequestMainThread::InitiateFetch(
   if (StaticPrefs::privacy_trackingprotection_lower_network_priority()) {
     MaybeLowerChannelPriority();
   }
+
+  // Associate any originating stack with the channel.
+  NotifyNetworkMonitorAlternateStack(mChannel, std::move(mOriginStack));
 
   // Start reading from the channel
   rv = mChannel->AsyncOpen(listener);
@@ -3136,6 +3145,11 @@ void XMLHttpRequestMainThread::SetMozBackgroundRequest(
     bool aMozBackgroundRequest, ErrorResult& aRv) {
   // No errors for this webIDL method on main-thread.
   SetMozBackgroundRequest(aMozBackgroundRequest);
+}
+
+void XMLHttpRequestMainThread::SetOriginStack(
+    UniquePtr<SerializedStackHolder> aOriginStack) {
+  mOriginStack = std::move(aOriginStack);
 }
 
 bool XMLHttpRequestMainThread::WithCredentials() const {

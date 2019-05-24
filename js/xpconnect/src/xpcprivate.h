@@ -1436,6 +1436,9 @@ class XPCWrappedNative final : public nsIXPConnectWrappedNative {
   }
 
  private:
+  void SetFlatJSObject(JSObject* object);
+  void UnsetFlatJSObject();
+
   inline void ExpireWrapper() {
     mMaybeScope = (XPCWrappedNativeScope*)(XPC_SCOPE_WORD(mMaybeScope) |
                                            XPC_WRAPPER_EXPIRED);
@@ -2724,7 +2727,7 @@ class CompartmentPrivate {
  private:
   JSObject2WrappedJSMap* mWrappedJSMap;
 
-  // Cache holding proxy objects for Window objects (and their Location oject)
+  // Cache holding proxy objects for Window objects (and their Location object)
   // that are loaded in a different process.
   RemoteProxyMap mRemoteProxies;
 

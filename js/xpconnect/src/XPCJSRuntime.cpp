@@ -44,6 +44,7 @@
 #include "nsCycleCollector.h"
 #include "jsapi.h"
 #include "js/BuildId.h"  // JS::BuildIdCharVector, JS::SetProcessBuildIdOp
+#include "js/experimental/SourceHook.h"  // js::{,Set}SourceHook
 #include "js/MemoryFunctions.h"
 #include "js/MemoryMetrics.h"
 #include "js/UbiNode.h"
@@ -1827,9 +1828,9 @@ static void ReportRealmStats(const JS::RealmStats& realmStats,
                  "The IonMonkey JIT's compilation data (IonScripts).");
 
   ZRREPORT_BYTES(
-      realmJSPathPrefix + NS_LITERAL_CSTRING("type-inference/type-scripts"),
-      realmStats.typeInferenceTypeScripts,
-      "Type sets associated with scripts.");
+      realmJSPathPrefix + NS_LITERAL_CSTRING("jit-scripts"),
+      realmStats.jitScripts,
+      "JIT and Type Inference data associated with scripts.");
 
   ZRREPORT_BYTES(
       realmJSPathPrefix +
@@ -2902,11 +2903,6 @@ static nsresult ReadSourceFromFilename(JSContext* cx, const char* filename,
 
     bytesAllocated = *len * sizeof(char16_t);
   }
-
-  // Historically this method used JS_malloc() which updates the GC memory
-  // accounting.  Since ConvertToUTF16() and js::MakeUnique now use js_malloc()
-  // instead we update the accounting manually after the fact.
-  JS_updateMallocCounter(cx, bytesAllocated);
 
   return NS_OK;
 }

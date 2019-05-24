@@ -31,6 +31,7 @@ const BASE_PATH = env.get("MOZ_DEVELOPER_REPO_DIR") +
 
 const cachedPackets = {};
 
+/* eslint-disable complexity */
 function getCleanedPacket(key, packet) {
   if (Object.keys(cachedPackets).includes(key)) {
     return cachedPackets[key];
@@ -203,6 +204,20 @@ function getCleanedPacket(key, packet) {
       }
     }
 
+    if (Array.isArray(res.exceptionStack)) {
+      res.exceptionStack = res.exceptionStack.map((frame, i) => {
+        const existingFrame = existingPacket.exceptionStack[i];
+        if (frame && existingFrame && frame.sourceId) {
+          frame.sourceId = existingFrame.sourceId;
+        }
+        return frame;
+      });
+    }
+
+    if (res.frame && existingPacket.frame) {
+      res.frame.sourceId = existingPacket.frame.sourceId;
+    }
+
     if (res.packet) {
       const override = {};
       const keys = ["totalTime", "from", "contentSize", "transferredSize"];
@@ -268,6 +283,7 @@ function getCleanedPacket(key, packet) {
   cachedPackets[key] = res;
   return res;
 }
+/* eslint-enable complexity */
 
 function formatPacket(key, packet) {
   const stringifiedPacket = JSON.stringify(getCleanedPacket(key, packet), null, 2);

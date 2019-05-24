@@ -574,6 +574,11 @@ impl<'le> GeckoElement<'le> {
     }
 
     #[inline(always)]
+    fn get_part_attr(&self) -> Option<&structs::nsAttrValue> {
+        snapshot_helpers::find_attr(self.attrs(), &atom!("part"))
+    }
+
+    #[inline(always)]
     fn get_class_attr(&self) -> Option<&structs::nsAttrValue> {
         if !self.may_have_class() {
             return None;
@@ -1400,7 +1405,7 @@ impl<'le> TElement for GeckoElement<'le> {
 
     #[inline]
     fn matches_user_and_author_rules(&self) -> bool {
-        !self.rule_hash_target().is_in_native_anonymous_subtree()
+        !self.is_in_native_anonymous_subtree()
     }
 
     #[inline]
@@ -2259,6 +2264,16 @@ impl<'le> ::selectors::Element for GeckoElement<'le> {
         case_sensitivity.eq_atom(element_id, id)
     }
 
+    #[inline]
+    fn is_part(&self, name: &Atom) -> bool {
+        let attr = match self.get_part_attr() {
+            Some(c) => c,
+            None => return false,
+        };
+
+        snapshot_helpers::has_class_or_part(name, CaseSensitivity::CaseSensitive, attr)
+    }
+
     #[inline(always)]
     fn has_class(&self, name: &Atom, case_sensitivity: CaseSensitivity) -> bool {
         let attr = match self.get_class_attr() {
@@ -2266,7 +2281,7 @@ impl<'le> ::selectors::Element for GeckoElement<'le> {
             None => return false,
         };
 
-        snapshot_helpers::has_class(name, case_sensitivity, attr)
+        snapshot_helpers::has_class_or_part(name, case_sensitivity, attr)
     }
 
     #[inline]

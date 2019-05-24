@@ -11,7 +11,6 @@
 #include "mozilla/WeakPtr.h"
 #include "mozilla/dom/VisualViewportBinding.h"
 #include "Units.h"
-#include "nsIPresShell.h"
 
 namespace mozilla {
 
@@ -29,8 +28,8 @@ class VisualViewport final : public mozilla::DOMEventTargetHelper {
   double OffsetTop() const;
   double PageLeft() const;
   double PageTop() const;
-  double Width() const;
-  double Height() const;
+  MOZ_CAN_RUN_SCRIPT double Width() const;
+  MOZ_CAN_RUN_SCRIPT double Height() const;
   double Scale() const;
   IMPL_EVENT_HANDLER(resize)
   IMPL_EVENT_HANDLER(scroll)
@@ -89,9 +88,10 @@ class VisualViewport final : public mozilla::DOMEventTargetHelper {
  private:
   virtual ~VisualViewport();
 
-  CSSSize VisualViewportSize() const;
+  MOZ_CAN_RUN_SCRIPT CSSSize VisualViewportSize() const;
   CSSPoint VisualViewportOffset() const;
   CSSPoint LayoutViewportOffset() const;
+  Document* GetDocument() const;
   PresShell* GetPresShell() const;
   nsPresContext* GetPresContext() const;
 

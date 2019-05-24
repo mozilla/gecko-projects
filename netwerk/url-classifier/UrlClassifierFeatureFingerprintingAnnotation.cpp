@@ -126,7 +126,7 @@ UrlClassifierFeatureFingerprintingAnnotation::GetIfNameMatches(
 NS_IMETHODIMP
 UrlClassifierFeatureFingerprintingAnnotation::ProcessChannel(
     nsIChannel* aChannel, const nsTArray<nsCString>& aList,
-    bool* aShouldContinue) {
+    const nsTArray<nsCString>& aHashes, bool* aShouldContinue) {
   NS_ENSURE_ARG_POINTER(aChannel);
   NS_ENSURE_ARG_POINTER(aShouldContinue);
 
@@ -148,6 +148,8 @@ UrlClassifierFeatureFingerprintingAnnotation::ProcessChannel(
   uint32_t flags = UrlClassifierCommon::TablesToClassificationFlags(
       aList, sClassificationData,
       nsIHttpChannel::ClassificationFlags::CLASSIFIED_FINGERPRINTING);
+
+  UrlClassifierCommon::SetTrackingInfo(aChannel, aList, aHashes);
 
   UrlClassifierCommon::AnnotateChannel(
       aChannel, AntiTrackingCommon::eFingerprinting, flags,

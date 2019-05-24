@@ -230,11 +230,22 @@ void ProfilerParent::ProfilerResumed() {
   });
 }
 
+/* static */
+void ProfilerParent::ClearAllPages() {
+  if (!NS_IsMainThread()) {
+    return;
+  }
+
+  ProfilerParentTracker::Enumerate([](ProfilerParent* profilerParent) {
+    Unused << profilerParent->SendClearAllPages();
+  });
+}
+
 void ProfilerParent::ActorDestroy(ActorDestroyReason aActorDestroyReason) {
   MOZ_RELEASE_ASSERT(NS_IsMainThread());
   mDestroyed = true;
 }
 
-void ProfilerParent::DeallocPProfilerParent() { mSelfRef = nullptr; }
+void ProfilerParent::ActorDealloc() { mSelfRef = nullptr; }
 
 }  // namespace mozilla

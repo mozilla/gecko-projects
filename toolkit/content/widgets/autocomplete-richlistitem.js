@@ -988,19 +988,68 @@ class MozAutocompleteRichlistitemLoginsFooter extends MozElements.MozAutocomplet
         return;
       }
 
-      LoginHelper.openPasswordManager(this.ownerGlobal, this._data.hostname);
+      // ac-label gets populated from getCommentAt despite the attribute name.
+      // The "comment" is used to populate additional visible text.
+      let formHostname = this.getAttribute("ac-label");
+      LoginHelper.openPasswordManager(this.ownerGlobal, {
+        filterString: formHostname,
+        entryPoint: "autocomplete",
+      });
     }
 
     this.addEventListener("click", handleEvent);
   }
+}
 
-  get _data() {
-    return JSON.parse(this.getAttribute("ac-value"));
+class MozAutocompleteTwoLineRichlistitem extends MozElements.MozRichlistitem {
+  connectedCallback() {
+    if (this.delayConnectedCallback()) {
+      return;
+    }
+
+    this.textContent = "";
+    this.appendChild(MozXULElement.parseXULToFragment(this._markup));
+    this.initializeAttributeInheritance();
+    this._adjustAcItem();
+  }
+
+
+  static get inheritedAttributes() {
+    return {
+      // getLabelAt:
+      ".line1-label": "text=ac-value",
+      // getCommentAt:
+      ".line2-label": "text=ac-label",
+    };
+  }
+
+  get _markup() {
+    return `
+      <div xmlns="http://www.w3.org/1999/xhtml"
+           xmlns:xul="http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul"
+           class="two-line-wrapper">
+        <xul:image class="ac-site-icon"></xul:image>
+        <div class="labels-wrapper">
+          <div class="label-row line1-label"></div>
+          <div class="label-row line2-label"></div>
+        </div>
+      </div>
+    `;
   }
 
   _adjustAcItem() {
-    this._titleText.textContent = this._data.label;
+    let outerBoxRect = this.parentNode.getBoundingClientRect();
+
+    // Make item fit in popup as XUL box could not constrain
+    // item's width
+    this.firstElementChild.style.width = outerBoxRect.width + "px";
   }
+
+  _onOverflow() {}
+
+  _onUnderflow() {}
+
+  handleOverUnderflow() {}
 }
 
 customElements.define("autocomplete-richlistitem", MozElements.MozAutocompleteRichlistitem, {
@@ -1012,6 +1061,10 @@ customElements.define("autocomplete-richlistitem-insecure-warning", MozAutocompl
 });
 
 customElements.define("autocomplete-richlistitem-logins-footer", MozAutocompleteRichlistitemLoginsFooter, {
+  extends: "richlistitem",
+});
+
+customElements.define("autocomplete-two-line-richlistitem", MozAutocompleteTwoLineRichlistitem, {
   extends: "richlistitem",
 });
 }

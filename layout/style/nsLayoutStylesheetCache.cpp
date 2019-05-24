@@ -102,6 +102,9 @@
 using namespace mozilla;
 using namespace mozilla::css;
 
+#define PREF_LEGACY_STYLESHEET_CUSTOMIZATION \
+  "toolkit.legacyUserProfileCustomizations.stylesheets"
+
 NS_IMPL_ISUPPORTS(nsLayoutStylesheetCache, nsIObserver, nsIMemoryReporter)
 
 nsresult nsLayoutStylesheetCache::Observe(nsISupports* aSubject,
@@ -413,6 +416,10 @@ nsLayoutStylesheetCache* nsLayoutStylesheetCache::Singleton() {
 }
 
 void nsLayoutStylesheetCache::InitFromProfile() {
+  if (!Preferences::GetBool(PREF_LEGACY_STYLESHEET_CUSTOMIZATION)) {
+    return;
+  }
+
   nsCOMPtr<nsIXULRuntime> appInfo =
       do_GetService("@mozilla.org/xre/app-info;1");
   if (appInfo) {
@@ -439,13 +446,6 @@ void nsLayoutStylesheetCache::InitFromProfile() {
                 eLogToConsole);
   LoadSheetFile(chromeFile, &mUserChromeSheet, eUserSheetFeatures,
                 eLogToConsole);
-
-  if (XRE_IsParentProcess()) {
-    // We're interested specifically in potential chrome customizations,
-    // so we only need data points from the parent process
-    Telemetry::Accumulate(Telemetry::USER_CHROME_CSS_LOADED,
-                          mUserChromeSheet != nullptr);
-  }
 }
 
 void nsLayoutStylesheetCache::LoadSheetURL(const char* aURL,

@@ -20,6 +20,7 @@ loader.lazyRequireGetter(this, "CollapseButton", "devtools/client/webconsole/com
 loader.lazyRequireGetter(this, "MessageRepeat", "devtools/client/webconsole/components/MessageRepeat");
 loader.lazyRequireGetter(this, "PropTypes", "devtools/client/shared/vendor/react-prop-types");
 loader.lazyRequireGetter(this, "SmartTrace", "devtools/client/shared/components/SmartTrace");
+ChromeUtils.defineModuleGetter(this, "pointPrecedes", "resource://devtools/shared/execution-point-utils.js");
 
 class Message extends Component {
   static get propTypes() {
@@ -27,6 +28,7 @@ class Message extends Component {
       open: PropTypes.bool,
       collapsible: PropTypes.bool,
       collapseTitle: PropTypes.string,
+      onToggle: PropTypes.func,
       source: PropTypes.string.isRequired,
       type: PropTypes.string.isRequired,
       level: PropTypes.string.isRequired,
@@ -39,12 +41,8 @@ class Message extends Component {
       attachment: PropTypes.any,
       stacktrace: PropTypes.any,
       messageId: PropTypes.string,
-      executionPoint: PropTypes.shape({
-        progress: PropTypes.number,
-      }),
-      pausedExecutionPoint: PropTypes.shape({
-        progress: PropTypes.number,
-      }),
+      executionPoint: PropTypes.object,
+      pausedExecutionPoint: PropTypes.object,
       scrollToMessage: PropTypes.bool,
       exceptionDocURL: PropTypes.string,
       request: PropTypes.object,
@@ -104,8 +102,13 @@ class Message extends Component {
   }
 
   toggleMessage(e) {
-    const { open, dispatch, messageId } = this.props;
-    if (open) {
+    const { open, dispatch, messageId, onToggle } = this.props;
+
+    // If defined on props, we let the onToggle() method handle the toggling,
+    // otherwise we toggle the message open/closed ourselves.
+    if (onToggle) {
+      onToggle(messageId, e);
+    } else if (open) {
       dispatch(actions.messageClose(messageId));
     } else {
       dispatch(actions.messageOpen(messageId));
@@ -138,6 +141,7 @@ class Message extends Component {
       executionPoint,
       serviceContainer,
       inWarningGroup,
+      type,
     } = this.props;
 
     if (inWarningGroup) {
@@ -149,9 +153,11 @@ class Message extends Component {
       onRewindClick: (serviceContainer.canRewind() && executionPoint)
         ? () => serviceContainer.jumpToExecutionPoint(executionPoint, messageId)
         : null,
+      type,
     });
   }
 
+  /* eslint-disable complexity */
   render() {
     const {
       open,
@@ -187,7 +193,7 @@ class Message extends Component {
 
       if (pausedExecutionPoint
         && executionPoint
-        && pausedExecutionPoint.progress < executionPoint.progress) {
+        && !pointPrecedes(executionPoint, pausedExecutionPoint)) {
         topLevelClasses.push("paused-before");
       }
     }
@@ -341,6 +347,7 @@ class Message extends Component {
       attachment ? null : dom.br(),
     );
   }
+  /* eslint-enable complexity */
 }
 
 module.exports = Message;

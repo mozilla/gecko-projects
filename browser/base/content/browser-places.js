@@ -189,15 +189,8 @@ var StarUI = {
     return BookmarkPanelHub.messageRequest(data, window);
   },
 
-  toggleRecommendation(visible) {
-    const info = this._element("editBookmarkPanelInfoButton");
-    info.checked = visible !== undefined ? !!visible : !info.checked;
-    const recommendation = this._element("editBookmarkPanelRecommendation");
-    if (info.checked) {
-      recommendation.removeAttribute("disabled");
-    } else {
-      recommendation.setAttribute("disabled", "disabled");
-    }
+  toggleRecommendation() {
+    BookmarkPanelHub.toggleRecommendation();
   },
 
   async showEditBookmarkPopup(aNode, aIsNewBookmark, aUrl) {
@@ -241,20 +234,20 @@ var StarUI = {
 
     this._setIconAndPreviewImage();
 
-    const showRecommendation = await this.getRecommendation({
+    await this.getRecommendation({
       container: this._element("editBookmarkPanelRecommendation"),
-      createElement: elem => document.createElementNS("http://www.w3.org/1999/xhtml", elem),
+      infoButton: this._element("editBookmarkPanelInfoButton"),
+      recommendationContainer: this._element("editBookmarkPanelRecommendation"),
+      document,
       url: aUrl.href,
       close: e => {
         e.stopPropagation();
-        this.toggleRecommendation(false);
+        BookmarkPanelHub.toggleRecommendation(false);
       },
       hidePopup: () => {
         this.panel.hidePopup();
       },
     });
-    this._element("editBookmarkPanelInfoButton").disabled = !showRecommendation;
-    this.toggleRecommendation(showRecommendation);
 
     this.beginBatch();
 
@@ -1143,8 +1136,7 @@ var LibraryUI = {
 
     let animatableBox = document.getElementById("library-animatable-box");
     let navBar = document.getElementById("nav-bar");
-    let libraryIcon = document.getAnonymousElementByAttribute(libraryButton, "class", "toolbarbutton-icon");
-    let iconBounds = window.windowUtils.getBoundsWithoutFlushing(libraryIcon);
+    let iconBounds = window.windowUtils.getBoundsWithoutFlushing(libraryButton.icon);
     let libraryBounds = window.windowUtils.getBoundsWithoutFlushing(libraryButton);
 
     animatableBox.style.setProperty("--library-button-height", libraryBounds.height + "px");
@@ -1204,8 +1196,7 @@ var LibraryUI = {
       }
 
       let animatableBox = document.getElementById("library-animatable-box");
-      let libraryIcon = document.getAnonymousElementByAttribute(libraryButton, "class", "toolbarbutton-icon");
-      let iconBounds = window.windowUtils.getBoundsWithoutFlushing(libraryIcon);
+      let iconBounds = window.windowUtils.getBoundsWithoutFlushing(libraryButton.icon);
 
       // Resizing the window will only have the ability to change the X offset of the
       // library button.

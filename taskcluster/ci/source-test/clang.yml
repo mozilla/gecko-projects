@@ -1,3 +1,7 @@
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at http://mozilla.org/MPL/2.0/.
+---
 job-defaults:
     # Run only on try and code-review tasks
     # to avoid running clang tools on the whole codebase
@@ -9,7 +13,7 @@ job-defaults:
         code-review: true
     worker-type:
         by-platform:
-            linux64.*: aws-provisioner-v1/gecko-t-linux-xlarge
+            linux64.*: t-linux-xlarge
     worker:
         docker-image: {in-tree: debian7-amd64-build}
         max-run-time: 5400
@@ -64,9 +68,13 @@ format:
         command: >-
             source $HOME/checkouts/gecko/taskcluster/scripts/misc/source-test-clang-setup.sh &&
             cd $HOME/checkouts/gecko &&
-            ./mach --log-no-times clang-format --outgoing --output $HOME/clang-format.json --format json
+            ./mach --log-no-times clang-format --outgoing --output $HOME/clang-format.json --format json &&
+            ./mach --log-no-times clang-format --outgoing --output $HOME/clang-format.diff --format diff
     worker:
         artifacts:
             - type: file
               name: public/code-review/clang-format.json
               path: /builds/worker/clang-format.json
+            - type: file
+              name: public/code-review/clang-format.diff
+              path: /builds/worker/clang-format.diff

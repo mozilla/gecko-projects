@@ -121,7 +121,29 @@ endif # FORCE_SHARED_LIB
 
 ifeq ($(OS_ARCH),WINNT)
 
+#
+# This next line captures both the default (non-MOZ_COPY_PDBS)
+# case as well as the MOZ_COPY_PDBS-for-mingwclang case.
+#
+# For the default case, placing the pdb in the build
+# directory is needed.
+#
+# For the MOZ_COPY_PDBS, non-mingwclang case - we need to
+# build the pdb next to the executable (handled in the if
+# statement immediately below.)
+#
+# For the MOZ_COPY_PDBS, mingwclang case - we also need to
+# build the pdb next to the executable, but this macro doesn't
+# work for jsapi-tests which is a little special, so we specify
+# the output directory below with MOZ_PROGRAM_LDFLAGS.
+#
 LINK_PDBFILE ?= $(basename $(@F)).pdb
+
+ifdef MOZ_COPY_PDBS
+ifneq ($(CC_TYPE),clang)
+LINK_PDBFILE = $(basename $@).pdb
+endif
+endif
 
 ifndef GNU_CC
 
@@ -304,24 +326,6 @@ EXTRA_DSO_LDOPTS	+= -dynamiclib -install_name $(_LOADER_PATH)/$(SHARED_LIBRARY) 
 endif
 endif
 
-ifdef SYMBOLS_FILE
-ifeq ($(OS_TARGET),WINNT)
-ifndef GNU_CC
-EXTRA_DSO_LDOPTS += -DEF:$(call normalizepath,$(SYMBOLS_FILE))
-else
-EXTRA_DSO_LDOPTS += $(call normalizepath,$(SYMBOLS_FILE))
-endif
-else
-ifdef GCC_USE_GNU_LD
-EXTRA_DSO_LDOPTS += -Wl,--version-script,$(SYMBOLS_FILE)
-else
-ifeq ($(OS_TARGET),Darwin)
-EXTRA_DSO_LDOPTS += -Wl,-exported_symbols_list,$(SYMBOLS_FILE)
-endif
-endif
-endif
-EXTRA_DEPS += $(SYMBOLS_FILE)
-endif
 #
 # GNU doesn't have path length limitation
 #
@@ -710,11 +714,8 @@ $(foreach f,$(HOST_CSRCS) $(HOST_CPPSRCS) $(HOST_CMSRCS) $(HOST_CMMSRCS),$(eval 
 
 # The Rust compiler only outputs library objects, and so we need different
 # mangling to generate dependency rules for it.
-mk_libname = $(basename lib$(notdir $1)).rlib
-src_libdep = $(call mk_libname,$1): $1 $$(call mkdir_deps,$$(MDDEPDIR))
 mk_global_crate_libname = $(basename lib$(notdir $1)).$(LIB_SUFFIX)
 crate_src_libdep = $(call mk_global_crate_libname,$1): $1 $$(call mkdir_deps,$$(MDDEPDIR))
-$(foreach f,$(RSSRCS),$(eval $(call src_libdep,$(f))))
 $(foreach f,$(RS_STATICLIB_CRATE_SRC),$(eval $(call crate_src_libdep,$(f))))
 
 $(OBJS) $(HOST_OBJS) $(PROGOBJS) $(HOST_PROGOBJS): $(GLOBAL_DEPS)
@@ -785,10 +786,18 @@ endif
 endif
 
 ifdef MOZ_COPY_PDBS
-PDB_FILES = $(addsuffix .pdb,$(basename $(DUMP_SYMS_TARGETS)))
-PDB_DEST ?= $(FINAL_TARGET)
-PDB_TARGET = syms
-INSTALL_TARGETS += PDB
+MAIN_PDB_FILES = $(addsuffix .pdb,$(basename $(DUMP_SYMS_TARGETS)))
+MAIN_PDB_DEST ?= $(FINAL_TARGET)
+MAIN_PDB_TARGET = syms
+INSTALL_TARGETS += MAIN_PDB
+
+ifdef CPP_UNIT_TESTS
+CPP_UNIT_TESTS_PDB_FILES = $(addsuffix .pdb,$(basename $(CPP_UNIT_TESTS)))
+CPP_UNIT_TESTS_PDB_DEST = $(DIST)/cppunittests
+CPP_UNIT_TESTS_PDB_TARGET = syms
+INSTALL_TARGETS += CPP_UNIT_TESTS_PDB
+endif
+
 else ifdef MOZ_CRASHREPORTER
 $(foreach file,$(DUMP_SYMS_TARGETS),$(eval $(call syms_template,$(file),$(notdir $(file))_syms.track)))
 endif

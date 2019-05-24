@@ -84,7 +84,7 @@ namespace css {
 struct URLValue;
 }  // namespace css
 namespace dom {
-struct AnimationFilter;
+struct GetAnimationsOptions;
 struct ScrollIntoViewOptions;
 struct ScrollToOptions;
 class DOMIntersectionObserver;
@@ -1175,7 +1175,7 @@ class Element : public FragmentOrElement {
     // If there is already an active capture, ignore this request. This would
     // occur if a splitter, frame resizer, etc had already captured and we don't
     // want to override those.
-    if (!nsIPresShell::GetCapturingContent()) {
+    if (!PresShell::GetCapturingContent()) {
       PresShell::SetCapturingContent(
           this, CaptureFlags::PreventDragStart |
                     (aRetargetToElement ? CaptureFlags::RetargetToElement
@@ -1192,7 +1192,7 @@ class Element : public FragmentOrElement {
   }
 
   void ReleaseCapture() {
-    if (nsIPresShell::GetCapturingContent() == this) {
+    if (PresShell::GetCapturingContent() == this) {
       PresShell::ReleaseCapturingContent();
     }
   }
@@ -1300,6 +1300,21 @@ class Element : public FragmentOrElement {
               : 0;
   }
 
+  MOZ_CAN_RUN_SCRIPT double ClientHeightDouble() {
+    return nsPresContext::AppUnitsToDoubleCSSPixels(
+        GetClientAreaRect().Height());
+  }
+
+  MOZ_CAN_RUN_SCRIPT double ClientWidthDouble() {
+    return nsPresContext::AppUnitsToDoubleCSSPixels(
+        GetClientAreaRect().Width());
+  }
+
+  // This function will return the block size of first line box, no matter if
+  // the box is 'block' or 'inline'. The return unit is pixel. If the element
+  // can't get a primary frame, we will return be zero.
+  double FirstLineBoxBSize() const;
+
   already_AddRefed<Flex> GetAsFlexContainer();
   void GetGridFragments(nsTArray<RefPtr<Grid>>& aResult);
 
@@ -1324,7 +1339,7 @@ class Element : public FragmentOrElement {
   // Note: GetAnimations will flush style while GetAnimationsUnsorted won't.
   // Callers must keep this element alive because flushing style may destroy
   // this element.
-  void GetAnimations(const AnimationFilter& filter,
+  void GetAnimations(const GetAnimationsOptions& aOptions,
                      nsTArray<RefPtr<Animation>>& aAnimations);
   static void GetAnimationsUnsorted(Element* aElement,
                                     PseudoStyleType aPseudoType,
@@ -1368,6 +1383,7 @@ class Element : public FragmentOrElement {
    * @param aFlags      Extra flags for the dispatching event.  The true flags
    *                    will be respected.
    */
+  MOZ_CAN_RUN_SCRIPT
   static nsresult DispatchClickEvent(nsPresContext* aPresContext,
                                      WidgetInputEvent* aSourceEvent,
                                      nsIContent* aTarget, bool aFullDispatch,
@@ -1382,6 +1398,7 @@ class Element : public FragmentOrElement {
    * If aPresContext is nullptr, this does nothing.
    */
   using nsIContent::DispatchEvent;
+  MOZ_CAN_RUN_SCRIPT
   static nsresult DispatchEvent(nsPresContext* aPresContext,
                                 WidgetEvent* aEvent, nsIContent* aTarget,
                                 bool aFullDispatch, nsEventStatus* aStatus);
@@ -1389,6 +1406,14 @@ class Element : public FragmentOrElement {
   bool IsDisplayContents() const {
     return HasServoData() && Servo_Element_IsDisplayContents(this);
   }
+
+  /*
+   * https://html.spec.whatwg.org/#being-rendered
+   *
+   * With a gotcha for display contents:
+   *   https://github.com/whatwg/html/issues/1837
+   */
+  bool IsRendered() const { return GetPrimaryFrame() || IsDisplayContents(); }
 
   const nsAttrValue* GetParsedAttr(const nsAtom* aAttr) const {
     return mAttrs.GetAttr(aAttr);
@@ -1926,7 +1951,7 @@ class Element : public FragmentOrElement {
   EventStates mState;
   // Per-node data managed by Servo.
   //
-  // There should not be data on nodes that are in the flattened tree, or
+  // There should not be data on nodes that are not in the flattened tree, or
   // descendants of display: none elements.
   mozilla::RustCell<ServoNodeData*> mServoData;
 

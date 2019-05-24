@@ -58,6 +58,7 @@ SIGNING_SCOPE_ALIAS_TO_PROJECT = [[
         'mozilla-beta',
         'mozilla-release',
         'mozilla-esr60',
+        'mozilla-esr68',
         'comm-beta',
         'comm-esr60',
     ])
@@ -95,8 +96,10 @@ BEETMOVER_SCOPE_ALIAS_TO_PROJECT = [[
         'mozilla-beta',
         'mozilla-release',
         'mozilla-esr60',
+        'mozilla-esr68',
         'comm-beta',
         'comm-esr60',
+        'comm-esr68',
     ])
 ]]
 
@@ -138,15 +141,16 @@ BALROG_SCOPE_ALIAS_TO_PROJECT = [[
 ], [
     'release', set([
         'mozilla-release',
+        'comm-esr60',
+        'comm-esr68',
     ])
 ], [
     'esr60', set([
         'mozilla-esr60',
-        'comm-esr60',
     ])
 ], [
-    'esr', set([
-        'mozilla-esr52',
+    'esr68', set([
+        'mozilla-esr68',
     ])
 ]]
 
@@ -157,8 +161,8 @@ BALROG_SERVER_SCOPES = {
     'aurora': 'balrog:server:aurora',
     'beta': 'balrog:server:beta',
     'release': 'balrog:server:release',
-    'esr': 'balrog:server:esr',
     'esr60': 'balrog:server:esr',
+    'esr68': 'balrog:server:esr',
     'default': 'balrog:server:dep',
 }
 
@@ -423,8 +427,10 @@ def generate_beetmover_upstream_artifacts(config, job, platform, locale=None, de
     resolve_keyed_by(
         job, 'attributes.artifact_map',
         'artifact map',
-        project=config.params['project'],
-        platform=platform
+        **{
+            'release-type': config.params['release_type'],
+            'platform': platform,
+        }
     )
     map_config = deepcopy(cached_load_yaml(job['attributes']['artifact_map']))
     upstream_artifacts = list()
@@ -464,6 +470,11 @@ def generate_beetmover_upstream_artifacts(config, job, platform, locale=None, de
                 jsone.render(file_config['source_path_modifier'], {'locale': locale}),
                 filename,
             ))
+
+        if getattr(job['dependencies'][dep], 'release_artifacts', None):
+            paths = [
+                path for path in paths
+                if path in job['dependencies'][dep].release_artifacts]
 
         if not paths:
             continue
@@ -551,9 +562,11 @@ def generate_beetmover_artifact_map(config, job, **kwargs):
     platform = kwargs.get('platform', '')
     resolve_keyed_by(
         job, 'attributes.artifact_map',
-        'artifact map',
-        project=config.params['project'],
-        platform=platform
+        job['label'],
+        **{
+            'release-type': config.params['release_type'],
+            'platform': platform,
+        }
     )
     map_config = deepcopy(cached_load_yaml(job['attributes']['artifact_map']))
     base_artifact_prefix = map_config.get('base_artifact_prefix', get_artifact_prefix(job))
@@ -570,7 +583,7 @@ def generate_beetmover_artifact_map(config, job, **kwargs):
     else:
         locales = map_config['default_locales']
 
-    resolve_keyed_by(map_config, 's3_bucket_paths', 's3_bucket_paths', platform=platform)
+    resolve_keyed_by(map_config, 's3_bucket_paths', job['label'], platform=platform)
 
     for locale, dep in itertools.product(locales, dependencies):
         paths = dict()
@@ -604,7 +617,9 @@ def generate_beetmover_artifact_map(config, job, **kwargs):
                 'pretty_name',
                 'checksums_path'
             ]:
-                resolve_keyed_by(file_config, field, field, locale=locale, platform=platform)
+                resolve_keyed_by(
+                    file_config, field, job["label"], locale=locale, platform=platform
+                )
 
             # This format string should ideally be in the configuration file,
             # but this would mean keeping variable names in sync between code + config.
@@ -647,7 +662,7 @@ def generate_beetmover_artifact_map(config, job, **kwargs):
         platforms = deepcopy(map_config.get('platform_names', {}))
         if platform:
             for key in platforms.keys():
-                resolve_keyed_by(platforms, key, key, platform=platform)
+                resolve_keyed_by(platforms, key, job['label'], platform=platform)
 
         upload_date = datetime.fromtimestamp(config.params['build_date'])
 
@@ -693,8 +708,10 @@ def generate_beetmover_partials_artifact_map(config, job, partials_info, **kwarg
     resolve_keyed_by(
         job, 'attributes.artifact_map',
         'artifact map',
-        project=config.params['project'],
-        platform=platform
+        **{
+            'release-type': config.params['release_type'],
+            'platform': platform,
+        }
     )
     map_config = deepcopy(cached_load_yaml(job['attributes']['artifact_map']))
     base_artifact_prefix = map_config.get('base_artifact_prefix', get_artifact_prefix(job))
@@ -807,48 +824,10 @@ def generate_beetmover_partials_artifact_map(config, job, partials_info, **kwarg
     return artifacts
 
 
-# should_use_artifact_map {{{
-def should_use_artifact_map(platform, project):
+def should_use_artifact_map(platform):
     """Return True if this task uses the beetmover artifact map.
 
     This function exists solely for the beetmover artifact map
     migration.
     """
-    if 'linux64-snap-shippable' in platform:
-        # Snap has never been implemented outside of declarative artifacts. We need to use
-        # declarative artifacts no matter the branch we're on
-        return True
-
-    # FIXME: once we're ready to switch fully to declarative artifacts on other
-    # branches, we can expand this; for now, Fennec is rolled-out to all
-    # release branches, while Firefox only to mozilla-central
-    platforms = [
-        'android',
-        'fennec'
-    ]
-    projects = ['mozilla-central', 'mozilla-beta', 'mozilla-release']
-    if any([pl in platform for pl in platforms]) and any([pj == project for pj in projects]):
-        return True
-
-    platforms = [
-        'linux',    # needed for beetmover-langpacks-checksums
-        'linux64',  # which inherit amended platform from their beetmover counterpart
-        'win32',
-        'win64',
-        'macosx64',
-        'linux-shippable',
-        'linux64-shippable',
-        'macosx64-shippable',
-        'win32-shippable',
-        'win64-shippable',
-        'win64-aarch64-shippable',
-        'win64-asan-reporter-nightly',
-        'linux64-asan-reporter-nightly',
-        'firefox-source',
-        'firefox-release',
-    ]
-    projects = ['mozilla-central', 'mozilla-beta', 'mozilla-release']
-    if any([pl == platform for pl in platforms]) and any([pj == project for pj in projects]):
-        return True
-
-    return False
+    return 'devedition' not in platform

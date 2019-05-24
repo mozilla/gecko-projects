@@ -168,7 +168,7 @@ pref("devtools.netmonitor.visibleColumns",
   "[\"status\",\"method\",\"domain\",\"file\",\"cause\",\"type\",\"transferred\",\"contentSize\",\"waterfall\"]"
 );
 pref("devtools.netmonitor.columnsData",
-  '[{"name":"status","minWidth":30,"width":5}, {"name":"method","minWidth":30,"width":5}, {"name":"domain","minWidth":30,"width":10}, {"name":"file","minWidth":30,"width":25}, {"name":"cause","minWidth":30,"width":10},{"name":"type","minWidth":30,"width":5},{"name":"transferred","minWidth":30,"width":10},{"name":"contentSize","minWidth":30,"width":5},{"name":"waterfall","minWidth":150,"width":25}]');
+  '[{"name":"status","minWidth":30,"width":5}, {"name":"method","minWidth":30,"width":5}, {"name":"domain","minWidth":30,"width":10}, {"name":"file","minWidth":30,"width":25}, {"name":"url","minWidth":30,"width":25}, {"name":"cause","minWidth":30,"width":10},{"name":"type","minWidth":30,"width":5},{"name":"transferred","minWidth":30,"width":10},{"name":"contentSize","minWidth":30,"width":5},{"name":"waterfall","minWidth":150,"width":25}]');
 
 // Support for columns resizing pref is now enabled (after merge date 03/18/19).
 pref("devtools.netmonitor.features.resizeColumns", true);
@@ -312,6 +312,8 @@ pref("devtools.editor.detectindentation", true);
 pref("devtools.editor.enableCodeFolding", true);
 pref("devtools.editor.autocomplete", true);
 
+// The angle of the viewport.
+pref("devtools.responsive.viewport.angle", 0);
 // The width of the viewport.
 pref("devtools.responsive.viewport.width", 320);
 // The height of the viewport.
@@ -347,8 +349,13 @@ pref("devtools.responsive.showUserAgentInput", true);
 pref("devtools.responsive.showUserAgentInput", false);
 #endif
 
-// Enable new about:debugging.
+// Enable new about:debugging in Nightly and DevEdition only.
+// Should ride the trains in Firefox 69. See Bug 1553042.
+#if defined(MOZ_DEV_EDITION) || defined(NIGHTLY_BUILD)
 pref("devtools.aboutdebugging.new-enabled", true);
+#else
+pref("devtools.aboutdebugging.new-enabled", false);
+#endif
 
 // Show tab debug targets for This Firefox (on by default for local builds).
 #ifdef MOZILLA_OFFICIAL

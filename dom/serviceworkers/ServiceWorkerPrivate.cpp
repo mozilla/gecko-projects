@@ -44,6 +44,7 @@
 #include "mozilla/net/NeckoChannelParams.h"
 #include "mozilla/StaticPrefs.h"
 #include "mozilla/Unused.h"
+#include "nsIReferrerInfo.h"
 
 using namespace mozilla;
 using namespace mozilla::dom;
@@ -1254,21 +1255,17 @@ class FetchEventRunnable : public ExtendableFunctionalEventWorkerRunnable,
     nsCOMPtr<nsIHttpChannel> httpChannel = do_QueryInterface(channel);
     MOZ_ASSERT(httpChannel, "How come we don't have an HTTP channel?");
 
-    nsAutoCString referrer;
-    // Ignore the return value since the Referer header may not exist.
-    Unused << httpChannel->GetRequestHeader(NS_LITERAL_CSTRING("Referer"),
-                                            referrer);
-    if (!referrer.IsEmpty()) {
-      mReferrer = referrer;
-    } else {
-      // If there's no referrer Header, means the header was omitted for
-      // security/privacy reason.
-      mReferrer = EmptyCString();
-    }
-
+    mReferrer = EmptyCString();
     uint32_t referrerPolicy = 0;
-    rv = httpChannel->GetReferrerPolicy(&referrerPolicy);
-    NS_ENSURE_SUCCESS(rv, rv);
+    nsCOMPtr<nsIReferrerInfo> referrerInfo = httpChannel->GetReferrerInfo();
+    if (referrerInfo) {
+      referrerPolicy = referrerInfo->GetReferrerPolicy();
+      nsCOMPtr<nsIURI> computedReferrer = referrerInfo->GetComputedReferrer();
+      if (computedReferrer) {
+        rv = computedReferrer->GetSpec(mReferrer);
+        NS_ENSURE_SUCCESS(rv, rv);
+      }
+    }
     switch (referrerPolicy) {
       case nsIHttpChannel::REFERRER_POLICY_UNSET:
         mReferrerPolicy = ReferrerPolicy::_empty;
@@ -1730,18 +1727,21 @@ nsresult ServiceWorkerPrivate::SpawnWorkerIfNeeded(WakeUpReason aWhy,
   // moment, ServiceWorkers are not exposed in partitioned contexts.
   info.mStoragePrincipal = info.mPrincipal;
 
-  info.mStorageAccess =
-      nsContentUtils::StorageAllowedForServiceWorker(info.mPrincipal);
-
   info.mCookieSettings = mozilla::net::CookieSettings::Create();
   MOZ_ASSERT(info.mCookieSettings);
 
+  info.mStorageAccess = nsContentUtils::StorageAllowedForServiceWorker(
+      info.mPrincipal, info.mCookieSettings);
+
   info.mOriginAttributes = mInfo->GetOriginAttributes();
 
-  // Verify that we don't have any CSP on pristine principal.
+  // Verify that we don't have any CSP on pristine client.
 #ifdef MOZ_DIAGNOSTIC_ASSERT_ENABLED
   nsCOMPtr<nsIContentSecurityPolicy> csp;
-  Unused << info.mPrincipal->GetCsp(getter_AddRefs(csp));
+  if (info.mChannel) {
+    nsCOMPtr<nsILoadInfo> loadinfo = info.mChannel->LoadInfo();
+    csp = loadinfo->GetCsp();
+  }
   MOZ_DIAGNOSTIC_ASSERT(!csp);
 #endif
 
@@ -1752,8 +1752,8 @@ nsresult ServiceWorkerPrivate::SpawnWorkerIfNeeded(WakeUpReason aWhy,
 
   WorkerPrivate::OverrideLoadInfoLoadGroup(info, info.mPrincipal);
 
-  rv = info.SetPrincipalsOnMainThread(info.mPrincipal, info.mStoragePrincipal,
-                                      info.mLoadGroup);
+  rv = info.SetPrincipalsAndCSPOnMainThread(
+      info.mPrincipal, info.mStoragePrincipal, info.mLoadGroup, nullptr);
   if (NS_WARN_IF(NS_FAILED(rv))) {
     return rv;
   }

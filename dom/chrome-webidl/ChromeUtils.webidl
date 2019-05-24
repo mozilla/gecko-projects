@@ -359,7 +359,7 @@ partial namespace ChromeUtils {
   /**
    * Request performance metrics to the current process & all content processes.
    */
-  [Throws, Func="DOMPrefs::dom_performance_enable_scheduler_timing"]
+  [Throws]
   Promise<sequence<PerformanceInfoDictionary>> requestPerformanceMetrics();
 
   /**
@@ -396,7 +396,7 @@ partial namespace ChromeUtils {
   void resetLastExternalProtocolIframeAllowed();
 
   [ChromeOnly, Throws]
-  void registerWindowActor(DOMString aName, WindowActorOptions aOptions);
+  void registerWindowActor(DOMString aName, optional WindowActorOptions aOptions);
 
   [ChromeOnly]
   void unregisterWindowActor(DOMString aName);
@@ -520,20 +520,16 @@ dictionary IOActivityDataDictionary {
  * (3) Update the methods on mozilla::OriginAttributesPattern, including matching.
  */
 dictionary OriginAttributesDictionary {
-  unsigned long appId = 0;
   unsigned long userContextId = 0;
   boolean inIsolatedMozBrowser = false;
   unsigned long privateBrowsingId = 0;
   DOMString firstPartyDomain = "";
-  DOMString geckoViewSessionContextId = "";
 };
 dictionary OriginAttributesPatternDictionary {
-  unsigned long appId;
   unsigned long userContextId;
   boolean inIsolatedMozBrowser;
   unsigned long privateBrowsingId;
   DOMString firstPartyDomain;
-  DOMString geckoViewSessionContextId;
 };
 
 dictionary CompileScriptOptionsDictionary {
@@ -625,13 +621,13 @@ dictionary WindowActorOptions {
   sequence<DOMString> remoteTypes;
 
   /** This fields are used for configuring individual sides of the actor. */
-  required WindowActorSidedOptions parent;
-  required WindowActorChildOptions child;
+  WindowActorSidedOptions parent = null;
+  WindowActorChildOptions child = null;
 };
 
 dictionary WindowActorSidedOptions {
   /** The module path which should be loaded for the actor on this side. */
-  required ByteString moduleURI;
+  ByteString moduleURI;
 };
 
 dictionary WindowActorChildOptions : WindowActorSidedOptions {

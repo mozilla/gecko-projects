@@ -16,6 +16,7 @@
 #include "mozilla/layers/AnimationInfo.h"
 #include "mozilla/layout/ScrollAnchorContainer.h"
 #include "mozilla/PresShell.h"
+#include "mozilla/PresShellInlines.h"
 #include "mozilla/ServoBindings.h"
 #include "mozilla/ServoStyleSetInlines.h"
 #include "mozilla/Unused.h"
@@ -35,7 +36,6 @@
 #include "nsIFrame.h"
 #include "nsIFrameInlines.h"
 #include "nsImageFrame.h"
-#include "nsIPresShellInlines.h"
 #include "nsPlaceholderFrame.h"
 #include "nsPrintfCString.h"
 #include "nsRefreshDriver.h"
@@ -3044,7 +3044,7 @@ void RestyleManager::DoProcessPendingRestyles(ServoTraversalFlags aFlags) {
   }
 
   // It'd be bad!
-  nsIPresShell::AutoAssertNoFlush noReentrantFlush(*presShell);
+  PresShell::AutoAssertNoFlush noReentrantFlush(*presShell);
 
   // Create a AnimationsWithDestroyedFrame during restyling process to
   // stop animations and transitions on elements that have no frame at the end

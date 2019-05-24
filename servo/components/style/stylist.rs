@@ -49,8 +49,8 @@ use selectors::NthIndexCache;
 use servo_arc::{Arc, ArcBorrow};
 use smallbitvec::SmallBitVec;
 use smallvec::SmallVec;
-use std::{mem, ops};
 use std::sync::Mutex;
+use std::{mem, ops};
 use style_traits::viewport::ViewportConstraints;
 
 /// The type of the stylesheets that the stylist contains.
@@ -271,12 +271,8 @@ impl DocumentCascadeData {
                 let origin_sheets = flusher.origin_sheets(Origin::UserAgent);
                 let _unused_cascade_datas = {
                     let mut ua_cache = UA_CASCADE_DATA_CACHE.lock().unwrap();
-                    self.user_agent = ua_cache.lookup(
-                        origin_sheets,
-                        device,
-                        quirks_mode,
-                        guards.ua_or_user,
-                    )?;
+                    self.user_agent =
+                        ua_cache.lookup(origin_sheets, device, quirks_mode, guards.ua_or_user)?;
                     debug!("User agent data cache size {:?}", ua_cache.len());
                     ua_cache.take_unused()
                 };
@@ -1198,6 +1194,10 @@ impl Stylist {
         //
         // See [3] for the bug to implement whatever gets resolved, and related
         // bugs for a bit more context.
+        //
+        // FIXME(emilio): This should probably work for pseudo-elements (i.e.,
+        // use rule_hash_target().shadow_root() instead of
+        // element.shadow_root()).
         //
         // [1]: https://cs.chromium.org/chromium/src/third_party/blink/renderer/
         //        core/css/resolver/style_resolver.cc?l=1267&rcl=90f9f8680ebb4a87d177f3b0833372ae4e0c88d8

@@ -951,14 +951,18 @@ RefPtr<ServiceWorkerRegistrationPromise> ServiceWorkerManager::GetRegistration(
 NS_IMETHODIMP
 ServiceWorkerManager::SendPushEvent(const nsACString& aOriginAttributes,
                                     const nsACString& aScope,
-                                    uint32_t aDataLength, uint8_t* aDataBytes,
+                                    const nsTArray<uint8_t>& aDataBytes,
                                     uint8_t optional_argc) {
-  if (optional_argc == 2) {
-    nsTArray<uint8_t> data;
-    if (!data.InsertElementsAt(0, aDataBytes, aDataLength, fallible)) {
-      return NS_ERROR_OUT_OF_MEMORY;
-    }
-    return SendPushEvent(aOriginAttributes, aScope, EmptyString(), Some(data));
+  if (optional_argc == 1) {
+    // This does one copy here (while constructing the Maybe) and another when
+    // we end up copying into the SendPushEventRunnable.  We could fix that to
+    // only do one copy by making things between here and there take
+    // Maybe<nsTArray<uint8_t>>&&, but then we'd need to copy before we know
+    // whether we really need to in PushMessageDispatcher::NotifyWorkers.  Since
+    // in practice this only affects JS callers that pass data, and we don't
+    // have any right now, let's not worry about it.
+    return SendPushEvent(aOriginAttributes, aScope, EmptyString(),
+                         Some(aDataBytes));
   }
   MOZ_ASSERT(optional_argc == 0);
   return SendPushEvent(aOriginAttributes, aScope, EmptyString(), Nothing());
@@ -1503,12 +1507,6 @@ ServiceWorkerManager::GetServiceWorkerRegistrationInfo(nsIPrincipal* aPrincipal,
                                                        nsIURI* aURI) const {
   MOZ_ASSERT(aPrincipal);
   MOZ_ASSERT(aURI);
-
-  // XXXnsm Temporary fix until Bug 1171432 is fixed.
-  if (NS_WARN_IF(BasePrincipal::Cast(aPrincipal)->AppId() ==
-                 nsIScriptSecurityManager::UNKNOWN_APP_ID)) {
-    return nullptr;
-  }
 
   nsAutoCString scopeKey;
   nsresult rv = PrincipalToScopeKey(aPrincipal, scopeKey);

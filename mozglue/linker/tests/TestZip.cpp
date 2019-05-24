@@ -12,37 +12,14 @@
 Logging Logging::Singleton;
 
 /**
- * ZIP_DATA(FOO, "foo") defines the variables FOO and FOO_SIZE.
- * The former contains the content of the "foo" file in the same directory
- * as this file, and FOO_SIZE its size.
- */
-/* clang-format off */
-#define ZIP_DATA(name, file)                          \
-  __asm__(".global " #name "\n"                       \
-          ".data\n"                                   \
-          ".balign 16\n"                              \
-          #name ":\n"                                 \
-          "  .incbin \"" SRCDIR "/" file "\"\n"       \
-          ".L" #name "_END:\n"                        \
-          "  .size " #name ", .L" #name "_END-" #name \
-          "\n"                                        \
-          ".global " #name "_SIZE\n"                  \
-          ".data\n"                                   \
-          ".balign 4\n"                               \
-          #name "_SIZE:\n"                            \
-          "  .int .L" #name "_END-" #name "\n");      \
-  extern const unsigned char name[];                  \
-  extern const unsigned int name##_SIZE
-/* clang-format on */
-
-/**
  * test.zip is a basic test zip file with a central directory. It contains
  * four entries, in the following order:
  * "foo", "bar", "baz", "qux".
  * The entries are going to be read out of order.
  */
-ZIP_DATA(TEST_ZIP, "test.zip");
-const char *test_entries[] = {"baz", "foo", "bar", "qux"};
+extern const unsigned char TEST_ZIP[];
+extern const unsigned int TEST_ZIP_SIZE;
+const char* test_entries[] = {"baz", "foo", "bar", "qux"};
 
 /**
  * no_central_dir.zip is a hand crafted test zip with no central directory
@@ -58,14 +35,15 @@ const char *test_entries[] = {"baz", "foo", "bar", "qux"};
  *   zipalign if it had a data descriptor originally.
  * - Fourth entry is a file "d", STOREd.
  */
-ZIP_DATA(NO_CENTRAL_DIR_ZIP, "no_central_dir.zip");
-const char *no_central_dir_entries[] = {"a", "b", "c", "d"};
+extern const unsigned char NO_CENTRAL_DIR_ZIP[];
+extern const unsigned int NO_CENTRAL_DIR_ZIP_SIZE;
+const char* no_central_dir_entries[] = {"a", "b", "c", "d"};
 
 TEST(Zip, TestZip)
 {
   Zip::Stream s;
-  RefPtr<Zip> z = Zip::Create((void *)TEST_ZIP, TEST_ZIP_SIZE);
-  for (auto &entry : test_entries) {
+  RefPtr<Zip> z = Zip::Create((void*)TEST_ZIP, TEST_ZIP_SIZE);
+  for (auto& entry : test_entries) {
     ASSERT_TRUE(z->GetStream(entry, &s))
     << "Could not get entry \"" << entry << "\"";
   }
@@ -75,8 +53,8 @@ TEST(Zip, NoCentralDir)
 {
   Zip::Stream s;
   RefPtr<Zip> z =
-      Zip::Create((void *)NO_CENTRAL_DIR_ZIP, NO_CENTRAL_DIR_ZIP_SIZE);
-  for (auto &entry : no_central_dir_entries) {
+      Zip::Create((void*)NO_CENTRAL_DIR_ZIP, NO_CENTRAL_DIR_ZIP_SIZE);
+  for (auto& entry : no_central_dir_entries) {
     ASSERT_TRUE(z->GetStream(entry, &s))
     << "Could not get entry \"" << entry << "\"";
   }

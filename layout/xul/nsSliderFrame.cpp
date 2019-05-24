@@ -933,6 +933,11 @@ static bool UsesSVGEffects(nsIFrame* aFrame) {
 }
 
 static bool ScrollFrameWillBuildScrollInfoLayer(nsIFrame* aScrollFrame) {
+  /*
+   * Note: if changing the conditions in this function, make a corresponding
+   * change to nsDisplayListBuilder::ShouldBuildScrollInfoItemsForHoisting()
+   * in nsDisplayList.cpp.
+   */
   if (gfx::gfxVars::UseWebRender()) {
     // If WebRender is enabled, even scrollframes enclosed in SVG effects can
     // be drag-scrolled by APZ.
@@ -1151,7 +1156,7 @@ void nsSliderFrame::DragThumb(bool aGrabMouseEvents) {
 }
 
 bool nsSliderFrame::isDraggingThumb() const {
-  return (nsIPresShell::GetCapturingContent() == GetContent());
+  return PresShell::GetCapturingContent() == GetContent();
 }
 
 void nsSliderFrame::AddListener() {

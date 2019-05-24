@@ -9,31 +9,6 @@
 const InspectorUtils = require("InspectorUtils");
 
 const MAX_DATA_URL_LENGTH = 40;
-
-/*
- * About the objects defined in this file:
- * - CssLogic contains style information about a view context. It provides
- *   access to 2 sets of objects: Css[Sheet|Rule|Selector] provide access to
- *   information that does not change when the selected element changes while
- *   Css[Property|Selector]Info provide information that is dependent on the
- *   selected element.
- *   Its key methods are highlight(), getPropertyInfo() and forEachSheet(), etc
- *   It also contains a number of static methods for l10n, naming, etc
- *
- * - CssSheet provides a more useful API to a DOM CSSSheet for our purposes,
- *   including shortSource and href.
- * - CssRule a more useful API to a DOM CSSRule including access to the group
- *   of CssSelectors that the rule provides properties for
- * - CssSelector A single selector - i.e. not a selector group. In other words
- *   a CssSelector does not contain ','. This terminology is different from the
- *   standard DOM API, but more inline with the definition in the spec.
- *
- * - CssPropertyInfo contains style information for a single property for the
- *   highlighted element.
- * - CssSelectorInfo is a wrapper around CssSelector, which adds sorting with
- *   reference to the selected element.
- */
-
 /**
  * Provide access to the style information in a page.
  * CssLogic uses the standard DOM API, and the Gecko InspectorUtils API to
@@ -205,6 +180,7 @@ function getLineCountInComments(text) {
  * @param string text The CSS source to prettify.
  * @return string Prettified CSS source
  */
+/* eslint-disable complexity */
 function prettifyCSS(text, ruleCount) {
   if (prettifyCSS.LINE_SEPARATOR == null) {
     const os = Services.appinfo.OS;
@@ -430,6 +406,7 @@ function prettifyCSS(text, ruleCount) {
 
   return result;
 }
+/* eslint-enable complexity */
 
 exports.prettifyCSS = prettifyCSS;
 

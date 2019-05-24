@@ -17,9 +17,10 @@ import { asyncStore } from "../utils/prefs";
 import {
   getSource,
   getSources,
+  getSourceInSources,
   getUrls,
   getSpecificSourceByURL,
-  getSpecificSourceByURLInSources
+  getSpecificSourceByURLInSources,
 } from "./sources";
 
 import type { Action } from "../actions/types";
@@ -31,7 +32,7 @@ export type Tab = {
   url: string,
   framework?: string | null,
   isOriginal: boolean,
-  sourceId?: string
+  sourceId?: string,
 };
 export type TabList = Tab[];
 
@@ -100,11 +101,13 @@ function updateTabList(
 }
 
 function persistTabs(tabs) {
-  return tabs.filter(tab => tab.url).map(tab => {
-    const newTab = { ...tab };
-    delete newTab.sourceId;
-    return newTab;
-  });
+  return tabs
+    .filter(tab => tab.url)
+    .map(tab => {
+      const newTab = { ...tab };
+      delete newTab.sourceId;
+      return newTab;
+    });
 }
 
 function moveTabInList(tabs: TabList, { url, tabIndex: newIndex }) {
@@ -220,7 +223,7 @@ function getTabWithOrWithoutUrl(tab, sources, urls) {
     );
   }
 
-  return tab.sourceId ? sources[tab.sourceId] : null;
+  return tab.sourceId ? getSourceInSources(sources, tab.sourceId) : null;
 }
 
 export default update;

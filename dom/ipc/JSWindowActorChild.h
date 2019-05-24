@@ -47,9 +47,11 @@ class JSWindowActorChild final : public JSWindowActor {
 
   WindowGlobalChild* Manager() const;
   void Init(const nsAString& aName, WindowGlobalChild* aManager);
-
+  void StartDestroy();
+  void AfterDestroy();
   Document* GetDocument(ErrorResult& aRv);
   BrowsingContext* GetBrowsingContext(ErrorResult& aRv);
+  nsIDocShell* GetDocShell(ErrorResult& aRv);
   Nullable<WindowProxyHolder> GetContentWindow(ErrorResult& aRv);
 
  protected:
@@ -58,8 +60,9 @@ class JSWindowActorChild final : public JSWindowActor {
                       ErrorResult& aRv) override;
 
  private:
-  ~JSWindowActorChild() = default;
+  ~JSWindowActorChild();
 
+  bool mCanSend = true;
   RefPtr<WindowGlobalChild> mManager;
 };
 

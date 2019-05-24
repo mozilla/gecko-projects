@@ -8,8 +8,10 @@ from __future__ import absolute_import, print_function, unicode_literals
 import os
 import json
 import logging
-
 import time
+import sys
+
+from redo import retry
 import yaml
 
 from . import GECKO
@@ -80,6 +82,11 @@ PER_PROJECT_PARAMETERS = {
         'release_type': 'esr60',
     },
 
+    'mozilla-esr68': {
+        'target_tasks_method': 'mozilla_esr68_tasks',
+        'release_type': 'esr68',
+    },
+
     'comm-central': {
         'target_tasks_method': 'default',
         'release_type': 'nightly',
@@ -92,6 +99,11 @@ PER_PROJECT_PARAMETERS = {
 
     'comm-esr60': {
         'target_tasks_method': 'mozilla_esr60_tasks',
+        'release_type': 'release',
+    },
+
+    'comm-esr68': {
+        'target_tasks_method': 'mozilla_esr68_tasks',
         'release_type': 'release',
     },
 
@@ -320,12 +332,16 @@ def get_existing_tasks(rebuild_kinds, parameters, graph_config):
     by `rebuild_kinds`.
     """
     try:
-        decision_task = find_decision_task(parameters, graph_config)
-        task_graph = get_artifact(decision_task, "public/full-task-graph.json")
+        decision_task = retry(
+            find_decision_task,
+            args=(parameters, graph_config),
+            attempts=4,
+            sleeptime=5*60,
+        )
     except Exception:
         logger.exception("Didn't find existing push task.")
-        return
-    _, task_graph = TaskGraph.from_json(task_graph)
+        sys.exit(1)
+    _, task_graph = TaskGraph.from_json(get_artifact(decision_task, "public/full-task-graph.json"))
     parameters['existing_tasks'] = find_existing_tasks_from_previous_kinds(
         task_graph, [decision_task], rebuild_kinds
     )
@@ -405,3 +421,7 @@ def read_artifact(filename):
             return json.load(f)
     else:
         raise TypeError("Don't know how to read {}".format(filename))
+
+
+def rename_artifact(src, dest):
+    os.rename(os.path.join(ARTIFACTS_DIR, src), os.path.join(ARTIFACTS_DIR, dest))

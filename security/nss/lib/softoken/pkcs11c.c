@@ -760,6 +760,32 @@ sftk_ChaCha20Poly1305_Decrypt(const SFTKChaCha20Poly1305Info *ctx,
                                  sizeof(ctx->nonce), ad, ctx->adLen);
 }
 
+static SECStatus
+sftk_ChaCha20Ctr(const SFTKChaCha20CtrInfo *ctx,
+                 unsigned char *output, unsigned int *outputLen,
+                 unsigned int maxOutputLen,
+                 const unsigned char *input, unsigned int inputLen)
+{
+    if (maxOutputLen < inputLen) {
+        PORT_SetError(SEC_ERROR_OUTPUT_LEN);
+        return SECFailure;
+    }
+    ChaCha20_Xor(output, input, inputLen, ctx->key,
+                 ctx->nonce, ctx->counter);
+    *outputLen = inputLen;
+    return SECSuccess;
+}
+
+static void
+sftk_ChaCha20Ctr_DestroyContext(SFTKChaCha20CtrInfo *ctx,
+                                PRBool freeit)
+{
+    memset(ctx, 0, sizeof(*ctx));
+    if (freeit) {
+        PORT_Free(ctx);
+    }
+}
+
 /** NSC_CryptInit initializes an encryption/Decryption operation.
  *
  * Always called by NSC_EncryptInit, NSC_DecryptInit, NSC_WrapKey,NSC_UnwrapKey.
@@ -1180,6 +1206,48 @@ sftk_CryptInit(CK_SESSION_HANDLE hSession, CK_MECHANISM_PTR pMechanism,
             context->destroy = (SFTKDestroy)sftk_ChaCha20Poly1305_DestroyContext;
             break;
 
+        case CKM_NSS_CHACHA20_CTR:
+            if (key_type != CKK_NSS_CHACHA20) {
+                crv = CKR_KEY_TYPE_INCONSISTENT;
+                break;
+            }
+            if (pMechanism->pParameter == NULL || pMechanism->ulParameterLen != 16) {
+                crv = CKR_MECHANISM_PARAM_INVALID;
+                break;
+            }
+
+            att = sftk_FindAttribute(key, CKA_VALUE);
+            if (att == NULL) {
+                crv = CKR_KEY_HANDLE_INVALID;
+                break;
+            }
+            SFTKChaCha20CtrInfo *ctx = PORT_ZNew(SFTKChaCha20CtrInfo);
+            if (!ctx) {
+                sftk_FreeAttribute(att);
+                crv = CKR_HOST_MEMORY;
+                break;
+            }
+            if (att->attrib.ulValueLen != sizeof(ctx->key)) {
+                sftk_FreeAttribute(att);
+                PORT_Free(ctx);
+                crv = CKR_KEY_HANDLE_INVALID;
+                break;
+            }
+            memcpy(ctx->key, att->attrib.pValue, att->attrib.ulValueLen);
+            sftk_FreeAttribute(att);
+
+            /* The counter is little endian. */
+            PRUint8 *param = pMechanism->pParameter;
+            int i = 0;
+            for (; i < 4; ++i) {
+                ctx->counter |= param[i] << (i * 8);
+            }
+            memcpy(ctx->nonce, param + 4, 12);
+            context->cipherInfo = ctx;
+            context->update = (SFTKCipher)sftk_ChaCha20Ctr;
+            context->destroy = (SFTKDestroy)sftk_ChaCha20Ctr_DestroyContext;
+            break;
+
         case CKM_NSS_AES_KEY_WRAP_PAD:
             context->doPad = PR_TRUE;
         /* fall thru */
@@ -1311,8 +1379,11 @@ NSC_EncryptUpdate(CK_SESSION_HANDLE hSession,
     /* do it: NOTE: this assumes buf size in is >= buf size out! */
     rv = (*context->update)(context->cipherInfo, pEncryptedPart,
                             &outlen, maxout, pPart, ulPartLen);
+    if (rv != SECSuccess) {
+        return sftk_MapCryptError(PORT_GetError());
+    }
     *pulEncryptedPartLen = (CK_ULONG)(outlen + padoutlen);
-    return (rv == SECSuccess) ? CKR_OK : sftk_MapCryptError(PORT_GetError());
+    return CKR_OK;
 }
 
 /* NSC_EncryptFinal finishes a multiple-part encryption operation. */
@@ -1392,26 +1463,29 @@ NSC_Encrypt(CK_SESSION_HANDLE hSession, CK_BYTE_PTR pData,
         return crv;
 
     if (!pEncryptedData) {
-        *pulEncryptedDataLen = context->rsa ? context->maxLen : ulDataLen + 2 * context->blockSize;
-        goto finish;
+        outlen = context->rsa ? context->maxLen : ulDataLen + 2 * context->blockSize;
+        goto done;
     }
 
     if (context->doPad) {
         if (context->multi) {
+            CK_ULONG updateLen = maxoutlen;
             CK_ULONG finalLen;
             /* padding is fairly complicated, have the update and final
              * code deal with it */
             sftk_FreeSession(session);
             crv = NSC_EncryptUpdate(hSession, pData, ulDataLen, pEncryptedData,
-                                    pulEncryptedDataLen);
-            if (crv != CKR_OK)
-                *pulEncryptedDataLen = 0;
-            maxoutlen -= *pulEncryptedDataLen;
-            pEncryptedData += *pulEncryptedDataLen;
+                                    &updateLen);
+            if (crv != CKR_OK) {
+                updateLen = 0;
+            }
+            maxoutlen -= updateLen;
+            pEncryptedData += updateLen;
             finalLen = maxoutlen;
             crv2 = NSC_EncryptFinal(hSession, pEncryptedData, &finalLen);
-            if (crv2 == CKR_OK)
-                *pulEncryptedDataLen += finalLen;
+            if (crv == CKR_OK && crv2 == CKR_OK) {
+                *pulEncryptedDataLen = updateLen + finalLen;
+            }
             return crv == CKR_OK ? crv2 : crv;
         }
         /* doPad without multi means that padding must be done on the first
@@ -1437,14 +1511,15 @@ NSC_Encrypt(CK_SESSION_HANDLE hSession, CK_BYTE_PTR pData,
     rv = (*context->update)(context->cipherInfo, pEncryptedData,
                             &outlen, maxoutlen, pText.data, pText.len);
     crv = (rv == SECSuccess) ? CKR_OK : sftk_MapCryptError(PORT_GetError());
-    *pulEncryptedDataLen = (CK_ULONG)outlen;
     if (pText.data != pData)
         PORT_ZFree(pText.data, pText.len);
 fail:
     sftk_TerminateOp(session, SFTK_ENCRYPT, context);
-finish:
+done:
     sftk_FreeSession(session);
-
+    if (crv == CKR_OK) {
+        *pulEncryptedDataLen = (CK_ULONG)outlen;
+    }
     return crv;
 }
 
@@ -1533,8 +1608,11 @@ NSC_DecryptUpdate(CK_SESSION_HANDLE hSession,
     /* do it: NOTE: this assumes buf size in is >= buf size out! */
     rv = (*context->update)(context->cipherInfo, pPart, &outlen,
                             maxout, pEncryptedPart, ulEncryptedPartLen);
+    if (rv != SECSuccess) {
+        return sftk_MapDecryptError(PORT_GetError());
+    }
     *pulPartLen = (CK_ULONG)(outlen + padoutlen);
-    return (rv == SECSuccess) ? CKR_OK : sftk_MapDecryptError(PORT_GetError());
+    return CKR_OK;
 }
 
 /* NSC_DecryptFinal finishes a multiple-part decryption operation. */
@@ -1625,25 +1703,27 @@ NSC_Decrypt(CK_SESSION_HANDLE hSession,
         return crv;
 
     if (!pData) {
-        *pulDataLen = ulEncryptedDataLen + context->blockSize;
-        goto finish;
+        outlen = ulEncryptedDataLen + context->blockSize;
+        goto done;
     }
 
     if (context->doPad && context->multi) {
+        CK_ULONG updateLen = maxoutlen;
         CK_ULONG finalLen;
         /* padding is fairly complicated, have the update and final
          * code deal with it */
         sftk_FreeSession(session);
         crv = NSC_DecryptUpdate(hSession, pEncryptedData, ulEncryptedDataLen,
-                                pData, pulDataLen);
-        if (crv != CKR_OK)
-            *pulDataLen = 0;
-        maxoutlen -= *pulDataLen;
-        pData += *pulDataLen;
+                                pData, &updateLen);
+        if (crv == CKR_OK) {
+            maxoutlen -= updateLen;
+            pData += updateLen;
+        }
         finalLen = maxoutlen;
         crv2 = NSC_DecryptFinal(hSession, pData, &finalLen);
-        if (crv2 == CKR_OK)
-            *pulDataLen += finalLen;
+        if (crv == CKR_OK && crv2 == CKR_OK) {
+            *pulDataLen = updateLen + finalLen;
+        }
         return crv == CKR_OK ? crv2 : crv;
     }
 
@@ -1668,10 +1748,12 @@ NSC_Decrypt(CK_SESSION_HANDLE hSession,
             }
         }
     }
-    *pulDataLen = (CK_ULONG)outlen;
     sftk_TerminateOp(session, SFTK_DECRYPT, context);
-finish:
+done:
     sftk_FreeSession(session);
+    if (crv == CKR_OK) {
+        *pulDataLen = (CK_ULONG)outlen;
+    }
     return crv;
 }
 

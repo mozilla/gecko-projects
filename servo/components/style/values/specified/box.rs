@@ -10,7 +10,7 @@ use crate::properties::{LonghandId, PropertyDeclarationId, PropertyFlags};
 use crate::properties::{PropertyId, ShorthandId};
 use crate::values::generics::box_::AnimationIterationCount as GenericAnimationIterationCount;
 use crate::values::generics::box_::Perspective as GenericPerspective;
-use crate::values::generics::box_::VerticalAlign as GenericVerticalAlign;
+use crate::values::generics::box_::{GenericVerticalAlign, VerticalAlignKeyword};
 use crate::values::specified::length::{LengthPercentage, NonNegativeLength};
 use crate::values::specified::{AllowQuirks, Number};
 use crate::values::{CustomIdent, KeyframesName};
@@ -280,20 +280,9 @@ impl Parse for VerticalAlign {
             return Ok(GenericVerticalAlign::Length(lp));
         }
 
-        try_match_ident_ignore_ascii_case! { input,
-            "baseline" => Ok(GenericVerticalAlign::Baseline),
-            "sub" => Ok(GenericVerticalAlign::Sub),
-            "super" => Ok(GenericVerticalAlign::Super),
-            "top" => Ok(GenericVerticalAlign::Top),
-            "text-top" => Ok(GenericVerticalAlign::TextTop),
-            "middle" => Ok(GenericVerticalAlign::Middle),
-            "bottom" => Ok(GenericVerticalAlign::Bottom),
-            "text-bottom" => Ok(GenericVerticalAlign::TextBottom),
-            #[cfg(feature = "gecko")]
-            "-moz-middle-with-baseline" => {
-                Ok(GenericVerticalAlign::MozMiddleWithBaseline)
-            },
-        }
+        Ok(GenericVerticalAlign::Keyword(VerticalAlignKeyword::parse(
+            input,
+        )?))
     }
 }
 
@@ -653,6 +642,7 @@ pub enum OverflowClipBox {
 #[derive(
     Clone,
     Debug,
+    Default,
     MallocSizeOf,
     PartialEq,
     SpecifiedValueInfo,
@@ -661,38 +651,38 @@ pub enum OverflowClipBox {
     ToResolvedValue,
     ToShmem,
 )]
-/// Provides a rendering hint to the user agent,
-/// stating what kinds of changes the author expects
-/// to perform on the element
+#[css(comma)]
+#[repr(C)]
+/// Provides a rendering hint to the user agent, stating what kinds of changes
+/// the author expects to perform on the element.
+///
+/// `auto` is represented by an empty `features` list.
 ///
 /// <https://drafts.csswg.org/css-will-change/#will-change>
-pub enum WillChange {
-    /// Expresses no particular intent
-    Auto,
-    /// <custom-ident>
-    #[css(comma)]
-    AnimateableFeatures {
-        /// The features that are supposed to change.
-        #[css(iterable)]
-        features: Box<[CustomIdent]>,
-        /// A bitfield with the kind of change that the value will create, based
-        /// on the above field.
-        #[css(skip)]
-        bits: WillChangeBits,
-    },
+pub struct WillChange {
+    /// The features that are supposed to change.
+    ///
+    /// TODO(emilio): Consider using ArcSlice since we just clone them from the
+    /// specified value? That'd save an allocation, which could be worth it.
+    #[css(iterable, if_empty = "auto")]
+    features: crate::OwnedSlice<CustomIdent>,
+    /// A bitfield with the kind of change that the value will create, based
+    /// on the above field.
+    #[css(skip)]
+    bits: WillChangeBits,
 }
 
 impl WillChange {
     #[inline]
     /// Get default value of `will-change` as `auto`
-    pub fn auto() -> WillChange {
-        WillChange::Auto
+    pub fn auto() -> Self {
+        Self::default()
     }
 }
 
 bitflags! {
     /// The change bits that we care about.
-    #[derive(MallocSizeOf, SpecifiedValueInfo, ToComputedValue, ToResolvedValue, ToShmem)]
+    #[derive(Default, MallocSizeOf, SpecifiedValueInfo, ToComputedValue, ToResolvedValue, ToShmem)]
     #[repr(C)]
     pub struct WillChangeBits: u8 {
         /// Whether the stacking context will change.
@@ -757,7 +747,7 @@ impl Parse for WillChange {
             .try(|input| input.expect_ident_matching("auto"))
             .is_ok()
         {
-            return Ok(WillChange::Auto);
+            return Ok(Self::default());
         }
 
         let mut bits = WillChangeBits::empty();
@@ -778,8 +768,8 @@ impl Parse for WillChange {
             Ok(ident)
         })?;
 
-        Ok(WillChange::AnimateableFeatures {
-            features: custom_idents.into_boxed_slice(),
+        Ok(Self {
+            features: custom_idents.into(),
             bits,
         })
     }

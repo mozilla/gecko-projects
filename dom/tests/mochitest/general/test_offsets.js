@@ -9,7 +9,7 @@ function testElements(baseid, callback)
     var element = elements[t];
 
     // Ignore presentational content inside menus
-    if (element.closest("menu") && element.closest("[aria-hidden=true]")) {
+    if (element.closest("menu, menuitem") && element.closest("[aria-hidden=true]")) {
       continue;
     }
 
@@ -23,7 +23,7 @@ function testElements(baseid, callback)
     testElement(element);
   }
 
-  var nonappended = document.createElement("div");
+  var nonappended = document.createElementNS("http://www.w3.org/1999/xhtml", "div");
   nonappended.id = "nonappended";
   nonappended.setAttribute("_offsetParent", "null");
   testElement(nonappended);

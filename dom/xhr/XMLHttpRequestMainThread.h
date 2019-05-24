@@ -66,6 +66,7 @@ namespace dom {
 
 class DOMString;
 class XMLHttpRequestUpload;
+class SerializedStackHolder;
 struct OriginAttributesDictionary;
 
 // A helper for building up an ArrayBuffer object's data
@@ -391,6 +392,8 @@ class XMLHttpRequestMainThread final : public XMLHttpRequest,
 
   virtual void SetMozBackgroundRequest(bool aMozBackgroundRequest,
                                        ErrorResult& aRv) override;
+
+  void SetOriginStack(UniquePtr<SerializedStackHolder> aOriginStack);
 
   virtual uint16_t ErrorCode() const override {
     return static_cast<uint16_t>(mErrorLoad);
@@ -721,8 +724,12 @@ class XMLHttpRequestMainThread final : public XMLHttpRequest,
   // Our parse-end listener, if we are parsing.
   RefPtr<nsXHRParseEndListener> mParseEndListener;
 
-  RefPtr<XMLHttpRequestDoneNotifier> mDelayedDoneNotifier;
+  XMLHttpRequestDoneNotifier* mDelayedDoneNotifier;
   void DisconnectDoneNotifier();
+
+  // Any stack information for the point the XHR was opened. This is deleted
+  // after the XHR is opened, to avoid retaining references to the worker.
+  UniquePtr<SerializedStackHolder> mOriginStack;
 
   static bool sDontWarnAboutSyncXHR;
 };
@@ -788,8 +795,9 @@ class XMLHttpRequestDoneNotifier : public Runnable {
   NS_IMETHOD Run() override {
     if (mXHR) {
       RefPtr<XMLHttpRequestMainThread> xhr = mXHR;
-      mXHR = nullptr;
+      // ChangeStateToDoneInternal ends up calling Disconnect();
       xhr->ChangeStateToDoneInternal();
+      MOZ_ASSERT(!mXHR);
     }
     return NS_OK;
   }
@@ -797,7 +805,7 @@ class XMLHttpRequestDoneNotifier : public Runnable {
   void Disconnect() { mXHR = nullptr; }
 
  private:
-  XMLHttpRequestMainThread* mXHR;
+  RefPtr<XMLHttpRequestMainThread> mXHR;
 };
 
 class nsXHRParseEndListener : public nsIDOMEventListener {

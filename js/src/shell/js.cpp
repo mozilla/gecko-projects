@@ -92,11 +92,13 @@
 #include "js/CompileOptions.h"
 #include "js/ContextOptions.h"  // JS::ContextOptions{,Ref}
 #include "js/Debug.h"
-#include "js/Equality.h"  // JS::SameValue
+#include "js/Equality.h"                 // JS::SameValue
+#include "js/experimental/SourceHook.h"  // js::{Set,Forget,}SourceHook
 #include "js/GCVector.h"
 #include "js/Initialization.h"
 #include "js/JSON.h"
 #include "js/MemoryFunctions.h"
+#include "js/Modules.h"  // JS::GetModulePrivate, JS::SetModule{DynamicImport,Metadata,Resolve}Hook, JS::SetModulePrivate
 #include "js/Printf.h"
 #include "js/PropertySpec.h"
 #include "js/Realm.h"
@@ -127,6 +129,7 @@
 #include "vm/JSFunction.h"
 #include "vm/JSObject.h"
 #include "vm/JSScript.h"
+#include "vm/ModuleBuilder.h"  // js::ModuleBuilder
 #include "vm/Monitor.h"
 #include "vm/MutexIDs.h"
 #include "vm/Printer.h"
@@ -980,7 +983,7 @@ static bool InitModuleLoader(JSContext* cx) {
   }
 
   RootedValue rv(cx);
-  return JS::Evaluate(cx, options, srcBuf, &rv);
+  return JS::EvaluateDontInflate(cx, options, srcBuf, &rv);
 }
 
 static bool GetModuleImportHook(JSContext* cx,
@@ -1135,7 +1138,7 @@ static bool TrackUnhandledRejections(JSContext* cx, JS::HandleObject promise,
 }
 
 static void ForwardingPromiseRejectionTrackerCallback(
-    JSContext* cx, JS::HandleObject promise,
+    JSContext* cx, bool mutedErrors, JS::HandleObject promise,
     JS::PromiseRejectionHandlingState state, void* data) {
   AutoReportException are(cx);
 
@@ -1765,9 +1768,10 @@ static bool LoadScript(JSContext* cx, unsigned argc, Value* vp,
         .setNoScriptRval(true);
 
     RootedValue unused(cx);
-    if (!(compileOnly
-              ? JS::CompileUtf8Path(cx, opts, filename.get()) != nullptr
-              : JS::EvaluateUtf8Path(cx, opts, filename.get(), &unused))) {
+    if (!(compileOnly ? JS::CompileUtf8PathDontInflate(
+                            cx, opts, filename.get()) != nullptr
+                      : JS::EvaluateUtf8PathDontInflate(
+                            cx, opts, filename.get(), &unused))) {
       return false;
     }
   }
@@ -3495,7 +3499,7 @@ static bool DisassFile(JSContext* cx, unsigned argc, Value* vp) {
         .setIsRunOnce(true)
         .setNoScriptRval(true);
 
-    script = JS::CompileUtf8Path(cx, options, filename.get());
+    script = JS::CompileUtf8PathDontInflate(cx, options, filename.get());
     if (!script) {
       return false;
     }
@@ -5098,6 +5102,12 @@ static bool BinParse(JSContext* cx, unsigned argc, Value* vp) {
 
   // Extract argument 2: Options.
 
+  // BinAST currently supports 2 formats, multipart and context.
+  enum {
+    Multipart,
+    Context,
+  } mode = Multipart;
+
   if (args.length() >= 2) {
     if (!args[1].isObject()) {
       const char* typeName = InformalValueTypeName(args[1]);
@@ -5119,7 +5129,11 @@ static bool BinParse(JSContext* cx, unsigned argc, Value* vp) {
         return false;
       }
       // Currently not used, reserved for future.
-      if (!StringEqualsAscii(linearFormat, "multipart")) {
+      if (StringEqualsAscii(linearFormat, "multipart")) {
+        mode = Multipart;
+      } else if (StringEqualsAscii(linearFormat, "context")) {
+        mode = Context;
+      } else {
         UniqueChars printable = JS_EncodeStringToUTF8(cx, linearFormat);
         if (!printable) {
           return false;
@@ -5154,7 +5168,9 @@ static bool BinParse(JSContext* cx, unsigned argc, Value* vp) {
   Directives directives(false);
   GlobalSharedContext globalsc(cx, ScopeKind::Global, directives, false);
 
-  auto parseFunc = ParseBinASTData<frontend::BinASTTokenReaderMultipart>;
+  auto parseFunc = mode == Multipart
+                       ? ParseBinASTData<frontend::BinASTTokenReaderMultipart>
+                       : ParseBinASTData<frontend::BinASTTokenReaderContext>;
   if (!parseFunc(cx, buf_data, buf_length, &globalsc, usedNames, options,
                  sourceObj)) {
     return false;
@@ -8682,8 +8698,11 @@ static const JSFunctionSpecWithHelp shell_functions[] = {
 #if defined(JS_BUILD_BINAST)
 
 JS_FN_HELP("parseBin", BinParse, 1, 0,
-"parseBin(arraybuffer)",
-"  Parses a Binary AST, potentially throwing."),
+"parseBin(arraybuffer, [options])",
+"  Parses a Binary AST, potentially throwing. If present, |options| may\n"
+"  have properties saying how the passed |arraybuffer| should be handled:\n"
+"      format: the format of the BinAST file\n"
+"        (\"multipart\" or \"context\")"),
 
 #endif // defined(JS_BUILD_BINAST)
 
@@ -9432,30 +9451,12 @@ static FILE* ErrorFilePointer() {
   return stderr;
 }
 
-static bool PrintStackTrace(JSContext* cx, HandleValue exn) {
-  if (!exn.isObject()) {
-    return false;
-  }
-
-  Maybe<JSAutoRealm> ar;
-  RootedObject exnObj(cx, &exn.toObject());
-  if (IsCrossCompartmentWrapper(exnObj)) {
-    exnObj = UncheckedUnwrap(exnObj);
-    ar.emplace(cx, exnObj);
-  }
-
-  // Ignore non-ErrorObject thrown by |throw| statement.
-  if (!exnObj->is<ErrorObject>()) {
+static bool PrintStackTrace(JSContext* cx, HandleObject stackObj) {
+  if (!stackObj || !stackObj->is<SavedFrame>()) {
     return true;
   }
 
-  // Exceptions thrown while compiling top-level script have no stack.
-  RootedObject stackObj(cx, exnObj->as<ErrorObject>().stack());
-  if (!stackObj) {
-    return true;
-  }
-
-  JSPrincipals* principals = exnObj->as<ErrorObject>().realm()->principals();
+  JSPrincipals* principals = stackObj->nonCCWRealm()->principals();
   RootedString stackStr(cx);
   if (!BuildStackString(cx, principals, stackObj, &stackStr, 2)) {
     return false;
@@ -9478,9 +9479,10 @@ js::shell::AutoReportException::~AutoReportException() {
     return;
   }
 
-  // Get exception object before printing and clearing exception.
+  // Get exception object and stack before printing and clearing exception.
   RootedValue exn(cx);
   (void)JS_GetPendingException(cx, &exn);
+  RootedObject stack(cx, GetPendingExceptionStack(cx));
 
   JS_ClearPendingException(cx);
 
@@ -9497,16 +9499,12 @@ js::shell::AutoReportException::~AutoReportException() {
 
   FILE* fp = ErrorFilePointer();
   PrintError(cx, fp, report.toStringResult(), report.report(), reportWarnings);
-
-  {
-    JS::AutoSaveExceptionState savedExc(cx);
-    if (!PrintStackTrace(cx, exn)) {
-      fputs("(Unable to print stack trace)\n", fp);
-    }
-    savedExc.restore();
-  }
-
   JS_ClearPendingException(cx);
+
+  if (!PrintStackTrace(cx, stack)) {
+    fputs("(Unable to print stack trace)\n", fp);
+    JS_ClearPendingException(cx);
+  }
 
 #if defined(DEBUG) || defined(JS_OOM_BREAKPOINT)
   // Don't quit the shell if an unhandled exception is reported during OOM
@@ -10167,7 +10165,7 @@ static MOZ_MUST_USE bool ProcessArgs(JSContext* cx, OptionParser* op) {
       }
 
       RootedValue rval(cx);
-      if (!JS::Evaluate(cx, opts, srcBuf, &rval)) {
+      if (!JS::EvaluateDontInflate(cx, opts, srcBuf, &rval)) {
         return false;
       }
 
@@ -10717,6 +10715,23 @@ static MOZ_MUST_USE bool ReportUnhandledRejections(JSContext* cx) {
 }
 
 static int Shell(JSContext* cx, OptionParser* op, char** envp) {
+  if (JS::TraceLoggerSupported()) {
+    JS::StartTraceLogger(cx);
+  }
+#ifdef JS_STRUCTURED_SPEW
+  cx->spewer().enableSpewing();
+#endif
+
+  auto exitShell = MakeScopeExit([&] {
+    if (JS::TraceLoggerSupported()) {
+      JS::SpewTraceLoggerForCurrentProcess();
+      JS::StopTraceLogger(cx);
+    }
+#ifdef JS_STRUCTURED_SPEW
+    cx->spewer().disableSpewing();
+#endif
+  });
+
   if (op->getBoolOption("wasm-compile-and-serialize")) {
     if (!WasmCompileAndSerialize(cx)) {
       // Errors have been printed directly to stderr.

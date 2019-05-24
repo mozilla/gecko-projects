@@ -16,7 +16,6 @@ function loadDetailView(win, id) {
   let card = doc.querySelector(`addon-card[addon-id="${id}"]`);
   let loaded = waitForViewLoad(win);
   EventUtils.synthesizeMouseAtCenter(card, {clickCount: 1}, win);
-  EventUtils.synthesizeMouseAtCenter(card, {clickCount: 2}, win);
   return loaded;
 }
 
@@ -108,20 +107,21 @@ add_task(async function testChangeAutoUpdates() {
   await extension.unload();
 });
 
-async function setupExtensionWithUpdate() {
+async function setupExtensionWithUpdate(id, {releaseNotes} = {}) {
   await SpecialPowers.pushPrefEnv({
     set: [["extensions.checkUpdateSecurity", false]],
   });
 
   let server = AddonTestUtils.createHttpServer();
   let serverHost = `http://localhost:${server.identity.primaryPort}`;
+  let updatesPath = `/ext-updates-${id}.json`;
 
   let baseManifest = {
     name: "Updates",
     applications: {
       gecko: {
-        id: "update@mochi.test",
-        update_url: `${serverHost}/ext-updates.json`,
+        id,
+        update_url: serverHost + updatesPath,
       },
     },
   };
@@ -132,18 +132,38 @@ async function setupExtensionWithUpdate() {
       version: "2",
     },
   });
-  server.registerFile("/update-2.xpi", updateXpi);
-  AddonTestUtils.registerJSON(server, "/ext-updates.json", {
+
+  let releaseNotesExtra = {};
+  if (releaseNotes) {
+    let notesPath = "/notes.txt";
+    server.registerPathHandler(notesPath, (request, response) => {
+      if (releaseNotes == "ERROR") {
+        response.setStatusLine(null, 404, "Not Found");
+      } else {
+        response.setStatusLine(null, 200, "OK");
+        response.write(releaseNotes);
+      }
+      response.processAsync();
+      response.finish();
+    });
+    releaseNotesExtra.update_info_url = serverHost + notesPath;
+  }
+
+  let xpiFilename = `/update-${id}.xpi`;
+  server.registerFile(xpiFilename, updateXpi);
+  AddonTestUtils.registerJSON(server, updatesPath, {
     addons: {
-      "update@mochi.test": {
-        updates: [
-          {version: "2", update_link: `${serverHost}/update-2.xpi`},
-        ],
+      [id]: {
+        updates: [{
+          version: "2",
+          update_link: serverHost + xpiFilename,
+          ...releaseNotesExtra,
+        }],
       },
     },
   });
 
-  return ExtensionTestUtils.loadExtension({
+  let extension = ExtensionTestUtils.loadExtension({
     manifest: {
       ...baseManifest,
       version: "1",
@@ -151,6 +171,8 @@ async function setupExtensionWithUpdate() {
     // Use permanent so the add-on can be updated.
     useAddonManager: "permanent",
   });
+  await extension.startup();
+  return extension;
 }
 
 function disableAutoUpdates(card) {
@@ -163,7 +185,7 @@ function disableAutoUpdates(card) {
   ok(!updateCheckButton.hidden, "The button is now visible");
 
   // There shouldn't be an update shown to the user.
-  assertUpdateState(card, false);
+  assertUpdateState({card, shown: false});
 }
 
 function checkForUpdate(card, expected) {
@@ -181,26 +203,36 @@ function installUpdate(card, expected) {
   return Promise.all([updateInstalled, updated]);
 }
 
-function assertUpdateState(card, shown) {
+function assertUpdateState({
+  card, shown, expanded = true, releaseNotes = false,
+}) {
   let menuButton = card.querySelector(".more-options-button");
   ok(menuButton.classList.contains("more-options-button-badged") == shown,
      "The menu button is badged");
   let installButton = card.querySelector('panel-item[action="install-update"]');
   ok(installButton.hidden != shown,
      `The install button is ${shown ? "hidden" : "shown"}`);
-  let updateCheckButton = card.querySelector('button[action="update-check"]');
-  ok(updateCheckButton.hidden == shown,
-     `The update check button is ${shown ? "hidden" : "shown"}`);
+  if (expanded) {
+    let updateCheckButton = card.querySelector('button[action="update-check"]');
+    ok(updateCheckButton.hidden == shown,
+      `The update check button is ${shown ? "hidden" : "shown"}`);
+
+    let {tabGroup} = card.details;
+    is(tabGroup.hidden, false, "The tab group is shown");
+    let notesBtn = tabGroup.querySelector('[name="release-notes"]');
+    is(notesBtn.hidden, !releaseNotes,
+       `The release notes button is ${releaseNotes ? "shown" : "hidden"}`);
+  }
 }
 
 add_task(async function testUpdateAvailable() {
-  let extension = await setupExtensionWithUpdate();
-  await extension.startup();
+  let id = "update@mochi.test";
+  let extension = await setupExtensionWithUpdate(id);
 
   let win = await loadInitialView("extension");
   let doc = win.document;
 
-  await loadDetailView(win, "update@mochi.test");
+  await loadDetailView(win, id);
 
   let card = doc.querySelector("addon-card");
 
@@ -209,7 +241,7 @@ add_task(async function testUpdateAvailable() {
   await checkForUpdate(card, "update-found");
 
   // There should now be an update.
-  assertUpdateState(card, true);
+  assertUpdateState({card, shown: true});
 
   // The version was 1.
   let versionRow = card.querySelector(".addon-detail-row-version");
@@ -222,7 +254,7 @@ add_task(async function testUpdateAvailable() {
   is(versionRow.lastChild.textContent, "2", "The version has updated");
 
   // No update is shown again.
-  assertUpdateState(card, false);
+  assertUpdateState({card, shown: false});
 
   // Check for updates again, there shouldn't be an update.
   await checkForUpdate(card, "no-update");
@@ -231,9 +263,160 @@ add_task(async function testUpdateAvailable() {
   await extension.unload();
 });
 
+add_task(async function testReleaseNotesLoad() {
+  let id = "update-with-notes@mochi.test";
+  let extension = await setupExtensionWithUpdate(id, {
+    releaseNotes: `
+      <html xmlns="http://www.w3.org/1999/xhtml">
+        <head><link rel="stylesheet" href="remove-me.css"/></head>
+        <body>
+          <script src="no-scripts.js"></script>
+          <h1>My release notes</h1>
+          <img src="http://example.com/tracker.png"/>
+          <ul>
+            <li onclick="alert('hi')">A thing</li>
+          </ul>
+          <a href="http://example.com/">Go somewhere</a>
+        </body>
+      </html>
+    `,
+  });
+
+  let win = await loadInitialView("extension");
+  let doc = win.document;
+
+  await loadDetailView(win, id);
+
+  let card = doc.querySelector("addon-card");
+  let {deck, tabGroup} = card.details;
+
+  // Disable updates and then check.
+  disableAutoUpdates(card);
+  await checkForUpdate(card, "update-found");
+
+  // There should now be an update.
+  assertUpdateState({card, shown: true, releaseNotes: true});
+
+  info("Check release notes");
+  let notesBtn = tabGroup.querySelector('[name="release-notes"]');
+  let notes = card.querySelector("update-release-notes");
+  let loading = BrowserTestUtils.waitForEvent(notes, "release-notes-loading");
+  let loaded = BrowserTestUtils.waitForEvent(notes, "release-notes-loaded");
+  // Don't use notesBtn.click() since it causes an assertion to fail.
+  // See bug 1551621 for more info.
+  EventUtils.synthesizeMouseAtCenter(notesBtn, {}, win);
+  await loading;
+  is(doc.l10n.getAttributes(notes.firstElementChild).id,
+     "release-notes-loading", "The loading message is shown");
+  await loaded;
+  info("Checking HTML release notes");
+  let [h1, ul, a] = notes.children;
+  is(h1.tagName, "H1", "There's a heading");
+  is(h1.textContent, "My release notes", "The heading has content");
+  is(ul.tagName, "UL", "There's a list");
+  is(ul.children.length, 1, "There's one item in the list");
+  let [li] = ul.children;
+  is(li.tagName, "LI", "There's a list item");
+  is(li.textContent, "A thing", "The text is set");
+  ok(!li.hasAttribute("onclick"), "The onclick was removed");
+  ok(!notes.querySelector("link"), "The link tag was removed");
+  ok(!notes.querySelector("script"), "The script tag was removed");
+  is(a.textContent, "Go somewhere", "The link text is preserved");
+  is(a.href, "http://example.com/", "The link href is preserved");
+
+  info("Verify the link opened in a new tab");
+  let tabOpened = BrowserTestUtils.waitForNewTab(gBrowser, a.href);
+  a.click();
+  let tab = await tabOpened;
+  BrowserTestUtils.removeTab(tab);
+
+  let originalContent = notes.innerHTML;
+
+  info("Switch away and back to release notes");
+  // Load details view.
+  let detailsBtn = tabGroup.firstElementChild;
+  let viewChanged = BrowserTestUtils.waitForEvent(deck, "view-changed");
+  detailsBtn.click();
+  await viewChanged;
+
+  // Load release notes again, verify they weren't loaded.
+  viewChanged = BrowserTestUtils.waitForEvent(deck, "view-changed");
+  let notesCached = BrowserTestUtils.waitForEvent(
+    notes, "release-notes-cached");
+  notesBtn.click();
+  await viewChanged;
+  await notesCached;
+  is(notes.innerHTML, originalContent, "The content didn't change");
+
+  info("Install the update to clean it up");
+  await installUpdate(card, "update-installed");
+
+  // There's no more update but release notes are still shown.
+  assertUpdateState({card, shown: false, releaseNotes: true});
+
+  await closeView(win);
+  await extension.unload();
+});
+
+add_task(async function testReleaseNotesError() {
+  let id = "update-with-notes-error@mochi.test";
+  let extension = await setupExtensionWithUpdate(id, {releaseNotes: "ERROR"});
+
+  let win = await loadInitialView("extension");
+  let doc = win.document;
+
+  await loadDetailView(win, id);
+
+  let card = doc.querySelector("addon-card");
+  let {deck, tabGroup} = card.details;
+
+  // Disable updates and then check.
+  disableAutoUpdates(card);
+  await checkForUpdate(card, "update-found");
+
+  // There should now be an update.
+  assertUpdateState({card, shown: true, releaseNotes: true});
+
+  info("Check release notes");
+  let notesBtn = tabGroup.querySelector('[name="release-notes"]');
+  let notes = card.querySelector("update-release-notes");
+  let loading = BrowserTestUtils.waitForEvent(notes, "release-notes-loading");
+  let errored = BrowserTestUtils.waitForEvent(notes, "release-notes-error");
+  // Don't use notesBtn.click() since it causes an assertion to fail.
+  // See bug 1551621 for more info.
+  EventUtils.synthesizeMouseAtCenter(notesBtn, {}, win);
+  await loading;
+  is(doc.l10n.getAttributes(notes.firstElementChild).id,
+     "release-notes-loading", "The loading message is shown");
+  await errored;
+  is(doc.l10n.getAttributes(notes.firstElementChild).id,
+     "release-notes-error", "The error message is shown");
+
+  info("Switch away and back to release notes");
+  // Load details view.
+  let detailsBtn = tabGroup.firstElementChild;
+  let viewChanged = BrowserTestUtils.waitForEvent(deck, "view-changed");
+  detailsBtn.click();
+  await viewChanged;
+
+  // Load release notes again, verify they weren't loaded.
+  viewChanged = BrowserTestUtils.waitForEvent(deck, "view-changed");
+  let notesCached = BrowserTestUtils.waitForEvent(
+    notes, "release-notes-cached");
+  notesBtn.click();
+  await viewChanged;
+  await notesCached;
+
+  info("Install the update to clean it up");
+  await installUpdate(card, "update-installed");
+
+  await closeView(win);
+  await extension.unload();
+});
+
 add_task(async function testUpdateCancelled() {
-  let extension = await setupExtensionWithUpdate();
-  await extension.startup();
+  let id = "update@mochi.test";
+  let extension = await setupExtensionWithUpdate(id);
 
   let win = await loadInitialView("extension");
   let doc = win.document;
@@ -246,7 +429,7 @@ add_task(async function testUpdateCancelled() {
   await checkForUpdate(card, "update-found");
 
   // There should now be an update.
-  assertUpdateState(card, true);
+  assertUpdateState({card, shown: true});
 
   // The add-on starts as version 1.
   let versionRow = card.querySelector(".addon-detail-row-version");
@@ -264,8 +447,96 @@ add_task(async function testUpdateCancelled() {
   is(versionRow.lastChild.textContent, "1", "The version hasn't changed");
 
   // The update has been removed.
-  assertUpdateState(card, false);
+  assertUpdateState({card, shown: false});
 
   await closeView(win);
   await extension.unload();
+});
+
+add_task(async function testAvailableUpdates() {
+  let ids = ["update1@mochi.test", "update2@mochi.test", "update3@mochi.test"];
+  let addons = await Promise.all(ids.map(id => setupExtensionWithUpdate(id)));
+
+  // Disable global add-on updates.
+  AddonManager.autoUpdateDefault = false;
+
+  let win = await loadInitialView("extension");
+  let doc = win.document;
+
+  let managerDoc = win.managerWindow.document;
+  let {gCategories} = win.managerWindow;
+  let availableCat = gCategories.get("addons://updates/available");
+
+  ok(availableCat.hidden, "Available updates is hidden");
+  is(availableCat.badgeCount, 0, "There are no updates");
+
+  // Check for all updates.
+  let updatesFound = TestUtils.topicObserved("EM-update-check-finished");
+  managerDoc.getElementById("utils-updateNow").doCommand();
+  await updatesFound;
+
+  // Wait for the available updates count to finalize, it's async.
+  await BrowserTestUtils.waitForCondition(() => availableCat.badgeCount == 3);
+
+  // The category shows the correct update count.
+  ok(!availableCat.hidden, "Available updates is visible");
+  is(availableCat.badgeCount, 3, "There are 3 updates");
+
+  // Go to the available updates page.
+  let loaded = waitForViewLoad(win);
+  availableCat.click();
+  await loaded;
+
+  // Check the updates are shown.
+  let cards = doc.querySelectorAll("addon-card");
+  is(cards.length, 3, "There are 3 cards");
+
+  // Each card should have an update.
+  for (let card of cards) {
+    assertUpdateState({card, shown: true, expanded: false});
+  }
+
+  // Check the detail page for the first add-on.
+  await loadDetailView(win, ids[0]);
+  is(gCategories.selected, "addons://list/extension",
+     "The extensions category is selected");
+
+  // Go back to the last view.
+  loaded = waitForViewLoad(win);
+  managerDoc.getElementById("go-back").click();
+  await loaded;
+
+  // We're back on the updates view.
+  is(gCategories.selected, "addons://updates/available",
+     "The available updates category is selected");
+
+  // Find the cards again.
+  cards = doc.querySelectorAll("addon-card");
+  is(cards.length, 3, "There are 3 cards");
+
+  // Install the first update.
+  await installUpdate(cards[0], "update-installed");
+  assertUpdateState({card: cards[0], shown: false, expanded: false});
+
+  // The count goes down but the card stays.
+  is(availableCat.badgeCount, 2, "There are only 2 updates now");
+  is(doc.querySelectorAll("addon-card").length, 3,
+     "All 3 cards are still visible on the updates page");
+
+  // Install the other two updates.
+  await installUpdate(cards[1], "update-installed");
+  assertUpdateState({card: cards[1], shown: false, expanded: false});
+  await installUpdate(cards[2], "update-installed");
+  assertUpdateState({card: cards[2], shown: false, expanded: false});
+
+  // The count goes down but the card stays.
+  is(availableCat.badgeCount, 0, "There are no more updates");
+  is(doc.querySelectorAll("addon-card").length, 3,
+     "All 3 cards are still visible on the updates page");
+
+  // Enable global add-on updates again.
+  AddonManager.autoUpdateDefault = true;
+
+  await closeView(win);
+  await Promise.all(addons.map(addon => addon.unload()));
 });

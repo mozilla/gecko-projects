@@ -338,7 +338,7 @@ nsresult HTMLEditor::DoInsertHTMLWithContext(
     if (wsObj.mEndReasonNode && TextEditUtils::IsBreak(wsObj.mEndReasonNode) &&
         !IsVisibleBRElement(wsObj.mEndReasonNode)) {
       AutoEditorDOMPointChildInvalidator lockOffset(pointToInsert);
-      rv = DeleteNodeWithTransaction(*wsObj.mEndReasonNode);
+      rv = DeleteNodeWithTransaction(MOZ_KnownLive(*wsObj.mEndReasonNode));
       if (NS_WARN_IF(NS_FAILED(rv))) {
         return rv;
       }
@@ -350,7 +350,7 @@ nsresult HTMLEditor::DoInsertHTMLWithContext(
     // Are we in a text node? If so, split it.
     if (pointToInsert.IsInTextNode()) {
       SplitNodeResult splitNodeResult = SplitNodeDeepWithTransaction(
-          *pointToInsert.GetContainerAsContent(), pointToInsert,
+          MOZ_KnownLive(*pointToInsert.GetContainerAsContent()), pointToInsert,
           SplitAtEdges::eAllowToCreateEmptyContainer);
       if (NS_WARN_IF(splitNodeResult.Failed())) {
         return splitNodeResult.Rv();
@@ -469,7 +469,8 @@ nsresult HTMLEditor::DoInsertHTMLWithContext(
                         !pointToInsert.GetContainer()->GetParentNode())) {
                   // Is it an orphan node?
                 } else {
-                  DeleteNodeWithTransaction(*pointToInsert.GetContainer());
+                  DeleteNodeWithTransaction(
+                      MOZ_KnownLive(*pointToInsert.GetContainer()));
                   pointToInsert.Set(pointToInsert.GetContainer());
                 }
               }
@@ -645,7 +646,7 @@ nsresult HTMLEditor::DoInsertHTMLWithContext(
         // in a BR that is not visible.  If so, the code above just placed
         // selection inside that.  So I split it instead.
         SplitNodeResult splitLinkResult = SplitNodeDeepWithTransaction(
-            *linkContent, EditorRawDOMPoint(selNode, selOffset),
+            *linkContent, EditorDOMPoint(selNode, selOffset),
             SplitAtEdges::eDoNotCreateEmptyContainer);
         NS_WARNING_ASSERTION(splitLinkResult.Succeeded(),
                              "Failed to split the link");
@@ -1454,7 +1455,7 @@ nsresult HTMLEditor::PasteInternal(int32_t aClipboardType,
   MOZ_ASSERT(IsEditActionDataAvailable());
 
   if (aDispatchPasteEvent && !FireClipboardEvent(ePaste, aClipboardType)) {
-    return NS_OK;
+    return NS_ERROR_EDITOR_ACTION_CANCELED;
   }
 
   // Get Clipboard Service
@@ -1546,7 +1547,7 @@ nsresult HTMLEditor::PasteTransferable(nsITransferable* aTransferable) {
   // aTransferable and we don't currently implement a way to put that in the
   // data transfer yet.
   if (!FireClipboardEvent(ePaste, nsIClipboard::kGlobalClipboard)) {
-    return NS_OK;
+    return EditorBase::ToGenericNSResult(NS_ERROR_EDITOR_ACTION_CANCELED);
   }
 
   nsAutoString contextStr, infoStr;
@@ -1571,7 +1572,7 @@ HTMLEditor::PasteNoFormatting(int32_t aSelectionType) {
       SettingDataTransfer::eWithoutFormat, aSelectionType);
 
   if (!FireClipboardEvent(ePasteNoFormatting, aSelectionType)) {
-    return NS_OK;
+    return EditorBase::ToGenericNSResult(NS_ERROR_EDITOR_ACTION_CANCELED);
   }
 
   CommitComposition();

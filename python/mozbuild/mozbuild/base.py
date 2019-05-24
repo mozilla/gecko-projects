@@ -971,6 +971,13 @@ class MachCommandConditions(object):
         return False
 
     @staticmethod
+    def is_not_android(cls):
+        """Must not have an Android build."""
+        if hasattr(cls, 'substs'):
+            return cls.substs.get('MOZ_WIDGET_TOOLKIT') != 'android'
+        return False
+
+    @staticmethod
     def is_firefox_or_android(cls):
         """Must have a Firefox or Android build."""
         return MachCommandConditions.is_firefox(cls) or MachCommandConditions.is_android(cls)
@@ -989,6 +996,11 @@ class MachCommandConditions(object):
     def is_artifact_build(cls):
         """Must be an artifact build."""
         return getattr(cls, 'substs', {}).get('MOZ_ARTIFACT_BUILDS')
+
+    @staticmethod
+    def is_non_artifact_build(cls):
+        """Must not be an artifact build."""
+        return not MachCommandConditions.is_artifact_build(cls)
 
 
 class PathArgument(object):

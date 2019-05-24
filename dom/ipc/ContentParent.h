@@ -10,6 +10,7 @@
 #include "mozilla/dom/PContentParent.h"
 #include "mozilla/dom/CPOWManagerGetter.h"
 #include "mozilla/dom/ipc/IdType.h"
+#include "mozilla/dom/RemoteBrowser.h"
 #include "mozilla/gfx/gfxVarReceiver.h"
 #include "mozilla/gfx/GPUProcessListener.h"
 #include "mozilla/ipc/BackgroundUtils.h"
@@ -32,6 +33,7 @@
 #include "nsHashKeys.h"
 #include "nsIInterfaceRequestor.h"
 #include "nsIObserver.h"
+#include "nsIRemoteTab.h"
 #include "nsIThreadInternal.h"
 #include "nsIDOMGeoPositionCallback.h"
 #include "nsIDOMGeoPositionErrorCallback.h"
@@ -109,6 +111,7 @@ class MemoryReport;
 class TabContext;
 class GetFilesHelper;
 class MemoryReportRequestHost;
+struct CancelContentJSOptions;
 
 #define NS_CONTENTPARENT_IID                         \
   {                                                  \
@@ -206,12 +209,10 @@ class ContentParent final : public PContentParent,
    * should be the frame/iframe element with which this process will
    * associated.
    */
-  static BrowserParent* CreateBrowser(const TabContext& aContext,
-                                      Element* aFrameElement,
-                                      BrowsingContext* aBrowsingContext,
-                                      ContentParent* aOpenerContentParent,
-                                      BrowserParent* aSameTabGroupAs,
-                                      uint64_t aNextRemoteTabId);
+  static already_AddRefed<RemoteBrowser> CreateBrowser(
+      const TabContext& aContext, Element* aFrameElement,
+      BrowsingContext* aBrowsingContext, ContentParent* aOpenerContentParent,
+      BrowserParent* aSameTabGroupAs, uint64_t aNextRemoteTabId);
 
   static void GetAll(nsTArray<ContentParent*>& aArray);
 
@@ -591,6 +592,11 @@ class ContentParent final : public PContentParent,
                                    bool aForceRepaint,
                                    const layers::LayersObserverEpoch& aEpoch);
 
+  void CancelContentJSExecutionIfRunning(
+      BrowserParent* aBrowserParent,
+      nsIRemoteTab::NavigationType aNavigationType,
+      const CancelContentJSOptions& aCancelContentJSOptions);
+
   // This function is called when we are about to load a document from an
   // HTTP(S) or FTP channel for a content process.  It is a useful place
   // to start to kick off work as early as possible in response to such
@@ -675,7 +681,7 @@ class ContentParent final : public PContentParent,
       const bool& aSizeSpecified, nsIURI* aURIToLoad,
       const nsCString& aFeatures, const float& aFullZoom,
       uint64_t aNextRemoteTabId, const nsString& aName, nsresult& aResult,
-      nsCOMPtr<nsIRemoteTab>& aNewBrowserParent, bool* aWindowIsNew,
+      nsCOMPtr<nsIRemoteTab>& aNewRemoteTab, bool* aWindowIsNew,
       int32_t& aOpenLocation, nsIPrincipal* aTriggeringPrincipal,
       nsIReferrerInfo* aReferrerInfo, bool aLoadUri,
       nsIContentSecurityPolicy* aCsp);
@@ -1167,6 +1173,8 @@ class ContentParent final : public PContentParent,
       nsTArray<ChildEventData>&& events);
   mozilla::ipc::IPCResult RecvRecordDiscardedData(
       const DiscardedData& aDiscardedData);
+  mozilla::ipc::IPCResult RecvRecordOrigin(const uint32_t& aMetricId,
+                                           const nsCString& aOrigin);
 
   mozilla::ipc::IPCResult RecvBHRThreadHang(const HangDetails& aHangDetails);
 
@@ -1205,6 +1213,8 @@ class ContentParent final : public PContentParent,
 
   void OnBrowsingContextGroupSubscribe(BrowsingContextGroup* aGroup);
   void OnBrowsingContextGroupUnsubscribe(BrowsingContextGroup* aGroup);
+
+  void UpdateNetworkLinkType();
 
  private:
   // Released in ActorDestroy; deliberately not exposed to the CC.

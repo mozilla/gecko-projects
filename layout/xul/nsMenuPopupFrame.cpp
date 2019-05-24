@@ -461,8 +461,7 @@ void nsMenuPopupFrame::UpdateWidgetProperties() {
 }
 
 void nsMenuPopupFrame::LayoutPopup(nsBoxLayoutState& aState,
-                                   nsIFrame* aParentMenu, nsIFrame* aAnchor,
-                                   bool aSizedToPopup) {
+                                   nsIFrame* aParentMenu, bool aSizedToPopup) {
   if (IsLeaf()) {
     return;
   }
@@ -517,7 +516,7 @@ void nsMenuPopupFrame::LayoutPopup(nsBoxLayoutState& aState,
 
   bool needCallback = false;
   if (shouldPosition) {
-    SetPopupPosition(aAnchor, false, aSizedToPopup,
+    SetPopupPosition(aParentMenu, false, aSizedToPopup,
                      mPopupState == ePopupPositioning);
     needCallback = true;
   }
@@ -544,7 +543,7 @@ void nsMenuPopupFrame::LayoutPopup(nsBoxLayoutState& aState,
   }
 
   if (rePosition) {
-    SetPopupPosition(aAnchor, false, aSizedToPopup, false);
+    SetPopupPosition(aParentMenu, false, aSizedToPopup, false);
   }
 
   nsPresContext* pc = PresContext();
@@ -604,7 +603,7 @@ void nsMenuPopupFrame::LayoutPopup(nsBoxLayoutState& aState,
 
   if (needCallback && !mReflowCallbackData.mPosted) {
     pc->PresShell()->PostReflowCallback(this);
-    mReflowCallbackData.MarkPosted(aAnchor, aSizedToPopup, openChanged);
+    mReflowCallbackData.MarkPosted(aParentMenu, aSizedToPopup, openChanged);
   }
 }
 
@@ -1812,9 +1811,10 @@ nsIScrollableFrame* nsMenuPopupFrame::GetScrollFrame(nsIFrame* aStart) {
 
 void nsMenuPopupFrame::EnsureMenuItemIsVisible(nsMenuFrame* aMenuItem) {
   if (aMenuItem) {
-    aMenuItem->PresShell()->ScrollFrameRectIntoView(
+    RefPtr<mozilla::PresShell> presShell = aMenuItem->PresShell();
+    presShell->ScrollFrameRectIntoView(
         aMenuItem, nsRect(nsPoint(0, 0), aMenuItem->GetRect().Size()),
-        nsIPresShell::ScrollAxis(), nsIPresShell::ScrollAxis(),
+        ScrollAxis(), ScrollAxis(),
         ScrollFlags::ScrollOverflowHidden |
             ScrollFlags::ScrollFirstAncestorOnly |
             ScrollFlags::IgnoreMarginAndPadding);
@@ -1948,9 +1948,11 @@ nsMenuPopupFrame::ChangeMenuItem(nsMenuFrame* aMenuItem, bool aSelectFirstItem,
       // Fire a command event as the new item, but we don't want to close
       // the menu, blink it, or update any other state of the menuitem. The
       // command event will cause the item to be selected.
-      nsContentUtils::DispatchXULCommand(
-          aMenuItem->GetContent(), /* aTrusted = */ true, nullptr, PresShell(),
-          false, false, false, false);
+      nsCOMPtr<nsIContent> menuItemContent = aMenuItem->GetContent();
+      RefPtr<mozilla::PresShell> presShell = PresShell();
+      nsContentUtils::DispatchXULCommand(menuItemContent, /* aTrusted = */ true,
+                                         nullptr, presShell, false, false,
+                                         false, false);
     }
 #endif
   }
@@ -2499,7 +2501,7 @@ nsIWidget* nsMenuPopupFrame::GetParentMenuWidget() {
   nsMenuFrame* menuFrame = do_QueryFrame(GetParent());
   if (menuFrame) {
     nsMenuParent* parentPopup = menuFrame->GetMenuParent();
-    if (parentPopup && parentPopup->IsMenu()) {
+    if (parentPopup && (parentPopup->IsMenu() || parentPopup->IsMenuBar())) {
       return static_cast<nsMenuPopupFrame*>(parentPopup)->GetWidget();
     }
   }

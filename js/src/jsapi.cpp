@@ -1153,8 +1153,26 @@ JS_PUBLIC_API void JS_freeop(JSFreeOp* fop, void* p) {
   return FreeOp::get(fop)->free_(p);
 }
 
-JS_PUBLIC_API void JS_updateMallocCounter(JSContext* cx, size_t nbytes) {
-  return cx->updateMallocCounter(nbytes);
+JS_PUBLIC_API void JS::AddAssociatedMemory(JSObject* obj, size_t nbytes,
+                                           JS::MemoryUse use) {
+  MOZ_ASSERT(obj);
+  if (!nbytes) {
+    return;
+  }
+
+  Zone* zone = obj->zone();
+  zone->addCellMemory(obj, nbytes, js::MemoryUse(use));
+  zone->runtimeFromMainThread()->gc.maybeAllocTriggerZoneGC(zone);
+}
+
+JS_PUBLIC_API void JS::RemoveAssociatedMemory(JSObject* obj, size_t nbytes,
+                                              JS::MemoryUse use) {
+  MOZ_ASSERT(obj);
+  if (!nbytes) {
+    return;
+  }
+
+  obj->zoneFromAnyThread()->removeCellMemory(obj, nbytes, js::MemoryUse(use));
 }
 
 #undef JS_AddRoot
@@ -2903,19 +2921,13 @@ JS_PUBLIC_API bool JSPropertySpec::getValue(JSContext* cx,
   return true;
 }
 
-static JS::SymbolCode PropertySpecNameToSymbolCode(const char* name) {
-  MOZ_ASSERT(JS::PropertySpecNameIsSymbol(name));
-  uintptr_t u = reinterpret_cast<uintptr_t>(name);
-  return JS::SymbolCode(u - 1);
-}
-
-bool PropertySpecNameToId(JSContext* cx, const char* name, MutableHandleId id,
+bool PropertySpecNameToId(JSContext* cx, JSPropertySpec::Name name,
+                          MutableHandleId id,
                           js::PinningBehavior pin = js::DoNotPinAtom) {
-  if (JS::PropertySpecNameIsSymbol(name)) {
-    JS::SymbolCode which = PropertySpecNameToSymbolCode(name);
-    id.set(SYMBOL_TO_JSID(cx->wellKnownSymbols().get(which)));
+  if (name.isSymbol()) {
+    id.set(SYMBOL_TO_JSID(cx->wellKnownSymbols().get(name.symbol())));
   } else {
-    JSAtom* atom = Atomize(cx, name, strlen(name), pin);
+    JSAtom* atom = Atomize(cx, name.string(), strlen(name.string()), pin);
     if (!atom) {
       return false;
     }
@@ -2925,7 +2937,7 @@ bool PropertySpecNameToId(JSContext* cx, const char* name, MutableHandleId id,
 }
 
 JS_PUBLIC_API bool JS::PropertySpecNameToPermanentId(JSContext* cx,
-                                                     const char* name,
+                                                     JSPropertySpec::Name name,
                                                      jsid* idp) {
   // We are calling fromMarkedLocation(idp) even though idp points to a
   // location that will never be marked. This is OK because the whole point
@@ -3676,74 +3688,6 @@ JS_PUBLIC_API JSString* JS_DecompileFunction(JSContext* cx,
   return FunctionToString(cx, fun, /* isToSource = */ false);
 }
 
-JS_PUBLIC_API JS::ModuleResolveHook JS::GetModuleResolveHook(JSRuntime* rt) {
-  AssertHeapIsIdle();
-  return rt->moduleResolveHook;
-}
-
-JS_PUBLIC_API void JS::SetModuleResolveHook(JSRuntime* rt,
-                                            JS::ModuleResolveHook func) {
-  AssertHeapIsIdle();
-  rt->moduleResolveHook = func;
-}
-
-JS_PUBLIC_API JS::ModuleMetadataHook JS::GetModuleMetadataHook(JSRuntime* rt) {
-  AssertHeapIsIdle();
-  return rt->moduleMetadataHook;
-}
-
-JS_PUBLIC_API void JS::SetModuleMetadataHook(JSRuntime* rt,
-                                             JS::ModuleMetadataHook func) {
-  AssertHeapIsIdle();
-  rt->moduleMetadataHook = func;
-}
-
-JS_PUBLIC_API JS::ModuleDynamicImportHook JS::GetModuleDynamicImportHook(
-    JSRuntime* rt) {
-  AssertHeapIsIdle();
-  return rt->moduleDynamicImportHook;
-}
-
-JS_PUBLIC_API void JS::SetModuleDynamicImportHook(
-    JSRuntime* rt, JS::ModuleDynamicImportHook func) {
-  AssertHeapIsIdle();
-  rt->moduleDynamicImportHook = func;
-}
-
-JS_PUBLIC_API bool JS::FinishDynamicModuleImport(JSContext* cx,
-                                                 HandleValue referencingPrivate,
-                                                 HandleString specifier,
-                                                 HandleObject promise) {
-  AssertHeapIsIdle();
-  CHECK_THREAD(cx);
-  cx->check(referencingPrivate, promise);
-
-  return js::FinishDynamicModuleImport(cx, referencingPrivate, specifier,
-                                       promise);
-}
-
-JS_PUBLIC_API bool JS::CompileModule(JSContext* cx,
-                                     const ReadOnlyCompileOptions& options,
-                                     SourceText<char16_t>& srcBuf,
-                                     JS::MutableHandleObject module) {
-  MOZ_ASSERT(!cx->zone()->isAtomsZone());
-  AssertHeapIsIdle();
-  CHECK_THREAD(cx);
-
-  module.set(frontend::CompileModule(cx, options, srcBuf));
-  return !!module;
-}
-
-JS_PUBLIC_API void JS::SetModulePrivate(JSObject* module,
-                                        const JS::Value& value) {
-  JSRuntime* rt = module->zone()->runtimeFromMainThread();
-  module->as<ModuleObject>().scriptSourceObject()->setPrivate(rt, value);
-}
-
-JS_PUBLIC_API JS::Value JS::GetModulePrivate(JSObject* module) {
-  return module->as<ModuleObject>().scriptSourceObject()->canonicalPrivate();
-}
-
 JS_PUBLIC_API void JS::SetScriptPrivate(JSScript* script,
                                         const JS::Value& value) {
   JSRuntime* rt = script->zone()->runtimeFromMainThread();
@@ -3772,58 +3716,6 @@ JS_PUBLIC_API void JS::SetScriptPrivateReferenceHooks(
   AssertHeapIsIdle();
   rt->scriptPrivateAddRefHook = addRefHook;
   rt->scriptPrivateReleaseHook = releaseHook;
-}
-
-JS_PUBLIC_API bool JS::ModuleInstantiate(JSContext* cx,
-                                         JS::HandleObject moduleArg) {
-  AssertHeapIsIdle();
-  CHECK_THREAD(cx);
-  cx->releaseCheck(moduleArg);
-  return ModuleObject::Instantiate(cx, moduleArg.as<ModuleObject>());
-}
-
-JS_PUBLIC_API bool JS::ModuleEvaluate(JSContext* cx,
-                                      JS::HandleObject moduleArg) {
-  AssertHeapIsIdle();
-  CHECK_THREAD(cx);
-  cx->releaseCheck(moduleArg);
-  return ModuleObject::Evaluate(cx, moduleArg.as<ModuleObject>());
-}
-
-JS_PUBLIC_API JSObject* JS::GetRequestedModules(JSContext* cx,
-                                                JS::HandleObject moduleArg) {
-  AssertHeapIsIdle();
-  CHECK_THREAD(cx);
-  cx->check(moduleArg);
-  return &moduleArg->as<ModuleObject>().requestedModules();
-}
-
-JS_PUBLIC_API JSString* JS::GetRequestedModuleSpecifier(JSContext* cx,
-                                                        JS::HandleValue value) {
-  AssertHeapIsIdle();
-  CHECK_THREAD(cx);
-  cx->check(value);
-  JSObject* obj = &value.toObject();
-  return obj->as<RequestedModuleObject>().moduleSpecifier();
-}
-
-JS_PUBLIC_API void JS::GetRequestedModuleSourcePos(JSContext* cx,
-                                                   JS::HandleValue value,
-                                                   uint32_t* lineNumber,
-                                                   uint32_t* columnNumber) {
-  AssertHeapIsIdle();
-  CHECK_THREAD(cx);
-  cx->check(value);
-  MOZ_ASSERT(lineNumber);
-  MOZ_ASSERT(columnNumber);
-  auto& requested = value.toObject().as<RequestedModuleObject>();
-  *lineNumber = requested.lineNumber();
-  *columnNumber = requested.columnNumber();
-}
-
-JS_PUBLIC_API JSScript* JS::GetModuleScript(JS::HandleObject moduleRecord) {
-  AssertHeapIsIdle();
-  return moduleRecord->as<ModuleObject>().script();
 }
 
 JS_PUBLIC_API JSObject* JS_New(JSContext* cx, HandleObject ctor,
@@ -4648,10 +4540,11 @@ JS_PUBLIC_API JS::Symbol* JS::GetWellKnownSymbol(JSContext* cx,
 }
 
 #ifdef DEBUG
-static bool PropertySpecNameIsDigits(const char* s) {
-  if (JS::PropertySpecNameIsSymbol(s)) {
+static bool PropertySpecNameIsDigits(JSPropertySpec::Name name) {
+  if (name.isSymbol()) {
     return false;
   }
+  const char* s = name.string();
   if (!*s) {
     return false;
   }
@@ -4664,18 +4557,19 @@ static bool PropertySpecNameIsDigits(const char* s) {
 }
 #endif  // DEBUG
 
-JS_PUBLIC_API bool JS::PropertySpecNameEqualsId(const char* name, HandleId id) {
-  if (JS::PropertySpecNameIsSymbol(name)) {
+JS_PUBLIC_API bool JS::PropertySpecNameEqualsId(JSPropertySpec::Name name,
+                                                HandleId id) {
+  if (name.isSymbol()) {
     if (!JSID_IS_SYMBOL(id)) {
       return false;
     }
     Symbol* sym = JSID_TO_SYMBOL(id);
-    return sym->isWellKnownSymbol() &&
-           sym->code() == PropertySpecNameToSymbolCode(name);
+    return sym->isWellKnownSymbol() && sym->code() == name.symbol();
   }
 
   MOZ_ASSERT(!PropertySpecNameIsDigits(name));
-  return JSID_IS_ATOM(id) && JS_FlatStringEqualsAscii(JSID_TO_ATOM(id), name);
+  return JSID_IS_ATOM(id) &&
+         JS_FlatStringEqualsAscii(JSID_TO_ATOM(id), name.string());
 }
 
 JS_PUBLIC_API bool JS_Stringify(JSContext* cx, MutableHandleValue vp,

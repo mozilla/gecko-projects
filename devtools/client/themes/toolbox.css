@@ -45,7 +45,7 @@
 
 .debug-target-info img {
   -moz-context-properties: fill;
-  fill: var(--theme-toolbar-icon-color);
+  fill: var(--theme-toolbar-color);
 }
 
 /* Toolbox tabbar */
@@ -242,6 +242,10 @@
 
 #toolbox-meatball-menu-dock-window {
   --menuitem-icon-image: url("chrome://devtools/skin/images/dock-undock.svg");
+}
+
+#toolbox-meatball-menu-dock-window:-moz-locale-dir(rtl) .label::before {
+  transform: scaleX(-1);
 }
 
 #toolbox-meatball-menu-splitconsole {

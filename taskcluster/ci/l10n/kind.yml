@@ -1,7 +1,7 @@
 # This Source Code Form is subject to the terms of the Mozilla Public
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
-
+---
 loader: taskgraph.loader.multi_dep:loader
 
 group-by: platform
@@ -82,8 +82,8 @@ job-template:
     run-on-projects: ['all']
     worker-type:
         by-build-platform:
-            default: aws-provisioner-v1/gecko-{level}-b-linux
-            win.*: aws-provisioner-v1/gecko-{level}-b-win2012
+            default: b-linux
+            win.*: b-win2012
     treeherder:
         symbol: L10n
         tier:

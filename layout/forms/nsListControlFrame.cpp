@@ -824,7 +824,7 @@ void nsListControlFrame::CaptureMouseEvents(bool aGrabMouseEvents) {
   if (aGrabMouseEvents) {
     PresShell::SetCapturingContent(mContent, CaptureFlags::IgnoreAllowedState);
   } else {
-    nsIContent* capturingContent = nsIPresShell::GetCapturingContent();
+    nsIContent* capturingContent = PresShell::GetCapturingContent();
 
     bool dropDownIsHidden = false;
     if (IsInDropDownMode()) {
@@ -1606,7 +1606,7 @@ nsresult nsListControlFrame::GetIndexFromDOMEvent(dom::Event* aMouseEvent,
                                                   int32_t& aCurIndex) {
   if (IgnoreMouseEventForSelection(aMouseEvent)) return NS_ERROR_FAILURE;
 
-  if (nsIPresShell::GetCapturingContent() != mContent) {
+  if (PresShell::GetCapturingContent() != mContent) {
     // If we're not capturing, then ignore movement in the border
     nsPoint pt =
         nsLayoutUtils::GetDOMEventCoordinatesRelativeTo(aMouseEvent, this);
@@ -1812,9 +1812,10 @@ void nsListControlFrame::ScrollToFrame(dom::HTMLOptionElement& aOptElement) {
   // otherwise we find the content's frame and scroll to it
   nsIFrame* childFrame = aOptElement.GetPrimaryFrame();
   if (childFrame) {
-    PresShell()->ScrollFrameRectIntoView(
-        childFrame, nsRect(nsPoint(0, 0), childFrame->GetSize()),
-        nsIPresShell::ScrollAxis(), nsIPresShell::ScrollAxis(),
+    RefPtr<mozilla::PresShell> presShell = PresShell();
+    presShell->ScrollFrameRectIntoView(
+        childFrame, nsRect(nsPoint(0, 0), childFrame->GetSize()), ScrollAxis(),
+        ScrollAxis(),
         ScrollFlags::ScrollOverflowHidden |
             ScrollFlags::ScrollFirstAncestorOnly |
             ScrollFlags::IgnoreMarginAndPadding);

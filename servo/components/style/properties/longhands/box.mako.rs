@@ -309,41 +309,6 @@ ${helpers.predefined_type(
     allowed_in_keyframe_block=False,
 )}
 
-% for axis in ["x", "y"]:
-    ${helpers.predefined_type(
-        "scroll-snap-points-" + axis,
-        "ScrollSnapPoint",
-        "computed::ScrollSnapPoint::none()",
-        animation_value_type="discrete",
-        gecko_pref="layout.css.scroll-snap.enabled",
-        products="gecko",
-        spec="Nonstandard (https://www.w3.org/TR/2015/WD-css-snappoints-1-20150326/#scroll-snap-points)",
-    )}
-% endfor
-
-${helpers.predefined_type(
-    "scroll-snap-destination",
-    "Position",
-    "computed::Position::zero()",
-    products="gecko",
-    gecko_pref="layout.css.scroll-snap.enabled",
-    boxed=True,
-    spec="Nonstandard (https://developer.mozilla.org/en-US/docs/Web/CSS/scroll-snap-destination)",
-    animation_value_type="discrete",
-)}
-
-${helpers.predefined_type(
-    "scroll-snap-coordinate",
-    "Position",
-    "computed::Position::zero()",
-    vector=True,
-    products="gecko",
-    gecko_pref="layout.css.scroll-snap.enabled",
-    spec="Nonstandard (https://developer.mozilla.org/en-US/docs/Web/CSS/scroll-snap-destination)",
-    animation_value_type="discrete",
-    allow_empty="NotInitial",
-)}
-
 <% transform_extra_prefixes = "moz:layout.css.prefixes.transforms webkit" %>
 
 ${helpers.predefined_type(
@@ -352,7 +317,6 @@ ${helpers.predefined_type(
     "generics::transform::Transform::none()",
     extra_prefixes=transform_extra_prefixes,
     animation_value_type="ComputedValue",
-    gecko_ffi_name="mSpecifiedTransform",
     flags="CREATES_STACKING_CONTEXT FIXPOS_CB \
            GETCS_NEEDS_LAYOUT_FLUSH CAN_ANIMATE_ON_COMPOSITOR",
     spec="https://drafts.csswg.org/css-transforms/#propdef-transform",
@@ -405,6 +369,19 @@ ${helpers.predefined_type(
     gecko_pref="layout.css.motion-path.enabled",
     flags="CREATES_STACKING_CONTEXT FIXPOS_CB",
     spec="https://drafts.fxtf.org/motion-1/#offset-path-property",
+    servo_restyle_damage="reflow_out_of_flow"
+)}
+
+// Motion Path Module Level 1
+${helpers.predefined_type(
+    "offset-distance",
+    "LengthPercentage",
+    "computed::LengthPercentage::zero()",
+    products="gecko",
+    animation_value_type="ComputedValue",
+    gecko_pref="layout.css.motion-path.enabled",
+    spec="https://drafts.fxtf.org/motion-1/#offset-distance-property",
+    servo_restyle_damage="reflow_out_of_flow"
 )}
 
 // CSSOM View Module
@@ -669,4 +646,17 @@ ${helpers.predefined_type(
     gecko_pref="layout.css.touch_action.enabled",
     animation_value_type="discrete",
     spec="https://compat.spec.whatwg.org/#touch-action",
+)}
+
+// Note that we only implement -webkit-line-clamp as a single, longhand
+// property for now, but the spec defines line-clamp as a shorthand for separate
+// max-lines, block-ellipsis, and continue properties.
+${helpers.predefined_type(
+    "-webkit-line-clamp",
+    "PositiveIntegerOrNone",
+    "Either::Second(None_)",
+    gecko_pref="layout.css.webkit-line-clamp.enabled",
+    animation_value_type="Integer",
+    products="gecko",
+    spec="https://drafts.csswg.org/css-overflow-3/#line-clamp",
 )}

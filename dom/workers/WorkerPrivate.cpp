@@ -29,6 +29,7 @@
 #include "mozilla/dom/MessageEventBinding.h"
 #include "mozilla/dom/MessagePort.h"
 #include "mozilla/dom/MessagePortBinding.h"
+#include "mozilla/dom/nsCSPContext.h"
 #include "mozilla/dom/nsCSPUtils.h"
 #include "mozilla/dom/Performance.h"
 #include "mozilla/dom/PerformanceStorageWorker.h"
@@ -302,12 +303,14 @@ class ModifyBusyCountRunnable final : public WorkerControlRunnable {
 
 class CompileScriptRunnable final : public WorkerDebuggeeRunnable {
   nsString mScriptURL;
+  UniquePtr<SerializedStackHolder> mOriginStack;
 
  public:
   explicit CompileScriptRunnable(WorkerPrivate* aWorkerPrivate,
+                                 UniquePtr<SerializedStackHolder> aOriginStack,
                                  const nsAString& aScriptURL)
       : WorkerDebuggeeRunnable(aWorkerPrivate, WorkerThreadModifyBusyCount),
-        mScriptURL(aScriptURL) {}
+        mScriptURL(aScriptURL), mOriginStack(aOriginStack.release()) {}
 
  private:
   // We can't implement PreRun effectively, because at the point when that would
@@ -331,14 +334,11 @@ class CompileScriptRunnable final : public WorkerDebuggeeRunnable {
     // Let's be sure that it is created before any
     // content loading.
     aWorkerPrivate->EnsurePerformanceStorage();
-
-    if (mozilla::StaticPrefs::dom_performance_enable_scheduler_timing()) {
-      aWorkerPrivate->EnsurePerformanceCounter();
-    }
+    aWorkerPrivate->EnsurePerformanceCounter();
 
     ErrorResult rv;
-    workerinternals::LoadMainScript(aWorkerPrivate, mScriptURL, WorkerScript,
-                                    rv);
+    workerinternals::LoadMainScript(aWorkerPrivate, std::move(mOriginStack),
+                                    mScriptURL, WorkerScript, rv);
     rv.WouldReportJSException();
     // Explicitly ignore NS_BINDING_ABORTED on rv.  Or more precisely, still
     // return false and don't SetWorkerScriptExecutedSuccessfully() in that
@@ -1257,6 +1257,11 @@ void WorkerPrivate::SetCSP(nsIContentSecurityPolicy* aCSP) {
   aCSP->EnsureEventTarget(mMainThreadEventTarget);
 
   mLoadInfo.mCSP = aCSP;
+  mLoadInfo.mCSPInfo = new CSPInfo();
+  nsresult rv = CSPToCSPInfo(mLoadInfo.mCSP, mLoadInfo.mCSPInfo);
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return;
+  }
 }
 
 nsresult WorkerPrivate::SetCSPFromHeaderValues(
@@ -1265,14 +1270,24 @@ nsresult WorkerPrivate::SetCSPFromHeaderValues(
   AssertIsOnMainThread();
   MOZ_DIAGNOSTIC_ASSERT(!mLoadInfo.mCSP);
 
+  if (nsContentUtils::IsSystemPrincipal(mLoadInfo.mPrincipal)) {
+    // After Bug 1496418 we can remove the early return and apply
+    // a CSP even when loading using a SystemPrincipal.
+    return NS_OK;
+  }
+
   NS_ConvertASCIItoUTF16 cspHeaderValue(aCSPHeaderValue);
   NS_ConvertASCIItoUTF16 cspROHeaderValue(aCSPReportOnlyHeaderValue);
 
-  nsCOMPtr<nsIContentSecurityPolicy> csp;
-  nsresult rv = mLoadInfo.mPrincipal->EnsureCSP(nullptr, getter_AddRefs(csp));
-  if (!csp) {
-    return NS_OK;
-  }
+  nsresult rv;
+  nsCOMPtr<nsIContentSecurityPolicy> csp = new nsCSPContext();
+
+  nsCOMPtr<nsIURI> selfURI;
+  mLoadInfo.mPrincipal->GetURI(getter_AddRefs(selfURI));
+
+  rv = csp->SetRequestContextWithPrincipal(mLoadInfo.mPrincipal, selfURI,
+                                           EmptyString(), 0);
+  NS_ENSURE_SUCCESS(rv, rv);
 
   csp->EnsureEventTarget(mMainThreadEventTarget);
 
@@ -1297,7 +1312,19 @@ nsresult WorkerPrivate::SetCSPFromHeaderValues(
   mLoadInfo.mEvalAllowed = evalAllowed;
   mLoadInfo.mReportCSPViolations = reportEvalViolations;
 
+  mLoadInfo.mCSPInfo = new CSPInfo();
+  rv = CSPToCSPInfo(csp, mLoadInfo.mCSPInfo);
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return rv;
+  }
   return NS_OK;
+}
+
+void WorkerPrivate::StoreCSPOnClient() {
+  MOZ_ACCESS_THREAD_BOUND(mWorkerThreadAccessible, data);
+  if (data->mClientSource) {
+    data->mClientSource->SetCspInfo(*mLoadInfo.mCSPInfo.get());
+  }
 }
 
 void WorkerPrivate::SetReferrerPolicyFromHeaderValue(
@@ -1932,15 +1959,15 @@ void WorkerPrivate::SetBaseURI(nsIURI* aBaseURI) {
   nsContentUtils::GetUTFOrigin(aBaseURI, mLocationInfo.mOrigin);
 }
 
-nsresult WorkerPrivate::SetPrincipalsOnMainThread(
+nsresult WorkerPrivate::SetPrincipalsAndCSPOnMainThread(
     nsIPrincipal* aPrincipal, nsIPrincipal* aStoragePrincipal,
-    nsILoadGroup* aLoadGroup) {
-  return mLoadInfo.SetPrincipalsOnMainThread(aPrincipal, aStoragePrincipal,
-                                             aLoadGroup);
+    nsILoadGroup* aLoadGroup, nsIContentSecurityPolicy* aCsp) {
+  return mLoadInfo.SetPrincipalsAndCSPOnMainThread(
+      aPrincipal, aStoragePrincipal, aLoadGroup, aCsp);
 }
 
-nsresult WorkerPrivate::SetPrincipalsFromChannel(nsIChannel* aChannel) {
-  return mLoadInfo.SetPrincipalsFromChannel(aChannel);
+nsresult WorkerPrivate::SetPrincipalsAndCSPFromChannel(nsIChannel* aChannel) {
+  return mLoadInfo.SetPrincipalsAndCSPFromChannel(aChannel);
 }
 
 bool WorkerPrivate::FinalChannelPrincipalIsValid(nsIChannel* aChannel) {
@@ -2148,15 +2175,18 @@ WorkerPrivate::WorkerPrivate(WorkerPrivate* aParent,
 
   // Throttle events to the main thread using a ThrottledEventQueue specific to
   // this tree of worker threads.
-  mMainThreadEventTargetForMessaging = ThrottledEventQueue::Create(target);
+  mMainThreadEventTargetForMessaging =
+      ThrottledEventQueue::Create(target, "Worker queue for messaging");
   if (StaticPrefs::dom_worker_use_medium_high_event_queue()) {
     mMainThreadEventTarget =
         ThrottledEventQueue::Create(GetMainThreadSerialEventTarget(),
+                                    "Worker queue",
                                     nsIRunnablePriority::PRIORITY_MEDIUMHIGH);
   } else {
     mMainThreadEventTarget = mMainThreadEventTargetForMessaging;
   }
-  mMainThreadDebuggeeEventTarget = ThrottledEventQueue::Create(target);
+  mMainThreadDebuggeeEventTarget =
+      ThrottledEventQueue::Create(target, "Worker debuggee queue");
   if (IsParentWindowPaused() || IsFrozen()) {
     MOZ_ALWAYS_SUCCEEDS(mMainThreadDebuggeeEventTarget->SetIsPaused(true));
   }
@@ -2256,8 +2286,13 @@ already_AddRefed<WorkerPrivate> WorkerPrivate::Constructor(
 
   MOZ_DIAGNOSTIC_ASSERT(worker->PrincipalIsValid());
 
+  UniquePtr<SerializedStackHolder> stack;
+  if (worker->IsWatchedByDevtools()) {
+    stack = GetCurrentStackForNetMonitor(aCx);
+  }
+
   RefPtr<CompileScriptRunnable> compiler =
-      new CompileScriptRunnable(worker, aScriptURL);
+      new CompileScriptRunnable(worker, std::move(stack), aScriptURL);
   if (!compiler->Dispatch()) {
     aRv.Throw(NS_ERROR_UNEXPECTED);
     return nullptr;
@@ -2362,6 +2397,7 @@ nsresult WorkerPrivate::GetLoadInfo(JSContext* aCx, nsPIDOMWindowInner* aWindow,
     loadInfo.mServiceWorkersTestingInWindow =
         aParent->ServiceWorkersTestingInWindow();
     loadInfo.mParentController = aParent->GetController();
+    loadInfo.mWatchedByDevtools = aParent->IsWatchedByDevtools();
   } else {
     AssertIsOnMainThread();
 
@@ -2482,6 +2518,11 @@ nsresult WorkerPrivate::GetLoadInfo(JSContext* aCx, nsPIDOMWindowInner* aWindow,
 
       loadInfo.mXHRParamsAllowed = perm == nsIPermissionManager::ALLOW_ACTION;
 
+      nsIDocShell* docShell = globalWindow->GetDocShell();
+      if (docShell) {
+        loadInfo.mWatchedByDevtools = docShell->GetWatchedByDevtools();
+      }
+
       loadInfo.mFromWindow = true;
       loadInfo.mWindowID = globalWindow->WindowID();
       loadInfo.mStorageAccess =
@@ -2564,7 +2605,7 @@ nsresult WorkerPrivate::GetLoadInfo(JSContext* aCx, nsPIDOMWindowInner* aWindow,
                                getter_AddRefs(loadInfo.mResolvedScriptURI));
     NS_ENSURE_SUCCESS(rv, rv);
 
-    rv = loadInfo.SetPrincipalsFromChannel(loadInfo.mChannel);
+    rv = loadInfo.SetPrincipalsAndCSPFromChannel(loadInfo.mChannel);
     NS_ENSURE_SUCCESS(rv, rv);
   }
 
@@ -4053,7 +4094,7 @@ void WorkerPrivate::ReportError(JSContext* aCx,
   JS::RootedObject exnStack(aCx, JS::GetPendingExceptionStack(aCx));
   JS_ClearPendingException(aCx);
 
-  UniquePtr<WorkerErrorReport> report = MakeUnique<WorkerErrorReport>(this);
+  UniquePtr<WorkerErrorReport> report = MakeUnique<WorkerErrorReport>();
   if (aReport) {
     report->AssignErrorReport(aReport);
   } else {
@@ -4065,8 +4106,7 @@ void WorkerPrivate::ReportError(JSContext* aCx,
                                           &stackGlobal);
 
   if (stack) {
-    JS::RootedValue stackValue(aCx, JS::ObjectValue(*stack));
-    report->Write(aCx, stackValue, IgnoreErrors());
+    report->SerializeWorkerStack(aCx, this, stack);
   }
 
   if (report->mMessage.IsEmpty() && aToStringResult) {
@@ -4765,7 +4805,6 @@ void WorkerPrivate::DumpCrashInformation(nsACString& aString) {
 
 void WorkerPrivate::EnsurePerformanceCounter() {
   AssertIsOnWorkerThread();
-  MOZ_ASSERT(mozilla::StaticPrefs::dom_performance_enable_scheduler_timing());
   if (!mPerformanceCounter) {
     nsPrintfCString workerName("Worker:%s",
                                NS_ConvertUTF16toUTF8(mWorkerName).get());

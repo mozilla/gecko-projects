@@ -151,7 +151,7 @@ MODERN_MERCURIAL_VERSION = LooseVersion('4.3.3')
 MODERN_PYTHON_VERSION = LooseVersion('2.7.3')
 
 # Upgrade rust older than this.
-MODERN_RUST_VERSION = LooseVersion('1.32.0')
+MODERN_RUST_VERSION = LooseVersion('1.34.0')
 
 # Upgrade nasm older than this.
 MODERN_NASM_VERSION = LooseVersion('2.14')
@@ -279,6 +279,12 @@ class BaseBootstrapper(object):
         raise NotImplementedError(
             '%s does not yet implement ensure_nasm_packages()'
             % __name__)
+
+    def ensure_sccache_packages(self, state_dir, checkout_root):
+        '''
+        Install sccache.
+        '''
+        pass
 
     def ensure_node_packages(self, state_dir, checkout_root):
         '''

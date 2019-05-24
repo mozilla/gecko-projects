@@ -70,8 +70,8 @@ class nsWindowRoot final : public nsPIWindowRoot {
 
   NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_CLASS(nsWindowRoot)
 
-  virtual void AddBrowser(mozilla::dom::BrowserParent* aBrowser) override;
-  virtual void RemoveBrowser(mozilla::dom::BrowserParent* aBrowser) override;
+  virtual void AddBrowser(nsIRemoteTab* aBrowser) override;
+  virtual void RemoveBrowser(nsIRemoteTab* aBrowser) override;
   virtual void EnumerateBrowsers(BrowserEnumerator aEnumFunc,
                                  void* aArg) override;
 
@@ -92,7 +92,7 @@ class nsWindowRoot final : public nsPIWindowRoot {
 
   void GetEnabledDisabledCommandsForControllers(
       nsIControllers* aControllers,
-      nsTHashtable<nsCharPtrHashKey>& aCommandsHandled,
+      nsTHashtable<nsCStringHashKey>& aCommandsHandled,
       nsTArray<nsCString>& aEnabledCommands,
       nsTArray<nsCString>& aDisabledCommands);
 

@@ -35,6 +35,7 @@ const {
   removeUSBRuntimesObserver,
 } = require("./src/modules/usb-runtimes");
 
+loader.lazyRequireGetter(this, "adb", "devtools/shared/adb/adb", true);
 loader.lazyRequireGetter(this, "adbAddon", "devtools/shared/adb/adb-addon", true);
 loader.lazyRequireGetter(this, "adbProcess", "devtools/shared/adb/adb-process", true);
 
@@ -64,6 +65,21 @@ const AboutDebugging = {
 
     this.actions.createThisFirefoxRuntime();
 
+    // Listen to Network locations updates and retrieve the initial list of locations.
+    addNetworkLocationsObserver(this.onNetworkLocationsUpdated);
+    await this.onNetworkLocationsUpdated();
+
+    // Listen to USB runtime updates and retrieve the initial list of runtimes.
+
+    // If ADB is already started, wait for the initial runtime list to be able to restore
+    // already connected runtimes.
+    const isProcessStarted = await adb.isProcessStarted();
+    const onAdbRuntimesReady = isProcessStarted ? adb.once("runtime-list-ready") : null;
+    addUSBRuntimesObserver(this.onUSBRuntimesUpdated);
+    await onAdbRuntimesReady;
+
+    await this.onUSBRuntimesUpdated();
+
     render(
       Provider(
         {
@@ -81,13 +97,6 @@ const AboutDebugging = {
       ),
       this.mount
     );
-
-    this.onNetworkLocationsUpdated();
-    addNetworkLocationsObserver(this.onNetworkLocationsUpdated);
-
-    // Listen to USB runtime updates and retrieve the initial list of runtimes.
-    this.onUSBRuntimesUpdated();
-    addUSBRuntimesObserver(this.onUSBRuntimesUpdated);
 
     adbAddon.on("update", this.onAdbAddonUpdated);
     this.onAdbAddonUpdated();
@@ -108,12 +117,12 @@ const AboutDebugging = {
   },
 
   onNetworkLocationsUpdated() {
-    this.actions.updateNetworkLocations(getNetworkLocations());
+    return this.actions.updateNetworkLocations(getNetworkLocations());
   },
 
   async onUSBRuntimesUpdated() {
     const runtimes = await getUSBRuntimes();
-    this.actions.updateUSBRuntimes(runtimes);
+    return this.actions.updateUSBRuntimes(runtimes);
   },
 
   async destroy() {

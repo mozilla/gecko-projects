@@ -7421,7 +7421,8 @@ void CodeGenerator::emitWasmCallBase(LWasmCallBase<Defs>* lir) {
       break;
     case wasm::CalleeDesc::BuiltinInstanceMethod:
       masm.wasmCallBuiltinInstanceMethod(desc, mir->instanceArg(),
-                                         callee.builtin());
+                                         callee.builtin(),
+                                         mir->builtinMethodFailureMode());
       switchRealm = false;
       break;
   }
@@ -7528,10 +7529,6 @@ void CodeGenerator::visitWasmStoreSlot(LWasmStoreSlot* ins) {
 void CodeGenerator::visitWasmDerivedPointer(LWasmDerivedPointer* ins) {
   masm.movePtr(ToRegister(ins->base()), ToRegister(ins->output()));
   masm.addPtr(Imm32(int32_t(ins->offset())), ToRegister(ins->output()));
-}
-
-void CodeGenerator::visitWasmLoadRef(LWasmLoadRef* lir) {
-  masm.loadPtr(Address(ToRegister(lir->ptr()), 0), ToRegister(lir->output()));
 }
 
 void CodeGenerator::visitWasmStoreRef(LWasmStoreRef* ins) {
@@ -8903,35 +8900,6 @@ JitCode* JitRealm::generateStringConcatStub(JSContext* cx) {
 #endif
 
   return code;
-}
-
-void JitRuntime::generateMallocStub(MacroAssembler& masm) {
-  const Register regReturn = CallTempReg0;
-  const Register regZone = CallTempReg0;
-  const Register regNBytes = CallTempReg1;
-
-  mallocStubOffset_ = startTrampolineCode(masm);
-
-  AllocatableRegisterSet regs(RegisterSet::Volatile());
-#ifdef JS_USE_LINK_REGISTER
-  masm.pushReturnAddress();
-#endif
-  regs.takeUnchecked(regZone);
-  regs.takeUnchecked(regNBytes);
-  LiveRegisterSet save(regs.asLiveSet());
-  masm.PushRegsInMask(save);
-
-  const Register regTemp = regs.takeAnyGeneral();
-  MOZ_ASSERT(regTemp != regNBytes && regTemp != regZone);
-
-  masm.setupUnalignedABICall(regTemp);
-  masm.passABIArg(regZone);
-  masm.passABIArg(regNBytes);
-  masm.callWithABI(JS_FUNC_TO_DATA_PTR(void*, MallocWrapper));
-  masm.storeCallPointerResult(regReturn);
-
-  masm.PopRegsInMask(save);
-  masm.ret();
 }
 
 void JitRuntime::generateFreeStub(MacroAssembler& masm) {
@@ -13918,6 +13886,7 @@ void CodeGenerator::emitIonToWasmCallBase(LIonToWasmCallBase<NumDefs>* lir) {
       case wasm::ValType::I64:
       case wasm::ValType::Ref:
       case wasm::ValType::AnyRef:
+      case wasm::ValType::FuncRef:
         // Don't forget to trace GC type arguments in TraceJitExitFrames
         // when they're enabled.
         MOZ_CRASH("unexpected argument type when calling from ion to wasm");
@@ -13976,6 +13945,7 @@ void CodeGenerator::emitIonToWasmCallBase(LIonToWasmCallBase<NumDefs>* lir) {
       break;
     case wasm::ExprType::Ref:
     case wasm::ExprType::AnyRef:
+    case wasm::ExprType::FuncRef:
     case wasm::ExprType::I64:
       // Don't forget to trace GC type return value in TraceJitExitFrames
       // when they're enabled.
@@ -14014,11 +13984,6 @@ void CodeGenerator::visitIonToWasmCallV(LIonToWasmCallV* lir) {
 
 void CodeGenerator::visitWasmNullConstant(LWasmNullConstant* lir) {
   masm.xorPtr(ToRegister(lir->output()), ToRegister(lir->output()));
-}
-
-void CodeGenerator::visitIsNullPointer(LIsNullPointer* lir) {
-  masm.cmpPtrSet(Assembler::Equal, ToRegister(lir->value()), ImmWord(0),
-                 ToRegister(lir->output()));
 }
 
 void CodeGenerator::visitWasmCompareAndSelect(LWasmCompareAndSelect* ins) {

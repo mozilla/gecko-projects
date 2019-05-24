@@ -38,8 +38,6 @@
 static const char sPrintSettingsServiceContractID[] =
     "@mozilla.org/gfx/printsettings-service;1";
 
-// Printing Events
-#include "nsPrintPreviewListener.h"
 #include "nsThreadUtils.h"
 
 // Printing
@@ -116,6 +114,7 @@ static const char kPrintingPromptService[] =
 #include "mozilla/dom/HTMLFrameElement.h"
 #include "nsContentList.h"
 #include "nsIChannel.h"
+#include "PrintPreviewUserEventSuppressor.h"
 #include "xpcpublic.h"
 #include "nsVariant.h"
 #include "mozilla/ServoStyleSet.h"
@@ -456,6 +455,80 @@ static void MapContentToWebShells(const UniquePtr<nsPrintObject>& aRootPO,
   }
 }
 
+/**
+ * On platforms that support it, sets the printer name stored in the
+ * nsIPrintSettings to the default printer if a printer name is not already
+ * set.
+ * XXXjwatt: Why is this necessary? Can't the code that reads the printer
+ * name later "just" use the default printer if a name isn't specified? Then
+ * we wouldn't have this inconsistency between platforms and processes.
+ */
+static nsresult EnsureSettingsHasPrinterNameSet(
+    nsIPrintSettings* aPrintSettings) {
+#if defined(XP_MACOSX) || defined(ANDROID)
+  // Mac doesn't support retrieving a printer list.
+  return NS_OK;
+#else
+#  if defined(MOZ_X11)
+  // On Linux, default printer name should be requested on the parent side.
+  // Unless we are in the parent, we ignore this function
+  if (!XRE_IsParentProcess()) {
+    return NS_OK;
+  }
+#  endif
+  NS_ENSURE_ARG_POINTER(aPrintSettings);
+
+  // See if aPrintSettings already has a printer
+  nsString printerName;
+  nsresult rv = aPrintSettings->GetPrinterName(printerName);
+  if (NS_SUCCEEDED(rv) && !printerName.IsEmpty()) {
+    return NS_OK;
+  }
+
+  // aPrintSettings doesn't have a printer set. Try to fetch the default.
+  nsCOMPtr<nsIPrintSettingsService> printSettingsService =
+      do_GetService(sPrintSettingsServiceContractID, &rv);
+  NS_ENSURE_SUCCESS(rv, rv);
+
+  rv = printSettingsService->GetDefaultPrinterName(printerName);
+  if (NS_SUCCEEDED(rv) && !printerName.IsEmpty()) {
+    rv = aPrintSettings->SetPrinterName(printerName);
+  }
+  return rv;
+#endif
+}
+
+static bool DocHasPrintCallbackCanvas(Document* aDoc, void* aData) {
+  if (!aDoc) {
+    return true;
+  }
+  Element* root = aDoc->GetRootElement();
+  if (!root) {
+    return true;
+  }
+  RefPtr<nsContentList> canvases =
+      NS_GetContentList(root, kNameSpaceID_XHTML, NS_LITERAL_STRING("canvas"));
+  uint32_t canvasCount = canvases->Length(true);
+  for (uint32_t i = 0; i < canvasCount; ++i) {
+    HTMLCanvasElement* canvas =
+        HTMLCanvasElement::FromNodeOrNull(canvases->Item(i, false));
+    if (canvas && canvas->GetMozPrintCallback()) {
+      // This subdocument has a print callback. Set result and return false to
+      // stop iteration.
+      *static_cast<bool*>(aData) = true;
+      return false;
+    }
+  }
+  return true;
+}
+
+static bool AnySubdocHasPrintCallbackCanvas(Document* aDoc) {
+  bool result = false;
+  aDoc->EnumerateSubDocuments(&DocHasPrintCallbackCanvas,
+                              static_cast<void*>(&result));
+  return result;
+}
+
 //-------------------------------------------------------
 
 NS_IMPL_ISUPPORTS(nsPrintJob, nsIWebProgressListener, nsISupportsWeakReference,
@@ -492,16 +565,43 @@ void nsPrintJob::DestroyPrintingData() { mPrt = nullptr; }
 
 //--------------------------------------------------------
 nsresult nsPrintJob::Initialize(nsIDocumentViewerPrint* aDocViewerPrint,
-                                nsIDocShell* aContainer, Document* aDocument,
+                                nsIDocShell* aDocShell, Document* aOriginalDoc,
                                 float aScreenDPI) {
   NS_ENSURE_ARG_POINTER(aDocViewerPrint);
-  NS_ENSURE_ARG_POINTER(aContainer);
-  NS_ENSURE_ARG_POINTER(aDocument);
+  NS_ENSURE_ARG_POINTER(aDocShell);
+  NS_ENSURE_ARG_POINTER(aOriginalDoc);
 
   mDocViewerPrint = aDocViewerPrint;
-  mContainer = do_GetWeakReference(aContainer);
-  mDocument = aDocument;
+  mDocShell = do_GetWeakReference(aDocShell);
   mScreenDPI = aScreenDPI;
+
+  // XXX We should not be storing this.  The original document that the user
+  // selected to print can be mutated while print preview is open.  Anything
+  // we need to know about the original document should be checked and stored
+  // here instead.
+  mOriginalDoc = aOriginalDoc;
+
+  // Anything state that we need from aOriginalDoc must be fetched and stored
+  // here, since the document that the user selected to print may mutate
+  // across consecutive PrintPreview() calls.
+
+  Element* root = aOriginalDoc->GetRootElement();
+  mDisallowSelectionPrint =
+      root &&
+      root->HasAttr(kNameSpaceID_None, nsGkAtoms::mozdisallowselectionprint);
+
+  nsCOMPtr<nsIDocShellTreeOwner> owner;
+  aDocShell->GetTreeOwner(getter_AddRefs(owner));
+  nsCOMPtr<nsIWebBrowserChrome> browserChrome = do_GetInterface(owner);
+  if (browserChrome) {
+    browserChrome->IsWindowModal(&mIsForModalWindow);
+  }
+
+  bool hasMozPrintCallback = false;
+  DocHasPrintCallbackCanvas(aOriginalDoc,
+                            static_cast<void*>(&hasMozPrintCallback));
+  mHasMozPrintCallback =
+      hasMozPrintCallback || AnySubdocHasPrintCallbackCanvas(aOriginalDoc);
 
   return NS_OK;
 }
@@ -528,17 +628,16 @@ nsresult nsPrintJob::Cancelled() {
 // some events from being processed while in PrintPreview
 //
 // No return code - if this fails, there isn't much we can do
-void nsPrintJob::InstallPrintPreviewListener() {
-  if (!mPrt->mPPEventListeners) {
-    nsCOMPtr<nsIDocShell> docShell = do_QueryReferent(mContainer);
+void nsPrintJob::SuppressPrintPreviewUserEvents() {
+  if (!mPrt->mPPEventSuppressor) {
+    nsCOMPtr<nsIDocShell> docShell = do_QueryReferent(mDocShell);
     if (!docShell) {
       return;
     }
 
     if (nsPIDOMWindowOuter* win = docShell->GetWindow()) {
       nsCOMPtr<EventTarget> target = win->GetFrameElementInternal();
-      mPrt->mPPEventListeners = new nsPrintPreviewListener(target);
-      mPrt->mPPEventListeners->AddListeners();
+      mPrt->mPPEventSuppressor = new PrintPreviewUserEventSuppressor(target);
     }
   }
 }
@@ -584,14 +683,14 @@ static void DumpLayoutData(const char* aTitleStr, const char* aURLStr,
 nsresult nsPrintJob::CommonPrint(bool aIsPrintPreview,
                                  nsIPrintSettings* aPrintSettings,
                                  nsIWebProgressListener* aWebProgressListener,
-                                 Document* aDoc) {
+                                 Document* aSourceDoc) {
   // Callers must hold a strong reference to |this| to ensure that we stay
   // alive for the duration of this method, because our main owning reference
   // (on nsDocumentViewer) might be cleared during this function (if we cause
   // script to run and it cancels the print operation).
 
   nsresult rv = DoCommonPrint(aIsPrintPreview, aPrintSettings,
-                              aWebProgressListener, aDoc);
+                              aWebProgressListener, aSourceDoc);
   if (NS_FAILED(rv)) {
     if (aIsPrintPreview) {
       mIsCreatingPrintPreview = false;
@@ -612,7 +711,7 @@ nsresult nsPrintJob::CommonPrint(bool aIsPrintPreview,
 nsresult nsPrintJob::DoCommonPrint(bool aIsPrintPreview,
                                    nsIPrintSettings* aPrintSettings,
                                    nsIWebProgressListener* aWebProgressListener,
-                                   Document* aDoc) {
+                                   Document* aSourceDoc) {
   nsresult rv;
 
   if (aIsPrintPreview) {
@@ -642,7 +741,7 @@ nsresult nsPrintJob::DoCommonPrint(bool aIsPrintPreview,
     NS_ENSURE_SUCCESS(rv, rv);
   }
 
-  rv = CheckForPrinters(printData->mPrintSettings);
+  rv = EnsureSettingsHasPrinterNameSet(printData->mPrintSettings);
   NS_ENSURE_SUCCESS(rv, rv);
 
   printData->mPrintSettings->SetIsCancelled(false);
@@ -697,13 +796,13 @@ nsresult nsPrintJob::DoCommonPrint(bool aIsPrintPreview,
   bool isSelection = IsThereARangeSelection(printData->mCurrentFocusWin);
 
   // Get the docshell for this documentviewer
-  nsCOMPtr<nsIDocShell> webContainer(do_QueryReferent(mContainer, &rv));
+  nsCOMPtr<nsIDocShell> docShell(do_QueryReferent(mDocShell, &rv));
   NS_ENSURE_SUCCESS(rv, rv);
 
   {
     if (aIsPrintPreview) {
       nsCOMPtr<nsIContentViewer> viewer;
-      webContainer->GetContentViewer(getter_AddRefs(viewer));
+      docShell->GetContentViewer(getter_AddRefs(viewer));
       if (viewer && viewer->GetDocument() &&
           viewer->GetDocument()->IsShowing()) {
         viewer->GetDocument()->OnPageHide(false, nullptr);
@@ -712,14 +811,14 @@ nsresult nsPrintJob::DoCommonPrint(bool aIsPrintPreview,
 
     nsAutoScriptBlocker scriptBlocker;
     printData->mPrintObject = MakeUnique<nsPrintObject>();
-    rv = printData->mPrintObject->Init(webContainer, aDoc, aIsPrintPreview);
+    rv = printData->mPrintObject->Init(docShell, aSourceDoc, aIsPrintPreview);
     NS_ENSURE_SUCCESS(rv, rv);
 
     NS_ENSURE_TRUE(
         printData->mPrintDocList.AppendElement(printData->mPrintObject.get()),
         NS_ERROR_OUT_OF_MEMORY);
 
-    printData->mIsParentAFrameSet = IsParentAFrameSet(webContainer);
+    printData->mIsParentAFrameSet = IsParentAFrameSet(docShell);
     printData->mPrintObject->mFrameType =
         printData->mIsParentAFrameSet ? eFrameSet : eDoc;
 
@@ -750,7 +849,7 @@ nsresult nsPrintJob::DoCommonPrint(bool aIsPrintPreview,
   MapContentToWebShells(printData->mPrintObject, printData->mPrintObject);
 
   printData->mIsIFrameSelected = IsThereAnIFrameSelected(
-      webContainer, printData->mCurrentFocusWin, printData->mIsParentAFrameSet);
+      docShell, printData->mCurrentFocusWin, printData->mIsParentAFrameSet);
 
   // Setup print options for UI
   if (printData->mIsParentAFrameSet) {
@@ -806,7 +905,7 @@ nsresult nsPrintJob::DoCommonPrint(bool aIsPrintPreview,
         nsPIDOMWindowOuter* domWin = nullptr;
         // We leave domWin as nullptr to indicate a call for print preview.
         if (!aIsPrintPreview) {
-          domWin = mDocument->GetWindow();
+          domWin = mOriginalDoc->GetWindow();
           NS_ENSURE_TRUE(domWin, NS_ERROR_FAILURE);
         }
 
@@ -964,7 +1063,7 @@ nsresult nsPrintJob::DoCommonPrint(bool aIsPrintPreview,
     TurnScriptingOn(false);
 
     if (!notifyOnInit) {
-      InstallPrintPreviewListener();
+      SuppressPrintPreviewUserEvents();
       rv = InitPrintDocConstruction(false);
     } else {
       rv = NS_OK;
@@ -987,26 +1086,25 @@ nsresult nsPrintJob::DoCommonPrint(bool aIsPrintPreview,
 }
 
 //---------------------------------------------------------------------------------
-NS_IMETHODIMP
-nsPrintJob::Print(nsIPrintSettings* aPrintSettings,
-                  nsIWebProgressListener* aWebProgressListener) {
+nsresult nsPrintJob::Print(Document* aSourceDoc,
+                           nsIPrintSettings* aPrintSettings,
+                           nsIWebProgressListener* aWebProgressListener) {
   // If we have a print preview document, use that instead of the original
   // mDocument. That way animated images etc. get printed using the same state
   // as in print preview.
   Document* doc = mPrtPreview && mPrtPreview->mPrintObject
-                      ? mPrtPreview->mPrintObject->mDocument
-                      : mDocument;
+                      ? mPrtPreview->mPrintObject->mDocument.get()
+                      : aSourceDoc;
 
   return CommonPrint(false, aPrintSettings, aWebProgressListener, doc);
 }
 
-NS_IMETHODIMP
-nsPrintJob::PrintPreview(nsIPrintSettings* aPrintSettings,
-                         mozIDOMWindowProxy* aChildDOMWin,
-                         nsIWebProgressListener* aWebProgressListener) {
+nsresult nsPrintJob::PrintPreview(
+    Document* aSourceDoc, nsIPrintSettings* aPrintSettings,
+    nsIWebProgressListener* aWebProgressListener) {
   // Get the DocShell and see if it is busy
   // (We can't Print Preview this document if it is still busy)
-  nsCOMPtr<nsIDocShell> docShell(do_QueryReferent(mContainer));
+  nsCOMPtr<nsIDocShell> docShell(do_QueryReferent(mDocShell));
   NS_ENSURE_STATE(docShell);
 
   auto busyFlags = docShell->GetBusyFlags();
@@ -1016,87 +1114,68 @@ nsPrintJob::PrintPreview(nsIPrintSettings* aPrintSettings,
     return NS_ERROR_FAILURE;
   }
 
-  auto* window = nsPIDOMWindowOuter::From(aChildDOMWin);
-  NS_ENSURE_STATE(window);
-  nsCOMPtr<Document> doc = window->GetDoc();
-  NS_ENSURE_STATE(doc);
-
   // Document is not busy -- go ahead with the Print Preview
-  return CommonPrint(true, aPrintSettings, aWebProgressListener, doc);
+  return CommonPrint(true, aPrintSettings, aWebProgressListener, aSourceDoc);
 }
 
 //----------------------------------------------------------------------------------
-NS_IMETHODIMP
-nsPrintJob::GetIsFramesetDocument(bool* aIsFramesetDocument) {
-  nsCOMPtr<nsIDocShell> webContainer(do_QueryReferent(mContainer));
-  *aIsFramesetDocument = IsParentAFrameSet(webContainer);
-  return NS_OK;
+bool nsPrintJob::IsFramesetDocument() const {
+  nsCOMPtr<nsIDocShell> docShell(do_QueryReferent(mDocShell));
+  return IsParentAFrameSet(docShell);
 }
 
 //----------------------------------------------------------------------------------
-NS_IMETHODIMP
-nsPrintJob::GetIsIFrameSelected(bool* aIsIFrameSelected) {
-  *aIsIFrameSelected = false;
-
+bool nsPrintJob::IsIFrameSelected() {
   // Get the docshell for this documentviewer
-  nsCOMPtr<nsIDocShell> webContainer(do_QueryReferent(mContainer));
+  nsCOMPtr<nsIDocShell> docShell(do_QueryReferent(mDocShell));
   // Get the currently focused window
   nsCOMPtr<nsPIDOMWindowOuter> currentFocusWin = FindFocusedDOMWindow();
-  if (currentFocusWin && webContainer) {
+  if (currentFocusWin && docShell) {
     // Get whether the doc contains a frameset
     // Also, check to see if the currently focus docshell
     // is a child of this docshell
     bool isParentFrameSet;
-    *aIsIFrameSelected = IsThereAnIFrameSelected(webContainer, currentFocusWin,
-                                                 isParentFrameSet);
+    return IsThereAnIFrameSelected(docShell, currentFocusWin, isParentFrameSet);
   }
-  return NS_OK;
+  return false;
 }
 
 //----------------------------------------------------------------------------------
-NS_IMETHODIMP
-nsPrintJob::GetIsRangeSelection(bool* aIsRangeSelection) {
+bool nsPrintJob::IsRangeSelection() {
   // Get the currently focused window
   nsCOMPtr<nsPIDOMWindowOuter> currentFocusWin = FindFocusedDOMWindow();
-  *aIsRangeSelection = IsThereARangeSelection(currentFocusWin);
-  return NS_OK;
+  return IsThereARangeSelection(currentFocusWin);
 }
 
 //----------------------------------------------------------------------------------
-NS_IMETHODIMP
-nsPrintJob::GetIsFramesetFrameSelected(bool* aIsFramesetFrameSelected) {
+bool nsPrintJob::IsFramesetFrameSelected() const {
   // Get the currently focused window
   nsCOMPtr<nsPIDOMWindowOuter> currentFocusWin = FindFocusedDOMWindow();
-  *aIsFramesetFrameSelected = currentFocusWin != nullptr;
-  return NS_OK;
+  return currentFocusWin != nullptr;
 }
 
 //----------------------------------------------------------------------------------
-NS_IMETHODIMP
-nsPrintJob::GetPrintPreviewNumPages(int32_t* aPrintPreviewNumPages) {
-  NS_ENSURE_ARG_POINTER(aPrintPreviewNumPages);
-
-  nsIFrame* seqFrame = nullptr;
-  *aPrintPreviewNumPages = 0;
-
+int32_t nsPrintJob::GetPrintPreviewNumPages() {
   // When calling this function, the FinishPrintPreview() function might not
   // been called as there are still some
   RefPtr<nsPrintData> printData = mPrtPreview ? mPrtPreview : mPrt;
   if (NS_WARN_IF(!printData)) {
-    return NS_ERROR_FAILURE;
+    return 0;
   }
-  nsresult rv = GetSeqFrameAndCountPagesInternal(
-      printData->mPrintObject, seqFrame, *aPrintPreviewNumPages);
+  nsIFrame* seqFrame = nullptr;
+  int32_t numPages = 0;
+  nsresult rv = GetSeqFrameAndCountPagesInternal(printData->mPrintObject,
+                                                 seqFrame, numPages);
   if (NS_WARN_IF(NS_FAILED(rv))) {
-    return NS_ERROR_FAILURE;
+    return 0;
   }
-  return NS_OK;
+  return numPages;
 }
 
 //----------------------------------------------------------------------------------
 // Enumerate all the documents for their titles
-NS_IMETHODIMP
-nsPrintJob::EnumerateDocumentNames(uint32_t* aCount, char16_t*** aResult) {
+nsresult nsPrintJob::EnumerateDocumentNames(uint32_t* aCount,
+                                            char16_t*** aResult) {
   NS_ENSURE_ARG(aCount);
   NS_ENSURE_ARG_POINTER(aResult);
 
@@ -1140,80 +1219,19 @@ nsresult nsPrintJob::GetGlobalPrintSettings(
 }
 
 //----------------------------------------------------------------------------------
-NS_IMETHODIMP
-nsPrintJob::GetDoingPrint(bool* aDoingPrint) {
-  NS_ENSURE_ARG_POINTER(aDoingPrint);
-  *aDoingPrint = mIsDoingPrinting;
-  return NS_OK;
-}
-
-//----------------------------------------------------------------------------------
-NS_IMETHODIMP
-nsPrintJob::GetDoingPrintPreview(bool* aDoingPrintPreview) {
-  NS_ENSURE_ARG_POINTER(aDoingPrintPreview);
-  *aDoingPrintPreview = mIsDoingPrintPreview;
-  return NS_OK;
-}
-
-//----------------------------------------------------------------------------------
-NS_IMETHODIMP
-nsPrintJob::GetCurrentPrintSettings(nsIPrintSettings** aCurrentPrintSettings) {
-  NS_ENSURE_ARG_POINTER(aCurrentPrintSettings);
-
+already_AddRefed<nsIPrintSettings> nsPrintJob::GetCurrentPrintSettings() {
   if (mPrt) {
-    *aCurrentPrintSettings = mPrt->mPrintSettings;
-
-  } else if (mPrtPreview) {
-    *aCurrentPrintSettings = mPrtPreview->mPrintSettings;
-
-  } else {
-    *aCurrentPrintSettings = nullptr;
+    return do_AddRef(mPrt->mPrintSettings);
   }
-  NS_IF_ADDREF(*aCurrentPrintSettings);
-  return NS_OK;
+  if (mPrtPreview) {
+    return do_AddRef(mPrtPreview->mPrintSettings);
+  }
+  return nullptr;
 }
 
 //-----------------------------------------------------------------
 //-- Section: Pre-Reflow Methods
 //-----------------------------------------------------------------
-
-//---------------------------------------------------------------------
-// This method checks to see if there is at least one printer defined
-// and if so, it sets the first printer in the list as the default name
-// in the PrintSettings which is then used for Printer Preview
-nsresult nsPrintJob::CheckForPrinters(nsIPrintSettings* aPrintSettings) {
-#if defined(XP_MACOSX) || defined(ANDROID)
-  // Mac doesn't support retrieving a printer list.
-  return NS_OK;
-#else
-#  if defined(MOZ_X11)
-  // On Linux, default printer name should be requested on the parent side.
-  // Unless we are in the parent, we ignore this function
-  if (!XRE_IsParentProcess()) {
-    return NS_OK;
-  }
-#  endif
-  NS_ENSURE_ARG_POINTER(aPrintSettings);
-
-  // See if aPrintSettings already has a printer
-  nsString printerName;
-  nsresult rv = aPrintSettings->GetPrinterName(printerName);
-  if (NS_SUCCEEDED(rv) && !printerName.IsEmpty()) {
-    return NS_OK;
-  }
-
-  // aPrintSettings doesn't have a printer set. Try to fetch the default.
-  nsCOMPtr<nsIPrintSettingsService> printSettingsService =
-      do_GetService(sPrintSettingsServiceContractID, &rv);
-  NS_ENSURE_SUCCESS(rv, rv);
-
-  rv = printSettingsService->GetDefaultPrinterName(printerName);
-  if (NS_SUCCEEDED(rv) && !printerName.IsEmpty()) {
-    rv = aPrintSettings->SetPrinterName(printerName);
-  }
-  return rv;
-#endif
-}
 
 //----------------------------------------------------------------------
 // Set up to use the "pluggable" Print Progress Dialog
@@ -1250,27 +1268,19 @@ void nsPrintJob::ShowPrintProgress(bool aIsForPrinting, bool& aDoNotify) {
     nsCOMPtr<nsIPrintingPromptService> printPromptService(
         do_GetService(kPrintingPromptService));
     if (printPromptService) {
-      nsPIDOMWindowOuter* domWin = mDocument->GetWindow();
-      if (!domWin) return;
-
-      nsCOMPtr<nsIDocShell> docShell = domWin->GetDocShell();
-      if (!docShell) return;
-      nsCOMPtr<nsIDocShellTreeOwner> owner;
-      docShell->GetTreeOwner(getter_AddRefs(owner));
-      nsCOMPtr<nsIWebBrowserChrome> browserChrome = do_GetInterface(owner);
-      if (!browserChrome) return;
-      bool isModal = true;
-      browserChrome->IsWindowModal(&isModal);
-      if (isModal) {
+      if (mIsForModalWindow) {
         // Showing a print progress dialog when printing a modal window
         // isn't supported. See bug 301560.
         return;
       }
 
+      nsPIDOMWindowOuter* domWin = mOriginalDoc->GetWindow();
+      if (!domWin) return;
+
       nsCOMPtr<nsIWebProgressListener> printProgressListener;
 
       nsCOMPtr<nsIWebBrowserPrint> wbp(do_QueryInterface(mDocViewerPrint));
-      nsresult rv = printPromptService->ShowProgress(
+      nsresult rv = printPromptService->ShowPrintProgressDialog(
           domWin, wbp, printData->mPrintSettings, this, aIsForPrinting,
           getter_AddRefs(printProgressListener),
           getter_AddRefs(printData->mPrintProgressParams), &aDoNotify);
@@ -1281,8 +1291,8 @@ void nsPrintJob::ShowPrintProgress(bool aIsForPrinting, bool& aDoNotify) {
         }
 
         if (printData->mPrintProgressParams) {
-          SetDocAndURLIntoProgress(printData->mPrintObject,
-                                   printData->mPrintProgressParams);
+          SetURLAndTitleOnProgressParams(printData->mPrintObject,
+                                         printData->mPrintProgressParams);
         }
       }
     }
@@ -1925,12 +1935,12 @@ nsresult nsPrintJob::InitPrintDocConstruction(bool aHandleError) {
   FirePrintPreviewUpdateEvent();
 
   if (mLoadCounter == 0) {
-    AfterNetworkPrint(aHandleError);
+    ResumePrintAfterResourcesLoaded(aHandleError);
   }
   return rv;
 }
 
-nsresult nsPrintJob::AfterNetworkPrint(bool aHandleError) {
+nsresult nsPrintJob::ResumePrintAfterResourcesLoaded(bool aCleanupOnError) {
   // If Destroy() has already been called, mPtr is nullptr.  Then, the instance
   // needs to do nothing anymore in this method.
   // Note: it shouldn't be possible for mPrt->mPrintObject to be null; we
@@ -1956,9 +1966,9 @@ nsresult nsPrintJob::AfterNetworkPrint(bool aHandleError) {
   }
 
   /* cleaup on failure + notify user */
-  if (aHandleError && NS_FAILED(rv)) {
+  if (aCleanupOnError && NS_FAILED(rv)) {
     NS_WARNING_ASSERTION(rv == NS_ERROR_ABORT,
-                         "nsPrintJob::AfterNetworkPrint failed");
+                         "nsPrintJob::ResumePrintAfterResourcesLoaded failed");
     CleanupOnFailure(rv, !mIsDoingPrinting);
   }
 
@@ -1985,7 +1995,7 @@ nsPrintJob::OnStateChange(nsIWebProgress* aWebProgress, nsIRequest* aRequest,
     // If all resources are loaded, then do a small timeout and if there
     // are still no new requests, then another reflow.
     if (mLoadCounter == 0) {
-      AfterNetworkPrint(true);
+      ResumePrintAfterResourcesLoaded(/* aCleanupOnError */ true);
     }
   }
   return NS_OK;
@@ -2524,7 +2534,7 @@ nsresult nsPrintJob::DoPrint(const UniquePtr<nsPrintObject>& aPO) {
   RefPtr<nsPrintData> printData = mPrt;
 
   if (printData->mPrintProgressParams) {
-    SetDocAndURLIntoProgress(aPO, printData->mPrintProgressParams);
+    SetURLAndTitleOnProgressParams(aPO, printData->mPrintProgressParams);
   }
 
   {
@@ -2576,8 +2586,8 @@ nsresult nsPrintJob::DoPrint(const UniquePtr<nsPrintObject>& aPO) {
 }
 
 //---------------------------------------------------------------------
-void nsPrintJob::SetDocAndURLIntoProgress(const UniquePtr<nsPrintObject>& aPO,
-                                          nsIPrintProgressParams* aParams) {
+void nsPrintJob::SetURLAndTitleOnProgressParams(
+    const UniquePtr<nsPrintObject>& aPO, nsIPrintProgressParams* aParams) {
   NS_ASSERTION(aPO, "Must have valid nsPrintObject");
   NS_ASSERTION(aParams, "Must have valid nsIPrintProgressParams");
 
@@ -2613,53 +2623,6 @@ void nsPrintJob::EllipseLongString(nsAString& aStr, const uint32_t aLen,
       aStr.AppendLiteral("...");
     }
   }
-}
-
-static bool DocHasPrintCallbackCanvas(Document* aDoc, void* aData) {
-  if (!aDoc) {
-    return true;
-  }
-  Element* root = aDoc->GetRootElement();
-  if (!root) {
-    return true;
-  }
-  RefPtr<nsContentList> canvases =
-      NS_GetContentList(root, kNameSpaceID_XHTML, NS_LITERAL_STRING("canvas"));
-  uint32_t canvasCount = canvases->Length(true);
-  for (uint32_t i = 0; i < canvasCount; ++i) {
-    HTMLCanvasElement* canvas =
-        HTMLCanvasElement::FromNodeOrNull(canvases->Item(i, false));
-    if (canvas && canvas->GetMozPrintCallback()) {
-      // This subdocument has a print callback. Set result and return false to
-      // stop iteration.
-      *static_cast<bool*>(aData) = true;
-      return false;
-    }
-  }
-  return true;
-}
-
-static bool DocHasPrintCallbackCanvas(Document* aDoc) {
-  bool result = false;
-  aDoc->EnumerateSubDocuments(&DocHasPrintCallbackCanvas,
-                              static_cast<void*>(&result));
-  return result;
-}
-
-/**
- * Checks to see if the document this print engine is associated with has any
- * canvases that have a mozPrintCallback.
- * https://developer.mozilla.org/en-US/docs/Web/API/HTMLCanvasElement#Properties
- */
-bool nsPrintJob::HasPrintCallbackCanvas() {
-  if (!mDocument) {
-    return false;
-  }
-  // First check this mDocument.
-  bool result = false;
-  DocHasPrintCallbackCanvas(mDocument, static_cast<void*>(&result));
-  // Also check the sub documents.
-  return result || DocHasPrintCallbackCanvas(mDocument);
 }
 
 //-------------------------------------------------------
@@ -2854,11 +2817,11 @@ void nsPrintJob::CleanupDocTitleArray(char16_t**& aArray, int32_t& aCount) {
 /** ---------------------------------------------------
  *  Get the Focused Frame for a documentviewer
  */
-already_AddRefed<nsPIDOMWindowOuter> nsPrintJob::FindFocusedDOMWindow() {
+already_AddRefed<nsPIDOMWindowOuter> nsPrintJob::FindFocusedDOMWindow() const {
   nsIFocusManager* fm = nsFocusManager::GetFocusManager();
   NS_ENSURE_TRUE(fm, nullptr);
 
-  nsPIDOMWindowOuter* window = mDocument->GetWindow();
+  nsPIDOMWindowOuter* window = mOriginalDoc->GetWindow();
   NS_ENSURE_TRUE(window, nullptr);
 
   nsCOMPtr<nsPIDOMWindowOuter> rootWindow = window->GetPrivateRoot();
@@ -2878,7 +2841,7 @@ already_AddRefed<nsPIDOMWindowOuter> nsPrintJob::FindFocusedDOMWindow() {
 }
 
 //---------------------------------------------------------------------
-bool nsPrintJob::IsWindowsInOurSubTree(nsPIDOMWindowOuter* window) {
+bool nsPrintJob::IsWindowsInOurSubTree(nsPIDOMWindowOuter* window) const {
   bool found = false;
 
   // now check to make sure it is in "our" tree of docshells
@@ -2887,7 +2850,7 @@ bool nsPrintJob::IsWindowsInOurSubTree(nsPIDOMWindowOuter* window) {
 
     if (docShell) {
       // get this DocViewer docshell
-      nsCOMPtr<nsIDocShell> thisDVDocShell(do_QueryReferent(mContainer));
+      nsCOMPtr<nsIDocShell> thisDVDocShell(do_QueryReferent(mDocShell));
       while (!found) {
         if (docShell) {
           if (docShell == thisDVDocShell) {
@@ -3205,7 +3168,6 @@ void nsPrintJob::TurnScriptingOn(bool aDoTurnOn) {
     return;
   }
 
-  NS_ASSERTION(mDocument, "We MUST have a document.");
   // First, get the script global object from the document...
 
   for (uint32_t i = 0; i < printData->mPrintDocList.Length(); i++) {
@@ -3219,15 +3181,16 @@ void nsPrintJob::TurnScriptingOn(bool aDoTurnOn) {
 
     if (nsCOMPtr<nsPIDOMWindowInner> window = doc->GetInnerWindow()) {
       nsCOMPtr<nsIGlobalObject> go = window->AsGlobal();
-      NS_WARNING_ASSERTION(go->GetGlobalJSObject(), "Can't get global");
+      NS_WARNING_ASSERTION(go->HasJSGlobal(), "Window has no global");
       nsresult propThere = NS_PROPTABLE_PROP_NOT_THERE;
       doc->GetProperty(nsGkAtoms::scriptEnabledBeforePrintOrPreview,
                        &propThere);
       if (aDoTurnOn) {
         if (propThere != NS_PROPTABLE_PROP_NOT_THERE) {
           doc->DeleteProperty(nsGkAtoms::scriptEnabledBeforePrintOrPreview);
-          if (go->GetGlobalJSObject()) {
-            xpc::Scriptability::Get(go->GetGlobalJSObject()).Unblock();
+          if (go->HasJSGlobal()) {
+            xpc::Scriptability::Get(go->GetGlobalJSObjectPreserveColor())
+                .Unblock();
           }
           window->Resume();
         }
@@ -3240,8 +3203,9 @@ void nsPrintJob::TurnScriptingOn(bool aDoTurnOn) {
           // that layout code running in print preview doesn't get confused.
           doc->SetProperty(nsGkAtoms::scriptEnabledBeforePrintOrPreview,
                            NS_INT32_TO_PTR(doc->IsScriptEnabled()));
-          if (go && go->GetGlobalJSObject()) {
-            xpc::Scriptability::Get(go->GetGlobalJSObject()).Block();
+          if (go && go->HasJSGlobal()) {
+            xpc::Scriptability::Get(go->GetGlobalJSObjectPreserveColor())
+                .Block();
           }
           window->Suspend();
         }

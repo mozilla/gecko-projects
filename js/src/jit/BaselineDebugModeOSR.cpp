@@ -168,8 +168,16 @@ static bool CollectJitStackScripts(JSContext* cx,
 
         BaselineFrame* baselineFrame = frame.baselineFrame();
 
-        if (BaselineDebugModeOSRInfo* info =
-                baselineFrame->getDebugModeOSRInfo()) {
+        if (baselineFrame->runningInInterpreter()) {
+          // Baseline Interpreter frames for scripts that have a BaselineScript
+          // or IonScript don't need to be patched but they do need to be
+          // invalidated and recompiled. See also CollectInterpreterStackScripts
+          // for C++ interpreter frames.
+          if (!entries.append(DebugModeOSREntry(script))) {
+            return false;
+          }
+        } else if (BaselineDebugModeOSRInfo* info =
+                       baselineFrame->getDebugModeOSRInfo()) {
           // If patching a previously patched yet unpopped frame, we can
           // use the BaselineDebugModeOSRInfo on the frame directly to
           // patch. Indeed, we cannot use frame.resumePCinCurrentFrame(), as
@@ -361,6 +369,14 @@ static void PatchBaselineFramesForDebugMode(
         DebugModeOSREntry& entry = entries[entryIndex];
 
         if (!entry.recompiled()) {
+          entryIndex++;
+          break;
+        }
+
+        BaselineFrame* baselineFrame = frame.baselineFrame();
+        if (baselineFrame->runningInInterpreter()) {
+          // We recompiled the script's BaselineScript but Baseline Interpreter
+          // frames don't need to be patched.
           entryIndex++;
           break;
         }
@@ -599,7 +615,7 @@ static bool RecompileBaselineScriptForDebugMode(
           script->filename(), script->lineno(), script->column(),
           observing ? "DEBUGGING" : "NORMAL EXECUTION");
 
-  AutoKeepTypeScripts keepTypes(cx);
+  AutoKeepJitScripts keepJitScripts(cx);
   script->setBaselineScript(cx->runtime(), nullptr);
 
   MethodStatus status =

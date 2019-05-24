@@ -15,6 +15,7 @@
  * https://wicg.github.io/feature-policy/#policy
  */
 
+interface ContentSecurityPolicy;
 interface Principal;
 interface WindowProxy;
 interface nsISupports;
@@ -544,6 +545,14 @@ partial interface Document {
   [Func="IsChromeOrXBL"] readonly attribute boolean inlineScriptAllowedByCSP;
 };
 
+// Allows frontend code to query a CSP which needs to be passed for a
+// new load into docshell. Further, allows to query the CSP in JSON
+// format for testing purposes.
+partial interface Document {
+  [ChromeOnly] readonly attribute ContentSecurityPolicy? csp;
+  [ChromeOnly] readonly attribute DOMString cspJSON;
+};
+
 // For more information on Flash classification, see
 // toolkit/components/url-classifier/flash-block-lists.rst
 enum FlashClassification {
@@ -584,4 +593,8 @@ partial interface Document {
   // is not propegated to descendant Documents upon settting.
   [ChromeOnly]
   attribute boolean inRDMPane;
+  // Extension to give chrome JS the ability to set the window screen
+  // orientation while in RDM.
+  [ChromeOnly]
+  void setRDMPaneOrientation(OrientationType type, float rotationAngle);
 };

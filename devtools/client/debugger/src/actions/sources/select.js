@@ -13,8 +13,8 @@ import { isOriginalId } from "devtools-source-map";
 
 import { getSourceFromId, getSourceWithContent } from "../../reducers/sources";
 import { getSourcesForTabs } from "../../reducers/tabs";
-import { setOutOfScopeLocations } from "../ast";
 import { setSymbols } from "./symbols";
+import { setInScopeLines } from "../ast";
 import { closeActiveSearch, updateActiveFileSearch } from "../ui";
 import { isFulfilled } from "../../utils/async-value";
 import { togglePrettyPrint } from "./prettyPrint";
@@ -32,14 +32,14 @@ import {
   getPrettySource,
   getActiveSearch,
   getSelectedLocation,
-  getSelectedSource
+  getSelectedSource,
 } from "../../selectors";
 
 import type {
   SourceLocation,
   PartialPosition,
   Source,
-  Context
+  Context,
 } from "../../types";
 import type { ThunkArgs } from "../types";
 
@@ -51,7 +51,7 @@ export const setSelectedLocation = (
   type: "SET_SELECTED_LOCATION",
   cx,
   source,
-  location
+  location,
 });
 
 export const setPendingSelectedLocation = (
@@ -62,12 +62,12 @@ export const setPendingSelectedLocation = (
   type: "SET_PENDING_SELECTED_LOCATION",
   cx,
   url: url,
-  line: options.location ? options.location.line : null
+  line: options.location ? options.location.line : null,
 });
 
 export const clearSelectedLocation = (cx: Context) => ({
   type: "CLEAR_SELECTED_LOCATION",
-  cx
+  cx,
 });
 
 /**
@@ -189,7 +189,7 @@ export function selectLocation(
     }
 
     dispatch(setSymbols({ cx, source: loadedSource }));
-    dispatch(setOutOfScopeLocations(cx));
+    dispatch(setInScopeLines(cx));
 
     // If a new source is selected update the file search results
     const newSource = getSelectedSource(getState());

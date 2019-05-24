@@ -22,6 +22,7 @@
 #include "mozilla/gfx/gfxVars.h"
 #include "mozilla/gfx/PathHelpers.h"
 #include "mozilla/PresShell.h"
+#include "mozilla/PresShellInlines.h"
 #include "mozilla/Sprintf.h"
 #include "mozilla/StaticPrefs.h"
 
@@ -44,7 +45,6 @@
 #include "nsTableWrapperFrame.h"
 #include "nsView.h"
 #include "nsViewManager.h"
-#include "nsIPresShellInlines.h"
 #include "nsIScrollableFrame.h"
 #include "nsPresContext.h"
 #include "nsPresContextInlines.h"
@@ -393,6 +393,10 @@ bool nsIFrame::IsVisibleConsideringAncestors(uint32_t aFlags) const {
     return false;
   }
 
+  if (PresShell()->IsUnderHiddenEmbedderElement()) {
+    return false;
+  }
+
   const nsIFrame* frame = this;
   while (frame) {
     nsView* view = frame->GetView();
@@ -415,8 +419,6 @@ bool nsIFrame::IsVisibleConsideringAncestors(uint32_t aFlags) const {
           !frame->PresContext()->IsChrome()) {
         break;
       }
-
-      if (!parent->StyleVisibility()->IsVisible()) return false;
 
       frame = parent;
     }
@@ -1212,8 +1214,10 @@ void nsFrame::DidSetComputedStyle(ComputedStyle* aOldComputedStyle) {
         needAnchorSuppression = true;
       }
 
+      // TODO(emilio): Should this do something about other transform-like
+      // properties?
       if (oldDisp->mPosition != StyleDisplay()->mPosition ||
-          oldDisp->TransformChanged(*StyleDisplay())) {
+          oldDisp->mTransform != StyleDisplay()->mTransform) {
         needAnchorSuppression = true;
       }
     }
@@ -1638,7 +1642,7 @@ bool nsIFrame::HasOpacityInternal(float aThreshold,
                                   EffectSet* aEffectSet) const {
   MOZ_ASSERT(0.0 <= aThreshold && aThreshold <= 1.0, "Invalid argument");
   if (aStyleEffects->mOpacity < aThreshold ||
-      (aStyleDisplay->mWillChangeBitField & StyleWillChangeBits_OPACITY)) {
+      (aStyleDisplay->mWillChange.bits & StyleWillChangeBits_OPACITY)) {
     return true;
   }
 
@@ -2134,7 +2138,7 @@ void nsIFrame::OnVisibilityChange(Visibility aNewVisibility,
 
 static nsIFrame* GetActiveSelectionFrame(nsPresContext* aPresContext,
                                          nsIFrame* aFrame) {
-  nsIContent* capturingContent = nsIPresShell::GetCapturingContent();
+  nsIContent* capturingContent = PresShell::GetCapturingContent();
   if (capturingContent) {
     nsIFrame* activeFrame = aPresContext->GetPrimaryFrameFor(capturingContent);
     return activeFrame ? activeFrame : aFrame;
@@ -2168,11 +2172,12 @@ int16_t nsFrame::DisplaySelection(nsPresContext* aPresContext,
   return selType;
 }
 
-class nsDisplaySelectionOverlay : public nsDisplayItem {
+class nsDisplaySelectionOverlay : public nsPaintedDisplayItem {
  public:
   nsDisplaySelectionOverlay(nsDisplayListBuilder* aBuilder, nsFrame* aFrame,
                             int16_t aSelectionValue)
-      : nsDisplayItem(aBuilder, aFrame), mSelectionValue(aSelectionValue) {
+      : nsPaintedDisplayItem(aBuilder, aFrame),
+        mSelectionValue(aSelectionValue) {
     MOZ_COUNT_CTOR(nsDisplaySelectionOverlay);
   }
 #ifdef NS_BUILD_REFCNT_LOGGING
@@ -2346,15 +2351,21 @@ void nsFrame::DisplaySelectionOverlay(nsDisplayListBuilder* aBuilder,
 
 void nsFrame::DisplayOutlineUnconditional(nsDisplayListBuilder* aBuilder,
                                           const nsDisplayListSet& aLists) {
+  // Per https://drafts.csswg.org/css-tables-3/#global-style-overrides:
+  // "All css properties of table-column and table-column-group boxes are
+  // ignored, except when explicitly specified by this specification."
+  // CSS outlines fall into this category, so we skip them on these boxes.
+  MOZ_ASSERT(!IsTableColGroupFrame() && !IsTableColFrame());
+
   if (!StyleOutline()->ShouldPaintOutline()) {
     return;
   }
 
-  if (IsTableColGroupFrame() || IsTableColFrame()) {
-    // Per https://drafts.csswg.org/css-tables-3/#global-style-overrides:
-    // "All css properties of table-column and table-column-group boxes are
-    // ignored, except when explicitly specified by this specification."
-    // CSS outlines fall into this category, so we skip them on these boxes.
+  if (HasAnyStateBits(NS_FRAME_PART_OF_IBSPLIT) &&
+      GetScrollableOverflowRect().IsEmpty()) {
+    // Skip parts of IB-splits with an empty overflow rect, see bug 434301.
+    // We may still want to fix some of the overflow area calculations over in
+    // that bug.
     return;
   }
 
@@ -2366,6 +2377,42 @@ void nsFrame::DisplayOutline(nsDisplayListBuilder* aBuilder,
   if (!IsVisibleForPainting()) return;
 
   DisplayOutlineUnconditional(aBuilder, aLists);
+}
+
+void nsFrame::DisplayInsetBoxShadowUnconditional(nsDisplayListBuilder* aBuilder,
+                                                 nsDisplayList* aList) {
+  // XXXbz should box-shadow for rows/rowgroups/columns/colgroups get painted
+  // just because we're visible?  Or should it depend on the cell visibility
+  // when we're not the whole table?
+  const auto* effects = StyleEffects();
+  if (effects->HasBoxShadowWithInset(true)) {
+    aList->AppendNewToTop<nsDisplayBoxShadowInner>(aBuilder, this);
+  }
+}
+
+void nsFrame::DisplayInsetBoxShadow(nsDisplayListBuilder* aBuilder,
+                                    nsDisplayList* aList) {
+  if (!IsVisibleForPainting()) return;
+
+  DisplayInsetBoxShadowUnconditional(aBuilder, aList);
+}
+
+void nsFrame::DisplayOutsetBoxShadowUnconditional(
+    nsDisplayListBuilder* aBuilder, nsDisplayList* aList) {
+  // XXXbz should box-shadow for rows/rowgroups/columns/colgroups get painted
+  // just because we're visible?  Or should it depend on the cell visibility
+  // when we're not the whole table?
+  const auto* effects = StyleEffects();
+  if (effects->HasBoxShadowWithInset(false)) {
+    aList->AppendNewToTop<nsDisplayBoxShadowOuter>(aBuilder, this);
+  }
+}
+
+void nsFrame::DisplayOutsetBoxShadow(nsDisplayListBuilder* aBuilder,
+                                     nsDisplayList* aList) {
+  if (!IsVisibleForPainting()) return;
+
+  DisplayOutsetBoxShadowUnconditional(aBuilder, aList);
 }
 
 void nsIFrame::DisplayCaret(nsDisplayListBuilder* aBuilder,
@@ -2389,7 +2436,9 @@ bool nsFrame::DisplayBackgroundUnconditional(nsDisplayListBuilder* aBuilder,
       !StyleBackground()->IsTransparent(this) ||
       StyleDisplay()->HasAppearance()) {
     return nsDisplayBackgroundImage::AppendBackgroundItemsToTop(
-        aBuilder, this, GetRectRelativeToSelf(), aLists.BorderBackground());
+        aBuilder, this,
+        GetRectRelativeToSelf() + aBuilder->ToReferenceFrame(this),
+        aLists.BorderBackground());
   }
   return false;
 }
@@ -2404,23 +2453,18 @@ void nsFrame::DisplayBorderBackgroundOutline(nsDisplayListBuilder* aBuilder,
     return;
   }
 
-  nsCSSShadowArray* shadows = StyleEffects()->mBoxShadow;
-  if (shadows && shadows->HasShadowWithInset(false)) {
-    aLists.BorderBackground()->AppendNewToTop<nsDisplayBoxShadowOuter>(aBuilder,
-                                                                       this);
-  }
+  DisplayOutsetBoxShadowUnconditional(aBuilder, aLists.BorderBackground());
 
   bool bgIsThemed =
       DisplayBackgroundUnconditional(aBuilder, aLists, aForceBackground);
 
-  if (shadows && shadows->HasShadowWithInset(true)) {
-    aLists.BorderBackground()->AppendNewToTop<nsDisplayBoxShadowInner>(aBuilder,
-                                                                       this);
-  }
+  DisplayInsetBoxShadowUnconditional(aBuilder, aLists.BorderBackground());
 
   // If there's a themed background, we should not create a border item.
   // It won't be rendered.
-  if (!bgIsThemed && StyleBorder()->HasBorder()) {
+  // Don't paint borders for tables here, since they paint them in a different
+  // order.
+  if (!bgIsThemed && StyleBorder()->HasBorder() && !IsTableFrame()) {
     aLists.BorderBackground()->AppendNewToTop<nsDisplayBorder>(aBuilder, this);
   }
 
@@ -2638,9 +2682,10 @@ static bool FrameParticipatesIn3DContext(nsIFrame* aAncestor,
 static bool ItemParticipatesIn3DContext(nsIFrame* aAncestor,
                                         nsDisplayItem* aItem) {
   auto type = aItem->GetType();
+  const bool isContainer = type == DisplayItemType::TYPE_WRAP_LIST ||
+                           type == DisplayItemType::TYPE_CONTAINER;
 
-  if (type == DisplayItemType::TYPE_WRAP_LIST &&
-      aItem->GetChildren()->Count() == 1) {
+  if (isContainer && aItem->GetChildren()->Count() == 1) {
     // If the wraplist has only one child item, use the type of that item.
     type = aItem->GetChildren()->GetBottom()->GetType();
   }
@@ -2859,7 +2904,7 @@ void nsIFrame::BuildDisplayListForStackingContext(
                              NS_STYLE_POINTER_EVENTS_NONE;
   bool opacityItemForEventsAndPluginsOnly = false;
   if (effects->mOpacity == 0.0 && aBuilder->IsForPainting() &&
-      !(disp->mWillChangeBitField & StyleWillChangeBits_OPACITY) &&
+      !(disp->mWillChange.bits & StyleWillChangeBits_OPACITY) &&
       !nsLayoutUtils::HasAnimationOfPropertySet(
           this, nsCSSPropertyIDSet::OpacityProperties(), effectSetForOpacity)) {
     if (needHitTestInfo || aBuilder->WillComputePluginGeometry()) {
@@ -2869,7 +2914,7 @@ void nsIFrame::BuildDisplayListForStackingContext(
     }
   }
 
-  if (disp->mWillChangeBitField) {
+  if (disp->mWillChange.bits) {
     aBuilder->AddToWillChangeBudget(this, GetSize());
   }
 
@@ -3518,7 +3563,7 @@ static nsDisplayItem* WrapInWrapList(nsDisplayListBuilder* aBuilder,
   // If we're doing a partial build and we didn't need a wrap list
   // previously then we can try to work from there.
   if (aBuilder->IsPartialUpdate() &&
-      !aFrame->HasDisplayItem(uint32_t(DisplayItemType::TYPE_WRAP_LIST))) {
+      !aFrame->HasDisplayItem(uint32_t(DisplayItemType::TYPE_CONTAINER))) {
     // If we now need a wrap list, we must previously have had no display items
     // or a single one belonging to this frame. Mark the item itself as
     // discarded so that RetainedDisplayListBuilder uses the ones we just built.
@@ -3540,10 +3585,8 @@ static nsDisplayItem* WrapInWrapList(nsDisplayListBuilder* aBuilder,
   // TODO:RetainedDisplayListBuilder's merge phase has the full list and
   // could strip them out.
 
-  // Clear clip rect for the construction of the items below. Since we're
-  // clipping all their contents, they themselves don't need to be clipped.
-  return MakeDisplayItem<nsDisplayWrapList>(aBuilder, aFrame, aList,
-                                            aContainerASR, true);
+  return MakeDisplayItem<nsDisplayContainer>(aBuilder, aFrame, aContainerASR,
+                                             aList);
 }
 
 /**
@@ -3578,6 +3621,31 @@ static bool DescendIntoChild(nsDisplayListBuilder* aBuilder,
 
   if (aChild->ForceDescendIntoIfVisible() && aVisible.Intersects(overflow)) {
     return true;
+  }
+
+  if (aChild->IsFrameOfType(nsIFrame::eTablePart)) {
+    // Relative positioning and transforms can cause table parts to move, but we
+    // will still paint the backgrounds for their ancestor parts under them at
+    // their 'normal' position. That means that we must consider the overflow
+    // rects at both positions.
+
+    // We convert the overflow rect into the nsTableFrame's coordinate
+    // space, applying the normal position offset at each step. Then we
+    // compare that against the builder's cached dirty rect in table
+    // coordinate space.
+    const nsIFrame* f = aChild;
+    nsRect normalPositionOverflowRelativeToTable = overflow;
+
+    while (f->IsFrameOfType(nsIFrame::eTablePart)) {
+      normalPositionOverflowRelativeToTable += f->GetNormalPosition();
+      f = f->GetParent();
+    }
+
+    nsDisplayTableBackgroundSet* tableBGs = aBuilder->GetTableBackgroundSet();
+    if (tableBGs &&
+        tableBGs->GetDirtyRect().Intersects(normalPositionOverflowRelativeToTable)) {
+      return true;
+    }
   }
 
   return false;
@@ -4240,7 +4308,7 @@ nsFrame::HandlePress(nsPresContext* aPresContext, WidgetGUIEvent* aEvent,
 
   if (!mouseEvent->IsAlt()) {
     for (nsIContent* content = mContent; content;
-         content = content->GetParent()) {
+         content = content->GetFlattenedTreeParent()) {
       if (nsContentUtils::ContentIsDraggable(content) &&
           !content->IsEditable()) {
         // coordinate stuff is the fix for bug #55921
@@ -4268,7 +4336,7 @@ nsFrame::HandlePress(nsPresContext* aPresContext, WidgetGUIEvent* aEvent,
   // the mouse on the nearest scrollable frame. If there isn't a scrollable
   // frame, or something else is already capturing the mouse, there's no
   // reason to capture.
-  if (!nsIPresShell::GetCapturingContent()) {
+  if (!PresShell::GetCapturingContent()) {
     nsIScrollableFrame* scrollFrame = nsLayoutUtils::GetNearestScrollableFrame(
         this, nsLayoutUtils::SCROLLABLE_SAME_DOC |
                   nsLayoutUtils::SCROLLABLE_INCLUDE_HIDDEN);
@@ -4673,7 +4741,7 @@ NS_IMETHODIMP nsFrame::HandleRelease(nsPresContext* aPresContext,
 
   nsIFrame* activeFrame = GetActiveSelectionFrame(aPresContext, this);
 
-  nsCOMPtr<nsIContent> captureContent = nsIPresShell::GetCapturingContent();
+  nsCOMPtr<nsIContent> captureContent = PresShell::GetCapturingContent();
 
   // We can unconditionally stop capturing because
   // we should never be capturing when the mouse button is up
@@ -5521,7 +5589,7 @@ IntrinsicSize nsFrame::GetIntrinsicSize() {
 }
 
 /* virtual */
-nsSize nsFrame::GetIntrinsicRatio() { return nsSize(0, 0); }
+AspectRatio nsFrame::GetIntrinsicRatio() { return AspectRatio(); }
 
 /* virtual */
 LogicalSize nsFrame::ComputeSize(gfxContext* aRenderingContext, WritingMode aWM,
@@ -5531,7 +5599,7 @@ LogicalSize nsFrame::ComputeSize(gfxContext* aRenderingContext, WritingMode aWM,
                                  const LogicalSize& aBorder,
                                  const LogicalSize& aPadding,
                                  ComputeSizeFlags aFlags) {
-  MOZ_ASSERT(GetIntrinsicRatio() == nsSize(0, 0),
+  MOZ_ASSERT(!GetIntrinsicRatio(),
              "Please override this method and call "
              "nsFrame::ComputeSizeWithIntrinsicDimensions instead.");
   LogicalSize result =
@@ -5783,10 +5851,12 @@ LogicalSize nsFrame::ComputeSize(gfxContext* aRenderingContext, WritingMode aWM,
 
 LogicalSize nsFrame::ComputeSizeWithIntrinsicDimensions(
     gfxContext* aRenderingContext, WritingMode aWM,
-    const IntrinsicSize& aIntrinsicSize, nsSize aIntrinsicRatio,
+    const IntrinsicSize& aIntrinsicSize, const AspectRatio& aIntrinsicRatio,
     const LogicalSize& aCBSize, const LogicalSize& aMargin,
     const LogicalSize& aBorder, const LogicalSize& aPadding,
     ComputeSizeFlags aFlags) {
+  auto logicalRatio =
+      aWM.IsVertical() ? aIntrinsicRatio.Inverted() : aIntrinsicRatio;
   const nsStylePosition* stylePos = StylePosition();
   const auto* inlineStyleCoord = &stylePos->ISize(aWM);
   const auto* blockStyleCoord = &stylePos->BSize(aWM);
@@ -5915,10 +5985,6 @@ LogicalSize nsFrame::ComputeSizeWithIntrinsicDimensions(
   const bool hasIntrinsicBSize = bsizeCoord.isSome();
   nscoord intrinsicBSize = std::max(0, bsizeCoord.valueOr(0));
 
-  NS_ASSERTION(aIntrinsicRatio.width >= 0 && aIntrinsicRatio.height >= 0,
-               "Intrinsic ratio has a negative component!");
-  LogicalSize logicalRatio(aWM, aIntrinsicRatio);
-
   if (!isAutoISize) {
     iSize = ComputeISizeValue(
         aRenderingContext, aCBSize.ISize(aWM), boxSizingAdjust.ISize(aWM),
@@ -5937,7 +6003,7 @@ LogicalSize nsFrame::ComputeSizeWithIntrinsicDimensions(
         // or ratio in the relevant dimension, otherwise 'stretch'.
         // https://drafts.csswg.org/css-grid/#grid-item-sizing
         if ((inlineAxisAlignment == NS_STYLE_ALIGN_NORMAL &&
-             !hasIntrinsicISize && !(logicalRatio.ISize(aWM) > 0)) ||
+             !hasIntrinsicISize && !logicalRatio) ||
             inlineAxisAlignment == NS_STYLE_ALIGN_STRETCH) {
           stretchI = eStretch;
         }
@@ -6004,7 +6070,7 @@ LogicalSize nsFrame::ComputeSizeWithIntrinsicDimensions(
         // or ratio in the relevant dimension, otherwise 'stretch'.
         // https://drafts.csswg.org/css-grid/#grid-item-sizing
         if ((blockAxisAlignment == NS_STYLE_ALIGN_NORMAL &&
-             !hasIntrinsicBSize && !(logicalRatio.BSize(aWM) > 0)) ||
+             !hasIntrinsicBSize && !logicalRatio) ||
             blockAxisAlignment == NS_STYLE_ALIGN_STRETCH) {
           stretchB = eStretch;
         }
@@ -6059,10 +6125,9 @@ LogicalSize nsFrame::ComputeSizeWithIntrinsicDimensions(
 
       if (hasIntrinsicISize) {
         tentISize = intrinsicISize;
-      } else if (hasIntrinsicBSize && logicalRatio.BSize(aWM) > 0) {
-        tentISize = NSCoordMulDiv(intrinsicBSize, logicalRatio.ISize(aWM),
-                                  logicalRatio.BSize(aWM));
-      } else if (logicalRatio.ISize(aWM) > 0) {
+      } else if (hasIntrinsicBSize && logicalRatio) {
+        tentISize = logicalRatio.ApplyTo(intrinsicBSize);
+      } else if (logicalRatio) {
         tentISize =
             aCBSize.ISize(aWM) - boxSizingToMarginEdgeISize;  // XXX scrollbar?
         if (tentISize < 0) tentISize = 0;
@@ -6080,9 +6145,8 @@ LogicalSize nsFrame::ComputeSizeWithIntrinsicDimensions(
 
       if (hasIntrinsicBSize) {
         tentBSize = intrinsicBSize;
-      } else if (logicalRatio.ISize(aWM) > 0) {
-        tentBSize = NSCoordMulDiv(tentISize, logicalRatio.BSize(aWM),
-                                  logicalRatio.ISize(aWM));
+      } else if (logicalRatio) {
+        tentBSize = logicalRatio.Inverted().ApplyTo(tentISize);
       } else {
         tentBSize = nsPresContext::CSSPixelsToAppUnits(150);
       }
@@ -6093,45 +6157,32 @@ LogicalSize nsFrame::ComputeSizeWithIntrinsicDimensions(
         stretchB = (stretchI == eStretch ? eStretch : eStretchPreservingRatio);
       }
 
-      if (aIntrinsicRatio != nsSize(0, 0)) {
+      if (logicalRatio) {
         if (stretchI == eStretch) {
           tentISize = iSize;  // * / 'stretch'
           if (stretchB == eStretch) {
             tentBSize = bSize;  // 'stretch' / 'stretch'
-          } else if (stretchB == eStretchPreservingRatio &&
-                     logicalRatio.ISize(aWM) > 0) {
+          } else if (stretchB == eStretchPreservingRatio) {
             // 'normal' / 'stretch'
-            tentBSize = NSCoordMulDiv(iSize, logicalRatio.BSize(aWM),
-                                      logicalRatio.ISize(aWM));
+            tentBSize = logicalRatio.Inverted().ApplyTo(iSize);
           }
         } else if (stretchB == eStretch) {
           tentBSize = bSize;  // 'stretch' / * (except 'stretch')
-          if (stretchI == eStretchPreservingRatio &&
-              logicalRatio.BSize(aWM) > 0) {
+          if (stretchI == eStretchPreservingRatio) {
             // 'stretch' / 'normal'
-            tentISize = NSCoordMulDiv(bSize, logicalRatio.ISize(aWM),
-                                      logicalRatio.BSize(aWM));
+            tentISize = logicalRatio.ApplyTo(bSize);
           }
         } else if (stretchI == eStretchPreservingRatio) {
           tentISize = iSize;  // * (except 'stretch') / 'normal'
-          if (logicalRatio.ISize(aWM) > 0) {
-            tentBSize = NSCoordMulDiv(iSize, logicalRatio.BSize(aWM),
-                                      logicalRatio.ISize(aWM));
-          }
+          tentBSize = logicalRatio.Inverted().ApplyTo(iSize);
           if (stretchB == eStretchPreservingRatio && tentBSize > bSize) {
             // Stretch within the CB size with preserved intrinsic ratio.
             tentBSize = bSize;  // 'normal' / 'normal'
-            if (logicalRatio.BSize(aWM) > 0) {
-              tentISize = NSCoordMulDiv(bSize, logicalRatio.ISize(aWM),
-                                        logicalRatio.BSize(aWM));
-            }
+            tentISize = logicalRatio.ApplyTo(bSize);
           }
         } else if (stretchB == eStretchPreservingRatio) {
           tentBSize = bSize;  // 'normal' / * (except 'normal' and 'stretch')
-          if (logicalRatio.BSize(aWM) > 0) {
-            tentISize = NSCoordMulDiv(bSize, logicalRatio.ISize(aWM),
-                                      logicalRatio.BSize(aWM));
-          }
+          tentISize = logicalRatio.ApplyTo(bSize);
         }
       }
 
@@ -6139,8 +6190,7 @@ LogicalSize nsFrame::ComputeSizeWithIntrinsicDimensions(
       // applying the min/max-size.  We don't want that when we have 'stretch'
       // in either axis because tentISize/tentBSize is likely not according to
       // ratio now.
-      if (aIntrinsicRatio != nsSize(0, 0) && stretchI != eStretch &&
-          stretchB != eStretch) {
+      if (logicalRatio && stretchI != eStretch && stretchB != eStretch) {
         nsSize autoSize = nsLayoutUtils::ComputeAutoSizeWithIntrinsicDimensions(
             minISize, minBSize, maxISize, maxBSize, tentISize, tentBSize);
         // The nsSize that ComputeAutoSizeWithIntrinsicDimensions returns will
@@ -6158,9 +6208,8 @@ LogicalSize nsFrame::ComputeSizeWithIntrinsicDimensions(
       // 'auto' iSize, non-'auto' bSize
       bSize = NS_CSS_MINMAX(bSize, minBSize, maxBSize);
       if (stretchI != eStretch) {
-        if (logicalRatio.BSize(aWM) > 0) {
-          iSize = NSCoordMulDiv(bSize, logicalRatio.ISize(aWM),
-                                logicalRatio.BSize(aWM));
+        if (logicalRatio) {
+          iSize = logicalRatio.ApplyTo(bSize);
         } else if (hasIntrinsicISize) {
           if (!((aFlags & ComputeSizeFlags::eIClampMarginBoxMinSize) &&
                 intrinsicISize > iSize)) {
@@ -6177,9 +6226,8 @@ LogicalSize nsFrame::ComputeSizeWithIntrinsicDimensions(
       // non-'auto' iSize, 'auto' bSize
       iSize = NS_CSS_MINMAX(iSize, minISize, maxISize);
       if (stretchB != eStretch) {
-        if (logicalRatio.ISize(aWM) > 0) {
-          bSize = NSCoordMulDiv(iSize, logicalRatio.BSize(aWM),
-                                logicalRatio.ISize(aWM));
+        if (logicalRatio) {
+          bSize = logicalRatio.Inverted().ApplyTo(iSize);
         } else if (hasIntrinsicBSize) {
           if (!((aFlags & ComputeSizeFlags::eBClampMarginBoxMinSize) &&
                 intrinsicBSize > bSize)) {
@@ -7351,6 +7399,9 @@ bool nsIFrame::UpdateOverflow() {
   nsOverflowAreas overflowAreas(rect, rect);
 
   if (!ComputeCustomOverflow(overflowAreas)) {
+    // If updating overflow wasn't supported by this frame, then it should
+    // have scheduled any necessary reflows. We can return false to say nothing
+    // changed, and wait for reflow to correct it.
     return false;
   }
 
@@ -7371,7 +7422,12 @@ bool nsIFrame::UpdateOverflow() {
     return true;
   }
 
-  return false;
+  // Frames that combine their 3d transform with their ancestors
+  // only compute a pre-transform overflow rect, and then contribute
+  // to the normal overflow rect of the preserve-3d root. Always return
+  // true here so that we propagate changes up to the root for final
+  // calculation.
+  return Combines3DTransformWithAncestors();
 }
 
 /* virtual */
@@ -7610,6 +7666,26 @@ void nsIFrame::List(FILE* out, const char* aPrefix, uint32_t aFlags) const {
   nsCString str;
   ListGeneric(str, aPrefix, aFlags);
   fprintf_stderr(out, "%s\n", str.get());
+}
+
+void nsIFrame::ListMatchedRules(FILE* out, const char* aPrefix) const {
+  nsTArray<const RawServoStyleRule*> rawRuleList;
+  Servo_ComputedValues_GetStyleRuleList(mComputedStyle, &rawRuleList);
+  for (const RawServoStyleRule* rawRule : rawRuleList) {
+    nsString ruleText;
+    Servo_StyleRule_GetCssText(rawRule, &ruleText);
+    fprintf_stderr(out, "%s%s\n", aPrefix,
+                   NS_ConvertUTF16toUTF8(ruleText).get());
+  }
+}
+
+void nsIFrame::ListWithMatchedRules(FILE* out, const char* aPrefix) const {
+  fprintf_stderr(out, "%s%s\n", aPrefix, ListTag().get());
+
+  nsCString rulePrefix;
+  rulePrefix += aPrefix;
+  rulePrefix += "    ";
+  ListMatchedRules(out, rulePrefix.get());
 }
 
 nsresult nsFrame::GetFrameName(nsAString& aResult) const {
@@ -9763,37 +9839,37 @@ bool nsIFrame::IsFocusable(int32_t* aTabIndex, bool aWithMouse) {
  */
 bool nsIFrame::HasSignificantTerminalNewline() const { return false; }
 
-static uint8_t ConvertSVGDominantBaselineToVerticalAlign(
+static StyleVerticalAlignKeyword ConvertSVGDominantBaselineToVerticalAlign(
     uint8_t aDominantBaseline) {
   // Most of these are approximate mappings.
   switch (aDominantBaseline) {
     case NS_STYLE_DOMINANT_BASELINE_HANGING:
     case NS_STYLE_DOMINANT_BASELINE_TEXT_BEFORE_EDGE:
-      return NS_STYLE_VERTICAL_ALIGN_TEXT_TOP;
+      return StyleVerticalAlignKeyword::TextTop;
     case NS_STYLE_DOMINANT_BASELINE_TEXT_AFTER_EDGE:
     case NS_STYLE_DOMINANT_BASELINE_IDEOGRAPHIC:
-      return NS_STYLE_VERTICAL_ALIGN_TEXT_BOTTOM;
+      return StyleVerticalAlignKeyword::TextBottom;
     case NS_STYLE_DOMINANT_BASELINE_CENTRAL:
     case NS_STYLE_DOMINANT_BASELINE_MIDDLE:
     case NS_STYLE_DOMINANT_BASELINE_MATHEMATICAL:
-      return NS_STYLE_VERTICAL_ALIGN_MIDDLE;
+      return StyleVerticalAlignKeyword::Middle;
     case NS_STYLE_DOMINANT_BASELINE_AUTO:
     case NS_STYLE_DOMINANT_BASELINE_ALPHABETIC:
-      return NS_STYLE_VERTICAL_ALIGN_BASELINE;
+      return StyleVerticalAlignKeyword::Baseline;
     case NS_STYLE_DOMINANT_BASELINE_USE_SCRIPT:
     case NS_STYLE_DOMINANT_BASELINE_NO_CHANGE:
     case NS_STYLE_DOMINANT_BASELINE_RESET_SIZE:
       // These three should not simply map to 'baseline', but we don't
       // support the complex baseline model that SVG 1.1 has and which
       // css3-linebox now defines.
-      return NS_STYLE_VERTICAL_ALIGN_BASELINE;
+      return StyleVerticalAlignKeyword::Baseline;
     default:
       MOZ_ASSERT_UNREACHABLE("unexpected aDominantBaseline value");
-      return NS_STYLE_VERTICAL_ALIGN_BASELINE;
+      return StyleVerticalAlignKeyword::Baseline;
   }
 }
 
-uint8_t nsIFrame::VerticalAlignEnum() const {
+Maybe<StyleVerticalAlignKeyword> nsIFrame::VerticalAlignEnum() const {
   if (nsSVGUtils::IsInSVGTextSubtree(this)) {
     uint8_t dominantBaseline;
     for (const nsIFrame* frame = this; frame; frame = frame->GetParent()) {
@@ -9803,15 +9879,15 @@ uint8_t nsIFrame::VerticalAlignEnum() const {
         break;
       }
     }
-    return ConvertSVGDominantBaselineToVerticalAlign(dominantBaseline);
+    return Some(ConvertSVGDominantBaselineToVerticalAlign(dominantBaseline));
   }
 
-  const nsStyleCoord& verticalAlign = StyleDisplay()->mVerticalAlign;
-  if (verticalAlign.GetUnit() == eStyleUnit_Enumerated) {
-    return verticalAlign.GetIntValue();
+  const auto& verticalAlign = StyleDisplay()->mVerticalAlign;
+  if (verticalAlign.IsKeyword()) {
+    return Some(verticalAlign.AsKeyword());
   }
 
-  return eInvalidVerticalAlign;
+  return Nothing();
 }
 
 NS_IMETHODIMP
@@ -10613,7 +10689,7 @@ bool nsIFrame::IsStackingContext(const nsStyleDisplay* aStyleDisplay,
          nsSVGIntegrationUtils::UsingEffectsForFrame(this) ||
          (aIsPositioned && (aStyleDisplay->IsPositionForcingStackingContext() ||
                             aStylePosition->mZIndex.IsInteger())) ||
-         (aStyleDisplay->mWillChangeBitField &
+         (aStyleDisplay->mWillChange.bits &
           StyleWillChangeBits_STACKING_CONTEXT) ||
          aStyleDisplay->mIsolation != NS_STYLE_ISOLATION_AUTO;
 }
@@ -10676,7 +10752,7 @@ bool nsIFrame::IsScrolledOutOfView() const {
 
 gfx::Matrix nsIFrame::ComputeWidgetTransform() {
   const nsStyleUIReset* uiReset = StyleUIReset();
-  if (!uiReset->mSpecifiedWindowTransform) {
+  if (uiReset->mMozWindowTransform.IsNone()) {
     return gfx::Matrix();
   }
 
@@ -10686,8 +10762,7 @@ gfx::Matrix nsIFrame::ComputeWidgetTransform() {
   nsPresContext* presContext = PresContext();
   int32_t appUnitsPerDevPixel = presContext->AppUnitsPerDevPixel();
   gfx::Matrix4x4 matrix = nsStyleTransformMatrix::ReadTransforms(
-      uiReset->mSpecifiedWindowTransform->mHead, refBox,
-      float(appUnitsPerDevPixel));
+      uiReset->mMozWindowTransform, refBox, float(appUnitsPerDevPixel));
 
   // Apply the -moz-window-transform-origin translation to the matrix.
   const StyleTransformOrigin& origin = uiReset->mWindowTransformOrigin;

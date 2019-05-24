@@ -3,8 +3,8 @@
  * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
 
 // @flow
-
 import { memoize } from "lodash";
+import { URL } from "whatwg-url";
 
 const defaultUrl = {
   hash: "",
@@ -20,7 +20,7 @@ const defaultUrl = {
   search: "",
   // This should be a "URLSearchParams" object
   searchParams: {},
-  username: ""
+  username: "",
 };
 
 export const parse = memoize(function parse(url: string): any {

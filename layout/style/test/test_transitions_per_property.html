@@ -80,6 +80,10 @@ var supported_properties = {
                            test_length_clamped ],
     "column-width": [ test_length_transition,
                       test_length_clamped ],
+    "cx": [ test_length_transition, test_percent_transition,
+            test_length_unclamped, test_percent_unclamped ],
+    "cy": [ test_length_transition, test_percent_transition,
+            test_length_unclamped, test_percent_unclamped ],
     "-moz-image-region": [ test_rect_transition ],
     "-moz-outline-radius-bottomleft": [ test_radius_transition ],
     "-moz-outline-radius-bottomright": [ test_radius_transition ],
@@ -244,6 +248,12 @@ var supported_properties = {
     "right": [ test_length_transition, test_percent_transition,
                test_length_percent_calc_transition,
                test_length_unclamped, test_percent_unclamped ],
+    "r": [ test_length_transition, test_percent_transition,
+           test_length_clamped, test_percent_clamped ],
+    "rx": [ test_length_transition, test_percent_transition,
+            test_length_clamped, test_percent_clamped ],
+    "ry": [ test_length_transition, test_percent_transition,
+            test_length_clamped, test_percent_clamped ],
     "shape-image-threshold": [ test_float_zeroToOne_transition,
                                // shape-image-threshold (like opacity) is
                                // clamped in computed style
@@ -297,7 +307,12 @@ var supported_properties = {
                test_length_percent_calc_transition,
                test_length_clamped, test_percent_clamped ],
     "word-spacing": [ test_length_transition, test_length_unclamped ],
+    "x": [ test_length_transition, test_percent_transition,
+           test_length_unclamped, test_percent_unclamped ],
+    "y": [ test_length_transition, test_percent_transition,
+           test_length_unclamped, test_percent_unclamped ],
     "z-index": [ test_integer_transition, test_pos_integer_or_auto_transition ],
+    "-webkit-line-clamp": [ test_pos_integer_or_none_transition ],
     "-webkit-text-fill-color": [ test_color_transition,
                                  test_currentcolor_transition ],
     "-webkit-text-stroke-color": [ test_color_transition,
@@ -306,6 +321,12 @@ var supported_properties = {
 
 if (IsCSSPropertyPrefEnabled("layout.css.motion-path.enabled")) {
   supported_properties["offset-path"] = [ test_path_function ];
+  supported_properties["offset-distance"] =
+    [ test_length_transition,
+      test_percent_transition,
+      test_length_unclamped,
+      test_percent_unclamped,
+      test_calc_wrapped_calc_transition ];
 }
 
 if (IsCSSPropertyPrefEnabled("layout.css.clip-path-path.enabled")) {
@@ -1478,6 +1499,57 @@ function test_length_percent_calc_transition(prop) {
                        "calc(50% + 50px)");
 }
 
+// This can deal well with properties for which the computed value
+// is not the used value, e.g. offset-distance, translate.
+function test_calc_wrapped_calc_transition(prop) {
+  // Test interpolation that computes to calc() (transition from % to px)
+  div.style.setProperty("transition-property", "none", "");
+  div.style.setProperty(prop, "20%", "");
+  is(cs.getPropertyValue(prop), "20%",
+     "property " + prop + ": computed value before transition");
+  div.style.setProperty("transition-property", prop, "");
+  div.style.setProperty(prop, "12px", "");
+  is(cs.getPropertyValue(prop), "calc(15% + 3px)",
+     "property " + prop + ": interpolation that computes to calc()");
+
+  check_distance(prop, "20%", "calc(15% + 3px)", "12px");
+
+  // Test interpolation that computes to calc() (transition from px to %)
+  div.style.setProperty("transition-property", "none", "");
+  div.style.setProperty(prop, "12px", "");
+  is(cs.getPropertyValue(prop), "12px",
+     "property " + prop + ": computed value before transition");
+  div.style.setProperty("transition-property", prop, "");
+  div.style.setProperty(prop, "20%", "");
+  is(cs.getPropertyValue(prop), "calc(5% + 9px)",
+     "property " + prop + ": interpolation that computes to calc()");
+
+  check_distance(prop, "12px", "calc(5% + 9px)", "20%");
+
+  // Test interpolation between calc() and non-calc()
+  div.style.setProperty("transition-property", "none", "");
+  div.style.setProperty(prop, "calc(40px + 10%)", "");
+  is(cs.getPropertyValue(prop), "calc(10% + 40px)",
+     "property " + prop + ": computed value before transition");
+  div.style.setProperty("transition-property", prop, "");
+  div.style.setProperty(prop, "30%", "");
+  is(cs.getPropertyValue(prop), "calc(15% + 30px)",
+     "property " + prop + ": interpolation between calc() and non-calc()");
+
+  check_distance(prop, "calc(40px + 10%)", "calc(30px + 15%)", "30%");
+
+  div.style.setProperty("transition-property", "none", "");
+  div.style.setProperty(prop, "16px", "");
+  is(cs.getPropertyValue(prop), "16px",
+     "property " + prop + ": computed value before transition");
+  div.style.setProperty("transition-property", prop, "");
+  div.style.setProperty(prop, "calc(8px + 60%)", "");
+  is(cs.getPropertyValue(prop), "calc(15% + 14px)",
+     "property " + prop + ": interpolation between calc() and non-calc()");
+
+  check_distance(prop, "16px", "calc(14px + 15%)", "calc(8px + 60%)");
+}
+
 function test_number_transition(prop) {
   div.style.transitionProperty = 'none';
   div.style[prop] = '10';
@@ -2254,7 +2326,7 @@ function test_grid_gap(prop) {
   test_percent_clamped(prop);
 }
 
-function test_pos_integer_or_auto_transition(prop) {
+function test_pos_integer_or_keyword_transition(prop, keyword) {
   div.style.setProperty("transition-property", "none", "");
   div.style.setProperty(prop, "4", "");
   is(cs.getPropertyValue(prop), "4",
@@ -2264,9 +2336,9 @@ function test_pos_integer_or_auto_transition(prop) {
   is(cs.getPropertyValue(prop), "6",
      "integer-valued property " + prop + ": interpolation of integers");
   check_distance(prop, "4", "6", "12");
-  div.style.setProperty(prop, "auto", "");
-  is(cs.getPropertyValue(prop), "auto",
-     "integer-valued property " + prop + ": auto not interpolable");
+  div.style.setProperty(prop, keyword, "");
+  is(cs.getPropertyValue(prop), keyword,
+     "integer-valued property " + prop + ": " + keyword + " not interpolable");
   div.style.setProperty(prop, "8", "");
   is(cs.getPropertyValue(prop), "8",
      "integer-valued property " + prop + ": computed value before transition");
@@ -2274,6 +2346,14 @@ function test_pos_integer_or_auto_transition(prop) {
   is(cs.getPropertyValue(prop), "7",
      "integer-valued property " + prop + ": interpolation of integers");
   check_distance(prop, "8", "7", "4");
+}
+
+function test_pos_integer_or_auto_transition(prop) {
+  return test_pos_integer_or_keyword_transition(prop, "auto");
+}
+
+function test_pos_integer_or_none_transition(prop) {
+  return test_pos_integer_or_keyword_transition(prop, "none");
 }
 
 function test_integer_at_least_one_clamping(prop) {
@@ -2881,11 +2961,11 @@ function test_translate_transition(prop) {
   test_length_unclamped(prop);
   test_percent_transition(prop);
   test_percent_unclamped(prop);
+  test_calc_wrapped_calc_transition(prop);
 
   // Two values: <length-percentage> <length-percentage>
-  // Note: Cannot use test_length_percent_pair_transition(prop) and
-  // test_length_percent_calc_transition(prop) because we don't resolve the
-  // percentage.
+  // Note: Cannot use test_length_percent_pair_transition(prop) because we
+  // don't resolve the percentage.
   test_length_pair_transition(prop);
 
   div.style.setProperty("transition-property", "none", "");

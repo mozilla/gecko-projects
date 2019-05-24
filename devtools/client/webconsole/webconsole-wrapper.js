@@ -180,6 +180,10 @@ class WebConsoleWrapper {
           return webConsoleUI.jsterm && webConsoleUI.jsterm.execute(expression);
         },
 
+        requestEvaluation: (string, options) => {
+          return webConsoleUI.webConsoleClient.evaluateJSAsync(string, options);
+        },
+
         getInputCursor: () => {
           return webConsoleUI.jsterm && webConsoleUI.jsterm.getSelectionStart();
         },
@@ -252,7 +256,7 @@ class WebConsoleWrapper {
 
         // Emit the "menu-open" event for testing.
         menu.once("open", () => this.emit("menu-open"));
-        menu.popup(screenX, screenY, { doc: this.hud.chromeWindow.document });
+        menu.popup(screenX, screenY, this.hud.chromeWindow.document);
 
         return menu;
       };
@@ -262,7 +266,7 @@ class WebConsoleWrapper {
         const menu = createEditContextMenu(window, "webconsole-menu");
         // Emit the "menu-open" event for testing.
         menu.once("open", () => this.emit("menu-open"));
-        menu.popup(screenX, screenY, { doc: this.hud.chromeWindow.document });
+        menu.popup(screenX, screenY, this.hud.chromeWindow.document);
 
         return menu;
       };
@@ -304,6 +308,11 @@ class WebConsoleWrapper {
           openNetworkPanel: (requestId) => {
             return this.toolbox.selectTool("netmonitor").then((panel) => {
               return panel.panelWin.Netmonitor.inspectRequest(requestId);
+            });
+          },
+          resendNetworkRequest: (requestId) => {
+            return this.toolbox.getNetMonitorAPI().then((api) => {
+              return api.resendRequest(requestId);
             });
           },
           sourceMapService: this.toolbox ? this.toolbox.sourceMapURLService : null,
@@ -358,7 +367,6 @@ class WebConsoleWrapper {
       const autocomplete = prefs.autocomplete;
 
       const app = App({
-        attachRefToWebConsoleUI,
         serviceContainer,
         webConsoleUI,
         onFirstMeaningfulPaint: resolve,

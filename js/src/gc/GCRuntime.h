@@ -247,7 +247,7 @@ class GCRuntime {
   uint32_t getParameter(JSGCParamKey key, const AutoLockGC& lock);
 
   MOZ_MUST_USE bool triggerGC(JS::GCReason reason);
-  void maybeAllocTriggerZoneGC(Zone* zone, const AutoLockGC& lock);
+  void maybeAllocTriggerZoneGC(Zone* zone);
   // The return value indicates if we were able to do the GC.
   bool triggerZoneGC(Zone* zone, JS::GCReason reason, size_t usedBytes,
                      size_t thresholdBytes);
@@ -629,8 +629,7 @@ class GCRuntime {
   IncrementalProgress performSweepActions(SliceBudget& sliceBudget);
   IncrementalProgress sweepTypeInformation(FreeOp* fop, SliceBudget& budget,
                                            Zone* zone);
-  IncrementalProgress releaseSweptEmptyArenas(FreeOp* fop, SliceBudget& budget,
-                                              Zone* zone);
+  IncrementalProgress releaseSweptEmptyArenas(FreeOp* fop, SliceBudget& budget);
   void startSweepingAtomsTable();
   IncrementalProgress sweepAtomsTable(FreeOp* fop, SliceBudget& budget);
   IncrementalProgress sweepWeakCaches(FreeOp* fop, SliceBudget& budget);

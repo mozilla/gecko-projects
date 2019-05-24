@@ -12,25 +12,25 @@ use api::{ImageData, ImageDescriptor, ImageKey, ImageRendering, TileSize};
 use api::{BlobImageData, BlobImageKey, MemoryReport, VoidPtrToSizeFn};
 use api::units::*;
 #[cfg(feature = "capture")]
-use capture::ExternalCaptureImage;
+use crate::capture::ExternalCaptureImage;
 #[cfg(feature = "replay")]
-use capture::PlainExternalImage;
+use crate::capture::PlainExternalImage;
 #[cfg(any(feature = "replay", feature = "png"))]
-use capture::CaptureConfig;
-use device::TextureFilter;
+use crate::capture::CaptureConfig;
+use crate::device::TextureFilter;
 use euclid::{point2, size2};
-use glyph_cache::GlyphCache;
+use crate::glyph_cache::GlyphCache;
 #[cfg(not(feature = "pathfinder"))]
-use glyph_cache::GlyphCacheEntry;
-use glyph_rasterizer::{BaseFontInstance, FontInstance, GlyphFormat, GlyphKey, GlyphRasterizer};
-use gpu_cache::{GpuCache, GpuCacheAddress, GpuCacheHandle};
-use gpu_types::UvRectKind;
-use image::{compute_tile_size, compute_tile_range, for_each_tile_in_range};
-use internal_types::{FastHashMap, FastHashSet, TextureSource, TextureUpdateList};
-use profiler::{ResourceProfileCounters, TextureCacheProfileCounters};
-use render_backend::{FrameId, FrameStamp};
-use render_task::{RenderTaskCache, RenderTaskCacheKey, RenderTaskId};
-use render_task::{RenderTaskCacheEntry, RenderTaskCacheEntryHandle, RenderTaskTree};
+use crate::glyph_cache::GlyphCacheEntry;
+use crate::glyph_rasterizer::{BaseFontInstance, FontInstance, GlyphFormat, GlyphKey, GlyphRasterizer};
+use crate::gpu_cache::{GpuCache, GpuCacheAddress, GpuCacheHandle};
+use crate::gpu_types::UvRectKind;
+use crate::image::{compute_tile_size, compute_tile_range, for_each_tile_in_range};
+use crate::internal_types::{FastHashMap, FastHashSet, TextureSource, TextureUpdateList};
+use crate::profiler::{ResourceProfileCounters, TextureCacheProfileCounters};
+use crate::render_backend::{FrameId, FrameStamp};
+use crate::render_task::{RenderTaskCache, RenderTaskCacheKey, RenderTaskId};
+use crate::render_task::{RenderTaskCacheEntry, RenderTaskCacheEntryHandle, RenderTaskGraph};
 use smallvec::SmallVec;
 use std::collections::hash_map::Entry::{self, Occupied, Vacant};
 use std::collections::hash_map::IterMut;
@@ -43,8 +43,8 @@ use std::os::raw::c_void;
 use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
 use std::time::SystemTime;
-use texture_cache::{TextureCache, TextureCacheHandle, Eviction};
-use util::drain_filter;
+use crate::texture_cache::{TextureCache, TextureCacheHandle, Eviction};
+use crate::util::drain_filter;
 
 const DEFAULT_TILE_SIZE: TileSize = 512;
 
@@ -536,11 +536,11 @@ impl ResourceCache {
         &mut self,
         key: RenderTaskCacheKey,
         gpu_cache: &mut GpuCache,
-        render_tasks: &mut RenderTaskTree,
+        render_tasks: &mut RenderTaskGraph,
         user_data: Option<[f32; 3]>,
         is_opaque: bool,
         f: F,
-    ) -> RenderTaskCacheEntryHandle where F: FnOnce(&mut RenderTaskTree) -> RenderTaskId {
+    ) -> RenderTaskCacheEntryHandle where F: FnOnce(&mut RenderTaskGraph) -> RenderTaskId {
         self.cached_render_tasks.request_render_task(
             key,
             &mut self.texture_cache,
@@ -1377,7 +1377,7 @@ impl ResourceCache {
         mut font: FontInstance,
         glyph_keys: &[GlyphKey],
         gpu_cache: &mut GpuCache,
-        render_task_tree: &mut RenderTaskTree,
+        render_task_tree: &mut RenderTaskGraph,
     ) {
         debug_assert_eq!(self.state, State::AddResources);
 
@@ -1565,12 +1565,12 @@ impl ResourceCache {
         })
     }
 
-    pub fn before_frames(&mut self, time: SystemTime) {
-        self.texture_cache.before_frames(time);
+    pub fn prepare_for_frames(&mut self, time: SystemTime) {
+        self.texture_cache.prepare_for_frames(time);
     }
 
-    pub fn after_frames(&mut self) {
-        self.texture_cache.after_frames();
+    pub fn bookkeep_after_frames(&mut self) {
+        self.texture_cache.bookkeep_after_frames();
     }
 
     pub fn requires_frame_build(&self) -> bool {
@@ -1593,7 +1593,7 @@ impl ResourceCache {
     pub fn block_until_all_resources_added(
         &mut self,
         gpu_cache: &mut GpuCache,
-        render_tasks: &mut RenderTaskTree,
+        render_tasks: &mut RenderTaskGraph,
         texture_cache_profile: &mut TextureCacheProfileCounters,
     ) {
         profile_scope!("block_until_all_resources_added");
@@ -1614,12 +1614,6 @@ impl ResourceCache {
 
         // Apply any updates of new / updated images (incl. blobs) to the texture cache.
         self.update_texture_cache(gpu_cache);
-        render_tasks.prepare_for_render();
-        self.cached_render_tasks.update(
-            gpu_cache,
-            &mut self.texture_cache,
-            render_tasks,
-        );
     }
 
     fn rasterize_missing_blob_images(&mut self) {
@@ -1984,8 +1978,6 @@ impl ResourceCache {
     pub fn save_capture(
         &mut self, root: &PathBuf
     ) -> (PlainResources, Vec<ExternalCaptureImage>) {
-        #[cfg(feature = "png")]
-        use device::ReadPixelsFormat;
         use std::fs;
         use std::io::Write;
 
@@ -2048,7 +2040,7 @@ impl ResourceCache {
                     CaptureConfig::save_png(
                         root.join(format!("images/{}.png", image_id)),
                         desc.size,
-                        ReadPixelsFormat::Standard(desc.format),
+                        desc.format,
                         &arc,
                     );
                     let file_name = format!("{}.raw", image_id);
@@ -2103,7 +2095,7 @@ impl ResourceCache {
                     CaptureConfig::save_png(
                         root.join(format!("blobs/{}.png", num_blobs)),
                         desc.size,
-                        ReadPixelsFormat::Standard(desc.format),
+                        desc.format,
                         &result.data,
                     );
                     let file_name = format!("{}.raw", num_blobs);
@@ -2191,6 +2183,9 @@ impl ResourceCache {
         // and fill out the map as the first step.
         let mut raw_map = FastHashMap::<String, Arc<Vec<u8>>>::default();
 
+        self.clear(ClearCache::all());
+        self.clear_images(|_| true);
+
         match caches {
             Some(cached) => {
                 self.current_frame_id = cached.current_frame_id;
@@ -2202,10 +2197,6 @@ impl ResourceCache {
             }
             None => {
                 self.current_frame_id = FrameId::INVALID;
-                self.cached_glyphs.clear();
-                self.cached_glyph_dimensions.clear();
-                self.cached_images.clear();
-                self.cached_render_tasks.clear();
                 self.texture_cache = TextureCache::new(
                     self.texture_cache.max_texture_size(),
                     self.texture_cache.max_texture_layers(),

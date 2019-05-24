@@ -4,21 +4,21 @@
 
 use api::{NormalBorder, PremultipliedColorF, Shadow};
 use api::units::*;
-use border::create_border_segments;
-use border::NormalBorderAu;
-use display_list_flattener::{CreateShadow, IsVisible};
-use frame_builder::{FrameBuildingState};
-use gpu_cache::GpuDataRequest;
-use intern;
-use internal_types::LayoutPrimitiveInfo;
-use prim_store::{
+use crate::border::create_border_segments;
+use crate::border::NormalBorderAu;
+use crate::display_list_flattener::{CreateShadow, IsVisible};
+use crate::frame_builder::{FrameBuildingState};
+use crate::gpu_cache::{GpuCache, GpuDataRequest};
+use crate::intern;
+use crate::internal_types::LayoutPrimitiveInfo;
+use crate::prim_store::{
     BorderSegmentInfo, BrushSegment, NinePatchDescriptor, PrimKey,
     PrimKeyCommonData, PrimTemplate, PrimTemplateCommonData,
     PrimitiveInstanceKind, PrimitiveOpacity, PrimitiveSceneData,
     PrimitiveStore, InternablePrimitive,
 };
-use resource_cache::ImageRequest;
-use storage;
+use crate::resource_cache::{ImageRequest, ResourceCache};
+use crate::storage;
 
 #[cfg_attr(feature = "capture", derive(Serialize))]
 #[cfg_attr(feature = "replay", derive(Deserialize))]
@@ -248,16 +248,23 @@ impl ImageBorderData {
             .get_image_properties(self.request.key);
 
         common.opacity = if let Some(image_properties) = image_properties {
-            frame_state.resource_cache.request_image(
-                self.request,
-                frame_state.gpu_cache,
-            );
             PrimitiveOpacity {
                 is_opaque: image_properties.descriptor.is_opaque,
             }
         } else {
             PrimitiveOpacity::opaque()
         }
+    }
+
+    pub fn request_resources(
+        &mut self,
+        resource_cache: &mut ResourceCache,
+        gpu_cache: &mut GpuCache,
+    ) {
+        resource_cache.request_image(
+            self.request,
+            gpu_cache,
+        );
     }
 
     fn write_prim_gpu_blocks(

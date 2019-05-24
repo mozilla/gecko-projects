@@ -80,6 +80,7 @@
 #include "mozilla/dom/ShadowRoot.h"
 #include "mozilla/dom/XULCommandEvent.h"
 #include "mozilla/dom/WorkerCommon.h"
+#include "mozilla/net/CookieSettings.h"
 #include "mozilla/EventDispatcher.h"
 #include "mozilla/EventListenerManager.h"
 #include "mozilla/EventStateManager.h"
@@ -248,6 +249,7 @@
 #include "mozilla/RecordReplay.h"
 #include "nsThreadManager.h"
 #include "nsIBidiKeyboard.h"
+#include "ReferrerInfo.h"
 
 #if defined(XP_WIN)
 // Undefine LoadImage to prevent naming conflict with Windows.
@@ -309,49 +311,19 @@ nsString* nsContentUtils::sAltText = nullptr;
 nsString* nsContentUtils::sModifierSeparator = nullptr;
 
 bool nsContentUtils::sInitialized = false;
-bool nsContentUtils::sIsFullscreenApiEnabled = false;
-bool nsContentUtils::sIsUnprefixedFullscreenApiEnabled = false;
-bool nsContentUtils::sTrustedFullscreenOnly = true;
-bool nsContentUtils::sIsCutCopyAllowed = true;
-bool nsContentUtils::sIsUpgradableDisplayContentPrefEnabled = false;
-bool nsContentUtils::sIsFrameTimingPrefEnabled = false;
-bool nsContentUtils::sIsPerformanceTimingEnabled = false;
-bool nsContentUtils::sIsResourceTimingEnabled = false;
-bool nsContentUtils::sIsPerformanceNavigationTimingEnabled = false;
-bool nsContentUtils::sIsFormAutofillAutocompleteEnabled = false;
-bool nsContentUtils::sSendPerformanceTimingNotifications = false;
-bool nsContentUtils::sUseActivityCursor = false;
-bool nsContentUtils::sAnimationsAPICoreEnabled = false;
-bool nsContentUtils::sGetBoxQuadsEnabled = false;
-bool nsContentUtils::sSkipCursorMoveForSameValueSet = false;
-bool nsContentUtils::sRequestIdleCallbackEnabled = false;
-bool nsContentUtils::sTailingEnabled = false;
-bool nsContentUtils::sShowInputPlaceholderOnFocus = true;
-bool nsContentUtils::sAutoFocusEnabled = true;
 #ifndef RELEASE_OR_BETA
 bool nsContentUtils::sBypassCSSOMOriginCheck = false;
 #endif
 
-bool nsContentUtils::sIsBytecodeCacheEnabled = false;
-int32_t nsContentUtils::sBytecodeCacheStrategy = 0;
 nsCString* nsContentUtils::sJSBytecodeMimeType = nullptr;
-
-int32_t nsContentUtils::sPrivacyMaxInnerWidth = 1000;
-int32_t nsContentUtils::sPrivacyMaxInnerHeight = 1000;
 
 nsContentUtils::UserInteractionObserver*
     nsContentUtils::sUserInteractionObserver = nullptr;
-
-uint32_t nsContentUtils::sHandlingInputTimeout = 1000;
 
 nsHtml5StringParser* nsContentUtils::sHTMLFragmentParser = nullptr;
 nsIParser* nsContentUtils::sXMLFragmentParser = nullptr;
 nsIFragmentContentSink* nsContentUtils::sXMLFragmentSink = nullptr;
 bool nsContentUtils::sFragmentParsingActive = false;
-
-bool nsContentUtils::sDoNotTrackEnabled = false;
-
-bool nsContentUtils::sAntiTrackingControlCenterUIEnabled = false;
 
 mozilla::LazyLogModule nsContentUtils::sDOMDumpLog("Dump");
 
@@ -562,7 +534,8 @@ class nsContentUtils::UserInteractionObserver final
 
 /* static */
 TimeDuration nsContentUtils::HandlingUserInputTimeout() {
-  return TimeDuration::FromMilliseconds(sHandlingInputTimeout);
+  return TimeDuration::FromMilliseconds(
+      StaticPrefs::dom_event_handling_user_input_time_limit());
 }
 
 // static
@@ -632,92 +605,9 @@ nsresult nsContentUtils::Init() {
   Preferences::AddBoolVarCache(&sAllowXULXBL_for_file,
                                "dom.allow_XUL_XBL_for_file");
 
-  Preferences::AddBoolVarCache(&sIsFullscreenApiEnabled,
-                               "full-screen-api.enabled");
-
-  Preferences::AddBoolVarCache(&sIsUnprefixedFullscreenApiEnabled,
-                               "full-screen-api.unprefix.enabled");
-
-  Preferences::AddBoolVarCache(&sTrustedFullscreenOnly,
-                               "full-screen-api.allow-trusted-requests-only");
-
-  Preferences::AddBoolVarCache(&sIsCutCopyAllowed, "dom.allow_cut_copy", true);
-
-  Preferences::AddBoolVarCache(&sIsPerformanceTimingEnabled,
-                               "dom.enable_performance", true);
-
-  Preferences::AddBoolVarCache(&sIsResourceTimingEnabled,
-                               "dom.enable_resource_timing", true);
-
-  Preferences::AddBoolVarCache(&sIsPerformanceNavigationTimingEnabled,
-                               "dom.enable_performance_navigation_timing",
-                               true);
-
-  Preferences::AddBoolVarCache(&sIsUpgradableDisplayContentPrefEnabled,
-                               "security.mixed_content.upgrade_display_content",
-                               false);
-
-  Preferences::AddBoolVarCache(&sIsFrameTimingPrefEnabled,
-                               "dom.enable_frame_timing", false);
-
-  Preferences::AddBoolVarCache(&sIsFormAutofillAutocompleteEnabled,
-                               "dom.forms.autocomplete.formautofill", false);
-
-  Preferences::AddIntVarCache(&sPrivacyMaxInnerWidth,
-                              "privacy.window.maxInnerWidth", 1000);
-
-  Preferences::AddIntVarCache(&sPrivacyMaxInnerHeight,
-                              "privacy.window.maxInnerHeight", 1000);
-
-  Preferences::AddUintVarCache(
-      &sHandlingInputTimeout, "dom.event.handling-user-input-time-limit", 1000);
-
-  Preferences::AddBoolVarCache(
-      &sSendPerformanceTimingNotifications,
-      "dom.performance.enable_notify_performance_timing", false);
-
-  Preferences::AddBoolVarCache(&sDoNotTrackEnabled,
-                               "privacy.donottrackheader.enabled", false);
-
-  Preferences::AddBoolVarCache(&sUseActivityCursor, "ui.use_activity_cursor",
-                               false);
-
-  Preferences::AddBoolVarCache(&sAnimationsAPICoreEnabled,
-                               "dom.animations-api.core.enabled", false);
-
-  Preferences::AddBoolVarCache(&sGetBoxQuadsEnabled,
-                               "layout.css.getBoxQuads.enabled", false);
-
-  Preferences::AddBoolVarCache(&sSkipCursorMoveForSameValueSet,
-                               "dom.input.skip_cursor_move_for_same_value_set",
-                               true);
-
-  Preferences::AddBoolVarCache(&sRequestIdleCallbackEnabled,
-                               "dom.requestIdleCallback.enabled", false);
-
 #ifndef RELEASE_OR_BETA
   sBypassCSSOMOriginCheck = getenv("MOZ_BYPASS_CSSOM_ORIGIN_CHECK");
 #endif
-
-  Preferences::AddBoolVarCache(&sTailingEnabled, "network.http.tailing.enabled",
-                               true);
-
-  Preferences::AddBoolVarCache(&sShowInputPlaceholderOnFocus,
-                               "dom.placeholder.show_on_focus", true);
-
-  Preferences::AddBoolVarCache(&sAutoFocusEnabled, "browser.autofocus", true);
-
-  Preferences::AddBoolVarCache(&sIsBytecodeCacheEnabled,
-                               "dom.script_loader.bytecode_cache.enabled",
-                               false);
-
-  Preferences::AddBoolVarCache(
-      &sAntiTrackingControlCenterUIEnabled,
-      "browser.contentblocking.rejecttrackers.control-center.ui.enabled",
-      false);
-
-  Preferences::AddIntVarCache(&sBytecodeCacheStrategy,
-                              "dom.script_loader.bytecode_cache.strategy", 0);
 
   nsDependentCString buildID(mozilla::PlatformBuildID());
   sJSBytecodeMimeType =
@@ -1124,7 +1014,8 @@ nsContentUtils::InternalSerializeAutocompleteAttribute(
 
     // Only allow on/off if form autofill @autocomplete values aren't enabled
     // and it doesn't grant all valid values.
-    if (!sIsFormAutofillAutocompleteEnabled && !aGrantAllValidValue) {
+    if (!StaticPrefs::dom_forms_autocomplete_formautofill() &&
+        !aGrantAllValidValue) {
       return eAutocompleteAttrState_Invalid;
     }
 
@@ -1136,7 +1027,8 @@ nsContentUtils::InternalSerializeAutocompleteAttribute(
   } else {  // Check if the last token is of the contact category instead.
     // Only allow on/off if form autofill @autocomplete values aren't enabled
     // and it doesn't grant all valid values.
-    if (!sIsFormAutofillAutocompleteEnabled && !aGrantAllValidValue) {
+    if (!StaticPrefs::dom_forms_autocomplete_formautofill() &&
+        !aGrantAllValidValue) {
       return eAutocompleteAttrState_Invalid;
     }
 
@@ -2105,19 +1997,19 @@ void nsContentUtils::CalcRoundedWindowSizeForResistingFingerprinting(
   int32_t availContentWidth = 0;
   int32_t availContentHeight = 0;
 
-  availContentWidth =
-      std::min(sPrivacyMaxInnerWidth, aScreenWidth - aChromeWidth);
+  availContentWidth = std::min(StaticPrefs::privacy_window_maxInnerWidth(),
+                               aScreenWidth - aChromeWidth);
 #ifdef MOZ_WIDGET_GTK
   // In the GTK window, it will not report outside system decorations
   // when we get available window size, see Bug 581863. So, we leave a
   // 40 pixels space for them when calculating the available content
   // height. It is not necessary for the width since the content width
   // is usually pretty much the same as the chrome width.
-  availContentHeight =
-      std::min(sPrivacyMaxInnerHeight, (-40 + aScreenHeight) - aChromeHeight);
+  availContentHeight = std::min(StaticPrefs::privacy_window_maxInnerHeight(),
+                                (-40 + aScreenHeight) - aChromeHeight);
 #else
-  availContentHeight =
-      std::min(sPrivacyMaxInnerHeight, aScreenHeight - aChromeHeight);
+  availContentHeight = std::min(StaticPrefs::privacy_window_maxInnerHeight(),
+                                aScreenHeight - aChromeHeight);
 #endif
 
   // Ideally, we'd like to round window size to 1000x1000, but the
@@ -4284,6 +4176,32 @@ nsresult nsContentUtils::DispatchFocusChromeEvent(nsPIDOMWindowOuter* aWindow) {
                              CanBubble::eYes, Cancelable::eYes);
 }
 
+void nsContentUtils::RequestFrameFocus(Element& aFrameElement, bool aCanRaise) {
+  RefPtr<Element> target = &aFrameElement;
+  bool defaultAction = true;
+  if (aCanRaise) {
+    DispatchEventOnlyToChrome(target->OwnerDoc(), target,
+                              NS_LITERAL_STRING("framefocusrequested"),
+                              CanBubble::eYes, Cancelable::eYes,
+                              &defaultAction);
+  }
+  if (!defaultAction) {
+    return;
+  }
+
+  nsCOMPtr<nsIFocusManager> fm = nsFocusManager::GetFocusManager();
+  if (!fm) {
+    return;
+  }
+
+  uint32_t flags = nsIFocusManager::FLAG_NOSCROLL;
+  if (aCanRaise) {
+    flags |= nsIFocusManager::FLAG_RAISE;
+  }
+
+  fm->SetFocus(target, flags);
+}
+
 nsresult nsContentUtils::DispatchEventOnlyToChrome(
     Document* aDoc, nsISupports* aTarget, const nsAString& aEventName,
     CanBubble aCanBubble, Cancelable aCancelable, bool* aDefaultAction) {
@@ -5166,12 +5084,8 @@ void nsContentUtils::TriggerLink(nsIContent* aContent,
       fileName.SetIsVoid(true);  // No actionable download attribute was found.
     }
 
-    // Currently we query the CSP from the triggeringPrincipal, which is
-    // aContent->NodePrincipal(). After Bug 965637 we can query the CSP
-    // directly from the doc instead (aContent->OwnerDoc()).
     nsCOMPtr<nsIPrincipal> triggeringPrincipal = aContent->NodePrincipal();
-    nsCOMPtr<nsIContentSecurityPolicy> csp;
-    triggeringPrincipal->GetCsp(getter_AddRefs(csp));
+    nsCOMPtr<nsIContentSecurityPolicy> csp = aContent->GetCsp();
 
     handler->OnLinkClick(
         aContent, aLinkURI, fileName.IsVoid() ? aTargetSpec : EmptyString(),
@@ -6059,7 +5973,7 @@ bool nsContentUtils::CanAccessNativeAnon() {
 /* static */
 nsresult nsContentUtils::DispatchXULCommand(nsIContent* aTarget, bool aTrusted,
                                             Event* aSourceEvent,
-                                            nsIPresShell* aShell, bool aCtrl,
+                                            PresShell* aPresShell, bool aCtrl,
                                             bool aAlt, bool aShift, bool aMeta,
                                             uint16_t aInputSource) {
   NS_ENSURE_STATE(aTarget);
@@ -6073,10 +5987,9 @@ nsresult nsContentUtils::DispatchXULCommand(nsIContent* aTarget, bool aTrusted,
                                0, aCtrl, aAlt, aShift, aMeta, aSourceEvent,
                                aInputSource, IgnoreErrors());
 
-  if (aShell) {
+  if (aPresShell) {
     nsEventStatus status = nsEventStatus_eIgnore;
-    nsCOMPtr<nsIPresShell> kungFuDeathGrip = aShell;
-    return aShell->HandleDOMEventWithTarget(aTarget, xulCommand, &status);
+    return aPresShell->HandleDOMEventWithTarget(aTarget, xulCommand, &status);
   }
 
   ErrorResult rv;
@@ -6366,8 +6279,8 @@ void nsContentUtils::PopulateStringFromStringBuffer(nsStringBuffer* aBuf,
   aBuf->ToString(stringLen, aResultString);
 }
 
-nsIPresShell* nsContentUtils::FindPresShellForDocument(const Document* aDoc) {
-  const Document* doc = aDoc;
+PresShell* nsContentUtils::FindPresShellForDocument(const Document* aDocument) {
+  const Document* doc = aDocument;
   Document* displayDoc = doc->GetDisplayDocument();
   if (displayDoc) {
     doc = displayDoc;
@@ -6396,22 +6309,24 @@ nsIPresShell* nsContentUtils::FindPresShellForDocument(const Document* aDoc) {
   return nullptr;
 }
 
-nsIWidget* nsContentUtils::WidgetForDocument(const Document* aDoc) {
-  nsIPresShell* shell = FindPresShellForDocument(aDoc);
-  if (shell) {
-    nsViewManager* VM = shell->GetViewManager();
-    if (VM) {
-      nsView* rootView = VM->GetRootView();
-      if (rootView) {
-        nsView* displayRoot = nsViewManager::GetDisplayRootFor(rootView);
-        if (displayRoot) {
-          return displayRoot->GetNearestWidget(nullptr);
-        }
-      }
-    }
+nsIWidget* nsContentUtils::WidgetForDocument(const Document* aDocument) {
+  PresShell* presShell = FindPresShellForDocument(aDocument);
+  if (!presShell) {
+    return nullptr;
   }
-
-  return nullptr;
+  nsViewManager* vm = presShell->GetViewManager();
+  if (!vm) {
+    return nullptr;
+  }
+  nsView* rootView = vm->GetRootView();
+  if (!rootView) {
+    return nullptr;
+  }
+  nsView* displayRoot = nsViewManager::GetDisplayRootFor(rootView);
+  if (!displayRoot) {
+    return nullptr;
+  }
+  return displayRoot->GetNearestWidget(nullptr);
 }
 
 nsIWidget* nsContentUtils::WidgetForContent(const nsIContent* aContent) {
@@ -6666,42 +6581,46 @@ bool nsContentUtils::ChannelShouldInheritPrincipal(
 }
 
 /* static */
-bool nsContentUtils::IsFullscreenApiEnabled() {
-  return sIsFullscreenApiEnabled;
-}
+const char* nsContentUtils::CheckRequestFullscreenAllowed(
+    CallerType aCallerType) {
+  if (!StaticPrefs::full_screen_api_allow_trusted_requests_only() ||
+      aCallerType == CallerType::System) {
+    return nullptr;
+  }
 
-/* static */
-bool nsContentUtils::IsRequestFullscreenAllowed(CallerType aCallerType) {
+  if (!EventStateManager::IsHandlingUserInput()) {
+    return "FullscreenDeniedNotInputDriven";
+  }
+
   // If more time has elapsed since the user input than is specified by the
-  // dom.event.handling-user-input-time-limit pref (default 1 second), this
-  // function also returns false.
-
-  if (!sTrustedFullscreenOnly || aCallerType == CallerType::System) {
-    return true;
+  // dom.event.handling-user-input-time-limit pref (default 1 second),
+  // disallow fullscreen
+  TimeDuration timeout = HandlingUserInputTimeout();
+  if (timeout > TimeDuration(nullptr) &&
+      (TimeStamp::Now() - EventStateManager::GetHandlingInputStart()) >
+          timeout) {
+    return "FullscreenDeniedNotInputDriven";
   }
 
-  if (EventStateManager::IsHandlingUserInput()) {
-    TimeDuration timeout = HandlingUserInputTimeout();
-    return timeout <= TimeDuration(nullptr) ||
-           (TimeStamp::Now() - EventStateManager::GetHandlingInputStart()) <=
-               timeout;
+  // Entering full-screen on mouse mouse event is only allowed with left mouse
+  // button
+  if (StaticPrefs::full_screen_api_mouse_event_allow_left_button_only() &&
+      (EventStateManager::sCurrentMouseBtn == MouseButton::eMiddle ||
+       EventStateManager::sCurrentMouseBtn == MouseButton::eRight)) {
+    return "FullscreenDeniedMouseEventOnlyLeftBtn";
   }
 
-  return false;
+  return nullptr;
 }
 
 /* static */
 bool nsContentUtils::IsCutCopyAllowed(nsIPrincipal* aSubjectPrincipal) {
-  if (!IsCutCopyRestricted() && EventStateManager::IsHandlingUserInput()) {
+  if (StaticPrefs::dom_allow_cut_copy() &&
+      EventStateManager::IsHandlingUserInput()) {
     return true;
   }
 
   return PrincipalHasPermission(aSubjectPrincipal, nsGkAtoms::clipboardWrite);
-}
-
-/* static */
-bool nsContentUtils::IsFrameTimingEnabled() {
-  return sIsFrameTimingPrefEnabled;
 }
 
 /* static */
@@ -7034,10 +6953,6 @@ bool nsContentUtils::IsCORSSafelistedRequestHeader(const nsACString& aName,
           nsContentUtils::IsAllowedNonCorsLanguage(aValue)) ||
          (aName.LowerCaseEqualsLiteral("content-type") &&
           nsContentUtils::IsAllowedNonCorsContentType(aValue));
-}
-
-bool nsContentUtils::DoNotTrackEnabled() {
-  return nsContentUtils::sDoNotTrackEnabled;
 }
 
 mozilla::LogModule* nsContentUtils::DOMDumpLog() { return sDOMDumpLog; }
@@ -7857,13 +7772,15 @@ mozilla::Modifiers nsContentUtils::GetWidgetModifiers(int32_t aModifiers) {
   return result;
 }
 
-nsIWidget* nsContentUtils::GetWidget(nsIPresShell* aPresShell,
-                                     nsPoint* aOffset) {
-  if (aPresShell) {
-    nsIFrame* frame = aPresShell->GetRootFrame();
-    if (frame) return frame->GetView()->GetNearestWidget(aOffset);
+nsIWidget* nsContentUtils::GetWidget(PresShell* aPresShell, nsPoint* aOffset) {
+  if (!aPresShell) {
+    return nullptr;
   }
-  return nullptr;
+  nsIFrame* frame = aPresShell->GetRootFrame();
+  if (!frame) {
+    return nullptr;
+  }
+  return frame->GetView()->GetNearestWidget(aOffset);
 }
 
 int16_t nsContentUtils::GetButtonsFlagForButton(int32_t aButton) {
@@ -7896,20 +7813,23 @@ LayoutDeviceIntPoint nsContentUtils::ToWidgetPoint(
       aPresContext->AppUnitsPerDevPixel());
 }
 
-nsView* nsContentUtils::GetViewToDispatchEvent(nsPresContext* presContext,
-                                               nsIPresShell** presShell) {
-  if (presContext && presShell) {
-    *presShell = presContext->PresShell();
-    if (*presShell) {
-      NS_ADDREF(*presShell);
-      if (nsViewManager* viewManager = (*presShell)->GetViewManager()) {
-        if (nsView* view = viewManager->GetRootView()) {
-          return view;
-        }
-      }
-    }
+nsView* nsContentUtils::GetViewToDispatchEvent(nsPresContext* aPresContext,
+                                               PresShell** aPresShell) {
+  if (!aPresContext || !aPresShell) {
+    return nullptr;
   }
-  return nullptr;
+  RefPtr<PresShell> presShell = aPresContext->PresShell();
+  if (NS_WARN_IF(!presShell)) {
+    *aPresShell = nullptr;
+    return nullptr;
+  }
+  nsViewManager* viewManager = presShell->GetViewManager();
+  if (!viewManager) {
+    presShell.forget(aPresShell);  // XXX Is this intentional?
+    return nullptr;
+  }
+  presShell.forget(aPresShell);
+  return viewManager->GetRootView();
 }
 
 nsresult nsContentUtils::SendMouseEvent(
@@ -7981,7 +7901,7 @@ nsresult nsContentUtils::SendMouseEvent(
 
   nsEventStatus status = nsEventStatus_eIgnore;
   if (aToWindow) {
-    nsCOMPtr<nsIPresShell> presShell;
+    RefPtr<PresShell> presShell;
     nsView* view =
         GetViewToDispatchEvent(presContext, getter_AddRefs(presShell));
     if (!presShell || !view) {
@@ -8095,8 +8015,10 @@ nsresult nsContentUtils::SetFetchReferrerURIWithPolicy(
 
   aPrincipal->GetURI(getter_AddRefs(principalURI));
 
+  nsCOMPtr<nsIReferrerInfo> referrerInfo;
   if (!aDoc) {
-    return aChannel->SetReferrerWithPolicy(principalURI, aReferrerPolicy);
+    referrerInfo = new ReferrerInfo(principalURI, aReferrerPolicy);
+    return aChannel->SetReferrerInfoWithoutClone(referrerInfo);
   }
 
   // If it weren't for history.push/replaceState, we could just use the
@@ -8125,7 +8047,8 @@ nsresult nsContentUtils::SetFetchReferrerURIWithPolicy(
     referrerURI = principalURI;
   }
 
-  return aChannel->SetReferrerWithPolicy(referrerURI, aReferrerPolicy);
+  referrerInfo = new ReferrerInfo(referrerURI, aReferrerPolicy);
+  return aChannel->SetReferrerInfoWithoutClone(referrerInfo);
 }
 
 // static
@@ -8208,6 +8131,7 @@ nsContentUtils::StorageAccess nsContentUtils::StorageAllowedForWindow(
     // will only fail to notify the UI in case storage gets blocked.
     nsIChannel* channel = document->GetChannel();
     return InternalStorageAllowedCheck(principal, aWindow, nullptr, channel,
+                                       document->CookieSettings(),
                                        *aRejectedReason);
   }
 
@@ -8228,8 +8152,9 @@ nsContentUtils::StorageAccess nsContentUtils::StorageAllowedForDocument(
     nsIChannel* channel = aDoc->GetChannel();
 
     uint32_t rejectedReason = 0;
-    return InternalStorageAllowedCheck(principal, inner, nullptr, channel,
-                                       rejectedReason);
+    return InternalStorageAllowedCheck(
+        principal, inner, nullptr, channel,
+        const_cast<Document*>(aDoc)->CookieSettings(), rejectedReason);
   }
 
   return StorageAccess::eDeny;
@@ -8243,7 +8168,13 @@ nsContentUtils::StorageAccess nsContentUtils::StorageAllowedForNewWindow(
   // parent may be nullptr
 
   uint32_t rejectedReason = 0;
-  return InternalStorageAllowedCheck(aPrincipal, aParent, aURI, nullptr,
+  nsCOMPtr<nsICookieSettings> cs;
+  if (aParent && aParent->GetExtantDoc()) {
+    cs = aParent->GetExtantDoc()->CookieSettings();
+  } else {
+    cs = net::CookieSettings::Create();
+  }
+  return InternalStorageAllowedCheck(aPrincipal, aParent, aURI, nullptr, cs,
                                      rejectedReason);
 }
 
@@ -8258,19 +8189,24 @@ nsContentUtils::StorageAccess nsContentUtils::StorageAllowedForChannel(
       aChannel, getter_AddRefs(principal));
   NS_ENSURE_TRUE(principal, nsContentUtils::StorageAccess::eDeny);
 
+  nsCOMPtr<nsILoadInfo> loadInfo = aChannel->LoadInfo();
+  nsCOMPtr<nsICookieSettings> cookieSettings;
+  nsresult rv = loadInfo->GetCookieSettings(getter_AddRefs(cookieSettings));
+  NS_ENSURE_SUCCESS(rv, nsContentUtils::StorageAccess::eDeny);
+
   uint32_t rejectedReason = 0;
   nsContentUtils::StorageAccess result = InternalStorageAllowedCheck(
-      principal, nullptr, nullptr, aChannel, rejectedReason);
+      principal, nullptr, nullptr, aChannel, cookieSettings, rejectedReason);
 
   return result;
 }
 
 // static, public
 nsContentUtils::StorageAccess nsContentUtils::StorageAllowedForServiceWorker(
-    nsIPrincipal* aPrincipal) {
+    nsIPrincipal* aPrincipal, nsICookieSettings* aCookieSettings) {
   uint32_t rejectedReason = 0;
   return InternalStorageAllowedCheck(aPrincipal, nullptr, nullptr, nullptr,
-                                     rejectedReason);
+                                     aCookieSettings, rejectedReason);
 }
 
 // static, private
@@ -8399,11 +8335,10 @@ bool nsContentUtils::IsThirdPartyTrackingResourceWindow(
   return httpChannel->IsThirdPartyTrackingResource();
 }
 
-static bool StorageDisabledByAntiTrackingInternal(nsPIDOMWindowInner* aWindow,
-                                                  nsIChannel* aChannel,
-                                                  nsIPrincipal* aPrincipal,
-                                                  nsIURI* aURI,
-                                                  uint32_t& aRejectedReason) {
+static bool StorageDisabledByAntiTrackingInternal(
+    nsPIDOMWindowInner* aWindow, nsIChannel* aChannel, nsIPrincipal* aPrincipal,
+    nsIURI* aURI, nsICookieSettings* aCookieSettings,
+    uint32_t& aRejectedReason) {
   MOZ_ASSERT(aWindow || aChannel || aPrincipal);
 
   if (aWindow) {
@@ -8430,7 +8365,8 @@ static bool StorageDisabledByAntiTrackingInternal(nsPIDOMWindowInner* aWindow,
   }
 
   MOZ_ASSERT(aPrincipal);
-  return !AntiTrackingCommon::IsFirstPartyStorageAccessGrantedFor(aPrincipal);
+  return !AntiTrackingCommon::IsFirstPartyStorageAccessGrantedFor(
+      aPrincipal, aCookieSettings);
 }
 
 // static public
@@ -8439,9 +8375,22 @@ bool nsContentUtils::StorageDisabledByAntiTracking(nsPIDOMWindowInner* aWindow,
                                                    nsIPrincipal* aPrincipal,
                                                    nsIURI* aURI,
                                                    uint32_t& aRejectedReason) {
+  nsCOMPtr<nsICookieSettings> cookieSettings;
+  if (aWindow) {
+    if (aWindow->GetExtantDoc()) {
+      cookieSettings = aWindow->GetExtantDoc()->CookieSettings();
+    }
+  } else if (aChannel) {
+    nsCOMPtr<nsILoadInfo> loadInfo = aChannel->LoadInfo();
+    Unused << loadInfo->GetCookieSettings(getter_AddRefs(cookieSettings));
+  }
+  if (!cookieSettings) {
+    cookieSettings = net::CookieSettings::Create();
+  }
   bool disabled = StorageDisabledByAntiTrackingInternal(
-      aWindow, aChannel, aPrincipal, aURI, aRejectedReason);
-  if (sAntiTrackingControlCenterUIEnabled) {
+      aWindow, aChannel, aPrincipal, aURI, cookieSettings, aRejectedReason);
+  if (StaticPrefs::
+          browser_contentblocking_rejecttrackers_control_center_ui_enabled()) {
     if (aWindow) {
       AntiTrackingCommon::NotifyBlockingDecision(
           aWindow,
@@ -8462,13 +8411,13 @@ bool nsContentUtils::StorageDisabledByAntiTracking(nsPIDOMWindowInner* aWindow,
 // static, private
 nsContentUtils::StorageAccess nsContentUtils::InternalStorageAllowedCheck(
     nsIPrincipal* aPrincipal, nsPIDOMWindowInner* aWindow, nsIURI* aURI,
-    nsIChannel* aChannel, uint32_t& aRejectedReason) {
+    nsIChannel* aChannel, nsICookieSettings* aCookieSettings,
+    uint32_t& aRejectedReason) {
   MOZ_ASSERT(aPrincipal);
 
   aRejectedReason = 0;
 
   StorageAccess access = StorageAccess::eAllow;
-  nsCOMPtr<nsICookieSettings> cookieSettings;
 
   // We don't allow storage on the null principal, in general. Even if the
   // calling context is chrome.
@@ -8487,15 +8436,6 @@ nsContentUtils::StorageAccess nsContentUtils::InternalStorageAllowedCheck(
     if (IsInPrivateBrowsing(document)) {
       access = StorageAccess::ePrivateBrowsing;
     }
-
-    if (document) {
-      cookieSettings = document->CookieSettings();
-    }
-  }
-
-  if (aChannel) {
-    nsCOMPtr<nsILoadInfo> loadInfo = aChannel->LoadInfo();
-    loadInfo->GetCookieSettings(getter_AddRefs(cookieSettings));
   }
 
   uint32_t lifetimePolicy;
@@ -8507,7 +8447,7 @@ nsContentUtils::StorageAccess nsContentUtils::InternalStorageAllowedCheck(
   if (policy) {
     lifetimePolicy = nsICookieService::ACCEPT_NORMALLY;
   } else {
-    GetCookieLifetimePolicyFromCookieSettings(cookieSettings, aPrincipal,
+    GetCookieLifetimePolicyFromCookieSettings(aCookieSettings, aPrincipal,
                                               &lifetimePolicy);
   }
 
@@ -9254,7 +9194,7 @@ void nsContentUtils::GetPresentationURL(nsIDocShell* aDocShell,
   MOZ_ASSERT(aDocShell);
 
   // Simulate receiver context for web platform test
-  if (Preferences::GetBool("dom.presentation.testing.simulate-receiver")) {
+  if (StaticPrefs::dom_presentation_testing_simulate_receiver()) {
     RefPtr<Document> doc;
 
     nsCOMPtr<nsPIDOMWindowOuter> docShellWin =
@@ -9846,20 +9786,13 @@ bool nsContentUtils::AttemptLargeAllocationLoad(nsIHttpChannel* aChannel) {
   const bool isWin32 = false;
 #endif
 
-  static bool sLargeAllocForceEnable = false;
-  static bool sCachedLargeAllocForceEnable = false;
-  if (!sCachedLargeAllocForceEnable) {
-    sCachedLargeAllocForceEnable = true;
-    mozilla::Preferences::AddBoolVarCache(&sLargeAllocForceEnable,
-                                          "dom.largeAllocation.forceEnable");
-  }
-
   // We want to enable the large allocation header on 32-bit windows machines,
   // and disable it on other machines, while still printing diagnostic messages.
   // dom.largeAllocation.forceEnable can allow you to enable the process
   // switching behavior of the Large-Allocation header on non 32-bit windows
   // machines.
-  bool largeAllocEnabled = isWin32 || sLargeAllocForceEnable;
+  bool largeAllocEnabled =
+      isWin32 || StaticPrefs::dom_largeAllocation_forceEnable();
   if (!largeAllocEnabled) {
     NS_WARNING(
         "dom.largeAllocation.forceEnable not set - "
@@ -9887,20 +9820,16 @@ bool nsContentUtils::AttemptLargeAllocationLoad(nsIHttpChannel* aChannel) {
   NS_ENSURE_TRUE(uri, false);
 
   nsCOMPtr<nsIURI> referrer;
-  rv = aChannel->GetReferrer(getter_AddRefs(referrer));
+  nsCOMPtr<nsIReferrerInfo> referrerInfo;
+  rv = aChannel->GetReferrerInfo(getter_AddRefs(referrerInfo));
   NS_ENSURE_SUCCESS(rv, false);
+  if (referrerInfo) {
+    referrer = referrerInfo->GetComputedReferrer();
+  }
 
   nsCOMPtr<nsILoadInfo> loadInfo = aChannel->LoadInfo();
   nsCOMPtr<nsIPrincipal> triggeringPrincipal = loadInfo->TriggeringPrincipal();
-
-  // Currently we query the CSP from the triggeringPrincipal within the
-  // loadInfo. After Bug 965637, we can query the CSP from the loadInfo, which
-  // internally queries the CSP from the Client.
-  nsCOMPtr<nsIContentSecurityPolicy> csp;
-  if (triggeringPrincipal) {
-    rv = triggeringPrincipal->GetCsp(getter_AddRefs(csp));
-    NS_ENSURE_SUCCESS(rv, false);
-  }
+  nsCOMPtr<nsIContentSecurityPolicy> csp = loadInfo->GetCsp();
 
   // Get the channel's load flags, and use them to generate nsIWebNavigation
   // load flags. We want to make sure to propagate the refresh and cache busting
@@ -10619,21 +10548,6 @@ bool nsContentUtils::
          topLevel->GetPresShell()->GetPresContext() &&
          !topLevel->GetPresShell()->GetPresContext()->HadContentfulPaint() &&
          nsThreadManager::MainThreadHasPendingHighPriorityEvents();
-}
-
-/* static */
-uint32_t nsContentUtils::GetNodeDepth(nsINode* aNode) {
-  uint32_t depth = 1;
-
-  MOZ_ASSERT(aNode, "Node shouldn't be null");
-
-  // Use GetFlattenedTreeParentNode to bypass the shadow root and cross the
-  // shadow boundary to calculate the node depth without the shadow root.
-  while ((aNode = aNode->GetFlattenedTreeParentNode())) {
-    ++depth;
-  }
-
-  return depth;
 }
 
 /* static */

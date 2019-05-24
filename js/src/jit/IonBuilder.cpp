@@ -755,8 +755,8 @@ AbortReasonOr<Ok> IonBuilder::analyzeNewLoopTypes(
 AbortReasonOr<Ok> IonBuilder::init() {
   {
     LifoAlloc::AutoFallibleScope fallibleAllocator(alloc().lifoAlloc());
-    if (!TypeScript::FreezeTypeSets(constraints(), script(), &thisTypes,
-                                    &argTypes, &typeArray)) {
+    if (!JitScript::FreezeTypeSets(constraints(), script(), &thisTypes,
+                                   &argTypes, &typeArray)) {
       return abort(AbortReason::Alloc);
     }
   }
@@ -773,7 +773,7 @@ AbortReasonOr<Ok> IonBuilder::init() {
     argTypes = nullptr;
   }
 
-  bytecodeTypeMap = script()->types()->bytecodeTypeMap();
+  bytecodeTypeMap = script()->jitScript()->bytecodeTypeMap();
 
   return Ok();
 }
@@ -3204,11 +3204,10 @@ AbortReasonOr<Ok> IonBuilder::visitTry(CFGTry* try_) {
   // Try-catch within inline frames is not yet supported.
   MOZ_ASSERT(!isInlineBuilder());
 
-  // Try-catch during the arguments usage analysis is not yet supported. Code
-  // accessing the arguments within the 'catch' block is not accounted for.
-  if (info().analysisMode() == Analysis_ArgumentsUsage) {
-    return abort(AbortReason::Disable,
-                 "Try-catch during arguments usage analysis");
+  // Try-catch during analyses is not yet supported. Code within the 'catch'
+  // block is not accounted for.
+  if (info().isAnalysis()) {
+    return abort(AbortReason::Disable, "Try-catch during analysis");
   }
 
   graph().setHasTryBlock();
@@ -4051,8 +4050,10 @@ IonBuilder::InliningResult IonBuilder::inlineScriptedCall(CallInfo& callInfo,
 
   // Improve type information of |this| when not set.
   if (callInfo.constructing() && !callInfo.thisArg()->resultTypeSet()) {
-    StackTypeSet* types = TypeScript::ThisTypes(calleeScript);
-    if (types && !types->unknown()) {
+    AutoSweepJitScript sweep(calleeScript);
+    StackTypeSet* types =
+        calleeScript->jitScript()->thisTypes(sweep, calleeScript);
+    if (!types->unknown()) {
       TemporaryTypeSet* clonedTypes = types->clone(alloc_->lifoAlloc());
       if (!clonedTypes) {
         return abort(AbortReason::Alloc);
@@ -5331,8 +5332,15 @@ MDefinition* IonBuilder::createThisScriptedSingleton(JSFunction* target) {
     return nullptr;
   }
 
-  StackTypeSet* thisTypes = TypeScript::ThisTypes(target->nonLazyScript());
-  if (!thisTypes || !thisTypes->hasType(TypeSet::ObjectType(templateObject))) {
+  JSScript* targetScript = target->nonLazyScript();
+  JitScript* jitScript = targetScript->jitScript();
+  if (!jitScript) {
+    return nullptr;
+  }
+
+  AutoSweepJitScript sweep(targetScript);
+  StackTypeSet* thisTypes = jitScript->thisTypes(sweep, targetScript);
+  if (!thisTypes->hasType(TypeSet::ObjectType(templateObject))) {
     return nullptr;
   }
 
@@ -5394,8 +5402,15 @@ MDefinition* IonBuilder::createThisScriptedBaseline(MDefinition* callee) {
     return nullptr;
   }
 
-  StackTypeSet* thisTypes = TypeScript::ThisTypes(target->nonLazyScript());
-  if (!thisTypes || !thisTypes->hasType(TypeSet::ObjectType(templateObject))) {
+  JSScript* targetScript = target->nonLazyScript();
+  JitScript* jitScript = targetScript->jitScript();
+  if (!jitScript) {
+    return nullptr;
+  }
+
+  AutoSweepJitScript sweep(targetScript);
+  StackTypeSet* thisTypes = jitScript->thisTypes(sweep, targetScript);
+  if (!thisTypes->hasType(TypeSet::ObjectType(templateObject))) {
     return nullptr;
   }
 
@@ -6081,21 +6096,26 @@ bool IonBuilder::testNeedsArgumentCheck(JSFunction* target,
   }
 
   JSScript* targetScript = target->nonLazyScript();
+  JitScript* jitScript = targetScript->jitScript();
+  if (!jitScript) {
+    return true;
+  }
 
+  AutoSweepJitScript sweep(targetScript);
   if (!ArgumentTypesMatch(callInfo.thisArg(),
-                          TypeScript::ThisTypes(targetScript))) {
+                          jitScript->thisTypes(sweep, targetScript))) {
     return true;
   }
   uint32_t expected_args = Min<uint32_t>(callInfo.argc(), target->nargs());
   for (size_t i = 0; i < expected_args; i++) {
     if (!ArgumentTypesMatch(callInfo.getArg(i),
-                            TypeScript::ArgTypes(targetScript, i))) {
+                            jitScript->argTypes(sweep, targetScript, i))) {
       return true;
     }
   }
   for (size_t i = callInfo.argc(); i < target->nargs(); i++) {
-    if (!TypeScript::ArgTypes(targetScript, i)
-             ->mightBeMIRType(MIRType::Undefined)) {
+    StackTypeSet* types = jitScript->argTypes(sweep, targetScript, i);
+    if (!types->mightBeMIRType(MIRType::Undefined)) {
       return true;
     }
   }
@@ -13566,8 +13586,8 @@ MInstruction* IonBuilder::addSharedTypedArrayGuard(MDefinition* obj) {
 }
 
 TemporaryTypeSet* IonBuilder::bytecodeTypes(jsbytecode* pc) {
-  return TypeScript::BytecodeTypes(script(), pc, bytecodeTypeMap,
-                                   &typeArrayHint, typeArray);
+  return JitScript::BytecodeTypes(script(), pc, bytecodeTypeMap, &typeArrayHint,
+                                  typeArray);
 }
 
 TypedObjectPrediction IonBuilder::typedObjectPrediction(MDefinition* typedObj) {

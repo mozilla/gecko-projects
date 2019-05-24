@@ -162,6 +162,7 @@
 #include "nsIJARChannel.h"
 #include "nsIScreenManager.h"
 #include "nsIEffectiveTLDService.h"
+#include "nsIClassifiedChannel.h"
 
 #include "xpcprivate.h"
 
@@ -309,6 +310,7 @@ using mozilla::TimeStamp;
   PR_END_MACRO
 
 static LazyLogModule gDOMLeakPRLogOuter("DOMLeakOuter");
+extern LazyLogModule gPageCacheLog;
 
 static int32_t gOpenPopupSpamCount = 0;
 
@@ -992,14 +994,13 @@ bool nsOuterWindowProxy::GetSubframeWindow(JSContext* cx,
   // Just return the window's global
   nsGlobalWindowOuter* global = nsGlobalWindowOuter::Cast(frame);
   frame->EnsureInnerWindow();
-  JSObject* obj = global->FastGetGlobalJSObject();
+  JSObject* obj = global->GetGlobalJSObject();
   // This null check fixes a hard-to-reproduce crash that occurs when we
   // get here when we're mid-call to nsDocShell::Destroy. See bug 640904
   // comment 105.
   if (MOZ_UNLIKELY(!obj)) {
     return xpc::Throw(cx, NS_ERROR_FAILURE);
   }
-  JS::ExposeObjectToActiveJS(obj);
   vp.setObject(*obj);
   return JS_WrapValue(cx, vp);
 }
@@ -1505,10 +1506,6 @@ nsresult nsGlobalWindowOuter::EnsureScriptEnvironment() {
 
 nsIScriptContext* nsGlobalWindowOuter::GetScriptContext() { return mContext; }
 
-JSObject* nsGlobalWindowOuter::GetGlobalJSObject() {
-  return FastGetGlobalJSObject();
-}
-
 bool nsGlobalWindowOuter::WouldReuseInnerWindow(Document* aNewDocument) {
   // We reuse the inner window when:
   // a. We are currently at our original document.
@@ -1551,7 +1548,8 @@ bool nsGlobalWindowOuter::WouldReuseInnerWindow(Document* aNewDocument) {
   return false;
 }
 
-void nsGlobalWindowOuter::SetInitialPrincipalToSubject() {
+void nsGlobalWindowOuter::SetInitialPrincipalToSubject(
+    nsIContentSecurityPolicy* aCSP) {
   // First, grab the subject principal.
   nsCOMPtr<nsIPrincipal> newWindowPrincipal =
       nsContentUtils::SubjectPrincipalOrSystemIfNativeCaller();
@@ -1584,7 +1582,7 @@ void nsGlobalWindowOuter::SetInitialPrincipalToSubject() {
 #endif
   }
 
-  GetDocShell()->CreateAboutBlankContentViewer(newWindowPrincipal);
+  GetDocShell()->CreateAboutBlankContentViewer(newWindowPrincipal, aCSP);
 
   if (mDoc) {
     mDoc->SetIsInitialDocument(true);
@@ -1997,15 +1995,15 @@ nsresult nsGlobalWindowOuter::SetNewDocument(Document* aDocument,
 
   bool doomCurrentInner = false;
 
+  // Only non-gray (i.e. exposed to JS) objects should be assigned to
+  // newInnerGlobal.
   JS::Rooted<JSObject*> newInnerGlobal(cx);
   if (reUseInnerWindow) {
     // We're reusing the current inner window.
     NS_ASSERTION(!currentInner->IsFrozen(),
                  "We should never be reusing a shared inner window");
     newInnerWindow = currentInner;
-    newInnerGlobal = currentInner->GetWrapperPreserveColor();
-
-    JS::ExposeObjectToActiveJS(newInnerGlobal);
+    newInnerGlobal = currentInner->GetWrapper();
 
     // We're reusing the inner window, but this still counts as a navigation,
     // so all expandos and such defined on the outer window should go away.
@@ -2032,7 +2030,7 @@ nsresult nsGlobalWindowOuter::SetNewDocument(Document* aDocument,
   } else {
     if (aState) {
       newInnerWindow = wsh->GetInnerWindow();
-      newInnerGlobal = newInnerWindow->GetWrapperPreserveColor();
+      newInnerGlobal = newInnerWindow->GetWrapper();
     } else {
       newInnerWindow = nsGlobalWindowInner::Create(this, thisChrome);
       if (StaticPrefs::dom_timeout_defer_during_load()) {
@@ -2099,7 +2097,6 @@ nsresult nsGlobalWindowOuter::SetNewDocument(Document* aDocument,
 
       SetWrapper(mContext->GetWindowProxy());
     } else {
-      JS::ExposeObjectToActiveJS(newInnerGlobal);
       JS::Rooted<JSObject*> outerObject(
           cx, NewOuterWindowProxy(cx, newInnerGlobal, thisChrome));
       if (!outerObject) {
@@ -2889,6 +2886,9 @@ void nsPIDOMWindowOuter::SetAudioMuted(bool aMuted) {
     return;
   }
 
+  MOZ_LOG(AudioChannelService::GetAudioChannelLog(), LogLevel::Debug,
+          ("nsPIDOMWindowOuter %p, SetAudioMuted=%s", this,
+           aMuted ? "muted" : "unmuted"));
   mAudioMuted = aMuted;
   RefreshMediaElementsVolume();
 }
@@ -4496,9 +4496,9 @@ void nsGlobalWindowOuter::FinishFullscreenChange(bool aIsFullscreen) {
   DispatchCustomEvent(NS_LITERAL_STRING("fullscreen"));
 
   if (!NS_WARN_IF(!IsChromeWindow())) {
-    if (nsCOMPtr<nsIPresShell> shell =
+    if (RefPtr<PresShell> presShell =
             do_QueryReferent(mChromeFields.mFullscreenPresShell)) {
-      if (nsRefreshDriver* rd = shell->GetRefreshDriver()) {
+      if (nsRefreshDriver* rd = presShell->GetRefreshDriver()) {
         rd->Thaw();
       }
       mChromeFields.mFullscreenPresShell = nullptr;
@@ -4866,14 +4866,7 @@ void nsGlobalWindowOuter::FocusOuter() {
   }
 
   nsCOMPtr<nsIBaseWindow> baseWin = do_QueryInterface(mDocShell);
-
-  bool isVisible = false;
-  if (baseWin) {
-    baseWin->GetVisibility(&isVisible);
-  }
-
-  if (!isVisible) {
-    // A hidden tab is being focused, ignore this call.
+  if (!baseWin) {
     return;
   }
 
@@ -4932,14 +4925,8 @@ void nsGlobalWindowOuter::FocusOuter() {
       return;
     }
 
-    RefPtr<Element> frame = parentdoc->FindContentForSubDocument(mDoc);
-    if (frame) {
-      uint32_t flags = nsIFocusManager::FLAG_NOSCROLL;
-      if (canFocus) flags |= nsIFocusManager::FLAG_RAISE;
-      DebugOnly<nsresult> rv = fm->SetFocus(frame, flags);
-      MOZ_ASSERT(NS_SUCCEEDED(rv),
-                 "SetFocus only fails if the first argument is null, "
-                 "but we pass an element");
+    if (Element* frame = parentdoc->FindContentForSubDocument(mDoc)) {
+      nsContentUtils::RequestFrameFocus(*frame, canFocus);
     }
     return;
   }
@@ -5372,16 +5359,15 @@ void nsGlobalWindowOuter::FirePopupBlockedEvent(
 
 void nsGlobalWindowOuter::NotifyContentBlockingEvent(
     unsigned aEvent, nsIChannel* aChannel, bool aBlocked, nsIURI* aURIHint,
+    nsIChannel* aTrackingChannel,
     const mozilla::Maybe<AntiTrackingCommon::StorageAccessGrantedReason>&
         aReason) {
   MOZ_ASSERT(aURIHint);
+  DebugOnly<bool> isCookiesBlockedTracker =
+      aEvent == nsIWebProgressListener::STATE_COOKIES_BLOCKED_TRACKER;
   MOZ_ASSERT_IF(aBlocked, aReason.isNothing());
-  MOZ_ASSERT_IF(aEvent != nsIWebProgressListener::STATE_COOKIES_BLOCKED_TRACKER,
-                aReason.isNothing());
-  MOZ_ASSERT_IF(
-      !aBlocked &&
-          aEvent == nsIWebProgressListener::STATE_COOKIES_BLOCKED_TRACKER,
-      aReason.isSome());
+  MOZ_ASSERT_IF(!isCookiesBlockedTracker, aReason.isNothing());
+  MOZ_ASSERT_IF(isCookiesBlockedTracker && !aBlocked, aReason.isSome());
 
   nsCOMPtr<nsIDocShell> docShell = GetDocShell();
   if (!docShell) {
@@ -5392,6 +5378,8 @@ void nsGlobalWindowOuter::NotifyContentBlockingEvent(
 
   nsCOMPtr<nsIURI> uri(aURIHint);
   nsCOMPtr<nsIChannel> channel(aChannel);
+  nsCOMPtr<nsIClassifiedChannel> trackingChannel =
+      do_QueryInterface(aTrackingChannel);
 
   static bool prefInitialized = false;
   if (!prefInitialized) {
@@ -5403,7 +5391,8 @@ void nsGlobalWindowOuter::NotifyContentBlockingEvent(
 
   nsCOMPtr<nsIRunnable> func = NS_NewRunnableFunction(
       "NotifyContentBlockingEventDelayed",
-      [doc, docShell, uri, channel, aEvent, aBlocked, aReason]() {
+      [doc, docShell, uri, channel, aEvent, aBlocked, aReason,
+       trackingChannel]() {
         // This event might come after the user has navigated to another
         // page. To prevent showing the TrackingProtection UI on the wrong
         // page, we need to check that the loading URI for the channel is
@@ -5470,7 +5459,14 @@ void nsGlobalWindowOuter::NotifyContentBlockingEvent(
           }
         } else if (aEvent ==
                    nsIWebProgressListener::STATE_COOKIES_BLOCKED_TRACKER) {
-          doc->SetHasTrackingCookiesBlocked(aBlocked, origin, aReason);
+          nsTArray<nsCString> trackingFullHashes;
+          if (trackingChannel) {
+            Unused << trackingChannel->GetMatchedTrackingFullHashes(
+                trackingFullHashes);
+          }
+          doc->SetHasTrackingCookiesBlocked(aBlocked, origin, aReason,
+                                            trackingFullHashes);
+
           if (!aBlocked) {
             unblocked = !doc->GetHasTrackingCookiesBlocked();
           }
@@ -6052,6 +6048,19 @@ void nsGlobalWindowOuter::PostMessageMozOuter(JSContext* aCx,
     return;
   }
 
+  if (StaticPrefs::dom_separate_event_queue_for_post_message_enabled()) {
+    if (mDoc) {
+      Document* doc = mDoc->GetTopLevelContentDocument();
+      if (doc && doc->GetReadyStateEnum() < Document::READYSTATE_COMPLETE) {
+        // As long as the top level is loading, we can dispatch events to the
+        // queue because the queue will be flushed eventually
+        mozilla::dom::TabGroup* tabGroup = TabGroup();
+        aError = tabGroup->QueuePostMessageEvent(event.forget());
+        return;
+      }
+    }
+  }
+
   aError = Dispatch(TaskCategory::Other, event.forget());
 }
 
@@ -6336,7 +6345,7 @@ void nsGlobalWindowOuter::EnterModalState() {
   // Usually the activeESM check above does that, but there are cases when
   // we don't have activeESM, or it is for different document.
   Document* topDoc = topWin->GetExtantDoc();
-  nsIContent* capturingContent = nsIPresShell::GetCapturingContent();
+  nsIContent* capturingContent = PresShell::GetCapturingContent();
   if (capturingContent && topDoc &&
       nsContentUtils::ContentIsCrossDocDescendantOf(capturingContent, topDoc)) {
     PresShell::ReleaseCapturingContent();
@@ -7366,16 +7375,12 @@ void nsGlobalWindowOuter::FlushPendingNotifications(FlushType aType) {
 }
 
 void nsGlobalWindowOuter::EnsureSizeAndPositionUpToDate() {
-  // If we're a subframe, make sure our size is up to date.  It's OK that this
-  // crosses the content/chrome boundary, since chrome can have pending reflows
-  // too.
-  //
-  // Make sure to go through the document chain rather than the window chain to
-  // not flush on detached iframes, see bug 1545516.
-  if (mDoc) {
-    if (RefPtr<Document> parent = mDoc->GetParentDocument()) {
-      parent->FlushPendingNotifications(FlushType::Layout);
-    }
+  // If we're a subframe, make sure our size is up to date.  Make sure to go
+  // through the document chain rather than the window chain to not flush on
+  // detached iframes, see bug 1545516.
+  if (mDoc && mDoc->StyleOrLayoutObservablyDependsOnParentDocumentLayout()) {
+    RefPtr<Document> parent = mDoc->GetParentDocument();
+    parent->FlushPendingNotifications(FlushType::Layout);
   }
 }
 
@@ -7397,9 +7402,8 @@ already_AddRefed<nsISupports> nsGlobalWindowOuter::SaveWindowState() {
 
   nsCOMPtr<nsISupports> state = new WindowStateHolder(inner);
 
-#ifdef DEBUG_PAGE_CACHE
-  printf("saving window state, state = %p\n", (void*)state);
-#endif
+  MOZ_LOG(gPageCacheLog, LogLevel::Debug,
+          ("saving window state, state = %p", (void*)state));
 
   return state.forget();
 }
@@ -7413,9 +7417,8 @@ nsresult nsGlobalWindowOuter::RestoreWindowState(nsISupports* aState) {
   nsCOMPtr<WindowStateHolder> holder = do_QueryInterface(aState);
   NS_ENSURE_TRUE(holder, NS_ERROR_FAILURE);
 
-#ifdef DEBUG_PAGE_CACHE
-  printf("restoring window state, state = %p\n", (void*)holder);
-#endif
+  MOZ_LOG(gPageCacheLog, LogLevel::Debug,
+          ("restoring window state, state = %p", (void*)holder));
 
   // And we're ready to go!
   nsGlobalWindowInner* inner = GetCurrentInnerWindowInternal();

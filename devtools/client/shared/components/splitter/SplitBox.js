@@ -199,11 +199,18 @@ class SplitBox extends Component {
 
   // Rendering
 
+  /* eslint-disable complexity */
   render() {
     const { endPanelControl, splitterSize, vert } = this.state;
     const { startPanel, endPanel, minSize, maxSize } = this.props;
 
-    const style = Object.assign({}, this.props.style);
+    const style = Object.assign({
+      // Set the size of the controlled panel (height or width depending on the
+      // current state). This can be used to help with styling of dependent
+      // panels.
+      "--split-box-controlled-panel-size":
+        `${vert ? this.state.width : this.state.height}`,
+    }, this.props.style);
 
     // Calculate class names list.
     let classNames = ["split-box"];
@@ -284,6 +291,7 @@ class SplitBox extends Component {
       )
     );
   }
+  /* eslint-enable complexity */
 }
 
 module.exports = SplitBox;

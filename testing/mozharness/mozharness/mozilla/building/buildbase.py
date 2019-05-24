@@ -353,6 +353,8 @@ class BuildOptionParser(object):
         'api-16-gradle-dependencies':
             'builds/releng_sub_%s_configs/%s_api_16_gradle_dependencies.py',
         'api-16': 'builds/releng_sub_%s_configs/%s_api_16.py',
+        'api-16-beta': 'builds/releng_sub_%s_configs/%s_api_16_beta.py',
+        'api-16-beta-debug': 'builds/releng_sub_%s_configs/%s_api_16_beta_debug.py',
         'api-16-debug': 'builds/releng_sub_%s_configs/%s_api_16_debug.py',
         'api-16-debug-ccov': 'builds/releng_sub_%s_configs/%s_api_16_debug_ccov.py',
         'api-16-debug-searchfox': 'builds/releng_sub_%s_configs/%s_api_16_debug_searchfox.py',
@@ -364,11 +366,19 @@ class BuildOptionParser(object):
         'rusttests': 'builds/releng_sub_%s_configs/%s_rusttests.py',
         'rusttests-debug': 'builds/releng_sub_%s_configs/%s_rusttests_debug.py',
         'x86': 'builds/releng_sub_%s_configs/%s_x86.py',
+        'x86-beta': 'builds/releng_sub_%s_configs/%s_x86_beta.py',
+        'x86-beta-debug': 'builds/releng_sub_%s_configs/%s_x86_beta_debug.py',
+        'x86-debug': 'builds/releng_sub_%s_configs/%s_x86_debug.py',
         'x86-fuzzing-debug': 'builds/releng_sub_%s_configs/%s_x86_fuzzing_debug.py',
         'x86_64': 'builds/releng_sub_%s_configs/%s_x86_64.py',
+        'x86_64-beta': 'builds/releng_sub_%s_configs/%s_x86_64_beta.py',
+        'x86_64-beta-debug': 'builds/releng_sub_%s_configs/%s_x86_64_beta_debug.py',
         'x86_64-debug': 'builds/releng_sub_%s_configs/%s_x86_64_debug.py',
         'api-16-partner-sample1': 'builds/releng_sub_%s_configs/%s_api_16_partner_sample1.py',
         'aarch64': 'builds/releng_sub_%s_configs/%s_aarch64.py',
+        'aarch64-beta': 'builds/releng_sub_%s_configs/%s_aarch64_beta.py',
+        'aarch64-beta-debug': 'builds/releng_sub_%s_configs/%s_aarch64_beta_debug.py',
+        'aarch64-pgo': 'builds/releng_sub_%s_configs/%s_aarch64_pgo.py',
         'aarch64-debug': 'builds/releng_sub_%s_configs/%s_aarch64_debug.py',
         'android-test': 'builds/releng_sub_%s_configs/%s_test.py',
         'android-test-ccov': 'builds/releng_sub_%s_configs/%s_test_ccov.py',
@@ -1631,7 +1641,7 @@ or run without that action (ie: --no-{action})"
         '''If sccache was in use for this build, shut down the sccache server.'''
         if os.environ.get('USE_SCCACHE') == '1':
             topsrcdir = self.query_abs_dirs()['abs_src_dir']
-            sccache = os.path.join(topsrcdir, 'sccache2', 'sccache')
+            sccache = os.path.join(topsrcdir, 'sccache', 'sccache')
             if self._is_windows():
                 sccache += '.exe'
             self.run_command([sccache, '--stop-server'], cwd=topsrcdir)

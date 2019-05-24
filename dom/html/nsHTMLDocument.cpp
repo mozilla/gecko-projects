@@ -18,6 +18,7 @@
 #include "nsPrintfCString.h"
 #include "nsReadableUtils.h"
 #include "nsUnicharUtils.h"
+#include "nsIContentSecurityPolicy.h"
 #include "nsGlobalWindowInner.h"
 #include "nsIDocumentLoader.h"
 #include "nsIHTMLContentSink.h"
@@ -102,6 +103,7 @@
 #include "nsIImageDocument.h"
 #include "mozilla/dom/HTMLBodyElement.h"
 #include "mozilla/dom/HTMLDocumentBinding.h"
+#include "mozilla/dom/nsCSPContext.h"
 #include "mozilla/dom/Selection.h"
 #include "mozilla/dom/ShadowIncludingTreeIterator.h"
 #include "nsCharsetSource.h"
@@ -542,18 +544,20 @@ nsresult nsHTMLDocument::StartDocumentLoad(const char* aCommand,
   nsCOMPtr<nsIDocShell> docShell(do_QueryInterface(aContainer));
 
   bool loadWithPrototype = false;
+  RefPtr<nsHtml5Parser> html5Parser;
   if (loadAsHtml5) {
-    mParser = nsHtml5Module::NewHtml5Parser();
+    html5Parser = nsHtml5Module::NewHtml5Parser();
+    mParser = html5Parser;
     if (mIsPlainText) {
       if (viewSource) {
-        mParser->MarkAsNotScriptCreated("view-source-plain");
+        html5Parser->MarkAsNotScriptCreated("view-source-plain");
       } else {
-        mParser->MarkAsNotScriptCreated("plain-text");
+        html5Parser->MarkAsNotScriptCreated("plain-text");
       }
     } else if (viewSource && !html) {
-      mParser->MarkAsNotScriptCreated("view-source-xml");
+      html5Parser->MarkAsNotScriptCreated("view-source-xml");
     } else {
-      mParser->MarkAsNotScriptCreated(aCommand);
+      html5Parser->MarkAsNotScriptCreated(aCommand);
     }
   } else if (xhtml && ShouldUsePrototypeDocument(aChannel, this)) {
     loadWithPrototype = true;
@@ -691,7 +695,7 @@ nsresult nsHTMLDocument::StartDocumentLoad(const char* aCommand,
     }
   } else {
     if (loadAsHtml5) {
-      nsHtml5Module::Initialize(mParser, this, uri, docShell, aChannel);
+      html5Parser->Initialize(this, uri, docShell, aChannel);
     } else {
       // about:blank *only*
       nsCOMPtr<nsIHTMLContentSink> htmlsink;
@@ -699,25 +703,6 @@ nsresult nsHTMLDocument::StartDocumentLoad(const char* aCommand,
                             aChannel);
       mParser->SetContentSink(htmlsink);
     }
-  }
-
-  if (mIsPlainText && !nsContentUtils::IsChildOfSameType(this) &&
-      Preferences::GetBool("plain_text.wrap_long_lines")) {
-    nsCOMPtr<nsIStringBundleService> bundleService =
-        do_GetService(NS_STRINGBUNDLE_CONTRACTID, &rv);
-    NS_ASSERTION(NS_SUCCEEDED(rv) && bundleService,
-                 "The bundle service could not be loaded");
-    nsCOMPtr<nsIStringBundle> bundle;
-    rv = bundleService->CreateBundle(
-        "chrome://global/locale/browser.properties", getter_AddRefs(bundle));
-    NS_ASSERTION(
-        NS_SUCCEEDED(rv) && bundle,
-        "chrome://global/locale/browser.properties could not be loaded");
-    nsAutoString title;
-    if (bundle) {
-      bundle->GetStringFromName("plainText.wordWrap", title);
-    }
-    SetSelectedStyleSheetSet(title);
   }
 
   // parser the content of the URI
@@ -1034,25 +1019,12 @@ Document* nsHTMLDocument::Open(const Optional<nsAString>& /* unused */,
     return nullptr;
   }
 
-  // Step 5 -- if we have an active parser, just no-op.
-  // If we already have a parser we ignore the document.open call.
-  if (mParser || mParserAborted) {
-    // The WHATWG spec used to say: "If the document has an active parser that
-    // isn't a script-created parser, and the insertion point associated with
-    // that parser's input stream is not undefined (that is, it does point to
-    // somewhere in the input stream), then the method does nothing. Abort these
-    // steps and return the Document object on which the method was invoked."
-    // Note that aborting a parser leaves the parser "active" with its insertion
-    // point "not undefined". We track this using mParserAborted, because
-    // aborting a parser nulls out mParser.
-    //
-    // Actually, the spec says something slightly different now, about having
-    // an "active parser whose script nesting level is greater than 0".  It
-    // does not mention insertion points at all.  Not sure whether it matters
-    // in practice.  It seems like "script nesting level" replaced the
-    // insertion point concept?  Anyway,
-    // https://bugzilla.mozilla.org/show_bug.cgi?id=1475000 is probably
-    // relevant here.
+  // Step 5 -- if we have an active parser with a nonzero script nesting level,
+  // just no-op.
+  //
+  // The mParserAborted check here is probably wrong.  Removing it is
+  // tracked in https://bugzilla.mozilla.org/show_bug.cgi?id=1475000
+  if ((mParser && mParser->HasNonzeroScriptNestingLevel()) || mParserAborted) {
     return this;
   }
 
@@ -1071,6 +1043,17 @@ Document* nsHTMLDocument::Open(const Optional<nsAString>& /* unused */,
     if (inUnload) {
       return this;
     }
+  }
+
+  // document.open() inherits the CSP from the opening document.
+  // Please create an actual copy of the CSP (do not share the same
+  // reference) otherwise appending a new policy within the opened
+  // document will be incorrectly propagated to the opening doc.
+  nsCOMPtr<nsIContentSecurityPolicy> csp = callerDoc->GetCsp();
+  if (csp) {
+    RefPtr<nsCSPContext> cspToInherit = new nsCSPContext();
+    cspToInherit->InitFromOther(static_cast<nsCSPContext*>(csp.get()));
+    mCSP = cspToInherit;
   }
 
   // At this point we know this is a valid-enough document.open() call
@@ -1116,8 +1099,32 @@ Document* nsHTMLDocument::Open(const Optional<nsAString>& /* unused */,
     }
   }
 
+  // If we have a parser that has a zero script nesting level, we need to
+  // properly terminate it.  We do that after we've removed all the event
+  // listeners (so termination won't trigger event listeners if it does
+  // something to the DOM), but before we remove all elements from the document
+  // (so if termination does modify the DOM in some way we will just blow it
+  // away immediately.  See the similar code in WriteCommon that handles the
+  // !IsInsertionPointDefined() case and should stay in sync with this code.
+  if (mParser) {
+    MOZ_ASSERT(!mParser->HasNonzeroScriptNestingLevel(),
+               "Why didn't we take the early return?");
+    // Make sure we don't re-enter.
+    IgnoreOpensDuringUnload ignoreOpenGuard(this);
+    mParser->Terminate();
+    MOZ_RELEASE_ASSERT(!mParser, "mParser should have been null'd out");
+  }
+
   // Step 10 -- remove all our DOM kids without firing any mutation events.
-  DisconnectNodeTree();
+  {
+    // We want to ignore any recursive calls to Open() that happen while
+    // disconnecting the node tree.  The spec doesn't say to do this, but the
+    // spec also doesn't envision unload events on subframes firing while we do
+    // this, while all browsers fire them in practice.  See
+    // <https://github.com/whatwg/html/issues/4611>.
+    IgnoreOpensDuringUnload ignoreOpenGuard(this);
+    DisconnectNodeTree();
+  }
 
   // Step 11 -- if we're the current document in our docshell, do the
   // equivalent of pushState() with the new URL we should have.
@@ -1189,8 +1196,9 @@ Document* nsHTMLDocument::Open(const Optional<nsAString>& /* unused */,
   // Step 14 -- create a new parser associated with document.  This also does
   // step 16 implicitly.
   mParserAborted = false;
-  mParser = nsHtml5Module::NewHtml5Parser();
-  nsHtml5Module::Initialize(mParser, this, GetDocumentURI(), shell, nullptr);
+  RefPtr<nsHtml5Parser> parser = nsHtml5Module::NewHtml5Parser();
+  mParser = parser;
+  parser->Initialize(this, GetDocumentURI(), shell, nullptr);
   if (mReferrerPolicySet) {
     // CSP may have set the referrer policy, so a speculative parser should
     // start with the new referrer policy.
@@ -1201,9 +1209,11 @@ Document* nsHTMLDocument::Open(const Optional<nsAString>& /* unused */,
           static_cast<ReferrerPolicy>(mReferrerPolicy));
     }
   }
-
-  // Some internal non-spec bookkeeping.
-  mContentTypeForWriteCalls.AssignLiteral("text/html");
+  nsresult rv = parser->StartExecutor();
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    aError.Throw(rv);
+    return nullptr;
+  }
 
   if (shell) {
     // Prepare the docshell and the document viewer for the impending
@@ -1246,7 +1256,7 @@ void nsHTMLDocument::Close(ErrorResult& rv) {
 
   ++mWriteLevel;
   rv = (static_cast<nsHtml5Parser*>(mParser.get()))
-           ->Parse(EmptyString(), nullptr, mContentTypeForWriteCalls, true);
+           ->Parse(EmptyString(), nullptr, true);
   --mWriteLevel;
 
   // Even if that Parse() call failed, do the rest of this method
@@ -1342,7 +1352,9 @@ void nsHTMLDocument::WriteCommon(const nsAString& aText, bool aNewlineTerminate,
       return;
     }
     // The spec doesn't tell us to ignore opens from here, but we need to
-    // ensure opens are ignored here.
+    // ensure opens are ignored here.  See similar code in Open() that handles
+    // the case of an existing parser which is not currently running script and
+    // should stay in sync with this code.
     IgnoreOpensDuringUnload ignoreOpenGuard(this);
     mParser->Terminate();
     MOZ_RELEASE_ASSERT(!mParser, "mParser should have been null'd out");
@@ -1378,10 +1390,10 @@ void nsHTMLDocument::WriteCommon(const nsAString& aText, bool aNewlineTerminate,
   // why pay that price when we don't need to?
   if (aNewlineTerminate) {
     aRv = (static_cast<nsHtml5Parser*>(mParser.get()))
-              ->Parse(aText + new_line, key, mContentTypeForWriteCalls, false);
+              ->Parse(aText + new_line, key, false);
   } else {
-    aRv = (static_cast<nsHtml5Parser*>(mParser.get()))
-              ->Parse(aText, key, mContentTypeForWriteCalls, false);
+    aRv =
+        (static_cast<nsHtml5Parser*>(mParser.get()))->Parse(aText, key, false);
   }
 
   --mWriteLevel;
@@ -2552,7 +2564,7 @@ bool nsHTMLDocument::QueryCommandSupported(const nsAString& commandID,
     if (commandID.LowerCaseEqualsLiteral("paste")) {
       return false;
     }
-    if (nsContentUtils::IsCutCopyRestricted()) {
+    if (!StaticPrefs::dom_allow_cut_copy()) {
       // XXXbz should we worry about correctly reporting "true" in the
       // "restricted, but we're an addon with clipboardWrite permissions" case?
       // See also nsContentUtils::IsCutCopyAllowed.

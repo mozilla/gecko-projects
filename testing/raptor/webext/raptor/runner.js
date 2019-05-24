@@ -18,6 +18,7 @@
 // Supported test types
 const TEST_BENCHMARK = "benchmark";
 const TEST_PAGE_LOAD = "pageload";
+const TEST_SCENARIO = "scenario";
 
 // when the browser starts this webext runner will start automatically; we
 // want to give the browser some time (ms) to settle before starting tests
@@ -42,6 +43,7 @@ var pageCycles = 0;
 var pageCycle = 0;
 var testURL;
 var testTabID = 0;
+var scenarioTestTime = 60000;
 var getHero = false;
 var getFNBPaint = false;
 var getFCP = false;
@@ -56,24 +58,28 @@ var isFCPPending = false;
 var isDCFPending = false;
 var isTTFIPending = false;
 var isLoadTimePending = false;
+var isScenarioPending = false;
 var isBenchmarkPending = false;
 var pageTimeout = 10000; // default pageload timeout
 var geckoProfiling = false;
 var geckoInterval = 1;
 var geckoEntries = 1000000;
-var webRenderEnabled = false;
+var geckoThreads = [];
 var debugMode = 0;
 var screenCapture = false;
 
-var results = {"name": "",
-               "page": "",
-               "type": "",
-               "browser_cycle": 0,
-               "expected_browser_cycles": 0,
-               "cold": false,
-               "lower_is_better": true,
-               "alert_threshold": 2.0,
-               "measurements": {}};
+var results = {
+  "name": "",
+  "page": "",
+  "type": "",
+  "browser_cycle": 0,
+  "expected_browser_cycles": 0,
+  "cold": false,
+  "lower_is_better": true,
+  "alert_change_type": "relative",
+  "alert_threshold": 2.0,
+  "measurements": {},
+};
 
 function getTestSettings() {
   console.log("getting test settings from control server");
@@ -87,6 +93,7 @@ function getTestSettings() {
         testType = settings.type;
         pageCycles = settings.page_cycles;
         testURL = settings.test_url;
+        scenarioTestTime = settings.scenario_time;
 
         // for pageload type tests, the testURL is fine as is - we don't have
         // to add a port as it's accessed via proxy and the playback tool
@@ -104,32 +111,26 @@ function getTestSettings() {
 
         console.log(`testURL: ${testURL}`);
 
+        results.alert_change_type = settings.alert_change_type;
+        results.alert_threshold = settings.alert_threshold;
+        results.browser_cycle = browserCycle;
+        results.cold = settings.cold;
+        results.expected_browser_cycles = settings.expected_browser_cycles;
+        results.lower_is_better = settings.lower_is_better === true;
+        results.name = testName;
         results.page = testURL;
         results.type = testType;
-        results.name = testName;
-        results.browser_cycle = browserCycle;
-        results.expected_browser_cycles = settings.expected_browser_cycles;
-        results.cold = settings.cold;
         results.unit = settings.unit;
         results.subtest_unit = settings.subtest_unit;
-        results.lower_is_better = settings.lower_is_better === true;
         results.subtest_lower_is_better = settings.subtest_lower_is_better === true;
-        results.alert_threshold = settings.alert_threshold;
 
-        if (settings.gecko_profile !== undefined) {
-          if (settings.gecko_profile === true) {
-            geckoProfiling = true;
-            results.extra_options = ["gecko_profile"];
-            if (settings.gecko_interval !== undefined) {
-              geckoInterval = settings.gecko_interval;
-            }
-            if (settings.gecko_entries !== undefined) {
-              geckoEntries = settings.gecko_entries;
-            }
-            if (settings.webrender_enabled !== undefined) {
-              webRenderEnabled = settings.webrender_enabled;
-            }
-          }
+        if (settings.gecko_profile === true) {
+          results.extra_options = ["gecko_profile"];
+
+          geckoProfiling = true;
+          geckoEntries = settings.gecko_profile_entries;
+          geckoInterval = settings.gecko_profile_interval;
+          geckoThreads = settings.gecko_profile_threads;
         }
 
         if (settings.screen_capture !== undefined) {
@@ -221,6 +222,14 @@ function getBrowserInfo() {
   });
 }
 
+function scenarioTimer() {
+  postToControlServer("status", `started scenario test timer`);
+    setTimeout(function() {
+      isScenarioPending = false;
+      results.measurements.scenario = [1];
+  }, scenarioTestTime);
+}
+
 function testTabCreated(tab) {
   testTabID = tab.id;
   postToControlServer("status", `opened new empty tab: ${testTabID}`);
@@ -241,43 +250,36 @@ async function testTabUpdated(tab) {
   nextCycle();
 }
 
-function waitForResult() {
-  console.log("awaiting results...");
-  return new Promise(resolve => {
-    async function checkForResult() {
+async function waitForResult() {
+  let results = await new Promise(resolve => {
+    function checkForResult() {
+      console.log("checking results...");
       switch (testType) {
         case TEST_BENCHMARK:
           if (!isBenchmarkPending) {
-            cancelTimeoutAlarm("raptor-page-timeout");
-            postToControlServer("status", "results received");
-            if (geckoProfiling) {
-              await getGeckoProfile();
-            }
             resolve();
-            if (screenCapture) {
-              await getScreenCapture();
-            }
           } else {
-            setTimeout(checkForResult, 5);
+            setTimeout(checkForResult, 250);
           }
           break;
 
         case TEST_PAGE_LOAD:
           if (!isHeroPending &&
-            !isFNBPaintPending &&
-            !isFCPPending &&
-            !isDCFPending &&
-            !isTTFIPending &&
-            !isLoadTimePending) {
-            cancelTimeoutAlarm("raptor-page-timeout");
-            postToControlServer("status", "results received");
-            if (geckoProfiling) {
-              await getGeckoProfile();
-            }
-            if (screenCapture) {
-              await getScreenCapture();
-            }
+              !isFNBPaintPending &&
+              !isFCPPending &&
+              !isDCFPending &&
+              !isTTFIPending &&
+              !isLoadTimePending) {
+            resolve();
+          } else {
+            setTimeout(checkForResult, 250);
+          }
+          break;
 
+        case TEST_SCENARIO:
+          if (!isScenarioPending) {
+            cancelTimeoutAlarm("raptor-page-timeout");
+            postToControlServer("status", `scenario test ended`);
             resolve();
           } else {
             setTimeout(checkForResult, 5);
@@ -285,53 +287,50 @@ function waitForResult() {
           break;
       }
     }
+
     checkForResult();
   });
+
+  cancelTimeoutAlarm("raptor-page-timeout");
+
+  postToControlServer("status", "results received");
+
+  if (geckoProfiling) {
+    await getGeckoProfile();
+  }
+
+  if (screenCapture) {
+    await getScreenCapture();
+  }
+
+  return results;
 }
 
 async function getScreenCapture() {
-  console.log("Capturing screenshot...");
-  var capturing;
-  if (["firefox", "geckoview", "refbrow", "fenix"].includes(browserName)) {
-    capturing = ext.tabs.captureVisibleTab();
-    capturing.then(onCaptured, onError);
-    await capturing;
-  } else {
-    // create capturing promise
-    capturing =  new Promise(function(resolve, reject) {
-    ext.tabs.captureVisibleTab(resolve);
-  });
+  console.log("capturing screenshot");
 
-    // capture and wait for promise to end
-    capturing.then(onCaptured, onError);
-    await capturing;
+  try {
+    let screenshotUri;
+
+    if (["firefox", "geckoview", "refbrow", "fenix"].includes(browserName)) {
+      screenshotUri = await ext.tabs.captureVisibleTab();
+    } else {
+      screenshotUri = await new Promise(resolve =>
+          ext.tabs.captureVisibleTab(resolve));
+    }
+    postToControlServer("screenshot", [screenshotUri, testName, pageCycle]);
+  } catch (e) {
+    console.log(`failed to capture screenshot: ${e}`);
   }
 }
-
-function onCaptured(screenshotUri) {
-  console.log("Screenshot capured!");
-  postToControlServer("screenshot", [screenshotUri, testName, pageCycle]);
-}
-
-function onError(error) {
-  console.log("Screenshot captured failed!");
-  console.log(`Error: ${error}`);
-}
-
 
 async function startGeckoProfiling() {
-  var _threads;
-  if (webRenderEnabled) {
-    _threads = ["GeckoMain", "Compositor", "WR,Renderer"];
-  } else {
-    _threads = ["GeckoMain", "Compositor"];
-  }
-  postToControlServer("status", "starting gecko profiling");
+  postToControlServer("status", `starting Gecko profiling for threads: ${geckoThreads}`);
   await browser.geckoProfiler.start({
     bufferSize: geckoEntries,
     interval: geckoInterval,
     features: ["js", "leaf", "stackwalk", "threads", "responsiveness"],
-    threads: _threads,
+    threads: geckoThreads.split(","),
   });
 }
 
@@ -395,6 +394,10 @@ async function nextCycle() {
           if (getLoadTime)
             isLoadTimePending = true;
           break;
+
+        case TEST_SCENARIO:
+          isScenarioPending = true;
+          break;
       }
 
       if (reuseTab && testTabID != 0) {
@@ -410,6 +413,9 @@ async function nextCycle() {
         postToControlServer("status", `update tab: ${testTabID}`);
         // update the test page - browse to our test URL
         ext.tabs.update(testTabID, {url: testURL}, testTabUpdated);
+        if (testType == TEST_SCENARIO) {
+          scenarioTimer();
+        }
         }, newTabDelay);
       }, pageCycleDelay);
     } else {
@@ -435,10 +441,8 @@ async function timeoutAlarmListener() {
   }
   postToControlServer("raptor-page-timeout", msgData);
 
-  // take a screen capture
-  if (screenCapture) {
-    await getScreenCapture();
-  }
+  await getScreenCapture();
+
   // call clean-up to shutdown gracefully
   cleanUp();
 }

@@ -23,6 +23,7 @@
 #include "mozilla/InternalMutationEvent.h"
 #include "mozilla/Likely.h"
 #include "mozilla/MemoryReporting.h"
+#include "mozilla/PresShell.h"
 #include "mozilla/ServoBindings.h"
 #include "mozilla/Telemetry.h"
 #include "mozilla/TextEditor.h"
@@ -35,6 +36,7 @@
 #include "mozilla/dom/SVGUseElement.h"
 #include "mozilla/dom/ScriptSettings.h"
 #include "mozilla/dom/l10n/DOMOverlays.h"
+#include "mozilla/StaticPrefs.h"
 #include "nsAttrValueOrString.h"
 #include "nsBindingManager.h"
 #include "nsCCUncollectableMarker.h"
@@ -67,7 +69,6 @@
 #include "nsILinkHandler.h"
 #include "mozilla/dom/NodeInfo.h"
 #include "mozilla/dom/NodeInfoInlines.h"
-#include "nsIPresShell.h"
 #include "nsIScriptError.h"
 #include "nsIScriptGlobalObject.h"
 #include "nsIScriptSecurityManager.h"
@@ -194,6 +195,10 @@ void* nsINode::UnsetProperty(const nsAtom* aPropertyName, nsresult* aStatus) {
                                                    aStatus);
 }
 
+nsIContentSecurityPolicy* nsINode::GetCsp() const {
+  return OwnerDoc()->GetCsp();
+}
+
 nsINode::nsSlots* nsINode::CreateSlots() { return new nsSlots(); }
 
 nsIContent* nsINode::GetTextEditorRootContent(TextEditor** aTextEditor) {
@@ -314,7 +319,7 @@ static nsIContent* GetRootForContentSubtree(nsIContent* aContent) {
   return aContent;
 }
 
-nsIContent* nsINode::GetSelectionRootContent(nsIPresShell* aPresShell) {
+nsIContent* nsINode::GetSelectionRootContent(PresShell* aPresShell) {
   NS_ENSURE_TRUE(aPresShell, nullptr);
 
   if (IsDocument()) return AsDocument()->GetRootElement();
@@ -2661,7 +2666,7 @@ Element* nsINode::GetParentElementCrossingShadowRoot() const {
 
 bool nsINode::HasBoxQuadsSupport(JSContext* aCx, JSObject* /* unused */) {
   return xpc::AccessCheck::isChrome(js::GetContextCompartment(aCx)) ||
-         nsContentUtils::GetBoxQuadsEnabled();
+         StaticPrefs::layout_css_getBoxQuads_enabled();
 }
 
 nsINode* nsINode::GetScopeChainParent() const { return nullptr; }

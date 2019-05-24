@@ -1028,9 +1028,9 @@ nsresult nsXULElement::DispatchXULCommand(const EventChainVisitor& aVisitor,
     }
     WidgetInputEvent* orig = aVisitor.mEvent->AsInputEvent();
     nsContentUtils::DispatchXULCommand(
-        commandElt, orig->IsTrusted(), aVisitor.mDOMEvent, nullptr,
-        orig->IsControl(), orig->IsAlt(), orig->IsShift(), orig->IsMeta(),
-        inputSource);
+        commandElt, orig->IsTrusted(), MOZ_KnownLive(aVisitor.mDOMEvent),
+        nullptr, orig->IsControl(), orig->IsAlt(), orig->IsShift(),
+        orig->IsMeta(), inputSource);
   } else {
     NS_WARNING("A XUL element is attached to a command that doesn't exist!\n");
   }
@@ -1190,7 +1190,8 @@ void nsXULElement::ClickWithInputSource(uint16_t aInputSource,
 void nsXULElement::DoCommand() {
   nsCOMPtr<Document> doc = GetComposedDoc();  // strong just in case
   if (doc) {
-    nsContentUtils::DispatchXULCommand(this, true);
+    RefPtr<nsXULElement> self = this;
+    nsContentUtils::DispatchXULCommand(self, true);
   }
 }
 
@@ -2135,9 +2136,6 @@ nsresult nsXULPrototypeScript::Compile(
   // source from the files on demand.
   options.setSourceIsLazy(mOutOfLine);
   JS::Rooted<JSObject*> scope(cx, JS::CurrentGlobalOrNull(cx));
-  if (scope) {
-    JS::ExposeObjectToActiveJS(scope);
-  }
 
   if (aOffThreadReceiver && JS::CanCompileOffThread(cx, options, aTextLength)) {
     if (!JS::CompileOffThread(cx, options, srcBuf,

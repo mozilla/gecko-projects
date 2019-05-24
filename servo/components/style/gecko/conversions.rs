@@ -22,9 +22,8 @@ use crate::values::computed::url::ComputedImageUrl;
 use crate::values::computed::{Angle, Gradient, Image};
 use crate::values::computed::{Integer, LengthPercentage};
 use crate::values::computed::{Length, Percentage, TextAlign};
-use crate::values::generics::box_::VerticalAlign;
 use crate::values::generics::grid::{TrackListValue, TrackSize};
-use crate::values::generics::image::{CompatMode, GradientItem, Image as GenericImage};
+use crate::values::generics::image::{CompatMode, Image as GenericImage};
 use crate::values::generics::rect::Rect;
 use crate::Zero;
 use app_units::Au;
@@ -154,7 +153,6 @@ impl nsStyleImage {
 
     // FIXME(emilio): This is really complex, we should use cbindgen for this.
     fn set_gradient(&mut self, gradient: Gradient) {
-        use self::structs::nsStyleCoord;
         use self::structs::NS_STYLE_GRADIENT_SIZE_CLOSEST_CORNER as CLOSEST_CORNER;
         use self::structs::NS_STYLE_GRADIENT_SIZE_CLOSEST_SIDE as CLOSEST_SIDE;
         use self::structs::NS_STYLE_GRADIENT_SIZE_FARTHEST_CORNER as FARTHEST_CORNER;
@@ -329,26 +327,9 @@ impl nsStyleImage {
             },
         };
 
-        for (index, item) in gradient.items.iter().enumerate() {
-            // NB: stops are guaranteed to be none in the gecko side by
-            // default.
-
+        for (index, item) in gradient.items.into_iter().enumerate() {
             let gecko_stop = unsafe { &mut (*gecko_gradient).mStops[index] };
-            let mut coord = nsStyleCoord::null();
-
-            match *item {
-                GradientItem::ColorStop(ref stop) => {
-                    gecko_stop.mColor = stop.color.into();
-                    gecko_stop.mIsInterpolationHint = false;
-                    coord.set(stop.position);
-                },
-                GradientItem::InterpolationHint(hint) => {
-                    gecko_stop.mIsInterpolationHint = true;
-                    coord.set(Some(hint));
-                },
-            }
-
-            gecko_stop.mLocation.move_from(coord);
+            *gecko_stop = item;
         }
 
         unsafe {
@@ -402,7 +383,6 @@ impl nsStyleImage {
                 let atom = bindings::Gecko_GetImageElement(self);
                 Some(GenericImage::Element(Atom::from_raw(atom)))
             },
-            _ => panic!("Unexpected image type"),
         }
     }
 
@@ -419,7 +399,7 @@ impl nsStyleImage {
         use self::structs::NS_STYLE_GRADIENT_SIZE_FARTHEST_CORNER as FARTHEST_CORNER;
         use self::structs::NS_STYLE_GRADIENT_SIZE_FARTHEST_SIDE as FARTHEST_SIDE;
         use crate::values::computed::position::Position;
-        use crate::values::generics::image::{Circle, ColorStop, Ellipse};
+        use crate::values::generics::image::{Circle, Ellipse};
         use crate::values::generics::image::{EndingShape, GradientKind, ShapeExtent};
 
         let gecko_gradient = bindings::Gecko_GetGradientImageValue(self)
@@ -531,24 +511,7 @@ impl nsStyleImage {
             },
         };
 
-        let items = gecko_gradient
-            .mStops
-            .iter()
-            .map(|ref stop| {
-                if stop.mIsInterpolationHint {
-                    GradientItem::InterpolationHint(
-                        LengthPercentage::from_gecko_style_coord(&stop.mLocation)
-                            .expect("mLocation could not convert to LengthPercentage"),
-                    )
-                } else {
-                    GradientItem::ColorStop(ColorStop {
-                        color: stop.mColor.into(),
-                        position: LengthPercentage::from_gecko_style_coord(&stop.mLocation),
-                    })
-                }
-            })
-            .collect();
-
+        let items = gecko_gradient.mStops.iter().cloned().collect();
         let compat_mode = if gecko_gradient.mMozLegacySyntax {
             CompatMode::Moz
         } else if gecko_gradient.mLegacySyntax {
@@ -568,28 +531,13 @@ impl nsStyleImage {
 
 pub mod basic_shape {
     //! Conversions from and to CSS shape representations.
-
-    use crate::gecko::values::GeckoStyleCoordConvertible;
-    use crate::gecko_bindings::structs::nsStyleCoord;
-    use crate::gecko_bindings::structs::{StyleBasicShape, StyleBasicShapeType};
     use crate::gecko_bindings::structs::{
         StyleGeometryBox, StyleShapeSource, StyleShapeSourceType,
     };
-    use crate::gecko_bindings::sugar::refptr::RefPtr;
-    use crate::values::computed::basic_shape::{
-        BasicShape, ClippingShape, FloatAreaShape, ShapeRadius,
-    };
-    use crate::values::computed::length::LengthPercentage;
+    use crate::values::computed::basic_shape::{BasicShape, ClippingShape, FloatAreaShape};
     use crate::values::computed::motion::OffsetPath;
-    use crate::values::computed::url::ComputedUrl;
-    use crate::values::generics::basic_shape::{
-        BasicShape as GenericBasicShape, InsetRect, Polygon,
-    };
-    use crate::values::generics::basic_shape::{Circle, Ellipse, Path, PolygonCoord};
-    use crate::values::generics::basic_shape::{GeometryBox, ShapeBox, ShapeSource};
-    use crate::values::generics::rect::Rect;
+    use crate::values::generics::basic_shape::{GeometryBox, Path, ShapeBox, ShapeSource};
     use crate::values::specified::SVGPathData;
-    use std::borrow::Borrow;
 
     impl StyleShapeSource {
         /// Convert StyleShapeSource to ShapeSource except URL and Image
@@ -605,7 +553,7 @@ pub mod basic_shape {
                 StyleShapeSourceType::Box => Some(ShapeSource::Box(self.mReferenceBox.into())),
                 StyleShapeSourceType::Shape => {
                     let other_shape = unsafe { &*self.__bindgen_anon_1.mBasicShape.as_ref().mPtr };
-                    let shape = other_shape.into();
+                    let shape = Box::new(other_shape.clone());
                     let reference_box = if self.mReferenceBox == StyleGeometryBox::NoBox {
                         None
                     } else {
@@ -613,7 +561,7 @@ pub mod basic_shape {
                     };
                     Some(ShapeSource::Shape(shape, reference_box))
                 },
-                StyleShapeSourceType::URL | StyleShapeSourceType::Image => None,
+                StyleShapeSourceType::Image => None,
                 StyleShapeSourceType::Path => {
                     let path = self.to_svg_path().expect("expect an SVGPathData");
                     let fill = unsafe { &*self.__bindgen_anon_1.mSVGPath.as_ref().mPtr }.mFillRule;
@@ -624,12 +572,10 @@ pub mod basic_shape {
 
         /// Generate a SVGPathData from StyleShapeSource if possible.
         fn to_svg_path(&self) -> Option<SVGPathData> {
-            use crate::values::specified::svg_path::PathCommand;
             match self.mType {
                 StyleShapeSourceType::Path => {
                     let gecko_path = unsafe { &*self.__bindgen_anon_1.mSVGPath.as_ref().mPtr };
-                    let result: Vec<PathCommand> = gecko_path.mPath.iter().cloned().collect();
-                    Some(SVGPathData::new(result.into_boxed_slice()))
+                    Some(SVGPathData(gecko_path.mPath.clone()))
                 },
                 _ => None,
             }
@@ -638,16 +584,15 @@ pub mod basic_shape {
 
     impl<'a> From<&'a StyleShapeSource> for ClippingShape {
         fn from(other: &'a StyleShapeSource) -> Self {
+            use crate::values::generics::image::Image as GenericImage;
             match other.mType {
-                StyleShapeSourceType::URL => unsafe {
+                StyleShapeSourceType::Image => unsafe {
                     let shape_image = &*other.__bindgen_anon_1.mShapeImage.as_ref().mPtr;
-                    let other_url =
-                        RefPtr::new(*shape_image.__bindgen_anon_1.mURLValue.as_ref() as *mut _);
-                    let url = ComputedUrl::from_url_value(other_url);
-                    ShapeSource::ImageOrUrl(url)
-                },
-                StyleShapeSourceType::Image => {
-                    unreachable!("ClippingShape doesn't support Image!");
+                    let image = shape_image.into_image().expect("Cannot convert to Image");
+                    match image {
+                        GenericImage::Url(url) => ShapeSource::ImageOrUrl(url.0),
+                        _ => panic!("ClippingShape doesn't support non-url images"),
+                    }
                 },
                 _ => other
                     .into_shape_source()
@@ -659,9 +604,6 @@ pub mod basic_shape {
     impl<'a> From<&'a StyleShapeSource> for FloatAreaShape {
         fn from(other: &'a StyleShapeSource) -> Self {
             match other.mType {
-                StyleShapeSourceType::URL => {
-                    unreachable!("FloatAreaShape doesn't support URL!");
-                },
                 StyleShapeSourceType::Image => unsafe {
                     let shape_image = &*other.__bindgen_anon_1.mShapeImage.as_ref().mPtr;
                     let image = shape_image.into_image().expect("Cannot convert to Image");
@@ -683,70 +625,8 @@ pub mod basic_shape {
                 StyleShapeSourceType::None => OffsetPath::none(),
                 StyleShapeSourceType::Shape |
                 StyleShapeSourceType::Box |
-                StyleShapeSourceType::URL |
                 StyleShapeSourceType::Image => unreachable!("Unsupported offset-path type"),
             }
-        }
-    }
-
-    impl<'a> From<&'a StyleBasicShape> for BasicShape {
-        fn from(other: &'a StyleBasicShape) -> Self {
-            match other.mType {
-                StyleBasicShapeType::Inset => {
-                    let t = LengthPercentage::from_gecko_style_coord(&other.mCoordinates[0]);
-                    let r = LengthPercentage::from_gecko_style_coord(&other.mCoordinates[1]);
-                    let b = LengthPercentage::from_gecko_style_coord(&other.mCoordinates[2]);
-                    let l = LengthPercentage::from_gecko_style_coord(&other.mCoordinates[3]);
-                    let round = other.mRadius;
-                    let rect = Rect::new(
-                        t.expect("inset() offset should be a length, percentage, or calc value"),
-                        r.expect("inset() offset should be a length, percentage, or calc value"),
-                        b.expect("inset() offset should be a length, percentage, or calc value"),
-                        l.expect("inset() offset should be a length, percentage, or calc value"),
-                    );
-                    GenericBasicShape::Inset(InsetRect { rect, round })
-                },
-                StyleBasicShapeType::Circle => GenericBasicShape::Circle(Circle {
-                    radius: (&other.mCoordinates[0]).into(),
-                    position: other.mPosition,
-                }),
-                StyleBasicShapeType::Ellipse => GenericBasicShape::Ellipse(Ellipse {
-                    semiaxis_x: (&other.mCoordinates[0]).into(),
-                    semiaxis_y: (&other.mCoordinates[1]).into(),
-                    position: other.mPosition,
-                }),
-                StyleBasicShapeType::Polygon => {
-                    let mut coords = Vec::with_capacity(other.mCoordinates.len() / 2);
-                    for i in 0..(other.mCoordinates.len() / 2) {
-                        let x = 2 * i;
-                        let y = x + 1;
-                        coords.push(PolygonCoord(
-                            LengthPercentage::from_gecko_style_coord(&other.mCoordinates[x])
-                                .expect(
-                                    "polygon() coordinate should be a length, percentage, \
-                                     or calc value",
-                                ),
-                            LengthPercentage::from_gecko_style_coord(&other.mCoordinates[y])
-                                .expect(
-                                    "polygon() coordinate should be a length, percentage, \
-                                     or calc value",
-                                ),
-                        ))
-                    }
-                    GenericBasicShape::Polygon(Polygon {
-                        fill: other.mFillRule,
-                        coordinates: coords,
-                    })
-                },
-            }
-        }
-    }
-
-    impl<'a> From<&'a nsStyleCoord> for ShapeRadius {
-        fn from(other: &'a nsStyleCoord) -> Self {
-            let other = other.borrow();
-            ShapeRadius::from_gecko_style_coord(other)
-                .expect("<shape-radius> should be a length, percentage, calc, or keyword value")
         }
     }
 
@@ -907,26 +787,6 @@ where
             T::from_gecko_style_coord(&sides.data_at(2)).expect("coord[2] cound not convert"),
             T::from_gecko_style_coord(&sides.data_at(3)).expect("coord[3] cound not convert"),
         ))
-    }
-}
-
-impl<L> VerticalAlign<L> {
-    /// Converts an enumerated value coming from Gecko to a `VerticalAlign<L>`.
-    pub fn from_gecko_keyword(value: u32) -> Self {
-        match value {
-            structs::NS_STYLE_VERTICAL_ALIGN_BASELINE => VerticalAlign::Baseline,
-            structs::NS_STYLE_VERTICAL_ALIGN_SUB => VerticalAlign::Sub,
-            structs::NS_STYLE_VERTICAL_ALIGN_SUPER => VerticalAlign::Super,
-            structs::NS_STYLE_VERTICAL_ALIGN_TOP => VerticalAlign::Top,
-            structs::NS_STYLE_VERTICAL_ALIGN_TEXT_TOP => VerticalAlign::TextTop,
-            structs::NS_STYLE_VERTICAL_ALIGN_MIDDLE => VerticalAlign::Middle,
-            structs::NS_STYLE_VERTICAL_ALIGN_BOTTOM => VerticalAlign::Bottom,
-            structs::NS_STYLE_VERTICAL_ALIGN_TEXT_BOTTOM => VerticalAlign::TextBottom,
-            structs::NS_STYLE_VERTICAL_ALIGN_MIDDLE_WITH_BASELINE => {
-                VerticalAlign::MozMiddleWithBaseline
-            },
-            _ => panic!("unexpected enumerated value for vertical-align"),
-        }
     }
 }
 

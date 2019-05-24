@@ -1409,6 +1409,12 @@ class AsyncPanZoomController {
    * The functions and members in this section are used for scrolling,
    * including handing off scroll to another APZC, and overscrolling.
    */
+
+  ScrollableLayerGuid::ViewID GetScrollId() const {
+    RecursiveMutexAutoLock lock(mRecursiveMutex);
+    return Metrics().GetScrollId();
+  }
+
  public:
   ScrollableLayerGuid::ViewID GetScrollHandoffParentId() const {
     return mScrollMetadata.GetScrollParentId();
@@ -1588,6 +1594,8 @@ class AsyncPanZoomController {
   LayersId GetLayersId() const { return mLayersId; }
 
   wr::RenderRoot GetRenderRoot() const { return mRenderRoot; }
+
+  bool IsPinchZooming() const { return mState == PINCHING; }
 
  private:
   // Extra offset to add to the async scroll position for testing

@@ -73,6 +73,7 @@
 #include "WidgetUtils.h"
 #include "nsIPresentationService.h"
 #include "nsIScriptError.h"
+#include "ReferrerInfo.h"
 
 #include "nsIExternalProtocolHandler.h"
 #include "BrowserChild.h"
@@ -578,7 +579,7 @@ void Navigator::GetBuildID(nsAString& aBuildID, CallerType aCallerType,
 }
 
 void Navigator::GetDoNotTrack(nsAString& aResult) {
-  bool doNotTrack = nsContentUtils::DoNotTrackEnabled();
+  bool doNotTrack = StaticPrefs::privacy_donottrackheader_enabled();
   if (!doNotTrack) {
     nsCOMPtr<nsILoadContext> loadContext = do_GetInterface(mWindow);
     doNotTrack = loadContext && loadContext->UseTrackingProtection();
@@ -1151,8 +1152,10 @@ bool Navigator::SendBeaconInternal(const nsAString& aUrl,
     aRv.Throw(NS_ERROR_DOM_BAD_URI);
     return false;
   }
-  mozilla::net::ReferrerPolicy referrerPolicy = doc->GetReferrerPolicy();
-  rv = httpChannel->SetReferrerWithPolicy(documentURI, referrerPolicy);
+
+  nsCOMPtr<nsIReferrerInfo> referrerInfo =
+      new ReferrerInfo(doc->GetDocumentURI(), doc->GetReferrerPolicy());
+  rv = httpChannel->SetReferrerInfoWithoutClone(referrerInfo);
   MOZ_ASSERT(NS_SUCCEEDED(rv));
 
   nsCOMPtr<nsIInputStream> in;
@@ -1274,7 +1277,20 @@ void Navigator::MozGetUserMediaDevices(
     aRv.Throw(NS_ERROR_NOT_AVAILABLE);
     return;
   }
-
+  if (Document* doc = mWindow->GetExtantDoc()) {
+    if (!mWindow->IsSecureContext()) {
+      doc->SetDocumentAndPageUseCounter(
+          eUseCounter_custom_MozGetUserMediaInsec);
+    }
+    nsINode* node = doc;
+    while ((node = nsContentUtils::GetCrossDocParentNode(node))) {
+      if (NS_FAILED(nsContentUtils::CheckSameOrigin(doc, node))) {
+        doc->SetDocumentAndPageUseCounter(
+            eUseCounter_custom_MozGetUserMediaXOrigin);
+        break;
+      }
+    }
+  }
   RefPtr<MediaManager> manager = MediaManager::Get();
   // XXXbz aOnError seems to be unused?
   nsCOMPtr<nsPIDOMWindowInner> window(mWindow);
@@ -1511,11 +1527,13 @@ JSObject* Navigator::WrapObject(JSContext* cx,
 }
 
 /* static */
-bool Navigator::HasUserMediaSupport(JSContext* /* unused */,
-                                    JSObject* /* unused */) {
-  // Make enabling peerconnection enable getUserMedia() as well
-  return Preferences::GetBool("media.navigator.enabled", false) ||
-         Preferences::GetBool("media.peerconnection.enabled", false);
+bool Navigator::HasUserMediaSupport(JSContext* cx, JSObject* obj) {
+  // Make enabling peerconnection enable getUserMedia() as well.
+  // Emulate [SecureContext] unless media.devices.insecure.enabled=true
+  return (StaticPrefs::media_navigator_enabled() ||
+          StaticPrefs::media_peerconnection_enabled()) &&
+         (IsSecureContextOrObjectIsFromSecureContext(cx, obj) ||
+          StaticPrefs::media_devices_insecure_enabled());
 }
 
 /* static */

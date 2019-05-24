@@ -83,7 +83,12 @@ class NetworkLocationsForm extends PureComponent {
           id: errorMessageId,
           "$host-value": errorHostValue,
         },
-        dom.p({}, errorMessageId)
+        dom.p(
+          {
+          className: "technical-text",
+          },
+          errorMessageId
+        )
       ),
     );
   }
@@ -108,7 +113,7 @@ class NetworkLocationsForm extends PureComponent {
       ),
       dom.input({
         id: "about-debugging-network-locations-host-input",
-        className: "default-input js-network-form-input",
+        className: "default-input qa-network-form-input",
         placeholder: "localhost:6080",
         type: "text",
         value: this.state.value,
@@ -123,7 +128,7 @@ class NetworkLocationsForm extends PureComponent {
         },
         dom.button(
           {
-            className: "primary-button js-network-form-submit-button",
+            className: "primary-button qa-network-form-submit-button",
           },
           "Add"
         )

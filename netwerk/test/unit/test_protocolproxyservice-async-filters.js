@@ -9,7 +9,6 @@
 
 "use strict";
 
-const {NetUtil} = ChromeUtils.import("resource://gre/modules/NetUtil.jsm");
 
 var ios = Cc["@mozilla.org/network/io-service;1"]
             .getService(Ci.nsIIOService);
@@ -108,7 +107,7 @@ TestFilter.prototype = {
       throw Cr.NS_ERROR_FAILURE;
     }
 
-    var pi_tail = pps.newProxyInfo(this._type, this._host, this._port,
+    var pi_tail = pps.newProxyInfo(this._type, this._host, this._port, "", "",
                                    this._flags, this._timeout, null);
     if (pi)
       pi.failoverProxy = pi_tail;

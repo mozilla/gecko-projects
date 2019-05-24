@@ -21,7 +21,13 @@ export { isMinified } from "./isMinified";
 import { getURL, getFileExtension } from "./sources-tree";
 import { prefs, features } from "./prefs";
 
-import type { SourceId, Source, SourceContent, SourceLocation } from "../types";
+import type {
+  SourceId,
+  Source,
+  SourceActor,
+  SourceContent,
+  SourceLocation,
+} from "../types";
 import { isFulfilled, type AsyncValue } from "./async-value";
 import type { Symbols } from "../reducers/types";
 
@@ -32,7 +38,7 @@ export const sourceTypes = {
   js: "javascript",
   jsx: "react",
   ts: "typescript",
-  vue: "vue"
+  vue: "vue",
 };
 
 /**
@@ -263,14 +269,14 @@ const contentTypeModeMap = {
   "text/coffeescript": { name: "coffeescript" },
   "text/typescript-jsx": {
     name: "jsx",
-    base: { name: "javascript", typescript: true }
+    base: { name: "javascript", typescript: true },
   },
   "text/jsx": { name: "jsx" },
   "text/x-elm": { name: "elm" },
   "text/x-clojure": { name: "clojure" },
   "text/x-clojurescript": { name: "clojure" },
   "text/wasm": { name: "text" },
-  "text/html": { name: "htmlmixed" }
+  "text/html": { name: "htmlmixed" },
 };
 
 export function getSourcePath(url: string) {
@@ -349,7 +355,7 @@ export function getMode(
     { ext: ".cpp", mode: "text/x-c++src" },
     { ext: ".m", mode: "text/x-objectivec" },
     { ext: ".rs", mode: "text/x-rustsrc" },
-    { ext: ".hx", mode: "text/x-haxe" }
+    { ext: ".hx", mode: "text/x-haxe" },
   ];
 
   // check for C and other non JS languages
@@ -397,7 +403,7 @@ export function getMode(
   return { name: "text" };
 }
 
-export function isInlineScript(source: Source): boolean {
+export function isInlineScript(source: SourceActor): boolean {
   return source.introductionType === "scriptElement";
 }
 
@@ -485,7 +491,7 @@ export function getSourceQueryString(source: ?Source) {
 }
 
 export function isUrlExtension(url: string) {
-  return /^(chrome|moz)-extension:\//.test(url);
+  return /\/?(chrome|moz)-extension:\//.test(url);
 }
 
 export function getPlainUrl(url: string): string {

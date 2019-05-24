@@ -3,15 +3,15 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 
-use blob;
+use crate::blob;
 use crossbeam::sync::chase_lev;
 #[cfg(windows)]
 use dwrote;
 #[cfg(all(unix, not(target_os = "android")))]
 use font_loader::system_fonts;
 use winit::EventsLoopProxy;
-use json_frame_writer::JsonFrameWriter;
-use ron_frame_writer::RonFrameWriter;
+use crate::json_frame_writer::JsonFrameWriter;
+use crate::ron_frame_writer::RonFrameWriter;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
@@ -21,8 +21,8 @@ use webrender;
 use webrender::api::*;
 use webrender::api::units::*;
 use webrender::{DebugFlags, RenderResults, ShaderPrecacheFlags};
-use yaml_frame_writer::YamlFrameWriterReceiver;
-use {WindowWrapper, NotifierEvent};
+use crate::yaml_frame_writer::YamlFrameWriterReceiver;
+use crate::{WindowWrapper, NotifierEvent};
 
 // TODO(gw): This descriptor matches what we currently support for fonts
 //           but is quite a mess. We should at least document and
@@ -120,7 +120,7 @@ impl RenderNotifier for Notifier {
 pub trait WrenchThing {
     fn next_frame(&mut self);
     fn prev_frame(&mut self);
-    fn do_frame(&mut self, &mut Wrench) -> u32;
+    fn do_frame(&mut self, _: &mut Wrench) -> u32;
 }
 
 impl WrenchThing for CapturedDocument {
@@ -218,11 +218,12 @@ impl Wrench {
             max_recorded_profiles: 16,
             precache_flags,
             blob_image_handler: Some(Box::new(blob::CheckerboardRenderer::new(callbacks.clone()))),
-            disable_dual_source_blending,
             chase_primitive,
             enable_picture_caching: true,
             testing: true,
             max_texture_size: Some(8196), // Needed for rawtest::test_resize_image.
+            allow_dual_source_blending: !disable_dual_source_blending,
+            allow_advanced_blend_equation: true,
             ..Default::default()
         };
 
@@ -286,11 +287,13 @@ impl Wrench {
     }
 
     pub fn set_page_zoom(&mut self, zoom_factor: ZoomFactor) {
-        self.page_zoom_factor = zoom_factor;
-        let mut txn = Transaction::new();
-        txn.set_page_zoom(self.page_zoom_factor);
-        self.api.send_transaction(self.document_id, txn);
-        self.set_title("");
+        if self.page_zoom_factor.get() != zoom_factor.get() {
+            self.page_zoom_factor = zoom_factor;
+            let mut txn = Transaction::new();
+            txn.set_page_zoom(self.page_zoom_factor);
+            self.api.send_transaction(self.document_id, txn);
+            self.set_title("");
+        }
     }
 
     pub fn layout_simple_ascii(

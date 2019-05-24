@@ -122,6 +122,7 @@
 #include "nsThreadUtils.h"
 #include "nsURIHashKey.h"
 #include "nsVideoFrame.h"
+#include "ReferrerInfo.h"
 #include "xpcpublic.h"
 #include <algorithm>
 #include <cmath>
@@ -1874,10 +1875,6 @@ void HTMLMediaElement::AbortExistingLoads() {
 
   mIsRunningSelectResource = false;
 
-  if (mTextTrackManager) {
-    mTextTrackManager->NotifyReset();
-  }
-
   mEventDeliveryPaused = false;
   mPendingEvents.Clear();
   mCurrentLoadPlayTime.Reset();
@@ -2454,6 +2451,27 @@ bool HTMLMediaElement::AllowedToPlay() const {
   return AutoplayPolicy::IsAllowedToPlay(*this);
 }
 
+uint32_t HTMLMediaElement::GetPreloadDefault() const {
+  if (mMediaSource) {
+    return HTMLMediaElement::PRELOAD_ATTR_METADATA;
+  }
+  if (OnCellularConnection()) {
+    return Preferences::GetInt("media.preload.default.cellular",
+                               HTMLMediaElement::PRELOAD_ATTR_NONE);
+  }
+  return Preferences::GetInt("media.preload.default",
+                             HTMLMediaElement::PRELOAD_ATTR_METADATA);
+}
+
+uint32_t HTMLMediaElement::GetPreloadDefaultAuto() const {
+  if (OnCellularConnection()) {
+    return Preferences::GetInt("media.preload.auto.cellular",
+                               HTMLMediaElement::PRELOAD_ATTR_METADATA);
+  }
+  return Preferences::GetInt("media.preload.auto",
+                             HTMLMediaElement::PRELOAD_ENOUGH);
+}
+
 void HTMLMediaElement::UpdatePreloadAction() {
   PreloadAction nextAction = PRELOAD_UNDEFINED;
   // If autoplay is set, or we're playing, we should always preload data,
@@ -2468,13 +2486,8 @@ void HTMLMediaElement::UpdatePreloadAction() {
         mAttrs.GetAttr(nsGkAtoms::preload, kNameSpaceID_None);
     // MSE doesn't work if preload is none, so it ignores the pref when src is
     // from MSE.
-    uint32_t preloadDefault =
-        mMediaSource
-            ? HTMLMediaElement::PRELOAD_ATTR_METADATA
-            : Preferences::GetInt("media.preload.default",
-                                  HTMLMediaElement::PRELOAD_ATTR_METADATA);
-    uint32_t preloadAuto = Preferences::GetInt(
-        "media.preload.auto", HTMLMediaElement::PRELOAD_ENOUGH);
+    uint32_t preloadDefault = GetPreloadDefault();
+    uint32_t preloadAuto = GetPreloadDefaultAuto();
     if (!val) {
       // Attribute is not set. Use the preload action specified by the
       // media.preload.default pref, or just preload metadata if not present.
@@ -5504,6 +5517,13 @@ void HTMLMediaElement::ChangeReadyState(nsMediaReadyState aState) {
 
   DDLOG(DDLogCategory::Property, "ready_state", gReadyStateToString[aState]);
 
+  // https://html.spec.whatwg.org/multipage/media.html#text-track-cue-active-flag
+  // The user agent must synchronously unset cues' active flag whenever the
+  // media element's readyState is changed back to HAVE_NOTHING.
+  if (mReadyState == HAVE_NOTHING && mTextTrackManager) {
+    mTextTrackManager->NotifyReset();
+  }
+
   if (mNetworkState == NETWORK_EMPTY) {
     return;
   }
@@ -6211,8 +6231,9 @@ void HTMLMediaElement::SetRequestHeaders(nsIHttpChannel* aChannel) {
   MOZ_ASSERT(NS_SUCCEEDED(rv));
 
   // Set the Referer header
-  rv = aChannel->SetReferrerWithPolicy(OwnerDoc()->GetDocumentURI(),
-                                       OwnerDoc()->GetReferrerPolicy());
+  nsCOMPtr<nsIReferrerInfo> referrerInfo = new ReferrerInfo(
+      OwnerDoc()->GetDocumentURI(), OwnerDoc()->GetReferrerPolicy());
+  rv = aChannel->SetReferrerInfoWithoutClone(referrerInfo);
   MOZ_ASSERT(NS_SUCCEEDED(rv));
 }
 
