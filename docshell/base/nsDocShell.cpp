@@ -11450,7 +11450,7 @@ nsresult nsDocShell::AddToSessionHistory(
 
   // Create a new entry if necessary.
   if (!entry) {
-    entry = components::SHEntry::Create();
+    mSessionHistory->LegacySHistory()->CreateEntry(getter_AddRefs(entry));
 
     if (!entry) {
       return NS_ERROR_OUT_OF_MEMORY;
