@@ -6604,6 +6604,7 @@ VARCACHE_PREF(
 // Store the session history in the parent process, and access it over IPC from
 // the child processes.
 VARCACHE_PREF(
+  Live,
   "fission.sessionHistoryInParent",
    fission_sessionHistoryInParent,
   bool, false
