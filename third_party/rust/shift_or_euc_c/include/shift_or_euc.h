@@ -19,10 +19,10 @@ extern "C" {
 #include "encoding_rs.h"
 
 #ifndef SHIFT_OR_EUC_DETECTOR
-#  define SHIFT_OR_EUC_DETECTOR Detector
-#  ifndef __cplusplus
+#define SHIFT_OR_EUC_DETECTOR Detector
+#ifndef __cplusplus
 typedef struct Detector_ Detector;
-#  endif
+#endif
 #endif
 
 /// Instantiates the detector. If `allow_2022` is `true` the possible
@@ -75,11 +75,14 @@ void shift_or_euc_detector_free(SHIFT_OR_EUC_DETECTOR* detector);
 /// * `buffer` and `buffer_len` don't designate a range of memory
 ///   valid for reading.
 ENCODING_RS_ENCODING const* shift_or_euc_detector_feed(
-    SHIFT_OR_EUC_DETECTOR* detector, uint8_t const* buffer, size_t buffer_len,
-    bool last);
+    SHIFT_OR_EUC_DETECTOR* detector,
+    uint8_t const* buffer,
+    size_t buffer_len,
+    bool last
+);
 
 #ifdef __cplusplus
 }
 #endif
 
-#endif  // shift_or_euc_h
+#endif // shift_or_euc_h
