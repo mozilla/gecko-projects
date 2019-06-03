@@ -19,11 +19,10 @@
 #include "mozilla/dom/DataTransfer.h"
 #include "mozilla/dom/DataTransferItemList.h"
 #include "mozilla/dom/Event.h"
-#include "mozilla/dom/FrameCrashedEvent.h"
 #include "mozilla/dom/indexedDB/ActorsParent.h"
-#include "mozilla/dom/IPCBlobUtils.h"
 #include "mozilla/dom/PaymentRequestParent.h"
 #include "mozilla/dom/BrowserBridgeParent.h"
+#include "mozilla/dom/RemoteDragStartData.h"
 #include "mozilla/dom/RemoteWebProgress.h"
 #include "mozilla/dom/RemoteWebProgressRequest.h"
 #include "mozilla/EventStateManager.h"
@@ -49,7 +48,6 @@
 #include "mozilla/UniquePtr.h"
 #include "mozilla/Unused.h"
 #include "nsCOMPtr.h"
-#include "nsContentAreaDragDrop.h"
 #include "nsContentUtils.h"
 #include "nsDebug.h"
 #include "nsFocusManager.h"
@@ -96,7 +94,6 @@
 #include "nsIAuthPromptCallback.h"
 #include "nsAuthInformationHolder.h"
 #include "nsICancelable.h"
-#include "gfxPrefs.h"
 #include "gfxUtils.h"
 #include "nsILoginManagerPrompter.h"
 #include "nsPIWindowRoot.h"
@@ -137,9 +134,9 @@ using namespace mozilla::widget;
 using namespace mozilla::jsipc;
 using namespace mozilla::gfx;
 
-using mozilla::Unused;
 using mozilla::LazyLogModule;
 using mozilla::StaticAutoPtr;
+using mozilla::Unused;
 
 LazyLogModule gBrowserFocusLog("BrowserFocus");
 
@@ -198,11 +195,6 @@ BrowserParent::BrowserParent(ContentParent* aManager, const TabId& aTabId,
       mSizeMode(nsSizeMode_Normal),
       mClientOffset{},
       mChromeOffset{},
-      mInitialDataTransferItems{},
-      mDnDVisualization{},
-      mDragValid(false),
-      mDragRect{},
-      mDragPrincipal{},
       mCreatingWindow(false),
       mDelayedURL{},
       mDelayedFrameScripts{},
@@ -541,7 +533,9 @@ void BrowserParent::SetOwnerElement(Element* aElement) {
   }
 
   VisitChildren([aElement](BrowserBridgeParent* aBrowser) {
-    aBrowser->GetBrowserParent()->SetOwnerElement(aElement);
+    if (auto* browserParent = aBrowser->GetBrowserParent()) {
+      browserParent->SetOwnerElement(aElement);
+    }
   });
 }
 
@@ -673,7 +667,6 @@ void BrowserParent::ActorDestroy(ActorDestroyReason why) {
   RefPtr<nsFrameLoader> frameLoader = GetFrameLoader(true);
   nsCOMPtr<nsIObserverService> os = services::GetObserverService();
   if (frameLoader) {
-    nsCOMPtr<Element> frameElement(mFrameElement);
     ReceiveMessage(CHILD_PROCESS_SHUTDOWN_MESSAGE, false, nullptr, nullptr,
                    nullptr);
 
@@ -684,38 +677,9 @@ void BrowserParent::ActorDestroy(ActorDestroyReason why) {
       frameLoader->DestroyComplete();
     }
 
-    if (why == AbnormalShutdown && os) {
-      os->NotifyObservers(ToSupports(frameLoader), "oop-frameloader-crashed",
-                          nullptr);
-      RefPtr<nsFrameLoaderOwner> owner = do_QueryObject(frameElement);
-      if (owner) {
-        RefPtr<nsFrameLoader> currentFrameLoader = owner->GetFrameLoader();
-        // It's possible that the frameloader owner has already moved on
-        // and created a new frameloader. If so, we don't fire the event,
-        // since the frameloader owner has clearly moved on.
-        if (currentFrameLoader == frameLoader) {
-          nsString eventName;
-          MessageChannel* channel = GetIPCChannel();
-          if (channel && !channel->DoBuildIDsMatch()) {
-            eventName = NS_LITERAL_STRING("oop-browser-buildid-mismatch");
-          } else {
-            eventName = NS_LITERAL_STRING("oop-browser-crashed");
-          }
-
-          dom::FrameCrashedEventInit init;
-          init.mBubbles = true;
-          init.mCancelable = true;
-          init.mBrowsingContextId = mBrowsingContext->Id();
-          init.mIsTopFrame = !mBrowsingContext->GetParent();
-
-          RefPtr<dom::FrameCrashedEvent> event =
-              dom::FrameCrashedEvent::Constructor(frameElement->OwnerDoc(),
-                                                  eventName, init);
-          event->SetTrusted(true);
-          EventDispatcher::DispatchDOMEvent(frameElement, nullptr, event,
-                                            nullptr, nullptr);
-        }
-      }
+    // If this was a crash, tell our nsFrameLoader to fire crash events.
+    if (why == AbnormalShutdown) {
+      frameLoader->MaybeNotifyCrashed(GetIPCChannel());
     }
   }
 
@@ -1091,7 +1055,8 @@ a11y::PDocAccessibleParent* BrowserParent::AllocPDocAccessibleParent(
     PDocAccessibleParent* aParent, const uint64_t&, const uint32_t&,
     const IAccessibleHolder&) {
 #ifdef ACCESSIBILITY
-  return new a11y::DocAccessibleParent();
+  // Reference freed in DeallocPDocAccessibleParent.
+  return do_AddRef(new a11y::DocAccessibleParent()).take();
 #else
   return nullptr;
 #endif
@@ -1099,7 +1064,8 @@ a11y::PDocAccessibleParent* BrowserParent::AllocPDocAccessibleParent(
 
 bool BrowserParent::DeallocPDocAccessibleParent(PDocAccessibleParent* aParent) {
 #ifdef ACCESSIBILITY
-  delete static_cast<a11y::DocAccessibleParent*>(aParent);
+  // Free reference from AllocPDocAccessibleParent.
+  static_cast<a11y::DocAccessibleParent*>(aParent)->Release();
 #endif
   return true;
 }
@@ -1145,6 +1111,35 @@ mozilla::ipc::IPCResult BrowserParent::RecvPDocAccessibleConstructor(
     }
 #  endif
 
+    return IPC_OK();
+  }
+
+  a11y::DocAccessibleParent* embedderDoc;
+  uint64_t embedderID;
+  Tie(embedderDoc, embedderID) = doc->GetRemoteEmbedder();
+  if (embedderDoc) {
+    // Iframe document rendered in a different process to its embedder.
+    // In this case, we don't get aParentDoc and aParentID.
+    MOZ_ASSERT(!aParentDoc && !aParentID);
+    MOZ_ASSERT(embedderID);
+#  ifdef XP_WIN
+    MOZ_ASSERT(!aDocCOMProxy.IsNull());
+    RefPtr<IAccessible> proxy(aDocCOMProxy.Get());
+    doc->SetCOMInterface(proxy);
+#  endif
+    mozilla::ipc::IPCResult added = embedderDoc->AddChildDoc(doc, embedderID);
+    if (!added) {
+#  ifdef DEBUG
+      return added;
+#  else
+      return IPC_OK();
+#  endif
+    }
+#  ifdef XP_WIN
+    if (a11y::nsWinUtils::IsWindowEmulationStarted()) {
+      doc->SetEmulatedWindowHandle(embedderDoc->GetEmulatedWindowHandle());
+    }
+#  endif
     return IPC_OK();
   } else {
     // null aParentDoc means this document is at the top level in the child
@@ -1233,9 +1228,12 @@ IPCResult BrowserParent::RecvPBrowserBridgeConstructor(
     PBrowserBridgeParent* aActor, const nsString& aName,
     const nsString& aRemoteType, BrowsingContext* aBrowsingContext,
     const uint32_t& aChromeFlags) {
-  static_cast<BrowserBridgeParent*>(aActor)->Init(
+  nsresult rv = static_cast<BrowserBridgeParent*>(aActor)->Init(
       aName, aRemoteType, CanonicalBrowsingContext::Cast(aBrowsingContext),
       aChromeFlags);
+  if (NS_FAILED(rv)) {
+    return IPC_FAIL(this, "Failed to construct BrowserBridgeParent");
+  }
   return IPC_OK();
 }
 
@@ -2291,7 +2289,7 @@ mozilla::ipc::IPCResult BrowserParent::RecvReplyKeyEvent(
   NS_ENSURE_TRUE(presContext, IPC_OK());
 
   AutoHandlingUserInputStatePusher userInpStatePusher(localEvent.IsTrusted(),
-                                                      &localEvent, doc);
+                                                      &localEvent);
 
   nsEventStatus status = nsEventStatus_eIgnore;
 
@@ -2374,27 +2372,53 @@ mozilla::ipc::IPCResult BrowserParent::RecvRegisterProtocolHandler(
   return IPC_OK();
 }
 
+mozilla::ipc::IPCResult BrowserParent::RecvOnStateChange(
+    const Maybe<WebProgressData>& aWebProgressData,
+    const RequestData& aRequestData, const uint32_t aStateFlags,
+    const nsresult aStatus,
+    const Maybe<WebProgressStateChangeData>& aStateChangeData) {
+  nsCOMPtr<nsIBrowser> browser;
+  nsCOMPtr<nsIWebProgress> manager;
+  nsCOMPtr<nsIWebProgressListener> managerAsListener;
+  if (!GetWebProgressListener(getter_AddRefs(browser), getter_AddRefs(manager),
+                              getter_AddRefs(managerAsListener))) {
+    return IPC_OK();
+  }
+
+  nsCOMPtr<nsIWebProgress> webProgress;
+  nsCOMPtr<nsIRequest> request;
+  ReconstructWebProgressAndRequest(manager, aWebProgressData, aRequestData,
+                                   webProgress, request);
+
+  if (aWebProgressData && aWebProgressData->isTopLevel()) {
+    Unused << browser->SetIsNavigating(aStateChangeData->isNavigating());
+    Unused << browser->SetMayEnableCharacterEncodingMenu(
+        aStateChangeData->mayEnableCharacterEncodingMenu());
+    Unused << browser->UpdateForStateChange(aStateChangeData->charset(),
+                                            aStateChangeData->documentURI(),
+                                            aStateChangeData->contentType());
+  } else if (aStateChangeData.isSome()) {
+    return IPC_FAIL(
+        this,
+        "Unexpected WebProgressStateChangeData for non-top-level WebProgress");
+  }
+
+  Unused << managerAsListener->OnStateChange(webProgress, request, aStateFlags,
+                                             aStatus);
+
+  return IPC_OK();
+}
+
 mozilla::ipc::IPCResult BrowserParent::RecvOnProgressChange(
     const Maybe<WebProgressData>& aWebProgressData,
     const RequestData& aRequestData, const int32_t aCurSelfProgress,
     const int32_t aMaxSelfProgress, const int32_t aCurTotalProgress,
     const int32_t aMaxTotalProgress) {
-  nsCOMPtr<nsIBrowser> browser =
-      mFrameElement ? mFrameElement->AsBrowser() : nullptr;
-
-  if (!browser) {
-    return IPC_OK();
-  }
-
+  nsCOMPtr<nsIBrowser> browser;
   nsCOMPtr<nsIWebProgress> manager;
-  nsresult rv = browser->GetRemoteWebProgressManager(getter_AddRefs(manager));
-  NS_ENSURE_SUCCESS(rv, IPC_OK());
-
-  nsCOMPtr<nsIWebProgressListener> managerAsListener =
-      do_QueryInterface(manager);
-
-  if (!managerAsListener) {
-    // We are no longer remote, so we cannot propagate this message.
+  nsCOMPtr<nsIWebProgressListener> managerAsListener;
+  if (!GetWebProgressListener(getter_AddRefs(browser), getter_AddRefs(manager),
+                              getter_AddRefs(managerAsListener))) {
     return IPC_OK();
   }
 
@@ -2414,22 +2438,11 @@ mozilla::ipc::IPCResult BrowserParent::RecvOnStatusChange(
     const Maybe<WebProgressData>& aWebProgressData,
     const RequestData& aRequestData, const nsresult aStatus,
     const nsString& aMessage) {
-  nsCOMPtr<nsIBrowser> browser =
-      mFrameElement ? mFrameElement->AsBrowser() : nullptr;
-
-  if (!browser) {
-    return IPC_OK();
-  }
-
+  nsCOMPtr<nsIBrowser> browser;
   nsCOMPtr<nsIWebProgress> manager;
-  nsresult rv = browser->GetRemoteWebProgressManager(getter_AddRefs(manager));
-  NS_ENSURE_SUCCESS(rv, IPC_OK());
-
-  nsCOMPtr<nsIWebProgressListener> managerAsListener =
-      do_QueryInterface(manager);
-
-  if (!managerAsListener) {
-    // We are no longer remote, so we cannot propagate this message.
+  nsCOMPtr<nsIWebProgressListener> managerAsListener;
+  if (!GetWebProgressListener(getter_AddRefs(browser), getter_AddRefs(manager),
+                              getter_AddRefs(managerAsListener))) {
     return IPC_OK();
   }
 
@@ -2447,30 +2460,55 @@ mozilla::ipc::IPCResult BrowserParent::RecvOnStatusChange(
 mozilla::ipc::IPCResult BrowserParent::RecvOnContentBlockingEvent(
     const Maybe<WebProgressData>& aWebProgressData,
     const RequestData& aRequestData, const uint32_t& aEvent) {
-  nsCOMPtr<nsIBrowser> browser =
-      mFrameElement ? mFrameElement->AsBrowser() : nullptr;
-  if (browser) {
-    nsCOMPtr<nsIWebProgress> manager;
-    nsresult rv = browser->GetRemoteWebProgressManager(getter_AddRefs(manager));
-    NS_ENSURE_SUCCESS(rv, IPC_OK());
-
-    nsCOMPtr<nsIWebProgressListener> managerAsListener =
-        do_QueryInterface(manager);
-    if (!managerAsListener) {
-      // We are no longer remote, so we cannot propagate this message.
-      return IPC_OK();
-    }
-
-    nsCOMPtr<nsIWebProgress> webProgress;
-    nsCOMPtr<nsIRequest> request;
-    ReconstructWebProgressAndRequest(manager, aWebProgressData, aRequestData,
-                                     webProgress, request);
-
-    Unused << managerAsListener->OnContentBlockingEvent(webProgress, request,
-                                                        aEvent);
+  nsCOMPtr<nsIBrowser> browser;
+  nsCOMPtr<nsIWebProgress> manager;
+  nsCOMPtr<nsIWebProgressListener> managerAsListener;
+  if (!GetWebProgressListener(getter_AddRefs(browser), getter_AddRefs(manager),
+                              getter_AddRefs(managerAsListener))) {
+    return IPC_OK();
   }
 
+  nsCOMPtr<nsIWebProgress> webProgress;
+  nsCOMPtr<nsIRequest> request;
+  ReconstructWebProgressAndRequest(manager, aWebProgressData, aRequestData,
+                                   webProgress, request);
+
+  Unused << managerAsListener->OnContentBlockingEvent(webProgress, request,
+                                                      aEvent);
+
   return IPC_OK();
+}
+
+bool BrowserParent::GetWebProgressListener(
+    nsIBrowser** aOutBrowser, nsIWebProgress** aOutManager,
+    nsIWebProgressListener** aOutListener) {
+  MOZ_ASSERT(aOutBrowser);
+  MOZ_ASSERT(aOutManager);
+  MOZ_ASSERT(aOutListener);
+
+  nsCOMPtr<nsIBrowser> browser =
+      mFrameElement ? mFrameElement->AsBrowser() : nullptr;
+  if (!browser) {
+    return false;
+  }
+
+  nsCOMPtr<nsIWebProgress> manager;
+  nsresult rv = browser->GetRemoteWebProgressManager(getter_AddRefs(manager));
+  if (NS_FAILED(rv)) {
+    return false;
+  }
+
+  nsCOMPtr<nsIWebProgressListener> listener = do_QueryInterface(manager);
+  if (!listener) {
+    // We are no longer remote so we cannot forward this event.
+    return false;
+  }
+
+  browser.forget(aOutBrowser);
+  manager.forget(aOutManager);
+  listener.forget(aOutListener);
+
+  return true;
 }
 
 void BrowserParent::ReconstructWebProgressAndRequest(
@@ -2778,9 +2816,8 @@ mozilla::ipc::IPCResult BrowserParent::RecvSetNativeChildOfShareableWindow(
 }
 
 mozilla::ipc::IPCResult BrowserParent::RecvDispatchFocusToTopLevelWindow() {
-  nsCOMPtr<nsIWidget> widget = GetTopLevelWidget();
-  if (widget) {
-    widget->SetFocus(false);
+  if (nsCOMPtr<nsIWidget> widget = GetTopLevelWidget()) {
+    widget->SetFocus(nsIWidget::Raise::No);
   }
   return IPC_OK();
 }
@@ -3449,7 +3486,6 @@ mozilla::ipc::IPCResult BrowserParent::RecvInvokeDragSession(
     Maybe<Shmem>&& aVisualDnDData, const uint32_t& aStride,
     const gfx::SurfaceFormat& aFormat, const LayoutDeviceIntRect& aDragRect,
     nsIPrincipal* aPrincipal) {
-  mInitialDataTransferItems.Clear();
   PresShell* presShell = mFrameElement->OwnerDoc()->GetPresShell();
   if (!presShell) {
     Unused << Manager()->SendEndDragSession(true, true, LayoutDeviceIntPoint(),
@@ -3460,9 +3496,14 @@ mozilla::ipc::IPCResult BrowserParent::RecvInvokeDragSession(
     return IPC_OK();
   }
 
-  EventStateManager* esm = presShell->GetPresContext()->EventStateManager();
-  for (uint32_t i = 0; i < aTransfers.Length(); ++i) {
-    mInitialDataTransferItems.AppendElement(std::move(aTransfers[i].items()));
+  RefPtr<RemoteDragStartData> dragStartData = new RemoteDragStartData(
+      this, std::move(aTransfers), aDragRect, aPrincipal);
+
+  if (!aVisualDnDData.isNothing() && aVisualDnDData.ref().IsReadable() &&
+      aVisualDnDData.ref().Size<char>() >= aDragRect.height * aStride) {
+    dragStartData->SetVisualization(gfx::CreateDataSourceSurfaceFromData(
+        gfx::IntSize(aDragRect.width, aDragRect.height), aFormat,
+        aVisualDnDData.ref().get<uint8_t>(), aStride));
   }
 
   nsCOMPtr<nsIDragService> dragService =
@@ -3471,88 +3512,15 @@ mozilla::ipc::IPCResult BrowserParent::RecvInvokeDragSession(
     dragService->MaybeAddChildProcess(Manager());
   }
 
-  if (aVisualDnDData.isNothing() || !aVisualDnDData.ref().IsReadable() ||
-      aVisualDnDData.ref().Size<char>() < aDragRect.height * aStride) {
-    mDnDVisualization = nullptr;
-  } else {
-    mDnDVisualization = gfx::CreateDataSourceSurfaceFromData(
-        gfx::IntSize(aDragRect.width, aDragRect.height), aFormat,
-        aVisualDnDData.ref().get<uint8_t>(), aStride);
-  }
-
-  mDragValid = true;
-  mDragRect = aDragRect;
-  mDragPrincipal = aPrincipal;
-
-  esm->BeginTrackingRemoteDragGesture(mFrameElement);
+  presShell->GetPresContext()
+      ->EventStateManager()
+      ->BeginTrackingRemoteDragGesture(mFrameElement, dragStartData);
 
   if (aVisualDnDData.isSome()) {
     Unused << DeallocShmem(aVisualDnDData.ref());
   }
 
   return IPC_OK();
-}
-
-void BrowserParent::AddInitialDnDDataTo(DataTransfer* aDataTransfer,
-                                        nsIPrincipal** aPrincipal) {
-  NS_IF_ADDREF(*aPrincipal = mDragPrincipal);
-
-  for (uint32_t i = 0; i < mInitialDataTransferItems.Length(); ++i) {
-    nsTArray<IPCDataTransferItem>& itemArray = mInitialDataTransferItems[i];
-    for (auto& item : itemArray) {
-      RefPtr<nsVariantCC> variant = new nsVariantCC();
-      // Special case kFilePromiseMime so that we get the right
-      // nsIFlavorDataProvider for it.
-      if (item.flavor().EqualsLiteral(kFilePromiseMime)) {
-        RefPtr<nsISupports> flavorDataProvider =
-            new nsContentAreaDragDropDataProvider();
-        variant->SetAsISupports(flavorDataProvider);
-      } else if (item.data().type() == IPCDataTransferData::TnsString) {
-        variant->SetAsAString(item.data().get_nsString());
-      } else if (item.data().type() == IPCDataTransferData::TIPCBlob) {
-        RefPtr<BlobImpl> impl =
-            IPCBlobUtils::Deserialize(item.data().get_IPCBlob());
-        variant->SetAsISupports(impl);
-      } else if (item.data().type() == IPCDataTransferData::TShmem) {
-        if (nsContentUtils::IsFlavorImage(item.flavor())) {
-          // An image! Get the imgIContainer for it and set it in the variant.
-          nsCOMPtr<imgIContainer> imageContainer;
-          nsresult rv = nsContentUtils::DataTransferItemToImage(
-              item, getter_AddRefs(imageContainer));
-          if (NS_FAILED(rv)) {
-            continue;
-          }
-          variant->SetAsISupports(imageContainer);
-        } else {
-          Shmem data = item.data().get_Shmem();
-          variant->SetAsACString(
-              nsDependentCSubstring(data.get<char>(), data.Size<char>()));
-        }
-
-        mozilla::Unused << DeallocShmem(item.data().get_Shmem());
-      }
-
-      // We set aHidden to false, as we don't need to worry about hiding data
-      // from content in the parent process where there is no content.
-      // XXX: Nested Content Processes may change this
-      aDataTransfer->SetDataWithPrincipalFromOtherProcess(
-          NS_ConvertUTF8toUTF16(item.flavor()), variant, i, mDragPrincipal,
-          /* aHidden = */ false);
-    }
-  }
-  mInitialDataTransferItems.Clear();
-  mDragPrincipal = nullptr;
-}
-
-bool BrowserParent::TakeDragVisualization(
-    RefPtr<mozilla::gfx::SourceSurface>& aSurface,
-    LayoutDeviceIntRect* aDragRect) {
-  if (!mDragValid) return false;
-
-  aSurface = mDnDVisualization.forget();
-  *aDragRect = mDragRect;
-  mDragValid = false;
-  return true;
 }
 
 bool BrowserParent::AsyncPanZoomEnabled() const {
@@ -3593,7 +3561,7 @@ mozilla::ipc::IPCResult BrowserParent::RecvLookUpDictionary(
 }
 
 mozilla::ipc::IPCResult BrowserParent::RecvShowCanvasPermissionPrompt(
-    const nsCString& aFirstPartyURI, const bool& aHideDoorHanger) {
+    const nsCString& aOrigin, const bool& aHideDoorHanger) {
   nsCOMPtr<nsIBrowser> browser =
       mFrameElement ? mFrameElement->AsBrowser() : nullptr;
   if (!browser) {
@@ -3609,7 +3577,7 @@ mozilla::ipc::IPCResult BrowserParent::RecvShowCanvasPermissionPrompt(
       browser,
       aHideDoorHanger ? "canvas-permissions-prompt-hide-doorhanger"
                       : "canvas-permissions-prompt",
-      NS_ConvertUTF8toUTF16(aFirstPartyURI).get());
+      NS_ConvertUTF8toUTF16(aOrigin).get());
   if (NS_FAILED(rv)) {
     return IPC_FAIL_NO_REASON(this);
   }

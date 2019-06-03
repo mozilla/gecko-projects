@@ -35,6 +35,7 @@ class nsPluginInstanceOwner;
 
 namespace mozilla {
 namespace dom {
+struct BindContext;
 template <typename T>
 class Sequence;
 struct MozPluginParameter;
@@ -316,9 +317,8 @@ class nsObjectLoadingContent : public nsImageLoadingContent,
 
   void DoStopPlugin(nsPluginInstanceOwner* aInstanceOwner);
 
-  nsresult BindToTree(mozilla::dom::Document* aDocument, nsIContent* aParent,
-                      nsIContent* aBindingParent);
-  void UnbindFromTree(bool aDeep = true, bool aNullParent = true);
+  nsresult BindToTree(mozilla::dom::BindContext&, nsINode& aParent);
+  void UnbindFromTree(bool aNullParent = true);
 
   /**
    * Return the content policy type used for loading the element.

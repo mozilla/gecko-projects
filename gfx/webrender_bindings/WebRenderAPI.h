@@ -16,6 +16,7 @@
 #include "mozilla/layers/IpcResourceUpdateQueue.h"
 #include "mozilla/layers/ScrollableLayerGuid.h"
 #include "mozilla/layers/SyncObject.h"
+#include "mozilla/layers/WebRenderCompositionRecorder.h"
 #include "mozilla/Range.h"
 #include "mozilla/webrender/webrender_ffi.h"
 #include "mozilla/webrender/WebRenderTypes.h"
@@ -24,6 +25,8 @@
 
 class nsDisplayItem;
 class nsDisplayTransform;
+
+#undef None
 
 namespace mozilla {
 
@@ -128,7 +131,7 @@ class TransactionBuilder final {
 
   void AddExternalImage(ImageKey key, const ImageDescriptor& aDescriptor,
                         ExternalImageId aExtID,
-                        wr::WrExternalImageBufferType aBufferType,
+                        wr::ExternalImageType aImageType,
                         uint8_t aChannelIndex = 0);
 
   void UpdateImageBuffer(wr::ImageKey aKey, const ImageDescriptor& aDescriptor,
@@ -141,13 +144,15 @@ class TransactionBuilder final {
 
   void UpdateExternalImage(ImageKey aKey, const ImageDescriptor& aDescriptor,
                            ExternalImageId aExtID,
-                           wr::WrExternalImageBufferType aBufferType,
+                           wr::ExternalImageType aImageType,
                            uint8_t aChannelIndex = 0);
 
-  void UpdateExternalImageWithDirtyRect(
-      ImageKey aKey, const ImageDescriptor& aDescriptor, ExternalImageId aExtID,
-      wr::WrExternalImageBufferType aBufferType,
-      const wr::DeviceIntRect& aDirtyRect, uint8_t aChannelIndex = 0);
+  void UpdateExternalImageWithDirtyRect(ImageKey aKey,
+                                        const ImageDescriptor& aDescriptor,
+                                        ExternalImageId aExtID,
+                                        wr::ExternalImageType aImageType,
+                                        const wr::DeviceIntRect& aDirtyRect,
+                                        uint8_t aChannelIndex = 0);
 
   void SetImageVisibleArea(BlobImageKey aKey, const wr::DeviceIntRect& aArea);
 
@@ -255,6 +260,9 @@ class WebRenderAPI final {
   layers::SyncHandle GetSyncHandle() const { return mSyncHandle; }
 
   void Capture();
+
+  void SetCompositionRecorder(
+      RefPtr<layers::WebRenderCompositionRecorder>&& aRecorder);
 
  protected:
   WebRenderAPI(wr::DocumentHandle* aHandle, wr::WindowId aId,

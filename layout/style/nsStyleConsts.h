@@ -171,7 +171,8 @@ enum class StyleScrollbarWidth : uint8_t {
 // Shape source type
 enum class StyleShapeSourceType : uint8_t {
   None,
-  Image,  // shape-outside / clip-path only, and clip-path only uses it for <url>s
+  Image,  // shape-outside / clip-path only, and clip-path only uses it for
+          // <url>s
   Shape,
   Box,
   Path,  // SVG path function
@@ -363,20 +364,6 @@ enum class StyleFlexDirection : uint8_t {
 // (rather than an internal numerical representation of some keyword).
 #define NS_STYLE_ORDER_INITIAL 0
 
-// See nsStyleFilter
-#define NS_STYLE_FILTER_NONE 0
-#define NS_STYLE_FILTER_URL 1
-#define NS_STYLE_FILTER_BLUR 2
-#define NS_STYLE_FILTER_BRIGHTNESS 3
-#define NS_STYLE_FILTER_CONTRAST 4
-#define NS_STYLE_FILTER_GRAYSCALE 5
-#define NS_STYLE_FILTER_INVERT 6
-#define NS_STYLE_FILTER_OPACITY 7
-#define NS_STYLE_FILTER_SATURATE 8
-#define NS_STYLE_FILTER_SEPIA 9
-#define NS_STYLE_FILTER_HUE_ROTATE 10
-#define NS_STYLE_FILTER_DROP_SHADOW 11
-
 // See nsStyleFont
 #define NS_STYLE_FONT_SIZE_XXSMALL 0
 #define NS_STYLE_FONT_SIZE_XSMALL 1
@@ -550,11 +537,6 @@ enum class StyleGridTrackBreadth : uint8_t {
 #define NS_STYLE_TEXT_DECORATION_STYLE_DOUBLE 4
 #define NS_STYLE_TEXT_DECORATION_STYLE_WAVY 5
 #define NS_STYLE_TEXT_DECORATION_STYLE_MAX NS_STYLE_TEXT_DECORATION_STYLE_WAVY
-
-// See nsStyleTextOverflow
-#define NS_STYLE_TEXT_OVERFLOW_CLIP 0
-#define NS_STYLE_TEXT_OVERFLOW_ELLIPSIS 1
-#define NS_STYLE_TEXT_OVERFLOW_STRING 2
 
 // See nsStyleText
 #define NS_STYLE_TEXT_TRANSFORM_NONE 0

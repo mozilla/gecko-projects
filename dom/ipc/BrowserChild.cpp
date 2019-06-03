@@ -8,7 +8,6 @@
 
 #include "BrowserChild.h"
 
-#include "gfxPrefs.h"
 #ifdef ACCESSIBILITY
 #  include "mozilla/a11y/DocAccessibleChild.h"
 #endif
@@ -132,6 +131,7 @@
 #include "nsWebBrowser.h"
 #include "mozilla/dom/WindowGlobalChild.h"
 #include "MMPrinter.h"
+#include "mozilla/ResultExtensions.h"
 
 #ifdef XP_WIN
 #  include "mozilla/plugins/PluginWidgetChild.h"
@@ -358,18 +358,19 @@ already_AddRefed<BrowserChild> BrowserChild::FindBrowserChild(
 already_AddRefed<BrowserChild> BrowserChild::Create(
     ContentChild* aManager, const TabId& aTabId, const TabId& aSameTabGroupAs,
     const TabContext& aContext, BrowsingContext* aBrowsingContext,
-    uint32_t aChromeFlags) {
+    uint32_t aChromeFlags, bool aIsTopLevel) {
   RefPtr<BrowserChild> groupChild = FindBrowserChild(aSameTabGroupAs);
   dom::TabGroup* group = groupChild ? groupChild->TabGroup() : nullptr;
-  RefPtr<BrowserChild> iframe = new BrowserChild(
-      aManager, aTabId, group, aContext, aBrowsingContext, aChromeFlags);
+  RefPtr<BrowserChild> iframe =
+      new BrowserChild(aManager, aTabId, group, aContext, aBrowsingContext,
+                       aChromeFlags, aIsTopLevel);
   return iframe.forget();
 }
 
 BrowserChild::BrowserChild(ContentChild* aManager, const TabId& aTabId,
                            dom::TabGroup* aTabGroup, const TabContext& aContext,
                            BrowsingContext* aBrowsingContext,
-                           uint32_t aChromeFlags)
+                           uint32_t aChromeFlags, bool aIsTopLevel)
     : TabContext(aContext),
       mTabGroup(aTabGroup),
       mManager(aManager),
@@ -378,6 +379,7 @@ BrowserChild::BrowserChild(ContentChild* aManager, const TabId& aTabId,
       mMaxTouchPoints(0),
       mLayersId{0},
       mBeforeUnloadListeners(0),
+      mEffectsInfo{EffectsInfo::FullyHidden()},
       mDidFakeShow(false),
       mNotified(false),
       mTriedBrowserInit(false),
@@ -386,6 +388,7 @@ BrowserChild::BrowserChild(ContentChild* aManager, const TabId& aTabId,
       mHasValidInnerSize(false),
       mDestroyed(false),
       mUniqueId(aTabId),
+      mIsTopLevel(aIsTopLevel),
       mHasSiblings(false),
       mIsTransparent(false),
       mIPCOpen(false),
@@ -394,22 +397,23 @@ BrowserChild::BrowserChild(ContentChild* aManager, const TabId& aTabId,
       mDidLoadURLInit(false),
       mAwaitingLA(false),
       mSkipKeyPress(false),
-      mLayersObserverEpoch {
-  1
-}
+      mLayersObserverEpoch{1},
 #if defined(XP_WIN) && defined(ACCESSIBILITY)
-, mNativeWindowHandle(0)
+      mNativeWindowHandle(0),
 #endif
 #if defined(ACCESSIBILITY)
-      ,
-    mTopLevelDocAccessibleChild(nullptr)
+      mTopLevelDocAccessibleChild(nullptr),
 #endif
-        ,
-    mPendingDocShellIsActive(false), mPendingDocShellReceivedMessage(false),
-    mPendingRenderLayers(false),
-    mPendingRenderLayersReceivedMessage(false), mPendingLayersObserverEpoch{0},
-    mPendingDocShellBlockers(0), mCancelContentJSEpoch(0),
-    mWidgetNativeData(0) {
+      mShouldSendWebProgressEventsToParent(false),
+      mRenderLayers(true),
+      mPendingDocShellIsActive(false),
+      mPendingDocShellReceivedMessage(false),
+      mPendingRenderLayers(false),
+      mPendingRenderLayersReceivedMessage(false),
+      mPendingLayersObserverEpoch{0},
+      mPendingDocShellBlockers(0),
+      mCancelContentJSEpoch(0),
+      mWidgetNativeData(0) {
   mozilla::HoldJSObjects(this);
 
   nsWeakPtr weakPtrThis(do_GetWeakReference(
@@ -543,8 +547,9 @@ nsresult BrowserChild::Init(mozIDOMWindowProxy* aParent) {
   MOZ_ASSERT(docShell);
 
   const uint32_t notifyMask =
-      nsIWebProgress::NOTIFY_PROGRESS | nsIWebProgress::NOTIFY_STATUS |
-      nsIWebProgress::NOTIFY_REFRESH | nsIWebProgress::NOTIFY_CONTENT_BLOCKING;
+      nsIWebProgress::NOTIFY_STATE_ALL | nsIWebProgress::NOTIFY_PROGRESS |
+      nsIWebProgress::NOTIFY_STATUS | nsIWebProgress::NOTIFY_REFRESH |
+      nsIWebProgress::NOTIFY_CONTENT_BLOCKING;
 
   mStatusFilter = new nsBrowserStatusFilter();
 
@@ -1207,6 +1212,8 @@ mozilla::ipc::IPCResult BrowserChild::RecvShow(const ScreenIntSize& aSize,
     recordreplay::child::CreateCheckpoint();
   }
 
+  UpdateVisibility(false);
+
   return IPC_OK();
 }
 
@@ -1809,7 +1816,7 @@ mozilla::ipc::IPCResult BrowserChild::RecvRealTouchEvent(
 
   if (localEvent.mMessage == eTouchStart && AsyncPanZoomEnabled()) {
     nsCOMPtr<Document> document = GetTopLevelDocument();
-    if (gfxPrefs::TouchActionEnabled()) {
+    if (StaticPrefs::TouchActionEnabled()) {
       APZCCallbackHelper::SendSetAllowedTouchBehaviorNotification(
           mPuppetWidget, document, localEvent, aInputBlockId,
           mSetAllowedTouchBehaviorCallback);
@@ -2482,6 +2489,8 @@ mozilla::ipc::IPCResult BrowserChild::RecvRenderLayers(
     lm->SetLayersObserverEpoch(mLayersObserverEpoch);
   }
 
+  mRenderLayers = aEnabled;
+
   if (aEnabled) {
     if (!aForceRepaint && IsVisible()) {
       // This request is a no-op. In this case, we still want a
@@ -2493,57 +2502,9 @@ mozilla::ipc::IPCResult BrowserChild::RecvRenderLayers(
         return IPC_OK();
       }
     }
-
-    if (!sVisibleTabs) {
-      sVisibleTabs = new nsTHashtable<nsPtrHashKey<BrowserChild>>();
-    }
-    sVisibleTabs->PutEntry(this);
-
-    MakeVisible();
-
-    nsCOMPtr<nsIDocShell> docShell = do_GetInterface(WebNavigation());
-    if (!docShell) {
-      return IPC_OK();
-    }
-
-    // We don't use BrowserChildBase::GetPresShell() here because that would
-    // create a content viewer if one doesn't exist yet. Creating a content
-    // viewer can cause JS to run, which we want to avoid.
-    // nsIDocShell::GetPresShell returns null if no content viewer exists yet.
-    if (RefPtr<PresShell> presShell = docShell->GetPresShell()) {
-      presShell->SetIsActive(true);
-
-      if (nsIFrame* root = presShell->GetRootFrame()) {
-        FrameLayerBuilder::InvalidateAllLayersForFrame(
-            nsLayoutUtils::GetDisplayRootFrame(root));
-        root->SchedulePaint();
-      }
-
-      Telemetry::AutoTimer<Telemetry::TABCHILD_PAINT_TIME> timer;
-      // If we need to repaint, let's do that right away. No sense waiting until
-      // we get back to the event loop again. We suppress the display port so
-      // that we only paint what's visible. This ensures that the tab we're
-      // switching to paints as quickly as possible.
-      presShell->SuppressDisplayport(true);
-      if (nsContentUtils::IsSafeToRunScript()) {
-        WebWidget()->PaintNowIfNeeded();
-      } else {
-        RefPtr<nsViewManager> vm = presShell->GetViewManager();
-        if (nsView* view = vm->GetRootView()) {
-          presShell->Paint(view, view->GetBounds(), PaintFlags::PaintLayers);
-        }
-      }
-      presShell->SuppressDisplayport(false);
-    }
-  } else {
-    if (sVisibleTabs) {
-      sVisibleTabs->RemoveEntry(this);
-      // We don't delete sVisibleTabs here when it's empty since that
-      // could cause a lot of churn. Instead, we wait until ~BrowserChild.
-    }
-
-    MakeHidden();
   }
+
+  UpdateVisibility(true);
 
   return IPC_OK();
 }
@@ -2795,17 +2756,96 @@ void BrowserChild::NotifyPainted() {
   }
 }
 
-void BrowserChild::MakeVisible() {
+IPCResult BrowserChild::RecvUpdateEffects(const EffectsInfo& aEffects) {
+  mEffectsInfo = aEffects;
+  UpdateVisibility(false);
+  return IPC_OK();
+}
+
+bool BrowserChild::IsVisible() {
+  return mPuppetWidget && mPuppetWidget->IsVisible();
+}
+
+void BrowserChild::UpdateVisibility(bool aForceRepaint) {
+  bool shouldBeVisible = mIsTopLevel ? mRenderLayers : mEffectsInfo.mVisible;
+  bool isVisible = IsVisible();
+
+  if (shouldBeVisible != isVisible) {
+    if (shouldBeVisible) {
+      MakeVisible(aForceRepaint);
+    } else {
+      MakeHidden();
+    }
+  }
+}
+
+void BrowserChild::MakeVisible(bool aForceRepaint) {
   if (IsVisible()) {
     return;
   }
 
+  if (!sVisibleTabs) {
+    sVisibleTabs = new nsTHashtable<nsPtrHashKey<BrowserChild>>();
+  }
+  sVisibleTabs->PutEntry(this);
+
   if (mPuppetWidget) {
     mPuppetWidget->Show(true);
+  }
+
+  nsCOMPtr<nsIDocShell> docShell = do_GetInterface(WebNavigation());
+  if (!docShell) {
+    return;
+  }
+
+  // We don't use BrowserChildBase::GetPresShell() here because that would
+  // create a content viewer if one doesn't exist yet. Creating a content
+  // viewer can cause JS to run, which we want to avoid.
+  // nsIDocShell::GetPresShell returns null if no content viewer exists yet.
+  if (RefPtr<PresShell> presShell = docShell->GetPresShell()) {
+    presShell->SetIsActive(true);
+  }
+
+  if (!aForceRepaint) {
+    return;
+  }
+
+  // We don't use BrowserChildBase::GetPresShell() here because that would
+  // create a content viewer if one doesn't exist yet. Creating a content
+  // viewer can cause JS to run, which we want to avoid.
+  // nsIDocShell::GetPresShell returns null if no content viewer exists yet.
+  if (RefPtr<PresShell> presShell = docShell->GetPresShell()) {
+    if (nsIFrame* root = presShell->GetRootFrame()) {
+      FrameLayerBuilder::InvalidateAllLayersForFrame(
+          nsLayoutUtils::GetDisplayRootFrame(root));
+      root->SchedulePaint();
+    }
+
+    Telemetry::AutoTimer<Telemetry::TABCHILD_PAINT_TIME> timer;
+    // If we need to repaint, let's do that right away. No sense waiting until
+    // we get back to the event loop again. We suppress the display port so
+    // that we only paint what's visible. This ensures that the tab we're
+    // switching to paints as quickly as possible.
+    presShell->SuppressDisplayport(true);
+    if (nsContentUtils::IsSafeToRunScript()) {
+      WebWidget()->PaintNowIfNeeded();
+    } else {
+      RefPtr<nsViewManager> vm = presShell->GetViewManager();
+      if (nsView* view = vm->GetRootView()) {
+        presShell->Paint(view, view->GetBounds(), PaintFlags::PaintLayers);
+      }
+    }
+    presShell->SuppressDisplayport(false);
   }
 }
 
 void BrowserChild::MakeHidden() {
+  if (sVisibleTabs) {
+    sVisibleTabs->RemoveEntry(this);
+    // We don't delete sVisibleTabs here when it's empty since that
+    // could cause a lot of churn. Instead, we wait until ~BrowserChild.
+  }
+
   if (!IsVisible()) {
     return;
   }
@@ -2841,10 +2881,6 @@ void BrowserChild::MakeHidden() {
   if (mPuppetWidget) {
     mPuppetWidget->Show(false);
   }
-}
-
-bool BrowserChild::IsVisible() {
-  return mPuppetWidget && mPuppetWidget->IsVisible();
 }
 
 NS_IMETHODIMP
@@ -3453,6 +3489,11 @@ void BrowserChild::BeforeUnloadRemoved() {
   }
 }
 
+NS_IMETHODIMP BrowserChild::BeginSendingWebProgressEventsToParent() {
+  mShouldSendWebProgressEventsToParent = true;
+  return NS_OK;
+}
+
 mozilla::dom::TabGroup* BrowserChild::TabGroup() { return mTabGroup; }
 
 nsresult BrowserChild::GetHasSiblings(bool* aHasSiblings) {
@@ -3469,7 +3510,50 @@ NS_IMETHODIMP BrowserChild::OnStateChange(nsIWebProgress* aWebProgress,
                                           nsIRequest* aRequest,
                                           uint32_t aStateFlags,
                                           nsresult aStatus) {
-  return NS_ERROR_NOT_IMPLEMENTED;
+  if (!IPCOpen() || !mShouldSendWebProgressEventsToParent) {
+    return NS_OK;
+  }
+
+  nsCOMPtr<nsIDocShell> docShell = do_GetInterface(WebNavigation());
+  if (!docShell) {
+    return NS_OK;
+  }
+
+  RefPtr<Document> document;
+  if (nsCOMPtr<nsPIDOMWindowOuter> outerWindow = do_GetInterface(docShell)) {
+    document = outerWindow->GetExtantDoc();
+  } else {
+    return NS_OK;
+  }
+
+  Maybe<WebProgressData> webProgressData;
+  Maybe<WebProgressStateChangeData> stateChangeData;
+  RequestData requestData;
+
+  MOZ_TRY(PrepareProgressListenerData(aWebProgress, aRequest, webProgressData,
+                                      requestData));
+
+  if (webProgressData->isTopLevel()) {
+    stateChangeData.emplace();
+
+    stateChangeData->isNavigating() = docShell->GetIsNavigating();
+    stateChangeData->mayEnableCharacterEncodingMenu() =
+        docShell->GetMayEnableCharacterEncodingMenu();
+
+    if (document && aStateFlags & nsIWebProgressListener::STATE_STOP) {
+      document->GetContentType(stateChangeData->contentType());
+      document->GetCharacterSet(stateChangeData->charset());
+      stateChangeData->documentURI() = document->GetDocumentURIObject();
+    } else {
+      stateChangeData->contentType().SetIsVoid(true);
+      stateChangeData->charset().SetIsVoid(true);
+    }
+  }
+
+  Unused << SendOnStateChange(webProgressData, requestData, aStateFlags,
+                              aStatus, stateChangeData);
+
+  return NS_OK;
 }
 
 NS_IMETHODIMP BrowserChild::OnProgressChange(nsIWebProgress* aWebProgress,
@@ -3478,7 +3562,7 @@ NS_IMETHODIMP BrowserChild::OnProgressChange(nsIWebProgress* aWebProgress,
                                              int32_t aMaxSelfProgress,
                                              int32_t aCurTotalProgress,
                                              int32_t aMaxTotalProgress) {
-  if (!IPCOpen()) {
+  if (!IPCOpen() || !mShouldSendWebProgressEventsToParent) {
     return NS_OK;
   }
 
@@ -3507,7 +3591,7 @@ NS_IMETHODIMP BrowserChild::OnStatusChange(nsIWebProgress* aWebProgress,
                                            nsIRequest* aRequest,
                                            nsresult aStatus,
                                            const char16_t* aMessage) {
-  if (!IPCOpen()) {
+  if (!IPCOpen() || !mShouldSendWebProgressEventsToParent) {
     return NS_OK;
   }
 
@@ -3534,7 +3618,7 @@ NS_IMETHODIMP BrowserChild::OnSecurityChange(nsIWebProgress* aWebProgress,
 NS_IMETHODIMP BrowserChild::OnContentBlockingEvent(nsIWebProgress* aWebProgress,
                                                    nsIRequest* aRequest,
                                                    uint32_t aEvent) {
-  if (!IPCOpen()) {
+  if (!IPCOpen() || !mShouldSendWebProgressEventsToParent) {
     return NS_OK;
   }
 

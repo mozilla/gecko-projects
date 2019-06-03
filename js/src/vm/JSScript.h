@@ -54,8 +54,10 @@ class SourceText;
 namespace js {
 
 namespace jit {
+class AutoKeepJitScripts;
 struct BaselineScript;
 struct IonScriptCounts;
+class JitScript;
 }  // namespace jit
 
 #define ION_DISABLED_SCRIPT ((js::jit::IonScript*)0x1)
@@ -64,7 +66,6 @@ struct IonScriptCounts;
 
 #define BASELINE_DISABLED_SCRIPT ((js::jit::BaselineScript*)0x1)
 
-class AutoKeepJitScripts;
 class AutoSweepJitScript;
 class BreakpointSite;
 class Debugger;
@@ -74,7 +75,6 @@ class ModuleObject;
 class RegExpObject;
 class SourceCompressionTask;
 class Shape;
-class JitScript;
 
 namespace frontend {
 struct BytecodeEmitter;
@@ -84,7 +84,7 @@ class ModuleSharedContext;
 
 namespace gc {
 void SweepLazyScripts(GCParallelTask* task);
-} // namespace gc
+}  // namespace gc
 
 namespace detail {
 
@@ -257,12 +257,12 @@ class DebugScript {
   friend class JS::Realm;
 
   /*
-   * When greater than zero, compile script in single-step mode, with VM calls
-   * to HandleDebugTrap before each bytecode instruction's code. This is a
-   * counter, adjusted by the incrementStepModeCount and decrementStepModeCount
-   * methods.
+   * The number of Debugger.Frame objects that refer to frames running this
+   * script and that have onStep handlers. When nonzero, the interpreter and JIT
+   * must arrange to call Debugger::onSingleStep before each bytecode, or at
+   * least at some useful granularity.
    */
-  uint32_t stepMode;
+  uint32_t stepperCount;
 
   /*
    * Number of breakpoint sites at opcodes in the script. This is the number
@@ -277,6 +277,12 @@ class DebugScript {
    * this array's true length is script->length().
    */
   BreakpointSite* breakpoints[1];
+
+  /*
+   * True if this DebugScript carries any useful information. If false, it
+   * should be removed from its JSScript.
+   */
+  bool needed() const { return stepperCount > 0 || numSites > 0; }
 };
 
 using UniqueDebugScript = js::UniquePtr<DebugScript, JS::FreePolicy>;
@@ -1728,7 +1734,6 @@ class JSScript : public js::gc::TenuredCell {
   // entry, the JIT's EnterInterpreter stub, or the lazy link stub. Must be
   // non-null.
   uint8_t* jitCodeRaw_ = nullptr;
-  uint8_t* jitCodeSkipArgCheck_ = nullptr;
 
   // Shareable script data
   RefPtr<js::SharedScriptData> scriptData_ = {};
@@ -1741,7 +1746,7 @@ class JSScript : public js::gc::TenuredCell {
 
  private:
   // JIT and type inference data for this script. May be purged on GC.
-  js::JitScript* jitScript_ = nullptr;
+  js::jit::JitScript* jitScript_ = nullptr;
 
   // This script's ScriptSourceObject.
   js::GCPtr<js::ScriptSourceObject*> sourceObject_ = {};
@@ -2475,9 +2480,6 @@ class JSScript : public js::gc::TenuredCell {
   static constexpr size_t offsetOfJitCodeRaw() {
     return offsetof(JSScript, jitCodeRaw_);
   }
-  static constexpr size_t offsetOfJitCodeSkipArgCheck() {
-    return offsetof(JSScript, jitCodeSkipArgCheck_);
-  }
   uint8_t* jitCodeRaw() const { return jitCodeRaw_; }
 
   // We don't relazify functions with a JitScript or JIT code, but some
@@ -2593,10 +2595,10 @@ class JSScript : public js::gc::TenuredCell {
   bool isTopLevel() { return code() && !functionNonDelazifying(); }
 
   /* Ensure the script has a JitScript. */
-  inline bool ensureHasJitScript(JSContext* cx, js::AutoKeepJitScripts&);
+  inline bool ensureHasJitScript(JSContext* cx, js::jit::AutoKeepJitScripts&);
 
   bool hasJitScript() const { return jitScript_ != nullptr; }
-  js::JitScript* jitScript() { return jitScript_; }
+  js::jit::JitScript* jitScript() { return jitScript_; }
 
   void maybeReleaseJitScript();
 
@@ -2884,7 +2886,7 @@ class JSScript : public js::gc::TenuredCell {
   /* Change this->stepMode to |newValue|. */
   void setNewStepMode(js::FreeOp* fop, uint32_t newValue);
 
-  bool ensureHasDebugScript(JSContext* cx);
+  js::DebugScript* getOrCreateDebugScript(JSContext* cx);
   js::DebugScript* debugScript();
   js::DebugScript* releaseDebugScript();
   void destroyDebugScript(js::FreeOp* fop);
@@ -2917,16 +2919,16 @@ class JSScript : public js::gc::TenuredCell {
    *
    * Only incrementing is fallible, as it could allocate a DebugScript.
    */
-  bool incrementStepModeCount(JSContext* cx);
-  void decrementStepModeCount(js::FreeOp* fop);
+  bool incrementStepperCount(JSContext* cx);
+  void decrementStepperCount(js::FreeOp* fop);
 
   bool stepModeEnabled() {
-    return hasDebugScript() && !!debugScript()->stepMode;
+    return hasDebugScript() && debugScript()->stepperCount > 0;
   }
 
 #ifdef DEBUG
-  uint32_t stepModeCount() {
-    return hasDebugScript() ? debugScript()->stepMode : 0;
+  uint32_t stepperCount() {
+    return hasDebugScript() ? debugScript()->stepperCount : 0;
   }
 #endif
 
@@ -2991,6 +2993,7 @@ class alignas(uintptr_t) LazyScriptData final {
   // Size to allocate
   static size_t AllocationSize(uint32_t numClosedOverBindings,
                                uint32_t numInnerFunctions);
+  size_t allocationSize() const;
 
   // Translate an offset into a concrete pointer.
   template <typename T>

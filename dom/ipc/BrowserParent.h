@@ -269,6 +269,12 @@ class BrowserParent final : public PBrowserParent,
                                                       const nsString& aTitle,
                                                       nsIURI* aDocURI);
 
+  mozilla::ipc::IPCResult RecvOnStateChange(
+      const Maybe<WebProgressData>& awebProgressData,
+      const RequestData& aRequestData, const uint32_t aStateFlags,
+      const nsresult aStatus,
+      const Maybe<WebProgressStateChangeData>& aStateChangeData);
+
   mozilla::ipc::IPCResult RecvOnProgressChange(
       const Maybe<WebProgressData>& aWebProgressData,
       const RequestData& aRequestData, const int32_t aCurSelfProgress,
@@ -283,6 +289,10 @@ class BrowserParent final : public PBrowserParent,
   mozilla::ipc::IPCResult RecvOnContentBlockingEvent(
       const Maybe<WebProgressData>& aWebProgressData,
       const RequestData& aRequestData, const uint32_t& aEvent);
+
+  bool GetWebProgressListener(nsIBrowser** aOutBrowser,
+                              nsIWebProgress** aOutManager,
+                              nsIWebProgressListener** aOutListener);
 
   void ReconstructWebProgressAndRequest(
       nsIWebProgress* aManager, const Maybe<WebProgressData>& aWebProgressData,
@@ -729,7 +739,7 @@ class BrowserParent final : public PBrowserParent,
                                             const int32_t& aCy);
 
   mozilla::ipc::IPCResult RecvShowCanvasPermissionPrompt(
-      const nsCString& aFirstPartyURI, const bool& aHideDoorHanger);
+      const nsCString& aOrigin, const bool& aHideDoorHanger);
 
   mozilla::ipc::IPCResult RecvSetSystemFont(const nsCString& aFontName);
   mozilla::ipc::IPCResult RecvGetSystemFont(nsCString* aFontName);
@@ -832,13 +842,6 @@ class BrowserParent final : public PBrowserParent,
   nsSizeMode mSizeMode;
   LayoutDeviceIntPoint mClientOffset;
   LayoutDeviceIntPoint mChromeOffset;
-
-  nsTArray<nsTArray<IPCDataTransferItem>> mInitialDataTransferItems;
-
-  RefPtr<gfx::DataSourceSurface> mDnDVisualization;
-  bool mDragValid;
-  LayoutDeviceIntRect mDragRect;
-  nsCOMPtr<nsIPrincipal> mDragPrincipal;
 
   // When loading a new tab or window via window.open, the child is
   // responsible for loading the URL it wants into the new BrowserChild. When

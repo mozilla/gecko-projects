@@ -1543,49 +1543,31 @@ already_AddRefed<MediaSource> HTMLMediaElement::GetMozMediaSourceObject()
   return source.forget();
 }
 
-void HTMLMediaElement::GetMozDebugReaderData(nsAString& aString) {
-  if (mDecoder && !mSrcStream) {
-    nsAutoCString result;
-    mDecoder->GetMozDebugReaderData(result);
-    CopyUTF8toUTF16(result, aString);
-  }
-}
-
 already_AddRefed<Promise> HTMLMediaElement::MozRequestDebugInfo(
     ErrorResult& aRv) {
   RefPtr<Promise> promise = CreateDOMPromise(aRv);
   if (NS_WARN_IF(aRv.Failed())) {
     return nullptr;
   }
-
-  nsAutoString result;
-  GetMozDebugReaderData(result);
-
-  if (mVideoFrameContainer) {
-    result.AppendPrintf(
-        "Compositor dropped frame(including when element's invisible): %u\n",
-        mVideoFrameContainer->GetDroppedImageCount());
-  }
-
+  auto result = MakeUnique<dom::HTMLMediaElementDebugInfo>();
   if (mMediaKeys) {
-    nsString EMEInfo;
-    GetEMEInfo(EMEInfo);
-    result.AppendLiteral("EME Info: ");
-    result.Append(EMEInfo);
-    result.AppendLiteral("\n");
+    GetEMEInfo(result->mEMEInfo);
   }
-
+  if (mVideoFrameContainer) {
+    result->mCompositorDroppedFrames =
+        mVideoFrameContainer->GetDroppedImageCount();
+  }
   if (mDecoder) {
-    mDecoder->RequestDebugInfo()->Then(
-        mAbstractMainThread, __func__,
-        [promise, result](const nsACString& aString) {
-          promise->MaybeResolve(result + NS_ConvertUTF8toUTF16(aString));
-        },
-        [promise, result]() { promise->MaybeResolve(result); });
+    mDecoder->RequestDebugInfo(result->mDecoder)
+        ->Then(
+            mAbstractMainThread, __func__,
+            [promise, ptr = std::move(result)]() {
+              promise->MaybeResolve(ptr.get());
+            },
+            []() { UNREACHABLE(); });
   } else {
-    promise->MaybeResolve(result);
+    promise->MaybeResolve(result.get());
   }
-
   return promise.forget();
 }
 
@@ -1608,22 +1590,6 @@ already_AddRefed<Promise> HTMLMediaElement::MozRequestDebugLog(
       },
       [promise](nsresult rv) { promise->MaybeReject(rv); });
 
-  return promise.forget();
-}
-
-already_AddRefed<Promise> HTMLMediaElement::MozDumpDebugInfo() {
-  ErrorResult rv;
-  RefPtr<Promise> promise = CreateDOMPromise(rv);
-  if (NS_WARN_IF(rv.Failed())) {
-    return nullptr;
-  }
-  if (mDecoder) {
-    mDecoder->DumpDebugInfo()->Then(mAbstractMainThread, __func__,
-                                    promise.get(),
-                                    &Promise::MaybeResolveWithUndefined);
-  } else {
-    promise->MaybeResolveWithUndefined();
-  }
   return promise.forget();
 }
 
@@ -4100,10 +4066,8 @@ void HTMLMediaElement::AfterMaybeChangeAttr(int32_t aNamespaceID, nsAtom* aName,
   }
 }
 
-nsresult HTMLMediaElement::BindToTree(Document* aDocument, nsIContent* aParent,
-                                      nsIContent* aBindingParent) {
-  nsresult rv =
-      nsGenericHTMLElement::BindToTree(aDocument, aParent, aBindingParent);
+nsresult HTMLMediaElement::BindToTree(BindContext& aContext, nsINode& aParent) {
+  nsresult rv = nsGenericHTMLElement::BindToTree(aContext, aParent);
 
   if (IsInComposedDoc()) {
     // Construct Shadow Root so web content can be hidden in the DOM.
@@ -4111,9 +4075,11 @@ nsresult HTMLMediaElement::BindToTree(Document* aDocument, nsIContent* aParent,
     NotifyUAWidgetSetupOrChange();
   }
 
+  // FIXME(emilio, bug 1555946): mUnboundFromTree doesn't make any sense, should
+  // just use IsInComposedDoc() in the relevant places or something.
   mUnboundFromTree = false;
 
-  if (aDocument) {
+  if (IsInUncomposedDoc()) {
     // The preload action depends on the value of the autoplay attribute.
     // It's value may have changed, so update it.
     UpdatePreloadAction();
@@ -4325,7 +4291,7 @@ void HTMLMediaElement::ReportTelemetry() {
   }
 }
 
-void HTMLMediaElement::UnbindFromTree(bool aDeep, bool aNullParent) {
+void HTMLMediaElement::UnbindFromTree(bool aNullParent) {
   mUnboundFromTree = true;
   mVisibilityState = Visibility::Untracked;
 
@@ -4333,7 +4299,7 @@ void HTMLMediaElement::UnbindFromTree(bool aDeep, bool aNullParent) {
     NotifyUAWidgetTeardown();
   }
 
-  nsGenericHTMLElement::UnbindFromTree(aDeep, aNullParent);
+  nsGenericHTMLElement::UnbindFromTree(aNullParent);
 
   MOZ_ASSERT(IsHidden());
   NotifyDecoderActivityChanges();
@@ -5713,8 +5679,7 @@ bool HTMLMediaElement::IsActive() const {
 }
 
 bool HTMLMediaElement::IsHidden() const {
-  Document* ownerDoc;
-  return mUnboundFromTree || !(ownerDoc = OwnerDoc()) || ownerDoc->Hidden();
+  return mUnboundFromTree || OwnerDoc()->Hidden();
 }
 
 VideoFrameContainer* HTMLMediaElement::GetVideoFrameContainer() {
@@ -6304,7 +6269,13 @@ void HTMLMediaElement::SetDefaultPlaybackRate(double aDefaultPlaybackRate,
     return;
   }
 
-  mDefaultPlaybackRate = ClampPlaybackRate(aDefaultPlaybackRate);
+  double defaultPlaybackRate = ClampPlaybackRate(aDefaultPlaybackRate);
+
+  if (mDefaultPlaybackRate == defaultPlaybackRate) {
+    return;
+  }
+
+  mDefaultPlaybackRate = defaultPlaybackRate;
   DispatchAsyncEvent(NS_LITERAL_STRING("ratechange"));
 }
 
@@ -7158,21 +7129,12 @@ void HTMLMediaElement::AsyncRejectPendingPlayPromises(nsresult aError) {
   mMainThreadEventTarget->Dispatch(event.forget());
 }
 
-void HTMLMediaElement::GetEMEInfo(nsString& aEMEInfo) {
+void HTMLMediaElement::GetEMEInfo(dom::EMEDebugInfo& aInfo) {
   if (!mMediaKeys) {
     return;
   }
-
-  nsString keySystem;
-  mMediaKeys->GetKeySystem(keySystem);
-
-  nsString sessionsInfo;
-  mMediaKeys->GetSessionsInfo(sessionsInfo);
-
-  aEMEInfo.AppendLiteral("Key System=");
-  aEMEInfo.Append(keySystem);
-  aEMEInfo.AppendLiteral(" SessionsInfo=");
-  aEMEInfo.Append(sessionsInfo);
+  mMediaKeys->GetKeySystem(aInfo.mKeySystem);
+  mMediaKeys->GetSessionsInfo(aInfo.mSessionsInfo);
 }
 
 void HTMLMediaElement::NotifyDecoderActivityChanges() const {

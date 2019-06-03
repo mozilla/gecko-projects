@@ -215,7 +215,7 @@ class nsStyleImageRequest {
 
   // Can be called from any thread, but Resolve() must be called later
   // on the main thread before get() can be used.
-  nsStyleImageRequest(Mode aModeFlags, mozilla::css::URLValue* aImageValue);
+  nsStyleImageRequest(Mode aModeFlags, const mozilla::StyleComputedImageUrl&);
 
   bool Resolve(mozilla::dom::Document&,
                const nsStyleImageRequest* aOldImageRequest);
@@ -234,7 +234,9 @@ class nsStyleImageRequest {
   // return true from URLValue::DefinitelyEqualURIs.
   bool DefinitelyEquals(const nsStyleImageRequest& aOther) const;
 
-  mozilla::css::URLValue* GetImageValue() const { return mImageValue; }
+  const mozilla::StyleComputedImageUrl& GetImageValue() const {
+    return mImageURL;
+  }
 
   already_AddRefed<nsIURI> GetImageURI() const;
   NS_INLINE_DECL_THREADSAFE_REFCOUNTING(nsStyleImageRequest);
@@ -246,7 +248,7 @@ class nsStyleImageRequest {
   void MaybeTrackAndLock();
 
   RefPtr<imgRequestProxy> mRequestProxy;
-  RefPtr<mozilla::css::URLValue> mImageValue;
+  mozilla::StyleComputedImageUrl mImageURL;
   RefPtr<mozilla::dom::ImageTracker> mImageTracker;
 
   // Cache DocGroup for dispatching events in the destructor.
@@ -295,8 +297,6 @@ struct CachedBorderImageData {
  * image of type (1)).
  */
 struct nsStyleImage {
-  typedef mozilla::css::URLValue URLValue;
-
   nsStyleImage();
   ~nsStyleImage();
   nsStyleImage(const nsStyleImage& aOther);
@@ -346,7 +346,7 @@ struct nsStyleImage {
 
   already_AddRefed<nsIURI> GetImageURI() const;
 
-  const URLValue* GetURLValue() const;
+  const mozilla::StyleComputedImageUrl* GetURLValue() const;
 
   /**
    * Compute the actual crop rect in pixels, using the source image bounds.
@@ -435,22 +435,6 @@ struct nsStyleImage {
 
   // This is _currently_ used only in conjunction with eStyleImageType_Image.
   mozilla::UniquePtr<nsStyleSides> mCropRect;
-};
-
-struct MOZ_NEEDS_MEMMOVABLE_MEMBERS nsStyleColor {
-  explicit nsStyleColor(const mozilla::dom::Document&);
-  nsStyleColor(const nsStyleColor& aOther);
-  ~nsStyleColor() { MOZ_COUNT_DTOR(nsStyleColor); }
-  void TriggerImageLoads(mozilla::dom::Document&, const nsStyleColor*) {}
-  const static bool kHasTriggerImageLoads = false;
-
-  nsChangeHint CalcDifference(const nsStyleColor& aNewData) const;
-
-  // Don't add ANY members to this struct!  We can achieve caching in the rule
-  // tree (rather than the style tree) by letting color stay by itself! -dwh
-  //
-  // FIXME(emilio): Not sure having color in its own struct is worth it anymore.
-  mozilla::StyleRGBA mColor;
 };
 
 struct nsStyleImageLayers {
@@ -1247,69 +1231,6 @@ struct MOZ_NEEDS_MEMMOVABLE_MEMBERS nsStylePosition {
   }
 };
 
-struct nsStyleTextOverflowSide {
-  nsStyleTextOverflowSide() : mType(NS_STYLE_TEXT_OVERFLOW_CLIP) {}
-
-  static nsStyleTextOverflowSide Ellipsis() {
-    nsStyleTextOverflowSide side;
-    side.mType = NS_STYLE_TEXT_OVERFLOW_ELLIPSIS;
-    return side;
-  }
-
-  bool operator==(const nsStyleTextOverflowSide& aOther) const {
-    return mType == aOther.mType && (mType != NS_STYLE_TEXT_OVERFLOW_STRING ||
-                                     mString == aOther.mString);
-  }
-  bool operator!=(const nsStyleTextOverflowSide& aOther) const {
-    return !(*this == aOther);
-  }
-
-  nsString mString;
-  uint8_t mType;
-};
-
-struct nsStyleTextOverflow {
-  nsStyleTextOverflow() : mLogicalDirections(true) {}
-  bool operator==(const nsStyleTextOverflow& aOther) const {
-    return mLeft == aOther.mLeft && mRight == aOther.mRight;
-  }
-  bool operator!=(const nsStyleTextOverflow& aOther) const {
-    return !(*this == aOther);
-  }
-
-  // Returns the value to apply on the left side.
-  const nsStyleTextOverflowSide& GetLeft(uint8_t aDirection) const {
-    NS_ASSERTION(aDirection == NS_STYLE_DIRECTION_LTR ||
-                     aDirection == NS_STYLE_DIRECTION_RTL,
-                 "bad direction");
-    return !mLogicalDirections || aDirection == NS_STYLE_DIRECTION_LTR ? mLeft
-                                                                       : mRight;
-  }
-
-  // Returns the value to apply on the right side.
-  const nsStyleTextOverflowSide& GetRight(uint8_t aDirection) const {
-    NS_ASSERTION(aDirection == NS_STYLE_DIRECTION_LTR ||
-                     aDirection == NS_STYLE_DIRECTION_RTL,
-                 "bad direction");
-    return !mLogicalDirections || aDirection == NS_STYLE_DIRECTION_LTR ? mRight
-                                                                       : mLeft;
-  }
-
-  // Returns the first value that was specified.
-  const nsStyleTextOverflowSide* GetFirstValue() const {
-    return mLogicalDirections ? &mRight : &mLeft;
-  }
-
-  // Returns the second value, or null if there was only one value specified.
-  const nsStyleTextOverflowSide* GetSecondValue() const {
-    return mLogicalDirections ? nullptr : &mRight;
-  }
-
-  nsStyleTextOverflowSide mLeft;   // start side when mLogicalDirections is true
-  nsStyleTextOverflowSide mRight;  // end side when mLogicalDirections is true
-  bool mLogicalDirections;         // true when only one value was specified
-};
-
 struct MOZ_NEEDS_MEMMOVABLE_MEMBERS nsStyleTextReset {
   explicit nsStyleTextReset(const mozilla::dom::Document&);
   nsStyleTextReset(const nsStyleTextReset& aOther);
@@ -1327,7 +1248,7 @@ struct MOZ_NEEDS_MEMMOVABLE_MEMBERS nsStyleTextReset {
 
   nsChangeHint CalcDifference(const nsStyleTextReset& aNewData) const;
 
-  nsStyleTextOverflow mTextOverflow;  // enum, string
+  mozilla::StyleTextOverflow mTextOverflow;
 
   mozilla::StyleTextDecorationLine mTextDecorationLine;
   uint8_t mTextDecorationStyle;  // NS_STYLE_TEXT_DECORATION_STYLE_*
@@ -1346,6 +1267,7 @@ struct MOZ_NEEDS_MEMMOVABLE_MEMBERS nsStyleText {
 
   nsChangeHint CalcDifference(const nsStyleText& aNewData) const;
 
+  mozilla::StyleRGBA mColor;
   mozilla::StyleTextTransform mTextTransform;
   uint8_t mTextAlign;      // NS_STYLE_TEXT_ALIGN_*
   uint8_t mTextAlignLast;  // NS_STYLE_TEXT_ALIGN_*
@@ -1666,10 +1588,7 @@ struct MOZ_NEEDS_MEMMOVABLE_MEMBERS nsStyleDisplay {
 
   nsChangeHint CalcDifference(const nsStyleDisplay& aNewData) const;
 
-  // We guarantee that if mBinding is non-null, so are mBinding->GetURI() and
-  // mBinding->mOriginPrincipal.
-  RefPtr<mozilla::css::URLValue> mBinding;
-
+  mozilla::StyleUrlOrNone mBinding;
   nsStyleAutoArray<mozilla::StyleTransition> mTransitions;
   // The number of elements in mTransitions that are not from repeating
   // a list due to another property being longer.
@@ -1737,6 +1656,7 @@ struct MOZ_NEEDS_MEMMOVABLE_MEMBERS nsStyleDisplay {
 
   mozilla::StyleOffsetPath mOffsetPath;
   mozilla::LengthPercentage mOffsetDistance;
+  mozilla::StyleOffsetRotate mOffsetRotate;
 
   mozilla::StyleTransformOrigin mTransformOrigin;
   mozilla::StylePerspective mChildPerspective;
@@ -2455,10 +2375,10 @@ class nsStyleSVGPaint {
 
   void SetNone();
   void SetColor(mozilla::StyleColor aColor);
-  void SetPaintServer(mozilla::css::URLValue* aPaintServer,
+  void SetPaintServer(const mozilla::StyleComputedUrl& aPaintServer,
                       nsStyleSVGFallbackType aFallbackType,
                       mozilla::StyleColor aFallbackColor);
-  void SetPaintServer(mozilla::css::URLValue* aPaintServer) {
+  void SetPaintServer(const mozilla::StyleComputedUrl& aPaintServer) {
     SetPaintServer(aPaintServer, eStyleSVGFallbackType_NotSet,
                    mozilla::StyleColor::Black());
   }
@@ -2475,7 +2395,7 @@ class nsStyleSVGPaint {
     return mPaint.mColor.CalcColor(*aComputedStyle);
   }
 
-  mozilla::css::URLValue* GetPaintServer() const {
+  const mozilla::StyleComputedUrl& GetPaintServer() const {
     MOZ_ASSERT(mType == eStyleSVGPaintType_Server);
     return mPaint.mPaintServer;
   }
@@ -2500,7 +2420,7 @@ class nsStyleSVGPaint {
 
   union ColorOrPaintServer {
     mozilla::StyleColor mColor;
-    mozilla::css::URLValue* mPaintServer;
+    mozilla::StyleComputedUrl mPaintServer;
     explicit ColorOrPaintServer(mozilla::StyleColor c) : mColor(c) {}
     ~ColorOrPaintServer() {}  // Caller must call Reset().
   };
@@ -2521,9 +2441,9 @@ struct MOZ_NEEDS_MEMMOVABLE_MEMBERS nsStyleSVG {
 
   nsStyleSVGPaint mFill;
   nsStyleSVGPaint mStroke;
-  RefPtr<mozilla::css::URLValue> mMarkerEnd;
-  RefPtr<mozilla::css::URLValue> mMarkerMid;
-  RefPtr<mozilla::css::URLValue> mMarkerStart;
+  mozilla::StyleUrlOrNone mMarkerEnd;
+  mozilla::StyleUrlOrNone mMarkerMid;
+  mozilla::StyleUrlOrNone mMarkerStart;
   nsTArray<mozilla::NonNegativeLengthPercentage> mStrokeDasharray;
   mozilla::StyleMozContextProperties mMozContextProperties;
 
@@ -2570,7 +2490,9 @@ struct MOZ_NEEDS_MEMMOVABLE_MEMBERS nsStyleSVG {
     return mContextFlags & STROKE_WIDTH_CONTEXT;
   }
 
-  bool HasMarker() const { return mMarkerStart || mMarkerMid || mMarkerEnd; }
+  bool HasMarker() const {
+    return mMarkerStart.IsUrl() || mMarkerMid.IsUrl() || mMarkerEnd.IsUrl();
+  }
 
   /**
    * Returns true if the stroke is not "none" and the stroke-opacity is greater
@@ -2607,60 +2529,6 @@ struct MOZ_NEEDS_MEMMOVABLE_MEMBERS nsStyleSVG {
   static const uint8_t STROKE_OPACITY_SOURCE_SHIFT = 2;
 
   uint8_t mContextFlags;
-};
-
-struct nsStyleFilter {
-  nsStyleFilter();
-  nsStyleFilter(const nsStyleFilter& aSource);
-  ~nsStyleFilter();
-  void TriggerImageLoads(mozilla::dom::Document&, const nsStyleFilter*) {}
-  const static bool kHasTriggerImageLoads = false;
-
-  nsStyleFilter& operator=(const nsStyleFilter& aOther);
-
-  bool operator==(const nsStyleFilter& aOther) const;
-  bool operator!=(const nsStyleFilter& aOther) const {
-    return !(*this == aOther);
-  }
-
-  uint32_t GetType() const { return mType; }
-
-  const nsStyleCoord& GetFilterParameter() const {
-    NS_ASSERTION(mType != NS_STYLE_FILTER_DROP_SHADOW &&
-                     mType != NS_STYLE_FILTER_URL &&
-                     mType != NS_STYLE_FILTER_NONE,
-                 "wrong filter type");
-    return mFilterParameter;
-  }
-  void SetFilterParameter(const nsStyleCoord& aFilterParameter, int32_t aType);
-
-  mozilla::css::URLValue* GetURL() const {
-    MOZ_ASSERT(mType == NS_STYLE_FILTER_URL, "wrong filter type");
-    return mURL;
-  }
-
-  bool SetURL(mozilla::css::URLValue* aValue);
-
-  const mozilla::StyleSimpleShadow& GetDropShadow() const {
-    NS_ASSERTION(mType == NS_STYLE_FILTER_DROP_SHADOW, "wrong filter type");
-    return mDropShadow;
-  }
-  void SetDropShadow(const mozilla::StyleSimpleShadow&);
-
- private:
-  void ReleaseRef();
-
-  uint32_t mType;                 // NS_STYLE_FILTER_*
-  nsStyleCoord mFilterParameter;  // coord, percent, factor, angle
-  union {
-    mozilla::css::URLValue* mURL;
-    mozilla::StyleSimpleShadow mDropShadow;
-  };
-};
-
-template <>
-struct nsTArray_CopyChooser<nsStyleFilter> {
-  typedef nsTArray_CopyWithConstructors<nsStyleFilter> Type;
 };
 
 struct MOZ_NEEDS_MEMMOVABLE_MEMBERS nsStyleSVGReset {
@@ -2729,7 +2597,7 @@ struct MOZ_NEEDS_MEMMOVABLE_MEMBERS nsStyleEffects {
     return false;
   }
 
-  nsTArray<nsStyleFilter> mFilters;
+  mozilla::StyleOwnedSlice<mozilla::StyleFilter> mFilters;
   mozilla::StyleOwnedSlice<mozilla::StyleBoxShadow> mBoxShadow;
   nsRect mClip;  // offsets from UL border edge
   float mOpacity;

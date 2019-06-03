@@ -138,6 +138,23 @@ already_AddRefed<BrowserChild> WindowGlobalChild::GetBrowserChild() {
   return do_AddRef(static_cast<BrowserChild*>(Manager()));
 }
 
+uint64_t WindowGlobalChild::ContentParentId() {
+  if (XRE_IsParentProcess()) {
+    return 0;
+  }
+  return ContentChild::GetSingleton()->GetID();
+}
+
+// A WindowGlobalChild is the root in its process if it has no parent, or its
+// embedder is in a different process.
+bool WindowGlobalChild::IsProcessRoot() {
+  if (!BrowsingContext()->GetParent()) {
+    return true;
+  }
+
+  return !BrowsingContext()->GetEmbedderElement();
+}
+
 void WindowGlobalChild::Destroy() {
   // Perform async IPC shutdown unless we're not in-process, and our
   // BrowserChild is in the process of being destroyed, which will destroy us as

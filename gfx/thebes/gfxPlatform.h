@@ -203,6 +203,8 @@ class gfxPlatform : public mozilla::layers::MemoryPressureListener {
 
   static bool IsHeadless();
 
+  static bool UseWebRender();
+
   /**
    * Create an offscreen surface of the given dimensions
    * and image format.
@@ -541,6 +543,11 @@ class gfxPlatform : public mozilla::layers::MemoryPressureListener {
    */
   static qcms_transform* GetCMSRGBATransform();
 
+  /**
+   * Return sRGBA -> output device transform.
+   */
+  static qcms_transform* GetCMSBGRATransform();
+
   virtual void FontsPrefsChanged(const char* aPref);
 
   int32_t GetBidiNumeralOption();
@@ -667,8 +674,8 @@ class gfxPlatform : public mozilla::layers::MemoryPressureListener {
       mozilla::gfx::SurfaceFormat aFormat);
 
   /**
-   * Wrapper around gfxPrefs::PerfWarnings().
-   * Extracted into a function to avoid including gfxPrefs.h from this file.
+   * Wrapper around StaticPrefs::PerfWarnings().
+   * Extracted into a function to avoid including StaticPrefs.h from this file.
    */
   static bool PerfWarnings();
 
@@ -876,6 +883,7 @@ class gfxPlatform : public mozilla::layers::MemoryPressureListener {
 
   void InitCompositorAccelerationPrefs();
   void InitGPUProcessPrefs();
+  virtual void InitPlatformGPUProcessPrefs() {}
   void InitOMTPConfig();
 
   static bool IsDXInterop2Blocked();

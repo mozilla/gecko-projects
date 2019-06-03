@@ -296,8 +296,7 @@ bool ParseContext::annexBAppliesToLexicalFunctionInInnermostScope(
     FunctionBox* funbox) {
   MOZ_ASSERT(!sc()->strict());
 
-  RootedPropertyName name(sc()->cx_,
-                          funbox->explicitName()->asPropertyName());
+  RootedPropertyName name(sc()->cx_, funbox->explicitName()->asPropertyName());
   Maybe<DeclarationKind> redeclaredKind = isVarRedeclaredInInnermostScope(
       name, DeclarationKind::VarForAnnexBLexicalFunction);
 
@@ -589,13 +588,6 @@ bool ParseContext::declareFunctionArgumentsObject(
 
     // Dynamic scope access destroys all hope of optimization.
     if (sc()->bindingsAccessedDynamically()) {
-      funbox->setDefinitelyNeedsArgsObj();
-    }
-
-    // If a script contains the debugger statement either directly or
-    // within an inner function, the arguments object should be created
-    // eagerly so the Debugger API may observe bindings.
-    if (sc()->hasDebuggerStatement()) {
       funbox->setDefinitelyNeedsArgsObj();
     }
   }

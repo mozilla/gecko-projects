@@ -18,7 +18,7 @@
 #include "mozilla/EventStates.h"
 #include "mozilla/dom/Element.h"
 #include "Layers.h"
-#include "gfxPrefs.h"
+
 #include "gfxUtils.h"
 #include "mozilla/layers/RenderRootStateManager.h"
 
@@ -508,13 +508,12 @@ ImgDrawResult nsButtonFrameRenderer::PaintBorder(nsDisplayListBuilder* aBuilder,
  */
 void nsButtonFrameRenderer::ReResolveStyles(nsPresContext* aPresContext) {
   // get all the styles
-  ComputedStyle* context = mFrame->Style();
   ServoStyleSet* styleSet = aPresContext->StyleSet();
 
   // get styles assigned to -moz-focus-inner (ie dotted border on Windows)
   mInnerFocusStyle = styleSet->ProbePseudoElementStyle(
       *mFrame->GetContent()->AsElement(), PseudoStyleType::mozFocusInner,
-      context);
+      mFrame->Style());
 }
 
 ComputedStyle* nsButtonFrameRenderer::GetComputedStyle(int32_t aIndex) const {

@@ -8,9 +8,12 @@
 #define mozilla_dom_SVGGeometryProperty_SVGGeometryProperty_h
 
 #include "mozilla/dom/SVGElement.h"
-#include "SVGAnimatedLength.h"
 #include "ComputedStyle.h"
+#include "SVGAnimatedLength.h"
+#include "nsComputedDOMStyle.h"
+#include "nsGkAtoms.h"
 #include "nsIFrame.h"
+#include "nsSVGImageFrame.h"
 #include <type_traits>
 
 namespace mozilla {
@@ -38,12 +41,24 @@ SVGGEOMETRYPROPERTY_GENERATETAG(Y, LengthPercentNoAuto, Y, nsStyleSVGReset);
 SVGGEOMETRYPROPERTY_GENERATETAG(Cx, LengthPercentNoAuto, X, nsStyleSVGReset);
 SVGGEOMETRYPROPERTY_GENERATETAG(Cy, LengthPercentNoAuto, Y, nsStyleSVGReset);
 SVGGEOMETRYPROPERTY_GENERATETAG(R, LengthPercentNoAuto, XY, nsStyleSVGReset);
-SVGGEOMETRYPROPERTY_GENERATETAG(Width, LengthPercentWidthHeight, X,
-                                nsStylePosition);
-SVGGEOMETRYPROPERTY_GENERATETAG(Height, LengthPercentWidthHeight, Y,
-                                nsStylePosition);
 
 #undef SVGGEOMETRYPROPERTY_GENERATETAG
+
+struct Height;
+struct Width {
+  using ResolverType = ResolverTypes::LengthPercentWidthHeight;
+  constexpr static auto CtxDirection = SVGContentUtils::X;
+  constexpr static auto Getter = &nsStylePosition::mWidth;
+  constexpr static auto SizeGetter = &gfx::Size::width;
+  using CounterPart = Height;
+};
+struct Height {
+  using ResolverType = ResolverTypes::LengthPercentWidthHeight;
+  constexpr static auto CtxDirection = SVGContentUtils::Y;
+  constexpr static auto Getter = &nsStylePosition::mHeight;
+  constexpr static auto SizeGetter = &gfx::Size::height;
+  using CounterPart = Width;
+};
 
 struct Ry;
 struct Rx {
@@ -64,6 +79,7 @@ struct Ry {
 namespace details {
 template <class T>
 using AlwaysFloat = float;
+using dummy = int[];
 
 using CtxDirectionType = decltype(SVGContentUtils::X);
 
@@ -94,7 +110,46 @@ float ResolveImpl(ComputedStyle const& aStyle, SVGElement* aElement,
         aElement, value.AsLengthPercentage());
   }
 
-  // |auto| and |max-content| etc. are treated as 0.
+  if (aElement->IsSVGElement(nsGkAtoms::image)) {
+    // It's not clear per SVG2 spec what should be done for values other
+    // than |auto| (e.g. |max-content|). We treat them as nonsense, thus
+    // using the initial value behavior, i.e. |auto|.
+
+    auto* f = aElement->GetPrimaryFrame();
+    MOZ_ASSERT(f && f->IsSVGImageFrame());
+    auto* imgf = static_cast<nsSVGImageFrame const*>(f);
+
+    using Other = typename Tag::CounterPart;
+    auto const& valueOther = aStyle.StylePosition()->*Other::Getter;
+
+    gfx::Size intrinsicImageSize;
+    if (!imgf->GetIntrinsicImageSize(intrinsicImageSize)) {
+      // Cannot get intrinsic image size, just return 0.
+      return 0.f;
+    }
+
+    if (valueOther.IsLengthPercentage()) {
+      // We are |auto|, but the other side has specifed length. Then
+      // we need to preserve aspect ratio.
+
+      float intrinsicLengthOther = intrinsicImageSize.*Other::SizeGetter;
+      if (!intrinsicLengthOther) {
+        // Avoid dividing by 0.
+        return 0.f;
+      }
+
+      float intrinsicLength = intrinsicImageSize.*Tag::SizeGetter,
+            lengthOther = ResolvePureLengthPercentage<Other::CtxDirection>(
+                aElement, valueOther.AsLengthPercentage());
+
+      return intrinsicLength * lengthOther / intrinsicLengthOther;
+    }
+
+    // So |width| and |height| are both |auto|, just use intrinsic size.
+    return intrinsicImageSize.*Tag::SizeGetter;
+  }
+
+  // For other elements, |auto| and |max-content| etc. are treated as 0.
   return 0.f;
 }
 
@@ -134,6 +189,25 @@ float ResolveWith(const ComputedStyle& aStyle, const SVGElement* aElement) {
                                    typename Tag::ResolverType{});
 }
 
+template <class Func>
+bool DoForComputedStyle(SVGElement* aElement, Func aFunc) {
+  if (const nsIFrame* f = aElement->GetPrimaryFrame()) {
+    aFunc(f->Style());
+    return true;
+  }
+
+  if (RefPtr<ComputedStyle> computedStyle =
+          nsComputedDOMStyle::GetComputedStyleNoFlush(aElement, nullptr)) {
+    aFunc(computedStyle.get());
+    return true;
+  }
+
+  return false;
+}
+
+#define SVGGEOMETRYPROPERTY_EVAL_ALL(expr) \
+  (void)details::dummy { 0, (static_cast<void>(expr), 0)... }
+
 // To add support for new properties, or to handle special cases for
 // existing properties, you can add a new tag in |Tags| and |ResolverTypes|
 // namespace, then implement the behavior in |details::ResolveImpl|.
@@ -141,12 +215,29 @@ template <class... Tags>
 bool ResolveAll(const SVGElement* aElement,
                 details::AlwaysFloat<Tags>*... aRes) {
   if (nsIFrame const* f = aElement->GetPrimaryFrame()) {
-    using dummy = int[];
-    (void)dummy{0, (*aRes = ResolveWith<Tags>(*f->Style(), aElement), 0)...};
+    SVGGEOMETRYPROPERTY_EVAL_ALL(*aRes =
+                                     ResolveWith<Tags>(*f->Style(), aElement));
     return true;
   }
   return false;
 }
+
+template <class... Tags>
+bool ResolveAllAllowFallback(SVGElement* aElement,
+                             details::AlwaysFloat<Tags>*... aRes) {
+  bool res = DoForComputedStyle(aElement, [&](auto const* style) {
+    SVGGEOMETRYPROPERTY_EVAL_ALL(*aRes = ResolveWith<Tags>(*style, aElement));
+  });
+
+  if (res) {
+    return true;
+  }
+
+  SVGGEOMETRYPROPERTY_EVAL_ALL(*aRes = 0);
+  return false;
+}
+
+#undef SVGGEOMETRYPROPERTY_EVAL_ALL
 
 nsCSSUnit SpecifiedUnitTypeToCSSUnit(uint8_t aSpecifiedUnit);
 nsCSSPropertyID AttrEnumToCSSPropId(const SVGElement* aElement,

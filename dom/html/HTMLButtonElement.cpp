@@ -287,10 +287,10 @@ nsresult HTMLButtonElement::PostHandleEvent(EventChainPostVisitor& aVisitor) {
   return rv;
 }
 
-nsresult HTMLButtonElement::BindToTree(Document* aDocument, nsIContent* aParent,
-                                       nsIContent* aBindingParent) {
-  nsresult rv = nsGenericHTMLFormElementWithState::BindToTree(
-      aDocument, aParent, aBindingParent);
+nsresult HTMLButtonElement::BindToTree(BindContext& aContext,
+                                       nsINode& aParent) {
+  nsresult rv =
+      nsGenericHTMLFormElementWithState::BindToTree(aContext, aParent);
   NS_ENSURE_SUCCESS(rv, rv);
 
   // Update our state; we may now be the default submit element
@@ -299,8 +299,8 @@ nsresult HTMLButtonElement::BindToTree(Document* aDocument, nsIContent* aParent,
   return NS_OK;
 }
 
-void HTMLButtonElement::UnbindFromTree(bool aDeep, bool aNullParent) {
-  nsGenericHTMLFormElementWithState::UnbindFromTree(aDeep, aNullParent);
+void HTMLButtonElement::UnbindFromTree(bool aNullParent) {
+  nsGenericHTMLFormElementWithState::UnbindFromTree(aNullParent);
 
   // Update our state; we may no longer be the default submit element
   UpdateState(false);

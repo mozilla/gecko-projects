@@ -6,6 +6,7 @@
 
 #include "nsMathMLElement.h"
 #include "base/compiler_specific.h"
+#include "mozilla/dom/BindContext.h"
 #include "mozilla/ArrayUtils.h"
 #include "mozilla/FontPropertyTypes.h"
 #include "mozilla/TextUtils.h"
@@ -73,32 +74,32 @@ nsMathMLElement::nsMathMLElement(
       ALLOW_THIS_IN_INITIALIZER_LIST(Link(this)),
       mIncrementScriptLevel(false) {}
 
-nsresult nsMathMLElement::BindToTree(Document* aDocument, nsIContent* aParent,
-                                     nsIContent* aBindingParent) {
+nsresult nsMathMLElement::BindToTree(BindContext& aContext, nsINode& aParent) {
   Link::ResetLinkState(false, Link::ElementHasHref());
 
-  nsresult rv =
-      nsMathMLElementBase::BindToTree(aDocument, aParent, aBindingParent);
+  nsresult rv = nsMathMLElementBase::BindToTree(aContext, aParent);
   NS_ENSURE_SUCCESS(rv, rv);
 
-  if (aDocument) {
-    aDocument->RegisterPendingLinkUpdate(this);
+  // FIXME(emilio): Probably should be composed, this uses all the other link
+  // infrastructure.
+  if (Document* doc = aContext.GetUncomposedDoc()) {
+    doc->RegisterPendingLinkUpdate(this);
   }
 
   // Set the bit in the document for telemetry.
-  if (Document* doc = GetComposedDoc()) {
+  if (Document* doc = aContext.GetComposedDoc()) {
     doc->SetMathMLEnabled();
   }
 
   return rv;
 }
 
-void nsMathMLElement::UnbindFromTree(bool aDeep, bool aNullParent) {
+void nsMathMLElement::UnbindFromTree(bool aNullParent) {
   // Without removing the link state we risk a dangling pointer
   // in the mStyledLinks hashtable
   Link::ResetLinkState(false, Link::ElementHasHref());
 
-  nsMathMLElementBase::UnbindFromTree(aDeep, aNullParent);
+  nsMathMLElementBase::UnbindFromTree(aNullParent);
 }
 
 bool nsMathMLElement::ParseAttribute(int32_t aNamespaceID, nsAtom* aAttribute,

@@ -972,6 +972,16 @@ static bool EnumerateStandardClasses(JSContext* cx, JS::HandleObject obj,
     return false;
   }
 
+  bool resolved = false;
+  if (!GlobalObject::maybeResolveGlobalThis(cx, global, &resolved)) {
+    return false;
+  }
+  if (resolved || includeResolved) {
+    if (!properties.append(NameToId(cx->names().globalThis))) {
+      return false;
+    }
+  }
+
   if (!EnumerateStandardClassesInTable(cx, global, properties,
                                        standard_class_names, includeResolved)) {
     return false;
@@ -1162,7 +1172,7 @@ JS_PUBLIC_API void JS::AddAssociatedMemory(JSObject* obj, size_t nbytes,
 
   Zone* zone = obj->zone();
   zone->addCellMemory(obj, nbytes, js::MemoryUse(use));
-  zone->runtimeFromMainThread()->gc.maybeAllocTriggerZoneGC(zone);
+  zone->maybeAllocTriggerZoneGC();
 }
 
 JS_PUBLIC_API void JS::RemoveAssociatedMemory(JSObject* obj, size_t nbytes,
@@ -1760,10 +1770,13 @@ JS_PUBLIC_API JSObject* JS_NewObjectForConstructor(JSContext* cx,
   AssertHeapIsIdle();
   CHECK_THREAD(cx);
 
-  Value callee = args.calleev();
-  cx->check(callee);
-  RootedObject obj(cx, &callee.toObject());
-  return CreateThis(cx, Valueify(clasp), obj);
+  if (!ThrowIfNotConstructing(cx, args, clasp->name)) {
+    return nullptr;
+  }
+
+  RootedObject newTarget(cx, &args.newTarget().toObject());
+  cx->check(newTarget);
+  return CreateThis(cx, Valueify(clasp), newTarget);
 }
 
 JS_PUBLIC_API bool JS_IsNative(JSObject* obj) { return obj->isNative(); }
@@ -3190,6 +3203,16 @@ JS_PUBLIC_API JSFunction* JS::NewFunctionFromSpec(JSContext* cx,
                                                   HandleId id) {
   cx->check(id);
 
+#ifdef DEBUG
+  if (fs->name.isSymbol()) {
+    MOZ_ASSERT(SYMBOL_TO_JSID(cx->wellKnownSymbols().get(fs->name.symbol())) ==
+               id);
+  } else {
+    MOZ_ASSERT(JSID_IS_STRING(id) &&
+               StringEqualsAscii(JSID_TO_FLAT_STRING(id), fs->name.string()));
+  }
+#endif
+
   // Delay cloning self-hosted functions until they are called. This is
   // achieved by passing DefineFunction a nullptr JSNative which produces an
   // interpreted JSFunction where !hasScript. Interpreted call paths then
@@ -3238,6 +3261,16 @@ JS_PUBLIC_API JSFunction* JS::NewFunctionFromSpec(JSContext* cx,
     fun->setJitInfo(fs->call.info);
   }
   return fun;
+}
+
+JS_PUBLIC_API JSFunction* JS::NewFunctionFromSpec(JSContext* cx,
+                                                  const JSFunctionSpec* fs) {
+  RootedId id(cx);
+  if (!PropertySpecNameToId(cx, fs->name, &id)) {
+    return nullptr;
+  }
+
+  return NewFunctionFromSpec(cx, fs, id);
 }
 
 static bool IsFunctionCloneable(HandleFunction fun) {

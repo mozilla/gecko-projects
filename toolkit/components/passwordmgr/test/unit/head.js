@@ -6,13 +6,14 @@
 
 // Globals
 
-var {XPCOMUtils} = ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
-var {Services} = ChromeUtils.import("resource://gre/modules/Services.jsm");
-var {LoginRecipesContent, LoginRecipesParent} = ChromeUtils.import("resource://gre/modules/LoginRecipes.jsm");
-var {LoginHelper} = ChromeUtils.import("resource://gre/modules/LoginHelper.jsm");
-var {FileTestUtils} = ChromeUtils.import("resource://testing-common/FileTestUtils.jsm");
-var {LoginTestUtils} = ChromeUtils.import("resource://testing-common/LoginTestUtils.jsm");
-var {MockDocument} = ChromeUtils.import("resource://testing-common/MockDocument.jsm");
+const {AppConstants} = ChromeUtils.import("resource://gre/modules/AppConstants.jsm");
+const {XPCOMUtils} = ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
+const {Services} = ChromeUtils.import("resource://gre/modules/Services.jsm");
+const {LoginRecipesContent, LoginRecipesParent} = ChromeUtils.import("resource://gre/modules/LoginRecipes.jsm");
+const {LoginHelper} = ChromeUtils.import("resource://gre/modules/LoginHelper.jsm");
+const {FileTestUtils} = ChromeUtils.import("resource://testing-common/FileTestUtils.jsm");
+const {LoginTestUtils} = ChromeUtils.import("resource://testing-common/LoginTestUtils.jsm");
+const {MockDocument} = ChromeUtils.import("resource://testing-common/MockDocument.jsm");
 
 ChromeUtils.defineModuleGetter(this, "DownloadPaths",
                                "resource://gre/modules/DownloadPaths.jsm");
@@ -58,8 +59,10 @@ add_task(async function test_common_initialize() {
   // Before initializing the service for the first time, we should copy the key
   // file required to decrypt the logins contained in the SQLite databases used
   // by migration tests.  This file is not required for the other tests.
-  await OS.File.copy(do_get_file("data/key3.db").path,
-                     OS.Path.join(OS.Constants.Path.profileDir, "key3.db"));
+  const isAndroid = AppConstants.platform == "android";
+  const keyDBName = isAndroid ? "key4.db" : "key3.db";
+  await OS.File.copy(do_get_file(`data/${keyDBName}`).path,
+                     OS.Path.join(OS.Constants.Path.profileDir, keyDBName));
 
   // Ensure that the service and the storage module are initialized.
   await Services.logins.initializationPromise;

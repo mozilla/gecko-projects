@@ -71,6 +71,10 @@ class StructuredCloneData;
 
 }  // namespace dom
 
+namespace ipc {
+class MessageChannel;
+}  // namespace ipc
+
 namespace layout {
 class RenderFrame;
 }  // namespace layout
@@ -308,6 +312,8 @@ class nsFrameLoader final : public nsStubMutationObserver,
    */
   bool IsRemoteFrame();
 
+  mozilla::dom::RemoteBrowser* GetRemoteBrowser() const;
+
   /**
    * Returns the IPDL actor used if this is a top-level remote browser, or null
    * otherwise.
@@ -390,6 +396,8 @@ class nsFrameLoader final : public nsStubMutationObserver,
 
   void SkipBrowsingContextDetach();
 
+  void MaybeNotifyCrashed(mozilla::ipc::MessageChannel* aChannel);
+
  private:
   nsFrameLoader(mozilla::dom::Element* aOwner,
                 mozilla::dom::BrowsingContext* aBrowsingContext,
@@ -452,6 +460,7 @@ class nsFrameLoader final : public nsStubMutationObserver,
 
   // Return true if remote browser created; nothing else to do
   bool TryRemoteBrowser();
+  bool TryRemoteBrowserInternal();
 
   // Tell the remote browser that it's now "virtually visible"
   bool ShowRemoteFrame(const mozilla::ScreenIntSize& size,
@@ -526,6 +535,10 @@ class nsFrameLoader final : public nsStubMutationObserver,
   bool mRemoteBrowserShown : 1;
   bool mIsRemoteFrame : 1;
   bool mObservingOwnerContent : 1;
+
+  // When an out-of-process nsFrameLoader crashes, an event is fired on the
+  // frame. To ensure this is only fired once, this bit is checked.
+  bool mTabProcessCrashFired : 1;
 };
 
 NS_DEFINE_STATIC_IID_ACCESSOR(nsFrameLoader, NS_FRAMELOADER_IID)

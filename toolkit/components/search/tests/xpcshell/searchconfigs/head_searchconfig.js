@@ -223,9 +223,6 @@ class SearchConfigTest {
 
   /**
    * Helper function to find an engine from within a list.
-   * Due to Amazon's current complex setup with three different identifiers,
-   * if the identifier is 'amazon', then we do a startsWith match. Otherwise
-   * we expect the names to equal.
    *
    * @param {Array} engines
    *   The list of engines to check.
@@ -235,10 +232,7 @@ class SearchConfigTest {
    *   Returns the engine if found, null otherwise.
    */
   _findEngine(engines, identifier) {
-    if (identifier == "amazon") {
-      return engines.find(engine => engine.identifier.startsWith(identifier));
-    }
-    return engines.find(engine => engine.identifier == identifier);
+    return engines.find(engine => engine.identifier.startsWith(identifier));
   }
 
   /**
@@ -347,7 +341,7 @@ class SearchConfigTest {
       if (rule.codes) {
         this._assertCorrectCodes(location, engine, rule);
       }
-      if (rule.searchUrlCode || rule.searchFormUrlCode) {
+      if (rule.searchUrlCode || rule.searchFormUrlCode || rule.suggestUrlCode) {
         this._assertCorrectUrlCode(location, engine, rule);
       }
       if (rule.aliases) {
@@ -409,8 +403,13 @@ class SearchConfigTest {
       const code = (typeof rules.codes === "string") ? rules.codes :
        rules.codes[purpose];
       const submission = engine.getSubmission("test", "text/html", purpose);
-      this.assertOk(submission.uri.query.split("&").includes(code),
+      const submissionQueryParams = submission.uri.query.split("&");
+      this.assertOk(submissionQueryParams.includes(code),
         `Expected "${code}" in url "${submission.uri.spec}" from purpose "${purpose}" ${location}`);
+
+      const paramName = code.split("=")[0];
+      this.assertOk(submissionQueryParams.filter(param => param.startsWith(paramName)).length == 1,
+        `Expected only one "${paramName}" parameter in "${submission.uri.spec}" from purpose "${purpose}" ${location}`);
     }
   }
 
@@ -428,12 +427,17 @@ class SearchConfigTest {
     if (rule.searchUrlCode) {
       const submission = engine.getSubmission("test", URLTYPE_SEARCH_HTML);
       this.assertOk(submission.uri.query.split("&").includes(rule.searchUrlCode),
-        `Expected "${rule.searchUrlCode}" in "${submission.uri.spec}"`);
+        `Expected "${rule.searchUrlCode}" in search url "${submission.uri.spec}"`);
     }
     if (rule.searchFormUrlCode) {
       const uri = engine.searchForm;
       this.assertOk(uri.includes(rule.searchFormUrlCode),
         `Expected "${rule.searchFormUrlCode}" in "${uri}"`);
+    }
+    if (rule.suggestUrlCode) {
+      const submission = engine.getSubmission("test", URLTYPE_SUGGEST_JSON);
+      this.assertOk(submission.uri.query.split("&").includes(rule.suggestUrlCode),
+        `Expected "${rule.suggestUrlCode}" in suggestion url "${submission.uri.spec}"`);
     }
   }
 

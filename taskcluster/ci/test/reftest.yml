@@ -11,17 +11,18 @@ job-defaults:
             default: null
     variants:
         by-test-platform:
-            linux64/debug: ['serviceworker']
-            default: []
+            linux64/debug: ['fission', 'serviceworker']
+            default: ['fission']
     run-on-projects:
         by-test-platform:
-            android-em-4.3-arm7-api-16/opt: ['try']
+            android-em-4.*/.*: ['try', 'mozilla-central']  # bug 1548659
             windows10-aarch64/opt: ['try', 'mozilla-central']
             default: built-projects
     mozharness:
         script:
             by-test-platform:
                 android-em.*: android_emulator_unittest.py
+                android-hw.*: android_hardware_unittest.py
                 default: desktop_unittest.py
         config:
             by-test-platform:
@@ -31,6 +32,9 @@ job-defaults:
                 android-em-4.*:
                     - android/android_common.py
                     - android/androidarm_4_3.py
+                android-hw.*:
+                    - android/android_common.py
+                    - android/android_hw.py
                 linux.*:
                     - unittests/linux_unittest.py
                     - remove_executables.py
@@ -64,22 +68,18 @@ crashtest:
     tier:
         by-test-platform:
             windows10-aarch64.*: 2
+            android-em-4.*/.*: 2  # bug 1548659
             default: default
 
 jsreftest:
     description: "JS Reftest run"
     schedules-component: jsreftest
     treeherder-symbol: R(J)
-    instance-size:
-        by-test-platform:
-            android-em.*: xlarge
-            default: default
+    instance-size: default
     chunks:
         by-test-platform:
-            android-em-4.*\/debug: 100
-            android-em.4.*\/(?:opt|pgo)?: 40
-            android-em-7.*\/debug: 8
-            android-em.7.*\/(?:opt|pgo)?: 4
+            android-hw.*\/debug: 12
+            android-hw.*/(opt|pgo)?: 6
             windows.*: 2
             windows10-64-ccov/debug: 5
             linux64-ccov/.*: 5
@@ -97,7 +97,14 @@ jsreftest:
     tier:
         by-test-platform:
             windows10-aarch64.*: 2
+            android-em-4.*/.*: 2  # bug 1548659
             default: default
+    run-on-projects:
+        by-test-platform:
+            android-em-4.*/.*: ['try', 'mozilla-central']  # bug 1548659
+            windows10-aarch64/opt: ['try', 'mozilla-central']
+            android-hw-.*-api-16/debug: ['try', 'mozilla-central']
+            default: built-projects
 
 reftest:
     description: "Reftest run"

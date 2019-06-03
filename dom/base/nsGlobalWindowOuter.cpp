@@ -2240,6 +2240,8 @@ nsresult nsGlobalWindowOuter::SetNewDocument(Document* aDocument,
 
   // Tell the WindowGlobalParent that it should become the current window global
   // for our BrowsingContext if it isn't already.
+  mInnerWindow->GetWindowGlobalChild()->SendUpdateDocumentURI(
+      aDocument->GetDocumentURI());
   mInnerWindow->GetWindowGlobalChild()->SendBecomeCurrentWindowGlobal();
 
   // We no longer need the old inner window.  Start its destruction if
@@ -2294,8 +2296,7 @@ nsresult nsGlobalWindowOuter::SetNewDocument(Document* aDocument,
   mHasStorageAccess = false;
   nsIURI* uri = aDocument->GetDocumentURI();
   if (newInnerWindow &&
-      aDocument->CookieSettings()->GetCookieBehavior() ==
-          nsICookieService::BEHAVIOR_REJECT_TRACKER &&
+      aDocument->CookieSettings()->GetRejectThirdPartyTrackers() &&
       nsContentUtils::IsThirdPartyWindowOrChannel(newInnerWindow, nullptr,
                                                   uri) &&
       nsContentUtils::IsTrackingResourceWindow(newInnerWindow)) {
@@ -2660,7 +2661,7 @@ bool nsGlobalWindowOuter::ConfirmDialogIfNeeded() {
   // Reset popup state while opening a modal dialog, and firing events
   // about the dialog, to prevent the current state from being active
   // the whole time a modal dialog is open.
-  nsAutoPopupStatePusher popupStatePusher(PopupBlocker::openAbused, true);
+  AutoPopupStatePusher popupStatePusher(PopupBlocker::openAbused, true);
 
   bool disableDialog = false;
   nsAutoString label, title;
@@ -3528,6 +3529,26 @@ nsIntSize nsGlobalWindowOuter::GetOuterSize(CallerType aCallerType,
     CSSIntSize size;
     aError = GetInnerSize(size);
     return nsIntSize(size.width, size.height);
+  }
+
+  if (mDoc && mDoc->InRDMPane()) {
+    CSSIntSize size;
+    aError = GetInnerSize(size);
+
+    // Obtain the current zoom of the presentation shell. The zoom value will
+    // be used to scale the size of the visual viewport to the device browser's
+    // outer size values. Once RDM no longer relies on the having the page
+    // content being embedded in a <iframe mozbrowser>, we can do away with
+    // this approach and retrieve the size of the frame containing the browser
+    // content.
+    RefPtr<nsPresContext> presContext = mDocShell->GetPresContext();
+
+    if (presContext) {
+      float zoom = presContext->GetDeviceFullZoom();
+      int32_t width = std::round(size.width * zoom);
+      int32_t height = std::round(size.height * zoom);
+      return nsIntSize(width, height);
+    }
   }
 
   nsCOMPtr<nsIBaseWindow> treeOwnerAsWin = GetTreeOwnerWindow();
@@ -4702,7 +4723,7 @@ bool nsGlobalWindowOuter::AlertOrConfirm(bool aAlert, const nsAString& aMessage,
   // Reset popup state while opening a modal dialog, and firing events
   // about the dialog, to prevent the current state from being active
   // the whole time a modal dialog is open.
-  nsAutoPopupStatePusher popupStatePusher(PopupBlocker::openAbused, true);
+  AutoPopupStatePusher popupStatePusher(PopupBlocker::openAbused, true);
 
   // Before bringing up the window, unsuppress painting and flush
   // pending reflows.
@@ -4790,7 +4811,7 @@ void nsGlobalWindowOuter::PromptOuter(const nsAString& aMessage,
   // Reset popup state while opening a modal dialog, and firing events
   // about the dialog, to prevent the current state from being active
   // the whole time a modal dialog is open.
-  nsAutoPopupStatePusher popupStatePusher(PopupBlocker::openAbused, true);
+  AutoPopupStatePusher popupStatePusher(PopupBlocker::openAbused, true);
 
   // Before bringing up the window, unsuppress painting and flush
   // pending reflows.
@@ -7195,7 +7216,7 @@ nsresult nsGlobalWindowOuter::OpenInternal(
     // Reset popup state while opening a window to prevent the
     // current state from being active the whole time a modal
     // dialog is open.
-    nsAutoPopupStatePusher popupStatePusher(PopupBlocker::openAbused, true);
+    AutoPopupStatePusher popupStatePusher(PopupBlocker::openAbused, true);
 
     if (!aCalledNoScript) {
       // We asserted at the top of this function that aNavigate is true for

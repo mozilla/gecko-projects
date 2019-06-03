@@ -1809,7 +1809,9 @@ class IDLNamespace(IDLInterfaceOrNamespace):
                 if not attr.noArguments():
                     raise WebIDLError("[%s] must not have arguments" % identifier,
                                       [attr.location])
-            elif identifier == "Pref" or identifier == "Func":
+            elif (identifier == "Pref" or
+                  identifier == "HeaderFile" or
+                  identifier == "Func"):
                 # Known extended attributes that take a string value
                 if not attr.hasValue():
                     raise WebIDLError("[%s] must have a value" % identifier,
@@ -4578,7 +4580,8 @@ class IDLArgument(IDLObjectWithIdentifier):
             elif identifier == "TreatNonCallableAsNull":
                 self._allowTreatNonCallableAsNull = True
             elif (self.dictionaryMember and
-                  (identifier == "ChromeOnly" or identifier == "Func")):
+                  (identifier == "ChromeOnly" or identifier == "Func" or
+                   identifier == "Pref")):
                 if not self.optional:
                     raise WebIDLError("[%s] must not be used on a required "
                                       "dictionary member" % identifier,
@@ -5269,7 +5272,8 @@ class IDLMethod(IDLInterfaceMember, IDLScope):
               identifier == "NeedsSubjectPrincipal" or
               identifier == "NeedsCallerType" or
               identifier == "StaticClassOverride" or
-              identifier == "NonEnumerable"):
+              identifier == "NonEnumerable" or
+              identifier == "Unexposed"):
             # Known attributes that we don't need to do anything with here
             pass
         else:

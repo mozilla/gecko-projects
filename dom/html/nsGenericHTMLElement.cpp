@@ -25,6 +25,7 @@
 #include "nsQueryObject.h"
 #include "nsIContentInlines.h"
 #include "nsIContentViewer.h"
+#include "mozilla/dom/BindContext.h"
 #include "mozilla/dom/Document.h"
 #include "nsIDocumentEncoder.h"
 #include "nsIDOMWindow.h"
@@ -417,28 +418,22 @@ EventStates nsGenericHTMLElement::IntrinsicState() const {
   return state;
 }
 
-nsresult nsGenericHTMLElement::BindToTree(Document* aDocument,
-                                          nsIContent* aParent,
-                                          nsIContent* aBindingParent) {
-  nsresult rv =
-      nsGenericHTMLElementBase::BindToTree(aDocument, aParent, aBindingParent);
+nsresult nsGenericHTMLElement::BindToTree(BindContext& aContext,
+                                          nsINode& aParent) {
+  nsresult rv = nsGenericHTMLElementBase::BindToTree(aContext, aParent);
   NS_ENSURE_SUCCESS(rv, rv);
 
-  if (aDocument) {
+  if (IsInUncomposedDoc()) {
     RegAccessKey();
     if (HasName() && CanHaveName(NodeInfo()->NameAtom())) {
-      aDocument->AddToNameTable(this,
-                                GetParsedAttr(nsGkAtoms::name)->GetAtomValue());
+      aContext.OwnerDoc().AddToNameTable(
+          this, GetParsedAttr(nsGkAtoms::name)->GetAtomValue());
     }
   }
 
   if (HasFlag(NODE_IS_EDITABLE) && GetContentEditableValue() == eTrue &&
       IsInComposedDoc()) {
-    nsCOMPtr<nsIHTMLDocument> htmlDocument =
-        do_QueryInterface(GetComposedDoc());
-    if (htmlDocument) {
-      htmlDocument->ChangeContentEditableCount(this, +1);
-    }
+    aContext.OwnerDoc().ChangeContentEditableCount(this, +1);
   }
 
   // We need to consider a labels element is moved to another subtree
@@ -452,7 +447,7 @@ nsresult nsGenericHTMLElement::BindToTree(Document* aDocument,
   return rv;
 }
 
-void nsGenericHTMLElement::UnbindFromTree(bool aDeep, bool aNullParent) {
+void nsGenericHTMLElement::UnbindFromTree(bool aNullParent) {
   if (IsInUncomposedDoc()) {
     UnregAccessKey();
   }
@@ -460,14 +455,13 @@ void nsGenericHTMLElement::UnbindFromTree(bool aDeep, bool aNullParent) {
   RemoveFromNameTable();
 
   if (GetContentEditableValue() == eTrue) {
-    nsCOMPtr<nsIHTMLDocument> htmlDocument =
-        do_QueryInterface(GetComposedDoc());
-    if (htmlDocument) {
-      htmlDocument->ChangeContentEditableCount(this, -1);
+    Document* doc = GetComposedDoc();
+    if (doc) {
+      doc->ChangeContentEditableCount(this, -1);
     }
   }
 
-  nsStyledElement::UnbindFromTree(aDeep, aNullParent);
+  nsStyledElement::UnbindFromTree(aNullParent);
 
   // Invalidate .labels list. It will be repopulated when used the next time.
   nsExtendedDOMSlots* slots = GetExistingExtendedDOMSlots();
@@ -1595,11 +1589,9 @@ nsIContent::IMEState nsGenericHTMLFormElement::GetDesiredIMEState() {
   return state;
 }
 
-nsresult nsGenericHTMLFormElement::BindToTree(Document* aDocument,
-                                              nsIContent* aParent,
-                                              nsIContent* aBindingParent) {
-  nsresult rv =
-      nsGenericHTMLElement::BindToTree(aDocument, aParent, aBindingParent);
+nsresult nsGenericHTMLFormElement::BindToTree(BindContext& aContext,
+                                              nsINode& aParent) {
+  nsresult rv = nsGenericHTMLElement::BindToTree(aContext, aParent);
   NS_ENSURE_SUCCESS(rv, rv);
 
   // An autofocus event has to be launched if the autofocus attribute is
@@ -1607,8 +1599,8 @@ nsresult nsGenericHTMLFormElement::BindToTree(Document* aDocument,
   // the document should not be already loaded and the "browser.autofocus"
   // preference should be 'true'.
   if (IsAutofocusable() && HasAttr(kNameSpaceID_None, nsGkAtoms::autofocus) &&
-      StaticPrefs::browser_autofocus() && aDocument) {
-    aDocument->SetAutoFocusElement(this);
+      StaticPrefs::browser_autofocus() && IsInUncomposedDoc()) {
+    aContext.OwnerDoc().SetAutoFocusElement(this);
   }
 
   // If @form is set, the element *has* to be in a composed document, otherwise
@@ -1618,7 +1610,7 @@ nsresult nsGenericHTMLFormElement::BindToTree(Document* aDocument,
   // We should not call UpdateFormOwner if none of these conditions are
   // fulfilled.
   if (HasAttr(kNameSpaceID_None, nsGkAtoms::form) ? IsInComposedDoc()
-                                                  : !!aParent) {
+                                                  : aParent.IsContent()) {
     UpdateFormOwner(true, nullptr);
   }
 
@@ -1628,7 +1620,7 @@ nsresult nsGenericHTMLFormElement::BindToTree(Document* aDocument,
   return NS_OK;
 }
 
-void nsGenericHTMLFormElement::UnbindFromTree(bool aDeep, bool aNullParent) {
+void nsGenericHTMLFormElement::UnbindFromTree(bool aNullParent) {
   // Save state before doing anything
   SaveState();
 
@@ -1660,7 +1652,7 @@ void nsGenericHTMLFormElement::UnbindFromTree(bool aDeep, bool aNullParent) {
     RemoveFormIdObserver();
   }
 
-  nsGenericHTMLElement::UnbindFromTree(aDeep, aNullParent);
+  nsGenericHTMLElement::UnbindFromTree(aNullParent);
 
   // The element might not have a fieldset anymore.
   UpdateFieldSet(false);
@@ -2343,7 +2335,7 @@ bool nsGenericHTMLElement::PerformAccesskey(bool aKeyCausesActivation,
 
   if (aKeyCausesActivation) {
     // Click on it if the users prefs indicate to do so.
-    nsAutoPopupStatePusher popupStatePusher(
+    AutoPopupStatePusher popupStatePusher(
         aIsTrustedEvent ? PopupBlocker::openAllowed : PopupBlocker::openAbused);
     DispatchSimulatedClick(this, aIsTrustedEvent, presContext);
   }
@@ -2459,9 +2451,7 @@ void nsGenericHTMLElement::ChangeEditableState(int32_t aChange) {
   }
 
   if (aChange != 0) {
-    if (nsCOMPtr<nsIHTMLDocument> htmlDocument = do_QueryInterface(document)) {
-      htmlDocument->ChangeContentEditableCount(this, aChange);
-    }
+    document->ChangeContentEditableCount(this, aChange);
   }
 
   if (document->HasFlag(NODE_IS_EDITABLE)) {

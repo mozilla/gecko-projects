@@ -52,7 +52,8 @@
 #define DEFAULT_REMOTE_TYPE "web"
 #define FILE_REMOTE_TYPE "file"
 #define EXTENSION_REMOTE_TYPE "extension"
-#define PRIVILEGED_REMOTE_TYPE "privileged"
+#define PRIVILEGEDABOUT_REMOTE_TYPE "privilegedabout"
+#define PRIVILEGEDMOZILLA_REMOTE_TYPE "privilegedmozilla"
 
 // This must start with the DEFAULT_REMOTE_TYPE above.
 #define LARGE_ALLOCATION_REMOTE_TYPE "webLargeAllocation"
@@ -629,7 +630,7 @@ class ContentParent final : public PContentParent,
       BrowsingContext* aContext);
 
   mozilla::ipc::IPCResult RecvRestoreBrowsingContextChildren(
-      BrowsingContext* aContext, nsTArray<BrowsingContextId>&& aChildren);
+      BrowsingContext* aContext, BrowsingContext::Children&& aChildren);
 
   mozilla::ipc::IPCResult RecvWindowClose(BrowsingContext* aContext,
                                           bool aTrustedCaller);
@@ -1175,6 +1176,8 @@ class ContentParent final : public PContentParent,
       const DiscardedData& aDiscardedData);
   mozilla::ipc::IPCResult RecvRecordOrigin(const uint32_t& aMetricId,
                                            const nsCString& aOrigin);
+  mozilla::ipc::IPCResult RecvReportContentBlockingLog(
+      const Principal& aPrincipal, const IPCStream& aIPCStream);
 
   mozilla::ipc::IPCResult RecvBHRThreadHang(const HangDetails& aHangDetails);
 
@@ -1215,6 +1218,8 @@ class ContentParent final : public PContentParent,
   void OnBrowsingContextGroupUnsubscribe(BrowsingContextGroup* aGroup);
 
   void UpdateNetworkLinkType();
+
+  static bool ShouldSyncPreference(const char16_t* aData);
 
  private:
   // Released in ActorDestroy; deliberately not exposed to the CC.

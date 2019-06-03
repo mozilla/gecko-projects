@@ -25,9 +25,12 @@ XPCOMUtils.defineLazyGetter(this, "log", () => {
   return logger.log.bind(logger);
 });
 
-var EXPORTED_SYMBOLS = [ "LoginManagerParent" ];
+XPCOMUtils.defineLazyPreferenceGetter(this, "INCLUDE_OTHER_SUBDOMAINS_IN_LOOKUP",
+                                      "signon.includeOtherSubdomainsInLookup", false);
 
-var LoginManagerParent = {
+const EXPORTED_SYMBOLS = [ "LoginManagerParent" ];
+
+this.LoginManagerParent = {
   /**
    * A map of a principal's origin (including suffixes) to a generated password string so that we
    * can offer the same password later (e.g. in a confirmation field).
@@ -51,14 +54,32 @@ var LoginManagerParent = {
   // to avoid spamming master password prompts on autocomplete searches.
   _lastMPLoginCancelled: Math.NEGATIVE_INFINITY,
 
-  _searchAndDedupeLogins(formOrigin, actionOrigin, {looseActionOriginMatch} = {}) {
+  /**
+   * @param {origin} formOrigin
+   * @param {object} options
+   * @param {origin?} options.formActionOrigin To match on. Omit this argument to match all action origins.
+   * @param {origin?} options.httpRealm To match on. Omit this argument to match all realms.
+   * @param {boolean} options.acceptDifferentSubdomains Include results for eTLD+1 matches
+   * @param {boolean} options.ignoreActionAndRealm Include all form and HTTP auth logins for the site
+   */
+  _searchAndDedupeLogins(formOrigin, {
+    acceptDifferentSubdomains,
+    formActionOrigin,
+    httpRealm,
+    ignoreActionAndRealm,
+  } = {}) {
     let logins;
     let matchData = {
       hostname: formOrigin,
       schemeUpgrades: LoginHelper.schemeUpgrades,
+      acceptDifferentSubdomains,
     };
-    if (!looseActionOriginMatch) {
-      matchData.formSubmitURL = actionOrigin;
+    if (!ignoreActionAndRealm) {
+      if (typeof(formActionOrigin) != "undefined") {
+        matchData.formSubmitURL = formActionOrigin;
+      } else if (typeof(httpRealm) != "undefined") {
+        matchData.httpRealm = httpRealm;
+      }
     }
     try {
       logins = LoginHelper.searchLoginsWithObject(matchData);
@@ -73,13 +94,15 @@ var LoginManagerParent = {
       throw e;
     }
 
-    // Dedupe so the length checks below still make sense with scheme upgrades.
+    logins = LoginHelper.shadowHTTPLogins(logins);
+
     let resolveBy = [
       "actionOrigin",
       "scheme",
+      "subdomain",
       "timePasswordChanged",
     ];
-    return LoginHelper.dedupeLogins(logins, ["username"], resolveBy, formOrigin, actionOrigin);
+    return LoginHelper.dedupeLogins(logins, ["username", "password"], resolveBy, formOrigin, formActionOrigin);
   },
 
   // Listeners are added in BrowserGlue.jsm on desktop
@@ -89,11 +112,11 @@ var LoginManagerParent = {
     switch (msg.name) {
       case "PasswordManager:findLogins": {
         // TODO Verify msg.target's principals against the formOrigin?
-        this.sendLoginDataToChild(data.options.showMasterPassword,
-                                  data.formOrigin,
+        this.sendLoginDataToChild(data.formOrigin,
                                   data.actionOrigin,
                                   data.requestId,
-                                  msg.target.messageManager);
+                                  msg.target.messageManager,
+                                  data.options);
         break;
       }
 
@@ -113,6 +136,11 @@ var LoginManagerParent = {
                            openerTopWindowID: data.openerTopWindowID,
                            dismissedPrompt: data.dismissedPrompt,
                            target: msg.target});
+        break;
+      }
+
+      case "PasswordManager:onGeneratedPasswordFilled": {
+        this._onGeneratedPasswordFilled(data);
         break;
       }
 
@@ -176,8 +204,10 @@ var LoginManagerParent = {
   /**
    * Send relevant data (e.g. logins and recipes) to the child process (LoginManagerContent).
    */
-  async sendLoginDataToChild(showMasterPassword, formOrigin, actionOrigin,
-                             requestId, target) {
+  async sendLoginDataToChild(formOrigin, actionOrigin, requestId, target, {
+    guid,
+    showMasterPassword,
+  }) {
     let recipes = [];
     if (formOrigin) {
       let formHost;
@@ -226,8 +256,9 @@ var LoginManagerParent = {
             return;
           }
 
-          self.sendLoginDataToChild(showMasterPassword, formOrigin, actionOrigin,
-                                    requestId, target);
+          self.sendLoginDataToChild(formOrigin, actionOrigin, requestId, target, {
+            showMasterPassword,
+          });
         },
       };
 
@@ -241,13 +272,25 @@ var LoginManagerParent = {
       return;
     }
 
-    // Autocomplete results do not need to match actionOrigin.
-    let logins = this._searchAndDedupeLogins(formOrigin, actionOrigin, {looseActionOriginMatch: true});
+    // Autocomplete results do not need to match actionOrigin or exact hostname.
+    let logins = null;
+    if (guid) {
+      logins = LoginHelper.searchLoginsWithObject({
+        guid,
+      });
+    } else {
+      logins = this._searchAndDedupeLogins(formOrigin,
+                                           {
+                                             formActionOrigin: actionOrigin,
+                                             ignoreActionAndRealm: true,
+                                             acceptDifferentSubdomains: INCLUDE_OTHER_SUBDOMAINS_IN_LOOKUP, // TODO: for TAB case
+                                           });
+    }
 
     log("sendLoginDataToChild:", logins.length, "deduped logins");
     // Convert the array of nsILoginInfo to vanilla JS objects since nsILoginInfo
     // doesn't support structured cloning.
-    var jsLogins = LoginHelper.loginsToVanillaObjects(logins);
+    let jsLogins = LoginHelper.loginsToVanillaObjects(logins);
     target.sendAsyncMessage("PasswordManager:loginsFound", {
       requestId,
       logins: jsLogins,
@@ -297,8 +340,13 @@ var LoginManagerParent = {
     } else {
       log("Creating new autocomplete search result.");
 
-      // Autocomplete results do not need to match actionOrigin.
-      logins = this._searchAndDedupeLogins(formOrigin, actionOrigin, {looseActionOriginMatch: true});
+      // Autocomplete results do not need to match actionOrigin or exact hostname.
+      logins = this._searchAndDedupeLogins(formOrigin,
+                                           {
+                                             formActionOrigin: actionOrigin,
+                                             ignoreActionAndRealm: true,
+                                             acceptDifferentSubdomains: INCLUDE_OTHER_SUBDOMAINS_IN_LOOKUP,
+                                           });
     }
 
     let matchingLogins = logins.filter(function(fullMatch) {
@@ -314,13 +362,15 @@ var LoginManagerParent = {
     });
 
     let generatedPassword = null;
-    if (isPasswordField && autocompleteInfo.fieldName == "new-password") {
+    if (isPasswordField &&
+        autocompleteInfo.fieldName == "new-password" &&
+        Services.logins.getLoginSavingEnabled(formOrigin)) {
       generatedPassword = this.getGeneratedPassword(browsingContextId);
     }
 
     // Convert the array of nsILoginInfo to vanilla JS objects since nsILoginInfo
     // doesn't support structured cloning.
-    var jsLogins = LoginHelper.loginsToVanillaObjects(matchingLogins);
+    let jsLogins = LoginHelper.loginsToVanillaObjects(matchingLogins);
     target.messageManager.sendAsyncMessage("PasswordManager:loginsAutoCompleted", {
       requestId,
       generatedPassword,
@@ -361,7 +411,7 @@ var LoginManagerParent = {
                 oldPasswordField, openerTopWindowID,
                 dismissedPrompt, target}) {
     function getPrompter() {
-      var prompterSvc = Cc["@mozilla.org/login-manager/prompter;1"].
+      let prompterSvc = Cc["@mozilla.org/login-manager/prompter;1"].
                         createInstance(Ci.nsILoginManagerPrompter);
       prompterSvc.init(target.ownerGlobal);
       prompterSvc.browser = target;
@@ -398,7 +448,7 @@ var LoginManagerParent = {
       return;
     }
 
-    var formLogin = Cc["@mozilla.org/login-manager/loginInfo;1"].
+    let formLogin = Cc["@mozilla.org/login-manager/loginInfo;1"].
                     createInstance(Ci.nsILoginInfo);
     formLogin.init(hostname, formSubmitURL, null,
                    (usernameField ? usernameField.value : ""),
@@ -422,16 +472,18 @@ var LoginManagerParent = {
 
     // Below here we have one login per hostPort + action + username with the
     // matching scheme being preferred.
-    let logins = this._searchAndDedupeLogins(hostname, formSubmitURL);
+    let logins = this._searchAndDedupeLogins(hostname, {
+      formActionOrigin: formSubmitURL,
+    });
 
     // If we didn't find a username field, but seem to be changing a
     // password, allow the user to select from a list of applicable
     // logins to update the password for.
     if (!usernameField && oldPasswordField && logins.length > 0) {
-      var prompter = getPrompter();
+      let prompter = getPrompter();
 
       if (logins.length == 1) {
-        var oldLogin = logins[0];
+        let oldLogin = logins[0];
 
         if (oldLogin.password == formLogin.password) {
           recordLoginUse(oldLogin);
@@ -456,7 +508,7 @@ var LoginManagerParent = {
     }
 
 
-    var existingLogin = null;
+    let existingLogin = null;
     // Look for an existing login that matches the form login.
     for (let login of logins) {
       let same;
@@ -466,7 +518,7 @@ var LoginManagerParent = {
       // same password. Otherwise, compare the logins and match even
       // if the passwords differ.
       if (!login.username && formLogin.username) {
-        var restoreMe = formLogin.username;
+        let restoreMe = formLogin.username;
         formLogin.username = "";
         same = LoginHelper.doLoginsMatch(formLogin, login, {
           ignorePassword: false,
@@ -499,11 +551,11 @@ var LoginManagerParent = {
       // Change password if needed.
       if (existingLogin.password != formLogin.password) {
         log("...passwords differ, prompting to change.");
-        prompter = getPrompter();
+        let prompter = getPrompter();
         prompter.promptToChangePassword(existingLogin, formLogin, dismissedPrompt);
       } else if (!existingLogin.username && formLogin.username) {
         log("...empty username update, prompting to change.");
-        prompter = getPrompter();
+        let prompter = getPrompter();
         prompter.promptToChangePassword(existingLogin, formLogin, dismissedPrompt);
       } else {
         recordLoginUse(existingLogin);
@@ -513,8 +565,46 @@ var LoginManagerParent = {
     }
 
     // Prompt user to save login (via dialog or notification bar)
-    prompter = getPrompter();
+    let prompter = getPrompter();
     prompter.promptToSavePassword(formLogin, dismissedPrompt);
+  },
+
+  _onGeneratedPasswordFilled({
+    browsingContextId,
+    formActionOrigin,
+  }) {
+    let browsingContext = BrowsingContext.get(browsingContextId);
+    let {originNoSuffix} = browsingContext.currentWindowGlobal.documentPrincipal;
+    let formOrigin = LoginHelper.getLoginOrigin(originNoSuffix);
+    if (!formOrigin) {
+      log("_onGeneratedPasswordFilled: Invalid form origin:",
+          browsingContext.currentWindowGlobal.documentPrincipal);
+      return;
+    }
+
+    if (!Services.logins.getLoginSavingEnabled(formOrigin)) {
+      log("_onGeneratedPasswordFilled: saving is disabled for:", formOrigin);
+      return;
+    }
+
+    // Check if we already have a login saved for this site since we don't want to overwrite it in
+    // case the user still needs their old password to succesffully complete a password change.
+    // An empty formActionOrigin is used as a wildcard to not restrict to action matches.
+    let logins = this._searchAndDedupeLogins(formOrigin, {
+      acceptDifferentSubdomains: false,
+      httpRealm: null,
+      ignoreActionAndRealm: false,
+    });
+
+    if (logins.length > 0) {
+      log("_onGeneratedPasswordFilled: Login already saved for this site");
+      return;
+    }
+
+    let password = this.getGeneratedPassword(browsingContextId);
+    let formLogin = Cc["@mozilla.org/login-manager/loginInfo;1"].createInstance(Ci.nsILoginInfo);
+    formLogin.init(formOrigin, formActionOrigin, null, "", password);
+    Services.logins.addLogin(formLogin);
   },
 
   /**

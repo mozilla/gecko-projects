@@ -73,7 +73,6 @@ talos:
     - talos-tp5o
     - talos-perf-reftest
     - talos-perf-reftest-singletons
-    - talos-tp6-stylo-threads
     - talos-tabswitch
     # - talos-h1 Bug 1487031 - Disabled for not finding actionable regressions
     # - talos-h2 Bug 1487031 - Disabled for not finding actionable regressions
@@ -219,6 +218,7 @@ linux-talos-flex:
 windows-qr-tests:
     - crashtest
     - mochitest
+    - mochitest-browser-chrome
     - mochitest-gpu
     - mochitest-media
     - mochitest-webgl1-core
@@ -307,52 +307,48 @@ marionette-gpu-tests:
 marionette-media-tests:
     - marionette-media
 
-# macosx1014-64-tests:
-#    - cppunit
-#    - crashtest
-#    - firefox-ui-functional-local
-#    - firefox-ui-functional-remote
-#    - gtest
-#    - jittest
-#    - jsreftest
-#    - marionette
-#    - mochitest
-#    - mochitest-a11y
-#    - mochitest-browser-chrome
-#    - mochitest-chrome
-#    - mochitest-devtools-chrome
-#    - mochitest-devtools-webreplay
-#    - mochitest-gpu
-#    - mochitest-media
-#    - mochitest-webgl1-core
-#    - mochitest-webgl1-ext
-#    - mochitest-webgl2-core
-#     - mochitest-webgl2-ext test  # timeouts
-#    - reftest
-#    - telemetry-tests-client
-#    - test-verify
-#    - test-verify-gpu
-#    - test-verify-wpt
-#    - web-platform-tests
-#    - web-platform-tests-reftests
-#    - web-platform-tests-wdspec
-#    - xpcshell
+macosx1014-64-tests:
+    # - cppunit
+    # - crashtest
+    - firefox-ui-functional-local
+    - firefox-ui-functional-remote
+    # - gtest
+    # - jittest
+    # - jsreftest
+    - marionette
+    # - mochitest
+    - mochitest-a11y
+    # - mochitest-browser-chrome
+    # - mochitest-chrome
+    # - mochitest-devtools-chrome
+    # - mochitest-devtools-webreplay
+    # - mochitest-gpu
+    # - mochitest-media
+    # - mochitest-webgl1-core
+    # - mochitest-webgl1-ext
+    # - mochitest-webgl2-core
+    # - mochitest-webgl2-ext test  # timeouts
+    - reftest
+    # - telemetry-tests-client
+    - test-verify
+    - test-verify-gpu
+    - test-verify-wpt
+    # - web-platform-tests
+    # - web-platform-tests-reftests
+    - web-platform-tests-wdspec
+    # - xpcshell
 
-# macosx1014-64-qr-tests:
-#    - crashtest
-#    - reftest
+macosx1014-64-qr-tests:
+    # - crashtest
+    - reftest
 
 macosx64-tests:
     - cppunit
     - crashtest
-    - firefox-ui-functional-local
-    - firefox-ui-functional-remote
     - gtest
     - jittest
     - jsreftest
-    - marionette
     - mochitest
-    - mochitest-a11y
     - mochitest-browser-chrome
     - mochitest-chrome
     - mochitest-devtools-chrome
@@ -363,14 +359,9 @@ macosx64-tests:
     - mochitest-webgl1-ext
     - mochitest-webgl2-core
     # - mochitest-webgl2-ext test timeouts
-    - reftest
     - telemetry-tests-client
-    - test-verify
-    - test-verify-gpu
-    - test-verify-wpt
     - web-platform-tests
     - web-platform-tests-reftests
-    - web-platform-tests-wdspec
     - xpcshell
 
 macosx64-talos:
@@ -387,13 +378,11 @@ macosx64-talos:
     - talos-tp5o
     - talos-perf-reftest
     - talos-perf-reftest-singletons
-    - talos-tp6-stylo-threads
     # - talos-tabswitch # Bug 1453007 times out
     # - talos-h1 # too long to unpack profile- Bug 1442893
 
 macosx64-qr-tests:
     - crashtest
-    - reftest
 
 linux32-tests:
     - web-platform-tests
@@ -407,7 +396,6 @@ desktop-instrumentation:
 android-common-tests:
     - crashtest
     - geckoview-junit
-    - jsreftest
     - mochitest
     - mochitest-chrome
     - mochitest-gpu
@@ -429,7 +417,6 @@ android-x86_64-opt-tests:
 android-x86_64-tests:
     - cppunit
     - gtest
-    - jsreftest
     - marionette
     - mochitest
     - mochitest-gpu
@@ -458,14 +445,17 @@ marionette-headless:
     - marionette-headless
 
 android-hw-arm7-opt-unittests:
+    - mochitest-media
+
+android-hw-arm7-pgo-unittests:
     - jittest
+    - jsreftest
     - mochitest-media
 
 android-hw-arm7-debug-unittests:
-    - mochitest-media
-
-android-hw-aarch64-opt-unittests:
     - jittest
+    - jsreftest
+    - mochitest-media
 
 android-hw-arm7-raptor:
     - raptor-speedometer-geckoview
@@ -482,6 +472,15 @@ android-hw-arm7-raptor:
     - raptor-tp6m-9-geckoview
     - raptor-tp6m-10-geckoview
     - raptor-tp6m-1-fenix
+    - raptor-tp6m-2-fenix
+    - raptor-tp6m-3-fenix
+    - raptor-tp6m-4-fenix
+    - raptor-tp6m-5-fenix
+    - raptor-tp6m-6-fenix
+    - raptor-tp6m-7-fenix
+    - raptor-tp6m-8-fenix
+    - raptor-tp6m-9-fenix
+    - raptor-tp6m-10-fenix
     - raptor-tp6m-1-refbrow
     - raptor-tp6m-2-refbrow
     - raptor-tp6m-3-refbrow
@@ -520,6 +519,16 @@ android-hw-arm7-raptor:
     - raptor-tp6m-12-geckoview-cold
     - raptor-tp6m-13-geckoview-cold
     - raptor-tp6m-14-geckoview-cold
+    - raptor-tp6m-1-fennec64
+    - raptor-tp6m-2-fennec64
+    - raptor-tp6m-3-fennec64
+    - raptor-tp6m-4-fennec64
+    - raptor-tp6m-5-fennec64
+    - raptor-tp6m-6-fennec64
+    - raptor-tp6m-7-fennec64
+    - raptor-tp6m-8-fennec64
+    - raptor-tp6m-9-fennec64
+    - raptor-tp6m-10-fennec64
     - raptor-tp6m-1-fennec-cold
     - raptor-tp6m-2-fennec-cold
     - raptor-tp6m-3-fennec-cold
@@ -534,10 +543,25 @@ android-hw-arm7-raptor:
     - raptor-tp6m-12-fennec-cold
     - raptor-tp6m-13-fennec-cold
     - raptor-tp6m-14-fennec-cold
+    - raptor-tp6m-1-fennec64-cold
+    - raptor-tp6m-2-fennec64-cold
+    - raptor-tp6m-3-fennec64-cold
+    - raptor-tp6m-4-fennec64-cold
+    - raptor-tp6m-5-fennec64-cold
+    - raptor-tp6m-6-fennec64-cold
+    - raptor-tp6m-7-fennec64-cold
+    - raptor-tp6m-8-fennec64-cold
+    - raptor-tp6m-9-fennec64-cold
+    - raptor-tp6m-10-fennec64-cold
+    - raptor-tp6m-11-fennec64-cold
+    - raptor-tp6m-12-fennec64-cold
+    - raptor-tp6m-13-fennec64-cold
+    - raptor-tp6m-14-fennec64-cold
 
 android-hw-aarch64-raptor:
     - raptor-speedometer-geckoview
     - raptor-speedometer-refbrow
+    - raptor-youtube-playback-geckoview
     - raptor-tp6m-1-geckoview
     - raptor-tp6m-2-geckoview
     - raptor-tp6m-3-geckoview
@@ -548,6 +572,16 @@ android-hw-aarch64-raptor:
     - raptor-tp6m-8-geckoview
     - raptor-tp6m-9-geckoview
     - raptor-tp6m-10-geckoview
+    - raptor-tp6m-1-fenix
+    - raptor-tp6m-2-fenix
+    - raptor-tp6m-3-fenix
+    - raptor-tp6m-4-fenix
+    - raptor-tp6m-5-fenix
+    - raptor-tp6m-6-fenix
+    - raptor-tp6m-7-fenix
+    - raptor-tp6m-8-fenix
+    - raptor-tp6m-9-fenix
+    - raptor-tp6m-10-fenix
     - raptor-tp6m-1-refbrow
     - raptor-tp6m-2-refbrow
     - raptor-tp6m-3-refbrow
@@ -600,6 +634,20 @@ android-hw-aarch64-raptor:
     - raptor-tp6m-12-fennec-cold
     - raptor-tp6m-13-fennec-cold
     - raptor-tp6m-14-fennec-cold
+    - raptor-tp6m-1-fennec64-cold
+    - raptor-tp6m-2-fennec64-cold
+    - raptor-tp6m-3-fennec64-cold
+    - raptor-tp6m-4-fennec64-cold
+    - raptor-tp6m-5-fennec64-cold
+    - raptor-tp6m-6-fennec64-cold
+    - raptor-tp6m-7-fennec64-cold
+    - raptor-tp6m-8-fennec64-cold
+    - raptor-tp6m-9-fennec64-cold
+    - raptor-tp6m-10-fennec64-cold
+    - raptor-tp6m-11-fennec64-cold
+    - raptor-tp6m-12-fennec64-cold
+    - raptor-tp6m-13-fennec64-cold
+    - raptor-tp6m-14-fennec64-cold
 
 android-hw-arm7-raptor-power:
     - raptor-speedometer-geckoview-power
@@ -641,6 +689,16 @@ android-hw-arm7-raptor-nightly:
     - raptor-tp6m-12-fennec-cold
     - raptor-tp6m-13-fennec-cold
     - raptor-tp6m-14-fennec-cold
+    - raptor-tp6m-1-fennec64
+    - raptor-tp6m-2-fennec64
+    - raptor-tp6m-3-fennec64
+    - raptor-tp6m-4-fennec64
+    - raptor-tp6m-5-fennec64
+    - raptor-tp6m-6-fennec64
+    - raptor-tp6m-7-fennec64
+    - raptor-tp6m-8-fennec64
+    - raptor-tp6m-9-fennec64
+    - raptor-tp6m-10-fennec64
 
 android-hw-aarch64-raptor-nightly:
     - raptor-speedometer-fennec

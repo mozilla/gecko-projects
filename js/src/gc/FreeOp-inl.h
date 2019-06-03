@@ -9,7 +9,7 @@
 
 #include "gc/FreeOp.h"
 
-#include "gc/Zone.h"
+#include "gc/ZoneAllocator.h"
 
 namespace js {
 
@@ -42,6 +42,6 @@ inline void FreeOp::freeLater(void* p) {
   }
 }
 
-} // namespace js
+}  // namespace js
 
-#endif // gc_FreeOp_inl_h
+#endif  // gc_FreeOp_inl_h

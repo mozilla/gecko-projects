@@ -523,7 +523,8 @@ class ContentChild final : public PContentChild,
       ManagedEndpoint<PBrowserChild>&& aBrowserEp, const TabId& aTabId,
       const TabId& aSameTabGroupAs, const IPCTabContext& aContext,
       BrowsingContext* aBrowsingContext, const uint32_t& aChromeFlags,
-      const ContentParentId& aCpID, const bool& aIsForBrowser);
+      const ContentParentId& aCpID, const bool& aIsForBrowser,
+      const bool& aIsTopLevel);
 
   FORWARD_SHMEM_ALLOCATOR_TO(PContentChild)
 
@@ -722,7 +723,7 @@ class ContentChild final : public PContentChild,
       BrowsingContext* aContext);
 
   mozilla::ipc::IPCResult RecvRestoreBrowsingContextChildren(
-      BrowsingContext* aContext, nsTArray<BrowsingContextId>&& aChildren);
+      BrowsingContext* aContext, BrowsingContext::Children&& aChildren);
 
   mozilla::ipc::IPCResult RecvRegisterBrowsingContextGroup(
       nsTArray<BrowsingContext::IPCInitializer>&& aInits);

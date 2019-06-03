@@ -6,6 +6,7 @@
 
 #include "mozilla/dom/BrowserHost.h"
 
+#include "mozilla/Unused.h"
 #include "mozilla/dom/CancelContentJSOptionsBinding.h"
 #include "mozilla/dom/WindowGlobalParent.h"
 
@@ -24,7 +25,9 @@ NS_IMPL_CYCLE_COLLECTING_ADDREF(BrowserHost)
 NS_IMPL_CYCLE_COLLECTING_RELEASE(BrowserHost)
 
 BrowserHost::BrowserHost(BrowserParent* aParent)
-    : mId(aParent->GetTabId()), mRoot(aParent) {
+    : mId(aParent->GetTabId()),
+      mRoot(aParent),
+      mEffectsInfo{EffectsInfo::FullyHidden()} {
   mRoot->SetBrowserHost(this);
 }
 
@@ -75,6 +78,14 @@ void BrowserHost::UpdateDimensions(const nsIntRect& aRect,
   mRoot->UpdateDimensions(aRect, aSize);
 }
 
+void BrowserHost::UpdateEffects(EffectsInfo aEffects) {
+  if (!mRoot || mEffectsInfo == aEffects) {
+    return;
+  }
+  mEffectsInfo = aEffects;
+  Unused << mRoot->SendUpdateEffects(mEffectsInfo);
+}
+
 /* attribute boolean docShellIsActive; */
 NS_IMETHODIMP
 BrowserHost::GetDocShellIsActive(bool* aDocShellIsActive) {
@@ -113,9 +124,7 @@ BrowserHost::SetRenderLayers(bool aRenderLayers) {
   if (!mRoot) {
     return NS_OK;
   }
-  VisitAll([&](BrowserParent* aBrowserParent) {
-    aBrowserParent->SetRenderLayers(aRenderLayers);
-  });
+  mRoot->SetRenderLayers(aRenderLayers);
   return NS_OK;
 }
 
@@ -227,25 +236,6 @@ BrowserHost::GetHasPresented(bool* aHasPresented) {
   return NS_OK;
 }
 
-NS_IMETHODIMP
-BrowserHost::GetWindowGlobalParents(
-    nsTArray<RefPtr<WindowGlobalParent>>& aWindowGlobalParents) {
-  if (!mRoot) {
-    aWindowGlobalParents = nsTArray<RefPtr<WindowGlobalParent>>();
-    return NS_OK;
-  }
-  VisitAll([&](BrowserParent* aBrowser) {
-    const auto& windowGlobalParents = aBrowser->ManagedPWindowGlobalParent();
-    for (auto iter = windowGlobalParents.ConstIter(); !iter.Done();
-         iter.Next()) {
-      WindowGlobalParent* windowGlobalParent =
-          static_cast<WindowGlobalParent*>(iter.Get()->GetKey());
-      aWindowGlobalParents.AppendElement(windowGlobalParent);
-    }
-  });
-  return NS_OK;
-}
-
 /* void transmitPermissionsForPrincipal (in nsIPrincipal aPrincipal); */
 NS_IMETHODIMP
 BrowserHost::TransmitPermissionsForPrincipal(nsIPrincipal* aPrincipal) {
@@ -262,7 +252,13 @@ BrowserHost::GetHasBeforeUnload(bool* aHasBeforeUnload) {
     *aHasBeforeUnload = false;
     return NS_OK;
   }
-  *aHasBeforeUnload = mRoot->GetHasBeforeUnload();
+  bool result = false;
+
+  VisitAll([&result](BrowserParent* aBrowserParent) {
+    result |= aBrowserParent->GetHasBeforeUnload();
+  });
+
+  *aHasBeforeUnload = result;
   return NS_OK;
 }
 

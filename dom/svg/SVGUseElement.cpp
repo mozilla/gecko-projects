@@ -149,18 +149,16 @@ nsresult SVGUseElement::Clone(dom::NodeInfo* aNodeInfo,
   return NS_FAILED(rv1) ? rv1 : rv2;
 }
 
-nsresult SVGUseElement::BindToTree(Document* aDocument, nsIContent* aParent,
-                                   nsIContent* aBindingParent) {
-  nsresult rv =
-      SVGUseElementBase::BindToTree(aDocument, aParent, aBindingParent);
+nsresult SVGUseElement::BindToTree(BindContext& aContext, nsINode& aParent) {
+  nsresult rv = SVGUseElementBase::BindToTree(aContext, aParent);
   NS_ENSURE_SUCCESS(rv, rv);
 
   TriggerReclone();
   return NS_OK;
 }
 
-void SVGUseElement::UnbindFromTree(bool aDeep, bool aNullParent) {
-  SVGUseElementBase::UnbindFromTree(aDeep, aNullParent);
+void SVGUseElement::UnbindFromTree(bool aNullParent) {
+  SVGUseElementBase::UnbindFromTree(aNullParent);
   OwnerDoc()->UnscheduleSVGUseElementShadowTreeUpdate(*this);
 }
 

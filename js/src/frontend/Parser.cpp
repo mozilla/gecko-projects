@@ -89,9 +89,6 @@ static inline void PropagateTransitiveParseFlags(const T* inner, U* outer) {
   if (inner->bindingsAccessedDynamically()) {
     outer->setBindingsAccessedDynamically();
   }
-  if (inner->hasDebuggerStatement()) {
-    outer->setHasDebuggerStatement();
-  }
   if (inner->hasDirectEval()) {
     outer->setHasDirectEval();
   }
@@ -6711,9 +6708,6 @@ GeneralParser<ParseHandler, Unit>::debuggerStatement() {
   }
   p.end = pos().end;
 
-  pc_->sc()->setBindingsAccessedDynamically();
-  pc_->sc()->setHasDebuggerStatement();
-
   return handler_.newDebuggerStatement(p);
 }
 
@@ -6991,6 +6985,10 @@ bool GeneralParser<ParseHandler, Unit>::finishClassConstructor(
       if (numFields > 0) {
         ctorbox->function()->lazyScript()->setHasThisBinding();
       }
+    }
+
+    if (numFields == 0) {
+      handler_.deleteConstructorScope(cx_, classMembers);
     }
   }
 

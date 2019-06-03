@@ -71,6 +71,8 @@ class ContentBlockingLog final {
   };
 
  public:
+  static const nsLiteralCString kDummyOriginHash;
+
   ContentBlockingLog() = default;
   ~ContentBlockingLog() = default;
 
@@ -156,7 +158,8 @@ class ContentBlockingLog final {
     }
   }
 
-  void ReportLog();
+  void ReportOrigins();
+  void ReportLog(nsIPrincipal* aFirstPartyPrincipal);
 
   nsAutoCString Stringify() {
     nsAutoCString buffer;

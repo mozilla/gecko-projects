@@ -13,6 +13,7 @@
 #include "mozilla/ipc/BackgroundUtils.h"
 #include "mozilla/ipc/PBackgroundSharedTypes.h"
 #include "mozilla/LoadContext.h"
+#include "mozilla/StorageAccess.h"
 #include "nsContentUtils.h"
 #include "nsIContentSecurityPolicy.h"
 #include "nsINetworkInterceptController.h"
@@ -89,7 +90,7 @@ WorkerLoadInfoData::WorkerLoadInfoData()
       mXHRParamsAllowed(false),
       mPrincipalIsSystem(false),
       mWatchedByDevtools(false),
-      mStorageAccess(nsContentUtils::StorageAccess::eDeny),
+      mStorageAccess(StorageAccess::eDeny),
       mFirstPartyStorageAccessGranted(false),
       mServiceWorkersTestingInWindow(false),
       mSecureContext(eNotSet) {}
@@ -108,15 +109,14 @@ nsresult WorkerLoadInfo::SetPrincipalsAndCSPOnMainThread(
 
   if (mCSP) {
     mCSP->GetAllowsEval(&mReportCSPViolations, &mEvalAllowed);
+    mCSPInfo = new CSPInfo();
+    nsresult rv = CSPToCSPInfo(aCsp, mCSPInfo);
+    if (NS_WARN_IF(NS_FAILED(rv))) {
+      return rv;
+    }
   } else {
     mEvalAllowed = true;
     mReportCSPViolations = false;
-  }
-
-  mCSPInfo = new CSPInfo();
-  nsresult rv = CSPToCSPInfo(aCsp, mCSPInfo);
-  if (NS_WARN_IF(NS_FAILED(rv))) {
-    return rv;
   }
 
   mLoadGroup = aLoadGroup;
@@ -125,7 +125,7 @@ nsresult WorkerLoadInfo::SetPrincipalsAndCSPOnMainThread(
   mStoragePrincipalInfo = new PrincipalInfo();
   mOriginAttributes = nsContentUtils::GetOriginAttributes(aLoadGroup);
 
-  rv = PrincipalToPrincipalInfo(aPrincipal, mPrincipalInfo);
+  nsresult rv = PrincipalToPrincipalInfo(aPrincipal, mPrincipalInfo);
   NS_ENSURE_SUCCESS(rv, rv);
 
   if (aPrincipal->Equals(aStoragePrincipal)) {

@@ -5,6 +5,7 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "mozilla/dom/HTMLSharedElement.h"
+#include "mozilla/dom/BindContext.h"
 #include "mozilla/dom/HTMLBaseElementBinding.h"
 #include "mozilla/dom/HTMLDirectoryElementBinding.h"
 #include "mozilla/dom/HTMLHeadElementBinding.h"
@@ -224,30 +225,29 @@ nsresult HTMLSharedElement::AfterSetAttr(int32_t aNamespaceID, nsAtom* aName,
       aNamespaceID, aName, aValue, aOldValue, aSubjectPrincipal, aNotify);
 }
 
-nsresult HTMLSharedElement::BindToTree(Document* aDocument, nsIContent* aParent,
-                                       nsIContent* aBindingParent) {
-  nsresult rv =
-      nsGenericHTMLElement::BindToTree(aDocument, aParent, aBindingParent);
+nsresult HTMLSharedElement::BindToTree(BindContext& aContext,
+                                       nsINode& aParent) {
+  nsresult rv = nsGenericHTMLElement::BindToTree(aContext, aParent);
   NS_ENSURE_SUCCESS(rv, rv);
 
   // The document stores a pointer to its base URI and base target, which we may
   // need to update here.
-  if (mNodeInfo->Equals(nsGkAtoms::base) && aDocument) {
+  if (mNodeInfo->Equals(nsGkAtoms::base) && IsInUncomposedDoc()) {
     if (HasAttr(kNameSpaceID_None, nsGkAtoms::href)) {
-      SetBaseURIUsingFirstBaseWithHref(aDocument, this);
+      SetBaseURIUsingFirstBaseWithHref(&aContext.OwnerDoc(), this);
     }
     if (HasAttr(kNameSpaceID_None, nsGkAtoms::target)) {
-      SetBaseTargetUsingFirstBaseWithTarget(aDocument, this);
+      SetBaseTargetUsingFirstBaseWithTarget(&aContext.OwnerDoc(), this);
     }
   }
 
   return NS_OK;
 }
 
-void HTMLSharedElement::UnbindFromTree(bool aDeep, bool aNullParent) {
+void HTMLSharedElement::UnbindFromTree(bool aNullParent) {
   Document* doc = GetUncomposedDoc();
 
-  nsGenericHTMLElement::UnbindFromTree(aDeep, aNullParent);
+  nsGenericHTMLElement::UnbindFromTree(aNullParent);
 
   // If we're removing a <base> from a document, we may need to update the
   // document's base URI and base target

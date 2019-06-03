@@ -139,7 +139,7 @@ class nsWindow final : public nsBaseWidget {
   void SetZIndex(int32_t aZIndex) override;
   virtual void SetSizeMode(nsSizeMode aMode) override;
   virtual void Enable(bool aState) override;
-  virtual nsresult SetFocus(bool aRaise = false) override;
+  virtual void SetFocus(Raise) override;
   virtual LayoutDeviceIntRect GetScreenBounds() override;
   virtual LayoutDeviceIntRect GetClientBounds() override;
   virtual LayoutDeviceIntSize GetClientSize() override;
@@ -274,6 +274,7 @@ class nsWindow final : public nsBaseWidget {
   GtkWidget* GetGtkWidget() { return mShell; }
   nsIFrame* GetFrame();
   bool IsDestroyed() { return mIsDestroyed; }
+  bool IsWaylandPopup();
 
   void DispatchDragEvent(mozilla::EventMessage aMsg,
                          const LayoutDeviceIntPoint& aRefPoint, guint aTime);
@@ -610,10 +611,10 @@ class nsWindow final : public nsBaseWidget {
 
   void ForceTitlebarRedraw();
 
-  bool IsWaylandPopup();
   GtkWidget* ConfigureWaylandPopupWindows();
-  void CloseWaylandTooltips();
-  void CloseWaylandWindow();
+  void HideWaylandWindow();
+  void HideWaylandTooltips();
+  void HideWaylandPopupAndAllChildren();
 
   /**
    * |mIMContext| takes all IME related stuff.

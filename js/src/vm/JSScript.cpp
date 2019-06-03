@@ -676,19 +676,6 @@ XDRResult js::PrivateScriptData::XDR(XDRState<mode>* xdr, HandleScript script,
   return Ok();
 }
 
-// Placement-new elements of an array. This should optimize away for types with
-// trivial default initiation.
-template <typename T>
-static void DefaultInitializeElements(void* arrayPtr, size_t length) {
-  uintptr_t elem = reinterpret_cast<uintptr_t>(arrayPtr);
-  MOZ_ASSERT(elem % alignof(T) == 0);
-
-  for (size_t i = 0; i < length; ++i) {
-    new (reinterpret_cast<void*>(elem)) T;
-    elem += sizeof(T);
-  }
-}
-
 /* static */ size_t SharedScriptData::AllocationSize(uint32_t codeLength,
                                                      uint32_t noteLength,
                                                      uint32_t natoms) {
@@ -3634,7 +3621,6 @@ JSScript::JSScript(JS::Realm* realm, uint8_t* stubEntry,
     :
 #ifndef JS_CODEGEN_NONE
       jitCodeRaw_(stubEntry),
-      jitCodeSkipArgCheck_(stubEntry),
 #endif
       realm_(realm),
       sourceStart_(sourceStart),
@@ -3774,6 +3760,7 @@ bool JSScript::createPrivateScriptData(JSContext* cx, HandleScript script,
                                        uint32_t nscopenotes,
                                        uint32_t nresumeoffsets) {
   cx->check(script);
+  MOZ_ASSERT(!script->data_);
 
   uint32_t dataSize;
 
@@ -3786,6 +3773,8 @@ bool JSScript::createPrivateScriptData(JSContext* cx, HandleScript script,
 
   script->data_ = data;
   script->dataSize_ = dataSize;
+  AddCellMemory(script, dataSize, MemoryUse::ScriptPrivateData);
+
   return true;
 }
 
@@ -4069,10 +4058,6 @@ void JSScript::finalize(FreeOp* fop) {
 
   fop->runtime()->geckoProfiler().onScriptFinalized(this);
 
-  if (jitScript_) {
-    jitScript_->destroy(zone());
-  }
-
   jit::DestroyJitScripts(fop, this);
 
   destroyScriptCounts();
@@ -4086,8 +4071,9 @@ void JSScript::finalize(FreeOp* fop) {
 #endif
 
   if (data_) {
-    AlwaysPoison(data_, 0xdb, computedSizeOfData(), MemCheckKind::MakeNoAccess);
-    fop->free_(data_);
+    size_t size = computedSizeOfData();
+    AlwaysPoison(data_, 0xdb, size, MemCheckKind::MakeNoAccess);
+    fop->free_(this, data_, size, MemoryUse::ScriptPrivateData);
   }
 
   freeScriptData();
@@ -4701,9 +4687,9 @@ void JSScript::destroyDebugScript(FreeOp* fop) {
   }
 }
 
-bool JSScript::ensureHasDebugScript(JSContext* cx) {
+DebugScript* JSScript::getOrCreateDebugScript(JSContext* cx) {
   if (hasDebugScript()) {
-    return true;
+    return debugScript();
   }
 
   size_t nbytes =
@@ -4711,22 +4697,23 @@ bool JSScript::ensureHasDebugScript(JSContext* cx) {
   UniqueDebugScript debug(
       reinterpret_cast<DebugScript*>(cx->pod_calloc<uint8_t>(nbytes)));
   if (!debug) {
-    return false;
+    return nullptr;
   }
 
   /* Create realm's debugScriptMap if necessary. */
   if (!realm()->debugScriptMap) {
     auto map = cx->make_unique<DebugScriptMap>();
     if (!map) {
-      return false;
+      return nullptr;
     }
 
     realm()->debugScriptMap = std::move(map);
   }
 
+  DebugScript* borrowed = debug.get();
   if (!realm()->debugScriptMap->putNew(this, std::move(debug))) {
     ReportOutOfMemory(cx);
-    return false;
+    return nullptr;
   }
 
   setFlag(MutableFlags::HasDebugScript);  // safe to set this;  we can't fail
@@ -4743,57 +4730,58 @@ bool JSScript::ensureHasDebugScript(JSContext* cx) {
     }
   }
 
-  return true;
+  return borrowed;
 }
 
-void JSScript::setNewStepMode(FreeOp* fop, uint32_t newValue) {
-  DebugScript* debug = debugScript();
-  uint32_t prior = debug->stepMode;
-  debug->stepMode = newValue;
-
-  if (!prior != !newValue) {
-    if (hasBaselineScript()) {
-      baseline->toggleDebugTraps(this, nullptr);
-    }
-
-    if (!stepModeEnabled() && !debug->numSites) {
-      fop->free_(releaseDebugScript());
-    }
-  }
-}
-
-bool JSScript::incrementStepModeCount(JSContext* cx) {
+bool JSScript::incrementStepperCount(JSContext* cx) {
   cx->check(this);
   MOZ_ASSERT(cx->realm()->isDebuggee());
 
   AutoRealm ar(cx, this);
 
-  if (!ensureHasDebugScript(cx)) {
+  DebugScript* debug = getOrCreateDebugScript(cx);
+  if (!debug) {
     return false;
   }
 
-  DebugScript* debug = debugScript();
-  uint32_t count = debug->stepMode;
-  setNewStepMode(cx->runtime()->defaultFreeOp(), count + 1);
+  debug->stepperCount++;
+
+  if (debug->stepperCount == 1) {
+    if (hasBaselineScript()) {
+      baseline->toggleDebugTraps(this, nullptr);
+    }
+  }
+
   return true;
 }
 
-void JSScript::decrementStepModeCount(FreeOp* fop) {
+void JSScript::decrementStepperCount(FreeOp* fop) {
   DebugScript* debug = debugScript();
-  uint32_t count = debug->stepMode;
-  MOZ_ASSERT(count > 0);
-  setNewStepMode(fop, count - 1);
+  MOZ_ASSERT(debug);
+  MOZ_ASSERT(debug->stepperCount > 0);
+
+  debug->stepperCount--;
+
+  if (debug->stepperCount == 0) {
+    if (hasBaselineScript()) {
+      baseline->toggleDebugTraps(this, nullptr);
+    }
+
+    if (!debug->needed()) {
+      fop->free_(releaseDebugScript());
+    }
+  }
 }
 
 BreakpointSite* JSScript::getOrCreateBreakpointSite(JSContext* cx,
                                                     jsbytecode* pc) {
   AutoRealm ar(cx, this);
 
-  if (!ensureHasDebugScript(cx)) {
+  DebugScript* debug = getOrCreateDebugScript(cx);
+  if (!debug) {
     return nullptr;
   }
 
-  DebugScript* debug = debugScript();
   BreakpointSite*& site = debug->breakpoints[pcToOffset(pc)];
 
   if (!site) {
@@ -4815,7 +4803,8 @@ void JSScript::destroyBreakpointSite(FreeOp* fop, jsbytecode* pc) {
   fop->delete_(site);
   site = nullptr;
 
-  if (--debug->numSites == 0 && !stepModeEnabled()) {
+  debug->numSites--;
+  if (!debug->needed()) {
     fop->free_(releaseDebugScript());
   }
 }
@@ -4945,7 +4934,12 @@ void JSScript::traceChildren(JSTracer* trc) {
   }
 }
 
-void LazyScript::finalize(FreeOp* fop) { fop->free_(lazyData_); }
+void LazyScript::finalize(FreeOp* fop) {
+  if (lazyData_) {
+    fop->free_(this, lazyData_, lazyData_->allocationSize(),
+               MemoryUse::LazyScriptData);
+  }
+}
 
 size_t JSScript::calculateLiveFixed(jsbytecode* pc) {
   size_t nlivefixed = numAlwaysLiveFixedSlots();
@@ -5179,6 +5173,10 @@ bool JSScript::formalLivesInArgumentsObject(unsigned argSlot) {
   return size;
 }
 
+inline size_t LazyScriptData::allocationSize() const {
+  return AllocationSize(numClosedOverBindings_, numInnerFunctions_);
+}
+
 // Placement-new elements of an array. This should optimize away for types with
 // trivial default initiation.
 template <typename T>
@@ -5274,6 +5272,10 @@ LazyScript::LazyScript(JSFunction* fun, ScriptSourceObject& sourceObject,
   MOZ_ASSERT(function_->compartment() == sourceObject_->compartment());
   MOZ_ASSERT(sourceStart <= sourceEnd);
   MOZ_ASSERT(toStringStart <= sourceStart);
+
+  if (data) {
+    AddCellMemory(this, data->allocationSize(), MemoryUse::LazyScriptData);
+  }
 }
 
 void LazyScript::initScript(JSScript* script) {
@@ -5426,25 +5428,30 @@ LazyScript* LazyScript::CreateForXDR(
 
 void JSScript::updateJitCodeRaw(JSRuntime* rt) {
   MOZ_ASSERT(rt);
+  uint8_t* jitCodeSkipArgCheck;
   if (hasBaselineScript() && baseline->hasPendingIonBuilder()) {
     MOZ_ASSERT(!isIonCompilingOffThread());
     jitCodeRaw_ = rt->jitRuntime()->lazyLinkStub().value;
-    jitCodeSkipArgCheck_ = jitCodeRaw_;
+    jitCodeSkipArgCheck = jitCodeRaw_;
   } else if (hasIonScript()) {
     jitCodeRaw_ = ion->method()->raw();
-    jitCodeSkipArgCheck_ = jitCodeRaw_ + ion->getSkipArgCheckEntryOffset();
+    jitCodeSkipArgCheck = jitCodeRaw_ + ion->getSkipArgCheckEntryOffset();
   } else if (hasBaselineScript()) {
     jitCodeRaw_ = baseline->method()->raw();
-    jitCodeSkipArgCheck_ = jitCodeRaw_;
+    jitCodeSkipArgCheck = jitCodeRaw_;
   } else if (jitScript() && js::jit::JitOptions.baselineInterpreter) {
     jitCodeRaw_ = rt->jitRuntime()->baselineInterpreter().codeRaw();
-    jitCodeSkipArgCheck_ = jitCodeRaw_;
+    jitCodeSkipArgCheck = jitCodeRaw_;
   } else {
     jitCodeRaw_ = rt->jitRuntime()->interpreterStub().value;
-    jitCodeSkipArgCheck_ = jitCodeRaw_;
+    jitCodeSkipArgCheck = jitCodeRaw_;
   }
   MOZ_ASSERT(jitCodeRaw_);
-  MOZ_ASSERT(jitCodeSkipArgCheck_);
+  MOZ_ASSERT(jitCodeSkipArgCheck);
+
+  if (jitScript_) {
+    jitScript_->jitCodeSkipArgCheck_ = jitCodeSkipArgCheck;
+  }
 }
 
 bool JSScript::hasLoops() {

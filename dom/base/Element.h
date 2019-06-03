@@ -460,7 +460,7 @@ class Element : public FragmentOrElement {
     }
   }
 
-  bool GetBindingURL(Document* aDocument, css::URLValue** aResult);
+  mozilla::StyleUrlOrNone GetBindingURL(Document* aDocument);
 
   Directionality GetComputedDirectionality() const;
 
@@ -653,10 +653,9 @@ class Element : public FragmentOrElement {
 
   void UpdateEditableState(bool aNotify) override;
 
-  nsresult BindToTree(Document* aDocument, nsIContent* aParent,
-                      nsIContent* aBindingParent) override;
+  nsresult BindToTree(BindContext&, nsINode& aParent) override;
 
-  void UnbindFromTree(bool aDeep = true, bool aNullParent = true) override;
+  void UnbindFromTree(bool aNullParent = true) override;
 
   /**
    * Normalizes an attribute name and returns it as a nodeinfo if an attribute

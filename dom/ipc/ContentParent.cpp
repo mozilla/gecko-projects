@@ -206,7 +206,6 @@
 #include "mozilla/net/NeckoMessageUtils.h"
 #include "gfxPlatform.h"
 #include "gfxPlatformFontList.h"
-#include "gfxPrefs.h"
 #include "prio.h"
 #include "private/pprio.h"
 #include "ContentProcessManager.h"
@@ -217,6 +216,7 @@
 #include "nsPluginHost.h"
 #include "nsPluginTags.h"
 #include "nsIBlocklistService.h"
+#include "nsITrackingDBService.h"
 #include "mozilla/StyleSheet.h"
 #include "mozilla/StyleSheetInlines.h"
 #include "nsICaptivePortalService.h"
@@ -224,6 +224,8 @@
 #include "nsIBidiKeyboard.h"
 #include "nsLayoutStylesheetCache.h"
 #include "MMPrinter.h"
+#include "nsStreamUtils.h"
+#include "nsIAsyncInputStream.h"
 
 #include "mozilla/Sprintf.h"
 
@@ -1204,7 +1206,8 @@ already_AddRefed<RemoteBrowser> ContentParent::CreateBrowser(
         std::move(childEp), tabId,
         aSameTabGroupAs ? aSameTabGroupAs->GetTabId() : TabId(0),
         aContext.AsIPCTabContext(), aBrowsingContext, chromeFlags,
-        constructorSender->ChildID(), constructorSender->IsForBrowser());
+        constructorSender->ChildID(), constructorSender->IsForBrowser(),
+        /* aIsTopLevel */ true);
     if (NS_WARN_IF(!ok)) {
       return nullptr;
     }
@@ -2957,30 +2960,8 @@ ContentParent::Observe(nsISupports* aSubject, const char* aTopic,
 
   if (!strcmp(aTopic, "nsPref:changed")) {
     // A pref changed. If it's not on the blacklist, inform child processes.
-#define BLACKLIST_ENTRY(s) \
-  { s, (sizeof(s) / sizeof(char16_t)) - 1 }
-    struct BlacklistEntry {
-      const char16_t* mPrefBranch;
-      size_t mLen;
-    };
-    // These prefs are not useful in child processes.
-    static const BlacklistEntry sContentPrefBranchBlacklist[] = {
-        BLACKLIST_ENTRY(u"app.update.lastUpdateTime."),
-        BLACKLIST_ENTRY(u"datareporting.policy."),
-        BLACKLIST_ENTRY(u"browser.safebrowsing.provider."),
-        BLACKLIST_ENTRY(u"browser.shell."),
-        BLACKLIST_ENTRY(u"browser.slowstartup."),
-        BLACKLIST_ENTRY(u"extensions.getAddons.cache."),
-        BLACKLIST_ENTRY(u"media.gmp-manager."),
-        BLACKLIST_ENTRY(u"media.gmp-gmpopenh264."),
-        BLACKLIST_ENTRY(u"privacy.sanitize."),
-    };
-#undef BLACKLIST_ENTRY
-
-    for (const auto& entry : sContentPrefBranchBlacklist) {
-      if (NS_strncmp(entry.mPrefBranch, aData, entry.mLen) == 0) {
-        return NS_OK;
-      }
+    if (!ShouldSyncPreference(aData)) {
+      return NS_OK;
     }
 
     // We know prefs are ASCII here.
@@ -3126,6 +3107,37 @@ ContentParent::Observe(nsISupports* aSubject, const char* aTopic,
   }
 
   return NS_OK;
+}
+
+/* static */
+bool ContentParent::ShouldSyncPreference(const char16_t* aData) {
+#define BLACKLIST_ENTRY(s) \
+  { s, (sizeof(s) / sizeof(char16_t)) - 1 }
+  struct BlacklistEntry {
+    const char16_t* mPrefBranch;
+    size_t mLen;
+  };
+  // These prefs are not useful in child processes.
+  static const BlacklistEntry sContentPrefBranchBlacklist[] = {
+      BLACKLIST_ENTRY(u"app.update.lastUpdateTime."),
+      BLACKLIST_ENTRY(u"datareporting.policy."),
+      BLACKLIST_ENTRY(u"browser.safebrowsing.provider."),
+      BLACKLIST_ENTRY(u"browser.shell."),
+      BLACKLIST_ENTRY(u"browser.slowStartup."),
+      BLACKLIST_ENTRY(u"browser.startup."),
+      BLACKLIST_ENTRY(u"extensions.getAddons.cache."),
+      BLACKLIST_ENTRY(u"media.gmp-manager."),
+      BLACKLIST_ENTRY(u"media.gmp-gmpopenh264."),
+      BLACKLIST_ENTRY(u"privacy.sanitize."),
+  };
+#undef BLACKLIST_ENTRY
+
+  for (const auto& entry : sContentPrefBranchBlacklist) {
+    if (NS_strncmp(entry.mPrefBranch, aData, entry.mLen) == 0) {
+      return false;
+    }
+  }
+  return true;
 }
 
 void ContentParent::UpdateNetworkLinkType() {
@@ -5386,8 +5398,13 @@ nsresult ContentParent::AboutToLoadHttpFtpDocumentForChild(
       return NS_ERROR_FAILURE;
     }
 
+    nsCOMPtr<nsIPrincipal> storagePrincipal;
+    rv = ssm->GetChannelResultStoragePrincipal(
+        aChannel, getter_AddRefs(storagePrincipal));
+    NS_ENSURE_SUCCESS(rv, rv);
+
     nsCOMPtr<nsISupports> dummy;
-    rv = lsm->Preload(principal, nullptr, getter_AddRefs(dummy));
+    rv = lsm->Preload(storagePrincipal, nullptr, getter_AddRefs(dummy));
     if (NS_FAILED(rv)) {
       NS_WARNING("Failed to preload local storage!");
     }
@@ -5481,6 +5498,26 @@ mozilla::ipc::IPCResult ContentParent::RecvRecordOrigin(
     const uint32_t& aMetricId, const nsCString& aOrigin) {
   Telemetry::RecordOrigin(static_cast<Telemetry::OriginMetricID>(aMetricId),
                           aOrigin);
+  return IPC_OK();
+}
+
+mozilla::ipc::IPCResult ContentParent::RecvReportContentBlockingLog(
+    const Principal& aPrincipal, const IPCStream& aIPCStream) {
+  nsCOMPtr<nsITrackingDBService> trackingDBService =
+      do_GetService("@mozilla.org/tracking-db-service;1");
+  if (NS_WARN_IF(!trackingDBService)) {
+    return IPC_FAIL_NO_REASON(this);
+  }
+
+  nsCOMPtr<nsIPrincipal> principal(aPrincipal);
+  nsCOMPtr<nsIInputStream> stream = DeserializeIPCStream(aIPCStream);
+  nsCOMPtr<nsIAsyncInputStream> asyncStream;
+  nsresult rv = NS_MakeAsyncNonBlockingInputStream(stream.forget(),
+                                                   getter_AddRefs(asyncStream));
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return IPC_FAIL_NO_REASON(this);
+  }
+  trackingDBService->RecordContentBlockingLog(principal, asyncStream);
   return IPC_OK();
 }
 
@@ -5812,7 +5849,7 @@ mozilla::ipc::IPCResult ContentParent::RecvCacheBrowsingContextChildren(
 }
 
 mozilla::ipc::IPCResult ContentParent::RecvRestoreBrowsingContextChildren(
-    BrowsingContext* aContext, nsTArray<BrowsingContextId>&& aChildren) {
+    BrowsingContext* aContext, BrowsingContext::Children&& aChildren) {
   if (!aContext) {
     MOZ_LOG(BrowsingContext::GetLog(), LogLevel::Debug,
             ("ParentIPC: Trying to restore already detached"));
@@ -5832,14 +5869,7 @@ mozilla::ipc::IPCResult ContentParent::RecvRestoreBrowsingContextChildren(
     return IPC_OK();
   }
 
-  BrowsingContext::Children children(aChildren.Length());
-
-  for (auto id : aChildren) {
-    RefPtr<BrowsingContext> child = BrowsingContext::Get(id);
-    children.AppendElement(child);
-  }
-
-  aContext->RestoreChildren(std::move(children), /* aFromIPC */ true);
+  aContext->RestoreChildren(std::move(aChildren), /* aFromIPC */ true);
 
   aContext->Group()->EachOtherParent(this, [&](ContentParent* aParent) {
     Unused << aParent->SendRestoreBrowsingContextChildren(aContext, aChildren);

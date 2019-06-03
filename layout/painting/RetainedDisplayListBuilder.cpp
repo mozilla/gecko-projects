@@ -8,7 +8,7 @@
 #include "RetainedDisplayListBuilder.h"
 
 #include "DisplayListChecker.h"
-#include "gfxPrefs.h"
+#include "mozilla/StaticPrefs.h"
 #include "nsPlaceholderFrame.h"
 #include "nsSubDocumentFrame.h"
 #include "nsViewManager.h"
@@ -130,8 +130,9 @@ bool RetainedDisplayListBuilder::PreProcessDisplayList(
   // list build if we hit them.
   static const uint32_t kMaxEdgeRatio = 5;
   const bool initializeDAG = !aList->mDAG.Length();
-  if (!aKeepLinked && !initializeDAG && aList->mDAG.mDirectPredecessorList.Length() >
-                            (aList->mDAG.mNodesInfo.Length() * kMaxEdgeRatio)) {
+  if (!aKeepLinked && !initializeDAG &&
+      aList->mDAG.mDirectPredecessorList.Length() >
+          (aList->mDAG.mNodesInfo.Length() * kMaxEdgeRatio)) {
     return false;
   }
 
@@ -185,6 +186,11 @@ bool RetainedDisplayListBuilder::PreProcessDisplayList(
         MOZ_RELEASE_ASSERT(aList->mOldItems[i].mItem == item);
         aList->mOldItems[i].mItem = nullptr;
       }
+
+      if (item->IsGlassItem() && item == mBuilder.GetGlassDisplayItem()) {
+        mBuilder.ClearGlassDisplayItem();
+      }
+
       item->Destroy(&mBuilder);
 
       i++;
@@ -227,7 +233,9 @@ bool RetainedDisplayListBuilder::PreProcessDisplayList(
       if (!PreProcessDisplayList(
               item->GetChildren(), SelectAGRForFrame(f, aAGR), aUpdated,
               item->GetPerFrameKey(), aNestingDepth + 1, keepLinked)) {
-        MOZ_RELEASE_ASSERT(!aKeepLinked, "Can't early return since we need to move the out list back");
+        MOZ_RELEASE_ASSERT(
+            !aKeepLinked,
+            "Can't early return since we need to move the out list back");
         return false;
       }
     }
@@ -446,6 +454,17 @@ class MergeState {
           oldItem->SetBuildingRect(aNewItem->GetBuildingRect());
         }
 
+        if (destItem == aNewItem) {
+          if (oldItem->IsGlassItem() &&
+              oldItem == mBuilder->Builder()->GetGlassDisplayItem()) {
+            mBuilder->Builder()->ClearGlassDisplayItem();
+          }
+        }  // aNewItem can't be the glass item on the builder yet.
+
+        if (destItem->IsGlassItem()) {
+          mBuilder->Builder()->SetGlassDisplayItem(destItem);
+        }
+
         MergeChildLists(aNewItem, oldItem, destItem);
 
         AutoTArray<MergedListIndex, 2> directPredecessors =
@@ -462,6 +481,9 @@ class MergeState {
       }
     }
     mResultIsModified = true;
+    if (aNewItem->IsGlassItem()) {
+      mBuilder->Builder()->SetGlassDisplayItem(aNewItem);
+    }
     return Some(AddNewNode(aNewItem, Nothing(), Span<MergedListIndex>(),
                            aPreviousItem));
   }
@@ -635,6 +657,11 @@ class MergeState {
                       nsTArray<MergedListIndex>&& aDirectPredecessors) {
     nsDisplayItem* item = mOldItems[aNode.val].mItem;
     if (mOldItems[aNode.val].IsChanged() || HasModifiedFrame(item)) {
+      if (item && item->IsGlassItem() &&
+          item == mBuilder->Builder()->GetGlassDisplayItem()) {
+        mBuilder->Builder()->ClearGlassDisplayItem();
+      }
+
       mOldItems[aNode.val].Discard(mBuilder, std::move(aDirectPredecessors));
       mResultIsModified = true;
     } else {
@@ -1201,9 +1228,10 @@ static void AddFramesForContainingBlock(nsIFrame* aBlock,
 // ancestors must also be visited).
 static void FindContainingBlocks(nsIFrame* aFrame,
                                  nsTArray<nsIFrame*>& aExtraFrames) {
-  for (nsIFrame* f = aFrame; f;
-       f = nsLayoutUtils::GetDisplayListParent(f)) {
-    if (f->ForceDescendIntoIfVisible()) return;
+  for (nsIFrame* f = aFrame; f; f = nsLayoutUtils::GetDisplayListParent(f)) {
+    if (f->ForceDescendIntoIfVisible()) {
+      return;
+    }
     f->SetForceDescendIntoIfVisible(true);
     CRR_LOG("Considering OOFs for %p\n", f);
 
@@ -1278,7 +1306,7 @@ bool RetainedDisplayListBuilder::ComputeRebuildRegion(
  * A simple early exit heuristic to avoid slow partial display list rebuilds.
  */
 static bool ShouldBuildPartial(nsTArray<nsIFrame*>& aModifiedFrames) {
-  if (aModifiedFrames.Length() > gfxPrefs::LayoutRebuildFrameLimit()) {
+  if (aModifiedFrames.Length() > StaticPrefs::LayoutRebuildFrameLimit()) {
     return false;
   }
 

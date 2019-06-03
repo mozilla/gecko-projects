@@ -758,8 +758,7 @@ ModuleObject* ModuleObject::create(JSContext* cx) {
 
   self->initReservedSlot(ImportBindingsSlot, PrivateValue(bindings));
 
-  FunctionDeclarationVector* funDecls =
-      cx->new_<FunctionDeclarationVector>(cx->zone());
+  FunctionDeclarationVector* funDecls = cx->new_<FunctionDeclarationVector>();
   if (!funDecls) {
     return nullptr;
   }
@@ -1057,9 +1056,8 @@ bool ModuleObject::execute(JSContext* cx, HandleModuleObject self,
   // The top-level script if a module is only ever executed once. Clear the
   // reference at exit to prevent us keeping this alive unnecessarily. This is
   // kept while executing so it is available to the debugger.
-  auto guardA = mozilla::MakeScopeExit([&] {
-      self->setReservedSlot(ScriptSlot, UndefinedValue());
-    });
+  auto guardA = mozilla::MakeScopeExit(
+      [&] { self->setReservedSlot(ScriptSlot, UndefinedValue()); });
 
   RootedModuleEnvironmentObject scope(cx, self->environment());
   if (!scope) {

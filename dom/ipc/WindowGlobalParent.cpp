@@ -75,7 +75,7 @@ void WindowGlobalParent::Init(const WindowGlobalInit& aInit) {
   entry.OrInsert([&] { return this; });
 
   // Determine which content process the window global is coming from.
-  ContentParentId processId(0);
+  dom::ContentParentId processId(0);
   if (!mInProcess) {
     processId = static_cast<ContentParent*>(Manager()->Manager())->ChildID();
   }
@@ -98,7 +98,7 @@ void WindowGlobalParent::Init(const WindowGlobalInit& aInit) {
   if (mInProcess) {
     // In the in-process case, we can get it from the other side's
     // WindowGlobalChild.
-    MOZ_ASSERT(Manager()->GetProtocolTypeId() == PInProcessMsgStart);
+    MOZ_ASSERT(Manager()->GetProtocolId() == PInProcessMsgStart);
     RefPtr<WindowGlobalChild> otherSide = GetChildActor();
     if (otherSide && otherSide->WindowGlobal()) {
       // Get the toplevel window from the other side.
@@ -110,7 +110,7 @@ void WindowGlobalParent::Init(const WindowGlobalInit& aInit) {
     }
   } else {
     // In the cross-process case, we can get the frame element from our manager.
-    MOZ_ASSERT(Manager()->GetProtocolTypeId() == PBrowserMsgStart);
+    MOZ_ASSERT(Manager()->GetProtocolId() == PBrowserMsgStart);
     frameElement = static_cast<BrowserParent*>(Manager())->GetOwnerElement();
   }
 
@@ -149,6 +149,23 @@ already_AddRefed<BrowserParent> WindowGlobalParent::GetBrowserParent() {
     return nullptr;
   }
   return do_AddRef(static_cast<BrowserParent*>(Manager()));
+}
+
+uint64_t WindowGlobalParent::ContentParentId() {
+  RefPtr<BrowserParent> browserParent = GetBrowserParent();
+  return browserParent ? browserParent->Manager()->ChildID() : 0;
+}
+
+// A WindowGlobalPaernt is the root in its process if it has no parent, or its
+// embedder is in a different process.
+bool WindowGlobalParent::IsProcessRoot() {
+  if (!BrowsingContext()->GetParent()) {
+    return true;
+  }
+
+  auto* embedder = BrowsingContext()->GetEmbedderWindowGlobal();
+  MOZ_ASSERT(embedder, "This should be set before we were created");
+  return ContentParentId() != embedder->ContentParentId();
 }
 
 IPCResult WindowGlobalParent::RecvUpdateDocumentURI(nsIURI* aURI) {

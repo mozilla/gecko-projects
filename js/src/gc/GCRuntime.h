@@ -31,6 +31,7 @@ class AutoLockGC;
 class AutoLockGCBgAlloc;
 class AutoLockHelperThreadState;
 class VerifyPreTracer;
+class ZoneAllocator;
 
 namespace gc {
 
@@ -84,11 +85,19 @@ class ChunkPool {
   void push(Chunk* chunk);
   Chunk* remove(Chunk* chunk);
 
+  void sort();
+
+ private:
+  Chunk* mergeSort(Chunk* list, size_t count);
+  bool isSorted() const;
+
 #ifdef DEBUG
+ public:
   bool contains(Chunk* chunk) const;
   bool verify() const;
 #endif
 
+ public:
   // Pool mutation does not invalidate an Iter unless the mutation
   // is of the Chunk currently being visited by the Iter.
   class Iter {
@@ -225,6 +234,8 @@ class ZoneList {
 };
 
 class GCRuntime {
+  friend GCMarker::MarkQueueProgress GCMarker::processMarkQueue();
+
  public:
   explicit GCRuntime(JSRuntime* rt);
   MOZ_MUST_USE bool init(uint32_t maxbytes, uint32_t maxNurseryBytes);
@@ -247,7 +258,9 @@ class GCRuntime {
   uint32_t getParameter(JSGCParamKey key, const AutoLockGC& lock);
 
   MOZ_MUST_USE bool triggerGC(JS::GCReason reason);
-  void maybeAllocTriggerZoneGC(Zone* zone);
+  // Check whether to trigger a zone GC. During an incremental GC, optionally
+  // count |nbytes| towards the threshold for performing the next slice.
+  void maybeAllocTriggerZoneGC(Zone* zone, size_t nbytes = 0);
   // The return value indicates if we were able to do the GC.
   bool triggerZoneGC(Zone* zone, JS::GCReason reason, size_t usedBytes,
                      size_t thresholdBytes);
@@ -395,6 +408,9 @@ class GCRuntime {
   void setFullCompartmentChecks(bool enable);
 
   JS::Zone* getCurrentSweepGroup() { return currentSweepGroup; }
+  unsigned getCurrentSweepGroupIndex() {
+    return state() == State::Sweep ? sweepGroupIndex : 0;
+  }
 
   uint64_t gcNumber() const { return number; }
 
@@ -606,12 +622,15 @@ class GCRuntime {
                                                gcstats::PhaseKind phase);
   void drainMarkStack();
   template <class ZoneIterT>
-  void markWeakReferences(gcstats::PhaseKind phase);
-  void markWeakReferencesInCurrentGroup(gcstats::PhaseKind phase);
+  IncrementalProgress markWeakReferences(gcstats::PhaseKind phase,
+                                         SliceBudget& budget);
+  IncrementalProgress markWeakReferencesInCurrentGroup(gcstats::PhaseKind phase,
+                                                       SliceBudget& budget);
   template <class ZoneIterT>
   void markGrayRoots(gcstats::PhaseKind phase);
   void markBufferedGrayRoots(JS::Zone* zone);
-  void markAllWeakReferences(gcstats::PhaseKind phase);
+  IncrementalProgress markAllWeakReferences(gcstats::PhaseKind phase,
+                                            SliceBudget& budget);
   void markAllGrayReferences(gcstats::PhaseKind phase);
 
   void beginSweepPhase(JS::GCReason reason, AutoGCSession& session);
@@ -640,7 +659,7 @@ class GCRuntime {
   void endSweepPhase(bool lastGC);
   bool allCCVisibleZonesWereCollected() const;
   void sweepZones(FreeOp* fop, bool destroyingRuntime);
-  void decommitAllWithoutUnlocking(const AutoLockGC& lock);
+  void decommitFreeArenasWithoutUnlocking(const AutoLockGC& lock);
   void startDecommit();
   void queueZonesAndStartBackgroundSweep(ZoneList& zones);
   void sweepFromBackgroundThread(AutoLockHelperThreadState& lock);

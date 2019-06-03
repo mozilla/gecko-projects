@@ -34,6 +34,8 @@
 #include "LayerState.h"
 #include "FrameMetrics.h"
 #include "ImgDrawResult.h"
+#include "mozilla/dom/EffectsInfo.h"
+#include "mozilla/dom/RemoteBrowser.h"
 #include "mozilla/EffectCompositor.h"
 #include "mozilla/EnumeratedArray.h"
 #include "mozilla/UniquePtr.h"
@@ -429,6 +431,9 @@ class nsDisplayListBuilder {
   typedef mozilla::gfx::CompositorHitTestInfo CompositorHitTestInfo;
   typedef mozilla::gfx::Matrix4x4 Matrix4x4;
   typedef mozilla::Maybe<mozilla::layers::ScrollDirection> MaybeScrollDirection;
+  typedef mozilla::dom::EffectsInfo EffectsInfo;
+  typedef mozilla::layers::LayersId LayersId;
+  typedef mozilla::dom::RemoteBrowser RemoteBrowser;
 
   /**
    * @param aReferenceFrame the frame at the root of the subtree; its origin
@@ -1040,6 +1045,15 @@ class nsDisplayListBuilder {
   void RemoveModifiedWindowRegions();
   void ClearRetainedWindowRegions();
 
+  const nsDataHashtable<nsPtrHashKey<RemoteBrowser>, EffectsInfo>&
+  GetEffectUpdates() const {
+    return mEffectsUpdates;
+  }
+
+  void AddEffectUpdate(RemoteBrowser* aBrowser, EffectsInfo aUpdate) {
+    mEffectsUpdates.Put(aBrowser, aUpdate);
+  }
+
   /**
    * Allocate memory in our arena. It will only be freed when this display list
    * builder is destroyed. This memory holds nsDisplayItems. nsDisplayItem
@@ -1602,17 +1616,9 @@ class nsDisplayListBuilder {
    */
   void ClearWindowOpaqueRegion() { mWindowOpaqueRegion.SetEmpty(); }
 
-  void SetGlassDisplayItem(nsDisplayItem* aItem) {
-    if (mGlassDisplayItem) {
-      // Web pages or extensions could trigger this by using
-      // -moz-appearance:win-borderless-glass etc on their own elements.
-      // Keep the first one, since that will be the background of the root
-      // window
-      NS_WARNING("Multiple glass backgrounds found?");
-    } else {
-      mGlassDisplayItem = aItem;
-    }
-  }
+  void SetGlassDisplayItem(nsDisplayItem* aItem);
+  void ClearGlassDisplayItem() { mGlassDisplayItem = nullptr; }
+  nsDisplayItem* GetGlassDisplayItem() { return mGlassDisplayItem; }
 
   bool NeedToForceTransparentSurfaceForItem(nsDisplayItem* aItem);
 
@@ -1903,6 +1909,8 @@ class nsDisplayListBuilder {
 
   nsTArray<nsIFrame*> mModifiedFramesDuringBuilding;
 
+  nsDataHashtable<nsPtrHashKey<RemoteBrowser>, EffectsInfo> mEffectsUpdates;
+
   // Relative to mCurrentFrame.
   nsRect mVisibleRect;
   nsRect mDirtyRect;
@@ -1920,7 +1928,12 @@ class nsDisplayListBuilder {
   nsRegion mWindowOpaqueRegion;
 
   // The display item for the Windows window glass background, if any
+  // Set during full display list builds or during display list merging only,
+  // partial display list builds don't touch this.
   nsDisplayItem* mGlassDisplayItem;
+  // If we've encountered a glass item yet, only used during partial display
+  // list builds.
+  bool mHasGlassItemDuringPartial;
   // A temporary list that we append scroll info items to while building
   // display items for the contents of frames with SVG effects.
   // Only non-null when ShouldBuildScrollInfoItemsForHoisting() is true.
@@ -2731,6 +2744,9 @@ class nsDisplayItem : public nsDisplayItemBase {
   void SetPainted() { mItemFlags += ItemFlag::Painted; }
 #endif
 
+  void SetIsGlassItem() { mItemFlags += ItemFlag::IsGlassItem; }
+  bool IsGlassItem() { return mItemFlags.contains(ItemFlag::IsGlassItem); }
+
   /**
    * Function to create the WebRenderCommands.
    * We should check if the layer state is
@@ -3048,6 +3064,7 @@ class nsDisplayItem : public nsDisplayItemBase {
     DisableSubpixelAA,
     ForceNotVisible,
     PaintRectValid,
+    IsGlassItem,
 #ifdef MOZ_DUMP_PAINTING
     // True if this frame has been painted.
     Painted,

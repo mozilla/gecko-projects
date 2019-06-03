@@ -76,8 +76,6 @@ pref("browser.cache.frecency_half_life_hours", 6);
 // and files are left open given up to the OS to do the cleanup.
 pref("browser.cache.max_shutdown_io_lag", 2);
 
-pref("browser.cache.offline.enable",           true);
-
 // AppCache over insecure connection is disabled by default
 pref("browser.cache.offline.insecure.enable",  false);
 
@@ -175,17 +173,6 @@ pref("dom.performance.time_to_first_interactive.enabled", false);
 // disable the Pointer Lock API altogether.
 pref("dom.pointer-lock.enabled", true);
 
-// Whether the Gamepad API is enabled
-pref("dom.gamepad.enabled", true);
-pref("dom.gamepad.test.enabled", false);
-#ifdef RELEASE_OR_BETA
-pref("dom.gamepad.non_standard_events.enabled", false);
-#else
-pref("dom.gamepad.non_standard_events.enabled", true);
-#endif
-pref("dom.gamepad.extensions.enabled", true);
-pref("dom.gamepad.haptic_feedback.enabled", true);
-
 // If this is true, TextEventDispatcher dispatches keydown and keyup events
 // even during composition (keypress events are never fired during composition
 // even if this is true).
@@ -229,9 +216,6 @@ pref("dom.inputevent.datatransfer.enabled", true);
 
 // Whether InputEvent.inputType is enabled.
 pref("dom.inputevent.inputtype.enabled", true);
-
-// Whether the WebMIDI API is enabled
-pref("dom.webmidi.enabled", false);
 
 #ifdef JS_BUILD_BINAST
 pref("dom.script_loader.binast_encoding.enabled", false);
@@ -403,6 +387,7 @@ pref("media.videocontrols.picture-in-picture.video-toggle.enabled", false);
 #endif
 pref("media.videocontrols.picture-in-picture.video-toggle.flyout-enabled", false);
 pref("media.videocontrols.picture-in-picture.video-toggle.flyout-wait-ms", 5000);
+pref("media.videocontrols.picture-in-picture.video-toggle.always-show", false);
 
 #ifdef MOZ_WEBRTC
 pref("media.navigator.video.enabled", true);
@@ -508,8 +493,6 @@ pref("media.getusermedia.agc", 1); // kAdaptiveDigital
 pref("media.navigator.audio.full_duplex", true);
 #endif
 
-pref("dom.webaudio.enabled", true);
-
 // Exposes the navigator.webdriver attribute.
 pref("dom.webdriver.enabled", true);
 
@@ -519,14 +502,8 @@ pref("media.getusermedia.screensharing.enabled", true);
 
 pref("media.getusermedia.audiocapture.enabled", false);
 
-// TextTrack WebVTT Region extension support.
-pref("media.webvtt.regions.enabled", true);
-
 // WebVTT pseudo element and class support.
 pref("media.webvtt.pseudo.enabled", true);
-
-// AudioTrack and VideoTrack support
-pref("media.track.enabled", false);
 
 // Whether to enable MediaSource support.
 pref("media.mediasource.enabled", true);
@@ -550,9 +527,6 @@ pref("media.benchmark.timeout", 1000);
 pref("media.media-capabilities.enabled", true);
 pref("media.media-capabilities.screen.enabled", false);
 
-#ifdef MOZ_WEBSPEECH
-pref("media.webspeech.synth.enabled", false);
-#endif
 #ifdef MOZ_WEBM_ENCODER
 pref("media.encoder.webm.enabled", true);
 #endif
@@ -627,7 +601,7 @@ pref("media.cubeb.sandbox", false);
 pref("media.audiograph.single_thread.enabled", false);
 
 #ifdef MOZ_AV1
-#if defined(XP_WIN) && !defined(_ARM64_)
+#if defined(XP_WIN) && !defined(_ARM64_) && !defined(__MINGW32__)
 pref("media.av1.enabled", true);
 pref("media.av1.use-dav1d", true);
 #elif defined(XP_MACOSX)
@@ -736,7 +710,7 @@ pref("apz.pinch_lock.mode", 1);
 pref("apz.pinch_lock.scoll_lock_threshold", "0.03125");  // 1/32 inches
 pref("apz.pinch_lock.span_breakout_threshold", "0.03125");  // 1/32 inches
 pref("apz.pinch_lock.span_lock_threshold", "0.03125");  // 1/32 inches
-pref("apz.pinch_lock.buffer_max_age", "50"); // milliseconds
+pref("apz.pinch_lock.buffer_max_age", 50); // milliseconds
 pref("apz.popups.enabled", false);
 pref("apz.relative-update.enabled", true);
 
@@ -929,7 +903,6 @@ pref("gfx.compositor.glcontext.opaque", false);
 
 pref("gfx.webrender.highlight-painted-layers", false);
 pref("gfx.webrender.blob-images", true);
-pref("gfx.webrender.blob.invalidation", true);
 pref("gfx.webrender.blob.paint-flashing", false);
 
 // WebRender debugging utilities.
@@ -991,9 +964,6 @@ pref("ui.scrollToClick", 0);
 pref("canvas.focusring.enabled", true);
 pref("canvas.hitregions.enabled", false);
 pref("canvas.filters.enabled", true);
-// Add support for canvas path objects
-pref("canvas.path.enabled", true);
-pref("canvas.capturestream.enabled", true);
 
 // We want the ability to forcibly disable platform a11y, because
 // some non-a11y-related components attempt to bring it up.  See bug
@@ -1256,6 +1226,7 @@ pref("editor.positioning.offset",            0);
 
 // Scripts & Windows prefs
 pref("dom.disable_beforeunload",            false);
+pref("dom.beforeunload_timeout_ms",         1000);
 pref("dom.disable_window_flip",             false);
 pref("dom.disable_window_move_resize",      false);
 
@@ -1572,8 +1543,6 @@ pref("javascript.options.spectre.jit_to_C++_calls", true);
 pref("javascript.options.streams", true);
 
 pref("javascript.options.experimental.fields", false);
-
-pref("javascript.options.experimental.await_fix", false);
 
 // Dynamic module import.
 pref("javascript.options.dynamicImport", true);
@@ -2357,8 +2326,6 @@ pref("network.proxy.no_proxies_on",         "");
 pref("network.proxy.allow_hijacking_localhost", false);
 pref("network.proxy.failover_timeout",      1800); // 30 minutes
 pref("network.online",                      true); //online/offline
-pref("network.cookie.thirdparty.sessionOnly", false);
-pref("network.cookie.thirdparty.nonsecureSessionOnly", false);
 
 // The interval in seconds to move the cookies in the child process.
 // Set to 0 to disable moving the cookies.
@@ -2680,7 +2647,7 @@ pref("security.allow_eval_with_system_principal", false);
 pref("security.uris_using_eval_with_system_principal", "autocomplete.xml,redux.js,react-redux.js,content-task.js,preferencesbindings.js,lodash.js,jszip.js,sinon-7.2.7.js,jsol.js");
 #endif
 
-#if defined(DEBUG) || defined(FUZZING)
+#ifdef EARLY_BETA_OR_EARLIER
 // Disallow web documents loaded with the SystemPrincipal
 pref("security.disallow_non_local_systemprincipal_in_tests", false);
 #endif
@@ -3069,15 +3036,6 @@ pref("layout.css.scroll-snap.prediction-max-velocity", 2000);
 // gestures.
 pref("layout.css.scroll-snap.prediction-sensitivity", "0.750");
 
-// Is support for DOMPoint enabled?
-pref("layout.css.DOMPoint.enabled", true);
-
-// Is support for DOMQuad enabled?
-pref("layout.css.DOMQuad.enabled", true);
-
-// Is support for DOMMatrix enabled?
-pref("layout.css.DOMMatrix.enabled", true);
-
 // Is support for GeometryUtils.convert*FromNode enabled?
 #ifdef RELEASE_OR_BETA
 pref("layout.css.convertFromNode.enabled", false);
@@ -3132,9 +3090,6 @@ pref("layout.css.scroll-behavior.spring-constant", "250.0");
 // When equal to 1.0, the system is critically-damped; it will reach the target
 // at the greatest speed without overshooting.
 pref("layout.css.scroll-behavior.damping-ratio", "1.0");
-
-// Is support for document.fonts enabled?
-pref("layout.css.font-loading-api.enabled", true);
 
 // Are inter-character ruby annotations enabled?
 pref("layout.css.ruby.intercharacter.enabled", false);
@@ -3347,13 +3302,17 @@ pref("dom.ipc.processCount.file", 1);
 // WebExtensions only support a single extension process.
 pref("dom.ipc.processCount.extension", 1);
 
-// Privileged content only supports a single content process.
-pref("dom.ipc.processCount.privileged", 1);
+// The privileged about process only supports a single content process.
+pref("dom.ipc.processCount.privilegedabout", 1);
 
-// Keep a single privileged content process alive for performance reasons.
+// Limit the privileged mozilla process to a single instance only
+// to avoid multiple of these content processes
+pref("dom.ipc.processCount.privilegedmozilla", 1);
+
+// Keep a single privileged about process alive for performance reasons.
 // e.g. we do not want to throw content processes out every time we navigate
 // away from about:newtab.
-pref("dom.ipc.keepProcessesAlive.privileged", 1);
+pref("dom.ipc.keepProcessesAlive.privilegedabout", 1);
 
 // Whether a native event loop should be used in the content process.
 #if defined(XP_WIN) || defined(XP_MACOSX)
@@ -3385,8 +3344,18 @@ pref("browser.tabs.remote.separateFileUriProcess", true);
 // content process, causes compatibility issues.
 pref("browser.tabs.remote.allowLinkedWebInFileUriProcess", true);
 
-// Pref to control whether we use separate privileged content processes.
+// Pref to control whether we use a separate privileged content process
+// for about: pages. This pref name did not age well: we will have multiple
+// types of privileged content processes, each with different privileges.
 pref("browser.tabs.remote.separatePrivilegedContentProcess", false);
+
+// Pref to control whether we use a separate privileged content process
+// for certain mozilla webpages (which are listed in the following pref).
+pref("browser.tabs.remote.separatePrivilegedMozillaWebContentProcess", false);
+
+// The domains we will isolate into the Mozilla Content Process. Comma-separated
+// full domains: any subdomains of the domains listed will also be allowed.
+pref("browser.tabs.remote.separatedMozillaDomains", "addons.mozilla.org,accounts.firefox.com");
 
 // When this pref is enabled top level loads with a mismatched
 // Cross-Origin-Opener-Policy header will be loaded in a separate process.
@@ -4731,6 +4700,7 @@ pref("signon.storeWhenAutocompleteOff",     true);
 pref("signon.debug",                        false);
 pref("signon.recipes.path",                 "chrome://passwordmgr/content/recipes.json");
 pref("signon.schemeUpgrades",               false);
+pref("signon.includeOtherSubdomainsInLookup", false);
 // This temporarily prevents the master password to reprompt for autocomplete.
 pref("signon.masterPasswordReprompt.timeout_ms", 900000); // 15 Minutes
 pref("signon.showAutoCompleteFooter", false);
@@ -4955,8 +4925,6 @@ pref("webgl.dxgl.enabled", true);
 pref("webgl.dxgl.needs-finish", false);
 #endif
 
-pref("dom.webgpu.enable", false);
-
 // sendbuffer of 0 means use OS default, sendbuffer unset means use
 // gecko default which varies depending on windows version and is OS
 // default on non windows
@@ -4999,12 +4967,17 @@ pref("layers.acceleration.disabled", false);
 // and output the result to stderr.
 pref("layers.bench.enabled", false);
 
-#if defined(XP_WIN)
+#if defined(XP_WIN) || defined(MOZ_WIDGET_GTK)
 pref("layers.gpu-process.enabled", true);
-pref("layers.gpu-process.allow-software", true);
 #ifdef NIGHTLY_BUILD
 pref("layers.gpu-process.max_restarts", 3);
 #endif
+#endif
+
+#if defined(XP_WIN)
+pref("layers.gpu-process.allow-software", true);
+#elif defined(MOZ_WIDGET_GTK)
+pref("layers.gpu-process.allow-software", false);
 #endif
 
 // Whether to force acceleration on, ignoring blacklists.
@@ -5099,7 +5072,6 @@ pref("gfx.apitrace.enabled",false);
 #ifdef MOZ_X11
 #ifdef MOZ_WIDGET_GTK
 pref("gfx.xrender.enabled",false);
-pref("widget.chrome.allow-gtk-dark-theme", false);
 pref("widget.content.allow-gtk-dark-theme", false);
 #endif
 #endif
@@ -5123,7 +5095,11 @@ pref("gfx.direct3d11.break-on-error", false);
 
 // Prefer flipping between two buffers over copying from our back buffer
 // to the OS.
+#ifdef NIGHTLY_BUILD
 pref("gfx.direct3d11.use-double-buffering", true);
+#else
+pref("gfx.direct3d11.use-double-buffering", false);
+#endif
 
 pref("layers.prefer-opengl", false);
 #endif
@@ -5142,10 +5118,6 @@ pref("geo.wifi.xhr.timeout", 60000);
 
 // Enable/Disable the various sensor APIs for content
 pref("device.sensors.enabled", true);
-pref("device.sensors.orientation.enabled", true);
-pref("device.sensors.motion.enabled", true);
-pref("device.sensors.proximity.enabled", false);
-pref("device.sensors.ambientLight.enabled", false);
 
 // Enable/Disable the device storage API for content
 pref("device.storage.enabled", false);
@@ -5179,13 +5151,8 @@ pref("extensions.webextensions.protocol.remote", true);
 // Enable tab hiding API by default.
 pref("extensions.webextensions.tabhide.enabled", true);
 
-#ifdef NIGHTLY_BUILD
-// Enable userScripts API by default on Nightly.
+// Enable userScripts API by default.
 pref("extensions.webextensions.userScripts.enabled", true);
-#else
-// Disable userScripts API by default on all other channels.
-pref("extensions.webextensions.userScripts.enabled", false);
-#endif
 
 pref("extensions.webextensions.background-delayed-startup", false);
 
@@ -5203,7 +5170,7 @@ pref("extensions.webextensions.performanceCountersMaxAge", 5000);
 // The HTML about:addons page.
 pref("extensions.htmlaboutaddons.enabled", false);
 // Whether to allow the inline options browser in HTML about:addons page.
-pref("extensions.htmlaboutaddons.inline-options.enabled", false);
+pref("extensions.htmlaboutaddons.inline-options.enabled", true);
 
 // Report Site Issue button
 // Note that on enabling the button in other release channels, make sure to
@@ -5323,13 +5290,6 @@ pref("dom.w3c_touch_events.enabled", 0);
 pref("dom.w3c_touch_events.enabled", 2);
 #endif
 
-// W3C draft pointer events
-#if !defined(ANDROID)
-pref("dom.w3c_pointer_events.enabled", true);
-#else
-pref("dom.w3c_pointer_events.enabled", false);
-#endif
-
 // Control firing WidgetMouseEvent by handling Windows pointer messages or mouse
 // messages.
 #if defined(XP_WIN)
@@ -5338,9 +5298,6 @@ pref("dom.w3c_pointer_events.dispatch_by_pointer_messages", false);
 
 // W3C pointer events draft
 pref("dom.w3c_pointer_events.implicit_capture", false);
-
-// W3C draft ImageCapture API
-pref("dom.imagecapture.enabled", false);
 
 // W3C MediaDevices devicechange event
 pref("media.ondevicechange.enabled", true);
@@ -5501,8 +5458,6 @@ pref("gfx.vr.osvr.clientKitLibPath", "");
 // When content is failing to submit frames on time or the lower level VR platform API's
 // are rejecting frames, it determines the rate at which RAF callbacks will be called.
 pref("dom.vr.display.rafMaxDuration", 50);
-// VR test system.
-pref("dom.vr.test.enabled", false);
 // Enable the VR Service, which interfaces with VR hardware in a separate thread
 pref("dom.vr.service.enabled", true);
 
@@ -5725,14 +5680,6 @@ pref("identity.fxaccounts.auth.uri", "https://api.accounts.firefox.com/v1");
 
 pref("beacon.enabled", true);
 
-// UDPSocket API
-pref("dom.udpsocket.enabled", false);
-
-// Presentation API
-pref("dom.presentation.enabled", false);
-pref("dom.presentation.controller.enabled", false);
-pref("dom.presentation.receiver.enabled", false);
-
 // Presentation Device
 pref("dom.presentation.tcp_server.debug", false);
 pref("dom.presentation.discovery.enabled", false);
@@ -5865,9 +5812,6 @@ pref("narrate.voice", " { \"default\": \"automatic\" }");
 // Only make voices that match content language available.
 pref("narrate.filter-voices", true);
 
-// HTML <dialog> element
-pref("dom.dialog_element.enabled", false);
-
 // Allow control characters appear in composition string.
 // When this is false, control characters except
 // CHARACTER TABULATION (horizontal tab) are removed from
@@ -5955,8 +5899,6 @@ pref("browser.sanitizer.loglevel", "Warn");
 // To disable blocking of auth prompts, set the limit to -1.
 pref("prompts.authentication_dialog_abuse_limit", 2);
 
-pref("dom.IntersectionObserver.enabled", true);
-
 // Whether module scripts (<script type="module">) are enabled for content.
 pref("dom.moduleScripts.enabled", true);
 
@@ -6029,10 +5971,6 @@ pref("general.document_open_conversion_depth_limit", 20);
 // documentElement and document.body are passive by default.
 pref("dom.event.default_to_passive_touch_listeners", true);
 
-// Enable clipboard readText() and writeText() by default
-pref("dom.events.asyncClipboard", true);
-// Disable clipboard read() and write() by default
-pref("dom.events.asyncClipboard.dataTransfer", false);
 // Should only be enabled in tests
 pref("dom.events.testing.asyncClipboard", false);
 

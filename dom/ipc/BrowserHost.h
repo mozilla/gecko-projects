@@ -55,9 +55,7 @@ class BrowserHost : public RemoteBrowser,
   ContentParent* GetContentParent() const {
     return mRoot ? mRoot->Manager() : nullptr;
   }
-  TabId GetTabId() const {
-    return mId;
-  }
+  TabId GetTabId() const { return mId; }
 
   BrowserHost* AsBrowserHost() override { return this; }
   BrowserBridgeHost* AsBrowserBridgeHost() override { return nullptr; }
@@ -91,6 +89,8 @@ class BrowserHost : public RemoteBrowser,
   void UpdateDimensions(const nsIntRect& aRect,
                         const ScreenIntSize& aSize) override;
 
+  void UpdateEffects(EffectsInfo aInfo) override;
+
  private:
   virtual ~BrowserHost() = default;
 
@@ -99,6 +99,7 @@ class BrowserHost : public RemoteBrowser,
   TabId mId;
   // The root BrowserParent of this remote browser
   RefPtr<BrowserParent> mRoot;
+  EffectsInfo mEffectsInfo;
 };
 
 }  // namespace dom

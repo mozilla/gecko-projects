@@ -8,6 +8,7 @@ const {XPCOMUtils} = ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm")
 const {Services} = ChromeUtils.import("resource://gre/modules/Services.jsm");
 
 XPCOMUtils.defineLazyModuleGetters(this, {
+  AppConstants: "resource://gre/modules/AppConstants.jsm",
   setTimeout: "resource://gre/modules/Timer.jsm",
   Downloads: "resource://gre/modules/Downloads.jsm",
   OfflineAppCacheHelper: "resource://gre/modules/offlineAppCache.jsm",
@@ -79,6 +80,24 @@ const CookieCleaner = {
     });
   },
 
+};
+
+const CertCleaner = {
+  deleteByHost(aHost, aOriginAttributes) {
+    let overrideService = Cc["@mozilla.org/security/certoverride;1"]
+                            .getService(Ci.nsICertOverrideService);
+    return new Promise(aResolve => {
+      overrideService.clearValidityOverride(aHost, -1);
+      aResolve();
+    });
+  },
+
+  deleteAll() {
+    return new Promise(aResolve => {
+      Cu.reportError("CertCleaner.deleteAll is not implemented");
+      aResolve();
+    });
+  },
 };
 
 const NetworkCacheCleaner = {
@@ -599,10 +618,16 @@ const StorageAccessCleaner = {
 
 const HistoryCleaner = {
   deleteByHost(aHost, aOriginAttributes) {
+    if (!AppConstants.MOZ_PLACES) {
+      return Promise.resolve();
+    }
     return PlacesUtils.history.removeByFilter({ host: "." + aHost });
   },
 
   deleteByRange(aFrom, aTo) {
+    if (!AppConstants.MOZ_PLACES) {
+      return Promise.resolve();
+    }
     return PlacesUtils.history.removeVisitsByFilter({
       beginDate: new Date(aFrom / 1000),
       endDate: new Date(aTo / 1000),
@@ -610,6 +635,9 @@ const HistoryCleaner = {
   },
 
   deleteAll() {
+    if (!AppConstants.MOZ_PLACES) {
+      return Promise.resolve();
+    }
     return PlacesUtils.history.clear();
   },
 };
@@ -818,6 +846,9 @@ const ReportsCleaner = {
 
 // Here the map of Flags-Cleaner.
 const FLAGS_MAP = [
+  { flag: Ci.nsIClearDataService.CLEAR_CERT_EXCEPTIONS,
+    cleaner: CertCleaner },
+
  { flag: Ci.nsIClearDataService.CLEAR_COOKIES,
    cleaner: CookieCleaner },
 

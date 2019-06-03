@@ -6,6 +6,7 @@
 
 #ifdef MOZ_WIDGET_GTK
 #  include <gtk/gtk.h>
+#  include <gdk/gdkx.h>
 #endif
 
 #include "ContentChild.h"
@@ -672,6 +673,11 @@ bool ContentChild::Init(MessageLoop* aIOLoop, base::ProcessId aParentPid,
   // their own children.
   if (recordreplay::IsMiddleman()) {
     SetMiddlemanIPCChannel(recordreplay::parent::ChannelToUIProcess());
+
+    // Eagerly mark this child as connected, as using another IPC channel will
+    // cause that channel's protocol to be marked as connected instead and
+    // prevent this one from being able to send IPDL messages.
+    ActorConnected();
   }
 
   if (!Open(aChannel, aParentPid, aIOLoop)) {
@@ -697,12 +703,15 @@ bool ContentChild::Init(MessageLoop* aIOLoop, base::ProcessId aParentPid,
   }
 
 #ifdef MOZ_X11
-  if (!gfxPlatform::IsHeadless()) {
+#  ifdef MOZ_WIDGET_GTK
+  if (GDK_IS_X11_DISPLAY(gdk_display_get_default()) &&
+      !gfxPlatform::IsHeadless()) {
     // Send the parent our X socket to act as a proxy reference for our X
     // resources.
     int xSocketFd = ConnectionNumber(DefaultXDisplay());
     SendBackUpXResources(FileDescriptor(xSocketFd));
   }
+#  endif
 #endif
 
   CrashReporterClient::InitSingleton(this);
@@ -957,8 +966,9 @@ nsresult ContentChild::ProvideWindowCommon(
       nullptr, openerBC, aName, BrowsingContext::Type::Content);
 
   TabContext newTabContext = aTabOpener ? *aTabOpener : TabContext();
-  RefPtr<BrowserChild> newChild = new BrowserChild(
-      this, tabId, tabGroup, newTabContext, browsingContext, aChromeFlags);
+  RefPtr<BrowserChild> newChild =
+      new BrowserChild(this, tabId, tabGroup, newTabContext, browsingContext,
+                       aChromeFlags, /* aIsTopLevel */ true);
 
   if (aTabOpener) {
     MOZ_ASSERT(ipcContext->type() == IPCTabContext::TPopupIPCTabContext);
@@ -1787,7 +1797,8 @@ mozilla::ipc::IPCResult ContentChild::RecvConstructBrowser(
     ManagedEndpoint<PBrowserChild>&& aBrowserEp, const TabId& aTabId,
     const TabId& aSameTabGroupAs, const IPCTabContext& aContext,
     BrowsingContext* aBrowsingContext, const uint32_t& aChromeFlags,
-    const ContentParentId& aCpID, const bool& aIsForBrowser) {
+    const ContentParentId& aCpID, const bool& aIsForBrowser,
+    const bool& aIsTopLevel) {
   MOZ_ASSERT(!IsShuttingDown());
 
   static bool hasRunOnce = false;
@@ -1818,7 +1829,7 @@ mozilla::ipc::IPCResult ContentChild::RecvConstructBrowser(
 
   RefPtr<BrowserChild> browserChild =
       BrowserChild::Create(this, aTabId, aSameTabGroupAs, tc.GetTabContext(),
-                           aBrowsingContext, aChromeFlags);
+                           aBrowsingContext, aChromeFlags, aIsTopLevel);
 
   // Bind the created BrowserChild to IPC to actually link the actor. The ref
   // here is released in DeallocPBrowserChild.
@@ -2723,7 +2734,7 @@ mozilla::ipc::IPCResult ContentChild::RecvRemoteType(
     SetProcessName(NS_LITERAL_STRING("file:// Content"));
   } else if (aRemoteType.EqualsLiteral(EXTENSION_REMOTE_TYPE)) {
     SetProcessName(NS_LITERAL_STRING("WebExtensions"));
-  } else if (aRemoteType.EqualsLiteral(PRIVILEGED_REMOTE_TYPE)) {
+  } else if (aRemoteType.EqualsLiteral(PRIVILEGEDABOUT_REMOTE_TYPE)) {
     SetProcessName(NS_LITERAL_STRING("Privileged Content"));
   } else if (aRemoteType.EqualsLiteral(LARGE_ALLOCATION_REMOTE_TYPE)) {
     SetProcessName(NS_LITERAL_STRING("Large Allocation Web Content"));
@@ -3844,17 +3855,10 @@ mozilla::ipc::IPCResult ContentChild::RecvCacheBrowsingContextChildren(
 }
 
 mozilla::ipc::IPCResult ContentChild::RecvRestoreBrowsingContextChildren(
-    BrowsingContext* aContext, nsTArray<BrowsingContextId>&& aChildren) {
+    BrowsingContext* aContext, BrowsingContext::Children&& aChildren) {
   MOZ_DIAGNOSTIC_ASSERT(aContext);
 
-  BrowsingContext::Children children(aChildren.Length());
-
-  for (auto id : aChildren) {
-    RefPtr<BrowsingContext> child = BrowsingContext::Get(id);
-    children.AppendElement(child);
-  }
-
-  aContext->RestoreChildren(std::move(children), /* aFromIPC */ true);
+  aContext->RestoreChildren(std::move(aChildren), /* aFromIPC */ true);
 
   return IPC_OK();
 }

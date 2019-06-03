@@ -51,7 +51,6 @@
 #include "gfxPlatform.h"
 #include "gfxFont.h"
 #include "gfxBlur.h"
-#include "gfxPrefs.h"
 #include "gfxTextRun.h"
 #include "gfxUtils.h"
 
@@ -93,6 +92,7 @@
 #include "mozilla/MathAlgorithms.h"
 #include "mozilla/Preferences.h"
 #include "mozilla/ServoBindings.h"
+#include "mozilla/StaticPrefs.h"
 #include "mozilla/Telemetry.h"
 #include "mozilla/TimeStamp.h"
 #include "mozilla/UniquePtr.h"
@@ -1001,7 +1001,7 @@ bool CanvasRenderingContext2D::ParseColor(const nsAString& aString,
     RefPtr<ComputedStyle> canvasStyle =
         nsComputedDOMStyle::GetComputedStyle(mCanvasElement, nullptr);
     if (canvasStyle) {
-      *aColor = canvasStyle->StyleColor()->mColor.ToColor();
+      *aColor = canvasStyle->StyleText()->mColor.ToColor();
     }
     // Beware that the presShell could be gone here.
   }
@@ -1231,8 +1231,8 @@ bool CanvasRenderingContext2D::EnsureTarget(const gfx::Rect* aCoveredRect,
   }
 
   // Check that the dimensions are sane
-  if (mWidth > gfxPrefs::MaxCanvasSize() ||
-      mHeight > gfxPrefs::MaxCanvasSize() || mWidth < 0 || mHeight < 0) {
+  if (mWidth > StaticPrefs::MaxCanvasSize() ||
+      mHeight > StaticPrefs::MaxCanvasSize() || mWidth < 0 || mHeight < 0) {
     SetErrorState();
     return false;
   }
@@ -2267,7 +2267,7 @@ static already_AddRefed<ComputedStyle> ResolveFilterStyleForServo(
 }
 
 bool CanvasRenderingContext2D::ParseFilter(
-    const nsAString& aString, nsTArray<nsStyleFilter>& aFilterChain,
+    const nsAString& aString, StyleOwnedSlice<StyleFilter>& aFilterChain,
     ErrorResult& aError) {
   if (!mCanvasElement && !mDocShell) {
     NS_WARNING(
@@ -2302,14 +2302,14 @@ bool CanvasRenderingContext2D::ParseFilter(
 
 void CanvasRenderingContext2D::SetFilter(const nsAString& aFilter,
                                          ErrorResult& aError) {
-  nsTArray<nsStyleFilter> filterChain;
+  StyleOwnedSlice<StyleFilter> filterChain;
   if (ParseFilter(aFilter, filterChain, aError)) {
     CurrentState().filterString = aFilter;
-    filterChain.SwapElements(CurrentState().filterChain);
+    CurrentState().filterChain = std::move(filterChain);
     if (mCanvasElement) {
       CurrentState().autoSVGFiltersObserver =
           SVGObserverUtils::ObserveFiltersForCanvasContext(
-              this, mCanvasElement, CurrentState().filterChain);
+              this, mCanvasElement, CurrentState().filterChain.AsSpan());
       UpdateFilter();
     }
   }
@@ -2376,7 +2376,8 @@ void CanvasRenderingContext2D::UpdateFilter() {
       (mCanvasElement && mCanvasElement->IsWriteOnly());
 
   CurrentState().filter = nsFilterInstance::GetFilterDescription(
-      mCanvasElement, CurrentState().filterChain, sourceGraphicIsTainted,
+      mCanvasElement, CurrentState().filterChain.AsSpan(),
+      sourceGraphicIsTainted,
       CanvasUserSpaceMetrics(
           GetSize(), CurrentState().fontFont, CurrentState().fontLanguage,
           CurrentState().fontExplicitLanguage, presShell->GetPresContext()),

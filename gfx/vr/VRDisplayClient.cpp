@@ -8,7 +8,7 @@
 
 #include "prlink.h"
 #include "prenv.h"
-#include "gfxPrefs.h"
+
 #include "nsIGlobalObject.h"
 #include "nsRefPtrHashtable.h"
 #include "nsString.h"
@@ -96,7 +96,7 @@ void VRDisplayClient::FireEvents() {
   // Check if we need to trigger onvrdisplayactivate event
   if (!bLastEventWasMounted && mDisplayInfo.mDisplayState.isMounted) {
     bLastEventWasMounted = true;
-    if (gfxPrefs::VRAutoActivateEnabled()) {
+    if (StaticPrefs::VRAutoActivateEnabled()) {
       vm->FireDOMVRDisplayMountedEvent(mDisplayInfo.mDisplayID);
     }
   }
@@ -104,7 +104,7 @@ void VRDisplayClient::FireEvents() {
   // Check if we need to trigger onvrdisplaydeactivate event
   if (bLastEventWasMounted && !mDisplayInfo.mDisplayState.isMounted) {
     bLastEventWasMounted = false;
-    if (gfxPrefs::VRAutoActivateEnabled()) {
+    if (StaticPrefs::VRAutoActivateEnabled()) {
       vm->FireDOMVRDisplayUnmountedEvent(mDisplayInfo.mDisplayID);
     }
   }
@@ -161,7 +161,7 @@ void VRDisplayClient::FireGamepadEvents() {
       dom::GamepadAdded info(NS_ConvertUTF8toUTF16(state.controllerName),
                              dom::GamepadMappingType::_empty, state.hand,
                              mDisplayInfo.mDisplayID, state.numButtons,
-                             state.numAxes, state.numHaptics);
+                             state.numAxes, state.numHaptics, 0, 0);
       dom::GamepadChangeEventBody body(info);
       dom::GamepadChangeEvent event(gamepadId, dom::GamepadServiceType::VR,
                                     body);

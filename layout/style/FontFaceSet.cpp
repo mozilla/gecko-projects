@@ -66,8 +66,6 @@ using namespace mozilla::dom;
 #define LOG_ENABLED() \
   MOZ_LOG_TEST(gfxUserFontSet::GetUserFontsLog(), LogLevel::Debug)
 
-#define FONT_LOADING_API_ENABLED_PREF "layout.css.font-loading-api.enabled"
-
 NS_IMPL_CYCLE_COLLECTION_CLASS(FontFaceSet)
 
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN_INHERITED(FontFaceSet,
@@ -1032,17 +1030,16 @@ FontFaceSet::FindOrCreateUserFontEntryFromFontFace(
   if (existingEntry) {
     // aFontFace already has a user font entry, so we update its attributes
     // rather than creating a new one.
-    existingEntry->UpdateAttributes(weight, stretch, italicStyle,
-                                    featureSettings, variationSettings,
-                                    languageOverride, unicodeRanges,
-                                    fontDisplay, rangeFlags);
+    existingEntry->UpdateAttributes(
+        weight, stretch, italicStyle, featureSettings, variationSettings,
+        languageOverride, unicodeRanges, fontDisplay, rangeFlags);
     // If the family name has changed, remove the entry from its current family
     // and clear the mFamilyName field so it can be reset when added to a new
     // family.
     if (!existingEntry->mFamilyName.IsEmpty() &&
         existingEntry->mFamilyName != aFamilyName) {
       gfxUserFontFamily* family =
-        set->GetUserFontSet()->LookupFamily(existingEntry->mFamilyName);
+          set->GetUserFontSet()->LookupFamily(existingEntry->mFamilyName);
       if (family) {
         family->RemoveFontEntry(existingEntry);
       }
@@ -1082,14 +1079,14 @@ FontFaceSet::FindOrCreateUserFontEntryFromFontFace(
         }
         case StyleFontFaceSourceListComponent::Tag::Url: {
           face->mSourceType = gfxFontFaceSrc::eSourceType_URL;
-          const URLValue* url = component.AsUrl();
+          const StyleCssUrl* url = component.AsUrl();
           nsIURI* uri = url->GetURI();
           face->mURI = uri ? new gfxFontSrcURI(uri) : nullptr;
-          URLExtraData* extraData = url->ExtraData();
-          face->mReferrer = extraData->GetReferrer();
-          face->mReferrerPolicy = extraData->GetReferrerPolicy();
+          const URLExtraData& extraData = url->ExtraData();
+          face->mReferrer = extraData.GetReferrer();
+          face->mReferrerPolicy = extraData.GetReferrerPolicy();
           face->mOriginPrincipal =
-              new gfxFontSrcPrincipal(extraData->Principal());
+              new gfxFontSrcPrincipal(extraData.Principal());
 
           // agent and user stylesheets are treated slightly differently,
           // the same-site origin check and access control headers are
@@ -1706,13 +1703,7 @@ FontFaceSet::HandleEvent(Event* aEvent) {
 
 /* static */
 bool FontFaceSet::PrefEnabled() {
-  static bool initialized = false;
-  static bool enabled;
-  if (!initialized) {
-    initialized = true;
-    Preferences::AddBoolVarCache(&enabled, FONT_LOADING_API_ENABLED_PREF);
-  }
-  return enabled;
+  return StaticPrefs::layout_css_font_loading_api_enabled();
 }
 
 // nsICSSLoaderObserver

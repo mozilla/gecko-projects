@@ -24,13 +24,12 @@
 #ifdef MOZ_WIDGET_GTK
 #  include "gfxPlatformGtk.h"  // for gfxPlatform
 #endif
-#include "gfxPrefs.h"                 // for gfxPrefs
 #include "mozilla/AutoRestore.h"      // for AutoRestore
 #include "mozilla/ClearOnShutdown.h"  // for ClearOnShutdown
 #include "mozilla/DebugOnly.h"        // for DebugOnly
+#include "mozilla/StaticPrefs.h"      // for StaticPrefs
 #include "mozilla/dom/BrowserParent.h"
 #include "mozilla/gfx/2D.h"         // for DrawTarget
-#include "mozilla/gfx/GPUChild.h"   // for GfxPrefValue
 #include "mozilla/gfx/Point.h"      // for IntSize
 #include "mozilla/gfx/Rect.h"       // for IntSize
 #include "mozilla/gfx/gfxVars.h"    // for gfxVars
@@ -294,10 +293,10 @@ static int32_t CalculateCompositionFrameRate() {
   // DEFAULT_FRAME_RATE in nsRefreshDriver.cpp.
   // TODO: This should actually return the vsync rate.
   const int32_t defaultFrameRate = 60;
-  int32_t compositionFrameRatePref = gfxPrefs::LayersCompositionFrameRate();
+  int32_t compositionFrameRatePref = StaticPrefs::LayersCompositionFrameRate();
   if (compositionFrameRatePref < 0) {
     // Use the same frame rate for composition as for layout.
-    int32_t layoutFrameRatePref = gfxPrefs::LayoutFrameRate();
+    int32_t layoutFrameRatePref = StaticPrefs::LayoutFrameRate();
     if (layoutFrameRatePref < 0) {
       // TODO: The main thread frame scheduling code consults the actual
       // monitor refresh rate in this case. We should do the same.
@@ -817,15 +816,15 @@ void CompositorBridgeParent::UpdatePaintTime(LayerTransactionParent* aLayerTree,
   mLayerManager->SetPaintTime(aPaintTime);
 }
 
-void CompositorBridgeParent::RegisterPayload(
+void CompositorBridgeParent::RegisterPayloads(
     LayerTransactionParent* aLayerTree,
-    const InfallibleTArray<CompositionPayload>& aPayload) {
+    const nsTArray<CompositionPayload>& aPayload) {
   // We get a lot of paint timings for things with empty transactions.
   if (!mLayerManager) {
     return;
   }
 
-  mLayerManager->RegisterPayload(aPayload);
+  mLayerManager->RegisterPayloads(aPayload);
 }
 
 void CompositorBridgeParent::NotifyShadowTreeTransaction(
@@ -1004,7 +1003,7 @@ void CompositorBridgeParent::CompositeToTarget(VsyncId aId, DrawTarget* aTarget,
   RenderTraceLayers(mLayerManager->GetRoot(), "0000");
 
 #ifdef MOZ_DUMP_PAINTING
-  if (gfxPrefs::DumpHostLayers()) {
+  if (StaticPrefs::DumpHostLayers()) {
     printf_stderr("Painting --- compositing layer tree:\n");
     mLayerManager->Dump(/* aSorted = */ true);
   }
@@ -1044,7 +1043,7 @@ void CompositorBridgeParent::CompositeToTarget(VsyncId aId, DrawTarget* aTarget,
 #endif
 
   // 0 -> Full-tilt composite
-  if (gfxPrefs::LayersCompositionFrameRate() == 0 ||
+  if (StaticPrefs::LayersCompositionFrameRate() == 0 ||
       mLayerManager->AlwaysScheduleComposite()) {
     // Special full-tilt composite mode for performance testing
     ScheduleComposition();
@@ -1216,7 +1215,7 @@ void CompositorBridgeParent::ScheduleRotationOnCompositorThread(
         "layers::CompositorBridgeParent::ForceComposition", this,
         &CompositorBridgeParent::ForceComposition);
     mForceCompositionTask = task;
-    ScheduleTask(task.forget(), gfxPrefs::OrientationSyncMillis());
+    ScheduleTask(task.forget(), StaticPrefs::OrientationSyncMillis());
   }
 }
 
@@ -1263,7 +1262,7 @@ void CompositorBridgeParent::ShadowLayersUpdated(
   mRefreshStartTime = aInfo.refreshStart();
   mTxnStartTime = aInfo.transactionStart();
   mFwdTime = aInfo.fwdTime();
-  RegisterPayload(aLayerTree, aInfo.payload());
+  RegisterPayloads(aLayerTree, aInfo.payload());
 
   if (root) {
     SetShadowProperties(root);
@@ -1554,7 +1553,7 @@ PLayerTransactionParent* CompositorBridgeParent::AllocPLayerTransactionParent(
 #ifdef XP_WIN
   // This is needed to avoid freezing the window on a device crash on double
   // buffering, see bug 1549674.
-  if (gfxPrefs::Direct3D11UseDoubleBuffering() && IsWin10OrLater() &&
+  if (StaticPrefs::Direct3D11UseDoubleBuffering() && IsWin10OrLater() &&
       XRE_IsGPUProcess()) {
     mWidget->AsWindows()->EnsureCompositorWindow();
   }
@@ -1793,7 +1792,7 @@ PWebRenderBridgeParent* CompositorBridgeParent::AllocPWebRenderBridgeParent(
     return mWrBridge;
   }
 
-  if (gfxPrefs::WebRenderSplitRenderRoots()) {
+  if (StaticPrefs::WebRenderSplitRenderRoots()) {
     apis.AppendElement(
         apis[0]->CreateDocument(aSize, 1, wr::RenderRoot::Content));
   }
@@ -2610,10 +2609,15 @@ int32_t RecordContentFrameTime(
 
 mozilla::ipc::IPCResult CompositorBridgeParent::RecvBeginRecording(
     const TimeStamp& aRecordingStart) {
-  mCompositionRecorder.reset(new CompositionRecorder(aRecordingStart));
-
   if (mLayerManager) {
-    mLayerManager->SetCompositionRecorder(mCompositionRecorder.get());
+    mCompositionRecorder = new CompositionRecorder(aRecordingStart);
+    mLayerManager->SetCompositionRecorder(do_AddRef(mCompositionRecorder));
+  } else if (mWrBridge) {
+    RefPtr<WebRenderCompositionRecorder> recorder =
+        new WebRenderCompositionRecorder(aRecordingStart,
+                                         mWrBridge->PipelineId());
+    mCompositionRecorder = recorder;
+    mWrBridge->SetCompositionRecorder(std::move(recorder));
   }
 
   return IPC_OK();
@@ -2623,8 +2627,13 @@ mozilla::ipc::IPCResult CompositorBridgeParent::RecvEndRecording() {
   if (mLayerManager) {
     mLayerManager->SetCompositionRecorder(nullptr);
   }
+
+  // If we are using WebRender, the |RenderThread| will have a handle to this
+  // |WebRenderCompositionRecorder|, which it will release once the frames have
+  // been written.
+
   mCompositionRecorder->WriteCollectedFrames();
-  mCompositionRecorder.reset(nullptr);
+  mCompositionRecorder = nullptr;
   return IPC_OK();
 }
 

@@ -2361,7 +2361,8 @@ class MethodDefiner(PropertyDefiner):
                        m.isMethod() and m.isStatic() == static and
                        MemberIsUnforgeable(m, descriptor) == unforgeable and
                        (not crossOriginOnly or m.getExtendedAttribute("CrossOriginCallable")) and
-                       not m.isIdentifierLess()]
+                       not m.isIdentifierLess() and
+                       not m.getExtendedAttribute("Unexposed")]
         else:
             methods = []
         self.chrome = []
@@ -3510,21 +3511,11 @@ def getConditionList(idlobj, cxName, objName):
     that needs to run before the list of conditions can be evaluated.
     """
     conditions = []
-    conditionSetup = None
     pref = idlobj.getExtendedAttribute("Pref")
     if pref:
         assert isinstance(pref, list) and len(pref) == 1
-        conditionSetup = CGGeneric(fill(
-            """
-            static bool sPrefValue;
-            static bool sPrefCacheSetUp = false;
-            if (!sPrefCacheSetUp) {
-              sPrefCacheSetUp = true;
-              Preferences::AddBoolVarCache(&sPrefValue, "${prefName}");
-            }
-            """,
-            prefName=pref[0]))
-        conditions.append("sPrefValue")
+        conditions.append("StaticPrefs::%s()" %
+                          pref[0].replace(".", "_").replace("-", "_"))
     if idlobj.getExtendedAttribute("ChromeOnly"):
         conditions.append("nsContentUtils::ThreadsafeIsSystemCaller(%s)" % cxName)
     func = idlobj.getExtendedAttribute("Func")
@@ -3534,8 +3525,7 @@ def getConditionList(idlobj, cxName, objName):
     if idlobj.getExtendedAttribute("SecureContext"):
         conditions.append("mozilla::dom::IsSecureContextOrObjectIsFromSecureContext(%s, %s)" % (cxName, objName))
 
-    return (CGList((CGGeneric(cond) for cond in conditions), " &&\n"),
-            conditionSetup)
+    return CGList((CGGeneric(cond) for cond in conditions), " &&\n")
 
 
 class CGConstructorEnabled(CGAbstractMethod):
@@ -3579,14 +3569,13 @@ class CGConstructorEnabled(CGAbstractMethod):
                                                    "!NS_IsMainThread()")
             body.append(exposedInWorkerCheck)
 
-        (conditions, conditionsSetup) = getConditionList(iface, "aCx", "aObj")
+        conditions = getConditionList(iface, "aCx", "aObj")
 
         # We should really have some conditions
         assert len(body) or len(conditions)
 
         conditionsWrapper = ""
         if len(conditions):
-            body.append(conditionsSetup);
             conditionsWrapper = CGWrapper(conditions,
                                           pre="return ",
                                           post=";\n",
@@ -8742,11 +8731,12 @@ class CGSetterCall(CGPerSignatureCall):
 
 class CGAbstractBindingMethod(CGAbstractStaticMethod):
     """
-    Common class to generate the JSNatives for all our methods, getters, and
-    setters.  This will generate the function declaration and unwrap the
-    |this| object.  Subclasses are expected to override the generate_code
-    function to do the rest of the work.  This function should return a
-    CGThing which is already properly indented.
+    Common class to generate some of our class hooks.  This will generate the
+    function declaration, get a reference to the JS object for our binding
+    object (which might be an argument of the class hook or something we get
+    from a JS::CallArgs), and unwrap into the right C++ type. Subclasses are
+    expected to override the generate_code function to do the rest of the work.
+    This function should return a CGThing which is already properly indented.
 
     getThisObj should be code for getting a JSObject* for the binding
     object.  "" can be passed in if the binding object is already stored in
@@ -8754,14 +8744,21 @@ class CGAbstractBindingMethod(CGAbstractStaticMethod):
 
     callArgs should be code for getting a JS::CallArgs into a variable
     called 'args'.  This can be "" if there is already such a variable
-    around.
+    around or if the body does not need a JS::CallArgs.
+
     """
     def __init__(self, descriptor, name, args, getThisObj,
                  callArgs="JS::CallArgs args = JS::CallArgsFromVp(argc, vp);\n"):
         CGAbstractStaticMethod.__init__(self, descriptor, name, "bool", args,
                                         canRunScript=True)
 
-        self.unwrapFailureCode = 'return ThrowErrorMessage(cx, MSG_THIS_DOES_NOT_IMPLEMENT_INTERFACE, "Value", "%s");\n' % descriptor.interface.identifier.name
+        # This can't ever happen, because we only use this for class hooks.
+        self.unwrapFailureCode = fill(
+            """
+            MOZ_CRASH("Unexpected object in '${name}' hook");
+            return false;
+            """,
+            name=name)
 
         if getThisObj == "":
             self.getThisObj = None
@@ -9635,11 +9632,19 @@ class CGMemberJITInfo(CGThing):
                 argTypes=argTypes,
                 slotAssert=slotAssert)
 
+        # Unexposed things are meant to be used from C++ directly, so we make
+        # their jitinfo non-static.  That way C++ can get at it.
+        if self.member.getExtendedAttribute("Unexposed"):
+            storageClass = "extern"
+        else:
+            storageClass = "static"
+
         return fill(
             """
-            static const JSJitInfo ${infoName} = ${jitInfo};
+            ${storageClass} const JSJitInfo ${infoName} = ${jitInfo};
             $*{slotAssert}
             """,
+            storageClass=storageClass,
             infoName=infoName,
             jitInfo=jitInfoInitializer(False),
             slotAssert=slotAssert)
@@ -13910,12 +13915,7 @@ class CGDictionary(CGThing):
               return false;
             }
             """))
-        (conditions, conditionsSetup) = getConditionList(member, "cx", "*object")
-        if conditionsSetup is not None:
-            raise TypeError("We don't support Pref annotations on dictionary "
-                            "members.  If we start to, we need to make sure all "
-                            "the variable names conditionsSetup uses for a "
-                            "given dictionary are unique.")
+        conditions = getConditionList(member, "cx", "*object")
         if len(conditions) != 0:
             setTempValue = CGIfElseWrapper(conditions.define(),
                                            setTempValue,
@@ -14031,12 +14031,7 @@ class CGDictionary(CGThing):
         if member.canHaveMissingValue():
             # Only do the conversion if we have a value
             conversion = CGIfWrapper(conversion, "%s.WasPassed()" % memberLoc)
-        (conditions, conditionsSetup) = getConditionList(member, "cx", "obj")
-        if conditionsSetup is not None:
-            raise TypeError("We don't support Pref annotations on dictionary "
-                            "members.  If we start to, we need to make sure all "
-                            "the variable names conditionsSetup uses for a "
-                            "given dictionary are unique.")
+        conditions = getConditionList(member, "cx", "obj")
         if len(conditions) != 0:
             conversion = CGIfWrapper(conversion, conditions.define())
         return conversion
@@ -15473,20 +15468,21 @@ class CGBindingImplClass(CGClass):
                      []),
                     {"infallible": True}))
 
-        wrapArgs = [Argument('JSContext*', 'aCx'),
-                    Argument('JS::Handle<JSObject*>', 'aGivenProto')]
-        if not descriptor.wrapperCache:
-            wrapReturnType = "bool"
-            wrapArgs.append(Argument('JS::MutableHandle<JSObject*>',
-                                     'aReflector'))
-        else:
-            wrapReturnType = "JSObject*"
-        self.methodDecls.insert(0,
-                                ClassMethod(wrapMethodName, wrapReturnType,
-                                            wrapArgs, virtual=descriptor.wrapperCache,
-                                            breakAfterReturnDecl=" ",
-                                            override=descriptor.wrapperCache,
-                                            body=self.getWrapObjectBody()))
+        if descriptor.concrete:
+            wrapArgs = [Argument('JSContext*', 'aCx'),
+                        Argument('JS::Handle<JSObject*>', 'aGivenProto')]
+            if not descriptor.wrapperCache:
+                wrapReturnType = "bool"
+                wrapArgs.append(Argument('JS::MutableHandle<JSObject*>',
+                                         'aReflector'))
+            else:
+                wrapReturnType = "JSObject*"
+            self.methodDecls.insert(0,
+                                    ClassMethod(wrapMethodName, wrapReturnType,
+                                                wrapArgs, virtual=descriptor.wrapperCache,
+                                                breakAfterReturnDecl=" ",
+                                                override=descriptor.wrapperCache,
+                                                body=self.getWrapObjectBody()))
         if descriptor.hasCEReactions():
             self.methodDecls.insert(0,
                                     ClassMethod("GetDocGroup", "DocGroup*", [],
@@ -15570,7 +15566,9 @@ class CGExampleClass(CGBindingImplClass):
 
     def define(self):
         # Just override CGClass and do our own thing
-        ctordtor = dedent("""
+        nativeType = self.nativeLeafName(self.descriptor)
+
+        ctordtor = fill("""
             ${nativeType}::${nativeType}()
             {
                 // Add |MOZ_COUNT_CTOR(${nativeType});| for a non-refcounted object.
@@ -15580,10 +15578,11 @@ class CGExampleClass(CGBindingImplClass):
             {
                 // Add |MOZ_COUNT_DTOR(${nativeType});| for a non-refcounted object.
             }
-            """)
+            """,
+            nativeType=nativeType)
 
         if self.parentIface:
-            ccImpl = dedent("""
+            ccImpl = fill("""
 
                 // Only needed for refcounted objects.
                 # error "If you don't have members that need cycle collection,
@@ -15596,9 +15595,11 @@ class CGExampleClass(CGBindingImplClass):
                 NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(${nativeType})
                 NS_INTERFACE_MAP_END_INHERITING(${parentType})
 
-                """)
+                """,
+                nativeType=nativeType,
+                parentType=self.nativeLeafName(self.parentDesc))
         else:
-            ccImpl = dedent("""
+            ccImpl = fill("""
 
                 // Only needed for refcounted objects.
                 NS_IMPL_CYCLE_COLLECTION_WRAPPERCACHE_0(${nativeType})
@@ -15609,31 +15610,35 @@ class CGExampleClass(CGBindingImplClass):
                   NS_INTERFACE_MAP_ENTRY(nsISupports)
                 NS_INTERFACE_MAP_END
 
-                """)
+                """,
+                nativeType=nativeType)
 
-        if self.descriptor.wrapperCache:
-            reflectorArg = ""
-            reflectorPassArg = ""
-            returnType = "JSObject*"
-        else:
-            reflectorArg = ", JS::MutableHandle<JSObject*> aReflector"
-            reflectorPassArg = ", aReflector"
-            returnType = "bool"
-        classImpl = ccImpl + ctordtor + "\n" + dedent("""
-            ${returnType}
-            ${nativeType}::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto${reflectorArg})
-            {
-              return ${ifaceName}_Binding::Wrap(aCx, this, aGivenProto${reflectorPassArg});
-            }
+        classImpl = ccImpl + ctordtor + "\n"
+        if self.descriptor.concrete:
+            if self.descriptor.wrapperCache:
+                reflectorArg = ""
+                reflectorPassArg = ""
+                returnType = "JSObject*"
+            else:
+                reflectorArg = ", JS::MutableHandle<JSObject*> aReflector"
+                reflectorPassArg = ", aReflector"
+                returnType = "bool"
+            classImpl += fill(
+                """
+                ${returnType}
+                ${nativeType}::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto${reflectorArg})
+                {
+                  return ${ifaceName}_Binding::Wrap(aCx, this, aGivenProto${reflectorPassArg});
+                }
 
-            """)
-        return string.Template(classImpl).substitute(
-            ifaceName=self.descriptor.name,
-            nativeType=self.nativeLeafName(self.descriptor),
-            parentType=self.nativeLeafName(self.parentDesc) if self.parentIface else "",
-            returnType=returnType,
-            reflectorArg=reflectorArg,
-            reflectorPassArg=reflectorPassArg)
+                """,
+                returnType=returnType,
+                nativeType=nativeType,
+                reflectorArg=reflectorArg,
+                ifaceName=self.descriptor.name,
+                reflectorPassArg=reflectorPassArg)
+
+        return classImpl
 
     @staticmethod
     def nativeLeafName(descriptor):

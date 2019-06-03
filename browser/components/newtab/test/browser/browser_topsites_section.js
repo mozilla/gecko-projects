@@ -9,13 +9,13 @@ test_newtab(
     let contextMenu = content.document.querySelector(".top-sites .section-top-bar .context-menu");
     ok(contextMenu, "Should find a visible topsite context menu");
 
-    const topsitesAddBtn = content.document.querySelector(".top-sites .context-menu-item a");
+    const topsitesAddBtn = content.document.querySelector(".top-sites .context-menu-item button");
     topsitesAddBtn.click();
 
     let found = content.document.querySelector(".topsite-form");
     ok(found && !found.hidden, "Should find a visible topsite form");
 
-    found = content.document.querySelector(".modal-overlay");
+    found = content.document.querySelector(".modalOverlayOuter");
     ok(found && !found.hidden, "Should find a visible overlay");
   }
 );
@@ -39,7 +39,7 @@ test_newtab({
     let contextMenu = topsiteEl.querySelector(".top-sites-list .context-menu");
     ok(contextMenu, "Should find a topsite context menu");
 
-    const pinUnpinTopsiteBtn = contextMenu.querySelector(".top-sites .context-menu-item a");
+    const pinUnpinTopsiteBtn = contextMenu.querySelector(".top-sites .context-menu-item button");
     // Pin the topsite.
     pinUnpinTopsiteBtn.click();
 
@@ -54,7 +54,7 @@ test_newtab({
     topsiteContextBtn = topsiteEl.querySelector(".context-menu-button");
     ok(topsiteContextBtn, "Should find a context menu button");
     topsiteContextBtn.click();
-    topsiteEl.querySelector(".context-menu-item a").click();
+    topsiteEl.querySelector(".context-menu-item button").click();
 
     // Need to wait for unpin action.
     await ContentTaskUtils.waitForCondition(() => !topsiteEl.querySelector(".icon-pin-small"),
@@ -75,10 +75,10 @@ test_newtab({
     let contextMenu = content.document.querySelector(".top-sites .section-top-bar .context-menu");
     ok(contextMenu, "Should find a visible topsite context menu");
 
-    const topsitesAddBtn = content.document.querySelector(".top-sites .context-menu-item a");
+    const topsitesAddBtn = content.document.querySelector(".top-sites .context-menu-item button");
     topsitesAddBtn.click();
 
-    let found = content.document.querySelector(".modal-overlay");
+    let found = content.document.querySelector(".modalOverlayOuter");
     ok(found && !found.hidden, "Should find a visible overlay");
 
     // Write field title
@@ -112,7 +112,7 @@ test_newtab({
 
     let contextMen = content.document.querySelector(".top-sites-list .context-menu");
 
-    const dismissBtn = contextMen.querySelector(".top-sites .context-menu-item a .icon-dismiss");
+    const dismissBtn = contextMen.querySelector(".top-sites .context-menu-item button .icon-dismiss");
     dismissBtn.click();
 
     // Wait for Topsite to be removed

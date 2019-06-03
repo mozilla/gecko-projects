@@ -18,6 +18,11 @@ interface WindowGlobalParent {
 
   readonly attribute unsigned long long innerWindowId;
   readonly attribute unsigned long long outerWindowId;
+  readonly attribute unsigned long long contentParentId;
+
+  // A WindowGlobalParent is the root in its process if it has no parent, or its
+  // embedder is in a different process.
+  readonly attribute boolean isProcessRoot;
 
   readonly attribute FrameLoader? rootFrameLoader; // Embedded (browser) only
 
@@ -48,6 +53,11 @@ interface WindowGlobalChild {
 
   readonly attribute unsigned long long innerWindowId;
   readonly attribute unsigned long long outerWindowId;
+  readonly attribute unsigned long long contentParentId;
+
+  // A WindowGlobalChild is the root in its process if it has no parent, or its
+  // embedder is in a different process.
+  readonly attribute boolean isProcessRoot;
 
   readonly attribute WindowGlobalParent? parentActor; // in-process only
 

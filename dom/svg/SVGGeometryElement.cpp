@@ -9,11 +9,11 @@
 #include "DOMSVGPoint.h"
 #include "gfxPlatform.h"
 #include "nsCOMPtr.h"
-#include "nsComputedDOMStyle.h"
 #include "nsSVGUtils.h"
 #include "SVGAnimatedLength.h"
 #include "SVGCircleElement.h"
 #include "SVGEllipseElement.h"
+#include "SVGGeometryProperty.h"
 #include "SVGRectElement.h"
 #include "mozilla/dom/SVGLengthBinding.h"
 #include "mozilla/gfx/2D.h"
@@ -134,18 +134,19 @@ FillRule SVGGeometryElement::GetFillRule() {
   FillRule fillRule =
       FillRule::FILL_WINDING;  // Equivalent to StyleFillRule::Nonzero
 
-  RefPtr<ComputedStyle> computedStyle =
-      nsComputedDOMStyle::GetComputedStyleNoFlush(this, nullptr);
+  bool res = SVGGeometryProperty::DoForComputedStyle(
+      this, [&](const ComputedStyle* s) {
+        const auto* styleSVG = s->StyleSVG();
 
-  if (computedStyle) {
-    MOZ_ASSERT(computedStyle->StyleSVG()->mFillRule == StyleFillRule::Nonzero ||
-               computedStyle->StyleSVG()->mFillRule == StyleFillRule::Evenodd);
+        MOZ_ASSERT(styleSVG->mFillRule == StyleFillRule::Nonzero ||
+                   styleSVG->mFillRule == StyleFillRule::Evenodd);
 
-    if (computedStyle->StyleSVG()->mFillRule == StyleFillRule::Evenodd) {
-      fillRule = FillRule::FILL_EVEN_ODD;
-    }
-  } else {
-    // ReportToConsole
+        if (styleSVG->mFillRule == StyleFillRule::Evenodd) {
+          fillRule = FillRule::FILL_EVEN_ODD;
+        }
+      });
+
+  if (!res) {
     NS_WARNING("Couldn't get ComputedStyle for content in GetFillRule");
   }
 

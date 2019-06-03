@@ -1003,10 +1003,10 @@ bool HTMLSelectElement::SelectSomething(bool aNotify) {
   return false;
 }
 
-nsresult HTMLSelectElement::BindToTree(Document* aDocument, nsIContent* aParent,
-                                       nsIContent* aBindingParent) {
-  nsresult rv = nsGenericHTMLFormElementWithState::BindToTree(
-      aDocument, aParent, aBindingParent);
+nsresult HTMLSelectElement::BindToTree(BindContext& aContext,
+                                       nsINode& aParent) {
+  nsresult rv =
+      nsGenericHTMLFormElementWithState::BindToTree(aContext, aParent);
   NS_ENSURE_SUCCESS(rv, rv);
 
   // If there is a disabled fieldset in the parent chain, the element is now
@@ -1021,8 +1021,8 @@ nsresult HTMLSelectElement::BindToTree(Document* aDocument, nsIContent* aParent,
   return rv;
 }
 
-void HTMLSelectElement::UnbindFromTree(bool aDeep, bool aNullParent) {
-  nsGenericHTMLFormElementWithState::UnbindFromTree(aDeep, aNullParent);
+void HTMLSelectElement::UnbindFromTree(bool aNullParent) {
+  nsGenericHTMLFormElementWithState::UnbindFromTree(aNullParent);
 
   // We might be no longer disabled because our parent chain changed.
   // XXXbz is this still needed now that fieldset changes always call

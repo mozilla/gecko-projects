@@ -498,13 +498,25 @@ pref("browser.tabs.showAudioPlayingIcon", true);
 // This should match Chromium's audio indicator delay.
 pref("browser.tabs.delayHidingAudioPlayingIconMS", 3000);
 
-// Pref to control whether we use separate privileged content processes.
 #if defined(NIGHTLY_BUILD) && !defined(MOZ_ASAN)
+// Pref to control whether we use a separate privileged content process
+// for about: pages. This pref name did not age well: we will have multiple
+// types of privileged content processes, each with different privileges.
+// types of privleged content processes, each with different privleges.
 pref("browser.tabs.remote.separatePrivilegedContentProcess", true);
+// Pref to control whether we use a separate privileged content process
+// for certain mozilla webpages (which are listed in the pref
+// browser.tabs.remote.separatedMozillaDomains).
+pref("browser.tabs.remote.separatePrivilegedMozillaWebContentProcess", true);
 #endif
 
-// Turn on HTTP response process selection.
+#ifdef NIGHTLY_BUILD
 pref("browser.tabs.remote.useHTTPResponseProcessSelection", true);
+#else
+// Disabled outside of nightly due to bug 1554217
+pref("browser.tabs.remote.useHTTPResponseProcessSelection", false);
+#endif
+
 
 // Unload tabs when available memory is running low
 pref("browser.tabs.unloadOnLowMemory", true);
@@ -1182,6 +1194,7 @@ pref("services.sync.prefs.sync.accessibility.browsewithcaret", true);
 pref("services.sync.prefs.sync.accessibility.typeaheadfind", true);
 pref("services.sync.prefs.sync.accessibility.typeaheadfind.linksonly", true);
 pref("services.sync.prefs.sync.addons.ignoreUserEnabledChanges", true);
+pref("services.sync.prefs.sync.app.shield.optoutstudies.enabled", true);
 // The addons prefs related to repository verification are intentionally
 // not synced for security reasons. If a system is compromised, a user
 // could weaken the pref locally, install an add-on from an untrusted
@@ -1192,6 +1205,7 @@ pref("services.sync.prefs.sync.browser.contentblocking.features.strict", true);
 pref("services.sync.prefs.sync.browser.contentblocking.introCount", true);
 pref("services.sync.prefs.sync.browser.crashReports.unsubmittedCheck.autoSubmit2", true);
 pref("services.sync.prefs.sync.browser.ctrlTab.recentlyUsedOrder", true);
+pref("services.sync.prefs.sync.browser.discovery.enabled", true);
 pref("services.sync.prefs.sync.browser.download.useDownloadDir", true);
 pref("services.sync.prefs.sync.browser.formfill.enable", true);
 pref("services.sync.prefs.sync.browser.link.open_newwindow", true);
@@ -1478,12 +1492,6 @@ pref("identity.fxaccounts.commands.missed.fetch_interval", 86400);
 pref("ui.key.menuAccessKeyFocuses", true);
 #endif
 
-#ifdef NIGHTLY_BUILD
-pref("media.eme.vp9-in-mp4.enabled", true);
-#else
-pref("media.eme.vp9-in-mp4.enabled", false);
-#endif
-
 pref("media.eme.hdcp-policy-check.enabled", false);
 
 // Whether we should run a test-pattern through EME GMPs before assuming they'll
@@ -1609,6 +1617,7 @@ pref("browser.contentblocking.fingerprinting.preferences.ui.enabled", true);
 //     "cookieBehavior2": cookie behaviour BEHAVIOR_REJECT
 //     "cookieBehavior3": cookie behaviour BEHAVIOR_LIMIT_FOREIGN
 //     "cookieBehavior4": cookie behaviour BEHAVIOR_REJECT_TRACKER
+//     "cookieBehavior5": cookie behaviour BEHAVIOR_REJECT_TRACKER_AND_PARTITION_FOREIGN
 // One value from each section must be included in the browser.contentblocking.features.strict pref.
 pref("browser.contentblocking.features.strict", "tp,tpPrivate,cookieBehavior4,cm,fp");
 
@@ -1689,7 +1698,7 @@ pref("dom.ipc.cpows.forbid-unsafe-from-browser", true);
 // detection).
 pref("dom.ipc.processHangMonitor", true);
 
-#if defined(NIGHTLY_BUILD) && defined(XP_WIN)
+#if defined(XP_WIN)
 // Allows us to deprioritize the processes of background tabs at an OS level
 pref("dom.ipc.processPriorityManager.enabled", true);
 #endif
@@ -1747,6 +1756,8 @@ pref("signon.schemeUpgrades", true);
 pref("signon.privateBrowsingCapture.enabled", true);
 pref("signon.showAutoCompleteFooter", true);
 pref("signon.management.page.enabled", false);
+pref("signon.showAutoCompleteOrigins", true);
+pref("signon.includeOtherSubdomainsInLookup", true);
 
 // Enable the "Simplify Page" feature in Print Preview. This feature
 // is disabled by default in toolkit.
@@ -1856,14 +1867,6 @@ pref("fission.frontend.simulate-events", false);
 // - Only deliver subframe messages that specifies
 //   their destination (using the BrowsingContext id).
 pref("fission.frontend.simulate-messages", false);
-
-// Prio preferences
-// Only enable by default on Nightly.
-// On platforms that do not build libprio, do not set these prefs at all, which gives us a way to detect support.
-
-// Curve25519 public keys for Prio servers
-pref("prio.publicKeyA", "35AC1C7576C7C6EDD7FED6BCFC337B34D48CB4EE45C86BEEFB40BD8875707733");
-pref("prio.publicKeyB", "26E6674E65425B823F1F1D5F96E3BB3EF9E406EC7FBA7DEF8B08A35DD135AF50");
 
 // Coverage ping is disabled by default.
 pref("toolkit.coverage.enabled", false);

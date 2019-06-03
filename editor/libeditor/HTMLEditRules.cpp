@@ -383,12 +383,12 @@ nsresult HTMLEditRules::BeforeEdit(EditSubAction aEditSubAction,
     }
 
     // Stabilize the document against contenteditable count changes
-    nsHTMLDocument* htmlDoc = HTMLEditorRef().GetHTMLDocument();
-    if (NS_WARN_IF(!htmlDoc)) {
+    Document* doc = HTMLEditorRef().GetDocument();
+    if (NS_WARN_IF(!doc)) {
       return NS_ERROR_FAILURE;
     }
-    if (htmlDoc->GetEditingState() == nsIHTMLDocument::eContentEditable) {
-      htmlDoc->ChangeContentEditableCount(nullptr, +1);
+    if (doc->GetEditingState() == Document::EditingState::eContentEditable) {
+      doc->ChangeContentEditableCount(nullptr, +1);
       mRestoreContentEditableCount = true;
     }
 
@@ -432,12 +432,12 @@ nsresult HTMLEditRules::AfterEdit(EditSubAction aEditSubAction,
 
     // Reset the contenteditable count to its previous value
     if (mRestoreContentEditableCount) {
-      nsHTMLDocument* htmlDoc = HTMLEditorRef().GetHTMLDocument();
-      if (NS_WARN_IF(!htmlDoc)) {
+      Document* doc = HTMLEditorRef().GetDocument();
+      if (NS_WARN_IF(!doc)) {
         return NS_ERROR_FAILURE;
       }
-      if (htmlDoc->GetEditingState() == nsIHTMLDocument::eContentEditable) {
-        htmlDoc->ChangeContentEditableCount(nullptr, -1);
+      if (doc->GetEditingState() == Document::EditingState::eContentEditable) {
+        doc->ChangeContentEditableCount(nullptr, -1);
       }
       mRestoreContentEditableCount = false;
     }
@@ -2429,7 +2429,7 @@ nsresult HTMLEditRules::WillDeleteSelection(
         eo--;
         // Bug 1068979: delete both codepoints if surrogate pair
         if (so > 0) {
-          const nsTextFragment* text = nodeAsText->GetText();
+          const nsTextFragment* text = &nodeAsText->TextFragment();
           if (NS_IS_LOW_SURROGATE(text->CharAt(so)) &&
               NS_IS_HIGH_SURROGATE(text->CharAt(so - 1))) {
             so--;
@@ -2502,6 +2502,12 @@ nsresult HTMLEditRules::WillDeleteSelection(
 
     if (wsType == WSType::special || wsType == WSType::br ||
         visNode->IsHTMLElement(nsGkAtoms::hr)) {
+      // If the void element is editing host, we should do nothing.
+      if (visNode == wsObj.GetEditingHost()) {
+        *aHandled = true;
+        return NS_OK;
+      }
+
       // Short circuit for invisible breaks.  delete them and recurse.
       if (visNode->IsHTMLElement(nsGkAtoms::br) &&
           !HTMLEditorRef().IsVisibleBRElement(visNode)) {
@@ -8648,6 +8654,15 @@ nsresult HTMLEditRules::ApplyBlockStyle(
 
   nsCOMPtr<Element> curBlock;
   for (auto& curNode : aNodeArray) {
+    if (NS_WARN_IF(!curNode->GetParent())) {
+      // If given node has been removed from the document, let's ignore it
+      // since the following code may need its parent replace it with new
+      // block.
+      curBlock = nullptr;
+      newBlock = nullptr;
+      continue;
+    }
+
     EditorDOMPoint atCurNode(curNode);
 
     // Is it already the right kind of block, or an uneditable block?
@@ -8675,6 +8690,12 @@ nsresult HTMLEditRules::ApplyBlockStyle(
       if (NS_WARN_IF(!newBlock)) {
         return NS_ERROR_FAILURE;
       }
+      // If the new block element was moved to different element or removed by
+      // the web app via mutation event listener, we should stop handling this
+      // action since we cannot handle each of a lot of edge cases.
+      if (NS_WARN_IF(newBlock->GetParentNode() != atCurNode.GetContainer())) {
+        return NS_ERROR_EDITOR_UNEXPECTED_DOM_TREE;
+      }
       continue;
     }
 
@@ -8701,15 +8722,28 @@ nsresult HTMLEditRules::ApplyBlockStyle(
       if (NS_WARN_IF(splitNodeResult.Failed())) {
         return splitNodeResult.Rv();
       }
+      // If current handling node has been moved from the container by a
+      // mutation event listener when we need to do something more for it,
+      // we should stop handling this action since we cannot handle each of
+      // a lot of edge cases.
+      if (NS_WARN_IF(atCurNode.HasChildMovedFromContainer())) {
+        return NS_ERROR_EDITOR_UNEXPECTED_DOM_TREE;
+      }
+      EditorDOMPoint splitPoint = splitNodeResult.SplitPoint();
       RefPtr<Element> theBlock =
           MOZ_KnownLive(HTMLEditorRef())
-              .CreateNodeWithTransaction(aBlockTag,
-                                         splitNodeResult.SplitPoint());
+              .CreateNodeWithTransaction(aBlockTag, splitPoint);
       if (NS_WARN_IF(!CanHandleEditAction())) {
         return NS_ERROR_EDITOR_DESTROYED;
       }
       if (NS_WARN_IF(!theBlock)) {
         return NS_ERROR_FAILURE;
+      }
+      // If the new block element was moved to different element or removed by
+      // the web app via mutation event listener, we should stop handling this
+      // action since we cannot handle each of a lot of edge cases.
+      if (NS_WARN_IF(theBlock->GetParentNode() != splitPoint.GetContainer())) {
+        return NS_ERROR_EDITOR_UNEXPECTED_DOM_TREE;
       }
       // Remember our new block for postprocessing
       mNewBlock = theBlock;
@@ -8740,14 +8774,27 @@ nsresult HTMLEditRules::ApplyBlockStyle(
       if (NS_WARN_IF(splitNodeResult.Failed())) {
         return splitNodeResult.Rv();
       }
+      // If current handling node has been moved from the container by a
+      // mutation event listener when we need to do something more for it,
+      // we should stop handling this action since we cannot handle each of
+      // a lot of edge cases.
+      if (NS_WARN_IF(atCurNode.HasChildMovedFromContainer())) {
+        return NS_ERROR_EDITOR_UNEXPECTED_DOM_TREE;
+      }
+      EditorDOMPoint splitPoint = splitNodeResult.SplitPoint();
       curBlock = MOZ_KnownLive(HTMLEditorRef())
-                     .CreateNodeWithTransaction(aBlockTag,
-                                                splitNodeResult.SplitPoint());
+                     .CreateNodeWithTransaction(aBlockTag, splitPoint);
       if (NS_WARN_IF(!CanHandleEditAction())) {
         return NS_ERROR_EDITOR_DESTROYED;
       }
       if (NS_WARN_IF(!curBlock)) {
         return NS_ERROR_FAILURE;
+      }
+      // If the new block element was moved to different element or removed by
+      // the web app via mutation event listener, we should stop handling this
+      // action since we cannot handle each of a lot of edge cases.
+      if (NS_WARN_IF(curBlock->GetParentNode() != splitPoint.GetContainer())) {
+        return NS_ERROR_EDITOR_UNEXPECTED_DOM_TREE;
       }
       // Remember our new block for postprocessing
       mNewBlock = curBlock;
@@ -8780,22 +8827,38 @@ nsresult HTMLEditRules::ApplyBlockStyle(
 
       // If no curBlock, make one
       if (!curBlock) {
-        AutoEditorDOMPointOffsetInvalidator lockChild(atCurNode);
-
         SplitNodeResult splitNodeResult =
             MaybeSplitAncestorsForInsertWithTransaction(aBlockTag, atCurNode);
         if (NS_WARN_IF(splitNodeResult.Failed())) {
           return splitNodeResult.Rv();
         }
+        // If current handling node has been moved from the container by a
+        // mutation event listener when we need to do something more for it,
+        // we should stop handling this action since we cannot handle each of
+        // a lot of edge cases.
+        if (NS_WARN_IF(atCurNode.HasChildMovedFromContainer())) {
+          return NS_ERROR_EDITOR_UNEXPECTED_DOM_TREE;
+        }
+        EditorDOMPoint splitPoint = splitNodeResult.SplitPoint();
         curBlock = MOZ_KnownLive(HTMLEditorRef())
-                       .CreateNodeWithTransaction(aBlockTag,
-                                                  splitNodeResult.SplitPoint());
+                       .CreateNodeWithTransaction(aBlockTag, splitPoint);
         if (NS_WARN_IF(!CanHandleEditAction())) {
           return NS_ERROR_EDITOR_DESTROYED;
         }
         if (NS_WARN_IF(!curBlock)) {
           return NS_ERROR_FAILURE;
         }
+        // If the new block element was moved to different element or removed by
+        // the web app via mutation event listener, we should stop handling this
+        // action since we cannot handle each of a lot of edge cases.
+        if (NS_WARN_IF(curBlock->GetParentNode() !=
+                       splitPoint.GetContainer())) {
+          return NS_ERROR_EDITOR_UNEXPECTED_DOM_TREE;
+        }
+
+        // Update container of curNode.
+        atCurNode.Set(curNode);
+
         // Remember our new block for postprocessing
         mNewBlock = curBlock;
         // Note: doesn't matter if we set mNewBlock multiple times.

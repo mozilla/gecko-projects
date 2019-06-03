@@ -17,9 +17,8 @@ class HTMLMarqueeElement final : public nsGenericHTMLElement {
   explicit HTMLMarqueeElement(already_AddRefed<dom::NodeInfo>&& aNodeInfo)
       : nsGenericHTMLElement(std::move(aNodeInfo)) {}
 
-  nsresult BindToTree(Document* aDocument, nsIContent* aParent,
-                      nsIContent* aBindingParent) override;
-  void UnbindFromTree(bool aDeep = true, bool aNullParent = true) override;
+  nsresult BindToTree(BindContext&, nsINode& aParent) override;
+  void UnbindFromTree(bool aNullParent = true) override;
 
   static const int kDefaultLoop = -1;
   static const int kDefaultScrollAmount = 6;

@@ -488,6 +488,8 @@ class JS::Realm : public JS::shadow::Realm {
   // can easily lead to races. Use this method very carefully.
   JSRuntime* runtimeFromAnyThread() const { return runtime_; }
 
+  void removeWrapper(js::WrapperMap::Ptr p);
+
   const JS::RealmCreationOptions& creationOptions() const {
     return creationOptions_;
   }
@@ -925,24 +927,6 @@ class ErrorCopier {
  public:
   explicit ErrorCopier(mozilla::Maybe<AutoRealm>& ar) : ar(ar) {}
   ~ErrorCopier();
-};
-
-class MOZ_RAII AutoSuppressAllocationMetadataBuilder {
-  JS::Zone* zone;
-  bool saved;
-
- public:
-  explicit AutoSuppressAllocationMetadataBuilder(JSContext* cx)
-      : AutoSuppressAllocationMetadataBuilder(cx->realm()->zone()) {}
-
-  explicit AutoSuppressAllocationMetadataBuilder(JS::Zone* zone)
-      : zone(zone), saved(zone->suppressAllocationMetadataBuilder) {
-    zone->suppressAllocationMetadataBuilder = true;
-  }
-
-  ~AutoSuppressAllocationMetadataBuilder() {
-    zone->suppressAllocationMetadataBuilder = saved;
-  }
 };
 
 } /* namespace js */
