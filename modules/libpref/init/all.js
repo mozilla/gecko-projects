@@ -2638,7 +2638,7 @@ pref("security.dialog_enable_delay", 1000);
 pref("security.notification_enable_delay", 500);
 
 #if defined(DEBUG) && !defined(ANDROID)
-pref("csp.about_uris_without_csp", "blank,printpreview,srcdoc,about,addons,cache-entry,config,crashes,debugging,devtools,downloads,home,memory,networking,newtab,performance,plugins,policies,profiles,restartrequired,serviceworkers,sessionrestore,support,sync-log,telemetry,url-classifier,webrtc,welcomeback");
+pref("csp.about_uris_without_csp", "blank,printpreview,srcdoc,addons,cache-entry,config,crashes,debugging,devtools,downloads,home,memory,networking,newtab,performance,plugins,policies,profiles,restartrequired,serviceworkers,sessionrestore,support,sync-log,telemetry,url-classifier,webrtc,welcomeback");
 // the following prefs are for testing purposes only.
 pref("csp.overrule_about_uris_without_csp_whitelist", false);
 pref("csp.skip_about_page_has_csp_assert", false);
@@ -5710,8 +5710,6 @@ pref("browser.search.update", true);
 pref("browser.search.update.log", false);
 pref("browser.search.update.interval", 21600);
 pref("browser.search.suggest.enabled", true);
-pref("browser.search.reset.enabled", false);
-pref("browser.search.reset.whitelist", "");
 pref("browser.search.geoSpecificDefaults", false);
 pref("browser.search.geoip.url", "https://location.services.mozilla.com/v1/country?key=%MOZILLA_API_KEY%");
 pref("browser.search.geoip.timeout", 3000);
