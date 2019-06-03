@@ -6,6 +6,9 @@ config/msvc-stl-wrapper.template.h
 # Generated code
 js/src/builtin/intl/TimeZoneDataGenerated.h
 
+dom/ipc/BrowserChild.cpp
+third_party/rust/shift_or_euc_c/include/shift_or_euc.h
+
 # Don't want to reformat irregexp. bug 1510128
 js/src/irregexp/.*
 
