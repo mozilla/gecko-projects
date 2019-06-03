@@ -34,7 +34,7 @@
 #include "SharedSurfaceGL.h"
 #include "GfxTexturesReporter.h"
 #include "gfx2DGlue.h"
-#include "gfxPrefs.h"
+#include "mozilla/StaticPrefs.h"
 #include "mozilla/IntegerPrintfMacros.h"
 #include "mozilla/gfx/Logging.h"
 
@@ -79,6 +79,7 @@ static const char* const sExtensionNames[] = {
     "GL_ANGLE_framebuffer_blit",
     "GL_ANGLE_framebuffer_multisample",
     "GL_ANGLE_instanced_arrays",
+    "GL_ANGLE_multiview",
     "GL_ANGLE_texture_compression_dxt3",
     "GL_ANGLE_texture_compression_dxt5",
     "GL_ANGLE_timer_query",
@@ -204,12 +205,13 @@ static const char* const sExtensionNames[] = {
     "GL_OES_texture_half_float",
     "GL_OES_texture_half_float_linear",
     "GL_OES_texture_npot",
-    "GL_OES_vertex_array_object"};
+    "GL_OES_vertex_array_object",
+    "GL_OVR_multiview2"};
 
 static bool ShouldUseTLSIsCurrent(bool useTLSIsCurrent) {
-  if (gfxPrefs::UseTLSIsCurrent() == 0) return useTLSIsCurrent;
+  if (StaticPrefs::UseTLSIsCurrent() == 0) return useTLSIsCurrent;
 
-  return gfxPrefs::UseTLSIsCurrent() > 0;
+  return StaticPrefs::UseTLSIsCurrent() > 0;
 }
 
 static bool ParseVersion(const std::string& versionStr,
@@ -274,7 +276,7 @@ GLContext::GLContext(CreateContextFlags flags, const SurfaceCaps& caps,
       mDebugFlags(ChooseDebugFlags(flags)),
       mSharedContext(sharedContext),
       mCaps(caps),
-      mWorkAroundDriverBugs(gfxPrefs::WorkAroundDriverBugs()) {
+      mWorkAroundDriverBugs(StaticPrefs::WorkAroundDriverBugs()) {
   mOwningThreadId = PlatformThread::CurrentId();
   MOZ_ALWAYS_TRUE(sCurrentContext.init());
   sCurrentContext.set(0);
@@ -1384,6 +1386,17 @@ void GLContext::LoadMoreSymbols(const SymbolLoader& loader) {
         fnLoadForFeature(symbols, GLFeature::invalidate_framebuffer);
     }
 
+    if (IsSupported(GLFeature::multiview)) {
+        const SymLoadStruct symbols[] = {
+            { (PRFuncPtr*) &mSymbols.fFramebufferTextureMultiview, {{
+              "glFramebufferTextureMultiviewOVR",
+              "glFramebufferTextureMultiviewLayeredANGLE"
+            }} },
+            END_SYMBOLS
+        };
+        fnLoadForFeature(symbols, GLFeature::multiview);
+    }
+
     if (IsSupported(GLFeature::prim_restart)) {
         const SymLoadStruct symbols[] = {
             { (PRFuncPtr*) &mSymbols.fPrimitiveRestartIndex,    {{ "glPrimitiveRestartIndex", "glPrimitiveRestartIndexNV" }} },
@@ -1746,7 +1759,7 @@ GLFormats GLContext::ChooseGLFormats(const SurfaceCaps& caps) const {
     }
   }
 
-  uint32_t msaaLevel = gfxPrefs::MSAALevel();
+  uint32_t msaaLevel = StaticPrefs::MSAALevel();
   GLsizei samples = msaaLevel * msaaLevel;
   samples = std::min(samples, mMaxSamples);
 

@@ -571,7 +571,7 @@ StorageActors.createActor({
       case cookie.SAMESITE_STRICT:
         return COOKIE_SAMESITE.STRICT;
     }
-    // cookie.SAMESITE_UNSET
+    // cookie.SAMESITE_NONE
     return COOKIE_SAMESITE.UNSET;
   },
 
@@ -835,6 +835,7 @@ var cookieHelpers = {
    *          }
    *        }
    */
+  /* eslint-disable complexity */
   editCookie(data) {
     let {field, oldValue, newValue} = data;
     const origName = field === "name" ? oldValue : data.items.name;
@@ -920,6 +921,7 @@ var cookieHelpers = {
       cookie.sameSite
     );
   },
+  /* eslint-enable complexity */
 
   _removeCookies(host, opts = {}) {
     // We use a uniqueId to emulate compound keys for cookies. We need to
@@ -998,7 +1000,7 @@ var cookieHelpers = {
           const cookies = [];
 
           for (let i = 0; i < cookiesNoInterface.length; i++) {
-            const cookie = cookiesNoInterface.queryElementAt(i, Ci.nsICookie2);
+            const cookie = cookiesNoInterface.queryElementAt(i, Ci.nsICookie);
             cookies.push(cookie);
           }
           cookieHelpers.onCookieChanged(cookies, topic, data);
@@ -1006,7 +1008,7 @@ var cookieHelpers = {
           return;
         }
 
-        const cookie = subject.QueryInterface(Ci.nsICookie2);
+        const cookie = subject.QueryInterface(Ci.nsICookie);
         cookieHelpers.onCookieChanged(cookie, topic, data);
         break;
     }
@@ -2775,6 +2777,7 @@ const StorageActor = protocol.ActorClassWithSpec(specs.storageSpec, {
    *           Pass an empty array if the host itself was affected: either completely
    *           removed or cleared.
    */
+  /* eslint-disable complexity */
   update(action, storeType, data) {
     if (action == "cleared") {
       this.emit("stores-cleared", { [storeType]: data });
@@ -2839,6 +2842,7 @@ const StorageActor = protocol.ActorClassWithSpec(specs.storageSpec, {
 
     return null;
   },
+  /* eslint-enable complexity */
 
   /**
    * This method removes data from the this.boundUpdate object in the same

@@ -3090,6 +3090,7 @@ exports.CSS_PROPERTIES = {
       "translate",
       "offset-path",
       "offset-distance",
+      "offset-rotate",
       "scroll-behavior",
       "scroll-snap-align",
       "scroll-snap-type",
@@ -3116,7 +3117,6 @@ exports.CSS_PROPERTIES = {
       "shape-outside",
       "touch-action",
       "-webkit-line-clamp",
-      "color",
       "column-width",
       "column-count",
       "column-fill",
@@ -3162,6 +3162,7 @@ exports.CSS_PROPERTIES = {
       "empty-cells",
       "caption-side",
       "border-spacing",
+      "color",
       "line-height",
       "text-transform",
       "hyphens",
@@ -8309,6 +8310,21 @@ exports.CSS_PROPERTIES = {
       "unset"
     ]
   },
+  "offset-rotate": {
+    "isInherited": false,
+    "subproperties": [
+      "offset-rotate"
+    ],
+    "supports": [],
+    "values": [
+      "auto",
+      "inherit",
+      "initial",
+      "reverse",
+      "revert",
+      "unset"
+    ]
+  },
   "opacity": {
     "isInherited": false,
     "subproperties": [
@@ -10654,6 +10670,10 @@ exports.PREFERENCES = [
   [
     "-moz-osx-font-smoothing",
     "layout.css.osx-font-smoothing.enabled"
+  ],
+  [
+    "offset-rotate",
+    "layout.css.motion-path.enabled"
   ],
   [
     "overflow-anchor",

@@ -32,6 +32,7 @@
 #include "mozilla/dom/WorkerNavigator.h"
 #include "mozilla/dom/cache/CacheStorage.h"
 #include "mozilla/StaticPrefs.h"
+#include "mozilla/StorageAccess.h"
 #include "nsServiceManagerUtils.h"
 
 #include "mozilla/dom/Document.h"
@@ -401,16 +402,16 @@ already_AddRefed<IDBFactory> WorkerGlobalScope::GetIndexedDB(
   RefPtr<IDBFactory> indexedDB = mIndexedDB;
 
   if (!indexedDB) {
-    nsContentUtils::StorageAccess access = mWorkerPrivate->StorageAccess();
+    StorageAccess access = mWorkerPrivate->StorageAccess();
 
-    if (access == nsContentUtils::StorageAccess::eDeny) {
+    if (access == StorageAccess::eDeny) {
       NS_WARNING("IndexedDB is not allowed in this worker!");
       aErrorResult = NS_ERROR_DOM_SECURITY_ERR;
       return nullptr;
     }
 
-    if (access == nsContentUtils::StorageAccess::ePartitionedOrDeny &&
-        !StaticPrefs::privacy_storagePrincipal_enabledForTrackers()) {
+    if (ShouldPartitionStorage(access) &&
+        !StoragePartitioningEnabled(access, mWorkerPrivate->CookieSettings())) {
       NS_WARNING("IndexedDB is not allowed in this worker!");
       aErrorResult = NS_ERROR_DOM_SECURITY_ERR;
       return nullptr;
@@ -506,7 +507,11 @@ WorkerGlobalScope::GetOrCreateServiceWorkerRegistration(
 }
 
 void WorkerGlobalScope::FirstPartyStorageAccessGranted() {
+  // Reset the IndexedDB factory.
   mIndexedDB = nullptr;
+
+  // Reset DOM Cache
+  mCacheStorage = nullptr;
 }
 
 DedicatedWorkerGlobalScope::DedicatedWorkerGlobalScope(

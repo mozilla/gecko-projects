@@ -704,9 +704,8 @@ impl<'le> GeckoElement<'le> {
                     .map(GeckoElement)
             }
         } else {
-            let binding_parent = unsafe { self.non_xul_xbl_binding_parent_raw_content().as_ref() }
-                .map(GeckoNode::from_content)
-                .and_then(|n| n.as_element());
+            let binding_parent = unsafe { self.non_xul_xbl_binding_parent().as_ref() }
+                .map(GeckoElement);
 
             debug_assert!(
                 binding_parent ==
@@ -721,10 +720,10 @@ impl<'le> GeckoElement<'le> {
     }
 
     #[inline]
-    fn non_xul_xbl_binding_parent_raw_content(&self) -> *mut nsIContent {
+    fn non_xul_xbl_binding_parent(&self) -> *mut RawGeckoElement {
         debug_assert!(!self.is_xul_element());
         self.extended_slots().map_or(ptr::null_mut(), |slots| {
-            slots._base.mBindingParent.raw::<nsIContent>()
+            slots._base.mBindingParent.mRawPtr
         })
     }
 
@@ -1098,7 +1097,7 @@ impl<'le> TElement for GeckoElement<'le> {
     type TraversalChildrenIterator = GeckoChildrenIterator<'le>;
 
     fn inheritance_parent(&self) -> Option<Self> {
-        if self.implemented_pseudo_element().is_some() {
+        if self.is_pseudo_element() {
             return self.pseudo_element_originating_element();
         }
 
@@ -1471,7 +1470,7 @@ impl<'le> TElement for GeckoElement<'le> {
     #[inline]
     fn skip_item_display_fixup(&self) -> bool {
         debug_assert!(
-            self.implemented_pseudo_element().is_none(),
+            !self.is_pseudo_element(),
             "Just don't call me if I'm a pseudo, you should know the answer already"
         );
         self.is_root_of_native_anonymous_subtree()
@@ -1736,7 +1735,7 @@ impl<'le> TElement for GeckoElement<'le> {
                     PropertyDeclaration::TextAlign(SpecifiedTextAlign::MozCenterOrInherit),
                     Importance::Normal,
                 );
-                let arc = Arc::new(global_style_data.shared_lock.wrap(pdb));
+                let arc = Arc::new_leaked(global_style_data.shared_lock.wrap(pdb));
                 ApplicableDeclarationBlock::from_declarations(arc, ServoCascadeLevel::PresHints)
             };
             static ref TABLE_COLOR_RULE: ApplicableDeclarationBlock = {
@@ -1745,7 +1744,7 @@ impl<'le> TElement for GeckoElement<'le> {
                     PropertyDeclaration::Color(SpecifiedColor(Color::InheritFromBodyQuirk.into())),
                     Importance::Normal,
                 );
-                let arc = Arc::new(global_style_data.shared_lock.wrap(pdb));
+                let arc = Arc::new_leaked(global_style_data.shared_lock.wrap(pdb));
                 ApplicableDeclarationBlock::from_declarations(arc, ServoCascadeLevel::PresHints)
             };
             static ref MATHML_LANG_RULE: ApplicableDeclarationBlock = {
@@ -1754,7 +1753,7 @@ impl<'le> TElement for GeckoElement<'le> {
                     PropertyDeclaration::XLang(SpecifiedLang(atom!("x-math"))),
                     Importance::Normal,
                 );
-                let arc = Arc::new(global_style_data.shared_lock.wrap(pdb));
+                let arc = Arc::new_leaked(global_style_data.shared_lock.wrap(pdb));
                 ApplicableDeclarationBlock::from_declarations(arc, ServoCascadeLevel::PresHints)
             };
             static ref SVG_TEXT_DISABLE_ZOOM_RULE: ApplicableDeclarationBlock = {
@@ -1763,7 +1762,7 @@ impl<'le> TElement for GeckoElement<'le> {
                     PropertyDeclaration::XTextZoom(SpecifiedZoom(false)),
                     Importance::Normal,
                 );
-                let arc = Arc::new(global_style_data.shared_lock.wrap(pdb));
+                let arc = Arc::new_leaked(global_style_data.shared_lock.wrap(pdb));
                 ApplicableDeclarationBlock::from_declarations(arc, ServoCascadeLevel::PresHints)
             };
         };
@@ -1919,8 +1918,13 @@ impl<'le> ::selectors::Element for GeckoElement<'le> {
     }
 
     #[inline]
+    fn is_pseudo_element(&self) -> bool {
+        self.implemented_pseudo_element().is_some()
+    }
+
+    #[inline]
     fn pseudo_element_originating_element(&self) -> Option<Self> {
-        debug_assert!(self.implemented_pseudo_element().is_some());
+        debug_assert!(self.is_pseudo_element());
         let parent = self.closest_anon_subtree_root_parent()?;
 
         // FIXME(emilio): Special-case for <input type="number">s

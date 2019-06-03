@@ -682,7 +682,7 @@ void nsXULPopupManager::ShowMenu(nsIContent* aMenu, bool aSelectFirstItem,
 
   // there is no trigger event for menus
   InitTriggerEvent(nullptr, nullptr, nullptr);
-  popupFrame->InitializePopup(menuFrame->GetAnchor(), nullptr, position, 0, 0,
+  popupFrame->InitializePopup(aMenu, nullptr, position, 0, 0,
                               MenuPopupAnchorType_Node, true);
 
   if (aAsynchronous) {
@@ -2667,8 +2667,7 @@ nsXULMenuCommandEvent::Run() {
     // Deselect ourselves.
     if (mCloseMenuMode != CloseMenuMode_None) menuFrame->SelectMenu(false);
 
-    AutoHandlingUserInputStatePusher userInpStatePusher(
-        mUserInput, nullptr, presShell->GetDocument());
+    AutoHandlingUserInputStatePusher userInpStatePusher(mUserInput);
     RefPtr<Element> menu = mMenu;
     nsContentUtils::DispatchXULCommand(menu, mIsTrusted, nullptr, presShell,
                                        mControl, mAlt, mShift, mMeta);

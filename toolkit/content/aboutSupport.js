@@ -479,6 +479,7 @@ var snapshotFormatters = {
       "webgl2Extensions",
       ["supportsHardwareH264", "hardware-h264"],
       ["direct2DEnabled", "#Direct2D"],
+      ["windowProtocol", "graphics-window-protocol"],
       "usesTiling",
       "contentUsesTiling",
       "offMainThreadPaintEnabled",
@@ -557,7 +558,7 @@ var snapshotFormatters = {
     let features = [];
     for (let feature of featureLog.features) {
       // Only add interesting decisions - ones that were not automatic based on
-      // all.js/gfxPrefs defaults.
+      // all.js/StaticPrefs defaults.
       if (feature.log.length > 1 || feature.log[0].status != "available") {
         features.push(feature);
       }

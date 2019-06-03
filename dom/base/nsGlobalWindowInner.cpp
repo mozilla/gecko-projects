@@ -83,6 +83,7 @@
 #include "mozilla/Preferences.h"
 #include "mozilla/Likely.h"
 #include "mozilla/Sprintf.h"
+#include "mozilla/StorageAccess.h"
 #include "mozilla/Unused.h"
 
 // Other Classes
@@ -260,6 +261,8 @@
 #include "mozilla/dom/ClientState.h"
 
 #include "mozilla/dom/WindowGlobalChild.h"
+
+#include "mozilla/net/CookieSettings.h"
 
 // Apple system headers seem to have a check() macro.  <sigh>
 #ifdef check
@@ -4344,8 +4347,7 @@ Storage* nsGlobalWindowInner::GetSessionStorage(ErrorResult& aError) {
     }
 
     uint32_t rejectedReason = 0;
-    nsContentUtils::StorageAccess access =
-        nsContentUtils::StorageAllowedForWindow(this, &rejectedReason);
+    StorageAccess access = StorageAllowedForWindow(this, &rejectedReason);
 
     // SessionStorage is an ephemeral per-tab per-origin storage that only lives
     // as long as the tab is open, although it may survive browser restarts
@@ -4369,8 +4371,8 @@ Storage* nsGlobalWindowInner::GetSessionStorage(ErrorResult& aError) {
     //
     // 3. Tracking protection (BEHAVIOR_REJECT_TRACKER) is in effect and
     // IsThirdPartyTrackingResourceWindow() returned true and there wasn't a
-    // permission that allows it. This will return ePartitionedOrDeny with a
-    // reason of STATE_COOKIES_BLOCKED_TRACKER.
+    // permission that allows it. This will return ePartitionTrackersOrDeny with
+    // a reason of STATE_COOKIES_BLOCKED_TRACKER.
     //
     // In the 1st case, the user has explicitly indicated that they don't want
     // to allow any storage to the origin or all origins and so we throw an
@@ -4378,7 +4380,7 @@ Storage* nsGlobalWindowInner::GetSessionStorage(ErrorResult& aError) {
     // decision reasoned that there's no harm in providing SessionStorage
     // because the information is not durable and cannot escape the current tab.
     // The rationale is similar for the 3rd case.
-    if (access == nsContentUtils::StorageAccess::eDeny &&
+    if (access == StorageAccess::eDeny &&
         rejectedReason !=
             nsIWebProgressListener::STATE_COOKIES_BLOCKED_FOREIGN) {
       aError.Throw(NS_ERROR_DOM_SECURITY_ERR);
@@ -4441,25 +4443,24 @@ Storage* nsGlobalWindowInner::GetLocalStorage(ErrorResult& aError) {
   // nsContentUtils::IsURIInPrefList to know the syntax for the pref value.
   // This is a temporary web-compatibility hack.
 
-  nsContentUtils::StorageAccess access =
-      nsContentUtils::StorageAllowedForWindow(this);
+  StorageAccess access = StorageAllowedForWindow(this);
 
   // We allow partitioned localStorage only to some hosts.
-  if (access == nsContentUtils::StorageAccess::ePartitionedOrDeny) {
+  if (ShouldPartitionStorage(access)) {
     if (!mDoc) {
-      access = nsContentUtils::StorageAccess::eDeny;
-    } else if (!StaticPrefs::privacy_storagePrincipal_enabledForTrackers()) {
+      access = StorageAccess::eDeny;
+    } else if (!StoragePartitioningEnabled(access, mDoc->CookieSettings())) {
       nsCOMPtr<nsIURI> uri;
       Unused << mDoc->NodePrincipal()->GetURI(getter_AddRefs(uri));
       static const char* kPrefName =
           "privacy.restrict3rdpartystorage.partitionedHosts";
       if (!uri || !nsContentUtils::IsURIInPrefList(uri, kPrefName)) {
-        access = nsContentUtils::StorageAccess::eDeny;
+        access = StorageAccess::eDeny;
       }
     }
   }
 
-  if (access == nsContentUtils::StorageAccess::eDeny) {
+  if (access == StorageAccess::eDeny) {
     if (mDoc && (mDoc->GetSandboxFlags() & SANDBOXED_ORIGIN) != 0) {
       // Only raise the exception if we are denying storage access due to
       // sandbox restrictions.  If we're denying storage access due to other
@@ -4470,12 +4471,19 @@ Storage* nsGlobalWindowInner::GetLocalStorage(ErrorResult& aError) {
     return nullptr;
   }
 
+  nsCOMPtr<nsICookieSettings> cookieSettings;
+  if (mDoc) {
+    cookieSettings = mDoc->CookieSettings();
+  } else {
+    cookieSettings = net::CookieSettings::CreateBlockingAll();
+  }
+
   // Note that this behavior is observable: if we grant storage permission to a
   // tracker, we pass from the partitioned LocalStorage to the 'normal'
   // LocalStorage. The previous data is lost and the 2 window.localStorage
   // objects, before and after the permission granted, will be different.
-  if ((StaticPrefs::privacy_storagePrincipal_enabledForTrackers() ||
-       access != nsContentUtils::StorageAccess::ePartitionedOrDeny) &&
+  if ((StoragePartitioningEnabled(access, cookieSettings) ||
+       !ShouldPartitionStorage(access)) &&
       (!mLocalStorage ||
        mLocalStorage->Type() == Storage::ePartitionedLocalStorage)) {
     RefPtr<Storage> storage;
@@ -4524,8 +4532,7 @@ Storage* nsGlobalWindowInner::GetLocalStorage(ErrorResult& aError) {
     MOZ_ASSERT(mLocalStorage);
   }
 
-  if (access == nsContentUtils::StorageAccess::ePartitionedOrDeny &&
-      !mLocalStorage) {
+  if (ShouldPartitionStorage(access) && !mLocalStorage) {
     nsIPrincipal* principal = GetPrincipal();
     if (!principal) {
       aError.Throw(NS_ERROR_DOM_SECURITY_ERR);
@@ -4543,8 +4550,8 @@ Storage* nsGlobalWindowInner::GetLocalStorage(ErrorResult& aError) {
   }
 
   MOZ_ASSERT_IF(
-      !StaticPrefs::privacy_storagePrincipal_enabledForTrackers(),
-      (access == nsContentUtils::StorageAccess::ePartitionedOrDeny) ==
+      !StoragePartitioningEnabled(access, cookieSettings),
+      ShouldPartitionStorage(access) ==
           (mLocalStorage->Type() == Storage::ePartitionedLocalStorage));
 
   return mLocalStorage;
@@ -4587,9 +4594,9 @@ already_AddRefed<CacheStorage> nsGlobalWindowInner::GetCaches(
   if (!mCacheStorage) {
     bool forceTrustedOrigin =
         GetOuterWindow()->GetServiceWorkersTestingEnabled();
-    mCacheStorage = CacheStorage::CreateOnMainThread(cache::DEFAULT_NAMESPACE,
-                                                     this, GetPrincipal(),
-                                                     forceTrustedOrigin, aRv);
+    mCacheStorage = CacheStorage::CreateOnMainThread(
+        cache::DEFAULT_NAMESPACE, this, GetEffectiveStoragePrincipal(),
+        forceTrustedOrigin, aRv);
   }
 
   RefPtr<CacheStorage> ref = mCacheStorage;
@@ -5694,7 +5701,7 @@ bool nsGlobalWindowInner::RunTimeoutHandler(Timeout* aTimeout,
   // eabled the first time a timeout fires that was created while
   // popups were enabled and with a delay less than
   // "dom.disable_open_click_delay".
-  nsAutoPopupStatePusher popupStatePusher(timeout->mPopupState);
+  AutoPopupStatePusher popupStatePusher(timeout->mPopupState);
 
   // Clear the timeout's popup state, if any, to prevent interval
   // timeouts from repeatedly opening poups.
@@ -6977,6 +6984,9 @@ void nsGlobalWindowInner::StorageAccessGranted() {
 
   // Reset the IndexedDB factory.
   mIndexedDB = nullptr;
+
+  // Reset DOM Cache
+  mCacheStorage = nullptr;
 }
 
 mozilla::dom::TabGroup* nsPIDOMWindowInner::TabGroup() {

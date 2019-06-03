@@ -132,12 +132,26 @@ void nsGenericHTMLFrameElement::EnsureFrameLoader() {
   mFrameLoader = nsFrameLoader::Create(this, mOpenerWindow, mNetworkCreated);
 }
 
-nsresult nsGenericHTMLFrameElement::CreateRemoteFrameLoader(
-    nsIRemoteTab* aBrowserParent) {
+void nsGenericHTMLFrameElement::DisallowCreateFrameLoader() {
+  MOZ_ASSERT(!mFrameLoader);
+  MOZ_ASSERT(!mFrameLoaderCreationDisallowed);
+  mFrameLoaderCreationDisallowed = true;
+}
+
+void nsGenericHTMLFrameElement::AllowCreateFrameLoader() {
+  MOZ_ASSERT(!mFrameLoader);
+  MOZ_ASSERT(mFrameLoaderCreationDisallowed);
+  mFrameLoaderCreationDisallowed = false;
+}
+
+void nsGenericHTMLFrameElement::CreateRemoteFrameLoader(
+    BrowserParent* aBrowserParent) {
   MOZ_ASSERT(!mFrameLoader);
   EnsureFrameLoader();
-  NS_ENSURE_STATE(mFrameLoader);
-  mFrameLoader->SetRemoteBrowser(aBrowserParent);
+  if (NS_WARN_IF(!mFrameLoader)) {
+    return;
+  }
+  mFrameLoader->InitializeFromBrowserParent(aBrowserParent);
 
   if (nsSubDocumentFrame* subdocFrame = do_QueryFrame(GetPrimaryFrame())) {
     // The reflow for this element already happened while we were waiting
@@ -146,7 +160,6 @@ nsresult nsGenericHTMLFrameElement::CreateRemoteFrameLoader(
     // ReflowFinished, and we need to do it properly now.
     mFrameLoader->UpdatePositionAndSize(subdocFrame);
   }
-  return NS_OK;
 }
 
 void nsGenericHTMLFrameElement::PresetOpenerWindow(
@@ -200,11 +213,9 @@ void nsGenericHTMLFrameElement::LoadSrc() {
   mFrameLoader->LoadFrame(origSrc);
 }
 
-nsresult nsGenericHTMLFrameElement::BindToTree(Document* aDocument,
-                                               nsIContent* aParent,
-                                               nsIContent* aBindingParent) {
-  nsresult rv =
-      nsGenericHTMLElement::BindToTree(aDocument, aParent, aBindingParent);
+nsresult nsGenericHTMLFrameElement::BindToTree(BindContext& aContext,
+                                               nsINode& aParent) {
+  nsresult rv = nsGenericHTMLElement::BindToTree(aContext, aParent);
   NS_ENSURE_SUCCESS(rv, rv);
 
   if (IsInComposedDoc()) {
@@ -223,7 +234,7 @@ nsresult nsGenericHTMLFrameElement::BindToTree(Document* aDocument,
   return rv;
 }
 
-void nsGenericHTMLFrameElement::UnbindFromTree(bool aDeep, bool aNullParent) {
+void nsGenericHTMLFrameElement::UnbindFromTree(bool aNullParent) {
   if (mFrameLoader) {
     // This iframe is being taken out of the document, destroy the
     // iframe's frame loader (doing that will tear down the window in
@@ -235,7 +246,7 @@ void nsGenericHTMLFrameElement::UnbindFromTree(bool aDeep, bool aNullParent) {
     mFrameLoader = nullptr;
   }
 
-  nsGenericHTMLElement::UnbindFromTree(aDeep, aNullParent);
+  nsGenericHTMLElement::UnbindFromTree(aNullParent);
 }
 
 /* static */
@@ -439,22 +450,6 @@ NS_IMETHODIMP nsGenericHTMLFrameElement::GetIsolated(bool* aOut) {
 
   // Isolation is only disabled if the attribute is present
   *aOut = !HasAttr(kNameSpaceID_None, nsGkAtoms::noisolation);
-  return NS_OK;
-}
-
-NS_IMETHODIMP
-nsGenericHTMLFrameElement::DisallowCreateFrameLoader() {
-  MOZ_ASSERT(!mFrameLoader);
-  MOZ_ASSERT(!mFrameLoaderCreationDisallowed);
-  mFrameLoaderCreationDisallowed = true;
-  return NS_OK;
-}
-
-NS_IMETHODIMP
-nsGenericHTMLFrameElement::AllowCreateFrameLoader() {
-  MOZ_ASSERT(!mFrameLoader);
-  MOZ_ASSERT(mFrameLoaderCreationDisallowed);
-  mFrameLoaderCreationDisallowed = false;
   return NS_OK;
 }
 

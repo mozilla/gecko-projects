@@ -140,6 +140,8 @@ JSObject* GCRuntime::tryNewTenuredObject(JSContext* cx, AllocKind kind,
   if (obj) {
     if (nDynamicSlots) {
       static_cast<NativeObject*>(obj)->initSlots(slots);
+      AddCellMemory(obj, nDynamicSlots * sizeof(HeapSlot),
+                    MemoryUse::ObjectSlots);
     }
   } else {
     js_free(slots);
@@ -600,7 +602,7 @@ Arena* GCRuntime::allocateArena(Chunk* chunk, Zone* zone, AllocKind thingKind,
 
   // Trigger an incremental slice if needed.
   if (checkThresholds != ShouldCheckThresholds::DontCheckThresholds) {
-    maybeAllocTriggerZoneGC(zone);
+    maybeAllocTriggerZoneGC(zone, ArenaSize);
   }
 
   return arena;

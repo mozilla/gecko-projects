@@ -10,7 +10,7 @@
 this.StoragePrincipalHelper = {
   runTest(name, callback, cleanupFunction, extraPrefs) {
     add_task(async _ => {
-      info("Starting test `" + name + "'...");
+      info("Starting test `" + name + "' with storage principal...");
 
       await SpecialPowers.flushPrefEnv();
       await SpecialPowers.pushPrefEnv({"set": [
@@ -20,7 +20,7 @@ this.StoragePrincipalHelper = {
         ["privacy.trackingprotection.pbmode.enabled", false],
         ["privacy.trackingprotection.annotate_channels", true],
         ["privacy.storagePrincipal.enabledForTrackers", true],
-        ["privacy.restrict3rdpartystorage.userInteractionRequiredForHosts", "tracking.example.com,tracking.example.org"],
+        ["privacy.restrict3rdpartystorage.userInteractionRequiredForHosts", "tracking.example.org"],
       ]});
 
       if (extraPrefs && Array.isArray(extraPrefs) && extraPrefs.length) {
@@ -85,6 +85,7 @@ this.StoragePrincipalHelper = {
       if (cleanupFunction) {
         await cleanupFunction();
       }
+      UrlClassifierTestUtils.cleanupTestTrackers();
     });
   },
 };

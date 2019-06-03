@@ -9,6 +9,11 @@
 {
 const {Services} = ChromeUtils.import("resource://gre/modules/Services.jsm");
 
+let LazyModules = {};
+
+ChromeUtils.defineModuleGetter(LazyModules, "PermitUnloader",
+  "resource://gre/actors/BrowserElementParent.jsm");
+
 const elementsToDestroyOnUnload = new Set();
 
 window.addEventListener("unload", () => {
@@ -41,6 +46,12 @@ class MozBrowser extends MozElements.MozElementMixin(XULFrameElement) {
     super();
 
     this.onPageHide = this.onPageHide.bind(this);
+
+    this.isNavigating = false;
+
+    this._documentURI = null;
+    this._characterSet = null;
+    this._documentContentType = null;
 
     /**
      * These are managed by the tabbrowser:
@@ -300,8 +311,6 @@ class MozBrowser extends MozElements.MozElementMixin(XULFrameElement) {
     this._autoScrollScrollId = null;
 
     this._autoScrollPresShellId = null;
-
-    this._permitUnloadId = 0;
   }
 
   connectedCallback() {
@@ -350,6 +359,16 @@ class MozBrowser extends MozElements.MozElementMixin(XULFrameElement) {
       return this._documentContentType;
     }
     return this.contentDocument ? this.contentDocument.contentType : null;
+  }
+
+  set documentContentType(aContentType) {
+    if (aContentType != null) {
+      if (this.isRemoteBrowser) {
+        this._documentContentType = aContentType;
+      } else {
+        this.contentDocument.documentContentType = aContentType;
+      }
+    }
   }
 
   set sameProcessAsFrameLoader(val) {
@@ -594,6 +613,12 @@ class MozBrowser extends MozElements.MozElementMixin(XULFrameElement) {
     return this.isRemoteBrowser ? this._mayEnableCharacterEncodingMenu : this.docShell.mayEnableCharacterEncodingMenu;
   }
 
+  set mayEnableCharacterEncodingMenu(aMayEnable) {
+    if (this.isRemoteBrowser) {
+      this._mayEnableCharacterEncodingMenu = aMayEnable;
+    }
+  }
+
   get contentPrincipal() {
     return this.isRemoteBrowser ? this._contentPrincipal : this.contentDocument.nodePrincipal;
   }
@@ -757,11 +782,11 @@ class MozBrowser extends MozElements.MozElementMixin(XULFrameElement) {
 
   _wrapURIChangeCall(fn) {
     if (!this.isRemoteBrowser) {
-      this.inLoadURI = true;
+      this.isNavigating = true;
       try {
         fn();
       } finally {
-        this.inLoadURI = false;
+        this.isNavigating = false;
       }
     } else {
       fn();
@@ -1020,7 +1045,7 @@ class MozBrowser extends MozElements.MozElementMixin(XULFrameElement) {
   }
 
   didStartLoadSinceLastUserTyping() {
-    return !this.inLoadURI &&
+    return !this.isNavigating &&
       this.urlbarChangeTracker._startedLoadSinceLastUserTyping;
   }
 
@@ -1367,6 +1392,22 @@ class MozBrowser extends MozElements.MozElementMixin(XULFrameElement) {
     return this._remoteWebProgressManager;
   }
 
+  updateForStateChange(aCharset, aDocumentURI, aContentType) {
+    if (this.isRemoteBrowser && this.messageManager) {
+      if (aCharset != null) {
+        this._characterSet = aCharset;
+      }
+
+      if (aDocumentURI != null) {
+        this._documentURI = aDocumentURI;
+      }
+
+      if (aContentType != null) {
+        this._documentContentType = aContentType;
+      }
+    }
+  }
+
   purgeSessionHistory() {
     if (this.isRemoteBrowser) {
       try {
@@ -1392,8 +1433,20 @@ class MozBrowser extends MozElements.MozElementMixin(XULFrameElement) {
         BrowserUtils.principalWithMatchingOA(aPrincipal, this.contentPrincipal);
       this.frameLoader.remoteTab.transmitPermissionsForPrincipal(permissionPrincipal);
 
-      // Create the about blank content viewer in the content process
-      this.messageManager.sendAsyncMessage("Browser:CreateAboutBlank", aPrincipal);
+      // This still uses the message manager, for the following reasons:
+      //
+      // 1. Due to bug 1523638, it's virtually certain that, if we've just created
+      //    this <xul:browser>, that the WindowGlobalParent for the top-level frame
+      //    of this browser doesn't exist yet, so it's not possible to get at a
+      //    JS Window Actor for it.
+      //
+      // 2. JS Window Actors are tied to the principals for the frames they're running
+      //    in - switching principals is therefore self-destructive and unexpected.
+      //
+      // So we'll continue to use the message manager until we come up with a better
+      // solution.
+      this.messageManager.sendAsyncMessage("BrowserElement:CreateAboutBlank",
+                                           aPrincipal);
       return;
     }
     let principal = BrowserUtils.principalWithMatchingOA(aPrincipal, this.contentPrincipal);
@@ -1716,16 +1769,13 @@ class MozBrowser extends MozElements.MozElementMixin(XULFrameElement) {
 
   getInPermitUnload(aCallback) {
     if (this.isRemoteBrowser) {
-      let id = this._permitUnloadId++;
-      let mm = this.messageManager;
-      mm.sendAsyncMessage("InPermitUnload", { id });
-      mm.addMessageListener("InPermitUnload", function listener(msg) {
-        if (msg.data.id != id) {
-          return;
-        }
-        mm.removeMessageListener("InPermitUnload", listener);
-        aCallback(msg.data.inPermitUnload);
-      });
+      let { remoteTab } = this.frameLoader;
+      if (!remoteTab) {
+        // If we're crashed, we're definitely not in this state anymore.
+        aCallback(false);
+        return;
+      }
+      aCallback(LazyModules.PermitUnloader.inPermitUnload(this.frameLoader));
       return;
     }
 
@@ -1738,68 +1788,11 @@ class MozBrowser extends MozElements.MozElementMixin(XULFrameElement) {
 
   permitUnload(aPermitUnloadFlags) {
     if (this.isRemoteBrowser) {
-      let { remoteTab } = this.frameLoader;
-
-      if (!remoteTab.hasBeforeUnload) {
+      if (!LazyModules.PermitUnloader.hasBeforeUnload(this.frameLoader)) {
         return { permitUnload: true, timedOut: false };
       }
 
-      const kTimeout = 1000;
-
-      let finished = false;
-      let responded = false;
-      let permitUnload;
-      let id = this._permitUnloadId++;
-      let mm = this.messageManager;
-      let {Services} = ChromeUtils.import("resource://gre/modules/Services.jsm");
-
-      let msgListener = msg => {
-        if (msg.data.id != id) {
-          return;
-        }
-        if (msg.data.kind == "start") {
-          responded = true;
-          return;
-        }
-        done(msg.data.permitUnload);
-      };
-
-      let observer = subject => {
-        if (subject == mm) {
-          done(true);
-        }
-      };
-
-      function done(result) {
-        finished = true;
-        permitUnload = result;
-        mm.removeMessageListener("PermitUnload", msgListener);
-        Services.obs.removeObserver(observer, "message-manager-close");
-      }
-
-      mm.sendAsyncMessage("PermitUnload", { id, aPermitUnloadFlags });
-      mm.addMessageListener("PermitUnload", msgListener);
-      Services.obs.addObserver(observer, "message-manager-close");
-
-      let timedOut = false;
-
-      function timeout() {
-        if (!responded) {
-          timedOut = true;
-        }
-
-        // Dispatch something to ensure that the main thread wakes up.
-        Services.tm.dispatchToMainThread(function() {});
-      }
-
-      let timer = Cc["@mozilla.org/timer;1"].createInstance(Ci.nsITimer);
-      timer.initWithCallback(timeout, kTimeout, timer.TYPE_ONE_SHOT);
-
-      while (!finished && !timedOut) {
-        Services.tm.currentThread.processNextEvent(true);
-      }
-
-      return { permitUnload, timedOut };
+      return LazyModules.PermitUnloader.permitUnload(this.frameLoader, aPermitUnloadFlags);
     }
 
     if (!this.docShell || !this.docShell.contentViewer) {

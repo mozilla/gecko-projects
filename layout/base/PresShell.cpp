@@ -39,7 +39,6 @@
 #endif
 
 #include "gfxContext.h"
-#include "gfxPrefs.h"
 #include "gfxUserFontSet.h"
 #include "nsContentList.h"
 #include "nsPresContext.h"
@@ -3397,7 +3396,7 @@ static void ScrollToShowRect(PresShell* aPresShell,
     bool smoothScroll = (aScrollFlags & ScrollFlags::ScrollSmooth) ||
                         ((aScrollFlags & ScrollFlags::ScrollSmoothAuto) &&
                          autoBehaviorIsSmooth);
-    if (gfxPrefs::ScrollBehaviorEnabled() && smoothScroll) {
+    if (StaticPrefs::ScrollBehaviorEnabled() && smoothScroll) {
       scrollMode = ScrollMode::SmoothMsd;
     }
     nsIFrame* frame = do_QueryFrame(aFrameAsScrollable);
@@ -3583,8 +3582,14 @@ bool PresShell::ScrollFrameRectIntoView(nsIFrame* aFrame, const nsRect& aRect,
         targetRect = targetRect.Intersect(sf->GetScrolledRect());
       }
 
-      ScrollToShowRect(this, sf, targetRect, aVertical, aHorizontal,
-                       aScrollFlags);
+      {
+        AutoWeakFrame wf(container);
+        ScrollToShowRect(this, sf, targetRect, aVertical, aHorizontal,
+                         aScrollFlags);
+        if (!wf.IsAlive()) {
+          return didScroll;
+        }
+      }
 
       nsPoint newPosition = sf->LastScrollDestination();
       // If the scroll position increased, that means our content moved up,
@@ -5100,7 +5105,7 @@ void PresShell::AddCanvasBackgroundColorItem(
   bool forceUnscrolledItem =
       nsLayoutUtils::UsesAsyncScrolling(aFrame) && NS_GET_A(bgcolor) == 255;
   if ((aFlags & AddCanvasBackgroundColorFlags::AddForSubDocument) &&
-      gfxPrefs::LayoutUseContainersForRootFrames()) {
+      StaticPrefs::LayoutUseContainersForRootFrames()) {
     // If we're using ContainerLayers for a subdoc, then any items we add here
     // will still be scrolled (since we're inside the container at this point),
     // so don't bother and we will do it manually later.
@@ -6013,7 +6018,7 @@ void PresShell::Paint(nsView* aViewToPaint, const nsRegion& aDirtyRegion,
     return;
   }
 
-  if (gfxPrefs::APZKeyboardEnabled()) {
+  if (StaticPrefs::APZKeyboardEnabled()) {
     // Update the focus target for async keyboard scrolling. This will be
     // forwarded to APZ by nsDisplayList::PaintRoot. We need to to do this
     // before we enter the paint phase because dispatching eVoid events can
@@ -7725,6 +7730,67 @@ nsresult PresShell::EventHandler::HandleEventWithTarget(
   return rv;
 }
 
+namespace {
+
+class MOZ_RAII AutoEventHandler final {
+ public:
+  AutoEventHandler(WidgetEvent* aEvent, Document* aDocument) : mEvent(aEvent) {
+    MOZ_ASSERT(mEvent);
+    MOZ_ASSERT(mEvent->IsTrusted());
+
+    if (mEvent->mMessage == eMouseDown) {
+      PresShell::ReleaseCapturingContent();
+      PresShell::AllowMouseCapture(true);
+    }
+    if (aDocument && NeedsToResetFocusManagerMouseButtonHandlingState()) {
+      nsFocusManager* fm = nsFocusManager::GetFocusManager();
+      NS_ENSURE_TRUE_VOID(fm);
+      // If it's in modal state, mouse button event handling may be nested.
+      // E.g., a modal dialog is opened at mousedown or mouseup event handler
+      // and the dialog is clicked.  Therefore, we should store current
+      // mouse button event handling document if nsFocusManager already has it.
+      mMouseButtonEventHandlingDocument =
+          fm->SetMouseButtonHandlingDocument(aDocument);
+    }
+    if (NeedsToUpdateCurrentMouseBtnState()) {
+      WidgetMouseEvent* mouseEvent = mEvent->AsMouseEvent();
+      if (mouseEvent) {
+        EventStateManager::sCurrentMouseBtn = mouseEvent->mButton;
+      }
+    }
+  }
+
+  ~AutoEventHandler() {
+    if (mEvent->mMessage == eMouseDown) {
+      PresShell::AllowMouseCapture(false);
+    }
+    if (NeedsToResetFocusManagerMouseButtonHandlingState()) {
+      nsFocusManager* fm = nsFocusManager::GetFocusManager();
+      NS_ENSURE_TRUE_VOID(fm);
+      RefPtr<Document> document =
+          fm->SetMouseButtonHandlingDocument(mMouseButtonEventHandlingDocument);
+    }
+    if (NeedsToUpdateCurrentMouseBtnState()) {
+      EventStateManager::sCurrentMouseBtn = MouseButton::eNotPressed;
+    }
+  }
+
+ protected:
+  bool NeedsToResetFocusManagerMouseButtonHandlingState() const {
+    return mEvent->mMessage == eMouseDown || mEvent->mMessage == eMouseUp;
+  }
+
+  bool NeedsToUpdateCurrentMouseBtnState() const {
+    return mEvent->mMessage == eMouseDown || mEvent->mMessage == eMouseUp ||
+           mEvent->mMessage == ePointerDown || mEvent->mMessage == ePointerUp;
+  }
+
+  RefPtr<Document> mMouseButtonEventHandlingDocument;
+  WidgetEvent* mEvent;
+};
+
+}  // anonymous namespace
+
 nsresult PresShell::EventHandler::HandleEventWithCurrentEventInfo(
     WidgetEvent* aEvent, nsEventStatus* aEventStatus,
     bool aIsHandlingNativeEvent, nsIContent* aOverrideClickTarget) {
@@ -7751,10 +7817,8 @@ nsresult PresShell::EventHandler::HandleEventWithCurrentEventInfo(
     }
   }
 
-  bool isHandlingUserInput = false;
   bool touchIsNew = false;
-  if (!PrepareToDispatchEvent(aEvent, aEventStatus, &isHandlingUserInput,
-                              &touchIsNew)) {
+  if (!PrepareToDispatchEvent(aEvent, aEventStatus, &touchIsNew)) {
     return NS_OK;
   }
 
@@ -7762,10 +7826,10 @@ nsresult PresShell::EventHandler::HandleEventWithCurrentEventInfo(
   // performance.
   RecordEventPreparationPerformance(aEvent);
 
-  AutoHandlingUserInputStatePusher userInpStatePusher(isHandlingUserInput,
-                                                      aEvent, GetDocument());
-
-  nsAutoPopupStatePusher popupStatePusher(
+  AutoHandlingUserInputStatePusher userInpStatePusher(
+      EventStateManager::IsUserInteractionEvent(aEvent), aEvent);
+  AutoEventHandler eventHandler(aEvent, GetDocument());
+  AutoPopupStatePusher popupStatePusher(
       PopupBlocker::GetEventPopupControlState(aEvent));
 
   // FIXME. If the event was reused, we need to clear the old target,
@@ -7872,11 +7936,9 @@ nsresult PresShell::EventHandler::DispatchEvent(
 }
 
 bool PresShell::EventHandler::PrepareToDispatchEvent(
-    WidgetEvent* aEvent, nsEventStatus* aEventStatus, bool* aIsUserInteraction,
-    bool* aTouchIsNew) {
+    WidgetEvent* aEvent, nsEventStatus* aEventStatus, bool* aTouchIsNew) {
   MOZ_ASSERT(aEvent->IsTrusted());
   MOZ_ASSERT(aEventStatus);
-  MOZ_ASSERT(aIsUserInteraction);
   MOZ_ASSERT(aTouchIsNew);
 
   *aTouchIsNew = false;
@@ -7890,26 +7952,14 @@ bool PresShell::EventHandler::PrepareToDispatchEvent(
     case eKeyUp: {
       WidgetKeyboardEvent* keyboardEvent = aEvent->AsKeyboardEvent();
       MaybeHandleKeyboardEventBeforeDispatch(keyboardEvent);
-      // Not all keyboard events are treated as user input, so that popups
-      // can't be opened, fullscreen mode can't be started, etc at unexpected
-      // time.
-      *aIsUserInteraction = keyboardEvent->CanTreatAsUserInput();
       return true;
     }
-    case eMouseDown:
-    case eMouseUp:
-    case ePointerDown:
-    case ePointerUp:
-      *aIsUserInteraction = true;
-      return true;
-
     case eMouseMove: {
       bool allowCapture = EventStateManager::GetActiveEventStateManager() &&
                           GetPresContext() &&
                           GetPresContext()->EventStateManager() ==
                               EventStateManager::GetActiveEventStateManager();
       PresShell::AllowMouseCapture(allowCapture);
-      *aIsUserInteraction = false;
       return true;
     }
     case eDrop: {
@@ -7921,12 +7971,9 @@ bool PresShell::EventHandler::PrepareToDispatchEvent(
           aEvent->mFlags.mOnlyChromeDispatch = true;
         }
       }
-      *aIsUserInteraction = false;
       return true;
     }
     case eContextMenu: {
-      *aIsUserInteraction = false;
-
       // If we cannot open context menu even though eContextMenu is fired, we
       // should stop dispatching it into the DOM.
       WidgetMouseEvent* mouseEvent = aEvent->AsMouseEvent();
@@ -7951,10 +7998,8 @@ bool PresShell::EventHandler::PrepareToDispatchEvent(
     case eTouchCancel:
     case eTouchPointerCancel:
       return mPresShell->mTouchManager.PreHandleEvent(
-          aEvent, aEventStatus, *aTouchIsNew, *aIsUserInteraction,
-          mPresShell->mCurrentEventContent);
+          aEvent, aEventStatus, *aTouchIsNew, mPresShell->mCurrentEventContent);
     default:
-      *aIsUserInteraction = false;
       return true;
   }
 }
@@ -10555,6 +10600,11 @@ void PresShell::UpdateViewportOverridden(bool aAfterInitialization) {
     docShell->GetSize(&width, &height);
     docShell->SetSize(width, height, false);
   }
+}
+
+bool PresShell::UsesMobileViewportSizing() const {
+  return GetIsViewportOverridden() &&
+         nsLayoutUtils::ShouldHandleMetaViewport(mDocument);
 }
 
 /*

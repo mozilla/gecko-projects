@@ -214,7 +214,7 @@ function convertResultToMatches(context, result, urls) {
       continue;
     }
     // Manage autofill and preselected properties for the first match.
-    if (i == 0) {
+    if (i == 0 && style.includes("heuristic")) {
       if (style.includes("autofill") && result.defaultIndex == 0) {
         let autofillValue = result.getValueAt(i);
         if (autofillValue.toLocaleLowerCase()
@@ -227,10 +227,9 @@ function convertResultToMatches(context, result, urls) {
           };
         }
       }
-      if (style.includes("heuristic")) {
-        context.preselected = true;
-        match.heuristic = true;
-      }
+
+      context.preselected = true;
+      match.heuristic = true;
     }
     matches.push(match);
   }
@@ -359,7 +358,8 @@ function makeUrlbarResult(tokens, info) {
       // Tags are separated by a comma and in a random order.
       // We should also just include tags that match the searchString.
       tags = tags.split(",").map(t => t.trim()).filter(tag => {
-        return tokens.some(token => tag.includes(token.value));
+        let lowerCaseTag = tag.toLocaleLowerCase();
+        return tokens.some(token => lowerCaseTag.includes(token.lowerCaseValue));
       }).sort();
     }
   } else if (info.style.includes("preloaded-top-sites")) {

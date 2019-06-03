@@ -23,7 +23,7 @@ use gleam::gl;
 use webrender::{
     api::*, api::units::*, ApiRecordingReceiver, AsyncPropertySampler, AsyncScreenshotHandle,
     BinaryRecorder, DebugFlags, Device, ExternalImage, ExternalImageHandler, ExternalImageSource,
-    PipelineInfo, ProfilerHooks, Renderer, RendererOptions, RendererStats,
+    PipelineInfo, ProfilerHooks, RecordedFrameHandle, Renderer, RendererOptions, RendererStats,
     SceneBuilderHooks, ShaderPrecacheFlags, Shaders, ThreadListener, UploadMethod, VertexUsageHint,
     WrShaders, set_profiler_hooks,
 };
@@ -63,15 +63,6 @@ pub enum AntialiasBorder {
     Yes,
 }
 
-#[repr(C)]
-pub enum WrExternalImageBufferType {
-    TextureHandle = 0,
-    TextureRectHandle = 1,
-    TextureArrayHandle = 2,
-    TextureExternalHandle = 3,
-    ExternalBuffer = 4,
-}
-
 /// Used to indicate if an image is opaque, or has an alpha channel.
 #[repr(u8)]
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
@@ -80,26 +71,10 @@ pub enum OpacityType {
     HasAlphaChannel = 1,
 }
 
-impl WrExternalImageBufferType {
-    fn to_wr(self) -> ExternalImageType {
-        match self {
-            WrExternalImageBufferType::TextureHandle =>
-                ExternalImageType::TextureHandle(TextureTarget::Default),
-            WrExternalImageBufferType::TextureRectHandle =>
-                ExternalImageType::TextureHandle(TextureTarget::Rect),
-            WrExternalImageBufferType::TextureArrayHandle =>
-                ExternalImageType::TextureHandle(TextureTarget::Array),
-            WrExternalImageBufferType::TextureExternalHandle =>
-                ExternalImageType::TextureHandle(TextureTarget::External),
-            WrExternalImageBufferType::ExternalBuffer =>
-                ExternalImageType::Buffer,
-        }
-    }
-}
-
 /// cbindgen:field-names=[mHandle]
 /// cbindgen:derive-lt=true
 /// cbindgen:derive-lte=true
+/// cbindgen:derive-neq=true
 type WrEpoch = Epoch;
 /// cbindgen:field-names=[mHandle]
 /// cbindgen:derive-lt=true
@@ -431,14 +406,22 @@ struct WrExternalImage {
     size: usize,
 }
 
-type LockExternalImageCallback = unsafe extern "C" fn(*mut c_void, WrExternalImageId, u8, ImageRendering) -> WrExternalImage;
-type UnlockExternalImageCallback = unsafe extern "C" fn(*mut c_void, WrExternalImageId, u8);
+extern "C" {
+    fn wr_renderer_lock_external_image(
+        renderer: *mut c_void,
+        external_image_id: WrExternalImageId,
+        channel_index: u8,
+        rendering: ImageRendering) -> WrExternalImage;
+    fn wr_renderer_unlock_external_image(
+        renderer: *mut c_void,
+        external_image_id: WrExternalImageId,
+        channel_index: u8);
+}
 
 #[repr(C)]
+#[derive(Copy, Clone, Debug)]
 pub struct WrExternalImageHandler {
     external_image_obj: *mut c_void,
-    lock_func: LockExternalImageCallback,
-    unlock_func: UnlockExternalImageCallback,
 }
 
 impl ExternalImageHandler for WrExternalImageHandler {
@@ -448,7 +431,7 @@ impl ExternalImageHandler for WrExternalImageHandler {
             rendering: ImageRendering)
             -> ExternalImage {
 
-        let image = unsafe { (self.lock_func)(self.external_image_obj, id.into(), channel_index, rendering) };
+        let image = unsafe { wr_renderer_lock_external_image(self.external_image_obj, id.into(), channel_index, rendering) };
         ExternalImage {
             uv: TexelRect::new(image.u0, image.v0, image.u1, image.v1),
             source: match image.image_type {
@@ -463,7 +446,7 @@ impl ExternalImageHandler for WrExternalImageHandler {
               id: ExternalImageId,
               channel_index: u8) {
         unsafe {
-            (self.unlock_func)(self.external_image_obj, id.into(), channel_index);
+            wr_renderer_unlock_external_image(self.external_image_obj, id.into(), channel_index);
         }
     }
 }
@@ -633,17 +616,8 @@ impl RenderNotifier for CppNotifier {
 
 #[no_mangle]
 pub extern "C" fn wr_renderer_set_external_image_handler(renderer: &mut Renderer,
-                                                         external_image_handler: *mut WrExternalImageHandler) {
-    if !external_image_handler.is_null() {
-        renderer.set_external_image_handler(Box::new(unsafe {
-                                                         WrExternalImageHandler {
-                                                             external_image_obj:
-                                                                 (*external_image_handler).external_image_obj,
-                                                             lock_func: (*external_image_handler).lock_func,
-                                                             unlock_func: (*external_image_handler).unlock_func,
-                                                         }
-                                                     }));
-    }
+                                                         external_image_handler: &mut WrExternalImageHandler) {
+    renderer.set_external_image_handler(Box::new(external_image_handler.clone()));
 }
 
 #[no_mangle]
@@ -676,6 +650,47 @@ pub extern "C" fn wr_renderer_render(renderer: &mut Renderer,
             false
         },
     }
+}
+
+#[no_mangle]
+pub extern "C" fn wr_renderer_record_frame(
+    renderer: &mut Renderer,
+    image_format: ImageFormat,
+    out_handle: &mut RecordedFrameHandle,
+    out_width: &mut i32,
+    out_height: &mut i32,
+) -> bool {
+    if let Some((handle, size)) = renderer.record_frame(image_format) {
+        *out_handle = handle;
+        *out_width = size.width;
+        *out_height = size.height;
+
+        true
+    } else {
+        false
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn wr_renderer_map_recorded_frame(
+    renderer: &mut Renderer,
+    handle: RecordedFrameHandle,
+    dst_buffer: *mut u8,
+    dst_buffer_len: usize,
+    dst_stride: usize,
+) -> bool {
+    renderer.map_recorded_frame(
+        handle,
+        unsafe { make_slice_mut(dst_buffer, dst_buffer_len) },
+        dst_stride,
+    )
+}
+
+#[no_mangle]
+pub extern "C" fn wr_renderer_release_composition_recorder_structures(
+    renderer: &mut Renderer,
+) {
+    renderer.release_composition_recorder_structures();
 }
 
 #[no_mangle]
@@ -1128,7 +1143,7 @@ fn wr_device_new(gl_context: *mut c_void, pc: Option<&mut WrProgramCache>)
       None => None,
     };
 
-    Device::new(gl, resource_override_path, upload_method, cached_programs, false)
+    Device::new(gl, resource_override_path, upload_method, cached_programs, false, None)
 }
 
 // Call MakeCurrent before this.
@@ -1567,6 +1582,15 @@ pub extern "C" fn wr_transaction_pinch_zoom(
 }
 
 #[no_mangle]
+pub extern "C" fn wr_transaction_set_is_transform_pinch_zooming(
+    txn: &mut Transaction,
+    animation_id: u64,
+    is_zooming: bool
+) {
+    txn.set_is_transform_pinch_zooming(is_zooming, PropertyBindingId::new(animation_id));
+}
+
+#[no_mangle]
 pub extern "C" fn wr_resource_updates_add_image(
     txn: &mut Transaction,
     image_key: WrImageKey,
@@ -1602,7 +1626,7 @@ pub extern "C" fn wr_resource_updates_add_external_image(
     image_key: WrImageKey,
     descriptor: &WrImageDescriptor,
     external_image_id: WrExternalImageId,
-    buffer_type: WrExternalImageBufferType,
+    image_type: &ExternalImageType,
     channel_index: u8
 ) {
     txn.add_image(
@@ -1612,7 +1636,7 @@ pub extern "C" fn wr_resource_updates_add_external_image(
             ExternalImageData {
                 id: external_image_id.into(),
                 channel_index: channel_index,
-                image_type: buffer_type.to_wr(),
+                image_type: *image_type,
             }
         ),
         None
@@ -1649,7 +1673,7 @@ pub extern "C" fn wr_resource_updates_update_external_image(
     key: WrImageKey,
     descriptor: &WrImageDescriptor,
     external_image_id: WrExternalImageId,
-    image_type: WrExternalImageBufferType,
+    image_type: &ExternalImageType,
     channel_index: u8
 ) {
     txn.update_image(
@@ -1659,7 +1683,7 @@ pub extern "C" fn wr_resource_updates_update_external_image(
             ExternalImageData {
                 id: external_image_id.into(),
                 channel_index,
-                image_type: image_type.to_wr(),
+                image_type: *image_type,
             }
         ),
         &DirtyRect::All,
@@ -1672,7 +1696,7 @@ pub extern "C" fn wr_resource_updates_update_external_image_with_dirty_rect(
     key: WrImageKey,
     descriptor: &WrImageDescriptor,
     external_image_id: WrExternalImageId,
-    image_type: WrExternalImageBufferType,
+    image_type: &ExternalImageType,
     channel_index: u8,
     dirty_rect: DeviceIntRect,
 ) {
@@ -1683,7 +1707,7 @@ pub extern "C" fn wr_resource_updates_update_external_image_with_dirty_rect(
             ExternalImageData {
                 id: external_image_id.into(),
                 channel_index,
-                image_type: image_type.to_wr(),
+                image_type: *image_type,
             }
         ),
         &DirtyRect::Partial(dirty_rect)

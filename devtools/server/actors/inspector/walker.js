@@ -28,6 +28,7 @@ loader.lazyRequireGetter(this, "loadSheet", "devtools/shared/layout/utils", true
 loader.lazyRequireGetter(this, "throttle", "devtools/shared/throttle", true);
 
 loader.lazyRequireGetter(this, "allAnonymousContentTreeWalkerFilter", "devtools/server/actors/inspector/utils", true);
+loader.lazyRequireGetter(this, "findGridParentContainerForNode", "devtools/server/actors/inspector/utils", true);
 loader.lazyRequireGetter(this, "isNodeDead", "devtools/server/actors/inspector/utils", true);
 loader.lazyRequireGetter(this, "nodeDocument", "devtools/server/actors/inspector/utils", true);
 loader.lazyRequireGetter(this, "standardTreeWalkerFilter", "devtools/server/actors/inspector/utils", true);
@@ -728,6 +729,7 @@ var WalkerActor = protocol.ActorClassWithSpec(walkerSpec, {
    *    hasLast: true if the last child of the node is included in the list.
    *    nodes: Array of DOMNodes.
    */
+  /* eslint-disable complexity */
   _getChildren: function(node, options = {}) {
     if (isNodeDead(node)) {
       return { hasFirst: true, hasLast: true, nodes: [] };
@@ -901,6 +903,7 @@ var WalkerActor = protocol.ActorClassWithSpec(walkerSpec, {
 
     return { hasFirst, hasLast, nodes };
   },
+  /* eslint-enable complexity */
 
   getNativeAnonymousChildren: function(rawNode) {
     // Get an anonymous walker and start on the first child.
@@ -1093,6 +1096,7 @@ var WalkerActor = protocol.ActorClassWithSpec(walkerSpec, {
    * @param string selectorState
    *        One of "pseudo", "id", "tag", "class", "null"
    */
+  /* eslint-disable complexity */
   getSuggestionsForQuery: function(query, completing, selectorState) {
     const sugs = {
       classes: new Map(),
@@ -1235,6 +1239,7 @@ var WalkerActor = protocol.ActorClassWithSpec(walkerSpec, {
       suggestions: result,
     };
   },
+  /* eslint-enable complexity */
 
   /**
    * Add a pseudo-class lock to a node.
@@ -2204,6 +2209,19 @@ var WalkerActor = protocol.ActorClassWithSpec(walkerSpec, {
     }
 
     return this.layoutActor;
+  },
+
+  /**
+   * Returns the parent grid DOMNode of the given node if it exists, otherwise, it
+   * returns null.
+   */
+  getParentGridNode: function(node) {
+    if (isNodeDead(node)) {
+      return null;
+    }
+
+    const parentGridNode = findGridParentContainerForNode(node.rawNode);
+    return parentGridNode ? this._ref(parentGridNode) : null;
   },
 
   /**

@@ -83,6 +83,8 @@ struct alignas(gc::CellAlignBytes) Cell {
   MOZ_ALWAYS_INLINE bool isMarkedAny() const;
   MOZ_ALWAYS_INLINE bool isMarkedBlack() const;
   MOZ_ALWAYS_INLINE bool isMarkedGray() const;
+  MOZ_ALWAYS_INLINE bool isMarked(gc::MarkColor color) const;
+  MOZ_ALWAYS_INLINE bool isMarkedAtLeast(gc::MarkColor color) const;
 
   inline JSRuntime* runtimeFromMainThread() const;
 
@@ -241,6 +243,14 @@ MOZ_ALWAYS_INLINE bool Cell::isMarkedBlack() const {
 
 MOZ_ALWAYS_INLINE bool Cell::isMarkedGray() const {
   return isTenured() && asTenured().isMarkedGray();
+}
+
+MOZ_ALWAYS_INLINE bool Cell::isMarked(gc::MarkColor color) const {
+  return color == MarkColor::Gray ? isMarkedGray() : isMarkedBlack();
+}
+
+MOZ_ALWAYS_INLINE bool Cell::isMarkedAtLeast(gc::MarkColor color) const {
+  return color == MarkColor::Gray ? isMarkedAny() : isMarkedBlack();
 }
 
 inline JSRuntime* Cell::runtimeFromMainThread() const {
@@ -428,6 +438,34 @@ static MOZ_ALWAYS_INLINE void AssertValidToSkipBarrier(TenuredCell* thing) {
     void* cellp, TenuredCell* prior, TenuredCell* next) {
   AssertValidToSkipBarrier(next);
 }
+
+// Like gc::MarkColor but allows the possibility of the cell being
+// unmarked. Order is important here, with white being 'least marked'
+// and black being 'most marked'.
+enum class CellColor : uint8_t { White = 0, Gray = 1, Black = 2 };
+
+inline CellColor GetCellColor(Cell* cell) {
+  if (cell->isMarkedBlack()) {
+    return CellColor::Black;
+  }
+
+  if (cell->isMarkedGray()) {
+    return CellColor::Gray;
+  }
+
+  return CellColor::White;
+}
+
+static inline CellColor GetCellColor(MarkColor color) {
+  return color == MarkColor::Black ? CellColor::Black : CellColor::Gray;
+}
+
+static inline MarkColor GetMarkColor(CellColor color) {
+  MOZ_ASSERT(color != CellColor::White);
+  return color == CellColor::Black ? MarkColor::Black : MarkColor::Gray;
+}
+
+static inline bool IsMarked(CellColor c) { return c != CellColor::White; }
 
 #ifdef DEBUG
 

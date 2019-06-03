@@ -361,6 +361,7 @@ class SyntaxParseHandler {
                                              Node member) {
     return true;
   }
+  void deleteConstructorScope(JSContext* cx, ListNodeType memberList) {}
   UnaryNodeType newYieldExpression(uint32_t begin, Node value) {
     return NodeGeneric;
   }
@@ -490,6 +491,8 @@ class SyntaxParseHandler {
       FunctionNodeType funNode, Node defaultValue) {
     return true;
   }
+
+  void checkAndSetIsDirectRHSAnonFunction(Node pn) {}
 
   FunctionNodeType newFunction(FunctionSyntaxKind syntaxKind,
                                const TokenPos& pos) {

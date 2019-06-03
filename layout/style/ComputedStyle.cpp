@@ -129,7 +129,6 @@ nsChangeHint ComputedStyle::CalcStyleDifference(const ComputedStyle& aNewStyle,
   DO_STRUCT_DIFFERENCE(TextReset);
   DO_STRUCT_DIFFERENCE(Effects);
   DO_STRUCT_DIFFERENCE(Background);
-  DO_STRUCT_DIFFERENCE(Color);
 
 #undef DO_STRUCT_DIFFERENCE
 #undef DO_STRUCT_DIFFERENCE_WITH_ARGS
@@ -374,8 +373,6 @@ Maybe<StyleStructID> ComputedStyle::LookupStruct(const nsACString& aName) {
 ComputedStyle* ComputedStyle::GetCachedLazyPseudoStyle(
     PseudoStyleType aPseudo) const {
   MOZ_ASSERT(PseudoStyle::IsPseudoElement(aPseudo));
-  MOZ_ASSERT(!IsLazilyCascadedPseudoElement(),
-             "Lazy pseudos can't inherit lazy pseudos");
 
   if (nsCSSPseudoElements::PseudoElementSupportsUserActionState(aPseudo)) {
     return nullptr;

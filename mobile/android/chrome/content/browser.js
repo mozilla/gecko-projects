@@ -466,7 +466,7 @@ var BrowserApp = {
 
     if (!ParentalControls.isAllowed(ParentalControls.INSTALL_EXTENSION)) {
       // Disable extension installs
-      Services.prefs.setIntPref("extensions.enabledScopes", 1);
+      Services.prefs.setIntPref("extensions.enabledScopes", 5);
       Services.prefs.setIntPref("extensions.autoDisableScopes", 1);
       Services.prefs.setBoolPref("xpinstall.enabled", false);
     } else if (ParentalControls.parentalControlsEnabled) {
@@ -1898,7 +1898,7 @@ var BrowserApp = {
               if (PrivateBrowsingUtils.isBrowserPrivate(browser)) {
                 PrivateBrowsingUtils.addToTrackingAllowlist(normalizedUrl);
               } else {
-                Services.perms.add(normalizedUrl, "trackingprotection", Services.perms.ALLOW_ACTION);
+                Services.perms.addFromPrincipal(browser.contentPrincipal, "trackingprotection", Services.perms.ALLOW_ACTION);
                 Telemetry.addData("TRACKING_PROTECTION_EVENTS", 1);
               }
             } else {
@@ -1909,7 +1909,7 @@ var BrowserApp = {
               if (PrivateBrowsingUtils.isBrowserPrivate(browser)) {
                 PrivateBrowsingUtils.removeFromTrackingAllowlist(normalizedUrl);
               } else {
-                Services.perms.remove(normalizedUrl, "trackingprotection");
+                Services.perms.removeFromPrincipal(browser.contentPrincipal, "trackingprotection");
                 Telemetry.addData("TRACKING_PROTECTION_EVENTS", 2);
               }
             }
@@ -5347,7 +5347,7 @@ var PopupBlockerObserver = {
     if (!browser.blockedPopups)
       return;
 
-    let result = Services.perms.testExactPermission(BrowserApp.selectedBrowser.currentURI, "popup");
+    let result = Services.perms.testExactPermissionFromPrincipal(BrowserApp.selectedBrowser.contentPrincipal, "popup");
     if (result == Ci.nsIPermissionManager.DENY_ACTION)
       return;
 
@@ -5395,36 +5395,39 @@ var PopupBlockerObserver = {
   },
 
   allowPopupsForSite: function allowPopupsForSite(aAllow) {
-    let currentURI = BrowserApp.selectedBrowser.currentURI;
-    Services.perms.add(currentURI, "popup", aAllow
+    let principal = BrowserApp.selectedBrowser.contentPrincipal;
+    Services.perms.addFromPrincipal(principal, "popup", aAllow
                        ? Ci.nsIPermissionManager.ALLOW_ACTION
                        : Ci.nsIPermissionManager.DENY_ACTION);
-    dump("Allowing popups for: " + currentURI);
   },
 
   showPopupsForSite: function showPopupsForSite() {
     let uri = BrowserApp.selectedBrowser.currentURI;
-    let {blockedPopups} = BrowserApp.selectedBrowser;
-    if (blockedPopups) {
-      for (let i = 0; i < blockedPopups.length; ++i) {
-        let popupURIspec = blockedPopups[i].popupWindowURIspec;
+    BrowserApp.selectedBrowser.retrieveListOfBlockedPopups().then(blockedPopups => {
+      if (blockedPopups) {
+        for (let i = 0; i < blockedPopups.length; ++i) {
+          let popupURIspec = blockedPopups[i].popupWindowURIspec;
 
-        // Sometimes the popup URI that we get back from blockedPopups
-        // isn't useful (for instance, netscape.com's popup URI ends up
-        // being "http://www.netscape.com", which isn't really the URI of
-        // the popup they're trying to show).  This isn't going to be
-        // useful to the user, so we won't create a menu item for it.
-        if (popupURIspec == "" || popupURIspec == "about:blank" || popupURIspec == uri.spec)
-          continue;
+          // Sometimes the popup URI that we get back from blockedPopups
+          // isn't useful (for instance, netscape.com's popup URI ends up
+          // being "http://www.netscape.com", which isn't really the URI of
+          // the popup they're trying to show).  This isn't going to be
+          // useful to the user, so we won't create a menu item for it.
+          if (popupURIspec == "" || popupURIspec == "about:blank" || popupURIspec == uri.spec)
+            continue;
 
-        let popupFeatures = blockedPopups[i].popupWindowFeatures;
-        let popupName = blockedPopups[i].popupWindowName;
+          let popupFeatures = blockedPopups[i].popupWindowFeatures;
+          let popupName = blockedPopups[i].popupWindowName;
 
-        let parent = BrowserApp.selectedTab;
-        let isPrivate = PrivateBrowsingUtils.isBrowserPrivate(parent.browser);
-        BrowserApp.addTab(popupURIspec, { parentId: parent.id, isPrivate: isPrivate });
+          let parent = BrowserApp.selectedTab;
+          let isPrivate = PrivateBrowsingUtils.isBrowserPrivate(parent.browser);
+          BrowserApp.addTab(popupURIspec, {
+            parentId: parent.id,
+            isPrivate: isPrivate,
+          });
+        }
       }
-    }
+    });
   },
 };
 

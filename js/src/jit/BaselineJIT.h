@@ -89,16 +89,6 @@ struct PCMappingIndexEntry {
   uint32_t bufferOffset;
 };
 
-// Describes a single wasm::ImportExit which jumps (via an import with
-// the given index) directly to a BaselineScript or IonScript.
-struct DependentWasmImport {
-  wasm::Instance* instance;
-  size_t importIndex;
-
-  DependentWasmImport(wasm::Instance& instance, size_t importIndex)
-      : instance(&instance), importIndex(importIndex) {}
-};
-
 // Largest script that the baseline compiler will attempt to compile.
 #if defined(JS_CODEGEN_ARM)
 // ARM branches can only reach 32MB, and the macroassembler doesn't mitigate
@@ -214,10 +204,6 @@ struct BaselineScript final {
   // object and decl env object (linked via the call object's enclosing
   // scope).
   HeapPtr<EnvironmentObject*> templateEnv_ = nullptr;
-
-  // If non-null, the list of wasm::Modules that contain an optimized call
-  // directly to this script.
-  Vector<DependentWasmImport>* dependentWasmImports_ = nullptr;
 
   // Early Ion bailouts will enter at this address. This is after frame
   // construction and before environment chain is initialized.
@@ -453,13 +439,6 @@ struct BaselineScript final {
   jsbytecode* approximatePcForNativeAddress(JSScript* script,
                                             uint8_t* nativeAddress);
 
-  MOZ_MUST_USE bool addDependentWasmImport(JSContext* cx,
-                                           wasm::Instance& instance,
-                                           uint32_t idx);
-  void removeDependentWasmImport(wasm::Instance& instance, uint32_t idx);
-  void unlinkDependentWasmImports(FreeOp* fop);
-  void clearDependentWasmImports();
-
   // Toggle debug traps (used for breakpoints and step mode) in the script.
   // If |pc| is nullptr, toggle traps for all ops in the script. Else, only
   // toggle traps at |pc|.
@@ -525,9 +504,6 @@ struct BaselineScript final {
 
     pendingBuilder_ = builder;
 
-    // lazy linking cannot happen during asmjs to ion.
-    clearDependentWasmImports();
-
     script->updateJitCodeRaw(rt);
   }
   void removePendingIonBuilder(JSRuntime* rt, JSScript* script) {
@@ -575,7 +551,7 @@ bool BaselineCompileFromBaselineInterpreter(JSContext* cx, BaselineFrame* frame,
 void FinishDiscardBaselineScript(FreeOp* fop, JSScript* script);
 
 void AddSizeOfBaselineData(JSScript* script, mozilla::MallocSizeOf mallocSizeOf,
-                           size_t* data, size_t* fallbackStubs);
+                           size_t* data);
 
 void ToggleBaselineProfiling(JSRuntime* runtime, bool enable);
 
@@ -638,16 +614,8 @@ MOZ_MUST_USE bool BailoutIonToBaseline(
     bool invalidate, BaselineBailoutInfo** bailoutInfo,
     const ExceptionBailoutInfo* exceptionInfo);
 
-// Mark TypeScripts on the stack as active, so that they are not discarded
-// during GC.
-void MarkActiveTypeScripts(Zone* zone);
-
 MethodStatus BaselineCompile(JSContext* cx, JSScript* script,
                              bool forceDebugInstrumentation = false);
-
-#ifdef JS_STRUCTURED_SPEW
-void JitSpewBaselineICStats(JSScript* script, const char* dumpReason);
-#endif
 
 static const unsigned BASELINE_MAX_ARGS_LENGTH = 20000;
 

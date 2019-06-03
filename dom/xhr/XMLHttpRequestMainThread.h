@@ -374,6 +374,10 @@ class XMLHttpRequestMainThread final : public XMLHttpRequest,
   virtual void SetResponseType(XMLHttpRequestResponseType aType,
                                ErrorResult& aRv) override;
 
+  void SetResponseTypeRaw(XMLHttpRequestResponseType aType) {
+    mResponseType = aType;
+  }
+
   virtual void GetResponse(JSContext* aCx,
                            JS::MutableHandle<JS::Value> aResponse,
                            ErrorResult& aRv) override;
@@ -724,7 +728,7 @@ class XMLHttpRequestMainThread final : public XMLHttpRequest,
   // Our parse-end listener, if we are parsing.
   RefPtr<nsXHRParseEndListener> mParseEndListener;
 
-  RefPtr<XMLHttpRequestDoneNotifier> mDelayedDoneNotifier;
+  XMLHttpRequestDoneNotifier* mDelayedDoneNotifier;
   void DisconnectDoneNotifier();
 
   // Any stack information for the point the XHR was opened. This is deleted
@@ -795,8 +799,9 @@ class XMLHttpRequestDoneNotifier : public Runnable {
   NS_IMETHOD Run() override {
     if (mXHR) {
       RefPtr<XMLHttpRequestMainThread> xhr = mXHR;
-      mXHR = nullptr;
+      // ChangeStateToDoneInternal ends up calling Disconnect();
       xhr->ChangeStateToDoneInternal();
+      MOZ_ASSERT(!mXHR);
     }
     return NS_OK;
   }
@@ -804,7 +809,7 @@ class XMLHttpRequestDoneNotifier : public Runnable {
   void Disconnect() { mXHR = nullptr; }
 
  private:
-  XMLHttpRequestMainThread* mXHR;
+  RefPtr<XMLHttpRequestMainThread> mXHR;
 };
 
 class nsXHRParseEndListener : public nsIDOMEventListener {

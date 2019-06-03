@@ -34,6 +34,7 @@
 #include "mozilla/Services.h"
 #include "mozilla/StaticPrefs.h"
 #include "mozilla/StartupTimeline.h"
+#include "mozilla/StorageAccess.h"
 #include "mozilla/Telemetry.h"
 #include "mozilla/Unused.h"
 #include "mozilla/WidgetUtils.h"
@@ -388,7 +389,8 @@ nsDocShell::nsDocShell(BrowsingContext* aBrowsingContext)
       mTitleValidForCurrentURI(false),
       mIsFrame(false),
       mSkipBrowsingContextDetachOnDestroy(false),
-      mWatchedByDevtools(false) {
+      mWatchedByDevtools(false),
+      mIsNavigating(false) {
   AssertOriginAttributesMatchPrivateBrowsing();
 
   if (gDocShellCount++ == 0) {
@@ -3065,9 +3067,9 @@ nsresult nsDocShell::DoFindItemWithName(const nsAString& aName,
     // NOTE: Could use GetSameTypeParent if the issues described in bug 1310344
     // are fixed.
     if (!GetIsMozBrowser() && parentAsTreeItem->ItemType() == mItemType) {
-      return parentAsTreeItem->FindItemWithName(
-          aName, static_cast<nsIDocShellTreeItem*>(this), aOriginalRequestor,
-          /* aSkipTabGroup = */ false, aResult);
+      return parentAsTreeItem->FindItemWithName(aName, this, aOriginalRequestor,
+                                                /* aSkipTabGroup = */ false,
+                                                aResult);
     }
   }
 
@@ -3076,7 +3078,7 @@ nsresult nsDocShell::DoFindItemWithName(const nsAString& aName,
   nsCOMPtr<nsPIDOMWindowOuter> window = GetWindow();
   if (window && !aSkipTabGroup) {
     RefPtr<mozilla::dom::TabGroup> tabGroup = window->TabGroup();
-    tabGroup->FindItemWithName(aName, aRequestor, aOriginalRequestor, aResult);
+    tabGroup->FindItemWithName(aName, this, aOriginalRequestor, aResult);
   }
 
   return NS_OK;
@@ -3677,6 +3679,12 @@ nsDocShell::GetContentBlockingLog(Promise** aPromise) {
 }
 
 NS_IMETHODIMP
+nsDocShell::GetIsNavigating(bool* aOut) {
+  *aOut = mIsNavigating;
+  return NS_OK;
+}
+
+NS_IMETHODIMP
 nsDocShell::SetDeviceSizeIsPageSize(bool aValue) {
   if (mDeviceSizeIsPageSize != aValue) {
     mDeviceSizeIsPageSize = aValue;
@@ -3767,6 +3775,10 @@ nsDocShell::GoBack() {
   if (!IsNavigationAllowed()) {
     return NS_OK;  // JS may not handle returning of an error code
   }
+
+  auto cleanupIsNavigating = MakeScopeExit([&]() { mIsNavigating = false; });
+  mIsNavigating = true;
+
   RefPtr<ChildSHistory> rootSH = GetRootSessionHistory();
   NS_ENSURE_TRUE(rootSH, NS_ERROR_FAILURE);
   ErrorResult rv;
@@ -3779,6 +3791,10 @@ nsDocShell::GoForward() {
   if (!IsNavigationAllowed()) {
     return NS_OK;  // JS may not handle returning of an error code
   }
+
+  auto cleanupIsNavigating = MakeScopeExit([&]() { mIsNavigating = false; });
+  mIsNavigating = true;
+
   RefPtr<ChildSHistory> rootSH = GetRootSessionHistory();
   NS_ENSURE_TRUE(rootSH, NS_ERROR_FAILURE);
   ErrorResult rv;
@@ -3793,6 +3809,10 @@ nsDocShell::GotoIndex(int32_t aIndex) {
   if (!IsNavigationAllowed()) {
     return NS_OK;  // JS may not handle returning of an error code
   }
+
+  auto cleanupIsNavigating = MakeScopeExit([&]() { mIsNavigating = false; });
+  mIsNavigating = true;
+
   RefPtr<ChildSHistory> rootSH = GetRootSessionHistory();
   NS_ENSURE_TRUE(rootSH, NS_ERROR_FAILURE);
   return rootSH->LegacySHistory()->GotoIndex(aIndex);
@@ -3808,6 +3828,10 @@ nsresult nsDocShell::LoadURI(const nsAString& aURI,
   if (!IsNavigationAllowed()) {
     return NS_OK;  // JS may not handle returning of an error code
   }
+
+  auto cleanupIsNavigating = MakeScopeExit([&]() { mIsNavigating = false; });
+  mIsNavigating = true;
+
   nsCOMPtr<nsIURI> uri;
   nsCOMPtr<nsIInputStream> postData(aLoadURIOptions.mPostData);
   nsresult rv = NS_OK;
@@ -3891,7 +3915,7 @@ nsresult nsDocShell::LoadURI(const nsAString& aURI,
   } else {
     popupState = PopupBlocker::openOverridden;
   }
-  nsAutoPopupStatePusher statePusher(popupState);
+  AutoPopupStatePusher statePusher(popupState);
 
   bool forceAllowDataURI = loadFlags & LOAD_FLAGS_FORCE_ALLOW_DATA_URI;
 
@@ -4019,7 +4043,8 @@ nsDocShell::DisplayLoadError(nsresult aError, nsIURI* aURI,
     formatStrCount = 1;
     errorDescriptionID = "dnsNotFound2";
     error = "dnsNotFound";
-  } else if (NS_ERROR_CONNECTION_REFUSED == aError) {
+  } else if (NS_ERROR_CONNECTION_REFUSED == aError ||
+             NS_ERROR_PROXY_BAD_GATEWAY == aError) {
     NS_ENSURE_ARG_POINTER(aURI);
     addHostPort = true;
     error = "connectionFailure";
@@ -4027,7 +4052,8 @@ nsDocShell::DisplayLoadError(nsresult aError, nsIURI* aURI,
     NS_ENSURE_ARG_POINTER(aURI);
     addHostPort = true;
     error = "netInterrupt";
-  } else if (NS_ERROR_NET_TIMEOUT == aError) {
+  } else if (NS_ERROR_NET_TIMEOUT == aError ||
+             NS_ERROR_PROXY_GATEWAY_TIMEOUT == aError) {
     NS_ENSURE_ARG_POINTER(aURI);
     // Get the host
     nsAutoCString host;
@@ -4256,6 +4282,7 @@ nsDocShell::DisplayLoadError(nsresult aError, nsIURI* aURI,
         error = "proxyResolveFailure";
         break;
       case NS_ERROR_PROXY_CONNECTION_REFUSED:
+      case NS_ERROR_PROXY_AUTHENTICATION_FAILED:
         // Proxy connection was refused.
         error = "proxyConnectFailure";
         break;
@@ -6850,15 +6877,18 @@ nsresult nsDocShell::EndPageLoad(nsIWebProgress* aProgress,
          aStatus == NS_ERROR_CONNECTION_REFUSED ||
          aStatus == NS_ERROR_UNKNOWN_PROXY_HOST ||
          aStatus == NS_ERROR_PROXY_CONNECTION_REFUSED ||
+         aStatus == NS_ERROR_PROXY_AUTHENTICATION_FAILED ||
          aStatus == NS_ERROR_BLOCKED_BY_POLICY) &&
         (isTopFrame || UseErrorPages())) {
       DisplayLoadError(aStatus, url, nullptr, aChannel);
     } else if (aStatus == NS_ERROR_NET_TIMEOUT ||
+               aStatus == NS_ERROR_PROXY_GATEWAY_TIMEOUT ||
                aStatus == NS_ERROR_REDIRECT_LOOP ||
                aStatus == NS_ERROR_UNKNOWN_SOCKET_TYPE ||
                aStatus == NS_ERROR_NET_INTERRUPT ||
-               aStatus == NS_ERROR_NET_RESET || aStatus == NS_ERROR_OFFLINE ||
-               aStatus == NS_ERROR_MALWARE_URI ||
+               aStatus == NS_ERROR_NET_RESET ||
+               aStatus == NS_ERROR_PROXY_BAD_GATEWAY ||
+               aStatus == NS_ERROR_OFFLINE || aStatus == NS_ERROR_MALWARE_URI ||
                aStatus == NS_ERROR_PHISHING_URI ||
                aStatus == NS_ERROR_UNWANTED_URI ||
                aStatus == NS_ERROR_HARMFUL_URI ||
@@ -12348,7 +12378,7 @@ class OnLinkClickEvent : public Runnable {
                    nsIContentSecurityPolicy* aCsp);
 
   NS_IMETHOD Run() override {
-    nsAutoPopupStatePusher popupStatePusher(mPopupState);
+    AutoPopupStatePusher popupStatePusher(mPopupState);
 
     // We need to set up an AutoJSAPI here for the following reason: When we
     // do OnLinkClickSync we'll eventually end up in
@@ -12966,10 +12996,10 @@ bool nsDocShell::ServiceWorkerAllowedToControlWindow(nsIPrincipal* aPrincipal,
   nsPIDOMWindowInner* parentInner =
       parentOuter ? parentOuter->GetCurrentInnerWindow() : nullptr;
 
-  nsContentUtils::StorageAccess storage =
-      nsContentUtils::StorageAllowedForNewWindow(aPrincipal, aURI, parentInner);
+  StorageAccess storage =
+      StorageAllowedForNewWindow(aPrincipal, aURI, parentInner);
 
-  return storage == nsContentUtils::StorageAccess::eAllow;
+  return storage == StorageAccess::eAllow;
 }
 
 nsresult nsDocShell::SetOriginAttributes(const OriginAttributes& aAttrs) {

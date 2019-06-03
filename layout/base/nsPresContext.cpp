@@ -66,7 +66,7 @@
 #include "LayerUserData.h"
 #include "ClientLayerManager.h"
 #include "mozilla/dom/NotifyPaintEvent.h"
-#include "gfxPrefs.h"
+
 #include "nsIDOMChromeWindow.h"
 #include "nsFrameLoader.h"
 #include "nsContentUtils.h"
@@ -339,10 +339,6 @@ bool nsPresContext::IsChromeOriginImage() const {
 }
 
 void nsPresContext::GetDocumentColorPreferences() {
-  // Make sure the preferences are initialized.  In the normal run,
-  // they would already be, because gfxPlatform would have been created,
-  // but in some reference tests, that is not the case.
-  gfxPrefs::GetSingleton();
   PreferenceSheet::EnsureInitialized();
 }
 
@@ -1393,8 +1389,8 @@ bool nsPresContext::UIResolutionChangedSubdocumentCallback(
   return true;
 }
 
-static void NotifyTabUIResolutionChanged(BrowserParent* aTab, void* aArg) {
-  aTab->UIResolutionChanged();
+static void NotifyTabUIResolutionChanged(nsIRemoteTab* aTab, void* aArg) {
+  aTab->NotifyResolutionChanged();
 }
 
 static void NotifyChildrenUIResolutionChanged(nsPIDOMWindowOuter* aWindow) {

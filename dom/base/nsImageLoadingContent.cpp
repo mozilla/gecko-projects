@@ -13,6 +13,7 @@
 #include "nsImageLoadingContent.h"
 #include "nsError.h"
 #include "nsIContent.h"
+#include "mozilla/dom/BindContext.h"
 #include "mozilla/dom/Document.h"
 #include "nsIScriptGlobalObject.h"
 #include "nsIDOMWindow.h"
@@ -38,8 +39,6 @@
 #include "nsLayoutUtils.h"
 #include "nsIContentPolicy.h"
 #include "SVGObserverUtils.h"
-
-#include "gfxPrefs.h"
 
 #include "mozAutoDocUpdate.h"
 #include "mozilla/AsyncEventDispatcher.h"
@@ -529,7 +528,7 @@ void nsImageLoadingContent::MaybeForceSyncDecoding(
     // attribute on a timer.
     TimeStamp now = TimeStamp::Now();
     TimeDuration threshold = TimeDuration::FromMilliseconds(
-        gfxPrefs::ImageInferSrcAnimationThresholdMS());
+        StaticPrefs::ImageInferSrcAnimationThresholdMS());
 
     // If the length of time between request changes is less than the threshold,
     // then force sync decoding to eliminate flicker from the animation.
@@ -1612,16 +1611,16 @@ void nsImageLoadingContent::NotifyOwnerDocumentActivityChanged() {
   }
 }
 
-void nsImageLoadingContent::BindToTree(Document* aDocument, nsIContent* aParent,
-                                       nsIContent* aBindingParent) {
+void nsImageLoadingContent::BindToTree(BindContext& aContext,
+                                       nsINode& aParent) {
   // We may be getting connected, if so our image should be tracked,
-  if (GetOurCurrentDoc()) {
+  if (aContext.InComposedDoc()) {
     TrackImage(mCurrentRequest);
     TrackImage(mPendingRequest);
   }
 }
 
-void nsImageLoadingContent::UnbindFromTree(bool aDeep, bool aNullParent) {
+void nsImageLoadingContent::UnbindFromTree(bool aNullParent) {
   // We may be leaving the document, so if our image is tracked, untrack it.
   nsCOMPtr<Document> doc = GetOurCurrentDoc();
   if (!doc) return;

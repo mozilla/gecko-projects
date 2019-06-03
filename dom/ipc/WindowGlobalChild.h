@@ -61,7 +61,11 @@ class WindowGlobalChild final : public WindowGlobalActor,
   uint64_t InnerWindowId() { return mInnerWindowId; }
   uint64_t OuterWindowId() { return mOuterWindowId; }
 
+  uint64_t ContentParentId();
+
   bool IsCurrentGlobal();
+
+  bool IsProcessRoot();
 
   // Get the other side of this actor if it is an in-process actor. Returns
   // |nullptr| if the actor has been torn down, or is not in-process.

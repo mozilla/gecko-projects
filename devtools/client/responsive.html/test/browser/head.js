@@ -390,7 +390,7 @@ function addDeviceForTest(device) {
 
 async function waitForClientClose(ui) {
   info("Waiting for RDM debugger client to close");
-  await ui.client.addOneTimeListener("closed");
+  await ui.client.once("closed");
   info("RDM's debugger client is now closed");
 }
 
@@ -564,4 +564,43 @@ function rotateViewport(ui) {
   const { document } = ui.toolWindow;
   const rotateButton = document.getElementById("rotate-button");
   rotateButton.click();
+}
+
+// Call this to switch between on/off support for meta viewports.
+async function setTouchAndMetaViewportSupport(ui, value) {
+  const reloadNeeded = await ui.updateTouchSimulation(value);
+  if (reloadNeeded) {
+    info("Reload is needed -- waiting for it.");
+    const reload = waitForViewportLoad(ui);
+    const browser = ui.getViewportBrowser();
+    browser.reload();
+    await reload;
+  }
+  return reloadNeeded;
+}
+
+// This function checks that zoom, layout viewport width and height
+// are all as expected.
+async function testViewportZoomWidthAndHeight(message, ui, zoom, width, height) {
+  if (typeof zoom !== "undefined") {
+    const resolution = await spawnViewportTask(ui, {}, function() {
+      return content.windowUtils.getResolution();
+    });
+    is(resolution, zoom, message + " should have expected zoom.");
+  }
+
+  if (typeof width !== "undefined" || typeof height !== "undefined") {
+    const layoutSize = await spawnViewportTask(ui, {}, function() {
+      return {
+        width: content.screen.width,
+        height: content.screen.height,
+      };
+    });
+    if (typeof width !== "undefined") {
+      is(layoutSize.width, width, message + " should have expected layout width.");
+    }
+    if (typeof height !== "undefined") {
+      is(layoutSize.height, height, message + " should have expected layout height.");
+    }
+  }
 }

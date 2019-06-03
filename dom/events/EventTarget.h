@@ -34,8 +34,6 @@ class EventListener;
 class EventListenerOptionsOrBoolean;
 class EventHandlerNonNull;
 class GlobalObject;
-template <typename>
-struct Nullable;
 class WindowProxyHolder;
 
 // IID for the dom::EventTarget interface

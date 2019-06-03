@@ -356,9 +356,9 @@ class UrlbarInput {
 
     // Use the selected result if we have one; this is usually the case
     // when the view is open.
-    let index = this.view.selectedIndex;
-    if (!selectedOneOff && index != -1) {
-      this.pickResult(event, index);
+    let result = this.view.selectedResult;
+    if (!selectedOneOff && result) {
+      this.pickResult(result, event);
       return;
     }
 
@@ -366,7 +366,7 @@ class UrlbarInput {
     if (selectedOneOff) {
       // If there's a selected one-off button then load a search using
       // the button's engine.
-      let result = this._resultForCurrentValue;
+      result = this._resultForCurrentValue;
       let searchString =
         (result && (result.payload.suggestion || result.payload.query)) ||
         this._lastSearchString;
@@ -384,12 +384,10 @@ class UrlbarInput {
       return;
     }
 
+    this.controller.recordSelectedResult(event, result || this.view.selectedResult);
+
     let where = openWhere || this._whereToOpen(event);
-
     openParams.allowInheritPrincipal = false;
-
-    this.controller.recordSelectedResult(event, index);
-
     url = this._maybeCanonizeURL(event, url) || url.trim();
 
     try {
@@ -423,11 +421,10 @@ class UrlbarInput {
   /**
    * Called by the view when a result is picked.
    *
+   * @param {UrlbarResult} result The result that was picked.
    * @param {Event} event The event that picked the result.
-   * @param {resultIndex} resultIndex The index of the result that was picked.
    */
-  pickResult(event, resultIndex) {
-    let result = this.view.getResult(resultIndex);
+  pickResult(result, event) {
     let isCanonized = this.setValueFromResult(result, event);
     let where = this._whereToOpen(event);
     let openParams = {
@@ -437,7 +434,8 @@ class UrlbarInput {
     if (!result.payload.isKeywordOffer) {
       this.view.close();
     }
-    this.controller.recordSelectedResult(event, resultIndex);
+
+    this.controller.recordSelectedResult(event, result);
 
     if (isCanonized) {
       this._loadURL(this.value, where, openParams);
@@ -468,6 +466,13 @@ class UrlbarInput {
       }
       case UrlbarUtils.RESULT_TYPE.SEARCH: {
         if (result.payload.isKeywordOffer) {
+          if (result.autofill) {
+            // The user confirmed an autofilled alias, so just move the caret
+            // to the end of it. Because there's a trailing space in the value,
+            // the user can directly start typing a query string at that point.
+            let value = result.autofill.value;
+            this.selectionStart = this.selectionEnd = value.length;
+          }
           // Picking a keyword offer just fills it in the input and doesn't
           // visit anything.  The user can then type a search string.  Also
           // start a new search so that the offer appears in the view by itself
@@ -1322,7 +1327,9 @@ class UrlbarInput {
   }
 
   _on_mousedown(event) {
-    if (event.originalTarget == this.inputField &&
+    if ((event.target == this.inputField ||
+         // Can be removed after bug 1513337:
+         event.originalTarget.classList.contains("anonymous-div")) &&
         event.button == 0 &&
         event.detail == 2 &&
         UrlbarPrefs.get("doubleClickSelectsAll")) {

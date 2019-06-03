@@ -9,7 +9,7 @@
 #include "mozilla/Attributes.h"
 #include "mozilla/IntegerPrintfMacros.h"
 #include "mozilla/Maybe.h"
-#include "mozilla/Utf8.h"
+#include "mozilla/Utf8.h"  // mozilla::Utf8Unit
 
 #include "builtin/ModuleObject.h"
 #if defined(JS_BUILD_BINAST)
@@ -542,16 +542,6 @@ JSScript* frontend::ScriptCompiler<Unit>::compileScript(
     AutoGeckoProfilerEntry pseudoFrame(cx, "script emit",
                                        JS::ProfilingCategoryPair::JS_Parsing);
     if (pn) {
-      if (sc->isEvalContext() && sc->hasDebuggerStatement() &&
-          !cx->helperThread()) {
-        // If the eval'ed script contains any debugger statement, force
-        // construction of arguments objects for the caller script and any other
-        // scripts it is transitively nested inside. The debugger can access any
-        // variable on the scope chain.
-        if (!info.deoptimizeArgumentsInEnclosingScripts(cx, environment)) {
-          return nullptr;
-        }
-      }
       if (!emitter->emitScript(pn)) {
         return nullptr;
       }
@@ -804,10 +794,9 @@ JSScript* frontend::CompileGlobalBinASTScript(
 #endif  // JS_BUILD_BINAST
 
 template <typename Unit>
-static ModuleObject* CreateModule(JSContext* cx,
-                                  const ReadOnlyCompileOptions& optionsInput,
-                                  SourceText<Unit>& srcBuf,
-                                  ScriptSourceObject** sourceObjectOut) {
+static ModuleObject* InternalParseModule(
+    JSContext* cx, const ReadOnlyCompileOptions& optionsInput,
+    SourceText<Unit>& srcBuf, ScriptSourceObject** sourceObjectOut) {
   MOZ_ASSERT(srcBuf.get());
   MOZ_ASSERT_IF(sourceObjectOut, *sourceObjectOut == nullptr);
 
@@ -822,7 +811,7 @@ static ModuleObject* CreateModule(JSContext* cx,
   ModuleInfo info(cx, options);
   AutoInitializeSourceObject autoSSO(info, sourceObjectOut);
 
-  ModuleCompiler<char16_t> compiler(srcBuf);
+  ModuleCompiler<Unit> compiler(srcBuf);
   ModuleObject* module = compiler.compile(info);
   if (!module) {
     return nullptr;
@@ -832,10 +821,18 @@ static ModuleObject* CreateModule(JSContext* cx,
   return module;
 }
 
-ModuleObject* frontend::CompileModule(
-    JSContext* cx, const ReadOnlyCompileOptions& optionsInput,
-    SourceText<char16_t>& srcBuf, ScriptSourceObject** sourceObjectOut) {
-  return CreateModule(cx, optionsInput, srcBuf, sourceObjectOut);
+ModuleObject* frontend::ParseModule(JSContext* cx,
+                                    const ReadOnlyCompileOptions& optionsInput,
+                                    SourceText<char16_t>& srcBuf,
+                                    ScriptSourceObject** sourceObjectOut) {
+  return InternalParseModule(cx, optionsInput, srcBuf, sourceObjectOut);
+}
+
+ModuleObject* frontend::ParseModule(JSContext* cx,
+                                    const ReadOnlyCompileOptions& optionsInput,
+                                    SourceText<Utf8Unit>& srcBuf,
+                                    ScriptSourceObject** sourceObjectOut) {
+  return InternalParseModule(cx, optionsInput, srcBuf, sourceObjectOut);
 }
 
 template <typename Unit>
@@ -848,7 +845,7 @@ static ModuleObject* CreateModule(JSContext* cx,
     return nullptr;
   }
 
-  RootedModuleObject module(cx, CompileModule(cx, options, srcBuf, nullptr));
+  RootedModuleObject module(cx, ParseModule(cx, options, srcBuf, nullptr));
   if (!module) {
     return nullptr;
   }
@@ -866,6 +863,12 @@ static ModuleObject* CreateModule(JSContext* cx,
 ModuleObject* frontend::CompileModule(JSContext* cx,
                                       const JS::ReadOnlyCompileOptions& options,
                                       SourceText<char16_t>& srcBuf) {
+  return CreateModule(cx, options, srcBuf);
+}
+
+ModuleObject* frontend::CompileModule(JSContext* cx,
+                                      const JS::ReadOnlyCompileOptions& options,
+                                      SourceText<Utf8Unit>& srcBuf) {
   return CreateModule(cx, options, srcBuf);
 }
 

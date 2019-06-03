@@ -462,7 +462,9 @@ bool ArrayPopDense(JSContext* cx, HandleObject obj, MutableHandleValue rval) {
   // have to monitor the return value.
   rval.set(argv[0]);
   if (rval.isUndefined()) {
-    TypeScript::Monitor(cx, rval);
+    jsbytecode* pc;
+    JSScript* script = cx->currentScript(&pc);
+    JitScript::MonitorBytecodeType(cx, script, pc, rval);
   }
   return true;
 }
@@ -526,7 +528,9 @@ bool ArrayShiftDense(JSContext* cx, HandleObject obj, MutableHandleValue rval) {
   // have to monitor the return value.
   rval.set(argv[0]);
   if (rval.isUndefined()) {
-    TypeScript::Monitor(cx, rval);
+    jsbytecode* pc;
+    JSScript* script = cx->currentScript(&pc);
+    JitScript::MonitorBytecodeType(cx, script, pc, rval);
   }
   return true;
 }
@@ -685,7 +689,9 @@ bool GetIntrinsicValue(JSContext* cx, HandlePropertyName name,
   // purposes, as its side effect is not observable from JS. We are
   // guaranteed to bail out after this function, but because of its AliasSet,
   // type info will not be reflowed. Manually monitor here.
-  TypeScript::Monitor(cx, rval);
+  jsbytecode* pc;
+  JSScript* script = cx->currentScript(&pc);
+  JitScript::MonitorBytecodeType(cx, script, pc, rval);
 
   return true;
 }
@@ -911,7 +917,7 @@ bool DebugEpilogue(JSContext* cx, BaselineFrame* frame, jsbytecode* pc,
   EnvironmentIter ei(cx, frame, pc);
   UnwindAllEnvironmentsInFrame(cx, ei);
   JSScript* script = frame->script();
-  frame->setOverridePc(script->lastPC());
+  frame->setOverridePc(script->offsetToPC(0));
 
   if (!ok) {
     // Pop this frame by updating packedExitFP, so that the exception
@@ -2002,8 +2008,8 @@ bool DoConcatStringObject(JSContext* cx, HandleValue lhs, HandleValue rhs,
     }
   }
 
-  // Technically, we need to call TypeScript::MonitorString for this PC, however
-  // it was called when this stub was attached so it's OK.
+  // Note: we don't have to call JitScript::MonitorBytecodeType because we
+  // monitored the string-type when attaching the IC stub.
 
   res.setString(str);
   return true;

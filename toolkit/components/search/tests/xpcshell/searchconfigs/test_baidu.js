@@ -5,6 +5,7 @@
 
 const test = new SearchConfigTest({
   identifier: "baidu",
+  aliases: ["@\u767E\u5EA6", "@baidu"],
   default: {
     included: [{
       regions: [
@@ -25,6 +26,8 @@ const test = new SearchConfigTest({
   details: [{
     included: [{}],
     domain: "baidu.com",
+    searchUrlCode: "tn=monline_7_dg",
+    suggestUrlCode: "tn=monline_7_dg",
   }],
 });
 

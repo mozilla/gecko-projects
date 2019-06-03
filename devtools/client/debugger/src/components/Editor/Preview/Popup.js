@@ -6,6 +6,7 @@
 
 import React, { Component } from "react";
 import { connect } from "../../../utils/connect";
+import { isTesting } from "devtools-environment";
 
 import Reps from "devtools-reps";
 const {
@@ -54,7 +55,7 @@ type State = {
 export class Popup extends Component<Props, State> {
   marker: any;
   pos: any;
-  popup: ?HTMLDivElement;
+  popover: ?React$ElementRef<typeof Popover>;
   timerId: ?IntervalID;
 
   constructor(props: Props) {
@@ -83,10 +84,14 @@ export class Popup extends Component<Props, State> {
 
     // Don't clear the current preview if mouse is hovered on
     // the current preview's element (target) or the popup element
+    // Note, we disregard while testing because it is impossible to hover
     const currentTarget = preview.target;
     if (
+      isTesting() ||
       currentTarget.matches(":hover") ||
-      (this.popup && this.popup.matches(":hover"))
+      !this.popover ||
+      (this.popover.$popover && this.popover.$popover.matches(":hover")) ||
+      (this.popover.$tooltip && this.popover.$tooltip.matches(":hover"))
     ) {
       return;
     }
@@ -115,7 +120,6 @@ export class Popup extends Component<Props, State> {
     return (
       <div
         className="preview-popup"
-        ref={a => (this.popup = a)}
         onClick={() =>
           selectSourceURL(cx, result.location.url, {
             line: result.location.line,
@@ -140,7 +144,6 @@ export class Popup extends Component<Props, State> {
       <div
         className="preview-popup"
         style={{ maxHeight: this.calculateMaxHeight() }}
-        ref={a => (this.popup = a)}
       >
         <ObjectInspector
           roots={properties}
@@ -164,7 +167,7 @@ export class Popup extends Component<Props, State> {
       preview: { result },
     } = this.props;
     return (
-      <div className="preview-popup" ref={a => (this.popup = a)}>
+      <div className="preview-popup">
         {Rep({
           object: result,
           mode: MODE.LONG,
@@ -226,6 +229,7 @@ export class Popup extends Component<Props, State> {
         type={type}
         onPopoverCoords={this.onPopoverCoords}
         editorRef={editorRef}
+        ref={a => (this.popover = a)}
       >
         {this.renderPreview()}
       </Popover>

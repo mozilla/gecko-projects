@@ -67,6 +67,7 @@ function transformPacket(packet) {
   }
 }
 
+/* eslint-disable complexity */
 function transformConsoleAPICallPacket(packet) {
   const { message } = packet;
 
@@ -198,6 +199,7 @@ function transformConsoleAPICallPacket(packet) {
     chromeContext: message.chromeContext,
   });
 }
+/* eslint-enable complexity */
 
 function transformNavigationMessagePacket(packet) {
   const { url } = packet;
@@ -262,7 +264,10 @@ function transformPageErrorPacket(packet) {
     private: pageError.private,
     executionPoint: pageError.executionPoint,
     chromeContext: pageError.chromeContext,
-    cssSelectors: pageError.cssSelectors,
+    // Backward compatibility: cssSelectors might not be available when debugging
+    // Firefox 67 or older.
+    // Remove `|| ""` when Firefox 68 is on the release channel.
+    cssSelectors: pageError.cssSelectors || "",
   });
 }
 

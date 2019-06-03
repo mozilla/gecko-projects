@@ -568,14 +568,6 @@ BUILD_BASE_CONFIG_OPTIONS = [
         "type": "string",
         "dest": "branch",
         "help": "This sets the branch we will be building this for."}],
-    [['--scm-level'], {
-        "action": "store",
-        "type": "int",
-        "dest": "scm_level",
-        "default": 1,
-        "help": "This sets the SCM level for the branch being built."
-                " See https://www.mozilla.org/en-US/about/"
-                "governance/policies/commit/access-policy/"}],
     [['--enable-pgo'], {
         "action": "store_true",
         "dest": "pgo_build",
@@ -1641,7 +1633,7 @@ or run without that action (ie: --no-{action})"
         '''If sccache was in use for this build, shut down the sccache server.'''
         if os.environ.get('USE_SCCACHE') == '1':
             topsrcdir = self.query_abs_dirs()['abs_src_dir']
-            sccache = os.path.join(topsrcdir, 'sccache2', 'sccache')
+            sccache = os.path.join(topsrcdir, 'sccache', 'sccache')
             if self._is_windows():
                 sccache += '.exe'
             self.run_command([sccache, '--stop-server'], cwd=topsrcdir)

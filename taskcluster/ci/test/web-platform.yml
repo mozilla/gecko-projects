@@ -12,8 +12,8 @@ job-defaults:
             default: 5400
     variants:
         by-test-platform:
-            linux64/debug: ['serviceworker']
-            default: []
+            linux64/debug: ['fission', 'serviceworker']
+            default: ['fission']
     virtualization:
         by-test-platform:
             windows10-64(?:-pgo|-shippable)?-qr/.*: virtual-with-gpu
@@ -121,7 +121,9 @@ web-platform-tests-reftests:
             default: built-projects
     tier:
         by-test-platform:
-            android.*: 2
+            android.*-x86_64/opt: 3
+            android.*-x86_64/debug: 3
+            android.*x86(?!x86_64)/opt: 2
             linux64-asan/opt: 2
             windows10-aarch64.*: 2
             default: default
@@ -170,7 +172,7 @@ web-platform-tests-wdspec:
             default: built-projects
     tier:
         by-test-platform:
-            android.*: 2
+            android.*: 3
             linux64-asan/opt: 2
             .*-qr/.*: 2  # can't be tier-1 if it's not running on integration branches
             default: default
@@ -199,6 +201,7 @@ test-verify-wpt:
     suite:
         category: test-verify
         name: test-verify-wpt
+    variants: []
     schedules-component: test-verify-wpt
     treeherder-symbol: TVw
     max-run-time: 10800

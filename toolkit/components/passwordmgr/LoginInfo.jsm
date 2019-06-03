@@ -29,14 +29,14 @@ nsLoginInfo.prototype = {
 
   init(aHostname, aFormSubmitURL, aHttpRealm,
        aUsername, aPassword,
-       aUsernameField, aPasswordField) {
+       aUsernameField = "", aPasswordField = "") {
     this.hostname      = aHostname;
     this.formSubmitURL = aFormSubmitURL;
     this.httpRealm     = aHttpRealm;
     this.username      = aUsername;
     this.password      = aPassword;
-    this.usernameField = aUsernameField;
-    this.passwordField = aPasswordField;
+    this.usernameField = aUsernameField || "";
+    this.passwordField = aPasswordField || "";
   },
 
   matches(aLogin, ignorePassword) {
@@ -89,4 +89,4 @@ nsLoginInfo.prototype = {
 
 }; // end of nsLoginInfo implementation
 
-var EXPORTED_SYMBOLS = ["nsLoginInfo"];
+const EXPORTED_SYMBOLS = ["nsLoginInfo"];

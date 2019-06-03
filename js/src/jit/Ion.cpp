@@ -3135,6 +3135,10 @@ void jit::DestroyJitScripts(FreeOp* fop, JSScript* script) {
   if (script->hasBaselineScript()) {
     jit::BaselineScript::Destroy(fop, script->baselineScript());
   }
+
+  if (script->hasJitScript()) {
+    JitScript::Destroy(script->zone(), script->jitScript());
+  }
 }
 
 void jit::TraceJitScripts(JSTracer* trc, JSScript* script) {
@@ -3146,8 +3150,8 @@ void jit::TraceJitScripts(JSTracer* trc, JSScript* script) {
     jit::BaselineScript::Trace(trc, script->baselineScript());
   }
 
-  if (script->hasICScript()) {
-    script->icScript()->trace(trc);
+  if (script->hasJitScript()) {
+    script->jitScript()->trace(trc);
   }
 }
 

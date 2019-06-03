@@ -8,7 +8,6 @@
 #include <algorithm>
 
 #include "CanvasUtils.h"
-#include "gfxPrefs.h"
 #include "GLBlitHelper.h"
 #include "GLContext.h"
 #include "mozilla/Casting.h"
@@ -19,6 +18,7 @@
 #include "mozilla/dom/ImageData.h"
 #include "mozilla/MathAlgorithms.h"
 #include "mozilla/Scoped.h"
+#include "mozilla/StaticPrefs.h"
 #include "mozilla/Unused.h"
 #include "ScopedGLHelpers.h"
 #include "TexUnpackBlob.h"
@@ -328,7 +328,7 @@ UniquePtr<webgl::TexUnpackBlob> WebGLContext::FromDomElem(
   uint32_t elemWidth = 0;
   uint32_t elemHeight = 0;
   layers::Image* layersImage = nullptr;
-  if (!gfxPrefs::WebGLDisableDOMBlitUploads() && sfer.mLayersImage) {
+  if (!StaticPrefs::WebGLDisableDOMBlitUploads() && sfer.mLayersImage) {
     layersImage = sfer.mLayersImage;
     elemWidth = layersImage->GetSize().width;
     elemHeight = layersImage->GetSize().height;
@@ -1893,22 +1893,26 @@ static const webgl::FormatUsageInfo* ValidateCopyDestUsage(
   return dstUsage;
 }
 
-bool WebGLTexture::ValidateCopyTexImageForFeedback(uint32_t level,
-                                                   GLint layer) const {
-  const auto& fb = mContext->mBoundReadFramebuffer;
+static bool ValidateCopyTexImageForFeedback(const WebGLContext& webgl,
+                                            const WebGLTexture& tex,
+                                            const uint8_t mipLevel,
+                                            const uint32_t zLayer) {
+  const auto& fb = webgl.BoundReadFb();
   if (fb) {
-    const auto& attach = fb->ColorReadBuffer();
-    MOZ_ASSERT(attach);
+    MOZ_ASSERT(fb->ColorReadBuffer());
+    const auto& attach = *fb->ColorReadBuffer();
+    MOZ_ASSERT(attach.ZLayerCount() ==
+               1);  // Multiview invalid for copyTexImage.
 
-    if (attach->Texture() == this && attach->Layer() == layer &&
-        uint32_t(attach->MipLevel()) == level) {
+    if (attach.Texture() == &tex && attach.Layer() == zLayer &&
+        attach.MipLevel() == mipLevel) {
       // Note that the TexImageTargets *don't* have to match for this to be
       // undefined per GLES 3.0.4 p211, thus an INVALID_OP in WebGL.
-      mContext->ErrorInvalidOperation(
+      webgl.ErrorInvalidOperation(
           "Feedback loop detected, as this texture"
           " is already attached to READ_FRAMEBUFFER's"
           " READ_BUFFER-selected COLOR_ATTACHMENT%u.",
-          attach->mAttachmentPoint);
+          attach.mAttachmentPoint);
       return false;
     }
   }
@@ -2052,7 +2056,10 @@ void WebGLTexture::CopyTexImage2D(TexImageTarget target, GLint level,
     return;
   }
 
-  if (!ValidateCopyTexImageForFeedback(level)) return;
+  const uint32_t zOffset = 0;
+  if (!ValidateCopyTexImageForFeedback(*mContext, *this,
+                                       AssertedCast<uint8_t>(level), zOffset))
+    return;
 
   ////////////////////////////////////
   // Check that source and dest info are compatible
@@ -2138,7 +2145,10 @@ void WebGLTexture::CopyTexSubImage(TexImageTarget target, GLint level,
     return;
   }
 
-  if (!ValidateCopyTexImageForFeedback(level, zOffset)) return;
+  if (!ValidateCopyTexImageForFeedback(*mContext, *this,
+                                       AssertedCast<uint8_t>(level),
+                                       AssertedCast<uint32_t>(zOffset)))
+    return;
 
   ////////////////////////////////////
   // Check that source and dest info are compatible

@@ -6,7 +6,7 @@
 
 #include "WebRenderAPI.h"
 
-#include "gfxPrefs.h"
+#include "mozilla/StaticPrefs.h"
 #include "LayersLogging.h"
 #include "mozilla/ipc/ByteBuf.h"
 #include "mozilla/webrender/RendererOGL.h"
@@ -77,8 +77,8 @@ class NewRenderer : public RendererEvent {
     if (!wr_window_new(
             aWindowId, mSize.width, mSize.height,
             supportLowPriorityTransactions,
-            gfxPrefs::WebRenderPictureCaching() && supportPictureCaching,
-            gfxPrefs::WebRenderStartDebugServer(), compositor->gl(),
+            StaticPrefs::WebRenderPictureCaching() && supportPictureCaching,
+            StaticPrefs::WebRenderStartDebugServer(), compositor->gl(),
             aRenderThread.GetProgramCache()
                 ? aRenderThread.GetProgramCache()->Raw()
                 : nullptr,
@@ -244,6 +244,11 @@ void TransactionWrapper::UpdateScrollPosition(
 
 void TransactionWrapper::UpdatePinchZoom(float aZoom) {
   wr_transaction_pinch_zoom(mTxn, aZoom);
+}
+
+void TransactionWrapper::UpdateIsTransformPinchZooming(uint64_t aAnimationId,
+                                                       bool aIsZooming) {
+  wr_transaction_set_is_transform_pinch_zooming(mTxn, aAnimationId, aIsZooming);
 }
 
 /*static*/
@@ -425,7 +430,10 @@ void WebRenderAPI::Readback(const TimeStamp& aStartTime, gfx::IntSize size,
     explicit Readback(layers::SynchronousTask* aTask, TimeStamp aStartTime,
                       gfx::IntSize aSize, const gfx::SurfaceFormat& aFormat,
                       const Range<uint8_t>& aBuffer)
-        : mTask(aTask), mStartTime(aStartTime), mSize(aSize), mFormat(aFormat),
+        : mTask(aTask),
+          mStartTime(aStartTime),
+          mSize(aSize),
+          mFormat(aFormat),
           mBuffer(aBuffer) {
       MOZ_COUNT_CTOR(Readback);
     }
@@ -569,6 +577,34 @@ void WebRenderAPI::Capture() {
   wr_api_capture(mDocHandle, path, bits);
 }
 
+void WebRenderAPI::SetCompositionRecorder(
+    RefPtr<layers::WebRenderCompositionRecorder>&& aRecorder) {
+  class SetCompositionRecorderEvent final : public RendererEvent {
+   public:
+    explicit SetCompositionRecorderEvent(
+        RefPtr<layers::WebRenderCompositionRecorder>&& aRecorder)
+        : mRecorder(std::move(aRecorder)) {
+      MOZ_COUNT_CTOR(SetCompositionRecorderEvent);
+    }
+
+    ~SetCompositionRecorderEvent() {
+      MOZ_COUNT_DTOR(SetCompositionRecorderEvent);
+    }
+
+    void Run(RenderThread& aRenderThread, WindowId aWindowId) override {
+      MOZ_ASSERT(mRecorder);
+
+      aRenderThread.SetCompositionRecorderForWindow(aWindowId,
+                                                    std::move(mRecorder));
+    }
+
+   private:
+    RefPtr<layers::WebRenderCompositionRecorder> mRecorder;
+  };
+
+  auto event = MakeUnique<SetCompositionRecorderEvent>(std::move(aRecorder));
+  RunOnRenderThread(std::move(event));
+}
 void TransactionBuilder::Clear() { wr_resource_updates_clear(mTxn); }
 
 void TransactionBuilder::Notify(wr::Checkpoint aWhen,
@@ -589,19 +625,21 @@ void TransactionBuilder::AddBlobImage(BlobImageKey key,
   wr_resource_updates_add_blob_image(mTxn, key, &aDescriptor, &aBytes.inner);
 }
 
-void TransactionBuilder::AddExternalImage(
-    ImageKey key, const ImageDescriptor& aDescriptor, ExternalImageId aExtID,
-    wr::WrExternalImageBufferType aBufferType, uint8_t aChannelIndex) {
+void TransactionBuilder::AddExternalImage(ImageKey key,
+                                          const ImageDescriptor& aDescriptor,
+                                          ExternalImageId aExtID,
+                                          wr::ExternalImageType aImageType,
+                                          uint8_t aChannelIndex) {
   wr_resource_updates_add_external_image(mTxn, key, &aDescriptor, aExtID,
-                                         aBufferType, aChannelIndex);
+                                         &aImageType, aChannelIndex);
 }
 
 void TransactionBuilder::AddExternalImageBuffer(
     ImageKey aKey, const ImageDescriptor& aDescriptor,
     ExternalImageId aHandle) {
   auto channelIndex = 0;
-  AddExternalImage(aKey, aDescriptor, aHandle,
-                   wr::WrExternalImageBufferType::ExternalBuffer, channelIndex);
+  AddExternalImage(aKey, aDescriptor, aHandle, wr::ExternalImageType::Buffer(),
+                   channelIndex);
 }
 
 void TransactionBuilder::UpdateImageBuffer(ImageKey aKey,
@@ -618,19 +656,21 @@ void TransactionBuilder::UpdateBlobImage(BlobImageKey aKey,
                                         aDirtyRect);
 }
 
-void TransactionBuilder::UpdateExternalImage(
-    ImageKey aKey, const ImageDescriptor& aDescriptor, ExternalImageId aExtID,
-    wr::WrExternalImageBufferType aBufferType, uint8_t aChannelIndex) {
+void TransactionBuilder::UpdateExternalImage(ImageKey aKey,
+                                             const ImageDescriptor& aDescriptor,
+                                             ExternalImageId aExtID,
+                                             wr::ExternalImageType aImageType,
+                                             uint8_t aChannelIndex) {
   wr_resource_updates_update_external_image(mTxn, aKey, &aDescriptor, aExtID,
-                                            aBufferType, aChannelIndex);
+                                            &aImageType, aChannelIndex);
 }
 
 void TransactionBuilder::UpdateExternalImageWithDirtyRect(
     ImageKey aKey, const ImageDescriptor& aDescriptor, ExternalImageId aExtID,
-    wr::WrExternalImageBufferType aBufferType,
-    const wr::DeviceIntRect& aDirtyRect, uint8_t aChannelIndex) {
+    wr::ExternalImageType aImageType, const wr::DeviceIntRect& aDirtyRect,
+    uint8_t aChannelIndex) {
   wr_resource_updates_update_external_image_with_dirty_rect(
-      mTxn, aKey, &aDescriptor, aExtID, aBufferType, aChannelIndex, aDirtyRect);
+      mTxn, aKey, &aDescriptor, aExtID, &aImageType, aChannelIndex, aDirtyRect);
 }
 
 void TransactionBuilder::SetImageVisibleArea(BlobImageKey aKey,
@@ -1156,8 +1196,7 @@ void DisplayListBuilder::PushShadow(const wr::LayoutRect& aRect,
   // being re-enabled mid-shadow. The optimization is restored in PopAllShadows.
   SuspendClipLeafMerging();
   wr_dp_push_shadow(mWrState, aRect, aClip, aIsBackfaceVisible,
-                    &mCurrentSpaceAndClipChain, aShadow,
-                    aShouldInflate);
+                    &mCurrentSpaceAndClipChain, aShadow, aShouldInflate);
 }
 
 void DisplayListBuilder::PopAllShadows() {

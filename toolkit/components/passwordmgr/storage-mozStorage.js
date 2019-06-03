@@ -420,6 +420,7 @@ LoginManagerStorage_mozStorage.prototype = {
     for (let prop of matchData.enumerator) {
       switch (prop.name) {
         // Some property names aren't field names but are special options to affect the search.
+        case "acceptDifferentSubdomains":
         case "schemeUpgrades": {
           options[prop.name] = prop.value;
           break;
@@ -450,6 +451,7 @@ LoginManagerStorage_mozStorage.prototype = {
    */
   _searchLogins(matchData, aOptions = {
     schemeUpgrades: false,
+    acceptDifferentSubdomains: false,
   }) {
     let conditions = [], params = {};
 
@@ -1274,4 +1276,4 @@ XPCOMUtils.defineLazyGetter(this.LoginManagerStorage_mozStorage.prototype, "log"
   return logger.log.bind(logger);
 });
 
-var EXPORTED_SYMBOLS = ["LoginManagerStorage_mozStorage"];
+const EXPORTED_SYMBOLS = ["LoginManagerStorage_mozStorage"];

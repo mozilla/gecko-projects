@@ -90,7 +90,6 @@
 #include "RetainedDisplayListBuilder.h"
 
 #include "gfxContext.h"
-#include "gfxPrefs.h"
 #include "nsAbsoluteContainingBlock.h"
 #include "StickyScrollContainer.h"
 #include "nsFontInflationData.h"
@@ -131,13 +130,13 @@ typedef nsAbsoluteContainingBlock::AbsPosReflowFlags AbsPosReflowFlags;
 const mozilla::LayoutFrameType nsIFrame::sLayoutFrameTypes[
 #define FRAME_ID(...) 1 +
 #define ABSTRACT_FRAME_ID(...)
-#include "nsFrameIdList.h"
+#include "mozilla/FrameIdList.h"
 #undef FRAME_ID
 #undef ABSTRACT_FRAME_ID
     0] = {
 #define FRAME_ID(class_, type_, ...) mozilla::LayoutFrameType::type_,
 #define ABSTRACT_FRAME_ID(...)
-#include "nsFrameIdList.h"
+#include "mozilla/FrameIdList.h"
 #undef FRAME_ID
 #undef ABSTRACT_FRAME_ID
 };
@@ -145,7 +144,7 @@ const mozilla::LayoutFrameType nsIFrame::sLayoutFrameTypes[
 const nsIFrame::FrameClassBits nsIFrame::sFrameClassBits[
 #define FRAME_ID(...) 1 +
 #define ABSTRACT_FRAME_ID(...)
-#include "nsFrameIdList.h"
+#include "mozilla/FrameIdList.h"
 #undef FRAME_ID
 #undef ABSTRACT_FRAME_ID
     0] = {
@@ -154,7 +153,7 @@ const nsIFrame::FrameClassBits nsIFrame::sFrameClassBits[
 #define DynamicLeaf eFrameClassBitsDynamicLeaf
 #define FRAME_ID(class_, type_, leaf_, ...) leaf_,
 #define ABSTRACT_FRAME_ID(...)
-#include "nsFrameIdList.h"
+#include "mozilla/FrameIdList.h"
 #undef Leaf
 #undef NotLeaf
 #undef DynamicLeaf
@@ -1085,7 +1084,7 @@ void nsIFrame::MarkNeedsDisplayItemRebuild() {
 
   RetainedDisplayListData* data = GetOrSetRetainedDisplayListData(rootFrame);
 
-  if (data->ModifiedFramesCount() > gfxPrefs::LayoutRebuildFrameLimit()) {
+  if (data->ModifiedFramesCount() > StaticPrefs::LayoutRebuildFrameLimit()) {
     // If the modified frames count is above the rebuild limit, mark the root
     // frame modified, and stop marking additional frames modified.
     data->AddModifiedFrame(rootFrame);
@@ -1138,7 +1137,7 @@ void nsFrame::DidSetComputedStyle(ComputedStyle* aOldComputedStyle) {
   // all bad, should get around to bug 1465474 eventually :(
   const bool isNonText = !IsTextFrame();
   if (isNonText) {
-    mComputedStyle->StartImageLoads(*doc);
+    mComputedStyle->StartImageLoads(*doc, aOldComputedStyle);
   }
 
   const nsStyleImageLayers* oldLayers =
@@ -1837,6 +1836,15 @@ void nsIFrame::OutsetBorderRadii(nscoord aRadii[8], const nsMargin& aOffsets) {
   }
 }
 
+static inline bool RadiiAreDefinitelyZero(const BorderRadius& aBorderRadius) {
+  NS_FOR_CSS_HALF_CORNERS(corner) {
+    if (!aBorderRadius.Get(corner).IsDefinitelyZero()) {
+      return false;
+    }
+  }
+  return true;
+}
+
 /* virtual */
 bool nsIFrame::GetBorderRadii(const nsSize& aFrameSize,
                               const nsSize& aBorderArea, Sides aSkipSides,
@@ -1858,10 +1866,18 @@ bool nsIFrame::GetBorderRadii(const nsSize& aFrameSize,
     return false;
   }
 
-  const_cast<nsIFrame*>(this)->mMayHaveRoundedCorners =
-      ComputeBorderRadii(StyleBorder()->mBorderRadius, aFrameSize, aBorderArea,
-                         aSkipSides, aRadii);
-  return mMayHaveRoundedCorners;
+  const auto& radii = StyleBorder()->mBorderRadius;
+  const bool hasRadii =
+      ComputeBorderRadii(radii, aFrameSize, aBorderArea, aSkipSides, aRadii);
+  if (!hasRadii) {
+    // TODO(emilio): Maybe we can just remove this bit and do the
+    // IsDefinitelyZero check unconditionally. That should still avoid most of
+    // the work, though maybe not the cache miss of going through the style and
+    // the border struct.
+    const_cast<nsIFrame*>(this)->mMayHaveRoundedCorners =
+        !RadiiAreDefinitelyZero(radii);
+  }
+  return hasRadii;
 }
 
 bool nsIFrame::GetBorderRadii(nscoord aRadii[8]) const {
@@ -2229,11 +2245,11 @@ Color nsDisplaySelectionOverlay::ComputeColor() const {
     return ComputeColorFromSelectionStyle(*style);
   }
   if (mSelectionValue == nsISelectionController::SELECTION_ON) {
-    colorID = LookAndFeel::eColorID_TextSelectBackground;
+    colorID = LookAndFeel::ColorID::TextSelectBackground;
   } else if (mSelectionValue == nsISelectionController::SELECTION_ATTENTION) {
-    colorID = LookAndFeel::eColorID_TextSelectBackgroundAttention;
+    colorID = LookAndFeel::ColorID::TextSelectBackgroundAttention;
   } else {
-    colorID = LookAndFeel::eColorID_TextSelectBackgroundDisabled;
+    colorID = LookAndFeel::ColorID::TextSelectBackgroundDisabled;
   }
 
   return ApplyTransparencyIfNecessary(
@@ -3255,7 +3271,7 @@ void nsIFrame::BuildDisplayListForStackingContext(
     set.Outlines()->DeleteAll(aBuilder);
   }
 
-  if (hasOverrideDirtyRect && gfxPrefs::LayoutDisplayListShowArea()) {
+  if (hasOverrideDirtyRect && StaticPrefs::LayoutDisplayListShowArea()) {
     nsDisplaySolidColor* color = MakeDisplayItem<nsDisplaySolidColor>(
         aBuilder, this,
         dirtyRect + aBuilder->GetCurrentFrameOffsetToReferenceFrame(),
@@ -3642,8 +3658,8 @@ static bool DescendIntoChild(nsDisplayListBuilder* aBuilder,
     }
 
     nsDisplayTableBackgroundSet* tableBGs = aBuilder->GetTableBackgroundSet();
-    if (tableBGs &&
-        tableBGs->GetDirtyRect().Intersects(normalPositionOverflowRelativeToTable)) {
+    if (tableBGs && tableBGs->GetDirtyRect().Intersects(
+                        normalPositionOverflowRelativeToTable)) {
       return true;
     }
   }

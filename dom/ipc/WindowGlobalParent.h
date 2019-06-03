@@ -64,7 +64,7 @@ class WindowGlobalParent final : public WindowGlobalActor,
 
   // Get this actor's manager if it is not an in-process actor. Returns
   // |nullptr| if the actor has been torn down, or is in-process.
-  already_AddRefed<BrowserParent> GetRemoteTab();
+  already_AddRefed<BrowserParent> GetBrowserParent();
 
   void ReceiveRawMessage(const JSWindowActorMessageMeta& aMeta,
                          ipc::StructuredCloneData&& aData);
@@ -92,7 +92,11 @@ class WindowGlobalParent final : public WindowGlobalActor,
   uint64_t OuterWindowId() { return mOuterWindowId; }
   uint64_t InnerWindowId() { return mInnerWindowId; }
 
+  uint64_t ContentParentId();
+
   bool IsCurrentGlobal();
+
+  bool IsProcessRoot();
 
   already_AddRefed<Promise> ChangeFrameRemoteness(dom::BrowsingContext* aBc,
                                                   const nsAString& aRemoteType,

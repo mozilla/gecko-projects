@@ -5,6 +5,7 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "mozilla/Preferences.h"
+#include "mozilla/dom/BindContext.h"
 #include "mozilla/dom/ShadowRoot.h"
 #include "mozilla/dom/DocumentFragment.h"
 #include "ChildIterator.h"
@@ -131,9 +132,10 @@ nsresult ShadowRoot::Bind() {
     OwnerDoc()->AddComposedDocShadowRoot(*this);
   }
 
+  BindContext context(*this);
   for (nsIContent* child = GetFirstChild(); child;
        child = child->GetNextSibling()) {
-    nsresult rv = child->BindToTree(nullptr, this, Host());
+    nsresult rv = child->BindToTree(context, *this);
     NS_ENSURE_SUCCESS(rv, rv);
   }
 
@@ -148,7 +150,7 @@ void ShadowRoot::Unbind() {
 
   for (nsIContent* child = GetFirstChild(); child;
        child = child->GetNextSibling()) {
-    child->UnbindFromTree(true, false);
+    child->UnbindFromTree(false);
   }
 }
 
@@ -478,9 +480,8 @@ ShadowRoot::SlotAssignment ShadowRoot::SlotAssignmentFor(nsIContent* aContent) {
   nsAutoString slotName;
   // Note that if slot attribute is missing, assign it to the first default
   // slot, if exists.
-  if (aContent->IsElement()) {
-    aContent->AsElement()->GetAttr(kNameSpaceID_None, nsGkAtoms::slot,
-                                   slotName);
+  if (Element* element = Element::FromNode(aContent)) {
+    element->GetAttr(kNameSpaceID_None, nsGkAtoms::slot, slotName);
   }
 
   SlotArray* slots = mSlotMap.Get(slotName);

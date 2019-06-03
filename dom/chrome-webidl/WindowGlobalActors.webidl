@@ -18,12 +18,15 @@ interface WindowGlobalParent {
 
   readonly attribute unsigned long long innerWindowId;
   readonly attribute unsigned long long outerWindowId;
+  readonly attribute unsigned long long contentParentId;
+
+  // A WindowGlobalParent is the root in its process if it has no parent, or its
+  // embedder is in a different process.
+  readonly attribute boolean isProcessRoot;
 
   readonly attribute FrameLoader? rootFrameLoader; // Embedded (browser) only
 
   readonly attribute WindowGlobalChild? childActor; // in-process only
-
-  readonly attribute RemoteTab? remoteTab; // out-of-process only
 
   // Information about the currently loaded document.
   readonly attribute Principal documentPrincipal;
@@ -35,7 +38,7 @@ interface WindowGlobalParent {
   JSWindowActorParent getActor(DOMString name);
 
   [Throws]
-  Promise<RemoteTab> changeFrameRemoteness(
+  Promise<unsigned long long> changeFrameRemoteness(
     BrowsingContext? bc, DOMString remoteType,
     unsigned long long pendingSwitchId);
 };
@@ -50,6 +53,11 @@ interface WindowGlobalChild {
 
   readonly attribute unsigned long long innerWindowId;
   readonly attribute unsigned long long outerWindowId;
+  readonly attribute unsigned long long contentParentId;
+
+  // A WindowGlobalChild is the root in its process if it has no parent, or its
+  // embedder is in a different process.
+  readonly attribute boolean isProcessRoot;
 
   readonly attribute WindowGlobalParent? parentActor; // in-process only
 

@@ -25,6 +25,7 @@ class RequestListContextMenu {
     this.props = props;
   }
 
+  /* eslint-disable complexity */
   open(event, clickedRequest, requests) {
     const {
       id,
@@ -217,14 +218,18 @@ class RequestListContextMenu {
       id: "request-list-context-block-url",
       label: L10N.getStr("netmonitor.context.blockURL"),
       visible: !!(clickedRequest && !blockedReason),
-      click: blockSelectedRequestURL,
+      click: () => {
+        blockSelectedRequestURL(clickedRequest);
+      },
     });
 
     menu.push({
       id: "request-list-context-unblock-url",
       label: L10N.getStr("netmonitor.context.unblockURL"),
       visible: !!(clickedRequest && blockedReason),
-      click: unblockSelectedRequestURL,
+      click: () => {
+        unblockSelectedRequestURL(clickedRequest);
+      },
     });
 
     menu.push({
@@ -284,6 +289,7 @@ class RequestListContextMenu {
       screenY: event.screenY,
     });
   }
+  /* eslint-enable complexity */
 
   /**
    * Opens selected item in the debugger

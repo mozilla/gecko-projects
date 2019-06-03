@@ -136,7 +136,10 @@
             % endif
             use crate::values::computed::ComputedVecIter;
 
-            <% is_shared_list = allow_empty and allow_empty != "NotInitial" and data.longhands_by_name[name].style_struct.inherited %>
+            <%
+                is_shared_list = allow_empty and allow_empty != "NotInitial" and \
+                    data.longhands_by_name[name].style_struct.inherited
+            %>
 
             // FIXME(emilio): Add an OwnedNonEmptySlice type, and figure out
             // something for transition-name, which is the only remaining user
@@ -363,7 +366,7 @@
 
         pub use self::single_value::SpecifiedValue as SingleSpecifiedValue;
 
-        % if not simple_vector_bindings:
+        % if not simple_vector_bindings and product == "gecko":
         impl SpecifiedValue {
             fn compute_iter<'a, 'cx, 'cx_a>(
                 &'a self,
@@ -493,7 +496,7 @@
                     .set_writing_mode_dependency(context.builder.writing_mode);
             % endif
 
-            % if property.is_vector and not property.simple_vector_bindings:
+            % if property.is_vector and not property.simple_vector_bindings and product == "gecko":
                 // In the case of a vector property we want to pass down an
                 // iterator so that this can be computed without allocation.
                 //

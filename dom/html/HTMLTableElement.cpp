@@ -1023,19 +1023,17 @@ void HTMLTableElement::ReleaseInheritedAttributes() {
   NS_IF_RELEASE(mTableInheritedAttributes);
 }
 
-nsresult HTMLTableElement::BindToTree(Document* aDocument, nsIContent* aParent,
-                                      nsIContent* aBindingParent) {
+nsresult HTMLTableElement::BindToTree(BindContext& aContext, nsINode& aParent) {
   ReleaseInheritedAttributes();
-  nsresult rv =
-      nsGenericHTMLElement::BindToTree(aDocument, aParent, aBindingParent);
+  nsresult rv = nsGenericHTMLElement::BindToTree(aContext, aParent);
   NS_ENSURE_SUCCESS(rv, rv);
   BuildInheritedAttributes();
   return NS_OK;
 }
 
-void HTMLTableElement::UnbindFromTree(bool aDeep, bool aNullParent) {
+void HTMLTableElement::UnbindFromTree(bool aNullParent) {
   ReleaseInheritedAttributes();
-  nsGenericHTMLElement::UnbindFromTree(aDeep, aNullParent);
+  nsGenericHTMLElement::UnbindFromTree(aNullParent);
 }
 
 nsresult HTMLTableElement::BeforeSetAttr(int32_t aNameSpaceID, nsAtom* aName,

@@ -302,7 +302,7 @@ function getClosestBackgroundColor(node) {
 function getClosestBackgroundImage(node) {
   let current = node;
 
-  while (current.ownerDocument) {
+  while (current) {
     const computedStyle = CssLogic.getComputedStyle(current);
     if (computedStyle) {
       const currentBackgroundImage = computedStyle.getPropertyValue("background-image");
@@ -317,8 +317,38 @@ function getClosestBackgroundImage(node) {
   return "none";
 }
 
+/**
+ * If the provided node is a grid item, then return its parent grid.
+ *
+ * @param  {DOMNode} node
+ *         The node that is supposedly a grid item.
+ * @return {DOMNode|null}
+ *         The parent grid if found, null otherwise.
+ */
+function findGridParentContainerForNode(node) {
+  try {
+    while ((node = node.parentNode)) {
+      const display = node.ownerGlobal.getComputedStyle(node).display;
+
+      if (display.includes("grid")) {
+        return node;
+      } else if (display === "contents") {
+        // Continue walking up the tree since the parent node is a content element.
+        continue;
+      }
+
+      break;
+    }
+  } catch (e) {
+    // Getting the parentNode can fail when the supplied node is in shadow DOM.
+  }
+
+  return null;
+}
+
 module.exports = {
   allAnonymousContentTreeWalkerFilter,
+  findGridParentContainerForNode,
   getClosestBackgroundColor,
   getClosestBackgroundImage,
   getNodeDisplayName,

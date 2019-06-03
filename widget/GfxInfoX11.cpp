@@ -19,6 +19,8 @@
 
 #include "GfxInfoX11.h"
 
+#include <gdk/gdkx.h>
+
 #ifdef DEBUG
 bool fire_glxtest_process();
 #endif
@@ -40,6 +42,7 @@ nsresult GfxInfo::Init() {
   mHasTextureFromPixmap = false;
   mIsMesa = false;
   mIsAccelerated = true;
+  mIsWayland = false;
   return GfxInfoBase::Init();
 }
 
@@ -52,6 +55,8 @@ void GfxInfo::AddCrashReportAnnotations() {
       CrashReporter::Annotation::AdapterDriverVendor, mDriverVendor);
   CrashReporter::AnnotateCrashReport(
       CrashReporter::Annotation::AdapterDriverVersion, mDriverVersion);
+  CrashReporter::AnnotateCrashReport(
+      CrashReporter::Annotation::IsWayland, mIsWayland);
 }
 
 void GfxInfo::GetData() {
@@ -269,9 +274,11 @@ void GfxInfo::GetData() {
     }
   } else if (glVendor.EqualsLiteral("NVIDIA Corporation")) {
     CopyUTF16toUTF8(GfxDriverInfo::GetDeviceVendor(VendorNVIDIA), mVendorId);
+    mDriverVendor.AssignLiteral("nvidia/unknown");
     // TODO: Use NV-CONTROL X11 extension to query Device ID and VRAM.
   } else if (glVendor.EqualsLiteral("ATI Technologies Inc.")) {
     CopyUTF16toUTF8(GfxDriverInfo::GetDeviceVendor(VendorATI), mVendorId);
+    mDriverVendor.AssignLiteral("ati/unknown");
     // TODO: Look into ways to find the device ID on FGLRX.
   } else {
     NS_WARNING("Failed to detect GL vendor!");
@@ -286,6 +293,7 @@ void GfxInfo::GetData() {
   }
 
   mAdapterDescription.Assign(glRenderer);
+  mIsWayland = !GDK_IS_X11_DISPLAY(gdk_display_get_default());
 
   AddCrashReportAnnotations();
 }
@@ -341,11 +349,20 @@ const nsTArray<GfxDriverInfo>& GfxInfo::GetGfxDriverInfo() {
         nsIGfxInfo::FEATURE_BLOCKED_DEVICE, DRIVER_COMPARISON_IGNORED,
         V(0, 0, 0, 0), "FEATURE_FAILURE_WEBRENDER_NO_LINUX_NVIDIA", "");
 
-    // Disable on all ATI devices for now.
+    // ATI Mesa baseline, chosen arbitrarily.
     APPEND_TO_DRIVER_BLOCKLIST(
         OperatingSystem::Linux,
         (nsAString&)GfxDriverInfo::GetDeviceVendor(VendorATI),
-        (nsAString&)GfxDriverInfo::GetDriverVendor(DriverVendorAll),
+        (nsAString&)GfxDriverInfo::GetDriverVendor(DriverMesaAll),
+        GfxDriverInfo::allDevices, nsIGfxInfo::FEATURE_WEBRENDER,
+        nsIGfxInfo::FEATURE_BLOCKED_DRIVER_VERSION, DRIVER_LESS_THAN,
+        V(18, 0, 0, 0), "FEATURE_FAILURE_WEBRENDER_OLD_MESA", "Mesa 18.0.0.0");
+
+    // Disable on all ATI devices not using Mesa for now.
+    APPEND_TO_DRIVER_BLOCKLIST(
+        OperatingSystem::Linux,
+        (nsAString&)GfxDriverInfo::GetDeviceVendor(VendorATI),
+        (nsAString&)GfxDriverInfo::GetDriverVendor(DriverNonMesaAll),
         GfxDriverInfo::allDevices, nsIGfxInfo::FEATURE_WEBRENDER,
         nsIGfxInfo::FEATURE_BLOCKED_DEVICE, DRIVER_COMPARISON_IGNORED,
         V(0, 0, 0, 0), "FEATURE_FAILURE_WEBRENDER_NO_LINUX_ATI", "");
@@ -357,6 +374,11 @@ bool GfxInfo::DoesDriverVendorMatch(const nsAString& aBlocklistVendor,
                                     const nsAString& aDriverVendor) {
   if (mIsMesa &&
       aBlocklistVendor.Equals(GfxDriverInfo::GetDriverVendor(DriverMesaAll),
+                              nsCaseInsensitiveStringComparator())) {
+    return true;
+  }
+  if (!mIsMesa &&
+      aBlocklistVendor.Equals(GfxDriverInfo::GetDriverVendor(DriverNonMesaAll),
                               nsCaseInsensitiveStringComparator())) {
     return true;
   }
@@ -424,6 +446,17 @@ GfxInfo::GetDWriteVersion(nsAString& aDwriteVersion) {
 NS_IMETHODIMP
 GfxInfo::GetCleartypeParameters(nsAString& aCleartypeParams) {
   return NS_ERROR_FAILURE;
+}
+
+NS_IMETHODIMP
+GfxInfo::GetWindowProtocol(nsAString& aWindowProtocol) {
+  if (mIsWayland) {
+    aWindowProtocol.AssignLiteral("wayland");
+    return NS_OK;
+  }
+
+  aWindowProtocol.AssignLiteral("x11");
+  return NS_OK;
 }
 
 NS_IMETHODIMP

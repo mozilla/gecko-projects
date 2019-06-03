@@ -122,12 +122,14 @@
 #include "mozilla/dom/Promise.h"
 #include "mozilla/dom/ServiceWorkerUtils.h"
 #include "mozilla/net/AsyncUrlChannelClassifier.h"
+#include "mozilla/net/CookieSettings.h"
 #include "mozilla/net/NeckoChannelParams.h"
 #include "mozilla/net/UrlClassifierFeatureFactory.h"
 #include "nsIWebNavigation.h"
 #include "HttpTrafficAnalyzer.h"
 #include "mozilla/dom/CanonicalBrowsingContext.h"
 #include "mozilla/dom/WindowGlobalParent.h"
+#include "js/Conversions.h"
 
 #ifdef MOZ_TASK_TRACER
 #  include "GeckoTaskTracer.h"
@@ -1952,16 +1954,18 @@ nsresult nsHttpChannel::ProcessFailedProxyConnect(uint32_t httpStatus) {
       rv = NS_ERROR_CONNECTION_REFUSED;
       break;
     case 403:  // HTTP/1.1: "Forbidden"
-    case 407:  // ProcessAuthentication() failed
     case 501:  // HTTP/1.1: "Not Implemented"
       // user sees boilerplate Mozilla "Proxy Refused Connection" page.
       rv = NS_ERROR_PROXY_CONNECTION_REFUSED;
       break;
-    // Squid sends 404 if DNS fails (regular 404 from target is tunneled)
+    case 407:  // ProcessAuthentication() failed (e.g. no header)
+      rv = NS_ERROR_PROXY_AUTHENTICATION_FAILED;
+      break;
+      // Squid sends 404 if DNS fails (regular 404 from target is tunneled)
     case 404:  // HTTP/1.1: "Not Found"
-    // RFC 2616: "some deployed proxies are known to return 400 or 500 when
-    // DNS lookups time out."  (Squid uses 500 if it runs out of sockets: so
-    // we have a conflict here).
+               // RFC 2616: "some deployed proxies are known to return 400 or
+               // 500 when DNS lookups time out."  (Squid uses 500 if it runs
+               // out of sockets: so we have a conflict here).
     case 400:  // HTTP/1.1 "Bad Request"
     case 500:  // HTTP/1.1: "Internal Server Error"
       /* User sees: "Address Not Found: Firefox can't find the server at
@@ -1970,8 +1974,10 @@ nsresult nsHttpChannel::ProcessFailedProxyConnect(uint32_t httpStatus) {
       rv = NS_ERROR_UNKNOWN_HOST;
       break;
     case 502:  // HTTP/1.1: "Bad Gateway" (invalid resp from target server)
-    // Squid returns 503 if target request fails for anything but DNS.
+      rv = NS_ERROR_PROXY_BAD_GATEWAY;
+      break;
     case 503:  // HTTP/1.1: "Service Unavailable"
+      // Squid returns 503 if target request fails for anything but DNS.
       /* User sees: "Failed to Connect:
        *  Firefox can't establish a connection to the server at
        *  www.foo.com.  Though the site seems valid, the browser
@@ -1984,7 +1990,7 @@ nsresult nsHttpChannel::ProcessFailedProxyConnect(uint32_t httpStatus) {
     case 504:  // HTTP/1.1: "Gateway Timeout"
       // user sees: "Network Timeout: The server at www.foo.com
       //              is taking too long to respond."
-      rv = NS_ERROR_NET_TIMEOUT;
+      rv = NS_ERROR_PROXY_GATEWAY_TIMEOUT;
       break;
     // Confused proxy server or malicious response
     default:
@@ -2516,7 +2522,7 @@ nsresult nsHttpChannel::ContinueProcessResponse1() {
       (httpStatus != 407)) {
     nsAutoCString cookie;
     if (NS_SUCCEEDED(mResponseHead->GetHeader(nsHttp::Set_Cookie, cookie))) {
-      SetCookie(cookie.get());
+      SetCookie(cookie);
     }
 
     // Given a successful connection, process any STS or PKP data that's
@@ -2569,7 +2575,7 @@ nsresult nsHttpChannel::ContinueProcessResponse1() {
     // notify "http-on-may-change-process" observers
     gHttpHandler->OnMayChangeProcess(this);
 
-    if (mRedirectTabPromise) {
+    if (mRedirectContentProcessIdPromise) {
       MOZ_ASSERT(!mOnStartRequestCalled);
 
       PushRedirectAsyncFunc(&nsHttpChannel::ContinueProcessResponse2);
@@ -4049,6 +4055,9 @@ nsresult nsHttpChannel::OpenCacheEntryInternal(
   if (mIsTRRServiceChannel) {
     extension.Append("TRR");
   }
+  if (mRequestHead.IsHead()) {
+    extension.Append("HEAD");
+  }
 
   if (IsIsolated()) {
     auto& topWindowOrigin = GetTopWindowOrigin();
@@ -4218,6 +4227,7 @@ nsHttpChannel::OnCacheEntryCheck(nsICacheEntry* entry,
     // The cached response does not contain an entity.  We can only reuse
     // the response if the current request is also HEAD.
     if (!mRequestHead.IsHead()) {
+      *aResult = ENTRY_NOT_WANTED;
       return NS_OK;
     }
   }
@@ -5914,10 +5924,16 @@ nsresult nsHttpChannel::ContinueProcessRedirectionAfterFallback(nsresult rv) {
   if (profiler_is_active()) {
     int32_t priority = PRIORITY_NORMAL;
     GetPriority(&priority);
+
+    TimingStruct timings;
+    if (mTransaction) {
+      timings = mTransaction->Timings();
+    }
+
     profiler_add_network_marker(
         mURI, priority, mChannelId, NetworkLoadType::LOAD_REDIRECT,
         mLastStatusReported, TimeStamp::Now(), mLogicalOffset,
-        mCacheDisposition, nullptr, mRedirectURI);
+        mCacheDisposition, &timings, mRedirectURI);
   }
 #endif
 
@@ -7249,10 +7265,11 @@ nsHttpChannel::GetRequestMethod(nsACString& aMethod) {
 class DomPromiseListener final : dom::PromiseNativeHandler {
   NS_DECL_ISUPPORTS
 
-  static RefPtr<nsHttpChannel::TabPromise> Create(dom::Promise* aDOMPromise) {
+  static RefPtr<nsHttpChannel::ContentProcessIdPromise> Create(
+      dom::Promise* aDOMPromise) {
     MOZ_ASSERT(aDOMPromise);
     RefPtr<DomPromiseListener> handler = new DomPromiseListener();
-    RefPtr<nsHttpChannel::TabPromise> promise =
+    RefPtr<nsHttpChannel::ContentProcessIdPromise> promise =
         handler->mPromiseHolder.Ensure(__func__);
     aDOMPromise->AppendNativeHandler(handler);
     return promise;
@@ -7260,15 +7277,12 @@ class DomPromiseListener final : dom::PromiseNativeHandler {
 
   virtual void ResolvedCallback(JSContext* aCx,
                                 JS::Handle<JS::Value> aValue) override {
-    nsCOMPtr<nsIRemoteTab> browserParent;
-    JS::Rooted<JSObject*> obj(aCx, &aValue.toObject());
-    nsresult rv =
-        UnwrapArg<nsIRemoteTab>(aCx, obj, getter_AddRefs(browserParent));
-    if (NS_FAILED(rv)) {
-      mPromiseHolder.Reject(rv, __func__);
+    uint64_t cpId;
+    if (!JS::ToUint64(aCx, aValue, &cpId)) {
+      mPromiseHolder.Reject(NS_ERROR_FAILURE, __func__);
       return;
     }
-    mPromiseHolder.Resolve(browserParent, __func__);
+    mPromiseHolder.Resolve(cpId, __func__);
   }
 
   virtual void RejectedCallback(JSContext* aCx,
@@ -7283,15 +7297,15 @@ class DomPromiseListener final : dom::PromiseNativeHandler {
  private:
   DomPromiseListener() = default;
   ~DomPromiseListener() = default;
-  MozPromiseHolder<nsHttpChannel::TabPromise> mPromiseHolder;
+  MozPromiseHolder<nsHttpChannel::ContentProcessIdPromise> mPromiseHolder;
 };
 
 NS_IMPL_ISUPPORTS0(DomPromiseListener)
 
-NS_IMETHODIMP nsHttpChannel::SwitchProcessTo(dom::Promise* aTabPromise,
-                                             uint64_t aIdentifier) {
+NS_IMETHODIMP nsHttpChannel::SwitchProcessTo(
+    dom::Promise* aContentProcessIdPromise, uint64_t aIdentifier) {
   MOZ_ASSERT(NS_IsMainThread());
-  NS_ENSURE_ARG(aTabPromise);
+  NS_ENSURE_ARG(aContentProcessIdPromise);
 
   LOG(("nsHttpChannel::SwitchProcessTo [this=%p]", this));
   LogCallingScriptLocation(this);
@@ -7299,7 +7313,8 @@ NS_IMETHODIMP nsHttpChannel::SwitchProcessTo(dom::Promise* aTabPromise,
   // We cannot do this after OnStartRequest of the listener has been called.
   NS_ENSURE_FALSE(mOnStartRequestCalled, NS_ERROR_NOT_AVAILABLE);
 
-  mRedirectTabPromise = DomPromiseListener::Create(aTabPromise);
+  mRedirectContentProcessIdPromise =
+      DomPromiseListener::Create(aContentProcessIdPromise);
   mCrossProcessRedirectIdentifier = aIdentifier;
   return NS_OK;
 }
@@ -7650,7 +7665,7 @@ nsHttpChannel::OnStartRequest(nsIRequest* request) {
     // notify "http-on-may-change-process" observers
     gHttpHandler->OnMayChangeProcess(this);
 
-    if (mRedirectTabPromise) {
+    if (mRedirectContentProcessIdPromise) {
       PushRedirectAsyncFunc(&nsHttpChannel::ContinueOnStartRequest1);
       rv = StartCrossProcessRedirect();
       if (NS_SUCCEEDED(rv)) {
@@ -7776,7 +7791,7 @@ nsHttpChannel::OnStopRequest(nsIRequest* request, nsresult status) {
   // If this load failed because of a security error, it may be because we
   // are in a captive portal - trigger an async check to make sure.
   int32_t nsprError = -1 * NS_ERROR_GET_CODE(status);
-  if (mozilla::psm::IsNSSErrorCode(nsprError)) {
+  if (mozilla::psm::IsNSSErrorCode(nsprError) && IsHTTPS()) {
     gIOService->RecheckCaptivePortal();
   }
 
@@ -10233,8 +10248,14 @@ nsresult nsHttpChannel::RedirectToInterceptedChannel() {
 }
 
 void nsHttpChannel::ReEvaluateReferrerAfterTrackingStatusIsKnown() {
-  if (StaticPrefs::network_cookie_cookieBehavior() ==
-      nsICookieService::BEHAVIOR_REJECT_TRACKER) {
+  nsCOMPtr<nsICookieSettings> cs;
+  if (mLoadInfo) {
+    Unused << mLoadInfo->GetCookieSettings(getter_AddRefs(cs));
+  }
+  if (!cs) {
+    cs = net::CookieSettings::Create();
+  }
+  if (cs->GetRejectThirdPartyTrackers()) {
     bool isPrivate =
         mLoadInfo && mLoadInfo->GetOriginAttributes().mPrivateBrowsingId > 0;
     // If our referrer has been set before, and our referrer policy is unset

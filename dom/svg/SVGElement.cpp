@@ -227,9 +227,8 @@ nsresult SVGElement::Init() {
 //----------------------------------------------------------------------
 // nsIContent methods
 
-nsresult SVGElement::BindToTree(Document* aDocument, nsIContent* aParent,
-                                nsIContent* aBindingParent) {
-  nsresult rv = SVGElementBase::BindToTree(aDocument, aParent, aBindingParent);
+nsresult SVGElement::BindToTree(BindContext& aContext, nsINode& aParent) {
+  nsresult rv = SVGElementBase::BindToTree(aContext, aParent);
   NS_ENSURE_SUCCESS(rv, rv);
 
   if (!MayHaveStyle()) {
@@ -1212,24 +1211,6 @@ void SVGElement::UpdateContentDeclarationBlock() {
     if (attrName->Equals(nsGkAtoms::lang, kNameSpaceID_None) &&
         HasAttr(kNameSpaceID_XML, nsGkAtoms::lang)) {
       continue;  // xml:lang has precedence
-    }
-
-    if (IsSVGElement(nsGkAtoms::svg)) {
-      // Special case: we don't want <svg> 'width'/'height' mapped into style
-      // if the attribute value isn't a valid <length> according to SVG (which
-      // only supports a subset of the CSS <length> values). We don't enforce
-      // this by checking the attribute value in SVGSVGElement::
-      // IsAttributeMapped since we don't want that method to depend on the
-      // value of the attribute that is being checked. Rather we just prevent
-      // the actual mapping here, as necessary.
-      if (attrName->Atom() == nsGkAtoms::width &&
-          !GetAnimatedLength(nsGkAtoms::width)->HasBaseVal()) {
-        continue;
-      }
-      if (attrName->Atom() == nsGkAtoms::height &&
-          !GetAnimatedLength(nsGkAtoms::height)->HasBaseVal()) {
-        continue;
-      }
     }
 
     if (lengthAffectsStyle) {

@@ -32,7 +32,7 @@ class SearchBox extends PureComponent {
       onFocus: PropTypes.func,
       onKeyDown: PropTypes.func,
       placeholder: PropTypes.string.isRequired,
-      type: PropTypes.string.isRequired,
+      type: PropTypes.string,
     };
   }
 
@@ -191,7 +191,7 @@ class SearchBox extends PureComponent {
         placeholder,
         ref: this.inputRef,
         value,
-        type,
+        type: "search",
       }),
       showLearnMoreLink && MDNLink({
         title: learnMoreTitle,

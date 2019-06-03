@@ -60,16 +60,17 @@ function declTest(name, cfg) {
     // Wait for the provided URL to load in our browser
     let browser = win.gBrowser.selectedBrowser;
     BrowserTestUtils.loadURI(browser, url);
-    await BrowserTestUtils.browserLoaded(browser);
+    await BrowserTestUtils.browserLoaded(browser, false, url);
 
     // Run the provided test
     info("browser ready");
-    await Promise.resolve(test(browser, win));
-
-    // Clean up after we're done.
-    ChromeUtils.unregisterWindowActor("Test");
-    await BrowserTestUtils.closeWindow(win);
-
-    info("Exiting test: " + name);
+    try {
+      await Promise.resolve(test(browser, win));
+    } finally {
+      // Clean up after we're done.
+      ChromeUtils.unregisterWindowActor("Test");
+      await BrowserTestUtils.closeWindow(win);
+      info("Exiting test: " + name);
+    }
   });
 }

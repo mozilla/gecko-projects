@@ -5484,6 +5484,16 @@ class TransactionDatabaseOperationBase : public DatabaseOperationBase {
   bool mWaitingForContinue;
   const bool mTransactionIsAborted;
 
+#ifdef MOZ_DIAGNOSTIC_ASSERT_ENABLED
+ protected:
+  // A check only enables when the diagnostic assert turns on. It assumes the
+  // mUpdateRefcountFunction is a nullptr because the previous
+  // StartTransactionOp failed on the connection thread and the next write
+  // operation (e.g. ObjectstoreAddOrPutRequestOp) doesn't have enough time to
+  // catch up the failure information.
+  bool mAssumingPreviousOperationFail;
+#endif
+
  public:
   void AssertIsOnConnectionThread() const
 #ifdef DEBUG
@@ -6596,6 +6606,12 @@ class FactoryOp
 
     return mDatabaseFilePath;
   }
+
+  void StringifyPersistenceType(nsCString& aResult) const;
+
+  void GetSanitizedOrigin(nsCString& aResult) const;
+
+  void StringifyState(nsCString& aResult) const;
 
  protected:
   FactoryOp(Factory* aFactory, already_AddRefed<ContentParent> aContentParent,
@@ -8948,6 +8964,23 @@ nsresult RemoveDatabaseFilesAndDirectory(nsIFile* aBaseDirectory,
   return NS_OK;
 }
 
+void SanitizeString(nsACString& aOrigin) {
+  char* iter = aOrigin.BeginWriting();
+  char* end = aOrigin.EndWriting();
+
+  while (iter != end) {
+    char c = *iter;
+
+    if (IsAsciiAlpha(c)) {
+      *iter = 'a';
+    } else if (IsAsciiDigit(c)) {
+      *iter = 'D';
+    }
+
+    ++iter;
+  }
+}
+
 /*******************************************************************************
  * Globals
  ******************************************************************************/
@@ -10062,11 +10095,14 @@ nsresult DatabaseConnection::AutoSavepoint::Start(
   MOZ_ASSERT(connection);
   connection->AssertIsOnConnectionThread();
 
-  // This is just a quick fix for preventing accessing the nullptr. The cause is
-  // probably because the connection was unexpectedly closed.
+  // The previous operation failed to begin a write transaction and the
+  // following opertion jumped to the connection thread before the previous
+  // operation has updated its failure to the transaction.
   if (!connection->GetUpdateRefcountFunction()) {
-    NS_WARNING("The connection was closed for some reasons!");
-    return NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR;
+    NS_WARNING(
+        "The connection was closed because the previous operation "
+        "failed!");
+    return NS_ERROR_DOM_INDEXEDDB_ABORT_ERR;
   }
 
   MOZ_ASSERT(!mConnection);
@@ -16309,7 +16345,43 @@ void QuotaClient::ShutdownTimedOut() {
   if (gFactoryOps && !gFactoryOps->IsEmpty()) {
     data.Append("gFactoryOps: ");
     data.AppendInt(static_cast<uint32_t>(gFactoryOps->Length()));
-    data.Append("\n");
+
+    nsTHashtable<nsCStringHashKey> ids;
+    for (uint32_t index = 0; index < gFactoryOps->Length(); index++) {
+      CheckedUnsafePtr<FactoryOp>& factoryOp = (*gFactoryOps)[index];
+
+      nsCString persistenceType;
+      factoryOp->StringifyPersistenceType(persistenceType);
+
+      nsCString origin;
+      factoryOp->GetSanitizedOrigin(origin);
+
+      nsCString state;
+      factoryOp->StringifyState(state);
+
+      NS_NAMED_LITERAL_CSTRING(delimiter, "*");
+
+      nsCString id = persistenceType + delimiter + origin + delimiter + state;
+
+      ids.PutEntry(id);
+    }
+
+    data.Append(" (");
+
+    bool first = true;
+    for (auto iter = ids.ConstIter(); !iter.Done(); iter.Next()) {
+      if (first) {
+        first = false;
+      } else {
+        data.Append(", ");
+      }
+
+      const nsACString& id = iter.Get()->GetKey();
+
+      data.Append(id);
+    }
+
+    data.Append(")\n");
   }
 
   if (gLiveDatabaseHashtable && gLiveDatabaseHashtable->Count()) {
@@ -19075,6 +19147,98 @@ FactoryOp::FactoryOp(Factory* aFactory,
   MOZ_ASSERT(!QuotaClient::IsShuttingDownOnBackgroundThread());
 }
 
+void FactoryOp::StringifyPersistenceType(nsCString& aResult) const {
+  AssertIsOnOwningThread();
+
+  PersistenceType persistenceType = mCommonParams.metadata().persistenceType();
+
+  PersistenceTypeToText(persistenceType, aResult);
+}
+
+void FactoryOp::GetSanitizedOrigin(nsCString& aResult) const {
+  AssertIsOnOwningThread();
+
+  int32_t colonPos = mOrigin.FindChar(':');
+  if (colonPos >= 0) {
+    const nsACString& prefix = Substring(mOrigin, 0, colonPos);
+
+    nsCString normSuffix(Substring(mOrigin, colonPos));
+    SanitizeString(normSuffix);
+
+    aResult = prefix + normSuffix;
+  } else {
+    nsCString origin(mOrigin);
+    SanitizeString(origin);
+
+    aResult = origin;
+  }
+}
+
+void FactoryOp::StringifyState(nsCString& aResult) const {
+  AssertIsOnOwningThread();
+
+  switch (mState) {
+    case State::Initial:
+      aResult.AssignLiteral("Initial");
+      return;
+
+    case State::PermissionChallenge:
+      aResult.AssignLiteral("PermissionChallenge");
+      return;
+
+    case State::PermissionRetry:
+      aResult.AssignLiteral("PermissionRetry");
+      return;
+
+    case State::FinishOpen:
+      aResult.AssignLiteral("FinishOpen");
+      return;
+
+    case State::QuotaManagerPending:
+      aResult.AssignLiteral("QuotaManagerPending");
+      return;
+
+    case State::DirectoryOpenPending:
+      aResult.AssignLiteral("DirectoryOpenPending");
+      return;
+
+    case State::DatabaseOpenPending:
+      aResult.AssignLiteral("DatabaseOpenPending");
+      return;
+
+    case State::DatabaseWorkOpen:
+      aResult.AssignLiteral("DatabaseWorkOpen");
+      return;
+
+    case State::BeginVersionChange:
+      aResult.AssignLiteral("BeginVersionChange");
+      return;
+
+    case State::WaitingForOtherDatabasesToClose:
+      aResult.AssignLiteral("WaitingForOtherDatabasesToClose");
+      return;
+
+    case State::WaitingForTransactionsToComplete:
+      aResult.AssignLiteral("WaitingForTransactionsToComplete");
+      return;
+
+    case State::DatabaseWorkVersionChange:
+      aResult.AssignLiteral("DatabaseWorkVersionChange");
+      return;
+
+    case State::SendingResults:
+      aResult.AssignLiteral("SendingResults");
+      return;
+
+    case State::Completed:
+      aResult.AssignLiteral("Completed");
+      return;
+
+    default:
+      MOZ_CRASH("Bad state!");
+  }
+}
+
 nsresult FactoryOp::Open() {
   MOZ_ASSERT(NS_IsMainThread());
   MOZ_ASSERT(mState == State::Initial);
@@ -21547,7 +21711,12 @@ TransactionDatabaseOperationBase::TransactionDatabaseOperationBase(
       mTransactionLoggingSerialNumber(aTransaction->LoggingSerialNumber()),
       mInternalState(InternalState::Initial),
       mWaitingForContinue(false),
+#ifdef MOZ_DIAGNOSTIC_ASSERT_ENABLED
+      mTransactionIsAborted(aTransaction->IsAborted()),
+      mAssumingPreviousOperationFail(false) {
+#else
       mTransactionIsAborted(aTransaction->IsAborted()) {
+#endif
   MOZ_ASSERT(aTransaction);
   MOZ_ASSERT(LoggingSerialNumber());
 }
@@ -21559,7 +21728,12 @@ TransactionDatabaseOperationBase::TransactionDatabaseOperationBase(
       mTransaction(aTransaction),
       mTransactionLoggingSerialNumber(aTransaction->LoggingSerialNumber()),
       mInternalState(InternalState::Initial),
+#ifdef MOZ_DIAGNOSTIC_ASSERT_ENABLED
+      mTransactionIsAborted(aTransaction->IsAborted()),
+      mAssumingPreviousOperationFail(false) {
+#else
       mTransactionIsAborted(aTransaction->IsAborted()) {
+#endif
   MOZ_ASSERT(aTransaction);
 }
 
@@ -21736,6 +21910,13 @@ void TransactionDatabaseOperationBase::SendPreprocessInfoOrResults(
   MOZ_ASSERT(mInternalState == InternalState::SendingPreprocess ||
              mInternalState == InternalState::SendingResults);
   MOZ_ASSERT(mTransaction);
+
+  // The flag is raised only when there is no mUpdateRefcountFunction for the
+  // executing operation. It assume that is because the previous
+  // StartTransactionOp was failed to begin a write transaction and it reported
+  // when this operation has already jumped to the Connection thread.
+  MOZ_DIAGNOSTIC_ASSERT_IF(mAssumingPreviousOperationFail,
+                           mTransaction->IsAborted());
 
   if (NS_WARN_IF(IsActorDestroyed())) {
     // Normally we wouldn't need to send any notifications if the actor was
@@ -22362,6 +22543,11 @@ nsresult CreateObjectStoreOp::DoDatabaseWork(DatabaseConnection* aConnection) {
   DatabaseConnection::AutoSavepoint autoSave;
   nsresult rv = autoSave.Start(Transaction());
   if (NS_WARN_IF(NS_FAILED(rv))) {
+#ifdef MOZ_DIAGNOSTIC_ASSERT_ENABLED
+    if (!aConnection->GetUpdateRefcountFunction()) {
+      mAssumingPreviousOperationFail = true;
+    }
+#endif
     return rv;
   }
 
@@ -22476,6 +22662,11 @@ nsresult DeleteObjectStoreOp::DoDatabaseWork(DatabaseConnection* aConnection) {
   DatabaseConnection::AutoSavepoint autoSave;
   nsresult rv = autoSave.Start(Transaction());
   if (NS_WARN_IF(NS_FAILED(rv))) {
+#ifdef MOZ_DIAGNOSTIC_ASSERT_ENABLED
+    if (!aConnection->GetUpdateRefcountFunction()) {
+      mAssumingPreviousOperationFail = true;
+    }
+#endif
     return rv;
   }
 
@@ -22670,6 +22861,11 @@ nsresult RenameObjectStoreOp::DoDatabaseWork(DatabaseConnection* aConnection) {
   DatabaseConnection::AutoSavepoint autoSave;
   nsresult rv = autoSave.Start(Transaction());
   if (NS_WARN_IF(NS_FAILED(rv))) {
+#ifdef MOZ_DIAGNOSTIC_ASSERT_ENABLED
+    if (!aConnection->GetUpdateRefcountFunction()) {
+      mAssumingPreviousOperationFail = true;
+    }
+#endif
     return rv;
   }
 
@@ -22835,6 +23031,11 @@ nsresult CreateIndexOp::DoDatabaseWork(DatabaseConnection* aConnection) {
   DatabaseConnection::AutoSavepoint autoSave;
   nsresult rv = autoSave.Start(Transaction());
   if (NS_WARN_IF(NS_FAILED(rv))) {
+#ifdef MOZ_DIAGNOSTIC_ASSERT_ENABLED
+    if (!aConnection->GetUpdateRefcountFunction()) {
+      mAssumingPreviousOperationFail = true;
+    }
+#endif
     return rv;
   }
 
@@ -23291,6 +23492,11 @@ nsresult DeleteIndexOp::DoDatabaseWork(DatabaseConnection* aConnection) {
   DatabaseConnection::AutoSavepoint autoSave;
   nsresult rv = autoSave.Start(Transaction());
   if (NS_WARN_IF(NS_FAILED(rv))) {
+#ifdef MOZ_DIAGNOSTIC_ASSERT_ENABLED
+    if (!aConnection->GetUpdateRefcountFunction()) {
+      mAssumingPreviousOperationFail = true;
+    }
+#endif
     return rv;
   }
 
@@ -23576,6 +23782,11 @@ nsresult RenameIndexOp::DoDatabaseWork(DatabaseConnection* aConnection) {
   DatabaseConnection::AutoSavepoint autoSave;
   nsresult rv = autoSave.Start(Transaction());
   if (NS_WARN_IF(NS_FAILED(rv))) {
+#ifdef MOZ_DIAGNOSTIC_ASSERT_ENABLED
+    if (!aConnection->GetUpdateRefcountFunction()) {
+      mAssumingPreviousOperationFail = true;
+    }
+#endif
     return rv;
   }
 
@@ -24023,6 +24234,11 @@ nsresult ObjectStoreAddOrPutRequestOp::DoDatabaseWork(
   DatabaseConnection::AutoSavepoint autoSave;
   nsresult rv = autoSave.Start(Transaction());
   if (NS_WARN_IF(NS_FAILED(rv))) {
+#ifdef MOZ_DIAGNOSTIC_ASSERT_ENABLED
+    if (!aConnection->GetUpdateRefcountFunction()) {
+      mAssumingPreviousOperationFail = true;
+    }
+#endif
     return rv;
   }
 
@@ -24786,6 +25002,11 @@ nsresult ObjectStoreDeleteRequestOp::DoDatabaseWork(
   DatabaseConnection::AutoSavepoint autoSave;
   nsresult rv = autoSave.Start(Transaction());
   if (NS_WARN_IF(NS_FAILED(rv))) {
+#ifdef MOZ_DIAGNOSTIC_ASSERT_ENABLED
+    if (!aConnection->GetUpdateRefcountFunction()) {
+      mAssumingPreviousOperationFail = true;
+    }
+#endif
     return rv;
   }
 
@@ -24869,6 +25090,11 @@ nsresult ObjectStoreClearRequestOp::DoDatabaseWork(
   DatabaseConnection::AutoSavepoint autoSave;
   nsresult rv = autoSave.Start(Transaction());
   if (NS_WARN_IF(NS_FAILED(rv))) {
+#ifdef MOZ_DIAGNOSTIC_ASSERT_ENABLED
+    if (!aConnection->GetUpdateRefcountFunction()) {
+      mAssumingPreviousOperationFail = true;
+    }
+#endif
     return rv;
   }
 

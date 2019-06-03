@@ -2,7 +2,7 @@
 set -x -e -v
 
 # 0.2.8 + a number of changes
-SCCACHE_REVISION=5cbd30684e03cab9c2d1272fdc530fd83b8c903b
+SCCACHE_REVISION=fd3cc3918bb8bad48329785ed8894f1c096f06db
 TARGET="$1"
 
 # This script is for building sccache
@@ -97,8 +97,8 @@ if [ -n "$TARGET" ]; then
     SCCACHE_OUT=target/$TARGET/release/sccache*
 fi
 
-mkdir sccache2
-cp $SCCACHE_OUT sccache2/
-tar -acf sccache2.tar.$COMPRESS_EXT sccache2
+mkdir sccache
+cp $SCCACHE_OUT sccache/
+tar -acf sccache.tar.$COMPRESS_EXT sccache
 mkdir -p $UPLOAD_DIR
-cp sccache2.tar.$COMPRESS_EXT $UPLOAD_DIR
+cp sccache.tar.$COMPRESS_EXT $UPLOAD_DIR

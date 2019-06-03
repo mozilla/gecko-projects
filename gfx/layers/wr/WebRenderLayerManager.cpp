@@ -7,7 +7,7 @@
 #include "WebRenderLayerManager.h"
 
 #include "BasicLayers.h"
-#include "gfxPrefs.h"
+
 #include "GeckoProfiler.h"
 #include "LayersLogging.h"
 #include "mozilla/dom/BrowserChild.h"
@@ -152,6 +152,17 @@ void WebRenderLayerManager::StopFrameTimeRecording(
   }
 }
 
+void WebRenderLayerManager::PayloadPresented() {
+  MOZ_CRASH("WebRenderLayerManager::PayloadPresented should not be called");
+}
+
+void WebRenderLayerManager::TakeCompositionPayloads(
+    nsTArray<CompositionPayload>& aPayloads) {
+  aPayloads.Clear();
+
+  std::swap(mPayload, aPayloads);
+}
+
 bool WebRenderLayerManager::BeginTransactionWithTarget(gfxContext* aTarget,
                                                        const nsCString& aURL) {
   mTarget = aTarget;
@@ -171,7 +182,7 @@ bool WebRenderLayerManager::BeginTransaction(const nsCString& aURL) {
   // enabled in this process; it may be enabled in the parent process,
   // and the parent process expects unique sequence numbers.
   ++mPaintSequenceNumber;
-  if (gfxPrefs::APZTestLoggingEnabled()) {
+  if (StaticPrefs::apz_test_logging_enabled()) {
     mApzTestData.StartNewPaint(mPaintSequenceNumber);
   }
   return true;
@@ -480,13 +491,13 @@ void WebRenderLayerManager::MakeSnapshotIfRequired(LayoutDeviceIntSize aSize) {
   // so on Android we use RGBA.
   SurfaceFormat format =
 #ifdef MOZ_WIDGET_ANDROID
-    SurfaceFormat::R8G8B8A8;
+      SurfaceFormat::R8G8B8A8;
 #else
-    SurfaceFormat::B8G8R8A8;
+      SurfaceFormat::B8G8R8A8;
 #endif
   RefPtr<TextureClient> texture = TextureClient::CreateForRawBufferAccess(
-      WrBridge(), format, aSize.ToUnknownSize(),
-      BackendType::SKIA, TextureFlags::SNAPSHOT);
+      WrBridge(), format, aSize.ToUnknownSize(), BackendType::SKIA,
+      TextureFlags::SNAPSHOT);
   if (!texture) {
     return;
   }
@@ -568,9 +579,6 @@ void WebRenderLayerManager::DidComposite(
   // this layer manager. So let's make sure this object stays alive until
   // the end of the method invocation.
   RefPtr<WebRenderLayerManager> selfRef = this;
-
-  // XXX - Currently we don't track this. Make sure it doesn't just grow though.
-  mPayload.Clear();
 
   // |aTransactionId| will be > 0 if the compositor is acknowledging a shadow
   // layers transaction.
@@ -692,7 +700,7 @@ void WebRenderLayerManager::FlushRendering() {
   if (WrBridge()->GetCompositorUseDComp() && !resizing) {
     cBridge->SendFlushRenderingAsync();
   } else if (mWidget->SynchronouslyRepaintOnResize() ||
-             gfxPrefs::LayersForceSynchronousResize()) {
+             StaticPrefs::LayersForceSynchronousResize()) {
     cBridge->SendFlushRendering();
   } else {
     cBridge->SendFlushRenderingAsync();
@@ -726,7 +734,7 @@ WebRenderLayerManager::CreatePersistentBufferProvider(
   // initialized with WebRender to reduce memory usage.
   gfxPlatform::GetPlatform()->EnsureDevicesInitialized();
 
-  if (gfxPrefs::PersistentBufferProviderSharedEnabled()) {
+  if (StaticPrefs::PersistentBufferProviderSharedEnabled()) {
     RefPtr<PersistentBufferProvider> provider =
         PersistentBufferProviderShared::Create(aSize, aFormat,
                                                AsKnowsCompositor());

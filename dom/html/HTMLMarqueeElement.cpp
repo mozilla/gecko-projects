@@ -46,11 +46,9 @@ JSObject* HTMLMarqueeElement::WrapNode(JSContext* aCx,
   return dom::HTMLMarqueeElement_Binding::Wrap(aCx, this, aGivenProto);
 }
 
-nsresult HTMLMarqueeElement::BindToTree(Document* aDocument,
-                                        nsIContent* aParent,
-                                        nsIContent* aBindingParent) {
-  nsresult rv =
-      nsGenericHTMLElement::BindToTree(aDocument, aParent, aBindingParent);
+nsresult HTMLMarqueeElement::BindToTree(BindContext& aContext,
+                                        nsINode& aParent) {
+  nsresult rv = nsGenericHTMLElement::BindToTree(aContext, aParent);
   NS_ENSURE_SUCCESS(rv, rv);
 
   if (IsInComposedDoc()) {
@@ -61,14 +59,14 @@ nsresult HTMLMarqueeElement::BindToTree(Document* aDocument,
   return rv;
 }
 
-void HTMLMarqueeElement::UnbindFromTree(bool aDeep, bool aNullParent) {
+void HTMLMarqueeElement::UnbindFromTree(bool aNullParent) {
   if (IsInComposedDoc()) {
     // We don't want to unattach the shadow root because it used to
     // contain a <slot>.
     NotifyUAWidgetTeardown(UnattachShadowRoot::No);
   }
 
-  nsGenericHTMLElement::UnbindFromTree(aDeep, aNullParent);
+  nsGenericHTMLElement::UnbindFromTree(aNullParent);
 }
 
 void HTMLMarqueeElement::GetBehavior(nsAString& aValue) {

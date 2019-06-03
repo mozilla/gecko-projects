@@ -266,43 +266,43 @@ windows10-64-shippable-qr/opt:
 ##
 # MacOS X platforms (matching /macosx.*/)
 
-# macosx1014-64-shippable/opt:
-#    build-platform: macosx64-shippable/opt
-#    test-sets:
-#        - macosx1014-64-tests
-#        - macosx64-talos
-#        - desktop-screenshot-capture
-#        - awsy
-#        - raptor-chromium
-#        - raptor-firefox
-#        - raptor-profiling
-#        - marionette-media-tests
+macosx1014-64-shippable/opt:
+    build-platform: macosx64-shippable/opt
+    test-sets:
+        - macosx1014-64-tests
+        - macosx64-talos
+        # - desktop-screenshot-capture
+        # - awsy
+        - raptor-chromium
+        - raptor-firefox
+        - raptor-profiling
+        # - marionette-media-tests
 
-# macosx1014-64/debug:
-#    build-platform: macosx64-shippable/opt
-#    test-sets:
-#        - macosx1014-64-tests
-#        - marionette-media-tests
+macosx1014-64/debug:
+    build-platform: macosx64-shippable/opt
+    test-sets:
+        - macosx1014-64-tests
+        # - marionette-media-tests
 
-# macosx1014-64-devedition/opt:
-#    build-platform: macosx64-devedition-nightly/opt
-#    test-sets:
-#        - macosx1014-64-tests
+macosx1014-64-devedition/opt:
+    build-platform: macosx64-devedition-nightly/opt
+    test-sets:
+        - macosx1014-64-tests
 
-# macosx1014-64-shippable-qr/opt:
-#    build-platform: macosx64-shippable/opt
-#    test-sets:
-#        - macosx1014-64-qr-tests
+macosx1014-64-shippable-qr/opt:
+    build-platform: macosx64-shippable/opt
+    test-sets:
+        - macosx1014-64-qr-tests
 
-# macosx1014-64-qr/debug:
-#    build-platform: macosx64/debug
-#    test-sets:
-#        - macosx1014-64-qr-tests
+macosx1014-64-qr/debug:
+    build-platform: macosx64/debug
+    test-sets:
+        - macosx1014-64-qr-tests
 
-# macosx1014-64-ccov/debug:
-#    build-platform: macosx64-ccov/debug
-#    test-sets:
-#        - macosx1014-64-tests
+macosx1014-64-ccov/debug:
+    build-platform: macosx64-ccov/debug
+    test-sets:
+        - macosx1014-64-tests
 
 macosx1010-64/debug:
     build-platform: macosx64/debug
@@ -313,13 +313,9 @@ macosx1010-64/debug:
 macosx1010-64-shippable/opt:
     build-platform: macosx64-shippable/opt
     test-sets:
-        - macosx64-talos
         - macosx64-tests
         - desktop-screenshot-capture
         - awsy
-        - raptor-chromium
-        - raptor-firefox
-        - raptor-profiling
         - marionette-media-tests
 
 macosx1010-64-devedition/opt:
@@ -410,7 +406,7 @@ android-hw-g5-7-0-arm7-api-16/pgo:
 android-hw-p2-8-0-arm7-api-16/pgo:
     build-platform: android-api-16-pgo/opt
     test-sets:
-        - android-hw-arm7-opt-unittests
+        - android-hw-arm7-pgo-unittests
         - android-hw-arm7-raptor
         - android-hw-arm7-raptor-power
         - raptor-fetch-geckoview
@@ -431,14 +427,12 @@ android-hw-p2-8-0-arm7-api-16/debug:
 android-hw-p2-8-0-android-aarch64/opt:
     build-platform: android-aarch64/opt
     test-sets:
-        - android-hw-aarch64-opt-unittests
         - android-hw-aarch64-raptor
         - android-hw-aarch64-raptor-power
 
 android-hw-p2-8-0-android-aarch64/pgo:
     build-platform: android-aarch64-pgo/opt
     test-sets:
-        - android-hw-aarch64-opt-unittests
         - android-hw-aarch64-raptor
         - android-hw-aarch64-raptor-power
 

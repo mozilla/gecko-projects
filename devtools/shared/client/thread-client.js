@@ -6,11 +6,20 @@
 "use strict";
 
 const {arg, DebuggerClient} = require("devtools/shared/client/debugger-client");
-const eventSource = require("devtools/shared/client/event-source");
+const EventEmitter = require("devtools/shared/event-emitter");
 const {ThreadStateTypes} = require("devtools/shared/client/constants");
 
-loader.lazyRequireGetter(this, "ObjectClient", "devtools/shared/client/object-client");
-loader.lazyRequireGetter(this, "SourceFront", "devtools/shared/fronts/source", true);
+loader.lazyRequireGetter(
+  this,
+  "ObjectClient",
+  "devtools/shared/client/object-client"
+);
+loader.lazyRequireGetter(
+  this,
+  "SourceFront",
+  "devtools/shared/fronts/source",
+  true
+);
 
 /**
  * Creates a thread client for the remote debugging protocol server. This client
@@ -50,7 +59,9 @@ ThreadClient.prototype = {
 
   _assertPaused: function(command) {
     if (!this.paused) {
-      throw Error(command + " command sent while not paused. Currently " + this._state);
+      throw Error(
+        command + " command sent while not paused. Currently " + this._state
+      );
     }
   },
 
@@ -413,6 +424,6 @@ ThreadClient.prototype = {
   events: ["newSource", "progress"],
 };
 
-eventSource(ThreadClient.prototype);
+EventEmitter.decorate(ThreadClient.prototype);
 
 module.exports = ThreadClient;

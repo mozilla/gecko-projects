@@ -17,11 +17,11 @@
 #include "UnitTransforms.h"  // for ViewAs
 #include "gfxEnv.h"
 #include "gfxPlatform.h"  // for gfxPlatform
-#include "gfxPrefs.h"
 #include "gfxUtils.h"  // for gfxUtils, etc
 #include "gfx2DGlue.h"
 #include "mozilla/DebugOnly.h"  // for DebugOnly
 #include "mozilla/IntegerPrintfMacros.h"
+#include "mozilla/StaticPrefs.h"
 #include "mozilla/Telemetry.h"  // for Accumulate
 #include "mozilla/ToString.h"
 #include "mozilla/gfx/2D.h"        // for DrawTarget
@@ -139,7 +139,7 @@ already_AddRefed<ImageContainer> LayerManager::CreateImageContainer(
 }
 
 bool LayerManager::AreComponentAlphaLayersEnabled() {
-  return gfxPrefs::ComponentAlphaEnabled();
+  return StaticPrefs::ComponentAlphaEnabled();
 }
 
 /*static*/
@@ -154,26 +154,7 @@ UniquePtr<LayerUserData> LayerManager::RemoveUserData(void* aKey) {
 }
 
 void LayerManager::PayloadPresented() {
-  if (mPayload.Length()) {
-    TimeStamp presented = TimeStamp::Now();
-    for (CompositionPayload& payload : mPayload) {
-#if MOZ_GECKO_PROFILER
-      if (profiler_is_active()) {
-        nsPrintfCString marker(
-            "Payload Presented, type: %d latency: %dms\n",
-            int32_t(payload.mType),
-            int32_t((presented - payload.mTimeStamp).ToMilliseconds()));
-        profiler_add_marker(marker.get(), JS::ProfilingCategoryPair::GRAPHICS);
-      }
-#endif
-
-      if (payload.mType == CompositionPayloadType::eKeyPress) {
-        Telemetry::AccumulateTimeDelta(
-            mozilla::Telemetry::KEYPRESS_PRESENT_LATENCY, payload.mTimeStamp,
-            presented);
-      }
-    }
-  }
+  RecordCompositionPayloadsPresented(mPayload);
 }
 
 //--------------------------------------------------
@@ -988,7 +969,7 @@ bool ContainerLayer::HasMultipleChildren() {
   for (Layer* child = GetFirstChild(); child; child = child->GetNextSibling()) {
     const Maybe<ParentLayerIntRect>& clipRect = child->GetLocalClipRect();
     if (clipRect && clipRect->IsEmpty()) continue;
-    if (child->GetLocalVisibleRegion().IsEmpty()) continue;
+    if (!child->Extend3DContext() && child->GetLocalVisibleRegion().IsEmpty()) continue;
     ++count;
     if (count > 1) return true;
   }
@@ -1200,7 +1181,7 @@ void ContainerLayer::DefaultComputeEffectiveTransforms(
            * above. Nor for a child with a mask layer.
            */
           if (checkClipRect && (clipRect && !clipRect->IsEmpty() &&
-                                !child->GetLocalVisibleRegion().IsEmpty())) {
+                                (child->Extend3DContext() || !child->GetLocalVisibleRegion().IsEmpty()))) {
             useIntermediateSurface = true;
             break;
           }
@@ -2288,7 +2269,7 @@ void PrintInfo(std::stringstream& aStream, HostLayer* aLayerComposite) {
     AppendToString(aStream, aLayerComposite->GetShadowBaseTransform(),
                    " [shadow-transform=", "]");
   }
-  if (!aLayerComposite->GetShadowVisibleRegion().IsEmpty()) {
+  if (!aLayerComposite->GetLayer()->Extend3DContext() && !aLayerComposite->GetShadowVisibleRegion().IsEmpty()) {
     AppendToString(aStream,
                    aLayerComposite->GetShadowVisibleRegion().ToUnknownRegion(),
                    " [shadow-visible=", "]");
@@ -2319,6 +2300,30 @@ void SetAntialiasingFlags(Layer* aLayer, DrawTarget* aTarget) {
 
 IntRect ToOutsideIntRect(const gfxRect& aRect) {
   return IntRect::RoundOut(aRect.X(), aRect.Y(), aRect.Width(), aRect.Height());
+}
+
+void RecordCompositionPayloadsPresented(
+    const nsTArray<CompositionPayload>& aPayloads) {
+  if (aPayloads.Length()) {
+    TimeStamp presented = TimeStamp::Now();
+    for (const CompositionPayload& payload : aPayloads) {
+#if MOZ_GECKO_PROFILER
+      if (profiler_is_active()) {
+        nsPrintfCString marker(
+            "Payload Presented, type: %d latency: %dms\n",
+            int32_t(payload.mType),
+            int32_t((presented - payload.mTimeStamp).ToMilliseconds()));
+        profiler_add_marker(marker.get(), JS::ProfilingCategoryPair::GRAPHICS);
+      }
+#endif
+
+      if (payload.mType == CompositionPayloadType::eKeyPress) {
+        Telemetry::AccumulateTimeDelta(
+            mozilla::Telemetry::KEYPRESS_PRESENT_LATENCY, payload.mTimeStamp,
+            presented);
+      }
+    }
+  }
 }
 
 }  // namespace layers

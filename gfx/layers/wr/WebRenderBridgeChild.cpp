@@ -7,6 +7,7 @@
 #include "mozilla/layers/WebRenderBridgeChild.h"
 
 #include "gfxPlatform.h"
+#include "mozilla/StaticPrefs.h"
 #include "mozilla/dom/TabGroup.h"
 #include "mozilla/layers/CompositableClient.h"
 #include "mozilla/layers/CompositorBridgeChild.h"
@@ -72,8 +73,9 @@ void WebRenderBridgeChild::DoDestroy() {
 
 void WebRenderBridgeChild::AddWebRenderParentCommand(
     const WebRenderParentCommand& aCmd, wr::RenderRoot aRenderRoot) {
-  MOZ_ASSERT(aRenderRoot == wr::RenderRoot::Default ||
-             (XRE_IsParentProcess() && gfxPrefs::WebRenderSplitRenderRoots()));
+  MOZ_ASSERT(
+      aRenderRoot == wr::RenderRoot::Default ||
+      (XRE_IsParentProcess() && StaticPrefs::WebRenderSplitRenderRoots()));
   mParentCommands[aRenderRoot].AppendElement(aCmd);
 }
 
@@ -118,14 +120,20 @@ void WebRenderBridgeChild::EndTransaction(
   for (auto& renderRoot : aRenderRoots) {
     MOZ_ASSERT(
         renderRoot.mRenderRoot == wr::RenderRoot::Default ||
-        (XRE_IsParentProcess() && gfxPrefs::WebRenderSplitRenderRoots()));
+        (XRE_IsParentProcess() && StaticPrefs::WebRenderSplitRenderRoots()));
     renderRoot.mCommands = std::move(mParentCommands[renderRoot.mRenderRoot]);
+  }
+
+  nsTArray<CompositionPayload> payloads;
+  if (mManager) {
+    mManager->TakeCompositionPayloads(payloads);
   }
 
   this->SendSetDisplayList(std::move(aRenderRoots), mDestroyedActors,
                            GetFwdTransactionId(), aTransactionId, mIdNamespace,
                            aContainsSVGGroup, aVsyncId, aVsyncStartTime,
-                           aRefreshStartTime, aTxnStartTime, aTxnURL, fwdTime);
+                           aRefreshStartTime, aTxnStartTime, aTxnURL, fwdTime,
+                           payloads);
 
   // With multiple render roots, we may not have sent all of our
   // mParentCommands, so go ahead and go through our mParentCommands and ensure
@@ -150,15 +158,20 @@ void WebRenderBridgeChild::EndEmptyTransaction(
   for (auto& update : aRenderRootUpdates) {
     MOZ_ASSERT(
         update.mRenderRoot == wr::RenderRoot::Default ||
-        (XRE_IsParentProcess() && gfxPrefs::WebRenderSplitRenderRoots()));
+        (XRE_IsParentProcess() && StaticPrefs::WebRenderSplitRenderRoots()));
     update.mCommands = std::move(mParentCommands[update.mRenderRoot]);
+  }
+
+  nsTArray<CompositionPayload> payloads;
+  if (mManager) {
+    mManager->TakeCompositionPayloads(payloads);
   }
 
   this->SendEmptyTransaction(
       aFocusTarget, aPaintSequenceNumber, std::move(aRenderRootUpdates),
       mDestroyedActors, GetFwdTransactionId(), aTransactionId, mIdNamespace,
       aVsyncId, aVsyncStartTime, aRefreshStartTime, aTxnStartTime, aTxnURL,
-      fwdTime);
+      fwdTime, payloads);
 
   // With multiple render roots, we may not have sent all of our
   // mParentCommands, so go ahead and go through our mParentCommands and ensure
@@ -174,7 +187,7 @@ void WebRenderBridgeChild::ProcessWebRenderParentCommands() {
   for (auto renderRoot : wr::kRenderRoots) {
     if (!mParentCommands[renderRoot].IsEmpty()) {
       MOZ_ASSERT(renderRoot == wr::RenderRoot::Default ||
-                 gfxPrefs::WebRenderSplitRenderRoots());
+                 StaticPrefs::WebRenderSplitRenderRoots());
       this->SendParentCommands(mParentCommands[renderRoot], renderRoot);
       mParentCommands[renderRoot].Clear();
     }

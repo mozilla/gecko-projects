@@ -43,11 +43,16 @@ class FullParseHandler {
 
   /*
    * If this is a full parse to construct the bytecode for a function that
-   * was previously lazily parsed, that lazy function and the current index
-   * into its inner functions. We do not want to reparse the inner functions.
+   * was previously lazily parsed, we still don't want to full parse the
+   * inner functions. These members are used for this functionality:
+   *
+   * - lazyOuterFunction_ holds the lazyScript for this current parse
+   * - lazyInnerFunctionIndex is used as we skip over inner functions
+   *   (see skipLazyInnerFunction),
    */
   const Rooted<LazyScript*> lazyOuterFunction_;
   size_t lazyInnerFunctionIndex;
+
   size_t lazyClosedOverBindingIndex;
 
   const SourceKind sourceKind_;
@@ -472,6 +477,29 @@ class FullParseHandler {
     return true;
   }
 
+  void deleteConstructorScope(JSContext* cx, ListNodeType memberList) {
+    for (ParseNode* member : memberList->contents()) {
+      if (member->is<LexicalScopeNode>()) {
+        LexicalScopeNode* node = &member->as<LexicalScopeNode>();
+        MOZ_ASSERT(node->scopeBody()->isKind(ParseNodeKind::ClassMethod));
+        MOZ_ASSERT(node->scopeBody()->as<ClassMethod>().method().syntaxKind() ==
+                       FunctionSyntaxKind::ClassConstructor ||
+                   node->scopeBody()->as<ClassMethod>().method().syntaxKind() ==
+                       FunctionSyntaxKind::DerivedClassConstructor);
+        // Check isEmptyScope instead of asserting, because this function must
+        // be idempotent: when parsing via asm.js, this function is called, then
+        // later, after asm.js parsing fails, this function is called again on
+        // the same scope. (See bug 1555979)
+        if (!node->isEmptyScope()) {
+          MOZ_ASSERT(node->scopeBindings()->length == 1);
+          MOZ_ASSERT(node->scopeBindings()->trailingNames[0].name() ==
+                     cx->names().dotInitializers);
+          node->clearScopeBindings();
+        }
+      }
+    }
+  }
+
   UnaryNodeType newInitialYieldExpression(uint32_t begin, Node gen) {
     TokenPos pos(begin, begin + 1);
     return new_<UnaryNode>(ParseNodeKind::InitialYield, pos, gen);
@@ -755,14 +783,12 @@ class FullParseHandler {
   inline MOZ_MUST_USE bool setLastFunctionFormalParameterDefault(
       FunctionNodeType funNode, Node defaultValue);
 
- private:
   void checkAndSetIsDirectRHSAnonFunction(Node pn) {
     if (IsAnonymousFunctionDefinition(pn)) {
       pn->setDirectRHSAnonFunction(true);
     }
   }
 
- public:
   FunctionNodeType newFunction(FunctionSyntaxKind syntaxKind,
                                const TokenPos& pos) {
     return new_<FunctionNode>(syntaxKind, pos);

@@ -54,9 +54,10 @@ class SourceText;
 namespace js {
 
 namespace jit {
+class AutoKeepJitScripts;
 struct BaselineScript;
-class ICScript;
 struct IonScriptCounts;
+class JitScript;
 }  // namespace jit
 
 #define ION_DISABLED_SCRIPT ((js::jit::IonScript*)0x1)
@@ -65,8 +66,7 @@ struct IonScriptCounts;
 
 #define BASELINE_DISABLED_SCRIPT ((js::jit::BaselineScript*)0x1)
 
-class AutoKeepTypeScripts;
-class AutoSweepTypeScript;
+class AutoSweepJitScript;
 class BreakpointSite;
 class Debugger;
 class GCParallelTask;
@@ -75,7 +75,6 @@ class ModuleObject;
 class RegExpObject;
 class SourceCompressionTask;
 class Shape;
-class TypeScript;
 
 namespace frontend {
 struct BytecodeEmitter;
@@ -85,7 +84,7 @@ class ModuleSharedContext;
 
 namespace gc {
 void SweepLazyScripts(GCParallelTask* task);
-} // namespace gc
+}  // namespace gc
 
 namespace detail {
 
@@ -258,12 +257,12 @@ class DebugScript {
   friend class JS::Realm;
 
   /*
-   * When greater than zero, compile script in single-step mode, with VM calls
-   * to HandleDebugTrap before each bytecode instruction's code. This is a
-   * counter, adjusted by the incrementStepModeCount and decrementStepModeCount
-   * methods.
+   * The number of Debugger.Frame objects that refer to frames running this
+   * script and that have onStep handlers. When nonzero, the interpreter and JIT
+   * must arrange to call Debugger::onSingleStep before each bytecode, or at
+   * least at some useful granularity.
    */
-  uint32_t stepMode;
+  uint32_t stepperCount;
 
   /*
    * Number of breakpoint sites at opcodes in the script. This is the number
@@ -278,6 +277,12 @@ class DebugScript {
    * this array's true length is script->length().
    */
   BreakpointSite* breakpoints[1];
+
+  /*
+   * True if this DebugScript carries any useful information. If false, it
+   * should be removed from its JSScript.
+   */
+  bool needed() const { return stepperCount > 0 || numSites > 0; }
 };
 
 using UniqueDebugScript = js::UniquePtr<DebugScript, JS::FreePolicy>;
@@ -1568,7 +1573,7 @@ class alignas(uintptr_t) SharedScriptData final {
   // Index into the scopes array of the body scope.
   uint32_t bodyScopeIndex = 0;
 
-  // Number of IC entries to allocate in ICScript for Baseline ICs.
+  // Number of IC entries to allocate in JitScript for Baseline ICs.
   uint32_t numICEntries = 0;
 
   // ES6 function length.
@@ -1729,7 +1734,6 @@ class JSScript : public js::gc::TenuredCell {
   // entry, the JIT's EnterInterpreter stub, or the lazy link stub. Must be
   // non-null.
   uint8_t* jitCodeRaw_ = nullptr;
-  uint8_t* jitCodeSkipArgCheck_ = nullptr;
 
   // Shareable script data
   RefPtr<js::SharedScriptData> scriptData_ = {};
@@ -1741,8 +1745,8 @@ class JSScript : public js::gc::TenuredCell {
   JS::Realm* realm_ = nullptr;
 
  private:
-  /* Persistent type information retained across GCs. */
-  js::TypeScript* types_ = nullptr;
+  // JIT and type inference data for this script. May be purged on GC.
+  js::jit::JitScript* jitScript_ = nullptr;
 
   // This script's ScriptSourceObject.
   js::GCPtr<js::ScriptSourceObject*> sourceObject_ = {};
@@ -2429,7 +2433,9 @@ class JSScript : public js::gc::TenuredCell {
   static constexpr size_t offsetOfScriptData() {
     return offsetof(JSScript, scriptData_);
   }
-  static constexpr size_t offsetOfTypes() { return offsetof(JSScript, types_); }
+  static constexpr size_t offsetOfJitScript() {
+    return offsetof(JSScript, jitScript_);
+  }
 
   bool hasAnyIonScript() const { return hasIonScript(); }
 
@@ -2465,14 +2471,6 @@ class JSScript : public js::gc::TenuredCell {
   inline void setBaselineScript(JSRuntime* rt,
                                 js::jit::BaselineScript* baselineScript);
 
-  inline js::jit::ICScript* icScript() const;
-
-  bool hasICScript() const {
-    // ICScript is stored in TypeScript so we have an ICScript iff we have a
-    // TypeScript.
-    return !!types_;
-  }
-
   void updateJitCodeRaw(JSRuntime* rt);
 
   static size_t offsetOfBaselineScript() {
@@ -2482,12 +2480,9 @@ class JSScript : public js::gc::TenuredCell {
   static constexpr size_t offsetOfJitCodeRaw() {
     return offsetof(JSScript, jitCodeRaw_);
   }
-  static constexpr size_t offsetOfJitCodeSkipArgCheck() {
-    return offsetof(JSScript, jitCodeSkipArgCheck_);
-  }
   uint8_t* jitCodeRaw() const { return jitCodeRaw_; }
 
-  // We don't relazify functions with a TypeScript or JIT code, but some
+  // We don't relazify functions with a JitScript or JIT code, but some
   // callers (XDR, testing functions) want to know whether this script is
   // relazifiable ignoring (or after) discarding JIT code.
   bool isRelazifiableIgnoringJitCode() const {
@@ -2496,8 +2491,8 @@ class JSScript : public js::gc::TenuredCell {
            !hasFlag(MutableFlags::DoNotRelazify);
   }
   bool isRelazifiable() const {
-    MOZ_ASSERT_IF(hasBaselineScript() || hasIonScript(), types_);
-    return isRelazifiableIgnoringJitCode() && !types_;
+    MOZ_ASSERT_IF(hasBaselineScript() || hasIonScript(), jitScript_);
+    return isRelazifiableIgnoringJitCode() && !jitScript_;
   }
   void setLazyScript(js::LazyScript* lazy) { lazyScript = lazy; }
   js::LazyScript* maybeLazyScript() { return lazyScript; }
@@ -2599,12 +2594,13 @@ class JSScript : public js::gc::TenuredCell {
    */
   bool isTopLevel() { return code() && !functionNonDelazifying(); }
 
-  /* Ensure the script has a TypeScript. */
-  inline bool ensureHasTypes(JSContext* cx, js::AutoKeepTypeScripts&);
+  /* Ensure the script has a JitScript. */
+  inline bool ensureHasJitScript(JSContext* cx, js::jit::AutoKeepJitScripts&);
 
-  js::TypeScript* types() { return types_; }
+  bool hasJitScript() const { return jitScript_ != nullptr; }
+  js::jit::JitScript* jitScript() { return jitScript_; }
 
-  void maybeReleaseTypes();
+  void maybeReleaseJitScript();
 
   inline js::GlobalObject& global() const;
   inline bool hasGlobal(const js::GlobalObject* global) const;
@@ -2655,7 +2651,7 @@ class JSScript : public js::gc::TenuredCell {
   js::Scope* enclosingScope() const { return outermostScope()->enclosing(); }
 
  private:
-  bool makeTypes(JSContext* cx);
+  bool createJitScript(JSContext* cx);
 
   bool createSharedScriptData(JSContext* cx, uint32_t codeLength,
                               uint32_t noteLength, uint32_t natoms);
@@ -2732,7 +2728,10 @@ class JSScript : public js::gc::TenuredCell {
    */
   size_t computedSizeOfData() const;
   size_t sizeOfData(mozilla::MallocSizeOf mallocSizeOf) const;
-  size_t sizeOfTypeScript(mozilla::MallocSizeOf mallocSizeOf) const;
+
+  void addSizeOfJitScript(mozilla::MallocSizeOf mallocSizeOf,
+                          size_t* sizeOfJitScript,
+                          size_t* sizeOfBaselineFallbackStubs) const;
 
   size_t dataSize() const { return dataSize_; }
 
@@ -2887,7 +2886,7 @@ class JSScript : public js::gc::TenuredCell {
   /* Change this->stepMode to |newValue|. */
   void setNewStepMode(js::FreeOp* fop, uint32_t newValue);
 
-  bool ensureHasDebugScript(JSContext* cx);
+  js::DebugScript* getOrCreateDebugScript(JSContext* cx);
   js::DebugScript* debugScript();
   js::DebugScript* releaseDebugScript();
   void destroyDebugScript(js::FreeOp* fop);
@@ -2920,16 +2919,16 @@ class JSScript : public js::gc::TenuredCell {
    *
    * Only incrementing is fallible, as it could allocate a DebugScript.
    */
-  bool incrementStepModeCount(JSContext* cx);
-  void decrementStepModeCount(js::FreeOp* fop);
+  bool incrementStepperCount(JSContext* cx);
+  void decrementStepperCount(js::FreeOp* fop);
 
   bool stepModeEnabled() {
-    return hasDebugScript() && !!debugScript()->stepMode;
+    return hasDebugScript() && debugScript()->stepperCount > 0;
   }
 
 #ifdef DEBUG
-  uint32_t stepModeCount() {
-    return hasDebugScript() ? debugScript()->stepMode : 0;
+  uint32_t stepperCount() {
+    return hasDebugScript() ? debugScript()->stepperCount : 0;
   }
 #endif
 
@@ -2994,6 +2993,7 @@ class alignas(uintptr_t) LazyScriptData final {
   // Size to allocate
   static size_t AllocationSize(uint32_t numClosedOverBindings,
                                uint32_t numInnerFunctions);
+  size_t allocationSize() const;
 
   // Translate an offset into a concrete pointer.
   template <typename T>

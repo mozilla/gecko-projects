@@ -6,6 +6,7 @@
 
 #ifdef MOZ_WIDGET_GTK
 #  include <gtk/gtk.h>
+#  include <gdk/gdkx.h>
 #endif
 
 #include "ContentChild.h"
@@ -30,6 +31,7 @@
 #include "mozilla/docshell/OfflineCacheUpdateChild.h"
 #include "mozilla/dom/BrowsingContext.h"
 #include "mozilla/dom/BrowsingContextGroup.h"
+#include "mozilla/dom/BrowserBridgeHost.h"
 #include "mozilla/dom/ClientManager.h"
 #include "mozilla/dom/ClientOpenWindowOpActors.h"
 #include "mozilla/dom/ChildProcessMessageManager.h"
@@ -133,6 +135,7 @@
 #include "mozInlineSpellChecker.h"
 #include "nsDocShell.h"
 #include "nsDocShellLoadState.h"
+#include "nsIDocShellTreeOwner.h"
 #include "nsIConsoleListener.h"
 #include "nsIContentViewer.h"
 #include "nsICycleCollectorListener.h"
@@ -245,6 +248,7 @@
 #include "nsIPrincipal.h"
 #include "DomainPolicy.h"
 #include "mozilla/dom/ipc/StructuredCloneData.h"
+#include "mozilla/dom/TabContext.h"
 #include "mozilla/ipc/CrashReporterClient.h"
 #include "mozilla/net/NeckoMessageUtils.h"
 #include "mozilla/widget/PuppetBidiKeyboard.h"
@@ -671,6 +675,11 @@ bool ContentChild::Init(MessageLoop* aIOLoop, base::ProcessId aParentPid,
   // their own children.
   if (recordreplay::IsMiddleman()) {
     SetMiddlemanIPCChannel(recordreplay::parent::ChannelToUIProcess());
+
+    // Eagerly mark this child as connected, as using another IPC channel will
+    // cause that channel's protocol to be marked as connected instead and
+    // prevent this one from being able to send IPDL messages.
+    ActorConnected();
   }
 
   if (!Open(aChannel, aParentPid, aIOLoop)) {
@@ -696,12 +705,15 @@ bool ContentChild::Init(MessageLoop* aIOLoop, base::ProcessId aParentPid,
   }
 
 #ifdef MOZ_X11
-  if (!gfxPlatform::IsHeadless()) {
+#  ifdef MOZ_WIDGET_GTK
+  if (GDK_IS_X11_DISPLAY(gdk_display_get_default()) &&
+      !gfxPlatform::IsHeadless()) {
     // Send the parent our X socket to act as a proxy reference for our X
     // resources.
     int xSocketFd = ConnectionNumber(DefaultXDisplay());
     SendBackUpXResources(FileDescriptor(xSocketFd));
   }
+#  endif
 #endif
 
   CrashReporterClient::InitSingleton(this);
@@ -956,8 +968,9 @@ nsresult ContentChild::ProvideWindowCommon(
       nullptr, openerBC, aName, BrowsingContext::Type::Content);
 
   TabContext newTabContext = aTabOpener ? *aTabOpener : TabContext();
-  RefPtr<BrowserChild> newChild = new BrowserChild(
-      this, tabId, tabGroup, newTabContext, browsingContext, aChromeFlags);
+  RefPtr<BrowserChild> newChild =
+      new BrowserChild(this, tabId, tabGroup, newTabContext, browsingContext,
+                       aChromeFlags, /* aIsTopLevel */ true);
 
   if (aTabOpener) {
     MOZ_ASSERT(ipcContext->type() == IPCTabContext::TPopupIPCTabContext);
@@ -1786,7 +1799,8 @@ mozilla::ipc::IPCResult ContentChild::RecvConstructBrowser(
     ManagedEndpoint<PBrowserChild>&& aBrowserEp, const TabId& aTabId,
     const TabId& aSameTabGroupAs, const IPCTabContext& aContext,
     BrowsingContext* aBrowsingContext, const uint32_t& aChromeFlags,
-    const ContentParentId& aCpID, const bool& aIsForBrowser) {
+    const ContentParentId& aCpID, const bool& aIsForBrowser,
+    const bool& aIsTopLevel) {
   MOZ_ASSERT(!IsShuttingDown());
 
   static bool hasRunOnce = false;
@@ -1817,7 +1831,7 @@ mozilla::ipc::IPCResult ContentChild::RecvConstructBrowser(
 
   RefPtr<BrowserChild> browserChild =
       BrowserChild::Create(this, aTabId, aSameTabGroupAs, tc.GetTabContext(),
-                           aBrowsingContext, aChromeFlags);
+                           aBrowsingContext, aChromeFlags, aIsTopLevel);
 
   // Bind the created BrowserChild to IPC to actually link the actor. The ref
   // here is released in DeallocPBrowserChild.
@@ -2005,6 +2019,58 @@ void ContentChild::UpdateCookieStatus(nsIChannel* aChannel) {
   NS_ASSERTION(csChild, "Couldn't get CookieServiceChild");
 
   csChild->TrackCookieLoad(aChannel);
+}
+
+already_AddRefed<RemoteBrowser> ContentChild::CreateBrowser(
+    nsFrameLoader* aFrameLoader, const TabContext& aContext,
+    const nsString& aRemoteType, BrowsingContext* aBrowsingContext) {
+  MOZ_ASSERT(XRE_IsContentProcess());
+
+  // Determine our embedder's BrowserChild actor.
+  RefPtr<Element> owner = aFrameLoader->GetOwnerContent();
+  MOZ_DIAGNOSTIC_ASSERT(owner);
+
+  nsCOMPtr<nsIDocShell> docShell = do_GetInterface(owner->GetOwnerGlobal());
+  MOZ_DIAGNOSTIC_ASSERT(docShell);
+
+  RefPtr<BrowserChild> browserChild = BrowserChild::GetFrom(docShell);
+  MOZ_DIAGNOSTIC_ASSERT(browserChild);
+
+  uint32_t chromeFlags = 0;
+
+  nsCOMPtr<nsIDocShellTreeOwner> treeOwner;
+  if (docShell) {
+    docShell->GetTreeOwner(getter_AddRefs(treeOwner));
+  }
+  if (treeOwner) {
+    nsCOMPtr<nsIWebBrowserChrome> wbc = do_GetInterface(treeOwner);
+    if (wbc) {
+      wbc->GetChromeFlags(&chromeFlags);
+    }
+  }
+
+  // Checking that this actually does something useful is
+  // https://bugzilla.mozilla.org/show_bug.cgi?id=1542710
+  nsCOMPtr<nsILoadContext> loadContext = do_QueryInterface(docShell);
+  if (loadContext && loadContext->UsePrivateBrowsing()) {
+    chromeFlags |= nsIWebBrowserChrome::CHROME_PRIVATE_WINDOW;
+  }
+  if (docShell->GetAffectPrivateSessionLifetime()) {
+    chromeFlags |= nsIWebBrowserChrome::CHROME_PRIVATE_LIFETIME;
+  }
+
+  RefPtr<BrowserBridgeChild> browserBridge =
+      new BrowserBridgeChild(aFrameLoader, aBrowsingContext);
+  // Reference is freed in BrowserChild::DeallocPBrowserBridgeChild.
+  browserChild->SendPBrowserBridgeConstructor(
+      do_AddRef(browserBridge).take(),
+      PromiseFlatString(aContext.PresentationURL()), aRemoteType,
+      aBrowsingContext, chromeFlags);
+  browserBridge->mIPCOpen = true;
+
+  RefPtr<BrowserBridgeHost> browserBridgeHost =
+      new BrowserBridgeHost(browserBridge);
+  return browserBridgeHost.forget();
 }
 
 PScriptCacheChild* ContentChild::AllocPScriptCacheChild(
@@ -2670,7 +2736,7 @@ mozilla::ipc::IPCResult ContentChild::RecvRemoteType(
     SetProcessName(NS_LITERAL_STRING("file:// Content"));
   } else if (aRemoteType.EqualsLiteral(EXTENSION_REMOTE_TYPE)) {
     SetProcessName(NS_LITERAL_STRING("WebExtensions"));
-  } else if (aRemoteType.EqualsLiteral(PRIVILEGED_REMOTE_TYPE)) {
+  } else if (aRemoteType.EqualsLiteral(PRIVILEGEDABOUT_REMOTE_TYPE)) {
     SetProcessName(NS_LITERAL_STRING("Privileged Content"));
   } else if (aRemoteType.EqualsLiteral(LARGE_ALLOCATION_REMOTE_TYPE)) {
     SetProcessName(NS_LITERAL_STRING("Large Allocation Web Content"));
@@ -3831,17 +3897,10 @@ mozilla::ipc::IPCResult ContentChild::RecvCacheBrowsingContextChildren(
 }
 
 mozilla::ipc::IPCResult ContentChild::RecvRestoreBrowsingContextChildren(
-    BrowsingContext* aContext, nsTArray<BrowsingContextId>&& aChildren) {
+    BrowsingContext* aContext, BrowsingContext::Children&& aChildren) {
   MOZ_DIAGNOSTIC_ASSERT(aContext);
 
-  BrowsingContext::Children children(aChildren.Length());
-
-  for (auto id : aChildren) {
-    RefPtr<BrowsingContext> child = BrowsingContext::Get(id);
-    children.AppendElement(child);
-  }
-
-  aContext->RestoreChildren(std::move(children), /* aFromIPC */ true);
+  aContext->RestoreChildren(std::move(aChildren), /* aFromIPC */ true);
 
   return IPC_OK();
 }

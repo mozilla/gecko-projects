@@ -4265,13 +4265,12 @@ void HTMLInputElement::MaybeLoadImage() {
   }
 }
 
-nsresult HTMLInputElement::BindToTree(Document* aDocument, nsIContent* aParent,
-                                      nsIContent* aBindingParent) {
-  nsresult rv = nsGenericHTMLFormElementWithState::BindToTree(
-      aDocument, aParent, aBindingParent);
+nsresult HTMLInputElement::BindToTree(BindContext& aContext, nsINode& aParent) {
+  nsresult rv =
+      nsGenericHTMLFormElementWithState::BindToTree(aContext, aParent);
   NS_ENSURE_SUCCESS(rv, rv);
 
-  nsImageLoadingContent::BindToTree(aDocument, aParent, aBindingParent);
+  nsImageLoadingContent::BindToTree(aContext, aParent);
 
   if (mType == NS_FORM_INPUT_IMAGE) {
     // Our base URI may have changed; claim that our URI changed, and the
@@ -4334,7 +4333,7 @@ nsresult HTMLInputElement::BindToTree(Document* aDocument, nsIContent* aParent,
   return rv;
 }
 
-void HTMLInputElement::UnbindFromTree(bool aDeep, bool aNullParent) {
+void HTMLInputElement::UnbindFromTree(bool aNullParent) {
   // If we have a form and are unbound from it,
   // nsGenericHTMLFormElementWithState::UnbindFromTree() will unset the form and
   // that takes care of form's WillRemove so we just have to take care
@@ -4349,8 +4348,8 @@ void HTMLInputElement::UnbindFromTree(bool aDeep, bool aNullParent) {
     NotifyUAWidgetTeardown();
   }
 
-  nsImageLoadingContent::UnbindFromTree(aDeep, aNullParent);
-  nsGenericHTMLFormElementWithState::UnbindFromTree(aDeep, aNullParent);
+  nsImageLoadingContent::UnbindFromTree(aNullParent);
+  nsGenericHTMLFormElementWithState::UnbindFromTree(aNullParent);
 
   // GetCurrentDoc is returning nullptr so we can update the value
   // missing validity state to reflect we are no longer into a doc.

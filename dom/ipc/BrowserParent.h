@@ -73,6 +73,8 @@ class ClonedMessageData;
 class ContentParent;
 class Element;
 class DataTransfer;
+class BrowserHost;
+class BrowserBridgeParent;
 
 namespace ipc {
 class StructuredCloneData;
@@ -84,7 +86,6 @@ class StructuredCloneData;
  */
 class BrowserParent final : public PBrowserParent,
                             public nsIDOMEventListener,
-                            public nsIRemoteTab,
                             public nsIAuthPromptProvider,
                             public nsIKeyEventInPluginCallback,
                             public nsSupportsWeakReference,
@@ -93,7 +94,6 @@ class BrowserParent final : public PBrowserParent,
   typedef mozilla::dom::ClonedMessageData ClonedMessageData;
 
   friend class PBrowserParent;
-  friend class BrowserBridgeParent;  // for clearing mBrowserBridgeParent
 
   virtual ~BrowserParent();
 
@@ -103,18 +103,15 @@ class BrowserParent final : public PBrowserParent,
 
   NS_DECL_CYCLE_COLLECTING_ISUPPORTS
   NS_DECL_NSIAUTHPROMPTPROVIDER
-  // nsIRemoteTab
-  NS_DECL_NSIREMOTETAB
   // nsIDOMEventListener interfaces
   NS_DECL_NSIDOMEVENTLISTENER
 
-  NS_DECL_CYCLE_COLLECTION_CLASS_AMBIGUOUS(BrowserParent, nsIRemoteTab)
+  NS_DECL_CYCLE_COLLECTION_CLASS_AMBIGUOUS(BrowserParent, nsIDOMEventListener)
 
   BrowserParent(ContentParent* aManager, const TabId& aTabId,
                 const TabContext& aContext,
                 CanonicalBrowsingContext* aBrowsingContext,
-                uint32_t aChromeFlags,
-                BrowserBridgeParent* aBrowserBridgeParent = nullptr);
+                uint32_t aChromeFlags);
 
   // Call from LayoutStatics only
   static void InitializeStatics();
@@ -126,8 +123,6 @@ class BrowserParent final : public PBrowserParent,
   static BrowserParent* GetFocused();
 
   static BrowserParent* GetFrom(nsFrameLoader* aFrameLoader);
-
-  static BrowserParent* GetFrom(nsIRemoteTab* aBrowserParent);
 
   static BrowserParent* GetFrom(PBrowserParent* aBrowserParent);
 
@@ -154,12 +149,6 @@ class BrowserParent final : public PBrowserParent,
 
   nsIBrowserDOMWindow* GetBrowserDOMWindow() const { return mBrowserDOMWindow; }
 
-  // Returns the BrowserBridgeParent if this BrowserParent is for an
-  // out-of-process iframe and nullptr otherwise.
-  BrowserBridgeParent* GetBrowserBridgeParent() const {
-    return mBrowserBridgeParent;
-  }
-
   already_AddRefed<nsPIDOMWindowOuter> GetParentWindowOuter();
 
   already_AddRefed<nsIWidget> GetTopLevelWidget();
@@ -178,6 +167,14 @@ class BrowserParent final : public PBrowserParent,
   a11y::DocAccessibleParent* GetTopLevelDocAccessible() const;
 
   layout::RenderFrame* GetRenderFrame();
+
+  // Returns the BrowserBridgeParent if this BrowserParent is for an
+  // out-of-process iframe and nullptr otherwise.
+  BrowserBridgeParent* GetBrowserBridgeParent() const;
+
+  // Returns the BrowserHost if this BrowserParent is for a top-level browser
+  // and nullptr otherwise.
+  BrowserHost* GetBrowserHost() const;
 
   ShowInfo GetShowInfo();
 
@@ -272,6 +269,12 @@ class BrowserParent final : public PBrowserParent,
                                                       const nsString& aTitle,
                                                       nsIURI* aDocURI);
 
+  mozilla::ipc::IPCResult RecvOnStateChange(
+      const Maybe<WebProgressData>& awebProgressData,
+      const RequestData& aRequestData, const uint32_t aStateFlags,
+      const nsresult aStatus,
+      const Maybe<WebProgressStateChangeData>& aStateChangeData);
+
   mozilla::ipc::IPCResult RecvOnProgressChange(
       const Maybe<WebProgressData>& aWebProgressData,
       const RequestData& aRequestData, const int32_t aCurSelfProgress,
@@ -286,6 +289,10 @@ class BrowserParent final : public PBrowserParent,
   mozilla::ipc::IPCResult RecvOnContentBlockingEvent(
       const Maybe<WebProgressData>& aWebProgressData,
       const RequestData& aRequestData, const uint32_t& aEvent);
+
+  bool GetWebProgressListener(nsIBrowser** aOutBrowser,
+                              nsIWebProgress** aOutManager,
+                              nsIWebProgressListener** aOutListener);
 
   void ReconstructWebProgressAndRequest(
       nsIWebProgress* aManager, const Maybe<WebProgressData>& aWebProgressData,
@@ -463,10 +470,7 @@ class BrowserParent final : public PBrowserParent,
   void InitRendering();
   void MaybeShowFrame();
 
-  // XXX/cjones: it's not clear what we gain by hiding these
-  // message-sending functions under a layer of indirection and
-  // eating the return values
-  void Show(const ScreenIntSize& aSize, bool aParentIsActive);
+  bool Show(const ScreenIntSize& aSize, bool aParentIsActive);
 
   void UpdateDimensions(const nsIntRect& aRect, const ScreenIntSize& aSize);
 
@@ -475,8 +479,6 @@ class BrowserParent final : public PBrowserParent,
   nsresult UpdatePosition();
 
   void SizeModeChanged(const nsSizeMode& aSizeMode);
-
-  void UIResolutionChanged();
 
   void ThemeChanged();
 
@@ -681,7 +683,33 @@ class BrowserParent final : public PBrowserParent,
 
   void SkipBrowsingContextDetach();
 
+  bool GetDocShellIsActive();
+  void SetDocShellIsActive(bool aDocShellIsActive);
+
+  bool GetHasPresented();
+  bool GetHasLayers();
+  bool GetRenderLayers();
+  void SetRenderLayers(bool aRenderLayers);
+  void PreserveLayers(bool aPreserveLayers);
+  void ForceRepaint();
+  void NotifyResolutionChanged();
+
+  void Deprioritize();
+
+  bool GetHasContentOpener();
+  bool GetHasBeforeUnload();
+
+  bool StartApzAutoscroll(float aAnchorX, float aAnchorY, nsViewID aScrollId,
+                          uint32_t aPresShellId);
+  void StopApzAutoscroll(nsViewID aScrollId, uint32_t aPresShellId);
+
  protected:
+  friend BrowserBridgeParent;
+  friend BrowserHost;
+
+  void SetBrowserBridgeParent(BrowserBridgeParent* aBrowser);
+  void SetBrowserHost(BrowserHost* aBrowser);
+
   bool ReceiveMessage(
       const nsString& aMessage, bool aSync, ipc::StructuredCloneData* aData,
       mozilla::jsipc::CpowHolder* aCpows, nsIPrincipal* aPrincipal,
@@ -711,7 +739,7 @@ class BrowserParent final : public PBrowserParent,
                                             const int32_t& aCy);
 
   mozilla::ipc::IPCResult RecvShowCanvasPermissionPrompt(
-      const nsCString& aFirstPartyURI, const bool& aHideDoorHanger);
+      const nsCString& aOrigin, const bool& aHideDoorHanger);
 
   mozilla::ipc::IPCResult RecvSetSystemFont(const nsCString& aFontName);
   mozilla::ipc::IPCResult RecvGetSystemFont(nsCString* aFontName);
@@ -792,6 +820,10 @@ class BrowserParent final : public PBrowserParent,
   // by the BrowserBridgeParent instance, which has the strong reference
   // to this BrowserParent.
   BrowserBridgeParent* mBrowserBridgeParent;
+  // Pointer to the BrowserHost that owns us, if any. This is mutually
+  // exclusive with mBrowserBridgeParent, and one is guaranteed to be
+  // non-null.
+  BrowserHost* mBrowserHost;
 
   ContentCacheInParent mContentCache;
 
@@ -810,13 +842,6 @@ class BrowserParent final : public PBrowserParent,
   nsSizeMode mSizeMode;
   LayoutDeviceIntPoint mClientOffset;
   LayoutDeviceIntPoint mChromeOffset;
-
-  nsTArray<nsTArray<IPCDataTransferItem>> mInitialDataTransferItems;
-
-  RefPtr<gfx::DataSourceSurface> mDnDVisualization;
-  bool mDragValid;
-  LayoutDeviceIntRect mDragRect;
-  nsCOMPtr<nsIPrincipal> mDragPrincipal;
 
   // When loading a new tab or window via window.open, the child is
   // responsible for loading the URL it wants into the new BrowserChild. When

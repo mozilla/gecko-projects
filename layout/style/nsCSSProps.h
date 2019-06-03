@@ -290,7 +290,6 @@ class nsCSSProps {
   // Not const because we modify its entries when the pref
   // "layout.css.background-clip.text" changes:
   static const KTableEntry kShapeRadiusKTable[];
-  static const KTableEntry kFilterFunctionKTable[];
   static const KTableEntry kBoxShadowTypeKTable[];
   static const KTableEntry kCursorKTable[];
   // Not const because we modify its entries when various
@@ -310,7 +309,6 @@ class nsCSSProps {
   static const KTableEntry kTextAlignKTable[];
   static const KTableEntry kTextDecorationStyleKTable[];
   static const KTableEntry kTextEmphasisStyleShapeKTable[];
-  static const KTableEntry kTextOverflowKTable[];
 };
 
 // MOZ_DBG support for nsCSSPropertyID

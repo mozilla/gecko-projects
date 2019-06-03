@@ -36,6 +36,7 @@
 #include "mozilla/dom/PromiseDebugging.h"
 #include "mozilla/dom/RemoteWorkerChild.h"
 #include "mozilla/dom/WorkerBinding.h"
+#include "mozilla/StorageAccess.h"
 #include "mozilla/ThreadEventQueue.h"
 #include "mozilla/ThrottledEventQueue.h"
 #include "mozilla/TimelineConsumers.h"
@@ -310,7 +311,8 @@ class CompileScriptRunnable final : public WorkerDebuggeeRunnable {
                                  UniquePtr<SerializedStackHolder> aOriginStack,
                                  const nsAString& aScriptURL)
       : WorkerDebuggeeRunnable(aWorkerPrivate, WorkerThreadModifyBusyCount),
-        mScriptURL(aScriptURL), mOriginStack(aOriginStack.release()) {}
+        mScriptURL(aScriptURL),
+        mOriginStack(aOriginStack.release()) {}
 
  private:
   // We can't implement PreRun effectively, because at the point when that would
@@ -1322,7 +1324,7 @@ nsresult WorkerPrivate::SetCSPFromHeaderValues(
 
 void WorkerPrivate::StoreCSPOnClient() {
   MOZ_ACCESS_THREAD_BOUND(mWorkerThreadAccessible, data);
-  if (data->mClientSource) {
+  if (data->mClientSource && mLoadInfo.mCSPInfo) {
     data->mClientSource->SetCspInfo(*mLoadInfo.mCSPInfo.get());
   }
 }
@@ -2178,10 +2180,9 @@ WorkerPrivate::WorkerPrivate(WorkerPrivate* aParent,
   mMainThreadEventTargetForMessaging =
       ThrottledEventQueue::Create(target, "Worker queue for messaging");
   if (StaticPrefs::dom_worker_use_medium_high_event_queue()) {
-    mMainThreadEventTarget =
-        ThrottledEventQueue::Create(GetMainThreadSerialEventTarget(),
-                                    "Worker queue",
-                                    nsIRunnablePriority::PRIORITY_MEDIUMHIGH);
+    mMainThreadEventTarget = ThrottledEventQueue::Create(
+        GetMainThreadSerialEventTarget(), "Worker queue",
+        nsIRunnablePriority::PRIORITY_MEDIUMHIGH);
   } else {
     mMainThreadEventTarget = mMainThreadEventTargetForMessaging;
   }
@@ -2525,8 +2526,7 @@ nsresult WorkerPrivate::GetLoadInfo(JSContext* aCx, nsPIDOMWindowInner* aWindow,
 
       loadInfo.mFromWindow = true;
       loadInfo.mWindowID = globalWindow->WindowID();
-      loadInfo.mStorageAccess =
-          nsContentUtils::StorageAllowedForWindow(globalWindow);
+      loadInfo.mStorageAccess = StorageAllowedForWindow(globalWindow);
       loadInfo.mCookieSettings = document->CookieSettings();
       loadInfo.mOriginAttributes =
           nsContentUtils::GetOriginAttributes(document);
@@ -2572,7 +2572,7 @@ nsresult WorkerPrivate::GetLoadInfo(JSContext* aCx, nsPIDOMWindowInner* aWindow,
       loadInfo.mXHRParamsAllowed = true;
       loadInfo.mFromWindow = false;
       loadInfo.mWindowID = UINT64_MAX;
-      loadInfo.mStorageAccess = nsContentUtils::StorageAccess::eAllow;
+      loadInfo.mStorageAccess = StorageAccess::eAllow;
       loadInfo.mCookieSettings = mozilla::net::CookieSettings::Create();
       MOZ_ASSERT(loadInfo.mCookieSettings);
 

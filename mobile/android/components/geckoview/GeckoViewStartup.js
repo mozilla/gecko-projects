@@ -44,6 +44,13 @@ GeckoViewStartup.prototype = {
           ],
         });
 
+        GeckoViewUtils.addLazyGetter(this, "GeckoViewRecordingMedia", {
+          module: "resource://gre/modules/GeckoViewMedia.jsm",
+          observers: [
+            "recording-device-events",
+          ],
+        });
+
         GeckoViewUtils.addLazyGetter(this, "GeckoViewConsole", {
           module: "resource://gre/modules/GeckoViewConsole.jsm",
         });
@@ -55,6 +62,14 @@ GeckoViewStartup.prototype = {
             "GeckoView:UnregisterWebExtension",
             "GeckoView:WebExtension:PortDisconnect",
             "GeckoView:WebExtension:PortMessageFromApp",
+          ],
+        });
+
+        GeckoViewUtils.addLazyGetter(this, "GeckoViewStorageController", {
+          module: "resource://gre/modules/GeckoViewStorageController.jsm",
+          ged: [
+            "GeckoView:ClearData",
+            "GeckoView:ClearHostData",
           ],
         });
 

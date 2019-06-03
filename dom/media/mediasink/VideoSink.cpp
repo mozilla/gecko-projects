@@ -607,7 +607,26 @@ void VideoSink::MaybeResolveEndPromise() {
         mFrameStats.NotifyPresentedFrame();
       }
     }
-    mEndPromiseHolder.ResolveIfExists(true, __func__);
+
+    TimeStamp nowTime;
+    const auto clockTime = mAudioSink->GetPosition(&nowTime);
+    if (clockTime < mVideoFrameEndTime) {
+      VSINK_LOG_V(
+          "Not reach video end time yet, reschedule timer to resolve "
+          "end promise. clockTime=%" PRId64 ", endTime=%" PRId64,
+          clockTime.ToMicroseconds(), mVideoFrameEndTime.ToMicroseconds());
+      int64_t delta = (mVideoFrameEndTime - clockTime).ToMicroseconds() /
+                      mAudioSink->GetPlaybackParams().mPlaybackRate;
+      TimeStamp target = nowTime + TimeDuration::FromMicroseconds(delta);
+      auto resolveEndPromise = [self = RefPtr<VideoSink>(this)]() {
+        self->mEndPromiseHolder.ResolveIfExists(true, __func__);
+        self->mUpdateScheduler.CompleteRequest();
+      };
+      mUpdateScheduler.Ensure(target, std::move(resolveEndPromise),
+                              std::move(resolveEndPromise));
+    } else {
+      mEndPromiseHolder.ResolveIfExists(true, __func__);
+    }
   }
 }
 
@@ -646,18 +665,17 @@ void VideoSink::ClearSecondaryVideoContainer() {
   mSecondaryContainer = nullptr;
 }
 
-nsCString VideoSink::GetDebugInfo() {
+void VideoSink::GetDebugInfo(dom::MediaSinkDebugInfo& aInfo) {
   AssertOwnerThread();
-  auto str = nsPrintfCString(
-      "VideoSink: IsStarted=%d IsPlaying=%d VideoQueue(finished=%d "
-      "size=%zu) mVideoFrameEndTime=%" PRId64
-      " mHasVideo=%d "
-      "mVideoSinkEndRequest.Exists()=%d mEndPromiseHolder.IsEmpty()=%d",
-      IsStarted(), IsPlaying(), VideoQueue().IsFinished(),
-      VideoQueue().GetSize(), mVideoFrameEndTime.ToMicroseconds(), mHasVideo,
-      mVideoSinkEndRequest.Exists(), mEndPromiseHolder.IsEmpty());
-  AppendStringIfNotEmpty(str, mAudioSink->GetDebugInfo());
-  return std::move(str);
+  aInfo.mVideoSink.mIsStarted = IsStarted();
+  aInfo.mVideoSink.mIsPlaying = IsPlaying();
+  aInfo.mVideoSink.mFinished = VideoQueue().IsFinished();
+  aInfo.mVideoSink.mSize = VideoQueue().GetSize();
+  aInfo.mVideoSink.mVideoFrameEndTime = mVideoFrameEndTime.ToMicroseconds();
+  aInfo.mVideoSink.mHasVideo = mHasVideo;
+  aInfo.mVideoSink.mVideoSinkEndRequestExists = mVideoSinkEndRequest.Exists();
+  aInfo.mVideoSink.mEndPromiseHolderIsEmpty = mEndPromiseHolder.IsEmpty();
+  mAudioSink->GetDebugInfo(aInfo);
 }
 
 bool VideoSink::InitializeBlankImage() {

@@ -15,6 +15,7 @@
 #include "mozilla/ComputedStyleInlines.h"
 #include "mozilla/DebugOnly.h"
 #include "mozilla/ErrorResult.h"
+#include "mozilla/dom/BindContext.h"
 #include "mozilla/dom/GeneratedImageContent.h"
 #include "mozilla/dom/HTMLDetailsElement.h"
 #include "mozilla/dom/HTMLSelectElement.h"
@@ -1158,9 +1159,8 @@ void nsFrameConstructorState::ConstructBackdropFrameFor(nsIContent* aContent,
 
   RefPtr<ComputedStyle> style =
       mPresShell->StyleSet()->ResolvePseudoElementStyle(
-          aContent->AsElement(), PseudoStyleType::backdrop,
-          /* aParentComputedStyle */ nullptr,
-          /* aPseudoElement */ nullptr);
+          *aContent->AsElement(), PseudoStyleType::backdrop,
+          /* aParentStyle */ nullptr);
   MOZ_ASSERT(style->StyleDisplay()->mTopLayer == NS_STYLE_TOP_LAYER_TOP);
   nsContainerFrame* parentFrame =
       GetGeometricParent(*style->StyleDisplay(), nullptr);
@@ -1717,6 +1717,8 @@ void nsCSSFrameConstructor::CreateGeneratedContentItem(
       property = nsGkAtoms::afterPseudoProperty;
       break;
     case PseudoStyleType::marker:
+      // We want to get a marker style even if we match no rules, but we still
+      // want to check the result of GeneratedContentPseudoExists.
       elemName = nsGkAtoms::mozgeneratedcontentmarker;
       property = nsGkAtoms::markerPseudoProperty;
       break;
@@ -1741,13 +1743,8 @@ void nsCSSFrameConstructor::CreateGeneratedContentItem(
   container->SetIsNativeAnonymousRoot();
   container->SetPseudoElementType(aPseudoElement);
 
-  // If the parent is in a shadow tree, make sure we don't
-  // bind with a document because shadow roots and its descendants
-  // are not in document.
-  Document* bindDocument =
-      aOriginatingElement.HasFlag(NODE_IS_IN_SHADOW_TREE) ? nullptr : mDocument;
-  rv = container->BindToTree(bindDocument, &aOriginatingElement,
-                             &aOriginatingElement);
+  BindContext context(aOriginatingElement, BindContext::ForNativeAnonymous);
+  rv = container->BindToTree(context, aOriginatingElement);
   if (NS_FAILED(rv)) {
     container->UnbindFromTree();
     return;
@@ -2245,7 +2242,7 @@ nsIFrame* nsCSSFrameConstructor::ConstructDocElementFrame(
   // Ensure that our XBL bindings are installed.
   //
   // FIXME(emilio): Can we remove support for bindings on the root?
-  if (display->mBinding) {
+  if (display->mBinding.IsUrl()) {
     // Get the XBL loader.
     nsresult rv;
 
@@ -2254,9 +2251,11 @@ nsIFrame* nsCSSFrameConstructor::ConstructDocElementFrame(
       return nullptr;
     }
 
+    const auto& url = display->mBinding.AsUrl();
+
     RefPtr<nsXBLBinding> binding;
-    rv = xblService->LoadBindings(aDocElement, display->mBinding->GetURI(),
-                                  display->mBinding->ExtraData()->Principal(),
+    rv = xblService->LoadBindings(aDocElement, url.GetURI(),
+                                  url.ExtraData().Principal(),
                                   getter_AddRefs(binding));
     if (NS_FAILED(rv) && rv != NS_ERROR_XBL_BLOCKED) {
       // Binding will load asynchronously.
@@ -3854,6 +3853,7 @@ nsresult nsCSSFrameConstructor::GetAnonymousContent(
     return rv;
   }
 
+  MOZ_ASSERT(aParent->IsElement());
   for (const auto& info : aContent) {
     // get our child's content and set its parent to our content
     nsIContent* content = info.mContent;
@@ -3861,12 +3861,9 @@ nsresult nsCSSFrameConstructor::GetAnonymousContent(
 
     bool anonContentIsEditable = content->HasFlag(NODE_IS_EDITABLE);
 
-    // If the parent is in a shadow tree, make sure we don't
-    // bind with a document because shadow roots and its descendants
-    // are not in document.
-    Document* bindDocument =
-        aParent->HasFlag(NODE_IS_IN_SHADOW_TREE) ? nullptr : mDocument;
-    rv = content->BindToTree(bindDocument, aParent, aParent);
+    BindContext context(*aParent->AsElement(), BindContext::ForNativeAnonymous);
+    rv = content->BindToTree(context, *aParent);
+
     // If the anonymous content creator requested that the content should be
     // editable, honor its request.
     // We need to set the flag on the whole subtree, because existing
@@ -5315,8 +5312,9 @@ nsCSSFrameConstructor::LoadXBLBindingIfNeeded(nsIContent& aContent,
   if (!(aFlags & ITEM_ALLOW_XBL_BASE)) {
     return XBLBindingLoadInfo(nullptr);
   }
-  css::URLValue* binding = aStyle.StyleDisplay()->mBinding;
-  if (!binding) {
+
+  const auto& binding = aStyle.StyleDisplay()->mBinding;
+  if (binding.IsNone()) {
     return XBLBindingLoadInfo(nullptr);
   }
 
@@ -5326,11 +5324,10 @@ nsCSSFrameConstructor::LoadXBLBindingIfNeeded(nsIContent& aContent,
   }
 
   auto newPendingBinding = MakeUnique<PendingBinding>();
-
-  nsresult rv =
-      xblService->LoadBindings(aContent.AsElement(), binding->GetURI(),
-                               binding->ExtraData()->Principal(),
-                               getter_AddRefs(newPendingBinding->mBinding));
+  const auto& url = binding.AsUrl();
+  nsresult rv = xblService->LoadBindings(
+      aContent.AsElement(), url.GetURI(), url.ExtraData().Principal(),
+      getter_AddRefs(newPendingBinding->mBinding));
   if (NS_FAILED(rv)) {
     if (rv == NS_ERROR_XBL_BLOCKED) {
       return XBLBindingLoadInfo(nullptr);
@@ -8717,8 +8714,7 @@ already_AddRefed<ComputedStyle> nsCSSFrameConstructor::GetFirstLetterStyle(
     nsIContent* aContent, ComputedStyle* aComputedStyle) {
   if (aContent) {
     return mPresShell->StyleSet()->ResolvePseudoElementStyle(
-        aContent->AsElement(), PseudoStyleType::firstLetter, aComputedStyle,
-        nullptr);
+        *aContent->AsElement(), PseudoStyleType::firstLetter, aComputedStyle);
   }
   return nullptr;
 }
@@ -8727,8 +8723,7 @@ already_AddRefed<ComputedStyle> nsCSSFrameConstructor::GetFirstLineStyle(
     nsIContent* aContent, ComputedStyle* aComputedStyle) {
   if (aContent) {
     return mPresShell->StyleSet()->ResolvePseudoElementStyle(
-        aContent->AsElement(), PseudoStyleType::firstLine, aComputedStyle,
-        nullptr);
+        *aContent->AsElement(), PseudoStyleType::firstLine, aComputedStyle);
   }
   return nullptr;
 }
@@ -9990,35 +9985,24 @@ static int32_t FirstLetterCount(const nsTextFragment* aFragment) {
   return count;
 }
 
-static bool NeedFirstLetterContinuation(nsIContent* aContent) {
-  MOZ_ASSERT(aContent, "null ptr");
-
-  bool result = false;
-  if (aContent) {
-    const nsTextFragment* frag = aContent->GetText();
-    if (frag) {
-      int32_t flc = FirstLetterCount(frag);
-      int32_t tl = frag->GetLength();
-      if (flc < tl) {
-        result = true;
-      }
-    }
-  }
-  return result;
+static bool NeedFirstLetterContinuation(Text* aText) {
+  MOZ_ASSERT(aText, "null ptr");
+  int32_t flc = FirstLetterCount(&aText->TextFragment());
+  int32_t tl = aText->TextDataLength();
+  return flc < tl;
 }
 
-static bool IsFirstLetterContent(nsIContent* aContent) {
-  return aContent->TextLength() && !aContent->TextIsOnlyWhitespace();
+static bool IsFirstLetterContent(Text* aText) {
+  return aText->TextDataLength() && !aText->TextIsOnlyWhitespace();
 }
 
 /**
  * Create a letter frame, only make it a floating frame.
  */
 nsFirstLetterFrame* nsCSSFrameConstructor::CreateFloatingLetterFrame(
-    nsFrameConstructorState& aState, nsIContent* aTextContent,
-    nsIFrame* aTextFrame, nsContainerFrame* aParentFrame,
-    ComputedStyle* aParentComputedStyle, ComputedStyle* aComputedStyle,
-    nsFrameList& aResult) {
+    nsFrameConstructorState& aState, Text* aTextContent, nsIFrame* aTextFrame,
+    nsContainerFrame* aParentFrame, ComputedStyle* aParentComputedStyle,
+    ComputedStyle* aComputedStyle, nsFrameList& aResult) {
   MOZ_ASSERT(aParentComputedStyle);
 
   nsFirstLetterFrame* letterFrame =
@@ -10082,9 +10066,7 @@ nsFirstLetterFrame* nsCSSFrameConstructor::CreateFloatingLetterFrame(
  */
 void nsCSSFrameConstructor::CreateLetterFrame(
     nsContainerFrame* aBlockFrame, nsContainerFrame* aBlockContinuation,
-    nsIContent* aTextContent, nsContainerFrame* aParentFrame,
-    nsFrameList& aResult) {
-  MOZ_ASSERT(aTextContent->IsText(), "aTextContent isn't text");
+    Text* aTextContent, nsContainerFrame* aParentFrame, nsFrameList& aResult) {
   NS_ASSERTION(aBlockFrame->IsBlockFrameOrSubclass(), "Not a block frame?");
 
   // Get a ComputedStyle for the first-letter-frame.
@@ -10218,7 +10200,7 @@ void nsCSSFrameConstructor::WrapFramesInFirstLetterFrame(
     LayoutFrameType frameType = frame->Type();
     if (LayoutFrameType::Text == frameType) {
       // Wrap up first-letter content in a letter frame
-      nsIContent* textContent = frame->GetContent();
+      Text* textContent = frame->GetContent()->AsText();
       if (IsFirstLetterContent(textContent)) {
         // Create letter frame to wrap up the text
         CreateLetterFrame(aBlockFrame, aBlockContinuation, textContent,

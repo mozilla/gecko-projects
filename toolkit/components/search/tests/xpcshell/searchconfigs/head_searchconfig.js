@@ -6,6 +6,7 @@
 const {XPCOMUtils} = ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
 XPCOMUtils.defineLazyModuleGetters(this, {
   AddonTestUtils: "resource://testing-common/AddonTestUtils.jsm",
+  ObjectUtils: "resource://gre/modules/ObjectUtils.jsm",
   OS: "resource://gre/modules/osfile.jsm",
   SearchTestUtils: "resource://testing-common/SearchTestUtils.jsm",
   Services: "resource://gre/modules/Services.jsm",
@@ -222,9 +223,6 @@ class SearchConfigTest {
 
   /**
    * Helper function to find an engine from within a list.
-   * Due to Amazon's current complex setup with three different identifiers,
-   * if the identifier is 'amazon', then we do a startsWith match. Otherwise
-   * we expect the names to equal.
    *
    * @param {Array} engines
    *   The list of engines to check.
@@ -234,10 +232,7 @@ class SearchConfigTest {
    *   Returns the engine if found, null otherwise.
    */
   _findEngine(engines, identifier) {
-    if (identifier == "amazon") {
-      return engines.find(engine => engine.identifier.startsWith(identifier));
-    }
-    return engines.find(engine => engine.identifier == identifier);
+    return engines.find(engine => engine.identifier.startsWith(identifier));
   }
 
   /**
@@ -334,12 +329,24 @@ class SearchConfigTest {
     const engine = this._findEngine(engines, this._config.identifier);
     this.assertOk(engine, "Should have an engine present");
 
+    if (this._config.aliases) {
+      this.assertDeepEqual(engine._internalAliases,
+        this._config.aliases, "Should have the correct aliases for the engine");
+    }
+
     const location = `in region:${region}, locale:${locale}`;
 
     for (const rule of details) {
       this._assertCorrectDomains(location, engine, rule);
       if (rule.codes) {
         this._assertCorrectCodes(location, engine, rule);
+      }
+      if (rule.searchUrlCode || rule.searchFormUrlCode || rule.suggestUrlCode) {
+        this._assertCorrectUrlCode(location, engine, rule);
+      }
+      if (rule.aliases) {
+        this.assertDeepEqual(engine._internalAliases,
+          rule.aliases, "Should have the correct aliases for the engine");
       }
     }
   }
@@ -396,8 +403,41 @@ class SearchConfigTest {
       const code = (typeof rules.codes === "string") ? rules.codes :
        rules.codes[purpose];
       const submission = engine.getSubmission("test", "text/html", purpose);
-      this.assertOk(submission.uri.query.split("&").includes(code),
+      const submissionQueryParams = submission.uri.query.split("&");
+      this.assertOk(submissionQueryParams.includes(code),
         `Expected "${code}" in url "${submission.uri.spec}" from purpose "${purpose}" ${location}`);
+
+      const paramName = code.split("=")[0];
+      this.assertOk(submissionQueryParams.filter(param => param.startsWith(paramName)).length == 1,
+        `Expected only one "${paramName}" parameter in "${submission.uri.spec}" from purpose "${purpose}" ${location}`);
+    }
+  }
+
+  /**
+   * Asserts whether the engine is using the correct URL codes or not.
+   *
+   * @param {string} location
+   *   Debug string with locale + region information.
+   * @param {object} engine
+   *   The engine being tested.
+   * @param {object} rules
+   *   Rules to test.
+   */
+  _assertCorrectUrlCode(location, engine, rule) {
+    if (rule.searchUrlCode) {
+      const submission = engine.getSubmission("test", URLTYPE_SEARCH_HTML);
+      this.assertOk(submission.uri.query.split("&").includes(rule.searchUrlCode),
+        `Expected "${rule.searchUrlCode}" in search url "${submission.uri.spec}"`);
+    }
+    if (rule.searchFormUrlCode) {
+      const uri = engine.searchForm;
+      this.assertOk(uri.includes(rule.searchFormUrlCode),
+        `Expected "${rule.searchFormUrlCode}" in "${uri}"`);
+    }
+    if (rule.suggestUrlCode) {
+      const submission = engine.getSubmission("test", URLTYPE_SUGGEST_JSON);
+      this.assertOk(submission.uri.query.split("&").includes(rule.suggestUrlCode),
+        `Expected "${rule.suggestUrlCode}" in suggestion url "${submission.uri.spec}"`);
     }
   }
 
@@ -415,6 +455,12 @@ class SearchConfigTest {
   assertEqual(actual, expected, message) {
     if (actual != expected || this._testDebug) {
       Assert.equal(actual, expected, message);
+    }
+  }
+
+  assertDeepEqual(actual, expected, message) {
+    if (!ObjectUtils.deepEqual(actual, expected)) {
+      Assert.deepEqual(actual, expected, message);
     }
   }
 }

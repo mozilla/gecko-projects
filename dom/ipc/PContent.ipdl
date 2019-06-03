@@ -51,6 +51,7 @@ include protocol PSHistory;
 include DOMTypes;
 include JavaScriptTypes;
 include IPCBlob;
+include IPCStream;
 include PTabContext;
 include URIParams;
 include PluginTypes;
@@ -99,7 +100,6 @@ using mozilla::Telemetry::ChildEventData from "mozilla/TelemetryComms.h";
 using mozilla::Telemetry::DiscardedData from "mozilla/TelemetryComms.h";
 using mozilla::CrossProcessMutexHandle from "mozilla/ipc/CrossProcessMutex.h";
 using refcounted class mozilla::dom::BrowsingContext from "mozilla/dom/BrowsingContext.h";
-using mozilla::dom::BrowsingContextId from "mozilla/dom/ipc/IdType.h";
 using mozilla::dom::BrowsingContextTransaction from "mozilla/dom/BrowsingContext.h";
 using mozilla::dom::BrowsingContextFieldEpochs from "mozilla/dom/BrowsingContext.h";
 using mozilla::dom::BrowsingContextInitializer from "mozilla/dom/BrowsingContext.h";
@@ -229,7 +229,7 @@ struct JSWindowActorInfo
 {
   nsString name;
   bool allFrames;
-  nsCString url;
+  nsCString? url;
 
   JSWindowActorEventDecl[] events;
   nsCString[] observers;
@@ -397,7 +397,7 @@ child:
                            IPCTabContext context,
                            BrowsingContext browsingContext,
                            uint32_t chromeFlags, ContentParentId cpId,
-                           bool isForBrowser);
+                           bool isForBrowser, bool isTopLevel);
 
 both:
     async PFileDescriptorSet(FileDescriptor fd);
@@ -1380,6 +1380,8 @@ parent:
     async RecordDiscardedData(DiscardedData data);
     async RecordOrigin(uint32_t metricId, nsCString origin);
 
+    async ReportContentBlockingLog(Principal firstPartyPrincipal, IPCStream aJSONStream);
+
     sync GetA11yContentId() returns (uint32_t aContentId);
     async A11yHandlerControl(uint32_t aPid,
                              IHandlerControlHolder aHandlerControl);
@@ -1461,7 +1463,7 @@ both:
      * Re-attach all BrowsingContexts in a 'aContext'.
      */
     async RestoreBrowsingContextChildren(BrowsingContext aContext,
-                                         BrowsingContextId[] aChildren);
+                                         BrowsingContext[] aChildren);
 
     async WindowClose(BrowsingContext aContext, bool aTrustedCaller);
     async WindowFocus(BrowsingContext aContext);

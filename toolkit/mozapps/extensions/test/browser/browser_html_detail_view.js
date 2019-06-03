@@ -640,6 +640,33 @@ add_task(async function testPrivateBrowsingExtension() {
   await closeView(win);
 });
 
+add_task(async function testInvalidExtension() {
+  let win = await open_manager("addons://detail/foo");
+  let categoryUtils = new CategoryUtilities(win);
+  is(categoryUtils.selectedCategory, "discover",
+     "Should fall back to the discovery pane");
+
+  ok(!gBrowser.canGoBack, "The view has been replaced");
+
+  await close_manager(win);
+});
+
+add_task(async function testInvalidExtensionNoDiscover() {
+  await SpecialPowers.pushPrefEnv({
+    set: [["extensions.getAddons.showPane", false]],
+  });
+
+  let win = await open_manager("addons://detail/foo");
+  let categoryUtils = new CategoryUtilities(win);
+  is(categoryUtils.selectedCategory, "extension",
+     "Should fall back to the extension list if discover is disabled");
+
+  ok(!gBrowser.canGoBack, "The view has been replaced");
+
+  await close_manager(win);
+  await SpecialPowers.popPrefEnv();
+});
+
 add_task(async function testExternalUninstall() {
   let id = "remove@mochi.test";
   let extension = ExtensionTestUtils.loadExtension({
@@ -796,4 +823,43 @@ add_task(async function testPermissions() {
 
   info("Check permissions for add-on without permission messages");
   await runTest("addon2@mochi.test");
+});
+
+// When the back button is used, its disabled state will be updated. If it
+// isn't updated when showing a view, then it will be disabled on the next
+// use (bug 1551213) if the last use caused it to become disabled.
+add_task(async function testGoBackButton() {
+  // Make sure the list view is the first loaded view so you cannot go back.
+  Services.prefs.setCharPref(PREF_UI_LASTCATEGORY, "addons://list/extension");
+
+  let id = "addon1@mochi.test";
+  let win = await loadInitialView("extension");
+  let doc = win.document;
+  let backButton = win.managerWindow.document.getElementById("go-back");
+
+  let loadDetailView = () => {
+    let loaded = waitForViewLoad(win);
+    getAddonCard(doc, id).querySelector("[action=expand]").click();
+    return loaded;
+  };
+
+  let checkBackButtonState = () => {
+    is_element_visible(backButton, "Back button is visible on the detail page");
+    ok(!backButton.disabled, "Back button is enabled");
+  };
+
+  // Load the detail view, first time should be fine.
+  await loadDetailView();
+  checkBackButtonState();
+
+  // Use the back button directly to pop from history and trigger its disabled
+  // state to be updated.
+  let loaded = waitForViewLoad(win);
+  backButton.click();
+  await loaded;
+
+  await loadDetailView();
+  checkBackButtonState();
+
+  await closeView(win);
 });

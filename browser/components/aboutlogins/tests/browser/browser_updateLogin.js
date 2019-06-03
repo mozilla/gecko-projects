@@ -4,7 +4,7 @@
 let nsLoginInfo = new Components.Constructor("@mozilla.org/login-manager/loginInfo;1",
                                              Ci.nsILoginInfo, "init");
 const LOGIN_URL = "https://www.example.com";
-let TEST_LOGIN1 = new nsLoginInfo(LOGIN_URL, LOGIN_URL, null, "user1", "pass1", "username", "password");
+let TEST_LOGIN1 = new nsLoginInfo(LOGIN_URL, LOGIN_URL, null, "user1", "pass1");
 
 add_task(async function setup() {
   let storageChangedPromised = TestUtils.topicObserved("passwordmgr-storage-changed",
@@ -66,12 +66,31 @@ add_task(async function test_login_item() {
     usernameInput.value += "-saveme";
     passwordInput.value += "-saveme";
 
+    ok(loginItem.hasAttribute("editing"), "LoginItem should be in 'edit' mode");
+
     let saveChangesButton = loginItem.shadowRoot.querySelector(".save-changes-button");
     saveChangesButton.click();
 
     await ContentTaskUtils.waitForCondition(() => {
+      loginListItem = Cu.waiveXrays(loginList.shadowRoot.querySelector("login-list-item"));
       return loginListItem._login.username == usernameInput.value &&
              loginListItem._login.password == passwordInput.value;
     }, "Waiting for corresponding login in login list to update");
+
+    ok(!loginItem.hasAttribute("editing"), "LoginItem should not be in 'edit' mode after saving");
+
+    editButton.click();
+    await Promise.resolve();
+
+    ok(loginItem.hasAttribute("editing"), "LoginItem should be in 'edit' mode");
+    let deleteButton = loginItem.shadowRoot.querySelector(".delete-button");
+    deleteButton.click();
+
+    await ContentTaskUtils.waitForCondition(() => {
+      loginListItem = Cu.waiveXrays(loginList.shadowRoot.querySelector("login-list-item"));
+      return !loginListItem;
+    }, "Waiting for login to be removed from list");
+
+    ok(!loginItem.hasAttribute("editing"), "LoginItem should not be in 'edit' mode after deleting");
   });
 });

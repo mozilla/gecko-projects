@@ -141,16 +141,16 @@ BALROG_SCOPE_ALIAS_TO_PROJECT = [[
 ], [
     'release', set([
         'mozilla-release',
+        'comm-esr60',
+        'comm-esr68',
     ])
 ], [
     'esr60', set([
         'mozilla-esr60',
-        'comm-esr60',
     ])
 ], [
     'esr68', set([
         'mozilla-esr68',
-        'comm-esr68',
     ])
 ]]
 
@@ -562,7 +562,7 @@ def generate_beetmover_artifact_map(config, job, **kwargs):
     platform = kwargs.get('platform', '')
     resolve_keyed_by(
         job, 'attributes.artifact_map',
-        'artifact map',
+        job['label'],
         **{
             'release-type': config.params['release_type'],
             'platform': platform,
@@ -583,7 +583,7 @@ def generate_beetmover_artifact_map(config, job, **kwargs):
     else:
         locales = map_config['default_locales']
 
-    resolve_keyed_by(map_config, 's3_bucket_paths', 's3_bucket_paths', platform=platform)
+    resolve_keyed_by(map_config, 's3_bucket_paths', job['label'], platform=platform)
 
     for locale, dep in itertools.product(locales, dependencies):
         paths = dict()
@@ -617,7 +617,9 @@ def generate_beetmover_artifact_map(config, job, **kwargs):
                 'pretty_name',
                 'checksums_path'
             ]:
-                resolve_keyed_by(file_config, field, field, locale=locale, platform=platform)
+                resolve_keyed_by(
+                    file_config, field, job["label"], locale=locale, platform=platform
+                )
 
             # This format string should ideally be in the configuration file,
             # but this would mean keeping variable names in sync between code + config.
@@ -660,7 +662,7 @@ def generate_beetmover_artifact_map(config, job, **kwargs):
         platforms = deepcopy(map_config.get('platform_names', {}))
         if platform:
             for key in platforms.keys():
-                resolve_keyed_by(platforms, key, key, platform=platform)
+                resolve_keyed_by(platforms, key, job['label'], platform=platform)
 
         upload_date = datetime.fromtimestamp(config.params['build_date'])
 

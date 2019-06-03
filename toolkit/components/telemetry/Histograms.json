@@ -1073,6 +1073,17 @@
     "bug_numbers": [1226196],
     "description": "Resident memory size (KB)"
   },
+  "MEMORY_RESIDENT_PEAK": {
+    "record_in_processes": ["main", "content"],
+    "alert_emails": ["memshrink-telemetry-alerts@mozilla.com", "kgupta@mozilla.com"],
+    "expires_in_version": "never",
+    "kind": "exponential",
+    "low": 32768,
+    "high": 16777216,
+    "n_buckets": 100,
+    "bug_numbers": [1551648],
+    "description": "Peak resident memory size (KB)"
+  },
   "MEMORY_TOTAL": {
     "record_in_processes": ["main"],
     "alert_emails": ["memshrink-telemetry-alerts@mozilla.com", "erahm@mozilla.com"],
@@ -8218,7 +8229,7 @@
   },
   "SEARCH_SERVICE_INIT_MS": {
     "record_in_processes": ["main"],
-    "alert_emails": ["mdeboer@mozilla.com", "dolske@mozilla.com"],
+    "alert_emails": ["mdeboer@mozilla.com", "fx-search@mozilla.com"],
     "expires_in_version": "never",
     "releaseChannelCollection": "opt-out",
     "kind": "exponential",
@@ -8229,7 +8240,7 @@
   },
   "SEARCH_SERVICE_COUNTRY_FETCH_TIME_MS": {
     "record_in_processes": ["main", "content"],
-    "alert_emails": ["mhammond@mozilla.com", "gavin@mozilla.com"],
+    "alert_emails": ["mdeboer@mozilla.com", "fx-search@mozilla.com"],
     "expires_in_version": "never",
     "kind": "exponential",
     "n_buckets": 30,
@@ -8238,7 +8249,7 @@
   },
   "SEARCH_SERVICE_COUNTRY_FETCH_RESULT": {
     "record_in_processes": ["main", "content"],
-    "alert_emails": ["mhammond@mozilla.com", "gavin@mozilla.com"],
+    "alert_emails": ["mdeboer@mozilla.com", "fx-search@mozilla.com"],
     "expires_in_version": "never",
     "kind": "enumerated",
     "n_values": 8,
@@ -8246,56 +8257,49 @@
   },
   "SEARCH_SERVICE_COUNTRY_TIMEOUT": {
     "record_in_processes": ["main", "content"],
-    "alert_emails": ["mhammond@mozilla.com", "gavin@mozilla.com"],
+    "alert_emails": ["mdeboer@mozilla.com", "fx-search@mozilla.com"],
     "expires_in_version": "never",
     "kind": "boolean",
     "description": "True if we stopped waiting for the XHR response before it completed"
   },
-  "SEARCH_SERVICE_COUNTRY_FETCH_CAUSED_SYNC_INIT": {
-    "record_in_processes": ["main", "content"],
-    "alert_emails": ["mhammond@mozilla.com", "gavin@mozilla.com"],
-    "expires_in_version": "never",
-    "kind": "boolean",
-    "description": "True if the search service was synchronously initialized while we were waiting for the XHR response"
-  },
   "SEARCH_SERVICE_US_COUNTRY_MISMATCHED_TIMEZONE": {
     "record_in_processes": ["main", "content"],
-    "alert_emails": ["mhammond@mozilla.com", "gavin@mozilla.com"],
+    "alert_emails": ["mdeboer@mozilla.com", "fx-search@mozilla.com"],
     "expires_in_version": "never",
     "kind": "flag",
     "description": "Set if the fetched country-code indicates US but the time-zone heuristic doesn't"
   },
   "SEARCH_SERVICE_US_TIMEZONE_MISMATCHED_COUNTRY": {
     "record_in_processes": ["main", "content"],
-    "alert_emails": ["mhammond@mozilla.com", "gavin@mozilla.com"],
+    "alert_emails": ["mdeboer@mozilla.com", "fx-search@mozilla.com"],
     "expires_in_version": "never",
     "kind": "flag",
     "description": "Set if the time-zone heuristic indicates US but the fetched country code doesn't"
   },
   "SEARCH_SERVICE_US_COUNTRY_MISMATCHED_PLATFORM_OSX": {
     "record_in_processes": ["main", "content"],
-    "alert_emails": ["mhammond@mozilla.com", "gavin@mozilla.com"],
+    "alert_emails": ["mdeboer@mozilla.com", "fx-search@mozilla.com"],
     "expires_in_version": "never",
     "kind": "boolean",
     "description": "If we are on OSX and either the OSX countryCode or the geoip countryCode indicates we are in the US, set to false if they both do or true otherwise"
   },
   "SEARCH_SERVICE_NONUS_COUNTRY_MISMATCHED_PLATFORM_OSX": {
     "record_in_processes": ["main", "content"],
-    "alert_emails": ["mhammond@mozilla.com", "gavin@mozilla.com"],
+    "alert_emails": ["mdeboer@mozilla.com", "fx-search@mozilla.com"],
     "expires_in_version": "never",
     "kind": "boolean",
     "description": "If we are on OSX and neither the OSX countryCode nor the geoip countryCode indicates we are in the US, set to false if they both agree on the value or true otherwise"
   },
   "SEARCH_SERVICE_US_COUNTRY_MISMATCHED_PLATFORM_WIN": {
     "record_in_processes": ["main", "content"],
-    "alert_emails": ["mhammond@mozilla.com", "gavin@mozilla.com"],
+    "alert_emails": ["mdeboer@mozilla.com", "fx-search@mozilla.com"],
     "expires_in_version": "never",
     "kind": "boolean",
     "description": "If we are on Windows and either the Windows countryCode or the geoip countryCode indicates we are in the US, set to false if they both do or true otherwise"
   },
   "SEARCH_SERVICE_NONUS_COUNTRY_MISMATCHED_PLATFORM_WIN": {
     "record_in_processes": ["main", "content"],
-    "alert_emails": ["mhammond@mozilla.com", "gavin@mozilla.com"],
+    "alert_emails": ["mdeboer@mozilla.com", "fx-search@mozilla.com"],
     "expires_in_version": "never",
     "kind": "boolean",
     "description": "If we are on Windows and neither the Windows countryCode nor the geoip countryCode indicates we are in the US, set to false if they both agree on the value or true otherwise"
@@ -14241,15 +14245,6 @@
     "n_values": 64,
     "description": "URL CLassifier-related (aka Safe Browsing) UI events. See nsIUrlClassifierUITelemetry.idl for the specific values."
   },
-  "USER_CHROME_CSS_LOADED": {
-    "record_in_processes": ["main"],
-    "bug_numbers": [1416044],
-    "expires_in_version": "62",
-    "alert_emails": ["sfoster@mozilla.com"],
-    "kind": "boolean",
-    "releaseChannelCollection": "opt-out",
-    "description": "Was a userChrome.css stylesheet loaded when the profile was initialized?"
-  },
  "WEBAUTHN_CREATE_CREDENTIAL_MS": {
     "record_in_processes": ["main"],
     "alert_emails": ["seceng-telemetry@mozilla.com", "jjones@mozilla.com"],
@@ -14638,6 +14633,20 @@
     "n_buckets": 100,
     "bug_numbers": [1499418],
     "description": "GeckoView: Time taken to load a page in ms. This includes all static contents, no dynamic content. Loading of about: pages is not counted."
+  },
+  "GV_PAGE_RELOAD_MS": {
+    "record_in_processes": ["main", "content"],
+    "alert_emails": [
+      "geckoview-team@mozilla.com",
+      "sefeng@mozilla.com",
+      "perfteam@mozilla.com"
+    ],
+    "expires_in_version": "never",
+    "kind": "exponential",
+    "high": 100000,
+    "n_buckets": 100,
+    "bug_numbers": [1549519],
+    "description": "GeckoView: Time taken to reload a page in ms. This includes all static contents, no dynamic content. Loading of about: pages is not counted."
   },
   "GV_STARTUP_RUNTIME_MS": {
     "record_in_processes": ["main", "content"],

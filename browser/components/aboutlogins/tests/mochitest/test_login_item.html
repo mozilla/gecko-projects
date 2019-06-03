@@ -37,6 +37,16 @@ const TEST_LOGIN_1 = {
   timeLastUsed: "4000",
 };
 
+const TEST_LOGIN_2 = {
+  guid: "987654321",
+  hostname: "https://example.com",
+  username: "user2",
+  password: "pass2",
+  timeCreated: "2000",
+  timePasswordChanged: "4000",
+  timeLastUsed: "8000",
+};
+
 add_task(async function setup() {
   stubFluentL10n({
     "time-created": "timeCreated",
@@ -130,6 +140,19 @@ add_task(async function test_edit_login_cancel() {
   }
 });
 
+add_task(async function test_reveal_password_change_selected_login() {
+  gLoginItem.setLogin(TEST_LOGIN_1);
+  let passwordInput = gLoginItem.shadowRoot.querySelector('modal-input[name="password"]');
+  let revealCheckbox = passwordInput.shadowRoot.querySelector(".reveal-checkbox");
+
+  ok(!revealCheckbox.checked, "reveal-checkbox should not be checked by default");
+  revealCheckbox.click();
+  ok(revealCheckbox.checked, "reveal-checkbox should be checked after clicking");
+
+  gLoginItem.setLogin(TEST_LOGIN_2);
+  ok(!revealCheckbox.checked, "reveal-checkbox should be unchecked when changing logins");
+});
+
 add_task(async function test_set_login_empty() {
   gLoginItem.setLogin({});
   await asyncElementRendered();
@@ -146,11 +169,18 @@ add_task(async function test_set_login_empty() {
   is(gLoginItem.shadowRoot.querySelector(".time-changed").textContent, "", "time-changed should be blank when undefined");
   is(gLoginItem.shadowRoot.querySelector(".time-used").textContent, "", "time-used should be blank when undefined");
 
+  let createEventDispatched = false;
+  document.addEventListener("AboutLoginsCreateLogin", event => {
+    createEventDispatched = true;
+  }, {once: true});
+  gLoginItem.shadowRoot.querySelector(".save-changes-button").click();
+  ok(!createEventDispatched, "Clicking the .save-changes-button shouldn't dispatch the event when fields are invalid");
+  ok(hostnameInput.matches(":invalid"), "hostname value is required");
+
   hostnameInput.value = "https://example.com/foo";
   gLoginItem.shadowRoot.querySelector("modal-input[name='username']").value = "user1";
   gLoginItem.shadowRoot.querySelector("modal-input[name='password']").value = "pass1";
 
-  let createEventDispatched = false;
   document.addEventListener("AboutLoginsCreateLogin", event => {
     is(event.detail.guid, undefined, "event should not include guid");
     is(event.detail.hostname, "https://example.com/foo", "event should include hostname");
