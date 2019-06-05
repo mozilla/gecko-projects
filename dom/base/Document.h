@@ -159,7 +159,6 @@ namespace dom {
 class Animation;
 class AnonymousContent;
 class Attr;
-class BoxObject;
 class XULBroadcastManager;
 class XULPersist;
 class ClientInfo;
@@ -1623,8 +1622,6 @@ class Document : public nsINode,
 
   void DoUnblockOnload();
 
-  void ClearAllBoxObjects();
-
   void MaybeEndOutermostXBLUpdate();
 
   void RetrieveRelevantHeaders(nsIChannel* aChannel);
@@ -2531,20 +2528,6 @@ class Document : public nsINode,
 
   // Refreshes the hrefs of all the links in the document.
   void RefreshLinkHrefs();
-
-  /**
-   * Resets and removes a box object from the document's box object cache
-   *
-   * @param aElement canonical nsIContent pointer of the box object's element
-   */
-  void ClearBoxObjectFor(nsIContent* aContent);
-
-  /**
-   * Get the box object for an element. This is not exposed through a
-   * scriptable interface except for XUL documents.
-   */
-  already_AddRefed<BoxObject> GetBoxObjectFor(Element* aElement,
-                                              ErrorResult& aRv);
 
   /**
    * Support for window.matchMedia()
@@ -3459,6 +3442,16 @@ class Document : public nsINode,
   bool Fullscreen() { return !!GetFullscreenElement(); }
   already_AddRefed<Promise> ExitFullscreen(ErrorResult&);
   void ExitPointerLock() { UnlockPointer(this); }
+  void GetFgColor(nsAString& aFgColor);
+  void SetFgColor(const nsAString& aFgColor);
+  void GetLinkColor(nsAString& aLinkColor);
+  void SetLinkColor(const nsAString& aLinkColor);
+  void GetVlinkColor(nsAString& aAvlinkColor);
+  void SetVlinkColor(const nsAString& aVlinkColor);
+  void GetAlinkColor(nsAString& aAlinkColor);
+  void SetAlinkColor(const nsAString& aAlinkColor);
+  void GetBgColor(nsAString& aBgColor);
+  void SetBgColor(const nsAString& aBgColor);
 
   static bool IsUnprefixedFullscreenEnabled(JSContext* aCx, JSObject* aObject);
   static bool DocumentSupportsL10n(JSContext* aCx, JSObject* aObject);
@@ -4483,8 +4476,6 @@ class Document : public nsINode,
   bool mScrolledToRefAlready : 1;
   bool mChangeScrollPosWhenScrollingToRef : 1;
 
-  bool mHasWarnedAboutBoxObjects : 1;
-
   bool mDelayFrameLoaderInitialization : 1;
 
   bool mSynchronousDOMContentLoaded : 1;
@@ -4878,8 +4869,6 @@ class Document : public nsINode,
   LinkedList<DocumentTimeline> mTimelines;
 
   RefPtr<dom::ScriptLoader> mScriptLoader;
-
-  nsRefPtrHashtable<nsPtrHashKey<nsIContent>, BoxObject>* mBoxObjectTable;
 
   // Tracker for animations that are waiting to start.
   // nullptr until GetOrCreatePendingAnimationTracker is called.

@@ -4145,6 +4145,14 @@ VARCACHE_PREF(
   bool, false
 )
 
+// text underline offset
+VARCACHE_PREF(
+  Live,
+  "layout.css.text-underline-offset.enabled",
+  layout_css_text_underline_offset_enabled,
+  bool, false
+)
+
 // Is support for CSS column-span enabled?
 VARCACHE_PREF(
   Live,
@@ -5737,6 +5745,20 @@ VARCACHE_PREF(
   "network.cookie.lifetimePolicy",
   network_cookie_lifetimePolicy,
   RelaxedAtomicInt32, 0
+)
+
+VARCACHE_PREF(
+  Live,
+  "network.cookie.sameSite.laxByDefault",
+   network_cookie_sameSite_laxByDefault,
+  bool, false
+)
+
+VARCACHE_PREF(
+  Live,
+  "network.cookie.sameSite.noneRequiresSecure",
+   network_cookie_sameSite_noneRequiresSecure,
+  bool, false
 )
 
 VARCACHE_PREF(
