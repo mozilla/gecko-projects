@@ -1,7 +1,6 @@
 /* Any copyright is dedicated to the Public Domain.
- * http://creativecommons.org/publicdomain/zero/1.0/ */
-
-"use strict";
+   http://creativecommons.org/publicdomain/zero/1.0/
+*/
 
 ChromeUtils.import("resource://testing-common/TelemetryArchiveTesting.jsm", this);
 
