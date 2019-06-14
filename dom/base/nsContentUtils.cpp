@@ -80,6 +80,7 @@
 #include "mozilla/dom/ShadowRoot.h"
 #include "mozilla/dom/XULCommandEvent.h"
 #include "mozilla/dom/WorkerCommon.h"
+#include "mozilla/dom/WorkerPrivate.h"
 #include "mozilla/net/CookieSettings.h"
 #include "mozilla/EventDispatcher.h"
 #include "mozilla/EventListenerManager.h"
@@ -1979,6 +1980,16 @@ bool nsContentUtils::ShouldResistFingerprinting(nsIPrincipal* aPrincipal) {
 }
 
 /* static */
+bool nsContentUtils::ShouldResistFingerprinting(WorkerPrivate* aWorkerPrivate) {
+  if (!aWorkerPrivate) {
+    // We may be on a non-worker thread!
+    return ShouldResistFingerprinting();
+  }
+  bool isChrome = aWorkerPrivate->UsesSystemPrincipal();
+  return !isChrome && ShouldResistFingerprinting();
+}
+
+/* static */
 bool nsContentUtils::UseStandinsForNativeColors() {
   return ShouldResistFingerprinting() ||
          StaticPrefs::ui_use_standins_for_native_colors();
@@ -3580,38 +3591,18 @@ nsresult nsContentUtils::GetLocalizedString(PropertiesFile aFile,
 }
 
 /* static */
-nsresult nsContentUtils::FormatLocalizedString(PropertiesFile aFile,
-                                               const char* aKey,
-                                               const char16_t** aParams,
-                                               uint32_t aParamsLength,
-                                               nsAString& aResult) {
+nsresult nsContentUtils::FormatLocalizedString(
+    PropertiesFile aFile, const char* aKey, const nsTArray<nsString>& aParams,
+    nsAString& aResult) {
   nsresult rv = EnsureStringBundle(aFile);
   NS_ENSURE_SUCCESS(rv, rv);
   nsIStringBundle* bundle = sStringBundles[aFile];
 
-  if (!aParams || !aParamsLength) {
+  if (aParams.IsEmpty()) {
     return bundle->GetStringFromName(aKey, aResult);
   }
 
-  return bundle->FormatStringFromName(aKey, aParams, aParamsLength, aResult);
-}
-
-/* static */
-nsresult nsContentUtils::FormatLocalizedString(
-    PropertiesFile aFile, const char* aKey,
-    const nsTArray<nsString>& aParamArray, nsAString& aResult) {
-  MOZ_ASSERT(NS_IsMainThread());
-
-  UniquePtr<const char16_t*[]> params;
-  uint32_t paramsLength = aParamArray.Length();
-  if (paramsLength > 0) {
-    params = MakeUnique<const char16_t*[]>(paramsLength);
-    for (uint32_t i = 0; i < paramsLength; ++i) {
-      params[i] = aParamArray[i].get();
-    }
-  }
-  return FormatLocalizedString(aFile, aKey, params.get(), paramsLength,
-                               aResult);
+  return bundle->FormatStringFromName(aKey, aParams, aResult);
 }
 
 /* static */
@@ -3637,17 +3628,12 @@ void nsContentUtils::LogSimpleConsoleError(const nsAString& aErrorText,
 nsresult nsContentUtils::ReportToConsole(
     uint32_t aErrorFlags, const nsACString& aCategory,
     const Document* aDocument, PropertiesFile aFile, const char* aMessageName,
-    const char16_t** aParams, uint32_t aParamsLength, nsIURI* aURI,
+    const nsTArray<nsString>& aParams, nsIURI* aURI,
     const nsString& aSourceLine, uint32_t aLineNumber, uint32_t aColumnNumber) {
-  NS_ASSERTION((aParams && aParamsLength) || (!aParams && !aParamsLength),
-               "Supply either both parameters and their number or no"
-               "parameters and 0.");
-
   nsresult rv;
   nsAutoString errorText;
-  if (aParams) {
-    rv = FormatLocalizedString(aFile, aMessageName, aParams, aParamsLength,
-                               errorText);
+  if (!aParams.IsEmpty()) {
+    rv = FormatLocalizedString(aFile, aMessageName, aParams, errorText);
   } else {
     rv = GetLocalizedString(aFile, aMessageName, errorText);
   }
@@ -6161,7 +6147,7 @@ bool nsContentUtils::IsSubDocumentTabbable(nsIContent* aContent) {
 }
 
 bool nsContentUtils::IsUserFocusIgnored(nsINode* aNode) {
-  if (!nsGenericHTMLFrameElement::BrowserFramesEnabled()) {
+  if (!StaticPrefs::dom_mozBrowserFramesEnabled()) {
     return false;
   }
 
@@ -6447,17 +6433,16 @@ static void ReportPatternCompileFailure(nsAString& aPattern,
   JS::RootedString messageStr(cx, messageVal.toString());
   MOZ_ASSERT(messageStr);
 
-  nsAutoString wideMessage;
-  if (!AssignJSString(cx, wideMessage, messageStr)) {
+  AutoTArray<nsString, 2> strings;
+  strings.AppendElement(aPattern);
+  if (!AssignJSString(cx, *strings.AppendElement(), messageStr)) {
     return;
   }
 
-  const nsString& pattern = PromiseFlatString(aPattern);
-  const char16_t* strings[] = {pattern.get(), wideMessage.get()};
-  nsContentUtils::ReportToConsole(
-      nsIScriptError::errorFlag, NS_LITERAL_CSTRING("DOM"), aDocument,
-      nsContentUtils::eDOM_PROPERTIES, "PatternAttributeCompileFailure",
-      strings, ArrayLength(strings));
+  nsContentUtils::ReportToConsole(nsIScriptError::errorFlag,
+                                  NS_LITERAL_CSTRING("DOM"), aDocument,
+                                  nsContentUtils::eDOM_PROPERTIES,
+                                  "PatternAttributeCompileFailure", strings);
   savedExc.drop();
 }
 
@@ -6793,12 +6778,50 @@ void nsContentUtils::GetSelectionInTextControl(Selection* aSelection,
 }
 
 HTMLEditor* nsContentUtils::GetHTMLEditor(nsPresContext* aPresContext) {
+  if (!aPresContext) {
+    return nullptr;
+  }
+
   nsCOMPtr<nsIDocShell> docShell(aPresContext->GetDocShell());
   bool isEditable;
   if (!docShell || NS_FAILED(docShell->GetEditable(&isEditable)) || !isEditable)
     return nullptr;
 
   return docShell->GetHTMLEditor();
+}
+
+// static
+TextEditor* nsContentUtils::GetActiveEditor(nsPresContext* aPresContext) {
+  if (!aPresContext) {
+    return nullptr;
+  }
+
+  nsPIDOMWindowOuter* window = aPresContext->Document()->GetWindow();
+  if (!window) {
+    return nullptr;
+  }
+
+  // If it's in designMode, nobody can have focus.  Therefore, the HTMLEditor
+  // handles all events.  I.e., it's focused editor in this case.
+  if (aPresContext->Document()->HasFlag(NODE_IS_EDITABLE)) {
+    return GetHTMLEditor(aPresContext);
+  }
+
+  // If focused element is associated with TextEditor, it must be <input>
+  // element or <textarea> element.  Let's return it even if it's in a
+  // contenteditable element.
+  nsCOMPtr<nsPIDOMWindowOuter> focusedWindow;
+  if (Element* focusedElement = nsFocusManager::GetFocusedDescendant(
+          window, nsFocusManager::SearchRange::eOnlyCurrentWindow,
+          getter_AddRefs(focusedWindow))) {
+    if (TextEditor* textEditor = focusedElement->GetTextEditorInternal()) {
+      return textEditor;
+    }
+  }
+
+  // Otherwise, HTMLEditor may handle inputs even non-editable element has
+  // focus or nobody has focus.
+  return GetHTMLEditor(aPresContext);
 }
 
 // static
@@ -9505,7 +9528,7 @@ bool nsContentUtils::AttemptLargeAllocationLoad(nsIHttpChannel* aChannel) {
 
   nsCOMPtr<nsILoadInfo> loadInfo = aChannel->LoadInfo();
   nsCOMPtr<nsIPrincipal> triggeringPrincipal = loadInfo->TriggeringPrincipal();
-  nsCOMPtr<nsIContentSecurityPolicy> csp = loadInfo->GetCsp();
+  nsCOMPtr<nsIContentSecurityPolicy> csp = loadInfo->GetCspToInherit();
 
   // Get the channel's load flags, and use them to generate nsIWebNavigation
   // load flags. We want to make sure to propagate the refresh and cache busting

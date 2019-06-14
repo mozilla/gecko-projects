@@ -99,9 +99,6 @@ pref("browser.cache.compression_level", 0);
 // Don't show "Open with" option on download dialog if true.
 pref("browser.download.forbid_open_with", false);
 
-// Remove navigator.registerContentHandler
-pref("dom.registerContentHandler.enabled", false);
-
 // Insecure registerProtocolHandler is disabled by default
 pref("dom.registerProtocolHandler.insecure.enabled", false);
 
@@ -121,12 +118,6 @@ pref("dom.indexedDB.logging.profiler-marks", false);
 
 // Whether or not File Handle is enabled.
 pref("dom.fileHandle.enabled", true);
-
-// Whether window.onappinstalled from "W3C Web Manifest" is enabled
-pref("dom.manifest.onappinstalled", false);
-
-// Whether or not selection events are enabled
-pref("dom.select_events.enabled", true);
 
 // Whether or not selection events on text controls are enabled
 #ifdef NIGHTLY_BUILD
@@ -151,27 +142,6 @@ pref("dom.serviceWorkers.update_delay", 1000);
 
 // Enable test for 24 hours update, service workers will always treat last update check time is over 24 hours
 pref("dom.serviceWorkers.testUpdateOverOneDay", false);
-
-// Enable Permission API's .revoke() method
-pref("dom.permissions.revoke.enable", false);
-
-// Enable exposing timeToNonBlankPaint
-pref("dom.performance.time_to_non_blank_paint.enabled", false);
-
-// Enable exposing timeToContentfulPaint
-pref("dom.performance.time_to_contentful_paint.enabled", false);
-
-// Enable exposing timeToDOMContentFlushed
-pref("dom.performance.time_to_dom_content_flushed.enabled", false);
-
-// Enable exposing timeToFirstInteractive
-pref("dom.performance.time_to_first_interactive.enabled", false);
-
-// Enable Pointer Lock API
-// This is added for accessibility purpose. When user has no way to exit
-// pointer lock (e.g. no keyboard available), they can use this pref to
-// disable the Pointer Lock API altogether.
-pref("dom.pointer-lock.enabled", true);
 
 // If this is true, TextEventDispatcher dispatches keydown and keyup events
 // even during composition (keypress events are never fired during composition
@@ -198,7 +168,7 @@ pref("dom.keyboardevent.keypress.hack.dispatch_non_printable_keys.addl", "");
 // non-zero keyCode or charCode value to the other).  The format is exactly
 // same as "dom.keyboardevent.keypress.hack.dispatch_non_printable_keys". So,
 // check its explanation for the detail.
-pref("dom.keyboardevent.keypress.hack.use_legacy_keycode_and_charcode", "docs.google.com,*.collabserv.com,*.gov.online.office365.us,*.officeapps-df.live.com,*.officeapps.live.com,*.online.office.de,*.partner.officewebapps.cn,*.scniris.com");
+pref("dom.keyboardevent.keypress.hack.use_legacy_keycode_and_charcode", "*.collabserv.com,*.gov.online.office365.us,*.officeapps-df.live.com,*.officeapps.live.com,*.online.office.de,*.partner.officewebapps.cn,*.scniris.com");
 // Pref for end-users and policy to add additional values.
 pref("dom.keyboardevent.keypress.hack.use_legacy_keycode_and_charcode.addl", "");
 
@@ -208,22 +178,18 @@ pref("dom.keyboardevent.keypress.hack.use_legacy_keycode_and_charcode.addl", "")
 // explanation for the detail.
 pref("dom.mouseevent.click.hack.use_legacy_non-primary_dispatch", "");
 
-// Whether InputEvent.data is enabled.
-pref("dom.inputevent.data.enabled", true);
-
 // Whether InputEvent.dataTransfer is enabled.
 pref("dom.inputevent.datatransfer.enabled", true);
 
-// Whether InputEvent.inputType is enabled.
-pref("dom.inputevent.inputtype.enabled", true);
-
 #ifdef JS_BUILD_BINAST
 pref("dom.script_loader.binast_encoding.enabled", false);
-pref("dom.script_loader.binast_encoding.domain.restrict.list", "*.facebook.com,static.xx.fbcdn.net");
-#endif
 
-// Whether window.event is enabled
-pref("dom.window.event.enabled", true);
+// Until we're satisfied that it works nicely, we're restricting
+// BinAST to a few partner sites:
+// - A subset of Facebook
+// - A subset of Cloudflare
+pref("dom.script_loader.binast_encoding.domain.restrict.list", "*.facebook.com,static.xx.fbcdn.net,*.cloudflare.com,*.cloudflarestream.com,unpkg.com");
+#endif
 
 // Fastback caching - if this pref is negative, then we calculate the number
 // of content viewers to cache based on the amount of available memory.
@@ -397,8 +363,6 @@ pref("media.navigator.video.use_tmmbr", false);
 pref("media.navigator.audio.use_fec", true);
 pref("media.navigator.video.red_ulpfec_enabled", false);
 
-pref("media.peerconnection.dtmf.enabled", true);
-
 #ifdef NIGHTLY_BUILD
 pref("media.peerconnection.sdp.rust.enabled", true);
 pref("media.peerconnection.sdp.rust.compare", true);
@@ -464,14 +428,12 @@ pref("media.peerconnection.ice.link_local", false); // Set only for testing IPV6
 pref("media.peerconnection.ice.force_interface", ""); // Limit to only a single interface
 pref("media.peerconnection.ice.relay_only", false); // Limit candidates to TURN
 pref("media.peerconnection.use_document_iceservers", true);
-pref("media.peerconnection.identity.enabled", true);
 pref("media.peerconnection.identity.timeout", 10000);
 pref("media.peerconnection.ice.stun_client_maximum_transmits", 7);
 pref("media.peerconnection.ice.trickle_grace_period", 5000);
 pref("media.peerconnection.ice.no_host", false);
 pref("media.peerconnection.ice.default_address_only", false);
 pref("media.peerconnection.ice.proxy_only", false);
-pref("media.peerconnection.rtpsourcesapi.enabled", true);
 pref("media.peerconnection.turn.disable", false);
 
 // These values (aec, agc, and noise) are from:
@@ -492,9 +454,6 @@ pref("media.getusermedia.agc", 1); // kAdaptiveDigital
 // full_duplex: enable cubeb full-duplex capture/playback
 pref("media.navigator.audio.full_duplex", true);
 #endif
-
-// Exposes the navigator.webdriver attribute.
-pref("dom.webdriver.enabled", true);
 
 #if !defined(ANDROID)
 pref("media.getusermedia.screensharing.enabled", true);
@@ -545,9 +504,6 @@ pref("media.autoplay.default", 0);
 // By default, don't block WebAudio from playing automatically.
 pref("media.autoplay.block-webaudio", false);
 
-// By default, don't block muted media from playing automatically.
-pref("media.autoplay.allow-muted", true);
-
 // By default, don't block the media from extension background script.
 pref("media.autoplay.allow-extension-background-pages", true);
 
@@ -558,19 +514,6 @@ pref("media.autoplay.allow-extension-background-pages", true);
 #ifdef NIGHTLY_BUILD
 pref("media.autoplay.enabled.user-gestures-needed", false);
 #endif
-
-// HTMLMediaElement.allowedToPlay should be exposed to web content when
-// block autoplay rides the trains to release. Until then, Nightly only.
-#ifdef NIGHTLY_BUILD
-pref("media.allowed-to-play.enabled", true);
-#else
-pref("media.allowed-to-play.enabled", false);
-#endif
-
-// This pref is used to enable/disable the `document.autoplayPolicy` API which
-// returns a enum string which presents current autoplay policy and can change
-// overtime based on user session activity.
-pref("dom.media.autoplay.autoplay-policy-api", false);
 
 // The default number of decoded video frames that are enqueued in
 // MediaDecoderReader's mVideoQueue.
@@ -617,10 +560,6 @@ pref("media.av1.use-dav1d", false);
 #endif
 
 pref("media.webaudio.audiocontextoptions-samplerate.enabled", true);
-
-// setSinkId expected to be unconditionally enabled in 63. Till then the
-// implementation will remain hidden behind this pref (Bug 1152401, Bug 934425).
-pref("media.setsinkid.enabled", false);
 
 // Weather we allow AMD switchable graphics
 pref("layers.amd-switchable-gfx.enabled", true);
@@ -781,8 +720,6 @@ pref("gfx.downloadable_fonts.fallback_delay_short", 100);
 // the uncached load behavior across pages (useful for testing reflow problems)
 pref("gfx.downloadable_fonts.disable_cache", false);
 
-pref("gfx.downloadable_fonts.woff2.enabled", true);
-
 // Whether OTS validation should be applied to OpenType Layout (OTL) tables
 #ifdef RELEASE_OR_BETA
 pref("gfx.downloadable_fonts.otl_validation", false);
@@ -844,6 +781,7 @@ pref("gfx.font_ahem_antialias_none", false);
 // e.g., pref("gfx.canvas.azure.backends", "direct2d,skia,cairo");
 pref("gfx.canvas.azure.backends", "direct2d1.1,skia,cairo");
 pref("gfx.content.azure.backends", "direct2d1.1,skia,cairo");
+pref("gfx.canvas.remote", false);
 #else
 #ifdef XP_MACOSX
 pref("gfx.content.azure.backends", "skia");
@@ -959,11 +897,6 @@ pref("accessibility.tabfocus_applies_to_xul", true);
 #if !defined(XP_MACOSX) && !defined(MOZ_WIDGET_GTK)
 pref("ui.scrollToClick", 0);
 #endif
-
-// provide ability to turn on support for canvas focus rings
-pref("canvas.focusring.enabled", true);
-pref("canvas.hitregions.enabled", false);
-pref("canvas.filters.enabled", true);
 
 // We want the ability to forcibly disable platform a11y, because
 // some non-a11y-related components attempt to bring it up.  See bug
@@ -1255,17 +1188,13 @@ pref("dom.storage.enabled", true);
 // Whether or not LSNG (Next Generation Local Storage) is enabled.
 // See bug 1517090 for enabling this on Nightly.
 // See bug 1534736 for changing it to EARLY_BETA_OR_EARLIER.
-#ifdef EARLY_BETA_OR_EARLIER
+// See bug 1539835 for enabling this unconditionally.
 pref("dom.storage.next_gen", true);
-#else
-pref("dom.storage.next_gen", false);
-#endif
 pref("dom.storage.default_quota",      5120);
 pref("dom.storage.shadow_writes", true);
 pref("dom.storage.snapshot_prefill", 16384);
 pref("dom.storage.snapshot_gradual_prefill", 4096);
 pref("dom.storage.snapshot_reusing", true);
-pref("dom.storage.testing", false);
 pref("dom.storage.client_validation", true);
 
 pref("dom.send_after_paint_to_content", false);
@@ -1305,9 +1234,6 @@ pref("dom.experimental_forms", false);
 // platforms which don't have a color picker implemented yet.
 pref("dom.forms.color", true);
 
-// Support for input type=date and type=time.
-pref("dom.forms.datetime", true);
-
 // Support for input type=month, type=week and type=datetime-local. By default,
 // disabled.
 pref("dom.forms.datetime.others", false);
@@ -1325,9 +1251,6 @@ pref("dom.forms.select.customstyling", false);
 pref("dom.forms.select.customstyling", true);
 #endif
 pref("dom.select_popup_in_parent.enabled", false);
-
-// Enable Directory API. By default, disabled.
-pref("dom.input.dirpicker", false);
 
 pref("dom.cycle_collector.incremental", true);
 
@@ -2638,13 +2561,13 @@ pref("security.dialog_enable_delay", 1000);
 pref("security.notification_enable_delay", 500);
 
 #if defined(DEBUG) && !defined(ANDROID)
-pref("csp.about_uris_without_csp", "blank,printpreview,srcdoc,addons,cache-entry,config,crashes,debugging,devtools,downloads,home,networking,newtab,performance,plugins,profiles,restartrequired,serviceworkers,sessionrestore,support,sync-log,telemetry,url-classifier,webrtc,welcomeback");
+pref("csp.about_uris_without_csp", "blank,printpreview,srcdoc,addons,cache-entry,config,debugging,devtools,downloads,home,networking,newtab,performance,plugins,profiles,preferences,restartrequired,serviceworkers,sessionrestore,support,sync-log,telemetry,url-classifier,welcomeback");
 // the following prefs are for testing purposes only.
 pref("csp.overrule_about_uris_without_csp_whitelist", false);
 pref("csp.skip_about_page_has_csp_assert", false);
 // assertion flag will be set to false after fixing Bug 1473549
 pref("security.allow_eval_with_system_principal", false);
-pref("security.uris_using_eval_with_system_principal", "autocomplete.xml,redux.js,react-redux.js,content-task.js,preferencesbindings.js,lodash.js,jszip.js,sinon-7.2.7.js,jsol.js");
+pref("security.uris_using_eval_with_system_principal", "autocomplete.xml,redux.js,react-redux.js,content-task.js,preferencesbindings.js,lodash.js,jszip.js,sinon-7.2.7.js,ajv-4.1.1.js,jsol.js");
 #endif
 
 #ifdef EARLY_BETA_OR_EARLIER
@@ -2713,7 +2636,7 @@ pref("services.settings.security.onecrl.collection", "onecrl");
 pref("services.settings.security.onecrl.signer", "onecrl.content-signature.mozilla.org");
 pref("services.settings.security.onecrl.checked", 0);
 
-pref("extensions.abuseReport.enabled", false);
+pref("extensions.abuseReport.enabled", true);
 pref("extensions.abuseReport.url", "https://addons.mozilla.org/api/v4/abuse/report/addon/");
 
 // Blocklist preferences
@@ -3010,18 +2933,6 @@ pref("layout.css.dpi", -1);
 // of a CSS "px". This is only used for windows on the screen, not for printing.
 pref("layout.css.devPixelsPerPx", "-1.0");
 
-// Is support for CSS individual transform enabled?
-pref("layout.css.individual-transform.enabled", false);
-
-// Is support for CSS initial-letter property enabled?
-pref("layout.css.initial-letter.enabled", false);
-
-// Is support for scrollbar-color property enabled?
-pref("layout.css.scrollbar-color.enabled", true);
-
-// Is support for scrollbar-width property enabled?
-pref("layout.css.scrollbar-width.enabled", true);
-
 // Set the threshold distance in CSS pixels below which scrolling will snap to
 // an edge, when scroll snapping is set to "proximity".
 pref("layout.css.scroll-snap.proximity-threshold", 200);
@@ -3036,38 +2947,9 @@ pref("layout.css.scroll-snap.prediction-max-velocity", 2000);
 // gestures.
 pref("layout.css.scroll-snap.prediction-sensitivity", "0.750");
 
-// Is support for GeometryUtils.convert*FromNode enabled?
-#ifdef RELEASE_OR_BETA
-pref("layout.css.convertFromNode.enabled", false);
-#else
-pref("layout.css.convertFromNode.enabled", true);
-#endif
-
-// Is support for CSS text-justify property enabled?
-pref("layout.css.text-justify.enabled", true);
-
 // Is the paint-order property supported for HTML text?
 // (It is always supported for SVG.)
 pref("layout.css.paint-order.enabled", true);
-
-// Are sets of prefixed properties supported?
-pref("layout.css.prefixes.border-image", true);
-pref("layout.css.prefixes.transforms", true);
-pref("layout.css.prefixes.transitions", true);
-pref("layout.css.prefixes.animations", true);
-pref("layout.css.prefixes.box-sizing", true);
-pref("layout.css.prefixes.font-features", true);
-
-// Is -moz-osx-font-smoothing enabled?
-// Only supported in OSX builds
-#ifdef XP_MACOSX
-pref("layout.css.osx-font-smoothing.enabled", true);
-#else
-pref("layout.css.osx-font-smoothing.enabled", false);
-#endif
-
-// Is support for CSS overflow-clip-box enabled for non-UA sheets?
-pref("layout.css.overflow-clip-box.enabled", false);
 
 // Is layout of CSS outline-style:auto enabled?
 pref("layout.css.outline-style-auto.enabled", false);
@@ -3093,16 +2975,6 @@ pref("layout.css.scroll-behavior.damping-ratio", "1.0");
 
 // Are inter-character ruby annotations enabled?
 pref("layout.css.ruby.intercharacter.enabled", false);
-
-// Is support for overscroll-behavior enabled?
-pref("layout.css.overscroll-behavior.enabled", true);
-
-// Is support for motion-path enabled?
-#ifdef RELEASE_OR_BETA
-pref("layout.css.motion-path.enabled", false);
-#else
-pref("layout.css.motion-path.enabled", true);
-#endif
 
 // pref for which side vertical scrollbars should be on
 // 0 = end-side in UI direction
@@ -3201,8 +3073,6 @@ pref("input_event_queue.default_duration_per_event", 1);
 pref("input_event_queue.count_for_prediction", 9);
 
 pref("plugins.load_appdir_plugins", false);
-// If true, plugins will be click to play
-pref("plugins.click_to_play", false);
 
 // This only supports one hidden ctp plugin, edit nsPluginArray.cpp if adding a second
 pref("plugins.navigator.hidden_ctp_plugin", "");
@@ -3371,8 +3241,6 @@ pref("svg.display-lists.painting.enabled", true);
 // Is support for the new getBBox method from SVG 2 enabled?
 // See https://svgwg.org/svg2-draft/single-page.html#types-SVGBoundingBoxOptions
 pref("svg.new-getBBox.enabled", false);
-
-pref("svg.transform-box.enabled", true);
 
 # This pref controls whether the 'context-fill' and 'context-stroke' keywords
 # can be used in SVG-as-an-image in the content processes to use the fill/
@@ -3866,9 +3734,6 @@ pref("layout.word_select.eat_space_to_next_word", true);
 
 // scrollbar snapping region
 pref("slider.snapMultiplier", 6);
-
-// Whether to extend the native dialog with information on printing frames.
-pref("print.extend_native_print_dialog", true);
 
 // Locate plugins by the directories specified in the Windows registry for PLIDs
 // Which is currently HKLM\Software\MozillaPlugins\xxxPLIDxxx\Path
@@ -4914,8 +4779,6 @@ pref("webgl.perf.max-warnings", 0);
 pref("webgl.perf.max-acceptable-fb-status-invals", 0);
 pref("webgl.perf.spew-frame-allocs", true);
 
-pref("webgl.enable-webgl2", true);
-
 pref("webgl.enable-debug-renderer-info", true);
 pref("webgl.renderer-string-override", "");
 pref("webgl.vendor-string-override", "");
@@ -5078,6 +4941,11 @@ pref("gfx.xrender.enabled",false);
 pref("widget.content.allow-gtk-dark-theme", false);
 #endif
 #endif
+#ifdef MOZ_WAYLAND
+#ifdef HAVE_LIBDRM
+pref("widget.wayland_dmabuf_backend.enabled", false);
+#endif
+#endif
 
 pref("widget.window-transforms.disabled", false);
 
@@ -5113,14 +4981,8 @@ pref("layers.shared-buffer-provider.enabled", true);
 // Force all possible layers to be always active layers
 pref("layers.force-active", false);
 
-// Enable/Disable the geolocation API for content
-pref("geo.enabled", true);
-
 // Timeout for outbound network geolocation provider XHR
 pref("geo.wifi.xhr.timeout", 60000);
-
-// Enable/Disable the various sensor APIs for content
-pref("device.sensors.enabled", true);
 
 // Enable/Disable the device storage API for content
 pref("device.storage.enabled", false);
@@ -5171,7 +5033,7 @@ pref("extensions.webextensions.enablePerformanceCounters", true);
 pref("extensions.webextensions.performanceCountersMaxAge", 5000);
 
 // The HTML about:addons page.
-pref("extensions.htmlaboutaddons.enabled", false);
+pref("extensions.htmlaboutaddons.enabled", true);
 // Whether to allow the inline options browser in HTML about:addons page.
 pref("extensions.htmlaboutaddons.inline-options.enabled", true);
 // Show recommendations on the extension and theme list views.
@@ -5248,9 +5110,6 @@ pref("dom.vibrator.enabled", true);
 pref("dom.vibrator.max_vibrate_ms", 10000);
 pref("dom.vibrator.max_vibrate_list_len", 128);
 
-// Battery API
-pref("dom.battery.enabled", true);
-
 // Push
 
 pref("dom.push.loglevel", "Error");
@@ -5309,18 +5168,8 @@ pref("dom.w3c_pointer_events.dispatch_by_pointer_messages", false);
 // W3C pointer events draft
 pref("dom.w3c_pointer_events.implicit_capture", false);
 
-// W3C MediaDevices devicechange event
-pref("media.ondevicechange.enabled", true);
-
 // W3C MediaDevices devicechange fake event
 pref("media.ondevicechange.fakeDeviceChangeEvent.enabled", false);
-
-// W3C touch-action css property (related to touch and pointer events)
-// Note that we turn this on even on platforms/configurations where touch
-// events are not supported (e.g. OS X, or Windows with e10s disabled). For
-// those platforms we don't handle touch events anyway so it's conceptually
-// a no-op.
-pref("layout.css.touch_action.enabled", true);
 
 // How long must we wait before declaring that a window is a "ghost" (i.e., a
 // likely leak)?  This should be longer than it usually takes for an eligible
@@ -5342,13 +5191,6 @@ pref("io.activity.enabled", false);
 // to take effect.
 pref("jsloader.shareGlobal", true);
 
-// WebVR is enabled by default in beta and release for Windows and for all
-// platforms in nightly and aurora.
-#if defined(XP_WIN) || defined(XP_MACOSX) || !defined(RELEASE_OR_BETA)
-pref("dom.vr.enabled", true);
-#else
-pref("dom.vr.enabled", false);
-#endif
 // It is often desirable to automatically start vr presentation when
 // a user puts on the VR headset.  This is done by emitting the
 // Window.vrdisplayactivate event when the headset's sensors detect it
@@ -5556,12 +5398,6 @@ pref("captivedetect.maxWaitingTime", 5000);
 pref("captivedetect.pollingTime", 3000);
 pref("captivedetect.maxRetryCount", 5);
 
-#ifdef RELEASE_OR_BETA
-pref("dom.forms.inputmode", false);
-#else
-pref("dom.forms.inputmode", true);
-#endif
-
 // Enable mapped array buffer by default.
 pref("dom.mapped_arraybuffer.enabled", true);
 
@@ -5694,8 +5530,6 @@ pref("dom.wakelock.enabled", false);
 // The URL of the Firefox Accounts auth server backend
 pref("identity.fxaccounts.auth.uri", "https://api.accounts.firefox.com/v1");
 
-pref("beacon.enabled", true);
-
 // Presentation Device
 pref("dom.presentation.tcp_server.debug", false);
 pref("dom.presentation.discovery.enabled", false);
@@ -5716,9 +5550,6 @@ pref("intl.allow-insecure-text-input", false);
 
 // Enable meta-viewport support in remote APZ-enabled frames.
 pref("dom.meta-viewport.enabled", false);
-
-// Disable Visual Viewport API
-pref("dom.visualviewport.enabled", false);
 
 // Search service settings
 pref("browser.search.log", false);
@@ -5856,16 +5687,11 @@ pref("dom.input.fallbackUploadDir", "");
 // Turn rewriting of youtube embeds on/off
 pref("plugins.rewrite_youtube_embeds", true);
 
-// Disable browser frames by default
-pref("dom.mozBrowserFramesEnabled", false);
-
 pref("dom.audiochannel.audioCompeting", false);
 pref("dom.audiochannel.audioCompeting.allAgents", false);
 
 // Default media volume
 pref("media.default_volume", "1.0");
-
-pref("media.seekToNextFrame.enabled", true);
 
 // return the maximum number of cores that navigator.hardwareCurrency returns
 pref("dom.maxHardwareConcurrency", 16);
@@ -5873,10 +5699,6 @@ pref("dom.maxHardwareConcurrency", 16);
 // Shutdown the osfile worker if its no longer needed.
 #if !defined(RELEASE_OR_BETA)
 pref("osfile.reset_worker_delay", 30000);
-#endif
-
-#if !defined(MOZ_WIDGET_ANDROID)
-pref("dom.webkitBlink.filesystem.enabled", true);
 #endif
 
 pref("media.block-autoplay-until-in-foreground", true);
@@ -5912,9 +5734,6 @@ pref("browser.sanitizer.loglevel", "Warn");
 // To disable all auth prompting, set the limit to 0.
 // To disable blocking of auth prompts, set the limit to -1.
 pref("prompts.authentication_dialog_abuse_limit", 2);
-
-// Whether module scripts (<script type="module">) are enabled for content.
-pref("dom.moduleScripts.enabled", true);
 
 // Maximum amount of time in milliseconds consecutive setTimeout()/setInterval()
 // callback are allowed to run before yielding the event loop.
@@ -5995,10 +5814,6 @@ pref("dom.datatransfer.mozAtAPIs", false);
 pref("dom.datatransfer.mozAtAPIs", true);
 #endif
 
-// External.AddSearchProvider is deprecated and it will be removed in the next
-// cycles.
-pref("dom.sidebar.enabled", true);
-
 // Turn off fission frameloader swapping while regressions are being fixed.
 // Should be turned back on to resolve bug 1551993.
 pref("fission.rebuild_frameloaders_on_remoteness_change", false);
@@ -6012,3 +5827,4 @@ pref("fission.preserve_browsing_contexts", false);
 //  * userContent.css
 //  * userChrome.css
 pref("toolkit.legacyUserProfileCustomizations.stylesheets", false);
+

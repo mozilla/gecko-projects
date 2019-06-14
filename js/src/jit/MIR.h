@@ -7934,9 +7934,8 @@ class MArrayPopShift : public MUnaryInstruction,
 };
 
 // Array.prototype.push on a dense array. Returns the new array length.
-class MArrayPush
-    : public MBinaryInstruction,
-      public MixPolicy<SingleObjectPolicy, NoFloatPolicy<1>>::Data {
+class MArrayPush : public MBinaryInstruction,
+                   public MixPolicy<SingleObjectPolicy, BoxPolicy<1>>::Data {
   MArrayPush(MDefinition* object, MDefinition* value)
       : MBinaryInstruction(classOpcode, object, value) {
     setResultType(MIRType::Int32);
@@ -12143,8 +12142,6 @@ bool PropertyWriteNeedsTypeBarrier(TempAllocator& alloc,
                                    PropertyName* name, MDefinition** pvalue,
                                    bool canModify,
                                    MIRType implicitType = MIRType::None);
-AbortReasonOr<bool> ArrayPrototypeHasIndexedProperty(IonBuilder* builder,
-                                                     JSScript* script);
 AbortReasonOr<bool> TypeCanHaveExtraIndexedProperties(IonBuilder* builder,
                                                       TemporaryTypeSet* types);
 

@@ -54,8 +54,8 @@ static bool IsSafeToLinkForUntrustedContent(nsIURI* aURI) {
 
   // The about modules for these URL types have the
   // URI_SAFE_FOR_UNTRUSTED_CONTENT and MAKE_LINKABLE flags set.
-  if (path.EqualsLiteral("blank") || path.EqualsLiteral("license") ||
-      path.EqualsLiteral("logo") || path.EqualsLiteral("srcdoc")) {
+  if (path.EqualsLiteral("blank") || path.EqualsLiteral("logo") ||
+      path.EqualsLiteral("srcdoc")) {
     return true;
   }
 
@@ -237,15 +237,14 @@ nsAboutProtocolHandler::NewChannel(nsIURI* uri, nsILoadInfo* aLoadInfo,
         NS_ASSERTION(false,
                      "nsIAboutModule->newChannel(aURI, aLoadInfo) needs to "
                      "set LoadInfo");
-        const char16_t* params[] = {
-            u"nsIAboutModule->newChannel(aURI)",
-            u"nsIAboutModule->newChannel(aURI, aLoadInfo)"};
+        AutoTArray<nsString, 2> params = {
+            NS_LITERAL_STRING("nsIAboutModule->newChannel(aURI)"),
+            NS_LITERAL_STRING("nsIAboutModule->newChannel(aURI, aLoadInfo)")};
         nsContentUtils::ReportToConsole(
             nsIScriptError::warningFlag,
             NS_LITERAL_CSTRING("Security by Default"),
             nullptr,  // aDocument
-            nsContentUtils::eNECKO_PROPERTIES, "APIDeprecationWarning", params,
-            mozilla::ArrayLength(params));
+            nsContentUtils::eNECKO_PROPERTIES, "APIDeprecationWarning", params);
         (*result)->SetLoadInfo(aLoadInfo);
       }
 

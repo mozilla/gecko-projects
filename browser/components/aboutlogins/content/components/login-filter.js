@@ -2,11 +2,12 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+import {recordTelemetryEvent} from "chrome://browser/content/aboutlogins/aboutLoginsUtils.js";
 import ReflectedFluentElement from "chrome://browser/content/aboutlogins/components/reflected-fluent-element.js";
 
 export default class LoginFilter extends ReflectedFluentElement {
   connectedCallback() {
-    if (this.children.length) {
+    if (this.shadowRoot) {
       return;
     }
 
@@ -60,6 +61,8 @@ export default class LoginFilter extends ReflectedFluentElement {
       composed: true,
       detail: value,
     }));
+
+    recordTelemetryEvent({object: "list", method: "filter"});
   }
 }
 customElements.define("login-filter", LoginFilter);

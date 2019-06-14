@@ -1488,13 +1488,9 @@ nsChangeHint nsStylePosition::CalcDifference(
                        mMinHeight != aNewData.mMinHeight ||
                        mMaxHeight != aNewData.mMaxHeight;
 
-  // Note that we pass an nsStyleVisibility here because we don't want
-  // to cause a new struct to be computed during
-  // ComputedStyle::CalcStyleDifference, which can lead to incorrect
-  // style data.
-  // It doesn't matter whether we're looking at the old or new
-  // visibility struct, since a change between vertical and horizontal
-  // writing-mode will cause a reframe, and it's easier to pass the old.
+  // It doesn't matter whether we're looking at the old or new visibility
+  // struct, since a change between vertical and horizontal writing-mode will
+  // cause a reframe.
   bool isVertical = WritingMode(&aOldStyleVisibility).IsVertical();
   if (isVertical ? widthChanged : heightChanged) {
     hint |= nsChangeHint_ReflowHintsForBSizeChange;
@@ -1634,43 +1630,9 @@ nsChangeHint nsStyleTableBorder::CalcDifference(
   }
 }
 
-// --------------------
-// nsStyleGradient
-//
-bool nsStyleGradient::operator==(const nsStyleGradient& aOther) const {
-  MOZ_ASSERT(mSize == NS_STYLE_GRADIENT_SIZE_FARTHEST_CORNER ||
-                 mShape != NS_STYLE_GRADIENT_SHAPE_LINEAR,
-             "incorrect combination of shape and size");
-  MOZ_ASSERT(aOther.mSize == NS_STYLE_GRADIENT_SIZE_FARTHEST_CORNER ||
-                 aOther.mShape != NS_STYLE_GRADIENT_SHAPE_LINEAR,
-             "incorrect combination of shape and size");
-
-  if (mShape != aOther.mShape || mSize != aOther.mSize ||
-      mRepeating != aOther.mRepeating ||
-      mLegacySyntax != aOther.mLegacySyntax ||
-      mMozLegacySyntax != aOther.mMozLegacySyntax ||
-      mBgPosX != aOther.mBgPosX || mBgPosY != aOther.mBgPosY ||
-      mAngle != aOther.mAngle || mRadiusX != aOther.mRadiusX ||
-      mRadiusY != aOther.mRadiusY) {
-    return false;
-  }
-
-  if (mStops != aOther.mStops) {
-    return false;
-  }
-
-  return true;
-}
-
-nsStyleGradient::nsStyleGradient()
-    : mShape(NS_STYLE_GRADIENT_SHAPE_LINEAR),
-      mSize(NS_STYLE_GRADIENT_SIZE_FARTHEST_CORNER),
-      mRepeating(false),
-      mLegacySyntax(false),
-      mMozLegacySyntax(false) {}
-
-bool nsStyleGradient::IsOpaque() {
-  for (auto& stop : mStops) {
+template <>
+bool StyleGradient::IsOpaque() const {
+  for (auto& stop : items.AsSpan()) {
     if (stop.IsInterpolationHint()) {
       continue;
     }
@@ -1941,7 +1903,7 @@ void nsStyleImage::DoCopy(const nsStyleImage& aOther) {
   if (aOther.mType == eStyleImageType_Image) {
     SetImageRequest(do_AddRef(aOther.mImage));
   } else if (aOther.mType == eStyleImageType_Gradient) {
-    SetGradientData(aOther.mGradient);
+    SetGradientData(MakeUnique<StyleGradient>(*aOther.mGradient));
   } else if (aOther.mType == eStyleImageType_Element) {
     SetElementId(do_AddRef(aOther.mElementId));
   }
@@ -1955,7 +1917,8 @@ void nsStyleImage::DoCopy(const nsStyleImage& aOther) {
 
 void nsStyleImage::SetNull() {
   if (mType == eStyleImageType_Gradient) {
-    mGradient->Release();
+    delete mGradient;
+    mGradient = nullptr;
   } else if (mType == eStyleImageType_Image) {
     NS_RELEASE(mImage);
   } else if (mType == eStyleImageType_Element) {
@@ -1983,19 +1946,15 @@ void nsStyleImage::SetImageRequest(
   }
 }
 
-void nsStyleImage::SetGradientData(nsStyleGradient* aGradient) {
-  if (aGradient) {
-    aGradient->AddRef();
-  }
+void nsStyleImage::SetGradientData(UniquePtr<StyleGradient> aGradient) {
+  MOZ_ASSERT(aGradient);
 
   if (mType != eStyleImageType_Null) {
     SetNull();
   }
 
-  if (aGradient) {
-    mGradient = aGradient;
-    mType = eStyleImageType_Gradient;
-  }
+  mGradient = aGradient.release();
+  mType = eStyleImageType_Gradient;
 }
 
 void nsStyleImage::SetElementId(already_AddRefed<nsAtom> aElementId) {
@@ -2869,7 +2828,6 @@ nsStyleDisplay::nsStyleDisplay(const Document& aDocument)
       mAppearance(StyleAppearance::None),
       mPosition(NS_STYLE_POSITION_STATIC),
       mFloat(StyleFloat::None),
-      mOriginalFloat(StyleFloat::None),
       mBreakType(StyleClear::None),
       mBreakInside(StyleBreakWithin::Auto),
       mBreakBefore(StyleBreakBetween::Auto),
@@ -2933,7 +2891,6 @@ nsStyleDisplay::nsStyleDisplay(const nsStyleDisplay& aSource)
       mAppearance(aSource.mAppearance),
       mPosition(aSource.mPosition),
       mFloat(aSource.mFloat),
-      mOriginalFloat(aSource.mOriginalFloat),
       mBreakType(aSource.mBreakType),
       mBreakInside(aSource.mBreakInside),
       mBreakBefore(aSource.mBreakBefore),
@@ -3028,7 +2985,7 @@ static inline nsChangeHint CompareMotionValues(
 }
 
 nsChangeHint nsStyleDisplay::CalcDifference(
-    const nsStyleDisplay& aNewData) const {
+    const nsStyleDisplay& aNewData, const nsStylePosition& aOldPosition) const {
   nsChangeHint hint = nsChangeHint(0);
 
   if (mBinding != aNewData.mBinding || mPosition != aNewData.mPosition ||
@@ -3215,6 +3172,20 @@ nsChangeHint nsStyleDisplay::CalcDifference(
     hint |= nsChangeHint_SchedulePaint;
   }
 
+  if (mOriginalDisplay != aNewData.mOriginalDisplay) {
+    // Our hypothetical box position may have changed.
+    //
+    // Note that it doesn't matter if we look at the old or the new struct,
+    // since a change on whether we need a hypothetical position would trigger
+    // reflow anyway.
+    if (IsAbsolutelyPositionedStyle() &&
+        aOldPosition.NeedsHypotheticalPositionIfAbsPos()) {
+      hint |= nsChangeHint_NeedReflow | nsChangeHint_ReflowChangesSizeOrPosition;
+    } else {
+      hint |= nsChangeHint_NeutralChange;
+    }
+  }
+
   // Note:  Our current behavior for handling changes to the
   // transition-duration, transition-delay, and transition-timing-function
   // properties is to do nothing.  In other words, the transition
@@ -3232,9 +3203,7 @@ nsChangeHint nsStyleDisplay::CalcDifference(
   // But we still need to return nsChangeHint_NeutralChange for these
   // properties, since some data did change in the style struct.
 
-  if (!hint && (mOriginalDisplay != aNewData.mOriginalDisplay ||
-                mOriginalFloat != aNewData.mOriginalFloat ||
-                mTransitions != aNewData.mTransitions ||
+  if (!hint && (mTransitions != aNewData.mTransitions ||
                 mTransitionTimingFunctionCount !=
                     aNewData.mTransitionTimingFunctionCount ||
                 mTransitionDurationCount != aNewData.mTransitionDurationCount ||
@@ -3478,7 +3447,8 @@ nsStyleTextReset::nsStyleTextReset(const Document& aDocument)
       mUnicodeBidi(NS_STYLE_UNICODE_BIDI_NORMAL),
       mInitialLetterSink(0),
       mInitialLetterSize(0.0f),
-      mTextDecorationColor(StyleColor::CurrentColor()) {
+      mTextDecorationColor(StyleColor::CurrentColor()),
+      mTextDecorationWidth(LengthOrAuto::Auto()) {
   MOZ_COUNT_CTOR(nsStyleTextReset);
 }
 
@@ -3489,7 +3459,8 @@ nsStyleTextReset::nsStyleTextReset(const nsStyleTextReset& aSource)
       mUnicodeBidi(aSource.mUnicodeBidi),
       mInitialLetterSink(aSource.mInitialLetterSink),
       mInitialLetterSize(aSource.mInitialLetterSize),
-      mTextDecorationColor(aSource.mTextDecorationColor) {
+      mTextDecorationColor(aSource.mTextDecorationColor),
+      mTextDecorationWidth(aSource.mTextDecorationWidth) {
   MOZ_COUNT_CTOR(nsStyleTextReset);
 }
 
@@ -3504,7 +3475,8 @@ nsChangeHint nsStyleTextReset::CalcDifference(
   }
 
   if (mTextDecorationLine != aNewData.mTextDecorationLine ||
-      mTextDecorationStyle != aNewData.mTextDecorationStyle) {
+      mTextDecorationStyle != aNewData.mTextDecorationStyle ||
+      mTextDecorationWidth != aNewData.mTextDecorationWidth) {
     // Changes to our text-decoration line can impact our overflow area &
     // also our descendants' overflow areas (particularly for text-frame
     // descendants).  So, we update those areas & trigger a repaint.

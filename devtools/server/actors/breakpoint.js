@@ -172,15 +172,15 @@ BreakpointActor.prototype = {
   hit: function(frame) {
     // Don't pause if we are currently stepping (in or over) or the frame is
     // black-boxed.
+    const location = this.threadActor.sources.getFrameLocation(frame);
     const {
       sourceActor,
       line,
       column,
-    } = this.threadActor.sources.getFrameLocation(frame);
-    const url = sourceActor.url;
+    } = location;
 
     if (
-      this.threadActor.sources.isBlackBoxed(url, line, column) ||
+      this.threadActor.sources.isBlackBoxed(sourceActor.url, line, column) ||
       this.threadActor.skipBreakpoints ||
       frame.onStep
     ) {
@@ -195,6 +195,10 @@ BreakpointActor.prototype = {
       locationAtFinish.line === line &&
       locationAtFinish.column === column
     ) {
+      return undefined;
+    }
+
+    if (!this.threadActor.hasMoved(location, "breakpoint")) {
       return undefined;
     }
 
@@ -224,13 +228,16 @@ BreakpointActor.prototype = {
       const displayName = formatDisplayName(frame);
       const completion = frame.evalWithBindings(`[${logValue}]`, { displayName });
       let value;
+      let level = "logPoint";
+
       if (!completion) {
         // The evaluation was killed (possibly by the slow script dialog).
         value = ["Log value evaluation incomplete"];
       } else if ("return" in completion) {
         value = completion.return;
       } else {
-        value = [this.getThrownMessage(completion)];
+        value = ["[Logpoint threw]: " + this.getThrownMessage(completion)];
+        level = "logPointError";
       }
 
       if (value && typeof value.unsafeDereference === "function") {
@@ -238,11 +245,11 @@ BreakpointActor.prototype = {
       }
 
       const message = {
-        filename: url,
+        filename: sourceActor.url,
         lineNumber: line,
         columnNumber: column,
-        level: "logPoint",
         arguments: value,
+        level,
       };
       this.threadActor._parent._consoleActor.onConsoleAPICall(message);
 

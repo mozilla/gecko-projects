@@ -14,8 +14,9 @@
     <script type="module" src="chrome://browser/content/aboutlogins/components/login-item.js"></script>
     <script type="module" src="chrome://browser/content/aboutlogins/components/login-list.js"></script>
     <script type="module" src="chrome://browser/content/aboutlogins/components/login-list-item.js"></script>
+    <script type="module" src="chrome://browser/content/aboutlogins/components/menu-button.js"></script>
     <script type="module" src="chrome://browser/content/aboutlogins/components/modal-input.js"></script>
-    <script defer="defer" src="chrome://browser/content/aboutlogins/aboutLogins.js"></script>
+    <script type="module" src="chrome://browser/content/aboutlogins/aboutLogins.js"></script>
     <link rel="stylesheet" href="chrome://global/skin/in-content/common.css">
     <link rel="stylesheet" href="chrome://browser/content/aboutlogins/aboutLogins.css">
   </head>
@@ -25,10 +26,19 @@
       <login-filter data-l10n-id="login-filter"
                     data-l10n-attrs="placeholder"></login-filter>
       <button id="create-login-button" data-l10n-id="create-login-button"></button>
+      <menu-button data-l10n-id="menu-button"
+                   data-l10n-attrs="button-title,
+                                    menuitem-preferences"></menu-button>
     </header>
     <login-list data-l10n-id="login-list"
-                data-l10n-attrs="count"
-                data-l10n-args='{"count": 0}'></login-list>
+                data-l10n-args='{"count": 0}'
+                data-l10n-attrs="count,
+                                 last-changed-option,
+                                 last-used-option,
+                                 name-option,
+                                 new-login-subtitle,
+                                 new-login-title,
+                                 sort-label-text"></login-list>
     <login-item data-l10n-id="login-item"
                 data-l10n-args='{"timeCreated": 0, "timeChanged": 0, "timeUsed": 0}'
                 data-l10n-attrs="cancel-button,
@@ -55,6 +65,14 @@
       <link rel="stylesheet" href="chrome://global/skin/in-content/common.css">
       <link rel="stylesheet" href="chrome://browser/content/aboutlogins/components/login-list.css">
       <div class="meta">
+        <label for="login-sort">
+          <span class="sort-label-text"></span>
+          <select id="login-sort">
+            <option class="name-option" value="name"/>
+            <option class="last-used-option" value="last-used"/>
+            <option class="last-changed-option" value="last-changed"/>
+          </select>
+        </label>
         <span class="count"></span>
       </div>
       <ol>
@@ -70,11 +88,12 @@
 
     <template id="login-item-template">
       <link rel="stylesheet" href="chrome://global/skin/in-content/common.css">
+      <link rel="stylesheet" href="chrome://browser/content/aboutlogins/common.css">
       <link rel="stylesheet" href="chrome://browser/content/aboutlogins/components/login-item.css">
       <div class="header">
         <h2 class="title"></h2>
-        <button class="edit-button"></button>
-        <button class="delete-button"></button>
+        <button class="edit-button alternate-button"></button>
+        <button class="delete-button alternate-button"></button>
       </div>
       <div class="detail-row">
         <label>
@@ -89,14 +108,16 @@
           <span class="username-label field-label"></span>
           <modal-input name="username"/>
         </label>
-        <copy-to-clipboard-button class="copy-username-button"></copy-to-clipboard-button>
+        <copy-to-clipboard-button class="copy-username-button"
+                                  data-telemetry-object="username"></copy-to-clipboard-button>
       </div>
       <div class="detail-row">
         <label>
           <span class="password-label field-label"></span>
           <modal-input type="password" name="password" required />
         </label>
-        <copy-to-clipboard-button class="copy-password-button"></copy-to-clipboard-button>
+        <copy-to-clipboard-button class="copy-password-button"
+                                  data-telemetry-object="password"></copy-to-clipboard-button>
       </div>
       <p class="time-created meta-info"></p>
       <p class="time-changed meta-info"></p>
@@ -109,6 +130,16 @@
       <link rel="stylesheet" href="chrome://global/skin/in-content/common.css">
       <link rel="stylesheet" href="chrome://browser/content/aboutlogins/components/login-filter.css">
       <input type="text"/>
+    </template>
+
+    <template id="menu-button-template">
+      <link rel="stylesheet" href="chrome://global/skin/in-content/common.css">
+      <link rel="stylesheet" href="chrome://browser/content/aboutlogins/common.css">
+      <link rel="stylesheet" href="chrome://browser/content/aboutlogins/components/menu-button.css">
+      <button class="menu-button alternate-button"></button>
+      <ul class="menu" role="menu" aria-hidden="true">
+        <li role="menuitem" class="menuitem"><button class="menuitem-button menuitem-preferences alternate-button"></button></li>
+      </ul>
     </template>
 
     <template id="modal-input-template">

@@ -18,8 +18,9 @@ import mozharness
 
 from mozharness.base.errors import PythonErrorList
 from mozharness.base.log import OutputParser, DEBUG, ERROR, CRITICAL, INFO
-from mozharness.mozilla.testing.testbase import TestingMixin, testing_config_options
 from mozharness.mozilla.testing.android import AndroidMixin
+from mozharness.mozilla.testing.errors import HarnessErrorList
+from mozharness.mozilla.testing.testbase import TestingMixin, testing_config_options
 from mozharness.base.vcs.vcsbase import MercurialScript
 from mozharness.mozilla.testing.codecoverage import (
     CodeCoverageMixin,
@@ -30,12 +31,11 @@ scripts_path = os.path.abspath(os.path.dirname(os.path.dirname(mozharness.__file
 external_tools_path = os.path.join(scripts_path, 'external_tools')
 here = os.path.abspath(os.path.dirname(__file__))
 
-RaptorErrorList = PythonErrorList + [
+RaptorErrorList = PythonErrorList + HarnessErrorList + [
     {'regex': re.compile(r'''run-as: Package '.*' is unknown'''), 'level': DEBUG},
-    {'substr': r'''FAIL: Busted:''', 'level': CRITICAL},
-    {'substr': r'''FAIL: failed to cleanup''', 'level': ERROR},
-    {'substr': r'''erfConfigurator.py: Unknown error''', 'level': CRITICAL},
-    {'substr': r'''raptorError''', 'level': CRITICAL},
+    {'substr': r'''raptorDebug''', 'level': DEBUG},
+    {'regex': re.compile(r'''^raptor[a-zA-Z-]*( - )?( )?(?i)error(:)?'''), 'level': ERROR},
+    {'regex': re.compile(r'''^raptor[a-zA-Z-]*( - )?( )?(?i)critical(:)?'''), 'level': CRITICAL},
     {'regex': re.compile(r'''No machine_name called '.*' can be found'''), 'level': CRITICAL},
     {'substr': r"""No such file or directory: 'browser_output.txt'""",
      'level': CRITICAL,
@@ -157,6 +157,12 @@ class Raptor(TestingMixin, MercurialScript, CodeCoverageMixin, AndroidMixin):
             "default": False,
             "help": "Use Raptor to measure memory usage.",
         }],
+        [["--cpu-test"], {
+            "dest": "cpu_test",
+            "action": "store_true",
+            "default": False,
+            "help": "Use Raptor to measure CPU usage"
+        }],
         [["--debug-mode"], {
             "dest": "debug_mode",
             "action": "store_true",
@@ -254,6 +260,7 @@ class Raptor(TestingMixin, MercurialScript, CodeCoverageMixin, AndroidMixin):
             self.host = os.environ['HOST_IP']
         self.power_test = self.config.get('power_test')
         self.memory_test = self.config.get('memory_test')
+        self.cpu_test = self.config.get('cpu_test')
         self.is_release_build = self.config.get('is_release_build')
         self.debug_mode = self.config.get('debug_mode', False)
         self.firefox_android_browsers = ["fennec", "geckoview", "refbrow", "fenix"]
@@ -389,6 +396,8 @@ class Raptor(TestingMixin, MercurialScript, CodeCoverageMixin, AndroidMixin):
             options.extend(['--power-test'])
         if self.config.get('memory_test', False):
             options.extend(['--memory-test'])
+        if self.config.get('cpu_test', False):
+            options.extend(['--cpu-test'])
         for key, value in kw_options.items():
             options.extend(['--%s' % key, value])
 
@@ -519,6 +528,8 @@ class Raptor(TestingMixin, MercurialScript, CodeCoverageMixin, AndroidMixin):
         if self.config.get('power_test', None):
             expected_perfherder += 1
         if self.config.get('memory_test', None):
+            expected_perfherder += 1
+        if self.config.get('cpu_test', None):
             expected_perfherder += 1
         if len(parser.found_perf_data) != expected_perfherder:
             self.critical("PERFHERDER_DATA was seen %d times, expected %d."
@@ -657,6 +668,10 @@ class Raptor(TestingMixin, MercurialScript, CodeCoverageMixin, AndroidMixin):
 
                 if self.memory_test:
                     src = os.path.join(self.query_abs_dirs()['abs_work_dir'], 'raptor-memory.json')
+                    self._artifact_perf_data(src, dest)
+
+                if self.cpu_test:
+                    src = os.path.join(self.query_abs_dirs()['abs_work_dir'], 'raptor-cpu.json')
                     self._artifact_perf_data(src, dest)
 
                 src = os.path.join(self.query_abs_dirs()['abs_work_dir'], 'screenshots.html')

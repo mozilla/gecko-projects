@@ -67,7 +67,7 @@
 #include "nsWindowSizes.h"
 #include "nsCOMPtr.h"
 #include "nsReadableUtils.h"
-#include "nsIPageSequenceFrame.h"
+#include "nsPageSequenceFrame.h"
 #include "nsIPermissionManager.h"
 #include "nsIMozBrowserFrame.h"
 #include "nsCaret.h"
@@ -551,7 +551,7 @@ class MOZ_STACK_CLASS AutoPointerEventTargetUpdater final {
     MOZ_ASSERT(!aFrame->GetContent() ||
                aShell->GetDocument() == aFrame->GetContent()->OwnerDoc());
 
-    MOZ_ASSERT(PointerEventHandler::IsPointerEventEnabled());
+    MOZ_ASSERT(StaticPrefs::dom_w3c_pointer_events_enabled());
     mShell = aShell;
     mWeakFrame = aFrame;
     mTargetContent = aTargetContent;
@@ -1824,10 +1824,10 @@ nsresult PresShell::Initialize() {
     }
   }
 
-  // If we get here and painting is not suppressed, then we can paint anytime
-  // and we should fire the before-first-paint notification
+  // If we get here and painting is not suppressed, we still want to run the
+  // unsuppression logic, so set mShouldUnsuppressPainting to true.
   if (!mPaintingSuppressed) {
-    ScheduleBeforeFirstPaint();
+    mShouldUnsuppressPainting = true;
   }
 
   return NS_OK;  // XXX this needs to be real. MMP
@@ -2440,9 +2440,8 @@ nsIScrollableFrame* PresShell::GetRootScrollFrameAsScrollable() const {
   return scrollableFrame;
 }
 
-nsIPageSequenceFrame* PresShell::GetPageSequenceFrame() const {
-  nsIFrame* frame = mFrameConstructor->GetPageSequenceFrame();
-  return do_QueryFrame(frame);
+nsPageSequenceFrame* PresShell::GetPageSequenceFrame() const {
+  return mFrameConstructor->GetPageSequenceFrame();
 }
 
 nsCanvasFrame* PresShell::GetCanvasFrame() const {
@@ -4463,12 +4462,6 @@ nsresult PresShell::RenderDocument(const nsRect& aRect,
   NS_ENSURE_TRUE(!(aFlags & RenderDocumentFlags::IsUntrusted),
                  NS_ERROR_NOT_IMPLEMENTED);
 
-  nsRootPresContext* rootPresContext = mPresContext->GetRootPresContext();
-  if (rootPresContext) {
-    rootPresContext->FlushWillPaintObservers();
-    if (mIsDestroying) return NS_OK;
-  }
-
   nsAutoScriptBlocker blockScripts;
 
   // Set up the rectangle as the path in aThebesContext
@@ -5021,24 +5014,23 @@ already_AddRefed<SourceSurface> PresShell::RenderSelection(
                              aScreenRect, aFlags);
 }
 
-void PresShell::AddPrintPreviewBackgroundItem(nsDisplayListBuilder& aBuilder,
-                                              nsDisplayList& aList,
+void PresShell::AddPrintPreviewBackgroundItem(nsDisplayListBuilder* aBuilder,
+                                              nsDisplayList* aList,
                                               nsIFrame* aFrame,
                                               const nsRect& aBounds) {
-  aList.AppendNewToBottom<nsDisplaySolidColor>(&aBuilder, aFrame, aBounds,
-                                               NS_RGB(115, 115, 115));
+  aList->AppendNewToBottom<nsDisplaySolidColor>(aBuilder, aFrame, aBounds,
+                                                NS_RGB(115, 115, 115));
 }
 
-static bool AddCanvasBackgroundColor(const nsDisplayList& aList,
+static bool AddCanvasBackgroundColor(const nsDisplayList* aList,
                                      nsIFrame* aCanvasFrame, nscolor aColor,
                                      bool aCSSBackgroundColor) {
-  for (nsDisplayItem* i = aList.GetBottom(); i; i = i->GetAbove()) {
+  for (nsDisplayItem* i = aList->GetBottom(); i; i = i->GetAbove()) {
     const DisplayItemType type = i->GetType();
 
     if (i->Frame() == aCanvasFrame &&
         type == DisplayItemType::TYPE_CANVAS_BACKGROUND_COLOR) {
-      nsDisplayCanvasBackgroundColor* bg =
-          static_cast<nsDisplayCanvasBackgroundColor*>(i);
+      auto* bg = static_cast<nsDisplayCanvasBackgroundColor*>(i);
       bg->SetExtraBackgroundColor(aColor);
       return true;
     }
@@ -5049,7 +5041,7 @@ static bool AddCanvasBackgroundColor(const nsDisplayList& aList,
 
     nsDisplayList* sublist = i->GetSameCoordinateSystemChildren();
     if (sublist && !(isBlendContainer && !aCSSBackgroundColor) &&
-        AddCanvasBackgroundColor(*sublist, aCanvasFrame, aColor,
+        AddCanvasBackgroundColor(sublist, aCanvasFrame, aColor,
                                  aCSSBackgroundColor))
       return true;
   }
@@ -5057,7 +5049,7 @@ static bool AddCanvasBackgroundColor(const nsDisplayList& aList,
 }
 
 void PresShell::AddCanvasBackgroundColorItem(
-    nsDisplayListBuilder& aBuilder, nsDisplayList& aList, nsIFrame* aFrame,
+    nsDisplayListBuilder* aBuilder, nsDisplayList* aList, nsIFrame* aFrame,
     const nsRect& aBounds, nscolor aBackstopColor,
     AddCanvasBackgroundColorFlags aFlags) {
   if (aBounds.IsEmpty()) {
@@ -5113,8 +5105,8 @@ void PresShell::AddCanvasBackgroundColorItem(
   }
 
   if (!addedScrollingBackgroundColor || forceUnscrolledItem) {
-    aList.AppendNewToBottom<nsDisplaySolidColor>(&aBuilder, aFrame, aBounds,
-                                                 bgcolor);
+    aList->AppendNewToBottom<nsDisplaySolidColor>(aBuilder, aFrame, aBounds,
+                                                  bgcolor);
   }
 }
 
@@ -5167,7 +5159,7 @@ void PresShell::UpdateCanvasBackground() {
         mPresContext, bgStyle, rootStyleFrame, drawBackgroundImage,
         drawBackgroundColor);
     mHasCSSBackgroundColor = drawBackgroundColor;
-    if (mPresContext->IsRootContentDocument() &&
+    if (mPresContext->IsRootContentDocumentCrossProcess() &&
         !IsTransparentContainerElement(mPresContext)) {
       mCanvasBackgroundColor = NS_ComposeColors(
           GetDefaultBackgroundColorToDraw(), mCanvasBackgroundColor);
@@ -5856,7 +5848,7 @@ bool PresShell::AssumeAllFramesVisible() {
   // Note that it's not safe to call IsRootContentDocument() if we're
   // currently being destroyed, so we have to check that first.
   if (!mHaveShutDown && !mIsDestroying &&
-      !mPresContext->IsRootContentDocument()) {
+      !mPresContext->IsRootContentDocumentInProcess()) {
     nsPresContext* presContext =
         mPresContext->GetToplevelContentDocumentPresContext();
     if (presContext && presContext->PresShell()->AssumeAllFramesVisible()) {
@@ -6917,7 +6909,7 @@ bool PresShell::EventHandler::DispatchPrecedingPointerEvent(
   MOZ_ASSERT(aEventTargetData);
   MOZ_ASSERT(aEventStatus);
 
-  if (!PointerEventHandler::IsPointerEventEnabled()) {
+  if (!StaticPrefs::dom_w3c_pointer_events_enabled()) {
     return true;
   }
 
@@ -7318,11 +7310,19 @@ nsIFrame* PresShell::EventHandler::MaybeFlushThrottledStyles(
     return aFrameForPresShell;
   }
 
+  PresShell* rootPresShell = mPresShell->GetRootPresShell();
+  if (NS_WARN_IF(!rootPresShell)) {
+    return nullptr;
+  }
+  Document* rootDocument = rootPresShell->GetDocument();
+  if (NS_WARN_IF(!rootDocument)) {
+    return nullptr;
+  }
+
   AutoWeakFrame weakFrameForPresShell(aFrameForPresShell);
   {  // scope for scriptBlocker.
     nsAutoScriptBlocker scriptBlocker;
-    FlushThrottledStyles(mPresShell->GetRootPresShell()->GetDocument(),
-                         nullptr);
+    FlushThrottledStyles(rootDocument, nullptr);
   }
 
   if (weakFrameForPresShell.IsAlive()) {
@@ -8830,17 +8830,6 @@ void PresShell::WillPaint() {
   if (!mIsActive || mPaintingSuppressed || !IsVisible()) {
     return;
   }
-
-  nsRootPresContext* rootPresContext = mPresContext->GetRootPresContext();
-  if (!rootPresContext) {
-    // In some edge cases, such as when we don't have a root frame yet,
-    // we can't find the root prescontext. There's nothing to do in that
-    // case.
-    return;
-  }
-
-  rootPresContext->FlushWillPaintObservers();
-  if (mIsDestroying) return;
 
   // Process reflows, if we have them, to reduce flicker due to invalidates and
   // reflow being interspersed.  Note that we _do_ allow this to be
@@ -10644,7 +10633,8 @@ PresShell* PresShell::GetRootPresShell() {
 
 void PresShell::AddSizeOfIncludingThis(nsWindowSizes& aSizes) const {
   MallocSizeOf mallocSizeOf = aSizes.mState.mMallocSizeOf;
-  mFrameArena.AddSizeOfExcludingThis(aSizes);
+  mFrameArena.AddSizeOfExcludingThis(aSizes,
+                                     &nsWindowSizes::mLayoutPresShellSize);
   aSizes.mLayoutPresShellSize += mallocSizeOf(this);
   if (mCaret) {
     aSizes.mLayoutPresShellSize += mCaret->SizeOfIncludingThis(mallocSizeOf);

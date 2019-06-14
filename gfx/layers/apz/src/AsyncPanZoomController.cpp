@@ -1405,7 +1405,7 @@ nsEventStatus AsyncPanZoomController::OnTouchMove(
       }
 
       MOZ_ASSERT(GetCurrentTouchBlock());
-      if (StaticPrefs::TouchActionEnabled() &&
+      if (StaticPrefs::layout_css_touch_action_enabled() &&
           GetCurrentTouchBlock()->TouchActionAllowsPanningXY()) {
         // User tries to trigger a touch behavior. If allowed touch behavior is
         // vertical pan
@@ -2572,9 +2572,9 @@ nsEventStatus AsyncPanZoomController::OnPan(const PanGestureInput& aEvent,
   // aEvent.mLocalStartPoint) would mess up velocity calculation. (This is
   // the only caller of UpdateWithTouchAtDevicePoint() for pan events, so
   // there is no risk of other calls resetting the position.)
-  mX.UpdateWithTouchAtDevicePoint(mX.GetPos() + logicalPanDisplacement.x,
+  mX.UpdateWithTouchAtDevicePoint(mX.GetPos() - logicalPanDisplacement.x,
                                   aEvent.mTime);
-  mY.UpdateWithTouchAtDevicePoint(mY.GetPos() + logicalPanDisplacement.y,
+  mY.UpdateWithTouchAtDevicePoint(mY.GetPos() - logicalPanDisplacement.y,
                                   aEvent.mTime);
 
   HandlePanningUpdate(physicalPanDisplacement);
@@ -3066,7 +3066,7 @@ nsEventStatus AsyncPanZoomController::StartPanning(
   angle = fabs(angle);                       // range [0, pi]
 
   RecursiveMutexAutoLock lock(mRecursiveMutex);
-  if (StaticPrefs::TouchActionEnabled()) {
+  if (StaticPrefs::layout_css_touch_action_enabled()) {
     HandlePanningWithTouchAction(angle);
   } else {
     if (GetAxisLockMode() == FREE) {
@@ -4597,13 +4597,18 @@ void AsyncPanZoomController::NotifyLayersUpdated(
           aLayerMetrics.GetDevPixelsPerCSSPixel());
     }
     bool scrollableRectChanged = false;
+    bool compositionBoundsChanged = false;
     if (!Metrics().GetScrollableRect().IsEqualEdges(
             aLayerMetrics.GetScrollableRect())) {
       Metrics().SetScrollableRect(aLayerMetrics.GetScrollableRect());
       needContentRepaint = true;
       scrollableRectChanged = true;
     }
-    Metrics().SetCompositionBounds(aLayerMetrics.GetCompositionBounds());
+    if (!Metrics().GetCompositionBounds().IsEqualEdges(
+            aLayerMetrics.GetCompositionBounds())) {
+      Metrics().SetCompositionBounds(aLayerMetrics.GetCompositionBounds());
+      compositionBoundsChanged = true;
+    }
     Metrics().SetRootCompositionSize(aLayerMetrics.GetRootCompositionSize());
     Metrics().SetPresShellResolution(aLayerMetrics.GetPresShellResolution());
     Metrics().SetCumulativeResolution(aLayerMetrics.GetCumulativeResolution());
@@ -4691,10 +4696,10 @@ void AsyncPanZoomController::NotifyLayersUpdated(
       // Since the main-thread scroll offset changed we should trigger a
       // recomposite to make sure it becomes user-visible.
       ScheduleComposite();
-    } else if (scrollableRectChanged) {
+    } else if (scrollableRectChanged || compositionBoundsChanged) {
       // Even if we didn't accept a new scroll offset from content, the
-      // scrollable rect may have changed in a way that makes our local
-      // scroll offset out of bounds, so re-clamp it.
+      // scrollable rect or composition bounds may have changed in a way that
+      // makes our local scroll offset out of bounds, so re-clamp it.
       ClampAndSetScrollOffset(Metrics().GetScrollOffset());
       ClampCompositedScrollOffset();
     }

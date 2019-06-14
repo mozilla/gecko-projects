@@ -196,14 +196,7 @@ class JSTerm extends Component {
         };
 
         const onCtrlCmdEnter = () => {
-          const hasSuggestion = this.hasAutocompletionSuggestion();
-          if (!hasSuggestion &&
-            !Debugger.isCompilableUnit(this.getInputValueBeforeCursor())) {
-            // incomplete statement
-            return "CodeMirror.Pass";
-          }
-
-          if (hasSuggestion) {
+          if (this.hasAutocompletionSuggestion()) {
             return this.acceptProposedCompletion();
           }
 
@@ -841,7 +834,7 @@ class JSTerm extends Component {
     const value = this._getValue();
     if (this.lastInputValue !== value) {
       this.resizeInput();
-      if (this.props.autocomplete) {
+      if (this.props.autocomplete || this.autocompletePopup.isOpen) {
         this.autocompleteUpdate();
       }
       this.lastInputValue = value;
@@ -947,7 +940,6 @@ class JSTerm extends Component {
           event.preventDefault();
         }
         this.clearCompletion();
-        event.preventDefault();
       }
 
       // control-enter should execute the current input if codeMirror

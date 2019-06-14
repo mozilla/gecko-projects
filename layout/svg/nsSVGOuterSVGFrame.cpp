@@ -307,8 +307,8 @@ LogicalSize nsSVGOuterSVGFrame::ComputeSize(
     // We're the root of the outermost browsing context, so we need to scale
     // cbSize by the full-zoom so that SVGs with percentage width/height zoom:
 
-    NS_ASSERTION(aCBSize.ISize(aWritingMode) != NS_AUTOHEIGHT &&
-                     aCBSize.BSize(aWritingMode) != NS_AUTOHEIGHT,
+    NS_ASSERTION(aCBSize.ISize(aWritingMode) != NS_UNCONSTRAINEDSIZE &&
+                     aCBSize.BSize(aWritingMode) != NS_UNCONSTRAINEDSIZE,
                  "root should not have auto-width/height containing block");
 
     if (!IsContainingWindowElementOfType(nullptr, nsGkAtoms::iframe)) {
@@ -336,7 +336,7 @@ LogicalSize nsSVGOuterSVGFrame::ComputeSize(
 
     const SVGAnimatedLength& height =
         content->mLengthAttributes[SVGSVGElement::ATTR_HEIGHT];
-    NS_ASSERTION(aCBSize.BSize(aWritingMode) != NS_AUTOHEIGHT,
+    NS_ASSERTION(aCBSize.BSize(aWritingMode) != NS_UNCONSTRAINEDSIZE,
                  "root should not have auto-height containing block");
     if (height.IsPercentage()) {
       MOZ_ASSERT(!intrinsicSize.height,
@@ -688,15 +688,15 @@ nsresult nsSVGOuterSVGFrame::AttributeChanged(int32_t aNameSpaceID,
               ? TRANSFORM_CHANGED | COORD_CONTEXT_CHANGED
               : TRANSFORM_CHANGED);
 
-      if (aAttribute != nsGkAtoms::transform) {
+      if (aAttribute == nsGkAtoms::preserveAspectRatio) {
         static_cast<SVGSVGElement*>(GetContent())
             ->ChildrenOnlyTransformChanged();
       }
-
-    } else if (aAttribute == nsGkAtoms::width ||
-               aAttribute == nsGkAtoms::height) {
+    }
+    if (aAttribute == nsGkAtoms::width || aAttribute == nsGkAtoms::height ||
+        aAttribute == nsGkAtoms::viewBox) {
       // Don't call ChildrenOnlyTransformChanged() here, since we call it
-      // under Reflow if the width/height actually changed.
+      // under Reflow if the width/height/viewBox actually changed.
 
       nsIFrame* embeddingFrame;
       if (IsRootOfReplacedElementSubDoc(&embeddingFrame) && embeddingFrame) {
@@ -709,7 +709,8 @@ nsresult nsSVGOuterSVGFrame::AttributeChanged(int32_t aNameSpaceID,
         // else our width and height is overridden - don't reflow anything
       } else {
         // We are not embedded by reference, so our 'width' and 'height'
-        // attributes are not overridden - we need to reflow.
+        // attributes are not overridden (and viewBox may influence our
+        // intrinsic aspect ratio).  We need to reflow.
         PresShell()->FrameNeedsReflow(this, IntrinsicDirty::StyleChange,
                                       NS_FRAME_IS_DIRTY);
       }

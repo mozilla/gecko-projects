@@ -57,6 +57,22 @@ class MozDialog extends MozXULElement {
     this.attachShadow({mode: "open"});
   }
 
+  static get observedAttributes() {
+    return super.observedAttributes.concat("subdialog");
+  }
+
+  attributeChangedCallback(name, oldValue, newValue) {
+    if (name == "subdialog") {
+      console.assert(newValue, `Turning off subdialog style is not supported`);
+      if (this.isConnectedAndReady && !oldValue && newValue) {
+        this.shadowRoot.appendChild(
+          MozXULElement.parseXULToFragment(this.inContentStyle));
+      }
+      return;
+    }
+    super.attributeChangedCallback(name, oldValue, newValue);
+  }
+
   static get inheritedAttributes() {
     return {
       ".dialog-button-box": "pack=buttonpack,align=buttonalign,dir=buttondir,orient=buttonorient",
@@ -64,8 +80,14 @@ class MozDialog extends MozXULElement {
     };
   }
 
+  get inContentStyle() {
+    return `
+      <html:link rel="stylesheet" href="chrome://global/skin/in-content/common.css" />
+    `;
+  }
+
   get _markup() {
-    let buttons = AppConstants.platform == "linux" ? `
+    let buttons = AppConstants.XP_UNIX ? `
       <hbox class="dialog-button-box">
         <button dlgtype="disclosure" class="dialog-button" hidden="true"/>
         <button dlgtype="help" class="dialog-button" hidden="true"/>
@@ -95,6 +117,7 @@ class MozDialog extends MozXULElement {
 
     return `
       <html:link rel="stylesheet" href="chrome://global/content/widgets.css" />
+      ${this.hasAttribute("subdialog") ? this.inContentStyle : ""}
       <html:style>
         :host([nobuttonspacer]) .spacer {
           display: none;
@@ -256,7 +279,7 @@ class MozDialog extends MozXULElement {
               // so return focus to the tab itself
               initialFocusedElt.focus();
             }
-          } else if (!/Mac/.test(navigator.platform) &&
+          } else if (AppConstants.platform != "macosx" &&
                      focusedElt.hasAttribute("dlgtype") &&
                      focusedElt != defaultButton) {
             defaultButton.focus();
@@ -382,7 +405,7 @@ class MozDialog extends MozXULElement {
       }
 
       // show the spacer on Windows only when the extra2 button is present
-      if (/Win/.test(navigator.platform)) {
+      if (AppConstants.platform == "win") {
         let spacer = this.shadowRoot.querySelector(".spacer");
         spacer.removeAttribute("hidden");
         spacer.setAttribute("flex", shown.extra2 ? "1" : "0");

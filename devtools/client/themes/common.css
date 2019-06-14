@@ -292,6 +292,7 @@ checkbox:-moz-focusring {
 
 /* Toolbar buttons */
 .devtools-toolbarbutton,
+.devtools-togglebutton,
 .devtools-button {
   -moz-appearance: none;
   background: transparent;
@@ -306,6 +307,10 @@ checkbox:-moz-focusring {
 
   /* Button text should not wrap on multiple lines */
   white-space: nowrap;
+}
+
+.devtools-togglebutton {
+  padding: 0 4px;
 }
 
 /* Remove system form border from devtools-button. */
@@ -411,6 +416,16 @@ checkbox:-moz-focusring {
   color: var(--toolbarbutton-focus-color);
 }
 
+.devtools-togglebutton:not([aria-pressed="true"]) {
+  background: var(--theme-toolbarbutton-background);
+  color: var(--theme-toolbarbutton-color);
+}
+
+.devtools-togglebutton:not([aria-pressed="true"]):hover,
+.devtools-togglebutton:hover:active {
+  background-color: var(--theme-toolbarbutton-hover-background);
+}
+
 /* Selectable button which is checked. */
 
 .devtools-toolbarbutton:not([disabled])[label][checked=true],
@@ -424,6 +439,16 @@ checkbox:-moz-focusring {
 .devtools-toolbarbutton:not([disabled])[label][open]:focus,
 .devtools-button:not(:empty).checked:focus {
   background-color: var(--toolbarbutton-checked-focus-background);
+}
+
+.devtools-togglebutton[aria-pressed="true"],
+.devtools-togglebutton:focus {
+  background-color: var(--theme-toolbarbutton-checked-background);
+  color: var(--theme-toolbarbutton-checked-color);
+}
+
+.devtools-togglebutton[aria-pressed="true"]:hover {
+  background: var(--theme-toolbarbutton-checked-hover-color);
 }
 
 /* Icons */
@@ -509,6 +534,8 @@ checkbox:-moz-focusring {
   background-color: transparent;
   border: none;
   flex-grow: 1;
+  min-width: 0;
+  width: 100%;
 }
 
 .devtools-searchbox:focus-within,
@@ -526,6 +553,7 @@ checkbox:-moz-focusring {
 
 /* Clear icon within the searchbox */
 .devtools-searchinput-clear {
+  flex: 0 0 auto;
   align-self: center;
   margin: 0 4px;
   padding: 0;
@@ -554,6 +582,14 @@ checkbox:-moz-focusring {
 
 .devtools-searchbox:not(:hover) .learn-more-link {
   visibility: hidden;
+}
+
+.devtools-searchbox .devtools-searchinput-summary {
+  flex-basis: auto;
+  flex-grow: 0;
+  flex-shrink: 0;
+  color: var(--theme-comment);
+  align-self: center;
 }
 
 /* Autocomplete popup within the searchbox */

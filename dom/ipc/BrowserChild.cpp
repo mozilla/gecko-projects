@@ -57,9 +57,11 @@
 #include "mozilla/ScopeExit.h"
 #include "mozilla/Services.h"
 #include "mozilla/StaticPtr.h"
+#include "mozilla/StaticPrefs.h"
 #include "mozilla/TextEvents.h"
 #include "mozilla/TouchEvents.h"
 #include "mozilla/Unused.h"
+#include "Units.h"
 #include "nsBrowserStatusFilter.h"
 #include "nsContentUtils.h"
 #include "nsDocShell.h"
@@ -171,49 +173,21 @@ typedef nsDataHashtable<nsUint64HashKey, BrowserChild*> BrowserChildMap;
 static BrowserChildMap* sBrowserChildren;
 StaticMutex sBrowserChildrenMutex;
 
-BrowserChildBase::BrowserChildBase() : mBrowserChildMessageManager(nullptr) {}
-
-BrowserChildBase::~BrowserChildBase() { mAnonymousGlobalScopes.Clear(); }
-
-NS_IMPL_CYCLE_COLLECTION_CLASS(BrowserChildBase)
-
-NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(BrowserChildBase)
-  NS_IMPL_CYCLE_COLLECTION_UNLINK(mBrowserChildMessageManager)
-  tmp->nsMessageManagerScriptExecutor::Unlink();
-  NS_IMPL_CYCLE_COLLECTION_UNLINK(mWebBrowserChrome)
-NS_IMPL_CYCLE_COLLECTION_UNLINK_END
-
-NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN(BrowserChildBase)
-  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mBrowserChildMessageManager)
-  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mWebBrowserChrome)
-NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
-
-NS_IMPL_CYCLE_COLLECTION_TRACE_BEGIN(BrowserChildBase)
-  tmp->nsMessageManagerScriptExecutor::Trace(aCallbacks, aClosure);
-NS_IMPL_CYCLE_COLLECTION_TRACE_END
-
-NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(BrowserChildBase)
-  NS_INTERFACE_MAP_ENTRY(nsISupports)
-NS_INTERFACE_MAP_END
-
-NS_IMPL_CYCLE_COLLECTING_ADDREF(BrowserChildBase)
-NS_IMPL_CYCLE_COLLECTING_RELEASE(BrowserChildBase)
-
-already_AddRefed<Document> BrowserChildBase::GetTopLevelDocument() const {
+already_AddRefed<Document> BrowserChild::GetTopLevelDocument() const {
   nsCOMPtr<Document> doc;
   WebNavigation()->GetDocument(getter_AddRefs(doc));
   return doc.forget();
 }
 
-PresShell* BrowserChildBase::GetTopLevelPresShell() const {
+PresShell* BrowserChild::GetTopLevelPresShell() const {
   if (RefPtr<Document> doc = GetTopLevelDocument()) {
     return doc->GetPresShell();
   }
   return nullptr;
 }
 
-void BrowserChildBase::DispatchMessageManagerMessage(
-    const nsAString& aMessageName, const nsAString& aJSONData) {
+void BrowserChild::DispatchMessageManagerMessage(const nsAString& aMessageName,
+                                                 const nsAString& aJSONData) {
   AutoSafeJSContext cx;
   JS::Rooted<JS::Value> json(cx, JS::NullValue());
   dom::ipc::StructuredCloneData data;
@@ -235,7 +209,7 @@ void BrowserChildBase::DispatchMessageManagerMessage(
                      IgnoreErrors());
 }
 
-bool BrowserChildBase::UpdateFrameHandler(const RepaintRequest& aRequest) {
+bool BrowserChild::UpdateFrame(const RepaintRequest& aRequest) {
   MOZ_ASSERT(aRequest.GetScrollId() != ScrollableLayerGuid::NULL_SCROLL_ID);
 
   if (aRequest.IsRootContent()) {
@@ -256,7 +230,7 @@ bool BrowserChildBase::UpdateFrameHandler(const RepaintRequest& aRequest) {
   return true;
 }
 
-void BrowserChildBase::ProcessUpdateFrame(const RepaintRequest& aRequest) {
+void BrowserChild::ProcessUpdateFrame(const RepaintRequest& aRequest) {
   if (!mBrowserChildMessageManager) {
     return;
   }
@@ -372,6 +346,7 @@ BrowserChild::BrowserChild(ContentChild* aManager, const TabId& aTabId,
                            BrowsingContext* aBrowsingContext,
                            uint32_t aChromeFlags, bool aIsTopLevel)
     : TabContext(aContext),
+      mBrowserChildMessageManager(nullptr),
       mTabGroup(aTabGroup),
       mManager(aManager),
       mBrowsingContext(aBrowsingContext),
@@ -463,7 +438,7 @@ BrowserChild::Observe(nsISupports* aSubject, const char* aTopic,
       nsCOMPtr<Document> subject(do_QueryInterface(aSubject));
       nsCOMPtr<Document> doc(GetTopLevelDocument());
 
-      if (subject == doc) {
+      if (subject == doc && doc->IsTopLevelContentDocument()) {
         RefPtr<PresShell> presShell = doc->GetPresShell();
         if (presShell) {
           presShell->SetIsFirstPaint(true);
@@ -658,20 +633,25 @@ void BrowserChild::UpdateFrameType() {
 
 NS_IMPL_CYCLE_COLLECTION_CLASS(BrowserChild)
 
-NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN_INHERITED(BrowserChild, BrowserChildBase)
+NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(BrowserChild)
+  NS_IMPL_CYCLE_COLLECTION_UNLINK(mBrowserChildMessageManager)
+  tmp->nsMessageManagerScriptExecutor::Unlink();
+  NS_IMPL_CYCLE_COLLECTION_UNLINK(mWebBrowserChrome)
   NS_IMPL_CYCLE_COLLECTION_UNLINK(mStatusFilter)
   NS_IMPL_CYCLE_COLLECTION_UNLINK(mWebNav)
   NS_IMPL_CYCLE_COLLECTION_UNLINK(mBrowsingContext)
 NS_IMPL_CYCLE_COLLECTION_UNLINK_END
 
-NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN_INHERITED(BrowserChild,
-                                                  BrowserChildBase)
+NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN(BrowserChild)
+  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mBrowserChildMessageManager)
+  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mWebBrowserChrome)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mStatusFilter)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mWebNav)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mBrowsingContext)
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
 
-NS_IMPL_CYCLE_COLLECTION_TRACE_BEGIN_INHERITED(BrowserChild, BrowserChildBase)
+NS_IMPL_CYCLE_COLLECTION_TRACE_BEGIN(BrowserChild)
+  tmp->nsMessageManagerScriptExecutor::Trace(aCallbacks, aClosure);
 NS_IMPL_CYCLE_COLLECTION_TRACE_END
 
 NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(BrowserChild)
@@ -686,10 +666,11 @@ NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(BrowserChild)
   NS_INTERFACE_MAP_ENTRY(nsISupportsWeakReference)
   NS_INTERFACE_MAP_ENTRY(nsITooltipListener)
   NS_INTERFACE_MAP_ENTRY(nsIWebProgressListener)
-NS_INTERFACE_MAP_END_INHERITING(BrowserChildBase)
+  NS_INTERFACE_MAP_ENTRY_AMBIGUOUS(nsISupports, nsIBrowserChild)
+NS_INTERFACE_MAP_END
 
-NS_IMPL_ADDREF_INHERITED(BrowserChild, BrowserChildBase);
-NS_IMPL_RELEASE_INHERITED(BrowserChild, BrowserChildBase);
+NS_IMPL_CYCLE_COLLECTING_ADDREF(BrowserChild)
+NS_IMPL_CYCLE_COLLECTING_RELEASE(BrowserChild)
 
 NS_IMETHODIMP
 BrowserChild::SetStatus(uint32_t aStatusType, const char16_t* aStatus) {
@@ -1039,6 +1020,7 @@ void BrowserChild::ActorDestroy(ActorDestroyReason why) {
 }
 
 BrowserChild::~BrowserChild() {
+  mAnonymousGlobalScopes.Clear();
   if (sVisibleTabs) {
     sVisibleTabs->RemoveEntry(this);
     if (sVisibleTabs->IsEmpty()) {
@@ -1289,10 +1271,6 @@ mozilla::ipc::IPCResult BrowserChild::RecvSetIsUnderHiddenEmbedderElement(
     presShell->SetIsUnderHiddenEmbedderElement(aIsUnderHiddenEmbedderElement);
   }
   return IPC_OK();
-}
-
-bool BrowserChild::UpdateFrame(const RepaintRequest& aRequest) {
-  return BrowserChildBase::UpdateFrameHandler(aRequest);
 }
 
 mozilla::ipc::IPCResult BrowserChild::RecvSuppressDisplayport(
@@ -1814,7 +1792,7 @@ mozilla::ipc::IPCResult BrowserChild::RecvRealTouchEvent(
 
   if (localEvent.mMessage == eTouchStart && AsyncPanZoomEnabled()) {
     nsCOMPtr<Document> document = GetTopLevelDocument();
-    if (StaticPrefs::TouchActionEnabled()) {
+    if (StaticPrefs::layout_css_touch_action_enabled()) {
       APZCCallbackHelper::SendSetAllowedTouchBehaviorNotification(
           mPuppetWidget, document, localEvent, aInputBlockId,
           mSetAllowedTouchBehaviorCallback);
@@ -2765,7 +2743,7 @@ bool BrowserChild::IsVisible() {
 }
 
 void BrowserChild::UpdateVisibility(bool aForceRepaint) {
-  bool shouldBeVisible = mIsTopLevel ? mRenderLayers : mEffectsInfo.mVisible;
+  bool shouldBeVisible = mIsTopLevel ? mRenderLayers : mEffectsInfo.IsVisible();
   bool isVisible = IsVisible();
 
   if (shouldBeVisible != isVisible) {
@@ -3332,7 +3310,8 @@ bool BrowserChild::DeallocPWindowGlobalChild(PWindowGlobalChild* aActor) {
 PBrowserBridgeChild* BrowserChild::AllocPBrowserBridgeChild(const nsString&,
                                                             const nsString&,
                                                             BrowsingContext*,
-                                                            const uint32_t&) {
+                                                            const uint32_t&,
+                                                            const TabId&) {
   MOZ_CRASH(
       "We should never be manually allocating PBrowserBridgeChild actors");
   return nullptr;
@@ -3350,6 +3329,17 @@ ScreenIntSize BrowserChild::GetInnerSize() {
   return ViewAs<ScreenPixel>(
       innerSize, PixelCastJustification::LayoutDeviceIsScreenForTabDims);
 };
+
+nsRect BrowserChild::GetVisibleRect() {
+  bool isForceRendering = mIsTopLevel && mRenderLayers;
+  if (isForceRendering && !mEffectsInfo.IsVisible()) {
+    // We are forced to render even though we are not visible. In this case, we
+    // don't have an accurate visible rect, so we must be conservative.
+    return nsRect(nsPoint(), CSSPixel::ToAppUnits(mUnscaledInnerSize));
+  } else {
+    return mEffectsInfo.mVisibleRect;
+  }
+}
 
 ScreenIntRect BrowserChild::GetOuterRect() {
   LayoutDeviceIntRect outerRect =

@@ -149,7 +149,6 @@
 #include "mozilla/dom/WakeLock.h"
 #include "nsIDOMWindow.h"
 #include "nsIExternalProtocolService.h"
-#include "nsIFormProcessor.h"
 #include "nsIGfxInfo.h"
 #include "nsIIdleService.h"
 #include "nsIInterfaceRequestorUtils.h"
@@ -591,6 +590,9 @@ static bool sCanLaunchSubprocesses;
 // Set to true if the DISABLE_UNSAFE_CPOW_WARNINGS environment variable is
 // set.
 static bool sDisableUnsafeCPOWWarnings = false;
+
+// Set to true when the first content process gets created.
+static bool sCreatedFirstContentProcess = false;
 
 // The first content child has ID 1, so the chrome process can have ID 0.
 static uint64_t gContentChildID = 1;
@@ -1987,7 +1989,7 @@ static void CacheSandboxParams(std::vector<std::string>& aCachedParams) {
   if (mozilla::IsDevelopmentBuild()) {
     // Repo dir
     nsCOMPtr<nsIFile> repoDir;
-    rv = mozilla::GetRepoDir(getter_AddRefs(repoDir));
+    rv = nsMacUtilsImpl::GetRepoDir(getter_AddRefs(repoDir));
     if (NS_FAILED(rv)) {
       MOZ_CRASH("Failed to get path to repo dir");
     }
@@ -1997,7 +1999,7 @@ static void CacheSandboxParams(std::vector<std::string>& aCachedParams) {
 
     // Object dir
     nsCOMPtr<nsIFile> objDir;
-    rv = mozilla::GetObjDir(getter_AddRefs(objDir));
+    rv = nsMacUtilsImpl::GetObjDir(getter_AddRefs(objDir));
     if (NS_FAILED(rv)) {
       MOZ_CRASH("Failed to get path to build object dir");
     }
@@ -2144,6 +2146,14 @@ void ContentParent::LaunchSubprocessInternal(
                       std::move(prefSerializer)](base::ProcessHandle handle) {
     AUTO_PROFILER_LABEL("ContentParent::LaunchSubprocess::resolve", OTHER);
     const auto launchResumeTS = TimeStamp::Now();
+
+    if (!sCreatedFirstContentProcess) {
+      nsCOMPtr<nsIObserverService> obs =
+          mozilla::services::GetObserverService();
+      obs->NotifyObservers(nullptr, "ipc:first-content-process-created",
+                           nullptr);
+      sCreatedFirstContentProcess = true;
+    }
 
     base::ProcessId procId = base::GetProcId(handle);
     Open(mSubprocess->GetChannel(), procId);
@@ -2516,7 +2526,7 @@ void ContentParent::InitInternal(ProcessPriority aInitialPriority) {
   Endpoint<PCompositorManagerChild> compositor;
   Endpoint<PImageBridgeChild> imageBridge;
   Endpoint<PVRManagerChild> vrBridge;
-  Endpoint<PVideoDecoderManagerChild> videoManager;
+  Endpoint<PRemoteDecoderManagerChild> videoManager;
   AutoTArray<uint32_t, 3> namespaces;
 
   DebugOnly<bool> opened =
@@ -2682,7 +2692,7 @@ void ContentParent::OnCompositorUnexpectedShutdown() {
   Endpoint<PCompositorManagerChild> compositor;
   Endpoint<PImageBridgeChild> imageBridge;
   Endpoint<PVRManagerChild> vrBridge;
-  Endpoint<PVideoDecoderManagerChild> videoManager;
+  Endpoint<PRemoteDecoderManagerChild> videoManager;
   AutoTArray<uint32_t, 3> namespaces;
 
   DebugOnly<bool> opened =
@@ -2821,15 +2831,8 @@ mozilla::ipc::IPCResult ContentParent::RecvClipboardHasType(
   nsCOMPtr<nsIClipboard> clipboard(do_GetService(kCClipboardCID, &rv));
   NS_ENSURE_SUCCESS(rv, IPC_OK());
 
-  const char** typesChrs = new const char*[aTypes.Length()];
-  for (uint32_t t = 0; t < aTypes.Length(); t++) {
-    typesChrs[t] = aTypes[t].get();
-  }
+  clipboard->HasDataMatchingFlavors(aTypes, aWhichClipboard, aHasType);
 
-  clipboard->HasDataMatchingFlavors(typesChrs, aTypes.Length(), aWhichClipboard,
-                                    aHasType);
-
-  delete[] typesChrs;
   return IPC_OK();
 }
 
@@ -4423,38 +4426,13 @@ mozilla::ipc::IPCResult ContentParent::RecvRequestAnonymousTemporaryFile(
 mozilla::ipc::IPCResult ContentParent::RecvCreateAudioIPCConnection(
     CreateAudioIPCConnectionResolver&& aResolver) {
   FileDescriptor fd = CubebUtils::CreateAudioIPCConnection();
-  if (!fd.IsValid()) {
-    return IPC_FAIL(this, "CubebUtils::CreateAudioIPCConnection failed");
+  FileDescOrError result;
+  if (fd.IsValid()) {
+    result = fd;
+  } else {
+    result = NS_ERROR_FAILURE;
   }
-  aResolver(std::move(fd));
-  return IPC_OK();
-}
-
-static NS_DEFINE_CID(kFormProcessorCID, NS_FORMPROCESSOR_CID);
-
-mozilla::ipc::IPCResult ContentParent::RecvKeygenProcessValue(
-    const nsString& oldValue, const nsString& challenge,
-    const nsString& keytype, const nsString& keyparams, nsString* newValue) {
-  nsCOMPtr<nsIFormProcessor> formProcessor = do_GetService(kFormProcessorCID);
-  if (!formProcessor) {
-    newValue->Truncate();
-    return IPC_OK();
-  }
-
-  formProcessor->ProcessValueIPC(oldValue, challenge, keytype, keyparams,
-                                 *newValue);
-  return IPC_OK();
-}
-
-mozilla::ipc::IPCResult ContentParent::RecvKeygenProvideContent(
-    nsString* aAttribute, nsTArray<nsString>* aContent) {
-  nsCOMPtr<nsIFormProcessor> formProcessor = do_GetService(kFormProcessorCID);
-  if (!formProcessor) {
-    return IPC_OK();
-  }
-
-  formProcessor->ProvideContent(NS_LITERAL_STRING("SELECT"), *aContent,
-                                *aAttribute);
+  aResolver(std::move(result));
   return IPC_OK();
 }
 
@@ -5752,7 +5730,7 @@ mozilla::ipc::IPCResult ContentParent::RecvAttachBrowsingContext(
   }
 
   if (parent && !parent->IsOwnedByProcess(ChildID())) {
-    // Where trying attach a child BrowsingContext to a parent
+    // We're trying attach a child BrowsingContext to a parent
     // BrowsingContext in another process. This is illegal since the
     // only thing that could create that child BrowsingContext is a
     // parent docshell in the same process as that BrowsingContext.
@@ -5805,7 +5783,7 @@ mozilla::ipc::IPCResult ContentParent::RecvDetachBrowsingContext(
   }
 
   if (!aContext->Canonical()->IsOwnedByProcess(ChildID())) {
-    // Where trying to detach a child BrowsingContext in another child
+    // We're trying to detach a child BrowsingContext in another child
     // process. This is illegal since the owner of the BrowsingContext
     // is the proccess with the in-process docshell, which is tracked
     // by OwnerProcessId.
@@ -5835,7 +5813,7 @@ mozilla::ipc::IPCResult ContentParent::RecvCacheBrowsingContextChildren(
   }
 
   if (!aContext->Canonical()->IsOwnedByProcess(ChildID())) {
-    // Where trying to cache a child BrowsingContext in another child
+    // We're trying to cache a child BrowsingContext in another child
     // process. This is illegal since the owner of the BrowsingContext
     // is the proccess with the in-process docshell, which is tracked
     // by OwnerProcessId.
@@ -5865,7 +5843,7 @@ mozilla::ipc::IPCResult ContentParent::RecvRestoreBrowsingContextChildren(
   }
 
   if (!aContext->Canonical()->IsOwnedByProcess(ChildID())) {
-    // Where trying to cache a child BrowsingContext in another child
+    // We're trying to cache a child BrowsingContext in another child
     // process. This is illegal since the owner of the BrowsingContext
     // is the proccess with the in-process docshell, which is tracked
     // by OwnerProcessId.

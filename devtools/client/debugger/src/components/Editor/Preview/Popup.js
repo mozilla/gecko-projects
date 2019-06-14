@@ -67,11 +67,27 @@ export class Popup extends Component<Props, State> {
 
   componentDidMount() {
     this.startTimer();
+    this.addHighlightToToken();
   }
 
   componentWillUnmount() {
     if (this.timerId) {
       clearInterval(this.timerId);
+    }
+    this.removeHighlightFromToken();
+  }
+
+  addHighlightToToken() {
+    const target = this.props.preview.target;
+    if (target) {
+      target.classList.add("preview-token");
+    }
+  }
+
+  removeHighlightFromToken() {
+    const target = this.props.preview.target;
+    if (target) {
+      target.classList.remove("preview-token");
     }
   }
 

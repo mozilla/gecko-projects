@@ -175,7 +175,7 @@ ${helpers.predefined_type(
 
 <%helpers:single_keyword
     name="white-space"
-    values="normal pre nowrap pre-wrap pre-line"
+    values="normal pre nowrap pre-wrap pre-line break-spaces"
     extra_gecko_values="-moz-pre-space"
     gecko_enum_prefix="StyleWhiteSpace"
     needs_conversion="True"
@@ -193,7 +193,8 @@ ${helpers.predefined_type(
                 SpecifiedValue::Pre => false,
                 SpecifiedValue::Normal |
                 SpecifiedValue::PreWrap |
-                SpecifiedValue::PreLine => true,
+                SpecifiedValue::PreLine |
+                SpecifiedValue::BreakSpaces => true,
             }
         }
 
@@ -203,7 +204,8 @@ ${helpers.predefined_type(
                 SpecifiedValue::Nowrap => false,
                 SpecifiedValue::Pre |
                 SpecifiedValue::PreWrap |
-                SpecifiedValue::PreLine => true,
+                SpecifiedValue::PreLine |
+                SpecifiedValue::BreakSpaces => true,
             }
         }
 
@@ -213,7 +215,8 @@ ${helpers.predefined_type(
                 SpecifiedValue::Nowrap |
                 SpecifiedValue::PreLine => false,
                 SpecifiedValue::Pre |
-                SpecifiedValue::PreWrap => true,
+                SpecifiedValue::PreWrap |
+                SpecifiedValue::BreakSpaces => true,
             }
         }
     }
@@ -291,7 +294,6 @@ ${helpers.predefined_type(
     "Color",
     "computed_value::T::currentcolor()",
     products="gecko",
-    gecko_pref="layout.css.prefixes.webkit",
     animation_value_type="AnimatedColor",
     ignored_when_colors_disabled=True,
     flags="APPLIES_TO_FIRST_LETTER APPLIES_TO_FIRST_LINE APPLIES_TO_PLACEHOLDER",
@@ -306,7 +308,6 @@ ${helpers.predefined_type(
     products="gecko",
     animation_value_type="AnimatedColor",
     ignored_when_colors_disabled=True,
-    gecko_pref="layout.css.prefixes.webkit",
     flags="APPLIES_TO_FIRST_LETTER APPLIES_TO_FIRST_LINE APPLIES_TO_PLACEHOLDER",
     spec="https://compat.spec.whatwg.org/#the-webkit-text-stroke-color",
 )}
@@ -318,7 +319,6 @@ ${helpers.predefined_type(
     initial_specified_value="specified::BorderSideWidth::zero()",
     computed_type="crate::values::computed::NonNegativeLength",
     products="gecko",
-    gecko_pref="layout.css.prefixes.webkit",
     flags="APPLIES_TO_FIRST_LETTER APPLIES_TO_FIRST_LINE APPLIES_TO_PLACEHOLDER",
     spec="https://compat.spec.whatwg.org/#the-webkit-text-stroke-width",
     animation_value_type="discrete",

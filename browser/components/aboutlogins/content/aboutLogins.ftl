@@ -20,9 +20,15 @@ login-filter =
 login-list =
   .count =
     { $count ->
-        [one] { $count } entry
-       *[other] { $count } entries
+        [one] { $count } login
+       *[other] { $count } logins
     }
+  .last-changed-option = Last Changed
+  .last-used-option = Last Used
+  .name-option = Name
+  .new-login-subtitle = Enter your login credentials
+  .new-login-title = New Login
+  .sort-label-text = Sort by:
 
 login-item =
   .cancel-button = Cancel
@@ -35,7 +41,7 @@ login-item =
   .field-required-symbol = *
   .modal-input-reveal-checkbox-hide = Hide password
   .modal-input-reveal-checkbox-show = Show password
-  .new-login-title = New Entry
+  .new-login-title = Create New Login
   .open-site-button = Launch
   .origin-label = Website Address
   .password-label = Password
@@ -50,3 +56,11 @@ master-password-notification-message = Please enter your master password to view
 master-password-reload-button-label = Log in
 # TODO: Not sure how to use formatValue with these as attributes on a single ID
 master-password-reload-button-accesskey = L
+
+menu-button =
+  .button-title = Open menu
+  .menuitem-preferences =
+    { PLATFORM() ->
+        [windows] Options
+       *[other] Preferences
+    }

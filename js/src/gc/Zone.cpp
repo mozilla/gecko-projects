@@ -32,17 +32,26 @@ using namespace js::gc;
 Zone* const Zone::NotOnList = reinterpret_cast<Zone*>(1);
 
 ZoneAllocator::ZoneAllocator(JSRuntime* rt)
-    : JS::shadow::Zone(rt, &rt->gc.marker), zoneSize(&rt->gc.heapSize) {
+    : JS::shadow::Zone(rt, &rt->gc.marker),
+      zoneSize(&rt->gc.heapSize),
+      gcMallocBytes(nullptr) {
   AutoLockGC lock(rt);
   threshold.updateAfterGC(8192, GC_NORMAL, rt->gc.tunables,
                           rt->gc.schedulingState, lock);
+  gcMallocThreshold.updateAfterGC(8192, rt->gc.tunables, rt->gc.schedulingState,
+                                  lock);
   setGCMaxMallocBytes(rt->gc.tunables.maxMallocBytes(), lock);
   jitCodeCounter.setMax(jit::MaxCodeBytesPerProcess * 0.8, lock);
 }
 
 ZoneAllocator::~ZoneAllocator() {
-  MOZ_ASSERT_IF(runtimeFromAnyThread()->gc.shutdownCollectedEverything(),
-                gcMallocBytes == 0);
+#ifdef DEBUG
+  if (runtimeFromAnyThread()->gc.shutdownCollectedEverything()) {
+    gcMallocTracker.checkEmptyOnDestroy();
+    MOZ_ASSERT(zoneSize.gcBytes() == 0);
+    MOZ_ASSERT(gcMallocBytes.gcBytes() == 0);
+  }
+#endif
 }
 
 void ZoneAllocator::fixupAfterMovingGC() {
@@ -61,6 +70,14 @@ void js::ZoneAllocator::updateAllGCMallocCountersOnGCEnd(
   auto& gc = runtimeFromAnyThread()->gc;
   gcMallocCounter.updateOnGCEnd(gc.tunables, lock);
   jitCodeCounter.updateOnGCEnd(gc.tunables, lock);
+}
+
+void js::ZoneAllocator::updateAllGCThresholds(GCRuntime& gc,
+                                              const js::AutoLockGC& lock) {
+  threshold.updateAfterGC(zoneSize.gcBytes(), GC_NORMAL, gc.tunables,
+                          gc.schedulingState, lock);
+  gcMallocThreshold.updateAfterGC(gcMallocBytes.gcBytes(), gc.tunables,
+                                  gc.schedulingState, lock);
 }
 
 js::gc::TriggerKind js::ZoneAllocator::shouldTriggerGCForTooMuchMalloc() {
@@ -399,13 +416,6 @@ void Zone::discardJitCode(FreeOp* fop,
   jitZone()->cfgSpace()->lifoAlloc().freeAll();
 }
 
-void JS::Zone::delegatePreWriteBarrierInternal(JSObject* obj,
-                                               JSObject* delegate) {
-  MOZ_ASSERT(js::WeakMapBase::getDelegate(obj) == delegate);
-  MOZ_ASSERT(needsIncrementalBarrier());
-  GCMarker::fromTracer(barrierTracer())->severWeakDelegate(obj, delegate);
-}
-
 #ifdef JSGC_HASH_TABLE_CHECKS
 void JS::Zone::checkUniqueIdTableAfterMovingGC() {
   for (auto r = uniqueIds().all(); !r.empty(); r.popFront()) {
@@ -665,12 +675,7 @@ static const char* MemoryUseName(MemoryUse use) {
 
 MemoryTracker::MemoryTracker() : mutex(mutexid::MemoryTracker) {}
 
-MemoryTracker::~MemoryTracker() {
-  if (!TlsContext.get()->runtime()->gc.shutdownCollectedEverything()) {
-    // Memory leak, suppress crashes.
-    return;
-  }
-
+void MemoryTracker::checkEmptyOnDestroy() {
   bool ok = true;
 
   if (!map.empty()) {

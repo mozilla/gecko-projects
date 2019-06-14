@@ -20,7 +20,6 @@
 #include "mozilla/dom/ContentFrameMessageManager.h"
 #include "mozilla/dom/DocumentInlines.h"
 #include "mozilla/dom/DOMJSProxyHandler.h"
-#include "mozilla/dom/DOMPrefs.h"
 #include "mozilla/dom/EventTarget.h"
 #include "mozilla/dom/LocalStorage.h"
 #include "mozilla/dom/LocalStorageCommon.h"
@@ -261,6 +260,7 @@
 #include "mozilla/dom/ClientState.h"
 
 #include "mozilla/dom/WindowGlobalChild.h"
+#include "mozilla/dom/BrowserChild.h"
 
 #include "mozilla/net/CookieSettings.h"
 
@@ -1051,6 +1051,8 @@ nsGlobalWindowInner::~nsGlobalWindowInner() {
 
   nsCOMPtr<nsIDeviceSensors> ac = do_GetService(NS_DEVICE_SENSORS_CONTRACTID);
   if (ac) ac->RemoveWindowAsListener(this);
+
+  mDeprioritizedLoadRunner.clear();
 
   nsLayoutStatics::Release();
 }
@@ -1917,6 +1919,62 @@ bool nsGlobalWindowInner::DialogsAreBeingAbused() {
   return false;
 }
 
+void nsGlobalWindowInner::FireFrameLoadEvent(bool aIsTrusted) {
+  // If we're not in a content frame, or are at a BrowsingContext tree boundary,
+  // such as the content-chrome boundary, don't fire the "load" event.
+  if (GetBrowsingContext()->IsTopContent() ||
+      GetBrowsingContext()->IsChrome()) {
+    return;
+  }
+
+  // If embedder is same-process, fire the event on our embedder element.
+  //
+  // XXX: Bug 1440212 is looking into potentially changing this behaviour to act
+  // more like the remote case when in-process.
+  RefPtr<Element> element = GetBrowsingContext()->GetEmbedderElement();
+  if (element) {
+    nsEventStatus status = nsEventStatus_eIgnore;
+    WidgetEvent event(aIsTrusted, eLoad);
+    event.mFlags.mBubbles = false;
+    event.mFlags.mCancelable = false;
+
+    if (mozilla::dom::DocGroup::TryToLoadIframesInBackground()) {
+      nsDocShell* ds = nsDocShell::Cast(GetDocShell());
+
+      if (ds && !ds->HasFakeOnLoadDispatched()) {
+        EventDispatcher::Dispatch(element, nullptr, &event, nullptr, &status);
+      }
+    } else {
+      // Most of the time we could get a pres context to pass in here,
+      // but not always (i.e. if this window is not shown there won't
+      // be a pres context available). Since we're not firing a GUI
+      // event we don't need a pres context anyway so we just pass
+      // null as the pres context all the time here.
+      EventDispatcher::Dispatch(element, nullptr, &event, nullptr, &status);
+    }
+    return;
+  }
+
+  // We don't have an in-process embedder. Try to get our `BrowserChild` actor
+  // to send a message to that embedder. We want to double-check that our outer
+  // window is actually the one at the root of this browserChild though, just in
+  // case.
+  RefPtr<BrowserChild> browserChild =
+      BrowserChild::GetFrom(static_cast<nsPIDOMWindowInner*>(this));
+  if (browserChild) {
+    // Double-check that our outer window is actually at the root of this
+    // `BrowserChild`, in case we're in an odd maybe-unhosted situation like a
+    // print preview dialog.
+    nsCOMPtr<nsPIDOMWindowOuter> rootOuter =
+        do_GetInterface(browserChild->WebNavigation());
+    if (!rootOuter || rootOuter != GetOuterWindow()) {
+      return;
+    }
+
+    mozilla::Unused << browserChild->SendFireFrameLoadEvent(aIsTrusted);
+  }
+}
+
 nsresult nsGlobalWindowInner::PostHandleEvent(EventChainPostVisitor& aVisitor) {
   // Return early if there is nothing to do.
   switch (aVisitor.mEvent->mMessage) {
@@ -1977,25 +2035,7 @@ nsresult nsGlobalWindowInner::PostHandleEvent(EventChainPostVisitor& aVisitor) {
 
     mTimeoutManager->OnDocumentLoaded();
 
-    nsCOMPtr<Element> element = GetOuterWindow()->GetFrameElementInternal();
-    nsIDocShell* docShell = GetDocShell();
-    if (element && GetParentInternal() && docShell &&
-        docShell->ItemType() != nsIDocShellTreeItem::typeChrome) {
-      // If we're not in chrome, or at a chrome boundary, fire the
-      // onload event for the frame element.
-
-      nsEventStatus status = nsEventStatus_eIgnore;
-      WidgetEvent event(aVisitor.mEvent->IsTrusted(), eLoad);
-      event.mFlags.mBubbles = false;
-      event.mFlags.mCancelable = false;
-
-      // Most of the time we could get a pres context to pass in here,
-      // but not always (i.e. if this window is not shown there won't
-      // be a pres context available). Since we're not firing a GUI
-      // event we don't need a pres context anyway so we just pass
-      // null as the pres context all the time here.
-      EventDispatcher::Dispatch(element, nullptr, &event, nullptr, &status);
-    }
+    FireFrameLoadEvent(aVisitor.mEvent->IsTrusted());
 
     if (mVREventObserver) {
       mVREventObserver->NotifyAfterLoad();
@@ -2508,7 +2548,7 @@ void nsPIDOMWindowInner::SetAudioCapture(bool aCapture) {
   }
 }
 
-void nsPIDOMWindowInner::SetActiveLoadingState(bool aIsLoading) {
+void nsGlobalWindowInner::SetActiveLoadingState(bool aIsLoading) {
   if (StaticPrefs::dom_separate_event_queue_for_post_message_enabled()) {
     if (!aIsLoading) {
       Document* doc = GetExtantDoc();
@@ -2526,15 +2566,33 @@ void nsPIDOMWindowInner::SetActiveLoadingState(bool aIsLoading) {
   }
 
   if (!aIsLoading) {
-    for (uint32_t i = 0; i < mAfterLoadRunners.Length(); ++i) {
-      NS_DispatchToCurrentThread(mAfterLoadRunners[i].forget());
+    while (!mDeprioritizedLoadRunner.isEmpty()) {
+      nsCOMPtr<nsIRunnable> runner = mDeprioritizedLoadRunner.popFirst();
+      NS_DispatchToCurrentThread(runner.forget());
     }
-    mAfterLoadRunners.Clear();
   }
 }
 
-void nsPIDOMWindowInner::AddAfterLoadRunner(nsIRunnable* aRunner) {
-  mAfterLoadRunners.AppendElement(aRunner);
+nsPIDOMWindowInner* nsPIDOMWindowInner::GetWindowForDeprioritizedLoadRunner() {
+  Document* doc = GetExtantDoc();
+  if (!doc) {
+    return nullptr;
+  }
+  doc = doc->GetTopLevelContentDocument();
+  if (!doc || (doc->GetReadyStateEnum() <= Document::READYSTATE_UNINITIALIZED ||
+               doc->GetReadyStateEnum() >= Document::READYSTATE_COMPLETE)) {
+    return nullptr;
+  }
+
+  return doc->GetInnerWindow();
+}
+
+void nsGlobalWindowInner::AddDeprioritizedLoadRunner(nsIRunnable* aRunner) {
+  MOZ_ASSERT(GetWindowForDeprioritizedLoadRunner() == this);
+  RefPtr<DeprioritizedLoadRunner> runner = new DeprioritizedLoadRunner(aRunner);
+  mDeprioritizedLoadRunner.insertBack(runner);
+  NS_DispatchToCurrentThreadQueue(runner.forget(), 5000,
+                                  EventQueuePriority::Idle);
 }
 
 // nsISpeechSynthesisGetter
@@ -3373,7 +3431,7 @@ bool nsGlobalWindowInner::GetFullScreen() {
 }
 
 void nsGlobalWindowInner::Dump(const nsAString& aStr) {
-  if (!DOMPrefs::DumpEnabled()) {
+  if (!nsJSUtils::DumpEnabled()) {
     return;
   }
 
@@ -4479,13 +4537,15 @@ Storage* nsGlobalWindowInner::GetLocalStorage(ErrorResult& aError) {
   }
 
   // Note that this behavior is observable: if we grant storage permission to a
-  // tracker, we pass from the partitioned LocalStorage to the 'normal'
-  // LocalStorage. The previous data is lost and the 2 window.localStorage
-  // objects, before and after the permission granted, will be different.
+  // tracker, we pass from the partitioned LocalStorage (or a partitioned cookie
+  // jar) to the 'normal' one. The previous data is lost and the 2
+  // window.localStorage objects, before and after the permission granted, will
+  // be different.
   if ((StoragePartitioningEnabled(access, cookieSettings) ||
        !ShouldPartitionStorage(access)) &&
       (!mLocalStorage ||
-       mLocalStorage->Type() == Storage::ePartitionedLocalStorage)) {
+       mLocalStorage->Type() == Storage::ePartitionedLocalStorage ||
+       mLocalStorage->StoragePrincipal() != GetEffectiveStoragePrincipal())) {
     RefPtr<Storage> storage;
 
     if (NextGenLocalStorageEnabled()) {
@@ -4746,9 +4806,9 @@ nsGlobalWindowInner::ShowSlowScriptDialog(JSContext* aCx,
       addonName = aAddonId;
     }
 
-    const char16_t* params[] = {addonName.get(), appName.get()};
     rv = nsContentUtils::FormatLocalizedString(
-        nsContentUtils::eDOM_PROPERTIES, "KillAddonScriptMessage", params, msg);
+        msg, nsContentUtils::eDOM_PROPERTIES, "KillAddonScriptMessage",
+        addonName, appName);
 
     failed = failed || NS_FAILED(rv);
   } else {
@@ -4800,10 +4860,9 @@ nsGlobalWindowInner::ShowSlowScriptDialog(JSContext* aCx,
       // Insert U+2026 HORIZONTAL ELLIPSIS
       filenameUTF16.ReplaceLiteral(cutStart, cutLength, u"\x2026");
     }
-    const char16_t* formatParams[] = {filenameUTF16.get()};
-    rv = nsContentUtils::FormatLocalizedString(nsContentUtils::eDOM_PROPERTIES,
-                                               "KillScriptLocation",
-                                               formatParams, scriptLocation);
+    rv = nsContentUtils::FormatLocalizedString(
+        scriptLocation, nsContentUtils::eDOM_PROPERTIES, "KillScriptLocation",
+        filenameUTF16);
 
     if (NS_SUCCEEDED(rv)) {
       msg.AppendLiteral("\n\n");
@@ -6963,8 +7022,7 @@ void nsGlobalWindowInner::StorageAccessGranted() {
   // If we have a partitioned localStorage, it's time to replace it with a real
   // one in order to receive notifications.
 
-  if (mLocalStorage &&
-      mLocalStorage->Type() == Storage::ePartitionedLocalStorage) {
+  if (mLocalStorage) {
     IgnoredErrorResult error;
     GetLocalStorage(error);
     if (NS_WARN_IF(error.Failed())) {
@@ -7082,6 +7140,7 @@ nsPIDOMWindowInner::nsPIDOMWindowInner(nsPIDOMWindowOuter* aOuterWindow)
       mNumOfOpenWebSockets(0),
       mEvent(nullptr) {
   MOZ_ASSERT(aOuterWindow);
+  mBrowsingContext = aOuterWindow->GetBrowsingContext();
 }
 
 void nsPIDOMWindowInner::RegisterReportingObserver(ReportingObserver* aObserver,

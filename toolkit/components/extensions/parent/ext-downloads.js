@@ -589,13 +589,13 @@ this.downloads = class extends ExtensionAPI {
               download = dl;
               return DownloadMap.getDownloadList();
             }).then(list => {
+              const item = DownloadMap.newFromDownload(download, extension);
               list.add(download);
 
               // This is necessary to make pause/resume work.
               download.tryToKeepPartialData = true;
               download.start();
 
-              const item = DownloadMap.newFromDownload(download, extension);
               return item.id;
             });
         },
@@ -738,8 +738,8 @@ this.downloads = class extends ExtensionAPI {
 
             return new Promise((resolve, reject) => {
               let chromeWebNav = Services.appShell.createWindowlessBrowser(true);
-              chromeWebNav.docShell
-                .createAboutBlankContentViewer(Services.scriptSecurityManager.getSystemPrincipal());
+              let system = Services.scriptSecurityManager.getSystemPrincipal();
+              chromeWebNav.docShell.createAboutBlankContentViewer(system, system);
 
               let img = chromeWebNav.document.createElement("img");
               img.width = size;

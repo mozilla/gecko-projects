@@ -1002,12 +1002,10 @@ void CompositorBridgeParent::CompositeToTarget(VsyncId aId, DrawTarget* aTarget,
 
   RenderTraceLayers(mLayerManager->GetRoot(), "0000");
 
-#ifdef MOZ_DUMP_PAINTING
-  if (StaticPrefs::DumpHostLayers()) {
+  if (StaticPrefs::DumpHostLayers() || StaticPrefs::LayersDump()) {
     printf_stderr("Painting --- compositing layer tree:\n");
     mLayerManager->Dump(/* aSorted = */ true);
   }
-#endif
   mLayerManager->SetDebugOverlayWantsNextFrame(false);
   mLayerManager->EndTransaction(time);
 
@@ -1871,7 +1869,7 @@ Maybe<TimeStamp> CompositorBridgeParent::GetTestingTimeStamp() const {
   return mTestTime;
 }
 
-static void EraseLayerState(LayersId aId) {
+void EraseLayerState(LayersId aId) {
   RefPtr<APZUpdater> apz;
 
   {  // scope lock
@@ -2189,8 +2187,8 @@ void CompositorBridgeParent::InvalidateRemoteLayers() {
   });
 }
 
-static void UpdateIndirectTree(LayersId aId, Layer* aRoot,
-                               const TargetConfig& aTargetConfig) {
+void UpdateIndirectTree(LayersId aId, Layer* aRoot,
+                        const TargetConfig& aTargetConfig) {
   MonitorAutoLock lock(*sIndirectLayerTreesLock);
   sIndirectLayerTrees[aId].mRoot = aRoot;
   sIndirectLayerTrees[aId].mTargetConfig = aTargetConfig;
@@ -2281,6 +2279,11 @@ PTextureParent* CompositorBridgeParent::AllocPTextureParent(
 
 bool CompositorBridgeParent::DeallocPTextureParent(PTextureParent* actor) {
   return TextureHost::DestroyIPDLActor(actor);
+}
+
+mozilla::ipc::IPCResult CompositorBridgeParent::RecvInitPCanvasParent(
+    Endpoint<PCanvasParent>&& aEndpoint) {
+  MOZ_CRASH("PCanvasParent shouldn't be created via CompositorBridgeParent.");
 }
 
 bool CompositorBridgeParent::IsSameProcess() const {

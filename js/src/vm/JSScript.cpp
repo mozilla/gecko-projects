@@ -554,7 +554,7 @@ XDRResult js::PrivateScriptData::XDR(XDRState<mode>* xdr, HandleScript script,
                                      HandleScope scriptEnclosingScope,
                                      HandleFunction fun) {
   uint32_t nscopes = 0;
-  uint32_t nconsts = 0;
+  uint32_t nbigints = 0;
   uint32_t nobjects = 0;
   uint32_t ntrynotes = 0;
   uint32_t nscopenotes = 0;
@@ -567,8 +567,8 @@ XDRResult js::PrivateScriptData::XDR(XDRState<mode>* xdr, HandleScript script,
     data = script->data_;
 
     nscopes = data->scopes().size();
-    if (data->hasConsts()) {
-      nconsts = data->consts().size();
+    if (data->hasBigInts()) {
+      nbigints = data->bigints().size();
     }
     if (data->hasObjects()) {
       nobjects = data->objects().size();
@@ -585,14 +585,14 @@ XDRResult js::PrivateScriptData::XDR(XDRState<mode>* xdr, HandleScript script,
   }
 
   MOZ_TRY(xdr->codeUint32(&nscopes));
-  MOZ_TRY(xdr->codeUint32(&nconsts));
+  MOZ_TRY(xdr->codeUint32(&nbigints));
   MOZ_TRY(xdr->codeUint32(&nobjects));
   MOZ_TRY(xdr->codeUint32(&ntrynotes));
   MOZ_TRY(xdr->codeUint32(&nscopenotes));
   MOZ_TRY(xdr->codeUint32(&nresumeoffsets));
 
   if (mode == XDR_DECODE) {
-    if (!JSScript::createPrivateScriptData(cx, script, nscopes, nconsts,
+    if (!JSScript::createPrivateScriptData(cx, script, nscopes, nbigints,
                                            nobjects, ntrynotes, nscopenotes,
                                            nresumeoffsets)) {
       return xdr->fail(JS::TranscodeResult_Throw);
@@ -601,15 +601,15 @@ XDRResult js::PrivateScriptData::XDR(XDRState<mode>* xdr, HandleScript script,
     data = script->data_;
   }
 
-  if (nconsts) {
-    RootedValue val(cx);
-    for (GCPtrValue& elem : data->consts()) {
+  if (nbigints > 0) {
+    RootedBigInt bi(cx);
+    for (GCPtrBigInt& elem : data->bigints()) {
       if (mode == XDR_ENCODE) {
-        val = elem.get();
+        bi = elem.get();
       }
-      MOZ_TRY(XDRScriptConst(xdr, &val));
+      MOZ_TRY(XDRBigInt(xdr, &bi));
       if (mode == XDR_DECODE) {
-        elem.init(val);
+        elem.init(bi);
       }
     }
   }
@@ -1650,23 +1650,20 @@ class ScriptSource::LoadSourceMatcher {
   explicit LoadSourceMatcher(JSContext* cx, ScriptSource* ss, bool* loaded)
       : cx_(cx), ss_(ss), loaded_(loaded) {}
 
-  template <typename Unit>
-  bool operator()(const Compressed<Unit>&) const {
+  template <typename Unit, SourceRetrievable CanRetrieve>
+  bool operator()(const Compressed<Unit, CanRetrieve>&) const {
     *loaded_ = true;
     return true;
   }
 
-  template <typename Unit>
-  bool operator()(const Uncompressed<Unit>&) const {
+  template <typename Unit, SourceRetrievable CanRetrieve>
+  bool operator()(const Uncompressed<Unit, CanRetrieve>&) const {
     *loaded_ = true;
     return true;
   }
 
   template <typename Unit>
   bool operator()(const Retrievable<Unit>&) {
-    MOZ_ASSERT(ss_->sourceRetrievable(),
-               "should be retrievable if Retrievable");
-
     if (!cx_->runtime()->sourceHook.ref()) {
       *loaded_ = false;
       return true;
@@ -1685,15 +1682,11 @@ class ScriptSource::LoadSourceMatcher {
   }
 
   bool operator()(const Missing&) const {
-    MOZ_ASSERT(!ss_->sourceRetrievable(),
-               "should have Retrievable<Unit> source, not Missing source, if "
-               "retrievable");
     *loaded_ = false;
     return true;
   }
 
   bool operator()(const BinAST&) const {
-    MOZ_ASSERT(!ss_->sourceRetrievable(), "binast source is never retrievable");
     *loaded_ = false;
     return true;
   }
@@ -1777,7 +1770,7 @@ template <typename Unit>
 const Unit* UncompressedSourceCache::lookup(const ScriptSourceChunk& ssc,
                                             AutoHoldEntry& holder) {
   MOZ_ASSERT(!holder_);
-  MOZ_ASSERT(ssc.ss->compressedSourceIs<Unit>());
+  MOZ_ASSERT(ssc.ss->isCompressed<Unit>());
 
   if (!map_) {
     return nullptr;
@@ -1841,7 +1834,7 @@ template <typename Unit>
 const Unit* ScriptSource::chunkUnits(
     JSContext* cx, UncompressedSourceCache::AutoHoldEntry& holder,
     size_t chunk) {
-  const Compressed<Unit>& c = data.as<Compressed<Unit>>();
+  const CompressedData<Unit>& c = *compressedData<Unit>();
 
   ScriptSourceChunk ssc(this, chunk);
   if (const Unit* decompressed =
@@ -1879,18 +1872,33 @@ const Unit* ScriptSource::chunkUnits(
 }
 
 template <typename Unit>
-void ScriptSource::movePendingCompressedSource() {
+void ScriptSource::convertToCompressedSource(SharedImmutableString compressed,
+                                             size_t uncompressedLength) {
+  MOZ_ASSERT(isUncompressed<Unit>());
+  MOZ_ASSERT(uncompressedData<Unit>()->length() == uncompressedLength);
+
+  if (data.is<Uncompressed<Unit, SourceRetrievable::Yes>>()) {
+    data = SourceType(Compressed<Unit, SourceRetrievable::Yes>(
+        std::move(compressed), uncompressedLength));
+  } else {
+    data = SourceType(Compressed<Unit, SourceRetrievable::No>(
+        std::move(compressed), uncompressedLength));
+  }
+}
+
+template <typename Unit>
+void ScriptSource::performDelayedConvertToCompressedSource() {
+  // There might not be a conversion to compressed source happening at all.
   if (pendingCompressed_.empty()) {
     return;
   }
 
-  Compressed<Unit>& pending = pendingCompressed_.ref<Compressed<Unit>>();
+  CompressedData<Unit>& pending =
+      pendingCompressed_.ref<CompressedData<Unit>>();
 
-  MOZ_ASSERT(!hasCompressedSource());
-  MOZ_ASSERT_IF(hasUncompressedSource(),
-                pending.uncompressedLength == length());
+  convertToCompressedSource<Unit>(std::move(pending.raw),
+                                  pending.uncompressedLength);
 
-  data = SourceType(std::move(pending));
   pendingCompressed_.destroy();
 }
 
@@ -1900,7 +1908,7 @@ ScriptSource::PinnedUnits<Unit>::~PinnedUnits() {
     MOZ_ASSERT(*stack_ == this);
     *stack_ = prev_;
     if (!prev_) {
-      source_->movePendingCompressedSource<Unit>();
+      source_->performDelayedConvertToCompressedSource<Unit>();
     }
   }
 }
@@ -1912,8 +1920,8 @@ const Unit* ScriptSource::units(JSContext* cx,
   MOZ_ASSERT(begin <= length());
   MOZ_ASSERT(begin + len <= length());
 
-  if (data.is<Uncompressed<Unit>>()) {
-    const Unit* units = data.as<Uncompressed<Unit>>().units();
+  if (isUncompressed<Unit>()) {
+    const Unit* units = uncompressedData<Unit>()->units();
     if (!units) {
       return nullptr;
     }
@@ -1928,7 +1936,7 @@ const Unit* ScriptSource::units(JSContext* cx,
     MOZ_CRASH("ScriptSource::units() on ScriptSource with retrievable source");
   }
 
-  MOZ_ASSERT(data.is<Compressed<Unit>>());
+  MOZ_ASSERT(isCompressed<Unit>());
 
   // Determine first/last chunks, the offset (in bytes) into the first chunk
   // of the requested units, and the number of bytes in the last chunk.
@@ -2130,7 +2138,8 @@ JSFlatString* ScriptSource::functionBodyString(JSContext* cx) {
 
 template <typename Unit>
 MOZ_MUST_USE bool ScriptSource::setUncompressedSourceHelper(
-    JSContext* cx, EntryUnits<Unit>&& source, size_t length) {
+    JSContext* cx, EntryUnits<Unit>&& source, size_t length,
+    SourceRetrievable retrievable) {
   auto& cache = cx->zone()->runtimeFromAnyThread()->sharedImmutableStrings();
 
   auto uniqueChars = SourceTypeTraits<Unit>::toCacheable(std::move(source));
@@ -2140,7 +2149,13 @@ MOZ_MUST_USE bool ScriptSource::setUncompressedSourceHelper(
     return false;
   }
 
-  data = SourceType(Uncompressed<Unit>(std::move(*deduped)));
+  if (retrievable == SourceRetrievable::Yes) {
+    data = SourceType(
+        Uncompressed<Unit, SourceRetrievable::Yes>(std::move(*deduped)));
+  } else {
+    data = SourceType(
+        Uncompressed<Unit, SourceRetrievable::No>(std::move(*deduped)));
+  }
   return true;
 }
 
@@ -2148,11 +2163,11 @@ template <typename Unit>
 MOZ_MUST_USE bool ScriptSource::setRetrievedSource(JSContext* cx,
                                                    EntryUnits<Unit>&& source,
                                                    size_t length) {
-  MOZ_ASSERT(sourceRetrievable_);
   MOZ_ASSERT(data.is<Retrievable<Unit>>(),
              "retrieved source can only overwrite the corresponding "
              "retrievable source");
-  return setUncompressedSourceHelper(cx, std::move(source), length);
+  return setUncompressedSourceHelper(cx, std::move(source), length,
+                                     SourceRetrievable::Yes);
 }
 
 #if defined(JS_BUILD_BINAST)
@@ -2226,25 +2241,31 @@ bool ScriptSource::tryCompressOffThread(JSContext* cx) {
 }
 
 template <typename Unit>
-void ScriptSource::convertToCompressedSource(SharedImmutableString compressed,
-                                             size_t uncompressedLength) {
-  MOZ_ASSERT(data.is<Uncompressed<Unit>>(),
-             "should only be converting uncompressed source to compressed "
-             "source identically encoded");
-  MOZ_ASSERT(length() == uncompressedLength);
+void ScriptSource::triggerConvertToCompressedSource(
+    SharedImmutableString compressed, size_t uncompressedLength) {
+  MOZ_ASSERT(isUncompressed<Unit>(),
+             "should only be triggering compressed source installation to "
+             "overwrite identically-encoded uncompressed source");
+  MOZ_ASSERT(uncompressedData<Unit>()->length() == uncompressedLength);
 
-  if (pinnedUnitsStack_) {
-    MOZ_ASSERT(pendingCompressed_.empty());
-    pendingCompressed_.construct<Compressed<Unit>>(std::move(compressed),
-                                                   uncompressedLength);
-  } else {
-    data =
-        SourceType(Compressed<Unit>(std::move(compressed), uncompressedLength));
+  // If units aren't pinned -- and they probably won't be, we'd have to have a
+  // GC in the small window of time where a |PinnedUnits| was live -- then we
+  // can immediately convert.
+  if (MOZ_LIKELY(!pinnedUnitsStack_)) {
+    convertToCompressedSource<Unit>(std::move(compressed), uncompressedLength);
+    return;
   }
+
+  // Otherwise, set aside the compressed-data info.  The conversion is performed
+  // when the last |PinnedUnits| dies.
+  MOZ_ASSERT(pendingCompressed_.empty(),
+             "shouldn't be multiple conversions happening");
+  pendingCompressed_.construct<CompressedData<Unit>>(std::move(compressed),
+                                                     uncompressedLength);
 }
 
 template <typename Unit>
-MOZ_MUST_USE bool ScriptSource::initializeWithCompressedSource(
+MOZ_MUST_USE bool ScriptSource::initializeWithUnretrievableCompressedSource(
     JSContext* cx, UniqueChars&& compressed, size_t rawLength,
     size_t sourceLength) {
   MOZ_ASSERT(data.is<Missing>(), "shouldn't be double-initializing");
@@ -2261,7 +2282,9 @@ MOZ_MUST_USE bool ScriptSource::initializeWithCompressedSource(
              "shouldn't be initializing a ScriptSource while its characters "
              "are pinned -- that only makes sense with a ScriptSource actively "
              "being inspected");
-  data = SourceType(Compressed<Unit>(std::move(*deduped), sourceLength));
+
+  data = SourceType(Compressed<Unit, SourceRetrievable::No>(std::move(*deduped),
+                                                            sourceLength));
 
   return true;
 }
@@ -2278,7 +2301,6 @@ bool ScriptSource::assignSource(JSContext* cx,
   }
 
   if (options.sourceIsLazy) {
-    sourceRetrievable_ = true;
     data = SourceType(Retrievable<Unit>());
     return true;
   }
@@ -2296,7 +2318,8 @@ bool ScriptSource::assignSource(JSContext* cx,
     return false;
   }
 
-  data = SourceType(Uncompressed<Unit>(std::move(*deduped)));
+  data = SourceType(
+      Uncompressed<Unit, SourceRetrievable::No>(std::move(*deduped)));
   return true;
 }
 
@@ -2334,7 +2357,7 @@ static MOZ_MUST_USE bool reallocUniquePtr(UniqueChars& unique, size_t size) {
 template <typename Unit>
 void SourceCompressionTask::workEncodingSpecific() {
   ScriptSource* source = sourceHolder_.get();
-  MOZ_ASSERT(source->data.is<ScriptSource::Uncompressed<Unit>>());
+  MOZ_ASSERT(source->isUncompressed<Unit>());
 
   // Try to keep the maximum memory usage down by only allocating half the
   // size of the string, first.
@@ -2345,8 +2368,7 @@ void SourceCompressionTask::workEncodingSpecific() {
     return;
   }
 
-  const Unit* chars =
-      source->data.as<ScriptSource::Uncompressed<Unit>>().units();
+  const Unit* chars = source->uncompressedData<Unit>()->units();
   Compressor comp(reinterpret_cast<const unsigned char*>(chars), inputBytes);
   if (!comp.init()) {
     return;
@@ -2410,8 +2432,8 @@ struct SourceCompressionTask::PerformTaskWork {
 
   explicit PerformTaskWork(SourceCompressionTask* task) : task_(task) {}
 
-  template <typename Unit>
-  void operator()(const ScriptSource::Uncompressed<Unit>&) {
+  template <typename Unit, SourceRetrievable CanRetrieve>
+  void operator()(const ScriptSource::Uncompressed<Unit, CanRetrieve>&) {
     task_->workEncodingSpecific<Unit>();
   }
 
@@ -2439,15 +2461,15 @@ void SourceCompressionTask::runTask() {
   source->performTaskWork(this);
 }
 
-void ScriptSource::convertToCompressedSourceFromTask(
+void ScriptSource::triggerConvertToCompressedSourceFromTask(
     SharedImmutableString compressed) {
-  data.match(ConvertToCompressedSourceFromTask(this, compressed));
+  data.match(TriggerConvertToCompressedSourceFromTask(this, compressed));
 }
 
 void SourceCompressionTask::complete() {
   if (!shouldCancel() && resultString_.isSome()) {
     ScriptSource* source = sourceHolder_.get();
-    source->convertToCompressedSourceFromTask(std::move(*resultString_));
+    source->triggerConvertToCompressedSourceFromTask(std::move(*resultString_));
   }
 }
 
@@ -2524,21 +2546,23 @@ bool ScriptSource::xdrFinalizeEncoder(JS::TranscodeBuffer& buffer) {
 }
 
 template <typename Unit>
-MOZ_MUST_USE bool ScriptSource::initializeUncompressedSource(
+MOZ_MUST_USE bool ScriptSource::initializeUnretrievableUncompressedSource(
     JSContext* cx, EntryUnits<Unit>&& source, size_t length) {
   MOZ_ASSERT(data.is<Missing>(), "must be initializing a fresh ScriptSource");
-  return setUncompressedSourceHelper(cx, std::move(source), length);
+  return setUncompressedSourceHelper(cx, std::move(source), length,
+                                     SourceRetrievable::No);
 }
 
 template <typename Unit>
-struct SourceDecoder {
+struct UnretrievableSourceDecoder {
   XDRState<XDR_DECODE>* const xdr_;
   ScriptSource* const scriptSource_;
   const uint32_t uncompressedLength_;
 
  public:
-  SourceDecoder(XDRState<XDR_DECODE>* xdr, ScriptSource* scriptSource,
-                uint32_t uncompressedLength)
+  UnretrievableSourceDecoder(XDRState<XDR_DECODE>* xdr,
+                             ScriptSource* scriptSource,
+                             uint32_t uncompressedLength)
       : xdr_(xdr),
         scriptSource_(scriptSource),
         uncompressedLength_(uncompressedLength) {}
@@ -2552,7 +2576,7 @@ struct SourceDecoder {
 
     MOZ_TRY(xdr_->codeChars(sourceUnits.get(), uncompressedLength_));
 
-    if (!scriptSource_->initializeUncompressedSource(
+    if (!scriptSource_->initializeUnretrievableUncompressedSource(
             xdr_->cx(), std::move(sourceUnits), uncompressedLength_)) {
       return xdr_->fail(JS::TranscodeResult_Throw);
     }
@@ -2564,34 +2588,35 @@ struct SourceDecoder {
 namespace js {
 
 template <>
-XDRResult ScriptSource::xdrUncompressedSource<XDR_DECODE>(
+XDRResult ScriptSource::xdrUnretrievableUncompressedSource<XDR_DECODE>(
     XDRState<XDR_DECODE>* xdr, uint8_t sourceCharSize,
     uint32_t uncompressedLength) {
   MOZ_ASSERT(sourceCharSize == 1 || sourceCharSize == 2);
 
   if (sourceCharSize == 1) {
-    SourceDecoder<Utf8Unit> decoder(xdr, this, uncompressedLength);
+    UnretrievableSourceDecoder<Utf8Unit> decoder(xdr, this, uncompressedLength);
     return decoder.decode();
   }
 
-  SourceDecoder<char16_t> decoder(xdr, this, uncompressedLength);
+  UnretrievableSourceDecoder<char16_t> decoder(xdr, this, uncompressedLength);
   return decoder.decode();
 }
 
 }  // namespace js
 
 template <typename Unit>
-struct SourceEncoder {
+struct UnretrievableSourceEncoder {
   XDRState<XDR_ENCODE>* const xdr_;
   ScriptSource* const source_;
   const uint32_t uncompressedLength_;
 
-  SourceEncoder(XDRState<XDR_ENCODE>* xdr, ScriptSource* source,
-                uint32_t uncompressedLength)
+  UnretrievableSourceEncoder(XDRState<XDR_ENCODE>* xdr, ScriptSource* source,
+                             uint32_t uncompressedLength)
       : xdr_(xdr), source_(source), uncompressedLength_(uncompressedLength) {}
 
   XDRResult encode() {
-    Unit* sourceUnits = const_cast<Unit*>(source_->uncompressedData<Unit>());
+    Unit* sourceUnits =
+        const_cast<Unit*>(source_->uncompressedData<Unit>()->units());
 
     return xdr_->codeChars(sourceUnits, uncompressedLength_);
   }
@@ -2600,17 +2625,17 @@ struct SourceEncoder {
 namespace js {
 
 template <>
-XDRResult ScriptSource::xdrUncompressedSource<XDR_ENCODE>(
+XDRResult ScriptSource::xdrUnretrievableUncompressedSource<XDR_ENCODE>(
     XDRState<XDR_ENCODE>* xdr, uint8_t sourceCharSize,
     uint32_t uncompressedLength) {
   MOZ_ASSERT(sourceCharSize == 1 || sourceCharSize == 2);
 
   if (sourceCharSize == 1) {
-    SourceEncoder<Utf8Unit> encoder(xdr, this, uncompressedLength);
+    UnretrievableSourceEncoder<Utf8Unit> encoder(xdr, this, uncompressedLength);
     return encoder.encode();
   }
 
-  SourceEncoder<char16_t> encoder(xdr, this, uncompressedLength);
+  UnretrievableSourceEncoder<char16_t> encoder(xdr, this, uncompressedLength);
   return encoder.encode();
 }
 
@@ -2619,73 +2644,52 @@ XDRResult ScriptSource::xdrUncompressedSource<XDR_ENCODE>(
 template <typename Unit, XDRMode mode>
 /* static */
 XDRResult ScriptSource::codeUncompressedData(XDRState<mode>* const xdr,
-                                             ScriptSource* const ss,
-                                             bool retrievable) {
+                                             ScriptSource* const ss) {
   static_assert(std::is_same<Unit, Utf8Unit>::value ||
                     std::is_same<Unit, char16_t>::value,
                 "should handle UTF-8 and UTF-16");
 
   if (mode == XDR_ENCODE) {
-    MOZ_ASSERT(ss->data.is<Uncompressed<Unit>>());
+    MOZ_ASSERT(ss->isUncompressed<Unit>());
   } else {
     MOZ_ASSERT(ss->data.is<Missing>());
   }
 
-  MOZ_ASSERT(retrievable == ss->sourceRetrievable());
-
-  if (retrievable) {
-    // It's unnecessary to code uncompressed data if it can just be retrieved
-    // using the source hook.
-    if (mode == XDR_DECODE) {
-      ss->data = SourceType(Retrievable<Unit>());
-    }
-    return Ok();
-  }
-
   uint32_t uncompressedLength;
   if (mode == XDR_ENCODE) {
-    uncompressedLength = ss->data.as<Uncompressed<Unit>>().length();
+    uncompressedLength = ss->uncompressedData<Unit>()->length();
   }
   MOZ_TRY(xdr->codeUint32(&uncompressedLength));
 
-  return ss->xdrUncompressedSource(xdr, sizeof(Unit), uncompressedLength);
+  return ss->xdrUnretrievableUncompressedSource(xdr, sizeof(Unit),
+                                                uncompressedLength);
 }
 
 template <typename Unit, XDRMode mode>
 /* static */
 XDRResult ScriptSource::codeCompressedData(XDRState<mode>* const xdr,
-                                           ScriptSource* const ss,
-                                           bool retrievable) {
+                                           ScriptSource* const ss) {
   static_assert(std::is_same<Unit, Utf8Unit>::value ||
                     std::is_same<Unit, char16_t>::value,
                 "should handle UTF-8 and UTF-16");
 
   if (mode == XDR_ENCODE) {
-    MOZ_ASSERT(ss->data.is<Compressed<Unit>>());
+    MOZ_ASSERT(ss->isCompressed<Unit>());
   } else {
     MOZ_ASSERT(ss->data.is<Missing>());
   }
 
-  MOZ_ASSERT(retrievable == ss->sourceRetrievable());
-
-  if (retrievable) {
-    // It's unnecessary to code compressed data if it can just be retrieved
-    // using the source hook.
-    if (mode == XDR_DECODE) {
-      ss->data = SourceType(Retrievable<Unit>());
-    }
-    return Ok();
-  }
-
   uint32_t uncompressedLength;
   if (mode == XDR_ENCODE) {
-    uncompressedLength = ss->data.as<Compressed<Unit>>().uncompressedLength;
+    uncompressedLength = ss->data.as<Compressed<Unit, SourceRetrievable::No>>()
+                             .uncompressedLength;
   }
   MOZ_TRY(xdr->codeUint32(&uncompressedLength));
 
   uint32_t compressedLength;
   if (mode == XDR_ENCODE) {
-    compressedLength = ss->data.as<Compressed<Unit>>().raw.length();
+    compressedLength =
+        ss->data.as<Compressed<Unit, SourceRetrievable::No>>().raw.length();
   }
   MOZ_TRY(xdr->codeUint32(&compressedLength));
 
@@ -2697,18 +2701,34 @@ XDRResult ScriptSource::codeCompressedData(XDRState<mode>* const xdr,
     }
     MOZ_TRY(xdr->codeBytes(bytes.get(), compressedLength));
 
-    if (!ss->initializeWithCompressedSource<Unit>(xdr->cx(), std::move(bytes),
-                                                  compressedLength,
-                                                  uncompressedLength)) {
+    if (!ss->initializeWithUnretrievableCompressedSource<Unit>(
+            xdr->cx(), std::move(bytes), compressedLength,
+            uncompressedLength)) {
       return xdr->fail(JS::TranscodeResult_Throw);
     }
   } else {
-    void* bytes =
-        const_cast<char*>(ss->data.as<Compressed<Unit>>().raw.chars());
+    void* bytes = const_cast<char*>(ss->compressedData<Unit>()->raw.chars());
     MOZ_TRY(xdr->codeBytes(bytes, compressedLength));
   }
 
   return Ok();
+}
+
+template <typename Unit,
+          template <typename U, SourceRetrievable CanRetrieve> class Data,
+          XDRMode mode>
+/* static */
+void ScriptSource::codeRetrievable(ScriptSource* const ss) {
+  static_assert(std::is_same<Unit, Utf8Unit>::value ||
+                    std::is_same<Unit, char16_t>::value,
+                "should handle UTF-8 and UTF-16");
+
+  if (mode == XDR_ENCODE) {
+    MOZ_ASSERT((ss->data.is<Data<Unit, SourceRetrievable::Yes>>()));
+  } else {
+    MOZ_ASSERT(ss->data.is<Missing>());
+    ss->data = SourceType(Retrievable<Unit>());
+  }
 }
 
 template <XDRMode mode>
@@ -2880,25 +2900,17 @@ template <XDRMode mode>
 /* static */
 XDRResult ScriptSource::xdrData(XDRState<mode>* const xdr,
                                 ScriptSource* const ss) {
-  // Retrievability is kept outside |ScriptSource::data| (and not solely as
-  // distinct variant types within it) because retrievable compressed or
-  // uncompressed data need not be XDR'd.
-  uint8_t retrievable;
-  if (mode == XDR_ENCODE) {
-    retrievable = ss->sourceRetrievable_;
-  }
-  MOZ_TRY(xdr->codeUint8(&retrievable));
-  if (mode == XDR_DECODE) {
-    ss->sourceRetrievable_ = retrievable != 0;
-  }
-
   // The order here corresponds to the type order in |ScriptSource::SourceType|
-  // for simplicity, but it isn't truly necessary that it do so.
+  // so number->internal Variant tag is a no-op.
   enum class DataType {
-    CompressedUtf8,
-    UncompressedUtf8,
-    CompressedUtf16,
-    UncompressedUtf16,
+    CompressedUtf8Retrievable,
+    UncompressedUtf8Retrievable,
+    CompressedUtf8NotRetrievable,
+    UncompressedUtf8NotRetrievable,
+    CompressedUtf16Retrievable,
+    UncompressedUtf16Retrievable,
+    CompressedUtf16NotRetrievable,
+    UncompressedUtf16NotRetrievable,
     RetrievableUtf8,
     RetrievableUtf16,
     Missing,
@@ -2914,17 +2926,33 @@ XDRResult ScriptSource::xdrData(XDRState<mode>* const xdr,
     // it, then switch on it (and ignore the |Variant::match| API).
     class XDRDataTag {
      public:
-      DataType operator()(const Compressed<Utf8Unit>&) {
-        return DataType::CompressedUtf8;
+      DataType operator()(const Compressed<Utf8Unit, SourceRetrievable::Yes>&) {
+        return DataType::CompressedUtf8Retrievable;
       }
-      DataType operator()(const Uncompressed<Utf8Unit>&) {
-        return DataType::UncompressedUtf8;
+      DataType operator()(
+          const Uncompressed<Utf8Unit, SourceRetrievable::Yes>&) {
+        return DataType::UncompressedUtf8Retrievable;
       }
-      DataType operator()(const Compressed<char16_t>&) {
-        return DataType::CompressedUtf16;
+      DataType operator()(const Compressed<Utf8Unit, SourceRetrievable::No>&) {
+        return DataType::CompressedUtf8NotRetrievable;
       }
-      DataType operator()(const Uncompressed<char16_t>&) {
-        return DataType::UncompressedUtf16;
+      DataType operator()(
+          const Uncompressed<Utf8Unit, SourceRetrievable::No>&) {
+        return DataType::UncompressedUtf8NotRetrievable;
+      }
+      DataType operator()(const Compressed<char16_t, SourceRetrievable::Yes>&) {
+        return DataType::CompressedUtf16Retrievable;
+      }
+      DataType operator()(
+          const Uncompressed<char16_t, SourceRetrievable::Yes>&) {
+        return DataType::UncompressedUtf16Retrievable;
+      }
+      DataType operator()(const Compressed<char16_t, SourceRetrievable::No>&) {
+        return DataType::CompressedUtf16NotRetrievable;
+      }
+      DataType operator()(
+          const Uncompressed<char16_t, SourceRetrievable::No>&) {
+        return DataType::UncompressedUtf16NotRetrievable;
       }
       DataType operator()(const Retrievable<Utf8Unit>&) {
         return DataType::RetrievableUtf8;
@@ -2952,17 +2980,33 @@ XDRResult ScriptSource::xdrData(XDRState<mode>* const xdr,
   }
 
   switch (tag) {
-    case DataType::CompressedUtf8:
-      return ScriptSource::codeCompressedData<Utf8Unit>(xdr, ss, retrievable);
+    case DataType::CompressedUtf8Retrievable:
+      ScriptSource::codeRetrievable<Utf8Unit, Compressed, mode>(ss);
+      return Ok();
 
-    case DataType::UncompressedUtf8:
-      return ScriptSource::codeUncompressedData<Utf8Unit>(xdr, ss, retrievable);
+    case DataType::CompressedUtf8NotRetrievable:
+      return ScriptSource::codeCompressedData<Utf8Unit>(xdr, ss);
 
-    case DataType::CompressedUtf16:
-      return ScriptSource::codeCompressedData<char16_t>(xdr, ss, retrievable);
+    case DataType::UncompressedUtf8Retrievable:
+      ScriptSource::codeRetrievable<Utf8Unit, Uncompressed, mode>(ss);
+      return Ok();
 
-    case DataType::UncompressedUtf16:
-      return ScriptSource::codeUncompressedData<char16_t>(xdr, ss, retrievable);
+    case DataType::UncompressedUtf8NotRetrievable:
+      return ScriptSource::codeUncompressedData<Utf8Unit>(xdr, ss);
+
+    case DataType::CompressedUtf16Retrievable:
+      ScriptSource::codeRetrievable<char16_t, Compressed, mode>(ss);
+      return Ok();
+
+    case DataType::CompressedUtf16NotRetrievable:
+      return ScriptSource::codeCompressedData<char16_t>(xdr, ss);
+
+    case DataType::UncompressedUtf16Retrievable:
+      ScriptSource::codeRetrievable<char16_t, Uncompressed, mode>(ss);
+      return Ok();
+
+    case DataType::UncompressedUtf16NotRetrievable:
+      return ScriptSource::codeUncompressedData<char16_t>(xdr, ss);
 
     case DataType::Missing: {
       MOZ_ASSERT(ss->data.is<Missing>(),
@@ -2974,11 +3018,11 @@ XDRResult ScriptSource::xdrData(XDRState<mode>* const xdr,
     }
 
     case DataType::RetrievableUtf8:
-      codeRetrievableData<Utf8Unit, mode>(ss);
+      ScriptSource::codeRetrievableData<Utf8Unit, mode>(ss);
       return Ok();
 
     case DataType::RetrievableUtf16:
-      codeRetrievableData<char16_t, mode>(ss);
+      ScriptSource::codeRetrievableData<char16_t, mode>(ss);
       return Ok();
 
     case DataType::BinAST:
@@ -3368,13 +3412,13 @@ void js::FreeScriptData(JSRuntime* rt) {
 }
 
 /* static */
-size_t PrivateScriptData::AllocationSize(uint32_t nscopes, uint32_t nconsts,
+size_t PrivateScriptData::AllocationSize(uint32_t nscopes, uint32_t nbigints,
                                          uint32_t nobjects, uint32_t ntrynotes,
                                          uint32_t nscopenotes,
                                          uint32_t nresumeoffsets) {
   size_t size = sizeof(PrivateScriptData);
 
-  if (nconsts) {
+  if (nbigints) {
     size += sizeof(PackedSpan);
   }
   if (nobjects) {
@@ -3392,11 +3436,8 @@ size_t PrivateScriptData::AllocationSize(uint32_t nscopes, uint32_t nconsts,
 
   size += nscopes * sizeof(GCPtrScope);
 
-  if (nconsts) {
-    // The scope array doesn't maintain Value alignment, so compute the
-    // padding needed to remedy this.
-    size = JS_ROUNDUP(size, alignof(GCPtrValue));
-    size += nconsts * sizeof(GCPtrValue);
+  if (nbigints) {
+    size += nbigints * sizeof(GCPtrBigInt);
   }
   if (nobjects) {
     size += nobjects * sizeof(GCPtrObject);
@@ -3443,7 +3484,7 @@ void PrivateScriptData::initSpan(size_t* cursor, uint32_t scaledSpanOffset,
 }
 
 // Initialize PackedSpans and placement-new the trailing arrays.
-PrivateScriptData::PrivateScriptData(uint32_t nscopes_, uint32_t nconsts,
+PrivateScriptData::PrivateScriptData(uint32_t nscopes_, uint32_t nbigints,
                                      uint32_t nobjects, uint32_t ntrynotes,
                                      uint32_t nscopenotes,
                                      uint32_t nresumeoffsets)
@@ -3471,8 +3512,8 @@ PrivateScriptData::PrivateScriptData(uint32_t nscopes_, uint32_t nconsts,
   // Layout PackedSpan structures and initialize packedOffsets fields.
   static_assert(alignof(PrivateScriptData) >= alignof(PackedSpan),
                 "Incompatible alignment");
-  if (nconsts) {
-    packedOffsets.constsSpanOffset = TakeSpan(&cursor);
+  if (nbigints) {
+    packedOffsets.bigintsSpanOffset = TakeSpan(&cursor);
   }
   if (nobjects) {
     packedOffsets.objectsSpanOffset = TakeSpan(&cursor);
@@ -3487,8 +3528,7 @@ PrivateScriptData::PrivateScriptData(uint32_t nscopes_, uint32_t nconsts,
     packedOffsets.resumeOffsetsSpanOffset = TakeSpan(&cursor);
   }
 
-  // Layout and initialize the scopes array. Manually insert padding so that
-  // the subsequent |consts| array is aligned.
+  // Layout and initialize the scopes array.
   {
     MOZ_ASSERT(nscopes > 0);
 
@@ -3500,17 +3540,13 @@ PrivateScriptData::PrivateScriptData(uint32_t nscopes_, uint32_t nconsts,
     cursor += nscopes * sizeof(GCPtrScope);
   }
 
-  if (nconsts) {
-    // Pad to required alignment if we are emitting constant array.
-    cursor = JS_ROUNDUP(cursor, alignof(GCPtrValue));
-
-    static_assert(alignof(PrivateScriptData) >= alignof(GCPtrValue),
-                  "Incompatible alignment");
-    initSpan<GCPtrValue>(&cursor, packedOffsets.constsSpanOffset, nconsts);
-  }
-
   // Layout arrays, initialize PackedSpans and placement-new the elements.
-  static_assert(alignof(GCPtrValue) >= alignof(GCPtrObject),
+  static_assert(alignof(PrivateScriptData) >= alignof(GCPtrBigInt),
+                "Incompatible alignment");
+  static_assert(alignof(GCPtrScope) >= alignof(GCPtrBigInt),
+                "Incompatible alignment");
+  initSpan<GCPtrBigInt>(&cursor, packedOffsets.bigintsSpanOffset, nbigints);
+  static_assert(alignof(GCPtrBigInt) >= alignof(GCPtrObject),
                 "Incompatible alignment");
   static_assert(alignof(GCPtrScope) >= alignof(GCPtrObject),
                 "Incompatible alignment");
@@ -3527,19 +3563,19 @@ PrivateScriptData::PrivateScriptData(uint32_t nscopes_, uint32_t nconsts,
                      nresumeoffsets);
 
   // Sanity check
-  MOZ_ASSERT(AllocationSize(nscopes_, nconsts, nobjects, ntrynotes, nscopenotes,
-                            nresumeoffsets) == cursor);
+  MOZ_ASSERT(AllocationSize(nscopes_, nbigints, nobjects, ntrynotes,
+                            nscopenotes, nresumeoffsets) == cursor);
 }
 
 /* static */
 PrivateScriptData* PrivateScriptData::new_(JSContext* cx, uint32_t nscopes,
-                                           uint32_t nconsts, uint32_t nobjects,
+                                           uint32_t nbigints, uint32_t nobjects,
                                            uint32_t ntrynotes,
                                            uint32_t nscopenotes,
                                            uint32_t nresumeoffsets,
                                            uint32_t* dataSize) {
   // Compute size including trailing arrays
-  size_t size = AllocationSize(nscopes, nconsts, nobjects, ntrynotes,
+  size_t size = AllocationSize(nscopes, nbigints, nobjects, ntrynotes,
                                nscopenotes, nresumeoffsets);
 
   // Allocate contiguous raw buffer
@@ -3555,22 +3591,22 @@ PrivateScriptData* PrivateScriptData::new_(JSContext* cx, uint32_t nscopes,
 
   // Constuct the PrivateScriptData. Trailing arrays are uninitialized but
   // GCPtrs are put into a safe state.
-  return new (raw) PrivateScriptData(nscopes, nconsts, nobjects, ntrynotes,
+  return new (raw) PrivateScriptData(nscopes, nbigints, nobjects, ntrynotes,
                                      nscopenotes, nresumeoffsets);
 }
 
 /* static */ bool PrivateScriptData::InitFromEmitter(
     JSContext* cx, js::HandleScript script, frontend::BytecodeEmitter* bce) {
   uint32_t nscopes = bce->perScriptData().scopeList().length();
-  uint32_t nconsts = bce->perScriptData().numberList().length();
+  uint32_t nbigints = bce->perScriptData().bigIntList().length();
   uint32_t nobjects = bce->perScriptData().objectList().length;
   uint32_t ntrynotes = bce->bytecodeSection().tryNoteList().length();
   uint32_t nscopenotes = bce->bytecodeSection().scopeNoteList().length();
   uint32_t nresumeoffsets = bce->bytecodeSection().resumeOffsetList().length();
 
   // Create and initialize PrivateScriptData
-  if (!JSScript::createPrivateScriptData(cx, script, nscopes, nconsts, nobjects,
-                                         ntrynotes, nscopenotes,
+  if (!JSScript::createPrivateScriptData(cx, script, nscopes, nbigints,
+                                         nobjects, ntrynotes, nscopenotes,
                                          nresumeoffsets)) {
     return false;
   }
@@ -3579,8 +3615,8 @@ PrivateScriptData* PrivateScriptData::new_(JSContext* cx, uint32_t nscopes,
   if (nscopes) {
     bce->perScriptData().scopeList().finish(data->scopes());
   }
-  if (nconsts) {
-    bce->perScriptData().numberList().finish(data->consts());
+  if (nbigints) {
+    bce->perScriptData().bigIntList().finish(data->bigints());
   }
   if (nobjects) {
     bce->perScriptData().objectList().finish(data->objects());
@@ -3602,9 +3638,9 @@ void PrivateScriptData::trace(JSTracer* trc) {
   auto scopearray = scopes();
   TraceRange(trc, scopearray.size(), scopearray.data(), "scopes");
 
-  if (hasConsts()) {
-    auto constarray = consts();
-    TraceRange(trc, constarray.size(), constarray.data(), "consts");
+  if (hasBigInts()) {
+    auto bigintarray = bigints();
+    TraceRange(trc, bigintarray.size(), bigintarray.data(), "bigints");
   }
 
   if (hasObjects()) {
@@ -3754,7 +3790,7 @@ bool JSScript::initScriptName(JSContext* cx) {
 
 /* static */
 bool JSScript::createPrivateScriptData(JSContext* cx, HandleScript script,
-                                       uint32_t nscopes, uint32_t nconsts,
+                                       uint32_t nscopes, uint32_t nbigints,
                                        uint32_t nobjects, uint32_t ntrynotes,
                                        uint32_t nscopenotes,
                                        uint32_t nresumeoffsets) {
@@ -3764,7 +3800,7 @@ bool JSScript::createPrivateScriptData(JSContext* cx, HandleScript script,
   uint32_t dataSize;
 
   PrivateScriptData* data =
-      PrivateScriptData::new_(cx, nscopes, nconsts, nobjects, ntrynotes,
+      PrivateScriptData::new_(cx, nscopes, nbigints, nobjects, ntrynotes,
                               nscopenotes, nresumeoffsets, &dataSize);
   if (!data) {
     return false;
@@ -3781,12 +3817,12 @@ bool JSScript::createPrivateScriptData(JSContext* cx, HandleScript script,
 bool JSScript::initFunctionPrototype(JSContext* cx, HandleScript script,
                                      HandleFunction functionProto) {
   uint32_t numScopes = 1;
-  uint32_t numConsts = 0;
+  uint32_t numBigInts = 0;
   uint32_t numObjects = 0;
   uint32_t numTryNotes = 0;
   uint32_t numScopeNotes = 0;
   uint32_t nresumeoffsets = 0;
-  if (!createPrivateScriptData(cx, script, numScopes, numConsts, numObjects,
+  if (!createPrivateScriptData(cx, script, numScopes, numBigInts, numObjects,
                                numTryNotes, numScopeNotes, nresumeoffsets)) {
     return false;
   }
@@ -4368,7 +4404,7 @@ bool PrivateScriptData::Clone(JSContext* cx, HandleScript src, HandleScript dst,
                               MutableHandle<GCVector<Scope*>> scopes) {
   PrivateScriptData* srcData = src->data_;
   uint32_t nscopes = srcData->scopes().size();
-  uint32_t nconsts = srcData->hasConsts() ? srcData->consts().size() : 0;
+  uint32_t nbigints = srcData->hasBigInts() ? srcData->bigints().size() : 0;
   uint32_t nobjects = srcData->hasObjects() ? srcData->objects().size() : 0;
   uint32_t ntrynotes = srcData->hasTryNotes() ? srcData->tryNotes().size() : 0;
   uint32_t nscopenotes =
@@ -4398,32 +4434,22 @@ bool PrivateScriptData::Clone(JSContext* cx, HandleScript src, HandleScript dst,
     }
   }
 
-  /* Constants */
+  /* BigInts */
 
-  RootedValueVector consts(cx);
-  if (nconsts != 0) {
-    RootedValue val(cx);
-    RootedValue clone(cx);
-    for (const GCPtrValue& elem : srcData->consts()) {
-      val = elem.get();
-      if (val.isDouble()) {
-        clone = val;
-      } else if (val.isBigInt()) {
-        if (cx->zone() == val.toBigInt()->zone()) {
-          clone.setBigInt(val.toBigInt());
-        } else {
-          RootedBigInt b(cx, val.toBigInt());
-          BigInt* copy = BigInt::copy(cx, b);
-          if (!copy) {
-            return false;
-          }
-          clone.setBigInt(copy);
-        }
+  Rooted<BigIntVector> bigints(cx);
+  if (nbigints != 0) {
+    RootedBigInt clone(cx);
+    for (const GCPtrBigInt& elem : srcData->bigints()) {
+      if (cx->zone() == elem->zone()) {
+        clone = elem;
       } else {
-        MOZ_ASSERT_UNREACHABLE("bad script consts() element");
+        RootedBigInt b(cx, elem);
+        clone = BigInt::copy(cx, b);
+        if (!clone) {
+          return false;
+        }
       }
-
-      if (!consts.append(clone)) {
+      if (!bigints.append(clone)) {
         return false;
       }
     }
@@ -4476,7 +4502,7 @@ bool PrivateScriptData::Clone(JSContext* cx, HandleScript src, HandleScript dst,
   }
 
   // Create the new PrivateScriptData on |dst| and fill it in.
-  if (!JSScript::createPrivateScriptData(cx, dst, nscopes, nconsts, nobjects,
+  if (!JSScript::createPrivateScriptData(cx, dst, nscopes, nbigints, nobjects,
                                          ntrynotes, nscopenotes,
                                          nresumeoffsets)) {
     return false;
@@ -4489,10 +4515,10 @@ bool PrivateScriptData::Clone(JSContext* cx, HandleScript src, HandleScript dst,
       array[i].init(scopes[i]);
     }
   }
-  if (nconsts) {
-    auto array = dstData->consts();
-    for (unsigned i = 0; i < nconsts; ++i) {
-      array[i].init(consts[i]);
+  if (nbigints) {
+    auto array = dstData->bigints();
+    for (unsigned i = 0; i < nbigints; ++i) {
+      array[i].init(bigints[i]);
     }
   }
   if (nobjects) {
@@ -4730,6 +4756,40 @@ DebugScript* JSScript::getOrCreateDebugScript(JSContext* cx) {
   }
 
   return borrowed;
+}
+
+bool JSScript::incrementGeneratorObserverCount(JSContext* cx) {
+  cx->check(this);
+  MOZ_ASSERT(cx->realm()->isDebuggee());
+
+  AutoRealm ar(cx, this);
+
+  DebugScript* debug = getOrCreateDebugScript(cx);
+  if (!debug) {
+    return false;
+  }
+
+  debug->generatorObserverCount++;
+
+  // It is our caller's responsibility, before bumping the generator observer
+  // count, to make sure that the baseline code includes the necessary
+  // JS_AFTERYIELD instrumentation by calling
+  // {ensure,update}ExecutionObservabilityOfScript.
+  MOZ_ASSERT_IF(hasBaselineScript(), baseline->hasDebugInstrumentation());
+
+  return true;
+}
+
+void JSScript::decrementGeneratorObserverCount(js::FreeOp* fop) {
+  DebugScript* debug = debugScript();
+  MOZ_ASSERT(debug);
+  MOZ_ASSERT(debug->generatorObserverCount > 0);
+
+  debug->generatorObserverCount--;
+
+  if (!debug->needed()) {
+    fop->free_(releaseDebugScript());
+  }
 }
 
 bool JSScript::incrementStepperCount(JSContext* cx) {

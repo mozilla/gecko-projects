@@ -81,8 +81,10 @@ module.exports = {
 
   // When adding items to this file please check for effects on sub-directories.
   "plugins": [
+    "fetch-options",
     "mozilla",
     "no-unsanitized",
+    "prettier",
   ],
 
   // When adding items to this file please check for effects on all of toolkit
@@ -133,6 +135,10 @@ module.exports = {
 
     // Always require a trailing EOL
     "eol-last": "error",
+
+    // XXX This rule should be enabled, see Bug 1557040
+    // No credentials submitted with fetch calls
+    "fetch-options/no-fetch-credentials": "off",
 
     // No spaces between function name and parentheses
     "func-call-spacing": "error",
@@ -335,6 +341,9 @@ module.exports = {
 
     // Prohibit blank lines at the beginning and end of blocks.
     "padded-blocks": ["error", "never"],
+
+    // Formatting.
+    "prettier/prettier": "error",
 
     // Require double-quotes everywhere, except where quotes are escaped
     // or template literals are used.

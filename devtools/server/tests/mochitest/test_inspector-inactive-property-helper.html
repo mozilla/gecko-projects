@@ -1,0 +1,74 @@
+<!DOCTYPE HTML>
+<html>
+  <head>
+    <meta charset="utf-8">
+    <title>Test for InactivePropertyHelper</title>
+    <script src="chrome://mochikit/content/tests/SimpleTest/SimpleTest.js"></script>
+    <link rel="stylesheet" type="text/css" href="chrome://mochikit/content/tests/SimpleTest/test.css">
+    <script type="application/javascript">
+"use strict";
+SimpleTest.waitForExplicitFinish();
+
+(async function() {
+  const { require } = ChromeUtils.import("resource://devtools/shared/Loader.jsm");
+  const Services = require("Services");
+  const { inactivePropertyHelper } = require("devtools/server/actors/utils/inactive-property-helper");
+  let { isPropertyUsed } = inactivePropertyHelper;
+  isPropertyUsed = isPropertyUsed.bind(inactivePropertyHelper);
+
+  const INACTIVE_CSS_PREF = "devtools.inspector.inactive.css.enabled";
+  Services.prefs.setBoolPref(INACTIVE_CSS_PREF, true);
+  SimpleTest.registerCleanupFunction(() => {
+    Services.prefs.clearUserPref(INACTIVE_CSS_PREF);
+  });
+
+  const FOLDER = "./inactive-property-helper";
+
+  // Each file should `export default` an array of objects, representing each test case.
+  // A single test case is an object of the following shape:
+  // - {String} info: a summary of the test case
+  // - {String} property: the CSS property that should be tested
+  // - {String} tagName: the tagName of the element we're going to test
+  // - {Array<String>} rules: An array of the rules that will be applied on the element.
+  //                          This can't be empty as isPropertyUsed need a rule.
+  // - {Integer} ruleIndex (optional): If there are multiples rules in `rules`, the index
+  //                                   of the one that should be tested in isPropertyUsed.
+  // - {Boolean} isActive: should the property be active (isPropertyUsed `used` result).
+  const testFiles = [
+    "gap.js",
+    "max-min-width-height.js",
+    "vertical-align.js",
+  ].map(file => `${FOLDER}/${file}`);
+
+  // Import all the test cases
+  const tests =
+    (await Promise.all(testFiles.map(f => import(f).then(data => data.default)))).flat();
+
+  for (const { info: summary, property, tagName, rules, ruleIndex, isActive } of tests) {
+    info(summary);
+
+    // Create an element which will contain the test elements.
+    const main = document.createElement("main");
+    document.firstElementChild.appendChild(main);
+
+    // Create the element and insert the rules
+    const el = document.createElement(tagName);
+    const style = document.createElement("style");
+    main.append(style, el);
+
+    for (const dataRule of rules) {
+      style.sheet.insertRule(dataRule);
+    }
+    const rule = style.sheet.cssRules[ruleIndex || 0];
+
+    const { used } = isPropertyUsed(el, getComputedStyle(el), rule, property);
+    ok(used === isActive, `"${property}" is ${isActive ? "active" : "inactive"}`);
+
+    main.remove();
+  }
+  SimpleTest.finish();
+})();
+    </script>
+  </head>
+  <body></body>
+</html>

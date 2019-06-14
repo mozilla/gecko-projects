@@ -1141,7 +1141,7 @@ BrowserPageActions.addSearchEngine = {
     }
     for (let engine of this.engines) {
       let button = document.createXULElement("toolbarbutton");
-      button.classList.add("subviewbutton", "subviewbutton-iconic", "badged-button");
+      button.classList.add("subviewbutton", "subviewbutton-iconic");
       button.setAttribute("label", engine.title);
       button.setAttribute("image", engine.icon);
       button.setAttribute("uri", engine.uri);
@@ -1190,7 +1190,7 @@ BrowserPageActions.addSearchEngine = {
         let brandName = brandBundle.getString("brandShortName");
         let title = searchBundle.GetStringFromName("error_invalid_engine_title");
         let text = searchBundle.formatStringFromName("error_duplicate_engine_msg",
-                                                     [brandName, uri], 2);
+                                                     [brandName, uri]);
         Services.prompt.QueryInterface(Ci.nsIPromptFactory);
         let prompt = Services.prompt.getPrompt(gBrowser.contentWindow, Ci.nsIPrompt);
         prompt.QueryInterface(Ci.nsIWritablePropertyBag2);

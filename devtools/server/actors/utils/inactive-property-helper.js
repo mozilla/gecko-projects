@@ -84,8 +84,6 @@ class InactivePropertyHelper {
           "grid-auto-rows",
           "grid-template",
           "grid-gap",
-          "row-gap",
-          "column-gap",
           "justify-items",
         ],
         when: () => !this.gridContainer,
@@ -126,11 +124,23 @@ class InactivePropertyHelper {
           "align-content",
           "align-items",
           "justify-content",
+          "row-gap",
         ],
         when: () => !this.gridContainer && !this.flexContainer,
         fixId: "inactive-css-not-grid-or-flex-container-fix",
         msgId: "inactive-css-not-grid-or-flex-container",
         numFixProps: 2,
+      },
+      // column-gap and shorthand used on non-grid or non-flex or non-multi-col container.
+      {
+        invalidProperties: [
+          "column-gap",
+          "gap",
+        ],
+        when: () => !this.gridContainer && !this.flexContainer && !this.multiColContainer,
+        fixId: "inactive-css-not-grid-or-flex-container-or-multicol-container-fix",
+        msgId: "inactive-css-not-grid-or-flex-container-or-multicol-container",
+        numFixProps: 3,
       },
       // Inline properties used on non-inline-level elements.
       {
@@ -256,11 +266,13 @@ class InactivePropertyHelper {
       return false;
     });
 
-    // Accessing this.style might throws, we wrap it in a try/catch block to avoid test
+    this.unselect();
+
+    // Accessing elStyle might throws, we wrap it in a try/catch block to avoid test
     // failures.
     let display;
     try {
-      display = this.style ? this.style.display : null;
+      display = elStyle ? elStyle.display : null;
     } catch (e) {}
 
     return {
@@ -284,6 +296,16 @@ class InactivePropertyHelper {
     this._cssRule = cssRule;
     this._property = property;
     this._style = style;
+  }
+
+  /**
+   * Clear references to avoid leaks.
+   */
+  unselect() {
+    this._node = null;
+    this._cssRule = null;
+    this._property = null;
+    this._style = null;
   }
 
   /**
@@ -387,6 +409,17 @@ class InactivePropertyHelper {
   }
 
   /**
+   * Check if the current node is a multi-column container, i.e. a node element whose
+   * `column-width` or `column-count` property is not `auto`.
+   */
+  get multiColContainer() {
+    const autoColumnWidth = this.checkStyle("column-width", ["auto"]);
+    const autoColumnCount = this.checkStyle("column-count", ["auto"]);
+
+    return !autoColumnWidth || !autoColumnCount;
+  }
+
+  /**
    * Check if the current node is a table row.
    */
   get tableRow() {
@@ -468,7 +501,7 @@ class InactivePropertyHelper {
    * @returns {String}
    */
   get nodeName() {
-    return this.node.nodeName;
+    return this.node.nodeName ? this.node.nodeName.toLowerCase() : null;
   }
 
   /**

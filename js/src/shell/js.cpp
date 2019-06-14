@@ -17,14 +17,12 @@
 #include "mozilla/ScopeExit.h"
 #include "mozilla/Sprintf.h"
 #include "mozilla/TimeStamp.h"
+#include "mozilla/UniquePtrExtensions.h"  // UniqueFreePtr
 #include "mozilla/Unused.h"
 #include "mozilla/Utf8.h"
 #include "mozilla/Variant.h"
 
 #include <chrono>
-#ifdef JS_POSIX_NSPR
-#  include <dlfcn.h>
-#endif
 #ifdef XP_WIN
 #  include <direct.h>
 #  include <process.h>
@@ -61,7 +59,7 @@
 #include "jsfriendapi.h"
 #include "jstypes.h"
 #include "jsutil.h"
-#ifndef JS_POSIX_NSPR
+#ifndef JS_WITHOUT_NSPR
 #  include "prerror.h"
 #  include "prlink.h"
 #endif
@@ -168,30 +166,6 @@ using mozilla::TimeDuration;
 using mozilla::TimeStamp;
 using mozilla::Utf8Unit;
 using mozilla::Variant;
-
-// Avoid an unnecessary NSPR dependency on Linux and OS X just for the shell.
-#ifdef JS_POSIX_NSPR
-
-enum PRLibSpecType { PR_LibSpec_Pathname };
-
-struct PRLibSpec {
-  PRLibSpecType type;
-  union {
-    const char* pathname;
-  } value;
-};
-
-typedef void PRLibrary;
-
-#  define PR_LD_NOW RTLD_NOW
-#  define PR_LD_GLOBAL RTLD_GLOBAL
-
-static PRLibrary* PR_LoadLibraryWithFlags(PRLibSpec libSpec, int flags) {
-  return dlopen(libSpec.value.pathname, flags);
-}
-
-static void PR_UnloadLibrary(PRLibrary* dll) { dlclose(dll); }
-#endif
 
 enum JSShellExitCode {
   EXITCODE_RUNTIME_ERROR = 3,
@@ -676,14 +650,14 @@ static void TraceGrayRoots(JSTracer* trc, void* data) {
   }
 }
 
-static char* GetLine(FILE* file, const char* prompt) {
+static mozilla::UniqueFreePtr<char[]> GetLine(FILE* file, const char* prompt) {
 #ifdef EDITLINE
   /*
    * Use readline only if file is stdin, because there's no way to specify
    * another handle.  Are other filehandles interactive?
    */
   if (file == stdin) {
-    char* linep = readline(prompt);
+    mozilla::UniqueFreePtr<char[]> linep(readline(prompt));
     /*
      * We set it to zero to avoid complaining about inappropriate ioctl
      * for device in the case of EOF. Looks like errno == 251 if line is
@@ -697,7 +671,7 @@ static char* GetLine(FILE* file, const char* prompt) {
       return nullptr;
     }
     if (linep[0] != '\0') {
-      add_history(linep);
+      add_history(linep.get());
     }
     return linep;
   }
@@ -710,25 +684,24 @@ static char* GetLine(FILE* file, const char* prompt) {
   }
 
   size_t size = 80;
-  char* buffer = static_cast<char*>(malloc(size));
+  mozilla::UniqueFreePtr<char[]> buffer(static_cast<char*>(malloc(size)));
   if (!buffer) {
     return nullptr;
   }
 
-  char* current = buffer;
+  char* current = buffer.get();
   do {
     while (true) {
       if (fgets(current, size - len, file)) {
         break;
       }
       if (errno != EINTR) {
-        free(buffer);
         return nullptr;
       }
     }
 
     len += strlen(current);
-    char* t = buffer + len - 1;
+    char* t = buffer.get() + len - 1;
     if (*t == '\n') {
       /* Line was read. We remove '\n' and exit. */
       *t = '\0';
@@ -737,14 +710,15 @@ static char* GetLine(FILE* file, const char* prompt) {
 
     if (len + 1 == size) {
       size = size * 2;
-      char* tmp = static_cast<char*>(realloc(buffer, size));
+      char* raw = buffer.release();
+      char* tmp = static_cast<char*>(realloc(raw, size));
       if (!tmp) {
-        free(buffer);
+        free(raw);
         return nullptr;
       }
-      buffer = tmp;
+      buffer.reset(tmp);
     }
-    current = buffer + len;
+    current = buffer.get() + len;
   } while (true);
   return buffer;
 }
@@ -1359,7 +1333,8 @@ static MOZ_MUST_USE bool ReadEvalPrintLoop(JSContext* cx, FILE* in,
       sc->serviceInterrupt = false;
       errno = 0;
 
-      char* line = GetLine(in, startline == lineno ? "js> " : "");
+      mozilla::UniqueFreePtr<char[]> line =
+          GetLine(in, startline == lineno ? "js> " : "");
       if (!line) {
         if (errno) {
           /*
@@ -1373,7 +1348,8 @@ static MOZ_MUST_USE bool ReadEvalPrintLoop(JSContext* cx, FILE* in,
         break;
       }
 
-      if (!buffer.append(line, strlen(line)) || !buffer.append('\n')) {
+      if (!buffer.append(line.get(), strlen(line.get())) ||
+          !buffer.append('\n')) {
         return false;
       }
 
@@ -4167,6 +4143,7 @@ static bool EvalInWorker(JSContext* cx, unsigned argc, Value* vp) {
   if (!workerThreads.append(thread)) {
     ReportOutOfMemory(cx);
     thread->join();
+    js_delete(thread);
     return false;
   }
 
@@ -4361,6 +4338,7 @@ static void KillWorkerThreads(JSContext* cx) {
       thread = workerThreads.popCopy();
     }
     thread->join();
+    js_delete(thread);
   }
 
   workerThreads.clearAndFree();
@@ -6172,8 +6150,6 @@ static bool WrapWithProto(JSContext* cx, unsigned argc, Value* vp) {
 }
 
 static bool NewGlobal(JSContext* cx, unsigned argc, Value* vp) {
-  JSPrincipals* principals = nullptr;
-
   JS::RealmOptions options;
   JS::RealmCreationOptions& creationOptions = options.creationOptions();
   JS::RealmBehaviors& behaviors = options.behaviors();
@@ -6188,6 +6164,8 @@ static bool NewGlobal(JSContext* cx, unsigned argc, Value* vp) {
   } else {
     creationOptions.setNewCompartmentAndZone();
   }
+
+  JS::AutoHoldPrincipals principals(cx);
 
   CallArgs args = CallArgsFromVp(argc, vp);
   if (args.length() == 1 && args[0].isObject()) {
@@ -6256,8 +6234,7 @@ static bool NewGlobal(JSContext* cx, unsigned argc, Value* vp) {
       return false;
     }
     if (v.isBoolean()) {
-      principals = &ShellPrincipals::fullyTrusted;
-      JS_HoldPrincipals(principals);
+      principals.reset(&ShellPrincipals::fullyTrusted);
     }
 
     if (!JS_GetProperty(cx, opts, "principal", &v)) {
@@ -6268,22 +6245,19 @@ static bool NewGlobal(JSContext* cx, unsigned argc, Value* vp) {
       if (!ToUint32(cx, v, &bits)) {
         return false;
       }
-      principals = cx->new_<ShellPrincipals>(bits);
-      if (!principals) {
+      JSPrincipals* newPrincipals = cx->new_<ShellPrincipals>(bits);
+      if (!newPrincipals) {
         return false;
       }
-      JS_HoldPrincipals(principals);
+      principals.reset(newPrincipals);
     }
   }
 
-  if (!CheckRealmOptions(cx, options, principals)) {
+  if (!CheckRealmOptions(cx, options, principals.get())) {
     return false;
   }
 
-  RootedObject global(cx, NewGlobalObject(cx, options, principals, kind));
-  if (principals) {
-    JS_DropPrincipals(cx, principals);
-  }
+  RootedObject global(cx, NewGlobalObject(cx, options, principals.get(), kind));
   if (!global) {
     return false;
   }
@@ -10285,12 +10259,8 @@ static bool SetContextOptions(JSContext* cx, const OptionParser& op) {
   if (const char* str = op.getStringOption("cache-ir-stubs")) {
     if (strcmp(str, "on") == 0) {
       jit::JitOptions.disableCacheIR = false;
-      jit::JitOptions.disableCacheIRCalls = true;
     } else if (strcmp(str, "off") == 0) {
       jit::JitOptions.disableCacheIR = true;
-    } else if (strcmp(str, "call") == 0) {
-      jit::JitOptions.disableCacheIR = false;
-      jit::JitOptions.disableCacheIRCalls = false;
     } else {
       return OptionFailure("cache-ir-stubs", str);
     }
@@ -10865,6 +10835,7 @@ static void PreInit() {
 #endif
 }
 
+#ifndef JS_WITHOUT_NSPR
 class AutoLibraryLoader {
   Vector<PRLibrary*, 4, SystemAllocPolicy> libraries;
 
@@ -10881,12 +10852,8 @@ class AutoLibraryLoader {
     libSpec.value.pathname = path;
     PRLibrary* dll = PR_LoadLibraryWithFlags(libSpec, PR_LD_NOW | PR_LD_GLOBAL);
     if (!dll) {
-#ifdef JS_POSIX_NSPR
-      fprintf(stderr, "LoadLibrary '%s' failed: %s\n", path, dlerror());
-#else
       fprintf(stderr, "LoadLibrary '%s' failed with code %d\n", path,
               PR_GetError());
-#endif
       MOZ_CRASH("Failed to load library");
     }
 
@@ -10894,6 +10861,7 @@ class AutoLibraryLoader {
     return dll;
   }
 };
+#endif
 
 int main(int argc, char** argv, char** envp) {
   PreInit();
@@ -11261,6 +11229,12 @@ int main(int argc, char** argv, char** envp) {
     coverage::EnableLCov();
   }
 
+#ifdef JS_WITHOUT_NSPR
+  if (!op.getMultiStringOption("dll").empty()) {
+    fprintf(stderr, "Error: --dll requires NSPR support!\n");
+    return EXIT_FAILURE;
+  }
+#else
   AutoLibraryLoader loader;
   MultiStringRange dllPaths = op.getMultiStringOption("dll");
   while (!dllPaths.empty()) {
@@ -11268,6 +11242,7 @@ int main(int argc, char** argv, char** envp) {
     loader.load(path);
     dllPaths.popFront();
   }
+#endif
 
   if (op.getBoolOption("suppress-minidump")) {
     js::NoteIntentionalCrash();

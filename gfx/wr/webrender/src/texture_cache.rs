@@ -556,10 +556,10 @@ impl TextureCache {
         }
 
         let mut pending_updates = TextureUpdateList::new();
-        let picture_texture = if let Some(tile_size) = picture_tile_size{
+        let picture_texture = if let Some(tile_size) = picture_tile_size {
             let picture_texture = WholeTextureArray {
                 size: tile_size,
-                filter: TextureFilter::Linear,
+                filter: TextureFilter::Nearest,
                 format: PICTURE_TILE_FORMAT,
                 texture_id: CacheTextureId(1),
                 slices: {
@@ -569,6 +569,7 @@ impl TextureCache {
                     info!("Initializing picture texture with {}x{} slices", num_x, num_y);
                     vec![WholeTextureSlice { uv_rect_handle: None }; count]
                 },
+                has_depth: true,
             };
             pending_updates.push_alloc(picture_texture.texture_id, picture_texture.to_info());
             Some(picture_texture)
@@ -663,7 +664,7 @@ impl TextureCache {
         let document_id = self.now.document_id();
         self.doc_data = self.per_doc_data
                             .remove(&document_id)
-                            .unwrap_or_else(|| PerDocumentData::new());
+                            .unwrap_or_else(PerDocumentData::new);
     }
 
     fn unset_doc_data(&mut self) {
@@ -680,7 +681,7 @@ impl TextureCache {
     }
 
     pub fn requires_frame_build(&self) -> bool {
-        return self.require_frame_build;
+        self.require_frame_build
     }
 
     /// Called at the beginning of each frame.
@@ -709,7 +710,7 @@ impl TextureCache {
             self.reached_reclaim_threshold = None;
         }
         if let Some(t) = self.reached_reclaim_threshold {
-            let dur = time.duration_since(t).unwrap_or(Duration::default());
+            let dur = time.duration_since(t).unwrap_or_default();
             if dur >= Duration::from_secs(5) {
                 self.clear_shared();
                 self.reached_reclaim_threshold = None;
@@ -730,7 +731,7 @@ impl TextureCache {
         // depend on allocation patterns of subsequent content.
         let time_since_last_gc = self.now.time()
             .duration_since(self.doc_data.last_shared_cache_expiration.time())
-            .unwrap_or(Duration::default());
+            .unwrap_or_default();
         let do_periodic_gc = time_since_last_gc >= Duration::from_secs(5) &&
             self.shared_textures.size_in_bytes() >= RECLAIM_THRESHOLD_BYTES * 2;
         if do_periodic_gc {
@@ -1092,6 +1093,7 @@ impl TextureCache {
                 filter: texture_array.filter,
                 layer_count: 1,
                 is_shared_cache: true,
+                has_depth: false,
             };
             self.pending_updates.push_alloc(texture_id, info);
 
@@ -1155,6 +1157,7 @@ impl TextureCache {
             filter: params.filter,
             layer_count: 1,
             is_shared_cache: false,
+            has_depth: false,
         };
         self.pending_updates.push_alloc(texture_id, info);
 
@@ -1223,6 +1226,7 @@ impl TextureCache {
                     filter: texture_array.filter,
                     layer_count: (num_regions + 1) as i32,
                     is_shared_cache: true,
+                    has_depth: false,
                 };
                 self.pending_updates.push_realloc(texture_array.texture_id.unwrap(), info);
                 texture_array.push_region();
@@ -1608,6 +1612,7 @@ struct WholeTextureArray {
     format: ImageFormat,
     texture_id: CacheTextureId,
     slices: Vec<WholeTextureSlice>,
+    has_depth: bool,
 }
 
 impl WholeTextureArray {
@@ -1619,6 +1624,7 @@ impl WholeTextureArray {
             filter: self.filter,
             layer_count: self.slices.len() as i32,
             is_shared_cache: true, //TODO: reconsider
+            has_depth: self.has_depth,
         }
     }
 
@@ -1766,12 +1772,12 @@ impl TextureCacheUpdate {
 fn quantize_dimension(size: i32) -> i32 {
     match size {
         0 => unreachable!(),
-        1...16 => 16,
-        17...32 => 32,
-        33...64 => 64,
-        65...128 => 128,
-        129...256 => 256,
-        257...512 => 512,
+        1..=16 => 16,
+        17..=32 => 32,
+        33..=64 => 64,
+        65..=128 => 128,
+        129..=256 => 256,
+        257..=512 => 512,
         _ => panic!("Invalid dimensions for cache!"),
     }
 }

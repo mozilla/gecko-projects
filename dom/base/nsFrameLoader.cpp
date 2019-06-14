@@ -89,7 +89,6 @@
 #include "mozilla/dom/SessionStoreListener.h"
 #include "mozilla/gfx/CrossProcessPaint.h"
 #include "mozilla/jsipc/CrossProcessObjectWrappers.h"
-#include "mozilla/layout/RenderFrame.h"
 #include "mozilla/ServoCSSParser.h"
 #include "mozilla/ServoStyleSet.h"
 #include "nsGenericHTMLFrameElement.h"
@@ -623,51 +622,20 @@ nsresult nsFrameLoader::ReallyStartLoadingInternal() {
     loadState->SetCsp(csp);
   }
 
-  nsCOMPtr<nsIURI> referrer;
-
   nsAutoString srcdoc;
   bool isSrcdoc =
       mOwnerContent->IsHTMLElement(nsGkAtoms::iframe) &&
       mOwnerContent->GetAttr(kNameSpaceID_None, nsGkAtoms::srcdoc, srcdoc);
 
   if (isSrcdoc) {
-    nsAutoString referrerStr;
-    mOwnerContent->OwnerDoc()->GetReferrer(referrerStr);
-    rv = NS_NewURI(getter_AddRefs(referrer), referrerStr);
-
     loadState->SetSrcdocData(srcdoc);
     nsCOMPtr<nsIURI> baseURI = mOwnerContent->GetBaseURI();
     loadState->SetBaseURI(baseURI);
-  } else {
-    rv = mOwnerContent->NodePrincipal()->GetURI(getter_AddRefs(referrer));
-    NS_ENSURE_SUCCESS(rv, rv);
   }
 
-  // Use referrer as long as it is not an NullPrincipalURI.
-  // We could add a method such as GetReferrerURI to principals to make this
-  // cleaner, but given that we need to start using Source Browsing Context for
-  // referrer (see Bug 960639) this may be wasted effort at this stage.
-  if (referrer) {
-    bool isNullPrincipalScheme;
-    rv = referrer->SchemeIs(NS_NULLPRINCIPAL_SCHEME, &isNullPrincipalScheme);
-    if (NS_SUCCEEDED(rv) && !isNullPrincipalScheme) {
-      // get referrer policy for this iframe:
-      // first load document wide policy, then
-      // load iframe referrer attribute if enabled in preferences
-      // per element referrer overrules document wide referrer if enabled
-      net::ReferrerPolicy referrerPolicy =
-          mOwnerContent->OwnerDoc()->GetReferrerPolicy();
-      HTMLIFrameElement* iframe = HTMLIFrameElement::FromNode(mOwnerContent);
-      if (iframe) {
-        net::ReferrerPolicy iframeReferrerPolicy =
-            iframe->GetReferrerPolicyAsEnum();
-        if (iframeReferrerPolicy != net::RP_Unset) {
-          referrerPolicy = iframeReferrerPolicy;
-        }
-      }
-      loadState->SetReferrerInfo(new ReferrerInfo(referrer, referrerPolicy));
-    }
-  }
+  nsCOMPtr<nsIReferrerInfo> referrerInfo = new ReferrerInfo();
+  referrerInfo->InitWithNode(mOwnerContent);
+  loadState->SetReferrerInfo(referrerInfo);
 
   // Default flags:
   int32_t flags = nsIWebNavigation::LOAD_FLAGS_NONE;
@@ -2713,7 +2681,7 @@ bool nsFrameLoader::TryRemoteBrowserInternal() {
   // The remoteType can be queried by asking the message manager instead.
   ownerElement->UnsetAttr(kNameSpaceID_None, nsGkAtoms::RemoteType, false);
 
-  // Now that browserParent is set, we can initialize the RenderFrame
+  // Now that browserParent is set, we can initialize graphics
   browserParent->InitRendering();
 
   MaybeUpdatePrimaryBrowserParent(eBrowserParentChanged);
@@ -2813,13 +2781,7 @@ BrowserBridgeChild* nsFrameLoader::GetBrowserBridgeChild() const {
 
 mozilla::layers::LayersId nsFrameLoader::GetLayersId() const {
   MOZ_ASSERT(mIsRemoteFrame);
-  if (auto* browserParent = GetBrowserParent()) {
-    return browserParent->GetRenderFrame()->GetLayersId();
-  }
-  if (auto* browserBridgeChild = GetBrowserBridgeChild()) {
-    return browserBridgeChild->GetLayersId();
-  }
-  return mozilla::layers::LayersId{};
+  return mRemoteBrowser->GetLayersId();
 }
 
 void nsFrameLoader::ActivateRemoteFrame(ErrorResult& aRv) {

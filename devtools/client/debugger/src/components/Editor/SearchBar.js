@@ -33,12 +33,13 @@ import type { Modifiers, SearchResults } from "../../reducers/file-search";
 import SearchInput from "../shared/SearchInput";
 import { debounce } from "lodash";
 import "./SearchBar.css";
+import { PluralForm } from "devtools-modules";
 
 import type SourceEditor from "../../utils/editor/source-editor";
 
 function getShortcuts() {
-  const searchAgainKey = L10N.getStr("sourceSearch.search.again.key2");
-  const searchAgainPrevKey = L10N.getStr("sourceSearch.search.againPrev.key2");
+  const searchAgainKey = L10N.getStr("sourceSearch.search.again.key3");
+  const searchAgainPrevKey = L10N.getStr("sourceSearch.search.againPrev.key3");
   const searchKey = L10N.getStr("sourceSearch.search.key2");
 
   return {
@@ -239,10 +240,14 @@ class SearchBar extends Component<Props, State> {
     }
 
     if (index == -1) {
-      return L10N.getFormatStr("sourceSearch.resultsSummary1", count);
+      const resultsSummaryString = L10N.getStr("sourceSearch.resultsSummary1");
+      return PluralForm.get(count, resultsSummaryString).replace("#1", count);
     }
 
-    return L10N.getFormatStr("editor.searchResults", matchIndex + 1, count);
+    const searchResultsString = L10N.getStr("editor.searchResults1");
+    return PluralForm.get(count, searchResultsString)
+      .replace("#1", count)
+      .replace("%d", matchIndex + 1);
   }
 
   renderSearchModifiers = () => {
@@ -251,7 +256,7 @@ class SearchBar extends Component<Props, State> {
 
     function SearchModBtn({ modVal, className, svgName, tooltip }) {
       const preppedClass = classnames(className, {
-        active: modifiers && modifiers.get(modVal),
+        active: modifiers && modifiers[modVal],
       });
       return (
         <button

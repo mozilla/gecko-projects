@@ -115,7 +115,7 @@ const PROP_JSON_FIELDS = ["id", "syncGUID", "version", "type",
                           "userPermissions", "icons", "iconURL",
                           "blocklistState", "blocklistURL", "startupData",
                           "previewImage", "hidden", "installTelemetryInfo",
-                          "rootURI"];
+                          "recommendationState", "rootURI"];
 
 const LEGACY_TYPES = new Set([
   "extension",
@@ -246,6 +246,7 @@ class AddonInternal {
     this.installTelemetryInfo = null;
     this.rootURI = null;
     this._updateInstall = null;
+    this.recommendationState = null;
 
     this.inDatabase = false;
 
@@ -833,6 +834,18 @@ AddonWrapper = class {
     return null;
   }
 
+  get isRecommended() {
+    let addon = addonFor(this);
+    let state = addon.recommendationState;
+    if (state &&
+        state.validNotBefore < addon.updateDate &&
+        state.validNotAfter > addon.updateDate &&
+        addon.isCorrectlySigned && !this.temporarilyInstalled) {
+      return state.states.includes("recommended");
+    }
+    return false;
+  }
+
   get applyBackgroundUpdates() {
     return addonFor(this).applyBackgroundUpdates;
   }
@@ -1391,7 +1404,7 @@ this.XPIDatabase = {
         throw error;
       }
 
-      if (inputAddons.schemaVersion == 27) {
+      if (inputAddons.schemaVersion <= 27) {
         // Types were translated in bug 857456.
         for (let addon of inputAddons.addons) {
           migrateAddonLoader(addon);
@@ -2873,7 +2886,7 @@ this.XPIDatabaseReconcile = {
       // Do some blocklist checks. These will happen after we've just saved everything,
       // because they're async and depend on the blocklist loading. When we're done, save
       // the data if any of the add-ons' blocklist state has changed.
-      AddonManager.shutdown.addBlocker(
+      AddonManager.beforeShutdown.addBlocker(
         "Update add-on blocklist state into add-on DB",
         (async () => {
           // Avoid querying the AddonManager immediately to give startup a chance

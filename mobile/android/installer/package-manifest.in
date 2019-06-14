@@ -129,6 +129,11 @@
 @BINPATH@/components/HandlerService.js
 @BINPATH@/components/servicesComponents.manifest
 @BINPATH@/components/servicesSettings.manifest
+@BINPATH@/components/l10n-registry.manifest
+
+#ifndef MOZ_GECKOVIEW_JAR
+@BINPATH@/components/TelemetryStartup.manifest
+#endif
 
 #if defined(ENABLE_TESTS) && defined(MOZ_DEBUG)
 @BINPATH@/components/TestInterfaceJS.js

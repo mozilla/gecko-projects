@@ -232,6 +232,7 @@ const DEFAULT_ENVIRONMENT_PREFS = new Map([
   ["extensions.blocklist.url", {what: RECORD_PREF_VALUE}],
   ["extensions.formautofill.addresses.enabled", {what: RECORD_PREF_VALUE}],
   ["extensions.formautofill.creditCards.enabled", {what: RECORD_PREF_VALUE}],
+  ["extensions.htmlaboutaddons.enabled", {what: RECORD_PREF_VALUE}],
   ["extensions.legacy.enabled", {what: RECORD_PREF_VALUE}],
   ["extensions.strictCompatibility", {what: RECORD_PREF_VALUE}],
   ["extensions.update.enabled", {what: RECORD_PREF_VALUE}],
@@ -555,15 +556,9 @@ EnvironmentAddonBuilder.prototype = {
    * Get the initial set of addons.
    * @returns Promise<void> when the initial load is complete.
    */
-  init() {
-    // Some tests don't initialize the addon manager. This accounts for the
-    // unfortunate reality of life.
-    try {
-      AddonManager.shutdown.addBlocker("EnvironmentAddonBuilder",
-        () => this._shutdownBlocker());
-    } catch (err) {
-      return Promise.reject(err);
-    }
+  async init() {
+    AddonManager.beforeShutdown.addBlocker("EnvironmentAddonBuilder",
+      () => this._shutdownBlocker());
 
     this._pendingTask = (async () => {
       try {
@@ -916,7 +911,6 @@ function EnvironmentCache() {
   this._log.trace("constructor");
 
   this._shutdown = false;
-  this._delayedInitFinished = false;
   // Don't allow querying the search service too early to prevent
   // impacting the startup performance.
   this._canQuerySearch = false;
@@ -1004,8 +998,24 @@ EnvironmentCache.prototype = {
   /**
    * This gets called when the delayed init completes.
    */
-  delayedInit() {
-    this._delayedInitFinished = true;
+  async delayedInit() {
+    if (AppConstants.platform == "win") {
+      this._hddData = await Services.sysinfo.diskInfo;
+      let oldEnv = null;
+      if (!this._initTask) {
+        // We've finished creating the initial env, so notify for the update
+        // This is all a bit awkward because `currentEnvironment` clones
+        // the object, which we need to pass to the notification, but we
+        // should only notify once we've updated the current environment...
+        // Ideally, _onEnvironmentChange should somehow deal with all this
+        // instead of all the consumers.
+        oldEnv = this.currentEnvironment;
+      }
+      this._currentEnvironment.system.hdd = this._getHDDData();
+      if (!this._initTask) {
+        this._onEnvironmentChange("hdd-info", oldEnv);
+      }
+    }
   },
 
   /**
@@ -1709,28 +1719,17 @@ EnvironmentCache.prototype = {
     return data;
   },
 
+  _hddData: null,
   /**
    * Get the HDD information.
    * @return Object containing the HDD data.
    */
   _getHDDData() {
-    return {
-      profile: { // hdd where the profile folder is located
-        model: getSysinfoProperty("profileHDDModel", null),
-        revision: getSysinfoProperty("profileHDDRevision", null),
-        type: getSysinfoProperty("profileHDDType", null),
-      },
-      binary:  { // hdd where the application binary is located
-        model: getSysinfoProperty("binHDDModel", null),
-        revision: getSysinfoProperty("binHDDRevision", null),
-        type: getSysinfoProperty("binHDDType", null),
-      },
-      system:  { // hdd where the system files are located
-        model: getSysinfoProperty("winHDDModel", null),
-        revision: getSysinfoProperty("winHDDRevision", null),
-        type: getSysinfoProperty("winHDDType", null),
-      },
-    };
+    if (this._hddData) {
+      return this._hddData;
+    }
+    let nullData = {model: null, revision: null, type: null};
+    return {profile: nullData, binary: nullData, system: nullData};
   },
 
   /**
@@ -1876,6 +1875,5 @@ EnvironmentCache.prototype = {
 
   reset() {
     this._shutdown = false;
-    this._delayedInitFinished = false;
   },
 };

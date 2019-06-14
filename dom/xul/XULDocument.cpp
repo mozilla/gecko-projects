@@ -75,7 +75,6 @@
 #include "nsURILoader.h"
 #include "mozilla/BasicEvents.h"
 #include "mozilla/CycleCollectedJSContext.h"
-#include "mozilla/dom/DocumentL10n.h"
 #include "mozilla/dom/Element.h"
 #include "mozilla/dom/NodeInfoInlines.h"
 #include "mozilla/dom/ProcessingInstruction.h"
@@ -275,9 +274,7 @@ nsresult XULDocument::StartDocumentLoad(const char* aCommand,
   return NS_OK;
 }
 
-void XULDocument::EndLoad() {
-  Document::EndLoad();
-}
+void XULDocument::EndLoad() { Document::EndLoad(); }
 
 //----------------------------------------------------------------------
 //

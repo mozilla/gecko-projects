@@ -5,16 +5,24 @@
 import LoginListItem from "chrome://browser/content/aboutlogins/components/login-list-item.js";
 import ReflectedFluentElement from "chrome://browser/content/aboutlogins/components/reflected-fluent-element.js";
 
+const collator = new Intl.Collator();
+const sortFnOptions = {
+  name: (a, b) => collator.compare(a.title, b.title),
+  "last-used": (a, b) => (a.timeLastUsed < b.timeLastUsed),
+  "last-changed": (a, b) => (a.timePasswordChanged < b.timePasswordChanged),
+};
+
 export default class LoginList extends ReflectedFluentElement {
   constructor() {
     super();
     this._logins = [];
     this._filter = "";
-    this._selectedItem = null;
+    this._selectedGuid = null;
+    this._blankLoginListItem = new LoginListItem({});
   }
 
   connectedCallback() {
-    if (this.children.length) {
+    if (this.shadowRoot) {
       return;
     }
     let loginListTemplate = document.querySelector("#login-list-template");
@@ -25,6 +33,8 @@ export default class LoginList extends ReflectedFluentElement {
 
     this.render();
 
+    this.shadowRoot.getElementById("login-sort")
+                   .addEventListener("change", this);
     window.addEventListener("AboutLoginsLoginSelected", this);
     window.addEventListener("AboutLoginsFilterLogins", this);
   }
@@ -32,8 +42,23 @@ export default class LoginList extends ReflectedFluentElement {
   render() {
     let list = this.shadowRoot.querySelector("ol");
     list.textContent = "";
+
+    if (!this._logins.length) {
+      document.l10n.setAttributes(this, "login-list", {count: 0});
+      return;
+    }
+
+    if (!this._selectedGuid) {
+      this._blankLoginListItem.classList.add("selected");
+      list.append(this._blankLoginListItem);
+    }
+
     for (let login of this._logins) {
-      list.append(new LoginListItem(login));
+      let listItem = new LoginListItem(login);
+      if (login.guid == this._selectedGuid) {
+        listItem.classList.add("selected");
+      }
+      list.append(listItem);
     }
 
     let visibleLoginCount = this._applyFilter();
@@ -52,6 +77,10 @@ export default class LoginList extends ReflectedFluentElement {
     }
 
     for (let listItem of this.shadowRoot.querySelectorAll("login-list-item")) {
+      if (!listItem.hasAttribute("guid")) {
+        // Don't hide the 'New Login' item if it is present.
+        continue;
+      }
       if (matchingLoginGuids.includes(listItem.getAttribute("guid"))) {
         if (listItem.hidden) {
           listItem.hidden = false;
@@ -66,39 +95,51 @@ export default class LoginList extends ReflectedFluentElement {
 
   handleEvent(event) {
     switch (event.type) {
+      case "change": {
+        const sort = event.target.value;
+        this._logins = this._logins.sort((a, b) => sortFnOptions[sort](a, b));
+        this.render();
+        break;
+      }
       case "AboutLoginsFilterLogins": {
         this._filter = event.detail.toLocaleLowerCase();
         this.render();
         break;
       }
       case "AboutLoginsLoginSelected": {
-        if (this._selectedItem) {
-          if (this._selectedItem.getAttribute("guid") == event.detail.guid) {
-            return;
-          }
-          this._selectedItem.classList.remove("selected");
+        if (this._selectedGuid == event.detail.guid) {
+          return;
         }
-        this._selectedItem = this.shadowRoot.querySelector(`login-list-item[guid="${event.detail.guid}"]`);
-        this._selectedItem.classList.add("selected");
+
+        this._selectedGuid = event.detail.guid || null;
+        this.render();
         break;
       }
     }
   }
 
   static get reflectedFluentIDs() {
-    return ["count"];
+    return ["count",
+            "last-used-option",
+            "last-changed-option",
+            "name-option",
+            "new-login-subtitle",
+            "new-login-title",
+            "sort-label-text"];
   }
 
   static get observedAttributes() {
     return this.reflectedFluentIDs;
   }
 
-  clearSelection() {
-    if (!this._selectedItem) {
-      return;
+  handleSpecialCaseFluentString(attrName) {
+    if (attrName != "new-login-subtitle" &&
+        attrName != "new-login-title") {
+      return false;
     }
-    this._selectedItem.classList.remove("selected");
-    this._selectedItem = null;
+
+    this._blankLoginListItem.setAttribute(attrName, this.getAttribute(attrName));
+    return true;
   }
 
   setLogins(logins) {

@@ -184,6 +184,10 @@ async function waitForElementWithSelector(dbg, selector) {
   return findElementWithSelector(dbg, selector);
 }
 
+function waitForRequestsToSettle(dbg) {
+  return dbg.toolbox.target.client.waitForRequestsToSettle();
+}
+
 function assertClass(el, className, exists = true) {
   if (exists) {
     ok(el.classList.contains(className), `${className} class exists`);
@@ -1034,8 +1038,9 @@ const keyMappings = {
   quickOpenFunc: { code: "o", modifiers: cmdShift },
   quickOpenLine: { code: ":", modifiers: cmdOrCtrl },
   fileSearch: { code: "f", modifiers: cmdOrCtrl },
-  fileSearchNext: { code: "g", modifiers: cmdOrCtrl },
+  fileSearchNext: { code: "g", modifiers: { metaKey: true } },
   fileSearchPrev: { code: "g", modifiers: cmdShift },
+  goToLine: { code: "g", modifiers: { ctrlKey: true } },
   Enter: { code: "VK_RETURN" },
   ShiftEnter: { code: "VK_RETURN", modifiers: shiftOrAlt },
   AltEnter: {

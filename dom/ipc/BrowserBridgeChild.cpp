@@ -22,8 +22,10 @@ namespace mozilla {
 namespace dom {
 
 BrowserBridgeChild::BrowserBridgeChild(nsFrameLoader* aFrameLoader,
-                                       BrowsingContext* aBrowsingContext)
-    : mLayersId{0},
+                                       BrowsingContext* aBrowsingContext,
+                                       TabId aId)
+    : mId{aId},
+      mLayersId{0},
       mIPCOpen(true),
       mFrameLoader(aFrameLoader),
       mBrowsingContext(aBrowsingContext) {}
@@ -135,6 +137,23 @@ BrowserBridgeChild::RecvSetEmbeddedDocAccessibleCOMProxy(
   mEmbeddedDocAccessible =
       new a11y::RemoteIframeDocProxyAccessibleWrap(comProxy);
 #endif
+  return IPC_OK();
+}
+
+mozilla::ipc::IPCResult BrowserBridgeChild::RecvFireFrameLoadEvent(
+    bool aIsTrusted) {
+  RefPtr<Element> owner = mFrameLoader->GetOwnerContent();
+  if (!owner) {
+    return IPC_OK();
+  }
+
+  // Fire the `load` event on our embedder element.
+  nsEventStatus status = nsEventStatus_eIgnore;
+  WidgetEvent event(aIsTrusted, eLoad);
+  event.mFlags.mBubbles = false;
+  event.mFlags.mCancelable = false;
+  EventDispatcher::Dispatch(owner, nullptr, &event, nullptr, &status);
+
   return IPC_OK();
 }
 

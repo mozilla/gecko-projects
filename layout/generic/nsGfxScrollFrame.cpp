@@ -1593,7 +1593,7 @@ nsSize nsXULScrollFrame::GetXULMinSize(nsBoxLayoutState& aState) {
 }
 
 nsSize nsXULScrollFrame::GetXULMaxSize(nsBoxLayoutState& aState) {
-  nsSize maxSize(NS_INTRINSICSIZE, NS_INTRINSICSIZE);
+  nsSize maxSize(NS_UNCONSTRAINEDSIZE, NS_UNCONSTRAINEDSIZE);
 
   AddBorderAndPadding(maxSize);
   bool widthSet, heightSet;
@@ -3078,17 +3078,7 @@ void ScrollFrameHelper::AppendScrollPartsTo(nsDisplayListBuilder* aBuilder,
   // viewport scrollbars. They would create layerization problems. This wouldn't
   // normally be an issue but themes can add overflow areas to scrollbar parts.
   if (mIsRoot) {
-    nsRect scrollPartsClip =
-        mOuter->GetRectRelativeToSelf() + aBuilder->ToReferenceFrame(mOuter);
-    if (!StaticPrefs::LayoutUseContainersForRootFrames() &&
-        mOuter->PresContext()->IsRootContentDocument()) {
-      // With containerless scrolling, the resolution does not apply to the
-      // scroll parts. We need to apply it to their clip manually to avoid it
-      // cutting off the scrollbars when zoomed in.
-      double res = mOuter->PresShell()->GetResolution();
-      scrollPartsClip.width = NSToCoordRound(scrollPartsClip.width * res);
-      scrollPartsClip.height = NSToCoordRound(scrollPartsClip.height * res);
-    }
+    nsRect scrollPartsClip(aBuilder->ToReferenceFrame(mOuter), TrueOuterSize());
     clipState.ClipContentDescendants(scrollPartsClip);
   }
 
@@ -3811,8 +3801,12 @@ bool ScrollFrameHelper::DecideScrollableLayer(
     if (aSetBase) {
       nsRect displayportBase = *aVisibleRect;
       nsPresContext* pc = mOuter->PresContext();
-      if (mIsRoot &&
-          (pc->IsRootContentDocument() || !pc->GetParentPresContext())) {
+
+      bool isContentRootDoc = pc->IsRootContentDocumentCrossProcess();
+      bool isChromeRootDoc =
+          !pc->Document()->IsContentDocument() && !pc->GetParentPresContext();
+
+      if (mIsRoot && (isContentRootDoc || isChromeRootDoc)) {
         displayportBase =
             nsRect(nsPoint(0, 0),
                    nsLayoutUtils::CalculateCompositionSizeForFrame(mOuter));
@@ -4299,7 +4293,17 @@ void ScrollFrameHelper::ScrollByCSSPixels(
     const CSSIntPoint& aDelta, ScrollMode aMode, nsAtom* aOrigin,
     nsIScrollbarMediator::ScrollSnapMode aSnap) {
   nsPoint current = GetScrollPosition();
-  nsPoint pt = current + CSSPoint::ToAppUnits(aDelta);
+  // `current` value above might be a value which was aligned to in
+  // layer-pixels, so starting from such points will make the difference between
+  // the given position in script (e.g. scrollTo) and the aligned position
+  // larger, in the worst case the difference can be observed in CSS pixels.
+  // To avoid it, we use the current position in CSS pixels as the start
+  // position.  Hopefully it exactly matches the position where it was given by
+  // the previous scrolling operation, but there may be some edge cases where
+  // the current position in CSS pixels differs from the given position, the
+  // cases should be fixed in bug 1556685.
+  CSSIntPoint currentCSSPixels = GetScrollPositionCSSPixels();
+  nsPoint pt = CSSPoint::ToAppUnits(currentCSSPixels + aDelta);
 
   if (aSnap == nsIScrollableFrame::DEFAULT) {
     aSnap = DefaultSnapMode();
@@ -5233,7 +5237,7 @@ bool nsXULScrollFrame::AddRemoveScrollbar(bool& aHasScrollbar, nscoord& aXY,
   nscoord size = aSize;
   nscoord xy = aXY;
 
-  if (size != NS_INTRINSICSIZE) {
+  if (size != NS_UNCONSTRAINEDSIZE) {
     if (aAdd) {
       size -= aSbSize;
       if (!aOnRightOrBottom && size >= 0) xy += aSbSize;
@@ -5311,13 +5315,8 @@ void ScrollFrameHelper::PostOverflowEvent() {
     return;
   }
 
-  nsRootPresContext* rpc = mOuter->PresContext()->GetRootPresContext();
-  if (!rpc) {
-    return;
-  }
-
   mAsyncScrollPortEvent = new AsyncScrollPortEvent(this);
-  rpc->AddWillPaintObserver(mAsyncScrollPortEvent.get());
+  nsContentUtils::AddScriptRunner(mAsyncScrollPortEvent.get());
 }
 
 nsIFrame* ScrollFrameHelper::GetFrameForDir() const {
@@ -5690,6 +5689,15 @@ class MOZ_RAII AutoMinimumScaleSizeChangeDetector final {
   nsSize mPreviousMinimumScaleSize;
   bool mPreviousIsUsingMinimumScaleSize;
 };
+
+nsSize ScrollFrameHelper::TrueOuterSize() const {
+  if (RefPtr<MobileViewportManager> manager =
+          mOuter->PresShell()->GetMobileViewportManager()) {
+    return LayoutDeviceSize::ToAppUnits(
+        manager->DisplaySize(), mOuter->PresContext()->AppUnitsPerDevPixel());
+  }
+  return mOuter->GetSize();
+}
 
 void ScrollFrameHelper::UpdateMinimumScaleSize(
     const nsRect& aScrollableOverflow, const nsSize& aICBSize) {

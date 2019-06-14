@@ -80,7 +80,7 @@ class nsIDocShell;
 class nsIFrame;
 class nsILayoutHistoryState;
 class nsINode;
-class nsIPageSequenceFrame;
+class nsPageSequenceFrame;
 class nsIReflowCallback;
 class nsIScrollableFrame;
 class nsITimer;
@@ -453,7 +453,7 @@ class PresShell final : public nsStubDocumentObserver,
    * Returns the page sequence frame associated with the frame hierarchy.
    * Returns nullptr if not a paginated view.
    */
-  nsIPageSequenceFrame* GetPageSequenceFrame() const;
+  nsPageSequenceFrame* GetPageSequenceFrame() const;
 
   /**
    * Returns the canvas frame associated with the frame hierarchy.
@@ -917,8 +917,8 @@ class PresShell final : public nsStubDocumentObserver,
    * bounds aBounds representing the dark grey background behind the page of a
    * print preview presentation.
    */
-  void AddPrintPreviewBackgroundItem(nsDisplayListBuilder& aBuilder,
-                                     nsDisplayList& aList, nsIFrame* aFrame,
+  void AddPrintPreviewBackgroundItem(nsDisplayListBuilder* aBuilder,
+                                     nsDisplayList* aList, nsIFrame* aFrame,
                                      const nsRect& aBounds);
 
   /**
@@ -1564,7 +1564,7 @@ class PresShell final : public nsStubDocumentObserver,
    * LayoutUseContainersForRootFrame has built the scrolling ContainerLayer.
    */
   void AddCanvasBackgroundColorItem(
-      nsDisplayListBuilder& aBuilder, nsDisplayList& aList, nsIFrame* aFrame,
+      nsDisplayListBuilder* aBuilder, nsDisplayList* aList, nsIFrame* aFrame,
       const nsRect& aBounds, nscolor aBackstopColor = NS_RGBA(0, 0, 0, 0),
       AddCanvasBackgroundColorFlags aFlags =
           AddCanvasBackgroundColorFlags::None);

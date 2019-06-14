@@ -1433,6 +1433,12 @@ class Connection final {
 
   void AssertIsOnOwningThread() const { NS_ASSERT_OWNINGTHREAD(Connection); }
 
+  QuotaClient* GetQuotaClient() const {
+    MOZ_ASSERT(mQuotaClient);
+
+    return mQuotaClient;
+  }
+
   ArchivedOriginScope* GetArchivedOriginScope() const {
     return mArchivedOriginScope;
   }
@@ -1478,6 +1484,12 @@ class Connection final {
 
   nsresult GetCachedStatement(const nsACString& aQuery,
                               CachedStatement* aCachedStatement);
+
+  nsresult BeginWriteTransaction();
+
+  nsresult CommitWriteTransaction();
+
+  nsresult RollbackWriteTransaction();
 
  private:
   // Only created by ConnectionThread.
@@ -2820,6 +2832,30 @@ class QuotaClient::MatchFunction final : public mozIStorageFunction {
 };
 
 /*******************************************************************************
+ * Helper classes
+ ******************************************************************************/
+
+class MOZ_STACK_CLASS AutoWriteTransaction final {
+  Connection* mConnection;
+  Maybe<MutexAutoLock> mShadowDatabaseLock;
+  bool mShadowWrites;
+
+ public:
+  explicit AutoWriteTransaction(bool aShadowWrites);
+
+  ~AutoWriteTransaction();
+
+  nsresult Start(Connection* aConnection);
+
+  nsresult Commit();
+
+ private:
+  nsresult LockAndAttachShadowDatabase(Connection* aConnection);
+
+  nsresult DetachShadowDatabaseAndUnlock();
+};
+
+/*******************************************************************************
  * Globals
  ******************************************************************************/
 
@@ -2925,7 +2961,7 @@ void InitUsageForOrigin(const nsACString& aOrigin, int64_t aUsage) {
     gUsages = new UsageHashtable();
   }
 
-  MOZ_DIAGNOSTIC_ASSERT(!gUsages->Contains(aOrigin));
+  MOZ_ASSERT(!gUsages->Contains(aOrigin));
   gUsages->Put(aOrigin, aUsage);
 }
 
@@ -4342,6 +4378,60 @@ nsresult Connection::GetCachedStatement(const nsACString& aQuery,
   return NS_OK;
 }
 
+nsresult Connection::BeginWriteTransaction() {
+  AssertIsOnConnectionThread();
+  MOZ_ASSERT(mStorageConnection);
+
+  CachedStatement stmt;
+  nsresult rv = GetCachedStatement(NS_LITERAL_CSTRING("BEGIN IMMEDIATE;"),
+                                       &stmt);
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return rv;
+  }
+
+  rv = stmt->Execute();
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return rv;
+  }
+
+  return NS_OK;
+}
+
+nsresult Connection::CommitWriteTransaction() {
+  AssertIsOnConnectionThread();
+  MOZ_ASSERT(mStorageConnection);
+
+  CachedStatement stmt;
+  nsresult rv = GetCachedStatement(NS_LITERAL_CSTRING("COMMIT;"), &stmt);
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return rv;
+  }
+
+  rv = stmt->Execute();
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return rv;
+  }
+
+  return NS_OK;
+}
+
+nsresult Connection::RollbackWriteTransaction() {
+  AssertIsOnConnectionThread();
+  MOZ_ASSERT(mStorageConnection);
+
+  CachedStatement stmt;
+  nsresult rv = GetCachedStatement(NS_LITERAL_CSTRING("ROLLBACK;"), &stmt);
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return rv;
+  }
+
+  // This may fail if SQLite already rolled back the transaction so ignore any
+  // errors.
+  Unused << stmt->Execute();
+
+  return NS_OK;
+}
+
 void Connection::ScheduleFlush() {
   AssertIsOnOwningThread();
   MOZ_ASSERT(mWriteOptimizer.HasWrites());
@@ -4497,37 +4587,9 @@ nsresult Connection::FlushOp::DoDatastoreWork() {
   AssertIsOnConnectionThread();
   MOZ_ASSERT(mConnection);
 
-  QuotaManager* quotaManager = QuotaManager::Get();
-  MOZ_ASSERT(quotaManager);
+  AutoWriteTransaction autoWriteTransaction(mShadowWrites);
 
-  nsCOMPtr<mozIStorageConnection> storageConnection =
-      mConnection->StorageConnection();
-  MOZ_ASSERT(storageConnection);
-
-  nsresult rv;
-
-  Maybe<MutexAutoLock> shadowDatabaseLock;
-
-  if (mShadowWrites) {
-    MOZ_ASSERT(mConnection->mQuotaClient);
-
-    shadowDatabaseLock.emplace(
-        mConnection->mQuotaClient->ShadowDatabaseMutex());
-
-    rv = AttachShadowDatabase(quotaManager->GetBasePath(), storageConnection);
-    if (NS_WARN_IF(NS_FAILED(rv))) {
-      return rv;
-    }
-  }
-
-  CachedStatement stmt;
-  rv = mConnection->GetCachedStatement(NS_LITERAL_CSTRING("BEGIN IMMEDIATE;"),
-                                       &stmt);
-  if (NS_WARN_IF(NS_FAILED(rv))) {
-    return rv;
-  }
-
-  rv = stmt->Execute();
+  nsresult rv = autoWriteTransaction.Start(mConnection);
   if (NS_WARN_IF(NS_FAILED(rv))) {
     return rv;
   }
@@ -4556,29 +4618,18 @@ nsresult Connection::FlushOp::DoDatastoreWork() {
     return rv;
   }
 
-  rv = mConnection->GetCachedStatement(NS_LITERAL_CSTRING("COMMIT;"), &stmt);
+  rv = autoWriteTransaction.Commit();
   if (NS_WARN_IF(NS_FAILED(rv))) {
     return rv;
-  }
-
-  rv = stmt->Execute();
-  if (NS_WARN_IF(NS_FAILED(rv))) {
-    return rv;
-  }
-
-  if (mShadowWrites) {
-    rv = DetachShadowDatabase(storageConnection);
-    if (NS_WARN_IF(NS_FAILED(rv))) {
-      return rv;
-    }
-
-    shadowDatabaseLock.reset();
   }
 
   rv = usageJournalFile->Remove(false);
   if (NS_WARN_IF(NS_FAILED(rv))) {
     return rv;
   }
+
+  QuotaManager* quotaManager = QuotaManager::Get();
+  MOZ_ASSERT(quotaManager);
 
   RefPtr<Runnable> runnable =
       NS_NewRunnableFunction("dom::localstorage::UpdateUsageRunnable",
@@ -8632,7 +8683,7 @@ nsresult QuotaClient::InitOrigin(PersistenceType aPersistenceType,
       }
     }
 
-    MOZ_DIAGNOSTIC_ASSERT(usage >= 0);
+    MOZ_ASSERT(usage >= 0);
 
     if (!aForGetUsage) {
       InitUsageForOrigin(aOrigin, usage);
@@ -9312,6 +9363,125 @@ QuotaClient::MatchFunction::OnFunctionCall(
   }
 
   outVar.forget(aResult);
+  return NS_OK;
+}
+
+/*******************************************************************************
+ * AutoWriteTransaction
+ ******************************************************************************/
+
+AutoWriteTransaction::AutoWriteTransaction(bool aShadowWrites)
+    : mConnection(nullptr)
+    , mShadowWrites(aShadowWrites)
+{
+  AssertIsOnConnectionThread();
+
+  MOZ_COUNT_CTOR(mozilla::dom::AutoWriteTransaction);
+}
+
+AutoWriteTransaction::~AutoWriteTransaction() {
+  AssertIsOnConnectionThread();
+
+  MOZ_COUNT_DTOR(mozilla::dom::AutoWriteTransaction);
+
+  if (mConnection) {
+    if (NS_FAILED(mConnection->RollbackWriteTransaction())) {
+      NS_WARNING("Failed to rollback write transaction!");
+    }
+
+    if (mShadowWrites && NS_FAILED(DetachShadowDatabaseAndUnlock())) {
+      NS_WARNING("Failed to detach shadow database!");
+    }
+  }
+}
+
+nsresult AutoWriteTransaction::Start(Connection* aConnection) {
+  AssertIsOnConnectionThread();
+  MOZ_ASSERT(aConnection);
+  MOZ_ASSERT(!mConnection);
+
+  nsresult rv;
+
+  if (mShadowWrites) {
+    rv = LockAndAttachShadowDatabase(aConnection);
+    if (NS_WARN_IF(NS_FAILED(rv))) {
+      return rv;
+    }
+  }
+
+  rv = aConnection->BeginWriteTransaction();
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return rv;
+  }
+
+  mConnection = aConnection;
+
+  return NS_OK;
+}
+
+nsresult AutoWriteTransaction::Commit() {
+  AssertIsOnConnectionThread();
+  MOZ_ASSERT(mConnection);
+
+  nsresult rv = mConnection->CommitWriteTransaction();
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return rv;
+  }
+
+  if (mShadowWrites) {
+    rv = DetachShadowDatabaseAndUnlock();
+    if (NS_WARN_IF(NS_FAILED(rv))) {
+      return rv;
+    }
+  }
+
+  mConnection = nullptr;
+
+  return NS_OK;
+}
+
+nsresult AutoWriteTransaction::LockAndAttachShadowDatabase(Connection* aConnection) {
+  AssertIsOnConnectionThread();
+  MOZ_ASSERT(aConnection);
+  MOZ_ASSERT(!mConnection);
+  MOZ_ASSERT(mShadowDatabaseLock.isNothing());
+  MOZ_ASSERT(mShadowWrites);
+
+  QuotaManager* quotaManager = QuotaManager::Get();
+  MOZ_ASSERT(quotaManager);
+
+  nsCOMPtr<mozIStorageConnection> storageConnection =
+      aConnection->StorageConnection();
+  MOZ_ASSERT(storageConnection);
+
+  mShadowDatabaseLock.emplace(
+      aConnection->GetQuotaClient()->ShadowDatabaseMutex());
+
+  nsresult rv = AttachShadowDatabase(quotaManager->GetBasePath(), storageConnection);
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return rv;
+  }
+
+  return NS_OK;
+}
+
+nsresult AutoWriteTransaction::DetachShadowDatabaseAndUnlock() {
+  AssertIsOnConnectionThread();
+  MOZ_ASSERT(mConnection);
+  MOZ_ASSERT(mShadowDatabaseLock.isSome());
+  MOZ_ASSERT(mShadowWrites);
+
+  nsCOMPtr<mozIStorageConnection> storageConnection =
+      mConnection->StorageConnection();
+  MOZ_ASSERT(storageConnection);
+
+  nsresult rv = DetachShadowDatabase(storageConnection);
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return rv;
+  }
+
+  mShadowDatabaseLock.reset();
+
   return NS_OK;
 }
 

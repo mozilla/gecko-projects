@@ -34,6 +34,7 @@
 #include "js/GCVector.h"
 #include "js/HashTable.h"
 #include "js/Id.h"
+#include "js/MemoryFunctions.h"
 #include "js/OffThreadScriptCompilation.h"
 #include "js/Principals.h"
 #include "js/PropertyDescriptor.h"
@@ -71,8 +72,6 @@ class MOZ_RAII AutoValueArray : public AutoGCRooter {
  public:
   explicit AutoValueArray(JSContext* cx MOZ_GUARD_OBJECT_NOTIFIER_PARAM)
       : AutoGCRooter(cx, AutoGCRooter::Tag::ValueArray), length_(N) {
-    /* Always initialize in case we GC before assignment. */
-    mozilla::PodArrayZero(elements_);
     MOZ_GUARD_OBJECT_NOTIFIER_INIT;
   }
 
@@ -252,12 +251,6 @@ JS_PUBLIC_API bool JS_StringHasBeenPinned(JSContext* cx, JSString* str);
 extern JS_PUBLIC_API int64_t JS_Now(void);
 
 /** Don't want to export data, so provide accessors for non-inline Values. */
-extern JS_PUBLIC_API JS::Value JS_GetNaNValue(JSContext* cx);
-
-extern JS_PUBLIC_API JS::Value JS_GetNegativeInfinityValue(JSContext* cx);
-
-extern JS_PUBLIC_API JS::Value JS_GetPositiveInfinityValue(JSContext* cx);
-
 extern JS_PUBLIC_API JS::Value JS_GetEmptyStringValue(JSContext* cx);
 
 extern JS_PUBLIC_API JSString* JS_GetEmptyString(JSContext* cx);
@@ -1765,6 +1758,16 @@ extern JS_PUBLIC_API JS::Value JS_GetReservedSlot(JSObject* obj,
 
 extern JS_PUBLIC_API void JS_SetReservedSlot(JSObject* obj, uint32_t index,
                                              const JS::Value& v);
+
+extern JS_PUBLIC_API void JS_InitReservedSlot(JSObject* obj, uint32_t index,
+                                              void* ptr, size_t nbytes,
+                                              JS::MemoryUse use);
+
+template <typename T>
+void JS_InitReservedSlot(JSObject* obj, uint32_t index, T* ptr,
+                         JS::MemoryUse use) {
+  JS_InitReservedSlot(obj, index, ptr, sizeof(T), use);
+}
 
 /************************************************************************/
 

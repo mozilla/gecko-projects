@@ -245,7 +245,16 @@ class TextureData {
           canConcurrentlyReadLock(true) {}
   };
 
-  TextureData() { MOZ_COUNT_CTOR(TextureData); }
+  static TextureData* Create(TextureForwarder* aAllocator,
+                             gfx::SurfaceFormat aFormat,
+                             gfx::IntSize aSize,
+                             LayersBackend aLayersBackend,
+                             int32_t aMaxTextureSize,
+                             BackendSelector aSelector,
+                             TextureFlags aTextureFlags,
+                             TextureAllocationFlags aAllocFlags);
+
+  static bool IsRemote(LayersBackend aLayersBackend, BackendSelector aSelector);
 
   virtual ~TextureData() { MOZ_COUNT_DTOR(TextureData); }
 
@@ -256,6 +265,10 @@ class TextureData {
   virtual void Unlock() = 0;
 
   virtual already_AddRefed<gfx::DrawTarget> BorrowDrawTarget() {
+    return nullptr;
+  }
+
+  virtual already_AddRefed<gfx::SourceSurface> BorrowSnapshot() {
     return nullptr;
   }
 
@@ -300,6 +313,9 @@ class TextureData {
   virtual BufferTextureData* AsBufferTextureData() { return nullptr; }
 
   virtual GPUVideoTextureData* AsGPUVideoTextureData() { return nullptr; }
+
+protected:
+  TextureData() { MOZ_COUNT_CTOR(TextureData); }
 };
 
 /**
@@ -430,6 +446,8 @@ class TextureClient : public AtomicRefCountedWithFinalize<TextureClient> {
    */
   gfx::DrawTarget* BorrowDrawTarget();
 
+  already_AddRefed<gfx::SourceSurface> BorrowSnapshot();
+
   /**
    * Similar to BorrowDrawTarget but provides direct access to the texture's
    * bits instead of a DrawTarget.
@@ -540,7 +558,7 @@ class TextureClient : public AtomicRefCountedWithFinalize<TextureClient> {
    * Should be called only once per TextureClient.
    * The TextureClient must not be locked when calling this method.
    */
-  bool InitIPDLActor(KnowsCompositor* aForwarder);
+  bool InitIPDLActor(KnowsCompositor* aKnowsCompositor);
 
   /**
    * Return a pointer to the IPDLActor.

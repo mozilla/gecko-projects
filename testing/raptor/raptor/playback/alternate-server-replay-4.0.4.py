@@ -87,7 +87,7 @@ class AlternateServerPlayback:
 
     def load(self, loader):
         loader.add_option(
-            "server_replay",
+            "server_replay_files",
             typing.Sequence[str],
             [],
             "Replay server responses from a saved file.",
@@ -99,14 +99,12 @@ class AlternateServerPlayback:
         """
         self.flowmap = {}
         for i in flows:
-            # Check that response has data.content. If response has no content a
-            # HttpException("Cannot assemble flow with missing content") will get raised
-            if i.response and i.response.data.content:
+            if i.response:
                 l = self.flowmap.setdefault(self._hash(i), [])
                 l.append(i)
             else:
                 ctx.log.info(
-                    "Request %s has no response data content. Removing from request list"
+                    "Request %s has no response. Removing from request list"
                     % i.request.url
                 )
         ctx.master.addons.trigger("update", [])
@@ -156,9 +154,9 @@ class AlternateServerPlayback:
             return self.flowmap[hsh][-1]
 
     def configure(self, updated):
-        if not self.configured and ctx.options.server_replay:
+        if not self.configured and ctx.options.server_replay_files:
             self.configured = True
-            self.load_files(ctx.options.server_replay)
+            self.load_files(ctx.options.server_replay_files)
 
     def request(self, f):
         if self.flowmap:

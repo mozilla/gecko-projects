@@ -73,8 +73,12 @@ static void LogBlockedRequest(nsIRequest* aRequest, const char* aProperty,
 
   // Generate the error message
   nsAutoString blockedMessage;
+  AutoTArray<nsString, 2> params;
+  CopyUTF8toUTF16(spec, *params.AppendElement());
+  if (aParam) {
+    params.AppendElement(aParam);
+  }
   NS_ConvertUTF8toUTF16 specUTF16(spec);
-  const char16_t* params[] = {specUTF16.get(), aParam};
   rv = nsContentUtils::FormatLocalizedString(
       nsContentUtils::eSECURITY_PROPERTIES, aProperty, params, blockedMessage);
 
@@ -552,6 +556,13 @@ nsresult nsCORSListenerProxy::CheckRequestApproved(nsIRequest* aRequest) {
     // For synthesized responses, we don't need to perform any checks.
     // Note: This would be unsafe if we ever changed our behavior to allow
     // service workers to intercept CORS preflights.
+    return NS_OK;
+  }
+  if (loadInfo->GetBypassCORSChecks()) {
+    // This flag gets set if a WebExtention redirects a channel
+    // @onBeforeRequest. At this point no request has been made so we don't have
+    // the "Access-Control-Allow-Origin" header yet and the redirect would fail.
+    // So we're skipping the CORS check in that case.
     return NS_OK;
   }
 

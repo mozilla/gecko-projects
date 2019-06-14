@@ -1500,7 +1500,7 @@ ScriptLoadRequest* ScriptLoader::CreateLoadRequest(
     nsIPrincipal* aTriggeringPrincipal, CORSMode aCORSMode,
     const SRIMetadata& aIntegrity,
     mozilla::net::ReferrerPolicy aReferrerPolicy) {
-  nsIURI* referrer = mDocument->GetDocumentURI();
+  nsIURI* referrer = mDocument->GetDocumentURIAsReferrer();
   ScriptFetchOptions* fetchOptions = new ScriptFetchOptions(
       aCORSMode, aReferrerPolicy, aElement, aTriggeringPrincipal);
 
@@ -3409,8 +3409,8 @@ void ScriptLoader::ReportErrorToConsole(ScriptLoadRequest* aRequest,
     message = isScript ? "ScriptSourceLoadFailed" : "ModuleSourceLoadFailed";
   }
 
-  NS_ConvertUTF8toUTF16 url(aRequest->mURI->GetSpecOrDefault());
-  const char16_t* params[] = {url.get()};
+  AutoTArray<nsString, 1> params;
+  CopyUTF8toUTF16(aRequest->mURI->GetSpecOrDefault(), *params.AppendElement());
 
   nsIScriptElement* element = aRequest->Element();
   uint32_t lineNo = element ? element->GetScriptLineNumber() : 0;
@@ -3418,8 +3418,8 @@ void ScriptLoader::ReportErrorToConsole(ScriptLoadRequest* aRequest,
 
   nsContentUtils::ReportToConsole(
       nsIScriptError::warningFlag, NS_LITERAL_CSTRING("Script Loader"),
-      mDocument, nsContentUtils::eDOM_PROPERTIES, message, params,
-      ArrayLength(params), nullptr, EmptyString(), lineNo, columnNo);
+      mDocument, nsContentUtils::eDOM_PROPERTIES, message, params, nullptr,
+      EmptyString(), lineNo, columnNo);
 }
 
 void ScriptLoader::ReportPreloadErrorsToConsole(ScriptLoadRequest* aRequest) {

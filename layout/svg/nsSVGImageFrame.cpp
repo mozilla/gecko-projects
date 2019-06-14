@@ -182,10 +182,9 @@ gfx::Matrix nsSVGImageFrame::GetRasterImageTransform(int32_t aNativeWidth,
 }
 
 gfx::Matrix nsSVGImageFrame::GetVectorImageTransform() {
-  float x, y, width, height;
+  float x, y;
   SVGImageElement* element = static_cast<SVGImageElement*>(GetContent());
-  SVGGeometryProperty::ResolveAll<SVGT::X, SVGT::Y, SVGT::Width, SVGT::Height>(
-      element, &x, &y, &width, &height);
+  SVGGeometryProperty::ResolveAll<SVGT::X, SVGT::Y>(element, &x, &y);
 
   // No viewBoxTM needed here -- our height/width overrides any concept of
   // "native size" that the SVG image has, and it will handle viewBox and
@@ -194,22 +193,27 @@ gfx::Matrix nsSVGImageFrame::GetVectorImageTransform() {
   return gfx::Matrix::Translation(x, y);
 }
 
-bool nsSVGImageFrame::GetIntrinsicImageSize(
-    mozilla::gfx::Size& aIntrinsicSize) const {
+bool nsSVGImageFrame::GetIntrinsicImageDimensions(
+    mozilla::gfx::Size& aSize, mozilla::AspectRatio& aAspectRatio) const {
   if (!mImageContainer) {
     return false;
   }
 
   int32_t width, height;
   if (NS_FAILED(mImageContainer->GetWidth(&width))) {
-    return false;
+    aSize.width = -1;
+  } else {
+    aSize.width = width;
   }
 
   if (NS_FAILED(mImageContainer->GetHeight(&height))) {
-    return false;
+    aSize.height = -1;
+  } else {
+    aSize.height = height;
   }
 
-  aIntrinsicSize = {float(width), float(height)};
+  Maybe<AspectRatio> asp = mImageContainer->GetIntrinsicRatio();
+  aAspectRatio = asp.valueOr(AspectRatio{});
 
   return true;
 }
@@ -307,10 +311,31 @@ void nsSVGImageFrame::PaintSVG(gfxContext& aContext,
                        (mState & NS_FRAME_IS_NONDISPLAY),
                    "Display lists handle dirty rect intersection test");
       dirtyRect = ToAppUnits(*aDirtyRect, appUnitsPerDevPx);
-      // Adjust dirtyRect to match our local coordinate system.
-      nsRect rootRect = nsSVGUtils::TransformFrameRectToOuterSVG(
-          mRect, aTransform, PresContext());
-      dirtyRect.MoveBy(-rootRect.TopLeft());
+
+      // dirtyRect is relative to the outer <svg>, we should transform it
+      // down to <image>.
+      Rect dir(dirtyRect.x, dirtyRect.y, dirtyRect.width, dirtyRect.height);
+      dir.Scale(1.f / AppUnitsPerCSSPixel());
+
+      // FIXME: This isn't correct if there is an inner <svg> enclosing
+      // the <image>. But that seems to be a quite obscure usecase, we can
+      // add a dedicated utility for that purpose to replace the GetCTM
+      // here if necessary.
+      auto mat = SVGContentUtils::GetCTM(
+          static_cast<SVGImageElement*>(GetContent()), false);
+      if (mat.IsSingular()) {
+        return;
+      }
+
+      mat.Invert();
+      dir = mat.TransformRect(dir);
+
+      // x, y offset of <image> is not included in CTM.
+      dir.MoveBy(-x, -y);
+
+      dir.Scale(AppUnitsPerCSSPixel());
+      dir.Round();
+      dirtyRect = nsRect(dir.x, dir.y, dir.width, dir.height);
     }
 
     uint32_t flags = aImgParams.imageFlags;

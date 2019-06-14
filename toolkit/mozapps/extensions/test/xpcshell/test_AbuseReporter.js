@@ -64,11 +64,24 @@ async function installTestExtension(overrideOptions = {}) {
   return {extension, addon};
 }
 
-async function assertRejectsAbuseReportError(promise, errorType) {
-  await Assert.rejects(promise, error => {
-    ok(error instanceof AbuseReportError);
-    return error.errorType === errorType;
-  });
+async function assertRejectsAbuseReportError(promise, errorType, errorInfo) {
+  let error;
+
+  await Assert.rejects(promise, err => {
+    // Log the actual error to make investigating test failures easier.
+    Cu.reportError(err);
+    error = err;
+    return err instanceof AbuseReportError;
+  }, `Got an AbuseReportError`);
+
+  equal(error.errorType, errorType, "Got the expected errorType");
+  equal(error.errorInfo, errorInfo, "Got the expected errorInfo");
+  ok(error.message.includes(errorType),
+    "errorType should be included in the error message");
+  if (errorInfo) {
+    ok(error.message.includes(errorInfo),
+      "errorInfo should be included in the error message");
+  }
 }
 
 async function assertBaseReportData({reportData, addon}) {
@@ -172,12 +185,12 @@ add_task(async function test_addon_install_method_mapping() {
     ["distribution", {source: "distribution"}],
     ["drag_and_drop", {source: "about:addons", method: "drag-and-drop"}],
     ["enterprise_policy", {source: "enterprise-policy"}],
-    ["file_uri", {source: "file-uri"}],
+    ["file_url", {source: "file-url"}],
     ["install_from_file", {source: "about:addons", method: "install-from-file"}],
     ["installtrigger", {source: "test-host", method: "installTrigger"}],
     ["link", {source: "unknown", method: "link"}],
     ["management_webext_api", {source: "extension", method: "management-webext-api"}],
-    ["sideload", {source: "sideload"}],
+    ["sideload", {source: "app-profile", method: "sideload"}],
     ["sync", {source: "sync"}],
     ["system_addon", {source: "system-addon"}],
     ["temporary_addon", {source: "temporary-addon"}],
@@ -292,9 +305,13 @@ add_task(async function test_error_recent_submit() {
 add_task(async function test_submission_server_error() {
   const {extension} = await installTestExtension();
 
-  async function testErrorCode(
-    responseStatus, expectedErrorType, expectRequest = true
-  ) {
+  async function testErrorCode({
+    responseStatus,
+    responseText = "",
+    expectedErrorType,
+    expectedErrorInfo,
+    expectRequest = true,
+  }) {
     info(`Test expected AbuseReportError on response status "${responseStatus}"`);
     Services.telemetry.clearEvents();
     await clearAbuseReportState();
@@ -303,14 +320,15 @@ add_task(async function test_submission_server_error() {
     apiRequestHandler = ({request, response}) => {
       requestReceived = true;
       response.setStatusLine(request.httpVersion, responseStatus, "Error");
-      response.write("");
+      response.write(responseText);
     };
 
     const report = await AbuseReporter.createAbuseReport(ADDON_ID, REPORT_OPTIONS);
     const promiseSubmit = report.submit({reason: "a-reason"});
     if (typeof expectedErrorType === "string") {
       // Assert a specific AbuseReportError errorType.
-      await assertRejectsAbuseReportError(promiseSubmit, expectedErrorType);
+      await assertRejectsAbuseReportError(
+        promiseSubmit, expectedErrorType, expectedErrorInfo);
     } else {
       // Assert on a given Error class.
       await Assert.rejects(promiseSubmit, expectedErrorType);
@@ -329,17 +347,47 @@ add_task(async function test_submission_server_error() {
     }], TELEMETRY_EVENTS_FILTERS);
   }
 
-  await testErrorCode(500, "ERROR_SERVER");
-  await testErrorCode(404, "ERROR_CLIENT");
+  await testErrorCode({
+    responseStatus: 500,
+    responseText: "A server error",
+    expectedErrorType: "ERROR_SERVER",
+    expectedErrorInfo: JSON.stringify({
+      status: 500,
+      responseText: "A server error",
+    }),
+  });
+  await testErrorCode({
+    responseStatus: 404,
+    responseText: "Not found error",
+    expectedErrorType: "ERROR_CLIENT",
+    expectedErrorInfo: JSON.stringify({
+      status: 404,
+      responseText: "Not found error",
+    }),
+  });
   // Test response with unexpected status code.
-  await testErrorCode(604, "ERROR_UNKNOWN");
+  await testErrorCode({
+    responseStatus: 604,
+    responseText: "An unexpected status code",
+    expectedErrorType: "ERROR_UNKNOWN",
+    expectedErrorInfo: JSON.stringify({
+      status: 604,
+      responseText: "An unexpected status code",
+    }),
+  });
   // Test response status 200 with invalid json data.
-  await testErrorCode(200, /SyntaxError: JSON.parse/);
+  await testErrorCode({
+    responseStatus: 200,
+    expectedErrorType: /SyntaxError: JSON.parse/,
+  });
 
   // Test on invalid url.
   Services.prefs.setCharPref("extensions.abuseReport.url",
                              "invalid-protocol://abuse-report");
-  await testErrorCode(200, "ERROR_NETWORK", false);
+  await testErrorCode({
+    expectedErrorType: "ERROR_NETWORK",
+    expectRequest: false,
+  });
 
   await extension.unload();
 });
@@ -400,4 +448,95 @@ add_task(async function test_submission_aborting() {
   // test file can shutdown (otherwise the test run will be stuck after this
   // task completed).
   resolvePendingResponses();
+});
+
+add_task(async function test_truncated_string_properties() {
+  const generateString = len => (new Array(len)).fill("a").join("");
+
+  const LONG_STRINGS_ADDON_ID = "addon-with-long-strings-props@mochi.test";
+  const {extension} = await installTestExtension({
+    manifest: {
+      name: generateString(400),
+      description: generateString(400),
+      applications: {gecko: {id: LONG_STRINGS_ADDON_ID}},
+    },
+  });
+
+  // Override the test api server request handler, to be able to
+  // intercept the properties actually submitted.
+  let reportSubmitted;
+  apiRequestHandler = ({data, request, response}) => {
+    reportSubmitted = JSON.parse(data);
+    handleSubmitRequest({request, response});
+  };
+
+  const report = await AbuseReporter.createAbuseReport(
+    LONG_STRINGS_ADDON_ID, REPORT_OPTIONS);
+
+  await report.submit({message: "fake-message", reason: "fake-reason"});
+
+  const expected = {
+    addon_name: generateString(255),
+    addon_summary: generateString(255),
+  };
+
+  Assert.deepEqual({
+    addon_name: reportSubmitted.addon_name,
+    addon_summary: reportSubmitted.addon_summary,
+  }, expected, "Got the long strings truncated as expected");
+
+  await extension.unload();
+});
+
+add_task(async function test_report_recommended() {
+  const NON_RECOMMENDED_ADDON_ID = "non-recommended-addon@mochi.test";
+  const RECOMMENDED_ADDON_ID = "recommended-addon@mochi.test";
+
+  const now = Date.now();
+  const not_before = new Date(now - 3600000).toISOString();
+  const not_after = new Date(now + 3600000).toISOString();
+
+  const {extension: nonRecommended} = await installTestExtension({
+    manifest: {
+      name: "Fake non recommended addon",
+      applications: {gecko: {id: NON_RECOMMENDED_ADDON_ID}},
+    },
+  });
+
+  const {extension: recommended} = await installTestExtension({
+    manifest: {
+      name: "Fake recommended addon",
+      applications: {gecko: {id: RECOMMENDED_ADDON_ID}},
+    },
+    files: {
+      "mozilla-recommendation.json": {
+        addon_id: RECOMMENDED_ADDON_ID,
+        states: ["recommended"],
+        validity: {not_before, not_after},
+      },
+    },
+  });
+
+  // Override the test api server request handler, to be able to
+  // intercept the properties actually submitted.
+  let reportSubmitted;
+  apiRequestHandler = ({data, request, response}) => {
+    reportSubmitted = JSON.parse(data);
+    handleSubmitRequest({request, response});
+  };
+
+  async function checkReportedSignature(addonId, expectedAddonSignature) {
+    await clearAbuseReportState();
+    const report = await AbuseReporter.createAbuseReport(
+      addonId, REPORT_OPTIONS);
+    await report.submit({message: "fake-message", reason: "fake-reason"});
+    equal(reportSubmitted.addon_signature, expectedAddonSignature,
+      `Got the expected addon_signature for ${addonId}`);
+  }
+
+  await checkReportedSignature(NON_RECOMMENDED_ADDON_ID, "signed");
+  await checkReportedSignature(RECOMMENDED_ADDON_ID, "curated");
+
+  await nonRecommended.unload();
+  await recommended.unload();
 });

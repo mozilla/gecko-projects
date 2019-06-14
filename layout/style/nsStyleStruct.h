@@ -130,46 +130,6 @@ struct MOZ_NEEDS_MEMMOVABLE_MEMBERS nsStyleFont {
   RefPtr<nsAtom> mLanguage;
 };
 
-class nsStyleGradient final {
- public:
-  nsStyleGradient();
-  uint8_t mShape;  // NS_STYLE_GRADIENT_SHAPE_*
-  uint8_t mSize;   // NS_STYLE_GRADIENT_SIZE_*;
-                   // not used (must be FARTHEST_CORNER) for linear shape
-  bool mRepeating;
-  bool mLegacySyntax;  // If true, serialization should use a vendor prefix.
-  // XXXdholbert This will hopefully be going away soon, if bug 1337655 sticks:
-  bool mMozLegacySyntax;  // (Only makes sense when mLegacySyntax is true.)
-                          // If true, serialization should use -moz prefix.
-                          // Else, serialization should use -webkit prefix.
-
-  nsStyleCoord mBgPosX;  // percent, coord, calc, none
-  nsStyleCoord mBgPosY;  // percent, coord, calc, none
-  nsStyleCoord mAngle;   // none, angle
-
-  nsStyleCoord mRadiusX;  // percent, coord, calc, none
-  nsStyleCoord mRadiusY;  // percent, coord, calc, none
-
-  // stops are in the order specified in the stylesheet
-  nsTArray<mozilla::StyleGradientItem> mStops;
-
-  bool operator==(const nsStyleGradient& aOther) const;
-  bool operator!=(const nsStyleGradient& aOther) const {
-    return !(*this == aOther);
-  }
-
-  bool IsOpaque();
-
-  NS_INLINE_DECL_THREADSAFE_REFCOUNTING(nsStyleGradient)
-
- private:
-  // Private destructor, to discourage deletion outside of Release():
-  ~nsStyleGradient() {}
-
-  nsStyleGradient(const nsStyleGradient& aOther) = delete;
-  nsStyleGradient& operator=(const nsStyleGradient& aOther) = delete;
-};
-
 /**
  * A wrapper for an imgRequestProxy that supports off-main-thread creation
  * and equality comparison.
@@ -304,7 +264,7 @@ struct nsStyleImage {
 
   void SetNull();
   void SetImageRequest(already_AddRefed<nsStyleImageRequest> aImage);
-  void SetGradientData(nsStyleGradient* aGradient);
+  void SetGradientData(mozilla::UniquePtr<mozilla::StyleGradient>);
   void SetElementId(already_AddRefed<nsAtom> aElementId);
   void SetCropRect(mozilla::UniquePtr<nsStyleSides> aCropRect);
 
@@ -327,9 +287,9 @@ struct nsStyleImage {
     return mImage;
   }
   imgRequestProxy* GetImageData() const { return ImageRequest()->get(); }
-  nsStyleGradient* GetGradientData() const {
+  const mozilla::StyleGradient& GetGradient() const {
     NS_ASSERTION(mType == eStyleImageType_Gradient, "Data is not a gradient!");
-    return mGradient;
+    return *mGradient;
   }
   bool IsResolved() const {
     return mType != eStyleImageType_Image || ImageRequest()->IsResolved();
@@ -429,7 +389,7 @@ struct nsStyleImage {
   nsStyleImageType mType;
   union {
     nsStyleImageRequest* mImage;
-    nsStyleGradient* mGradient;
+    mozilla::StyleGradient* mGradient;
     nsAtom* mElementId;
   };
 
@@ -1119,6 +1079,15 @@ struct MOZ_NEEDS_MEMMOVABLE_MEMBERS nsStylePosition {
       const nsStylePosition& aNewData,
       const nsStyleVisibility& aOldStyleVisibility) const;
 
+  // Returns whether we need to compute an hypothetical position if we were
+  // absolutely positioned.
+  bool NeedsHypotheticalPositionIfAbsPos() const {
+    return (mOffset.Get(mozilla::eSideRight).IsAuto() &&
+            mOffset.Get(mozilla::eSideLeft).IsAuto()) ||
+           (mOffset.Get(mozilla::eSideTop).IsAuto() &&
+            mOffset.Get(mozilla::eSideBottom).IsAuto());
+  }
+
   /**
    * Return the used value for 'align-self' given our parent ComputedStyle
    * aParent (or null for the root).
@@ -1256,6 +1225,7 @@ struct MOZ_NEEDS_MEMMOVABLE_MEMBERS nsStyleTextReset {
   nscoord mInitialLetterSink;    // 0 means normal
   float mInitialLetterSize;      // 0.0f means normal
   mozilla::StyleColor mTextDecorationColor;
+  mozilla::StyleLengthOrAuto mTextDecorationWidth;
 };
 
 struct MOZ_NEEDS_MEMMOVABLE_MEMBERS nsStyleText {
@@ -1325,30 +1295,35 @@ struct MOZ_NEEDS_MEMMOVABLE_MEMBERS nsStyleText {
   bool WhiteSpaceIsSignificant() const {
     return mWhiteSpace == mozilla::StyleWhiteSpace::Pre ||
            mWhiteSpace == mozilla::StyleWhiteSpace::PreWrap ||
+           mWhiteSpace == mozilla::StyleWhiteSpace::BreakSpaces ||
            mWhiteSpace == mozilla::StyleWhiteSpace::PreSpace;
   }
 
   bool NewlineIsSignificantStyle() const {
     return mWhiteSpace == mozilla::StyleWhiteSpace::Pre ||
            mWhiteSpace == mozilla::StyleWhiteSpace::PreWrap ||
+           mWhiteSpace == mozilla::StyleWhiteSpace::BreakSpaces ||
            mWhiteSpace == mozilla::StyleWhiteSpace::PreLine;
   }
 
   bool WhiteSpaceOrNewlineIsSignificant() const {
     return mWhiteSpace == mozilla::StyleWhiteSpace::Pre ||
            mWhiteSpace == mozilla::StyleWhiteSpace::PreWrap ||
+           mWhiteSpace == mozilla::StyleWhiteSpace::BreakSpaces ||
            mWhiteSpace == mozilla::StyleWhiteSpace::PreLine ||
            mWhiteSpace == mozilla::StyleWhiteSpace::PreSpace;
   }
 
   bool TabIsSignificant() const {
     return mWhiteSpace == mozilla::StyleWhiteSpace::Pre ||
-           mWhiteSpace == mozilla::StyleWhiteSpace::PreWrap;
+           mWhiteSpace == mozilla::StyleWhiteSpace::PreWrap ||
+           mWhiteSpace == mozilla::StyleWhiteSpace::BreakSpaces;
   }
 
   bool WhiteSpaceCanWrapStyle() const {
     return mWhiteSpace == mozilla::StyleWhiteSpace::Normal ||
            mWhiteSpace == mozilla::StyleWhiteSpace::PreWrap ||
+           mWhiteSpace == mozilla::StyleWhiteSpace::BreakSpaces ||
            mWhiteSpace == mozilla::StyleWhiteSpace::PreLine;
   }
 
@@ -1589,7 +1564,8 @@ struct MOZ_NEEDS_MEMMOVABLE_MEMBERS nsStyleDisplay {
   void TriggerImageLoads(mozilla::dom::Document&, const nsStyleDisplay*);
   const static bool kHasTriggerImageLoads = true;
 
-  nsChangeHint CalcDifference(const nsStyleDisplay& aNewData) const;
+  nsChangeHint CalcDifference(const nsStyleDisplay& aNewData,
+                              const nsStylePosition& aOldPosition) const;
 
   mozilla::StyleUrlOrNone mBinding;
   nsStyleAutoArray<mozilla::StyleTransition> mTransitions;
@@ -1623,9 +1599,6 @@ struct MOZ_NEEDS_MEMMOVABLE_MEMBERS nsStyleDisplay {
   uint8_t mPosition;  // NS_STYLE_POSITION_*
 
   mozilla::StyleFloat mFloat;
-  // Save mFloat for position:absolute/fixed; otherwise equal to mFloat.
-  mozilla::StyleFloat mOriginalFloat;
-
   mozilla::StyleClear mBreakType;
   mozilla::StyleBreakWithin mBreakInside;
   mozilla::StyleBreakBetween mBreakBefore;
@@ -1745,8 +1718,7 @@ struct MOZ_NEEDS_MEMMOVABLE_MEMBERS nsStyleDisplay {
            mozilla::StyleDisplay::RubyBase == mDisplay ||
            mozilla::StyleDisplay::RubyBaseContainer == mDisplay ||
            mozilla::StyleDisplay::RubyText == mDisplay ||
-           mozilla::StyleDisplay::RubyTextContainer == mDisplay ||
-           mozilla::StyleDisplay::Contents == mDisplay;
+           mozilla::StyleDisplay::RubyTextContainer == mDisplay;
   }
 
   bool IsBlockOutsideStyle() const {
@@ -1773,8 +1745,7 @@ struct MOZ_NEEDS_MEMMOVABLE_MEMBERS nsStyleDisplay {
            mozilla::StyleDisplay::RubyBase == aDisplay ||
            mozilla::StyleDisplay::RubyBaseContainer == aDisplay ||
            mozilla::StyleDisplay::RubyText == aDisplay ||
-           mozilla::StyleDisplay::RubyTextContainer == aDisplay ||
-           mozilla::StyleDisplay::Contents == aDisplay;
+           mozilla::StyleDisplay::RubyTextContainer == aDisplay;
   }
 
   bool IsInlineOutsideStyle() const {

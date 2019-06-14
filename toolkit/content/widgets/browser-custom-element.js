@@ -8,6 +8,7 @@
 // leaking to window scope.
 {
 const {Services} = ChromeUtils.import("resource://gre/modules/Services.jsm");
+const {AppConstants} = ChromeUtils.import("resource://gre/modules/AppConstants.jsm");
 
 let LazyModules = {};
 
@@ -248,6 +249,8 @@ class MozBrowser extends MozElements.MozElementMixin(XULFrameElement) {
     this._charsetAutodetected = false;
 
     this._contentPrincipal = null;
+
+    this._contentStoragePrincipal = null;
 
     this._csp = null;
 
@@ -599,7 +602,7 @@ class MozBrowser extends MozElements.MozElementMixin(XULFrameElement) {
 
   set characterSet(val) {
     if (this.isRemoteBrowser) {
-      this.messageManager.sendAsyncMessage("UpdateCharacterSet", { value: val });
+      this.sendMessageToActor("UpdateCharacterSet", { value: val }, "BrowserTab");
       this._characterSet = val;
     } else {
       this.docShell.charset = val;
@@ -633,6 +636,10 @@ class MozBrowser extends MozElements.MozElementMixin(XULFrameElement) {
 
   get contentPrincipal() {
     return this.isRemoteBrowser ? this._contentPrincipal : this.contentDocument.nodePrincipal;
+  }
+
+  get contentStoragePrincipal() {
+    return this.isRemoteBrowser ? this._contentStoragePrincipal : this.contentDocument.effectiveStoragePrincipal;
   }
 
   get csp() {
@@ -836,23 +843,24 @@ class MozBrowser extends MozElements.MozElementMixin(XULFrameElement) {
   /**
    * throws exception for unknown schemes
    */
-  loadURI(aURI, aParams) {
+  loadURI(aURI, aParams = {}) {
     if (!aURI) {
       aURI = "about:blank";
     }
     let {
-      flags = Ci.nsIWebNavigation.LOAD_FLAGS_NONE,
         referrerInfo,
         triggeringPrincipal,
         postData,
         headers,
         csp,
-    } = aParams || {};
+    } = aParams;
+    let loadFlags = aParams.loadFlags || aParams.flags ||
+                    Ci.nsIWebNavigation.LOAD_FLAGS_NONE;
     let loadURIOptions = {
       triggeringPrincipal,
       csp,
       referrerInfo,
-      loadFlags: flags,
+      loadFlags,
       postData,
       headers,
     };
@@ -1437,7 +1445,7 @@ class MozBrowser extends MozElements.MozElementMixin(XULFrameElement) {
     this.messageManager.sendAsyncMessage("Browser:PurgeSessionHistory");
   }
 
-  createAboutBlankContentViewer(aPrincipal) {
+  createAboutBlankContentViewer(aPrincipal, aStoragePrincipal) {
     if (this.isRemoteBrowser) {
       // Ensure that the content process has the permissions which are
       // needed to create a document with the given principal.
@@ -1458,11 +1466,13 @@ class MozBrowser extends MozElements.MozElementMixin(XULFrameElement) {
       // So we'll continue to use the message manager until we come up with a better
       // solution.
       this.messageManager.sendAsyncMessage("BrowserElement:CreateAboutBlank",
-                                           aPrincipal);
+                                           {principal: aPrincipal,
+                                            storagePrincipal: aStoragePrincipal});
       return;
     }
     let principal = BrowserUtils.principalWithMatchingOA(aPrincipal, this.contentPrincipal);
-    this.docShell.createAboutBlankContentViewer(principal);
+    let storagePrincipal = BrowserUtils.principalWithMatchingOA(aStoragePrincipal, this.contentStoragePrincipal);
+    this.docShell.createAboutBlankContentViewer(principal, storagePrincipal);
   }
 
   stopScroll() {
@@ -1536,7 +1546,8 @@ class MozBrowser extends MozElements.MozElementMixin(XULFrameElement) {
       // Exclude second-rate platforms
       this._autoScrollPopup.setAttribute("transparent", !/BeOS|OS\/2/.test(navigator.appVersion));
       // Enable translucency on Windows and Mac
-      this._autoScrollPopup.setAttribute("translucent", /Win|Mac/.test(navigator.platform));
+      this._autoScrollPopup.setAttribute("translucent",
+        AppConstants.platform == "win" || AppConstants.platform == "macosx");
     }
 
     this._autoScrollPopup.setAttribute("scrolldir", scrolldir);
@@ -1858,6 +1869,41 @@ class MozBrowser extends MozElements.MozElementMixin(XULFrameElement) {
     return this.docShell ?
       this.docShell.getContentBlockingLog() :
       Promise.reject("docshell isn't available");
+  }
+
+  // Send an asynchronous message to the remote child via an actor.
+  // Note: use this only for messages through an actor. For old-style
+  // messages, use the message manager. If 'all' is true, then send
+  // a message to all descendant processes.
+  sendMessageToActor(messageName, args, actorName, all) {
+    if (!this.frameLoader) {
+      return;
+    }
+
+    let windowGlobal = this.browsingContext.currentWindowGlobal;
+    if (!windowGlobal) {
+      // Workaround for bug 1523638 where about:blank is loaded in a tab.
+      if (messageName == "Browser:AppTab") {
+        setTimeout(() => { this.sendMessageToActor(messageName, args, actorName); }, 0);
+      }
+      return;
+    }
+
+    function sendToChildren(browsingContext, checkRoot) {
+      let windowGlobal = browsingContext.currentWindowGlobal;
+      if (windowGlobal && (!checkRoot || windowGlobal.isProcessRoot)) {
+        windowGlobal.getActor(actorName).sendAsyncMessage(messageName, args);
+      }
+
+      if (all) {
+        let contexts = browsingContext.getChildren();
+        for (let context of contexts) {
+          sendToChildren(context, true);
+        }
+      }
+    }
+
+    sendToChildren(this.browsingContext, false);
   }
 }
 

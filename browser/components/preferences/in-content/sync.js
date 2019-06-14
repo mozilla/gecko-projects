@@ -321,7 +321,7 @@ var gSyncPane = {
     } else {
       fxaLoginStatus.removeAttribute("hasName");
     }
-    if (state.avatarURL) {
+    if (state.avatarURL && !state.avatarIsDefault) {
       let bgImage = "url(\"" + state.avatarURL + "\")";
       let profileImageElement = document.querySelector("#fxaLoginVerified > .fxaProfileImage");
       profileImageElement.style.listStyleImage = bgImage;
@@ -436,7 +436,7 @@ var gSyncPane = {
       let sb = this._accountsStringBundle;
       let title = sb.GetStringFromName("verification" + maybeNot + "SentTitle");
       let email = !isError && data ? data.email : "";
-      let body = sb.formatStringFromName("verification" + maybeNot + "SentBody", [email], 1);
+      let body = sb.formatStringFromName("verification" + maybeNot + "SentBody", [email]);
       new Notification(title, { body });
     };
 

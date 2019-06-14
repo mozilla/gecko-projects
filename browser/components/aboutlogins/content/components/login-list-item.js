@@ -2,6 +2,8 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+import {recordTelemetryEvent} from "chrome://browser/content/aboutlogins/aboutLoginsUtils.js";
+
 export default class LoginListItem extends HTMLElement {
   constructor(login) {
     super();
@@ -9,7 +11,7 @@ export default class LoginListItem extends HTMLElement {
   }
 
   connectedCallback() {
-    if (this.children.length) {
+    if (this.shadowRoot) {
       this.render();
       return;
     }
@@ -23,9 +25,19 @@ export default class LoginListItem extends HTMLElement {
   }
 
   render() {
+    let origin = this.shadowRoot.querySelector(".origin");
+    let username = this.shadowRoot.querySelector(".username");
+
+    if (!this._login.guid) {
+      this.removeAttribute("guid");
+      origin.textContent = this.getAttribute("new-login-title");
+      username.textContent = this.getAttribute("new-login-subtitle");
+      return;
+    }
+
     this.setAttribute("guid", this._login.guid);
-    this.shadowRoot.querySelector(".origin").textContent = this._login.origin;
-    this.shadowRoot.querySelector(".username").textContent = this._login.username;
+    origin.textContent = this._login.origin;
+    username.textContent = this._login.username;
   }
 
   handleEvent(event) {
@@ -36,6 +48,8 @@ export default class LoginListItem extends HTMLElement {
           composed: true,
           detail: this._login,
         }));
+
+        recordTelemetryEvent({object: "existing_login", method: "select"});
       }
     }
   }

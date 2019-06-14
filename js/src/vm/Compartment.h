@@ -124,10 +124,18 @@ class CrossCompartmentKey {
         : Debuggee(debugger, referent) {}
   };
 
-  using WrappedType = mozilla::Variant<JSObject*, JSString*, DebuggeeObject,
-                                       DebuggeeJSScript, DebuggeeWasmScript,
-                                       DebuggeeLazyScript, DebuggeeEnvironment,
-                                       DebuggeeSource, DebuggeeFrameGenerator>;
+  // Key under which we find debugger's Debugger.Frame for the generator call
+  // whose AbstractGeneratorObject is referent.
+  struct DebuggeeFrameGeneratorScript : Debuggee<JSScript> {
+    DebuggeeFrameGeneratorScript(NativeObject* debugger, JSScript* referent)
+        : Debuggee(debugger, referent) {}
+  };
+
+  using WrappedType =
+      mozilla::Variant<JSObject*, JSString*, DebuggeeObject, DebuggeeJSScript,
+                       DebuggeeWasmScript, DebuggeeLazyScript,
+                       DebuggeeEnvironment, DebuggeeSource,
+                       DebuggeeFrameGenerator, DebuggeeFrameGeneratorScript>;
 
   explicit CrossCompartmentKey(JSObject* obj) : wrapped(obj) {
     MOZ_RELEASE_ASSERT(obj);
@@ -151,6 +159,8 @@ class CrossCompartmentKey {
   explicit CrossCompartmentKey(DebuggeeWasmScript&& key)
       : wrapped(std::move(key)) {}
   explicit CrossCompartmentKey(DebuggeeFrameGenerator&& key)
+      : wrapped(std::move(key)) {}
+  explicit CrossCompartmentKey(DebuggeeFrameGeneratorScript&& key)
       : wrapped(std::move(key)) {}
   explicit CrossCompartmentKey(NativeObject* debugger, JSScript* referent)
       : wrapped(DebuggeeJSScript(debugger, referent)) {}
@@ -592,14 +602,16 @@ class JS::Compartment {
                                const js::CrossCompartmentKey& wrapped,
                                const js::Value& wrapper);
 
-  void removeWrapper(js::WrapperMap::Ptr p);
-
   js::WrapperMap::Ptr lookupWrapper(const js::Value& wrapped) const {
     return crossCompartmentWrappers.lookup(js::CrossCompartmentKey(wrapped));
   }
 
   js::WrapperMap::Ptr lookupWrapper(JSObject* obj) const {
     return crossCompartmentWrappers.lookup(js::CrossCompartmentKey(obj));
+  }
+
+  void removeWrapper(js::WrapperMap::Ptr p) {
+    crossCompartmentWrappers.remove(p);
   }
 
   bool hasNurseryAllocatedWrapperEntries(const js::CompartmentFilter& f) {

@@ -395,6 +395,8 @@ ModuleNamespaceObject* ModuleNamespaceObject::create(
   SetProxyReservedSlot(object, ExportsSlot, ObjectValue(*exports));
   SetProxyReservedSlot(object, BindingsSlot,
                        PrivateValue(rootedBindings.release()));
+  AddCellMemory(object, sizeof(IndirectBindingMap),
+                MemoryUse::ModuleBindingMap);
 
   return &object->as<ModuleNamespaceObject>();
 }
@@ -677,12 +679,13 @@ void ModuleNamespaceObject::ProxyHandler::trace(JSTracer* trc,
   }
 }
 
-void ModuleNamespaceObject::ProxyHandler::finalize(JSFreeOp* fop,
+void ModuleNamespaceObject::ProxyHandler::finalize(JSFreeOp* fopArg,
                                                    JSObject* proxy) const {
+  FreeOp* fop = FreeOp::get(fopArg);
   auto& self = proxy->as<ModuleNamespaceObject>();
 
   if (self.hasBindings()) {
-    js_delete(&self.bindings());
+    fop->delete_(proxy, &self.bindings(), MemoryUse::ModuleBindingMap);
   }
 }
 
@@ -756,7 +759,8 @@ ModuleObject* ModuleObject::create(JSContext* cx) {
     return nullptr;
   }
 
-  self->initReservedSlot(ImportBindingsSlot, PrivateValue(bindings));
+  InitReservedSlot(self, ImportBindingsSlot, bindings,
+                   MemoryUse::ModuleBindingMap);
 
   FunctionDeclarationVector* funDecls = cx->new_<FunctionDeclarationVector>();
   if (!funDecls) {
@@ -772,9 +776,10 @@ void ModuleObject::finalize(js::FreeOp* fop, JSObject* obj) {
   MOZ_ASSERT(fop->maybeOnHelperThread());
   ModuleObject* self = &obj->as<ModuleObject>();
   if (self->hasImportBindings()) {
-    fop->delete_(&self->importBindings());
+    fop->delete_(obj, &self->importBindings(), MemoryUse::ModuleBindingMap);
   }
   if (FunctionDeclarationVector* funDecls = self->functionDeclarations()) {
+    // Not tracked as these may move between zones on merge.
     fop->delete_(funDecls);
   }
 }

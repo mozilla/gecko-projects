@@ -30,8 +30,8 @@ js_option('--disable-optimize',
           help='Disable optimizations via compiler flags')
 
 
-@depends('--enable-optimize')
-def moz_optimize(option):
+@depends('--enable-optimize', '--help')
+def moz_optimize(option, _):
     flags = None
 
     if len(option):
@@ -395,10 +395,10 @@ def get_compiler_info(compiler, language):
     # in Xcode have a completely different versioning scheme despite exposing
     # the version with the same defines.
     # So instead, we make things such that the version is missing when the
-    # clang used is below the minimum supported version (currently clang 3.9).
-    # We then only include the version information when the C++ compiler
-    # matches the feature check, so that an unsupported version of clang would
-    # have no version number.
+    # clang used is below the minimum supported version (currently clang 4.0).
+    # We then only include the version information when the compiler matches
+    # the feature check, so that an unsupported version of clang would have
+    # no version number.
     check = dedent('''\
         #if defined(_MSC_VER)
         #if defined(__clang__)
@@ -407,7 +407,7 @@ def get_compiler_info(compiler, language):
         #endif
         #elif defined(__clang__)
         %COMPILER "clang"
-        #  if !__cplusplus || __has_builtin(__builtin_bitreverse8)
+        #  if __has_attribute(diagnose_if)
         %VERSION __clang_major__.__clang_minor__.__clang_patchlevel__
         #  endif
         #elif defined(__GNUC__)
@@ -700,10 +700,11 @@ def toolchain_search_path_for(host_or_target):
         target: vc_compiler_path,
     }[host_or_target]
 
-    @depends(vc_path, original_path)
+    @depends(vc_path, original_path, developer_options, mozbuild_state_path)
     @imports('os')
     @imports(_from='os', _import='environ')
-    def toolchain_search_path(vc_compiler_path, original_path):
+    def toolchain_search_path(vc_compiler_path, original_path, developer_options,
+                              mozbuild_state_path):
         result = list(original_path)
 
         if vc_compiler_path:
@@ -717,22 +718,24 @@ def toolchain_search_path_for(host_or_target):
 
         # Also add in the location to which `mach bootstrap` or
         # `mach artifact toolchain` installs clang.
-        mozbuild_state_dir = environ.get('MOZBUILD_STATE_PATH',
-                                         os.path.expanduser(os.path.join('~', '.mozbuild')))
-        bootstrap_clang_path = os.path.join(mozbuild_state_dir, 'clang', 'bin')
-        result.append(bootstrap_clang_path)
+        bootstrapped = []
 
-        bootstrap_cbindgen_path = os.path.join(mozbuild_state_dir, 'cbindgen')
-        result.append(bootstrap_cbindgen_path)
+        bootstrap_clang_path = os.path.join(mozbuild_state_path, 'clang', 'bin')
+        bootstrapped.append(bootstrap_clang_path)
 
-        bootstrap_nasm_path = os.path.join(mozbuild_state_dir, 'nasm')
-        result.append(bootstrap_nasm_path)
+        bootstrap_cbindgen_path = os.path.join(mozbuild_state_path, 'cbindgen')
+        bootstrapped.append(bootstrap_cbindgen_path)
+
+        bootstrap_nasm_path = os.path.join(mozbuild_state_path, 'nasm')
+        bootstrapped.append(bootstrap_nasm_path)
 
         # Also add the rustup install directory for cargo/rustc.
         rustup_path = os.path.expanduser(os.path.join('~', '.cargo', 'bin'))
         result.append(rustup_path)
 
-        return result
+        if developer_options:
+            return bootstrapped + result
+        return result + bootstrapped
     return toolchain_search_path
 
 
@@ -772,10 +775,9 @@ def default_c_compilers(host_or_target, other_c_compiler=None):
 
     other_c_compiler = () if other_c_compiler is None else (other_c_compiler,)
 
-    @depends(host_or_target, target, toolchain_prefix, android_clang_compiler,
-             *other_c_compiler)
+    @depends(host_or_target, target, toolchain_prefix, *other_c_compiler)
     def default_c_compilers(host_or_target, target, toolchain_prefix,
-                            android_clang_compiler, *other_c_compiler):
+                            *other_c_compiler):
         if host_or_target.kernel == 'WINNT':
             supported = types = ('clang-cl', 'gcc', 'clang')
         elif host_or_target.kernel == 'Darwin':
@@ -798,10 +800,6 @@ def default_c_compilers(host_or_target, other_c_compiler=None):
                     # -m32/-m64 for the host, it's probably toolchain-prefixed,
                     # so we prioritize a raw 'gcc' instead.
                     prioritized = info.type
-            elif info.type == 'clang' and android_clang_compiler:
-                # Android NDK clangs do not function as host compiler, so
-                # prioritize a raw 'clang' instead.
-                prioritized = info.type
 
             types = [prioritized] + [t for t in types if t != info.type]
 
@@ -811,12 +809,7 @@ def default_c_compilers(host_or_target, other_c_compiler=None):
 
         result = []
         for type in types:
-            # Android sets toolchain_prefix and android_clang_compiler, but
-            # we want the latter to take precedence, because the latter can
-            # point at clang, which is what we want to use.
-            if type == 'clang' and android_clang_compiler and host_or_target is target:
-                result.append(android_clang_compiler)
-            elif type == 'gcc':
+            if type == 'gcc':
                 result.extend(gcc)
             else:
                 result.append(type)
@@ -1044,10 +1037,10 @@ def compiler(language, host_or_target, c_compiler=None, other_compiler=None,
                     % info.version)
 
         # If you want to bump the version check here search for
-        # builtin_bitreverse8 above, and see the associated comment.
+        # diagnose_if above, and see the associated comment.
         if info.type == 'clang' and not info.version:
             raise FatalCheckError(
-                'Only clang/llvm 3.9 or newer is supported.')
+                'Only clang/llvm 4.0 or newer is supported.')
 
         if info.flags:
             raise FatalCheckError(
@@ -1603,6 +1596,32 @@ def asan():
 
 add_old_configure_assignment('MOZ_ASAN', asan)
 
+# MSAN
+# ==============================================================
+
+js_option('--enable-memory-sanitizer', help='Enable Memory Sanitizer')
+
+
+@depends(when='--enable-memory-sanitizer')
+def msan():
+    return True
+
+
+add_old_configure_assignment('MOZ_MSAN', msan)
+
+# TSAN
+# ==============================================================
+
+js_option('--enable-thread-sanitizer', help='Enable Thread Sanitizer')
+
+
+@depends(when='--enable-thread-sanitizer')
+def tsan():
+    return True
+
+
+add_old_configure_assignment('MOZ_TSAN', tsan)
+
 # UBSAN
 # ==============================================================
 
@@ -1623,6 +1642,30 @@ def ubsan(options):
     return ','.join(checks)
 
 add_old_configure_assignment('MOZ_UBSAN_CHECKS', ubsan)
+
+
+js_option('--enable-signed-overflow-sanitizer',
+          help='Enable UndefinedBehavior Sanitizer (Signed Integer Overflow Parts)')
+
+
+@depends(when='--enable-signed-overflow-sanitizer')
+def ub_signed_overflow_san():
+    return True
+
+
+add_old_configure_assignment('MOZ_SIGNED_OVERFLOW_SANITIZE', ub_signed_overflow_san)
+
+
+js_option('--enable-unsigned-overflow-sanitizer',
+          help='Enable UndefinedBehavior Sanitizer (Unsigned Integer Overflow Parts)')
+
+
+@depends(when='--enable-unsigned-overflow-sanitizer')
+def ub_unsigned_overflow_san():
+    return True
+
+
+add_old_configure_assignment('MOZ_UNSIGNED_OVERFLOW_SANITIZE', ub_unsigned_overflow_san)
 
 # Security Hardening
 # ==============================================================
@@ -2078,10 +2121,10 @@ def select_linker(linker, c_compiler, developer_options, enable_gold,
         die("Failed to find a linker")
 
     if (linker is None and enable_gold.origin == 'default' and
-            developer_options and result.KIND == 'bfd'):
+            developer_options and result.KIND in ('bfd', 'gold')):
         # try and use lld if available.
         tried = try_linker('lld')
-        if tried is None or tried.KIND != 'lld':
+        if result.KIND != 'gold' and (tried is None or tried.KIND != 'lld'):
             tried = try_linker('gold')
             if tried is None or tried.KIND != 'gold':
                 tried = None
@@ -2438,3 +2481,45 @@ ar = check_prog('AR', ar_config.names, paths=toolchain_search_path)
 add_old_configure_assignment('AR', ar)
 
 set_config('AR_FLAGS', ar_config.flags)
+
+# Frame pointers
+# ==============================================================
+@depends(c_compiler, target)
+def frame_pointer_flags(compiler, target):
+    if compiler.type == 'clang-cl':
+        if target.cpu == 'aarch64':
+            # Some version of clang-cl don't support -Oy-; accomodate them.
+            return namespace(
+                enable=['-Xclang', '-mdisable-fp-elim'],
+                disable=['-Xclang', '-mdisable-fp-elim'],
+            )
+        return namespace(
+            enable=['-Oy-'],
+            disable=['-Oy'],
+        )
+    return namespace(
+        enable=['-fno-omit-frame-pointer', '-funwind-tables'],
+        disable=['-fomit-frame-pointer', '-funwind-tables'],
+    )
+
+
+@depends(moz_optimize.optimize, moz_debug, target,
+         '--enable-memory-sanitizer', '--enable-address-sanitizer',
+         '--enable-undefined-sanitizer')
+def frame_pointer_default(optimize, debug, target, msan, asan, ubsan):
+    return bool(not optimize or debug or msan or asan or ubsan or \
+        (target.os == 'WINNT' and target.cpu in ('x86', 'aarch64')))
+
+
+js_option('--enable-frame-pointers', default=frame_pointer_default,
+          help='{Enable|Disable} frame pointers')
+
+
+@depends('--enable-frame-pointers', frame_pointer_flags)
+def frame_pointer_flags(enable, flags):
+    if enable:
+        return flags.enable
+    return flags.disable
+
+
+set_config('MOZ_FRAMEPTR_FLAGS', frame_pointer_flags)

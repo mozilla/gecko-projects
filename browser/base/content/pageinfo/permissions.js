@@ -85,11 +85,6 @@ function initRow(aPartId) {
     return;
   }
 
-  // When flash permission state is "Hide", we show it as "Always Ask" in page info.
-  if (aPartId.startsWith("plugin") && state == SitePermissions.PROMPT_HIDE) {
-    defaultState == SitePermissions.UNKNOWN ? state = defaultState : state = SitePermissions.PROMPT;
-  }
-
   if (state != defaultState) {
     checkbox.checked = false;
     command.removeAttribute("disabled");
@@ -151,7 +146,7 @@ function createRow(aPartId) {
   for (let state of SitePermissions.getAvailableStates(aPartId)) {
     let radio = document.createXULElement("radio");
     radio.setAttribute("id", aPartId + "#" + state);
-    radio.setAttribute("label", SitePermissions.getMultichoiceStateLabel(state));
+    radio.setAttribute("label", SitePermissions.getMultichoiceStateLabel(aPartId, state));
     radio.setAttribute("command", commandId);
     radiogroup.appendChild(radio);
   }

@@ -29,6 +29,10 @@ XPCOMUtils.defineLazyGetter(this, "brandBundle", () => {
   return Services.strings.createBundle(
       "chrome://branding/locale/brand.properties");
 });
+XPCOMUtils.defineLazyGetter(this, "extBundle", function() {
+  return Services.strings.createBundle(
+    "chrome://mozapps/locale/extensions/extensions.properties");
+});
 XPCOMUtils.defineLazyGetter(this, "extensionStylesheets", () => {
   const {ExtensionParent} =
     ChromeUtils.import("resource://gre/modules/ExtensionParent.jsm");
@@ -132,6 +136,12 @@ const AddonCardListenerHandler = {
   },
 };
 
+function isAbuseReportSupported(addon) {
+  return ABUSE_REPORT_ENABLED &&
+    ["extension", "theme"].includes(addon.type) &&
+    !(addon.isBuiltin || addon.isSystem);
+}
+
 async function isAllowedInPrivateBrowsing(addon) {
   // Use the Promise directly so this function stays sync for the other case.
   let perms = await ExtensionPermissions.get(addon.id);
@@ -147,6 +157,85 @@ function isPending(addon, action) {
   return !!(addon.pendingOperations & amAction);
 }
 
+async function getAddonMessageInfo(addon) {
+  const {name} = addon;
+  const appName = brandBundle.GetStringFromName("brandShortName");
+  const {
+    STATE_BLOCKED, STATE_OUTDATED, STATE_SOFTBLOCKED,
+    STATE_VULNERABLE_UPDATE_AVAILABLE, STATE_VULNERABLE_NO_UPDATE,
+  } = Ci.nsIBlocklistService;
+
+  const formatString = (name, args) =>
+    extBundle.formatStringFromName(
+      `details.notification.${name}`, args, args.length);
+  const getString = name =>
+    extBundle.GetStringFromName(`details.notification.${name}`);
+
+  if (addon.blocklistState === STATE_BLOCKED) {
+    return {
+      linkText: getString("blocked.link"),
+      linkUrl: await addon.getBlocklistURL(),
+      message: formatString("blocked", [name]),
+      type: "error",
+    };
+  } else if (isDisabledUnsigned(addon)) {
+    return {
+      linkText: getString("unsigned.link"),
+      linkUrl: SUPPORT_URL + "unsigned-addons",
+      message: formatString("unsignedAndDisabled", [name, appName]),
+      type: "error",
+    };
+  } else if (!addon.isCompatible && (AddonManager.checkCompatibility ||
+      addon.blocklistState !== STATE_SOFTBLOCKED)) {
+    return {
+      message: formatString(
+        "incompatible", [name, appName, Services.appinfo.version]),
+      type: "warning",
+    };
+  } else if (!isCorrectlySigned(addon)) {
+    return {
+      linkText: getString("unsigned.link"),
+      linkUrl: SUPPORT_URL + "unsigned-addons",
+      message: formatString("unsigned", [name, appName]),
+      type: "warning",
+    };
+  } else if (addon.blocklistState === STATE_SOFTBLOCKED) {
+    return {
+      linkText: getString("softblocked.link"),
+      linkUrl: await addon.getBlocklistURL(),
+      message: formatString("softblocked", [name]),
+      type: "warning",
+    };
+  } else if (addon.blocklistState === STATE_OUTDATED) {
+    return {
+      linkText: getString("outdated.link"),
+      linkUrl: await addon.getBlocklistURL(),
+      message: formatString("outdated", [name]),
+      type: "warning",
+    };
+  } else if (addon.blocklistState === STATE_VULNERABLE_UPDATE_AVAILABLE) {
+    return {
+      linkText: getString("vulnerableUpdatable.link"),
+      linkUrl: await addon.getBlocklistURL(),
+      message: formatString("vulnerableUpdatable", [name]),
+      type: "error",
+    };
+  } else if (addon.blocklistState === STATE_VULNERABLE_NO_UPDATE) {
+    return {
+      linkText: getString("vulnerableNoUpdate.link"),
+      linkUrl: await addon.getBlocklistURL(),
+      message: formatString("vulnerableNoUpdate", [name]),
+      type: "error",
+    };
+  } else if (addon.isGMPlugin && !addon.isInstalled && addon.isActive) {
+    return {
+      message: formatString("gmpPending", [name]),
+      type: "warning",
+    };
+  }
+  return {};
+}
+
 // Don't change how we handle this while the page is open.
 const INLINE_OPTIONS_ENABLED = Services.prefs.getBoolPref(
   "extensions.htmlaboutaddons.inline-options.enabled");
@@ -160,6 +249,27 @@ const OPTIONS_TYPE_MAP = {
 // to disable inline options.
 function getOptionsType(addon, type) {
   return OPTIONS_TYPE_MAP[addon.optionsType];
+}
+
+// Check whether the options page can be loaded in the current browser window.
+async function isAddonOptionsUIAllowed(addon) {
+  if (addon.type !== "extension" || !getOptionsType(addon)) {
+    // Themes never have options pages.
+    // Some plugins have preference pages, and they can always be shown.
+    // Extensions do not need to be checked if they do not have options pages.
+    return true;
+  }
+  if (!PrivateBrowsingUtils.isContentWindowPrivate(window)) {
+    return true;
+  }
+  if (addon.incognito === "not_allowed") {
+    return false;
+  }
+  // The current page is in a private browsing window, and the add-on does not
+  // have the permission to access private browsing windows. Block access.
+  return allowPrivateBrowsingByDefault ||
+    // Note: This function is async because isAllowedInPrivateBrowsing is async.
+    isAllowedInPrivateBrowsing(addon);
 }
 
 /**
@@ -612,7 +722,7 @@ class AddonOptions extends HTMLElement {
         el.hidden = !hasPermission(addon, "uninstall");
         break;
       case "report":
-        el.hidden = !ABUSE_REPORT_ENABLED;
+        el.hidden = !isAbuseReportSupported(addon);
         break;
       case "toggle-disabled": {
         let toggleDisabledAction = addon.userDisabled ? "enable" : "disable";
@@ -630,6 +740,11 @@ class AddonOptions extends HTMLElement {
       case "preferences":
         el.hidden = getOptionsType(addon) !== "tab" &&
           (getOptionsType(addon) !== "inline" || card.expanded);
+        if (!el.hidden) {
+          isAddonOptionsUIAllowed(addon).then(allowed => {
+            el.hidden = !allowed;
+          });
+        }
         break;
     }
   }
@@ -661,7 +776,9 @@ class PluginOptions extends AddonOptions {
     if (action in userDisabledStates) {
       let userDisabled = userDisabledStates[action];
       el.checked = addon.userDisabled === userDisabled;
-      el.disabled = !(el.checked || hasPermission(addon, action));
+      let resultProp = (action == "always-activate" && addon.isFlashPlugin) ?
+        "hidden" : "disabled";
+      el[resultProp] = !(el.checked || hasPermission(addon, action));
     } else {
       super.setElementState(el, card, addon);
     }
@@ -1062,6 +1179,12 @@ class AddonDetails extends HTMLElement {
     if (e.type == "view-changed" && e.target == this.deck) {
       switch (this.deck.selectedViewName) {
         case "release-notes":
+          AMTelemetry.recordActionEvent({
+            object: "aboutAddons",
+            view: getTelemetryViewName(this),
+            action: "releaseNotes",
+            addon: this.addon,
+          });
           let releaseNotes = this.querySelector("update-release-notes");
           let uri = this.releaseNotesUri;
           if (uri) {
@@ -1098,6 +1221,11 @@ class AddonDetails extends HTMLElement {
     notesBtn.hidden = !this.releaseNotesUri;
     let prefsBtn = getButtonByName("preferences");
     prefsBtn.hidden = getOptionsType(addon) !== "inline";
+    if (!prefsBtn.hidden) {
+      isAddonOptionsUIAllowed(addon).then(allowed => {
+        prefsBtn.hidden = !allowed;
+      });
+    }
 
     // Hide the tab group if "details" is the only visible button.
     this.tabGroup.hidden = Array.from(this.tabGroup.children).every(button => {
@@ -1147,15 +1275,10 @@ class AddonDetails extends HTMLElement {
       description.appendChild(nl2br(addon.fullDescription));
     }
 
-    // Contribute.
-    if (!addon.contributionURL) {
-      this.querySelector(".addon-detail-contribute").remove();
-    }
-
-    // Auto updates setting.
-    if (!hasPermission(addon, "upgrade")) {
-      this.querySelector(".addon-detail-row-updates").remove();
-    }
+    this.querySelector(".addon-detail-contribute").hidden =
+      !addon.contributionURL;
+    this.querySelector(".addon-detail-row-updates").hidden =
+      !hasPermission(addon, "upgrade");
 
     let pbRow = this.querySelector(".addon-detail-row-private-browsing");
     if (!allowPrivateBrowsingByDefault && addon.type == "extension" &&
@@ -1167,26 +1290,25 @@ class AddonDetails extends HTMLElement {
       learnMore.href = SUPPORT_URL + "extensions-pb";
     } else {
       // Remove the help row, which is right after the settings.
-      pbRow.nextElementSibling.remove();
+      pbRow.nextElementSibling.hidden = true;
       // Then remove the actual settings.
-      pbRow.remove();
+      pbRow.hidden = true;
     }
 
     // Author.
     let creatorRow = this.querySelector(".addon-detail-row-author");
     if (addon.creator) {
-      let creator;
-      if (addon.creator.url) {
-        creator = document.createElement("a");
-        creator.href = addon.creator.url;
-        creator.target = "_blank";
-        creator.textContent = addon.creator.name;
+      let link = creatorRow.querySelector("a");
+      link.hidden = !addon.creator.url;
+      if (link.hidden) {
+        creatorRow.appendChild(new Text(addon.creator.name));
       } else {
-        creator = new Text(addon.creator.name);
+        link.href = addon.creator.url;
+        link.target = "_blank";
+        link.textContent = addon.creator.name;
       }
-      creatorRow.appendChild(creator);
     } else {
-      creatorRow.remove();
+      creatorRow.hidden = true;
     }
 
     // Version. Don't show a version for LWTs.
@@ -1194,7 +1316,7 @@ class AddonDetails extends HTMLElement {
     if (addon.version && !/@personas\.mozilla\.org/.test(addon.id)) {
       version.appendChild(new Text(addon.version));
     } else {
-      version.remove();
+      version.hidden = true;
     }
 
     // Last updated.
@@ -1207,7 +1329,7 @@ class AddonDetails extends HTMLElement {
       });
       updateDate.appendChild(new Text(lastUpdated));
     } else {
-      updateDate.remove();
+      updateDate.hidden = true;
     }
 
     // Homepage.
@@ -1217,7 +1339,7 @@ class AddonDetails extends HTMLElement {
       homepageURL.href = addon.homepageURL;
       homepageURL.textContent = addon.homepageURL;
     } else {
-      homepageRow.remove();
+      homepageRow.hidden = true;
     }
 
     // Rating.
@@ -1230,7 +1352,7 @@ class AddonDetails extends HTMLElement {
         numberOfReviews: addon.reviewCount,
       });
     } else {
-      ratingRow.remove();
+      ratingRow.hidden = true;
     }
 
     this.update();
@@ -1327,6 +1449,7 @@ class AddonCard extends HTMLElement {
     if (e.type == "click") {
       switch (action) {
         case "toggle-disabled":
+          this.recordActionEvent(addon.userDisabled ? "enable" : "disable");
           if (addon.userDisabled) {
             if (shouldShowPermissionsPrompt(addon)) {
               await showPermissionsPrompt(addon);
@@ -1347,12 +1470,15 @@ class AddonCard extends HTMLElement {
           }
           break;
         case "always-activate":
+          this.recordActionEvent("enable");
           addon.userDisabled = false;
           break;
         case "never-activate":
+          this.recordActionEvent("disable");
           addon.userDisabled = true;
           break;
         case "update-check":
+          this.recordActionEvent("checkForUpdate");
           let listener = {
             onUpdateAvailable(addon, install) {
               attachUpdateHandler(install);
@@ -1377,6 +1503,7 @@ class AddonCard extends HTMLElement {
           this.updateInstall = null;
           break;
         case "contribute":
+          this.recordActionEvent("contribute");
           windowRoot.ownerGlobal.openUILinkIn(addon.contributionURL, "tab", {
             triggeringPrincipal:
               Services.scriptSecurityManager.createNullPrincipal({}),
@@ -1384,8 +1511,10 @@ class AddonCard extends HTMLElement {
           break;
         case "preferences":
           if (getOptionsType(addon) == "tab") {
+            this.recordActionEvent("preferences", "external");
             openOptionsInTab(addon.optionsURL);
           } else if (getOptionsType(addon) == "inline") {
+            this.recordActionEvent("preferences", "inline");
             loadViewFn("detail", this.addon.id, "preferences");
           }
           break;
@@ -1395,6 +1524,8 @@ class AddonCard extends HTMLElement {
             let {
               remove, report,
             } = windowRoot.ownerGlobal.promptRemoveExtension(addon);
+            let value = remove ? "accepted" : "cancelled";
+            this.recordActionEvent("uninstall", value);
             if (remove) {
               await addon.uninstall(true);
               this.sendEvent("remove");
@@ -1421,18 +1552,38 @@ class AddonCard extends HTMLElement {
           this.panel.hide();
           openAbuseReport({addonId: addon.id, reportEntryPoint: "menu"});
           break;
+        case "link":
+          if (e.target.getAttribute("url")) {
+            windowRoot.ownerGlobal.openWebLinkIn(
+              e.target.getAttribute("url"), "tab");
+          }
+          break;
         default:
           // Handle a click on the card itself.
           if (!this.expanded) {
             loadViewFn("detail", this.addon.id);
+          } else if (e.target.localName == "a" &&
+                     e.target.getAttribute("data-telemetry-name")) {
+            let value = e.target.getAttribute("data-telemetry-name");
+            AMTelemetry.recordLinkEvent({
+              object: "aboutAddons",
+              addon,
+              value,
+              extra: {
+                view: getTelemetryViewName(this),
+              },
+            });
           }
           break;
       }
     } else if (e.type == "change") {
       let {name} = e.target;
+      let telemetryValue = e.target.getAttribute("data-telemetry-value");
       if (name == "autoupdate") {
+        this.recordActionEvent("setAddonUpdate", telemetryValue);
         addon.applyBackgroundUpdates = e.target.value;
       } else if (name == "private-browsing") {
+        this.recordActionEvent("privateBrowsingAllowed", telemetryValue);
         let policy = WebExtensionPolicy.getByID(addon.id);
         let extension = policy && policy.extension;
 
@@ -1494,6 +1645,13 @@ class AddonCard extends HTMLElement {
   }
 
   onEnabled(addon) {
+    this.reloading = false;
+    this.update();
+  }
+
+  onInstalled(addon) {
+    // When a temporary addon is reloaded, onInstalled is triggered instead of
+    // onEnabled.
     this.reloading = false;
     this.update();
   }
@@ -1572,8 +1730,14 @@ class AddonCard extends HTMLElement {
       });
     }
 
+    // Show the recommended badge if needed.
+    card.querySelector(".addon-badge-recommended")
+      .hidden = !addon.isRecommended;
+
     // Update description.
     card.querySelector(".addon-description").textContent = addon.description;
+
+    this.updateMessage();
 
     // Update the details if they're shown.
     if (this.details) {
@@ -1581,6 +1745,27 @@ class AddonCard extends HTMLElement {
     }
 
     this.sendEvent("update");
+  }
+
+  async updateMessage() {
+    let {addon, card} = this;
+    let messageBar = card.querySelector(".addon-card-message");
+    let link = messageBar.querySelector("button");
+
+    let {message, type = "", linkText, linkUrl} =
+      await getAddonMessageInfo(addon);
+
+    if (message) {
+      messageBar.querySelector("span").textContent = message;
+      messageBar.setAttribute("type", type);
+      if (linkText) {
+        link.textContent = linkText;
+        link.setAttribute("url", linkUrl);
+      }
+    }
+
+    messageBar.hidden = !message;
+    link.hidden = !linkText;
   }
 
   showPrefs() {
@@ -1635,6 +1820,16 @@ class AddonCard extends HTMLElement {
 
   sendEvent(name, detail) {
     this.dispatchEvent(new CustomEvent(name, {detail}));
+  }
+
+  recordActionEvent(action, value) {
+    AMTelemetry.recordActionEvent({
+      object: "aboutAddons",
+      view: getTelemetryViewName(this),
+      action,
+      addon: this.addon,
+      value,
+    });
   }
 }
 customElements.define("addon-card", AddonCard);
@@ -1977,6 +2172,12 @@ class AddonList extends HTMLElement {
     const undo = document.createElement("button");
     undo.setAttribute("action", "undo");
     undo.addEventListener("click", () => {
+      AMTelemetry.recordActionEvent({
+        object: "aboutAddons",
+        view: getTelemetryViewName(this),
+        action: "undo",
+        addon,
+      });
       addon.cancelUninstall();
     });
 
@@ -2545,7 +2746,8 @@ class DetailView {
     card.setAddon(addon);
     card.expand();
     await card.render();
-    if (this.selectedTab === "preferences") {
+    if (this.selectedTab === "preferences" &&
+        (await isAddonOptionsUIAllowed(addon))) {
       card.showPrefs();
     }
 
@@ -2603,7 +2805,7 @@ class DiscoveryView {
 }
 
 // Generic view management.
-let root = null;
+let mainEl = null;
 
 /**
  * The name of the view for an element, used for telemetry.
@@ -2620,15 +2822,15 @@ function getTelemetryViewName(el) {
  * Called from extensions.js once, when about:addons is loading.
  */
 function initialize(opts) {
-  root = document.getElementById("main");
+  mainEl = document.getElementById("main");
   loadViewFn = opts.loadViewFn;
   replaceWithDefaultViewFn = opts.replaceWithDefaultViewFn;
   setCategoryFn = opts.setCategoryFn;
   AddonCardListenerHandler.startup();
   window.addEventListener("unload", () => {
-    // Clear out the root node so the disconnectedCallback will trigger
+    // Clear out the main node so the disconnectedCallback will trigger
     // properly and all of the custom elements can cleanup.
-    root.textContent = "";
+    mainEl.textContent = "";
     AddonCardListenerHandler.shutdown();
   }, {once: true});
 }
@@ -2655,10 +2857,10 @@ async function show(type, param) {
   } else {
     throw new Error(`Unknown view type: ${type}`);
   }
-  root.textContent = "";
-  root.appendChild(container);
+  mainEl.textContent = "";
+  mainEl.appendChild(container);
 }
 
 function hide() {
-  root.textContent = "";
+  mainEl.textContent = "";
 }

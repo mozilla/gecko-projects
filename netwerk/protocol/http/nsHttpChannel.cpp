@@ -1410,14 +1410,13 @@ nsresult ProcessXCTO(nsHttpChannel* aChannel, nsIURI* aURI,
     // since we are getting here, the XCTO header was sent;
     // a non matching value most likely means a mistake happenend;
     // e.g. sending 'nosnif' instead of 'nosniff', let's log a warning.
-    NS_ConvertUTF8toUTF16 char16_header(contentTypeOptionsHeader);
-    const char16_t* params[] = {char16_header.get()};
+    AutoTArray<nsString, 1> params;
+    CopyUTF8toUTF16(contentTypeOptionsHeader, *params.AppendElement());
     RefPtr<Document> doc;
     aLoadInfo->GetLoadingDocument(getter_AddRefs(doc));
     nsContentUtils::ReportToConsole(
         nsIScriptError::warningFlag, NS_LITERAL_CSTRING("XCTO"), doc,
-        nsContentUtils::eSECURITY_PROPERTIES, "XCTOHeaderValueMissing", params,
-        ArrayLength(params));
+        nsContentUtils::eSECURITY_PROPERTIES, "XCTOHeaderValueMissing", params);
     return NS_OK;
   }
 
@@ -2566,6 +2565,13 @@ nsresult nsHttpChannel::ContinueProcessResponse1() {
   rv = ProcessCrossOriginHeader();
   if (NS_FAILED(rv)) {
     mStatus = NS_ERROR_BLOCKED_BY_POLICY;
+    HandleAsyncAbort();
+    return NS_OK;
+  }
+
+  rv = ProcessCrossOriginResourcePolicyHeader();
+  if (NS_FAILED(rv)) {
+    mStatus = NS_ERROR_DOM_CORP_FAILED;
     HandleAsyncAbort();
     return NS_OK;
   }
@@ -4101,9 +4107,6 @@ nsresult nsHttpChannel::OpenCacheEntryInternal(
     mCacheOpenFunc = [openURI, extension, cacheEntryOpenFlags,
                       cacheStorage](nsHttpChannel* self) -> void {
       MOZ_ASSERT(NS_IsMainThread(), "Should be called on the main thread");
-      if (self->mNetworkTriggered) {
-        self->mRaceCacheWithNetwork = true;
-      }
       cacheStorage->AsyncOpenURI(openURI, extension, cacheEntryOpenFlags, self);
     };
 
@@ -7450,19 +7453,30 @@ nsHttpChannel::HasCrossOriginOpenerPolicyMismatch(bool* aMismatch) {
     LOG(("doc origin:%s - res origin: %s\n", docOrigin.get(), resOrigin.get()));
   }
 
-  if (!compareResult) {
-    // If one of the following is false:
-    //   - doc is the initial about:blank document
-    //   - document's unsafe-allow-outgoing is true
-    //   - resultPolicy is null
-    // then we have a mismatch.
-    if (!documentOrigin->GetIsNullPrincipal() ||
-        !(documentPolicy &
-          nsILoadInfo::OPENER_POLICY_UNSAFE_ALLOW_OUTGOING_FLAG) ||
-        !(resultPolicy == nsILoadInfo::OPENER_POLICY_NULL)) {
-      *aMismatch = true;
-      return NS_OK;
-    }
+  if (compareResult) {
+    return NS_OK;
+  }
+
+  // If one of the following is false:
+  //   - document's unsafe-allow-outgoing is true
+  //   - resultPolicy is null
+  //   - doc is the initial about:blank document
+  // then we have a mismatch.
+
+  if (!(documentPolicy &
+        nsILoadInfo::OPENER_POLICY_UNSAFE_ALLOW_OUTGOING_FLAG)) {
+    *aMismatch = true;
+    return NS_OK;
+  }
+
+  if (resultPolicy != nsILoadInfo::OPENER_POLICY_NULL) {
+    *aMismatch = true;
+    return NS_OK;
+  }
+
+  if (!ctx->Canonical()->GetCurrentWindowGlobal()->IsInitialDocument()) {
+    *aMismatch = true;
+    return NS_OK;
   }
 
   return NS_OK;
@@ -7531,6 +7545,70 @@ nsresult nsHttpChannel::ProcessCrossOriginHeader() {
   if (documentPolicy != nsILoadInfo::CROSS_ORIGIN_POLICY_NULL &&
       resultPolicy == nsILoadInfo::CROSS_ORIGIN_POLICY_NULL) {
     return NS_ERROR_BLOCKED_BY_POLICY;
+  }
+
+  return NS_OK;
+}
+
+// https://fetch.spec.whatwg.org/#cross-origin-resource-policy-header
+nsresult nsHttpChannel::ProcessCrossOriginResourcePolicyHeader() {
+  if (!StaticPrefs::browser_tabs_remote_useCORP()) {
+    return NS_OK;
+  }
+
+  uint32_t corsMode;
+  MOZ_ALWAYS_SUCCEEDS(GetCorsMode(&corsMode));
+  if (corsMode != nsIHttpChannelInternal::CORS_MODE_NO_CORS) {
+    return NS_OK;
+  }
+
+  // We only apply this for resources.
+  if (mLoadInfo->GetExternalContentPolicyType() ==
+          nsIContentPolicy::TYPE_DOCUMENT ||
+      mLoadInfo->GetExternalContentPolicyType() ==
+          nsIContentPolicy::TYPE_SUBDOCUMENT) {
+    return NS_OK;
+  }
+
+  MOZ_ASSERT(mLoadInfo->LoadingPrincipal(),
+             "Resources should always have a LoadingPrincipal");
+  MOZ_ASSERT(mResponseHead);
+
+  nsAutoCString content;
+  Unused << mResponseHead->GetHeader(nsHttp::Cross_Origin_Resource_Policy,
+                                     content);
+
+  if (content.IsEmpty()) {
+    return NS_OK;
+  }
+
+  nsCOMPtr<nsIPrincipal> channelOrigin;
+  nsContentUtils::GetSecurityManager()->GetChannelResultPrincipal(
+      this, getter_AddRefs(channelOrigin));
+
+  // Cross-Origin-Resource-Policy = %s"same-origin" / %s"same-site"
+  if (content.EqualsLiteral("same-origin")) {
+    if (!channelOrigin->Equals(mLoadInfo->LoadingPrincipal())) {
+      return NS_ERROR_DOM_CORP_FAILED;
+    }
+    return NS_OK;
+  }
+  if (content.EqualsLiteral("same-site")) {
+    nsAutoCString documentBaseDomain;
+    nsAutoCString resourceBaseDomain;
+    mLoadInfo->LoadingPrincipal()->GetBaseDomain(documentBaseDomain);
+    channelOrigin->GetBaseDomain(resourceBaseDomain);
+    if (documentBaseDomain != resourceBaseDomain) {
+      return NS_ERROR_DOM_CORP_FAILED;
+    }
+
+    nsCOMPtr<nsIURI> documentURI = mLoadInfo->LoadingPrincipal()->GetURI();
+    nsCOMPtr<nsIURI> resourceURI = channelOrigin->GetURI();
+    if (!documentURI->SchemeIs("https") && resourceURI->SchemeIs("https")) {
+      return NS_ERROR_DOM_CORP_FAILED;
+    }
+
+    return NS_OK;
   }
 
   return NS_OK;
@@ -9276,13 +9354,12 @@ nsresult nsHttpChannel::OnPush(const nsACString& url,
                                 NS_GET_IID(nsIHttpPushListener),
                                 getter_AddRefs(pushListener));
 
-  MOZ_ASSERT(pushListener);
   if (!pushListener) {
     LOG(
         ("nsHttpChannel::OnPush [this=%p] notification callbacks do not "
          "implement nsIHttpPushListener\n",
          this));
-    return NS_ERROR_UNEXPECTED;
+    return NS_ERROR_NOT_AVAILABLE;
   }
 
   nsCOMPtr<nsIURI> pushResource;
@@ -9976,7 +10053,12 @@ nsresult nsHttpChannel::TriggerNetwork() {
     return NS_OK;
   }
 
-  if (AwaitingCacheCallbacks()) {
+  // If |mCacheOpenFunc| is assigned, we're delaying opening the entry to
+  // simulate racing. Although cache entry opening hasn't started yet, we're
+  // actually racing, so we must set mRaceCacheWithNetwork to true now.
+  if (mCacheOpenFunc) {
+    mRaceCacheWithNetwork = true;
+  } else if (AwaitingCacheCallbacks()) {
     mRaceCacheWithNetwork = sRCWNEnabled;
   }
 

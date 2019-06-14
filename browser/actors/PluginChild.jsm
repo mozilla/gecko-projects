@@ -53,10 +53,10 @@ class PluginChild extends ActorChild {
       case "BrowserPlugins:ContextMenuCommand":
         switch (msg.data.command) {
           case "play":
-            this._showClickToPlayNotification(ContextMenuChild.getTarget(this.mm, msg, "plugin"), true);
+            this._showClickToPlayNotification(ContextMenuChild.getTarget(this.docShell.browsingContext, msg, "plugin"), true);
             break;
           case "hide":
-            this.hideClickToPlayOverlay(ContextMenuChild.getTarget(this.mm, msg, "plugin"));
+            this.hideClickToPlayOverlay(ContextMenuChild.getTarget(this.docShell.browsingContext, msg, "plugin"));
             break;
         }
         break;
@@ -500,7 +500,7 @@ class PluginChild extends ActorChild {
       case "PluginClickToPlay":
         this._handleClickToPlayEvent(plugin);
         let pluginName = this._getPluginInfo(plugin).pluginName;
-        let messageString = gNavigatorBundle.formatStringFromName("PluginClickToActivate2", [pluginName], 1);
+        let messageString = gNavigatorBundle.formatStringFromName("PluginClickToActivate2", [pluginName]);
         let overlayText = this.getPluginUI(plugin, "clickToPlay");
         overlayText.textContent = messageString;
         if (eventType == "PluginVulnerableUpdatable" ||
@@ -885,7 +885,7 @@ class PluginChild extends ActorChild {
   NPAPIPluginProcessCrashed({pluginName, runID, state}) {
     let message =
       gNavigatorBundle.formatStringFromName("crashedpluginsMessage.title",
-                                            [pluginName], 1);
+                                            [pluginName]);
 
     let contentWindow = this.content;
     let cwu = contentWindow.windowUtils;
@@ -1010,7 +1010,7 @@ class PluginChild extends ActorChild {
 
     let messageString =
       gNavigatorBundle.formatStringFromName("crashedpluginsMessage.title",
-                                            [pluginName], 1);
+                                            [pluginName]);
 
     this.mm.sendAsyncMessage("PluginContent:ShowPluginCrashedNotification",
                                  { messageString, pluginID });

@@ -1135,9 +1135,9 @@ void Gecko_SetNullImageValue(nsStyleImage* aImage) {
 }
 
 void Gecko_SetGradientImageValue(nsStyleImage* aImage,
-                                 nsStyleGradient* aGradient) {
+                                 StyleGradient* aGradient) {
   MOZ_ASSERT(aImage);
-  aImage->SetGradientData(aGradient);
+  aImage->SetGradientData(UniquePtr<StyleGradient>(aGradient));
 }
 
 static already_AddRefed<nsStyleImageRequest> CreateStyleImageRequest(
@@ -1207,34 +1207,6 @@ nsStyleContentData::CounterFunction* Gecko_SetCounterFunction(
   return ptr;
 }
 
-nsStyleGradient* Gecko_CreateGradient(uint8_t aShape, uint8_t aSize,
-                                      bool aRepeating, bool aLegacySyntax,
-                                      bool aMozLegacySyntax,
-                                      uint32_t aStopCount) {
-  nsStyleGradient* result = new nsStyleGradient();
-
-  result->mShape = aShape;
-  result->mSize = aSize;
-  result->mRepeating = aRepeating;
-  result->mLegacySyntax = aLegacySyntax;
-  result->mMozLegacySyntax = aMozLegacySyntax;
-
-  result->mAngle.SetNoneValue();
-  result->mBgPosX.SetNoneValue();
-  result->mBgPosY.SetNoneValue();
-  result->mRadiusX.SetNoneValue();
-  result->mRadiusY.SetNoneValue();
-
-  result->mStops.SetCapacity(aStopCount);
-
-  auto dummyItem = StyleGradientItem::SimpleColorStop(StyleColor::Black());
-  for (uint32_t i = 0; i < aStopCount; i++) {
-    result->mStops.AppendElement(dummyItem);
-  }
-
-  return result;
-}
-
 const nsStyleImageRequest* Gecko_GetImageRequest(const nsStyleImage* aImage) {
   MOZ_ASSERT(aImage);
   return aImage->ImageRequest();
@@ -1243,11 +1215,6 @@ const nsStyleImageRequest* Gecko_GetImageRequest(const nsStyleImage* aImage) {
 nsAtom* Gecko_GetImageElement(const nsStyleImage* aImage) {
   MOZ_ASSERT(aImage && aImage->GetType() == eStyleImageType_Element);
   return const_cast<nsAtom*>(aImage->GetElementId());
-}
-
-const nsStyleGradient* Gecko_GetGradientImageValue(const nsStyleImage* aImage) {
-  MOZ_ASSERT(aImage && aImage->GetType() == eStyleImageType_Gradient);
-  return aImage->GetGradientData();
 }
 
 void Gecko_SetListStyleImageNone(nsStyleList* aList) {
@@ -1994,7 +1961,8 @@ void Gecko_ReportUnexpectedCSSError(
   if (prefix) {
     if (prefixParam) {
       nsDependentCSubstring paramValue(prefixParam, prefixParamLen);
-      nsAutoString wideParam = NS_ConvertUTF8toUTF16(paramValue);
+      AutoTArray<nsString, 1> wideParam;
+      CopyUTF8toUTF16(paramValue, *wideParam.AppendElement());
       reporter.ReportUnexpectedUnescaped(prefix, wideParam);
     } else {
       reporter.ReportUnexpected(prefix);
@@ -2003,7 +1971,8 @@ void Gecko_ReportUnexpectedCSSError(
 
   if (param) {
     nsDependentCSubstring paramValue(param, paramLen);
-    nsAutoString wideParam = NS_ConvertUTF8toUTF16(paramValue);
+    AutoTArray<nsString, 1> wideParam;
+    CopyUTF8toUTF16(paramValue, *wideParam.AppendElement());
     reporter.ReportUnexpectedUnescaped(message, wideParam);
   } else {
     reporter.ReportUnexpected(message);

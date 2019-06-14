@@ -2459,7 +2459,8 @@ bool BaselineInterpreterCodeGen::emit_JSOP_DOUBLE() {
 
 template <>
 bool BaselineCompilerCodeGen::emit_JSOP_BIGINT() {
-  frame.push(handler.script()->getConst(GET_UINT32_INDEX(handler.pc())));
+  BigInt* bi = handler.script()->getBigInt(handler.pc());
+  frame.push(BigIntValue(bi));
   return true;
 }
 
@@ -3214,11 +3215,11 @@ bool BaselineCompilerCodeGen::tryOptimizeGetGlobalName() {
     return true;
   }
   if (name == cx->names().NaN) {
-    frame.push(cx->runtime()->NaNValue);
+    frame.push(JS::NaNValue());
     return true;
   }
   if (name == cx->names().Infinity) {
-    frame.push(cx->runtime()->positiveInfinityValue);
+    frame.push(JS::InfinityValue());
     return true;
   }
 

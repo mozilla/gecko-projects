@@ -563,6 +563,12 @@ class DesktopInstance(GeckoInstance):
         # Disable browser animations
         "toolkit.cosmeticAnimations.enabled": False,
 
+        # Bug 1557457: Disable because modal dialogs might not appear in Firefox
+        "browser.tabs.remote.separatePrivilegedContentProcess": False,
+
+        # Don't unload tabs when available memory is running low
+        "browser.tabs.unloadOnLowMemory": False,
+
         # Do not warn when closing all open tabs
         "browser.tabs.warnOnClose": False,
         # Do not warn when closing all other open tabs
@@ -597,21 +603,6 @@ class DesktopInstance(GeckoInstance):
         self.required_prefs.update(required_prefs)
 
 
-class ThunderbirdInstance(GeckoInstance):
-    def __init__(self, *args, **kwargs):
-        super(ThunderbirdInstance, self).__init__(*args, **kwargs)
-        try:
-            # Copied alongside in the test archive
-            from .thunderbirdinstance import thunderbird_prefs
-        except ImportError:
-            try:
-                # Coming from source tree through virtualenv
-                from thunderbirdinstance import thunderbird_prefs
-            except ImportError:
-                thunderbird_prefs = {}
-        self.required_prefs.update(thunderbird_prefs)
-
-
 class NullOutput(object):
     def __call__(self, line):
         pass
@@ -620,11 +611,9 @@ class NullOutput(object):
 apps = {
     'fennec': FennecInstance,
     'fxdesktop': DesktopInstance,
-    'thunderbird': ThunderbirdInstance,
 }
 
 app_ids = {
     '{aa3c5121-dab2-40e2-81ca-7ea25febc110}': 'fennec',
     '{ec8030f7-c20a-464f-9b0e-13a3a9e97384}': 'fxdesktop',
-    '{3550f703-e582-4d05-9a08-453d09bdfdc6}': 'thunderbird',
 }

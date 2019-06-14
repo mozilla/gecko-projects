@@ -309,56 +309,47 @@ marionette-media-tests:
 
 macosx1014-64-tests:
     - cppunit
-    # - crashtest
+    - crashtest
     - firefox-ui-functional-local
     - firefox-ui-functional-remote
     # - gtest
     - jittest
-    # - jsreftest
+    - jsreftest
     - marionette
     # - mochitest
     - mochitest-a11y
     # - mochitest-browser-chrome
     # - mochitest-chrome
-    # - mochitest-devtools-chrome
+    - mochitest-devtools-chrome
     - mochitest-devtools-webreplay
     - mochitest-gpu
     # - mochitest-media
-    # - mochitest-webgl1-core
-    # - mochitest-webgl1-ext
+    - mochitest-webgl1-core
+    - mochitest-webgl1-ext
     # - mochitest-webgl2-core
     # - mochitest-webgl2-ext test  # timeouts
     - reftest
-    # - telemetry-tests-client
+    - telemetry-tests-client
     - test-verify
     - test-verify-gpu
     - test-verify-wpt
-    # - web-platform-tests
-    # - web-platform-tests-reftests
+    - web-platform-tests
+    - web-platform-tests-reftests
     - web-platform-tests-wdspec
-    # - xpcshell
+    - xpcshell
 
 macosx1014-64-qr-tests:
-    # - crashtest
+    - crashtest
     - reftest
 
 macosx64-tests:
-    - crashtest
     - gtest
-    - jsreftest
     - mochitest
     - mochitest-browser-chrome
     - mochitest-chrome
-    - mochitest-devtools-chrome
     - mochitest-media
-    - mochitest-webgl1-core
-    - mochitest-webgl1-ext
     - mochitest-webgl2-core
     # - mochitest-webgl2-ext test timeouts
-    - telemetry-tests-client
-    - web-platform-tests
-    - web-platform-tests-reftests
-    - xpcshell
 
 macosx64-talos:
     - talos-bcv
@@ -376,9 +367,6 @@ macosx64-talos:
     - talos-perf-reftest-singletons
     # - talos-tabswitch # Bug 1453007 times out
     # - talos-h1 # too long to unpack profile- Bug 1442893
-
-macosx64-qr-tests:
-    - crashtest
 
 linux32-tests:
     - web-platform-tests
@@ -416,8 +404,7 @@ android-x86_64-tests:
     - marionette
     - mochitest
     - mochitest-gpu
-    # various reftest (plain) failures; bug 1501582
-    # - reftest
+    - reftest
     - test-verify
     - web-platform-tests
     - web-platform-tests-reftests

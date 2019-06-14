@@ -913,10 +913,8 @@ void LayerManagerComposite::Render(const nsIntRegion& aInvalidRegion,
   // Set LayerScope begin/end frame
   LayerScopeAutoFrame frame(PR_Now());
 
-  // Dump to console
-  if (StaticPrefs::LayersDump()) {
-    this->Dump(/* aSorted= */ true);
-  }
+  // If you're looking for the code to dump the layer tree, it was moved
+  // to CompositorBridgeParent::CompositeToTarget().
 
   // Dump to LayerScope Viewer
   if (LayerScope::CheckSendable()) {
@@ -1500,7 +1498,9 @@ void HostLayer::RecomputeShadowVisibleRegionFromChildren() {
   // that can only be represented correctly in 3d space. Since
   // we can't do that, leave it empty instead to stop anyone
   // from trying to use it.
-  NS_ASSERTION(!GetLayer()->Extend3DContext(), "Can't compute visible region for layers that extend a 3d context");
+  NS_ASSERTION(
+      !GetLayer()->Extend3DContext(),
+      "Can't compute visible region for layers that extend a 3d context");
   if (container && !GetLayer()->Extend3DContext()) {
     ComputeVisibleRegionForChildren(container, mShadowVisibleRegion);
   }
