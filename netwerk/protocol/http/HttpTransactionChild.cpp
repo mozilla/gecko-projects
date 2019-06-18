@@ -83,6 +83,8 @@ nsresult HttpTransactionChild::InitInternal(
                          info.resolveFlags());
     if (last) {
       last->mNext = pi;
+      // |mNext| will be released in |last|'s destructor.
+      NS_IF_ADDREF(last->mNext);
     } else {
       first = pi;
     }
