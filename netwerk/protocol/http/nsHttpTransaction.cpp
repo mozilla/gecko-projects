@@ -272,6 +272,7 @@ nsresult nsHttpTransaction::Init(
         mRequestContext.get()));
 
   mTrafficCategory = trafficCategory;
+  MOZ_ASSERT(mTrafficCategory <= HttpTrafficCategory::eInvalid);
   SetClassOfService(classOfService);
 
   mActivityDistributor = services::GetActivityDistributor();

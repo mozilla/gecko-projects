@@ -94,10 +94,10 @@ nsresult HttpTransactionChild::InitInternal(
 
   RefPtr<nsHttpConnectionInfo> cinfo;
   if (infoArgs.routedHost().IsEmpty()) {
-    cinfo = new nsHttpConnectionInfo(infoArgs.host(), infoArgs.port(),
-                                     infoArgs.npnToken(), infoArgs.username(),
-                                     EmptyCString(), first, infoArgs.originAttributes(),
-                                     infoArgs.endToEndSSL());
+    cinfo = new nsHttpConnectionInfo(
+        infoArgs.host(), infoArgs.port(), infoArgs.npnToken(),
+        infoArgs.username(), EmptyCString(), first, infoArgs.originAttributes(),
+        infoArgs.endToEndSSL());
   } else {
     cinfo = new nsHttpConnectionInfo(
         infoArgs.host(), infoArgs.port(), infoArgs.npnToken(),
@@ -213,9 +213,9 @@ mozilla::ipc::IPCResult HttpTransactionChild::RecvInit(
   if (NS_FAILED(InitInternal(
           aCaps, aArgs, &mRequestHead, mUploadStream, aReqContentLength,
           aReqBodyIncludesHeaders, GetCurrentThreadEventTarget(),
-          aTopLevelOuterContentWindowId, aRequestContextID, aClassOfService,
-          aPushedStreamId, aResponseTimeoutEnabled, aInitialRwin,
-          aHttpTrafficCategory))) {
+          aTopLevelOuterContentWindowId, aHttpTrafficCategory,
+          aRequestContextID, aClassOfService, aPushedStreamId,
+          aResponseTimeoutEnabled, aInitialRwin))) {
     LOG(("HttpTransactionChild::RecvInit: [this=%p] InitInternal failed!\n",
          this));
   }
