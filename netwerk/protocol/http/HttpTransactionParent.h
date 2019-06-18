@@ -21,6 +21,7 @@
 namespace mozilla {
 namespace net {
 
+class ChannelEventQueue;
 class nsHttpConnectionInfo;
 
 // HttpTransactionParent plays the role of nsHttpTransaction and delegates the
@@ -43,8 +44,8 @@ class HttpTransactionParent final : public PHttpTransactionParent,
   mozilla::ipc::IPCResult RecvOnStartRequest(
       const nsresult& aStatus, const Maybe<nsHttpResponseHead>& aResponseHead,
       const nsCString& aSecurityInfoSerialization,
-      const bool& aProxyConnectFailed,
-      const TimingStruct& aTimings, nsTArray<uint8_t>&& aDataForSniffer);
+      const bool& aProxyConnectFailed, const TimingStruct& aTimings,
+      nsTArray<uint8_t>&& aDataForSniffer);
   mozilla::ipc::IPCResult RecvOnTransportStatus(const nsresult& aStatus,
                                                 const int64_t& aProgress,
                                                 const int64_t& aProgressMax);
@@ -58,6 +59,26 @@ class HttpTransactionParent final : public PHttpTransactionParent,
       const TransactionObserverResult& aResult);
   mozilla::ipc::IPCResult RecvOnNetAddrUpdate(const NetAddr& aSelfAddr,
                                               const NetAddr& aPeerAddr);
+
+  void DoOnStartRequest(const nsresult& aStatus,
+                        const Maybe<nsHttpResponseHead>& aResponseHead,
+                        const nsCString& aSecurityInfoSerialization,
+                        const bool& aProxyConnectFailed,
+                        const TimingStruct& aTimings,
+                        nsTArray<uint8_t>&& aDataForSniffer);
+  void DoOnTransportStatus(const nsresult& aStatus, const int64_t& aProgress,
+                           const int64_t& aProgressMax);
+  void DoOnDataAvailable(const nsCString& aData, const uint64_t& aOffset,
+                         const uint32_t& aCount,
+                         const bool& dataSentToChildProcess);
+  void DoOnStopRequest(const nsresult& aStatus, const bool& aResponseIsComplete,
+                       const int64_t& aTransferSize,
+                       const TimingStruct& aTimings,
+                       const nsHttpHeaderArray& responseTrailers,
+                       const bool& aHasStickyConn,
+                       const TransactionObserverResult& aResult);
+
+  void DoNotifyListener();
 
  private:
   virtual ~HttpTransactionParent();
@@ -76,6 +97,7 @@ class HttpTransactionParent final : public PHttpTransactionParent,
 
   nsAutoPtr<nsHttpResponseHead> mResponseHead;
   nsAutoPtr<nsHttpHeaderArray> mResponseTrailers;
+  RefPtr<ChannelEventQueue> mEventQ;
 
   nsLoadFlags mLoadFlags = LOAD_NORMAL;
   bool mProxyConnectFailed = false;
@@ -84,10 +106,6 @@ class HttpTransactionParent final : public PHttpTransactionParent,
   bool mDataAlreadySent = false;
   int32_t mSuspendCount = 0;
   std::queue<std::function<void()>> mSuspendQueue;
-  // Store pending messages that require to be handled after OnStartRequest is
-  // finished. Should be flushed after OnStartRequest is done.
-  nsTArray<nsCOMPtr<nsIRunnable>> mQueuedRunnables;
-  bool mOnStartRequestFinished = false;
 
   NetAddr mSelfAddr;
   NetAddr mPeerAddr;
@@ -100,6 +118,8 @@ class HttpTransactionParent final : public PHttpTransactionParent,
   bool mHasStickyConnection;
   TransactionObserver mTransactionObserver;
   uint64_t mChannelId;
+  bool mOnStartRequestCalled;
+  bool mOnStopRequestCalled;
 };
 
 }  // namespace net

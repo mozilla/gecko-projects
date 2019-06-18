@@ -9,6 +9,7 @@
 
 #include "HttpTransactionParent.h"
 #include "mozilla/ipc/IPCStreamUtils.h"
+#include "mozilla/net/ChannelEventQueue.h"
 #include "mozilla/net/InputChannelThrottleQueueParent.h"
 #include "mozilla/net/SocketProcessParent.h"
 #include "nsHttpHandler.h"
@@ -63,7 +64,9 @@ HttpTransactionParent::HttpTransactionParent()
       mResponseHeadTaken(false),
       mResponseTrailersTaken(false),
       mHasStickyConnection(false),
-      mChannelId(0) {
+      mChannelId(0),
+      mOnStartRequestCalled(false),
+      mOnStopRequestCalled(false) {
   LOG(("Creating HttpTransactionParent @%p\n", this));
 
   this->mSelfAddr.inet = {};
@@ -75,6 +78,8 @@ HttpTransactionParent::HttpTransactionParent()
 #endif
   mSelfAddr.raw.family = PR_AF_UNSPEC;
   mPeerAddr.raw.family = PR_AF_UNSPEC;
+
+  mEventQ = new ChannelEventQueue(static_cast<nsIRequest*>(this));
 }
 
 HttpTransactionParent::~HttpTransactionParent() {
@@ -130,9 +135,10 @@ nsresult HttpTransactionParent::Init(
     nsIInputStream* requestBody, uint64_t requestContentLength,
     bool requestBodyHasHeaders, nsIEventTarget* target,
     nsIInterfaceRequestor* callbacks, nsITransportEventSink* eventsink,
-    uint64_t topLevelOuterContentWindowId, HttpTrafficCategory trafficCategory, nsIRequestContext* requestContext,
-    uint32_t classOfService, uint32_t pushedStreamId, uint64_t aChannelId,
-    bool responseTimeoutEnabled, uint32_t initialRwin) {
+    uint64_t topLevelOuterContentWindowId, HttpTrafficCategory trafficCategory,
+    nsIRequestContext* requestContext, uint32_t classOfService,
+    uint32_t pushedStreamId, uint64_t aChannelId, bool responseTimeoutEnabled,
+    uint32_t initialRwin) {
   LOG(("HttpTransactionParent::Init [this=%p caps=%x]\n", this, caps));
 
   if (!mIPCOpen) {
@@ -341,14 +347,67 @@ void HttpTransactionParent::SetTransactionObserver(TransactionObserver&& obs) {
   mTransactionObserver = std::move(obs);
 }
 
+namespace {
+
+class OnStartRequestEvent : public MainThreadChannelEvent {
+ public:
+  explicit OnStartRequestEvent(HttpTransactionParent* aParent,
+                               const nsresult& aStatus,
+                               const Maybe<nsHttpResponseHead>& aResponseHead,
+                               const nsCString& aSecurityInfoSerialization,
+                               const bool& aProxyConnectFailed,
+                               const TimingStruct& aTimings,
+                               nsTArray<uint8_t>&& aDataForSniffer)
+      : mParent(aParent),
+        mStatus(aStatus),
+        mResponseHead(aResponseHead),
+        mSecurityInfoSerialization(aSecurityInfoSerialization),
+        mProxyConnectFailed(aProxyConnectFailed),
+        mTimings(aTimings),
+        mDataForSniffer(std::move(aDataForSniffer)) {}
+
+  void Run() override {
+    LOG(("HttpTransactionParent::OnStartRequestEvent [this=%p]\n", mParent));
+    mParent->DoOnStartRequest(mStatus, mResponseHead,
+                              mSecurityInfoSerialization, mProxyConnectFailed,
+                              mTimings, std::move(mDataForSniffer));
+  }
+
+ private:
+  HttpTransactionParent* mParent;
+  nsresult mStatus;
+  Maybe<nsHttpResponseHead> mResponseHead;
+  nsCString mSecurityInfoSerialization;
+  bool mProxyConnectFailed;
+  TimingStruct mTimings;
+  nsTArray<uint8_t> mDataForSniffer;
+};
+
+};  // anonymous namespace
+
 mozilla::ipc::IPCResult HttpTransactionParent::RecvOnStartRequest(
     const nsresult& aStatus, const Maybe<nsHttpResponseHead>& aResponseHead,
     const nsCString& aSecurityInfoSerialization,
-    const bool& aProxyConnectFailed,
-    const TimingStruct& aTimings, nsTArray<uint8_t>&& aDataForSniffer) {
-  LOG(("HttpTransactionParent::RecvOnStartRequest [this=%p aStatus=%" PRIx32
+    const bool& aProxyConnectFailed, const TimingStruct& aTimings,
+    nsTArray<uint8_t>&& aDataForSniffer) {
+  mEventQ->RunOrEnqueue(new OnStartRequestEvent(
+      this, aStatus, aResponseHead, aSecurityInfoSerialization,
+      aProxyConnectFailed, aTimings, std::move(aDataForSniffer)));
+  return IPC_OK();
+}
+
+void HttpTransactionParent::DoOnStartRequest(
+    const nsresult& aStatus, const Maybe<nsHttpResponseHead>& aResponseHead,
+    const nsCString& aSecurityInfoSerialization,
+    const bool& aProxyConnectFailed, const TimingStruct& aTimings,
+    nsTArray<uint8_t>&& aDataForSniffer) {
+  LOG(("HttpTransactionParent::DoOnStartRequest [this=%p aStatus=%" PRIx32
        "]\n",
        this, static_cast<uint32_t>(aStatus)));
+
+  if (mOnStartRequestCalled) {
+    return;
+  }
 
   if (!mCanceled && NS_SUCCEEDED(mStatus)) {
     mStatus = aStatus;
@@ -364,49 +423,88 @@ mozilla::ipc::IPCResult HttpTransactionParent::RecvOnStartRequest(
   }
   mProxyConnectFailed = aProxyConnectFailed;
   mTimings = aTimings;
-
-  nsCOMPtr<nsIStreamListener> chan = mChannel;
-
   mDataForSniffer = std::move(aDataForSniffer);
 
-  RefPtr<HttpTransactionParent> self(this);
-  auto call = [self{std::move(self)}, chan{std::move(chan)}]() {
-    nsresult rv = chan->OnStartRequest(self);
-    // The OnStartRequest listeners could spin the event loop on the current
-    // thread, so we need |mOnStartRequestFinished| to make sure that
-    // |OnStartRequest| is really finished.
-    self->mOnStartRequestFinished = true;
+  AutoEventEnqueuer ensureSerialDispatch(mEventQ);
+  nsresult rv = mChannel->OnStartRequest(this);
+  mOnStartRequestCalled = true;
+  if (NS_FAILED(rv)) {
+    Cancel(rv);
+  }
+}
 
-    if (NS_FAILED(rv)) {
-      self->Cancel(rv);
-    }
+namespace {
 
-    if (!self->mQueuedRunnables.IsEmpty()) {
-      nsTArray<nsCOMPtr<nsIRunnable>> runnables;
-      runnables.SwapElements(self->mQueuedRunnables);
+class OnTransportStatusEvent : public MainThreadChannelEvent {
+ public:
+  explicit OnTransportStatusEvent(HttpTransactionParent* aParent,
+                                  const nsresult& aStatus,
+                                  const int64_t& aProgress,
+                                  const int64_t& aProgressMax)
+      : mParent(aParent),
+        mStatus(aStatus),
+        mProgress(aProgress),
+        mProgressMax(aProgressMax) {}
 
-      for (const auto& event : runnables) {
-        event->Run();
-      }
-    }
-  };
-  if (mSuspendCount > 0) {
-    mSuspendQueue.emplace(std::move(call));
-  } else {
-    call();
+  void Run() override {
+    LOG(("HttpTransactionParent::OnTransportStatusEvent [this=%p]\n", mParent));
+    mParent->DoOnTransportStatus(mStatus, mProgress, mProgressMax);
   }
 
-  return IPC_OK();
-}
+ private:
+  HttpTransactionParent* mParent;
+  nsresult mStatus;
+  int64_t mProgress;
+  int64_t mProgressMax;
+};
+
+};  // anonymous namespace
 
 mozilla::ipc::IPCResult HttpTransactionParent::RecvOnTransportStatus(
     const nsresult& aStatus, const int64_t& aProgress,
     const int64_t& aProgressMax) {
   LOG(("HttpTransactionParent::OnTransportStatus [this=%p]\n", this));
 
-  mEventsink->OnTransportStatus(nullptr, aStatus, aProgress, aProgressMax);
+  mEventQ->RunOrEnqueue(
+      new OnTransportStatusEvent(this, aStatus, aProgress, aProgressMax));
   return IPC_OK();
 }
+
+void HttpTransactionParent::DoOnTransportStatus(const nsresult& aStatus,
+                                                const int64_t& aProgress,
+                                                const int64_t& aProgressMax) {
+  AutoEventEnqueuer ensureSerialDispatch(mEventQ);
+  mEventsink->OnTransportStatus(nullptr, aStatus, aProgress, aProgressMax);
+}
+
+namespace {
+
+class OnDataAvailableEvent : public MainThreadChannelEvent {
+ public:
+  explicit OnDataAvailableEvent(HttpTransactionParent* aParent,
+                                const nsCString& aData, const uint64_t& aOffset,
+                                const uint32_t& aCount,
+                                const bool& aDataSentToChildProcess)
+      : mParent(aParent),
+        mData(aData),
+        mOffset(aOffset),
+        mCount(aCount),
+        mDataSentToChildProcess(aDataSentToChildProcess) {}
+
+  void Run() override {
+    LOG(("HttpTransactionParent::OnDataAvailableEvent [this=%p]\n", mParent));
+    mParent->DoOnDataAvailable(mData, mOffset, mCount, mDataSentToChildProcess);
+  }
+
+ private:
+  HttpTransactionParent* mParent;
+  nsCString mData;
+  uint64_t mOffset;
+  uint32_t mCount;
+  bool mDataSentToChildProcess;
+};
+
+};  // anonymous namespace
 
 mozilla::ipc::IPCResult HttpTransactionParent::RecvOnDataAvailable(
     const nsCString& aData, const uint64_t& aOffset, const uint32_t& aCount,
@@ -419,23 +517,14 @@ mozilla::ipc::IPCResult HttpTransactionParent::RecvOnDataAvailable(
     return IPC_OK();
   }
 
-  if (!mOnStartRequestFinished) {
-    LOG(("  > pending until OnStartRequest finished [offset=%" PRIu64
-         " count=%" PRIu32 "]\n",
-         aOffset, aCount));
+  mEventQ->RunOrEnqueue(new OnDataAvailableEvent(this, aData, aOffset, aCount,
+                                                 dataSentToChildProcess));
+  return IPC_OK();
+}
 
-    mQueuedRunnables.AppendElement(
-        NewRunnableMethod<const nsCString, const uint64_t, const uint32_t,
-                          const bool>(
-            "HttpTransactionParent::RecvOnDataAvailable", this,
-            &HttpTransactionParent::RecvOnDataAvailable, aData, aOffset, aCount,
-            dataSentToChildProcess));
-
-    return IPC_OK();
-  }
-
-  // TODO: need to determine how to send the input stream, we use nsCString for
-  // now
+void HttpTransactionParent::DoOnDataAvailable(
+    const nsCString& aData, const uint64_t& aOffset, const uint32_t& aCount,
+    const bool& dataSentToChildProcess) {
   nsCOMPtr<nsIInputStream> stringStream;
   nsresult rv = NS_NewByteInputStream(getter_AddRefs(stringStream),
                                       MakeSpan(aData.get(), aCount),
@@ -443,44 +532,54 @@ mozilla::ipc::IPCResult HttpTransactionParent::RecvOnDataAvailable(
 
   if (NS_FAILED(rv)) {
     Cancel(rv);
-    return IPC_OK();
+    return;
   }
 
+  AutoEventEnqueuer ensureSerialDispatch(mEventQ);
   mDataAlreadySent = dataSentToChildProcess;
-
-  if (!mSuspendCount) {
-    mChannel->OnDataAvailable(this, stringStream, aOffset, aCount);
-    return IPC_OK();
-  }
-
-  // We have to clone |stringStream|, since |stringStream| is created with flag
-  // |NS_ASSIGNMENT_DEPEND|. The |aData| will be released when this function
-  // ends.
-  nsCOMPtr<nsIInputStream> clonedStream;
-  rv = NS_CloneInputStream(stringStream, getter_AddRefs(clonedStream));
-  if (NS_WARN_IF(NS_FAILED(rv))) {
+  rv = mChannel->OnDataAvailable(this, stringStream, aOffset, aCount);
+  if (NS_FAILED(rv)) {
     Cancel(rv);
-    return IPC_OK();
   }
-
-  nsCOMPtr<nsIStreamListener> chan = mChannel;
-  RefPtr<HttpTransactionParent> self(this);
-  auto call = [self{std::move(self)}, chan{std::move(chan)},
-               clonedStream{std::move(clonedStream)}, aOffset, aCount]() {
-    nsresult rv = chan->OnDataAvailable(self, clonedStream, aOffset, aCount);
-    if (NS_FAILED(rv)) {
-      self->Cancel(rv);
-    }
-  };
-
-  if (mSuspendCount > 0) {
-    mSuspendQueue.emplace(std::move(call));
-  } else {
-    call();
-  }
-
-  return IPC_OK();
 }
+
+namespace {
+
+class OnStopRequestEvent : public MainThreadChannelEvent {
+ public:
+  explicit OnStopRequestEvent(
+      HttpTransactionParent* aParent, const nsresult& aStatus,
+      const bool& aResponseIsComplete, const int64_t& aTransferSize,
+      const TimingStruct& aTimings, const nsHttpHeaderArray& aResponseTrailers,
+      const bool& aHasStickyConn, const TransactionObserverResult& aResult)
+      : mParent(aParent),
+        mStatus(aStatus),
+        mResponseIsComplete(aResponseIsComplete),
+        mTransferSize(aTransferSize),
+        mTimings(aTimings),
+        mResponseTrailers(aResponseTrailers),
+        mHasStickyConn(aHasStickyConn),
+        mResult(aResult) {}
+
+  void Run() override {
+    LOG(("HttpTransactionParent::OnStopRequestEvent [this=%p]\n", mParent));
+    mParent->DoOnStopRequest(mStatus, mResponseIsComplete, mTransferSize,
+                             mTimings, mResponseTrailers, mHasStickyConn,
+                             mResult);
+  }
+
+ private:
+  HttpTransactionParent* mParent;
+  nsresult mStatus;
+  bool mResponseIsComplete;
+  int64_t mTransferSize;
+  TimingStruct mTimings;
+  nsHttpHeaderArray mResponseTrailers;
+  bool mHasStickyConn;
+  TransactionObserverResult mResult;
+};
+
+};  // anonymous namespace
 
 mozilla::ipc::IPCResult HttpTransactionParent::RecvOnStopRequest(
     const nsresult& aStatus, const bool& aResponseIsComplete,
@@ -490,21 +589,19 @@ mozilla::ipc::IPCResult HttpTransactionParent::RecvOnStopRequest(
   LOG(("HttpTransactionParent::RecvOnStopRequest [this=%p status=%" PRIx32
        "]\n",
        this, static_cast<uint32_t>(aStatus)));
+  mEventQ->RunOrEnqueue(new OnStopRequestEvent(
+      this, aStatus, aResponseIsComplete, aTransferSize, aTimings,
+      aResponseTrailers, aHasStickyConn, aResult));
+  return IPC_OK();
+}
 
-  if (!mOnStartRequestFinished) {
-    LOG(("  > pending until OnStartRequest finished [status=%" PRIx32 "]\n",
-         static_cast<uint32_t>(aStatus)));
-
-    mQueuedRunnables.AppendElement(
-        NewRunnableMethod<const nsresult, const bool, const int64_t,
-                          const TimingStruct, const nsHttpHeaderArray,
-                          const bool, const TransactionObserverResult>(
-            "HttpTransactionParent::RecvOnStopRequest", this,
-            &HttpTransactionParent::RecvOnStopRequest, aStatus,
-            aResponseIsComplete, aTransferSize, aTimings, aResponseTrailers,
-            aHasStickyConn, aResult));
-
-    return IPC_OK();
+void HttpTransactionParent::DoOnStopRequest(
+    const nsresult& aStatus, const bool& aResponseIsComplete,
+    const int64_t& aTransferSize, const TimingStruct& aTimings,
+    const nsHttpHeaderArray& aResponseTrailers, const bool& aHasStickyConn,
+    const TransactionObserverResult& aResult) {
+  if (mOnStopRequestCalled) {
+    return;
   }
 
   if (!mCanceled && NS_SUCCEEDED(mStatus)) {
@@ -525,19 +622,10 @@ mozilla::ipc::IPCResult HttpTransactionParent::RecvOnStopRequest(
     mTransactionObserver = nullptr;
   }
 
-  nsCOMPtr<nsIStreamListener> chan = mChannel;
-  RefPtr<HttpTransactionParent> self(this);
-  auto call = [self{std::move(self)}, chan{std::move(chan)}]() {
-    Unused << chan->OnStopRequest(self, self->mStatus);
-    gHttpHandler->RemoveHttpChannel(self->mChannelId);
-  };
-  if (mSuspendCount > 0) {
-    mSuspendQueue.emplace(std::move(call));
-  } else {
-    call();
-  }
-
-  return IPC_OK();
+  AutoEventEnqueuer ensureSerialDispatch(mEventQ);
+  Unused << mChannel->OnStopRequest(this, mStatus);
+  mOnStopRequestCalled = true;
+  gHttpHandler->RemoveHttpChannel(mChannelId);
 }
 
 mozilla::ipc::IPCResult HttpTransactionParent::RecvOnNetAddrUpdate(
@@ -569,53 +657,88 @@ HttpTransactionParent::GetStatus(nsresult* aStatus) {
   return NS_OK;
 }
 
+namespace {
+
+class NotifyListenerEvent : public MainThreadChannelEvent {
+ public:
+  explicit NotifyListenerEvent(HttpTransactionParent* aParent)
+      : mParent(aParent) {}
+
+  void Run() override {
+    LOG(("HttpTransactionParent::NotifyListenerEvent [this=%p]\n", mParent));
+    mParent->DoNotifyListener();
+  }
+
+ private:
+  HttpTransactionParent* mParent;
+};
+
+};  // anonymous namespace
+
 NS_IMETHODIMP
 HttpTransactionParent::Cancel(nsresult aStatus) {
+  MOZ_ASSERT(NS_IsMainThread());
+
   LOG(("HttpTransactionParent::Cancel [this=%p status=%" PRIx32 "]\n", this,
        static_cast<uint32_t>(aStatus)));
 
-  if (!mCanceled) {
-    mCanceled = true;
-    mStatus = aStatus;
+  if (mCanceled) {
+    LOG(("  already canceled\n"));
+    return NS_OK;
+  }
+
+  MOZ_ASSERT(NS_FAILED(aStatus), "cancel with non-failure status code");
+
+  mCanceled = true;
+  mStatus = aStatus;
+  if (mIPCOpen) {
     Unused << SendCancelPump(mStatus);
   }
+
+  // Leverage ChannelEventQueue::Suspend() to call DoNotifyListener()
+  // asynchronously.
+  mEventQ->Suspend();
+  mEventQ->RunOrEnqueue(new NotifyListenerEvent(this));
+  mEventQ->Resume();
   return NS_OK;
 }
 
-NS_IMETHODIMP
-HttpTransactionParent::Suspend(void) {
-  ++mSuspendCount;
+void HttpTransactionParent::DoNotifyListener() {
+  MOZ_ASSERT(NS_IsMainThread());
 
-  Unused << SendSuspendPump();
-  return NS_OK;
-}
-
-NS_IMETHODIMP
-HttpTransactionParent::Resume(void) {
-  MOZ_ASSERT(mSuspendCount, "Resume called more than Suspend");
-
-  Unused << SendResumePump();
-  if (mSuspendCount && !--mSuspendCount && !mSuspendQueue.empty()) {
-    RefPtr<HttpTransactionParent> self(this);
-    nsCOMPtr<nsIRunnable> dequeue(NS_NewRunnableFunction(
-        "HttpTransactionParent::Resume", [self{std::move(self)}]() {
-          while (!self->mSuspendQueue.empty()) {
-            auto call = self->mSuspendQueue.front();
-            self->mSuspendQueue.pop();
-            call();
-            if (self->mSuspendCount) {
-              break;
-            }
-            // Note that we don't need to call OnStopRequest
-            // from here artifically when the channel is cancelled
-            // from one of the callbacks.  We bypass calling stream
-            // listener when cancelled, channel cancels us.
-          }
-        }));
-
-    Unused << NS_DispatchToMainThread(dequeue);
+  if (!mOnStartRequestCalled) {
+    mChannel->OnStartRequest(this);
+    mOnStartRequestCalled = true;
   }
 
+  if (!mOnStopRequestCalled) {
+    mChannel->OnStopRequest(this, mStatus);
+    mOnStopRequestCalled = true;
+  }
+}
+
+NS_IMETHODIMP
+HttpTransactionParent::Suspend() {
+  MOZ_ASSERT(NS_IsMainThread());
+
+  // SendSuspend only once, when suspend goes from 0 to 1.
+  if (!mSuspendCount++ && mIPCOpen) {
+    Unused << SendSuspendPump();
+  }
+  mEventQ->Suspend();
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+HttpTransactionParent::Resume() {
+  MOZ_ASSERT(NS_IsMainThread());
+  MOZ_ASSERT(mSuspendCount, "Resume called more than Suspend");
+
+  // SendResume only once, when suspend count drops to 0.
+  if (mSuspendCount && !--mSuspendCount && mIPCOpen) {
+    Unused << SendResumePump();
+  }
+  mEventQ->Resume();
   return NS_OK;
 }
 
@@ -644,8 +767,9 @@ HttpTransactionParent::SetLoadFlags(nsLoadFlags aLoadFlags) {
 void HttpTransactionParent::ActorDestroy(ActorDestroyReason aWhy) {
   LOG(("HttpTransactionParent::ActorDestroy [this=%p]\n", this));
   mIPCOpen = false;
-  mQueuedRunnables.Clear();
-  // TODO: we (probably?) have to notify OnStopReq on the channel
+  if (aWhy != Deletion) {
+    Cancel(NS_ERROR_FAILURE);
+  }
 }
 
 void HttpTransactionParent::DontReuseConnection() {

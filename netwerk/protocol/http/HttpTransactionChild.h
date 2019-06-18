@@ -86,14 +86,16 @@ class HttpTransactionChild final : public PHttpTransactionChild,
 
   bool IsNoSniff(nsHttpResponseHead* aResponseHead);
 
+  uint64_t mChannelId;
+  bool mStatusCodeIs200;
+  bool mIPCOpen;
+  bool mCanceled;
+  nsresult mStatus;
   nsHttpRequestHead mRequestHead;
+
   nsCOMPtr<nsIInputStream> mUploadStream;
   RefPtr<nsHttpTransaction> mTransaction;
   nsCOMPtr<nsIRequest> mTransactionPump;
-  bool mStatusCodeIs200;
-
-  uint64_t mChannelId;
-  bool mIPCOpen;
   RefPtr<InputChannelThrottleQueueChild> mThrottleQueue;
 
   // These values can be accessed from sts thread.

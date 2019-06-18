@@ -33,16 +33,17 @@ NS_IMPL_ISUPPORTS(HttpTransactionChild, nsIRequestObserver, nsIStreamListener,
 // HttpTransactionChild <public>
 //-----------------------------------------------------------------------------
 
-HttpTransactionChild::HttpTransactionChild(const uint64_t& aChannelId) {
+HttpTransactionChild::HttpTransactionChild(const uint64_t& aChannelId)
+    : mChannelId(aChannelId),
+      mStatusCodeIs200(false),
+      mIPCOpen(true),
+      mCanceled(false),
+      mStatus(NS_OK),
+      mTransaction(new nsHttpTransaction()),
+      mVersionOk(false),
+      mAuthOK(false),
+      mTransactionCloseReason(NS_OK) {
   LOG(("Creating HttpTransactionChild @%p\n", this));
-  mTransaction = new nsHttpTransaction();
-
-  mChannelId = aChannelId;
-  mStatusCodeIs200 = false;
-  mIPCOpen = true;
-  mVersionOk = false;
-  mAuthOK = false;
-  mTransactionCloseReason = NS_OK;
 }
 
 HttpTransactionChild::~HttpTransactionChild() {
@@ -139,8 +140,8 @@ nsresult HttpTransactionChild::InitInternal(
   }
 
   nsMainThreadPtrHandle<HttpTransactionChild> handle(
-      new nsMainThreadPtrHolder<HttpTransactionChild>("HttpTransactionChildProxy",
-                                                      this, false));
+      new nsMainThreadPtrHolder<HttpTransactionChild>(
+          "HttpTransactionChildProxy", this, false));
   mTransaction->SetTransactionObserver(
       [handle](bool aVersionOK, bool aAuthOK, nsresult aReason) {
         handle->mVersionOk = aVersionOK;
@@ -154,9 +155,12 @@ nsresult HttpTransactionChild::InitInternal(
 mozilla::ipc::IPCResult HttpTransactionChild::RecvCancelPump(
     const nsresult& aStatus) {
   LOG(("HttpTransactionChild::RecvCancelPump start [this=%p]\n", this));
+  MOZ_ASSERT(NS_FAILED(aStatus));
 
+  mCanceled = true;
+  mStatus = aStatus;
   if (mTransactionPump) {
-    mTransactionPump->Cancel(aStatus);
+    mTransactionPump->Cancel(mStatus);
   }
 
   return IPC_OK();
@@ -299,7 +303,11 @@ HttpTransactionChild::OnDataAvailable(nsIRequest* aRequest,
   LOG(("HttpTransactionChild::OnDataAvailable [this=%p, aOffset= %" PRIu64
        " aCount=%" PRIu32 "]\n",
        this, aOffset, aCount));
-  MOZ_ASSERT(mTransaction);
+
+  // Don't bother sending IPC if already canceled.
+  if (mCanceled) {
+    return mStatus;
+  }
 
   // TODO: need to determine how to send the input stream, we use nsCString for
   // now
@@ -381,7 +389,14 @@ static void GetDataForSniffer(void* aClosure, const uint8_t* aData,
 
 NS_IMETHODIMP
 HttpTransactionChild::OnStartRequest(nsIRequest* aRequest) {
-  LOG(("HttpTransactionChild::OnStartRequest start [this=%p]\n", this));
+  LOG(("HttpTransactionChild::OnStartRequest start [this=%p] mTransaction=%p\n",
+       this, mTransaction.get()));
+
+  // Don't bother sending IPC to parent process if already canceled.
+  if (mCanceled) {
+    return mStatus;
+  }
+
   MOZ_ASSERT(mTransaction);
 
   nsresult status;
@@ -420,6 +435,17 @@ HttpTransactionChild::OnStartRequest(nsIRequest* aRequest) {
 NS_IMETHODIMP
 HttpTransactionChild::OnStopRequest(nsIRequest* aRequest, nsresult aStatus) {
   LOG(("HttpTransactionChild::OnStopRequest [this=%p]\n", this));
+
+  if (mThrottleQueue) {
+    mThrottleQueue->Send__delete__(mThrottleQueue);
+    mThrottleQueue = nullptr;
+  }
+
+  // Don't bother sending IPC to parent process if already canceled.
+  if (mCanceled) {
+    return mStatus;
+  }
+
   MOZ_ASSERT(mTransaction);
 
   nsAutoPtr<nsHttpHeaderArray> responseTrailer(
@@ -436,10 +462,6 @@ HttpTransactionChild::OnStopRequest(nsIRequest* aRequest, nsresult aStatus) {
       responseTrailer ? *responseTrailer : nsHttpHeaderArray(),
       mTransaction->HasStickyConnection(), result);
 
-  if (mThrottleQueue) {
-    mThrottleQueue->Send__delete__(mThrottleQueue);
-    mThrottleQueue = nullptr;
-  }
   return NS_OK;
 }
 
