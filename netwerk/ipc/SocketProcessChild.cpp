@@ -283,6 +283,11 @@ PDNSRequestChild* SocketProcessChild::AllocPDNSRequestChild(
 mozilla::ipc::IPCResult SocketProcessChild::RecvPDNSRequestConstructor(
     PDNSRequestChild* aActor, const nsCString& aHost,
     const OriginAttributes& aOriginAttributes, const uint32_t& aFlags) {
+  DNSRequestChild* child = static_cast<DNSRequestChild*>(aActor);
+  DNSRequestHandler* handler = child->GetDNSRequest()->AsDNSRequestHandler();
+  MOZ_ASSERT(handler);
+
+  handler->DoAsyncResolve(aHost, aOriginAttributes, aFlags);
   return IPC_OK();
 }
 

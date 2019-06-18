@@ -19,7 +19,9 @@ namespace net {
 
 class DNSRequestActor;
 class DNSRequestChild;
+class DNSRequestHandler;
 class DNSRequestParent;
+class DNSRequestSender;
 
 // A base class for DNSRequestSender and DNSRequestHandler.
 // Provide interfaces for processing DNS requests.
@@ -36,6 +38,9 @@ class DNSRequestBase : public nsISupports {
                                       const nsresult& reason) = 0;
   virtual bool OnRecvLookupCompleted(const DNSRequestResponse& reply) = 0;
   virtual void OnIPCActorReleased() = 0;
+
+  virtual DNSRequestSender* AsDNSRequestSender() = 0;
+  virtual DNSRequestHandler* AsDNSRequestHandler() = 0;
 
  protected:
   virtual ~DNSRequestBase() = default;
@@ -67,6 +72,9 @@ class DNSRequestSender final : public DNSRequestBase, public nsICancelable {
   void StartRequest();
   void CallOnLookupComplete();
   void CallOnLookupByTypeComplete();
+
+  DNSRequestSender* AsDNSRequestSender() override { return this; }
+  DNSRequestHandler* AsDNSRequestHandler() override { return nullptr; }
 
  private:
   friend class ChildDNSService;
@@ -108,6 +116,9 @@ class DNSRequestHandler final : public DNSRequestBase, public nsIDNSListener {
   bool OnRecvLookupCompleted(const DNSRequestResponse& reply) override;
   void OnIPCActorReleased() override;
 
+  DNSRequestSender* AsDNSRequestSender() override { return nullptr; }
+  DNSRequestHandler* AsDNSRequestHandler() override { return this; }
+
  private:
   virtual ~DNSRequestHandler() = default;
 
@@ -141,6 +152,8 @@ class DNSRequestActor {
 
   virtual DNSRequestChild* AsDNSRequestChild() = 0;
   virtual DNSRequestParent* AsDNSRequestParent() = 0;
+
+  DNSRequestBase* GetDNSRequest() { return mDNSRequest.get(); };
 
  protected:
   virtual ~DNSRequestActor() = default;
