@@ -221,6 +221,7 @@ static const char* gCallbackPrefs[] = {
 };
 
 static const char* gCallbackPrefsForSocketProcess[] = {
+    NETWORK_DNS_PREF,
     WEBRTC_PREF_PREFIX,
     NETWORK_DNS_PREF,
     nullptr,
