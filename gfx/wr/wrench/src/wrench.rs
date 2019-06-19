@@ -101,7 +101,7 @@ impl Notifier {
 }
 
 impl RenderNotifier for Notifier {
-    fn clone(&self) -> Box<RenderNotifier> {
+    fn clone(&self) -> Box<dyn RenderNotifier> {
         Box::new(Notifier(self.0.clone()))
     }
 
@@ -174,6 +174,7 @@ impl Wrench {
         size: DeviceIntSize,
         do_rebuild: bool,
         no_subpixel_aa: bool,
+        no_picture_caching: bool,
         verbose: bool,
         no_scissor: bool,
         no_batch: bool,
@@ -182,21 +183,21 @@ impl Wrench {
         zoom_factor: f32,
         chase_primitive: webrender::ChasePrimitive,
         dump_shader_source: Option<String>,
-        notifier: Option<Box<RenderNotifier>>,
+        notifier: Option<Box<dyn RenderNotifier>>,
     ) -> Self {
         println!("Shader override path: {:?}", shader_override_path);
 
         let recorder = save_type.map(|save_type| match save_type {
             SaveType::Yaml => Box::new(
                 YamlFrameWriterReceiver::new(&PathBuf::from("yaml_frames")),
-            ) as Box<webrender::ApiRecordingReceiver>,
+            ) as Box<dyn webrender::ApiRecordingReceiver>,
             SaveType::Json => Box::new(JsonFrameWriter::new(&PathBuf::from("json_frames"))) as
-                Box<webrender::ApiRecordingReceiver>,
+                Box<dyn webrender::ApiRecordingReceiver>,
             SaveType::Ron => Box::new(RonFrameWriter::new(&PathBuf::from("ron_frames"))) as
-                Box<webrender::ApiRecordingReceiver>,
+                Box<dyn webrender::ApiRecordingReceiver>,
             SaveType::Binary => Box::new(webrender::BinaryRecorder::new(
                 &PathBuf::from("wr-record.bin"),
-            )) as Box<webrender::ApiRecordingReceiver>,
+            )) as Box<dyn webrender::ApiRecordingReceiver>,
         });
 
         let mut debug_flags = DebugFlags::ECHO_DRIVER_MESSAGES;
@@ -220,7 +221,7 @@ impl Wrench {
             precache_flags,
             blob_image_handler: Some(Box::new(blob::CheckerboardRenderer::new(callbacks.clone()))),
             chase_primitive,
-            enable_picture_caching: true,
+            enable_picture_caching: !no_picture_caching,
             testing: true,
             max_texture_size: Some(8196), // Needed for rawtest::test_resize_image.
             allow_dual_source_blending: !disable_dual_source_blending,
@@ -265,7 +266,7 @@ impl Wrench {
             rebuild_display_lists: do_rebuild,
             verbose,
             device_pixel_ratio: dp_ratio,
-            page_zoom_factor: zoom_factor,
+            page_zoom_factor: ZoomFactor::new(0.0),
 
             root_pipeline_id: PipelineId(0, 0),
 

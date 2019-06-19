@@ -191,16 +191,16 @@ class nsComputedDOMStyle final : public nsDOMCSSDeclaration,
 
   // Appends all aLineNames (may be empty) space-separated to aResult.
   void AppendGridLineNames(nsString& aResult,
-                           const nsTArray<nsString>& aLineNames);
+                           const nsTArray<RefPtr<nsAtom>>& aLineNames);
   // Appends aLineNames as a CSSValue* to aValueList.  If aLineNames is empty
   // a value ("[]") is only appended if aSuppressEmptyList is false.
   void AppendGridLineNames(nsDOMCSSValueList* aValueList,
-                           const nsTArray<nsString>& aLineNames,
+                           const nsTArray<RefPtr<nsAtom>>& aLineNames,
                            bool aSuppressEmptyList = true);
   // Appends aLineNames1/2 (if non-empty) as a CSSValue* to aValueList.
   void AppendGridLineNames(nsDOMCSSValueList* aValueList,
-                           const nsTArray<nsString>& aLineNames1,
-                           const nsTArray<nsString>& aLineNames2);
+                           const nsTArray<RefPtr<nsAtom>>& aLineNames1,
+                           const nsTArray<RefPtr<nsAtom>>& aLineNames2);
   already_AddRefed<CSSValue> GetGridTrackSize(const nsStyleCoord& aMinSize,
                                               const nsStyleCoord& aMaxSize);
   already_AddRefed<CSSValue> GetGridTemplateColumnsRows(

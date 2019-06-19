@@ -65,7 +65,7 @@ pub use self::viewport_rule::ViewportRule;
 
 /// The CORS mode used for a CSS load.
 #[repr(u8)]
-#[derive(Debug, Copy, Clone, PartialEq, Eq, ToShmem)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, ToShmem)]
 pub enum CorsMode {
     /// No CORS mode, so cross-origin loads can be done.
     None,
@@ -352,7 +352,7 @@ impl CssRule {
         parent_stylesheet_contents: &StylesheetContents,
         shared_lock: &SharedRwLock,
         state: State,
-        loader: Option<&StylesheetLoader>,
+        loader: Option<&dyn StylesheetLoader>,
     ) -> Result<Self, RulesMutateError> {
         let url_data = parent_stylesheet_contents.url_data.read();
         let context = ParserContext::new(

@@ -34,7 +34,7 @@
 #include "mozilla/jsipc/CrossProcessObjectWrappers.h"
 #include "mozilla/layers/AsyncDragMetrics.h"
 #include "mozilla/layers/InputAPZContext.h"
-#include "mozilla/layout/RenderFrame.h"
+#include "mozilla/layout/RemoteLayerTreeOwner.h"
 #include "mozilla/plugins/PPluginWidgetParent.h"
 #include "mozilla/LookAndFeel.h"
 #include "mozilla/MouseEvents.h"
@@ -182,7 +182,7 @@ BrowserParent::BrowserParent(ContentParent* aManager, const TabId& aTabId,
       mBrowserBridgeParent(nullptr),
       mBrowserHost(nullptr),
       mContentCache(*this),
-      mRenderFrame{},
+      mRemoteLayerTreeOwner{},
       mLayerTreeEpoch{1},
       mChildToParentConversionMatrix{},
       mRect(0, 0, 0, 0),
@@ -409,7 +409,11 @@ a11y::DocAccessibleParent* BrowserParent::GetTopLevelDocAccessible() const {
       ManagedPDocAccessibleParent();
   for (auto iter = docs.ConstIter(); !iter.Done(); iter.Next()) {
     auto doc = static_cast<a11y::DocAccessibleParent*>(iter.Get()->GetKey());
-    if (doc->IsTopLevel()) {
+    // We want the document for this BrowserParent even if it's for an
+    // embedded out-of-process iframe. Therefore, we use
+    // IsTopLevelInContentProcess. In contrast, using IsToplevel would only
+    // include documents that aren't embedded; e.g. tab documents.
+    if (doc->IsTopLevelInContentProcess()) {
       return doc;
     }
   }
@@ -421,11 +425,11 @@ a11y::DocAccessibleParent* BrowserParent::GetTopLevelDocAccessible() const {
   return nullptr;
 }
 
-RenderFrame* BrowserParent::GetRenderFrame() {
-  if (!mRenderFrame.IsInitialized()) {
-    return nullptr;
+LayersId BrowserParent::GetLayersId() const {
+  if (!mRemoteLayerTreeOwner.IsInitialized()) {
+    return LayersId{};
   }
-  return &mRenderFrame;
+  return mRemoteLayerTreeOwner.GetLayersId();
 }
 
 BrowserBridgeParent* BrowserParent::GetBrowserBridgeParent() const {
@@ -522,8 +526,8 @@ void BrowserParent::SetOwnerElement(Element* aElement) {
     }
   }
 
-  if (mRenderFrame.IsInitialized()) {
-    mRenderFrame.OwnerContentChanged();
+  if (mRemoteLayerTreeOwner.IsInitialized()) {
+    mRemoteLayerTreeOwner.OwnerContentChanged();
   }
 
   // Set our BrowsingContext's embedder if we're not embedded within a
@@ -619,8 +623,8 @@ void BrowserParent::Destroy() {
 
 mozilla::ipc::IPCResult BrowserParent::RecvEnsureLayersConnected(
     CompositorOptions* aCompositorOptions) {
-  if (mRenderFrame.IsInitialized()) {
-    mRenderFrame.EnsureLayersConnected(aCompositorOptions);
+  if (mRemoteLayerTreeOwner.IsInitialized()) {
+    mRemoteLayerTreeOwner.EnsureLayersConnected(aCompositorOptions);
   }
   return IPC_OK();
 }
@@ -634,12 +638,12 @@ mozilla::ipc::IPCResult BrowserParent::Recv__delete__() {
 }
 
 void BrowserParent::ActorDestroy(ActorDestroyReason why) {
-  if (mRenderFrame.IsInitialized()) {
+  if (mRemoteLayerTreeOwner.IsInitialized()) {
     // It's important to unmap layers after the remote browser has been
     // destroyed, otherwise it may still send messages to the compositor which
     // will reject them, causing assertions.
-    RemoveBrowserParentFromTable(mRenderFrame.GetLayersId());
-    mRenderFrame.Destroy();
+    RemoveBrowserParentFromTable(mRemoteLayerTreeOwner.GetLayersId());
+    mRemoteLayerTreeOwner.Destroy();
   }
 
   // Even though BrowserParent::Destroy calls this, we need to do it here too in
@@ -679,7 +683,7 @@ void BrowserParent::ActorDestroy(ActorDestroyReason why) {
 
     // If this was a crash, tell our nsFrameLoader to fire crash events.
     if (why == AbnormalShutdown) {
-      frameLoader->MaybeNotifyCrashed(GetIPCChannel());
+      frameLoader->MaybeNotifyCrashed(mBrowsingContext, GetIPCChannel());
     }
   }
 
@@ -841,19 +845,23 @@ void BrowserParent::ResumeLoad(uint64_t aPendingSwitchID) {
 }
 
 void BrowserParent::InitRendering() {
-  if (mRenderFrame.IsInitialized()) {
+  if (mRemoteLayerTreeOwner.IsInitialized()) {
     return;
   }
-  mRenderFrame.Initialize(this);
+  mRemoteLayerTreeOwner.Initialize(this);
 
-  layers::LayersId layersId = mRenderFrame.GetLayersId();
+  layers::LayersId layersId = mRemoteLayerTreeOwner.GetLayersId();
   AddBrowserParentToTable(layersId, this);
 
   TextureFactoryIdentifier textureFactoryIdentifier;
-  mRenderFrame.GetTextureFactoryIdentifier(&textureFactoryIdentifier);
+  mRemoteLayerTreeOwner.GetTextureFactoryIdentifier(&textureFactoryIdentifier);
   Unused << SendInitRendering(textureFactoryIdentifier, layersId,
-                              mRenderFrame.GetCompositorOptions(),
-                              mRenderFrame.IsLayersConnected());
+                              mRemoteLayerTreeOwner.GetCompositorOptions(),
+                              mRemoteLayerTreeOwner.IsLayersConnected());
+}
+
+bool BrowserParent::AttachLayerManager() {
+  return !!mRemoteLayerTreeOwner.AttachLayerManager();
 }
 
 void BrowserParent::MaybeShowFrame() {
@@ -870,8 +878,8 @@ bool BrowserParent::Show(const ScreenIntSize& size, bool aParentIsActive) {
     return false;
   }
 
-  MOZ_ASSERT(mRenderFrame.IsInitialized());
-  if (!mRenderFrame.AttachLayerManager()) {
+  MOZ_ASSERT(mRemoteLayerTreeOwner.IsInitialized());
+  if (!mRemoteLayerTreeOwner.AttachLayerManager()) {
     return false;
   }
 
@@ -1043,9 +1051,11 @@ void BrowserParent::Activate() {
   }
 }
 
-void BrowserParent::Deactivate() {
+void BrowserParent::Deactivate(bool aWindowLowering) {
   LOGBROWSERFOCUS(("Deactivate %p", this));
-  PopFocus(this);  // Intentionally outside "if"
+  if (!aWindowLowering) {
+    PopFocus(this);  // Intentionally outside the next "if"
+  }
   if (!mIsDestroyed) {
     Unused << Manager()->SendDeactivate(this);
   }
@@ -1122,6 +1132,7 @@ mozilla::ipc::IPCResult BrowserParent::RecvPDocAccessibleConstructor(
     // In this case, we don't get aParentDoc and aParentID.
     MOZ_ASSERT(!aParentDoc && !aParentID);
     MOZ_ASSERT(embedderID);
+    doc->SetTopLevelInContentProcess();
 #  ifdef XP_WIN
     MOZ_ASSERT(!aDocCOMProxy.IsNull());
     RefPtr<IAccessible> proxy(aDocCOMProxy.Get());
@@ -1136,9 +1147,11 @@ mozilla::ipc::IPCResult BrowserParent::RecvPDocAccessibleConstructor(
 #  endif
     }
 #  ifdef XP_WIN
-    if (a11y::nsWinUtils::IsWindowEmulationStarted()) {
-      doc->SetEmulatedWindowHandle(embedderDoc->GetEmulatedWindowHandle());
-    }
+    // This *must* be called after AddChildDoc because AddChildDoc
+    // calls ProxyCreated and WrapperFor will fail before that.
+    a11y::AccessibleWrap* wrapper = a11y::WrapperFor(doc);
+    MOZ_ASSERT(wrapper);
+    wrapper->SetID(aMsaaID);
 #  endif
     return IPC_OK();
   } else {
@@ -1159,7 +1172,9 @@ mozilla::ipc::IPCResult BrowserParent::RecvPDocAccessibleConstructor(
     RefPtr<IAccessible> proxy(aDocCOMProxy.Get());
     doc->SetCOMInterface(proxy);
     doc->MaybeInitWindowEmulation();
-    doc->SendParentCOMProxy();
+    if (a11y::Accessible* outerDoc = doc->OuterDocOfRemoteBrowser()) {
+      doc->SendParentCOMProxy(outerDoc);
+    }
 #  endif
   }
 #endif
@@ -1227,10 +1242,10 @@ bool BrowserParent::DeallocPWindowGlobalParent(PWindowGlobalParent* aActor) {
 IPCResult BrowserParent::RecvPBrowserBridgeConstructor(
     PBrowserBridgeParent* aActor, const nsString& aName,
     const nsString& aRemoteType, BrowsingContext* aBrowsingContext,
-    const uint32_t& aChromeFlags) {
+    const uint32_t& aChromeFlags, const TabId& aTabId) {
   nsresult rv = static_cast<BrowserBridgeParent*>(aActor)->Init(
       aName, aRemoteType, CanonicalBrowsingContext::Cast(aBrowsingContext),
-      aChromeFlags);
+      aChromeFlags, aTabId);
   if (NS_FAILED(rv)) {
     return IPC_FAIL(this, "Failed to construct BrowserBridgeParent");
   }
@@ -1239,7 +1254,8 @@ IPCResult BrowserParent::RecvPBrowserBridgeConstructor(
 
 PBrowserBridgeParent* BrowserParent::AllocPBrowserBridgeParent(
     const nsString& aName, const nsString& aRemoteType,
-    BrowsingContext* aBrowsingContext, const uint32_t& aChromeFlags) {
+    BrowsingContext* aBrowsingContext, const uint32_t& aChromeFlags,
+    const TabId& aTabId) {
   // Reference freed in DeallocPBrowserBridgeParent.
   return do_AddRef(new BrowserBridgeParent()).take();
 }
@@ -2388,12 +2404,15 @@ mozilla::ipc::IPCResult BrowserParent::RecvOnStateChange(
   nsCOMPtr<nsIWebProgress> webProgress;
   nsCOMPtr<nsIRequest> request;
   ReconstructWebProgressAndRequest(manager, aWebProgressData, aRequestData,
-                                   webProgress, request);
+                                   getter_AddRefs(webProgress),
+                                   getter_AddRefs(request));
 
   if (aWebProgressData && aWebProgressData->isTopLevel()) {
     Unused << browser->SetIsNavigating(aStateChangeData->isNavigating());
     Unused << browser->SetMayEnableCharacterEncodingMenu(
         aStateChangeData->mayEnableCharacterEncodingMenu());
+    Unused << browser->SetCharsetAutodetected(
+        aStateChangeData->charsetAutodetected());
     Unused << browser->UpdateForStateChange(aStateChangeData->charset(),
                                             aStateChangeData->documentURI(),
                                             aStateChangeData->contentType());
@@ -2425,11 +2444,65 @@ mozilla::ipc::IPCResult BrowserParent::RecvOnProgressChange(
   nsCOMPtr<nsIWebProgress> webProgress;
   nsCOMPtr<nsIRequest> request;
   ReconstructWebProgressAndRequest(manager, aWebProgressData, aRequestData,
-                                   webProgress, request);
+                                   getter_AddRefs(webProgress),
+                                   getter_AddRefs(request));
 
   Unused << managerAsListener->OnProgressChange(
       webProgress, request, aCurSelfProgress, aMaxSelfProgress,
       aCurTotalProgress, aMaxTotalProgress);
+
+  return IPC_OK();
+}
+
+mozilla::ipc::IPCResult BrowserParent::RecvOnLocationChange(
+    const Maybe<WebProgressData>& aWebProgressData,
+    const RequestData& aRequestData, nsIURI* aLocation, const uint32_t aFlags,
+    const bool aCanGoBack, const bool aCanGoForward,
+    const Maybe<WebProgressLocationChangeData>& aLocationChangeData) {
+  nsCOMPtr<nsIBrowser> browser;
+  nsCOMPtr<nsIWebProgress> manager;
+  nsCOMPtr<nsIWebProgressListener> managerAsListener;
+  if (!GetWebProgressListener(getter_AddRefs(browser), getter_AddRefs(manager),
+                              getter_AddRefs(managerAsListener))) {
+    return IPC_OK();
+  }
+
+  nsCOMPtr<nsIWebProgress> webProgress;
+  nsCOMPtr<nsIRequest> request;
+  ReconstructWebProgressAndRequest(manager, aWebProgressData, aRequestData,
+                                   getter_AddRefs(webProgress),
+                                   getter_AddRefs(request));
+
+  Unused << browser->UpdateWebNavigationForLocationChange(aCanGoBack,
+                                                          aCanGoForward);
+
+  if (aWebProgressData && aWebProgressData->isTopLevel()) {
+    nsCOMPtr<nsIContentSecurityPolicy> csp;
+    if (aLocationChangeData->csp().isSome()) {
+      csp = CSPInfoToCSP(aLocationChangeData->csp().ref(), nullptr, nullptr);
+    }
+
+    nsCOMPtr<nsIPrincipal> contentPrincipal =
+        PrincipalInfoToPrincipal(aLocationChangeData->contentPrincipal());
+    nsCOMPtr<nsIPrincipal> contentStoragePrincipal = PrincipalInfoToPrincipal(
+        aLocationChangeData->contentStoragePrincipal());
+
+    Unused << browser->SetIsNavigating(aLocationChangeData->isNavigating());
+    Unused << browser->UpdateForLocationChange(
+        aLocation, aLocationChangeData->charset(),
+        aLocationChangeData->mayEnableCharacterEncodingMenu(),
+        aLocationChangeData->charsetAutodetected(),
+        aLocationChangeData->documentURI(), aLocationChangeData->title(),
+        contentPrincipal, contentStoragePrincipal, csp,
+        aLocationChangeData->isSyntheticDocument(),
+        aWebProgressData->innerDOMWindowID(),
+        aLocationChangeData->requestContextID().isSome(),
+        aLocationChangeData->requestContextID().valueOr(0),
+        aLocationChangeData->contentType());
+  }
+
+  Unused << managerAsListener->OnLocationChange(webProgress, request, aLocation,
+                                                aFlags);
 
   return IPC_OK();
 }
@@ -2449,7 +2522,8 @@ mozilla::ipc::IPCResult BrowserParent::RecvOnStatusChange(
   nsCOMPtr<nsIWebProgress> webProgress;
   nsCOMPtr<nsIRequest> request;
   ReconstructWebProgressAndRequest(manager, aWebProgressData, aRequestData,
-                                   webProgress, request);
+                                   getter_AddRefs(webProgress),
+                                   getter_AddRefs(request));
 
   Unused << managerAsListener->OnStatusChange(webProgress, request, aStatus,
                                               aMessage.get());
@@ -2471,10 +2545,22 @@ mozilla::ipc::IPCResult BrowserParent::RecvOnContentBlockingEvent(
   nsCOMPtr<nsIWebProgress> webProgress;
   nsCOMPtr<nsIRequest> request;
   ReconstructWebProgressAndRequest(manager, aWebProgressData, aRequestData,
-                                   webProgress, request);
+                                   getter_AddRefs(webProgress),
+                                   getter_AddRefs(request));
 
   Unused << managerAsListener->OnContentBlockingEvent(webProgress, request,
                                                       aEvent);
+
+  return IPC_OK();
+}
+
+mozilla::ipc::IPCResult BrowserParent::RecvNavigationFinished() {
+  nsCOMPtr<nsIBrowser> browser =
+      mFrameElement ? mFrameElement->AsBrowser() : nullptr;
+
+  if (browser) {
+    browser->SetIsNavigating(false);
+  }
 
   return IPC_OK();
 }
@@ -2513,21 +2599,31 @@ bool BrowserParent::GetWebProgressListener(
 
 void BrowserParent::ReconstructWebProgressAndRequest(
     nsIWebProgress* aManager, const Maybe<WebProgressData>& aWebProgressData,
-    const RequestData& aRequestData, nsCOMPtr<nsIWebProgress>& aOutWebProgress,
-    nsCOMPtr<nsIRequest>& aOutRequest) {
+    const RequestData& aRequestData, nsIWebProgress** aOutWebProgress,
+    nsIRequest** aOutRequest) {
+  MOZ_DIAGNOSTIC_ASSERT(aOutWebProgress,
+                        "aOutWebProgress should never be null");
+  MOZ_DIAGNOSTIC_ASSERT(aOutRequest, "aOutRequest should never be null");
+
+  nsCOMPtr<nsIWebProgress> webProgress;
   if (aWebProgressData) {
-    aOutWebProgress = MakeAndAddRef<RemoteWebProgress>(
+    webProgress = new RemoteWebProgress(
         aManager, aWebProgressData->outerDOMWindowID(),
         aWebProgressData->innerDOMWindowID(), aWebProgressData->loadType(),
         aWebProgressData->isLoadingDocument(), aWebProgressData->isTopLevel());
   } else {
-    aOutWebProgress =
-        MakeAndAddRef<RemoteWebProgress>(aManager, 0, 0, 0, false, false);
+    webProgress = new RemoteWebProgress(aManager, 0, 0, 0, false, false);
   }
+  webProgress.forget(aOutWebProgress);
 
-  aOutRequest = MakeAndAddRef<RemoteWebProgressRequest>(
-      aRequestData.requestURI(), aRequestData.originalRequestURI(),
-      aRequestData.matchedList());
+  if (aRequestData.requestURI()) {
+    nsCOMPtr<nsIRequest> request = MakeAndAddRef<RemoteWebProgressRequest>(
+        aRequestData.requestURI(), aRequestData.originalRequestURI(),
+        aRequestData.matchedList());
+    request.forget(aOutRequest);
+  } else {
+    *aOutRequest = nullptr;
+  }
 }
 
 mozilla::ipc::IPCResult BrowserParent::RecvSessionStoreUpdate(
@@ -2928,12 +3024,13 @@ void BrowserParent::ApzAwareEventRoutingToChild(
       // There may be cases where the APZ hit-testing code came to a different
       // conclusion than the main-thread hit-testing code as to where the event
       // is destined. In such cases the layersId of the APZ result may not match
-      // the layersId of this renderframe. In such cases the main-thread hit-
-      // testing code "wins" so we need to update the guid to reflect this.
-      if (mRenderFrame.IsInitialized()) {
-        if (aOutTargetGuid->mLayersId != mRenderFrame.GetLayersId()) {
+      // the layersId of this RemoteLayerTreeOwner. In such cases the
+      // main-thread hit- testing code "wins" so we need to update the guid to
+      // reflect this.
+      if (mRemoteLayerTreeOwner.IsInitialized()) {
+        if (aOutTargetGuid->mLayersId != mRemoteLayerTreeOwner.GetLayersId()) {
           *aOutTargetGuid =
-              ScrollableLayerGuid(mRenderFrame.GetLayersId(), 0,
+              ScrollableLayerGuid(mRemoteLayerTreeOwner.GetLayersId(), 0,
                                   ScrollableLayerGuid::NULL_SCROLL_ID);
         }
       }
@@ -3132,8 +3229,8 @@ bool BrowserParent::StartApzAutoscroll(float aAnchorX, float aAnchorY,
   }
 
   bool success = false;
-  if (mRenderFrame.IsInitialized()) {
-    layers::LayersId layersId = mRenderFrame.GetLayersId();
+  if (mRemoteLayerTreeOwner.IsInitialized()) {
+    layers::LayersId layersId = mRemoteLayerTreeOwner.GetLayersId();
     if (nsCOMPtr<nsIWidget> widget = GetWidget()) {
       SLGuidAndRenderRoot guid(layersId, aPresShellId, aScrollId,
                                gfxUtils::GetContentRenderRoot());
@@ -3161,8 +3258,8 @@ void BrowserParent::StopApzAutoscroll(nsViewID aScrollId,
     return;
   }
 
-  if (mRenderFrame.IsInitialized()) {
-    layers::LayersId layersId = mRenderFrame.GetLayersId();
+  if (mRemoteLayerTreeOwner.IsInitialized()) {
+    layers::LayersId layersId = mRemoteLayerTreeOwner.GetLayersId();
     if (nsCOMPtr<nsIWidget> widget = GetWidget()) {
       SLGuidAndRenderRoot guid(layersId, aPresShellId, aScrollId,
                                gfxUtils::GetContentRenderRoot());
@@ -3541,12 +3638,6 @@ void BrowserParent::StartPersistence(
   // (The actor will be destroyed on constructor failure.)
 }
 
-void BrowserParent::SkipBrowsingContextDetach() {
-  RefPtr<nsFrameLoader> fl = GetFrameLoader();
-  MOZ_ASSERT(fl);
-  fl->SkipBrowsingContextDetach();
-}
-
 mozilla::ipc::IPCResult BrowserParent::RecvLookUpDictionary(
     const nsString& aText, nsTArray<FontRange>&& aFontRangeArray,
     const bool& aIsVertical, const LayoutDeviceIntPoint& aPoint) {
@@ -3679,6 +3770,17 @@ mozilla::ipc::IPCResult BrowserParent::RecvGetSystemFont(nsCString* aFontName) {
   if (widget) {
     widget->GetSystemFont(*aFontName);
   }
+  return IPC_OK();
+}
+
+mozilla::ipc::IPCResult BrowserParent::RecvFireFrameLoadEvent(bool aIsTrusted) {
+  BrowserBridgeParent* bridge = GetBrowserBridgeParent();
+  if (!bridge) {
+    NS_WARNING("Received `load` event on unbridged BrowserParent!");
+    return IPC_OK();
+  }
+
+  Unused << bridge->SendFireFrameLoadEvent(aIsTrusted);
   return IPC_OK();
 }
 

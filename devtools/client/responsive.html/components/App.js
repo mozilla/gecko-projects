@@ -163,13 +163,17 @@ class App extends PureComponent {
     this.props.dispatch(changeUserAgent(userAgent));
   }
 
-  onChangeViewportOrientation(id, { type, angle }) {
+  onChangeViewportOrientation(id, type, angle, isViewportRotated = false) {
     window.postMessage({
       type: "viewport-orientation-change",
       orientationType: type,
       angle,
+      isViewportRotated,
     }, "*");
-    this.props.dispatch(changeViewportAngle(id, angle));
+
+    if (isViewportRotated) {
+      this.props.dispatch(changeViewportAngle(id, angle));
+    }
   }
 
   onContentResize({ width, height }) {
@@ -275,15 +279,10 @@ class App extends PureComponent {
     }
 
     const currentAngle = Services.prefs.getIntPref("devtools.responsive.viewport.angle");
-    // TODO: For Firefox Android, when the device is rotated clock-wise, the angle is
-    // updated to 270 degrees. This is valid since the user-agent determines whether it
-    // will be set to 90 or 270. However, we should update the angle based on the how the
-    // user-agent assigns the angle value.
-    // See https://w3c.github.io/screen-orientation/#dfn-screen-orientation-values-table
-    const angleToRotateTo = currentAngle === 270 ? 0 : 270;
-    const orientation = getOrientation(currentDevice, viewport, angleToRotateTo);
+    const angleToRotateTo = currentAngle === 90 ? 0 : 90;
+    const { type, angle } = getOrientation(currentDevice, viewport, angleToRotateTo);
 
-    this.onChangeViewportOrientation(id, orientation);
+    this.onChangeViewportOrientation(id, type, angle, true);
     this.props.dispatch(rotateViewport(id));
   }
 

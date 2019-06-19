@@ -35,8 +35,10 @@ BrowserHost* BrowserHost::GetFrom(nsIRemoteTab* aRemoteTab) {
   return static_cast<BrowserHost*>(aRemoteTab);
 }
 
+TabId BrowserHost::GetTabId() const { return mId; }
+
 mozilla::layers::LayersId BrowserHost::GetLayersId() const {
-  return mRoot->GetRenderFrame()->GetLayersId();
+  return mRoot->GetLayersId();
 }
 
 BrowsingContext* BrowserHost::GetBrowsingContext() const {
@@ -357,7 +359,10 @@ NS_IMETHODIMP
 BrowserHost::MaybeCancelContentJSExecutionFromScript(
     nsIRemoteTab::NavigationType aNavigationType,
     JS::Handle<JS::Value> aCancelContentJSOptions, JSContext* aCx) {
-  if (!mRoot) {
+  // If we're in the process of creating a new window (via window.open), then
+  // the load that called this function isn't a "normal" load and should be
+  // ignored for the purposes of cancelling content JS.
+  if (!mRoot || mRoot->CreatingWindow()) {
     return NS_OK;
   }
   dom::CancelContentJSOptions cancelContentJSOptions;

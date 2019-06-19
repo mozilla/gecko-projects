@@ -252,16 +252,20 @@ const Types = exports.__TypesForTests = [
     spec: "devtools/shared/specs/targets/worker",
     front: "devtools/shared/fronts/targets/worker",
   },
-  /* Thread has an old fashion client and no front */
   {
     types: ["context"],
     spec: "devtools/shared/specs/thread",
-    front: null,
+    front: "devtools/shared/client/thread-client",
   },
   {
     types: ["console"],
     spec: "devtools/shared/specs/webconsole",
     front: "devtools/shared/fronts/webconsole",
+  },
+  {
+    types: ["webSocket"],
+    spec: "devtools/shared/specs/websocket",
+    front: "devtools/shared/fronts/websocket",
   },
   {
     types: ["pushSubscription"],

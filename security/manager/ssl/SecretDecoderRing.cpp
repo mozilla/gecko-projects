@@ -20,6 +20,7 @@
 #include "nsITokenPasswordDialogs.h"
 #include "nsNSSComponent.h"
 #include "nsNSSHelper.h"
+#include "nsNetCID.h"
 #include "nsPK11TokenDB.h"
 #include "pk11func.h"
 #include "pk11sdr.h"  // For PK11SDR_Encrypt, PK11SDR_Decrypt
@@ -141,12 +142,10 @@ SecretDecoderRing::EncryptString(const nsACString& text,
 }
 
 NS_IMETHODIMP
-SecretDecoderRing::AsyncEncryptStrings(uint32_t plaintextsCount,
-                                       const char16_t** plaintexts,
+SecretDecoderRing::AsyncEncryptStrings(const nsTArray<nsCString>& plaintexts,
                                        JSContext* aCx, Promise** aPromise) {
   MOZ_RELEASE_ASSERT(NS_IsMainThread());
-  NS_ENSURE_ARG(plaintextsCount);
-  NS_ENSURE_ARG_POINTER(plaintexts);
+  NS_ENSURE_ARG(!plaintexts.IsEmpty());
   NS_ENSURE_ARG_POINTER(aCx);
 
   nsIGlobalObject* globalObject = xpc::CurrentNativeGlobal(aCx);
@@ -160,19 +159,18 @@ SecretDecoderRing::AsyncEncryptStrings(uint32_t plaintextsCount,
     return result.StealNSResult();
   }
 
-  InfallibleTArray<nsCString> plaintextsUtf8(plaintextsCount);
-  for (uint32_t i = 0; i < plaintextsCount; ++i) {
-    plaintextsUtf8.AppendElement(NS_ConvertUTF16toUTF8(plaintexts[i]));
-  }
+  // plaintexts are already expected to be UTF-8.
   nsCOMPtr<nsIRunnable> runnable(NS_NewRunnableFunction(
-      "BackgroundSdrEncryptStrings",
-      [promise, plaintextsUtf8 = std::move(plaintextsUtf8)]() mutable {
-        BackgroundSdrEncryptStrings(plaintextsUtf8, promise);
+      "BackgroundSdrEncryptStrings", [promise, plaintexts]() mutable {
+        BackgroundSdrEncryptStrings(plaintexts, promise);
       }));
 
-  nsCOMPtr<nsIThread> encryptionThread;
-  nsresult rv = NS_NewNamedThread("AsyncSDRThread",
-                                  getter_AddRefs(encryptionThread), runnable);
+  nsCOMPtr<nsIEventTarget> target(
+      do_GetService(NS_STREAMTRANSPORTSERVICE_CONTRACTID));
+  if (!target) {
+    return NS_ERROR_FAILURE;
+  }
+  nsresult rv = target->Dispatch(runnable, NS_DISPATCH_NORMAL);
   if (NS_WARN_IF(NS_FAILED(rv))) {
     return rv;
   }

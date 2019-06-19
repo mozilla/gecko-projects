@@ -95,27 +95,6 @@ function waitForDispatch(dbg, actionType, eventRepeat = 1) {
 }
 
 /**
- * Waits for specific thread events.
- *
- * @memberof mochitest/waits
- * @param {Object} dbg
- * @param {String} eventName
- * @return {Promise}
- * @static
- */
-function waitForThreadEvents(dbg, eventName) {
-  info(`Waiting for thread event '${eventName}' to fire.`);
-  const thread = dbg.toolbox.threadClient;
-
-  return new Promise(function(resolve, reject) {
-    thread.once(function onEvent(...args) {
-      info(`Thread event '${eventName}' fired.`);
-      resolve.apply(resolve, args);
-    });
-  });
-}
-
-/**
  * Waits for `predicate()` to be true. `state` is the redux app state.
  *
  * @memberof mochitest/waits
@@ -203,6 +182,10 @@ async function waitForAllElements(dbg, name, count = 1) {
 async function waitForElementWithSelector(dbg, selector) {
   await waitUntil(() => findElementWithSelector(dbg, selector));
   return findElementWithSelector(dbg, selector);
+}
+
+function waitForRequestsToSettle(dbg) {
+  return dbg.toolbox.target.client.waitForRequestsToSettle();
 }
 
 function assertClass(el, className, exists = true) {
@@ -816,11 +799,13 @@ async function addBreakpoint(dbg, source, line, column, options) {
   source = findSource(dbg, source);
   const sourceId = source.id;
   const bpCount = dbg.selectors.getBreakpointCount();
+  const onBreakpoint = waitForDispatch(dbg, "SET_BREAKPOINT");
   await dbg.actions.addBreakpoint(
     getContext(dbg),
     { sourceId, line, column },
     options
   );
+  await onBreakpoint;
   is(
     dbg.selectors.getBreakpointCount(),
     bpCount + 1,
@@ -1055,8 +1040,9 @@ const keyMappings = {
   quickOpenFunc: { code: "o", modifiers: cmdShift },
   quickOpenLine: { code: ":", modifiers: cmdOrCtrl },
   fileSearch: { code: "f", modifiers: cmdOrCtrl },
-  fileSearchNext: { code: "g", modifiers: cmdOrCtrl },
+  fileSearchNext: { code: "g", modifiers: { metaKey: true } },
   fileSearchPrev: { code: "g", modifiers: cmdShift },
+  goToLine: { code: "g", modifiers: { ctrlKey: true } },
   Enter: { code: "VK_RETURN" },
   ShiftEnter: { code: "VK_RETURN", modifiers: shiftOrAlt },
   AltEnter: {

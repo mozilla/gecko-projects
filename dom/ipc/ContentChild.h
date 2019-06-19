@@ -57,14 +57,6 @@ using mozilla::loader::PScriptCacheChild;
 bool IsDevelopmentBuild();
 #endif /* !XP_WIN */
 
-#if defined(XP_MACOSX)
-// Return the repo directory and the repo object directory respectively. These
-// should only be used on Mac developer builds to determine the path to the
-// repo or object directory.
-nsresult GetRepoDir(nsIFile** aRepoDir);
-nsresult GetObjDir(nsIFile** aObjDir);
-#endif /* XP_MACOSX */
-
 namespace ipc {
 class URIParams;
 }  // namespace ipc
@@ -183,7 +175,7 @@ class ContentChild final : public PContentChild,
       Endpoint<PCompositorManagerChild>&& aCompositor,
       Endpoint<PImageBridgeChild>&& aImageBridge,
       Endpoint<PVRManagerChild>&& aVRBridge,
-      Endpoint<PVideoDecoderManagerChild>&& aVideoManager,
+      Endpoint<PRemoteDecoderManagerChild>&& aVideoManager,
       nsTArray<uint32_t>&& namespaces);
 
   mozilla::ipc::IPCResult RecvRequestPerformanceMetrics(const nsID& aID);
@@ -192,7 +184,7 @@ class ContentChild final : public PContentChild,
       Endpoint<PCompositorManagerChild>&& aCompositor,
       Endpoint<PImageBridgeChild>&& aImageBridge,
       Endpoint<PVRManagerChild>&& aVRBridge,
-      Endpoint<PVideoDecoderManagerChild>&& aVideoManager,
+      Endpoint<PRemoteDecoderManagerChild>&& aVideoManager,
       nsTArray<uint32_t>&& namespaces);
 
   mozilla::ipc::IPCResult RecvAudioDefaultDeviceChange();
@@ -348,6 +340,12 @@ class ContentChild final : public PContentChild,
 
   mozilla::ipc::IPCResult RecvPreferenceUpdate(const Pref& aPref);
   mozilla::ipc::IPCResult RecvVarUpdate(const GfxVarUpdate& pref);
+
+  mozilla::ipc::IPCResult RecvUpdatePerfStatsCollectionMask(
+      const uint64_t& aMask);
+
+  mozilla::ipc::IPCResult RecvCollectPerfStatsJSON(
+      CollectPerfStatsJSONResolver&& aResolver);
 
   mozilla::ipc::IPCResult RecvDataStoragePut(const nsString& aFilename,
                                              const DataStorageItem& aItem);
@@ -727,6 +725,9 @@ class ContentChild final : public PContentChild,
       BrowsingContext::IPCInitializer&& aInit);
 
   mozilla::ipc::IPCResult RecvDetachBrowsingContext(BrowsingContext* aContext);
+
+  mozilla::ipc::IPCResult RecvDetachBrowsingContextChildren(
+      BrowsingContext* aContext);
 
   mozilla::ipc::IPCResult RecvCacheBrowsingContextChildren(
       BrowsingContext* aContext);

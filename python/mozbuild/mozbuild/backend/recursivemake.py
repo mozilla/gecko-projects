@@ -485,7 +485,7 @@ class RecursiveMakeBackend(CommonBackend):
                 '.cpp': 'HOST_CPPSRCS',
             }
             variables = [suffix_map[obj.canonical_suffix]]
-            if isinstance(obj, GeneratedSources):
+            if isinstance(obj, HostGeneratedSources):
                 variables.append('GARBAGE')
                 base = backend_file.objdir
             else:
@@ -515,13 +515,16 @@ class RecursiveMakeBackend(CommonBackend):
             self._process_defines(obj, backend_file)
 
         elif isinstance(obj, GeneratedFile):
-            if obj.required_for_compile:
+            if obj.required_before_compile:
                 tier = 'export'
+            elif obj.required_during_compile:
+                tier = None
             elif obj.localized:
                 tier = 'libs'
             else:
                 tier = 'misc'
-            self._no_skip[tier].add(backend_file.relobjdir)
+            if tier:
+                self._no_skip[tier].add(backend_file.relobjdir)
 
             # Localized generated files can use {AB_CD} and {AB_rCD} in their
             # output paths.
@@ -582,12 +585,13 @@ class RecursiveMakeBackend(CommonBackend):
                 force = ' $(if $(IS_LANGUAGE_REPACK),FORCE)'
 
             if obj.script:
-                # If we're doing this during export that means we need it during
-                # compile, but if we have an artifact build we don't run compile,
-                # so we can skip it altogether or let the rule run as the result of
-                # something depending on it.
-                if tier != 'export' or not self.environment.is_artifact_build:
-                    if not needs_AB_rCD:
+                # If we are doing an artifact build, we don't run compiler, so
+                # we can skip generated files that are needed during compile,
+                # or let the rule run as the result of something depending on
+                # it.
+                if not (obj.required_before_compile or obj.required_during_compile) or \
+                        not self.environment.is_artifact_build:
+                    if tier and not needs_AB_rCD:
                         # Android localized resources have special Makefile
                         # handling.
                         backend_file.write('%s:: %s\n' % (tier, stub_file))
@@ -1782,7 +1786,10 @@ class RecursiveMakeBackend(CommonBackend):
         for source in sorted(webidls.all_preprocessed_sources()):
             basename = os.path.basename(source)
             rule = mk.create_rule([basename])
-            rule.add_dependencies([source, '$(GLOBAL_DEPS)'])
+            # GLOBAL_DEPS would be used here, but due to the include order of
+            # our makefiles it's not set early enough to be useful, so we use
+            # WEBIDL_PP_DEPS, which has analagous content.
+            rule.add_dependencies([source, '$(WEBIDL_PP_DEPS)'])
             rule.add_commands([
                 # Remove the file before writing so bindings that go from
                 # static to preprocessed don't end up writing to a symlink,

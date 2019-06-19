@@ -459,7 +459,7 @@ pub struct ResourceCache {
     /// both blobs and regular images.
     pending_image_requests: FastHashSet<ImageRequest>,
 
-    blob_image_handler: Option<Box<BlobImageHandler>>,
+    blob_image_handler: Option<Box<dyn BlobImageHandler>>,
     rasterized_blob_images: FastHashMap<BlobImageKey, RasterizedBlob>,
     blob_image_templates: FastHashMap<BlobImageKey, BlobImageTemplate>,
 
@@ -467,7 +467,7 @@ pub struct ResourceCache {
     /// rasterize, add them to this list and rasterize them synchronously.
     missing_blob_images: Vec<BlobImageParams>,
     /// The rasterizer associated with the current scene.
-    blob_image_rasterizer: Option<Box<AsyncBlobImageRasterizer>>,
+    blob_image_rasterizer: Option<Box<dyn AsyncBlobImageRasterizer>>,
     /// An epoch of the stored blob image rasterizer, used to skip the ones
     /// coming from low-priority scene builds if the current one is newer.
     /// This is to be removed when we get rid of the whole "missed" blob
@@ -479,14 +479,18 @@ pub struct ResourceCache {
     blob_image_rasterizer_consumed_epoch: BlobImageRasterizerEpoch,
     /// A log of the last three frames worth of deleted image keys kept
     /// for debugging purposes.
-    deleted_blob_keys: VecDeque<Vec<BlobImageKey>>
+    deleted_blob_keys: VecDeque<Vec<BlobImageKey>>,
+    /// A set of the image keys that have been requested, and require
+    /// updates to the texture cache. Images in this category trigger
+    /// invalidations for picture caching tiles.
+    dirty_image_keys: FastHashSet<ImageKey>,
 }
 
 impl ResourceCache {
     pub fn new(
         texture_cache: TextureCache,
         glyph_rasterizer: GlyphRasterizer,
-        blob_image_handler: Option<Box<BlobImageHandler>>,
+        blob_image_handler: Option<Box<dyn BlobImageHandler>>,
     ) -> Self {
         ResourceCache {
             cached_glyphs: GlyphCache::new(),
@@ -508,6 +512,7 @@ impl ResourceCache {
             blob_image_rasterizer_consumed_epoch: BlobImageRasterizerEpoch(0),
             // We want to keep three frames worth of delete blob keys
             deleted_blob_keys: vec![Vec::new(), Vec::new(), Vec::new()].into(),
+            dirty_image_keys: FastHashSet::default(),
         }
     }
 
@@ -683,7 +688,7 @@ impl ResourceCache {
     }
 
     pub fn set_blob_rasterizer(
-        &mut self, rasterizer: Box<AsyncBlobImageRasterizer>,
+        &mut self, rasterizer: Box<dyn AsyncBlobImageRasterizer>,
         supp: AsyncBlobImageInfo,
     ) {
         if self.blob_image_rasterizer_consumed_epoch.0 < supp.epoch.0 {
@@ -987,25 +992,7 @@ impl ResourceCache {
         &self,
         image_key: ImageKey,
     ) -> bool {
-        match self.cached_images.try_get(&image_key) {
-            Some(ImageResult::UntiledAuto(ref info)) => {
-                !info.dirty_rect.is_empty()
-            }
-            Some(ImageResult::Multi(ref entries)) => {
-                for (_, entry) in &entries.resources {
-                    if !entry.dirty_rect.is_empty() {
-                        return true;
-                    }
-                }
-                false
-            }
-            Some(ImageResult::Err(..)) => {
-                false
-            }
-            None => {
-                true
-            }
-        }
+        self.dirty_image_keys.contains(&image_key)
     }
 
     pub fn request_image(
@@ -1109,6 +1096,10 @@ impl ResourceCache {
             return
         }
 
+        // By this point, we know that the image request is considered dirty, and will
+        // require a texture cache modification.
+        self.dirty_image_keys.insert(request.key);
+
         if template.data.is_blob() {
             let request: BlobImageRequest = request.into();
             let missing = match (self.rasterized_blob_images.get(&request.key), request.tile) {
@@ -1158,7 +1149,7 @@ impl ResourceCache {
     pub fn create_blob_scene_builder_requests(
         &mut self,
         keys: &[BlobImageKey]
-    ) -> (Option<(Box<AsyncBlobImageRasterizer>, AsyncBlobImageInfo)>, Vec<BlobImageParams>) {
+    ) -> (Option<(Box<dyn AsyncBlobImageRasterizer>, AsyncBlobImageInfo)>, Vec<BlobImageParams>) {
         if self.blob_image_handler.is_none() || keys.is_empty() {
             return (None, Vec::new());
         }
@@ -1200,7 +1191,7 @@ impl ResourceCache {
                         tile_size,
                     );
 
-                    tiles = tiles.intersection(&dirty_tiles).unwrap_or(TileRange::zero());
+                    tiles = tiles.intersection(&dirty_tiles).unwrap_or_else(TileRange::zero);
                 }
 
                 let original_tile_range = tiles;
@@ -1774,6 +1765,7 @@ impl ResourceCache {
         debug_assert_eq!(self.state, State::QueryResources);
         self.state = State::Idle;
         self.texture_cache.end_frame(texture_cache_profile);
+        self.dirty_image_keys.clear();
     }
 
     pub fn set_debug_flags(&mut self, flags: DebugFlags) {

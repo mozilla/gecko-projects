@@ -258,13 +258,18 @@ class GCRuntime {
   uint32_t getParameter(JSGCParamKey key, const AutoLockGC& lock);
 
   MOZ_MUST_USE bool triggerGC(JS::GCReason reason);
-  // Check whether to trigger a zone GC. During an incremental GC, optionally
-  // count |nbytes| towards the threshold for performing the next slice.
+  // Check whether to trigger a zone GC after allocating GC cells. During an
+  // incremental GC, optionally count |nbytes| towards the threshold for
+  // performing the next slice.
   void maybeAllocTriggerZoneGC(Zone* zone, size_t nbytes = 0);
+  // Check whether to trigger a zone GC after malloc memory.
+  void maybeMallocTriggerZoneGC(Zone* zone);
   // The return value indicates if we were able to do the GC.
   bool triggerZoneGC(Zone* zone, JS::GCReason reason, size_t usedBytes,
                      size_t thresholdBytes);
   void maybeGC(Zone* zone);
+  bool checkEagerAllocTrigger(const HeapSize& size,
+                              const ZoneThreshold& threshold);
   // The return value indicates whether a major GC was performed.
   bool gcIfRequested();
   void gc(JSGCInvocationKind gckind, JS::GCReason reason);
@@ -431,6 +436,8 @@ class GCRuntime {
 
   bool areGrayBitsValid() const { return grayBitsValid; }
   void setGrayBitsInvalid() { grayBitsValid = false; }
+
+  mozilla::TimeStamp lastGCTime() const { return lastGCTime_; }
 
   bool majorGCRequested() const {
     return majorGCTriggerReason != JS::GCReason::NO_REASON;
@@ -622,15 +629,12 @@ class GCRuntime {
                                                gcstats::PhaseKind phase);
   void drainMarkStack();
   template <class ZoneIterT>
-  IncrementalProgress markWeakReferences(gcstats::PhaseKind phase,
-                                         SliceBudget& budget);
-  IncrementalProgress markWeakReferencesInCurrentGroup(gcstats::PhaseKind phase,
-                                                       SliceBudget& budget);
+  void markWeakReferences(gcstats::PhaseKind phase);
+  void markWeakReferencesInCurrentGroup(gcstats::PhaseKind phase);
   template <class ZoneIterT>
   void markGrayRoots(gcstats::PhaseKind phase);
   void markBufferedGrayRoots(JS::Zone* zone);
-  IncrementalProgress markAllWeakReferences(gcstats::PhaseKind phase,
-                                            SliceBudget& budget);
+  void markAllWeakReferences(gcstats::PhaseKind phase);
   void markAllGrayReferences(gcstats::PhaseKind phase);
 
   void beginSweepPhase(JS::GCReason reason, AutoGCSession& session);
@@ -775,7 +779,7 @@ class GCRuntime {
 
  private:
   UnprotectedData<bool> chunkAllocationSinceLastGC;
-  MainThreadData<mozilla::TimeStamp> lastGCTime;
+  MainThreadData<mozilla::TimeStamp> lastGCTime_;
 
   /*
    * JSGC_MODE
@@ -1129,6 +1133,9 @@ inline bool GCRuntime::upcomingZealousGC() { return false; }
 inline bool GCRuntime::needZealousGC() { return false; }
 inline bool GCRuntime::hasIncrementalTwoSliceZealMode() { return false; }
 #endif
+
+bool IsCurrentlyAnimating(const mozilla::TimeStamp& lastAnimationTime,
+                          const mozilla::TimeStamp& currentTime);
 
 } /* namespace gc */
 } /* namespace js */

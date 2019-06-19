@@ -61,6 +61,7 @@ struct ID3D11Texture2D;
 struct ID3D11Device;
 struct ID2D1Device;
 struct ID2D1DeviceContext;
+struct ID2D1Multithread;
 struct IDWriteFactory;
 struct IDWriteRenderingParams;
 struct IDWriteFontFace;
@@ -587,10 +588,31 @@ class PathSink : public RefCounted<PathSink> {
   /** Add an arc to the current figure */
   virtual void Arc(const Point& aOrigin, float aRadius, float aStartAngle,
                    float aEndAngle, bool aAntiClockwise = false) = 0;
+
+  virtual Point CurrentPoint() const {
+    return mCurrentPoint;
+  }
+
+  virtual Point BeginPoint() const {
+    return mBeginPoint;
+  }
+
+  virtual void SetCurrentPoint(const Point& aPoint) {
+    mCurrentPoint = aPoint;
+  }
+
+  virtual void SetBeginPoint(const Point& aPoint) {
+    mBeginPoint = aPoint;
+  }
+
+protected:
   /** Point the current subpath is at - or where the next subpath will start
    * if there is no active subpath.
    */
-  virtual Point CurrentPoint() const = 0;
+  Point mCurrentPoint;
+
+  /** Position of the previous MoveTo operation. */
+  Point mBeginPoint;
 };
 
 class PathBuilder;
@@ -1848,6 +1870,17 @@ class GFX2D_API Factory {
 
  private:
   static DrawEventRecorder* mRecorder;
+};
+
+class MOZ_RAII AutoSerializeWithMoz2D final {
+ public:
+  explicit AutoSerializeWithMoz2D(BackendType aBackendType);
+  ~AutoSerializeWithMoz2D();
+
+ private:
+#if defined(WIN32)
+  RefPtr<ID2D1Multithread> mMT;
+#endif
 };
 
 }  // namespace gfx

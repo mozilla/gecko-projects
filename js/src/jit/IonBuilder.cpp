@@ -1985,7 +1985,7 @@ AbortReasonOr<Ok> IonBuilder::inspectOpcode(JSOp op) {
       return Ok();
 
     case JSOP_BIGINT:
-      pushConstant(info().getConst(pc));
+      pushConstant(BigIntValue(info().getBigInt(pc)));
       return Ok();
 
     case JSOP_STRING:
@@ -8334,11 +8334,11 @@ AbortReasonOr<Ok> IonBuilder::jsop_getgname(PropertyName* name) {
     return Ok();
   }
   if (name == names().NaN) {
-    pushConstant(realm->runtime()->NaNValue());
+    pushConstant(JS::NaNValue());
     return Ok();
   }
   if (name == names().Infinity) {
-    pushConstant(realm->runtime()->positiveInfinityValue());
+    pushConstant(JS::InfinityValue());
     return Ok();
   }
 

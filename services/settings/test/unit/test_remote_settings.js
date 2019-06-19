@@ -20,6 +20,9 @@ let client;
 let clientWithDump;
 
 async function clear_state() {
+  client.verifySignature = false;
+  clientWithDump.verifySignature = false;
+
   // Clear local DB.
   const collection = await client.openCollection();
   await collection.clear();
@@ -45,11 +48,10 @@ function run_test() {
   Services.prefs.setCharPref("services.settings.server",
                              `http://localhost:${server.identity.primaryPort}/v1`);
 
-  client = RemoteSettings("password-fields");
-  client.verifySignature = false;
+  Services.prefs.setCharPref("services.settings.loglevel", "debug");
 
+  client = RemoteSettings("password-fields");
   clientWithDump = RemoteSettings("language-dictionaries");
-  clientWithDump.verifySignature = false;
 
   server.registerPathHandler("/v1/", handleResponse);
   server.registerPathHandler("/v1/buckets/monitor/collections/changes/records", handleResponse);
@@ -57,6 +59,8 @@ function run_test() {
   server.registerPathHandler("/v1/buckets/main/collections/password-fields/records", handleResponse);
   server.registerPathHandler("/v1/buckets/main/collections/language-dictionaries", handleResponse);
   server.registerPathHandler("/v1/buckets/main/collections/language-dictionaries/records", handleResponse);
+  server.registerPathHandler("/v1/buckets/main/collections/with-local-fields", handleResponse);
+  server.registerPathHandler("/v1/buckets/main/collections/with-local-fields/records", handleResponse);
   server.registerPathHandler("/fake-x5u", handleResponse);
 
   run_next_test();
@@ -65,6 +69,7 @@ function run_test() {
     server.stop(() => { });
   });
 }
+add_task(clear_state);
 
 add_task(async function test_records_obtained_from_server_are_stored_in_db() {
   // Test an empty db populates
@@ -98,13 +103,14 @@ add_task(async function test_records_from_dump_are_listed_as_created_in_event() 
 add_task(clear_state);
 
 add_task(async function test_records_can_have_local_fields() {
-  const c = RemoteSettings("password-fields", { localFields: ["accepted"] });
+  const c = RemoteSettings("with-local-fields", { localFields: [ "accepted" ]});
+  c.verifySignature = false;
+
   await c.maybeSync(2000);
 
   const col = await c.openCollection();
-  await col.update({ id: "9d500963-d80e-3a91-6e74-66f3811b99cc", accepted: true });
-
-  await c.maybeSync(2000); // Does not fail.
+  await col.update({ id: "c74279ce-fb0a-42a6-ae11-386b567a6119", accepted: true });
+  await c.maybeSync(3000); // Does not fail.
 });
 add_task(clear_state);
 
@@ -212,6 +218,84 @@ add_task(async function test_get_can_verify_signature() {
     error = e;
   }
   equal(error.message, "Invalid content signature (main/password-fields)");
+});
+add_task(clear_state);
+
+add_task(async function test_get_does_not_verify_signature_if_load_dump() {
+  if (IS_ANDROID) {
+    // Skip test: we don't ship remote settings dumps on Android (see package-manifest).
+    return;
+  }
+
+  let called;
+  clientWithDump._verifier = {
+    async asyncVerifyContentSignature(serialized, signature) {
+      called = true;
+      return true;
+    },
+  };
+
+  // When dump is loaded, signature is not verified.
+  const records = await clientWithDump.get({ verifySignature: true });
+  ok(records.length > 0, "dump is loaded");
+  ok(!called, "signature is missing but not verified");
+
+  // If metadata is missing locally, it is not fetched if `syncIfEmpty` is disabled.
+  let error;
+  try {
+    await clientWithDump.get({ verifySignature: true, syncIfEmpty: false });
+  } catch (e) {
+    error = e;
+  }
+  ok(!called, "signer was not called");
+  equal(error.message, "Missing signature (main/language-dictionaries)", "signature is missing locally");
+
+  // If metadata is missing locally, it is fetched by default (`syncIfEmpty: true`)
+  await clientWithDump.get({ verifySignature: true });
+  const metadata = await (await clientWithDump.openCollection()).metadata();
+  ok(Object.keys(metadata).length > 0, "metadata was fetched");
+  ok(called, "signature was verified for the data that was in dump");
+});
+add_task(clear_state);
+
+add_task(async function test_sync_pulls_metadata_if_missing_with_dump_is_up_to_date() {
+  if (IS_ANDROID) {
+    // Skip test: we don't ship remote settings dumps on Android (see package-manifest).
+    return;
+  }
+
+  let called;
+  clientWithDump._verifier = {
+    async asyncVerifyContentSignature(serialized, signature) {
+      called = true;
+      return true;
+    },
+  };
+  // When dump is loaded, signature is not verified.
+  const records = await clientWithDump.get({ verifySignature: true });
+  ok(records.length > 0, "dump is loaded");
+  ok(!called, "signature is missing but not verified");
+
+  // Synchronize the collection (local data is up-to-date, collection last modified > 42)
+  // Signature verification is disabled (see `clear_state()`), so we don't bother with
+  // fetching metadata.
+  await clientWithDump.maybeSync(42);
+  let metadata = await (await clientWithDump.openCollection()).metadata();
+  ok(!metadata, "metadata was not fetched");
+
+  // Synchronize again the collection (up-to-date, since collection last modified still > 42)
+  clientWithDump.verifySignature = true;
+  await clientWithDump.maybeSync(42);
+
+  // With signature verification, metadata was fetched.
+  metadata = await (await clientWithDump.openCollection()).metadata();
+  ok(Object.keys(metadata).length > 0, "metadata was fetched");
+  ok(called, "signature was verified for the data that was in dump");
+
+  // Metadata is present, signature will now verified.
+  called = false;
+  await clientWithDump.get({ verifySignature: true });
+  ok(called, "local signature is verified");
 });
 add_task(clear_state);
 
@@ -599,7 +683,7 @@ function getSampleResponse(req, port) {
     },
     "GET:/fake-x5u": {
       "sampleHeaders": [
-        "Content-Type: /octet-stream",
+        "Content-Type: application/octet-stream",
       ],
       "status": { status: 200, statusText: "OK" },
       "responseBody": `-----BEGIN CERTIFICATE-----
@@ -793,6 +877,58 @@ wNuvFqc=
           "id": "xx",
           "last_modified": 5000000000000,
           "dictionaries": ["xx-XX@dictionaries.addons.mozilla.org"],
+        }],
+      },
+    },
+    "GET:/v1/buckets/main/collections/with-local-fields": {
+      "sampleHeaders": [
+        "Access-Control-Allow-Origin: *",
+        "Access-Control-Expose-Headers: Retry-After, Content-Length, Alert, Backoff",
+        "Content-Type: application/json; charset=UTF-8",
+        "Server: waitress",
+        "Etag: \"1234\"",
+      ],
+      "status": { status: 200, statusText: "OK" },
+      "responseBody": JSON.stringify({
+        "data": {
+          "id": "with-local-fields",
+          "last_modified": 1234,
+          "signature": {
+            "signature": "xyz",
+            "x5u": `http://localhost:${port}/fake-x5u`,
+          },
+        },
+      }),
+    },
+    "GET:/v1/buckets/main/collections/with-local-fields/records?_expected=2000&_sort=-last_modified": {
+      "sampleHeaders": [
+        "Access-Control-Allow-Origin: *",
+        "Access-Control-Expose-Headers: Retry-After, Content-Length, Alert, Backoff",
+        "Content-Type: application/json; charset=UTF-8",
+        "Server: waitress",
+        "Etag: \"2000\"",
+      ],
+      "status": { status: 200, statusText: "OK" },
+      "responseBody": {
+        "data": [{
+          "id": "c74279ce-fb0a-42a6-ae11-386b567a6119",
+          "last_modified": 2000,
+        }],
+      },
+    },
+    "GET:/v1/buckets/main/collections/with-local-fields/records?_expected=3000&_sort=-last_modified&_since=2000": {
+      "sampleHeaders": [
+        "Access-Control-Allow-Origin: *",
+        "Access-Control-Expose-Headers: Retry-After, Content-Length, Alert, Backoff",
+        "Content-Type: application/json; charset=UTF-8",
+        "Server: waitress",
+        "Etag: \"3000\"",
+      ],
+      "status": { status: 200, statusText: "OK" },
+      "responseBody": {
+        "data": [{
+          "id": "1f5c98b9-6d93-4c13-aa26-978b38695096",
+          "last_modified": 3000,
         }],
       },
     },

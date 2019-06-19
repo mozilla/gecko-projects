@@ -111,9 +111,21 @@ var interfaceNamesInGlobalScope =
 // IMPORTANT: Do not change this list without review from a DOM peer!
     {name: "Directory", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    {name: "DOMError", insecureContext: true},
-// IMPORTANT: Do not change this list without review from a DOM peer!
     {name: "DOMException", insecureContext: true},
+// IMPORTANT: Do not change this list without review from a DOM peer!
+    {name: "DOMMatrix", insecureContext: true},
+// IMPORTANT: Do not change this list without review from a DOM peer!
+    {name: "DOMMatrixReadOnly", insecureContext: true},
+// IMPORTANT: Do not change this list without review from a DOM peer!
+    {name: "DOMPoint", insecureContext: true},
+// IMPORTANT: Do not change this list without review from a DOM peer!
+    {name: "DOMPointReadOnly", insecureContext: true},
+// IMPORTANT: Do not change this list without review from a DOM peer!
+    {name: "DOMQuad", insecureContext: true},
+// IMPORTANT: Do not change this list without review from a DOM peer!
+    {name: "DOMRect", insecureContext: true},
+// IMPORTANT: Do not change this list without review from a DOM peer!
+    {name: "DOMRectReadOnly", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
     {name: "DOMRequest", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
@@ -196,6 +208,8 @@ var interfaceNamesInGlobalScope =
     {name: "PerformanceServerTiming", insecureContext: false},
 // IMPORTANT: Do not change this list without review from a DOM peer!
     {name: "ProgressEvent", insecureContext: true},
+// IMPORTANT: Do not change this list without review from a DOM peer!
+    {name: "PromiseRejectionEvent", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
     {name: "PushManager", insecureContext: true, fennecOrDesktop: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!

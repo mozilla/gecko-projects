@@ -395,7 +395,8 @@ class StartRequestEvent : public NeckoTargetChannelEvent<HttpChannelChild> {
       const NetAddr& aPeerAddr, const uint32_t& aCacheKey,
       const nsCString& altDataType, const int64_t& altDataLen,
       const bool& deliveringAltData, const bool& aApplyConversion,
-      const bool& aIsResolvedByTRR, const ResourceTimingStruct& aTiming)
+      const bool& aIsResolvedByTRR, const ResourceTimingStruct& aTiming,
+      const bool& aAllRedirectsSameOrigin)
       : NeckoTargetChannelEvent<HttpChannelChild>(aChild),
         mChannelStatus(aChannelStatus),
         mResponseHead(aResponseHead),
@@ -418,7 +419,8 @@ class StartRequestEvent : public NeckoTargetChannelEvent<HttpChannelChild> {
         mDeliveringAltData(deliveringAltData),
         mLoadInfoForwarder(loadInfoForwarder),
         mIsResolvedByTRR(aIsResolvedByTRR),
-        mTiming(aTiming) {}
+        mTiming(aTiming),
+        mAllRedirectsSameOrigin(aAllRedirectsSameOrigin) {}
 
   void Run() override {
     LOG(("StartRequestEvent [this=%p]\n", mChild));
@@ -428,7 +430,7 @@ class StartRequestEvent : public NeckoTargetChannelEvent<HttpChannelChild> {
         mCacheEntryId, mCacheFetchCount, mCacheExpirationTime, mCachedCharset,
         mSecurityInfoSerialization, mSelfAddr, mPeerAddr, mCacheKey,
         mAltDataType, mAltDataLen, mDeliveringAltData, mApplyConversion,
-        mIsResolvedByTRR, mTiming);
+        mIsResolvedByTRR, mTiming, mAllRedirectsSameOrigin);
   }
 
  private:
@@ -454,6 +456,7 @@ class StartRequestEvent : public NeckoTargetChannelEvent<HttpChannelChild> {
   ParentLoadInfoForwarderArgs mLoadInfoForwarder;
   bool mIsResolvedByTRR;
   ResourceTimingStruct mTiming;
+  bool mAllRedirectsSameOrigin;
 };
 
 mozilla::ipc::IPCResult HttpChannelChild::RecvOnStartRequest(
@@ -468,7 +471,8 @@ mozilla::ipc::IPCResult HttpChannelChild::RecvOnStartRequest(
     const int16_t& redirectCount, const uint32_t& cacheKey,
     const nsCString& altDataType, const int64_t& altDataLen,
     const bool& deliveringAltData, const bool& aApplyConversion,
-    const bool& aIsResolvedByTRR, const ResourceTimingStruct& aTiming) {
+    const bool& aIsResolvedByTRR, const ResourceTimingStruct& aTiming,
+    const bool& aAllRedirectsSameOrigin) {
   AUTO_PROFILER_LABEL("HttpChannelChild::RecvOnStartRequest", NETWORK);
   LOG(("HttpChannelChild::RecvOnStartRequest [this=%p]\n", this));
   // mFlushedForDiversion and mDivertingToParent should NEVER be set at this
@@ -488,7 +492,7 @@ mozilla::ipc::IPCResult HttpChannelChild::RecvOnStartRequest(
       cacheEntryId, cacheFetchCount, cacheExpirationTime, cachedCharset,
       securityInfoSerialization, selfAddr, peerAddr, cacheKey, altDataType,
       altDataLen, deliveringAltData, aApplyConversion, aIsResolvedByTRR,
-      aTiming));
+      aTiming, aAllRedirectsSameOrigin));
 
   {
     // Child's mEventQ is to control the execution order of the IPC messages
@@ -522,7 +526,8 @@ void HttpChannelChild::OnStartRequest(
     const NetAddr& selfAddr, const NetAddr& peerAddr, const uint32_t& cacheKey,
     const nsCString& altDataType, const int64_t& altDataLen,
     const bool& deliveringAltData, const bool& aApplyConversion,
-    const bool& aIsResolvedByTRR, const ResourceTimingStruct& aTiming) {
+    const bool& aIsResolvedByTRR, const ResourceTimingStruct& aTiming,
+    const bool& aAllRedirectsSameOrigin) {
   LOG(("HttpChannelChild::OnStartRequest [this=%p]\n", this));
 
   // mFlushedForDiversion and mDivertingToParent should NEVER be set at this
@@ -597,6 +602,8 @@ void HttpChannelChild::OnStartRequest(
   mTracingEnabled = false;
 
   mTransactionTimings = aTiming;
+
+  mAllRedirectsSameOrigin = aAllRedirectsSameOrigin;
 
   DoOnStartRequest(this, nullptr);
 }
@@ -2900,6 +2907,8 @@ nsresult HttpChannelChild::ContinueAsyncOpen() {
   openArgs.forceMainDocumentChannel() = mForceMainDocumentChannel;
 
   openArgs.navigationStartTimeStamp() = navigationStartTimeStamp;
+  openArgs.hasSandboxedAuxiliaryNavigations() =
+      GetHasSandboxedAuxiliaryNavigations();
 
   // This must happen before the constructor message is sent. Otherwise messages
   // from the parent could arrive quickly and be delivered to the wrong event
@@ -4022,14 +4031,14 @@ HttpChannelChild::LogMimeTypeMismatch(const nsACString& aMessageName,
     mLoadInfo->GetLoadingDocument(getter_AddRefs(doc));
   }
 
-  nsAutoString url(aURL);
-  nsAutoString contentType(aContentType);
-  const char16_t* params[] = {url.get(), contentType.get()};
+  AutoTArray<nsString, 2> params;
+  params.AppendElement(aURL);
+  params.AppendElement(aContentType);
   nsContentUtils::ReportToConsole(
       aWarning ? nsIScriptError::warningFlag : nsIScriptError::errorFlag,
       NS_LITERAL_CSTRING("MIMEMISMATCH"), doc,
       nsContentUtils::eSECURITY_PROPERTIES, nsCString(aMessageName).get(),
-      params, ArrayLength(params));
+      params);
   return NS_OK;
 }
 

@@ -4,7 +4,6 @@
 "use strict";
 
 const {XPCOMUtils} = ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
-const {DOMLocalization} = ChromeUtils.import("resource://gre/modules/DOMLocalization.jsm");
 const {Services} = ChromeUtils.import("resource://gre/modules/Services.jsm");
 XPCOMUtils.defineLazyGlobalGetters(this, ["fetch"]);
 
@@ -374,7 +373,8 @@ class PageAction {
       footerLink.onclick = () => this._sendTelemetry({message_id: id, bucket_id: content.bucket_id, event: "LEARN_MORE"});
 
       primaryActionCallback = async () => {
-        primary.action.data.url = await CFRPageActions._fetchLatestAddonVersion(content.addon.id); // eslint-disable-line no-use-before-define
+        // eslint-disable-next-line no-use-before-define
+        primary.action.data.url = await CFRPageActions._fetchLatestAddonVersion(content.addon.id);
         this._blockMessage(id);
         this.dispatchUserAction(primary.action);
         this.hideAddressBarNotifier();

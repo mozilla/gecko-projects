@@ -52,7 +52,7 @@ const ErrorDocs = {
   JSMSG_DEPRECATED_FOR_EACH: "For-each-in_loops_are_deprecated",
   JSMSG_STRICT_NON_SIMPLE_PARAMS: "Strict_Non_Simple_Params",
   JSMSG_DEAD_OBJECT: "Dead_object",
-  JSMSG_NOT_NONNULL_OBJECT: "No_non-null_object",
+  JSMSG_OBJECT_REQUIRED: "No_non-null_object",
   JSMSG_IDSTART_AFTER_NUMBER: "Identifier_after_number",
   JSMSG_DEPRECATED_EXPR_CLOSURE: "Deprecated_expression_closures",
   JSMSG_ILLEGAL_CHARACTER: "Illegal_character",
@@ -90,6 +90,7 @@ const ErrorDocs = {
   JSMSG_PROPERTY_FAIL: "cant_access_property",
   JSMSG_PROPERTY_FAIL_EXPR: "cant_access_property",
   JSMSG_REDECLARED_VAR: "Redeclared_parameter",
+  JSMSG_SET_NON_OBJECT_RECEIVER: "Cant_assign_to_property",
 };
 
 const MIXED_CONTENT_LEARN_MORE = "https://developer.mozilla.org/docs/Web/Security/Mixed_content";

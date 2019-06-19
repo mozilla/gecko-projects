@@ -16,6 +16,7 @@
 #include "mozilla/DebugOnly.h"
 #include "mozilla/Encoding.h"
 #include "mozilla/EventStates.h"
+#include "mozilla/HTMLEditor.h"
 #include "mozilla/gfx/2D.h"
 #include "mozilla/gfx/Helpers.h"
 #include "mozilla/gfx/PathHelpers.h"
@@ -2568,32 +2569,22 @@ void nsImageFrame::IconLoad::GetPrefs() {
 
 nsresult nsImageFrame::RestartAnimation() {
   nsCOMPtr<imgIRequest> currentRequest = GetCurrentRequest();
-  /*
-   * We cannot count on mContentURLRequestRegistered to make
-   * the deregistration work. So, we are going to force it.
-   */
-  bool deregister = true;
 
-  if (currentRequest && !mContentURLRequestRegistered) {
+  if (currentRequest) {
+    bool deregister = false;
     nsLayoutUtils::RegisterImageRequestIfAnimated(PresContext(), currentRequest,
                                                   &deregister);
-    return currentRequest->StartDecoding(imgIContainer::FLAG_NONE);
   }
   return NS_OK;
 }
 
 nsresult nsImageFrame::StopAnimation() {
   nsCOMPtr<imgIRequest> currentRequest = GetCurrentRequest();
-  /*
-   * We cannot count on mContentURLRequestRegistered to make
-   * the deregistration work. So, we are going to force it.
-   */
-  bool deregister = true;
 
   if (currentRequest) {
+    bool deregister = true;
     nsLayoutUtils::DeregisterImageRequest(PresContext(), currentRequest,
                                           &deregister);
-    return currentRequest->CancelAndForgetObserver(NS_BINDING_ABORTED);
   }
   return NS_OK;
 }

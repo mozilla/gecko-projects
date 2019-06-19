@@ -153,6 +153,17 @@ class ShadowRoot final : public DocumentFragment,
   void AddSlot(HTMLSlotElement* aSlot);
   void RemoveSlot(HTMLSlotElement* aSlot);
   bool HasSlots() const { return !mSlotMap.IsEmpty(); };
+  HTMLSlotElement* GetDefaultSlot() const {
+    SlotArray* list = mSlotMap.Get(NS_LITERAL_STRING(""));
+    return list ? (*list)->ElementAt(0) : nullptr;
+  }
+
+  void PartAdded(const Element&);
+  void PartRemoved(const Element&);
+
+  const nsTArray<const Element*>& Parts() const {
+    return mParts;
+  }
 
   const RawServoAuthorStyles* GetServoStyles() const {
     return mServoStyles.get();
@@ -258,6 +269,10 @@ class ShadowRoot final : public DocumentFragment,
   // the given name. The slots are stored as a weak pointer because the elements
   // are in the shadow tree and should be kept alive by its parent.
   nsClassHashtable<nsStringHashKey, SlotArray> mSlotMap;
+
+  // Unordered array of all elements that have a part attribute in this shadow
+  // tree.
+  nsTArray<const Element*> mParts;
 
   bool mIsUAWidget;
 

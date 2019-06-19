@@ -6,12 +6,6 @@ const {FormRec} = ChromeUtils.import("resource://services-sync/engines/forms.js"
 const {LoginRec} = ChromeUtils.import("resource://services-sync/engines/passwords.js");
 const {PrefRec} = ChromeUtils.import("resource://services-sync/engines/prefs.js");
 
-// Allow eval to avoid triggering the eval()-assertion through ajv-4.1.1.js
-Services.prefs.setBoolPref("security.allow_eval_with_system_principal", true);
-registerCleanupFunction(() => {
-  Services.prefs.clearUserPref("security.allow_eval_with_system_principal");
-});
-
 const LoginInfo = Components.Constructor(
   "@mozilla.org/login-manager/loginInfo;1", Ci.nsILoginInfo, "init");
 
@@ -476,8 +470,12 @@ add_task(async function test_bookmark_change_during_sync() {
                                               "bookmarks";
       return p.syncs[0].engines.find(e => e.name == name);
     });
-    ok(!engineData[0].validation, "Should not validate after first sync");
-    ok(engineData[1].validation, "Should validate after second sync");
+    if (bufferedBookmarksEnabled()) {
+      ok(engineData[0].validation, "Buffered engine should validate after first sync");
+    } else {
+      ok(!engineData[0].validation, "Legacy engine should not validate after first sync");
+    }
+    ok(engineData[1].validation, "Buffered and legacy engines should validate after second sync");
   } finally {
     engine._uploadOutgoing = uploadOutgoing;
     await cleanup(engine, server);

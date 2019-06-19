@@ -446,6 +446,27 @@ class RTCPeerConnection {
       this._mustValidateRTCConfiguration(rtcConfig,
         "RTCPeerConnection constructor passed invalid RTCConfiguration");
     }
+
+    let certificates = rtcConfig.certificates || [];
+
+    if (certificates.some(c => c.expires <= Date.now())) {
+      throw new this._win.DOMException(
+        "Unable to create RTCPeerConnection with an expired certificate",
+        "InvalidAccessError");
+    }
+
+    // TODO(bug 1531875): Check origin of certs
+
+    // TODO(bug 1176518): Remove this code once we support multiple certs
+    let certificate;
+    if (certificates.length == 1) {
+      certificate = certificates[0];
+    } else if (certificates.length) {
+      throw new this._win.DOMException(
+        "RTCPeerConnection does not currently support multiple certificates",
+        "NotSupportedError");
+    }
+
     var principal = Cu.getWebIDLCallerPrincipal();
     this._isChrome = principal.isSystemPrincipal;
 
@@ -485,7 +506,7 @@ class RTCPeerConnection {
     this._impl.initialize(observer, this._win, rtcConfig,
                           Services.tm.currentThread);
 
-    this._certificateReady = this._initCertificate(rtcConfig.certificates);
+    this._certificateReady = this._initCertificate(certificate);
     this._initIdp();
     _globalPCList.notifyLifecycleObservers(this, "initialized");
   }
@@ -503,22 +524,7 @@ class RTCPeerConnection {
     return this._config;
   }
 
-  async _initCertificate(certificates = []) {
-    let certificate;
-    if (certificates.length > 1) {
-      throw new this._win.DOMException(
-        "RTCPeerConnection does not currently support multiple certificates",
-        "NotSupportedError");
-    }
-    if (certificates.length) {
-      certificate = certificates.find(c => c.expires > Date.now());
-      if (!certificate) {
-        throw new this._win.DOMException(
-          "Unable to create RTCPeerConnection with an expired certificate",
-          "InvalidParameterError");
-      }
-    }
-
+  async _initCertificate(certificate) {
     if (!certificate) {
       certificate = await this._win.RTCPeerConnection.generateCertificate({
         name: "ECDSA", namedCurve: "P-256",
@@ -1005,42 +1011,48 @@ class RTCPeerConnection {
     // Only run a single identity verification at a time.  We have to do this to
     // avoid problems with the fact that identity validation doesn't block the
     // resolution of setRemoteDescription().
-    let p = (async () => {
-      // Should never throw
+    const validate = async () => {
       await this._lastIdentityValidation;
-      try {
-        const msg = await this._remoteIdp.verifyIdentityFromSDP(sdp, origin);
-        // If this pc has an identity already, then the identity in sdp must match
-        if (this._impl.peerIdentity && (!msg || msg.identity !== this._impl.peerIdentity)) {
-          throw new this._win.DOMException(
-            "Peer Identity mismatch, expected: " + this._impl.peerIdentity,
-            "IncompatibleSessionDescriptionError");
-        }
-
-        if (msg) {
-          // Set new identity and generate an event.
-          this._impl.peerIdentity = msg.identity;
-          this._resolvePeerIdentity(Cu.cloneInto({
-            idp: this._remoteIdp.provider,
-            name: msg.identity,
-          }, this._win));
-        }
-      } catch (e) {
-        this._rejectPeerIdentity(e);
-        // If we don't expect a specific peer identity, failure to get a valid
-        // peer identity is not a terminal state, so replace the promise to
-        // allow another attempt.
-        if (!this._impl.peerIdentity) {
-          this._resetPeerIdentityPromise();
-        }
-        throw e;
+      const msg = await this._remoteIdp.verifyIdentityFromSDP(sdp, origin);
+      // If this pc has an identity already, then the identity in sdp must match
+      if (this._impl.peerIdentity && (!msg || msg.identity !== this._impl.peerIdentity)) {
+        throw new this._win.DOMException(
+          "Peer Identity mismatch, expected: " + this._impl.peerIdentity,
+          "OperationError");
       }
-    })();
-    this._lastIdentityValidation = p.catch(() => {});
+
+      if (msg) {
+        // Set new identity and generate an event.
+        this._impl.peerIdentity = msg.identity;
+        this._resolvePeerIdentity(Cu.cloneInto({
+          idp: this._remoteIdp.provider,
+          name: msg.identity,
+        }, this._win));
+      }
+    };
+
+    const haveValidation = validate();
+
+    // Always eat errors on this chain
+    this._lastIdentityValidation = haveValidation.catch(() => {});
+
+    // If validation fails, we have some work to do. Fork it so it cannot
+    // interfere with the validation chain itself, even if the catch function
+    // throws.
+    haveValidation.catch(e => {
+      this._rejectPeerIdentity(e);
+
+      // If we don't expect a specific peer identity, failure to get a valid
+      // peer identity is not a terminal state, so replace the promise to
+      // allow another attempt.
+      if (!this._impl.peerIdentity) {
+        this._resetPeerIdentityPromise();
+      }
+    });
 
     // Only wait for IdP validation if we need identity matching
     if (this._impl.peerIdentity) {
-      await p;
+      await haveValidation;
     }
   }
 

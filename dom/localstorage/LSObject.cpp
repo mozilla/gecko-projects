@@ -405,6 +405,8 @@ nsresult LSObject::CreateForPrincipal(nsPIDOMWindowInner* aWindow,
     }
 
     clientId = Some(clientInfo.ref().Id());
+  } else if (Preferences::GetBool("dom.storage.client_validation")) {
+    return NS_ERROR_FAILURE;
   }
 
   RefPtr<LSObject> object =
@@ -764,6 +766,24 @@ void LSObject::EndExplicitSnapshot(nsIPrincipal& aSubjectPrincipal,
     aError.Throw(rv);
     return;
   }
+}
+
+bool LSObject::GetHasActiveSnapshot(nsIPrincipal& aSubjectPrincipal,
+                                    ErrorResult& aError) {
+  AssertIsOnOwningThread();
+
+  if (!CanUseStorage(aSubjectPrincipal)) {
+    aError.Throw(NS_ERROR_DOM_SECURITY_ERR);
+    return 0;
+  }
+
+  if (mDatabase && mDatabase->HasActiveSnapshot()) {
+    MOZ_ASSERT(!mDatabase->IsAllowedToClose());
+
+    return true;
+  }
+
+  return false;
 }
 
 NS_IMPL_ADDREF_INHERITED(LSObject, Storage)

@@ -628,10 +628,10 @@ void nsContainerFrame::SetSizeConstraints(nsPresContext* aPresContext,
       aPresContext->AppUnitsToDevPixels(aMinSize.width),
       aPresContext->AppUnitsToDevPixels(aMinSize.height));
   LayoutDeviceIntSize devMaxSize(
-      aMaxSize.width == NS_INTRINSICSIZE
+      aMaxSize.width == NS_UNCONSTRAINEDSIZE
           ? NS_MAXSIZE
           : aPresContext->AppUnitsToDevPixels(aMaxSize.width),
-      aMaxSize.height == NS_INTRINSICSIZE
+      aMaxSize.height == NS_UNCONSTRAINEDSIZE
           ? NS_MAXSIZE
           : aPresContext->AppUnitsToDevPixels(aMaxSize.height));
 
@@ -722,7 +722,7 @@ void nsContainerFrame::DoInlineIntrinsicISize(
   nscoord clonePBM = 0;  // PBM = PaddingBorderMargin
   const bool sliceBreak =
       styleBorder->mBoxDecorationBreak == StyleBoxDecorationBreak::Slice;
-  if (!GetPrevContinuation()) {
+  if (!GetPrevContinuation() || MOZ_UNLIKELY(!sliceBreak)) {
     nscoord startPBM =
         // clamp negative calc() to 0
         std::max(GetCoord(stylePadding->mPadding.Get(startSide), 0), 0) +
@@ -742,6 +742,7 @@ void nsContainerFrame::DoInlineIntrinsicISize(
       GetCoord(styleMargin->mMargin.Get(endSide), 0);
   if (MOZ_UNLIKELY(!sliceBreak)) {
     clonePBM += endPBM;
+    aData->mCurrentLine += clonePBM;
   }
 
   const nsLineList_iterator* savedLine = aData->mLine;

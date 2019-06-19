@@ -7,10 +7,6 @@
 #include "mozilla/dom/HTMLTrackElement.h"
 #include "mozilla/dom/Element.h"
 #include "mozilla/dom/HTMLMediaElement.h"
-#ifdef XP_WIN
-// HTMLTrackElement.webidl defines ERROR, but so does windows.h:
-#  undef ERROR
-#endif
 #include "WebVTTListener.h"
 #include "mozilla/LoadInfo.h"
 #include "mozilla/dom/HTMLTrackElementBinding.h"
@@ -313,7 +309,10 @@ void HTMLTrackElement::LoadResource(RefPtr<WebVTTListener>&& aWebVTTListener) {
   // be the state of the parent media element's crossorigin content attribute.
   // Otherwise, let CORS mode be No CORS."
   //
-  CORSMode corsMode = mMediaParent ? mMediaParent->GetCORSMode() : CORS_NONE;
+  CORSMode corsMode =
+      mMediaParent ? AttrValueToCORSMode(
+                         mMediaParent->GetParsedAttr(nsGkAtoms::crossorigin))
+                   : CORS_NONE;
 
   // Determine the security flag based on corsMode.
   nsSecurityFlags secFlags;

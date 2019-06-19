@@ -32,6 +32,12 @@ from wptserve.utils import get_port, HTTPException, http2_compatible
 from mod_pywebsocket import standalone as pywebsocket
 
 
+EDIT_HOSTS_HELP = ("Please ensure all the necessary WPT subdomains "
+                   "are mapped to a loopback device in /etc/hosts. "
+                   "See https://github.com/web-platform-tests/wpt#running-the-tests "
+                   "for instructions.")
+
+
 def replace_end(s, old, new):
     """
     Given a string `s` that ends with `old`, replace that occurrence of `old`
@@ -310,8 +316,7 @@ class RoutesBuilder(object):
 
         self.forbidden = [("*", "/_certs/*", handlers.ErrorHandler(404)),
                           ("*", "/tools/*", handlers.ErrorHandler(404)),
-                          ("*", "{spec}/tools/*", handlers.ErrorHandler(404)),
-                          ("*", "/serve.py", handlers.ErrorHandler(404))]
+                          ("*", "{spec}/tools/*", handlers.ErrorHandler(404))]
 
         self.extra = []
 
@@ -445,18 +450,19 @@ def check_subdomains(config):
     wrapper.start(start_http_server, host, port, paths, build_routes(aliases),
                   bind_address, config)
 
+    url = "http://{}:{}/".format(host, port)
     connected = False
     for i in range(10):
         try:
-            urllib.request.urlopen("http://%s:%d/" % (host, port))
+            urllib.request.urlopen(url)
             connected = True
             break
         except urllib.error.URLError:
             time.sleep(1)
 
     if not connected:
-        logger.critical("Failed to connect to test server on http://%s:%s. "
-                        "You may need to edit /etc/hosts or similar, see README.md." % (host, port))
+        logger.critical("Failed to connect to test server "
+                        "on {}. {}".format(url, EDIT_HOSTS_HELP))
         sys.exit(1)
 
     for domain in config.domains_set:
@@ -466,8 +472,7 @@ def check_subdomains(config):
         try:
             urllib.request.urlopen("http://%s:%d/" % (domain, port))
         except Exception:
-            logger.critical("Failed probing domain %s. "
-                            "You may need to edit /etc/hosts or similar, see README.md." % domain)
+            logger.critical("Failed probing domain {}. {}".format(domain, EDIT_HOSTS_HELP))
             sys.exit(1)
 
     wrapper.wait()
@@ -724,7 +729,7 @@ def build_config(override_path=None, **kwargs):
     return rv
 
 def _make_subdomains_product(s, depth=2):
-    return set(u".".join(x) for x in chain(*(product(s, repeat=i) for i in range(1, depth+1))))
+    return {u".".join(x) for x in chain(*(product(s, repeat=i) for i in range(1, depth+1)))}
 
 _subdomains = {u"www",
                u"www1",

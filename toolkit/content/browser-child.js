@@ -15,6 +15,10 @@ docShell.QueryInterface(Ci.nsIInterfaceRequestor)
   .getInterface(Ci.nsIBrowserChild)
   .beginSendingWebProgressEventsToParent();
 
+// This message is used to measure content process startup performance in Talos
+// tests.
+sendAsyncMessage("Content:BrowserChildReady", { time: Services.telemetry.msSystemNow() });
+
 addEventListener("DOMTitleChanged", function(aEvent) {
   if (!aEvent.isTrusted || aEvent.target.defaultView != content)
     return;
@@ -40,10 +44,12 @@ addMessageListener("BrowserElement:CreateAboutBlank", message => {
   if (!content.document || content.document.documentURI != "about:blank") {
     throw new Error("Can't create a content viewer unless on about:blank");
   }
-  let principal = message.data;
+  let {principal, storagePrincipal} = message.data;
   principal = BrowserUtils.principalWithMatchingOA(principal,
     content.document.nodePrincipal);
-  docShell.createAboutBlankContentViewer(principal);
+  storagePrincipal = BrowserUtils.principalWithMatchingOA(storagePrincipal,
+    content.document.effectiveStoragePrincipal);
+  docShell.createAboutBlankContentViewer(principal, storagePrincipal);
 });
 
 // We may not get any responses to Browser:Init if the browser element

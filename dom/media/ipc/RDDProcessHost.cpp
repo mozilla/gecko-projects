@@ -147,7 +147,6 @@ void RDDProcessHost::InitAfterConnect(bool aSucceeded) {
   MOZ_ASSERT(!mRDDChild);
 
   mLaunchPhase = LaunchPhase::Complete;
-  mPrefSerializer = nullptr;
 
   if (aSucceeded) {
     mProcessToken = ++sRDDProcessTokenCounter;
@@ -155,6 +154,12 @@ void RDDProcessHost::InitAfterConnect(bool aSucceeded) {
     DebugOnly<bool> rv =
         mRDDChild->Open(GetChannel(), base::GetProcId(GetChildProcessHandle()));
     MOZ_ASSERT(rv);
+
+    // Only clear mPrefSerializer in the success case to avoid a
+    // possible race in the case case of a timeout on Windows launch.
+    // See Bug 1555076 comment 7:
+    // https://bugzilla.mozilla.org/show_bug.cgi?id=1555076#c7
+    mPrefSerializer = nullptr;
 
     bool startMacSandbox = false;
 
@@ -256,15 +261,16 @@ void RDDProcessHost::DestroyProcess() {
 
 #if defined(XP_MACOSX) && defined(MOZ_SANDBOX)
 /* static */
-void RDDProcessHost::StaticFillMacSandboxInfo(MacSandboxInfo& aInfo) {
+bool RDDProcessHost::StaticFillMacSandboxInfo(MacSandboxInfo& aInfo) {
   GeckoChildProcessHost::StaticFillMacSandboxInfo(aInfo);
   if (!aInfo.shouldLog && PR_GetEnv("MOZ_SANDBOX_RDD_LOGGING")) {
     aInfo.shouldLog = true;
   }
+  return true;
 }
 
-void RDDProcessHost::FillMacSandboxInfo(MacSandboxInfo& aInfo) {
-  RDDProcessHost::StaticFillMacSandboxInfo(aInfo);
+bool RDDProcessHost::FillMacSandboxInfo(MacSandboxInfo& aInfo) {
+  return RDDProcessHost::StaticFillMacSandboxInfo(aInfo);
 }
 
 /* static */

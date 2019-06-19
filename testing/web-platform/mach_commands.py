@@ -211,6 +211,12 @@ class WebPlatformTestsUpdater(MozbuildObject):
 #            pdb.post_mortem()
 
 
+class WebPlatformTestsUnittestRunner(MozbuildObject):
+    def run(self, **kwargs):
+        import unittestrunner
+        return unittestrunner.run(self.topsrcdir, **kwargs)
+
+
 def create_parser_update():
     from update import updatecommandline
     return updatecommandline.create_parser()
@@ -254,6 +260,11 @@ def create_parser_serve():
     return serve.serve.get_parser()
 
 
+def create_parser_unittest():
+    import unittestrunner
+    return unittestrunner.get_parser()
+
+
 @CommandProvider
 class MachCommands(MachCommandBase):
     def setup(self):
@@ -277,6 +288,7 @@ class MachCommands(MachCommandBase):
             del params["test_objects"]
 
         wpt_setup = self._spawn(WebPlatformTestsRunnerSetup)
+        wpt_setup._mach_context = self._mach_context
         wpt_runner = WebPlatformTestsRunner(wpt_setup)
 
         if params["log_mach_screenshot"] is None:
@@ -348,3 +360,13 @@ class MachCommands(MachCommandBase):
         import metasummary
         wpt_setup = self._spawn(WebPlatformTestsRunnerSetup)
         return metasummary.run(wpt_setup.topsrcdir, wpt_setup.topobjdir, **params)
+
+    @Command("wpt-unittest",
+             category="testing",
+             description="Run the wpt tools and wptrunner unit tests",
+             parser=create_parser_unittest)
+    def wpt_unittest(self, **params):
+        self.setup()
+        self.virtualenv_manager.install_pip_package('tox')
+        runner = self._spawn(WebPlatformTestsUnittestRunner)
+        return 0 if runner.run(**params) else 1

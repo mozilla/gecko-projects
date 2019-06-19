@@ -325,8 +325,7 @@ var gIdentityHandler = {
   },
 
   enableMixedContentProtection() {
-    gBrowser.selectedBrowser.messageManager.sendAsyncMessage(
-      "MixedContent:ReenableProtection", {});
+    gBrowser.selectedBrowser.sendMessageToActor("MixedContent:ReenableProtection", {}, "BrowserTab");
     BrowserReload();
     PanelMultiView.hidePopup(this._identityPopup);
   },
@@ -643,7 +642,8 @@ var gIdentityHandler = {
     // show permission icons
     let permissions = SitePermissions.getAllForBrowser(gBrowser.selectedBrowser);
     for (let permission of permissions) {
-      if (permission.state == SitePermissions.BLOCK) {
+      if (permission.state == SitePermissions.BLOCK ||
+          permission.state == SitePermissions.AUTOPLAY_BLOCKED_ALL) {
         let icon = permissionAnchors[permission.id];
         if (icon) {
           icon.setAttribute("showing", "true");
@@ -868,10 +868,8 @@ var gIdentityHandler = {
    * Click handler for the identity-box element in primary chrome.
    */
   handleIdentityButtonEvent(event) {
-    // For Nightly users, show the WIP protections panel if the tracking
-    // protection icon was clicked.
-    if (this._protectionsPanelEnabled &&
-        event.originalTarget.id == "tracking-protection-icon-animatable-image") {
+    // For Nightly users, show the WIP protections panel if the meta key was held.
+    if (this._protectionsPanelEnabled && event.metaKey) {
       gProtectionsHandler.handleProtectionsButtonEvent(event);
       return;
     }
@@ -1083,12 +1081,7 @@ var gIdentityHandler = {
     container.setAttribute("role", "group");
 
     let img = document.createXULElement("image");
-    img.classList.add("identity-popup-permission-icon");
-    if (aPermission.id == "plugin:flash") {
-      img.classList.add("plugin-icon");
-    } else {
-      img.classList.add(aPermission.id + "-icon");
-    }
+    img.classList.add("identity-popup-permission-icon", aPermission.id + "-icon");
     if (aPermission.state == SitePermissions.BLOCK)
       img.classList.add("blocked-permission-icon");
 
@@ -1143,7 +1136,8 @@ var gIdentityHandler = {
         } else {
           menuitem.setAttribute("value", state);
         }
-        menuitem.setAttribute("label", SitePermissions.getMultichoiceStateLabel(state));
+
+        menuitem.setAttribute("label", SitePermissions.getMultichoiceStateLabel(aPermission.id, state));
         menupopup.appendChild(menuitem);
       }
 

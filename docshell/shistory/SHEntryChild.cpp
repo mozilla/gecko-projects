@@ -535,19 +535,21 @@ SHEntryChild::Create(
     nsIURI* aURI, const nsAString& aTitle, nsIInputStream* aInputStream,
     uint32_t aCacheKey, const nsACString& aContentType,
     nsIPrincipal* aTriggeringPrincipal, nsIPrincipal* aPrincipalToInherit,
-    nsIContentSecurityPolicy* aCsp, const nsID& aDocShellID,
-    bool aDynamicCreation, nsIURI* aOriginalURI, nsIURI* aResultPrincipalURI,
-    bool aLoadReplace, nsIReferrerInfo* aReferrerInfo, const nsAString& srcdoc,
-    bool srcdocEntry, nsIURI* aBaseURI, bool aSaveLayoutState, bool aExpired) {
+    nsIPrincipal* aStoragePrincipalToInherit, nsIContentSecurityPolicy* aCsp,
+    const nsID& aDocShellID, bool aDynamicCreation, nsIURI* aOriginalURI,
+    nsIURI* aResultPrincipalURI, bool aLoadReplace,
+    nsIReferrerInfo* aReferrerInfo, const nsAString& srcdoc, bool srcdocEntry,
+    nsIURI* aBaseURI, bool aSaveLayoutState, bool aExpired) {
   mShared->mLayoutHistoryState = nullptr;
 
   mShared->mSaveLayoutState = aSaveLayoutState;
   return SendCreate(aURI, nsString(aTitle), aInputStream, aCacheKey,
                     nsCString(aContentType), aTriggeringPrincipal,
-                    aPrincipalToInherit, aCsp, aDocShellID, aDynamicCreation,
-                    aOriginalURI, aResultPrincipalURI, aLoadReplace,
-                    aReferrerInfo, nsString(srcdoc), srcdocEntry, aBaseURI,
-                    aSaveLayoutState, aExpired)
+                    aPrincipalToInherit, aStoragePrincipalToInherit, aCsp,
+                    aDocShellID, aDynamicCreation, aOriginalURI,
+                    aResultPrincipalURI, aLoadReplace, aReferrerInfo,
+                    nsString(srcdoc), srcdocEntry, aBaseURI, aSaveLayoutState,
+                    aExpired)
              ? NS_OK
              : NS_ERROR_FAILURE;
 }
@@ -629,6 +631,24 @@ NS_IMETHODIMP
 SHEntryChild::SetPrincipalToInherit(nsIPrincipal* aPrincipalToInherit) {
   return SendSetPrincipalToInherit(aPrincipalToInherit) ? NS_OK
                                                         : NS_ERROR_FAILURE;
+}
+
+NS_IMETHODIMP
+SHEntryChild::GetStoragePrincipalToInherit(
+    nsIPrincipal** aStoragePrincipalToInherit) {
+  RefPtr<nsIPrincipal> storagePrincipalToInherit;
+  if (!SendGetStoragePrincipalToInherit(&storagePrincipalToInherit)) {
+    return NS_ERROR_FAILURE;
+  }
+  storagePrincipalToInherit.forget(aStoragePrincipalToInherit);
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+SHEntryChild::SetStoragePrincipalToInherit(
+    nsIPrincipal* aStoragePrincipalToInherit) {
+  return SendSetStoragePrincipalToInherit(aStoragePrincipalToInherit) ? NS_OK
+                                                               : NS_ERROR_FAILURE;
 }
 
 NS_IMETHODIMP

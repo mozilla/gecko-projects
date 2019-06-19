@@ -611,7 +611,7 @@ PromptDelegate.prototype = {
     return true;
   },
 
-  select: function(aTitle, aText, aCount, aSelectList, aOutSelection) {
+  select: function(aTitle, aText, aSelectList, aOutSelection) {
     let choices = Array.prototype.map.call(aSelectList, (item, index) => ({
       id: String(index),
       label: item,
@@ -741,15 +741,15 @@ PromptDelegate.prototype = {
         "chrome://global/locale/commonDialogs.properties");
     let text;
     if (isProxy) {
-      text = bundle.formatStringFromName("EnterLoginForProxy3", [realm, displayHost], 2);
+      text = bundle.formatStringFromName("EnterLoginForProxy3", [realm, displayHost]);
     } else if (isPassOnly) {
-      text = bundle.formatStringFromName("EnterPasswordFor", [username, displayHost], 2);
+      text = bundle.formatStringFromName("EnterPasswordFor", [username, displayHost]);
     } else if (isCrossOrig) {
-      text = bundle.formatStringFromName("EnterUserPasswordForCrossOrigin2", [displayHost], 1);
+      text = bundle.formatStringFromName("EnterUserPasswordForCrossOrigin2", [displayHost]);
     } else if (!realm) {
-      text = bundle.formatStringFromName("EnterUserPasswordFor2", [displayHost], 1);
+      text = bundle.formatStringFromName("EnterUserPasswordFor2", [displayHost]);
     } else {
-      text = bundle.formatStringFromName("EnterLoginForRealm3", [realm, displayHost], 2);
+      text = bundle.formatStringFromName("EnterLoginForRealm3", [realm, displayHost]);
     }
 
     return text;

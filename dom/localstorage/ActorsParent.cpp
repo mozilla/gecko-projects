@@ -1433,6 +1433,12 @@ class Connection final {
 
   void AssertIsOnOwningThread() const { NS_ASSERT_OWNINGTHREAD(Connection); }
 
+  QuotaClient* GetQuotaClient() const {
+    MOZ_ASSERT(mQuotaClient);
+
+    return mQuotaClient;
+  }
+
   ArchivedOriginScope* GetArchivedOriginScope() const {
     return mArchivedOriginScope;
   }
@@ -1478,6 +1484,12 @@ class Connection final {
 
   nsresult GetCachedStatement(const nsACString& aQuery,
                               CachedStatement* aCachedStatement);
+
+  nsresult BeginWriteTransaction();
+
+  nsresult CommitWriteTransaction();
+
+  nsresult RollbackWriteTransaction();
 
  private:
   // Only created by ConnectionThread.
@@ -2193,13 +2205,13 @@ class LSRequestBase : public DatastoreOperationBase,
                       public PBackgroundLSRequestParent {
  protected:
   enum class State {
-    // Just created on the PBackground thread. Next step is Opening.
+    // Just created on the PBackground thread. Next step is StartingRequest.
     Initial,
 
-    // Waiting to open/opening on the main thread. Next step is either
-    // Nesting if a subclass needs to process more nested states or
+    // Waiting to start/starting request on the PBackground thread. Next step is
+    // either Nesting if a subclass needs to process more nested states or
     // SendingReadyMessage if a subclass doesn't need any nested processing.
-    Opening,
+    StartingRequest,
 
     // Doing nested processing.
     Nesting,
@@ -2221,18 +2233,24 @@ class LSRequestBase : public DatastoreOperationBase,
   };
 
   nsCOMPtr<nsIEventTarget> mMainEventTarget;
+  const LSRequestParams mParams;
+  Maybe<ContentParentId> mContentParentId;
   State mState;
   bool mWaitingForFinish;
 
  public:
-  explicit LSRequestBase(nsIEventTarget* aMainEventTarget);
+  LSRequestBase(nsIEventTarget* aMainEventTarget,
+                const LSRequestParams& aParams,
+                const Maybe<ContentParentId>& aContentParentId);
+
+  void StringifyState(nsCString& aResult) const;
 
   void Dispatch();
 
  protected:
   ~LSRequestBase() override;
 
-  virtual nsresult Open() = 0;
+  virtual nsresult Start() = 0;
 
   virtual nsresult NestedRun();
 
@@ -2245,6 +2263,10 @@ class LSRequestBase : public DatastoreOperationBase,
   virtual void LogNestedState() {}
 
  private:
+  bool VerifyRequestParams();
+
+  nsresult StartRequest();
+
   void SendReadyMessage();
 
   nsresult SendReadyMessageInternal();
@@ -2336,8 +2358,6 @@ class PrepareDatastoreOp
   LoadDataOp* mLoadDataOp;
   nsDataHashtable<nsStringHashKey, LSValue> mValues;
   nsTArray<LSItemInfo> mOrderedItems;
-  const LSRequestCommonParams mParams;
-  Maybe<ContentParentId> mContentParentId;
   nsCString mSuffix;
   nsCString mGroup;
   nsCString mMainThreadOrigin;
@@ -2376,6 +2396,8 @@ class PrepareDatastoreOp
     return mOrigin;
   }
 
+  void StringifyNestedState(nsCString& aResult) const;
+
   bool RequestedDirectoryLock() const {
     AssertIsOnOwningThread();
 
@@ -2391,7 +2413,7 @@ class PrepareDatastoreOp
  private:
   ~PrepareDatastoreOp() override;
 
-  nsresult Open() override;
+  nsresult Start() override;
 
   nsresult CheckExistingOperations();
 
@@ -2489,15 +2511,15 @@ class PrepareDatastoreOp::CompressibleFunction final
 };
 
 class PrepareObserverOp : public LSRequestBase {
-  const LSRequestPrepareObserverParams mParams;
   nsCString mOrigin;
 
  public:
   PrepareObserverOp(nsIEventTarget* aMainEventTarget,
-                    const LSRequestParams& aParams);
+                    const LSRequestParams& aParams,
+                    const Maybe<ContentParentId>& aContentParentId);
 
  private:
-  nsresult Open() override;
+  nsresult Start() override;
 
   void GetResponse(LSRequestResponse& aResponse) override;
 };
@@ -2506,11 +2528,12 @@ class LSSimpleRequestBase : public DatastoreOperationBase,
                             public PBackgroundLSSimpleRequestParent {
  protected:
   enum class State {
-    // Just created on the PBackground thread. Next step is Opening.
+    // Just created on the PBackground thread. Next step is StartingRequest.
     Initial,
 
-    // Waiting to open/opening on the main thread. Next step is SendingResults.
-    Opening,
+    // Waiting to start/starting request on the PBackground thread. Next step is
+    // SendingResults.
+    StartingRequest,
 
     // Waiting to send/sending results on the PBackground thread. Next step is
     // Completed.
@@ -2520,21 +2543,28 @@ class LSSimpleRequestBase : public DatastoreOperationBase,
     Completed
   };
 
+  const LSSimpleRequestParams mParams;
+  Maybe<ContentParentId> mContentParentId;
   State mState;
 
  public:
-  LSSimpleRequestBase();
+  LSSimpleRequestBase(const LSSimpleRequestParams& aParams,
+                      const Maybe<ContentParentId>& aContentParentId);
 
   void Dispatch();
 
  protected:
   ~LSSimpleRequestBase() override;
 
-  virtual nsresult Open() = 0;
+  virtual nsresult Start() = 0;
 
   virtual void GetResponse(LSSimpleRequestResponse& aResponse) = 0;
 
  private:
+  bool VerifyRequestParams();
+
+  nsresult StartRequest();
+
   void SendResults();
 
   // Common nsIRunnable implementation that subclasses may not override.
@@ -2546,14 +2576,14 @@ class LSSimpleRequestBase : public DatastoreOperationBase,
 };
 
 class PreloadedOp : public LSSimpleRequestBase {
-  const LSSimpleRequestPreloadedParams mParams;
   nsCString mOrigin;
 
  public:
-  explicit PreloadedOp(const LSSimpleRequestParams& aParams);
+  PreloadedOp(const LSSimpleRequestParams& aParams,
+              const Maybe<ContentParentId>& aContentParentId);
 
  private:
-  nsresult Open() override;
+  nsresult Start() override;
 
   void GetResponse(LSSimpleRequestResponse& aResponse) override;
 };
@@ -2806,6 +2836,30 @@ class QuotaClient::MatchFunction final : public mozIStorageFunction {
 };
 
 /*******************************************************************************
+ * Helper classes
+ ******************************************************************************/
+
+class MOZ_STACK_CLASS AutoWriteTransaction final {
+  Connection* mConnection;
+  Maybe<MutexAutoLock> mShadowDatabaseLock;
+  bool mShadowWrites;
+
+ public:
+  explicit AutoWriteTransaction(bool aShadowWrites);
+
+  ~AutoWriteTransaction();
+
+  nsresult Start(Connection* aConnection);
+
+  nsresult Commit();
+
+ private:
+  nsresult LockAndAttachShadowDatabase(Connection* aConnection);
+
+  nsresult DetachShadowDatabaseAndUnlock();
+};
+
+/*******************************************************************************
  * Globals
  ******************************************************************************/
 
@@ -2911,7 +2965,7 @@ void InitUsageForOrigin(const nsACString& aOrigin, int64_t aUsage) {
     gUsages = new UsageHashtable();
   }
 
-  MOZ_DIAGNOSTIC_ASSERT(!gUsages->Contains(aOrigin));
+  MOZ_ASSERT(!gUsages->Contains(aOrigin));
   gUsages->Put(aOrigin, aUsage);
 }
 
@@ -3134,6 +3188,63 @@ void RequestAllowToCloseIf(P aPredicate) {
   databases.Clear();
 }
 
+bool VerifyPrincipalInfo(const PrincipalInfo& aPrincipalInfo,
+                         const PrincipalInfo& aStoragePrincipalInfo) {
+  AssertIsOnBackgroundThread();
+
+  if (NS_WARN_IF(!QuotaManager::IsPrincipalInfoValid(aPrincipalInfo))) {
+    return false;
+  }
+
+  if (NS_WARN_IF(!StoragePrincipalHelper::
+                     VerifyValidStoragePrincipalInfoForPrincipalInfo(
+                         aStoragePrincipalInfo, aPrincipalInfo))) {
+    return false;
+  }
+
+  return true;
+}
+
+bool VerifyClientId(const Maybe<ContentParentId>& aContentParentId,
+                    const PrincipalInfo& aPrincipalInfo,
+                    const Maybe<nsID>& aClientId) {
+  AssertIsOnBackgroundThread();
+
+  if (gClientValidation) {
+    if (NS_WARN_IF(aClientId.isNothing())) {
+      return false;
+    }
+
+    RefPtr<ClientManagerService> svc = ClientManagerService::GetInstance();
+    if (svc && NS_WARN_IF(!svc->HasWindow(aContentParentId, aPrincipalInfo,
+                                          aClientId.ref()))) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+bool VerifyOriginKey(const nsACString& aOriginKey,
+                     const PrincipalInfo& aPrincipalInfo) {
+  AssertIsOnBackgroundThread();
+
+  nsCString originAttrSuffix;
+  nsCString originKey;
+  nsresult rv = GenerateOriginKey2(aPrincipalInfo, originAttrSuffix, originKey);
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return false;
+  }
+
+  if (NS_WARN_IF(originKey != aOriginKey)) {
+    LS_WARNING("originKey (%s) doesn't match passed one (%s)!", originKey.get(),
+               nsCString(aOriginKey).get());
+    return false;
+  }
+
+  return true;
+}
+
 }  // namespace
 
 /*******************************************************************************
@@ -3330,119 +3441,6 @@ bool DeallocPBackgroundLSObserverParent(PBackgroundLSObserverParent* aActor) {
   return true;
 }
 
-bool VerifyPrincipalInfo(const Maybe<ContentParentId>& aContentParentId,
-                         const PrincipalInfo& aPrincipalInfo,
-                         const PrincipalInfo& aStoragePrincipalInfo,
-                         const Maybe<nsID>& aClientId) {
-  AssertIsOnBackgroundThread();
-
-  if (NS_WARN_IF(!QuotaManager::IsPrincipalInfoValid(aPrincipalInfo))) {
-    ASSERT_UNLESS_FUZZING();
-    return false;
-  }
-
-  if (aClientId.isSome() && gClientValidation) {
-    RefPtr<ClientManagerService> svc = ClientManagerService::GetInstance();
-    if (svc &&
-        !svc->HasWindow(aContentParentId, aPrincipalInfo, aClientId.ref())) {
-      ASSERT_UNLESS_FUZZING();
-      return false;
-    }
-  }
-
-  return StoragePrincipalHelper::
-      VerifyValidStoragePrincipalInfoForPrincipalInfo(aStoragePrincipalInfo,
-                                                      aPrincipalInfo);
-}
-
-bool VerifyOriginKey(const nsACString& aOriginKey,
-                     const PrincipalInfo& aPrincipalInfo) {
-  AssertIsOnBackgroundThread();
-
-  nsCString originAttrSuffix;
-  nsCString originKey;
-  nsresult rv = GenerateOriginKey2(aPrincipalInfo, originAttrSuffix, originKey);
-  if (NS_WARN_IF(NS_FAILED(rv))) {
-    ASSERT_UNLESS_FUZZING();
-    return false;
-  }
-
-  if (NS_WARN_IF(originKey != aOriginKey)) {
-    LS_WARNING("originKey (%s) doesn't match passed one (%s)!", originKey.get(),
-               nsCString(aOriginKey).get());
-    ASSERT_UNLESS_FUZZING();
-    return false;
-  }
-
-  return true;
-}
-
-bool VerifyRequestParams(const Maybe<ContentParentId>& aContentParentId,
-                         const LSRequestParams& aParams) {
-  AssertIsOnBackgroundThread();
-  MOZ_ASSERT(aParams.type() != LSRequestParams::T__None);
-
-  switch (aParams.type()) {
-    case LSRequestParams::TLSRequestPreloadDatastoreParams: {
-      const LSRequestCommonParams& params =
-          aParams.get_LSRequestPreloadDatastoreParams().commonParams();
-
-      if (NS_WARN_IF(
-              !VerifyPrincipalInfo(aContentParentId, params.principalInfo(),
-                                   params.storagePrincipalInfo(), Nothing()))) {
-        ASSERT_UNLESS_FUZZING();
-        return false;
-      }
-
-      if (NS_WARN_IF(
-              !VerifyOriginKey(params.originKey(), params.principalInfo()))) {
-        ASSERT_UNLESS_FUZZING();
-        return false;
-      }
-      break;
-    }
-
-    case LSRequestParams::TLSRequestPrepareDatastoreParams: {
-      const LSRequestPrepareDatastoreParams& params =
-          aParams.get_LSRequestPrepareDatastoreParams();
-
-      const LSRequestCommonParams& commonParams = params.commonParams();
-
-      if (NS_WARN_IF(!VerifyPrincipalInfo(
-              aContentParentId, commonParams.principalInfo(),
-              commonParams.storagePrincipalInfo(), params.clientId()))) {
-        ASSERT_UNLESS_FUZZING();
-        return false;
-      }
-
-      if (NS_WARN_IF(!VerifyOriginKey(commonParams.originKey(),
-                                      commonParams.principalInfo()))) {
-        ASSERT_UNLESS_FUZZING();
-        return false;
-      }
-      break;
-    }
-
-    case LSRequestParams::TLSRequestPrepareObserverParams: {
-      const LSRequestPrepareObserverParams& params =
-          aParams.get_LSRequestPrepareObserverParams();
-
-      if (NS_WARN_IF(!VerifyPrincipalInfo(
-              aContentParentId, params.principalInfo(),
-              params.storagePrincipalInfo(), params.clientId()))) {
-        ASSERT_UNLESS_FUZZING();
-        return false;
-      }
-      break;
-    }
-
-    default:
-      MOZ_CRASH("Should never get here!");
-  }
-
-  return true;
-}
-
 PBackgroundLSRequestParent* AllocPBackgroundLSRequestParent(
     PBackgroundParent* aBackgroundActor, const LSRequestParams& aParams) {
   AssertIsOnBackgroundThread();
@@ -3452,24 +3450,11 @@ PBackgroundLSRequestParent* AllocPBackgroundLSRequestParent(
     return nullptr;
   }
 
-#ifdef DEBUG
-  // Always verify parameters in DEBUG builds!
-  bool trustParams = false;
-#else
-  bool trustParams = !BackgroundParent::IsOtherProcessActor(aBackgroundActor);
-#endif
-
   Maybe<ContentParentId> contentParentId;
 
   uint64_t childID = BackgroundParent::GetChildID(aBackgroundActor);
   if (childID) {
     contentParentId = Some(ContentParentId(childID));
-  }
-
-  if (!trustParams &&
-      NS_WARN_IF(!VerifyRequestParams(contentParentId, aParams))) {
-    ASSERT_UNLESS_FUZZING();
-    return nullptr;
   }
 
   // If we're in the same process as the actor, we need to get the target event
@@ -3499,7 +3484,7 @@ PBackgroundLSRequestParent* AllocPBackgroundLSRequestParent(
 
     case LSRequestParams::TLSRequestPrepareObserverParams: {
       RefPtr<PrepareObserverOp> prepareObserverOp =
-          new PrepareObserverOp(mainEventTarget, aParams);
+          new PrepareObserverOp(mainEventTarget, aParams, contentParentId);
 
       actor = std::move(prepareObserverOp);
 
@@ -3540,32 +3525,6 @@ bool DeallocPBackgroundLSRequestParent(PBackgroundLSRequestParent* aActor) {
   return true;
 }
 
-bool VerifyRequestParams(const Maybe<ContentParentId>& aContentParentId,
-                         const LSSimpleRequestParams& aParams) {
-  AssertIsOnBackgroundThread();
-  MOZ_ASSERT(aParams.type() != LSSimpleRequestParams::T__None);
-
-  switch (aParams.type()) {
-    case LSSimpleRequestParams::TLSSimpleRequestPreloadedParams: {
-      const LSSimpleRequestPreloadedParams& params =
-          aParams.get_LSSimpleRequestPreloadedParams();
-
-      if (NS_WARN_IF(
-              !VerifyPrincipalInfo(aContentParentId, params.principalInfo(),
-                                   params.storagePrincipalInfo(), Nothing()))) {
-        ASSERT_UNLESS_FUZZING();
-        return false;
-      }
-      break;
-    }
-
-    default:
-      MOZ_CRASH("Should never get here!");
-  }
-
-  return true;
-}
-
 PBackgroundLSSimpleRequestParent* AllocPBackgroundLSSimpleRequestParent(
     PBackgroundParent* aBackgroundActor, const LSSimpleRequestParams& aParams) {
   AssertIsOnBackgroundThread();
@@ -3575,32 +3534,19 @@ PBackgroundLSSimpleRequestParent* AllocPBackgroundLSSimpleRequestParent(
     return nullptr;
   }
 
-#ifdef DEBUG
-  // Always verify parameters in DEBUG builds!
-  bool trustParams = false;
-#else
-  bool trustParams = !BackgroundParent::IsOtherProcessActor(aBackgroundActor);
-#endif
+  Maybe<ContentParentId> contentParentId;
 
-  if (!trustParams) {
-    Maybe<ContentParentId> contentParentId;
-
-    uint64_t childID = BackgroundParent::GetChildID(aBackgroundActor);
-    if (childID) {
-      contentParentId = Some(ContentParentId(childID));
-    }
-
-    if (NS_WARN_IF(!VerifyRequestParams(contentParentId, aParams))) {
-      ASSERT_UNLESS_FUZZING();
-      return nullptr;
-    }
+  uint64_t childID = BackgroundParent::GetChildID(aBackgroundActor);
+  if (childID) {
+    contentParentId = Some(ContentParentId(childID));
   }
 
   RefPtr<LSSimpleRequestBase> actor;
 
   switch (aParams.type()) {
     case LSSimpleRequestParams::TLSSimpleRequestPreloadedParams: {
-      RefPtr<PreloadedOp> preloadedOp = new PreloadedOp(aParams);
+      RefPtr<PreloadedOp> preloadedOp =
+          new PreloadedOp(aParams, contentParentId);
 
       actor = std::move(preloadedOp);
 
@@ -4436,6 +4382,60 @@ nsresult Connection::GetCachedStatement(const nsACString& aQuery,
   return NS_OK;
 }
 
+nsresult Connection::BeginWriteTransaction() {
+  AssertIsOnConnectionThread();
+  MOZ_ASSERT(mStorageConnection);
+
+  CachedStatement stmt;
+  nsresult rv = GetCachedStatement(NS_LITERAL_CSTRING("BEGIN IMMEDIATE;"),
+                                       &stmt);
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return rv;
+  }
+
+  rv = stmt->Execute();
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return rv;
+  }
+
+  return NS_OK;
+}
+
+nsresult Connection::CommitWriteTransaction() {
+  AssertIsOnConnectionThread();
+  MOZ_ASSERT(mStorageConnection);
+
+  CachedStatement stmt;
+  nsresult rv = GetCachedStatement(NS_LITERAL_CSTRING("COMMIT;"), &stmt);
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return rv;
+  }
+
+  rv = stmt->Execute();
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return rv;
+  }
+
+  return NS_OK;
+}
+
+nsresult Connection::RollbackWriteTransaction() {
+  AssertIsOnConnectionThread();
+  MOZ_ASSERT(mStorageConnection);
+
+  CachedStatement stmt;
+  nsresult rv = GetCachedStatement(NS_LITERAL_CSTRING("ROLLBACK;"), &stmt);
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return rv;
+  }
+
+  // This may fail if SQLite already rolled back the transaction so ignore any
+  // errors.
+  Unused << stmt->Execute();
+
+  return NS_OK;
+}
+
 void Connection::ScheduleFlush() {
   AssertIsOnOwningThread();
   MOZ_ASSERT(mWriteOptimizer.HasWrites());
@@ -4591,37 +4591,9 @@ nsresult Connection::FlushOp::DoDatastoreWork() {
   AssertIsOnConnectionThread();
   MOZ_ASSERT(mConnection);
 
-  QuotaManager* quotaManager = QuotaManager::Get();
-  MOZ_ASSERT(quotaManager);
+  AutoWriteTransaction autoWriteTransaction(mShadowWrites);
 
-  nsCOMPtr<mozIStorageConnection> storageConnection =
-      mConnection->StorageConnection();
-  MOZ_ASSERT(storageConnection);
-
-  nsresult rv;
-
-  Maybe<MutexAutoLock> shadowDatabaseLock;
-
-  if (mShadowWrites) {
-    MOZ_ASSERT(mConnection->mQuotaClient);
-
-    shadowDatabaseLock.emplace(
-        mConnection->mQuotaClient->ShadowDatabaseMutex());
-
-    rv = AttachShadowDatabase(quotaManager->GetBasePath(), storageConnection);
-    if (NS_WARN_IF(NS_FAILED(rv))) {
-      return rv;
-    }
-  }
-
-  CachedStatement stmt;
-  rv = mConnection->GetCachedStatement(NS_LITERAL_CSTRING("BEGIN IMMEDIATE;"),
-                                       &stmt);
-  if (NS_WARN_IF(NS_FAILED(rv))) {
-    return rv;
-  }
-
-  rv = stmt->Execute();
+  nsresult rv = autoWriteTransaction.Start(mConnection);
   if (NS_WARN_IF(NS_FAILED(rv))) {
     return rv;
   }
@@ -4650,29 +4622,18 @@ nsresult Connection::FlushOp::DoDatastoreWork() {
     return rv;
   }
 
-  rv = mConnection->GetCachedStatement(NS_LITERAL_CSTRING("COMMIT;"), &stmt);
+  rv = autoWriteTransaction.Commit();
   if (NS_WARN_IF(NS_FAILED(rv))) {
     return rv;
-  }
-
-  rv = stmt->Execute();
-  if (NS_WARN_IF(NS_FAILED(rv))) {
-    return rv;
-  }
-
-  if (mShadowWrites) {
-    rv = DetachShadowDatabase(storageConnection);
-    if (NS_WARN_IF(NS_FAILED(rv))) {
-      return rv;
-    }
-
-    shadowDatabaseLock.reset();
   }
 
   rv = usageJournalFile->Remove(false);
   if (NS_WARN_IF(NS_FAILED(rv))) {
     return rv;
   }
+
+  QuotaManager* quotaManager = QuotaManager::Get();
+  MOZ_ASSERT(quotaManager);
 
   RefPtr<Runnable> runnable =
       NS_NewRunnableFunction("dom::localstorage::UpdateUsageRunnable",
@@ -6346,8 +6307,12 @@ mozilla::ipc::IPCResult Observer::RecvDeleteMe() {
  * LSRequestBase
  ******************************************************************************/
 
-LSRequestBase::LSRequestBase(nsIEventTarget* aMainEventTarget)
+LSRequestBase::LSRequestBase(nsIEventTarget* aMainEventTarget,
+                             const LSRequestParams& aParams,
+                             const Maybe<ContentParentId>& aContentParentId)
     : mMainEventTarget(aMainEventTarget),
+      mParams(aParams),
+      mContentParentId(aContentParentId),
       mState(State::Initial),
       mWaitingForFinish(false) {}
 
@@ -6356,10 +6321,47 @@ LSRequestBase::~LSRequestBase() {
                 mState == State::Initial || mState == State::Completed);
 }
 
+void LSRequestBase::StringifyState(nsCString& aResult) const {
+  AssertIsOnOwningThread();
+
+  switch (mState) {
+    case State::Initial:
+      aResult.AssignLiteral("Initial");
+      return;
+
+    case State::StartingRequest:
+      aResult.AssignLiteral("StartingRequest");
+      return;
+
+    case State::Nesting:
+      aResult.AssignLiteral("Nesting");
+      return;
+
+    case State::SendingReadyMessage:
+      aResult.AssignLiteral("SendingReadyMessage");
+      return;
+
+    case State::WaitingForFinish:
+      aResult.AssignLiteral("WaitingForFinish");
+      return;
+
+    case State::SendingResults:
+      aResult.AssignLiteral("SendingResults");
+      return;
+
+    case State::Completed:
+      aResult.AssignLiteral("Completed");
+      return;
+
+    default:
+      MOZ_CRASH("Bad state!");
+  }
+}
+
 void LSRequestBase::Dispatch() {
   AssertIsOnOwningThread();
 
-  mState = State::Opening;
+  mState = State::StartingRequest;
 
   MOZ_ALWAYS_SUCCEEDS(NS_DispatchToCurrentThread(this));
 }
@@ -6376,39 +6378,7 @@ void LSRequestBase::LogState() {
   LS_LOG(("LSRequestBase [%p]", this));
 
   nsCString state;
-
-  switch (mState) {
-    case State::Initial:
-      state.AssignLiteral("Initial");
-      break;
-
-    case State::Opening:
-      state.AssignLiteral("Opening");
-      break;
-
-    case State::Nesting:
-      state.AssignLiteral("Nesting");
-      break;
-
-    case State::SendingReadyMessage:
-      state.AssignLiteral("SendingReadyMessage");
-      break;
-
-    case State::WaitingForFinish:
-      state.AssignLiteral("WaitingForFinish");
-      break;
-
-    case State::SendingResults:
-      state.AssignLiteral("SendingResults");
-      break;
-
-    case State::Completed:
-      state.AssignLiteral("Completed");
-      break;
-
-    default:
-      MOZ_CRASH("Bad state!");
-  }
+  StringifyState(state);
 
   LS_LOG(("  mState: %s", state.get()));
 
@@ -6419,6 +6389,107 @@ void LSRequestBase::LogState() {
 
     default:;
   }
+}
+
+bool LSRequestBase::VerifyRequestParams() {
+  AssertIsOnBackgroundThread();
+
+  MOZ_ASSERT(mParams.type() != LSRequestParams::T__None);
+
+  switch (mParams.type()) {
+    case LSRequestParams::TLSRequestPreloadDatastoreParams: {
+      const LSRequestCommonParams& params =
+          mParams.get_LSRequestPreloadDatastoreParams().commonParams();
+
+      if (NS_WARN_IF(!VerifyPrincipalInfo(params.principalInfo(),
+                                          params.storagePrincipalInfo()))) {
+        return false;
+      }
+
+      if (NS_WARN_IF(
+              !VerifyOriginKey(params.originKey(), params.principalInfo()))) {
+        return false;
+      }
+
+      break;
+    }
+
+    case LSRequestParams::TLSRequestPrepareDatastoreParams: {
+      const LSRequestPrepareDatastoreParams& params =
+          mParams.get_LSRequestPrepareDatastoreParams();
+
+      const LSRequestCommonParams& commonParams = params.commonParams();
+
+      if (NS_WARN_IF(
+              !VerifyPrincipalInfo(commonParams.principalInfo(),
+                                   commonParams.storagePrincipalInfo()))) {
+        return false;
+      }
+
+      if (NS_WARN_IF(!VerifyClientId(mContentParentId,
+                                     commonParams.principalInfo(),
+                                     params.clientId()))) {
+        return false;
+      }
+
+      if (NS_WARN_IF(!VerifyOriginKey(commonParams.originKey(),
+                                      commonParams.principalInfo()))) {
+        return false;
+      }
+
+      break;
+    }
+
+    case LSRequestParams::TLSRequestPrepareObserverParams: {
+      const LSRequestPrepareObserverParams& params =
+          mParams.get_LSRequestPrepareObserverParams();
+
+      if (NS_WARN_IF(!VerifyPrincipalInfo(params.principalInfo(),
+                                          params.storagePrincipalInfo()))) {
+        return false;
+      }
+
+      if (NS_WARN_IF(!VerifyClientId(mContentParentId, params.principalInfo(),
+                                     params.clientId()))) {
+        return false;
+      }
+
+      break;
+    }
+
+    default:
+      MOZ_CRASH("Should never get here!");
+  }
+
+  return true;
+}
+
+nsresult LSRequestBase::StartRequest() {
+  AssertIsOnOwningThread();
+  MOZ_ASSERT(mState == State::StartingRequest);
+
+  if (NS_WARN_IF(QuotaClient::IsShuttingDownOnBackgroundThread()) ||
+      !MayProceed()) {
+    return NS_ERROR_FAILURE;
+  }
+
+#ifdef DEBUG
+  // Always verify parameters in DEBUG builds!
+  bool trustParams = false;
+#else
+  bool trustParams = !BackgroundParent::IsOtherProcessActor(Manager());
+#endif
+
+  if (!trustParams && NS_WARN_IF(!VerifyRequestParams())) {
+    return NS_ERROR_FAILURE;
+  }
+
+  nsresult rv = Start();
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return rv;
+  }
+
+  return NS_OK;
 }
 
 void LSRequestBase::SendReadyMessage() {
@@ -6511,8 +6582,8 @@ LSRequestBase::Run() {
   nsresult rv;
 
   switch (mState) {
-    case State::Opening:
-      rv = Open();
+    case State::StartingRequest:
+      rv = StartRequest();
       break;
 
     case State::Nesting:
@@ -6605,14 +6676,9 @@ mozilla::ipc::IPCResult LSRequestBase::RecvFinish() {
 PrepareDatastoreOp::PrepareDatastoreOp(
     nsIEventTarget* aMainEventTarget, const LSRequestParams& aParams,
     const Maybe<ContentParentId>& aContentParentId)
-    : LSRequestBase(aMainEventTarget),
+    : LSRequestBase(aMainEventTarget, aParams, aContentParentId),
       mMainEventTarget(aMainEventTarget),
       mLoadDataOp(nullptr),
-      mParams(
-          aParams.type() == LSRequestParams::TLSRequestPreloadDatastoreParams
-              ? aParams.get_LSRequestPreloadDatastoreParams().commonParams()
-              : aParams.get_LSRequestPrepareDatastoreParams().commonParams()),
-      mContentParentId(aContentParentId),
       mPrivateBrowsingId(0),
       mUsage(0),
       mSizeOfKeys(0),
@@ -6641,17 +6707,69 @@ PrepareDatastoreOp::~PrepareDatastoreOp() {
   MOZ_ASSERT(!mLoadDataOp);
 }
 
-nsresult PrepareDatastoreOp::Open() {
+void PrepareDatastoreOp::StringifyNestedState(nsCString& aResult) const {
   AssertIsOnOwningThread();
-  MOZ_ASSERT(mState == State::Opening);
-  MOZ_ASSERT(mNestedState == NestedState::BeforeNesting);
 
-  if (NS_WARN_IF(QuotaClient::IsShuttingDownOnBackgroundThread()) ||
-      !MayProceedOnNonOwningThread()) {
-    return NS_ERROR_FAILURE;
+  switch (mNestedState) {
+    case NestedState::BeforeNesting:
+      aResult.AssignLiteral("BeforeNesting");
+      return;
+
+    case NestedState::CheckExistingOperations:
+      aResult.AssignLiteral("CheckExistingOperations");
+      return;
+
+    case NestedState::CheckClosingDatastore:
+      aResult.AssignLiteral("CheckClosingDatastore");
+      return;
+
+    case NestedState::PreparationPending:
+      aResult.AssignLiteral("PreparationPending");
+      return;
+
+    case NestedState::QuotaManagerPending:
+      aResult.AssignLiteral("QuotaManagerPending");
+      return;
+
+    case NestedState::DirectoryOpenPending:
+      aResult.AssignLiteral("DirectoryOpenPending");
+      return;
+
+    case NestedState::DatabaseWorkOpen:
+      aResult.AssignLiteral("DatabaseWorkOpen");
+      return;
+
+    case NestedState::BeginLoadData:
+      aResult.AssignLiteral("BeginLoadData");
+      return;
+
+    case NestedState::DatabaseWorkLoadData:
+      aResult.AssignLiteral("DatabaseWorkLoadData");
+      return;
+
+    case NestedState::AfterNesting:
+      aResult.AssignLiteral("AfterNesting");
+      return;
+
+    default:
+      MOZ_CRASH("Bad state!");
   }
+}
 
-  const PrincipalInfo& storagePrincipalInfo = mParams.storagePrincipalInfo();
+nsresult PrepareDatastoreOp::Start() {
+  AssertIsOnOwningThread();
+  MOZ_ASSERT(mState == State::StartingRequest);
+  MOZ_ASSERT(mNestedState == NestedState::BeforeNesting);
+  MOZ_ASSERT(!QuotaClient::IsShuttingDownOnBackgroundThread());
+  MOZ_ASSERT(MayProceed());
+
+  const LSRequestCommonParams& commonParams =
+      mForPreload
+          ? mParams.get_LSRequestPreloadDatastoreParams().commonParams()
+          : mParams.get_LSRequestPrepareDatastoreParams().commonParams();
+
+  const PrincipalInfo& storagePrincipalInfo =
+      commonParams.storagePrincipalInfo();
 
   if (storagePrincipalInfo.type() == PrincipalInfo::TSystemPrincipalInfo) {
     QuotaManager::GetInfoForChrome(&mSuffix, &mGroup, &mOrigin);
@@ -6682,7 +6800,13 @@ nsresult PrepareDatastoreOp::CheckExistingOperations() {
     return NS_ERROR_FAILURE;
   }
 
-  const PrincipalInfo& storagePrincipalInfo = mParams.storagePrincipalInfo();
+  const LSRequestCommonParams& commonParams =
+      mForPreload
+          ? mParams.get_LSRequestPreloadDatastoreParams().commonParams()
+          : mParams.get_LSRequestPrepareDatastoreParams().commonParams();
+
+  const PrincipalInfo& storagePrincipalInfo =
+      commonParams.storagePrincipalInfo();
 
   nsCString originAttrSuffix;
   uint32_t privateBrowsingId;
@@ -6702,7 +6826,7 @@ nsresult PrepareDatastoreOp::CheckExistingOperations() {
   }
 
   mArchivedOriginScope = ArchivedOriginScope::CreateFromOrigin(
-      originAttrSuffix, mParams.originKey());
+      originAttrSuffix, commonParams.originKey());
   MOZ_ASSERT(mArchivedOriginScope);
 
   // Normally it's safe to access member variables without a mutex because even
@@ -7081,7 +7205,7 @@ nsresult PrepareDatastoreOp::DatabaseWork() {
   }
 
   if (hasDataForMigration) {
-    MOZ_DIAGNOSTIC_ASSERT(mUsage == 0);
+    MOZ_ASSERT(mUsage == 0);
 
     rv = AttachArchiveDatabase(quotaManager->GetStoragePath(), connection);
     if (NS_WARN_IF(NS_FAILED(rv))) {
@@ -7467,6 +7591,8 @@ void PrepareDatastoreOp::GetResponse(LSRequestResponse& aResponse) {
   AssertIsOnOwningThread();
   MOZ_ASSERT(mState == State::SendingResults);
   MOZ_ASSERT(NS_SUCCEEDED(ResultCode()));
+  MOZ_ASSERT(!QuotaClient::IsShuttingDownOnBackgroundThread());
+  MOZ_ASSERT(MayProceed());
 
   // A datastore is not created when we are just trying to preload data and
   // there's no database file.
@@ -7635,51 +7761,7 @@ void PrepareDatastoreOp::LogNestedState() {
   AssertIsOnOwningThread();
 
   nsCString nestedState;
-
-  switch (mNestedState) {
-    case NestedState::BeforeNesting:
-      nestedState.AssignLiteral("BeforeNesting");
-      break;
-
-    case NestedState::CheckExistingOperations:
-      nestedState.AssignLiteral("CheckExistingOperations");
-      break;
-
-    case NestedState::CheckClosingDatastore:
-      nestedState.AssignLiteral("CheckClosingDatastore");
-      break;
-
-    case NestedState::PreparationPending:
-      nestedState.AssignLiteral("PreparationPending");
-      break;
-
-    case NestedState::QuotaManagerPending:
-      nestedState.AssignLiteral("QuotaManagerPending");
-      break;
-
-    case NestedState::DirectoryOpenPending:
-      nestedState.AssignLiteral("DirectoryOpenPending");
-      break;
-
-    case NestedState::DatabaseWorkOpen:
-      nestedState.AssignLiteral("DatabaseWorkOpen");
-      break;
-
-    case NestedState::BeginLoadData:
-      nestedState.AssignLiteral("BeginLoadData");
-      break;
-
-    case NestedState::DatabaseWorkLoadData:
-      nestedState.AssignLiteral("DatabaseWorkLoadData");
-      break;
-
-    case NestedState::AfterNesting:
-      nestedState.AssignLiteral("AfterNesting");
-      break;
-
-    default:
-      MOZ_CRASH("Bad state!");
-  }
+  StringifyNestedState(nestedState);
 
   LS_LOG(("  mNestedState: %s", nestedState.get()));
 
@@ -7942,24 +8024,24 @@ PrepareDatastoreOp::CompressibleFunction::OnFunctionCall(
  * PrepareObserverOp
  ******************************************************************************/
 
-PrepareObserverOp::PrepareObserverOp(nsIEventTarget* aMainEventTarget,
-                                     const LSRequestParams& aParams)
-    : LSRequestBase(aMainEventTarget),
-      mParams(aParams.get_LSRequestPrepareObserverParams()) {
+PrepareObserverOp::PrepareObserverOp(
+    nsIEventTarget* aMainEventTarget, const LSRequestParams& aParams,
+    const Maybe<ContentParentId>& aContentParentId)
+    : LSRequestBase(aMainEventTarget, aParams, aContentParentId) {
   MOZ_ASSERT(aParams.type() ==
              LSRequestParams::TLSRequestPrepareObserverParams);
 }
 
-nsresult PrepareObserverOp::Open() {
+nsresult PrepareObserverOp::Start() {
   AssertIsOnOwningThread();
-  MOZ_ASSERT(mState == State::Opening);
+  MOZ_ASSERT(mState == State::StartingRequest);
+  MOZ_ASSERT(!QuotaClient::IsShuttingDownOnBackgroundThread());
+  MOZ_ASSERT(MayProceed());
 
-  if (NS_WARN_IF(QuotaClient::IsShuttingDownOnBackgroundThread()) ||
-      !MayProceedOnNonOwningThread()) {
-    return NS_ERROR_FAILURE;
-  }
+  const LSRequestPrepareObserverParams params =
+      mParams.get_LSRequestPrepareObserverParams();
 
-  const PrincipalInfo& storagePrincipalInfo = mParams.storagePrincipalInfo();
+  const PrincipalInfo& storagePrincipalInfo = params.storagePrincipalInfo();
 
   if (storagePrincipalInfo.type() == PrincipalInfo::TSystemPrincipalInfo) {
     QuotaManager::GetInfoForChrome(nullptr, nullptr, &mOrigin);
@@ -7981,6 +8063,8 @@ void PrepareObserverOp::GetResponse(LSRequestResponse& aResponse) {
   AssertIsOnOwningThread();
   MOZ_ASSERT(mState == State::SendingResults);
   MOZ_ASSERT(NS_SUCCEEDED(ResultCode()));
+  MOZ_ASSERT(!QuotaClient::IsShuttingDownOnBackgroundThread());
+  MOZ_ASSERT(MayProceed());
 
   uint64_t observerId = ++gLastObserverId;
 
@@ -8002,7 +8086,12 @@ void PrepareObserverOp::GetResponse(LSRequestResponse& aResponse) {
 +
 ******************************************************************************/
 
-LSSimpleRequestBase::LSSimpleRequestBase() : mState(State::Initial) {}
+LSSimpleRequestBase::LSSimpleRequestBase(
+    const LSSimpleRequestParams& aParams,
+    const Maybe<ContentParentId>& aContentParentId)
+    : mParams(aParams),
+      mContentParentId(aContentParentId),
+      mState(State::Initial) {}
 
 LSSimpleRequestBase::~LSSimpleRequestBase() {
   MOZ_ASSERT_IF(MayProceedOnNonOwningThread(),
@@ -8012,9 +8101,62 @@ LSSimpleRequestBase::~LSSimpleRequestBase() {
 void LSSimpleRequestBase::Dispatch() {
   AssertIsOnOwningThread();
 
-  mState = State::Opening;
+  mState = State::StartingRequest;
 
   MOZ_ALWAYS_SUCCEEDS(NS_DispatchToCurrentThread(this));
+}
+
+bool LSSimpleRequestBase::VerifyRequestParams() {
+  AssertIsOnBackgroundThread();
+
+  MOZ_ASSERT(mParams.type() != LSSimpleRequestParams::T__None);
+
+  switch (mParams.type()) {
+    case LSSimpleRequestParams::TLSSimpleRequestPreloadedParams: {
+      const LSSimpleRequestPreloadedParams& params =
+          mParams.get_LSSimpleRequestPreloadedParams();
+
+      if (NS_WARN_IF(!VerifyPrincipalInfo(params.principalInfo(),
+                                          params.storagePrincipalInfo()))) {
+        return false;
+      }
+
+      break;
+    }
+
+    default:
+      MOZ_CRASH("Should never get here!");
+  }
+
+  return true;
+}
+
+nsresult LSSimpleRequestBase::StartRequest() {
+  AssertIsOnOwningThread();
+  MOZ_ASSERT(mState == State::StartingRequest);
+
+  if (NS_WARN_IF(QuotaClient::IsShuttingDownOnBackgroundThread()) ||
+      !MayProceed()) {
+    return NS_ERROR_FAILURE;
+  }
+
+#ifdef DEBUG
+  // Always verify parameters in DEBUG builds!
+  bool trustParams = false;
+#else
+  bool trustParams = !BackgroundParent::IsOtherProcessActor(Manager());
+#endif
+
+  if (!trustParams && NS_WARN_IF(!VerifyRequestParams())) {
+    return NS_ERROR_FAILURE;
+  }
+
+  nsresult rv = Start();
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return rv;
+  }
+
+  return NS_OK;
 }
 
 void LSSimpleRequestBase::SendResults() {
@@ -8046,8 +8188,8 @@ LSSimpleRequestBase::Run() {
   nsresult rv;
 
   switch (mState) {
-    case State::Opening:
-      rv = Open();
+    case State::StartingRequest:
+      rv = StartRequest();
       break;
 
     case State::SendingResults:
@@ -8086,22 +8228,23 @@ void LSSimpleRequestBase::ActorDestroy(ActorDestroyReason aWhy) {
  * PreloadedOp
  ******************************************************************************/
 
-PreloadedOp::PreloadedOp(const LSSimpleRequestParams& aParams)
-    : mParams(aParams.get_LSSimpleRequestPreloadedParams()) {
+PreloadedOp::PreloadedOp(const LSSimpleRequestParams& aParams,
+                         const Maybe<ContentParentId>& aContentParentId)
+    : LSSimpleRequestBase(aParams, aContentParentId) {
   MOZ_ASSERT(aParams.type() ==
              LSSimpleRequestParams::TLSSimpleRequestPreloadedParams);
 }
 
-nsresult PreloadedOp::Open() {
+nsresult PreloadedOp::Start() {
   AssertIsOnOwningThread();
-  MOZ_ASSERT(mState == State::Opening);
+  MOZ_ASSERT(mState == State::StartingRequest);
+  MOZ_ASSERT(!QuotaClient::IsShuttingDownOnBackgroundThread());
+  MOZ_ASSERT(MayProceed());
 
-  if (NS_WARN_IF(QuotaClient::IsShuttingDownOnBackgroundThread()) ||
-      !MayProceedOnNonOwningThread()) {
-    return NS_ERROR_FAILURE;
-  }
+  const LSSimpleRequestPreloadedParams& params =
+      mParams.get_LSSimpleRequestPreloadedParams();
 
-  const PrincipalInfo& storagePrincipalInfo = mParams.storagePrincipalInfo();
+  const PrincipalInfo& storagePrincipalInfo = params.storagePrincipalInfo();
 
   if (storagePrincipalInfo.type() == PrincipalInfo::TSystemPrincipalInfo) {
     QuotaManager::GetInfoForChrome(nullptr, nullptr, &mOrigin);
@@ -8123,6 +8266,8 @@ void PreloadedOp::GetResponse(LSSimpleRequestResponse& aResponse) {
   AssertIsOnOwningThread();
   MOZ_ASSERT(mState == State::SendingResults);
   MOZ_ASSERT(NS_SUCCEEDED(ResultCode()));
+  MOZ_ASSERT(!QuotaClient::IsShuttingDownOnBackgroundThread());
+  MOZ_ASSERT(MayProceed());
 
   bool preloaded;
   RefPtr<Datastore> datastore;
@@ -8552,7 +8697,7 @@ nsresult QuotaClient::InitOrigin(PersistenceType aPersistenceType,
       }
     }
 
-    MOZ_DIAGNOSTIC_ASSERT(usage >= 0);
+    MOZ_ASSERT(usage >= 0);
 
     if (!aForGetUsage) {
       InitUsageForOrigin(aOrigin, usage);
@@ -8986,7 +9131,47 @@ void QuotaClient::ShutdownTimedOut() {
   if (gPrepareDatastoreOps) {
     data.Append("gPrepareDatastoreOps: ");
     data.AppendInt(static_cast<uint32_t>(gPrepareDatastoreOps->Length()));
-    data.Append("\n");
+
+    nsTHashtable<nsCStringHashKey> ids;
+    for (uint32_t index = 0; index < gPrepareDatastoreOps->Length(); index++) {
+      CheckedUnsafePtr<PrepareDatastoreOp>& prepareDatastoreOp =
+          (*gPrepareDatastoreOps)[index];
+
+      nsCString origin;
+      if (prepareDatastoreOp->OriginIsKnown()) {
+        origin = prepareDatastoreOp->Origin();
+        SanitizeOrigin(origin);
+      }
+
+      nsCString state;
+      prepareDatastoreOp->StringifyState(state);
+
+      nsCString nestedState;
+      prepareDatastoreOp->StringifyNestedState(nestedState);
+
+      NS_NAMED_LITERAL_CSTRING(delimiter, "*");
+
+      nsCString id = origin + delimiter + state + delimiter + nestedState;
+
+      ids.PutEntry(id);
+    }
+
+    data.Append(" (");
+
+    bool first = true;
+    for (auto iter = ids.ConstIter(); !iter.Done(); iter.Next()) {
+      if (first) {
+        first = false;
+      } else {
+        data.Append(", ");
+      }
+
+      const nsACString& id = iter.Get()->GetKey();
+
+      data.Append(id);
+    }
+
+    data.Append(")\n");
   }
 
   if (gDatastores) {
@@ -9232,6 +9417,125 @@ QuotaClient::MatchFunction::OnFunctionCall(
   }
 
   outVar.forget(aResult);
+  return NS_OK;
+}
+
+/*******************************************************************************
+ * AutoWriteTransaction
+ ******************************************************************************/
+
+AutoWriteTransaction::AutoWriteTransaction(bool aShadowWrites)
+    : mConnection(nullptr)
+    , mShadowWrites(aShadowWrites)
+{
+  AssertIsOnConnectionThread();
+
+  MOZ_COUNT_CTOR(mozilla::dom::AutoWriteTransaction);
+}
+
+AutoWriteTransaction::~AutoWriteTransaction() {
+  AssertIsOnConnectionThread();
+
+  MOZ_COUNT_DTOR(mozilla::dom::AutoWriteTransaction);
+
+  if (mConnection) {
+    if (NS_FAILED(mConnection->RollbackWriteTransaction())) {
+      NS_WARNING("Failed to rollback write transaction!");
+    }
+
+    if (mShadowWrites && NS_FAILED(DetachShadowDatabaseAndUnlock())) {
+      NS_WARNING("Failed to detach shadow database!");
+    }
+  }
+}
+
+nsresult AutoWriteTransaction::Start(Connection* aConnection) {
+  AssertIsOnConnectionThread();
+  MOZ_ASSERT(aConnection);
+  MOZ_ASSERT(!mConnection);
+
+  nsresult rv;
+
+  if (mShadowWrites) {
+    rv = LockAndAttachShadowDatabase(aConnection);
+    if (NS_WARN_IF(NS_FAILED(rv))) {
+      return rv;
+    }
+  }
+
+  rv = aConnection->BeginWriteTransaction();
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return rv;
+  }
+
+  mConnection = aConnection;
+
+  return NS_OK;
+}
+
+nsresult AutoWriteTransaction::Commit() {
+  AssertIsOnConnectionThread();
+  MOZ_ASSERT(mConnection);
+
+  nsresult rv = mConnection->CommitWriteTransaction();
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return rv;
+  }
+
+  if (mShadowWrites) {
+    rv = DetachShadowDatabaseAndUnlock();
+    if (NS_WARN_IF(NS_FAILED(rv))) {
+      return rv;
+    }
+  }
+
+  mConnection = nullptr;
+
+  return NS_OK;
+}
+
+nsresult AutoWriteTransaction::LockAndAttachShadowDatabase(Connection* aConnection) {
+  AssertIsOnConnectionThread();
+  MOZ_ASSERT(aConnection);
+  MOZ_ASSERT(!mConnection);
+  MOZ_ASSERT(mShadowDatabaseLock.isNothing());
+  MOZ_ASSERT(mShadowWrites);
+
+  QuotaManager* quotaManager = QuotaManager::Get();
+  MOZ_ASSERT(quotaManager);
+
+  nsCOMPtr<mozIStorageConnection> storageConnection =
+      aConnection->StorageConnection();
+  MOZ_ASSERT(storageConnection);
+
+  mShadowDatabaseLock.emplace(
+      aConnection->GetQuotaClient()->ShadowDatabaseMutex());
+
+  nsresult rv = AttachShadowDatabase(quotaManager->GetBasePath(), storageConnection);
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return rv;
+  }
+
+  return NS_OK;
+}
+
+nsresult AutoWriteTransaction::DetachShadowDatabaseAndUnlock() {
+  AssertIsOnConnectionThread();
+  MOZ_ASSERT(mConnection);
+  MOZ_ASSERT(mShadowDatabaseLock.isSome());
+  MOZ_ASSERT(mShadowWrites);
+
+  nsCOMPtr<mozIStorageConnection> storageConnection =
+      mConnection->StorageConnection();
+  MOZ_ASSERT(storageConnection);
+
+  nsresult rv = DetachShadowDatabase(storageConnection);
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return rv;
+  }
+
+  mShadowDatabaseLock.reset();
+
   return NS_OK;
 }
 

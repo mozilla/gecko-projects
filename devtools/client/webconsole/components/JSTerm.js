@@ -195,6 +195,15 @@ class JSTerm extends Component {
           return "CodeMirror.Pass";
         };
 
+        const onCtrlCmdEnter = () => {
+          if (this.hasAutocompletionSuggestion()) {
+            return this.acceptProposedCompletion();
+          }
+
+          this.execute();
+          return null;
+        };
+
         this.editor = new Editor({
           autofocus: true,
           enableCodeFolding: false,
@@ -220,9 +229,15 @@ class JSTerm extends Component {
                 return this.acceptProposedCompletion();
               }
 
-              this.execute();
-              return null;
+              if (!this.props.editorMode) {
+                this.execute();
+                return null;
+              }
+              return "CodeMirror.Pass";
             },
+
+            "Cmd-Enter": onCtrlCmdEnter,
+            "Ctrl-Enter": onCtrlCmdEnter,
 
             "Tab": () => {
               if (this.hasEmptyInput()) {
@@ -819,7 +834,7 @@ class JSTerm extends Component {
     const value = this._getValue();
     if (this.lastInputValue !== value) {
       this.resizeInput();
-      if (this.props.autocomplete) {
+      if (this.props.autocomplete || this.autocompletePopup.isOpen) {
         this.autocompleteUpdate();
       }
       this.lastInputValue = value;
@@ -925,10 +940,31 @@ class JSTerm extends Component {
           event.preventDefault();
         }
         this.clearCompletion();
+      }
+
+      // control-enter should execute the current input if codeMirror
+      // is not enabled but editor mode is enabled.
+      if (event.keyCode === KeyCodes.DOM_VK_RETURN) {
+        if (this.hasAutocompletionSuggestion()) {
+          this.acceptProposedCompletion();
+        } else if (this.props.editorMode) {
+          this.execute();
+        }
         event.preventDefault();
       }
 
       return;
+    } else if (event.metaKey && Services.appinfo.OS === "Darwin") {
+      // cmd-enter should execute the current input if codeMirror
+      // is not enabled but editor mode is enabled.
+      if (event.keyCode === KeyCodes.DOM_VK_RETURN) {
+        if (this.hasAutocompletionSuggestion()) {
+          this.acceptProposedCompletion();
+        } else if (this.props.editorMode) {
+          this.execute();
+        }
+        event.preventDefault();
+      }
     } else if (event.keyCode == KeyCodes.DOM_VK_RETURN) {
       if (!this.autocompletePopup.isOpen && (
         event.shiftKey || !Debugger.isCompilableUnit(this._getValue())
@@ -950,8 +986,10 @@ class JSTerm extends Component {
       case KeyCodes.DOM_VK_RETURN:
         if (this.hasAutocompletionSuggestion()) {
           this.acceptProposedCompletion();
-        } else {
+        } else if (!this.props.editorMode) {
           this.execute();
+        } else {
+          this.insertStringAtCursor("\n");
         }
         event.preventDefault();
         break;

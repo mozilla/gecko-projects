@@ -64,6 +64,7 @@ class Message extends Component {
       })),
       isPaused: PropTypes.bool,
       maybeScrollToBottom: PropTypes.func,
+      message: PropTypes.object.isRequired,
     };
   }
 
@@ -96,12 +97,19 @@ class Message extends Component {
     }
   }
 
+  componentDidCatch(e) {
+    this.setState({error: e});
+  }
+
   onLearnMoreClick(e) {
     const {exceptionDocURL} = this.props;
     this.props.serviceContainer.openLink(exceptionDocURL, e);
   }
 
   toggleMessage(e) {
+    // Don't bubble up to the main App component, which  redirects focus to input,
+    // making difficult for screen reader users to review output
+    e.stopPropagation();
     const { open, dispatch, messageId, onToggle } = this.props;
 
     // If defined on props, we let the onToggle() method handle the toggling,
@@ -157,8 +165,52 @@ class Message extends Component {
     });
   }
 
+  renderTimestamp() {
+    if (!this.props.timestampsVisible) {
+      return null;
+    }
+
+    return dom.span({
+      className: "timestamp devtools-monospace",
+    }, l10n.timestampString(this.props.timeStamp || Date.now()));
+  }
+
+  renderErrorState() {
+    const newBugUrl =
+      "https://bugzilla.mozilla.org/enter_bug.cgi?product=DevTools&component=Console";
+    const timestampEl = this.renderTimestamp();
+
+    return dom.div({
+      className: "message error message-did-catch",
+    },
+      timestampEl,
+      MessageIcon({level: "error"}),
+      dom.span({ className: "message-body-wrapper" },
+        dom.span({
+          className: "message-flex-body",
+        },
+          // Add whitespaces for formatting when copying to the clipboard.
+          timestampEl ? " " : null,
+          dom.span({ className: "message-body devtools-monospace" },
+            l10n.getFormatStr("webconsole.message.componentDidCatch.label", [newBugUrl]),
+            dom.button({
+              className: "devtools-button",
+              onClick: () => navigator.clipboard.writeText(
+                JSON.stringify(this.props.message, null, 2)),
+            }, l10n.getStr("webconsole.message.componentDidCatch.copyButton.label")),
+          ),
+        ),
+      ),
+      dom.br(),
+    );
+  }
+
   /* eslint-disable complexity */
   render() {
+    if (this.state && this.state.error) {
+      return this.renderErrorState();
+    }
+
     const {
       open,
       collapsible,
@@ -175,8 +227,6 @@ class Message extends Component {
       stacktrace,
       serviceContainer,
       exceptionDocURL,
-      timeStamp = Date.now(),
-      timestampsVisible,
       executionPoint,
       pausedExecutionPoint,
       messageId,
@@ -198,13 +248,7 @@ class Message extends Component {
       }
     }
 
-    let timestampEl;
-    if (timestampsVisible === true) {
-      timestampEl = dom.span({
-        className: "timestamp devtools-monospace",
-      }, l10n.timestampString(timeStamp));
-    }
-
+    const timestampEl = this.renderTimestamp();
     const icon = this.renderIcon();
 
     // Figure out if there is an expandable part to the message.

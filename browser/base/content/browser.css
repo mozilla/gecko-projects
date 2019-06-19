@@ -55,10 +55,6 @@
   min-width: -moz-fit-content;
 }
 
-.searchbar-textbox {
-  -moz-binding: url("chrome://browser/content/search/search.xml#searchbar-textbox");
-}
-
 .search-one-offs[compact=true] .search-setting-button,
 .search-one-offs:not([compact=true]) .search-setting-button-compact {
   display: none;
@@ -1117,10 +1113,6 @@ toolbarpaletteitem[place="palette"] > #downloads-button[indicator] > .toolbarbut
     -moz-window-transform: none;
   }
 %else
-  #BMB_bookmarksPopup {
-    will-change: transform, opacity; /* workaround for bug 1414033 */
-  }
-
   #BMB_bookmarksPopup:not([animate="false"]) {
     opacity: 0;
     transform: translateY(-70px);

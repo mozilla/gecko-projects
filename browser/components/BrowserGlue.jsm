@@ -16,6 +16,56 @@ ChromeUtils.defineModuleGetter(this, "ActorManagerParent",
 const PREF_PDFJS_ENABLED_CACHE_STATE = "pdfjs.enabledCache.state";
 
 let ACTORS = {
+  BrowserTab: {
+    parent: {
+      moduleURI: "resource:///actors/BrowserTabParent.jsm",
+    },
+    child: {
+      moduleURI: "resource:///actors/BrowserTabChild.jsm",
+
+      events: {
+        "DOMWindowCreated": {},
+        "MozAfterPaint": {},
+        "MozDOMPointerLock:Entered": {},
+        "MozDOMPointerLock:Exited": {},
+      },
+      messages: [
+        "Browser:Reload",
+        "Browser:AppTab",
+        "Browser:HasSiblings",
+        "MixedContent:ReenableProtection",
+        "UpdateCharacterSet",
+      ],
+    },
+  },
+
+  ContextMenu: {
+    parent: {
+      moduleURI: "resource:///actors/ContextMenuParent.jsm",
+    },
+
+    child: {
+      moduleURI: "resource:///actors/ContextMenuChild.jsm",
+      events: {
+        "contextmenu": { mozSystemGroup: true },
+      },
+    },
+
+    allFrames: true,
+  },
+
+  SwitchDocumentDirection: {
+    child: {
+      moduleURI: "resource:///actors/SwitchDocumentDirectionChild.jsm",
+
+      messages: [
+        "SwitchDocumentDirection",
+      ],
+    },
+
+    allFrames: true,
+  },
+
   SubframeCrash: {
     parent: {
       moduleURI: "resource:///actors/SubframeCrashParent.jsm",
@@ -37,9 +87,12 @@ let LEGACY_ACTORS = {
       events: {
         "AboutLoginsCreateLogin": {wantUntrusted: true},
         "AboutLoginsDeleteLogin": {wantUntrusted: true},
-        "AboutLoginsOpenSite": {wantUntrusted: true},
-        "AboutLoginsUpdateLogin": {wantUntrusted: true},
+        "AboutLoginsImport": {wantUntrusted: true},
         "AboutLoginsInit": {wantUntrusted: true},
+        "AboutLoginsOpenPreferences": {wantUntrusted: true},
+        "AboutLoginsOpenSite": {wantUntrusted: true},
+        "AboutLoginsRecordTelemetryEvent": {wantUntrusted: true},
+        "AboutLoginsUpdateLogin": {wantUntrusted: true},
       },
       messages: [
         "AboutLogins:AllLogins",
@@ -82,45 +135,12 @@ let LEGACY_ACTORS = {
     },
   },
 
-  BrowserTab: {
-    child: {
-      module: "resource:///actors/BrowserTabChild.jsm",
-      group: "browsers",
-
-      events: {
-        "DOMWindowCreated": {once: true},
-        "MozAfterPaint": {once: true},
-        "MozDOMPointerLock:Entered": {},
-        "MozDOMPointerLock:Exited": {},
-      },
-
-      messages: [
-        "AllowScriptsToClose",
-        "Browser:AppTab",
-        "Browser:HasSiblings",
-        "Browser:Reload",
-        "MixedContent:ReenableProtection",
-        "SwitchDocumentDirection",
-        "UpdateCharacterSet",
-      ],
-    },
-  },
-
   ClickHandler: {
     child: {
       module: "resource:///actors/ClickHandlerChild.jsm",
       events: {
         "click": {capture: true, mozSystemGroup: true},
         "auxclick": {capture: true, mozSystemGroup: true},
-      },
-    },
-  },
-
-  ContextMenu: {
-    child: {
-      module: "resource:///actors/ContextMenuChild.jsm",
-      events: {
-        "contextmenu": {mozSystemGroup: true},
       },
     },
   },
@@ -138,6 +158,16 @@ let LEGACY_ACTORS = {
         "ContentSearch",
       ],
     },
+  },
+
+  ContextMenuSpecialProcess: {
+    child: {
+      module: "resource:///actors/ContextMenuSpecialProcessChild.jsm",
+      events: {
+        "contextmenu": {mozSystemGroup: true},
+      },
+    },
+    allFrames: true,
   },
 
   DOMFullscreen: {
@@ -434,12 +464,10 @@ XPCOMUtils.defineLazyModuleGetters(this, {
   DateTimePickerParent: "resource://gre/modules/DateTimePickerParent.jsm",
   Discovery: "resource:///modules/Discovery.jsm",
   ExtensionsUI: "resource:///modules/ExtensionsUI.jsm",
-  FileSource: "resource://gre/modules/L10nRegistry.jsm",
   FxAccounts: "resource://gre/modules/FxAccounts.jsm",
   HomePage: "resource:///modules/HomePage.jsm",
   HybridContentTelemetry: "resource://gre/modules/HybridContentTelemetry.jsm",
   Integration: "resource://gre/modules/Integration.jsm",
-  L10nRegistry: "resource://gre/modules/L10nRegistry.jsm",
   LiveBookmarkMigrator: "resource:///modules/LiveBookmarkMigrator.jsm",
   NewTabUtils: "resource://gre/modules/NewTabUtils.jsm",
   Normandy: "resource://normandy/Normandy.jsm",
@@ -556,6 +584,8 @@ const listeners = {
   mm: {
     "AboutLogins:CreateLogin": ["AboutLoginsParent"],
     "AboutLogins:DeleteLogin": ["AboutLoginsParent"],
+    "AboutLogins:Import": ["AboutLoginsParent"],
+    "AboutLogins:OpenPreferences": ["AboutLoginsParent"],
     "AboutLogins:OpenSite": ["AboutLoginsParent"],
     "AboutLogins:Subscribe": ["AboutLoginsParent"],
     "AboutLogins:UpdateLogin": ["AboutLoginsParent"],
@@ -1063,14 +1093,6 @@ BrowserGlue.prototype = {
       PdfJs.earlyInit();
     }
 
-    // Initialize the default l10n resource sources for L10nRegistry.
-    let locales = Services.locale.packagedLocales;
-    const greSource = new FileSource("toolkit", locales, "resource://gre/localization/{locale}/");
-    L10nRegistry.registerSource(greSource);
-
-    const appSource = new FileSource("app", locales, "resource://app/localization/{locale}/");
-    L10nRegistry.registerSource(appSource);
-
     // check if we're in safe mode
     if (Services.appinfo.inSafeMode) {
       Services.ww.openWindow(null, "chrome://browser/content/safeMode.xul",
@@ -1250,15 +1272,15 @@ BrowserGlue.prototype = {
 
     let message;
     if (reason == "unused") {
-      message = resetBundle.formatStringFromName("resetUnusedProfile.message", [productName], 1);
+      message = resetBundle.formatStringFromName("resetUnusedProfile.message", [productName]);
     } else if (reason == "uninstall") {
-      message = resetBundle.formatStringFromName("resetUninstalled.message", [productName], 1);
+      message = resetBundle.formatStringFromName("resetUninstalled.message", [productName]);
     } else {
       throw new Error(`Unknown reason (${reason}) given to _resetProfileNotification.`);
     }
     let buttons = [
       {
-        label:     resetBundle.formatStringFromName("refreshProfile.resetButton.label", [productName], 1),
+        label:     resetBundle.formatStringFromName("refreshProfile.resetButton.label", [productName]),
         accessKey: resetBundle.GetStringFromName("refreshProfile.resetButton.accesskey"),
         callback() {
           ResetProfile.openConfirmationDialog(win);
@@ -1451,7 +1473,10 @@ BrowserGlue.prototype = {
   },
 
   _recordContentBlockingTelemetry() {
-    let recordIdentityPopupEvents = Services.prefs.getBoolPref("security.identitypopup.recordEventElemetry");
+    let recordIdentityPopupEvents = Services.prefs.prefHasUserValue("security.identitypopup.recordEventElemetry") ?
+                                    Services.prefs.getBoolPref("security.identitypopup.recordEventElemetry") :
+                                    Services.prefs.getBoolPref("security.identitypopup.recordEventTelemetry");
+
     Services.telemetry.setEventRecordingEnabled("security.ui.identitypopup", recordIdentityPopupEvents);
 
     let tpEnabled = Services.prefs.getBoolPref("privacy.trackingprotection.enabled");
@@ -2163,7 +2188,7 @@ BrowserGlue.prototype = {
     var applicationName = gBrandBundle.GetStringFromName("brandShortName");
     var placesBundle = Services.strings.createBundle("chrome://browser/locale/places/places.properties");
     var title = placesBundle.GetStringFromName("lockPrompt.title");
-    var text = placesBundle.formatStringFromName("lockPrompt.text", [applicationName], 1);
+    var text = placesBundle.formatStringFromName("lockPrompt.text", [applicationName]);
     var buttonText = placesBundle.GetStringFromName("lockPromptInfoButton.label");
     var accessKey = placesBundle.GetStringFromName("lockPromptInfoButton.accessKey");
 
@@ -2196,7 +2221,7 @@ BrowserGlue.prototype = {
     let productName = gBrandBundle.GetStringFromName("brandShortName");
     let title = bundle.GetStringFromName("syncStartNotification.title");
     let body = bundle.formatStringFromName("syncStartNotification.body2",
-                                            [productName], 1);
+                                            [productName]);
 
     let clickCallback = (subject, topic, data) => {
       if (topic != "alertclickcallback")
@@ -2248,7 +2273,7 @@ BrowserGlue.prototype = {
   _migrateUI: function BG__migrateUI() {
     // Use an increasing number to keep track of the current migration state.
     // Completely unrelated to the current Firefox release number.
-    const UI_VERSION = 82;
+    const UI_VERSION = 84;
     const BROWSER_DOCURL = AppConstants.BROWSER_CHROME_URL;
 
     let currentUIVersion;
@@ -2342,11 +2367,8 @@ BrowserGlue.prototype = {
             !Services.search.originalDefaultEngine.wrappedJSObject._isDefault)
           return;
 
-        if (currentEngine._loadPath.startsWith("[https]")) {
-          Services.prefs.setCharPref("browser.search.reset.status", "pending");
-        } else {
+        if (!currentEngine._loadPath.startsWith("[https]")) {
           Services.search.resetToOriginalDefaultEngine();
-          Services.prefs.setCharPref("browser.search.reset.status", "silent");
         }
       });
 
@@ -2555,6 +2577,24 @@ BrowserGlue.prototype = {
     if (currentUIVersion < 82) {
       this._migrateXULStoreForDocument("chrome://browser/content/browser.xul",
                                        "chrome://browser/content/browser.xhtml");
+    }
+
+    if (currentUIVersion < 83) {
+      Services.prefs.clearUserPref("browser.search.reset.status");
+    }
+
+    if (currentUIVersion < 84) {
+      // Reset flash "always allow/block" permissions
+      // We keep session and policy permissions, which could both be
+      // the result of enterprise policy settings. "Never/Always allow"
+      // settings for flash were actually time-bound on recent-ish Firefoxen,
+      // so we remove EXPIRE_TIME entries, too.
+      const {EXPIRE_NEVER, EXPIRE_TIME} = Services.perms;
+      let flashPermissions =
+        Services.perms.getAllWithTypePrefix("plugin:flash").filter(p =>
+          p.type == "plugin:flash" &&
+          (p.expireType == EXPIRE_NEVER || p.expireType == EXPIRE_TIME));
+      flashPermissions.forEach(p => Services.perms.removePermission(p));
     }
 
     // Update the migration version.
@@ -2775,7 +2815,7 @@ BrowserGlue.prototype = {
         // we have separate strings to handle those cases. (See Also
         // unnamedTabsArrivingNotificationNoDevice.body below)
         if (deviceName) {
-          title = bundle.formatStringFromName("tabArrivingNotificationWithDevice.title", [deviceName], 1);
+          title = bundle.formatStringFromName("tabArrivingNotificationWithDevice.title", [deviceName]);
         } else {
           title = bundle.GetStringFromName("tabArrivingNotification.title");
         }
@@ -2788,7 +2828,7 @@ BrowserGlue.prototype = {
           body = win.gURLBar.trimValue(body);
         }
         if (wasTruncated) {
-          body = bundle.formatStringFromName("singleTabArrivingWithTruncatedURL.body", [body], 1);
+          body = bundle.formatStringFromName("singleTabArrivingWithTruncatedURL.body", [body]);
         }
       } else {
         title = bundle.GetStringFromName("multipleTabsArrivingNotification.title");
@@ -2863,7 +2903,7 @@ BrowserGlue.prototype = {
     let title = accountsBundle.GetStringFromName("deviceConnectedTitle");
     let body = accountsBundle.formatStringFromName("deviceConnectedBody" +
                                                    (deviceName ? "" : ".noDeviceName"),
-                                                   [deviceName], 1);
+                                                   [deviceName]);
 
     let clickCallback = async (subject, topic, data) => {
       if (topic != "alertclickcallback")

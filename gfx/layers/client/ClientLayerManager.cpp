@@ -22,6 +22,7 @@
 #include "mozilla/layers/LayerTransactionChild.h"
 #include "mozilla/layers/PersistentBufferProvider.h"
 #include "mozilla/layers/SyncObject.h"
+#include "mozilla/PerfStats.h"
 #include "ClientReadbackLayer.h"  // for ClientReadbackLayer
 #include "nsAString.h"
 #include "nsDisplayList.h"
@@ -278,6 +279,7 @@ bool ClientLayerManager::EndTransactionInternal(
 
   PaintTelemetry::AutoRecord record(PaintTelemetry::Metric::Rasterization);
   AUTO_PROFILER_TRACING("Paint", "Rasterize", GRAPHICS);
+  PerfStats::AutoMetricRecording<PerfStats::Metric::Rasterizing> autoRecording;
 
   Maybe<TimeStamp> startTime;
   if (StaticPrefs::LayersDrawFPS()) {
@@ -665,6 +667,8 @@ void ClientLayerManager::ForwardTransaction(bool aScheduleComposite) {
   AUTO_PROFILER_TRACING("Paint", "ForwardTransaction", GRAPHICS);
   TimeStamp start = TimeStamp::Now();
 
+  GetCompositorBridgeChild()->EndCanvasTransaction();
+
   // Skip the synchronization for buffer since we also skip the painting during
   // device-reset status. With OMTP, we have to wait for async paints
   // before we synchronize and it's done on the paint thread.
@@ -862,8 +866,7 @@ ClientLayerManager::CreatePersistentBufferProvider(const gfx::IntSize& aSize,
   // because the canvas will most likely be flattened into a thebes layer
   // instead of being sent to the compositor, in which case rendering into
   // shared memory is wasteful.
-  if (IsCompositingCheap() &&
-      StaticPrefs::PersistentBufferProviderSharedEnabled()) {
+  if (IsCompositingCheap()) {
     RefPtr<PersistentBufferProvider> provider =
         PersistentBufferProviderShared::Create(aSize, aFormat,
                                                AsShadowForwarder());

@@ -60,9 +60,12 @@
           <div class="card-contents">
             <div class="addon-name-container">
               <span class="addon-name"></span>
+              <div class="addon-badge addon-badge-recommended"
+                   data-l10n-id="addon-badge-recommended"
+                   hidden></div>
               <div class="addon-badge addon-badge-private-browsing-allowed"
-                    data-l10n-id="addon-badge-private-browsing-allowed"
-                    hidden></div>
+                   data-l10n-id="addon-badge-private-browsing-allowed"
+                   hidden></div>
             </div>
             <span class="addon-description"></span>
           </div>
@@ -70,6 +73,10 @@
             <button class="more-options-button ghost-button" action="more-options"></button>
           </div>
         </div>
+        <message-bar class="addon-card-message" align="center" hidden>
+          <span></span>
+          <button action="link"></button>
+        </message-bar>
       </div>
     </template>
 
@@ -117,37 +124,50 @@
             <div>
               <button class="button-link" data-l10n-id="addon-detail-update-check-label" action="update-check" hidden></button>
               <label>
-                <input type="radio" name="autoupdate" value="1"/>
+                <input type="radio" name="autoupdate" value="1" data-telemetry-value="default">
                 <span data-l10n-id="addon-detail-updates-radio-default"></span>
               </label>
               <label>
-                <input type="radio" name="autoupdate" value="2"/>
+                <input type="radio" name="autoupdate" value="2" data-telemetry-value="enabled">
                 <span data-l10n-id="addon-detail-updates-radio-on"></span>
               </label>
               <label>
-                <input type="radio" name="autoupdate" value="0"/>
+                <input type="radio" name="autoupdate" value="0" data-telemetry-value="">
                 <span data-l10n-id="addon-detail-updates-radio-off"></span>
               </label>
             </div>
           </div>
-          <div class="addon-detail-row addon-detail-row-has-help addon-detail-row-private-browsing">
+          <div class="addon-detail-row addon-detail-row-has-help addon-detail-row-private-browsing" hidden>
             <label data-l10n-id="detail-private-browsing-label"></label>
             <div>
               <label>
-                <input type="radio" name="private-browsing" value="1"/>
+                <input type="radio" name="private-browsing" value="1" data-telemetry-value="on">
                 <span data-l10n-id="addon-detail-private-browsing-allow"></span>
               </label>
               <label>
-                <input type="radio" name="private-browsing" value="0"/>
+                <input type="radio" name="private-browsing" value="0" data-telemetry-value="off">
                 <span data-l10n-id="addon-detail-private-browsing-disallow"></span>
               </label>
             </div>
           </div>
-          <div class="addon-detail-row addon-detail-help-row" data-l10n-id="addon-detail-private-browsing-help">
+          <div class="addon-detail-row addon-detail-help-row" data-l10n-id="addon-detail-private-browsing-help" hidden>
             <a target="_blank" data-l10n-name="learn-more"></a>
+          </div>
+          <div class="addon-detail-row addon-detail-row-has-help addon-detail-row-private-browsing-disallowed" hidden>
+            <label data-l10n-id="detail-private-disallowed-label"></label>
+          </div>
+          <div class="addon-detail-row addon-detail-help-row" data-l10n-id="detail-private-disallowed-description" hidden>
+            <label class="text-link" data-l10n-name="detail-private-browsing-learn-more" action="pb-learn-more" aria-role="link" tabindex="0"></label>
+          </div>
+          <div class="addon-detail-row addon-detail-row-has-help addon-detail-row-private-browsing-required" hidden>
+            <label class="learn-more-label-link" data-l10n-id="detail-private-required-label"></label>
+          </div>
+          <div class="addon-detail-row addon-detail-help-row" data-l10n-id="detail-private-required-description" hidden>
+            <label class="text-link" data-l10n-name="detail-private-browsing-learn-more" action="pb-learn-more" aria-role="link" tabindex="0"></label>
           </div>
           <div class="addon-detail-row addon-detail-row-author">
             <label data-l10n-id="addon-detail-author-label"></label>
+            <a target="_blank" data-telemetry-name="author"></a>
           </div>
           <div class="addon-detail-row addon-detail-row-version">
             <label data-l10n-id="addon-detail-version-label"></label>
@@ -157,13 +177,13 @@
           </div>
           <div class="addon-detail-row addon-detail-row-homepage">
             <label data-l10n-id="addon-detail-homepage-label"></label>
-            <a target="_blank"></a>
+            <a target="_blank" data-telemetry-name="homepage"></a>
           </div>
           <div class="addon-detail-row addon-detail-row-rating">
             <label data-l10n-id="addon-detail-rating-label"></label>
             <div class="addon-detail-rating">
               <five-star-rating></five-star-rating>
-              <a target="_blank"></a>
+              <a target="_blank" data-telemetry-name="rating"></a>
             </div>
           </div>
         </section>
@@ -196,6 +216,24 @@
       <button><slot></slot></button>
     </template>
 
+    <template name="taar-notice">
+      <message-bar class="discopane-notice">
+        <div class="discopane-notice-content">
+          <span data-l10n-id="discopane-notice-recommendations"></span>
+          <button data-l10n-id="discopane-notice-learn-more" action="notice-learn-more"></button>
+        </div>
+      </message-bar>
+    </template>
+
+    <template name="recommended-footer">
+      <div class="amo-link-container view-footer-item">
+        <button class="primary" action="open-amo" data-l10n-id="find-more-addons"></button>
+      </div>
+      <div class="view-footer-item">
+        <a class="privacy-policy-link" data-l10n-id="privacy-policy" target="_blank"></a>
+      </div>
+    </template>
+
     <template name="discopane">
       <header>
         <p>
@@ -208,24 +246,26 @@
           </span>
         </p>
       </header>
-      <message-bar class="discopane-notice">
-        <div class="discopane-notice-content">
-          <span data-l10n-id="discopane-notice-recommendations"></span>
-          <button data-l10n-id="discopane-notice-learn-more" action="notice-learn-more"></button>
-        </div>
-      </message-bar>
+      <taar-notice></taar-notice>
       <recommended-addon-list></recommended-addon-list>
-      <footer class="discopane-footer">
+      <footer is="recommended-footer" class="view-footer"></footer>
+    </template>
+
+    <template name="recommended-extensions-section">
+      <h2 data-l10n-id="recommended-extensions-heading" class="header-name recommended-heading"></h2>
+      <taar-notice></taar-notice>
+      <recommended-addon-list type="extension" hide-installed></recommended-addon-list>
+      <footer is="recommended-footer" class="view-footer hide-amo-link"></footer>
+    </template>
+
+    <template name="recommended-themes-section">
+      <h2 data-l10n-id="recommended-themes-heading" class="header-name recommended-heading"></h2>
+      <recommended-addon-list type="theme" hide-installed></recommended-addon-list>
+      <footer>
         <div>
-          <button class="primary" action="open-amo" data-l10n-id="find-more-addons"></button>
-        </div>
-        <div>
-          <a
-            class="discopane-privacy-policy-link"
-            data-l10n-id="privacy-policy"
-            href="https://www.mozilla.org/privacy/firefox/?utm_source=firefox-browser&amp;utm_medium=firefox-browser&amp;utm_content=privacy-policy-link#addons"
-            target="_blank"
-          ></a>
+          <p data-l10n-id="recommended-theme-1" class="theme-recommendation">
+            <a data-l10n-name="link" target="_blank"></a>
+          </p>
         </div>
       </footer>
     </template>

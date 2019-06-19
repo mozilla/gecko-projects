@@ -217,24 +217,14 @@ class Toolbar extends Component {
    */
   renderFilterButtons(requestFilterTypes) {
     // Render list of filter-buttons.
-    const buttons = Object.entries(requestFilterTypes).map(([type, checked]) => {
-      const classList = ["devtools-button", `requests-list-filter-${type}-button`];
-      checked && classList.push("checked");
-
-      return (
-        button({
-          className: classList.join(" "),
-          key: type,
-          onClick: this.toggleRequestFilterType,
-          onKeyDown: this.toggleRequestFilterType,
-          "aria-pressed": checked,
-          "data-key": type,
-        },
-          TOOLBAR_FILTER_LABELS[type]
-        )
-      );
-    });
-
+    const buttons = Object.entries(requestFilterTypes).map(([type, checked]) => button({
+      className: `devtools-togglebutton requests-list-filter-${type}-button`,
+      key: type,
+      onClick: this.toggleRequestFilterType,
+      onKeyDown: this.toggleRequestFilterType,
+      "aria-pressed": checked,
+      "data-key": type,
+    }, TOOLBAR_FILTER_LABELS[type]));
     return div({ className: "requests-list-filter-buttons" }, buttons);
   }
 
@@ -389,23 +379,22 @@ class Toolbar extends Component {
     // Render the entire toolbar.
     // dock at bottom or dock at side has different layout
     return singleRow ? (
-      span({
-        id: "netmonitor-main-toolbar",
-        className: "devtools-toolbar devtools-input-toolbar",
-      },
-        this.renderClearButton(clearRequests),
-        this.renderSeparator(),
-        this.renderFilterBox(setRequestFilterText),
-        this.renderSeparator(),
-        this.renderToggleRecordingButton(recording, toggleRecording),
-        this.renderSeparator(),
-        this.renderFilterButtons(requestFilterTypes),
-        this.renderSeparator(),
-        this.renderPersistlogCheckbox(persistentLogsEnabled, togglePersistentLogs),
-        this.renderCacheCheckbox(browserCacheDisabled, toggleBrowserCache),
-        this.renderSeparator(),
-        this.renderThrottlingMenu(),
-        this.renderHarButton(),
+      span({ id: "netmonitor-toolbar-container" },
+        span({ className: "devtools-toolbar devtools-input-toolbar" },
+          this.renderClearButton(clearRequests),
+          this.renderSeparator(),
+          this.renderFilterBox(setRequestFilterText),
+          this.renderSeparator(),
+          this.renderToggleRecordingButton(recording, toggleRecording),
+          this.renderSeparator(),
+          this.renderFilterButtons(requestFilterTypes),
+          this.renderSeparator(),
+          this.renderPersistlogCheckbox(persistentLogsEnabled, togglePersistentLogs),
+          this.renderCacheCheckbox(browserCacheDisabled, toggleBrowserCache),
+          this.renderSeparator(),
+          this.renderThrottlingMenu(),
+          this.renderHarButton(),
+        )
       )
     ) : (
       span({ id: "netmonitor-toolbar-container" },

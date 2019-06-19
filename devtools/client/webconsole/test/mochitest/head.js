@@ -924,14 +924,10 @@ async function getFilterState(hud) {
 
   for (const button of buttons) {
     const classes = new Set(button.classList.values());
-    const checked = classes.has("checked");
-
-    classes.delete("devtools-button");
-    classes.delete("checked");
-
+    classes.delete("devtools-togglebutton");
     const category = classes.values().next().value;
 
-    result[category] = checked;
+    result[category] = button.getAttribute("aria-pressed") === "true";
   }
 
   return result;
@@ -993,13 +989,17 @@ async function setFilterState(hud, settings) {
 
     info(`Setting the ${category} category to ${value ? "checked" : "disabled"}`);
 
-    const isChecked = button.classList.contains("checked");
+    const isPressed = button.getAttribute("aria-pressed");
 
-    if (value !== isChecked) {
+    if ((!value && isPressed === "true") || (value && isPressed !== "true")) {
       button.click();
 
       await waitFor(() => {
-        return button.classList.contains("checked") === value;
+        const pressed = button.getAttribute("aria-pressed");
+        if (!value) {
+          return pressed === "false" || pressed === null;
+        }
+        return pressed === "true";
       });
     }
   }
@@ -1342,6 +1342,9 @@ function checkConsoleOutputForWarningGroup(hud, expectedMessages) {
       }
 
       expectedMessage = expectedMessage.replace("| ", "");
+    } else {
+      is(message.querySelector(".indent").getAttribute("data-indent"),
+        "0", "The message has the expected indent");
     }
 
     ok(message.textContent.trim().includes(expectedMessage.trim()), `Message includes ` +

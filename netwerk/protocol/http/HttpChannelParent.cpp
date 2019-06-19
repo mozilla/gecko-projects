@@ -150,7 +150,8 @@ bool HttpChannelParent::Init(const HttpChannelCreationArgs& aArgs) {
           a.launchServiceWorkerStart(), a.launchServiceWorkerEnd(),
           a.dispatchFetchEventStart(), a.dispatchFetchEventEnd(),
           a.handleFetchEventStart(), a.handleFetchEventEnd(),
-          a.forceMainDocumentChannel(), a.navigationStartTimeStamp());
+          a.forceMainDocumentChannel(), a.navigationStartTimeStamp(),
+          a.hasSandboxedAuxiliaryNavigations());
     }
     case HttpChannelCreationArgs::THttpChannelConnectArgs: {
       const HttpChannelConnectArgs& cArgs = aArgs.get_HttpChannelConnectArgs();
@@ -262,7 +263,7 @@ base::ProcessId HttpChannelParent::OtherPid() const {
   if (mIPCClosed) {
     return 0;
   }
-  return Manager()->OtherPid();
+  return IProtocol::OtherPid();
 }
 
 //-----------------------------------------------------------------------------
@@ -408,7 +409,8 @@ bool HttpChannelParent::DoAsyncOpen(
     const TimeStamp& aHandleFetchEventStart,
     const TimeStamp& aHandleFetchEventEnd,
     const bool& aForceMainDocumentChannel,
-    const TimeStamp& aNavigationStartTimeStamp) {
+    const TimeStamp& aNavigationStartTimeStamp,
+    const bool& hasSandboxedAuxiliaryNavigations) {
   nsCOMPtr<nsIURI> uri = DeserializeURI(aURI);
   if (!uri) {
     // URIParams does MOZ_ASSERT if null, but we need to protect opt builds from
@@ -490,6 +492,10 @@ bool HttpChannelParent::DoAsyncOpen(
 
   if (aForceMainDocumentChannel) {
     httpChannel->SetIsMainDocumentChannel(true);
+  }
+
+  if (hasSandboxedAuxiliaryNavigations) {
+    httpChannel->SetHasSandboxedAuxiliaryNavigations(true);
   }
 
   for (uint32_t i = 0; i < requestHeaders.Length(); i++) {
@@ -1467,6 +1473,9 @@ HttpChannelParent::OnStartRequest(nsIRequest* aRequest) {
   bool isResolvedByTRR = false;
   chan->GetIsResolvedByTRR(&isResolvedByTRR);
 
+  bool allRedirectsSameOrigin = false;
+  chan->GetAllRedirectsSameOrigin(&allRedirectsSameOrigin);
+
   rv = NS_OK;
   if (mIPCClosed ||
       !SendOnStartRequest(
@@ -1476,7 +1485,8 @@ HttpChannelParent::OnStartRequest(nsIRequest* aRequest) {
           mCacheEntry ? true : false, cacheEntryId, fetchCount, expirationTime,
           cachedCharset, secInfoSerialization, chan->GetSelfAddr(),
           chan->GetPeerAddr(), redirectCount, cacheKey, altDataType, altDataLen,
-          deliveringAltData, applyConversion, isResolvedByTRR, timing)) {
+          deliveringAltData, applyConversion, isResolvedByTRR, timing,
+          allRedirectsSameOrigin)) {
     rv = NS_ERROR_UNEXPECTED;
   }
   requestHead->Exit();

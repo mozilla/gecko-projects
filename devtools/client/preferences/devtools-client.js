@@ -189,6 +189,9 @@ pref("devtools.netmonitor.har.forceExport", false);
 pref("devtools.netmonitor.har.pageLoadedTimeout", 1500);
 pref("devtools.netmonitor.har.enableAutoExportToFile", false);
 
+// Support for WebSocket monitoring pref (pending complete implementation)
+pref("devtools.netmonitor.features.webSockets", false);
+
 // Scratchpad settings
 // - recentFileMax: The maximum number of recently-opened files
 //                  stored. Setting this preference to 0 will not
@@ -286,8 +289,6 @@ pref("devtools.performance.new-panel-enabled", false);
 // Enable message grouping in the console, false by default
 pref("devtools.webconsole.groupWarningMessages", false);
 
-// Enable Content messages filtering in the browser console.
-pref("devtools.browserconsole.filterContentMessages", false);
 // Saved state of the Display content messages checkbox in the browser console.
 pref("devtools.browserconsole.contentMessages", false);
 

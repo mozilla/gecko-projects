@@ -55,6 +55,9 @@ parent:
   sync SetTriggeringPrincipal(nsIPrincipal triggeringPrincipal);
   sync GetPrincipalToInherit() returns (nsIPrincipal principalToInherit);
   sync SetPrincipalToInherit(nsIPrincipal principalToInherit);
+  sync GetStoragePrincipalToInherit()
+    returns (nsIPrincipal storagePrincipalToInherit);
+  sync SetStoragePrincipalToInherit(nsIPrincipal storagePrincipalToInherit);
   sync GetCsp() returns (nsIContentSecurityPolicy csp);
   sync SetCsp(nsIContentSecurityPolicy csp);
   sync GetStateData() returns (ClonedMessageData stateData);
@@ -81,6 +84,7 @@ parent:
   sync Create(nsIURI URI, nsString title, nsIInputStream inputStream,
               uint32_t cacheKey, nsCString contentType,
               nsIPrincipal triggeringPrincipal, nsIPrincipal principalToInherit,
+              nsIPrincipal storagePrincipalToInherit,
               nsIContentSecurityPolicy csp, nsID docshellID,
               bool dynamicCreation, nsIURI originalUri, nsIURI resultPrincipalURI,
               bool loadReplace, nsIReferrerInfo referrerInfo,

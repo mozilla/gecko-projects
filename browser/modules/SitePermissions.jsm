@@ -211,7 +211,7 @@ const GloballyBlockedPermissions = {
       for (let id of Object.keys(timeStamps)) {
         permissions.push({
           id,
-          state: SitePermissions.BLOCK,
+          state: gPermissionObject[id].getDefault(),
           scope: SitePermissions.SCOPE_GLOBAL,
         });
       }
@@ -238,14 +238,12 @@ const GloballyBlockedPermissions = {
  */
 var SitePermissions = {
   // Permission states.
-  // PROMPT_HIDE state is only used to show the "Hide Prompt" state in the identity panel
-  // for the "plugin:flash" permission and not in pageinfo.
   UNKNOWN: Services.perms.UNKNOWN_ACTION,
   ALLOW: Services.perms.ALLOW_ACTION,
   BLOCK: Services.perms.DENY_ACTION,
   PROMPT: Services.perms.PROMPT_ACTION,
   ALLOW_COOKIES_FOR_SESSION: Ci.nsICookiePermission.ACCESS_SESSION,
-  PROMPT_HIDE: Ci.nsIObjectLoadingContent.PLUGIN_PERMISSION_PROMPT_ACTION_QUIET,
+  AUTOPLAY_BLOCKED_ALL: Ci.nsIAutoplay.BLOCKED_ALL,
 
   // Permission scopes.
   SCOPE_REQUEST: "{SitePermissions.SCOPE_REQUEST}",
@@ -484,6 +482,23 @@ var SitePermissions = {
     return this._defaultPrefBranch.getIntPref(permissionID, this.UNKNOWN);
   },
 
+  /**
+   * Set the default state of a particular permission.
+   *
+   * @param {string} permissionID
+   *        The ID to set the default for.
+   *
+   * @param {string} state
+   *        The state to set.
+   */
+  setDefault(permissionID, state) {
+    if (permissionID in gPermissionObject &&
+        gPermissionObject[permissionID].setDefault) {
+      return gPermissionObject[permissionID].setDefault(state);
+    }
+    let key = "permissions.default." + permissionID;
+    return Services.prefs.setIntPref(key, state);
+  },
   /**
    * Returns the state and scope of a particular permission for a given URI.
    *
@@ -770,7 +785,14 @@ var SitePermissions = {
    * @return {String|null} the localized label or null if an
    *         unknown state was passed.
    */
-  getMultichoiceStateLabel(state) {
+  getMultichoiceStateLabel(permissionID, state) {
+    // If the permission has custom logic for getting its default value,
+    // try that first.
+    if (permissionID in gPermissionObject &&
+        gPermissionObject[permissionID].getMultichoiceStateLabel) {
+      return gPermissionObject[permissionID].getMultichoiceStateLabel(state);
+    }
+
     switch (state) {
       case this.UNKNOWN:
       case this.PROMPT:
@@ -800,12 +822,6 @@ var SitePermissions = {
    *         unknown state was passed.
    */
   getCurrentStateLabel(state, id, scope = null) {
-    // We try to avoid a collision between SitePermissions.PROMPT_HIDE
-    // and SitePermissions.ALLOW_COOKIES_FOR_SESSION which share the same const value.
-    if (id.startsWith("plugin") && state == SitePermissions.PROMPT_HIDE) {
-      return gStringBundle.GetStringFromName("state.current.hide");
-    }
-
     switch (state) {
       case this.PROMPT:
         return gStringBundle.GetStringFromName("state.current.prompt");
@@ -848,24 +864,47 @@ var gPermissionObject = {
    *  - states
    *    Array of permission states to be exposed to the user.
    *    Defaults to ALLOW, BLOCK and the default state (see getDefault).
-   *    The PROMPT_HIDE state is deliberately excluded from "plugin:flash" since we
-   *    don't want to expose a "Hide Prompt" button to the user through pageinfo.
    */
 
   "autoplay-media": {
     exactHostMatch: true,
     getDefault() {
-      let state = Services.prefs.getIntPref("media.autoplay.default",
+      let pref = Services.prefs.getIntPref("media.autoplay.default",
                                             Ci.nsIAutoplay.BLOCKED);
-      if (state == Ci.nsIAutoplay.ALLOWED) {
+      if (pref == Ci.nsIAutoplay.ALLOWED) {
         return SitePermissions.ALLOW;
-      } else if (state == Ci.nsIAutoplay.BLOCKED) {
-        return SitePermissions.BLOCK;
       }
-      return SitePermissions.UNKNOWN;
+      if (pref == Ci.nsIAutoplay.BLOCKED_ALL) {
+        return SitePermissions.AUTOPLAY_BLOCKED_ALL;
+      }
+      return SitePermissions.BLOCK;
+    },
+    setDefault(value) {
+      let prefValue = Ci.nsIAutoplay.BLOCKED;
+      if (value == SitePermissions.ALLOW) {
+        prefValue = Ci.nsIAutoplay.ALLOWED;
+      } else if (value == SitePermissions.AUTOPLAY_BLOCKED_ALL) {
+        prefValue = Ci.nsIAutoplay.BLOCKED_ALL;
+      }
+      Services.prefs.setIntPref("media.autoplay.default", prefValue);
     },
     labelID: "autoplay-media2",
-    states: [ SitePermissions.ALLOW, SitePermissions.BLOCK ],
+    states: [
+      SitePermissions.ALLOW,
+      SitePermissions.BLOCK,
+      SitePermissions.AUTOPLAY_BLOCKED_ALL,
+    ],
+    getMultichoiceStateLabel(state) {
+      switch (state) {
+        case SitePermissions.AUTOPLAY_BLOCKED_ALL:
+          return gStringBundle.GetStringFromName("state.multichoice.autoplayblockall");
+        case SitePermissions.BLOCK:
+          return gStringBundle.GetStringFromName("state.multichoice.autoplayblock");
+        case SitePermissions.ALLOW:
+          return gStringBundle.GetStringFromName("state.multichoice.autoplayallow");
+      }
+      throw new Error(`Unkown state: ${state}`);
+    },
   },
 
   "image": {
@@ -935,11 +974,6 @@ var gPermissionObject = {
   },
 
   "canvas": {
-  },
-
-  "plugin:flash": {
-    labelID: "flash-plugin",
-    states: [ SitePermissions.UNKNOWN, SitePermissions.ALLOW, SitePermissions.BLOCK ],
   },
 
   "midi": {

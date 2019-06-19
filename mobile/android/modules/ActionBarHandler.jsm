@@ -503,7 +503,7 @@ var ActionBarHandler = {
           }
           // Can't paste if Clipboard empty.
           let flavors = ["text/unicode"];
-          return Services.clipboard.hasDataMatchingFlavors(flavors, flavors.length,
+          return Services.clipboard.hasDataMatchingFlavors(flavors,
             Ci.nsIClipboard.kGlobalClipboard);
         },
       },
@@ -553,7 +553,7 @@ var ActionBarHandler = {
     SEARCH: {
       id: "search_action",
       label: () => Strings.browser.formatStringFromName("contextmenu.search",
-        [Services.search.defaultEngine.name], 1),
+        [Services.search.defaultEngine.name]),
       icon: "drawable://ab_search",
       order: 1,
       floatingOrder: 6,

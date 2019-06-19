@@ -5,12 +5,12 @@ let gLogins = [{
     guid: "70a",
     username: "jared",
     password: "deraj",
-    hostname: "https://www.example.com",
+    origin: "https://www.example.com",
   }, {
     guid: "70b",
     username: "firefox",
     password: "xoferif",
-    hostname: "https://www.example.com",
+    origin: "https://www.example.com",
   },
 ];
 
@@ -45,12 +45,13 @@ add_task(async function test_login_item() {
   });
   await ContentTask.spawn(browser, gLogins, async (logins) => {
     let loginList = content.document.querySelector("login-list");
-    let loginListItems = loginList.shadowRoot.querySelectorAll("login-list-item");
-    loginListItems[0].click();
+    let loginListItem = loginList.shadowRoot.querySelector("login-list-item[data-guid]");
+    info("Clicking on the first login");
+    loginListItem.click();
 
     let loginItem = Cu.waiveXrays(content.document.querySelector("login-item"));
     let loginItemPopulated = await ContentTaskUtils.waitForCondition(() => {
-      return loginItem._login.guid == loginListItems[0].getAttribute("guid");
+      return loginItem._login.guid == loginListItem.dataset.guid;
     }, "Waiting for login item to get populated");
     ok(loginItemPopulated, "The login item should get populated");
 

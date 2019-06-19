@@ -346,8 +346,7 @@ class nsBaseWidget : public nsIWidget, public nsSupportsWeakReference {
   // theme changes.
   void NotifySysColorChanged();
   void NotifyThemeChanged();
-  void NotifyUIStateChanged(UIStateChangeType aShowAccelerators,
-                            UIStateChangeType aShowFocusRings);
+  void NotifyUIStateChanged(UIStateChangeType aShowFocusRings);
 
 #ifdef ACCESSIBILITY
   // Get the accessible for the window.
@@ -413,6 +412,8 @@ class nsBaseWidget : public nsIWidget, public nsSupportsWeakReference {
   static nsIRollupListener* GetActiveRollupListener();
 
   void Shutdown();
+
+  void QuitIME();
 
 #if defined(XP_WIN)
   uint64_t CreateScrollCaptureContainer() override;
@@ -691,6 +692,7 @@ class nsBaseWidget : public nsIWidget, public nsSupportsWeakReference {
   bool mUpdateCursor;
   bool mUseAttachedEvents;
   bool mIMEHasFocus;
+  bool mIMEHasQuit;
   bool mIsFullyOccluded;
   static nsIRollupListener* gRollupListener;
 

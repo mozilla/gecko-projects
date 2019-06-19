@@ -224,11 +224,12 @@ export function getSourceLocationFromMouseEvent(
     left: e.clientX,
     top: e.clientY,
   });
+  const sourceId = source.id;
 
   return {
-    sourceId: source.id,
-    line: line + 1,
-    column: ch + 1,
+    sourceId,
+    line: fromEditorLine(sourceId, line),
+    column: isWasm(sourceId) ? 0 : ch + 1,
   };
 }
 
@@ -265,6 +266,7 @@ export function getTokenEnd(codeMirror: Object, line: number, column: number) {
     line: line,
     ch: column + 1,
   });
+  const tokenString = token.string;
 
-  return token.end;
+  return tokenString === "{" || tokenString === "[" ? null : token.end;
 }

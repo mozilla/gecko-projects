@@ -90,9 +90,9 @@ Prompter.prototype = {
         return p.nsIPrompt_promptPassword(title, text, pass, checkLabel, checkValue);
     },
 
-    select(domWin, title, text, count, list, selected) {
+    select(domWin, title, text, list, selected) {
         let p = this.pickPrompter(domWin);
-        return p.select(title, text, count, list, selected);
+        return p.select(title, text, list, selected);
     },
 
 
@@ -115,7 +115,7 @@ var PromptUtilsTemp = {
 
     getLocalizedString(key, formatArgs) {
         if (formatArgs)
-            return this.strBundle.formatStringFromName(key, formatArgs, formatArgs.length);
+            return this.strBundle.formatStringFromName(key, formatArgs);
         return this.strBundle.GetStringFromName(key);
     },
 
@@ -792,7 +792,7 @@ ModalPrompter.prototype = {
         return ok;
     },
 
-    select(title, text, count, list, selected) {
+    select(title, text, list, selected) {
         if (!title)
             title = PromptUtils.getLocalizedString("Select");
 

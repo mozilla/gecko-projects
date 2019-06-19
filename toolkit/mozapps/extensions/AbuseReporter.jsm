@@ -9,6 +9,10 @@ const {XPCOMUtils} = ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm")
 Cu.importGlobalProperties(["fetch"]);
 
 const PREF_ABUSE_REPORT_URL  = "extensions.abuseReport.url";
+
+// Maximum length of the string properties sent to the API endpoint.
+const MAX_STRING_LENGTH = 255;
+
 // Minimum time between report submissions (in ms).
 const MIN_MS_BETWEEN_SUBMITS = 30000;
 
@@ -35,13 +39,18 @@ const ERROR_TYPES = Object.freeze([
 ]);
 
 class AbuseReportError extends Error {
-  constructor(errorType) {
+  constructor(errorType, errorInfo = undefined) {
     if (!ERROR_TYPES.includes(errorType)) {
       throw new Error(`Unknown AbuseReportError type "${errorType}"`);
     }
-    super(errorType);
+
+    let message = errorInfo ?
+      `${errorType} - ${errorInfo}` : errorType;
+
+    super(message);
     this.name = "AbuseReportError";
     this.errorType = errorType;
+    this.errorInfo = errorInfo;
   }
 }
 
@@ -119,11 +128,15 @@ const AbuseReporter = {
    *         An object that contains the collected details.
    */
   async getReportData(addon) {
+    const truncateString = (text) =>
+      typeof text == "string" ? text.slice(0, MAX_STRING_LENGTH) : text;
+
     const data = {
       addon: addon.id,
       addon_version: addon.version,
-      addon_summary: addon.description,
-      addon_install_origin: addon.sourceURI && addon.sourceURI.spec,
+      addon_name: truncateString(addon.name),
+      addon_summary: truncateString(addon.description),
+      addon_install_origin: addon.sourceURI && truncateString(addon.sourceURI.spec),
       install_date: addon.installDate && addon.installDate.toISOString(),
     };
 
@@ -135,13 +148,12 @@ const AbuseReporter = {
       const {source, method} = addon.installTelemetryInfo;
       switch (source) {
         case "enterprise-policy":
-        case "file-uri":
+        case "file-url":
         case "system-addon":
         case "temporary-addon":
           install_method = source.replace(/-/g, "_");
           break;
         case "distribution":
-        case "sideload":
         case "sync":
           install_method = source;
           break;
@@ -150,6 +162,7 @@ const AbuseReporter = {
       }
 
       switch (method) {
+        case "sideload":
         case "link":
           install_method = method;
           break;
@@ -166,8 +179,6 @@ const AbuseReporter = {
     }
     data.addon_install_method = install_method;
 
-    // TODO: Add support for addon_signature "curated" in AbuseReport
-    // (Bug 1549290).
     switch (addon.signedState) {
       case AddonManager.SIGNEDSTATE_BROKEN:
         data.addon_signature = "broken";
@@ -192,6 +203,13 @@ const AbuseReporter = {
         break;
       default:
         data.addon_signature = `unknown: ${addon.signedState}`;
+    }
+
+    // Set "curated" as addon_signature on recommended addons
+    // (addon.isRecommended internally checks that the addon is also
+    // signed correctly).
+    if (addon.isRecommended) {
+      data.addon_signature = "curated";
     }
 
     data.client_id = await ClientID.getClientIdHash();
@@ -272,20 +290,32 @@ class AbuseReport {
     } = this[PRIVATE_REPORT_PROPS];
 
     // Record telemetry event and throw an AbuseReportError.
-    const throwReportError = (errorType) => {
+    const rejectReportError = async (errorType, {response} = {}) => {
       this.recordTelemetry(errorType);
-      throw new AbuseReportError(errorType);
+
+      let errorInfo;
+      if (response) {
+        try {
+          errorInfo = JSON.stringify({
+            status: response.status,
+            responseText: await response.text().catch(err => ""),
+          });
+        } catch (err) {
+          // leave the errorInfo empty if we failed to stringify it.
+        }
+      }
+      throw new AbuseReportError(errorType, errorInfo);
     };
 
     if (aborted) {
       // Report aborted before being actually submitted.
-      throwReportError("ERROR_ABORTED_SUBMIT");
+      return rejectReportError("ERROR_ABORTED_SUBMIT");
     }
 
     // Prevent submit of a new abuse report in less than MIN_MS_BETWEEN_SUBMITS.
     let msFromLastReport = AbuseReporter.getTimeFromLastReport();
     if (msFromLastReport < MIN_MS_BETWEEN_SUBMITS) {
-      throwReportError("ERROR_RECENT_SUBMIT");
+      return rejectReportError("ERROR_RECENT_SUBMIT");
     }
 
     let response;
@@ -305,10 +335,10 @@ class AbuseReport {
       });
     } catch (err) {
       if (err.name === "AbortError") {
-        throwReportError("ERROR_ABORTED_SUBMIT");
+        return rejectReportError("ERROR_ABORTED_SUBMIT");
       }
       Cu.reportError(err);
-      throwReportError("ERROR_NETWORK");
+      return rejectReportError("ERROR_NETWORK");
     }
 
     if (response.ok && response.status >= 200 && response.status < 400) {
@@ -321,19 +351,19 @@ class AbuseReport {
       }
       AbuseReporter.updateLastReportTimestamp();
       this.recordTelemetry();
-      return;
+      return undefined;
     }
 
     if (response.status >= 400 && response.status < 500) {
-      throwReportError("ERROR_CLIENT");
+      return rejectReportError("ERROR_CLIENT", {response});
     }
 
     if (response.status >= 500 && response.status < 600) {
-      throwReportError("ERROR_SERVER");
+      return rejectReportError("ERROR_SERVER", {response});
     }
 
     // We got an unexpected HTTP status code.
-    throwReportError("ERROR_UNKNOWN");
+    return rejectReportError("ERROR_UNKNOWN", {response});
   }
 
   /**

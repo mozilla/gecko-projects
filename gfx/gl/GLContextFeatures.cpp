@@ -111,11 +111,6 @@ static const FeatureInfo sFeatureInfoArr[] = {
      {GLContext::ARB_draw_instanced, GLContext::EXT_draw_instanced,
       GLContext::NV_draw_instanced, GLContext::ANGLE_instanced_arrays,
       GLContext::Extensions_End}},
-    {"draw_range_elements",
-     GLVersion::GL1_2,
-     GLESVersion::ES3,
-     GLContext::Extension_None,
-     {GLContext::EXT_draw_range_elements, GLContext::Extensions_End}},
     {"element_index_uint",
      GLVersion::GL2,
      GLESVersion::ES3,
@@ -538,8 +533,9 @@ static inline uint32_t ProfileVersionForFeature(GLFeature feature,
   return (uint32_t)featureInfo.mOpenGLVersion;
 }
 
-bool IsFeaturePartOfProfileVersion(GLFeature feature, ContextProfile profile,
-                                   unsigned int version) {
+static bool IsFeaturePartOfProfileVersion(GLFeature feature,
+                                          ContextProfile profile,
+                                          unsigned int version) {
   unsigned int profileVersion = ProfileVersionForFeature(feature, profile);
 
   /**

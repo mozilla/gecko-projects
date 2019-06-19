@@ -92,10 +92,7 @@ bool WeakMapObject::get(JSContext* cx, unsigned argc, Value* vp) {
   if (ObjectValueMap* map =
           args.thisv().toObject().as<WeakMapObject>().getMap()) {
     JSObject* key = &args[0].toObject();
-    // The lookup here is only used for the removal, so we can skip the read
-    // barrier. This is not very important for performance, but makes it easier
-    // to test nonbarriered removal from internal weakmaps (eg Debugger maps.)
-    if (ObjectValueMap::Ptr ptr = map->unbarrieredLookup(key)) {
+    if (ObjectValueMap::Ptr ptr = map->lookup(key)) {
       map->remove(ptr);
       args.rval().setBoolean(true);
       return true;
@@ -118,7 +115,7 @@ bool WeakMapObject::delete_(JSContext* cx, unsigned argc, Value* vp) {
   MOZ_ASSERT(WeakMapObject::is(args.thisv()));
 
   if (!args.get(0).isObject()) {
-    ReportNotObjectWithName(cx, "WeakMap key", args.get(0));
+    ReportNotObject(cx, JSMSG_OBJECT_REQUIRED_WEAKMAP_KEY, args.get(0));
     return false;
   }
 
@@ -184,7 +181,7 @@ static void WeakCollection_trace(JSTracer* trc, JSObject* obj) {
 static void WeakCollection_finalize(FreeOp* fop, JSObject* obj) {
   MOZ_ASSERT(fop->maybeOnHelperThread());
   if (ObjectValueMap* map = obj->as<WeakCollectionObject>().getMap()) {
-    fop->delete_(map);
+    fop->delete_(obj, map, MemoryUse::WeakMapObject);
   }
 }
 

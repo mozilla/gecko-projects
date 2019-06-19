@@ -85,6 +85,7 @@
 #include "gfxConfig.h"
 #include "nsView.h"
 #include "nsViewManager.h"
+#include "mozilla/StaticPrefs.h"
 
 #ifdef DEBUG
 #  include "nsIObserver.h"
@@ -175,6 +176,7 @@ nsBaseWidget::nsBaseWidget()
       mUpdateCursor(true),
       mUseAttachedEvents(false),
       mIMEHasFocus(false),
+      mIMEHasQuit(false),
       mIsFullyOccluded(false) {
 #ifdef NOISY_WIDGET_LEAKS
   gNumWidgets++;
@@ -209,9 +211,15 @@ WidgetShutdownObserver::~WidgetShutdownObserver() {
 NS_IMETHODIMP
 WidgetShutdownObserver::Observe(nsISupports* aSubject, const char* aTopic,
                                 const char16_t* aData) {
-  if (mWidget && !strcmp(aTopic, NS_XPCOM_SHUTDOWN_OBSERVER_ID)) {
+  if (!mWidget) {
+    return NS_OK;
+  }
+  if (!strcmp(aTopic, NS_XPCOM_SHUTDOWN_OBSERVER_ID)) {
     RefPtr<nsBaseWidget> widget(mWidget);
     widget->Shutdown();
+  } else if (!strcmp(aTopic, "quit-application")) {
+    RefPtr<nsBaseWidget> widget(mWidget);
+    widget->QuitIME();
   }
   return NS_OK;
 }
@@ -220,12 +228,35 @@ void WidgetShutdownObserver::Register() {
   if (!mRegistered) {
     mRegistered = true;
     nsContentUtils::RegisterShutdownObserver(this);
+
+#ifndef MOZ_WIDGET_ANDROID
+    // The primary purpose of observing quit-application is
+    // to avoid leaking a widget on Windows when nothing else
+    // breaks the circular reference between the widget and
+    // TSFTextStore. However, our Android IME code crashes if
+    // doing this on Android, so let's not do this on Android.
+    // Doing this on Gtk and Mac just in case.
+    nsCOMPtr<nsIObserverService> observerService =
+        mozilla::services::GetObserverService();
+    if (observerService) {
+      observerService->AddObserver(this, "quit-application", false);
+    }
+#endif
   }
 }
 
 void WidgetShutdownObserver::Unregister() {
   if (mRegistered) {
     mWidget = nullptr;
+
+#ifndef MOZ_WIDGET_ANDROID
+    nsCOMPtr<nsIObserverService> observerService =
+        mozilla::services::GetObserverService();
+    if (observerService) {
+      observerService->RemoveObserver(this, "quit-application");
+    }
+#endif
+
     nsContentUtils::UnregisterShutdownObserver(this);
     mRegistered = false;
   }
@@ -242,6 +273,11 @@ void nsBaseWidget::Shutdown() {
     sPluginWidgetList = nullptr;
   }
 #endif
+}
+
+void nsBaseWidget::QuitIME() {
+  IMEStateManager::WidgetOnQuit(this);
+  this->mIMEHasQuit = true;
 }
 
 void nsBaseWidget::DestroyCompositor() {
@@ -898,7 +934,7 @@ void nsBaseWidget::ConfigureAPZCTreeManager() {
   // have code that can deal with them properly. If APZ is not enabled, this
   // function doesn't get called.
   if (Preferences::GetInt("dom.w3c_touch_events.enabled", 0) ||
-      Preferences::GetBool("dom.w3c_pointer_events.enabled", false)) {
+      StaticPrefs::dom_w3c_pointer_events_enabled()) {
     RegisterTouchWindow();
   }
 }
@@ -976,7 +1012,7 @@ nsEventStatus nsBaseWidget::ProcessUntransformedAPZEvent(
     UniquePtr<DisplayportSetListener> postLayerization;
     if (WidgetTouchEvent* touchEvent = aEvent->AsTouchEvent()) {
       if (touchEvent->mMessage == eTouchStart) {
-        if (StaticPrefs::TouchActionEnabled()) {
+        if (StaticPrefs::layout_css_touch_action_enabled()) {
           APZCCallbackHelper::SendSetAllowedTouchBehaviorNotification(
               this, GetDocument(), *(original->AsTouchEvent()), aInputBlockId,
               mSetAllowedTouchBehaviorCallback);
@@ -1693,17 +1729,18 @@ void nsBaseWidget::NotifyThemeChanged() {
   }
 }
 
-void nsBaseWidget::NotifyUIStateChanged(UIStateChangeType aShowAccelerators,
-                                        UIStateChangeType aShowFocusRings) {
+void nsBaseWidget::NotifyUIStateChanged(UIStateChangeType aShowFocusRings) {
   if (Document* doc = GetDocument()) {
-    nsPIDOMWindowOuter* win = doc->GetWindow();
-    if (win) {
-      win->SetKeyboardIndicators(aShowAccelerators, aShowFocusRings);
+    if (nsPIDOMWindowOuter* win = doc->GetWindow()) {
+      win->SetKeyboardIndicators(aShowFocusRings);
     }
   }
 }
 
 nsresult nsBaseWidget::NotifyIME(const IMENotification& aIMENotification) {
+  if (mIMEHasQuit) {
+    return NS_OK;
+  }
   switch (aIMENotification.mMessage) {
     case REQUEST_TO_COMMIT_COMPOSITION:
     case REQUEST_TO_CANCEL_COMPOSITION:

@@ -9,15 +9,17 @@ let TEST_LOGIN2 = new nsLoginInfo("https://example2.com/", "https://example2.com
 add_task(async function setup() {
   await SpecialPowers.pushPrefEnv({"set": [["signon.management.overrideURI", "about:logins?filter=%DOMAIN%"]] });
 
-  for (let login of [TEST_LOGIN1, TEST_LOGIN2]) {
-    let storageChangedPromised = TestUtils.topicObserved("passwordmgr-storage-changed",
-                                                         (_, data) => data == "addLogin");
-    login = Services.logins.addLogin(login);
-    await storageChangedPromised;
-  }
+  let storageChangedPromised = TestUtils.topicObserved("passwordmgr-storage-changed",
+                                                       (_, data) => data == "addLogin");
+  TEST_LOGIN1 = Services.logins.addLogin(TEST_LOGIN1);
+  await storageChangedPromised;
+  storageChangedPromised = TestUtils.topicObserved("passwordmgr-storage-changed",
+                                                   (_, data) => data == "addLogin");
+  TEST_LOGIN2 = Services.logins.addLogin(TEST_LOGIN2);
+  await storageChangedPromised;
   let tabOpenedPromise =
-    BrowserTestUtils.waitForNewTab(gBrowser, "about:logins?filter=" + encodeURIComponent(TEST_LOGIN1.hostname), true);
-  LoginHelper.openPasswordManager(window, { filterString: TEST_LOGIN1.hostname, entryPoint: "preferences" });
+    BrowserTestUtils.waitForNewTab(gBrowser, "about:logins?filter=" + encodeURIComponent(TEST_LOGIN1.origin), true);
+  LoginHelper.openPasswordManager(window, { filterString: TEST_LOGIN1.origin, entryPoint: "preferences" });
   await tabOpenedPromise;
   registerCleanupFunction(() => {
     BrowserTestUtils.removeTab(gBrowser.selectedTab);
@@ -38,13 +40,14 @@ add_task(async function test_query_parameter_filter() {
     }, "Waiting for logins to be cached");
 
     let loginFilter = Cu.waiveXrays(content.document.querySelector("login-filter"));
-    is(loginFilter.value, logins[0].hostname, "The filter should be prepopulated");
+    is(loginFilter.value, logins[0].origin, "The filter should be prepopulated");
 
     let hiddenLoginListItems = loginList.shadowRoot.querySelectorAll("login-list-item[hidden]");
     let visibleLoginListItems = loginList.shadowRoot.querySelectorAll("login-list-item:not([hidden])");
-    is(visibleLoginListItems.length, 1, "One login should be visible");
-    is(visibleLoginListItems[0].guid, logins[0].guid, "TEST_LOGIN1 should be visible");
+    is(visibleLoginListItems.length, 2, "The 'new' login and one login should be visible");
+    ok(!visibleLoginListItems[0].dataset.guid, "The 'new' login should be visible");
+    is(visibleLoginListItems[1].dataset.guid, logins[0].guid, "TEST_LOGIN1 should be visible");
     is(hiddenLoginListItems.length, 1, "One login should be hidden");
-    is(hiddenLoginListItems[0].guid, logins[1].guid, "TEST_LOGIN2 should be hidden");
+    is(hiddenLoginListItems[0].dataset.guid, logins[1].guid, "TEST_LOGIN2 should be hidden");
   });
 });

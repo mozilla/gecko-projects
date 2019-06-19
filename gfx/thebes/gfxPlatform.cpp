@@ -25,6 +25,7 @@
 #include "mozilla/TimeStamp.h"
 #include "mozilla/Unused.h"
 #include "mozilla/IntegerPrintfMacros.h"
+#include "mozilla/Base64.h"
 
 #include "mozilla/Logging.h"
 #include "mozilla/Services.h"
@@ -39,6 +40,8 @@
 #include "gfxConfig.h"
 #include "VRProcessManager.h"
 #include "VRThread.h"
+
+#include "mozilla/arm.h"
 
 #ifdef XP_WIN
 #  include <process.h>
@@ -72,7 +75,7 @@
 #endif
 
 #ifdef MOZ_WAYLAND
-#  include "mozilla/widget/nsWaylandDisplayShutdown.h"
+#  include "mozilla/widget/nsWaylandDisplay.h"
 #endif
 
 #include "nsGkAtoms.h"
@@ -462,6 +465,7 @@ gfxPlatform::gfxPlatform()
       mApzSupportCollector(this, &gfxPlatform::GetApzSupportInfo),
       mTilesInfoCollector(this, &gfxPlatform::GetTilesSupportInfo),
       mFrameStatsCollector(this, &gfxPlatform::GetFrameStats),
+      mCMSInfoCollector(this, &gfxPlatform::GetCMSSupportInfo),
       mCompositorBackend(layers::LayersBackend::LAYERS_NONE),
       mScreenDepth(0) {
   mAllowDownloadableFonts = UNINITIALIZED_VALUE;
@@ -1985,6 +1989,11 @@ eCMSMode gfxPlatform::GetCMSMode() {
     if (enableV4) {
       qcms_enable_iccv4();
     }
+#ifdef MOZILLA_MAY_SUPPORT_NEON
+    if (mozilla::supports_neon()) {
+      qcms_enable_neon();
+    }
+#endif
     gCMSInitialized = true;
   }
   return gCMSMode;
@@ -2421,6 +2430,9 @@ void gfxPlatform::InitAcceleration() {
         VideoDecodingFailedChangedCallback,
         "media.hardware-video-decoding.failed");
     InitGPUProcessPrefs();
+
+    gfxVars::SetRemoteCanvasEnabled(StaticPrefs::CanvasRemote() &&
+                                    gfxConfig::IsEnabled(Feature::GPU_PROCESS));
   }
 }
 
@@ -2617,27 +2629,9 @@ static FeatureState& WebRenderHardwareQualificationStatus(
             FeatureStatus::BlockedDeviceUnknown, "Bad device id",
             NS_LITERAL_CSTRING("FEATURE_FAILURE_BAD_DEVICE_ID"));
       } else {
-#ifdef NIGHTLY_BUILD
-        // For AMD/Intel devices, if we have a battery, ignore it if the screen
-        // is small enough. Note that we always check for a battery with NVIDIA
-        // because we do not have a limited/curated set of devices to support
-        // WebRender on.
-        const int32_t kMaxPixelsBattery = 1920 * 1200;  // WUXGA
         const int32_t screenPixels = aScreenSize.width * aScreenSize.height;
-        bool disableForBattery = aHasBattery;
-        if ((adapterVendorID == u"0x8086" || adapterVendorID == u"0x1002") &&
-            screenPixels > 0 && screenPixels <= kMaxPixelsBattery) {
-          disableForBattery = false;
-        }
-#else
-        bool disableForBattery = aHasBattery;
-#endif
 
-        if (disableForBattery) {
-          featureWebRenderQualified.Disable(
-              FeatureStatus::BlockedHasBattery, "Has battery",
-              NS_LITERAL_CSTRING("FEATURE_FAILURE_WR_HAS_BATTERY"));
-        } else if (adapterVendorID == u"0x10de") {
+        if (adapterVendorID == u"0x10de") {
           if (deviceID < 0x6c0) {
             // 0x6c0 is the lowest Fermi device id. Unfortunately some Tesla
             // devices that don't support D3D 10.1 have higher deviceIDs. They
@@ -2646,7 +2640,6 @@ static FeatureState& WebRenderHardwareQualificationStatus(
                 FeatureStatus::BlockedDeviceTooOld, "Device too old",
                 NS_LITERAL_CSTRING("FEATURE_FAILURE_DEVICE_TOO_OLD"));
           }
-#ifdef EARLY_BETA_OR_EARLIER
         } else if (adapterVendorID == u"0x1002") {  // AMD
           // AMD deviceIDs are not very well ordered. This
           // condition is based off the information in gpu-db
@@ -2659,13 +2652,12 @@ static FeatureState& WebRenderHardwareQualificationStatus(
               (deviceID >= 0x9830 && deviceID < 0x9870) ||
               (deviceID >= 0x9900 && deviceID < 0x9a00)) {
             // we have a desktop CAYMAN, SI, CIK, VI, or GFX9 device
+            // so treat the device as qualified.
           } else {
             featureWebRenderQualified.Disable(
                 FeatureStatus::BlockedDeviceTooOld, "Device too old",
                 NS_LITERAL_CSTRING("FEATURE_FAILURE_DEVICE_TOO_OLD"));
           }
-#endif
-#ifdef NIGHTLY_BUILD
         } else if (adapterVendorID == u"0x8086") {  // Intel
           const uint16_t supportedDevices[] = {
               // skylake gt2+
@@ -2757,13 +2749,8 @@ static FeatureState& WebRenderHardwareQualificationStatus(
               break;
             }
           }
-          if (!supported) {
-            featureWebRenderQualified.Disable(
-                FeatureStatus::BlockedDeviceTooOld, "Device too old",
-                NS_LITERAL_CSTRING("FEATURE_FAILURE_DEVICE_TOO_OLD"));
-          }
-#  ifdef MOZ_WIDGET_GTK
-          else {
+          if (supported) {
+#ifdef MOZ_WIDGET_GTK
             // Performance is not great on 4k screens with WebRender + Linux.
             // Disable it for now if it is too large.
             const int32_t kMaxPixelsLinux = 3440 * 1440;  // UWQHD
@@ -2775,14 +2762,49 @@ static FeatureState& WebRenderHardwareQualificationStatus(
               featureWebRenderQualified.Disable(
                   FeatureStatus::BlockedScreenUnknown, "Screen size unknown",
                   NS_LITERAL_CSTRING("FEATURE_FAILURE_SCREEN_SIZE_UNKNOWN"));
+            } else {
+#endif  // MOZ_WIDGET_GTK
+#ifndef NIGHTLY_BUILD
+              featureWebRenderQualified.Disable(
+                  FeatureStatus::BlockedReleaseChannelIntel,
+                  "Release channel and Intel",
+                  NS_LITERAL_CSTRING("FEATURE_FAILURE_RELEASE_CHANNEL_INTEL"));
+#endif  // !NIGHTLY_BUILD
+#ifdef MOZ_WIDGET_GTK
             }
+#endif  // MOZ_WIDGET_GTK
+          } else {
+            featureWebRenderQualified.Disable(
+                FeatureStatus::BlockedDeviceTooOld, "Device too old",
+                NS_LITERAL_CSTRING("FEATURE_FAILURE_DEVICE_TOO_OLD"));
           }
-#  endif  // MOZ_WIDGET_GTK
-#endif    // NIGHTLY_BUILD
         } else {
           featureWebRenderQualified.Disable(
               FeatureStatus::BlockedVendorUnsupported, "Unsupported vendor",
               NS_LITERAL_CSTRING("FEATURE_FAILURE_UNSUPPORTED_VENDOR"));
+        }
+
+        // We leave checking the battery for last because we would like to know
+        // which users were denied WebRender only because they have a battery.
+        if (featureWebRenderQualified.IsEnabled() && aHasBattery) {
+          // For AMD/Intel devices, if we have a battery, ignore it if the
+          // screen is small enough. Note that we always check for a battery
+          // with NVIDIA because we do not have a limited/curated set of devices
+          // to support WebRender on.
+          const int32_t kMaxPixelsBattery = 1920 * 1200;  // WUXGA
+          if ((adapterVendorID == u"0x8086" || adapterVendorID == u"0x1002") &&
+              screenPixels > 0 && screenPixels <= kMaxPixelsBattery) {
+#ifndef NIGHTLY_BUILD
+            featureWebRenderQualified.Disable(
+                FeatureStatus::BlockedReleaseChannelBattery,
+                "Release channel and battery",
+                NS_LITERAL_CSTRING("FEATURE_FAILURE_RELEASE_CHANNEL_BATTERY"));
+#endif  // !NIGHTLY_BUILD
+          } else {
+            featureWebRenderQualified.Disable(
+                FeatureStatus::BlockedHasBattery, "Has battery",
+                NS_LITERAL_CSTRING("FEATURE_FAILURE_WR_HAS_BATTERY"));
+          }
         }
       }
     }
@@ -3243,6 +3265,38 @@ void gfxPlatform::GetFrameStats(mozilla::widget::InfoObject& aObj) {
   }
 }
 
+void gfxPlatform::GetCMSSupportInfo(mozilla::widget::InfoObject& aObj) {
+  void* profile = nullptr;
+  size_t size = 0;
+
+  GetCMSOutputProfileData(profile, size);
+  if (!profile) {
+    return;
+  }
+
+  // Some profiles can be quite large. We don't want to include giant profiles
+  // by default in about:support. For now, we only accept less than 8kiB.
+  const size_t kMaxProfileSize = 8192;
+  if (size < kMaxProfileSize) {
+    char* encodedProfile = nullptr;
+    nsresult rv =
+        Base64Encode(reinterpret_cast<char*>(profile), size, &encodedProfile);
+    if (NS_SUCCEEDED(rv)) {
+      aObj.DefineProperty("CMSOutputProfile", encodedProfile);
+      free(encodedProfile);
+    } else {
+      nsPrintfCString msg("base64 encode failed 0x%08x",
+                          static_cast<uint32_t>(rv));
+      aObj.DefineProperty("CMSOutputProfile", msg.get());
+    }
+  } else {
+    nsPrintfCString msg("%zu bytes, too large", size);
+    aObj.DefineProperty("CMSOutputProfile", msg.get());
+  }
+
+  free(profile);
+}
+
 class FrameStatsComparator {
  public:
   bool Equals(const FrameStats& aA, const FrameStats& aB) const {
@@ -3357,6 +3411,8 @@ void gfxPlatform::NotifyGPUProcessDisabled() {
             NS_LITERAL_CSTRING("FEATURE_FAILURE_GPU_PROCESS_DISABLED"));
     gfxVars::SetUseWebRender(false);
   }
+
+  gfxVars::SetRemoteCanvasEnabled(false);
 }
 
 void gfxPlatform::FetchAndImportContentDeviceData() {

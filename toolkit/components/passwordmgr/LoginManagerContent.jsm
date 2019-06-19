@@ -34,6 +34,8 @@ ChromeUtils.defineModuleGetter(this, "LoginHelper",
                                "resource://gre/modules/LoginHelper.jsm");
 ChromeUtils.defineModuleGetter(this, "InsecurePasswordUtils",
                                "resource://gre/modules/InsecurePasswordUtils.jsm");
+ChromeUtils.defineModuleGetter(this, "ContentDOMReference",
+                               "resource://gre/modules/ContentDOMReference.jsm");
 
 XPCOMUtils.defineLazyServiceGetter(this, "gNetUtil",
                                    "@mozilla.org/network/util;1",
@@ -304,7 +306,7 @@ this.LoginManagerContent = {
         loginFormOrigin: msg.data.loginFormOrigin,
         loginsFound: LoginHelper.vanillaObjectsToLogins(msg.data.logins),
         recipes: msg.data.recipes,
-        inputElement: msg.objects.inputElement,
+        inputElementIdentifier: msg.data.inputElementIdentifier,
       });
       return;
     }
@@ -684,15 +686,22 @@ this.LoginManagerContent = {
    *            from the origin of the form used for the fill.
    *          recipes:
    *            Fill recipes transmitted together with the original message.
-   *          inputElement:
-   *            Username or password input element from the form we want to fill.
+   *          inputElementIdentifier:
+   *            An identifier generated for the input element via ContentDOMReference.
    *        }
    */
-  fillForm({ topDocument, loginFormOrigin, loginsFound, recipes, inputElement }) {
-    if (!inputElement) {
+  fillForm({ topDocument, loginFormOrigin, loginsFound, recipes, inputElementIdentifier }) {
+    if (!inputElementIdentifier) {
       log("fillForm: No input element specified");
       return;
     }
+
+    let inputElement = ContentDOMReference.resolve(inputElementIdentifier);
+    if (!inputElement) {
+      log("fillForm: Could not resolve inputElementIdentifier to a living element.");
+      return;
+    }
+
     if (LoginHelper.getLoginOrigin(topDocument.documentURI) != loginFormOrigin) {
       if (!inputElement ||
           LoginHelper.getLoginOrigin(inputElement.ownerDocument.documentURI) != loginFormOrigin) {
@@ -1117,16 +1126,16 @@ this.LoginManagerContent = {
       return;
     }
 
-    let hostname = LoginHelper.getLoginOrigin(doc.documentURI);
-    if (!hostname) {
-      log("(form submission ignored -- invalid hostname)");
+    let origin = LoginHelper.getLoginOrigin(doc.documentURI);
+    if (!origin) {
+      log("(form submission ignored -- invalid origin)");
       return;
     }
 
-    let formSubmitURL = LoginHelper.getFormActionOrigin(form);
+    let formActionOrigin = LoginHelper.getFormActionOrigin(form);
     let messageManager = win.docShell.messageManager;
 
-    let recipes = LoginRecipesContent.getRecipes(hostname, win);
+    let recipes = LoginRecipesContent.getRecipes(origin, win);
 
     // Get the appropriate fields from the form.
     let [usernameField, newPasswordField, oldPasswordField] =
@@ -1205,8 +1214,8 @@ this.LoginManagerContent = {
 
     let autoFilledLogin = this.stateForDocument(doc).fillsByRootElement.get(form.rootElement);
     messageManager.sendAsyncMessage("PasswordManager:onFormSubmit",
-                                    { hostname,
-                                      formSubmitURL,
+                                    { origin,
+                                      formActionOrigin,
                                       autoFilledLoginGuid: autoFilledLogin && autoFilledLogin.guid,
                                       usernameField: mockUsername,
                                       newPasswordField: mockPassword,
@@ -1382,19 +1391,19 @@ this.LoginManagerContent = {
       }
 
       if (!userTriggered) {
-        // Only autofill logins that match the form's action and hostname. In the above code
+        // Only autofill logins that match the form's action and origin. In the above code
         // we have attached autocomplete for logins that don't match the form action.
         let loginOrigin = LoginHelper.getLoginOrigin(form.ownerDocument.documentURI);
         let formActionOrigin = LoginHelper.getFormActionOrigin(form);
         foundLogins = foundLogins.filter(l => {
-          let formActionMatches = LoginHelper.isOriginMatching(l.formSubmitURL,
+          let formActionMatches = LoginHelper.isOriginMatching(l.formActionOrigin,
                                                                formActionOrigin,
                                                                {
                                                                  schemeUpgrades: LoginHelper.schemeUpgrades,
                                                                  acceptWildcardMatch: true,
                                                                  acceptDifferentSubdomains: false,
                                                                });
-          let formOriginMatches = LoginHelper.isOriginMatching(l.hostname,
+          let formOriginMatches = LoginHelper.isOriginMatching(l.origin,
                                                                loginOrigin,
                                                                {
                                                                  schemeUpgrades: LoginHelper.schemeUpgrades,

@@ -35,6 +35,7 @@ common-tests:
     - mochitest-devtools-chrome
     - mochitest-gpu
     - mochitest-media
+    - mochitest-remote
     - mochitest-webgl1-core
     - mochitest-webgl1-ext
     - reftest
@@ -250,6 +251,7 @@ windows-tests:
     - mochitest-devtools-chrome
     - mochitest-gpu
     - mochitest-media
+    - mochitest-remote
     - mochitest-webgl1-core
     - mochitest-webgl1-ext
     - mochitest-webgl2-core
@@ -274,6 +276,7 @@ windows-aarch64-tests:
     - mochitest-devtools-chrome
     - mochitest-gpu
     - mochitest-media
+    - mochitest-remote
     - mochitest-webgl1-core
     - mochitest-webgl1-ext
     - mochitest-webgl2-core
@@ -308,61 +311,49 @@ marionette-media-tests:
     - marionette-media
 
 macosx1014-64-tests:
-    # - cppunit
-    # - crashtest
+    - cppunit
+    - crashtest
     - firefox-ui-functional-local
     - firefox-ui-functional-remote
     # - gtest
-    # - jittest
-    # - jsreftest
+    - jittest
+    - jsreftest
     - marionette
     # - mochitest
     - mochitest-a11y
     # - mochitest-browser-chrome
     # - mochitest-chrome
-    # - mochitest-devtools-chrome
-    # - mochitest-devtools-webreplay
-    # - mochitest-gpu
-    # - mochitest-media
-    # - mochitest-webgl1-core
-    # - mochitest-webgl1-ext
-    # - mochitest-webgl2-core
-    # - mochitest-webgl2-ext test  # timeouts
-    - reftest
-    # - telemetry-tests-client
-    - test-verify
-    - test-verify-gpu
-    - test-verify-wpt
-    # - web-platform-tests
-    # - web-platform-tests-reftests
-    - web-platform-tests-wdspec
-    # - xpcshell
-
-macosx1014-64-qr-tests:
-    # - crashtest
-    - reftest
-
-macosx64-tests:
-    - cppunit
-    - crashtest
-    - gtest
-    - jittest
-    - jsreftest
-    - mochitest
-    - mochitest-browser-chrome
-    - mochitest-chrome
     - mochitest-devtools-chrome
     - mochitest-devtools-webreplay
     - mochitest-gpu
-    - mochitest-media
+    # - mochitest-media
+    - mochitest-remote
     - mochitest-webgl1-core
     - mochitest-webgl1-ext
-    - mochitest-webgl2-core
-    # - mochitest-webgl2-ext test timeouts
+    # - mochitest-webgl2-core
+    # - mochitest-webgl2-ext test  # timeouts
+    - reftest
     - telemetry-tests-client
+    - test-verify
+    - test-verify-gpu
+    - test-verify-wpt
     - web-platform-tests
     - web-platform-tests-reftests
+    - web-platform-tests-wdspec
     - xpcshell
+
+macosx1014-64-qr-tests:
+    - crashtest
+    - reftest
+
+macosx64-tests:
+    - gtest
+    - mochitest
+    - mochitest-browser-chrome
+    - mochitest-chrome
+    - mochitest-media
+    - mochitest-webgl2-core
+    # - mochitest-webgl2-ext test timeouts
 
 macosx64-talos:
     - talos-bcv
@@ -380,9 +371,6 @@ macosx64-talos:
     - talos-perf-reftest-singletons
     # - talos-tabswitch # Bug 1453007 times out
     # - talos-h1 # too long to unpack profile- Bug 1442893
-
-macosx64-qr-tests:
-    - crashtest
 
 linux32-tests:
     - web-platform-tests
@@ -420,8 +408,7 @@ android-x86_64-tests:
     - marionette
     - mochitest
     - mochitest-gpu
-    # various reftest (plain) failures; bug 1501582
-    # - reftest
+    - reftest
     - test-verify
     - web-platform-tests
     - web-platform-tests-reftests
@@ -444,6 +431,9 @@ mochitest-headless:
 marionette-headless:
     - marionette-headless
 
+remote-tests:
+    - mochitest-remote
+
 android-hw-arm7-opt-unittests:
     - mochitest-media
 
@@ -460,6 +450,7 @@ android-hw-arm7-debug-unittests:
 android-hw-arm7-raptor:
     - raptor-speedometer-geckoview
     - raptor-speedometer-refbrow
+    - raptor-youtube-playback-fenix
     - raptor-youtube-playback-geckoview
     - raptor-tp6m-1-geckoview
     - raptor-tp6m-2-geckoview
@@ -561,6 +552,7 @@ android-hw-arm7-raptor:
 android-hw-aarch64-raptor:
     - raptor-speedometer-geckoview
     - raptor-speedometer-refbrow
+    - raptor-youtube-playback-fenix
     - raptor-youtube-playback-geckoview
     - raptor-tp6m-1-geckoview
     - raptor-tp6m-2-geckoview

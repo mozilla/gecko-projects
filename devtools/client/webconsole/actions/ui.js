@@ -20,6 +20,8 @@ const {
   SIDEBAR_CLOSE,
   SPLIT_CONSOLE_CLOSE_BUTTON_TOGGLE,
   TIMESTAMPS_TOGGLE,
+  WARNING_GROUPS_TOGGLE,
+  FILTERBAR_DISPLAY_MODE_SET,
 } = require("devtools/client/webconsole/constants");
 
 function persistToggle() {
@@ -46,6 +48,13 @@ function timestampsToggle(visible) {
   return {
     type: TIMESTAMPS_TOGGLE,
     visible,
+  };
+}
+
+function warningGroupsToggle(value) {
+  return {
+    type: WARNING_GROUPS_TOGGLE,
+    value,
   };
 }
 
@@ -110,8 +119,16 @@ function reverseSearchInputToggle({initialValue} = {}) {
   };
 }
 
+function filterBarDisplayModeSet(displayMode) {
+  return {
+    type: FILTERBAR_DISPLAY_MODE_SET,
+    displayMode,
+  };
+}
+
 module.exports = {
   contentMessagesToggle,
+  filterBarDisplayModeSet,
   initialize,
   persistToggle,
   reverseSearchInputToggle,
@@ -121,4 +138,5 @@ module.exports = {
   sidebarClose,
   splitConsoleCloseButtonToggle,
   timestampsToggle,
+  warningGroupsToggle,
 };

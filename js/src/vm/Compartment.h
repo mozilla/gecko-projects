@@ -14,6 +14,7 @@
 #include "mozilla/Variant.h"
 
 #include <stddef.h>
+#include <utility>
 
 #include "gc/Barrier.h"
 #include "gc/NurseryAwareHashMap.h"
@@ -116,10 +117,25 @@ class CrossCompartmentKey {
         : Debuggee(debugger, referent) {}
   };
 
+  // Key under which we find debugger's Debugger.Frame for the generator call
+  // whose AbstractGeneratorObject is referent.
+  struct DebuggeeFrameGenerator : Debuggee<NativeObject> {
+    DebuggeeFrameGenerator(NativeObject* debugger, NativeObject* referent)
+        : Debuggee(debugger, referent) {}
+  };
+
+  // Key under which we find debugger's Debugger.Frame for the generator call
+  // whose AbstractGeneratorObject is referent.
+  struct DebuggeeFrameGeneratorScript : Debuggee<JSScript> {
+    DebuggeeFrameGeneratorScript(NativeObject* debugger, JSScript* referent)
+        : Debuggee(debugger, referent) {}
+  };
+
   using WrappedType =
       mozilla::Variant<JSObject*, JSString*, DebuggeeObject, DebuggeeJSScript,
                        DebuggeeWasmScript, DebuggeeLazyScript,
-                       DebuggeeEnvironment, DebuggeeSource>;
+                       DebuggeeEnvironment, DebuggeeSource,
+                       DebuggeeFrameGenerator, DebuggeeFrameGeneratorScript>;
 
   explicit CrossCompartmentKey(JSObject* obj) : wrapped(obj) {
     MOZ_RELEASE_ASSERT(obj);
@@ -134,10 +150,18 @@ class CrossCompartmentKey {
   // For most debuggee keys, we must let the caller choose the key type
   // themselves. But for JSScript and LazyScript, there is only one key type
   // that makes sense, so we provide an overloaded constructor.
-  explicit CrossCompartmentKey(DebuggeeObject&& key) : wrapped(key) {}
-  explicit CrossCompartmentKey(DebuggeeSource&& key) : wrapped(key) {}
-  explicit CrossCompartmentKey(DebuggeeEnvironment&& key) : wrapped(key) {}
-  explicit CrossCompartmentKey(DebuggeeWasmScript&& key) : wrapped(key) {}
+  explicit CrossCompartmentKey(DebuggeeObject&& key)
+      : wrapped(std::move(key)) {}
+  explicit CrossCompartmentKey(DebuggeeSource&& key)
+      : wrapped(std::move(key)) {}
+  explicit CrossCompartmentKey(DebuggeeEnvironment&& key)
+      : wrapped(std::move(key)) {}
+  explicit CrossCompartmentKey(DebuggeeWasmScript&& key)
+      : wrapped(std::move(key)) {}
+  explicit CrossCompartmentKey(DebuggeeFrameGenerator&& key)
+      : wrapped(std::move(key)) {}
+  explicit CrossCompartmentKey(DebuggeeFrameGeneratorScript&& key)
+      : wrapped(std::move(key)) {}
   explicit CrossCompartmentKey(NativeObject* debugger, JSScript* referent)
       : wrapped(DebuggeeJSScript(debugger, referent)) {}
   explicit CrossCompartmentKey(NativeObject* debugger, LazyScript* referent)
@@ -578,14 +602,16 @@ class JS::Compartment {
                                const js::CrossCompartmentKey& wrapped,
                                const js::Value& wrapper);
 
-  void removeWrapper(js::WrapperMap::Ptr p);
-
   js::WrapperMap::Ptr lookupWrapper(const js::Value& wrapped) const {
     return crossCompartmentWrappers.lookup(js::CrossCompartmentKey(wrapped));
   }
 
   js::WrapperMap::Ptr lookupWrapper(JSObject* obj) const {
     return crossCompartmentWrappers.lookup(js::CrossCompartmentKey(obj));
+  }
+
+  void removeWrapper(js::WrapperMap::Ptr p) {
+    crossCompartmentWrappers.remove(p);
   }
 
   bool hasNurseryAllocatedWrapperEntries(const js::CompartmentFilter& f) {

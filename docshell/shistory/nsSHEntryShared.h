@@ -67,6 +67,7 @@ class SHEntrySharedParentState {
   nsID mDocShellID;
   nsCOMPtr<nsIPrincipal> mTriggeringPrincipal;
   nsCOMPtr<nsIPrincipal> mPrincipalToInherit;
+  nsCOMPtr<nsIPrincipal> mStoragePrincipalToInherit;
   nsCOMPtr<nsIContentSecurityPolicy> mCsp;
   nsCString mContentType;
 

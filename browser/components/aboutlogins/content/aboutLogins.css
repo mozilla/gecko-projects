@@ -4,7 +4,7 @@
 
 body {
   display: grid;
-  grid-template-columns: 280px 1fr;
+  grid-template-columns: minmax(320px, max-content) 1fr;
   grid-template-rows: 75px 1fr;
   grid-template-areas: "header header"
                        "logins login";
@@ -42,7 +42,7 @@ login-item {
 
 #create-login-button {
   margin-inline-start: 18px;
-  margin-inline-end: 0;
+  margin-inline-end: 18px;
 }
 
 :root:not(.official-branding) #branding-logo {

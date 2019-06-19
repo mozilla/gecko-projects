@@ -238,7 +238,7 @@ impl FontInstance {
     ) -> Self {
         FontInstance {
             transform: FontTransform::identity(),
-            color: color.into(),
+            color,
             size: base.size,
             base,
             render_mode,
@@ -395,9 +395,9 @@ impl SubpixelOffset {
         let apos = ((pos - pos.floor()) * 8.0) as i32;
 
         match apos {
-            1...2 => SubpixelOffset::Quarter,
-            3...4 => SubpixelOffset::Half,
-            5...6 => SubpixelOffset::ThreeQuarters,
+            1..=2 => SubpixelOffset::Quarter,
+            3..=4 => SubpixelOffset::Half,
+            5..=6 => SubpixelOffset::ThreeQuarters,
             _ => SubpixelOffset::Zero,
         }
     }

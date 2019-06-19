@@ -228,7 +228,10 @@ inline bool StyleAtom::IsStatic() const { return !!(_0 & 1); }
 
 inline nsAtom* StyleAtom::AsAtom() const {
   if (IsStatic()) {
-    return const_cast<nsStaticAtom*>(&detail::gGkAtoms.mAtoms[_0 >> 1]);
+    auto* atom = reinterpret_cast<const nsStaticAtom*>(
+        reinterpret_cast<const uint8_t*>(&detail::gGkAtoms) + (_0 >> 1));
+    MOZ_ASSERT(atom->IsStatic());
+    return const_cast<nsStaticAtom*>(atom);
   }
   return reinterpret_cast<nsAtom*>(_0);
 }
@@ -237,6 +240,19 @@ inline StyleAtom::~StyleAtom() {
   if (!IsStatic()) {
     AsAtom()->Release();
   }
+}
+
+inline StyleAtom::StyleAtom(already_AddRefed<nsAtom> aAtom) {
+  nsAtom* atom = aAtom.take();
+  if (atom->IsStatic()) {
+    ptrdiff_t offset = reinterpret_cast<const uint8_t*>(atom->AsStatic()) -
+        reinterpret_cast<const uint8_t*>(&detail::gGkAtoms);
+    _0 = (offset << 1) | 1;
+  } else {
+    _0 = reinterpret_cast<uintptr_t>(atom);
+  }
+  MOZ_ASSERT(IsStatic() == atom->IsStatic());
+  MOZ_ASSERT(AsAtom() == atom);
 }
 
 inline StyleAtom::StyleAtom(const StyleAtom& aOther) : _0(aOther._0) {
@@ -349,6 +365,9 @@ inline bool StyleComputedUrl::HasRef() const {
   }
   return false;
 }
+
+template <>
+bool StyleGradient::IsOpaque() const;
 
 }  // namespace mozilla
 

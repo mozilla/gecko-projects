@@ -42,6 +42,7 @@ void dom::SHEntrySharedParentState::CopyFrom(
   mDocShellID = aEntry->mDocShellID;
   mTriggeringPrincipal = aEntry->mTriggeringPrincipal;
   mPrincipalToInherit = aEntry->mPrincipalToInherit;
+  mStoragePrincipalToInherit = aEntry->mStoragePrincipalToInherit;
   mCsp = aEntry->mCsp;
   mContentType.Assign(aEntry->mContentType);
   mIsFrameNavigation = aEntry->mIsFrameNavigation;

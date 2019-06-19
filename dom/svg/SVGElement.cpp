@@ -2167,11 +2167,11 @@ void SVGElement::StringListAttributesInfo::Reset(uint8_t aAttrEnum) {
 nsresult SVGElement::ReportAttributeParseFailure(Document* aDocument,
                                                  nsAtom* aAttribute,
                                                  const nsAString& aValue) {
-  const nsString& attributeValue = PromiseFlatString(aValue);
-  const char16_t* strings[] = {aAttribute->GetUTF16String(),
-                               attributeValue.get()};
+  AutoTArray<nsString, 2> strings;
+  strings.AppendElement(nsDependentAtomString(aAttribute));
+  strings.AppendElement(aValue);
   return SVGContentUtils::ReportToConsole(aDocument, "AttributeParseWarning",
-                                          strings, ArrayLength(strings));
+                                          strings);
 }
 
 void SVGElement::RecompileScriptEventListeners() {
@@ -2372,6 +2372,21 @@ void SVGElement::FlushAnimations() {
   Document* doc = GetComposedDoc();
   if (doc && doc->HasAnimationController()) {
     doc->GetAnimationController()->FlushResampleRequests();
+  }
+}
+
+void SVGElement::AddSizeOfExcludingThis(nsWindowSizes& aSizes,
+                                        size_t* aNodeSize) const {
+  Element::AddSizeOfExcludingThis(aSizes, aNodeSize);
+
+  // These are owned by the element and not referenced from the stylesheets.
+  // They're referenced from the rule tree, but the rule nodes don't measure
+  // their style source (since they're non-owning), so unconditionally reporting
+  // them even though it's a refcounted object is ok.
+  if (mContentDeclarationBlock) {
+    aSizes.mLayoutSvgMappedDeclarations +=
+        mContentDeclarationBlock->SizeofIncludingThis(
+            aSizes.mState.mMallocSizeOf);
   }
 }
 

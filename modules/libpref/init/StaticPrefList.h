@@ -72,10 +72,12 @@
 //   * Skip: Set the value to <default-value>, skip any Preferences calls. This
 //     policy should be rarely used and its use is discouraged.
 //
-//   * Once: Evaluate the pref once, and unchanged during the session once
-//     enterprise policies have been loaded. This is useful for features where
-//     you want to ignore any pref changes until the start of the next browser
-//     session.
+//   * Once: Set the value once at startup, and then leave it unchanged after
+//     that. (The exact point at which all Once pref values is set is when the
+//     first Once getter is called.) This is useful for graphics prefs where we
+//     often don't want a new pref value to apply until restart. Otherwise, this
+//     update policy is best avoided because its behaviour can cause confusion
+//     and bugs.
 //
 // - <pref-name-string> is the same as for normal prefs.
 //
@@ -101,6 +103,12 @@
 // the getter.
 
 // clang-format off
+
+#ifdef RELEASE_OR_BETA
+# define NOT_IN_RELEASE_OR_BETA_VALUE false
+#else
+# define NOT_IN_RELEASE_OR_BETA_VALUE true
+#endif
 
 //---------------------------------------------------------------------------
 // Prefs starting with "accessibility."
@@ -398,12 +406,18 @@ VARCACHE_PREF(
   RelaxedAtomicBool, false
 )
 
+#if !defined(MOZ_WIDGET_ANDROID)
+# define PREF_VALUE true
+#else
+# define PREF_VALUE false
+#endif
 VARCACHE_PREF(
   Once,
   "apz.keyboard.enabled",
   APZKeyboardEnabled,
-  bool, false
+  bool, PREF_VALUE
 )
+#undef PREF_VALUE
 
 VARCACHE_PREF(
   Live,
@@ -528,7 +542,7 @@ VARCACHE_PREF(
   Once,
   "apz.pinch_lock.buffer_max_age",
   APZPinchLockBufferMaxAge,
-  int32_t, 50
+  int32_t, 50 // milliseconds
 )
 
 VARCACHE_PREF(
@@ -671,6 +685,27 @@ VARCACHE_PREF(
   bool, true
 )
 
+// When this pref is set, parent documents may consider child iframes've loaded
+// while they are still loading
+VARCACHE_PREF(
+  Live,
+  "dom.cross_origin_iframes_loaded_in_background",
+   dom_cross_origin_iframes_loaded_in_background,
+  bool, false
+)
+
+//---------------------------------------------------------------------------
+// Prefs starting with "beacon."
+//---------------------------------------------------------------------------
+
+// Is support for Navigator.sendBeacon enabled?
+VARCACHE_PREF(
+  Live,
+  "beacon.enabled",
+  beacon_enabled,
+  bool, true
+)
+
 //---------------------------------------------------------------------------
 // Prefs starting with "browser."
 //---------------------------------------------------------------------------
@@ -712,7 +747,7 @@ VARCACHE_PREF(
   Live,
   "browser.contentblocking.database.enabled",
   browser_contentblocking_database_enabled,
-  bool, true
+  bool, false
 )
 
 // How many recent block/unblock actions per origins we remember in the
@@ -769,6 +804,19 @@ VARCACHE_PREF(
 
 PREF("browser.display.focus_text_color", String, "")
 PREF("browser.display.foreground_color", String, "")
+
+VARCACHE_PREF(
+  Live,
+  "browser.display.show_focus_rings",
+  browser_display_show_focus_rings,
+  bool,
+  // Focus rings are not shown on Mac or Android by default.
+#if defined(XP_MACOSX) || defined(ANDROID)
+  false
+#else
+  true
+#endif
+)
 
 // In theory: 0 = never, 1 = quick, 2 = always, though we always just use it as
 // a bool!
@@ -875,6 +923,26 @@ VARCACHE_PREF(
   bool, false
 )
 
+// When this pref is enabled top level loads with a mismatched
+// Cross-Origin-Opener-Policy header will be loaded in a separate process.
+VARCACHE_PREF(
+  Live,
+  "browser.tabs.remote.useCrossOriginOpenerPolicy",
+  browser_tabs_remote_useCrossOriginOpenerPolicy,
+  bool, false
+)
+
+// When this pref is enabled, the browser will check no-cors responses that
+// have the Cross-Origin-Resource-Policy header and will fail the request if
+// the origin of the resource's loading document doesn't match the origin
+// (or base domain) of the loaded resource.
+VARCACHE_PREF(
+  Live,
+  "browser.tabs.remote.useCORP",
+  browser_tabs_remote_useCORP,
+  bool, false
+)
+
 VARCACHE_PREF(
   Live,
   "browser.ui.scroll-toolbar-threshold",
@@ -924,6 +992,30 @@ VARCACHE_PREF(
   bool, true
 )
 
+// Is support for CanvasRenderingContext2D.filter enabled?
+VARCACHE_PREF(
+  Live,
+  "canvas.filters.enabled",
+  canvas_filters_enabled,
+  bool, true
+)
+
+// Provide ability to turn on support for canvas focus rings.
+VARCACHE_PREF(
+  Live,
+  "canvas.focusring.enabled",
+  canvas_focusring_enabled,
+  bool, true
+)
+
+// Is support for CanvasRenderingContext2D's hitRegion APIs enabled?
+VARCACHE_PREF(
+  Live,
+  "canvas.hitregions.enabled",
+  canvas_hitregions_enabled,
+  bool, false
+)
+
 //---------------------------------------------------------------------------
 // Prefs starting with "channelclassifier."
 //---------------------------------------------------------------------------
@@ -955,6 +1047,15 @@ VARCACHE_PREF(
 //---------------------------------------------------------------------------
 // Prefs starting with "device."
 //---------------------------------------------------------------------------
+
+// Is support for the device sensors API enabled?
+VARCACHE_PREF(
+  Live,
+  "device.sensors.enabled",
+  device_sensors_enabled,
+  bool, true
+)
+
 VARCACHE_PREF(
   Live,
   "device.sensors.ambientLight.enabled",
@@ -1118,6 +1219,14 @@ VARCACHE_PREF(
   bool, false
 )
 
+// Is support for Navigator.getBattery enabled?
+VARCACHE_PREF(
+  Live,
+  "dom.battery.enabled",
+  dom_battery_enabled,
+  bool, true
+)
+
 // Block multiple external protocol URLs in iframes per single event.
 VARCACHE_PREF(
   Live,
@@ -1179,6 +1288,14 @@ VARCACHE_PREF(
   Live,
   "dom.disable_open_during_load",
   dom_disable_open_during_load,
+  bool, false
+)
+
+// Is support for Performance.mozMemory enabled?
+VARCACHE_PREF(
+  Live,
+  "dom.enable_memory_stats",
+  dom_enable_memory_stats,
   bool, false
 )
 
@@ -1404,6 +1521,54 @@ VARCACHE_PREF(
   RelaxedAtomicBool, false
 )
 
+// Is support for input type=date and type=time enabled?
+VARCACHE_PREF(
+  Live,
+  "dom.forms.datetime",
+  dom_forms_datetime,
+  bool, true
+)
+
+// Is support for HTMLInputElement.inputMode enabled?
+VARCACHE_PREF(
+  Live,
+  "dom.forms.inputmode",
+  dom_forms_inputmode,
+  bool, NOT_IN_RELEASE_OR_BETA_VALUE
+)
+
+// Enable Directory API. By default, disabled.
+VARCACHE_PREF(
+  Live,
+  "dom.input.dirpicker",
+  dom_input_dirpicker,
+  bool, false
+)
+
+// Is support for InputEvent.data enabled?
+VARCACHE_PREF(
+  Live,
+  "dom.inputevent.data.enabled",
+  dom_inputevent_data_enabled,
+  bool, true
+)
+
+// Is support for InputEvent.dataTransfer enabled?
+VARCACHE_PREF(
+  Live,
+  "dom.inputevent.datatransfer.enabled",
+  dom_inputevent_datatransfer_enabled,
+  bool, true
+)
+
+// Is support for InputEvent.inputType enabled?
+VARCACHE_PREF(
+  Live,
+  "dom.inputevent.inputtype.enabled",
+  dom_inputevent_inputtype_enabled,
+  bool, true
+)
+
 // How long a content process can take before closing its IPC channel
 // after shutdown is initiated.  If the process exceeds the timeout,
 // we fear the worst and kill it.
@@ -1450,6 +1615,24 @@ VARCACHE_PREF(
   bool, true
 )
 
+// Whether window.onappinstalled from "W3C Web Manifest" is enabled
+VARCACHE_PREF(
+  Live,
+  "dom.manifest.onappinstalled",
+  dom_manifest_onappinstalled,
+  bool, false
+)
+
+// This pref is used to enable/disable the `document.autoplayPolicy` API which
+// returns a enum string which presents current autoplay policy and can change
+// overtime based on user session activity.
+VARCACHE_PREF(
+  Live,
+  "dom.media.autoplay.autoplay-policy-api",
+  dom_media_autoplay_autoplay_policy_api,
+  bool, false
+)
+
 VARCACHE_PREF(
   Live,
   "dom.meta-viewport.enabled",
@@ -1461,6 +1644,22 @@ VARCACHE_PREF(
   Live,
   "dom.metaElement.setCookie.allowed",
   dom_metaElement_setCookie_allowed,
+  bool, false
+)
+
+// Is support for module scripts (<script type="module">) enabled for content?
+VARCACHE_PREF(
+  Live,
+  "dom.moduleScripts.enabled",
+  dom_moduleScripts_enabled,
+  bool, true
+)
+
+// Is support for mozBrowser frames enabled?
+VARCACHE_PREF(
+  Live,
+  "dom.mozBrowserFramesEnabled",
+  dom_mozBrowserFramesEnabled,
   bool, false
 )
 
@@ -1488,6 +1687,14 @@ VARCACHE_PREF(
   RelaxedAtomicBool, PREF_VALUE
 )
 #undef PREF_VALUE
+
+// Is support for Window.paintWorklet enabled?
+VARCACHE_PREF(
+  Live,
+  "dom.paintWorklet.enabled",
+  dom_paintWorklet_enabled,
+  bool, false
+)
 
 // Enable/disable the PaymentRequest API
 VARCACHE_PREF(
@@ -1538,6 +1745,46 @@ VARCACHE_PREF(
   bool, false
 )
 
+// Is support for PerformanceTiming.timeToContentfulPaint enabled?
+VARCACHE_PREF(
+  Live,
+  "dom.performance.time_to_contentful_paint.enabled",
+  dom_performance_time_to_contentful_paint_enabled,
+  bool, false
+)
+
+// Is support for PerformanceTiming.timeToDOMContentFlushed enabled?
+VARCACHE_PREF(
+  Live,
+  "dom.performance.time_to_dom_content_flushed.enabled",
+  dom_performance_time_to_dom_content_flushed_enabled,
+  bool, false
+)
+
+// Is support for PerformanceTiming.timeToFirstInteractive enabled?
+VARCACHE_PREF(
+  Live,
+  "dom.performance.time_to_first_interactive.enabled",
+  dom_performance_time_to_first_interactive_enabled,
+  bool, false
+)
+
+// Is support for PerformanceTiming.timeToNonBlankPaint enabled?
+VARCACHE_PREF(
+  Live,
+  "dom.performance.time_to_non_blank_paint.enabled",
+  dom_performance_time_to_non_blank_paint_enabled,
+  bool, false
+)
+
+// Is support for Permissions.revoke enabled?
+VARCACHE_PREF(
+  Live,
+  "dom.permissions.revoke.enable",
+  dom_permissions_revoke_enable,
+  bool, false
+)
+
 // Whether we should show the placeholder when the element is focused but empty.
 VARCACHE_PREF(
   Live,
@@ -1546,27 +1793,44 @@ VARCACHE_PREF(
   bool, true
 )
 
+// Is support for Element.requestPointerLock enabled?
+// This is added for accessibility purpose. When user has no way to exit
+// pointer lock (e.g. no keyboard available), they can use this pref to
+// disable the Pointer Lock API altogether.
+VARCACHE_PREF(
+  Live,
+  "dom.pointer-lock.enabled",
+  dom_pointer_lock_enabled,
+  bool, true
+)
+
 // Presentation API
+#if defined(ANDROID)
+# define PREF_VALUE NOT_IN_RELEASE_OR_BETA_VALUE
+#else
+# define PREF_VALUE false
+#endif
 VARCACHE_PREF(
   Live,
   "dom.presentation.enabled",
   dom_presentation_enabled,
-  bool, false
+  bool, PREF_VALUE
 )
 
 VARCACHE_PREF(
   Live,
   "dom.presentation.controller.enabled",
   dom_presentation_controller_enabled,
-  bool, false
+  bool, PREF_VALUE
 )
 
 VARCACHE_PREF(
   Live,
   "dom.presentation.receiver.enabled",
   dom_presentation_receiver_enabled,
-  bool, false
+  bool, PREF_VALUE
 )
+#undef PREF_VALUE
 
 VARCACHE_PREF(
   Live,
@@ -1577,12 +1841,11 @@ VARCACHE_PREF(
 
 // WHATWG promise rejection events. See
 // https://html.spec.whatwg.org/multipage/webappapis.html#promiserejectionevent
-// TODO: Enable the event interface once actually firing it (bug 1362272).
 VARCACHE_PREF(
   Live,
   "dom.promise_rejection_events.enabled",
   dom_promise_rejection_events_enabled,
-  RelaxedAtomicBool, false
+  RelaxedAtomicBool, true
 )
 
 // This currently only affects XHTML. For XUL the cache is always allowed.
@@ -1599,6 +1862,14 @@ VARCACHE_PREF(
   "dom.push.enabled",
   dom_push_enabled,
   RelaxedAtomicBool, false
+)
+
+// Is support for Navigator.registerContentHandler enabled?
+VARCACHE_PREF(
+  Live,
+  "dom.registerContentHandler.enabled",
+  dom_registerContentHandler_enabled,
+  bool, false
 )
 
 // Reporting API.
@@ -1731,6 +2002,16 @@ VARCACHE_PREF(
   int32_t, 0
 )
 
+// Is support for decoding external (non-inline) classic or module DOM scripts
+// (i.e. anything but workers) as UTF-8, then directly compiling without
+// inflating to UTF-16, enabled?
+VARCACHE_PREF(
+  Live,
+  "dom.script_loader.external_scripts.utf8_parsing.enabled",
+  dom_script_loader_external_scripts_utf8_parsing_enabled,
+  bool, NOT_IN_RELEASE_OR_BETA_VALUE
+)
+
 #ifdef NIGHTLY_BUILD
 # define PREF_VALUE true
 #else
@@ -1762,6 +2043,14 @@ VARCACHE_PREF(
 )
 #undef PREF_VALUE
 
+// Is support for selection event APIs enabled?
+VARCACHE_PREF(
+  Live,
+  "dom.select_events.enabled",
+  dom_select_events_enabled,
+  bool, true
+)
+
 VARCACHE_PREF(
   Live,
   "dom.separate_event_queue_for_post_message.enabled",
@@ -1786,6 +2075,15 @@ VARCACHE_PREF(
   "dom.serviceWorkers.testing.enabled",
   dom_serviceWorkers_testing_enabled,
   RelaxedAtomicBool, false
+)
+
+// External.AddSearchProvider is deprecated and it will be removed in the next
+// cycles.
+VARCACHE_PREF(
+  Live,
+  "dom.sidebar.enabled",
+  dom_sidebar_enabled,
+  bool, true
 )
 
 // Are shared memory User Agent style sheets enabled?
@@ -1818,6 +2116,14 @@ VARCACHE_PREF(
 )
 #undef PREF_VALUE
 
+// Is support for Storage test APIs enabled?
+VARCACHE_PREF(
+  Live,
+  "dom.storage.testing",
+  dom_storage_testing,
+  bool, false
+)
+
 // For area and anchor elements with target=_blank and no rel set to
 // opener/noopener.
 #ifdef EARLY_BETA_OR_EARLIER
@@ -1832,6 +2138,14 @@ VARCACHE_PREF(
   bool, PREF_VALUE
 )
 #undef PREF_VALUE
+
+// Is support for Selection.GetRangesForInterval enabled?
+VARCACHE_PREF(
+  Live,
+  "dom.testing.selection.GetRangesForInterval",
+  dom_testing_selection_GetRangesForInterval,
+  bool, false
+)
 
 VARCACHE_PREF(
   Live,
@@ -1865,12 +2179,29 @@ VARCACHE_PREF(
   bool, false
 )
 
+// Is support for Window.visualViewport enabled?
+VARCACHE_PREF(
+  Live,
+  "dom.visualviewport.enabled",
+  dom_visualviewport_enabled,
+  bool, false
+)
+
+// Is support for WebVR APIs enabled?
+// Enabled by default in beta and release for Windows and OS X and for all
+// platforms in nightly and aurora.
+#if defined(XP_WIN) || defined(XP_DARWIN) || !defined(RELEASE_OR_BETA)
+# define PREF_VALUE true
+#else
+# define PREF_VALUE false
+#endif
 VARCACHE_PREF(
   Once,
   "dom.vr.enabled",
   dom_vr_enabled,
-  bool, false
+  bool, PREF_VALUE
 )
+#undef PREF_VALUE
 
 VARCACHE_PREF(
   Live,
@@ -1907,12 +2238,19 @@ VARCACHE_PREF(
   RelaxedAtomicUint32, 50
 )
 
+// Enable external XR API integrations.
+#if defined(XP_WIN)
+#define PREF_VALUE true
+#else
+#define PREF_VALUE false
+#endif
 VARCACHE_PREF(
   Once,
   "dom.vr.external.enabled",
   VRExternalEnabled,
-  bool, false
+  bool, PREF_VALUE
 )
+#undef PREF_VALUE
 
 VARCACHE_PREF(
   Live,
@@ -1942,12 +2280,21 @@ VARCACHE_PREF(
   RelaxedAtomicInt32, 1000
 )
 
+// Oculus device
+#if defined(HAVE_64BIT_BUILD) && !defined(ANDROID)
+// We are only enabling WebVR by default on 64-bit builds (Bug 1384459)
+#define PREF_VALUE true
+#else
+// On Android, this pref is irrelevant.
+#define PREF_VALUE false
+#endif
 VARCACHE_PREF(
   Once,
   "dom.vr.oculus.enabled",
   VROculusEnabled,
-  bool, true
+  bool, PREF_VALUE
 )
+#undef PREF_VALUE
 
 VARCACHE_PREF(
   Live,
@@ -1970,12 +2317,24 @@ VARCACHE_PREF(
   RelaxedAtomicInt32, 10000
 )
 
+// OpenVR device
+#if !defined(HAVE_64BIT_BUILD) && !defined(ANDROID)
+// We are only enabling WebVR by default on 64-bit builds (Bug 1384459).
+#define PREF_VALUE false
+#elif defined(XP_WIN) || defined(XP_MACOSX)
+// We enable OpenVR by default for Windows and macOS.
+#define PREF_VALUE true
+#else
+// See Bug 1310663 (Linux).  On Android, this pref is irrelevant.
+#define PREF_VALUE false
+#endif
 VARCACHE_PREF(
   Once,
   "dom.vr.openvr.enabled",
   VROpenVREnabled,
-  bool, false
+  bool, PREF_VALUE
 )
+#undef PREF_VALUE
 
 VARCACHE_PREF(
   Once,
@@ -1984,6 +2343,7 @@ VARCACHE_PREF(
   bool, true
 )
 
+// OSVR device
 VARCACHE_PREF(
   Once,
   "dom.vr.osvr.enabled",
@@ -1998,12 +2358,19 @@ VARCACHE_PREF(
   RelaxedAtomicBool, true
 )
 
+// Enable a separate process for VR module.
+#if defined(XP_WIN)
+#define PREF_VALUE true
+#else
+#define PREF_VALUE false
+#endif
 VARCACHE_PREF(
   Once,
   "dom.vr.process.enabled",
   VRProcessEnabled,
-  bool, false
+  bool, PREF_VALUE
 )
+#undef PREF_VALUE
 
 VARCACHE_PREF(
   Once,
@@ -2041,6 +2408,8 @@ VARCACHE_PREF(
   RelaxedAtomicBool, true
 )
 
+// Enable the VR Service, which interfaces with VR hardware in a separate
+// thread.
 VARCACHE_PREF(
   Once,
   "dom.vr.service.enabled",
@@ -2061,6 +2430,14 @@ VARCACHE_PREF(
   RelaxedAtomicBool, PREF_VALUE
 )
 #undef PREF_VALUE
+
+// Is support for Navigator.webdriver enabled?
+VARCACHE_PREF(
+  Live,
+  "dom.webdriver.enabled",
+  dom_webdriver_enabled,
+  bool, true
+)
 
 // In case Touch API is enabled, this pref controls whether to support
 // ontouch* event handlers, document.createTouch, document.createTouchList and
@@ -2115,6 +2492,20 @@ VARCACHE_PREF(
   dom_webgpu_enable,
   bool, false
 )
+
+// Is support for HTMLInputElement.webkitEntries enabled?
+#if !defined(MOZ_WIDGET_ANDROID)
+# define PREF_VALUE true
+#else
+# define PREF_VALUE false
+#endif
+VARCACHE_PREF(
+  Live,
+  "dom.webkitBlink.filesystem.enabled",
+  dom_webkitBlink_filesystem_enabled,
+  bool, PREF_VALUE
+)
+#undef PREF_VALUE
 
 // Whether the WebMIDI API is enabled
 VARCACHE_PREF(
@@ -2171,6 +2562,14 @@ VARCACHE_PREF(
   RelaxedAtomicBool, true
 )
 
+// Is support for Window.event enabled?
+VARCACHE_PREF(
+  Live,
+  "dom.window.event.enabled",
+  dom_window_event_enabled,
+  bool, true
+)
+
 // Enable the "noreferrer" feature argument for window.open()
 VARCACHE_PREF(
   Live,
@@ -2188,18 +2587,12 @@ VARCACHE_PREF(
 
 // Is support for compiling DOM worker scripts directly from UTF-8 (without ever
 // inflating to UTF-16) enabled?
-#ifdef RELEASE_OR_BETA
-# define PREF_VALUE false
-#else
-# define PREF_VALUE true
-#endif
 VARCACHE_PREF(
   Live,
   "dom.worker.script_loader.utf8_parsing.enabled",
   dom_worker_script_loader_utf8_parsing_enabled,
-  RelaxedAtomicBool, PREF_VALUE
+  RelaxedAtomicBool, NOT_IN_RELEASE_OR_BETA_VALUE
 )
-#undef PREF_VALUE
 
 VARCACHE_PREF(
   Live,
@@ -2221,6 +2614,45 @@ VARCACHE_PREF(
   "dom.xhr.standard_content_type_normalization",
   dom_xhr_standard_content_type_normalization,
   RelaxedAtomicBool, true
+)
+
+// Is support for XMLDocument.async enabled?
+VARCACHE_PREF(
+  Live,
+  "dom.xmldocument.async.enabled",
+  dom_xmldocument_async_enabled,
+  bool, false
+)
+
+// Is support for XMLDocument.load enabled?
+VARCACHE_PREF(
+  Live,
+  "dom.xmldocument.load.enabled",
+  dom_xmldocument_load_enabled,
+  bool, false
+)
+
+// Is support for Navigator.geolocation enabled?
+VARCACHE_PREF(
+  Live,
+  "geo.enabled",
+  geo_enabled,
+  bool, true
+)
+
+// WebIDL test prefs
+
+VARCACHE_PREF(
+  Live,
+  "abc.def",
+  abc_def,
+  bool, true
+)
+VARCACHE_PREF(
+  Live,
+  "ghi.jkl",
+  ghi_jkl,
+  bool, true
 )
 
 //---------------------------------------------------------------------------
@@ -2247,6 +2679,19 @@ VARCACHE_PREF(
   Live,
   "extensions.cookiesBehavior.overrideOnTopLevel",
   extensions_cookiesBehavior_overrideOnTopLevel,
+  bool, false
+)
+
+//---------------------------------------------------------------------------
+// Prefs starting with "fission."
+//---------------------------------------------------------------------------
+
+// This pref has no effect within fission windows, it only controls the
+// behaviour within non-fission windows.
+VARCACHE_PREF(
+  Live,
+  "fission.preserve_browsing_contexts",
+  fission_preserve_browsing_contexts,
   bool, false
 )
 
@@ -2515,6 +2960,13 @@ VARCACHE_PREF(
 
 VARCACHE_PREF(
   Live,
+  "gfx.canvas.remote",
+  CanvasRemote,
+  RelaxedAtomicBool, false
+)
+
+VARCACHE_PREF(
+  Live,
   "gfx.color_management.enablev4",
   CMSEnableV4,
   RelaxedAtomicBool, false
@@ -2611,6 +3063,7 @@ VARCACHE_PREF(
 )
 
 
+// Whether to disable the automatic detection and use of direct2d.
 VARCACHE_PREF(
   Once,
   "gfx.direct2d.disabled",
@@ -2618,6 +3071,8 @@ VARCACHE_PREF(
   bool, false
 )
 
+// Whether to attempt to enable Direct2D regardless of automatic detection or
+// blacklisting.
 VARCACHE_PREF(
   Once,
   "gfx.direct2d.force-enabled",
@@ -2679,6 +3134,14 @@ VARCACHE_PREF(
   "gfx.downloadable_fonts.keep_color_bitmaps",
   KeepColorBitmaps,
   RelaxedAtomicBool, false
+)
+
+// Whether font sanitization is performed on the main thread or not.
+VARCACHE_PREF(
+  Live,
+  "gfx.downloadable_fonts.sanitize_omt",
+  gfx_downloadable_fonts_sanitize_omt,
+  RelaxedAtomicBool, true
 )
 
 VARCACHE_PREF(
@@ -2912,12 +3375,33 @@ VARCACHE_PREF(
   int32_t, 10
 )
 
+// We expose two prefs: gfx.webrender.all and gfx.webrender.enabled.
+// The first enables WR+additional features, and the second just enables WR.
+// For developer convenience, building with --enable-webrender=true or just
+// --enable-webrender will set gfx.webrender.enabled to true by default.
+//
+// We also have a pref gfx.webrender.all.qualified which is not exposed via
+// about:config. That pref enables WR but only on qualified hardware. This is
+// the pref we'll eventually flip to deploy WebRender to the target population.
 VARCACHE_PREF(
   Once,
   "gfx.webrender.all",
   WebRenderAll,
   bool, false
 )
+
+#ifdef MOZ_ENABLE_WEBRENDER
+#define PREF_VALUE true
+#else
+#define PREF_VALUE false
+#endif
+VARCACHE_PREF(
+  Once,
+  "gfx.webrender.enabled",
+  WebRenderEnabledDoNotUseDirectly,
+  bool, PREF_VALUE
+)
+#undef PREF_VALUE
 
 VARCACHE_PREF(
   Live,
@@ -2947,13 +3431,9 @@ VARCACHE_PREF(
   RelaxedAtomicBool, false
 )
 
-VARCACHE_PREF(
-  Once,
-  "gfx.webrender.enabled",
-  WebRenderEnabledDoNotUseDirectly,
-  bool, false
-)
-
+// Also expose a pref to allow users to force-disable WR. This is exposed
+// on all channels because WR can be enabled on qualified hardware on all
+// channels.
 VARCACHE_PREF(
   Once,
   "gfx.webrender.force-disabled",
@@ -3036,13 +3516,6 @@ VARCACHE_PREF(
   RelaxedAtomicBool, false
 )
 
-VARCACHE_PREF(
-  Live,
-  "gl.msaa-level",
-  MSAALevel,
-  RelaxedAtomicUint32, 2
-)
-
 #if defined(XP_MACOSX)
 VARCACHE_PREF(
   Live,
@@ -3115,11 +3588,14 @@ VARCACHE_PREF(
   RelaxedAtomicUint32, 6
 )
 
+// Whether we should recycle already displayed frames instead of discarding
+// them. This saves on the allocation itself, and may be able to reuse the
+// contents as well. Only applies if generating full frames.
 VARCACHE_PREF(
   Once,
   "image.animated.decode-on-demand.recycle",
   ImageAnimatedDecodeOnDemandRecycle,
-  bool, false
+  bool, true
 )
 
 VARCACHE_PREF(
@@ -3143,6 +3619,7 @@ VARCACHE_PREF(
   RelaxedAtomicInt32, 90*1024
 )
 
+// The maximum size, in bytes, of the decoded images we cache.
 VARCACHE_PREF(
   Once,
   "image.cache.size",
@@ -3150,6 +3627,8 @@ VARCACHE_PREF(
   int32_t, 5*1024*1024
 )
 
+// A weight, from 0-1000, to place on time when comparing to size.
+// Size is given a weight of 1000 - timeweight.
 VARCACHE_PREF(
   Once,
   "image.cache.timeweight",
@@ -3185,11 +3664,12 @@ VARCACHE_PREF(
   RelaxedAtomicBool, true
 )
 
+// Chunk size for calls to the image decoders.
 VARCACHE_PREF(
   Once,
   "image.mem.decode_bytes_at_a_time",
   ImageMemDecodeBytesAtATime,
-  uint32_t, 200000
+  uint32_t, 16384
 )
 
 VARCACHE_PREF(
@@ -3199,11 +3679,13 @@ VARCACHE_PREF(
   RelaxedAtomicBool, false
 )
 
+// Discards inactive image frames of _animated_ images and re-decodes them on
+// demand from compressed data. Has no effect if image.mem.discardable is false.
 VARCACHE_PREF(
   Once,
   "image.mem.animated.discardable",
   ImageMemAnimatedDiscardable,
-  bool, false
+  bool, true
 )
 
 VARCACHE_PREF(
@@ -3227,6 +3709,12 @@ VARCACHE_PREF(
   RelaxedAtomicBool, true
 )
 
+// How much of the data in the surface cache is discarded when we get a memory
+// pressure notification, as a fraction. The discard factor is interpreted as a
+// reciprocal, so a discard factor of 1 means to discard everything in the
+// surface cache on memory pressure, a discard factor of 2 means to discard half
+// of the data, and so forth. The default should be a good balance for desktop
+// and laptop systems, where we never discard visible images.
 VARCACHE_PREF(
   Once,
   "image.mem.surfacecache.discard_factor",
@@ -3234,13 +3722,16 @@ VARCACHE_PREF(
   uint32_t, 1
 )
 
+// Maximum size for the surface cache, in kilobytes.
 VARCACHE_PREF(
   Once,
   "image.mem.surfacecache.max_size_kb",
   ImageMemSurfaceCacheMaxSizeKB,
-  uint32_t, 100 * 1024
+  uint32_t, 1024 * 1024
 )
 
+// Minimum timeout for expiring unused images from the surface cache, in
+// milliseconds. This controls how long we store cached temporary surfaces.
 VARCACHE_PREF(
   Once,
   "image.mem.surfacecache.min_expiration_ms",
@@ -3248,11 +3739,15 @@ VARCACHE_PREF(
   uint32_t, 60*1000
 )
 
+// The surface cache's size, within the constraints of the maximum size set
+// above, is determined as a fraction of main memory size. The size factor is
+// interpreted as a reciprocal, so a size factor of 4 means to use no more than
+// 1/4 of main memory.  The default should be a good balance for most systems.
 VARCACHE_PREF(
   Once,
   "image.mem.surfacecache.size_factor",
   ImageMemSurfaceCacheSizeFactor,
-  uint32_t, 64
+  uint32_t, 4
 )
 
 VARCACHE_PREF(
@@ -3262,13 +3757,16 @@ VARCACHE_PREF(
   RelaxedAtomicInt32, -1
 )
 
+// How long in ms before we should start shutting down idle decoder threads.
 VARCACHE_PREF(
   Once,
   "image.multithreaded_decoding.idle_timeout",
   ImageMTDecodingIdleTimeout,
-  int32_t, -1
+  int32_t, 600000
 )
 
+// How many threads we'll use for multithreaded decoding. If < 0, will be
+// automatically determined based on the system's number of cores.
 VARCACHE_PREF(
   Once,
   "image.multithreaded_decoding.limit",
@@ -3373,10 +3871,20 @@ VARCACHE_PREF(
   RelaxedAtomicBool, false
 )
 
+// Whether ISO-2022-JP is a permitted content-based encoding detection
+// outcome.
+VARCACHE_PREF(
+  Live,
+  "intl.charset.detector.iso2022jp.allowed",
+   intl_charset_detector_iso2022jp_allowed,
+  bool, true
+)
+
 //---------------------------------------------------------------------------
 // Prefs starting with "layers."
 //---------------------------------------------------------------------------
 
+// Whether to disable acceleration for all widgets.
 VARCACHE_PREF(
   Once,
   "layers.acceleration.disabled",
@@ -3406,12 +3914,24 @@ VARCACHE_PREF(
   RelaxedAtomicBool, false
 )
 
+// Whether to force acceleration on, ignoring blacklists.
+#ifdef ANDROID
+// bug 838603 -- on Android, accidentally blacklisting OpenGL layers
+// means a startup crash for everyone.
+// Temporarily force-enable GL compositing.  This is default-disabled
+// deep within the bowels of the widgetry system.  Remove me when GL
+// compositing isn't default disabled in widget/android.
+#define PREF_VALUE true
+#else
+#define PREF_VALUE false
+#endif
 VARCACHE_PREF(
   Once,
   "layers.acceleration.force-enabled",
   LayersAccelerationForceEnabledDoNotUseDirectly,
-  bool, false
+  bool, PREF_VALUE
 )
+#undef PREF_VALUE
 
 VARCACHE_PREF(
   Live,
@@ -3420,13 +3940,15 @@ VARCACHE_PREF(
   RelaxedAtomicBool, false
 )
 
+// Whether we allow AMD switchable graphics.
 VARCACHE_PREF(
   Once,
   "layers.amd-switchable-gfx.enabled",
   LayersAMDSwitchableGfxEnabled,
-  bool, false
+  bool, true
 )
 
+// Whether to use async panning and zooming.
 VARCACHE_PREF(
   Once,
   "layers.async-pan-zoom.enabled",
@@ -3534,15 +4056,16 @@ VARCACHE_PREF(
 #ifdef MOZ_DUMP_PAINTING
 VARCACHE_PREF(
   Live,
-  "layers.dump-client-layers",
-  DumpClientLayers,
+  "layers.dump-decision",
+  LayersDumpDecision,
   RelaxedAtomicBool, false
 )
+#endif
 
 VARCACHE_PREF(
   Live,
-  "layers.dump-decision",
-  LayersDumpDecision,
+  "layers.dump-client-layers",
+  DumpClientLayers,
   RelaxedAtomicBool, false
 )
 
@@ -3552,7 +4075,6 @@ VARCACHE_PREF(
   DumpHostLayers,
   RelaxedAtomicBool, false
 )
-#endif
 
 // 0 is "no change" for contrast, positive values increase it, negative values
 // decrease it until we hit mid gray at -1 contrast, after that it gets weird.
@@ -3577,19 +4099,31 @@ VARCACHE_PREF(
   RelaxedAtomicBool, false
 )
 
+#if defined(XP_MACOSX) || defined (OS_OPENBSD)
+#define PREF_VALUE true
+#else
+#define PREF_VALUE false
+#endif
 VARCACHE_PREF(
   Once,
   "layers.enable-tiles",
   LayersTilesEnabled,
-  bool, false
+  bool, PREF_VALUE
 )
+#undef PREF_VALUE
 
+#if defined(XP_WIN)
+#define PREF_VALUE true
+#else
+#define PREF_VALUE false
+#endif
 VARCACHE_PREF(
   Once,
   "layers.enable-tiles-if-skia-pomtp",
   LayersTilesEnabledIfSkiaPOMTP,
-  bool, false
+  bool, PREF_VALUE
 )
+#undef PREF_VALUE
 
 VARCACHE_PREF(
   Live,
@@ -3640,19 +4174,33 @@ VARCACHE_PREF(
   RelaxedAtomicBool, false
 )
 
+#if defined(XP_WIN)
+#define PREF_VALUE true
+#elif defined(MOZ_WIDGET_GTK)
+#define PREF_VALUE false
+#else
+#define PREF_VALUE false
+#endif
 VARCACHE_PREF(
   Once,
   "layers.gpu-process.allow-software",
   GPUProcessAllowSoftware,
-  bool, false
+  bool, PREF_VALUE
 )
+#undef PREF_VALUE
 
+#if defined(XP_WIN) || defined(MOZ_WIDGET_GTK)
+#define PREF_VALUE true
+#else
+#define PREF_VALUE false
+#endif
 VARCACHE_PREF(
   Once,
   "layers.gpu-process.enabled",
   GPUProcessEnabled,
-  bool, false
+  bool, PREF_VALUE
 )
+#undef PREF_VALUE
 
 VARCACHE_PREF(
   Once,
@@ -3718,12 +4266,18 @@ VARCACHE_PREF(
   RelaxedAtomicInt32, -1
 )
 
+#if defined(XP_WIN)
+#define PREF_VALUE true
+#else
+#define PREF_VALUE false
+#endif
 VARCACHE_PREF(
   Once,
   "layers.mlgpu.enabled",
   AdvancedLayersEnabledDoNotUseDirectly,
-  bool, false
+  bool, PREF_VALUE
 )
+#undef PREF_VALUE
 
 VARCACHE_PREF(
   Once,
@@ -3767,12 +4321,20 @@ VARCACHE_PREF(
   RelaxedAtomicBool, true
 )
 
+#if defined(XP_WIN)
+// Both this and the master "enabled" pref must be on to use Advanced Layers
+// on Windows 7.
+#define PREF_VALUE true
+#else
+#define PREF_VALUE false
+#endif
 VARCACHE_PREF(
   Once,
   "layers.mlgpu.enable-on-windows7",
   AdvancedLayersEnableOnWindows7,
-  bool, false
+  bool, PREF_VALUE
 )
+#undef PREF_VALUE
 
 VARCACHE_PREF(
   Once,
@@ -3813,7 +4375,7 @@ VARCACHE_PREF(
   Once,
   "layers.omtp.paint-workers",
   LayersOMTPPaintWorkers,
-  int32_t, 1
+  int32_t, -1
 )
 
 VARCACHE_PREF(
@@ -3830,12 +4392,14 @@ VARCACHE_PREF(
   RelaxedAtomicUint32, (uint32_t)0
 )
 
+#ifdef XP_WIN
 VARCACHE_PREF(
   Once,
   "layers.prefer-opengl",
   LayersPreferOpenGL,
   bool, false
 )
+#endif
 
 VARCACHE_PREF(
   Live,
@@ -3866,14 +4430,14 @@ VARCACHE_PREF(
   Once,
   "layers.tile-width",
   LayersTileWidth,
-  int32_t, 256
+  int32_t, 512
 )
 
 VARCACHE_PREF(
   Once,
   "layers.tile-height",
   LayersTileHeight,
-  int32_t, 256
+  int32_t, 512
 )
 
 VARCACHE_PREF(
@@ -3904,6 +4468,11 @@ VARCACHE_PREF(
   uint32_t, (uint32_t)5000
 )
 
+// If this is set the tile size will only be treated as a suggestion.
+// On B2G we will round this to the stride of the underlying allocation.
+// On any platform we may later use the screen size and ignore
+// tile-width/tile-height entirely. Its recommended to turn this off
+// if you change the tile size.
 VARCACHE_PREF(
   Once,
   "layers.tiles.adjust",
@@ -3911,12 +4480,18 @@ VARCACHE_PREF(
   bool, true
 )
 
+#ifdef MOZ_WIDGET_ANDROID
+#define PREF_VALUE true
+#else
+#define PREF_VALUE false
+#endif
 VARCACHE_PREF(
   Once,
   "layers.tiles.edge-padding",
   TileEdgePaddingEnabled,
-  bool, false
+  bool, PREF_VALUE
 )
+#undef PREF_VALUE
 
 VARCACHE_PREF(
   Live,
@@ -4124,6 +4699,22 @@ VARCACHE_PREF(
   bool, false
 )
 
+// text underline offset
+VARCACHE_PREF(
+  Live,
+  "layout.css.text-underline-offset.enabled",
+  layout_css_text_underline_offset_enabled,
+  bool, false
+)
+
+// text decoration width
+VARCACHE_PREF(
+  Live,
+  "layout.css.text-decoration-width.enabled",
+  layout_css_text_decoration_width_enabled,
+  bool, false
+)
+
 // Is support for CSS column-span enabled?
 VARCACHE_PREF(
   Live,
@@ -4160,12 +4751,20 @@ VARCACHE_PREF(
 )
 #undef PREF_VALUE
 
+// Is support for GeometryUtils.convert*FromNode enabled?
+VARCACHE_PREF(
+  Live,
+  "layout.css.convertFromNode.enabled",
+  layout_css_convertFromNode_enabled,
+  bool, NOT_IN_RELEASE_OR_BETA_VALUE
+)
+
 // Is support for DOMMatrix enabled?
 VARCACHE_PREF(
   Live,
   "layout.css.DOMMatrix.enabled",
   layout_css_DOMMatrix_enabled,
-  bool, true
+  RelaxedAtomicBool, true
 )
 
 // Is support for DOMQuad enabled?
@@ -4173,7 +4772,7 @@ VARCACHE_PREF(
   Live,
   "layout.css.DOMQuad.enabled",
   layout_css_DOMQuad_enabled,
-  bool, true
+  RelaxedAtomicBool, true
 )
 
 // Is support for DOMPoint enabled?
@@ -4181,7 +4780,7 @@ VARCACHE_PREF(
   Live,
   "layout.css.DOMPoint.enabled",
   layout_css_DOMPoint_enabled,
-  bool, true
+  RelaxedAtomicBool, true
 )
 
 // Are we emulating -moz-{inline}-box layout using CSS flexbox?
@@ -4244,11 +4843,43 @@ VARCACHE_PREF(
 )
 #undef PREF_VALUE
 
+// Is support for CSS individual transform enabled?
+VARCACHE_PREF(
+  Live,
+  "layout.css.individual-transform.enabled",
+  layout_css_individual_transform_enabled,
+  bool, false
+)
+
+// Is support for CSS initial-letter property enabled?
+VARCACHE_PREF(
+  Live,
+  "layout.css.initial-letter.enabled",
+  layout_css_initial_letter_enabled,
+  bool, false
+)
+
 // Pref to control whether line-height: -moz-block-height is exposed to content.
 VARCACHE_PREF(
   Live,
   "layout.css.line-height-moz-block-height.content.enabled",
   layout_css_line_height_moz_block_height_content_enabled,
+  bool, false
+)
+
+// Is support for motion-path enabled?
+VARCACHE_PREF(
+  Live,
+  "layout.css.motion-path.enabled",
+  layout_css_motion_path_enabled,
+  bool, NOT_IN_RELEASE_OR_BETA_VALUE
+)
+
+// Is support for -moz-binding enabled?
+VARCACHE_PREF(
+  Live,
+  "layout.css.moz-binding.content.enabled",
+  layout_css_moz_binding_content_enabled,
   bool, false
 )
 
@@ -4283,6 +4914,43 @@ VARCACHE_PREF(
   bool, false
 )
 
+// Is -moz-osx-font-smoothing enabled? (Only supported in OSX builds)
+#if defined(XP_MACOSX)
+# define PREF_VALUE true
+#else
+# define PREF_VALUE false
+#endif
+VARCACHE_PREF(
+  Live,
+  "layout.css.osx-font-smoothing.enabled",
+  layout_css_osx_font_smoothing_enabled,
+  bool, PREF_VALUE
+)
+#undef PREF_VALUE
+
+// Is support for CSS overflow-clip-box enabled for non-UA sheets?
+VARCACHE_PREF(
+  Live,
+  "layout.css.overflow-clip-box.enabled",
+  layout_css_overflow_clip_box_enabled,
+  bool, false
+)
+
+// Is support for overscroll-behavior enabled?
+VARCACHE_PREF(
+  Live,
+  "layout.css.overscroll-behavior.enabled",
+  layout_css_overscroll_behavior_enabled,
+  bool, true
+)
+
+VARCACHE_PREF(
+  Live,
+  "layout.css.overflow-logical.enabled",
+  layout_css_overflow_logical_enabled,
+  bool, true
+)
+
 VARCACHE_PREF(
   Live,
   "layout.css.paint-order.enabled",
@@ -4298,9 +4966,31 @@ VARCACHE_PREF(
   bool, true
 )
 
-// Are "-webkit-{min|max}-device-pixel-ratio" media queries supported? (Note:
-// this pref has no effect if the master 'layout.css.prefixes.webkit' pref is
-// set to false.)
+// Is support for -moz-prefixed animation properties enabled?
+VARCACHE_PREF(
+  Live,
+  "layout.css.prefixes.animations",
+  layout_css_prefixes_animations,
+  bool, true
+)
+
+// Is support for -moz-border-image enabled?
+VARCACHE_PREF(
+  Live,
+  "layout.css.prefixes.border-image",
+  layout_css_prefixes_border_image,
+  bool, true
+)
+
+// Is support for -moz-box-sizing enabled?
+VARCACHE_PREF(
+  Live,
+  "layout.css.prefixes.box-sizing",
+  layout_css_prefixes_box_sizing,
+  bool, true
+)
+
+// Are "-webkit-{min|max}-device-pixel-ratio" media queries supported?
 VARCACHE_PREF(
   Live,
   "layout.css.prefixes.device-pixel-ratio-webkit",
@@ -4308,11 +4998,27 @@ VARCACHE_PREF(
   bool, true
 )
 
-// Are webkit-prefixed properties & property-values supported?
+// Is support for -moz-prefixed font feature properties enabled?
 VARCACHE_PREF(
   Live,
-  "layout.css.prefixes.webkit",
-  layout_css_prefixes_webkit,
+  "layout.css.prefixes.font-features",
+  layout_css_prefixes_font_features,
+  bool, true
+)
+
+// Is support for -moz-prefixed transform properties enabled?
+VARCACHE_PREF(
+  Live,
+  "layout.css.prefixes.transforms",
+  layout_css_prefixes_transforms,
+  bool, true
+)
+
+// Is support for -moz-prefixed transition properties enabled?
+VARCACHE_PREF(
+  Live,
+  "layout.css.prefixes.transitions",
+  layout_css_prefixes_transitions,
   bool, true
 )
 
@@ -4326,17 +5032,31 @@ VARCACHE_PREF(
 
 VARCACHE_PREF(
   Live,
+  "layout.css.resizeobserver.enabled",
+   layout_css_resizeobserver_enabled,
+  bool, true
+)
+
+VARCACHE_PREF(
+  Live,
   "layout.css.scroll-behavior.damping-ratio",
   ScrollBehaviorDampingRatio,
   AtomicFloat, 1.0f
 )
 
-// Are -moz-prefixed gradients restricted to a simpler syntax? (with an optional
-// <angle> or <position>, but not both)?
+// Is support for scrollbar-color property enabled?
 VARCACHE_PREF(
   Live,
-  "layout.css.simple-moz-gradient.enabled",
-  layout_css_simple_moz_gradient_enabled,
+  "layout.css.scrollbar-color.enabled",
+  layout_css_scrollbar_color_enabled,
+  bool, true
+)
+
+// Is support for scrollbar-width property enabled?
+VARCACHE_PREF(
+  Live,
+  "layout.css.scrollbar-width.enabled",
+  layout_css_scrollbar_width_enabled,
   bool, true
 )
 
@@ -4396,11 +5116,16 @@ VARCACHE_PREF(
   bool, true
 )
 
+// W3C touch-action css property (related to touch and pointer events)
+// Note that we turn this on even on platforms/configurations where touch
+// events are not supported (e.g. OS X, or Windows with e10s disabled). For
+// those platforms we don't handle touch events anyway so it's conceptually
+// a no-op.
 VARCACHE_PREF(
   Live,
   "layout.css.touch_action.enabled",
-  TouchActionEnabled,
-  RelaxedAtomicBool, false
+  layout_css_touch_action_enabled,
+  RelaxedAtomicBool, true
 )
 
 // Does arbitrary ::-webkit-* pseudo-element parsed?
@@ -4672,11 +5397,19 @@ VARCACHE_PREF(
 #endif
 VARCACHE_PREF(
   Live,
-  "layout.css.resizeobserver.enabled",
-  layout_css_resizeobserver_enabled,
+  "layout.css.shadow-parts.enabled",
+   layout_css_shadow_parts_enabled,
   bool, PREF_VALUE
 )
 #undef PREF_VALUE
+
+// Is support for CSS text-justify property enabled?
+VARCACHE_PREF(
+  Live,
+  "layout.css.text-justify.enabled",
+  layout_css_text_justify_enabled,
+  bool, true
+)
 
 // Is support for -webkit-line-clamp enabled?
 VARCACHE_PREF(
@@ -4692,6 +5425,13 @@ VARCACHE_PREF(
 
 // These prefs use camel case instead of snake case for the getter because one
 // reviewer had an unshakeable preference for that. Who could that be?
+
+VARCACHE_PREF(
+  Live,
+  "media.autoplay.enabled.user-gestures-needed",
+  MediaAutoplayUserGesturesNeeded,
+  bool, false
+)
 
 VARCACHE_PREF(
   Live,
@@ -4839,6 +5579,19 @@ VARCACHE_PREF(
   bool, PREF_VALUE
 )
 #undef PREF_VALUE
+
+// Whether we expose the functionality proposed in
+// https://github.com/WICG/encrypted-media-encryption-scheme/blob/master/explainer.md
+// I.e. if true, apps calling navigator.requestMediaKeySystemAccess() can pass
+// an optional encryption scheme as part of MediaKeySystemMediaCapability
+// objects. If a scheme is present when we check for support, we must ensure we
+// support that scheme in order to provide key system access.
+VARCACHE_PREF(
+  Live,
+  "media.eme.encrypted-media-encryption-scheme.enabled",
+  media_eme_encrypted_media_encryption_scheme_enabled,
+  bool, false
+)
 
 VARCACHE_PREF(
   Live,
@@ -5097,7 +5850,6 @@ VARCACHE_PREF(
   MediaWmfVp9Enabled,
   bool, true
 )
-
 #endif // MOZ_WMF
 
 VARCACHE_PREF(
@@ -5427,7 +6179,7 @@ VARCACHE_PREF(
 VARCACHE_PREF(
   Live,
   "media.videocontrols.lock-video-orientation",
-  MediaVideocontrolsLockVideoOrientation,
+  media_videocontrols_lock_video_orientation,
   bool, PREF_VALUE
 )
 #undef PREF_VALUE
@@ -5499,7 +6251,7 @@ VARCACHE_PREF(
 VARCACHE_PREF(
   Live,
   "media.test.video-suspend",
-  MediaTestVideoSuspend,
+  media_test_video_suspend,
   RelaxedAtomicBool, false
 )
 
@@ -5541,6 +6293,27 @@ VARCACHE_PREF(
   Live,
   "media.peerconnection.enabled",
   media_peerconnection_enabled,
+  bool, true
+)
+
+VARCACHE_PREF(
+  Live,
+  "media.peerconnection.dtmf.enabled",
+  media_peerconnection_dtmf_enabled,
+  bool, true
+)
+
+VARCACHE_PREF(
+  Live,
+  "media.peerconnection.identity.enabled",
+  media_peerconnection_identity_enabled,
+  bool, true
+)
+
+VARCACHE_PREF(
+  Live,
+  "media.peerconnection.rtpsourcesapi.enabled",
+  media_peerconnection_rtpsourcesapi_enabled,
   bool, true
 )
 
@@ -5593,6 +6366,61 @@ VARCACHE_PREF(
 #undef PREF_VALUE
 
 #endif // MOZ_WEBRTC
+
+// HTMLMediaElement.allowedToPlay should be exposed to web content when
+// block autoplay rides the trains to release. Until then, Nightly only.
+#ifdef NIGHTLY_BUILD
+# define PREF_VALUE true
+#else
+# define PREF_VALUE false
+#endif
+VARCACHE_PREF(
+  Live,
+  "media.allowed-to-play.enabled",
+  media_allowed_to_play_enabled,
+  bool, PREF_VALUE
+)
+#undef PREF_VALUE
+
+// Is support for MediaKeys.getStatusForPolicy enabled?
+VARCACHE_PREF(
+  Live,
+  "media.eme.hdcp-policy-check.enabled",
+  media_eme_hdcp_policy_check_enabled,
+  bool, false
+)
+
+// Is support for MediaDevices.ondevicechange enabled?
+VARCACHE_PREF(
+  Live,
+  "media.ondevicechange.enabled",
+  media_ondevicechange_enabled,
+  bool, true
+)
+
+// Is support for HTMLMediaElement.seekToNextFrame enabled?
+VARCACHE_PREF(
+  Live,
+  "media.seekToNextFrame.enabled",
+  media_seekToNextFrame_enabled,
+  bool, true
+)
+
+// setSinkId will be enabled in bug 1498512. Till then the
+// implementation will remain hidden behind this pref (Bug 1152401, Bug 934425).
+VARCACHE_PREF(
+  Live,
+  "media.setsinkid.enabled",
+  media_setsinkid_enabled,
+  bool, false
+)
+
+VARCACHE_PREF(
+  Live,
+  "media.useAudioChannelService.testing",
+  media_useAudioChannelService_testing,
+  bool, false
+)
 
 //---------------------------------------------------------------------------
 // Prefs starting with "mousewheel."
@@ -5720,15 +6548,29 @@ VARCACHE_PREF(
 
 VARCACHE_PREF(
   Live,
+  "network.cookie.sameSite.laxByDefault",
+   network_cookie_sameSite_laxByDefault,
+  bool, false
+)
+
+VARCACHE_PREF(
+  Live,
+  "network.cookie.sameSite.noneRequiresSecure",
+   network_cookie_sameSite_noneRequiresSecure,
+  bool, false
+)
+
+VARCACHE_PREF(
+  Live,
   "network.cookie.thirdparty.sessionOnly",
-   network_cookie_thirdparty_sessionOnly,
+  network_cookie_thirdparty_sessionOnly,
   bool, false
 )
 
 VARCACHE_PREF(
   Live,
   "network.cookie.thirdparty.nonsecureSessionOnly",
-   network_cookie_thirdparty_nonsecureSessionOnly,
+  network_cookie_thirdparty_nonsecureSessionOnly,
   bool, false
 )
 
@@ -5951,6 +6793,28 @@ VARCACHE_PREF(
 //---------------------------------------------------------------------------
 
 PREF("preferences.allow.omt-write", bool, true)
+
+#ifdef DEBUG
+// If set to true, setting a Preference matched to a `Once` StaticPref will
+// assert that the value matches. Such assertion being broken is a clear flag
+// that the Once policy shouldn't be used.
+VARCACHE_PREF(
+  Live,
+  "preferences.check.once.policy",
+  preferences_check_once_policy,
+  bool, false
+)
+
+// If set to true, StaticPrefs Once policy check will be skipped during
+// automation regression test. Use with care. This pref must be set back to
+// false as soon as specific test has completed.
+VARCACHE_PREF(
+  Live,
+  "preferences.force-disable.check.once.policy",
+  preferences_force_disable_check_once_policy,
+  bool, false
+)
+#endif
 
 //---------------------------------------------------------------------------
 // Prefs starting with "print."
@@ -6205,11 +7069,26 @@ VARCACHE_PREF(
 // Prefs starting with "slider."
 //---------------------------------------------------------------------------
 
+// scrollbar snapping region
+// 0 - off
+// 1 and higher - slider thickness multiple
 VARCACHE_PREF(
   Once,
   "slider.snapMultiplier",
   SliderSnapMultiplier,
-  int32_t, 0
+  int32_t, 6
+)
+
+//---------------------------------------------------------------------------
+// Prefs starting with "svg."
+//---------------------------------------------------------------------------
+
+// Is support for transform-box enabled?
+VARCACHE_PREF(
+  Live,
+  "svg.transform-box.enabled",
+  svg_transform_box_enabled,
+  bool, true
 )
 
 //---------------------------------------------------------------------------
@@ -6358,6 +7237,19 @@ VARCACHE_PREF(
   RelaxedAtomicBool, true
 )
 
+#ifdef MOZ_WIDGET_ANDROID
+# define PREF_VALUE false
+#else
+# define PREF_VALUE true
+#endif
+VARCACHE_PREF(
+  Live,
+  "webgl.default-antialias",
+  WebGLDefaultAntialias,
+  RelaxedAtomicBool, PREF_VALUE
+)
+#undef PREF_VALUE
+
 VARCACHE_PREF(
   Live,
   "webgl.default-low-power",
@@ -6465,7 +7357,7 @@ VARCACHE_PREF(
 )
 
 VARCACHE_PREF(
-  Once,
+  Live,
   "webgl.force-layers-readback",
   WebGLForceLayersReadback,
   bool, false

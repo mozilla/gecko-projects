@@ -213,6 +213,7 @@ struct DocShellLoadStateInit
   bool InheritPrincipal;
   bool PrincipalIsExplicit;
   nsIPrincipal PrincipalToInherit;
+  nsIPrincipal StoragePrincipalToInherit;
   bool ForceAllowDataURI;
   bool OriginalFrameSrc;
   uint32_t LoadType;

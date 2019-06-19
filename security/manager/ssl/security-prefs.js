@@ -120,14 +120,9 @@ pref("security.pki.certificate_transparency.mode", 0);
 
 // Only one of ["enable_softtoken", "enable_usbtoken",
 // "webauthn_enable_android_fido2"] should be true at a time, as the
-// softtoken will override the other two.
+// softtoken will override the other two. Note android's pref is set in
+// mobile.js / geckoview-prefs.js
 pref("security.webauth.webauthn_enable_softtoken", false);
-
-#ifdef FENNEC_NIGHTLY
-pref("security.webauth.webauthn_enable_android_fido2", true);
-#else
-pref("security.webauth.webauthn_enable_android_fido2", false);
-#endif
 
 #ifdef MOZ_WIDGET_ANDROID
 // the Rust usbtoken support does not function on Android
@@ -178,4 +173,5 @@ pref("security.remote_settings.intermediates.bucket", "security-state");
 pref("security.remote_settings.intermediates.collection", "intermediates");
 pref("security.remote_settings.intermediates.checked", 0);
 pref("security.remote_settings.intermediates.downloads_per_poll", 100);
+pref("security.remote_settings.intermediates.parallel_downloads", 8);
 pref("security.remote_settings.intermediates.signer", "onecrl.content-signature.mozilla.org");

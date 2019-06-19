@@ -771,9 +771,6 @@ function setupTestCommon(aAppUpdateAutoEnabled = false, aAllowBits = false) {
 
   setDefaultPrefs();
 
-  // Don't attempt to show a prompt when an update finishes.
-  Services.prefs.setBoolPref(PREF_APP_UPDATE_SILENT, true);
-
   gGREDirOrig = getGREDir();
   gGREBinDirOrig = getGREBinDir();
 
@@ -3411,48 +3408,6 @@ function checkFilesInDirRecursive(aDir, aCallback) {
   }
 }
 
-
-/**
- * Helper function to override the update prompt component to verify whether it
- * is called or not.
- *
- * @param   aCallback
- *          The callback to call if the update prompt component is called.
- */
-function overrideUpdatePrompt(aCallback) {
-  MockRegistrar.register("@mozilla.org/updates/update-prompt;1", UpdatePrompt, [aCallback]);
-}
-
-function UpdatePrompt(aCallback) {
-  this._callback = aCallback;
-
-  let fns = ["checkForUpdates", "showUpdateAvailable", "showUpdateDownloaded",
-             "showUpdateError", "showUpdateHistory", "showUpdateInstalled"];
-
-  fns.forEach(function UP_fns(aPromptFn) {
-    UpdatePrompt.prototype[aPromptFn] = function() {
-      if (!this._callback) {
-        return;
-      }
-
-      let callback = this._callback[aPromptFn];
-      if (!callback) {
-        return;
-      }
-
-      callback.apply(this._callback,
-                     Array.prototype.slice.call(arguments));
-    };
-  });
-}
-
-UpdatePrompt.prototype = {
-  flags: Ci.nsIClassInfo.SINGLETON,
-  getScriptableHelper: () => null,
-  interfaces: [Ci.nsISupports, Ci.nsIUpdatePrompt],
-  QueryInterface: ChromeUtils.generateQI([Ci.nsIClassInfo, Ci.nsIUpdatePrompt]),
-};
-
 /**
  * Waits for an update check request to complete.
  *
@@ -3470,13 +3425,13 @@ function waitForUpdateCheck(aSuccess, aExpectedValues = {}) {
   return new Promise(resolve => gUpdateChecker.checkForUpdates({
     onProgress: (aRequest, aPosition, aTotalSize) => {
     },
-    onCheckComplete: (request, updates, updateCount) => {
+    onCheckComplete: (request, updates) => {
       Assert.ok(aSuccess, "the update check should succeed");
       if (aExpectedValues.updateCount) {
-        Assert.equal(aExpectedValues.updateCount, updateCount,
+        Assert.equal(aExpectedValues.updateCount, updates.length,
                      "the update count" + MSG_SHOULD_EQUAL);
       }
-      resolve({request, updates, updateCount});
+      resolve({request, updates});
     },
     onError: (request, update) => {
       Assert.ok(!aSuccess, "the update check should error");
@@ -3502,8 +3457,8 @@ function waitForUpdateCheck(aSuccess, aExpectedValues = {}) {
  * @return  A promise which will resolve the first time the update download
  *          onStopRequest occurs and returns the arguments from onStopRequest.
  */
-function waitForUpdateDownload(aUpdates, aUpdateCount, aExpectedStatus) {
-  let bestUpdate = gAUS.selectUpdate(aUpdates, aUpdateCount);
+function waitForUpdateDownload(aUpdates, aExpectedStatus) {
+  let bestUpdate = gAUS.selectUpdate(aUpdates);
   let state = gAUS.downloadUpdate(bestUpdate, false);
   if (state == STATE_NONE || state == STATE_FAILED) {
     do_throw("nsIApplicationUpdateService:downloadUpdate returned " + state);

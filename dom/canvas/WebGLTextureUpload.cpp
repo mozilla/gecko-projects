@@ -1095,6 +1095,7 @@ void WebGLTexture::TexStorage(TexTarget target, GLsizei levels,
 
   if (error == LOCAL_GL_OUT_OF_MEMORY) {
     mContext->ErrorOutOfMemory("Ran out of memory during texture allocation.");
+    Truncate();
     return;
   }
   if (error) {
@@ -1232,6 +1233,7 @@ void WebGLTexture::TexImage(TexImageTarget target, GLint level,
 
   if (glError == LOCAL_GL_OUT_OF_MEMORY) {
     mContext->ErrorOutOfMemory("Driver ran out of memory during upload.");
+    Truncate();
     return;
   }
 
@@ -1312,6 +1314,7 @@ void WebGLTexture::TexSubImage(TexImageTarget target, GLint level,
 
   if (glError == LOCAL_GL_OUT_OF_MEMORY) {
     mContext->ErrorOutOfMemory("Driver ran out of memory during upload.");
+    Truncate();
     return;
   }
 
@@ -1418,6 +1421,7 @@ void WebGLTexture::CompressedTexImage(TexImageTarget target, GLint level,
   mContext->OnDataAllocCall();
   if (error == LOCAL_GL_OUT_OF_MEMORY) {
     mContext->ErrorOutOfMemory("Ran out of memory during upload.");
+    Truncate();
     return;
   }
   if (error) {
@@ -1564,6 +1568,7 @@ void WebGLTexture::CompressedTexSubImage(
       blob->mPtr);
   if (error == LOCAL_GL_OUT_OF_MEMORY) {
     mContext->ErrorOutOfMemory("Ran out of memory during upload.");
+    Truncate();
     return;
   }
   if (error) {
@@ -1722,24 +1727,24 @@ ScopedCopyTexImageSource::ScopedCopyTexImageSource(
   // Now create the swizzled FB we'll be exposing.
 
   GLuint rgbaRB = 0;
-  gl->fGenRenderbuffers(1, &rgbaRB);
-  gl::ScopedBindRenderbuffer scopedRB(gl, rgbaRB);
-  gl->fRenderbufferStorage(LOCAL_GL_RENDERBUFFER, sizedFormat, srcWidth,
-                           srcHeight);
-
   GLuint rgbaFB = 0;
-  gl->fGenFramebuffers(1, &rgbaFB);
-  gl->fBindFramebuffer(LOCAL_GL_FRAMEBUFFER, rgbaFB);
-  gl->fFramebufferRenderbuffer(LOCAL_GL_FRAMEBUFFER, LOCAL_GL_COLOR_ATTACHMENT0,
-                               LOCAL_GL_RENDERBUFFER, rgbaRB);
+  {
+    gl->fGenRenderbuffers(1, &rgbaRB);
+    gl::ScopedBindRenderbuffer scopedRB(gl, rgbaRB);
+    gl->fRenderbufferStorage(LOCAL_GL_RENDERBUFFER, sizedFormat, srcWidth,
+                             srcHeight);
 
-  const GLenum status = gl->fCheckFramebufferStatus(LOCAL_GL_FRAMEBUFFER);
-  if (status != LOCAL_GL_FRAMEBUFFER_COMPLETE) {
-    MOZ_CRASH("GFX: Temp framebuffer is not complete.");
+    gl->fGenFramebuffers(1, &rgbaFB);
+    gl->fBindFramebuffer(LOCAL_GL_FRAMEBUFFER, rgbaFB);
+    gl->fFramebufferRenderbuffer(LOCAL_GL_FRAMEBUFFER,
+                                 LOCAL_GL_COLOR_ATTACHMENT0,
+                                 LOCAL_GL_RENDERBUFFER, rgbaRB);
+
+    const GLenum status = gl->fCheckFramebufferStatus(LOCAL_GL_FRAMEBUFFER);
+    if (status != LOCAL_GL_FRAMEBUFFER_COMPLETE) {
+      MOZ_CRASH("GFX: Temp framebuffer is not complete.");
+    }
   }
-
-  // Restore RB binding.
-  scopedRB.Unwrap();  // This function should really have a better name.
 
   // Draw-blit rgbaTex into rgbaFB.
   const gfx::IntSize srcSize(srcWidth, srcHeight);
@@ -1748,10 +1753,6 @@ ScopedCopyTexImageSource::ScopedCopyTexImageSource(
     gl->BlitHelper()->DrawBlitTextureToFramebuffer(scopedTex.Texture(), srcSize,
                                                    srcSize);
   }
-
-  // Restore Tex2D binding and destroy the temp tex.
-  scopedBindTex.Unwrap();
-  scopedTex.Unwrap();
 
   // Leave RB and FB alive, and FB bound.
   mRB = rgbaRB;
@@ -1920,7 +1921,7 @@ static bool ValidateCopyTexImageForFeedback(const WebGLContext& webgl,
 }
 
 static bool DoCopyTexOrSubImage(WebGLContext* webgl, bool isSubImage,
-                                const WebGLTexture* tex, TexImageTarget target,
+                                WebGLTexture* const tex, const TexImageTarget target,
                                 GLint level, GLint xWithinSrc, GLint yWithinSrc,
                                 uint32_t srcTotalWidth, uint32_t srcTotalHeight,
                                 const webgl::FormatUsageInfo* srcUsage,
@@ -2009,6 +2010,7 @@ static bool DoCopyTexOrSubImage(WebGLContext* webgl, bool isSubImage,
 
   if (error == LOCAL_GL_OUT_OF_MEMORY) {
     webgl->ErrorOutOfMemory("Ran out of memory during texture copy.");
+    tex->Truncate();
     return false;
   }
 

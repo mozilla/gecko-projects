@@ -26,7 +26,13 @@
 @namespace xbl url("http://www.mozilla.org/xbl"); /* namespace for XBL elements */
 
 :root {
+  text-rendering: optimizeLegibility;
+  -moz-control-character-visibility: visible;
   --animation-easing-function: cubic-bezier(.07, .95, 0, 1);
+}
+
+:root:-moz-locale-dir(rtl) {
+  direction: rtl;
 }
 
 /* ::::::::::
@@ -287,10 +293,6 @@ panel[type="arrow"] {
     -moz-window-transform: none;
   }
 %else
-  panel[type="arrow"] {
-    will-change: transform, opacity; /* workaround for bug 1414033 */
-  }
-
   panel[type="arrow"]:not([animate="false"]) {
     opacity: 0;
     transform: translateY(-70px);
@@ -577,7 +579,6 @@ stringbundleset {
 
 dialog,
 dialog:root /* override :root from above */ {
-  -moz-binding: url("chrome://global/content/bindings/dialog.xml#dialog");
   -moz-box-orient: vertical;
 }
 

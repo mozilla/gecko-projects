@@ -17,13 +17,13 @@
 #include "nsIFactory.h"
 #include "nsISupports.h"
 #include "mozilla/dom/Document.h"
-#include "nsIHTMLDocument.h"
 #include "nsCOMPtr.h"
 #include "nsIContentSerializer.h"
 #include "mozilla/Encoding.h"
 #include "nsIOutputStream.h"
 #include "nsRange.h"
 #include "nsGkAtoms.h"
+#include "nsHTMLDocument.h"
 #include "nsIContent.h"
 #include "nsIScriptContext.h"
 #include "nsIScriptGlobalObject.h"
@@ -355,7 +355,8 @@ NS_INTERFACE_MAP_END
 
 NS_IMPL_CYCLE_COLLECTION(nsDocumentEncoder, mDocument,
                          mEncodingScope.mSelection, mEncodingScope.mRange,
-                         mEncodingScope.mNode, mSerializer, mCommonAncestorOfRange)
+                         mEncodingScope.mNode, mSerializer,
+                         mCommonAncestorOfRange)
 
 nsDocumentEncoder::nsDocumentEncoder()
     : mEncoding(nullptr), mIsCopying(false), mCachedBuffer(nullptr) {
@@ -1040,7 +1041,8 @@ nsresult nsDocumentEncoder::SerializeRangeToString(nsRange* aRange,
   nsContentUtils::GetAncestorsAndOffsets(
       endContainer, endOffset, &endContainerPath, &endContainerOffsets);
 
-  nsCOMPtr<nsIContent> commonContent = do_QueryInterface(mCommonAncestorOfRange);
+  nsCOMPtr<nsIContent> commonContent =
+      do_QueryInterface(mCommonAncestorOfRange);
   mStartRootIndex = startContainerPath.IndexOf(commonContent);
   mEndRootIndex = endContainerPath.IndexOf(commonContent);
 
@@ -1347,8 +1349,7 @@ nsHTMLCopyEncoder::SetSelection(Selection* aSelection) {
   // XXX bug 1245883
 
   // also consider ourselves in a text widget if we can't find an html document
-  nsCOMPtr<nsIHTMLDocument> htmlDoc = do_QueryInterface(mDocument);
-  if (!(htmlDoc && mDocument->IsHTMLDocument())) {
+  if (!(mDocument && mDocument->IsHTMLDocument())) {
     mIsTextWidget = true;
     mEncodingScope.mSelection = aSelection;
     // mMimeType is set to text/plain when encoding starts.

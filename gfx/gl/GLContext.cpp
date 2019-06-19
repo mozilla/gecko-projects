@@ -137,7 +137,6 @@ static const char* const sExtensionNames[] = {
     "GL_EXT_draw_buffers",
     "GL_EXT_draw_buffers2",
     "GL_EXT_draw_instanced",
-    "GL_EXT_draw_range_elements",
     "GL_EXT_float_blend",
     "GL_EXT_frag_depth",
     "GL_EXT_framebuffer_blit",
@@ -1236,18 +1235,6 @@ void GLContext::LoadMoreSymbols(const SymbolLoader& loader) {
         fnLoadFeatureByCore(coreSymbols, extSymbols, GLFeature::draw_buffers);
     }
 
-    if (IsSupported(GLFeature::draw_range_elements)) {
-        const SymLoadStruct coreSymbols[] = {
-            { (PRFuncPtr*) &mSymbols.fDrawRangeElements, {{ "glDrawRangeElements" }} },
-            END_SYMBOLS
-        };
-        const SymLoadStruct extSymbols[] = {
-            { (PRFuncPtr*) &mSymbols.fDrawRangeElements, {{ "glDrawRangeElementsEXT" }} },
-            END_SYMBOLS
-        };
-        fnLoadFeatureByCore(coreSymbols, extSymbols, GLFeature::draw_range_elements);
-    }
-
     if (IsSupported(GLFeature::get_integer_indexed)) {
         const SymLoadStruct coreSymbols[] = {
             { (PRFuncPtr*) &mSymbols.fGetIntegeri_v, {{ "glGetIntegeri_v" }} },
@@ -1758,16 +1745,6 @@ GLFormats GLContext::ChooseGLFormats(const SurfaceCaps& caps) const {
       formats.color_rbFormat = LOCAL_GL_RGB8;
     }
   }
-
-  uint32_t msaaLevel = StaticPrefs::MSAALevel();
-  GLsizei samples = msaaLevel * msaaLevel;
-  samples = std::min(samples, mMaxSamples);
-
-  // Bug 778765.
-  if (WorkAroundDriverBugs() && samples == 1) {
-    samples = 0;
-  }
-  formats.samples = samples;
 
   // Be clear that these are 0 if unavailable.
   formats.depthStencil = 0;
@@ -2911,6 +2888,15 @@ void GLContext::OnImplicitMakeCurrentFailure(const char* const funcName) {
   gfxCriticalError() << "Ignoring call to " << funcName << " with failed"
                      << " mImplicitMakeCurrent.";
 }
+
+// -
+
+// These are defined out of line so that we don't need to include
+// ISurfaceAllocator.h in SurfaceTypes.h.
+SurfaceCaps::SurfaceCaps() = default;
+SurfaceCaps::SurfaceCaps(const SurfaceCaps& other) = default;
+SurfaceCaps& SurfaceCaps::operator=(const SurfaceCaps& other) = default;
+SurfaceCaps::~SurfaceCaps() = default;
 
 } /* namespace gl */
 } /* namespace mozilla */

@@ -35,9 +35,9 @@
 #include "mozilla/layers/MatrixMessage.h"
 #include "mozilla/layers/WebRenderScrollDataWrapper.h"
 #include "mozilla/MouseEvents.h"
-#include "mozilla/mozalloc.h"  // for operator new
-#include "mozilla/Preferences.h"        // for Preferences
-#include "mozilla/StaticPrefs.h"        // for StaticPrefs
+#include "mozilla/mozalloc.h"     // for operator new
+#include "mozilla/Preferences.h"  // for Preferences
+#include "mozilla/StaticPrefs.h"  // for StaticPrefs
 #include "mozilla/TouchEvents.h"
 #include "mozilla/EventStateManager.h"  // for WheelPrefs
 #include "mozilla/webrender/WebRenderAPI.h"
@@ -431,6 +431,9 @@ APZCTreeManager::UpdateHitTestingTreeImpl(LayersId aRootLayerTreeId,
             ++asyncZoomContainerNestingDepth;
           }
 
+          // Note that this check happens after the potential increment of
+          // asyncZoomContainerNestingDepth, to allow the root content
+          // metadata to be on the same node as the async zoom container.
           if (aLayerMetrics.Metrics().IsRootContent() &&
               asyncZoomContainerNestingDepth == 0) {
             haveRootContentOutsideAsyncZoomContainer = true;
@@ -2545,7 +2548,8 @@ already_AddRefed<AsyncPanZoomController> APZCTreeManager::GetTargetAPZC(
   if (gfx::gfxVars::UseWebRender()) {
     target = GetAPZCAtPointWR(aPoint, &hitResult, aOutLayersId, &scrollbarNode);
   } else {
-    target = GetAPZCAtPoint(mRootNode, aPoint, &hitResult, &scrollbarNode);
+    target = GetAPZCAtPoint(mRootNode, aPoint, &hitResult, aOutLayersId,
+                            &scrollbarNode);
   }
 
   if (aOutHitResult) {
@@ -2724,7 +2728,7 @@ AsyncPanZoomController* APZCTreeManager::GetTargetApzcForNode(
 
 AsyncPanZoomController* APZCTreeManager::GetAPZCAtPoint(
     HitTestingTreeNode* aNode, const ScreenPoint& aHitTestPoint,
-    CompositorHitTestInfo* aOutHitResult,
+    CompositorHitTestInfo* aOutHitResult, LayersId* aOutLayersId,
     HitTestingTreeNode** aOutScrollbarNode) {
   mTreeLock.AssertCurrentThreadIn();
 
@@ -2798,6 +2802,9 @@ AsyncPanZoomController* APZCTreeManager::GetAPZCAtPoint(
         RefPtr<AsyncPanZoomController> scrollTarget =
             GetTargetAPZC(n->GetLayersId(), n->GetScrollTargetId());
         if (scrollTarget) {
+          if (aOutLayersId) {
+            *aOutLayersId = n->GetLayersId();
+          }
           return scrollTarget.get();
         }
       }
@@ -2811,6 +2818,9 @@ AsyncPanZoomController* APZCTreeManager::GetAPZCAtPoint(
     }
     APZCTM_LOG("Successfully matched APZC %p via node %p (hit result 0x%x)\n",
                result, resultNode, aOutHitResult->serialize());
+    if (aOutLayersId) {
+      *aOutLayersId = resultNode->GetLayersId();
+    }
     return result;
   }
 
@@ -3158,8 +3168,13 @@ LayerToParentLayerMatrix4x4 APZCTreeManager::ComputeTransformForNode(
   if (AsyncPanZoomController* apzc = aNode->GetApzc()) {
     // If the node represents scrollable content, apply the async transform
     // from its APZC.
+    bool visualTransformIsInheritedFromAncestor =
+        apzc->IsRootContent() &&        /* we're the APZC whose visual transform
+                                           might be on the async zoom container */
+        mUsingAsyncZoomContainer &&     /* there is an async zoom container */
+        !aNode->IsAsyncZoomContainer(); /* it's not us */
     AsyncTransformComponents components =
-        mUsingAsyncZoomContainer && apzc->IsRootContent()
+        visualTransformIsInheritedFromAncestor
             ? AsyncTransformComponents{AsyncTransformComponent::eLayout}
             : LayoutAndVisual;
     return aNode->GetTransform() *

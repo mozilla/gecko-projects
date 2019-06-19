@@ -137,7 +137,7 @@ const startupPhases = {
       name: "PCompositorBridge::Msg_WillClose",
       condition: WIN,
       ignoreIfUnused: true, // Only on Win7 32
-      maxCount: 1,
+      maxCount: 2,
     },
     {
       name: "PCompositorBridge::Msg_MakeSnapshot",
@@ -176,7 +176,7 @@ const startupPhases = {
   "before becoming idle": [
     { // bug 1373773
       name: "PCompositorBridge::Msg_NotifyChildCreated",
-      condition: !WIN,
+      ignoreIfUnused: true,
       maxCount: 1,
     },
     {
@@ -201,6 +201,12 @@ const startupPhases = {
       name: "PCompositorBridge::Msg_Initialize",
       condition: WIN && WEBRENDER,
       ignoreIfUnused: true, // Intermittently occurs in "before handling user events"
+      maxCount: 1,
+    },
+    {
+      name: "PCompositorBridge::Msg_MapAndNotifyChildCreated",
+      condition: WIN,
+      ignoreIfUnused: true,
       maxCount: 1,
     },
   ],

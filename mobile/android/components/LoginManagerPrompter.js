@@ -177,7 +177,7 @@ LoginManagerPrompter.prototype = {
         label: this._getLocalizedString("neverButton"),
         callback: function() {
           promptHistogram.add(PROMPT_NEVER);
-          pwmgr.setLoginSavingEnabled(aLogin.hostname, false);
+          pwmgr.setLoginSavingEnabled(aLogin.origin, false);
         },
       },
       {
@@ -321,7 +321,7 @@ LoginManagerPrompter.prototype = {
   _getLocalizedString: function(key, formatArgs) {
     if (formatArgs)
       return this._strBundle.pwmgr.formatStringFromName(
-        key, formatArgs, formatArgs.length);
+        key, formatArgs);
     return this._strBundle.pwmgr.GetStringFromName(key);
   },
 

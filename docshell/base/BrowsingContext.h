@@ -146,6 +146,13 @@ class BrowsingContext : public nsWrapperCache, public BrowsingContextBase {
   // child and the parent process.
   void Detach(bool aFromIPC = false);
 
+  // Prepare this BrowsingContext to leave the current process.
+  void PrepareForProcessChange();
+
+  // Detach the current BrowsingContext's children, in both the child
+  // and the parent process.
+  void DetachChildren(bool aFromIPC = false);
+
   // Remove all children from the current BrowsingContext and cache
   // them to allow them to be attached again.
   void CacheChildren(bool aFromIPC = false);
@@ -162,6 +169,9 @@ class BrowsingContext : public nsWrapperCache, public BrowsingContextBase {
   bool NameEquals(const nsAString& aName) { return mName.Equals(aName); }
 
   bool IsContent() const { return mType == Type::Content; }
+  bool IsChrome() const { return !IsContent(); }
+
+  bool IsTopContent() const { return IsContent() && !GetParent(); }
 
   uint64_t Id() const { return mBrowsingContextId; }
 
@@ -375,6 +385,9 @@ class BrowsingContext : public nsWrapperCache, public BrowsingContextBase {
 
   bool IsActive() const;
 
+  // Removes the context from its group and sets mIsDetached to true.
+  void Unregister();
+
   friend class ::nsOuterWindowProxy;
   friend class ::nsGlobalWindowOuter;
   // Update the window proxy object that corresponds to this browsing context.
@@ -456,6 +469,10 @@ class BrowsingContext : public nsWrapperCache, public BrowsingContextBase {
   // process? This may be true with a null mDocShell after the Window has been
   // closed.
   bool mIsInProcess : 1;
+
+  // Has this browsing context been detached? BrowsingContexts should
+  // only be detached once.
+  bool mIsDiscarded : 1;
 };
 
 /**

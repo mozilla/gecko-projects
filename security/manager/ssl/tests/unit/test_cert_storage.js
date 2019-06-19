@@ -13,8 +13,7 @@
 //   unmodified
 
 const { setTimeout } = ChromeUtils.import("resource://gre/modules/Timer.jsm", {});
-const { RemoteSettings } = ChromeUtils.import("resource://services-settings/remote-settings.js", {});
-const { BlocklistClients } = ChromeUtils.import("resource://services-common/blocklist-clients.js", {});
+const { RemoteSecuritySettings } = ChromeUtils.import("resource://gre/modules/psm/RemoteSecuritySettings.jsm");
 
 // First, we need to setup appInfo for the blocklist service to work
 var id = "xpcshell@tests.mozilla.org";
@@ -98,12 +97,6 @@ const certBlocklist = [
   },
 ];
 
-// Setup the addonManager
-var addonManager = Cc["@mozilla.org/addons/integration;1"]
-                     .getService(Ci.nsIObserver)
-                     .QueryInterface(Ci.nsITimerCallback);
-addonManager.observe(null, "addons-startup", null);
-
 function verify_cert(file, expectedError) {
   let ee = constructCertFromFile(file);
   return checkCertErrorGeneric(certDB, ee, expectedError,
@@ -127,7 +120,7 @@ function load_cert(cert, trust) {
 }
 
 async function update_blocklist() {
-  const { OneCRLBlocklistClient } = BlocklistClients.initialize();
+  const { OneCRLBlocklistClient } = RemoteSecuritySettings.init();
 
   const fakeEvent = {
     current: certBlocklist, // with old .txt revocations.

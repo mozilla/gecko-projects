@@ -10,6 +10,7 @@
 #include "mozilla/StaticPtr.h"
 #include "mozilla/TypedEnumBits.h"
 #include "nsIControllerCommand.h"
+#include "nsIPrincipal.h"
 #include "nsISupportsImpl.h"
 #include "nsRefPtrHashtable.h"
 #include "nsStringFwd.h"
@@ -267,6 +268,7 @@ class EditorCommand : public nsIControllerCommand {
       case Command::FormatJustifyRight:
       case Command::FormatJustifyCenter:
       case Command::FormatJustifyFull:
+      case Command::FormatJustifyNone:
         return EditorCommandParamType::CString |
                EditorCommandParamType::String |
                EditorCommandParamType::StateAttribute;
@@ -300,6 +302,19 @@ class EditorCommand : public nsIControllerCommand {
       case Command::FormatIncreaseZIndex:
         return EditorCommandParamType::None;
 
+      // nsClipboardGetContentsCommand
+      // XXX nsClipboardGetContentsCommand is implemented by
+      //     nsGlobalWindowCommands.cpp but cmd_getContents command is not
+      //     used internally, but it's accessible from JS with
+      //     queryCommandValue(), etc.  So, this class is out of scope of
+      //     editor module for now but we should return None for making
+      //     Document code simpler.  We should reimplement the command class
+      //     in editor later for making Document's related methods possible
+      //     to access directly.  Anyway, it does not support `DoCommand()`
+      //     nor `DoCommandParams()` so that let's return `None` here.
+      case Command::GetHTML:
+        return EditorCommandParamType::None;
+
       default:
         MOZ_ASSERT_UNREACHABLE("Unknown Command");
         return EditorCommandParamType::None;
@@ -328,8 +343,8 @@ class EditorCommand : public nsIControllerCommand {
   virtual bool IsCommandEnabled(Command aCommand,
                                 TextEditor* aTextEditor) const = 0;
   MOZ_CAN_RUN_SCRIPT
-  virtual nsresult DoCommand(Command aCommand,
-                             TextEditor& aTextEditor) const = 0;
+  virtual nsresult DoCommand(Command aCommand, TextEditor& aTextEditor,
+                             nsIPrincipal* aPrincipal) const = 0;
 
   /**
    * @param aTextEditor         If the context is an editor, should be set to
@@ -349,8 +364,8 @@ class EditorCommand : public nsIControllerCommand {
    * EditorCommandParamType::None.
    */
   MOZ_CAN_RUN_SCRIPT
-  virtual nsresult DoCommandParam(Command aCommand,
-                                  TextEditor& aTextEditor) const {
+  virtual nsresult DoCommandParam(Command aCommand, TextEditor& aTextEditor,
+                                  nsIPrincipal* aPrincipal) const {
     MOZ_ASSERT_UNREACHABLE("Wrong overload is called");
     return NS_ERROR_NOT_IMPLEMENTED;
   }
@@ -363,7 +378,8 @@ class EditorCommand : public nsIControllerCommand {
   MOZ_CAN_RUN_SCRIPT
   virtual nsresult DoCommandParam(Command aCommand,
                                   const Maybe<bool>& aBoolParam,
-                                  TextEditor& aTextEditor) const {
+                                  TextEditor& aTextEditor,
+                                  nsIPrincipal* aPrincipal) const {
     MOZ_ASSERT_UNREACHABLE("Wrong overload is called");
     return NS_ERROR_NOT_IMPLEMENTED;
   }
@@ -376,7 +392,8 @@ class EditorCommand : public nsIControllerCommand {
   MOZ_CAN_RUN_SCRIPT
   virtual nsresult DoCommandParam(Command aCommand,
                                   const nsACString& aCStringParam,
-                                  TextEditor& aTextEditor) const {
+                                  TextEditor& aTextEditor,
+                                  nsIPrincipal* aPrincipal) const {
     MOZ_ASSERT_UNREACHABLE("Wrong overload is called");
     return NS_ERROR_NOT_IMPLEMENTED;
   }
@@ -389,7 +406,8 @@ class EditorCommand : public nsIControllerCommand {
   MOZ_CAN_RUN_SCRIPT
   virtual nsresult DoCommandParam(Command aCommand,
                                   const nsAString& aStringParam,
-                                  TextEditor& aTextEditor) const {
+                                  TextEditor& aTextEditor,
+                                  nsIPrincipal* aPrincipal) const {
     MOZ_ASSERT_UNREACHABLE("Wrong overload is called");
     return NS_ERROR_NOT_IMPLEMENTED;
   }
@@ -402,7 +420,8 @@ class EditorCommand : public nsIControllerCommand {
   MOZ_CAN_RUN_SCRIPT
   virtual nsresult DoCommandParam(Command aCommand,
                                   nsITransferable* aTransferableParam,
-                                  TextEditor& aTextEditor) const {
+                                  TextEditor& aTextEditor,
+                                  nsIPrincipal* aPrincipal) const {
     MOZ_ASSERT_UNREACHABLE("Wrong overload is called");
     return NS_ERROR_NOT_IMPLEMENTED;
   }
@@ -419,8 +438,8 @@ class EditorCommand : public nsIControllerCommand {
       const final;                                                         \
   using EditorCommand::IsCommandEnabled;                                   \
   MOZ_CAN_RUN_SCRIPT                                                       \
-  virtual nsresult DoCommand(Command aCommand, TextEditor& aTextEditor)    \
-      const final;                                                         \
+  virtual nsresult DoCommand(Command aCommand, TextEditor& aTextEditor,    \
+                             nsIPrincipal* aPrincipal) const final;        \
   using EditorCommand::DoCommand;                                          \
   MOZ_CAN_RUN_SCRIPT                                                       \
   virtual nsresult GetCommandStateParams(                                  \
@@ -429,51 +448,45 @@ class EditorCommand : public nsIControllerCommand {
   using EditorCommand::GetCommandStateParams;                              \
   using EditorCommand::DoCommandParam;
 
-#define NS_DECL_DO_COMMAND_PARAMS                                              \
-  MOZ_CAN_RUN_SCRIPT                                                           \
-  virtual nsresult DoCommandParams(Command aCommand, nsCommandParams* aParams, \
-                                   TextEditor& aTextEditor) const final;       \
-  using EditorCommand::DoCommandParams;
-
 #define NS_DECL_DO_COMMAND_PARAM_DELEGATE_TO_DO_COMMAND                      \
  public:                                                                     \
   MOZ_CAN_RUN_SCRIPT                                                         \
-  virtual nsresult DoCommandParam(Command aCommand, TextEditor& aTextEditor) \
-      const final {                                                          \
-    return DoCommand(aCommand, aTextEditor);                                 \
+  virtual nsresult DoCommandParam(Command aCommand, TextEditor& aTextEditor, \
+                                  nsIPrincipal* aPrincipal) const final {    \
+    return DoCommand(aCommand, aTextEditor, aPrincipal);                     \
   }
 
-#define NS_DECL_DO_COMMAND_PARAM_FOR_BOOL_PARAM                  \
- public:                                                         \
-  MOZ_CAN_RUN_SCRIPT                                             \
-  virtual nsresult DoCommandParam(Command aCommand,              \
-                                  const Maybe<bool>& aBoolParam, \
-                                  TextEditor& aTextEditor) const final;
+#define NS_DECL_DO_COMMAND_PARAM_FOR_BOOL_PARAM        \
+ public:                                               \
+  MOZ_CAN_RUN_SCRIPT                                   \
+  virtual nsresult DoCommandParam(                     \
+      Command aCommand, const Maybe<bool>& aBoolParam, \
+      TextEditor& aTextEditor, nsIPrincipal* aPrincipal) const final;
 
-#define NS_DECL_DO_COMMAND_PARAM_FOR_CSTRING_PARAM                 \
- public:                                                           \
-  MOZ_CAN_RUN_SCRIPT                                               \
-  virtual nsresult DoCommandParam(Command aCommand,                \
-                                  const nsACString& aCStringParam, \
-                                  TextEditor& aTextEditor) const final;
+#define NS_DECL_DO_COMMAND_PARAM_FOR_CSTRING_PARAM       \
+ public:                                                 \
+  MOZ_CAN_RUN_SCRIPT                                     \
+  virtual nsresult DoCommandParam(                       \
+      Command aCommand, const nsACString& aCStringParam, \
+      TextEditor& aTextEditor, nsIPrincipal* aPrincipal) const final;
 
-#define NS_DECL_DO_COMMAND_PARAM_FOR_STRING_PARAM                \
- public:                                                         \
-  MOZ_CAN_RUN_SCRIPT                                             \
-  virtual nsresult DoCommandParam(Command aCommand,              \
-                                  const nsAString& aStringParam, \
-                                  TextEditor& aTextEditor) const final;
+#define NS_DECL_DO_COMMAND_PARAM_FOR_STRING_PARAM      \
+ public:                                               \
+  MOZ_CAN_RUN_SCRIPT                                   \
+  virtual nsresult DoCommandParam(                     \
+      Command aCommand, const nsAString& aStringParam, \
+      TextEditor& aTextEditor, nsIPrincipal* aPrincipal) const final;
 
-#define NS_DECL_DO_COMMAND_PARAM_FOR_TRANSFERABLE_PARAM                \
- public:                                                               \
-  MOZ_CAN_RUN_SCRIPT                                                   \
-  virtual nsresult DoCommandParam(Command aCommand,                    \
-                                  nsITransferable* aTransferableParam, \
-                                  TextEditor& aTextEditor) const final;
+#define NS_DECL_DO_COMMAND_PARAM_FOR_TRANSFERABLE_PARAM      \
+ public:                                                     \
+  MOZ_CAN_RUN_SCRIPT                                         \
+  virtual nsresult DoCommandParam(                           \
+      Command aCommand, nsITransferable* aTransferableParam, \
+      TextEditor& aTextEditor, nsIPrincipal* aPrincipal) const final;
 
 #define NS_INLINE_DECL_EDITOR_COMMAND_MAKE_SINGLETON(_cmd) \
  public:                                                   \
-  static _cmd* GetInstance() {                             \
+  static EditorCommand* GetInstance() {                    \
     if (!sInstance) {                                      \
       sInstance = new _cmd();                              \
     }                                                      \
@@ -586,8 +599,8 @@ class StateUpdatingCommandBase : public EditorCommand {
 
   // add/remove the style
   MOZ_CAN_RUN_SCRIPT
-  virtual nsresult ToggleState(nsAtom* aTagName,
-                               HTMLEditor* aHTMLEditor) const = 0;
+  virtual nsresult ToggleState(nsAtom* aTagName, HTMLEditor* aHTMLEditor,
+                               nsIPrincipal* aPrincipal) const = 0;
 
   static nsAtom* GetTagName(Command aCommand) {
     switch (aCommand) {
@@ -659,7 +672,8 @@ class StyleUpdatingCommand final : public StateUpdatingCommandBase {
 
   // add/remove the style
   MOZ_CAN_RUN_SCRIPT
-  nsresult ToggleState(nsAtom* aTagName, HTMLEditor* aHTMLEditor) const final;
+  nsresult ToggleState(nsAtom* aTagName, HTMLEditor* aHTMLEditor,
+                       nsIPrincipal* aPrincipal) const final;
 };
 
 class InsertTagCommand final : public EditorCommand {
@@ -704,7 +718,8 @@ class ListCommand final : public StateUpdatingCommandBase {
 
   // add/remove the style
   MOZ_CAN_RUN_SCRIPT
-  nsresult ToggleState(nsAtom* aTagName, HTMLEditor* aHTMLEditor) const final;
+  nsresult ToggleState(nsAtom* aTagName, HTMLEditor* aHTMLEditor,
+                       nsIPrincipal* aPrincipal) const final;
 };
 
 class ListItemCommand final : public StateUpdatingCommandBase {
@@ -722,7 +737,8 @@ class ListItemCommand final : public StateUpdatingCommandBase {
 
   // add/remove the style
   MOZ_CAN_RUN_SCRIPT
-  nsresult ToggleState(nsAtom* aTagName, HTMLEditor* aHTMLEditor) const final;
+  nsresult ToggleState(nsAtom* aTagName, HTMLEditor* aHTMLEditor,
+                       nsIPrincipal* aPrincipal) const final;
 };
 
 // Base class for commands whose state consists of a string (e.g. para format)
@@ -741,8 +757,8 @@ class MultiStateCommandBase : public EditorCommand {
   virtual nsresult GetCurrentState(HTMLEditor* aHTMLEditor,
                                    nsCommandParams& aParams) const = 0;
   MOZ_CAN_RUN_SCRIPT
-  virtual nsresult SetState(HTMLEditor* aHTMLEditor,
-                            const nsAString& aNewState) const = 0;
+  virtual nsresult SetState(HTMLEditor* aHTMLEditor, const nsAString& aNewState,
+                            nsIPrincipal* aPrincipal) const = 0;
 };
 
 class ParagraphStateCommand final : public MultiStateCommandBase {
@@ -757,8 +773,8 @@ class ParagraphStateCommand final : public MultiStateCommandBase {
   nsresult GetCurrentState(HTMLEditor* aHTMLEditor,
                            nsCommandParams& aParams) const final;
   MOZ_CAN_RUN_SCRIPT
-  nsresult SetState(HTMLEditor* aHTMLEditor,
-                    const nsAString& aNewState) const final;
+  nsresult SetState(HTMLEditor* aHTMLEditor, const nsAString& aNewState,
+                    nsIPrincipal* aPrincipal) const final;
 };
 
 class FontFaceStateCommand final : public MultiStateCommandBase {
@@ -773,8 +789,8 @@ class FontFaceStateCommand final : public MultiStateCommandBase {
   nsresult GetCurrentState(HTMLEditor* aHTMLEditor,
                            nsCommandParams& aParams) const final;
   MOZ_CAN_RUN_SCRIPT
-  nsresult SetState(HTMLEditor* aHTMLEditor,
-                    const nsAString& aNewState) const final;
+  nsresult SetState(HTMLEditor* aHTMLEditor, const nsAString& aNewState,
+                    nsIPrincipal* aPrincipal) const final;
 };
 
 class FontSizeStateCommand final : public MultiStateCommandBase {
@@ -789,8 +805,8 @@ class FontSizeStateCommand final : public MultiStateCommandBase {
   nsresult GetCurrentState(HTMLEditor* aHTMLEditor,
                            nsCommandParams& aParams) const final;
   MOZ_CAN_RUN_SCRIPT
-  nsresult SetState(HTMLEditor* aHTMLEditor,
-                    const nsAString& aNewState) const final;
+  nsresult SetState(HTMLEditor* aHTMLEditor, const nsAString& aNewState,
+                    nsIPrincipal* aPrincipal) const final;
 };
 
 class HighlightColorStateCommand final : public MultiStateCommandBase {
@@ -805,8 +821,8 @@ class HighlightColorStateCommand final : public MultiStateCommandBase {
   nsresult GetCurrentState(HTMLEditor* aHTMLEditor,
                            nsCommandParams& aParams) const final;
   MOZ_CAN_RUN_SCRIPT
-  nsresult SetState(HTMLEditor* aHTMLEditor,
-                    const nsAString& aNewState) const final;
+  nsresult SetState(HTMLEditor* aHTMLEditor, const nsAString& aNewState,
+                    nsIPrincipal* aPrincipal) const final;
 };
 
 class FontColorStateCommand final : public MultiStateCommandBase {
@@ -821,8 +837,8 @@ class FontColorStateCommand final : public MultiStateCommandBase {
   nsresult GetCurrentState(HTMLEditor* aHTMLEditor,
                            nsCommandParams& aParams) const final;
   MOZ_CAN_RUN_SCRIPT
-  nsresult SetState(HTMLEditor* aHTMLEditor,
-                    const nsAString& aNewState) const final;
+  nsresult SetState(HTMLEditor* aHTMLEditor, const nsAString& aNewState,
+                    nsIPrincipal* aPrincipal) const final;
 };
 
 class AlignCommand final : public MultiStateCommandBase {
@@ -837,8 +853,8 @@ class AlignCommand final : public MultiStateCommandBase {
   nsresult GetCurrentState(HTMLEditor* aHTMLEditor,
                            nsCommandParams& aParams) const final;
   MOZ_CAN_RUN_SCRIPT
-  nsresult SetState(HTMLEditor* aHTMLEditor,
-                    const nsAString& aNewState) const final;
+  nsresult SetState(HTMLEditor* aHTMLEditor, const nsAString& aNewState,
+                    nsIPrincipal* aPrincipal) const final;
 };
 
 class BackgroundColorStateCommand final : public MultiStateCommandBase {
@@ -853,8 +869,8 @@ class BackgroundColorStateCommand final : public MultiStateCommandBase {
   nsresult GetCurrentState(HTMLEditor* aHTMLEditor,
                            nsCommandParams& aParams) const final;
   MOZ_CAN_RUN_SCRIPT
-  nsresult SetState(HTMLEditor* aHTMLEditor,
-                    const nsAString& aNewState) const final;
+  nsresult SetState(HTMLEditor* aHTMLEditor, const nsAString& aNewState,
+                    nsIPrincipal* aPrincipal) const final;
 };
 
 class AbsolutePositioningCommand final : public StateUpdatingCommandBase {
@@ -869,7 +885,8 @@ class AbsolutePositioningCommand final : public StateUpdatingCommandBase {
   nsresult GetCurrentState(nsAtom* aTagName, HTMLEditor* aHTMLEditor,
                            nsCommandParams& aParams) const final;
   MOZ_CAN_RUN_SCRIPT
-  nsresult ToggleState(nsAtom* aTagName, HTMLEditor* aHTMLEditor) const final;
+  nsresult ToggleState(nsAtom* aTagName, HTMLEditor* aHTMLEditor,
+                       nsIPrincipal* aPrincipal) const final;
 };
 
 // composer commands
@@ -916,7 +933,6 @@ NS_DECL_EDITOR_COMMAND_FOR_STRING_PARAM(InsertHTMLCommand)
 #undef NS_DECL_EDITOR_COMMAND_FOR_STRING_PARAM
 #undef NS_DECL_EDITOR_COMMAND_FOR_TRANSFERABLE_PARAM
 #undef NS_DECL_EDITOR_COMMAND_COMMON_METHODS
-#undef NS_DECL_DO_COMMAND_PARAMS
 #undef NS_DECL_DO_COMMAND_PARAM_DELEGATE_TO_DO_COMMAND
 #undef NS_DECL_DO_COMMAND_PARAM_FOR_BOOL_PARAM
 #undef NS_DECL_DO_COMMAND_PARAM_FOR_CSTRING_PARAM

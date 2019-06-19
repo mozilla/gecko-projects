@@ -94,7 +94,7 @@ class UrlbarView {
     }
 
     let items = Array.from(this._rows.children)
-                     .filter(r => r.style.display != "none");
+                     .filter(r => this._isRowVisible(r));
     if (val >= items.length) {
       throw new Error(`UrlbarView: Index ${val} is out of bounds.`);
     }
@@ -134,7 +134,7 @@ class UrlbarView {
 
     // Results over maxResults may be hidden and should not be selectable.
     let lastElementChild = this._rows.lastElementChild;
-    while (lastElementChild && lastElementChild.style.display == "none") {
+    while (lastElementChild && !this._isRowVisible(lastElementChild)) {
       lastElementChild = lastElementChild.previousElementSibling;
     }
 
@@ -163,7 +163,7 @@ class UrlbarView {
       if (!next) {
         break;
       }
-      if (next.style.display == "none") {
+      if (!this._isRowVisible(next)) {
         continue;
       }
       row = next;
@@ -461,7 +461,7 @@ class UrlbarView {
       // Due to stale rows, we may have more rows than maxResults, thus we must
       // hide them, and we'll revert this when stale rows are removed.
       if (this._rows.children.length >= queryContext.maxResults) {
-        row.style.display = "none";
+        this._setRowVisibility(row, false);
       }
       this._rows.appendChild(row);
     }
@@ -575,7 +575,7 @@ class UrlbarView {
         break;
       case UrlbarUtils.RESULT_TYPE.SEARCH:
         action = bundle.formatStringFromName("searchWithEngine",
-                                             [result.payload.engine], 1);
+                                             [result.payload.engine]);
         break;
       case UrlbarUtils.RESULT_TYPE.KEYWORD:
         isVisitAction = result.payload.input.trim() == result.payload.keyword;
@@ -624,6 +624,21 @@ class UrlbarView {
     }
   }
 
+  _setRowVisibility(row, visible) {
+    row.style.display = visible ? "" : "none";
+    if (!visible) {
+      // Reset the overflow state of elements that can overflow in case their
+      // content changes while they're hidden. When making the row visible
+      // again, we'll get new overflow events if needed.
+      this._setElementOverflowing(row._elements.get("title"), false);
+      this._setElementOverflowing(row._elements.get("url"), false);
+    }
+  }
+
+  _isRowVisible(row) {
+    return row.style.display != "none";
+  }
+
   _removeStaleRows() {
     let row = this._rows.lastElementChild;
     while (row) {
@@ -631,7 +646,7 @@ class UrlbarView {
       if (row.hasAttribute("stale")) {
         row.remove();
       } else {
-        row.style.display = "";
+        this._setRowVisibility(row, true);
       }
       row = next;
     }
@@ -733,6 +748,17 @@ class UrlbarView {
     }
   }
 
+  _setElementOverflowing(element, overflowing) {
+    element.toggleAttribute("overflow", overflowing);
+    if (overflowing) {
+      element.setAttribute("title", element._tooltip);
+    } else {
+      element.removeAttribute("title");
+    }
+  }
+
+  // Event handlers below.
+
   _on_SelectedOneOffButtonChanged() {
     if (!this.isOpen || !this._queryContext) {
       return;
@@ -762,7 +788,7 @@ class UrlbarView {
       let action = item.querySelector(".urlbarView-action");
       action.textContent =
         bundle.formatStringFromName("searchWithEngine",
-          [(engine && engine.name) || result.payload.engine], 1);
+          [(engine && engine.name) || result.payload.engine]);
       // If we just changed the engine from the original engine and it had an
       // icon, then make sure the result now uses the new engine's icon or
       // failing that the default icon.  If we changed it back to the original
@@ -809,8 +835,7 @@ class UrlbarView {
     if (event.detail == 1 &&
         (event.target.classList.contains("urlbarView-url") ||
          event.target.classList.contains("urlbarView-title"))) {
-      event.target.toggleAttribute("overflow", true);
-      event.target.setAttribute("title", event.target._tooltip);
+      this._setElementOverflowing(event.target, true);
     }
   }
 
@@ -818,8 +843,7 @@ class UrlbarView {
     if (event.detail == 1 &&
         (event.target.classList.contains("urlbarView-url") ||
          event.target.classList.contains("urlbarView-title"))) {
-      event.target.toggleAttribute("overflow", false);
-      event.target.removeAttribute("title");
+      this._setElementOverflowing(event.target, false);
     }
   }
 

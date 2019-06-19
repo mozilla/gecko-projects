@@ -21,6 +21,7 @@
 #include "mozilla/gfx/2D.h"
 #include "mozilla/LinkedList.h"
 #include "mozilla/UniquePtr.h"
+#include "mozilla/WeakPtr.h"
 #include "nsCycleCollectionNoteChild.h"
 #include "nsICanvasRenderingContextInternal.h"
 #include "nsLayoutUtils.h"
@@ -269,7 +270,8 @@ class AvailabilityRunnable final : public Runnable {
 
 class WebGLContext : public nsICanvasRenderingContextInternal,
                      public nsSupportsWeakReference,
-                     public nsWrapperCache {
+                     public nsWrapperCache,
+                     public SupportsWeakPtr<WebGLContext> {
   friend class ScopedDrawCallWrapper;
   friend class ScopedDrawWithTransformFeedback;
   friend class ScopedFakeVertexAttrib0;
@@ -344,9 +346,9 @@ class WebGLContext : public nsICanvasRenderingContextInternal,
 
  public:
   NS_DECL_CYCLE_COLLECTING_ISUPPORTS
-
   NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_CLASS_AMBIGUOUS(
       WebGLContext, nsICanvasRenderingContextInternal)
+  MOZ_DECLARE_WEAKREFERENCE_TYPENAME(WebGLContext)
 
   virtual JSObject* WrapObject(JSContext* cx,
                                JS::Handle<JSObject*> givenProto) override = 0;
@@ -2004,6 +2006,8 @@ class WebGLContext : public nsICanvasRenderingContextInternal,
 
   // --
 
+  bool ShouldResistFingerprinting() const;
+
  public:
   void LoseOldestWebGLContextIfLimitExceeded();
   void UpdateLastUseIndex();
@@ -2091,44 +2095,33 @@ bool ValidateTexImageTarget(WebGLContext* webgl, uint8_t funcDims,
                             TexImageTarget* const out_texImageTarget,
                             WebGLTexture** const out_tex);
 
-class ScopedUnpackReset final : public gl::ScopedGLWrapper<ScopedUnpackReset> {
-  friend struct gl::ScopedGLWrapper<ScopedUnpackReset>;
-
+class ScopedUnpackReset final {
  private:
   const WebGLContext* const mWebGL;
 
  public:
   explicit ScopedUnpackReset(const WebGLContext* webgl);
-
- private:
-  void UnwrapImpl();
+  ~ScopedUnpackReset();
 };
 
-class ScopedFBRebinder final : public gl::ScopedGLWrapper<ScopedFBRebinder> {
-  friend struct gl::ScopedGLWrapper<ScopedFBRebinder>;
-
+class ScopedFBRebinder final {
  private:
   const WebGLContext* const mWebGL;
 
  public:
-  explicit ScopedFBRebinder(const WebGLContext* const webgl)
-      : ScopedGLWrapper<ScopedFBRebinder>(webgl->gl), mWebGL(webgl) {}
-
- private:
-  void UnwrapImpl();
+  explicit ScopedFBRebinder(const WebGLContext* const webgl) : mWebGL(webgl) {}
+  ~ScopedFBRebinder();
 };
 
-class ScopedLazyBind final : public gl::ScopedGLWrapper<ScopedLazyBind> {
-  friend struct gl::ScopedGLWrapper<ScopedLazyBind>;
-
+class ScopedLazyBind final {
+ private:
+  gl::GLContext* const mGL;
   const GLenum mTarget;
   const WebGLBuffer* const mBuf;
 
  public:
   ScopedLazyBind(gl::GLContext* gl, GLenum target, const WebGLBuffer* buf);
-
- private:
-  void UnwrapImpl();
+  ~ScopedLazyBind();
 };
 
 ////

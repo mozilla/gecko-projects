@@ -47,7 +47,7 @@ impl From<settings::SetError> for BasicError {
 /// # Errors
 ///
 /// This function fails if Cranelift has not been compiled with support for the current CPU.
-pub fn make_isa(env: &StaticEnvironment) -> DashResult<Box<isa::TargetIsa>> {
+pub fn make_isa(env: &StaticEnvironment) -> DashResult<Box<dyn isa::TargetIsa>> {
     // Start with the ISA-independent settings.
     let shared_flags = make_shared_flags().expect("Cranelift configuration error");
 
@@ -120,7 +120,7 @@ fn make_shared_flags() -> settings::SetResult<settings::Flags> {
     sb.set("opt_level", "best")?;
 
     // TODO: Enable jump tables (requires emitting readonly data separately from text).
-    sb.set("jump_tables_enabled", "false")?;
+    sb.set("jump_tables_enabled", "true")?;
 
     Ok(settings::Flags::new(sb))
 }

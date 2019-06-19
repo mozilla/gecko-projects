@@ -512,6 +512,9 @@ var Policies = {
       setAndLockPref("browser.download.dir", replacePathVariables(param));
       // If a custom download directory is being used, just lock folder list to 2.
       setAndLockPref("browser.download.folderList", 2);
+      // Per Chrome spec, user can't choose to download every time
+      // if this is set.
+      setAndLockPref("browser.download.useDownloadDir", true);
     },
   },
 
@@ -693,13 +696,10 @@ var Policies = {
 
       const FLASH_NEVER_ACTIVATE = 0;
       const FLASH_ASK_TO_ACTIVATE = 1;
-      const FLASH_ALWAYS_ACTIVATE = 2;
 
       let flashPrefVal;
-      if (param.Default === undefined) {
+      if (param.Default === undefined || param.Default) {
         flashPrefVal = FLASH_ASK_TO_ACTIVATE;
-      } else if (param.Default) {
-        flashPrefVal = FLASH_ALWAYS_ACTIVATE;
       } else {
         flashPrefVal = FLASH_NEVER_ACTIVATE;
       }

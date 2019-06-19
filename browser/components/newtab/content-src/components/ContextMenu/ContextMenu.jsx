@@ -38,8 +38,9 @@ export class ContextMenu extends React.PureComponent {
 
   render() {
     // Disabling focus on the menu span allows the first tab to focus on the first menu item instead of the wrapper.
-    // eslint-disable-next-line jsx-a11y/interactive-supports-focus
-    return (<span role="menu" className="context-menu" onClick={this.onClick} onKeyDown={this.onClick} >
+    return (
+      // eslint-disable-next-line jsx-a11y/interactive-supports-focus
+      <span role="menu" className="context-menu" onClick={this.onClick} onKeyDown={this.onClick} >
       <ul className="context-menu-list">
         {this.props.options.map((option, i) => (option.type === "separator" ?
           (<li key={i} className="separator" />) :
@@ -62,6 +63,20 @@ export class ContextMenuItem extends React.PureComponent {
     this.props.option.onClick();
   }
 
+  // This selects the correct node based on the key pressed
+  focusSibling(target, key) {
+    const parent = target.parentNode;
+    const closestSiblingSelector = (key === "ArrowUp") ? "previousSibling" : "nextSibling";
+    if (!parent[closestSiblingSelector]) {
+      return;
+    }
+    if (parent[closestSiblingSelector].firstElementChild) {
+      parent[closestSiblingSelector].firstElementChild.focus();
+    } else {
+      parent[closestSiblingSelector][closestSiblingSelector].firstElementChild.focus();
+    }
+  }
+
   onKeyDown(event) {
     const {option} = this.props;
     switch (event.key) {
@@ -73,9 +88,17 @@ export class ContextMenuItem extends React.PureComponent {
           this.props.hideContext();
         }
         break;
+      case "ArrowUp":
+      case "ArrowDown":
+        event.preventDefault();
+        this.focusSibling(event.target, event.key);
+        break;
       case "Enter":
         this.props.hideContext();
         option.onClick();
+        break;
+      case "Escape":
+        this.props.hideContext();
         break;
     }
   }
@@ -84,7 +107,7 @@ export class ContextMenuItem extends React.PureComponent {
     const {option} = this.props;
     return (
       <li role="menuitem" className="context-menu-item" >
-        <button className={option.disabled ? "disabled" : ""} onClick={this.onClick} onKeyDown={this.onKeyDown} tabIndex="0" >
+        <button className={option.disabled ? "disabled" : ""} tabIndex="0" onClick={this.onClick} onKeyDown={this.onKeyDown}>
           {option.icon && <span className={`icon icon-spacer icon-${option.icon}`} />}
           {option.label}
         </button>

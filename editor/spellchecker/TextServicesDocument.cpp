@@ -1094,6 +1094,7 @@ nsresult TextServicesDocument::InsertText(const nsAString& aText) {
 
   nsresult rv = textEditor->InsertTextAsAction(aText);
   if (NS_FAILED(rv)) {
+    NS_WARNING("InsertTextAsAction() failed");
     return rv;
   }
 
@@ -1402,6 +1403,13 @@ Element* TextServicesDocument::GetDocumentContentRootNode() const {
   }
 
   if (mDocument->IsHTMLOrXHTML()) {
+    Element* rootElement = mDocument->GetRootElement();
+    if (rootElement && rootElement->IsXULElement()) {
+      // HTML documents with root XUL elements should eventually be transitioned
+      // to a regular document structure, but for now the content root node will
+      // be the document element.
+      return mDocument->GetDocumentElement();
+    }
     // For HTML documents, the content root node is the body.
     return mDocument->GetBody();
   }
@@ -1609,7 +1617,6 @@ bool TextServicesDocument::IsBlockNode(nsIContent* aContent) {
           nsGkAtoms::font    != atom &&
           nsGkAtoms::i       != atom &&
           nsGkAtoms::kbd     != atom &&
-          nsGkAtoms::keygen  != atom &&
           nsGkAtoms::nobr    != atom &&
           nsGkAtoms::s       != atom &&
           nsGkAtoms::samp    != atom &&

@@ -124,6 +124,10 @@ class SHEntryParent final : public PSHEntryParent {
   bool RecvSetTriggeringPrincipal(nsIPrincipal* aTriggeringPrincipal);
   bool RecvGetPrincipalToInherit(RefPtr<nsIPrincipal>* aPrincipalToInherit);
   bool RecvSetPrincipalToInherit(nsIPrincipal* aPrincipalToInherit);
+  bool RecvGetStoragePrincipalToInherit(
+    RefPtr<nsIPrincipal>* aStoragePrincipalToInherit);
+  bool RecvSetStoragePrincipalToInherit(
+    nsIPrincipal* aStoragePrincipalToInherit);
   bool RecvGetCsp(RefPtr<nsIContentSecurityPolicy>* aCsp);
   bool RecvSetCsp(nsIContentSecurityPolicy* aCsp);
   bool RecvGetStateData(ClonedMessageData* aData);
@@ -152,6 +156,7 @@ class SHEntryParent final : public PSHEntryParent {
                   const nsCString& aContentType,
                   nsIPrincipal* aTriggeringPrincipal,
                   nsIPrincipal* aPrincipalToInherit,
+                  nsIPrincipal* aStoragePrincipalToInherit,
                   nsIContentSecurityPolicy* aCsp, const nsID& aDocshellID,
                   const bool& aDynamicCreation, nsIURI* aOriginalURI,
                   nsIURI* aResultPrincipalURI, const bool& aLoadReplace,

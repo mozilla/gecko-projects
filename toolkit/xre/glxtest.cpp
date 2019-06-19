@@ -201,7 +201,7 @@ void glxtest() {
         "The MOZ_AVOID_OPENGL_ALTOGETHER environment variable is defined");
 
     ///// Open libGL and load needed symbols /////
-#ifdef __OpenBSD__
+#if defined(__OpenBSD__) || defined(__NetBSD__)
 #  define LIBGL_FILENAME "libGL.so"
 #else
 #  define LIBGL_FILENAME "libGL.so.1"
@@ -345,7 +345,8 @@ void glxtest() {
     const char* driDriver = glXGetScreenDriverProc(dpy, DefaultScreen(dpy));
     if (driDriver) {
       gotDriDriver = 1;
-      length += snprintf(buf + length, bufsize - length, "DRI_DRIVER\n%s\n", driDriver);
+      length += snprintf(buf + length, bufsize - length, "DRI_DRIVER\n%s\n",
+                         driDriver);
       if (length >= bufsize)
         fatal_error("GL strings length too large for buffer size");
     }

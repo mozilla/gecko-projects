@@ -448,7 +448,7 @@ void GetDOMFileOrDirectoryPath(const OwningFileOrDirectory& aData,
 
 /* static */
 bool HTMLInputElement::ValueAsDateEnabled(JSContext* cx, JSObject* obj) {
-  return IsExperimentalFormsEnabled() || IsInputDateTimeEnabled() ||
+  return IsExperimentalFormsEnabled() || StaticPrefs::dom_forms_datetime() ||
          IsInputDateTimeOthersEnabled();
 }
 
@@ -1918,7 +1918,7 @@ nsresult HTMLInputElement::ApplyStep(int32_t aStep) {
 /* static */
 bool HTMLInputElement::IsExperimentalMobileType(uint8_t aType) {
   return (aType == NS_FORM_INPUT_DATE || aType == NS_FORM_INPUT_TIME) &&
-         !IsInputDateTimeEnabled();
+         !StaticPrefs::dom_forms_datetime();
 }
 
 bool HTMLInputElement::IsDateTimeInputType(uint8_t aType) {
@@ -2336,7 +2336,7 @@ void HTMLInputElement::GetDisplayFileName(nsAString& aValue) const {
   nsAutoString value;
 
   if (mFileData->mFilesOrDirectories.IsEmpty()) {
-    if ((IsDirPickerEnabled() && Allowdirs()) ||
+    if ((StaticPrefs::dom_input_dirpicker() && Allowdirs()) ||
         (StaticPrefs::dom_webkitBlink_dirPicker_enabled() &&
          HasAttr(kNameSpaceID_None, nsGkAtoms::webkitdirectory))) {
       nsContentUtils::GetLocalizedString(nsContentUtils::eFORMS_PROPERTIES,
@@ -2352,9 +2352,8 @@ void HTMLInputElement::GetDisplayFileName(nsAString& aValue) const {
     nsString count;
     count.AppendInt(int(mFileData->mFilesOrDirectories.Length()));
 
-    const char16_t* params[] = {count.get()};
-    nsContentUtils::FormatLocalizedString(nsContentUtils::eFORMS_PROPERTIES,
-                                          "XFilesSelected", params, value);
+    nsContentUtils::FormatLocalizedString(
+        value, nsContentUtils::eFORMS_PROPERTIES, "XFilesSelected", count);
   }
 
   aValue = value;
@@ -2368,11 +2367,15 @@ HTMLInputElement::GetFilesOrDirectoriesInternal() const {
 void HTMLInputElement::SetFilesOrDirectories(
     const nsTArray<OwningFileOrDirectory>& aFilesOrDirectories,
     bool aSetValueChanged) {
+  if (NS_WARN_IF(mType != NS_FORM_INPUT_FILE)) {
+    return;
+  }
+
   MOZ_ASSERT(mFileData);
 
   mFileData->ClearGetFilesHelpers();
 
-  if (IsWebkitFileSystemEnabled()) {
+  if (StaticPrefs::dom_webkitBlink_filesystem_enabled()) {
     HTMLInputElement_Binding::ClearCachedWebkitEntriesValue(this);
     mFileData->mEntries.Clear();
   }
@@ -2389,7 +2392,7 @@ void HTMLInputElement::SetFiles(FileList* aFiles, bool aSetValueChanged) {
   mFileData->mFilesOrDirectories.Clear();
   mFileData->ClearGetFilesHelpers();
 
-  if (IsWebkitFileSystemEnabled()) {
+  if (StaticPrefs::dom_webkitBlink_filesystem_enabled()) {
     HTMLInputElement_Binding::ClearCachedWebkitEntriesValue(this);
     mFileData->mEntries.Clear();
   }
@@ -2415,7 +2418,7 @@ void HTMLInputElement::MozSetDndFilesAndDirectories(
 
   SetFilesOrDirectories(aFilesOrDirectories, true);
 
-  if (IsWebkitFileSystemEnabled()) {
+  if (StaticPrefs::dom_webkitBlink_filesystem_enabled()) {
     UpdateEntries(aFilesOrDirectories);
   }
 
@@ -2496,7 +2499,7 @@ FileList* HTMLInputElement::GetFiles() {
     return nullptr;
   }
 
-  if (IsDirPickerEnabled() && Allowdirs() &&
+  if (StaticPrefs::dom_input_dirpicker() && Allowdirs() &&
       (!StaticPrefs::dom_webkitBlink_dirPicker_enabled() ||
        !HasAttr(kNameSpaceID_None, nsGkAtoms::webkitdirectory))) {
     return nullptr;
@@ -3408,12 +3411,16 @@ nsresult HTMLInputElement::PreHandleEvent(EventChainVisitor& aVisitor) {
 }
 
 void HTMLInputElement::StartRangeThumbDrag(WidgetGUIEvent* aEvent) {
+  nsRangeFrame* rangeFrame = do_QueryFrame(GetPrimaryFrame());
+  if (!rangeFrame) {
+    return;
+  }
+
   mIsDraggingRange = true;
   mRangeThumbDragStartValue = GetValueAsDecimal();
   // Don't use CaptureFlags::RetargetToElement, as that breaks pseudo-class
   // styling of the thumb.
   PresShell::SetCapturingContent(this, CaptureFlags::IgnoreAllowedState);
-  nsRangeFrame* rangeFrame = do_QueryFrame(GetPrimaryFrame());
 
   // Before we change the value, record the current value so that we'll
   // correctly send a 'change' event if appropriate. We need to do this here
@@ -3640,7 +3647,7 @@ nsresult HTMLInputElement::MaybeInitPickers(EventChainPostVisitor& aVisitor) {
     nsCOMPtr<nsIContent> target =
         do_QueryInterface(aVisitor.mEvent->mOriginalTarget);
     if (target && target->FindFirstNonChromeOnlyAccessContent() == this &&
-        ((IsDirPickerEnabled() && Allowdirs()) ||
+        ((StaticPrefs::dom_input_dirpicker() && Allowdirs()) ||
          (StaticPrefs::dom_webkitBlink_dirPicker_enabled() &&
           HasAttr(kNameSpaceID_None, nsGkAtoms::webkitdirectory)))) {
       type = FILE_PICKER_DIRECTORY;
@@ -5101,37 +5108,12 @@ bool HTMLInputElement::ParseTime(const nsAString& aValue, uint32_t* aResult) {
 bool HTMLInputElement::IsDateTimeTypeSupported(uint8_t aDateTimeInputType) {
   return ((aDateTimeInputType == NS_FORM_INPUT_DATE ||
            aDateTimeInputType == NS_FORM_INPUT_TIME) &&
-          (IsInputDateTimeEnabled() || IsExperimentalFormsEnabled())) ||
+          (StaticPrefs::dom_forms_datetime() ||
+           IsExperimentalFormsEnabled())) ||
          ((aDateTimeInputType == NS_FORM_INPUT_MONTH ||
            aDateTimeInputType == NS_FORM_INPUT_WEEK ||
            aDateTimeInputType == NS_FORM_INPUT_DATETIME_LOCAL) &&
           IsInputDateTimeOthersEnabled());
-}
-
-/* static */
-bool HTMLInputElement::IsWebkitFileSystemEnabled() {
-  static bool sWebkitFileSystemEnabled = false;
-  static bool sWebkitFileSystemPrefCached = false;
-  if (!sWebkitFileSystemPrefCached) {
-    sWebkitFileSystemPrefCached = true;
-    Preferences::AddBoolVarCache(&sWebkitFileSystemEnabled,
-                                 "dom.webkitBlink.filesystem.enabled", false);
-  }
-
-  return sWebkitFileSystemEnabled;
-}
-
-/* static */
-bool HTMLInputElement::IsDirPickerEnabled() {
-  static bool sDirPickerEnabled = false;
-  static bool sDirPickerPrefCached = false;
-  if (!sDirPickerPrefCached) {
-    sDirPickerPrefCached = true;
-    Preferences::AddBoolVarCache(&sDirPickerEnabled, "dom.input.dirpicker",
-                                 false);
-  }
-
-  return sDirPickerEnabled;
 }
 
 /* static */
@@ -5145,19 +5127,6 @@ bool HTMLInputElement::IsExperimentalFormsEnabled() {
   }
 
   return sExperimentalFormsEnabled;
-}
-
-/* static */
-bool HTMLInputElement::IsInputDateTimeEnabled() {
-  static bool sDateTimeEnabled = false;
-  static bool sDateTimePrefCached = false;
-  if (!sDateTimePrefCached) {
-    sDateTimePrefCached = true;
-    Preferences::AddBoolVarCache(&sDateTimeEnabled, "dom.forms.datetime",
-                                 false);
-  }
-
-  return sDateTimeEnabled;
 }
 
 /* static */

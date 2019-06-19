@@ -694,10 +694,6 @@ class TupBackend(CommonBackend):
             # TODO: AB_CD only exists in Makefiles at the moment.
             acdefines_flags += ' -DAB_CD=en-US'
 
-            # Use BUILD_FASTER to avoid CXXFLAGS/CPPFLAGS in
-            # toolkit/content/buildconfig.html
-            acdefines_flags += ' -DBUILD_FASTER=1'
-
             fh.write('MOZ_OBJ_ROOT = $(TUP_CWD)\n')
             fh.write('DIST = $(MOZ_OBJ_ROOT)/dist\n')
             fh.write('ACDEFINES = %s\n' % acdefines_flags)
@@ -1042,7 +1038,7 @@ class TupBackend(CommonBackend):
                    for f in obj.outputs):
                 output_group = self._early_generated_files
             else:
-                output_group = self._installed_files if obj.required_for_compile else None
+                output_group = self._installed_files if obj.required_during_compile else None
                 full_inputs += [self._early_generated_files]
 
             extra_inputs = []

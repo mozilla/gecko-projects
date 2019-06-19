@@ -131,6 +131,12 @@ const RECOMMENDED_PREFS = new Map([
   // unloaded
   ["browser.tabs.disableBackgroundZombification", false],
 
+  // Bug 1557457: Disable because modal dialogs might not appear in Firefox
+  ["browser.tabs.remote.separatePrivilegedContentProcess", false],
+
+  // Don't unload tabs when available memory is running low
+  ["browser.tabs.unloadOnLowMemory", false],
+
   // Do not warn when closing all open tabs
   ["browser.tabs.warnOnClose", false],
 
@@ -184,6 +190,9 @@ const RECOMMENDED_PREFS = new Map([
   // Disable slow script dialogues
   ["dom.max_chrome_script_run_time", 0],
   ["dom.max_script_run_time", 0],
+
+  // DOM Push
+  ["dom.push.connection.enabled", false],
 
   // Only load extensions from the application and user profile
   // AddonManager.SCOPE_PROFILE + AddonManager.SCOPE_APPLICATION
@@ -240,6 +249,9 @@ const RECOMMENDED_PREFS = new Map([
 
   // Make sure SNTP requests do not hit the network
   ["network.sntp.pools", "%(server)s"],
+
+  // Privacy and Tracking Protection
+  ["privacy.trackingprotection.enabled", false],
 
   // Don't do network connections for mitm priming
   ["security.certerrors.mitm.priming.enabled", false],

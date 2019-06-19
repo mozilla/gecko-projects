@@ -318,7 +318,9 @@ var supported_properties = {
     "-webkit-text-fill-color": [ test_color_transition,
                                  test_currentcolor_transition ],
     "-webkit-text-stroke-color": [ test_color_transition,
-                                   test_currentcolor_transition ]
+                                   test_currentcolor_transition ],
+    "text-underline-offset": [ test_length_transition ],
+    "text-decoration-width": [ test_length_transition ],
 };
 
 if (IsCSSPropertyPrefEnabled("layout.css.motion-path.enabled")) {
@@ -850,7 +852,7 @@ const basicShapesTests = [
   { start: "circle(500px)", end: "circle(farthest-side)",
     expected: ["circle", ["farthest-side at 50% 50%"]]},
   { start: "circle(500px)", end: "circle(closest-side)",
-    expected: ["circle", ["closest-side at 50% 50%"]]},
+    expected: ["circle", ["at 50% 50%"]]},
   { start: "ellipse()", end: "ellipse(50px 50px)",
     expected: ["ellipse", ["50px 50px at 50% 50%"]] },
   { start: "ellipse(closest-side closest-side)", end: "ellipse(500px 500px)",

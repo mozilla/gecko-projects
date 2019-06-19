@@ -3117,7 +3117,7 @@ bool QuotaManager::IsOSMetadata(const nsAString& aFileName) {
   return aFileName.EqualsLiteral(DSSTORE_FILE_NAME) ||
          aFileName.EqualsLiteral(DESKTOP_FILE_NAME) ||
          aFileName.LowerCaseEqualsLiteral(DESKTOP_INI_FILE_NAME) ||
-         aFileName.EqualsLiteral(THUMBS_DB_FILE_NAME);
+         aFileName.LowerCaseEqualsLiteral(THUMBS_DB_FILE_NAME);
 }
 
 // static
@@ -3729,21 +3729,12 @@ already_AddRefed<QuotaObject> QuotaManager::GetQuotaObject(
     fileSize = aFileSize;
   }
 
-  // Re-escape our parameters above to make sure we get the right quota group.
-  nsAutoCString group;
-  rv = NS_EscapeURL(aGroup, esc_Query, group, fallible);
-  NS_ENSURE_SUCCESS(rv, nullptr);
-
-  nsAutoCString origin;
-  rv = NS_EscapeURL(aOrigin, esc_Query, origin, fallible);
-  NS_ENSURE_SUCCESS(rv, nullptr);
-
   RefPtr<QuotaObject> result;
   {
     MutexAutoLock lock(mQuotaMutex);
 
     GroupInfoPair* pair;
-    if (!mGroupInfoPairs.Get(group, &pair)) {
+    if (!mGroupInfoPairs.Get(aGroup, &pair)) {
       return nullptr;
     }
 
@@ -3753,7 +3744,7 @@ already_AddRefed<QuotaObject> QuotaManager::GetQuotaObject(
       return nullptr;
     }
 
-    RefPtr<OriginInfo> originInfo = groupInfo->LockedGetOriginInfo(origin);
+    RefPtr<OriginInfo> originInfo = groupInfo->LockedGetOriginInfo(aOrigin);
 
     if (!originInfo) {
       return nullptr;
@@ -4120,6 +4111,10 @@ nsresult QuotaManager::InitializeRepository(PersistenceType aPersistenceType) {
   while (NS_SUCCEEDED(
              (rv = entries->GetNextFile(getter_AddRefs(childDirectory)))) &&
          childDirectory) {
+    if (NS_WARN_IF(IsShuttingDown())) {
+      RETURN_STATUS_OR_RESULT(statusKeeper, NS_ERROR_FAILURE);
+    }
+
     bool isDirectory;
     rv = childDirectory->IsDirectory(&isDirectory);
     if (NS_WARN_IF(NS_FAILED(rv))) {
@@ -4222,6 +4217,10 @@ nsresult QuotaManager::InitializeOrigin(PersistenceType aPersistenceType,
   nsCOMPtr<nsIFile> file;
   while (NS_SUCCEEDED((rv = entries->GetNextFile(getter_AddRefs(file)))) &&
          file) {
+    if (NS_WARN_IF(IsShuttingDown())) {
+      RETURN_STATUS_OR_RESULT(statusKeeper, NS_ERROR_FAILURE);
+    }
+
     bool isDirectory;
     rv = file->IsDirectory(&isDirectory);
     if (NS_WARN_IF(NS_FAILED(rv))) {
@@ -4260,6 +4259,13 @@ nsresult QuotaManager::InitializeOrigin(PersistenceType aPersistenceType,
 
       UNKNOWN_FILE_WARNING(leafName);
       REPORT_TELEMETRY_INIT_ERR(kInternalError, Ori_UnexpectedFile);
+
+#ifdef NIGHTLY_BUILD
+      Telemetry::ScalarSetMaximum(
+          Telemetry::ScalarID::QM_ORIGIN_DIRECTORY_UNEXPECTED_FILENAME,
+          leafName, 1);
+#endif
+
       RECORD_IN_NIGHTLY(statusKeeper, NS_ERROR_UNEXPECTED);
       CONTINUE_IN_NIGHTLY_RETURN_IN_OTHERS(NS_ERROR_UNEXPECTED);
     }
@@ -5808,6 +5814,10 @@ nsresult QuotaManager::EnsureTemporaryStorageIsInitialized() {
     }
   });
 
+  if (NS_WARN_IF(IsShuttingDown())) {
+    RETURN_STATUS_OR_RESULT(statusKeeper, NS_ERROR_FAILURE);
+  }
+
   nsresult rv = InitializeRepository(PERSISTENCE_TYPE_DEFAULT);
   if (NS_WARN_IF(NS_FAILED(rv))) {
     RECORD_IN_NIGHTLY(statusKeeper, rv);
@@ -5818,6 +5828,10 @@ nsresult QuotaManager::EnsureTemporaryStorageIsInitialized() {
 
     return rv;
 #endif
+  }
+
+  if (NS_WARN_IF(IsShuttingDown())) {
+    RETURN_STATUS_OR_RESULT(statusKeeper, NS_ERROR_FAILURE);
   }
 
   rv = InitializeRepository(PERSISTENCE_TYPE_TEMPORARY);
@@ -9135,7 +9149,8 @@ auto OriginParser::Parse(nsACString& aSpec, OriginAttributes* aAttrs)
     QM_WARNING("Origin '%s' failed to parse, handled tokens: %s", mOrigin.get(),
                mHandledTokens.get());
 
-    return mSchemeType == eChrome ? ObsoleteOrigin : InvalidOrigin;
+    return (mSchemeType == eChrome || mSchemeType == eAbout) ? ObsoleteOrigin
+                                                             : InvalidOrigin;
   }
 
   MOZ_ASSERT(mState == eComplete || mState == eHandledTrailingSeparator);
@@ -9392,7 +9407,20 @@ void OriginParser::HandleToken(const nsDependentCSubstring& aToken) {
         return;
       }
 
-      mState = mTokenizer.hasMoreTokens() ? eExpectingPort : eComplete;
+      if (mTokenizer.hasMoreTokens()) {
+        if (mSchemeType == eAbout) {
+          QM_WARNING("Expected an empty string after host!");
+
+          mError = true;
+          return;
+        }
+
+        mState = eExpectingPort;
+
+        return;
+      }
+
+      mState = eComplete;
 
       return;
     }

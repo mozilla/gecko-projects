@@ -26,6 +26,7 @@ include JavaScriptTypes;
 include URIParams;
 include PPrintingTypes;
 include PTabContext;
+include PBackgroundSharedTypes;
 
 include "mozilla/GfxMessageUtils.h";
 include "mozilla/layers/LayersMessageUtils.h";
@@ -87,6 +88,7 @@ using mozilla::a11y::IAccessibleHolder from "mozilla/a11y/IPCTypes.h";
 using mozilla::OriginAttributes from "mozilla/ipc/BackgroundUtils.h";
 using refcounted class mozilla::dom::BrowsingContext from "mozilla/dom/BrowsingContext.h";
 using mozilla::dom::EffectsInfo from "mozilla/dom/TabMessageUtils.h";
+using mozilla::dom::TabId from "mozilla/dom/ipc/IdType.h";
 
 namespace mozilla {
 namespace dom {
@@ -123,6 +125,7 @@ struct WebProgressStateChangeData
 {
   bool isNavigating;
   bool mayEnableCharacterEncodingMenu;
+  bool charsetAutodetected;
 
   // The following fields are only set when the aStateFlags param passed with
   // this struct is |nsIWebProgress.STATE_STOP|.
@@ -131,6 +134,22 @@ struct WebProgressStateChangeData
   nsIURI documentURI;
 };
 
+
+struct WebProgressLocationChangeData
+{
+  bool isNavigating;
+  bool isSyntheticDocument;
+  bool mayEnableCharacterEncodingMenu;
+  bool charsetAutodetected;
+  nsString contentType;
+  nsString title;
+  nsString charset;
+  nsIURI documentURI;
+  PrincipalInfo contentPrincipal;
+  PrincipalInfo contentStoragePrincipal;
+  CSPInfo? csp;
+  uint64_t? requestContextID;
+};
 
 /**
  * A PBrowser manages a maximal locally connected subtree of BrowsingContexts
@@ -186,7 +205,8 @@ parent:
      * Construct a new Remote iframe actor.
      */
     async PBrowserBridge(nsString aPresentationURL, nsString aRemoteType,
-                         BrowsingContext aBrowsingContext, uint32_t aChromeFlags);
+                         BrowsingContext aBrowsingContext, uint32_t aChromeFlags,
+                         TabId tabId);
 
     /**
      * Sends an NS_NATIVE_CHILD_OF_SHAREABLE_WINDOW to be adopted by the
@@ -568,12 +588,20 @@ parent:
                            int32_t aMaxSelfProgress, int32_t aCurTotalProgress,
                            int32_t aMaxTotalProgress);
 
+    async OnLocationChange(WebProgressData? aWebProgressData,
+                           RequestData aRequestData, nsIURI aLocation,
+                           uint32_t aFlags, bool aCanGoBack,
+                           bool aCanGoForward,
+                           WebProgressLocationChangeData? aLocationChangeData);
+
     async OnStatusChange(WebProgressData? aWebProgressData,
                          RequestData aRequestData, nsresult aStatus,
                          nsString aMessage);
 
     async OnContentBlockingEvent(WebProgressData? aWebProgressData,
                                  RequestData aRequestData, uint32_t aEvent);
+
+    async NavigationFinished();
 
     async SessionStoreUpdate(nsCString? aDocShellCaps,
                              bool? aPrivatedMode,
@@ -660,6 +688,11 @@ parent:
     sync SetPrefersReducedMotionOverrideForTest(bool aValue);
     sync ResetPrefersReducedMotionOverrideForTest();
 
+    /**
+     * Fire a `load` event on this PBrowser's embedding frame element.
+     */
+    async FireFrameLoadEvent(bool aIsTrusted);
+
 child:
     /**
      * Notify the remote browser that it has been Show()n on this
@@ -694,8 +727,7 @@ child:
 
     async ParentActivated(bool aActivated);
 
-    async SetKeyboardIndicators(UIStateChangeType showAccelerators,
-                                UIStateChangeType showFocusRings);
+    async SetKeyboardIndicators(UIStateChangeType showFocusRings);
 
     /**
      * StopIMEStateManagement() is called when the process loses focus and

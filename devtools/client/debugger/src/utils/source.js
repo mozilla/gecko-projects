@@ -15,6 +15,7 @@ import { getUnicodeUrl } from "devtools-modules";
 import { endTruncateStr } from "./utils";
 import { truncateMiddleText } from "../utils/text";
 import { parse as parseURL } from "../utils/url";
+import { memoizeLast } from "../utils/memoizeLast";
 import { renderWasmText } from "./wasm";
 import { toEditorLine } from "./editor";
 export { isMinified } from "./isMinified";
@@ -367,9 +368,9 @@ export function getMode(
     }
   }
 
-  // if the url ends with .marko we set the name to Javascript so
-  // syntax highlighting works for marko too
-  if (url && url.match(/\.marko$/i)) {
+  // if the url ends with .marko or .es6 we set the name to Javascript so
+  // syntax highlighting works for these file extensions too
+  if (url && url.match(/\.marko|\.es6$/i)) {
     return { name: "javascript" };
   }
 
@@ -407,26 +408,28 @@ export function isInlineScript(source: SourceActor): boolean {
   return source.introductionType === "scriptElement";
 }
 
-export function getLineText(
-  sourceId: SourceId,
-  asyncContent: AsyncValue<SourceContent> | null,
-  line: number
-): string {
-  if (!asyncContent || !isFulfilled(asyncContent)) {
-    return "";
+export const getLineText = memoizeLast(
+  (
+    sourceId: SourceId,
+    asyncContent: AsyncValue<SourceContent> | null,
+    line: number
+  ) => {
+    if (!asyncContent || !isFulfilled(asyncContent)) {
+      return "";
+    }
+
+    const content = asyncContent.value;
+
+    if (content.type === "wasm") {
+      const editorLine = toEditorLine(sourceId, line);
+      const lines = renderWasmText(sourceId, content);
+      return lines[editorLine] || "";
+    }
+
+    const lineText = content.value.split("\n")[line - 1];
+    return lineText || "";
   }
-
-  const content = asyncContent.value;
-
-  if (content.type === "wasm") {
-    const editorLine = toEditorLine(sourceId, line);
-    const lines = renderWasmText(sourceId, content);
-    return lines[editorLine] || "";
-  }
-
-  const lineText = content.value.split("\n")[line - 1];
-  return lineText || "";
-}
+);
 
 export function getTextAtPosition(
   sourceId: SourceId,

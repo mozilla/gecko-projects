@@ -950,7 +950,25 @@ class nsPresContext : public nsISupports,
     return aMallocSizeOf(this) + SizeOfExcludingThis(aMallocSizeOf);
   }
 
+  /**
+   * Deprecated. Please use the InProcess or CrossProcess variants
+   * to specify which behaviour you want.
+   */
   bool IsRootContentDocument() const;
+
+  /**
+   * We are a root content document in process if: we are not a resource doc, we
+   * are not chrome, and we either have no parent in the current process or our
+   * parent is chrome.
+   */
+  bool IsRootContentDocumentInProcess() const;
+
+  /**
+   * We are a root content document cross process if: we are not a resource doc,
+   * we are not chrome, and we either have no parent in any process or our
+   * parent is chrome.
+   */
+  bool IsRootContentDocumentCrossProcess() const;
 
   bool HadNonBlankPaint() const { return mHadNonBlankPaint; }
   bool HadContentfulPaint() const { return mHadContentfulPaint; }
@@ -1336,18 +1354,6 @@ class nsRootPresContext final : public nsPresContext {
 
   virtual bool IsRoot() override { return true; }
 
-  /**
-   * Add a runnable that will get called before the next paint. They will get
-   * run eventually even if painting doesn't happen. They might run well before
-   * painting happens.
-   */
-  void AddWillPaintObserver(nsIRunnable* aRunnable);
-
-  /**
-   * Run all runnables that need to get called before the next paint.
-   */
-  void FlushWillPaintObservers();
-
   virtual size_t SizeOfExcludingThis(
       mozilla::MallocSizeOf aMallocSizeOf) const override;
 
@@ -1361,28 +1367,10 @@ class nsRootPresContext final : public nsPresContext {
    */
   void CancelApplyPluginGeometryTimer();
 
-  class RunWillPaintObservers : public mozilla::Runnable {
-   public:
-    explicit RunWillPaintObservers(nsRootPresContext* aPresContext)
-        : Runnable("nsPresContextType::RunWillPaintObservers"),
-          mPresContext(aPresContext) {}
-    void Revoke() { mPresContext = nullptr; }
-    NS_IMETHOD Run() override {
-      if (mPresContext) {
-        mPresContext->FlushWillPaintObservers();
-      }
-      return NS_OK;
-    }
-    // The lifetime of this reference is handled by an nsRevocableEventPtr
-    nsRootPresContext* MOZ_NON_OWNING_REF mPresContext;
-  };
-
   friend class nsPresContext;
 
   nsCOMPtr<nsITimer> mApplyPluginGeometryTimer;
   nsTHashtable<nsRefPtrHashKey<nsIContent>> mRegisteredPlugins;
-  nsTArray<nsCOMPtr<nsIRunnable>> mWillPaintObservers;
-  nsRevocableEventPtr<RunWillPaintObservers> mWillPaintFallbackEvent;
 };
 
 #ifdef MOZ_REFLOW_PERF

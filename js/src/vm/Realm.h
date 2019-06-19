@@ -488,8 +488,6 @@ class JS::Realm : public JS::shadow::Realm {
   // can easily lead to races. Use this method very carefully.
   JSRuntime* runtimeFromAnyThread() const { return runtime_; }
 
-  void removeWrapper(js::WrapperMap::Ptr p);
-
   const JS::RealmCreationOptions& creationOptions() const {
     return creationOptions_;
   }
@@ -616,7 +614,7 @@ class JS::Realm : public JS::shadow::Realm {
     return objectMetadataState_.is<js::PendingMetadata>();
   }
   void setObjectPendingMetadata(JSContext* cx, JSObject* obj) {
-    if (!cx->helperThread()) {
+    if (!cx->isHelperThreadContext()) {
       MOZ_ASSERT(objectMetadataState_.is<js::DelayMetadata>());
       objectMetadataState_ =
           js::NewObjectMetadataState(js::PendingMetadata(obj));

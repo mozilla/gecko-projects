@@ -598,6 +598,7 @@ nsresult nsHostResolver::Init() {
   LOG(("nsHostResolver::Init this=%p", this));
 
   mShutdown = false;
+  mNCS = NetworkConnectivityService::GetSingleton();
 
   // The preferences probably haven't been loaded from the disk yet, so we
   // need to register a callback that will set up the experiment once they
@@ -745,6 +746,8 @@ void nsHostResolver::Shutdown() {
     }
     // empty host database
     mRecordDB.Clear();
+
+    mNCS = nullptr;
   }
 
   ClearPendingQueue(pendingQHigh);
@@ -1243,7 +1246,9 @@ nsresult nsHostResolver::TrrLookup(nsHostRecord* aRec, TRR* pushedTRR) {
     do {
       sendAgain = false;
       if ((TRRTYPE_AAAA == rectype) && gTRRService &&
-          gTRRService->DisableIPv6()) {
+          (gTRRService->DisableIPv6() ||
+           (gTRRService->CheckIPv6Connectivity() && mNCS &&
+            mNCS->GetIPv6() == nsINetworkConnectivityService::NOT_AVAILABLE))) {
         break;
       }
       LOG(("TRR Resolve %s type %d\n", addrRec->host.get(), (int)rectype));
@@ -1391,13 +1396,6 @@ nsresult nsHostResolver::NameLookup(nsHostRecord* rec) {
     addrRec->mTrrAAAAUsed = AddrHostRecord::INIT;
   }
 
-  if (rec->flags & RES_DISABLE_TRR) {
-    if (mode == MODE_TRRONLY) {
-      return rv;
-    }
-    mode = MODE_NATIVEONLY;
-  }
-
   // For domains that are excluded from TRR we fallback to NativeLookup.
   // This happens even in MODE_TRRONLY.
   // By default localhost and local are excluded (so we cover *.local hosts)
@@ -1405,6 +1403,13 @@ nsresult nsHostResolver::NameLookup(nsHostRecord* rec) {
   bool skipTRR = true;
   if (gTRRService) {
     skipTRR = gTRRService->IsExcludedFromTRR(rec->host);
+  }
+
+  if (rec->flags & RES_DISABLE_TRR) {
+    if (mode == MODE_TRRONLY && !skipTRR) {
+      return rv;
+    }
+    mode = MODE_NATIVEONLY;
   }
 
   if (!TRR_DISABLED(mode) && !skipTRR) {
@@ -1651,7 +1656,6 @@ void nsHostResolver::AddToEvictionQ(nsHostRecord* rec) {
 //
 // CompleteLookup() checks if the resolving should be redone and if so it
 // returns LOOKUP_RESOLVEAGAIN, but only if 'status' is not NS_ERROR_ABORT.
-// takes ownership of AddrInfo parameter
 nsHostResolver::LookupStatus nsHostResolver::CompleteLookup(
     nsHostRecord* rec, nsresult status, AddrInfo* aNewRRSet, bool pb,
     const nsACString& aOriginsuffix) {
@@ -1724,6 +1728,11 @@ nsHostResolver::LookupStatus nsHostResolver::CompleteLookup(
         return LOOKUP_OK;
       }
 
+      if (gTRRService && gTRRService->WaitForAllResponses()) {
+        LOG(("CompleteLookup: waiting for all responses!\n"));
+        return LOOKUP_OK;
+      }
+
       if (addrRec->mTrrA && (!gTRRService || !gTRRService->EarlyAAAA())) {
         // This is an early AAAA with a pending A response. Allowed
         // only by pref.
@@ -1741,9 +1750,14 @@ nsHostResolver::LookupStatus nsHostResolver::CompleteLookup(
       // If mFirstTRR is set, merge those addresses into current set!
       if (addrRec->mFirstTRR) {
         if (NS_SUCCEEDED(status)) {
+          LOG(("Merging responses"));
           merge_rrset(newRRSet, addrRec->mFirstTRR);
         } else {
+          LOG(("Will use previous response"));
           newRRSet.swap(addrRec->mFirstTRR);  // transfers
+          // We must use the status of the first response, otherwise we'll
+          // pass an error result to the consumers.
+          status = addrRec->mFirstTRRresult;
         }
         addrRec->mFirstTRR = nullptr;
       }

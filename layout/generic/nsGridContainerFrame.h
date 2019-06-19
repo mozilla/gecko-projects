@@ -11,9 +11,8 @@
 
 #include "mozilla/Maybe.h"
 #include "mozilla/TypeTraits.h"
+#include "mozilla/HashTable.h"
 #include "nsContainerFrame.h"
-#include "nsHashKeys.h"
-#include "nsTHashtable.h"
 
 namespace mozilla {
 class PresShell;
@@ -67,18 +66,19 @@ struct ComputedGridTrackInfo {
 };
 
 struct ComputedGridLineInfo {
-  explicit ComputedGridLineInfo(nsTArray<nsTArray<nsString>>&& aNames,
-                                const nsTArray<nsString>& aNamesBefore,
-                                const nsTArray<nsString>& aNamesAfter,
-                                nsTArray<nsString>&& aNamesFollowingRepeat)
+  explicit ComputedGridLineInfo(
+      nsTArray<nsTArray<RefPtr<nsAtom>>>&& aNames,
+      const nsTArray<RefPtr<nsAtom>>& aNamesBefore,
+      const nsTArray<RefPtr<nsAtom>>& aNamesAfter,
+      nsTArray<RefPtr<nsAtom>>&& aNamesFollowingRepeat)
       : mNames(aNames),
         mNamesBefore(aNamesBefore),
         mNamesAfter(aNamesAfter),
         mNamesFollowingRepeat(aNamesFollowingRepeat) {}
-  nsTArray<nsTArray<nsString>> mNames;
-  nsTArray<nsString> mNamesBefore;
-  nsTArray<nsString> mNamesAfter;
-  nsTArray<nsString> mNamesFollowingRepeat;
+  nsTArray<nsTArray<RefPtr<nsAtom>>> mNames;
+  nsTArray<RefPtr<nsAtom>> mNamesBefore;
+  nsTArray<RefPtr<nsAtom>> mNamesAfter;
+  nsTArray<RefPtr<nsAtom>> mNamesFollowingRepeat;
 };
 }  // namespace mozilla
 
@@ -90,6 +90,7 @@ class nsGridContainerFrame final : public nsContainerFrame {
   using ComputedGridLineInfo = mozilla::ComputedGridLineInfo;
   using LogicalAxis = mozilla::LogicalAxis;
   using BaselineSharingGroup = mozilla::BaselineSharingGroup;
+  using NamedArea = mozilla::StyleNamedArea;
 
   template <typename T>
   using PerBaseline = mozilla::EnumeratedArray<BaselineSharingGroup,
@@ -201,16 +202,28 @@ class nsGridContainerFrame final : public nsContainerFrame {
     return info;
   }
 
-  typedef nsBaseHashtable<nsStringHashKey, mozilla::css::GridNamedArea,
-                          mozilla::css::GridNamedArea>
-      ImplicitNamedAreas;
+  struct AtomKey {
+    RefPtr<nsAtom> mKey;
+
+    explicit AtomKey(nsAtom* aAtom) : mKey(aAtom) {}
+
+    using Lookup = nsAtom*;
+
+    static mozilla::HashNumber hash(const Lookup& aKey) { return aKey->hash(); }
+
+    static bool match(const AtomKey& aFirst, const Lookup& aSecond) {
+      return aFirst.mKey == aSecond;
+    }
+  };
+
+  using ImplicitNamedAreas = mozilla::HashMap<AtomKey, NamedArea, AtomKey>;
   NS_DECLARE_FRAME_PROPERTY_DELETABLE(ImplicitNamedAreasProperty,
                                       ImplicitNamedAreas)
   ImplicitNamedAreas* GetImplicitNamedAreas() const {
     return GetProperty(ImplicitNamedAreasProperty());
   }
 
-  typedef nsTArray<mozilla::css::GridNamedArea> ExplicitNamedAreas;
+  using ExplicitNamedAreas = mozilla::StyleOwnedSlice<NamedArea>;
   NS_DECLARE_FRAME_PROPERTY_DELETABLE(ExplicitNamedAreasProperty,
                                       ExplicitNamedAreas)
   ExplicitNamedAreas* GetExplicitNamedAreas() const {
@@ -283,7 +296,6 @@ class nsGridContainerFrame final : public nsContainerFrame {
   typedef mozilla::ReverseCSSOrderAwareFrameIterator
       ReverseCSSOrderAwareFrameIterator;
   typedef mozilla::WritingMode WritingMode;
-  typedef mozilla::css::GridNamedArea GridNamedArea;
   typedef mozilla::layout::AutoFrameListPtr AutoFrameListPtr;
   typedef nsLayoutUtils::IntrinsicISizeType IntrinsicISizeType;
   struct Grid;
@@ -317,7 +329,7 @@ class nsGridContainerFrame final : public nsContainerFrame {
    */
   void InitImplicitNamedAreas(const nsStylePosition* aStyle);
   void AddImplicitNamedAreas(
-      const nsTArray<nsTArray<nsString>>& aLineNameLists);
+      const nsTArray<nsTArray<RefPtr<nsAtom>>>& aLineNameLists);
 
   void NormalizeChildLists();
 

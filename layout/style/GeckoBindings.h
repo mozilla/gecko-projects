@@ -338,8 +338,9 @@ const mozilla::AnonymousCounterStyle* Gecko_CounterStyle_GetAnonymous(
 
 // background-image style.
 void Gecko_SetNullImageValue(nsStyleImage* image);
-void Gecko_SetGradientImageValue(nsStyleImage* image,
-                                 nsStyleGradient* gradient);
+
+// NOTE: Takes ownership of the gradient.
+void Gecko_SetGradientImageValue(nsStyleImage*, mozilla::StyleGradient*);
 
 void Gecko_SetLayerImageImageValue(nsStyleImage* image,
                                    const mozilla::StyleComputedImageUrl* url);
@@ -348,13 +349,8 @@ void Gecko_SetImageElement(nsStyleImage* image, nsAtom* atom);
 void Gecko_CopyImageValueFrom(nsStyleImage* image, const nsStyleImage* other);
 void Gecko_InitializeImageCropRect(nsStyleImage* image);
 
-nsStyleGradient* Gecko_CreateGradient(uint8_t shape, uint8_t size,
-                                      bool repeating, bool legacy_syntax,
-                                      bool moz_legacy_syntax, uint32_t stops);
-
 const nsStyleImageRequest* Gecko_GetImageRequest(const nsStyleImage* image);
 nsAtom* Gecko_GetImageElement(const nsStyleImage* image);
-const nsStyleGradient* Gecko_GetGradientImageValue(const nsStyleImage* image);
 
 // list-style-image style.
 void Gecko_SetListStyleImageNone(nsStyleList* style_struct);
@@ -420,6 +416,7 @@ void Gecko_EnsureTArrayCapacity(void* array, size_t capacity, size_t elem_size);
 void Gecko_ClearPODTArray(void* array, size_t elem_size, size_t elem_align);
 
 void Gecko_ResizeTArrayForStrings(nsTArray<nsString>* array, uint32_t length);
+void Gecko_ResizeAtomArray(nsTArray<RefPtr<nsAtom>>* array, uint32_t length);
 
 void Gecko_SetStyleGridTemplate(
     mozilla::UniquePtr<nsStyleGridTemplate>* grid_template,
@@ -431,12 +428,6 @@ nsStyleGridTemplate* Gecko_CreateStyleGridTemplate(uint32_t track_sizes,
 void Gecko_CopyStyleGridTemplateValues(
     mozilla::UniquePtr<nsStyleGridTemplate>* grid_template,
     const nsStyleGridTemplate* other);
-
-mozilla::css::GridTemplateAreasValue* Gecko_NewGridTemplateAreasValue(
-    uint32_t areas, uint32_t templates, uint32_t columns);
-
-NS_DECL_THREADSAFE_FFI_REFCOUNTING(mozilla::css::GridTemplateAreasValue,
-                                   GridTemplateAreasValue);
 
 // Clear the mContents, mCounterIncrements, mCounterResets, or mCounterSets
 // field in nsStyleContent. This is needed to run the destructors, otherwise

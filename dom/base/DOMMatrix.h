@@ -7,6 +7,7 @@
 #ifndef MOZILLA_DOM_DOMMATRIX_H_
 #define MOZILLA_DOM_DOMMATRIX_H_
 
+#include "js/StructuredClone.h"
 #include "nsWrapperCache.h"
 #include "nsISupports.h"
 #include "nsCycleCollectionParticipant.h"
@@ -57,6 +58,13 @@ class DOMMatrixReadOnly : public nsWrapperCache {
       const Optional<StringOrUnrestrictedDoubleSequence>& aArg,
       ErrorResult& aRv);
 
+  static already_AddRefed<DOMMatrixReadOnly> ReadStructuredClone(
+      nsISupports* aParent, JSStructuredCloneReader* aReader);
+
+  static bool ReadStructuredCloneElements(JSStructuredCloneReader* aReader,
+                                          DOMMatrixReadOnly* matrix);
+
+  // clang-format off
 #define GetMatrixMember(entry2D, entry3D, default) \
   {                                                \
     if (mMatrix3D) {                               \
@@ -73,27 +81,29 @@ class DOMMatrixReadOnly : public nsWrapperCache {
     return default;                         \
   }
 
-  double A() const GetMatrixMember(_11, _11, 1.0) double B() const
-      GetMatrixMember(_12, _12, 0) double C() const
-      GetMatrixMember(_21, _21, 0) double D() const
-      GetMatrixMember(_22, _22, 1.0) double E() const
-      GetMatrixMember(_31, _41, 0) double F() const GetMatrixMember(_32, _42, 0)
+  double A() const GetMatrixMember(_11, _11, 1.0)
+  double B() const GetMatrixMember(_12, _12, 0)
+  double C() const GetMatrixMember(_21, _21, 0)
+  double D() const GetMatrixMember(_22, _22, 1.0)
+  double E() const GetMatrixMember(_31, _41, 0)
+  double F() const GetMatrixMember(_32, _42, 0)
 
-          double M11() const GetMatrixMember(_11, _11, 1.0) double M12() const
-      GetMatrixMember(_12, _12, 0) double M13() const
-      Get3DMatrixMember(_13, 0) double M14() const
-      Get3DMatrixMember(_14, 0) double M21() const
-      GetMatrixMember(_21, _21, 0) double M22() const
-      GetMatrixMember(_22, _22, 1.0) double M23() const
-      Get3DMatrixMember(_23, 0) double M24() const
-      Get3DMatrixMember(_24, 0) double M31() const
-      Get3DMatrixMember(_31, 0) double M32() const
-      Get3DMatrixMember(_32, 0) double M33() const
-      Get3DMatrixMember(_33, 1.0) double M34() const
-      Get3DMatrixMember(_34, 0) double M41() const
-      GetMatrixMember(_31, _41, 0) double M42() const
-      GetMatrixMember(_32, _42, 0) double M43() const
-      Get3DMatrixMember(_43, 0) double M44() const Get3DMatrixMember(_44, 1.0)
+  double M11() const GetMatrixMember(_11, _11, 1.0)
+  double M12() const GetMatrixMember(_12, _12, 0)
+  double M13() const Get3DMatrixMember(_13, 0)
+  double M14() const Get3DMatrixMember(_14, 0)
+  double M21() const GetMatrixMember(_21, _21, 0)
+  double M22() const GetMatrixMember(_22, _22, 1.0)
+  double M23() const Get3DMatrixMember(_23, 0)
+  double M24() const Get3DMatrixMember(_24, 0)
+  double M31() const Get3DMatrixMember(_31, 0)
+  double M32() const Get3DMatrixMember(_32, 0)
+  double M33() const Get3DMatrixMember(_33, 1.0)
+  double M34() const Get3DMatrixMember(_34, 0)
+  double M41() const GetMatrixMember(_31, _41, 0)
+  double M42() const GetMatrixMember(_32, _42, 0)
+  double M43() const Get3DMatrixMember(_43, 0)
+  double M44() const Get3DMatrixMember(_44, 1.0)
 
 #undef GetMatrixMember
 #undef Get3DMatrixMember
@@ -116,60 +126,37 @@ class DOMMatrixReadOnly : public nsWrapperCache {
     }                                       \
   }
 
-          void SetA(double v) Set2DMatrixMember(_11, _11) void SetB(double v) Set2DMatrixMember(
-              _12,
-              _12) void SetC(double v) Set2DMatrixMember(_21,
-                                                         _21) void SetD(double
-                                                                            v)
-              Set2DMatrixMember(_22, _22) void SetE(double v) Set2DMatrixMember(
-                  _31, _41) void SetF(double v) Set2DMatrixMember(_32, _42)
+  void SetA(double v) Set2DMatrixMember(_11, _11)
+  void SetB(double v) Set2DMatrixMember(_12, _12)
+  void SetC(double v) Set2DMatrixMember(_21, _21)
+  void SetD(double v) Set2DMatrixMember(_22, _22)
+  void SetE(double v) Set2DMatrixMember(_31, _41)
+  void SetF(double v) Set2DMatrixMember(_32, _42)
 
-                  void SetM11(double v) Set2DMatrixMember(_11, _11) void SetM12(
-                      double v) Set2DMatrixMember(_12,
-                                                  _12) void SetM13(double v)
-                      Set3DMatrixMember(_13, 0) void SetM14(
-                          double v) Set3DMatrixMember(_14,
-                                                      0) void SetM21(double v)
-                          Set2DMatrixMember(_21, _21) void SetM22(
-                              double
-                                  v) Set2DMatrixMember(_22,
-                                                       _22) void SetM23(double
-                                                                            v)
-                              Set3DMatrixMember(_23, 0) void SetM24(
-                                  double
-                                      v) Set3DMatrixMember(_24,
-                                                           0) void SetM31(double
-                                                                              v)
-                                  Set3DMatrixMember(_31, 0) void SetM32(
-                                      double
-                                          v) Set3DMatrixMember(_32,
-                                                               0) void SetM33(double
-                                                                                  v)
-                                      Set3DMatrixMember(_33, 1.0) void SetM34(
-                                          double v)
-                                          Set3DMatrixMember(_34, 0) void SetM41(
-                                              double v)
-                                              Set2DMatrixMember(
-                                                  _31,
-                                                  _41) void SetM42(double v)
-                                                  Set2DMatrixMember(
-                                                      _32,
-                                                      _42) void SetM43(double v)
-                                                      Set3DMatrixMember(
-                                                          _43,
-                                                          0) void SetM44(double
-                                                                             v)
-                                                          Set3DMatrixMember(_44,
-                                                                            1.0)
+  void SetM11(double v) Set2DMatrixMember(_11, _11)
+  void SetM12(double v) Set2DMatrixMember(_12, _12)
+  void SetM13(double v) Set3DMatrixMember(_13, 0)
+  void SetM14(double v) Set3DMatrixMember(_14, 0)
+  void SetM21(double v) Set2DMatrixMember(_21, _21)
+  void SetM22(double v) Set2DMatrixMember(_22, _22)
+  void SetM23(double v) Set3DMatrixMember(_23, 0)
+  void SetM24(double v) Set3DMatrixMember(_24, 0)
+  void SetM31(double v) Set3DMatrixMember(_31, 0)
+  void SetM32(double v) Set3DMatrixMember(_32, 0)
+  void SetM33(double v) Set3DMatrixMember(_33, 1.0)
+  void SetM34(double v) Set3DMatrixMember(_34, 0)
+  void SetM41(double v) Set2DMatrixMember(_31, _41)
+  void SetM42(double v) Set2DMatrixMember(_32, _42)
+  void SetM43(double v) Set3DMatrixMember(_43, 0)
+  void SetM44(double v) Set3DMatrixMember(_44, 1.0)
+  ; // semi-colon here to get clang-format to align properly from here on
 
 #undef Set2DMatrixMember
 #undef Set3DMatrixMember
+  // clang-format on
 
-                                                              already_AddRefed<DOMMatrix> Translate(
-                                                                  double aTx,
-                                                                  double aTy,
-                                                                  double aTz =
-                                                                      0) const;
+  already_AddRefed<DOMMatrix> Translate(double aTx, double aTy,
+                                        double aTz = 0) const;
   already_AddRefed<DOMMatrix> Scale(double aScale, double aOriginX = 0,
                                     double aOriginY = 0) const;
   already_AddRefed<DOMMatrix> Scale3d(double aScale, double aOriginX = 0,
@@ -199,6 +186,8 @@ class DOMMatrixReadOnly : public nsWrapperCache {
                       ErrorResult& aRv) const;
   void Stringify(nsAString& aResult);
 
+  bool WriteStructuredClone(JSStructuredCloneWriter* aWriter) const;
+
  protected:
   nsCOMPtr<nsISupports> mParent;
   nsAutoPtr<gfx::Matrix> mMatrix2D;
@@ -209,6 +198,14 @@ class DOMMatrixReadOnly : public nsWrapperCache {
   DOMMatrixReadOnly* SetMatrixValue(const nsAString& aTransformList,
                                     ErrorResult& aRv);
   void Ensure3DMatrix();
+
+  DOMMatrixReadOnly(nsISupports* aParent, bool is2D) : mParent(aParent) {
+    if (is2D) {
+      mMatrix2D = new gfx::Matrix();
+    } else {
+      mMatrix3D = new gfx::Matrix4x4();
+    }
+  }
 
  private:
   DOMMatrixReadOnly() = delete;
@@ -244,6 +241,9 @@ class DOMMatrix : public DOMMatrixReadOnly {
       const GlobalObject& aGlobal, const Sequence<double>& aNumberSequence,
       ErrorResult& aRv);
 
+  static already_AddRefed<DOMMatrix> ReadStructuredClone(
+      nsISupports* aParent, JSStructuredCloneReader* aReader);
+
   virtual JSObject* WrapObject(JSContext* aCx,
                                JS::Handle<JSObject*> aGivenProto) override;
 
@@ -267,6 +267,10 @@ class DOMMatrix : public DOMMatrixReadOnly {
   DOMMatrix* SetMatrixValue(const nsAString& aTransformList, ErrorResult& aRv);
 
   virtual ~DOMMatrix() {}
+
+ private:
+  DOMMatrix(nsISupports* aParent, bool is2D)
+      : DOMMatrixReadOnly(aParent, is2D) {}
 };
 
 }  // namespace dom

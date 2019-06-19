@@ -2,12 +2,6 @@ const {FXA_PWDMGR_HOST, FXA_PWDMGR_REALM} = ChromeUtils.import("resource://gre/m
 const {LoginRec} = ChromeUtils.import("resource://services-sync/engines/passwords.js");
 const {Service} = ChromeUtils.import("resource://services-sync/service.js");
 
-// Allow eval to avoid triggering the eval()-assertion through ajv-4.1.1.js
-Services.prefs.setBoolPref("security.allow_eval_with_system_principal", true);
-registerCleanupFunction(() => {
-  Services.prefs.clearUserPref("security.allow_eval_with_system_principal");
-});
-
 const LoginInfo = Components.Constructor(
   "@mozilla.org/login-manager/loginInfo;1", Ci.nsILoginInfo, "init");
 
@@ -117,9 +111,9 @@ add_task(async function test_password_engine() {
 
     // Insert a server record that's older, so that we prefer the local one.
     let rec = new LoginRec("passwords", newLogin.guid);
-    rec.formSubmitURL = newLogin.formSubmitURL;
+    rec.formSubmitURL = newLogin.formActionOrigin;
     rec.httpRealm = newLogin.httpRealm;
-    rec.hostname = newLogin.hostname;
+    rec.hostname = newLogin.origin;
     rec.username = newLogin.username;
     rec.password = "sekrit";
     let remotePasswordChangeTime = Date.now() - 1 * 60 * 60 * 24 * 1000;
@@ -147,8 +141,8 @@ add_task(async function test_password_engine() {
     equal(oldLogin.timePasswordChanged, localPasswordChangeTime);
 
     let rec = new LoginRec("passwords", oldLogin.guid);
-    rec.hostname = oldLogin.hostname;
-    rec.formSubmitURL = oldLogin.formSubmitURL;
+    rec.hostname = oldLogin.origin;
+    rec.formSubmitURL = oldLogin.formActionOrigin;
     rec.httpRealm = oldLogin.httpRealm;
     rec.username = oldLogin.username;
     // Change the password and bump the password change time to ensure we prefer

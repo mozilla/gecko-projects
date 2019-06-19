@@ -20,7 +20,7 @@
 #include "mozilla/dom/File.h"
 #include "mozilla/gfx/CrossProcessPaint.h"
 #include "mozilla/layers/CompositorBridgeParent.h"
-#include "mozilla/layout/RenderFrame.h"
+#include "mozilla/layout/RemoteLayerTreeOwner.h"
 #include "mozilla/RefPtr.h"
 #include "mozilla/Move.h"
 #include "nsCOMPtr.h"
@@ -162,11 +162,16 @@ class BrowserParent final : public PBrowserParent,
   nsIXULBrowserWindow* GetXULBrowserWindow();
 
   /**
-   * Return the top level doc accessible parent for this tab.
+   * Return the top level DocAccessibleParent for this BrowserParent.
+   * Note that in the case of an out-of-process iframe, the returned actor
+   * might not be at the top level of the DocAccessibleParent tree; i.e. it
+   * might have a parent. However, it will be at the top level in its content
+   * process. That is, doc->IsTopLevelInContentProcess() will always be true,
+   * but doc->IsTopLevel() might not.
    */
   a11y::DocAccessibleParent* GetTopLevelDocAccessible() const;
 
-  layout::RenderFrame* GetRenderFrame();
+  LayersId GetLayersId() const;
 
   // Returns the BrowserBridgeParent if this BrowserParent is for an
   // out-of-process iframe and nullptr otherwise.
@@ -183,6 +188,13 @@ class BrowserParent final : public PBrowserParent,
    * messages when the PBrowser actor is being destroyed.
    */
   bool IsDestroyed() const { return mIsDestroyed; }
+
+  /**
+   * Returns whether we're in the process of creating a new window (from
+   * window.open). If so, LoadURL calls are being skipped until everything is
+   * set up. For further details, see `mCreatingWindow` below.
+   */
+  bool CreatingWindow() const { return mCreatingWindow; }
 
   /*
    * Visit each BrowserParent in the tree formed by PBrowser and
@@ -281,6 +293,12 @@ class BrowserParent final : public PBrowserParent,
       const int32_t aMaxSelfProgress, const int32_t aCurTotalProgres,
       const int32_t aMaxTotalProgress);
 
+  mozilla::ipc::IPCResult RecvOnLocationChange(
+      const Maybe<WebProgressData>& aWebProgressData,
+      const RequestData& aRequestData, nsIURI* aLocation, const uint32_t aFlags,
+      const bool aCanGoBack, const bool aCanGoForward,
+      const Maybe<WebProgressLocationChangeData>& aLocationChangeData);
+
   mozilla::ipc::IPCResult RecvOnStatusChange(
       const Maybe<WebProgressData>& aWebProgressData,
       const RequestData& aRequestData, const nsresult aStatus,
@@ -290,15 +308,16 @@ class BrowserParent final : public PBrowserParent,
       const Maybe<WebProgressData>& aWebProgressData,
       const RequestData& aRequestData, const uint32_t& aEvent);
 
+  mozilla::ipc::IPCResult RecvNavigationFinished();
+
   bool GetWebProgressListener(nsIBrowser** aOutBrowser,
                               nsIWebProgress** aOutManager,
                               nsIWebProgressListener** aOutListener);
 
   void ReconstructWebProgressAndRequest(
       nsIWebProgress* aManager, const Maybe<WebProgressData>& aWebProgressData,
-      const RequestData& aRequestData,
-      nsCOMPtr<nsIWebProgress>& aOutWebProgress,
-      nsCOMPtr<nsIRequest>& aOutRequest);
+      const RequestData& aRequestData, nsIWebProgress** aOutWebProgress,
+      nsIRequest** aOutRequest);
 
   mozilla::ipc::IPCResult RecvSessionStoreUpdate(
       const Maybe<nsCString>& aDocShellCaps, const Maybe<bool>& aPrivatedMode,
@@ -454,20 +473,22 @@ class BrowserParent final : public PBrowserParent,
 
   PBrowserBridgeParent* AllocPBrowserBridgeParent(
       const nsString& aPresentationURL, const nsString& aRemoteType,
-      BrowsingContext* aBrowsingContext, const uint32_t& aChromeFlags);
+      BrowsingContext* aBrowsingContext, const uint32_t& aChromeFlags,
+      const TabId& aTabId);
 
   bool DeallocPBrowserBridgeParent(PBrowserBridgeParent* aActor);
 
   virtual mozilla::ipc::IPCResult RecvPBrowserBridgeConstructor(
       PBrowserBridgeParent* aActor, const nsString& aPresentationURL,
       const nsString& aRemoteType, BrowsingContext* aBrowsingContext,
-      const uint32_t& aChromeFlags) override;
+      const uint32_t& aChromeFlags, const TabId& aTabId) override;
 
   void LoadURL(nsIURI* aURI);
 
   void ResumeLoad(uint64_t aPendingSwitchID);
 
   void InitRendering();
+  bool AttachLayerManager();
   void MaybeShowFrame();
 
   bool Show(const ScreenIntSize& aSize, bool aParentIsActive);
@@ -487,7 +508,7 @@ class BrowserParent final : public PBrowserParent,
 
   void Activate();
 
-  void Deactivate();
+  void Deactivate(bool aWindowLowering);
 
   bool MapEventCoordinatesForChildProcess(mozilla::WidgetEvent* aEvent);
 
@@ -681,8 +702,6 @@ class BrowserParent final : public PBrowserParent,
 
   void NavigateByKey(bool aForward, bool aForDocumentNavigation);
 
-  void SkipBrowsingContextDetach();
-
   bool GetDocShellIsActive();
   void SetDocShellIsActive(bool aDocShellIsActive);
 
@@ -750,6 +769,8 @@ class BrowserParent final : public PBrowserParent,
 
   mozilla::ipc::IPCResult RecvQueryVisitedState(
       InfallibleTArray<URIParams>&& aURIs);
+
+  mozilla::ipc::IPCResult RecvFireFrameLoadEvent(bool aIsTrusted);
 
  private:
   void SuppressDisplayport(bool aEnabled);
@@ -827,7 +848,7 @@ class BrowserParent final : public PBrowserParent,
 
   ContentCacheInParent mContentCache;
 
-  layout::RenderFrame mRenderFrame;
+  layout::RemoteLayerTreeOwner mRemoteLayerTreeOwner;
   LayersObserverEpoch mLayerTreeEpoch;
 
   Maybe<LayoutDeviceToLayoutDeviceMatrix4x4> mChildToParentConversionMatrix;

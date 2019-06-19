@@ -14,6 +14,10 @@ const {UserDomainAffinityProvider} = ChromeUtils.import("resource://activity-str
 const {actionTypes: at, actionCreators: ac} = ChromeUtils.import("resource://activity-stream/common/Actions.jsm");
 const {PersistentCache} = ChromeUtils.import("resource://activity-stream/lib/PersistentCache.jsm");
 
+XPCOMUtils.defineLazyServiceGetters(this, {
+  gUUIDGenerator: ["@mozilla.org/uuid-generator;1", "nsIUUIDGenerator"],
+});
+
 const CACHE_KEY = "discovery_stream";
 const LAYOUT_UPDATE_TIME = 30 * 60 * 1000; // 30 minutes
 const STARTUP_CACHE_EXPIRE_TIME = 7 * 24 * 60 * 60 * 1000; // 1 week
@@ -26,6 +30,9 @@ const DEFAULT_MAX_HISTORY_QUERY_RESULTS = 1000;
 const FETCH_TIMEOUT = 45 * 1000;
 const PREF_CONFIG = "discoverystream.config";
 const PREF_ENDPOINTS = "discoverystream.endpoints";
+const PREF_IMPRESSION_ID = "browser.newtabpage.activity-stream.impressionId";
+const PREF_TOPSTORIES = "feeds.section.topstories";
+const PREF_SPOCS_CLEAR_ENDPOINT = "discoverystream.endpointSpocsClear";
 const PREF_SHOW_SPONSORED = "showSponsored";
 const PREF_SPOC_IMPRESSIONS = "discoverystream.spoc.impressions";
 const PREF_REC_IMPRESSIONS = "discoverystream.rec.impressions";
@@ -39,8 +46,18 @@ this.DiscoveryStreamFeed = class DiscoveryStreamFeed {
 
     // Persistent cache for remote endpoint data.
     this.cache = new PersistentCache(CACHE_KEY, true);
+    this._impressionId = this.getOrCreateImpressionId();
     // Internal in-memory cache for parsing json prefs.
     this._prefCache = {};
+  }
+
+  getOrCreateImpressionId() {
+    let impressionId = Services.prefs.getCharPref(PREF_IMPRESSION_ID, "");
+    if (!impressionId) {
+      impressionId = String(gUUIDGenerator.generateUUID());
+      Services.prefs.setCharPref(PREF_IMPRESSION_ID, impressionId);
+    }
+    return impressionId;
   }
 
   /**
@@ -117,7 +134,7 @@ this.DiscoveryStreamFeed = class DiscoveryStreamFeed {
     this._prefCache = {};
   }
 
-  async fetchFromEndpoint(rawEndpoint) {
+  async fetchFromEndpoint(rawEndpoint, options = {}) {
     if (!rawEndpoint) {
       Cu.reportError("Tried to fetch endpoint but none was configured.");
       return null;
@@ -140,7 +157,12 @@ this.DiscoveryStreamFeed = class DiscoveryStreamFeed {
 
       const controller = new AbortController();
       const {signal} = controller;
-      const fetchPromise = fetch(endpoint, {credentials: "omit", signal});
+
+      const fetchPromise = fetch(endpoint, {
+        ...options,
+        credentials: "omit",
+        signal,
+      });
       // istanbul ignore next
       const timeoutId = setTimeout(() => { controller.abort(); }, FETCH_TIMEOUT);
 
@@ -220,6 +242,7 @@ this.DiscoveryStreamFeed = class DiscoveryStreamFeed {
           lastUpdated: Date.now(),
           spocs: layoutResponse.spocs,
           layout: layoutResponse.layout,
+          status: "success",
         };
 
         await this.cache.set("layout", layout);
@@ -381,7 +404,22 @@ this.DiscoveryStreamFeed = class DiscoveryStreamFeed {
       if (this.isExpired({cachedData, key: "spocs", isStartup})) {
         const endpoint = this.store.getState().DiscoveryStream.spocs.spocs_endpoint;
         const start = perfService.absNow();
-        const spocsResponse = await this.fetchFromEndpoint(endpoint);
+
+        const headers = new Headers();
+        headers.append("content-type", "application/json");
+
+        const apiKeyPref = this._prefCache.config.api_key_pref;
+        const apiKey = Services.prefs.getCharPref(apiKeyPref, "");
+
+        const spocsResponse = await this.fetchFromEndpoint(endpoint, {
+          method: "POST",
+          headers,
+          body: JSON.stringify({
+            pocket_id: this._impressionId,
+            consumer_key: apiKey,
+          }),
+        });
+
         if (spocsResponse) {
           this.spocsRequestTime = Math.round(perfService.absNow() - start);
           spocs = {
@@ -417,6 +455,23 @@ this.DiscoveryStreamFeed = class DiscoveryStreamFeed {
       },
     });
     this._sendSpocsFill({...filtered, frequency_cap: frequencyCapped}, true);
+  }
+
+  async clearSpocs() {
+    const endpoint = this.store.getState().Prefs.values[PREF_SPOCS_CLEAR_ENDPOINT];
+    if (!endpoint) {
+      return;
+    }
+    const headers = new Headers();
+    headers.append("content-type", "application/json");
+
+    await this.fetchFromEndpoint(endpoint, {
+      method: "DELETE",
+      headers,
+      body: JSON.stringify({
+        pocket_id: this._impressionId,
+      }),
+    });
   }
 
   async loadAffinityScoresCache() {
@@ -616,6 +671,19 @@ this.DiscoveryStreamFeed = class DiscoveryStreamFeed {
     return true;
   }
 
+  async retryFeed(feed) {
+    const {url} = feed;
+    const result = await this.getComponentFeed(url);
+    const newFeed = this.filterRecommendations(result);
+    this.store.dispatch(ac.BroadcastToContent({
+      type: at.DISCOVERY_STREAM_FEED_UPDATE,
+      data: {
+        feed: newFeed,
+        url,
+      },
+    }));
+  }
+
   async getComponentFeed(feedUrl, isStartup) {
     const cachedData = await this.cache.get() || {};
     const {feeds} = cachedData;
@@ -633,6 +701,7 @@ this.DiscoveryStreamFeed = class DiscoveryStreamFeed {
           data: {
             settings: feedResponse.settings,
             recommendations,
+            status: "success",
           },
         };
       } else {
@@ -640,7 +709,12 @@ this.DiscoveryStreamFeed = class DiscoveryStreamFeed {
       }
     }
 
-    return feed;
+    // If we have no feed at this point, both fetch and cache failed for some reason.
+    return feed || {
+      data: {
+        status: "failed",
+      },
+    };
   }
 
   /**
@@ -859,7 +933,7 @@ this.DiscoveryStreamFeed = class DiscoveryStreamFeed {
   // longer part of the response.
   cleanUpTopRecImpressionPref(newFeeds) {
     // Need to build a single list of stories.
-    const activeStories = Object.keys(newFeeds).reduce((accumulator, currentValue) => {
+    const activeStories = Object.keys(newFeeds).filter(currentValue => newFeeds[currentValue].data).reduce((accumulator, currentValue) => {
       const {recommendations} = newFeeds[currentValue].data;
       return accumulator.concat(recommendations.map(i => `${i.id}`));
     }, []);
@@ -918,6 +992,9 @@ this.DiscoveryStreamFeed = class DiscoveryStreamFeed {
           [action.data.name]: action.data.value,
         })));
         break;
+      case at.DISCOVERY_STREAM_RETRY_FEED:
+        this.retryFeed(action.data.feed);
+        break;
       case at.DISCOVERY_STREAM_CONFIG_CHANGE:
         // When the config pref changes, load or unload data as needed.
         await this.onPrefChange();
@@ -975,8 +1052,18 @@ this.DiscoveryStreamFeed = class DiscoveryStreamFeed {
               data: this.config,
             }));
             break;
+          case PREF_TOPSTORIES:
+            if (!action.data.value) {
+              // Ensure we delete any remote data potentially related to spocs.
+              this.clearSpocs();
+            }
+            break;
           // Check if spocs was disabled. Remove them if they were.
           case PREF_SHOW_SPONSORED:
+            if (!action.data.value) {
+              // Ensure we delete any remote data potentially related to spocs.
+              this.clearSpocs();
+            }
             await this.loadSpocs(update => this.store.dispatch(ac.BroadcastToContent(update)));
             break;
         }
@@ -987,7 +1074,7 @@ this.DiscoveryStreamFeed = class DiscoveryStreamFeed {
 
 defaultLayoutResp = {
   "spocs": {
-    "url": "https://getpocket.cdn.mozilla.net/v3/firefox/unique-spocs?consumer_key=$apiKey",
+    "url": "https://getpocket.cdn.mozilla.net/v3/firefox/unique-spocs",
     "spocs_per_domain": 1,
   },
   "layout": [

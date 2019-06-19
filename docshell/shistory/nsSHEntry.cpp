@@ -351,6 +351,7 @@ nsSHEntry::Create(nsIURI* aURI, const nsAString& aTitle,
                   const nsACString& aContentType,
                   nsIPrincipal* aTriggeringPrincipal,
                   nsIPrincipal* aPrincipalToInherit,
+                  nsIPrincipal* aStoragePrincipalToInherit,
                   nsIContentSecurityPolicy* aCsp, const nsID& aDocShellID,
                   bool aDynamicCreation, nsIURI* aOriginalURI,
                   nsIURI* aResultPrincipalURI, bool aLoadReplace,
@@ -372,6 +373,7 @@ nsSHEntry::Create(nsIURI* aURI, const nsAString& aTitle,
   mShared->mContentType = aContentType;
   mShared->mTriggeringPrincipal = aTriggeringPrincipal;
   mShared->mPrincipalToInherit = aPrincipalToInherit;
+  mShared->mStoragePrincipalToInherit = aStoragePrincipalToInherit;
   mShared->mCsp = aCsp;
   mShared->mDocShellID = aDocShellID;
   mShared->mDynamicallyCreated = aDynamicCreation;
@@ -470,6 +472,21 @@ nsSHEntry::GetPrincipalToInherit(nsIPrincipal** aPrincipalToInherit) {
 NS_IMETHODIMP
 nsSHEntry::SetPrincipalToInherit(nsIPrincipal* aPrincipalToInherit) {
   mShared->mPrincipalToInherit = aPrincipalToInherit;
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+nsSHEntry::GetStoragePrincipalToInherit(
+    nsIPrincipal** aStoragePrincipalToInherit) {
+  NS_IF_ADDREF(*aStoragePrincipalToInherit =
+                   mShared->mStoragePrincipalToInherit);
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+nsSHEntry::SetStoragePrincipalToInherit(
+    nsIPrincipal* aStoragePrincipalToInherit) {
+  mShared->mStoragePrincipalToInherit = aStoragePrincipalToInherit;
   return NS_OK;
 }
 
@@ -964,6 +981,9 @@ nsSHEntry::CreateLoadInfo(nsDocShellLoadState** aLoadState) {
   loadState->SetTriggeringPrincipal(triggeringPrincipal);
   nsCOMPtr<nsIPrincipal> principalToInherit = GetPrincipalToInherit();
   loadState->SetPrincipalToInherit(principalToInherit);
+  nsCOMPtr<nsIPrincipal> storagePrincipalToInherit =
+    GetStoragePrincipalToInherit();
+  loadState->SetStoragePrincipalToInherit(storagePrincipalToInherit);
   nsCOMPtr<nsIContentSecurityPolicy> csp = GetCsp();
   loadState->SetCsp(csp);
   nsCOMPtr<nsIReferrerInfo> referrerInfo = GetReferrerInfo();
@@ -1071,20 +1091,21 @@ nsLegacySHEntry::Create(
     nsIURI* aURI, const nsAString& aTitle, nsIInputStream* aInputStream,
     uint32_t aCacheKey, const nsACString& aContentType,
     nsIPrincipal* aTriggeringPrincipal, nsIPrincipal* aPrincipalToInherit,
-    nsIContentSecurityPolicy* aCsp, const nsID& aDocShellID,
-    bool aDynamicCreation, nsIURI* aOriginalURI, nsIURI* aResultPrincipalURI,
-    bool aLoadReplace, nsIReferrerInfo* aReferrerInfo,
-    const nsAString& aSrcdocData, bool aSrcdocEntry, nsIURI* aBaseURI,
-    bool aSaveLayoutState, bool aExpired) {
+    nsIPrincipal *aStoragePrincipalToInherit, nsIContentSecurityPolicy* aCsp,
+    const nsID& aDocShellID, bool aDynamicCreation, nsIURI* aOriginalURI,
+    nsIURI* aResultPrincipalURI, bool aLoadReplace,
+    nsIReferrerInfo* aReferrerInfo, const nsAString& aSrcdocData,
+    bool aSrcdocEntry, nsIURI* aBaseURI, bool aSaveLayoutState, bool aExpired) {
   GetState()->mLayoutHistoryState = nullptr;
 
   GetState()->mSaveLayoutState = aSaveLayoutState;
 
   return nsSHEntry::Create(
       aURI, aTitle, aInputStream, aCacheKey, aContentType, aTriggeringPrincipal,
-      aPrincipalToInherit, aCsp, aDocShellID, aDynamicCreation, aOriginalURI,
-      aResultPrincipalURI, aLoadReplace, aReferrerInfo, aSrcdocData,
-      aSrcdocEntry, aBaseURI, aSaveLayoutState, aExpired);
+      aPrincipalToInherit, aStoragePrincipalToInherit, aCsp, aDocShellID,
+      aDynamicCreation, aOriginalURI, aResultPrincipalURI, aLoadReplace,
+      aReferrerInfo, aSrcdocData, aSrcdocEntry, aBaseURI, aSaveLayoutState,
+      aExpired);
 }
 
 NS_IMETHODIMP

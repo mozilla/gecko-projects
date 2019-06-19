@@ -33,6 +33,7 @@
 #include "mozilla/gfx/CrossProcessPaint.h"
 #include "mozilla/gfx/gfxVars.h"
 #include "mozilla/IMEStateManager.h"
+#include "mozilla/ipc/BackgroundUtils.h"
 #include "mozilla/ipc/URIUtils.h"
 #include "mozilla/layers/APZChild.h"
 #include "mozilla/layers/APZCCallbackHelper.h"
@@ -57,9 +58,11 @@
 #include "mozilla/ScopeExit.h"
 #include "mozilla/Services.h"
 #include "mozilla/StaticPtr.h"
+#include "mozilla/StaticPrefs.h"
 #include "mozilla/TextEvents.h"
 #include "mozilla/TouchEvents.h"
 #include "mozilla/Unused.h"
+#include "Units.h"
 #include "nsBrowserStatusFilter.h"
 #include "nsContentUtils.h"
 #include "nsDocShell.h"
@@ -83,6 +86,7 @@
 #include "nsIDocShell.h"
 #include "nsIFrame.h"
 #include "nsIURI.h"
+#include "nsIURIMutator.h"
 #include "nsIURIFixup.h"
 #include "nsIWebBrowser.h"
 #include "nsIWebProgress.h"
@@ -171,49 +175,21 @@ typedef nsDataHashtable<nsUint64HashKey, BrowserChild*> BrowserChildMap;
 static BrowserChildMap* sBrowserChildren;
 StaticMutex sBrowserChildrenMutex;
 
-BrowserChildBase::BrowserChildBase() : mBrowserChildMessageManager(nullptr) {}
-
-BrowserChildBase::~BrowserChildBase() { mAnonymousGlobalScopes.Clear(); }
-
-NS_IMPL_CYCLE_COLLECTION_CLASS(BrowserChildBase)
-
-NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(BrowserChildBase)
-  NS_IMPL_CYCLE_COLLECTION_UNLINK(mBrowserChildMessageManager)
-  tmp->nsMessageManagerScriptExecutor::Unlink();
-  NS_IMPL_CYCLE_COLLECTION_UNLINK(mWebBrowserChrome)
-NS_IMPL_CYCLE_COLLECTION_UNLINK_END
-
-NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN(BrowserChildBase)
-  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mBrowserChildMessageManager)
-  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mWebBrowserChrome)
-NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
-
-NS_IMPL_CYCLE_COLLECTION_TRACE_BEGIN(BrowserChildBase)
-  tmp->nsMessageManagerScriptExecutor::Trace(aCallbacks, aClosure);
-NS_IMPL_CYCLE_COLLECTION_TRACE_END
-
-NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(BrowserChildBase)
-  NS_INTERFACE_MAP_ENTRY(nsISupports)
-NS_INTERFACE_MAP_END
-
-NS_IMPL_CYCLE_COLLECTING_ADDREF(BrowserChildBase)
-NS_IMPL_CYCLE_COLLECTING_RELEASE(BrowserChildBase)
-
-already_AddRefed<Document> BrowserChildBase::GetTopLevelDocument() const {
+already_AddRefed<Document> BrowserChild::GetTopLevelDocument() const {
   nsCOMPtr<Document> doc;
   WebNavigation()->GetDocument(getter_AddRefs(doc));
   return doc.forget();
 }
 
-PresShell* BrowserChildBase::GetTopLevelPresShell() const {
+PresShell* BrowserChild::GetTopLevelPresShell() const {
   if (RefPtr<Document> doc = GetTopLevelDocument()) {
     return doc->GetPresShell();
   }
   return nullptr;
 }
 
-void BrowserChildBase::DispatchMessageManagerMessage(
-    const nsAString& aMessageName, const nsAString& aJSONData) {
+void BrowserChild::DispatchMessageManagerMessage(const nsAString& aMessageName,
+                                                 const nsAString& aJSONData) {
   AutoSafeJSContext cx;
   JS::Rooted<JS::Value> json(cx, JS::NullValue());
   dom::ipc::StructuredCloneData data;
@@ -235,7 +211,7 @@ void BrowserChildBase::DispatchMessageManagerMessage(
                      IgnoreErrors());
 }
 
-bool BrowserChildBase::UpdateFrameHandler(const RepaintRequest& aRequest) {
+bool BrowserChild::UpdateFrame(const RepaintRequest& aRequest) {
   MOZ_ASSERT(aRequest.GetScrollId() != ScrollableLayerGuid::NULL_SCROLL_ID);
 
   if (aRequest.IsRootContent()) {
@@ -256,7 +232,7 @@ bool BrowserChildBase::UpdateFrameHandler(const RepaintRequest& aRequest) {
   return true;
 }
 
-void BrowserChildBase::ProcessUpdateFrame(const RepaintRequest& aRequest) {
+void BrowserChild::ProcessUpdateFrame(const RepaintRequest& aRequest) {
   if (!mBrowserChildMessageManager) {
     return;
   }
@@ -372,6 +348,7 @@ BrowserChild::BrowserChild(ContentChild* aManager, const TabId& aTabId,
                            BrowsingContext* aBrowsingContext,
                            uint32_t aChromeFlags, bool aIsTopLevel)
     : TabContext(aContext),
+      mBrowserChildMessageManager(nullptr),
       mTabGroup(aTabGroup),
       mManager(aManager),
       mBrowsingContext(aBrowsingContext),
@@ -463,7 +440,7 @@ BrowserChild::Observe(nsISupports* aSubject, const char* aTopic,
       nsCOMPtr<Document> subject(do_QueryInterface(aSubject));
       nsCOMPtr<Document> doc(GetTopLevelDocument());
 
-      if (subject == doc) {
+      if (subject == doc && doc->IsTopLevelContentDocument()) {
         RefPtr<PresShell> presShell = doc->GetPresShell();
         if (presShell) {
           presShell->SetIsFirstPaint(true);
@@ -548,8 +525,8 @@ nsresult BrowserChild::Init(mozIDOMWindowProxy* aParent) {
 
   const uint32_t notifyMask =
       nsIWebProgress::NOTIFY_STATE_ALL | nsIWebProgress::NOTIFY_PROGRESS |
-      nsIWebProgress::NOTIFY_STATUS | nsIWebProgress::NOTIFY_REFRESH |
-      nsIWebProgress::NOTIFY_CONTENT_BLOCKING;
+      nsIWebProgress::NOTIFY_STATUS | nsIWebProgress::NOTIFY_LOCATION |
+      nsIWebProgress::NOTIFY_REFRESH | nsIWebProgress::NOTIFY_CONTENT_BLOCKING;
 
   mStatusFilter = new nsBrowserStatusFilter();
 
@@ -590,10 +567,10 @@ nsresult BrowserChild::Init(mozIDOMWindowProxy* aParent) {
   docShell->SetChromeEventHandler(chromeHandler);
 
   if (window->GetCurrentInnerWindow()) {
-    window->SetKeyboardIndicators(ShowAccelerators(), ShowFocusRings());
+    window->SetKeyboardIndicators(ShowFocusRings());
   } else {
     // Skip ShouldShowFocusRing check if no inner window is available
-    window->SetInitialKeyboardIndicators(ShowAccelerators(), ShowFocusRings());
+    window->SetInitialKeyboardIndicators(ShowFocusRings());
   }
 
   nsContentUtils::SetScrollbarsVisibility(
@@ -658,20 +635,25 @@ void BrowserChild::UpdateFrameType() {
 
 NS_IMPL_CYCLE_COLLECTION_CLASS(BrowserChild)
 
-NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN_INHERITED(BrowserChild, BrowserChildBase)
+NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(BrowserChild)
+  NS_IMPL_CYCLE_COLLECTION_UNLINK(mBrowserChildMessageManager)
+  tmp->nsMessageManagerScriptExecutor::Unlink();
+  NS_IMPL_CYCLE_COLLECTION_UNLINK(mWebBrowserChrome)
   NS_IMPL_CYCLE_COLLECTION_UNLINK(mStatusFilter)
   NS_IMPL_CYCLE_COLLECTION_UNLINK(mWebNav)
   NS_IMPL_CYCLE_COLLECTION_UNLINK(mBrowsingContext)
 NS_IMPL_CYCLE_COLLECTION_UNLINK_END
 
-NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN_INHERITED(BrowserChild,
-                                                  BrowserChildBase)
+NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN(BrowserChild)
+  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mBrowserChildMessageManager)
+  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mWebBrowserChrome)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mStatusFilter)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mWebNav)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mBrowsingContext)
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
 
-NS_IMPL_CYCLE_COLLECTION_TRACE_BEGIN_INHERITED(BrowserChild, BrowserChildBase)
+NS_IMPL_CYCLE_COLLECTION_TRACE_BEGIN(BrowserChild)
+  tmp->nsMessageManagerScriptExecutor::Trace(aCallbacks, aClosure);
 NS_IMPL_CYCLE_COLLECTION_TRACE_END
 
 NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(BrowserChild)
@@ -686,10 +668,11 @@ NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(BrowserChild)
   NS_INTERFACE_MAP_ENTRY(nsISupportsWeakReference)
   NS_INTERFACE_MAP_ENTRY(nsITooltipListener)
   NS_INTERFACE_MAP_ENTRY(nsIWebProgressListener)
-NS_INTERFACE_MAP_END_INHERITING(BrowserChildBase)
+  NS_INTERFACE_MAP_ENTRY_AMBIGUOUS(nsISupports, nsIBrowserChild)
+NS_INTERFACE_MAP_END
 
-NS_IMPL_ADDREF_INHERITED(BrowserChild, BrowserChildBase);
-NS_IMPL_RELEASE_INHERITED(BrowserChild, BrowserChildBase);
+NS_IMPL_CYCLE_COLLECTING_ADDREF(BrowserChild)
+NS_IMPL_CYCLE_COLLECTING_RELEASE(BrowserChild)
 
 NS_IMETHODIMP
 BrowserChild::SetStatus(uint32_t aStatusType, const char16_t* aStatus) {
@@ -1039,6 +1022,7 @@ void BrowserChild::ActorDestroy(ActorDestroyReason why) {
 }
 
 BrowserChild::~BrowserChild() {
+  mAnonymousGlobalScopes.Clear();
   if (sVisibleTabs) {
     sVisibleTabs->RemoveEntry(this);
     if (sVisibleTabs->IsEmpty()) {
@@ -1291,10 +1275,6 @@ mozilla::ipc::IPCResult BrowserChild::RecvSetIsUnderHiddenEmbedderElement(
   return IPC_OK();
 }
 
-bool BrowserChild::UpdateFrame(const RepaintRequest& aRequest) {
-  return BrowserChildBase::UpdateFrameHandler(aRequest);
-}
-
 mozilla::ipc::IPCResult BrowserChild::RecvSuppressDisplayport(
     const bool& aEnabled) {
   if (RefPtr<PresShell> presShell = GetTopLevelPresShell()) {
@@ -1468,12 +1448,10 @@ mozilla::ipc::IPCResult BrowserChild::RecvParentActivated(
 }
 
 mozilla::ipc::IPCResult BrowserChild::RecvSetKeyboardIndicators(
-    const UIStateChangeType& aShowAccelerators,
     const UIStateChangeType& aShowFocusRings) {
   nsCOMPtr<nsPIDOMWindowOuter> window = do_GetInterface(WebNavigation());
   NS_ENSURE_TRUE(window, IPC_OK());
-
-  window->SetKeyboardIndicators(aShowAccelerators, aShowFocusRings);
+  window->SetKeyboardIndicators(aShowFocusRings);
   return IPC_OK();
 }
 
@@ -1816,7 +1794,7 @@ mozilla::ipc::IPCResult BrowserChild::RecvRealTouchEvent(
 
   if (localEvent.mMessage == eTouchStart && AsyncPanZoomEnabled()) {
     nsCOMPtr<Document> document = GetTopLevelDocument();
-    if (StaticPrefs::TouchActionEnabled()) {
+    if (StaticPrefs::layout_css_touch_action_enabled()) {
       APZCCallbackHelper::SendSetAllowedTouchBehaviorNotification(
           mPuppetWidget, document, localEvent, aInputBlockId,
           mSetAllowedTouchBehaviorCallback);
@@ -2767,7 +2745,7 @@ bool BrowserChild::IsVisible() {
 }
 
 void BrowserChild::UpdateVisibility(bool aForceRepaint) {
-  bool shouldBeVisible = mIsTopLevel ? mRenderLayers : mEffectsInfo.mVisible;
+  bool shouldBeVisible = mIsTopLevel ? mRenderLayers : mEffectsInfo.IsVisible();
   bool isVisible = IsVisible();
 
   if (shouldBeVisible != isVisible) {
@@ -3334,7 +3312,8 @@ bool BrowserChild::DeallocPWindowGlobalChild(PWindowGlobalChild* aActor) {
 PBrowserBridgeChild* BrowserChild::AllocPBrowserBridgeChild(const nsString&,
                                                             const nsString&,
                                                             BrowsingContext*,
-                                                            const uint32_t&) {
+                                                            const uint32_t&,
+                                                            const TabId&) {
   MOZ_CRASH(
       "We should never be manually allocating PBrowserBridgeChild actors");
   return nullptr;
@@ -3352,6 +3331,16 @@ ScreenIntSize BrowserChild::GetInnerSize() {
   return ViewAs<ScreenPixel>(
       innerSize, PixelCastJustification::LayoutDeviceIsScreenForTabDims);
 };
+
+nsRect BrowserChild::GetVisibleRect() {
+  if (mIsTopLevel) {
+    // We are conservative about visible rects for top-level browsers to avoid
+    // artifacts when resizing
+    return nsRect(nsPoint(), CSSPixel::ToAppUnits(mUnscaledInnerSize));
+  } else {
+    return mEffectsInfo.mVisibleRect;
+  }
+}
 
 ScreenIntRect BrowserChild::GetOuterRect() {
   LayoutDeviceIntRect outerRect =
@@ -3403,6 +3392,14 @@ nsresult BrowserChild::CanCancelContentJS(
   rv = history->GetEntryAtIndex(current, getter_AddRefs(entry));
   NS_ENSURE_SUCCESS(rv, rv);
 
+  nsCOMPtr<nsIURI> currentURI = entry->GetURI();
+  if (!currentURI->SchemeIs("http") && !currentURI->SchemeIs("https") &&
+      !currentURI->SchemeIs("file")) {
+    // Only cancel content JS for http(s) and file URIs. Other URIs are probably
+    // internal and we should just let them run to completion.
+    return NS_OK;
+  }
+
   if (aNavigationType == nsIRemoteTab::NAVIGATE_BACK) {
     aNavigationIndex = current - 1;
   } else if (aNavigationType == nsIRemoteTab::NAVIGATE_FORWARD) {
@@ -3412,9 +3409,13 @@ nsresult BrowserChild::CanCancelContentJS(
       return NS_ERROR_FAILURE;
     }
 
-    nsCOMPtr<nsIURI> currentURI = entry->GetURI();
-    CanCancelContentJSBetweenURIs(currentURI, aNavigationURI, aCanCancel);
+    // If navigating directly to a URL (e.g. via hitting Enter in the location
+    // bar), then we can cancel anytime the next URL is different from the
+    // current, *excluding* the ref ("#").
+    bool equals;
+    rv = currentURI->EqualsExceptRef(aNavigationURI, &equals);
     NS_ENSURE_SUCCESS(rv, rv);
+    *aCanCancel = !equals;
     return NS_OK;
   }
   // Note: aNavigationType may also be NAVIGATE_INDEX, in which case we don't
@@ -3429,41 +3430,27 @@ nsresult BrowserChild::CanCancelContentJS(
     NS_ENSURE_SUCCESS(rv, rv);
 
     nsCOMPtr<nsISHEntry> laterEntry = delta == 1 ? nextEntry : entry;
-    nsCOMPtr<nsIURI> uri = entry->GetURI();
+    nsCOMPtr<nsIURI> thisURI = entry->GetURI();
     nsCOMPtr<nsIURI> nextURI = nextEntry->GetURI();
 
     // If we changed origin and the load wasn't in a subframe, we know it was
     // a full document load, so we can cancel the content JS safely.
     if (!laterEntry->GetIsSubFrame()) {
-      CanCancelContentJSBetweenURIs(uri, nextURI, aCanCancel);
+      nsAutoCString thisHost;
+      rv = thisURI->GetPrePath(thisHost);
       NS_ENSURE_SUCCESS(rv, rv);
-      if (*aCanCancel) {
+
+      nsAutoCString nextHost;
+      rv = nextURI->GetPrePath(nextHost);
+      NS_ENSURE_SUCCESS(rv, rv);
+
+      if (!thisHost.Equals(nextHost)) {
+        *aCanCancel = true;
         return NS_OK;
       }
     }
 
     entry = nextEntry;
-  }
-
-  return NS_OK;
-}
-
-nsresult BrowserChild::CanCancelContentJSBetweenURIs(nsIURI* aFirstURI,
-                                                     nsIURI* aSecondURI,
-                                                     bool* aCanCancel) {
-  nsresult rv;
-  *aCanCancel = false;
-
-  nsAutoCString firstHost;
-  rv = aFirstURI->GetHostPort(firstHost);
-  NS_ENSURE_SUCCESS(rv, rv);
-
-  nsAutoCString secondHost;
-  rv = aSecondURI->GetHostPort(secondHost);
-  NS_ENSURE_SUCCESS(rv, rv);
-
-  if (!firstHost.Equals(secondHost)) {
-    *aCanCancel = true;
   }
 
   return NS_OK;
@@ -3539,6 +3526,7 @@ NS_IMETHODIMP BrowserChild::OnStateChange(nsIWebProgress* aWebProgress,
     stateChangeData->isNavigating() = docShell->GetIsNavigating();
     stateChangeData->mayEnableCharacterEncodingMenu() =
         docShell->GetMayEnableCharacterEncodingMenu();
+    stateChangeData->charsetAutodetected() = docShell->GetCharsetAutodetected();
 
     if (document && aStateFlags & nsIWebProgressListener::STATE_STOP) {
       document->GetContentType(stateChangeData->contentType());
@@ -3584,7 +3572,100 @@ NS_IMETHODIMP BrowserChild::OnLocationChange(nsIWebProgress* aWebProgress,
                                              nsIRequest* aRequest,
                                              nsIURI* aLocation,
                                              uint32_t aFlags) {
-  return NS_ERROR_NOT_IMPLEMENTED;
+  if (!IPCOpen() || !mShouldSendWebProgressEventsToParent) {
+    return NS_OK;
+  }
+
+  nsCOMPtr<nsIWebNavigation> webNav = WebNavigation();
+  nsCOMPtr<nsIDocShell> docShell = do_GetInterface(webNav);
+  if (!docShell) {
+    return NS_OK;
+  }
+
+  RefPtr<Document> document;
+  if (nsCOMPtr<nsPIDOMWindowOuter> outerWindow = do_GetInterface(docShell)) {
+    document = outerWindow->GetExtantDoc();
+  } else {
+    return NS_OK;
+  }
+
+  if (!document) {
+    return NS_OK;
+  }
+
+  Maybe<WebProgressData> webProgressData;
+  RequestData requestData;
+
+  MOZ_TRY(PrepareProgressListenerData(aWebProgress, aRequest, webProgressData,
+                                      requestData));
+
+  Maybe<WebProgressLocationChangeData> locationChangeData;
+
+  bool canGoBack = false;
+  bool canGoForward = false;
+
+  MOZ_TRY(webNav->GetCanGoBack(&canGoBack));
+  MOZ_TRY(webNav->GetCanGoForward(&canGoForward));
+
+  if (aWebProgress && webProgressData->isTopLevel()) {
+    locationChangeData.emplace();
+
+    document->GetContentType(locationChangeData->contentType());
+    locationChangeData->isNavigating() = docShell->GetIsNavigating();
+    locationChangeData->documentURI() = document->GetDocumentURIObject();
+    document->GetTitle(locationChangeData->title());
+    document->GetCharacterSet(locationChangeData->charset());
+
+    locationChangeData->mayEnableCharacterEncodingMenu() =
+        docShell->GetMayEnableCharacterEncodingMenu();
+    locationChangeData->charsetAutodetected() =
+        docShell->GetCharsetAutodetected();
+
+    MOZ_TRY(PrincipalToPrincipalInfo(
+        document->EffectiveStoragePrincipal(),
+        &locationChangeData->contentStoragePrincipal(), false));
+
+    MOZ_TRY(PrincipalToPrincipalInfo(document->NodePrincipal(),
+                                     &locationChangeData->contentPrincipal(),
+                                     false));
+
+    if (const nsCOMPtr<nsIContentSecurityPolicy> csp = document->GetCsp()) {
+      locationChangeData->csp().emplace();
+      MOZ_TRY(CSPToCSPInfo(csp, &locationChangeData->csp().ref()));
+    }
+
+    locationChangeData->isSyntheticDocument() = document->IsSyntheticDocument();
+
+    if (nsCOMPtr<nsILoadGroup> loadGroup = document->GetDocumentLoadGroup()) {
+      uint64_t requestContextID = 0;
+      MOZ_TRY(loadGroup->GetRequestContextID(&requestContextID));
+      locationChangeData->requestContextID() = Some(requestContextID);
+    }
+
+#ifdef MOZ_CRASHREPORTER
+    if (CrashReporter::GetEnabled()) {
+      nsCOMPtr<nsIURI> annotationURI;
+
+      nsresult rv = NS_MutateURI(aLocation)
+                        .SetUserPass(EmptyCString())
+                        .Finalize(annotationURI);
+
+      if (NS_FAILED(rv)) {
+        // Ignore failures on about: URIs.
+        annotationURI = aLocation;
+      }
+
+      CrashReporter::AnnotateCrashReport(CrashReporter::Annotation::URL,
+                                         annotationURI->GetSpecOrDefault());
+    }
+#endif
+  }
+
+  Unused << SendOnLocationChange(webProgressData, requestData, aLocation,
+                                 aFlags, canGoBack, canGoForward,
+                                 locationChangeData);
+
+  return NS_OK;
 }
 
 NS_IMETHODIMP BrowserChild::OnStatusChange(nsIWebProgress* aWebProgress,
@@ -3651,6 +3732,11 @@ NS_IMETHODIMP BrowserChild::OnRefreshAttempted(nsIWebProgress* aWebProgress,
   NS_ENSURE_ARG_POINTER(aOut);
   *aOut = true;
 
+  return NS_OK;
+}
+
+NS_IMETHODIMP BrowserChild::NotifyNavigationFinished() {
+  Unused << SendNavigationFinished();
   return NS_OK;
 }
 

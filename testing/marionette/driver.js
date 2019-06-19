@@ -149,9 +149,9 @@ this.GeckoDriver = function(server) {
   this.listener = proxy.toListener(
       this.sendAsync.bind(this), () => this.curBrowser);
 
-  // points to an alert instance if a modal dialog is present
+  // used for modal dialogs or tab modal alerts
   this.dialog = null;
-  this.dialogHandler = this.globalModalDialogHandler.bind(this);
+  this.dialogObserver = null;
 };
 
 Object.defineProperty(GeckoDriver.prototype, "a11yChecks", {
@@ -304,13 +304,17 @@ GeckoDriver.prototype.uninit = function() {
  * Callback used to observe the creation of new modal or tab modal dialogs
  * during the session's lifetime.
  */
-GeckoDriver.prototype.globalModalDialogHandler = function(subject, topic) {
-  let winr;
-  if (topic === modal.COMMON_DIALOG_LOADED) {
-    // Always keep a weak reference to the current dialog
-    winr = Cu.getWeakReference(subject);
+GeckoDriver.prototype.handleModalDialog = function(action, dialog, win) {
+  // Only care about modals of the currently selected window.
+  if (win !== this.curBrowser.window) {
+    return;
   }
-  this.dialog = new modal.Dialog(() => this.curBrowser, winr);
+
+  if (action === modal.ACTION_OPENED) {
+    this.dialog = new modal.Dialog(() => this.curBrowser, dialog);
+  } else if (action === modal.ACTION_CLOSED) {
+    this.dialog = null;
+  }
 };
 
 /**
@@ -793,9 +797,11 @@ GeckoDriver.prototype.newSession = async function(cmd) {
     this.curBrowser.contentBrowser.focus();
   }
 
-  // Setup global listener for modal dialogs, and check if there is already
-  // one open for the currently selected browser window.
-  modal.addHandler(this.dialogHandler);
+  // Setup observer for modal dialogs
+  this.dialogObserver = new modal.DialogObserver(this);
+  this.dialogObserver.add(this.handleModalDialog.bind(this));
+
+  // Check if there is already an open dialog for the selected browser window.
   this.dialog = modal.findModalDialogs(this.curBrowser);
 
   return {
@@ -1574,7 +1580,7 @@ GeckoDriver.prototype.findWindow = function(winIterable, filter) {
 
 /**
  * Switch the marionette window to a given window. If the browser in
- * the window is unregistered, registers that browser and waits for
+ * the window is unregistered, register that browser and wait for
  * the registration is complete. If |focus| is true then set the focus
  * on the window.
  *
@@ -1611,9 +1617,13 @@ GeckoDriver.prototype.setWindowHandle = async function(
 
     // .. and activate the tab if it's a content browser.
     if ("tabIndex" in winProperties) {
-      this.curBrowser.switchToTab(
+      await this.curBrowser.switchToTab(
           winProperties.tabIndex, winProperties.win, focus);
     }
+  }
+
+  if (focus) {
+    await this.curBrowser.focusWindow();
   }
 };
 
@@ -2878,7 +2888,10 @@ GeckoDriver.prototype.deleteSession = function() {
     this.observing = null;
   }
 
-  modal.removeHandler(this.dialogHandler);
+  if (this.dialogObserver) {
+    this.dialogObserver.cleanup();
+    this.dialogObserver = null;
+  }
 
   this.sandboxes.clear();
   CertificateOverrideManager.uninstall();
@@ -3170,8 +3183,7 @@ GeckoDriver.prototype.dismissDialog = async function() {
   (button1 ? button1 : button0).click();
 
   await dialogClosed;
-
-  this.dialog = null;
+  await new IdlePromise(win);
 };
 
 /**
@@ -3188,8 +3200,7 @@ GeckoDriver.prototype.acceptDialog = async function() {
   button0.click();
 
   await dialogClosed;
-
-  this.dialog = null;
+  await new IdlePromise(win);
 };
 
 /**

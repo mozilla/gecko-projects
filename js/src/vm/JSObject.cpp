@@ -81,14 +81,19 @@
 
 using namespace js;
 
-void js::ReportNotObject(JSContext* cx, HandleValue v) {
+void js::ReportNotObject(JSContext* cx, JSErrNum err, int spindex,
+                         HandleValue v) {
   MOZ_ASSERT(!v.isObject());
+  ReportValueError(cx, err, spindex, v, nullptr);
+}
 
-  if (UniqueChars bytes =
-          DecompileValueGenerator(cx, JSDVG_SEARCH_STACK, v, nullptr)) {
-    JS_ReportErrorNumberUTF8(cx, GetErrorMessage, nullptr,
-                             JSMSG_NOT_NONNULL_OBJECT, bytes.get());
-  }
+void js::ReportNotObject(JSContext* cx, JSErrNum err, HandleValue v) {
+  ReportNotObject(cx, err, JSDVG_SEARCH_STACK, v);
+}
+
+void js::ReportNotObject(JSContext* cx, const Value& v) {
+  RootedValue value(cx, v);
+  ReportNotObject(cx, JSMSG_OBJECT_REQUIRED, value);
 }
 
 void js::ReportNotObjectArg(JSContext* cx, const char* nth, const char* fun,
@@ -97,19 +102,8 @@ void js::ReportNotObjectArg(JSContext* cx, const char* nth, const char* fun,
 
   UniqueChars bytes;
   if (const char* chars = ValueToSourceForError(cx, v, bytes)) {
-    JS_ReportErrorNumberUTF8(cx, GetErrorMessage, nullptr,
-                             JSMSG_NOT_NONNULL_OBJECT_ARG, nth, fun, chars);
-  }
-}
-
-void js::ReportNotObjectWithName(JSContext* cx, const char* name,
-                                 HandleValue v) {
-  MOZ_ASSERT(!v.isObject());
-
-  UniqueChars bytes;
-  if (const char* chars = ValueToSourceForError(cx, v, bytes)) {
-    JS_ReportErrorNumberUTF8(cx, GetErrorMessage, nullptr,
-                             JSMSG_NOT_NONNULL_OBJECT_NAME, name, chars);
+    JS_ReportErrorNumberLatin1(cx, GetErrorMessage, nullptr,
+                               JSMSG_OBJECT_REQUIRED_ARG, nth, fun, chars);
   }
 }
 
@@ -308,7 +302,7 @@ bool js::ToPropertyDescriptor(JSContext* cx, HandleValue descval,
                               MutableHandle<PropertyDescriptor> desc) {
   // step 2
   RootedObject obj(cx,
-                   NonNullObjectWithName(cx, "property descriptor", descval));
+                   RequireObject(cx, JSMSG_OBJECT_REQUIRED_PROP_DESC, descval));
   if (!obj) {
     return false;
   }
@@ -833,8 +827,9 @@ bool js::NewObjectWithTaggedProtoIsCachable(JSContext* cx,
                                             Handle<TaggedProto> proto,
                                             NewObjectKind newKind,
                                             const Class* clasp) {
-  return !cx->helperThread() && proto.isObject() && newKind == GenericObject &&
-         clasp->isNative() && !proto.toObject()->is<GlobalObject>();
+  return !cx->isHelperThreadContext() && proto.isObject() &&
+         newKind == GenericObject && clasp->isNative() &&
+         !proto.toObject()->is<GlobalObject>();
 }
 
 JSObject* js::NewObjectWithGivenTaggedProto(JSContext* cx, const Class* clasp,
@@ -884,7 +879,8 @@ JSObject* js::NewObjectWithGivenTaggedProto(JSContext* cx, const Class* clasp,
 
 static bool NewObjectIsCachable(JSContext* cx, NewObjectKind newKind,
                                 const Class* clasp) {
-  return !cx->helperThread() && newKind == GenericObject && clasp->isNative();
+  return !cx->isHelperThreadContext() && newKind == GenericObject &&
+         clasp->isNative();
 }
 
 JSObject* js::NewObjectWithClassProtoCommon(JSContext* cx, const Class* clasp,
@@ -951,7 +947,7 @@ JSObject* js::NewObjectWithClassProtoCommon(JSContext* cx, const Class* clasp,
 static bool NewObjectWithGroupIsCachable(JSContext* cx, HandleObjectGroup group,
                                          NewObjectKind newKind) {
   if (!group->proto().isObject() || newKind != GenericObject ||
-      !group->clasp()->isNative() || cx->helperThread()) {
+      !group->clasp()->isNative() || cx->isHelperThreadContext()) {
     return false;
   }
 
@@ -2908,7 +2904,7 @@ bool js::DefineAccessorProperty(JSContext* cx, HandleObject obj, HandleId id,
   }
 
   if (DefinePropertyOp op = obj->getOpsDefineProperty()) {
-    MOZ_ASSERT(!cx->helperThread());
+    MOZ_ASSERT(!cx->isHelperThreadContext());
     return op(cx, obj, id, desc, result);
   }
   return NativeDefineProperty(cx, obj.as<NativeObject>(), id, desc, result);
@@ -2920,7 +2916,7 @@ bool js::DefineDataProperty(JSContext* cx, HandleObject obj, HandleId id,
   Rooted<PropertyDescriptor> desc(cx);
   desc.initFields(nullptr, value, attrs, nullptr, nullptr);
   if (DefinePropertyOp op = obj->getOpsDefineProperty()) {
-    MOZ_ASSERT(!cx->helperThread());
+    MOZ_ASSERT(!cx->isHelperThreadContext());
     return op(cx, obj, id, desc, result);
   }
   return NativeDefineProperty(cx, obj.as<NativeObject>(), id, desc, result);
@@ -2951,7 +2947,7 @@ bool js::DefineAccessorProperty(JSContext* cx, HandleObject obj, HandleId id,
     return false;
   }
   if (!result) {
-    MOZ_ASSERT(!cx->helperThread());
+    MOZ_ASSERT(!cx->isHelperThreadContext());
     result.reportError(cx, obj, id);
     return false;
   }
@@ -2965,7 +2961,7 @@ bool js::DefineDataProperty(JSContext* cx, HandleObject obj, HandleId id,
     return false;
   }
   if (!result) {
-    MOZ_ASSERT(!cx->helperThread());
+    MOZ_ASSERT(!cx->isHelperThreadContext());
     result.reportError(cx, obj, id);
     return false;
   }
@@ -2996,7 +2992,7 @@ bool js::DefineDataElement(JSContext* cx, HandleObject obj, uint32_t index,
 bool js::SetImmutablePrototype(JSContext* cx, HandleObject obj,
                                bool* succeeded) {
   if (obj->hasDynamicPrototype()) {
-    MOZ_ASSERT(!cx->helperThread());
+    MOZ_ASSERT(!cx->isHelperThreadContext());
     return Proxy::setImmutablePrototype(cx, obj, succeeded);
   }
 
@@ -4158,7 +4154,7 @@ MOZ_MUST_USE JSObject* js::SpeciesConstructor(
   // Step 4.
   if (!ctor.isObject()) {
     JS_ReportErrorNumberASCII(cx, GetErrorMessage, nullptr,
-                              JSMSG_NOT_NONNULL_OBJECT,
+                              JSMSG_OBJECT_REQUIRED,
                               "object's 'constructor' property");
     return nullptr;
   }

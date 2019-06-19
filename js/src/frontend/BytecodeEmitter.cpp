@@ -1497,7 +1497,8 @@ restart:
     case ParseNodeKind::PropertyNameExpr:  // by ParseNodeKind::Dot
       MOZ_CRASH("handled by parent nodes");
 
-    case ParseNodeKind::Limit:  // invalid sentinel value
+    case ParseNodeKind::LastUnused:
+    case ParseNodeKind::Limit:
       MOZ_CRASH("invalid node kind");
   }
 
@@ -1585,7 +1586,7 @@ bool BytecodeEmitter::emitSuperBase() {
 void BytecodeEmitter::tellDebuggerAboutCompiledScript(JSContext* cx) {
   // Note: when parsing off thread the resulting scripts need to be handed to
   // the debugger after rejoining to the main thread.
-  if (cx->helperThread()) {
+  if (cx->isHelperThreadContext()) {
     return;
   }
 
@@ -4590,6 +4591,7 @@ bool BytecodeEmitter::emitCallSiteObject(CallSiteNode* callSiteObj) {
     return false;
   }
 
+  hasCallSiteObj = true;
   return emitObjectPairOp(objbox1, objbox2, JSOP_CALLSITEOBJ);
 }
 
@@ -5004,10 +5006,10 @@ bool BytecodeEmitter::emitCopyDataProperties(CopyOption option) {
 }
 
 bool BytecodeEmitter::emitBigIntOp(BigInt* bigint) {
-  if (!perScriptData().numberList().append(BigIntValue(bigint))) {
+  if (!perScriptData().bigIntList().append(bigint)) {
     return false;
   }
-  return emitIndex32(JSOP_BIGINT, perScriptData().numberList().length() - 1);
+  return emitIndex32(JSOP_BIGINT, perScriptData().bigIntList().length() - 1);
 }
 
 bool BytecodeEmitter::emitIterator() {

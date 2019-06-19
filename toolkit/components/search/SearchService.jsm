@@ -916,7 +916,7 @@ SearchService.prototype = {
       SearchUtils.log("_loadEngines: loading " +
         this._startupExtensions.size + " engines reported by AddonManager startup");
       for (let extension of this._startupExtensions) {
-        await this._installExtensionEngine(extension, [DEFAULT_TAG]);
+        await this._installExtensionEngine(extension, [DEFAULT_TAG], true);
       }
     }
 
@@ -1109,6 +1109,7 @@ SearchService.prototype = {
    */
   reset() {
     gInitialized = false;
+    this._initObservers = PromiseUtils.defer();
     this._initStarted = this.__sortedEngines =
       this._currentEngine = this._searchDefault = null;
     this._startupExtensions = new Set();
@@ -1824,29 +1825,16 @@ SearchService.prototype = {
     return null;
   },
 
-  async addEngineWithDetails(name, iconURL, alias, description, method, template, extensionID) {
+  async addEngineWithDetails(name, details) {
     SearchUtils.log("addEngineWithDetails: Adding \"" + name + "\".");
     let isCurrent = false;
-    var params;
-
-    if (iconURL && typeof iconURL == "object") {
-      params = iconURL;
-    } else {
-      params = {
-        iconURL,
-        alias,
-        description,
-        method,
-        template,
-        extensionID,
-      };
-    }
+    var params = details;
 
     let isBuiltin = !!params.isBuiltin;
     // We install search extensions during the init phase, both built in
     // web extensions freshly installed (via addEnginesFromExtension) or
     // user installed extensions being reenabled calling this directly.
-    if (!gInitialized && !isBuiltin) {
+    if (!gInitialized && !isBuiltin && !params.initEngine) {
       await this.init(true);
     }
     if (!name)
@@ -1898,13 +1886,13 @@ SearchService.prototype = {
     return this._installExtensionEngine(extension, [DEFAULT_TAG]);
   },
 
-  async _installExtensionEngine(extension, locales) {
+  async _installExtensionEngine(extension, locales, initEngine) {
     SearchUtils.log("installExtensionEngine: " + extension.id);
 
     let installLocale = async (locale) => {
       let manifest = (locale === DEFAULT_TAG) ? extension.manifest :
         (await extension.getLocalizedManifest(locale));
-      return this._addEngineForManifest(extension, manifest, locale);
+      return this._addEngineForManifest(extension, manifest, locale, initEngine);
     };
 
     let engines = [];
@@ -1916,7 +1904,9 @@ SearchService.prototype = {
     return engines;
   },
 
-  async _addEngineForManifest(extension, manifest, locale = DEFAULT_TAG) {
+  async _addEngineForManifest(extension, manifest,
+                              locale = DEFAULT_TAG,
+                              initEngine = false) {
     let {IconDetails} = ExtensionParent;
 
     // General set of icons for an engine.
@@ -1966,6 +1956,7 @@ SearchService.prototype = {
       suggestGetParams: searchProvider.suggest_url_get_params,
       queryCharset: searchProvider.encoding || "UTF-8",
       mozParams: searchProvider.params,
+      initEngine,
     };
 
     return this.addEngineWithDetails(params.name, params);

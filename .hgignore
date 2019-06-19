@@ -190,8 +190,11 @@ tps_result\.json
 # Ignore various raptor performance framework files
 ^testing/raptor/.raptor-venv
 ^testing/raptor/raptor-venv
-^testing/raptor/raptor/tests/.*.json
+^testing/raptor/raptor/tests/json/
 ^testing/raptor/webext/raptor/auto_gen_test_config.js
+
+# Ignore browsertime output directory
+^browsertime-results
 
 # Ignore the build directories of WebRender standalone builds.
 gfx/wr/target/

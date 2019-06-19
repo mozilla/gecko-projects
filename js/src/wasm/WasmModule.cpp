@@ -25,7 +25,6 @@
 #include "jit/JitOptions.h"
 #include "js/BuildId.h"  // JS::BuildIdCharVector
 #include "threading/LockGuard.h"
-#include "util/NSPR.h"
 #include "wasm/WasmBaselineCompile.h"
 #include "wasm/WasmCompile.h"
 #include "wasm/WasmInstance.h"
@@ -64,6 +63,9 @@ class Module::Tier2GeneratorTaskImpl : public Tier2GeneratorTask {
 
   void runTask() override {
     CompileTier2(*compileArgs_, bytecode_->bytes, *module_, &cancelled_);
+  }
+  ThreadType threadType() override {
+    return ThreadType::THREAD_TYPE_WASM_TIER2;
   }
 };
 
@@ -357,39 +359,8 @@ bool wasm::GetOptimizedEncodingBuildId(JS::BuildIdCharVector* buildId) {
   return true;
 }
 
-struct MemUnmap {
-  uint32_t size;
-  MemUnmap() : size(0) {}
-  explicit MemUnmap(uint32_t size) : size(size) {}
-  void operator()(uint8_t* p) {
-    MOZ_ASSERT(size);
-    PR_MemUnmap(p, size);
-  }
-};
-
-typedef UniquePtr<uint8_t, MemUnmap> UniqueMapping;
-
-static UniqueMapping MapFile(PRFileDesc* file, PRFileInfo* info) {
-  if (PR_GetOpenFileInfo(file, info) != PR_SUCCESS) {
-    return nullptr;
-  }
-
-  PRFileMap* map = PR_CreateFileMap(file, info->size, PR_PROT_READONLY);
-  if (!map) {
-    return nullptr;
-  }
-
-  // PRFileMap objects do not need to be kept alive after the memory has been
-  // mapped, so unconditionally close the PRFileMap, regardless of whether
-  // PR_MemMap succeeds.
-  uint8_t* memory = (uint8_t*)PR_MemMap(map, 0, info->size);
-  PR_CloseFileMap(map);
-  return UniqueMapping(memory, MemUnmap(info->size));
-}
-
-RefPtr<JS::WasmModule> wasm::DeserializeModule(PRFileDesc* bytecodeFile,
-                                               UniqueChars filename,
-                                               unsigned line) {
+RefPtr<JS::WasmModule> wasm::DeserializeModule(const uint8_t* bytecode,
+                                               size_t bytecodeLength) {
   // We have to compile new code here so if we're fundamentally unable to
   // compile, we have to fail. If you change this code, update the
   // MutableCompileArgs setting below.
@@ -397,23 +368,17 @@ RefPtr<JS::WasmModule> wasm::DeserializeModule(PRFileDesc* bytecodeFile,
     return nullptr;
   }
 
-  PRFileInfo bytecodeInfo;
-  UniqueMapping bytecodeMapping = MapFile(bytecodeFile, &bytecodeInfo);
-  if (!bytecodeMapping) {
+  MutableBytes bytecodeCopy = js_new<ShareableBytes>();
+  if (!bytecodeCopy ||
+      !bytecodeCopy->bytes.initLengthUninitialized(bytecodeLength)) {
     return nullptr;
   }
 
-  MutableBytes bytecode = js_new<ShareableBytes>();
-  if (!bytecode ||
-      !bytecode->bytes.initLengthUninitialized(bytecodeInfo.size)) {
-    return nullptr;
-  }
-
-  memcpy(bytecode->bytes.begin(), bytecodeMapping.get(), bytecodeInfo.size);
+  memcpy(bytecodeCopy->bytes.begin(), bytecode, bytecodeLength);
 
   ScriptedCaller scriptedCaller;
-  scriptedCaller.filename = std::move(filename);
-  scriptedCaller.line = line;
+  scriptedCaller.filename = nullptr;
+  scriptedCaller.line = 0;
 
   MutableCompileArgs args = js_new<CompileArgs>(std::move(scriptedCaller));
   if (!args) {
@@ -438,7 +403,7 @@ RefPtr<JS::WasmModule> wasm::DeserializeModule(PRFileDesc* bytecodeFile,
 
   UniqueChars error;
   UniqueCharsVector warnings;
-  SharedModule module = CompileBuffer(*args, *bytecode, &error, &warnings);
+  SharedModule module = CompileBuffer(*args, *bytecodeCopy, &error, &warnings);
   if (!module) {
     return nullptr;
   }

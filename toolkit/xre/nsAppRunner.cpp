@@ -27,6 +27,7 @@
 #include "mozilla/intl/LocaleService.h"
 #include "mozilla/recordreplay/ParentIPC.h"
 #include "mozilla/JSONWriter.h"
+#include "BaseProfiler.h"
 
 #include "nsAppRunner.h"
 #include "mozilla/XREAppData.h"
@@ -253,10 +254,10 @@ static const char kPrefHealthReportUploadEnabled[] =
 int gArgc;
 char** gArgv;
 
-#include "buildid.h"
-
 static const char gToolkitVersion[] = NS_STRINGIFY(GRE_MILESTONE);
-static const char gToolkitBuildID[] = NS_STRINGIFY(MOZ_BUILDID);
+// The gToolkitBuildID global is defined to MOZ_BUILDID via gen_buildid.py
+// in toolkit/library. See related comment in toolkit/library/moz.build.
+extern const char gToolkitBuildID[];
 
 static nsIProfileLock* gProfileLock;
 
@@ -1690,16 +1691,16 @@ static nsresult ProfileMissingDialog(nsINativeAppSupport* aNative) {
     NS_ENSURE_TRUE_LOG(sbs, NS_ERROR_FAILURE);
 
     NS_ConvertUTF8toUTF16 appName(gAppData->name);
-    const char16_t* params[] = {appName.get(), appName.get()};
+    AutoTArray<nsString, 2> params = {appName, appName};
 
     // profileMissing
     nsAutoString missingMessage;
-    rv = sb->FormatStringFromName("profileMissing", params, 2, missingMessage);
+    rv = sb->FormatStringFromName("profileMissing", params, missingMessage);
     NS_ENSURE_SUCCESS(rv, NS_ERROR_ABORT);
 
     nsAutoString missingTitle;
-    rv = sb->FormatStringFromName("profileMissingTitle", params, 1,
-                                  missingTitle);
+    params.SetLength(1);
+    rv = sb->FormatStringFromName("profileMissingTitle", params, missingTitle);
     NS_ENSURE_SUCCESS(rv, NS_ERROR_ABORT);
 
     nsCOMPtr<nsIPromptService> ps(do_GetService(NS_PROMPTSERVICE_CONTRACTID));
@@ -1744,22 +1745,23 @@ static ReturnAbortOnError ProfileLockedDialog(nsIFile* aProfileDir,
     NS_ENSURE_TRUE_LOG(sbs, NS_ERROR_FAILURE);
 
     NS_ConvertUTF8toUTF16 appName(gAppData->name);
-    const char16_t* params[] = {appName.get(), appName.get()};
+    AutoTArray<nsString, 2> params = {appName, appName};
 
     nsAutoString killMessage;
 #ifndef XP_MACOSX
     rv = sb->FormatStringFromName(
         aUnlocker ? "restartMessageUnlocker" : "restartMessageNoUnlocker",
-        params, 2, killMessage);
+        params, killMessage);
 #else
     rv = sb->FormatStringFromName(
         aUnlocker ? "restartMessageUnlockerMac" : "restartMessageNoUnlockerMac",
-        params, 2, killMessage);
+        params, killMessage);
 #endif
     NS_ENSURE_SUCCESS(rv, NS_ERROR_FAILURE);
 
+    params.SetLength(1);
     nsAutoString killTitle;
-    rv = sb->FormatStringFromName("restartTitle", params, 1, killTitle);
+    rv = sb->FormatStringFromName("restartTitle", params, killTitle);
     NS_ENSURE_SUCCESS(rv, NS_ERROR_FAILURE);
 
     if (gfxPlatform::IsHeadless()) {
@@ -2356,11 +2358,16 @@ static void ExtractCompatVersionInfo(const nsACString& aCompatVersion,
   }
 
   aAppVersion = Substring(aCompatVersion, 0, underscorePos);
-  aAppBuildID = Substring(aCompatVersion, underscorePos + 1, slashPos - (underscorePos + 1));
+  aAppBuildID = Substring(aCompatVersion, underscorePos + 1,
+                          slashPos - (underscorePos + 1));
   aPlatformBuildID = Substring(aCompatVersion, slashPos + 1);
 }
 
-static bool IsNewIDLower(nsACString& oldID, nsACString& newID) {
+/**
+ * Compares two build IDs. Returns 0 if they match, < 0 if newID is considered
+ * newer than oldID and > 0 if the oldID is considered newer than newID.
+ */
+static int32_t CompareBuildIDs(nsACString& oldID, nsACString& newID) {
   // For Mozilla builds the build ID is a numeric date string. But it is too
   // large a number for the version comparator to handle so try to just compare
   // them as integer values first.
@@ -2392,16 +2399,22 @@ static bool IsNewIDLower(nsACString& oldID, nsACString& newID) {
 
   if (isNumeric) {
     nsresult rv;
-    uint64_t oldVal;
-    uint64_t newVal;
-    oldVal = oldID.ToInteger64(&rv);
+    CheckedInt<uint64_t> oldVal = oldID.ToInteger64(&rv);
 
-    if (NS_SUCCEEDED(rv)) {
-      newVal = newID.ToInteger64(&rv);
+    if (NS_SUCCEEDED(rv) && oldVal.isValid()) {
+      CheckedInt<uint64_t> newVal = newID.ToInteger64(&rv);
 
-      if (NS_SUCCEEDED(rv)) {
+      if (NS_SUCCEEDED(rv) && newVal.isValid()) {
         // We have simple numbers for both IDs.
-        return newVal < oldVal;
+        if (oldVal.value() == newVal.value()) {
+          return 0;
+        }
+
+        if (oldVal.value() > newVal.value()) {
+          return 1;
+        }
+
+        return -1;
       }
     }
   }
@@ -2410,27 +2423,31 @@ static bool IsNewIDLower(nsACString& oldID, nsACString& newID) {
   // distribution could have modified the build ID in some way. We don't know
   // what format this may be so let's just fall back to assuming that it's a
   // valid toolkit version.
-  return Version(PromiseFlatCString(newID).get()) <
-         Version(PromiseFlatCString(oldID).get());
+  return CompareVersions(PromiseFlatCString(oldID).get(),
+                         PromiseFlatCString(newID).get());
 }
 
 /**
- * Checks whether the compatibility versions from the previous and current
- * application match. Returns true if there has been no change, false otherwise.
- * The aDowngrade parameter is set to true if the old version is "newer" than
- * the new version.
+ * Compares the provided compatibility versions. Returns 0 if they match,
+ * < 0 if the new version is considered an upgrade from the old version and
+ * > 0 if the new version is considered a downgrade from the old version.
  */
-bool CheckCompatVersions(const nsACString& aOldCompatVersion,
-                         const nsACString& aNewCompatVersion,
-                         bool* aIsDowngrade) {
+int32_t CompareCompatVersions(const nsACString& aOldCompatVersion,
+                              const nsACString& aNewCompatVersion) {
   // Quick path for the common case.
   if (aOldCompatVersion.Equals(aNewCompatVersion)) {
-    *aIsDowngrade = false;
-    return true;
+    return 0;
   }
 
   // The versions differ for some reason so we will only ever return false from
   // here onwards. We just have to figure out if this is a downgrade or not.
+
+  // Hardcode the case where the last run was in safe mode (Bug 1556612). We
+  // cannot tell if this is a downgrade or not so just assume it isn't and let
+  // the user proceed.
+  if (aOldCompatVersion.EqualsLiteral("Safe Mode")) {
+    return -1;
+  }
 
   nsCString oldVersion;
   nsCString oldAppBuildID;
@@ -2445,24 +2462,18 @@ bool CheckCompatVersions(const nsACString& aOldCompatVersion,
                            newPlatformBuildID);
 
   // In most cases the app version will differ and this is an easy check.
-  if (Version(newVersion.get()) < Version(oldVersion.get())) {
-    *aIsDowngrade = true;
-    return false;
+  int32_t result = CompareVersions(oldVersion.get(), newVersion.get());
+  if (result != 0) {
+    return result;
   }
 
   // Fall back to build ID comparison.
-  if (IsNewIDLower(oldAppBuildID, newAppBuildID)) {
-    *aIsDowngrade = true;
-    return false;
+  result = CompareBuildIDs(oldAppBuildID, newAppBuildID);
+  if (result != 0) {
+    return result;
   }
 
-  if (IsNewIDLower(oldPlatformBuildID, newPlatformBuildID)) {
-    *aIsDowngrade = true;
-    return false;
-  }
-
-  *aIsDowngrade = false;
-  return false;
+  return CompareBuildIDs(oldPlatformBuildID, newPlatformBuildID);
 }
 
 /**
@@ -2496,7 +2507,9 @@ static bool CheckCompatibility(nsIFile* aProfileDir, const nsCString& aVersion,
     return false;
   }
 
-  if (!CheckCompatVersions(aLastVersion, aVersion, aIsDowngrade)) {
+  int32_t result = CompareCompatVersions(aLastVersion, aVersion);
+  if (result != 0) {
+    *aIsDowngrade = result > 0;
     return false;
   }
 
@@ -2537,11 +2550,11 @@ static bool CheckCompatibility(nsIFile* aProfileDir, const nsCString& aVersion,
   *aCachesOK = (NS_FAILED(rv) || !buf.EqualsLiteral("1"));
 
   bool purgeCaches = false;
-  if (aFlagFile) {
-    aFlagFile->Exists(&purgeCaches);
+  if (aFlagFile && NS_SUCCEEDED(aFlagFile->Exists(&purgeCaches)) &&
+      purgeCaches) {
+    *aCachesOK = false;
   }
 
-  *aCachesOK = !purgeCaches && *aCachesOK;
   return true;
 }
 
@@ -3006,6 +3019,10 @@ int XREMain::XRE_mainInit(bool* aExitFlag) {
   if (CheckForUserMismatch()) {
     return 1;
   }
+
+#ifdef XP_MACOSX
+  DisableAppNap();
+#endif
 
   if (PR_GetEnv("MOZ_CHAOSMODE")) {
     ChaosFeature feature = ChaosFeature::Any;
@@ -3625,6 +3642,9 @@ static void PR_CALLBACK ReadAheadDlls_ThreadStart(void*) {
 
   // Load explorerframe.dll for WinTaskbar::Initialize
   ReadAheadDll(L"ExplorerFrame.dll");
+
+  // Load WinTypes.dll for nsOSHelperAppService::GetApplicationDescription
+  ReadAheadDll(L"WinTypes.dll");
 }
 #endif
 
@@ -4162,6 +4182,9 @@ int XREMain::XRE_mainStartup(bool* aExitFlag) {
       mProfD, version, osABI, mDirProvider.GetGREDir(), mAppData->directory,
       flagFile, &cachesOK, &isDowngrade, lastVersion);
 
+  MOZ_RELEASE_ASSERT(!cachesOK || versionOK,
+                     "Caches cannot be good if the version has changed.");
+
 #ifdef MOZ_BLOCK_PROFILE_DOWNGRADE
   // The argument check must come first so the argument is always removed from
   // the command line regardless of whether this is a downgrade or not.
@@ -4203,7 +4226,7 @@ int XREMain::XRE_mainStartup(bool* aExitFlag) {
   bool lastStartupWasCrash = CheckLastStartupWasCrash().unwrapOr(false);
 
   if (CheckArg("purgecaches") || PR_GetEnv("MOZ_PURGE_CACHES") ||
-      lastStartupWasCrash) {
+      lastStartupWasCrash || gSafeMode) {
     cachesOK = false;
   }
 
@@ -4215,32 +4238,15 @@ int XREMain::XRE_mainStartup(bool* aExitFlag) {
   // re-generated to prevent mysterious component loading failures.
   //
   bool startupCacheValid = true;
-  if (gSafeMode) {
+
+  if (!cachesOK || !versionOK) {
     startupCacheValid = RemoveComponentRegistries(mProfD, mProfLD, false);
-    WriteVersion(mProfD, NS_LITERAL_CSTRING("Safe Mode"), osABI,
-                 mDirProvider.GetGREDir(), mAppData->directory,
-                 !startupCacheValid);
-  } else if (versionOK) {
-    if (!cachesOK) {
-      // Remove caches, forcing component re-registration.
-      // The new list of additional components directories is derived from
-      // information in "extensions.ini".
-      startupCacheValid = RemoveComponentRegistries(mProfD, mProfLD, false);
 
-      // Rewrite compatibility.ini to remove the flag
-      WriteVersion(mProfD, version, osABI, mDirProvider.GetGREDir(),
-                   mAppData->directory, !startupCacheValid);
-    }
-    // Nothing need be done for the normal startup case.
-  } else {
-    // Remove caches, forcing component re-registration
-    // with the default set of components (this disables any potentially
-    // troublesome incompatible XPCOM components).
-    startupCacheValid = RemoveComponentRegistries(mProfD, mProfLD, true);
-
-    // Write out version
+    // Rewrite compatibility.ini to match the current build. The next run
+    // should attempt to invalidate the caches if either this run is safe mode
+    // or the attempt to invalidate the caches this time failed.
     WriteVersion(mProfD, version, osABI, mDirProvider.GetGREDir(),
-                 mAppData->directory, !startupCacheValid);
+                 mAppData->directory, gSafeMode || !startupCacheValid);
   }
 
   if (!startupCacheValid) StartupCache::IgnoreDiskCache();
@@ -4445,7 +4451,7 @@ nsresult XREMain::XRE_mainRun() {
   // ready in time for early consumers, such as the component loader.
   mDirProvider.InitializeUserPrefs();
 
-  nsAppStartupNotifier::NotifyObservers(APPSTARTUP_TOPIC);
+  nsAppStartupNotifier::NotifyObservers(APPSTARTUP_CATEGORY);
 
   nsCOMPtr<nsIAppStartup> appStartup(components::AppStartup::Service());
   NS_ENSURE_TRUE(appStartup, NS_ERROR_FAILURE);
@@ -4654,6 +4660,7 @@ int XREMain::XRE_main(int argc, char* argv[], const BootstrapConfig& aConfig) {
   CodeCoverageHandler::Init();
 #endif
 
+  AUTO_BASE_PROFILER_LABEL("XREMain::XRE_main (around Gecko Profiler)", OTHER);
   AUTO_PROFILER_INIT;
   AUTO_PROFILER_LABEL("XREMain::XRE_main", OTHER);
 

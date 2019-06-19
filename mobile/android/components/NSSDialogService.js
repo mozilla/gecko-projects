@@ -48,8 +48,7 @@ NSSDialogs.prototype = {
         Services.strings.createBundle("chrome://browser/locale/pippki.properties");
     }
     let escapedArgList = Array.from(argList, x => this.escapeHTML(x));
-    return this.bundle.formatStringFromName(aName, escapedArgList,
-                                            escapedArgList.length);
+    return this.bundle.formatStringFromName(aName, escapedArgList);
   },
 
   getPrompt: function(aTitle, aText, aButtons, aCtx) {
@@ -188,7 +187,7 @@ NSSDialogs.prototype = {
       detailLines.push(this.formatString("clientAuthAsk.keyUsages",
                                          [keyUsages]));
     }
-    let emailAddresses = cert.getEmailAddresses({});
+    let emailAddresses = cert.getEmailAddresses();
     if (emailAddresses.length > 0) {
       let joinedAddresses = emailAddresses.join(", ");
       detailLines.push(this.formatString("clientAuthAsk.emailAddresses",

@@ -529,6 +529,12 @@ interface nsIDocShell : nsIDocShellTreeItem
    */
   [infallible] readonly attribute boolean hasMixedDisplayContentBlocked;
 
+   /**
+   * This attribute determines whether a document has Tracking Content
+   * that has been blocked from loading.
+   */
+  [infallible] readonly attribute boolean hasTrackingContentBlocked;
+
   /**
    * Disconnects this docshell's editor from its window, and stores the
    * editor data in the open document's session history entry.  This
@@ -607,9 +613,11 @@ interface nsIDocShell : nsIDocShellTreeItem
   /**
    * Create a new about:blank document and content viewer.
    * @param aPrincipal the principal to use for the new document.
+   * @param aStoragePrincipal the storage principal to use for the new document.
    * @param aCsp the CSP to use for the new document.
    */
   void createAboutBlankContentViewer(in nsIPrincipal aPrincipal,
+                                     in nsIPrincipal aStoragePrincipal,
                                      [optional] in nsIContentSecurityPolicy aCSP);
 
   /**
@@ -877,6 +885,11 @@ interface nsIDocShell : nsIDocShellTreeItem
    * must disable the menu when this property is false.
    */
   [infallible] readonly attribute boolean mayEnableCharacterEncodingMenu;
+
+  /**
+   * Indicates that the character encoding was autodetected.
+   */
+  [infallible] readonly attribute boolean charsetAutodetected;
 
            attribute  nsIEditor editor;
   readonly attribute  boolean   editable;             /* this docShell is editable */

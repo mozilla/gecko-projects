@@ -60,6 +60,7 @@ nsDocShellLoadState::nsDocShellLoadState(DocShellLoadStateInit& aLoadState) {
   mBaseURI = aLoadState.BaseURI();
   mTriggeringPrincipal = aLoadState.TriggeringPrincipal();
   mPrincipalToInherit = aLoadState.PrincipalToInherit();
+  mStoragePrincipalToInherit = aLoadState.StoragePrincipalToInherit();
   mCsp = aLoadState.Csp();
   mSrcdocData = aLoadState.SrcdocData();
   mPostDataStream = aLoadState.PostDataStream();
@@ -167,6 +168,15 @@ nsIPrincipal* nsDocShellLoadState::PrincipalToInherit() const {
 void nsDocShellLoadState::SetPrincipalToInherit(
     nsIPrincipal* aPrincipalToInherit) {
   mPrincipalToInherit = aPrincipalToInherit;
+}
+
+nsIPrincipal* nsDocShellLoadState::StoragePrincipalToInherit() const {
+  return mStoragePrincipalToInherit;
+}
+
+void nsDocShellLoadState::SetStoragePrincipalToInherit(
+    nsIPrincipal* aStoragePrincipalToInherit) {
+  mStoragePrincipalToInherit = aStoragePrincipalToInherit;
 }
 
 void nsDocShellLoadState::SetCsp(nsIContentSecurityPolicy* aCsp) {
@@ -467,6 +477,7 @@ DocShellLoadStateInit nsDocShellLoadState::Serialize() {
   loadState.BaseURI() = mBaseURI;
   loadState.TriggeringPrincipal() = mTriggeringPrincipal;
   loadState.PrincipalToInherit() = mPrincipalToInherit;
+  loadState.StoragePrincipalToInherit() = mStoragePrincipalToInherit;
   loadState.Csp() = mCsp;
   loadState.ReferrerInfo() = mReferrerInfo;
   loadState.SrcdocData() = mSrcdocData;

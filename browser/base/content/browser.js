@@ -124,8 +124,7 @@ XPCOMUtils.defineLazyScriptGetter(this, "gSync",
                                   "chrome://browser/content/browser-sync.js");
 XPCOMUtils.defineLazyScriptGetter(this, "gBrowserThumbnails",
                                   "chrome://browser/content/browser-thumbnails.js");
-XPCOMUtils.defineLazyScriptGetter(this, ["setContextMenuContentData",
-                                         "openContextMenu", "nsContextMenu"],
+XPCOMUtils.defineLazyScriptGetter(this, ["openContextMenu", "nsContextMenu"],
                                   "chrome://browser/content/nsContextMenu.js");
 XPCOMUtils.defineLazyScriptGetter(this, ["DownloadsPanel",
                                          "DownloadsOverlayLoader",
@@ -503,7 +502,7 @@ var gNavigatorBundle = {
     return gBrowserBundle.GetStringFromName(key);
   },
   getFormattedString(key, array) {
-    return gBrowserBundle.formatStringFromName(key, array, array.length);
+    return gBrowserBundle.formatStringFromName(key, array);
   },
 };
 
@@ -1199,13 +1198,14 @@ function _loadURI(browser, uri, params = {}) {
   }
 
   let {
-    flags = Ci.nsIWebNavigation.LOAD_FLAGS_NONE,
     triggeringPrincipal,
     referrerInfo,
     postData,
     userContextId,
     csp,
   } = params || {};
+  let loadFlags = params.loadFlags || params.flags ||
+                  Ci.nsIWebNavigation.LOAD_FLAGS_NONE;
 
   if (!triggeringPrincipal) {
     throw new Error("Must load with a triggering Principal");
@@ -1217,7 +1217,7 @@ function _loadURI(browser, uri, params = {}) {
     mustChangeProcess,
     newFrameloader,
   } = E10SUtils.shouldLoadURIInBrowser(browser, uri, gMultiProcessBrowser,
-                                       gFissionBrowser, flags);
+                                       gFissionBrowser, loadFlags);
   if (uriObject && handleUriInChrome(browser, uriObject)) {
     // If we've handled the URI in Chrome then just return here.
     return;
@@ -1235,7 +1235,7 @@ function _loadURI(browser, uri, params = {}) {
   let loadURIOptions = {
     triggeringPrincipal,
     csp,
-    loadFlags: flags,
+    loadFlags,
     referrerInfo,
     postData,
   };
@@ -1264,7 +1264,7 @@ function _loadURI(browser, uri, params = {}) {
         triggeringPrincipal: triggeringPrincipal
           ? E10SUtils.serializePrincipal(triggeringPrincipal)
           : null,
-        flags,
+        flags: loadFlags,
         referrerInfo: E10SUtils.serializeReferrerInfo(referrerInfo),
         remoteType: requiredRemoteType,
         postData,
@@ -1357,7 +1357,8 @@ var delayedStartupPromise = new Promise(resolve => {
 
 var gBrowserInit = {
   delayedStartupFinished: false,
-  idleTasksFinished: false,
+  idleTasksFinishedPromise: null,
+  idleTaskPromiseResolve: null,
 
   _tabToAdopt: undefined,
 
@@ -1704,7 +1705,6 @@ var gBrowserInit = {
     }
 
     FullScreen.init();
-    PointerLock.init();
 
     if (AppConstants.isPlatformAndVersionAtLeast("win", "10")) {
       MenuTouchModeObserver.init();
@@ -1773,17 +1773,12 @@ var gBrowserInit = {
   _setInitialFocus() {
     let initiallyFocusedElement = document.commandDispatcher.focusedElement;
 
-    let firstBrowserPaintDeferred = {};
-    firstBrowserPaintDeferred.promise = new Promise(resolve => {
-      firstBrowserPaintDeferred.resolve = resolve;
+    this._firstBrowserPaintDeferred = {};
+    this._firstBrowserPaintDeferred.promise = new Promise(resolve => {
+      this._firstBrowserPaintDeferred.resolve = resolve;
     });
 
     let mm = window.messageManager;
-    mm.addMessageListener("Browser:FirstPaint", function onFirstPaint() {
-      mm.removeMessageListener("Browser:FirstPaint", onFirstPaint);
-      firstBrowserPaintDeferred.resolve();
-    });
-
     let initialBrowser = gBrowser.selectedBrowser;
     mm.addMessageListener("Browser:FirstNonBlankPaint",
                           function onFirstNonBlankPaint() {
@@ -1806,7 +1801,7 @@ var gBrowserInit = {
       if (gBrowser.selectedBrowser.isRemoteBrowser) {
         // If the initial browser is remote, in order to optimize for first paint,
         // we'll defer switching focus to that browser until it has painted.
-        firstBrowserPaintDeferred.promise.then(() => {
+        this._firstBrowserPaintDeferred.promise.then(() => {
           // If focus didn't move while we were waiting for first paint, we're okay
           // to move to the browser.
           if (document.commandDispatcher.focusedElement == initiallyFocusedElement) {
@@ -1849,9 +1844,9 @@ var gBrowserInit = {
             replace: true,
             // See below for the semantics of window.arguments. Only the minimum is supported.
             userContextId: window.arguments[5],
-            triggeringPrincipal: window.arguments[7] || Services.scriptSecurityManager.getSystemPrincipal(),
-            allowInheritPrincipal: window.arguments[8],
-            csp: window.arguments[9],
+            triggeringPrincipal: window.arguments[8] || Services.scriptSecurityManager.getSystemPrincipal(),
+            allowInheritPrincipal: window.arguments[9],
+            csp: window.arguments[10],
             fromExternal: true,
           });
         } catch (e) {}
@@ -1862,19 +1857,21 @@ var gBrowserInit = {
         //                 [4]: allowThirdPartyFixup (bool)
         //                 [5]: userContextId (int)
         //                 [6]: originPrincipal (nsIPrincipal)
-        //                 [7]: triggeringPrincipal (nsIPrincipal)
-        //                 [8]: allowInheritPrincipal (bool)
-        //                 [9]: csp (nsIContentSecurityPolicy)
+        //                 [7]: originStoragePrincipal (nsIPrincipal)
+        //                 [8]: triggeringPrincipal (nsIPrincipal)
+        //                 [9]: allowInheritPrincipal (bool)
+        //                 [10]: csp (nsIContentSecurityPolicy)
         let userContextId = (window.arguments[5] != undefined ?
             window.arguments[5] : Ci.nsIScriptSecurityManager.DEFAULT_USER_CONTEXT_ID);
         loadURI(uriToLoad, window.arguments[2] || null, window.arguments[3] || null,
                 window.arguments[4] || false, userContextId,
                 // pass the origin principal (if any) and force its use to create
                 // an initial about:blank viewer if present:
-                window.arguments[6], !!window.arguments[6], window.arguments[7],
+                window.arguments[6], window.arguments[7], !!window.arguments[6],
+                window.arguments[8],
                 // TODO fix allowInheritPrincipal to default to false.
                 // Default to true unless explicitly set to false because of bug 1475201.
-                window.arguments[8] !== false, window.arguments[9]);
+                window.arguments[9] !== false, window.arguments[10]);
         window.focus();
       } else {
         // Note: loadOneOrMoreURIs *must not* be called if window.arguments.length >= 3.
@@ -1958,26 +1955,6 @@ var gBrowserInit = {
       scheduleIdleTask(() => Win7Features.onOpenWindow());
     }
 
-    scheduleIdleTask(() => {
-      if (Services.prefs.getBoolPref("privacy.resistFingerprinting")) {
-        return;
-      }
-
-      setTimeout(() => {
-        if (window.closed) {
-          return;
-        }
-
-        let browser = gBrowser.selectedBrowser;
-        let browserBounds = window.windowUtils.getBoundsWithoutFlushing(browser);
-
-        Services.telemetry.keyedScalarAdd(
-          "resistfingerprinting.content_window_size",
-          `${browserBounds.width}x${browserBounds.height}`,
-          1);
-      }, 300 * 1000);
-    });
-
     scheduleIdleTask(async () => {
       NewTabPagePreloading.maybeCreatePreloadedBrowser(window);
     });
@@ -1986,7 +1963,7 @@ var gBrowserInit = {
     // timeouts) should execute in order. Note that this observer notification is
     // not guaranteed to fire, since the window could close before we get here.
     scheduleIdleTask(() => {
-      this.idleTasksFinished = true;
+      this.idleTaskPromiseResolve();
       Services.obs.notifyObservers(window, "browser-idle-startup-tasks-finished");
     });
   },
@@ -2159,6 +2136,10 @@ var gBrowserInit = {
   },
 };
 
+gBrowserInit.idleTasksFinishedPromise = new Promise(resolve => {
+  gBrowserInit.idleTaskPromiseResolve = resolve;
+});
+
 function HandleAppCommandEvent(evt) {
   switch (evt.command) {
   case "Back":
@@ -2321,11 +2302,11 @@ function BrowserReload() {
   BrowserReloadWithFlags(reloadFlags);
 }
 
+const kSkipCacheFlags = Ci.nsIWebNavigation.LOAD_FLAGS_BYPASS_PROXY |
+                        Ci.nsIWebNavigation.LOAD_FLAGS_BYPASS_CACHE;
 function BrowserReloadSkipCache() {
   // Bypass proxy and cache.
-  const reloadFlags = Ci.nsIWebNavigation.LOAD_FLAGS_BYPASS_PROXY |
-                      Ci.nsIWebNavigation.LOAD_FLAGS_BYPASS_CACHE;
-  BrowserReloadWithFlags(reloadFlags);
+  BrowserReloadWithFlags(kSkipCacheFlags);
 }
 
 function BrowserHome(aEvent) {
@@ -2447,6 +2428,9 @@ function focusAndSelectUrlBar(userInitiatedFocus = false) {
 function openLocation() {
   if (window.location.href == AppConstants.BROWSER_CHROME_URL) {
     focusAndSelectUrlBar(true);
+    if (gURLBar.openViewOnFocus && !gURLBar.view.isOpen) {
+      gURLBar.startQuery();
+    }
     return;
   }
 
@@ -2598,8 +2582,9 @@ function BrowserTryToCloseWindow() {
 }
 
 function loadURI(uri, referrerInfo, postData, allowThirdPartyFixup,
-                 userContextId, originPrincipal, forceAboutBlankViewerInCurrent,
-                 triggeringPrincipal, allowInheritPrincipal = false, csp = null) {
+                 userContextId, originPrincipal, originStoragePrincipal,
+                 forceAboutBlankViewerInCurrent, triggeringPrincipal,
+                 allowInheritPrincipal = false, csp = null) {
   if (!triggeringPrincipal) {
     throw new Error("Must load with a triggering Principal");
   }
@@ -2611,6 +2596,7 @@ function loadURI(uri, referrerInfo, postData, allowThirdPartyFixup,
                  allowThirdPartyFixup,
                  userContextId,
                  originPrincipal,
+                 originStoragePrincipal,
                  triggeringPrincipal,
                  csp,
                  forceAboutBlankViewerInCurrent,
@@ -3051,8 +3037,6 @@ var BrowserOnClick = {
     mm.addMessageListener("Browser:ResetSSLPreferences", this);
     mm.addMessageListener("Browser:SSLErrorReportTelemetry", this);
     mm.addMessageListener("Browser:SSLErrorGoBack", this);
-    mm.addMessageListener("Browser:PrimeMitm", this);
-    mm.addMessageListener("Browser:ResetEnterpriseRootsPref", this);
   },
 
   uninit() {
@@ -3064,8 +3048,6 @@ var BrowserOnClick = {
     mm.removeMessageListener("Browser:ResetSSLPreferences", this);
     mm.removeMessageListener("Browser:SSLErrorReportTelemetry", this);
     mm.removeMessageListener("Browser:SSLErrorGoBack", this);
-    mm.removeMessageListener("Browser:PrimeMitm", this);
-    mm.removeMessageListener("Browser:ResetEnterpriseRootsPref", this);
   },
 
   receiveMessage(msg) {
@@ -3113,74 +3095,7 @@ var BrowserOnClick = {
       case "Browser:SSLErrorGoBack":
         goBackFromErrorPage();
       break;
-      case "Browser:PrimeMitm":
-        this.primeMitm(msg.target);
-      break;
-      case "Browser:ResetEnterpriseRootsPref":
-        Services.prefs.clearUserPref("security.enterprise_roots.enabled");
-        Services.prefs.clearUserPref("security.enterprise_roots.auto-enabled");
-      break;
     }
-  },
-
-  /**
-   * This function does a canary request to a reliable, maintained endpoint, in
-   * order to help network code detect a system-wide man-in-the-middle.
-   */
-  primeMitm(browser) {
-    // If we already have a mitm canary issuer stored, then don't bother with the
-    // extra request. This will be cleared on every update ping.
-    if (Services.prefs.getStringPref("security.pki.mitm_canary_issuer", null)) {
-      return;
-    }
-
-    let url = Services.prefs.getStringPref("security.certerrors.mitm.priming.endpoint");
-    let request = new XMLHttpRequest({mozAnon: true});
-    request.open("HEAD", url);
-    request.channel.loadFlags |= Ci.nsIRequest.LOAD_BYPASS_CACHE;
-    request.channel.loadFlags |= Ci.nsIRequest.INHIBIT_CACHING;
-
-    request.addEventListener("error", event => {
-      // Make sure the user is still on the cert error page.
-      if (!browser.documentURI.spec.startsWith("about:certerror")) {
-        return;
-      }
-
-      let secInfo = request.channel.securityInfo.QueryInterface(Ci.nsITransportSecurityInfo);
-      if (secInfo.errorCode != SEC_ERROR_UNKNOWN_ISSUER) {
-        return;
-      }
-
-      // When we get to this point there's already something deeply wrong, it's very likely
-      // that there is indeed a system-wide MitM.
-      if (secInfo.serverCert && secInfo.serverCert.issuerName) {
-        // Grab the issuer of the certificate used in the exchange and store it so that our
-        // network-level MitM detection code has a comparison baseline.
-        Services.prefs.setStringPref("security.pki.mitm_canary_issuer", secInfo.serverCert.issuerName);
-
-        // MitM issues are sometimes caused by software not registering their root certs in the
-        // Firefox root store. We might opt for using third party roots from the system root store.
-        if (Services.prefs.getBoolPref("security.certerrors.mitm.auto_enable_enterprise_roots")) {
-          if (!Services.prefs.getBoolPref("security.enterprise_roots.enabled")) {
-            // Loading enterprise roots happens on a background thread, so wait for import to finish.
-            BrowserUtils.promiseObserved("psm:enterprise-certs-imported").then(() => {
-              if (browser.documentURI.spec.startsWith("about:certerror")) {
-                browser.reload();
-              }
-            });
-
-            Services.prefs.setBoolPref("security.enterprise_roots.enabled", true);
-            // Record that this pref was automatically set.
-            Services.prefs.setBoolPref("security.enterprise_roots.auto-enabled", true);
-          }
-        } else {
-          // Need to reload the page to make sure network code picks up the canary issuer pref.
-          browser.reload();
-        }
-      }
-    });
-
-    request.send(null);
   },
 
   onCertError(browser, elementId, isTopFrame, location, securityInfoAsString, frameId) {
@@ -3231,11 +3146,15 @@ var BrowserOnClick = {
         securityInfo = getSecurityInfo(securityInfoAsString);
         let errorInfo = getDetailedCertErrorInfo(location,
                                                  securityInfo);
+        let clockSkewDifference = Services.prefs.getIntPref("services.settings.clock_skew_seconds", 0);
+        let settingsLastFetched = Services.prefs.getIntPref("services.settings.last_update_seconds", 0);
+        let appBuildID = Services.appinfo.appBuildID;
         browser.messageManager.sendAsyncMessage("CertErrorDetails", {
-            code: securityInfo.errorCode,
-            info: errorInfo,
-            codeString: securityInfo.errorCodeString,
-            frameId,
+          info: errorInfo,
+          clockSkewDifference,
+          settingsLastFetched,
+          appBuildID,
+          frameId,
         });
         break;
 
@@ -3479,10 +3398,8 @@ function BrowserReloadWithFlags(reloadFlags) {
   }
 
   function sendReloadMessage(tab) {
-    tab.linkedBrowser
-         .messageManager
-         .sendAsyncMessage("Browser:Reload",
-                           { flags: reloadFlags, handlingUserInput });
+    tab.linkedBrowser.sendMessageToActor("Browser:Reload",
+                                         { flags: reloadFlags, handlingUserInput }, "BrowserTab");
   }
 }
 
@@ -3547,8 +3464,7 @@ function getDetailedCertErrorInfo(location, securityInfo) {
 // TODO: can we pull getDERString and getPEMString in from pippki.js instead of
 // duplicating them here?
 function getDERString(cert) {
-  var length = {};
-  var derArray = cert.getRawDER(length);
+  var derArray = cert.getRawDER();
   var derString = "";
   for (var i = 0; i < derArray.length; i++) {
     derString += String.fromCharCode(derArray[i]);
@@ -4126,7 +4042,7 @@ const BrowserSearch = {
     let placeholder;
     if (name) {
       placeholder = gBrowserBundle.formatStringFromName("urlbar.placeholder",
-        [name], 1);
+        [name]);
     } else {
       placeholder = gURLBar.getAttribute("defaultPlaceholder");
     }
@@ -5005,24 +4921,6 @@ var XULBrowserWindow = {
   onLocationChange(aWebProgress, aRequest, aLocationURI, aFlags, aIsSimulated) {
     var location = aLocationURI ? aLocationURI.spec : "";
 
-    let pageTooltip = document.getElementById("aHTMLTooltip");
-    let tooltipNode = pageTooltip.triggerNode;
-    if (tooltipNode) {
-      // Optimise for the common case
-      if (aWebProgress.isTopLevel) {
-        pageTooltip.hidePopup();
-      } else {
-        for (let tooltipWindow = tooltipNode.ownerGlobal;
-             tooltipWindow != tooltipWindow.parent;
-             tooltipWindow = tooltipWindow.parent) {
-          if (tooltipWindow == aWebProgress.DOMWindow) {
-            pageTooltip.hidePopup();
-            break;
-          }
-        }
-      }
-    }
-
     this.hideOverLinkImmediately = true;
     this.setOverLink("", null);
     this.hideOverLinkImmediately = false;
@@ -5033,6 +4931,12 @@ var XULBrowserWindow = {
     // Do not update urlbar if there was a subframe navigation
 
     if (aWebProgress.isTopLevel) {
+      let pageTooltip = document.getElementById("aHTMLTooltip");
+      if (pageTooltip.state != "closed") {
+        // TODO: this misses cases where a subframe navigates.
+        pageTooltip.hidePopup();
+      }
+
       if ((location == "about:blank" && checkEmptyPageOrigin()) ||
           location == "") { // Second condition is for new tabs, otherwise
                              // reload function is enabled until tab is refreshed.
@@ -5635,24 +5539,43 @@ var TabsProgressListener = {
   onStateChange(aBrowser, aWebProgress, aRequest, aStateFlags, aStatus) {
     // Collect telemetry data about tab load times.
     if (aWebProgress.isTopLevel && (!aRequest.originalURI || aRequest.originalURI.scheme != "about")) {
-      let stopwatchRunning = TelemetryStopwatch.running("FX_PAGE_LOAD_MS_2", aBrowser);
+      let histogram = "FX_PAGE_LOAD_MS_2";
+      let recordLoadTelemetry = true;
 
+      if (aWebProgress.loadType & Ci.nsIDocShell.LOAD_CMD_RELOAD) {
+        // loadType is constructed by shifting loadFlags, this is why we need to
+        // do the same shifting here.
+        // https://searchfox.org/mozilla-central/rev/11cfa0462a6b5d8c5e2111b8cfddcf78098f0141/docshell/base/nsDocShellLoadTypes.h#22
+        if (aWebProgress.loadType & (kSkipCacheFlags << 16)) {
+          histogram = "FX_PAGE_RELOAD_SKIP_CACHE_MS";
+        } else if (aWebProgress.loadType == Ci.nsIDocShell.LOAD_CMD_RELOAD) {
+          histogram = "FX_PAGE_RELOAD_NORMAL_MS";
+        } else {
+          recordLoadTelemetry = false;
+        }
+      }
+
+      let stopwatchRunning = TelemetryStopwatch.running(histogram, aBrowser);
       if (aStateFlags & Ci.nsIWebProgressListener.STATE_IS_WINDOW) {
         if (aStateFlags & Ci.nsIWebProgressListener.STATE_START) {
           if (stopwatchRunning) {
             // Oops, we're seeing another start without having noticed the previous stop.
-            TelemetryStopwatch.cancel("FX_PAGE_LOAD_MS_2", aBrowser);
+            if (recordLoadTelemetry)
+              TelemetryStopwatch.cancel(histogram, aBrowser);
           }
-          TelemetryStopwatch.start("FX_PAGE_LOAD_MS_2", aBrowser);
+          if (recordLoadTelemetry)
+            TelemetryStopwatch.start(histogram, aBrowser);
           Services.telemetry.getHistogramById("FX_TOTAL_TOP_VISITS").add(true);
         } else if (aStateFlags & Ci.nsIWebProgressListener.STATE_STOP &&
                    stopwatchRunning /* we won't see STATE_START events for pre-rendered tabs */) {
-          TelemetryStopwatch.finish("FX_PAGE_LOAD_MS_2", aBrowser);
+          if (recordLoadTelemetry)
+            TelemetryStopwatch.finish(histogram, aBrowser);
         }
       } else if (aStateFlags & Ci.nsIWebProgressListener.STATE_STOP &&
                  aStatus == Cr.NS_BINDING_ABORTED &&
                  stopwatchRunning /* we won't see STATE_START events for pre-rendered tabs */) {
-        TelemetryStopwatch.cancel("FX_PAGE_LOAD_MS_2", aBrowser);
+        if (recordLoadTelemetry)
+          TelemetryStopwatch.cancel(histogram, aBrowser);
       }
     }
   },
@@ -5831,7 +5754,7 @@ nsBrowserAccess.prototype = {
         try {
           newWindow = openDialog(AppConstants.BROWSER_CHROME_URL, "_blank", features,
                       // window.arguments
-                      url, null, null, null, null, null, null, aTriggeringPrincipal,
+                      url, null, null, null, null, null, null, null, aTriggeringPrincipal,
                       null, aCsp);
         } catch (ex) {
           Cu.reportError(ex);
@@ -6439,7 +6362,13 @@ function handleLinkClick(event, href, linkNode) {
     return true;
   }
 
-  var referrerURI = doc.documentURIObject;
+  let referrerInfo = Cc["@mozilla.org/referrer-info;1"].createInstance(Ci.nsIReferrerInfo);
+  if (linkNode) {
+    referrerInfo.initWithNode(linkNode);
+  } else {
+    referrerInfo.initWithDocument(doc);
+  }
+
   // if the mixedContentChannel is present and the referring URI passes
   // a same origin check with the target URI, we can preserve the users
   // decision of disabling MCB on a page for it's child tabs.
@@ -6450,28 +6379,12 @@ function handleLinkClick(event, href, linkNode) {
     try {
       var targetURI = makeURI(href);
       let isPrivateWin = doc.nodePrincipal.originAttributes.privateBrowsingId > 0;
-      sm.checkSameOriginURI(referrerURI, targetURI, false, isPrivateWin);
+      sm.checkSameOriginURI(doc.documentURIObject, targetURI, false, isPrivateWin);
       persistAllowMixedContentInChildTab = true;
     } catch (e) { }
   }
 
-  // first get document wide referrer policy, then
-  // get referrer attribute from clicked link and parse it and
-  // allow per element referrer to overrule the document wide referrer if enabled
-  let referrerPolicy = doc.referrerPolicy;
-  if (linkNode) {
-    let referrerAttrValue = Services.netUtils.parseAttributePolicyString(linkNode.
-                            getAttribute("referrerpolicy"));
-    if (referrerAttrValue != Ci.nsIHttpChannel.REFERRER_POLICY_UNSET) {
-      referrerPolicy = referrerAttrValue;
-    }
-  }
-
   let frameOuterWindowID = WebNavigationFrames.getFrameId(doc.defaultView);
-  let referrerInfo = new ReferrerInfo(
-    referrerPolicy,
-    !BrowserUtils.linkHasNoReferrer(linkNode),
-    referrerURI);
 
   urlSecurityCheck(href, doc.nodePrincipal);
   let params = {
@@ -6479,6 +6392,7 @@ function handleLinkClick(event, href, linkNode) {
     allowMixedContent: persistAllowMixedContentInChildTab,
     referrerInfo,
     originPrincipal: doc.nodePrincipal,
+    originStoragePrincipal: doc.effectiveStoragePrincipal,
     triggeringPrincipal: doc.nodePrincipal,
     csp: doc.csp,
     frameOuterWindowID,
@@ -6615,6 +6529,9 @@ function handleDroppedLink(event, urlOrLinks, nameOrTriggeringPrincipal, trigger
 
 function BrowserSetForcedCharacterSet(aCharset) {
   if (aCharset) {
+    if (aCharset == "Japanese") {
+      aCharset = "Shift_JIS";
+    }
     gBrowser.selectedBrowser.characterSet = aCharset;
     // Save the forced character-set
     PlacesUIUtils.setCharsetForPage(getWebNavigation().currentURI,
@@ -6629,7 +6546,8 @@ function BrowserCharsetReload() {
 }
 
 function UpdateCurrentCharset(target) {
-  let selectedCharset = CharsetMenu.foldCharset(gBrowser.selectedBrowser.characterSet);
+  let selectedCharset = CharsetMenu.foldCharset(gBrowser.selectedBrowser.characterSet,
+                                                gBrowser.selectedBrowser.charsetAutodetected);
   for (let menuItem of target.getElementsByTagName("menuitem")) {
     let isSelected = menuItem.getAttribute("charset") === selectedCharset;
     menuItem.setAttribute("checked", isSelected);
@@ -6649,8 +6567,11 @@ function promptRemoveExtension(addon) {
   let checkboxState = {value: false};
   let checkboxMessage = null;
 
-  // Enable abuse report checkbox in the remove extension dialog.
-  if (gHtmlAboutAddonsEnabled && gAddonAbuseReportEnabled) {
+  // Enable abuse report checkbox in the remove extension dialog,
+  // if enabled by the about:config prefs and the addon type
+  // is currently supported.
+  if (gHtmlAboutAddonsEnabled && gAddonAbuseReportEnabled &&
+      ["extension", "theme"].includes(addon.type)) {
     checkboxMessage = getFormattedString("webext.remove.abuseReportCheckbox.message", [
       document.getElementById("bundle_brand").getString("vendorShortName"),
     ]);
@@ -7611,27 +7532,11 @@ function BrowserOpenAddonsMgr(aView) {
 }
 
 function AddKeywordForSearchField() {
-  let mm = gBrowser.selectedBrowser.messageManager;
+  if (!gContextMenu) {
+    throw new Error("Context menu doesn't seem to be open.");
+  }
 
-  let onMessage = (message) => {
-    mm.removeMessageListener("ContextMenu:SearchFieldBookmarkData:Result", onMessage);
-
-    let bookmarkData = message.data;
-    let title = gNavigatorBundle.getFormattedString("addKeywordTitleAutoFill",
-                                                    [bookmarkData.title]);
-    PlacesUIUtils.showBookmarkDialog({ action: "add",
-                                       type: "bookmark",
-                                       uri: makeURI(bookmarkData.spec),
-                                       title,
-                                       keyword: "",
-                                       postData: bookmarkData.postData,
-                                       charSet: bookmarkData.charset,
-                                       hiddenRows: [ "location", "tags" ],
-                                     }, window);
-  };
-  mm.addMessageListener("ContextMenu:SearchFieldBookmarkData:Result", onMessage);
-
-  mm.sendAsyncMessage("ContextMenu:SearchFieldBookmarkData", {}, { target: gContextMenu.target });
+  gContextMenu.addKeywordForSearchField();
 }
 
 /**
@@ -7747,7 +7652,7 @@ function ReportFalseDeceptiveSite() {
         Services.prompt.alert(window,
                               bundle.GetStringFromName("errorReportFalseDeceptiveTitle"),
                               bundle.formatStringFromName("errorReportFalseDeceptiveMessage",
-                                                          [message.data.blockedInfo.provider], 1));
+                                                          [message.data.blockedInfo.provider]));
         }
     };
     mm.addMessageListener("DeceptiveBlockedDetails:Result", onMessage);
@@ -8498,7 +8403,7 @@ TabModalPromptBox.prototype = {
       let spacer = document.createXULElement("spacer");
       allowFocusRow.appendChild(spacer);
       let label = gTabBrowserBundle.formatStringFromName("tabs.allowTabFocusByPromptForSite",
-                                                      [hostForAllowFocusCheckbox], 1);
+                                                      [hostForAllowFocusCheckbox]);
       allowFocusCheckbox.setAttribute("label", label);
       allowFocusRow.appendChild(allowFocusCheckbox);
       newPrompt.ui.rows.append(allowFocusRow);

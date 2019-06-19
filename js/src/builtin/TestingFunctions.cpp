@@ -1215,6 +1215,81 @@ static bool GCState(JSContext* cx, unsigned argc, Value* vp) {
   return ReturnStringCopy(cx, args, state);
 }
 
+static bool CurrentGC(JSContext* cx, unsigned argc, Value* vp) {
+  CallArgs args = CallArgsFromVp(argc, vp);
+
+  if (args.length() != 0) {
+    RootedObject callee(cx, &args.callee());
+    ReportUsageErrorASCII(cx, callee, "Too many arguments");
+    return false;
+  }
+
+  RootedObject result(cx, JS_NewPlainObject(cx));
+  if (!result) {
+    return false;
+  }
+
+  js::gc::GCRuntime& gc = cx->runtime()->gc;
+  const char* state = StateName(gc.state());
+
+  RootedString str(cx, JS_NewStringCopyZ(cx, state));
+  if (!str) {
+    return false;
+  }
+  RootedValue val(cx, StringValue(str));
+  if (!JS_DefineProperty(cx, result, "incrementalState", val,
+                         JSPROP_ENUMERATE)) {
+    return false;
+  }
+
+  if (gc.state() == js::gc::State::Sweep) {
+    val = Int32Value(gc.getCurrentSweepGroupIndex());
+    if (!JS_DefineProperty(cx, result, "sweepGroup", val, JSPROP_ENUMERATE)) {
+      return false;
+    }
+  }
+
+  val = BooleanValue(gc.isShrinkingGC());
+  if (!JS_DefineProperty(cx, result, "isShrinking", val, JSPROP_ENUMERATE)) {
+    return false;
+  }
+
+  val = Int32Value(gc.gcNumber());
+  if (!JS_DefineProperty(cx, result, "number", val, JSPROP_ENUMERATE)) {
+    return false;
+  }
+
+  val = Int32Value(gc.minorGCCount());
+  if (!JS_DefineProperty(cx, result, "minorCount", val, JSPROP_ENUMERATE)) {
+    return false;
+  }
+
+  val = Int32Value(gc.majorGCCount());
+  if (!JS_DefineProperty(cx, result, "majorCount", val, JSPROP_ENUMERATE)) {
+    return false;
+  }
+
+  val = BooleanValue(gc.isFullGc());
+  if (!JS_DefineProperty(cx, result, "isFull", val, JSPROP_ENUMERATE)) {
+    return false;
+  }
+
+  val = BooleanValue(gc.isCompactingGc());
+  if (!JS_DefineProperty(cx, result, "isCompacting", val, JSPROP_ENUMERATE)) {
+    return false;
+  }
+
+#  ifdef DEBUG
+  val = Int32Value(gc.marker.queuePos);
+  if (!JS_DefineProperty(cx, result, "queuePos", val, JSPROP_ENUMERATE)) {
+    return false;
+  }
+#  endif
+
+  args.rval().setObject(*result);
+  return true;
+}
+
 static bool DeterministicGC(JSContext* cx, unsigned argc, Value* vp) {
   CallArgs args = CallArgsFromVp(argc, vp);
 
@@ -1833,6 +1908,7 @@ static bool SetupOOMFailure(JSContext* cx, bool failAlways, unsigned argc,
   }
 
   if (targetThread == js::THREAD_TYPE_NONE ||
+      targetThread == js::THREAD_TYPE_WORKER ||
       targetThread >= js::THREAD_TYPE_MAX) {
     JS_ReportErrorASCII(cx, "Invalid thread type specified");
     return false;
@@ -4310,10 +4386,9 @@ static void minorGC(JSContext* cx, JSGCStatus status, void* data) {
   }
 }
 
-// Process global, should really be runtime-local. Also, the final one of these
-// is currently leaked, since they are only deleted when changing.
-MajorGC* prevMajorGC = nullptr;
-MinorGC* prevMinorGC = nullptr;
+// Process global, should really be runtime-local.
+static MajorGC majorGCInfo;
+static MinorGC minorGCInfo;
 
 } /* namespace gcCallback */
 
@@ -4375,28 +4450,10 @@ static bool SetGCCallback(JSContext* cx, unsigned argc, Value* vp) {
     }
   }
 
-  if (gcCallback::prevMajorGC) {
-    JS_SetGCCallback(cx, nullptr, nullptr);
-    js_delete<gcCallback::MajorGC>(gcCallback::prevMajorGC);
-    gcCallback::prevMajorGC = nullptr;
-  }
-
-  if (gcCallback::prevMinorGC) {
-    JS_SetGCCallback(cx, nullptr, nullptr);
-    js_delete<gcCallback::MinorGC>(gcCallback::prevMinorGC);
-    gcCallback::prevMinorGC = nullptr;
-  }
-
   if (StringEqualsAscii(action, "minorGC")) {
-    auto info = js_new<gcCallback::MinorGC>();
-    if (!info) {
-      ReportOutOfMemory(cx);
-      return false;
-    }
-
-    info->phases = phases;
-    info->active = true;
-    JS_SetGCCallback(cx, gcCallback::minorGC, info);
+    gcCallback::minorGCInfo.phases = phases;
+    gcCallback::minorGCInfo.active = true;
+    JS_SetGCCallback(cx, gcCallback::minorGC, &gcCallback::minorGCInfo);
   } else if (StringEqualsAscii(action, "majorGC")) {
     if (!JS_GetProperty(cx, opts, "depth", &v)) {
       return false;
@@ -4417,15 +4474,9 @@ static bool SetGCCallback(JSContext* cx, unsigned argc, Value* vp) {
       return false;
     }
 
-    auto info = js_new<gcCallback::MajorGC>();
-    if (!info) {
-      ReportOutOfMemory(cx);
-      return false;
-    }
-
-    info->phases = phases;
-    info->depth = depth;
-    JS_SetGCCallback(cx, gcCallback::majorGC, info);
+    gcCallback::majorGCInfo.phases = phases;
+    gcCallback::majorGCInfo.depth = depth;
+    JS_SetGCCallback(cx, gcCallback::majorGC, &gcCallback::majorGCInfo);
   } else {
     JS_ReportErrorASCII(cx, "Unknown GC callback action");
     return false;
@@ -6013,6 +6064,11 @@ gc::ZealModeHelpText),
     JS_FN_HELP("gcstate", GCState, 0, 0,
 "gcstate()",
 "  Report the global GC state."),
+
+    JS_FN_HELP("currentgc", CurrentGC, 0, 0,
+"currentgc()",
+"  Report various information about the currently running incremental GC,\n"
+"  if one is running."),
 
     JS_FN_HELP("deterministicgc", DeterministicGC, 1, 0,
 "deterministicgc(true|false)",

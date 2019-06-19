@@ -89,7 +89,6 @@
 #include "mozilla/dom/SessionStoreListener.h"
 #include "mozilla/gfx/CrossProcessPaint.h"
 #include "mozilla/jsipc/CrossProcessObjectWrappers.h"
-#include "mozilla/layout/RenderFrame.h"
 #include "mozilla/ServoCSSParser.h"
 #include "mozilla/ServoStyleSet.h"
 #include "nsGenericHTMLFrameElement.h"
@@ -623,51 +622,20 @@ nsresult nsFrameLoader::ReallyStartLoadingInternal() {
     loadState->SetCsp(csp);
   }
 
-  nsCOMPtr<nsIURI> referrer;
-
   nsAutoString srcdoc;
   bool isSrcdoc =
       mOwnerContent->IsHTMLElement(nsGkAtoms::iframe) &&
       mOwnerContent->GetAttr(kNameSpaceID_None, nsGkAtoms::srcdoc, srcdoc);
 
   if (isSrcdoc) {
-    nsAutoString referrerStr;
-    mOwnerContent->OwnerDoc()->GetReferrer(referrerStr);
-    rv = NS_NewURI(getter_AddRefs(referrer), referrerStr);
-
     loadState->SetSrcdocData(srcdoc);
     nsCOMPtr<nsIURI> baseURI = mOwnerContent->GetBaseURI();
     loadState->SetBaseURI(baseURI);
-  } else {
-    rv = mOwnerContent->NodePrincipal()->GetURI(getter_AddRefs(referrer));
-    NS_ENSURE_SUCCESS(rv, rv);
   }
 
-  // Use referrer as long as it is not an NullPrincipalURI.
-  // We could add a method such as GetReferrerURI to principals to make this
-  // cleaner, but given that we need to start using Source Browsing Context for
-  // referrer (see Bug 960639) this may be wasted effort at this stage.
-  if (referrer) {
-    bool isNullPrincipalScheme;
-    rv = referrer->SchemeIs(NS_NULLPRINCIPAL_SCHEME, &isNullPrincipalScheme);
-    if (NS_SUCCEEDED(rv) && !isNullPrincipalScheme) {
-      // get referrer policy for this iframe:
-      // first load document wide policy, then
-      // load iframe referrer attribute if enabled in preferences
-      // per element referrer overrules document wide referrer if enabled
-      net::ReferrerPolicy referrerPolicy =
-          mOwnerContent->OwnerDoc()->GetReferrerPolicy();
-      HTMLIFrameElement* iframe = HTMLIFrameElement::FromNode(mOwnerContent);
-      if (iframe) {
-        net::ReferrerPolicy iframeReferrerPolicy =
-            iframe->GetReferrerPolicyAsEnum();
-        if (iframeReferrerPolicy != net::RP_Unset) {
-          referrerPolicy = iframeReferrerPolicy;
-        }
-      }
-      loadState->SetReferrerInfo(new ReferrerInfo(referrer, referrerPolicy));
-    }
-  }
+  nsCOMPtr<nsIReferrerInfo> referrerInfo = new ReferrerInfo();
+  referrerInfo->InitWithNode(mOwnerContent);
+  loadState->SetReferrerInfo(referrerInfo);
 
   // Default flags:
   int32_t flags = nsIWebNavigation::LOAD_FLAGS_NONE;
@@ -2713,7 +2681,7 @@ bool nsFrameLoader::TryRemoteBrowserInternal() {
   // The remoteType can be queried by asking the message manager instead.
   ownerElement->UnsetAttr(kNameSpaceID_None, nsGkAtoms::RemoteType, false);
 
-  // Now that browserParent is set, we can initialize the RenderFrame
+  // Now that browserParent is set, we can initialize graphics
   browserParent->InitRendering();
 
   MaybeUpdatePrimaryBrowserParent(eBrowserParentChanged);
@@ -2770,7 +2738,7 @@ bool nsFrameLoader::TryRemoteBrowser() {
   // Check if we should report a browser-crashed error because the browser
   // failed to start.
   if (XRE_IsParentProcess() && mOwnerContent && mOwnerContent->IsXULElement()) {
-    MaybeNotifyCrashed(nullptr);
+    MaybeNotifyCrashed(nullptr, nullptr);
   }
 
   return false;
@@ -2813,13 +2781,7 @@ BrowserBridgeChild* nsFrameLoader::GetBrowserBridgeChild() const {
 
 mozilla::layers::LayersId nsFrameLoader::GetLayersId() const {
   MOZ_ASSERT(mIsRemoteFrame);
-  if (auto* browserParent = GetBrowserParent()) {
-    return browserParent->GetRenderFrame()->GetLayersId();
-  }
-  if (auto* browserBridgeChild = GetBrowserBridgeChild()) {
-    return browserBridgeChild->GetLayersId();
-  }
-  return mozilla::layers::LayersId{};
+  return mRemoteBrowser->GetLayersId();
 }
 
 void nsFrameLoader::ActivateRemoteFrame(ErrorResult& aRv) {
@@ -2839,7 +2801,7 @@ void nsFrameLoader::DeactivateRemoteFrame(ErrorResult& aRv) {
     return;
   }
 
-  browserParent->Deactivate();
+  browserParent->Deactivate(false);
 }
 
 void nsFrameLoader::SendCrossProcessMouseEvent(const nsAString& aType, float aX,
@@ -3451,7 +3413,6 @@ nsresult nsFrameLoader::GetNewTabContext(MutableTabContext* aTabContext,
   bool isPrivate = parentContext->UsePrivateBrowsing();
   attrs.SyncAttributesWithPrivateBrowsing(isPrivate);
 
-  UIStateChangeType showAccelerators = UIStateChangeType_NoChange;
   UIStateChangeType showFocusRings = UIStateChangeType_NoChange;
   uint64_t chromeOuterWindowID = 0;
 
@@ -3459,8 +3420,6 @@ nsresult nsFrameLoader::GetNewTabContext(MutableTabContext* aTabContext,
   if (doc) {
     nsCOMPtr<nsPIWindowRoot> root = nsContentUtils::GetWindowRoot(doc);
     if (root) {
-      showAccelerators = root->ShowAccelerators() ? UIStateChangeType_Set
-                                                  : UIStateChangeType_Clear;
       showFocusRings = root->ShowFocusRings() ? UIStateChangeType_Set
                                               : UIStateChangeType_Clear;
 
@@ -3471,9 +3430,9 @@ nsresult nsFrameLoader::GetNewTabContext(MutableTabContext* aTabContext,
     }
   }
 
-  bool tabContextUpdated = aTabContext->SetTabContext(
-      OwnerIsMozBrowserFrame(), chromeOuterWindowID, showAccelerators,
-      showFocusRings, attrs, presentationURLStr);
+  bool tabContextUpdated =
+      aTabContext->SetTabContext(OwnerIsMozBrowserFrame(), chromeOuterWindowID,
+                                 showFocusRings, attrs, presentationURLStr);
   NS_ENSURE_STATE(tabContextUpdated);
 
   return NS_OK;
@@ -3532,11 +3491,15 @@ void nsFrameLoader::SkipBrowsingContextDetach() {
   docshell->SkipBrowsingContextDetach();
 }
 
-void nsFrameLoader::MaybeNotifyCrashed(mozilla::ipc::MessageChannel* aChannel) {
+void nsFrameLoader::MaybeNotifyCrashed(BrowsingContext* aBrowsingContext,
+                                       mozilla::ipc::MessageChannel* aChannel) {
   if (mTabProcessCrashFired) {
     return;
   }
-  mTabProcessCrashFired = true;
+
+  if (mBrowsingContext == aBrowsingContext) {
+    mTabProcessCrashFired = true;
+  }
 
   // Fire the crashed observer notification.
   nsCOMPtr<nsIObserverService> os = services::GetObserverService();
@@ -3568,9 +3531,9 @@ void nsFrameLoader::MaybeNotifyCrashed(mozilla::ipc::MessageChannel* aChannel) {
   FrameCrashedEventInit init;
   init.mBubbles = true;
   init.mCancelable = true;
-  if (mBrowsingContext) {
-    init.mBrowsingContextId = mBrowsingContext->Id();
-    init.mIsTopFrame = !mBrowsingContext->GetParent();
+  if (aBrowsingContext) {
+    init.mBrowsingContextId = aBrowsingContext->Id();
+    init.mIsTopFrame = !aBrowsingContext->GetParent();
   }
 
   RefPtr<FrameCrashedEvent> event = FrameCrashedEvent::Constructor(

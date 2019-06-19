@@ -335,7 +335,7 @@ const browsingContextTargetPrototype = {
    * Getter for the browsing context's current DOM window.
    */
   get window() {
-    return this.docShell.domWindow;
+    return this.docShell && this.docShell.domWindow;
   },
 
   get outerWindowID() {
@@ -1346,8 +1346,7 @@ const browsingContextTargetPrototype = {
     // will-navigate
     const threadActor = this.threadActor;
     if (threadActor.state == "paused") {
-      this.conn.send(
-        threadActor.unsafeSynchronize(Promise.resolve(threadActor.onResume())));
+      threadActor.unsafeSynchronize(Promise.resolve(threadActor.doResume()));
       threadActor.dbg.enabled = false;
     }
     threadActor.disableAllBreakpoints();

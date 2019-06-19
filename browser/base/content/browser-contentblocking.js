@@ -2,6 +2,9 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+ChromeUtils.defineModuleGetter(this, "ContentBlockingAllowList",
+                               "resource://gre/modules/ContentBlockingAllowList.jsm");
+
 var Fingerprinting = {
   PREF_ENABLED: "privacy.trackingprotection.fingerprinting.enabled",
   reportBreakageLabel: "fingerprinting",
@@ -816,6 +819,11 @@ var ContentBlocking = {
     return this.identityPopup = document.getElementById("identity-popup");
   },
 
+  get protectionsPopup() {
+    delete this.protectionsPopup;
+    return this.protectionsPopup = document.getElementById("protections-popup");
+  },
+
   strings: {
     get appMenuTitle() {
       delete this.appMenuTitle;
@@ -1082,12 +1090,20 @@ var ContentBlocking = {
   onLocationChange() {
     // Reset blocking and exception status so that we can send telemetry
     this.hadShieldState = false;
-    let baseURI = this._baseURIForChannelClassifier;
 
     // Don't deal with about:, file: etc.
-    if (!baseURI) {
+    if (!ContentBlockingAllowList.canHandle(gBrowser.selectedBrowser)) {
       return;
     }
+
+    // Check whether the user has added an exception for this site.
+    let hasException =
+      ContentBlockingAllowList.includes(gBrowser.selectedBrowser);
+
+    this.content.toggleAttribute("hasException", hasException);
+    this.protectionsPopup.toggleAttribute("hasException", hasException);
+    this.iconBox.toggleAttribute("hasException", hasException);
+
     // Add to telemetry per page load as a baseline measurement.
     this.fingerprintersHistogramAdd("pageLoad");
     this.cryptominersHistogramAdd("pageLoad");
@@ -1096,10 +1112,9 @@ var ContentBlocking = {
 
   onContentBlockingEvent(event, webProgress, isSimulated) {
     let previousState = gBrowser.securityUI.contentBlockingEvent;
-    let baseURI = this._baseURIForChannelClassifier;
 
     // Don't deal with about:, file: etc.
-    if (!baseURI) {
+    if (!ContentBlockingAllowList.canHandle(gBrowser.selectedBrowser)) {
       this.iconBox.removeAttribute("animate");
       this.iconBox.removeAttribute("active");
       this.iconBox.removeAttribute("hasException");
@@ -1122,12 +1137,9 @@ var ContentBlocking = {
       anyBlocking = anyBlocking || blocker.activated;
     }
 
-    let isBrowserPrivate = PrivateBrowsingUtils.isBrowserPrivate(gBrowser.selectedBrowser);
-
     // Check whether the user has added an exception for this site.
-    let type =  isBrowserPrivate ? "trackingprotection-pb" : "trackingprotection";
-    let hasException = Services.perms.testExactPermission(baseURI, type) ==
-      Services.perms.ALLOW_ACTION;
+    let hasException =
+      ContentBlockingAllowList.includes(gBrowser.selectedBrowser);
 
     // Reset the animation in case the user is switching tabs or if no blockers were detected
     // (this is most likely happening because the user navigated on to a different site). This
@@ -1139,6 +1151,7 @@ var ContentBlocking = {
     } else if (anyBlocking && !this.iconBox.hasAttribute("active")) {
       this.iconBox.setAttribute("animate", "true");
 
+      let isBrowserPrivate = PrivateBrowsingUtils.isBrowserPrivate(gBrowser.selectedBrowser);
       if (!isBrowserPrivate) {
         let introCount = Services.prefs.getIntPref(this.prefIntroCount);
         let installStamp = Services.prefs.getIntPref(
@@ -1157,9 +1170,11 @@ var ContentBlocking = {
     // occurs on the page.  Note that merely allowing the loading of content that
     // we could have blocked does not trigger the appearance of the shield.
     // This state will be overriden later if there's an exception set for this site.
-    this.content.toggleAttribute("detected", anyDetected);
-    this.content.toggleAttribute("blocking", anyBlocking);
-    this.content.toggleAttribute("hasException", hasException);
+    for (let elt of [this.content, this.protectionsPopup]) {
+      elt.toggleAttribute("detected", anyDetected);
+      elt.toggleAttribute("blocking", anyBlocking);
+      elt.toggleAttribute("hasException", hasException);
+    }
 
     this.iconBox.toggleAttribute("active", anyBlocking);
     this.iconBox.toggleAttribute("hasException", hasException);
@@ -1211,32 +1226,13 @@ var ContentBlocking = {
   },
 
   disableForCurrentPage() {
-    let baseURI = this._baseURIForChannelClassifier;
-
-    // Add the current host in the 'trackingprotection' consumer of
-    // the permission manager using a normalized URI. This effectively
-    // places this host on the tracking protection allowlist.
-    if (PrivateBrowsingUtils.isBrowserPrivate(gBrowser.selectedBrowser)) {
-      PrivateBrowsingUtils.addToTrackingAllowlist(baseURI);
-    } else {
-      Services.perms.add(baseURI,
-        "trackingprotection", Services.perms.ALLOW_ACTION);
-    }
+    ContentBlockingAllowList.add(gBrowser.selectedBrowser);
 
     this.hideIdentityPopupAndReload();
   },
 
   enableForCurrentPage() {
-    // Remove the current host from the 'trackingprotection' consumer
-    // of the permission manager. This effectively removes this host
-    // from the tracking protection allowlist.
-    let baseURI = this._baseURIForChannelClassifier;
-
-    if (PrivateBrowsingUtils.isBrowserPrivate(gBrowser.selectedBrowser)) {
-      PrivateBrowsingUtils.removeFromTrackingAllowlist(baseURI);
-    } else {
-      Services.perms.remove(baseURI, "trackingprotection");
-    }
+    ContentBlockingAllowList.remove(gBrowser.selectedBrowser);
 
     this.hideIdentityPopupAndReload();
   },

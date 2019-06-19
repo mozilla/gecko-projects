@@ -45,16 +45,6 @@ function appUpdater(options = {}) {
   this.updateDeck = document.getElementById("updateDeck");
   this.promiseAutoUpdateSetting = null;
 
-  // Hide the update deck when the update window is already open and it's not
-  // already applied, to avoid syncing issues between them. Applied updates
-  // don't have any information to sync between the windows as they both just
-  // show the "Restart to continue"-type button.
-  if (Services.wm.getMostRecentWindow("Update:Wizard") &&
-      !this.isReadyForRestart) {
-    this.updateDeck.hidden = true;
-    return;
-  }
-
   this.bundle = Services.strings.
                 createBundle("chrome://browser/locale/browser.properties");
 
@@ -202,7 +192,7 @@ appUpdater.prototype =
           let day = buildID.slice(6, 8);
           updateVersion += ` (${year}-${month}-${day})`;
         }
-        button.label = this.bundle.formatStringFromName("update.downloadAndInstallButton.label", [updateVersion], 1);
+        button.label = this.bundle.formatStringFromName("update.downloadAndInstallButton.label", [updateVersion]);
         button.accessKey = this.bundle.GetStringFromName("update.downloadAndInstallButton.accesskey");
       }
       this.updateDeck.selectedPanel = panel;
@@ -274,10 +264,10 @@ appUpdater.prototype =
     /**
      * See nsIUpdateService.idl
      */
-    onCheckComplete(aRequest, aUpdates, aUpdateCount) {
+    onCheckComplete(aRequest, aUpdates) {
       gAppUpdater.isChecking = false;
       gAppUpdater.update = gAppUpdater.aus.
-                           selectUpdate(aUpdates, aUpdates.length);
+                           selectUpdate(aUpdates);
       if (!gAppUpdater.update) {
         gAppUpdater.selectPanel("noUpdatesFound");
         return;

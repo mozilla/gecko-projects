@@ -3,12 +3,6 @@
 
 const {BookmarkValidator} = ChromeUtils.import("resource://services-sync/bookmark_validator.js");
 
-// Allow eval to avoid triggering the eval()-assertion through ajv-4.1.1.js
-Services.prefs.setBoolPref("security.allow_eval_with_system_principal", true);
-registerCleanupFunction(() => {
-  Services.prefs.clearUserPref("security.allow_eval_with_system_principal");
-});
-
 function run_test() {
   do_get_profile();
   run_next_test();
@@ -390,10 +384,10 @@ async function validationPing(server, client, duration) {
   let {problemData} = await validator.compareServerWithClient(server, client);
   let data = {
     // We fake duration and version just so that we can verify they"re passed through.
-    duration,
+    took: duration,
     version: validator.version,
-    recordCount: server.length,
-    problems: problemData,
+    checked: server.length,
+    problems: problemData.getSummary(true),
   };
   Svc.Obs.notify("weave:engine:validate:finish", data, "bookmarks");
   Svc.Obs.notify("weave:service:sync:finish");

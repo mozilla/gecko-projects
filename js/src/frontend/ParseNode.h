@@ -211,10 +211,13 @@ class BigIntBox;
  * The long comment after this enum block describes the kinds in detail.
  */
 enum class ParseNodeKind : uint16_t {
+  // These constants start at 1001, the better to catch
+  LastUnused = 1000,
 #define EMIT_ENUM(name, _type) name,
   FOR_EACH_PARSE_NODE_KIND(EMIT_ENUM)
 #undef EMIT_ENUM
-      Limit, /* domain size */
+      Limit,
+  Start = LastUnused + 1,
   BinOpFirst = ParseNodeKind::PipelineExpr,
   BinOpLast = ParseNodeKind::PowExpr,
   AssignmentStart = ParseNodeKind::AssignExpr,
@@ -603,6 +606,15 @@ static inline bool IsMethodDefinitionKind(FunctionSyntaxKind kind) {
          kind == FunctionSyntaxKind::Setter;
 }
 
+// To help diagnose sporadic crashes in the frontend, a few assertions are
+// enabled in early beta builds. (Most are not; those still use MOZ_ASSERT.)
+// See bug 1547561.
+#if defined(EARLY_BETA_OR_EARLIER)
+#  define JS_PARSE_NODE_ASSERT MOZ_RELEASE_ASSERT
+#else
+#  define JS_PARSE_NODE_ASSERT MOZ_ASSERT
+#endif
+
 class ParseNode {
   const ParseNodeKind pn_type; /* ParseNodeKind::PNK_* type */
 
@@ -622,7 +634,8 @@ class ParseNode {
         pn_rhs_anon_fun(false),
         pn_pos(0, 0),
         pn_next(nullptr) {
-    MOZ_ASSERT(kind < ParseNodeKind::Limit);
+    JS_PARSE_NODE_ASSERT(ParseNodeKind::Start <= kind);
+    JS_PARSE_NODE_ASSERT(kind < ParseNodeKind::Limit);
   }
 
   ParseNode(ParseNodeKind kind, const TokenPos& pos)
@@ -631,16 +644,22 @@ class ParseNode {
         pn_rhs_anon_fun(false),
         pn_pos(pos),
         pn_next(nullptr) {
-    MOZ_ASSERT(kind < ParseNodeKind::Limit);
+    JS_PARSE_NODE_ASSERT(ParseNodeKind::Start <= kind);
+    JS_PARSE_NODE_ASSERT(kind < ParseNodeKind::Limit);
   }
 
   ParseNodeKind getKind() const {
-    MOZ_ASSERT(pn_type < ParseNodeKind::Limit);
+    JS_PARSE_NODE_ASSERT(ParseNodeKind::Start <= pn_type);
+    JS_PARSE_NODE_ASSERT(pn_type < ParseNodeKind::Limit);
     return pn_type;
   }
   bool isKind(ParseNodeKind kind) const { return getKind() == kind; }
 
  protected:
+  size_t getKindAsIndex() const {
+    return size_t(getKind()) - size_t(ParseNodeKind::Start);
+  }
+
   // Used to implement test() on a few ParseNodes efficiently.
   // (This enum doesn't fully reflect the ParseNode class hierarchy,
   // so don't use it for anything else.)
@@ -654,11 +673,17 @@ class ParseNode {
     Other
   };
 
-  // typeCodeTable[size_t(pnk)] is the type code of a ParseNode of kind pnk.
+  // typeCodeTable[getKindAsIndex()] is the type code of a ParseNode of kind
+  // pnk.
   static const TypeCode typeCodeTable[];
 
+ private:
+#ifdef DEBUG
+  static const size_t sizeTable[];
+#endif
+
  public:
-  TypeCode typeCode() const { return typeCodeTable[size_t(getKind())]; }
+  TypeCode typeCode() const { return typeCodeTable[getKindAsIndex()]; }
 
   bool isBinaryOperation() const {
     ParseNodeKind kind = getKind();
@@ -739,6 +764,9 @@ class ParseNode {
   void dump();
   void dump(GenericPrinter& out);
   void dump(GenericPrinter& out, int indent);
+
+  // The size of this node, in bytes.
+  size_t size() const { return sizeTable[getKindAsIndex()]; }
 #endif
 };
 
@@ -1068,13 +1096,6 @@ class ListNode : public ParseNode {
   // Flag set by the emitter after emitting top-level function statements.
   static constexpr uint32_t emittedTopLevelFunctionDeclarationsBit = 0x08;
 
-  void checkConsistency() const
-#ifndef DEBUG
-  {
-  }
-#endif
-  ;
-
  public:
   ListNode(ParseNodeKind kind, const TokenPos& pos) : ParseNode(kind, pos) {
     makeEmpty();
@@ -1130,6 +1151,13 @@ class ListNode : public ParseNode {
   uint32_t count() const { return count_; }
 
   bool empty() const { return count() == 0; }
+
+  void checkConsistency() const
+#ifndef DEBUG
+  {
+  }
+#endif
+  ;
 
   MOZ_MUST_USE bool hasTopLevelFunctionDeclarations() const {
     MOZ_ASSERT(isKind(ParseNodeKind::StatementList));

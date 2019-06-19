@@ -13,6 +13,8 @@ ChromeUtils.defineModuleGetter(this, "Localization",
                                "resource://gre/modules/Localization.jsm");
 ChromeUtils.defineModuleGetter(this, "LoginHelper",
                                "resource://gre/modules/LoginHelper.jsm");
+ChromeUtils.defineModuleGetter(this, "MigrationUtils",
+                               "resource:///modules/MigrationUtils.jsm");
 ChromeUtils.defineModuleGetter(this, "Services",
                                "resource://gre/modules/Services.jsm");
 
@@ -35,7 +37,7 @@ const EXPECTED_ABOUTLOGINS_REMOTE_TYPE =
                                   : E10SUtils.DEFAULT_REMOTE_TYPE;
 
 const isValidLogin = login => {
-  return !(login.hostname || "").startsWith("chrome://");
+  return !(login.origin || "").startsWith("chrome://");
 };
 
 const convertSubjectToLogin = subject => {
@@ -50,9 +52,9 @@ const convertSubjectToLogin = subject => {
 const augmentVanillaLoginObject = login => {
   let title;
   try {
-    title = (new URL(login.hostname)).host;
+    title = (new URL(login.origin)).host;
   } catch (ex) {
-    title = login.hostname;
+    title = login.origin;
   }
   title = title.replace(/^http(s)?:\/\//, "").
                 replace(/^www\d*\./, "");
@@ -76,8 +78,15 @@ var AboutLoginsParent = {
     switch (message.name) {
       case "AboutLogins:CreateLogin": {
         let newLogin = message.data.login;
+        // Remove the path from the origin, if it was provided.
+        let origin = LoginHelper.getLoginOrigin(newLogin.origin);
+        if (!origin) {
+          Cu.reportError("AboutLogins:CreateLogin: Unable to get an origin from the login details.");
+          return;
+        }
+        newLogin.origin = origin;
         Object.assign(newLogin, {
-          formSubmitURL: "",
+          formActionOrigin: "",
           usernameField: "",
           passwordField: "",
         });
@@ -89,6 +98,19 @@ var AboutLoginsParent = {
         Services.logins.removeLogin(login);
         break;
       }
+      case "AboutLogins:Import": {
+        try {
+          MigrationUtils.showMigrationWizard(message.target.ownerGlobal,
+                                             [MigrationUtils.MIGRATION_ENTRYPOINT_PASSWORDS]);
+        } catch (ex) {
+          Cu.reportError(ex);
+        }
+        break;
+      }
+      case "AboutLogins:OpenPreferences": {
+        message.target.ownerGlobal.openPreferences("privacy-logins");
+        break;
+      }
       case "AboutLogins:OpenSite": {
         let guid = message.data.login.guid;
         let logins = LoginHelper.searchLoginsWithObject({guid});
@@ -97,7 +119,7 @@ var AboutLoginsParent = {
           return;
         }
 
-        message.target.ownerGlobal.openWebLinkIn(logins[0].hostname, "tab", {relatedToCurrent: true});
+        message.target.ownerGlobal.openWebLinkIn(logins[0].origin, "tab", {relatedToCurrent: true});
         break;
       }
       case "AboutLogins:Subscribe": {

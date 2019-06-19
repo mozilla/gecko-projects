@@ -62,8 +62,8 @@ class GPUParent final : public PGPUParent {
       Endpoint<PImageBridgeParent>&& aEndpoint);
   mozilla::ipc::IPCResult RecvNewContentVRManager(
       Endpoint<PVRManagerParent>&& aEndpoint);
-  mozilla::ipc::IPCResult RecvNewContentVideoDecoderManager(
-      Endpoint<PVideoDecoderManagerParent>&& aEndpoint);
+  mozilla::ipc::IPCResult RecvNewContentRemoteDecoderManager(
+      Endpoint<PRemoteDecoderManagerParent>&& aEndpoint);
   mozilla::ipc::IPCResult RecvGetDeviceStatus(GPUDeviceData* aOutStatus);
   mozilla::ipc::IPCResult RecvSimulateDeviceReset(GPUDeviceData* aOutStatus);
   mozilla::ipc::IPCResult RecvAddLayerTreeIdMapping(
@@ -76,6 +76,11 @@ class GPUParent final : public PGPUParent {
       const bool& minimizeMemoryUsage,
       const Maybe<ipc::FileDescriptor>& DMDFile);
   mozilla::ipc::IPCResult RecvShutdownVR();
+
+  mozilla::ipc::IPCResult RecvUpdatePerfStatsCollectionMask(
+      const uint64_t& aMask);
+  mozilla::ipc::IPCResult RecvCollectPerfStatsJSON(
+      CollectPerfStatsJSONResolver&& aResolver);
 
   void ActorDestroy(ActorDestroyReason aWhy) override;
 

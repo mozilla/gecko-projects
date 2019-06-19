@@ -244,6 +244,12 @@ class nsThread : public nsIThreadInternal,
   mozilla::TimeStamp mCurrentEventStart;
   mozilla::TimeStamp mNextIdleDeadline;
 
+#ifdef EARLY_BETA_OR_EARLIER
+  nsCString mNameForWakeupTelemetry;
+  mozilla::TimeStamp mLastWakeupCheckTime;
+  uint32_t mWakeupCount = 0;
+#endif
+
   RefPtr<mozilla::PerformanceCounter> mCurrentPerformanceCounter;
 
   bool mIsInLocalExecutionMode = false;
