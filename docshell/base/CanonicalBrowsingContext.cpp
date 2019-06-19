@@ -170,13 +170,13 @@ void CanonicalBrowsingContext::Traverse(
     nsCycleCollectionTraversalCallback& cb) {
   CanonicalBrowsingContext* tmp = this;
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mWindowGlobals, mCurrentWindowGlobal,
-                                    mEmbedderWindowGlobal);
+                                    mEmbedderWindowGlobal, mSessionHistory);
 }
 
 void CanonicalBrowsingContext::Unlink() {
   CanonicalBrowsingContext* tmp = this;
   NS_IMPL_CYCLE_COLLECTION_UNLINK(mWindowGlobals, mCurrentWindowGlobal,
-                                  mEmbedderWindowGlobal);
+                                  mEmbedderWindowGlobal, mSessionHistory);
 }
 
 void CanonicalBrowsingContext::NotifyStartDelayedAutoplayMedia() {

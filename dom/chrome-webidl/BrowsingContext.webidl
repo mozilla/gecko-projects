@@ -49,6 +49,8 @@ interface CanonicalBrowsingContext : BrowsingContext {
 
   void notifyStartDelayedAutoplayMedia();
   void notifyMediaMutedChanged(boolean muted);
+
+  readonly attribute nsISHistory? sessionHistory;
 };
 
 [Exposed=Window, ChromeOnly]

@@ -13,6 +13,7 @@
 #include "nsWrapperCache.h"
 #include "nsTHashtable.h"
 #include "nsHashKeys.h"
+#include "nsISHistory.h"
 
 class nsIDocShell;
 
@@ -57,6 +58,10 @@ class CanonicalBrowsingContext final : public BrowsingContext {
   }
   void SetEmbedderWindowGlobal(WindowGlobalParent* aGlobal);
 
+  nsISHistory* GetSessionHistory() { return mSessionHistory; }
+  void SetSessionHistory(nsISHistory* aSHistory) {
+    mSessionHistory = aSHistory;
+  }
   JSObject* WrapObject(JSContext* aCx,
                        JS::Handle<JSObject*> aGivenProto) override;
 
@@ -112,6 +117,8 @@ class CanonicalBrowsingContext final : public BrowsingContext {
   // Generation information for each content process which has interacted with
   // this CanonicalBrowsingContext, by ChildID.
   nsDataHashtable<nsUint64HashKey, FieldEpochs> mChildFieldEpochs;
+
+  nsCOMPtr<nsISHistory> mSessionHistory;
 };
 
 }  // namespace dom
