@@ -56,16 +56,25 @@ function handleSubmitRequest({request, response}) {
   response.write("{}");
 }
 
-function createPromptConfirmEx({remove = false, report = false} = {}) {
+function createPromptConfirmEx({
+  remove = false, report = false, expectCheckboxHidden = false,
+} = {}) {
   return (...args) => {
     const checkboxState = args.pop();
     const checkboxMessage = args.pop();
     is(checkboxState && checkboxState.value, false,
        "checkboxState should be initially false");
-    ok(checkboxMessage,
-       "Got a checkboxMessage in promptService.confirmEx call");
+    if (expectCheckboxHidden) {
+      ok(!checkboxMessage,
+         "Should not have a checkboxMessage in promptService.confirmEx call");
+    } else {
+      ok(checkboxMessage,
+         "Got a checkboxMessage in promptService.confirmEx call");
+    }
+
     // Report checkbox selected.
     checkboxState.value = report;
+
     // Remove accepted.
     return remove ? 0 : 1;
   };
@@ -978,9 +987,12 @@ add_task(async function test_trigger_abusereport_from_aboutaddons_menu() {
 
 add_task(async function test_trigger_abusereport_from_aboutaddons_remove() {
   const EXT_ID = "test-report-from-aboutaddons-remove@mochi.test";
-  const extension = await installTestExtension(EXT_ID);
 
-  await openAboutAddons();
+  // Test on a theme addon to cover the report checkbox included in the
+  // uninstall dialog also on a theme.
+  const extension = await installTestExtension(EXT_ID, "theme");
+
+  await openAboutAddons("theme");
   await gManagerWindow.htmlBrowserLoaded;
 
   const abuseReportFrameEl = getAbuseReportFrame();
@@ -991,10 +1003,10 @@ add_task(async function test_trigger_abusereport_from_aboutaddons_remove() {
 
   const addonCard = doc.querySelector(
     `addon-list addon-card[addon-id="${extension.id}"]`);
-  ok(addonCard, "Got the addon-card for the test extension");
+  ok(addonCard, "Got the addon-card for the test theme extension");
 
   const removeButton = addonCard.querySelector("[action=remove]");
-  ok(removeButton, "Got the report action for the test extension");
+  ok(removeButton, "Got the remove action for the test theme extension");
 
   const onceReportNew = BrowserTestUtils.waitForEvent(
     abuseReportFrameEl, "abuse-report:new");
@@ -1035,14 +1047,8 @@ add_task(async function test_trigger_abusereport_from_browserAction_remove() {
   const extension = await installTestExtension(EXT_ID, "extension", {
     browser_action: {},
   });
-
-  // Prepare the mocked prompt service.
-  const promptService = mockPromptService();
-  promptService.confirmEx = createPromptConfirmEx({remove: true, report: true});
-
-  await BrowserTestUtils.withNewTab("about:blank", async function() {
-    info(`Open browserAction context menu in toolbar context menu`);
-    let buttonId = `${makeWidgetId(EXT_ID)}-browser-action`;
+  const buttonId = `${makeWidgetId(EXT_ID)}-browser-action`;
+  async function reportFromContextMenuRemove() {
     const menu = document.getElementById("toolbar-context-menu");
     const node = document.getElementById(CSS.escape(buttonId));
     const shown = BrowserTestUtils.waitForEvent(menu, "popupshown");
@@ -1054,13 +1060,11 @@ add_task(async function test_trigger_abusereport_from_browserAction_remove() {
       ".customize-context-removeExtension");
     removeExtension.click();
 
-    // Wait about:addons to be loaded.
-    const browser = gBrowser.selectedBrowser;
-    await BrowserTestUtils.browserLoaded(browser);
-    is(browser.currentURI.spec, "about:addons",
-      "about:addons tab currently selected");
-    menu.hidePopup();
+    return menu;
+  }
 
+  async function assertAbuseReportPanelOpen() {
+    const browser = gBrowser.selectedBrowser;
     const abuseReportFrame = browser.contentDocument
       .querySelector("addon-abuse-report-xulframe");
 
@@ -1070,7 +1074,53 @@ add_task(async function test_trigger_abusereport_from_browserAction_remove() {
       "Abuse report frame has the expected addon id");
     is(abuseReportFrame.report.reportEntryPoint, "uninstall",
       "Abuse report frame has the expected reportEntryPoint");
-  });
+
+    const panelEl = await abuseReportFrame.promiseAbuseReport;
+    const onceCancelled = BrowserTestUtils.waitForEvent(
+      abuseReportFrame, "abuse-report:cancel");
+    panelEl.dispatchEvent(new CustomEvent("abuse-report:cancel"));
+    await onceCancelled;
+  }
+
+  // Prepare the mocked prompt service.
+  const promptService = mockPromptService();
+  promptService.confirmEx = createPromptConfirmEx({remove: true, report: true});
+
+  await BrowserTestUtils.withNewTab("about:blank", async function() {
+    info(`Open browserAction context menu in toolbar context menu`);
+
+    let menu = await reportFromContextMenuRemove();
+
+    // Wait about:addons to be loaded.
+    let browser = gBrowser.selectedBrowser;
+    await BrowserTestUtils.browserLoaded(browser);
+    is(browser.currentURI.spec, "about:addons",
+      "about:addons tab currently selected");
+    menu.hidePopup();
+
+    await assertAbuseReportPanelOpen();
+
+    const addon = await AddonManager.getAddonByID(EXT_ID);
+    await addon.cancelUninstall();
+
+    // Reload the tab to verify Bug 1559124 didn't regressed.
+    browser.contentWindow.location.reload();
+    await BrowserTestUtils.browserLoaded(browser);
+    is(browser.currentURI.spec, "about:addons",
+      "about:addons tab currently selected");
+    const abuseReportFrame = browser.contentDocument
+      .querySelector("addon-abuse-report-xulframe");
+
+    const onceReportFrameShown = BrowserTestUtils.waitForEvent(
+      abuseReportFrame, "abuse-report:frame-shown");
+    menu = await reportFromContextMenuRemove();
+    await onceReportFrameShown;
+
+    await assertAbuseReportPanelOpen();
+
+    menu.hidePopup();
+    await addon.cancelUninstall();
+   });
 
   await extension.unload();
 });
@@ -1148,4 +1198,60 @@ add_task(async function test_frame_hidden_on_report_unsupported_addontype() {
   is(el.hidden, true, `report frame hidden on automatically cancelled report`);
 
   await closeAboutAddons();
+});
+
+add_task(async function test_no_report_checkbox_for_unsupported_addon_types() {
+  async function test_report_checkbox_hidden(addon) {
+    await openAboutAddons(addon.type);
+    await gManagerWindow.htmlBrowserLoaded;
+
+    const abuseReportFrameEl = getAbuseReportFrame();
+    ok(abuseReportFrameEl.hidden,
+       "Abuse Report frame should be hidden");
+
+    const {contentDocument: doc} = gManagerWindow.getHtmlBrowser();
+
+    const addonCard = doc.querySelector(
+      `addon-list addon-card[addon-id="${addon.id}"]`);
+    ok(addonCard, "Got the addon-card for the test extension");
+
+    const removeButton = addonCard.querySelector("[action=remove]");
+    ok(removeButton, "Got the remove action for the test extension");
+
+    // Prepare the mocked prompt service.
+    const promptService = mockPromptService();
+    promptService.confirmEx = createPromptConfirmEx({
+      remove: true, report: false, expectCheckboxHidden: true,
+    });
+
+    info("Click the report action and wait for the addon to be removed");
+    const promiseCardRemoved = BrowserTestUtils.waitForEvent(
+      addonCard.closest("addon-list"), "remove");
+    removeButton.click();
+    await promiseCardRemoved;
+
+    ok(abuseReportFrameEl.hidden,
+      "Abuse Report frame should still be hidden");
+
+    await closeAboutAddons();
+  }
+
+  const reportNotSupportedAddons = [{
+    id: "fake-langpack-to-remove@mochi.test",
+    name: "This is a fake langpack",
+    version: "1.1",
+    type: "locale",
+  }, {
+    id: "fake-dictionary-to-remove@mochi.test",
+    name: "This is a fake dictionary",
+    version: "1.1",
+    type: "dictionary",
+  }];
+
+  gProvider.createAddons(reportNotSupportedAddons);
+
+  for (const {id} of reportNotSupportedAddons) {
+    const addon = await AddonManager.getAddonByID(id);
+    await test_report_checkbox_hidden(addon);
+  }
 });

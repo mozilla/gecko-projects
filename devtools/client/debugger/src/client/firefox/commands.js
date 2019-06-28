@@ -35,7 +35,10 @@ import type {
   SourcesPacket,
 } from "./types";
 
-import type { EventListenerCategoryList } from "../../actions/types";
+import type {
+  EventListenerCategoryList,
+  EventListenerActiveList,
+} from "../../actions/types";
 
 let workerClients: Object;
 let threadClient: ThreadClient;
@@ -43,6 +46,7 @@ let tabTarget: TabTarget;
 let debuggerClient: DebuggerClient;
 let sourceActors: { [ActorId]: SourceId };
 let breakpoints: { [string]: Object };
+let eventBreakpoints: ?EventListenerActiveList;
 let supportsWasm: boolean;
 
 let shouldWaitForWorkers = false;
@@ -363,6 +367,8 @@ function interrupt(thread: string): Promise<*> {
 }
 
 async function setEventListenerBreakpoints(ids: string[]) {
+  eventBreakpoints = ids;
+
   await threadClient.setActiveEventBreakpoints(ids);
   await forEachWorkerThread(thread => thread.setActiveEventBreakpoints(ids));
 }
@@ -371,8 +377,23 @@ async function setEventListenerBreakpoints(ids: string[]) {
 async function getEventListenerBreakpointTypes(): Promise<
   EventListenerCategoryList
 > {
-  const { value } = await threadClient.getAvailableEventBreakpoints();
-  return value;
+  let categories;
+  try {
+    categories = await threadClient.getAvailableEventBreakpoints();
+
+    if (!Array.isArray(categories)) {
+      // When connecting to older browser that had our placeholder
+      // implementation of the 'getAvailableEventBreakpoints' endpoint, we
+      // actually get back an object with a 'value' property containing
+      // the categories. Since that endpoint wasn't actually backed with a
+      // functional implementation, we just bail here instead of storing the
+      // 'value' property into the categories.
+      categories = null;
+    }
+  } catch (err) {
+    // Event bps aren't supported on this firefox version.
+  }
+  return categories || [];
 }
 
 function pauseGrip(thread: string, func: Function): ObjectClient {
@@ -406,6 +427,7 @@ async function fetchWorkers(): Promise<Worker[]> {
   if (features.windowlessWorkers) {
     const options = {
       breakpoints,
+      eventBreakpoints,
       observeAsmJS: true,
     };
 

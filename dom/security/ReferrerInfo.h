@@ -27,6 +27,7 @@ class nsIURI;
 class nsIChannel;
 class nsILoadInfo;
 class nsINode;
+class nsIPrincipal;
 
 namespace mozilla {
 namespace net {
@@ -73,6 +74,16 @@ class ReferrerInfo : public nsIReferrerInfo {
   already_AddRefed<nsIReferrerInfo> CloneWithNewOriginalReferrer(
       nsIURI* aOriginalReferrer) const;
 
+  /*
+   * Implements step 3.1 and 3.3 of the Determine request's Referrer algorithm
+   * from the Referrer Policy specification.
+   *
+   * https://w3c.github.io/webappsec/specs/referrer-policy/#determine-requests-referrer
+   */
+
+  static already_AddRefed<nsIReferrerInfo> CreateForFetch(
+      nsIPrincipal* aPrincipal, Document* aDoc);
+
   /**
    * Check whether the given referrer's scheme is allowed to be computed and
    * sent. The whitelist schemes are: http, https, ftp.
@@ -91,6 +102,28 @@ class ReferrerInfo : public nsIReferrerInfo {
    */
   static bool HideOnionReferrerSource();
 
+  /*
+   * Check whether referrer is allowed to send in secure to insecure scenario.
+   */
+  static nsresult HandleSecureToInsecureReferral(nsIURI* aOriginalURI,
+                                                 nsIURI* aURI, uint32_t aPolicy,
+                                                 bool& aAllowed);
+
+  /**
+   * Returns true if the given channel is cross-origin request
+   *
+   * Computing whether the request is cross-origin may be expensive, so please
+   * do that in cases where we're going to use this information later on.
+   */
+  static bool IsCrossOriginRequest(nsIHttpChannel* aChannel);
+
+  /**
+   * Returns true if the given channel is suppressed by Referrer-Policy header
+   * and should set "null" to Origin header.
+   */
+  static bool ShouldSetNullOriginHeader(net::HttpBaseChannel* aChannel,
+                                        nsIURI* aOriginURI);
+
   /**
    * Return default referrer policy which is controlled by user
    * prefs:
@@ -105,7 +138,7 @@ class ReferrerInfo : public nsIReferrerInfo {
                                            nsIURI* aURI = nullptr,
                                            bool privateBrowsing = false);
 
-  NS_DECL_ISUPPORTS
+  NS_DECL_THREADSAFE_ISUPPORTS
   NS_DECL_NSIREFERRERINFO
   NS_DECL_NSISERIALIZABLE
 
@@ -168,19 +201,6 @@ class ReferrerInfo : public nsIReferrerInfo {
    * Return true if node has a rel="noreferrer" attribute.
    */
   bool HasRelNoReferrer(nsINode* aNode) const;
-
-  /**
-   * Returns true if the given channel is cross-origin request
-   *
-   * Computing whether the request is cross-origin may be expensive, so please
-   * do that in cases where we're going to use this information later on.
-   */
-  bool IsCrossOriginRequest(nsIHttpChannel* aChannel) const;
-
-  /*
-   * Check whether referrer is allowed to send in secure to insecure scenario.
-   */
-  nsresult HandleSecureToInsecureReferral(nsIURI* aURI, bool& aAllowed) const;
 
   /*
    * Handle user controlled pref network.http.referer.XOriginPolicy

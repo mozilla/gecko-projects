@@ -23,6 +23,7 @@
 #include "mozilla/Likely.h"
 #include "mozilla/Logging.h"
 #include "mozilla/MouseEvents.h"
+#include "mozilla/PerfStats.h"
 #include "mozilla/PresShellInlines.h"
 #include "mozilla/Sprintf.h"
 #include "mozilla/StaticPrefs.h"
@@ -3389,9 +3390,7 @@ static void ScrollToShowRect(PresShell* aPresShell,
   // a current smooth scroll operation.
   if (needToScroll) {
     ScrollMode scrollMode = ScrollMode::Instant;
-    bool autoBehaviorIsSmooth =
-        (aFrameAsScrollable->GetScrollStyles().mScrollBehavior ==
-         NS_STYLE_SCROLL_BEHAVIOR_SMOOTH);
+    bool autoBehaviorIsSmooth = aFrameAsScrollable->IsSmoothScroll();
     bool smoothScroll = (aScrollFlags & ScrollFlags::ScrollSmooth) ||
                         ((aScrollFlags & ScrollFlags::ScrollSmoothAuto) &&
                          autoBehaviorIsSmooth);
@@ -4179,6 +4178,7 @@ void PresShell::DoFlushPendingNotifications(mozilla::ChangesToFlush aFlush) {
       AutoProfilerStyleMarker tracingStyleFlush(std::move(mStyleCause),
                                                 docShellId, docShellHistoryId);
 #endif
+      PerfStats::AutoMetricRecording<PerfStats::Metric::Styling> autoRecording;
 
       mPresContext->RestyleManager()->ProcessPendingRestyles();
     }
@@ -4205,6 +4205,7 @@ void PresShell::DoFlushPendingNotifications(mozilla::ChangesToFlush aFlush) {
       AutoProfilerStyleMarker tracingStyleFlush(std::move(mStyleCause),
                                                 docShellId, docShellHistoryId);
 #endif
+      PerfStats::AutoMetricRecording<PerfStats::Metric::Styling> autoRecording;
 
       mPresContext->RestyleManager()->ProcessPendingRestyles();
       // Clear mNeedStyleFlush here agagin to make this flag work properly for
@@ -4461,6 +4462,12 @@ nsresult PresShell::RenderDocument(const nsRect& aRect,
                                    gfxContext* aThebesContext) {
   NS_ENSURE_TRUE(!(aFlags & RenderDocumentFlags::IsUntrusted),
                  NS_ERROR_NOT_IMPLEMENTED);
+
+  nsRootPresContext* rootPresContext = mPresContext->GetRootPresContext();
+  if (rootPresContext) {
+    rootPresContext->FlushWillPaintObservers();
+    if (mIsDestroying) return NS_OK;
+  }
 
   nsAutoScriptBlocker blockScripts;
 
@@ -5520,11 +5527,6 @@ void PresShell::ProcessSynthMouseMoveEvent(bool aFromScroll) {
     event.mLayersId = bbc->GetLayersId();
     bbc->SendDispatchSynthesizedMouseEvent(event);
   } else if (RefPtr<PresShell> presShell = pointVM->GetPresShell()) {
-    // Otherwise we're targetting regular (non-OOP iframe) content in the
-    // current process. This field probably won't even be read, but we
-    // can fill it in with a sane value.
-    event.mLayersId = mMouseEventTargetGuid.mLayersId;
-
     // Since this gets run in a refresh tick there isn't an InputAPZContext on
     // the stack from the nsBaseWidget. We need to simulate one with at least
     // the correct target guid, so that the correct callback transform gets
@@ -6010,7 +6012,7 @@ void PresShell::Paint(nsView* aViewToPaint, const nsRegion& aDirtyRegion,
     return;
   }
 
-  if (StaticPrefs::APZKeyboardEnabled()) {
+  if (StaticPrefs::apz_keyboard_enabled()) {
     // Update the focus target for async keyboard scrolling. This will be
     // forwarded to APZ by nsDisplayList::PaintRoot. We need to to do this
     // before we enter the paint phase because dispatching eVoid events can
@@ -8831,6 +8833,17 @@ void PresShell::WillPaint() {
     return;
   }
 
+  nsRootPresContext* rootPresContext = mPresContext->GetRootPresContext();
+  if (!rootPresContext) {
+    // In some edge cases, such as when we don't have a root frame yet,
+    // we can't find the root prescontext. There's nothing to do in that
+    // case.
+    return;
+  }
+
+  rootPresContext->FlushWillPaintObservers();
+  if (mIsDestroying) return;
+
   // Process reflows, if we have them, to reduce flicker due to invalidates and
   // reflow being interspersed.  Note that we _do_ allow this to be
   // interruptible; if we can't do all the reflows it's better to flicker a bit
@@ -9153,6 +9166,7 @@ bool PresShell::DoReflow(nsIFrame* target, bool aInterruptible,
       "Reflow", LAYOUT_Reflow,
       uri ? uri->GetSpecOrDefault() : NS_LITERAL_CSTRING("N/A"));
 #endif
+  PerfStats::AutoMetricRecording<PerfStats::Metric::Reflowing> autoRecording;
 
   gfxTextPerfMetrics* tp = mPresContext->GetTextPerfMetrics();
   TimeStamp timeStart;

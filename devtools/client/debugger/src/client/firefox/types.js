@@ -96,6 +96,7 @@ export type SourcePayload = {
   sourceMapURL: URL | null,
   introductionUrl: URL | null,
   introductionType: string | null,
+  extensionName: string | null,
 };
 
 /**
@@ -136,11 +137,6 @@ export type PausedPacket = {
     type: string,
     onNext?: Function,
   },
-};
-
-export type ResumedPacket = {
-  from: ActorId,
-  type: string,
 };
 
 /**
@@ -187,7 +183,7 @@ export type TabPayload = {
  */
 export type Actions = {
   paused: Pause => void,
-  resumed: ResumedPacket => void,
+  resumed: ActorId => void,
   newQueuedSources: (QueuedSourceData[]) => void,
   fetchEventListeners: () => void,
   updateWorkers: () => void,
@@ -369,12 +365,11 @@ export type ThreadClient = {
   getLastPausePacket: () => ?PausedPacket,
   _parent: TabClient,
   actor: ActorId,
+  actorID: ActorId,
   request: (payload: Object) => Promise<*>,
   url: string,
   setActiveEventBreakpoints: (string[]) => void,
-  getAvailableEventBreakpoints: () => Promise<{|
-    value: EventListenerCategoryList,
-  |}>,
+  getAvailableEventBreakpoints: () => Promise<EventListenerCategoryList>,
   skipBreakpoints: boolean => Promise<{| skip: boolean |}>,
 };
 

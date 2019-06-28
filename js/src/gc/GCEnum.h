@@ -104,7 +104,29 @@ enum class ZealMode {
   _(WeakMapObject)                         \
   _(ShapeKids)                             \
   _(ShapeCache)                            \
-  _(ModuleBindingMap)
+  _(ModuleBindingMap)                      \
+  _(BaselineScript)                        \
+  _(IonScript)                             \
+  _(ArgumentsData)                         \
+  _(RareArgumentsData)                     \
+  _(RegExpStatics)                         \
+  _(RegExpSharedBytecode)                  \
+  _(TypedArrayElements)                    \
+  _(TypeDescrTraceList)                    \
+  _(NativeIterator)                        \
+  _(JitScript)                             \
+  _(ObjectGroupAddendum)                   \
+  _(ScriptDebugScript)                     \
+  _(BreakpointSite)                        \
+  _(ForOfPIC)                              \
+  _(ForOfPICStub)                          \
+  _(WasmInstanceExports)                   \
+  _(WasmInstanceScopes)                    \
+  _(WasmInstanceGlobals)                   \
+  _(WasmInstanceInstance)                  \
+  _(WasmMemoryObservers)                   \
+  _(WasmGlobalCell)                        \
+  _(WasmResolveResponseClosure)
 
 #define JS_FOR_EACH_MEMORY_USE(_)  \
   JS_FOR_EACH_PUBLIC_MEMORY_USE(_) \

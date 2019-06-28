@@ -516,10 +516,8 @@ bool gfxWindowsPlatform::HandleDeviceReset() {
 BackendPrefsData gfxWindowsPlatform::GetBackendPrefs() const {
   BackendPrefsData data;
 
-  data.mCanvasBitmask =
-      BackendTypeBit(BackendType::CAIRO) | BackendTypeBit(BackendType::SKIA);
-  data.mContentBitmask =
-      BackendTypeBit(BackendType::CAIRO) | BackendTypeBit(BackendType::SKIA);
+  data.mCanvasBitmask = BackendTypeBit(BackendType::SKIA);
+  data.mContentBitmask = BackendTypeBit(BackendType::SKIA);
   data.mCanvasDefault = BackendType::SKIA;
   data.mContentDefault = BackendType::SKIA;
 
@@ -1356,7 +1354,7 @@ void gfxWindowsPlatform::InitializeD3D11Config() {
       d3d11.Disable(FeatureStatus::Blacklisted, "Blacklisted, see bug 1351349",
                     NS_LITERAL_CSTRING("FEATURE_FAILURE_BUG_1351349"));
 #else
-      StaticPrefs::SetCompositorClearState(true);
+      Preferences::SetBool("gfx.compositor.clearstate", true);
 #endif
     }
   }
@@ -1545,8 +1543,8 @@ void gfxWindowsPlatform::InitializeD2DConfig() {
     return;
   }
 
-  d2d1.SetDefaultFromPref(StaticPrefs::GetDirect2DDisabledPrefName(), false,
-                          StaticPrefs::GetDirect2DDisabledPrefDefault());
+  d2d1.SetDefaultFromPref(StaticPrefs::Getgfx_direct2d_disabledPrefName(), false,
+                          StaticPrefs::Getgfx_direct2d_disabledPrefDefault());
 
   nsCString message;
   nsCString failureId;
@@ -1555,7 +1553,7 @@ void gfxWindowsPlatform::InitializeD2DConfig() {
     d2d1.Disable(FeatureStatus::Blacklisted, message.get(), failureId);
   }
 
-  if (!d2d1.IsEnabled() && StaticPrefs::Direct2DForceEnabled()) {
+  if (!d2d1.IsEnabled() && StaticPrefs::gfx_direct2d_force_enabled()) {
     d2d1.UserForceEnable("Force-enabled via user-preference");
   }
 }

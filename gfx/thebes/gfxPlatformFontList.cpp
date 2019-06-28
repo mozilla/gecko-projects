@@ -39,7 +39,6 @@
 #include "mozilla/Unused.h"
 
 #include "base/eintr_wrapper.h"
-#include "base/file_util.h"
 
 #include <locale.h>
 
@@ -419,7 +418,7 @@ nsresult gfxPlatformFontList::InitFontList() {
 
   // Try to initialize the cross-process shared font list if enabled by prefs,
   // but not if we're running in Safe Mode.
-  if (StaticPrefs::SharedFontList() && !gfxPlatform::InSafeMode()) {
+  if (StaticPrefs::gfx_e10s_font_list_shared() && !gfxPlatform::InSafeMode()) {
     for (auto i = mFontEntries.Iter(); !i.Done(); i.Next()) {
       i.Data()->mShmemCharacterMap = nullptr;
       i.Data()->mShmemFace = nullptr;

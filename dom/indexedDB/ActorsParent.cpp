@@ -6594,6 +6594,12 @@ class FactoryOp
   bool HasBlockedDatabases() const { return !mMaybeBlockedDatabases.IsEmpty(); }
 #endif
 
+  const nsCString& Origin() const {
+    AssertIsOnOwningThread();
+
+    return mOrigin;
+  }
+
   bool DatabaseFilePathIsKnown() const {
     AssertIsOnOwningThread();
 
@@ -6608,8 +6614,6 @@ class FactoryOp
   }
 
   void StringifyPersistenceType(nsCString& aResult) const;
-
-  void GetSanitizedOrigin(nsCString& aResult) const;
 
   void StringifyState(nsCString& aResult) const;
 
@@ -8964,23 +8968,6 @@ nsresult RemoveDatabaseFilesAndDirectory(nsIFile* aBaseDirectory,
   return NS_OK;
 }
 
-void SanitizeString(nsACString& aOrigin) {
-  char* iter = aOrigin.BeginWriting();
-  char* end = aOrigin.EndWriting();
-
-  while (iter != end) {
-    char c = *iter;
-
-    if (IsAsciiAlpha(c)) {
-      *iter = 'a';
-    } else if (IsAsciiDigit(c)) {
-      *iter = 'D';
-    }
-
-    ++iter;
-  }
-}
-
 /*******************************************************************************
  * Globals
  ******************************************************************************/
@@ -11183,6 +11170,8 @@ bool ConnectionPool::ScheduleTransaction(TransactionInfo* aTransactionInfo,
         nsresult rv = NS_NewNamedThread(runnable->GetThreadName(),
                                         getter_AddRefs(newThread), runnable);
         if (NS_SUCCEEDED(rv)) {
+          newThread->SetNameForWakeupTelemetry(
+              NS_LITERAL_CSTRING("IndexedDB (all)"));
           MOZ_ASSERT(newThread);
 
           IDB_DEBUG_LOG(("ConnectionPool created thread %" PRIu32,
@@ -16353,8 +16342,8 @@ void QuotaClient::ShutdownTimedOut() {
       nsCString persistenceType;
       factoryOp->StringifyPersistenceType(persistenceType);
 
-      nsCString origin;
-      factoryOp->GetSanitizedOrigin(origin);
+      nsCString origin(factoryOp->Origin());
+      SanitizeOrigin(origin);
 
       nsCString state;
       factoryOp->StringifyState(state);
@@ -19158,25 +19147,6 @@ void FactoryOp::StringifyPersistenceType(nsCString& aResult) const {
   PersistenceType persistenceType = mCommonParams.metadata().persistenceType();
 
   PersistenceTypeToText(persistenceType, aResult);
-}
-
-void FactoryOp::GetSanitizedOrigin(nsCString& aResult) const {
-  AssertIsOnOwningThread();
-
-  int32_t colonPos = mOrigin.FindChar(':');
-  if (colonPos >= 0) {
-    const nsACString& prefix = Substring(mOrigin, 0, colonPos);
-
-    nsCString normSuffix(Substring(mOrigin, colonPos));
-    SanitizeString(normSuffix);
-
-    aResult = prefix + normSuffix;
-  } else {
-    nsCString origin(mOrigin);
-    SanitizeString(origin);
-
-    aResult = origin;
-  }
 }
 
 void FactoryOp::StringifyState(nsCString& aResult) const {

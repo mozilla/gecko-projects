@@ -175,6 +175,7 @@ nsFrameLoader::nsFrameLoader(Element* aOwner, BrowsingContext* aBrowsingContext,
       mDetachedSubdocFrame(nullptr),
       mPendingSwitchID(0),
       mChildID(0),
+      mRemoteType(VoidString()),
       mDepthTooGreat(false),
       mIsTopLevelContent(false),
       mDestroyCalled(false),
@@ -191,6 +192,11 @@ nsFrameLoader::nsFrameLoader(Element* aOwner, BrowsingContext* aBrowsingContext,
   mIsRemoteFrame = ShouldUseRemoteProcess();
   MOZ_ASSERT(!mIsRemoteFrame || !mBrowsingContext->HasOpener(),
              "Cannot pass aOpener for a remote frame!");
+
+  if (mIsRemoteFrame &&
+      !aOwner->GetAttr(kNameSpaceID_None, nsGkAtoms::RemoteType, mRemoteType)) {
+    mRemoteType.AssignLiteral(DEFAULT_REMOTE_TYPE);
+  }
 }
 
 nsFrameLoader::nsFrameLoader(Element* aOwner, BrowsingContext* aBrowsingContext,
@@ -200,6 +206,7 @@ nsFrameLoader::nsFrameLoader(Element* aOwner, BrowsingContext* aBrowsingContext,
       mDetachedSubdocFrame(nullptr),
       mPendingSwitchID(0),
       mChildID(0),
+      mRemoteType(VoidString()),
       mDepthTooGreat(false),
       mIsTopLevelContent(false),
       mDestroyCalled(false),
@@ -216,6 +223,7 @@ nsFrameLoader::nsFrameLoader(Element* aOwner, BrowsingContext* aBrowsingContext,
   if (aOptions.mRemoteType.WasPassed() &&
       (!aOptions.mRemoteType.Value().IsVoid())) {
     mIsRemoteFrame = true;
+    mRemoteType = aOptions.mRemoteType.Value();
   }
 }
 
@@ -2661,14 +2669,13 @@ bool nsFrameLoader::TryRemoteBrowserInternal() {
   if (XRE_IsContentProcess()) {
     mBrowsingContext->SetEmbedderElement(mOwnerContent);
 
-    mRemoteBrowser = ContentChild::CreateBrowser(
-        this, context, NS_LITERAL_STRING(DEFAULT_REMOTE_TYPE),
-        mBrowsingContext);
+    mRemoteBrowser = ContentChild::CreateBrowser(this, context, mRemoteType,
+                                                 mBrowsingContext);
     return !!mRemoteBrowser;
   }
 
   mRemoteBrowser = ContentParent::CreateBrowser(
-      context, ownerElement, mBrowsingContext, openerContentParent,
+      context, ownerElement, mRemoteType, mBrowsingContext, openerContentParent,
       sameTabGroupAs, nextRemoteTabId);
   if (!mRemoteBrowser) {
     return false;
@@ -2738,7 +2745,7 @@ bool nsFrameLoader::TryRemoteBrowser() {
   // Check if we should report a browser-crashed error because the browser
   // failed to start.
   if (XRE_IsParentProcess() && mOwnerContent && mOwnerContent->IsXULElement()) {
-    MaybeNotifyCrashed(nullptr);
+    MaybeNotifyCrashed(nullptr, nullptr);
   }
 
   return false;
@@ -2801,7 +2808,7 @@ void nsFrameLoader::DeactivateRemoteFrame(ErrorResult& aRv) {
     return;
   }
 
-  browserParent->Deactivate();
+  browserParent->Deactivate(false);
 }
 
 void nsFrameLoader::SendCrossProcessMouseEvent(const nsAString& aType, float aX,
@@ -3430,9 +3437,9 @@ nsresult nsFrameLoader::GetNewTabContext(MutableTabContext* aTabContext,
     }
   }
 
-  bool tabContextUpdated = aTabContext->SetTabContext(
-      OwnerIsMozBrowserFrame(), chromeOuterWindowID, showFocusRings, attrs,
-      presentationURLStr);
+  bool tabContextUpdated =
+      aTabContext->SetTabContext(OwnerIsMozBrowserFrame(), chromeOuterWindowID,
+                                 showFocusRings, attrs, presentationURLStr);
   NS_ENSURE_STATE(tabContextUpdated);
 
   return NS_OK;
@@ -3491,11 +3498,15 @@ void nsFrameLoader::SkipBrowsingContextDetach() {
   docshell->SkipBrowsingContextDetach();
 }
 
-void nsFrameLoader::MaybeNotifyCrashed(mozilla::ipc::MessageChannel* aChannel) {
+void nsFrameLoader::MaybeNotifyCrashed(BrowsingContext* aBrowsingContext,
+                                       mozilla::ipc::MessageChannel* aChannel) {
   if (mTabProcessCrashFired) {
     return;
   }
-  mTabProcessCrashFired = true;
+
+  if (mBrowsingContext == aBrowsingContext) {
+    mTabProcessCrashFired = true;
+  }
 
   // Fire the crashed observer notification.
   nsCOMPtr<nsIObserverService> os = services::GetObserverService();
@@ -3527,9 +3538,9 @@ void nsFrameLoader::MaybeNotifyCrashed(mozilla::ipc::MessageChannel* aChannel) {
   FrameCrashedEventInit init;
   init.mBubbles = true;
   init.mCancelable = true;
-  if (mBrowsingContext) {
-    init.mBrowsingContextId = mBrowsingContext->Id();
-    init.mIsTopFrame = !mBrowsingContext->GetParent();
+  if (aBrowsingContext) {
+    init.mBrowsingContextId = aBrowsingContext->Id();
+    init.mIsTopFrame = !aBrowsingContext->GetParent();
   }
 
   RefPtr<FrameCrashedEvent> event = FrameCrashedEvent::Constructor(

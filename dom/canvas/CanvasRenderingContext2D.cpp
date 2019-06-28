@@ -1227,12 +1227,13 @@ bool CanvasRenderingContext2D::EnsureTarget(const gfx::Rect* aCoveredRect,
   }
 
   if (mTarget) {
-    return true;
+    return mTarget != sErrorTarget;
   }
 
   // Check that the dimensions are sane
-  if (mWidth > StaticPrefs::MaxCanvasSize() ||
-      mHeight > StaticPrefs::MaxCanvasSize() || mWidth < 0 || mHeight < 0) {
+  if (mWidth > StaticPrefs::gfx_canvas_max_size() ||
+      mHeight > StaticPrefs::gfx_canvas_max_size() || mWidth < 0 ||
+      mHeight < 0) {
     SetErrorState();
     return false;
   }
@@ -1666,25 +1667,26 @@ CanvasRenderingContext2D::GetInputStream(const char* aMimeType,
 
 already_AddRefed<mozilla::gfx::SourceSurface>
 CanvasRenderingContext2D::GetSurfaceSnapshot(gfxAlphaType* aOutAlphaType) {
-  if (!mBufferProvider) {
-    if (!EnsureTarget()) {
-      return nullptr;
-    }
-  }
-
-  RefPtr<SourceSurface> snapshot = mBufferProvider->BorrowSnapshot();
-  if (!snapshot) {
-    return nullptr;
-  }
-
-  RefPtr<DataSourceSurface> dataSurface = snapshot->GetDataSurface();
-  mBufferProvider->ReturnSnapshot(snapshot.forget());
-
   if (aOutAlphaType) {
     *aOutAlphaType = (mOpaque ? gfxAlphaType::Opaque : gfxAlphaType::Premult);
   }
 
-  return dataSurface.forget();
+  if (!mBufferProvider) {
+    if (!EnsureTarget()) {
+      MOZ_ASSERT(
+          mTarget == sErrorTarget,
+          "On EnsureTarget failure mTarget should be set to sErrorTarget.");
+      return mTarget->Snapshot();
+    }
+  }
+
+  // The concept of BorrowSnapshot seems a bit broken here, but the original
+  // code in GetSurfaceSnapshot just returned a snapshot from mTarget, which
+  // amounts to breaking the concept implicitly.
+  RefPtr<SourceSurface> snapshot = mBufferProvider->BorrowSnapshot();
+  RefPtr<SourceSurface> retSurface = snapshot;
+  mBufferProvider->ReturnSnapshot(snapshot.forget());
+  return retSurface.forget();
 }
 
 SurfaceFormat CanvasRenderingContext2D::GetSurfaceFormat() const {
@@ -4937,7 +4939,7 @@ nsresult CanvasRenderingContext2D::GetImageDataArray(
 
   if (!mBufferProvider) {
     if (!EnsureTarget()) {
-      return NS_ERROR_OUT_OF_MEMORY;
+      return NS_ERROR_FAILURE;
     }
   }
 
@@ -5666,7 +5668,8 @@ size_t BindingJSObjectMallocBytes(CanvasRenderingContext2D* aContext) {
   int32_t height = aContext->GetHeight();
 
   // TODO: Bug 1552137: No memory will be allocated if either dimension is
-  // greater than gfxPrefs::MaxCanvasSize(). We should check this here too.
+  // greater than gfxPrefs::gfx_canvas_max_size(). We should check this here
+  // too.
 
   CheckedInt<uint32_t> bytes = CheckedInt<uint32_t>(width) * height * 4;
   if (!bytes.isValid()) {

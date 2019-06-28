@@ -2,8 +2,8 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-import {recordTelemetryEvent} from "chrome://browser/content/aboutlogins/aboutLoginsUtils.js";
-import ReflectedFluentElement from "chrome://browser/content/aboutlogins/components/reflected-fluent-element.js";
+import {recordTelemetryEvent} from "../aboutLoginsUtils.js";
+import ReflectedFluentElement from "./reflected-fluent-element.js";
 
 export default class LoginItem extends ReflectedFluentElement {
   constructor() {
@@ -21,8 +21,6 @@ export default class LoginItem extends ReflectedFluentElement {
     this.attachShadow({mode: "open"})
         .appendChild(loginItemTemplate.content.cloneNode(true));
 
-    this.reflectFluentStrings();
-
     for (let selector of [
       ".delete-button",
       ".edit-button",
@@ -34,14 +32,27 @@ export default class LoginItem extends ReflectedFluentElement {
       button.addEventListener("click", this);
     }
 
-    window.addEventListener("AboutLoginsLoginSelected", this);
+    this._copyPasswordButton = this.shadowRoot.querySelector(".copy-password-button");
+    this._copyUsernameButton = this.shadowRoot.querySelector(".copy-username-button");
+    this._deleteButton = this.shadowRoot.querySelector(".delete-button");
+    this._editButton = this.shadowRoot.querySelector(".edit-button");
+    this._form = this.shadowRoot.querySelector("form");
+    this._originInput = this.shadowRoot.querySelector("input[name='origin']");
+    this._usernameInput = this.shadowRoot.querySelector("input[name='username']");
+    this._passwordInput = this.shadowRoot.querySelector("input[name='password']");
+    this._revealCheckbox = this.shadowRoot.querySelector(".reveal-password-checkbox");
+    this._title = this.shadowRoot.querySelector(".title");
 
-    let copyUsernameButton = this.shadowRoot.querySelector(".copy-username-button");
-    let copyPasswordButton = this.shadowRoot.querySelector(".copy-password-button");
-    copyUsernameButton.relatedInput = this.shadowRoot.querySelector("modal-input[name='username']");
-    copyPasswordButton.relatedInput = this.shadowRoot.querySelector("modal-input[name='password']");
+    this._copyUsernameButton.relatedInput = this._usernameInput;
+    this._copyPasswordButton.relatedInput = this._passwordInput;
 
     this.render();
+
+    this._originInput.addEventListener("blur", this);
+    this._revealCheckbox.addEventListener("click", this);
+    window.addEventListener("AboutLoginsLoginSelected", this);
+
+    super.connectedCallback();
   }
 
   static get reflectedFluentIDs() {
@@ -53,18 +64,19 @@ export default class LoginItem extends ReflectedFluentElement {
       "copy-username-button",
       "delete-button",
       "edit-button",
-      "field-required-symbol",
-      "modal-input-reveal-checkbox-hide",
-      "modal-input-reveal-checkbox-show",
       "new-login-title",
       "open-site-button",
       "origin-label",
+      "origin-placeholder",
+      "password-hide-title",
       "password-label",
+      "password-show-title",
       "save-changes-button",
       "time-created",
       "time-changed",
       "time-used",
       "username-label",
+      "username-placeholder",
     ];
   }
 
@@ -76,41 +88,34 @@ export default class LoginItem extends ReflectedFluentElement {
     switch (attrName) {
       case "copied-password-button":
       case "copy-password-button": {
-        let copyPasswordButton = this.shadowRoot.querySelector(".copy-password-button");
         let newAttrName = attrName.substr(0, attrName.indexOf("-")) + "-button-text";
-        copyPasswordButton.setAttribute(newAttrName, this.getAttribute(attrName));
+        this._copyPasswordButton.setAttribute(newAttrName, this.getAttribute(attrName));
         break;
       }
       case "copied-username-button":
       case "copy-username-button": {
-        let copyUsernameButton = this.shadowRoot.querySelector(".copy-username-button");
         let newAttrName = attrName.substr(0, attrName.indexOf("-")) + "-button-text";
-        copyUsernameButton.setAttribute(newAttrName, this.getAttribute(attrName));
-        break;
-      }
-      case "field-required-symbol": {
-        for (let labelSelector of [".origin-label", ".password-label"]) {
-          let label = this.shadowRoot.querySelector(labelSelector);
-          label.setAttribute("field-required-symbol", this.getAttribute(attrName));
-        }
-        break;
-      }
-      case "modal-input-reveal-checkbox-hide": {
-        this.shadowRoot.querySelector("modal-input[name='password']")
-                       .setAttribute("reveal-checkbox-hide", this.getAttribute(attrName));
-        break;
-      }
-      case "modal-input-reveal-checkbox-show": {
-        this.shadowRoot.querySelector("modal-input[name='password']")
-                       .setAttribute("reveal-checkbox-show", this.getAttribute(attrName));
+        this._copyUsernameButton.setAttribute(newAttrName, this.getAttribute(attrName));
         break;
       }
       case "new-login-title": {
-        let title = this.shadowRoot.querySelector(".title");
-        title.setAttribute(attrName, this.getAttribute(attrName));
+        this._title.setAttribute(attrName, this.getAttribute(attrName));
         if (!this._login.title) {
-          title.textContent = this.getAttribute(attrName);
+          this._title.textContent = this.getAttribute(attrName);
         }
+        break;
+      }
+      case "origin-placeholder": {
+        this._originInput.setAttribute("placeholder", this.getAttribute(attrName));
+        break;
+      }
+      case "password-hide-title":
+      case "password-show-title": {
+        this._updatePasswordRevealState();
+        break;
+      }
+      case "username-placeholder": {
+        this._usernameInput.setAttribute("placeholder", this.getAttribute(attrName));
         break;
       }
       default:
@@ -127,12 +132,11 @@ export default class LoginItem extends ReflectedFluentElement {
     };
     document.l10n.setAttributes(this, "login-item", l10nArgs);
 
-    let title = this.shadowRoot.querySelector(".title");
-    title.textContent = this._login.title || title.getAttribute("new-login-title");
-    this.shadowRoot.querySelector(".origin-saved-value").textContent = this._login.origin || "";
-    this.shadowRoot.querySelector("input[name='origin']").value = this._login.origin || "";
-    this.shadowRoot.querySelector("modal-input[name='username']").setAttribute("value", this._login.username || "");
-    this.shadowRoot.querySelector("modal-input[name='password']").setAttribute("value", this._login.password || "");
+    this._title.textContent = this._login.title || this._title.getAttribute("new-login-title");
+    this._originInput.defaultValue = this._login.origin || "";
+    this._usernameInput.defaultValue = this._login.username || "";
+    this._passwordInput.defaultValue = this._login.password || "";
+    this._updatePasswordRevealState();
   }
 
   handleEvent(event) {
@@ -141,10 +145,38 @@ export default class LoginItem extends ReflectedFluentElement {
         this.setLogin(event.detail);
         break;
       }
+      case "blur": {
+        // Add https:// prefix if one was not provided.
+        let originValue = this._originInput.value.trim();
+        if (!originValue) {
+          return;
+        }
+        if (!originValue.match(/:\/\//)) {
+          this._originInput.value = "https://" + originValue;
+        }
+        break;
+      }
       case "click": {
-        if (event.target.classList.contains("cancel-button")) {
-          this.toggleEditing();
-          this.render();
+        let classList = event.target.classList;
+        if (classList.contains("reveal-password-checkbox")) {
+          this._updatePasswordRevealState();
+
+          let method = this._revealCheckbox.checked ? "show" : "hide";
+          recordTelemetryEvent({object: "password", method});
+          return;
+        }
+
+        // Prevent form submit behavior on the following buttons.
+        event.preventDefault();
+        if (classList.contains("cancel-button")) {
+          if (this._login.guid) {
+            this.setLogin(this._login);
+          } else {
+            // TODO, should select the first login if it exists
+            // or show the no-logins view otherwise
+            this._toggleEditing();
+            this.render();
+          }
 
           recordTelemetryEvent({
             object: this._login.guid ? "existing_login" : "new_login",
@@ -152,7 +184,7 @@ export default class LoginItem extends ReflectedFluentElement {
           });
           return;
         }
-        if (event.target.classList.contains("delete-button")) {
+        if (classList.contains("delete-button")) {
           document.dispatchEvent(new CustomEvent("AboutLoginsDeleteLogin", {
             bubbles: true,
             detail: this._login,
@@ -161,13 +193,13 @@ export default class LoginItem extends ReflectedFluentElement {
           recordTelemetryEvent({object: "existing_login", method: "delete"});
           return;
         }
-        if (event.target.classList.contains("edit-button")) {
-          this.toggleEditing();
+        if (classList.contains("edit-button")) {
+          this._toggleEditing();
 
           recordTelemetryEvent({object: "existing_login", method: "edit"});
           return;
         }
-        if (event.target.classList.contains("open-site-button")) {
+        if (classList.contains("open-site-button")) {
           document.dispatchEvent(new CustomEvent("AboutLoginsOpenSite", {
             bubbles: true,
             detail: this._login,
@@ -176,7 +208,7 @@ export default class LoginItem extends ReflectedFluentElement {
           recordTelemetryEvent({object: "existing_login", method: "open_site"});
           return;
         }
-        if (event.target.classList.contains("save-changes-button")) {
+        if (classList.contains("save-changes-button")) {
           if (!this._isFormValid({reportErrors: true})) {
             return;
           }
@@ -203,56 +235,77 @@ export default class LoginItem extends ReflectedFluentElement {
     }
   }
 
+  /**
+   * @param {login} login The login that should be displayed. The login object is
+   *                      a plain JS object representation of nsILoginInfo/nsILoginMetaInfo.
+   */
   setLogin(login) {
     this._login = login;
-    this.toggleAttribute("isNewLogin", !login.guid);
-    this.toggleEditing(!login.guid);
+
+    this._form.reset();
+
+    if (login.guid) {
+      delete this.dataset.isNewLogin;
+    } else {
+      this.dataset.isNewLogin = true;
+    }
+    this._toggleEditing(!login.guid);
+
+    this._revealCheckbox.checked = false;
+
     this.render();
   }
 
+  /**
+   * Updates the view if the login argument matches the login currently
+   * displayed.
+   *
+   * @param {login} login The login that was added to storage. The login object is
+   *                      a plain JS object representation of nsILoginInfo/nsILoginMetaInfo.
+   */
   loginAdded(login) {
     if (this._login.guid ||
         !window.AboutLoginsUtils.doLoginsMatch(login, this._loginFromForm())) {
       return;
     }
 
-    this.toggleEditing(false);
+    this._toggleEditing(false);
     this._login = login;
     this.render();
   }
 
+  /**
+   * Updates the view if the login argument matches the login currently
+   * displayed.
+   *
+   * @param {login} login The login that was modified in storage. The login object is
+   *                      a plain JS object representation of nsILoginInfo/nsILoginMetaInfo.
+   */
   loginModified(login) {
     if (this._login.guid != login.guid) {
       return;
     }
 
-    this.toggleEditing(false);
+    this._toggleEditing(false);
     this._login = login;
     this.render();
   }
 
+  /**
+   * Clears the displayed login if the argument matches the currently
+   * displayed login.
+   *
+   * @param {login} login The login that was removed from storage. The login object is
+   *                      a plain JS object representation of nsILoginInfo/nsILoginMetaInfo.
+   */
   loginRemoved(login) {
     if (login.guid != this._login.guid) {
       return;
     }
 
-    this.toggleEditing(false);
+    this._toggleEditing(false);
     this._login = {};
     this.render();
-  }
-
-  toggleEditing(force) {
-    let shouldEdit = force !== undefined ? force : !this.hasAttribute("editing");
-
-    if (!shouldEdit) {
-      this.removeAttribute("isNewLogin");
-    }
-
-    this.shadowRoot.querySelector(".delete-button").disabled = this.hasAttribute("isNewLogin");
-    this.shadowRoot.querySelector(".edit-button").disabled = shouldEdit;
-    this.shadowRoot.querySelectorAll("modal-input")
-                   .forEach(el => el.toggleAttribute("editing", shouldEdit));
-    this.toggleAttribute("editing", shouldEdit);
   }
 
   /**
@@ -263,9 +316,9 @@ export default class LoginItem extends ReflectedFluentElement {
    *                               to the user.
    */
   _isFormValid({reportErrors} = {}) {
-    let fields = [this.shadowRoot.querySelector("modal-input[name='password']")];
-    if (this.hasAttribute("isNewLogin")) {
-      fields.push(this.shadowRoot.querySelector("input[name='origin']"));
+    let fields = [this._passwordInput];
+    if (this.dataset.isNewLogin) {
+      fields.push(this._originInput);
     }
     let valid = true;
     // Check validity on all required fields so each field will get :invalid styling
@@ -282,11 +335,54 @@ export default class LoginItem extends ReflectedFluentElement {
 
   _loginFromForm() {
     return {
-      username: this.shadowRoot.querySelector("modal-input[name='username']").value.trim(),
-      password: this.shadowRoot.querySelector("modal-input[name='password']").value.trim(),
-      origin: this.hasAttribute("isNewLogin") ? this.shadowRoot.querySelector("input[name='origin']").value.trim()
-                                              : this.shadowRoot.querySelector(".origin-saved-value").textContent,
+      username: this._usernameInput.value.trim(),
+      password: this._passwordInput.value.trim(),
+      origin: this._originInput.value.trim(),
     };
+  }
+
+  /**
+   * Toggles the login-item view from editing to non-editing mode.
+   *
+   * @param {boolean} force When true puts the form in 'edit' mode, otherwise
+   *                        puts the form in read-only mode.
+   */
+  _toggleEditing(force) {
+    let shouldEdit = force !== undefined ? force : !this.dataset.editing;
+
+    if (!shouldEdit) {
+      delete this.dataset.isNewLogin;
+    }
+
+    if (shouldEdit) {
+      this._passwordInput.style.removeProperty("width");
+    } else {
+      // Need to set a shorter width than -moz-available so the reveal checkbox
+      // will still appear next to the password.
+      this._passwordInput.style.width = (this._login.password || "").length + "ch";
+    }
+
+    this._deleteButton.disabled = this.dataset.isNewLogin;
+    this._editButton.disabled = shouldEdit;
+    this._originInput.readOnly = !this.dataset.isNewLogin;
+    this._usernameInput.readOnly = !shouldEdit;
+    this._passwordInput.readOnly = !shouldEdit;
+    if (shouldEdit) {
+      this.dataset.editing = true;
+    } else {
+      delete this.dataset.editing;
+    }
+  }
+
+  _updatePasswordRevealState() {
+    let labelAttr = this._revealCheckbox.checked ? "password-show-title"
+                                                 : "password-hide-title";
+    this._revealCheckbox.setAttribute("aria-label", this.getAttribute(labelAttr));
+    this._revealCheckbox.setAttribute("title", this.getAttribute(labelAttr));
+
+    let {checked} = this._revealCheckbox;
+    let inputType = checked ? "type" : "password";
+    this._passwordInput.setAttribute("type", inputType);
   }
 }
 customElements.define("login-item", LoginItem);

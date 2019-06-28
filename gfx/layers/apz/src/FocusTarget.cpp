@@ -138,7 +138,7 @@ FocusTarget::FocusTarget(PresShell* aRootPresShell,
 
   // Check if there are key event listeners that could prevent default or change
   // the focus or selection of the page.
-  if (StaticPrefs::APZKeyboardPassiveListeners()) {
+  if (StaticPrefs::apz_keyboard_passive_listeners()) {
     mFocusHasKeyEventListeners =
         HasListenersForNonPassiveKeyEvents(keyEventTarget.get());
   } else {
@@ -207,17 +207,19 @@ FocusTarget::FocusTarget(PresShell* aRootPresShell,
   target.mHorizontal = nsLayoutUtils::FindIDForScrollableFrame(horizontal);
   target.mVertical = nsLayoutUtils::FindIDForScrollableFrame(vertical);
   if (XRE_IsContentProcess()) {
-    target.mHorizontalRenderRoot = gfxUtils::GetContentRenderRoot();
-    target.mVerticalRenderRoot = gfxUtils::GetContentRenderRoot();
+    target.mHorizontalRenderRoot = Some(gfxUtils::GetContentRenderRoot());
+    target.mVerticalRenderRoot = Some(gfxUtils::GetContentRenderRoot());
   } else {
-    target.mHorizontalRenderRoot =
-        horizontal ? gfxUtils::RecursivelyGetRenderRootForFrame(
-                         horizontal->GetScrolledFrame())
-                   : wr::RenderRoot::Default;
-    target.mVerticalRenderRoot =
-        vertical ? gfxUtils::RecursivelyGetRenderRootForFrame(
-                       vertical->GetScrolledFrame())
-                 : wr::RenderRoot::Default;
+    if (horizontal) {
+      auto renderRoot = gfxUtils::RecursivelyGetRenderRootForFrame(
+          horizontal->GetScrolledFrame());
+      target.mHorizontalRenderRoot = Some(renderRoot);
+    }
+    if (vertical) {
+      auto renderRoot = gfxUtils::RecursivelyGetRenderRootForFrame(
+          vertical->GetScrolledFrame());
+      target.mVerticalRenderRoot = Some(renderRoot);
+    }
   }
   mData = AsVariant(target);
 

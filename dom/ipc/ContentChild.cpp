@@ -20,6 +20,7 @@
 #include "mozilla/LookAndFeel.h"
 #include "mozilla/MemoryTelemetry.h"
 #include "mozilla/NullPrincipal.h"
+#include "mozilla/PerfStats.h"
 #include "mozilla/Preferences.h"
 #include "mozilla/ProcessHangMonitorIPC.h"
 #include "mozilla/RemoteDecoderManagerChild.h"
@@ -103,6 +104,7 @@
 #include "nsIStringBundle.h"
 #include "nsIWorkerDebuggerManager.h"
 #include "nsGeolocation.h"
+#include "audio_thread_priority.h"
 
 #if !defined(XP_WIN)
 #  include "mozilla/Omnijar.h"
@@ -1717,6 +1719,11 @@ mozilla::ipc::IPCResult ContentChild::RecvSetProcessSandbox(
     if (!Preferences::GetBool("media.cubeb.sandbox")) {
       Unused << CubebUtils::GetCubebContext();
     }
+#    if defined(XP_LINUX)
+    else {
+      CubebUtils::InitAudioThreads();
+    }
+#    endif
   }
 
   if (sandboxEnabled) {
@@ -2425,6 +2432,18 @@ mozilla::ipc::IPCResult ContentChild::RecvPreferenceUpdate(const Pref& aPref) {
 
 mozilla::ipc::IPCResult ContentChild::RecvVarUpdate(const GfxVarUpdate& aVar) {
   gfx::gfxVars::ApplyUpdate(aVar);
+  return IPC_OK();
+}
+
+mozilla::ipc::IPCResult ContentChild::RecvUpdatePerfStatsCollectionMask(
+    const uint64_t& aMask) {
+  PerfStats::SetCollectionMask(static_cast<PerfStats::MetricMask>(aMask));
+  return IPC_OK();
+}
+
+mozilla::ipc::IPCResult ContentChild::RecvCollectPerfStatsJSON(
+    CollectPerfStatsJSONResolver&& aResolver) {
+  aResolver(PerfStats::CollectLocalPerfStatsJSON());
   return IPC_OK();
 }
 
@@ -3912,6 +3931,13 @@ mozilla::ipc::IPCResult ContentChild::RecvWindowClose(BrowsingContext* aContext,
   }
 
   nsCOMPtr<nsPIDOMWindowOuter> window = aContext->GetDOMWindow();
+  if (!window) {
+    MOZ_LOG(
+        BrowsingContext::GetLog(), LogLevel::Debug,
+        ("ChildIPC: Trying to send a message to a context without a window"));
+    return IPC_OK();
+  }
+
   nsGlobalWindowOuter::Cast(window)->CloseOuter(aTrustedCaller);
   return IPC_OK();
 }
@@ -3925,6 +3951,12 @@ mozilla::ipc::IPCResult ContentChild::RecvWindowFocus(
   }
 
   nsCOMPtr<nsPIDOMWindowOuter> window = aContext->GetDOMWindow();
+  if (!window) {
+    MOZ_LOG(
+        BrowsingContext::GetLog(), LogLevel::Debug,
+        ("ChildIPC: Trying to send a message to a context without a window"));
+    return IPC_OK();
+  }
   nsGlobalWindowOuter::Cast(window)->FocusOuter();
   return IPC_OK();
 }
@@ -3938,6 +3970,12 @@ mozilla::ipc::IPCResult ContentChild::RecvWindowBlur(
   }
 
   nsCOMPtr<nsPIDOMWindowOuter> window = aContext->GetDOMWindow();
+  if (!window) {
+    MOZ_LOG(
+        BrowsingContext::GetLog(), LogLevel::Debug,
+        ("ChildIPC: Trying to send a message to a context without a window"));
+    return IPC_OK();
+  }
   nsGlobalWindowOuter::Cast(window)->BlurOuter();
   return IPC_OK();
 }
@@ -3953,6 +3991,13 @@ mozilla::ipc::IPCResult ContentChild::RecvWindowPostMessage(
 
   RefPtr<nsGlobalWindowOuter> window =
       nsGlobalWindowOuter::Cast(aContext->GetDOMWindow());
+  if (!window) {
+    MOZ_LOG(
+        BrowsingContext::GetLog(), LogLevel::Debug,
+        ("ChildIPC: Trying to send a message to a context without a window"));
+    return IPC_OK();
+  }
+
   nsCOMPtr<nsIPrincipal> providedPrincipal;
   if (!window->GetPrincipalForPostMessage(
           aData.targetOrigin(), aData.targetOriginURI(),

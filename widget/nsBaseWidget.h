@@ -413,6 +413,8 @@ class nsBaseWidget : public nsIWidget, public nsSupportsWeakReference {
 
   void Shutdown();
 
+  void QuitIME();
+
 #if defined(XP_WIN)
   uint64_t CreateScrollCaptureContainer() override;
 #endif
@@ -617,6 +619,14 @@ class nsBaseWidget : public nsIWidget, public nsSupportsWeakReference {
    */
   void DispatchTouchInput(mozilla::MultiTouchInput& aInput);
 
+  /**
+   * Dispatch the given PanGestureInput through APZ to Gecko (if APZ is enabled)
+   * or directly to gecko (if APZ is not enabled). This function must only
+   * be called from the main thread, and if APZ is enabled, that must also be
+   * the APZ controller thread.
+   */
+  void DispatchPanGestureInput(mozilla::PanGestureInput& aInput);
+
 #if defined(XP_WIN)
   void UpdateScrollCapture() override;
 
@@ -690,6 +700,7 @@ class nsBaseWidget : public nsIWidget, public nsSupportsWeakReference {
   bool mUpdateCursor;
   bool mUseAttachedEvents;
   bool mIMEHasFocus;
+  bool mIMEHasQuit;
   bool mIsFullyOccluded;
   static nsIRollupListener* gRollupListener;
 

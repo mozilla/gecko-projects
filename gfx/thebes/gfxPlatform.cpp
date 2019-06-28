@@ -605,7 +605,8 @@ static uint32_t GetSkiaGlyphCacheSize() {
   // We don't need to change the font cache count since we usually
   // cache thrash due to asian character sets in talos.
   // Only increase memory on the content process
-  uint32_t cacheSize = StaticPrefs::SkiaContentFontCacheSize() * 1024 * 1024;
+  uint32_t cacheSize =
+      StaticPrefs::gfx_content_skia_font_cache_size() * 1024 * 1024;
   if (mozilla::BrowserTabsRemoteAutostart()) {
     return XRE_IsContentProcess() ? cacheSize : kDefaultGlyphCacheSize;
   }
@@ -911,8 +912,8 @@ void gfxPlatform::Init() {
   {
     nsAutoCString forcedPrefs;
     // D2D prefs
-    forcedPrefs.AppendPrintf("FP(D%d%d", StaticPrefs::Direct2DDisabled(),
-                             StaticPrefs::Direct2DForceEnabled());
+    forcedPrefs.AppendPrintf("FP(D%d%d", StaticPrefs::gfx_direct2d_disabled(),
+                             StaticPrefs::gfx_direct2d_force_enabled());
     // Layers prefs
     forcedPrefs.AppendPrintf(
         "-L%d%d%d%d", StaticPrefs::LayersAMDSwitchableGfxEnabled(),
@@ -927,7 +928,8 @@ void gfxPlatform::Init() {
         StaticPrefs::WebGLForceEnabled(),
         StaticPrefs::WebGLForceLayersReadback(), StaticPrefs::WebGLForceMSAA());
     // Prefs that don't fit into any of the other sections
-    forcedPrefs.AppendPrintf("-T%d%d%d) ", StaticPrefs::AndroidRGB16Force(),
+    forcedPrefs.AppendPrintf("-T%d%d%d) ",
+                             StaticPrefs::gfx_android_rgb16_force(),
                              0,  // SkiaGL canvas no longer supported
                              StaticPrefs::ForceShmemTiles());
     ScopedGfxFeatureReporter::AppNote(forcedPrefs);
@@ -1133,7 +1135,8 @@ int32_t gfxPlatform::MaxTextureSize() {
   // Make sure we don't completely break rendering because of a typo in the
   // pref or whatnot.
   const int32_t kMinSizePref = 2048;
-  return std::max(kMinSizePref, StaticPrefs::MaxTextureSizeDoNotUseDirectly());
+  return std::max(kMinSizePref,
+                  StaticPrefs::gfx_max_texture_size_do_not_use_directly());
 }
 
 /* static */
@@ -1141,14 +1144,15 @@ int32_t gfxPlatform::MaxAllocSize() {
   // Make sure we don't completely break rendering because of a typo in the
   // pref or whatnot.
   const int32_t kMinAllocPref = 10000000;
-  return std::max(kMinAllocPref, StaticPrefs::MaxAllocSizeDoNotUseDirectly());
+  return std::max(kMinAllocPref,
+                  StaticPrefs::gfx_max_alloc_size_do_not_use_directly());
 }
 
 /* static */
 void gfxPlatform::InitMoz2DLogging() {
   auto fwd = new CrashStatsLogForwarder(
       CrashReporter::Annotation::GraphicsCriticalError);
-  fwd->SetCircularBufferSize(StaticPrefs::GfxLoggingCrashLength());
+  fwd->SetCircularBufferSize(StaticPrefs::gfx_logging_crash_length());
 
   mozilla::gfx::Config cfg;
   cfg.mLogForwarder = fwd;
@@ -1330,9 +1334,7 @@ void gfxPlatform::WillShutdown() {
   // base gfxPlatform destructor.
   mScreenReferenceSurface = nullptr;
   mScreenReferenceDrawTarget = nullptr;
-}
 
-gfxPlatform::~gfxPlatform() {
   // The cairo folks think we should only clean up in debug builds,
   // but we're generally in the habit of trying to shut down as
   // cleanly as possible even in production code, so call this
@@ -1351,6 +1353,9 @@ gfxPlatform::~gfxPlatform() {
   cairo_debug_reset_static_data();
 #  endif
 #endif
+}
+
+gfxPlatform::~gfxPlatform() {
 }
 
 /* static */
@@ -1875,14 +1880,16 @@ mozilla::layers::DiagnosticTypes gfxPlatform::GetLayerDiagnosticTypes() {
 BackendPrefsData gfxPlatform::GetBackendPrefs() const {
   BackendPrefsData data;
 
-  data.mCanvasBitmask = BackendTypeBit(BackendType::CAIRO);
-  data.mContentBitmask = BackendTypeBit(BackendType::CAIRO);
-#ifdef USE_SKIA
-  data.mCanvasBitmask |= BackendTypeBit(BackendType::SKIA);
-  data.mContentBitmask |= BackendTypeBit(BackendType::SKIA);
+  data.mCanvasBitmask = BackendTypeBit(BackendType::SKIA);
+  data.mContentBitmask = BackendTypeBit(BackendType::SKIA);
+
+#ifdef MOZ_WIDGET_GTK
+  data.mCanvasBitmask |= BackendTypeBit(BackendType::CAIRO);
+  data.mContentBitmask |= BackendTypeBit(BackendType::CAIRO);
 #endif
-  data.mCanvasDefault = BackendType::CAIRO;
-  data.mContentDefault = BackendType::CAIRO;
+
+  data.mCanvasDefault = BackendType::SKIA;
+  data.mContentDefault = BackendType::SKIA;
 
   return data;
 }
@@ -1915,8 +1922,10 @@ void gfxPlatform::InitBackendPrefs(BackendPrefsData&& aPrefsData) {
     mContentBackendBitmask |= BackendTypeBit(aPrefsData.mContentDefault);
   }
 
-  uint32_t swBackendBits =
-      BackendTypeBit(BackendType::SKIA) | BackendTypeBit(BackendType::CAIRO);
+  uint32_t swBackendBits = BackendTypeBit(BackendType::SKIA);
+#ifdef MOZ_WIDGET_GTK
+  swBackendBits |= BackendTypeBit(BackendType::CAIRO);
+#endif
   mSoftwareBackend = GetContentBackendPref(swBackendBits);
 
   if (XRE_IsParentProcess()) {
@@ -1980,12 +1989,12 @@ bool gfxPlatform::OffMainThreadCompositingEnabled() {
 
 eCMSMode gfxPlatform::GetCMSMode() {
   if (!gCMSInitialized) {
-    int32_t mode = StaticPrefs::CMSMode();
+    int32_t mode = StaticPrefs::gfx_color_management_mode();
     if (mode >= 0 && mode < eCMSMode_AllCount) {
       gCMSMode = static_cast<eCMSMode>(mode);
     }
 
-    bool enableV4 = StaticPrefs::CMSEnableV4();
+    bool enableV4 = StaticPrefs::gfx_color_management_enablev4();
     if (enableV4) {
       qcms_enable_iccv4();
     }
@@ -2007,7 +2016,7 @@ int gfxPlatform::GetRenderingIntent() {
   MOZ_ASSERT(QCMS_INTENT_DEFAULT == 0);
 
   /* Try to query the pref system for a rendering intent. */
-  int32_t pIntent = StaticPrefs::CMSRenderingIntent();
+  int32_t pIntent = StaticPrefs::gfx_color_management_rendering_intent();
   if ((pIntent < QCMS_INTENT_MIN) || (pIntent > QCMS_INTENT_MAX)) {
     /* If the pref is out of range, use embedded profile. */
     pIntent = -1;
@@ -2431,7 +2440,7 @@ void gfxPlatform::InitAcceleration() {
         "media.hardware-video-decoding.failed");
     InitGPUProcessPrefs();
 
-    gfxVars::SetRemoteCanvasEnabled(StaticPrefs::CanvasRemote() &&
+    gfxVars::SetRemoteCanvasEnabled(StaticPrefs::gfx_canvas_remote() &&
                                     gfxConfig::IsEnabled(Feature::GPU_PROCESS));
   }
 }
@@ -2473,7 +2482,7 @@ void gfxPlatform::InitGPUProcessPrefs() {
                          NS_LITERAL_CSTRING("FEATURE_FAILURE_SAFE_MODE"));
     return;
   }
-  if (StaticPrefs::LayerScopeEnabled()) {
+  if (StaticPrefs::gfx_layerscope_enabled()) {
     gpuProc.ForceDisable(FeatureStatus::Blocked,
                          "LayerScope does not work in the GPU process",
                          NS_LITERAL_CSTRING("FEATURE_FAILURE_LAYERSCOPE"));
@@ -2529,8 +2538,8 @@ void gfxPlatform::InitCompositorAccelerationPrefs() {
 
 /*static*/
 bool gfxPlatform::WebRenderPrefEnabled() {
-  return StaticPrefs::WebRenderAll() ||
-         StaticPrefs::WebRenderEnabledDoNotUseDirectly();
+  return StaticPrefs::gfx_webrender_all() ||
+         StaticPrefs::gfx_webrender_enabled_do_not_use_directly();
 }
 
 /*static*/
@@ -2652,12 +2661,14 @@ static FeatureState& WebRenderHardwareQualificationStatus(
               (deviceID >= 0x9830 && deviceID < 0x9870) ||
               (deviceID >= 0x9900 && deviceID < 0x9a00)) {
             // we have a desktop CAYMAN, SI, CIK, VI, or GFX9 device
-#ifndef EARLY_BETA_OR_EARLIER
+            // so treat the device as qualified unless it is not Windows
+            // and not nightly.
+#if !defined(XP_WIN) && !defined(NIGHTLY_BUILD)
             featureWebRenderQualified.Disable(
                 FeatureStatus::BlockedReleaseChannelAMD,
                 "Release channel and AMD",
                 NS_LITERAL_CSTRING("FEATURE_FAILURE_RELEASE_CHANNEL_AMD"));
-#endif  // !EARLY_BETA_OR_EARLIER
+#endif  // !XPWIN && !NIGHTLY_BUILD
           } else {
             featureWebRenderQualified.Disable(
                 FeatureStatus::BlockedDeviceTooOld, "Device too old",
@@ -2877,7 +2888,8 @@ void gfxPlatform::InitWebRenderConfig() {
   // If the user set the pref to force-disable, let's do that. This will
   // override all the other enabling prefs (gfx.webrender.enabled,
   // gfx.webrender.all, and gfx.webrender.all.qualified).
-  if (StaticPrefs::WebRenderForceDisabled() || WebRenderEnvvarDisabled()) {
+  if (StaticPrefs::gfx_webrender_force_disabled() ||
+      WebRenderEnvvarDisabled()) {
     featureWebRender.UserDisable(
         "User force-disabled WR",
         NS_LITERAL_CSTRING("FEATURE_FAILURE_USER_FORCE_DISABLED"));
@@ -3225,7 +3237,7 @@ void gfxPlatform::GetApzSupportInfo(mozilla::widget::InfoObject& aObj) {
   }
 
   if (SupportsApzKeyboardInput() &&
-      !StaticPrefs::AccessibilityBrowseWithCaret()) {
+      !StaticPrefs::accessibility_browsewithcaret()) {
     aObj.DefineProperty("ApzKeyboardInput", 1);
   }
 
@@ -3315,7 +3327,7 @@ class FrameStatsComparator {
 };
 
 void gfxPlatform::NotifyFrameStats(nsTArray<FrameStats>&& aFrameStats) {
-  if (!StaticPrefs::LoggingSlowFramesEnabled()) {
+  if (!StaticPrefs::gfx_logging_slow_frames_enabled()) {
     return;
   }
 
@@ -3356,7 +3368,9 @@ bool gfxPlatform::AsyncPanZoomEnabled() {
 }
 
 /*static*/
-bool gfxPlatform::PerfWarnings() { return StaticPrefs::PerfWarnings(); }
+bool gfxPlatform::PerfWarnings() {
+  return StaticPrefs::gfx_perf_warnings_enabled();
+}
 
 void gfxPlatform::GetAcceleratedCompositorBackends(
     nsTArray<LayersBackend>& aBackends) {
@@ -3470,15 +3484,15 @@ bool gfxPlatform::SupportsApzTouchInput() const {
 }
 
 bool gfxPlatform::SupportsApzDragInput() const {
-  return StaticPrefs::APZDragEnabled();
+  return StaticPrefs::apz_drag_enabled();
 }
 
 bool gfxPlatform::SupportsApzKeyboardInput() const {
-  return StaticPrefs::APZKeyboardEnabled();
+  return StaticPrefs::apz_keyboard_enabled();
 }
 
 bool gfxPlatform::SupportsApzAutoscrolling() const {
-  return StaticPrefs::APZAutoscrollEnabled();
+  return StaticPrefs::apz_autoscroll_enabled();
 }
 
 void gfxPlatform::InitOpenGLConfig() {

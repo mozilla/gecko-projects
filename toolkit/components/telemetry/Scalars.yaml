@@ -1,3 +1,7 @@
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at http://mozilla.org/MPL/2.0/.
+
 # This file contains a definition of the scalar probes that are recorded in Telemetry.
 # They are submitted with the "main" pings and can be inspected in about:telemetry.
 
@@ -452,11 +456,12 @@ security:
   webauthn_used:
     bug_numbers:
       - 1265472
+      - 1558870
     description: >
       Counts of how often Web Authentication was used in this session, keyed
       by authenticator protocol, method and result. Currently: U2FRegisterFinish,
       U2FRegisterAbort, U2FSignFinish, U2FSignAbort.
-    expires: "70"
+    expires: "78"
     kind: uint
     keyed: true
     notification_emails:
@@ -3773,6 +3778,21 @@ networking:
     kind: uint
     notification_emails:
       - ddamjanovic@mozilla.com
+    record_in_processes:
+      - 'main'
+
+# The following section is for quotaManager
+qm:
+  origin_directory_unexpected_filename:
+    bug_numbers:
+      - 1529016
+    description: >
+      Keys are the filenames of unexpected files in the profile's origin directories.
+    expires: "70"
+    keyed: true
+    kind: uint
+    notification_emails:
+      - ttung@mozilla.com
     record_in_processes:
       - 'main'
 

@@ -179,12 +179,7 @@ Http2ContinuedHeaderListener.prototype = new Http2CheckListener();
 
 Http2ContinuedHeaderListener.prototype.onStopsLeft = 2;
 
-Http2ContinuedHeaderListener.prototype.QueryInterface = function (aIID) {
-  if (aIID.equals(Ci.nsIHttpPushListener) ||
-      aIID.equals(Ci.nsIStreamListener))
-    return this;
-  throw Cr.NS_ERROR_NO_INTERFACE;
-};
+Http2ContinuedHeaderListener.prototype.QueryInterface = ChromeUtils.generateQI(["nsIHttpPushListener", "nsIStreamListener"]);
 
 Http2ContinuedHeaderListener.prototype.getInterface = function(aIID) {
   return this.QueryInterface(aIID);
@@ -669,7 +664,7 @@ function h1ServerWK(metadata, response) {
   response.setHeader("Access-Control-Allow-Origin", "*", false);
   response.setHeader("Access-Control-Allow-Method", "GET", false);
 
-  var body = '{"http://foo.example.com:' + httpserv.identity.primaryPort + '": { "tls-ports": [' + serverPort + '] }}';
+  var body = '["http://foo.example.com:' + httpserv.identity.primaryPort + '"]';
   response.bodyOutputStream.write(body, body.length);
 }
 
@@ -692,7 +687,7 @@ function h1ServerWK2(metadata, response) {
   response.setHeader("Access-Control-Allow-Origin", "*", false);
   response.setHeader("Access-Control-Allow-Method", "GET", false);
 
-  var body = '{"http://foo.example.com:' + httpserv2.identity.primaryPort + '": { "tls-ports": [' + serverPort + '] }}';
+  var body = '["http://foo.example.com:' + httpserv2.identity.primaryPort + '"]';
   response.bodyOutputStream.write(body, body.length);
 }
 function test_http2_altsvc() {
@@ -706,16 +701,11 @@ var Http2PushApiListener = function() {};
 Http2PushApiListener.prototype = {
   checksPending: 9, // 4 onDataAvailable and 5 onStop
 
-  getInterface: function(aIID) {
+  getInterface(aIID) {
     return this.QueryInterface(aIID);
   },
 
-  QueryInterface: function(aIID) {
-    if (aIID.equals(Ci.nsIHttpPushListener) ||
-        aIID.equals(Ci.nsIStreamListener))
-      return this;
-    throw Cr.NS_ERROR_NO_INTERFACE;
-  },
+  QueryInterface: ChromeUtils.generateQI(["nsIHttpPushListener", "nsIStreamListener"]),
 
   // nsIHttpPushListener
   onPush: function onPush(associatedChannel, pushChannel) {

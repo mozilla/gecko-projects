@@ -176,6 +176,7 @@ nsBaseWidget::nsBaseWidget()
       mUpdateCursor(true),
       mUseAttachedEvents(false),
       mIMEHasFocus(false),
+      mIMEHasQuit(false),
       mIsFullyOccluded(false) {
 #ifdef NOISY_WIDGET_LEAKS
   gNumWidgets++;
@@ -210,9 +211,15 @@ WidgetShutdownObserver::~WidgetShutdownObserver() {
 NS_IMETHODIMP
 WidgetShutdownObserver::Observe(nsISupports* aSubject, const char* aTopic,
                                 const char16_t* aData) {
-  if (mWidget && !strcmp(aTopic, NS_XPCOM_SHUTDOWN_OBSERVER_ID)) {
+  if (!mWidget) {
+    return NS_OK;
+  }
+  if (!strcmp(aTopic, NS_XPCOM_SHUTDOWN_OBSERVER_ID)) {
     RefPtr<nsBaseWidget> widget(mWidget);
     widget->Shutdown();
+  } else if (!strcmp(aTopic, "quit-application")) {
+    RefPtr<nsBaseWidget> widget(mWidget);
+    widget->QuitIME();
   }
   return NS_OK;
 }
@@ -221,12 +228,35 @@ void WidgetShutdownObserver::Register() {
   if (!mRegistered) {
     mRegistered = true;
     nsContentUtils::RegisterShutdownObserver(this);
+
+#ifndef MOZ_WIDGET_ANDROID
+    // The primary purpose of observing quit-application is
+    // to avoid leaking a widget on Windows when nothing else
+    // breaks the circular reference between the widget and
+    // TSFTextStore. However, our Android IME code crashes if
+    // doing this on Android, so let's not do this on Android.
+    // Doing this on Gtk and Mac just in case.
+    nsCOMPtr<nsIObserverService> observerService =
+        mozilla::services::GetObserverService();
+    if (observerService) {
+      observerService->AddObserver(this, "quit-application", false);
+    }
+#endif
   }
 }
 
 void WidgetShutdownObserver::Unregister() {
   if (mRegistered) {
     mWidget = nullptr;
+
+#ifndef MOZ_WIDGET_ANDROID
+    nsCOMPtr<nsIObserverService> observerService =
+        mozilla::services::GetObserverService();
+    if (observerService) {
+      observerService->RemoveObserver(this, "quit-application");
+    }
+#endif
+
     nsContentUtils::UnregisterShutdownObserver(this);
     mRegistered = false;
   }
@@ -243,6 +273,11 @@ void nsBaseWidget::Shutdown() {
     sPluginWidgetList = nullptr;
   }
 #endif
+}
+
+void nsBaseWidget::QuitIME() {
+  IMEStateManager::WidgetOnQuit(this);
+  this->mIMEHasQuit = true;
 }
 
 void nsBaseWidget::DestroyCompositor() {
@@ -824,7 +859,7 @@ bool nsBaseWidget::UseAPZ() {
           (WindowType() == eWindowType_toplevel ||
            WindowType() == eWindowType_child ||
            (WindowType() == eWindowType_popup && HasRemoteContent() &&
-            StaticPrefs::APZPopupsEnabled())));
+            StaticPrefs::apz_popups_enabled())));
 }
 
 bool nsBaseWidget::AllowWebRenderForThisWindow() {
@@ -858,7 +893,7 @@ void nsBaseWidget::ConfigureAPZCTreeManager() {
       NewRunnableMethod<float>("layers::IAPZCTreeManager::SetDPI", mAPZC,
                                &IAPZCTreeManager::SetDPI, dpi));
 
-  if (StaticPrefs::APZKeyboardEnabled()) {
+  if (StaticPrefs::apz_keyboard_enabled()) {
     KeyboardMap map = nsXBLWindowKeyHandler::CollectKeyboardShortcuts();
     // On Android the main thread is not the controller thread
     APZThreadUtils::RunOnControllerThread(NewRunnableMethod<KeyboardMap>(
@@ -1091,6 +1126,29 @@ void nsBaseWidget::DispatchTouchInput(MultiTouchInput& aInput) {
     ProcessUntransformedAPZEvent(&event, guid, inputBlockId, result);
   } else {
     WidgetTouchEvent event = aInput.ToWidgetTouchEvent(this);
+
+    nsEventStatus status;
+    DispatchEvent(&event, status);
+  }
+}
+
+void nsBaseWidget::DispatchPanGestureInput(PanGestureInput& aInput) {
+  MOZ_ASSERT(NS_IsMainThread());
+  if (mAPZC) {
+    MOZ_ASSERT(APZThreadUtils::IsControllerThread());
+    uint64_t inputBlockId = 0;
+    ScrollableLayerGuid guid;
+
+    nsEventStatus result =
+        mAPZC->InputBridge()->ReceiveInputEvent(aInput, &guid, &inputBlockId);
+    if (result == nsEventStatus_eConsumeNoDefault) {
+      return;
+    }
+
+    WidgetWheelEvent event = aInput.ToWidgetWheelEvent(this);
+    ProcessUntransformedAPZEvent(&event, guid, inputBlockId, result);
+  } else {
+    WidgetWheelEvent event = aInput.ToWidgetWheelEvent(this);
 
     nsEventStatus status;
     DispatchEvent(&event, status);
@@ -1703,6 +1761,9 @@ void nsBaseWidget::NotifyUIStateChanged(UIStateChangeType aShowFocusRings) {
 }
 
 nsresult nsBaseWidget::NotifyIME(const IMENotification& aIMENotification) {
+  if (mIMEHasQuit) {
+    return NS_OK;
+  }
   switch (aIMENotification.mMessage) {
     case REQUEST_TO_COMMIT_COMPOSITION:
     case REQUEST_TO_CANCEL_COMPOSITION:

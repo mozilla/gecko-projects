@@ -17,4 +17,11 @@ dictionary FailedCertSecurityInfo {
   DOMTimeStamp validNotBefore = 0;
   DOMTimeStamp validNotAfter = 0;
   DOMString subjectAltNames = "";
+  DOMString issuerCommonName = "";
+  DOMTimeStamp certValidityRangeNotAfter = 0;
+  DOMTimeStamp certValidityRangeNotBefore = 0;
+  DOMString errorMessage = "";
+  boolean hasHSTS = true;
+  boolean hasHPKP = true;
+  sequence<DOMString> certChainStrings;
 };

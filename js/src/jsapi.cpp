@@ -1774,6 +1774,11 @@ JS_PUBLIC_API void JS::AssertObjectBelongsToCurrentThread(JSObject* obj) {
   MOZ_RELEASE_ASSERT(CurrentThreadCanAccessRuntime(rt));
 }
 
+JS_PUBLIC_API void SetHelperThreadTaskCallback(
+    void (*callback)(js::RunnableTask*)) {
+  HelperThreadTaskCallback = callback;
+}
+
 /*** Standard internal methods **********************************************/
 
 JS_PUBLIC_API bool JS_GetPrototype(JSContext* cx, HandleObject obj,
@@ -3028,6 +3033,11 @@ JS_PUBLIC_API void JS_InitReservedSlot(JSObject* obj, uint32_t index, void* ptr,
                    js::MemoryUse(use));
 }
 
+JS_PUBLIC_API void JS_InitPrivate(JSObject* obj, void* data, size_t nbytes,
+                                  JS::MemoryUse use) {
+  InitObjectPrivate(&obj->as<NativeObject>(), data, nbytes, js::MemoryUse(use));
+}
+
 JS_PUBLIC_API JSObject* JS_NewArrayObject(
     JSContext* cx, const JS::HandleValueArray& contents) {
   MOZ_ASSERT(!cx->zone()->isAtomsZone());
@@ -3455,6 +3465,7 @@ extern JS_PUBLIC_API JSFunction* JS_DefineFunctionById(
 void JS::TransitiveCompileOptions::copyPODTransitiveOptions(
     const TransitiveCompileOptions& rhs) {
   mutedErrors_ = rhs.mutedErrors_;
+  forceFullParse_ = rhs.forceFullParse_;
   selfHostingMode = rhs.selfHostingMode;
   canLazilyParse = rhs.canLazilyParse;
   strictOption = rhs.strictOption;
@@ -3463,12 +3474,12 @@ void JS::TransitiveCompileOptions::copyPODTransitiveOptions(
   asmJSOption = rhs.asmJSOption;
   throwOnAsmJSValidationFailureOption = rhs.throwOnAsmJSValidationFailureOption;
   forceAsync = rhs.forceAsync;
+  discardSource = rhs.discardSource;
   sourceIsLazy = rhs.sourceIsLazy;
   introductionType = rhs.introductionType;
   introductionLineno = rhs.introductionLineno;
   introductionOffset = rhs.introductionOffset;
   hasIntroductionInfo = rhs.hasIntroductionInfo;
-  isProbablySystemCode = rhs.isProbablySystemCode;
   hideScriptFromDebugger = rhs.hideScriptFromDebugger;
   bigIntEnabledOption = rhs.bigIntEnabledOption;
   fieldsEnabledOption = rhs.fieldsEnabledOption;
@@ -3492,12 +3503,18 @@ JS::OwningCompileOptions::OwningCompileOptions(JSContext* cx)
       introductionScriptRoot(cx),
       scriptOrModuleRoot(cx) {}
 
-JS::OwningCompileOptions::~OwningCompileOptions() {
+void JS::OwningCompileOptions::release() {
   // OwningCompileOptions always owns these, so these casts are okay.
   js_free(const_cast<char*>(filename_));
   js_free(const_cast<char16_t*>(sourceMapURL_));
   js_free(const_cast<char*>(introducerFilename_));
+
+  filename_ = nullptr;
+  sourceMapURL_ = nullptr;
+  introducerFilename_ = nullptr;
 }
+
+JS::OwningCompileOptions::~OwningCompileOptions() { release(); }
 
 size_t JS::OwningCompileOptions::sizeOfExcludingThis(
     mozilla::MallocSizeOf mallocSizeOf) const {
@@ -3507,75 +3524,38 @@ size_t JS::OwningCompileOptions::sizeOfExcludingThis(
 
 bool JS::OwningCompileOptions::copy(JSContext* cx,
                                     const ReadOnlyCompileOptions& rhs) {
+  // Release existing string allocations.
+  release();
+
   copyPODOptions(rhs);
 
-  setElement(rhs.element());
-  setElementAttributeName(rhs.elementAttributeName());
-  setIntroductionScript(rhs.introductionScript());
-  setScriptOrModule(rhs.scriptOrModule());
+  elementRoot = rhs.element();
+  elementAttributeNameRoot = rhs.elementAttributeName();
+  introductionScriptRoot = rhs.introductionScript();
+  scriptOrModuleRoot = rhs.scriptOrModule();
 
-  return setFileAndLine(cx, rhs.filename(), rhs.lineno) &&
-         setSourceMapURL(cx, rhs.sourceMapURL()) &&
-         setIntroducerFilename(cx, rhs.introducerFilename());
-}
-
-bool JS::OwningCompileOptions::setFile(JSContext* cx, const char* f) {
-  char* copy = nullptr;
-  if (f) {
-    copy = DuplicateString(cx, f).release();
-    if (!copy) {
+  if (rhs.filename()) {
+    filename_ = DuplicateString(cx, rhs.filename()).release();
+    if (!filename_) {
       return false;
     }
   }
 
-  // OwningCompileOptions always owns filename_, so this cast is okay.
-  js_free(const_cast<char*>(filename_));
-
-  filename_ = copy;
-  return true;
-}
-
-bool JS::OwningCompileOptions::setFileAndLine(JSContext* cx, const char* f,
-                                              unsigned l) {
-  if (!setFile(cx, f)) {
-    return false;
-  }
-
-  lineno = l;
-  return true;
-}
-
-bool JS::OwningCompileOptions::setSourceMapURL(JSContext* cx,
-                                               const char16_t* s) {
-  UniqueTwoByteChars copy;
-  if (s) {
-    copy = DuplicateString(cx, s);
-    if (!copy) {
+  if (rhs.sourceMapURL()) {
+    sourceMapURL_ = DuplicateString(cx, rhs.sourceMapURL()).release();
+    if (!sourceMapURL_) {
       return false;
     }
   }
 
-  // OwningCompileOptions always owns sourceMapURL_, so this cast is okay.
-  js_free(const_cast<char16_t*>(sourceMapURL_));
-
-  sourceMapURL_ = copy.release();
-  return true;
-}
-
-bool JS::OwningCompileOptions::setIntroducerFilename(JSContext* cx,
-                                                     const char* s) {
-  char* copy = nullptr;
-  if (s) {
-    copy = DuplicateString(cx, s).release();
-    if (!copy) {
+  if (rhs.introducerFilename()) {
+    introducerFilename_ =
+        DuplicateString(cx, rhs.introducerFilename()).release();
+    if (!introducerFilename_) {
       return false;
     }
   }
 
-  // OwningCompileOptions always owns introducerFilename_, so this cast is okay.
-  js_free(const_cast<char*>(introducerFilename_));
-
-  introducerFilename_ = copy;
   return true;
 }
 
@@ -3587,7 +3567,7 @@ JS::CompileOptions::CompileOptions(JSContext* cx)
       scriptOrModuleRoot(cx) {
   strictOption = cx->options().strictMode();
   extraWarningsOption = cx->realm()->behaviors().extraWarnings(cx);
-  isProbablySystemCode = cx->realm()->isProbablySystemCode();
+  discardSource = cx->realm()->behaviors().discardSource();
   werrorOption = cx->options().werror();
   if (!cx->options().asmJS()) {
     asmJSOption = AsmJSOption::Disabled;
@@ -3600,6 +3580,13 @@ JS::CompileOptions::CompileOptions(JSContext* cx)
       cx->options().throwOnAsmJSValidationFailure();
   bigIntEnabledOption = cx->realm()->creationOptions().getBigIntEnabled();
   fieldsEnabledOption = cx->realm()->creationOptions().getFieldsEnabled();
+
+  // Certain modes of operation disallow syntax parsing in general. The replay
+  // debugger requires scripts to be constructed in a consistent order, which
+  // might not happen with lazy parsing.
+  forceFullParse_ = cx->realm()->behaviors().disableLazyParsing() ||
+                    coverage::IsLCovEnabled() ||
+                    mozilla::recordreplay::IsRecordingOrReplaying();
 }
 
 CompileOptions& CompileOptions::setIntroductionInfoToCaller(

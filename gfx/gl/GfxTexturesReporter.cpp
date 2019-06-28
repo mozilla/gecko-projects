@@ -19,7 +19,7 @@ Atomic<size_t> GfxTexturesReporter::sAmount(0);
 Atomic<size_t> GfxTexturesReporter::sPeakAmount(0);
 Atomic<size_t> GfxTexturesReporter::sTileWasteAmount(0);
 
-std::string FormatBytes(size_t amount) {
+static std::string FormatBytes(size_t amount) {
   std::stringstream stream;
   int depth = 0;
   double val = amount;
@@ -59,7 +59,7 @@ void GfxTexturesReporter::UpdateAmount(MemoryUse action, size_t amount) {
         "GFX: Current texture usage greater than update amount.");
     sAmount -= amount;
 
-    if (StaticPrefs::GfxLoggingTextureUsageEnabled()) {
+    if (StaticPrefs::gfx_logging_texture_usage_enabled()) {
       printf_stderr("Current texture usage: %s\n",
                     FormatBytes(sAmount).c_str());
     }
@@ -67,7 +67,7 @@ void GfxTexturesReporter::UpdateAmount(MemoryUse action, size_t amount) {
     sAmount += amount;
     if (sAmount > sPeakAmount) {
       sPeakAmount.exchange(sAmount);
-      if (StaticPrefs::GfxLoggingPeakTextureUsageEnabled()) {
+      if (StaticPrefs::gfx_logging_peak_texture_usage_enabled()) {
         printf_stderr("Peak texture usage: %s\n",
                       FormatBytes(sPeakAmount).c_str());
       }

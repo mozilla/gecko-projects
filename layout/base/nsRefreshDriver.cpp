@@ -52,6 +52,7 @@
 #include "nsViewManager.h"
 #include "GeckoProfiler.h"
 #include "nsNPAPIPluginInstance.h"
+#include "mozilla/dom/CallbackDebuggerNotification.h"
 #include "mozilla/dom/Event.h"
 #include "mozilla/dom/Performance.h"
 #include "mozilla/dom/Selection.h"
@@ -1695,6 +1696,12 @@ void nsRefreshDriver::RunFrameRequestCallbacks(TimeStamp aNowTime) {
                 callback.mHandle)) {
           continue;
         }
+
+        nsCOMPtr<nsIGlobalObject> global(innerWindow ? innerWindow->AsGlobal()
+                                                     : nullptr);
+        CallbackDebuggerNotificationGuard guard(
+            global, DebuggerNotificationType::RequestAnimationFrameCallback);
+
         // MOZ_KnownLive is OK, because the stack array frameRequestCallbacks
         // keeps callback alive and the mCallback strong reference can't be
         // mutated by the call.
@@ -1859,7 +1866,7 @@ void nsRefreshDriver::Tick(VsyncId aId, TimeStamp aNowTime) {
   // We want to process any pending APZ metrics ahead of their positions
   // in the queue. This will prevent us from spending precious time
   // painting a stale displayport.
-  if (StaticPrefs::APZPeekMessages()) {
+  if (StaticPrefs::apz_peek_messages_enabled()) {
     nsLayoutUtils::UpdateDisplayPortMarginsFromPendingMessages();
   }
 
@@ -2134,7 +2141,7 @@ void nsRefreshDriver::Tick(VsyncId aId, TimeStamp aNowTime) {
   NS_ASSERTION(mInRefresh, "Still in refresh");
 
   if (mPresContext->IsRoot() && XRE_IsContentProcess() &&
-      StaticPrefs::AlwaysPaint()) {
+      StaticPrefs::gfx_content_always_paint()) {
     ScheduleViewManagerFlush();
   }
 

@@ -44,6 +44,7 @@ class MessagePort;
 class MessagePortIdentifier;
 class PerformanceStorage;
 class RemoteWorkerChild;
+class TimeoutHandler;
 class WorkerControlRunnable;
 class WorkerCSPEventListener;
 class WorkerDebugger;
@@ -249,8 +250,8 @@ class WorkerPrivate : public RelativeTimeline {
   static void ReportErrorToConsole(const char* aMessage,
                                    const nsTArray<nsString>& aParams);
 
-  int32_t SetTimeout(JSContext* aCx, nsIScriptTimeoutHandler* aHandler,
-                     int32_t aTimeout, bool aIsInterval, ErrorResult& aRv);
+  int32_t SetTimeout(JSContext* aCx, TimeoutHandler* aHandler, int32_t aTimeout,
+                     bool aIsInterval, ErrorResult& aRv);
 
   void ClearTimeout(int32_t aId);
 
@@ -276,6 +277,8 @@ class WorkerPrivate : public RelativeTimeline {
   void UpdateGCZealInternal(JSContext* aCx, uint8_t aGCZeal,
                             uint32_t aFrequency);
 #endif
+
+  void SetLowMemoryStateInternal(JSContext* aCx, bool aState);
 
   void GarbageCollectInternal(JSContext* aCx, bool aShrinking,
                               bool aCollectChildren);
@@ -714,15 +717,17 @@ class WorkerPrivate : public RelativeTimeline {
     return *mLoadInfo.mCSPInfo;
   }
 
-  void SetReferrerPolicyFromHeaderValue(
+  void UpdateReferrerInfoFromHeader(
       const nsACString& aReferrerPolicyHeaderValue);
 
-  net::ReferrerPolicy GetReferrerPolicy() const {
-    return mLoadInfo.mReferrerPolicy;
+  nsIReferrerInfo* GetReferrerInfo() const { return mLoadInfo.mReferrerInfo; }
+
+  uint32_t GetReferrerPolicy() const {
+    return mLoadInfo.mReferrerInfo->GetReferrerPolicy();
   }
 
-  void SetReferrerPolicy(net::ReferrerPolicy aReferrerPolicy) {
-    mLoadInfo.mReferrerPolicy = aReferrerPolicy;
+  void SetReferrerInfo(nsIReferrerInfo* aReferrerInfo) {
+    mLoadInfo.mReferrerInfo = aReferrerInfo;
   }
 
   bool IsEvalAllowed() const { return mLoadInfo.mEvalAllowed; }
@@ -799,6 +804,8 @@ class WorkerPrivate : public RelativeTimeline {
       already_AddRefed<nsIRunnable> aRunnable);
 
   bool ProxyReleaseMainThreadObjects();
+
+  void SetLowMemoryState(bool aState);
 
   void GarbageCollect(bool aShrinking);
 

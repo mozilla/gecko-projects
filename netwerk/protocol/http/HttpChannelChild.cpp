@@ -1785,7 +1785,7 @@ void HttpChannelChild::Redirect1Begin(
   nsCOMPtr<nsIURI> uri = DeserializeURI(newOriginalURI);
 
   mTransactionTimings = timing;
-  PROFILER_ADD_NETWORK_MARKER(mURI, mPriority, channelId,
+  PROFILER_ADD_NETWORK_MARKER(mURI, mPriority, mChannelId,
                               NetworkLoadType::LOAD_REDIRECT,
                               mLastStatusReported, TimeStamp::Now(), 0,
                               kCacheUnknown, &mTransactionTimings, uri);
@@ -2258,6 +2258,11 @@ HttpChannelChild::CompleteRedirectSetup(nsIStreamListener* listener,
    * channel reflect AsyncOpen'ed state.
    */
 
+  mLastStatusReported = TimeStamp::Now();
+  PROFILER_ADD_NETWORK_MARKER(mURI, mPriority, mChannelId,
+                              NetworkLoadType::LOAD_START,
+                              mChannelCreationTimestamp, mLastStatusReported, 0,
+                              kCacheUnknown, nullptr, nullptr);
   mIsPending = true;
   mWasOpened = true;
   mListener = listener;
@@ -2907,6 +2912,8 @@ nsresult HttpChannelChild::ContinueAsyncOpen() {
   openArgs.forceMainDocumentChannel() = mForceMainDocumentChannel;
 
   openArgs.navigationStartTimeStamp() = navigationStartTimeStamp;
+  openArgs.hasSandboxedAuxiliaryNavigations() =
+      GetHasSandboxedAuxiliaryNavigations();
 
   // This must happen before the constructor message is sent. Otherwise messages
   // from the parent could arrive quickly and be delivered to the wrong event

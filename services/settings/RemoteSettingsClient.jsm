@@ -220,11 +220,11 @@ class RemoteSettingsClient extends EventEmitter {
         // We'll try to avoid returning an empty list.
         if (await Utils.hasLocalDump(this.bucketName, this.collectionName)) {
           // Since there is a JSON dump, load it as default data.
-          console.debug("Local DB is empty, load JSON dump");
+          console.debug(`${this.identifier} Local DB is empty, load JSON dump`);
           await RemoteSettingsWorker.importJSONDump(this.bucketName, this.collectionName);
         } else {
           // There is no JSON dump, force a synchronization from the server.
-          console.debug("Local DB is empty, pull data from server");
+          console.debug(`${this.identifier} Local DB is empty, pull data from server`);
           await this.sync({ loadDump: false });
         }
         // Either from trusted dump, or already done during sync.
@@ -241,7 +241,7 @@ class RemoteSettingsClient extends EventEmitter {
     const { data } = await kintoCollection.list({ filters, order });
 
     if (verifySignature) {
-      console.debug("Verify signature of local data");
+      console.debug(`${this.identifier} verify signature of local data`);
       const { data: allData } = await kintoCollection.list({ order: "" });
       const localRecords = allData.map(r => kintoCollection.cleanLocalFields(r));
       const timestamp = await kintoCollection.db.getLastModified();
@@ -315,8 +315,8 @@ class RemoteSettingsClient extends EventEmitter {
           const imported = await RemoteSettingsWorker.importJSONDump(this.bucketName, this.collectionName);
           // The worker only returns an integer. List the imported records to build the sync event.
           if (imported > 0) {
-            console.debug(`${imported} records loaded from JSON dump`);
-            ({ data: importedFromDump } = await kintoCollection.list());
+            console.debug(`${this.identifier} ${imported} records loaded from JSON dump`);
+            ({ data: importedFromDump } = await kintoCollection.list({ order: "" }));
           }
           collectionLastModified = await kintoCollection.db.getLastModified();
         } catch (e) {
@@ -332,8 +332,12 @@ class RemoteSettingsClient extends EventEmitter {
         // If the data is up-to-date but don't have metadata (records loaded from dump),
         // we fetch them and validate the signature immediately.
         if (this.verifySignature && ObjectUtils.isEmpty(await kintoCollection.metadata())) {
-          console.debug("Verify signature of local data");
-          const { data: allData } = await kintoCollection.list({ order: "" });
+          console.debug(`${this.identifier} verify signature of local data`);
+          let allData = importedFromDump;
+          if (importedFromDump.length == 0) {
+            // If dump was imported at some other point (eg. `.get()`), list local DB.
+            ({ data: allData } = await kintoCollection.list({ order: "" }));
+          }
           const localRecords = allData.map(r => kintoCollection.cleanLocalFields(r));
           const metadata = await kintoCollection.pullMetadata(this.httpClient());
           if (this.verifySignature) {
@@ -378,7 +382,19 @@ class RemoteSettingsClient extends EventEmitter {
         }
         // The records imported from the dump should be considered as "created" for the
         // listeners.
-        syncResult.created = importedFromDump.concat(syncResult.created);
+        const importedById = importedFromDump.reduce((acc, r) => {
+          acc.set(r.id, r);
+          return acc;
+        }, new Map());
+        // Deleted records should not appear as created.
+        syncResult.deleted.forEach(r => importedById.delete(r.id));
+        // Records from dump that were updated should appear in their newest form.
+        syncResult.updated.forEach(u => {
+          if (importedById.has(u.old.id)) {
+            importedById.set(u.old.id, u.new);
+          }
+        });
+        syncResult.add("created", Array.from(importedById.values()));
       } catch (e) {
         if (e instanceof RemoteSettingsClient.InvalidSignatureError) {
           // Signature verification failed during synchronization.
@@ -452,6 +468,7 @@ class RemoteSettingsClient extends EventEmitter {
         trigger,
         duration: durationMilliseconds,
       });
+      console.debug(`${this.identifier} sync status is ${reportStatus}`);
     }
   }
 

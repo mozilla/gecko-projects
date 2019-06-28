@@ -880,15 +880,8 @@ class Side(object):
         self.ident = name.lower()
         self.index = index
 
-class GridLine(object):
-    def __init__(self, name):
-        self.ident = "grid-" + name.lower()
-        self.name = self.ident.replace('-', '_')
-        self.gecko = "m" + to_camel_case(self.ident)
-
 SIDES = [Side("Top", 0), Side("Right", 1), Side("Bottom", 2), Side("Left", 3)]
 CORNERS = ["top_left", "top_right", "bottom_right", "bottom_left"]
-GRID_LINES = map(GridLine, ["row-start", "row-end", "column-start", "column-end"])
 %>
 
 #[allow(dead_code)]
@@ -1077,14 +1070,14 @@ fn static_assert() {
     % endfor
 </%self:impl_trait>
 
-<% skip_position_longhands = " ".join(x.ident for x in SIDES + GRID_LINES) %>
+<% skip_position_longhands = " ".join(x.ident for x in SIDES) %>
 <%self:impl_trait style_struct_name="Position"
                   skip_longhands="${skip_position_longhands} order
                                   align-content justify-content align-self
                                   justify-self align-items justify-items
                                   grid-auto-rows grid-auto-columns
-                                  grid-auto-flow grid-template-areas
-                                  grid-template-rows grid-template-columns">
+                                  grid-auto-flow grid-template-rows
+                                  grid-template-columns">
     % for side in SIDES:
     <% impl_split_style_coord(side.ident, "mOffset", side.index) %>
     % endfor
@@ -1132,55 +1125,6 @@ fn static_assert() {
 
     ${impl_simple_copy('order', 'mOrder')}
 
-    % for value in GRID_LINES:
-    pub fn set_${value.name}(&mut self, v: longhands::${value.name}::computed_value::T) {
-        use crate::gecko_bindings::structs::{nsStyleGridLine_kMinLine, nsStyleGridLine_kMaxLine};
-
-        let ident = v.ident.as_ref().map_or(&[] as &[_], |ident| ident.0.as_slice());
-        self.gecko.${value.gecko}.mLineName.assign(ident);
-        self.gecko.${value.gecko}.mHasSpan = v.is_span;
-        if let Some(integer) = v.line_num {
-            // clamping the integer between a range
-            self.gecko.${value.gecko}.mInteger = cmp::max(nsStyleGridLine_kMinLine,
-                cmp::min(integer, nsStyleGridLine_kMaxLine));
-        }
-    }
-
-    pub fn copy_${value.name}_from(&mut self, other: &Self) {
-        self.gecko.${value.gecko}.mHasSpan = other.gecko.${value.gecko}.mHasSpan;
-        self.gecko.${value.gecko}.mInteger = other.gecko.${value.gecko}.mInteger;
-        self.gecko.${value.gecko}.mLineName.assign(&*other.gecko.${value.gecko}.mLineName);
-    }
-
-    pub fn reset_${value.name}(&mut self, other: &Self) {
-        self.copy_${value.name}_from(other)
-    }
-
-    pub fn clone_${value.name}(&self) -> longhands::${value.name}::computed_value::T {
-        use crate::gecko_bindings::structs::{nsStyleGridLine_kMinLine, nsStyleGridLine_kMaxLine};
-
-        longhands::${value.name}::computed_value::T {
-            is_span: self.gecko.${value.gecko}.mHasSpan,
-            ident: {
-                let name = self.gecko.${value.gecko}.mLineName.to_string();
-                if name.len() == 0 {
-                    None
-                } else {
-                    Some(CustomIdent(Atom::from(name)))
-                }
-            },
-            line_num:
-                if self.gecko.${value.gecko}.mInteger == 0 {
-                    None
-                } else {
-                    debug_assert!(nsStyleGridLine_kMinLine <= self.gecko.${value.gecko}.mInteger);
-                    debug_assert!(self.gecko.${value.gecko}.mInteger <= nsStyleGridLine_kMaxLine);
-                    Some(self.gecko.${value.gecko}.mInteger)
-                },
-        }
-    }
-    % endfor
-
     % for kind in ["rows", "columns"]:
     pub fn set_grid_auto_${kind}(&mut self, v: longhands::grid_auto_${kind}::computed_value::T) {
         let gecko = &mut *self.gecko;
@@ -1204,25 +1148,26 @@ fn static_assert() {
 
     pub fn set_grid_template_${kind}(&mut self, v: longhands::grid_template_${kind}::computed_value::T) {
         <% self_grid = "self.gecko.mGridTemplate%s" % kind.title() %>
-        use crate::gecko_bindings::structs::{nsTArray, nsStyleGridLine_kMaxLine};
-        use nsstring::nsString;
+        use crate::gecko_bindings::structs::nsTArray;
         use std::usize;
         use crate::values::CustomIdent;
         use crate::values::generics::grid::TrackListType::Auto;
-        use crate::values::generics::grid::{GridTemplateComponent, RepeatCount};
+        use crate::values::generics::grid::{GridTemplateComponent, RepeatCount, MAX_GRID_LINE};
 
         #[inline]
-        fn set_line_names(servo_names: &[CustomIdent], gecko_names: &mut nsTArray<nsString>) {
+        fn set_line_names(servo_names: &[CustomIdent], gecko_names: &mut nsTArray<structs::RefPtr<structs::nsAtom>>) {
             unsafe {
-                bindings::Gecko_ResizeTArrayForStrings(gecko_names, servo_names.len() as u32);
+                bindings::Gecko_ResizeAtomArray(gecko_names, servo_names.len() as u32);
             }
 
             for (servo_name, gecko_name) in servo_names.iter().zip(gecko_names.iter_mut()) {
-                gecko_name.assign(servo_name.0.as_slice());
+                gecko_name.set_move(unsafe {
+                    RefPtr::from_addrefed(servo_name.0.clone().into_addrefed())
+                });
             }
         }
 
-        let max_lines = nsStyleGridLine_kMaxLine as usize - 1;      // for accounting the final <line-names>
+        let max_lines = MAX_GRID_LINE as usize - 1; // for accounting the final <line-names>
 
         let result = match v {
             GridTemplateComponent::None => ptr::null_mut(),
@@ -1256,9 +1201,9 @@ fn static_assert() {
                     auto_track_size = Some(auto_repeat.track_sizes.get(0).unwrap().clone());
                 } else {
                     unsafe {
-                        bindings::Gecko_ResizeTArrayForStrings(
+                        bindings::Gecko_ResizeAtomArray(
                             &mut value.mRepeatAutoLineNameListBefore, 0);
-                        bindings::Gecko_ResizeTArrayForStrings(
+                        bindings::Gecko_ResizeAtomArray(
                             &mut value.mRepeatAutoLineNameListAfter, 0);
                     }
                 }
@@ -1332,7 +1277,6 @@ fn static_assert() {
     pub fn clone_grid_template_${kind}(&self) -> longhands::grid_template_${kind}::computed_value::T {
         <% self_grid = "self.gecko.mGridTemplate%s" % kind.title() %>
         use crate::gecko_bindings::structs::nsTArray;
-        use nsstring::nsString;
         use crate::values::CustomIdent;
         use crate::values::generics::grid::{GridTemplateComponent, LineNameList, RepeatCount};
         use crate::values::generics::grid::{TrackList, TrackListType, TrackListValue, TrackRepeat, TrackSize};
@@ -1343,16 +1287,17 @@ fn static_assert() {
         };
 
         #[inline]
-        fn to_boxed_customident_slice(gecko_names: &nsTArray<nsString>) -> Box<[CustomIdent]> {
+        fn to_boxed_customident_slice(gecko_names: &nsTArray<structs::RefPtr<structs::nsAtom>>) -> Box<[CustomIdent]> {
             let idents: Vec<CustomIdent> = gecko_names.iter().map(|gecko_name| {
-                CustomIdent(Atom::from(gecko_name.to_string()))
+                CustomIdent(unsafe { Atom::from_raw(gecko_name.mRawPtr) })
             }).collect();
             idents.into_boxed_slice()
         }
 
         #[inline]
-        fn to_line_names_vec(gecko_line_names: &nsTArray<nsTArray<nsString>>)
-            -> Vec<Box<[CustomIdent]>> {
+        fn to_line_names_vec(
+            gecko_line_names: &nsTArray<nsTArray<structs::RefPtr<structs::nsAtom>>>,
+        ) -> Vec<Box<[CustomIdent]>> {
             gecko_line_names.iter().map(|gecko_names| {
                 to_boxed_customident_slice(gecko_names)
             }).collect()
@@ -1415,89 +1360,6 @@ fn static_assert() {
     % endfor
 
     ${impl_simple_type_with_conversion("grid_auto_flow")}
-
-    pub fn set_grid_template_areas(&mut self, v: values::computed::position::GridTemplateAreas) {
-        use crate::gecko_bindings::bindings::Gecko_NewGridTemplateAreasValue;
-        use crate::gecko_bindings::sugar::refptr::UniqueRefPtr;
-
-        let v = match v {
-            Either::First(areas) => areas,
-            Either::Second(_) => {
-                unsafe { self.gecko.mGridTemplateAreas.clear() }
-                return;
-            },
-        };
-
-        let mut refptr = unsafe {
-            UniqueRefPtr::from_addrefed(
-                Gecko_NewGridTemplateAreasValue(v.0.areas.len() as u32, v.0.strings.len() as u32, v.0.width))
-        };
-
-        for (servo, gecko) in v.0.areas.into_iter().zip(refptr.mNamedAreas.iter_mut()) {
-            gecko.mName.assign_str(&*servo.name);
-            gecko.mColumnStart = servo.columns.start;
-            gecko.mColumnEnd = servo.columns.end;
-            gecko.mRowStart = servo.rows.start;
-            gecko.mRowEnd = servo.rows.end;
-        }
-
-        for (servo, gecko) in v.0.strings.into_iter().zip(refptr.mTemplates.iter_mut()) {
-            gecko.assign_str(&*servo);
-        }
-
-        self.gecko.mGridTemplateAreas.set_move(refptr.get())
-    }
-
-    pub fn copy_grid_template_areas_from(&mut self, other: &Self) {
-        unsafe { self.gecko.mGridTemplateAreas.set(&other.gecko.mGridTemplateAreas) }
-    }
-
-    pub fn reset_grid_template_areas(&mut self, other: &Self) {
-        self.copy_grid_template_areas_from(other)
-    }
-
-    pub fn clone_grid_template_areas(&self) -> values::computed::position::GridTemplateAreas {
-        use std::ops::Range;
-        use crate::values::None_;
-        use crate::values::specified::position::{NamedArea, TemplateAreas, TemplateAreasArc};
-
-        if self.gecko.mGridTemplateAreas.mRawPtr.is_null() {
-            return Either::Second(None_);
-        }
-
-        let gecko_grid_template_areas = self.gecko.mGridTemplateAreas.mRawPtr;
-        let areas = unsafe {
-            let vec: Vec<NamedArea> =
-                (*gecko_grid_template_areas).mNamedAreas.iter().map(|gecko_name_area| {
-                    let name = gecko_name_area.mName.to_string().into_boxed_str();
-                    let rows = Range {
-                        start: gecko_name_area.mRowStart,
-                        end: gecko_name_area.mRowEnd
-                    };
-                    let columns = Range {
-                        start: gecko_name_area.mColumnStart,
-                        end: gecko_name_area.mColumnEnd
-                    };
-                    NamedArea{ name, rows, columns }
-                }).collect();
-            vec.into_boxed_slice()
-        };
-
-        let strings = unsafe {
-            let vec: Vec<Box<str>> =
-                (*gecko_grid_template_areas).mTemplates.iter().map(|gecko_template| {
-                    gecko_template.to_string().into_boxed_str()
-                }).collect();
-            vec.into_boxed_slice()
-        };
-
-        let width = unsafe {
-            (*gecko_grid_template_areas).mNColumns
-        };
-
-        Either::First(TemplateAreasArc(Arc::new(TemplateAreas{ areas, strings, width })))
-    }
-
 </%self:impl_trait>
 
 <% skip_outline_longhands = " ".join("outline-style outline-width".split() +

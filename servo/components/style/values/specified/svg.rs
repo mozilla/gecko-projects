@@ -36,7 +36,7 @@ pub type SVGStrokeDashArray = generic::SVGStrokeDashArray<NonNegativeLengthPerce
 #[cfg(feature = "gecko")]
 pub fn is_context_value_enabled() -> bool {
     use crate::gecko_bindings::structs::mozilla;
-    unsafe { mozilla::StaticPrefs_sVarCache_gfx_font_rendering_opentype_svg_enabled }
+    unsafe { mozilla::StaticPrefs::sVarCache_gfx_font_rendering_opentype_svg_enabled }
 }
 
 /// Whether the `context-value` value is enabled.
@@ -200,7 +200,7 @@ impl Parse for SVGPaintOrder {
 
         // fill in rest
         for i in pos..PAINT_ORDER_COUNT {
-            for paint in 0..PAINT_ORDER_COUNT {
+            for paint in 1..(PAINT_ORDER_COUNT + 1) {
                 // if not seen, set bit at position, mark as seen
                 if (seen & (1 << paint)) == 0 {
                     seen |= 1 << paint;

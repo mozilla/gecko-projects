@@ -304,8 +304,6 @@ var interfaceNamesInGlobalScope =
 // IMPORTANT: Do not change this list without review from a DOM peer!
     {name: "DocumentType", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    {name: "DOMError", insecureContext: true},
-// IMPORTANT: Do not change this list without review from a DOM peer!
     {name: "DOMException", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
     {name: "DOMImplementation", insecureContext: true},
@@ -842,11 +840,11 @@ var interfaceNamesInGlobalScope =
 // IMPORTANT: Do not change this list without review from a DOM peer!
     {name: "Request", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    {name: "ResizeObserver", insecureContext: true, nightly: true},
+    {name: "ResizeObserver", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    {name: "ResizeObserverEntry", insecureContext: true, nightly: true},
+    {name: "ResizeObserverEntry", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    {name: "ResizeObserverSize", insecureContext: true, nightly: true},
+    {name: "ResizeObserverSize", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
     {name: "Response", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!

@@ -42,9 +42,9 @@ already_AddRefed<DOMMatrixReadOnly> DOMMatrixReadOnly::Constructor(
     const GlobalObject& aGlobal,
     const Optional<StringOrUnrestrictedDoubleSequence>& aArg,
     ErrorResult& aRv) {
-  RefPtr<DOMMatrixReadOnly> rval =
-      new DOMMatrixReadOnly(aGlobal.GetAsSupports());
   if (!aArg.WasPassed()) {
+    RefPtr<DOMMatrixReadOnly> rval =
+        new DOMMatrixReadOnly(aGlobal.GetAsSupports());
     return rval.forget();
   }
 
@@ -56,11 +56,34 @@ already_AddRefed<DOMMatrixReadOnly> DOMMatrixReadOnly::Constructor(
       aRv.ThrowTypeError<MSG_ILLEGAL_CONSTRUCTOR>();
       return nullptr;
     }
+    RefPtr<DOMMatrixReadOnly> rval =
+        new DOMMatrixReadOnly(aGlobal.GetAsSupports());
     rval->SetMatrixValue(arg.GetAsString(), aRv);
-  } else {
-    const auto& sequence = arg.GetAsUnrestrictedDoubleSequence();
-    SetDataInMatrix(rval, sequence.Elements(), sequence.Length(), aRv);
+    return rval.forget();
   }
+
+  const auto& sequence = arg.GetAsUnrestrictedDoubleSequence();
+  const int length = sequence.Length();
+  const bool is2D = length == 6;
+  RefPtr<DOMMatrixReadOnly> rval =
+      new DOMMatrixReadOnly(aGlobal.GetAsSupports(), is2D);
+  SetDataInMatrix(rval, sequence.Elements(), length, aRv);
+  return rval.forget();
+}
+
+already_AddRefed<DOMMatrixReadOnly> DOMMatrixReadOnly::ReadStructuredClone(
+    nsISupports* aParent, JSStructuredCloneReader* aReader) {
+  uint8_t is2D;
+
+  if (!JS_ReadBytes(aReader, &is2D, 1)) {
+    return nullptr;
+  }
+
+  RefPtr<DOMMatrixReadOnly> rval = new DOMMatrixReadOnly(aParent, is2D);
+
+  if (!ReadStructuredCloneElements(aReader, rval)) {
+    return nullptr;
+  };
 
   return rval.forget();
 }
@@ -152,13 +175,13 @@ already_AddRefed<DOMMatrix> DOMMatrixReadOnly::Multiply(
 already_AddRefed<DOMMatrix> DOMMatrixReadOnly::FlipX() const {
   RefPtr<DOMMatrix> retval = new DOMMatrix(mParent, *this);
   if (mMatrix3D) {
-    gfx::Matrix4x4 m;
+    gfx::Matrix4x4Double m;
     m._11 = -1;
-    retval->mMatrix3D = new gfx::Matrix4x4(m * *mMatrix3D);
+    retval->mMatrix3D = new gfx::Matrix4x4Double(m * *mMatrix3D);
   } else {
-    gfx::Matrix m;
+    gfx::MatrixDouble m;
     m._11 = -1;
-    retval->mMatrix2D = new gfx::Matrix(mMatrix2D ? m * *mMatrix2D : m);
+    retval->mMatrix2D = new gfx::MatrixDouble(mMatrix2D ? m * *mMatrix2D : m);
   }
 
   return retval.forget();
@@ -167,13 +190,13 @@ already_AddRefed<DOMMatrix> DOMMatrixReadOnly::FlipX() const {
 already_AddRefed<DOMMatrix> DOMMatrixReadOnly::FlipY() const {
   RefPtr<DOMMatrix> retval = new DOMMatrix(mParent, *this);
   if (mMatrix3D) {
-    gfx::Matrix4x4 m;
+    gfx::Matrix4x4Double m;
     m._22 = -1;
-    retval->mMatrix3D = new gfx::Matrix4x4(m * *mMatrix3D);
+    retval->mMatrix3D = new gfx::Matrix4x4Double(m * *mMatrix3D);
   } else {
-    gfx::Matrix m;
+    gfx::MatrixDouble m;
     m._22 = -1;
-    retval->mMatrix2D = new gfx::Matrix(mMatrix2D ? m * *mMatrix2D : m);
+    retval->mMatrix2D = new gfx::MatrixDouble(mMatrix2D ? m * *mMatrix2D : m);
   }
 
   return retval.forget();
@@ -214,9 +237,9 @@ already_AddRefed<DOMPoint> DOMMatrixReadOnly::TransformPoint(
     retval->SetZ(transformedPoint.z);
     retval->SetW(transformedPoint.w);
   } else if (point.mZ != 0 || point.mW != 1.0) {
-    gfx::Matrix4x4 tempMatrix(gfx::Matrix4x4::From2D(*mMatrix2D));
+    gfx::Matrix4x4Double tempMatrix(gfx::Matrix4x4Double::From2D(*mMatrix2D));
 
-    gfx::Point4D transformedPoint;
+    gfx::PointDouble4D transformedPoint;
     transformedPoint.x = point.mX;
     transformedPoint.y = point.mY;
     transformedPoint.z = point.mZ;
@@ -229,7 +252,7 @@ already_AddRefed<DOMPoint> DOMMatrixReadOnly::TransformPoint(
     retval->SetZ(transformedPoint.z);
     retval->SetW(transformedPoint.w);
   } else {
-    gfx::Point transformedPoint;
+    gfx::PointDouble transformedPoint;
     transformedPoint.x = point.mX;
     transformedPoint.y = point.mY;
 
@@ -356,6 +379,79 @@ void DOMMatrixReadOnly::Stringify(nsAString& aResult) {
   aResult = matrixStr;
 }
 
+// https://drafts.fxtf.org/geometry/#structured-serialization
+bool DOMMatrixReadOnly::WriteStructuredClone(
+    JSStructuredCloneWriter* aWriter) const {
+#define WriteDouble(d)                                                       \
+  JS_WriteUint32Pair(aWriter, (BitwiseCast<uint64_t>(d) >> 32) & 0xffffffff, \
+                     BitwiseCast<uint64_t>(d) & 0xffffffff)
+
+  const uint8_t is2D = Is2D();
+
+  if (!JS_WriteBytes(aWriter, &is2D, 1)) {
+    return false;
+  }
+
+  if (is2D == 1) {
+    return WriteDouble(mMatrix2D->_11) && WriteDouble(mMatrix2D->_12) &&
+           WriteDouble(mMatrix2D->_21) && WriteDouble(mMatrix2D->_22) &&
+           WriteDouble(mMatrix2D->_31) && WriteDouble(mMatrix2D->_32);
+  }
+
+  return WriteDouble(mMatrix3D->_11) && WriteDouble(mMatrix3D->_12) &&
+         WriteDouble(mMatrix3D->_13) && WriteDouble(mMatrix3D->_14) &&
+         WriteDouble(mMatrix3D->_21) && WriteDouble(mMatrix3D->_22) &&
+         WriteDouble(mMatrix3D->_23) && WriteDouble(mMatrix3D->_24) &&
+         WriteDouble(mMatrix3D->_31) && WriteDouble(mMatrix3D->_32) &&
+         WriteDouble(mMatrix3D->_33) && WriteDouble(mMatrix3D->_34) &&
+         WriteDouble(mMatrix3D->_41) && WriteDouble(mMatrix3D->_42) &&
+         WriteDouble(mMatrix3D->_43) && WriteDouble(mMatrix3D->_44);
+
+#undef WriteDouble
+}
+
+bool DOMMatrixReadOnly::ReadStructuredCloneElements(
+    JSStructuredCloneReader* aReader, DOMMatrixReadOnly* matrix) {
+  uint32_t high;
+  uint32_t low;
+
+#define ReadDouble(d)                             \
+  if (!JS_ReadUint32Pair(aReader, &high, &low)) { \
+    return false;                                 \
+  }                                               \
+  (*(d) = BitwiseCast<double>(static_cast<uint64_t>(high) << 32 | low))
+
+  if (matrix->Is2D() == 1) {
+    ReadDouble(&(matrix->mMatrix2D->_11));
+    ReadDouble(&(matrix->mMatrix2D->_12));
+    ReadDouble(&(matrix->mMatrix2D->_21));
+    ReadDouble(&(matrix->mMatrix2D->_22));
+    ReadDouble(&(matrix->mMatrix2D->_31));
+    ReadDouble(&(matrix->mMatrix2D->_32));
+  } else {
+    ReadDouble(&(matrix->mMatrix3D->_11));
+    ReadDouble(&(matrix->mMatrix3D->_12));
+    ReadDouble(&(matrix->mMatrix3D->_13));
+    ReadDouble(&(matrix->mMatrix3D->_14));
+    ReadDouble(&(matrix->mMatrix3D->_21));
+    ReadDouble(&(matrix->mMatrix3D->_22));
+    ReadDouble(&(matrix->mMatrix3D->_23));
+    ReadDouble(&(matrix->mMatrix3D->_24));
+    ReadDouble(&(matrix->mMatrix3D->_31));
+    ReadDouble(&(matrix->mMatrix3D->_32));
+    ReadDouble(&(matrix->mMatrix3D->_33));
+    ReadDouble(&(matrix->mMatrix3D->_34));
+    ReadDouble(&(matrix->mMatrix3D->_41));
+    ReadDouble(&(matrix->mMatrix3D->_42));
+    ReadDouble(&(matrix->mMatrix3D->_43));
+    ReadDouble(&(matrix->mMatrix3D->_44));
+  }
+
+  return true;
+
+#undef ReadDouble
+}
+
 already_AddRefed<DOMMatrix> DOMMatrix::Constructor(const GlobalObject& aGlobal,
                                                    ErrorResult& aRv) {
   RefPtr<DOMMatrix> obj = new DOMMatrix(aGlobal.GetAsSupports());
@@ -365,6 +461,11 @@ already_AddRefed<DOMMatrix> DOMMatrix::Constructor(const GlobalObject& aGlobal,
 already_AddRefed<DOMMatrix> DOMMatrix::Constructor(
     const GlobalObject& aGlobal, const nsAString& aTransformList,
     ErrorResult& aRv) {
+  nsCOMPtr<nsPIDOMWindowInner> win = do_QueryInterface(aGlobal.GetAsSupports());
+  if (!win) {
+    aRv.ThrowTypeError<MSG_ILLEGAL_CONSTRUCTOR>();
+    return nullptr;
+  }
   RefPtr<DOMMatrix> obj = new DOMMatrix(aGlobal.GetAsSupports());
   obj = obj->SetMatrixValue(aTransformList, aRv);
   return obj.forget();
@@ -414,9 +515,12 @@ static void SetDataInMatrix(DOMMatrixReadOnly* aMatrix, const T* aData,
 already_AddRefed<DOMMatrix> DOMMatrix::Constructor(const GlobalObject& aGlobal,
                                                    const Float32Array& aArray32,
                                                    ErrorResult& aRv) {
-  RefPtr<DOMMatrix> obj = new DOMMatrix(aGlobal.GetAsSupports());
   aArray32.ComputeLengthAndData();
-  SetDataInMatrix(obj, aArray32.Data(), aArray32.Length(), aRv);
+
+  const int length = aArray32.Length();
+  const bool is2D = length == 6;
+  RefPtr<DOMMatrix> obj = new DOMMatrix(aGlobal.GetAsSupports(), is2D);
+  SetDataInMatrix(obj, aArray32.Data(), length, aRv);
 
   return obj.forget();
 }
@@ -424,9 +528,12 @@ already_AddRefed<DOMMatrix> DOMMatrix::Constructor(const GlobalObject& aGlobal,
 already_AddRefed<DOMMatrix> DOMMatrix::Constructor(const GlobalObject& aGlobal,
                                                    const Float64Array& aArray64,
                                                    ErrorResult& aRv) {
-  RefPtr<DOMMatrix> obj = new DOMMatrix(aGlobal.GetAsSupports());
   aArray64.ComputeLengthAndData();
-  SetDataInMatrix(obj, aArray64.Data(), aArray64.Length(), aRv);
+
+  const int length = aArray64.Length();
+  const bool is2D = length == 6;
+  RefPtr<DOMMatrix> obj = new DOMMatrix(aGlobal.GetAsSupports(), is2D);
+  SetDataInMatrix(obj, aArray64.Data(), length, aRv);
 
   return obj.forget();
 }
@@ -434,16 +541,35 @@ already_AddRefed<DOMMatrix> DOMMatrix::Constructor(const GlobalObject& aGlobal,
 already_AddRefed<DOMMatrix> DOMMatrix::Constructor(
     const GlobalObject& aGlobal, const Sequence<double>& aNumberSequence,
     ErrorResult& aRv) {
-  RefPtr<DOMMatrix> obj = new DOMMatrix(aGlobal.GetAsSupports());
-  SetDataInMatrix(obj, aNumberSequence.Elements(), aNumberSequence.Length(),
-                  aRv);
+  const int length = aNumberSequence.Length();
+  const bool is2D = length == 6;
+  RefPtr<DOMMatrix> obj = new DOMMatrix(aGlobal.GetAsSupports(), is2D);
+  SetDataInMatrix(obj, aNumberSequence.Elements(), length, aRv);
 
   return obj.forget();
 }
 
+already_AddRefed<DOMMatrix> DOMMatrix::ReadStructuredClone(
+    nsISupports* aParent, JSStructuredCloneReader* aReader) {
+  uint8_t is2D;
+
+  if (!JS_ReadBytes(aReader, &is2D, 1)) {
+    return nullptr;
+  }
+
+  RefPtr<DOMMatrix> rval = new DOMMatrix(aParent, is2D);
+
+  if (!ReadStructuredCloneElements(aReader, rval)) {
+    return nullptr;
+  };
+
+  return rval.forget();
+}
+
 void DOMMatrixReadOnly::Ensure3DMatrix() {
   if (!mMatrix3D) {
-    mMatrix3D = new gfx::Matrix4x4(gfx::Matrix4x4::From2D(*mMatrix2D));
+    mMatrix3D =
+        new gfx::Matrix4x4Double(gfx::Matrix4x4Double::From2D(*mMatrix2D));
     mMatrix2D = nullptr;
   }
 }
@@ -455,7 +581,7 @@ DOMMatrix* DOMMatrix::MultiplySelf(const DOMMatrix& aOther) {
 
   if (aOther.Is2D()) {
     if (mMatrix3D) {
-      *mMatrix3D = gfx::Matrix4x4::From2D(*aOther.mMatrix2D) * *mMatrix3D;
+      *mMatrix3D = gfx::Matrix4x4Double::From2D(*aOther.mMatrix2D) * *mMatrix3D;
     } else {
       *mMatrix2D = *aOther.mMatrix2D * *mMatrix2D;
     }
@@ -474,7 +600,7 @@ DOMMatrix* DOMMatrix::PreMultiplySelf(const DOMMatrix& aOther) {
 
   if (aOther.Is2D()) {
     if (mMatrix3D) {
-      *mMatrix3D = *mMatrix3D * gfx::Matrix4x4::From2D(*aOther.mMatrix2D);
+      *mMatrix3D = *mMatrix3D * gfx::Matrix4x4Double::From2D(*aOther.mMatrix2D);
     } else {
       *mMatrix2D = *mMatrix2D * *aOther.mMatrix2D;
     }
@@ -526,13 +652,13 @@ DOMMatrix* DOMMatrix::ScaleNonUniformSelf(double aScaleX, double aScaleY,
 
   if (mMatrix3D || aScaleZ != 1.0 || aOriginZ != 0) {
     Ensure3DMatrix();
-    gfx::Matrix4x4 m;
+    gfx::Matrix4x4Double m;
     m._11 = aScaleX;
     m._22 = aScaleY;
     m._33 = aScaleZ;
     *mMatrix3D = m * *mMatrix3D;
   } else {
-    gfx::Matrix m;
+    gfx::MatrixDouble m;
     m._11 = aScaleX;
     m._22 = aScaleY;
     *mMatrix2D = m * *mMatrix2D;
@@ -581,7 +707,7 @@ DOMMatrix* DOMMatrix::RotateAxisAngleSelf(double aX, double aY, double aZ,
   aAngle *= radPerDegree;
 
   Ensure3DMatrix();
-  gfx::Matrix4x4 m;
+  gfx::Matrix4x4Double m;
   m.SetRotateAxisAngle(aX, aY, aZ, aAngle);
 
   *mMatrix3D = m * *mMatrix3D;
@@ -595,11 +721,11 @@ DOMMatrix* DOMMatrix::SkewXSelf(double aSx) {
   }
 
   if (mMatrix3D) {
-    gfx::Matrix4x4 m;
+    gfx::Matrix4x4Double m;
     m._21 = tan(aSx * radPerDegree);
     *mMatrix3D = m * *mMatrix3D;
   } else {
-    gfx::Matrix m;
+    gfx::MatrixDouble m;
     m._21 = tan(aSx * radPerDegree);
     *mMatrix2D = m * *mMatrix2D;
   }
@@ -613,11 +739,11 @@ DOMMatrix* DOMMatrix::SkewYSelf(double aSy) {
   }
 
   if (mMatrix3D) {
-    gfx::Matrix4x4 m;
+    gfx::Matrix4x4Double m;
     m._12 = tan(aSy * radPerDegree);
     *mMatrix3D = m * *mMatrix3D;
   } else {
-    gfx::Matrix m;
+    gfx::MatrixDouble m;
     m._12 = tan(aSy * radPerDegree);
     *mMatrix2D = m * *mMatrix2D;
   }
@@ -633,7 +759,7 @@ DOMMatrix* DOMMatrix::InvertSelf() {
   } else if (!mMatrix2D->Invert()) {
     mMatrix2D = nullptr;
 
-    mMatrix3D = new gfx::Matrix4x4();
+    mMatrix3D = new gfx::Matrix4x4Double();
     mMatrix3D->SetNAN();
   }
 
@@ -657,7 +783,9 @@ DOMMatrixReadOnly* DOMMatrixReadOnly::SetMatrixValue(
 
   if (!contains3dTransform) {
     mMatrix3D = nullptr;
-    mMatrix2D = new gfx::Matrix();
+    if (!mMatrix2D) {
+      mMatrix2D = new gfx::MatrixDouble();
+    }
 
     SetA(transform._11);
     SetB(transform._12);
@@ -666,7 +794,7 @@ DOMMatrixReadOnly* DOMMatrixReadOnly::SetMatrixValue(
     SetE(transform._41);
     SetF(transform._42);
   } else {
-    mMatrix3D = new gfx::Matrix4x4(transform);
+    mMatrix3D = new gfx::Matrix4x4Double(transform);
     mMatrix2D = nullptr;
   }
 

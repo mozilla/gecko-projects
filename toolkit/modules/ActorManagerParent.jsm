@@ -101,6 +101,21 @@ const {Services} = ChromeUtils.import("resource://gre/modules/Services.jsm");
 const {DefaultMap} = ExtensionUtils;
 
 let ACTORS = {
+  Autoplay: {
+    parent: {
+      moduleURI: "resource://gre/actors/AutoplayParent.jsm",
+    },
+
+    child: {
+      moduleURI: "resource://gre/actors/AutoplayChild.jsm",
+      events: {
+        "GloballyAutoplayBlocked": {},
+      },
+    },
+
+    allFrames: true,
+  },
+
   BrowserElement: {
     parent: {
       moduleURI: "resource://gre/actors/BrowserElementParent.jsm",
@@ -127,6 +142,48 @@ let ACTORS = {
 
     allFrames: true,
   },
+
+  Select: {
+    parent: {
+      moduleURI: "resource://gre/actors/SelectParent.jsm",
+    },
+
+    child: {
+      moduleURI: "resource://gre/actors/SelectChild.jsm",
+      events: {
+        "mozshowdropdown": {},
+        "mozshowdropdown-sourcetouch": {},
+        "mozhidedropdown": { mozSystemGroup: true },
+      },
+    },
+
+    allFrames: true,
+  },
+
+  Zoom: {
+    parent: {
+      moduleURI: "resource://gre/actors/ZoomParent.jsm",
+      messages: [
+        "FullZoomChange",
+        "TextZoomChange",
+        "ZoomChangeUsingMouseWheel",
+      ],
+    },
+    child: {
+      moduleURI: "resource://gre/actors/ZoomChild.jsm",
+      events: {
+        "FullZoomChange": {},
+        "TextZoomChange": {},
+        "ZoomChangeUsingMouseWheel": {},
+      },
+      messages: [
+        "FullZoom",
+        "TextZoom",
+      ],
+    },
+
+    allFrames: true,
+  },
 };
 
 let LEGACY_ACTORS = {
@@ -139,15 +196,6 @@ let LEGACY_ACTORS = {
       observers: [
         "audio-playback",
       ],
-    },
-  },
-
-  Autoplay: {
-    child: {
-      module: "resource://gre/actors/AutoplayChild.jsm",
-      events: {
-        "GloballyAutoplayBlocked": {},
-      },
     },
   },
 
@@ -291,16 +339,6 @@ let LEGACY_ACTORS = {
     },
   },
 
-  Select: {
-    child: {
-      module: "resource://gre/actors/SelectChild.jsm",
-      events: {
-        "mozshowdropdown": {},
-        "mozshowdropdown-sourcetouch": {},
-      },
-    },
-  },
-
   SelectionSource: {
     child: {
       module: "resource://gre/actors/SelectionSourceChild.jsm",
@@ -367,21 +405,6 @@ let LEGACY_ACTORS = {
         "WebNavigation:Reload",
         "WebNavigation:SetOriginAttributes",
         "WebNavigation:Stop",
-      ],
-    },
-  },
-
-  Zoom: {
-    child: {
-      module: "resource://gre/actors/ZoomChild.jsm",
-      events: {
-        "FullZoomChange": {},
-        "TextZoomChange": {},
-        "ZoomChangeUsingMouseWheel": {},
-      },
-      messages: [
-        "FullZoom",
-        "TextZoom",
       ],
     },
   },

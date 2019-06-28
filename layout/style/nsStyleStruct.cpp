@@ -46,9 +46,6 @@
 using namespace mozilla;
 using namespace mozilla::dom;
 
-/* static */ const int32_t nsStyleGridLine::kMinLine;
-/* static */ const int32_t nsStyleGridLine::kMaxLine;
-
 static const nscoord kMediumBorderWidth = nsPresContext::CSSPixelsToAppUnits(3);
 
 // We set the size limit of style structs to 504 bytes so that when they
@@ -1280,6 +1277,7 @@ nsStylePosition::nsStylePosition(const Document& aDocument)
       mGridAutoColumnsMax(eStyleUnit_Auto),
       mGridAutoRowsMin(eStyleUnit_Auto),
       mGridAutoRowsMax(eStyleUnit_Auto),
+      mAspectRatio(0.0f),
       mGridAutoFlow(NS_STYLE_GRID_AUTO_FLOW_ROW),
       mBoxSizing(StyleBoxSizing::Content),
       mAlignContent(NS_STYLE_ALIGN_NORMAL),
@@ -1296,6 +1294,7 @@ nsStylePosition::nsStylePosition(const Document& aDocument)
       mFlexGrow(0.0f),
       mFlexShrink(1.0f),
       mZIndex(StyleZIndex::Auto()),
+      mGridTemplateAreas(StyleGridTemplateAreas::None()),
       mColumnGap(NonNegativeLengthPercentageOrNormal::Normal()),
       mRowGap(NonNegativeLengthPercentageOrNormal::Normal()) {
   MOZ_COUNT_CTOR(nsStylePosition);
@@ -1305,7 +1304,6 @@ nsStylePosition::nsStylePosition(const Document& aDocument)
 
   // Other members get their default constructors
   // which initialize them to representations of their respective initial value.
-  // mGridTemplateAreas: nullptr for 'none'
   // mGridTemplate{Rows,Columns}: false and empty arrays for 'none'
   // mGrid{Column,Row}{Start,End}: false/0/empty values for 'auto'
 }
@@ -1326,6 +1324,7 @@ nsStylePosition::nsStylePosition(const nsStylePosition& aSource)
       mGridAutoColumnsMax(aSource.mGridAutoColumnsMax),
       mGridAutoRowsMin(aSource.mGridAutoRowsMin),
       mGridAutoRowsMax(aSource.mGridAutoRowsMax),
+      mAspectRatio(aSource.mAspectRatio),
       mGridAutoFlow(aSource.mGridAutoFlow),
       mBoxSizing(aSource.mBoxSizing),
       mAlignContent(aSource.mAlignContent),
@@ -1500,6 +1499,11 @@ nsChangeHint nsStylePosition::CalcDifference(
     hint |= nsChangeHint_ReflowHintsForISizeChange;
   }
 
+  if (mAspectRatio != aNewData.mAspectRatio) {
+    hint |= nsChangeHint_ReflowHintsForISizeChange |
+            nsChangeHint_ReflowHintsForBSizeChange;
+  }
+
   // If any of the offsets have changed, then return the respective hints
   // so that we would hopefully be able to avoid reflowing.
   // Note that it is possible that we'll need to reflow when processing
@@ -1512,7 +1516,7 @@ nsChangeHint nsStylePosition::CalcDifference(
       hint |=
           nsChangeHint_RecomputePosition | nsChangeHint_UpdateParentOverflow;
     } else {
-      hint |= nsChangeHint_AllReflowHints;
+      hint |= nsChangeHint_NeedReflow | nsChangeHint_ReflowChangesSizeOrPosition;
     }
   }
   return hint;
@@ -3886,6 +3890,7 @@ nsStyleEffects::nsStyleEffects(const Document&)
 nsStyleEffects::nsStyleEffects(const nsStyleEffects& aSource)
     : mFilters(aSource.mFilters),
       mBoxShadow(aSource.mBoxShadow),
+      mBackdropFilters(aSource.mBackdropFilters),
       mClip(aSource.mClip),
       mOpacity(aSource.mOpacity),
       mClipFlags(aSource.mClipFlags),
@@ -3946,6 +3951,10 @@ nsChangeHint nsStyleEffects::CalcDifference(
 
   if (mMixBlendMode != aNewData.mMixBlendMode) {
     hint |= nsChangeHint_RepaintFrame;
+  }
+
+  if (mBackdropFilters != aNewData.mBackdropFilters) {
+    hint |= nsChangeHint_UpdateEffects | nsChangeHint_RepaintFrame;
   }
 
   if (!hint && !mClip.IsEqualEdges(aNewData.mClip)) {

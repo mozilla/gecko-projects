@@ -789,7 +789,7 @@ static bool SampleAnimations(Layer* aLayer,
 }
 
 void AsyncCompositionManager::RecordShadowTransforms(Layer* aLayer) {
-  MOZ_ASSERT(StaticPrefs::CollectScrollTransforms());
+  MOZ_ASSERT(StaticPrefs::gfx_vsync_collect_scroll_transforms());
   MOZ_ASSERT(CompositorThreadHolder::IsInCompositorThread());
 
   ForEachNodePostOrder<ForwardIterator>(aLayer, [this](Layer* layer) {
@@ -1472,7 +1472,7 @@ bool AsyncCompositionManager::TransformShadowTree(
   trans *= gfx::Matrix4x4::From2D(mWorldTransform);
   rootComposite->SetShadowBaseTransform(trans);
 
-  if (StaticPrefs::CollectScrollTransforms()) {
+  if (StaticPrefs::gfx_vsync_collect_scroll_transforms()) {
     RecordShadowTransforms(root);
   }
 
@@ -1487,9 +1487,9 @@ void AsyncCompositionManager::SetFixedLayerMargins(ScreenIntCoord aTop,
 }
 ScreenMargin AsyncCompositionManager::GetFixedLayerMargins() const {
   ScreenMargin result = mFixedLayerMargins;
-  if (StaticPrefs::APZFixedMarginOverrideEnabled()) {
-    result.top = StaticPrefs::APZFixedMarginOverrideTop();
-    result.bottom = StaticPrefs::APZFixedMarginOverrideBottom();
+  if (StaticPrefs::apz_fixed_margin_override_enabled()) {
+    result.top = StaticPrefs::apz_fixed_margin_override_top();
+    result.bottom = StaticPrefs::apz_fixed_margin_override_bottom();
   }
   return result;
 }

@@ -111,8 +111,10 @@ exports.ANIMATION_TYPE_FOR_LONGHANDS = [
     "-moz-osx-font-smoothing",
     "outline-style",
     "overflow-anchor",
+    "overflow-block",
     "overflow-clip-box-block",
     "overflow-clip-box-inline",
+    "overflow-inline",
     "overflow-wrap",
     "overflow-x",
     "overflow-y",
@@ -246,6 +248,7 @@ exports.ANIMATION_TYPE_FOR_LONGHANDS = [
     "-webkit-text-stroke-color",
   ])],
   ["custom", new Set([
+    "backdrop-filter",
     "background-position-x",
     "background-position-y",
     "background-size",

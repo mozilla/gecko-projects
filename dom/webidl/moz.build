@@ -469,7 +469,6 @@ WEBIDL_FILES = [
     'DocumentOrShadowRoot.webidl',
     'DocumentTimeline.webidl',
     'DocumentType.webidl',
-    'DOMError.webidl',
     'DOMException.webidl',
     'DOMImplementation.webidl',
     'DOMMatrix.webidl',
@@ -966,7 +965,6 @@ WEBIDL_FILES = [
 if CONFIG['MOZ_WEBRTC']:
     WEBIDL_FILES += [
         'PeerConnectionImpl.webidl',
-        'PeerConnectionImplEnums.webidl',
         'PeerConnectionObserver.webidl',
         'PeerConnectionObserverEnums.webidl',
         'RTCCertificate.webidl',

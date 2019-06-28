@@ -13,6 +13,8 @@ ChromeUtils.defineModuleGetter(this, "Localization",
                                "resource://gre/modules/Localization.jsm");
 ChromeUtils.defineModuleGetter(this, "LoginHelper",
                                "resource://gre/modules/LoginHelper.jsm");
+ChromeUtils.defineModuleGetter(this, "MigrationUtils",
+                               "resource:///modules/MigrationUtils.jsm");
 ChromeUtils.defineModuleGetter(this, "Services",
                                "resource://gre/modules/Services.jsm");
 
@@ -27,6 +29,10 @@ const PRIVILEGEDABOUT_PROCESS_PREF =
   "browser.tabs.remote.separatePrivilegedContentProcess";
 const PRIVILEGEDABOUT_PROCESS_ENABLED =
   Services.prefs.getBoolPref(PRIVILEGEDABOUT_PROCESS_PREF, false);
+
+
+const FEEDBACK_URL_PREF = "signon.feedbackURL";
+const FEEDBACK_URL = Services.urlFormatter.formatURLPref(FEEDBACK_URL_PREF);
 
 // When the privileged content process is enabled, we expect about:logins
 // to load in it. Otherwise, it's in a normal web content process.
@@ -76,6 +82,13 @@ var AboutLoginsParent = {
     switch (message.name) {
       case "AboutLogins:CreateLogin": {
         let newLogin = message.data.login;
+        // Remove the path from the origin, if it was provided.
+        let origin = LoginHelper.getLoginOrigin(newLogin.origin);
+        if (!origin) {
+          Cu.reportError("AboutLogins:CreateLogin: Unable to get an origin from the login details.");
+          return;
+        }
+        newLogin.origin = origin;
         Object.assign(newLogin, {
           formActionOrigin: "",
           usernameField: "",
@@ -87,6 +100,19 @@ var AboutLoginsParent = {
       case "AboutLogins:DeleteLogin": {
         let login = LoginHelper.vanillaObjectToLogin(message.data.login);
         Services.logins.removeLogin(login);
+        break;
+      }
+      case "AboutLogins:Import": {
+        try {
+          MigrationUtils.showMigrationWizard(message.target.ownerGlobal,
+                                             [MigrationUtils.MIGRATION_ENTRYPOINT_PASSWORDS]);
+        } catch (ex) {
+          Cu.reportError(ex);
+        }
+        break;
+      }
+      case "AboutLogins:OpenFeedback": {
+        message.target.ownerGlobal.openWebLinkIn(FEEDBACK_URL, "tab", {relatedToCurrent: true});
         break;
       }
       case "AboutLogins:OpenPreferences": {

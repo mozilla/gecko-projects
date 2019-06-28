@@ -4,14 +4,15 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/.
  *
  * The origin of this IDL file is
- * http://dev.w3.org/fxtf/geometry/
+ * https://drafts.fxtf.org/geometry/
  *
  * Copyright © 2012 W3C® (MIT, ERCIM, Keio), All Rights Reserved. W3C
  * liability, trademark and document use rules apply.
  */
 
 [Pref="layout.css.DOMMatrix.enabled",
- Constructor(optional (DOMString or sequence<unrestricted double>) init)]
+ Constructor(optional (DOMString or sequence<unrestricted double>) init),
+ Exposed=(Window,Worker)]
 interface DOMMatrixReadOnly {
     // These attributes are simple aliases for certain elements of the 4x4 matrix
     readonly attribute unrestricted double a;
@@ -39,8 +40,8 @@ interface DOMMatrixReadOnly {
     readonly attribute unrestricted double m44;
 
     // Immutable transform methods
-    DOMMatrix translate(unrestricted double tx,
-                        unrestricted double ty,
+    DOMMatrix translate(optional unrestricted double tx = 0,
+                        optional unrestricted double ty = 0,
                         optional unrestricted double tz = 0);
     DOMMatrix scale(unrestricted double scale,
                     optional unrestricted double originX = 0,
@@ -64,8 +65,8 @@ interface DOMMatrixReadOnly {
                               unrestricted double y,
                               unrestricted double z,
                               unrestricted double angle);
-    DOMMatrix skewX(unrestricted double sx);
-    DOMMatrix skewY(unrestricted double sy);
+    DOMMatrix skewX(optional unrestricted double sx = 0);
+    DOMMatrix skewY(optional unrestricted double sy = 0);
     DOMMatrix multiply(DOMMatrix other);
     DOMMatrix flipX();
     DOMMatrix flipY();
@@ -77,7 +78,7 @@ interface DOMMatrixReadOnly {
     DOMPoint                   transformPoint(optional DOMPointInit point);
     [Throws] Float32Array      toFloat32Array();
     [Throws] Float64Array      toFloat64Array();
-                               stringifier;
+    [Exposed=Window]           stringifier;
     [Default] object           toJSON();
 };
 
@@ -87,7 +88,8 @@ interface DOMMatrixReadOnly {
  Constructor(DOMMatrixReadOnly other),
  Constructor(Float32Array array32),
  Constructor(Float64Array array64),
- Constructor(sequence<unrestricted double> numberSequence)]
+ Constructor(sequence<unrestricted double> numberSequence),
+ Exposed=(Window,Worker)]
 interface DOMMatrix : DOMMatrixReadOnly {
     // These attributes are simple aliases for certain elements of the 4x4 matrix
     inherit attribute unrestricted double a;
@@ -117,8 +119,8 @@ interface DOMMatrix : DOMMatrixReadOnly {
     // Mutable transform methods
     DOMMatrix multiplySelf(DOMMatrix other);
     DOMMatrix preMultiplySelf(DOMMatrix other);
-    DOMMatrix translateSelf(unrestricted double tx,
-                            unrestricted double ty,
+    DOMMatrix translateSelf(optional unrestricted double tx = 0,
+                            optional unrestricted double ty = 0,
                             optional unrestricted double tz = 0);
     DOMMatrix scaleSelf(unrestricted double scale,
                         optional unrestricted double originX = 0,
@@ -142,9 +144,9 @@ interface DOMMatrix : DOMMatrixReadOnly {
                                   unrestricted double y,
                                   unrestricted double z,
                                   unrestricted double angle);
-    DOMMatrix skewXSelf(unrestricted double sx);
-    DOMMatrix skewYSelf(unrestricted double sy);
+    DOMMatrix skewXSelf(optional unrestricted double sx = 0);
+    DOMMatrix skewYSelf(optional unrestricted double sy = 0);
     DOMMatrix invertSelf();
-    [Throws] DOMMatrix setMatrixValue(DOMString transformList);
+    [Exposed=Window, Throws] DOMMatrix setMatrixValue(DOMString transformList);
 };
 

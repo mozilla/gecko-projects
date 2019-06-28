@@ -528,18 +528,12 @@ toolbarbutton[constrain-size="true"][cui-areatype="menu-panel"] > .toolbarbutton
   width: 16px;
 }
 
-#appMenu-addon-banners:not(:empty) ~ #appMenu-fxa-container,
-.panel-banner-item:not([hidden]) + #appMenu-fxa-container {
+#appMenu-addon-banners:not(:empty) ~ #appMenu-fxa-status,
+.panel-banner-item:not([hidden]) + #appMenu-fxa-status {
   margin-top: 6px;
 }
 
 /* FxAccount indicator bits. */
-
-/* Add the .toolbaritem-combined-buttons class to increase the specificity so as
- * to override the end margin for .toolbaritem-combined-buttons items further down. */
-#appMenu-fxa-container.toolbaritem-combined-buttons:not([fxastatus="signedin"]) {
-  margin-inline-end: 0;
-}
 
 #appMenu-fxa-label {
   -moz-context-properties: fill;
@@ -574,43 +568,43 @@ toolbarbutton[constrain-size="true"][cui-areatype="menu-panel"] > .toolbarbutton
 }
 
 /* Handle different UI states. */
-#appMenu-fxa-container[fxastatus="signedin"] > #appMenu-fxa-status > #appMenu-fxa-label > .toolbarbutton-icon,
-#appMenu-fxa-container:not([fxastatus="signedin"]) > #appMenu-fxa-status > #appMenu-fxa-avatar {
+#appMenu-fxa-status[fxastatus="signedin"] > #appMenu-fxa-label > .toolbarbutton-icon,
+#appMenu-fxa-status:not([fxastatus="signedin"]) > #appMenu-fxa-avatar {
   display: none;
 }
 
-#appMenu-fxa-container[fxastatus="signedin"] > #appMenu-fxa-status > #appMenu-fxa-label {
+#appMenu-fxa-status[fxastatus="signedin"] > #appMenu-fxa-label {
   /* 12px space before the avatar, then 16px for the avatar */
   padding-inline-start: 28px;
   margin-inline-start: -28px;
 }
 
-#appMenu-fxa-container[fxastatus="signedin"] > #appMenu-fxa-status > #appMenu-fxa-avatar {
+#appMenu-fxa-status[fxastatus="signedin"] > #appMenu-fxa-avatar {
   margin-inline-start: 12px;
 }
 
 /* Error states */
-#appMenu-fxa-container[fxastatus="unverified"] > #appMenu-fxa-status > #appMenu-fxa-label,
-#appMenu-fxa-container[fxastatus="login-failed"] > #appMenu-fxa-status > #appMenu-fxa-label {
+#appMenu-fxa-status[fxastatus="unverified"] > #appMenu-fxa-label,
+#appMenu-fxa-status[fxastatus="login-failed"] > #appMenu-fxa-label {
   list-style-image: url(chrome://browser/skin/warning.svg);
   -moz-image-region: rect(0, 16px, 16px, 0);
 }
 
-#appMenu-fxa-container[fxastatus="login-failed"],
-#appMenu-fxa-container[fxastatus="unverified"] {
+#appMenu-fxa-status[fxastatus="login-failed"],
+#appMenu-fxa-status[fxastatus="unverified"] {
   background-color: @appmenuWarningBackgroundColor@;
   color: @appmenuWarningColor@;
   border-top: 1px solid @appmenuWarningBorderColor@;
   border-bottom: 1px solid @appmenuWarningBorderColor@;
 }
 
-#appMenu-fxa-container[fxastatus="login-failed"] > #appMenu-fxa-status:hover,
-#appMenu-fxa-container[fxastatus="unverified"] > #appMenu-fxa-status:hover {
+#appMenu-fxa-status[fxastatus="login-failed"]:hover,
+#appMenu-fxa-status[fxastatus="unverified"]:hover {
   background-color: @appmenuWarningBackgroundColorHover@;
 }
 
-#appMenu-fxa-container[fxastatus="login-failed"] > #appMenu-fxa-status:hover:active,
-#appMenu-fxa-container[fxastatus="unverified"] > #appMenu-fxa-status:hover:active {
+#appMenu-fxa-status[fxastatus="login-failed"]:hover:active,
+#appMenu-fxa-status[fxastatus="unverified"]:hover:active {
   background-color: @appmenuWarningBackgroundColorActive@;
 }
 
@@ -672,19 +666,19 @@ toolbarbutton[constrain-size="true"][cui-areatype="menu-panel"] > .toolbarbutton
   background: @appmenuWarningBackgroundColorActiveBrightText@;
 }
 
-:root[lwt-popup-brighttext] #appMenu-fxa-container[fxastatus="login-failed"],
-:root[lwt-popup-brighttext] #appMenu-fxa-container[fxastatus="unverified"] {
+:root[lwt-popup-brighttext] #appMenu-fxa-status[fxastatus="login-failed"],
+:root[lwt-popup-brighttext] #appMenu-fxa-status[fxastatus="unverified"] {
   background-color: @appmenuWarningBackgroundColorBrightText@;
   color: @appmenuWarningColorBrightText@;
 }
 
-:root[lwt-popup-brighttext] #appMenu-fxa-container[fxastatus="login-failed"] > #appMenu-fxa-status:hover,
-:root[lwt-popup-brighttext] #appMenu-fxa-container[fxastatus="unverified"] > #appMenu-fxa-status:hover {
+:root[lwt-popup-brighttext] #appMenu-fxa-status[fxastatus="login-failed"]:hover,
+:root[lwt-popup-brighttext] #appMenu-fxa-status[fxastatus="unverified"]:hover {
   background-color: @appmenuWarningBackgroundColorHoverBrightText@;
 }
 
-:root[lwt-popup-brighttext] #appMenu-fxa-container[fxastatus="login-failed"] > #appMenu-fxa-status:hover:active,
-:root[lwt-popup-brighttext] #appMenu-fxa-container[fxastatus="unverified"] > #appMenu-fxa-status:hover:active {
+:root[lwt-popup-brighttext] #appMenu-fxa-status[fxastatus="login-failed"]:hover:active,
+:root[lwt-popup-brighttext] #appMenu-fxa-status[fxastatus="unverified"]:hover:active {
   background-color: @appmenuWarningBackgroundColorActiveBrightText@;
 }
 
@@ -1120,10 +1114,6 @@ panelview .toolbarbutton-1,
   fill-opacity: 0.6;
   float: right;
   transform: translateY(1px);
-}
-
-#main-window:not([customizing]) .subviewbutton-nav[disabled=true]::after {
-  opacity: 0.4;
 }
 
 .PanelUI-subView .subviewbutton-nav:-moz-locale-dir(ltr)::after {

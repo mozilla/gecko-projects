@@ -1159,12 +1159,12 @@ LayoutDeviceIntRect PuppetWidget::GetScreenBounds() {
 }
 
 LayoutDeviceIntSize PuppetWidget::GetCompositionSize() {
-  if (!mBrowserChild) {
+  Maybe<LayoutDeviceIntRect> visibleRect =
+      mBrowserChild ? mBrowserChild->GetVisibleRect() : Nothing();
+  if (!visibleRect) {
     return nsBaseWidget::GetCompositionSize();
   }
-  CSSSize visibleSize =
-      CSSPixel::FromAppUnits(mBrowserChild->GetVisibleRect().Size());
-  return RoundedToInt(visibleSize * GetDefaultScale());
+  return visibleRect->Size();
 }
 
 uint32_t PuppetWidget::GetMaxTouchPoints() const {

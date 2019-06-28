@@ -99,7 +99,12 @@ class AlternateServerPlayback:
         """
         self.flowmap = {}
         for i in flows:
-            if i.response:
+            if i.type == 'websocket':
+                ctx.log.info(
+                    "Request is a WebSocketFlow. Removing from request list as WebSockets"
+                    " are dissabled "
+                )
+            elif i.response:
                 l = self.flowmap.setdefault(self._hash(i), [])
                 l.append(i)
             else:
@@ -121,7 +126,13 @@ class AlternateServerPlayback:
             if os.path.exists(proto):
                 ctx.log.info("Loading proto info from %s" % proto)
                 with open(proto) as f:
-                    _PROTO.update(json.loads(f.read()))
+                    recording_info = json.loads(f.read())
+                ctx.log.info(
+                    "Replaying file {} recorded on {}".format(
+                        os.path.basename(path), recording_info["recording_date"]
+                    )
+                )
+                _PROTO.update(recording_info["http_protocol"])
 
     def _hash(self, flow):
         """

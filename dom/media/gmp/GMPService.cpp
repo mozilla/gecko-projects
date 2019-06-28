@@ -103,7 +103,7 @@ class GMPServiceCreateHelper final : public mozilla::Runnable {
             new GeckoMediaPluginServiceParent();
         service->Init();
         sSingletonService = service;
-#if defined(XP_MACOSX)
+#if defined(XP_MACOSX) && defined(MOZ_SANDBOX)
         // GMPProcessParent should only be instantiated in the parent
         // so initialization only needs to be done in the parent.
         GMPProcessParent::InitStaticMainThread();

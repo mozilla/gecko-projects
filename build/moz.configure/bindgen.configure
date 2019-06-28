@@ -15,7 +15,7 @@ option(env='CBINDGEN', nargs=1, when=cbindgen_is_needed,
 def check_cbindgen_version(cbindgen, fatal=False):
     log.debug("trying cbindgen: %s" % cbindgen)
 
-    cbindgen_min_version = Version('0.8.7')
+    cbindgen_min_version = Version('0.9.0')
 
     # cbindgen x.y.z
     version = Version(check_cmd_output(cbindgen, '--version').strip().split(" ")[1])
@@ -152,7 +152,7 @@ def bindgen_libclang_path(libclang_path, clang, library_name_info, host):
                 # To make matters complicated, clang before version 9 uses `:`
                 # separate between paths (and `;` in newer versions)
                 if pathsep in value:
-                    dirs = value.split(pathsep)
+                    candidates.extend(value.split(pathsep))
                 else:
                     for part in value.split(':'):
                         # Assume that if previous "candidate" was of length 1,

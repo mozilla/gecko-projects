@@ -5,7 +5,7 @@
 use api::{BorderRadius, ClipMode, ColorF};
 use api::{ImageRendering, RepeatMode};
 use api::{PremultipliedColorF, PropertyBinding, Shadow, GradientStop};
-use api::{BoxShadowClipMode, LineStyle, LineOrientation};
+use api::{BoxShadowClipMode, LineStyle, LineOrientation, BorderStyle};
 use api::{PrimitiveKeyKind};
 use api::units::*;
 use crate::border::{get_max_scale_for_border, build_border_instances};
@@ -244,10 +244,6 @@ impl<F, T> SpaceMapper<F, T> where F: fmt::Debug {
                 }
             }
         }
-    }
-
-    pub fn get_conservative_local_bounds(&self) -> Option<TypedRect<f32, F>> {
-        self.unmap(&self.bounds)
     }
 }
 
@@ -654,6 +650,7 @@ impl From<PrimitiveKeyKind> for PrimitiveTemplateKind {
 #[derive(MallocSizeOf)]
 pub struct PrimTemplateCommonData {
     pub is_backface_visible: bool,
+    pub may_need_repetition: bool,
     pub prim_size: LayoutSize,
     pub opacity: PrimitiveOpacity,
     /// The GPU cache handle for a primitive template. Since this structure
@@ -667,6 +664,7 @@ impl PrimTemplateCommonData {
     pub fn with_key_common(common: PrimKeyCommonData) -> Self {
         PrimTemplateCommonData {
             is_backface_visible: common.is_backface_visible,
+            may_need_repetition: true,
             prim_size: common.prim_size.into(),
             gpu_cache_handle: GpuCacheHandle::new(),
             opacity: PrimitiveOpacity::translucent(),
@@ -2222,7 +2220,8 @@ impl PrimitiveStore {
 
                 self.request_resources_for_prim(
                     prim_instance,
-                    &map_local_to_surface,
+                    clipped_world_rect,
+                    frame_context,
                     frame_state,
                 );
             }
@@ -2307,7 +2306,8 @@ impl PrimitiveStore {
     fn request_resources_for_prim(
         &mut self,
         prim_instance: &mut PrimitiveInstance,
-        map_local_to_surface: &SpaceMapper<LayoutPixel, PicturePixel>,
+        prim_world_rect: WorldRect,
+        frame_context: &FrameVisibilityContext,
         frame_state: &mut FrameVisibilityState,
     ) {
         match prim_instance.kind {
@@ -2336,6 +2336,7 @@ impl PrimitiveStore {
 
                 match image_properties {
                     Some(ImageProperties { tiling: None, .. }) => {
+
                         frame_state.resource_cache.request_image(
                             request,
                             frame_state.gpu_cache,
@@ -2358,14 +2359,26 @@ impl PrimitiveStore {
                             .intersection(&prim_rect).unwrap();
                         image_instance.tight_local_clip_rect = tight_clip_rect;
 
+                        let map_local_to_world = SpaceMapper::new_with_target(
+                            ROOT_SPATIAL_NODE_INDEX,
+                            prim_instance.spatial_node_index,
+                            frame_context.global_screen_world_rect,
+                            frame_context.clip_scroll_tree,
+                        );
+
                         let visible_rect = compute_conservative_visible_rect(
                             &tight_clip_rect,
-                            map_local_to_surface,
+                            prim_world_rect,
+                            &map_local_to_world,
                         );
 
                         let base_edge_flags = edge_flags_for_tile_spacing(&image_data.tile_spacing);
 
                         let stride = image_data.stretch_size + image_data.tile_spacing;
+
+                        // We are performing the decomposition on the CPU here, no need to
+                        // have it in the shader.
+                        common_data.may_need_repetition = false;
 
                         let repetitions = crate::image::repetitions(
                             &prim_rect,
@@ -2813,6 +2826,8 @@ impl PrimitiveStore {
                 let prim_data = &mut data_stores.text_run[*data_handle];
                 let run = &mut self.text_runs[*run_index];
 
+                prim_data.common.may_need_repetition = false;
+
                 // The transform only makes sense for screen space rasterization
                 let relative_transform = frame_context
                     .clip_scroll_tree
@@ -2845,6 +2860,8 @@ impl PrimitiveStore {
             PrimitiveInstanceKind::Clear { data_handle, .. } => {
                 let prim_data = &mut data_stores.prim[*data_handle];
 
+                prim_data.common.may_need_repetition = false;
+
                 // Update the template this instane references, which may refresh the GPU
                 // cache with any shared template data.
                 prim_data.update(frame_state);
@@ -2854,7 +2871,27 @@ impl PrimitiveStore {
                 let common_data = &mut prim_data.common;
                 let border_data = &mut prim_data.kind;
 
-                // Update the template this instane references, which may refresh the GPU
+                let mut needs_repetition = false;
+                needs_repetition |= match border_data.border.top.style {
+                    BorderStyle::Dotted | BorderStyle::Dashed => true,
+                    _ => false,
+                };
+                needs_repetition |= match border_data.border.right.style {
+                    BorderStyle::Dotted | BorderStyle::Dashed => true,
+                    _ => false,
+                };
+                needs_repetition |= match border_data.border.bottom.style {
+                    BorderStyle::Dotted | BorderStyle::Dashed => true,
+                    _ => false,
+                };
+                needs_repetition |= match border_data.border.left.style {
+                    BorderStyle::Dotted | BorderStyle::Dashed => true,
+                    _ => false,
+                };
+
+                common_data.may_need_repetition = needs_repetition;
+
+                // Update the template this instance references, which may refresh the GPU
                 // cache with any shared template data.
                 border_data.update(common_data, frame_state);
 
@@ -2924,6 +2961,8 @@ impl PrimitiveStore {
             }
             PrimitiveInstanceKind::ImageBorder { data_handle, .. } => {
                 let prim_data = &mut data_stores.image_border[*data_handle];
+                // TODO: get access to the ninepatch and to check whwther we need support
+                // for repetitions in the shader.
 
                 // Update the template this instane references, which may refresh the GPU
                 // cache with any shared template data.
@@ -2931,6 +2970,7 @@ impl PrimitiveStore {
             }
             PrimitiveInstanceKind::Rectangle { data_handle, segment_instance_index, opacity_binding_index, .. } => {
                 let prim_data = &mut data_stores.prim[*data_handle];
+                prim_data.common.may_need_repetition = false;
 
                 // Update the template this instane references, which may refresh the GPU
                 // cache with any shared template data.
@@ -2957,6 +2997,8 @@ impl PrimitiveStore {
             PrimitiveInstanceKind::YuvImage { data_handle, segment_instance_index, .. } => {
                 let yuv_image_data = &mut data_stores.yuv_image[*data_handle];
 
+                yuv_image_data.common.may_need_repetition = false;
+
                 // Update the template this instane references, which may refresh the GPU
                 // cache with any shared template data.
                 yuv_image_data.kind.update(&mut yuv_image_data.common, frame_state);
@@ -2975,6 +3017,12 @@ impl PrimitiveStore {
                 let prim_data = &mut data_stores.image[*data_handle];
                 let common_data = &mut prim_data.common;
                 let image_data = &mut prim_data.kind;
+
+                if image_data.stretch_size.width >= common_data.prim_size.width &&
+                    image_data.stretch_size.height >= common_data.prim_size.height {
+
+                    common_data.may_need_repetition = false;
+                }
 
                 // Update the template this instane references, which may refresh the GPU
                 // cache with any shared template data.
@@ -3005,6 +3053,12 @@ impl PrimitiveStore {
                 // Update the template this instane references, which may refresh the GPU
                 // cache with any shared template data.
                 prim_data.update(frame_state);
+
+                if prim_data.stretch_size.width >= prim_data.common.prim_size.width &&
+                    prim_data.stretch_size.height >= prim_data.common.prim_size.height {
+
+                    prim_data.common.may_need_repetition = false;
+                }
 
                 if prim_data.supports_caching {
                     let gradient_size = (prim_data.end_point - prim_data.start_point).to_size();
@@ -3079,20 +3133,32 @@ impl PrimitiveStore {
                 }
 
                 if prim_data.tile_spacing != LayoutSize::zero() {
+                    // We are performing the decomposition on the CPU here, no need to
+                    // have it in the shader.
+                    prim_data.common.may_need_repetition = false;
+
                     let prim_info = &scratch.prim_info[prim_instance.visibility_info.0 as usize];
                     let prim_rect = LayoutRect::new(
                         prim_instance.prim_origin,
                         prim_data.common.prim_size,
                     );
 
+                    let map_local_to_world = SpaceMapper::new_with_target(
+                        ROOT_SPATIAL_NODE_INDEX,
+                        prim_instance.spatial_node_index,
+                        frame_context.global_screen_world_rect,
+                        frame_context.clip_scroll_tree,
+                    );
+
                     gradient.visible_tiles_range = decompose_repeated_primitive(
                         &prim_info.combined_local_clip_rect,
                         &prim_rect,
+                        prim_info.clipped_world_rect,
                         &prim_data.stretch_size,
                         &prim_data.tile_spacing,
                         frame_state,
                         &mut scratch.gradient_tiles,
-                        &pic_state.map_local_to_pic,
+                        &map_local_to_world,
                         &mut |_, mut request| {
                             request.push([
                                 prim_data.start_point.x,
@@ -3120,6 +3186,14 @@ impl PrimitiveStore {
             PrimitiveInstanceKind::RadialGradient { data_handle, ref mut visible_tiles_range, .. } => {
                 let prim_data = &mut data_stores.radial_grad[*data_handle];
 
+                if prim_data.stretch_size.width >= prim_data.common.prim_size.width &&
+                    prim_data.stretch_size.height >= prim_data.common.prim_size.height {
+
+                    // We are performing the decomposition on the CPU here, no need to
+                    // have it in the shader.
+                    prim_data.common.may_need_repetition = false;
+                }
+
                 // Update the template this instane references, which may refresh the GPU
                 // cache with any shared template data.
                 prim_data.update(frame_state);
@@ -3131,14 +3205,24 @@ impl PrimitiveStore {
                         prim_data.common.prim_size,
                     );
 
+                    let map_local_to_world = SpaceMapper::new_with_target(
+                        ROOT_SPATIAL_NODE_INDEX,
+                        prim_instance.spatial_node_index,
+                        frame_context.global_screen_world_rect,
+                        frame_context.clip_scroll_tree,
+                    );
+
+                    prim_data.common.may_need_repetition = false;
+
                     *visible_tiles_range = decompose_repeated_primitive(
                         &prim_info.combined_local_clip_rect,
                         &prim_rect,
+                        prim_info.clipped_world_rect,
                         &prim_data.stretch_size,
                         &prim_data.tile_spacing,
                         frame_state,
                         &mut scratch.gradient_tiles,
-                        &pic_state.map_local_to_pic,
+                        &map_local_to_world,
                         &mut |_, mut request| {
                             request.push([
                                 prim_data.center.x,
@@ -3163,9 +3247,12 @@ impl PrimitiveStore {
                 // TODO(gw): Consider whether it's worth doing segment building
                 //           for gradient primitives.
             }
-            PrimitiveInstanceKind::Picture { pic_index, segment_instance_index, .. } => {
+            PrimitiveInstanceKind::Picture { pic_index, segment_instance_index, data_handle, .. } => {
                 let pic = &mut self.pictures[pic_index.0];
                 let prim_info = &scratch.prim_info[prim_instance.visibility_info.0 as usize];
+
+                data_stores.picture[*data_handle].common.may_need_repetition = false;
+
                 if pic.prepare_for_render(
                     frame_context,
                     frame_state,
@@ -3244,11 +3331,12 @@ fn write_segment<F>(
 fn decompose_repeated_primitive(
     combined_local_clip_rect: &LayoutRect,
     prim_local_rect: &LayoutRect,
+    prim_world_rect: WorldRect,
     stretch_size: &LayoutSize,
     tile_spacing: &LayoutSize,
     frame_state: &mut FrameBuildingState,
     gradient_tiles: &mut GradientTileStorage,
-    map_local_to_pic: &SpaceMapper<LayoutPixel, PicturePixel>,
+    map_local_to_world: &SpaceMapper<LayoutPixel, WorldPixel>,
     callback: &mut dyn FnMut(&LayoutRect, GpuDataRequest),
 ) -> GradientTileRange {
     let mut visible_tiles = Vec::new();
@@ -3261,7 +3349,8 @@ fn decompose_repeated_primitive(
 
     let visible_rect = compute_conservative_visible_rect(
         &tight_clip_rect,
-        map_local_to_pic,
+        prim_world_rect,
+        map_local_to_world,
     );
     let stride = *stretch_size + *tile_spacing;
 
@@ -3298,9 +3387,10 @@ fn decompose_repeated_primitive(
 
 fn compute_conservative_visible_rect(
     local_clip_rect: &LayoutRect,
-    map_local_to_pic: &SpaceMapper<LayoutPixel, PicturePixel>,
+    world_culling_rect: WorldRect,
+    map_local_to_world: &SpaceMapper<LayoutPixel, WorldPixel>,
 ) -> LayoutRect {
-    if let Some(local_bounds) = map_local_to_pic.get_conservative_local_bounds() {
+    if let Some(local_bounds) = map_local_to_world.unmap(&world_culling_rect) {
         return local_clip_rect.intersection(&local_bounds).unwrap_or_else(LayoutRect::zero)
     }
 

@@ -11,7 +11,7 @@ ${helpers.predefined_type(
     "ColorPropertyValue",
     "::cssparser::RGBA::new(0, 0, 0, 255)",
     animation_value_type="AnimatedRGBA",
-    flags="APPLIES_TO_FIRST_LETTER APPLIES_TO_FIRST_LINE APPLIES_TO_PLACEHOLDER",
+    flags="APPLIES_TO_CUE APPLIES_TO_FIRST_LETTER APPLIES_TO_FIRST_LINE APPLIES_TO_PLACEHOLDER APPLIES_TO_MARKER",
     ignored_when_colors_disabled="True",
     spec="https://drafts.csswg.org/css-color/#color",
 )}
@@ -21,7 +21,7 @@ ${helpers.predefined_type(
     "LineHeight",
     "computed::LineHeight::normal()",
     animation_value_type="LineHeight",
-    flags="APPLIES_TO_FIRST_LETTER APPLIES_TO_FIRST_LINE \
+    flags="APPLIES_TO_CUE APPLIES_TO_FIRST_LETTER APPLIES_TO_FIRST_LINE \
            APPLIES_TO_PLACEHOLDER GETCS_NEEDS_LAYOUT_FLUSH",
     spec="https://drafts.csswg.org/css2/visudet.html#propdef-line-height",
     servo_restyle_damage="reflow"
@@ -175,13 +175,13 @@ ${helpers.predefined_type(
 
 <%helpers:single_keyword
     name="white-space"
-    values="normal pre nowrap pre-wrap pre-line break-spaces"
-    extra_gecko_values="-moz-pre-space"
+    values="normal pre nowrap pre-wrap pre-line"
+    extra_gecko_values="break-spaces -moz-pre-space"
     gecko_enum_prefix="StyleWhiteSpace"
     needs_conversion="True"
     animation_value_type="discrete"
     // Only allowed for UA sheets, which set it !important.
-    flags="APPLIES_TO_PLACEHOLDER"
+    flags="APPLIES_TO_CUE APPLIES_TO_PLACEHOLDER"
     spec="https://drafts.csswg.org/css-text/#propdef-white-space"
     servo_restyle_damage="rebuild_and_reflow"
 >
@@ -193,8 +193,7 @@ ${helpers.predefined_type(
                 SpecifiedValue::Pre => false,
                 SpecifiedValue::Normal |
                 SpecifiedValue::PreWrap |
-                SpecifiedValue::PreLine |
-                SpecifiedValue::BreakSpaces => true,
+                SpecifiedValue::PreLine => true,
             }
         }
 
@@ -204,8 +203,7 @@ ${helpers.predefined_type(
                 SpecifiedValue::Nowrap => false,
                 SpecifiedValue::Pre |
                 SpecifiedValue::PreWrap |
-                SpecifiedValue::PreLine |
-                SpecifiedValue::BreakSpaces => true,
+                SpecifiedValue::PreLine => true,
             }
         }
 
@@ -215,8 +213,7 @@ ${helpers.predefined_type(
                 SpecifiedValue::Nowrap |
                 SpecifiedValue::PreLine => false,
                 SpecifiedValue::Pre |
-                SpecifiedValue::PreWrap |
-                SpecifiedValue::BreakSpaces => true,
+                SpecifiedValue::PreWrap => true,
             }
         }
     }
@@ -232,7 +229,7 @@ ${helpers.predefined_type(
     animation_value_type="AnimatedTextShadowList",
     ignored_when_colors_disabled=True,
     simple_vector_bindings=True,
-    flags="APPLIES_TO_FIRST_LETTER APPLIES_TO_FIRST_LINE APPLIES_TO_PLACEHOLDER",
+    flags="APPLIES_TO_CUE APPLIES_TO_FIRST_LETTER APPLIES_TO_FIRST_LINE APPLIES_TO_PLACEHOLDER",
     spec="https://drafts.csswg.org/css-text-decor-3/#text-shadow-property",
 )}
 
@@ -340,6 +337,7 @@ ${helpers.single_keyword(
     products="gecko",
     animation_value_type="discrete",
     spec="https://drafts.csswg.org/css-ruby/#ruby-position-property",
+    flags="APPLIES_TO_CUE",
 )}
 
 // CSS Writing Modes Module Level 3
@@ -351,6 +349,7 @@ ${helpers.single_keyword(
     products="gecko",
     animation_value_type="discrete",
     spec="https://drafts.csswg.org/css-writing-modes-3/#text-combine-upright",
+    flags="APPLIES_TO_CUE APPLIES_TO_MARKER",
 )}
 
 // SVG 1.1: Section 11 - Painting: Filling, Stroking and Marker Symbols

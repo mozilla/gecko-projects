@@ -3,31 +3,14 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 export default class ReflectedFluentElement extends HTMLElement {
-  _isReflectedAttributePresent(attr) {
-    return this.constructor.reflectedFluentIDs.includes(attr.name);
+  connectedCallback() {
+    this._reflectFluentStrings();
   }
 
-  /* This function should be called to apply any localized strings that Fluent
-     may have applied to the element before the custom element was defined. */
-  reflectFluentStrings() {
-    for (let reflectedFluentID of this.constructor.reflectedFluentIDs) {
-      if (this.hasAttribute(reflectedFluentID)) {
-        if (this.handleSpecialCaseFluentString &&
-            this.handleSpecialCaseFluentString(reflectedFluentID)) {
-          continue;
-        }
-
-        let attrValue = this.getAttribute(reflectedFluentID);
-        // Strings that are reflected to their shadowed element are assigned
-        // to an attribute name that matches a className on the element.
-        let shadowedElement = this.shadowRoot.querySelector("." + reflectedFluentID);
-        shadowedElement.textContent = attrValue;
-      }
-    }
-  }
-
-  /* Fluent doesn't handle localizing into Shadow DOM yet so strings
-     need to get reflected in to their targeted element. */
+  /*
+   * Fluent doesn't handle localizing into Shadow DOM yet so strings
+   * need to get reflected in to their targeted element.
+   */
   attributeChangedCallback(attr, oldValue, newValue) {
     if (!this.shadowRoot) {
       return;
@@ -47,6 +30,31 @@ export default class ReflectedFluentElement extends HTMLElement {
     // to an attribute name that matches a className on the element.
     let shadowedElement = this.shadowRoot.querySelector("." + attr);
     shadowedElement.textContent = newValue;
+  }
+
+  _isReflectedAttributePresent(attr) {
+    return this.constructor.reflectedFluentIDs.includes(attr.name);
+  }
+
+  /*
+   * Called to apply any localized strings that Fluent may have applied
+   * to the element before the custom element was defined.
+   */
+  _reflectFluentStrings() {
+    for (let reflectedFluentID of this.constructor.reflectedFluentIDs) {
+      if (this.hasAttribute(reflectedFluentID)) {
+        if (this.handleSpecialCaseFluentString &&
+            this.handleSpecialCaseFluentString(reflectedFluentID)) {
+          continue;
+        }
+
+        let attrValue = this.getAttribute(reflectedFluentID);
+        // Strings that are reflected to their shadowed element are assigned
+        // to an attribute name that matches a className on the element.
+        let shadowedElement = this.shadowRoot.querySelector("." + reflectedFluentID);
+        shadowedElement.textContent = attrValue;
+      }
+    }
   }
 }
 customElements.define("reflected-fluent-element", ReflectedFluentElement);

@@ -75,6 +75,7 @@ class RuntimeSettingsTest : BaseSessionTest() {
     }
 
     @WithDevToolsAPI
+    @Ignore // Bug 1546297 disabled test on pgo for frequent failures
     @Test fun fontSize() {
         val settings = sessionRule.runtime.settings
         settings.fontSizeFactor = 1.0f

@@ -185,11 +185,13 @@ class MOZ_STACK_CLASS gfxOTSContext : public ots::OTSContext {
  public:
   gfxOTSContext() {
     // Whether to apply OTS validation to OpenType Layout tables
-    mCheckOTLTables = StaticPrefs::ValidateOTLTables();
+    mCheckOTLTables = StaticPrefs::gfx_downloadable_fonts_otl_validation();
     // Whether to preserve Variation tables in downloaded fonts
-    mCheckVariationTables = StaticPrefs::ValidateVariationTables();
+    mCheckVariationTables =
+        StaticPrefs::gfx_downloadable_fonts_validate_variation_tables();
     // Whether to preserve color bitmap glyphs
-    mKeepColorBitmaps = StaticPrefs::KeepColorBitmaps();
+    mKeepColorBitmaps =
+        StaticPrefs::gfx_downloadable_fonts_keep_color_bitmaps();
   }
 
   virtual ~gfxOTSContext() {
@@ -926,6 +928,13 @@ void gfxUserFontEntry::LoadPlatformFontAsync(
 
   // Do the OpenType sanitization over on the font loading thread.  Once that is
   // complete, we'll continue in ContinuePlatformFontLoadOnMainThread.
+  //
+  // We hold a strong reference to the gfxUserFontSet during this work, since
+  // the document might be closed while we are OMT, and release it at the end
+  // of ContinuePlatformFontLoadOnMainThread.
+
+  mFontSet->AddRef();
+
   nsCOMPtr<nsIRunnable> event =
       NewRunnableMethod<const uint8_t*, uint32_t,
                         nsMainThreadPtrHandle<nsIFontLoadCompleteCallback>>(
@@ -952,10 +961,11 @@ void gfxUserFontEntry::ContinuePlatformFontLoadOnMainThread(
   if (loaded) {
     IncrementGeneration();
     aCallback->FontLoadComplete();
-    return;
+  } else {
+    FontLoadFailed(aCallback);
   }
 
-  FontLoadFailed(aCallback);
+  mFontSet->Release();  // for the AddRef in LoadPlatformFontAsync
 }
 
 void gfxUserFontEntry::FontLoadFailed(nsIFontLoadCompleteCallback* aCallback) {

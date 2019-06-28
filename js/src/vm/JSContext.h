@@ -74,6 +74,8 @@ struct AutoResolving;
 
 struct HelperThread;
 
+struct ParseTask;
+
 class InternalJobQueue : public JS::JobQueue {
  public:
   explicit InternalJobQueue(JSContext* cx)
@@ -156,9 +158,6 @@ struct JSContext : public JS::RootingContext,
   js::UnprotectedData<JSRuntime*> runtime_;
   js::WriteOnceData<js::ContextKind> kind_;
 
-  // The thread on which this context is running if this is not the main thread.
-  js::ThreadData<js::HelperThread*> helperThread_;
-
   friend class js::gc::AutoSuppressNurseryCellAlloc;
   js::ThreadData<size_t> nurserySuppressions_;
 
@@ -177,6 +176,8 @@ struct JSContext : public JS::RootingContext,
 
   js::ThreadData<js::FreeOp> defaultFreeOp_;
 
+  js::ParseTask* parseTask_;
+
  public:
   // This is used by helper threads to change the runtime their context is
   // currently operating on.
@@ -184,6 +185,10 @@ struct JSContext : public JS::RootingContext,
 
   bool isMainThreadContext() const {
     return kind_ == js::ContextKind::MainThread;
+  }
+
+  bool isHelperThreadContext() const {
+    return kind_ == js::ContextKind::HelperThread;
   }
 
   js::gc::FreeLists& freeLists() {
@@ -208,7 +213,7 @@ struct JSContext : public JS::RootingContext,
 
   void* onOutOfMemory(js::AllocFunction allocFunc, arena_id_t arena,
                       size_t nbytes, void* reallocPtr = nullptr) {
-    if (helperThread()) {
+    if (isHelperThreadContext()) {
       addPendingOutOfMemory();
       return nullptr;
     }
@@ -325,8 +330,8 @@ struct JSContext : public JS::RootingContext,
 
   inline void leaveRealm(JS::Realm* oldRealm);
 
-  void setHelperThread(js::HelperThread* helperThread);
-  js::HelperThread* helperThread() const { return helperThread_; }
+  void setParseTask(js::ParseTask* parseTask) { parseTask_ = parseTask; }
+  js::ParseTask* parseTask() const { return parseTask_; }
 
   bool isNurseryAllocSuppressed() const { return nurserySuppressions_; }
 
@@ -1358,8 +1363,8 @@ struct MOZ_RAII AutoSetThreadIsSweeping {
 
 } /* namespace js */
 
-#define CHECK_THREAD(cx)                   \
-  MOZ_ASSERT_IF(cx && !cx->helperThread(), \
+#define CHECK_THREAD(cx)                            \
+  MOZ_ASSERT_IF(cx && !cx->isHelperThreadContext(), \
                 CurrentThreadCanAccessRuntime(cx->runtime()))
 
 #endif /* vm_JSContext_h */

@@ -116,6 +116,7 @@
 @BINPATH@/msvcp*.dll
 @BINPATH@/libEGL.dll
 @BINPATH@/libGLESv2.dll
+@BINPATH@/d3dcompiler_47.dll
 #endif
 
 [browser]
@@ -195,8 +196,6 @@
 #ifdef ENABLE_REMOTE_AGENT
 @RESPATH@/chrome/remote@JAREXT@
 @RESPATH@/chrome/remote.manifest
-@RESPATH@/components/command-line-handler.js
-@RESPATH@/components/RemoteAgent.manifest
 @RESPATH@/defaults/pref/remote.js
 #endif
 
@@ -361,6 +360,9 @@
 #ifndef MOZ_SYSTEM_NSS
 #if defined(XP_LINUX) && !defined(ANDROID)
 @BINPATH@/@DLL_PREFIX@freeblpriv3@DLL_SUFFIX@
+#elif defined(XP_SOLARIS) && defined(SPARC64)
+bin/libfreebl_64fpu_3.so
+bin/libfreebl_64int_3.so
 #else
 @BINPATH@/@DLL_PREFIX@freebl3@DLL_SUFFIX@
 #endif
@@ -384,13 +386,6 @@
 #if defined(XP_LINUX)
 @BINPATH@/@DLL_PREFIX@mozsandbox@DLL_SUFFIX@
 #endif
-#endif
-
-; for Solaris SPARC
-#ifdef SOLARIS
-bin/libfreebl_32fpu_3.so
-bin/libfreebl_32int_3.so
-bin/libfreebl_32int64_3.so
 #endif
 
 ; [Updater]

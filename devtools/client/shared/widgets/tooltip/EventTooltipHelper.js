@@ -76,7 +76,10 @@ EventTooltip.prototype = {
 
       // Header
       const header = doc.createElementNS(XHTML_NS, "div");
-      header.className = "event-header devtools-toolbar";
+      header.className = "event-header";
+      const arrow = doc.createElementNS(XHTML_NS, "span");
+      arrow.className = "theme-twisty";
+      header.appendChild(arrow);
       this.container.appendChild(header);
 
       if (!listener.hide.type) {
@@ -221,19 +224,22 @@ EventTooltip.prototype = {
     const doc = this._tooltip.doc;
     const header = event.currentTarget;
     const content = header.nextElementSibling;
-    header.classList.toggle("content-expanded");
 
     if (content.hasAttribute("open")) {
+      header.classList.remove("content-expanded");
       content.removeAttribute("open");
     } else {
-      const contentNodes = doc.querySelectorAll(".event-tooltip-content-box");
-
-      for (const node of contentNodes) {
-        if (node !== content) {
-          node.removeAttribute("open");
-        }
+      // Close other open events first
+      const openHeaders = doc.querySelectorAll(".event-header.content-expanded");
+      const openContent = doc.querySelectorAll(".event-tooltip-content-box[open]");
+      for (const node of openHeaders) {
+        node.classList.remove("content-expanded");
+      }
+      for (const node of openContent) {
+        node.removeAttribute("open");
       }
 
+      header.classList.add("content-expanded");
       content.setAttribute("open", "");
 
       const eventEditor = this._eventEditors.get(content);

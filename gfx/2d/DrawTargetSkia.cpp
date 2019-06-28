@@ -1374,14 +1374,22 @@ void DrawTargetSkia::DrawGlyphs(ScaledFont* aFont, const GlyphBuffer& aBuffer,
 
   font.setSubpixel(useSubpixelText);
 
-  SkTextBlobBuilder builder;
-  auto runBuffer = builder.allocRunPos(font, aBuffer.mNumGlyphs);
-  for (uint32_t i = 0; i < aBuffer.mNumGlyphs; i++) {
-    runBuffer.glyphs[i] = aBuffer.mGlyphs[i].mIndex;
-    runBuffer.points()[i] = PointToSkPoint(aBuffer.mGlyphs[i].mPosition);
+  // Limit the amount of internal batch allocations Skia does.
+  const uint32_t kMaxGlyphBatchSize = 8192;
+
+  for (uint32_t offset = 0; offset < aBuffer.mNumGlyphs;) {
+    uint32_t batchSize =
+        std::min(aBuffer.mNumGlyphs - offset, kMaxGlyphBatchSize);
+    SkTextBlobBuilder builder;
+    auto runBuffer = builder.allocRunPos(font, batchSize);
+    for (uint32_t i = 0; i < batchSize; i++, offset++) {
+      runBuffer.glyphs[i] = aBuffer.mGlyphs[offset].mIndex;
+      runBuffer.points()[i] = PointToSkPoint(aBuffer.mGlyphs[offset].mPosition);
+    }
+
+    sk_sp<SkTextBlob> text = builder.make();
+    mCanvas->drawTextBlob(text, 0, 0, paint.mPaint);
   }
-  sk_sp<SkTextBlob> text = builder.make();
-  mCanvas->drawTextBlob(text, 0, 0, paint.mPaint);
 }
 
 void DrawTargetSkia::FillGlyphs(ScaledFont* aFont, const GlyphBuffer& aBuffer,
@@ -1591,6 +1599,30 @@ already_AddRefed<DrawTarget> DrawTargetSkia::CreateSimilarDrawTarget(
 bool DrawTargetSkia::CanCreateSimilarDrawTarget(const IntSize& aSize,
                                                 SurfaceFormat aFormat) const {
   return size_t(std::max(aSize.width, aSize.height)) < GetMaxSurfaceSize();
+}
+
+RefPtr<DrawTarget> DrawTargetSkia::CreateClippedDrawTarget(
+    const Rect& aBounds, SurfaceFormat aFormat) {
+  SkIRect clipBounds;
+
+  RefPtr<DrawTarget> result;
+  // Doing this save()/restore() dance is wasteful
+  mCanvas->save();
+  if (!aBounds.IsEmpty()) {
+    mCanvas->clipRect(RectToSkRect(aBounds), SkClipOp::kIntersect, true);
+  }
+  if (mCanvas->getDeviceClipBounds(&clipBounds)) {
+    RefPtr<DrawTarget> dt = CreateSimilarDrawTarget(
+        IntSize(clipBounds.width(), clipBounds.height()), aFormat);
+    result = gfx::Factory::CreateOffsetDrawTarget(
+        dt, IntPoint(clipBounds.x(), clipBounds.y()));
+    result->SetTransform(mTransform);
+  } else {
+    // Everything is clipped but we still want some kind of surface
+    result = CreateSimilarDrawTarget(IntSize(1, 1), aFormat);
+  }
+  mCanvas->restore();
+  return result;
 }
 
 already_AddRefed<SourceSurface>

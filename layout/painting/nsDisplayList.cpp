@@ -971,32 +971,17 @@ static bool GenerateAndPushTextMask(nsIFrame* aFrame, gfxContext* aContext,
   LayoutDeviceRect bounds = LayoutDeviceRect::FromAppUnits(
       aFillRect, aFrame->PresContext()->AppUnitsPerDevPixel());
 
-  // Evaluate required surface size.
-  IntRect drawRect =
-      RoundedOut(ToRect(sourceCtx->GetClipExtents(gfxContext::eDeviceSpace)));
-
-  Matrix currentMatrix = sourceCtx->CurrentMatrix();
-  Matrix invCurrentMatrix = currentMatrix;
-  invCurrentMatrix.Invert();
-  Matrix maskSurfaceDeviceOffsetTranslation =
-      Matrix::Translation(drawRect.TopLeft());
-
   // Create a mask surface.
   RefPtr<DrawTarget> sourceTarget = sourceCtx->GetDrawTarget();
-  if (!sourceTarget->CanCreateSimilarDrawTarget(drawRect.Size(),
-                                                SurfaceFormat::A8)) {
-    return false;
-  }
   RefPtr<DrawTarget> maskDT = sourceTarget->CreateClippedDrawTarget(
-      drawRect.Size(), maskSurfaceDeviceOffsetTranslation, SurfaceFormat::A8);
+      bounds.ToUnknownRect(), SurfaceFormat::A8);
   if (!maskDT || !maskDT->IsValid()) {
     return false;
   }
   RefPtr<gfxContext> maskCtx =
       gfxContext::CreatePreservingTransformOrNull(maskDT);
   MOZ_ASSERT(maskCtx);
-  maskCtx->SetMatrix(Matrix::Translation(bounds.TopLeft().ToUnknownPoint()) *
-                     currentMatrix * Matrix::Translation(-drawRect.TopLeft()));
+  maskCtx->Multiply(Matrix::Translation(bounds.TopLeft().ToUnknownPoint()));
 
   // Shade text shape into mask A8 surface.
   nsLayoutUtils::PaintFrame(
@@ -1005,10 +990,14 @@ static bool GenerateAndPushTextMask(nsIFrame* aFrame, gfxContext* aContext,
 
   // Push the generated mask into aContext, so that the caller can pop and
   // blend with it.
+
+  Matrix currentMatrix = sourceCtx->CurrentMatrix();
+  Matrix invCurrentMatrix = currentMatrix;
+  invCurrentMatrix.Invert();
+
   RefPtr<SourceSurface> maskSurface = maskDT->Snapshot();
-  sourceCtx->PushGroupForBlendBack(
-      gfxContentType::COLOR_ALPHA, 1.0, maskSurface,
-      maskSurfaceDeviceOffsetTranslation * invCurrentMatrix);
+  sourceCtx->PushGroupForBlendBack(gfxContentType::COLOR_ALPHA, 1.0,
+                                   maskSurface, invCurrentMatrix);
 
   return true;
 }
@@ -1156,7 +1145,7 @@ nsRect nsDisplayListBuilder::OutOfFlowDisplayData::ComputeVisibleRectForFrame(
   nsRect visible = aVisibleRect;
   nsRect dirtyRectRelativeToDirtyFrame = aDirtyRect;
 
-  if (StaticPrefs::APZAllowZooming() &&
+  if (StaticPrefs::apz_allow_zooming() &&
       nsLayoutUtils::IsFixedPosFrameInDisplayPort(aFrame) &&
       aBuilder->IsPaintingToWindow()) {
     dirtyRectRelativeToDirtyFrame =
@@ -1232,6 +1221,7 @@ nsDisplayListBuilder::nsDisplayListBuilder(nsIFrame* aReferenceFrame,
       mRootAGR(AnimatedGeometryRoot::CreateAGRForFrame(
           aReferenceFrame, nullptr, true, aRetainingDisplayList)),
       mCurrentAGR(mRootAGR),
+      mBuildingExtraPagesForPageNum(0),
       mUsedAGRBudget(0),
       mDirtyRect(-1, -1, -1, -1),
       mGlassDisplayItem(nullptr),
@@ -2867,7 +2857,7 @@ FrameLayerBuilder* nsDisplayList::BuildLayers(nsDisplayListBuilder* aBuilder,
                                    docShell);
 #endif
 
-    if (XRE_IsContentProcess() && StaticPrefs::AlwaysPaint()) {
+    if (XRE_IsContentProcess() && StaticPrefs::gfx_content_always_paint()) {
       FrameLayerBuilder::InvalidateAllLayers(aLayerManager);
     }
 
@@ -2890,8 +2880,10 @@ FrameLayerBuilder* nsDisplayList::BuildLayers(nsDisplayListBuilder* aBuilder,
 
     // If we are in a remote browser, then apply scaling from ancestor browsers
     if (BrowserChild* browserChild = BrowserChild::GetFrom(presShell)) {
-      resolutionX *= browserChild->GetEffectsInfo().mScaleX;
-      resolutionY *= browserChild->GetEffectsInfo().mScaleY;
+      if (!browserChild->IsTopLevel()) {
+        resolutionX *= browserChild->GetEffectsInfo().mScaleX;
+        resolutionY *= browserChild->GetEffectsInfo().mScaleY;
+      }
     }
 
     ContainerLayerParameters containerParameters(resolutionX, resolutionY);
@@ -6976,7 +6968,7 @@ nsDisplayRenderRoot::nsDisplayRenderRoot(
       mRenderRoot(aRenderRoot),
       mBuiltWRCommands(false) {
   MOZ_ASSERT(aRenderRoot != wr::RenderRoot::Default);
-  MOZ_ASSERT(StaticPrefs::WebRenderSplitRenderRoots());
+  MOZ_ASSERT(StaticPrefs::gfx_webrender_split_render_roots());
   ExpandDisplayListBuilderRenderRootRect(aBuilder);
   MOZ_COUNT_CTOR(nsDisplayRenderRoot);
 }
@@ -9644,18 +9636,6 @@ bool nsDisplayEffectsBase::ValidateSVGFrame() {
   return true;
 }
 
-static IntRect ComputeClipExtsInDeviceSpace(gfxContext& aCtx) {
-  // Get the clip extents in device space.
-  gfxRect clippedFrameSurfaceRect =
-      aCtx.GetClipExtents(gfxContext::eDeviceSpace);
-  clippedFrameSurfaceRect.RoundOut();
-
-  IntRect result;
-  ToRect(clippedFrameSurfaceRect).ToIntRect(&result);
-  return mozilla::gfx::Factory::CheckSurfaceSize(result.Size()) ? result
-                                                                : IntRect();
-}
-
 typedef nsSVGIntegrationUtils::PaintFramesParams PaintFramesParams;
 
 static void ComputeMaskGeometry(PaintFramesParams& aParams) {
@@ -9712,15 +9692,11 @@ static void ComputeMaskGeometry(PaintFramesParams& aParams) {
     maskInUserSpace = maskInUserSpace.Union(currentMaskSurfaceRect);
   }
 
-  gfxContextAutoSaveRestore autoSR;
-
   if (!maskInUserSpace.IsEmpty()) {
-    autoSR.SetContext(&ctx);
-    ctx.Clip(maskInUserSpace);
+    aParams.maskRect = Some(ToRect(maskInUserSpace));
+  } else {
+    aParams.maskRect = Nothing();
   }
-
-  IntRect result = ComputeClipExtsInDeviceSpace(ctx);
-  aParams.maskRect = result;
 }
 
 nsDisplayMasksAndClipPaths::nsDisplayMasksAndClipPaths(
@@ -10285,7 +10261,8 @@ bool nsDisplayFilters::CreateWebRenderCSSFilters(WrFiltersHolder& aWrFilters) {
 
   // If there are too many filters to render, then just pretend that we
   // succeeded, and don't render any of them.
-  if (filters.Length() > StaticPrefs::WebRenderMaxFilterOpsPerChain()) {
+  if (filters.Length() >
+      StaticPrefs::gfx_webrender_max_filter_ops_per_chain()) {
     return true;
   }
   aWrFilters.filters.SetCapacity(filters.Length());

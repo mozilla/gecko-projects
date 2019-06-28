@@ -696,26 +696,40 @@ class nsTextFrame : public nsFrame {
     // positive offsets are *above* the baseline and negative offsets below
     nscoord mBaselineOffset;
 
+    // This represents the offset from the initial position of the underline
+    const mozilla::LengthOrAuto mTextUnderlineOffset;
+
+    // for CSS property text-decoration-width, the width refers to the thickness
+    // of the decoration line
+    const mozilla::LengthOrAuto mTextDecorationWidth;
     nscolor mColor;
     uint8_t mStyle;
 
     LineDecoration(nsIFrame* const aFrame, const nscoord aOff,
-                   const nscolor aColor, const uint8_t aStyle)
+                   const mozilla::LengthOrAuto& aUnderline,
+                   const mozilla::LengthOrAuto& aDecWidth, const nscolor aColor,
+                   const uint8_t aStyle)
         : mFrame(aFrame),
           mBaselineOffset(aOff),
+          mTextUnderlineOffset(aUnderline),
+          mTextDecorationWidth(aDecWidth),
           mColor(aColor),
           mStyle(aStyle) {}
 
     LineDecoration(const LineDecoration& aOther)
         : mFrame(aOther.mFrame),
           mBaselineOffset(aOther.mBaselineOffset),
+          mTextUnderlineOffset(aOther.mTextUnderlineOffset),
+          mTextDecorationWidth(aOther.mTextDecorationWidth),
           mColor(aOther.mColor),
           mStyle(aOther.mStyle) {}
 
     bool operator==(const LineDecoration& aOther) const {
       return mFrame == aOther.mFrame && mStyle == aOther.mStyle &&
              mColor == aOther.mColor &&
-             mBaselineOffset == aOther.mBaselineOffset;
+             mBaselineOffset == aOther.mBaselineOffset &&
+             mTextUnderlineOffset == aOther.mTextUnderlineOffset &&
+             mTextDecorationWidth == aOther.mTextDecorationWidth;
     }
 
     bool operator!=(const LineDecoration& aOther) const {

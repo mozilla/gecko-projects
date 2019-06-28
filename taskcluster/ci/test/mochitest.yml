@@ -329,8 +329,7 @@ mochitest-media:
         by-test-platform:
             android-em-7.*: 1
             windows10-64.*: 1
-            macosx.*64.*/opt: 2
-            macosx.*64.*/debug: 4
+            macosx.*64.*/.*: 2
             windows10-aarch64/.*: 2
             windows7-32-shippable/.*: 2
             linux64(-shippable|-devedition|-.*qr)/opt: 2
@@ -506,3 +505,13 @@ mochitest-webgl2-deqp:
     mozharness:
         mochitest-flavor: plain
         chunked: true
+
+mochitest-remote:
+    description: "Mochitest for the remote agent (/remote folder)"
+    suite:
+        name: mochitest-remote
+    treeherder-symbol: M(remote)
+    loopback-video: true
+    max-run-time: 5400
+    mozharness:
+        mochitest-flavor: browser

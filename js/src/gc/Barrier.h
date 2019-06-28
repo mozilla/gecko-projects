@@ -863,6 +863,10 @@ class ImmutableTenuredPtr {
   const T* address() { return &value; }
 };
 
+#if MOZ_IS_GCC
+template struct JS_PUBLIC_API MovableCellHasher<JSObject*>;
+#endif
+
 template <typename T>
 struct MovableCellHasher<PreBarriered<T>> {
   using Key = PreBarriered<T>;
@@ -955,6 +959,21 @@ struct WeakHeapPtrHasher {
   static void rekey(Key& k, const Key& newKey) {
     k.set(newKey.unbarrieredGet());
   }
+};
+
+// Wrapper around GCCellPtr for use with RootedVector<StackGCCellPtr>.
+class MOZ_STACK_CLASS StackGCCellPtr {
+  JS::GCCellPtr ptr_;
+
+ public:
+  MOZ_IMPLICIT StackGCCellPtr(JS::GCCellPtr ptr) : ptr_(ptr) {}
+  StackGCCellPtr() = default;
+
+  void operator=(const StackGCCellPtr& other) { ptr_ = other.ptr_; }
+
+  void trace(JSTracer* trc);
+
+  JS::GCCellPtr get() const { return ptr_; }
 };
 
 }  // namespace js

@@ -21,12 +21,9 @@
 #if defined(XP_MACOSX) && defined(MOZ_SANDBOX)
 #  include "mozilla/dom/ContentChild.h"
 #  include "mozilla/Sandbox.h"
+#  include "mozilla/SandboxSettings.h"
 #  include "nsMacUtilsImpl.h"
 #endif
-
-#if defined(XP_MACOSX)
-#  include "mozilla/SandboxSettings.h"
-#endif /* XP_MACOSX */
 
 using std::string;
 using std::vector;

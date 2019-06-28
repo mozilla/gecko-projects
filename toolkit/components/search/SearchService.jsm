@@ -17,6 +17,7 @@ XPCOMUtils.defineLazyModuleGetters(this, {
   getVerificationHash: "resource://gre/modules/SearchEngine.jsm",
   OS: "resource://gre/modules/osfile.jsm",
   RemoteSettings: "resource://services-settings/remote-settings.js",
+  RemoteSettingsClient: "resource://services-settings/RemoteSettingsClient.jsm",
   SearchEngine: "resource://gre/modules/SearchEngine.jsm",
   SearchStaticData: "resource://gre/modules/SearchStaticData.jsm",
   SearchUtils: "resource://gre/modules/SearchUtils.jsm",
@@ -625,6 +626,41 @@ SearchService.prototype = {
     return this._initRV;
   },
 
+
+  /**
+   * Obtains the current ignore list from remote settings. This includes
+   * verifying the signature of the ignore list within the database.
+   *
+   * If the signature in the database is invalid, the database will be wiped
+   * and the stored dump will be used, until the settings next update.
+   *
+   * Note that this may cause a network check of the certificate, but that
+   * should generally be quick.
+   *
+   * @param {RemoteSettings} ignoreListSettings
+   *   The remote settings object associated with the ignore list.
+   * @param {boolean} [firstTime]
+   *   Internal boolean to indicate if this is the first time check or not.
+   */
+  async _getRemoteSettings(ignoreListSettings, firstTime = true) {
+    try {
+      return ignoreListSettings.get({verifySignature: true});
+    } catch (ex) {
+      if (ex instanceof RemoteSettingsClient.InvalidSignatureError && firstTime) {
+        // The local database is invalid, try and reset it.
+        const collection = await ignoreListSettings.openCollection();
+        await collection.clear();
+        await collection.db.close();
+        // Now call this again.
+        return this._getRemoteSettings(ignoreListSettings, false);
+      }
+      // Don't throw an error just log it, just continue with no data, and hopefully
+      // a sync will fix things later on.
+      Cu.reportError(ex);
+      return [];
+    }
+  },
+
   /**
    * Obtains the remote settings for the search service. This should only be
    * called from init(). Any subsequent updates to the remote settings are
@@ -637,7 +673,7 @@ SearchService.prototype = {
   async _setupRemoteSettings() {
     const ignoreListSettings = RemoteSettings(SearchUtils.SETTINGS_IGNORELIST_KEY);
     // Trigger a get of the initial value.
-    const current = await ignoreListSettings.get();
+    const current = await this._getRemoteSettings(ignoreListSettings);
 
     // Now we have the values, listen for future updates.
     this._ignoreListListener = this._handleIgnoreListUpdated.bind(this);
@@ -1825,23 +1861,10 @@ SearchService.prototype = {
     return null;
   },
 
-  async addEngineWithDetails(name, iconURL, alias, description, method, template, extensionID) {
+  async addEngineWithDetails(name, details) {
     SearchUtils.log("addEngineWithDetails: Adding \"" + name + "\".");
     let isCurrent = false;
-    var params;
-
-    if (iconURL && typeof iconURL == "object") {
-      params = iconURL;
-    } else {
-      params = {
-        iconURL,
-        alias,
-        description,
-        method,
-        template,
-        extensionID,
-      };
-    }
+    var params = details;
 
     let isBuiltin = !!params.isBuiltin;
     // We install search extensions during the init phase, both built in
@@ -2221,6 +2244,24 @@ SearchService.prototype = {
   },
 
   async setDefault(engine) {
+    await this.init(true);
+    return this.defaultEngine = engine;
+  },
+
+  get defaultPrivateEngine() {
+    return this.defaultEngine;
+  },
+
+  set defaultPrivateEngine(engine) {
+    return this.defaultEngine = engine;
+  },
+
+  async getDefaultPrivate() {
+    await this.init(true);
+    return this.defaultEngine;
+  },
+
+  async setDefaultPrivate(engine) {
     await this.init(true);
     return this.defaultEngine = engine;
   },

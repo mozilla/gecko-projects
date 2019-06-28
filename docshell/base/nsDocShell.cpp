@@ -5718,11 +5718,8 @@ nsresult nsDocShell::SetCurScrollPosEx(int32_t aCurHorizontalPos,
   nsIScrollableFrame* sf = GetRootScrollFrame();
   NS_ENSURE_TRUE(sf, NS_ERROR_FAILURE);
 
-  ScrollMode scrollMode = ScrollMode::Instant;
-  if (sf->GetScrollStyles().mScrollBehavior ==
-      NS_STYLE_SCROLL_BEHAVIOR_SMOOTH) {
-    scrollMode = ScrollMode::SmoothMsd;
-  }
+  ScrollMode scrollMode =
+      sf->IsSmoothScroll() ? ScrollMode::SmoothMsd : ScrollMode::Instant;
 
   nsPoint targetPos(aCurHorizontalPos, aCurVerticalPos);
   sf->ScrollTo(targetPos, scrollMode);
@@ -7419,8 +7416,6 @@ nsresult nsDocShell::CaptureState() {
     mOSHE->AddChildShell(childShell);
   }
 
-  mBrowsingContext->CacheChildren();
-
   return NS_OK;
 }
 
@@ -7806,6 +7801,10 @@ nsresult nsDocShell::RestoreFromHistory() {
 
   // Order the mContentViewer setup just like Embed does.
   mContentViewer = nullptr;
+
+  // Move the browsing ontext's children to the cache. If we're
+  // detaching them, we'll detach them from there.
+  mBrowsingContext->CacheChildren();
 
   // Now that we're about to switch documents, forget all of our children.
   // Note that we cached them as needed up in CaptureState above.
@@ -8512,6 +8511,10 @@ nsresult nsDocShell::SetupNewViewer(nsIContentViewer* aNewViewer) {
   }
 
   mContentViewer = nullptr;
+
+  // Move the browsing ontext's children to the cache. If we're
+  // detaching them, we'll detach them from there.
+  mBrowsingContext->CacheChildren();
 
   // Now that we're about to switch documents, forget all of our children.
   // Note that we cached them as needed up in CaptureState above.
@@ -10483,6 +10486,14 @@ nsresult nsDocShell::DoChannelLoad(nsIChannel* aChannel,
   if (SandboxFlagsImplyCookies(mSandboxFlags)) {
     loadFlags |= nsIRequest::LOAD_DOCUMENT_NEEDS_COOKIE;
   }
+
+  if (mSandboxFlags & SANDBOXED_AUXILIARY_NAVIGATION) {
+    nsCOMPtr<nsIHttpChannelInternal> httpChannel(do_QueryInterface(aChannel));
+    if (httpChannel) {
+      httpChannel->SetHasSandboxedAuxiliaryNavigations(true);
+    }
+  }
+
   // Load attributes depend on load type...
   switch (mLoadType) {
     case LOAD_HISTORY: {
@@ -11793,18 +11804,6 @@ nsresult nsDocShell::LoadHistoryEntry(nsISHEntry* aEntry, uint32_t aLoadType) {
                     nullptr,   // No nsIDocShell
                     nullptr);  // No nsIRequest
   return rv;
-}
-
-NS_IMETHODIMP
-nsDocShell::GetShouldSaveLayoutState(bool* aShould) {
-  *aShould = false;
-  if (mOSHE) {
-    // Don't capture historystate and save it in history
-    // if the page asked not to do so.
-    *aShould = mOSHE->GetSaveLayoutStateFlag();
-  }
-
-  return NS_OK;
 }
 
 nsresult nsDocShell::PersistLayoutHistoryState() {

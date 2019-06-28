@@ -1470,17 +1470,21 @@ bool gfxUtils::DumpDisplayList() {
 
 wr::RenderRoot gfxUtils::GetContentRenderRoot() {
   if (gfx::gfxVars::UseWebRender() &&
-      StaticPrefs::WebRenderSplitRenderRoots()) {
+      StaticPrefs::gfx_webrender_split_render_roots()) {
     return wr::RenderRoot::Content;
   }
   return wr::RenderRoot::Default;
 }
 
 Maybe<wr::RenderRoot> gfxUtils::GetRenderRootForFrame(const nsIFrame* aFrame) {
-  if (!gfxVars::UseWebRender() || !StaticPrefs::WebRenderSplitRenderRoots()) {
+  if (!gfxVars::UseWebRender() ||
+      !StaticPrefs::gfx_webrender_split_render_roots()) {
     return Nothing();
   }
   if (!aFrame->GetContent()) {
+    return Nothing();
+  }
+  if (!aFrame->GetContent()->IsElement()) {
     return Nothing();
   }
   return gfxUtils::GetRenderRootForElement(aFrame->GetContent()->AsElement());
@@ -1491,7 +1495,8 @@ Maybe<wr::RenderRoot> gfxUtils::GetRenderRootForElement(
   if (!aElement) {
     return Nothing();
   }
-  if (!gfxVars::UseWebRender() || !StaticPrefs::WebRenderSplitRenderRoots()) {
+  if (!gfxVars::UseWebRender() ||
+      !StaticPrefs::gfx_webrender_split_render_roots()) {
     return Nothing();
   }
   if (!aElement->IsXULElement()) {
@@ -1506,30 +1511,14 @@ Maybe<wr::RenderRoot> gfxUtils::GetRenderRootForElement(
 
 wr::RenderRoot gfxUtils::RecursivelyGetRenderRootForFrame(
     const nsIFrame* aFrame) {
-  if (!gfxVars::UseWebRender() || !StaticPrefs::WebRenderSplitRenderRoots()) {
+  if (!gfxVars::UseWebRender() ||
+      !StaticPrefs::gfx_webrender_split_render_roots()) {
     return wr::RenderRoot::Default;
   }
 
   for (const nsIFrame* current = aFrame; current;
-       current = current->GetParent()) {
+       current = nsLayoutUtils::GetCrossDocParentFrame(current)) {
     auto renderRoot = gfxUtils::GetRenderRootForFrame(current);
-    if (renderRoot) {
-      return *renderRoot;
-    }
-  }
-
-  return wr::RenderRoot::Default;
-}
-
-wr::RenderRoot gfxUtils::RecursivelyGetRenderRootForElement(
-    const dom::Element* aElement) {
-  if (!gfxVars::UseWebRender() || !StaticPrefs::WebRenderSplitRenderRoots()) {
-    return wr::RenderRoot::Default;
-  }
-
-  for (const dom::Element* current = aElement; current;
-       current = current->GetParentElement()) {
-    auto renderRoot = gfxUtils::GetRenderRootForElement(current);
     if (renderRoot) {
       return *renderRoot;
     }

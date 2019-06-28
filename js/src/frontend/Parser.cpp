@@ -51,6 +51,7 @@
 #include "vm/JSScript.h"
 #include "vm/ModuleBuilder.h"  // js::ModuleBuilder
 #include "vm/RegExpObject.h"
+#include "vm/SelfHosting.h"
 #include "vm/StringType.h"
 #include "wasm/AsmJS.h"
 
@@ -182,7 +183,7 @@ ParserBase::ParserBase(JSContext* cx, LifoAlloc& alloc,
                        ScriptSourceObject* sourceObject, ParseGoal parseGoal)
     : ParserSharedBase(cx, alloc, usedNames, sourceObject,
                        ParserSharedBase::Kind::Parser),
-      anyChars(cx, options, thisForCtor()),
+      anyChars(cx, options, this),
       ss(nullptr),
       foldConstants_(foldConstants),
 #ifdef DEBUG
@@ -1973,6 +1974,10 @@ JSFunction* AllocNewFunction(JSContext* cx, HandleAtom atom,
 
   gc::AllocKind allocKind = gc::AllocKind::FUNCTION;
   JSFunction::Flags flags;
+  bool isExtendedUnclonedSelfHostedFunctionName =
+      isSelfHosting && atom && IsExtendedUnclonedSelfHostedFunctionName(atom);
+  MOZ_ASSERT_IF(isExtendedUnclonedSelfHostedFunctionName, !inFunctionBox);
+
   switch (kind) {
     case FunctionSyntaxKind::Expression:
       flags = (generatorKind == GeneratorKind::NotGenerator &&
@@ -2003,7 +2008,7 @@ JSFunction* AllocNewFunction(JSContext* cx, HandleAtom atom,
       break;
     default:
       MOZ_ASSERT(kind == FunctionSyntaxKind::Statement);
-      if (isSelfHosting && !inFunctionBox) {
+      if (isExtendedUnclonedSelfHostedFunctionName) {
         allocKind = gc::AllocKind::FUNCTION_EXTENDED;
       }
       flags = (generatorKind == GeneratorKind::NotGenerator &&
@@ -2694,7 +2699,7 @@ bool Parser<FullParseHandler, Unit>::trySyntaxParseInnerFunction(
         // correctness.
         syntaxParser->clearAbortedSyntaxParse();
         usedNames_.rewind(token);
-        MOZ_ASSERT_IF(!syntaxParser->cx_->helperThread(),
+        MOZ_ASSERT_IF(!syntaxParser->cx_->isHelperThreadContext(),
                       !syntaxParser->cx_->isExceptionPending());
         break;
       }
@@ -7359,7 +7364,7 @@ GeneralParser<ParseHandler, Unit>::fieldInitializerOpt(
   }
 
   // Create the function object.
-  RootedFunction fun(cx_, newFunction(nullptr, FunctionSyntaxKind::Expression,
+  RootedFunction fun(cx_, newFunction(nullptr, FunctionSyntaxKind::Method,
                                       GeneratorKind::NotGenerator,
                                       FunctionAsyncKind::SyncFunction));
   if (!fun) {
@@ -7368,7 +7373,7 @@ GeneralParser<ParseHandler, Unit>::fieldInitializerOpt(
 
   // Create the top-level field initializer node.
   FunctionNodeType funNode =
-      handler_.newFunction(FunctionSyntaxKind::Expression, firstTokenPos);
+      handler_.newFunction(FunctionSyntaxKind::Method, firstTokenPos);
   if (!funNode) {
     return null();
   }
@@ -7529,6 +7534,10 @@ GeneralParser<ParseHandler, Unit>::fieldInitializerOpt(
   }
 
   handler_.setFunctionBody(funNode, initializerBody);
+
+  if (pc_->superScopeNeedsHomeObject()) {
+    funbox->setNeedsHomeObject();
+  }
 
   if (!finishFunction(/* isStandaloneFunction = */ false,
                       IsFieldInitializer::Yes)) {

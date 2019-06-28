@@ -2,7 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-import {recordTelemetryEvent} from "chrome://browser/content/aboutlogins/aboutLoginsUtils.js";
+import {recordTelemetryEvent} from "../aboutLoginsUtils.js";
 
 export default class LoginListItem extends HTMLElement {
   constructor(login) {
@@ -19,25 +19,26 @@ export default class LoginListItem extends HTMLElement {
     let loginListItemTemplate = document.querySelector("#login-list-item-template");
     this.attachShadow({mode: "open"})
         .appendChild(loginListItemTemplate.content.cloneNode(true));
+
+    this._title = this.shadowRoot.querySelector(".title");
+    this._username = this.shadowRoot.querySelector(".username");
+
     this.render();
 
     this.addEventListener("click", this);
   }
 
   render() {
-    let origin = this.shadowRoot.querySelector(".origin");
-    let username = this.shadowRoot.querySelector(".username");
-
     if (!this._login.guid) {
-      this.removeAttribute("guid");
-      origin.textContent = this.getAttribute("new-login-title");
-      username.textContent = this.getAttribute("new-login-subtitle");
+      delete this.dataset.guid;
+      this._title.textContent = this.getAttribute("new-login-title");
+      this._username.textContent = this.getAttribute("new-login-subtitle");
       return;
     }
 
-    this.setAttribute("guid", this._login.guid);
-    origin.textContent = this._login.origin;
-    username.textContent = this._login.username;
+    this.dataset.guid = this._login.guid;
+    this._title.textContent = this._login.title;
+    this._username.textContent = this._login.username.trim() || this.getAttribute("missing-username");
   }
 
   handleEvent(event) {
@@ -54,6 +55,12 @@ export default class LoginListItem extends HTMLElement {
     }
   }
 
+  /**
+   * Updates the cached login object with new values.
+   *
+   * @param {login} login The login object to display. The login object is
+   *                      a plain JS object representation of nsILoginInfo/nsILoginMetaInfo.
+   */
   update(login) {
     this._login = login;
     this.render();

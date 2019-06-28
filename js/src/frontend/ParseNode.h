@@ -586,7 +586,10 @@ enum class FunctionSyntaxKind {
   Statement,
 
   Arrow,
+
+  // Method of a class or object. Field initializers also desugar to methods.
   Method,
+
   ClassConstructor,
   DerivedClassConstructor,
   Getter,
@@ -2188,7 +2191,7 @@ class BigIntBox : public TraceListNode {
 
 class ObjectBox : public TraceListNode {
  protected:
-  friend struct CGObjectList;
+  friend struct GCThingList;
   ObjectBox* emitLink;
 
   ObjectBox(JSFunction* function, TraceListNode* link);

@@ -65,6 +65,7 @@
 #include "mozilla/webrender/WebRenderAPI.h"
 #include "mozilla/media/MediaSystemResourceService.h"  // for MediaSystemResourceService
 #include "mozilla/mozalloc.h"                          // for operator new, etc
+#include "mozilla/PerfStats.h"
 #include "mozilla/Telemetry.h"
 #ifdef MOZ_WIDGET_GTK
 #  include "basic/X11BasicCompositor.h"  // for X11BasicCompositor
@@ -851,7 +852,7 @@ void CompositorBridgeParent::NotifyShadowTreeTransaction(
                                     WRRootId::NonWebRender(aId), aFocusTarget);
       if (aHitTestUpdate) {
         mApzUpdater->UpdateHitTestingTree(
-            mRootLayerTreeID, mLayerManager->GetRoot(), aIsFirstPaint, aId,
+            mLayerManager->GetRoot(), aIsFirstPaint, aId,
             aPaintSequenceNumber);
       }
     }
@@ -912,6 +913,7 @@ void CompositorBridgeParent::CompositeToTarget(VsyncId aId, DrawTarget* aTarget,
                                                const gfx::IntRect* aRect) {
   AUTO_PROFILER_TRACING("Paint", "Composite", GRAPHICS);
   AUTO_PROFILER_LABEL("CompositorBridgeParent::CompositeToTarget", GRAPHICS);
+  PerfStats::AutoMetricRecording<PerfStats::Metric::Compositing> autoRecording;
 
   MOZ_ASSERT(CompositorThreadHolder::IsInCompositorThread(),
              "Composite can only be called on the compositor thread");
@@ -1245,7 +1247,7 @@ void CompositorBridgeParent::ShadowLayersUpdated(
     if (aHitTestUpdate) {
       AutoResolveRefLayers resolve(mCompositionManager);
 
-      mApzUpdater->UpdateHitTestingTree(mRootLayerTreeID, root,
+      mApzUpdater->UpdateHitTestingTree(root,
                                         aInfo.isFirstPaint(), mRootLayerTreeID,
                                         aInfo.paintSequenceNumber());
     }
@@ -1551,7 +1553,7 @@ PLayerTransactionParent* CompositorBridgeParent::AllocPLayerTransactionParent(
 #ifdef XP_WIN
   // This is needed to avoid freezing the window on a device crash on double
   // buffering, see bug 1549674.
-  if (StaticPrefs::Direct3D11UseDoubleBuffering() && IsWin10OrLater() &&
+  if (StaticPrefs::gfx_direct3d11_use_double_buffering() && IsWin10OrLater() &&
       XRE_IsGPUProcess()) {
     mWidget->AsWindows()->EnsureCompositorWindow();
   }
@@ -1790,7 +1792,7 @@ PWebRenderBridgeParent* CompositorBridgeParent::AllocPWebRenderBridgeParent(
     return mWrBridge;
   }
 
-  if (StaticPrefs::WebRenderSplitRenderRoots()) {
+  if (StaticPrefs::gfx_webrender_split_render_roots()) {
     apis.AppendElement(
         apis[0]->CreateDocument(aSize, 1, wr::RenderRoot::Content));
   }

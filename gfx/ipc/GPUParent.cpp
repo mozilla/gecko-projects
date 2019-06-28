@@ -14,6 +14,7 @@
 #include "GPUProcessHost.h"
 #include "GPUProcessManager.h"
 #include "mozilla/Assertions.h"
+#include "mozilla/PerfStats.h"
 #include "mozilla/StaticPrefs.h"
 #include "mozilla/Telemetry.h"
 #include "mozilla/TimeStamp.h"
@@ -106,6 +107,10 @@ bool GPUParent::Init(base::ProcessId aParentPid, const char* aParentBuildID,
     ProcessChild::QuickExit();
   }
 
+  if (NS_FAILED(NS_InitMinimalXPCOM())) {
+    return false;
+  }
+
   // Init crash reporter support.
   CrashReporterClient::InitSingleton(this);
 
@@ -118,10 +123,6 @@ bool GPUParent::Init(base::ProcessId aParentPid, const char* aParentBuildID,
 #if defined(XP_WIN)
   DeviceManagerDx::Init();
 #endif
-
-  if (NS_FAILED(NS_InitMinimalXPCOM())) {
-    return false;
-  }
 
   CompositorThreadHolder::Start();
   APZThreadUtils::SetControllerThread(MessageLoop::current());
@@ -263,7 +264,8 @@ mozilla::ipc::IPCResult GPUParent::RecvInit(
   }
 #ifdef XP_WIN
   else {
-    if (StaticPrefs::Direct3D11UseDoubleBuffering() && IsWin10OrLater()) {
+    if (StaticPrefs::gfx_direct3d11_use_double_buffering() &&
+        IsWin10OrLater()) {
       // This is needed to avoid freezing the window on a device crash on double
       // buffering, see bug 1549674.
       widget::WinCompositorWindowThread::Start();
@@ -477,9 +479,21 @@ mozilla::ipc::IPCResult GPUParent::RecvRequestMemoryReport(
 }
 
 mozilla::ipc::IPCResult GPUParent::RecvShutdownVR() {
-  if (StaticPrefs::VRProcessEnabled()) {
+  if (StaticPrefs::dom_vr_process_enabled()) {
     VRGPUChild::Shutdown();
   }
+  return IPC_OK();
+}
+
+mozilla::ipc::IPCResult GPUParent::RecvUpdatePerfStatsCollectionMask(
+    const uint64_t& aMask) {
+  PerfStats::SetCollectionMask(static_cast<PerfStats::MetricMask>(aMask));
+  return IPC_OK();
+}
+
+mozilla::ipc::IPCResult GPUParent::RecvCollectPerfStatsJSON(
+    CollectPerfStatsJSONResolver&& aResolver) {
+  aResolver(PerfStats::CollectLocalPerfStatsJSON());
   return IPC_OK();
 }
 

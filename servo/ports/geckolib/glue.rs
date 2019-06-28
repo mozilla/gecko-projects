@@ -1168,7 +1168,7 @@ pub unsafe extern "C" fn Servo_Property_GetCSSValuesForProperty(
 
     let result = result.as_mut().unwrap();
     let len = extras.len() + values.len();
-    bindings::Gecko_ResizeTArrayForStrings(result as *mut _ as *mut nsTArray<nsString>, len as u32);
+    bindings::Gecko_ResizeTArrayForStrings(result, len as u32);
 
     for (src, dest) in extras.iter().chain(values.iter()).zip(result.iter_mut()) {
         dest.write_str(src).unwrap();
@@ -1383,7 +1383,7 @@ pub extern "C" fn Servo_StyleSheet_FromUTF8Bytes(
     };
 
     // FIXME(emilio): loader.as_ref() doesn't typecheck for some reason?
-    let loader: Option<&StyleStylesheetLoader> = match loader {
+    let loader: Option<&dyn StyleStylesheetLoader> = match loader {
         None => None,
         Some(ref s) => Some(s),
     };
@@ -1394,7 +1394,7 @@ pub extern "C" fn Servo_StyleSheet_FromUTF8Bytes(
         mode_to_origin(mode),
         &global_style_data.shared_lock,
         loader,
-        reporter.as_ref().map(|r| r as &ParseErrorReporter),
+        reporter.as_ref().map(|r| r as &dyn ParseErrorReporter),
         quirks_mode.into(),
         line_number_offset,
         use_counters,
@@ -1908,7 +1908,7 @@ pub extern "C" fn Servo_CssRules_InsertRule(
     };
     let loader = loader
         .as_ref()
-        .map(|loader| loader as &StyleStylesheetLoader);
+        .map(|loader| loader as &dyn StyleStylesheetLoader);
     let rule = unsafe { rule.as_ref().unwrap().as_str_unchecked() };
 
     let global_style_data = &*GLOBAL_STYLE_DATA;
@@ -3588,7 +3588,7 @@ fn get_pseudo_style(
     inherited_styles: Option<&ComputedValues>,
     doc_data: &PerDocumentStyleDataImpl,
     is_probe: bool,
-    matching_func: Option<&Fn(&PseudoElement) -> bool>,
+    matching_func: Option<&dyn Fn(&PseudoElement) -> bool>,
 ) -> Option<Arc<ComputedValues>> {
     let style = match pseudo.cascade_type() {
         PseudoElementCascadeType::Eager => {
@@ -3746,6 +3746,69 @@ pub extern "C" fn Servo_ComputedValues_GetStyleRuleList(
     }))
 }
 
+/// println_stderr!() calls Gecko's printf_stderr(), which, unlike eprintln!(),
+/// will funnel output to Android logcat.
+#[cfg(feature = "gecko_debug")]
+macro_rules! println_stderr {
+    ($($e:expr),+) => {
+        {
+            let mut s = nsCString::new();
+            write!(s, $($e),+).unwrap();
+            s.write_char('\n').unwrap();
+            unsafe { bindings::Gecko_PrintfStderr(&s); }
+        }
+    }
+}
+
+#[cfg(feature = "gecko_debug")]
+fn dump_properties_and_rules(cv: &ComputedValues, properties: &LonghandIdSet) {
+    println_stderr!("  Properties:");
+    for p in properties.iter() {
+        let mut v = String::new();
+        cv.get_longhand_property_value(p, &mut CssWriter::new(&mut v)).unwrap();
+        println_stderr!("    {:?}: {}", p, v);
+    }
+    println_stderr!("  Rules:");
+    let global_style_data = &*GLOBAL_STYLE_DATA;
+    let guard = global_style_data.shared_lock.read();
+    for rn in cv.rules().self_and_ancestors() {
+        if rn.importance().important() {
+            continue;
+        }
+        if let Some(d) = rn.style_source().and_then(|s| s.as_declarations()) {
+            println_stderr!("    [DeclarationBlock: {:?}]", d);
+        }
+        if let Some(r) = rn.style_source().and_then(|s| s.as_rule()) {
+            let mut s = nsString::new();
+            r.read_with(&guard).to_css(&guard, &mut s).unwrap();
+            println_stderr!("    {}", s);
+        }
+    }
+}
+
+#[cfg(feature = "gecko_debug")]
+#[no_mangle]
+pub extern "C" fn Servo_ComputedValues_EqualForCachedAnonymousContentStyle(
+    a: &ComputedValues,
+    b: &ComputedValues,
+) -> bool {
+    let mut differing_properties = a.differing_properties(b);
+
+    // Ignore any difference in -x-lang, which we can't override in the
+    // rules in minimal-xul.css, but which makes no difference for the
+    // anonymous content subtrees we cache style for.
+    differing_properties.remove(LonghandId::XLang);
+
+    if !differing_properties.is_empty() {
+        println_stderr!("Actual style:");
+        dump_properties_and_rules(a, &differing_properties);
+        println_stderr!("Expected style:");
+        dump_properties_and_rules(b, &differing_properties);
+    }
+
+    differing_properties.is_empty()
+}
+
 #[no_mangle]
 pub extern "C" fn Servo_StyleSet_Init(doc: &structs::Document) -> *mut RawServoStyleSet {
     let data = Box::new(PerDocumentStyleData::new(doc));
@@ -3777,7 +3840,7 @@ fn parse_property_into(
     data: *mut URLExtraData,
     parsing_mode: structs::ParsingMode,
     quirks_mode: QuirksMode,
-    reporter: Option<&ParseErrorReporter>,
+    reporter: Option<&dyn ParseErrorReporter>,
 ) -> Result<(), ()> {
     let value = unsafe { value.as_ref().unwrap().as_str_unchecked() };
     let url_data = unsafe { UrlExtraData::from_ptr_ref(&data) };
@@ -3814,7 +3877,7 @@ pub extern "C" fn Servo_ParseProperty(
         data,
         parsing_mode,
         quirks_mode.into(),
-        reporter.as_ref().map(|r| r as &ParseErrorReporter),
+        reporter.as_ref().map(|r| r as &dyn ParseErrorReporter),
     );
 
     match result {
@@ -3966,7 +4029,7 @@ pub unsafe extern "C" fn Servo_ParseStyleAttribute(
     Arc::new(global_style_data.shared_lock.wrap(parse_style_attribute(
         value,
         url_data,
-        reporter.as_ref().map(|r| r as &ParseErrorReporter),
+        reporter.as_ref().map(|r| r as &dyn ParseErrorReporter),
         quirks_mode.into(),
     )))
     .into_strong()
@@ -4195,7 +4258,7 @@ fn set_property(
         data,
         parsing_mode,
         quirks_mode,
-        reporter.as_ref().map(|r| r as &ParseErrorReporter),
+        reporter.as_ref().map(|r| r as &dyn ParseErrorReporter),
     );
 
     if result.is_err() {
@@ -4805,6 +4868,7 @@ pub extern "C" fn Servo_DeclarationBlock_SetNumberValue(
     use style::properties::longhands::_moz_script_level::SpecifiedValue as MozScriptLevel;
     use style::properties::longhands::_moz_script_size_multiplier::SpecifiedValue as MozScriptSizeMultiplier;
     use style::properties::PropertyDeclaration;
+    use style::values::specified::Number;
 
     let long = get_longhand_from_id!(property);
 
@@ -4812,6 +4876,7 @@ pub extern "C" fn Servo_DeclarationBlock_SetNumberValue(
         MozScriptSizeMultiplier => MozScriptSizeMultiplier(value),
         // Gecko uses Number values to signal that it is absolute
         MozScriptLevel => MozScriptLevel::MozAbsolute(value as i32),
+        AspectRatio => Number::new(value),
     };
     write_locked_arc(declarations, |decls: &mut PropertyDeclarationBlock| {
         decls.push(prop, Importance::Normal);
@@ -5087,7 +5152,6 @@ pub extern "C" fn Servo_TakeChangeHint(
 #[no_mangle]
 pub extern "C" fn Servo_ResolveStyle(
     element: &RawGeckoElement,
-    _raw_data: &RawServoStyleSet,
 ) -> Strong<ComputedValues> {
     let element = GeckoElement(element);
     debug!("Servo_ResolveStyle: {:?}", element);
@@ -5229,7 +5293,7 @@ fn simulate_compute_values_failure(_: &PropertyValuePair) -> bool {
 
 fn create_context_for_animation<'a>(
     per_doc_data: &'a PerDocumentStyleDataImpl,
-    font_metrics_provider: &'a FontMetricsProvider,
+    font_metrics_provider: &'a dyn FontMetricsProvider,
     style: &'a ComputedValues,
     parent_style: Option<&'a ComputedValues>,
     for_smil_animation: bool,
@@ -6163,7 +6227,7 @@ pub unsafe extern "C" fn Servo_SelectorList_Drop(list: *mut RawServoSelectorList
 
 fn parse_color(
     value: &str,
-    error_reporter: Option<&ParseErrorReporter>,
+    error_reporter: Option<&dyn ParseErrorReporter>,
 ) -> Result<specified::Color, ()> {
     let mut input = ParserInput::new(value);
     let mut parser = Parser::new(&mut input);
@@ -6227,7 +6291,7 @@ pub extern "C" fn Servo_ComputeColor(
         ErrorReporter::new(ptr::null_mut(), loader, ptr::null_mut())
     });
 
-    match parse_color(&value, reporter.as_ref().map(|r| r as &ParseErrorReporter)) {
+    match parse_color(&value, reporter.as_ref().map(|r| r as &dyn ParseErrorReporter)) {
         Ok(specified_color) => {
             let computed_color = match raw_data {
                 Some(raw_data) => {

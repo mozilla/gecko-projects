@@ -2,10 +2,14 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-import {recordTelemetryEvent} from "chrome://browser/content/aboutlogins/aboutLoginsUtils.js";
-import ReflectedFluentElement from "chrome://browser/content/aboutlogins/components/reflected-fluent-element.js";
+import {recordTelemetryEvent} from "../aboutLoginsUtils.js";
+import ReflectedFluentElement from "./reflected-fluent-element.js";
 
 export default class CopyToClipboardButton extends ReflectedFluentElement {
+  /**
+   * The number of milliseconds to display the "Copied" success message
+   * before reverting to the normal "Copy" button.
+   */
   static get BUTTON_RESET_TIMEOUT() {
     return 5000;
   }
@@ -25,7 +29,10 @@ export default class CopyToClipboardButton extends ReflectedFluentElement {
     this.attachShadow({mode: "open"})
         .appendChild(CopyToClipboardButtonTemplate.content.cloneNode(true));
 
-    this.shadowRoot.querySelector(".copy-button").addEventListener("click", this);
+    this._copyButton = this.shadowRoot.querySelector(".copy-button");
+    this._copyButton.addEventListener("click", this);
+
+    super.connectedCallback();
   }
 
   static get reflectedFluentIDs() {
@@ -48,25 +55,28 @@ export default class CopyToClipboardButton extends ReflectedFluentElement {
   }
 
   handleEvent(event) {
-    let copyButton = this.shadowRoot.querySelector(".copy-button");
-    if (event.type != "click" || event.currentTarget != copyButton) {
+    if (event.type != "click" || event.currentTarget != this._copyButton) {
       return;
     }
 
-    copyButton.disabled = true;
+    this._copyButton.disabled = true;
     navigator.clipboard.writeText(this._relatedInput.value).then(() => {
-      this.setAttribute("copied", "");
+      this.dataset.copied = true;
       setTimeout(() => {
-        copyButton.disabled = false;
-        this.removeAttribute("copied");
+        this._copyButton.disabled = false;
+        delete this.dataset.copied;
       }, CopyToClipboardButton.BUTTON_RESET_TIMEOUT);
-    }, () => copyButton.disabled = false);
+    }, () => this._copyButton.disabled = false);
 
     if (this.dataset.telemetryObject) {
       recordTelemetryEvent({object: this.dataset.telemetryObject, method: "copy"});
     }
   }
 
+  /**
+   * @param {Element} val A reference to the input element whose value will
+   *                      be placed on the clipboard.
+   */
   set relatedInput(val) {
     this._relatedInput = val;
   }

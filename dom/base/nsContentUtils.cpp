@@ -1950,6 +1950,13 @@ bool nsContentUtils::IsFuzzingEnabled() {
 #endif
 
 /* static */
+bool nsContentUtils::IsCallerChromeOrElementTransformGettersEnabled(
+    JSContext* aCx, JSObject*) {
+  return ThreadsafeIsSystemCaller(aCx) ||
+         StaticPrefs::dom_element_transform_getters_enabled();
+}
+
+/* static */
 bool nsContentUtils::ShouldResistFingerprinting() {
   return StaticPrefs::privacy_resistFingerprinting();
 }
@@ -2647,23 +2654,21 @@ static inline bool IsAutocompleteOff(const nsIContent* aContent) {
 }
 
 /*static*/
-nsresult nsContentUtils::GenerateStateKey(nsIContent* aContent,
-                                          Document* aDocument,
-                                          nsACString& aKey) {
+void nsContentUtils::GenerateStateKey(nsIContent* aContent, Document* aDocument,
+                                      nsACString& aKey) {
+  MOZ_ASSERT(aContent);
+
   aKey.Truncate();
 
   uint32_t partID = aDocument ? aDocument->GetPartID() : 0;
 
-  // We must have content if we're not using a special state id
-  NS_ENSURE_TRUE(aContent, NS_ERROR_FAILURE);
-
   // Don't capture state for anonymous content
   if (aContent->IsInAnonymousSubtree()) {
-    return NS_OK;
+    return;
   }
 
   if (IsAutocompleteOff(aContent)) {
-    return NS_OK;
+    return;
   }
 
   RefPtr<Document> doc = aContent->GetUncomposedDoc();
@@ -2673,10 +2678,6 @@ nsresult nsContentUtils::GenerateStateKey(nsIContent* aContent,
 
   if (doc && doc->IsHTMLOrXHTML()) {
     nsHTMLDocument* htmlDoc = doc->AsHTMLDocument();
-    RefPtr<nsContentList> htmlForms;
-    RefPtr<nsContentList> htmlFormControls;
-    htmlDoc->GetFormsAndFormControls(getter_AddRefs(htmlForms),
-                                     getter_AddRefs(htmlFormControls));
 
     // If we have a form control and can calculate form information, use that
     // as the key - it is more reliable than just recording position in the
@@ -2684,47 +2685,84 @@ nsresult nsContentUtils::GenerateStateKey(nsIContent* aContent,
     // XXXbz Is it, really?  We have bugs on this, I think...
     // Important to have a unique key, and tag/type/name may not be.
     //
-    // If the control has a form, the format of the key is:
-    // f>type>IndOfFormInDoc>IndOfControlInForm>FormName>name
-    // else:
-    // d>type>IndOfControlInDoc>name
+    // The format of the key depends on whether the control has a form,
+    // and whether the element was parser inserted:
+    //
+    // [Has Form, Parser Inserted]:
+    //   fp>type>FormNum>IndOfControlInForm>FormName>name
+    //
+    // [No Form, Parser Inserted]:
+    //   dp>type>ControlNum>name
+    //
+    // [Has Form, Not Parser Inserted]:
+    //   fn>type>IndOfFormInDoc>IndOfControlInForm>FormName>name
+    //
+    // [No Form, Not Parser Inserted]:
+    //   dn>type>IndOfControlInDoc>name
     //
     // XXX We don't need to use index if name is there
     // XXXbz We don't?  Why not?  I don't follow.
     //
     nsCOMPtr<nsIFormControl> control(do_QueryInterface(aContent));
     if (control) {
+      // Get the control number if this was a parser inserted element from the
+      // network.
+      int32_t controlNumber =
+          control->GetParserInsertedControlNumberForStateKey();
+      bool parserInserted = controlNumber != -1;
+
+      RefPtr<nsContentList> htmlForms;
+      RefPtr<nsContentList> htmlFormControls;
+      if (!parserInserted) {
+        // Getting these lists is expensive, as we need to keep them up to date
+        // as the document loads, so we avoid it if we don't need them.
+        htmlDoc->GetFormsAndFormControls(getter_AddRefs(htmlForms),
+                                         getter_AddRefs(htmlFormControls));
+      }
+
       // Append the control type
       KeyAppendInt(control->ControlType(), aKey);
 
       // If in a form, add form name / index of form / index in form
-      Element* formElement = control->GetFormElement();
+      HTMLFormElement* formElement = control->GetFormElement();
       if (formElement) {
         if (IsAutocompleteOff(formElement)) {
           aKey.Truncate();
-          return NS_OK;
+          return;
         }
 
-        KeyAppendString(NS_LITERAL_CSTRING("f"), aKey);
-
-        // Append the index of the form in the document
-        int32_t index = htmlForms->IndexOf(formElement, false);
-        if (index <= -1) {
-          //
-          // XXX HACK this uses some state that was dumped into the document
-          // specifically to fix bug 138892.  What we are trying to do is
-          // *guess* which form this control's state is found in, with the
-          // highly likely guess that the highest form parsed so far is the one.
-          // This code should not be on trunk, only branch.
-          //
-          index = htmlDoc->GetNumFormsSynchronous() - 1;
+        // Append the form number, if this is a parser inserted control, or
+        // the index of the form in the document otherwise.
+        bool appendedForm = false;
+        if (parserInserted) {
+          MOZ_ASSERT(formElement->GetFormNumberForStateKey() != -1,
+                     "when generating a state key for a parser inserted form "
+                     "control we should have a parser inserted <form> element");
+          KeyAppendString(NS_LITERAL_CSTRING("fp"), aKey);
+          KeyAppendInt(formElement->GetFormNumberForStateKey(), aKey);
+          appendedForm = true;
+        } else {
+          KeyAppendString(NS_LITERAL_CSTRING("fn"), aKey);
+          int32_t index = htmlForms->IndexOf(formElement, false);
+          if (index <= -1) {
+            //
+            // XXX HACK this uses some state that was dumped into the document
+            // specifically to fix bug 138892.  What we are trying to do is
+            // *guess* which form this control's state is found in, with the
+            // highly likely guess that the highest form parsed so far is the
+            // one. This code should not be on trunk, only branch.
+            //
+            index = htmlDoc->GetNumFormsSynchronous() - 1;
+          }
+          if (index > -1) {
+            KeyAppendInt(index, aKey);
+            appendedForm = true;
+          }
         }
-        if (index > -1) {
-          KeyAppendInt(index, aKey);
 
+        if (appendedForm) {
           // Append the index of the control in the form
-          nsCOMPtr<nsIForm> form(do_QueryInterface(formElement));
-          index = form->IndexOfControl(control);
+          int32_t index = formElement->IndexOfControl(control);
 
           if (index > -1) {
             KeyAppendInt(index, aKey);
@@ -2736,29 +2774,30 @@ nsresult nsContentUtils::GenerateStateKey(nsIContent* aContent,
         nsAutoString formName;
         formElement->GetAttr(kNameSpaceID_None, nsGkAtoms::name, formName);
         KeyAppendString(formName, aKey);
-
       } else {
-        KeyAppendString(NS_LITERAL_CSTRING("d"), aKey);
-
-        // If not in a form, add index of control in document
-        // Less desirable than indexing by form info.
-
-        // Hash by index of control in doc (we are not in a form)
-        // These are important as they are unique, and type/name may not be.
-
-        // We have to flush sink notifications at this point to make
-        // sure that htmlFormControls is up to date.
-        int32_t index = htmlFormControls->IndexOf(aContent, true);
-        if (index > -1) {
-          KeyAppendInt(index, aKey);
+        // Not in a form.  Append the control number, if this is a parser
+        // inserted control, or the index of the control in the document
+        // otherwise.
+        if (parserInserted) {
+          KeyAppendString(NS_LITERAL_CSTRING("dp"), aKey);
+          KeyAppendInt(control->GetParserInsertedControlNumberForStateKey(),
+                       aKey);
           generatedUniqueKey = true;
+        } else {
+          KeyAppendString(NS_LITERAL_CSTRING("dn"), aKey);
+          int32_t index = htmlFormControls->IndexOf(aContent, true);
+          if (index > -1) {
+            KeyAppendInt(index, aKey);
+            generatedUniqueKey = true;
+          }
         }
-      }
 
-      // Append the control name
-      nsAutoString name;
-      aContent->AsElement()->GetAttr(kNameSpaceID_None, nsGkAtoms::name, name);
-      KeyAppendString(name, aKey);
+        // Append the control name
+        nsAutoString name;
+        aContent->AsElement()->GetAttr(kNameSpaceID_None, nsGkAtoms::name,
+                                       name);
+        KeyAppendString(name, aKey);
+      }
     }
   }
 
@@ -2786,8 +2825,6 @@ nsresult nsContentUtils::GenerateStateKey(nsIContent* aContent,
       parent = content->GetParentNode();
     }
   }
-
-  return NS_OK;
 }
 
 // static
@@ -5745,7 +5782,6 @@ nsresult nsContentUtils::GetASCIIOrigin(nsIPrincipal* aPrincipal,
 /* static */
 nsresult nsContentUtils::GetASCIIOrigin(nsIURI* aURI, nsACString& aOrigin) {
   MOZ_ASSERT(aURI, "missing uri");
-  MOZ_ASSERT(NS_IsMainThread());
 
   bool isBlobURL = false;
   nsresult rv = aURI->SchemeIs(BLOBURI_SCHEME, &isBlobURL);
@@ -5797,69 +5833,6 @@ nsresult nsContentUtils::GetASCIIOrigin(nsIURI* aURI, nsACString& aOrigin) {
 }
 
 /* static */
-nsresult nsContentUtils::GetThreadSafeASCIIOrigin(nsIURI* aURI,
-                                                  nsACString& aOrigin) {
-  MOZ_ASSERT(aURI, "missing uri");
-
-  bool isBlobURL = false;
-  nsresult rv = aURI->SchemeIs(BLOBURI_SCHEME, &isBlobURL);
-  NS_ENSURE_SUCCESS(rv, rv);
-
-  // For Blob URI, the path is the URL of the owning page.
-  if (isBlobURL) {
-    nsAutoCString path;
-    rv = aURI->GetPathQueryRef(path);
-    NS_ENSURE_SUCCESS(rv, rv);
-
-    nsCOMPtr<nsIURI> uri;
-    nsresult rv = NS_NewURI(getter_AddRefs(uri), path);
-    if (rv == NS_ERROR_UNKNOWN_PROTOCOL) {
-      return NS_ERROR_UNKNOWN_PROTOCOL;
-    }
-
-    if (NS_FAILED(rv)) {
-      aOrigin.AssignLiteral("null");
-      return NS_OK;
-    }
-
-    return GetThreadSafeASCIIOrigin(uri, aOrigin);
-  }
-
-  aOrigin.Truncate();
-
-  // This is not supported yet.
-  nsCOMPtr<nsINestedURI> nestedURI(do_QueryInterface(aURI));
-  if (nestedURI) {
-    return NS_ERROR_UNKNOWN_PROTOCOL;
-  }
-
-  nsAutoCString host;
-  rv = aURI->GetAsciiHost(host);
-
-  if (NS_SUCCEEDED(rv) && !host.IsEmpty()) {
-    nsAutoCString userPass;
-    aURI->GetUserPass(userPass);
-
-    nsCOMPtr<nsIURI> uri = aURI;
-
-    nsAutoCString prePath;
-    if (!userPass.IsEmpty()) {
-      rv = NS_MutateURI(uri).SetUserPass(EmptyCString()).Finalize(uri);
-      NS_ENSURE_SUCCESS(rv, rv);
-    }
-
-    rv = uri->GetPrePath(prePath);
-    NS_ENSURE_SUCCESS(rv, rv);
-
-    aOrigin = prePath;
-  } else {
-    aOrigin.AssignLiteral("null");
-  }
-
-  return NS_OK;
-}
-
-/* static */
 nsresult nsContentUtils::GetUTFOrigin(nsIPrincipal* aPrincipal,
                                       nsAString& aOrigin) {
   MOZ_ASSERT(aPrincipal, "missing principal");
@@ -5877,7 +5850,6 @@ nsresult nsContentUtils::GetUTFOrigin(nsIPrincipal* aPrincipal,
 /* static */
 nsresult nsContentUtils::GetUTFOrigin(nsIURI* aURI, nsAString& aOrigin) {
   MOZ_ASSERT(aURI, "missing uri");
-  MOZ_ASSERT(NS_IsMainThread());
   nsresult rv;
 
 #if defined(MOZ_THUNDERBIRD) || defined(MOZ_SUITE)
@@ -5895,24 +5867,6 @@ nsresult nsContentUtils::GetUTFOrigin(nsIURI* aURI, nsAString& aOrigin) {
 
   nsAutoCString asciiOrigin;
   rv = GetASCIIOrigin(aURI, asciiOrigin);
-  NS_ENSURE_SUCCESS(rv, rv);
-
-  aOrigin = NS_ConvertUTF8toUTF16(asciiOrigin);
-  return NS_OK;
-}
-
-/* static */
-nsresult nsContentUtils::GetThreadSafeUTFOrigin(nsIURI* aURI,
-                                                nsAString& aOrigin) {
-#if defined(MOZ_THUNDERBIRD) || defined(MOZ_SUITE)
-  return NS_ERROR_UNKNOWN_PROTOCOL;
-#endif
-
-  MOZ_ASSERT(aURI, "missing uri");
-  nsresult rv;
-
-  nsAutoCString asciiOrigin;
-  rv = GetThreadSafeASCIIOrigin(aURI, asciiOrigin);
   NS_ENSURE_SUCCESS(rv, rv);
 
   aOrigin = NS_ConvertUTF8toUTF16(asciiOrigin);
@@ -7997,56 +7951,6 @@ bool nsContentUtils::IsUpgradableDisplayType(nsContentPolicyType aType) {
   MOZ_ASSERT(NS_IsMainThread());
   return (aType == nsIContentPolicy::TYPE_IMAGE ||
           aType == nsIContentPolicy::TYPE_MEDIA);
-}
-
-nsresult nsContentUtils::SetFetchReferrerURIWithPolicy(
-    nsIPrincipal* aPrincipal, Document* aDoc, nsIHttpChannel* aChannel,
-    mozilla::net::ReferrerPolicy aReferrerPolicy) {
-  NS_ENSURE_ARG_POINTER(aPrincipal);
-  NS_ENSURE_ARG_POINTER(aChannel);
-
-  nsCOMPtr<nsIURI> principalURI;
-
-  if (aPrincipal->IsSystemPrincipal()) {
-    return NS_OK;
-  }
-
-  aPrincipal->GetURI(getter_AddRefs(principalURI));
-
-  nsCOMPtr<nsIReferrerInfo> referrerInfo;
-  if (!aDoc) {
-    referrerInfo = new ReferrerInfo(principalURI, aReferrerPolicy);
-    return aChannel->SetReferrerInfoWithoutClone(referrerInfo);
-  }
-
-  // If it weren't for history.push/replaceState, we could just use the
-  // principal's URI here.  But since we want changes to the URI effected
-  // by push/replaceState to be reflected in the XHR referrer, we have to
-  // be more clever.
-  //
-  // If the document's original URI (before any push/replaceStates) matches
-  // our principal, then we use the document's current URI (after
-  // push/replaceStates).  Otherwise (if the document is, say, a data:
-  // URI), we just use the principal's URI.
-  nsCOMPtr<nsIURI> docCurURI = aDoc->GetDocumentURI();
-  nsCOMPtr<nsIURI> docOrigURI = aDoc->GetOriginalURI();
-
-  nsCOMPtr<nsIURI> referrerURI;
-
-  if (principalURI && docCurURI && docOrigURI) {
-    bool equal = false;
-    principalURI->Equals(docOrigURI, &equal);
-    if (equal) {
-      referrerURI = docCurURI;
-    }
-  }
-
-  if (!referrerURI) {
-    referrerURI = principalURI;
-  }
-
-  referrerInfo = new ReferrerInfo(referrerURI, aReferrerPolicy);
-  return aChannel->SetReferrerInfoWithoutClone(referrerInfo);
 }
 
 // static

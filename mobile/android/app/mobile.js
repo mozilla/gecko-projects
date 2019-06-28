@@ -98,7 +98,6 @@ pref("network.protocol-handler.warn-external.vnd.youtube", false);
 
 /* http prefs */
 pref("network.http.keep-alive.timeout", 109);
-pref("network.http.max-connections", 20);
 pref("network.http.max-persistent-connections-per-server", 6);
 pref("network.http.max-persistent-connections-per-proxy", 20);
 
@@ -576,6 +575,9 @@ pref("media.webspeech.synth.enabled", true);
 // OpenH264 is visible in about:plugins, and enabled, by default.
 pref("media.gmp-gmpopenh264.visible", true);
 pref("media.gmp-gmpopenh264.enabled", true);
+
+// Disable future downloads of OpenH264 on Android
+pref("media.gmp-gmpopenh264.autoupdate", false);
 
 // optimize images memory usage
 pref("image.downscale-during-decode.enabled", true);

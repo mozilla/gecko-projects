@@ -531,10 +531,6 @@ menulist > menupopup > .popup-internal-box > .arrowscrollbox-scrollbox {
   overflow: auto;
 }
 
-dropmarker > .dropmarker-icon {
-  pointer-events: none;
-}
-
 /********** splitter **********/
 
 .tree-splitter {
@@ -592,6 +588,7 @@ page {
 
 wizard,
 wizard:root /* override :root from above */ {
+  -moz-binding: url("chrome://global/content/bindings/wizard.xml#wizard");
   -moz-box-orient: vertical;
   width: 40em;
   height: 30em;

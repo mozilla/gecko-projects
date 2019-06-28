@@ -395,6 +395,12 @@ JS_PUBLIC_API void AssertObjectBelongsToCurrentThread(JSObject* obj);
 
 } /* namespace JS */
 
+/**
+ * Set callback to send tasks to XPCOM thread pools
+ */
+JS_PUBLIC_API void SetHelperThreadTaskCallback(
+    void (*callback)(js::RunnableTask*));
+
 extern JS_PUBLIC_API const char* JS_GetImplementationVersion(void);
 
 extern JS_PUBLIC_API void JS_SetDestroyCompartmentCallback(
@@ -911,6 +917,9 @@ extern JS_PUBLIC_API bool InstanceofOperator(JSContext* cx, HandleObject obj,
 extern JS_PUBLIC_API void* JS_GetPrivate(JSObject* obj);
 
 extern JS_PUBLIC_API void JS_SetPrivate(JSObject* obj, void* data);
+
+extern JS_PUBLIC_API void JS_InitPrivate(JSObject* obj, void* data,
+                                         size_t nbytes, JS::MemoryUse use);
 
 extern JS_PUBLIC_API void* JS_GetInstancePrivate(JSContext* cx,
                                                  JS::Handle<JSObject*> obj,
@@ -1768,6 +1777,9 @@ void JS_InitReservedSlot(JSObject* obj, uint32_t index, T* ptr,
                          JS::MemoryUse use) {
   JS_InitReservedSlot(obj, index, ptr, sizeof(T), use);
 }
+
+extern JS_PUBLIC_API void JS_InitPrivate(JSObject* obj, void* data,
+                                         size_t nbytes, JS::MemoryUse use);
 
 /************************************************************************/
 

@@ -278,6 +278,8 @@ class WebConsoleWrapper {
         this.toolbox.threadClient.on("paused", this.dispatchPaused);
         this.toolbox.threadClient.on("progress", this.dispatchProgress);
 
+        const {highlight, unhighlight} = this.toolbox.getHighlighter(true);
+
         Object.assign(serviceContainer, {
           onViewSourceInDebugger: frame => {
             this.toolbox.viewSourceInDebugger(
@@ -318,19 +320,8 @@ class WebConsoleWrapper {
             });
           },
           sourceMapService: this.toolbox ? this.toolbox.sourceMapURLService : null,
-          highlightDomElement: async (grip, options = {}) => {
-            await this.toolbox.initInspector();
-            if (!this.toolbox.highlighter) {
-              return null;
-            }
-            const nodeFront = await this.toolbox.walker.gripToNodeFront(grip);
-            return this.toolbox.highlighter.highlight(nodeFront, options);
-          },
-          unHighlightDomElement: (forceHide = false) => {
-            return this.toolbox.highlighter
-              ? this.toolbox.highlighter.unhighlight(forceHide)
-              : null;
-          },
+          highlightDomElement: highlight,
+          unHighlightDomElement: unhighlight,
           openNodeInInspector: async (grip) => {
             await this.toolbox.initInspector();
             const onSelectInspector = this.toolbox.selectTool("inspector", "inspect_dom");
@@ -390,8 +381,7 @@ class WebConsoleWrapper {
         closeSplitConsole: this.closeSplitConsole.bind(this),
         jstermCodeMirror,
         autocomplete,
-        hideShowContentMessagesCheckbox: !webConsoleUI.isBrowserConsole ||
-          !prefs.filterContentMessages,
+        hideShowContentMessagesCheckbox: !webConsoleUI.isBrowserConsole,
       });
 
       // Render the root Application component.

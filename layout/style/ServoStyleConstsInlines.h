@@ -228,22 +228,53 @@ inline bool StyleAtom::IsStatic() const { return !!(_0 & 1); }
 
 inline nsAtom* StyleAtom::AsAtom() const {
   if (IsStatic()) {
-    return const_cast<nsStaticAtom*>(&detail::gGkAtoms.mAtoms[_0 >> 1]);
+    auto* atom = reinterpret_cast<const nsStaticAtom*>(
+        reinterpret_cast<const uint8_t*>(&detail::gGkAtoms) + (_0 >> 1));
+    MOZ_ASSERT(atom->IsStatic());
+    return const_cast<nsStaticAtom*>(atom);
   }
   return reinterpret_cast<nsAtom*>(_0);
 }
 
-inline StyleAtom::~StyleAtom() {
+inline void StyleAtom::AddRef() {
+  if (!IsStatic()) {
+    AsAtom()->AddRef();
+  }
+}
+
+inline void StyleAtom::Release() {
   if (!IsStatic()) {
     AsAtom()->Release();
   }
 }
 
-inline StyleAtom::StyleAtom(const StyleAtom& aOther) : _0(aOther._0) {
-  if (!IsStatic()) {
-    reinterpret_cast<nsAtom*>(_0)->AddRef();
+inline StyleAtom::StyleAtom(already_AddRefed<nsAtom> aAtom) {
+  nsAtom* atom = aAtom.take();
+  if (atom->IsStatic()) {
+    ptrdiff_t offset = reinterpret_cast<const uint8_t*>(atom->AsStatic()) -
+        reinterpret_cast<const uint8_t*>(&detail::gGkAtoms);
+    _0 = (offset << 1) | 1;
+  } else {
+    _0 = reinterpret_cast<uintptr_t>(atom);
   }
+  MOZ_ASSERT(IsStatic() == atom->IsStatic());
+  MOZ_ASSERT(AsAtom() == atom);
 }
+
+inline StyleAtom::StyleAtom(const StyleAtom& aOther) : _0(aOther._0) {
+  AddRef();
+}
+
+inline StyleAtom& StyleAtom::operator=(const StyleAtom& aOther) {
+  if (MOZ_LIKELY(this != &aOther)) {
+    Release();
+    _0 = aOther._0;
+    AddRef();
+  }
+  return *this;
+}
+
+inline StyleAtom::~StyleAtom() { Release(); }
 
 inline nsAtom* StyleCustomIdent::AsAtom() const { return _0.AsAtom(); }
 
@@ -352,6 +383,22 @@ inline bool StyleComputedUrl::HasRef() const {
 
 template <>
 bool StyleGradient::IsOpaque() const;
+
+template <typename Integer>
+inline StyleGenericGridLine<Integer>::StyleGenericGridLine()
+    : ident(do_AddRef(static_cast<nsAtom*>(nsGkAtoms::_empty))),
+      line_num(0),
+      is_span(false) {}
+
+template <>
+inline nsAtom* StyleGridLine::LineName() const {
+  return ident.AsAtom();
+}
+
+template <>
+inline bool StyleGridLine::IsAuto() const {
+  return LineName()->IsEmpty() && line_num == 0 && !is_span;
+}
 
 }  // namespace mozilla
 

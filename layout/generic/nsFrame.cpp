@@ -126,6 +126,7 @@ using namespace mozilla::gfx;
 using namespace mozilla::layers;
 using namespace mozilla::layout;
 typedef nsAbsoluteContainingBlock::AbsPosReflowFlags AbsPosReflowFlags;
+class nsImageFrame;
 
 const mozilla::LayoutFrameType nsIFrame::sLayoutFrameTypes[
 #define FRAME_ID(...) 1 +
@@ -696,8 +697,13 @@ void nsFrame::Init(nsIContent* aContent, nsContainerFrame* aParent,
 
   if (disp->IsContainLayout() && disp->IsContainSize() &&
       // All frames that support contain:layout also support contain:size.
-      IsFrameOfType(eSupportsContainLayoutAndPaint)) {
-    // Frames that have contain:layout+size can be reflow roots.
+      IsFrameOfType(eSupportsContainLayoutAndPaint) && !IsTableWrapperFrame()) {
+    // In general, frames that have contain:layout+size can be reflow roots.
+    // (One exception: table-wrapper frames don't work well as reflow roots,
+    // because their inner-table ReflowInput init path tries to reuse & deref
+    // the wrapper's containing block reflow input, which may be null if we
+    // initiate reflow from the table-wrapper itself.)
+    //
     // Changes to `contain` force frame reconstructions, so this bit can be set
     // for the whole lifetime of this frame.
     AddStateBits(NS_FRAME_REFLOW_ROOT);
@@ -715,7 +721,9 @@ void nsFrame::Init(nsIContent* aContent, nsContainerFrame* aParent,
       AddStateBits(NS_FRAME_FONT_INFLATION_CONTAINER);
       if (!GetParent() ||
           // I'd use NS_FRAME_OUT_OF_FLOW, but it's not set yet.
-          disp->IsFloating(this) || disp->IsAbsolutelyPositioned(this)) {
+          disp->IsFloating(this) || disp->IsAbsolutelyPositioned(this) ||
+          GetParent()->IsFlexContainerFrame() ||
+          GetParent()->IsGridContainerFrame()) {
         AddStateBits(NS_FRAME_FONT_INFLATION_FLOW_ROOT);
       }
     }
@@ -5148,10 +5156,11 @@ static FrameTarget GetSelectionClosestFrame(nsIFrame* aFrame,
     }
   }
 
-  // Use frame edge for grid, flex and tables, but not replaced frames like
-  // images.
-  bool useFrameEdge = !aFrame->StyleDisplay()->IsInlineInsideStyle() &&
-                      !aFrame->IsFrameOfType(nsIFrame::eReplaced);
+  // Use frame edge for grid, flex, table, and non-editable image frames.
+  const bool useFrameEdge =
+      aFrame->IsFlexOrGridContainer() || aFrame->IsTableFrame() ||
+      (static_cast<nsImageFrame*>(do_QueryFrame(aFrame)) &&
+       !aFrame->GetContent()->IsEditable());
   return FrameTarget(aFrame, useFrameEdge, false);
 }
 
@@ -9731,7 +9740,7 @@ ComputedStyle* nsFrame::DoGetParentComputedStyle(
           pseudo == PseudoStyleType::tableWrapper) {
         if (Servo_Element_IsDisplayContents(parentElement)) {
           RefPtr<ComputedStyle> style =
-              PresShell()->StyleSet()->ResolveServoStyle(*parentElement);
+              ServoStyleSet::ResolveServoStyle(*parentElement);
           // NOTE(emilio): we return a weak reference because the element also
           // holds the style context alive. This is a bit silly (we could've
           // returned a weak ref directly), but it's probably not worth

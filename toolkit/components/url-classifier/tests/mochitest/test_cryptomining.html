@@ -39,6 +39,7 @@ async function runTest(test) {
     [ "privacy.trackingprotection.annotate_channels", false ],
     [ "privacy.trackingprotection.cryptomining.enabled", true ],
     [ "privacy.trackingprotection.fingerprinting.enabled", false ],
+    [ "privacy.trackingprotection.socialtracking.enabled", false ],
   ]});
 
   info("Testing: " + test.config.toSource() + "\n");

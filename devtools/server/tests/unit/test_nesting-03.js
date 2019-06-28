@@ -37,21 +37,19 @@ function start_second_connection() {
 }
 
 async function test_nesting() {
+  let result;
   try {
-    await gThreadClient1.resume();
+    result = await gThreadClient1.resume();
   } catch (e) {
-    Assert.equal(e.error, "wrongOrder");
+    Assert.ok(e.includes("wrongOrder"), "rejects with the wrong order");
   }
-  try {
-    await gThreadClient2.resume();
-  } catch (e) {
-    Assert.ok(!e.error);
-    Assert.equal(e.from, gThreadClient2.actor);
-  }
+  Assert.ok(!result, "no response");
+
+  result = await gThreadClient2.resume();
+  Assert.ok(true, "resumed as expected");
 
   gThreadClient1.resume().then(response => {
-    Assert.ok(!response.error);
-    Assert.equal(response.from, gThreadClient1.actor);
+    Assert.ok(true, "resumed as expected");
 
     gClient1.close(() => finishClient(gClient2));
   });

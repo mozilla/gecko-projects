@@ -17,7 +17,10 @@
 #include "nsHistory.h"
 #include "nsDOMNavigationTiming.h"
 #include "nsIDOMStorageManager.h"
+#include "mozilla/dom/CallbackDebuggerNotification.h"
 #include "mozilla/dom/ContentFrameMessageManager.h"
+#include "mozilla/dom/CSPEvalChecker.h"
+#include "mozilla/dom/DebuggerNotification.h"
 #include "mozilla/dom/DocumentInlines.h"
 #include "mozilla/dom/DOMJSProxyHandler.h"
 #include "mozilla/dom/EventTarget.h"
@@ -28,6 +31,7 @@
 #include "mozilla/dom/Storage.h"
 #include "mozilla/dom/IdleRequest.h"
 #include "mozilla/dom/Performance.h"
+#include "mozilla/dom/ScriptLoader.h"
 #include "mozilla/dom/StorageEvent.h"
 #include "mozilla/dom/StorageEventBinding.h"
 #include "mozilla/dom/StorageNotifierService.h"
@@ -56,8 +60,6 @@
 #include "nsIPermission.h"
 #include "nsIPermissionManager.h"
 #include "nsIScriptContext.h"
-#include "nsIScriptTimeoutHandler.h"
-#include "nsITimeoutHandler.h"
 #include "nsIController.h"
 #include "nsISlowScriptDebug.h"
 #include "nsWindowMemoryReporter.h"
@@ -264,11 +266,6 @@
 
 #include "mozilla/net/CookieSettings.h"
 
-// Apple system headers seem to have a check() macro.  <sigh>
-#ifdef check
-class nsIScriptTimeoutHandler;
-#  undef check
-#endif  // check
 #include "AccessCheck.h"
 
 #ifdef ANDROID
@@ -426,7 +423,7 @@ class IdleRequestExecutorTimeoutHandler final : public TimeoutHandler {
   NS_DECL_CYCLE_COLLECTION_CLASS_INHERITED(IdleRequestExecutorTimeoutHandler,
                                            TimeoutHandler)
 
-  void Call() override;
+  bool Call(const char* /* unused */) override;
 
  private:
   ~IdleRequestExecutorTimeoutHandler() override {}
@@ -499,7 +496,7 @@ class IdleRequestExecutor final : public nsIRunnable,
   // desirable. This is used if we've dispatched all idle callbacks
   // that are allowed to run in the current idle period, or if the
   // associated window is currently in the background.
-  nsCOMPtr<nsITimeoutHandler> mDelayedExecutorDispatcher;
+  RefPtr<TimeoutHandler> mDelayedExecutorDispatcher;
   // If not Nothing() then this value is the handle to the currently
   // scheduled delayed executor dispatcher. This is needed to be able
   // to cancel the timeout handler in case of the executor being
@@ -625,10 +622,11 @@ void IdleRequestExecutor::DelayedDispatch(uint32_t aDelay) {
   mDelayedExecutorHandle = Some(handle);
 }
 
-void IdleRequestExecutorTimeoutHandler::Call() {
+bool IdleRequestExecutorTimeoutHandler::Call(const char* /* unused */) {
   if (!mExecutor->IsCancelled()) {
     mExecutor->ScheduleDispatch();
   }
+  return true;
 }
 
 void nsGlobalWindowInner::ScheduleIdleRequestDispatch() {
@@ -721,10 +719,11 @@ class IdleRequestTimeoutHandler final : public TimeoutHandler {
   NS_DECL_CYCLE_COLLECTION_CLASS_INHERITED(IdleRequestTimeoutHandler,
                                            TimeoutHandler)
 
-  MOZ_CAN_RUN_SCRIPT void Call() override {
+  MOZ_CAN_RUN_SCRIPT bool Call(const char* /* unused */) override {
     RefPtr<nsGlobalWindowInner> window(nsGlobalWindowInner::Cast(mWindow));
     RefPtr<IdleRequest> request(mIdleRequest);
     window->RunIdleRequest(request, 0.0, true);
+    return true;
   }
 
  private:
@@ -758,7 +757,7 @@ uint32_t nsGlobalWindowInner::RequestIdleCallback(
 
   if (aOptions.mTimeout.WasPassed()) {
     int32_t timeoutHandle;
-    nsCOMPtr<nsITimeoutHandler> handler(
+    RefPtr<TimeoutHandler> handler(
         new IdleRequestTimeoutHandler(aCx, request, this));
 
     nsresult rv = mTimeoutManager->SetTimeout(
@@ -1373,6 +1372,8 @@ NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN_INTERNAL(nsGlobalWindowInner)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mCacheStorage)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mVRDisplays)
 
+  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mDebuggerNotificationManager)
+
   // Traverse stuff from nsPIDOMWindow
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mChromeEventHandler)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mParentTarget)
@@ -1470,6 +1471,8 @@ NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(nsGlobalWindowInner)
 
   NS_IMPL_CYCLE_COLLECTION_UNLINK(mCacheStorage)
   NS_IMPL_CYCLE_COLLECTION_UNLINK(mVRDisplays)
+
+  NS_IMPL_CYCLE_COLLECTION_UNLINK(mDebuggerNotificationManager)
 
   // Unlink stuff from nsPIDOMWindow
   NS_IMPL_CYCLE_COLLECTION_UNLINK(mChromeEventHandler)
@@ -3292,6 +3295,9 @@ int32_t nsGlobalWindowInner::RequestAnimationFrame(
     js::NotifyAnimationActivity(GetWrapperPreserveColor());
   }
 
+  DebuggerNotificationDispatch(this,
+                               DebuggerNotificationType::RequestAnimationFrame);
+
   int32_t handle;
   aError = mDoc->ScheduleFrameRequestCallback(aCallback, &handle);
   return handle;
@@ -3302,6 +3308,9 @@ void nsGlobalWindowInner::CancelAnimationFrame(int32_t aHandle,
   if (!mDoc) {
     return;
   }
+
+  DebuggerNotificationDispatch(this,
+                               DebuggerNotificationType::CancelAnimationFrame);
 
   mDoc->CancelFrameRequestCallback(aHandle);
 }
@@ -3642,11 +3651,11 @@ void nsGlobalWindowInner::ScrollTo(const CSSIntPoint& aScroll,
       scroll.y = maxpx;
     }
 
-    bool smoothScroll =
-        sf->GetScrollStyles().IsSmoothScroll(aOptions.mBehavior);
+    ScrollMode scrollMode = sf->IsSmoothScroll(aOptions.mBehavior)
+                                ? ScrollMode::SmoothMsd
+                                : ScrollMode::Instant;
 
-    sf->ScrollToCSSPixels(
-        scroll, smoothScroll ? ScrollMode::SmoothMsd : ScrollMode::Instant);
+    sf->ScrollToCSSPixels(scroll, scrollMode);
   }
 }
 
@@ -3678,15 +3687,9 @@ void nsGlobalWindowInner::ScrollBy(const ScrollToOptions& aOptions) {
       scrollDelta.y = mozilla::ToZeroIfNonfinite(aOptions.mTop.Value());
     }
 
-    ScrollMode scrollMode = ScrollMode::Instant;
-    if (aOptions.mBehavior == ScrollBehavior::Smooth) {
-      scrollMode = ScrollMode::SmoothMsd;
-    } else if (aOptions.mBehavior == ScrollBehavior::Auto) {
-      ScrollStyles styles = sf->GetScrollStyles();
-      if (styles.mScrollBehavior == NS_STYLE_SCROLL_BEHAVIOR_SMOOTH) {
-        scrollMode = ScrollMode::SmoothMsd;
-      }
-    }
+    ScrollMode scrollMode = sf->IsSmoothScroll(aOptions.mBehavior)
+                                ? ScrollMode::SmoothMsd
+                                : ScrollMode::Instant;
 
     sf->ScrollByCSSPixels(scrollDelta, scrollMode, nsGkAtoms::relative);
   }
@@ -3700,11 +3703,12 @@ void nsGlobalWindowInner::ScrollByLines(int32_t numLines,
     // It seems like it would make more sense for ScrollByLines to use
     // SMOOTH mode, but tests seem to depend on the synchronous behaviour.
     // Perhaps Web content does too.
-    bool smoothScroll =
-        sf->GetScrollStyles().IsSmoothScroll(aOptions.mBehavior);
+    ScrollMode scrollMode = sf->IsSmoothScroll(aOptions.mBehavior)
+                                ? ScrollMode::SmoothMsd
+                                : ScrollMode::Instant;
 
     sf->ScrollBy(nsIntPoint(0, numLines), nsIScrollableFrame::LINES,
-                 smoothScroll ? ScrollMode::SmoothMsd : ScrollMode::Instant);
+                 scrollMode);
   }
 }
 
@@ -3716,11 +3720,12 @@ void nsGlobalWindowInner::ScrollByPages(int32_t numPages,
     // It seems like it would make more sense for ScrollByPages to use
     // SMOOTH mode, but tests seem to depend on the synchronous behaviour.
     // Perhaps Web content does too.
-    bool smoothScroll =
-        sf->GetScrollStyles().IsSmoothScroll(aOptions.mBehavior);
+    ScrollMode scrollMode = sf->IsSmoothScroll(aOptions.mBehavior)
+                                ? ScrollMode::SmoothMsd
+                                : ScrollMode::Instant;
 
     sf->ScrollBy(nsIntPoint(0, numPages), nsIScrollableFrame::PAGES,
-                 smoothScroll ? ScrollMode::SmoothMsd : ScrollMode::Instant);
+                 scrollMode);
   }
 }
 
@@ -3733,12 +3738,16 @@ void nsGlobalWindowInner::MozScrollSnap() {
 }
 
 void nsGlobalWindowInner::ClearTimeout(int32_t aHandle) {
+  DebuggerNotificationDispatch(this, DebuggerNotificationType::ClearTimeout);
+
   if (aHandle > 0) {
     mTimeoutManager->ClearTimeout(aHandle, Timeout::Reason::eTimeoutOrInterval);
   }
 }
 
 void nsGlobalWindowInner::ClearInterval(int32_t aHandle) {
+  DebuggerNotificationDispatch(this, DebuggerNotificationType::ClearInterval);
+
   if (aHandle > 0) {
     mTimeoutManager->ClearTimeout(aHandle, Timeout::Reason::eTimeoutOrInterval);
   }
@@ -4004,6 +4013,20 @@ EventListenerManager* nsGlobalWindowInner::GetOrCreateListenerManager() {
 
 EventListenerManager* nsGlobalWindowInner::GetExistingListenerManager() const {
   return mListenerManager;
+}
+
+mozilla::dom::DebuggerNotificationManager*
+nsGlobalWindowInner::GetOrCreateDebuggerNotificationManager() {
+  if (!mDebuggerNotificationManager) {
+    mDebuggerNotificationManager = new DebuggerNotificationManager(this);
+  }
+
+  return mDebuggerNotificationManager;
+}
+
+mozilla::dom::DebuggerNotificationManager*
+nsGlobalWindowInner::GetExistingDebuggerNotificationManager() {
+  return mDebuggerNotificationManager;
 }
 
 //*****************************************************************************
@@ -5649,6 +5672,66 @@ nsIPrincipal* nsGlobalWindowInner::GetTopLevelStorageAreaPrincipal() {
 // nsGlobalWindowInner: Timeout Functions
 //*****************************************************************************
 
+class WindowScriptTimeoutHandler final : public ScriptTimeoutHandler {
+ public:
+  NS_DECL_ISUPPORTS_INHERITED
+  NS_DECL_CYCLE_COLLECTION_CLASS_INHERITED(WindowScriptTimeoutHandler,
+                                           ScriptTimeoutHandler)
+
+  WindowScriptTimeoutHandler(JSContext* aCx, nsIGlobalObject* aGlobal,
+                             const nsAString& aExpression)
+      : ScriptTimeoutHandler(aCx, aGlobal, aExpression),
+        mInitiatingScript(ScriptLoader::GetActiveScript(aCx)) {}
+
+  MOZ_CAN_RUN_SCRIPT virtual bool Call(const char* aExecutionReason) override;
+
+ private:
+  virtual ~WindowScriptTimeoutHandler() {}
+
+  // Initiating script for use when evaluating mExpr on the main thread.
+  RefPtr<LoadedScript> mInitiatingScript;
+};
+
+NS_IMPL_CYCLE_COLLECTION_INHERITED(WindowScriptTimeoutHandler,
+                                   ScriptTimeoutHandler, mInitiatingScript)
+
+NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(WindowScriptTimeoutHandler)
+NS_INTERFACE_MAP_END_INHERITING(ScriptTimeoutHandler)
+
+NS_IMPL_ADDREF_INHERITED(WindowScriptTimeoutHandler, ScriptTimeoutHandler)
+NS_IMPL_RELEASE_INHERITED(WindowScriptTimeoutHandler, ScriptTimeoutHandler)
+
+bool WindowScriptTimeoutHandler::Call(const char* aExecutionReason) {
+  // New script entry point required, due to the "Create a script" sub-step
+  // of
+  // http://www.whatwg.org/specs/web-apps/current-work/#timer-initialisation-steps
+  nsAutoMicroTask mt;
+  AutoEntryScript aes(mGlobal, aExecutionReason, true);
+  JS::CompileOptions options(aes.cx());
+  options.setFileAndLine(mFileName.get(), mLineNo);
+  options.setNoScriptRval(true);
+  JS::Rooted<JSObject*> global(aes.cx(), mGlobal->GetGlobalJSObject());
+  {
+    nsJSUtils::ExecutionContext exec(aes.cx(), global);
+    nsresult rv = exec.Compile(options, mExpr);
+
+    JS::Rooted<JSScript*> script(aes.cx(), exec.MaybeGetScript());
+    if (script) {
+      if (mInitiatingScript) {
+        mInitiatingScript->AssociateWithScript(script);
+      }
+
+      rv = exec.ExecScript();
+    }
+
+    if (rv == NS_SUCCESS_DOM_SCRIPT_EVALUATION_THREW_UNCATCHABLE) {
+      return false;
+    }
+  }
+
+  return true;
+};
+
 nsGlobalWindowInner* nsGlobalWindowInner::InnerForSetTimeoutOrInterval(
     ErrorResult& aError) {
   nsGlobalWindowOuter* outer = GetOuterWindowInternal();
@@ -5701,15 +5784,30 @@ int32_t nsGlobalWindowInner::SetTimeoutOrInterval(
   }
 
   if (inner != this) {
-    return inner->SetTimeoutOrInterval(aCx, aFunction, aTimeout, aArguments,
-                                       aIsInterval, aError);
+    RefPtr<nsGlobalWindowInner> innerRef(inner);
+    return innerRef->SetTimeoutOrInterval(aCx, aFunction, aTimeout, aArguments,
+                                          aIsInterval, aError);
   }
 
-  nsCOMPtr<nsIScriptTimeoutHandler> handler =
-      NS_CreateJSTimeoutHandler(aCx, this, aFunction, aArguments, aError);
-  if (!handler) {
+  DebuggerNotificationDispatch(
+      this, aIsInterval ? DebuggerNotificationType::SetInterval
+                        : DebuggerNotificationType::SetTimeout);
+
+  if (!GetContextInternal() || !HasJSGlobal()) {
+    // This window was already closed, or never properly initialized,
+    // don't let a timer be scheduled on such a window.
+    aError.Throw(NS_ERROR_NOT_INITIALIZED);
     return 0;
   }
+
+  nsTArray<JS::Heap<JS::Value>> args;
+  if (!args.AppendElements(aArguments, fallible)) {
+    aError.Throw(NS_ERROR_OUT_OF_MEMORY);
+    return 0;
+  }
+
+  RefPtr<TimeoutHandler> handler =
+      new CallbackTimeoutHandler(aCx, this, &aFunction, std::move(args));
 
   int32_t result;
   aError =
@@ -5729,15 +5827,30 @@ int32_t nsGlobalWindowInner::SetTimeoutOrInterval(JSContext* aCx,
   }
 
   if (inner != this) {
-    return inner->SetTimeoutOrInterval(aCx, aHandler, aTimeout, aIsInterval,
-                                       aError);
+    RefPtr<nsGlobalWindowInner> innerRef(inner);
+    return innerRef->SetTimeoutOrInterval(aCx, aHandler, aTimeout, aIsInterval,
+                                          aError);
   }
 
-  nsCOMPtr<nsIScriptTimeoutHandler> handler =
-      NS_CreateJSTimeoutHandler(aCx, this, aHandler, aError);
-  if (!handler) {
+  DebuggerNotificationDispatch(
+      this, aIsInterval ? DebuggerNotificationType::SetInterval
+                        : DebuggerNotificationType::SetTimeout);
+
+  if (!GetContextInternal() || !HasJSGlobal()) {
+    // This window was already closed, or never properly initialized,
+    // don't let a timer be scheduled on such a window.
+    aError.Throw(NS_ERROR_NOT_INITIALIZED);
     return 0;
   }
+
+  bool allowEval = false;
+  aError = CSPEvalChecker::CheckForWindow(aCx, this, aHandler, &allowEval);
+  if (NS_WARN_IF(aError.Failed()) || !allowEval) {
+    return 0;
+  }
+
+  RefPtr<TimeoutHandler> handler =
+      new WindowScriptTimeoutHandler(aCx, this, aHandler);
 
   int32_t result;
   aError =
@@ -5780,63 +5893,15 @@ bool nsGlobalWindowInner::RunTimeoutHandler(Timeout* aTimeout,
     reason = "setTimeout handler";
   }
 
-  bool abortIntervalHandler = false;
-  nsCOMPtr<nsIScriptTimeoutHandler> handler(
-      do_QueryInterface(timeout->mScriptHandler));
-  if (handler) {
-    RefPtr<Function> callback = handler->GetCallback();
+  bool abortIntervalHandler;
+  {
+    RefPtr<TimeoutHandler> handler(timeout->mScriptHandler);
 
-    if (!callback) {
-      // Evaluate the timeout expression.
-      const char* filename = nullptr;
-      uint32_t lineNo = 0, dummyColumn = 0;
-      handler->GetLocation(&filename, &lineNo, &dummyColumn);
-
-      // New script entry point required, due to the "Create a script" sub-step
-      // of
-      // http://www.whatwg.org/specs/web-apps/current-work/#timer-initialisation-steps
-      nsAutoMicroTask mt;
-      AutoEntryScript aes(this, reason, true);
-      JS::CompileOptions options(aes.cx());
-      options.setFileAndLine(filename, lineNo);
-      options.setNoScriptRval(true);
-      JS::Rooted<JSObject*> global(aes.cx(), GetGlobalJSObject());
-      nsresult rv;
-      {
-        nsJSUtils::ExecutionContext exec(aes.cx(), global);
-        rv = exec.Compile(options, handler->GetHandlerText());
-
-        JS::Rooted<JSScript*> script(aes.cx(), exec.MaybeGetScript());
-        if (script) {
-          LoadedScript* initiatingScript = handler->GetInitiatingScript();
-          if (initiatingScript) {
-            initiatingScript->AssociateWithScript(script);
-          }
-
-          rv = exec.ExecScript();
-        }
-      }
-
-      if (rv == NS_SUCCESS_DOM_SCRIPT_EVALUATION_THREW_UNCATCHABLE) {
-        abortIntervalHandler = true;
-      }
-    } else {
-      // Hold strong ref to ourselves while we call the callback.
-      nsCOMPtr<nsISupports> me(static_cast<nsIDOMWindow*>(this));
-      ErrorResult rv;
-      JS::Rooted<JS::Value> ignoredVal(RootingCx());
-      callback->Call(me, handler->GetArgs(), &ignoredVal, rv, reason);
-      if (rv.IsUncatchableException()) {
-        abortIntervalHandler = true;
-      }
-
-      rv.SuppressException();
-    }
-  } else {
-    nsCOMPtr<nsITimeoutHandler> basicHandler(timeout->mScriptHandler);
-    nsCOMPtr<nsISupports> kungFuDeathGrip(static_cast<nsIDOMWindow*>(this));
-    mozilla::Unused << kungFuDeathGrip;
-    basicHandler->Call();
+    CallbackDebuggerNotificationGuard guard(
+        this, timeout->mIsInterval
+                  ? DebuggerNotificationType::SetIntervalCallback
+                  : DebuggerNotificationType::SetTimeoutCallback);
+    abortIntervalHandler = !handler->Call(reason);
   }
 
   // If we received an uncatchable exception, do not schedule the timeout again.

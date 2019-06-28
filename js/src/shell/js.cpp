@@ -1856,7 +1856,7 @@ static bool ParseCompileOptions(JSContext* cx, CompileOptions& options,
 
 static void my_LargeAllocFailCallback() {
   JSContext* cx = TlsContext.get();
-  if (!cx || cx->helperThread()) {
+  if (!cx || cx->isHelperThreadContext()) {
     return;
   }
 
@@ -3279,8 +3279,13 @@ static MOZ_MUST_USE bool DisassembleScript(JSContext* cx, HandleScript script,
     return false;
   }
 
-  if (recursive && script->hasObjects()) {
-    for (JSObject* obj : script->objects()) {
+  if (recursive) {
+    for (JS::GCCellPtr gcThing : script->gcthings()) {
+      if (!gcThing.is<JSObject>()) {
+        continue;
+      }
+
+      JSObject* obj = &gcThing.as<JSObject>();
       if (obj->is<JSFunction>()) {
         if (!sp->put("\n")) {
           return false;
@@ -5174,7 +5179,6 @@ static bool Parse(JSContext* cx, unsigned argc, Value* vp) {
     return false;
   }
 
-  bool allowSyntaxParser = true;
   frontend::ParseGoal goal = frontend::ParseGoal::Script;
 
   if (args.length() >= 2) {
@@ -5185,22 +5189,6 @@ static bool Parse(JSContext* cx, unsigned argc, Value* vp) {
       return false;
     }
     RootedObject objOptions(cx, &args[1].toObject());
-
-    RootedValue optionAllowSyntaxParser(cx);
-    if (!JS_GetProperty(cx, objOptions, "allowSyntaxParser",
-                        &optionAllowSyntaxParser)) {
-      return false;
-    }
-
-    if (optionAllowSyntaxParser.isBoolean()) {
-      allowSyntaxParser = optionAllowSyntaxParser.toBoolean();
-    } else if (!optionAllowSyntaxParser.isUndefined()) {
-      const char* typeName = InformalValueTypeName(optionAllowSyntaxParser);
-      JS_ReportErrorASCII(
-          cx, "option `allowSyntaxParser` should be a boolean, got %s",
-          typeName);
-      return false;
-    }
 
     RootedValue optionModule(cx);
     if (!JS_GetProperty(cx, objOptions, "module", &optionModule)) {
@@ -5233,9 +5221,7 @@ static bool Parse(JSContext* cx, unsigned argc, Value* vp) {
   const char16_t* chars = stableChars.twoByteRange().begin().get();
 
   CompileOptions options(cx);
-  options.setIntroductionType("js shell parse")
-      .setFileAndLine("<string>", 1)
-      .setAllowSyntaxParser(allowSyntaxParser);
+  options.setIntroductionType("js shell parse").setFileAndLine("<string>", 1);
   if (goal == frontend::ParseGoal::Module) {
     // See frontend::CompileModule.
     options.maybeMakeStrictMode(true);
@@ -10235,7 +10221,7 @@ static bool SetContextOptions(JSContext* cx, const OptionParser& op) {
   enableAsyncStacks = !op.getBoolOption("no-async-stacks");
   enableStreams = !op.getBoolOption("no-streams");
   enableBigInt = !op.getBoolOption("no-bigint");
-  enableFields = op.getBoolOption("enable-experimental-fields");
+  enableFields = !op.getBoolOption("disable-experimental-fields");
   enableAwaitFix = op.getBoolOption("enable-experimental-await-fix");
 
   JS::ContextOptionsRef(cx)
@@ -10974,8 +10960,8 @@ int main(int argc, char** argv, char** envp) {
                         "Enable WHATWG Streams (default)") ||
       !op.addBoolOption('\0', "no-streams", "Disable WHATWG Streams") ||
       !op.addBoolOption('\0', "no-bigint", "Disable BigInt support") ||
-      !op.addBoolOption('\0', "enable-experimental-fields",
-                        "Enable fields in classes") ||
+      !op.addBoolOption('\0', "disable-experimental-fields",
+                        "Disable public fields in classes") ||
       !op.addBoolOption('\0', "enable-experimental-await-fix",
                         "Enable new, faster await semantics") ||
       !op.addStringOption('\0', "shared-memory", "on/off",

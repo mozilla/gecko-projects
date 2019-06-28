@@ -15,7 +15,6 @@
     <script type="module" src="chrome://browser/content/aboutlogins/components/login-list.js"></script>
     <script type="module" src="chrome://browser/content/aboutlogins/components/login-list-item.js"></script>
     <script type="module" src="chrome://browser/content/aboutlogins/components/menu-button.js"></script>
-    <script type="module" src="chrome://browser/content/aboutlogins/components/modal-input.js"></script>
     <script type="module" src="chrome://browser/content/aboutlogins/aboutLogins.js"></script>
     <link rel="stylesheet" href="chrome://global/skin/in-content/common.css">
     <link rel="stylesheet" href="chrome://browser/content/aboutlogins/aboutLogins.css">
@@ -28,6 +27,8 @@
       <button id="create-login-button" data-l10n-id="create-login-button"></button>
       <menu-button data-l10n-id="menu-button"
                    data-l10n-attrs="button-title,
+                                    menuitem-feedback,
+                                    menuitem-import,
                                     menuitem-preferences"></menu-button>
     </header>
     <login-list data-l10n-id="login-list"
@@ -35,6 +36,7 @@
                 data-l10n-attrs="count,
                                  last-changed-option,
                                  last-used-option,
+                                 missing-username,
                                  name-option,
                                  new-login-subtitle,
                                  new-login-title,
@@ -48,18 +50,19 @@
                                  copied-username-button,
                                  delete-button,
                                  edit-button,
-                                 field-required-symbol,
-                                 modal-input-reveal-checkbox-hide,
-                                 modal-input-reveal-checkbox-show,
                                  new-login-title,
                                  open-site-button,
                                  origin-label,
+                                 origin-placeholder,
+                                 password-hide-title,
                                  password-label,
+                                 password-show-title,
                                  save-changes-button,
                                  time-created,
                                  time-changed,
                                  time-used,
-                                 username-label"></login-item>
+                                 username-label,
+                                 username-placeholder"></login-item>
 
     <template id="login-list-template">
       <link rel="stylesheet" href="chrome://global/skin/in-content/common.css">
@@ -82,7 +85,7 @@
     <template id="login-list-item-template">
       <link rel="stylesheet" href="chrome://global/skin/in-content/common.css">
       <link rel="stylesheet" href="chrome://browser/content/aboutlogins/components/login-list-item.css">
-      <span class="origin"></span>
+      <span class="title"></span>
       <span class="username"></span>
     </template>
 
@@ -95,41 +98,45 @@
         <button class="edit-button alternate-button"></button>
         <button class="delete-button alternate-button"></button>
       </div>
-      <div class="detail-row">
-        <label>
-          <span class="origin-label field-label"></span>
-          <span class="origin-saved-value"></span>
-          <input type="url" name="origin" required/>
-        </label>
-        <button class="open-site-button"></button>
-      </div>
-      <div class="detail-row">
-        <label>
-          <span class="username-label field-label"></span>
-          <modal-input name="username"/>
-        </label>
-        <copy-to-clipboard-button class="copy-username-button"
-                                  data-telemetry-object="username"></copy-to-clipboard-button>
-      </div>
-      <div class="detail-row">
-        <label>
-          <span class="password-label field-label"></span>
-          <modal-input type="password" name="password" required />
-        </label>
-        <copy-to-clipboard-button class="copy-password-button"
-                                  data-telemetry-object="password"></copy-to-clipboard-button>
-      </div>
-      <p class="time-created meta-info"></p>
-      <p class="time-changed meta-info"></p>
-      <p class="time-used meta-info"></p>
-      <button class="save-changes-button"></button>
-      <button class="cancel-button"></button>
+      <form>
+        <div class="detail-row">
+          <label class="detail-cell">
+            <span class="origin-label field-label"></span>
+            <input type="url" name="origin" required/>
+          </label>
+          <button class="open-site-button"></button>
+        </div>
+        <div class="detail-row">
+          <label class="detail-cell">
+            <span class="username-label field-label"></span>
+            <input type="text" name="username"/>
+          </label>
+          <copy-to-clipboard-button class="copy-username-button"
+                                    data-telemetry-object="username"></copy-to-clipboard-button>
+        </div>
+        <div class="detail-row">
+          <label class="detail-cell">
+            <span class="password-label field-label"></span>
+            <div class="reveal-password-wrapper">
+              <input type="password" name="password" required/>
+              <input type="checkbox" class="reveal-password-checkbox"/>
+            </div>
+          </label>
+          <copy-to-clipboard-button class="copy-password-button"
+                                    data-telemetry-object="password"></copy-to-clipboard-button>
+        </div>
+        <p class="time-created meta-info"></p>
+        <p class="time-changed meta-info"></p>
+        <p class="time-used meta-info"></p>
+        <button class="save-changes-button"></button>
+        <button class="cancel-button"></button>
+      </form>
     </template>
 
     <template id="login-filter-template">
       <link rel="stylesheet" href="chrome://global/skin/in-content/common.css">
       <link rel="stylesheet" href="chrome://browser/content/aboutlogins/components/login-filter.css">
-      <input type="text"/>
+      <input class="filter" type="text"/>
     </template>
 
     <template id="menu-button-template">
@@ -137,17 +144,17 @@
       <link rel="stylesheet" href="chrome://browser/content/aboutlogins/common.css">
       <link rel="stylesheet" href="chrome://browser/content/aboutlogins/components/menu-button.css">
       <button class="menu-button alternate-button"></button>
-      <ul class="menu" role="menu" aria-hidden="true">
-        <li role="menuitem" class="menuitem"><button class="menuitem-button menuitem-preferences alternate-button"></button></li>
+      <ul class="menu" role="menu" hidden>
+        <li role="menuitem" class="menuitem windows-only">
+          <button class="menuitem-button menuitem-import alternate-button" data-event-name="AboutLoginsImport"></button>
+        </li>
+        <li role="menuitem" class="menuitem">
+          <button class="menuitem-button menuitem-feedback alternate-button" data-event-name="AboutLoginsOpenFeedback"></button>
+        </li>
+        <li role="menuitem" class="menuitem">
+          <button class="menuitem-button menuitem-preferences alternate-button" data-event-name="AboutLoginsOpenPreferences"></button>
+        </li>
       </ul>
-    </template>
-
-    <template id="modal-input-template">
-      <link rel="stylesheet" href="chrome://global/skin/in-content/common.css">
-      <link rel="stylesheet" href="chrome://browser/content/aboutlogins/components/modal-input.css">
-      <span class="locked-value"></span>
-      <input type="text" class="unlocked-value"/>
-      <input type="checkbox" class="reveal-checkbox"/>
     </template>
 
     <template id="copy-to-clipboard-button-template">

@@ -12,7 +12,8 @@ add_task(async function() {
   // Turn on BC preservation and frameloader rebuilding to ensure that the
   // BrowsingContext is preserved.
   await SpecialPowers.pushPrefEnv({set: [["fission.preserve_browsing_contexts", true],
-                                         ["fission.rebuild_frameloaders_on_remoteness_change", true]]});
+                                         ["fission.rebuild_frameloaders_on_remoteness_change", true],
+                                         ["browser.tabs.remote.useHTTPResponseProcessSelection", true]]});
 
   // Open a window with fission force-enabled in it.
   let win = await BrowserTestUtils.openNewBrowserWindow({fission: true, remote: true});
@@ -83,8 +84,6 @@ add_task(async function() {
 
       ok(!Cu.isDeadWrapper(content.win1), "win1 shouldn't be a dead wrapper after navigation");
 
-      // This load still doesn't work for some reason, so we skip it for now.
-      /*
       askLoad(URL3);
       await waitLoad();
 
@@ -93,23 +92,15 @@ add_task(async function() {
 
       is(content.bc2, content.bc3, "cross to cross-origin navigation BrowsingContext match");
       ok(content.win2 == content.win3, "cross to cross-origin navigation WindowProxy match");
-      */
 
-      // It would also be useful and important to handle navigating back into an
-      // in-process URL, but that actually doesn't work yet... so........
-      /*
       askLoad(URL1);
       await waitLoad();
-      let win4 = iframe.contentWindow;
-      let bc4 = iframe.browsingContext;
 
-      is(bc3, bc4, "cross to same-origin navigation BrowsingContext match");
-      try {
-        is(win3, win4, "cross to same-origin navigation WindowProxy match");
-      } catch(e) {
-        ok(false, "cross to same-origin navigation WindowProxy exception");
-      }
-      */
+      content.win4 = iframe.contentWindow;
+      content.bc4 = iframe.browsingContext;
+
+      is(content.bc3, content.bc4, "cross to same-origin navigation BrowsingContext match");
+      todo(content.win3 == content.win4, "cross to same-origin navigation WindowProxty match");
     });
   } finally {
     await BrowserTestUtils.closeWindow(win);

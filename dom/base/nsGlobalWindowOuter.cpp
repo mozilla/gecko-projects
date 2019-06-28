@@ -55,8 +55,6 @@
 #include "nsIInterfaceRequestorUtils.h"
 #include "nsIPermissionManager.h"
 #include "nsIScriptContext.h"
-#include "nsIScriptTimeoutHandler.h"
-#include "nsITimeoutHandler.h"
 #include "nsISlowScriptDebug.h"
 #include "nsWindowMemoryReporter.h"
 #include "nsWindowSizes.h"
@@ -1486,21 +1484,12 @@ nsresult nsGlobalWindowOuter::EnsureScriptEnvironment() {
 
   NS_ASSERTION(!GetCurrentInnerWindowInternal(),
                "No cached wrapper, but we have an inner window?");
+  NS_ASSERTION(!mContext, "Will overwrite mContext!");
 
   // If this window is a [i]frame, don't bother GC'ing when the frame's context
   // is destroyed since a GC will happen when the frameset or host document is
   // destroyed anyway.
-  nsCOMPtr<nsIScriptContext> context = new nsJSContext(!IsFrame(), this);
-
-  NS_ASSERTION(!mContext, "Will overwrite mContext!");
-
-  // should probably assert the context is clean???
-  context->WillInitializeContext();
-
-  nsresult rv = context->InitContext();
-  NS_ENSURE_SUCCESS(rv, rv);
-
-  mContext = context;
+  mContext = new nsJSContext(!IsFrame(), this);
   return NS_OK;
 }
 
@@ -1977,8 +1966,6 @@ nsresult nsGlobalWindowOuter::SetNewDocument(Document* aDocument,
   mLastOpenedURI = aDocument->GetDocumentURI();
 #endif
 
-  mContext->WillInitializeContext();
-
   RefPtr<nsGlobalWindowInner> currentInner = GetCurrentInnerWindowInternal();
 
   if (currentInner && currentInner->mNavigator) {
@@ -2094,7 +2081,6 @@ nsresult nsGlobalWindowOuter::SetNewDocument(Document* aDocument,
 
       // Inform the nsJSContext, which is the canonical holder of the outer.
       mContext->SetWindowProxy(outer);
-      mContext->DidInitializeContext();
 
       SetWrapper(mContext->GetWindowProxy());
     } else {
@@ -2261,8 +2247,6 @@ nsresult nsGlobalWindowOuter::SetNewDocument(Document* aDocument,
     js::SetRealmValidAccessPtr(
         cx, newInnerGlobal, newInnerWindow->GetDocGroup()->GetValidAccessPtr());
   }
-
-  kungFuDeathGrip->DidInitializeContext();
 
   // We wait to fire the debugger hook until the window is all set up and hooked
   // up with the outer. See bug 969156.
@@ -2436,7 +2420,7 @@ void nsGlobalWindowOuter::DetachFromDocShell() {
     DocGroup* docGroup = GetDocGroup();
     RefPtr<nsIDocShell> docShell = GetDocShell();
     RefPtr<nsDocShell> dShell = nsDocShell::Cast(docShell);
-    if (dShell){
+    if (dShell) {
       docGroup->TryFlushIframePostMessages(dShell->GetOuterWindowID());
     }
   }
@@ -5480,6 +5464,18 @@ void nsGlobalWindowOuter::NotifyContentBlockingEvent(
             unblocked = !doc->GetHasCryptominingContentLoaded();
           }
         } else if (aEvent == nsIWebProgressListener::
+                                 STATE_BLOCKED_SOCIALTRACKING_CONTENT) {
+          doc->SetHasSocialTrackingContentBlocked(aBlocked, origin);
+          if (!aBlocked) {
+            unblocked = !doc->GetHasSocialTrackingContentBlocked();
+          }
+        } else if (aEvent == nsIWebProgressListener::
+                                 STATE_LOADED_SOCIALTRACKING_CONTENT) {
+          doc->SetHasSocialTrackingContentLoaded(aBlocked, origin);
+          if (!aBlocked) {
+            unblocked = !doc->GetHasSocialTrackingContentLoaded();
+          }
+        } else if (aEvent == nsIWebProgressListener::
                                  STATE_COOKIES_BLOCKED_BY_PERMISSION) {
           doc->SetHasCookiesBlockedByPermission(aBlocked, origin);
           if (!aBlocked) {
@@ -6076,7 +6072,6 @@ void nsGlobalWindowOuter::PostMessageMozOuter(JSContext* aCx,
     return;
   }
 
-
   if (mDoc &&
       StaticPrefs::dom_separate_event_queue_for_post_message_enabled() &&
       !DocGroup::TryToLoadIframesInBackground()) {
@@ -6091,7 +6086,6 @@ void nsGlobalWindowOuter::PostMessageMozOuter(JSContext* aCx,
   }
 
   if (mDoc && DocGroup::TryToLoadIframesInBackground()) {
-
     RefPtr<nsIDocShell> docShell = GetDocShell();
     RefPtr<nsDocShell> dShell = nsDocShell::Cast(docShell);
 
@@ -6109,7 +6103,8 @@ void nsGlobalWindowOuter::PostMessageMozOuter(JSContext* aCx,
         }
       } else if (mDoc->GetReadyStateEnum() < Document::READYSTATE_COMPLETE) {
         mozilla::dom::DocGroup* docGroup = GetDocGroup();
-        aError = docGroup->QueueIframePostMessages(event.forget(), dShell->GetOuterWindowID());
+        aError = docGroup->QueueIframePostMessages(event.forget(),
+                                                   dShell->GetOuterWindowID());
         return;
       }
     }

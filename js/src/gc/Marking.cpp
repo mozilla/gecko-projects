@@ -126,12 +126,16 @@ using mozilla::PodCopy;
 template <typename T>
 static inline bool IsThingPoisoned(T* thing) {
   const uint8_t poisonBytes[] = {
-      JS_FRESH_NURSERY_PATTERN,     JS_SWEPT_NURSERY_PATTERN,
-      JS_ALLOCATED_NURSERY_PATTERN, JS_FRESH_TENURED_PATTERN,
-      JS_MOVED_TENURED_PATTERN,     JS_SWEPT_TENURED_PATTERN,
-      JS_ALLOCATED_TENURED_PATTERN, JS_FREED_HEAP_PTR_PATTERN,
-      JS_SWEPT_TI_PATTERN,          JS_SWEPT_CODE_PATTERN,
-      JS_FREED_CHUNK_PATTERN};
+      JS_FRESH_NURSERY_PATTERN,      JS_SWEPT_NURSERY_PATTERN,
+      JS_ALLOCATED_NURSERY_PATTERN,  JS_FRESH_TENURED_PATTERN,
+      JS_MOVED_TENURED_PATTERN,      JS_SWEPT_TENURED_PATTERN,
+      JS_ALLOCATED_TENURED_PATTERN,  JS_FREED_HEAP_PTR_PATTERN,
+      JS_FREED_CHUNK_PATTERN,        JS_FREED_ARENA_PATTERN,
+      JS_SWEPT_TI_PATTERN,           JS_SWEPT_CODE_PATTERN,
+      JS_RESET_VALUE_PATTERN,        JS_POISONED_JSSCRIPT_DATA_PATTERN,
+      JS_OOB_PARSE_NODE_PATTERN,     JS_LIFO_UNDEFINED_PATTERN,
+      JS_LIFO_UNINITIALIZED_PATTERN,
+  };
   const int numPoisonBytes = sizeof(poisonBytes) / sizeof(poisonBytes[0]);
   uint32_t* p =
       reinterpret_cast<uint32_t*>(reinterpret_cast<FreeSpan*>(thing) + 1);
@@ -545,6 +549,14 @@ void js::TraceManuallyBarrieredGenericPointerEdge(JSTracer* trc, Cell** thingp,
                                 });
   if (traced != thing) {
     *thingp = traced;
+  }
+}
+
+void StackGCCellPtr::trace(JSTracer* trc) {
+  Cell* thing = ptr_.asCell();
+  TraceGenericPointerRoot(trc, &thing, "stack-gc-cell-ptr");
+  if (thing != ptr_.asCell()) {
+    ptr_ = JS::GCCellPtr(thing, ptr_.kind());
   }
 }
 
@@ -1405,7 +1417,7 @@ void js::GCMarker::lazilyMarkChildren(ObjectGroup* group) {
 void JS::BigInt::traceChildren(JSTracer* trc) { return; }
 
 template <typename Functor>
-static void VisitTraceList(const Functor& f, const int32_t* traceList,
+static void VisitTraceList(const Functor& f, const uint32_t* traceList,
                            uint8_t* memory);
 
 // Call the trace hook set on the object, if present. If further tracing of
@@ -1445,22 +1457,23 @@ static inline NativeObject* CallTraceHook(Functor&& f, JSTracer* trc,
 }
 
 template <typename Functor>
-static void VisitTraceList(const Functor& f, const int32_t* traceList,
+static void VisitTraceList(const Functor& f, const uint32_t* traceList,
                            uint8_t* memory) {
-  while (*traceList != -1) {
+  size_t stringCount = *traceList++;
+  size_t objectCount = *traceList++;
+  size_t valueCount = *traceList++;
+  for (size_t i = 0; i < stringCount; i++) {
     f(reinterpret_cast<JSString**>(memory + *traceList));
     traceList++;
   }
-  traceList++;
-  while (*traceList != -1) {
+  for (size_t i = 0; i < objectCount; i++) {
     JSObject** objp = reinterpret_cast<JSObject**>(memory + *traceList);
     if (*objp) {
       f(objp);
     }
     traceList++;
   }
-  traceList++;
-  while (*traceList != -1) {
+  for (size_t i = 0; i < valueCount; i++) {
     f(reinterpret_cast<Value*>(memory + *traceList));
     traceList++;
   }

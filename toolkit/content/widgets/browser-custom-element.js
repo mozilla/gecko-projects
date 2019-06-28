@@ -234,8 +234,6 @@ class MozBrowser extends MozElements.MozElementMixin(XULFrameElement) {
 
     this._controller = null;
 
-    this._selectParentHelper = null;
-
     this._remoteWebNavigation = null;
 
     this._remoteWebProgress = null;
@@ -401,6 +399,30 @@ class MozBrowser extends MozElements.MozElementMixin(XULFrameElement) {
 
   get dateTimePicker() {
     return document.getElementById(this.getAttribute("datetimepicker"));
+  }
+
+  /**
+   * Provides a node to hang popups (such as the datetimepicker) from.
+   * If this <browser> isn't the descendant of a <stack>, null is returned
+   * instead and popup code must handle this case.
+   */
+  get popupAnchor() {
+    let stack = this.closest("stack");
+    if (!stack) {
+      return null;
+    }
+
+    let popupAnchor = stack.querySelector(".popup-anchor");
+    if (popupAnchor) {
+      return popupAnchor;
+    }
+
+    // Create an anchor for the popup
+    popupAnchor = document.createXULElement("hbox");
+    popupAnchor.className = "popup-anchor";
+    popupAnchor.hidden = true;
+    stack.appendChild(popupAnchor);
+    return popupAnchor;
   }
 
   set docShellIsActive(val) {
@@ -676,9 +698,7 @@ class MozBrowser extends MozElements.MozElementMixin(XULFrameElement) {
 
       if (changed) {
         this._fullZoom = val;
-        try {
-          this.messageManager.sendAsyncMessage("FullZoom", { value: val });
-        } catch (ex) {}
+        this.sendMessageToActor("FullZoom", { value: val }, "Zoom", true);
 
         let event = new Event("FullZoomChange", { bubbles: true });
         this.dispatchEvent(event);
@@ -701,9 +721,7 @@ class MozBrowser extends MozElements.MozElementMixin(XULFrameElement) {
 
       if (changed) {
         this._textZoom = val;
-        try {
-          this.messageManager.sendAsyncMessage("TextZoom", { value: val });
-        } catch (ex) {}
+        this.sendMessageToActor("TextZoom", { value: val }, "Zoom", true);
 
         let event = new Event("TextZoomChange", { bubbles: true });
         this.dispatchEvent(event);
@@ -984,14 +1002,6 @@ class MozBrowser extends MozElements.MozElementMixin(XULFrameElement) {
     this.dispatchEvent(event);
   }
 
-  notifyGloballyAutoplayBlocked() {
-    let event = document.createEvent("CustomEvent");
-    event.initCustomEvent("GloballyAutoplayBlocked", true, false, {
-      url: this.documentURI,
-    });
-    this.dispatchEvent(event);
-  }
-
   /**
    * When the pref "media.block-autoplay-until-in-foreground" is on,
    * Gecko delays starting playback of media resources in tabs until the
@@ -1096,9 +1106,6 @@ class MozBrowser extends MozElements.MozElementMixin(XULFrameElement) {
       this.messageManager.addMessageListener("Browser:Init", this);
       this.messageManager.addMessageListener("DOMTitleChanged", this);
       this.messageManager.addMessageListener("ImageDocumentLoaded", this);
-      this.messageManager.addMessageListener("FullZoomChange", this);
-      this.messageManager.addMessageListener("TextZoomChange", this);
-      this.messageManager.addMessageListener("ZoomChangeUsingMouseWheel", this);
 
       // browser-child messages, such as Content:LocationChange, are handled in
       // RemoteWebProgress, ensure it is loaded and ready.
@@ -1117,11 +1124,6 @@ class MozBrowser extends MozElements.MozElementMixin(XULFrameElement) {
       this._remoteWebProgress = this._remoteWebProgressManager.topLevelWebProgress;
 
       this.messageManager.loadFrameScript("chrome://global/content/browser-child.js", true);
-
-      if (this.hasAttribute("selectmenulist")) {
-        this.messageManager.addMessageListener("Forms:ShowDropDown", this);
-        this.messageManager.addMessageListener("Forms:HideDropDown", this);
-      }
 
       if (!this.hasAttribute("disablehistory")) {
         Services.obs.addObserver(this.observer, "browser:purge-session-history", true);
@@ -1188,12 +1190,6 @@ class MozBrowser extends MozElements.MozElementMixin(XULFrameElement) {
       this.messageManager.addMessageListener("AudioPlayback:ActiveMediaBlockStart", this);
       this.messageManager.addMessageListener("AudioPlayback:ActiveMediaBlockStop", this);
       this.messageManager.addMessageListener("UnselectedTabHover:Toggle", this);
-      this.messageManager.addMessageListener("GloballyAutoplayBlocked", this);
-
-      if (this.hasAttribute("selectmenulist")) {
-        this.messageManager.addMessageListener("Forms:ShowDropDown", this);
-        this.messageManager.addMessageListener("Forms:HideDropDown", this);
-      }
     }
   }
 
@@ -1205,9 +1201,13 @@ class MozBrowser extends MozElements.MozElementMixin(XULFrameElement) {
     elementsToDestroyOnUnload.delete(this);
 
     // Make sure that any open select is closed.
-    if (this._selectParentHelper) {
+    if (this.hasAttribute("selectmenulist")) {
       let menulist = document.getElementById(this.getAttribute("selectmenulist"));
-      this._selectParentHelper.hide(menulist, this);
+      if (menulist) {
+        let resourcePath = "resource://gre/modules/SelectParentHelper.jsm";
+        let {SelectParentHelper} = ChromeUtils.import(resourcePath);
+        SelectParentHelper.hide(menulist, this);
+      }
     }
 
     this.resetFields();
@@ -1303,38 +1303,6 @@ class MozBrowser extends MozElements.MozElementMixin(XULFrameElement) {
           ++this._unselectedTabHoverMessageListenerCount > 0 :
           --this._unselectedTabHoverMessageListenerCount == 0;
         break;
-      case "GloballyAutoplayBlocked":
-        this.notifyGloballyAutoplayBlocked();
-        break;
-      case "Forms:ShowDropDown":
-        {
-          if (!this._selectParentHelper) {
-            this._selectParentHelper =
-              ChromeUtils.import("resource://gre/modules/SelectParentHelper.jsm", {}).SelectParentHelper;
-          }
-
-          let menulist = document.getElementById(this.getAttribute("selectmenulist"));
-          menulist.menupopup.style.direction = data.style.direction;
-
-          let useFullZoom = !this.isRemoteBrowser ||
-                            Services.prefs.getBoolPref("browser.zoom.full") ||
-                            this.isSyntheticDocument;
-          let zoom = useFullZoom ? this._fullZoom : this._textZoom;
-          this._selectParentHelper.populate(menulist, data.options.options,
-            data.options.uniqueStyles, data.selectedIndex, zoom,
-            data.defaultStyle, data.style);
-          this._selectParentHelper.open(this, menulist, data.rect, data.isOpenedViaTouch);
-          break;
-        }
-
-      case "Forms:HideDropDown":
-        {
-          if (this._selectParentHelper) {
-            let menulist = document.getElementById(this.getAttribute("selectmenulist"));
-            this._selectParentHelper.hide(menulist, this);
-          }
-          break;
-        }
     }
     return undefined;
   }
@@ -1358,33 +1326,6 @@ class MozBrowser extends MozElements.MozElementMixin(XULFrameElement) {
           height: data.height,
         };
         break;
-
-      case "FullZoomChange":
-        {
-          this._fullZoom = data.value;
-          let event = document.createEvent("Events");
-          event.initEvent("FullZoomChange", true, false);
-          this.dispatchEvent(event);
-          break;
-        }
-
-      case "TextZoomChange":
-        {
-          this._textZoom = data.value;
-          let event = document.createEvent("Events");
-          event.initEvent("TextZoomChange", true, false);
-          this.dispatchEvent(event);
-          break;
-        }
-
-      case "ZoomChangeUsingMouseWheel":
-        {
-          let event = document.createEvent("Events");
-          event.initEvent("ZoomChangeUsingMouseWheel", true, false);
-          this.dispatchEvent(event);
-          break;
-        }
-
       default:
         return this._receiveMessage(aMessage);
     }
@@ -1425,6 +1366,52 @@ class MozBrowser extends MozElements.MozElementMixin(XULFrameElement) {
       if (aContentType != null) {
         this._documentContentType = aContentType;
       }
+    }
+  }
+
+  updateWebNavigationForLocationChange(aCanGoBack, aCanGoForward) {
+    if (this.isRemoteBrowser && this.messageManager) {
+      let remoteWebNav = this._remoteWebNavigationImpl;
+      remoteWebNav.canGoBack = aCanGoBack;
+      remoteWebNav.canGoForward = aCanGoForward;
+    }
+  }
+
+  updateForLocationChange(aLocation,
+                          aCharset,
+                          aMayEnableCharacterEncodingMenu,
+                          aCharsetAutodetected,
+                          aDocumentURI,
+                          aTitle,
+                          aContentPrincipal,
+                          aContentStoragePrincipal,
+                          aCSP,
+                          aIsSynthetic,
+                          aInnerWindowID,
+                          aHaveRequestContextID,
+                          aRequestContextID,
+                          aContentType) {
+    if (this.isRemoteBrowser && this.messageManager) {
+      if (aCharset != null) {
+        this._characterSet = aCharset;
+        this._mayEnableCharacterEncodingMenu = aMayEnableCharacterEncodingMenu;
+        this._charsetAutodetected = aCharsetAutodetected;
+      }
+
+      if (aContentType != null) {
+        this._documentContentType = aContentType;
+      }
+
+      this._remoteWebNavigationImpl._currentURI = aLocation;
+      this._documentURI = aDocumentURI;
+      this._contentTile = aTitle;
+      this._imageDocument = null;
+      this._contentPrincipal = aContentPrincipal;
+      this._contentStoragePrincipal = aContentStoragePrincipal;
+      this._csp = aCSP;
+      this._isSyntheticDocument = aIsSynthetic;
+      this._innerWindowID = aInnerWindowID;
+      this._contentRequestContextID = aHaveRequestContextID ? aRequestContextID : null;
     }
   }
 

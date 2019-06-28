@@ -54,6 +54,7 @@
 #include "mozilla/layers/TextureClient.h"
 #include "mozilla/layers/TextureWrapperImage.h"
 #include "mozilla/layers/WebRenderUserData.h"
+#include "mozilla/PerfStats.h"
 #include "mozilla/Unused.h"
 #include "GeckoProfiler.h"
 #include "LayersLogging.h"
@@ -3793,13 +3794,14 @@ UniquePtr<InactiveLayerData> PaintedLayerData::CreateInactiveLayerData(
   UniquePtr<InactiveLayerData> data = MakeUnique<InactiveLayerData>();
   data->mLayerManager = tempManager;
 
-  data->mLayerBuilder = new FrameLayerBuilder();
-  data->mLayerBuilder->Init(aState->Builder(), tempManager, this, true,
+  FrameLayerBuilder* layerBuilder = new FrameLayerBuilder();
+  // Ownership of layerBuilder is passed to tempManager.
+  layerBuilder->Init(aState->Builder(), tempManager, this, true,
                             &aItem->GetClip());
 
   tempManager->BeginTransaction();
   if (aState->LayerBuilder()->GetRetainingLayerManager()) {
-    data->mLayerBuilder->DidBeginRetainedLayerTransaction(tempManager);
+    layerBuilder->DidBeginRetainedLayerTransaction(tempManager);
   }
 
   data->mProps = LayerProperties::CloneFrom(tempManager->GetRoot());
@@ -4475,6 +4477,8 @@ static void ProcessDisplayItemMarker(DisplayItemEntryType aMarker,
 void ContainerState::ProcessDisplayItems(nsDisplayList* aList) {
   AUTO_PROFILER_LABEL("ContainerState::ProcessDisplayItems",
                       GRAPHICS_LayerBuilding);
+  PerfStats::AutoMetricRecording<PerfStats::Metric::LayerBuilding>
+      autoRecording;
 
   nsPoint topLeft(0, 0);
 
@@ -5421,7 +5425,7 @@ void FrameLayerBuilder::AddPaintedDisplayItem(PaintedLayerData* aLayerData,
   if (aItem.mInactiveLayerData) {
     RefPtr<BasicLayerManager> tempManager =
         aItem.mInactiveLayerData->mLayerManager;
-    FrameLayerBuilder* layerBuilder = aItem.mInactiveLayerData->mLayerBuilder;
+    FrameLayerBuilder* layerBuilder = tempManager->GetLayerBuilder();
     Layer* tmpLayer = aItem.mInactiveLayerData->mLayer;
 
     // We have no easy way of detecting if this transaction will ever actually
@@ -7279,7 +7283,7 @@ void FrameLayerBuilder::DrawPaintedLayer(PaintedLayer* aLayer,
       layerBuilder->PaintItems(userData->mItems, iterRect, aContext, builder,
                                presContext, offset, userData->mXScale,
                                userData->mYScale);
-      if (StaticPrefs::GfxLoggingPaintedPixelCountEnabled()) {
+      if (StaticPrefs::gfx_logging_painted_pixel_count_enabled()) {
         aLayer->Manager()->AddPaintedPixelCount(iterRect.Area());
       }
     }
@@ -7296,7 +7300,7 @@ void FrameLayerBuilder::DrawPaintedLayer(PaintedLayer* aLayer,
     layerBuilder->PaintItems(userData->mItems, aRegionToDraw.GetBounds(),
                              aContext, builder, presContext, offset,
                              userData->mXScale, userData->mYScale);
-    if (StaticPrefs::GfxLoggingPaintedPixelCountEnabled()) {
+    if (StaticPrefs::gfx_logging_painted_pixel_count_enabled()) {
       aLayer->Manager()->AddPaintedPixelCount(aRegionToDraw.GetBounds().Area());
     }
   }

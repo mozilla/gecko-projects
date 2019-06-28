@@ -239,6 +239,9 @@ class nsContentUtils {
     return ThreadsafeIsSystemCaller(aCx) || IsFuzzingEnabled();
   }
 
+  static bool IsCallerChromeOrElementTransformGettersEnabled(JSContext* aCx,
+                                                             JSObject*);
+
   // The APIs for checking whether the caller is system (in the sense of system
   // principal) should only be used when the JSContext is known to accurately
   // represent the caller.  In practice, that means you should only use them in
@@ -719,8 +722,8 @@ class nsContentUtils {
   // with a single realm.
   static nsIPrincipal* ObjectPrincipal(JSObject* aObj);
 
-  static nsresult GenerateStateKey(nsIContent* aContent, Document* aDocument,
-                                   nsACString& aKey);
+  static void GenerateStateKey(nsIContent* aContent, Document* aDocument,
+                               nsACString& aKey);
 
   /**
    * Create a new nsIURI from aSpec, using aBaseURI as the base.  The
@@ -2141,10 +2144,8 @@ class nsContentUtils {
    */
   static nsresult GetASCIIOrigin(nsIPrincipal* aPrincipal, nsACString& aOrigin);
   static nsresult GetASCIIOrigin(nsIURI* aURI, nsACString& aOrigin);
-  static nsresult GetThreadSafeASCIIOrigin(nsIURI* aURI, nsACString& aOrigin);
   static nsresult GetUTFOrigin(nsIPrincipal* aPrincipal, nsAString& aOrigin);
   static nsresult GetUTFOrigin(nsIURI* aURI, nsAString& aOrigin);
-  static nsresult GetThreadSafeUTFOrigin(nsIURI* aURI, nsAString& aOrigin);
 
   /**
    * This method creates and dispatches "command" event, which implements
@@ -2848,25 +2849,6 @@ class nsContentUtils {
                                 bool aOnlySystemGroup = false);
 
   static already_AddRefed<nsPIWindowRoot> GetWindowRoot(Document* aDoc);
-
-  /*
-   * Implements step 3.1 and 3.3 of the Determine request's Referrer algorithm
-   * from the Referrer Policy specification.
-   *
-   * The referrer policy of the document is applied by Necko when using
-   * channels.
-   *
-   * For documents representing an iframe srcdoc attribute, the document sets
-   * its own URI correctly, so this method simply uses the document's original
-   * or current URI as appropriate.
-   *
-   * aDoc may be null.
-   *
-   * https://w3c.github.io/webappsec/specs/referrer-policy/#determine-requests-referrer
-   */
-  static nsresult SetFetchReferrerURIWithPolicy(
-      nsIPrincipal* aPrincipal, Document* aDoc, nsIHttpChannel* aChannel,
-      mozilla::net::ReferrerPolicy aReferrerPolicy);
 
   /*
    * If there is a Referrer-Policy response header in |aChannel|, parse a

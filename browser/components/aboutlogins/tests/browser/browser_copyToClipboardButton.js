@@ -35,6 +35,7 @@ add_task(async function test() {
         expectedValue: testCase[0],
         copyButtonSelector: testCase[1],
       };
+      info("waiting for " + testObj.expectedValue + " to be placed on clipboard");
       await SimpleTest.promiseClipboardChange(testObj.expectedValue, async () => {
         await ContentTask.spawn(browser, testObj, async function(aTestObj) {
           let loginItem = content.document.querySelector("login-item");
@@ -44,13 +45,13 @@ add_task(async function test() {
           innerButton.click();
         });
       });
-      ok(true, "Username is on clipboard now");
+      ok(true, testObj.expectedValue + " is on clipboard now");
 
       await ContentTask.spawn(browser, testObj, async function(aTestObj) {
         let loginItem = content.document.querySelector("login-item");
         let copyButton = loginItem.shadowRoot.querySelector(aTestObj.copyButtonSelector);
-        ok(copyButton.hasAttribute("copied"), "Success message should be shown");
-        await ContentTaskUtils.waitForCondition(() => !copyButton.hasAttribute("copied"),
+        ok(copyButton.dataset.copied, "Success message should be shown");
+        await ContentTaskUtils.waitForCondition(() => !copyButton.dataset.copied,
           "'copied' attribute should be removed after a timeout");
       });
     }

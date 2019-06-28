@@ -1649,6 +1649,7 @@ void HTMLMediaElement::ShutdownDecoder() {
     mNextAvailableMediaDecoderOutputTrackID =
         mDecoder->GetNextOutputStreamTrackID();
   }
+  DiscardFinishWhenEndedOutputStreams();
   mDecoder->Shutdown();
   DDUNLINKCHILD(mDecoder.get());
   mDecoder = nullptr;
@@ -1749,6 +1750,8 @@ void HTMLMediaElement::AbortExistingLoads() {
   if (mSrcStream) {
     EndSrcMediaStreamPlayback();
   }
+
+  DiscardFinishWhenEndedOutputStreams();
 
   RemoveMediaElementFromURITable();
   mLoadingSrc = nullptr;
@@ -2211,6 +2214,9 @@ void HTMLMediaElement::NotifyMediaTrackDisabled(MediaTrack* aTrack) {
   for (OutputMediaStream& ms : mOutputStreams) {
     if (ms.mCapturingDecoder) {
       MOZ_ASSERT(!ms.mCapturingMediaStream);
+      continue;
+    }
+    if (ms.mCapturingAudioOnly && aTrack->AsVideoTrack()) {
       continue;
     }
     MOZ_ASSERT(ms.mCapturingMediaStream);
@@ -3088,6 +3094,23 @@ void HTMLMediaElement::AddCaptureMediaTrackToOutputStream(
       ("Created %s track %p with id %d from track %p through MediaInputPort %p",
        inputTrack->AsAudioStreamTrack() ? "audio" : "video", track.get(),
        destinationTrackID, inputTrack, port.get()));
+}
+
+void HTMLMediaElement::DiscardFinishWhenEndedOutputStreams() {
+  // Discard all output streams that have finished now.
+  for (int32_t i = mOutputStreams.Length() - 1; i >= 0; --i) {
+    if (!mOutputStreams[i].mFinishWhenEnded) {
+      continue;
+    }
+    LOG(LogLevel::Debug,
+        ("Playback ended. Letting output stream %p go inactive",
+         mOutputStreams[i].mStream.get()));
+    mOutputStreams[i].mStream->SetFinishedOnInactive(true);
+    if (mOutputStreams[i].mCapturingDecoder) {
+      mDecoder->RemoveOutputStream(mOutputStreams[i].mStream);
+    }
+    mOutputStreams.RemoveElementAt(i);
+  }
 }
 
 bool HTMLMediaElement::CanBeCaptured(StreamCaptureType aCaptureType) {
@@ -4058,10 +4081,6 @@ nsresult HTMLMediaElement::BindToTree(BindContext& aContext, nsINode& aParent) {
     NotifyUAWidgetSetupOrChange();
   }
 
-  // FIXME(emilio, bug 1555946): mUnboundFromTree doesn't make any sense, should
-  // just use IsInComposedDoc() in the relevant places or something.
-  mUnboundFromTree = false;
-
   if (IsInUncomposedDoc()) {
     // The preload action depends on the value of the autoplay attribute.
     // It's value may have changed, so update it.
@@ -4275,7 +4294,6 @@ void HTMLMediaElement::ReportTelemetry() {
 }
 
 void HTMLMediaElement::UnbindFromTree(bool aNullParent) {
-  mUnboundFromTree = true;
   mVisibilityState = Visibility::Untracked;
 
   if (IsInComposedDoc()) {
@@ -4287,14 +4305,21 @@ void HTMLMediaElement::UnbindFromTree(bool aNullParent) {
   MOZ_ASSERT(IsHidden());
   NotifyDecoderActivityChanges();
 
-  RefPtr<HTMLMediaElement> self(this);
-  nsCOMPtr<nsIRunnable> task =
-      NS_NewRunnableFunction("dom::HTMLMediaElement::UnbindFromTree", [self]() {
-        if (self->mUnboundFromTree) {
-          self->Pause();
-        }
-      });
-  RunInStableState(task);
+  // Dispatch a task to run once we're in a stable state which ensures we're
+  // paused if we're no longer in a document. Note we set a flag here to
+  // ensure we don't dispatch redundant tasks.
+  if (!mDispatchedTaskToPauseIfNotInDocument) {
+    mDispatchedTaskToPauseIfNotInDocument = true;
+    nsCOMPtr<nsIRunnable> task = NS_NewRunnableFunction(
+        "dom::HTMLMediaElement::UnbindFromTree",
+        [self = RefPtr<HTMLMediaElement>(this)]() {
+          self->mDispatchedTaskToPauseIfNotInDocument = false;
+          if (!self->IsInComposedDoc()) {
+            self->Pause();
+          }
+        });
+    RunInStableState(task);
+  }
 }
 
 /* static */
@@ -5087,19 +5112,7 @@ void HTMLMediaElement::PlaybackEnded() {
   NS_ASSERTION(!mDecoder || mDecoder->IsEnded(),
                "Decoder fired ended, but not in ended state");
 
-  // Discard all output streams that have finished now.
-  for (int32_t i = mOutputStreams.Length() - 1; i >= 0; --i) {
-    if (mOutputStreams[i].mFinishWhenEnded) {
-      LOG(LogLevel::Debug,
-          ("Playback ended. Letting output stream %p go inactive",
-           mOutputStreams[i].mStream.get()));
-      mOutputStreams[i].mStream->SetFinishedOnInactive(true);
-      if (mOutputStreams[i].mCapturingDecoder) {
-        mDecoder->RemoveOutputStream(mOutputStreams[i].mStream);
-      }
-      mOutputStreams.RemoveElementAt(i);
-    }
-  }
+  DiscardFinishWhenEndedOutputStreams();
 
   if (mSrcStream) {
     LOG(LogLevel::Debug,
@@ -5693,7 +5706,7 @@ bool HTMLMediaElement::IsActive() const {
 }
 
 bool HTMLMediaElement::IsHidden() const {
-  return mUnboundFromTree || OwnerDoc()->Hidden();
+  return !IsInComposedDoc() || OwnerDoc()->Hidden();
 }
 
 VideoFrameContainer* HTMLMediaElement::GetVideoFrameContainer() {
