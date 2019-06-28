@@ -101,20 +101,6 @@ static gfxRect AppUnitsToFloatCSSPixels(const gfxRect& aRect,
 }
 
 /**
- * Scales a gfxRect around a given point.
- *
- * @param aRect The rectangle to scale.
- * @param aPoint The point around which to scale.
- * @param aScale The scale amount.
- */
-static void ScaleAround(gfxRect& aRect, const gfxPoint& aPoint, double aScale) {
-  aRect.x = aPoint.x - aScale * (aPoint.x - aRect.x);
-  aRect.y = aPoint.y - aScale * (aPoint.y - aRect.y);
-  aRect.width *= aScale;
-  aRect.height *= aScale;
-}
-
-/**
  * Returns whether a gfxPoint lies within a gfxRect.
  */
 static bool Inside(const gfxRect& aRect, const gfxPoint& aPoint) {
@@ -905,14 +891,8 @@ SVGBBox TextRenderedRun::GetRunUserSpaceRect(nsPresContext* aContext,
               fillInAppUnits.height),
       aContext);
 
-  // Scale the rectangle up due to any mFontSizeScaleFactor.  We scale
-  // it around the text's origin.
-  ScaleAround(
-      fill,
-      textRun->IsVertical()
-          ? gfxPoint(nsPresContext::AppUnitsToFloatCSSPixels(baseline), 0.0)
-          : gfxPoint(0.0, nsPresContext::AppUnitsToFloatCSSPixels(baseline)),
-      1.0 / mFontSizeScaleFactor);
+  // Scale the rectangle up due to any mFontSizeScaleFactor.
+  fill.Scale(1.0 / mFontSizeScaleFactor);
 
   // Include the fill if requested.
   if (aFlags & eIncludeFill) {
@@ -4035,7 +4015,7 @@ nsresult SVGTextFrame::GetEndPositionOfChar(nsIContent* aContent,
  * text content element.
  */
 nsresult SVGTextFrame::GetExtentOfChar(nsIContent* aContent, uint32_t aCharNum,
-                                       SVGIRect** aResult) {
+                                       SVGRect** aResult) {
   nsIFrame* kid = PrincipalChildList().FirstChild();
   if (NS_SUBTREE_DIRTY(kid)) {
     // We're never reflowed if we're under a non-SVG element that is
@@ -4088,7 +4068,7 @@ nsresult SVGTextFrame::GetExtentOfChar(nsIContent* aContent, uint32_t aCharNum,
   // Transform the glyph's rect into user space.
   gfxRect r = m.TransformBounds(glyphRect);
 
-  RefPtr<SVGRect> rect = new SVGRect(aContent, r.x, r.y, r.width, r.height);
+  RefPtr<SVGRect> rect = new SVGRect(aContent, ToRect(r));
   rect.forget(aResult);
   return NS_OK;
 }

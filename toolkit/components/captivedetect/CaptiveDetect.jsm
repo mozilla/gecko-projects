@@ -31,6 +31,8 @@ function URLFetcher(url, timeout) {
   xhr.channel.loadFlags |= Ci.nsIRequest.LOAD_ANONYMOUS;
   // Use the system's resolver for this check
   xhr.channel.loadFlags |= Ci.nsIRequest.LOAD_DISABLE_TRR;
+  // We except this from being classified
+  xhr.channel.loadFlags |= Ci.nsIChannel.LOAD_BYPASS_URL_CLASSIFIER;
 
   // We don't want to follow _any_ redirects
   xhr.channel.QueryInterface(Ci.nsIHttpChannel).redirectionLimit = 0;
@@ -55,7 +57,7 @@ function URLFetcher(url, timeout) {
         self.onsuccess(xhr.responseText);
       } else if (xhr.status) {
         self.onredirectorerror(xhr.status);
-      } else if (xhr.channel.status == Cr.NS_ERROR_REDIRECT_LOOP) {
+      } else if (xhr.channel && xhr.channel.status == Cr.NS_ERROR_REDIRECT_LOOP) {
         // For some redirects we don't get a status, so we need to check it
         // this way. This only works because we set the redirectionLimit to 0.
         self.onredirectorerror(300);

@@ -1099,17 +1099,17 @@ mozilla::ipc::IPCResult ContentParent::RecvLaunchRDDProcess(
 /*static*/
 already_AddRefed<RemoteBrowser> ContentParent::CreateBrowser(
     const TabContext& aContext, Element* aFrameElement,
-    BrowsingContext* aBrowsingContext, ContentParent* aOpenerContentParent,
-    BrowserParent* aSameTabGroupAs, uint64_t aNextRemoteTabId) {
+    const nsAString& aRemoteType, BrowsingContext* aBrowsingContext,
+    ContentParent* aOpenerContentParent, BrowserParent* aSameTabGroupAs,
+    uint64_t aNextRemoteTabId) {
   AUTO_PROFILER_LABEL("ContentParent::CreateBrowser", OTHER);
 
   if (!sCanLaunchSubprocesses) {
     return nullptr;
   }
 
-  nsAutoString remoteType;
-  if (!aFrameElement->GetAttr(kNameSpaceID_None, nsGkAtoms::RemoteType,
-                              remoteType)) {
+  nsAutoString remoteType(aRemoteType);
+  if (remoteType.IsEmpty()) {
     remoteType.AssignLiteral(DEFAULT_REMOTE_TYPE);
   }
 
@@ -5490,14 +5490,13 @@ mozilla::ipc::IPCResult ContentParent::RecvRecordOrigin(
 }
 
 mozilla::ipc::IPCResult ContentParent::RecvReportContentBlockingLog(
-    const Principal& aPrincipal, const IPCStream& aIPCStream) {
+    const IPCStream& aIPCStream) {
   nsCOMPtr<nsITrackingDBService> trackingDBService =
       do_GetService("@mozilla.org/tracking-db-service;1");
   if (NS_WARN_IF(!trackingDBService)) {
     return IPC_FAIL_NO_REASON(this);
   }
 
-  nsCOMPtr<nsIPrincipal> principal(aPrincipal);
   nsCOMPtr<nsIInputStream> stream = DeserializeIPCStream(aIPCStream);
   nsCOMPtr<nsIAsyncInputStream> asyncStream;
   nsresult rv = NS_MakeAsyncNonBlockingInputStream(stream.forget(),
@@ -5505,7 +5504,7 @@ mozilla::ipc::IPCResult ContentParent::RecvReportContentBlockingLog(
   if (NS_WARN_IF(NS_FAILED(rv))) {
     return IPC_FAIL_NO_REASON(this);
   }
-  trackingDBService->RecordContentBlockingLog(principal, asyncStream);
+  trackingDBService->RecordContentBlockingLog(asyncStream);
   return IPC_OK();
 }
 
@@ -5862,33 +5861,6 @@ mozilla::ipc::IPCResult ContentParent::RecvCacheBrowsingContextChildren(
   return IPC_OK();
 }
 
-mozilla::ipc::IPCResult ContentParent::RecvDetachBrowsingContextChildren(
-    BrowsingContext* aContext) {
-  if (!aContext) {
-    MOZ_LOG(BrowsingContext::GetLog(), LogLevel::Debug,
-            ("ParentIPC: Trying to detach from already detached context"));
-    return IPC_OK();
-  }
-
-  if (!aContext->Canonical()->IsOwnedByProcess(ChildID())) {
-    // We're trying to detach the children of a BrowsingContext in
-    // another child process. This is illegal since the owner of the
-    // BrowsingContext is the proccess with the in-process docshell,
-    // which is tracked by OwnerProcessId.
-    MOZ_DIAGNOSTIC_ASSERT(false,
-                          "Trying to detach from out of process context");
-    return IPC_OK();
-  }
-
-  aContext->DetachChildren(/* aFromIPC */ true);
-
-  aContext->Group()->EachOtherParent(this, [&](ContentParent* aParent) {
-    Unused << aParent->SendDetachBrowsingContextChildren(aContext);
-  });
-
-  return IPC_OK();
-}
-
 mozilla::ipc::IPCResult ContentParent::RecvRestoreBrowsingContextChildren(
     BrowsingContext* aContext, BrowsingContext::Children&& aChildren) {
   if (!aContext) {
@@ -6001,16 +5973,22 @@ mozilla::ipc::IPCResult ContentParent::RecvWindowPostMessage(
     return IPC_OK();
   }
 
-  ContentProcessManager* cpm = ContentProcessManager::GetSingleton();
-  ContentParent* cp = cpm->GetContentProcessById(
-      ContentParentId(aContext->Canonical()->OwnerProcessId()));
+  RefPtr<ContentParent> cp = aContext->Canonical()->GetContentParent();
+  if (!cp) {
+    MOZ_LOG(BrowsingContext::GetLog(), LogLevel::Debug,
+            ("ParentIPC: Trying to send PostMessage to dead content process"));
+    return IPC_OK();
+  }
+
   StructuredCloneData messageFromChild;
   UnpackClonedMessageDataForParent(aMessage, messageFromChild);
+
   ClonedMessageData message;
   if (!BuildClonedMessageDataForParent(cp, messageFromChild, message)) {
     // FIXME Logging?
     return IPC_OK();
   }
+
   Unused << cp->SendWindowPostMessage(aContext, message, aData);
   return IPC_OK();
 }

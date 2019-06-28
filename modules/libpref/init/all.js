@@ -342,13 +342,8 @@ pref("media.decoder-doctor.verbose", false);
 // URL to report decode issues
 pref("media.decoder-doctor.new-issue-endpoint", "https://webcompat.com/issues/new");
 
-#if defined(NIGHTLY_BUILD) && defined(XP_WIN)
-pref("media.videocontrols.picture-in-picture.enabled", true);
-pref("media.videocontrols.picture-in-picture.video-toggle.enabled", true);
-#else
 pref("media.videocontrols.picture-in-picture.enabled", false);
 pref("media.videocontrols.picture-in-picture.video-toggle.enabled", false);
-#endif
 pref("media.videocontrols.picture-in-picture.video-toggle.flyout-enabled", false);
 pref("media.videocontrols.picture-in-picture.video-toggle.flyout-wait-ms", 5000);
 pref("media.videocontrols.picture-in-picture.video-toggle.always-show", false);
@@ -765,9 +760,9 @@ pref("gfx.font_ahem_antialias_none", false);
 
 #ifdef XP_WIN
 // comma separated list of backends to use in order of preference
-// e.g., pref("gfx.canvas.azure.backends", "direct2d,skia,cairo");
-pref("gfx.canvas.azure.backends", "direct2d1.1,skia,cairo");
-pref("gfx.content.azure.backends", "direct2d1.1,skia,cairo");
+// e.g., pref("gfx.canvas.azure.backends", "direct2d,skia");
+pref("gfx.canvas.azure.backends", "direct2d1.1,skia");
+pref("gfx.content.azure.backends", "direct2d1.1,skia");
 pref("gfx.canvas.remote", false);
 #else
 #ifdef XP_MACOSX
@@ -1419,8 +1414,6 @@ pref("javascript.options.spectre.jit_to_C++_calls", true);
 // Streams API
 pref("javascript.options.streams", true);
 
-pref("javascript.options.experimental.fields", false);
-
 // Dynamic module import.
 pref("javascript.options.dynamicImport", true);
 
@@ -1510,7 +1503,7 @@ pref("network.protocol-handler.external.le", false);   // file
 pref("network.protocol-handler.expose-all", true);
 
 // Warning for about:networking page
-pref("network.warnOnAboutNetworking", true);
+pref("network.warnOnAboutNetworking", false);
 
 // Example: make IMAP an exposed protocol
 // pref("network.protocol-handler.expose.imap", true);
@@ -2515,7 +2508,7 @@ pref("security.dialog_enable_delay", 1000);
 pref("security.notification_enable_delay", 500);
 
 #if defined(DEBUG) && !defined(ANDROID)
-pref("csp.about_uris_without_csp", "blank,printpreview,srcdoc,addons,cache-entry,config,debugging,devtools,downloads,home,newtab,performance,plugins,profiles,preferences,restartrequired,serviceworkers,sessionrestore,support,sync-log,telemetry,url-classifier,welcomeback");
+pref("csp.about_uris_without_csp", "blank,printpreview,srcdoc,addons,cache-entry,config,debugging,devtools,downloads,home,newtab,plugins,profiles,preferences,restartrequired,serviceworkers,sessionrestore,support,sync-log,telemetry,url-classifier,welcomeback");
 // the following prefs are for testing purposes only.
 pref("csp.overrule_about_uris_without_csp_whitelist", false);
 pref("csp.skip_about_page_has_csp_assert", false);
@@ -3159,6 +3152,9 @@ pref("dom.largeAllocationHeader.enabled", true);
 
 // Disable e10s for Gecko by default. This is overridden in firefox.js.
 pref("browser.tabs.remote.autostart", false);
+
+// Disable fission for Gecko by default.
+pref("fission.autostart", false);
 
 // Pref to control whether we use separate content processes for top-level load
 // of file:// URIs.
@@ -4794,9 +4790,7 @@ pref("widget.content.allow-gtk-dark-theme", false);
 #endif
 #endif
 #ifdef MOZ_WAYLAND
-#ifdef HAVE_LIBDRM
 pref("widget.wayland_dmabuf_backend.enabled", false);
-#endif
 #endif
 
 pref("widget.window-transforms.disabled", false);
@@ -5065,13 +5059,6 @@ pref("dom.vr.navigation.timeout", 5000);
 // If this value is too low, the Oculus Home interface may be visible
 // momentarily during VR link navigation.
 pref("dom.vr.oculus.present.timeout", 500);
-// Minimum number of milliseconds that the browser will wait before
-// reloading the Oculus OVR library after seeing a "ShouldQuit" flag set.
-// Oculus requests that we shut down and unload the OVR library, by setting
-// a "ShouldQuit" flag.  To ensure that we don't interfere with
-// Oculus software auto-updates, we will not attempt to re-load the
-// OVR library until this timeout has elapsed.
-pref("dom.vr.oculus.quit.timeout", 10000);
 // When enabled, Oculus sessions may be created with the ovrInit_Invisible
 // flag if a page is using tracking but not presenting.  When a page
 // begins presenting VR frames, the session will be re-initialized without

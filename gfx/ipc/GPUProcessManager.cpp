@@ -384,8 +384,8 @@ void GPUProcessManager::OnProcessLaunchComplete(GPUProcessHost* aHost) {
 static bool ShouldLimitDeviceResets(uint32_t count, int32_t deltaMilliseconds) {
   // We decide to limit by comparing the amount of resets that have happened
   // and time since the last reset to two prefs.
-  int32_t timeLimit = StaticPrefs::DeviceResetThresholdMilliseconds();
-  int32_t countLimit = StaticPrefs::DeviceResetLimitCount();
+  int32_t timeLimit = StaticPrefs::gfx_device_reset_threshold_ms();
+  int32_t countLimit = StaticPrefs::gfx_device_reset_limit();
 
   bool hasTimeLimit = timeLimit >= 0;
   bool hasCountLimit = countLimit >= 0;
@@ -454,6 +454,15 @@ void GPUProcessManager::DisableWebRender(wr::WebRenderError aError) {
     MOZ_ASSERT_UNREACHABLE("Invalid value");
   }
   gfx::gfxVars::SetUseWebRender(false);
+
+#if defined(MOZ_WIDGET_ANDROID)
+  // If aError is not wr::WebRenderError::INITIALIZE, nsWindow does not
+  // re-create LayerManager. Needs to trigger re-creating LayerManager on
+  // android
+  if (aError != wr::WebRenderError::INITIALIZE) {
+    NotifyDisablingWebRender();
+  }
+#endif
 
   if (mProcess) {
     OnRemoteProcessDeviceReset(mProcess);
@@ -639,6 +648,18 @@ void GPUProcessManager::RebuildInProcessSessions() {
   for (const auto& session : sessions) {
     session->NotifySessionLost();
   }
+}
+
+void GPUProcessManager::NotifyDisablingWebRender() {
+#if defined(MOZ_WIDGET_ANDROID)
+  for (const auto& session : mRemoteSessions) {
+    session->NotifyDisablingWebRender();
+  }
+
+  for (const auto& session : mInProcessSessions) {
+    session->NotifyDisablingWebRender();
+  }
+#endif
 }
 
 void GPUProcessManager::NotifyRemoteActorDestroyed(

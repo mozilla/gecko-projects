@@ -34,6 +34,9 @@ class SourceSurfaceOffset : public SourceSurface {
   virtual already_AddRefed<DataSourceSurface> GetDataSurface() override {
     return mSurface->GetDataSurface();
   }
+  virtual already_AddRefed<SourceSurface> GetUnderlyingSurface() override {
+    return mSurface->GetUnderlyingSurface();
+  }
 
  private:
   RefPtr<SourceSurface> mSurface;
@@ -151,6 +154,15 @@ class DrawTargetOffset : public DrawTarget {
   virtual bool CanCreateSimilarDrawTarget(
       const IntSize& aSize, SurfaceFormat aFormat) const override {
     return mDrawTarget->CanCreateSimilarDrawTarget(aSize, aFormat);
+  }
+  virtual RefPtr<DrawTarget> CreateClippedDrawTarget(
+      const Rect& aBounds, SurfaceFormat aFormat) override {
+    RefPtr<DrawTarget> dt =
+        mDrawTarget->CreateClippedDrawTarget(aBounds, aFormat);
+    RefPtr<DrawTarget> result =
+        gfx::Factory::CreateOffsetDrawTarget(dt, mOrigin);
+    result->SetTransform(mTransform);
+    return result;
   }
 
   virtual already_AddRefed<PathBuilder> CreatePathBuilder(

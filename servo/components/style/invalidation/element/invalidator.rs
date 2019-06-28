@@ -78,7 +78,8 @@ pub struct DescendantInvalidationLists<'a> {
 
 impl<'a> DescendantInvalidationLists<'a> {
     fn is_empty(&self) -> bool {
-        self.dom_descendants.is_empty() && self.slotted_descendants.is_empty() &&
+        self.dom_descendants.is_empty() &&
+            self.slotted_descendants.is_empty() &&
             self.parts.is_empty()
     }
 }
@@ -179,9 +180,7 @@ impl<'a> Invalidation<'a> {
             Combinator::Child | Combinator::Descendant | Combinator::PseudoElement => {
                 InvalidationKind::Descendant(DescendantInvalidationKind::Dom)
             },
-            Combinator::Part => {
-                InvalidationKind::Descendant(DescendantInvalidationKind::Part)
-            },
+            Combinator::Part => InvalidationKind::Descendant(DescendantInvalidationKind::Part),
             Combinator::SlotAssignment => {
                 InvalidationKind::Descendant(DescendantInvalidationKind::Slotted)
             },
@@ -506,7 +505,6 @@ where
         any
     }
 
-
     fn invalidate_slotted_elements(&mut self, invalidations: &[Invalidation<'b>]) -> bool {
         if invalidations.is_empty() {
             return false;
@@ -803,6 +801,19 @@ where
                         // Same caveats as for other eager pseudos apply, this
                         // could be more fine-grained.
                         if pseudo.is_marker() && self.element.marker_pseudo_element().is_none() {
+                            invalidated_self = true;
+                        }
+
+                        // FIXME: ::selection doesn't generate elements, so the
+                        // regular invalidation doesn't work for it. We store
+                        // the cached selection style holding off the originating
+                        // element, so we need to restyle it in order to invalidate
+                        // it. This is still not quite correct, since nothing
+                        // triggers a repaint necessarily, but matches old Gecko
+                        // behavior, and the ::selection implementation needs to
+                        // change significantly anyway to implement
+                        // https://github.com/w3c/csswg-drafts/issues/2474.
+                        if pseudo.is_selection() {
                             invalidated_self = true;
                         }
                     }

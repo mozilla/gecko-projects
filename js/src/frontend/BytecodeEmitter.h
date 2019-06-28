@@ -51,6 +51,7 @@ namespace js {
 namespace frontend {
 
 class CallOrNewEmitter;
+class ClassEmitter;
 class ElemOpEmitter;
 class EmitterScope;
 class NestableControl;
@@ -278,12 +279,11 @@ struct MOZ_STACK_CLASS BytecodeEmitter {
   }
 
   Scope* outermostScope() const {
-    return perScriptData().scopeList().vector[0];
+    return perScriptData().gcThingList().firstScope();
   }
   Scope* innermostScope() const;
   Scope* bodyScope() const {
-    MOZ_ASSERT(bodyScopeIndex < perScriptData().scopeList().length());
-    return perScriptData().scopeList().vector[bodyScopeIndex];
+    return perScriptData().gcThingList().getScope(bodyScopeIndex);
   }
 
   MOZ_ALWAYS_INLINE
@@ -375,7 +375,6 @@ struct MOZ_STACK_CLASS BytecodeEmitter {
   MOZ_MUST_USE bool newSrcNote3(SrcNoteType type, ptrdiff_t offset1,
                                 ptrdiff_t offset2, unsigned* indexp = nullptr);
 
-  void copySrcNotes(jssrcnote* destination, uint32_t nsrcnotes);
   MOZ_MUST_USE bool setSrcNoteOffset(unsigned index, unsigned which,
                                      BytecodeOffsetDiff offset);
 
@@ -505,7 +504,8 @@ struct MOZ_STACK_CLASS BytecodeEmitter {
 
   FieldInitializers setupFieldInitializers(ListNode* classMembers);
   MOZ_MUST_USE bool emitCreateFieldKeys(ListNode* obj);
-  MOZ_MUST_USE bool emitCreateFieldInitializers(ListNode* obj);
+  MOZ_MUST_USE bool emitCreateFieldInitializers(ClassEmitter& ce,
+                                                ListNode* obj);
   const FieldInitializers& findFieldInitializersForCall();
   MOZ_MUST_USE bool emitInitializeInstanceFields();
 
@@ -546,7 +546,7 @@ struct MOZ_STACK_CLASS BytecodeEmitter {
 
   MOZ_MUST_USE bool emitPrepareIteratorResult();
   MOZ_MUST_USE bool emitFinishIteratorResult(bool done);
-  MOZ_MUST_USE bool iteratorResultShape(unsigned* shape);
+  MOZ_MUST_USE bool iteratorResultShape(uint32_t* shape);
 
   MOZ_MUST_USE bool emitGetDotGeneratorInInnermostScope() {
     return emitGetDotGeneratorInScope(*innermostEmitterScope());

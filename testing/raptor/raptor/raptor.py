@@ -180,26 +180,40 @@ class Raptor(object):
     def run_tests(self, tests, test_names):
         try:
             for test in tests:
-                self.run_test(test, timeout=int(test['page_timeout']))
+                self.run_test(test, timeout=int(test.get('page_timeout')))
 
             return self.process_results(test_names)
 
         finally:
             self.clean_up()
 
-    def run_test(self, test, timeout=None):
+    def run_test(self, test, timeout):
         raise NotImplementedError()
 
     def wait_for_test_finish(self, test, timeout):
+        # this is a 'back-stop' i.e. if for some reason Raptor doesn't finish for some
+        # serious problem; i.e. the test was unable to send a 'page-timeout' to the control
+        # server, etc. Therefore since this is a 'back-stop' we want to be generous here;
+        # we don't want this timeout occurring unless abosultely necessary
+
         # convert timeout to seconds and account for page cycles
         timeout = int(timeout / 1000) * int(test.get('page_cycles', 1))
         # account for the pause the raptor webext runner takes after browser startup
         # and the time an exception is propagated through the framework
         timeout += (int(self.post_startup_delay / 1000) + 10)
 
+        # for page-load tests we don't start the page-timeout timer until the pageload.js content
+        # is successfully injected and invoked; which differs per site being tested; therefore we
+        # need to be generous here - let's add 10 seconds extra per page-cycle
+        if test.get('type') == "pageload":
+            timeout += (10 * int(test.get('page_cycles', 1)))
+
         # if geckoProfile enabled, give browser more time for profiling
         if self.config['gecko_profile'] is True:
             timeout += 5 * 60
+
+        # we also need to give time for results processing, not just page/browser cycles!
+        timeout += 60
 
         elapsed_time = 0
         while not self.control_server._finished:
@@ -499,15 +513,15 @@ class RaptorDesktop(Raptor):
         # give our control server the browser process so it can shut it down later
         self.control_server.browser_proc = proc
 
-    def run_test(self, test, timeout=None):
+    def run_test(self, test, timeout):
         # tests will be run warm (i.e. NO browser restart between page-cycles)
         # unless otheriwse specified in the test INI by using 'cold = true'
         if test.get('cold', False) is True:
-            self.run_test_cold(test, timeout)
+            self.__run_test_cold(test, timeout)
         else:
-            self.run_test_warm(test, timeout)
+            self.__run_test_warm(test, timeout)
 
-    def run_test_cold(self, test, timeout=None):
+    def __run_test_cold(self, test, timeout):
         '''
         Run the Raptor test but restart the entire browser app between page-cycles.
 
@@ -562,7 +576,7 @@ class RaptorDesktop(Raptor):
 
         self.run_test_teardown()
 
-    def run_test_warm(self, test, timeout=None):
+    def __run_test_warm(self, test, timeout):
         self.run_test_setup(test)
 
         try:
@@ -1015,14 +1029,14 @@ class RaptorAndroid(Raptor):
 
         super(RaptorAndroid, self).run_test_teardown()
 
-    def run_test(self, test, timeout=None):
+    def run_test(self, test, timeout):
         # tests will be run warm (i.e. NO browser restart between page-cycles)
         # unless otheriwse specified in the test INI by using 'cold = true'
         try:
             if test.get('cold', False) is True:
-                self.run_test_cold(test, timeout)
+                self.__run_test_cold(test, timeout)
             else:
-                self.run_test_warm(test, timeout)
+                self.__run_test_warm(test, timeout)
 
         except SignalHandlerException:
             self.device.stop_application(self.config['binary'])
@@ -1032,7 +1046,7 @@ class RaptorAndroid(Raptor):
                 finish_android_power_test(self, test['name'])
             self.run_test_teardown()
 
-    def run_test_cold(self, test, timeout=None):
+    def __run_test_cold(self, test, timeout):
         '''
         Run the Raptor test but restart the entire browser app between page-cycles.
 
@@ -1127,7 +1141,7 @@ class RaptorAndroid(Raptor):
             if len(self.results_handler.page_timeout_list) > 0:
                 break
 
-    def run_test_warm(self, test, timeout=None):
+    def __run_test_warm(self, test, timeout):
         LOG.info("test %s is running in warm mode; browser will NOT be restarted between "
                  "page cycles" % test['name'])
         if self.config['power_test']:

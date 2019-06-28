@@ -212,8 +212,9 @@ class ContentParent final : public PContentParent,
    */
   static already_AddRefed<RemoteBrowser> CreateBrowser(
       const TabContext& aContext, Element* aFrameElement,
-      BrowsingContext* aBrowsingContext, ContentParent* aOpenerContentParent,
-      BrowserParent* aSameTabGroupAs, uint64_t aNextRemoteTabId);
+      const nsAString& aRemoteType, BrowsingContext* aBrowsingContext,
+      ContentParent* aOpenerContentParent, BrowserParent* aSameTabGroupAs,
+      uint64_t aNextRemoteTabId);
 
   static void GetAll(nsTArray<ContentParent*>& aArray);
 
@@ -634,9 +635,6 @@ class ContentParent final : public PContentParent,
       BrowsingContext::IPCInitializer&& aInit);
 
   mozilla::ipc::IPCResult RecvDetachBrowsingContext(BrowsingContext* aContext);
-
-  mozilla::ipc::IPCResult RecvDetachBrowsingContextChildren(
-      BrowsingContext* aContext);
 
   mozilla::ipc::IPCResult RecvCacheBrowsingContextChildren(
       BrowsingContext* aContext);
@@ -1180,7 +1178,7 @@ class ContentParent final : public PContentParent,
   mozilla::ipc::IPCResult RecvRecordOrigin(const uint32_t& aMetricId,
                                            const nsCString& aOrigin);
   mozilla::ipc::IPCResult RecvReportContentBlockingLog(
-      const Principal& aPrincipal, const IPCStream& aIPCStream);
+      const IPCStream& aIPCStream);
 
   mozilla::ipc::IPCResult RecvBHRThreadHang(const HangDetails& aHangDetails);
 

@@ -286,8 +286,8 @@ pref("devtools.webconsole.input.editor", false);
 // Disable the new performance recording panel by default
 pref("devtools.performance.new-panel-enabled", false);
 
-// Enable message grouping in the console, false by default
-pref("devtools.webconsole.groupWarningMessages", false);
+// Enable message grouping in the console, true by default
+pref("devtools.webconsole.groupWarningMessages", true);
 
 // Saved state of the Display content messages checkbox in the browser console.
 pref("devtools.browserconsole.contentMessages", false);
@@ -350,13 +350,8 @@ pref("devtools.responsive.showUserAgentInput", true);
 pref("devtools.responsive.showUserAgentInput", false);
 #endif
 
-// Enable new about:debugging in Nightly and DevEdition only.
-// Should ride the trains in Firefox 69. See Bug 1553042.
-#if defined(MOZ_DEV_EDITION) || defined(NIGHTLY_BUILD)
+// Enable new about:debugging.
 pref("devtools.aboutdebugging.new-enabled", true);
-#else
-pref("devtools.aboutdebugging.new-enabled", false);
-#endif
 
 // Show tab debug targets for This Firefox (on by default for local builds).
 #ifdef MOZILLA_OFFICIAL

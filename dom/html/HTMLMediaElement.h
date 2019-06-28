@@ -875,6 +875,11 @@ class HTMLMediaElement : public nsGenericHTMLElement,
                                           bool aAsyncAddtrack = true);
 
   /**
+   * Discard all output streams that are flagged to finish when playback ends.
+   */
+  void DiscardFinishWhenEndedOutputStreams();
+
+  /**
    * Returns an DOMMediaStream containing the played contents of this
    * element. When aBehavior is FINISH_WHEN_ENDED, when this element ends
    * playback we will finish the stream and not play any more into it.  When
@@ -1671,10 +1676,11 @@ class HTMLMediaElement : public nsGenericHTMLElement,
   // MediaStream.
   nsCOMPtr<nsIPrincipal> mSrcStreamVideoPrincipal;
 
-  // True if UnbindFromTree() is called on the element.
-  // Note this flag is false when the element is in a phase after creation and
-  // before attaching to the DOM tree.
-  bool mUnboundFromTree = false;
+  // True if we've dispatched a task in UnbindFromTree() which runs in a
+  // stable state and attempts to pause playback if we're not in a composed
+  // document. The flag stops us dispatching multiple tasks if the element
+  // is involved in a series of append/remove cycles.
+  bool mDispatchedTaskToPauseIfNotInDocument = false;
 
   // True if the autoplay media was blocked because it hadn't loaded metadata
   // yet.

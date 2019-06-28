@@ -34,7 +34,9 @@ add_task(async function testCDP() {
   ok("Page" in client, "Page domain is available");
 
   const version = await Browser.getVersion();
-  is(version.product, "Firefox", "Browser.getVersion works");
+  const { isHeadless } = Cc["@mozilla.org/gfx/info;1"].getService(Ci.nsIGfxInfo);
+  is(version.product, isHeadless ? "Headless Firefox" : "Firefox", "Browser.getVersion works and depends on headless mode");
+  is(version.userAgent, window.navigator.userAgent, "Browser.getVersion().userAgent is correct");
 
   // receive console.log messages and print them
   Log.enable();

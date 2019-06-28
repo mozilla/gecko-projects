@@ -147,16 +147,6 @@ impl StyleSource {
         block.read_with(guard)
     }
 
-    /// Indicates if this StyleSource is a style rule.
-    pub fn is_rule(&self) -> bool {
-        self.0.is_first()
-    }
-
-    /// Indicates if this StyleSource is a PropertyDeclarationBlock.
-    pub fn is_declarations(&self) -> bool {
-        self.0.is_second()
-    }
-
     /// Returns the style rule if applicable, otherwise None.
     pub fn as_rule(&self) -> Option<ArcBorrow<Locked<StyleRule>>> {
         self.0.as_first()
@@ -960,8 +950,8 @@ mod gecko_leak_checking {
     use std::os::raw::{c_char, c_void};
 
     extern "C" {
-        pub fn NS_LogCtor(aPtr: *const c_void, aTypeName: *const c_char, aSize: u32);
-        pub fn NS_LogDtor(aPtr: *const c_void, aTypeName: *const c_char, aSize: u32);
+        fn NS_LogCtor(aPtr: *mut c_void, aTypeName: *const c_char, aSize: u32);
+        fn NS_LogDtor(aPtr: *mut c_void, aTypeName: *const c_char, aSize: u32);
     }
 
     static NAME: &'static [u8] = b"RuleNode\0";
@@ -970,7 +960,7 @@ mod gecko_leak_checking {
     pub fn log_ctor(ptr: *const RuleNode) {
         let s = NAME as *const [u8] as *const u8 as *const c_char;
         unsafe {
-            NS_LogCtor(ptr as *const c_void, s, size_of::<RuleNode>() as u32);
+            NS_LogCtor(ptr as *mut c_void, s, size_of::<RuleNode>() as u32);
         }
     }
 
@@ -978,7 +968,7 @@ mod gecko_leak_checking {
     pub fn log_dtor(ptr: *const RuleNode) {
         let s = NAME as *const [u8] as *const u8 as *const c_char;
         unsafe {
-            NS_LogDtor(ptr as *const c_void, s, size_of::<RuleNode>() as u32);
+            NS_LogDtor(ptr as *mut c_void, s, size_of::<RuleNode>() as u32);
         }
     }
 
@@ -1215,7 +1205,7 @@ impl StrongRuleNode {
     /// Returns whether this node has any child, only intended for testing
     /// purposes, and called on a single-threaded fashion only.
     pub unsafe fn has_children_for_testing(&self) -> bool {
-        self.get().children.read().is_empty()
+        !self.get().children.read().is_empty()
     }
 
     unsafe fn pop_from_free_list(&self) -> Option<WeakRuleNode> {

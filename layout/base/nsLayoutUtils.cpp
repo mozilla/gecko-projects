@@ -758,7 +758,7 @@ bool nsLayoutUtils::AllowZoomingForDocument(
   // True if we allow zooming for all documents on this platform, or if we are
   // in RDM and handling meta viewports, which force zoom under some
   // circumstances.
-  return StaticPrefs::APZAllowZooming() ||
+  return StaticPrefs::apz_allow_zooming() ||
          (aDocument && aDocument->InRDMPane() &&
           nsLayoutUtils::ShouldHandleMetaViewport(aDocument));
 }
@@ -1050,7 +1050,7 @@ bool nsLayoutUtils::ShouldDisableApzForElement(nsIContent* aContent) {
   if (!doc) {
     return false;
   }
-  return StaticPrefs::APZDisableForScrollLinkedEffects() &&
+  return StaticPrefs::apz_disable_for_scroll_linked_effects() &&
          doc->HasScrollLinkedEffect();
 }
 
@@ -3792,8 +3792,14 @@ nsresult nsLayoutUtils::PaintFrame(gfxContext* aRenderingContext,
 
   // If we are in a remote browser, then apply clipping from ancestor browsers
   if (BrowserChild* browserChild = BrowserChild::GetFrom(presShell)) {
-    rootVisualOverflow.IntersectRect(rootVisualOverflow,
-                                     browserChild->GetVisibleRect());
+    Maybe<LayoutDeviceIntRect> unscaledVisibleRect =
+        browserChild->GetVisibleRect();
+    if (unscaledVisibleRect) {
+      CSSRect visibleRect =
+          *unscaledVisibleRect / presContext->CSSToDevPixelScale();
+      rootVisualOverflow.IntersectRect(rootVisualOverflow,
+                                       CSSPixel::ToAppUnits(visibleRect));
+    }
   }
 
   nsIFrame* rootScrollFrame = presShell->GetRootScrollFrame();
@@ -4101,7 +4107,7 @@ nsresult nsLayoutUtils::PaintFrame(gfxContext* aRenderingContext,
   presShell->EndPaint();
   builder->Check();
 
-  if (StaticPrefs::GfxLoggingPaintedPixelCountEnabled()) {
+  if (StaticPrefs::gfx_logging_painted_pixel_count_enabled()) {
     LogPaintedPixelCount(layerManager, paintStart);
   }
 
@@ -9247,7 +9253,7 @@ ScrollMetadata nsLayoutUtils::ComputeScrollMetadata(
       aScrollFrame ? aScrollFrame : aForFrame, isRootContentDocRootScrollFrame,
       metrics));
 
-  if (StaticPrefs::APZPrintTree() || StaticPrefs::apz_test_logging_enabled()) {
+  if (StaticPrefs::apz_printtree() || StaticPrefs::apz_test_logging_enabled()) {
     if (nsIContent* content =
             frameForCompositionBoundsCalculation->GetContent()) {
       nsAutoString contentDescription;
@@ -10002,7 +10008,7 @@ bool nsLayoutUtils::ShouldHandleMetaViewport(const Document* aDocument) {
                  nsIDocShell::META_VIEWPORT_OVERRIDE_NONE);
       // The META_VIEWPORT_OVERRIDE_NONE case means that there is no override
       // and we rely solely on the StaticPrefs.
-      return StaticPrefs::MetaViewportEnabled();
+      return StaticPrefs::dom_meta_viewport_enabled();
   }
 }
 
@@ -10038,12 +10044,12 @@ ComputedStyle* nsLayoutUtils::StyleForScrollbar(nsIFrame* aScrollbarPart) {
   // from the element directly. This can happen on viewport, because
   // the scrollbar of viewport may be shown when the root element has
   // > display: none; overflow: scroll;
-  nsPresContext* pc = aScrollbarPart->PresContext();
-  MOZ_ASSERT(content == pc->Document()->GetRootElement(),
-             "Root element is the only case for this fallback "
-             "path to be triggered");
+  MOZ_ASSERT(
+      content == aScrollbarPart->PresContext()->Document()->GetRootElement(),
+      "Root element is the only case for this fallback "
+      "path to be triggered");
   RefPtr<ComputedStyle> style =
-      pc->StyleSet()->ResolveServoStyle(*content->AsElement());
+      ServoStyleSet::ResolveServoStyle(*content->AsElement());
   // Dropping the strong reference is fine because the style should be
   // held strongly by the element.
   return style.get();

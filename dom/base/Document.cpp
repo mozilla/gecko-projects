@@ -34,6 +34,7 @@
 #include "mozilla/StorageAccess.h"
 #include "mozilla/TextEditor.h"
 #include "mozilla/URLExtraData.h"
+#include "mozilla/Base64.h"
 #include <algorithm>
 
 #include "mozilla/Logging.h"
@@ -70,6 +71,9 @@
 #include "nsIX509CertValidity.h"
 #include "nsIX509CertList.h"
 #include "nsITransportSecurityInfo.h"
+#include "nsINSSErrorsService.h"
+#include "nsISocketProvider.h"
+#include "nsISiteSecurityService.h"
 
 #include "mozilla/AsyncEventDispatcher.h"
 #include "mozilla/BasicEvents.h"
@@ -1334,7 +1338,9 @@ Document::Document(const char* aContentType)
       mPendingInitialTranslation(false),
       mGeneration(0),
       mCachedTabSizeGeneration(0),
-      mInRDMPane(false) {
+      mInRDMPane(false),
+      mNextFormNumber(0),
+      mNextControlNumber(0) {
   MOZ_LOG(gDocumentLeakPRLog, LogLevel::Debug, ("DOCUMENT %p created", this));
 
   SetIsInDocument();
@@ -1482,6 +1488,8 @@ void Document::GetFailedCertSecurityInfo(
   aInfo.mSubjectAltNames = subjectAltNames;
 
   nsAutoString issuerCommonName;
+  nsAutoString certChainPEMString;
+  Sequence<nsString>& certChainStrings = aInfo.mCertChainStrings.Construct();
   int64_t maxValidity = std::numeric_limits<int64_t>::max();
   int64_t minValidity = 0;
   PRTime notBefore, notAfter;
@@ -1562,7 +1570,28 @@ void Document::GetFailedCertSecurityInfo(
 
     notBefore = std::max(minValidity, notBefore);
     notAfter = std::min(maxValidity, notAfter);
+    nsTArray<uint8_t> certArray;
+    rv = certificate->GetRawDER(certArray);
+    if (NS_WARN_IF(NS_FAILED(rv))) {
+      aRv.Throw(rv);
+      return;
+    }
 
+    certArray.AppendElement(
+        0);  // Append null terminator, required by nsC*String.
+    nsDependentCString derString(reinterpret_cast<char*>(certArray.Elements()),
+                                 certArray.Length() - 1);
+    nsAutoCString der64;
+    rv = mozilla::Base64Encode(derString, der64);
+    if (NS_WARN_IF(NS_FAILED(rv))) {
+      aRv.Throw(rv);
+      return;
+    }
+    if (!certChainStrings.AppendElement(NS_ConvertUTF8toUTF16(der64),
+                                        mozilla::fallible)) {
+      aRv.Throw(NS_ERROR_OUT_OF_MEMORY);
+      return;
+    }
     rv = enumerator->HasMoreElements(&hasMore);
     if (NS_WARN_IF(NS_FAILED(rv))) {
       aRv.Throw(rv);
@@ -1574,6 +1603,46 @@ void Document::GetFailedCertSecurityInfo(
   aInfo.mCertValidityRangeNotAfter = DOMTimeStamp(notAfter / PR_USEC_PER_MSEC);
   aInfo.mCertValidityRangeNotBefore =
       DOMTimeStamp(notBefore / PR_USEC_PER_MSEC);
+
+  int32_t errorCode;
+  rv = tsi->GetErrorCode(&errorCode);
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    aRv.Throw(rv);
+    return;
+  }
+
+  nsCOMPtr<nsINSSErrorsService> nsserr =
+      do_GetService("@mozilla.org/nss_errors_service;1");
+  if (NS_WARN_IF(!nsserr)) {
+    aRv.Throw(NS_ERROR_DOM_INVALID_STATE_ERR);
+    return;
+  }
+  nsresult res;
+  rv = nsserr->GetXPCOMFromNSSError(errorCode, &res);
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    aRv.Throw(rv);
+    return;
+  }
+  rv = nsserr->GetErrorMessage(res, aInfo.mErrorMessage);
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    aRv.Throw(rv);
+    return;
+  }
+
+  bool isPrivateBrowsing = nsContentUtils::IsInPrivateBrowsing(this);
+  uint32_t flags =
+      isPrivateBrowsing ? nsISocketProvider::NO_PERMANENT_STORAGE : 0;
+  mozilla::OriginAttributes attrs;
+  attrs = nsContentUtils::GetOriginAttributes(this);
+  nsCOMPtr<nsIURI> aURI;
+  mFailedChannel->GetURI(getter_AddRefs(aURI));
+  mozilla::dom::ContentChild* cc = mozilla::dom::ContentChild::GetSingleton();
+  mozilla::ipc::URIParams uri;
+  SerializeURI(aURI, uri);
+  cc->SendIsSecureURI(nsISiteSecurityService::HEADER_HSTS, uri, flags, attrs,
+                      &aInfo.mHasHSTS);
+  cc->SendIsSecureURI(nsISiteSecurityService::HEADER_HPKP, uri, flags, attrs,
+                      &aInfo.mHasHPKP);
 }
 
 bool Document::IsAboutPage() const {
@@ -9525,7 +9594,8 @@ nsViewportInfo Document::GetViewportInfo(const ScreenIntSize& aDisplaySize) {
   // Special behaviour for desktop mode, provided we are not on an about: page
   nsPIDOMWindowOuter* win = GetWindow();
   if (win && win->IsDesktopModeViewport() && !IsAboutPage()) {
-    CSSCoord viewportWidth = StaticPrefs::DesktopViewportWidth() / fullZoom;
+    CSSCoord viewportWidth =
+        StaticPrefs::browser_viewport_desktopWidth() / fullZoom;
     CSSToScreenScale scaleToFit(aDisplaySize.width / viewportWidth);
     float aspectRatio = (float)aDisplaySize.height / aDisplaySize.width;
     CSSSize viewportSize(viewportWidth, viewportWidth * aspectRatio);
@@ -9619,14 +9689,15 @@ nsViewportInfo Document::GetViewportInfo(const ScreenIntSize& aDisplaySize) {
       nsViewportInfo::ZoomFlag effectiveZoomFlag =
           mAllowZoom ? nsViewportInfo::ZoomFlag::AllowZoom
                      : nsViewportInfo::ZoomFlag::DisallowZoom;
-      if (StaticPrefs::ForceUserScalable()) {
+      if (StaticPrefs::browser_ui_zoom_force_user_scalable()) {
         // If the pref to force user-scalable is enabled, we ignore the values
         // from the meta-viewport tag for these properties and just assume they
         // allow the page to be scalable. Note in particular that this code is
         // in the "Specified" branch of the enclosing switch statement, so that
         // calls to GetViewportInfo always use the latest value of the
-        // ForceUserScalable pref. Other codepaths that return nsViewportInfo
-        // instances are all consistent with ForceUserScalable() already.
+        // browser_ui_zoom_force_user_scalable pref. Other codepaths that
+        // return nsViewportInfo instances are all consistent with
+        // browser_ui_zoom_force_user_scalable() already.
         effectiveMinScale = kViewportMinScale;
         effectiveMaxScale = kViewportMaxScale;
         effectiveValidMaxScale = true;
@@ -9732,7 +9803,7 @@ nsViewportInfo Document::GetViewportInfo(const ScreenIntSize& aDisplaySize) {
             // Divide by fullZoom to stretch CSS pixel size of viewport in order
             // to keep device pixel size unchanged after full zoom applied.
             // See bug 974242.
-            width = StaticPrefs::DesktopViewportWidth() / fullZoom;
+            width = StaticPrefs::browser_viewport_desktopWidth() / fullZoom;
           } else {
             // Some viewport information was provided; follow the spec.
             width = displaySize.width;
@@ -10403,6 +10474,13 @@ bool Document::CanSavePresentation(nsIRequest* aNewRequest,
   return ret;
 }
 
+static bool HasHttpScheme(nsIURI* aURI) {
+  bool isHttpish = false;
+  return aURI &&
+         ((NS_SUCCEEDED(aURI->SchemeIs("http", &isHttpish)) && isHttpish) ||
+          (NS_SUCCEEDED(aURI->SchemeIs("https", &isHttpish)) && isHttpish));
+}
+
 void Document::Destroy() {
   // The ContentViewer wants to release the document now.  So, tell our content
   // to drop any references to the document so that it can be destroyed.
@@ -10412,7 +10490,10 @@ void Document::Destroy() {
   if (!nsContentUtils::IsInPrivateBrowsing(this) &&
       IsTopLevelContentDocument()) {
     mContentBlockingLog.ReportLog(NodePrincipal());
-    mContentBlockingLog.ReportOrigins();
+
+    if (HasHttpScheme(GetDocumentURI())) {
+      mContentBlockingLog.ReportOrigins();
+    }
   }
 
   mIsGoingAway = true;
@@ -10757,13 +10838,6 @@ static void DispatchFullscreenChange(Document* aDocument, nsINode* aTarget) {
 }
 
 static void ClearPendingFullscreenRequests(Document* aDoc);
-
-static bool HasHttpScheme(nsIURI* aURI) {
-  bool isHttpish = false;
-  return aURI &&
-         ((NS_SUCCEEDED(aURI->SchemeIs("http", &isHttpish)) && isHttpish) ||
-          (NS_SUCCEEDED(aURI->SchemeIs("https", &isHttpish)) && isHttpish));
-}
 
 void Document::OnPageHide(bool aPersisted, EventTarget* aDispatchStartTarget,
                           bool aOnlySystemGroup) {

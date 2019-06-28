@@ -652,7 +652,7 @@ asserts(4) == 368155-negative-margins-1.html 368155-negative-margins-1-ref.html 
 == 370629-1.html 370629-1-ref.html
 == 370629-2.html 370629-2-ref.html
 == 370692-1.xhtml 370692-1-ref.xhtml
-== 371041-1.html 371041-1-ref.html
+pref(layout.css.line-height.normal-as-resolved-value.enabled,false) == 371041-1.html 371041-1-ref.html
 == 371043-1.html 371043-1-ref.html
 == 371354-1.html 371354-1-ref.html
 == 371483-1.html about:blank # assertion test
@@ -2109,3 +2109,4 @@ fuzzy-if(!webrender,0-6,0-34) fails-if(webrender) fuzzy-if(geckoview,9-9,44-44) 
 skip-if(!asyncPan) fuzzy-if(geckoview,1-1,165-165) == 1544895.html 1544895-ref.html
 == 1548809.html 1548809-ref.html
 != 1552789-1.html 1552789-ref-1.html
+== 1558937-1.html 1558937-1-ref.html

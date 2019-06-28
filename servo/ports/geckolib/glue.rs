@@ -3746,6 +3746,69 @@ pub extern "C" fn Servo_ComputedValues_GetStyleRuleList(
     }))
 }
 
+/// println_stderr!() calls Gecko's printf_stderr(), which, unlike eprintln!(),
+/// will funnel output to Android logcat.
+#[cfg(feature = "gecko_debug")]
+macro_rules! println_stderr {
+    ($($e:expr),+) => {
+        {
+            let mut s = nsCString::new();
+            write!(s, $($e),+).unwrap();
+            s.write_char('\n').unwrap();
+            unsafe { bindings::Gecko_PrintfStderr(&s); }
+        }
+    }
+}
+
+#[cfg(feature = "gecko_debug")]
+fn dump_properties_and_rules(cv: &ComputedValues, properties: &LonghandIdSet) {
+    println_stderr!("  Properties:");
+    for p in properties.iter() {
+        let mut v = String::new();
+        cv.get_longhand_property_value(p, &mut CssWriter::new(&mut v)).unwrap();
+        println_stderr!("    {:?}: {}", p, v);
+    }
+    println_stderr!("  Rules:");
+    let global_style_data = &*GLOBAL_STYLE_DATA;
+    let guard = global_style_data.shared_lock.read();
+    for rn in cv.rules().self_and_ancestors() {
+        if rn.importance().important() {
+            continue;
+        }
+        if let Some(d) = rn.style_source().and_then(|s| s.as_declarations()) {
+            println_stderr!("    [DeclarationBlock: {:?}]", d);
+        }
+        if let Some(r) = rn.style_source().and_then(|s| s.as_rule()) {
+            let mut s = nsString::new();
+            r.read_with(&guard).to_css(&guard, &mut s).unwrap();
+            println_stderr!("    {}", s);
+        }
+    }
+}
+
+#[cfg(feature = "gecko_debug")]
+#[no_mangle]
+pub extern "C" fn Servo_ComputedValues_EqualForCachedAnonymousContentStyle(
+    a: &ComputedValues,
+    b: &ComputedValues,
+) -> bool {
+    let mut differing_properties = a.differing_properties(b);
+
+    // Ignore any difference in -x-lang, which we can't override in the
+    // rules in minimal-xul.css, but which makes no difference for the
+    // anonymous content subtrees we cache style for.
+    differing_properties.remove(LonghandId::XLang);
+
+    if !differing_properties.is_empty() {
+        println_stderr!("Actual style:");
+        dump_properties_and_rules(a, &differing_properties);
+        println_stderr!("Expected style:");
+        dump_properties_and_rules(b, &differing_properties);
+    }
+
+    differing_properties.is_empty()
+}
+
 #[no_mangle]
 pub extern "C" fn Servo_StyleSet_Init(doc: &structs::Document) -> *mut RawServoStyleSet {
     let data = Box::new(PerDocumentStyleData::new(doc));
@@ -4805,6 +4868,7 @@ pub extern "C" fn Servo_DeclarationBlock_SetNumberValue(
     use style::properties::longhands::_moz_script_level::SpecifiedValue as MozScriptLevel;
     use style::properties::longhands::_moz_script_size_multiplier::SpecifiedValue as MozScriptSizeMultiplier;
     use style::properties::PropertyDeclaration;
+    use style::values::specified::Number;
 
     let long = get_longhand_from_id!(property);
 
@@ -4812,6 +4876,7 @@ pub extern "C" fn Servo_DeclarationBlock_SetNumberValue(
         MozScriptSizeMultiplier => MozScriptSizeMultiplier(value),
         // Gecko uses Number values to signal that it is absolute
         MozScriptLevel => MozScriptLevel::MozAbsolute(value as i32),
+        AspectRatio => Number::new(value),
     };
     write_locked_arc(declarations, |decls: &mut PropertyDeclarationBlock| {
         decls.push(prop, Importance::Normal);
@@ -5087,7 +5152,6 @@ pub extern "C" fn Servo_TakeChangeHint(
 #[no_mangle]
 pub extern "C" fn Servo_ResolveStyle(
     element: &RawGeckoElement,
-    _raw_data: &RawServoStyleSet,
 ) -> Strong<ComputedValues> {
     let element = GeckoElement(element);
     debug!("Servo_ResolveStyle: {:?}", element);

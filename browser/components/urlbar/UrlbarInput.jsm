@@ -45,7 +45,6 @@ class UrlbarInput {
    */
   constructor(options = {}) {
     this.textbox = options.textbox;
-    this.textbox.clickSelectsAll = UrlbarPrefs.get("clickSelectsAll");
 
     this.window = this.textbox.ownerGlobal;
     this.document = this.window.document;
@@ -182,6 +181,8 @@ class UrlbarInput {
     this.inputField.controllers.insertControllerAt(0, this._copyCutController);
 
     this._initPasteAndGo();
+
+    this._ignoreFocus = true;
 
     // Tracks IME composition.
     this._compositionState = UrlbarUtils.COMPOSITION.NONE;
@@ -524,6 +525,13 @@ class UrlbarInput {
     if (!url) {
       throw new Error(`Invalid url for result ${JSON.stringify(result)}`);
     }
+
+    if (!this.isPrivate && !result.heuristic) {
+      // This should not interrupt the load anyway.
+      UrlbarUtils.addToInputHistory(url, this._lastSearchString)
+                 .catch(Cu.reportError);
+    }
+
     this._loadURL(url, where, openParams, {
       source: result.source,
       type: result.type,
@@ -1289,12 +1297,23 @@ class UrlbarInput {
     if (this.getAttribute("pageproxystate") != "valid") {
       this.window.UpdatePopupNotificationsVisibility();
     }
+    // Don't trigger clickSelectsAll when switching application windows.
+    if (this.document.activeElement == this.inputField) {
+      this._ignoreFocus = true;
+    }
     this._resetSearchState();
   }
 
   _on_focus(event) {
     this._updateUrlTooltip();
     this.formatValue();
+
+    if (this._ignoreFocus) {
+      this._ignoreFocus = false;
+    } else if (UrlbarPrefs.get("clickSelectsAll") &&
+               this._compositionState != UrlbarUtils.COMPOSITION.COMPOSING) {
+      this.editor.selectAll();
+    }
 
     // Hide popup notifications, to reduce visual noise.
     if (this.getAttribute("pageproxystate") != "valid") {
@@ -1318,7 +1337,7 @@ class UrlbarInput {
         this.editor.selectAll();
         event.preventDefault();
       } else if (this.openViewOnFocus && !this.view.isOpen) {
-        this.startQuery();
+        this.startQuery({ allowAutofill: false });
       }
       return;
     }
@@ -1327,7 +1346,7 @@ class UrlbarInput {
       if (this.view.isOpen) {
         this.view.close();
       } else {
-        this.startQuery();
+        this.startQuery({ allowAutofill: false });
       }
     }
   }

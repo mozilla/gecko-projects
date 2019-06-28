@@ -1946,6 +1946,10 @@ var gBrowserInit = {
         DownloadsCommon.initializeAllDataLinks();
         ChromeUtils.import("resource:///modules/DownloadsTaskbar.jsm", {})
           .DownloadsTaskbar.registerIndicator(window);
+        if (AppConstants.platform == "macosx") {
+          ChromeUtils.import("resource:///modules/DownloadsMacFinderProgress.jsm")
+            .DownloadsMacFinderProgress.register();
+        }
       } catch (ex) {
         Cu.reportError(ex);
       }
@@ -3141,31 +3145,6 @@ var BrowserOnClick = {
       case "advancedPanelReturnButton":
         goBackFromErrorPage();
         break;
-
-      case "advancedButton":
-        securityInfo = getSecurityInfo(securityInfoAsString);
-        let errorInfo = getDetailedCertErrorInfo(location,
-                                                 securityInfo);
-        let clockSkewDifference = Services.prefs.getIntPref("services.settings.clock_skew_seconds", 0);
-        let settingsLastFetched = Services.prefs.getIntPref("services.settings.last_update_seconds", 0);
-        let appBuildID = Services.appinfo.appBuildID;
-        browser.messageManager.sendAsyncMessage("CertErrorDetails", {
-          info: errorInfo,
-          clockSkewDifference,
-          settingsLastFetched,
-          appBuildID,
-          frameId,
-        });
-        break;
-
-      case "copyToClipboard":
-        const gClipboardHelper = Cc["@mozilla.org/widget/clipboardhelper;1"]
-                                    .getService(Ci.nsIClipboardHelper);
-        securityInfo = getSecurityInfo(securityInfoAsString);
-        let detailedInfo = getDetailedCertErrorInfo(location,
-                                                    securityInfo);
-        gClipboardHelper.copyString(detailedInfo);
-        break;
     }
   },
 
@@ -3411,54 +3390,6 @@ function getSecurityInfo(securityInfoAsString) {
   securityInfo.QueryInterface(Ci.nsITransportSecurityInfo);
 
   return securityInfo;
-}
-
-/**
- * Returns a string with detailed information about the certificate validation
- * failure from the specified URI that can be used to send a report.
- */
-function getDetailedCertErrorInfo(location, securityInfo) {
-  if (!securityInfo)
-    return "";
-
-  let certErrorDetails = location;
-  let code = securityInfo.errorCode;
-  let errors = Cc["@mozilla.org/nss_errors_service;1"]
-                  .getService(Ci.nsINSSErrorsService);
-
-  certErrorDetails += "\r\n\r\n" + errors.getErrorMessage(errors.getXPCOMFromNSSError(code));
-
-  const sss = Cc["@mozilla.org/ssservice;1"]
-                 .getService(Ci.nsISiteSecurityService);
-  // SiteSecurityService uses different storage if the channel is
-  // private. Thus we must give isSecureURI correct flags or we
-  // might get incorrect results.
-  let flags = PrivateBrowsingUtils.isWindowPrivate(window) ?
-              Ci.nsISocketProvider.NO_PERMANENT_STORAGE : 0;
-
-  let uri = Services.io.newURI(location);
-
-  let hasHSTS = sss.isSecureURI(sss.HEADER_HSTS, uri, flags);
-  let hasHPKP = sss.isSecureURI(sss.HEADER_HPKP, uri, flags);
-  certErrorDetails += "\r\n\r\n" +
-                      gNavigatorBundle.getFormattedString("certErrorDetailsHSTS.label",
-                                                          [hasHSTS]);
-  certErrorDetails += "\r\n" +
-                      gNavigatorBundle.getFormattedString("certErrorDetailsKeyPinning.label",
-                                                          [hasHPKP]);
-
-  let certChain = "";
-  if (securityInfo.failedCertChain) {
-    for (let cert of securityInfo.failedCertChain.getEnumerator()) {
-      certChain += getPEMString(cert);
-    }
-  }
-
-  certErrorDetails += "\r\n\r\n" +
-                      gNavigatorBundle.getString("certErrorDetailsCertChain.label") +
-                      "\r\n\r\n" + certChain;
-
-  return certErrorDetails;
 }
 
 // TODO: can we pull getDERString and getPEMString in from pippki.js instead of
@@ -4921,6 +4852,24 @@ var XULBrowserWindow = {
   onLocationChange(aWebProgress, aRequest, aLocationURI, aFlags, aIsSimulated) {
     var location = aLocationURI ? aLocationURI.spec : "";
 
+    let pageTooltip = document.getElementById("aHTMLTooltip");
+    let tooltipNode = pageTooltip.triggerNode;
+    if (tooltipNode) {
+      // Optimise for the common case
+      if (aWebProgress.isTopLevel) {
+        pageTooltip.hidePopup();
+      } else {
+        for (let tooltipWindow = tooltipNode.ownerGlobal;
+             tooltipWindow != tooltipWindow.parent;
+             tooltipWindow = tooltipWindow.parent) {
+          if (tooltipWindow == aWebProgress.DOMWindow) {
+            pageTooltip.hidePopup();
+            break;
+          }
+        }
+      }
+    }
+
     this.hideOverLinkImmediately = true;
     this.setOverLink("", null);
     this.hideOverLinkImmediately = false;
@@ -4931,12 +4880,6 @@ var XULBrowserWindow = {
     // Do not update urlbar if there was a subframe navigation
 
     if (aWebProgress.isTopLevel) {
-      let pageTooltip = document.getElementById("aHTMLTooltip");
-      if (pageTooltip.state != "closed") {
-        // TODO: this misses cases where a subframe navigates.
-        pageTooltip.hidePopup();
-      }
-
       if ((location == "about:blank" && checkEmptyPageOrigin()) ||
           location == "") { // Second condition is for new tabs, otherwise
                              // reload function is enabled until tab is refreshed.

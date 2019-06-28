@@ -463,9 +463,13 @@ Toolbox.prototype = {
 
     this.highlightTool("jsdebugger");
 
-    if (packet.why.type === "debuggerStatement" ||
-       packet.why.type === "breakpoint" ||
-       packet.why.type === "exception") {
+    if (
+      packet.why.type === "debuggerStatement" ||
+      packet.why.type === "mutationBreakpoint" ||
+      packet.why.type === "eventBreakpoint" ||
+      packet.why.type === "breakpoint" ||
+      packet.why.type === "exception"
+    ) {
       this.raise();
       this.selectTool("jsdebugger", packet.why.type);
     }
@@ -3019,6 +3023,54 @@ Toolbox.prototype = {
       }.bind(this))();
     }
     return this._initInspector;
+  },
+
+  /**
+   * An helper function that returns an object contain a highlighter and unhighlighter
+   * function.
+   *
+   * @param {Boolean} isGrip: Set to true if the `highlight` function is going to be
+   *                          called with a Grip (and not from a NodeFront).
+   * @returns {Object} an object of the following shape:
+   *   - {AsyncFunction} highlight: A function that will initialize the highlighter front
+   *                                and call highlighter.highlight with the provided node
+   *                                front (which will be retrieved from a grip, if
+   *                                `fromGrip` is true.)
+   *   - {AsyncFunction} unhighlight: A function that will unhighlight the node that is
+   *                                  currently highlighted. If the `highlight` function
+   *                                  isn't settled yet, it will wait until it's done and
+   *                                  then unhighlight to prevent zombie highlighters.
+   *
+   */
+  getHighlighter(fromGrip = false) {
+    let pendingHighlight;
+    return {
+      highlight: async (nodeFront, options) => {
+        pendingHighlight = (async () => {
+          await this.initInspector();
+          if (!this.highlighter) {
+            return null;
+          }
+
+          if (fromGrip) {
+            nodeFront = await this.walker.gripToNodeFront(nodeFront);
+          }
+
+          return this.highlighter.highlight(nodeFront, options);
+        })();
+        return pendingHighlight;
+      },
+      unhighlight: async (forceHide) => {
+        if (pendingHighlight) {
+          await pendingHighlight;
+          pendingHighlight = null;
+        }
+
+        return this.highlighter
+          ? this.highlighter.unhighlight(forceHide)
+          : null;
+      },
+    };
   },
 
   _onNewSelectedNodeFront: function() {

@@ -205,7 +205,7 @@ windows10-aarch64/opt:
         - windows-aarch64-tests
         - windows-talos
 
-windows10-64-ref-hw-2017/opt:
+windows10-64-ux/opt:
     build-platform: win64-shippable/opt
     test-sets:
         - raptor-firefox
@@ -354,11 +354,6 @@ android-em-4.3-arm7-api-16/pgo:
     test-sets:
         - android-common-tests
         - android-opt-tests
-
-android-em-7.0-x86/opt:
-    build-platform: android-x86/opt
-    test-sets:
-        - android-x86-tests
 
 android-em-7.0-x86_64/opt:
     build-platform: android-x86_64/opt

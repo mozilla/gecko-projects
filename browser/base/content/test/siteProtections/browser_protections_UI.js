@@ -3,6 +3,14 @@
 
 /* Basic UI tests for the protections panel */
 
+add_task(async function setup() {
+  await SpecialPowers.pushPrefEnv({
+    set: [
+      ["browser.protections_panel.enabled", true],
+    ],
+  });
+});
+
 add_task(async function testToggleSwitch() {
   let tab = await BrowserTestUtils.openNewForegroundTab(gBrowser, "https://example.com");
   await openProtectionsPanel();
@@ -36,6 +44,32 @@ add_task(async function testSettingsButton() {
   let newTab = await newTabPromise;
 
   ok(true, "about:preferences has been opened successfully");
+
+  BrowserTestUtils.removeTab(newTab);
+  BrowserTestUtils.removeTab(tab);
+});
+
+/**
+ * A test for the 'Show Full Report' button in the footer seciton.
+ */
+add_task(async function testShouFullReportLink() {
+  // Open a tab and its protection panel.
+  let tab = await BrowserTestUtils.openNewForegroundTab(gBrowser, "https://example.com");
+  await openProtectionsPanel();
+
+  let popuphiddenPromise = BrowserTestUtils.waitForEvent(protectionsPopup, "popuphidden");
+  let newTabPromise = BrowserTestUtils.waitForNewTab(gBrowser, "about:protections");
+  let showFullReportLink =
+    document.getElementById("protections-popup-show-full-report-link");
+
+  showFullReportLink.click();
+
+  // The protection popup should be hidden after clicking the link.
+  await popuphiddenPromise;
+  // Wait until the 'about:protections' has been opened correctly.
+  let newTab = await newTabPromise;
+
+  ok(true, "about:protections has been opened successfully");
 
   BrowserTestUtils.removeTab(newTab);
   BrowserTestUtils.removeTab(tab);
