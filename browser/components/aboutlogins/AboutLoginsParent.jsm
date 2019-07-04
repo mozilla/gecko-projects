@@ -9,8 +9,6 @@ var EXPORTED_SYMBOLS = ["AboutLoginsParent"];
 const {XPCOMUtils} = ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
 ChromeUtils.defineModuleGetter(this, "E10SUtils",
                                "resource://gre/modules/E10SUtils.jsm");
-ChromeUtils.defineModuleGetter(this, "Localization",
-                               "resource://gre/modules/Localization.jsm");
 ChromeUtils.defineModuleGetter(this, "LoginHelper",
                                "resource://gre/modules/LoginHelper.jsm");
 ChromeUtils.defineModuleGetter(this, "MigrationUtils",
@@ -31,8 +29,11 @@ const PRIVILEGEDABOUT_PROCESS_ENABLED =
   Services.prefs.getBoolPref(PRIVILEGEDABOUT_PROCESS_PREF, false);
 
 
-const FEEDBACK_URL_PREF = "signon.feedbackURL";
+const FEEDBACK_URL_PREF = "signon.management.page.feedbackURL";
 const FEEDBACK_URL = Services.urlFormatter.formatURLPref(FEEDBACK_URL_PREF);
+
+const FAQ_URL_PREF = "signon.management.page.faqURL";
+const FAQ_URL = Services.prefs.getStringPref(FAQ_URL_PREF);
 
 // When the privileged content process is enabled, we expect about:logins
 // to load in it. Otherwise, it's in a normal web content process.
@@ -72,7 +73,7 @@ var AboutLoginsParent = {
   _subscribers: new WeakSet(),
 
   // Listeners are added in BrowserGlue.jsm
-  receiveMessage(message) {
+  async receiveMessage(message) {
     // Only respond to messages sent from about:logins.
     if (message.target.remoteType != EXPECTED_ABOUTLOGINS_REMOTE_TYPE ||
         message.target.contentPrincipal.originNoSuffix != ABOUT_LOGINS_ORIGIN) {
@@ -115,6 +116,10 @@ var AboutLoginsParent = {
         message.target.ownerGlobal.openWebLinkIn(FEEDBACK_URL, "tab", {relatedToCurrent: true});
         break;
       }
+      case "AboutLogins:OpenFAQ": {
+        message.target.ownerGlobal.openWebLinkIn(FAQ_URL, "tab", {relatedToCurrent: true});
+        break;
+      }
       case "AboutLogins:OpenPreferences": {
         message.target.ownerGlobal.openPreferences("privacy-logins");
         break;
@@ -139,7 +144,7 @@ var AboutLoginsParent = {
         this._subscribers.add(message.target);
 
         let messageManager = message.target.messageManager;
-        messageManager.sendAsyncMessage("AboutLogins:AllLogins", this.getAllLogins());
+        messageManager.sendAsyncMessage("AboutLogins:AllLogins", await this.getAllLogins());
         break;
       }
       case "AboutLogins:UpdateLogin": {
@@ -164,7 +169,7 @@ var AboutLoginsParent = {
     }
   },
 
-  observe(subject, topic, type) {
+  async observe(subject, topic, type) {
     if (!ChromeUtils.nondeterministicGetWeakSetKeys(this._subscribers).length) {
       Services.obs.removeObserver(this, "passwordmgr-crypto-login");
       Services.obs.removeObserver(this, "passwordmgr-crypto-loginCanceled");
@@ -174,7 +179,7 @@ var AboutLoginsParent = {
 
     if (topic == "passwordmgr-crypto-login") {
       this.removeMasterPasswordLoginNotifications();
-      this.messageSubscribers("AboutLogins:AllLogins", this.getAllLogins());
+      this.messageSubscribers("AboutLogins:AllLogins", await this.getAllLogins());
       return;
     }
 
@@ -215,12 +220,10 @@ var AboutLoginsParent = {
   },
 
   async showMasterPasswordLoginNotifications() {
-    if (!this._l10n) {
-      this._l10n = new Localization(["browser/aboutLogins.ftl"]);
-    }
-
-    let messageString = await this._l10n.formatValue("master-password-notification-message");
     for (let subscriber of this._subscriberIterator()) {
+      let MozXULElement = subscriber.ownerGlobal.MozXULElement;
+      MozXULElement.insertFTLIfNeeded("browser/aboutLogins.ftl");
+
       // If there's already an existing notification bar, don't do anything.
       let {gBrowser} = subscriber.ownerGlobal;
       let browser = subscriber;
@@ -233,17 +236,20 @@ var AboutLoginsParent = {
       // Configure the notification bar
       let priority = notificationBox.PRIORITY_WARNING_MEDIUM;
       let iconURL = "chrome://browser/skin/login.svg";
-      let reloadLabel = await this._l10n.formatValue("master-password-reload-button-label");
-      let reloadKey = await this._l10n.formatValue("master-password-reload-button-accesskey");
+
+      let doc = subscriber.ownerDocument;
+      let messageFragment = doc.createDocumentFragment();
+      let message = doc.createElement("span");
+      doc.l10n.setAttributes(message, "master-password-notification-message");
+      messageFragment.appendChild(message);
 
       let buttons = [{
-        label: reloadLabel,
-        accessKey: reloadKey,
+        "l10n-id": "master-password-reload-button",
         popup: null,
         callback() { browser.reload(); },
       }];
 
-      notification = notificationBox.appendNotification(messageString, MASTER_PASSWORD_NOTIFICATION_ID,
+      notification = notificationBox.appendNotification(messageFragment, MASTER_PASSWORD_NOTIFICATION_ID,
                                                         iconURL, priority, buttons);
     }
   },
@@ -282,11 +288,18 @@ var AboutLoginsParent = {
     }
   },
 
-  getAllLogins() {
-    return Services.logins
-                   .getAllLogins()
-                   .filter(isValidLogin)
+  async getAllLogins() {
+    try {
+      let logins = await Services.logins.getAllLoginsAsync();
+      return logins.filter(isValidLogin)
                    .map(LoginHelper.loginToVanillaObject)
                    .map(augmentVanillaLoginObject);
+    } catch (e) {
+      if (e.result == Cr.NS_ERROR_ABORT) {
+        // If the user cancels the MP prompt then return no logins.
+        return [];
+      }
+      throw e;
+    }
   },
 };

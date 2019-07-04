@@ -212,7 +212,7 @@ static bool DoesTextureSharingWorkInternal(ID3D11Device* device,
       gfxInfo->GetAdapterVendorID(vendorID);
       gfxInfo->GetAdapterVendorID2(vendorID2);
       if (vendorID.EqualsLiteral("0x8086") && vendorID2.IsEmpty()) {
-        if (!StaticPrefs::LayersAMDSwitchableGfxEnabled()) {
+        if (!StaticPrefs::layers_amd_switchable_gfx_enabled()) {
           return false;
         }
         gfxCriticalError(CriticalLog::DefaultOptions(false))
@@ -449,7 +449,7 @@ bool D3D11Checks::DoesRemotePresentWork(IDXGIAdapter* adapter) {
 
   auto doesP010Work = [&]() {
     if (gfxVars::DXP010Blocked() &&
-        !StaticPrefs::PDMWMFForceAllowP010Format()) {
+        !StaticPrefs::media_wmf_force_allow_p010_format()) {
       return false;
     }
     UINT formatSupport;
@@ -459,7 +459,7 @@ bool D3D11Checks::DoesRemotePresentWork(IDXGIAdapter* adapter) {
 
   auto doesP016Work = [&]() {
     if (gfxVars::DXP016Blocked() &&
-        !StaticPrefs::PDMWMFForceAllowP010Format()) {
+        !StaticPrefs::media_wmf_force_allow_p010_format()) {
       return false;
     }
     UINT formatSupport;

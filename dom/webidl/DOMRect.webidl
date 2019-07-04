@@ -12,8 +12,11 @@
 
 [Constructor(optional unrestricted double x = 0, optional unrestricted double y = 0,
              optional unrestricted double width = 0, optional unrestricted double height = 0),
- Exposed=(Window,Worker)]
+ Exposed=(Window,Worker),
+ Serializable]
 interface DOMRect : DOMRectReadOnly {
+    [NewObject] static DOMRect fromRect(optional DOMRectInit other = {});
+
     inherit attribute unrestricted double x;
     inherit attribute unrestricted double y;
     inherit attribute unrestricted double width;
@@ -23,8 +26,11 @@ interface DOMRect : DOMRectReadOnly {
 [ProbablyShortLivingWrapper,
  Constructor(optional unrestricted double x = 0, optional unrestricted double y = 0,
              optional unrestricted double width = 0, optional unrestricted double height = 0),
- Exposed=(Window,Worker)]
+ Exposed=(Window,Worker),
+ Serializable]
 interface DOMRectReadOnly {
+    [NewObject] static DOMRectReadOnly fromRect(optional DOMRectInit other = {});
+
     readonly attribute unrestricted double x;
     readonly attribute unrestricted double y;
     readonly attribute unrestricted double width;

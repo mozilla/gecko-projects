@@ -1708,6 +1708,12 @@ toolbar#nav-bar {
         if not options.enableCPOWWarnings:
             browserEnv["DISABLE_UNSAFE_CPOW_WARNINGS"] = "1"
 
+        if options.enable_webrender:
+            browserEnv["MOZ_WEBRENDER"] = "1"
+            browserEnv["MOZ_ACCELERATED"] = "1"
+        else:
+            browserEnv["MOZ_WEBRENDER"] = "0"
+
         return browserEnv
 
     def killNamedProc(self, pname, orphans=True):
@@ -2588,6 +2594,7 @@ toolbar#nav-bar {
                 'dom.serviceWorkers.parent_intercept', False),
             "socketprocess_e10s": self.extraPrefs.get(
                 'network.process.enabled', False),
+            "webrender": options.enable_webrender,
         })
 
         self.setTestRoot(options)
@@ -3128,13 +3135,6 @@ def run_test_harness(parser, options):
 
     if hasattr(options, 'log'):
         delattr(options, 'log')
-
-    # windows10-aarch64 does not yet support crashreporter testing.
-    # see https://bugzilla.mozilla.org/show_bug.cgi?id=1536221
-    if mozinfo.os == "win" and mozinfo.processor == "aarch64":
-        # manually override the mozinfo.crashreporter value after MochitestDesktop
-        # is instantiated.
-        mozinfo.update({u"crashreporter": False})
 
     options.runByManifest = False
     if options.flavor in ('plain', 'browser', 'chrome'):

@@ -111,6 +111,33 @@ for (const injection of [
       matches: ["*://gaming.youtube.com/*"],
       css: [{file: "injections/css/bug1305028-gaming.youtube.com-webkit-scrollbar.css"}],
     },
+  }, {
+    id: "bug1432935-discord",
+    platform: "desktop",
+    domain: "discordapp.com",
+    bug: "1432935",
+    contentScripts: {
+      matches: ["*://discordapp.com/*"],
+      css: [{file: "injections/css/bug1432935-discordapp.com-webkit-scorllbar-white-line.css"}],
+    },
+  }, {
+    id: "bug1432935-breitbart",
+    platform: "desktop",
+    domain: "breitbart.com",
+    bug: "1432935",
+    contentScripts: {
+      matches: ["*://*.breitbart.com/*"],
+      css: [{file: "injections/css/bug1432935-breitbart.com-webkit-scrollbar.css"}],
+    },
+  }, {
+    id: "bug1561371",
+    platform: "android",
+    domain: "mail.google.com",
+    bug: "1561371",
+    contentScripts: {
+      matches: ["*://mail.google.com/*"],
+      css: [{file: "injections/css/bug1561371-mail.google.com-allow-horizontal-scrolling.css"}],
+    },
   },
 ]) {
   Injections.push(injection);

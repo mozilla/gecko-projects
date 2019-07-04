@@ -1390,3 +1390,32 @@ function reloadPage() {
   });
   return onLoad;
 }
+
+/**
+  * Check if the editor mode is enabled (i.e. .webconsole-app has the expected class).
+  *
+  * @param {WebConsole} hud
+  * @returns {Boolean}
+  */
+function isEditorModeEnabled(hud) {
+  const {outputNode} = hud.ui;
+  const appNode = outputNode.querySelector(".webconsole-app");
+  return appNode.classList.contains("jsterm-editor");
+}
+
+/**
+ * Toggle the layout between in-line and editor.
+ *
+ * @param {WebConsole} hud
+ * @returns {Promise} A promise that resolves once the layout change was rendered.
+ */
+function toggleLayout(hud) {
+  const isMacOS = Services.appinfo.OS === "Darwin";
+  const enabled = isEditorModeEnabled(hud);
+
+  EventUtils.synthesizeKey("b", {
+    [isMacOS ? "metaKey" : "ctrlKey"]: true,
+  });
+  return waitFor(() => isEditorModeEnabled(hud) === !enabled);
+}
+

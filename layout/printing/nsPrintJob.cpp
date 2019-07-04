@@ -1909,7 +1909,8 @@ nsresult nsPrintJob::UpdateSelectionAndShrinkPrintObject(
     int32_t cnt = selection->RangeCount();
     int32_t inx;
     for (inx = 0; inx < cnt; ++inx) {
-      selectionPS->AddRange(*selection->GetRangeAt(inx), IgnoreErrors());
+      selectionPS->AddRangeAndSelectFramesAndNotifyListeners(
+          *selection->GetRangeAt(inx), IgnoreErrors());
     }
   }
 
@@ -2292,13 +2293,14 @@ static nsresult DeleteUnselectedNodes(Document* aOrigDoc, Document* aDoc) {
     uint32_t endOffset = origRange->StartOffset() + ellipsisOffset;
 
     // Create the range that we want to remove. Note that if startNode or
-    // endNode are null CreateRange will fail and we won't remove that section.
-    RefPtr<nsRange> range;
-    nsresult rv = nsRange::CreateRange(startNode, startOffset, endNode,
-                                       endOffset, getter_AddRefs(range));
+    // endNode are null nsRange::Create() will fail and we won't remove
+    // that section.
+    RefPtr<nsRange> range = nsRange::Create(startNode, startOffset, endNode,
+                                            endOffset, IgnoreErrors());
 
-    if (NS_SUCCEEDED(rv) && !range->Collapsed()) {
-      selection->AddRange(*range, IgnoreErrors());
+    if (range && !range->Collapsed()) {
+      selection->AddRangeAndSelectFramesAndNotifyListeners(*range,
+                                                           IgnoreErrors());
 
       // Unless we've already added an ellipsis at the start, if we ended mid
       // text node then add ellipsis.
@@ -2329,12 +2331,12 @@ static nsresult DeleteUnselectedNodes(Document* aOrigDoc, Document* aDoc) {
   }
 
   // Add in the last range to the end of the body.
-  RefPtr<nsRange> lastRange;
-  nsresult rv = nsRange::CreateRange(startNode, startOffset, bodyNode,
-                                     bodyNode->GetChildCount(),
-                                     getter_AddRefs(lastRange));
-  if (NS_SUCCEEDED(rv) && !lastRange->Collapsed()) {
-    selection->AddRange(*lastRange, IgnoreErrors());
+  RefPtr<nsRange> lastRange =
+      nsRange::Create(startNode, startOffset, bodyNode,
+                      bodyNode->GetChildCount(), IgnoreErrors());
+  if (lastRange && !lastRange->Collapsed()) {
+    selection->AddRangeAndSelectFramesAndNotifyListeners(*lastRange,
+                                                         IgnoreErrors());
   }
 
   selection->DeleteFromDocument(IgnoreErrors());
