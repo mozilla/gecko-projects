@@ -1604,11 +1604,30 @@ function copyTestUpdaterToBinDir() {
   if (!updater.exists()) {
     testUpdater.copyToFollowingLinks(updater.parent, updater.leafName);
   }
-  if (AppConstants.platform == "macosx") {
-    updater.append("Contents");
-    updater.append("MacOS");
-    updater.append("org.mozilla.updater");
+  return updater;
+}
+
+/**
+ * Copies the test updater to the location where it will be launched to apply an
+ * update and returns the nsIFile for the copied test updater.
+ *
+ * @return  nsIFIle for the copied test updater.
+ */
+function copyTestUpdaterForRunUsingUpdater() {
+  if (AppConstants.platform == "win" || AppConstants.platform == "linux") {
+    return copyTestUpdaterToBinDir();
   }
+
+  let testUpdater = getTestUpdater();
+  let updater = getUpdateDirFile(DIR_PATCH);
+  updater.append(testUpdater.leafName);
+  if (!updater.exists()) {
+    testUpdater.copyToFollowingLinks(updater.parent, updater.leafName);
+  }
+
+  updater.append("Contents");
+  updater.append("MacOS");
+  updater.append("org.mozilla.updater");
   return updater;
 }
 
@@ -1714,7 +1733,8 @@ function runUpdate(aExpectedStatus, aSwitchApp, aExpectedExitValue, aCheckSvcLog
     gEnv.set("MOZ_TEST_SHORTER_WAIT_PID", "1");
   }
 
-  let updateBin = copyTestUpdaterToBinDir();
+  // Copy the updater binary to the directory where it will apply updates.
+  let updateBin = copyTestUpdaterForRunUsingUpdater();
   Assert.ok(updateBin.exists(),
             MSG_SHOULD_EXIST + getMsgPath(updateBin.path));
 
