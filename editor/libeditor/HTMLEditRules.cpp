@@ -21,10 +21,12 @@
 #include "mozilla/MathAlgorithms.h"
 #include "mozilla/Move.h"
 #include "mozilla/Preferences.h"
+#include "mozilla/RangeUtils.h"
 #include "mozilla/TextComposition.h"
 #include "mozilla/UniquePtr.h"
 #include "mozilla/Unused.h"
 #include "mozilla/dom/Selection.h"
+#include "mozilla/dom/StaticRange.h"
 #include "mozilla/dom/Element.h"
 #include "mozilla/dom/RangeBinding.h"
 #include "mozilla/OwningNonNull.h"
@@ -1419,8 +1421,9 @@ nsresult HTMLEditRules::WillInsertText(EditSubAction aEditSubAction,
     if (!mDocChangeRange) {
       mDocChangeRange = new nsRange(compositionStartPoint.GetContainer());
     }
-    rv = mDocChangeRange->SetStartAndEnd(compositionStartPoint,
-                                         compositionEndPoint);
+    rv = mDocChangeRange->SetStartAndEnd(
+        compositionStartPoint.ToRawRangeBoundary(),
+        compositionEndPoint.ToRawRangeBoundary());
     if (NS_WARN_IF(NS_FAILED(rv))) {
       return rv;
     }
@@ -1628,7 +1631,8 @@ nsresult HTMLEditRules::WillInsertText(EditSubAction aEditSubAction,
   }
 
   if (currentPoint.IsSet()) {
-    rv = mDocChangeRange->SetStartAndEnd(pointToInsert, currentPoint);
+    rv = mDocChangeRange->SetStartAndEnd(pointToInsert.ToRawRangeBoundary(),
+                                         currentPoint.ToRawRangeBoundary());
     if (NS_WARN_IF(NS_FAILED(rv))) {
       return rv;
     }
@@ -6722,16 +6726,16 @@ nsresult HTMLEditRules::ExpandSelectionForDeletion() {
     bool nodeBefore = false, nodeAfter = false;
 
     // Create a range that represents expanded selection
-    RefPtr<nsRange> range = new nsRange(selStartNode);
-    nsresult rv = range->SetStartAndEnd(selStartNode, selStartOffset,
-                                        selEndNode, selEndOffset);
-    if (NS_WARN_IF(NS_FAILED(rv))) {
-      return rv;
+    RefPtr<StaticRange> staticRange = StaticRange::Create(
+        selStartNode, selStartOffset, selEndNode, selEndOffset, IgnoreErrors());
+    if (NS_WARN_IF(!staticRange)) {
+      return NS_ERROR_FAILURE;
     }
 
     // Check if block is entirely inside range
     if (brBlock) {
-      nsRange::CompareNodeToRange(brBlock, range, &nodeBefore, &nodeAfter);
+      RangeUtils::CompareNodeToRange(brBlock, staticRange, &nodeBefore,
+                                     &nodeAfter);
     }
 
     // If block isn't contained, forgo grabbing the <br> in expanded selection.
@@ -6865,11 +6869,13 @@ nsresult HTMLEditRules::NormalizeSelection() {
   // start, or new start after old end.  If so then just leave things alone.
 
   int16_t comp;
-  comp = nsContentUtils::ComparePoints(startPoint, newEndPoint);
+  comp = nsContentUtils::ComparePoints(startPoint.ToRawRangeBoundary(),
+                                       newEndPoint.ToRawRangeBoundary());
   if (comp == 1) {
     return NS_OK;  // New end before old start.
   }
-  comp = nsContentUtils::ComparePoints(newStartPoint, endPoint);
+  comp = nsContentUtils::ComparePoints(newStartPoint.ToRawRangeBoundary(),
+                                       endPoint.ToRawRangeBoundary());
   if (comp == 1) {
     return NS_OK;  // New start after old end.
   }
@@ -7172,7 +7178,8 @@ void HTMLEditRules::PromoteRange(nsRange& aRange,
     return;
   }
 
-  DebugOnly<nsresult> rv = aRange.SetStartAndEnd(startPoint, endPoint);
+  DebugOnly<nsresult> rv = aRange.SetStartAndEnd(
+      startPoint.ToRawRangeBoundary(), endPoint.ToRawRangeBoundary());
   MOZ_ASSERT(NS_SUCCEEDED(rv));
 }
 
@@ -9279,18 +9286,18 @@ nsresult HTMLEditRules::PinSelectionToNewBlock() {
     return NS_ERROR_FAILURE;
   }
 
-  // Use ranges and nsRange::CompareNodeToRange() to compare selection start
+  // Use ranges and RangeUtils::CompareNodeToRange() to compare selection start
   // to new block.
-  // XXX It's too expensive to use nsRange and set it only for comparing a
-  //     DOM point with a node.
-  RefPtr<nsRange> range = new nsRange(selectionStartPoint.GetContainer());
-  nsresult rv = range->CollapseTo(selectionStartPoint);
-  if (NS_WARN_IF(NS_FAILED(rv))) {
-    return rv;
+  RefPtr<StaticRange> staticRange = StaticRange::Create(
+      selectionStartPoint.ToRawRangeBoundary(),
+      selectionStartPoint.ToRawRangeBoundary(), IgnoreErrors());
+  if (NS_WARN_IF(!staticRange)) {
+    return NS_ERROR_FAILURE;
   }
 
   bool nodeBefore, nodeAfter;
-  rv = nsRange::CompareNodeToRange(mNewBlock, range, &nodeBefore, &nodeAfter);
+  nsresult rv = RangeUtils::CompareNodeToRange(mNewBlock, staticRange,
+                                               &nodeBefore, &nodeAfter);
   if (NS_WARN_IF(NS_FAILED(rv))) {
     return rv;
   }
@@ -10346,7 +10353,8 @@ void HTMLEditRules::WillDeleteSelection() {
   if (NS_WARN_IF(!endPoint.IsSet())) {
     return;
   }
-  nsresult rv = mUtilRange->SetStartAndEnd(startPoint, endPoint);
+  nsresult rv = mUtilRange->SetStartAndEnd(startPoint.ToRawRangeBoundary(),
+                                           endPoint.ToRawRangeBoundary());
   if (NS_WARN_IF(NS_FAILED(rv))) {
     return;
   }

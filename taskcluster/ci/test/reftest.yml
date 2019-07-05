@@ -8,6 +8,7 @@ job-defaults:
     target:
         by-test-platform:
             android-em-7.*: geckoview-androidTest.apk
+            android-hw-.*-qr/.*: geckoview-androidTest.apk
             default: null
     variants:
         by-test-platform:
@@ -16,6 +17,7 @@ job-defaults:
     run-on-projects:
         by-test-platform:
             android-em-4.*/.*: ['try', 'mozilla-central']  # bug 1548659
+            android-hw-.*-qr/.*: ['try', 'mozilla-central']
             windows10-aarch64/opt: ['try', 'mozilla-central']
             default: built-projects
     mozharness:
@@ -69,6 +71,7 @@ crashtest:
         by-test-platform:
             windows10-aarch64.*: 2
             android-em-4.*/.*: 2  # bug 1548659
+            android-hw-.*-qr/.*: 2
             default: default
 
 jsreftest:
@@ -80,7 +83,8 @@ jsreftest:
         by-test-platform:
             android-hw.*\/debug: 12
             android-hw.*/(opt|pgo)?: 6
-            windows.*: 2
+            windows.*\/opt: 2
+            windows10-64-asan/opt: 3
             windows10-64-ccov/debug: 5
             linux64-ccov/.*: 5
             linux64-qr/opt: 4
@@ -120,7 +124,7 @@ reftest:
         by-test-platform:
             android-em-4.*\/debug: 56
             android-em.4.*\/(?:opt|pgo)?: 28
-            android-em-7.*: 5
+            android-em-7.*: 2
             linux64(-shippable|-devedition|-qr)?/opt: 5
             macosx101.*-64/opt: 2
             macosx101.*-64/debug: 3
@@ -147,6 +151,7 @@ reftest:
     tier:
         by-test-platform:
             windows10-aarch64.*: 2
+            android-hw-.*-qr/.*: 2
             default: default
 
 reftest-gpu:

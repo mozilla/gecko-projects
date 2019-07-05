@@ -3713,7 +3713,7 @@ already_AddRefed<Promise> HTMLMediaElement::Play(ErrorResult& aRv) {
 }
 
 void HTMLMediaElement::DispatchEventsWhenPlayWasNotAllowed() {
-  if (StaticPrefs::MediaBlockEventEnabled()) {
+  if (StaticPrefs::media_autoplay_block_event_enabled()) {
     DispatchAsyncEvent(NS_LITERAL_STRING("blocked"));
   }
 #if defined(MOZ_WIDGET_ANDROID)
@@ -3962,9 +3962,6 @@ bool HTMLMediaElement::ParseAttribute(int32_t aNamespaceID, nsAtom* aAttribute,
       {nullptr, 0}};
 
   if (aNamespaceID == kNameSpaceID_None) {
-    if (ParseImageAttribute(aAttribute, aValue, aResult)) {
-      return true;
-    }
     if (aAttribute == nsGkAtoms::crossorigin) {
       ParseCORSValue(aValue, aResult);
       return true;
@@ -4110,7 +4107,7 @@ void HTMLMediaElement::HiddenVideoStart() {
   }
   NS_NewTimerWithFuncCallback(
       getter_AddRefs(mVideoDecodeSuspendTimer), VideoDecodeSuspendTimerCallback,
-      this, StaticPrefs::MediaSuspendBkgndVideoDelayMs(),
+      this, StaticPrefs::media_suspend_bkgnd_video_delay_ms(),
       nsITimer::TYPE_ONE_SHOT,
       "HTMLMediaElement::VideoDecodeSuspendTimerCallback",
       mMainThreadEventTarget);
@@ -4278,7 +4275,8 @@ void HTMLMediaElement::ReportTelemetry() {
         // Here, we have played *some* of the video, but didn't get more than 1
         // keyframe. Report '0' if we have played for longer than the video-
         // decode-suspend delay (showing recovery would be difficult).
-        uint32_t suspendDelay_ms = StaticPrefs::MediaSuspendBkgndVideoDelayMs();
+        uint32_t suspendDelay_ms =
+            StaticPrefs::media_suspend_bkgnd_video_delay_ms();
         if (uint32_t(playTime * 1000.0) > suspendDelay_ms) {
           Telemetry::Accumulate(Telemetry::VIDEO_INTER_KEYFRAME_MAX_MS, key, 0);
           Telemetry::Accumulate(Telemetry::VIDEO_INTER_KEYFRAME_MAX_MS,

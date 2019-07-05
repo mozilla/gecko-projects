@@ -103,6 +103,12 @@ function onPrompt(subject, topic, data) {
 Services.obs.addObserver(onPrompt, "passwordmgr-prompt-change");
 Services.obs.addObserver(onPrompt, "passwordmgr-prompt-save");
 
+addMessageListener("cleanup", () => {
+  Services.obs.removeObserver(onStorageChanged, "passwordmgr-storage-changed");
+  Services.obs.removeObserver(onPrompt, "passwordmgr-prompt-change");
+  Services.obs.removeObserver(onPrompt, "passwordmgr-prompt-save");
+});
+
 
 // Begin message listeners
 
@@ -122,6 +128,29 @@ addMessageListener("resetRecipes", async function() {
   await recipeParent.reset();
   sendAsyncMessage("recipesReset");
 });
+
+addMessageListener("getTelemetryEvents", options => {
+  options = Object.assign({
+    filterProps: {},
+    clear: false,
+  }, options);
+  let snapshots = Services.telemetry.snapshotEvents(Ci.nsITelemetry.DATASET_PRERELEASE_CHANNELS, options.clear);
+  let events = (options.process in snapshots) ? snapshots[options.process] : [];
+
+  // event is array of values like: [22476,"pwmgr","autocomplete_field","generatedpassword"]
+  let keys = ["id", "category", "method", "object", "value"];
+  events = events.filter(entry => {
+    for (let idx = 0; idx < keys.length; idx++) {
+      let key = keys[idx];
+      if ((key in options.filterProps) && options.filterProps[key] !== entry[idx]) {
+        return false;
+      }
+    }
+    return true;
+  });
+  sendAsyncMessage("getTelemetryEvents", events);
+});
+
 
 addMessageListener("proxyLoginManager", msg => {
   // Recreate nsILoginInfo objects from vanilla JS objects.
@@ -155,6 +184,11 @@ addMessageListener("setMasterPassword", ({ enable }) => {
   }
 });
 
-Services.mm.addMessageListener("PasswordManager:onFormSubmit", function onFormSubmit(message) {
+function onFormSubmit(message) {
   sendAsyncMessage("formSubmissionProcessed", message.data, message.objects);
+}
+
+Services.mm.addMessageListener("PasswordManager:onFormSubmit", onFormSubmit);
+addMessageListener("cleanup", () => {
+  Services.mm.removeMessageListener("PasswordManager:onFormSubmit", onFormSubmit);
 });

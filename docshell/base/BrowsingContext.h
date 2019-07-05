@@ -52,6 +52,7 @@ template <typename>
 struct Nullable;
 template <typename T>
 class Sequence;
+class StructuredCloneHolder;
 struct WindowPostMessageOptions;
 class WindowProxyHolder;
 
@@ -103,6 +104,13 @@ class BrowsingContext : public nsWrapperCache, public BrowsingContextBase {
   static already_AddRefed<BrowsingContext> Get(uint64_t aId);
   static already_AddRefed<BrowsingContext> Get(GlobalObject&, uint64_t aId) {
     return Get(aId);
+  }
+
+  static already_AddRefed<BrowsingContext> GetFromWindow(
+      WindowProxyHolder& aProxy);
+  static already_AddRefed<BrowsingContext> GetFromWindow(
+      GlobalObject&, WindowProxyHolder& aProxy) {
+    return GetFromWindow(aProxy);
   }
 
   // Create a brand-new BrowsingContext object.
@@ -267,6 +275,12 @@ class BrowsingContext : public nsWrapperCache, public BrowsingContextBase {
 
   JSObject* WrapObject(JSContext* aCx);
 
+  static JSObject* ReadStructuredClone(JSContext* aCx,
+                                       JSStructuredCloneReader* aReader,
+                                       StructuredCloneHolder* aHolder);
+  bool WriteStructuredClone(JSContext* aCx, JSStructuredCloneWriter* aWriter,
+                            StructuredCloneHolder* aHolder);
+
   void StartDelayedAutoplayMediaComponents();
 
   /**
@@ -381,6 +395,9 @@ class BrowsingContext : public nsWrapperCache, public BrowsingContextBase {
 
   bool IsActive() const;
 
+  // Removes the context from its group and sets mIsDetached to true.
+  void Unregister();
+
   friend class ::nsOuterWindowProxy;
   friend class ::nsGlobalWindowOuter;
   // Update the window proxy object that corresponds to this browsing context.
@@ -462,6 +479,10 @@ class BrowsingContext : public nsWrapperCache, public BrowsingContextBase {
   // process? This may be true with a null mDocShell after the Window has been
   // closed.
   bool mIsInProcess : 1;
+
+  // Has this browsing context been discarded? BrowsingContexts should
+  // only be discarded once.
+  bool mIsDiscarded : 1;
 };
 
 /**

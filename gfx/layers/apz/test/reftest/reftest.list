@@ -1,16 +1,16 @@
 # The following tests test the async positioning of the scrollbars.
 # Basic root-frame scrollbar with async scrolling
-fuzzy-if(Android,1-1,1-2) skip-if(!asyncPan) pref(apz.allow_zooming,true) == async-scrollbar-1-v.html async-scrollbar-1-v-ref.html
+fuzzy-if(Android,0-1,0-2) skip-if(!asyncPan) pref(apz.allow_zooming,true) == async-scrollbar-1-v.html async-scrollbar-1-v-ref.html
 fuzzy-if(Android,0-4,0-5) skip-if(!asyncPan) pref(apz.allow_zooming,true) == async-scrollbar-1-h.html async-scrollbar-1-h-ref.html
 fuzzy-if(Android,0-3,0-5) skip-if(!asyncPan) pref(apz.allow_zooming,true) == async-scrollbar-1-vh.html async-scrollbar-1-vh-ref.html
-fuzzy-if(Android,1-1,1-2) skip-if(!asyncPan) pref(apz.allow_zooming,true) == async-scrollbar-1-v-rtl.html async-scrollbar-1-v-rtl-ref.html
+fuzzy-if(Android,0-1,0-2) skip-if(!asyncPan) pref(apz.allow_zooming,true) == async-scrollbar-1-v-rtl.html async-scrollbar-1-v-rtl-ref.html
 fuzzy-if(Android,0-4,0-5) skip-if(!asyncPan) pref(apz.allow_zooming,true) == async-scrollbar-1-h-rtl.html async-scrollbar-1-h-rtl-ref.html
-fuzzy-if(Android,0-3,0-7) skip-if(!asyncPan) pref(apz.allow_zooming,true) fuzzy-if(geckoview,2-2,9-9) == async-scrollbar-1-vh-rtl.html async-scrollbar-1-vh-rtl-ref.html
+fuzzy-if(Android,0-3,0-7) skip-if(!asyncPan) pref(apz.allow_zooming,true) == async-scrollbar-1-vh-rtl.html async-scrollbar-1-vh-rtl-ref.html
 
 # Different async zoom levels. Since the scrollthumb gets async-scaled in the
 # compositor, the border-radius ends of the scrollthumb are going to be a little
 # off, hence the fuzzy-if clauses.
-fuzzy-if(Android,0-54,0-20) skip-if(!Android) pref(apz.allow_zooming,true) == async-scrollbar-zoom-1.html async-scrollbar-zoom-1-ref.html
+fuzzy-if(Android,0-54,0-20) skip-if(!Android) pref(apz.allow_zooming,true) fuzzy-if(geckoview&&webrender,0-45,0-214) == async-scrollbar-zoom-1.html async-scrollbar-zoom-1-ref.html
 fuzzy-if(Android,0-45,0-27) skip-if(!Android) pref(apz.allow_zooming,true) == async-scrollbar-zoom-2.html async-scrollbar-zoom-2-ref.html
 
 # Test scrollbars working properly with pinch-zooming, i.e. different document resolutions.
@@ -19,8 +19,7 @@ fuzzy-if(Android,0-45,0-27) skip-if(!Android) pref(apz.allow_zooming,true) == as
 # won't make the thumb exactly twice as short, which is what the test expects. That's fine, as the purpose of the test is
 # to catch more fundamental scrollbar rendering bugs such as the entire track being mispositioned or the thumb being
 # clipped away.
-# Fails on WebRender - seems related to the viewport_rect in scroll frames not being scaled correctly.
-fuzzy-if(Android,0-54,0-14) fuzzy-if(!Android,0-128,0-137) fails-if(webrender) pref(apz.allow_zooming,true) == scrollbar-zoom-resolution-1.html scrollbar-zoom-resolution-1-ref.html
+fuzzy-if(Android,0-54,0-14) fuzzy-if(!Android,0-128,0-137) pref(apz.allow_zooming,true) == scrollbar-zoom-resolution-1.html scrollbar-zoom-resolution-1-ref.html
 fuzzy-if(Android,0-51,0-22) fuzzy-if(!Android,0-128,0-137) pref(apz.allow_zooming,true) == scrollbar-zoom-resolution-2.html scrollbar-zoom-resolution-2-ref.html
 
 # Meta-viewport tag support
@@ -30,5 +29,5 @@ skip-if(!asyncPan) == frame-reconstruction-scroll-clamping.html frame-reconstruc
 
 # Test that position:fixed and position:sticky elements are attached to the
 # layout viewport.
-pref(apz.allow_zooming,true) fuzzy-if(geckoview,3-3,4000-4000) == pinch-zoom-position-fixed.html pinch-zoom-position-fixed-ref.html
+pref(apz.allow_zooming,true) == pinch-zoom-position-fixed.html pinch-zoom-position-fixed-ref.html
 pref(apz.allow_zooming,true) == pinch-zoom-position-sticky.html pinch-zoom-position-sticky-ref.html

@@ -323,7 +323,10 @@ class Nursery {
   bool registerMallocedBuffer(void* buffer);
 
   /* Mark a malloced buffer as no longer needing to be freed. */
-  void removeMallocedBuffer(void* buffer) { mallocedBuffers.remove(buffer); }
+  void removeMallocedBuffer(void* buffer) {
+    MOZ_ASSERT(mallocedBuffers.has(buffer));
+    mallocedBuffers.remove(buffer);
+  }
 
   MOZ_MUST_USE bool addedUniqueIdToCell(gc::Cell* cell) {
     MOZ_ASSERT(IsInsideNursery(cell));
@@ -581,7 +584,8 @@ class Nursery {
    * current chunk, or the whole chunk if fullPoison is true or it is not
    * the current chunk.
    */
-  void setCurrentChunk(unsigned chunkno, bool fullPoison = false);
+  void setCurrentChunk(unsigned chunkno);
+  void poisonAndInitCurrentChunk(bool fullPoison = false);
   void setCurrentEnd();
   void setStartPosition();
 
@@ -637,8 +641,8 @@ class Nursery {
   void sweep(JSTracer* trc);
 
   /*
-   * Frees all non-live nursery-allocated things at the end of a minor
-   * collection.
+   * Reset the current chunk and position after a minor collection. Also poison
+   * the nursery on debug & nightly builds.
    */
   void clear();
 

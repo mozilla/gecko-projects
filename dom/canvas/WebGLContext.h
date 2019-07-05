@@ -21,6 +21,7 @@
 #include "mozilla/ErrorResult.h"
 #include "mozilla/gfx/2D.h"
 #include "mozilla/LinkedList.h"
+#include "mozilla/Mutex.h"
 #include "mozilla/UniquePtr.h"
 #include "mozilla/WeakPtr.h"
 #include "nsCycleCollectionNoteChild.h"
@@ -254,6 +255,7 @@ struct TexImageSourceAdapter final : public TexImageSource {
 // --
 
 namespace webgl {
+
 class AvailabilityRunnable final : public Runnable {
  public:
   const RefPtr<WebGLContext> mWebGL;  // Prevent CC
@@ -265,6 +267,42 @@ class AvailabilityRunnable final : public Runnable {
 
   NS_IMETHOD Run() override;
 };
+
+struct BufferAndIndex final {
+  const WebGLBuffer* buffer = nullptr;
+  uint32_t id = -1;
+};
+
+// -
+
+class DynDGpuManager final {
+  static constexpr uint32_t TICK_MS = 3000;
+
+  enum class State {
+    Inactive,
+    Primed,
+    Active,
+  };
+
+  Mutex mMutex;
+  bool mActivityThisTick = false;
+  State mState = State::Inactive;
+  RefPtr<gl::GLContext> mDGpuContext;
+
+ public:
+  static std::shared_ptr<DynDGpuManager> Get();
+
+  DynDGpuManager();
+  ~DynDGpuManager();
+
+  void ReportActivity(const std::shared_ptr<DynDGpuManager>& strong);
+
+ private:
+  void SetState(const MutexAutoLock&, State);
+  void Tick(const std::shared_ptr<DynDGpuManager>& strong);
+  void DispatchTick(const std::shared_ptr<DynDGpuManager>& strong);
+};
+
 }  // namespace webgl
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -324,6 +362,18 @@ class WebGLContext : public nsICanvasRenderingContextInternal,
  public:
   // Grab a const reference so we can see changes, but can't make changes.
   const decltype(mGL_OnlyClearInDestroyResourcesAndContext)& gl;
+
+ private:
+  std::shared_ptr<webgl::DynDGpuManager> mDynDGpuManager;
+
+  void ReportActivity() const {
+    if (mDynDGpuManager) {
+      mDynDGpuManager->ReportActivity(mDynDGpuManager);
+    }
+  }
+
+ public:
+  void CheckForInactivity();
 
  protected:
   const uint32_t mMaxPerfWarnings;
@@ -970,9 +1020,34 @@ class WebGLContext : public nsICanvasRenderingContextInternal,
   // -----------------------------------------------------------------------------
   // Buffer Objects (WebGLContextBuffers.cpp)
   void BindBuffer(GLenum target, WebGLBuffer* buffer);
-  void BindBufferBase(GLenum target, GLuint index, WebGLBuffer* buf);
+
+ private:
+  void BindBufferRangeImpl(GLenum target, GLuint index, WebGLBuffer* buf,
+                           WebGLintptr offset, WebGLsizeiptr size);
+
+ public:
+  void BindBufferBase(GLenum target, GLuint index, WebGLBuffer* buf) {
+    const FuncScope funcScope(*this, "bindBufferBase");
+    if (IsContextLost()) return;
+
+    BindBufferRangeImpl(target, index, buf, 0, 0);
+  }
+
   void BindBufferRange(GLenum target, GLuint index, WebGLBuffer* buf,
-                       WebGLintptr offset, WebGLsizeiptr size);
+                       WebGLintptr offset, WebGLsizeiptr size) {
+    const FuncScope funcScope(*this, "bindBufferRange");
+    if (IsContextLost()) return;
+
+    if (!ValidateNonNegative("offset", offset) ||
+        !ValidateNonNegative("size", size)) {
+      return;
+    }
+    if (buf && !size) {
+      ErrorInvalidValue("Size must be non-zero for non-null buffer.");
+      return;
+    }
+    BindBufferRangeImpl(target, index, buf, offset, size);
+  }
 
  private:
   void BufferDataImpl(GLenum target, uint64_t dataLen, const uint8_t* data,
@@ -1018,6 +1093,26 @@ class WebGLContext : public nsICanvasRenderingContextInternal,
   WebGLRefPtr<WebGLBuffer>& GetBufferSlotByTarget(GLenum target);
   WebGLRefPtr<WebGLBuffer>& GetBufferSlotByTargetIndexed(GLenum target,
                                                          GLuint index);
+
+  // -
+
+  void GenErrorIllegalUse(GLenum useTarget, uint32_t useId, GLenum boundTarget,
+                          uint32_t boundId) const;
+
+  bool ValidateBufferForNonTf(const WebGLBuffer&, GLenum nonTfTarget,
+                              uint32_t nonTfId) const;
+
+  bool ValidateBufferForNonTf(const WebGLBuffer* const nonTfBuffer,
+                              const GLenum nonTfTarget,
+                              const uint32_t nonTfId = -1) const {
+    if (!nonTfBuffer) return true;
+    return ValidateBufferForNonTf(*nonTfBuffer, nonTfTarget, nonTfId);
+  }
+
+  bool ValidateBuffersForTf(const WebGLTransformFeedback&,
+                            const webgl::LinkedProgramInfo&) const;
+  bool ValidateBuffersForTf(
+      const std::vector<webgl::BufferAndIndex>& tfBuffers) const;
 
   // -----------------------------------------------------------------------------
   // Queries (WebGL2ContextQueries.cpp)
@@ -2119,7 +2214,6 @@ class ScopedLazyBind final {
  private:
   gl::GLContext* const mGL;
   const GLenum mTarget;
-  const WebGLBuffer* const mBuf;
 
  public:
   ScopedLazyBind(gl::GLContext* gl, GLenum target, const WebGLBuffer* buf);

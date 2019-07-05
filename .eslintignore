@@ -50,7 +50,6 @@ browser/components/pocket/content/panels/js/vendor/**
 # Kept in sync with browser/components/newtab/.eslintignore
 browser/components/newtab/data/
 browser/components/newtab/logs/
-browser/components/newtab/prerendered/
 browser/components/newtab/vendor/
 
 # The only file in browser/locales/ is pre-processed.
@@ -334,9 +333,6 @@ toolkit/components/reader/JSDOMParser.js
 
 # Uses preprocessing
 toolkit/components/reader/Readerable.jsm
-
-# Should be going away soon
-toolkit/content/widgets/wizard.xml
 
 # Uses preprocessing
 toolkit/mozapps/update/tests/data/xpcshellConstantsPP.js

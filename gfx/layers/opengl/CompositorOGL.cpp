@@ -786,6 +786,7 @@ void CompositorOGL::BeginFrame(const nsIntRegion& aInvalidRegion,
 
 #ifdef MOZ_WIDGET_ANDROID
   java::GeckoSurfaceTexture::DestroyUnused((int64_t)mGLContext.get());
+  mGLContext->MakeCurrent();  // DestroyUnused can change the current context!
 #endif
 
   // Default blend function implements "OVER"
@@ -1233,8 +1234,8 @@ void CompositorOGL::DrawGeometry(const Geometry& aGeometry,
 
   // Only apply DEAA to quads that have been transformed such that aliasing
   // could be visible
-  bool bEnableAA =
-      StaticPrefs::LayersDEAAEnabled() && !aTransform.Is2DIntegerTranslation();
+  bool bEnableAA = StaticPrefs::layers_deaa_enabled() &&
+                   !aTransform.Is2DIntegerTranslation();
 
   bool colorMatrix = aEffectChain.mSecondaryEffects[EffectTypes::COLOR_MATRIX];
   ShaderConfigOGL config =
@@ -1549,7 +1550,7 @@ void CompositorOGL::DrawGeometry(const Geometry& aGeometry,
       BindAndDrawGeometry(program, aGeometry);
     } break;
     case EffectTypes::COMPONENT_ALPHA: {
-      MOZ_ASSERT(StaticPrefs::ComponentAlphaEnabled());
+      MOZ_ASSERT(StaticPrefs::layers_componentalpha_enabled());
       MOZ_ASSERT(blendMode == gfx::CompositionOp::OP_OVER,
                  "Can't support blend modes with component alpha!");
       EffectComponentAlpha* effectComponentAlpha =
@@ -2027,7 +2028,7 @@ void PerUnitTexturePoolOGL::DestroyTextures() {
 }
 
 bool CompositorOGL::SupportsLayerGeometry() const {
-  return StaticPrefs::OGLLayerGeometry();
+  return StaticPrefs::layers_geometry_opengl_enabled();
 }
 
 void CompositorOGL::RegisterTextureSource(TextureSource* aTextureSource) {

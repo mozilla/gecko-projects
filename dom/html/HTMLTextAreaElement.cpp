@@ -518,8 +518,8 @@ void HTMLTextAreaElement::DoneAddingChildren(bool aHaveNotified) {
       Reset();
     }
 
-    GenerateStateKey();
     if (!mInhibitStateRestoration) {
+      GenerateStateKey();
       RestoreFormControlState();
     }
   }

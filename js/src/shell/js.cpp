@@ -107,7 +107,6 @@
 #include "js/SweepingAPI.h"
 #include "js/Warnings.h"  // JS::SetWarningReporter
 #include "js/Wrapper.h"
-#include "perf/jsperf.h"
 #include "shell/jsoptparse.h"
 #include "shell/jsshell.h"
 #include "shell/OSObject.h"
@@ -9904,9 +9903,6 @@ static JSObject* NewGlobalObject(JSContext* cx, JS::RealmOptions& options,
     if (!JS_DefineDebuggerObject(cx, glob)) {
       return nullptr;
     }
-    if (!JS::RegisterPerfMeasurement(cx, glob)) {
-      return nullptr;
-    }
     if (!JS_DefineFunctionsWithHelp(cx, glob, shell_functions) ||
         !JS_DefineProfilingFunctions(cx, glob)) {
       return nullptr;
@@ -11354,7 +11350,7 @@ int main(int argc, char** argv, char** envp) {
   if (!op.getBoolOption("no-incremental-gc")) {
     JS_SetGCParameter(cx, JSGC_DYNAMIC_HEAP_GROWTH, 1);
     JS_SetGCParameter(cx, JSGC_DYNAMIC_MARK_SLICE, 1);
-    JS_SetGCParameter(cx, JSGC_SLICE_TIME_BUDGET, 10);
+    JS_SetGCParameter(cx, JSGC_SLICE_TIME_BUDGET_MS, 10);
   }
 #endif
 

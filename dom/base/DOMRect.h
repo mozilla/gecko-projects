@@ -18,9 +18,12 @@
 #include <algorithm>
 
 struct nsRect;
+class nsIGlobalObject;
 
 namespace mozilla {
 namespace dom {
+
+struct DOMRectInit;
 
 class DOMRectReadOnly : public nsISupports, public nsWrapperCache {
  protected:
@@ -41,6 +44,9 @@ class DOMRectReadOnly : public nsISupports, public nsWrapperCache {
 
   virtual JSObject* WrapObject(JSContext* aCx,
                                JS::Handle<JSObject*> aGivenProto) override;
+
+  static already_AddRefed<DOMRectReadOnly> FromRect(const GlobalObject& aGlobal,
+                                                    const DOMRectInit& aInit);
 
   static already_AddRefed<DOMRectReadOnly> Constructor(
       const GlobalObject& aGlobal, double aX, double aY, double aWidth,
@@ -68,11 +74,18 @@ class DOMRectReadOnly : public nsISupports, public nsWrapperCache {
     return std::max(y, y + h);
   }
 
-  bool WriteStructuredClone(JSStructuredCloneWriter* aWriter) const;
+  bool WriteStructuredClone(JSContext* aCx,
+                            JSStructuredCloneWriter* aWriter) const;
 
-  bool ReadStructuredClone(JSStructuredCloneReader* aReader);
+  static already_AddRefed<DOMRectReadOnly> ReadStructuredClone(
+      JSContext* aCx, nsIGlobalObject* aGlobal,
+      JSStructuredCloneReader* aReader);
 
  protected:
+  // Shared implementation of ReadStructuredClone for DOMRect and
+  // DOMRectReadOnly.
+  bool ReadStructuredClone(JSStructuredCloneReader* aReader);
+
   nsCOMPtr<nsISupports> mParent;
   double mX, mY, mWidth, mHeight;
 };
@@ -85,6 +98,9 @@ class DOMRect final : public DOMRectReadOnly {
 
   NS_INLINE_DECL_REFCOUNTING_INHERITED(DOMRect, DOMRectReadOnly)
 
+  static already_AddRefed<DOMRect> FromRect(const GlobalObject& aGlobal,
+                                            const DOMRectInit& aInit);
+
   static already_AddRefed<DOMRect> Constructor(const GlobalObject& aGlobal,
                                                double aX, double aY,
                                                double aWidth, double aHeight,
@@ -92,6 +108,11 @@ class DOMRect final : public DOMRectReadOnly {
 
   virtual JSObject* WrapObject(JSContext* aCx,
                                JS::Handle<JSObject*> aGivenProto) override;
+
+  static already_AddRefed<DOMRect> ReadStructuredClone(
+      JSContext* aCx, nsIGlobalObject* aGlobal,
+      JSStructuredCloneReader* aReader);
+  using DOMRectReadOnly::ReadStructuredClone;
 
   void SetRect(float aX, float aY, float aWidth, float aHeight) {
     mX = aX;

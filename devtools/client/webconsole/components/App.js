@@ -17,6 +17,7 @@ const ConsoleOutput = createFactory(require("devtools/client/webconsole/componen
 const FilterBar = createFactory(require("devtools/client/webconsole/components/FilterBar/FilterBar"));
 const SideBar = createFactory(require("devtools/client/webconsole/components/SideBar"));
 const ReverseSearchInput = createFactory(require("devtools/client/webconsole/components/Input/ReverseSearchInput"));
+const EditorToolbar = createFactory(require("devtools/client/webconsole/components/Input/EditorToolbar"));
 const JSTerm = createFactory(require("devtools/client/webconsole/components/Input/JSTerm"));
 const ConfirmDialog = createFactory(require("devtools/client/webconsole/components/Input/ConfirmDialog"));
 const NotificationBox = createFactory(require("devtools/client/shared/components/NotificationBox").NotificationBox);
@@ -58,6 +59,7 @@ class App extends Component {
       sidebarVisible: PropTypes.bool.isRequired,
       filterBarDisplayMode:
         PropTypes.oneOf([...Object.values(FILTERBAR_DISPLAY_MODES)]).isRequired,
+      editorFeatureEnabled: PropTypes.bool.isRequired,
     };
   }
 
@@ -73,6 +75,7 @@ class App extends Component {
     const {
       dispatch,
       webConsoleUI,
+      editorFeatureEnabled,
     } = this.props;
 
     if (
@@ -82,6 +85,18 @@ class App extends Component {
       const initialValue = webConsoleUI.jsterm && webConsoleUI.jsterm.getSelectedText();
       dispatch(actions.reverseSearchInputToggle({initialValue}));
       event.stopPropagation();
+    }
+
+    if (
+      editorFeatureEnabled &&
+      event.key.toLowerCase() === "b" && (
+        isMacOS && event.metaKey ||
+        !isMacOS && event.ctrlKey
+      )
+    ) {
+      event.stopPropagation();
+      event.preventDefault();
+      dispatch(actions.editorToggle());
     }
   }
 
@@ -238,7 +253,7 @@ class App extends Component {
         ref: node => {
           this.node = node;
         }},
-        div({className: "webconsole-flex-wrapper"},
+        div({className: "webconsole-wrapper"},
           FilterBar({
             hidePersistLogsCheckbox: webConsoleUI.isBrowserConsole,
             hideShowContentMessagesCheckbox,
@@ -253,6 +268,10 @@ class App extends Component {
             id: "webconsole-notificationbox",
             wrapping: true,
             notifications,
+          }),
+          EditorToolbar({
+            editorMode,
+            webConsoleUI,
           }),
           JSTerm({
             webConsoleUI,

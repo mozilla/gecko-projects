@@ -1113,8 +1113,8 @@ void HTMLSelectElement::DoneAddingChildren(bool aHaveNotified) {
     selectFrame->DoneAddingChildren(true);
   }
 
-  GenerateStateKey();
   if (!mInhibitStateRestoration) {
+    GenerateStateKey();
     RestoreFormControlState();
   }
 

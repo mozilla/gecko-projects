@@ -27,6 +27,13 @@ JSObject* DOMRectReadOnly::WrapObject(JSContext* aCx,
   return DOMRectReadOnly_Binding::Wrap(aCx, this, aGivenProto);
 }
 
+already_AddRefed<DOMRectReadOnly> DOMRectReadOnly::FromRect(
+    const GlobalObject& aGlobal, const DOMRectInit& aInit) {
+  RefPtr<DOMRectReadOnly> obj = new DOMRectReadOnly(
+      aGlobal.GetAsSupports(), aInit.mX, aInit.mY, aInit.mWidth, aInit.mHeight);
+  return obj.forget();
+}
+
 already_AddRefed<DOMRectReadOnly> DOMRectReadOnly::Constructor(
     const GlobalObject& aGlobal, double aX, double aY, double aWidth,
     double aHeight, ErrorResult& aRv) {
@@ -37,7 +44,7 @@ already_AddRefed<DOMRectReadOnly> DOMRectReadOnly::Constructor(
 
 // https://drafts.fxtf.org/geometry/#structured-serialization
 bool DOMRectReadOnly::WriteStructuredClone(
-    JSStructuredCloneWriter* aWriter) const {
+    JSContext* aCx, JSStructuredCloneWriter* aWriter) const {
 #define WriteDouble(d)                                                       \
   JS_WriteUint32Pair(aWriter, (BitwiseCast<uint64_t>(d) >> 32) & 0xffffffff, \
                      BitwiseCast<uint64_t>(d) & 0xffffffff)
@@ -46,6 +53,17 @@ bool DOMRectReadOnly::WriteStructuredClone(
          WriteDouble(mHeight);
 
 #undef WriteDouble
+}
+
+// static
+already_AddRefed<DOMRectReadOnly> DOMRectReadOnly::ReadStructuredClone(
+    JSContext* aCx, nsIGlobalObject* aGlobal,
+    JSStructuredCloneReader* aReader) {
+  RefPtr<DOMRectReadOnly> retval = new DOMRectReadOnly(aGlobal);
+  if (!retval->ReadStructuredClone(aReader)) {
+    return nullptr;
+  }
+  return retval.forget();
 }
 
 bool DOMRectReadOnly::ReadStructuredClone(JSStructuredCloneReader* aReader) {
@@ -76,6 +94,13 @@ JSObject* DOMRect::WrapObject(JSContext* aCx,
   return DOMRect_Binding::Wrap(aCx, this, aGivenProto);
 }
 
+already_AddRefed<DOMRect> DOMRect::FromRect(const GlobalObject& aGlobal,
+                                            const DOMRectInit& aInit) {
+  RefPtr<DOMRect> obj = new DOMRect(aGlobal.GetAsSupports(), aInit.mX, aInit.mY,
+                                    aInit.mWidth, aInit.mHeight);
+  return obj.forget();
+}
+
 already_AddRefed<DOMRect> DOMRect::Constructor(const GlobalObject& aGlobal,
                                                double aX, double aY,
                                                double aWidth, double aHeight,
@@ -83,6 +108,17 @@ already_AddRefed<DOMRect> DOMRect::Constructor(const GlobalObject& aGlobal,
   RefPtr<DOMRect> obj =
       new DOMRect(aGlobal.GetAsSupports(), aX, aY, aWidth, aHeight);
   return obj.forget();
+}
+
+// static
+already_AddRefed<DOMRect> DOMRect::ReadStructuredClone(
+    JSContext* aCx, nsIGlobalObject* aGlobal,
+    JSStructuredCloneReader* aReader) {
+  RefPtr<DOMRect> retval = new DOMRect(aGlobal);
+  if (!retval->ReadStructuredClone(aReader)) {
+    return nullptr;
+  }
+  return retval.forget();
 }
 
 // -----------------------------------------------------------------------------

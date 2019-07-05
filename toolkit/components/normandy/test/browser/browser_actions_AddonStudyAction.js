@@ -6,6 +6,9 @@ ChromeUtils.import("resource://normandy/actions/AddonStudyAction.jsm", this);
 ChromeUtils.import("resource://normandy/lib/AddonStudies.jsm", this);
 ChromeUtils.import("resource://normandy/lib/Uptake.jsm", this);
 
+const {NormandyTestUtils} = ChromeUtils.import("resource://testing-common/NormandyTestUtils.jsm");
+const {addonStudyFactory} = NormandyTestUtils.factories;
+
 function addonStudyRecipeFactory(overrides = {}) {
   let args = {
     name: "Fake name",
@@ -726,8 +729,6 @@ decorate_task(
   async function unenrollMissingAddonTest([study], sendEventStub) {
     const action = new AddonStudyAction();
 
-    SimpleTest.waitForExplicitFinish();
-    SimpleTest.monitorConsole(() => SimpleTest.finish(), [{message: /could not uninstall addon/i}]);
     await action.unenroll(study.recipeId);
 
     sendEventStub.assertEvents(

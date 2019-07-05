@@ -51,9 +51,7 @@ web-platform-tests:
     - web-platform-tests-reftests
     - web-platform-tests-wdspec
 
-web-platform-tests-headless:
-    - web-platform-tests-headless
-    - web-platform-tests-reftests-headless
+web-platform-tests-wdspec-headless:
     - web-platform-tests-wdspec-headless
 
 opt-only-tests:
@@ -322,7 +320,7 @@ macosx1014-64-tests:
     - mochitest
     - mochitest-a11y
     # - mochitest-browser-chrome
-    # - mochitest-chrome
+    - mochitest-chrome
     - mochitest-devtools-chrome
     - mochitest-devtools-webreplay
     - mochitest-gpu
@@ -330,7 +328,7 @@ macosx1014-64-tests:
     - mochitest-remote
     - mochitest-webgl1-core
     - mochitest-webgl1-ext
-    # - mochitest-webgl2-core
+    - mochitest-webgl2-core
     # - mochitest-webgl2-ext test  # timeouts
     - reftest
     - telemetry-tests-client
@@ -348,11 +346,8 @@ macosx1014-64-qr-tests:
 
 macosx64-tests:
     - gtest
-    - mochitest
     - mochitest-browser-chrome
-    - mochitest-chrome
     - mochitest-media
-    - mochitest-webgl2-core
     # - mochitest-webgl2-ext test timeouts
 
 macosx64-talos:
@@ -442,6 +437,10 @@ android-hw-arm7-debug-unittests:
     - jittest
     - jsreftest
     - mochitest-media
+
+android-hw-arm7-qr:
+    - crashtest
+    - reftest
 
 android-hw-arm7-raptor:
     - raptor-speedometer-geckoview
@@ -767,6 +766,10 @@ android-hw-arm7-raptor-power:
     - raptor-scn-power-idle-fennec
     - raptor-scn-power-idle-geckoview
     - raptor-scn-power-idle-refbrow
+    - raptor-scn-power-idle-bg-fenix
+    - raptor-scn-power-idle-bg-fennec
+    - raptor-scn-power-idle-bg-geckoview
+    - raptor-scn-power-idle-bg-refbrow
 
 android-hw-aarch64-raptor-power:
     - raptor-speedometer-geckoview-power
@@ -774,6 +777,10 @@ android-hw-aarch64-raptor-power:
     - raptor-scn-power-idle-fennec
     - raptor-scn-power-idle-geckoview
     - raptor-scn-power-idle-refbrow
+    - raptor-scn-power-idle-bg-fenix
+    - raptor-scn-power-idle-bg-fennec
+    - raptor-scn-power-idle-bg-geckoview
+    - raptor-scn-power-idle-bg-refbrow
 
 android-hw-arm7-raptor-nightly:
     - raptor-speedometer-fennec

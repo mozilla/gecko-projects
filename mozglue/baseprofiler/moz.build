@@ -83,6 +83,8 @@ EXPORTS += [
 
 EXPORTS.mozilla += [
     'public/BaseProfilerCounts.h',
+    'public/leb128iterator.h',
+    'public/PowerOfTwo.h',
 ]
 
 if CONFIG['MOZ_VTUNE']:

@@ -16,6 +16,7 @@
 #include "mozilla/dom/Element.h"
 #include "mozilla/dom/Location.h"
 #include "mozilla/dom/LocationBinding.h"
+#include "mozilla/dom/StructuredCloneTags.h"
 #include "mozilla/dom/WindowBinding.h"
 #include "mozilla/dom/WindowGlobalChild.h"
 #include "mozilla/dom/WindowGlobalParent.h"
@@ -60,6 +61,12 @@ static void Register(BrowsingContext* aBrowsingContext) {
   aBrowsingContext->Group()->Register(aBrowsingContext);
 }
 
+void BrowsingContext::Unregister() {
+  MOZ_DIAGNOSTIC_ASSERT(mGroup);
+  mGroup->Unregister(this);
+  mIsDiscarded = true;
+}
+
 BrowsingContext* BrowsingContext::Top() {
   BrowsingContext* bc = this;
   while (bc->mParent) {
@@ -82,6 +89,12 @@ LogModule* BrowsingContext::GetLog() { return gBrowsingContextLog; }
 /* static */
 already_AddRefed<BrowsingContext> BrowsingContext::Get(uint64_t aId) {
   return do_AddRef(sBrowsingContexts->Get(aId));
+}
+
+/* static */
+already_AddRefed<BrowsingContext> BrowsingContext::GetFromWindow(
+    WindowProxyHolder& aProxy) {
+  return do_AddRef(aProxy.get());
 }
 
 CanonicalBrowsingContext* BrowsingContext::Canonical() {
@@ -181,7 +194,8 @@ BrowsingContext::BrowsingContext(BrowsingContext* aParent,
       mBrowsingContextId(aBrowsingContextId),
       mGroup(aGroup),
       mParent(aParent),
-      mIsInProcess(false) {
+      mIsInProcess(false),
+      mIsDiscarded(false) {
   MOZ_RELEASE_ASSERT(!mParent || mParent->Group() == mGroup);
   MOZ_RELEASE_ASSERT(mBrowsingContextId != 0);
   MOZ_RELEASE_ASSERT(mGroup);
@@ -212,7 +226,7 @@ void BrowsingContext::SetEmbedderElement(Element* aEmbedder) {
 
       MOZ_DIAGNOSTIC_ASSERT(mType == Type::Chrome, "must be chrome");
       MOZ_DIAGNOSTIC_ASSERT(XRE_IsParentProcess(), "must be in parent");
-      MOZ_DIAGNOSTIC_ASSERT(!Group()->IsContextCached(this),
+      MOZ_DIAGNOSTIC_ASSERT(!mGroup->IsContextCached(this),
                             "cannot be in bfcache");
 
       RefPtr<BrowsingContext> kungFuDeathGrip(this);
@@ -250,7 +264,9 @@ void BrowsingContext::Attach(bool aFromIPC) {
            XRE_IsParentProcess() ? "Parent" : "Child", Id(),
            mParent ? mParent->Id() : 0));
 
-  MOZ_DIAGNOSTIC_ASSERT(!Group()->IsContextCached(this));
+  MOZ_DIAGNOSTIC_ASSERT(mGroup);
+  MOZ_DIAGNOSTIC_ASSERT(!mGroup->IsContextCached(this));
+  MOZ_DIAGNOSTIC_ASSERT(!mIsDiscarded);
 
   auto* children = mParent ? &mParent->mChildren : &mGroup->Toplevels();
   MOZ_DIAGNOSTIC_ASSERT(!children->Contains(this));
@@ -264,7 +280,7 @@ void BrowsingContext::Attach(bool aFromIPC) {
           GetIPCInitializer());
     } else if (IsContent()) {
       MOZ_DIAGNOSTIC_ASSERT(XRE_IsParentProcess());
-      Group()->EachParent([&](ContentParent* aParent) {
+      mGroup->EachParent([&](ContentParent* aParent) {
         Unused << aParent->SendAttachBrowsingContext(GetIPCInitializer());
       });
     }
@@ -277,36 +293,28 @@ void BrowsingContext::Detach(bool aFromIPC) {
            XRE_IsParentProcess() ? "Parent" : "Child", Id(),
            mParent ? mParent->Id() : 0));
 
+  // Unlinking might remove our group before Detach gets called.
+  if (NS_WARN_IF(!mGroup)) {
+    return;
+  }
+
   RefPtr<BrowsingContext> kungFuDeathGrip(this);
 
-  if (Group() && !Group()->EvictCachedContext(this)) {
+  if (!mGroup->EvictCachedContext(this)) {
     Children* children = nullptr;
     if (mParent) {
       children = &mParent->mChildren;
-    } else if (mGroup) {
+    } else {
       children = &mGroup->Toplevels();
     }
 
-    if (children) {
-      // TODO(farre): This assert looks extremely fishy, I know, but
-      // what we're actually saying is this: if we're detaching, but our
-      // parent doesn't have any children, it is because we're being
-      // detached by the cycle collector destroying docshells out of
-      // order.
-      MOZ_DIAGNOSTIC_ASSERT(children->IsEmpty() || children->Contains(this));
-
-      children->RemoveElement(this);
-    }
-  }
-
-  if (mGroup) {
-    mGroup->Unregister(this);
+    children->RemoveElement(this);
   }
 
   // As our nsDocShell is going away, this should implicitly mark us as closed.
   // We directly set our member, rather than using a transaction as we're going
   // to send a `Detach` message to other processes either way.
-  mClosed = true;
+  Unregister();
 
   if (!aFromIPC && XRE_IsContentProcess()) {
     auto cc = ContentChild::GetSingleton();
@@ -340,7 +348,7 @@ void BrowsingContext::CacheChildren(bool aFromIPC) {
           ("%s: Caching children of 0x%08" PRIx64 "",
            XRE_IsParentProcess() ? "Parent" : "Child", Id()));
 
-  Group()->CacheContexts(mChildren);
+  mGroup->CacheContexts(mChildren);
   mChildren.Clear();
 
   if (!aFromIPC && XRE_IsContentProcess()) {
@@ -357,7 +365,7 @@ void BrowsingContext::RestoreChildren(Children&& aChildren, bool aFromIPC) {
 
   for (BrowsingContext* child : aChildren) {
     MOZ_DIAGNOSTIC_ASSERT(child->GetParent() == this);
-    Unused << Group()->EvictCachedContext(child);
+    Unused << mGroup->EvictCachedContext(child);
   }
 
   mChildren.AppendElements(aChildren);
@@ -369,7 +377,7 @@ void BrowsingContext::RestoreChildren(Children&& aChildren, bool aFromIPC) {
   }
 }
 
-bool BrowsingContext::IsCached() { return Group()->IsContextCached(this); }
+bool BrowsingContext::IsCached() { return mGroup->IsContextCached(this); }
 
 bool BrowsingContext::HasOpener() const {
   return sBrowsingContexts->Contains(mOpenerId);
@@ -552,6 +560,45 @@ JSObject* BrowsingContext::WrapObject(JSContext* aCx,
   return BrowsingContext_Binding::Wrap(aCx, this, aGivenProto);
 }
 
+bool BrowsingContext::WriteStructuredClone(JSContext* aCx,
+                                           JSStructuredCloneWriter* aWriter,
+                                           StructuredCloneHolder* aHolder) {
+  return (JS_WriteUint32Pair(aWriter, SCTAG_DOM_BROWSING_CONTEXT, 0) &&
+          JS_WriteUint32Pair(aWriter, uint32_t(Id()), uint32_t(Id() >> 32)));
+}
+
+/* static */
+JSObject* BrowsingContext::ReadStructuredClone(JSContext* aCx,
+                                               JSStructuredCloneReader* aReader,
+                                               StructuredCloneHolder* aHolder) {
+  uint32_t idLow = 0;
+  uint32_t idHigh = 0;
+  if (!JS_ReadUint32Pair(aReader, &idLow, &idHigh)) {
+    return nullptr;
+  }
+  uint64_t id = uint64_t(idHigh) << 32 | idLow;
+
+  // Note: Do this check after reading our ID data. Returning null will abort
+  // the decode operation anyway, but we should at least be as safe as possible.
+  if (NS_WARN_IF(!NS_IsMainThread())) {
+    MOZ_DIAGNOSTIC_ASSERT(false,
+                          "We shouldn't be trying to decode a BrowsingContext "
+                          "on a background thread.");
+    return nullptr;
+  }
+
+  JS::RootedValue val(aCx, JS::NullValue());
+  // We'll get rooting hazard errors from the RefPtr destructor if it isn't
+  // destroyed before we try to return a raw JSObject*, so create it in its own
+  // scope.
+  if (RefPtr<BrowsingContext> context = Get(id)) {
+    if (!GetOrCreateDOMReflector(aCx, context, &val) || !val.isObject()) {
+      return nullptr;
+    }
+  }
+  return val.toObjectOrNull();
+}
+
 void BrowsingContext::NotifyUserGestureActivation() {
   // We would set the user gesture activation flag on the top level browsing
   // context, which would automatically be sync to other top level browsing
@@ -672,7 +719,7 @@ void BrowsingContext::Blur(ErrorResult& aError) {
 }
 
 Nullable<WindowProxyHolder> BrowsingContext::GetTop(ErrorResult& aError) {
-  if (mClosed) {
+  if (mIsDiscarded) {
     return nullptr;
   }
 
@@ -696,7 +743,7 @@ void BrowsingContext::GetOpener(JSContext* aCx,
 }
 
 Nullable<WindowProxyHolder> BrowsingContext::GetParent(ErrorResult& aError) {
-  if (mClosed) {
+  if (mIsDiscarded) {
     return nullptr;
   }
 

@@ -21,7 +21,6 @@ const {
   FORM_FIELDSET_NO_NAME_FROM_LEGEND,
   FORM_NO_NAME,
   FORM_NO_VISIBLE_NAME,
-  FORM_OPTGROUP_NO_NAME,
   FORM_OPTGROUP_NO_NAME_FROM_LABEL,
   FRAME_NO_NAME,
   HEADING_NO_CONTENT,
@@ -175,11 +174,7 @@ const formGroupingRule = function(accessible) {
 
   switch (DOMNode.nodeName) {
     case "OPTGROUP":
-      if (!name) {
-        return { score: FAIL, issue: FORM_OPTGROUP_NO_NAME };
-      }
-
-      return DOMNode.label && DOMNode.label.trim() === name ? null : {
+      return name && DOMNode.label && DOMNode.label.trim() === name ? null : {
         score: FAIL,
         issue: FORM_OPTGROUP_NO_NAME_FROM_LABEL,
       };
@@ -195,7 +190,7 @@ const formGroupingRule = function(accessible) {
         isVisible(label));
 
       return hasNameFromLegend ? null : {
-        score: FAIL,
+        score: WARNING,
         issue: FORM_FIELDSET_NO_NAME_FROM_LEGEND,
       };
     default:
@@ -293,7 +288,7 @@ const headingRule = function(accessible) {
   }
 
   const content = accessible.DOMNode.textContent && accessible.DOMNode.textContent.trim();
-  return content ? null : { score: FAIL, issue: HEADING_NO_CONTENT };
+  return content ? null : { score: WARNING, issue: HEADING_NO_CONTENT };
 };
 
 /**

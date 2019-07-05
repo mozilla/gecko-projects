@@ -330,6 +330,19 @@ mozilla::LazyLogModule nsContentUtils::sDOMDumpLog("Dump");
 int32_t nsContentUtils::sInnerOrOuterWindowCount = 0;
 uint32_t nsContentUtils::sInnerOrOuterWindowSerialCounter = 0;
 
+template int32_t nsContentUtils::ComparePoints(
+    const RangeBoundary& aFirstBoundary, const RangeBoundary& aSecondBoundary,
+    bool* aDisconnected);
+template int32_t nsContentUtils::ComparePoints(
+    const RangeBoundary& aFirstBoundary,
+    const RawRangeBoundary& aSecondBoundary, bool* aDisconnected);
+template int32_t nsContentUtils::ComparePoints(
+    const RawRangeBoundary& aFirstBoundary,
+    const RangeBoundary& aSecondBoundary, bool* aDisconnected);
+template int32_t nsContentUtils::ComparePoints(
+    const RawRangeBoundary& aFirstBoundary,
+    const RawRangeBoundary& aSecondBoundary, bool* aDisconnected);
+
 // Subset of
 // http://www.whatwg.org/specs/web-apps/current-work/#autofill-field-name
 enum AutocompleteUnsupportedFieldName : uint8_t {
@@ -1169,10 +1182,6 @@ int32_t nsContentUtils::ParseHTMLInteger(const nsAString& aValue,
         break;
       }
       foundValue = true;
-    } else if (*iter == char16_t('%')) {
-      ++iter;
-      result |= eParseHTMLInteger_IsPercent;
-      break;
     } else {
       break;
     }
@@ -2510,14 +2519,19 @@ nsINode* nsContentUtils::GetCommonAncestorUnderInteractiveContent(
 }
 
 /* static */
-int32_t nsContentUtils::ComparePoints(const RawRangeBoundary& aFirst,
-                                      const RawRangeBoundary& aSecond,
-                                      bool* aDisconnected) {
-  if (NS_WARN_IF(!aFirst.IsSet()) || NS_WARN_IF(!aSecond.IsSet())) {
+template <typename FPT, typename FRT, typename SPT, typename SRT>
+int32_t nsContentUtils::ComparePoints(
+    const RangeBoundaryBase<FPT, FRT>& aFirstBoundary,
+    const RangeBoundaryBase<SPT, SRT>& aSecondBoundary, bool* aDisconnected) {
+  if (NS_WARN_IF(!aFirstBoundary.IsSet()) ||
+      NS_WARN_IF(!aSecondBoundary.IsSet())) {
     return -1;
   }
-  return ComparePoints(aFirst.Container(), aFirst.Offset(), aSecond.Container(),
-                       aSecond.Offset(), aDisconnected);
+  // XXX Re-implement this without calling `Offset()` as far as possible,
+  //     and the other overload should be an alias of this.
+  return ComparePoints(aFirstBoundary.Container(), aFirstBoundary.Offset(),
+                       aSecondBoundary.Container(), aSecondBoundary.Offset(),
+                       aDisconnected);
 }
 
 inline bool IsCharInSet(const char* aSet, const char16_t aChar) {
@@ -6899,9 +6913,6 @@ bool nsContentUtils::IsAllowedNonCorsLanguage(const nsACString& aHeaderValue) {
 bool nsContentUtils::IsCORSSafelistedRequestHeader(const nsACString& aName,
                                                    const nsACString& aValue) {
   // see https://fetch.spec.whatwg.org/#cors-safelisted-request-header
-  if (aValue.Length() > 128) {
-    return false;
-  }
   return (aName.LowerCaseEqualsLiteral("accept") &&
           nsContentUtils::IsAllowedNonCorsAccept(aValue)) ||
          (aName.LowerCaseEqualsLiteral("accept-language") &&
@@ -7165,6 +7176,8 @@ nsresult nsContentUtils::IPCTransferableToTransferable(
     mozilla::dom::BrowserChild* aBrowserChild) {
   nsresult rv;
 
+  aTransferable->SetIsPrivateData(aIsPrivateData);
+
   const nsTArray<IPCDataTransferItem>& items = aDataTransfer.items();
   for (const auto& item : items) {
     aTransferable->AddDataFlavor(item.flavor().get());
@@ -7214,7 +7227,6 @@ nsresult nsContentUtils::IPCTransferableToTransferable(
     }
   }
 
-  aTransferable->SetIsPrivateData(aIsPrivateData);
   aTransferable->SetRequestingPrincipal(aRequestingPrincipal);
   aTransferable->SetContentPolicyType(aContentPolicyType);
   return NS_OK;
@@ -7861,7 +7873,7 @@ nsresult nsContentUtils::SendMouseEvent(
     }
     return presShell->HandleEvent(view->GetFrame(), &event, false, &status);
   }
-  if (StaticPrefs::TestEventsAsyncEnabled()) {
+  if (StaticPrefs::test_events_async_enabled()) {
     status = widget->DispatchInputEvent(&event);
   } else {
     nsresult rv = widget->DispatchEvent(&event, status);

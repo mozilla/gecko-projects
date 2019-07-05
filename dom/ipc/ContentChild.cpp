@@ -890,12 +890,21 @@ nsresult ContentChild::ProvideWindowCommon(
   // load in the current process.
   bool loadInDifferentProcess = aForceNoOpener && sNoopenerNewProcess;
   if (aTabOpener && !loadInDifferentProcess && aURI) {
-    nsCOMPtr<nsIWebBrowserChrome3> browserChrome3;
-    rv = aTabOpener->GetWebBrowserChrome(getter_AddRefs(browserChrome3));
-    if (NS_SUCCEEDED(rv) && browserChrome3) {
-      bool shouldLoad;
-      rv = browserChrome3->ShouldLoadURIInThisProcess(aURI, &shouldLoad);
-      loadInDifferentProcess = NS_SUCCEEDED(rv) && !shouldLoad;
+    nsCOMPtr<nsILoadContext> context;
+    if (aParent) {
+      context = do_GetInterface(aTabOpener->WebNavigation());
+    }
+    // Only special-case cross-process loads if Fission is disabled. With
+    // Fission enabled, the initial in-process load will automatically be
+    // retargeted to the correct process.
+    if (!(context && context->UseRemoteSubframes())) {
+      nsCOMPtr<nsIWebBrowserChrome3> browserChrome3;
+      rv = aTabOpener->GetWebBrowserChrome(getter_AddRefs(browserChrome3));
+      if (NS_SUCCEEDED(rv) && browserChrome3) {
+        bool shouldLoad;
+        rv = browserChrome3->ShouldLoadURIInThisProcess(aURI, &shouldLoad);
+        loadInDifferentProcess = NS_SUCCEEDED(rv) && !shouldLoad;
+      }
     }
   }
 
@@ -926,7 +935,7 @@ nsresult ContentChild::ProvideWindowCommon(
     Unused << SendCreateWindowInDifferentProcess(
         aTabOpener, aChromeFlags, aCalledFromJS, aPositionSpecified,
         aSizeSpecified, uriToLoad, features, fullZoom, name,
-        Principal(triggeringPrincipal), csp, referrerInfo);
+        triggeringPrincipal, csp, referrerInfo);
 
     // We return NS_ERROR_ABORT, so that the caller knows that we've abandoned
     // the window open as far as it is concerned.
@@ -1754,8 +1763,10 @@ mozilla::ipc::IPCResult ContentChild::RecvSetProcessSandbox(
       CrashReporter::Annotation::ContentSandboxCapabilities,
       static_cast<int>(SandboxInfo::Get().AsInteger()));
 #  endif /* XP_LINUX && !OS_ANDROID */
+  // Use the prefix to avoid URIs from Fission isolated processes.
+  auto remoteTypePrefix = RemoteTypePrefix(GetRemoteType());
   CrashReporter::AnnotateCrashReport(CrashReporter::Annotation::RemoteType,
-                                     NS_ConvertUTF16toUTF8(GetRemoteType()));
+                                     NS_ConvertUTF16toUTF8(remoteTypePrefix));
 #endif /* MOZ_SANDBOX */
 
   return IPC_OK();
@@ -2774,6 +2785,8 @@ mozilla::ipc::IPCResult ContentChild::RecvRemoteType(
   return IPC_OK();
 }
 
+// Call RemoteTypePrefix() on the result to remove URIs if you want to use this
+// for telemetry.
 const nsAString& ContentChild::GetRemoteType() const { return mRemoteType; }
 
 mozilla::ipc::IPCResult ContentChild::RecvInitServiceWorkers(

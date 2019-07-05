@@ -555,8 +555,6 @@ pref("media.av1.use-dav1d", false);
 #endif
 #endif
 
-pref("media.webaudio.audiocontextoptions-samplerate.enabled", true);
-
 // Whether to enable arbitrary layer geometry for OpenGL compositor
 pref("layers.geometry.opengl.enabled", true);
 
@@ -1242,6 +1240,10 @@ pref("privacy.popups.maxReported", 100);
 pref("privacy.trackingprotection.enabled",  false);
 // Enforce tracking protection in Private Browsing mode
 pref("privacy.trackingprotection.pbmode.enabled",  true);
+// Enable Origin Telemetry by default
+#ifdef NIGHTLY_BUILD
+pref("privacy.trackingprotection.origin_telemetry.enabled", true);
+#endif
 // First Party Isolation (double keying), disabled by default
 pref("privacy.firstparty.isolate",                        false);
 // If false, two windows in the same domain with different first party domains
@@ -1339,7 +1341,7 @@ pref("javascript.options.mem.nursery.max_kb", 16384);
 pref("javascript.options.mem.gc_per_zone", true);
 pref("javascript.options.mem.gc_incremental", true);
 
-// JSGC_SLICE_TIME_BUDGET
+// JSGC_SLICE_TIME_BUDGET_MS
 // Override the shell's default of unlimited slice time.
 pref("javascript.options.mem.gc_incremental_slice_ms", 5);
 
@@ -2508,7 +2510,7 @@ pref("security.dialog_enable_delay", 1000);
 pref("security.notification_enable_delay", 500);
 
 #if defined(DEBUG) && !defined(ANDROID)
-pref("csp.about_uris_without_csp", "blank,printpreview,srcdoc,addons,cache-entry,config,debugging,devtools,downloads,home,newtab,plugins,profiles,preferences,restartrequired,serviceworkers,sessionrestore,support,sync-log,telemetry,url-classifier,welcomeback");
+pref("csp.about_uris_without_csp", "blank,printpreview,srcdoc,addons,cache-entry,config,debugging,devtools,downloads,home,newtab,plugins,preferences,sessionrestore,support,sync-log,telemetry,welcomeback");
 // the following prefs are for testing purposes only.
 pref("csp.overrule_about_uris_without_csp_whitelist", false);
 pref("csp.skip_about_page_has_csp_assert", false);
@@ -3153,8 +3155,14 @@ pref("dom.largeAllocationHeader.enabled", true);
 // Disable e10s for Gecko by default. This is overridden in firefox.js.
 pref("browser.tabs.remote.autostart", false);
 
-// Disable fission for Gecko by default.
+// Disable fission for Gecko by default. Lock it on release and beta because
+// it is not ready for use and can leak URIs to telemetry until bug 1561653 is
+// fixed.
+#ifdef RELEASE_OR_BETA
+pref("fission.autostart", false, locked);
+#else
 pref("fission.autostart", false);
+#endif
 
 // Pref to control whether we use separate content processes for top-level load
 // of file:// URIs.
@@ -3166,6 +3174,10 @@ pref("browser.tabs.remote.separateFileUriProcess", true);
 // sorts of pages, which we have to do when we run them in the normal web
 // content process, causes compatibility issues.
 pref("browser.tabs.remote.allowLinkedWebInFileUriProcess", true);
+
+// This pref will cause assertions when a remoteType triggers a process switch
+// to a new remoteType it should not be able to trigger.
+pref("browser.tabs.remote.enforceRemoteTypeRestrictions", false);
 
 // Pref to control whether we use a separate privileged content process
 // for about: pages. This pref name did not age well: we will have multiple
@@ -5091,9 +5103,6 @@ pref("dom.vr.poseprediction.enabled", true);
 pref("dom.vr.require-gesture", true);
 // Puppet device, used for simulating VR hardware within tests and dev tools
 pref("dom.vr.puppet.enabled", false);
-// Allow displaying the result of vr submitframe (0: disable, 1: store the
-// result as a base64 image, 2: show it on the screen).
-pref("dom.vr.puppet.submitframe", 0);
 // path to OSVR DLLs
 pref("gfx.vr.osvr.utilLibPath", "");
 pref("gfx.vr.osvr.commonLibPath", "");
@@ -5193,13 +5202,13 @@ pref("captivedetect.maxRetryCount", 5);
 pref("dom.mapped_arraybuffer.enabled", true);
 
 // The tables used for Safebrowsing phishing and malware checks
-pref("urlclassifier.malwareTable", "goog-malware-proto,goog-unwanted-proto,test-harmful-simple,test-malware-simple,test-unwanted-simple");
+pref("urlclassifier.malwareTable", "goog-malware-proto,goog-unwanted-proto,moztest-harmful-simple,moztest-malware-simple,moztest-unwanted-simple");
 #ifdef MOZILLA_OFFICIAL
 // In official builds, we are allowed to use Google's private phishing
 // list (see bug 1288840).
-pref("urlclassifier.phishTable", "goog-phish-proto,test-phish-simple");
+pref("urlclassifier.phishTable", "goog-phish-proto,moztest-phish-simple");
 #else
-pref("urlclassifier.phishTable", "googpub-phish-proto,test-phish-simple");
+pref("urlclassifier.phishTable", "googpub-phish-proto,moztest-phish-simple");
 #endif
 
 // Tables for application reputation
@@ -5210,10 +5219,10 @@ pref("urlclassifier.downloadBlockTable", "goog-badbinurl-proto");
 pref("urlclassifier.passwordAllowTable", "goog-passwordwhite-proto");
 
 // Tables for anti-tracking features
-pref("urlclassifier.trackingAnnotationTable", "test-track-simple,ads-track-digest256,social-track-digest256,analytics-track-digest256,content-track-digest256");
-pref("urlclassifier.trackingAnnotationWhitelistTable", "test-trackwhite-simple,mozstd-trackwhite-digest256");
-pref("urlclassifier.trackingTable", "test-track-simple,base-track-digest256");
-pref("urlclassifier.trackingWhitelistTable", "test-trackwhite-simple,mozstd-trackwhite-digest256");
+pref("urlclassifier.trackingAnnotationTable", "moztest-track-simple,ads-track-digest256,social-track-digest256,analytics-track-digest256,content-track-digest256");
+pref("urlclassifier.trackingAnnotationWhitelistTable", "moztest-trackwhite-simple,mozstd-trackwhite-digest256");
+pref("urlclassifier.trackingTable", "moztest-track-simple,base-track-digest256");
+pref("urlclassifier.trackingWhitelistTable", "moztest-trackwhite-simple,mozstd-trackwhite-digest256");
 
 pref("urlclassifier.features.fingerprinting.blacklistTables", "base-fingerprinting-track-digest256");
 pref("urlclassifier.features.fingerprinting.whitelistTables", "mozstd-trackwhite-digest256");
@@ -5302,7 +5311,7 @@ pref("browser.safebrowsing.provider.mozilla.lists.base", "moz-std");
 pref("browser.safebrowsing.provider.mozilla.lists.content", "moz-full");
 
 // The table and global pref for blocking plugin content
-pref("urlclassifier.blockedTable", "test-block-simple,mozplugin-block-digest256");
+pref("urlclassifier.blockedTable", "moztest-block-simple,mozplugin-block-digest256");
 
 // Flash blocking tables
 pref("urlclassifier.flashAllowTable", "allow-flashallow-digest256");

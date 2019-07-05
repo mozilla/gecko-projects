@@ -84,7 +84,7 @@ bool HTMLMarqueeElement::ParseAttribute(int32_t aNamespaceID,
                                         nsAttrValue& aResult) {
   if (aNamespaceID == kNameSpaceID_None) {
     if ((aAttribute == nsGkAtoms::width) || (aAttribute == nsGkAtoms::height)) {
-      return aResult.ParseSpecialIntValue(aValue);
+      return aResult.ParseHTMLDimension(aValue);
     }
     if (aAttribute == nsGkAtoms::bgcolor) {
       return aResult.ParseColor(aValue);
@@ -97,9 +97,8 @@ bool HTMLMarqueeElement::ParseAttribute(int32_t aNamespaceID,
       return aResult.ParseEnumValue(aValue, kDirectionTable, false,
                                     kDefaultDirection);
     }
-    if ((aAttribute == nsGkAtoms::hspace) ||
-        (aAttribute == nsGkAtoms::vspace)) {
-      return aResult.ParseIntWithBounds(aValue, 0);
+    if (aAttribute == nsGkAtoms::hspace || aAttribute == nsGkAtoms::vspace) {
+      return aResult.ParseHTMLDimension(aValue);
     }
 
     if (aAttribute == nsGkAtoms::loop) {

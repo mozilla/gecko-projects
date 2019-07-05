@@ -89,6 +89,7 @@ let LEGACY_ACTORS = {
         "AboutLoginsDeleteLogin": {wantUntrusted: true},
         "AboutLoginsImport": {wantUntrusted: true},
         "AboutLoginsInit": {wantUntrusted: true},
+        "AboutLoginsOpenFAQ": {wantUntrusted: true},
         "AboutLoginsOpenFeedback": {wantUntrusted: true},
         "AboutLoginsOpenPreferences": {wantUntrusted: true},
         "AboutLoginsOpenSite": {wantUntrusted: true},
@@ -459,7 +460,6 @@ XPCOMUtils.defineLazyModuleGetters(this, {
   BrowserWindowTracker: "resource:///modules/BrowserWindowTracker.jsm",
   ContextualIdentityService: "resource://gre/modules/ContextualIdentityService.jsm",
   Corroborate: "resource://gre/modules/Corroborate.jsm",
-  DateTimePickerParent: "resource://gre/modules/DateTimePickerParent.jsm",
   Discovery: "resource:///modules/Discovery.jsm",
   ExtensionsUI: "resource:///modules/ExtensionsUI.jsm",
   FxAccounts: "resource://gre/modules/FxAccounts.jsm",
@@ -583,6 +583,7 @@ const listeners = {
     "AboutLogins:CreateLogin": ["AboutLoginsParent"],
     "AboutLogins:DeleteLogin": ["AboutLoginsParent"],
     "AboutLogins:Import": ["AboutLoginsParent"],
+    "AboutLogins:OpenFAQ": ["AboutLoginsParent"],
     "AboutLogins:OpenFeedback": ["AboutLoginsParent"],
     "AboutLogins:OpenPreferences": ["AboutLoginsParent"],
     "AboutLogins:OpenSite": ["AboutLoginsParent"],
@@ -1397,7 +1398,6 @@ BrowserGlue.prototype = {
     this._checkForOldBuildUpdates();
 
     AutoCompletePopup.init();
-    DateTimePickerParent.init();
     // Check if Sync is configured
     if (Services.prefs.prefHasUserValue("services.sync.username")) {
       WeaveService.init();
@@ -1569,7 +1569,6 @@ BrowserGlue.prototype = {
     AboutPrivateBrowsingHandler.uninit();
     AboutProtectionsHandler.uninit();
     AutoCompletePopup.uninit();
-    DateTimePickerParent.uninit();
 
     Normandy.uninit();
     RFPHelper.uninit();

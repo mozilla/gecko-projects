@@ -27,7 +27,6 @@ login-filter {
 
 login-list {
   grid-area: logins;
-  overflow: hidden auto;
 }
 
 login-item {
@@ -43,6 +42,19 @@ login-item {
 #create-login-button {
   margin-inline-start: 18px;
   margin-inline-end: 18px;
+}
+
+#branding-logo {
+  -moz-context-properties: fill;
+  fill: #20123a;
+}
+
+@supports -moz-bool-pref("browser.in-content.dark-mode") {
+  @media (prefers-color-scheme: dark) {
+    #branding-logo {
+      fill: #fff;
+    }
+  }
 }
 
 :root:not(.official-branding) #branding-logo {

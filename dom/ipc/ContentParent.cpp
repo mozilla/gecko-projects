@@ -704,17 +704,23 @@ uint32_t ContentParent::GetPoolSize(const nsAString& aContentProcessType) {
   return *sBrowserContentParents->LookupOrAdd(aContentProcessType);
 }
 
-/*static*/
-uint32_t ContentParent::GetMaxProcessCount(
+const nsDependentSubstring RemoteTypePrefix(
     const nsAString& aContentProcessType) {
   // The suffix after a `=` in a remoteType is dynamic, and used to control the
-  // process pool to use. Max process count is based only on the prefix.
+  // process pool to use.
   int32_t equalIdx = aContentProcessType.FindChar(L'=');
   if (equalIdx == kNotFound) {
     equalIdx = aContentProcessType.Length();
   }
+  return StringHead(aContentProcessType, equalIdx);
+}
+
+/*static*/
+uint32_t ContentParent::GetMaxProcessCount(
+    const nsAString& aContentProcessType) {
+  // Max process count is based only on the prefix.
   const nsDependentSubstring processTypePrefix =
-      StringHead(aContentProcessType, equalIdx);
+    RemoteTypePrefix(aContentProcessType);
 
   // Check for the default remote type of "web", as it uses different prefs.
   if (processTypePrefix.EqualsLiteral("web")) {
@@ -1550,8 +1556,7 @@ void ContentParent::ProcessingError(Result aCode, const char* aReason) {
 }
 
 void ContentParent::ActorDestroy(ActorDestroyReason why) {
-  RefPtr<ContentParent> kungFuDeathGrip(mSelfRef.forget());
-  MOZ_RELEASE_ASSERT(kungFuDeathGrip);
+  MOZ_RELEASE_ASSERT(mSelfRef);
 
   if (mForceKillTimer) {
     mForceKillTimer->Cancel();
@@ -1663,16 +1668,6 @@ void ContentParent::ActorDestroy(ActorDestroyReason why) {
     }
   }
 
-  // IPDL rules require actors to live on past ActorDestroy, but it
-  // may be that the kungFuDeathGrip above is the last reference to
-  // |this|.  If so, when we go out of scope here, we're deleted and
-  // all hell breaks loose.
-  //
-  // This runnable ensures that a reference to |this| lives on at
-  // least until after the current task finishes running.
-  NS_DispatchToCurrentThread(NS_NewRunnableFunction(
-      "DelayedReleaseContentParent", [kungFuDeathGrip] {}));
-
   ContentProcessManager* cpm = ContentProcessManager::GetSingleton();
   nsTArray<ContentParentId> childIDArray =
       cpm->GetAllChildProcessById(this->ChildID());
@@ -1710,6 +1705,8 @@ void ContentParent::ActorDestroy(ActorDestroyReason why) {
 
   MOZ_DIAGNOSTIC_ASSERT(mGroups.IsEmpty());
 }
+
+void ContentParent::ActorDealloc() { mSelfRef = nullptr; }
 
 bool ContentParent::TryToRecycle() {
   // This life time check should be replaced by a memory health check (memory
@@ -2130,7 +2127,7 @@ void ContentParent::LaunchSubprocessInternal(
     return LaunchPromise::CreateAndReject(err, __func__);
   };
 
-  // See also ActorDestroy.
+  // See also ActorDealloc.
   mSelfRef = this;
 
   // Lifetime note: the GeckoChildProcessHost holds a strong reference
@@ -2804,6 +2801,12 @@ mozilla::ipc::IPCResult ContentParent::RecvGetClipboard(
       do_CreateInstance("@mozilla.org/widget/transferable;1", &rv);
   NS_ENSURE_SUCCESS(rv, IPC_OK());
   trans->Init(nullptr);
+  // The private flag is only used to prevent the data from being cached to the
+  // disk. The flag is not exported to the IPCDataTransfer object.
+  // The flag is set because we are not sure whether the clipboard data is used
+  // in a private browsing context. The transferable is only used in this scope,
+  // so the cache would not reduce memory consumption anyway.
+  trans->SetIsPrivateData(true);
 
   for (uint32_t t = 0; t < aTypes.Length(); t++) {
     trans->AddDataFlavor(aTypes[t].get());
@@ -4970,7 +4973,7 @@ mozilla::ipc::IPCResult ContentParent::RecvCreateWindowInDifferentProcess(
     const bool& aCalledFromJS, const bool& aPositionSpecified,
     const bool& aSizeSpecified, const Maybe<URIParams>& aURIToLoad,
     const nsCString& aFeatures, const float& aFullZoom, const nsString& aName,
-    const IPC::Principal& aTriggeringPrincipal, nsIContentSecurityPolicy* aCsp,
+    nsIPrincipal* aTriggeringPrincipal, nsIContentSecurityPolicy* aCsp,
     nsIReferrerInfo* aReferrerInfo) {
   MOZ_DIAGNOSTIC_ASSERT(!nsContentUtils::IsSpecialName(aName));
 
@@ -4978,6 +4981,36 @@ mozilla::ipc::IPCResult ContentParent::RecvCreateWindowInDifferentProcess(
   bool windowIsNew;
   nsCOMPtr<nsIURI> uriToLoad = DeserializeURI(aURIToLoad);
   int32_t openLocation = nsIBrowserDOMWindow::OPEN_NEWWINDOW;
+
+  // If we have enough data, check the schemes of the loader and loadee
+  // to make sure they make sense.
+  if (uriToLoad && uriToLoad->SchemeIs("file") &&
+      !GetRemoteType().EqualsLiteral(FILE_REMOTE_TYPE) &&
+      Preferences::GetBool("browser.tabs.remote.enforceRemoteTypeRestrictions",
+                           false)) {
+#ifdef MOZ_DIAGNOSTIC_ASSERT_ENABLED
+#  ifdef DEBUG
+    nsAutoCString uriToLoadStr;
+    uriToLoad->GetAsciiSpec(uriToLoadStr);
+
+    nsCOMPtr<nsIURI> triggeringUri;
+    aTriggeringPrincipal->GetURI(getter_AddRefs(triggeringUri));
+    nsAutoCString triggeringUriStr;
+    if (triggeringUri) {
+      triggeringUri->GetAsciiSpec(triggeringUriStr);
+    }
+
+    NS_WARNING(nsPrintfCString(
+                   "RecvCreateWindowInDifferentProcess blocked loading file "
+                   "scheme from non-file remotetype: %s tried to load %s",
+                   triggeringUriStr.get(), uriToLoadStr.get())
+                   .get());
+#  endif
+    MOZ_CRASH(
+        "RecvCreateWindowInDifferentProcess blocked loading improper scheme");
+#endif
+    return IPC_OK();
+  }
 
   nsresult rv;
   mozilla::ipc::IPCResult ipcResult = CommonCreateWindow(

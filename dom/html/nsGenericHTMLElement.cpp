@@ -1038,12 +1038,12 @@ bool nsGenericHTMLElement::ParseDivAlignValue(const nsAString& aString,
 bool nsGenericHTMLElement::ParseImageAttribute(nsAtom* aAttribute,
                                                const nsAString& aString,
                                                nsAttrValue& aResult) {
-  if ((aAttribute == nsGkAtoms::width) || (aAttribute == nsGkAtoms::height)) {
-    return aResult.ParseSpecialIntValue(aString);
+  if (aAttribute == nsGkAtoms::width || aAttribute == nsGkAtoms::height ||
+      aAttribute == nsGkAtoms::hspace || aAttribute == nsGkAtoms::vspace) {
+    return aResult.ParseHTMLDimension(aString);
   }
-  if ((aAttribute == nsGkAtoms::hspace) || (aAttribute == nsGkAtoms::vspace) ||
-      (aAttribute == nsGkAtoms::border)) {
-    return aResult.ParseIntWithBounds(aString, 0);
+  if (aAttribute == nsGkAtoms::border) {
+    return aResult.ParseNonNegativeIntValue(aString);
   }
   return false;
 }
@@ -1224,46 +1224,9 @@ void nsGenericHTMLElement::MapVAlignAttributeInto(
   }
 }
 
-void nsGenericHTMLElement::MapImageMarginAttributeInto(
-    const nsMappedAttributes* aAttributes, MappedDeclarations& aDecls) {
-  const nsAttrValue* value;
-
-  // hspace: value
-  value = aAttributes->GetAttr(nsGkAtoms::hspace);
-  if (value) {
-    if (value->Type() == nsAttrValue::eInteger) {
-      aDecls.SetPixelValueIfUnset(eCSSProperty_margin_left,
-                                  (float)value->GetIntegerValue());
-      aDecls.SetPixelValueIfUnset(eCSSProperty_margin_right,
-                                  (float)value->GetIntegerValue());
-    } else if (value->Type() == nsAttrValue::ePercent) {
-      aDecls.SetPercentValueIfUnset(eCSSProperty_margin_left,
-                                    value->GetPercentValue());
-      aDecls.SetPercentValueIfUnset(eCSSProperty_margin_right,
-                                    value->GetPercentValue());
-    }
-  }
-
-  // vspace: value
-  value = aAttributes->GetAttr(nsGkAtoms::vspace);
-  if (value) {
-    if (value->Type() == nsAttrValue::eInteger) {
-      aDecls.SetPixelValueIfUnset(eCSSProperty_margin_top,
-                                  (float)value->GetIntegerValue());
-      aDecls.SetPixelValueIfUnset(eCSSProperty_margin_bottom,
-                                  (float)value->GetIntegerValue());
-    } else if (value->Type() == nsAttrValue::ePercent) {
-      aDecls.SetPercentValueIfUnset(eCSSProperty_margin_top,
-                                    value->GetPercentValue());
-      aDecls.SetPercentValueIfUnset(eCSSProperty_margin_bottom,
-                                    value->GetPercentValue());
-    }
-  }
-}
-
-static void MapSizeAttributeInto(MappedDeclarations& aDecls,
-                                 nsCSSPropertyID aProp,
-                                 const nsAttrValue& aValue) {
+static void MapDimensionAttributeInto(MappedDeclarations& aDecls,
+                                      nsCSSPropertyID aProp,
+                                      const nsAttrValue& aValue) {
   MOZ_ASSERT(!aDecls.PropertyIsSet(aProp),
              "Why mapping the same property twice?");
   if (aValue.Type() == nsAttrValue::eInteger) {
@@ -1272,19 +1235,41 @@ static void MapSizeAttributeInto(MappedDeclarations& aDecls,
   if (aValue.Type() == nsAttrValue::ePercent) {
     return aDecls.SetPercentValue(aProp, aValue.GetPercentValue());
   }
+  if (aValue.Type() == nsAttrValue::eDoubleValue) {
+    return aDecls.SetPixelValue(aProp, aValue.GetDoubleValue());
+  }
+}
+
+void nsGenericHTMLElement::MapImageMarginAttributeInto(
+    const nsMappedAttributes* aAttributes, MappedDeclarations& aDecls) {
+  const nsAttrValue* value;
+
+  // hspace: value
+  value = aAttributes->GetAttr(nsGkAtoms::hspace);
+  if (value) {
+    MapDimensionAttributeInto(aDecls, eCSSProperty_margin_left, *value);
+    MapDimensionAttributeInto(aDecls, eCSSProperty_margin_right, *value);
+  }
+
+  // vspace: value
+  value = aAttributes->GetAttr(nsGkAtoms::vspace);
+  if (value) {
+    MapDimensionAttributeInto(aDecls, eCSSProperty_margin_top, *value);
+    MapDimensionAttributeInto(aDecls, eCSSProperty_margin_bottom, *value);
+  }
 }
 
 void nsGenericHTMLElement::MapWidthAttributeInto(
     const nsMappedAttributes* aAttributes, MappedDeclarations& aDecls) {
   if (const nsAttrValue* value = aAttributes->GetAttr(nsGkAtoms::width)) {
-    MapSizeAttributeInto(aDecls, eCSSProperty_width, *value);
+    MapDimensionAttributeInto(aDecls, eCSSProperty_width, *value);
   }
 }
 
 void nsGenericHTMLElement::MapHeightAttributeInto(
     const nsMappedAttributes* aAttributes, MappedDeclarations& aDecls) {
   if (const nsAttrValue* value = aAttributes->GetAttr(nsGkAtoms::height)) {
-    MapSizeAttributeInto(aDecls, eCSSProperty_height, *value);
+    MapDimensionAttributeInto(aDecls, eCSSProperty_height, *value);
   }
 }
 
@@ -1293,21 +1278,32 @@ void nsGenericHTMLElement::MapImageSizeAttributesInto(
   auto* width = aAttributes->GetAttr(nsGkAtoms::width);
   auto* height = aAttributes->GetAttr(nsGkAtoms::height);
   if (width) {
-    MapSizeAttributeInto(aDecls, eCSSProperty_width, *width);
+    MapDimensionAttributeInto(aDecls, eCSSProperty_width, *width);
   }
   if (height) {
-    MapSizeAttributeInto(aDecls, eCSSProperty_height, *height);
+    MapDimensionAttributeInto(aDecls, eCSSProperty_height, *height);
   }
   // NOTE(emilio): If we implement the unrestricted aspect-ratio proposal, we
   // probably need to make this attribute mapping not apply to things like
   // <marquee> and <table>, which right now can go through this path.
   if (StaticPrefs::layout_css_width_and_height_map_to_aspect_ratio_enabled() &&
-      width && width->Type() == nsAttrValue::eInteger && height &&
-      height->Type() == nsAttrValue::eInteger) {
-    int32_t w = width->GetIntegerValue();
-    int32_t h = height->GetIntegerValue();
-    if (w != 0 && h != 0) {
-      aDecls.SetNumberValue(eCSSProperty_aspect_ratio, float(w) / float(h));
+      width && height) {
+    Maybe<double> w;
+    if (width->Type() == nsAttrValue::eInteger) {
+      w.emplace(width->GetIntegerValue());
+    } else if (width->Type() == nsAttrValue::eDoubleValue) {
+      w.emplace(width->GetDoubleValue());
+    }
+
+    Maybe<double> h;
+    if (height->Type() == nsAttrValue::eInteger) {
+      h.emplace(height->GetIntegerValue());
+    } else if (height->Type() == nsAttrValue::eDoubleValue) {
+      h.emplace(height->GetDoubleValue());
+    }
+
+    if (w && h && *w != 0 && *h != 0) {
+      aDecls.SetNumberValue(eCSSProperty_aspect_ratio, *w / *h);
     }
   }
 }
@@ -1396,6 +1392,47 @@ uint32_t nsGenericHTMLElement::GetUnsignedIntAttr(nsAtom* aAttr,
   }
 
   return attrVal->GetIntegerValue();
+}
+
+uint32_t nsGenericHTMLElement::GetDimensionAttrAsUnsignedInt(
+    nsAtom* aAttr, uint32_t aDefault) const {
+  const nsAttrValue* attrVal = mAttrs.GetAttr(aAttr);
+  if (!attrVal) {
+    return aDefault;
+  }
+
+  if (attrVal->Type() == nsAttrValue::eInteger) {
+    return attrVal->GetIntegerValue();
+  }
+
+  if (attrVal->Type() == nsAttrValue::ePercent) {
+    // This is a nasty hack.  When we parsed the value, we stored it as an
+    // ePercent, not eInteger, because there was a '%' after it in the string.
+    // But the spec says to basically re-parse the string as an integer.
+    // Luckily, we can just return the value we have stored.  But
+    // GetPercentValue() divides it by 100, so we need to multiply it back.
+    return uint32_t(attrVal->GetPercentValue() * 100.0f);
+  }
+
+  if (attrVal->Type() == nsAttrValue::eDoubleValue) {
+    return uint32_t(attrVal->GetDoubleValue());
+  }
+
+  // Unfortunately, the set of values that are valid dimensions is not a
+  // superset of values that are valid unsigned ints.  In particular "+100" is
+  // not a valid dimension, but should parse as the unsigned int "100".  So if
+  // we got here and we don't have a valid dimension value, just try re-parsing
+  // the string we have as an integer.
+  nsAutoString val;
+  attrVal->ToString(val);
+  nsContentUtils::ParseHTMLIntegerResultFlags result;
+  int32_t parsedInt = nsContentUtils::ParseHTMLInteger(val, &result);
+  if ((result & nsContentUtils::eParseHTMLInteger_Error) ||
+      parsedInt < 0) {
+    return aDefault;
+  }
+
+  return parsedInt;
 }
 
 void nsGenericHTMLElement::GetURIAttr(nsAtom* aAttr, nsAtom* aBaseAttr,

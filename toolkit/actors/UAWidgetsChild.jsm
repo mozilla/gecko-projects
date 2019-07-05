@@ -1,13 +1,21 @@
 /* vim: set ts=2 sw=2 sts=2 et tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
- * License, v. 2.0. If a copy of the MPL was not distributed with this
- * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+* License, v. 2.0. If a copy of the MPL was not distributed with this
+* file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 "use strict";
 
 var EXPORTED_SYMBOLS = ["UAWidgetsChild"];
 
 const {ActorChild} = ChromeUtils.import("resource://gre/modules/ActorChild.jsm");
 const {Services} = ChromeUtils.import("resource://gre/modules/Services.jsm");
+
+const HANDLED_ELEMENTS = [
+  "video",
+  "audio",
+  "embed",
+  "object",
+  "marquee",
+];
 
 class UAWidgetsChild extends ActorChild {
   constructor(dispatcher) {
@@ -18,18 +26,20 @@ class UAWidgetsChild extends ActorChild {
   }
 
   handleEvent(aEvent) {
-    switch (aEvent.type) {
-      case "UAWidgetSetupOrChange":
-        this.setupOrNotifyWidget(aEvent.target);
-        break;
-      case "UAWidgetTeardown":
-        this.teardownWidget(aEvent.target);
-        break;
-    }
+    if (HANDLED_ELEMENTS.includes(aEvent.target.localName)) {
+      switch (aEvent.type) {
+        case "UAWidgetSetupOrChange":
+          this.setupOrNotifyWidget(aEvent.target);
+          break;
+        case "UAWidgetTeardown":
+          this.teardownWidget(aEvent.target);
+          break;
+      }
 
-    // In case we are a nested frame, prevent the message manager of the
-    // parent frame from receving the event.
-    aEvent.stopPropagation();
+      // In case we are a nested frame, prevent the message manager of the
+      // parent frame from receving the event.
+      aEvent.stopPropagation();
+    }
   }
 
   setupOrNotifyWidget(aElement) {
@@ -60,10 +70,6 @@ class UAWidgetsChild extends ActorChild {
           "media.videocontrols.picture-in-picture.video-toggle.enabled",
           "media.videocontrols.picture-in-picture.video-toggle.always-show",
         ];
-        break;
-      case "input":
-        uri = "chrome://global/content/elements/datetimebox.js";
-        widgetName = "DateTimeBoxWidget";
         break;
       case "embed":
       case "object":

@@ -21,11 +21,9 @@
   --console-error-background: hsl(345, 23%, 24%);
   --console-error-border: hsl(345, 30%, 35%);
   --console-error-color: var(--red-20);
-  --console-error-icon-color: var(--red-40);
   --console-warning-background: hsl(42, 37%, 19%);
   --console-warning-border: hsl(60, 30%, 26%);
   --console-warning-color: hsl(43, 94%, 81%);
-  --console-warning-icon-color: var(--yellow-60);
   --console-navigation-color: var(--theme-highlight-blue);
   --console-navigation-border: var(--blue-60);
   --console-indent-border-color: var(--theme-highlight-blue);
@@ -45,11 +43,9 @@
   --console-error-background: hsl(344, 73%, 97%);
   --console-error-border: rgba(215, 0, 34, 0.12); /* Red 60 + opacity */
   --console-error-color: var(--red-70);
-  --console-error-icon-color: var(--red-60);
   --console-warning-background: hsl(54, 100%, 92%);
   --console-warning-border: rgba(215, 182, 0, 0.28); /* Yellow 60 + opacity */
   --console-warning-color: var(--yellow-80);
-  --console-warning-icon-color: var(--yellow-65);
   --console-navigation-color: var(--theme-highlight-blue);
   --console-navigation-border: var(--blue-30);
   --console-indent-border-color: var(--theme-highlight-blue);
@@ -132,7 +128,7 @@ a {
 
 /* We already paint a top border on jsterm-input-container (and we need to keep
  * it when scrolling console content), so remove the last item's border. */
-.message:last-child {
+.webconsole-app:not(.jsterm-editor) .message:last-child {
   border-bottom-width: 0;
 }
 
@@ -152,15 +148,11 @@ a {
 
 /*
  * By default, prevent any element in message to overflow.
+ * We exclude network messages as it may cause issues in the network detail panel.
  * This makes console reflows faster (See Bug 1487457).
  */
-.message * {
+.message:not(.network) * {
   overflow: hidden;
-}
-
-/* Reset the overflow for the network info panel (when a network message is expanded) */
-.message .network-info * {
-  overflow: unset;
 }
 
 .message.error {
@@ -284,17 +276,17 @@ a {
 
 .message.info > .icon {
   color: var(--theme-icon-color);
-  background-image: url(chrome://devtools/skin/images/webconsole/info.svg);
+  background-image: url(chrome://devtools/skin/images/info-small.svg);
 }
 
 .message.error > .icon {
-  color: var(--console-error-icon-color);
-  background-image: url(chrome://devtools/skin/images/webconsole/error.svg);
+  color: var(--theme-icon-error-color);
+  background-image: url(chrome://devtools/skin/images/error-small.svg);
 }
 
 .message.warn > .icon {
-  color: var(--console-warning-icon-color);
-  background-image: url(chrome://devtools/skin/images/alert.svg);
+  color: var(--theme-icon-warning-color);
+  background-image: url(chrome://devtools/skin/images/alert-small.svg);
 }
 
 .message.navigationMarker > .icon {
@@ -607,35 +599,33 @@ a.learn-more-link.webconsole-learn-more-link {
 
 /*
   This element contains the different toolbars in the console
-    - primary, containing the clear messages button and the text search input.
-      It can expand as much as it need.
-    - filtered messages, containing the "X items hidden by filters" and the reset filters button.
-      It should be on the same row than the primary bar if it fits there, or on its own 100% row if it is wrapped.
-    - close button, close the split console panel. This button will be displayed on righ-top of tool bar always.
-    - secondary, containing the filter buttons (Error, Warning, …).
-      It should be on its own 100% row.
+    - primary, containing the clear messages button and the text search input, and a
+      checkbox (Persist logs or Show Content Messages).
+      It can expand as much as it needs.
+    - close button, close the split console panel. This button will always be displayed on
+      righ-top of the toolbar.
+    - secondary, containing the filter buttons (Error, Warning, …). It's placed inside the
+      primary toolbar if there's enought space.
 
-  Basically here's what we can have :
+  We have 2 different layout:
 
-  --------------------------------------------------------------------------------------------------------------------------
-  | Clear button - Open filter bar button - Filter Input | X items hidden by filters - Reset Filters button | Close button |
-  --------------------------------------------------------------------------------------------------------------------------
-  | Error - Warning - Log - Info - Debug - CSS - Network - XHR                                                             |
-  --------------------------------------------------------------------------------------------------------------------------
+  Narrow:
 
-  or
+  --------------------------------------------------------------
+  | 🗑 - Filter Input                                      | ✕ |
+  --------------------------------------------------------------
+  | Error - Warning - Log - Info - Debug - CSS - Network - XHR |
+  --------------------------------------------------------------
 
-  ---------------------------------------------------------------------------------------------------
-  | Clear button - Open filter bar button - Filter Input                             | Close button |
-  ---------------------------------------------------------------------------------------------------
-  |                                               X items hidden by filters  - Reset Filters button |
-  ---------------------------------------------------------------------------------------------------
-  | Error - Warning - Log - Info - Debug - CSS - Network - XHR                                      |
-  ---------------------------------------------------------------------------------------------------
+  And wide:
+
+  --------------------------------------------------------------------------------------
+  | 🗑 - Filter Input | Error - Warning - Log - Info - Debug - CSS - Network - XHR | ✕ |
+  --------------------------------------------------------------------------------------
 */
 .webconsole-filteringbar-wrapper {
   display: grid;
-  grid-template-columns: 1fr max-content auto auto;
+  grid-template-columns: 1fr auto;
   --primary-toolbar-height: 29px;
 }
 
@@ -833,6 +823,7 @@ a.learn-more-link.webconsole-learn-more-link {
 .network .message-flex-body > .message-body {
   display: flex;
   flex-wrap: wrap;
+  align-items: baseline;
 }
 
 /*
@@ -912,7 +903,7 @@ body {
  *
  *  +------------------------------+--------------+
  *  |                              |              |
- *  |  WEBCONSOLE FLEX WRAPPER     |   SIDEBAR    |
+ *  |  WEBCONSOLE WRAPPER          |   SIDEBAR    |
  *  |                              |              |
  *  +------------------------------+--------------+
  */
@@ -930,7 +921,7 @@ body {
   -moz-user-focus: normal;
 }
 
-.webconsole-flex-wrapper {
+.webconsole-wrapper {
   display: flex;
   flex-direction: column;
   height: 100vh;
@@ -938,17 +929,17 @@ body {
   overflow: hidden;
 }
 
-.webconsole-flex-wrapper .webconsole-filteringbar-wrapper {
+.webconsole-wrapper .webconsole-filteringbar-wrapper {
   flex-shrink: 0;
   overflow: hidden;
 }
 
-.webconsole-flex-wrapper .webconsole-output {
+.webconsole-wrapper .webconsole-output {
   flex-shrink: 100000;
   overflow-x: hidden;
 }
 
-.webconsole-flex-wrapper > .webconsole-output:not(:empty) {
+.webconsole-wrapper > .webconsole-output:not(:empty) {
   min-height: 19px;
 }
 
@@ -967,7 +958,7 @@ body {
   padding-block-start: 2px;
 }
 
-.webconsole-flex-wrapper > .webconsole-output:empty ~ .jsterm-input-container {
+.webconsole-wrapper > .webconsole-output:empty ~ .jsterm-input-container {
   border-top: none;
 }
 
@@ -1123,6 +1114,88 @@ body {
 
 .sidebar-contents .object-inspector {
   min-width: 100%;
+}
+
+
+/** EDITOR MODE */
+.jsterm-editor .webconsole-wrapper {
+    display: grid;
+    /*
+     * Here's the design we want in editor mode
+     * +----------------------------------------------------+
+     * |    Editor Toolbar        |   Filter bar primary    |
+     * +----------------------------------------------------+
+     * |                          |  (Filter bar secondary) |
+     * |                          +-------------------------+
+     * |         Editor           |                         |
+     * |                          |                         |
+     * |                          |                         |
+     * |                          |        output           |
+     * |                          |                         |
+     * |                          |                         |
+     * +--------------------------+                         |
+     * |  (Reverse search input)  |                         |
+     * +----------------------------------------------------+
+     *
+     * Elements in parens may not be visible, so we set some rows to be auto to make them
+     * have no height when the element they contain is hidden.
+     */
+    grid-template-rows: var(--primary-toolbar-height) auto 1fr auto;
+    /* The first column is set to auto so we can resize it */
+    grid-template-columns: auto 1fr;
+}
+
+.jsterm-editor .webconsole-filteringbar-wrapper {
+    grid-column: 2 / 3;
+    grid-row: 1 / 3;
+    grid-template-rows: subgrid;
+}
+
+.jsterm-editor .webconsole-filterbar-primary {
+    grid-row: 1 / 2;
+}
+
+/* Only put the filter buttons toolbar on its own row in narrow filterbar layout  */
+.jsterm-editor .narrow .devtools-toolbar.webconsole-filterbar-secondary {
+    grid-row: 2 / 3;
+}
+
+.jsterm-editor .webconsole-editor-toolbar {
+    grid-column: 1 / 2;
+    grid-row: 1 / 2;
+    border-inline-end: 1px solid var(--theme-splitter-color);
+    display: flex;
+    flex-direction: row;
+    justify-content: start;
+    height: unset;
+}
+
+.jsterm-editor .webconsole-output {
+    grid-column: 2 / 3;
+    grid-row: 3 / -1;
+}
+
+.jsterm-editor .jsterm-input-container {
+    grid-column: 1 / 2;
+    grid-row: 2 / 4;
+    width: 50vw;
+    border-inline-end: 1px solid var(--theme-splitter-color);
+    border-top: none;
+}
+
+.jsterm-editor #webconsole-notificationbox {
+    display: none;
+}
+
+.jsterm-cm.jsterm-editor .jsterm-input-container > .CodeMirror {
+    padding-inline-start: 0;
+    background-image: none;
+}
+
+.jsterm-editor .reverse-search {
+    grid-column: 1 / 2;
+    grid-row: -1 / -2;
+    border-top: 1px solid var(--theme-splitter-color);
 }
 
 /** Utils **/

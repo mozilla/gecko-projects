@@ -114,6 +114,20 @@ class UrlbarView {
   }
 
   /**
+   * @returns {number}
+   *   The number of visible results in the view.  Note that this may be larger
+   *   than the number of results in the current query context since the view
+   *   may be showing stale results.
+   */
+  get visibleItemCount() {
+    let sum = 0;
+    for (let row of this._rows.children) {
+      sum += Number(this._isRowVisible(row));
+    }
+    return sum;
+  }
+
+  /**
    * Moves the view selection forward or backward.
    *
    * @param {number} amount
@@ -851,6 +865,7 @@ class UrlbarView {
 
   _on_popupshowing() {
     this.window.addEventListener("resize", this);
+    this._windowOuterWidth = this.window.outerWidth;
   }
 
   _on_popupshown() {
@@ -866,6 +881,14 @@ class UrlbarView {
   }
 
   _on_resize() {
+    if (this._windowOuterWidth == this.window.outerWidth) {
+      // Sometimes a resize event is fired when the window's size doesn't
+      // actually change; at least, browser_tabMatchesInAwesomebar.js triggers
+      // it intermittently, which causes that test to hang or fail.  Ignore
+      // those events.
+      return;
+    }
+
     // Close the popup as it would be wrongly sized. This can
     // happen when using special OS resize functions like Win+Arrow.
     this.close();

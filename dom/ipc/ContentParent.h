@@ -531,8 +531,8 @@ class ContentParent final : public PContentParent,
       const bool& aCalledFromJS, const bool& aPositionSpecified,
       const bool& aSizeSpecified, const Maybe<URIParams>& aURIToLoad,
       const nsCString& aFeatures, const float& aFullZoom, const nsString& aName,
-      const IPC::Principal& aTriggeringPrincipal,
-      nsIContentSecurityPolicy* aCsp, nsIReferrerInfo* aReferrerInfo);
+      nsIPrincipal* aTriggeringPrincipal, nsIContentSecurityPolicy* aCsp,
+      nsIReferrerInfo* aReferrerInfo);
 
   static void BroadcastBlobURLRegistration(
       const nsACString& aURI, BlobImpl* aBlobImpl, nsIPrincipal* aPrincipal,
@@ -655,7 +655,8 @@ class ContentParent final : public PContentParent,
  protected:
   void OnChannelConnected(int32_t pid) override;
 
-  virtual void ActorDestroy(ActorDestroyReason why) override;
+  void ActorDestroy(ActorDestroyReason why) override;
+  void ActorDealloc() override;
 
   bool ShouldContinueFromReplyTimeout() override;
 
@@ -1223,7 +1224,7 @@ class ContentParent final : public PContentParent,
   static bool ShouldSyncPreference(const char16_t* aData);
 
  private:
-  // Released in ActorDestroy; deliberately not exposed to the CC.
+  // Released in ActorDealloc; deliberately not exposed to the CC.
   RefPtr<ContentParent> mSelfRef;
 
   // If you add strong pointers to cycle collected objects here, be sure to
@@ -1364,6 +1365,8 @@ class ContentParent final : public PContentParent,
 
 NS_DEFINE_STATIC_IID_ACCESSOR(ContentParent, NS_CONTENTPARENT_IID)
 
+const nsDependentSubstring RemoteTypePrefix(
+    const nsAString& aContentProcessType);
 }  // namespace dom
 }  // namespace mozilla
 
