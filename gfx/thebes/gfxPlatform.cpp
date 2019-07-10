@@ -21,6 +21,7 @@
 #include "mozilla/gfx/GraphicsMessages.h"
 #include "mozilla/ClearOnShutdown.h"
 #include "mozilla/StaticPrefs.h"
+#include "mozilla/StaticPrefs_accessibility.h"
 #include "mozilla/Telemetry.h"
 #include "mozilla/TimeStamp.h"
 #include "mozilla/Unused.h"
@@ -1356,8 +1357,7 @@ void gfxPlatform::WillShutdown() {
 #endif
 }
 
-gfxPlatform::~gfxPlatform() {
-}
+gfxPlatform::~gfxPlatform() {}
 
 /* static */
 already_AddRefed<DrawTarget> gfxPlatform::CreateDrawTargetForSurface(
@@ -2417,6 +2417,10 @@ void gfxPlatform::InitAcceleration() {
       gfxCriticalNote << "Cannot evaluate keyed mutex feature status";
       gfxVars::SetAllowD3D11KeyedMutex(true);
     }
+    if (StaticPrefs::gfx_direct3d11_use_double_buffering() &&
+        IsWin10OrLater()) {
+      gfxVars::SetUseDoubleBufferingWithCompositor(true);
+    }
 #endif
   }
 
@@ -2612,13 +2616,12 @@ static bool CalculateWrQualifiedPrefValue() {
 }
 
 static void HardwareTooOldForWR(FeatureState& aFeature) {
-  aFeature.Disable(
-      FeatureStatus::BlockedDeviceTooOld, "Device too old",
-      NS_LITERAL_CSTRING("FEATURE_FAILURE_DEVICE_TOO_OLD"));
+  aFeature.Disable(FeatureStatus::BlockedDeviceTooOld, "Device too old",
+                   NS_LITERAL_CSTRING("FEATURE_FAILURE_DEVICE_TOO_OLD"));
 }
 
 static void UpdateWRQualificationForNvidia(FeatureState& aFeature,
-    int32_t aDeviceId) {
+                                           int32_t aDeviceId) {
   // 0x6c0 is the lowest Fermi device id. Unfortunately some Tesla
   // devices that don't support D3D 10.1 have higher deviceIDs. They
   // will be included, but blocked by ANGLE.
@@ -2633,18 +2636,17 @@ static void UpdateWRQualificationForNvidia(FeatureState& aFeature,
 }
 
 static void UpdateWRQualificationForAMD(FeatureState& aFeature,
-    int32_t aDeviceId) {
+                                        int32_t aDeviceId) {
   // AMD deviceIDs are not very well ordered. This
   // condition is based off the information in gpu-db
-  bool supported =
-      (aDeviceId >= 0x6600 && aDeviceId < 0x66b0) ||
-      (aDeviceId >= 0x6700 && aDeviceId < 0x6720) ||
-      (aDeviceId >= 0x6780 && aDeviceId < 0x6840) ||
-      (aDeviceId >= 0x6860 && aDeviceId < 0x6880) ||
-      (aDeviceId >= 0x6900 && aDeviceId < 0x6a00) ||
-      (aDeviceId == 0x7300) ||
-      (aDeviceId >= 0x9830 && aDeviceId < 0x9870) ||
-      (aDeviceId >= 0x9900 && aDeviceId < 0x9a00);
+  bool supported = (aDeviceId >= 0x6600 && aDeviceId < 0x66b0) ||
+                   (aDeviceId >= 0x6700 && aDeviceId < 0x6720) ||
+                   (aDeviceId >= 0x6780 && aDeviceId < 0x6840) ||
+                   (aDeviceId >= 0x6860 && aDeviceId < 0x6880) ||
+                   (aDeviceId >= 0x6900 && aDeviceId < 0x6a00) ||
+                   (aDeviceId == 0x7300) ||
+                   (aDeviceId >= 0x9830 && aDeviceId < 0x9870) ||
+                   (aDeviceId >= 0x9900 && aDeviceId < 0x9a00);
 
   if (!supported) {
     HardwareTooOldForWR(aFeature);
@@ -2655,15 +2657,15 @@ static void UpdateWRQualificationForAMD(FeatureState& aFeature,
   // so treat the device as qualified unless it is not Windows
   // and not nightly.
 #if !defined(XP_WIN) && !defined(NIGHTLY_BUILD)
-  aFeature.Disable(
-      FeatureStatus::BlockedReleaseChannelAMD,
-      "Release channel and AMD",
-      NS_LITERAL_CSTRING("FEATURE_FAILURE_RELEASE_CHANNEL_AMD"));
+  aFeature.Disable(FeatureStatus::BlockedReleaseChannelAMD,
+                   "Release channel and AMD",
+                   NS_LITERAL_CSTRING("FEATURE_FAILURE_RELEASE_CHANNEL_AMD"));
 #endif  // !XPWIN && !NIGHTLY_BUILD
 }
 
 static void UpdateWRQualificationForIntel(FeatureState& aFeature,
-    int32_t aDeviceId, int32_t aScreenPixels) {
+                                          int32_t aDeviceId,
+                                          int32_t aScreenPixels) {
   const uint16_t supportedDevices[] = {
       // skylake gt2+
       0x1912,
@@ -2759,29 +2761,38 @@ static void UpdateWRQualificationForIntel(FeatureState& aFeature,
     return;
   }
 
-#ifdef MOZ_WIDGET_GTK
-  // Performance is not great on 4k screens with WebRender + Linux.
-  // Disable it for now if it is too large.
-  const int32_t kMaxPixelsLinux = 3440 * 1440;  // UWQHD
-  if (aScreenPixels > kMaxPixelsLinux) {
+  // Performance is not great on 4k screens with WebRender.
+  // Disable it for now on all release platforms, and also on Linux
+  // nightly. We only allow it on Windows nightly.
+#if defined(XP_WIN) && defined(NIGHTLY_BUILD)
+  // Windows nightly, so don't do screen size checks
+#else
+  // Windows release, Linux nightly, Linux release. Do screen size
+  // checks. (macOS is still completely blocked by the blocklist).
+  const int32_t kMaxPixels = 3440 * 1440;  // UWQHD
+  if (aScreenPixels > kMaxPixels) {
     aFeature.Disable(
         FeatureStatus::BlockedScreenTooLarge, "Screen size too large",
         NS_LITERAL_CSTRING("FEATURE_FAILURE_SCREEN_SIZE_TOO_LARGE"));
-  } else if (aScreenPixels <= 0) {
-    aFeature.Disable(
-        FeatureStatus::BlockedScreenUnknown, "Screen size unknown",
-        NS_LITERAL_CSTRING("FEATURE_FAILURE_SCREEN_SIZE_UNKNOWN"));
-  } else {
-#endif  // MOZ_WIDGET_GTK
-#ifndef NIGHTLY_BUILD
-    aFeature.Disable(
-        FeatureStatus::BlockedReleaseChannelIntel,
-        "Release channel and Intel",
-        NS_LITERAL_CSTRING("FEATURE_FAILURE_RELEASE_CHANNEL_INTEL"));
-#endif  // !NIGHTLY_BUILD
-#ifdef MOZ_WIDGET_GTK
+    return;
   }
-#endif  // MOZ_WIDGET_GTK
+  if (aScreenPixels <= 0) {
+    aFeature.Disable(FeatureStatus::BlockedScreenUnknown, "Screen size unknown",
+                     NS_LITERAL_CSTRING("FEATURE_FAILURE_SCREEN_SIZE_UNKNOWN"));
+    return;
+  }
+#endif
+
+#if ((defined(XP_WIN) && defined(EARLY_BETA_OR_EARLIER)) || \
+     (defined(MOZ_WIDGET_GTK) && defined(NIGHTLY_BUILD)))
+  // Qualify Intel graphics cards on Windows up to early beta, and
+  // on Linux nightly.
+#else
+  // Disqualify everywhere else
+  aFeature.Disable(FeatureStatus::BlockedReleaseChannelIntel,
+                   "Release channel and Intel",
+                   NS_LITERAL_CSTRING("FEATURE_FAILURE_RELEASE_CHANNEL_INTEL"));
+#endif
 }
 
 static FeatureState& WebRenderHardwareQualificationStatus(
@@ -2831,7 +2842,7 @@ static FeatureState& WebRenderHardwareQualificationStatus(
 
   const int32_t screenPixels = aScreenSize.width * aScreenSize.height;
 
-  if (adapterVendorID == u"0x10de") { // Nvidia
+  if (adapterVendorID == u"0x10de") {  // Nvidia
     UpdateWRQualificationForNvidia(featureWebRenderQualified, deviceID);
   } else if (adapterVendorID == u"0x1002") {  // AMD
     UpdateWRQualificationForAMD(featureWebRenderQualified, deviceID);

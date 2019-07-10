@@ -535,7 +535,7 @@ extern "C" {
     fn is_in_compositor_thread() -> bool;
     fn is_in_render_thread() -> bool;
     fn is_in_main_thread() -> bool;
-    fn is_glcontext_egl(glcontext_ptr: *mut c_void) -> bool;
+    fn is_glcontext_gles(glcontext_ptr: *mut c_void) -> bool;
     fn is_glcontext_angle(glcontext_ptr: *mut c_void) -> bool;
     // Enables binary recording that can be used with `wrench replay`
     // Outputs a wr-record-*.bin file for each window that is shown
@@ -1106,7 +1106,7 @@ fn wr_device_new(gl_context: *mut c_void, pc: Option<&mut WrProgramCache>)
     assert!(unsafe { is_in_render_thread() });
 
     let gl;
-    if unsafe { is_glcontext_egl(gl_context) } {
+    if unsafe { is_glcontext_gles(gl_context) } {
         gl = unsafe { gl::GlesFns::load_with(|symbol| get_proc_address(gl_context, symbol)) };
     } else {
         gl = unsafe { gl::GlFns::load_with(|symbol| get_proc_address(gl_context, symbol)) };
@@ -1171,7 +1171,7 @@ pub extern "C" fn wr_window_new(window_id: WrWindowId,
     };
 
     let gl;
-    if unsafe { is_glcontext_egl(gl_context) } {
+    if unsafe { is_glcontext_gles(gl_context) } {
         gl = unsafe { gl::GlesFns::load_with(|symbol| get_proc_address(gl_context, symbol)) };
     } else {
         gl = unsafe { gl::GlFns::load_with(|symbol| get_proc_address(gl_context, symbol)) };
@@ -2768,30 +2768,36 @@ pub extern "C" fn wr_dp_push_border(state: &mut WrState,
                       border_details);
 }
 
+#[repr(C)]
+pub struct WrBorderImage {
+    widths: LayoutSideOffsets,
+    image: WrImageKey,
+    width: i32,
+    height: i32,
+    fill: bool,
+    slice: SideOffsets2D<i32>,
+    outset: SideOffsets2D<f32>,
+    repeat_horizontal: RepeatMode,
+    repeat_vertical: RepeatMode,
+}
+
 #[no_mangle]
 pub extern "C" fn wr_dp_push_border_image(state: &mut WrState,
                                           rect: LayoutRect,
                                           clip: LayoutRect,
                                           is_backface_visible: bool,
                                           parent: &WrSpaceAndClipChain,
-                                          widths: LayoutSideOffsets,
-                                          image: WrImageKey,
-                                          width: i32,
-                                          height: i32,
-                                          slice: SideOffsets2D<i32>,
-                                          outset: SideOffsets2D<f32>,
-                                          repeat_horizontal: RepeatMode,
-                                          repeat_vertical: RepeatMode) {
+                                          params: &WrBorderImage) {
     debug_assert!(unsafe { is_in_main_thread() });
     let border_details = BorderDetails::NinePatch(NinePatchBorder {
-        source: NinePatchBorderSource::Image(image),
-        width,
-        height,
-        slice,
-        fill: false,
-        outset: outset.into(),
-        repeat_horizontal: repeat_horizontal.into(),
-        repeat_vertical: repeat_vertical.into(),
+        source: NinePatchBorderSource::Image(params.image),
+        width: params.width,
+        height: params.height,
+        slice: params.slice,
+        fill: params.fill,
+        outset: params.outset,
+        repeat_horizontal: params.repeat_horizontal,
+        repeat_vertical: params.repeat_vertical,
     });
     let space_and_clip = parent.to_webrender(state.pipeline_id);
 
@@ -2806,7 +2812,7 @@ pub extern "C" fn wr_dp_push_border_image(state: &mut WrState,
     state.frame_builder.dl_builder.push_border(
         &prim_info,
         rect,
-        widths.into(),
+        params.widths,
         border_details,
     );
 }
@@ -2820,6 +2826,7 @@ pub extern "C" fn wr_dp_push_border_gradient(state: &mut WrState,
                                              widths: LayoutSideOffsets,
                                              width: i32,
                                              height: i32,
+                                             fill: bool,
                                              slice: SideOffsets2D<i32>,
                                              start_point: LayoutPoint,
                                              end_point: LayoutPoint,
@@ -2844,7 +2851,7 @@ pub extern "C" fn wr_dp_push_border_gradient(state: &mut WrState,
         width,
         height,
         slice,
-        fill: false,
+        fill,
         outset: outset.into(),
         repeat_horizontal: RepeatMode::Stretch,
         repeat_vertical: RepeatMode::Stretch,
@@ -2875,6 +2882,7 @@ pub extern "C" fn wr_dp_push_border_radial_gradient(state: &mut WrState,
                                                     is_backface_visible: bool,
                                                     parent: &WrSpaceAndClipChain,
                                                     widths: LayoutSideOffsets,
+                                                    fill: bool,
                                                     center: LayoutPoint,
                                                     radius: LayoutSize,
                                                     stops: *const GradientStop,
@@ -2905,7 +2913,7 @@ pub extern "C" fn wr_dp_push_border_radial_gradient(state: &mut WrState,
         width: rect.size.width as i32,
         height: rect.size.height as i32,
         slice,
-        fill: false,
+        fill,
         outset: outset.into(),
         repeat_horizontal: RepeatMode::Stretch,
         repeat_vertical: RepeatMode::Stretch,

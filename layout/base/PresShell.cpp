@@ -33,7 +33,6 @@
 #include "mozilla/TouchEvents.h"
 #include "mozilla/UniquePtr.h"
 #include "mozilla/Unused.h"
-#include "MobileViewportManager.h"
 #include <algorithm>
 
 #ifdef XP_WIN
@@ -1051,7 +1050,7 @@ void PresShell::Init(Document* aDocument, nsPresContext* aPresContext,
 
   mTouchManager.Init(this, mDocument);
 
-  if (mPresContext->IsRootContentDocument()) {
+  if (mPresContext->IsRootContentDocumentCrossProcess()) {
     mZoomConstraintsClient = new ZoomConstraintsClient();
     mZoomConstraintsClient->Init(this, mDocument);
 
@@ -3617,12 +3616,20 @@ bool PresShell::ScrollFrameRectIntoView(nsIFrame* aFrame, const nsRect& aRect,
     }
     if (!parent && !(aScrollFlags & ScrollFlags::ScrollNoParentFrames)) {
       nsPoint extraOffset(0, 0);
+      int32_t APD = container->PresContext()->AppUnitsPerDevPixel();
       parent = nsLayoutUtils::GetCrossDocParentFrame(container, &extraOffset);
       if (parent) {
-        int32_t APD = container->PresContext()->AppUnitsPerDevPixel();
         int32_t parentAPD = parent->PresContext()->AppUnitsPerDevPixel();
         rect = rect.ScaleToOtherAppUnitsRoundOut(APD, parentAPD);
         rect += extraOffset;
+      } else {
+        nsCOMPtr<nsIDocShell> docShell =
+            container->PresContext()->GetDocShell();
+        if (BrowserChild* browserChild = BrowserChild::GetFrom(docShell)) {
+          // Defer to the parent document if this is an out-of-process iframe.
+          Unused << browserChild->SendScrollRectIntoView(
+              rect, aVertical, aHorizontal, aScrollFlags, APD);
+        }
       }
     }
     container = parent;
@@ -10566,7 +10573,7 @@ void PresShell::UpdateViewportOverridden(bool aAfterInitialization) {
   }
 
   if (needMVM) {
-    if (mPresContext->IsRootContentDocument()) {
+    if (mPresContext->IsRootContentDocumentCrossProcess()) {
       mMVMContext = new GeckoMVMContext(mDocument, this);
       mMobileViewportManager = new MobileViewportManager(mMVMContext);
 
@@ -10650,8 +10657,7 @@ PresShell* PresShell::GetRootPresShell() {
 
 void PresShell::AddSizeOfIncludingThis(nsWindowSizes& aSizes) const {
   MallocSizeOf mallocSizeOf = aSizes.mState.mMallocSizeOf;
-  mFrameArena.AddSizeOfExcludingThis(aSizes,
-                                     &nsWindowSizes::mLayoutPresShellSize);
+  mFrameArena.AddSizeOfExcludingThis(aSizes, Arena::ArenaKind::PresShell);
   aSizes.mLayoutPresShellSize += mallocSizeOf(this);
   if (mCaret) {
     aSizes.mLayoutPresShellSize += mCaret->SizeOfIncludingThis(mallocSizeOf);

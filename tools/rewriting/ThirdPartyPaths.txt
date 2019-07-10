@@ -1,13 +1,13 @@
 browser/components/translation/cld2/
 devtools/client/aboutdebugging-new/test/jest/node_modules/
-devtools/client/application/test/node_modules/
+devtools/client/application/test/components/node_modules/
 devtools/client/debugger/node_modules/
 devtools/client/shared/build/babel.js
 devtools/client/shared/sourceeditor/codemirror/
 devtools/client/shared/sourceeditor/tern/
 devtools/shared/heapsnapshot/CoreDump.pb.cc
 devtools/shared/heapsnapshot/CoreDump.pb.h
-dom/canvas/test/webgl-conf/checkout/closure-library/
+dom/canvas/test/webgl-conf/checkout/
 dom/media/gmp/rlz/
 dom/media/gmp/widevine-adapter/content_decryption_module.h
 dom/media/gmp/widevine-adapter/content_decryption_module_export.h
@@ -36,7 +36,7 @@ dom/webauthn/tests/pkijs/
 editor/libeditor/tests/browserscope/lib/richtext/
 editor/libeditor/tests/browserscope/lib/richtext2/
 extensions/spellcheck/hunspell/src/
-gfx/angle/
+gfx/angle/checkout/
 gfx/cairo/
 gfx/graphite2/
 gfx/harfbuzz/
@@ -123,6 +123,7 @@ toolkit/components/jsoncpp/
 toolkit/components/protobuf/
 toolkit/components/url-classifier/chromium/
 toolkit/components/url-classifier/protobuf/
+toolkit/components/utils/mozjexl.js
 toolkit/crashreporter/breakpad-client/
 toolkit/crashreporter/google-breakpad/
 toolkit/recordreplay/udis86/
