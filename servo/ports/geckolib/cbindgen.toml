@@ -160,6 +160,8 @@ include = [
   "GridLine",
   "TrackSize",
   "TrackBreadth",
+  "SVGPaint",
+  "SVGPaintKind",
 ]
 item_types = ["enums", "structs", "typedefs", "functions", "constants"]
 renaming_overrides_prefixing = true
@@ -316,6 +318,15 @@ renaming_overrides_prefixing = true
 "TextTransform" = """
   static inline StyleTextTransform None();
   inline bool IsNone() const;
+"""
+
+"Quotes" = """
+ private:
+  // Private default constructor without initialization so that the helper
+  // constructor functions still work as expected. They take care of
+  // initializing the fields properly.
+  StyleQuotes() {}
+ public:
 """
 
 # TODO(emilio): Add hooks to cbindgen to be able to generate MOZ_MUST_USE_TYPE
@@ -627,4 +638,22 @@ renaming_overrides_prefixing = true
  public:
   inline const StyleGenericTrackBreadth<L>& GetMin() const;
   inline const StyleGenericTrackBreadth<L>& GetMax() const;
+"""
+
+"GenericSVGPaintKind" = """
+ private:
+  // Private default constructor without initialization so that the helper
+  // constructor functions still work as expected. They take care of
+  // initializing the fields properly.
+  StyleGenericSVGPaintKind() {}
+ public:
+"""
+
+"GenericSVGPaintFallback" = """
+ private:
+  // Private default constructor without initialization so that the helper
+  // constructor functions still work as expected. They take care of
+  // initializing the fields properly.
+  StyleGenericSVGPaintFallback() {}
+ public:
 """

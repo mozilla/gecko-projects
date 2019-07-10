@@ -8,19 +8,24 @@
 
 "use strict";
 
-var EXPORTED_SYMBOLS = [
-  "DownloadPaths",
-];
+var EXPORTED_SYMBOLS = ["DownloadPaths"];
 
-const {XPCOMUtils} = ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
+const { XPCOMUtils } = ChromeUtils.import(
+  "resource://gre/modules/XPCOMUtils.jsm"
+);
 
-ChromeUtils.defineModuleGetter(this, "AppConstants",
-                               "resource://gre/modules/AppConstants.jsm");
+ChromeUtils.defineModuleGetter(
+  this,
+  "AppConstants",
+  "resource://gre/modules/AppConstants.jsm"
+);
 
 /**
  * Platform-dependent regular expression used by the "sanitize" method.
  */
 XPCOMUtils.defineLazyGetter(this, "gConvertToSpaceRegExp", () => {
+  // Note: we remove colons everywhere to avoid issues in subresource URL
+  // parsing, as well as filename restrictions on some OSes (see bug 1562176).
   /* eslint-disable no-control-regex */
   switch (AppConstants.platform) {
     // On mobile devices, the file system may be very limited in what it
@@ -29,10 +34,8 @@ XPCOMUtils.defineLazyGetter(this, "gConvertToSpaceRegExp", () => {
       return /[\x00-\x1f\x7f-\x9f:*?|"<>;,+=\[\]]+/g;
     case "win":
       return /[\x00-\x1f\x7f-\x9f:*?|]+/g;
-    case "macosx":
-      return /[\x00-\x1f\x7f-\x9f:]+/g;
     default:
-      return /[\x00-\x1f\x7f-\x9f]+/g;
+      return /[\x00-\x1f\x7f-\x9f:]+/g;
   }
   /* eslint-enable no-control-regex */
 });
@@ -67,14 +70,16 @@ var DownloadPaths = {
    */
   sanitize(leafName) {
     if (AppConstants.platform == "win") {
-      leafName = leafName.replace(/</g, "(")
-                         .replace(/>/g, ")")
-                         .replace(/"/g, "'");
+      leafName = leafName
+        .replace(/</g, "(")
+        .replace(/>/g, ")")
+        .replace(/"/g, "'");
     }
-    return leafName.replace(/[\\/]+/g, "_")
-                   .replace(/[\u200e\u200f\u202a-\u202e]/g, "")
-                   .replace(gConvertToSpaceRegExp, " ")
-                   .replace(/^[\s\u180e.]+|[\s\u180e.]+$/g, "");
+    return leafName
+      .replace(/[\\/]+/g, "_")
+      .replace(/[\u200e\u200f\u202a-\u202e]/g, "")
+      .replace(gConvertToSpaceRegExp, " ")
+      .replace(/^[\s\u180e.]+|[\s\u180e.]+$/g, "");
   },
 
   /**
@@ -133,8 +138,9 @@ var DownloadPaths = {
     //                           double extension.
     //  \.(?:gz|bz2|Z)           The second part of common double extensions.
     //  \.[^.]*                  Matches any extension or a single trailing dot.
-    let [, base, ext] = /(.*?)(\.[A-Z0-9]{1,3}\.(?:gz|bz2|Z)|\.[^.]*)?$/i
-                        .exec(leafName);
+    let [, base, ext] = /(.*?)(\.[A-Z0-9]{1,3}\.(?:gz|bz2|Z)|\.[^.]*)?$/i.exec(
+      leafName
+    );
     // Return an empty string instead of undefined if no extension is found.
     return [base, ext || ""];
   },

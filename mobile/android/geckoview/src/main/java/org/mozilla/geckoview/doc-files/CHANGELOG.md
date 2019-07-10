@@ -12,8 +12,23 @@ exclude: true
 - Modified behavior of ['setAutomaticFontSizeAdjustment'][69.1] so that it no 
   longer has any effect on ['setFontInflationEnabled'][69.2]
 
+- Add GeckoSession.LOAD_FLAGS_FORCE_ALLOW_DATA_URI
+
 [69.1]: ./GeckoRuntimeSettings.html#setAutomaticFontSizeAdjustment-boolean-
 [69.2]: ./GeckoRuntimeSettings.html#setFontInflationEnabled-boolean-
+
+- Added [`GeckoResult.accept`][69.3] for consuming a result without
+  transforming it.
+
+[69.3]: ../GeckoResult.html#accept-org.mozilla.geckoview.GeckoResult.Consumer-org.mozilla.geckoview.GeckoResult.Consumer-
+
+- [`GeckoSession.setMessageDelegate`][69.2] callers must now specify the
+  [`WebExtension`][69.3] that the [`MessageDelegate`][69.4] will receive
+  messages from.
+
+[69.2]: ../GeckoSession.html#setMessageDelegate-org.mozilla.geckoview.WebExtension-org.mozilla.geckoview.WebExtension.MessageDelegate-java.lang.String-
+[69.3]: ../WebExtension.html
+[69.4]: ../WebExtension.MessageDelegate.html
 
 ## v68
 - Added [`GeckoRuntime#configurationChanged`][68.1] to notify the device
@@ -327,4 +342,4 @@ exclude: true
 [65.24]: ../CrashReporter.html#sendCrashReport-android.content.Context-android.os.Bundle-java.lang.String-
 [65.25]: ../GeckoResult.html
 
-[api-version]: 29ff764a2ca4aaa16dbe79a269d6c1c8a166775e
+[api-version]: 95d443eb3946aeb5b278a258ab5a527d3281edda

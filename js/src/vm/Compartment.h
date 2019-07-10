@@ -18,6 +18,7 @@
 
 #include "gc/Barrier.h"
 #include "gc/NurseryAwareHashMap.h"
+#include "gc/ZoneAllocator.h"
 #include "js/UniquePtr.h"
 #include "vm/JSObject.h"
 #include "vm/JSScript.h"
@@ -124,18 +125,10 @@ class CrossCompartmentKey {
         : Debuggee(debugger, referent) {}
   };
 
-  // Key under which we find debugger's Debugger.Frame for the generator call
-  // whose AbstractGeneratorObject is referent.
-  struct DebuggeeFrameGeneratorScript : Debuggee<JSScript> {
-    DebuggeeFrameGeneratorScript(NativeObject* debugger, JSScript* referent)
-        : Debuggee(debugger, referent) {}
-  };
-
-  using WrappedType =
-      mozilla::Variant<JSObject*, JSString*, DebuggeeObject, DebuggeeJSScript,
-                       DebuggeeWasmScript, DebuggeeLazyScript,
-                       DebuggeeEnvironment, DebuggeeSource,
-                       DebuggeeFrameGenerator, DebuggeeFrameGeneratorScript>;
+  using WrappedType = mozilla::Variant<JSObject*, JSString*, DebuggeeObject,
+                                       DebuggeeJSScript, DebuggeeWasmScript,
+                                       DebuggeeLazyScript, DebuggeeEnvironment,
+                                       DebuggeeSource, DebuggeeFrameGenerator>;
 
   explicit CrossCompartmentKey(JSObject* obj) : wrapped(obj) {
     MOZ_RELEASE_ASSERT(obj);
@@ -159,8 +152,6 @@ class CrossCompartmentKey {
   explicit CrossCompartmentKey(DebuggeeWasmScript&& key)
       : wrapped(std::move(key)) {}
   explicit CrossCompartmentKey(DebuggeeFrameGenerator&& key)
-      : wrapped(std::move(key)) {}
-  explicit CrossCompartmentKey(DebuggeeFrameGeneratorScript&& key)
       : wrapped(std::move(key)) {}
   explicit CrossCompartmentKey(NativeObject* debugger, JSScript* referent)
       : wrapped(DebuggeeJSScript(debugger, referent)) {}
@@ -286,12 +277,12 @@ class WrapperMap {
 
   using InnerMap =
       NurseryAwareHashMap<CrossCompartmentKey, JS::Value,
-                          CrossCompartmentKey::Hasher, SystemAllocPolicy>;
-  using OuterMap =
-      GCHashMap<JS::Compartment*, InnerMap, DefaultHasher<JS::Compartment*>,
-                SystemAllocPolicy>;
+                          CrossCompartmentKey::Hasher, ZoneAllocPolicy>;
+  using OuterMap = GCHashMap<JS::Compartment*, InnerMap,
+                             DefaultHasher<JS::Compartment*>, ZoneAllocPolicy>;
 
   OuterMap map;
+  Zone* zone;
 
  public:
   class Enum {
@@ -391,8 +382,8 @@ class WrapperMap {
     Ptr(const InnerMap::Ptr& p, InnerMap& m) : InnerMap::Ptr(p), map(&m) {}
   };
 
-  WrapperMap() {}
-  explicit WrapperMap(size_t aLen) : map(aLen) {}
+  explicit WrapperMap(Zone* zone) : map(zone), zone(zone) {}
+  WrapperMap(Zone* zone, size_t aLen) : map(zone, aLen), zone(zone) {}
 
   bool empty() {
     if (map.empty()) {
@@ -428,7 +419,7 @@ class WrapperMap {
     MOZ_ASSERT(k.is<JSString*>() == !c);
     auto p = map.lookupForAdd(c);
     if (!p) {
-      InnerMap m(InitialInnerMapSize);
+      InnerMap m(zone, InitialInnerMapSize);
       if (!map.add(p, c, std::move(m))) {
         return false;
       }
@@ -495,7 +486,7 @@ class JS::Compartment {
 
   js::WrapperMap crossCompartmentWrappers;
 
-  using RealmVector = js::Vector<JS::Realm*, 1, js::SystemAllocPolicy>;
+  using RealmVector = js::Vector<JS::Realm*, 1, js::ZoneAllocPolicy>;
   RealmVector realms_;
 
  public:
@@ -602,20 +593,19 @@ class JS::Compartment {
                                const js::CrossCompartmentKey& wrapped,
                                const js::Value& wrapper);
 
+  js::WrapperMap::Ptr lookupWrapper(const js::CrossCompartmentKey& key) const {
+    return crossCompartmentWrappers.lookup(key);
+  }
+
   js::WrapperMap::Ptr lookupWrapper(const js::Value& wrapped) const {
-    return crossCompartmentWrappers.lookup(js::CrossCompartmentKey(wrapped));
+    return lookupWrapper(js::CrossCompartmentKey(wrapped));
   }
 
   js::WrapperMap::Ptr lookupWrapper(JSObject* obj) const {
-    return crossCompartmentWrappers.lookup(js::CrossCompartmentKey(obj));
+    return lookupWrapper(js::CrossCompartmentKey(obj));
   }
 
   void removeWrapper(js::WrapperMap::Ptr p) {
-    crossCompartmentWrappers.remove(p);
-  }
-
-  void removeWrapper(const js::CrossCompartmentKey& key) {
-    js::WrapperMap::Ptr p = crossCompartmentWrappers.lookup(key);
     crossCompartmentWrappers.remove(p);
   }
 

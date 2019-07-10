@@ -38,6 +38,7 @@
 #include "mozilla/mozalloc.h"     // for operator new
 #include "mozilla/Preferences.h"  // for Preferences
 #include "mozilla/StaticPrefs.h"  // for StaticPrefs
+#include "mozilla/StaticPrefs_accessibility.h"
 #include "mozilla/TouchEvents.h"
 #include "mozilla/EventStateManager.h"  // for WheelPrefs
 #include "mozilla/webrender/WebRenderAPI.h"
@@ -2345,7 +2346,8 @@ static bool TransformDisplacement(APZCTreeManager* aTreeManager,
 void APZCTreeManager::DispatchScroll(
     AsyncPanZoomController* aPrev, ParentLayerPoint& aStartPoint,
     ParentLayerPoint& aEndPoint,
-    OverscrollHandoffState& aOverscrollHandoffState) {
+    OverscrollHandoffState& aOverscrollHandoffState,
+    const TimeStamp& aTimeStamp) {
   const OverscrollHandoffChain& overscrollHandoffChain =
       aOverscrollHandoffState.mChain;
   uint32_t overscrollHandoffChainIndex = aOverscrollHandoffState.mChainIndex;
@@ -2371,7 +2373,8 @@ void APZCTreeManager::DispatchScroll(
 
   // Scroll |next|. If this causes overscroll, it will call DispatchScroll()
   // again with an incremented index.
-  if (!next->AttemptScroll(aStartPoint, aEndPoint, aOverscrollHandoffState)) {
+  if (!next->AttemptScroll(aStartPoint, aEndPoint, aOverscrollHandoffState,
+                           aTimeStamp)) {
     // Transform |aStartPoint| and |aEndPoint| (which now represent the
     // portion of the displacement that wasn't consumed by APZCs later
     // in the handoff chain) back into |aPrev|'s coordinate space. This

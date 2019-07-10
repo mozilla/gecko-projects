@@ -122,14 +122,6 @@ DefaultJitOptions::DefaultJitOptions() {
   // Toggles whether CacheIR stubs are used.
   SET_DEFAULT(disableCacheIR, false);
 
-// Toggles whether sincos optimization is globally disabled.
-// See bug984018: The MacOS is the only one that has the sincos fast.
-#if defined(XP_MACOSX)
-  SET_DEFAULT(disableSincos, false);
-#else
-  SET_DEFAULT(disableSincos, true);
-#endif
-
   // Toggles whether sink code motion is globally disabled.
   SET_DEFAULT(disableSink, true);
 
@@ -242,6 +234,10 @@ DefaultJitOptions::DefaultJitOptions() {
   SET_DEFAULT(spectreValueMasking, true);
   SET_DEFAULT(spectreJitToCxxCalls, true);
 #endif
+
+  // These are set to their actual values in InitializeJit.
+  SET_DEFAULT(supportsFloatingPoint, false);
+  SET_DEFAULT(supportsUnalignedAccesses, false);
 
   // Toggles the optimization whereby offsets are folded into loads and not
   // included in the bounds check.

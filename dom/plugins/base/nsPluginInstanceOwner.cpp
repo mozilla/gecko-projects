@@ -28,7 +28,6 @@ using mozilla::DefaultXDisplay;
 #include "nsIStringStream.h"
 #include "nsNetUtil.h"
 #include "mozilla/Preferences.h"
-#include "nsILinkHandler.h"
 #include "nsIDocShellTreeItem.h"
 #include "nsIWebBrowserChrome.h"
 #include "nsLayoutUtils.h"
@@ -389,10 +388,8 @@ NS_IMETHODIMP nsPluginInstanceOwner::GetURL(
   }
 
   // the container of the pres context will give us the link handler
-  nsCOMPtr<nsISupports> container = presContext->GetContainerWeak();
+  nsCOMPtr<nsIDocShell> container = presContext->GetDocShell();
   NS_ENSURE_TRUE(container, NS_ERROR_FAILURE);
-  nsCOMPtr<nsILinkHandler> lh = do_QueryInterface(container);
-  NS_ENSURE_TRUE(lh, NS_ERROR_FAILURE);
 
   nsAutoString unitarget;
   if ((0 == PL_strcmp(aTarget, "newwindow")) ||
@@ -430,7 +427,7 @@ NS_IMETHODIMP nsPluginInstanceOwner::GetURL(
       (PopupBlocker::PopupControlState)blockPopups);
 
   // if security checks (in particular CheckLoadURIWithPrincipal) needs
-  // to be skipped we are creating a codebasePrincipal to make sure
+  // to be skipped we are creating a contentPrincipal to make sure
   // that security check succeeds. Please note that we do not want to
   // fall back to using the systemPrincipal, because that would also
   // bypass ContentPolicy checks which should still be enforced.
@@ -438,7 +435,7 @@ NS_IMETHODIMP nsPluginInstanceOwner::GetURL(
   if (!aDoCheckLoadURIChecks) {
     mozilla::OriginAttributes attrs =
         BasePrincipal::Cast(content->NodePrincipal())->OriginAttributesRef();
-    triggeringPrincipal = BasePrincipal::CreateCodebasePrincipal(uri, attrs);
+    triggeringPrincipal = BasePrincipal::CreateContentPrincipal(uri, attrs);
   } else {
     triggeringPrincipal =
         NullPrincipal::CreateWithInheritedAttributes(content->NodePrincipal());
@@ -446,10 +443,10 @@ NS_IMETHODIMP nsPluginInstanceOwner::GetURL(
 
   nsCOMPtr<nsIContentSecurityPolicy> csp = content->GetCsp();
 
-  rv = lh->OnLinkClick(content, uri, unitarget, VoidString(), aPostStream,
-                       headersDataStream,
-                       /* isUserTriggered */ false,
-                       /* isTrusted */ true, triggeringPrincipal, csp);
+  rv = nsDocShell::Cast(container)->OnLinkClick(
+      content, uri, unitarget, VoidString(), aPostStream, headersDataStream,
+      /* isUserTriggered */ false, /* isTrusted */ true, triggeringPrincipal,
+      csp);
 
   return rv;
 }

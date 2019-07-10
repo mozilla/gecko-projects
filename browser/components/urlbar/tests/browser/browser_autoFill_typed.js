@@ -11,9 +11,7 @@ add_task(async function init() {
 });
 
 add_task(async function origin() {
-  await PlacesTestUtils.addVisits([
-    "http://example.com/",
-  ]);
+  await PlacesTestUtils.addVisits(["http://example.com/"]);
   // all lowercase
   await typeAndCheck([
     ["e", "example.com/"],
@@ -49,9 +47,7 @@ add_task(async function origin() {
 });
 
 add_task(async function url() {
-  await PlacesTestUtils.addVisits([
-    "http://example.com/foo/bar",
-  ]);
+  await PlacesTestUtils.addVisits(["http://example.com/foo/bar"]);
   // all lowercase
   await typeAndCheck([
     ["e", "example.com/"],
@@ -141,13 +137,14 @@ add_task(async function tokenAlias() {
   await cleanUp();
 });
 
-
 async function typeAndCheck(values) {
   gURLBar.focus();
   for (let i = 0; i < values.length; i++) {
     let [char, expectedInputValue] = values[i];
-    info(`Typing: i=${i} char=${char} ` +
-         `substring="${expectedInputValue.substring(0, i + 1)}"`);
+    info(
+      `Typing: i=${i} char=${char} ` +
+        `substring="${expectedInputValue.substring(0, i + 1)}"`
+    );
     EventUtils.synthesizeKey(char);
     if (i == 0 && char == "@") {
       // A single "@" doesn't trigger autofill, so skip the checks below.  (It
@@ -156,11 +153,6 @@ async function typeAndCheck(values) {
     }
     await UrlbarTestUtils.promiseSearchComplete(window);
     let restIsSpaces = !expectedInputValue.substring(i + 1).trim();
-    if (restIsSpaces && !UrlbarPrefs.get("quantumbar")) {
-      // See below.  In addition to that, in awesomebar, after typing the final
-      // character, autofill incorrectly doesn't include the trailing space.
-      expectedInputValue = expectedInputValue.trim();
-    }
     Assert.equal(gURLBar.value, expectedInputValue);
     Assert.equal(gURLBar.selectionStart, i + 1);
     Assert.equal(gURLBar.selectionEnd, expectedInputValue.length);

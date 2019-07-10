@@ -28,6 +28,10 @@ async function testSteps() {
     },
   ];
 
+  info("Setting prefs");
+
+  Services.prefs.setBoolPref("dom.storage.next_gen", true);
+
   for (let origin of origins) {
     const principal = getPrincipal(origin.uri);
 
@@ -35,8 +39,10 @@ async function testSteps() {
 
     info("Checking the origin directory existence");
 
-    ok(!originDir.exists(),
-      `The origin directory ${origin.path} should not exists`);
+    ok(
+      !originDir.exists(),
+      `The origin directory ${origin.path} should not exists`
+    );
 
     info("Getting storage");
 

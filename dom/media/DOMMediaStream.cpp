@@ -188,8 +188,7 @@ DOMMediaStream::DOMMediaStream(nsPIDOMWindowInner* aWindow)
       mTracksCreated(false),
       mNotifiedOfMediaStreamGraphShutdown(false),
       mActive(false),
-      mFinishedOnInactive(true),
-      mCORSMode(CORS_NONE) {
+      mFinishedOnInactive(true) {
   nsresult rv;
   nsCOMPtr<nsIUUIDGenerator> uuidgen =
       do_GetService("@mozilla.org/uuid-generator;1", &rv);
@@ -732,7 +731,7 @@ void DOMMediaStream::NotifyPrincipalChanged() {
     LOG(LogLevel::Info, ("DOMMediaStream %p Principal changed. Now: "
                          "null=%d, codebase=%d, expanded=%d, system=%d",
                          this, mPrincipal->GetIsNullPrincipal(),
-                         mPrincipal->GetIsCodebasePrincipal(),
+                         mPrincipal->GetIsContentPrincipal(),
                          mPrincipal->GetIsExpandedPrincipal(),
                          mPrincipal->IsSystemPrincipal()));
   }

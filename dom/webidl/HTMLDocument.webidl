@@ -9,16 +9,6 @@ interface HTMLDocument : Document {
   // DOM tree accessors
   [Throws]
   getter object (DOMString name);
-
-  void clear();
-
-  readonly attribute HTMLAllCollection all;
-
-  // @deprecated These are old Netscape 4 methods. Do not use,
-  //             the implementation is no-op.
-  // XXXbz do we actually need these anymore?
-  void                      captureEvents();
-  void                      releaseEvents();
 };
 
 partial interface HTMLDocument {

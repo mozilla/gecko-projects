@@ -596,6 +596,7 @@ linux64-asan/opt:
     worker:
         env:
             PERFHERDER_EXTRA_OPTIONS: "opt asan"
+            ASAN_OPTIONS: "detect_leaks=0"
         max-run-time: 5400
     run:
         using: mozharness
@@ -631,6 +632,7 @@ linux64-asan-fuzzing/opt:
     worker:
         env:
             PERFHERDER_EXTRA_OPTIONS: asan-fuzzing
+            ASAN_OPTIONS: "detect_leaks=0"
         max-run-time: 5400
     run:
         using: mozharness
@@ -667,6 +669,7 @@ linux64-asan-fuzzing-ccov/opt:
     worker:
         env:
             PERFHERDER_EXTRA_OPTIONS: asan-fuzzing-ccov
+            ASAN_OPTIONS: "detect_leaks=0"
         max-run-time: 5400
     run:
         using: mozharness
@@ -704,6 +707,7 @@ linux64-fuzzing-ccov/opt:
         env:
             PERFHERDER_EXTRA_OPTIONS: fuzzing-ccov
             FORCE_GCC: '1'
+            ASAN_OPTIONS: "detect_leaks=0"
     run:
         using: mozharness
         actions: [get-secrets, build, check-test]
@@ -745,6 +749,7 @@ linux64-asan-reporter-nightly/opt:
     worker:
         env:
             PERFHERDER_EXTRA_OPTIONS: asan-reporter
+            ASAN_OPTIONS: "detect_leaks=0"
         max-run-time: 3600
     run:
         using: mozharness
@@ -780,6 +785,7 @@ linux64-asan/debug:
     worker:
         env:
             PERFHERDER_EXTRA_OPTIONS: "debug asan"
+            ASAN_OPTIONS: "detect_leaks=0"
         max-run-time: 5400
     run:
         using: mozharness
@@ -1218,47 +1224,6 @@ linux-gcp/opt:
         - linux64-nasm
         - linux64-node
 
-linux-gcp-shippable/opt:
-    description: "Linux32 Shippable - built on GCP"
-    attributes:
-        shippable: true
-        enable-full-crashsymbols: true
-    shipping-phase: build
-    shipping-product: firefox
-    index:
-        product: firefox
-        job-name: linux-gcp-opt
-        type: shippable
-    treeherder:
-        platform: linux32-shippable/opt
-        symbol: Bg
-        tier: 3
-    worker-type: gce/gecko-{level}-b-linux
-    worker:
-        docker-image: {in-tree: debian7-i386-build}
-        max-run-time: 7200
-        env:
-            PERFHERDER_EXTRA_OPTIONS: gcp
-    run:
-        using: mozharness
-        actions: [get-secrets, build, check-test]
-        config:
-            - builds/releng_base_firefox.py
-            - builds/releng_base_linux_32_builds.py
-            - taskcluster_nightly.py
-        script: "mozharness/scripts/fx_desktop_build.py"
-        secrets: true
-        tooltool-downloads: public
-        need-xvfb: true
-    toolchains:
-        - linux64-binutils
-        - linux64-clang
-        - linux64-rust
-        - linux64-rust-size
-        - linux64-cbindgen
-        - linux64-nasm
-        - linux64-node
-
 linux64-gcp/debug:
     description: "Linux64 Debug - built on GCP"
     index:
@@ -1331,45 +1296,5 @@ linux64-gcp/opt:
         - linux64-rust-size
         - linux64-cbindgen
         - linux64-sccache
-        - linux64-nasm
-        - linux64-node
-
-linux64-gcp-shippable/opt:
-    description: "Linux64 Shippable - built on GCP"
-    attributes:
-        shippable: true
-        enable-full-crashsymbols: true
-    shipping-phase: build
-    shipping-product: firefox
-    index:
-        product: firefox
-        job-name: linux64-gcp-opt
-        type: shippable
-    treeherder:
-        platform: linux64-shippable/opt
-        symbol: Bg
-        tier: 3
-    worker-type: gce/gecko-{level}-b-linux
-    worker:
-        max-run-time: 7200
-        env:
-            PERFHERDER_EXTRA_OPTIONS: gcp
-    run:
-        using: mozharness
-        actions: [get-secrets, build, check-test]
-        config:
-            - builds/releng_base_firefox.py
-            - builds/releng_base_linux_64_builds.py
-            - taskcluster_nightly.py
-        script: "mozharness/scripts/fx_desktop_build.py"
-        secrets: true
-        tooltool-downloads: public
-        need-xvfb: true
-    toolchains:
-        - linux64-binutils
-        - linux64-clang
-        - linux64-rust
-        - linux64-rust-size
-        - linux64-cbindgen
         - linux64-nasm
         - linux64-node

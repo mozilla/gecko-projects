@@ -1,13 +1,14 @@
 browser/components/translation/cld2/
+browser/extensions/screenshots/build/raven.js
 devtools/client/aboutdebugging-new/test/jest/node_modules/
-devtools/client/application/test/node_modules/
+devtools/client/application/test/components/node_modules/
 devtools/client/debugger/node_modules/
 devtools/client/shared/build/babel.js
 devtools/client/shared/sourceeditor/codemirror/
 devtools/client/shared/sourceeditor/tern/
 devtools/shared/heapsnapshot/CoreDump.pb.cc
 devtools/shared/heapsnapshot/CoreDump.pb.h
-dom/canvas/test/webgl-conf/checkout/closure-library/
+dom/canvas/test/webgl-conf/checkout/
 dom/media/gmp/rlz/
 dom/media/gmp/widevine-adapter/content_decryption_module.h
 dom/media/gmp/widevine-adapter/content_decryption_module_export.h
@@ -36,7 +37,7 @@ dom/webauthn/tests/pkijs/
 editor/libeditor/tests/browserscope/lib/richtext/
 editor/libeditor/tests/browserscope/lib/richtext2/
 extensions/spellcheck/hunspell/src/
-gfx/angle/
+gfx/angle/checkout/
 gfx/cairo/
 gfx/graphite2/
 gfx/harfbuzz/
@@ -63,6 +64,7 @@ js/src/vtune/ittnotify_types.h
 js/src/vtune/jitprofiling.c
 js/src/vtune/jitprofiling.h
 js/src/vtune/legacy/
+js/src/zydis/
 media/ffvpx/
 media/gmp-clearkey/0.1/openaes/
 media/kiss_fft/
@@ -119,9 +121,11 @@ testing/xpcshell/node-ip/
 testing/xpcshell/dns-packet/
 third_party/
 toolkit/components/jsoncpp/
+toolkit/components/normandy/vendor/
 toolkit/components/protobuf/
 toolkit/components/url-classifier/chromium/
 toolkit/components/url-classifier/protobuf/
+toolkit/components/utils/mozjexl.js
 toolkit/crashreporter/breakpad-client/
 toolkit/crashreporter/google-breakpad/
 toolkit/recordreplay/udis86/

@@ -535,7 +535,7 @@ extern "C" {
     fn is_in_compositor_thread() -> bool;
     fn is_in_render_thread() -> bool;
     fn is_in_main_thread() -> bool;
-    fn is_glcontext_egl(glcontext_ptr: *mut c_void) -> bool;
+    fn is_glcontext_gles(glcontext_ptr: *mut c_void) -> bool;
     fn is_glcontext_angle(glcontext_ptr: *mut c_void) -> bool;
     // Enables binary recording that can be used with `wrench replay`
     // Outputs a wr-record-*.bin file for each window that is shown
@@ -761,7 +761,6 @@ pub unsafe extern "C" fn wr_renderer_readback(renderer: &mut Renderer,
                               format, &mut slice);
 }
 
-/// cbindgen:postfix=WR_DESTRUCTOR_SAFE_FUNC
 #[no_mangle]
 pub unsafe extern "C" fn wr_renderer_delete(renderer: *mut Renderer) {
     let renderer = Box::from_raw(renderer);
@@ -841,7 +840,6 @@ pub unsafe extern "C" fn wr_renderer_flush_pipeline_info(renderer: &mut Renderer
     WrPipelineInfo::new(&info)
 }
 
-/// cbindgen:postfix=WR_DESTRUCTOR_SAFE_FUNC
 #[no_mangle]
 pub unsafe extern "C" fn wr_pipeline_info_delete(_info: WrPipelineInfo) {
     // _info will be dropped here, and the drop impl on FfiVec will free
@@ -1057,7 +1055,6 @@ pub unsafe extern "C" fn wr_thread_pool_new() -> *mut WrThreadPool {
     Box::into_raw(Box::new(WrThreadPool(workers)))
 }
 
-/// cbindgen:postfix=WR_DESTRUCTOR_SAFE_FUNC
 #[no_mangle]
 pub unsafe extern "C" fn wr_thread_pool_delete(thread_pool: *mut WrThreadPool) {
     Box::from_raw(thread_pool);
@@ -1070,7 +1067,6 @@ pub unsafe extern "C" fn wr_program_cache_new(prof_path: &nsAString, thread_pool
     Box::into_raw(Box::new(program_cache))
 }
 
-/// cbindgen:postfix=WR_DESTRUCTOR_SAFE_FUNC
 #[no_mangle]
 pub unsafe extern "C" fn wr_program_cache_delete(program_cache: *mut WrProgramCache) {
     Box::from_raw(program_cache);
@@ -1110,7 +1106,7 @@ fn wr_device_new(gl_context: *mut c_void, pc: Option<&mut WrProgramCache>)
     assert!(unsafe { is_in_render_thread() });
 
     let gl;
-    if unsafe { is_glcontext_egl(gl_context) } {
+    if unsafe { is_glcontext_gles(gl_context) } {
         gl = unsafe { gl::GlesFns::load_with(|symbol| get_proc_address(gl_context, symbol)) };
     } else {
         gl = unsafe { gl::GlFns::load_with(|symbol| get_proc_address(gl_context, symbol)) };
@@ -1175,7 +1171,7 @@ pub extern "C" fn wr_window_new(window_id: WrWindowId,
     };
 
     let gl;
-    if unsafe { is_glcontext_egl(gl_context) } {
+    if unsafe { is_glcontext_gles(gl_context) } {
         gl = unsafe { gl::GlesFns::load_with(|symbol| get_proc_address(gl_context, symbol)) };
     } else {
         gl = unsafe { gl::GlFns::load_with(|symbol| get_proc_address(gl_context, symbol)) };
@@ -1298,7 +1294,6 @@ pub extern "C" fn wr_api_create_document(
     )));
 }
 
-/// cbindgen:postfix=WR_DESTRUCTOR_SAFE_FUNC
 #[no_mangle]
 pub unsafe extern "C" fn wr_api_delete_document(dh: &mut DocumentHandle) {
     dh.api.delete_document(dh.document_id);
@@ -1318,13 +1313,11 @@ pub extern "C" fn wr_api_clone(
     *out_handle = Box::into_raw(Box::new(handle));
 }
 
-/// cbindgen:postfix=WR_DESTRUCTOR_SAFE_FUNC
 #[no_mangle]
 pub unsafe extern "C" fn wr_api_delete(dh: *mut DocumentHandle) {
     let _ = Box::from_raw(dh);
 }
 
-/// cbindgen:postfix=WR_DESTRUCTOR_SAFE_FUNC
 #[no_mangle]
 pub unsafe extern "C" fn wr_api_shut_down(dh: &mut DocumentHandle) {
     dh.api.shut_down();
@@ -1348,7 +1341,6 @@ pub unsafe extern "C" fn wr_api_accumulate_memory_report(
     *report += dh.api.report_memory();
 }
 
-/// cbindgen:postfix=WR_DESTRUCTOR_SAFE_FUNC
 #[no_mangle]
 pub unsafe extern "C" fn wr_api_clear_all_caches(dh: &mut DocumentHandle) {
     dh.api.send_debug_cmd(DebugCommand::ClearCaches(ClearCache::all()));
@@ -1372,7 +1364,6 @@ pub extern "C" fn wr_transaction_new(do_async: bool) -> *mut Transaction {
     Box::into_raw(Box::new(make_transaction(do_async)))
 }
 
-/// cbindgen:postfix=WR_DESTRUCTOR_SAFE_FUNC
 #[no_mangle]
 pub extern "C" fn wr_transaction_delete(txn: *mut Transaction) {
     unsafe { let _ = Box::from_raw(txn); }
@@ -1802,7 +1793,6 @@ pub unsafe extern "C" fn wr_transaction_clear_display_list(
     );
 }
 
-/// cbindgen:postfix=WR_DESTRUCTOR_SAFE_FUNC
 #[no_mangle]
 pub extern "C" fn wr_api_send_external_event(dh: &mut DocumentHandle,
                                              evt: usize) {
@@ -2035,7 +2025,6 @@ pub extern "C" fn wr_state_new(pipeline_id: WrPipelineId,
     Box::into_raw(state)
 }
 
-/// cbindgen:postfix=WR_DESTRUCTOR_SAFE_FUNC
 #[no_mangle]
 pub extern "C" fn wr_state_delete(state: *mut WrState) {
     assert!(unsafe { !is_in_render_thread() });
@@ -2779,30 +2768,36 @@ pub extern "C" fn wr_dp_push_border(state: &mut WrState,
                       border_details);
 }
 
+#[repr(C)]
+pub struct WrBorderImage {
+    widths: LayoutSideOffsets,
+    image: WrImageKey,
+    width: i32,
+    height: i32,
+    fill: bool,
+    slice: SideOffsets2D<i32>,
+    outset: SideOffsets2D<f32>,
+    repeat_horizontal: RepeatMode,
+    repeat_vertical: RepeatMode,
+}
+
 #[no_mangle]
 pub extern "C" fn wr_dp_push_border_image(state: &mut WrState,
                                           rect: LayoutRect,
                                           clip: LayoutRect,
                                           is_backface_visible: bool,
                                           parent: &WrSpaceAndClipChain,
-                                          widths: LayoutSideOffsets,
-                                          image: WrImageKey,
-                                          width: i32,
-                                          height: i32,
-                                          slice: SideOffsets2D<i32>,
-                                          outset: SideOffsets2D<f32>,
-                                          repeat_horizontal: RepeatMode,
-                                          repeat_vertical: RepeatMode) {
+                                          params: &WrBorderImage) {
     debug_assert!(unsafe { is_in_main_thread() });
     let border_details = BorderDetails::NinePatch(NinePatchBorder {
-        source: NinePatchBorderSource::Image(image),
-        width,
-        height,
-        slice,
-        fill: false,
-        outset: outset.into(),
-        repeat_horizontal: repeat_horizontal.into(),
-        repeat_vertical: repeat_vertical.into(),
+        source: NinePatchBorderSource::Image(params.image),
+        width: params.width,
+        height: params.height,
+        slice: params.slice,
+        fill: params.fill,
+        outset: params.outset,
+        repeat_horizontal: params.repeat_horizontal,
+        repeat_vertical: params.repeat_vertical,
     });
     let space_and_clip = parent.to_webrender(state.pipeline_id);
 
@@ -2817,7 +2812,7 @@ pub extern "C" fn wr_dp_push_border_image(state: &mut WrState,
     state.frame_builder.dl_builder.push_border(
         &prim_info,
         rect,
-        widths.into(),
+        params.widths,
         border_details,
     );
 }
@@ -2831,6 +2826,7 @@ pub extern "C" fn wr_dp_push_border_gradient(state: &mut WrState,
                                              widths: LayoutSideOffsets,
                                              width: i32,
                                              height: i32,
+                                             fill: bool,
                                              slice: SideOffsets2D<i32>,
                                              start_point: LayoutPoint,
                                              end_point: LayoutPoint,
@@ -2855,7 +2851,7 @@ pub extern "C" fn wr_dp_push_border_gradient(state: &mut WrState,
         width,
         height,
         slice,
-        fill: false,
+        fill,
         outset: outset.into(),
         repeat_horizontal: RepeatMode::Stretch,
         repeat_vertical: RepeatMode::Stretch,
@@ -2886,6 +2882,7 @@ pub extern "C" fn wr_dp_push_border_radial_gradient(state: &mut WrState,
                                                     is_backface_visible: bool,
                                                     parent: &WrSpaceAndClipChain,
                                                     widths: LayoutSideOffsets,
+                                                    fill: bool,
                                                     center: LayoutPoint,
                                                     radius: LayoutSize,
                                                     stops: *const GradientStop,
@@ -2916,7 +2913,7 @@ pub extern "C" fn wr_dp_push_border_radial_gradient(state: &mut WrState,
         width: rect.size.width as i32,
         height: rect.size.height as i32,
         slice,
-        fill: false,
+        fill,
         outset: outset.into(),
         repeat_horizontal: RepeatMode::Stretch,
         repeat_vertical: RepeatMode::Stretch,
@@ -3148,7 +3145,6 @@ pub extern "C" fn wr_add_ref_arc(arc: &ArcVecU8) -> *const VecU8 {
     Arc::into_raw(arc.clone())
 }
 
-/// cbindgen:postfix=WR_DESTRUCTOR_SAFE_FUNC
 #[no_mangle]
 pub unsafe extern "C" fn wr_dec_ref_arc(arc: *const VecU8) {
     Arc::from_raw(arc);
@@ -3216,7 +3212,6 @@ impl WrSpatialId {
     }
 }
 
-/// cbindgen:postfix=WR_DESTRUCTOR_SAFE_FUNC
 #[no_mangle]
 pub unsafe extern "C" fn wr_device_delete(device: *mut Device) {
     Box::from_raw(device);
@@ -3261,7 +3256,6 @@ pub extern "C" fn wr_shaders_new(gl_context: *mut c_void,
     Box::into_raw(Box::new(shaders))
 }
 
-/// cbindgen:postfix=WR_DESTRUCTOR_SAFE_FUNC
 #[no_mangle]
 pub unsafe extern "C" fn wr_shaders_delete(shaders: *mut WrShaders, gl_context: *mut c_void) {
     let mut device = wr_device_new(gl_context, None);

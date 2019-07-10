@@ -16,6 +16,7 @@
 #include "jsfriendapi.h"
 
 #include "builtin/ModuleObject.h"
+#include "dbg/Debugger.h"
 #include "gc/GCInternals.h"
 #include "gc/Policy.h"
 #include "jit/IonCode.h"
@@ -23,7 +24,6 @@
 #include "vm/ArgumentsObject.h"
 #include "vm/ArrayObject.h"
 #include "vm/BigIntType.h"
-#include "vm/Debugger.h"
 #include "vm/EnvironmentObject.h"
 #include "vm/RegExpShared.h"
 #include "vm/Scope.h"
@@ -431,6 +431,11 @@ JS_PUBLIC_API void JS::UnsafeTraceRoot(JSTracer* trc, T* thingp,
   js::TraceNullableRoot(trc, thingp, name);
 }
 
+namespace js {
+class SavedFrame;
+class AbstractGeneratorObject;
+}  // namespace js
+
 // Instantiate a copy of the Tracing templates for each public GC pointer type.
 #define INSTANTIATE_PUBLIC_TRACE_FUNCTIONS(type)                          \
   template JS_PUBLIC_API void JS::UnsafeTraceRoot<type>(JSTracer*, type*, \
@@ -441,6 +446,8 @@ JS_PUBLIC_API void JS::UnsafeTraceRoot(JSTracer* trc, T* thingp,
       JSTracer*, type*, const char*);
 FOR_EACH_PUBLIC_GC_POINTER_TYPE(INSTANTIATE_PUBLIC_TRACE_FUNCTIONS)
 FOR_EACH_PUBLIC_TAGGED_GC_POINTER_TYPE(INSTANTIATE_PUBLIC_TRACE_FUNCTIONS)
+INSTANTIATE_PUBLIC_TRACE_FUNCTIONS(SavedFrame*);
+INSTANTIATE_PUBLIC_TRACE_FUNCTIONS(AbstractGeneratorObject*);
 #undef INSTANTIATE_PUBLIC_TRACE_FUNCTIONS
 
 namespace js {

@@ -15,14 +15,21 @@
  * content retrieved.
  */
 
-const {Services} = ChromeUtils.import("resource://gre/modules/Services.jsm");
-const {XPCOMUtils} = ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
+const { Services } = ChromeUtils.import("resource://gre/modules/Services.jsm");
+const { XPCOMUtils } = ChromeUtils.import(
+  "resource://gre/modules/XPCOMUtils.jsm"
+);
 
 XPCOMUtils.defineLazyGlobalGetters(this, ["DOMParser"]);
-XPCOMUtils.defineLazyGetter(this, "domParser", () => new DOMParser());
+XPCOMUtils.defineLazyGetter(this, "domParser", () => {
+  const parser = new DOMParser();
+  parser.forceEnableDTD();
+  return parser;
+});
 
-const {NoSuchElementError} =
-    ChromeUtils.import("chrome://marionette/content/error.js");
+const { NoSuchElementError } = ChromeUtils.import(
+  "chrome://marionette/content/error.js"
+);
 
 this.EXPORTED_SYMBOLS = ["l10n"];
 
@@ -91,8 +98,7 @@ l10n.localizeProperty = function(urls, id) {
   }
 
   if (property === null) {
-    throw new NoSuchElementError(
-        `Property with ID '${id}' hasn't been found`);
+    throw new NoSuchElementError(`Property with ID '${id}' hasn't been found`);
   }
 
   return property;

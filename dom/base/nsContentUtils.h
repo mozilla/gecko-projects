@@ -472,7 +472,7 @@ class nsContentUtils {
                                int32_t* aNode2Index = nullptr);
 
   struct ComparePointsCache {
-    int32_t ComputeIndexOf(nsINode* aParent, nsINode* aChild) {
+    int32_t ComputeIndexOf(const nsINode* aParent, const nsINode* aChild) {
       if (aParent == mParent && aChild == mChild) {
         return mIndex;
       }
@@ -484,8 +484,8 @@ class nsContentUtils {
     }
 
    private:
-    nsINode* mParent = nullptr;
-    nsINode* mChild = nullptr;
+    const nsINode* mParent = nullptr;
+    const nsINode* mChild = nullptr;
     int32_t mIndex = 0;
   };
 
@@ -508,8 +508,8 @@ class nsContentUtils {
    *      On the other hand, nsINode can have ATTRCHILD_ARRAY_MAX_CHILD_COUN
    *      (0x3FFFFF) at most.  Therefore, they can be int32_t for now.
    */
-  static int32_t ComparePoints(nsINode* aParent1, int32_t aOffset1,
-                               nsINode* aParent2, int32_t aOffset2,
+  static int32_t ComparePoints(const nsINode* aParent1, int32_t aOffset1,
+                               const nsINode* aParent2, int32_t aOffset2,
                                bool* aDisconnected = nullptr,
                                ComparePointsCache* aParent1Cache = nullptr);
   template <typename FPT, typename FRT, typename SPT, typename SRT>
@@ -1896,7 +1896,6 @@ class nsContentUtils {
    * security check using aContent's principal.
    *
    * @param aContent the node on which a link was triggered.
-   * @param aPresContext the pres context, must be non-null.
    * @param aLinkURI the URI of the link, must be non-null.
    * @param aTargetSpec the target (like target=, may be empty).
    * @param aClick whether this was a click or not (if false, this method
@@ -1904,9 +1903,9 @@ class nsContentUtils {
    * @param aIsTrusted If false, JS Context will be pushed to stack
    *                   when the link is triggered.
    */
-  static void TriggerLink(nsIContent* aContent, nsPresContext* aPresContext,
-                          nsIURI* aLinkURI, const nsString& aTargetSpec,
-                          bool aClick, bool aIsTrusted);
+  static void TriggerLink(nsIContent* aContent, nsIURI* aLinkURI,
+                          const nsString& aTargetSpec, bool aClick,
+                          bool aIsTrusted);
 
   /**
    * Get the link location.
@@ -1975,6 +1974,13 @@ class nsContentUtils {
    * Check whether an application should be allowed to use offline APIs.
    */
   static bool OfflineAppAllowed(nsIPrincipal* aPrincipal);
+
+  /**
+   * Determine whether the principal is allowed access to the localization
+   * system. We don't want the web to ever see this but all our UI including in
+   * content pages should pass this test.
+   */
+  static bool PrincipalAllowsL10n(nsIPrincipal* aPrincipal);
 
   /**
    * If offline-apps.allow_by_default is true, we set offline-app permission
@@ -3332,6 +3338,10 @@ nsContentUtils::InternalContentPolicyTypeToExternal(nsContentPolicyType aType) {
     case nsIContentPolicy::TYPE_INTERNAL_STYLESHEET:
     case nsIContentPolicy::TYPE_INTERNAL_STYLESHEET_PRELOAD:
       return nsIContentPolicy::TYPE_STYLESHEET;
+
+    case nsIContentPolicy::TYPE_INTERNAL_DTD:
+    case nsIContentPolicy::TYPE_INTERNAL_FORCE_ALLOWED_DTD:
+      return nsIContentPolicy::TYPE_DTD;
 
     default:
       return aType;

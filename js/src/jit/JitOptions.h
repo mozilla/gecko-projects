@@ -57,7 +57,6 @@ struct DefaultJitOptions {
   bool disableRecoverIns;
   bool disableScalarReplacement;
   bool disableCacheIR;
-  bool disableSincos;
   bool disableSink;
   bool disableOptimizationLevels;
   bool baselineInterpreter;
@@ -109,6 +108,9 @@ struct DefaultJitOptions {
   bool spectreStringMitigations;
   bool spectreValueMasking;
   bool spectreJitToCxxCalls;
+
+  bool supportsFloatingPoint;
+  bool supportsUnalignedAccesses;
 
   DefaultJitOptions();
   bool isSmallFunction(JSScript* script) const;

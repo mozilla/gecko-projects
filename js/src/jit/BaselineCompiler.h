@@ -256,6 +256,8 @@ namespace jit {
   _(JSOP_INC)                   \
   _(JSOP_DEC)
 
+enum class ScriptGCThingType { RegExp, Function, Scope, BigInt };
+
 // Base class for BaselineCompiler and BaselineInterpreterGenerator. The Handler
 // template is a class storing fields/methods that are interpreter or compiler
 // specific. This can be combined with template specialization of methods in
@@ -318,10 +320,11 @@ class BaselineCodeGen {
 
   // Pushes a name/object/scope associated with the current bytecode op (and
   // stored in the script) as argument for a VM function.
-  enum class ScriptObjectType { RegExp, Function };
-  void pushScriptObjectArg(ScriptObjectType type);
+  void loadScriptGCThing(ScriptGCThingType type, Register dest,
+                         Register scratch);
+  void pushScriptGCThingArg(ScriptGCThingType type, Register scratch1,
+                            Register scratch2);
   void pushScriptNameArg(Register scratch1, Register scratch2);
-  void pushScriptScopeArg();
 
   // Pushes a bytecode operand as argument for a VM function.
   void pushUint8BytecodeOperandArg(Register scratch);
@@ -333,6 +336,9 @@ class BaselineCodeGen {
 
   // Loads the current JSScript* in dest.
   void loadScript(Register dest);
+
+  void saveInterpreterPCReg();
+  void restoreInterpreterPCReg();
 
   // Subtracts |script->nslots() * sizeof(Value)| from reg.
   void subtractScriptSlotsSize(Register reg, Register scratch);
@@ -407,6 +413,8 @@ class BaselineCodeGen {
   MOZ_MUST_USE bool emitEnterGeneratorCode(Register script,
                                            Register resumeIndex,
                                            Register scratch);
+  void emitInterpJumpToResumeEntry(Register script, Register resumeIndex,
+                                   Register scratch);
   void emitJumpToInterpretOpLabel();
 
   MOZ_MUST_USE bool emitIncExecutionProgressCounter(Register scratch);
@@ -444,7 +452,8 @@ class BaselineCodeGen {
 
   // Converts |val| to an index in the jump table and stores this in |dest|
   // or branches to the default pc if not int32 or out-of-range.
-  void emitGetTableSwitchIndex(ValueOperand val, Register dest);
+  void emitGetTableSwitchIndex(ValueOperand val, Register dest,
+                               Register scratch1, Register scratch2);
 
   // Jumps to the target of a table switch based on |key| and the
   // firstResumeIndex stored in JSOP_TABLESWITCH.
@@ -505,10 +514,9 @@ class BaselineCodeGen {
 
   MOZ_MUST_USE bool emitHandleCodeCoverageAtPrologue();
 
-  void emitInitFrameFields();
-  void emitIsDebuggeeCheck();
+  void emitInitFrameFields(Register nonFunctionEnv);
+  MOZ_MUST_USE bool emitIsDebuggeeCheck();
   void emitInitializeLocals();
-  void emitPreInitEnvironmentChain(Register nonFunctionEnv);
 
   void emitProfilerEnterFrame();
   void emitProfilerExitFrame();
@@ -661,11 +669,20 @@ class BaselineCompiler final : private BaselineCompilerCodeGen {
 // Interface used by BaselineCodeGen for BaselineInterpreterGenerator.
 class BaselineInterpreterHandler {
   InterpreterFrameInfo frame_;
+
+  // Entry point to start interpreting a bytecode op. No registers are live. PC
+  // is loaded from the frame.
   Label interpretOp_;
-  CodeOffset debuggeeCheckOffset_;
+
+  // Like interpretOp_ but at this point the PC is expected to be in
+  // InterpreterPCReg.
+  Label interpretOpWithPCReg_;
+
+  // Offsets of toggled jumps for debugger instrumentation.
+  using CodeOffsetVector = Vector<uint32_t, 0, SystemAllocPolicy>;
+  CodeOffsetVector debugInstrumentationOffsets_;
 
   // Offsets of toggled jumps for code coverage instrumentation.
-  using CodeOffsetVector = Vector<uint32_t, 0, SystemAllocPolicy>;
   CodeOffsetVector codeCoverageOffsets_;
   Label codeCoverageAtPrologueLabel_;
   Label codeCoverageAtPCLabel_;
@@ -678,9 +695,14 @@ class BaselineInterpreterHandler {
   InterpreterFrameInfo& frame() { return frame_; }
 
   Label* interpretOpLabel() { return &interpretOp_; }
+  Label* interpretOpWithPCRegLabel() { return &interpretOpWithPCReg_; }
+
   Label* codeCoverageAtPrologueLabel() { return &codeCoverageAtPrologueLabel_; }
   Label* codeCoverageAtPCLabel() { return &codeCoverageAtPCLabel_; }
 
+  CodeOffsetVector& debugInstrumentationOffsets() {
+    return debugInstrumentationOffsets_;
+  }
   CodeOffsetVector& codeCoverageOffsets() { return codeCoverageOffsets_; }
 
   // Interpreter doesn't know the script and pc statically.
@@ -689,10 +711,9 @@ class BaselineInterpreterHandler {
   JSScript* maybeScript() const { return nullptr; }
   JSFunction* maybeFunction() const { return nullptr; }
 
-  void setDebuggeeCheckOffset(CodeOffset offset) {
-    debuggeeCheckOffset_ = offset;
+  MOZ_MUST_USE bool addDebugInstrumentationOffset(CodeOffset offset) {
+    return debugInstrumentationOffsets_.append(offset.offset());
   }
-  CodeOffset debuggeeCheckOffset() const { return debuggeeCheckOffset_; }
 
   // Interpreter doesn't need to keep track of RetAddrEntries, so these methods
   // are no-ops.
@@ -725,6 +746,9 @@ class BaselineInterpreterGenerator final : private BaselineInterpreterCodeGen {
 
   // Offset of the code to start interpreting a bytecode op.
   uint32_t interpretOpOffset_ = 0;
+
+  // Like interpretOpOffset_ but skips the debug trap for the current op.
+  uint32_t interpretOpNoDebugTrapOffset_ = 0;
 
  public:
   explicit BaselineInterpreterGenerator(JSContext* cx);

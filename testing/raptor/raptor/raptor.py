@@ -722,6 +722,9 @@ class RaptorAndroid(Raptor):
         self.remote_test_root = os.path.abspath(os.path.join(os.sep, 'sdcard', 'raptor'))
         self.remote_profile = os.path.join(self.remote_test_root, "profile")
         self.os_baseline_data = None
+        self.screen_off_timeout = 0
+        self.screen_brightness = 127
+        self.app_launched = False
 
     def set_reverse_port(self, port):
         tcp_port = "tcp:{}".format(port)
@@ -966,6 +969,13 @@ class RaptorAndroid(Raptor):
         proxy_prefs["network.proxy.no_proxies_on"] = self.config['host']
         self.profile.set_preferences(proxy_prefs)
 
+    def log_android_device_temperature(self):
+        # retrieve and log the android device temperature
+        thermal_zone0 = float(self.device.shell_output('cat sys/class/thermal/thermal_zone0/temp'))
+        zone_type = self.device.shell_output('cat sys/class/thermal/thermal_zone0/type')
+        LOG.info("(thermal_zone0) device temperature: %.3f zone type: %s"
+                 % (thermal_zone0 / 1000, zone_type))
+
     def launch_firefox_android_app(self, test_name):
         LOG.info("starting %s" % self.config['app'])
 
@@ -1005,6 +1015,7 @@ class RaptorAndroid(Raptor):
             if not self.device.process_exist(self.config['binary']):
                 raise Exception("Error launching %s. App did not start properly!" %
                                 self.config['binary'])
+            self.app_launched = True
         except Exception as e:
             LOG.error("Exception launching %s" % self.config['binary'])
             LOG.error("Exception: %s %s" % (type(e).__name__, str(e)))
@@ -1143,6 +1154,7 @@ class RaptorAndroid(Raptor):
                 self.turn_on_android_app_proxy()
 
             self.copy_profile_to_device()
+            self.log_android_device_temperature()
 
             # now start the browser/app under test
             self.launch_firefox_android_app(test['name'])
@@ -1182,6 +1194,7 @@ class RaptorAndroid(Raptor):
 
         self.clear_app_data()
         self.copy_profile_to_device()
+        self.log_android_device_temperature()
 
         # now start the browser/app under test
         self.launch_firefox_android_app(test['name'])
@@ -1201,6 +1214,10 @@ class RaptorAndroid(Raptor):
             self.runner.wait(timeout=None)
 
     def check_for_crashes(self):
+        if not self.app_launched:
+            LOG.info("skipping check_for_crashes: application has not been launched")
+            return
+        self.app_launched = False
         # Turn off verbose to prevent logcat from being inserted into the main log.
         verbose = self.device._verbose
         self.device._verbose = False

@@ -21,39 +21,54 @@ function run_test() {
   gDebuggee = addTestGlobal("test-stack");
   gClient = new DebuggerClient(DebuggerServer.connectPipe());
   gClient.connect().then(function() {
-    attachTestTabAndResume(gClient, "test-stack",
-                           function(response, targetFront, threadClient) {
-                             gThreadClient = threadClient;
-                             test_pause_frame();
-                           });
+    attachTestTabAndResume(gClient, "test-stack", function(
+      response,
+      targetFront,
+      threadClient
+    ) {
+      gThreadClient = threadClient;
+      test_pause_frame();
+    });
   });
   do_test_pending();
 }
 
 function test_pause_frame() {
-  gThreadClient.once("paused", function(packet) {
+  gThreadClient.once("paused", async function(packet) {
     const pauseActor = packet.actor;
 
     // Make a bogus request to the pause-lifetime actor.  Should get
     // unrecognized-packet-type (and not no-such-actor).
-    gClient.request({ to: pauseActor, type: "bogusRequest" }, function(response) {
-      Assert.equal(response.error, "unrecognizedPacketType");
+    try {
+      await gClient.request({ to: pauseActor, type: "bogusRequest" });
+      ok(false, "bogusRequest should throw");
+    } catch (e) {
+      ok(true, "bogusRequest thrown");
+      Assert.equal(e.error, "unrecognizedPacketType");
+    }
 
-      gThreadClient.resume().then(function() {
-        // Now that we've resumed, should get no-such-actor for the
-        // same request.
-        gClient.request({ to: pauseActor, type: "bogusRequest" }, function(response) {
-          Assert.equal(response.error, "noSuchActor");
-          finishClient(gClient);
-        });
-      });
+    gThreadClient.resume().then(async function() {
+      // Now that we've resumed, should get no-such-actor for the
+      // same request.
+      try {
+        await gClient.request({ to: pauseActor, type: "bogusRequest" });
+        ok(false, "bogusRequest should throw");
+      } catch (e) {
+        ok(true, "bogusRequest thrown");
+        Assert.equal(e.error, "noSuchActor");
+      }
+      finishClient(gClient);
     });
   });
 
-  gDebuggee.eval("(" + function() {
-    function stopMe() {
-      debugger;
-    }
-    stopMe();
-  } + ")()");
+  gDebuggee.eval(
+    "(" +
+      function() {
+        function stopMe() {
+          debugger;
+        }
+        stopMe();
+      } +
+      ")()"
+  );
 }

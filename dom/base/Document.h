@@ -185,6 +185,7 @@ class FeaturePolicy;
 class FontFaceSet;
 class FrameRequestCallback;
 class ImageTracker;
+class HTMLAllCollection;
 class HTMLBodyElement;
 class HTMLSharedElement;
 class HTMLImageElement;
@@ -1366,6 +1367,9 @@ class Document : public nsINode,
    */
   void DisableCookieAccess() { mDisableCookieAccess = true; }
 
+  void SetLinkHandlingEnabled(bool aValue) { mLinksEnabled = aValue; }
+  bool LinkHandlingEnabled() { return mLinksEnabled; }
+
   /**
    * Set compatibility mode for this document
    */
@@ -2319,7 +2323,7 @@ class Document : public nsINode,
 
   /**
    * Reset this document to aURI, aLoadGroup, aPrincipal and aStoragePrincipal.
-   * aURI must not be null.  If aPrincipal is null, a codebase principal based
+   * aURI must not be null.  If aPrincipal is null, a content principal based
    * on aURI will be used.
    */
   virtual void ResetToURI(nsIURI* aURI, nsILoadGroup* aLoadGroup,
@@ -2335,7 +2339,7 @@ class Document : public nsINode,
   /**
    * Get the container (docshell) for this document.
    */
-  virtual nsISupports* GetContainer() const;
+  nsISupports* GetContainer() const;
 
   /**
    * Get the container's load context for this document.
@@ -2691,15 +2695,15 @@ class Document : public nsINode,
 
     // If we are a document "whose URL's scheme is not a network scheme."
     // NB: Explicitly allow file: URIs to store cookies.
-    nsCOMPtr<nsIURI> codebaseURI;
-    NodePrincipal()->GetURI(getter_AddRefs(codebaseURI));
+    nsCOMPtr<nsIURI> contentURI;
+    NodePrincipal()->GetURI(getter_AddRefs(contentURI));
 
-    if (!codebaseURI) {
+    if (!contentURI) {
       return true;
     }
 
     nsAutoCString scheme;
-    codebaseURI->GetScheme(scheme);
+    contentURI->GetScheme(scheme);
     return !scheme.EqualsLiteral("http") && !scheme.EqualsLiteral("https") &&
            !scheme.EqualsLiteral("ftp") && !scheme.EqualsLiteral("file");
   }
@@ -2997,7 +3001,15 @@ class Document : public nsINode,
                : mAllowXULXBL == eTriFalse ? false : InternalAllowXULXBL();
   }
 
+  /**
+   * Returns true if this document is allowed to load DTDs from UI resources
+   * no matter what.
+   */
+  bool SkipDTDSecurityChecks() { return mSkipDTDSecurityChecks; }
+
   void ForceEnableXULXBL() { mAllowXULXBL = eTriTrue; }
+
+  void ForceSkipDTDSecurityChecks() { mSkipDTDSecurityChecks = true; }
 
   /**
    * Returns the template content owner document that owns the content of
@@ -3565,6 +3577,13 @@ class Document : public nsINode,
   void SetAlinkColor(const nsAString& aAlinkColor);
   void GetBgColor(nsAString& aBgColor);
   void SetBgColor(const nsAString& aBgColor);
+  void Clear() const {
+    // Deprecated
+  }
+  void CaptureEvents();
+  void ReleaseEvents();
+
+  mozilla::dom::HTMLAllCollection* All();
 
   static bool IsUnprefixedFullscreenEnabled(JSContext* aCx, JSObject* aObject);
   static bool DocumentSupportsL10n(JSContext* aCx, JSObject* aObject);
@@ -3950,7 +3969,8 @@ class Document : public nsINode,
  private:
   void InitializeLocalization(nsTArray<nsString>& aResourceIds);
 
-  void ParseWidthAndHeightInMetaViewport(const nsAString& aWidthString,
+  // Returns true if there is any valid value in the viewport meta tag.
+  bool ParseWidthAndHeightInMetaViewport(const nsAString& aWidthString,
                                          const nsAString& aHeightString,
                                          bool aIsAutoScale);
 
@@ -3960,7 +3980,8 @@ class Document : public nsINode,
 
   // Parse scale values in viewport meta tag and set the values in
   // mScaleMinFloat, mScaleMaxFloat and mScaleFloat respectively.
-  void ParseScalesInMetaViewport();
+  // Returns true if there is any valid scale value in the viewport meta tag.
+  bool ParseScalesInMetaViewport();
 
   FlashClassification DocumentFlashClassificationInternal();
 
@@ -4052,7 +4073,7 @@ class Document : public nsINode,
     mAllowPaymentRequest = aAllowPaymentRequest;
   }
 
-  FeaturePolicy* Policy() const;
+  mozilla::dom::FeaturePolicy* FeaturePolicy() const;
 
   bool ModuleScriptsEnabled();
 
@@ -4359,7 +4380,7 @@ class Document : public nsINode,
 
   // This should *ONLY* be used in GetCookie/SetCookie.
   already_AddRefed<nsIChannel> CreateDummyChannelForCookies(
-      nsIURI* aCodebaseURI);
+      nsIURI* aContentURI);
 
   nsCOMPtr<nsIReferrerInfo> mPreloadReferrerInfo;
   nsCOMPtr<nsIReferrerInfo> mReferrerInfo;
@@ -4474,7 +4495,7 @@ class Document : public nsINode,
 
   RefPtr<Promise> mReadyForIdle;
 
-  RefPtr<FeaturePolicy> mFeaturePolicy;
+  RefPtr<mozilla::dom::FeaturePolicy> mFeaturePolicy;
 
   UniquePtr<ResizeObserverController> mResizeObserverController;
 
@@ -4643,6 +4664,10 @@ class Document : public nsINode,
   // True if the encoding menu should be disabled.
   bool mEncodingMenuDisabled : 1;
 
+  // False if we've disabled link handling for elements inside this document,
+  // true otherwise.
+  bool mLinksEnabled : 1;
+
   // True if this document is for an SVG-in-OpenType font.
   bool mIsSVGGlyphsDocument : 1;
 
@@ -4810,6 +4835,8 @@ class Document : public nsINode,
   enum Tri { eTriUnset = 0, eTriFalse, eTriTrue };
 
   Tri mAllowXULXBL;
+
+  bool mSkipDTDSecurityChecks;
 
   // The document's script global object, the object from which the
   // document can get its script context and scope. This is the
@@ -5029,7 +5056,12 @@ class Document : public nsINode,
   // Our update nesting level
   uint32_t mUpdateNestLevel;
 
-  enum ViewportType : uint8_t { DisplayWidthHeight, Specified, Unknown, Empty };
+  enum ViewportType : uint8_t {
+    DisplayWidthHeight,
+    Specified,
+    Unknown,
+    NoValidContent,
+  };
 
   ViewportType mViewportType;
 
@@ -5185,6 +5217,8 @@ class Document : public nsINode,
 
   RefPtr<XULBroadcastManager> mXULBroadcastManager;
   RefPtr<XULPersist> mXULPersist;
+
+  RefPtr<mozilla::dom::HTMLAllCollection> mAll;
 
   // document lightweight theme for use with :-moz-lwtheme,
   // :-moz-lwtheme-brighttext and :-moz-lwtheme-darktext

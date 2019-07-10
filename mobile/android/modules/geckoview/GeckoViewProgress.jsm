@@ -6,16 +6,27 @@
 
 var EXPORTED_SYMBOLS = ["GeckoViewProgress"];
 
-const {GeckoViewModule} = ChromeUtils.import("resource://gre/modules/GeckoViewModule.jsm");
-const {Services} = ChromeUtils.import("resource://gre/modules/Services.jsm");
-const {XPCOMUtils} = ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
+const { GeckoViewModule } = ChromeUtils.import(
+  "resource://gre/modules/GeckoViewModule.jsm"
+);
+const { Services } = ChromeUtils.import("resource://gre/modules/Services.jsm");
+const { XPCOMUtils } = ChromeUtils.import(
+  "resource://gre/modules/XPCOMUtils.jsm"
+);
 
 XPCOMUtils.defineLazyServiceGetter(
-  this, "OverrideService", "@mozilla.org/security/certoverride;1",
-  "nsICertOverrideService");
+  this,
+  "OverrideService",
+  "@mozilla.org/security/certoverride;1",
+  "nsICertOverrideService"
+);
 
 XPCOMUtils.defineLazyServiceGetter(
-  this, "IDNService", "@mozilla.org/network/idn-service;1", "nsIIDNService");
+  this,
+  "IDNService",
+  "@mozilla.org/network/idn-service;1",
+  "nsIIDNService"
+);
 
 var IdentityHandler = {
   // The definitions below should be kept in sync with those in GeckoView.ProgressListener.SecurityInformation
@@ -60,7 +71,9 @@ var IdentityHandler = {
       return this.MIXED_MODE_CONTENT_LOADED;
     }
 
-    if (aState & Ci.nsIWebProgressListener.STATE_BLOCKED_MIXED_DISPLAY_CONTENT) {
+    if (
+      aState & Ci.nsIWebProgressListener.STATE_BLOCKED_MIXED_DISPLAY_CONTENT
+    ) {
       return this.MIXED_MODE_CONTENT_BLOCKED;
     }
 
@@ -69,8 +82,10 @@ var IdentityHandler = {
 
   getMixedActiveMode: function getActiveDisplayMode(aState) {
     // Only show an indicator for loaded mixed content if the pref to block it is enabled
-    if ((aState & Ci.nsIWebProgressListener.STATE_LOADED_MIXED_ACTIVE_CONTENT) &&
-        !Services.prefs.getBoolPref("security.mixed_content.block_active_content")) {
+    if (
+      aState & Ci.nsIWebProgressListener.STATE_LOADED_MIXED_ACTIVE_CONTENT &&
+      !Services.prefs.getBoolPref("security.mixed_content.block_active_content")
+    ) {
       return this.MIXED_MODE_CONTENT_LOADED;
     }
 
@@ -103,9 +118,11 @@ var IdentityHandler = {
 
     // Don't show identity data for pages with an unknown identity or if any
     // mixed content is loaded (mixed display content is loaded by default).
-    if (identityMode === this.IDENTITY_MODE_UNKNOWN ||
-        (aState & Ci.nsIWebProgressListener.STATE_IS_BROKEN) ||
-        (aState & Ci.nsIWebProgressListener.STATE_IS_INSECURE)) {
+    if (
+      identityMode === this.IDENTITY_MODE_UNKNOWN ||
+      aState & Ci.nsIWebProgressListener.STATE_IS_BROKEN ||
+      aState & Ci.nsIWebProgressListener.STATE_IS_INSECURE
+    ) {
       result.secure = false;
       return result;
     }
@@ -132,9 +149,13 @@ var IdentityHandler = {
 
     try {
       result.securityException = OverrideService.hasMatchingOverride(
-        uri.host, uri.port, cert, {}, {});
-    } catch (e) {
-    }
+        uri.host,
+        uri.port,
+        cert,
+        {},
+        {}
+      );
+    } catch (e) {}
 
     return result;
   },
@@ -142,26 +163,33 @@ var IdentityHandler = {
 
 class GeckoViewProgress extends GeckoViewModule {
   onInit() {
+    debug`onInit`;
     this._hostChanged = false;
   }
 
   onEnable() {
-    debug `onEnable`;
+    debug`onEnable`;
 
-    const flags = Ci.nsIWebProgress.NOTIFY_STATE_NETWORK |
-                  Ci.nsIWebProgress.NOTIFY_SECURITY |
-                  Ci.nsIWebProgress.NOTIFY_LOCATION;
-    this.progressFilter =
-      Cc["@mozilla.org/appshell/component/browser-status-filter;1"]
-      .createInstance(Ci.nsIWebProgress);
+    this._initialAboutBlank = true;
+    const flags =
+      Ci.nsIWebProgress.NOTIFY_STATE_NETWORK |
+      Ci.nsIWebProgress.NOTIFY_SECURITY |
+      Ci.nsIWebProgress.NOTIFY_LOCATION;
+    this.progressFilter = Cc[
+      "@mozilla.org/appshell/component/browser-status-filter;1"
+    ].createInstance(Ci.nsIWebProgress);
     this.progressFilter.addProgressListener(this, flags);
     this.browser.addProgressListener(this.progressFilter, flags);
     Services.obs.addObserver(this, "oop-frameloader-crashed");
     this.registerListener("GeckoView:FlushSessionState");
+    this.messageManager.addMessageListener(
+      "GeckoView:ContentModuleLoaded",
+      this
+    );
   }
 
   onDisable() {
-    debug `onDisable`;
+    debug`onDisable`;
 
     if (this.progressFilter) {
       this.progressFilter.removeProgressListener(this);
@@ -173,7 +201,7 @@ class GeckoViewProgress extends GeckoViewModule {
   }
 
   onEvent(aEvent, aData, aCallback) {
-    debug `onEvent: event=${aEvent}, data=${aData}`;
+    debug`onEvent: event=${aEvent}, data=${aData}`;
 
     switch (aEvent) {
       case "GeckoView:FlushSessionState":
@@ -182,34 +210,54 @@ class GeckoViewProgress extends GeckoViewModule {
     }
   }
 
+  receiveMessage(aMsg) {
+    debug`receiveMessage ${aMsg.name} ${aMsg.data}`;
+    switch (aMsg.name) {
+      case "GeckoView:ContentModuleLoaded": {
+        if (
+          this._initialAboutBlank &&
+          aMsg.data.module === "GeckoViewProgress"
+        ) {
+          this._fireInitialLoad();
+        }
+        break;
+      }
+    }
+  }
+
   onSettingsUpdate() {
     const settings = this.settings;
-    debug `onSettingsUpdate: ${settings}`;
+    debug`onSettingsUpdate: ${settings}`;
   }
 
   onStateChange(aWebProgress, aRequest, aStateFlags, aStatus) {
-    debug `onStateChange: isTopLevel=${aWebProgress.isTopLevel},
+    debug`onStateChange: isTopLevel=${aWebProgress.isTopLevel},
                           flags=${aStateFlags}, status=${aStatus}
                           loadType=${aWebProgress.loadType}`;
-
 
     if (!aWebProgress.isTopLevel) {
       return;
     }
 
-    const uriSpec = aRequest.QueryInterface(Ci.nsIChannel).URI.displaySpec;
+    const { displaySpec, spec } = aRequest.QueryInterface(Ci.nsIChannel).URI;
     const isSuccess = aStatus == Cr.NS_OK;
     const isStart = (aStateFlags & Ci.nsIWebProgressListener.STATE_START) != 0;
     const isStop = (aStateFlags & Ci.nsIWebProgressListener.STATE_STOP) != 0;
 
-    debug `onStateChange: uri=${uriSpec} isSuccess=${isSuccess}
+    debug`onStateChange: uri=${spec} isSuccess=${isSuccess}
            isStart=${isStart} isStop=${isStop}`;
+
+    // GeckoView never gets PageStart or PageStop for about:blank because we
+    // set nodefaultsrc to true unconditionally so we can assume here that
+    // we're starting a page load for a non-blank page (or a consumer-initiated
+    // about:blank load).
+    this._initialAboutBlank = false;
 
     if (isStart) {
       this._inProgress = true;
       const message = {
         type: "GeckoView:PageStart",
-        uri: uriSpec,
+        uri: displaySpec,
       };
 
       this.eventDispatcher.sendRequest(message);
@@ -225,11 +273,39 @@ class GeckoViewProgress extends GeckoViewModule {
     }
   }
 
+  // The initial about:blank load events are unreliable because docShell starts
+  // up concurrently with loading geckoview.js so we're never guaranteed to get
+  // the events.
+  // What we do instead is ignore all initial about:blank events and fire them
+  // manually once the child process has booted up.
+  _fireInitialLoad() {
+    this.eventDispatcher.sendRequest({
+      type: "GeckoView:PageStart",
+      uri: "about:blank",
+    });
+    this.eventDispatcher.sendRequest({
+      type: "GeckoView:LocationChange",
+      uri: "about:blank",
+      canGoBack: false,
+      canGoForward: false,
+      isTopLevel: true,
+    });
+    this.eventDispatcher.sendRequest({
+      type: "GeckoView:PageStop",
+      success: true,
+    });
+  }
+
   onSecurityChange(aWebProgress, aRequest, aState) {
-    debug `onSecurityChange`;
+    debug`onSecurityChange`;
 
     // Don't need to do anything if the data we use to update the UI hasn't changed
     if (this._state === aState && !this._hostChanged) {
+      return;
+    }
+
+    // We don't report messages about the initial about:blank
+    if (this._initialAboutBlank) {
       return;
     }
 
@@ -247,7 +323,7 @@ class GeckoViewProgress extends GeckoViewModule {
   }
 
   onLocationChange(aWebProgress, aRequest, aLocationURI, aFlags) {
-    debug `onLocationChange: location=${aLocationURI.displaySpec},
+    debug`onLocationChange: location=${aLocationURI.displaySpec},
                              flags=${aFlags}`;
 
     this._hostChanged = true;
@@ -255,7 +331,7 @@ class GeckoViewProgress extends GeckoViewModule {
 
   // nsIObserver event handler
   observe(aSubject, aTopic, aData) {
-    debug `observe: topic=${aTopic}`;
+    debug`observe: topic=${aTopic}`;
 
     switch (aTopic) {
       case "oop-frameloader-crashed": {
@@ -273,4 +349,4 @@ class GeckoViewProgress extends GeckoViewModule {
   }
 }
 
-const {debug, warn} = GeckoViewProgress.initLogging("GeckoViewProgress"); // eslint-disable-line no-unused-vars
+const { debug, warn } = GeckoViewProgress.initLogging("GeckoViewProgress"); // eslint-disable-line no-unused-vars

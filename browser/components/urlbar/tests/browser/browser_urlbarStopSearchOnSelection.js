@@ -25,7 +25,8 @@ add_task(async function init() {
   });
   // Add a test search engine that returns suggestions on a delay.
   let engine = await SearchTestUtils.promiseNewSearchEngine(
-    getRootDirectory(gTestPath) + TEST_ENGINE_BASENAME);
+    getRootDirectory(gTestPath) + TEST_ENGINE_BASENAME
+  );
   let oldDefaultEngine = await Services.search.getDefault();
   await Services.search.moveEngine(engine, 0);
   await Services.search.setDefault(engine);
@@ -49,19 +50,19 @@ add_task(async function mainTest() {
       // and the two suggestions.
       await promiseAutocompleteResultPopup("amp");
       await TestUtils.waitForCondition(() => {
-        return UrlbarTestUtils.getResultCount(window) ==
-               2 + TEST_ENGINE_NUM_EXPECTED_RESULTS;
+        return (
+          UrlbarTestUtils.getResultCount(window) ==
+          2 + TEST_ENGINE_NUM_EXPECTED_RESULTS
+        );
       });
 
       // Type a character to start a new search.  The new search should still
       // match the open tab so that the open-tab result appears again.
       EventUtils.synthesizeKey("l");
 
-      // There should be 2 results immediately: heuristic and open tab.  (On
-      // quantumbar, there will be only 2, but on awesomebar, there will be 4
-      // since awesomebar will keep showing the excess old results for a bit.)
+      // There should be 2 results immediately: heuristic and open tab.
       await TestUtils.waitForCondition(() => {
-        return UrlbarTestUtils.getResultCount(window) >= 2;
+        return UrlbarTestUtils.getResultCount(window) == 2;
       });
 
       // Before the search completes, change the selected result.  Pressing only
@@ -78,35 +79,31 @@ add_task(async function mainTest() {
 
       // To make absolutely sure the suggestions don't appear after the search
       // completes, wait a bit.
-      await new Promise(r => setTimeout(r, 1 + TEST_ENGINE_SUGGESTIONS_TIMEOUT));
+      await new Promise(r =>
+        setTimeout(r, 1 + TEST_ENGINE_SUGGESTIONS_TIMEOUT)
+      );
 
       // The heuristic result should reflect the new search, "ampl".
       let result = await UrlbarTestUtils.getDetailsOfResultAt(window, 0);
-      Assert.equal(result.type, UrlbarUtils.RESULT_TYPE.SEARCH,
-        "Should have the correct result type");
-      Assert.equal(result.searchParams.query, "ampl",
-        "Should have the correct query");
+      Assert.equal(
+        result.type,
+        UrlbarUtils.RESULT_TYPE.SEARCH,
+        "Should have the correct result type"
+      );
+      Assert.equal(
+        result.searchParams.query,
+        "ampl",
+        "Should have the correct query"
+      );
 
       // None of the other results should be "ampl" suggestions, i.e., amplfoo
       // and amplbar should not be in the results.
       let count = UrlbarTestUtils.getResultCount(window);
       for (let i = 1; i < count; i++) {
-        if (!UrlbarPrefs.get("quantumbar")) {
-          // On awesomebar, UrlbarTestUtils.getDetailsOfResultAt() can throw due
-          // to its urlbar.controller.getFinalCompleteValueAt() call.  That's
-          // because the results at this point may contain results from two
-          // different searches.  This only seems to happen on --verify runs.
-          try {
-            gURLBar.controller.getFinalCompleteValueAt(i);
-          } catch (ex) {
-            info("getFinalCompleteValueAt exception: " + ex);
-            continue;
-          }
-        }
         result = await UrlbarTestUtils.getDetailsOfResultAt(window, i);
         Assert.ok(
           result.type != UrlbarUtils.RESULT_TYPE.SEARCH ||
-          !["amplfoo", "amplbar"].includes(result.searchParams.suggestion),
+            !["amplfoo", "amplbar"].includes(result.searchParams.suggestion),
           "Suggestions should not contain the typed l char"
         );
       }

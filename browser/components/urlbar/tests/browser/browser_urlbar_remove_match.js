@@ -10,7 +10,10 @@ add_task(async function test_remove_history() {
   });
 
   let promiseVisitRemoved = PlacesTestUtils.waitForNotification(
-    "onDeleteURI", uri => uri.spec == TEST_URL, "history");
+    "onDeleteURI",
+    uri => uri.spec == TEST_URL,
+    "history"
+  );
 
   await promiseAutocompleteResultPopup("from_urlbar");
 
@@ -21,18 +24,20 @@ add_task(async function test_remove_history() {
 
   EventUtils.synthesizeKey("KEY_ArrowDown");
   Assert.equal(UrlbarTestUtils.getSelectedIndex(window), 1);
-  let options = UrlbarPrefs.get("quantumbar") || AppConstants.platform == "macosx" ?
-    { shiftKey: true } : {};
-  EventUtils.synthesizeKey("KEY_Delete", options);
+  EventUtils.synthesizeKey("KEY_Delete", { shiftKey: true });
   await promiseVisitRemoved;
   await TestUtils.waitForCondition(
     () => UrlbarTestUtils.getResultCount(window) == expectedResultCount,
-    "Waiting for the result to disappear");
+    "Waiting for the result to disappear"
+  );
 
   for (let i = 0; i < expectedResultCount; i++) {
     let details = await UrlbarTestUtils.getDetailsOfResultAt(window, i);
-    Assert.notEqual(details.url, TEST_URL,
-      "Should not find the test URL in the remaining results");
+    Assert.notEqual(
+      details.url,
+      TEST_URL,
+      "Should not find the test URL in the remaining results"
+    );
   }
 
   await UrlbarTestUtils.promisePopupClose(window);
@@ -57,15 +62,15 @@ add_task(async function test_remove_bookmark_doesnt() {
 
   EventUtils.synthesizeKey("KEY_ArrowDown");
   Assert.equal(UrlbarTestUtils.getSelectedIndex(window), 1);
-  let options = UrlbarPrefs.get("quantumbar") || AppConstants.platform == "macosx" ?
-    { shiftKey: true } : {};
-  EventUtils.synthesizeKey("KEY_Delete", options);
+  EventUtils.synthesizeKey("KEY_Delete", { shiftKey: true });
 
   // We don't have an easy way of determining if the event was process or not,
   // so let any event queues clear before testing.
   await new Promise(resolve => setTimeout(resolve, 0));
   await PlacesTestUtils.promiseAsyncUpdates();
 
-  Assert.ok(await PlacesUtils.bookmarks.fetch({url: TEST_URL}),
-    "Should still have the URL bookmarked.");
+  Assert.ok(
+    await PlacesUtils.bookmarks.fetch({ url: TEST_URL }),
+    "Should still have the URL bookmarked."
+  );
 });

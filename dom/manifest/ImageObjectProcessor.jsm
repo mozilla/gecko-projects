@@ -21,24 +21,27 @@
 /* globals Components */
 "use strict";
 
-const {XPCOMUtils} = ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
-const {Services} = ChromeUtils.import("resource://gre/modules/Services.jsm");
+const { XPCOMUtils } = ChromeUtils.import(
+  "resource://gre/modules/XPCOMUtils.jsm"
+);
+const { Services } = ChromeUtils.import("resource://gre/modules/Services.jsm");
 
 XPCOMUtils.defineLazyGlobalGetters(this, ["URL"]);
 
-function ImageObjectProcessor(aConsole, aExtractor) {
-  this.console = aConsole;
+function ImageObjectProcessor(aErrors, aExtractor, aBundle) {
+  this.errors = aErrors;
   this.extractor = aExtractor;
+  this.domBundle = aBundle;
 }
 
 // Static getters
 Object.defineProperties(ImageObjectProcessor, {
-  "decimals": {
+  decimals: {
     get() {
       return /^\d+$/;
     },
   },
-  "anyRegEx": {
+  anyRegEx: {
     get() {
       return new RegExp("any", "i");
     },
@@ -46,7 +49,9 @@ Object.defineProperties(ImageObjectProcessor, {
 });
 
 ImageObjectProcessor.prototype.process = function(
-  aManifest, aBaseURL, aMemberName
+  aManifest,
+  aBaseURL,
+  aMemberName
 ) {
   const spec = {
     objectName: "manifest",
@@ -55,12 +60,13 @@ ImageObjectProcessor.prototype.process = function(
     expectedType: "array",
     trim: false,
   };
-  const extractor = this.extractor;
+  const { domBundle, extractor, errors } = this;
   const images = [];
   const value = extractor.extractValue(spec);
   if (Array.isArray(value)) {
     // Filter out images whose "src" is not useful.
-    value.filter(item => !!processSrcMember(item, aBaseURL))
+    value
+      .filter((item, index) => !!processSrcMember(item, aBaseURL, index))
       .map(toImageObject)
       .forEach(image => images.push(image));
   }
@@ -68,9 +74,9 @@ ImageObjectProcessor.prototype.process = function(
 
   function toImageObject(aImageSpec) {
     return {
-      "src": processSrcMember(aImageSpec, aBaseURL),
-      "type": processTypeMember(aImageSpec),
-      "sizes": processSizesMember(aImageSpec),
+      src: processSrcMember(aImageSpec, aBaseURL),
+      type: processTypeMember(aImageSpec),
+      sizes: processSizesMember(aImageSpec),
     };
   }
 
@@ -86,14 +92,18 @@ ImageObjectProcessor.prototype.process = function(
     };
     let value = extractor.extractValue(spec);
     if (value) {
-      value = Services.netUtils.parseRequestContentType(value, charset, hadCharset);
+      value = Services.netUtils.parseRequestContentType(
+        value,
+        charset,
+        hadCharset
+      );
     }
     return value || undefined;
   }
 
-  function processSrcMember(aImage, aBaseURL) {
+  function processSrcMember(aImage, aBaseURL, index) {
     const spec = {
-      objectName: "image",
+      objectName: aMemberName,
       object: aImage,
       property: "src",
       expectedType: "string",
@@ -104,7 +114,13 @@ ImageObjectProcessor.prototype.process = function(
     if (value && value.length) {
       try {
         url = new URL(value, aBaseURL).href;
-      } catch (e) {}
+      } catch (e) {
+        const warn = domBundle.formatStringFromName(
+          "ManifestImageURLIsInvalid",
+          [aMemberName, index, "src", value]
+        );
+        errors.push({ warn });
+      }
     }
     return url;
   }
@@ -121,11 +137,12 @@ ImageObjectProcessor.prototype.process = function(
     const value = extractor.extractValue(spec);
     if (value) {
       // Split on whitespace and filter out invalid values.
-      value.split(/\s+/)
+      value
+        .split(/\s+/)
         .filter(isValidSizeValue)
         .reduce((collector, size) => collector.add(size), sizes);
     }
-    return (sizes.size) ? Array.from(sizes).join(" ") : undefined;
+    return sizes.size ? Array.from(sizes).join(" ") : undefined;
     // Implementation of HTML's link@size attribute checker.
     function isValidSizeValue(aSize) {
       const size = aSize.toLowerCase();
@@ -141,7 +158,7 @@ ImageObjectProcessor.prototype.process = function(
       const h = widthAndHeight.join("x");
       const validStarts = !w.startsWith("0") && !h.startsWith("0");
       const validDecimals = ImageObjectProcessor.decimals.test(w + h);
-      return (validStarts && validDecimals);
+      return validStarts && validDecimals;
     }
   }
 };

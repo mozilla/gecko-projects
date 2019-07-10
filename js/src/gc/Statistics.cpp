@@ -17,10 +17,10 @@
 
 #include "jsutil.h"
 
+#include "dbg/Debugger.h"
 #include "gc/GC.h"
 #include "gc/Memory.h"
 #include "util/Text.h"
-#include "vm/Debugger.h"
 #include "vm/HelperThreads.h"
 #include "vm/Runtime.h"
 #include "vm/Time.h"
@@ -1056,8 +1056,7 @@ void Statistics::endGC() {
     runtime->addTelemetry(JS_TELEMETRY_GC_TIME_BETWEEN_S,
                           timeSinceLastGC.ToSeconds());
     if (!nonincremental()) {
-      runtime->addTelemetry(JS_TELEMETRY_GC_SLICE_COUNT,
-                            slices_.length());
+      runtime->addTelemetry(JS_TELEMETRY_GC_SLICE_COUNT, slices_.length());
     }
   }
 

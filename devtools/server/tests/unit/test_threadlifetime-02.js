@@ -21,46 +21,62 @@ function run_test() {
   gDebuggee = addTestGlobal("test-grips");
   gClient = new DebuggerClient(DebuggerServer.connectPipe());
   gClient.connect().then(function() {
-    attachTestTabAndResume(gClient, "test-grips",
-                           function(response, targetFront, threadClient) {
-                             gThreadClient = threadClient;
-                             test_thread_lifetime();
-                           });
+    attachTestTabAndResume(gClient, "test-grips", function(
+      response,
+      targetFront,
+      threadClient
+    ) {
+      gThreadClient = threadClient;
+      test_thread_lifetime();
+    });
   });
   do_test_pending();
 }
 
 function test_thread_lifetime() {
-  gThreadClient.once("paused", function(packet) {
+  gThreadClient.once("paused", async function(packet) {
     const pauseGrip = packet.frame.arguments[0];
 
     // Create a thread-lifetime actor for this object.
-    gClient.request({ to: pauseGrip.actor, type: "threadGrip" }, function(response) {
-      // Successful promotion won't return an error.
-      Assert.equal(response.error, undefined);
-      gThreadClient.once("paused", function(packet) {
-        // Verify that the promoted actor is returned again.
-        Assert.equal(pauseGrip.actor, packet.frame.arguments[0].actor);
-        // Now that we've resumed, release the thread-lifetime grip.
-        gClient.release(pauseGrip.actor, function(response) {
-          gClient.request(
-            {to: pauseGrip.actor, type: "bogusRequest"}, function(response) {
+    const response = await gClient.request({
+      to: pauseGrip.actor,
+      type: "threadGrip",
+    });
+    // Successful promotion won't return an error.
+    Assert.equal(response.error, undefined);
+    gThreadClient.once("paused", function(packet) {
+      // Verify that the promoted actor is returned again.
+      Assert.equal(pauseGrip.actor, packet.frame.arguments[0].actor);
+      // Now that we've resumed, release the thread-lifetime grip.
+      gClient.release(pauseGrip.actor, async function(response) {
+        try {
+          await gClient.request(
+            { to: pauseGrip.actor, type: "bogusRequest" },
+            function(response) {
               Assert.equal(response.error, "noSuchActor");
               gThreadClient.resume().then(function() {
                 finishClient(gClient);
               });
-            });
-        });
+            }
+          );
+          ok(false, "bogusRequest should throw");
+        } catch (e) {
+          ok(true, "bogusRequest thrown");
+        }
       });
-      gThreadClient.resume();
     });
+    gThreadClient.resume();
   });
 
-  gDebuggee.eval("(" + function() {
-    function stopMe(arg1) {
-      debugger;
-      debugger;
-    }
-    stopMe({obj: true});
-  } + ")()");
+  gDebuggee.eval(
+    "(" +
+      function() {
+        function stopMe(arg1) {
+          debugger;
+          debugger;
+        }
+        stopMe({ obj: true });
+      } +
+      ")()"
+  );
 }

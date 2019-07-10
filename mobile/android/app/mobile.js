@@ -277,9 +277,6 @@ pref("chrome.override_package.global", "browser");
 pref("chrome.override_package.mozapps", "browser");
 pref("chrome.override_package.passwordmgr", "browser");
 
-// enable xul error pages
-pref("browser.xul.error_pages.enabled", true);
-
 // disable color management
 pref("gfx.color_management.mode", 0);
 
@@ -783,13 +780,6 @@ pref("layout.accessiblecaret.hapticfeedback", true);
 // Initial text selection on long-press is enhanced to provide
 // a smarter phone-number selection for direct-dial ActionBar action.
 pref("layout.accessiblecaret.extend_selection_for_phone_number", true);
-
-// Disable sending console to logcat on release builds.
-#ifdef RELEASE_OR_BETA
-pref("consoleservice.logcat", false);
-#else
-pref("consoleservice.logcat", true);
-#endif
 
 pref("browser.tabs.showAudioPlayingIcon", true);
 

@@ -243,10 +243,6 @@ using namespace mozilla::net;
 
 static NS_DEFINE_CID(kAppShellCID, NS_APPSHELL_CID);
 
-// True means sUseErrorPages has been added to
-// preferences var cache.
-static bool gAddedPreferencesVarCache = false;
-
 // Number of documents currently loading
 static int32_t gNumberOfDocumentsLoading = 0;
 
@@ -270,8 +266,6 @@ extern mozilla::LazyLogModule gPageCacheLog;
 const char kBrandBundleURL[] = "chrome://branding/locale/brand.properties";
 const char kAppstringsBundleURL[] =
     "chrome://global/locale/appstrings.properties";
-
-bool nsDocShell::sUseErrorPages = false;
 
 // Global reference to the URI fixup service.
 nsIURIFixup* nsDocShell::sURIFixup = nullptr;
@@ -559,7 +553,6 @@ NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(nsDocShell)
   NS_INTERFACE_MAP_ENTRY(nsIWebPageDescriptor)
   NS_INTERFACE_MAP_ENTRY(nsIAuthPromptProvider)
   NS_INTERFACE_MAP_ENTRY(nsILoadContext)
-  NS_INTERFACE_MAP_ENTRY(nsILinkHandler)
   NS_INTERFACE_MAP_ENTRY(nsIDOMStorageManager)
   NS_INTERFACE_MAP_ENTRY_CONDITIONAL(nsINetworkInterceptController,
                                      mInterceptController)
@@ -2083,7 +2076,8 @@ nsDocShell::GetUseErrorPages(bool* aUseErrorPages) {
 
 NS_IMETHODIMP
 nsDocShell::SetUseErrorPages(bool aUseErrorPages) {
-  // If mUseErrorPages is set explicitly, stop using sUseErrorPages.
+  // If mUseErrorPages is set explicitly, stop using the
+  // browser.xul.error_pages_enabled pref.
   if (mObserveErrorPages) {
     mObserveErrorPages = false;
   }
@@ -4306,6 +4300,7 @@ nsDocShell::DisplayLoadError(nsresult aError, nsIURI* aURI,
         break;
       case NS_ERROR_PROXY_CONNECTION_REFUSED:
       case NS_ERROR_PROXY_AUTHENTICATION_FAILED:
+      case NS_ERROR_TOO_MANY_REQUESTS:
         // Proxy connection was refused.
         error = "proxyConnectFailure";
         break;
@@ -4887,14 +4882,7 @@ nsDocShell::Create() {
       "security.strict_security_checks.enabled", mUseStrictSecurityChecks);
 
   // Should we use XUL error pages instead of alerts if possible?
-  mUseErrorPages =
-      Preferences::GetBool("browser.xul.error_pages.enabled", mUseErrorPages);
-
-  if (!gAddedPreferencesVarCache) {
-    Preferences::AddBoolVarCache(
-        &sUseErrorPages, "browser.xul.error_pages.enabled", mUseErrorPages);
-    gAddedPreferencesVarCache = true;
-  }
+  mUseErrorPages = StaticPrefs::browser_xul_error_pages_enabled();
 
   mDisableMetaRefreshWhenInactive =
       Preferences::GetBool("browser.meta_refresh_when_inactive.disabled",
@@ -6522,8 +6510,8 @@ void nsDocShell::OnRedirectStateChange(nsIChannel* aOldChannel,
 
       if (secMan) {
         nsCOMPtr<nsIPrincipal> principal;
-        secMan->GetDocShellCodebasePrincipal(newURI, this,
-                                             getter_AddRefs(principal));
+        secMan->GetDocShellContentPrincipal(newURI, this,
+                                            getter_AddRefs(principal));
         appCacheChannel->SetChooseApplicationCache(
             NS_ShouldCheckAppCache(principal));
       }
@@ -6901,6 +6889,7 @@ nsresult nsDocShell::EndPageLoad(nsIWebProgress* aProgress,
          aStatus == NS_ERROR_UNKNOWN_PROXY_HOST ||
          aStatus == NS_ERROR_PROXY_CONNECTION_REFUSED ||
          aStatus == NS_ERROR_PROXY_AUTHENTICATION_FAILED ||
+         aStatus == NS_ERROR_TOO_MANY_REQUESTS ||
          aStatus == NS_ERROR_BLOCKED_BY_POLICY) &&
         (isTopFrame || UseErrorPages())) {
       DisplayLoadError(aStatus, url, nullptr, aChannel);
@@ -9707,13 +9696,13 @@ static bool IsConsideredSameOriginForUIR(nsIPrincipal* aTriggeringPrincipal,
     return true;
   }
 
-  if (!aResultPrincipal->GetIsCodebasePrincipal()) {
+  if (!aResultPrincipal->GetIsContentPrincipal()) {
     return false;
   }
 
   nsCOMPtr<nsIURI> resultURI = aResultPrincipal->GetURI();
 
-  // We know this is a codebase principal, and codebase principals require valid
+  // We know this is a content principal, and content principals require valid
   // URIs, so we shouldn't need to check non-null here.
   if (!SchemeIsHTTP(resultURI)) {
     return false;
@@ -9734,7 +9723,7 @@ static bool IsConsideredSameOriginForUIR(nsIPrincipal* aTriggeringPrincipal,
       BasePrincipal::Cast(aResultPrincipal)->OriginAttributesRef();
 
   nsCOMPtr<nsIPrincipal> tmpResultPrincipal =
-      BasePrincipal::CreateCodebasePrincipal(tmpResultURI, tmpOA);
+      BasePrincipal::CreateContentPrincipal(tmpResultURI, tmpOA);
 
   return aTriggeringPrincipal->Equals(tmpResultPrincipal);
 }
@@ -10113,8 +10102,8 @@ nsresult nsDocShell::DoURILoad(nsDocShellLoadState* aLoadState,
 
       if (secMan) {
         nsCOMPtr<nsIPrincipal> principal;
-        secMan->GetDocShellCodebasePrincipal(aLoadState->URI(), this,
-                                             getter_AddRefs(principal));
+        secMan->GetDocShellContentPrincipal(aLoadState->URI(), this,
+                                            getter_AddRefs(principal));
         appCacheChannel->SetChooseApplicationCache(
             NS_ShouldCheckAppCache(principal));
       }
@@ -12343,20 +12332,10 @@ NS_IMETHODIMP
 nsDocShell::GetUseTrackingProtection(bool* aUseTrackingProtection) {
   *aUseTrackingProtection = false;
 
-  static bool sTPEnabled = false;
-  static bool sTPInPBEnabled = false;
-  static bool sPrefsInit = false;
-
-  if (!sPrefsInit) {
-    sPrefsInit = true;
-    Preferences::AddBoolVarCache(&sTPEnabled,
-                                 "privacy.trackingprotection.enabled", false);
-    Preferences::AddBoolVarCache(
-        &sTPInPBEnabled, "privacy.trackingprotection.pbmode.enabled", false);
-  }
-
-  if (mUseTrackingProtection || sTPEnabled ||
-      (UsePrivateBrowsing() && sTPInPBEnabled)) {
+  if (mUseTrackingProtection ||
+      StaticPrefs::privacy_trackingprotection_enabled() ||
+      (UsePrivateBrowsing() &&
+       StaticPrefs::privacy_trackingprotection_pbmode_enabled())) {
     *aUseTrackingProtection = true;
     return NS_OK;
   }
@@ -12546,8 +12525,7 @@ OnLinkClickEvent::OnLinkClickEvent(
       mTriggeringPrincipal(aTriggeringPrincipal),
       mCsp(aCsp) {}
 
-NS_IMETHODIMP
-nsDocShell::OnLinkClick(
+nsresult nsDocShell::OnLinkClick(
     nsIContent* aContent, nsIURI* aURI, const nsAString& aTargetSpec,
     const nsAString& aFileName, nsIInputStream* aPostDataStream,
     nsIInputStream* aHeadersDataStream, bool aIsUserTriggered, bool aIsTrusted,
@@ -12605,8 +12583,7 @@ static bool IsElementAnchorOrArea(nsIContent* aContent) {
   return aContent->IsAnyOfHTMLElements(nsGkAtoms::a, nsGkAtoms::area);
 }
 
-NS_IMETHODIMP
-nsDocShell::OnLinkClickSync(
+nsresult nsDocShell::OnLinkClickSync(
     nsIContent* aContent, nsIURI* aURI, const nsAString& aTargetSpec,
     const nsAString& aFileName, nsIInputStream* aPostDataStream,
     nsIInputStream* aHeadersDataStream, bool aNoOpenerImplied,
@@ -12790,9 +12767,8 @@ nsDocShell::OnLinkClickSync(
   return rv;
 }
 
-NS_IMETHODIMP
-nsDocShell::OnOverLink(nsIContent* aContent, nsIURI* aURI,
-                       const nsAString& aTargetSpec) {
+nsresult nsDocShell::OnOverLink(nsIContent* aContent, nsIURI* aURI,
+                                const nsAString& aTargetSpec) {
   if (aContent->IsEditable()) {
     return NS_OK;
   }
@@ -12826,8 +12802,7 @@ nsDocShell::OnOverLink(nsIContent* aContent, nsIURI* aURI,
   return rv;
 }
 
-NS_IMETHODIMP
-nsDocShell::OnLeaveLink() {
+nsresult nsDocShell::OnLeaveLink() {
   nsCOMPtr<nsIWebBrowserChrome> browserChrome(do_GetInterface(mTreeOwner));
   nsresult rv = NS_ERROR_FAILURE;
 

@@ -4,10 +4,12 @@
 
 "use strict";
 
-const promise = require("devtools/shared/deprecated-sync-thenables");
-
+const defer = require("devtools/shared/defer");
 const DevToolsUtils = require("devtools/shared/DevToolsUtils");
-const { getStack, callFunctionWithAsyncStack } = require("devtools/shared/platform/stack");
+const {
+  getStack,
+  callFunctionWithAsyncStack,
+} = require("devtools/shared/platform/stack");
 const EventEmitter = require("devtools/shared/event-emitter");
 const {
   ThreadStateTypes,
@@ -15,12 +17,30 @@ const {
   UnsolicitedPauses,
 } = require("./constants");
 
-loader.lazyRequireGetter(this, "Authentication", "devtools/shared/security/auth");
-loader.lazyRequireGetter(this, "DebuggerSocket", "devtools/shared/security/socket", true);
+loader.lazyRequireGetter(
+  this,
+  "Authentication",
+  "devtools/shared/security/auth"
+);
+loader.lazyRequireGetter(
+  this,
+  "DebuggerSocket",
+  "devtools/shared/security/socket",
+  true
+);
 loader.lazyRequireGetter(this, "EventEmitter", "devtools/shared/event-emitter");
 
-loader.lazyRequireGetter(this, "RootFront", "devtools/shared/fronts/root", true);
-loader.lazyRequireGetter(this, "ObjectClient", "devtools/shared/client/object-client");
+loader.lazyRequireGetter(
+  this,
+  "RootFront",
+  "devtools/shared/fronts/root",
+  true
+);
+loader.lazyRequireGetter(
+  this,
+  "ObjectClient",
+  "devtools/shared/client/object-client"
+);
 loader.lazyRequireGetter(this, "Front", "devtools/shared/protocol", true);
 
 /**
@@ -46,7 +66,7 @@ function DebuggerClient(transport) {
    * the connection's root actor.
    */
   this.mainRoot = null;
-  this.expectReply("root", (packet) => {
+  this.expectReply("root", packet => {
     this.mainRoot = new RootFront(this, packet);
 
     // Root Front is a special case, managing itself as it doesn't have any parent.
@@ -98,22 +118,25 @@ DebuggerClient.requester = function(packetSkeleton, config = {}) {
       outgoingPacket = before.call(this, outgoingPacket);
     }
 
-    return this.request(outgoingPacket, DevToolsUtils.makeInfallible((response) => {
-      if (after) {
-        const { from } = response;
-        response = after.call(this, response);
-        if (!response.from) {
-          response.from = from;
+    return this.request(
+      outgoingPacket,
+      DevToolsUtils.makeInfallible(response => {
+        if (after) {
+          const { from } = response;
+          response = after.call(this, response);
+          if (!response.from) {
+            response.from = from;
+          }
         }
-      }
 
-      // The callback is always the last parameter.
-      const thisCallback = args[maxPosition + 1];
-      if (thisCallback) {
-        thisCallback(response);
-      }
-      return response;
-    }, "DebuggerClient.requester request callback"));
+        // The callback is always the last parameter.
+        const thisCallback = args[maxPosition + 1];
+        if (thisCallback) {
+          thisCallback(response);
+        }
+        return response;
+      }, "DebuggerClient.requester request callback")
+    );
   }, "DebuggerClient.requester");
 };
 
@@ -160,7 +183,7 @@ DebuggerClient.prototype = {
    *         and behaviors of the server we connect to. See RootActor).
    */
   connect: function(onConnected) {
-    const deferred = promise.defer();
+    const deferred = defer();
 
     this.once("connected", (applicationType, traits) => {
       this.traits = traits;
@@ -185,7 +208,7 @@ DebuggerClient.prototype = {
    *         Resolves after the underlying transport is closed.
    */
   close: function(onClosed) {
-    const deferred = promise.defer();
+    const deferred = defer();
     if (onClosed) {
       deferred.promise.then(onClosed);
     }
@@ -294,11 +317,16 @@ DebuggerClient.prototype = {
     };
 
     if (this._closed) {
-      const msg = "'" + type + "' request packet to " +
-                "'" + packet.to + "' " +
-               "can't be sent as the connection is closed.";
+      const msg =
+        "'" +
+        type +
+        "' request packet to " +
+        "'" +
+        packet.to +
+        "' " +
+        "can't be sent as the connection is closed.";
       const resp = { error: "connectionClosed", message: msg };
-      return promise.reject(safeOnResponse(resp));
+      return Promise.reject(safeOnResponse(resp));
     }
 
     const request = new Request(packet);
@@ -307,31 +335,33 @@ DebuggerClient.prototype = {
 
     // Implement a Promise like API on the returned object
     // that resolves/rejects on request response
-    const deferred = promise.defer();
-    function listenerJson(resp) {
-      removeRequestListeners();
-      resp = safeOnResponse(resp);
-      if (resp.error) {
-        deferred.reject(resp);
-      } else {
-        deferred.resolve(resp);
+    const promise = new Promise((resolve, reject) => {
+      function listenerJson(resp) {
+        removeRequestListeners();
+        resp = safeOnResponse(resp);
+        if (resp.error) {
+          reject(resp);
+        } else {
+          resolve(resp);
+        }
       }
-    }
-    function listenerBulk(resp) {
-      removeRequestListeners();
-      deferred.resolve(safeOnResponse(resp));
-    }
+      function listenerBulk(resp) {
+        removeRequestListeners();
+        resolve(safeOnResponse(resp));
+      }
 
-    const removeRequestListeners = () => {
-      request.off("json-reply", listenerJson);
-      request.off("bulk-reply", listenerBulk);
-    };
+      const removeRequestListeners = () => {
+        request.off("json-reply", listenerJson);
+        request.off("bulk-reply", listenerBulk);
+      };
 
-    request.on("json-reply", listenerJson);
-    request.on("bulk-reply", listenerBulk);
+      request.on("json-reply", listenerJson);
+      request.on("bulk-reply", listenerBulk);
+    });
 
     this._sendOrQueueRequest(request);
-    request.then = deferred.promise.then.bind(deferred.promise);
+    request.then = promise.then.bind(promise);
+    request.catch = promise.catch.bind(promise);
 
     return request;
   },
@@ -531,24 +561,28 @@ DebuggerClient.prototype = {
     if (!packet.from) {
       DevToolsUtils.reportException(
         "onPacket",
-        new Error("Server did not specify an actor, dropping packet: " +
-                  JSON.stringify(packet)));
+        new Error(
+          "Server did not specify an actor, dropping packet: " +
+            JSON.stringify(packet)
+        )
+      );
       return;
     }
 
     // Check for "forwardingCancelled" here instead of using a front to handle it.
     // This is necessary because we might receive this event while the client is closing,
     // and the fronts have already been removed by that point.
-    if (this.mainRoot &&
-        packet.from == this.mainRoot.actorID &&
-        packet.type == "forwardingCancelled") {
+    if (
+      this.mainRoot &&
+      packet.from == this.mainRoot.actorID &&
+      packet.type == "forwardingCancelled"
+    ) {
       this.purgeRequests(packet.prefix);
       return;
     }
 
     // support older browsers for Fx69+ for using the old thread client
-    if (!this.traits.hasThreadFront &&
-        packet.from.includes("context")) {
+    if (!this.traits.hasThreadFront && packet.from.includes("context")) {
       this.sendToDeprecatedThreadClient(packet);
       return;
     }
@@ -565,8 +599,10 @@ DebuggerClient.prototype = {
     // See if we have a handler function waiting for a reply from this
     // actor. (Don't count unsolicited notifications or pauses as
     // replies.)
-    if (this._activeRequests.has(packet.from) &&
-        !(packet.type in UnsolicitedNotifications)) {
+    if (
+      this._activeRequests.has(packet.from) &&
+      !(packet.type in UnsolicitedNotifications)
+    ) {
       activeRequest = this._activeRequests.get(packet.from);
       this._activeRequests.delete(packet.from);
     }
@@ -585,8 +621,11 @@ DebuggerClient.prototype = {
     if (activeRequest) {
       const emitReply = () => activeRequest.emit("json-reply", packet);
       if (activeRequest.stack) {
-        callFunctionWithAsyncStack(emitReply, activeRequest.stack,
-                                   "DevTools RDP");
+        callFunctionWithAsyncStack(
+          emitReply,
+          activeRequest.stack,
+          "DevTools RDP"
+        );
       } else {
         emitReply();
       }
@@ -611,9 +650,13 @@ DebuggerClient.prototype = {
     // See if we have a handler function waiting for a reply from this
     // actor. (Don't count unsolicited notifications or pauses as
     // replies.)
-    if (this._activeRequests.has(packet.from) &&
-        !(packet.type == ThreadStateTypes.paused &&
-          packet.why.type in UnsolicitedPauses)) {
+    if (
+      this._activeRequests.has(packet.from) &&
+      !(
+        packet.type == ThreadStateTypes.paused &&
+        packet.why.type in UnsolicitedPauses
+      )
+    ) {
       activeRequest = this._activeRequests.get(packet.from);
       this._activeRequests.delete(packet.from);
     }
@@ -624,9 +667,11 @@ DebuggerClient.prototype = {
     this._attemptNextRequest(packet.from);
 
     // Packets that indicate thread state changes get special treatment.
-    if (packet.type in ThreadStateTypes &&
-        deprecatedThreadClient &&
-        typeof deprecatedThreadClient._onThreadState == "function") {
+    if (
+      packet.type in ThreadStateTypes &&
+      deprecatedThreadClient &&
+      typeof deprecatedThreadClient._onThreadState == "function"
+    ) {
       deprecatedThreadClient._onThreadState(packet);
     }
 
@@ -677,8 +722,11 @@ DebuggerClient.prototype = {
     if (!actor) {
       DevToolsUtils.reportException(
         "onBulkPacket",
-        new Error("Server did not specify an actor, dropping bulk packet: " +
-                  JSON.stringify(packet)));
+        new Error(
+          "Server did not specify an actor, dropping bulk packet: " +
+            JSON.stringify(packet)
+        )
+      );
       return;
     }
 
@@ -751,11 +799,19 @@ DebuggerClient.prototype = {
       // to expectReply, so that there is no request object.
       let msg;
       if (request.request) {
-        msg = "'" + request.request.type + "' " + type + " request packet" +
-              " to '" + request.actor + "' " +
-              "can't be sent as the connection just closed.";
+        msg =
+          "'" +
+          request.request.type +
+          "' " +
+          type +
+          " request packet" +
+          " to '" +
+          request.actor +
+          "' " +
+          "can't be sent as the connection just closed.";
       } else {
-        msg = "server side packet can't be received as the connection just closed.";
+        msg =
+          "server side packet can't be received as the connection just closed.";
       }
       const packet = { error: "connectionClosed", message: msg };
       request.emit("json-reply", packet);
@@ -838,14 +894,16 @@ DebuggerClient.prototype = {
       return Promise.resolve();
     }
 
-    return DevToolsUtils.settleAll(requests).catch(() => {
-      // One of the requests might have failed, but ignore that situation here and pipe
-      // both success and failure through the same path.  The important part is just that
-      // we waited.
-    }).then(() => {
-      // Repeat, more requests may have started in response to those we just waited for
-      return this.waitForRequestsToSettle();
-    });
+    return DevToolsUtils.settleAll(requests)
+      .catch(() => {
+        // One of the requests might have failed, but ignore that situation here and pipe
+        // both success and failure through the same path.  The important part is just that
+        // we waited.
+      })
+      .then(() => {
+        // Repeat, more requests may have started in response to those we just waited for
+        return this.waitForRequestsToSettle();
+      });
   },
 
   /**

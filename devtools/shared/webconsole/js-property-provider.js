@@ -11,19 +11,25 @@ const DevToolsUtils = require("devtools/shared/DevToolsUtils");
 if (!isWorker) {
   loader.lazyImporter(this, "Parser", "resource://devtools/shared/Parser.jsm");
 }
-loader.lazyRequireGetter(this, "Reflect", "resource://gre/modules/reflect.jsm", true);
+loader.lazyRequireGetter(
+  this,
+  "Reflect",
+  "resource://gre/modules/reflect.jsm",
+  true
+);
 
 // Provide an easy way to bail out of even attempting an autocompletion
 // if an object has way too many properties. Protects against large objects
 // with numeric values that wouldn't be tallied towards MAX_AUTOCOMPLETIONS.
-const MAX_AUTOCOMPLETE_ATTEMPTS = exports.MAX_AUTOCOMPLETE_ATTEMPTS = 100000;
+const MAX_AUTOCOMPLETE_ATTEMPTS = (exports.MAX_AUTOCOMPLETE_ATTEMPTS = 100000);
 // Prevent iterating over too many properties during autocomplete suggestions.
-const MAX_AUTOCOMPLETIONS = exports.MAX_AUTOCOMPLETIONS = 1500;
+const MAX_AUTOCOMPLETIONS = (exports.MAX_AUTOCOMPLETIONS = 1500);
 
 const STATE_NORMAL = Symbol("STATE_NORMAL");
 const STATE_QUOTE = Symbol("STATE_QUOTE");
 const STATE_DQUOTE = Symbol("STATE_DQUOTE");
 const STATE_TEMPLATE_LITERAL = Symbol("STATE_TEMPLATE_LITERAL");
+const STATE_ESCAPE = Symbol("STATE_ESCAPE");
 
 const OPEN_BODY = "{[(".split("");
 const CLOSE_BODY = "}])".split("");
@@ -63,36 +69,18 @@ function hasArrayIndex(str) {
  */
 /* eslint-disable complexity */
 function analyzeInputString(str) {
+  // work variables.
   const bodyStack = [];
-
   let state = STATE_NORMAL;
-  let start = 0;
-  let c;
-
-  // Use an array in order to handle character with a length > 2 (e.g. 😎).
-  const characters = Array.from(str);
-
-  const buildReturnObject = () => {
-    let isElementAccess = false;
-    if (bodyStack.length === 1 && bodyStack[0].token === "[") {
-      start = bodyStack[0].start;
-      isElementAccess = true;
-      if ([STATE_DQUOTE, STATE_QUOTE, STATE_TEMPLATE_LITERAL].includes(state)) {
-        state = STATE_NORMAL;
-      }
-    }
-
-    return {
-      state,
-      lastStatement: characters.slice(start).join(""),
-      isElementAccess,
-    };
-  };
+  let previousNonWhitespaceChar;
+  let lastStatement = "";
+  let pendingWhitespaceChars = "";
 
   const TIMEOUT = 2500;
   const startingTime = Date.now();
 
-  for (let i = 0; i < characters.length; i++) {
+  // Use a string iterator in order to handle character with a length >= 2 (e.g. 😎).
+  for (const c of str) {
     // We are possibly dealing with a very large string that would take a long time to
     // analyze (and freeze the process). If the function has been running for more than
     // a given time, we stop the analysis (this isn't too bad because the only
@@ -103,10 +91,24 @@ function analyzeInputString(str) {
       };
     }
 
-    c = characters[i];
+    let resetLastStatement = false;
+    const isWhitespaceChar = c.trim() === "";
+
     switch (state) {
       // Normal JS state.
       case STATE_NORMAL:
+        // If the last characters were spaces, and the current one is not.
+        if (pendingWhitespaceChars && !isWhitespaceChar) {
+          // If we have a legitimate property/element access, we append the spaces.
+          if (c === "[" || c === ".") {
+            lastStatement = lastStatement + pendingWhitespaceChars;
+          } else {
+            // if not, we can be sure the statement was over, and we can start a new one.
+            lastStatement = "";
+          }
+          pendingWhitespaceChars = "";
+        }
+
         if (c == '"') {
           state = STATE_DQUOTE;
         } else if (c == "'") {
@@ -114,47 +116,29 @@ function analyzeInputString(str) {
         } else if (c == "`") {
           state = STATE_TEMPLATE_LITERAL;
         } else if (OPERATOR_CHARS_SET.has(c)) {
-          // If the character is an operator, we need to update the start position.
-          start = i + 1;
-        } else if (c == " ") {
-          const currentLastStatement = characters.slice(start, i).join("");
-          const before = characters.slice(0, i);
-          const after = characters.slice(i + 1);
-          const trimmedBefore = Array.from(before.join("").trimRight());
-          const trimmedAfter = Array.from(after.join("").trimLeft());
-
-          const nextNonSpaceChar = trimmedAfter[0];
-          const nextNonSpaceCharIndex = after.indexOf(nextNonSpaceChar);
-          const previousNonSpaceChar = trimmedBefore[trimmedBefore.length - 1];
-
-          // If the previous char isn't a dot or opening bracket, and the next one isn't
-          // one either, and the current computed statement is not a
-          // variable/function/class declaration, update the start position.
+          // If the character is an operator, we can update the current statement.
+          resetLastStatement = true;
+        } else if (isWhitespaceChar) {
+          // If the previous char isn't a dot or opening bracket, and the current computed
+          // statement is not a variable/function/class declaration, we track the number
+          // of consecutive spaces, so we can re-use them at some point (or drop them).
           if (
-            previousNonSpaceChar !== "." && nextNonSpaceChar !== "." &&
-            previousNonSpaceChar !== "[" && nextNonSpaceChar !== "[" &&
-            !NO_AUTOCOMPLETE_PREFIXES.includes(currentLastStatement)
+            previousNonWhitespaceChar !== "." &&
+            previousNonWhitespaceChar !== "[" &&
+            !NO_AUTOCOMPLETE_PREFIXES.includes(lastStatement)
           ) {
-            start = i + (
-              nextNonSpaceCharIndex >= 0
-                ? nextNonSpaceCharIndex
-                : (after.length + 1)
-            );
+            pendingWhitespaceChars += c;
+            continue;
           }
-
-          // There's only spaces after that, so we can return.
-          if (!nextNonSpaceChar) {
-            return buildReturnObject();
-          }
-
-          // Let's jump to handle the next non-space char.
-          i = i + nextNonSpaceCharIndex;
         } else if (OPEN_BODY.includes(c)) {
+          // When opening a bracket or a parens, we store the current statement, in order
+          // to be able to retrieve it later.
           bodyStack.push({
             token: c,
-            start,
+            lastStatement,
           });
-          start = i + 1;
+          // And we compute a new statement.
+          resetLastStatement = true;
         } else if (CLOSE_BODY.includes(c)) {
           const last = bodyStack.pop();
           if (!last || OPEN_CLOSE_BODY[last.token] != c) {
@@ -163,17 +147,22 @@ function analyzeInputString(str) {
             };
           }
           if (c == "}") {
-            start = i + 1;
+            resetLastStatement = true;
           } else {
-            start = last.start;
+            lastStatement = last.lastStatement;
           }
         }
+        break;
+
+      // Escaped quote
+      case STATE_ESCAPE:
+        state = STATE_NORMAL;
         break;
 
       // Double quote state > " <
       case STATE_DQUOTE:
         if (c == "\\") {
-          i++;
+          state = STATE_ESCAPE;
         } else if (c == "\n") {
           return {
             err: "unterminated string literal",
@@ -186,7 +175,7 @@ function analyzeInputString(str) {
       // Template literal state > ` <
       case STATE_TEMPLATE_LITERAL:
         if (c == "\\") {
-          i++;
+          state = STATE_ESCAPE;
         } else if (c == "`") {
           state = STATE_NORMAL;
         }
@@ -195,7 +184,7 @@ function analyzeInputString(str) {
       // Single quote state > ' <
       case STATE_QUOTE:
         if (c == "\\") {
-          i++;
+          state = STATE_ESCAPE;
         } else if (c == "\n") {
           return {
             err: "unterminated string literal",
@@ -205,9 +194,46 @@ function analyzeInputString(str) {
         }
         break;
     }
+
+    if (!isWhitespaceChar) {
+      previousNonWhitespaceChar = c;
+    }
+
+    if (resetLastStatement) {
+      lastStatement = "";
+    } else {
+      lastStatement = lastStatement + c;
+    }
+
+    // We update all the open stacks lastStatement so they are up-to-date.
+    bodyStack.forEach(stack => {
+      if (stack.token !== "}") {
+        stack.lastStatement = stack.lastStatement + c;
+      }
+    });
   }
 
-  return buildReturnObject();
+  let isElementAccess = false;
+  if (bodyStack.length === 1 && bodyStack[0].token === "[") {
+    lastStatement = bodyStack[0].lastStatement;
+    isElementAccess = true;
+    if (
+      state === STATE_DQUOTE ||
+      state === STATE_QUOTE ||
+      state === STATE_TEMPLATE_LITERAL ||
+      state === STATE_ESCAPE
+    ) {
+      state = STATE_NORMAL;
+    }
+  } else if (pendingWhitespaceChars) {
+    lastStatement = "";
+  }
+
+  return {
+    state,
+    lastStatement,
+    isElementAccess,
+  };
 }
 /* eslint-enable complexity */
 
@@ -280,12 +306,9 @@ function JSPropertyProvider({
 
   // Analyse the inputValue and find the beginning of the last part that
   // should be completed.
-  const {
-    err,
-    state,
-    lastStatement,
-    isElementAccess,
-  } = analyzeInputString(inputValue);
+  const { err, state, lastStatement, isElementAccess } = analyzeInputString(
+    inputValue
+  );
 
   // There was an error analysing the string.
   if (err) {
@@ -304,15 +327,24 @@ function JSPropertyProvider({
     return null;
   }
 
-  if (NO_AUTOCOMPLETE_PREFIXES.some(prefix => lastStatement.startsWith(prefix + " "))) {
+  if (
+    NO_AUTOCOMPLETE_PREFIXES.some(prefix =>
+      lastStatement.startsWith(prefix + " ")
+    )
+  ) {
     return null;
   }
 
   const env = environment || dbgObject.asEnvironment();
   const completionPart = lastStatement;
   const lastDotIndex = completionPart.lastIndexOf(".");
-  const lastOpeningBracketIndex = isElementAccess ? completionPart.lastIndexOf("[") : -1;
-  const lastCompletionCharIndex = Math.max(lastDotIndex, lastOpeningBracketIndex);
+  const lastOpeningBracketIndex = isElementAccess
+    ? completionPart.lastIndexOf("[")
+    : -1;
+  const lastCompletionCharIndex = Math.max(
+    lastDotIndex,
+    lastOpeningBracketIndex
+  );
   const startQuoteRegex = /^('|"|`)/;
 
   // AST representation of the expression before the last access char (`.` or `[`).
@@ -329,7 +361,8 @@ function JSPropertyProvider({
     const parsedExpression = completionPart.slice(0, lastCompletionCharIndex);
     const syntaxTree = parser.get(parsedExpression);
     const lastTree = syntaxTree.getLastSyntaxTree();
-    const lastBody = lastTree && lastTree.AST.body[lastTree.AST.body.length - 1];
+    const lastBody =
+      lastTree && lastTree.AST.body[lastTree.AST.body.length - 1];
 
     // Finding the last expression since we've sliced up until the dot.
     // If there were parse errors this won't exist.
@@ -403,7 +436,10 @@ function JSPropertyProvider({
       const lastPart = properties[properties.length - 1];
       const openBracketIndex = lastPart.lastIndexOf("[");
       matchProp = lastPart.substr(openBracketIndex + 1);
-      properties[properties.length - 1] = lastPart.substring(0, openBracketIndex);
+      properties[properties.length - 1] = lastPart.substring(
+        0,
+        openBracketIndex
+      );
     } else {
       matchProp = properties.pop().trimLeft();
     }
@@ -468,7 +504,8 @@ function JSPropertyProvider({
 
     const propPath = [firstProp].concat(properties.slice(0, index + 1));
     const authorized = authorizedEvaluations.some(
-      x => JSON.stringify(x) === JSON.stringify(propPath));
+      x => JSON.stringify(x) === JSON.stringify(propPath)
+    );
 
     if (!authorized && DevToolsUtils.isUnsafeGetter(obj, prop)) {
       // If we try to access an unsafe getter, return its name so we can consume that
@@ -513,7 +550,7 @@ function JSPropertyProvider({
       }
     }
 
-    return {isElementAccess, matchProp, matches};
+    return { isElementAccess, matchProp, matches };
   };
 
   // If the final property is a primitive
@@ -558,7 +595,7 @@ function getPropertiesFromAstExpression(ast) {
   if (!ast) {
     return result;
   }
-  const {type, property, object, name} = ast;
+  const { type, property, object, name } = ast;
   if (type === "ThisExpression") {
     result.unshift("this");
   } else if (type === "Identifier" && name) {
@@ -581,32 +618,34 @@ function getPropertiesFromAstExpression(ast) {
 }
 
 function wrapMatchesInQuotes(matches, quote = `"`) {
-  return new Set([...matches].map(p => {
-    // Escape as a double-quoted string literal
-    p = JSON.stringify(p);
+  return new Set(
+    [...matches].map(p => {
+      // Escape as a double-quoted string literal
+      p = JSON.stringify(p);
 
-    // We don't have to do anything more when using double quotes
-    if (quote == `"`) {
-      return p;
-    }
+      // We don't have to do anything more when using double quotes
+      if (quote == `"`) {
+        return p;
+      }
 
-    // Remove surrounding double quotes
-    p = p.slice(1, -1);
+      // Remove surrounding double quotes
+      p = p.slice(1, -1);
 
-    // Unescape inner double quotes (all must be escaped, so no need to count backslashes)
-    p = p.replace(/\\(?=")/g, "");
+      // Unescape inner double quotes (all must be escaped, so no need to count backslashes)
+      p = p.replace(/\\(?=")/g, "");
 
-    // Escape the specified quote (assuming ' or `, which are treated literally in regex)
-    p = p.replace(new RegExp(quote, "g"), "\\$&");
+      // Escape the specified quote (assuming ' or `, which are treated literally in regex)
+      p = p.replace(new RegExp(quote, "g"), "\\$&");
 
-    // Template literals treat ${ specially, escape it
-    if (quote == "`") {
-      p = p.replace(/\${/g, "\\$&");
-    }
+      // Template literals treat ${ specially, escape it
+      if (quote == "`") {
+        p = p.replace(/\${/g, "\\$&");
+      }
 
-    // Surround the result with quotes
-    return `${quote}${p}${quote}`;
-  }));
+      // Surround the result with quotes
+      return `${quote}${p}${quote}`;
+    })
+  );
 }
 
 /**
@@ -642,7 +681,10 @@ function getArrayMemberProperty(obj, env, prop) {
   const arrayIndicesRegex = /\[[^\]]*\]/g;
   while ((result = arrayIndicesRegex.exec(prop)) !== null) {
     const indexWithBrackets = result[0];
-    const indexAsText = indexWithBrackets.substr(1, indexWithBrackets.length - 2);
+    const indexAsText = indexWithBrackets.substr(
+      1,
+      indexWithBrackets.length - 2
+    );
     const index = parseInt(indexAsText, 10);
 
     if (isNaN(index)) {
@@ -721,7 +763,7 @@ function getMatchedProps(obj, match) {
  *        Filter for properties that match this string.
  * @returns {Set} List of matched properties.
  */
-function getMatchedPropsImpl(obj, match, {chainIterator, getProperties}) {
+function getMatchedPropsImpl(obj, match, { chainIterator, getProperties }) {
   const matches = new Set();
   let numProps = 0;
 
@@ -744,8 +786,10 @@ function getMatchedPropsImpl(obj, match, {chainIterator, getProperties}) {
     // If there are too many properties to event attempt autocompletion,
     // or if we have already added the max number, then stop looping
     // and return the partial set that has already been discovered.
-    if (numProps >= MAX_AUTOCOMPLETE_ATTEMPTS ||
-        matches.size >= MAX_AUTOCOMPLETIONS) {
+    if (
+      numProps >= MAX_AUTOCOMPLETE_ATTEMPTS ||
+      matches.size >= MAX_AUTOCOMPLETIONS
+    ) {
       break;
     }
 
@@ -784,7 +828,7 @@ function getMatchedPropsImpl(obj, match, {chainIterator, getProperties}) {
  *        A Debugger.Object if the property exists in the object's prototype
  *        chain, undefined otherwise.
  */
-function getExactMatchImpl(obj, name, {chainIterator, getProperty}) {
+function getExactMatchImpl(obj, name, { chainIterator, getProperty }) {
   // We need to go up the prototype chain.
   const iter = chainIterator(obj);
   for (obj of iter) {
@@ -797,7 +841,7 @@ function getExactMatchImpl(obj, name, {chainIterator, getProperty}) {
 }
 
 var JSObjectSupport = {
-  chainIterator: function* (obj) {
+  chainIterator: function*(obj) {
     while (obj) {
       yield obj;
       try {
@@ -825,7 +869,7 @@ var JSObjectSupport = {
 };
 
 var DebuggerObjectSupport = {
-  chainIterator: function* (obj) {
+  chainIterator: function*(obj) {
     while (obj) {
       yield obj;
       try {
@@ -853,7 +897,7 @@ var DebuggerObjectSupport = {
 };
 
 var DebuggerEnvironmentSupport = {
-  chainIterator: function* (obj) {
+  chainIterator: function*(obj) {
     while (obj) {
       yield obj;
       obj = obj.parent;
@@ -886,8 +930,11 @@ var DebuggerEnvironmentSupport = {
     }
 
     // FIXME: Need actual UI, bug 941287.
-    if (result === undefined || result.optimizedOut ||
-        result.missingArguments) {
+    if (
+      result === undefined ||
+      result.optimizedOut ||
+      result.missingArguments
+    ) {
       return null;
     }
     return { value: result };

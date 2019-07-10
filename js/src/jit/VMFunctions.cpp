@@ -8,6 +8,7 @@
 
 #include "builtin/Promise.h"
 #include "builtin/TypedObject.h"
+#include "dbg/Debugger.h"
 #include "frontend/BytecodeCompiler.h"
 #include "jit/arm/Simulator-arm.h"
 #include "jit/BaselineIC.h"
@@ -16,16 +17,15 @@
 #include "jit/mips32/Simulator-mips32.h"
 #include "jit/mips64/Simulator-mips64.h"
 #include "vm/ArrayObject.h"
-#include "vm/Debugger.h"
 #include "vm/EqualityOperations.h"  // js::StrictlyEqual
 #include "vm/Interpreter.h"
 #include "vm/SelfHosting.h"
 #include "vm/TraceLogging.h"
 
+#include "dbg/Debugger-inl.h"
 #include "jit/BaselineFrame-inl.h"
 #include "jit/JitFrames-inl.h"
 #include "jit/VMFunctionList-inl.h"
-#include "vm/Debugger-inl.h"
 #include "vm/Interpreter-inl.h"
 #include "vm/JSScript-inl.h"
 #include "vm/NativeObject-inl.h"
@@ -1015,12 +1015,21 @@ bool DebugAfterYield(JSContext* cx, BaselineFrame* frame, jsbytecode* pc,
 bool GeneratorThrowOrReturn(JSContext* cx, BaselineFrame* frame,
                             Handle<AbstractGeneratorObject*> genObj,
                             HandleValue arg, uint32_t resumeKindArg) {
-  // Set the frame's pc to the current resume pc, so that frame iterators
-  // work. This function always returns false, so we're guaranteed to enter
-  // the exception handler where we will clear the pc.
   JSScript* script = frame->script();
   uint32_t offset = script->resumeOffsets()[genObj->resumeIndex()];
   jsbytecode* pc = script->offsetToPC(offset);
+
+  // Initialize interpreter frame fields if needed. Doing this here is
+  // simpler than doing it in JIT code.
+  if (!script->hasBaselineScript()) {
+    MOZ_ASSERT(IsBaselineInterpreterEnabled());
+    MOZ_ASSERT(!frame->runningInInterpreter());
+    frame->initInterpFieldsForGeneratorThrowOrReturn(script, pc);
+  }
+
+  // Set the frame's pc to the current resume pc, so that frame iterators
+  // work. This function always returns false, so we're guaranteed to enter
+  // the exception handler where we will clear the pc.
   frame->setOverridePc(pc);
 
   // In the interpreter, AbstractGeneratorObject::resume marks the generator as

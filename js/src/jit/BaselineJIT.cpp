@@ -10,6 +10,7 @@
 #include "mozilla/DebugOnly.h"
 #include "mozilla/MemoryReporting.h"
 
+#include "dbg/Debugger.h"
 #include "gc/FreeOp.h"
 #include "jit/BaselineCompiler.h"
 #include "jit/BaselineIC.h"
@@ -18,7 +19,6 @@
 #include "jit/JitCommon.h"
 #include "jit/JitSpewer.h"
 #include "util/StructuredSpewer.h"
-#include "vm/Debugger.h"
 #include "vm/Interpreter.h"
 #include "vm/TraceLogging.h"
 
@@ -85,7 +85,7 @@ static JitExecStatus EnterBaseline(JSContext* cx, EnterJitData& data) {
   nogc.emplace(cx);
 #endif
 
-  MOZ_ASSERT(jit::IsBaselineEnabled(cx));
+  MOZ_ASSERT(IsBaselineInterpreterOrJitEnabled(cx));
   MOZ_ASSERT(CheckFrame(data.osrFrame));
 
   EnterJitCode enter = cx->runtime()->jitRuntime()->enterJit();
@@ -150,13 +150,10 @@ JitExecStatus jit::EnterBaselineAtBranch(JSContext* cx, InterpreterFrame* fp,
       data.jitcode += MacroAssembler::ToggledCallSize(data.jitcode);
     }
   } else {
+    // As above, use the entry point that skips the debug trap.
     const BaselineInterpreter& interp =
         cx->runtime()->jitRuntime()->baselineInterpreter();
-    data.jitcode = interp.interpretOpAddr().value;
-    if (fp->isDebuggee()) {
-      // Skip the debug trap emitted by emitInterpreterLoop.
-      data.jitcode += MacroAssembler::ToggledCallSize(data.jitcode);
-    }
+    data.jitcode = interp.interpretOpNoDebugTrapAddr().value;
   }
 
   // Note: keep this in sync with SetEnterJitData.
@@ -243,11 +240,14 @@ MethodStatus jit::BaselineCompile(JSContext* cx, JSScript* script,
 
 static MethodStatus CanEnterBaselineJIT(JSContext* cx, HandleScript script,
                                         AbstractFramePtr osrSourceFrame) {
-  MOZ_ASSERT(jit::IsBaselineEnabled(cx));
-
   // Skip if the script has been disabled.
   if (!script->canBaselineCompile()) {
     return Method_Skipped;
+  }
+
+  if (!IsBaselineEnabled(cx)) {
+    script->setBaselineScript(cx->runtime(), BASELINE_DISABLED_SCRIPT);
+    return Method_CantCompile;
   }
 
   // This check is needed in the following corner case. Consider a function h,
@@ -276,10 +276,12 @@ static MethodStatus CanEnterBaselineJIT(JSContext* cx, HandleScript script,
   }
 
   if (script->length() > BaselineMaxScriptLength) {
+    script->setBaselineScript(cx->runtime(), BASELINE_DISABLED_SCRIPT);
     return Method_CantCompile;
   }
 
   if (script->nslots() > BaselineMaxScriptSlots) {
+    script->setBaselineScript(cx->runtime(), BASELINE_DISABLED_SCRIPT);
     return Method_CantCompile;
   }
 
@@ -303,6 +305,7 @@ static MethodStatus CanEnterBaselineJIT(JSContext* cx, HandleScript script,
   }
 
   if (script->hasForceInterpreterOp()) {
+    script->setBaselineScript(cx->runtime(), BASELINE_DISABLED_SCRIPT);
     return Method_CantCompile;
   }
 
@@ -314,16 +317,32 @@ static MethodStatus CanEnterBaselineJIT(JSContext* cx, HandleScript script,
   return BaselineCompile(cx, script, forceDebugInstrumentation);
 }
 
+bool jit::CanBaselineInterpretScript(JSScript* script) {
+  MOZ_ASSERT(IsBaselineInterpreterEnabled());
+
+  if (script->hasForceInterpreterOp()) {
+    return false;
+  }
+
+  if (script->nslots() > BaselineMaxScriptSlots) {
+    // Avoid overrecursion exceptions when the script has a ton of stack slots
+    // by forcing such scripts to run in the C++ interpreter with heap-allocated
+    // stack frames.
+    return false;
+  }
+
+  return true;
+}
+
 static MethodStatus CanEnterBaselineInterpreter(JSContext* cx,
                                                 HandleScript script) {
-  MOZ_ASSERT(jit::IsBaselineEnabled(cx));
-  MOZ_ASSERT(JitOptions.baselineInterpreter);
+  MOZ_ASSERT(IsBaselineInterpreterEnabled());
 
   if (script->jitScript()) {
     return Method_Compiled;
   }
 
-  if (script->hasForceInterpreterOp()) {
+  if (!CanBaselineInterpretScript(script)) {
     return Method_CantCompile;
   }
 
@@ -973,7 +992,7 @@ void BaselineScript::toggleProfilerInstrumentation(bool enable) {
 }
 
 void BaselineInterpreter::toggleProfilerInstrumentation(bool enable) {
-  if (!JitOptions.baselineInterpreter) {
+  if (!IsBaselineInterpreterEnabled()) {
     return;
   }
 
@@ -983,19 +1002,20 @@ void BaselineInterpreter::toggleProfilerInstrumentation(bool enable) {
 }
 
 void BaselineInterpreter::toggleDebuggerInstrumentation(bool enable) {
-  if (!JitOptions.baselineInterpreter) {
+  if (!IsBaselineInterpreterEnabled()) {
     return;
   }
 
   AutoWritableJitCode awjc(code_);
 
-  // Toggle prologue IsDebuggeeCheck code.
-  CodeLocationLabel debuggeeCheckLocation(code_,
-                                          CodeOffset(debuggeeCheckOffset_));
-  if (enable) {
-    Assembler::ToggleToCmp(debuggeeCheckLocation);
-  } else {
-    Assembler::ToggleToJmp(debuggeeCheckLocation);
+  // Toggle jumps for debugger instrumentation.
+  for (uint32_t offset : debugInstrumentationOffsets_) {
+    CodeLocationLabel label(code_, CodeOffset(offset));
+    if (enable) {
+      Assembler::ToggleToCmp(label);
+    } else {
+      Assembler::ToggleToJmp(label);
+    }
   }
 
   // Toggle DebugTrapHandler calls.
@@ -1007,7 +1027,7 @@ void BaselineInterpreter::toggleDebuggerInstrumentation(bool enable) {
 
 void BaselineInterpreter::toggleCodeCoverageInstrumentationUnchecked(
     bool enable) {
-  if (!JitOptions.baselineInterpreter) {
+  if (!IsBaselineInterpreterEnabled()) {
     return;
   }
 
@@ -1107,24 +1127,27 @@ void jit::ToggleBaselineTraceLoggerEngine(JSRuntime* runtime, bool enable) {
 #endif
 
 void BaselineInterpreter::init(JitCode* code, uint32_t interpretOpOffset,
+                               uint32_t interpretOpNoDebugTrapOffset,
                                uint32_t profilerEnterToggleOffset,
                                uint32_t profilerExitToggleOffset,
-                               uint32_t debuggeeCheckOffset,
+                               CodeOffsetVector&& debugInstrumentationOffsets,
                                CodeOffsetVector&& debugTrapOffsets,
                                CodeOffsetVector&& codeCoverageOffsets) {
   code_ = code;
   interpretOpOffset_ = interpretOpOffset;
+  interpretOpNoDebugTrapOffset_ = interpretOpNoDebugTrapOffset;
   profilerEnterToggleOffset_ = profilerEnterToggleOffset;
   profilerExitToggleOffset_ = profilerExitToggleOffset;
-  debuggeeCheckOffset_ = debuggeeCheckOffset;
+  debugInstrumentationOffsets_ = std::move(debugInstrumentationOffsets);
   debugTrapOffsets_ = std::move(debugTrapOffsets);
   codeCoverageOffsets_ = std::move(codeCoverageOffsets);
 }
 
 bool jit::GenerateBaselineInterpreter(JSContext* cx,
                                       BaselineInterpreter& interpreter) {
-  // Temporary JitOptions check to prevent crashes for now.
-  if (JitOptions.baselineInterpreter) {
+  // Temporary IsBaselineInterpreterEnabled check to not generate the
+  // interpreter code (until it's enabled by default).
+  if (IsBaselineInterpreterEnabled()) {
     BaselineInterpreterGenerator generator(cx);
     return generator.generate(interpreter);
   }

@@ -35,7 +35,7 @@
 #   isolation, but don't try to do any order checking between such blocks.
 # ----------------------------------------------------------------------------
 
-from __future__ import print_function
+from __future__ import absolute_import, print_function
 
 import difflib
 import os
@@ -97,6 +97,7 @@ included_inclnames_to_ignore = set([
     'unicode/udatpg.h',         # ICU
     'unicode/udisplaycontext.h',  # ICU
     'unicode/uenum.h',          # ICU
+    'unicode/uformattedvalue.h',  # ICU
     'unicode/uloc.h',           # ICU
     'unicode/unistr.h',         # ICU
     'unicode/unorm2.h',         # ICU
