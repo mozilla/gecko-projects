@@ -33,12 +33,6 @@ XPCOMUtils.defineLazyServiceGetter(
   "@mozilla.org/windows-ui-utils;1",
   "nsIWindowsUIUtils"
 );
-XPCOMUtils.defineLazyServiceGetter(
-  this,
-  "UpdateManager",
-  "@mozilla.org/updates/update-manager;1",
-  "nsIUpdateManager"
-);
 
 XPCOMUtils.defineLazyGetter(this, "gSystemPrincipal", () =>
   Services.scriptSecurityManager.getSystemPrincipal()
@@ -165,14 +159,29 @@ function needHomepageOverride(prefb) {
 /**
  * Gets the override page for the first run after the application has been
  * updated.
- * @param  update
- *         The nsIUpdate for the update that has been applied.
  * @param  defaultOverridePage
  *         The default override page.
  * @return The override page.
  */
-function getPostUpdateOverridePage(update, defaultOverridePage) {
-  update = update.QueryInterface(Ci.nsIWritablePropertyBag);
+function getPostUpdateOverridePage(defaultOverridePage) {
+  var um = Cc["@mozilla.org/updates/update-manager;1"].getService(
+    Ci.nsIUpdateManager
+  );
+  // The active update should be present when this code is called. If for
+  // whatever reason it isn't fallback to the latest update in the update
+  // history.
+  if (um.activeUpdate) {
+    var update = um.activeUpdate.QueryInterface(Ci.nsIWritablePropertyBag);
+  } else {
+    // If the updates.xml file is deleted then getUpdateAt will throw.
+    try {
+      update = um.getUpdateAt(0).QueryInterface(Ci.nsIWritablePropertyBag);
+    } catch (e) {
+      Cu.reportError("Unable to find update: " + e);
+      return defaultOverridePage;
+    }
+  }
+
   let actions = update.getProperty("actions");
   // When the update doesn't specify actions fallback to the original behavior
   // of displaying the default override page.
@@ -656,12 +665,9 @@ nsBrowserContentHandler.prototype = {
             overridePage = Services.urlFormatter.formatURLPref(
               "startup.homepage_override_url"
             );
-            let update = UpdateManager.activeUpdate;
-            if (
-              update &&
-              Services.vc.compare(update.appVersion, old_mstone) > 0
-            ) {
-              overridePage = getPostUpdateOverridePage(update, overridePage);
+            if (prefb.prefHasUserValue("app.update.postupdate")) {
+              prefb.clearUserPref("app.update.postupdate");
+              overridePage = getPostUpdateOverridePage(overridePage);
               // Send the update ping to signal that the update was successful.
               UpdatePing.handleUpdateSuccess(old_mstone, old_buildId);
             }
@@ -669,7 +675,8 @@ nsBrowserContentHandler.prototype = {
             overridePage = overridePage.replace("%OLD_VERSION%", old_mstone);
             break;
           case OVERRIDE_NEW_BUILD_ID:
-            if (UpdateManager.activeUpdate) {
+            if (prefb.prefHasUserValue("app.update.postupdate")) {
+              prefb.clearUserPref("app.update.postupdate");
               // Send the update ping to signal that the update was successful.
               UpdatePing.handleUpdateSuccess(old_mstone, old_buildId);
             }

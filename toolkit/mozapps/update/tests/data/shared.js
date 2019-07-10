@@ -201,14 +201,7 @@ function initUpdateServiceStub() {
   );
 }
 
-/**
- * Reloads the update xml files.
- *
- * @param  skipFiles (optional)
- *         If true, the update xml files will not be read and the metedata will
- *         be reset. If false (the default), the update xml files will be read
- *         to populate the update metadata.
- */
+/* Reloads the update metadata from disk */
 function reloadUpdateManagerData(skipFiles = false) {
   let observeData = skipFiles ? "skip-files" : "";
   gUpdateManager
