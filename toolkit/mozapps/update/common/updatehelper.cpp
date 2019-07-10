@@ -253,15 +253,13 @@ BOOL PathAppendSafe(LPWSTR base, LPCWSTR extra) {
  * @param  basePath  The base directory path for the temp file
  * @param  prefix    Optional prefix for the beginning of the file name
  * @param  tmpPath   Output full path, with the base directory and the file
- * name. Must already have been allocated with size >= MAX_PATH + 1.
+ * name. Must already have been allocated with size >= MAX_PATH.
  * @return TRUE if tmpPath was successfully filled in, FALSE on errors
  */
 BOOL GetUUIDTempFilePath(LPCWSTR basePath, LPCWSTR prefix, LPWSTR tmpPath) {
   WCHAR filename[MAX_PATH + 1] = {L"\0"};
   if (prefix) {
-    if (wcsncpy_s(filename, MAX_PATH + 1, prefix, MAX_PATH) != 0) {
-      return FALSE;
-    }
+    wcsncpy(filename, prefix, MAX_PATH);
   }
 
   UUID tmpFileNameUuid;
@@ -276,17 +274,10 @@ BOOL GetUUIDTempFilePath(LPCWSTR basePath, LPCWSTR prefix, LPWSTR tmpPath) {
     return FALSE;
   }
 
-  errno_t str_cat_error = wcsncat_s(filename, MAX_PATH + 1,
-                                    (LPCWSTR)tmpFileNameString, MAX_PATH);
+  wcsncat(filename, (LPCWSTR)tmpFileNameString, MAX_PATH);
   RpcStringFreeW(&tmpFileNameString);
-  if (str_cat_error != 0) {
-    return FALSE;
-  }
 
-
-  if (wcsncpy_s(tmpPath, MAX_PATH + 1, basePath, MAX_PATH) != 0) {
-    return FALSE;
-  }
+  wcsncpy(tmpPath, basePath, MAX_PATH);
   if (!PathAppendSafe(tmpPath, filename)) {
     return FALSE;
   }

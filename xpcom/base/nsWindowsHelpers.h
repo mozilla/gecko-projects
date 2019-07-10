@@ -11,7 +11,6 @@
 #include "nsAutoRef.h"
 #include "nscore.h"
 #include "mozilla/Assertions.h"
-#include "mozilla/UniquePtr.h"
 
 // ----------------------------------------------------------------------------
 // Critical Section helper class
@@ -234,6 +233,19 @@ class nsAutoRefTraits<nsHPRINTER> {
   static void Release(RawRef hPrinter) { ::ClosePrinter(hPrinter); }
 };
 
+template <>
+class nsAutoRefTraits<PSID> {
+ public:
+  typedef PSID RawRef;
+  static RawRef Void() { return nullptr; }
+
+  static void Release(RawRef aFD) {
+    if (aFD != Void()) {
+      FreeSid(aFD);
+    }
+  }
+};
+
 typedef nsAutoRef<HKEY> nsAutoRegKey;
 typedef nsAutoRef<HDC> nsAutoHDC;
 typedef nsAutoRef<HBRUSH> nsAutoBrush;
@@ -245,6 +257,7 @@ typedef nsAutoRef<HMODULE> nsModuleHandle;
 typedef nsAutoRef<DEVMODEW*> nsAutoDevMode;
 typedef nsAutoRef<nsHGLOBAL> nsAutoGlobalMem;
 typedef nsAutoRef<nsHPRINTER> nsAutoPrinter;
+typedef nsAutoRef<PSID> nsAutoSid;
 
 namespace {
 
@@ -306,15 +319,6 @@ HMODULE inline LoadLibrarySystem32(LPCWSTR aModule) {
 struct LocalFreeDeleter {
   void operator()(void* aPtr) { ::LocalFree(aPtr); }
 };
-
-// for UniquePtr to store a PSID
-struct SidDeleter {
-  void operator()(void* aPtr) { ::FreeSid(aPtr); }
-};
-// Unfortunately, although SID is a struct, PSID is a void*
-// This typedef will work for storing a PSID in a UniquePtr and should make
-// things a bit more readable.
-typedef mozilla::UniquePtr<void, SidDeleter> UniqueSidPtr;
 
 // for UnqiuePtr<_PROC_THREAD_ATTRIBUTE_LIST, ProcThreadAttributeListDeleter>
 struct ProcThreadAttributeListDeleter {
