@@ -154,6 +154,7 @@ var gShouldResetEnv = undefined;
 var gAddedEnvXRENoWindowsCrashDialog = false;
 var gEnvXPCOMDebugBreak;
 var gEnvXPCOMMemLeakLog;
+var gEnvDyldLibraryPath;
 
 const URL_HTTP_UPDATE_SJS = "http://test_details/";
 const DATA_URI_SPEC = Services.io.newFileURI(do_get_file("", false)).spec;
@@ -1796,11 +1797,30 @@ function copyTestUpdaterToBinDir() {
   if (!updater.exists()) {
     testUpdater.copyToFollowingLinks(updater.parent, updater.leafName);
   }
-  if (AppConstants.platform == "macosx") {
-    updater.append("Contents");
-    updater.append("MacOS");
-    updater.append("org.mozilla.updater");
+  return updater;
+}
+
+/**
+ * Copies the test updater to the location where it will be launched to apply an
+ * update and returns the nsIFile for the copied test updater.
+ *
+ * @return  nsIFIle for the copied test updater.
+ */
+function copyTestUpdaterForRunUsingUpdater() {
+  if (AppConstants.platform == "win" || AppConstants.platform == "linux") {
+    return copyTestUpdaterToBinDir();
   }
+
+  let testUpdater = getTestUpdater();
+  let updater = getUpdateDirFile(DIR_PATCH);
+  updater.append(testUpdater.leafName);
+  if (!updater.exists()) {
+    testUpdater.copyToFollowingLinks(updater.parent, updater.leafName);
+  }
+
+  updater.append("Contents");
+  updater.append("MacOS");
+  updater.append("org.mozilla.updater");
   return updater;
 }
 
@@ -1917,7 +1937,8 @@ function runUpdate(
     gEnv.set("MOZ_TEST_SHORTER_WAIT_PID", "1");
   }
 
-  let updateBin = copyTestUpdaterToBinDir();
+  // Copy the updater binary to the directory where it will apply updates.
+  let updateBin = copyTestUpdaterForRunUsingUpdater();
   Assert.ok(updateBin.exists(), MSG_SHOULD_EXIST + getMsgPath(updateBin.path));
 
   let updatesDirPath = aPatchDirPath || getUpdateDirFile(DIR_PATCH).path;
@@ -4555,6 +4576,30 @@ function setEnvironment() {
     gEnv.set("XRE_NO_WINDOWS_CRASH_DIALOG", "1");
   }
 
+  if (AppConstants.platform == "macosx") {
+    let shouldSetEnv = true;
+    let appGreBinDir = gGREBinDirOrig.clone();
+    let envGreBinDir = Cc["@mozilla.org/file/local;1"].createInstance(
+      Ci.nsIFile
+    );
+    if (gEnv.exists("DYLD_LIBRARY_PATH")) {
+      gEnvDyldLibraryPath = gEnv.get("DYLD_LIBRARY_PATH");
+      envGreBinDir.initWithPath(gEnvDyldLibraryPath);
+      if (envGreBinDir.path == appGreBinDir.path) {
+        gEnvDyldLibraryPath = null;
+        shouldSetEnv = false;
+      }
+    }
+
+    if (shouldSetEnv) {
+      debugDump(
+        "setting DYLD_LIBRARY_PATH environment variable value to " +
+          appGreBinDir.path
+      );
+      gEnv.set("DYLD_LIBRARY_PATH", appGreBinDir.path);
+    }
+  }
+
   if (gEnv.exists("XPCOM_MEM_LEAK_LOG")) {
     gEnvXPCOMMemLeakLog = gEnv.get("XPCOM_MEM_LEAK_LOG");
     debugDump(
@@ -4616,6 +4661,20 @@ function resetEnvironment() {
   } else if (gEnv.exists("XPCOM_DEBUG_BREAK")) {
     debugDump("clearing the XPCOM_DEBUG_BREAK environment variable");
     gEnv.set("XPCOM_DEBUG_BREAK", "");
+  }
+
+  if (AppConstants.platform == "macosx") {
+    if (gEnvDyldLibraryPath) {
+      debugDump(
+        "setting DYLD_LIBRARY_PATH environment variable value " +
+          "back to " +
+          gEnvDyldLibraryPath
+      );
+      gEnv.set("DYLD_LIBRARY_PATH", gEnvDyldLibraryPath);
+    } else if (gEnvDyldLibraryPath !== null) {
+      debugDump("removing DYLD_LIBRARY_PATH environment variable");
+      gEnv.set("DYLD_LIBRARY_PATH", "");
+    }
   }
 
   if (AppConstants.platform == "win" && gAddedEnvXRENoWindowsCrashDialog) {
