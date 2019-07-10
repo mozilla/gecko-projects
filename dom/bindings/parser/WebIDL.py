@@ -4,13 +4,15 @@
 
 """ A WebIDL parser. """
 
+from __future__ import print_function
 from ply import lex, yacc
 import re
 import os
 import traceback
 import math
 import string
-from collections import defaultdict
+from collections import defaultdict, OrderedDict
+from itertools import chain
 
 # Machinery
 
@@ -40,32 +42,22 @@ def parseInt(literal):
     return value * sign
 
 
-# Magic for creating enums
-def M_add_class_attribs(attribs, start):
-    def foo(name, bases, dict_):
-        for v, k in enumerate(attribs):
-            dict_[k] = start + v
-        assert 'length' not in dict_
-        dict_['length'] = start + len(attribs)
-        return type(name, bases, dict_)
-    return foo
-
-
 def enum(*names, **kw):
-    if len(kw) == 1:
-        base = kw['base'].__class__
-        start = base.length
-    else:
-        assert len(kw) == 0
-        base = object
-        start = 0
-
-    class Foo(base):
-        __metaclass__ = M_add_class_attribs(names, start)
-
+    class Foo(object):
+        attrs = OrderedDict()
+        def __init__(self, names):
+            for v, k in enumerate(names):
+                self.attrs[k] = v
+        def __getattr__(self, attr):
+            if attr in self.attrs:
+                return self.attrs[attr]
+            raise AttributeError
         def __setattr__(self, name, value):  # this makes it read-only
             raise NotImplementedError
-    return Foo()
+
+    if "base" not in kw:
+        return Foo(names)
+    return Foo(chain(kw["base"].attrs.keys(), names))
 
 
 class WebIDLError(Exception):
@@ -973,7 +965,6 @@ class IDLInterfaceOrNamespace(IDLObjectWithScope, IDLExposureMixins):
         # self.members.  Sort our consequential interfaces by name
         # just so we have a consistent order.
         for iface in sorted(self.getConsequentialInterfaces(),
-                            cmp=cmp,
                             key=lambda x: x.identifier.name):
             # Flag the interface as being someone's consequential interface
             iface.setIsConsequentialInterfaceOf(self)
@@ -1927,7 +1918,7 @@ class IDLDictionary(IDLObjectWithScope):
                 assert member.type.isComplete()
 
         # Members of a dictionary are sorted in lexicographic order
-        self.members.sort(cmp=cmp, key=lambda x: x.identifier.name)
+        self.members.sort(key=lambda x: x.identifier.name)
 
         inheritedMembers = []
         ancestor = self.parent
@@ -2282,7 +2273,7 @@ class IDLUnresolvedType(IDLType):
 
         assert obj
         if obj.isType():
-            print obj
+            print(obj)
         assert not obj.isType()
         if obj.isTypedef():
             assert self.name.name == obj.identifier.name
@@ -3758,7 +3749,7 @@ class IDLInterfaceMember(IDLObjectWithIdentifier, IDLExposureMixins):
     def finish(self, scope):
         # We better be exposed _somewhere_.
         if (len(self._exposureGlobalNames) == 0):
-            print self.identifier.name
+            print(self.identifier.name)
         assert len(self._exposureGlobalNames) != 0
         IDLExposureMixins.finish(self, scope)
 
@@ -4838,6 +4829,9 @@ class IDLMethodOverload:
         deps.add(self.returnType)
         return deps
 
+    def includesRestrictedFloatArgument(self):
+        return any(arg.type.includesRestrictedFloat() for arg in self.arguments)
+
 
 class IDLMethod(IDLInterfaceMember, IDLScope):
 
@@ -5009,10 +5003,25 @@ class IDLMethod(IDLInterfaceMember, IDLScope):
     def addOverload(self, method):
         assert len(method._overloads) == 1
 
-        if self._extendedAttrDict != method ._extendedAttrDict:
-            raise WebIDLError("Extended attributes differ on different "
-                              "overloads of %s" % method.identifier,
-                              [self.location, method.location])
+        if self._extendedAttrDict != method._extendedAttrDict:
+            extendedAttrDiff = set(self._extendedAttrDict.keys()) ^ set(method._extendedAttrDict.keys())
+
+            if extendedAttrDiff == { "LenientFloat" }:
+                if "LenientFloat" not in self._extendedAttrDict:
+                    for overload in self._overloads:
+                        if overload.includesRestrictedFloatArgument():
+                            raise WebIDLError("Restricted float behavior differs on different "
+                                              "overloads of %s" % method.identifier,
+                                              [overload.location, method.location])
+                    self._extendedAttrDict["LenientFloat"] = method._extendedAttrDict["LenientFloat"]
+                elif method._overloads[0].includesRestrictedFloatArgument():
+                    raise WebIDLError("Restricted float behavior differs on different "
+                                      "overloads of %s" % method.identifier,
+                                      [self.location, method.location])
+            else:
+                raise WebIDLError("Extended attributes differ on different "
+                                "overloads of %s" % method.identifier,
+                                [self.location, method.location])
 
         self._overloads.extend(method._overloads)
 
@@ -5252,12 +5261,12 @@ class IDLMethod(IDLInterfaceMember, IDLScope):
                               [attr.location, self.location])
         elif identifier == "LenientFloat":
             # This is called before we've done overload resolution
-            assert len(self.signatures()) == 1
-            sig = self.signatures()[0]
-            if not sig[0].isVoid():
+            overloads = self._overloads
+            assert len(overloads) == 1
+            if not overloads[0].returnType.isVoid():
                 raise WebIDLError("[LenientFloat] used on a non-void method",
                                   [attr.location, self.location])
-            if not any(arg.type.includesRestrictedFloat() for arg in sig[1]):
+            if not overloads[0].includesRestrictedFloatArgument():
                 raise WebIDLError("[LenientFloat] used on an operation with no "
                                   "restricted float type arguments",
                                   [attr.location, self.location])
@@ -5328,7 +5337,7 @@ class IDLMethod(IDLInterfaceMember, IDLScope):
             if self.signatures()[0][0] != BuiltinTypes[IDLBuiltinType.Types.object]:
                 raise WebIDLError("The return type of the default toJSON "
                                   "operation must be 'object'",
-                                  [attr.location, self.location]);
+                                  [attr.location, self.location])
         elif (identifier == "Throws" or
               identifier == "CanOOM" or
               identifier == "NewObject" or
@@ -5730,7 +5739,7 @@ class Parser(Tokenizer):
                                       [location, existingObj.location])
                 existingObj.setNonPartial(*nonPartialArgs)
                 return existingObj
-        except Exception, ex:
+        except Exception as ex:
             if isinstance(ex, WebIDLError):
                 raise ex
             pass
@@ -5768,7 +5777,7 @@ class Parser(Tokenizer):
                                       "%s and %s" % (identifier.name, p[0]),
                                       [location, p[0].location])
                 return
-        except Exception, ex:
+        except Exception as ex:
             if isinstance(ex, WebIDLError):
                 raise ex
             pass
@@ -5832,7 +5841,7 @@ class Parser(Tokenizer):
                                       "non-%s object" %
                                       (prettyname, prettyname),
                                       [location, nonPartialObject.location])
-        except Exception, ex:
+        except Exception as ex:
             if isinstance(ex, WebIDLError):
                 raise ex
             pass
@@ -7145,8 +7154,8 @@ class Parser(Tokenizer):
     def _installBuiltins(self, scope):
         assert isinstance(scope, IDLScope)
 
-        # xrange omits the last value.
-        for x in xrange(IDLBuiltinType.Types.ArrayBuffer, IDLBuiltinType.Types.Float64Array + 1):
+        # range omits the last value.
+        for x in range(IDLBuiltinType.Types.ArrayBuffer, IDLBuiltinType.Types.Float64Array + 1):
             builtin = BuiltinTypes[x]
             name = builtin.name
             typedef = IDLTypedef(BuiltinLocation("<builtin type>"), scope, builtin, name)
@@ -7290,14 +7299,14 @@ def main():
             f = open(fullPath, 'rb')
             lines = f.readlines()
             f.close()
-            print fullPath
+            print(fullPath)
             parser.parse(''.join(lines), fullPath)
         parser.finish()
     except WebIDLError, e:
         if options.verbose_errors:
             traceback.print_exc()
         else:
-            print e
+            print(e)
 
 if __name__ == '__main__':
     main()

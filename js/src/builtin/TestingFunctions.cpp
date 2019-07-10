@@ -37,6 +37,7 @@
 #  include "irregexp/RegExpEngine.h"
 #  include "irregexp/RegExpParser.h"
 #endif
+#include "dbg/Debugger.h"
 #include "gc/Heap.h"
 #include "jit/BaselineJIT.h"
 #include "jit/InlinableNatives.h"
@@ -65,7 +66,6 @@
 #include "util/Text.h"
 #include "vm/AsyncFunction.h"
 #include "vm/AsyncIteration.h"
-#include "vm/Debugger.h"
 #include "vm/GlobalObject.h"
 #include "vm/Interpreter.h"
 #include "vm/Iteration.h"
@@ -84,8 +84,8 @@
 #include "wasm/WasmTextToBinary.h"
 #include "wasm/WasmTypes.h"
 
+#include "dbg/Debugger-inl.h"
 #include "vm/Compartment-inl.h"
-#include "vm/Debugger-inl.h"
 #include "vm/EnvironmentObject-inl.h"
 #include "vm/JSContext-inl.h"
 #include "vm/JSObject-inl.h"
@@ -2812,7 +2812,7 @@ static_assert(JitWarmupResetLimit <=
 static bool testingFunc_inJit(JSContext* cx, unsigned argc, Value* vp) {
   CallArgs args = CallArgsFromVp(argc, vp);
 
-  if (!jit::IsBaselineEnabled(cx)) {
+  if (!jit::IsBaselineJitEnabled()) {
     return ReturnStringCopy(cx, args, "Baseline is disabled.");
   }
 
@@ -2840,7 +2840,7 @@ static bool testingFunc_inJit(JSContext* cx, unsigned argc, Value* vp) {
 static bool testingFunc_inIon(JSContext* cx, unsigned argc, Value* vp) {
   CallArgs args = CallArgsFromVp(argc, vp);
 
-  if (!jit::IsIonEnabled(cx)) {
+  if (!jit::IsIonEnabled()) {
     return ReturnStringCopy(cx, args, "Ion is disabled.");
   }
 
@@ -5710,7 +5710,7 @@ static bool BaselineCompile(JSContext* cx, unsigned argc, Value* vp) {
       return true;
     }
 
-    if (!jit::IsBaselineEnabled(cx)) {
+    if (!jit::IsBaselineJitEnabled()) {
       returnedStr = "baseline disabled";
       break;
     }

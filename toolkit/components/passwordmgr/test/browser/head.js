@@ -231,6 +231,7 @@ async function openPasswordContextMenu(
 ) {
   const CONTEXT_MENU = document.getElementById("contentAreaContextMenu");
   const POPUP_HEADER = document.getElementById("fill-login");
+  const LOGIN_POPUP = document.getElementById("fill-login-popup");
 
   let contextMenuShownPromise = BrowserTestUtils.waitForEvent(
     CONTEXT_MENU,
@@ -265,8 +266,49 @@ async function openPasswordContextMenu(
 
   // Synthesize a mouse click over the fill login menu header.
   let popupShownPromise = BrowserTestUtils.waitForCondition(
-    () => POPUP_HEADER.open
+    () => POPUP_HEADER.open && BrowserTestUtils.is_visible(LOGIN_POPUP)
   );
   EventUtils.synthesizeMouseAtCenter(POPUP_HEADER, {});
   await popupShownPromise;
+}
+
+/**
+ * Use the contextmenu to fill a field with a generated password
+ */
+async function doFillGeneratedPasswordContextMenuItem(browser, passwordInput) {
+  await SimpleTest.promiseFocus(browser);
+  await openPasswordContextMenu(browser, passwordInput);
+
+  let loginPopup = document.getElementById("fill-login-popup");
+  let generatedPasswordItem = document.getElementById(
+    "fill-login-generated-password"
+  );
+  let generatedPasswordSeparator = document.getElementById(
+    "generated-password-separator"
+  );
+
+  // Check the content of the password manager popup
+  ok(BrowserTestUtils.is_visible(loginPopup), "Popup is visible");
+  ok(
+    BrowserTestUtils.is_visible(generatedPasswordItem),
+    "generated password item is visible"
+  );
+  ok(
+    BrowserTestUtils.is_visible(generatedPasswordSeparator),
+    "separator is visible"
+  );
+
+  let passwordChangedPromise = ContentTask.spawn(
+    browser,
+    [passwordInput],
+    async function(passwordInput) {
+      let input = content.document.querySelector(passwordInput);
+      await ContentTaskUtils.waitForEvent(input, "input");
+    }
+  );
+
+  generatedPasswordItem.doCommand();
+  info("Waiting for input event");
+  await passwordChangedPromise;
+  document.getElementById("contentAreaContextMenu").hidePopup();
 }
