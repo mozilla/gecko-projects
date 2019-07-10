@@ -253,13 +253,15 @@ BOOL PathAppendSafe(LPWSTR base, LPCWSTR extra) {
  * @param  basePath  The base directory path for the temp file
  * @param  prefix    Optional prefix for the beginning of the file name
  * @param  tmpPath   Output full path, with the base directory and the file
- * name. Must already have been allocated with size >= MAX_PATH.
+ * name. Must already have been allocated with size >= MAX_PATH + 1.
  * @return TRUE if tmpPath was successfully filled in, FALSE on errors
  */
 BOOL GetUUIDTempFilePath(LPCWSTR basePath, LPCWSTR prefix, LPWSTR tmpPath) {
   WCHAR filename[MAX_PATH + 1] = {L"\0"};
   if (prefix) {
-    wcsncpy(filename, prefix, MAX_PATH);
+    if (wcsncpy_s(filename, MAX_PATH + 1, prefix, MAX_PATH) != 0) {
+      return FALSE;
+    }
   }
 
   UUID tmpFileNameUuid;
@@ -274,10 +276,16 @@ BOOL GetUUIDTempFilePath(LPCWSTR basePath, LPCWSTR prefix, LPWSTR tmpPath) {
     return FALSE;
   }
 
-  wcsncat(filename, (LPCWSTR)tmpFileNameString, MAX_PATH);
+  errno_t str_cat_error = wcsncat_s(filename, MAX_PATH + 1,
+                                    (LPCWSTR)tmpFileNameString, MAX_PATH);
   RpcStringFreeW(&tmpFileNameString);
+  if (str_cat_error != 0) {
+    return FALSE;
+  }
 
-  wcsncpy(tmpPath, basePath, MAX_PATH);
+  if (wcsncpy_s(tmpPath, MAX_PATH + 1, basePath, MAX_PATH) != 0) {
+    return FALSE;
+  }
   if (!PathAppendSafe(tmpPath, filename)) {
     return FALSE;
   }
@@ -570,56 +578,4 @@ BOOL IsLocalFile(LPCWSTR file, BOOL& isLocal) {
   PathStripToRootW(rootPath);
   isLocal = GetDriveTypeW(rootPath) == DRIVE_FIXED;
   return TRUE;
-}
-
-/**
- * Determines the DWORD value of a registry key value
- *
- * @param key       The base key to where the value name exists
- * @param valueName The name of the value
- * @param retValue  Out parameter which will hold the value
- * @return TRUE on success
- */
-static BOOL GetDWORDValue(HKEY key, LPCWSTR valueName, DWORD& retValue) {
-  DWORD regDWORDValueSize = sizeof(DWORD);
-  LONG retCode =
-      RegQueryValueExW(key, valueName, 0, nullptr,
-                       reinterpret_cast<LPBYTE>(&retValue), &regDWORDValueSize);
-  return ERROR_SUCCESS == retCode;
-}
-
-/**
- * Determines if the the system's elevation type allows
- * unprmopted elevation.
- *
- * @param isUnpromptedElevation Out parameter which specifies if unprompted
- *                              elevation is allowed.
- * @return TRUE if the user can actually elevate and the value was obtained
- *         successfully.
- */
-BOOL IsUnpromptedElevation(BOOL& isUnpromptedElevation) {
-  if (!UACHelper::CanUserElevate()) {
-    return FALSE;
-  }
-
-  LPCWSTR UACBaseRegKey =
-      L"SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Policies\\System";
-  HKEY baseKey;
-  LONG retCode =
-      RegOpenKeyExW(HKEY_LOCAL_MACHINE, UACBaseRegKey, 0, KEY_READ, &baseKey);
-  if (retCode != ERROR_SUCCESS) {
-    return FALSE;
-  }
-
-  DWORD consent, secureDesktop;
-  BOOL success = GetDWORDValue(baseKey, L"ConsentPromptBehaviorAdmin", consent);
-  success = success &&
-            GetDWORDValue(baseKey, L"PromptOnSecureDesktop", secureDesktop);
-
-  RegCloseKey(baseKey);
-  if (success) {
-    isUnpromptedElevation = !consent && !secureDesktop;
-  }
-
-  return success;
 }

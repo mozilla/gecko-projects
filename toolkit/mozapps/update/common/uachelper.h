@@ -19,4 +19,6 @@ class UACHelper {
   static LPCTSTR PrivsToDisable[];
 };
 
+BOOL IsUnpromptedElevation(BOOL& isUnpromptedElevation);
+
 #endif
