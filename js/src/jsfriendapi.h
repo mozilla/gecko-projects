@@ -167,6 +167,7 @@ enum {
   JS_TELEMETRY_GC_NURSERY_BYTES,
   JS_TELEMETRY_GC_PRETENURE_COUNT,
   JS_TELEMETRY_GC_NURSERY_PROMOTION_RATE,
+  JS_TELEMETRY_GC_TENURED_SURVIVAL_RATE,
   JS_TELEMETRY_GC_MARK_RATE,
   JS_TELEMETRY_GC_TIME_BETWEEN_S,
   JS_TELEMETRY_GC_TIME_BETWEEN_SLICES_MS,
@@ -1056,6 +1057,18 @@ MOZ_ALWAYS_INLINE bool CheckRecursionLimitWithStackPointer(JSContext* cx,
     return false;
   }
   return true;
+}
+
+MOZ_ALWAYS_INLINE bool CheckRecursionLimitWithExtra(JSContext* cx,
+                                                    size_t extra) {
+  char stackDummy;
+  char* sp = &stackDummy;
+#if JS_STACK_GROWTH_DIRECTION > 0
+  sp += extra;
+#else
+  sp -= extra;
+#endif
+  return CheckRecursionLimitWithStackPointer(cx, sp);
 }
 
 MOZ_ALWAYS_INLINE bool CheckSystemRecursionLimit(JSContext* cx) {
