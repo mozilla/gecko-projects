@@ -49,8 +49,8 @@
 // pref hash table lookup functions, but it also has:
 //
 // - an associated global variable (the VarCache) that mirrors the pref value
-//   in the prefs hash table (unless the update policy is `Skip` or `Once`, see
-//   below); and
+//   in the prefs hash table (unless the update policy is `Once`, see below);
+//   and
 //
 // - a getter function that reads that global variable.
 //
@@ -78,9 +78,6 @@
 //   * Live: Evaluate the pref and set callback so it stays current/live. This
 //     is the normal policy.
 //
-//   * Skip: Set the value to <default-value>, skip any Preferences calls. This
-//     policy should be rarely used and its use is discouraged.
-//
 //   * Once: Set the value once at startup, and then leave it unchanged after
 //     that. (The exact point at which all Once pref values is set is when the
 //     first Once getter is called.) This is useful for graphics prefs where we
@@ -104,7 +101,7 @@
 //   of one of those. The C++ preprocessor doesn't like template syntax in a
 //   macro argument, so use the typedefs defines in StaticPrefs.h; for example,
 //   use `ReleaseAcquireAtomicBool` instead of `Atomic<bool, ReleaseAcquire>`.
-//   A pref with a Skip or Once policy can be non-atomic as it is only ever
+//   A pref with a `Once` policy should be non-atomic as it is only ever
 //   written to once during the parent process startup. A pref with a Live
 //   policy must be made Atomic if ever accessed outside the main thread;
 //   assertions are in place to ensure this.
@@ -405,7 +402,7 @@ VARCACHE_PREF(
   Live,
   "apz.gtk.kinetic_scroll.enabled",
    apz_gtk_kinetic_scroll_enabled,
-  RelaxedAtomicBool, false
+  RelaxedAtomicBool, true
 )
 #endif
 
@@ -713,6 +710,127 @@ VARCACHE_PREF(
   "browser.cache.offline.enable",
   browser_cache_offline_enable,
   bool, true
+)
+
+VARCACHE_PREF(
+  Live,
+  "browser.cache.disk.enable",
+   browser_cache_disk_enable,
+  RelaxedAtomicBool, true
+)
+
+VARCACHE_PREF(
+  Live,
+  "browser.cache.memory.enable",
+   browser_cache_memory_enable,
+  RelaxedAtomicBool, true
+)
+
+// Limit of recent metadata we keep in memory for faster access, in KB.
+VARCACHE_PREF(
+  Live,
+  "browser.cache.disk.metadata_memory_limit",
+   browser_cache_disk_metadata_memory_limit,
+  RelaxedAtomicUint32, 250 // 0.25 MB
+)
+
+// Does the user want smart-sizing?
+VARCACHE_PREF(
+  Live,
+  "browser.cache.disk.smart_size.enabled",
+   browser_cache_disk_smart_size_enabled,
+  RelaxedAtomicBool, true
+)
+
+// -1 = determine dynamically, 0 = none, n = memory capacity in kilobytes.
+VARCACHE_PREF(
+  Live,
+  "browser.cache.memory.capacity",
+   browser_cache_memory_capacity,
+  RelaxedAtomicInt32,
+#ifdef ANDROID
+  1024  // kilobytes
+#else
+  -1    // determine dynamically
+#endif
+)
+
+// When smartsizing is disabled we could potentially fill all disk space by
+// cache data when the disk capacity is not set correctly. To avoid that we
+// check the free space every time we write some data to the cache. The free
+// space is checked against two limits. Once the soft limit is reached we start
+// evicting the least useful entries, when we reach the hard limit writing to
+// the entry fails.
+VARCACHE_PREF(
+  Live,
+  "browser.cache.disk.free_space_soft_limit",
+   browser_cache_disk_free_space_soft_limit,
+  RelaxedAtomicUint32, 5 * 1024 // 5MB
+)
+
+VARCACHE_PREF(
+  Live,
+  "browser.cache.disk.free_space_hard_limit",
+   browser_cache_disk_free_space_hard_limit,
+  RelaxedAtomicUint32, 1024  // 1MB
+)
+
+// The number of chunks we preload ahead of read. One chunk currently has
+// 256kB.
+VARCACHE_PREF(
+  Live,
+  "browser.cache.disk.preload_chunk_count",
+   browser_cache_disk_preload_chunk_count,
+  RelaxedAtomicUint32, 4  // 1 MB of read ahead
+)
+
+// Max-size (in KB) for entries in disk cache. Set to -1 for no limit.
+// (Note: entries bigger than 1/8 of disk-cache are never cached)
+VARCACHE_PREF(
+  Live,
+  "browser.cache.disk.max_entry_size",
+   browser_cache_disk_max_entry_size,
+  RelaxedAtomicUint32, 50 * 1024  // 50 MB
+)
+
+// Max-size (in KB) for entries in memory cache. Set to -1 for no limit.
+// (Note: entries bigger than than 90% of the mem-cache are never cached.)
+VARCACHE_PREF(
+  Live,
+  "browser.cache.memory.max_entry_size",
+   browser_cache_memory_max_entry_size,
+  RelaxedAtomicInt32, 5 * 1024
+)
+
+// Memory limit (in kB) for new cache data not yet written to disk. Writes to
+// the cache are buffered and written to disk on background with low priority.
+// With a slow persistent storage these buffers may grow when data is coming
+// fast from the network. When the amount of unwritten data is exceeded, new
+// writes will simply fail. We have two buckets, one for important data
+// (priority) like html, css, fonts and js, and one for other data like images,
+// video, etc.
+// Note: 0 means no limit.
+VARCACHE_PREF(
+  Live,
+  "browser.cache.disk.max_chunks_memory_usage",
+   browser_cache_disk_max_chunks_memory_usage,
+  RelaxedAtomicUint32, 40 * 1024
+)
+VARCACHE_PREF(
+  Live,
+  "browser.cache.disk.max_priority_chunks_memory_usage",
+   browser_cache_disk_max_priority_chunks_memory_usage,
+  RelaxedAtomicUint32, 40 * 1024
+)
+
+// Number of seconds the cache spends writing pending data and closing files
+// after shutdown has been signalled. Past that time data is not written and
+// files are left open for the OS to clean up.
+VARCACHE_PREF(
+  Live,
+  "browser.cache.max_shutdown_io_lag",
+   browser_cache_max_shutdown_io_lag,
+  RelaxedAtomicUint32, 2
 )
 
 // Whether Content Blocking Third-Party Cookies UI has been enabled.
@@ -2969,22 +3087,13 @@ VARCACHE_PREF(
   bool, false
 )
 
-#if defined(RELEASE_OR_BETA)
-// "Skip" means this is locked to the default value in beta and release.
-VARCACHE_PREF(
-  Skip,
-  "gfx.blocklist.all",
-   gfx_blocklist_all,
-  int32_t, 0
-)
-#else
+// Nb: we ignore this pref on release and beta.
 VARCACHE_PREF(
   Once,
   "gfx.blocklist.all",
    gfx_blocklist_all,
   int32_t, 0
 )
-#endif
 
 // 0x7fff is the maximum supported xlib surface size and is more than enough for canvases.
 VARCACHE_PREF(
@@ -4018,25 +4127,21 @@ VARCACHE_PREF(
   RelaxedAtomicBool, true
 )
 
-#ifdef MOZ_GFX_OPTIMIZE_MOBILE
-// If MOZ_GFX_OPTIMIZE_MOBILE is defined, we force component alpha off
-// and ignore the preference.
-VARCACHE_PREF(
-  Skip,
-  "layers.componentalpha.enabled",
-   layers_componentalpha_enabled,
-  bool, false
-)
-#else
-// If MOZ_GFX_OPTIMIZE_MOBILE is not defined, we actually take the
-// preference value, defaulting to true.
 VARCACHE_PREF(
   Once,
   "layers.componentalpha.enabled",
-   layers_componentalpha_enabled,
-  bool, true
-)
+   layers_componentalpha_enabled_do_not_use_directly,
+  bool,
+  // Nb: we ignore this pref if MOZ_GFX_OPTIMIZE_MOBILE is defined, as if this
+  // pref was always false. But we go to the effort of setting it to false so
+  // that telemetry's reporting of the pref value is more likely to reflect
+  // what the code is doing.
+#ifdef MOZ_GFX_OPTIMIZE_MOBILE
+  false
+#else
+  true
 #endif
+)
 
 VARCACHE_PREF(
   Once,
@@ -7145,6 +7250,20 @@ VARCACHE_PREF(
   "privacy.window.maxInnerHeight",
   privacy_window_maxInnerHeight,
   int32_t, 1000
+)
+
+VARCACHE_PREF(
+  Live,
+  "privacy.sanitize.sanitizeOnShutdown",
+   privacy_sanitize_sanitizeOnShutdown,
+  RelaxedAtomicBool, false
+)
+
+VARCACHE_PREF(
+  Live,
+  "privacy.clearOnShutdown.cache",
+   privacy_clearOnShutdown_cache,
+  RelaxedAtomicBool, false
 )
 
 //---------------------------------------------------------------------------

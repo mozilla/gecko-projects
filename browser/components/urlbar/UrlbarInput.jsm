@@ -96,7 +96,6 @@ class UrlbarInput {
     this.controller.setInput(this);
     this.view = new UrlbarView(this);
     this.valueIsTyped = false;
-    this.userInitiatedFocus = false;
     this.isPrivate = PrivateBrowsingUtils.isWindowPrivate(this.window);
     this.lastQueryContextPromise = Promise.resolve();
     this._actionOverrideKeyCount = 0;
@@ -301,15 +300,6 @@ class UrlbarInput {
     }
   }
 
-  /**
-   * This exists for legacy compatibility, and can be removed once the old
-   * urlbar code goes away, by changing callers. Internal consumers should use
-   * view.close().
-   */
-  closePopup() {
-    this.view.close();
-  }
-
   focus() {
     this.inputField.focus();
   }
@@ -500,6 +490,12 @@ class UrlbarInput {
     openParams.postData = postData;
 
     switch (result.type) {
+      case UrlbarUtils.RESULT_TYPE.KEYWORD: {
+        // If this result comes from a bookmark keyword, let it inherit the
+        // current document's principal, otherwise bookmarklets would break.
+        openParams.allowInheritPrincipal = true;
+        break;
+      }
       case UrlbarUtils.RESULT_TYPE.TAB_SWITCH: {
         if (this.hasAttribute("actionoverride")) {
           where = "current";

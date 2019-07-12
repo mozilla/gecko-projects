@@ -718,7 +718,7 @@ uint32_t ContentParent::GetMaxProcessCount(
     const nsAString& aContentProcessType) {
   // Max process count is based only on the prefix.
   const nsDependentSubstring processTypePrefix =
-    RemoteTypePrefix(aContentProcessType);
+      RemoteTypePrefix(aContentProcessType);
 
   // Check for the default remote type of "web", as it uses different prefs.
   if (processTypePrefix.EqualsLiteral("web")) {
@@ -2052,8 +2052,8 @@ void ContentParent::LaunchSubprocessInternal(
     if (isSync) {
       *aRetval.as<bool*>() = false;
     } else {
-      *aRetval.as<RefPtr<LaunchPromise>*>() = LaunchPromise::CreateAndReject(
-          GeckoChildProcessHost::LaunchError(), __func__);
+      *aRetval.as<RefPtr<LaunchPromise>*>() =
+          LaunchPromise::CreateAndReject(LaunchError(), __func__);
     }
   };
 
@@ -2119,7 +2119,7 @@ void ContentParent::LaunchSubprocessInternal(
 
   RefPtr<ContentParent> self(this);
 
-  auto reject = [self, this](GeckoChildProcessHost::LaunchError err) {
+  auto reject = [self, this](LaunchError err) {
     NS_ERROR("failed to launch child in the parent");
     MarkAsDead();
     return LaunchPromise::CreateAndReject(err, __func__);
@@ -2160,7 +2160,13 @@ void ContentParent::LaunchSubprocessInternal(
 #endif
 
     mLifecycleState = LifecycleState::ALIVE;
-    InitInternal(aInitialPriority);
+    if (!InitInternal(aInitialPriority)) {
+      NS_ERROR("failed to initialize child in the parent");
+      // We've already called Open() by this point, so we need to close the
+      // channel to avoid leaking the process.
+      ShutDownProcess(SEND_SHUTDOWN_MESSAGE);
+      return LaunchPromise::CreateAndReject(LaunchError{}, __func__);
+    }
 
     ContentProcessManager::GetSingleton()->AddContentProcess(this);
 
@@ -2201,19 +2207,19 @@ void ContentParent::LaunchSubprocessInternal(
     if (ok) {
       Unused << resolve(mSubprocess->GetChildProcessHandle());
     } else {
-      Unused << reject(GeckoChildProcessHost::LaunchError{});
+      Unused << reject(LaunchError{});
     }
     *aRetval.as<bool*>() = ok;
   } else {
     auto* retptr = aRetval.as<RefPtr<LaunchPromise>*>();
     if (mSubprocess->AsyncLaunch(std::move(extraArgs))) {
-      RefPtr<GeckoChildProcessHost::HandlePromise> ready =
+      RefPtr<ProcessHandlePromise> ready =
           mSubprocess->WhenProcessHandleReady();
       mLaunchYieldTS = TimeStamp::Now();
       *retptr = ready->Then(GetCurrentThreadSerialEventTarget(), __func__,
                             std::move(resolve), std::move(reject));
     } else {
-      *retptr = reject(GeckoChildProcessHost::LaunchError{});
+      *retptr = reject(LaunchError{});
     }
   }
 }
@@ -2326,7 +2332,7 @@ ContentParent::~ContentParent() {
   }
 }
 
-void ContentParent::InitInternal(ProcessPriority aInitialPriority) {
+bool ContentParent::InitInternal(ProcessPriority aInitialPriority) {
   XPCOMInitData xpcomInit;
 
   nsCOMPtr<nsIIOService> io(do_GetIOService());
@@ -2526,10 +2532,12 @@ void ContentParent::InitInternal(ProcessPriority aInitialPriority) {
   Endpoint<PRemoteDecoderManagerChild> videoManager;
   AutoTArray<uint32_t, 3> namespaces;
 
-  DebugOnly<bool> opened =
-      gpm->CreateContentBridges(OtherPid(), &compositor, &imageBridge,
-                                &vrBridge, &videoManager, &namespaces);
-  MOZ_ASSERT(opened);
+  if (!gpm->CreateContentBridges(OtherPid(), &compositor, &imageBridge,
+                                 &vrBridge, &videoManager, &namespaces)) {
+    // This can fail if we've already started shutting down the compositor
+    // thread. See Bug 1562763 comment 8.
+    return false;
+  }
 
   Unused << SendInitRendering(std::move(compositor), std::move(imageBridge),
                               std::move(vrBridge), std::move(videoManager),
@@ -2601,7 +2609,7 @@ void ContentParent::InitInternal(ProcessPriority aInitialPriority) {
           SandboxBroker::Create(std::move(policy), Pid(), brokerFd.ref());
       if (!mSandboxBroker) {
         KillHard("SandboxBroker::Create failed");
-        return;
+        return false;
       }
       MOZ_ASSERT(brokerFd.ref().IsValid());
     }
@@ -2657,6 +2665,8 @@ void ContentParent::InitInternal(ProcessPriority aInitialPriority) {
   RefPtr<nsPluginHost> pluginHost = nsPluginHost::GetInst();
   pluginHost->SendPluginsToContent();
   MaybeEnableRemoteInputEventQueue();
+
+  return true;
 }
 
 bool ContentParent::IsAlive() const {
@@ -2671,7 +2681,7 @@ int32_t ContentParent::Pid() const {
 }
 
 mozilla::ipc::IPCResult ContentParent::RecvGetGfxVars(
-    InfallibleTArray<GfxVarUpdate>* aVars) {
+    nsTArray<GfxVarUpdate>* aVars) {
   // Ensure gfxVars is initialized (for xpcshell tests).
   gfxVars::Initialize();
 
@@ -2759,7 +2769,7 @@ void ContentParent::OnVarChanged(const GfxVarUpdate& aVar) {
 }
 
 mozilla::ipc::IPCResult ContentParent::RecvReadFontList(
-    InfallibleTArray<FontListEntry>* retValue) {
+    nsTArray<FontListEntry>* retValue) {
 #ifdef ANDROID
   gfxAndroidPlatform::GetPlatform()->GetSystemFontList(retValue);
 #endif
@@ -2894,7 +2904,7 @@ mozilla::ipc::IPCResult ContentParent::RecvPlayEventSound(
 
 mozilla::ipc::IPCResult ContentParent::RecvGetIconForExtension(
     const nsCString& aFileExt, const uint32_t& aIconSize,
-    InfallibleTArray<uint8_t>* bits) {
+    nsTArray<uint8_t>* bits) {
 #ifdef MOZ_WIDGET_ANDROID
   NS_ASSERTION(AndroidBridge::Bridge() != nullptr,
                "AndroidBridge is not available");
@@ -3187,7 +3197,7 @@ ContentParent::GetInterface(const nsIID& aIID, void** aResult) {
 mozilla::ipc::IPCResult ContentParent::RecvInitBackground(
     Endpoint<PBackgroundParent>&& aEndpoint) {
   if (!BackgroundParent::Alloc(this, std::move(aEndpoint))) {
-    return IPC_FAIL(this, "BackgroundParent::Alloc failed");
+    NS_WARNING("BackgroundParent::Alloc failed");
   }
 
   return IPC_OK();
@@ -3950,7 +3960,7 @@ mozilla::ipc::IPCResult ContentParent::RecvNotificationEvent(
 
 mozilla::ipc::IPCResult ContentParent::RecvSyncMessage(
     const nsString& aMsg, const ClonedMessageData& aData,
-    InfallibleTArray<CpowEntry>&& aCpows, const IPC::Principal& aPrincipal,
+    nsTArray<CpowEntry>&& aCpows, const IPC::Principal& aPrincipal,
     nsTArray<StructuredCloneData>* aRetvals) {
   AUTO_PROFILER_LABEL_DYNAMIC_LOSSY_NSSTRING("ContentParent::RecvSyncMessage",
                                              OTHER, aMsg);
@@ -3970,7 +3980,7 @@ mozilla::ipc::IPCResult ContentParent::RecvSyncMessage(
 
 mozilla::ipc::IPCResult ContentParent::RecvRpcMessage(
     const nsString& aMsg, const ClonedMessageData& aData,
-    InfallibleTArray<CpowEntry>&& aCpows, const IPC::Principal& aPrincipal,
+    nsTArray<CpowEntry>&& aCpows, const IPC::Principal& aPrincipal,
     nsTArray<StructuredCloneData>* aRetvals) {
   AUTO_PROFILER_LABEL_DYNAMIC_LOSSY_NSSTRING("ContentParent::RecvRpcMessage",
                                              OTHER, aMsg);
@@ -3989,7 +3999,7 @@ mozilla::ipc::IPCResult ContentParent::RecvRpcMessage(
 }
 
 mozilla::ipc::IPCResult ContentParent::RecvAsyncMessage(
-    const nsString& aMsg, InfallibleTArray<CpowEntry>&& aCpows,
+    const nsString& aMsg, nsTArray<CpowEntry>&& aCpows,
     const IPC::Principal& aPrincipal, const ClonedMessageData& aData) {
   AUTO_PROFILER_LABEL_DYNAMIC_LOSSY_NSSTRING("ContentParent::RecvAsyncMessage",
                                              OTHER, aMsg);
@@ -4205,7 +4215,7 @@ nsresult ContentParent::DoSendAsyncMessage(JSContext* aCx,
   if (!BuildClonedMessageDataForParent(this, aHelper, data)) {
     return NS_ERROR_DOM_DATA_CLONE_ERR;
   }
-  InfallibleTArray<CpowEntry> cpows;
+  nsTArray<CpowEntry> cpows;
   jsipc::CPOWManager* mgr = GetCPOWManager();
   if (aCpows && (!mgr || !mgr->Wrap(aCx, aCpows, &cpows))) {
     return NS_ERROR_UNEXPECTED;
@@ -4465,7 +4475,7 @@ void ContentParent::NotifyUpdatedDictionaries() {
   RefPtr<mozSpellChecker> spellChecker(mozSpellChecker::Create());
   MOZ_ASSERT(spellChecker, "No spell checker?");
 
-  InfallibleTArray<nsString> dictionaries;
+  nsTArray<nsString> dictionaries;
   spellChecker->GetDictionaryList(&dictionaries);
 
   for (auto* cp : AllProcesses(eLive)) {
@@ -4474,7 +4484,7 @@ void ContentParent::NotifyUpdatedDictionaries() {
 }
 
 void ContentParent::NotifyUpdatedFonts() {
-  InfallibleTArray<SystemFontListEntry> fontList;
+  nsTArray<SystemFontListEntry> fontList;
   gfxPlatform::GetPlatform()->ReadSystemFontList(&fontList);
 
   for (auto* cp : AllProcesses(eLive)) {
@@ -4644,7 +4654,7 @@ mozilla::ipc::IPCResult ContentParent::RecvUpdateDropEffect(
 
 PContentPermissionRequestParent*
 ContentParent::AllocPContentPermissionRequestParent(
-    const InfallibleTArray<PermissionRequest>& aRequests,
+    const nsTArray<PermissionRequest>& aRequests,
     const IPC::Principal& aPrincipal, const IPC::Principal& aTopLevelPrincipal,
     const bool& aIsHandlingUserInput, const bool& aDocumentHasUserInput,
     const DOMTimeStamp& aPageLoadTimestamp, const TabId& aTabId) {
@@ -5158,7 +5168,7 @@ mozilla::ipc::IPCResult ContentParent::RecvNotifyPushObservers(
 
 mozilla::ipc::IPCResult ContentParent::RecvNotifyPushObserversWithData(
     const nsCString& aScope, const IPC::Principal& aPrincipal,
-    const nsString& aMessageId, InfallibleTArray<uint8_t>&& aData) {
+    const nsString& aMessageId, nsTArray<uint8_t>&& aData) {
   PushMessageDispatcher dispatcher(aScope, aPrincipal, aMessageId, Some(aData));
   Unused << NS_WARN_IF(NS_FAILED(dispatcher.NotifyObserversAndWorkers()));
   return IPC_OK();
@@ -5473,28 +5483,28 @@ bool ContentParent::NeedsPermissionsUpdate(
 }
 
 mozilla::ipc::IPCResult ContentParent::RecvAccumulateChildHistograms(
-    InfallibleTArray<HistogramAccumulation>&& aAccumulations) {
+    nsTArray<HistogramAccumulation>&& aAccumulations) {
   TelemetryIPC::AccumulateChildHistograms(GetTelemetryProcessID(mRemoteType),
                                           aAccumulations);
   return IPC_OK();
 }
 
 mozilla::ipc::IPCResult ContentParent::RecvAccumulateChildKeyedHistograms(
-    InfallibleTArray<KeyedHistogramAccumulation>&& aAccumulations) {
+    nsTArray<KeyedHistogramAccumulation>&& aAccumulations) {
   TelemetryIPC::AccumulateChildKeyedHistograms(
       GetTelemetryProcessID(mRemoteType), aAccumulations);
   return IPC_OK();
 }
 
 mozilla::ipc::IPCResult ContentParent::RecvUpdateChildScalars(
-    InfallibleTArray<ScalarAction>&& aScalarActions) {
+    nsTArray<ScalarAction>&& aScalarActions) {
   TelemetryIPC::UpdateChildScalars(GetTelemetryProcessID(mRemoteType),
                                    aScalarActions);
   return IPC_OK();
 }
 
 mozilla::ipc::IPCResult ContentParent::RecvUpdateChildKeyedScalars(
-    InfallibleTArray<KeyedScalarAction>&& aScalarActions) {
+    nsTArray<KeyedScalarAction>&& aScalarActions) {
   TelemetryIPC::UpdateChildKeyedScalars(GetTelemetryProcessID(mRemoteType),
                                         aScalarActions);
   return IPC_OK();

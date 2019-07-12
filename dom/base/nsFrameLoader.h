@@ -197,13 +197,11 @@ class nsFrameLoader final : public nsStubMutationObserver,
 
   bool RequestTabStateFlush(uint32_t aFlushId, bool aIsFinal = false);
 
+  void RequestEpochUpdate(uint32_t aEpoch);
+
   void Print(uint64_t aOuterWindowID, nsIPrintSettings* aPrintSettings,
              nsIWebProgressListener* aProgressListener,
              mozilla::ErrorResult& aRv);
-
-  already_AddRefed<mozilla::dom::Promise> DrawSnapshot(
-      double aX, double aY, double aW, double aH, double aScale,
-      const nsAString& aBackgroundColor, mozilla::ErrorResult& aRv);
 
   void StartPersistence(uint64_t aOuterWindowID,
                         nsIWebBrowserPersistDocumentReceiver* aRecv,

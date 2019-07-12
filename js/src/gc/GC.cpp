@@ -1461,7 +1461,7 @@ bool GCRuntime::setParameter(JSGCParamKey key, uint32_t value,
         return false;
       }
       for (ZonesIter zone(rt, WithAtoms); !zone.done(); zone.next()) {
-        zone->updateAllGCThresholds(*this, lock);
+        zone->updateAllGCThresholds(*this, GC_NORMAL, lock);
       }
   }
 
@@ -1720,7 +1720,7 @@ void GCRuntime::resetParameter(JSGCParamKey key, AutoLockGC& lock) {
     default:
       tunables.resetParameter(key, lock);
       for (ZonesIter zone(rt, WithAtoms); !zone.done(); zone.next()) {
-        zone->updateAllGCThresholds(*this, lock);
+        zone->updateAllGCThresholds(*this, GC_NORMAL, lock);
       }
   }
 }
@@ -2167,19 +2167,16 @@ void ZoneHeapThreshold::updateForRemovedArena(
 }
 
 /* static */
-size_t ZoneMallocThreshold::computeZoneTriggerBytes(
-    float growthFactor, size_t lastBytes, const GCSchedulingTunables& tunables,
-    const AutoLockGC& lock) {
-  size_t base = Max(lastBytes, tunables.maxMallocBytes());
-  float trigger = float(base) * growthFactor;
-  return size_t(trigger);
+size_t ZoneMallocThreshold::computeZoneTriggerBytes(float growthFactor,
+                                                    size_t lastBytes,
+                                                    size_t baseBytes,
+                                                    const AutoLockGC& lock) {
+  return size_t(float(Max(lastBytes, baseBytes)) * growthFactor);
 }
 
-void ZoneMallocThreshold::updateAfterGC(size_t lastBytes,
-                                        const GCSchedulingTunables& tunables,
-                                        const GCSchedulingState& state,
+void ZoneMallocThreshold::updateAfterGC(size_t lastBytes, size_t baseBytes,
                                         const AutoLockGC& lock) {
-  gcTriggerBytes_ = computeZoneTriggerBytes(2.0, lastBytes, tunables, lock);
+  gcTriggerBytes_ = computeZoneTriggerBytes(2.0, lastBytes, baseBytes, lock);
 }
 
 MemoryCounter::MemoryCounter()
@@ -3881,7 +3878,9 @@ void GCRuntime::freeFromBackgroundThread(AutoLockHelperThreadState& lock) {
     FreeOp* fop = TlsContext.get()->defaultFreeOp();
     for (Nursery::BufferSet::Range r = buffers.all(); !r.empty();
          r.popFront()) {
-      fop->free_(r.front());
+      // Malloc memory associated with nursery objects is not tracked as these
+      // are assumed to be short lived.
+      fop->freeUntracked(r.front());
     }
   } while (!lifoBlocksToFree.ref().isEmpty() ||
            !buffersToFreeAfterMinorGC.ref().empty());
@@ -3912,7 +3911,9 @@ void Realm::destroy(FreeOp* fop) {
   if (principals()) {
     JS_DropPrincipals(rt->mainContextFromOwnThread(), principals());
   }
-  fop->delete_(this);
+  // Bug 1560019: Malloc memory associated with a zone but not with a specific
+  // GC thing is not currently tracked.
+  fop->deleteUntracked(this);
 }
 
 void Compartment::destroy(FreeOp* fop) {
@@ -3920,13 +3921,17 @@ void Compartment::destroy(FreeOp* fop) {
   if (auto callback = rt->destroyCompartmentCallback) {
     callback(fop, this);
   }
-  fop->delete_(this);
+  // Bug 1560019: Malloc memory associated with a zone but not with a specific
+  // GC thing is not currently tracked.
+  fop->deleteUntracked(this);
   rt->gc.stats().sweptCompartment();
 }
 
 void Zone::destroy(FreeOp* fop) {
   MOZ_ASSERT(compartments().empty());
-  fop->delete_(this);
+  // Bug 1560019: Malloc memory associated with a zone but not with a specific
+  // GC thing is not currently tracked.
+  fop->deleteUntracked(this);
   fop->runtime()->gc.stats().sweptZone();
 }
 
@@ -5991,7 +5996,7 @@ IncrementalProgress GCRuntime::endSweepingSweepGroup(FreeOp* fop,
   for (SweepGroupZonesIter zone(rt); !zone.done(); zone.next()) {
     AutoLockGC lock(rt);
     zone->changeGCState(Zone::Sweep, Zone::Finished);
-    zone->updateAllGCThresholds(*this, lock);
+    zone->updateAllGCThresholds(*this, invocationKind, lock);
     zone->updateAllGCMallocCountersOnGCEnd(lock);
     zone->arenas.unmarkPreMarkedFreeCells();
   }

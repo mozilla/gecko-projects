@@ -116,6 +116,9 @@ void RenderThread::ShutDownTask(layers::SynchronousTask* aTask) {
   layers::AutoCompleteTask complete(aTask);
   MOZ_ASSERT(IsInRenderThread());
 
+  // Let go of our handle to the (internally ref-counted) thread pool.
+  mThreadPool.Release();
+
   // Releasing on the render thread will allow us to avoid dispatching to remove
   // remaining textures from the texture map.
   layers::SharedSurfacesParent::Shutdown();
@@ -883,8 +886,16 @@ WebRenderThreadPool::WebRenderThreadPool() {
 }
 
 WebRenderThreadPool::~WebRenderThreadPool() {
-  wr_thread_pool_delete(mThreadPool);
+  Release();
 }
+
+void WebRenderThreadPool::Release() {
+  if (mThreadPool) {
+    wr_thread_pool_delete(mThreadPool);
+    mThreadPool = nullptr;
+  }
+}
+
 
 WebRenderProgramCache::WebRenderProgramCache(wr::WrThreadPool* aThreadPool) {
   MOZ_ASSERT(aThreadPool);
@@ -1042,7 +1053,7 @@ void wr_finished_scene_build(mozilla::wr::WrWindowId aWindowId,
       CompositorBridgeParent::GetCompositorBridgeParentFromWindowId(aWindowId);
   RefPtr<wr::WebRenderPipelineInfo> info = new wr::WebRenderPipelineInfo(aInfo);
   if (cbp) {
-    InfallibleTArray<wr::RenderRoot> renderRoots;
+    nsTArray<wr::RenderRoot> renderRoots;
     renderRoots.SetLength(aDocumentIdsCount);
     for (size_t i = 0; i < aDocumentIdsCount; ++i) {
       renderRoots[i] = wr::RenderRootFromId(aDocumentIds[i]);

@@ -31,7 +31,6 @@ include PBackgroundSharedTypes;
 include "mozilla/GfxMessageUtils.h";
 include "mozilla/layers/LayersMessageUtils.h";
 
-using moveonly mozilla::gfx::PaintFragment from "mozilla/gfx/CrossProcessPaint.h";
 using mozilla::gfx::Matrix4x4 from "mozilla/gfx/Matrix.h";
 using mozilla::gfx::SurfaceFormat from "mozilla/gfx/Types.h";
 using mozilla::LayoutDeviceIntPoint from "Units.h";
@@ -47,7 +46,6 @@ using mozilla::layers::GeckoContentController::TapType from "mozilla/layers/Geck
 using ScrollableLayerGuid::ViewID from "mozilla/layers/ScrollableLayerGuid.h";
 using struct mozilla::void_t from "ipc/IPCMessageUtils.h";
 using mozilla::WindowsHandle from "ipc/IPCMessageUtils.h";
-using nscolor from "nsColor.h";
 using class mozilla::WidgetCompositionEvent from "ipc/nsGUIEventIPC.h";
 using struct mozilla::widget::IMENotification from "mozilla/widget/IMEData.h";
 using struct mozilla::widget::IMENotificationRequests from "mozilla/widget/IMEData.h";
@@ -56,7 +54,6 @@ using struct mozilla::widget::InputContext from "mozilla/widget/IMEData.h";
 using struct mozilla::widget::InputContextAction from "mozilla/widget/IMEData.h";
 using mozilla::gfx::IntSize from "mozilla/gfx/Point.h";
 using mozilla::gfx::IntPoint from "mozilla/gfx/Point.h";
-using mozilla::gfx::IntRect from "mozilla/gfx/Rect.h";
 using class mozilla::ContentCache from "ipc/nsGUIEventIPC.h";
 using class mozilla::WidgetKeyboardEvent from "ipc/nsGUIEventIPC.h";
 using class mozilla::WidgetMouseEvent from "ipc/nsGUIEventIPC.h";
@@ -121,6 +118,12 @@ struct RequestData
   nsIURI requestURI;
   nsIURI originalRequestURI;
   nsCString matchedList;
+  // The elapsedLoadTimeMS is only set when the request has finished loading.
+  // In other words, this field is set only during and |OnStateChange| event
+  // where |aStateFlags| contains |nsIWebProgressListener::STATE_STOP| and
+  // |nsIWebProgressListener::STATE_IS_NETWORK| and
+  // |nsIWebProgressListener::STATE_IS_WINDOW|, and the document is top level.
+  uint64_t? elapsedLoadTimeMS;
 };
 
 struct WebProgressStateChangeData
@@ -605,16 +608,14 @@ parent:
 
     async NavigationFinished();
 
-    async SessionStoreUpdate(nsCString? aDocShellCaps,
-                             bool? aPrivatedMode,
-                             nsCString[] aPositions,
-                             int32_t[] aPositionDescendants,
-                             uint32_t aFlushId,
-                             bool aIsFinal);
+    async SessionStoreUpdate(nsCString? aDocShellCaps, bool? aPrivatedMode,
+                             nsCString[] aPositions, int32_t[] aPositionDescendants,
+                             uint32_t aFlushId, bool aIsFinal, uint32_t aEpoch);
 
 child:
     async NativeSynthesisResponse(uint64_t aObserverId, nsCString aResponse);
     async FlushTabState(uint32_t aFlushId, bool aIsFinal);
+    async UpdateEpoch(uint32_t aEpoch);
 
 parent:
 
@@ -886,9 +887,6 @@ child:
      *        PaintWhileInterruptingJS).
      */
     async RenderLayers(bool aEnabled, bool aForceRepaint, LayersObserverEpoch aEpoch);
-
-    async RequestRootPaint(IntRect aRect, float aScale, nscolor aBackgroundColor) returns (PaintFragment retval);
-    async RequestSubPaint(float aScale, nscolor aBackgroundColor) returns (PaintFragment retval);
 child:
     /**
      * Notify the child that it shouldn't paint the offscreen displayport.

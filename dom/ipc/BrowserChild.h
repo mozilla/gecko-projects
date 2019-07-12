@@ -359,6 +359,8 @@ class BrowserChild final : public nsMessageManagerScriptExecutor,
   mozilla::ipc::IPCResult RecvFlushTabState(const uint32_t& aFlushId,
                                             const bool& aIsFinal);
 
+  mozilla::ipc::IPCResult RecvUpdateEpoch(const uint32_t& aEpoch);
+
   mozilla::ipc::IPCResult RecvNativeSynthesisResponse(
       const uint64_t& aObserverId, const nsCString& aResponse);
 
@@ -391,7 +393,7 @@ class BrowserChild final : public nsMessageManagerScriptExecutor,
                                                const bool& aRunInGlobalScope);
 
   mozilla::ipc::IPCResult RecvAsyncMessage(const nsString& aMessage,
-                                           InfallibleTArray<CpowEntry>&& aCpows,
+                                           nsTArray<CpowEntry>&& aCpows,
                                            nsIPrincipal* aPrincipal,
                                            const ClonedMessageData& aData);
   mozilla::ipc::IPCResult RecvSwappedWithOtherRemoteLoader(
@@ -684,14 +686,6 @@ class BrowserChild final : public nsMessageManagerScriptExecutor,
   mozilla::ipc::IPCResult RecvRenderLayers(
       const bool& aEnabled, const bool& aForce,
       const layers::LayersObserverEpoch& aEpoch);
-
-  mozilla::ipc::IPCResult RecvRequestRootPaint(
-      const IntRect& aRect, const float& aScale,
-      const nscolor& aBackgroundColor, RequestRootPaintResolver&& aResolve);
-
-  mozilla::ipc::IPCResult RecvRequestSubPaint(
-      const float& aScale, const nscolor& aBackgroundColor,
-      RequestSubPaintResolver&& aResolve);
 
   mozilla::ipc::IPCResult RecvNavigateByKey(const bool& aForward,
                                             const bool& aForDocumentNavigation);
