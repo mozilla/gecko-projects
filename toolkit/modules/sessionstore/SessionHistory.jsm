@@ -475,7 +475,7 @@ var SessionHistoryInternal = {
         "@mozilla.org/docshell/structured-clone-container;1"
       ].createInstance(Ci.nsIStructuredCloneContainer);
 
-      shEntry.stateData.initFromBase64(
+      stateData.initFromBase64(
         entry.structuredCloneState,
         entry.structuredCloneVersion
       );
