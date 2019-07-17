@@ -22,6 +22,7 @@
 #include "mozilla/HalTypes.h"
 #include "mozilla/LinkedList.h"
 #include "mozilla/MemoryReportingProcess.h"
+#include "mozilla/MozPromise.h"
 #include "mozilla/StaticPtr.h"
 #include "mozilla/TimeStamp.h"
 #include "mozilla/Variant.h"
@@ -148,9 +149,9 @@ class ContentParent final : public PContentParent,
 #endif
 
  public:
-  using LaunchError = GeckoChildProcessHost::LaunchError;
+  using LaunchError = mozilla::ipc::LaunchError;
   using LaunchPromise =
-      GeckoChildProcessHost::LaunchPromise<RefPtr<ContentParent>>;
+      mozilla::MozPromise<RefPtr<ContentParent>, LaunchError, false>;
 
   NS_DECLARE_STATIC_IID_ACCESSOR(NS_CONTENTPARENT_IID)
 
@@ -504,7 +505,7 @@ class ContentParent final : public PContentParent,
   void MaybeInvokeDragSession(BrowserParent* aParent);
 
   PContentPermissionRequestParent* AllocPContentPermissionRequestParent(
-      const InfallibleTArray<PermissionRequest>& aRequests,
+      const nsTArray<PermissionRequest>& aRequests,
       const IPC::Principal& aPrincipal,
       const IPC::Principal& aTopLevelPrincipal,
       const bool& aIsHandlingUserInput, const bool& aDocumentHasUserInput,
@@ -634,7 +635,8 @@ class ContentParent final : public PContentParent,
   mozilla::ipc::IPCResult RecvAttachBrowsingContext(
       BrowsingContext::IPCInitializer&& aInit);
 
-  mozilla::ipc::IPCResult RecvDetachBrowsingContext(BrowsingContext* aContext);
+  mozilla::ipc::IPCResult RecvDetachBrowsingContext(
+      uint64_t aContextId, DetachBrowsingContextResolver&& aResolve);
 
   mozilla::ipc::IPCResult RecvCacheBrowsingContextChildren(
       BrowsingContext* aContext);
@@ -732,7 +734,7 @@ class ContentParent final : public PContentParent,
       mozilla::Variant<bool*, RefPtr<LaunchPromise>*>&& aRetval);
 
   // Common initialization after sub process launch.
-  void InitInternal(ProcessPriority aPriority);
+  bool InitInternal(ProcessPriority aPriority);
 
   // Generate a minidump for the child process and one for the main process
   void GeneratePairedMinidump(const char* aReason);
@@ -942,10 +944,9 @@ class ContentParent final : public PContentParent,
   bool DeallocPWebBrowserPersistDocumentParent(
       PWebBrowserPersistDocumentParent* aActor);
 
-  mozilla::ipc::IPCResult RecvGetGfxVars(InfallibleTArray<GfxVarUpdate>* aVars);
+  mozilla::ipc::IPCResult RecvGetGfxVars(nsTArray<GfxVarUpdate>* aVars);
 
-  mozilla::ipc::IPCResult RecvReadFontList(
-      InfallibleTArray<FontListEntry>* retValue);
+  mozilla::ipc::IPCResult RecvReadFontList(nsTArray<FontListEntry>* retValue);
 
   mozilla::ipc::IPCResult RecvSetClipboard(
       const IPCDataTransfer& aDataTransfer, const bool& aIsPrivateData,
@@ -970,9 +971,9 @@ class ContentParent final : public PContentParent,
   mozilla::ipc::IPCResult RecvBeep();
   mozilla::ipc::IPCResult RecvPlayEventSound(const uint32_t& aEventId);
 
-  mozilla::ipc::IPCResult RecvGetIconForExtension(
-      const nsCString& aFileExt, const uint32_t& aIconSize,
-      InfallibleTArray<uint8_t>* bits);
+  mozilla::ipc::IPCResult RecvGetIconForExtension(const nsCString& aFileExt,
+                                                  const uint32_t& aIconSize,
+                                                  nsTArray<uint8_t>* bits);
 
   mozilla::ipc::IPCResult RecvGetShowPasswordSetting(bool* showPassword);
 
@@ -1004,16 +1005,16 @@ class ContentParent final : public PContentParent,
 
   mozilla::ipc::IPCResult RecvSyncMessage(
       const nsString& aMsg, const ClonedMessageData& aData,
-      InfallibleTArray<CpowEntry>&& aCpows, const IPC::Principal& aPrincipal,
+      nsTArray<CpowEntry>&& aCpows, const IPC::Principal& aPrincipal,
       nsTArray<StructuredCloneData>* aRetvals);
 
   mozilla::ipc::IPCResult RecvRpcMessage(
       const nsString& aMsg, const ClonedMessageData& aData,
-      InfallibleTArray<CpowEntry>&& aCpows, const IPC::Principal& aPrincipal,
+      nsTArray<CpowEntry>&& aCpows, const IPC::Principal& aPrincipal,
       nsTArray<StructuredCloneData>* aRetvals);
 
   mozilla::ipc::IPCResult RecvAsyncMessage(const nsString& aMsg,
-                                           InfallibleTArray<CpowEntry>&& aCpows,
+                                           nsTArray<CpowEntry>&& aCpows,
                                            const IPC::Principal& aPrincipal,
                                            const ClonedMessageData& aData);
 
@@ -1145,7 +1146,7 @@ class ContentParent final : public PContentParent,
 
   mozilla::ipc::IPCResult RecvNotifyPushObserversWithData(
       const nsCString& aScope, const IPC::Principal& aPrincipal,
-      const nsString& aMessageId, InfallibleTArray<uint8_t>&& aData);
+      const nsString& aMessageId, nsTArray<uint8_t>&& aData);
 
   mozilla::ipc::IPCResult RecvNotifyPushSubscriptionChangeObservers(
       const nsCString& aScope, const IPC::Principal& aPrincipal);
@@ -1165,13 +1166,13 @@ class ContentParent final : public PContentParent,
   mozilla::ipc::IPCResult RecvDeleteGetFilesRequest(const nsID& aID);
 
   mozilla::ipc::IPCResult RecvAccumulateChildHistograms(
-      InfallibleTArray<HistogramAccumulation>&& aAccumulations);
+      nsTArray<HistogramAccumulation>&& aAccumulations);
   mozilla::ipc::IPCResult RecvAccumulateChildKeyedHistograms(
-      InfallibleTArray<KeyedHistogramAccumulation>&& aAccumulations);
+      nsTArray<KeyedHistogramAccumulation>&& aAccumulations);
   mozilla::ipc::IPCResult RecvUpdateChildScalars(
-      InfallibleTArray<ScalarAction>&& aScalarActions);
+      nsTArray<ScalarAction>&& aScalarActions);
   mozilla::ipc::IPCResult RecvUpdateChildKeyedScalars(
-      InfallibleTArray<KeyedScalarAction>&& aScalarActions);
+      nsTArray<KeyedScalarAction>&& aScalarActions);
   mozilla::ipc::IPCResult RecvRecordChildEvents(
       nsTArray<ChildEventData>&& events);
   mozilla::ipc::IPCResult RecvRecordDiscardedData(

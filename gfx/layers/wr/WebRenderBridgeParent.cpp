@@ -265,7 +265,7 @@ class MOZ_STACK_CLASS AutoWebRenderBridgeParentAsyncMessageSender final {
  public:
   explicit AutoWebRenderBridgeParentAsyncMessageSender(
       WebRenderBridgeParent* aWebRenderBridgeParent,
-      InfallibleTArray<OpDestroy>* aDestroyActors = nullptr)
+      nsTArray<OpDestroy>* aDestroyActors = nullptr)
       : mWebRenderBridgeParent(aWebRenderBridgeParent),
         mActorsToDestroy(aDestroyActors) {
     mWebRenderBridgeParent->SetAboutToSendAsyncMessages();
@@ -284,7 +284,7 @@ class MOZ_STACK_CLASS AutoWebRenderBridgeParentAsyncMessageSender final {
 
  private:
   WebRenderBridgeParent* mWebRenderBridgeParent;
-  InfallibleTArray<OpDestroy>* mActorsToDestroy;
+  nsTArray<OpDestroy>* mActorsToDestroy;
 };
 
 WebRenderBridgeParent::WebRenderBridgeParent(
@@ -428,7 +428,8 @@ bool WebRenderBridgeParent::UpdateResources(
         if (!reader.Read(op.bytes(), bytes)) {
           return false;
         }
-        aUpdates.AddBlobImage(op.key(), op.descriptor(), bytes);
+        aUpdates.AddBlobImage(op.key(), op.descriptor(), bytes,
+                              wr::ToDeviceIntRect(op.visibleRect()));
         break;
       }
       case OpUpdateResource::TOpUpdateBlobImage: {
@@ -438,17 +439,14 @@ bool WebRenderBridgeParent::UpdateResources(
           return false;
         }
         aUpdates.UpdateBlobImage(op.key(), op.descriptor(), bytes,
+                                 wr::ToDeviceIntRect(op.visibleRect()),
                                  wr::ToLayoutIntRect(op.dirtyRect()));
         break;
       }
-      case OpUpdateResource::TOpSetImageVisibleArea: {
-        const auto& op = cmd.get_OpSetImageVisibleArea();
-        wr::DeviceIntRect area;
-        area.origin.x = op.area().x;
-        area.origin.y = op.area().y;
-        area.size.width = op.area().width;
-        area.size.height = op.area().height;
-        aUpdates.SetImageVisibleArea(op.key(), area);
+      case OpUpdateResource::TOpSetBlobImageVisibleArea: {
+        const auto& op = cmd.get_OpSetBlobImageVisibleArea();
+        aUpdates.SetBlobImageVisibleArea(op.key(),
+                                         wr::ToDeviceIntRect(op.area()));
         break;
       }
       case OpUpdateResource::TOpAddExternalImage: {
@@ -758,7 +756,7 @@ mozilla::ipc::IPCResult WebRenderBridgeParent::RecvUpdateResources(
 }
 
 mozilla::ipc::IPCResult WebRenderBridgeParent::RecvDeleteCompositorAnimations(
-    InfallibleTArray<uint64_t>&& aIds) {
+    nsTArray<uint64_t>&& aIds) {
   if (mDestroyed) {
     return IPC_OK();
   }
@@ -966,7 +964,7 @@ bool WebRenderBridgeParent::SetDisplayList(
 
 mozilla::ipc::IPCResult WebRenderBridgeParent::RecvSetDisplayList(
     nsTArray<RenderRootDisplayListData>&& aDisplayLists,
-    InfallibleTArray<OpDestroy>&& aToDestroy, const uint64_t& aFwdTransactionId,
+    nsTArray<OpDestroy>&& aToDestroy, const uint64_t& aFwdTransactionId,
     const TransactionId& aTransactionId, const wr::IdNamespace& aIdNamespace,
     const bool& aContainsSVGGroup, const VsyncId& aVsyncId,
     const TimeStamp& aVsyncStartTime, const TimeStamp& aRefreshStartTime,
@@ -1107,7 +1105,7 @@ mozilla::ipc::IPCResult WebRenderBridgeParent::RecvSetDisplayList(
 mozilla::ipc::IPCResult WebRenderBridgeParent::RecvEmptyTransaction(
     const FocusTarget& aFocusTarget, const uint32_t& aPaintSequenceNumber,
     nsTArray<RenderRootUpdates>&& aRenderRootUpdates,
-    InfallibleTArray<OpDestroy>&& aToDestroy, const uint64_t& aFwdTransactionId,
+    nsTArray<OpDestroy>&& aToDestroy, const uint64_t& aFwdTransactionId,
     const TransactionId& aTransactionId, const wr::IdNamespace& aIdNamespace,
     const VsyncId& aVsyncId, const TimeStamp& aVsyncStartTime,
     const TimeStamp& aRefreshStartTime, const TimeStamp& aTxnStartTime,
@@ -1289,14 +1287,14 @@ mozilla::ipc::IPCResult WebRenderBridgeParent::RecvParentCommands(
 }
 
 bool WebRenderBridgeParent::ProcessWebRenderParentCommands(
-    const InfallibleTArray<WebRenderParentCommand>& aCommands,
+    const nsTArray<WebRenderParentCommand>& aCommands,
     wr::TransactionBuilder& aTxn, wr::RenderRoot aRenderRoot) {
   // Transaction for async image pipeline that uses ImageBridge always need to
   // be non low priority.
   wr::TransactionBuilder txnForImageBridge;
   wr::AutoTransactionSender sender(Api(aRenderRoot), &txnForImageBridge);
 
-  for (InfallibleTArray<WebRenderParentCommand>::index_type i = 0;
+  for (nsTArray<WebRenderParentCommand>::index_type i = 0;
        i < aCommands.Length(); ++i) {
     const WebRenderParentCommand& cmd = aCommands[i];
     switch (cmd.type()) {
@@ -1943,6 +1941,15 @@ void WebRenderBridgeParent::MaybeGenerateFrame(VsyncId aId,
   // This function should only get called in the root WRBP
   MOZ_ASSERT(IsRootWebRenderBridgeParent());
 
+  if (CompositorBridgeParent* cbp = GetRootCompositorBridgeParent()) {
+    // Skip WR render during paused state.
+    if (cbp->IsPaused()) {
+      TimeStamp now = TimeStamp::Now();
+      cbp->NotifyPipelineRendered(mPipelineId, mWrEpoch, VsyncId(), now, now,
+                                  now);
+    }
+  }
+
   TimeStamp start = TimeStamp::Now();
   mAsyncImageManager->SetCompositionTime(start);
 
@@ -2360,7 +2367,7 @@ bool WebRenderBridgeParent::ShouldParentObserveEpoch() {
 }
 
 void WebRenderBridgeParent::SendAsyncMessage(
-    const InfallibleTArray<AsyncParentMessageData>& aMessage) {
+    const nsTArray<AsyncParentMessageData>& aMessage) {
   MOZ_ASSERT_UNREACHABLE("unexpected to be called");
 }
 

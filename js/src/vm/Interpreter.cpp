@@ -973,6 +973,7 @@ static void PopEnvironment(JSContext* cx, EnvironmentIter& ei) {
     case ScopeKind::Catch:
     case ScopeKind::NamedLambda:
     case ScopeKind::StrictNamedLambda:
+    case ScopeKind::FunctionLexical:
       if (MOZ_UNLIKELY(cx->realm()->isDebuggee())) {
         DebugEnvironments::onPopLexical(cx, ei);
       }
@@ -1972,7 +1973,7 @@ static MOZ_NEVER_INLINE JS_HAZ_JSNATIVE_CALLER bool Interpret(JSContext* cx,
     CASE(JSOP_LOOPENTRY) {
       COUNT_COVERAGE();
       // Attempt on-stack replacement with Baseline code.
-      if (jit::IsBaselineInterpreterOrJitEnabled(cx)) {
+      if (jit::IsBaselineInterpreterOrJitEnabled()) {
         script->incWarmUpCounter();
 
         using Tier = jit::BaselineTier;

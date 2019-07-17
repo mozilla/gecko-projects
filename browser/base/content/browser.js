@@ -1943,7 +1943,7 @@ var gBrowserInit = {
     BookmarkingUI.init();
     BrowserSearch.delayedStartupInit();
     AutoShowBookmarksToolbar.init();
-    ContentBlocking.init();
+    gProtectionsHandler.init();
 
     let safeMode = document.getElementById("helpSafeMode");
     if (Services.appinfo.inSafeMode) {
@@ -2423,7 +2423,7 @@ var gBrowserInit = {
       Services.prefs.removeObserver(ctrlTab.prefName, ctrlTab);
       ctrlTab.uninit();
       gBrowserThumbnails.uninit();
-      ContentBlocking.uninit();
+      gProtectionsHandler.uninit();
       FullZoom.destroy();
 
       Services.obs.removeObserver(gIdentityHandler, "perm-changed");
@@ -2751,29 +2751,17 @@ function loadOneOrMoreURIs(aURIString, aTriggeringPrincipal, aCsp) {
 
 /**
  * Focuses the location bar input field and selects its contents.
- *
- * @param [optional] userInitiatedFocus
- *        Whether this focus is caused by an user interaction whose intention
- *        was to use the location bar. For example, using a shortcut to go to
- *        the location bar, or a contextual menu to search from it.
- *        The default is false and should be used in all those cases where the
- *        code focuses the location bar but that's not the primary user
- *        intention, like when opening a new tab.
  */
-function focusAndSelectUrlBar(userInitiatedFocus = false) {
+function focusAndSelectUrlBar() {
   // In customize mode, the url bar is disabled. If a new tab is opened or the
   // user switches to a different tab, this function gets called before we've
   // finished leaving customize mode, and the url bar will still be disabled.
   // We can't focus it when it's disabled, so we need to re-run ourselves when
   // we've finished leaving customize mode.
-  if (CustomizationHandler.isExitingCustomizeMode) {
-    gNavToolbox.addEventListener(
-      "aftercustomization",
-      function() {
-        focusAndSelectUrlBar(userInitiatedFocus);
-      },
-      { once: true }
-    );
+  if (CustomizationHandler.isCustomizing()) {
+    gNavToolbox.addEventListener("aftercustomization", focusAndSelectUrlBar, {
+      once: true,
+    });
     return;
   }
 
@@ -2781,14 +2769,12 @@ function focusAndSelectUrlBar(userInitiatedFocus = false) {
     FullScreen.showNavToolbox();
   }
 
-  gURLBar.userInitiatedFocus = userInitiatedFocus;
   gURLBar.select();
-  gURLBar.userInitiatedFocus = false;
 }
 
 function openLocation() {
   if (window.location.href == AppConstants.BROWSER_CHROME_URL) {
-    focusAndSelectUrlBar(true);
+    focusAndSelectUrlBar();
     if (gURLBar.openViewOnFocus && !gURLBar.view.isOpen) {
       gURLBar.startQuery();
     }
@@ -3559,13 +3545,21 @@ var BrowserOnClick = {
       case "viewCertificate":
         securityInfo = getSecurityInfo(securityInfoAsString);
         cert = securityInfo.serverCert;
-        Services.ww.openWindow(
-          window,
-          "chrome://pippki/content/certViewer.xul",
-          "_blank",
-          "centerscreen,chrome",
-          cert
-        );
+        if (Services.prefs.getBoolPref("security.aboutcertificate.enabled")) {
+          let derb64 = encodeURIComponent(btoa(getDERString(cert)));
+          let url = `about:certificate?cert=${derb64}`;
+          openTrustedLinkIn(url, "tab", {
+            triggeringPrincipal: browser.contentPrincipal,
+          });
+        } else {
+          Services.ww.openWindow(
+            window,
+            "chrome://pippki/content/certViewer.xul",
+            "_blank",
+            "centerscreen,chrome",
+            cert
+          );
+        }
         break;
       case "exceptionDialogButton":
         securityInfo = getSecurityInfo(securityInfoAsString);
@@ -5753,7 +5747,7 @@ var XULBrowserWindow = {
       );
     }
 
-    ContentBlocking.onContentBlockingEvent(
+    gProtectionsHandler.onContentBlockingEvent(
       this._event,
       aWebProgress,
       aIsSimulated
@@ -5840,107 +5834,6 @@ var XULBrowserWindow = {
       "Trying to navigateAndRestore a browser which was " +
         "not attached to this tabbrowser is unsupported"
     );
-  },
-
-  // data for updating sessionStore
-  _sessionData: {},
-
-  composeChildren: function XWB_composeScrollPositionsData(
-    aPositions,
-    aDescendants,
-    aStartIndex,
-    aNumberOfDescendants
-  ) {
-    let children = [];
-    let lastIndexOfNonNullbject = -1;
-    for (let i = 0; i < aNumberOfDescendants; i++) {
-      let currentIndex = aStartIndex + i;
-      let obj = {};
-      let objWithData = false;
-      if (aPositions[currentIndex]) {
-        obj.scroll = aPositions[currentIndex];
-        objWithData = true;
-      }
-      if (aDescendants[currentIndex]) {
-        let descendantsTree = this.composeChildren(
-          aPositions,
-          aDescendants,
-          currentIndex + 1,
-          aDescendants[currentIndex]
-        );
-        i += aDescendants[currentIndex];
-        if (descendantsTree) {
-          obj.children = descendantsTree;
-          objWithData = true;
-        }
-      }
-
-      if (objWithData) {
-        lastIndexOfNonNullbject = children.length;
-        children.push(obj);
-      } else {
-        children.push(null);
-      }
-    }
-
-    if (lastIndexOfNonNullbject == -1) {
-      return null;
-    }
-
-    return children.slice(0, lastIndexOfNonNullbject + 1);
-  },
-
-  updateScrollPositions: function XWB_updateScrollPositions(
-    aPositions,
-    aDescendants
-  ) {
-    let obj = {};
-    let objWithData = false;
-
-    if (aPositions[0]) {
-      obj.scroll = aPositions[0];
-      objWithData = true;
-    }
-
-    if (aPositions.length > 1) {
-      let children = this.composeChildren(
-        aPositions,
-        aDescendants,
-        1,
-        aDescendants[0]
-      );
-      if (children) {
-        obj.children = children;
-        objWithData = true;
-      }
-    }
-
-    if (objWithData) {
-      this._sessionData.scroll = obj;
-    } else {
-      this._sessionData.scroll = null;
-    }
-  },
-
-  updateDocShellCaps: function XWB_updateDocShellCaps(aDisCaps) {
-    this._sessionData.disallow = aDisCaps ? aDisCaps : null;
-  },
-
-  updateIsPrivate: function XWB_updateIsPrivate(aIsPrivate) {
-    this._sessionData.isPrivate = aIsPrivate;
-  },
-
-  updateSessionStore: function XWB_updateSessionStore(
-    aBrowser,
-    aFlushId,
-    aIsFinal
-  ) {
-    SessionStore.updateSessionStoreFromTablistener(aBrowser, {
-      data: this._sessionData,
-      flushID: aFlushId,
-      isFinal: aIsFinal,
-    });
-    this._sessionData = {};
   },
 };
 
@@ -6378,8 +6271,6 @@ var TabsProgressListener = {
     gBrowser.getNotificationBox(aBrowser).removeTransientNotifications();
 
     FullZoom.onLocationChange(aLocationURI, false, aBrowser);
-
-    ContentBlocking.onLocationChange();
   },
 
   onLinkIconAvailable(browser, dataURI, iconURI) {
@@ -8956,58 +8847,39 @@ var gPrivateBrowsingUI = {
     // temporary fix until bug 463607 is fixed
     document.getElementById("Tools:Sanitize").setAttribute("disabled", "true");
 
-    if (window.location.href == AppConstants.BROWSER_CHROME_URL) {
-      // Adjust the window's title
-      let docElement = document.documentElement;
-      if (!PrivateBrowsingUtils.permanentPrivateBrowsing) {
-        docElement.setAttribute(
-          "title",
-          docElement.getAttribute("title_privatebrowsing")
-        );
-        docElement.setAttribute(
-          "titlemodifier",
-          docElement.getAttribute("titlemodifier_privatebrowsing")
-        );
-      }
+    if (window.location.href != AppConstants.BROWSER_CHROME_URL) {
+      return;
+    }
+
+    // Adjust the window's title
+    let docElement = document.documentElement;
+    if (!PrivateBrowsingUtils.permanentPrivateBrowsing) {
       docElement.setAttribute(
-        "privatebrowsingmode",
-        PrivateBrowsingUtils.permanentPrivateBrowsing
-          ? "permanent"
-          : "temporary"
+        "title",
+        docElement.getAttribute("title_privatebrowsing")
       );
-      gBrowser.updateTitlebar();
+      docElement.setAttribute(
+        "titlemodifier",
+        docElement.getAttribute("titlemodifier_privatebrowsing")
+      );
+    }
+    docElement.setAttribute(
+      "privatebrowsingmode",
+      PrivateBrowsingUtils.permanentPrivateBrowsing ? "permanent" : "temporary"
+    );
+    gBrowser.updateTitlebar();
 
-      if (PrivateBrowsingUtils.permanentPrivateBrowsing) {
-        // Adjust the New Window menu entries
-        [
-          { normal: "menu_newNavigator", private: "menu_newPrivateWindow" },
-        ].forEach(function(menu) {
-          let newWindow = document.getElementById(menu.normal);
-          let newPrivateWindow = document.getElementById(menu.private);
-          if (newWindow && newPrivateWindow) {
-            newPrivateWindow.hidden = true;
-            newWindow.label = newPrivateWindow.label;
-            newWindow.accessKey = newPrivateWindow.accessKey;
-            newWindow.command = newPrivateWindow.command;
-          }
-        });
+    if (PrivateBrowsingUtils.permanentPrivateBrowsing) {
+      // Adjust the New Window menu entries
+      let newWindow = document.getElementById("menu_newNavigator");
+      let newPrivateWindow = document.getElementById("menu_newPrivateWindow");
+      if (newWindow && newPrivateWindow) {
+        newPrivateWindow.hidden = true;
+        newWindow.label = newPrivateWindow.label;
+        newWindow.accessKey = newPrivateWindow.accessKey;
+        newWindow.command = newPrivateWindow.command;
       }
     }
-
-    let urlBarSearchParam =
-      gURLBar.getAttribute("autocompletesearchparam") || "";
-    if (
-      !PrivateBrowsingUtils.permanentPrivateBrowsing &&
-      !urlBarSearchParam.includes("disable-private-actions")
-    ) {
-      // Disable switch to tab autocompletion for private windows.
-      // We leave it enabled for permanent private browsing mode though.
-      urlBarSearchParam += " disable-private-actions";
-    }
-    if (!urlBarSearchParam.includes("private-window")) {
-      urlBarSearchParam += " private-window";
-    }
-    gURLBar.setAttribute("autocompletesearchparam", urlBarSearchParam);
   },
 };
 

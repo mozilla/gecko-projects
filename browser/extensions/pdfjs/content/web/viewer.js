@@ -622,6 +622,10 @@ let PDFViewerApplication = {
   },
 
   zoomIn(ticks) {
+    if (this.pdfViewer.isInPresentationMode) {
+      return;
+    }
+
     let newScale = this.pdfViewer.currentScale;
 
     do {
@@ -634,6 +638,10 @@ let PDFViewerApplication = {
   },
 
   zoomOut(ticks) {
+    if (this.pdfViewer.isInPresentationMode) {
+      return;
+    }
+
     let newScale = this.pdfViewer.currentScale;
 
     do {
@@ -8655,6 +8663,10 @@ class BaseViewer {
       }
 
       onePageRenderedCapability.promise.then(() => {
+        if (this.findController) {
+          this.findController.setDocument(pdfDocument);
+        }
+
         if (pdfDocument.loadingParams['disableAutoFetch']) {
           pagesCapability.resolve();
           return;
@@ -8687,10 +8699,6 @@ class BaseViewer {
       this.eventBus.dispatch('pagesinit', {
         source: this
       });
-
-      if (this.findController) {
-        this.findController.setDocument(pdfDocument);
-      }
 
       if (this.defaultRenderingQueue) {
         this.update();
@@ -9626,7 +9634,8 @@ class PDFPageView {
       this.eventBus.dispatch('pagerendered', {
         source: this,
         pageNumber: this.id,
-        cssTransform: true
+        cssTransform: true,
+        timestamp: performance.now()
       });
       return;
     }
@@ -9647,7 +9656,8 @@ class PDFPageView {
         this.eventBus.dispatch('pagerendered', {
           source: this,
           pageNumber: this.id,
-          cssTransform: true
+          cssTransform: true,
+          timestamp: performance.now()
         });
         return;
       }
@@ -9853,7 +9863,8 @@ class PDFPageView {
       this.eventBus.dispatch('pagerendered', {
         source: this,
         pageNumber: this.id,
-        cssTransform: false
+        cssTransform: false,
+        timestamp: performance.now()
       });
 
       if (error) {
@@ -11834,18 +11845,23 @@ function FirefoxPrintService(pdfDocument, pagesOverview, printContainer) {
 
 FirefoxPrintService.prototype = {
   layout() {
-    let pdfDocument = this.pdfDocument;
-    let printContainer = this.printContainer;
-    let body = document.querySelector('body');
+    const {
+      pdfDocument,
+      pagesOverview,
+      printContainer
+    } = this;
+    const body = document.querySelector('body');
     body.setAttribute('data-pdfjsprinting', true);
 
-    for (let i = 0, ii = this.pagesOverview.length; i < ii; ++i) {
-      composePage(pdfDocument, i + 1, this.pagesOverview[i], printContainer);
+    for (let i = 0, ii = pagesOverview.length; i < ii; ++i) {
+      composePage(pdfDocument, i + 1, pagesOverview[i], printContainer);
     }
   },
 
   destroy() {
     this.printContainer.textContent = '';
+    const body = document.querySelector('body');
+    body.removeAttribute('data-pdfjsprinting');
   }
 
 };

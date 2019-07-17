@@ -411,7 +411,8 @@ APZCTreeManager::UpdateHitTestingTreeImpl(const ScrollNode& aRoot,
     HitTestingTreeNode* parent = nullptr;
     HitTestingTreeNode* next = nullptr;
     LayersId layersId = mRootLayersId;
-    wr::RenderRoot renderRoot = wr::RenderRoot::Default;
+    std::stack<wr::RenderRoot> renderRoots;
+    renderRoots.push(wr::RenderRoot::Default);
     ancestorTransforms.push(AncestorTransform());
     state.mParentHasPerspective.push(false);
 
@@ -441,7 +442,7 @@ APZCTreeManager::UpdateHitTestingTreeImpl(const ScrollNode& aRoot,
 
           HitTestingTreeNode* node = PrepareNodeForLayer(
               lock, aLayerMetrics, aLayerMetrics.Metrics(), layersId,
-              ancestorTransforms.top(), parent, next, state, renderRoot);
+              ancestorTransforms.top(), parent, next, state, renderRoots.top());
           MOZ_ASSERT(node);
           AsyncPanZoomController* apzc = node->GetApzc();
           aLayerMetrics.SetApzc(apzc);
@@ -490,7 +491,7 @@ APZCTreeManager::UpdateHitTestingTreeImpl(const ScrollNode& aRoot,
           }
           if (Maybe<wr::RenderRoot> newRenderRoot =
                   aLayerMetrics.GetReferentRenderRoot()) {
-            renderRoot = *newRenderRoot;
+            renderRoots.push(*newRenderRoot);
           }
 
           indents.push(gfx::TreeAutoIndent<LOG_DEFAULT>(mApzcTreeLog));
@@ -508,6 +509,9 @@ APZCTreeManager::UpdateHitTestingTreeImpl(const ScrollNode& aRoot,
           ancestorTransforms.pop();
           indents.pop();
           state.mParentHasPerspective.pop();
+          if (aLayerMetrics.GetReferentRenderRoot()) {
+            renderRoots.pop();
+          }
         });
 
     mApzcTreeLog << "[end]\n";
@@ -2346,8 +2350,7 @@ static bool TransformDisplacement(APZCTreeManager* aTreeManager,
 void APZCTreeManager::DispatchScroll(
     AsyncPanZoomController* aPrev, ParentLayerPoint& aStartPoint,
     ParentLayerPoint& aEndPoint,
-    OverscrollHandoffState& aOverscrollHandoffState,
-    const TimeStamp& aTimeStamp) {
+    OverscrollHandoffState& aOverscrollHandoffState) {
   const OverscrollHandoffChain& overscrollHandoffChain =
       aOverscrollHandoffState.mChain;
   uint32_t overscrollHandoffChainIndex = aOverscrollHandoffState.mChainIndex;
@@ -2373,8 +2376,7 @@ void APZCTreeManager::DispatchScroll(
 
   // Scroll |next|. If this causes overscroll, it will call DispatchScroll()
   // again with an incremented index.
-  if (!next->AttemptScroll(aStartPoint, aEndPoint, aOverscrollHandoffState,
-                           aTimeStamp)) {
+  if (!next->AttemptScroll(aStartPoint, aEndPoint, aOverscrollHandoffState)) {
     // Transform |aStartPoint| and |aEndPoint| (which now represent the
     // portion of the displacement that wasn't consumed by APZCs later
     // in the handoff chain) back into |aPrev|'s coordinate space. This

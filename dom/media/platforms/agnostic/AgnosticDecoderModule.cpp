@@ -23,12 +23,21 @@ namespace mozilla {
 bool AgnosticDecoderModule::SupportsMimeType(
     const nsACString& aMimeType, DecoderDoctorDiagnostics* aDiagnostics) const {
   bool supports =
-      VPXDecoder::IsVPX(aMimeType) || OpusDataDecoder::IsOpus(aMimeType) ||
-      WaveDataDecoder::IsWave(aMimeType) || TheoraDecoder::IsTheora(aMimeType);
+      VPXDecoder::IsVPX(aMimeType) || TheoraDecoder::IsTheora(aMimeType);
   if (!StaticPrefs::media_rdd_vorbis_enabled() ||
       !StaticPrefs::media_rdd_process_enabled() ||
       !BrowserTabsRemoteAutostart()) {
     supports |= VorbisDataDecoder::IsVorbis(aMimeType);
+  }
+  if (!StaticPrefs::media_rdd_wav_enabled() ||
+      !StaticPrefs::media_rdd_process_enabled() ||
+      !BrowserTabsRemoteAutostart()) {
+    supports |= WaveDataDecoder::IsWave(aMimeType);
+  }
+  if (!StaticPrefs::media_rdd_opus_enabled() ||
+      !StaticPrefs::media_rdd_process_enabled() ||
+      !BrowserTabsRemoteAutostart()) {
+    supports |= OpusDataDecoder::IsOpus(aMimeType);
   }
 #ifdef MOZ_AV1
   // We remove support for decoding AV1 here if RDD is enabled so that

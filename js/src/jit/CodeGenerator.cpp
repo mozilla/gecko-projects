@@ -1569,7 +1569,7 @@ void CodeGenerator::visitDoubleToString(LDoubleToString* lir) {
       lir, ArgList(input), StoreRegisterTo(output));
 
   // Try double to integer conversion and run integer to string code.
-  masm.convertDoubleToInt32(input, temp, ool->entry(), true);
+  masm.convertDoubleToInt32(input, temp, ool->entry(), false);
   emitIntToString(temp, output, ool->entry());
 
   masm.bind(ool->rejoin());
@@ -13777,9 +13777,9 @@ void CodeGenerator::visitFinishBoundFunctionInit(
     // Load the length property of an interpreted function.
     masm.loadPtr(Address(target, JSFunction::offsetOfScript()), temp1);
     masm.loadPtr(Address(temp1, JSScript::offsetOfScriptData()), temp1);
-    masm.loadPtr(Address(temp1, RuntimeScriptData::offsetOfSSD()), temp1);
-    masm.load16ZeroExtend(Address(temp1, SharedScriptData::offsetOfFunLength()),
-                          temp1);
+    masm.loadPtr(Address(temp1, RuntimeScriptData::offsetOfISD()), temp1);
+    masm.load16ZeroExtend(
+        Address(temp1, ImmutableScriptData::offsetOfFunLength()), temp1);
   }
   masm.bind(&lengthLoaded);
 

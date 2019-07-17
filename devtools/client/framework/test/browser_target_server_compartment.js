@@ -41,10 +41,10 @@ async function testChromeTab() {
   const target = await TargetFactory.forTab(tab);
   await target.attach();
 
-  const [, threadClient] = await target.attachThread();
-  await threadClient.resume();
+  const [, threadFront] = await target.attachThread();
+  await threadFront.resume();
 
-  const { sources } = await threadClient.getSources();
+  const { sources } = await threadFront.getSources();
   ok(
     sources.find(s => s.url == CHROME_PAGE),
     "The thread actor is able to attach to the chrome page and its sources"
@@ -78,8 +78,7 @@ async function testChromeTab() {
 // Test that Main process Target can debug chrome scripts
 async function testMainProcess() {
   const { DevToolsLoader } = ChromeUtils.import(
-    "resource://devtools/shared/Loader.jsm",
-    {}
+    "resource://devtools/shared/Loader.jsm"
   );
   const customLoader = new DevToolsLoader();
   customLoader.invisibleToDebugger = true;
@@ -107,9 +106,9 @@ async function testMainProcess() {
   const target = await client.mainRoot.getMainProcess();
   await target.attach();
 
-  const [, threadClient] = await target.attachThread();
-  await threadClient.resume();
-  const { sources } = await threadClient.getSources();
+  const [, threadFront] = await target.attachThread();
+  await threadFront.resume();
+  const { sources } = await threadFront.getSources();
   ok(
     sources.find(
       s => s.url == "resource://devtools/client/framework/devtools.js"

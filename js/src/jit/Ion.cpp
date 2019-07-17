@@ -1035,7 +1035,8 @@ void IonScript::Trace(JSTracer* trc, IonScript* script) {
 }
 
 void IonScript::Destroy(FreeOp* fop, IonScript* script) {
-  fop->delete_(script);
+  // This allocation is tracked by JSScript::setIonScript / clearIonScript.
+  fop->deleteUntracked(script);
 }
 
 void JS::DeletePolicy<js::jit::IonScript>::operator()(
@@ -2107,8 +2108,8 @@ static OptimizationLevel GetOptimizationLevel(HandleScript script,
 static MethodStatus Compile(JSContext* cx, HandleScript script,
                             BaselineFrame* osrFrame, jsbytecode* osrPc,
                             bool forceRecompile = false) {
-  MOZ_ASSERT(jit::IsIonEnabled(cx));
-  MOZ_ASSERT(jit::IsBaselineEnabled(cx));
+  MOZ_ASSERT(jit::IsIonEnabled());
+  MOZ_ASSERT(jit::IsBaselineJitEnabled());
   MOZ_ASSERT_IF(osrPc != nullptr, LoopEntryCanIonOsr(osrPc));
   AutoGeckoProfilerEntry pseudoFrame(
       cx, "Ion script compilation",
@@ -2207,7 +2208,7 @@ bool jit::OffThreadCompilationAvailable(JSContext* cx) {
 }
 
 MethodStatus jit::CanEnterIon(JSContext* cx, RunState& state) {
-  MOZ_ASSERT(jit::IsIonEnabled(cx));
+  MOZ_ASSERT(jit::IsIonEnabled());
 
   HandleScript script = state.script();
 
@@ -2280,7 +2281,7 @@ MethodStatus jit::CanEnterIon(JSContext* cx, RunState& state) {
 
 static MethodStatus BaselineCanEnterAtEntry(JSContext* cx, HandleScript script,
                                             BaselineFrame* frame) {
-  MOZ_ASSERT(jit::IsIonEnabled(cx));
+  MOZ_ASSERT(jit::IsIonEnabled());
   MOZ_ASSERT(frame->callee()->nonLazyScript()->canIonCompile());
   MOZ_ASSERT(!frame->callee()->nonLazyScript()->isIonCompilingOffThread());
   MOZ_ASSERT(!frame->callee()->nonLazyScript()->hasIonScript());
@@ -2309,7 +2310,7 @@ static MethodStatus BaselineCanEnterAtEntry(JSContext* cx, HandleScript script,
 static MethodStatus BaselineCanEnterAtBranch(JSContext* cx, HandleScript script,
                                              BaselineFrame* osrFrame,
                                              jsbytecode* pc) {
-  MOZ_ASSERT(jit::IsIonEnabled(cx));
+  MOZ_ASSERT(jit::IsIonEnabled());
   MOZ_ASSERT((JSOp)*pc == JSOP_LOOPENTRY);
   MOZ_ASSERT(LoopEntryCanIonOsr(pc));
 
@@ -2384,7 +2385,7 @@ static MethodStatus BaselineCanEnterAtBranch(JSContext* cx, HandleScript script,
 bool jit::IonCompileScriptForBaseline(JSContext* cx, BaselineFrame* frame,
                                       jsbytecode* pc) {
   // A TI OOM will disable TI and Ion.
-  if (!jit::IsIonEnabled(cx)) {
+  if (!jit::IsIonEnabled()) {
     return true;
   }
 

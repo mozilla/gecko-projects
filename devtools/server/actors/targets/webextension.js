@@ -25,6 +25,7 @@ const { ActorClassWithSpec } = require("devtools/shared/protocol");
 const {
   webExtensionTargetSpec,
 } = require("devtools/shared/specs/targets/webextension");
+const DevToolsUtils = require("devtools/shared/DevToolsUtils");
 
 loader.lazyRequireGetter(
   this,
@@ -32,8 +33,8 @@ loader.lazyRequireGetter(
   "devtools/server/actors/thread",
   true
 );
-const FALLBACK_DOC_MESSAGE =
-  "Your addon does not have any document opened yet.";
+const FALLBACK_DOC_URL =
+  "chrome://devtools/content/shared/webextension-fallback.html";
 
 /**
  * Protocol.js expects only the prototype object, and does not maintain the prototype
@@ -176,12 +177,12 @@ webExtensionTargetPrototype._searchFallbackWindow = function() {
     return this.fallbackWindow;
   }
 
-  // Set and initialized the fallbackWindow (which initially is a empty
+  // Set and initialize the fallbackWindow (which initially is a empty
   // about:blank browser), this window is related to a XUL browser element
   // specifically created for the devtools server and it is never used
   // or navigated anywhere else.
   this.fallbackWindow = this.chromeGlobal.content;
-  this.fallbackWindow.location = "data:text/html,<h1>" + FALLBACK_DOC_MESSAGE;
+  this.fallbackWindow.document.location.href = FALLBACK_DOC_URL;
 
   return this.fallbackWindow;
 };
@@ -318,11 +319,17 @@ webExtensionTargetPrototype.isExtensionWindowDescendent = function(window) {
 webExtensionTargetPrototype._allowSource = function(source) {
   // Use the source.element to detect the allowed source, if any.
   if (source.element) {
-    const domEl = unwrapDebuggerObjectGlobal(source.element);
-    return (
-      this.isExtensionWindow(domEl.ownerGlobal) ||
-      this.isExtensionWindowDescendent(domEl.ownerGlobal)
-    );
+    try {
+      const domEl = unwrapDebuggerObjectGlobal(source.element);
+      return (
+        this.isExtensionWindow(domEl.ownerGlobal) ||
+        this.isExtensionWindowDescendent(domEl.ownerGlobal)
+      );
+    } catch (e) {
+      // If the source's window is dead then the above will throw.
+      DevToolsUtils.reportException("WebExtensionTarget.allowSource", e);
+      return false;
+    }
   }
 
   // Fallback to check the uri if there is no source.element associated to the source.

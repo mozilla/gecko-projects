@@ -60,8 +60,7 @@ BaselineCompilerHandler::BaselineCompilerHandler(JSContext* cx,
       pc_(script->code()),
       icEntryIndex_(0),
       compileDebugInstrumentation_(script->isDebuggee()),
-      ionCompileable_(jit::IsIonEnabled(cx) &&
-                      CanIonCompileScript(cx, script)) {}
+      ionCompileable_(jit::IsIonEnabled() && CanIonCompileScript(cx, script)) {}
 
 BaselineInterpreterHandler::BaselineInterpreterHandler(JSContext* cx,
                                                        MacroAssembler& masm)
@@ -268,8 +267,6 @@ MethodStatus BaselineCompiler::compile() {
     return Method_Error;
   }
 
-  size_t resumeEntries =
-      script->hasResumeOffsets() ? script->resumeOffsets().size() : 0;
   UniquePtr<BaselineScript> baselineScript(
       BaselineScript::New(script, bailoutPrologueOffset_.offset(),
                           warmUpCheckPrologueOffset_.offset(),
@@ -279,7 +276,8 @@ MethodStatus BaselineCompiler::compile() {
                           profilerExitFrameToggleOffset_.offset(),
                           handler.retAddrEntries().length(),
                           pcMappingIndexEntries.length(), pcEntries.length(),
-                          resumeEntries, traceLoggerToggleOffsets_.length()),
+                          script->resumeOffsets().size(),
+                          traceLoggerToggleOffsets_.length()),
       JS::DeletePolicy<BaselineScript>(cx->runtime()));
   if (!baselineScript) {
     ReportOutOfMemory(cx);
@@ -530,8 +528,8 @@ void BaselineInterpreterCodeGen::emitInitializeLocals() {
   Register scratch = R0.scratchReg();
   loadScript(scratch);
   masm.loadPtr(Address(scratch, JSScript::offsetOfScriptData()), scratch);
-  masm.loadPtr(Address(scratch, RuntimeScriptData::offsetOfSSD()), scratch);
-  masm.load32(Address(scratch, SharedScriptData::offsetOfNfixed()), scratch);
+  masm.loadPtr(Address(scratch, RuntimeScriptData::offsetOfISD()), scratch);
+  masm.load32(Address(scratch, ImmutableScriptData::offsetOfNfixed()), scratch);
 
   Label top, done;
   masm.bind(&top);
@@ -714,30 +712,16 @@ bool BaselineCodeGen<Handler>::callVMInternal(VMFunctionId id,
                            BaselineFrame::reverseOffsetOfFrameSize());
   uint32_t frameBaseSize =
       BaselineFrame::FramePointerOffset + BaselineFrame::Size();
-  if (phase == POST_INITIALIZE) {
+  if (phase == CallVMPhase::AfterPushingLocals) {
     storeFrameSizeAndPushDescriptor(frameBaseSize, argSize, frameSizeAddress,
                                     R0.scratchReg(), R1.scratchReg());
   } else {
-    MOZ_ASSERT(phase == CHECK_OVER_RECURSED);
-    Label done, pushedFrameLocals;
-
-    // If OVER_RECURSED is set, then frame locals haven't been pushed yet.
-    masm.branchTest32(Assembler::Zero, frame.addressOfFlags(),
-                      Imm32(BaselineFrame::OVER_RECURSED), &pushedFrameLocals);
-    {
-      masm.store32(Imm32(frameBaseSize), frameSizeAddress);
-      uint32_t descriptor =
-          MakeFrameDescriptor(frameBaseSize + argSize, FrameType::BaselineJS,
-                              ExitFrameLayout::Size());
-      masm.push(Imm32(descriptor));
-      masm.jump(&done);
-    }
-    masm.bind(&pushedFrameLocals);
-    {
-      storeFrameSizeAndPushDescriptor(frameBaseSize, argSize, frameSizeAddress,
-                                      R0.scratchReg(), R1.scratchReg());
-    }
-    masm.bind(&done);
+    MOZ_ASSERT(phase == CallVMPhase::BeforePushingLocals);
+    masm.store32(Imm32(frameBaseSize), frameSizeAddress);
+    uint32_t descriptor =
+        MakeFrameDescriptor(frameBaseSize + argSize, FrameType::BaselineJS,
+                            ExitFrameLayout::Size());
+    masm.push(Imm32(descriptor));
   }
   MOZ_ASSERT(fun.expectTailCall == NonTailCall);
   // Perform the call.
@@ -774,36 +758,26 @@ bool BaselineCodeGen<Handler>::callVM(CallVMPhase phase) {
 
 template <typename Handler>
 bool BaselineCodeGen<Handler>::emitStackCheck() {
-  // If this is the late stack check for a frame which contains an early stack
-  // check, then the early stack check might have failed and skipped past the
-  // pushing of locals on the stack.
-  //
-  // If this is a possibility, then the OVER_RECURSED flag should be checked,
-  // and the VMCall to CheckOverRecursedBaseline done unconditionally if it's
-  // set.
-  Label forceCall;
-  if (handler.needsEarlyStackCheck()) {
-    masm.branchTest32(Assembler::NonZero, frame.addressOfFlags(),
-                      Imm32(BaselineFrame::OVER_RECURSED), &forceCall);
-  }
-
   Label skipCall;
-  masm.branchStackPtrRhs(Assembler::BelowOrEqual,
-                         AbsoluteAddress(cx->addressOfJitStackLimit()),
-                         &skipCall);
-
-  if (handler.needsEarlyStackCheck()) {
-    masm.bind(&forceCall);
+  if (handler.mustIncludeSlotsInStackCheck()) {
+    // Subtract the size of script->nslots() first.
+    Register scratch = R1.scratchReg();
+    masm.moveStackPtrTo(scratch);
+    subtractScriptSlotsSize(scratch, R2.scratchReg());
+    masm.branchPtr(Assembler::BelowOrEqual,
+                   AbsoluteAddress(cx->addressOfJitStackLimit()), scratch,
+                   &skipCall);
+  } else {
+    masm.branchStackPtrRhs(Assembler::BelowOrEqual,
+                           AbsoluteAddress(cx->addressOfJitStackLimit()),
+                           &skipCall);
   }
 
   prepareVMCall();
   masm.loadBaselineFramePtr(BaselineFrameReg, R1.scratchReg());
   pushArg(R1.scratchReg());
 
-  CallVMPhase phase = POST_INITIALIZE;
-  if (handler.needsEarlyStackCheck()) {
-    phase = CHECK_OVER_RECURSED;
-  }
+  const CallVMPhase phase = CallVMPhase::BeforePushingLocals;
 
   using Fn = bool (*)(JSContext*, BaselineFrame*);
   if (!callVMNonOp<Fn, CheckOverRecursedBaseline>(phase)) {
@@ -898,8 +872,8 @@ void BaselineInterpreterCodeGen::subtractScriptSlotsSize(Register reg,
   MOZ_ASSERT(reg != scratch);
   loadScript(scratch);
   masm.loadPtr(Address(scratch, JSScript::offsetOfScriptData()), scratch);
-  masm.loadPtr(Address(scratch, RuntimeScriptData::offsetOfSSD()), scratch);
-  masm.load32(Address(scratch, SharedScriptData::offsetOfNslots()), scratch);
+  masm.loadPtr(Address(scratch, RuntimeScriptData::offsetOfISD()), scratch);
+  masm.load32(Address(scratch, ImmutableScriptData::offsetOfNslots()), scratch);
   static_assert(sizeof(Value) == 8,
                 "shift by 3 below assumes Value is 8 bytes");
   masm.lshiftPtr(Imm32(3), scratch);
@@ -1222,8 +1196,8 @@ void BaselineInterpreterCodeGen::emitInitFrameFields(Register nonFunctionEnv) {
 
   // Initialize interpreter pc.
   masm.loadPtr(Address(scratch1, JSScript::offsetOfScriptData()), scratch1);
-  masm.loadPtr(Address(scratch1, RuntimeScriptData::offsetOfSSD()), scratch1);
-  masm.addPtr(Imm32(SharedScriptData::offsetOfCode()), scratch1);
+  masm.loadPtr(Address(scratch1, RuntimeScriptData::offsetOfISD()), scratch1);
+  masm.addPtr(Imm32(ImmutableScriptData::offsetOfCode()), scratch1);
 
   if (HasInterpreterPCReg()) {
     MOZ_ASSERT(scratch1 == InterpreterPCReg,
@@ -1288,18 +1262,15 @@ bool BaselineInterpreterCodeGen::initEnvironmentChainHelper(
 
 template <typename Handler>
 bool BaselineCodeGen<Handler>::initEnvironmentChain() {
-  CallVMPhase phase = POST_INITIALIZE;
-  if (handler.needsEarlyStackCheck()) {
-    phase = CHECK_OVER_RECURSED;
-  }
-
-  auto initFunctionEnv = [this, phase]() {
-    auto initEnv = [this, phase]() {
+  auto initFunctionEnv = [this]() {
+    auto initEnv = [this]() {
       // Call into the VM to create the proper environment objects.
       prepareVMCall();
 
       masm.loadBaselineFramePtr(BaselineFrameReg, R0.scratchReg());
       pushArg(R0.scratchReg());
+
+      const CallVMPhase phase = CallVMPhase::BeforePushingLocals;
 
       using Fn = bool (*)(JSContext*, BaselineFrame*);
       return callVMNonOp<Fn, jit::InitFunctionEnvironmentObjects>(phase);
@@ -1309,7 +1280,7 @@ bool BaselineCodeGen<Handler>::initEnvironmentChain() {
         initEnv, R2.scratchReg());
   };
 
-  auto initGlobalOrEvalEnv = [this, phase]() {
+  auto initGlobalOrEvalEnv = [this]() {
     // EnvironmentChain pointer in BaselineFrame has already been initialized
     // in prologue, but we need to check for redeclaration errors in global and
     // eval scripts.
@@ -1319,6 +1290,8 @@ bool BaselineCodeGen<Handler>::initEnvironmentChain() {
     pushScriptArg();
     masm.loadPtr(frame.addressOfEnvironmentChain(), R0.scratchReg());
     pushArg(R0.scratchReg());
+
+    const CallVMPhase phase = CallVMPhase::BeforePushingLocals;
 
     using Fn = bool (*)(JSContext*, HandleObject, HandleScript);
     return callVMNonOp<Fn, js::CheckGlobalOrEvalDeclarationConflicts>(phase);
@@ -4861,20 +4834,21 @@ template <typename Handler>
 void BaselineCodeGen<Handler>::emitInterpJumpToResumeEntry(Register script,
                                                            Register resumeIndex,
                                                            Register scratch) {
-  // Load JSScript::sharedScriptData() into |script|.
+  // Load JSScript::immutableScriptData() into |script|.
   masm.loadPtr(Address(script, JSScript::offsetOfScriptData()), script);
-  masm.loadPtr(Address(script, RuntimeScriptData::offsetOfSSD()), script);
+  masm.loadPtr(Address(script, RuntimeScriptData::offsetOfISD()), script);
 
   // Load the resume pcOffset in |resumeIndex|.
-  masm.load32(Address(script, SharedScriptData::offsetOfResumeOffsetsOffset()),
-              scratch);
+  masm.load32(
+      Address(script, ImmutableScriptData::offsetOfResumeOffsetsOffset()),
+      scratch);
   masm.computeEffectiveAddress(BaseIndex(scratch, resumeIndex, TimesFour),
                                scratch);
   masm.load32(BaseIndex(script, scratch, TimesOne), resumeIndex);
 
   // Add resume offset to PC, jump to it.
   masm.computeEffectiveAddress(BaseIndex(script, resumeIndex, TimesOne,
-                                         SharedScriptData::offsetOfCode()),
+                                         ImmutableScriptData::offsetOfCode()),
                                script);
   Address pcAddr(BaselineFrameReg,
                  BaselineFrame::reverseOffsetOfInterpreterPC());
@@ -6720,46 +6694,24 @@ bool BaselineCodeGen<Handler>::emitPrologue() {
     return false;
   }
 
-  // Functions with a large number of locals require two stack checks.
-  // The VMCall for a fallible stack check can only occur after the
-  // env chain has been initialized, as that is required for proper
-  // exception handling if the VMCall returns false.  The env chain
-  // initialization can only happen after the UndefinedValues for the
-  // local slots have been pushed. However by that time, the stack might
-  // have grown too much.
-  //
-  // In these cases, we emit an extra, early, infallible check before pushing
-  // the locals. The early check just sets a flag on the frame if the stack
-  // check fails. If the flag is set, then the jitcode skips past the pushing
-  // of the locals, and directly to env chain initialization followed by the
-  // actual stack check, which will throw the correct exception.
-  Label earlyStackCheckFailed;
-  if (handler.needsEarlyStackCheck()) {
-    // Subtract the size of script->nslots() from the stack pointer.
-    Register scratch = R1.scratchReg();
-    masm.moveStackPtrTo(scratch);
-    subtractScriptSlotsSize(scratch, R2.scratchReg());
+  // When compiling with Debugger instrumentation, set the debuggeeness of
+  // the frame before any operation that can call into the VM.
+  if (!emitIsDebuggeeCheck()) {
+    return false;
+  }
 
-    // Set the OVER_RECURSED flag on the frame if the computed stack pointer
-    // overflows the stack limit. We have to use the actual (*NoInterrupt)
-    // stack limit here because we don't want to set the flag and throw an
-    // overrecursion exception later in the interrupt case.
-    Label stackCheckOk;
-    masm.branchPtr(Assembler::BelowOrEqual,
-                   AbsoluteAddress(cx->addressOfJitStackLimitNoInterrupt()),
-                   scratch, &stackCheckOk);
-    {
-      masm.or32(Imm32(BaselineFrame::OVER_RECURSED), frame.addressOfFlags());
-      masm.jump(&earlyStackCheckFailed);
-    }
-    masm.bind(&stackCheckOk);
+  // Initialize the env chain before any operation that may call into the VM and
+  // trigger a GC.
+  if (!initEnvironmentChain()) {
+    return false;
+  }
+
+  // Check for overrecursion before initializing locals.
+  if (!emitStackCheck()) {
+    return false;
   }
 
   emitInitializeLocals();
-
-  if (handler.needsEarlyStackCheck()) {
-    masm.bind(&earlyStackCheckFailed);
-  }
 
 #ifdef JS_TRACE_LOGGING
   if (JS::TraceLoggerSupported() && !emitTraceLoggerEnter()) {
@@ -6767,30 +6719,13 @@ bool BaselineCodeGen<Handler>::emitPrologue() {
   }
 #endif
 
-  // Record the offset of the prologue, because Ion can bailout before
-  // the env chain is initialized.
+  // Record prologue offset for Ion bailouts.
   bailoutPrologueOffset_ = CodeOffset(masm.currentOffset());
-
-  // When compiling with Debugger instrumentation, set the debuggeeness of
-  // the frame before any operation that can call into the VM.
-  if (!emitIsDebuggeeCheck()) {
-    return false;
-  }
-
-  // Initialize the env chain before any operation that may
-  // call into the VM and trigger a GC.
-  if (!initEnvironmentChain()) {
-    return false;
-  }
 
   frame.assertSyncedStack();
 
   if (JSScript* script = handler.maybeScript()) {
     masm.debugAssertContextRealm(script->realm(), R1.scratchReg());
-  }
-
-  if (!emitStackCheck()) {
-    return false;
   }
 
   if (!emitDebugPrologue()) {

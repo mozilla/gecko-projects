@@ -988,6 +988,7 @@ pref("security.certerrors.permanentOverride", true);
 pref("security.certerrors.mitm.priming.enabled", true);
 pref("security.certerrors.mitm.priming.endpoint", "https://mitmdetection.services.mozilla.com/");
 pref("security.certerrors.mitm.auto_enable_enterprise_roots", true);
+pref("security.aboutcertificate.enabled", false);
 
 // Whether to start the private browsing mode at application startup
 pref("browser.privatebrowsing.autostart", false);
@@ -1041,7 +1042,7 @@ pref("dom.ipc.plugins.sandbox-level.flash", 0);
 // On windows these levels are:
 // See - security/sandbox/win/src/sandboxbroker/sandboxBroker.cpp
 // SetSecurityLevelForContentProcess() for what the different settings mean.
-pref("security.sandbox.content.level", 5);
+pref("security.sandbox.content.level", 6);
 
 // This controls the depth of stack trace that is logged when Windows sandbox
 // logging is turned on.  This is only currently available for the content
@@ -1186,7 +1187,6 @@ pref("services.sync.prefs.sync.app.shield.optoutstudies.enabled", true);
 // uncompromised Sync-connected devices.
 pref("services.sync.prefs.sync.browser.contentblocking.category", true);
 pref("services.sync.prefs.sync.browser.contentblocking.features.strict", true);
-pref("services.sync.prefs.sync.browser.contentblocking.introCount", true);
 pref("services.sync.prefs.sync.browser.crashReports.unsubmittedCheck.autoSubmit2", true);
 pref("services.sync.prefs.sync.browser.ctrlTab.recentlyUsedOrder", true);
 pref("services.sync.prefs.sync.browser.discovery.enabled", true);
@@ -1378,9 +1378,6 @@ pref("security.insecure_connection_text.pbmode.enabled", false);
 // 1 = allow MITM for certificate pinning checks.
 pref("security.cert_pinning.enforcement_level", 1);
 
-
-// Override the Gecko-default value of false for Firefox.
-pref("plain_text.wrap_long_lines", true);
 
 // If this turns true, Moz*Gesture events are not called stopPropagation()
 // before content.
@@ -1617,18 +1614,13 @@ pref("browser.contentblocking.rejecttrackers.reportBreakage.enabled", true);
 
 pref("browser.contentblocking.reportBreakage.url", "https://tracking-protection-issues.herokuapp.com/new");
 
-pref("browser.contentblocking.introCount", 0);
-
-pref("browser.contentblocking.maxIntroCount", 5);
-// 1800 = 30 min in seconds
-pref("browser.contentblocking.introDelaySeconds", 1800);
+// Enable Protections report's Lockwise card by default.
+pref("browser.contentblocking.report.lockwise.enabled", true);
 
 // Enables the new Protections Panel.
 #ifdef NIGHTLY_BUILD
 pref("browser.protections_panel.enabled", true);
 #endif
-
-pref("privacy.trackingprotection.introURL", "https://www.mozilla.org/%LOCALE%/firefox/%VERSION%/content-blocking/start/");
 
 // Always enable newtab segregation using containers
 pref("privacy.usercontext.about_newtab_segregation.enabled", true);
@@ -1651,6 +1643,23 @@ pref("privacy.userContext.extension", "");
 // Start the browser in e10s mode
 pref("browser.tabs.remote.autostart", true);
 pref("browser.tabs.remote.desktopbehavior", true);
+
+// Run media transport in a separate process?
+#ifdef NIGHTLY_BUILD
+pref("media.peerconnection.mtransport_process", true);
+#else
+pref("media.peerconnection.mtransport_process", false);
+#endif
+
+// Start a separate socket process. Performing networking on the socket process
+// is control by a sepparate pref
+// ("network.http.network_access_on_socket_process.enabled").
+// Changing these prefs requires a restart.
+#ifdef NIGHTLY_BUILD
+pref("network.process.enabled", true);
+#else
+pref("network.process.enabled", false);
+#endif
 
 // For speculatively warming up tabs to improve perceived
 // performance while using the async tab switcher.
@@ -1737,6 +1746,8 @@ pref("extensions.pocket.enabled", true);
 pref("extensions.pocket.oAuthConsumerKey", "40249-e88c401e1b1f2242d9e441c4");
 pref("extensions.pocket.site", "getpocket.com");
 
+pref("signon.generation.available", true);
+pref("signon.generation.enabled", true);
 pref("signon.schemeUpgrades", true);
 pref("signon.privateBrowsingCapture.enabled", true);
 pref("signon.showAutoCompleteFooter", true);

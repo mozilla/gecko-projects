@@ -63,6 +63,10 @@ class WindowGlobalChild final : public WindowGlobalActor,
 
   uint64_t ContentParentId();
 
+  int64_t BeforeUnloadListeners() { return mBeforeUnloadListeners; }
+  void BeforeUnloadAdded();
+  void BeforeUnloadRemoved();
+
   bool IsCurrentGlobal();
 
   bool IsProcessRoot();
@@ -103,6 +107,11 @@ class WindowGlobalChild final : public WindowGlobalActor,
       dom::BrowsingContext* aBc, const nsString& aRemoteType,
       uint64_t aPendingSwitchId, ChangeFrameRemotenessResolver&& aResolver);
 
+  mozilla::ipc::IPCResult RecvDrawSnapshot(const Maybe<IntRect>& aRect,
+                                           const float& aScale,
+                                           const nscolor& aBackgroundColor,
+                                           DrawSnapshotResolver&& aResolve);
+
   mozilla::ipc::IPCResult RecvGetSecurityInfo(
       GetSecurityInfoResolver&& aResolve);
 
@@ -117,6 +126,7 @@ class WindowGlobalChild final : public WindowGlobalActor,
   nsRefPtrHashtable<nsStringHashKey, JSWindowActorChild> mWindowActors;
   uint64_t mInnerWindowId;
   uint64_t mOuterWindowId;
+  int64_t mBeforeUnloadListeners;
   bool mIPCClosed;
 };
 

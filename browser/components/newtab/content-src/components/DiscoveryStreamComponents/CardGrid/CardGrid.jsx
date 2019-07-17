@@ -1,3 +1,7 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this file,
+ * You can obtain one at http://mozilla.org/MPL/2.0/. */
+
 import { DSCard, PlaceholderDSCard } from "../DSCard/DSCard.jsx";
 import { DSEmptyState } from "../DSEmptyState/DSEmptyState.jsx";
 import React from "react";
@@ -14,7 +18,7 @@ export class CardGrid extends React.PureComponent {
           <PlaceholderDSCard key={`dscard-${index}`} />
         ) : (
           <DSCard
-            key={`dscard-${index}`}
+            key={`dscard-${rec.id}`}
             pos={rec.pos}
             campaignId={rec.campaign_id}
             image_src={rec.image_src}

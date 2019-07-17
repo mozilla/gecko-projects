@@ -1073,8 +1073,8 @@ pub unsafe extern "C" fn wr_program_cache_delete(program_cache: *mut WrProgramCa
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn wr_try_load_shader_from_disk(program_cache: *mut WrProgramCache) {
-    (*program_cache).try_load_from_disk();
+pub unsafe extern "C" fn wr_try_load_startup_shaders_from_disk(program_cache: *mut WrProgramCache) {
+    (*program_cache).try_load_startup_shaders_from_disk();
 }
 
 #[no_mangle]
@@ -1320,7 +1320,7 @@ pub unsafe extern "C" fn wr_api_delete(dh: *mut DocumentHandle) {
 
 #[no_mangle]
 pub unsafe extern "C" fn wr_api_shut_down(dh: &mut DocumentHandle) {
-    dh.api.shut_down();
+    dh.api.shut_down(true);
 }
 
 #[no_mangle]
@@ -1602,11 +1602,13 @@ pub extern "C" fn wr_resource_updates_add_blob_image(
     image_key: BlobImageKey,
     descriptor: &WrImageDescriptor,
     bytes: &mut WrVecU8,
+    visible_rect: DeviceIntRect,
 ) {
     txn.add_blob_image(
         image_key,
         descriptor.into(),
         Arc::new(bytes.flush_into_vec()),
+        visible_rect,
         if descriptor.format == ImageFormat::BGRA8 { Some(256) } else { None }
     );
 }
@@ -1711,12 +1713,14 @@ pub extern "C" fn wr_resource_updates_update_blob_image(
     image_key: BlobImageKey,
     descriptor: &WrImageDescriptor,
     bytes: &mut WrVecU8,
+    visible_rect: DeviceIntRect,
     dirty_rect: LayoutIntRect,
 ) {
     txn.update_blob_image(
         image_key,
         descriptor.into(),
         Arc::new(bytes.flush_into_vec()),
+        visible_rect,
         &DirtyRect::Partial(dirty_rect)
     );
 }
@@ -2189,6 +2193,7 @@ pub extern "C" fn wr_dp_push_stacking_context(
                                 params.mix_blend_mode,
                                 &filters,
                                 &r_filter_datas,
+                                &[],
                                 glyph_raster_space,
                                 params.cache_tiles);
 
@@ -3159,6 +3164,7 @@ extern "C" {
                                width: i32,
                                height: i32,
                                format: ImageFormat,
+                               visible_rect: &DeviceIntRect,
                                tile_size: Option<&u16>,
                                tile_offset: Option<&TileOffset>,
                                dirty_rect: Option<&LayoutIntRect>,

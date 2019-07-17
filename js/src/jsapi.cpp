@@ -1148,7 +1148,7 @@ JS_PUBLIC_API void* JS_string_realloc(JSContext* cx, void* p, size_t oldBytes,
 JS_PUBLIC_API void JS_string_free(JSContext* cx, void* p) { return js_free(p); }
 
 JS_PUBLIC_API void JS_freeop(JSFreeOp* fop, void* p) {
-  return FreeOp::get(fop)->free_(p);
+  return FreeOp::get(fop)->freeUntracked(p);
 }
 
 JS_PUBLIC_API void JS::AddAssociatedMemory(JSObject* obj, size_t nbytes,
@@ -3626,19 +3626,6 @@ JSScript* JS::DecodeBinAST(JSContext* cx, const ReadOnlyCompileOptions& options,
   return DecodeBinAST(cx, options, fileContents.begin(), fileContents.length());
 }
 
-JS_PUBLIC_API bool JS::DecodeBinASTOffThread(
-    JSContext* cx, const ReadOnlyCompileOptions& options, const uint8_t* buf,
-    size_t length, OffThreadCompileCallback callback, void* callbackData) {
-  return StartOffThreadDecodeBinAST(cx, options, buf, length, callback,
-                                    callbackData);
-}
-
-JS_PUBLIC_API JSScript* JS::FinishOffThreadBinASTDecode(
-    JSContext* cx, JS::OffThreadToken* token) {
-  MOZ_ASSERT(cx);
-  MOZ_ASSERT(CurrentThreadCanAccessRuntime(cx->runtime()));
-  return HelperThreadState().finishBinASTDecodeTask(cx, token);
-}
 #endif
 
 JS_PUBLIC_API JSObject* JS_GetGlobalFromScript(JSScript* script) {
@@ -5304,10 +5291,10 @@ JS_PUBLIC_API void JS_SetGlobalJitCompilerOption(JSContext* cx,
       break;
     case JSJITCOMPILER_ION_ENABLE:
       if (value == 1) {
-        JS::ContextOptionsRef(cx).setIon(true);
+        jit::JitOptions.ion = true;
         JitSpew(js::jit::JitSpew_IonScripts, "Enable ion");
       } else if (value == 0) {
-        JS::ContextOptionsRef(cx).setIon(false);
+        jit::JitOptions.ion = false;
         JitSpew(js::jit::JitSpew_IonScripts, "Disable ion");
       }
       break;
@@ -5328,14 +5315,17 @@ JS_PUBLIC_API void JS_SetGlobalJitCompilerOption(JSContext* cx,
       break;
     case JSJITCOMPILER_BASELINE_ENABLE:
       if (value == 1) {
-        JS::ContextOptionsRef(cx).setBaseline(true);
+        jit::JitOptions.baselineJit = true;
         ReleaseAllJITCode(rt->defaultFreeOp());
         JitSpew(js::jit::JitSpew_BaselineScripts, "Enable baseline");
       } else if (value == 0) {
-        JS::ContextOptionsRef(cx).setBaseline(false);
+        jit::JitOptions.baselineJit = false;
         ReleaseAllJITCode(rt->defaultFreeOp());
         JitSpew(js::jit::JitSpew_BaselineScripts, "Disable baseline");
       }
+      break;
+    case JSJITCOMPILER_NATIVE_REGEXP_ENABLE:
+      jit::JitOptions.nativeRegExp = !!value;
       break;
     case JSJITCOMPILER_OFFTHREAD_COMPILATION_ENABLE:
       if (value == 1) {
@@ -5416,7 +5406,7 @@ JS_PUBLIC_API bool JS_GetGlobalJitCompilerOption(JSContext* cx,
       *valueOut = jit::JitOptions.checkRangeAnalysis;
       break;
     case JSJITCOMPILER_ION_ENABLE:
-      *valueOut = JS::ContextOptionsRef(cx).ion();
+      *valueOut = jit::JitOptions.ion;
       break;
     case JSJITCOMPILER_ION_FREQUENT_BAILOUT_THRESHOLD:
       *valueOut = jit::JitOptions.frequentBailoutThreshold;
@@ -5425,7 +5415,10 @@ JS_PUBLIC_API bool JS_GetGlobalJitCompilerOption(JSContext* cx,
       *valueOut = jit::JitOptions.baselineInterpreter;
       break;
     case JSJITCOMPILER_BASELINE_ENABLE:
-      *valueOut = JS::ContextOptionsRef(cx).baseline();
+      *valueOut = jit::JitOptions.baselineJit;
+      break;
+    case JSJITCOMPILER_NATIVE_REGEXP_ENABLE:
+      *valueOut = jit::JitOptions.nativeRegExp;
       break;
     case JSJITCOMPILER_OFFTHREAD_COMPILATION_ENABLE:
       *valueOut = rt->canUseOffthreadIonCompilation();

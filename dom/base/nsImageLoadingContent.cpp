@@ -1353,14 +1353,13 @@ nsresult nsImageLoadingContent::StringToURI(const nsAString& aSpec,
 
   // (1) Get the base URI
   nsIContent* thisContent = AsContent();
-  nsCOMPtr<nsIURI> baseURL = thisContent->GetBaseURI();
+  nsIURI* baseURL = thisContent->GetBaseURI();
 
   // (2) Get the charset
   auto encoding = aDocument->GetDocumentCharacterSet();
 
   // (3) Construct the silly thing
-  return NS_NewURI(aURI, aSpec, encoding, baseURL,
-                   nsContentUtils::GetIOService());
+  return NS_NewURI(aURI, aSpec, encoding, baseURL);
 }
 
 nsresult nsImageLoadingContent::FireEvent(const nsAString& aEventType,

@@ -596,6 +596,7 @@ impl ResourceCache {
                             &img.dirty_rect
                         ),
                     );
+                    self.discard_tiles_outside_visible_area(img.key, &img.visible_rect);
                 }
                 ResourceUpdate::DeleteImage(img) => {
                     self.delete_image_template(img);
@@ -630,6 +631,7 @@ impl ResourceCache {
                         &img.descriptor,
                         img.tiling,
                         Arc::clone(&img.data),
+                        &img.visible_rect,
                     );
                 }
                 ResourceUpdate::UpdateBlobImage(ref img) => {
@@ -638,6 +640,7 @@ impl ResourceCache {
                         &img.descriptor,
                         &img.dirty_rect,
                         Arc::clone(&img.data),
+                        &img.visible_rect,
                     );
                 }
                 ResourceUpdate::SetBlobImageVisibleArea(ref key, ref area) => {
@@ -894,7 +897,13 @@ impl ResourceCache {
                                 ) * tile_size as i32;
                                 rect.origin -= tile_offset.to_vector();
 
-                                rect
+                                let tile_rect = compute_tile_size(
+                                    &descriptor.size.into(),
+                                    tile_size,
+                                    tile,
+                                ).into();
+
+                                rect.intersection(&tile_rect).unwrap_or(DeviceIntRect::zero())
                             })
                         }
                         (None, Some(..)) => DirtyRect::All,
@@ -920,11 +929,14 @@ impl ResourceCache {
         descriptor: &ImageDescriptor,
         mut tiling: Option<TileSize>,
         data: Arc<BlobImageData>,
+        visible_rect: &DeviceIntRect,
     ) {
         let max_texture_size = self.max_texture_size();
         tiling = get_blob_tiling(tiling, descriptor, max_texture_size);
 
-        self.blob_image_handler.as_mut().unwrap().add(key, data, tiling);
+        let viewport_tiles = tiling.map(|tile_size| compute_tile_range(&visible_rect, tile_size));
+
+        self.blob_image_handler.as_mut().unwrap().add(key, data, visible_rect, tiling);
 
         self.blob_image_templates.insert(
             key,
@@ -932,7 +944,7 @@ impl ResourceCache {
                 descriptor: *descriptor,
                 tiling,
                 dirty_rect: DirtyRect::All,
-                viewport_tiles: None,
+                viewport_tiles,
             },
         );
     }
@@ -944,8 +956,9 @@ impl ResourceCache {
         descriptor: &ImageDescriptor,
         dirty_rect: &BlobDirtyRect,
         data: Arc<BlobImageData>,
+        visible_rect: &DeviceIntRect,
     ) {
-        self.blob_image_handler.as_mut().unwrap().update(key, data, dirty_rect);
+        self.blob_image_handler.as_mut().unwrap().update(key, data, visible_rect, dirty_rect);
 
         let max_texture_size = self.max_texture_size();
 
@@ -955,11 +968,13 @@ impl ResourceCache {
 
         let tiling = get_blob_tiling(image.tiling, descriptor, max_texture_size);
 
+        let viewport_tiles = image.tiling.map(|tile_size| compute_tile_range(&visible_rect, tile_size));
+
         *image = BlobImageTemplate {
             descriptor: *descriptor,
             tiling,
             dirty_rect: dirty_rect.union(&image.dirty_rect),
-            viewport_tiles: image.viewport_tiles,
+            viewport_tiles,
         };
     }
 

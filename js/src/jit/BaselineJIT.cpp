@@ -85,7 +85,7 @@ static JitExecStatus EnterBaseline(JSContext* cx, EnterJitData& data) {
   nogc.emplace(cx);
 #endif
 
-  MOZ_ASSERT(IsBaselineInterpreterOrJitEnabled(cx));
+  MOZ_ASSERT(IsBaselineInterpreterOrJitEnabled());
   MOZ_ASSERT(CheckFrame(data.osrFrame));
 
   EnterJitCode enter = cx->runtime()->jitRuntime()->enterJit();
@@ -206,7 +206,7 @@ MethodStatus jit::BaselineCompile(JSContext* cx, JSScript* script,
   cx->check(script);
   MOZ_ASSERT(!script->hasBaselineScript());
   MOZ_ASSERT(script->canBaselineCompile());
-  MOZ_ASSERT(IsBaselineEnabled(cx));
+  MOZ_ASSERT(IsBaselineJitEnabled());
   AutoGeckoProfilerEntry pseudoFrame(
       cx, "Baseline script compilation",
       JS::ProfilingCategoryPair::JS_BaselineCompilation);
@@ -245,7 +245,7 @@ static MethodStatus CanEnterBaselineJIT(JSContext* cx, HandleScript script,
     return Method_Skipped;
   }
 
-  if (!IsBaselineEnabled(cx)) {
+  if (!IsBaselineJitEnabled()) {
     script->setBaselineScript(cx->runtime(), BASELINE_DISABLED_SCRIPT);
     return Method_CantCompile;
   }
@@ -551,7 +551,9 @@ void BaselineScript::Trace(JSTracer* trc, BaselineScript* script) {
 void BaselineScript::Destroy(FreeOp* fop, BaselineScript* script) {
   MOZ_ASSERT(!script->hasPendingIonBuilder());
 
-  fop->delete_(script);
+  // This allocation is tracked by JSScript::setBaselineScript /
+  // clearBaselineScript.
+  fop->deleteUntracked(script);
 }
 
 void JS::DeletePolicy<js::jit::BaselineScript>::operator()(
@@ -693,10 +695,6 @@ RetAddrEntry& BaselineScript::retAddrEntryFromReturnAddress(
 }
 
 void BaselineScript::computeResumeNativeOffsets(JSScript* script) {
-  if (!script->hasResumeOffsets()) {
-    return;
-  }
-
   // Translate pcOffset to BaselineScript native address. This may return
   // nullptr if compiler decided code was unreachable.
   auto computeNative = [this, script](uint32_t pcOffset) {

@@ -28,53 +28,14 @@ pref("general.warnOnAboutConfig", true);
 // maximum number of dated backups to keep at any time
 pref("browser.bookmarks.max_backups",       5);
 
-pref("browser.cache.disk.enable",           true);
-// Does the user want smart-sizing?
-pref("browser.cache.disk.smart_size.enabled", true);
 // Size (in KB) explicitly set by the user. Used when smart_size.enabled == false
 pref("browser.cache.disk.capacity",         256000);
-// When smartsizing is disabled we could potentially fill all disk space by
-// cache data when the disk capacity is not set correctly. To avoid that we
-// check the free space every time we write some data to the cache. The free
-// space is checked against two limits. Once the soft limit is reached we start
-// evicting the least useful entries, when we reach the hard limit writing to
-// the entry fails.
-pref("browser.cache.disk.free_space_soft_limit", 5120); // 5MB
-pref("browser.cache.disk.free_space_hard_limit", 1024); // 1MB
-// Max-size (in KB) for entries in disk cache. Set to -1 for no limit.
-// (Note: entries bigger than 1/8 of disk-cache are never cached)
-pref("browser.cache.disk.max_entry_size",    51200);  // 50 MB
-pref("browser.cache.memory.enable",         true);
-// -1 = determine dynamically, 0 = none, n = memory capacity in kilobytes
-//pref("browser.cache.memory.capacity",     -1);
-// Max-size (in KB) for entries in memory cache. Set to -1 for no limit.
-// (Note: entries bigger than than 90% of the mem-cache are never cached)
-pref("browser.cache.memory.max_entry_size",  5120);
-// Memory limit (in kB) for new cache data not yet written to disk. Writes to
-// the cache are buffered and written to disk on background with low priority.
-// With a slow persistent storage these buffers may grow when data is coming
-// fast from the network. When the amount of unwritten data is exceeded, new
-// writes will simply fail. We have two buckets, one for important data
-// (priority) like html, css, fonts and js, and one for other data like images,
-// video, etc.
-// Note: 0 means no limit.
-pref("browser.cache.disk.max_chunks_memory_usage", 40960);
-pref("browser.cache.disk.max_priority_chunks_memory_usage", 40960);
 
 pref("browser.cache.disk_cache_ssl",        true);
 // 0 = once-per-session, 1 = each-time, 2 = never, 3 = when-appropriate/automatically
 pref("browser.cache.check_doc_frequency",   3);
-// Limit of recent metadata we keep in memory for faster access, in Kb
-pref("browser.cache.disk.metadata_memory_limit", 250); // 0.25 MB
-// The number of chunks we preload ahead of read.  One chunk has currently 256kB.
-pref("browser.cache.disk.preload_chunk_count", 4); // 1 MB of read ahead
 // The half life used to re-compute cache entries frecency in hours.
 pref("browser.cache.frecency_half_life_hours", 6);
-
-// Number of seconds the cache spends writting pending data and closing files
-// after the shutdown has been signalled.  Past that time data are never written
-// and files are left open given up to the OS to do the cleanup.
-pref("browser.cache.max_shutdown_io_lag", 2);
 
 // AppCache over insecure connection is disabled by default
 pref("browser.cache.offline.insecure.enable",  false);
@@ -88,13 +49,6 @@ pref("browser.cache.offline.capacity",         512000);
 // the user should be warned if offline app disk usage exceeds this amount
 // (in kilobytes)
 pref("offline-apps.quota.warn",        51200);
-
-// zlib compression level used for cache compression:
-// 0 => disable compression
-// 1 => best speed
-// 9 => best compression
-// cache compression turned off for now - see bug #715198
-pref("browser.cache.compression_level", 0);
 
 // Don't show "Open with" option on download dialog if true.
 pref("browser.download.forbid_open_with", false);
@@ -417,6 +371,7 @@ pref("media.peerconnection.ice.link_local", false); // Set only for testing IPV6
 pref("media.peerconnection.ice.force_interface", ""); // Limit to only a single interface
 pref("media.peerconnection.ice.relay_only", false); // Limit candidates to TURN
 pref("media.peerconnection.use_document_iceservers", true);
+
 pref("media.peerconnection.identity.timeout", 10000);
 pref("media.peerconnection.ice.stun_client_maximum_transmits", 7);
 pref("media.peerconnection.ice.trickle_grace_period", 5000);
@@ -1267,13 +1222,12 @@ pref("javascript.options.strict",           false);
 #ifdef DEBUG
 pref("javascript.options.strict.debug",     false);
 #endif
-pref("javascript.options.unboxed_objects",  false);
-pref("javascript.options.blinterp",         false);
+pref("javascript.options.blinterp",         true);
 // Duplicated in JitOptions - ensure both match.
 pref("javascript.options.blinterp.threshold", 10);
 pref("javascript.options.baselinejit",      true);
 // Duplicated in JitOptions - ensure both match.
-pref("javascript.options.baselinejit.threshold", 10);
+pref("javascript.options.baselinejit.threshold", 50);
 pref("javascript.options.ion",              true);
 // Duplicated in JitOptions - ensure both match.
 pref("javascript.options.ion.threshold",    1000);
@@ -1791,12 +1745,6 @@ pref("network.sts.max_time_for_pr_close_during_shutdown", 5000);
 // The value is expected in seconds.
 pref("network.sts.pollable_event_timeout", 6);
 
-// Start a separate socket process. Performing networking on the socket process
-// is control by a sepparate pref
-// ("network.http.network_access_on_socket_process.enabled").
-// Changing these prefs requires a restart.
-pref("network.process.enabled", false);
-
 // Enable/disable sni encryption.
 pref("network.security.esni.enabled", false);
 
@@ -2178,6 +2126,9 @@ pref("network.http.tailing.total-max", 45000);
 
 // Enable or disable the whole fix from bug 1563538
 pref("network.http.spdy.bug1563538", true);
+pref("network.http.spdy.bug1563695", true);
+pref("network.http.spdy.bug1562315", true);
+pref("network.http.spdy.bug1556491", true);
 
 pref("permissions.default.image",           1); // 1-Accept, 2-Deny, 3-dontAcceptForeign
 
@@ -2510,13 +2461,13 @@ pref("security.dialog_enable_delay", 1000);
 pref("security.notification_enable_delay", 500);
 
 #if defined(DEBUG) && !defined(ANDROID)
-pref("csp.about_uris_without_csp", "blank,printpreview,srcdoc,addons,config,debugging,downloads,home,newtab,plugins,preferences,sessionrestore,support,sync-log,welcomeback");
+pref("csp.about_uris_without_csp", "blank,printpreview,srcdoc,addons,config,downloads,home,newtab,preferences,sessionrestore,sync-log,welcomeback");
 // the following prefs are for testing purposes only.
 pref("csp.overrule_about_uris_without_csp_whitelist", false);
 pref("csp.skip_about_page_has_csp_assert", false);
 // assertion flag will be set to false after fixing Bug 1473549
 pref("security.allow_eval_with_system_principal", false);
-pref("security.uris_using_eval_with_system_principal", "autocomplete.xml,redux.js,react-redux.js,content-task.js,preferencesbindings.js,lodash.js,jszip.js,sinon-7.2.7.js,ajv-4.1.1.js,jsol.js");
+pref("security.uris_using_eval_with_system_principal", "autocomplete.xml,redux.js,react-redux.js,content-task.js,lodash.js,jszip.js,sinon-7.2.7.js,ajv-4.1.1.js,jsol.js");
 #endif
 
 #ifdef EARLY_BETA_OR_EARLIER
@@ -4846,7 +4797,6 @@ pref("extensions.webextensions.keepUuidOnUninstall", false);
 pref("extensions.webextensions.identity.redirectDomain", "extensions.allizom.org");
 pref("extensions.webextensions.restrictedDomains", "accounts-static.cdn.mozilla.net,accounts.firefox.com,addons.cdn.mozilla.net,addons.mozilla.org,api.accounts.firefox.com,content.cdn.mozilla.net,discovery.addons.mozilla.org,install.mozilla.org,oauth.accounts.firefox.com,profile.accounts.firefox.com,support.mozilla.org,sync.services.mozilla.com");
 
-pref("extensions.webextensions.remote", false);
 // Whether or not the moz-extension resource loads are remoted. For debugging
 // purposes only. Setting this to false will break moz-extension URI loading
 // unless other process sandboxing and extension remoting prefs are changed.
@@ -5219,11 +5169,19 @@ pref("urlclassifier.trackingWhitelistTable", "moztest-trackwhite-simple,mozstd-t
 
 pref("urlclassifier.features.fingerprinting.blacklistTables", "base-fingerprinting-track-digest256");
 pref("urlclassifier.features.fingerprinting.whitelistTables", "mozstd-trackwhite-digest256");
+pref("urlclassifier.features.fingerprinting.annotate.blacklistTables", "base-fingerprinting-track-digest256");
+pref("urlclassifier.features.fingerprinting.annotate.whitelistTables", "mozstd-trackwhite-digest256");
 pref("urlclassifier.features.cryptomining.blacklistTables", "base-cryptomining-track-digest256");
 pref("urlclassifier.features.cryptomining.whitelistTables", "mozstd-trackwhite-digest256");
+pref("urlclassifier.features.cryptomining.annotate.blacklistTables", "base-cryptomining-track-digest256");
+pref("urlclassifier.features.cryptomining.annotate.whitelistTables", "mozstd-trackwhite-digest256");
+pref("urlclassifier.features.socialtracking.blacklistTables", "social-tracking-protection-digest256,social-tracking-protection-facebook-digest256,social-tracking-protection-linkedin-digest256,social-tracking-protection-twitter-digest256,social-tracking-protection-youtube-digest256");
+pref("urlclassifier.features.socialtracking.whitelistTables", "mozstd-trackwhite-digest256");
+pref("urlclassifier.features.socialtracking.annotation.blacklistTables", "social-tracking-protection-digest256,social-tracking-protection-facebook-digest256,social-tracking-protection-linkedin-digest256,social-tracking-protection-twitter-digest256,social-tracking-protection-youtube-digest256");
+pref("urlclassifier.features.socialtracking.annotation.whitelistTables", "mozstd-trackwhite-digest256");
 
 // These tables will never trigger a gethash call.
-pref("urlclassifier.disallow_completions", "goog-downloadwhite-digest256,base-track-digest256,mozstd-trackwhite-digest256,content-track-digest256,mozplugin-block-digest256,mozplugin2-block-digest256,block-flash-digest256,except-flash-digest256,allow-flashallow-digest256,except-flashallow-digest256,block-flashsubdoc-digest256,except-flashsubdoc-digest256,goog-passwordwhite-proto,ads-track-digest256,social-track-digest256,analytics-track-digest256,base-fingerprinting-track-digest256,content-fingerprinting-track-digest256,base-cryptomining-track-digest256,content-cryptomining-track-digest256,fanboyannoyance-ads-digest256,fanboysocial-ads-digest256,easylist-ads-digest256,easyprivacy-ads-digest256,adguard-ads-digest256");
+pref("urlclassifier.disallow_completions", "goog-downloadwhite-digest256,base-track-digest256,mozstd-trackwhite-digest256,content-track-digest256,mozplugin-block-digest256,mozplugin2-block-digest256,block-flash-digest256,except-flash-digest256,allow-flashallow-digest256,except-flashallow-digest256,block-flashsubdoc-digest256,except-flashsubdoc-digest256,goog-passwordwhite-proto,ads-track-digest256,social-track-digest256,analytics-track-digest256,base-fingerprinting-track-digest256,content-fingerprinting-track-digest256,base-cryptomining-track-digest256,content-cryptomining-track-digest256,fanboyannoyance-ads-digest256,fanboysocial-ads-digest256,easylist-ads-digest256,easyprivacy-ads-digest256,adguard-ads-digest256,social-tracking-protection-digest256,social-tracking-protection-facebook-digest256,social-tracking-protection-linkedin-digest256,social-tracking-protection-twitter-digest256,social-tracking-protection-youtube-digest256");
 
 // Workaround for Google Recaptcha
 pref("urlclassifier.trackingAnnotationSkipURLs", "google.com/recaptcha/,*.google.com/recaptcha/");
@@ -5293,7 +5251,7 @@ pref("browser.safebrowsing.reportPhishURL", "https://%LOCALE%.phish-report.mozil
 
 // Mozilla Safe Browsing provider (for tracking protection and plugin blocking)
 pref("browser.safebrowsing.provider.mozilla.pver", "2.2");
-pref("browser.safebrowsing.provider.mozilla.lists", "base-track-digest256,mozstd-trackwhite-digest256,content-track-digest256,mozplugin-block-digest256,mozplugin2-block-digest256,block-flash-digest256,except-flash-digest256,allow-flashallow-digest256,except-flashallow-digest256,block-flashsubdoc-digest256,except-flashsubdoc-digest256,ads-track-digest256,social-track-digest256,analytics-track-digest256,base-fingerprinting-track-digest256,content-fingerprinting-track-digest256,base-cryptomining-track-digest256,content-cryptomining-track-digest256,fanboyannoyance-ads-digest256,fanboysocial-ads-digest256,easylist-ads-digest256,easyprivacy-ads-digest256,adguard-ads-digest256");
+pref("browser.safebrowsing.provider.mozilla.lists", "base-track-digest256,mozstd-trackwhite-digest256,content-track-digest256,mozplugin-block-digest256,mozplugin2-block-digest256,block-flash-digest256,except-flash-digest256,allow-flashallow-digest256,except-flashallow-digest256,block-flashsubdoc-digest256,except-flashsubdoc-digest256,ads-track-digest256,social-track-digest256,analytics-track-digest256,base-fingerprinting-track-digest256,content-fingerprinting-track-digest256,base-cryptomining-track-digest256,content-cryptomining-track-digest256,fanboyannoyance-ads-digest256,fanboysocial-ads-digest256,easylist-ads-digest256,easyprivacy-ads-digest256,adguard-ads-digest256,social-tracking-protection-digest256,social-tracking-protection-facebook-digest256,social-tracking-protection-linkedin-digest256,social-tracking-protection-twitter-digest256,social-tracking-protection-youtube-digest256");
 pref("browser.safebrowsing.provider.mozilla.updateURL", "https://shavar.services.mozilla.com/downloads?client=SAFEBROWSING_ID&appver=%MAJOR_VERSION%&pver=2.2");
 pref("browser.safebrowsing.provider.mozilla.gethashURL", "https://shavar.services.mozilla.com/gethash?client=SAFEBROWSING_ID&appver=%MAJOR_VERSION%&pver=2.2");
 // Set to a date in the past to force immediate download in new profiles.

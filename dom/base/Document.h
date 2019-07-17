@@ -559,6 +559,14 @@ class Document : public nsINode,
     return EffectiveStoragePrincipal();
   }
 
+  // You should probably not be using this function, since it performs no
+  // checks to ensure that the intrinsic storage principal should really be
+  // used here.  It is only designed to be used in very specific circumstances,
+  // such as when inheriting the document/storage principal.
+  nsIPrincipal* IntrinsicStoragePrincipal() const {
+    return mIntrinsicStoragePrincipal;
+  }
+
   // EventTarget
   void GetEventTargetParent(EventChainPreVisitor& aVisitor) override;
   EventListenerManager* GetOrCreateListenerManager() override;
@@ -658,7 +666,9 @@ class Document : public nsINode,
   virtual void NotifyPossibleTitleChange(bool aBoundTitleElement);
 
   /**
-   * Return the URI for the document. May return null.
+   * Return the URI for the document. May return null.  If it ever stops being
+   * able to return null, we can make sure nsINode::GetBaseURI/GetBaseURIObject
+   * also never return null.
    *
    * The value returned corresponds to the "document's address" in
    * HTML5.  As such, it may change over the lifetime of the document, for
@@ -893,8 +903,7 @@ class Document : public nsINode,
     return GetFallbackBaseURI();
   }
 
-  already_AddRefed<nsIURI> GetBaseURI(
-      bool aTryUseXHRDocBaseURI = false) const final;
+  nsIURI* GetBaseURI(bool aTryUseXHRDocBaseURI = false) const final;
 
   void SetBaseURI(nsIURI* aURI);
 
@@ -3516,10 +3525,11 @@ class Document : public nsINode,
         this, MatchNameAttribute, nullptr, UseExistingNameString, aName);
   }
   Document* Open(const mozilla::dom::Optional<nsAString>& /* unused */,
-                 const nsAString& /* unused */, mozilla::ErrorResult& aError);
+                 const mozilla::dom::Optional<nsAString>& /* unused */,
+                 mozilla::ErrorResult& aError);
   mozilla::dom::Nullable<mozilla::dom::WindowProxyHolder> Open(
       const nsAString& aURL, const nsAString& aName, const nsAString& aFeatures,
-      bool aReplace, mozilla::ErrorResult& rv);
+      mozilla::ErrorResult& rv);
   void Close(mozilla::ErrorResult& rv);
   void Write(const mozilla::dom::Sequence<nsString>& aText,
              mozilla::ErrorResult& rv);

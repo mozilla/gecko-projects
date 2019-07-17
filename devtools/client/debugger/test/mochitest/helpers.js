@@ -22,12 +22,16 @@ const {
   getSelectedLocation
 } = require("devtools/client/debugger/src/utils/selected-location");
 
+const {
+  resetSchemaVersion
+} = require("devtools/client/debugger/src/utils/prefs");
+
 function log(msg, data) {
   info(`${msg} ${!data ? "" : JSON.stringify(data)}`);
 }
 
 function logThreadEvents(dbg, event) {
-  const thread = dbg.toolbox.threadClient;
+  const thread = dbg.toolbox.threadFront;
 
   thread.on(event, function onEvent(...args) {
     info(`Thread event '${event}' fired.`);
@@ -505,6 +509,7 @@ function isSelectedFrameSelected(dbg, state) {
  * Clear all the debugger related preferences.
  */
 async function clearDebuggerPreferences() {
+  resetSchemaVersion();
   asyncStorage.clear();
   Services.prefs.clearUserPref("devtools.recordreplay.enabled");
   Services.prefs.clearUserPref("devtools.debugger.pause-on-exceptions");
@@ -531,7 +536,6 @@ async function initDebugger(url, ...sources) {
   await clearDebuggerPreferences();
   const toolbox = await openNewTabAndToolbox(EXAMPLE_URL + url, "jsdebugger");
   const dbg = createDebuggerContext(toolbox);
-  dbg.client.waitForWorkers(false);
 
   await waitForSources(dbg, ...sources);
   return dbg;
@@ -1727,11 +1731,11 @@ function hideConsoleContextMenu(hud) {
 // Return a promise that resolves with the result of a thread evaluating a
 // string in the topmost frame.
 async function evaluateInTopFrame(target, text) {
-  const threadClient = target.threadClient;
+  const threadFront = target.threadFront;
   const consoleFront = await target.getFront("console");
-  const { frames } = await threadClient.getFrames(0, 1);
+  const { frames } = await threadFront.getFrames(0, 1);
   ok(frames.length == 1, "Got one frame");
-  const options = { thread: threadClient.actor, frameActor: frames[0].actor };
+  const options = { thread: threadFront.actor, frameActor: frames[0].actor };
   const response = await consoleFront.evaluateJS(text, options);
   return response.result.type == "undefined" ? undefined : response.result;
 }

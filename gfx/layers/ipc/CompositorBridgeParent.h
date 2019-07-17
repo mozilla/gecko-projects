@@ -162,7 +162,7 @@ class CompositorBridgeParentBase : public PCompositorBridgeParent,
   void NotifyNotUsed(PTextureParent* aTexture,
                      uint64_t aTransactionId) override;
   void SendAsyncMessage(
-      const InfallibleTArray<AsyncParentMessageData>& aMessage) override;
+      const nsTArray<AsyncParentMessageData>& aMessage) override;
 
   // ShmemAllocator
   bool AllocShmem(size_t aSize,
@@ -254,6 +254,7 @@ class CompositorBridgeParentBase : public PCompositorBridgeParent,
   virtual mozilla::ipc::IPCResult RecvWillClose() = 0;
   virtual mozilla::ipc::IPCResult RecvPause() = 0;
   virtual mozilla::ipc::IPCResult RecvResume() = 0;
+  virtual mozilla::ipc::IPCResult RecvResumeAsync() = 0;
   virtual mozilla::ipc::IPCResult RecvNotifyChildCreated(
       const LayersId& id, CompositorOptions* compositorOptions) = 0;
   virtual mozilla::ipc::IPCResult RecvMapAndNotifyChildCreated(
@@ -320,6 +321,7 @@ class CompositorBridgeParent final : public CompositorBridgeParentBase,
   mozilla::ipc::IPCResult RecvWillClose() override;
   mozilla::ipc::IPCResult RecvPause() override;
   mozilla::ipc::IPCResult RecvResume() override;
+  mozilla::ipc::IPCResult RecvResumeAsync() override;
   mozilla::ipc::IPCResult RecvNotifyChildCreated(
       const LayersId& child, CompositorOptions* aOptions) override;
   mozilla::ipc::IPCResult RecvMapAndNotifyChildCreated(
@@ -340,7 +342,7 @@ class CompositorBridgeParent final : public CompositorBridgeParentBase,
   mozilla::ipc::IPCResult RecvStartFrameTimeRecording(
       const int32_t& aBufferSize, uint32_t* aOutStartIndex) override;
   mozilla::ipc::IPCResult RecvStopFrameTimeRecording(
-      const uint32_t& aStartIndex, InfallibleTArray<float>* intervals) override;
+      const uint32_t& aStartIndex, nsTArray<float>* intervals) override;
 
   mozilla::ipc::IPCResult RecvCheckContentOnlyTDR(
       const uint32_t& sequenceNum, bool* isContentOnlyTDR) override {
@@ -685,6 +687,7 @@ class CompositorBridgeParent final : public CompositorBridgeParentBase,
   void ResumeComposition();
   void ResumeCompositionAndResize(int x, int y, int width, int height);
   void Invalidate();
+  bool IsPaused() { return mPaused; }
 
  protected:
   void ForceComposition();

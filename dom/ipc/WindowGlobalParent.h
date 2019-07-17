@@ -8,6 +8,7 @@
 #define mozilla_dom_WindowGlobalParent_h
 
 #include "mozilla/RefPtr.h"
+#include "mozilla/dom/DOMRect.h"
 #include "mozilla/dom/PWindowGlobalParent.h"
 #include "mozilla/dom/BrowserParent.h"
 #include "nsRefPtrHashtable.h"
@@ -21,6 +22,11 @@ class nsIURI;
 class nsFrameLoader;
 
 namespace mozilla {
+
+namespace gfx {
+class CrossProcessPaint;
+}  // namespace gfx
+
 namespace dom {
 
 class WindowGlobalChild;
@@ -32,6 +38,7 @@ class JSWindowActorMessageMeta;
  */
 class WindowGlobalParent final : public WindowGlobalActor,
                                  public PWindowGlobalParent {
+  friend class gfx::CrossProcessPaint;
   friend class PWindowGlobalParent;
 
  public:
@@ -102,10 +109,16 @@ class WindowGlobalParent final : public WindowGlobalActor,
 
   bool IsInitialDocument() { return mIsInitialDocument; }
 
+  bool HasBeforeUnload() { return mHasBeforeUnload; }
+
   already_AddRefed<Promise> ChangeFrameRemoteness(dom::BrowsingContext* aBc,
                                                   const nsAString& aRemoteType,
                                                   uint64_t aPendingSwitchId,
                                                   ErrorResult& aRv);
+
+  already_AddRefed<mozilla::dom::Promise> DrawSnapshot(
+      const DOMRect* aRect, double aScale, const nsAString& aBackgroundColor,
+      mozilla::ErrorResult& aRv);
 
   already_AddRefed<Promise> GetSecurityInfo(ErrorResult& aRv);
 
@@ -117,7 +130,7 @@ class WindowGlobalParent final : public WindowGlobalActor,
   // be called after setting the Manager actor.
   void Init(const WindowGlobalInit& aInit);
 
-  nsISupports* GetParentObject();
+  nsIGlobalObject* GetParentObject();
   JSObject* WrapObject(JSContext* aCx,
                        JS::Handle<JSObject*> aGivenProto) override;
 
@@ -131,6 +144,7 @@ class WindowGlobalParent final : public WindowGlobalActor,
     mIsInitialDocument = aIsInitialDocument;
     return IPC_OK();
   }
+  mozilla::ipc::IPCResult RecvSetHasBeforeUnload(bool aHasBeforeUnload);
   mozilla::ipc::IPCResult RecvBecomeCurrentWindowGlobal();
   mozilla::ipc::IPCResult RecvDestroy();
   mozilla::ipc::IPCResult RecvRawMessage(const JSWindowActorMessageMeta& aMeta,
@@ -139,6 +153,10 @@ class WindowGlobalParent final : public WindowGlobalActor,
       dom::BrowsingContext* aContext);
 
   void ActorDestroy(ActorDestroyReason aWhy) override;
+
+  void DrawSnapshotInternal(gfx::CrossProcessPaint* aPaint,
+                            const Maybe<IntRect>& aRect, float aScale,
+                            nscolor aBackgroundColor);
 
  private:
   ~WindowGlobalParent();
@@ -155,6 +173,9 @@ class WindowGlobalParent final : public WindowGlobalActor,
   bool mInProcess;
   bool mIPCClosed;
   bool mIsInitialDocument;
+
+  // True if this window has a "beforeunload" event listener.
+  bool mHasBeforeUnload;
 };
 
 }  // namespace dom

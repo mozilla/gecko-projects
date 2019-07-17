@@ -150,8 +150,7 @@ class ScrollFrameHelper::AsyncScrollPortEvent : public Runnable {
  public:
   NS_DECL_NSIRUNNABLE
   explicit AsyncScrollPortEvent(ScrollFrameHelper* helper)
-      : Runnable("ScrollFrameHelper::AsyncScrollPortEvent"),
-        mHelper(helper) {}
+      : Runnable("ScrollFrameHelper::AsyncScrollPortEvent"), mHelper(helper) {}
   void Revoke() { mHelper = nullptr; }
 
  private:
@@ -3357,7 +3356,7 @@ void ScrollFrameHelper::BuildDisplayList(nsDisplayListBuilder* aBuilder,
   mOuter->DisplayBorderBackgroundOutline(aBuilder, aLists);
 
   if (aBuilder->IsPaintingToWindow()) {
-    if (IsMaybeScrollingActive()) {
+    if (IsMaybeScrollingActive() && !gfxVars::UseWebRender()) {
       if (mScrollPosForLayerPixelAlignment == nsPoint(-1, -1)) {
         mScrollPosForLayerPixelAlignment = GetScrollPosition();
       }

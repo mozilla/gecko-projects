@@ -11,10 +11,26 @@ const { LocalizationHelper } = require("devtools/shared/l10n");
 const L10N = new LocalizationHelper(
   "devtools/client/locales/inspector.properties"
 );
+const { openDocLink } = require("devtools/client/shared/link");
+const {
+  A11Y_CONTRAST_LEARN_MORE_LINK,
+} = require("devtools/client/accessibility/constants");
+
+loader.lazyRequireGetter(
+  this,
+  "wrapMoveFocus",
+  "devtools/client/shared/focus",
+  true
+);
+loader.lazyRequireGetter(
+  this,
+  "getFocusableElements",
+  "devtools/client/shared/focus",
+  true
+);
 
 const TELEMETRY_PICKER_EYEDROPPER_OPEN_COUNT =
   "DEVTOOLS_PICKER_EYEDROPPER_OPENED_COUNT";
-
 const XHTML_NS = "http://www.w3.org/1999/xhtml";
 
 /**
@@ -44,7 +60,11 @@ class SwatchColorPickerTooltip extends SwatchBasedEditorTooltip {
     this.spectrum = this.setColorPickerContent([0, 0, 0, 1]);
     this._onSpectrumColorChange = this._onSpectrumColorChange.bind(this);
     this._openEyeDropper = this._openEyeDropper.bind(this);
+    this._openDocLink = this._openDocLink.bind(this);
+    this._onTooltipKeydown = this._onTooltipKeydown.bind(this);
     this.cssColor4 = supportsCssColor4ColorFunction();
+
+    this.tooltip.container.addEventListener("keydown", this._onTooltipKeydown);
   }
 
   /**
@@ -65,7 +85,7 @@ class SwatchColorPickerTooltip extends SwatchBasedEditorTooltip {
 
     const widget = new Spectrum(node, color);
     this.tooltip.panel.appendChild(container);
-    this.tooltip.setContentSize({ width: 215, height: 175 });
+    this.tooltip.setContentSize({ width: 215 });
 
     widget.inspector = this.inspector;
 
@@ -94,9 +114,16 @@ class SwatchColorPickerTooltip extends SwatchBasedEditorTooltip {
       );
     }
 
-    // only enable contrast if it is compatible and if the type of property is color.
+    // Only enable contrast and set spectrum text props if selected node is
+    // contrast compatible and if the type of property is color.
     this.spectrum.contrastEnabled =
       name === "color" && this.isContrastCompatible;
+    this.spectrum.textProps = this.spectrum.contrastEnabled
+      ? await this.inspector.pageStyle.getComputed(
+          this.inspector.selection.nodeFront,
+          { filterProperties: ["font-size", "font-weight"] }
+        )
+      : null;
 
     // Call then parent class' show function
     await super.show();
@@ -106,8 +133,8 @@ class SwatchColorPickerTooltip extends SwatchBasedEditorTooltip {
       this.currentSwatchColor = this.activeSwatch.nextSibling;
       this._originalColor = this.currentSwatchColor.textContent;
       const color = this.activeSwatch.style.backgroundColor;
-      this.spectrum.off("changed", this._onSpectrumColorChange);
 
+      this.spectrum.off("changed", this._onSpectrumColorChange);
       this.spectrum.rgb = this._colorToRgba(color);
       this.spectrum.on("changed", this._onSpectrumColorChange);
       this.spectrum.updateUI();
@@ -125,7 +152,51 @@ class SwatchColorPickerTooltip extends SwatchBasedEditorTooltip {
       eyeButton.disabled = true;
       eyeButton.title = L10N.getStr("eyedropper.disabled.title");
     }
+
+    const learnMoreButton = this.tooltip.container.querySelector(
+      "#learn-more-button"
+    );
+    if (learnMoreButton) {
+      learnMoreButton.addEventListener("click", this._openDocLink);
+      learnMoreButton.addEventListener("keydown", e => e.stopPropagation());
+    }
+
+    // After spectrum properties are set, update the tooltip content size.
+    // If contrast is enabled, the tooltip will have additional contrast content
+    // and tooltip size needs to be updated to account for it.
+    this.tooltip.updateContainerBounds(super.tooltipAnchor);
+
+    // Add focus to the first focusable element in the tooltip and attach keydown
+    // event listener to tooltip
+    this.focusableElements[0].focus();
+    this.tooltip.container.addEventListener(
+      "keydown",
+      this._onTooltipKeydown,
+      true
+    );
+
     this.emit("ready");
+  }
+
+  _onTooltipKeydown(event) {
+    const { target, key, shiftKey } = event;
+
+    if (key !== "Tab") {
+      return;
+    }
+
+    const focusMoved = !!wrapMoveFocus(
+      this.focusableElements,
+      target,
+      shiftKey
+    );
+    if (focusMoved) {
+      // Focus was moved to the begining/end of the tooltip, so we need to prevent the
+      // default focus change that would happen here.
+      event.preventDefault();
+    }
+
+    event.stopPropagation();
   }
 
   _onSpectrumColorChange(rgba, cssColor) {
@@ -158,6 +229,10 @@ class SwatchColorPickerTooltip extends SwatchBasedEditorTooltip {
     }
 
     super.onTooltipHidden();
+    this.tooltip.container.removeEventListener(
+      "keydown",
+      this._onTooltipKeydown
+    );
   }
 
   _openEyeDropper() {
@@ -193,6 +268,11 @@ class SwatchColorPickerTooltip extends SwatchBasedEditorTooltip {
     });
   }
 
+  _openDocLink() {
+    openDocLink(A11Y_CONTRAST_LEARN_MORE_LINK);
+    this.hide();
+  }
+
   _onEyeDropperDone() {
     this.eyedropperOpen = false;
     this.activeSwatch = null;
@@ -216,6 +296,12 @@ class SwatchColorPickerTooltip extends SwatchBasedEditorTooltip {
    */
   isEditing() {
     return this.tooltip.isVisible() || this.eyedropperOpen;
+  }
+
+  get focusableElements() {
+    return getFocusableElements(this.tooltip.container).filter(
+      el => !!el.offsetParent
+    );
   }
 
   destroy() {

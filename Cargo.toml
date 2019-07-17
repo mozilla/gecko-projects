@@ -37,10 +37,6 @@ exclude = [
   "media/mp4parse-rust/mp4parse_capi",
   "media/mp4parse-rust/mp4parse_fallible",
   "xpcom/rust/gkrust_utils",
-
-  # Exclude temporarily till it is developed independently
-  # TODO(nupur): Remove after this is completed
-  "testing/geckodriver/marionette",
 ]
 
 # Explicitly specify what our profiles use.  The opt-level setting here is
@@ -62,7 +58,6 @@ codegen-units = 1
 
 [patch.crates-io]
 libudev-sys = { path = "dom/webauthn/libudev-sys" }
-serde_derive = { git = "https://github.com/servo/serde", branch = "deserialize_from_enums10" }
 winapi = { git = "https://github.com/froydnj/winapi-rs", branch = "aarch64" }
 packed_simd = { git = "https://github.com/hsivonen/packed_simd", branch = "rust_1_32" }
 

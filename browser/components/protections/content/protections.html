@@ -10,7 +10,8 @@
     <link rel="stylesheet" type="text/css"
           href="chrome://browser/content/protections.css">
     <link rel="icon" href="chrome://global/skin/icons/warning.svg">
-    <script type="text/javascript" src="chrome://browser/content/protections.js"></script>
+    <script type="module" src="chrome://browser/content/protections.js"></script>
+    <script type="module" src="chrome://browser/content/lockwise-card.js"></script>
     <title>Protection Report</title>
   </head>
 
@@ -43,8 +44,8 @@
                 <input id="tab-social" data-type="social" type="radio" name="tabs" checked>
                 <label for="tab-social" data-type="social">345</label>
 
-                <input id="tab-crossSite" data-type="crossSite" type="radio" name="tabs">
-                <label for="tab-crossSite" data-type="crossSite">123</label>
+                <input id="tab-cookie" data-type="cookie" type="radio" name="tabs">
+                <label for="tab-cookie" data-type="cookie">123</label>
 
                 <input id="tab-tracker" data-type="tracker" type="radio" name="tabs">
                 <label for="tab-tracker" data-type="tracker">1</label>
@@ -59,7 +60,7 @@
                   <p class="content-title">Social Media Trackers</p>
                   <p>Social media like, post, and comment buttons on other websites can track you — even if you don’t use them. Logging in to sites using your Facebook or Twitter account is another way they can track what you do on those sites. We remove these trackers so Facebook and Twitter see less of what you do online.</p>
                 </div>
-                <div id="crossSite" class="tab-content">
+                <div id="cookie" class="tab-content">
                   <p class="content-title">Cross-Site Tracking Cookies</p>
                   <p>Cross-site tracking cookies follow you from site to site to collect data about your browsing habits. Advertisers and analytics companies gather this data to create a profile of your interests across many sites. Blocking them reduces the number of personalized ads that follow you around.</p>
                 </div>
@@ -83,6 +84,51 @@
           </div>
         </div>
       </div>
+      <!-- Markup for Lockwise card. -->
+      <section class="report-card lockwise-card hidden">
+        <div class="card-header">
+          <div class="icon"></div>
+          <div class="wrapper">
+            <h3 id="lockwise-title" class="card-title">
+              <!-- Insert Lockwise card title here. -->
+            </h3>
+            <p id="lockwise-header-content" class="content">
+              <!-- Insert Lockwise header content here. -->
+            </p>
+          </div>
+          <button id="open-about-logins-button">Open in Firefox</button>
+        </div>
+        <div class="card-body">
+          <div id="lockwise-body-content" class="body-wrapper">
+            <div class="no-logins hidden">
+                <div class="lockwise-mobile-app-icon"></div>
+                <span>
+                  Get the <a target="_blank" href="https://lockwise.firefox.com/">Firefox Lockwise</a>
+                  app to take your passwords everywhere.
+                </span>
+            </div>
+            <div class="has-logins hidden">
+              <span class="number-of-logins block">
+                <!-- Display number of stored logins here. -->
+              </span>
+              <span class="lockwise-text-icon passwords-stored-text">
+                Passwords stored securely.
+                <a href="">How it works</a>
+              </span>
+              <span class="number-of-synced-devices block">
+                <!-- Display number of synced devices here. -->
+              </span>
+              <span class="lockwise-text-icon synced-devices-text">
+                <span>
+                  <!-- Display message for status of synced devices here. -->
+                </span>
+                <a class="hidden" href="" title="Go to sync preferences">Turn on sync…</a>
+              </span>
+            </div>
+           </div>
+          </div>
+        </div>
+      </section>
     </div>
   </body>
 </html>

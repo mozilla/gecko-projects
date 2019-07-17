@@ -18,16 +18,27 @@ function importJSM(jsm) {
   return SpecialPowers.wrap(obj);
 }
 
-let CC = (typeof Components === "object"
-            ? Components
-            : SpecialPowers.wrap(SpecialPowers.Components)).Constructor;
+// When running in release builds, we get a fake Components object in
+// web contexts, so we need to check that the Components object is sane,
+// too, not just that it exists.
+let haveComponents =
+  typeof Components === "object" &&
+  typeof Components.Constructor === "function";
 
-let ConverterOutputStream = CC("@mozilla.org/intl/converter-output-stream;1",
-                               "nsIConverterOutputStream", "init");
+let CC = (haveComponents
+  ? Components
+  : SpecialPowers.wrap(SpecialPowers.Components)
+).Constructor;
+
+let ConverterOutputStream = CC(
+  "@mozilla.org/intl/converter-output-stream;1",
+  "nsIConverterOutputStream",
+  "init"
+);
 
 class MozillaLogger {
   get logCallback() {
-    return (msg) => {
+    return msg => {
       this.log(formatLogMessage(msg));
     };
   }
@@ -38,7 +49,6 @@ class MozillaLogger {
 
   close() {}
 }
-
 
 /**
  * MozillaFileLogger, a log listener that can write to a local file.
@@ -51,18 +61,19 @@ class MozillaFileLogger extends MozillaLogger {
   constructor(aPath) {
     super();
 
-    const {FileUtils} = importJSM("resource://gre/modules/FileUtils.jsm");
+    const { FileUtils } = importJSM("resource://gre/modules/FileUtils.jsm");
 
     this._file = FileUtils.File(aPath);
     this._foStream = FileUtils.openFileOutputStream(
-        this._file, (FileUtils.MODE_WRONLY | FileUtils.MODE_CREATE |
-                     FileUtils.MODE_APPEND));
+      this._file,
+      FileUtils.MODE_WRONLY | FileUtils.MODE_CREATE | FileUtils.MODE_APPEND
+    );
 
     this._converter = ConverterOutputStream(this._foStream, "UTF-8");
   }
 
   get logCallback() {
-    return (msg) => {
+    return msg => {
       if (this._converter) {
         var data = formatLogMessage(msg);
         this.log(data);

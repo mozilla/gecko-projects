@@ -32,7 +32,6 @@
       <html:input id="homePrefHidden"
                   type="text"
                   preference="browser.startup.homepage"
-                  onsyncfrompreference="return gHomePane.syncFromHomePref();"
                   hidden="true" />
       <menulist id="homeMode"
                 class="check-home-page-controlled"
@@ -71,21 +70,6 @@
       </vbox>
     </vbox>
   </hbox>
-  <hbox id="newTabsOption">
-    <label control="newTabMode" data-l10n-id="home-newtabs-mode-label" flex="1" />
-
-    <menulist id="newTabMode"
-                flex="1"
-                preference="browser.newtabpage.enabled"
-                onsyncfrompreference="return gHomePane.syncFromNewTabPref();"
-                onsynctopreference="return gHomePane.syncToNewTabPref(this.value);">
-      <menupopup>
-          <menuitem value="0" data-l10n-id="home-mode-choice-default" />
-          <menuitem value="1" data-l10n-id="home-mode-choice-blank" />
-      </menupopup>
-    </menulist>
-  </hbox>
-
   <hbox id="browserHomePageExtensionContent"
         align="center" hidden="true" class="extension-controlled">
     <description control="disableHomePageExtension" flex="1" />
@@ -93,6 +77,19 @@
             is="highlightable-button"
             class="extension-controlled-button accessory-button"
             data-l10n-id="disable-extension" />
+  </hbox>
+
+  <hbox id="newTabsOption">
+    <label control="newTabMode" data-l10n-id="home-newtabs-mode-label" flex="1" />
+
+    <menulist id="newTabMode"
+                flex="1"
+                preference="browser.newtabpage.enabled">
+      <menupopup>
+          <menuitem value="0" data-l10n-id="home-mode-choice-default" />
+          <menuitem value="1" data-l10n-id="home-mode-choice-blank" />
+      </menupopup>
+    </menulist>
   </hbox>
   <hbox id="browserNewTabExtensionContent"
         align="center" hidden="true" class="extension-controlled">

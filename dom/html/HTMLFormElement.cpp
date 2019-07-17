@@ -297,7 +297,7 @@ static void CollectOrphans(nsINode* aRemovalRoot,
 #endif
     if (node->HasFlag(MAYBE_ORPHAN_FORM_ELEMENT)) {
       node->UnsetFlags(MAYBE_ORPHAN_FORM_ELEMENT);
-      if (!nsContentUtils::ContentIsDescendantOf(node, aRemovalRoot)) {
+      if (!node->IsInclusiveDescendantOf(aRemovalRoot)) {
         node->ClearForm(true, false);
 
         // When a form control loses its form owner, its state can change.
@@ -338,7 +338,7 @@ static void CollectOrphans(nsINode* aRemovalRoot,
 #endif
     if (node->HasFlag(MAYBE_ORPHAN_FORM_ELEMENT)) {
       node->UnsetFlags(MAYBE_ORPHAN_FORM_ELEMENT);
-      if (!nsContentUtils::ContentIsDescendantOf(node, aRemovalRoot)) {
+      if (!node->IsInclusiveDescendantOf(aRemovalRoot)) {
         node->ClearForm(true);
 
 #ifdef DEBUG
@@ -1485,7 +1485,7 @@ nsresult HTMLFormElement::GetActionURL(nsIURI** aActionURL,
 
     actionURL = docURI;
   } else {
-    nsCOMPtr<nsIURI> baseURL = GetBaseURI();
+    nsIURI* baseURL = GetBaseURI();
     NS_ASSERTION(baseURL, "No Base URL found in Form Submit!\n");
     if (!baseURL) {
       return NS_OK;  // No base URL -> exit early, see Bug 30721

@@ -71,6 +71,7 @@ class UrlbarInput {
                flip="none"
                consumeoutsideclicks="never"
                norolluponanchor="true"
+               rolluponmousewheel="true"
                level="parent">
           <html:div class="urlbarView-body-outer">
             <html:div class="urlbarView-body-inner"
@@ -96,7 +97,6 @@ class UrlbarInput {
     this.controller.setInput(this);
     this.view = new UrlbarView(this);
     this.valueIsTyped = false;
-    this.userInitiatedFocus = false;
     this.isPrivate = PrivateBrowsingUtils.isWindowPrivate(this.window);
     this.lastQueryContextPromise = Promise.resolve();
     this._actionOverrideKeyCount = 0;
@@ -105,6 +105,7 @@ class UrlbarInput {
     this._textValueOnLastSearch = "";
     this._resultForCurrentValue = null;
     this._suppressStartQuery = false;
+    this._suppressPrimaryAdjustment = false;
     this._untrimmedValue = "";
 
     // This exists only for tests.
@@ -119,7 +120,6 @@ class UrlbarInput {
       "setAttribute",
       "removeAttribute",
       "toggleAttribute",
-      "select",
     ];
     const READ_ONLY_PROPERTIES = ["inputField", "editor"];
     const READ_WRITE_PROPERTIES = [
@@ -174,8 +174,10 @@ class UrlbarInput {
     this.eventBufferer = new UrlbarEventBufferer(this);
 
     this._inputFieldEvents = [
+      "click",
       "compositionstart",
       "compositionend",
+      "contextmenu",
       "dragover",
       "dragstart",
       "drop",
@@ -207,8 +209,6 @@ class UrlbarInput {
     this.inputField.controllers.insertControllerAt(0, this._copyCutController);
 
     this._initPasteAndGo();
-
-    this._ignoreFocus = true;
 
     // Tracks IME composition.
     this._compositionState = UrlbarUtils.COMPOSITION.NONE;
@@ -301,21 +301,20 @@ class UrlbarInput {
     }
   }
 
-  /**
-   * This exists for legacy compatibility, and can be removed once the old
-   * urlbar code goes away, by changing callers. Internal consumers should use
-   * view.close().
-   */
-  closePopup() {
-    this.view.close();
-  }
-
   focus() {
     this.inputField.focus();
   }
 
   blur() {
     this.inputField.blur();
+  }
+
+  select() {
+    // See _on_select().  HTMLInputElement.select() dispatches a "select"
+    // event but does not set the primary selection.
+    this._suppressPrimaryAdjustment = true;
+    this.inputField.select();
+    this._suppressPrimaryAdjustment = false;
   }
 
   /**
@@ -500,6 +499,12 @@ class UrlbarInput {
     openParams.postData = postData;
 
     switch (result.type) {
+      case UrlbarUtils.RESULT_TYPE.KEYWORD: {
+        // If this result comes from a bookmark keyword, let it inherit the
+        // current document's principal, otherwise bookmarklets would break.
+        openParams.allowInheritPrincipal = true;
+        break;
+      }
       case UrlbarUtils.RESULT_TYPE.TAB_SWITCH: {
         if (this.hasAttribute("actionoverride")) {
           where = "current";
@@ -1381,6 +1386,22 @@ class UrlbarInput {
     Services.obs.notifyObservers({ result }, "urlbar-user-start-navigation");
   }
 
+  /**
+   * Determines if we should select all the text in the Urlbar based on the
+   * clickSelectsAll pref, Urlbar state, and whether the selection is empty.
+   */
+  _maybeSelectAll() {
+    if (
+      !this._preventClickSelectsAll &&
+      UrlbarPrefs.get("clickSelectsAll") &&
+      this._compositionState != UrlbarUtils.COMPOSITION.COMPOSING &&
+      this.document.activeElement == this.inputField &&
+      this.inputField.selectionStart == this.inputField.selectionEnd
+    ) {
+      this.editor.selectAll();
+    }
+  }
+
   // Event handlers below.
 
   _on_blur(event) {
@@ -1405,25 +1426,32 @@ class UrlbarInput {
     if (this.getAttribute("pageproxystate") != "valid") {
       this.window.UpdatePopupNotificationsVisibility();
     }
-    // Don't trigger clickSelectsAll when switching application windows.
-    if (this.document.activeElement == this.inputField) {
-      this._ignoreFocus = true;
-    }
     this._resetSearchState();
+  }
+
+  _on_click(event) {
+    this._maybeSelectAll();
+  }
+
+  _on_contextmenu(event) {
+    // On Windows, the context menu appears on mouseup. macOS and Linux require
+    // special handling to selectAll when the contextmenu is displayed.
+    // See bug 576135 comment 4 for details.
+    if (AppConstants.platform == "win") {
+      return;
+    }
+
+    // Context menu opened via keyboard shortcut.
+    if (!event.button) {
+      return;
+    }
+
+    this._maybeSelectAll();
   }
 
   _on_focus(event) {
     this._updateUrlTooltip();
     this.formatValue();
-
-    if (this._ignoreFocus) {
-      this._ignoreFocus = false;
-    } else if (
-      UrlbarPrefs.get("clickSelectsAll") &&
-      this._compositionState != UrlbarUtils.COMPOSITION.COMPOSING
-    ) {
-      this.editor.selectAll();
-    }
 
     // Hide popup notifications, to reduce visual noise.
     if (this.getAttribute("pageproxystate") != "valid") {
@@ -1436,12 +1464,14 @@ class UrlbarInput {
   }
 
   _on_mousedown(event) {
-    // We only care about left clicks here.
-    if (event.button != 0) {
-      return;
-    }
-
     if (event.currentTarget == this.inputField) {
+      this._preventClickSelectsAll = this.focused;
+
+      // The rest of this handler only cares about left clicks.
+      if (event.button != 0) {
+        return;
+      }
+
       if (event.detail == 2 && UrlbarPrefs.get("doubleClickSelectsAll")) {
         this.editor.selectAll();
         event.preventDefault();
@@ -1453,7 +1483,10 @@ class UrlbarInput {
       return;
     }
 
-    if (event.originalTarget.classList.contains("urlbar-history-dropmarker")) {
+    if (
+      event.originalTarget.classList.contains("urlbar-history-dropmarker") &&
+      event.button == 0
+    ) {
       if (this.view.isOpen) {
         this.view.close();
       } else {
@@ -1461,6 +1494,7 @@ class UrlbarInput {
         this.startQuery({
           allowAutofill: false,
         });
+        this._maybeSelectAll();
       }
     }
   }
@@ -1526,7 +1560,22 @@ class UrlbarInput {
   }
 
   _on_select(event) {
+    // On certain user input, AutoCopyListener::OnSelectionChange() updates
+    // the primary selection with user-selected text (when supported).
+    // Selection::NotifySelectionListeners() then dispatches a "select" event
+    // under similar conditions via TextInputListener::OnSelectionChange().
+    // This event is received here in order to replace the primary selection
+    // from the editor with text having the adjustments of
+    // _getSelectedValueForClipboard(), such as adding the scheme for the url.
+    //
+    // Other "select" events are also received, however, and must be excluded.
     if (
+      // _suppressPrimaryAdjustment is set during select().  Don't update
+      // the primary selection because that is not the intent of user input,
+      // which may be new tab or urlbar focus.
+      this._suppressPrimaryAdjustment ||
+      // The check on isHandlingUserInput filters out async "select" events
+      // from setSelectionRange(), which occur when autofill text is selected.
       !this.window.windowUtils.isHandlingUserInput ||
       !Services.clipboard.supportsSelectionClipboard()
     ) {

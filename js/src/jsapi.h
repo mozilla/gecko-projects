@@ -1974,16 +1974,6 @@ extern JS_PUBLIC_API JSScript* DecodeBinAST(
     JSContext* cx, const ReadOnlyCompileOptions& options, const uint8_t* buf,
     size_t length);
 
-extern JS_PUBLIC_API bool CanDecodeBinASTOffThread(
-    JSContext* cx, const ReadOnlyCompileOptions& options, size_t length);
-
-extern JS_PUBLIC_API bool DecodeBinASTOffThread(
-    JSContext* cx, const ReadOnlyCompileOptions& options, const uint8_t* buf,
-    size_t length, OffThreadCompileCallback callback, void* callbackData);
-
-extern JS_PUBLIC_API JSScript* FinishOffThreadBinASTDecode(
-    JSContext* cx, OffThreadToken* token);
-
 } /* namespace JS */
 
 #endif /* JS_BUILD_BINAST */
@@ -2863,12 +2853,12 @@ extern JS_PUBLIC_API void JS_SetOffthreadIonCompilationEnabled(JSContext* cx,
   Register(ION_FREQUENT_BAILOUT_THRESHOLD, "ion.frequent-bailout-threshold") \
   Register(BASELINE_INTERPRETER_ENABLE, "blinterp.enable") \
   Register(BASELINE_ENABLE, "baseline.enable") \
-  Register(OFFTHREAD_COMPILATION_ENABLE, "offthread-compilation.enable") \
+  Register(OFFTHREAD_COMPILATION_ENABLE, "offthread-compilation.enable")  \
   Register(FULL_DEBUG_CHECKS, "jit.full-debug-checks") \
   Register(JUMP_THRESHOLD, "jump-threshold") \
-  Register(TRACK_OPTIMIZATIONS, "jit.track-optimizations")\
-  Register(UNBOXED_OBJECTS, "unboxed_objects") \
-  Register(SIMULATOR_ALWAYS_INTERRUPT, "simulator.always-interrupt") \
+  Register(TRACK_OPTIMIZATIONS, "jit.track-optimizations") \
+  Register(NATIVE_REGEXP_ENABLE, "native_regexp.enable") \
+  Register(SIMULATOR_ALWAYS_INTERRUPT, "simulator.always-interrupt")      \
   Register(SPECTRE_INDEX_MASKING, "spectre.index-masking") \
   Register(SPECTRE_OBJECT_MITIGATIONS_BARRIERS, "spectre.object-mitigations.barriers") \
   Register(SPECTRE_OBJECT_MITIGATIONS_MISC, "spectre.object-mitigations.misc") \

@@ -35,9 +35,6 @@ function waitForThemeChange(list) {
 }
 
 add_task(async function enableHtmlViews() {
-  await SpecialPowers.pushPrefEnv({
-    set: [["extensions.htmlaboutaddons.enabled", true]],
-  });
   promptService = mockPromptService();
   Services.telemetry.clearEvents();
 });
@@ -730,5 +727,30 @@ add_task(async function testPluginIcons() {
     is(icon.src, pluginIconUrl, "Plugins use the plugin icon");
   }
 
+  await closeView(win);
+});
+
+add_task(async function testExtensionGenericIcon() {
+  const extensionIconUrl =
+    "chrome://mozapps/skin/extensions/extensionGeneric.svg";
+
+  let id = "test@mochi.test";
+  let extension = ExtensionTestUtils.loadExtension({
+    manifest: {
+      name: "Test extension",
+      applications: { gecko: { id } },
+    },
+    useAddonManager: "temporary",
+  });
+  await extension.startup();
+
+  let win = await loadInitialView("extension");
+  let doc = win.document;
+
+  let card = getCardByAddonId(doc, id);
+  let icon = card.querySelector(".addon-icon");
+  is(icon.src, extensionIconUrl, "Extensions without icon use the generic one");
+
+  await extension.unload();
   await closeView(win);
 });

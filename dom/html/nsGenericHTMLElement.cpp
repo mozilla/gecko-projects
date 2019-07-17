@@ -510,7 +510,7 @@ HTMLFormElement* nsGenericHTMLElement::FindAncestorForm(
       // we're one of those inputs-in-a-table that have a hacked mForm pointer
       // and a subtree containing both us and the form got removed from the
       // DOM.
-      if (nsContentUtils::ContentIsDescendantOf(aCurrentForm, prevContent)) {
+      if (aCurrentForm->IsInclusiveDescendantOf(prevContent)) {
         return aCurrentForm;
       }
     }
@@ -863,10 +863,9 @@ bool nsGenericHTMLElement::ParseBackgroundAttribute(int32_t aNamespaceID,
       aAttribute == nsGkAtoms::background && !aValue.IsEmpty()) {
     // Resolve url to an absolute url
     Document* doc = OwnerDoc();
-    nsCOMPtr<nsIURI> baseURI = GetBaseURI();
     nsCOMPtr<nsIURI> uri;
     nsresult rv = nsContentUtils::NewURIWithDocumentCharset(
-        getter_AddRefs(uri), aValue, doc, baseURI);
+        getter_AddRefs(uri), aValue, doc, GetBaseURI());
     if (NS_FAILED(rv)) {
       return false;
     }
@@ -1413,8 +1412,7 @@ uint32_t nsGenericHTMLElement::GetDimensionAttrAsUnsignedInt(
   attrVal->ToString(val);
   nsContentUtils::ParseHTMLIntegerResultFlags result;
   int32_t parsedInt = nsContentUtils::ParseHTMLInteger(val, &result);
-  if ((result & nsContentUtils::eParseHTMLInteger_Error) ||
-      parsedInt < 0) {
+  if ((result & nsContentUtils::eParseHTMLInteger_Error) || parsedInt < 0) {
     return aDefault;
   }
 
@@ -2685,9 +2683,9 @@ nsresult nsGenericHTMLElement::NewURIFromString(const nsAString& aURISpec,
 
   nsCOMPtr<Document> doc = OwnerDoc();
 
-  nsCOMPtr<nsIURI> baseURI = GetBaseURI();
   nsresult rv =
-      nsContentUtils::NewURIWithDocumentCharset(aURI, aURISpec, doc, baseURI);
+      nsContentUtils::NewURIWithDocumentCharset(aURI, aURISpec, doc,
+                                                GetBaseURI());
   NS_ENSURE_SUCCESS(rv, rv);
 
   bool equal;

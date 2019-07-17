@@ -775,32 +775,21 @@ void xpc::SetPrefableRealmOptions(JS::RealmOptions& options) {
       .setAwaitFixEnabled(sAwaitFixEnabled);
 }
 
-static void ReloadPrefsCallback(const char* pref, XPCJSContext* xpccx) {
+static void LoadStartupJSPrefs(XPCJSContext* xpccx) {
+  // Prefs that require a restart are handled here. This includes the
+  // process-wide JIT options because toggling these at runtime can easily cause
+  // races or get us into an inconsistent state.
+  //
+  // 'Live' prefs are handled by ReloadPrefsCallback below.
+
   JSContext* cx = xpccx->Context();
 
   bool useBaselineInterp = Preferences::GetBool(JS_OPTIONS_DOT_STR "blinterp");
-  bool useBaseline = Preferences::GetBool(JS_OPTIONS_DOT_STR "baselinejit");
+  bool useBaselineJit = Preferences::GetBool(JS_OPTIONS_DOT_STR "baselinejit");
   bool useIon = Preferences::GetBool(JS_OPTIONS_DOT_STR "ion");
-  bool useAsmJS = Preferences::GetBool(JS_OPTIONS_DOT_STR "asmjs");
-  bool useWasm = Preferences::GetBool(JS_OPTIONS_DOT_STR "wasm");
-  bool useWasmIon = Preferences::GetBool(JS_OPTIONS_DOT_STR "wasm_ionjit");
-  bool useWasmBaseline =
-      Preferences::GetBool(JS_OPTIONS_DOT_STR "wasm_baselinejit");
-#ifdef ENABLE_WASM_CRANELIFT
-  bool useWasmCranelift =
-      Preferences::GetBool(JS_OPTIONS_DOT_STR "wasm_cranelift");
-#endif
-#ifdef ENABLE_WASM_GC
-  bool useWasmGc = Preferences::GetBool(JS_OPTIONS_DOT_STR "wasm_gc");
-#endif
-  bool useWasmVerbose = Preferences::GetBool(JS_OPTIONS_DOT_STR "wasm_verbose");
-  bool throwOnAsmJSValidationFailure = Preferences::GetBool(
-      JS_OPTIONS_DOT_STR "throw_on_asmjs_validation_failure");
   bool useNativeRegExp =
       Preferences::GetBool(JS_OPTIONS_DOT_STR "native_regexp");
 
-  bool parallelParsing =
-      Preferences::GetBool(JS_OPTIONS_DOT_STR "parallel_parsing");
   bool offthreadIonCompilation =
       Preferences::GetBool(JS_OPTIONS_DOT_STR "ion.offthread_compilation");
   bool useBaselineEager = Preferences::GetBool(
@@ -823,23 +812,6 @@ static void ReloadPrefsCallback(const char* pref, XPCJSContext* xpccx) {
   int32_t ionFrequentBailoutThreshold = Preferences::GetInt(
       JS_OPTIONS_DOT_STR "ion.frequent_bailout_threshold", -1);
 
-  sDiscardSystemSource =
-      Preferences::GetBool(JS_OPTIONS_DOT_STR "discardSystemSource");
-
-  bool useAsyncStack = Preferences::GetBool(JS_OPTIONS_DOT_STR "asyncstack");
-
-  sBigIntEnabled = Preferences::GetBool(JS_OPTIONS_DOT_STR "bigint");
-
-  bool throwOnDebuggeeWouldRun =
-      Preferences::GetBool(JS_OPTIONS_DOT_STR "throw_on_debuggee_would_run");
-
-  bool dumpStackOnDebuggeeWouldRun = Preferences::GetBool(
-      JS_OPTIONS_DOT_STR "dump_stack_on_debuggee_would_run");
-
-  bool werror = Preferences::GetBool(JS_OPTIONS_DOT_STR "werror");
-
-  bool extraWarnings = Preferences::GetBool(JS_OPTIONS_DOT_STR "strict");
-
   bool spectreIndexMasking =
       Preferences::GetBool(JS_OPTIONS_DOT_STR "spectre.index_masking");
   bool spectreObjectMitigationsBarriers = Preferences::GetBool(
@@ -853,75 +825,31 @@ static void ReloadPrefsCallback(const char* pref, XPCJSContext* xpccx) {
   bool spectreJitToCxxCalls =
       Preferences::GetBool(JS_OPTIONS_DOT_STR "spectre.jit_to_C++_calls");
 
-  sSharedMemoryEnabled =
-      Preferences::GetBool(JS_OPTIONS_DOT_STR "shared_memory");
-  sStreamsEnabled = Preferences::GetBool(JS_OPTIONS_DOT_STR "streams");
-  sFieldsEnabled =
-      Preferences::GetBool(JS_OPTIONS_DOT_STR "experimental.fields");
-  sAwaitFixEnabled =
-      Preferences::GetBool(JS_OPTIONS_DOT_STR "experimental.await_fix");
-
-#ifdef DEBUG
-  sExtraWarningsForSystemJS =
-      Preferences::GetBool(JS_OPTIONS_DOT_STR "strict.debug");
-#endif
-
-#ifdef JS_GC_ZEAL
-  int32_t zeal = Preferences::GetInt(JS_OPTIONS_DOT_STR "gczeal", -1);
-  int32_t zeal_frequency = Preferences::GetInt(
-      JS_OPTIONS_DOT_STR "gczeal.frequency", JS_DEFAULT_ZEAL_FREQ);
-  if (zeal >= 0) {
-    JS_SetGCZeal(cx, (uint8_t)zeal, zeal_frequency);
-  }
-#endif  // JS_GC_ZEAL
-
-#ifdef FUZZING
-  bool fuzzingEnabled = StaticPrefs::fuzzing_enabled();
-#endif
-
-  JS::ContextOptionsRef(cx)
-      .setBaseline(useBaseline)
-      .setIon(useIon)
-      .setAsmJS(useAsmJS)
-      .setWasm(useWasm)
-      .setWasmIon(useWasmIon)
-      .setWasmBaseline(useWasmBaseline)
-#ifdef ENABLE_WASM_CRANELIFT
-      .setWasmCranelift(useWasmCranelift)
-#endif
-#ifdef ENABLE_WASM_GC
-      .setWasmGc(useWasmGc)
-#endif
-      .setWasmVerbose(useWasmVerbose)
-      .setThrowOnAsmJSValidationFailure(throwOnAsmJSValidationFailure)
-      .setNativeRegExp(useNativeRegExp)
-      .setAsyncStack(useAsyncStack)
-      .setThrowOnDebuggeeWouldRun(throwOnDebuggeeWouldRun)
-      .setDumpStackOnDebuggeeWouldRun(dumpStackOnDebuggeeWouldRun)
-      .setWerror(werror)
-#ifdef FUZZING
-      .setFuzzing(fuzzingEnabled)
-#endif
-      .setExtraWarnings(extraWarnings);
-
   nsCOMPtr<nsIXULRuntime> xr = do_GetService("@mozilla.org/xre/runtime;1");
   if (xr) {
     bool safeMode = false;
     xr->GetInSafeMode(&safeMode);
     if (safeMode) {
-      JS::ContextOptionsRef(cx).disableOptionsForSafeMode();
       useBaselineInterp = false;
+      useBaselineJit = false;
+      useIon = false;
+      useNativeRegExp = false;
     }
   }
 
   JS_SetGlobalJitCompilerOption(cx, JSJITCOMPILER_BASELINE_INTERPRETER_ENABLE,
                                 useBaselineInterp);
+  JS_SetGlobalJitCompilerOption(cx, JSJITCOMPILER_BASELINE_ENABLE,
+                                useBaselineJit);
+  JS_SetGlobalJitCompilerOption(cx, JSJITCOMPILER_ION_ENABLE, useIon);
+  JS_SetGlobalJitCompilerOption(cx, JSJITCOMPILER_NATIVE_REGEXP_ENABLE,
+                                useNativeRegExp);
+
+  JS_SetOffthreadIonCompilationEnabled(cx, offthreadIonCompilation);
+
   JS_SetGlobalJitCompilerOption(
       cx, JSJITCOMPILER_BASELINE_INTERPRETER_WARMUP_TRIGGER,
       baselineInterpThreshold);
-
-  JS_SetParallelParsingEnabled(cx, parallelParsing);
-  JS_SetOffthreadIonCompilationEnabled(cx, offthreadIonCompilation);
   JS_SetGlobalJitCompilerOption(cx, JSJITCOMPILER_BASELINE_WARMUP_TRIGGER,
                                 useBaselineEager ? 0 : baselineThreshold);
   JS_SetGlobalJitCompilerOption(cx, JSJITCOMPILER_ION_NORMAL_WARMUP_TRIGGER,
@@ -951,6 +879,107 @@ static void ReloadPrefsCallback(const char* pref, XPCJSContext* xpccx) {
                                 spectreValueMasking);
   JS_SetGlobalJitCompilerOption(cx, JSJITCOMPILER_SPECTRE_JIT_TO_CXX_CALLS,
                                 spectreJitToCxxCalls);
+}
+
+static void ReloadPrefsCallback(const char* pref, XPCJSContext* xpccx) {
+  // Note: Prefs that require a restart are handled in LoadStartupJSPrefs above.
+
+  JSContext* cx = xpccx->Context();
+
+  bool useAsmJS = Preferences::GetBool(JS_OPTIONS_DOT_STR "asmjs");
+  bool useWasm = Preferences::GetBool(JS_OPTIONS_DOT_STR "wasm");
+  bool useWasmIon = Preferences::GetBool(JS_OPTIONS_DOT_STR "wasm_ionjit");
+  bool useWasmBaseline =
+      Preferences::GetBool(JS_OPTIONS_DOT_STR "wasm_baselinejit");
+#ifdef ENABLE_WASM_CRANELIFT
+  bool useWasmCranelift =
+      Preferences::GetBool(JS_OPTIONS_DOT_STR "wasm_cranelift");
+#endif
+#ifdef ENABLE_WASM_GC
+  bool useWasmGc = Preferences::GetBool(JS_OPTIONS_DOT_STR "wasm_gc");
+#endif
+  bool useWasmVerbose = Preferences::GetBool(JS_OPTIONS_DOT_STR "wasm_verbose");
+  bool throwOnAsmJSValidationFailure = Preferences::GetBool(
+      JS_OPTIONS_DOT_STR "throw_on_asmjs_validation_failure");
+
+  bool parallelParsing =
+      Preferences::GetBool(JS_OPTIONS_DOT_STR "parallel_parsing");
+
+  sDiscardSystemSource =
+      Preferences::GetBool(JS_OPTIONS_DOT_STR "discardSystemSource");
+
+  bool useAsyncStack = Preferences::GetBool(JS_OPTIONS_DOT_STR "asyncstack");
+
+  sBigIntEnabled = Preferences::GetBool(JS_OPTIONS_DOT_STR "bigint");
+
+  bool throwOnDebuggeeWouldRun =
+      Preferences::GetBool(JS_OPTIONS_DOT_STR "throw_on_debuggee_would_run");
+
+  bool dumpStackOnDebuggeeWouldRun = Preferences::GetBool(
+      JS_OPTIONS_DOT_STR "dump_stack_on_debuggee_would_run");
+
+  bool werror = Preferences::GetBool(JS_OPTIONS_DOT_STR "werror");
+
+  bool extraWarnings = Preferences::GetBool(JS_OPTIONS_DOT_STR "strict");
+
+  sSharedMemoryEnabled =
+      Preferences::GetBool(JS_OPTIONS_DOT_STR "shared_memory");
+  sStreamsEnabled = Preferences::GetBool(JS_OPTIONS_DOT_STR "streams");
+  sFieldsEnabled =
+      Preferences::GetBool(JS_OPTIONS_DOT_STR "experimental.fields");
+  sAwaitFixEnabled =
+      Preferences::GetBool(JS_OPTIONS_DOT_STR "experimental.await_fix");
+
+#ifdef DEBUG
+  sExtraWarningsForSystemJS =
+      Preferences::GetBool(JS_OPTIONS_DOT_STR "strict.debug");
+#endif
+
+#ifdef JS_GC_ZEAL
+  int32_t zeal = Preferences::GetInt(JS_OPTIONS_DOT_STR "gczeal", -1);
+  int32_t zeal_frequency = Preferences::GetInt(
+      JS_OPTIONS_DOT_STR "gczeal.frequency", JS_DEFAULT_ZEAL_FREQ);
+  if (zeal >= 0) {
+    JS_SetGCZeal(cx, (uint8_t)zeal, zeal_frequency);
+  }
+#endif  // JS_GC_ZEAL
+
+#ifdef FUZZING
+  bool fuzzingEnabled = StaticPrefs::fuzzing_enabled();
+#endif
+
+  JS::ContextOptionsRef(cx)
+      .setAsmJS(useAsmJS)
+      .setWasm(useWasm)
+      .setWasmIon(useWasmIon)
+      .setWasmBaseline(useWasmBaseline)
+#ifdef ENABLE_WASM_CRANELIFT
+      .setWasmCranelift(useWasmCranelift)
+#endif
+#ifdef ENABLE_WASM_GC
+      .setWasmGc(useWasmGc)
+#endif
+      .setWasmVerbose(useWasmVerbose)
+      .setThrowOnAsmJSValidationFailure(throwOnAsmJSValidationFailure)
+      .setAsyncStack(useAsyncStack)
+      .setThrowOnDebuggeeWouldRun(throwOnDebuggeeWouldRun)
+      .setDumpStackOnDebuggeeWouldRun(dumpStackOnDebuggeeWouldRun)
+      .setWerror(werror)
+#ifdef FUZZING
+      .setFuzzing(fuzzingEnabled)
+#endif
+      .setExtraWarnings(extraWarnings);
+
+  nsCOMPtr<nsIXULRuntime> xr = do_GetService("@mozilla.org/xre/runtime;1");
+  if (xr) {
+    bool safeMode = false;
+    xr->GetInSafeMode(&safeMode);
+    if (safeMode) {
+      JS::ContextOptionsRef(cx).disableOptionsForSafeMode();
+    }
+  }
+
+  JS_SetParallelParsingEnabled(cx, parallelParsing);
 }
 
 XPCJSContext::~XPCJSContext() {
@@ -1214,6 +1243,8 @@ nsresult XPCJSContext::Initialize(XPCJSContext* aPrimaryContext) {
   if (!aPrimaryContext) {
     Runtime()->Initialize(cx);
   }
+
+  LoadStartupJSPrefs(this);
 
   // Watch for the JS boolean options.
   ReloadPrefsCallback(nullptr, this);

@@ -81,7 +81,6 @@
   /* eslint-env mozilla/browser-window */
   Services.scriptloader.loadSubScript("chrome://global/content/contentAreaUtils.js", this);
   Services.scriptloader.loadSubScript("chrome://browser/content/browser-captivePortal.js", this);
-  Services.scriptloader.loadSubScript("chrome://browser/content/browser-contentblocking.js", this);
   if (AppConstants.MOZ_DATA_REPORTING) {
     Services.scriptloader.loadSubScript("chrome://browser/content/browser-data-submission-info-bar.js", this);
   }
@@ -221,16 +220,6 @@
            role="group"
            noautofocus="true"
            hidden="true" />
-
-    <!-- for url bar autocomplete -->
-    <panel type="autocomplete-richlistbox"
-           id="PopupAutoCompleteRichResult"
-           role="group"
-           noautofocus="true"
-           hidden="true"
-           flip="none"
-           level="parent"
-           overflowpadding="15" />
 
     <!-- for date/time picker. consumeoutsideclicks is set to never, so that
          clicks on the anchored input box are never consumed. -->
@@ -737,6 +726,7 @@
                 <toolbarbutton class="tabs-newtab-button toolbarbutton-1" command="cmd_newNavigatorTab" onclick="checkForMiddleClick(this, event);"/>
                 <spacer class="closing-tabs-spacer" style="width: 0;"/>
               </arrowscrollbox>
+              <html:span id="tabbrowser-tab-a11y-desc" hidden="true"/>
             </tabs>
 
             <toolbarbutton id="new-tab-button"

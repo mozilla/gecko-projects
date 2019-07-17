@@ -1640,7 +1640,7 @@ nsresult gfxFcPlatformFontList::InitFontListForPlatform() {
 }
 
 void gfxFcPlatformFontList::ReadSystemFontList(
-    InfallibleTArray<SystemFontListEntry>* retValue) {
+    nsTArray<SystemFontListEntry>* retValue) {
   // Fontconfig versions below 2.9 drop the FC_FILE element in FcNameUnparse
   // (see https://bugs.freedesktop.org/show_bug.cgi?id=26718), so when using
   // an older version, we manually append it to the unparsed pattern.
@@ -1650,10 +1650,11 @@ void gfxFcPlatformFontList::ReadSystemFontList(
       family->AddFacesToFontList([&](FcPattern* aPat, bool aAppFonts) {
         char* s = (char*)FcNameUnparse(aPat);
         nsDependentCString patternStr(s);
+        char* file = nullptr;
         if (FcResultMatch ==
-            FcPatternGetString(aPat, FC_FILE, 0, (FcChar8**)&s)) {
+            FcPatternGetString(aPat, FC_FILE, 0, (FcChar8**)&file)) {
           patternStr.Append(":file=");
-          patternStr.Append(s);
+          patternStr.Append(file);
         }
         retValue->AppendElement(FontPatternListEntry(patternStr, aAppFonts));
         free(s);

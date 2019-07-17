@@ -525,6 +525,22 @@ bool BreakpointSite::hasBreakpoint(Breakpoint* toFind) {
   return false;
 }
 
+inline gc::Cell* BreakpointSite::owningCellUnbarriered() {
+  if (type() == Type::JS) {
+    return asJS()->script;
+  }
+
+  return asWasm()->instance->objectUnbarriered();
+}
+
+inline size_t BreakpointSite::allocSize() {
+  if (type() == Type::JS) {
+    return sizeof(Breakpoint);
+  }
+
+  return sizeof(WasmBreakpoint);
+}
+
 Breakpoint::Breakpoint(Debugger* debugger, BreakpointSite* site,
                        JSObject* handler)
     : debugger(debugger), site(site), handler(handler) {
@@ -540,10 +556,12 @@ void Breakpoint::destroy(FreeOp* fop,
   }
   debugger->breakpoints.remove(this);
   site->breakpoints.remove(this);
+  gc::Cell* cell = site->owningCellUnbarriered();
+  size_t size = site->allocSize();
   if (mayDestroySite == MayDestroySite::True) {
     site->destroyIfEmpty(fop);
   }
-  fop->delete_(this);
+  fop->delete_(cell, this, size, MemoryUse::Breakpoint);
 }
 
 Breakpoint* Breakpoint::nextInDebugger() { return debuggerLink.mNext; }
@@ -567,19 +585,20 @@ void JSBreakpointSite::destroyIfEmpty(FreeOp* fop) {
   }
 }
 
-WasmBreakpointSite::WasmBreakpointSite(wasm::DebugState* debug_,
+WasmBreakpointSite::WasmBreakpointSite(wasm::Instance* instance_,
                                        uint32_t offset_)
-    : BreakpointSite(Type::Wasm), debug(debug_), offset(offset_) {
-  MOZ_ASSERT(debug_);
+    : BreakpointSite(Type::Wasm), instance(instance_), offset(offset_) {
+  MOZ_ASSERT(instance);
+  MOZ_ASSERT(instance->debugEnabled());
 }
 
 void WasmBreakpointSite::recompile(FreeOp* fop) {
-  debug->toggleBreakpointTrap(fop->runtime(), offset, isEnabled());
+  instance->debug().toggleBreakpointTrap(fop->runtime(), offset, isEnabled());
 }
 
 void WasmBreakpointSite::destroyIfEmpty(FreeOp* fop) {
   if (isEmpty()) {
-    debug->destroyBreakpointSite(fop, offset);
+    instance->destroyBreakpointSite(fop, offset);
   }
 }
 
@@ -2418,8 +2437,7 @@ ResumeMode Debugger::onTrap(JSContext* cx, MutableHandleValue vp) {
     isJS = false;
     pc = nullptr;
     bytecodeOffset = iter.wasmBytecodeOffset();
-    site = iter.wasmInstance()->debug().getOrCreateBreakpointSite(
-        cx, bytecodeOffset);
+    site = iter.wasmInstance()->debug().getBreakpointSite(cx, bytecodeOffset);
   }
 
   // Build list of breakpoint handlers.
@@ -2488,7 +2506,7 @@ ResumeMode Debugger::onTrap(JSContext* cx, MutableHandleValue vp) {
         if (isJS) {
           site = iter.script()->getBreakpointSite(pc);
         } else {
-          site = iter.wasmInstance()->debug().getOrCreateBreakpointSite(cx,
+          site = iter.wasmInstance()->debug().getBreakpointSite(cx,
                                                                 bytecodeOffset);
         }
       }
@@ -8076,6 +8094,7 @@ struct DebuggerScriptSetBreakpointMatcher {
     }
     site->inc(cx_->runtime()->defaultFreeOp());
     if (cx_->zone()->new_<Breakpoint>(dbg_, site, handler_)) {
+      AddCellMemory(script, sizeof(Breakpoint), MemoryUse::Breakpoint);
       return true;
     }
     site->dec(cx_->runtime()->defaultFreeOp());
@@ -8097,14 +8116,15 @@ struct DebuggerScriptSetBreakpointMatcher {
                                 JSMSG_DEBUG_BAD_OFFSET);
       return false;
     }
-    WasmBreakpointSite* site =
-        instance.debug().getOrCreateBreakpointSite(cx_, offset_);
+    WasmBreakpointSite* site = instance.getOrCreateBreakpointSite(cx_, offset_);
     if (!site) {
       return false;
     }
     site->inc(cx_->runtime()->defaultFreeOp());
     if (cx_->zone()->new_<WasmBreakpoint>(dbg_, site, handler_,
                                           instance.object())) {
+      AddCellMemory(wasmInstance, sizeof(WasmBreakpoint),
+                    MemoryUse::Breakpoint);
       return true;
     }
     site->dec(cx_->runtime()->defaultFreeOp());
@@ -8268,15 +8288,14 @@ class DebuggerScriptIsInCatchScopeMatcher {
       return false;
     }
 
-    if (script->hasTrynotes()) {
-      for (const JSTryNote& tn : script->trynotes()) {
-        if (tn.start <= offset_ && offset_ < tn.start + tn.length &&
-            tn.kind == JSTRY_CATCH) {
-          isInCatch_ = true;
-          return true;
-        }
+    for (const JSTryNote& tn : script->trynotes()) {
+      if (tn.start <= offset_ && offset_ < tn.start + tn.length &&
+          tn.kind == JSTRY_CATCH) {
+        isInCatch_ = true;
+        return true;
       }
     }
+
     isInCatch_ = false;
     return true;
   }
@@ -12905,6 +12924,29 @@ bool DebuggerEnvironment::typeGetter(JSContext* cx, unsigned argc, Value* vp) {
   return true;
 }
 
+bool DebuggerEnvironment::scopeKindGetter(JSContext* cx, unsigned argc,
+                                          Value* vp) {
+  THIS_DEBUGGER_ENVIRONMENT(cx, argc, vp, "get scopeKind", args, environment);
+
+  if (!environment->requireDebuggee(cx)) {
+    return false;
+  }
+
+  Maybe<ScopeKind> kind = environment->scopeKind();
+  if (kind.isSome()) {
+    const char* s = ScopeKindString(*kind);
+    JSAtom* str = Atomize(cx, s, strlen(s), PinAtom);
+    if (!str) {
+      return false;
+    }
+    args.rval().setString(str);
+  } else {
+    args.rval().setNull();
+  }
+
+  return true;
+}
+
 /* static */
 bool DebuggerEnvironment::parentGetter(JSContext* cx, unsigned argc,
                                        Value* vp) {
@@ -13090,6 +13132,7 @@ bool DebuggerEnvironment::requireDebuggee(JSContext* cx) const {
 
 const JSPropertySpec DebuggerEnvironment::properties_[] = {
     JS_PSG("type", DebuggerEnvironment::typeGetter, 0),
+    JS_PSG("scopeKind", DebuggerEnvironment::scopeKindGetter, 0),
     JS_PSG("parent", DebuggerEnvironment::parentGetter, 0),
     JS_PSG("object", DebuggerEnvironment::objectGetter, 0),
     JS_PSG("callee", DebuggerEnvironment::calleeGetter, 0),
@@ -13141,6 +13184,16 @@ DebuggerEnvironmentType DebuggerEnvironment::type() const {
     return DebuggerEnvironmentType::With;
   }
   return DebuggerEnvironmentType::Object;
+}
+
+mozilla::Maybe<ScopeKind> DebuggerEnvironment::scopeKind() const {
+  if (!referent()->is<DebugEnvironmentProxy>()) {
+    return Nothing();
+  }
+  EnvironmentObject& env =
+      referent()->as<DebugEnvironmentProxy>().environment();
+  Scope* scope = GetEnvironmentScope(env);
+  return scope ? Some(scope->kind()) : Nothing();
 }
 
 bool DebuggerEnvironment::getParent(

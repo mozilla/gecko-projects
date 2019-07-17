@@ -73,7 +73,6 @@
 #include "mozilla/dom/ServiceWorkerManager.h"
 #include "mozilla/UniquePtr.h"
 #include "Principal.h"
-#include "WorkerHolder.h"
 #include "WorkerPrivate.h"
 #include "WorkerRunnable.h"
 #include "WorkerScope.h"
@@ -1316,8 +1315,7 @@ class ScriptLoaderRunnable final : public nsIRunnable, public nsINamed {
     }
     if (NS_SUCCEEDED(rv) && IsMainWorkerScript()) {
       nsCOMPtr<nsIURI> finalURI;
-      rv = NS_NewURI(getter_AddRefs(finalURI), loadInfo.mFullURL, nullptr,
-                     nullptr);
+      rv = NS_NewURI(getter_AddRefs(finalURI), loadInfo.mFullURL);
       if (NS_SUCCEEDED(rv)) {
         mWorkerPrivate->SetBaseURI(finalURI);
       }

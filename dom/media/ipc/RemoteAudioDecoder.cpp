@@ -6,7 +6,10 @@
 #include "RemoteAudioDecoder.h"
 
 #include "RemoteDecoderManagerChild.h"
+#include "OpusDecoder.h"
 #include "VorbisDecoder.h"
+#include "WAVDecoder.h"
+
 #include "mozilla/PodOperations.h"
 
 namespace mozilla {
@@ -83,6 +86,10 @@ RemoteAudioDecoderParent::RemoteAudioDecoderParent(
 
   if (VorbisDataDecoder::IsVorbis(params.mConfig.mMimeType)) {
     mDecoder = new VorbisDataDecoder(params);
+  } else if (OpusDataDecoder::IsOpus(params.mConfig.mMimeType)) {
+    mDecoder = new OpusDataDecoder(params);
+  } else if (WaveDataDecoder::IsWave(params.mConfig.mMimeType)) {
+    mDecoder = new WaveDataDecoder(params);
   }
 
   if (NS_FAILED(error)) {

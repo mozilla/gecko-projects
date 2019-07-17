@@ -1181,12 +1181,13 @@ void nsGlobalWindowInner::FreeInnerObjects() {
   // This breaks a cycle between the window and the ClientSource object.
   mClientSource.reset();
 
-  if (mBrowserChild) {
-    // Remove any remaining listeners, and reset mBeforeUnloadListenerCount.
-    for (int i = 0; i < mBeforeUnloadListenerCount; ++i) {
-      mBrowserChild->BeforeUnloadRemoved();
+  if (mWindowGlobalChild) {
+    // Remove any remaining listeners.
+    int64_t nListeners = mWindowGlobalChild->BeforeUnloadListeners();
+    for (int64_t i = 0; i < nListeners; ++i) {
+      mWindowGlobalChild->BeforeUnloadRemoved();
     }
-    mBeforeUnloadListenerCount = 0;
+    MOZ_ASSERT(mWindowGlobalChild->BeforeUnloadListeners() == 0);
   }
 
   // If we have any promiseDocumentFlushed callbacks, fire them now so
@@ -5854,6 +5855,21 @@ int32_t nsGlobalWindowInner::SetTimeoutOrInterval(JSContext* aCx,
   return result;
 }
 
+static const char* GetTimeoutReasonString(Timeout* aTimeout) {
+  switch (aTimeout->mReason) {
+    case Timeout::Reason::eTimeoutOrInterval:
+      if (aTimeout->mIsInterval) {
+        return "setInterval handler";
+      }
+      return "setTimeout handler";
+    case Timeout::Reason::eIdleCallbackTimeout:
+      return "setIdleCallback handler (timed out)";
+    default:
+      MOZ_CRASH("Unexpected enum value");
+      return "";
+  }
+}
+
 bool nsGlobalWindowInner::RunTimeoutHandler(Timeout* aTimeout,
                                             nsIScriptContext* aScx) {
   // Hold on to the timeout in case mExpr or mFunObj releases its
@@ -5881,12 +5897,25 @@ bool nsGlobalWindowInner::RunTimeoutHandler(Timeout* aTimeout,
     TimeoutManager::SetNestingLevel(timeout->mNestingLevel);
   }
 
-  const char* reason;
-  if (timeout->mIsInterval) {
-    reason = "setInterval handler";
-  } else {
-    reason = "setTimeout handler";
+  const char* reason = GetTimeoutReasonString(timeout);
+
+#ifdef MOZ_GECKO_PROFILER
+  nsCOMPtr<nsIDocShell> docShell = GetDocShell();
+  nsCString str;
+  if (profiler_is_active()) {
+    TimeDuration originalInterval = timeout->When() - timeout->SubmitTime();
+    str.Append(reason);
+    str.Append(" with interval ");
+    str.AppendInt(int(originalInterval.ToMilliseconds()));
+    str.Append("ms: ");
+    nsCString handlerDescription;
+    timeout->mScriptHandler->GetDescription(handlerDescription);
+    str.Append(handlerDescription);
   }
+  AUTO_PROFILER_TEXT_MARKER_DOCSHELL_CAUSE("setTimeout callback", str, JS,
+                                           docShell,
+                                           timeout->TakeProfilerBacktrace());
+#endif
 
   bool abortIntervalHandler;
   {
@@ -6042,9 +6071,8 @@ void nsGlobalWindowInner::EventListenerAdded(nsAtom* aType) {
 
   if (aType == nsGkAtoms::onbeforeunload && mBrowserChild &&
       (!mDoc || !(mDoc->GetSandboxFlags() & SANDBOXED_MODALS))) {
-    mBeforeUnloadListenerCount++;
-    MOZ_ASSERT(mBeforeUnloadListenerCount > 0);
-    mBrowserChild->BeforeUnloadAdded();
+    mWindowGlobalChild->BeforeUnloadAdded();
+    MOZ_ASSERT(mWindowGlobalChild->BeforeUnloadListeners() > 0);
   }
 
   // We need to initialize localStorage in order to receive notifications.
@@ -6065,9 +6093,8 @@ void nsGlobalWindowInner::EventListenerAdded(nsAtom* aType) {
 void nsGlobalWindowInner::EventListenerRemoved(nsAtom* aType) {
   if (aType == nsGkAtoms::onbeforeunload && mBrowserChild &&
       (!mDoc || !(mDoc->GetSandboxFlags() & SANDBOXED_MODALS))) {
-    mBeforeUnloadListenerCount--;
-    MOZ_ASSERT(mBeforeUnloadListenerCount >= 0);
-    mBrowserChild->BeforeUnloadRemoved();
+    mWindowGlobalChild->BeforeUnloadRemoved();
+    MOZ_ASSERT(mWindowGlobalChild->BeforeUnloadListeners() >= 0);
   }
 
   if (aType == nsGkAtoms::onstorage) {

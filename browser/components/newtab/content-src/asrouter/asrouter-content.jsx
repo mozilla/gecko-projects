@@ -1,3 +1,7 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this file,
+ * You can obtain one at http://mozilla.org/MPL/2.0/. */
+
 import { actionCreators as ac } from "common/Actions.jsm";
 import { OUTGOING_MESSAGE_NAME as AS_GENERAL_OUTGOING_MESSAGE_NAME } from "content-src/lib/init-store";
 import { generateBundles } from "./rich-text-strings";
@@ -269,9 +273,12 @@ export class ASRouterUISurface extends React.PureComponent {
   renderSnippets() {
     if (
       this.state.bundle.template === "onboarding" ||
-      this.state.message.template === "fxa_overlay" ||
-      this.state.message.template === "return_to_amo_overlay" ||
-      this.state.message.template === "trailhead"
+      [
+        "fxa_overlay",
+        "return_to_amo_overlay",
+        "trailhead",
+        "whatsnew_panel_message",
+      ].includes(this.state.message.template)
     ) {
       return null;
     }

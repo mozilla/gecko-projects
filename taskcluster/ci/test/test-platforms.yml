@@ -207,11 +207,11 @@ windows10-aarch64/opt:
         - windows-aarch64-tests
         - windows-talos
 
-windows10-64-ux/opt:
+windows10-64-ref-hw-2017/opt:
     build-platform: win64-shippable/opt
     test-sets:
         - raptor-firefox
-        - talos-ux
+        - talos-ref-hw
 
 windows10-64-shippable/opt:
     build-platform: win64-shippable/opt
@@ -283,10 +283,10 @@ macosx1014-64-shippable/opt:
         - web-platform-tests-wdspec-headless
 
 macosx1014-64/debug:
-    build-platform: macosx64-shippable/opt
+    build-platform: macosx64/debug
     test-sets:
         - macosx1014-64-tests
-        # - marionette-media-tests
+        - marionette-media-tests
 
 macosx1014-64-devedition/opt:
     build-platform: macosx64-devedition-nightly/opt
@@ -312,7 +312,6 @@ macosx1010-64/debug:
     build-platform: macosx64/debug
     test-sets:
         - macosx64-tests
-        - marionette-media-tests
 
 macosx1010-64-shippable/opt:
     build-platform: macosx64-shippable/opt
@@ -339,6 +338,7 @@ android-em-4.3-arm7-api-16/debug:
     build-platform: android-api-16/debug
     test-sets:
         - android-common-tests
+        - android-debug-tests
 
 # Disable ccov testing on Android due to issues with
 # Java 8 features. Bug 1498721.

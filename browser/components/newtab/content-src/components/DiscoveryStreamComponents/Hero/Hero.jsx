@@ -1,3 +1,7 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this file,
+ * You can obtain one at http://mozilla.org/MPL/2.0/. */
+
 import { DSCard, PlaceholderDSCard } from "../DSCard/DSCard.jsx";
 import { actionCreators as ac } from "common/Actions.jsm";
 import { DSEmptyState } from "../DSEmptyState/DSEmptyState.jsx";
@@ -58,7 +62,7 @@ export class Hero extends React.PureComponent {
         ) : (
           <DSCard
             campaignId={rec.campaign_id}
-            key={`dscard-${index}`}
+            key={`dscard-${rec.id}`}
             image_src={rec.image_src}
             raw_image_src={rec.raw_image_src}
             title={rec.title}
@@ -83,7 +87,7 @@ export class Hero extends React.PureComponent {
       heroCard = <PlaceholderDSCard />;
     } else {
       heroCard = (
-        <div className="ds-hero-item">
+        <div className="ds-hero-item" key={`dscard-${heroRec.id}`}>
           <SafeAnchor
             className="wrapper"
             dispatch={this.props.dispatch}

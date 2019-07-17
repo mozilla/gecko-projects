@@ -2182,20 +2182,6 @@ nsINode* nsContentUtils::GetCrossDocParentNode(nsINode* aChild) {
   return parentDoc ? parentDoc->FindContentForSubDocument(doc) : nullptr;
 }
 
-// static
-bool nsContentUtils::ContentIsDescendantOf(const nsINode* aPossibleDescendant,
-                                           const nsINode* aPossibleAncestor) {
-  MOZ_ASSERT(aPossibleDescendant, "The possible descendant is null!");
-  MOZ_ASSERT(aPossibleAncestor, "The possible ancestor is null!");
-
-  do {
-    if (aPossibleDescendant == aPossibleAncestor) return true;
-    aPossibleDescendant = aPossibleDescendant->GetParentNode();
-  } while (aPossibleDescendant);
-
-  return false;
-}
-
 bool nsContentUtils::ContentIsHostIncludingDescendantOf(
     const nsINode* aPossibleDescendant, const nsINode* aPossibleAncestor) {
   MOZ_ASSERT(aPossibleDescendant, "The possible descendant is null!");
@@ -2206,32 +2192,6 @@ bool nsContentUtils::ContentIsHostIncludingDescendantOf(
     if (aPossibleDescendant->IsDocumentFragment()) {
       aPossibleDescendant =
           aPossibleDescendant->AsDocumentFragment()->GetHost();
-    } else {
-      aPossibleDescendant = aPossibleDescendant->GetParentNode();
-    }
-  } while (aPossibleDescendant);
-
-  return false;
-}
-
-bool nsContentUtils::ContentIsShadowIncludingDescendantOf(
-    const nsINode* aPossibleDescendant, const nsINode* aPossibleAncestor) {
-  MOZ_ASSERT(aPossibleDescendant, "The possible descendant is null!");
-  MOZ_ASSERT(aPossibleAncestor, "The possible ancestor is null!");
-
-  if (aPossibleAncestor == aPossibleDescendant->GetComposedDoc()) {
-    return true;
-  }
-
-  do {
-    if (aPossibleDescendant == aPossibleAncestor) {
-      return true;
-    }
-
-    if (aPossibleDescendant->NodeType() == nsINode::DOCUMENT_FRAGMENT_NODE) {
-      ShadowRoot* shadowRoot =
-          ShadowRoot::FromNode(const_cast<nsINode*>(aPossibleDescendant));
-      aPossibleDescendant = shadowRoot ? shadowRoot->GetHost() : nullptr;
     } else {
       aPossibleDescendant = aPossibleDescendant->GetParentNode();
     }
@@ -2299,7 +2259,7 @@ nsINode* nsContentUtils::Retarget(nsINode* aTargetA, nsINode* aTargetB) {
     }
 
     // or A's root is a shadow-including inclusive ancestor of B...
-    if (nsContentUtils::ContentIsShadowIncludingDescendantOf(aTargetB, root)) {
+    if (aTargetB->IsShadowIncludingInclusiveDescendantOf(root)) {
       // ...then return A.
       return aTargetA;
     }
@@ -2945,9 +2905,9 @@ nsresult nsContentUtils::NewURIWithDocumentCharset(nsIURI** aResult,
                                                    nsIURI* aBaseURI) {
   if (aDocument) {
     return NS_NewURI(aResult, aSpec, aDocument->GetDocumentCharacterSet(),
-                     aBaseURI, sIOService);
+                     aBaseURI);
   }
-  return NS_NewURI(aResult, aSpec, nullptr, aBaseURI, sIOService);
+  return NS_NewURI(aResult, aSpec, nullptr, aBaseURI);
 }
 
 // static

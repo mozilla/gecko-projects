@@ -1,3 +1,4 @@
+/*! THIS FILE IS AUTO-GENERATED: webpack.system-addon.config.js */
 /******/ (function(modules) { // webpackBootstrap
 /******/ 	// The module cache
 /******/ 	var installedModules = {};
@@ -101,6 +102,9 @@ __webpack_require__.r(__webpack_exports__);
 /* harmony import */ var react_dom__WEBPACK_IMPORTED_MODULE_6__ = __webpack_require__(14);
 /* harmony import */ var react_dom__WEBPACK_IMPORTED_MODULE_6___default = /*#__PURE__*/__webpack_require__.n(react_dom__WEBPACK_IMPORTED_MODULE_6__);
 /* harmony import */ var common_Reducers_jsm__WEBPACK_IMPORTED_MODULE_7__ = __webpack_require__(53);
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this file,
+ * You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 
 
@@ -461,7 +465,7 @@ function SetPref(name, value, importContext = globalImportContext) {
 
 function WebExtEvent(type, data, importContext = globalImportContext) {
   if (!data || !data.source) {
-    throw new Error("WebExtEvent actions should include a property \"source\", the id of the webextension that should receive the event.");
+    throw new Error('WebExtEvent actions should include a property "source", the id of the webextension that should receive the event.');
   }
 
   const action = {
@@ -569,6 +573,9 @@ __webpack_require__.r(__webpack_exports__);
 /* harmony import */ var content_src_components_Sections_Sections__WEBPACK_IMPORTED_MODULE_9__ = __webpack_require__(36);
 function _extends() { _extends = Object.assign || function (target) { for (var i = 1; i < arguments.length; i++) { var source = arguments[i]; for (var key in source) { if (Object.prototype.hasOwnProperty.call(source, key)) { target[key] = source[key]; } } } return target; }; return _extends.apply(this, arguments); }
 
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this file,
+ * You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 
 
@@ -759,6 +766,9 @@ __webpack_require__.r(__webpack_exports__);
 /* harmony import */ var _SimpleHashRouter__WEBPACK_IMPORTED_MODULE_5__ = __webpack_require__(26);
 function _extends() { _extends = Object.assign || function (target) { for (var i = 1; i < arguments.length; i++) { var source = arguments[i]; for (var key in source) { if (Object.prototype.hasOwnProperty.call(source, key)) { target[key] = source[key]; } } } return target; }; return _extends.apply(this, arguments); }
 
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this file,
+ * You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 
 
@@ -792,7 +802,7 @@ function relativeTime(timestamp) {
 }
 
 const LAYOUT_VARIANTS = {
-  "basic": "Basic default layout (on by default in nightly)",
+  basic: "Basic default layout (on by default in nightly)",
   "dev-test-all": "A little bit of everything. Good layout for testing all components",
   "dev-test-feeds": "Stress testing for slow feeds"
 };
@@ -951,7 +961,7 @@ class DiscoveryStreamAdmin extends react__WEBPACK_IMPORTED_MODULE_4___default.a.
       type: "checkbox",
       checked: config.enabled,
       onChange: this.onEnableToggle
-    }), " enabled "), react__WEBPACK_IMPORTED_MODULE_4___default.a.createElement("h3", null, "Endpoint variant"), react__WEBPACK_IMPORTED_MODULE_4___default.a.createElement("p", null, "You can also change this manually by changing this pref: ", react__WEBPACK_IMPORTED_MODULE_4___default.a.createElement("code", null, "browser.newtabpage.activity-stream.discoverystream.config")), react__WEBPACK_IMPORTED_MODULE_4___default.a.createElement("table", {
+    }), " ", "enabled", " "), react__WEBPACK_IMPORTED_MODULE_4___default.a.createElement("h3", null, "Endpoint variant"), react__WEBPACK_IMPORTED_MODULE_4___default.a.createElement("p", null, "You can also change this manually by changing this pref:", " ", react__WEBPACK_IMPORTED_MODULE_4___default.a.createElement("code", null, "browser.newtabpage.activity-stream.discoverystream.config")), react__WEBPACK_IMPORTED_MODULE_4___default.a.createElement("table", {
       style: config.enabled ? null : {
         opacity: 0.5
       }
@@ -1406,7 +1416,7 @@ class ASRouterAdminInner extends react__WEBPACK_IMPORTED_MODULE_4___default.a.Pu
       rows: "10",
       cols: "60",
       placeholder: "Evaluate JEXL expressions and mock parameters by changing their values below"
-    })), react__WEBPACK_IMPORTED_MODULE_4___default.a.createElement("p", null, "Status: ", react__WEBPACK_IMPORTED_MODULE_4___default.a.createElement("span", {
+    })), react__WEBPACK_IMPORTED_MODULE_4___default.a.createElement("p", null, "Status:", " ", react__WEBPACK_IMPORTED_MODULE_4___default.a.createElement("span", {
       ref: "evaluationStatus"
     }, success ? "✅" : "❌", ", Result: ", result))), react__WEBPACK_IMPORTED_MODULE_4___default.a.createElement("td", null, react__WEBPACK_IMPORTED_MODULE_4___default.a.createElement("button", {
       className: "ASRouterButton secondary",
@@ -1500,7 +1510,7 @@ class ASRouterAdminInner extends react__WEBPACK_IMPORTED_MODULE_4___default.a.Pu
   }
 
   renderAttributionParamers() {
-    return react__WEBPACK_IMPORTED_MODULE_4___default.a.createElement("div", null, react__WEBPACK_IMPORTED_MODULE_4___default.a.createElement("h2", null, " Attribution Parameters "), react__WEBPACK_IMPORTED_MODULE_4___default.a.createElement("p", null, " This forces the browser to set some attribution parameters, useful for testing the Return To AMO feature. Clicking on 'Force Attribution', with the default values in each field, will demo the Return To AMO flow with the addon called 'Iridium for Youtube'. If you wish to try different attribution parameters, enter them in the text boxes. If you wish to try a different addon with the Return To AMO flow, make sure the 'content' text box has the addon GUID, then click 'Force Attribution'."), react__WEBPACK_IMPORTED_MODULE_4___default.a.createElement("table", null, react__WEBPACK_IMPORTED_MODULE_4___default.a.createElement("tr", null, react__WEBPACK_IMPORTED_MODULE_4___default.a.createElement("td", null, react__WEBPACK_IMPORTED_MODULE_4___default.a.createElement("b", null, " Source ")), react__WEBPACK_IMPORTED_MODULE_4___default.a.createElement("td", null, " ", react__WEBPACK_IMPORTED_MODULE_4___default.a.createElement("input", {
+    return react__WEBPACK_IMPORTED_MODULE_4___default.a.createElement("div", null, react__WEBPACK_IMPORTED_MODULE_4___default.a.createElement("h2", null, " Attribution Parameters "), react__WEBPACK_IMPORTED_MODULE_4___default.a.createElement("p", null, " ", "This forces the browser to set some attribution parameters, useful for testing the Return To AMO feature. Clicking on 'Force Attribution', with the default values in each field, will demo the Return To AMO flow with the addon called 'Iridium for Youtube'. If you wish to try different attribution parameters, enter them in the text boxes. If you wish to try a different addon with the Return To AMO flow, make sure the 'content' text box has the addon GUID, then click 'Force Attribution'."), react__WEBPACK_IMPORTED_MODULE_4___default.a.createElement("table", null, react__WEBPACK_IMPORTED_MODULE_4___default.a.createElement("tr", null, react__WEBPACK_IMPORTED_MODULE_4___default.a.createElement("td", null, react__WEBPACK_IMPORTED_MODULE_4___default.a.createElement("b", null, " Source ")), react__WEBPACK_IMPORTED_MODULE_4___default.a.createElement("td", null, " ", react__WEBPACK_IMPORTED_MODULE_4___default.a.createElement("input", {
       type: "text",
       name: "source",
       placeholder: "addons.mozilla.org",
@@ -1521,7 +1531,7 @@ class ASRouterAdminInner extends react__WEBPACK_IMPORTED_MODULE_4___default.a.Pu
     }), " ")), react__WEBPACK_IMPORTED_MODULE_4___default.a.createElement("tr", null, react__WEBPACK_IMPORTED_MODULE_4___default.a.createElement("td", null, " ", react__WEBPACK_IMPORTED_MODULE_4___default.a.createElement("button", {
       className: "ASRouterButton primary button",
       onClick: this.setAttribution
-    }, " Force Attribution "), " "))));
+    }, " ", "Force Attribution", " "), " "))));
   }
 
   renderErrorMessage({
@@ -1571,7 +1581,7 @@ class ASRouterAdminInner extends react__WEBPACK_IMPORTED_MODULE_4___default.a.Pu
         return react__WEBPACK_IMPORTED_MODULE_4___default.a.createElement(react__WEBPACK_IMPORTED_MODULE_4___default.a.Fragment, null, react__WEBPACK_IMPORTED_MODULE_4___default.a.createElement("h2", null, "Targeting Utilities"), react__WEBPACK_IMPORTED_MODULE_4___default.a.createElement("button", {
           className: "button",
           onClick: this.expireCache
-        }, "Expire Cache"), " (This expires the cache in ASR Targeting for bookmarks and top sites)", this.renderTargetingParameters(), this.renderAttributionParamers());
+        }, "Expire Cache"), " ", "(This expires the cache in ASR Targeting for bookmarks and top sites)", this.renderTargetingParameters(), this.renderAttributionParamers());
 
       case "pocket":
         return react__WEBPACK_IMPORTED_MODULE_4___default.a.createElement(react__WEBPACK_IMPORTED_MODULE_4___default.a.Fragment, null, react__WEBPACK_IMPORTED_MODULE_4___default.a.createElement("h2", null, "Pocket"), this.renderPocketStories());
@@ -1587,7 +1597,7 @@ class ASRouterAdminInner extends react__WEBPACK_IMPORTED_MODULE_4___default.a.Pu
         return react__WEBPACK_IMPORTED_MODULE_4___default.a.createElement(react__WEBPACK_IMPORTED_MODULE_4___default.a.Fragment, null, react__WEBPACK_IMPORTED_MODULE_4___default.a.createElement("h2", null, "ASRouter Errors"), this.renderErrors());
 
       default:
-        return react__WEBPACK_IMPORTED_MODULE_4___default.a.createElement(react__WEBPACK_IMPORTED_MODULE_4___default.a.Fragment, null, react__WEBPACK_IMPORTED_MODULE_4___default.a.createElement("h2", null, "Message Providers ", react__WEBPACK_IMPORTED_MODULE_4___default.a.createElement("button", {
+        return react__WEBPACK_IMPORTED_MODULE_4___default.a.createElement(react__WEBPACK_IMPORTED_MODULE_4___default.a.Fragment, null, react__WEBPACK_IMPORTED_MODULE_4___default.a.createElement("h2", null, "Message Providers", " ", react__WEBPACK_IMPORTED_MODULE_4___default.a.createElement("button", {
           title: "Restore all provider settings that ship with Firefox",
           className: "button",
           onClick: this.resetPref
@@ -1616,7 +1626,7 @@ class ASRouterAdminInner extends react__WEBPACK_IMPORTED_MODULE_4___default.a.Pu
       className: "helpLink"
     }, react__WEBPACK_IMPORTED_MODULE_4___default.a.createElement("span", {
       className: "icon icon-small-spacer icon-info"
-    }), " ", react__WEBPACK_IMPORTED_MODULE_4___default.a.createElement("span", null, "Need help using these tools? Check out our ", react__WEBPACK_IMPORTED_MODULE_4___default.a.createElement("a", {
+    }), " ", react__WEBPACK_IMPORTED_MODULE_4___default.a.createElement("span", null, "Need help using these tools? Check out our", " ", react__WEBPACK_IMPORTED_MODULE_4___default.a.createElement("a", {
       target: "blank",
       href: "https://github.com/mozilla/activity-stream/blob/master/content-src/asrouter/docs/debugging-docs.md"
     }, "documentation"))), this.getSection()));
@@ -1724,6 +1734,9 @@ __webpack_require__.r(__webpack_exports__);
 /* harmony import */ var _templates_Trailhead_Trailhead__WEBPACK_IMPORTED_MODULE_12__ = __webpack_require__(25);
 function _extends() { _extends = Object.assign || function (target) { for (var i = 1; i < arguments.length; i++) { var source = arguments[i]; for (var key in source) { if (Object.prototype.hasOwnProperty.call(source, key)) { target[key] = source[key]; } } } return target; }; return _extends.apply(this, arguments); }
 
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this file,
+ * You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 
 
@@ -2072,7 +2085,7 @@ class ASRouterUISurface extends react__WEBPACK_IMPORTED_MODULE_7___default.a.Pur
   }
 
   renderSnippets() {
-    if (this.state.bundle.template === "onboarding" || this.state.message.template === "fxa_overlay" || this.state.message.template === "return_to_amo_overlay" || this.state.message.template === "trailhead") {
+    if (this.state.bundle.template === "onboarding" || ["fxa_overlay", "return_to_amo_overlay", "trailhead", "whatsnew_panel_message"].includes(this.state.message.template)) {
       return null;
     }
 
@@ -2128,7 +2141,7 @@ class ASRouterUISurface extends react__WEBPACK_IMPORTED_MODULE_7___default.a.Pur
       global.document.body.classList.add("amo");
       return react__WEBPACK_IMPORTED_MODULE_7___default.a.createElement(fluent_react__WEBPACK_IMPORTED_MODULE_4__["LocalizationProvider"], {
         bundles: Object(_rich_text_strings__WEBPACK_IMPORTED_MODULE_2__["generateBundles"])({
-          "amo_html": message.content.text
+          amo_html: message.content.text
         })
       }, react__WEBPACK_IMPORTED_MODULE_7___default.a.createElement(_templates_ReturnToAMO_ReturnToAMO__WEBPACK_IMPORTED_MODULE_9__["ReturnToAMO"], _extends({}, message, {
         UISurface: "NEWTAB_OVERLAY",
@@ -2216,6 +2229,10 @@ __webpack_require__.r(__webpack_exports__);
 /* harmony import */ var common_Actions_jsm__WEBPACK_IMPORTED_MODULE_0__ = __webpack_require__(2);
 /* harmony import */ var redux__WEBPACK_IMPORTED_MODULE_1__ = __webpack_require__(7);
 /* harmony import */ var redux__WEBPACK_IMPORTED_MODULE_1___default = /*#__PURE__*/__webpack_require__.n(redux__WEBPACK_IMPORTED_MODULE_1__);
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this file,
+ * You can obtain one at http://mozilla.org/MPL/2.0/. */
+
 /* eslint-env mozilla/frame-script */
 
 
@@ -2377,6 +2394,9 @@ __webpack_require__.r(__webpack_exports__);
 /* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "ImpressionsWrapper", function() { return ImpressionsWrapper; });
 /* harmony import */ var react__WEBPACK_IMPORTED_MODULE_0__ = __webpack_require__(9);
 /* harmony import */ var react__WEBPACK_IMPORTED_MODULE_0___default = /*#__PURE__*/__webpack_require__.n(react__WEBPACK_IMPORTED_MODULE_0__);
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this file,
+ * You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 const VISIBLE = "visible";
 const VISIBILITY_CHANGE_EVENT = "visibilitychange";
@@ -2463,31 +2483,34 @@ module.exports = PropTypes;
 __webpack_require__.r(__webpack_exports__);
 /* WEBPACK VAR INJECTION */(function(global) {/* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "IS_NEWTAB", function() { return IS_NEWTAB; });
 /* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "NEWTAB_DARK_THEME", function() { return NEWTAB_DARK_THEME; });
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this file,
+ * You can obtain one at http://mozilla.org/MPL/2.0/. */
 const IS_NEWTAB = global.document && global.document.documentURI === "about:newtab";
 const NEWTAB_DARK_THEME = {
-  "ntp_background": {
-    "r": 42,
-    "g": 42,
-    "b": 46,
-    "a": 1
+  ntp_background: {
+    r: 42,
+    g: 42,
+    b: 46,
+    a: 1
   },
-  "ntp_text": {
-    "r": 249,
-    "g": 249,
-    "b": 250,
-    "a": 1
+  ntp_text: {
+    r: 249,
+    g: 249,
+    b: 250,
+    a: 1
   },
-  "sidebar": {
-    "r": 56,
-    "g": 56,
-    "b": 61,
-    "a": 1
+  sidebar: {
+    r: 56,
+    g: 56,
+    b: 61,
+    a: 1
   },
-  "sidebar_text": {
-    "r": 249,
-    "g": 249,
-    "b": 250,
-    "a": 1
+  sidebar_text: {
+    r: 249,
+    g: 249,
+    b: 250,
+    a: 1
   }
 };
 /* WEBPACK VAR INJECTION */}.call(this, __webpack_require__(1)))
@@ -2505,6 +2528,9 @@ __webpack_require__.r(__webpack_exports__);
 /* harmony import */ var react__WEBPACK_IMPORTED_MODULE_1___default = /*#__PURE__*/__webpack_require__.n(react__WEBPACK_IMPORTED_MODULE_1__);
 function _extends() { _extends = Object.assign || function (target) { for (var i = 1; i < arguments.length; i++) { var source = arguments[i]; for (var key in source) { if (Object.prototype.hasOwnProperty.call(source, key)) { target[key] = source[key]; } } } return target; }; return _extends.apply(this, arguments); }
 
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this file,
+ * You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 
 const FLUENT_FILES = ["branding/brand.ftl", "browser/branding/sync-brand.ftl", "browser/newtab/onboarding.ftl"];
@@ -2596,6 +2622,9 @@ __webpack_require__.r(__webpack_exports__);
 /* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "ModalOverlay", function() { return ModalOverlay; });
 /* harmony import */ var react__WEBPACK_IMPORTED_MODULE_0__ = __webpack_require__(9);
 /* harmony import */ var react__WEBPACK_IMPORTED_MODULE_0___default = /*#__PURE__*/__webpack_require__.n(react__WEBPACK_IMPORTED_MODULE_0__);
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this file,
+ * You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 class ModalOverlayWrapper extends react__WEBPACK_IMPORTED_MODULE_0___default.a.PureComponent {
   constructor(props) {
@@ -2681,6 +2710,9 @@ __webpack_require__.r(__webpack_exports__);
 /* harmony import */ var react__WEBPACK_IMPORTED_MODULE_0__ = __webpack_require__(9);
 /* harmony import */ var react__WEBPACK_IMPORTED_MODULE_0___default = /*#__PURE__*/__webpack_require__.n(react__WEBPACK_IMPORTED_MODULE_0__);
 /* harmony import */ var _components_RichText_RichText__WEBPACK_IMPORTED_MODULE_1__ = __webpack_require__(16);
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this file,
+ * You can obtain one at http://mozilla.org/MPL/2.0/. */
 
  // Alt text if available; in the future this should come from the server. See bug 1551711
 
@@ -2775,6 +2807,9 @@ __webpack_require__.r(__webpack_exports__);
 /* harmony import */ var _template_utils__WEBPACK_IMPORTED_MODULE_3__ = __webpack_require__(17);
 function _extends() { _extends = Object.assign || function (target) { for (var i = 1; i < arguments.length; i++) { var source = arguments[i]; for (var key in source) { if (Object.prototype.hasOwnProperty.call(source, key)) { target[key] = source[key]; } } } return target; }; return _extends.apply(this, arguments); }
 
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this file,
+ * You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 
 
@@ -2840,6 +2875,9 @@ function RichText(props) {
 "use strict";
 __webpack_require__.r(__webpack_exports__);
 /* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "safeURI", function() { return safeURI; });
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this file,
+ * You can obtain one at http://mozilla.org/MPL/2.0/. */
 function safeURI(url) {
   if (!url) {
     return "";
@@ -2900,6 +2938,9 @@ __webpack_require__.r(__webpack_exports__);
 /* harmony import */ var react_redux__WEBPACK_IMPORTED_MODULE_1___default = /*#__PURE__*/__webpack_require__.n(react_redux__WEBPACK_IMPORTED_MODULE_1__);
 /* harmony import */ var react__WEBPACK_IMPORTED_MODULE_2__ = __webpack_require__(9);
 /* harmony import */ var react__WEBPACK_IMPORTED_MODULE_2___default = /*#__PURE__*/__webpack_require__.n(react__WEBPACK_IMPORTED_MODULE_2__);
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this file,
+ * You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 
 
@@ -3204,6 +3245,9 @@ __webpack_require__.r(__webpack_exports__);
 /* harmony import */ var react__WEBPACK_IMPORTED_MODULE_3___default = /*#__PURE__*/__webpack_require__.n(react__WEBPACK_IMPORTED_MODULE_3__);
 function _extends() { _extends = Object.assign || function (target) { for (var i = 1; i < arguments.length; i++) { var source = arguments[i]; for (var key in source) { if (Object.prototype.hasOwnProperty.call(source, key)) { target[key] = source[key]; } } } return target; }; return _extends.apply(this, arguments); }
 
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this file,
+ * You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 
 
@@ -3620,6 +3664,9 @@ __webpack_require__.r(__webpack_exports__);
 /* WEBPACK VAR INJECTION */(function(global) {/* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "SimpleHashRouter", function() { return SimpleHashRouter; });
 /* harmony import */ var react__WEBPACK_IMPORTED_MODULE_0__ = __webpack_require__(9);
 /* harmony import */ var react__WEBPACK_IMPORTED_MODULE_0___default = /*#__PURE__*/__webpack_require__.n(react__WEBPACK_IMPORTED_MODULE_0__);
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this file,
+ * You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 class SimpleHashRouter extends react__WEBPACK_IMPORTED_MODULE_0___default.a.PureComponent {
   constructor(props) {
@@ -3670,6 +3717,9 @@ __webpack_require__.r(__webpack_exports__);
 /* harmony import */ var react_redux__WEBPACK_IMPORTED_MODULE_1___default = /*#__PURE__*/__webpack_require__.n(react_redux__WEBPACK_IMPORTED_MODULE_1__);
 /* harmony import */ var react__WEBPACK_IMPORTED_MODULE_2__ = __webpack_require__(9);
 /* harmony import */ var react__WEBPACK_IMPORTED_MODULE_2___default = /*#__PURE__*/__webpack_require__.n(react__WEBPACK_IMPORTED_MODULE_2__);
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this file,
+ * You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 
 
@@ -3769,6 +3819,9 @@ __webpack_require__.r(__webpack_exports__);
 /* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "ContextMenuItem", function() { return ContextMenuItem; });
 /* harmony import */ var react__WEBPACK_IMPORTED_MODULE_0__ = __webpack_require__(9);
 /* harmony import */ var react__WEBPACK_IMPORTED_MODULE_0___default = /*#__PURE__*/__webpack_require__.n(react__WEBPACK_IMPORTED_MODULE_0__);
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this file,
+ * You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 class ContextMenu extends react__WEBPACK_IMPORTED_MODULE_0___default.a.PureComponent {
   constructor(props) {
@@ -3834,18 +3887,11 @@ class ContextMenuItem extends react__WEBPACK_IMPORTED_MODULE_0___default.a.PureC
     super(props);
     this.onClick = this.onClick.bind(this);
     this.onKeyDown = this.onKeyDown.bind(this);
-    this.focusFirst = this.focusFirst.bind(this);
   }
 
   onClick() {
     this.props.hideContext();
     this.props.option.onClick();
-  }
-
-  focusFirst(button) {
-    if (button) {
-      button.focus();
-    }
   } // This selects the correct node based on the key pressed
 
 
@@ -3908,8 +3954,7 @@ class ContextMenuItem extends react__WEBPACK_IMPORTED_MODULE_0___default.a.PureC
       className: option.disabled ? "disabled" : "",
       tabIndex: "0",
       onClick: this.onClick,
-      onKeyDown: this.onKeyDown,
-      ref: option.first ? this.focusFirst : null
+      onKeyDown: this.onKeyDown
     }, option.icon && react__WEBPACK_IMPORTED_MODULE_0___default.a.createElement("span", {
       className: `icon icon-spacer icon-${option.icon}`
     }), react__WEBPACK_IMPORTED_MODULE_0___default.a.createElement("span", {
@@ -3931,6 +3976,9 @@ __webpack_require__.r(__webpack_exports__);
 /* harmony import */ var common_Actions_jsm__WEBPACK_IMPORTED_MODULE_0__ = __webpack_require__(2);
 /* harmony import */ var react__WEBPACK_IMPORTED_MODULE_1__ = __webpack_require__(9);
 /* harmony import */ var react__WEBPACK_IMPORTED_MODULE_1___default = /*#__PURE__*/__webpack_require__.n(react__WEBPACK_IMPORTED_MODULE_1__);
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this file,
+ * You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 
 const VISIBLE = "visible";
@@ -4158,6 +4206,9 @@ __webpack_require__.r(__webpack_exports__);
 /* harmony import */ var react__WEBPACK_IMPORTED_MODULE_3___default = /*#__PURE__*/__webpack_require__.n(react__WEBPACK_IMPORTED_MODULE_3__);
 /* harmony import */ var content_src_components_SectionMenu_SectionMenu__WEBPACK_IMPORTED_MODULE_4__ = __webpack_require__(34);
 /* harmony import */ var content_src_lib_section_menu_options__WEBPACK_IMPORTED_MODULE_5__ = __webpack_require__(35);
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this file,
+ * You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 
 
@@ -4454,6 +4505,9 @@ __webpack_require__.r(__webpack_exports__);
 /* harmony import */ var content_src_components_A11yLinkButton_A11yLinkButton__WEBPACK_IMPORTED_MODULE_0__ = __webpack_require__(32);
 /* harmony import */ var react__WEBPACK_IMPORTED_MODULE_1__ = __webpack_require__(9);
 /* harmony import */ var react__WEBPACK_IMPORTED_MODULE_1___default = /*#__PURE__*/__webpack_require__.n(react__WEBPACK_IMPORTED_MODULE_1__);
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this file,
+ * You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 
 class ErrorBoundaryFallback extends react__WEBPACK_IMPORTED_MODULE_1___default.a.PureComponent {
@@ -4538,6 +4592,9 @@ __webpack_require__.r(__webpack_exports__);
 /* harmony import */ var react__WEBPACK_IMPORTED_MODULE_0___default = /*#__PURE__*/__webpack_require__.n(react__WEBPACK_IMPORTED_MODULE_0__);
 function _extends() { _extends = Object.assign || function (target) { for (var i = 1; i < arguments.length; i++) { var source = arguments[i]; for (var key in source) { if (Object.prototype.hasOwnProperty.call(source, key)) { target[key] = source[key]; } } } return target; }; return _extends.apply(this, arguments); }
 
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this file,
+ * You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 function A11yLinkButton(props) {
   // function for merging classes, if necessary
@@ -4563,6 +4620,9 @@ __webpack_require__.r(__webpack_exports__);
 /* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "FluentOrText", function() { return FluentOrText; });
 /* harmony import */ var react__WEBPACK_IMPORTED_MODULE_0__ = __webpack_require__(9);
 /* harmony import */ var react__WEBPACK_IMPORTED_MODULE_0___default = /*#__PURE__*/__webpack_require__.n(react__WEBPACK_IMPORTED_MODULE_0__);
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this file,
+ * You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 /**
  * Set text on a child element/component depending on if the message is already
@@ -4610,6 +4670,9 @@ __webpack_require__.r(__webpack_exports__);
 /* harmony import */ var react__WEBPACK_IMPORTED_MODULE_2__ = __webpack_require__(9);
 /* harmony import */ var react__WEBPACK_IMPORTED_MODULE_2___default = /*#__PURE__*/__webpack_require__.n(react__WEBPACK_IMPORTED_MODULE_2__);
 /* harmony import */ var content_src_lib_section_menu_options__WEBPACK_IMPORTED_MODULE_3__ = __webpack_require__(35);
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this file,
+ * You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 
 
@@ -4686,6 +4749,9 @@ const SectionMenu = _SectionMenu;
 __webpack_require__.r(__webpack_exports__);
 /* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "SectionMenuOptions", function() { return SectionMenuOptions; });
 /* harmony import */ var common_Actions_jsm__WEBPACK_IMPORTED_MODULE_0__ = __webpack_require__(2);
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this file,
+ * You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 /**
  * List of functions that return items that can be included as menu options in a
@@ -4830,6 +4896,9 @@ __webpack_require__.r(__webpack_exports__);
 /* harmony import */ var content_src_components_TopSites_TopSites__WEBPACK_IMPORTED_MODULE_10__ = __webpack_require__(43);
 function _extends() { _extends = Object.assign || function (target) { for (var i = 1; i < arguments.length; i++) { var source = arguments[i]; for (var key in source) { if (Object.prototype.hasOwnProperty.call(source, key)) { target[key] = source[key]; } } } return target; }; return _extends.apply(this, arguments); }
 
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this file,
+ * You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 
 
@@ -5180,6 +5249,10 @@ const Sections = Object(react_redux__WEBPACK_IMPORTED_MODULE_5__["connect"])(sta
 "use strict";
 __webpack_require__.r(__webpack_exports__);
 /* WEBPACK VAR INJECTION */(function(global) {/* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "ScreenshotUtils", function() { return ScreenshotUtils; });
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this file,
+ * You can obtain one at http://mozilla.org/MPL/2.0/. */
+
 /**
  * List of helper functions for screenshot-based images.
  *
@@ -5249,6 +5322,9 @@ __webpack_require__.r(__webpack_exports__);
 /* harmony import */ var common_PerfService_jsm__WEBPACK_IMPORTED_MODULE_1__ = __webpack_require__(39);
 /* harmony import */ var react__WEBPACK_IMPORTED_MODULE_2__ = __webpack_require__(9);
 /* harmony import */ var react__WEBPACK_IMPORTED_MODULE_2___default = /*#__PURE__*/__webpack_require__.n(react__WEBPACK_IMPORTED_MODULE_2__);
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this file,
+ * You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 
  // Currently record only a fixed set of sections. This will prevent data
@@ -5423,6 +5499,9 @@ class ComponentPerfTimer extends react__WEBPACK_IMPORTED_MODULE_2___default.a.Co
 __webpack_require__.r(__webpack_exports__);
 /* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "_PerfService", function() { return _PerfService; });
 /* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "perfService", function() { return perfService; });
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this file,
+ * You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 
 if (typeof ChromeUtils !== "undefined") {
@@ -5553,6 +5632,9 @@ __webpack_require__.r(__webpack_exports__);
 /* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "MoreRecommendations", function() { return MoreRecommendations; });
 /* harmony import */ var react__WEBPACK_IMPORTED_MODULE_0__ = __webpack_require__(9);
 /* harmony import */ var react__WEBPACK_IMPORTED_MODULE_0___default = /*#__PURE__*/__webpack_require__.n(react__WEBPACK_IMPORTED_MODULE_0__);
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this file,
+ * You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 class MoreRecommendations extends react__WEBPACK_IMPORTED_MODULE_0___default.a.PureComponent {
   render() {
@@ -5585,6 +5667,9 @@ __webpack_require__.r(__webpack_exports__);
 /* harmony import */ var react_redux__WEBPACK_IMPORTED_MODULE_0___default = /*#__PURE__*/__webpack_require__.n(react_redux__WEBPACK_IMPORTED_MODULE_0__);
 /* harmony import */ var react__WEBPACK_IMPORTED_MODULE_1__ = __webpack_require__(9);
 /* harmony import */ var react__WEBPACK_IMPORTED_MODULE_1___default = /*#__PURE__*/__webpack_require__.n(react__WEBPACK_IMPORTED_MODULE_1__);
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this file,
+ * You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 
 class _PocketLoggedInCta extends react__WEBPACK_IMPORTED_MODULE_1___default.a.PureComponent {
@@ -5623,6 +5708,9 @@ __webpack_require__.r(__webpack_exports__);
 /* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "Topics", function() { return Topics; });
 /* harmony import */ var react__WEBPACK_IMPORTED_MODULE_0__ = __webpack_require__(9);
 /* harmony import */ var react__WEBPACK_IMPORTED_MODULE_0___default = /*#__PURE__*/__webpack_require__.n(react__WEBPACK_IMPORTED_MODULE_0__);
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this file,
+ * You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 class Topic extends react__WEBPACK_IMPORTED_MODULE_0___default.a.PureComponent {
   render() {
@@ -5678,6 +5766,9 @@ __webpack_require__.r(__webpack_exports__);
 /* harmony import */ var _TopSite__WEBPACK_IMPORTED_MODULE_10__ = __webpack_require__(46);
 function _extends() { _extends = Object.assign || function (target) { for (var i = 1; i < arguments.length; i++) { var source = arguments[i]; for (var key in source) { if (Object.prototype.hasOwnProperty.call(source, key)) { target[key] = source[key]; } } } return target; }; return _extends.apply(this, arguments); }
 
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this file,
+ * You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 
 
@@ -5727,12 +5818,12 @@ function countTopSitesIconsTypes(topSites) {
   };
 
   return topSites.reduce(countTopSitesTypes, {
-    "custom_screenshot": 0,
-    "screenshot_with_icon": 0,
-    "screenshot": 0,
-    "tippytop": 0,
-    "rich_icon": 0,
-    "no_image": 0
+    custom_screenshot: 0,
+    screenshot_with_icon: 0,
+    screenshot: 0,
+    tippytop: 0,
+    rich_icon: 0,
+    no_image: 0
   });
 }
 
@@ -5889,6 +5980,9 @@ __webpack_require__.r(__webpack_exports__);
 /* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "TOP_SITES_SEARCH_SHORTCUTS_CONTEXT_MENU_OPTIONS", function() { return TOP_SITES_SEARCH_SHORTCUTS_CONTEXT_MENU_OPTIONS; });
 /* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "MIN_RICH_FAVICON_SIZE", function() { return MIN_RICH_FAVICON_SIZE; });
 /* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "MIN_CORNER_FAVICON_SIZE", function() { return MIN_CORNER_FAVICON_SIZE; });
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this file,
+ * You can obtain one at http://mozilla.org/MPL/2.0/. */
 const TOP_SITES_SOURCE = "TOP_SITES";
 const TOP_SITES_CONTEXT_MENU_OPTIONS = ["CheckPinTopSite", "EditTopSite", "Separator", "OpenInNewWindow", "OpenInPrivateWindow", "Separator", "BlockUrl", "DeleteUrl"]; // the special top site for search shortcut experiment can only have the option to unpin (which removes) the topsite
 
@@ -5910,6 +6004,9 @@ __webpack_require__.r(__webpack_exports__);
 /* harmony import */ var react__WEBPACK_IMPORTED_MODULE_1__ = __webpack_require__(9);
 /* harmony import */ var react__WEBPACK_IMPORTED_MODULE_1___default = /*#__PURE__*/__webpack_require__.n(react__WEBPACK_IMPORTED_MODULE_1__);
 /* harmony import */ var _TopSitesConstants__WEBPACK_IMPORTED_MODULE_2__ = __webpack_require__(44);
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this file,
+ * You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 
 
@@ -6105,6 +6202,9 @@ __webpack_require__.r(__webpack_exports__);
 /* harmony import */ var common_Reducers_jsm__WEBPACK_IMPORTED_MODULE_5__ = __webpack_require__(53);
 function _extends() { _extends = Object.assign || function (target) { for (var i = 1; i < arguments.length; i++) { var source = arguments[i]; for (var key in source) { if (Object.prototype.hasOwnProperty.call(source, key)) { target[key] = source[key]; } } } return target; }; return _extends.apply(this, arguments); }
 
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this file,
+ * You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 
 
@@ -6747,6 +6847,10 @@ __webpack_require__.r(__webpack_exports__);
 /* harmony import */ var content_src_lib_constants__WEBPACK_IMPORTED_MODULE_2__ = __webpack_require__(11);
 /* harmony import */ var react__WEBPACK_IMPORTED_MODULE_3__ = __webpack_require__(9);
 /* harmony import */ var react__WEBPACK_IMPORTED_MODULE_3___default = /*#__PURE__*/__webpack_require__.n(react__WEBPACK_IMPORTED_MODULE_3__);
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this file,
+ * You can obtain one at http://mozilla.org/MPL/2.0/. */
+
 /* globals ContentSearchUIController */
 
 
@@ -6926,6 +7030,9 @@ __webpack_require__.r(__webpack_exports__);
 /* WEBPACK VAR INJECTION */(function(global) {/* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "DetectUserSessionStart", function() { return DetectUserSessionStart; });
 /* harmony import */ var common_Actions_jsm__WEBPACK_IMPORTED_MODULE_0__ = __webpack_require__(2);
 /* harmony import */ var common_PerfService_jsm__WEBPACK_IMPORTED_MODULE_1__ = __webpack_require__(39);
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this file,
+ * You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 
 const VISIBLE = "visible";
@@ -7015,6 +7122,9 @@ var external_ReactDOM_ = __webpack_require__(14);
 var external_ReactDOM_default = /*#__PURE__*/__webpack_require__.n(external_ReactDOM_);
 
 // CONCATENATED MODULE: ./content-src/components/DiscoveryStreamComponents/DSImage/DSImage.jsx
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this file,
+ * You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 
 class DSImage_DSImage extends external_React_default.a.PureComponent {
@@ -7140,6 +7250,9 @@ DSImage_DSImage.defaultProps = {
 var LinkMenu = __webpack_require__(56);
 
 // CONCATENATED MODULE: ./content-src/components/DiscoveryStreamComponents/DSLinkMenu/DSLinkMenu.jsx
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this file,
+ * You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 
 class DSLinkMenu_DSLinkMenu extends external_React_default.a.PureComponent {
@@ -7236,6 +7349,9 @@ class DSLinkMenu_DSLinkMenu extends external_React_default.a.PureComponent {
 var ImpressionStats = __webpack_require__(29);
 
 // CONCATENATED MODULE: ./content-src/components/DiscoveryStreamComponents/SafeAnchor/SafeAnchor.jsx
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this file,
+ * You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 
 class SafeAnchor_SafeAnchor extends external_React_default.a.PureComponent {
@@ -7312,6 +7428,9 @@ class SafeAnchor_SafeAnchor extends external_React_default.a.PureComponent {
 
 }
 // CONCATENATED MODULE: ./content-src/components/DiscoveryStreamComponents/DSCard/DSCard.jsx
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this file,
+ * You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 
 
@@ -7401,6 +7520,9 @@ const PlaceholderDSCard = props => external_React_default.a.createElement(DSCard
   placeholder: true
 });
 // CONCATENATED MODULE: ./content-src/components/DiscoveryStreamComponents/DSEmptyState/DSEmptyState.jsx
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this file,
+ * You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 
 class DSEmptyState_DSEmptyState extends external_React_default.a.PureComponent {
@@ -7456,22 +7578,30 @@ class DSEmptyState_DSEmptyState extends external_React_default.a.PureComponent {
   renderButton() {
     if (this.props.status === "waiting" || this.state.waiting) {
       return external_React_default.a.createElement("button", {
-        className: "try-again-button waiting"
-      }, "Loading...");
+        className: "try-again-button waiting",
+        "data-l10n-id": "newtab-discovery-empty-section-topstories-loading"
+      });
     }
 
     return external_React_default.a.createElement("button", {
       className: "try-again-button",
-      onClick: this.onReset
-    }, "Try Again");
+      onClick: this.onReset,
+      "data-l10n-id": "newtab-discovery-empty-section-topstories-try-again-button"
+    });
   }
 
   renderState() {
     if (this.props.status === "waiting" || this.props.status === "failed") {
-      return external_React_default.a.createElement(external_React_default.a.Fragment, null, external_React_default.a.createElement("h2", null, "Oops! We almost loaded this section, but not quite."), this.renderButton());
+      return external_React_default.a.createElement(external_React_default.a.Fragment, null, external_React_default.a.createElement("h2", {
+        "data-l10n-id": "newtab-discovery-empty-section-topstories-timed-out"
+      }), this.renderButton());
     }
 
-    return external_React_default.a.createElement(external_React_default.a.Fragment, null, external_React_default.a.createElement("h2", null, "You are caught up!"), external_React_default.a.createElement("p", null, "Check back later for more stories."));
+    return external_React_default.a.createElement(external_React_default.a.Fragment, null, external_React_default.a.createElement("h2", {
+      "data-l10n-id": "newtab-discovery-empty-section-topstories-header"
+    }), external_React_default.a.createElement("p", {
+      "data-l10n-id": "newtab-discovery-empty-section-topstories-content"
+    }));
   }
 
   render() {
@@ -7484,6 +7614,9 @@ class DSEmptyState_DSEmptyState extends external_React_default.a.PureComponent {
 
 }
 // CONCATENATED MODULE: ./content-src/components/DiscoveryStreamComponents/CardGrid/CardGrid.jsx
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this file,
+ * You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 
 
@@ -7497,7 +7630,7 @@ class CardGrid_CardGrid extends external_React_default.a.PureComponent {
       cards.push(!rec || rec.placeholder ? external_React_default.a.createElement(PlaceholderDSCard, {
         key: `dscard-${index}`
       }) : external_React_default.a.createElement(DSCard_DSCard, {
-        key: `dscard-${index}`,
+        key: `dscard-${rec.id}`,
         pos: rec.pos,
         campaignId: rec.campaign_id,
         image_src: rec.image_src,
@@ -7564,6 +7697,9 @@ var CollapsibleSection = __webpack_require__(30);
 var external_ReactRedux_ = __webpack_require__(24);
 
 // CONCATENATED MODULE: ./content-src/components/DiscoveryStreamComponents/DSMessage/DSMessage.jsx
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this file,
+ * You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 
 class DSMessage_DSMessage extends external_React_default.a.PureComponent {
@@ -7587,6 +7723,9 @@ class DSMessage_DSMessage extends external_React_default.a.PureComponent {
 
 }
 // CONCATENATED MODULE: ./content-src/components/DiscoveryStreamComponents/List/List.jsx
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this file,
+ * You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 
 
@@ -7693,7 +7832,7 @@ function _List(props) {
       recMarkup.push(!rec || rec.placeholder ? external_React_default.a.createElement(PlaceholderListItem, {
         key: `ds-list-item-${index}`
       }) : external_React_default.a.createElement(List_ListItem, {
-        key: `ds-list-item-${index}`,
+        key: `ds-list-item-${rec.id}`,
         dispatch: props.dispatch,
         campaignId: rec.campaign_id,
         domain: rec.domain,
@@ -7756,6 +7895,9 @@ const List = Object(external_ReactRedux_["connect"])(state => ({
   DiscoveryStream: state.DiscoveryStream
 }))(_List);
 // CONCATENATED MODULE: ./content-src/components/DiscoveryStreamComponents/Hero/Hero.jsx
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this file,
+ * You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 
 
@@ -7803,7 +7945,7 @@ class Hero_Hero extends external_React_default.a.PureComponent {
         key: `dscard-${index}`
       }) : external_React_default.a.createElement(DSCard_DSCard, {
         campaignId: rec.campaign_id,
-        key: `dscard-${index}`,
+        key: `dscard-${rec.id}`,
         image_src: rec.image_src,
         raw_image_src: rec.raw_image_src,
         title: rec.title,
@@ -7826,7 +7968,8 @@ class Hero_Hero extends external_React_default.a.PureComponent {
       heroCard = external_React_default.a.createElement(PlaceholderDSCard, null);
     } else {
       heroCard = external_React_default.a.createElement("div", {
-        className: "ds-hero-item"
+        className: "ds-hero-item",
+        key: `dscard-${heroRec.id}`
       }, external_React_default.a.createElement(SafeAnchor_SafeAnchor, {
         className: "wrapper",
         dispatch: this.props.dispatch,
@@ -7926,6 +8069,9 @@ var Sections = __webpack_require__(36);
 // CONCATENATED MODULE: ./content-src/components/DiscoveryStreamComponents/Highlights/Highlights.jsx
 function _extends() { _extends = Object.assign || function (target) { for (var i = 1; i < arguments.length; i++) { var source = arguments[i]; for (var key in source) { if (Object.prototype.hasOwnProperty.call(source, key)) { target[key] = source[key]; } } } return target; }; return _extends.apply(this, arguments); }
 
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this file,
+ * You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 
 
@@ -7949,6 +8095,9 @@ const Highlights = Object(external_ReactRedux_["connect"])(state => ({
   Sections: state.Sections
 }))(Highlights_Highlights);
 // CONCATENATED MODULE: ./content-src/components/DiscoveryStreamComponents/HorizontalRule/HorizontalRule.jsx
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this file,
+ * You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 class HorizontalRule_HorizontalRule extends external_React_default.a.PureComponent {
   render() {
@@ -7959,6 +8108,9 @@ class HorizontalRule_HorizontalRule extends external_React_default.a.PureCompone
 
 }
 // CONCATENATED MODULE: ./content-src/components/DiscoveryStreamComponents/Navigation/Navigation.jsx
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this file,
+ * You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 
 class Navigation_Topic extends external_React_default.a.PureComponent {
@@ -7996,6 +8148,9 @@ class Navigation_Navigation extends external_React_default.a.PureComponent {
 
 }
 // CONCATENATED MODULE: ./content-src/components/DiscoveryStreamComponents/SectionTitle/SectionTitle.jsx
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this file,
+ * You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 class SectionTitle_SectionTitle extends external_React_default.a.PureComponent {
   render() {
@@ -8016,6 +8171,9 @@ class SectionTitle_SectionTitle extends external_React_default.a.PureComponent {
 
 }
 // CONCATENATED MODULE: ./content-src/lib/selectLayoutRender.js
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this file,
+ * You can obtain one at http://mozilla.org/MPL/2.0/. */
 const selectLayoutRender = (state, prefs, rickRollCache) => {
   const {
     layout,
@@ -8087,7 +8245,7 @@ const selectLayoutRender = (state, prefs, rickRollCache) => {
 
     for (let i = 0; i < items; i++) {
       data.recommendations.push({
-        "placeholder": true
+        placeholder: true
       });
     }
 
@@ -8217,6 +8375,9 @@ const selectLayoutRender = (state, prefs, rickRollCache) => {
 var TopSites = __webpack_require__(43);
 
 // CONCATENATED MODULE: ./content-src/components/DiscoveryStreamComponents/TopSites/TopSites.jsx
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this file,
+ * You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 
 
@@ -8239,6 +8400,9 @@ const TopSites_TopSites_TopSites = Object(external_ReactRedux_["connect"])(state
 /* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "isAllowedCSS", function() { return isAllowedCSS; });
 /* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "_DiscoveryStreamBase", function() { return DiscoveryStreamBase_DiscoveryStreamBase; });
 /* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "DiscoveryStreamBase", function() { return DiscoveryStreamBase; });
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this file,
+ * You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 
 
@@ -9348,6 +9512,9 @@ var external_React_default = /*#__PURE__*/__webpack_require__.n(external_React_)
 var EOYSnippet_schema = __webpack_require__(18);
 
 // CONCATENATED MODULE: ./content-src/asrouter/components/Button/Button.jsx
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this file,
+ * You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 const ALLOWED_STYLE_TAGS = ["color", "backgroundColor"];
 const Button = props => {
@@ -9371,6 +9538,9 @@ const Button = props => {
   }, props.children);
 };
 // CONCATENATED MODULE: ./content-src/asrouter/components/ConditionalWrapper/ConditionalWrapper.jsx
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this file,
+ * You can obtain one at http://mozilla.org/MPL/2.0/. */
 // lifted from https://gist.github.com/kitze/23d82bb9eb0baabfd03a6a720b1d637f
 const ConditionalWrapper = ({
   condition,
@@ -9387,6 +9557,9 @@ var template_utils = __webpack_require__(17);
 var SimpleSnippet_schema = __webpack_require__(19);
 
 // CONCATENATED MODULE: ./content-src/asrouter/components/SnippetBase/SnippetBase.jsx
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this file,
+ * You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 
 class SnippetBase_SnippetBase extends external_React_default.a.PureComponent {
@@ -9496,6 +9669,9 @@ class SnippetBase_SnippetBase extends external_React_default.a.PureComponent {
 // CONCATENATED MODULE: ./content-src/asrouter/templates/SimpleSnippet/SimpleSnippet.jsx
 function _extends() { _extends = Object.assign || function (target) { for (var i = 1; i < arguments.length; i++) { var source = arguments[i]; for (var key in source) { if (Object.prototype.hasOwnProperty.call(source, key)) { target[key] = source[key]; } } } return target; }; return _extends.apply(this, arguments); }
 
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this file,
+ * You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 
 
@@ -9689,6 +9865,9 @@ class SimpleSnippet_SimpleSnippet extends external_React_default.a.PureComponent
 // CONCATENATED MODULE: ./content-src/asrouter/templates/EOYSnippet/EOYSnippet.jsx
 function EOYSnippet_extends() { EOYSnippet_extends = Object.assign || function (target) { for (var i = 1; i < arguments.length; i++) { var source = arguments[i]; for (var key in source) { if (Object.prototype.hasOwnProperty.call(source, key)) { target[key] = source[key]; } } } return target; }; return EOYSnippet_extends.apply(this, arguments); }
 
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this file,
+ * You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 
 
@@ -9837,6 +10016,9 @@ var FXASignupSnippet_schema = __webpack_require__(20);
 // CONCATENATED MODULE: ./content-src/asrouter/templates/SubmitFormSnippet/SubmitFormSnippet.jsx
 function SubmitFormSnippet_extends() { SubmitFormSnippet_extends = Object.assign || function (target) { for (var i = 1; i < arguments.length; i++) { var source = arguments[i]; for (var key in source) { if (Object.prototype.hasOwnProperty.call(source, key)) { target[key] = source[key]; } } } return target; }; return SubmitFormSnippet_extends.apply(this, arguments); }
 
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this file,
+ * You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 
 
@@ -10143,6 +10325,9 @@ class SubmitFormSnippet_SubmitFormSnippet extends external_React_default.a.PureC
 // CONCATENATED MODULE: ./content-src/asrouter/templates/FXASignupSnippet/FXASignupSnippet.jsx
 function FXASignupSnippet_extends() { FXASignupSnippet_extends = Object.assign || function (target) { for (var i = 1; i < arguments.length; i++) { var source = arguments[i]; for (var key in source) { if (Object.prototype.hasOwnProperty.call(source, key)) { target[key] = source[key]; } } } return target; }; return FXASignupSnippet_extends.apply(this, arguments); }
 
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this file,
+ * You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 
 
@@ -10179,6 +10364,9 @@ var NewsletterSnippet_schema = __webpack_require__(21);
 // CONCATENATED MODULE: ./content-src/asrouter/templates/NewsletterSnippet/NewsletterSnippet.jsx
 function NewsletterSnippet_extends() { NewsletterSnippet_extends = Object.assign || function (target) { for (var i = 1; i < arguments.length; i++) { var source = arguments[i]; for (var key in source) { if (Object.prototype.hasOwnProperty.call(source, key)) { target[key] = source[key]; } } } return target; }; return NewsletterSnippet_extends.apply(this, arguments); }
 
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this file,
+ * You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 
 
@@ -10205,6 +10393,10 @@ const NewsletterSnippet = props => {
   }));
 };
 // CONCATENATED MODULE: ./content-src/asrouter/templates/SendToDeviceSnippet/isEmailOrPhoneNumber.js
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this file,
+ * You can obtain one at http://mozilla.org/MPL/2.0/. */
+
 /**
  * Checks if a given string is an email or phone number or neither
  * @param {string} val The user input
@@ -10252,6 +10444,9 @@ var SendToDeviceSnippet_schema = __webpack_require__(22);
 // CONCATENATED MODULE: ./content-src/asrouter/templates/SendToDeviceSnippet/SendToDeviceSnippet.jsx
 function SendToDeviceSnippet_extends() { SendToDeviceSnippet_extends = Object.assign || function (target) { for (var i = 1; i < arguments.length; i++) { var source = arguments[i]; for (var key in source) { if (Object.prototype.hasOwnProperty.call(source, key)) { target[key] = source[key]; } } } return target; }; return SendToDeviceSnippet_extends.apply(this, arguments); }
 
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this file,
+ * You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 
 
@@ -10318,6 +10513,9 @@ const SendToDeviceSnippet = props => {
 // CONCATENATED MODULE: ./content-src/asrouter/templates/SimpleBelowSearchSnippet/SimpleBelowSearchSnippet.jsx
 function SimpleBelowSearchSnippet_extends() { SimpleBelowSearchSnippet_extends = Object.assign || function (target) { for (var i = 1; i < arguments.length; i++) { var source = arguments[i]; for (var key in source) { if (Object.prototype.hasOwnProperty.call(source, key)) { target[key] = source[key]; } } } return target; }; return SimpleBelowSearchSnippet_extends.apply(this, arguments); }
 
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this file,
+ * You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 
 
@@ -10368,6 +10566,9 @@ class SimpleBelowSearchSnippet_SimpleBelowSearchSnippet extends external_React_d
 }
 // CONCATENATED MODULE: ./content-src/asrouter/templates/template-manifest.jsx
 /* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "SnippetsTemplates", function() { return SnippetsTemplates; });
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this file,
+ * You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 
 
@@ -11760,6 +11961,9 @@ function ftl(strings) {
 // CONCATENATED MODULE: ./content-src/asrouter/rich-text-strings.js
 /* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "RICH_TEXT_KEYS", function() { return RICH_TEXT_KEYS; });
 /* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "generateBundles", function() { return generateBundles; });
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this file,
+ * You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 /**
  * Properties that allow rich text MUST be added to this list.
@@ -11768,13 +11972,13 @@ function ftl(strings) {
  */
 
 const RICH_TEXT_CONFIG = {
-  "text": ["text", "scene1_text"],
-  "success_text": "success_text",
-  "error_text": "error_text",
-  "scene2_text": "scene2_text",
-  "amo_html": "amo_html",
-  "privacy_html": "scene2_privacy_html",
-  "disclaimer_html": "scene2_disclaimer_html"
+  text: ["text", "scene1_text"],
+  success_text: "success_text",
+  error_text: "error_text",
+  scene2_text: "scene2_text",
+  amo_html: "amo_html",
+  privacy_html: "scene2_privacy_html",
+  disclaimer_html: "scene2_disclaimer_html"
 };
 const RICH_TEXT_KEYS = Object.keys(RICH_TEXT_CONFIG);
 /**
@@ -11812,6 +12016,9 @@ __webpack_require__.r(__webpack_exports__);
 var Actions = __webpack_require__(2);
 
 // CONCATENATED MODULE: ./common/Dedupe.jsm
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this file,
+ * You can obtain one at http://mozilla.org/MPL/2.0/. */
 class Dedupe {
   constructor(createKey) {
     this.createKey = createKey || this.defaultCreateKey;
@@ -12660,6 +12867,9 @@ __webpack_require__.r(__webpack_exports__);
 var Actions = __webpack_require__(2);
 
 // CONCATENATED MODULE: ./content-src/components/Card/types.js
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this file,
+ * You can obtain one at http://mozilla.org/MPL/2.0/. */
 const cardContextTypes = {
   history: {
     fluentID: "newtab-label-visited",
@@ -12699,6 +12909,9 @@ var screenshot_utils = __webpack_require__(37);
 /* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "_Card", function() { return Card_Card; });
 /* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "Card", function() { return Card; });
 /* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "PlaceholderCard", function() { return PlaceholderCard; });
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this file,
+ * You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 
 
@@ -13050,6 +13263,9 @@ var external_React_default = /*#__PURE__*/__webpack_require__.n(external_React_)
 var TopSitesConstants = __webpack_require__(44);
 
 // CONCATENATED MODULE: ./content-src/components/TopSites/TopSiteFormInput.jsx
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this file,
+ * You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 class TopSiteFormInput_TopSiteFormInput extends external_React_default.a.PureComponent {
   constructor(props) {
@@ -13163,6 +13379,9 @@ var TopSite = __webpack_require__(46);
 
 // CONCATENATED MODULE: ./content-src/components/TopSites/TopSiteForm.jsx
 /* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "TopSiteForm", function() { return TopSiteForm_TopSiteForm; });
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this file,
+ * You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 
 
@@ -13196,7 +13415,7 @@ class TopSiteForm_TopSiteForm extends external_React_default.a.PureComponent {
 
   onLabelChange(event) {
     this.setState({
-      "label": event.target.value
+      label: event.target.value
     });
   }
 
@@ -13469,6 +13688,9 @@ var external_ReactRedux_ = __webpack_require__(24);
 var ContextMenu = __webpack_require__(28);
 
 // CONCATENATED MODULE: ./content-src/lib/link-menu-options.js
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this file,
+ * You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 
 const _OpenInPrivateWindow = site => ({
@@ -13750,6 +13972,9 @@ var external_React_default = /*#__PURE__*/__webpack_require__.n(external_React_)
 // CONCATENATED MODULE: ./content-src/components/LinkMenu/LinkMenu.jsx
 /* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "_LinkMenu", function() { return LinkMenu_LinkMenu; });
 /* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "LinkMenu", function() { return LinkMenu; });
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this file,
+ * You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 
 

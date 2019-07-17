@@ -720,6 +720,13 @@ bool CompositorBridgeChild::SendResume() {
   return PCompositorBridgeChild::SendResume();
 }
 
+bool CompositorBridgeChild::SendResumeAsync() {
+  if (!mCanSend) {
+    return false;
+  }
+  return PCompositorBridgeChild::SendResumeAsync();
+}
+
 bool CompositorBridgeChild::SendNotifyChildCreated(
     const LayersId& id, CompositorOptions* aOptions) {
   if (!mCanSend) {
@@ -802,7 +809,7 @@ bool CompositorBridgeChild::DeallocPTextureChild(PTextureChild* actor) {
 }
 
 mozilla::ipc::IPCResult CompositorBridgeChild::RecvParentAsyncMessages(
-    InfallibleTArray<AsyncParentMessageData>&& aMessages) {
+    nsTArray<AsyncParentMessageData>&& aMessages) {
   for (AsyncParentMessageArray::index_type i = 0; i < aMessages.Length(); ++i) {
     const AsyncParentMessageData& message = aMessages[i];
 

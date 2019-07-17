@@ -274,8 +274,6 @@ class BrowserParent final : public PBrowserParent,
   mozilla::ipc::IPCResult RecvAccessKeyNotHandled(
       const WidgetKeyboardEvent& aEvent);
 
-  mozilla::ipc::IPCResult RecvSetHasBeforeUnload(const bool& aHasBeforeUnload);
-
   mozilla::ipc::IPCResult RecvRegisterProtocolHandler(const nsString& aScheme,
                                                       nsIURI* aHandlerURI,
                                                       const nsString& aTitle,
@@ -321,9 +319,9 @@ class BrowserParent final : public PBrowserParent,
 
   mozilla::ipc::IPCResult RecvSessionStoreUpdate(
       const Maybe<nsCString>& aDocShellCaps, const Maybe<bool>& aPrivatedMode,
-      const nsTArray<nsCString>& aPositions,
-      const nsTArray<int32_t>& aPositionDescendants, const uint32_t& aFlushId,
-      const bool& aIsFinal);
+      const nsTArray<nsCString>&& aPositions,
+      const nsTArray<int32_t>&& aPositionDescendants, const uint32_t& aFlushId,
+      const bool& aIsFinal, const uint32_t& aEpoch);
 
   mozilla::ipc::IPCResult RecvBrowserFrameOpenWindow(
       PBrowserParent* aOpener, const nsString& aURL, const nsString& aName,
@@ -332,16 +330,16 @@ class BrowserParent final : public PBrowserParent,
 
   mozilla::ipc::IPCResult RecvSyncMessage(
       const nsString& aMessage, const ClonedMessageData& aData,
-      InfallibleTArray<CpowEntry>&& aCpows, nsIPrincipal* aPrincipal,
+      nsTArray<CpowEntry>&& aCpows, nsIPrincipal* aPrincipal,
       nsTArray<ipc::StructuredCloneData>* aRetVal);
 
   mozilla::ipc::IPCResult RecvRpcMessage(
       const nsString& aMessage, const ClonedMessageData& aData,
-      InfallibleTArray<CpowEntry>&& aCpows, nsIPrincipal* aPrincipal,
+      nsTArray<CpowEntry>&& aCpows, nsIPrincipal* aPrincipal,
       nsTArray<ipc::StructuredCloneData>* aRetVal);
 
   mozilla::ipc::IPCResult RecvAsyncMessage(const nsString& aMessage,
-                                           InfallibleTArray<CpowEntry>&& aCpows,
+                                           nsTArray<CpowEntry>&& aCpows,
                                            nsIPrincipal* aPrincipal,
                                            const ClonedMessageData& aData);
 
@@ -678,11 +676,6 @@ class BrowserParent final : public PBrowserParent,
 
   void LayerTreeUpdate(const LayersObserverEpoch& aEpoch, bool aActive);
 
-  void RequestRootPaint(gfx::CrossProcessPaint* aPaint, IntRect aRect,
-                        float aScale, nscolor aBackgroundColor);
-  void RequestSubPaint(gfx::CrossProcessPaint* aPaint, float aScale,
-                       nscolor aBackgroundColor);
-
   mozilla::ipc::IPCResult RecvInvokeDragSession(
       nsTArray<IPCDataTransfer>&& aTransfers, const uint32_t& aAction,
       Maybe<Shmem>&& aVisualDnDData, const uint32_t& aStride,
@@ -721,7 +714,6 @@ class BrowserParent final : public PBrowserParent,
   void Deprioritize();
 
   bool GetHasContentOpener();
-  bool GetHasBeforeUnload();
 
   bool StartApzAutoscroll(float aAnchorX, float aAnchorY, nsViewID aScrollId,
                           uint32_t aPresShellId);
@@ -772,8 +764,7 @@ class BrowserParent final : public PBrowserParent,
                                        const Maybe<URIParams>& aLastVisitedURI,
                                        const uint32_t& aFlags);
 
-  mozilla::ipc::IPCResult RecvQueryVisitedState(
-      InfallibleTArray<URIParams>&& aURIs);
+  mozilla::ipc::IPCResult RecvQueryVisitedState(nsTArray<URIParams>&& aURIs);
 
   mozilla::ipc::IPCResult RecvFireFrameLoadEvent(bool aIsTrusted);
 
@@ -947,10 +938,6 @@ class BrowserParent final : public PBrowserParent,
   // True if this BrowserParent has had its layer tree sent to the compositor
   // at least once.
   bool mHasPresented;
-
-  // True if at least one window hosted in the BrowserChild has added a
-  // beforeunload event listener.
-  bool mHasBeforeUnload;
 
   // True when the remote browser is created and ready to handle input events.
   bool mIsReadyToHandleInputEvents;
