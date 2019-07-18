@@ -101,9 +101,14 @@ add_task(async function click() {
   });
   await promise;
 
+  let tab = await BrowserTestUtils.openNewForegroundTab({
+    gBrowser,
+    url: "about:blank",
+  });
   promise = waitForLoad(gBrowser.selectedBrowser, EXAMPLE_PAGE);
   EventUtils.synthesizeMouseAtCenter(gBookmarkElements[2], {});
   await promise;
+  BrowserTestUtils.removeTab(tab);
 });
 
 add_task(async function middleclick() {
@@ -128,21 +133,6 @@ add_task(async function clickWithPrefSet() {
 
   let promise = waitForNewTab(TEST_PAGES[0], false);
   EventUtils.synthesizeMouseAtCenter(gBookmarkElements[0], {
-    button: 0,
-  });
-  await promise;
-
-  let placesContext = document.getElementById("placesContext");
-  promise = BrowserTestUtils.waitForEvent(placesContext, "popupshown");
-  EventUtils.synthesizeMouseAtCenter(gBookmarkElements[1], {
-    button: 2,
-    type: "contextmenu",
-  });
-  await promise;
-
-  promise = waitForLoad(gBrowser.selectedBrowser, TEST_PAGES[1]);
-  let open = document.getElementById("placesContext_open");
-  EventUtils.synthesizeMouseAtCenter(open, {
     button: 0,
   });
   await promise;
@@ -184,7 +174,7 @@ add_task(async function quickContextMenu() {
   await promise;
 
   Assert.ok(
-    !document.getElementById("placesContext_open").disabled,
+    !document.getElementById("placesContext_open:newtab").disabled,
     "Commands in context menu are enabled"
   );
 

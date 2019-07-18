@@ -33,7 +33,7 @@ use crate::render_task::{RenderTaskCache, RenderTaskCacheKey, RenderTaskId};
 use crate::render_task::{RenderTaskCacheEntry, RenderTaskCacheEntryHandle, RenderTaskGraph};
 use smallvec::SmallVec;
 use std::collections::hash_map::Entry::{self, Occupied, Vacant};
-use std::collections::hash_map::IterMut;
+use std::collections::hash_map::{Iter, IterMut};
 use std::collections::VecDeque;
 use std::{cmp, mem};
 use std::fmt::Debug;
@@ -273,8 +273,16 @@ where
         self.resources.entry(key)
     }
 
+    pub fn iter(&self) -> Iter<K, V> {
+        self.resources.iter()
+    }
+
     pub fn iter_mut(&mut self) -> IterMut<K, V> {
         self.resources.iter_mut()
+    }
+
+    pub fn is_empty(&mut self) -> bool {
+        self.resources.is_empty()
     }
 
     pub fn clear(&mut self) {
@@ -491,10 +499,11 @@ impl ResourceCache {
     pub fn new(
         texture_cache: TextureCache,
         glyph_rasterizer: GlyphRasterizer,
+        cached_glyphs: GlyphCache,
         blob_image_handler: Option<Box<dyn BlobImageHandler>>,
     ) -> Self {
         ResourceCache {
-            cached_glyphs: GlyphCache::new(),
+            cached_glyphs,
             cached_images: ResourceClassCache::new(),
             cached_render_tasks: RenderTaskCache::new(),
             resources: Resources::default(),
@@ -596,6 +605,7 @@ impl ResourceCache {
                             &img.dirty_rect
                         ),
                     );
+                    self.discard_tiles_outside_visible_area(img.key, &img.visible_rect);
                 }
                 ResourceUpdate::DeleteImage(img) => {
                     self.delete_image_template(img);
@@ -630,6 +640,7 @@ impl ResourceCache {
                         &img.descriptor,
                         img.tiling,
                         Arc::clone(&img.data),
+                        &img.visible_rect,
                     );
                 }
                 ResourceUpdate::UpdateBlobImage(ref img) => {
@@ -638,6 +649,7 @@ impl ResourceCache {
                         &img.descriptor,
                         &img.dirty_rect,
                         Arc::clone(&img.data),
+                        &img.visible_rect,
                     );
                 }
                 ResourceUpdate::SetBlobImageVisibleArea(ref key, ref area) => {
@@ -778,7 +790,7 @@ impl ResourceCache {
         self.glyph_rasterizer.delete_font(font_key);
         self.resources.font_templates.remove(&font_key);
         self.cached_glyphs
-            .clear_fonts(|font| font.font_key == font_key);
+            .clear_fonts(&mut self.texture_cache, |font| font.font_key == font_key);
         if let Some(ref mut r) = self.blob_image_handler {
             r.delete_font(font_key);
         }
@@ -926,11 +938,14 @@ impl ResourceCache {
         descriptor: &ImageDescriptor,
         mut tiling: Option<TileSize>,
         data: Arc<BlobImageData>,
+        visible_rect: &DeviceIntRect,
     ) {
         let max_texture_size = self.max_texture_size();
         tiling = get_blob_tiling(tiling, descriptor, max_texture_size);
 
-        self.blob_image_handler.as_mut().unwrap().add(key, data, tiling);
+        let viewport_tiles = tiling.map(|tile_size| compute_tile_range(&visible_rect, tile_size));
+
+        self.blob_image_handler.as_mut().unwrap().add(key, data, visible_rect, tiling);
 
         self.blob_image_templates.insert(
             key,
@@ -938,7 +953,7 @@ impl ResourceCache {
                 descriptor: *descriptor,
                 tiling,
                 dirty_rect: DirtyRect::All,
-                viewport_tiles: None,
+                viewport_tiles,
             },
         );
     }
@@ -950,8 +965,9 @@ impl ResourceCache {
         descriptor: &ImageDescriptor,
         dirty_rect: &BlobDirtyRect,
         data: Arc<BlobImageData>,
+        visible_rect: &DeviceIntRect,
     ) {
-        self.blob_image_handler.as_mut().unwrap().update(key, data, dirty_rect);
+        self.blob_image_handler.as_mut().unwrap().update(key, data, visible_rect, dirty_rect);
 
         let max_texture_size = self.max_texture_size();
 
@@ -961,11 +977,13 @@ impl ResourceCache {
 
         let tiling = get_blob_tiling(image.tiling, descriptor, max_texture_size);
 
+        let viewport_tiles = image.tiling.map(|tile_size| compute_tile_range(&visible_rect, tile_size));
+
         *image = BlobImageTemplate {
             descriptor: *descriptor,
             tiling,
             dirty_rect: dirty_rect.union(&image.dirty_rect),
-            viewport_tiles: image.viewport_tiles,
+            viewport_tiles,
         };
     }
 
@@ -1227,8 +1245,9 @@ impl ResourceCache {
                     && (tiles.size.width > MAX_TILES_PER_REQUEST
                         || tiles.size.height > MAX_TILES_PER_REQUEST
                         || tiles.size.width * tiles.size.height > MAX_TILES_PER_REQUEST) {
-                    let w = tiles.size.width;
-                    let h = tiles.size.height;
+                    let limit = 46340; // sqrt(i32::MAX) rounded down to avoid overflow.
+                    let w = tiles.size.width.min(limit);
+                    let h = tiles.size.height.min(limit);
                     let diff = w * h - MAX_TILES_PER_REQUEST;
                     // Remove tiles in the largest dimension.
                     if tiles.size.width > tiles.size.height {
@@ -1594,7 +1613,12 @@ impl ResourceCache {
         debug_assert_eq!(self.state, State::Idle);
         self.state = State::AddResources;
         self.texture_cache.begin_frame(stamp);
-        self.cached_glyphs.begin_frame(&self.texture_cache, &self.cached_render_tasks, &mut self.glyph_rasterizer);
+        self.cached_glyphs.begin_frame(
+            stamp,
+            &mut self.texture_cache,
+            &self.cached_render_tasks,
+            &mut self.glyph_rasterizer,
+        );
         self.cached_render_tasks.begin_frame(&mut self.texture_cache);
         self.current_frame_id = stamp.frame_id();
         self.active_image_keys.clear();
@@ -1832,7 +1856,7 @@ impl ResourceCache {
             .font_templates
             .retain(|key, _| key.0 != namespace);
         self.cached_glyphs
-            .clear_fonts(|font| font.font_key.0 == namespace);
+            .clear_fonts(&mut self.texture_cache, |font| font.font_key.0 == namespace);
 
         if let Some(ref mut r) = self.blob_image_handler {
             r.clear_namespace(namespace);

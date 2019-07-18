@@ -7131,7 +7131,7 @@ void HTMLEditRules::PromoteRange(nsRange& aRange,
         return;
       }
       // Make sure we don't go higher than our root element in the content tree
-      if (!nsContentUtils::ContentIsDescendantOf(host, block)) {
+      if (!host->IsInclusiveDescendantOf(block)) {
         HTMLEditorRef().IsEmptyNode(block, &bIsEmptyNode, true, false);
       }
       if (bIsEmptyNode) {
@@ -10048,7 +10048,7 @@ nsresult HTMLEditRules::ConfirmSelectionInBody() {
   // XXXsmaug this code is insane.
   nsINode* temp = selectionStartPoint.GetContainer();
   while (temp && !temp->IsHTMLElement(nsGkAtoms::body)) {
-    temp = temp->GetParentOrHostNode();
+    temp = temp->GetParentOrShadowHostNode();
   }
 
   // If we aren't in the <body> element, force the issue.
@@ -10074,7 +10074,7 @@ nsresult HTMLEditRules::ConfirmSelectionInBody() {
   // XXXsmaug this code is insane.
   temp = selectionEndPoint.GetContainer();
   while (temp && !temp->IsHTMLElement(nsGkAtoms::body)) {
-    temp = temp->GetParentOrHostNode();
+    temp = temp->GetParentOrShadowHostNode();
   }
 
   // If we aren't in the <body> element, force the issue.

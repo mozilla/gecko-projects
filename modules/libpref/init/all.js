@@ -371,6 +371,7 @@ pref("media.peerconnection.ice.link_local", false); // Set only for testing IPV6
 pref("media.peerconnection.ice.force_interface", ""); // Limit to only a single interface
 pref("media.peerconnection.ice.relay_only", false); // Limit candidates to TURN
 pref("media.peerconnection.use_document_iceservers", true);
+
 pref("media.peerconnection.identity.timeout", 10000);
 pref("media.peerconnection.ice.stun_client_maximum_transmits", 7);
 pref("media.peerconnection.ice.trickle_grace_period", 5000);
@@ -479,7 +480,7 @@ pref("media.cubeb.logging_level", "");
 // Cubeb sandbox (remoting) control
 #if defined(XP_LINUX) && !defined(MOZ_WIDGET_ANDROID)
 pref("media.cubeb.sandbox", true);
-pref("media.audioipc.pool_size", 2);
+pref("media.audioipc.pool_size", 1);
 // 64 * 4 kB stack per pool thread.
 pref("media.audioipc.stack_size", 262144);
 #else
@@ -490,7 +491,7 @@ pref("media.cubeb.sandbox", false);
 pref("media.audiograph.single_thread.enabled", false);
 
 #ifdef MOZ_AV1
-#if defined(XP_WIN) && !defined(_ARM64_) && !defined(__MINGW32__)
+#if defined(XP_WIN) && !defined(_ARM64_)
 pref("media.av1.enabled", true);
 pref("media.av1.use-dav1d", true);
 #elif defined(XP_MACOSX)
@@ -740,6 +741,7 @@ pref("gfx.webrender.program-binary-disk", true);
 
 #ifdef XP_MACOSX
 pref("gfx.compositor.glcontext.opaque", false);
+pref("gfx.core-animation.enabled", false);
 #endif
 
 pref("gfx.webrender.highlight-painted-layers", false);
@@ -1221,12 +1223,12 @@ pref("javascript.options.strict",           false);
 #ifdef DEBUG
 pref("javascript.options.strict.debug",     false);
 #endif
-pref("javascript.options.blinterp",         false);
+pref("javascript.options.blinterp",         true);
 // Duplicated in JitOptions - ensure both match.
 pref("javascript.options.blinterp.threshold", 10);
 pref("javascript.options.baselinejit",      true);
 // Duplicated in JitOptions - ensure both match.
-pref("javascript.options.baselinejit.threshold", 10);
+pref("javascript.options.baselinejit.threshold", 50);
 pref("javascript.options.ion",              true);
 // Duplicated in JitOptions - ensure both match.
 pref("javascript.options.ion.threshold",    1000);
@@ -1743,12 +1745,6 @@ pref("network.sts.max_time_for_pr_close_during_shutdown", 5000);
 // This timeout can be disabled by setting this pref to 0.
 // The value is expected in seconds.
 pref("network.sts.pollable_event_timeout", 6);
-
-// Start a separate socket process. Performing networking on the socket process
-// is control by a sepparate pref
-// ("network.http.network_access_on_socket_process.enabled").
-// Changing these prefs requires a restart.
-pref("network.process.enabled", false);
 
 // Enable/disable sni encryption.
 pref("network.security.esni.enabled", false);
@@ -2466,13 +2462,10 @@ pref("security.dialog_enable_delay", 1000);
 pref("security.notification_enable_delay", 500);
 
 #if defined(DEBUG) && !defined(ANDROID)
-pref("csp.about_uris_without_csp", "blank,printpreview,srcdoc,addons,config,debugging,downloads,home,newtab,preferences,sessionrestore,sync-log,welcomeback");
+pref("csp.about_uris_without_csp", "blank,printpreview,srcdoc,addons,config,downloads,home,newtab,preferences,sync-log");
 // the following prefs are for testing purposes only.
 pref("csp.overrule_about_uris_without_csp_whitelist", false);
 pref("csp.skip_about_page_has_csp_assert", false);
-// assertion flag will be set to false after fixing Bug 1473549
-pref("security.allow_eval_with_system_principal", false);
-pref("security.uris_using_eval_with_system_principal", "autocomplete.xml,redux.js,react-redux.js,content-task.js,lodash.js,jszip.js,sinon-7.2.7.js,ajv-4.1.1.js,jsol.js");
 #endif
 
 #ifdef EARLY_BETA_OR_EARLIER
@@ -4802,7 +4795,6 @@ pref("extensions.webextensions.keepUuidOnUninstall", false);
 pref("extensions.webextensions.identity.redirectDomain", "extensions.allizom.org");
 pref("extensions.webextensions.restrictedDomains", "accounts-static.cdn.mozilla.net,accounts.firefox.com,addons.cdn.mozilla.net,addons.mozilla.org,api.accounts.firefox.com,content.cdn.mozilla.net,discovery.addons.mozilla.org,install.mozilla.org,oauth.accounts.firefox.com,profile.accounts.firefox.com,support.mozilla.org,sync.services.mozilla.com");
 
-pref("extensions.webextensions.remote", false);
 // Whether or not the moz-extension resource loads are remoted. For debugging
 // purposes only. Setting this to false will break moz-extension URI loading
 // unless other process sandboxing and extension remoting prefs are changed.
@@ -4876,6 +4868,10 @@ pref("alerts.useSystemBackend", true);
 #endif
 
 // DOM full-screen API.
+#ifdef XP_MACOSX
+// Whether to use macOS native full screen for Fullscreen API
+pref("full-screen-api.macos-native-full-screen", false);
+#endif
 // whether to prevent the top level widget from going fullscreen
 pref("full-screen-api.ignore-widgets", false);
 pref("full-screen-api.pointer-lock.enabled", true);

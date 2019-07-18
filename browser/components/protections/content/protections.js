@@ -28,13 +28,35 @@ document.addEventListener("DOMContentLoaded", e => {
     RPMSendAsyncMessage("OpenContentBlockingPreferences");
   });
 
+  // Check to see if displaying the Lockwise card pref is enabled.
+  RPMSendAsyncMessage("GetEnabledLockwiseCard");
+
   let createGraph = data => {
+    let dateInMS = data.earliestDate
+      ? new Date(data.earliestDate).getTime()
+      : Date.now();
+
+    let summary = document.getElementById("graph-total-summary");
+    summary.setAttribute(
+      "data-l10n-args",
+      JSON.stringify({ count: data.sumEvents, earliestDate: dateInMS })
+    );
+    summary.setAttribute("data-l10n-id", "graph-total-summary");
+
     // Set a default top size for the height of the graph bars so that small
     // numbers don't fill the whole graph.
     let largest = 100;
     if (largest < data.largest) {
       largest = data.largest;
     }
+    let weekCount = 0;
+    let weekTypeCounts = {
+      social: 0,
+      cookie: 0,
+      tracker: 0,
+      fingerprinter: 0,
+      cryptominer: 0,
+    };
 
     let graph = document.getElementById("graph");
     for (let i = weekdays.length - 1; i >= 0; i--) {
@@ -46,23 +68,40 @@ document.addEventListener("DOMContentLoaded", e => {
       bar.className = "graph-bar";
       if (data[dateString]) {
         let content = data[dateString];
+        let count = document.createElement("div");
+        count.className = "bar-count";
+        count.textContent = content.total;
+        bar.appendChild(count);
         let barHeight = (content.total / largest) * 100;
+        weekCount += content.total;
         bar.style.height = `${barHeight}%`;
         for (let type of dataTypes) {
           if (content[type]) {
             let dataHeight = (content[type] / content.total) * 100;
             let div = document.createElement("div");
-            div.className = `${type}-bar`;
+            div.className = `${type}-bar inner-bar`;
             div.setAttribute("data-type", type);
             div.style.height = `${dataHeight}%`;
+            weekTypeCounts[type] += content[type];
             bar.appendChild(div);
           }
         }
       } else {
         // There were no content blocking events on this day.
-        bar.style.height = `0`;
+        bar.classList.add("empty");
       }
       graph.appendChild(bar);
+      let weekSummary = document.getElementById("graph-week-summary");
+      weekSummary.setAttribute(
+        "data-l10n-args",
+        JSON.stringify({ count: weekCount })
+      );
+      weekSummary.setAttribute("data-l10n-id", "graph-week-summary");
+
+      for (let type of dataTypes) {
+        document.querySelector(`label[data-type=${type}]`).textContent =
+          weekTypeCounts[type];
+      }
 
       let label = document.createElement("span");
       label.className = "column-label";
@@ -110,7 +149,15 @@ document.addEventListener("DOMContentLoaded", e => {
     createGraph(message.data);
   });
 
-  // Create the Lockwise card.
-  const lockwiseCard = new LockwiseCard(document);
-  lockwiseCard.init();
+  // Display Lockwise card
+  RPMAddMessageListener("SendEnabledLockWiseCardPref", message => {
+    if (message.data.isEnabled) {
+      const lockwiseCard = new LockwiseCard(document);
+      lockwiseCard.init();
+    }
+
+    // For tests
+    const lockwiseUI = document.querySelector(".lockwise-card");
+    lockwiseUI.dataset.enabled = message.data.isEnabled;
+  });
 });

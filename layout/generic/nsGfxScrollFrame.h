@@ -201,6 +201,10 @@ class ScrollFrameHelper : public nsIReflowCallback {
   void ScrollSnap(const nsPoint& aDestination,
                   ScrollMode aMode = ScrollMode::SmoothMsd);
 
+  bool HasPendingScrollRestoration() const {
+    return mRestorePos != nsPoint(-1, -1);
+  }
+
  protected:
   nsRect GetVisualScrollRange() const;
 
@@ -512,7 +516,6 @@ class ScrollFrameHelper : public nsIReflowCallback {
   // if there is overflow-x:hidden region.
   void UpdateMinimumScaleSize(const nsRect& aScrollableOverflow,
                               const nsSize& aICBSize);
-
 
   // Return the scroll frame's "true outer size".
   // This is mOuter->GetSize(), except when mOuter has been sized to reflect
@@ -842,6 +845,7 @@ class nsHTMLScrollFrame : public nsContainerFrame,
   virtual void AppendFrames(ChildListID aListID,
                             nsFrameList& aFrameList) override;
   virtual void InsertFrames(ChildListID aListID, nsIFrame* aPrevFrame,
+                            const nsLineList::iterator* aPrevFrameLine,
                             nsFrameList& aFrameList) override;
   virtual void RemoveFrame(ChildListID aListID, nsIFrame* aOldFrame) override;
 
@@ -1297,6 +1301,7 @@ class nsXULScrollFrame final : public nsBoxFrame,
   virtual void AppendFrames(ChildListID aListID,
                             nsFrameList& aFrameList) override;
   virtual void InsertFrames(ChildListID aListID, nsIFrame* aPrevFrame,
+                            const nsLineList::iterator* aPrevFrameLine,
                             nsFrameList& aFrameList) override;
   virtual void RemoveFrame(ChildListID aListID, nsIFrame* aOldFrame) override;
 

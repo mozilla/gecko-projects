@@ -194,14 +194,6 @@ var gIdentityHandler = {
       "identity-icon-label"
     ));
   },
-  get _connectionIcon() {
-    delete this._connectionIcon;
-    return (this._connectionIcon = document.getElementById("connection-icon"));
-  },
-  get _extensionIcon() {
-    delete this._extensionIcon;
-    return (this._extensionIcon = document.getElementById("extension-icon"));
-  },
   get _overrideService() {
     delete this._overrideService;
     return (this._overrideService = Cc[
@@ -256,6 +248,12 @@ var gIdentityHandler = {
       permissionAnchors[anchor.getAttribute("data-permission-id")] = anchor;
     }
     return (this._permissionAnchors = permissionAnchors);
+  },
+  get _trackingProtectionIconContainer() {
+    delete this._trackingProtectionIconContainer;
+    return (this._trackingProtectionIconContainer = document.getElementById(
+      "tracking-protection-icon-container"
+    ));
   },
 
   get _insecureConnectionIconEnabled() {
@@ -343,20 +341,10 @@ var gIdentityHandler = {
   },
 
   recordClick(object) {
-    let extra = {};
-    for (let blocker of ContentBlocking.blockers) {
-      if (blocker.telemetryIdentifier) {
-        extra[blocker.telemetryIdentifier] = blocker.activated
-          ? "true"
-          : "false";
-      }
-    }
     Services.telemetry.recordEvent(
       "security.ui.identitypopup",
       "click",
-      object,
-      null,
-      extra
+      object
     );
   },
 
@@ -732,6 +720,12 @@ var gIdentityHandler = {
       }
     }
 
+    // Hide the shield icon if it is a chrome page.
+    this._trackingProtectionIconContainer.classList.toggle(
+      "chromeUI",
+      this._isSecureInternalUI
+    );
+
     if (this._isCertUserOverridden) {
       this._identityBox.classList.add("certUserOverridden");
       // Cert is trusted because of a security exception, verifier is a special string.
@@ -783,11 +777,11 @@ var gIdentityHandler = {
     }
 
     // Push the appropriate strings out to the UI
-    this._connectionIcon.setAttribute("tooltiptext", tooltip);
+    this._identityIcon.setAttribute("tooltiptext", tooltip);
 
     if (this._pageExtensionPolicy) {
       let extensionName = this._pageExtensionPolicy.name;
-      this._extensionIcon.setAttribute(
+      this._identityIcon.setAttribute(
         "tooltiptext",
         gNavigatorBundle.getFormattedString("identity.extension.tooltip", [
           extensionName,
@@ -796,10 +790,6 @@ var gIdentityHandler = {
     }
 
     this._identityIconLabels.setAttribute("tooltiptext", tooltip);
-    this._identityIcon.setAttribute(
-      "tooltiptext",
-      gNavigatorBundle.getString("identity.icon.tooltip")
-    );
     this._identityIconLabel.setAttribute("value", icon_label);
     this._identityIconCountryLabel.setAttribute("value", icon_country_label);
     // Set cropping and direction
@@ -969,8 +959,6 @@ var gIdentityHandler = {
 
     // Update per-site permissions section.
     this.updateSitePermissions();
-
-    ContentBlocking.toggleReportBreakageButton();
   },
 
   setURI(uri) {
@@ -1012,12 +1000,6 @@ var gIdentityHandler = {
    * Click handler for the identity-box element in primary chrome.
    */
   handleIdentityButtonEvent(event) {
-    // For Nightly users, show the WIP protections panel if the meta key was held.
-    if (this._protectionsPanelEnabled && event.altKey) {
-      gProtectionsHandler.handleProtectionsButtonEvent(event);
-      return;
-    }
-
     event.stopPropagation();
 
     if (
@@ -1089,6 +1071,11 @@ var gIdentityHandler = {
     // Add the "open" attribute to the identity box for styling
     this._identityBox.setAttribute("open", "true");
 
+    // Check the panel state of the protections panel. Hide it if needed.
+    if (gProtectionsHandler._protectionsPopup.state != "closed") {
+      PanelMultiView.hidePopup(gProtectionsHandler._protectionsPopup);
+    }
+
     // Now open the popup, anchored off the primary chrome element
     PanelMultiView.openPopup(this._identityPopup, this._identityIcon, {
       position: "bottomcenter topleft",
@@ -1101,24 +1088,10 @@ var gIdentityHandler = {
       window.addEventListener("focus", this, true);
     }
 
-    let extra = {};
-    for (let blocker of ContentBlocking.blockers) {
-      if (blocker.telemetryIdentifier) {
-        extra[blocker.telemetryIdentifier] = blocker.activated
-          ? "true"
-          : "false";
-      }
-    }
-
-    let shieldStatus = ContentBlocking.iconBox.hasAttribute("active")
-      ? "shield-showing"
-      : "shield-hidden";
     Services.telemetry.recordEvent(
       "security.ui.identitypopup",
       "open",
-      "identity_popup",
-      shieldStatus,
-      extra
+      "identity_popup"
     );
   },
 

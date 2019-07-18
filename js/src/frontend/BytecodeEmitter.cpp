@@ -25,7 +25,7 @@
 #include "jstypes.h"  // JS_BIT
 #include "jsutil.h"   // Min
 
-#include "dbg/Debugger.h"                        // Debugger
+#include "debugger/Debugger.h"                   // Debugger
 #include "ds/Nestable.h"                         // Nestable
 #include "frontend/BytecodeControlStructures.h"  // NestableControl, BreakableControl, LabelControl, LoopControl, TryFinallyControl
 #include "frontend/CallOrNewEmitter.h"           // CallOrNewEmitter
@@ -1521,11 +1521,7 @@ bool BytecodeEmitter::isInLoop() {
 }
 
 bool BytecodeEmitter::checkSingletonContext() {
-  if (!script->treatAsRunOnce() || sc->isFunctionBox() || isInLoop()) {
-    return false;
-  }
-  hasSingletons = true;
-  return true;
+  return script->treatAsRunOnce() && !sc->isFunctionBox() && !isInLoop();
 }
 
 bool BytecodeEmitter::checkRunOnceContext() {
@@ -2219,18 +2215,14 @@ MOZ_NEVER_INLINE bool BytecodeEmitter::emitSwitch(SwitchStatement* switchStmt) {
 }
 
 bool BytecodeEmitter::isRunOnceLambda() {
-  // The run once lambda flags set by the parser are approximate, and we look
-  // at properties of the function itself before deciding to emit a function
-  // as a run once lambda.
-
-  if (!(parent && parent->emittingRunOnceLambda) &&
-      (emitterMode != LazyFunction || !lazyScript->treatAsRunOnce())) {
-    return false;
+  if (lazyScript) {
+    MOZ_ASSERT_IF(sc->asFunctionBox()->shouldSuppressRunOnce(),
+                  !lazyScript->treatAsRunOnce());
+    return lazyScript->treatAsRunOnce();
   }
 
-  FunctionBox* funbox = sc->asFunctionBox();
-  return !funbox->argumentsHasLocalBinding() && !funbox->isGenerator() &&
-         !funbox->isAsync() && !funbox->explicitName();
+  return parent && parent->emittingRunOnceLambda &&
+         !sc->asFunctionBox()->shouldSuppressRunOnce();
 }
 
 bool BytecodeEmitter::allocateResumeIndex(BytecodeOffset offset,

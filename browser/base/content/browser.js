@@ -1620,10 +1620,6 @@ var gBrowserInit = {
   },
 
   onBeforeInitialXULLayout() {
-    // Turn on QuantumBar. This can be removed once the quantumbar attribute is gone.
-    let urlbar = document.getElementById("urlbar");
-    urlbar.setAttribute("quantumbar", true);
-
     // Set a sane starting width/height for all resolutions on new profiles.
     if (Services.prefs.getBoolPref("privacy.resistFingerprinting")) {
       // When the fingerprinting resistance is enabled, making sure that we don't
@@ -1799,7 +1795,7 @@ var gBrowserInit = {
 
     if (!window.toolbar.visible) {
       // adjust browser UI for popups
-      gURLBar.setAttribute("readonly", "true");
+      gURLBar.readOnly = true;
     }
 
     // Misc. inits.
@@ -1856,6 +1852,55 @@ var gBrowserInit = {
     }
 
     this._loadHandled = true;
+    let reloadHistogram = Services.telemetry.getHistogramById(
+      "FX_PAGE_RELOAD_KEY_COMBO"
+    );
+    let reloadCommand = document.getElementById("Browser:Reload");
+    reloadCommand.addEventListener("command", function(event) {
+      let { target } = event.sourceEvent || {};
+      if (target.getAttribute("keycode") == "VK_F5") {
+        reloadHistogram.add("only_f5", 1);
+      } else if (target.id == "key_reload") {
+        reloadHistogram.add("accel_reloadKey", 1);
+      }
+    });
+
+    let reloadSkipCacheCommand = document.getElementById(
+      "Browser:ReloadSkipCache"
+    );
+    reloadSkipCacheCommand.addEventListener("command", function(event) {
+      let { target } = event.sourceEvent || {};
+      if (target.getAttribute("keycode") == "VK_F5") {
+        reloadHistogram.add("ctrl_f5", 1);
+      } else if (target.id == "key_reload_skip_cache") {
+        reloadHistogram.add("accel_shift_reload", 1);
+      }
+    });
+
+    let reloadOrDuplicateCommand = document.getElementById(
+      "Browser:ReloadOrDuplicate"
+    );
+    reloadOrDuplicateCommand.addEventListener("command", function(event) {
+      let { target } = event.sourceEvent || {};
+      if (target.id == "reload-button") {
+        let accelKeyPressed =
+          AppConstants.platform == "macosx" ? event.metaKey : event.ctrlKey;
+        let auxiliaryPressed = false;
+        let { sourceEvent } = event.sourceEvent || {};
+        if (sourceEvent) {
+          auxiliaryPressed = sourceEvent.button == 1;
+        }
+        if (auxiliaryPressed) {
+          reloadHistogram.add("auxiliary_toolbar", 1);
+        } else if (accelKeyPressed) {
+          reloadHistogram.add("accel_toolbar", 1);
+        } else if (event.shiftKey) {
+          reloadHistogram.add("shift_toolbar", 1);
+        } else {
+          reloadHistogram.add("toolbar", 1);
+        }
+      }
+    });
   },
 
   _cancelDelayedStartup() {
@@ -1943,7 +1988,7 @@ var gBrowserInit = {
     BookmarkingUI.init();
     BrowserSearch.delayedStartupInit();
     AutoShowBookmarksToolbar.init();
-    ContentBlocking.init();
+    gProtectionsHandler.init();
 
     let safeMode = document.getElementById("helpSafeMode");
     if (Services.appinfo.inSafeMode) {
@@ -2423,7 +2468,7 @@ var gBrowserInit = {
       Services.prefs.removeObserver(ctrlTab.prefName, ctrlTab);
       ctrlTab.uninit();
       gBrowserThumbnails.uninit();
-      ContentBlocking.uninit();
+      gProtectionsHandler.uninit();
       FullZoom.destroy();
 
       Services.obs.removeObserver(gIdentityHandler, "perm-changed");
@@ -2621,9 +2666,9 @@ function BrowserStop() {
 
 function BrowserReloadOrDuplicate(aEvent) {
   aEvent = getRootEvent(aEvent);
-  let metaKeyPressed =
+  let accelKeyPressed =
     AppConstants.platform == "macosx" ? aEvent.metaKey : aEvent.ctrlKey;
-  var backgroundTabModifier = aEvent.button == 1 || metaKeyPressed;
+  var backgroundTabModifier = aEvent.button == 1 || accelKeyPressed;
 
   if (aEvent.shiftKey && !backgroundTabModifier) {
     BrowserReloadSkipCache();
@@ -3545,13 +3590,21 @@ var BrowserOnClick = {
       case "viewCertificate":
         securityInfo = getSecurityInfo(securityInfoAsString);
         cert = securityInfo.serverCert;
-        Services.ww.openWindow(
-          window,
-          "chrome://pippki/content/certViewer.xul",
-          "_blank",
-          "centerscreen,chrome",
-          cert
-        );
+        if (Services.prefs.getBoolPref("security.aboutcertificate.enabled")) {
+          let derb64 = encodeURIComponent(btoa(getDERString(cert)));
+          let url = `about:certificate?cert=${derb64}`;
+          openTrustedLinkIn(url, "tab", {
+            triggeringPrincipal: browser.contentPrincipal,
+          });
+        } else {
+          Services.ww.openWindow(
+            window,
+            "chrome://pippki/content/certViewer.xul",
+            "_blank",
+            "centerscreen,chrome",
+            cert
+          );
+        }
         break;
       case "exceptionDialogButton":
         securityInfo = getSecurityInfo(securityInfoAsString);
@@ -4520,7 +4573,7 @@ const BrowserSearch = {
     } else {
       placeholder = gURLBar.getAttribute("defaultPlaceholder");
     }
-    gURLBar.setAttribute("placeholder", placeholder);
+    gURLBar.placeholder = placeholder;
   },
 
   addEngine(browser, engine, uri) {
@@ -5549,26 +5602,6 @@ var XULBrowserWindow = {
   onLocationChange(aWebProgress, aRequest, aLocationURI, aFlags, aIsSimulated) {
     var location = aLocationURI ? aLocationURI.spec : "";
 
-    let pageTooltip = document.getElementById("aHTMLTooltip");
-    let tooltipNode = pageTooltip.triggerNode;
-    if (tooltipNode) {
-      // Optimise for the common case
-      if (aWebProgress.isTopLevel) {
-        pageTooltip.hidePopup();
-      } else {
-        for (
-          let tooltipWindow = tooltipNode.ownerGlobal;
-          tooltipWindow != tooltipWindow.parent;
-          tooltipWindow = tooltipWindow.parent
-        ) {
-          if (tooltipWindow == aWebProgress.DOMWindow) {
-            pageTooltip.hidePopup();
-            break;
-          }
-        }
-      }
-    }
-
     this.hideOverLinkImmediately = true;
     this.setOverLink("", null);
     this.hideOverLinkImmediately = false;
@@ -5739,7 +5772,7 @@ var XULBrowserWindow = {
       );
     }
 
-    ContentBlocking.onContentBlockingEvent(
+    gProtectionsHandler.onContentBlockingEvent(
       this._event,
       aWebProgress,
       aIsSimulated
@@ -5792,6 +5825,13 @@ var XULBrowserWindow = {
 
     CombinedStopReload.onTabSwitch();
 
+    // Docshell should normally take care of hiding the tooltip, but we need to do it
+    // ourselves for tabswitches.
+    this.hideTooltip();
+
+    // Also hide tooltips for content loaded in the parent process:
+    document.getElementById("aHTMLTooltip").hidePopup();
+
     var nsIWebProgressListener = Ci.nsIWebProgressListener;
     var loadingDone = aStateFlags & nsIWebProgressListener.STATE_STOP;
     // use a pseudo-object instead of a (potentially nonexistent) channel for getting
@@ -5826,109 +5866,6 @@ var XULBrowserWindow = {
       "Trying to navigateAndRestore a browser which was " +
         "not attached to this tabbrowser is unsupported"
     );
-  },
-
-  // data for updating sessionStore
-  _sessionData: {},
-
-  composeChildren: function XWB_composeScrollPositionsData(
-    aPositions,
-    aDescendants,
-    aStartIndex,
-    aNumberOfDescendants
-  ) {
-    let children = [];
-    let lastIndexOfNonNullbject = -1;
-    for (let i = 0; i < aNumberOfDescendants; i++) {
-      let currentIndex = aStartIndex + i;
-      let obj = {};
-      let objWithData = false;
-      if (aPositions[currentIndex]) {
-        obj.scroll = aPositions[currentIndex];
-        objWithData = true;
-      }
-      if (aDescendants[currentIndex]) {
-        let descendantsTree = this.composeChildren(
-          aPositions,
-          aDescendants,
-          currentIndex + 1,
-          aDescendants[currentIndex]
-        );
-        i += aDescendants[currentIndex];
-        if (descendantsTree) {
-          obj.children = descendantsTree;
-          objWithData = true;
-        }
-      }
-
-      if (objWithData) {
-        lastIndexOfNonNullbject = children.length;
-        children.push(obj);
-      } else {
-        children.push(null);
-      }
-    }
-
-    if (lastIndexOfNonNullbject == -1) {
-      return null;
-    }
-
-    return children.slice(0, lastIndexOfNonNullbject + 1);
-  },
-
-  updateScrollPositions: function XWB_updateScrollPositions(
-    aPositions,
-    aDescendants
-  ) {
-    let obj = {};
-    let objWithData = false;
-
-    if (aPositions[0]) {
-      obj.scroll = aPositions[0];
-      objWithData = true;
-    }
-
-    if (aPositions.length > 1) {
-      let children = this.composeChildren(
-        aPositions,
-        aDescendants,
-        1,
-        aDescendants[0]
-      );
-      if (children) {
-        obj.children = children;
-        objWithData = true;
-      }
-    }
-
-    if (objWithData) {
-      this._sessionData.scroll = obj;
-    } else {
-      this._sessionData.scroll = null;
-    }
-  },
-
-  updateDocShellCaps: function XWB_updateDocShellCaps(aDisCaps) {
-    this._sessionData.disallow = aDisCaps ? aDisCaps : null;
-  },
-
-  updateIsPrivate: function XWB_updateIsPrivate(aIsPrivate) {
-    this._sessionData.isPrivate = aIsPrivate;
-  },
-
-  updateSessionStore: function XWB_updateSessionStore(
-    aBrowser,
-    aFlushId,
-    aIsFinal,
-    aEpoch
-  ) {
-    SessionStore.updateSessionStoreFromTablistener(aBrowser, {
-      data: this._sessionData,
-      flushID: aFlushId,
-      isFinal: aIsFinal,
-      epoch: aEpoch,
-    });
-    this._sessionData = {};
   },
 };
 
@@ -6366,8 +6303,6 @@ var TabsProgressListener = {
     gBrowser.getNotificationBox(aBrowser).removeTransientNotifications();
 
     FullZoom.onLocationChange(aLocationURI, false, aBrowser);
-
-    ContentBlocking.onLocationChange();
   },
 
   onLinkIconAvailable(browser, dataURI, iconURI) {
@@ -7297,6 +7232,14 @@ function handleLinkClick(event, href, linkNode) {
   }
 
   var doc = event.target.ownerDocument;
+  let referrerInfo = Cc["@mozilla.org/referrer-info;1"].createInstance(
+    Ci.nsIReferrerInfo
+  );
+  if (linkNode) {
+    referrerInfo.initWithNode(linkNode);
+  } else {
+    referrerInfo.initWithDocument(doc);
+  }
 
   if (where == "save") {
     saveURL(
@@ -7305,20 +7248,11 @@ function handleLinkClick(event, href, linkNode) {
       null,
       true,
       true,
-      doc.documentURIObject,
+      referrerInfo,
       doc
     );
     event.preventDefault();
     return true;
-  }
-
-  let referrerInfo = Cc["@mozilla.org/referrer-info;1"].createInstance(
-    Ci.nsIReferrerInfo
-  );
-  if (linkNode) {
-    referrerInfo.initWithNode(linkNode);
-  } else {
-    referrerInfo.initWithDocument(doc);
   }
 
   // if the mixedContentChannel is present and the referring URI passes

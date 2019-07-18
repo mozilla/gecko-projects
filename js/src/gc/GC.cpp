@@ -213,7 +213,7 @@
 #include "jstypes.h"
 #include "jsutil.h"
 
-#include "dbg/Debugger.h"
+#include "debugger/Debugger.h"
 #include "gc/FindSCCs.h"
 #include "gc/FreeOp.h"
 #include "gc/GCInternals.h"
@@ -6654,8 +6654,7 @@ static UniquePtr<SweepAction> ForEachAllocKind(AllocKinds kinds,
     return nullptr;
   }
 
-  using Action =
-      SweepActionForEach<ContainerIter<AllocKinds>, AllocKinds>;
+  using Action = SweepActionForEach<ContainerIter<AllocKinds>, AllocKinds>;
   return js::MakeUnique<Action>(kinds, kindOut, std::move(action));
 }
 

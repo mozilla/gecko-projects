@@ -1564,8 +1564,8 @@ nsDocShell::SetRemoteSubframes(bool aUseRemoteSubframes) {
 
   if (aUseRemoteSubframes && !annotated) {
     annotated = true;
-    CrashReporter::AnnotateCrashReport(CrashReporter::Annotation::DOMFissionEnabled,
-                                       true);
+    CrashReporter::AnnotateCrashReport(
+        CrashReporter::Annotation::DOMFissionEnabled, true);
   }
 
   // Don't allow non-remote tabs with remote subframes.
@@ -4663,7 +4663,7 @@ nsDocShell::Reload(uint32_t aReloadFlags) {
     // Do not inherit owner from document
     uint32_t flags = INTERNAL_LOAD_FLAGS_NONE;
     nsAutoString srcdoc;
-    nsCOMPtr<nsIURI> baseURI;
+    nsIURI* baseURI = nullptr;
     nsCOMPtr<nsIURI> originalURI;
     nsCOMPtr<nsIURI> resultPrincipalURI;
     bool loadReplace = false;
@@ -9534,6 +9534,98 @@ nsresult nsDocShell::InternalLoad(nsDocShellLoadState* aLoadState,
     }
   }
 
+  // In e10s, in the parent process, we refuse to load anything other than
+  // "safe" resources that we ship or trust enough to give "special" URLs.
+  if (XRE_IsE10sParentProcess()) {
+    nsCOMPtr<nsIURI> uri = aLoadState->URI();
+    do {
+      bool canLoadInParent = false;
+      if (NS_SUCCEEDED(NS_URIChainHasFlags(
+              uri, nsIProtocolHandler::URI_IS_UI_RESOURCE, &canLoadInParent)) &&
+          canLoadInParent) {
+        // We allow UI resources.
+        break;
+      }
+      // For about: and extension-based URIs, which don't get
+      // URI_IS_UI_RESOURCE, first remove layers of view-source:, if present.
+      while (uri && uri->SchemeIs("view-source")) {
+        nsCOMPtr<nsINestedURI> nested = do_QueryInterface(uri);
+        if (nested) {
+          nested->GetInnerURI(getter_AddRefs(uri));
+        } else {
+          break;
+        }
+      }
+      // Allow about: URIs, and allow moz-extension ones if we're running
+      // extension content in the parent process.
+      if (!uri || uri->SchemeIs("about") ||
+          (!StaticPrefs::extensions_webextensions_remote() &&
+           uri->SchemeIs("moz-extension"))) {
+        break;
+      }
+      nsAutoCString scheme;
+      uri->GetScheme(scheme);
+      // Allow ext+foo URIs (extension-registered custom protocols). See
+      // https://developer.mozilla.org/en-US/docs/Mozilla/Add-ons/WebExtensions/manifest.json/protocol_handlers
+      if (StringBeginsWith(scheme, NS_LITERAL_CSTRING("ext+")) &&
+          !StaticPrefs::extensions_webextensions_remote()) {
+        break;
+      }
+      // This next bit is... awful. Basically, about:addons used to load the
+      // discovery pane remotely. Allow for that, if that's actually the state
+      // we're in (which is no longer the default at time of writing, but still
+      // tested). https://bugzilla.mozilla.org/show_bug.cgi?id=1565606 covers
+      // removing this atrocity.
+      nsCOMPtr<nsIWebNavigation> parent(do_QueryInterface(mParent));
+      if (parent) {
+        nsCOMPtr<nsIURI> parentURL;
+        parent->GetCurrentURI(getter_AddRefs(parentURL));
+        if (parentURL &&
+            parentURL->GetSpecOrDefault().EqualsLiteral("about:addons") &&
+            (!Preferences::GetBool("extensions.htmlaboutaddons.enabled",
+                                   true) ||
+             !Preferences::GetBool(
+                 "extensions.htmlaboutaddons.discover.enabled", true))) {
+          nsCString discoveryURLString;
+          Preferences::GetCString("extensions.webservice.discoverURL",
+                                  discoveryURLString);
+          nsCOMPtr<nsIURI> discoveryURL;
+          NS_NewURI(getter_AddRefs(discoveryURL), discoveryURLString);
+
+          nsAutoCString discoveryPrePath;
+          if (discoveryURL) {
+            discoveryURL->GetPrePath(discoveryPrePath);
+          }
+
+          nsAutoCString requestedPrePath;
+          uri->GetPrePath(requestedPrePath);
+          // So allow the discovery path to load inside about:addons.
+          if (discoveryPrePath.Equals(requestedPrePath)) {
+            break;
+          }
+        }
+      }
+#ifdef MOZ_LAYOUT_DEBUGGER
+      // Also allow loads in the layout debugger window.
+      nsCOMPtr<nsIDocShellTreeItem> rootItem;
+      GetRootTreeItem(getter_AddRefs(rootItem));
+      nsCOMPtr<nsIWebNavigation> root = do_QueryInterface(rootItem);
+      nsCOMPtr<nsIURI> rootURL;
+      root->GetCurrentURI(getter_AddRefs(rootURL));
+      if (rootURL && rootURL->GetSpecOrDefault().EqualsLiteral(
+                         "chrome://layoutdebug/content/layoutdebug.xul")) {
+        break;
+      }
+#endif
+      // Final exception for some legacy automated tests:
+      if (xpc::IsInAutomation() &&
+          Preferences::GetBool("security.allow_unsafe_parent_loads", false)) {
+        break;
+      }
+      return NS_ERROR_FAILURE;
+    } while (0);
+  }
+
   // Whenever a top-level browsing context is navigated, the user agent MUST
   // lock the orientation of the document to the document's default
   // orientation. We don't explicitly check for a top-level browsing context
@@ -13557,14 +13649,18 @@ nsDocShell::SetDisplayMode(DisplayMode aDisplayMode) {
   return NS_OK;
 }
 
+#define MATRIX_LENGTH 20
+
 NS_IMETHODIMP
-nsDocShell::SetColorMatrix(float* aMatrix, uint32_t aMatrixLen) {
-  if (aMatrixLen == 20) {
+nsDocShell::SetColorMatrix(const nsTArray<float>& aMatrix) {
+  if (aMatrix.Length() == MATRIX_LENGTH) {
     mColorMatrix.reset(new gfx::Matrix5x4());
-    MOZ_ASSERT(aMatrixLen * sizeof(*aMatrix) ==
-               sizeof(mColorMatrix->components));
-    memcpy(mColorMatrix->components, aMatrix, sizeof(mColorMatrix->components));
-  } else if (aMatrixLen == 0) {
+    static_assert(MATRIX_LENGTH * sizeof(float) ==
+                  sizeof(mColorMatrix->components),
+                  "Size mismatch for our memcpy");
+    memcpy(mColorMatrix->components, aMatrix.Elements(),
+           sizeof(mColorMatrix->components));
+  } else if (aMatrix.Length() == 0) {
     mColorMatrix.reset();
   } else {
     return NS_ERROR_INVALID_ARG;
@@ -13586,22 +13682,20 @@ nsDocShell::SetColorMatrix(float* aMatrix, uint32_t aMatrixLen) {
 }
 
 NS_IMETHODIMP
-nsDocShell::GetColorMatrix(uint32_t* aMatrixLen, float** aMatrix) {
-  NS_ENSURE_ARG_POINTER(aMatrixLen);
-  *aMatrixLen = 0;
-
-  NS_ENSURE_ARG_POINTER(aMatrix);
-  *aMatrix = nullptr;
-
+nsDocShell::GetColorMatrix(nsTArray<float>& aMatrix) {
   if (mColorMatrix) {
-    *aMatrix = (float*)moz_xmalloc(20 * sizeof(float));
-    MOZ_ASSERT(20 * sizeof(float) == sizeof(mColorMatrix->components));
-    *aMatrixLen = 20;
-    memcpy(*aMatrix, mColorMatrix->components, 20 * sizeof(float));
+    aMatrix.SetLength(MATRIX_LENGTH);
+    static_assert(MATRIX_LENGTH * sizeof(float) ==
+                  sizeof(mColorMatrix->components),
+                  "Size mismatch for our memcpy");
+    memcpy(aMatrix.Elements(), mColorMatrix->components,
+           MATRIX_LENGTH * sizeof(float));
   }
 
   return NS_OK;
 }
+
+#undef MATRIX_LENGTH
 
 bool nsDocShell::IsForceReloading() { return IsForceReloadType(mLoadType); }
 

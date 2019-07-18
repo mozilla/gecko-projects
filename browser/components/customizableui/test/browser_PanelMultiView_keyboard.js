@@ -69,6 +69,11 @@ async function expectFocusAfterKey(aKey, aFocus) {
 }
 
 add_task(async function setup() {
+  // This shouldn't be necessary - but it is, because we use same-process frames.
+  // https://bugzilla.mozilla.org/show_bug.cgi?id=1565276 covers improving this.
+  await SpecialPowers.pushPrefEnv({
+    set: [["security.allow_unsafe_parent_loads", true]],
+  });
   let navBar = document.getElementById("nav-bar");
   gAnchor = document.createXULElement("toolbarbutton");
   navBar.appendChild(gAnchor);
@@ -256,6 +261,27 @@ add_task(async function testArrowsMenulist() {
     is(gMainMenulist.value, "1", "menulist value 1 after ArrowUp");
   }
   await hidePopup();
+});
+
+// Test that the tab key closes an open menu list.
+add_task(async function testTabOpenMenulist() {
+  await openPopup();
+  gMainMenulist.focus();
+  is(document.activeElement, gMainMenulist, "menulist focused");
+  let popup = gMainMenulist.menupopup;
+  let shown = BrowserTestUtils.waitForEvent(popup, "popupshown");
+  gMainMenulist.open = true;
+  await shown;
+  ok(gMainMenulist.open, "menulist open");
+  let menuHidden = BrowserTestUtils.waitForEvent(popup, "popuphidden");
+  let panelHidden = BrowserTestUtils.waitForEvent(gPanel, "popuphidden");
+  EventUtils.synthesizeKey("KEY_Tab");
+  await menuHidden;
+  ok(!gMainMenulist.open, "menulist closed after Tab");
+  // Tab in an open menulist closes the menulist, but also dismisses the panel
+  // above it (bug 1566673). So, we just wait for the panel to hide rather than
+  // using hidePopup().
+  await panelHidden;
 });
 
 // Test that pressing space in a textbox inserts a space (instead of trying to

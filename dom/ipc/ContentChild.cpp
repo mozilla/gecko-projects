@@ -3878,10 +3878,17 @@ mozilla::ipc::IPCResult ContentChild::RecvAttachBrowsingContext(
 }
 
 mozilla::ipc::IPCResult ContentChild::RecvDetachBrowsingContext(
-    BrowsingContext* aContext) {
-  MOZ_RELEASE_ASSERT(aContext);
+    uint64_t aContextId, DetachBrowsingContextResolver&& aResolve) {
+  // NOTE: Immediately resolve the promise, as we've received the message. This
+  // will allow the parent process to discard references to this BC.
+  aResolve(true);
 
-  aContext->Detach(/* aFromIPC */ true);
+  // If we can't find a BrowsingContext with the given ID, it's already been
+  // collected and we can ignore the request.
+  RefPtr<BrowsingContext> context = BrowsingContext::Get(aContextId);
+  if (context) {
+    context->Detach(/* aFromIPC */ true);
+  }
 
   return IPC_OK();
 }
@@ -4040,8 +4047,11 @@ mozilla::ipc::IPCResult ContentChild::RecvCommitBrowsingContextTransaction(
 }
 
 void ContentChild::HoldBrowsingContextGroup(BrowsingContextGroup* aBCG) {
-  RefPtr<BrowsingContextGroup> bcgPtr(aBCG);
-  mBrowsingContextGroupHolder.AppendElement(bcgPtr);
+  mBrowsingContextGroupHolder.AppendElement(aBCG);
+}
+
+void ContentChild::ReleaseBrowsingContextGroup(BrowsingContextGroup* aBCG) {
+  mBrowsingContextGroupHolder.RemoveElement(aBCG);
 }
 
 }  // namespace dom

@@ -2,8 +2,9 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-// Enable DevTools WebIDE by default
-pref("devtools.webide.enabled", true);
+// Disable WebIDE and ConnectPage by default (Bug 1539451)
+pref("devtools.webide.enabled", false);
+pref("devtools.connectpage.enabled", false);
 
 // Toolbox preferences
 pref("devtools.toolbox.footer.height", 250);
@@ -289,6 +290,10 @@ pref("devtools.webconsole.features.editor", false);
 // Saved editor mode state in the console.
 pref("devtools.webconsole.input.editor", false);
 
+// Editor width for webconsole and browserconsole
+pref("devtools.webconsole.input.editorWidth", 0);
+pref("devtools.browserconsole.input.editorWidth", 0);
+
 // Disable the new performance recording panel by default
 pref("devtools.performance.new-panel-enabled", false);
 
@@ -355,9 +360,6 @@ pref("devtools.responsive.showUserAgentInput", true);
 #else
 pref("devtools.responsive.showUserAgentInput", false);
 #endif
-
-// Enable new about:debugging.
-pref("devtools.aboutdebugging.new-enabled", true);
 
 // Show tab debug targets for This Firefox (on by default for local builds).
 #ifdef MOZILLA_OFFICIAL

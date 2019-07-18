@@ -71,7 +71,7 @@
 #include "builtin/Promise.h"
 #include "builtin/RegExp.h"
 #include "builtin/TestingFunctions.h"
-#include "dbg/Debugger.h"
+#include "debugger/Debugger.h"
 #if defined(JS_BUILD_BINAST)
 #  include "frontend/BinASTParser.h"
 #endif  // defined(JS_BUILD_BINAST)
@@ -3157,10 +3157,6 @@ static const char* TryNoteName(JSTryNoteKind kind) {
 
 static MOZ_MUST_USE bool TryNotes(JSContext* cx, HandleScript script,
                                   Sprinter* sp) {
-  if (!script->hasTrynotes()) {
-    return true;
-  }
-
   if (!sp->put(
           "\nException table:\nkind               stack    start      end\n")) {
     return false;
@@ -3178,10 +3174,6 @@ static MOZ_MUST_USE bool TryNotes(JSContext* cx, HandleScript script,
 
 static MOZ_MUST_USE bool ScopeNotes(JSContext* cx, HandleScript script,
                                     Sprinter* sp) {
-  if (!script->hasScopeNotes()) {
-    return true;
-  }
-
   if (!sp->put("\nScope notes:\n   index   parent    start      end\n")) {
     return false;
   }
@@ -4259,37 +4251,41 @@ static void WatchdogMain(JSContext* cx) {
 
   ShellContext* sc = GetShellContext(cx);
 
-  LockGuard<Mutex> guard(sc->watchdogLock);
-  while (sc->watchdogThread) {
-    auto now = TimeStamp::Now();
-    if (sc->watchdogTimeout && now >= sc->watchdogTimeout.value()) {
-      /*
-       * The timeout has just expired. Request an interrupt callback
-       * outside the lock.
-       */
-      sc->watchdogTimeout = Nothing();
-      {
-        UnlockGuard<Mutex> unlock(guard);
-        CancelExecution(cx);
-      }
-
-      /* Wake up any threads doing sleep. */
-      sc->sleepWakeup.notify_all();
-    } else {
-      if (sc->watchdogTimeout) {
+  {
+    LockGuard<Mutex> guard(sc->watchdogLock);
+    while (sc->watchdogThread) {
+      auto now = TimeStamp::Now();
+      if (sc->watchdogTimeout && now >= sc->watchdogTimeout.value()) {
         /*
-         * Time hasn't expired yet. Simulate an interrupt callback
-         * which doesn't abort execution.
+         * The timeout has just expired. Request an interrupt callback
+         * outside the lock.
          */
-        JS_RequestInterruptCallback(cx);
-      }
+        sc->watchdogTimeout = Nothing();
+        {
+          UnlockGuard<Mutex> unlock(guard);
+          CancelExecution(cx);
+        }
 
-      TimeDuration sleepDuration = sc->watchdogTimeout
-                                       ? TimeDuration::FromSeconds(0.1)
-                                       : TimeDuration::Forever();
-      sc->watchdogWakeup.wait_for(guard, sleepDuration);
+        /* Wake up any threads doing sleep. */
+        sc->sleepWakeup.notify_all();
+      } else {
+        if (sc->watchdogTimeout) {
+          /*
+           * Time hasn't expired yet. Simulate an interrupt callback
+           * which doesn't abort execution.
+           */
+          JS_RequestInterruptCallback(cx);
+        }
+
+        TimeDuration sleepDuration = sc->watchdogTimeout
+                                         ? TimeDuration::FromSeconds(0.1)
+                                         : TimeDuration::Forever();
+        sc->watchdogWakeup.wait_for(guard, sleepDuration);
+      }
     }
   }
+
+  Mutex::ShutDown();
 }
 
 static bool ScheduleWatchdog(JSContext* cx, double t) {
@@ -11057,9 +11053,9 @@ int main(int argc, char** argv, char** envp) {
           "Wait for COUNT calls or iterations before baseline-compiling "
           "(default: 10)",
           -1) ||
-      !op.addBoolOption('\0', "blinterp", "Enable Baseline Interpreter") ||
-      !op.addBoolOption('\0', "no-blinterp",
-                        "Disable Baseline Interpreter (default)") ||
+      !op.addBoolOption('\0', "blinterp",
+                        "Enable Baseline Interpreter (default)") ||
+      !op.addBoolOption('\0', "no-blinterp", "Disable Baseline Interpreter") ||
       !op.addBoolOption('\0', "blinterp-eager",
                         "Always Baseline-interpret scripts") ||
       !op.addIntOption(

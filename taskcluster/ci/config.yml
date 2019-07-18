@@ -88,6 +88,7 @@ treeherder:
         'Deb7': 'Packages for Debian 7'
         'Deb7-32': 'Packages for Debian 7 32-bits'
         'Deb9': 'Packages for Debian 9'
+        'Deb10': 'Packages for Debian 10'
         'Nexus 5-L': 'Nexus 5-L Device Image'
         'I': 'Docker Image Builds'
         'TL': 'Toolchain builds for Linux 64-bits'
@@ -412,7 +413,7 @@ mac-notarization:
     mac-entitlements:
         by-platform:
             macosx64.*:
-                by-project:
-                    mozilla-(central|beta|release): security/mac/hardenedruntime/production.entitlements.xml
+                by-release-level:
+                    production: security/mac/hardenedruntime/production.entitlements.xml
                     default: security/mac/hardenedruntime/developer.entitlements.xml
             default: ''

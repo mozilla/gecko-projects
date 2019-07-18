@@ -87,7 +87,7 @@ inline const StyleTrackBreadth& StyleTrackSize::GetMin() const {
   return kAuto;
 }
 
-}
+}  // namespace mozilla
 
 static void ReparentFrame(nsIFrame* aFrame, nsContainerFrame* aOldParent,
                           nsContainerFrame* aNewParent) {
@@ -3878,7 +3878,9 @@ void nsGridContainerFrame::Grid::PlaceGridItems(
   // Note that this is for a grid with a 1,1 origin.  We'll change that
   // to a 0,0 based grid after placing definite lines.
   const nsStylePosition* const gridStyle = aState.mGridStyle;
-  const auto* areas = gridStyle->mGridTemplateAreas.IsNone() ? nullptr : &*gridStyle->mGridTemplateAreas.AsAreas();
+  const auto* areas = gridStyle->mGridTemplateAreas.IsNone()
+                          ? nullptr
+                          : &*gridStyle->mGridTemplateAreas.AsAreas();
   int32_t clampMinColLine = kMinLine;
   int32_t clampMaxColLine = kMaxLine;
   uint32_t numRepeatCols;
@@ -7656,11 +7658,12 @@ void nsGridContainerFrame::AppendFrames(ChildListID aListID,
   nsContainerFrame::AppendFrames(aListID, aFrameList);
 }
 
-void nsGridContainerFrame::InsertFrames(ChildListID aListID,
-                                        nsIFrame* aPrevFrame,
-                                        nsFrameList& aFrameList) {
+void nsGridContainerFrame::InsertFrames(
+    ChildListID aListID, nsIFrame* aPrevFrame,
+    const nsLineList::iterator* aPrevFrameLine, nsFrameList& aFrameList) {
   NoteNewChildren(aListID, aFrameList);
-  nsContainerFrame::InsertFrames(aListID, aPrevFrame, aFrameList);
+  nsContainerFrame::InsertFrames(aListID, aPrevFrame, aPrevFrameLine,
+                                 aFrameList);
 }
 
 void nsGridContainerFrame::RemoveFrame(ChildListID aListID,

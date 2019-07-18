@@ -687,6 +687,7 @@ class ContentChild final : public PContentChild,
                                             bool aMuted);
 
   void HoldBrowsingContextGroup(BrowsingContextGroup* aBCG);
+  void ReleaseBrowsingContextGroup(BrowsingContextGroup* aBCG);
 
 #ifdef NIGHTLY_BUILD
   // Fetch the current number of pending input events.
@@ -717,7 +718,8 @@ class ContentChild final : public PContentChild,
   mozilla::ipc::IPCResult RecvAttachBrowsingContext(
       BrowsingContext::IPCInitializer&& aInit);
 
-  mozilla::ipc::IPCResult RecvDetachBrowsingContext(BrowsingContext* aContext);
+  mozilla::ipc::IPCResult RecvDetachBrowsingContext(
+      uint64_t aContextId, DetachBrowsingContextResolver&& aResolve);
 
   mozilla::ipc::IPCResult RecvCacheBrowsingContextChildren(
       BrowsingContext* aContext);

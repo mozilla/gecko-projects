@@ -988,6 +988,7 @@ pref("security.certerrors.permanentOverride", true);
 pref("security.certerrors.mitm.priming.enabled", true);
 pref("security.certerrors.mitm.priming.endpoint", "https://mitmdetection.services.mozilla.com/");
 pref("security.certerrors.mitm.auto_enable_enterprise_roots", true);
+pref("security.aboutcertificate.enabled", false);
 
 // Whether to start the private browsing mode at application startup
 pref("browser.privatebrowsing.autostart", false);
@@ -1008,11 +1009,7 @@ pref("browser.flash-protected-mode-flip.enable", false);
 pref("browser.flash-protected-mode-flip.done", false);
 
 // Dark in-content pages
-#ifdef NIGHTLY_BUILD
 pref("browser.in-content.dark-mode", true);
-#else
-pref("browser.in-content.dark-mode", false);
-#endif
 
 pref("dom.ipc.shims.enabledWarnings", false);
 
@@ -1227,6 +1224,7 @@ pref("services.sync.prefs.sync.dom.disable_window_flip", true);
 pref("services.sync.prefs.sync.dom.disable_window_move_resize", true);
 pref("services.sync.prefs.sync.dom.event.contextmenu.enabled", true);
 pref("services.sync.prefs.sync.extensions.update.enabled", true);
+pref("services.sync.prefs.sync.extensions.activeThemeID", true);
 pref("services.sync.prefs.sync.intl.accept_languages", true);
 pref("services.sync.prefs.sync.layout.spellcheckDefault", true);
 pref("services.sync.prefs.sync.media.autoplay.default", true);
@@ -1361,14 +1359,10 @@ pref("security.insecure_password.ui.enabled", true);
 // Show in-content login form warning UI for insecure login fields
 pref("security.insecure_field_warning.contextual.enabled", true);
 
-// Show degraded UI for http pages; disabled for now
-pref("security.insecure_connection_icon.enabled", false);
-// Show degraded UI for http pages in private mode only for Nightly: Bug 1434626
-#if defined(NIGHTLY_BUILD)
+// Show degraded UI for http pages.
+pref("security.insecure_connection_icon.enabled", true);
+// Show degraded UI for http pages in private mode.
 pref("security.insecure_connection_icon.pbmode.enabled", true);
-#else
-pref("security.insecure_connection_icon.pbmode.enabled", false);
-#endif
 
 // Show "Not Secure" text for http pages; disabled for now
 pref("security.insecure_connection_text.enabled", false);
@@ -1613,6 +1607,9 @@ pref("browser.contentblocking.rejecttrackers.reportBreakage.enabled", true);
 
 pref("browser.contentblocking.reportBreakage.url", "https://tracking-protection-issues.herokuapp.com/new");
 
+// Enable Protections report's Lockwise card by default.
+pref("browser.contentblocking.report.lockwise.enabled", true);
+
 // Enables the new Protections Panel.
 #ifdef NIGHTLY_BUILD
 pref("browser.protections_panel.enabled", true);
@@ -1639,6 +1636,23 @@ pref("privacy.userContext.extension", "");
 // Start the browser in e10s mode
 pref("browser.tabs.remote.autostart", true);
 pref("browser.tabs.remote.desktopbehavior", true);
+
+// Run media transport in a separate process?
+#ifdef NIGHTLY_BUILD
+pref("media.peerconnection.mtransport_process", true);
+#else
+pref("media.peerconnection.mtransport_process", false);
+#endif
+
+// Start a separate socket process. Performing networking on the socket process
+// is control by a sepparate pref
+// ("network.http.network_access_on_socket_process.enabled").
+// Changing these prefs requires a restart.
+#ifdef NIGHTLY_BUILD
+pref("network.process.enabled", true);
+#else
+pref("network.process.enabled", false);
+#endif
 
 // For speculatively warming up tabs to improve perceived
 // performance while using the async tab switcher.
@@ -1725,6 +1739,8 @@ pref("extensions.pocket.enabled", true);
 pref("extensions.pocket.oAuthConsumerKey", "40249-e88c401e1b1f2242d9e441c4");
 pref("extensions.pocket.site", "getpocket.com");
 
+pref("signon.generation.available", true);
+pref("signon.generation.enabled", true);
 pref("signon.schemeUpgrades", true);
 pref("signon.privateBrowsingCapture.enabled", true);
 pref("signon.showAutoCompleteFooter", true);

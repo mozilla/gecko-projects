@@ -4414,7 +4414,7 @@ void PresShell::ContentRemoved(nsIContent* aChild,
   // After removing aChild from tree we should save information about live
   // ancestor
   if (mPointerEventTarget &&
-      nsContentUtils::ContentIsDescendantOf(mPointerEventTarget, aChild)) {
+      mPointerEventTarget->IsInclusiveDescendantOf(aChild)) {
     mPointerEventTarget = aChild->GetParent();
   }
 
@@ -4725,7 +4725,7 @@ UniquePtr<RangePaintInfo> PresShell::CreateRangePaintInfo(
         break;
       }
 
-      ancestor = ancestor->GetParentOrHostNode();
+      ancestor = ancestor->GetParentOrShadowHostNode();
     }
 
     // use the nearest ancestor frame that includes all continuations as the
@@ -7413,8 +7413,7 @@ nsIFrame* PresShell::EventHandler::ComputeRootFrameToHandleEventWithPopup(
   }
 
   if (aCapturingContent && !*aIsCapturingContentIgnored &&
-      nsContentUtils::ContentIsDescendantOf(aCapturingContent,
-                                            popupFrame->GetContent())) {
+      aCapturingContent->IsInclusiveDescendantOf(popupFrame->GetContent())) {
     return popupFrame;
   }
 

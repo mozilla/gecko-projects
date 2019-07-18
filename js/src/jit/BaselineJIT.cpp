@@ -10,9 +10,9 @@
 #include "mozilla/DebugOnly.h"
 #include "mozilla/MemoryReporting.h"
 
-#include "dbg/Debugger.h"
+#include "debugger/Debugger.h"
 #include "gc/FreeOp.h"
-#include "jit/BaselineCompiler.h"
+#include "jit/BaselineCodeGen.h"
 #include "jit/BaselineIC.h"
 #include "jit/CompileInfo.h"
 #include "jit/IonControlFlow.h"
@@ -695,10 +695,6 @@ RetAddrEntry& BaselineScript::retAddrEntryFromReturnAddress(
 }
 
 void BaselineScript::computeResumeNativeOffsets(JSScript* script) {
-  if (!script->hasResumeOffsets()) {
-    return;
-  }
-
   // Translate pcOffset to BaselineScript native address. This may return
   // nullptr if compiler decided code was unreachable.
   auto computeNative = [this, script](uint32_t pcOffset) {

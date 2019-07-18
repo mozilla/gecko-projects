@@ -31,7 +31,7 @@
 #include "gc/Nursery.h"
 #include "irregexp/NativeRegExpMacroAssembler.h"
 #include "jit/AtomicOperations.h"
-#include "jit/BaselineCompiler.h"
+#include "jit/BaselineCodeGen.h"
 #include "jit/IonBuilder.h"
 #include "jit/IonIC.h"
 #include "jit/IonOptimizationLevels.h"
@@ -13777,9 +13777,9 @@ void CodeGenerator::visitFinishBoundFunctionInit(
     // Load the length property of an interpreted function.
     masm.loadPtr(Address(target, JSFunction::offsetOfScript()), temp1);
     masm.loadPtr(Address(temp1, JSScript::offsetOfScriptData()), temp1);
-    masm.loadPtr(Address(temp1, RuntimeScriptData::offsetOfSSD()), temp1);
-    masm.load16ZeroExtend(Address(temp1, SharedScriptData::offsetOfFunLength()),
-                          temp1);
+    masm.loadPtr(Address(temp1, RuntimeScriptData::offsetOfISD()), temp1);
+    masm.load16ZeroExtend(
+        Address(temp1, ImmutableScriptData::offsetOfFunLength()), temp1);
   }
   masm.bind(&lengthLoaded);
 

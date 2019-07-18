@@ -10,9 +10,8 @@ import Services from "devtools-services";
 import { asyncStoreHelper } from "./asyncStoreHelper";
 
 // Schema version to bump when the async store format has changed incompatibly
-// and old stores should be cleared. This needs to match the prefs schema
-// version in devtools/client/preferences/debugger.js.
-const prefsSchemaVersion = "1.0.11";
+// and old stores should be cleared.
+const prefsSchemaVersion = 11;
 const pref = Services.pref;
 
 if (isDevelopment()) {
@@ -69,7 +68,6 @@ if (isDevelopment()) {
   pref("devtools.debugger.features.event-listeners-breakpoints", true);
   pref("devtools.debugger.features.log-points", true);
   pref("devtools.debugger.log-actions", true);
-  pref("devtools.debugger.features.overlay-step-buttons", false);
 }
 
 export const prefs = new PrefsHelper("devtools", {
@@ -101,7 +99,7 @@ export const prefs = new PrefsHelper("devtools", {
   fileSearchCaseSensitive: ["Bool", "debugger.file-search-case-sensitive"],
   fileSearchWholeWord: ["Bool", "debugger.file-search-whole-word"],
   fileSearchRegexMatch: ["Bool", "debugger.file-search-regex-match"],
-  debuggerPrefsSchemaVersion: ["Char", "debugger.prefs-schema-version"],
+  debuggerPrefsSchemaVersion: ["Int", "debugger.prefs-schema-version"],
   projectDirectoryRoot: ["Char", "debugger.project-directory-root", ""],
   skipPausing: ["Bool", "debugger.skip-pausing"],
   mapScopes: ["Bool", "debugger.map-scopes-enabled"],
@@ -129,7 +127,6 @@ export const features = new PrefsHelper("devtools.debugger.features", {
   originalBlackbox: ["Bool", "original-blackbox"],
   eventListenersBreakpoints: ["Bool", "event-listeners-breakpoints"],
   logPoints: ["Bool", "log-points"],
-  showOverlayStepButtons: ["Bool", "debugger.features.overlay-step-buttons"],
 });
 
 export const asyncStore = asyncStoreHelper("debugger", {
@@ -139,9 +136,12 @@ export const asyncStore = asyncStoreHelper("debugger", {
   eventListenerBreakpoints: ["event-listener-breakpoints", undefined],
 });
 
+export function resetSchemaVersion() {
+  prefs.debuggerPrefsSchemaVersion = prefsSchemaVersion;
+}
+
 export function verifyPrefSchema() {
-  if (prefs.debuggerPrefsSchemaVersion !== prefsSchemaVersion) {
-    // clear pending Breakpoints
+  if (prefs.debuggerPrefsSchemaVersion < prefsSchemaVersion) {
     asyncStore.pendingBreakpoints = {};
     asyncStore.tabs = [];
     asyncStore.xhrBreakpoints = [];

@@ -428,7 +428,8 @@ bool WebRenderBridgeParent::UpdateResources(
         if (!reader.Read(op.bytes(), bytes)) {
           return false;
         }
-        aUpdates.AddBlobImage(op.key(), op.descriptor(), bytes);
+        aUpdates.AddBlobImage(op.key(), op.descriptor(), bytes,
+                              wr::ToDeviceIntRect(op.visibleRect()));
         break;
       }
       case OpUpdateResource::TOpUpdateBlobImage: {
@@ -438,17 +439,14 @@ bool WebRenderBridgeParent::UpdateResources(
           return false;
         }
         aUpdates.UpdateBlobImage(op.key(), op.descriptor(), bytes,
+                                 wr::ToDeviceIntRect(op.visibleRect()),
                                  wr::ToLayoutIntRect(op.dirtyRect()));
         break;
       }
-      case OpUpdateResource::TOpSetImageVisibleArea: {
-        const auto& op = cmd.get_OpSetImageVisibleArea();
-        wr::DeviceIntRect area;
-        area.origin.x = op.area().x;
-        area.origin.y = op.area().y;
-        area.size.width = op.area().width;
-        area.size.height = op.area().height;
-        aUpdates.SetImageVisibleArea(op.key(), area);
+      case OpUpdateResource::TOpSetBlobImageVisibleArea: {
+        const auto& op = cmd.get_OpSetBlobImageVisibleArea();
+        aUpdates.SetBlobImageVisibleArea(op.key(),
+                                         wr::ToDeviceIntRect(op.area()));
         break;
       }
       case OpUpdateResource::TOpAddExternalImage: {
@@ -1942,6 +1940,15 @@ void WebRenderBridgeParent::MaybeGenerateFrame(VsyncId aId,
                                                bool aForceGenerateFrame) {
   // This function should only get called in the root WRBP
   MOZ_ASSERT(IsRootWebRenderBridgeParent());
+
+  if (CompositorBridgeParent* cbp = GetRootCompositorBridgeParent()) {
+    // Skip WR render during paused state.
+    if (cbp->IsPaused()) {
+      TimeStamp now = TimeStamp::Now();
+      cbp->NotifyPipelineRendered(mPipelineId, mWrEpoch, VsyncId(), now, now,
+                                  now);
+    }
+  }
 
   TimeStamp start = TimeStamp::Now();
   mAsyncImageManager->SetCompositionTime(start);

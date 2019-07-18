@@ -486,26 +486,6 @@ bool frontend::SourceAwareCompiler<Unit>::handleParseFailure(
   return true;
 }
 
-bool BytecodeCompiler::deoptimizeArgumentsInEnclosingScripts(
-    JSContext* cx, HandleObject environment) {
-  RootedObject env(cx, environment);
-  while (env->is<EnvironmentObject>() || env->is<DebugEnvironmentProxy>()) {
-    if (env->is<CallObject>()) {
-      RootedFunction fun(cx, &env->as<CallObject>().callee());
-      RootedScript script(cx, JSFunction::getOrCreateScript(cx, fun));
-      if (!script) {
-        return false;
-      }
-      if (script->argumentsHasVarBinding()) {
-        JSScript::argumentsOptimizationFailed(cx, script);
-      }
-    }
-    env = env->enclosingEnvironment();
-  }
-
-  return true;
-}
-
 template <typename Unit>
 JSScript* frontend::ScriptCompiler<Unit>::compileScript(
     BytecodeCompiler& info, HandleObject environment, SharedContext* sc) {
@@ -970,10 +950,7 @@ static bool CompileLazyFunctionImpl(JSContext* cx, Handle<LazyScript*> lazy,
     return false;
   }
 
-  Rooted<JSScript*> script(
-      cx, JSScript::Create(cx, options, sourceObject, lazy->sourceStart(),
-                           lazy->sourceEnd(), lazy->toStringStart(),
-                           lazy->toStringEnd()));
+  Rooted<JSScript*> script(cx, JSScript::CreateFromLazy(cx, lazy));
   if (!script) {
     return false;
   }
@@ -1000,6 +977,9 @@ static bool CompileLazyFunctionImpl(JSContext* cx, Handle<LazyScript*> lazy,
   if (!bce.emitFunctionScript(pn, BytecodeEmitter::TopLevelFunction::Yes)) {
     return false;
   }
+
+  MOZ_ASSERT(lazy->treatAsRunOnce() == script->treatAsRunOnce());
+  MOZ_ASSERT(lazy->hasDirectEval() == script->hasDirectEval());
 
   delazificationCompletion.complete();
   assertException.reset();

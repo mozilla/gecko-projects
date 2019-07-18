@@ -588,7 +588,7 @@ MediaResult WMFVideoMFTManager::InitInternal() {
                     WMFDecoderModule::GetNumDecoderThreads());
     bool lowLatency =
         (StaticPrefs::media_wmf_low_latency_enabled() || IsWin10OrLater()) &&
-        !StaticPrefs::media_mwf_low_latency_force_disabled();
+        !StaticPrefs::media_wmf_low_latency_force_disabled();
     if (mLowLatency || lowLatency) {
       hr = attr->SetUINT32(CODECAPI_AVLowLatencyMode, TRUE);
       if (SUCCEEDED(hr)) {
@@ -753,8 +753,7 @@ WMFVideoMFTManager::Input(MediaRawData* aSample) {
   RefPtr<IMFSample> inputSample;
   HRESULT hr = mDecoder->CreateInputSample(
       aSample->Data(), uint32_t(aSample->Size()),
-      aSample->mTime.ToMicroseconds(), aSample->mDuration.ToMicroseconds(),
-      &inputSample);
+      aSample->mTime.ToMicroseconds(), &inputSample);
   NS_ENSURE_TRUE(SUCCEEDED(hr) && inputSample != nullptr, hr);
 
   if (!mColorSpace && aSample->mTrackInfo) {

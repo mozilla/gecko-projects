@@ -8,21 +8,22 @@
   --clickable-text-active: hsla(0,0%,70%,.3);
   --card-divider: rgba(12,12,13,0.1) 1px solid;
   --report-background: #FAFAFC;
-  --card-padding: 22px;
-  --social-color: #AB71FF;
-  --social-color-darker: #7F27FF;
+  --card-padding: 24px;
+  --social-color: #9059FF;
+  --social-color-darker: #7F40FF;
   --cookie-color: #0090F4;
   --cookie-color-darker: #0073C3;
   --tracker-color: #2AC3A2;
   --tracker-color-darker: #229C82;
-  --orange: #FFBD4F;
-  --dark-orange: #ffA40C;
-  --grey: #AFAFBB;
-  --dark-grey: #88889A;
+  --orange: #FFA436;
+  --dark-orange: #FF981D;
+  --grey: #8F8F9D;
+  --dark-grey: #818191;
   --tab-highlight: var(--social-color); /* start with social selected */
   --blue-60: #0060DF;
   --blue-70: #003eaa;
   --blue-80: #002275;
+  --column-width: 16px;
 }
 
  a {
@@ -171,31 +172,31 @@ body[focuseddatatype=cryptominer] {
   border-top: var(--card-divider);
   grid-column: span 2;
   grid-row: 2;
-  margin-bottom: 24px;
 }
 
 .body-wrapper {
   grid-column: 2;
 }
 
-.graph-week-summary,
-.graph-total-summary {
+#graph-week-summary,
+#graph-total-summary {
   font-size: 0.8rem;
 }
 
-.graph-week-summary {
+#graph-week-summary {
   font-weight: bold;
 }
 
 #graph-wrapper {
   width: 100%;
-  margin-top: 30px;
+  margin-top: 40px;
+  margin-bottom: 25px;
 }
 
 #graph {
   display: grid;
   grid: repeat(10, 1fr) max-content / repeat(7, 1fr);
-  height: 200px;
+  height: 175px;
   margin-bottom: 10px;
 }
 
@@ -204,13 +205,27 @@ body[focuseddatatype=cryptominer] {
   grid-row: 1 / -2;
   justify-self: center;
   align-self: flex-end;
-  width: 16px;
-  border-radius: 4px;
-  overflow: hidden;
+  width: var(--column-width);
+  position: relative;
+}
+
+.graph-bar div:nth-child(2){
+  border-radius: 2px 2px 0 0;
+}
+
+.graph-bar div:last-child{
+  border-radius: 0 0 2px 2px;
 }
 
 .graph-bar:hover {
   cursor: pointer;
+}
+
+.graph-bar.empty {
+  height: 0;
+  border: 1px rgba(12,12,13,0.2) solid;
+  border-radius: 4px;
+  cursor: default;
 }
 
 .social-bar {
@@ -257,6 +272,14 @@ body[focuseddatatype=cryptominer] {
   justify-self: center;
   margin-top: 5px;
   font-size: 0.9rem;
+  width: var(--column-width);
+}
+
+.bar-count {
+  position: absolute;
+  top: -25px;
+	color: #0C0C0D;
+  font-size: .8rem;
 }
 
 /* Legend */
@@ -289,7 +312,7 @@ label[data-type="cookie"] {
 }
 
 label[data-type="tracker"] {
-  background-image: url(chrome://browser/skin/controlcenter/trackers.svg);
+  background-image: url(chrome://browser/skin/controlcenter/tracker-image.svg);
   fill: var(--tracker-color);
   color: var(--tracker-color);
 }
@@ -367,6 +390,7 @@ label:hover {
 }
 
 a.hidden,
+.lockwise-card.hidden,
 #lockwise-body-content .has-logins.hidden,
 #lockwise-body-content .no-logins.hidden {
   display: none;
@@ -416,6 +440,6 @@ a.hidden,
   line-height: 18px;
 }
 
-.has-logins a {
+#lockwise-body-content .has-logins a {
   margin-inline-start: 10px;
 }

@@ -11,7 +11,7 @@
 #include "mozilla/CheckedInt.h"
 #include "mozilla/DebugOnly.h"
 
-#include "dbg/Debugger.h"
+#include "debugger/Debugger.h"
 #include "gc/Marking.h"
 #include "jit/BaselineIC.h"
 #include "js/CharacterEncoding.h"
@@ -453,7 +453,7 @@ void NativeObject::shrinkSlots(JSContext* cx, uint32_t oldCount,
       ReallocateObjectBuffer<HeapSlot>(cx, this, slots_, oldCount, newCount);
   if (!newslots) {
     cx->recoverFromOutOfMemory();
-    return; // Leave slots at its old size.
+    return;  // Leave slots at its old size.
   }
 
   slots_ = newslots;
