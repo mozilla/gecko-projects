@@ -411,21 +411,6 @@ pref("media.webvtt.pseudo.enabled", true);
 // WebVTT debug logging.
 pref("media.webvtt.debug.logging", false);
 
-// Whether to enable MediaSource support.
-pref("media.mediasource.enabled", true);
-
-pref("media.mediasource.mp4.enabled", true);
-
-#if defined(XP_WIN) || defined(XP_MACOSX) || defined(MOZ_WIDGET_ANDROID)
-pref("media.mediasource.webm.enabled", false);
-#else
-pref("media.mediasource.webm.enabled", true);
-#endif
-pref("media.mediasource.webm.audio.enabled", true);
-
-// Whether to enable MediaSource v2 support.
-pref("media.mediasource.experimental.enabled", false);
-
 pref("media.benchmark.vp9.threshold", 150);
 pref("media.benchmark.frames", 300);
 pref("media.benchmark.timeout", 1000);
@@ -2466,6 +2451,14 @@ pref("csp.about_uris_without_csp", "blank,printpreview,srcdoc,addons,config,down
 // the following prefs are for testing purposes only.
 pref("csp.overrule_about_uris_without_csp_whitelist", false);
 pref("csp.skip_about_page_has_csp_assert", false);
+#endif
+
+#if !defined(ANDROID)
+#if defined(NIGHTLY_BUILD) || defined(DEBUG)
+// assertion flag will be set to false after fixing Bug 1473549
+pref("security.allow_eval_with_system_principal", false);
+pref("security.uris_using_eval_with_system_principal", "autocomplete.xml,redux.js,react-redux.js,content-task.js,lodash.js,jszip.js,sinon-7.2.7.js,ajv-4.1.1.js,jsol.js");
+#endif
 #endif
 
 #ifdef EARLY_BETA_OR_EARLIER
