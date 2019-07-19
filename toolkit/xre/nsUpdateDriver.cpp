@@ -815,7 +815,7 @@ nsUpdateProcessor::FixUpdateDirectoryPerms(bool aShouldUseService) {
             mInstallPath.get(), SetPermissionsOf::AllFilesAndDirs, updateDir);
         if (SUCCEEDED(permResult)) {
           LOG(("Successfully fixed permissions from within Firefox\n"));
-          return NS_OK;
+          return ReportSuccess();
         } else if (!mShouldUseService) {
           LOG(
               ("Error: Unable to fix permissions within Firefox and "
@@ -902,9 +902,9 @@ nsUpdateProcessor::FixUpdateDirectoryPerms(bool aShouldUseService) {
               return ReportUpdateError();
             }
             LOG(
-                ("Maintenance service successully fixed update directory "
+                ("Maintenance service successfully fixed update directory "
                  "permissions\n"));
-            return NS_OK;
+            return ReportSuccess();
           }
           mState = State::Starting;
           mCurrentTry = 1;
@@ -960,6 +960,20 @@ nsUpdateProcessor::FixUpdateDirectoryPerms(bool aShouldUseService) {
             }
             observerService->NotifyObservers(nullptr, "update-error",
                                              u"bad-perms");
+          }));
+    }
+    nsresult ReportSuccess() {
+      return NS_DispatchToMainThread(NS_NewRunnableFunction(
+          "nsUpdateProcessor::FixUpdateDirectoryPerms::"
+          "FixUpdateDirectoryPermsRunnable::ReportSuccess",
+          []() -> void {
+            nsCOMPtr<nsIObserverService> observerService =
+                services::GetObserverService();
+            if (NS_WARN_IF(!observerService)) {
+              return;
+            }
+            observerService->NotifyObservers(nullptr, "update-perms-fixed",
+                                             u"");
           }));
     }
   };
