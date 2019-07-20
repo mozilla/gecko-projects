@@ -815,12 +815,12 @@ nsUpdateProcessor::FixUpdateDirectoryPerms(bool aShouldUseService) {
             mInstallPath.get(), SetPermissionsOf::AllFilesAndDirs, updateDir);
         if (SUCCEEDED(permResult)) {
           LOG(("Successfully fixed permissions from within Firefox\n"));
-          return NS_OK;
+          return ReportPermsFixedSuccess();
         } else if (!mShouldUseService) {
           LOG(
               ("Error: Unable to fix permissions within Firefox and "
                "maintenance service is disabled\n"));
-          return ReportUpdateError();
+          return ReportPermsFixedError();
         }
 
         SC_HANDLE serviceManager =
@@ -899,12 +899,12 @@ nsUpdateProcessor::FixUpdateDirectoryPerms(bool aShouldUseService) {
               LOG(
                   ("Error: Maintenance Service was unable to fix update "
                    "directory permissions\n"));
-              return ReportUpdateError();
+              return ReportPermsFixedError();
             }
             LOG(
-                ("Maintenance service successully fixed update directory "
+                ("Maintenance service successfully fixed update directory "
                  "permissions\n"));
-            return NS_OK;
+            return ReportPermsFixedSuccess();
           }
           mState = State::Starting;
           mCurrentTry = 1;
@@ -948,10 +948,10 @@ nsUpdateProcessor::FixUpdateDirectoryPerms(bool aShouldUseService) {
       nsCOMPtr<nsIRunnable> runnable(this);
       return NS_DelayedDispatchToCurrentThread(runnable.forget(), aDelayMS);
     }
-    nsresult ReportUpdateError() {
+    nsresult ReportPermsFixedError() {
       return NS_DispatchToMainThread(NS_NewRunnableFunction(
           "nsUpdateProcessor::FixUpdateDirectoryPerms::"
-          "FixUpdateDirectoryPermsRunnable::ReportUpdateError",
+          "FixUpdateDirectoryPermsRunnable::ReportPermsFixedError",
           []() -> void {
             nsCOMPtr<nsIObserverService> observerService =
                 services::GetObserverService();
@@ -960,6 +960,20 @@ nsUpdateProcessor::FixUpdateDirectoryPerms(bool aShouldUseService) {
             }
             observerService->NotifyObservers(nullptr, "update-error",
                                              u"bad-perms");
+          }));
+    }
+    nsresult ReportPermsFixedSuccess() {
+      return NS_DispatchToMainThread(NS_NewRunnableFunction(
+          "nsUpdateProcessor::FixUpdateDirectoryPerms::"
+          "FixUpdateDirectoryPermsRunnable::ReportPermsFixedSuccess",
+          []() -> void {
+            nsCOMPtr<nsIObserverService> observerService =
+                services::GetObserverService();
+            if (NS_WARN_IF(!observerService)) {
+              return;
+            }
+            observerService->NotifyObservers(nullptr, "update-perms-fixed",
+                                             u"");
           }));
     }
   };
