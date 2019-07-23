@@ -8,6 +8,16 @@ exclude: true
 
 <h1> GeckoView API Changelog. </h1>
 
+## v70
+
+- Added API for session context assignment
+  [`GeckoSessionSettings.Builder.contextId`][70.1] and deletion of data
+  related to a session context
+  [`StorageController.clearDataForSessionContext`][70.2].
+
+[70.1]: ../GeckoSessionSettings.Builder.html#contextId-java.lang.String-
+[70.2]: ../StorageController.html#clearDataForSessionContext-java.lang.String-
+
 ## v69
 - Modified behavior of ['setAutomaticFontSizeAdjustment'][69.1] so that it no 
   longer has any effect on ['setFontInflationEnabled'][69.2]
@@ -142,7 +152,6 @@ exclude: true
 - Removed redundant constants in [`MediaSource`][68.28]
 
 [68.28]: ./GeckoSession.MediaSource.html
-
 
 ## v67
 - Added [`setAutomaticFontSizeAdjustment`][67.2] to
@@ -350,4 +359,4 @@ exclude: true
 [65.24]: ../CrashReporter.html#sendCrashReport-android.content.Context-android.os.Bundle-java.lang.String-
 [65.25]: ../GeckoResult.html
 
-[api-version]: a48d987bbc9301577c072823070ff5541e0fa211
+[api-version]: 17974580cb71870c61063156846294b3b75fa987

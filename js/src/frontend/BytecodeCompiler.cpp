@@ -934,7 +934,7 @@ static bool CompileLazyFunctionImpl(JSContext* cx, Handle<LazyScript*> lazy,
 
   UsedNameTracker usedNames(cx);
 
-  RootedScriptSourceObject sourceObject(cx, &lazy->sourceObject());
+  RootedScriptSourceObject sourceObject(cx, lazy->sourceObject());
   Parser<FullParseHandler, Unit> parser(
       cx, cx->tempLifoAlloc(), options, units, length,
       /* foldConstants = */ true, usedNames, nullptr, lazy, sourceObject,
@@ -978,7 +978,6 @@ static bool CompileLazyFunctionImpl(JSContext* cx, Handle<LazyScript*> lazy,
     return false;
   }
 
-  MOZ_ASSERT(lazy->treatAsRunOnce() == script->treatAsRunOnce());
   MOZ_ASSERT(lazy->hasDirectEval() == script->hasDirectEval());
 
   delazificationCompletion.complete();
@@ -1024,7 +1023,7 @@ bool frontend::CompileLazyBinASTFunction(JSContext* cx,
 
   UsedNameTracker usedNames(cx);
 
-  RootedScriptSourceObject sourceObj(cx, &lazy->sourceObject());
+  RootedScriptSourceObject sourceObj(cx, lazy->sourceObject());
   MOZ_ASSERT(sourceObj);
 
   RootedScript script(

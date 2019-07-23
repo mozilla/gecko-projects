@@ -215,14 +215,6 @@ struct BaselineScript final {
   // is right after the warm-up counter check in the prologue.
   uint32_t warmUpCheckPrologueOffset_;
 
-  // Baseline Debug OSR during prologue will enter at this address. This is
-  // right after where a debug prologue VM call would have returned.
-  uint32_t debugOsrPrologueOffset_;
-
-  // Baseline Debug OSR during epilogue will enter at this address. This is
-  // right after where a debug epilogue VM call would have returned.
-  uint32_t debugOsrEpilogueOffset_;
-
   // The offsets for the toggledJump instructions for profiler instrumentation.
   uint32_t profilerEnterToggleOffset_;
   uint32_t profilerExitToggleOffset_;
@@ -310,25 +302,22 @@ struct BaselineScript final {
   // allocate trailing objects.
   BaselineScript(uint32_t bailoutPrologueOffset,
                  uint32_t warmUpCheckPrologueOffset,
-                 uint32_t debugOsrPrologueOffset,
-                 uint32_t debugOsrEpilogueOffset,
                  uint32_t profilerEnterToggleOffset,
                  uint32_t profilerExitToggleOffset)
       : bailoutPrologueOffset_(bailoutPrologueOffset),
         warmUpCheckPrologueOffset_(warmUpCheckPrologueOffset),
-        debugOsrPrologueOffset_(debugOsrPrologueOffset),
-        debugOsrEpilogueOffset_(debugOsrEpilogueOffset),
         profilerEnterToggleOffset_(profilerEnterToggleOffset),
         profilerExitToggleOffset_(profilerExitToggleOffset) {}
 
  public:
-  static BaselineScript* New(
-      JSScript* jsscript, uint32_t bailoutPrologueOffset,
-      uint32_t warmUpCheckPrologueOffset, uint32_t debugOsrPrologueOffset,
-      uint32_t debugOsrEpilogueOffset, uint32_t profilerEnterToggleOffset,
-      uint32_t profilerExitToggleOffset, size_t retAddrEntries,
-      size_t pcMappingIndexEntries, size_t pcMappingSize, size_t resumeEntries,
-      size_t traceLoggerToggleOffsetEntries);
+  static BaselineScript* New(JSScript* jsscript, uint32_t bailoutPrologueOffset,
+                             uint32_t warmUpCheckPrologueOffset,
+                             uint32_t profilerEnterToggleOffset,
+                             uint32_t profilerExitToggleOffset,
+                             size_t retAddrEntries,
+                             size_t pcMappingIndexEntries, size_t pcMappingSize,
+                             size_t resumeEntries,
+                             size_t traceLoggerToggleOffsetEntries);
 
   static void Trace(JSTracer* trc, BaselineScript* script);
   static void Destroy(FreeOp* fop, BaselineScript* script);
@@ -362,12 +351,6 @@ struct BaselineScript final {
   }
   uint8_t* warmUpCheckPrologueAddr() const {
     return method_->raw() + warmUpCheckPrologueOffset_;
-  }
-  uint8_t* debugOsrPrologueEntryAddr() const {
-    return method_->raw() + debugOsrPrologueOffset_;
-  }
-  uint8_t* debugOsrEpilogueEntryAddr() const {
-    return method_->raw() + debugOsrEpilogueOffset_;
   }
 
   RetAddrEntry* retAddrEntryList() {
@@ -529,14 +512,6 @@ static_assert(
     sizeof(BaselineScript) % sizeof(uintptr_t) == 0,
     "The data attached to the script must be aligned for fast JIT access.");
 
-inline bool IsBaselineJitEnabled() {
-#ifdef JS_CODEGEN_NONE
-  return false;
-#else
-  return JitOptions.baselineJit && JitOptions.supportsFloatingPoint;
-#endif
-}
-
 inline bool IsBaselineInterpreterEnabled() {
 #ifdef JS_CODEGEN_NONE
   return false;
@@ -545,8 +520,8 @@ inline bool IsBaselineInterpreterEnabled() {
 #endif
 }
 
-inline bool IsBaselineInterpreterOrJitEnabled() {
-  return IsBaselineInterpreterEnabled() || IsBaselineJitEnabled();
+inline bool IsBaselineJitEnabled() {
+  return IsBaselineInterpreterEnabled() && JitOptions.baselineJit;
 }
 
 enum class BaselineTier { Interpreter, Compiler };
@@ -554,11 +529,12 @@ enum class BaselineTier { Interpreter, Compiler };
 template <BaselineTier Tier>
 MethodStatus CanEnterBaselineMethod(JSContext* cx, RunState& state);
 
-template <BaselineTier Tier>
-MethodStatus CanEnterBaselineAtBranch(JSContext* cx, InterpreterFrame* fp);
+MethodStatus CanEnterBaselineInterpreterAtBranch(JSContext* cx,
+                                                 InterpreterFrame* fp);
 
-JitExecStatus EnterBaselineAtBranch(JSContext* cx, InterpreterFrame* fp,
-                                    jsbytecode* pc);
+JitExecStatus EnterBaselineInterpreterAtBranch(JSContext* cx,
+                                               InterpreterFrame* fp,
+                                               jsbytecode* pc);
 
 bool CanBaselineInterpretScript(JSScript* script);
 
@@ -666,6 +642,23 @@ class BaselineInterpreter {
   CodeOffsetVector codeCoverageOffsets_;
 
  public:
+  // Offsets of some callVMs for BaselineDebugModeOSR.
+  struct CallVMOffsets {
+    uint32_t debugPrologueOffset = 0;
+    uint32_t debugEpilogueOffset = 0;
+    uint32_t debugAfterYieldOffset = 0;
+  };
+
+ private:
+  CallVMOffsets callVMOffsets_;
+
+  uint8_t* codeAtOffset(uint32_t offset) const {
+    MOZ_ASSERT(offset > 0);
+    MOZ_ASSERT(offset < code_->instructionsSize());
+    return codeRaw() + offset;
+  }
+
+ public:
   BaselineInterpreter() = default;
 
   BaselineInterpreter(const BaselineInterpreter&) = delete;
@@ -677,15 +670,26 @@ class BaselineInterpreter {
             uint32_t profilerExitToggleOffset,
             CodeOffsetVector&& debugInstrumentationOffsets,
             CodeOffsetVector&& debugTrapOffsets,
-            CodeOffsetVector&& codeCoverageOffsets);
+            CodeOffsetVector&& codeCoverageOffsets,
+            const CallVMOffsets& callVMOffsets);
 
   uint8_t* codeRaw() const { return code_->raw(); }
 
+  uint8_t* retAddrForDebugPrologueCallVM() const {
+    return codeAtOffset(callVMOffsets_.debugPrologueOffset);
+  }
+  uint8_t* retAddrForDebugEpilogueCallVM() const {
+    return codeAtOffset(callVMOffsets_.debugEpilogueOffset);
+  }
+  uint8_t* retAddrForDebugAfterYieldCallVM() const {
+    return codeAtOffset(callVMOffsets_.debugAfterYieldOffset);
+  }
+
   TrampolinePtr interpretOpAddr() const {
-    return TrampolinePtr(codeRaw() + interpretOpOffset_);
+    return TrampolinePtr(codeAtOffset(interpretOpOffset_));
   }
   TrampolinePtr interpretOpNoDebugTrapAddr() const {
-    return TrampolinePtr(codeRaw() + interpretOpNoDebugTrapOffset_);
+    return TrampolinePtr(codeAtOffset(interpretOpNoDebugTrapOffset_));
   }
 
   void toggleProfilerInstrumentation(bool enable);
