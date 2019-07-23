@@ -14,9 +14,8 @@ async function run_test() {
   const LINK_FILENAME = "hard_link";
   const LINK_TARGET_FILENAME = "hard_link_target";
 
-  let link_target = gCommonAppDataDir.clone();
-  link_target.append(LINK_TARGET_FILENAME);
-  link_target.createUnique(Ci.nsIFile.NORMAL_FILE_TYPE, FileUtils.PERMS_FILE);
+  let link_target = getTestDirFile(LINK_TARGET_FILENAME, true);
+  link_target.create(Ci.nsIFile.NORMAL_FILE_TYPE, FileUtils.PERMS_FILE);
   Assert.ok(link_target.exists(), "Link target should exist after creation");
 
   registerCleanupFunction(() => {
