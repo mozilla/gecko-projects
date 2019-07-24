@@ -973,9 +973,7 @@ void LazyScript::traceChildren(JSTracer* trc) {
     TraceNullableEdge(trc, &script_, "script");
   }
 
-  if (function_) {
-    TraceEdge(trc, &function_, "function");
-  }
+  TraceEdge(trc, &function_, "function");
 
   if (enclosingLazyScriptOrScope_) {
     TraceGenericPointerRoot(
@@ -1009,9 +1007,7 @@ inline void js::GCMarker::eagerlyMarkChildren(LazyScript* thing) {
 
   // script_ is weak so is not traced here.
 
-  if (thing->function_) {
-    traverseEdge(thing, static_cast<JSObject*>(thing->function_));
-  }
+  traverseEdge(thing, static_cast<JSObject*>(thing->function_));
 
   if (thing->enclosingLazyScriptOrScope_) {
     TraceManuallyBarrieredGenericPointerEdge(
@@ -2883,11 +2879,14 @@ static inline void TraceWholeCell(TenuringTracer& mover,
 template <typename T>
 static void TraceBufferedCells(TenuringTracer& mover, Arena* arena,
                                ArenaCellSet* cells) {
-  for (size_t i = 0; i < MaxArenaCellIndex; i++) {
-    if (cells->hasCell(i)) {
+  for (size_t i = 0; i < MaxArenaCellIndex; i += cells->BitsPerWord) {
+    ArenaCellSet::WordT bitset = cells->getWord(i / cells->BitsPerWord);
+    while (bitset) {
+      size_t bit = i + js::detail::CountTrailingZeroes(bitset);
       auto cell =
-          reinterpret_cast<T*>(uintptr_t(arena) + ArenaCellIndexBytes * i);
+          reinterpret_cast<T*>(uintptr_t(arena) + ArenaCellIndexBytes * bit);
       TraceWholeCell(mover, cell);
+      bitset &= bitset - 1;  // Clear the low bit.
     }
   }
 }
