@@ -8,13 +8,18 @@
 
 #include "builtin/intl/NumberFormat.h"
 
+#include "mozilla/ArrayUtils.h"
 #include "mozilla/Assertions.h"
 #include "mozilla/Casting.h"
 #include "mozilla/FloatingPoint.h"
+#include "mozilla/UniquePtr.h"
 
 #include <algorithm>
+#include <cstring>
+#include <iterator>
 #include <stddef.h>
 #include <stdint.h>
+#include <string>
 #include <type_traits>
 
 #include "builtin/intl/CommonFunctions.h"
@@ -32,6 +37,7 @@
 #include "vm/JSContext.h"
 #include "vm/SelfHosting.h"
 #include "vm/Stack.h"
+#include "vm/StringType.h"
 
 #include "vm/JSObject-inl.h"
 
@@ -251,19 +257,101 @@ bool js::intl_numberingSystem(JSContext* cx, unsigned argc, Value* vp) {
   return true;
 }
 
-bool js::intl::NumberFormatterSkeleton::currency(CurrencyDisplay display,
-                                                 JSLinearString* currency) {
+#if DEBUG || MOZ_SYSTEM_ICU
+class UResourceBundleDeleter {
+ public:
+  void operator()(UResourceBundle* aPtr) { ures_close(aPtr); }
+};
+
+using UniqueUResourceBundle =
+    mozilla::UniquePtr<UResourceBundle, UResourceBundleDeleter>;
+
+bool js::intl_availableMeasurementUnits(JSContext* cx, unsigned argc,
+                                        Value* vp) {
+  CallArgs args = CallArgsFromVp(argc, vp);
+  MOZ_ASSERT(args.length() == 0);
+
+  RootedObject measurementUnits(
+      cx, NewObjectWithGivenProto<PlainObject>(cx, nullptr));
+  if (!measurementUnits) {
+    return false;
+  }
+
+  // Lookup the available measurement units in the resource boundle of the root
+  // locale.
+
+  static const char packageName[] =
+      U_ICUDATA_NAME U_TREE_SEPARATOR_STRING "unit";
+  static const char rootLocale[] = "";
+
+  UErrorCode status = U_ZERO_ERROR;
+  UResourceBundle* rawRes = ures_open(packageName, rootLocale, &status);
+  if (U_FAILURE(status)) {
+    intl::ReportInternalError(cx);
+    return false;
+  }
+  UniqueUResourceBundle res(rawRes);
+
+  UResourceBundle* rawUnits =
+      ures_getByKey(res.get(), "units", nullptr, &status);
+  if (U_FAILURE(status)) {
+    intl::ReportInternalError(cx);
+    return false;
+  }
+  UniqueUResourceBundle units(rawUnits);
+
+  RootedAtom unitAtom(cx);
+
+  int32_t unitsSize = ures_getSize(units.get());
+  for (int32_t i = 0; i < unitsSize; i++) {
+    UResourceBundle* rawType =
+        ures_getByIndex(units.get(), i, nullptr, &status);
+    if (U_FAILURE(status)) {
+      intl::ReportInternalError(cx);
+      return false;
+    }
+    UniqueUResourceBundle type(rawType);
+
+    int32_t typeSize = ures_getSize(type.get());
+    for (int32_t j = 0; j < typeSize; j++) {
+      UResourceBundle* rawSubtype =
+          ures_getByIndex(type.get(), j, nullptr, &status);
+      if (U_FAILURE(status)) {
+        intl::ReportInternalError(cx);
+        return false;
+      }
+      UniqueUResourceBundle subtype(rawSubtype);
+
+      const char* unitIdentifier = ures_getKey(subtype.get());
+
+      unitAtom = Atomize(cx, unitIdentifier, strlen(unitIdentifier));
+      if (!unitAtom) {
+        return false;
+      }
+      if (!DefineDataProperty(cx, measurementUnits, unitAtom->asPropertyName(),
+                              TrueHandleValue)) {
+        return false;
+      }
+    }
+  }
+
+  args.rval().setObject(*measurementUnits);
+  return true;
+}
+#endif
+
+bool js::intl::NumberFormatterSkeleton::currency(JSLinearString* currency) {
   MOZ_ASSERT(currency->length() == 3,
              "IsWellFormedCurrencyCode permits only length-3 strings");
 
   char16_t currencyChars[] = {currency->latin1OrTwoByteChar(0),
                               currency->latin1OrTwoByteChar(1),
                               currency->latin1OrTwoByteChar(2), '\0'};
+  return append(u"currency/") && append(currencyChars) && append(' ');
+}
 
-  if (!(append(u"currency/") && append(currencyChars) && append(' '))) {
-    return false;
-  }
-
+bool js::intl::NumberFormatterSkeleton::currencyDisplay(
+    CurrencyDisplay display) {
   switch (display) {
     case CurrencyDisplay::Code:
       return appendToken(u"unit-width-iso-code");
@@ -272,9 +360,147 @@ bool js::intl::NumberFormatterSkeleton::currency(CurrencyDisplay display,
     case CurrencyDisplay::Symbol:
       // Default, no additional tokens needed.
       return true;
+    case CurrencyDisplay::NarrowSymbol:
+      return appendToken(u"unit-width-narrow");
   }
-
   MOZ_CRASH("unexpected currency display type");
+}
+
+struct MeasureUnit {
+  const char* const type;
+  const char* const subtype;
+};
+
+/**
+ * The list of currently supported simple unit identifiers.
+ *
+ * Note: Keep in sync with the measure unit lists in
+ * - js/src/builtin/intl/NumberFormat.js
+ * - intl/icu/data_filter.json
+ *
+ * The list must be kept in alphabetical order of the |subtype|.
+ */
+const MeasureUnit simpleMeasureUnits[] = {
+    // clang-format off
+    {"area", "acre"},
+    {"digital", "bit"},
+    {"digital", "byte"},
+    {"temperature", "celsius"},
+    {"length", "centimeter"},
+    {"duration", "day"},
+    {"angle", "degree"},
+    {"temperature", "fahrenheit"},
+    {"volume", "fluid-ounce"},
+    {"length", "foot"},
+    {"volume", "gallon"},
+    {"digital", "gigabit"},
+    {"digital", "gigabyte"},
+    {"mass", "gram"},
+    {"area", "hectare"},
+    {"duration", "hour"},
+    {"length", "inch"},
+    {"digital", "kilobit"},
+    {"digital", "kilobyte"},
+    {"mass", "kilogram"},
+    {"length", "kilometer"},
+    {"volume", "liter"},
+    {"digital", "megabit"},
+    {"digital", "megabyte"},
+    {"length", "meter"},
+    {"length", "mile"},
+    {"length", "mile-scandinavian"},
+    {"volume", "milliliter"},
+    {"length", "millimeter"},
+    {"duration", "millisecond"},
+    {"duration", "minute"},
+    {"duration", "month"},
+    {"mass", "ounce"},
+    {"concentr", "percent"},
+    {"digital", "petabyte"},
+    {"mass", "pound"},
+    {"duration", "second"},
+    {"mass", "stone"},
+    {"digital", "terabit"},
+    {"digital", "terabyte"},
+    {"duration", "week"},
+    {"length", "yard"},
+    {"duration", "year"},
+    // clang-format on
+};
+
+static const MeasureUnit& FindSimpleMeasureUnit(const char* subtype) {
+  auto measureUnit = std::lower_bound(
+      std::begin(simpleMeasureUnits), std::end(simpleMeasureUnits), subtype,
+      [](const auto& measureUnit, const char* subtype) {
+        return strcmp(measureUnit.subtype, subtype) < 0;
+      });
+  MOZ_ASSERT(measureUnit != std::end(simpleMeasureUnits),
+             "unexpected unit identifier: unit not found");
+  MOZ_ASSERT(strcmp(measureUnit->subtype, subtype) == 0,
+             "unexpected unit identifier: wrong unit found");
+  return *measureUnit;
+}
+
+static constexpr size_t MaxUnitLength() {
+  // Enable by default when bug 1560664 is fixed.
+#if __cplusplus >= 201703L
+  size_t length = 0;
+  for (const auto& unit : simpleMeasureUnits) {
+    length = std::max(length, std::char_traits<char>::length(unit.subtype));
+  }
+  return length * 2 + std::char_traits<char>::length("-per-");
+#else
+  return mozilla::ArrayLength("mile-scandinavian-per-mile-scandinavian") - 1;
+#endif
+}
+
+bool js::intl::NumberFormatterSkeleton::unit(JSLinearString* unit) {
+  MOZ_RELEASE_ASSERT(unit->length() <= MaxUnitLength());
+
+  char unitChars[MaxUnitLength() + 1] = {};
+  CopyChars(reinterpret_cast<Latin1Char*>(unitChars), *unit);
+
+  auto appendUnit = [this](const MeasureUnit& unit) {
+    return append(unit.type, strlen(unit.type)) && append('-') &&
+           append(unit.subtype, strlen(unit.subtype));
+  };
+
+  // |unit| can be a compound unit identifier, separated by "-per-".
+
+  static constexpr char separator[] = "-per-";
+  if (char* p = strstr(unitChars, separator)) {
+    // Split into two strings.
+    p[0] = '\0';
+
+    auto& numerator = FindSimpleMeasureUnit(unitChars);
+    if (!append(u"measure-unit/") || !appendUnit(numerator) || !append(' ')) {
+      return false;
+    }
+
+    auto& denominator = FindSimpleMeasureUnit(p + strlen(separator));
+    if (!append(u"per-measure-unit/") || !appendUnit(denominator) ||
+        !append(' ')) {
+      return false;
+    }
+  } else {
+    auto& simple = FindSimpleMeasureUnit(unitChars);
+    if (!append(u"measure-unit/") || !appendUnit(simple) || !append(' ')) {
+      return false;
+    }
+  }
+  return true;
+}
+
+bool js::intl::NumberFormatterSkeleton::unitDisplay(UnitDisplay display) {
+  switch (display) {
+    case UnitDisplay::Short:
+      return appendToken(u"unit-width-short");
+    case UnitDisplay::Narrow:
+      return appendToken(u"unit-width-narrow");
+    case UnitDisplay::Long:
+      return appendToken(u"unit-width-full-name");
+  }
+  MOZ_CRASH("unexpected unit display type");
 }
 
 bool js::intl::NumberFormatterSkeleton::percent() {
@@ -303,6 +529,44 @@ bool js::intl::NumberFormatterSkeleton::significantDigits(uint32_t min,
 
 bool js::intl::NumberFormatterSkeleton::useGrouping(bool on) {
   return on || appendToken(u"group-off");
+}
+
+bool js::intl::NumberFormatterSkeleton::notation(Notation style) {
+  switch (style) {
+    case Notation::Standard:
+      // Default, no additional tokens needed.
+      return true;
+    case Notation::Scientific:
+      return appendToken(u"scientific");
+    case Notation::Engineering:
+      return appendToken(u"engineering");
+    case Notation::CompactShort:
+      return appendToken(u"compact-short");
+    case Notation::CompactLong:
+      return appendToken(u"compact-long");
+  }
+  MOZ_CRASH("unexpected notation style");
+}
+
+bool js::intl::NumberFormatterSkeleton::signDisplay(SignDisplay display) {
+  switch (display) {
+    case SignDisplay::Auto:
+      // Default, no additional tokens needed.
+      return true;
+    case SignDisplay::Always:
+      return appendToken(u"sign-always");
+    case SignDisplay::Never:
+      return appendToken(u"sign-never");
+    case SignDisplay::ExceptZero:
+      return appendToken(u"sign-except-zero");
+    case SignDisplay::Accounting:
+      return appendToken(u"sign-accounting");
+    case SignDisplay::AccountingAlways:
+      return appendToken(u"sign-accounting-always");
+    case SignDisplay::AccountingExceptZero:
+      return appendToken(u"sign-accounting-except-zero");
+  }
+  MOZ_CRASH("unexpected sign display type");
 }
 
 bool js::intl::NumberFormatterSkeleton::roundingModeHalfUp() {
@@ -351,6 +615,7 @@ static UNumberFormatter* NewUNumberFormatter(
     return nullptr;
   }
 
+  bool accountingSign = false;
   {
     JSLinearString* style = value.toString()->ensureLinear(cx);
     if (!style) {
@@ -358,7 +623,18 @@ static UNumberFormatter* NewUNumberFormatter(
     }
 
     if (StringEqualsAscii(style, "currency")) {
-      using CurrencyDisplay = intl::NumberFormatterSkeleton::CurrencyDisplay;
+      if (!GetProperty(cx, internals, internals, cx->names().currency,
+                       &value)) {
+        return nullptr;
+      }
+      JSLinearString* currency = value.toString()->ensureLinear(cx);
+      if (!currency) {
+        return nullptr;
+      }
+
+      if (!skeleton.currency(currency)) {
+        return nullptr;
+      }
 
       if (!GetProperty(cx, internals, internals, cx->names().currencyDisplay,
                        &value)) {
@@ -369,30 +645,77 @@ static UNumberFormatter* NewUNumberFormatter(
         return nullptr;
       }
 
+      using CurrencyDisplay = intl::NumberFormatterSkeleton::CurrencyDisplay;
+
       CurrencyDisplay display;
       if (StringEqualsAscii(currencyDisplay, "code")) {
         display = CurrencyDisplay::Code;
       } else if (StringEqualsAscii(currencyDisplay, "symbol")) {
         display = CurrencyDisplay::Symbol;
+      } else if (StringEqualsAscii(currencyDisplay, "narrowSymbol")) {
+        display = CurrencyDisplay::NarrowSymbol;
       } else {
         MOZ_ASSERT(StringEqualsAscii(currencyDisplay, "name"));
         display = CurrencyDisplay::Name;
       }
 
-      if (!GetProperty(cx, internals, internals, cx->names().currency,
-                       &value)) {
-        return nullptr;
-      }
-      JSLinearString* currency = value.toString()->ensureLinear(cx);
-      if (!currency) {
+      if (!skeleton.currencyDisplay(display)) {
         return nullptr;
       }
 
-      if (!skeleton.currency(display, currency)) {
+      if (!GetProperty(cx, internals, internals, cx->names().currencySign,
+                       &value)) {
         return nullptr;
+      }
+      JSLinearString* currencySign = value.toString()->ensureLinear(cx);
+      if (!currencySign) {
+        return nullptr;
+      }
+
+      if (StringEqualsAscii(currencySign, "accounting")) {
+        accountingSign = true;
+      } else {
+        MOZ_ASSERT(StringEqualsAscii(currencySign, "standard"));
       }
     } else if (StringEqualsAscii(style, "percent")) {
       if (!skeleton.percent()) {
+        return nullptr;
+      }
+    } else if (StringEqualsAscii(style, "unit")) {
+      if (!GetProperty(cx, internals, internals, cx->names().unit, &value)) {
+        return nullptr;
+      }
+      JSLinearString* unit = value.toString()->ensureLinear(cx);
+      if (!unit) {
+        return nullptr;
+      }
+
+      if (!skeleton.unit(unit)) {
+        return nullptr;
+      }
+
+      if (!GetProperty(cx, internals, internals, cx->names().unitDisplay,
+                       &value)) {
+        return nullptr;
+      }
+      JSLinearString* unitDisplay = value.toString()->ensureLinear(cx);
+      if (!unitDisplay) {
+        return nullptr;
+      }
+
+      using UnitDisplay = intl::NumberFormatterSkeleton::UnitDisplay;
+
+      UnitDisplay display;
+      if (StringEqualsAscii(unitDisplay, "short")) {
+        display = UnitDisplay::Short;
+      } else if (StringEqualsAscii(unitDisplay, "narrow")) {
+        display = UnitDisplay::Narrow;
+      } else {
+        MOZ_ASSERT(StringEqualsAscii(unitDisplay, "long"));
+        display = UnitDisplay::Long;
+      }
+
+      if (!skeleton.unitDisplay(display)) {
         return nullptr;
       }
     } else {
@@ -423,13 +746,15 @@ static UNumberFormatter* NewUNumberFormatter(
                                     maximumSignificantDigits)) {
       return nullptr;
     }
-  } else {
-    if (!GetProperty(cx, internals, internals, cx->names().minimumIntegerDigits,
-                     &value)) {
-      return nullptr;
-    }
-    uint32_t minimumIntegerDigits = AssertedCast<uint32_t>(value.toInt32());
+  }
 
+  bool hasMinimumFractionDigits;
+  if (!HasProperty(cx, internals, cx->names().minimumFractionDigits,
+                   &hasMinimumFractionDigits)) {
+    return nullptr;
+  }
+
+  if (hasMinimumFractionDigits) {
     if (!GetProperty(cx, internals, internals,
                      cx->names().minimumFractionDigits, &value)) {
       return nullptr;
@@ -446,9 +771,16 @@ static UNumberFormatter* NewUNumberFormatter(
                                  maximumFractionDigits)) {
       return nullptr;
     }
-    if (!skeleton.integerWidth(minimumIntegerDigits)) {
-      return nullptr;
-    }
+  }
+
+  if (!GetProperty(cx, internals, internals, cx->names().minimumIntegerDigits,
+                   &value)) {
+    return nullptr;
+  }
+  uint32_t minimumIntegerDigits = AssertedCast<uint32_t>(value.toInt32());
+
+  if (!skeleton.integerWidth(minimumIntegerDigits)) {
+    return nullptr;
   }
 
   if (!GetProperty(cx, internals, internals, cx->names().useGrouping, &value)) {
@@ -456,6 +788,92 @@ static UNumberFormatter* NewUNumberFormatter(
   }
   if (!skeleton.useGrouping(value.toBoolean())) {
     return nullptr;
+  }
+
+  if (!GetProperty(cx, internals, internals, cx->names().notation, &value)) {
+    return nullptr;
+  }
+
+  {
+    JSLinearString* notation = value.toString()->ensureLinear(cx);
+    if (!notation) {
+      return nullptr;
+    }
+
+    using Notation = intl::NumberFormatterSkeleton::Notation;
+
+    Notation style;
+    if (StringEqualsAscii(notation, "standard")) {
+      style = Notation::Standard;
+    } else if (StringEqualsAscii(notation, "scientific")) {
+      style = Notation::Scientific;
+    } else if (StringEqualsAscii(notation, "engineering")) {
+      style = Notation::Engineering;
+    } else {
+      MOZ_ASSERT(StringEqualsAscii(notation, "compact"));
+
+      if (!GetProperty(cx, internals, internals, cx->names().compactDisplay,
+                       &value)) {
+        return nullptr;
+      }
+
+      JSLinearString* compactDisplay = value.toString()->ensureLinear(cx);
+      if (!compactDisplay) {
+        return nullptr;
+      }
+
+      if (StringEqualsAscii(compactDisplay, "short")) {
+        style = Notation::CompactShort;
+      } else {
+        MOZ_ASSERT(StringEqualsAscii(compactDisplay, "long"));
+        style = Notation::CompactLong;
+      }
+    }
+
+    if (!skeleton.notation(style)) {
+      return nullptr;
+    }
+  }
+
+  if (!GetProperty(cx, internals, internals, cx->names().signDisplay, &value)) {
+    return nullptr;
+  }
+
+  {
+    JSLinearString* signDisplay = value.toString()->ensureLinear(cx);
+    if (!signDisplay) {
+      return nullptr;
+    }
+
+    using SignDisplay = intl::NumberFormatterSkeleton::SignDisplay;
+
+    SignDisplay display;
+    if (StringEqualsAscii(signDisplay, "auto")) {
+      if (accountingSign) {
+        display = SignDisplay::Accounting;
+      } else {
+        display = SignDisplay::Auto;
+      }
+    } else if (StringEqualsAscii(signDisplay, "never")) {
+      display = SignDisplay::Never;
+    } else if (StringEqualsAscii(signDisplay, "always")) {
+      if (accountingSign) {
+        display = SignDisplay::AccountingAlways;
+      } else {
+        display = SignDisplay::Always;
+      }
+    } else {
+      MOZ_ASSERT(StringEqualsAscii(signDisplay, "exceptZero"));
+      if (accountingSign) {
+        display = SignDisplay::AccountingExceptZero;
+      } else {
+        display = SignDisplay::ExceptZero;
+      }
+    }
+
+    if (!skeleton.signDisplay(display)) {
+      return nullptr;
+    }
   }
 
   if (!skeleton.roundingModeHalfUp()) {
@@ -613,16 +1031,11 @@ static FieldType GetFieldTypeForNumberField(UNumberFormatFields fieldName,
       return &JSAtomState::fraction;
 
     case UNUM_SIGN_FIELD: {
-      // Manual trawling through the ICU call graph appears to indicate that
-      // the basic formatting we request will never include a positive sign.
-      // But this analysis may be mistaken, so don't absolutely trust it.
-      MOZ_ASSERT(!x.isNumber() || !IsNaN(x.toNumber()),
-                 "ICU appearing not to produce positive-sign among fields, "
-                 "plus our coercing all NaNs to one with sign bit unset "
-                 "(i.e. \"positive\"), means we shouldn't reach here with a "
-                 "NaN value");
-      bool isNegative =
-          x.isNumber() ? IsNegative(x.toNumber()) : x.toBigInt()->isNegative();
+      // We coerce all NaNs to one with the sign bit unset, so all NaNs are
+      // positive in our implementation.
+      bool isNegative = x.isNumber()
+                            ? !IsNaN(x.toNumber()) && IsNegative(x.toNumber())
+                            : x.toBigInt()->isNegative();
       return isNegative ? &JSAtomState::minusSign : &JSAtomState::plusSign;
     }
 
@@ -640,42 +1053,32 @@ static FieldType GetFieldTypeForNumberField(UNumberFormatFields fieldName,
       break;
 
     case UNUM_EXPONENT_SYMBOL_FIELD:
+      return &JSAtomState::exponentSeparator;
+
     case UNUM_EXPONENT_SIGN_FIELD:
+      return &JSAtomState::exponentMinusSign;
+
     case UNUM_EXPONENT_FIELD:
-      MOZ_ASSERT_UNREACHABLE(
-          "exponent field unexpectedly found in "
-          "formatted number, even though UNUM_SCIENTIFIC "
-          "and scientific notation were never requested");
-      break;
+      return &JSAtomState::exponentInteger;
 
 #ifndef U_HIDE_DRAFT_API
     case UNUM_MEASURE_UNIT_FIELD:
-      MOZ_ASSERT_UNREACHABLE(
-          "unexpected measure unit field found, even though "
-          "we don't use any user-defined patterns that "
-          "would require a measure unit field");
-      break;
+      return &JSAtomState::unit;
 
     case UNUM_COMPACT_FIELD:
-      MOZ_ASSERT_UNREACHABLE(
-          "unexpected compact field found, even though "
-          "we don't use any user-defined patterns that "
-          "would require a compact number notation");
-      break;
+      return &JSAtomState::compact;
 #endif
 
 #ifndef U_HIDE_DEPRECATED_API
     case UNUM_FIELD_COUNT:
       MOZ_ASSERT_UNREACHABLE(
-          "format field sentinel value returned by "
-          "iterator!");
+          "format field sentinel value returned by iterator!");
       break;
 #endif
   }
 
   MOZ_ASSERT_UNREACHABLE(
-      "unenumerated, undocumented format field returned "
-      "by iterator");
+      "unenumerated, undocumented format field returned by iterator");
   return nullptr;
 }
 

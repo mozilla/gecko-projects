@@ -3350,7 +3350,7 @@ static void ScrollToShowRect(nsIScrollableFrame* aFrameAsScrollable,
   ScrollStyles ss = aFrameAsScrollable->GetScrollStyles();
   nsRect allowedRange(scrollPt, nsSize(0, 0));
   bool needToScroll = false;
-  uint32_t directions = aFrameAsScrollable->GetPerceivedScrollingDirections();
+  uint32_t directions = aFrameAsScrollable->GetAvailableScrollingDirections();
 
   if (((aScrollFlags & ScrollFlags::ScrollOverflowHidden) ||
        ss.mVertical != StyleOverflow::Hidden) &&
@@ -3636,8 +3636,8 @@ bool PresShell::ScrollFrameRectIntoView(nsIFrame* aFrame, const nsRect& aRect,
 RectVisibility PresShell::GetRectVisibility(nsIFrame* aFrame,
                                             const nsRect& aRect,
                                             nscoord aMinTwips) const {
-  NS_ASSERTION(aFrame->PresContext() == GetPresContext(),
-               "prescontext mismatch?");
+  MOZ_DIAGNOSTIC_ASSERT(aFrame->PresContext() == GetPresContext(),
+                        "prescontext mismatch?");
   nsIFrame* rootFrame = mFrameConstructor->GetRootFrame();
   NS_ASSERTION(
       rootFrame,

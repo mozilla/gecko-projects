@@ -92,11 +92,14 @@
   MACRO(CopyDataPropertiesUnfiltered, CopyDataPropertiesUnfiltered,            \
         "CopyDataPropertiesUnfiltered")                                        \
   MACRO(copyWithin, copyWithin, "copyWithin")                                  \
+  MACRO(compact, compact, "compact")                                           \
+  MACRO(compactDisplay, compactDisplay, "compactDisplay")                      \
   MACRO(count, count, "count")                                                 \
   MACRO(CreateResolvingFunctions, CreateResolvingFunctions,                    \
         "CreateResolvingFunctions")                                            \
   MACRO(currency, currency, "currency")                                        \
   MACRO(currencyDisplay, currencyDisplay, "currencyDisplay")                   \
+  MACRO(currencySign, currencySign, "currencySign")                            \
   MACRO(DateTimeFormat, DateTimeFormat, "DateTimeFormat")                      \
   MACRO(day, day, "day")                                                       \
   MACRO(dayPeriod, dayPeriod, "dayPeriod")                                     \
@@ -141,6 +144,9 @@
   MACRO(escape, escape, "escape")                                              \
   MACRO(eval, eval, "eval")                                                    \
   MACRO(exec, exec, "exec")                                                    \
+  MACRO(exponentInteger, exponentInteger, "exponentInteger")                   \
+  MACRO(exponentMinusSign, exponentMinusSign, "exponentMinusSign")             \
+  MACRO(exponentSeparator, exponentSeparator, "exponentSeparator")             \
   MACRO(export, export_, "export")                                             \
   MACRO(extends, extends, "extends")                                           \
   MACRO(false, false_, "false")                                                \
@@ -299,6 +305,7 @@
   MACRO(noFilename, noFilename, "noFilename")                                  \
   MACRO(nonincrementalReason, nonincrementalReason, "nonincrementalReason")    \
   MACRO(noStack, noStack, "noStack")                                           \
+  MACRO(notation, notation, "notation")                                        \
   MACRO(notes, notes, "notes")                                                 \
   MACRO(NumberFormat, NumberFormat, "NumberFormat")                            \
   MACRO(numeric, numeric, "numeric")                                           \
@@ -377,6 +384,7 @@
   MACRO(setPrefix, setPrefix, "set ")                                          \
   MACRO(setPrototypeOf, setPrototypeOf, "setPrototypeOf")                      \
   MACRO(shape, shape, "shape")                                                 \
+  MACRO(signDisplay, signDisplay, "signDisplay")                               \
   MACRO(size, size, "size")                                                    \
   MACRO(source, source, "source")                                              \
   MACRO(SpeciesConstructor, SpeciesConstructor, "SpeciesConstructor")          \
@@ -431,6 +439,7 @@
   MACRO(uneval, uneval, "uneval")                                              \
   MACRO(unicode, unicode, "unicode")                                           \
   MACRO(unit, unit, "unit")                                                    \
+  MACRO(unitDisplay, unitDisplay, "unitDisplay")                               \
   MACRO(uninitialized, uninitialized, "uninitialized")                         \
   MACRO(unsized, unsized, "unsized")                                           \
   MACRO(unwatch, unwatch, "unwatch")                                           \
