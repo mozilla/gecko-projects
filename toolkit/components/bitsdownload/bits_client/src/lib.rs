@@ -102,9 +102,6 @@ impl BitsClient {
     /// Start a job to download a single file at `url` to local path `save_path` (relative to the
     /// `save_path_prefix` given when constructing the `BitsClient`).
     ///
-    /// This creates a foreground priority job, which will immediately fail if it encounters a
-    /// transient error.
-    ///
     /// `save_path_prefix` combined with `save_path` must name a file (existing or not) in an
     /// existing directory, which must be under the directory named by `save_path_prefix`.
     ///
@@ -114,34 +111,6 @@ impl BitsClient {
     /// new job, and `result.1` is a monitor client that can be polled for periodic updates,
     /// returning a result approximately once per `monitor_interval_millis` milliseconds.
     pub fn start_job(
-        &mut self,
-        url: ffi::OsString,
-        save_path: ffi::OsString,
-        proxy_usage: BitsProxyUsage,
-        monitor_interval_millis: u32,
-    ) -> Result<Result<(StartJobSuccess, BitsMonitorClient), StartJobFailure>, Error> {
-        match self {
-            InProcess(client) => Ok(client
-                .start_job(url, save_path, proxy_usage, monitor_interval_millis)
-                .map(|(success, monitor)| (success, BitsMonitorClient::InProcess(monitor)))),
-        }
-    }
-
-    /// Start a background job to download a single file at `url` to local path `save_path`
-    /// (relative to the `save_path_prefix` given when constructing the `BitsClient`).
-    ///
-    /// A background job has priority `BG_JOB_PRIORITY_NORMAL`, and will retry following a
-    /// transient error for up to 1 hour.
-    ///
-    /// `save_path_prefix` combined with `save_path` must name a file (existing or not) in an
-    /// existing directory, which must be under the directory named by `save_path_prefix`.
-    ///
-    /// `proxy_usage` determines what proxy will be used.
-    ///
-    /// When a successful result `Ok(result)` is returned, `result.0.guid` is the id for the
-    /// new job, and `result.1` is a monitor client that can be polled for periodic updates,
-    /// returning a result approximately once per `monitor_interval_millis` milliseconds.
-    pub fn start_background_job(
         &mut self,
         url: ffi::OsString,
         save_path: ffi::OsString,
@@ -193,9 +162,6 @@ impl BitsClient {
     /// `foreground == true` will set the priority to `BG_JOB_PRIORITY_FOREGROUND`,
     /// `false` will use the default `BG_JOB_PRIORITY_NORMAL`.
     /// See the Microsoft documentation for `BG_JOB_PRIORITY` for details.
-    ///
-    /// A foreground job will immediately fail if it encounters a transient error, while a
-    /// "normal" background priority job will retry for 1 hour.
     ///
     /// A job created by `start_job()` will be foreground priority, by default.
     pub fn set_job_priority(

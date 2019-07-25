@@ -18,9 +18,6 @@ use bits_protocol::*;
 
 use super::Error;
 
-const FOREGROUND_NO_PROGRESS_TIMEOUT: u32 = 0; // No retry after a transient error.
-const BACKGROUND_NO_PROGRESS_TIMEOUT: u32 = 60 * 60; // 1 hour
-
 // This is a macro in order to use the NotFound and GetJob variants from whatever enum is in scope.
 macro_rules! get_job {
     ($bcm:ident, $guid:expr, $name:expr) => {{
@@ -72,42 +69,9 @@ impl InProcessClient {
     pub fn start_job(
         &mut self,
         url: ffi::OsString,
-        save_path_prefix: ffi::OsString,
-        proxy_usage: BitsProxyUsage,
-        monitor_interval_millis: u32,
-    ) -> Result<(StartJobSuccess, InProcessMonitor), StartJobFailure> {
-        self.start_job_impl(
-            url,
-            save_path_prefix,
-            proxy_usage,
-            monitor_interval_millis,
-            true,
-        )
-    }
-
-    pub fn start_background_job(
-        &mut self,
-        url: ffi::OsString,
-        save_path_prefix: ffi::OsString,
-        proxy_usage: BitsProxyUsage,
-        monitor_interval_millis: u32,
-    ) -> Result<(StartJobSuccess, InProcessMonitor), StartJobFailure> {
-        self.start_job_impl(
-            url,
-            save_path_prefix,
-            proxy_usage,
-            monitor_interval_millis,
-            false,
-        )
-    }
-
-    fn start_job_impl(
-        &mut self,
-        url: ffi::OsString,
         save_path: ffi::OsString,
         proxy_usage: BitsProxyUsage,
         monitor_interval_millis: u32,
-        foreground: bool,
     ) -> Result<(StartJobSuccess, InProcessMonitor), StartJobFailure> {
         use StartJobFailure::*;
 
@@ -157,13 +121,7 @@ impl InProcessClient {
             job.set_minimum_retry_delay(60)?;
             job.set_redirect_report()?;
 
-            if foreground {
-                job.set_priority(BitsJobPriority::Foreground)?;
-                job.set_no_progress_timeout(FOREGROUND_NO_PROGRESS_TIMEOUT)?;
-            } else {
-                job.set_priority(BitsJobPriority::Normal)?;
-                job.set_no_progress_timeout(BACKGROUND_NO_PROGRESS_TIMEOUT)?;
-            }
+            job.set_priority(BitsJobPriority::Foreground)?;
 
             Ok(())
         })()
@@ -231,17 +189,15 @@ impl InProcessClient {
     ) -> Result<(), SetJobPriorityFailure> {
         use SetJobPriorityFailure::*;
 
-        let (priority, timeout) = if foreground {
-            (BitsJobPriority::Foreground, FOREGROUND_NO_PROGRESS_TIMEOUT)
+        let priority = if foreground {
+            BitsJobPriority::Foreground
         } else {
-            (BitsJobPriority::Normal, BACKGROUND_NO_PROGRESS_TIMEOUT)
+            BitsJobPriority::Normal
         };
 
         let bcm;
-        let mut job = get_job!(bcm, &guid, &self.job_name);
-        job.set_priority(priority)
-            .map_err(|e| ApplySettings(format_error(&bcm, e)))?;
-        job.set_no_progress_timeout(timeout)
+        get_job!(bcm, &guid, &self.job_name)
+            .set_priority(priority)
             .map_err(|e| ApplySettings(format_error(&bcm, e)))?;
 
         Ok(())

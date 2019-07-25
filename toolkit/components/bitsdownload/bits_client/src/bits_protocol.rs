@@ -35,7 +35,6 @@ impl fmt::Display for HResultMessage {
 #[derive(Clone, Debug)]
 pub enum Command {
     StartJob(StartJobCommand),
-    StartBackgroundJob(StartBackgroundJobCommand),
     MonitorJob(MonitorJobCommand),
     SuspendJob(SuspendJobCommand),
     ResumeJob(ResumeJobCommand),
@@ -68,23 +67,6 @@ impl CommandType for StartJobCommand {
     type Failure = StartJobFailure;
     fn wrap(cmd: Self) -> Command {
         Command::StartJob(cmd)
-    }
-}
-
-#[doc(hidden)]
-#[derive(Clone, Debug)]
-pub struct StartBackgroundJobCommand {
-    pub url: OsString,
-    pub save_path: OsString,
-    pub proxy_usage: BitsProxyUsage,
-    pub monitor: Option<MonitorConfig>,
-}
-
-impl CommandType for StartBackgroundJobCommand {
-    type Success = StartJobSuccess;
-    type Failure = StartJobFailure;
-    fn wrap(cmd: Self) -> Command {
-        Command::StartBackgroundJob(cmd)
     }
 }
 

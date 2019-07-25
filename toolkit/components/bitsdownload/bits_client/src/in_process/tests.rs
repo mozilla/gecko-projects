@@ -504,11 +504,7 @@ test! {
 }
 
 test! {
-    // NOTE: It's possible that the background job will not be transferred within the time limit
-    // if the machine is loaded. If this becomes an intermittent failure, it may be worth trying to
-    // test retry timeouts separately from background transfers.
-
-    fn transient_background_error(name: &str, tmp_dir: &TempDir) {
+    fn transient_error(name: &str, tmp_dir: &TempDir) {
         let mut server = mock_http_server(name, HttpServerResponses {
             body: name.to_owned().into_boxed_str().into_boxed_bytes(),
             delay: 100,
@@ -520,7 +516,7 @@ test! {
         let timeout = 10_000;
 
         let (_, mut monitor) =
-            client.start_background_job(server.format_url("error_500"), name.into(), BitsProxyUsage::Preconfig, interval).unwrap();
+            client.start_job(server.format_url("error_500"), name.into(), BitsProxyUsage::Preconfig, interval).unwrap();
 
         // Start the timer now, the initial job creation may be delayed by BITS service startup.
         let start = Instant::now();
@@ -533,40 +529,6 @@ test! {
         assert!(start.elapsed() > Duration::from_millis(900));
         assert!(start.elapsed() < Duration::from_millis(9_000));
         assert_eq!(status.state, BitsJobState::TransientError);
-
-        server.shutdown();
-
-        // job will be cancelled by macro
-    }
-}
-
-test! {
-    fn transient_foreground_error(name: &str, tmp_dir: &TempDir) {
-        let mut server = mock_http_server(name, HttpServerResponses {
-            body: name.to_owned().into_boxed_str().into_boxed_bytes(),
-            delay: 100,
-        });
-
-        let mut client = InProcessClient::new(format_job_name(name), format_dir_prefix(tmp_dir)).unwrap();
-
-        let interval = 60_000;
-        let timeout = 10_000;
-
-        let (_, mut monitor) =
-            client.start_job(server.format_url("error_500"), name.into(), BitsProxyUsage::Preconfig, interval).unwrap();
-
-        // Start the timer now, the initial job creation may be delayed by BITS service startup.
-        let start = Instant::now();
-
-        // First immediate report
-        monitor.get_status(timeout).expect("should initially be ok").unwrap();
-
-        // 500 is a transient error, but for a foreground job it should immediately produce an
-        // error notification should with the HEAD response in 100ms. Otherwise no status until
-        // 10s interval or timeout.
-        let status = monitor.get_status(timeout).expect("should get status update").unwrap();
-        assert!(start.elapsed() < Duration::from_millis(9_000));
-        assert_eq!(status.state, BitsJobState::Error);
 
         server.shutdown();
 
