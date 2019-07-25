@@ -34,6 +34,16 @@ XPCOMUtils.defineLazyPreferenceGetter(
 );
 XPCOMUtils.defineLazyPreferenceGetter(
   this,
+  "TERMS_URL",
+  "services.sync.fxa.termsURL"
+);
+XPCOMUtils.defineLazyPreferenceGetter(
+  this,
+  "PRIVACY_URL",
+  "services.sync.fxa.privacyURL"
+);
+XPCOMUtils.defineLazyPreferenceGetter(
+  this,
   "CONTEXT_PARAM",
   "identity.fxaccounts.contextParam"
 );
@@ -57,75 +67,95 @@ const CONFIG_PREFS = [
 ];
 
 var FxAccountsConfig = {
-  async promiseSignUpURI(entrypoint) {
+  async promiseSignUpURI(entrypoint, extraParams = {}) {
     return this._buildURL("signup", {
-      extraParams: { entrypoint },
+      extraParams: { entrypoint, ...extraParams },
     });
   },
 
-  async promiseSignInURI(entrypoint) {
+  async promiseSignInURI(entrypoint, extraParams = {}) {
     return this._buildURL("signin", {
-      extraParams: { entrypoint },
+      extraParams: { entrypoint, ...extraParams },
     });
   },
 
-  async promiseEmailURI(email, entrypoint) {
+  async promiseEmailURI(email, entrypoint, extraParams = {}) {
     return this._buildURL("", {
-      extraParams: { entrypoint, email },
+      extraParams: { entrypoint, email, ...extraParams },
     });
   },
 
-  async promiseEmailFirstURI(entrypoint) {
+  async promiseEmailFirstURI(entrypoint, extraParams = {}) {
     return this._buildURL("", {
-      extraParams: { entrypoint, action: "email" },
+      extraParams: { entrypoint, action: "email", ...extraParams },
     });
   },
 
-  async promiseForceSigninURI(entrypoint) {
+  async promiseForceSigninURI(entrypoint, extraParams = {}) {
     return this._buildURL("force_auth", {
-      extraParams: { entrypoint },
+      extraParams: { entrypoint, ...extraParams },
       addAccountIdentifiers: true,
     });
   },
 
-  async promiseManageURI(entrypoint) {
+  async promiseManageURI(entrypoint, extraParams = {}) {
     return this._buildURL("settings", {
-      extraParams: { entrypoint },
+      extraParams: { entrypoint, ...extraParams },
       addAccountIdentifiers: true,
     });
   },
 
-  async promiseChangeAvatarURI(entrypoint) {
+  async promiseChangeAvatarURI(entrypoint, extraParams = {}) {
     return this._buildURL("settings/avatar/change", {
-      extraParams: { entrypoint },
+      extraParams: { entrypoint, ...extraParams },
       addAccountIdentifiers: true,
     });
   },
 
-  async promiseManageDevicesURI(entrypoint) {
+  async promiseManageDevicesURI(entrypoint, extraParams = {}) {
     return this._buildURL("settings/clients", {
-      extraParams: { entrypoint },
+      extraParams: { entrypoint, ...extraParams },
       addAccountIdentifiers: true,
     });
   },
 
-  async promiseConnectDeviceURI(entrypoint) {
+  async promiseConnectDeviceURI(entrypoint, extraParams = {}) {
     return this._buildURL("connect_another_device", {
-      extraParams: { entrypoint },
+      extraParams: { entrypoint, ...extraParams },
       addAccountIdentifiers: true,
     });
   },
 
-  async promisePairingURI() {
+  async promisePairingURI(extraParams = {}) {
     return this._buildURL("pair", {
+      extraParams,
       includeDefaultParams: false,
     });
   },
 
-  async promiseOAuthURI() {
+  async promiseOAuthURI(extraParams = {}) {
     return this._buildURL("oauth", {
+      extraParams,
       includeDefaultParams: false,
     });
+  },
+
+  async promiseMetricsFlowURI(entrypoint, extraParams = {}) {
+    return this._buildURL("metrics-flow", {
+      extraParams: { entrypoint, ...extraParams },
+      includeDefaultParams: false,
+    });
+  },
+
+  // Terms and Privacy URLs are special:
+  // For Reasons, we want them to always point
+  // to our servers even if a custom server is used.
+  async promiseLegalTermsURI(extraParams = {}) {
+    return this._buildURLFromString(TERMS_URL, extraParams);
+  },
+
+  async promiseLegalPrivacyURI(extraParams = {}) {
+    return this._buildURLFromString(PRIVACY_URL, extraParams);
   },
 
   get defaultParams() {
@@ -165,6 +195,14 @@ var FxAccountsConfig = {
       }
       url.searchParams.append("uid", accountData.uid);
       url.searchParams.append("email", accountData.email);
+    }
+    return url.href;
+  },
+
+  async _buildURLFromString(href, extraParams = {}) {
+    const url = new URL(href);
+    for (let [k, v] of Object.entries(extraParams)) {
+      url.searchParams.append(k, v);
     }
     return url.href;
   },
