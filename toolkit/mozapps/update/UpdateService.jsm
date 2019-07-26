@@ -362,8 +362,9 @@ function createMutex(aName, aAllowExisting = true) {
  * Windows only function that determines a unique mutex name for the
  * installation.
  *
- * @param aGlobal true if the function should return a global mutex. A global
- *                mutex is valid across different sessions
+ * @param aGlobal
+ *        true if the function should return a global mutex. A global mutex is
+ *        valid across different sessions.
  * @return Global mutex path
  */
 function getPerInstallationMutexName(aGlobal = true) {
@@ -473,13 +474,41 @@ function getElevationRequired() {
 }
 
 /**
+ * Determines whether or not it is possible to write to the update directory.
+ *
+ * @return true if there is write access, false otherwise.
+ */
+function getCanWriteToUpdateDir() {
+  let file = getUpdateFile([FILE_UPDATE_TEST]);
+  LOG("getCanWriteToUpdateDir - testing write access " + file.path);
+  try {
+    testWriteAccess(file, false);
+  } catch (e) {
+    LOG(
+      "getCanWriteToUpdateDir - unable to apply updates without write " +
+        "access to the update directory. Exception: " +
+        e
+    );
+    return false;
+  }
+  return true;
+}
+
+/**
  * Determines whether or not an update can be applied. This is always true on
- * Windows when the service is used. Also, this is always true on OSX because we
- * offer users the option to perform an elevated update when necessary.
+ * Windows when the service is used. On Mac OS X and Linux, if the user has
+ * write access to the update directory this will return true because on OSX we
+ * offer users the option to perform an elevated update when necessary and on
+ * Linux the update directory is located in the application directory.
  *
  * @return true if an update can be applied, false otherwise
  */
 function getCanApplyUpdates() {
+  if (!getCanWriteToUpdateDir()) {
+    // This is logged in getCanWriteToUpdateDir.
+    return false;
+  }
+
   if (AppConstants.platform == "macosx") {
     LOG(
       "getCanApplyUpdates - bypass the write since elevation can be used " +
@@ -497,15 +526,6 @@ function getCanApplyUpdates() {
   }
 
   try {
-    // Test write access to the updates directory. On Linux the updates
-    // directory is located in the installation directory so this is the only
-    // write access check that is necessary to tell whether the user can apply
-    // updates. On Windows the updates directory is in the user's local
-    // application data directory so this should always succeed and additional
-    // checks are performed below.
-    let updateTestFile = getUpdateFile([FILE_UPDATE_TEST]);
-    LOG("getCanApplyUpdates - testing write access " + updateTestFile.path);
-    testWriteAccess(updateTestFile, false);
     if (AppConstants.platform == "win") {
       // On Windows when the maintenance service isn't used updates can still be
       // performed in a location requiring admin privileges by the client
@@ -3399,6 +3419,16 @@ UpdateManager.prototype = {
         "UpdateManager:_loadXMLFileIntoArray - XML file does not exist. " +
           "path: " +
           file.path
+      );
+      return updates;
+    }
+
+    // Don't load the active-update.xml when the user can't apply updates. This
+    // way the user will still receive notifications to update manually.
+    if (fileName == FILE_ACTIVE_UPDATE_XML && !getCanWriteToUpdateDir()) {
+      LOG(
+        "UpdateManager:_loadXMLFileIntoArray - not loading the active " +
+          "update xml file since we can't apply updates."
       );
       return updates;
     }
