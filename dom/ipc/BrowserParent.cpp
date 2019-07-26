@@ -43,7 +43,7 @@
 #include "mozilla/Preferences.h"
 #include "mozilla/PresShell.h"
 #include "mozilla/ProcessHangMonitor.h"
-#include "mozilla/StaticPrefs.h"
+#include "mozilla/StaticPrefs_dom.h"
 #include "mozilla/TextEvents.h"
 #include "mozilla/TouchEvents.h"
 #include "mozilla/UniquePtr.h"
@@ -2669,7 +2669,7 @@ mozilla::ipc::IPCResult BrowserParent::RecvSessionStoreUpdate(
 
   nsCOMPtr<nsISessionStoreFunctions> funcs =
       do_ImportModule("resource://gre/modules/SessionStoreFunctions.jsm");
-  MOZ_ALWAYS_TRUE(funcs);
+  NS_ENSURE_TRUE(funcs, IPC_OK());
   nsCOMPtr<nsIXPConnectWrappedJS> wrapped = do_QueryInterface(funcs);
   AutoJSAPI jsapi;
   MOZ_ALWAYS_TRUE(jsapi.Init(wrapped->GetJSObjectGlobal()));

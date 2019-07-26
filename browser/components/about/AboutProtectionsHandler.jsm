@@ -176,13 +176,15 @@ var AboutProtectionsHandler = {
    * @return {{ monitoredEmails: Number,
    *            numBreaches: Number,
    *            passwords: Number,
+   *            userEmail: String|null,
    *            potentiallyBreachedLogins: Number,
    *            error: Boolean }}
    *         Monitor data.
    */
   async getMonitorData() {
     let monitorData = {};
-    let potentiallyBreachedLogins = 0;
+    let potentiallyBreachedLogins = null;
+    let userEmail = null;
     const hasFxa = await fxAccounts.accountStatus();
 
     if (hasFxa) {
@@ -214,11 +216,21 @@ var AboutProtectionsHandler = {
         }
       }
 
-      // Get the stats for number of potentially breached Lockwise passwords
-      const logins = await LoginHelper.getAllUserFacingLogins();
-      potentiallyBreachedLogins = await LoginHelper.getBreachesForLogins(
-        logins
-      );
+      // Get the stats for number of potentially breached Lockwise passwords if no master
+      // password is set.
+      if (!LoginHelper.isMasterPasswordSet()) {
+        const logins = await LoginHelper.getAllUserFacingLogins();
+        potentiallyBreachedLogins = await LoginHelper.getBreachesForLogins(
+          logins
+        );
+
+        // If the user isn't subscribed to Monitor, then send back their email so the
+        // protections report can direct them to the proper OAuth flow on Monitor.
+        if (monitorData.errorMessage) {
+          const { email } = await fxAccounts.getSignedInUser();
+          userEmail = email;
+        }
+      }
     } else {
       // If no account exists, then the user is not logged in with an fxAccount.
       monitorData = {
@@ -228,7 +240,10 @@ var AboutProtectionsHandler = {
 
     return {
       ...monitorData,
-      potentiallyBreachedLogins: potentiallyBreachedLogins.size,
+      userEmail,
+      potentiallyBreachedLogins: potentiallyBreachedLogins
+        ? potentiallyBreachedLogins.size
+        : 0,
       error: !!monitorData.errorMessage,
     };
   },

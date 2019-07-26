@@ -127,7 +127,6 @@ mozilla::ipc::IPCResult MediaTransportParent::RecvExitPrivateMode() {
 mozilla::ipc::IPCResult MediaTransportParent::RecvCreateIceCtx(
     const string& name, nsTArray<RTCIceServer>&& iceServers,
     const RTCIceTransportPolicy& icePolicy) {
-
   nsresult rv = mImpl->mHandler->CreateIceCtx(name, iceServers, icePolicy);
   if (NS_FAILED(rv)) {
     return ipc::IPCResult::Fail(WrapNotNull(this), __func__,
@@ -148,6 +147,13 @@ mozilla::ipc::IPCResult MediaTransportParent::RecvEnsureProvisionalTransport(
     const int& componentCount) {
   mImpl->mHandler->EnsureProvisionalTransport(transportId, localUfrag, localPwd,
                                               componentCount);
+  return ipc::IPCResult::Ok();
+}
+
+mozilla::ipc::IPCResult
+MediaTransportParent::RecvSetTargetForDefaultLocalAddressLookup(
+    const std::string& targetIp, uint16_t targetPort) {
+  mImpl->mHandler->SetTargetForDefaultLocalAddressLookup(targetIp, targetPort);
   return ipc::IPCResult::Ok();
 }
 
@@ -231,7 +237,6 @@ mozilla::ipc::IPCResult MediaTransportParent::RecvGetIceStats(
   return ipc::IPCResult::Ok();
 }
 
-void MediaTransportParent::ActorDestroy(ActorDestroyReason aWhy) {
-}
+void MediaTransportParent::ActorDestroy(ActorDestroyReason aWhy) {}
 
 }  // namespace mozilla

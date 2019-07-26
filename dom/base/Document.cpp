@@ -30,7 +30,13 @@
 #include "mozilla/PresShell.h"
 #include "mozilla/PresShellInlines.h"
 #include "mozilla/RestyleManager.h"
-#include "mozilla/StaticPrefs.h"
+#include "mozilla/StaticPrefs_browser.h"
+#include "mozilla/StaticPrefs_dom.h"
+#include "mozilla/StaticPrefs_full_screen_api.h"
+#include "mozilla/StaticPrefs_layout.h"
+#include "mozilla/StaticPrefs_plugins.h"
+#include "mozilla/StaticPrefs_privacy.h"
+#include "mozilla/StaticPrefs_security.h"
 #include "mozilla/StorageAccess.h"
 #include "mozilla/TextEditor.h"
 #include "mozilla/URLExtraData.h"
@@ -92,6 +98,7 @@
 #include "mozilla/dom/FeaturePolicyUtils.h"
 #include "mozilla/dom/FramingChecker.h"
 #include "mozilla/dom/HTMLAllCollection.h"
+#include "mozilla/dom/HTMLMetaElement.h"
 #include "mozilla/dom/HTMLSharedElement.h"
 #include "mozilla/dom/Navigator.h"
 #include "mozilla/dom/Performance.h"
@@ -2050,6 +2057,9 @@ NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN_INTERNAL(Document)
   if (tmp->mResizeObserverController) {
     tmp->mResizeObserverController->Traverse(cb);
   }
+  for (size_t i = 0; i < tmp->mMetaViewports.Length(); i++) {
+    NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mMetaViewports[i].mElement);
+  }
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
 
 NS_IMPL_CYCLE_COLLECTION_CLASS(Document)
@@ -2166,6 +2176,7 @@ NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(Document)
   if (tmp->mResizeObserverController) {
     tmp->mResizeObserverController->Unlink();
   }
+  tmp->mMetaViewports.Clear();
 NS_IMPL_CYCLE_COLLECTION_UNLINK_END
 
 nsresult Document::Init() {
@@ -5848,13 +5859,7 @@ void Document::SetHeaderData(nsAtom* aHeaderField, const nsAString& aData) {
   }
 
   if (aHeaderField == nsGkAtoms::viewport ||
-      aHeaderField == nsGkAtoms::handheldFriendly ||
-      aHeaderField == nsGkAtoms::viewport_minimum_scale ||
-      aHeaderField == nsGkAtoms::viewport_maximum_scale ||
-      aHeaderField == nsGkAtoms::viewport_initial_scale ||
-      aHeaderField == nsGkAtoms::viewport_height ||
-      aHeaderField == nsGkAtoms::viewport_width ||
-      aHeaderField == nsGkAtoms::viewport_user_scalable) {
+      aHeaderField == nsGkAtoms::handheldFriendly) {
     mViewportType = Unknown;
   }
 }
@@ -9454,33 +9459,22 @@ static Maybe<LayoutDeviceToScreenScale> ParseScaleString(
                       kViewportMaxScale));
 }
 
-Maybe<LayoutDeviceToScreenScale> Document::ParseScaleInHeader(
-    nsAtom* aHeaderField) {
-  MOZ_ASSERT(aHeaderField == nsGkAtoms::viewport_initial_scale ||
-             aHeaderField == nsGkAtoms::viewport_maximum_scale ||
-             aHeaderField == nsGkAtoms::viewport_minimum_scale);
-
-  nsAutoString scaleStr;
-  GetHeaderData(aHeaderField, scaleStr);
-
-  return ParseScaleString(scaleStr);
-}
-
-bool Document::ParseScalesInMetaViewport() {
+bool Document::ParseScalesInViewportMetaData(
+    const ViewportMetaData& aViewportMetaData) {
   Maybe<LayoutDeviceToScreenScale> scale;
 
-  scale = ParseScaleInHeader(nsGkAtoms::viewport_initial_scale);
+  scale = ParseScaleString(aViewportMetaData.mInitialScale);
   mScaleFloat = scale.valueOr(LayoutDeviceToScreenScale(0.0f));
   mValidScaleFloat = scale.isSome();
 
-  scale = ParseScaleInHeader(nsGkAtoms::viewport_maximum_scale);
+  scale = ParseScaleString(aViewportMetaData.mMaximumScale);
   // Chrome uses '5' for the fallback value of maximum-scale, we might
   // consider matching it in future.
   // https://cs.chromium.org/chromium/src/third_party/blink/renderer/core/html/html_meta_element.cc?l=452&rcl=65ca4278b42d269ca738fc93ef7ae04a032afeb0
   mScaleMaxFloat = scale.valueOr(kViewportMaxScale);
   mValidMaxScale = scale.isSome();
 
-  scale = ParseScaleInHeader(nsGkAtoms::viewport_minimum_scale);
+  scale = ParseScaleString(aViewportMetaData.mMinimumScale);
   mScaleMinFloat = scale.valueOr(kViewportMinScale);
   mValidMinScale = scale.isSome();
 
@@ -9635,35 +9629,29 @@ nsViewportInfo Document::GetViewportInfo(const ScreenIntSize& aDisplaySize) {
         }
       }
 
+      ViewportMetaData metaData = GetViewportMetaData();
+
       // Parse initial-scale, minimum-scale and maximum-scale.
-      bool hasValidContents = ParseScalesInMetaViewport();
-
-      nsAutoString widthStr, heightStr;
-
-      GetHeaderData(nsGkAtoms::viewport_height, heightStr);
-      GetHeaderData(nsGkAtoms::viewport_width, widthStr);
+      bool hasValidContents = ParseScalesInViewportMetaData(metaData);
 
       // Parse width and height properties
       // This function sets m{Min,Max}{Width,Height}.
-      if (ParseWidthAndHeightInMetaViewport(widthStr, heightStr,
+      if (ParseWidthAndHeightInMetaViewport(metaData.mWidth, metaData.mHeight,
                                             mValidScaleFloat)) {
         hasValidContents = true;
       }
 
       mAllowZoom = true;
-      nsAutoString userScalable;
-      GetHeaderData(nsGkAtoms::viewport_user_scalable, userScalable);
-
-      if ((userScalable.EqualsLiteral("0")) ||
-          (userScalable.EqualsLiteral("no")) ||
-          (userScalable.EqualsLiteral("false"))) {
+      if ((metaData.mUserScalable.EqualsLiteral("0")) ||
+          (metaData.mUserScalable.EqualsLiteral("no")) ||
+          (metaData.mUserScalable.EqualsLiteral("false"))) {
         mAllowZoom = false;
       }
-      if (!userScalable.IsEmpty()) {
+      if (!metaData.mUserScalable.IsEmpty()) {
         hasValidContents = true;
       }
 
-      mWidthStrEmpty = widthStr.IsEmpty();
+      mWidthStrEmpty = metaData.mWidth.IsEmpty();
 
       mViewportType = hasValidContents ? Specified : NoValidContent;
       MOZ_FALLTHROUGH;
@@ -9874,6 +9862,45 @@ nsViewportInfo Document::GetViewportInfo(const ScreenIntSize& aDisplaySize) {
           mValidScaleFloat ? nsViewportInfo::AutoScaleFlag::FixedScale
                            : nsViewportInfo::AutoScaleFlag::AutoScale,
           effectiveZoomFlag);
+  }
+}
+
+ViewportMetaData Document::GetViewportMetaData() const {
+  // The order of mMetaViewport is first-modified is first. We want the last
+  // modified since Chrome uses the last one.
+  // See https://webcompat.com/issues/20701#issuecomment-436054739
+  return !mMetaViewports.IsEmpty() ? mMetaViewports.LastElement().mData
+                                   : ViewportMetaData();
+}
+
+void Document::AddMetaViewportElement(HTMLMetaElement* aElement,
+                                      ViewportMetaData&& aData) {
+  for (size_t i = 0; i < mMetaViewports.Length(); i++) {
+    MetaViewportElementAndData& viewport = mMetaViewports[i];
+    if (viewport.mElement == aElement) {
+      if (viewport.mData == aData) {
+        return;
+      }
+      // Move the existing one to the tail since Chrome uses the last modified
+      // viewport meta tag.
+      mMetaViewports.RemoveElementAt(i);
+      break;
+    }
+  }
+
+  mMetaViewports.AppendElement(MetaViewportElementAndData{aElement, aData});
+  // Trigger recomputation of the nsViewportInfo the next time it's queried.
+  mViewportType = Unknown;
+}
+
+void Document::RemoveMetaViewportElement(HTMLMetaElement* aElement) {
+  for (MetaViewportElementAndData& viewport : mMetaViewports) {
+    if (viewport.mElement == aElement) {
+      mMetaViewports.RemoveElement(viewport);
+      // Trigger recomputation of the nsViewportInfo the next time it's queried.
+      mViewportType = Unknown;
+      return;
+    }
   }
 }
 

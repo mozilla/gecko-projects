@@ -24,6 +24,7 @@
 #include "nsIPrincipal.h"
 #include "mozilla/LoadInfo.h"
 #include "nsProxyRelease.h"
+#include "nsIHttpChannelInternal.h"
 
 #include "nsIScriptGlobalObject.h"
 #include "mozilla/Preferences.h"
@@ -112,7 +113,8 @@ PeerConnectionMedia::PeerConnectionMedia(PeerConnectionImpl* parent)
       mSTSThread(mParent->GetSTSThread()),
       mProxyResolveCompleted(false),
       mProxyConfig(nullptr),
-      mLocalAddrsCompleted(false) {}
+      mLocalAddrsCompleted(false),
+      mTargetForDefaultLocalAddressLookupIsSet(false) {}
 
 PeerConnectionMedia::~PeerConnectionMedia() {
   MOZ_RELEASE_ASSERT(!mMainThread);
@@ -418,6 +420,53 @@ void PeerConnectionMedia::GatherIfReady() {
   PerformOrEnqueueIceCtxOperation(runnable);
 }
 
+nsresult PeerConnectionMedia::SetTargetForDefaultLocalAddressLookup() {
+  Document* doc = mParent->GetWindow()->GetExtantDoc();
+  if (!doc) {
+    NS_WARNING("Unable to get document from window");
+    return NS_ERROR_NOT_AVAILABLE;
+  }
+
+  bool isFileScheme;
+  doc->GetDocumentURI()->SchemeIs("file", &isFileScheme);
+  if (!isFileScheme) {
+    nsIChannel* channel = doc->GetChannel();
+    if (!channel) {
+      NS_WARNING("Unable to get channel from document");
+      return NS_ERROR_NOT_AVAILABLE;
+    }
+
+    nsCOMPtr<nsIHttpChannelInternal> httpChannelInternal =
+        do_QueryInterface(channel);
+    if (!httpChannelInternal) {
+      CSFLogInfo(LOGTAG, "%s: Document does not have an HTTP channel",
+                 __FUNCTION__);
+      return NS_OK;
+    }
+
+    nsCString remoteIp;
+    nsresult rv = httpChannelInternal->GetRemoteAddress(remoteIp);
+    if (NS_FAILED(rv) || remoteIp.IsEmpty()) {
+      CSFLogError(LOGTAG, "%s: Failed to get remote IP address: %d",
+                  __FUNCTION__, (int)rv);
+      return rv;
+    }
+
+    int32_t remotePort;
+    rv = httpChannelInternal->GetRemotePort(&remotePort);
+    if (NS_FAILED(rv)) {
+      CSFLogError(LOGTAG, "%s: Failed to get remote port number: %d",
+                  __FUNCTION__, (int)rv);
+      return rv;
+    }
+
+    mTransportHandler->SetTargetForDefaultLocalAddressLookup(remoteIp.get(),
+                                                             remotePort);
+  }
+
+  return NS_OK;
+}
+
 void PeerConnectionMedia::EnsureIceGathering(bool aDefaultRouteOnly) {
   if (mProxyConfig) {
     // Note that this could check if PrivacyRequested() is set on the PC and
@@ -427,6 +476,14 @@ void PeerConnectionMedia::EnsureIceGathering(bool aDefaultRouteOnly) {
     // media is isolated, then we would need to restructure this code.
     mTransportHandler->SetProxyServer(std::move(*mProxyConfig));
     mProxyConfig.reset();
+  }
+
+  if (!mTargetForDefaultLocalAddressLookupIsSet) {
+    nsresult rv = SetTargetForDefaultLocalAddressLookup();
+    if (NS_FAILED(rv)) {
+      NS_WARNING("Unable to set target for default local address lookup");
+    }
+    mTargetForDefaultLocalAddressLookupIsSet = true;
   }
 
   // Make sure we don't call StartIceGathering if we're in e10s mode
