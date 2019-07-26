@@ -753,7 +753,6 @@ var Bits = {
     downloadURL,
     saveRelPath,
     proxy,
-    noProgressTimeoutSecs,
     monitorIntervalMs,
     observer,
     context
@@ -764,7 +763,6 @@ var Bits = {
         downloadURL,
         saveRelPath,
         proxy,
-        noProgressTimeoutSecs,
         monitorIntervalMs,
         wrappedObserver,
         context,
