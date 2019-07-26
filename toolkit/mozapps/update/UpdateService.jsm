@@ -362,8 +362,9 @@ function createMutex(aName, aAllowExisting = true) {
  * Windows only function that determines a unique mutex name for the
  * installation.
  *
- * @param aGlobal true if the function should return a global mutex. A global
- *                mutex is valid across different sessions
+ * @param aGlobal
+ *        true if the function should return a global mutex. A global mutex is
+ *        valid across different sessions.
  * @return Global mutex path
  */
 function getPerInstallationMutexName(aGlobal = true) {
@@ -474,12 +475,30 @@ function getElevationRequired() {
 
 /**
  * Determines whether or not an update can be applied. This is always true on
- * Windows when the service is used. Also, this is always true on OSX because we
- * offer users the option to perform an elevated update when necessary.
+ * Windows when the service is used. On Mac OS X and Linux, if the user has
+ * write access to the update directory this will return true because on OSX we
+ * offer users the option to perform an elevated update when necessary and on
+ * Linux the update directory is located in the application directory.
  *
  * @return true if an update can be applied, false otherwise
  */
 function getCanApplyUpdates() {
+  try {
+    // Check if it is possible to write to the update directory so clients won't
+    // repeatedly try to apply an update without the ability to complete the
+    // update process which requires write access to the update directory.
+    let updateTestFile = getUpdateFile([FILE_UPDATE_TEST]);
+    LOG("getCanApplyUpdates - testing write access " + updateTestFile.path);
+    testWriteAccess(updateTestFile, false);
+  } catch (e) {
+    LOG(
+      "getCanApplyUpdates - unable to apply updates without write " +
+        "access to the update directory. Exception: " +
+        e
+    );
+    return false;
+  }
+
   if (AppConstants.platform == "macosx") {
     LOG(
       "getCanApplyUpdates - bypass the write since elevation can be used " +
@@ -497,15 +516,6 @@ function getCanApplyUpdates() {
   }
 
   try {
-    // Test write access to the updates directory. On Linux the updates
-    // directory is located in the installation directory so this is the only
-    // write access check that is necessary to tell whether the user can apply
-    // updates. On Windows the updates directory is in the user's local
-    // application data directory so this should always succeed and additional
-    // checks are performed below.
-    let updateTestFile = getUpdateFile([FILE_UPDATE_TEST]);
-    LOG("getCanApplyUpdates - testing write access " + updateTestFile.path);
-    testWriteAccess(updateTestFile, false);
     if (AppConstants.platform == "win") {
       // On Windows when the maintenance service isn't used updates can still be
       // performed in a location requiring admin privileges by the client
@@ -3403,11 +3413,20 @@ UpdateManager.prototype = {
       return updates;
     }
 
+    // Open the active-update.xml file with both read and write access so
+    // opening it will fail if it isn't possible to also write to the file. When
+    // opening it fails it means that it isn't possible to update and the code
+    // below will return early without loading the active-update.xml. This will
+    // also make it so notifications to update manually will still be shown.
+    let mode =
+      fileName == FILE_ACTIVE_UPDATE_XML
+        ? FileUtils.MODE_RDWR
+        : FileUtils.MODE_RDONLY;
     let fileStream = Cc[
       "@mozilla.org/network/file-input-stream;1"
     ].createInstance(Ci.nsIFileInputStream);
     try {
-      fileStream.init(file, FileUtils.MODE_RDONLY, FileUtils.PERMS_FILE, 0);
+      fileStream.init(file, mode, FileUtils.PERMS_FILE, 0);
     } catch (e) {
       LOG(
         "UpdateManager:_loadXMLFileIntoArray - error initializing file " +
